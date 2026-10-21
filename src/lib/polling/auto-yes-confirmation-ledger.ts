@@ -433,7 +433,9 @@ function closeEntry(state: LedgerState, entry: LedgerEntry, now: number, how: Cl
   if (wasUnobservable && entry.unobservableSince !== null) {
     entry.unobservableMs += Math.max(0, now - entry.unobservableSince);
   }
-  const withheldAtClose = entry.interval !== null;
+  // Withheld only by the duplicate guard after an `ok`: the answer was landing.
+  const waitingForAnswer = entry.answered && entry.interval?.reason === 'answered-recently';
+  const withheldAtClose = entry.interval !== null && !waitingForAnswer;
   endInterval(state, entry, how.kind === 'gone' ? 'gone' : 'abandoned', now);
   let attemptsPending = 0;
   for (const pending of state.pending.values()) if (pending.confirmationId === entry.id) attemptsPending += 1;
@@ -448,6 +450,7 @@ function closeEntry(state: LedgerState, entry: LedgerEntry, now: number, how: Cl
   } else if (entry.answered) {
     resolution = 'resolved-after-answer';
   } else if (entry.intervals > 0) {
+    // Answered never, withheld once and since answerable again.
     resolution = 'resolved-while-withheld';
   } else {
     resolution = 'resolved-before-decision';

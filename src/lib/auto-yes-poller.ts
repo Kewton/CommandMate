@@ -25,6 +25,7 @@ import {
 } from './polling/auto-yes-policy';
 import { isCodexModelPickerFrame } from './detection/tools/codex/detect';
 import { normalizeFrame } from './detection/tools/frame';
+import { detectAntigravityNumberedDialogPrompt } from './detection/tools/antigravity/dialog';
 import { evaluateAutoYesDialogGate, type AutoYesDialogGateVerdict } from './polling/auto-yes-dialog-gate';
 import {
   clearEnterFallbacks,
@@ -85,6 +86,7 @@ import {
   clearPartialAnswers,
   forgetPartialAnswer,
   forgetPartialAnswersByWorktree,
+  ledgerScreenKey,
   partialAnswerScreenKey,
   promptFrameKey,
   settleSendAttempt,
@@ -767,7 +769,7 @@ function noteNoPromptOnScreen(tick: {
     // rather than closing it on every tick outside the window.
     if (seen !== null) {
       const scope: LedgerScope = { compositeKey, worktreeId, cliToolId, instanceId };
-      observeLedgerScreen(scope, partialAnswerScreenKey(seen.promptData), seen.promptData.type);
+      observeLedgerScreen(scope, ledgerScreenKey(seen.promptData), seen.promptData.type);
       if (seen.reason !== null) withholdLedgerConfirmation(scope, seen.reason);
     }
   }
@@ -789,8 +791,19 @@ function attemptResultOfThrow(keysSent: boolean | null): AttemptResult {
  * §7 PR 1). A tool's own dialog detector vouched for the frame: `L3`. The
  * gate did not judge it (a `legacy` tool, a non-multiple-choice prompt): the
  * generic reading alone, `L4`.
+ *
+ * agy's gate is `legacy` (`gated: false`), yet its prompts are read by its own
+ * reader first (`detectPromptOnCleanFrame` returns that reader's result
+ * whenever it reads the frame). Which reader it was is not on the detection
+ * result, so it is asked of the same reader on the same text here — for the
+ * label only; the answer was decided before this is called. Read by agy's own
+ * reader, and through the receipt gate (the tick's reading carried the
+ * receipt scope): `L3`, with `receiptAccepted` on the attempt.
  */
-function answerBasisOf(prompt: JudgedPrompt): AnswerBasis {
+function answerBasisOf(prompt: JudgedPrompt, cleanOutput: string): AnswerBasis {
+  if (prompt.cliToolId === 'antigravity') {
+    return detectAntigravityNumberedDialogPrompt(cleanOutput) !== null ? 'L3' : 'L4';
+  }
   const gate = prompt.dialogGate;
   return gate !== undefined && gate.gated && gate.allowed && gate.dialog !== null ? 'L3' : 'L4';
 }
@@ -951,13 +964,18 @@ export async function detectAndRespondToPrompt(
     // Issue #3820: computed here, before the duplicate check, so the ledger
     // sees the confirmation on every tick it is on screen (step 2.5 below
     // reads the same key).
+    // The ledger's own key keeps the body (`ledgerScreenKey`): two commands
+    // that differ by a `>` or an indent are two confirmations to count.
     const screenKey = partialAnswerScreenKey(promptDetection.promptData);
-    observeLedgerScreen(ledgerScope, screenKey, promptDetection.promptData.type);
+    observeLedgerScreen(ledgerScope, ledgerScreenKey(promptDetection.promptData), promptDetection.promptData.type);
 
     // 2. Check for duplicate prompt (Issue #306)
     const promptKey = generatePromptKey(promptDetection.promptData);
     const frameKey = promptFrameKey(promptDetection.promptData);
     if (isDuplicatePrompt(pollerState, promptKey)) {
+      // Issue #3820: not answered on this tick either — an interval of its own
+      // reason, so the count can tell the wait for an answer to land apart.
+      withholdLedgerConfirmation(ledgerScope, 'answered-recently');
       return 'duplicate';
     }
 
@@ -1031,7 +1049,9 @@ export async function detectAndRespondToPrompt(
       screenKey,
       generation?.sessionEpoch ?? epoch,
       // Issue #3820: an agy prompt read past the gate is one a hook receipt let through.
-      beginLedgerAttempt(ledgerScope, answerBasisOf(judged), { receiptAccepted: cliToolId === 'antigravity' }),
+      beginLedgerAttempt(ledgerScope, answerBasisOf(judged, cleanOutput), {
+        receiptAccepted: cliToolId === 'antigravity',
+      }),
     );
     receiptEpisode = receiptEpisodeOfSend(cliToolId, worktreeId, instanceId);
     sendInFlight = true;

@@ -67,7 +67,13 @@ export type LedgerOnlyWithholdReason =
   /** The session is another server's (#2865). */
   | 'foreign-session'
   /** A send a worktree ID move carried is still in flight (#3713). */
-  | 'moved-send-in-flight';
+  | 'moved-send-in-flight'
+  /**
+   * The duplicate guard (#306): the same question was answered less than
+   * `DUPLICATE_RETRY_EXPIRY_MS` ago, so it is not answered again yet. Its own
+   * reason so the daily count can tell the wait for an answer to land from a stop.
+   */
+  | 'answered-recently';
 
 export type LedgerWithholdReason = AutoYesSuppressionReason | LedgerOnlyWithholdReason;
 

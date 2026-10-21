@@ -211,6 +211,41 @@ function withoutCursorMarks(promptData: PromptData): string {
   return aligned ?? withoutLeadingMarks(target);
 }
 
+/**
+ * Which confirmation the ledger counts a prompt as (Issue #3820): the
+ * {@link partialAnswerScreenKey} reading where the option rows can be told,
+ * and otherwise one that still keeps the body. That key's fallback takes the
+ * marks and indent off every row — for a partial answer, two bodies reading as
+ * one screen holds the prompt for a human, the safe side — but for counting it
+ * makes two confirmations whose commands differ by a `>` or an indent one.
+ * Here only rows that read as numbered options (where the cursor sits) lose
+ * their gutter; every other row stays byte for byte.
+ */
+export function ledgerScreenKey(promptData: PromptData): string {
+  if (promptData.type !== 'multiple_choice') return partialAnswerScreenKey(promptData);
+  const target = promptData.approvalTarget ?? '';
+  const aligned = approvalTargetWithOptionRowsAligned(
+    target,
+    promptData.options.map((o) => o.label),
+    (read, named) => read.startsWith(named),
+  );
+  if (aligned !== null) return partialAnswerScreenKey(promptData);
+  const options = promptData.options.map((o) => `${o.number}.${o.label}`).join('\n');
+  return [generatePromptKey(promptData), options, withOptionRowGuttersOnlyRemoved(target)].join('\u0000');
+}
+
+/** Rows that read as a numbered option lose their leading marks and indent; the rest stay. */
+function withOptionRowGuttersOnlyRemoved(text: string): string {
+  return text
+    .split('\n')
+    .map((line) =>
+      /^[\s\u276F\u203A>\u25B6\u25BA\u25CF\u25CB\u25C9\u2192]*\d+\.\s/u.test(line)
+        ? line.replace(/^[\s\u276F\u203A>\u25B6\u25BA\u25CF\u25CB\u25C9\u2192]+/u, '')
+        : line,
+    )
+    .join('\n');
+}
+
 /** Every row's leading marks and indentation taken out (the reading before #3817). */
 function withoutLeadingMarks(text: string): string {
   return text

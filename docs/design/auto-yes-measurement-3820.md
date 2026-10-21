@@ -42,6 +42,9 @@
 | 実装: 時計を張る場所 | サーバーの起動（`server.ts`）は変えない（評価時の import を増やすと Next の起動が壊れる前例がある）。時計は**記録のモジュールが最初に使われたとき**に `globalThis` で 1 つだけ張る。生存の行の意味は「記録のモジュールが動いていた」になり、最初の確認より前の時間は計測なしになる | §4.4・§7 PR 1 |
 | 実装: 判断の前に消えた確認 | 1 tick だけ見えて、Auto-Yes が答えも止めもしないうちに消えた確認（Enter の補いの 1 回目の tick、人が先に答えた）を表す `resolution` が無かった。`resolved-before-decision` を足した | §2.6 |
 | 実装: 記録だけの停止の理由 | 画面の経路は、方針の抑止のほかに「他のサーバーのセッション」（#2865）と「ID の移動で運ばれた送信を待つ」（#3713）でも答えない。記録だけの理由 `foreign-session`・`moved-send-in-flight` を足した（`send-failed`・`send-no-keys` と同じ扱い） | §2.2 |
+| 整合性レビュー P2-1: 重複の抑止で区間が記録されない | 重複の抑止（#306。同じ質問に答えてから 10 秒は答えない）の `duplicate` の早期 return の前に、記録だけの理由 **`answered-recently`** で停止を記録する（答え方は変えない）。答えが画面に届くのを待つ時間なので、`ok` の後にこの理由の区間だけが開いたまま消えた確認は `resolved-after-answer` とし、集計は理由で停止の費用と分けられる | §2.2・§2.6・§7 PR 1 |
+| 整合性レビュー P2-2: 本文が違う確認が同じ id になる | #3817 で `partialAnswerScreenKey` は選択肢の行を読めるときだけその行の印・字下げを揃えるようになったが、読めないときは従来どおり全行の印・字下げを消す（部分送信では 2 つを 1 画面と読む方が安全なため）。記録の識別はこれでは足りないので、**`ledgerScreenKey`** を使う: 選択肢の行を読めるときは `partialAnswerScreenKey` と同じ、読めないときは番号つきの行だけ印・字下げを消し、ほかの行（本文）はそのまま残す | §2.1 |
+| 整合性レビュー P2-3: agy の専用リーダーの確認が L4 になる | agy の門は `legacy`（`gated: false`）なので門の判定からは L3 にならない。poller が同じ文字列を agy の専用リーダー（`detectAntigravityNumberedDialogPrompt`。`detectPromptOnCleanFrame` は読めればその結果を返す）で読み直し、読めたら **`L3`**（受信の門を通った確認なので `receiptAccepted: true`）、読めなければ汎用の推定で `L4` とする。読み直しは記録の段のためだけで、答えはその前に決まっている | §7 PR 1 |
 
 ---
 
@@ -128,7 +131,7 @@ Issue 本文の 3 点は、実コードと合っていた（行番号は 1 か�
 
 | 経路 | 識別の材料 | 同じ確認とみなす範囲 | 別の確認に分ける条件 |
 |---|---|---|---|
-| 画面（全ツール共通） | `partialAnswerScreenKey(promptData)`（`src/lib/polling/auto-yes-poller-state.ts:178`。種類・質問・選択肢・`approvalTarget`、カーソルは除く）＋ セッションの世代（`sessionEpoch`） | 同じ画面キーが、存在が `gone` の tick を挟まずに続いている間（`unobservable` の間を挟んでもよい。§2.2） | 存在が `gone` の tick・別の画面キー・セッションの作り直し（世代が変わる） |
+| 画面（全ツール共通） | `ledgerScreenKey(promptData)`（`src/lib/polling/auto-yes-poller-state.ts`。種類・質問・選択肢・`approvalTarget`、カーソルは除く。選択肢の行を読めるときは `partialAnswerScreenKey` と同じで、読めないときも本文の行は残す）＋ セッションの世代（`sessionEpoch`） | 同じ画面キーが、存在が `gone` の tick を挟まずに続いている間（`unobservable` の間を挟んでもよい。§2.2） | 存在が `gone` の tick・別の画面キー・セッションの作り直し（世代が変わる） |
 | hook: claude / codex / copilot | hook の 1 回の要求（route が受けた 1 リクエスト）。`prompt_id` はターンの id なので使わない（claude は `tool_use_id` が `PermissionRequest` に無い: `src/lib/hooks/sources/claude/source.ts:165`） | その 1 リクエスト | 別のリクエスト |
 | hook: agy | **(`conversationId`, `stepIdx`)**（`measurements-2026-10-20.md` §2: 会話の中では一意、起動し直すと 2 から始まるので会話の id と組にする） | 同じ組 | 別の組 |
 | API: opencode / opencode-v2 | `PendingDecision.id`（`per_…`） | 同じ id | 別の id |
@@ -151,7 +154,7 @@ Issue 本文の 3 点は、実コードと合っていた（行番号は 1 か�
 | | `gone` | 画面を読めた tick で、門を通した検出・通さない読み取りの**どちらにも**確認が無い、または別の画面キーが見えた。hook の要求なら応答の完了（§2.3）、opencode なら `settled` |
 | | `unobservable` | Auto-Yes OFF・期限切れ・`stop-pattern` などでポーラーが止まっている。**この間は確認を閉じない**。capture の失敗（画面を読めない tick）は存在を変えない: その tick は確認の行を出さず、次に読めた tick が決める（一時的な失敗のたびに区間を割らないため） |
 | 回答可否（`answerability`） | `answerable` | 門が開いていて、方針も止めていない |
-| | `withheld` | 理由つき（`AutoYesSuppressionReason` の語彙、`src/lib/polling/auto-yes-suppression-reason.ts:9-76`。加えて記録だけの `send-failed`・`send-no-keys`（§2.5）と `foreign-session`（他のサーバーのセッション、#2865）・`moved-send-in-flight`（ID の移動で運ばれた送信を待つ、#3713））。agy の `no-hook-receipt`（受信窓の外）もここ |
+| | `withheld` | 理由つき（`AutoYesSuppressionReason` の語彙、`src/lib/polling/auto-yes-suppression-reason.ts:9-76`。加えて記録だけの `send-failed`・`send-no-keys`（§2.5）と `foreign-session`（他のサーバーのセッション、#2865）・`moved-send-in-flight`（ID の移動で運ばれた送信を待つ、#3713）・`answered-recently`（重複の抑止、#306: 同じ質問に答えてから 10 秒は答えない））。agy の `no-hook-receipt`（受信窓の外）もここ |
 
 - 確認を閉じるのは**存在が `gone` になったときだけ**（と §4.2 の放棄）。回答可否が `answerable`↔`withheld` を行き来しても確認は閉じない
 - agy の受信窓: 窓の中（`isPrompt: true`、`answerable`）→ 窓の外（`isPrompt: false` だが専用リーダーが確認を見る: `present`・`withheld(no-hook-receipt)`）→ 次の受信で窓の中、と続いても **1 件の確認**。停止の区間は `withheld` の間だけで、同じ理由が続く限り 1 区間（受入基準、§7 PR 1）
@@ -211,7 +214,7 @@ hook の要求の記録（`hookRequestId`、§3.3）と確認の記録（`confir
 
 ### 2.6 解消と、観測できなかったこと（必須 4）
 
-- **`resolution`**（どう終わったか、観測の事実）: `resolved-after-answer`（`ok` の試行の後に `gone`）・`resolved-while-withheld`（止めている間に `gone`）・`resolved-by-reply`（hook の allow で確認を出さないツール）・`unresolved-after-send`（試行の後、解消を見ないまま放棄）・`gone-while-unobservable`（§2.3）・`resolved-before-decision`（答えも止めもしないうちに `gone`。Enter の補いの 1 回目の tick、人が先に答えた、など）・`abandoned`（§4.2）
+- **`resolution`**（どう終わったか、観測の事実）: `resolved-after-answer`（`ok` の試行の後に `gone`。開いていた区間が `answered-recently` だけのときも含む）・`resolved-while-withheld`（止めている間に `gone`）・`resolved-by-reply`（hook の allow で確認を出さないツール）・`unresolved-after-send`（試行の後、解消を見ないまま放棄）・`gone-while-unobservable`（§2.3）・`resolved-before-decision`（答えも止めもしないうちに `gone`。Enter の補いの 1 回目の tick、人が先に答えた、など）・`abandoned`（§4.2）
 - **`resolvedBy`**（誰が消したか）: 因果を確かめられたときだけ値を書く。`auto` は hook の返事で確認を出さないツールの allow（返事そのものが解消）と、opencode の `delivered` の後の `settled` だけ。`human-ui` は `/prompt-response` が人の答えを送り、その結果が成功だったときだけ。**画面のキー送信の後に消えた場合は `resolution: 'resolved-after-answer'`（観測の事実）とし、`resolvedBy` は `unknown`**（端末で人が先に押した・エージェントが取り消した、と区別できない）
 - **`dialogUnobserved`（確認未観測）**: hook の要求の後、画面で確認を観測しないまま呼び出しが終わったもの（agy の `PostToolUse` が先に来た、など）。これは「確認が出なかった」ではない。`PreToolUse` から `PostToolUse` の間に人が確認に答え、ポーラーが画面を取り逃した場合と区別できないため。集計は `dialogUnobserved` として、**CLI 自身の自動許可（§3.4）とも、CommandMate の回答とも別に**数える
 
@@ -448,7 +451,7 @@ C の欠点への手当て:
   - `src/lib/polling/auto-yes-poller-receipt-log.ts`（`logIfWithheldForWantOfReceipt` が読み直しの結果を返し、agy の受信窓の外を `present`・`withheld(no-hook-receipt)` として記録）
   - 時計（生存と checkpoint）は記録のモジュールが最初に使われたときに張る（`server.ts` は変えない）
   - テスト: `tests/unit/polling/auto-yes-confirmation-ledger.test.ts`（新規）、poller の既存テストの隣に経路のテスト
-- 根拠の段の決め方（PR 1 の範囲）: 門の判定が `gated && allowed && dialog` なら `L3`、`gated: false`（`legacy` のツール・`yes_no`）なら `L4`、Enter の補いは `enter-fallback`。agy の専用リーダーが読んで受信で受理した確認は、PR 3 までは `L3` とし `receiptAccepted: true` を添える
+- 根拠の段の決め方（PR 1 の範囲）: 門の判定が `gated && allowed && dialog` なら `L3`、`gated: false`（`legacy` のツール・`yes_no`）なら `L4`、Enter の補いは `enter-fallback`。agy の専用リーダーが読んで受信で受理した確認は、PR 3 までは `L3` とし `receiptAccepted: true` を添える（agy の門は `legacy` なので、poller が同じ文字列を専用リーダーで読み直して決める。読めなければ汎用の推定で `L4`）
 - 受入基準:
   - 陽性: 同じ確認が 5 tick 続き、止めたまま解消 → `opened` 1 行・区間 1 つ・`closed` 1 行。区間の長さは最初の判断から解消まで
   - **陽性（必須 1）: agy で同じ確認が「受信窓の中 → 外（`isPrompt: false`、専用リーダーは確認を見る）→ 外 → 次の受信で中」と続く → 確認 1 件・停止の区間 1 つ**（閉じて開き直さない）。陰性: 専用リーダーでも確認が見えない tick → 閉じる

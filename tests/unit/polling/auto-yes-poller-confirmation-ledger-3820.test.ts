@@ -317,6 +317,63 @@ describe('[#3820] claude: answers, retries and failures on the screen path', () 
   });
 });
 
+describe('[#3820] the duplicate guard is a withheld interval of its own (review P2-1)', () => {
+  it('opens a new interval when the same confirmation is held by the duplicate guard after an ok', async () => {
+    sendPromptAnswer.mockRejectedValueOnce(new Error('tmux gone'));
+    const state = pollerState('claude');
+    expect(await tickOn('claude', state, proceed('npm test'))).toBe('error');
+    now += 2_000;
+    expect(await tickOn('claude', state, proceed('npm test'))).toBe('responded');
+    now += 2_000;
+    // The answer has not landed yet: the guard holds it, nothing is sent.
+    expect(await tickOn('claude', state, proceed('npm test'))).toBe('duplicate');
+    now += 2_000;
+    await tickOn('claude', state, null);
+
+    const confirmationId = String(lines(EV.opened)[0].confirmationId);
+    expect(sendPromptAnswer).toHaveBeenCalledTimes(2);
+    expect(lines(EV.withholdStarted).map((line) => [line.intervalId, line.reason])).toEqual([
+      [`${confirmationId}#1`, 'send-failed'],
+      [`${confirmationId}#2`, 'answered-recently'],
+    ]);
+    expect(lines(EV.withholdEnded).map((line) => line.end)).toEqual(['answered', 'gone']);
+    // Waiting for its own answer to land is not "resolved while withheld".
+    expect(lines(EV.closed)).toEqual([
+      expect.objectContaining({ resolution: 'resolved-after-answer', intervals: 2 }),
+    ]);
+  });
+});
+
+describe('[#3820] two bodies are two confirmations (review P2-2)', () => {
+  /** agy's legacy gate hands any reading back as ours; the contract withholds it. */
+  const approval = (body: string): PromptData => ({ ...SINGLE, approvalTarget: body });
+
+  it('counts `> file` and `file` under the same question and options as two confirmations', async () => {
+    seedContract('antigravity', "autoYes:\n  mode: 'off'\n");
+    const state = pollerState('antigravity');
+    await tickOn('antigravity', state, approval('cat > file'));
+    now += 2_000;
+    await tickOn('antigravity', state, approval('cat file'));
+    now += 2_000;
+    await tickOn('antigravity', state, approval('> file'));
+    now += 2_000;
+    await tickOn('antigravity', state, approval('file'));
+
+    expect(lines(EV.opened)).toHaveLength(4);
+    expect(lines(EV.closed)).toHaveLength(3);
+  });
+
+  it('keeps one confirmation when only the cursor moved between its option rows (negative control)', async () => {
+    seedContract('antigravity', "autoYes:\n  mode: 'off'\n");
+    const state = pollerState('antigravity');
+    await tickOn('antigravity', state, approval('rm -rf build\n❯ 1. Allow once\n  2. Deny'));
+    now += 2_000;
+    await tickOn('antigravity', state, approval('rm -rf build\n  1. Allow once\n❯ 2. Deny'));
+
+    expect(lines(EV.opened)).toHaveLength(1);
+  });
+});
+
 describe('[#3820] Auto-Yes off and on again through the poller (必須 2)', () => {
   it('keeps the confirmation over a disable and splits its intervals by enabled period', async () => {
     seedContract('claude', "autoYes:\n  mode: 'off'\n");

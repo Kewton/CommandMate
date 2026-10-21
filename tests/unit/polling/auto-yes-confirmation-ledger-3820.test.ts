@@ -48,6 +48,8 @@ import {
 } from '@/lib/polling/auto-yes-confirmation-ledger';
 import { AUTO_YES_LEDGER_EVENTS as EV } from '@/lib/polling/auto-yes-confirmation-ledger-types';
 import { beginEnterFallbackSession } from '@/lib/polling/auto-yes-enter-fallback-state';
+import { ledgerScreenKey, partialAnswerScreenKey } from '@/lib/polling/auto-yes-poller-state';
+import type { PromptData } from '@/types/models';
 
 const T0 = Date.UTC(2026, 9, 21, 10, 0, 0);
 const SCOPE: LedgerScope = { worktreeId: 'wt-3820', cliToolId: 'claude', instanceId: 'claude' };
@@ -407,5 +409,33 @@ describe('[#3820] limits and failures', () => {
     tick(null);
     runAutoYesLedgerHourForTests(T0 + AUTO_YES_LEDGER_CLOCK_MS);
     expect(JSON.stringify(mockLogger.info.mock.calls)).not.toContain('rm -rf');
+  });
+});
+
+describe('[#3820] the ledger key keeps the body (review P2-2)', () => {
+  const approval = (body: string): PromptData => ({
+    type: 'multiple_choice',
+    question: 'Do you want to proceed?',
+    status: 'pending',
+    options: [
+      { number: 1, label: 'Yes', isDefault: true },
+      { number: 2, label: 'No', isDefault: false },
+    ],
+    approvalTarget: body,
+  });
+
+  it('tells `> file` from `file` where the partial-answer key cannot (its fallback strips every row)', () => {
+    expect(partialAnswerScreenKey(approval('> file'))).toBe(partialAnswerScreenKey(approval('file')));
+    expect(ledgerScreenKey(approval('> file'))).not.toBe(ledgerScreenKey(approval('file')));
+  });
+
+  it('still ignores the cursor on option rows, aligned or not', () => {
+    expect(ledgerScreenKey(approval('cat > f\n❯ 1. Yes\n  2. No'))).toBe(
+      ledgerScreenKey(approval('cat > f\n  1. Yes\n❯ 2. No')),
+    );
+    // Labels that do not match the options: the option-row-only reading.
+    expect(ledgerScreenKey(approval('cat > f\n❯ 1. Yes, run it\n  2. No, stop'))).toBe(
+      ledgerScreenKey(approval('cat > f\n  1. Yes, run it\n❯ 2. No, stop')),
+    );
   });
 });
