@@ -23,7 +23,10 @@
 
 import { executeRegexWithTimeout, validateStopPattern } from '@/config/auto-yes-config';
 import type { PromptData, PromptType } from '@/types/models';
-import type { AutoYesSuppressionReason } from './auto-yes-suppression-reason';
+import {
+  POLICY_LOOKUP_FAILED_SUPPRESSION_REASON,
+  type AutoYesSuppressionReason,
+} from './auto-yes-suppression-reason';
 import { isMultiSelectPrompt } from '@/lib/prompt-answer-semantic';
 
 /** Auto-answer policy modes; mirrors AUTO_YES_MODES in lib/tasks/contract-parser. */
@@ -82,16 +85,6 @@ export function policyLookupMode(policy: AutoYesPolicyLookup | undefined): AutoY
   return policy && !isAutoYesPolicyUnknown(policy) ? policy.mode : null;
 }
 
-/**
- * Issue #3822: the reason recorded when the contract could not be read.
- *
- * An existing member, not a new one, so `cmate wait` and the Push keep their
- * wording: like an unusable deny pattern, this is protection the contract may
- * have asked for that cannot be evaluated, and it is failed closed the same
- * way. Records and denials carry `policyLookupFailed: true` to tell the two apart.
- */
-export const POLICY_LOOKUP_FAILED_SUPPRESSION_REASON = 'deny-pattern-unusable' satisfies AutoYesSuppressionReason;
-
 export interface AutoYesResolution {
   /** The answer to send, or null when nothing should be sent. */
   answer: string | null;
@@ -99,8 +92,6 @@ export interface AutoYesResolution {
   suppressedBy: AutoYesSuppressionReason | null;
   /** The deny pattern responsible, for the escalation log. */
   pattern?: string;
-  /** Issue #3822: set when the answer was withheld because the contract could not be read. */
-  policyLookupFailed?: true;
 }
 
 /**
@@ -232,8 +223,6 @@ function evaluateDenyPatterns(rawTexts: string[], patterns: string[]): DenyOutco
 export interface AutoYesPolicyDenial {
   reason: AutoYesSuppressionReason;
   pattern?: string;
-  /** Issue #3822: the contract could not be read, so nothing it says was evaluated. */
-  policyLookupFailed?: true;
 }
 
 /**
@@ -268,7 +257,7 @@ export function evaluatePolicyAgainstTexts(
 ): AutoYesPolicyDenial | null {
   if (!policy) return null;
   if (isAutoYesPolicyUnknown(policy)) {
-    return { reason: POLICY_LOOKUP_FAILED_SUPPRESSION_REASON, policyLookupFailed: true };
+    return { reason: POLICY_LOOKUP_FAILED_SUPPRESSION_REASON };
   }
 
   if (policy.mode === 'off') {
@@ -324,9 +313,7 @@ export function resolveAutoAnswerWithPolicy(
 
   const denial = evaluatePolicy(promptData, policy);
   if (denial) {
-    return denial.policyLookupFailed
-      ? { answer: null, suppressedBy: denial.reason, policyLookupFailed: true }
-      : { answer: null, suppressedBy: denial.reason, pattern: denial.pattern };
+    return { answer: null, suppressedBy: denial.reason, pattern: denial.pattern };
   }
 
   return { answer, suppressedBy: null };

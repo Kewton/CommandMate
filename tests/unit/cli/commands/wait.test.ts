@@ -1869,3 +1869,40 @@ describe('Issue #2521 / #2522: a Command Code question screen is a blocked agent
     );
   });
 });
+
+/**
+ * Issue #3822: `policy-lookup-failed` (the contract could not be read, so
+ * nothing was answered) has its own wording — not "by contract policy", which
+ * would send the operator to a contract that withheld nothing.
+ */
+describe('Issue #3822: the failed contract lookup has its own wording', () => {
+  const stderrOf = () => mockConsoleError.mock.calls.map(c => String(c[0])).join('\n');
+
+  it('names the failed lookup, exits 10 and keeps the raw reason in --json', async () => {
+    mockFetchSequence([{
+      data: {
+        ...baseOutput,
+        isRunning: true,
+        isPromptWaiting: true,
+        sessionStatus: 'waiting' as const,
+        promptData: { type: 'yes_no', question: 'Proceed?', options: ['yes', 'no'], status: 'pending' },
+        autoYes: {
+          enabled: true,
+          expiresAt: null,
+          lastSuppression: { reason: 'policy-lookup-failed', mode: null, promptType: 'yes_no', at: Date.now() },
+        },
+      },
+    }]);
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+
+    const stderr = stderrOf();
+    expect(stderr).toContain('because the server could not read the execution contract');
+    expect(stderr).toContain('reason=policy-lookup-failed');
+    expect(stderr).not.toContain('by contract policy');
+    expect(stderr).not.toContain('does not recognise');
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
+    const output = JSON.parse(mockConsoleLog.mock.calls[0][0]);
+    expect(output.autoYesSuppression).toMatchObject({ reason: 'policy-lookup-failed', mode: null });
+  });
+});

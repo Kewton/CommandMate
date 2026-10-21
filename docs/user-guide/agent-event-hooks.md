@@ -190,6 +190,7 @@ Claude は承認ダイアログを**描く前に**この hook を叩き、Comman
 | payload を読めない | no-decision |
 | `tool_name` が `AskUserQuestion` | no-decision（常に） |
 | Auto-Yes が無効／期限切れ | no-decision |
+| 契約の照会（DB の読み出し）に失敗（Issue #3822） | no-decision ＋ `lastSuppression` 記録（`reason: policy-lookup-failed`）。「契約なし」とは扱わない。失敗はキャッシュしないので、照会が戻れば次のリクエストから下の行どおり |
 | 契約 `autoYes` が抑止（`mode: off` / `denyPatterns` 一致 / 型不許可） | no-decision ＋ `lastSuppression` 記録 |
 | 上記以外 | `allow` |
 

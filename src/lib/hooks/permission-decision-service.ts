@@ -108,8 +108,6 @@ export interface PermissionDecision {
   pattern?: string;
   /** Policy mode in force (null = contract stated no mode, no contract, or unknown). */
   mode?: AutoYesMode | null;
-  /** Issue #3822: the approval was withheld because the contract could not be read. */
-  policyLookupFailed?: true;
 }
 
 /** The session a permission request belongs to, resolved from the hook URL. */
@@ -226,7 +224,6 @@ export function decidePermissionRequest(
       suppressedBy: denial.reason,
       pattern: denial.pattern,
       mode: policyLookupMode(policy),
-      ...(denial.policyLookupFailed ? { policyLookupFailed: true as const } : {}),
     };
   }
 
@@ -527,7 +524,6 @@ export function resolvePermissionRequest(
         mode: decision.mode ?? null,
         promptType: PERMISSION_REQUEST_PROMPT_TYPE,
         pattern: decision.pattern,
-        ...(decision.policyLookupFailed ? { policyLookupFailed: true as const } : {}),
       }
     );
     logger.warn('permission-request:suppressed-by-policy', {
@@ -539,7 +535,6 @@ export function resolvePermissionRequest(
       reason: decision.suppressedBy,
       mode: decision.mode ?? null,
       pattern: decision.pattern,
-      ...(decision.policyLookupFailed ? { policyLookupFailed: true } : {}),
     });
   }
 

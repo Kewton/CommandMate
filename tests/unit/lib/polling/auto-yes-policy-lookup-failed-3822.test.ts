@@ -123,8 +123,7 @@ describe.each([
 
     expect(resolveAutoAnswerWithPolicy(YES_NO, getSessionAutoYesPolicy('wt-1', 'claude'))).toEqual({
       answer: null,
-      suppressedBy: 'deny-pattern-unusable',
-      policyLookupFailed: true,
+      suppressedBy: 'policy-lookup-failed',
     });
   });
 
@@ -180,8 +179,7 @@ describe('[#3822] controls', () => {
 
   it('the hook evaluator denies an unknown policy, and allows a null one', () => {
     expect(evaluatePolicyAgainstTexts('multiple_choice', ['git status'], AUTO_YES_POLICY_UNKNOWN)).toEqual({
-      reason: 'deny-pattern-unusable',
-      policyLookupFailed: true,
+      reason: 'policy-lookup-failed',
     });
     expect(evaluatePolicyAgainstTexts('multiple_choice', ['git status'], null)).toBeNull();
   });

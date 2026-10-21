@@ -38,12 +38,6 @@ export interface AutoYesPolicySuppression {
   promptType: PromptType;
   /** The deny pattern responsible, when `reason` is a deny-pattern case. */
   pattern?: string;
-  /**
-   * Issue #3822: the answer was withheld because the contract could not be read
-   * (the lookup failed), not because of anything it says. `reason` is then
-   * `deny-pattern-unusable` with no `pattern`.
-   */
-  policyLookupFailed?: true;
   /** Epoch ms of the suppression; refreshed on every poll that re-suppresses. */
   at: number;
 }

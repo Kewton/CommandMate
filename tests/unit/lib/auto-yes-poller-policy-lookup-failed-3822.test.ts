@@ -208,14 +208,13 @@ describe.each(FAILURES)('[#3822] step 4, %s', (_label, fail) => {
     expect(await tick(pollerState())).toBe('no_answer');
     expect(sendPromptAnswer).not.toHaveBeenCalled();
     expect(getLastPolicySuppression(WORKTREE_ID, 'claude')).toMatchObject({
-      reason: 'deny-pattern-unusable',
+      reason: 'policy-lookup-failed',
       mode: null,
       promptType: 'multiple_choice',
-      policyLookupFailed: true,
     });
     expect(getLastPolicySuppression(WORKTREE_ID, 'claude')?.pattern).toBeUndefined();
     expect(suppressionWarnings()).toEqual([
-      expect.objectContaining({ reason: 'deny-pattern-unusable', mode: null, policyLookupFailed: true }),
+      expect.objectContaining({ reason: 'policy-lookup-failed', mode: null }),
     ]);
   });
 
@@ -246,7 +245,6 @@ describe.each(FAILURES)('[#3822] step 4, %s', (_label, fail) => {
     expect(await tick(state)).toBe('no_answer');
     expect(sendPromptAnswer).not.toHaveBeenCalled();
     expect(getLastPolicySuppression(WORKTREE_ID, 'claude')).toMatchObject({ reason: 'mode-off', mode: 'off' });
-    expect(getLastPolicySuppression(WORKTREE_ID, 'claude')?.policyLookupFailed).toBeUndefined();
   });
 });
 
@@ -258,11 +256,10 @@ describe.each(FAILURES)('[#3822] the Enter fallback, %s', (_label, fail) => {
 
     expect(sendSpecialKeys).not.toHaveBeenCalled();
     expect(getLastPolicySuppression(WORKTREE_ID, 'claude')).toMatchObject({
-      reason: 'deny-pattern-unusable',
-      policyLookupFailed: true,
+      reason: 'policy-lookup-failed',
     });
     expect(suppressionWarnings()).toEqual([
-      expect.objectContaining({ policyLookupFailed: true, enterFallback: true }),
+      expect.objectContaining({ reason: 'policy-lookup-failed', mode: null, enterFallback: true }),
     ]);
   });
 
@@ -289,7 +286,6 @@ describe('[#3822] controls: a lookup that succeeds behaves as before', () => {
     seedTask("autoYes:\n  mode: 'off'\n");
     expect(await tick(pollerState())).toBe('no_answer');
     expect(suppressionWarnings()).toEqual([expect.objectContaining({ reason: 'mode-off', mode: 'off' })]);
-    expect(suppressionWarnings()[0]).not.toHaveProperty('policyLookupFailed');
   });
 
   it('a deny pattern that matches: no keystroke, reason deny-pattern', async () => {

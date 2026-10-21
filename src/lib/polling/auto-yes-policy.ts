@@ -139,6 +139,21 @@ export function getSessionAutoYesPolicyEntry(
 }
 
 /**
+ * {@link getSessionAutoYesPolicyEntry} for a path that judges the prompt again
+ * (Issue #3822): a failed lookup stays {@link AUTO_YES_POLICY_UNKNOWN} instead of
+ * reading as no contract, so the resolver withholds on it as the tick did.
+ * `taskId` is null when no contract governs the instance or the lookup failed.
+ */
+export function getSessionAutoYesPolicyLookupEntry(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string
+): { policy: AutoYesPolicyLookup; taskId: string | null } {
+  const { policy, taskId } = lookupEntry(worktreeId, cliToolId, instanceId);
+  return { policy, taskId };
+}
+
+/**
  * Whether the contract's policy keeps Auto-Yes from ever answering (Issue #3723).
  *
  * `mode: 'off'` only. `safe` / `allow-listed` still answer some prompts, and a

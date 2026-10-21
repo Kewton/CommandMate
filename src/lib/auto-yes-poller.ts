@@ -396,9 +396,8 @@ async function tryEnterFallback(
         mode,
         promptType: promptData.type,
         pattern: resolution.pattern,
-        ...(resolution.policyLookupFailed ? { policyLookupFailed: true as const } : {}),
       },
-      `${frameKey}\u0000${resolution.suppressedBy}\u0000${mode ?? ''}\u0000${resolution.pattern ?? ''}\u0000${resolution.policyLookupFailed ? 'lookup-failed' : ''}`,
+      `${frameKey}\u0000${resolution.suppressedBy}\u0000${mode ?? ''}\u0000${resolution.pattern ?? ''}`,
       'poller:auto-yes-suppressed-by-policy',
       {
         reason: resolution.suppressedBy,
@@ -406,7 +405,6 @@ async function tryEnterFallback(
         pattern: resolution.pattern,
         promptType: promptData.type,
         enterFallback: true,
-        ...(resolution.policyLookupFailed ? { policyLookupFailed: true } : {}),
       },
     );
     return false;

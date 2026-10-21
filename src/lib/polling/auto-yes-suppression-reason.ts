@@ -12,6 +12,15 @@ export type AutoYesSuppressionReason =
   | 'deny-pattern-unusable'
   | 'type-not-allowed'
   /**
+   * Issue #3822: the contract governing the instance could not be read (the
+   * database lookup threw), so nothing it says was evaluated. Not "no contract":
+   * a contract stating `off` or deny patterns may be there, so the answer is
+   * withheld — the poller sends no key and the `PermissionRequest` hook does not
+   * allow. Re-evaluated on every tick (the failure is not cached), so it clears
+   * once the lookup succeeds.
+   */
+  | 'policy-lookup-failed'
+  /**
    * Issue #1829: not a policy verdict at all, but the same outcome recorded
    * through the same channel. The prompt on screen is a CLI-lifecycle dialog
    * whose answer belongs to the tool's own launch sequence, so the poller
@@ -85,7 +94,11 @@ export const CONTRACT_SUPPRESSION_REASONS: ReadonlySet<AutoYesSuppressionReason>
   'deny-pattern',
   'deny-pattern-unusable',
   'type-not-allowed',
+  'policy-lookup-failed',
 ]);
+
+/** Issue #3822: the reason recorded when the contract lookup failed. */
+export const POLICY_LOOKUP_FAILED_SUPPRESSION_REASON = 'policy-lookup-failed' satisfies AutoYesSuppressionReason;
 
 /** Issue #3706: the reason the poller records for an answer stopped part-way. */
 export const PARTIAL_ANSWER_SUPPRESSION_REASON = 'partial-answer' satisfies AutoYesSuppressionReason;

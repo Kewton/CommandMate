@@ -143,10 +143,9 @@ describe.each([
     expect(decidePermissionRequest(SESSION, bash('rm -rf build'))).toEqual({
       behavior: null,
       reason: 'policy-suppressed',
-      suppressedBy: 'deny-pattern-unusable',
+      suppressedBy: 'policy-lookup-failed',
       pattern: undefined,
       mode: null,
-      policyLookupFailed: true,
     });
   });
 
@@ -161,14 +160,13 @@ describe.each([
 
     expect(resolvePermissionRequest(SESSION, bash('git status')).behavior).toBeNull();
     expect(getLastPolicySuppression(SESSION.worktreeId, SESSION.cliToolId, SESSION.instanceId)).toMatchObject({
-      reason: 'deny-pattern-unusable',
+      reason: 'policy-lookup-failed',
       mode: null,
       promptType: 'multiple_choice',
-      policyLookupFailed: true,
     });
     expect(warn).toHaveBeenCalledWith(
       'permission-request:suppressed-by-policy',
-      expect.objectContaining({ reason: 'deny-pattern-unusable', policyLookupFailed: true })
+      expect.objectContaining({ reason: 'policy-lookup-failed' })
     );
     expect(created).toHaveLength(0);
   });
@@ -189,7 +187,6 @@ describe.each([
     recover();
     const decision = decidePermissionRequest(SESSION, bash('git status'));
     expect(decision).toMatchObject({ behavior: null, suppressedBy: 'mode-off', mode: 'off' });
-    expect(decision).not.toHaveProperty('policyLookupFailed');
   });
 });
 
