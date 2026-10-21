@@ -148,6 +148,45 @@ describe('[#3820 PR 2] Auto-Yes stopping under a withheld API approval (review i
   });
 });
 
+describe('[#3820 PR 2] a failed delivery that comes back after Auto-Yes was switched off (re-review)', () => {
+  it('records the failed send but opens no interval, and no checkpoint counts the time off', () => {
+    const handle = beginLedgerApiAdjudication(API, 'per_1', ALLOW);
+    now += 1_000;
+    noteLedgerPollerStopped(API_KEY, 'manual');
+    now += 1_000;
+    settleLedgerApiAdjudication(handle, { delivered: false, settled: false });
+    runAutoYesLedgerHourForTests(T0 + AUTO_YES_LEDGER_CLOCK_MS);
+
+    expect(lines(EV.attemptSettled)).toEqual([expect.objectContaining({ result: 'failed', late: false })]);
+    expect(lines(EV.withholdStarted)).toHaveLength(0);
+    expect(lines(EV.checkpoint)).toEqual([
+      expect.objectContaining({ source: 'api', answerability: 'answerable', withheldMsTotal: 0 }),
+    ]);
+    expect(lines(EV.closed)).toHaveLength(0);
+  });
+
+  it('opens the interval of a failed delivery when Auto-Yes was not switched off (positive)', () => {
+    const handle = beginLedgerApiAdjudication(API, 'per_1', ALLOW);
+    now += 1_000;
+    settleLedgerApiAdjudication(handle, { delivered: false, settled: false });
+
+    expect(lines(EV.withholdStarted)).toEqual([expect.objectContaining({ reason: 'send-failed', source: 'api' })]);
+  });
+
+  it('opens it again once Auto-Yes is back on and adjudicates it anew (a new period)', () => {
+    const stale = beginLedgerApiAdjudication(API, 'per_1', ALLOW);
+    noteLedgerPollerStopped(API_KEY, 'manual');
+    settleLedgerApiAdjudication(stale, { delivered: false, settled: false });
+    now += 60_000;
+    const fresh = beginLedgerApiAdjudication(API, 'per_1', ALLOW);
+    settleLedgerApiAdjudication(fresh, { delivered: false, settled: false });
+
+    expect(lines(EV.opened)).toHaveLength(1);
+    expect(lines(EV.attemptSettled).map((line) => line.result)).toEqual(['failed', 'failed']);
+    expect(lines(EV.withholdStarted)).toEqual([expect.objectContaining({ reason: 'send-failed', startedAtMs: now })]);
+  });
+});
+
 describe('[#3820 PR 2] a worktree’s confirmations, whatever pollers ran (review item 3)', () => {
   it('abandons every open confirmation of a deleted worktree, and only its', () => {
     beginLedgerApiAdjudication(API, 'per_1', { outcome: 'abstained', promptType: 'multiple_choice' });

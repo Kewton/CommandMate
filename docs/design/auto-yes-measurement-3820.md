@@ -66,7 +66,7 @@ PR 2 の実装への Codex の整合性レビュー（`.commandmate/tasks/review
 
 | 指摘 | 決定と反映 | 節 |
 |---|---|---|
-| API の停止の区間に Auto-Yes OFF の間の時間が入る | API の確認を開いたまま残すことと、停止の区間を終えることを分けた。セッションを終えない停止（`manual`・`expired`・`not-enabled`・`stop-pattern`・`consecutive-errors`・`shutdown`）では、API の確認は閉じず存在も `present` のまま（返事でまだ決着する）だが、開いている区間は **`end: 'stopped'`**（`WithholdEnd` に足した）で閉じる。OFF の間は区間が無いので checkpoint に時間は入らない。ON に戻って再裁定で止めたら、同じ確認に新しい区間を開く | §3.3・§4.2 |
+| API の停止の区間に Auto-Yes OFF の間の時間が入る | API の確認を開いたまま残すことと、停止の区間を終えることを分けた。セッションを終えない停止（`manual`・`expired`・`not-enabled`・`stop-pattern`・`consecutive-errors`・`shutdown`）では、API の確認は閉じず存在も `present` のまま（返事でまだ決着する）だが、開いている区間は **`end: 'stopped'`**（`WithholdEnd` に足した）で閉じる。OFF の間は区間が無いので checkpoint に時間は入らない。OFF の前に始めた配送が OFF の後に `failed` で戻っても、試行は `failed` と記録するが区間は開き直さない（再レビュー）。ON に戻って再裁定（allow か、方針による停止）したら、その有効期間の区間として扱い、止めるなら同じ確認に新しい区間を開く | §3.3・§4.2 |
 | API の遅れた結果が別の確認の通常の回答になる | 画面の経路と同じく、配送の前（await の前）に確認と試行を取る（`beginLedgerApiAdjudication`）。結果はその試行へ返す（`settleLedgerApiAdjudication`）。配送の間に確認が閉じていれば（kill など）、その確認の `late: true` の行だけを書き、決定の id で確認を開き直さない。一度で書く `recordLedgerApiAdjudication` は 2 つを続けて呼ぶ形で残した | §2.4・§2.5 |
 | poller の無い API の確認が worktree の削除で放棄されない | 記録の後始末を、動いている poller の列挙に頼らない。`stopAutoYesPollingByWorktree`（worktree の削除・セッションの後始末・全エージェントの OFF が通る）は、poller ごとの停止の後に **`noteLedgerWorktreeStopped`** で、その worktree の開いている確認すべてに同じ停止を伝える（削除なら `abandoned(worktree-deleted)`、OFF なら区間を閉じる）。インスタンス単位の停止（`stopAutoYesPolling`）は、poller が無くても記録へ伝える（PR 1 から） | §4.2 |
 | hook の配送のヘルパーが握りつぶした失敗を回答の成功と記録する | `answerPendingDecision` に、既存の配送の受領（receipt）を渡す `onReceipt` を足した（本文は変わらない）。受領が「届いていない」（`decide` が throw した、slot が閉じていた）と言えば、route は要求を `abstained`・`abstainReason: 'delivery-failed'` で閉じ、allow で開いていた確認は試行 `failed`・`unresolved-after-send`（`abandonReason: 'delivery-failed'`）で閉じる。受領が無いときは本文を書いたものとして従来どおり | §2.3 |
@@ -342,7 +342,7 @@ C の欠点への手当て:
 | `ok` の後に同じ確認を再び `withheld` | **新しい区間**を開く | — |
 | 存在が `gone` | 区間を閉じる（`end: 'gone'`） | 閉じる（§2.6 の `resolution`） |
 | Auto-Yes OFF・期限切れ・`stop-pattern`・`consecutive-errors`（`AutoYesPollerStopReason`、`src/config/auto-yes-config.ts:97`） | 区間を閉じる（`end: 'unobservable'`） | 存在を `unobservable` に。閉じない（§2.3 の OFF→ON） |
-| 同じ停止の下の API の確認（opencode の承認。画面では見ていない。改訂 4） | 区間を閉じる（`end: 'stopped'`）。OFF の間は区間に入れない | 存在は `present` のまま。閉じない（返事でまだ決着する） |
+| 同じ停止の下の API の確認（opencode の承認。画面では見ていない。改訂 4） | 区間を閉じる（`end: 'stopped'`）。OFF の間は区間に入れない（OFF の後に戻った配送の失敗でも開かない。次の再裁定から新しい有効期間） | 存在は `present` のまま。閉じない（返事でまだ決着する） |
 | ON に戻り、同じ世代・同じ画面キーを見た | 止めるなら新しい区間 | 存在を `present` に戻す |
 | ON に戻り、確認が無い | — | `closed(gone-while-unobservable)` |
 | セッションの終了（`session-killed`・`instance-removed`・`worktree-deleted`・`orphan-swept`・`invalid-key`、`src/lib/auto-yes-lifecycle.ts:110-118`）・セッションの世代交代 | 区間を閉じる（`end: 'abandoned'`） | `closed(abandoned)`、`abandonReason` に停止の理由 |

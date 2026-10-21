@@ -192,6 +192,13 @@ interface LedgerEntry {
   attempts: AttemptCounts;
   nextAttempt: number;
   answered: boolean;
+  /**
+   * API confirmations: Auto-Yes stopped (a poller stop that did not end the
+   * session) and has not adjudicated it since. A send that comes back failed
+   * meanwhile opens no withheld interval — the time Auto-Yes is off is nobody's
+   * withheld time; the next adjudication, Auto-Yes back on, decides afresh.
+   */
+  autoYesStopped: boolean;
   /** The ledger tick that last saw it on screen. */
   observedTick: number;
 }
@@ -619,6 +626,7 @@ function openEntry(
     attempts: { ok: 0, partial: 0, noKeysSent: 0, failed: 0 },
     nextAttempt: 0,
     answered: false,
+    autoYesStopped: false,
     observedTick: state.ticks.get(compositeKey) ?? 0,
   };
   state.entries.set(opened.id, opened);
@@ -836,7 +844,7 @@ function settleAttempt(
   if (result === 'partial') entry.attempts.partial += 1;
   else if (result === 'no-keys-sent') entry.attempts.noKeysSent += 1;
   else entry.attempts.failed += 1;
-  if (entry.presence === 'present' && options.withholdOnFailure !== false) {
+  if (entry.presence === 'present' && !entry.autoYesStopped && options.withholdOnFailure !== false) {
     withhold(state, entry, WITHHOLD_REASON_OF_RESULT[result], now);
   }
 }
@@ -885,6 +893,7 @@ function noteEntryStopped(state: LedgerState, entry: LedgerEntry, reason: string
     // `present`. Auto-Yes stopped answering it, though, so a withheld interval
     // ends here: the time it is off is nobody's withheld time.
     endInterval(state, entry, 'stopped', now);
+    entry.autoYesStopped = true;
     return;
   }
   if (entry.presence === 'unobservable') return;
@@ -1145,6 +1154,9 @@ export function beginLedgerApiAdjudication(
       }, now);
       state.apiDecisions.set(decisionKey, entry.id);
     }
+    // Adjudicated again with Auto-Yes on (an allow, or a policy's withholding):
+    // its intervals are this period's.
+    if (verdict.outcome === 'allow' || verdict.withholdReason !== undefined) entry.autoYesStopped = false;
     if (verdict.outcome === 'allow') return beginAttempt(state, entry, 'L1', false);
     if (verdict.withholdReason !== undefined) {
       entry.decision = 'withhold';
