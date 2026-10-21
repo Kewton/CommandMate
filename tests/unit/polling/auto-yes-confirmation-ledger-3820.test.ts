@@ -332,9 +332,11 @@ describe('[#3820] checkpoints, alive lines and the clock', () => {
       expect.objectContaining({ atMs: h1 + AUTO_YES_LEDGER_CLOCK_MS, withheldMsTotal: h1 + AUTO_YES_LEDGER_CLOCK_MS - T0 }),
     ]);
     // Measured from when the ledger started, never a whole hour for one line.
+    // PR 2 (design §6.4): every path this version records gets its own span.
+    const paths = ['screen', 'hook', 'api', 'prompt-response'];
     expect(lines(EV.alive).map((line) => line.segments)).toEqual([
-      [{ path: 'screen', startMs: T0, endMs: h1 }],
-      [{ path: 'screen', startMs: h1, endMs: h1 + AUTO_YES_LEDGER_CLOCK_MS }],
+      paths.map((path) => ({ path, startMs: T0, endMs: h1 })),
+      paths.map((path) => ({ path, startMs: h1, endMs: h1 + AUTO_YES_LEDGER_CLOCK_MS })),
     ]);
     expect(lines(EV.alive)[0]).toEqual(
       expect.objectContaining({ openConfirmations: 1, openIntervals: 1, ledgerErrors: 0 }),
@@ -349,7 +351,10 @@ describe('[#3820] checkpoints, alive lines and the clock', () => {
 
     const h1 = (Math.floor(T0 / AUTO_YES_LEDGER_CLOCK_MS) + 1) * AUTO_YES_LEDGER_CLOCK_MS;
     expect(scheduled).toEqual([h1 - T0]);
-    expect(lines(EV.started)).toEqual([expect.objectContaining({ atMs: T0, paths: ['screen'] })]);
+    // PR 2 (design §6.4) added the hook, the API and `/prompt-response`.
+    expect(lines(EV.started)).toEqual([
+      expect.objectContaining({ atMs: T0, paths: ['screen', 'hook', 'api', 'prompt-response'] }),
+    ]);
   });
 
   it('keeps the bootId, the sequence and the clock across a reload of the module', async () => {

@@ -30,6 +30,7 @@ import type { AskUserQuestionSpec } from '@/lib/hooks/ask-user-question-payload'
 import { MAX_EVENT_DETAIL_LENGTH } from '@/lib/hooks/agent-event-types';
 import { adjudicatePendingPermission } from '@/lib/hooks/permission-adjudication';
 import { OPENCODE_QUESTION_TOOL_NAME } from '@/lib/hooks/pending-decision-kind';
+import { noteLedgerApiDecisionReplied } from '@/lib/polling/auto-yes-confirmation-ledger';
 import {
   classifyAgentEventDelivery,
   recordAgentEvent,
@@ -237,6 +238,14 @@ export async function ingestOpencodeV2Event(
       record.decisionId = frameDecisionId(event.raw);
       record.promptSettled = true;
       recordAgentEvent(target.worktreeId, OPENCODE_V2_CLI_TOOL_ID, instanceId, record, options);
+      // Issue #3820: as v1's `permission.replied` — the ledger's confirmation
+      // of this approval ends, by whoever answered it.
+      if (record.decisionId) {
+        noteLedgerApiDecisionReplied(
+          { worktreeId: target.worktreeId, cliToolId: OPENCODE_V2_CLI_TOOL_ID, instanceId },
+          record.decisionId
+        );
+      }
     } else if (event.event === 'notification' && event.detail === OPENCODE_V2_QUESTION_DETAIL) {
       const spec = await readQuestion(target, event, loadForm);
       record.message =

@@ -13,6 +13,17 @@
 import type { PromptData, SubmitMode } from '@/types/models';
 
 /**
+ * Issue #3820: the `origin` the browser's Auto-Yes (`useAutoYes`) puts on its
+ * answer, so the server's Auto-Yes confirmation ledger can tell it from a
+ * person's (basis `browser`, not `human`). It changes nothing else: the answer
+ * is sent, and recorded as `answeredBy: 'human'`, exactly as before.
+ */
+export const AUTO_YES_BROWSER_ORIGIN = 'auto-yes-browser';
+
+/** Who sent a prompt-response request, when it says (Issue #3820). */
+export type PromptResponseOrigin = typeof AUTO_YES_BROWSER_ORIGIN;
+
+/**
  * Shape of the prompt-response API request body.
  */
 export interface PromptResponseBody {
@@ -24,6 +35,8 @@ export interface PromptResponseBody {
   defaultOptionNumber?: number;
   /** Issue #616: Submit mode for multiple choice prompts */
   submitMode?: SubmitMode;
+  /** Issue #3820: set by the browser's Auto-Yes only; absent from a person's answer. */
+  origin?: PromptResponseOrigin;
 }
 
 /**

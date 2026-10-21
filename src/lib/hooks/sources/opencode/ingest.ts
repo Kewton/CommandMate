@@ -46,6 +46,7 @@ import { createLogger } from '@/lib/logger';
 import { MAX_EVENT_DETAIL_LENGTH } from '@/lib/hooks/agent-event-types';
 import { adjudicatePendingPermission } from '@/lib/hooks/permission-adjudication';
 import { OPENCODE_QUESTION_TOOL_NAME } from '@/lib/hooks/pending-decision-kind';
+import { noteLedgerApiDecisionReplied } from '@/lib/polling/auto-yes-confirmation-ledger';
 import {
   classifyAgentEventDelivery,
   recordAgentEvent,
@@ -393,6 +394,14 @@ export async function ingestOpencodeEvent(
       record.decisionId = repliedPermissionId(event.raw);
       record.promptSettled = replyReleasesPrompt(target, instanceId);
       recordAgentEvent(target.worktreeId, OPENCODE_CLI_TOOL_ID, instanceId, record, options);
+      // Issue #3820: the approval's confirmation in the Auto-Yes ledger ends
+      // here when Auto-Yes did not settle it — who answered is not known.
+      if (record.decisionId) {
+        noteLedgerApiDecisionReplied(
+          { worktreeId: target.worktreeId, cliToolId: OPENCODE_CLI_TOOL_ID, instanceId },
+          record.decisionId
+        );
+      }
       logger.info('opencode-permission-reply-observed', {
         worktreeId: target.worktreeId,
         instanceId,

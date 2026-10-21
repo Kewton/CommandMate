@@ -52,8 +52,12 @@ export type AutoYesLedgerPath = 'screen' | 'hook' | 'api' | 'prompt-response' | 
 /** Where a confirmation was seen or received. */
 export type ConfirmationSource = 'screen' | 'hook' | 'api' | 'prompt-response';
 
-/** The level of evidence an answer was given on (design §0). */
-export type AnswerBasis = 'L1' | 'L2' | 'L3' | 'L4' | 'enter-fallback' | 'browser';
+/**
+ * The level of evidence an answer was given on (design §0). `human` is not
+ * Auto-Yes's: a person's answer through `/prompt-response` (PR 2), recorded
+ * so the browser's Auto-Yes (`browser`) can be told from it.
+ */
+export type AnswerBasis = 'L1' | 'L2' | 'L3' | 'L4' | 'enter-fallback' | 'browser' | 'human';
 
 /**
  * Reasons only the ledger records (design §2.2, §2.5): a stop that is not a
@@ -243,7 +247,9 @@ export interface ConfirmationClosedLine extends LedgerLineBase {
 export interface HookRequestClosedLine extends LedgerLineBase {
   hookRequestId: string;
   cliToolId: CLIToolType;
+  /** What the agent was answered: a reply the route could not write as decided is `abstained` (`error`). */
   outcome: 'allow' | 'abstained';
+  /** The adjudicator's reason (`policy-suppressed`, `auto-yes-disabled`, …), `worktree-unresolved` or `error`. */
   abstainReason?: string;
   allowSuppressesDialog: boolean;
   replyMs: number;

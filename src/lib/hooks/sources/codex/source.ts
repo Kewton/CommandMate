@@ -120,6 +120,8 @@ export const codexAgentEventSource: AgentEventSource = definePushHookSource({
     // current behaviour, which is what the state machine does today.
     sessionStartMayArriveLate: false,
     permissionReplyReleasesPrompt: false,
+    // Issue #3820: an allowed `PermissionRequest` draws no dialog.
+    permissionAllowSuppressesDialog: true,
     eventIdentity: null,
     resync: 'none',
     // Issue #2197. codex appends every record of a session to

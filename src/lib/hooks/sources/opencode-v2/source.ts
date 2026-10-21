@@ -295,6 +295,8 @@ export const opencodeV2AgentEventSource: AgentEventSource = definePullEventSourc
     permissionHookPredictsDialog: false,
     sessionStartMayArriveLate: false,
     permissionReplyReleasesPrompt: true,
+    // Issue #3820: an allow is the approval itself, over the agent's API.
+    permissionAllowSuppressesDialog: true,
     // Issue #2945: `per_…` / `frm_…`, the id the reply URL takes and the one
     // `permission.replied` / `form.replied` settle. Moves together with
     // `extractEventIdentity` below.

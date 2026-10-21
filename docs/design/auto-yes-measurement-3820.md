@@ -46,6 +46,20 @@
 | 整合性レビュー P2-2: 本文が違う確認が同じ id になる | #3817 で `partialAnswerScreenKey` は選択肢の行を読めるときだけその行の印・字下げを揃えるようになったが、読めないときは従来どおり全行の印・字下げを消す（部分送信では 2 つを 1 画面と読む方が安全なため）。記録の識別はこれでは足りないので、**`ledgerScreenKey`** を使う: 選択肢の行を読めるときは `partialAnswerScreenKey` と同じ、読めないときは**検出器が読んだ選択肢（`promptData.options` の番号とラベル）に一致する行だけ**印・字下げを消し、ほかの行（番号つきの本文を含む）はそのまま残す。照合は `1.`・`1)`・ピリオドの無い `1  Yes` を区切りの空白の数によらず受け付ける（再レビューの 2 件: 番号つきの本文が 1 件に潰れる・ピリオドの無い選択肢でカーソルが動くと開き直す） | §2.1 |
 | 整合性レビュー P2-3: agy の専用リーダーの確認が L4 になる | agy の門は `legacy`（`gated: false`）なので門の判定からは L3 にならない。poller が同じ文字列を agy の専用リーダー（`detectAntigravityNumberedDialogPrompt`。`detectPromptOnCleanFrame` は読めればその結果を返す）で読み直し、読めたら **`L3`**（受信の門を通った確認なので `receiptAccepted: true`）、読めなければ汎用の推定で `L4` とする。読み直しは記録の段のためだけで、答えはその前に決まっている | §7 PR 1 |
 
+### 改訂 3: PR 2 の実装で直したこと
+
+PR 2 の実装（hook・API・`/prompt-response` の経路）で分かった食い違いを、設計書の側で直した。
+
+| 食い違い | 決定と反映 | 節 |
+|---|---|---|
+| 人の回答の根拠の段が語彙に無い | `/prompt-response` の人の回答を、ブラウザの自動回答（`browser`）と分けて数えるため、`AnswerBasis` に **`human`** を足した（Auto-Yes の回答ではない。`closed` の `decision` は `none`）。PR 4 は知らない値を `(other)` にまとめるので壊れない | §0・§2.6 |
+| `/prompt-response` の確認の開閉 | route が受けた 1 リクエストを **1 件の確認（`source: 'prompt-response'`）** とし、試行 1 つと同時に開いて閉じる。画面の経路の確認とは結ばない（同じ画面を poller も見ていれば、別の `source` の 2 件になる。集計は `source` で分ける）。`ok` なら `resolved-after-answer`（人なら `resolvedBy: 'human-ui'`、ブラウザなら `unknown`）、失敗は `unresolved-after-send`。区間は開かない。記録はセッションが動いていると分かった後の応答だけ（それより前の 400・404 は確認に数えない） | §2.1・§2.6 |
+| hook の要求を開く時点と、返事を書けなかったとき | 要求は route が worktree を引いた直後に開く（`worktree-unresolved` も 1 件の要求として閉じる）。route の catch-all が書くのは棄権の本文なので、要求は `outcome: 'abstained'`・`abstainReason: 'error'` で閉じ、allow で開いていた確認は試行 `failed`・`unresolved-after-send` で閉じる | §2.3 |
+| `afterHookAllow` / `afterHookAbstain` の基準の時刻 | 要求を**閉じた**時刻から `AUTO_YES_LEDGER_HOOK_LINK_WINDOW_MS`（8 秒。agy の受信窓と同じ）以内に、同じインスタンスで画面の確認が開いたとき。要求の id は付けない（同じ呼び出しとは断定しない） | §2.3・§2.4 |
+| opencode の確認を閉じる契機 | `settled` で閉じる（`resolved-by-reply`・`resolvedBy: 'auto'`）ほかに、Auto-Yes が settle しなかった承認は **`permission.replied`（v2 は決着の通知）** を受けた時点で閉じる（`src/lib/hooks/sources/opencode/ingest.ts`・`opencode-v2/ingest.ts`。誰が答えたかは分からないので `unknown`）。ポーラーの停止（Auto-Yes OFF など）では `unobservable` にしない（画面で見ている確認ではない）。セッションの終了では放棄する | §2.4・§4.2 |
+| `permission_mode` | claude だけでなく codex の `PermissionRequest` にも載っている（`tests/fixtures/hooks/codex/permission-request.json`）。どのツールでも本文にあれば記録する。値は語彙の形（英字と `-`、32 文字まで）に限り、外れたら `(other)` | §3.4 |
+| PR 1 のテストが固定していた `paths` | PR 1 の `auto-yes-confirmation-ledger-3820.test.ts` は `paths: ['screen']` を固定していた。§6.4 のとおり PR 2 で `screen`・`hook`・`api`・`prompt-response` に変わるので、その 2 か所の期待値だけを直した | §6.4 |
+
 ---
 
 ## 0. 用語
@@ -60,7 +74,7 @@
 | 回答可否（`answerability`） | Auto-Yes が今その確認に答えられるか: `answerable`／`withheld`（理由つき）。存在とは独立に動く（§2.2） |
 | 解消 | 確認の存在が `gone` になったこと。誰が消したか（`resolvedBy`）は、因果を確かめられたときだけ書き、それ以外は `unknown` |
 | 停止の区間 | 1 件の確認について、Auto-Yes が答えられない（`withheld`）と判断してから、答えるか、確認が解消するか、観測できなくなるまでの時間。1 件の確認に複数の区間があり得る（§4.1） |
-| 根拠の段 | 基本方針の L1〜L4。L1 = hook / API の判定、L2 = hook の目撃と画面の照合、L3 = ツール専用の規則で認識した画面、L4 = 汎用の文字推定。ほかに今の経路として `enter-fallback`（Enter の補い）と `browser`（ブラウザの自動回答）を別に数える |
+| 根拠の段 | 基本方針の L1〜L4。L1 = hook / API の判定、L2 = hook の目撃と画面の照合、L3 = ツール専用の規則で認識した画面、L4 = 汎用の文字推定。ほかに今の経路として `enter-fallback`（Enter の補い）と `browser`（ブラウザの自動回答）を別に数える。`human` は `/prompt-response` の人の回答で、Auto-Yes の回答ではない（改訂 3） |
 | 計測の有無 | その時間に記録のモジュールが動いていて、ログが出る水準だったか。生存の行で示す（§4.4）。**計測が無い時間を 0 件と扱わない** |
 
 ---
@@ -473,7 +487,8 @@ C の欠点への手当て:
   - `src/lib/hooks/permission-decision-service.ts`（hook の要求の記録と §2.3 の規則、能力が `false` なら `recordAllowedPermission` を呼ばない、`permissionMode` の観測 §3.4）
   - `src/app/api/hooks/permission-request/route.ts`（`permission-request-decided` に `allowSuppressesDialog`、要求を閉じる行）
   - `src/lib/hooks/permission-adjudication.ts`（opencode の試行と解消）
-  - `src/hooks/useAutoYes.ts` と `src/app/api/worktrees/[id]/prompt-response/`（本文に `origin: 'auto-yes-browser'` を足し、計測の記録で `browser` と人を分ける。**`answeredBy` は変えない**。#3821 でブラウザの自動回答をやめるまでの基準の数字を取るため）
+  - `src/hooks/useAutoYes.ts` と `src/app/api/worktrees/[id]/prompt-response/`（本文に `origin: 'auto-yes-browser'` を足し、計測の記録で `browser` と人を分ける。**`answeredBy` は変えない**。#3821 でブラウザの自動回答をやめるまでの基準の数字を取るため）。`origin` の定数は client から読める `src/lib/prompt-response-body-builder.ts` に置き、`useAutoYes.ts` は記録のモジュールを import しない
+  - `src/lib/hooks/sources/opencode/ingest.ts`・`opencode-v2/ingest.ts`（`permission.replied` で opencode の確認を閉じる。改訂 3）
   - テスト: 能力の表のテスト（`tests/unit/hooks/sources/capabilities.test.ts`。全ソースが宣言している）、agy の allow で行を書かないこと、claude の allow で今までどおり行を書くこと（陰性）、**hook の route と `/prompt-response`・opencode の配送で、記録とロガーを throw させても応答の本文・状態コードが変わらない故障注入のテスト（推奨 9）**
 - 受入基準:
   - claude / codex / copilot の allow → hook の要求 1 件と確認 1 件（`L1`・`resolved-by-reply`・`resolvedBy: 'auto'`）、`chat_messages` の行 1 行（今と同じ）

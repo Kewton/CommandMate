@@ -28,6 +28,16 @@
  * capability block is the whole vocabulary (`docs/design/
  * multi-agent-state-architecture.md` §4 D3).
  *
+ * ## The ledger (Issue #3820)
+ *
+ * Each adjudication is written to the Auto-Yes confirmation ledger as the
+ * approval's confirmation, keyed by the decision id (design
+ * `docs/design/auto-yes-measurement-3820.md` §2.4): an `allow` is a send whose
+ * result is `delivered`, `settled` closes it, a policy's abstention withholds
+ * it. **No hook request is made here** — that id is the hook route's alone
+ * (§2.3, N2), so `resolvePermissionRequest` is called without one. The ledger
+ * never throws, and its record is written after the verdict was delivered.
+ *
  * ## Why `permission-decision-service` is imported dynamically
  *
  * The same reason `sources/opencode/ingest` does it: that module reaches the
@@ -37,6 +47,7 @@
  */
 
 import { createLogger } from '@/lib/logger';
+import { recordLedgerApiAdjudication } from '@/lib/polling/auto-yes-confirmation-ledger';
 import { describeAbstain } from './sources/abstain';
 import { answerPendingDecisionWithReceipt } from './sources/pending-decisions';
 import type { AgentEventSource, AgentInstanceRef, PendingDecision, Verdict } from './sources/types';
@@ -142,6 +153,18 @@ export async function adjudicatePendingPermission(
     releasedPrompt: settled,
     trigger,
     at: decision.askedAt,
+  });
+
+  recordLedgerApiAdjudication(session, decision.id, {
+    outcome: verdictSource.behavior === 'allow' ? 'allow' : 'abstained',
+    ...(verdictSource.reason === 'policy-suppressed' && verdictSource.suppressedBy
+      ? { withholdReason: verdictSource.suppressedBy }
+      : {}),
+    delivered,
+    settled,
+    // `PERMISSION_REQUEST_PROMPT_TYPE`, spelled out: the service is imported
+    // dynamically (below) and its suites mock it down to one export.
+    promptType: 'multiple_choice',
   });
 
   logger.info('permission-decision-adjudicated', {

@@ -3,7 +3,8 @@
  * what Auto-Yes decided about it, each send and how it came back, how it went
  * away — and the intervals Auto-Yes left it alone, written as structured log
  * lines for agent-health's daily count (design
- * `docs/design/auto-yes-measurement-3820.md`, PR 1: the screen path).
+ * `docs/design/auto-yes-measurement-3820.md`; PR 1: the screen path, PR 2: the
+ * hook route, the API adjudication and `/prompt-response`).
  *
  * ## Records, never decides
  *
@@ -26,6 +27,18 @@
  * window flips the gated reading to `isPrompt: false` while the dialog stays
  * up; the poller observes it from the ungated reading instead, so it stays one
  * confirmation and one interval.
+ *
+ * ## The hook, the API and `/prompt-response` (design §2.3, §2.4, PR 2)
+ *
+ * A hook request is its own record, opened by the hook route only (the API
+ * adjudication never makes one) and closed when the reply is written; it holds
+ * no waiting time. An `allow` on a source whose allow draws no dialog is also
+ * the confirmation, opened and closed with the request. A screen confirmation
+ * opened soon after a request on the same instance carries that fact
+ * (`afterHookAllow` / `afterHookAbstain`), never the claim that it is the same
+ * call. An opencode approval is a confirmation keyed by its decision id, open
+ * until the reply settles it. A `/prompt-response` answer is a confirmation of
+ * its own, opened and closed with the request.
  *
  * ## State
  *
@@ -58,11 +71,14 @@ import {
   type AttemptSettledLine,
   type AutoYesLedgerPath,
   type CheckpointLine,
+  type CliModeObservedLine,
   type ConfirmationClosedLine,
   type ConfirmationDecision,
   type ConfirmationOpenedLine,
   type ConfirmationResolution,
+  type ConfirmationResolvedBy,
   type ConfirmationSource,
+  type HookRequestClosedLine,
   type LedgerAliveLine,
   type LedgerLineBase,
   type LedgerStartedLine,
@@ -74,8 +90,18 @@ import {
   type WithholdStartedLine,
 } from './auto-yes-confirmation-ledger-types';
 
-/** The paths this version records (PR 1: the poller's screen path only). */
-export const AUTO_YES_LEDGER_RECORDED_PATHS: readonly AutoYesLedgerPath[] = ['screen'];
+/**
+ * The paths this version records (design §6.4): PR 1 the poller's screen path,
+ * PR 2 the hook route, the API adjudication and `/prompt-response`.
+ */
+export const AUTO_YES_LEDGER_RECORDED_PATHS: readonly AutoYesLedgerPath[] = ['screen', 'hook', 'api', 'prompt-response'];
+
+/**
+ * A screen confirmation opened this soon after a hook request closed on the
+ * same instance carries `afterHookAllow` / `afterHookAbstain` (design §2.3).
+ * agy's receipt window is the same length.
+ */
+export const AUTO_YES_LEDGER_HOOK_LINK_WINDOW_MS = 8_000;
 
 /** The grid of the `alive` and `checkpoint` lines: every UTC hour boundary. */
 export const AUTO_YES_LEDGER_CLOCK_MS = 60 * 60 * 1000;
@@ -91,6 +117,15 @@ export const AUTO_YES_LEDGER_MAX_OPEN_TOTAL = 1024;
 
 /** Sends whose result has not come back that are remembered; the oldest is dropped past it. */
 const MAX_PENDING_ATTEMPTS = 1024;
+
+/** Hook requests whose reply has not been written that are remembered; the oldest is dropped past it. */
+const MAX_OPEN_HOOK_REQUESTS = 1024;
+
+/** Instances whose last hook request or CLI mode is remembered; the oldest is dropped past it. */
+const MAX_REMEMBERED_INSTANCES = 1024;
+
+/** A CLI mode is a word of the CLI's own vocabulary; anything else is logged as `(other)`. */
+const CLI_MODE_WORD = /^[A-Za-z][A-Za-z-]{0,31}$/;
 
 /**
  * Poller stop reasons that end the session the confirmation was on, or hand
@@ -141,6 +176,8 @@ interface LedgerEntry {
   source: ConfirmationSource;
   /** What tells this confirmation from the next on the same screen (`partialAnswerScreenKey`). Memory only. */
   screenKey: string;
+  /** API confirmations: their key in `apiDecisions`. */
+  decisionKey?: string;
   epoch: number;
   promptType: string;
   openedAt: number;
@@ -166,6 +203,41 @@ interface PendingAttempt {
   receiptAccepted: boolean;
 }
 
+/** Which instance a hook request came from; the worktree is null when it named none this server knows. */
+export interface LedgerHookRequestScope {
+  worktreeId: string | null;
+  cliToolId: CLIToolType;
+  instanceId: string | undefined;
+}
+
+/** What the adjudication decided about a hook request (design §2.3). */
+export interface LedgerHookDecision {
+  outcome: 'allow' | 'abstained';
+  /** The adjudicator's reason, when it abstained. */
+  abstainReason?: string;
+  /** The source's `permissionAllowSuppressesDialog`. */
+  allowSuppressesDialog: boolean;
+  promptType: string;
+}
+
+interface OpenHookRequest {
+  id: string;
+  compositeKey: string | null;
+  worktreeId: string | null;
+  cliToolId: CLIToolType;
+  instanceId: string;
+  receivedAt: number;
+  decision: LedgerHookDecision | null;
+  /** The confirmation the request is, when it was allowed on a source whose allow draws no dialog. */
+  confirmation: { id: string; openedAt: number; promptType: string } | null;
+}
+
+interface RecentHookRequest {
+  at: number;
+  outcome: 'allow' | 'abstained';
+  abstainReason?: string;
+}
+
 interface LedgerClock {
   timer: ReturnType<typeof setTimeout> | null;
   dueAt: number;
@@ -177,6 +249,14 @@ interface LedgerState {
   nextConfirmation: number;
   /** Insertion order is age: the first is the oldest (capacity). */
   entries: Map<string, LedgerEntry>;
+  /** `<compositeKey>\u0000<decisionId>` -> the API confirmation of that decision. */
+  apiDecisions: Map<string, string>;
+  nextHookRequest: number;
+  hookRequests: Map<string, OpenHookRequest>;
+  /** compositeKey -> the last hook request closed on that instance. */
+  lastHookRequest: Map<string, RecentHookRequest>;
+  /** compositeKey -> the CLI mode last seen on that instance, in its session. */
+  cliModes: Map<string, { epoch: number; mode: string }>;
   /** compositeKey -> the screen confirmation of that instance. */
   current: Map<string, string>;
   /** compositeKey -> the ledger tick in progress. */
@@ -248,6 +328,11 @@ function ledgerState(): LedgerState {
       startedAt,
       nextConfirmation: 0,
       entries: new Map(),
+      apiDecisions: new Map(),
+      nextHookRequest: 0,
+      hookRequests: new Map(),
+      lastHookRequest: new Map(),
+      cliModes: new Map(),
       current: new Map(),
       ticks: new Map(),
       nextTick: 0,
@@ -426,7 +511,12 @@ function endInterval(state: LedgerState, entry: LedgerEntry, end: WithholdEnd, n
   });
 }
 
-type CloseHow = { kind: 'gone' } | { kind: 'abandoned'; reason: string };
+type CloseHow =
+  /** `resolvedBy` only where the cause is known (a human's `/prompt-response`, design §2.6). */
+  | { kind: 'gone'; resolvedBy?: ConfirmationResolvedBy }
+  | { kind: 'abandoned'; reason: string }
+  /** The delivered reply itself released it (opencode's `settled`, design §2.6). */
+  | { kind: 'reply' };
 
 function closeEntry(state: LedgerState, entry: LedgerEntry, now: number, how: CloseHow): void {
   const wasUnobservable = entry.presence === 'unobservable';
@@ -436,13 +526,15 @@ function closeEntry(state: LedgerState, entry: LedgerEntry, now: number, how: Cl
   // Withheld only by the duplicate guard after an `ok`: the answer was landing.
   const waitingForAnswer = entry.answered && entry.interval?.reason === 'answered-recently';
   const withheldAtClose = entry.interval !== null && !waitingForAnswer;
-  endInterval(state, entry, how.kind === 'gone' ? 'gone' : 'abandoned', now);
+  endInterval(state, entry, how.kind === 'abandoned' ? 'abandoned' : 'gone', now);
   let attemptsPending = 0;
   for (const pending of state.pending.values()) if (pending.confirmationId === entry.id) attemptsPending += 1;
   const sent = entry.nextAttempt > 0;
   let resolution: ConfirmationResolution;
   if (how.kind === 'abandoned') {
     resolution = sent ? 'unresolved-after-send' : 'abandoned';
+  } else if (how.kind === 'reply') {
+    resolution = 'resolved-by-reply';
   } else if (wasUnobservable) {
     resolution = 'gone-while-unobservable';
   } else if (withheldAtClose) {
@@ -469,8 +561,9 @@ function closeEntry(state: LedgerState, entry: LedgerEntry, now: number, how: Cl
     attemptsPending,
     answeredAtClose: entry.answered,
     resolution,
-    // The screen path cannot tell Auto-Yes's keys from a human's (design §2.6).
-    resolvedBy: 'unknown',
+    // The screen path cannot tell Auto-Yes's keys from a human's; only a
+    // delivered reply that released it is known to be Auto-Yes's (design §2.6).
+    resolvedBy: how.kind === 'reply' ? 'auto' : how.kind === 'gone' ? (how.resolvedBy ?? 'unknown') : 'unknown',
     openMs: Math.max(0, now - entry.openedAt),
     withheldMsTotal: entry.withheldMsClosed,
     unobservableMs: entry.unobservableMs,
@@ -479,6 +572,67 @@ function closeEntry(state: LedgerState, entry: LedgerEntry, now: number, how: Cl
   });
   state.entries.delete(entry.id);
   if (state.current.get(entry.compositeKey) === entry.id) state.current.delete(entry.compositeKey);
+  if (entry.decisionKey !== undefined) state.apiDecisions.delete(entry.decisionKey);
+}
+
+/** Set `key` in a map kept to `max` entries, dropping the oldest. */
+function rememberBounded<V>(map: Map<string, V>, key: string, value: V, max: number): void {
+  map.delete(key);
+  if (map.size >= max) {
+    const oldest = map.keys().next().value;
+    if (oldest !== undefined) map.delete(oldest);
+  }
+  map.set(key, value);
+}
+
+/** Open a confirmation and write its `opened` line; the caller indexes it. */
+function openEntry(
+  state: LedgerState,
+  scope: LedgerScope,
+  compositeKey: string,
+  fields: { source: ConfirmationSource; screenKey: string; promptType: string; decisionKey?: string },
+  now: number,
+  link: Pick<ConfirmationOpenedLine, 'afterHookAllow' | 'afterHookAbstain'> = {},
+): LedgerEntry {
+  makeRoom(state, compositeKey, now);
+  state.nextConfirmation += 1;
+  const opened: LedgerEntry = {
+    id: `${state.bootId}-${state.nextConfirmation}`,
+    compositeKey,
+    worktreeId: scope.worktreeId,
+    cliToolId: scope.cliToolId,
+    instanceId: scope.instanceId ?? scope.cliToolId,
+    source: fields.source,
+    screenKey: fields.screenKey,
+    ...(fields.decisionKey !== undefined ? { decisionKey: fields.decisionKey } : {}),
+    epoch: getEnterFallbackSessionEpoch(compositeKey),
+    promptType: fields.promptType,
+    openedAt: now,
+    presence: 'present',
+    unobservableSince: null,
+    unobservableMs: 0,
+    decision: 'none',
+    basis: null,
+    interval: null,
+    intervals: 0,
+    withheldMsClosed: 0,
+    attempts: { ok: 0, partial: 0, noKeysSent: 0, failed: 0 },
+    nextAttempt: 0,
+    answered: false,
+    observedTick: state.ticks.get(compositeKey) ?? 0,
+  };
+  state.entries.set(opened.id, opened);
+  emit<ConfirmationOpenedLine>(state, AUTO_YES_LEDGER_EVENTS.opened, {
+    atMs: now,
+    confirmationId: opened.id,
+    worktreeId: opened.worktreeId,
+    cliToolId: opened.cliToolId,
+    instanceId: opened.instanceId,
+    source: opened.source,
+    promptType: opened.promptType,
+    ...link,
+  });
+  return opened;
 }
 
 function makeRoom(state: LedgerState, compositeKey: string, now: number): void {
@@ -555,43 +709,15 @@ export function observeLedgerScreen(scope: LedgerScope, screenKey: string, promp
       entry = undefined;
     }
     if (entry === undefined) {
-      makeRoom(state, compositeKey, now);
-      state.nextConfirmation += 1;
-      const opened: LedgerEntry = {
-        id: `${state.bootId}-${state.nextConfirmation}`,
+      const opened = openEntry(
+        state,
+        scope,
         compositeKey,
-        worktreeId: scope.worktreeId,
-        cliToolId: scope.cliToolId,
-        instanceId: scope.instanceId ?? scope.cliToolId,
-        source: 'screen',
-        screenKey,
-        epoch,
-        promptType,
-        openedAt: now,
-        presence: 'present',
-        unobservableSince: null,
-        unobservableMs: 0,
-        decision: 'none',
-        basis: null,
-        interval: null,
-        intervals: 0,
-        withheldMsClosed: 0,
-        attempts: { ok: 0, partial: 0, noKeysSent: 0, failed: 0 },
-        nextAttempt: 0,
-        answered: false,
-        observedTick: tick,
-      };
-      state.entries.set(opened.id, opened);
+        { source: 'screen', screenKey, promptType },
+        now,
+        hookLink(state, compositeKey, now),
+      );
       state.current.set(compositeKey, opened.id);
-      emit<ConfirmationOpenedLine>(state, AUTO_YES_LEDGER_EVENTS.opened, {
-        atMs: now,
-        confirmationId: opened.id,
-        worktreeId: opened.worktreeId,
-        cliToolId: opened.cliToolId,
-        instanceId: opened.instanceId,
-        source: opened.source,
-        promptType,
-      });
       return;
     }
     if (entry.presence === 'unobservable') {
@@ -637,22 +763,21 @@ export function beginLedgerAttempt(
   return guarded<LedgerAttemptHandle | null>(null, (state) => {
     const entry = currentEntry(state, keyOf(scope));
     if (entry === undefined) return null;
-    entry.nextAttempt += 1;
-    entry.decision = 'answer';
-    entry.basis = basis;
-    const handle: LedgerAttemptHandle = { confirmationId: entry.id, attemptId: `${entry.id}.${entry.nextAttempt}` };
-    if (state.pending.size >= MAX_PENDING_ATTEMPTS) {
-      const oldest = state.pending.keys().next().value;
-      if (oldest !== undefined) state.pending.delete(oldest);
-    }
-    state.pending.set(handle.attemptId, {
-      confirmationId: entry.id,
-      cliToolId: entry.cliToolId,
-      basis,
-      receiptAccepted: options.receiptAccepted === true,
-    });
-    return handle;
+    return beginAttempt(state, entry, basis, options.receiptAccepted === true);
   });
+}
+
+function beginAttempt(state: LedgerState, entry: LedgerEntry, basis: AnswerBasis, receiptAccepted: boolean): LedgerAttemptHandle {
+  entry.nextAttempt += 1;
+  entry.decision = 'answer';
+  entry.basis = basis;
+  const handle: LedgerAttemptHandle = { confirmationId: entry.id, attemptId: `${entry.id}.${entry.nextAttempt}` };
+  if (state.pending.size >= MAX_PENDING_ATTEMPTS) {
+    const oldest = state.pending.keys().next().value;
+    if (oldest !== undefined) state.pending.delete(oldest);
+  }
+  state.pending.set(handle.attemptId, { confirmationId: entry.id, cliToolId: entry.cliToolId, basis, receiptAccepted });
+  return handle;
 }
 
 const WITHHOLD_REASON_OF_RESULT: Record<Exclude<AttemptResult, 'ok'>, LedgerWithholdReason> = {
@@ -675,34 +800,45 @@ export function settleLedgerAttempt(
   options: { expired?: boolean } = {},
 ): void {
   if (handle === null || handle === undefined) return;
-  guarded(undefined, (state, now) => {
-    const pending = state.pending.get(handle.attemptId);
-    if (pending === undefined) return;
-    state.pending.delete(handle.attemptId);
-    const entry = state.entries.get(handle.confirmationId);
-    emit<AttemptSettledLine>(state, AUTO_YES_LEDGER_EVENTS.attemptSettled, {
-      atMs: now,
-      confirmationId: handle.confirmationId,
-      attemptId: handle.attemptId,
-      cliToolId: pending.cliToolId,
-      basis: pending.basis,
-      result,
-      late: entry === undefined,
-      expired: options.expired === true,
-      ...(pending.receiptAccepted ? { receiptAccepted: true } : {}),
-    });
-    if (entry === undefined) return;
-    if (result === 'ok') {
-      entry.attempts.ok += 1;
-      entry.answered = true;
-      endInterval(state, entry, 'answered', now);
-      return;
-    }
-    if (result === 'partial') entry.attempts.partial += 1;
-    else if (result === 'no-keys-sent') entry.attempts.noKeysSent += 1;
-    else entry.attempts.failed += 1;
-    if (entry.presence === 'present') withhold(state, entry, WITHHOLD_REASON_OF_RESULT[result], now);
+  guarded(undefined, (state, now) => settleAttempt(state, handle, result, options.expired === true, now));
+}
+
+function settleAttempt(
+  state: LedgerState,
+  handle: LedgerAttemptHandle,
+  result: AttemptResult,
+  expired: boolean,
+  now: number,
+  options: { withholdOnFailure?: boolean } = {},
+): void {
+  const pending = state.pending.get(handle.attemptId);
+  if (pending === undefined) return;
+  state.pending.delete(handle.attemptId);
+  const entry = state.entries.get(handle.confirmationId);
+  emit<AttemptSettledLine>(state, AUTO_YES_LEDGER_EVENTS.attemptSettled, {
+    atMs: now,
+    confirmationId: handle.confirmationId,
+    attemptId: handle.attemptId,
+    cliToolId: pending.cliToolId,
+    basis: pending.basis,
+    result,
+    late: entry === undefined,
+    expired,
+    ...(pending.receiptAccepted ? { receiptAccepted: true } : {}),
   });
+  if (entry === undefined) return;
+  if (result === 'ok') {
+    entry.attempts.ok += 1;
+    entry.answered = true;
+    endInterval(state, entry, 'answered', now);
+    return;
+  }
+  if (result === 'partial') entry.attempts.partial += 1;
+  else if (result === 'no-keys-sent') entry.attempts.noKeysSent += 1;
+  else entry.attempts.failed += 1;
+  if (entry.presence === 'present' && options.withholdOnFailure !== false) {
+    withhold(state, entry, WITHHOLD_REASON_OF_RESULT[result], now);
+  }
 }
 
 /**
@@ -721,7 +857,9 @@ export function noteLedgerPollerStopped(compositeKey: string, reason: string): v
         closeEntry(state, entry, now, { kind: 'abandoned', reason });
         continue;
       }
-      if (entry.presence === 'unobservable') continue;
+      // An API approval is not read off the screen: the poller stopping does
+      // not stop it being seen (its reply still settles it).
+      if (entry.source !== 'screen' || entry.presence === 'unobservable') continue;
       endInterval(state, entry, 'unobservable', now);
       entry.presence = 'unobservable';
       entry.unobservableSince = now;
@@ -733,6 +871,283 @@ export function noteLedgerPollerStopped(compositeKey: string, reason: string): v
         cause: reason,
       });
     }
+  });
+}
+
+/** `afterHookAllow` / `afterHookAbstain` for a screen confirmation opened `now` (design §2.3). */
+function hookLink(
+  state: LedgerState,
+  compositeKey: string,
+  now: number,
+): Pick<ConfirmationOpenedLine, 'afterHookAllow' | 'afterHookAbstain'> {
+  const recent = state.lastHookRequest.get(compositeKey);
+  if (recent === undefined || now - recent.at > AUTO_YES_LEDGER_HOOK_LINK_WINDOW_MS) return {};
+  return recent.outcome === 'allow' ? { afterHookAllow: true } : { afterHookAbstain: recent.abstainReason ?? 'unknown' };
+}
+
+// =============================================================================
+// The hook path (the hook route and the adjudication it calls, PR 2)
+// =============================================================================
+
+/**
+ * A hook request arrived. **Only the hook route calls this** (design §2.3,
+ * N2): the API adjudication shares the adjudicator but makes no hook request.
+ *
+ * @returns The request's id, for {@link decideLedgerHookRequest} and
+ *   {@link closeLedgerHookRequest}; null when the ledger failed
+ */
+export function beginLedgerHookRequest(scope: LedgerHookRequestScope, receivedAtMs: number): string | null {
+  return guarded<string | null>(null, (state) => {
+    state.nextHookRequest += 1;
+    const id = `${state.bootId}-h${state.nextHookRequest}`;
+    const instanceId = scope.instanceId ?? scope.cliToolId;
+    rememberBounded(
+      state.hookRequests,
+      id,
+      {
+        id,
+        compositeKey: scope.worktreeId === null ? null : buildCompositeKey(scope.worktreeId, scope.cliToolId, instanceId),
+        worktreeId: scope.worktreeId,
+        cliToolId: scope.cliToolId,
+        instanceId,
+        receivedAt: receivedAtMs,
+        decision: null,
+        confirmation: null,
+      },
+      MAX_OPEN_HOOK_REQUESTS,
+    );
+    return id;
+  });
+}
+
+/**
+ * The adjudicator decided about a hook request. An `allow` on a source whose
+ * allow draws no dialog makes the request the confirmation (design §2.3): it
+ * is opened here and closed with the request. Any other outcome opens nothing —
+ * a dialog that follows is the screen's confirmation, which alone holds the
+ * waiting time (the rule against counting it twice).
+ */
+export function decideLedgerHookRequest(hookRequestId: string | null | undefined, decision: LedgerHookDecision): void {
+  if (hookRequestId === null || hookRequestId === undefined) return;
+  guarded(undefined, (state, now) => {
+    const request = state.hookRequests.get(hookRequestId);
+    if (request === undefined) return;
+    request.decision = { ...decision };
+    if (decision.outcome !== 'allow' || !decision.allowSuppressesDialog || request.worktreeId === null) return;
+    if (request.confirmation !== null) return;
+    state.nextConfirmation += 1;
+    const confirmation = { id: `${state.bootId}-${state.nextConfirmation}`, openedAt: now, promptType: decision.promptType };
+    request.confirmation = confirmation;
+    emit<ConfirmationOpenedLine>(state, AUTO_YES_LEDGER_EVENTS.opened, {
+      atMs: now,
+      confirmationId: confirmation.id,
+      worktreeId: request.worktreeId,
+      cliToolId: request.cliToolId,
+      instanceId: request.instanceId,
+      source: 'hook',
+      promptType: confirmation.promptType,
+      hookRequestId,
+    });
+  });
+}
+
+/**
+ * The hook route wrote its reply. `delivered: false` is the route's catch-all:
+ * whatever had been decided, the agent got an abstention, so the request is
+ * closed `abstained` (`error`) and a confirmation it was is closed unanswered.
+ */
+export function closeLedgerHookRequest(hookRequestId: string | null | undefined, reply: { delivered: boolean }): void {
+  if (hookRequestId === null || hookRequestId === undefined) return;
+  guarded(undefined, (state, now) => {
+    const request = state.hookRequests.get(hookRequestId);
+    if (request === undefined) return;
+    state.hookRequests.delete(hookRequestId);
+    const decision = request.decision;
+    const outcome = reply.delivered && decision !== null ? decision.outcome : 'abstained';
+    const abstainReason = !reply.delivered ? 'error' : decision === null ? 'undecided' : decision.abstainReason;
+    const confirmation = request.confirmation;
+    if (confirmation !== null && request.worktreeId !== null) {
+      const ok = reply.delivered;
+      emit<AttemptSettledLine>(state, AUTO_YES_LEDGER_EVENTS.attemptSettled, {
+        atMs: now,
+        confirmationId: confirmation.id,
+        attemptId: `${confirmation.id}.1`,
+        cliToolId: request.cliToolId,
+        basis: 'L1',
+        result: ok ? 'ok' : 'failed',
+        late: false,
+        expired: false,
+      });
+      emit<ConfirmationClosedLine>(state, AUTO_YES_LEDGER_EVENTS.closed, {
+        atMs: now,
+        confirmationId: confirmation.id,
+        worktreeId: request.worktreeId,
+        cliToolId: request.cliToolId,
+        instanceId: request.instanceId,
+        source: 'hook',
+        promptType: confirmation.promptType,
+        decision: 'answer',
+        basis: 'L1',
+        attempts: { ok: ok ? 1 : 0, partial: 0, noKeysSent: 0, failed: ok ? 0 : 1 },
+        attemptsPending: 0,
+        answeredAtClose: ok,
+        resolution: ok ? 'resolved-by-reply' : 'unresolved-after-send',
+        resolvedBy: ok ? 'auto' : 'unknown',
+        openMs: Math.max(0, now - confirmation.openedAt),
+        withheldMsTotal: 0,
+        unobservableMs: 0,
+        intervals: 0,
+        ...(ok ? {} : { abandonReason: 'error' }),
+      });
+    }
+    emit<HookRequestClosedLine>(state, AUTO_YES_LEDGER_EVENTS.hookRequestClosed, {
+      atMs: now,
+      hookRequestId,
+      cliToolId: request.cliToolId,
+      outcome,
+      ...(outcome === 'abstained' && abstainReason !== undefined ? { abstainReason } : {}),
+      allowSuppressesDialog: decision?.allowSuppressesDialog ?? false,
+      replyMs: Math.max(0, now - request.receivedAt),
+    });
+    if (request.compositeKey !== null) {
+      rememberBounded(
+        state.lastHookRequest,
+        request.compositeKey,
+        { at: now, outcome, ...(outcome === 'abstained' && abstainReason !== undefined ? { abstainReason } : {}) },
+        MAX_REMEMBERED_INSTANCES,
+      );
+    }
+  });
+}
+
+/**
+ * The CLI's own permission mode, as a `PermissionRequest` stated it (design
+ * §3.4). A line the first time an instance's session shows one and whenever it
+ * changes; a new session forgets it. Instances that never show one write
+ * nothing — the count reads them as unknown, never as zero.
+ */
+export function observeLedgerCliMode(scope: LedgerScope, mode: string): void {
+  guarded(undefined, (state, now) => {
+    const compositeKey = keyOf(scope);
+    const epoch = getEnterFallbackSessionEpoch(compositeKey);
+    const word = CLI_MODE_WORD.test(mode) ? mode : '(other)';
+    const seen = state.cliModes.get(compositeKey);
+    const sameSession = seen !== undefined && seen.epoch === epoch;
+    if (sameSession && seen.mode === word) return;
+    rememberBounded(state.cliModes, compositeKey, { epoch, mode: word }, MAX_REMEMBERED_INSTANCES);
+    emit<CliModeObservedLine>(state, AUTO_YES_LEDGER_EVENTS.cliModeObserved, {
+      atMs: now,
+      worktreeId: scope.worktreeId,
+      cliToolId: scope.cliToolId,
+      instanceId: scope.instanceId ?? scope.cliToolId,
+      sessionEpoch: epoch,
+      mode: word,
+      change: sameSession ? 'changed' : 'first',
+    });
+  });
+}
+
+// =============================================================================
+// The API path (an approval CommandMate holds: opencode, PR 2)
+// =============================================================================
+
+/** What one adjudication of a held approval did (`adjudicatePendingPermission`). */
+export interface LedgerApiAdjudication {
+  outcome: 'allow' | 'abstained';
+  /** Why Auto-Yes withheld it, when a policy did; an abstention without one (Auto-Yes off) withholds nothing. */
+  withholdReason?: LedgerWithholdReason;
+  /** The verdict reached the agent. Meaningful for an `allow`. */
+  delivered: boolean;
+  /** The delivery released the approval (the source declares that a reply does). */
+  settled: boolean;
+  promptType: string;
+}
+
+/**
+ * One adjudication of the approval `decisionId` (design §2.4). The first opens
+ * the confirmation; a re-adjudication (re-connect, Auto-Yes switched on)
+ * continues it. An `allow` is a send: `delivered` is its result. A settled
+ * reply closes it, answered by Auto-Yes.
+ */
+export function recordLedgerApiAdjudication(
+  scope: LedgerScope,
+  decisionId: string,
+  adjudication: LedgerApiAdjudication,
+): void {
+  guarded(undefined, (state, now) => {
+    const compositeKey = keyOf(scope);
+    const decisionKey = `${compositeKey}\u0000${decisionId}`;
+    const knownId = state.apiDecisions.get(decisionKey);
+    let entry = knownId === undefined ? undefined : state.entries.get(knownId);
+    if (entry === undefined) {
+      entry = openEntry(state, scope, compositeKey, {
+        source: 'api',
+        screenKey: '',
+        promptType: adjudication.promptType,
+        decisionKey,
+      }, now);
+      state.apiDecisions.set(decisionKey, entry.id);
+    }
+    if (adjudication.outcome === 'allow') {
+      const handle = beginAttempt(state, entry, 'L1', false);
+      settleAttempt(state, handle, adjudication.delivered ? 'ok' : 'failed', false, now);
+      if (adjudication.delivered && adjudication.settled) closeEntry(state, entry, now, { kind: 'reply' });
+      return;
+    }
+    if (adjudication.withholdReason !== undefined) {
+      entry.decision = 'withhold';
+      withhold(state, entry, adjudication.withholdReason, now);
+    }
+  });
+}
+
+/**
+ * The agent said the approval `decisionId` was answered (opencode's
+ * `permission.replied`) — by this server, another client or a human at the
+ * terminal. An open confirmation closes as gone; who answered is not known.
+ */
+export function noteLedgerApiDecisionReplied(scope: LedgerScope, decisionId: string): void {
+  guarded(undefined, (state, now) => {
+    const knownId = state.apiDecisions.get(`${keyOf(scope)}\u0000${decisionId}`);
+    const entry = knownId === undefined ? undefined : state.entries.get(knownId);
+    if (entry !== undefined) closeEntry(state, entry, now, { kind: 'gone' });
+  });
+}
+
+// =============================================================================
+// The `/prompt-response` path (PR 2)
+// =============================================================================
+
+/** One `/prompt-response` request that reached the session (design §2.1, §2.5). */
+export interface LedgerPromptResponse {
+  /** `browser` when the body said it came from the browser's Auto-Yes, `human` otherwise. */
+  basis: Extract<AnswerBasis, 'browser' | 'human'>;
+  promptType: string;
+  /** `ok` for a 200 `success: true`; anything else (`success: false`, a 500) is `failed`. */
+  result: Extract<AttemptResult, 'ok' | 'failed'>;
+}
+
+/**
+ * A `/prompt-response` answer: a confirmation of its own, opened and closed
+ * with the request, with its one send. A failure is never an answer. Only a
+ * human's successful answer names who resolved it (`human-ui`, design §2.6).
+ */
+export function recordLedgerPromptResponse(scope: LedgerScope, response: LedgerPromptResponse): void {
+  guarded(undefined, (state, now) => {
+    const entry = openEntry(state, scope, keyOf(scope), {
+      source: 'prompt-response',
+      screenKey: '',
+      promptType: response.promptType,
+    }, now);
+    const handle = beginAttempt(state, entry, response.basis, false);
+    if (response.basis === 'human') entry.decision = 'none';
+    // Closed in the same call, so a failure opens no withheld interval.
+    settleAttempt(state, handle, response.result, false, now, { withholdOnFailure: false });
+    if (response.result === 'ok') {
+      closeEntry(state, entry, now, { kind: 'gone', resolvedBy: response.basis === 'human' ? 'human-ui' : 'unknown' });
+      return;
+    }
+    closeEntry(state, entry, now, { kind: 'abandoned', reason: 'send-failed' });
   });
 }
 
