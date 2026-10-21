@@ -218,8 +218,11 @@ function withoutCursorMarks(promptData: PromptData): string {
  * marks and indent off every row — for a partial answer, two bodies reading as
  * one screen holds the prompt for a human, the safe side — but for counting it
  * makes two confirmations whose commands differ by a `>` or an indent one.
- * Here only rows that read as numbered options (where the cursor sits) lose
- * their gutter; every other row stays byte for byte.
+ * Here only the rows that ARE the options the reader read — the row's number
+ * and label match one of `promptData.options` — lose their gutter (where the
+ * cursor sits); every other row, a numbered line of the body included, stays
+ * byte for byte. The match takes the separator as the readers do: `1.`, `1)`
+ * or a bare `1` followed by any run of spaces (`❯ 1  Yes`).
  */
 export function ledgerScreenKey(promptData: PromptData): string {
   if (promptData.type !== 'multiple_choice') return partialAnswerScreenKey(promptData);
@@ -231,18 +234,36 @@ export function ledgerScreenKey(promptData: PromptData): string {
   );
   if (aligned !== null) return partialAnswerScreenKey(promptData);
   const options = promptData.options.map((o) => `${o.number}.${o.label}`).join('\n');
-  return [generatePromptKey(promptData), options, withOptionRowGuttersOnlyRemoved(target)].join('\u0000');
+  return [generatePromptKey(promptData), options, withOptionRowGuttersAligned(target, promptData.options)].join(
+    '\u0000',
+  );
 }
 
-/** Rows that read as a numbered option lose their leading marks and indent; the rest stay. */
-function withOptionRowGuttersOnlyRemoved(text: string): string {
+/** A row's leading cursor marks and indentation. */
+const LEADING_MARKS_PATTERN = /^[\s\u276F\u203A>\u25B6\u25BA\u25CF\u25CB\u25C9\u2192]+/u;
+
+/** A row's option number and the text after its separator (`1.`, `1)` or `1`, then spaces). */
+const OPTION_ROW_PATTERN = /^(\d+)(?:[.)]\s*|\s+)(.*)$/u;
+
+const collapseSpaces = (text: string): string => text.replace(/\s+/gu, ' ').trim();
+
+/** Rows that match one of `options` lose their leading marks and indent; the rest stay. */
+function withOptionRowGuttersAligned(
+  text: string,
+  options: ReadonlyArray<{ number: number; label: string }>,
+): string {
   return text
     .split('\n')
-    .map((line) =>
-      /^[\s\u276F\u203A>\u25B6\u25BA\u25CF\u25CB\u25C9\u2192]*\d+\.\s/u.test(line)
-        ? line.replace(/^[\s\u276F\u203A>\u25B6\u25BA\u25CF\u25CB\u25C9\u2192]+/u, '')
-        : line,
-    )
+    .map((line) => {
+      const row = OPTION_ROW_PATTERN.exec(line.replace(LEADING_MARKS_PATTERN, ''));
+      if (row === null) return line;
+      const rest = collapseSpaces(row[2]);
+      const isOption = options.some((option) => {
+        const label = collapseSpaces(option.label);
+        return option.number === Number(row[1]) && label !== '' && rest.startsWith(label);
+      });
+      return isOption ? line.replace(LEADING_MARKS_PATTERN, '') : line;
+    })
     .join('\n');
 }
 

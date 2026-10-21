@@ -429,6 +429,29 @@ describe('[#3820] the ledger key keeps the body (review P2-2)', () => {
     expect(ledgerScreenKey(approval('> file'))).not.toBe(ledgerScreenKey(approval('file')));
   });
 
+  it('keeps a numbered line of the body as it is when the option rows cannot be aligned (re-review 1)', () => {
+    // No option rows in the target: the fallback. `1. item` is the body, not an option.
+    expect(ledgerScreenKey(approval('cat <<EOF\n   > 1. item\nEOF'))).not.toBe(
+      ledgerScreenKey(approval('cat <<EOF\n   1. item\nEOF')),
+    );
+  });
+
+  it('reads options with no period as option rows, so a cursor move keeps the key (re-review 2)', () => {
+    expect(ledgerScreenKey(approval('rm -rf build\n❯ 1  Yes\n  2  No'))).toBe(
+      ledgerScreenKey(approval('rm -rf build\n  1  Yes\n❯ 2  No')),
+    );
+    // The body above them still counts.
+    expect(ledgerScreenKey(approval('rm -rf build\n❯ 1  Yes\n  2  No'))).not.toBe(
+      ledgerScreenKey(approval('rm -rf dist\n❯ 1  Yes\n  2  No')),
+    );
+  });
+
+  it('leaves the partial-answer key as #3817 made it (negative control)', () => {
+    expect(partialAnswerScreenKey(approval('cat <<EOF\n   > 1. item\nEOF'))).toBe(
+      partialAnswerScreenKey(approval('cat <<EOF\n   1. item\nEOF')),
+    );
+  });
+
   it('still ignores the cursor on option rows, aligned or not', () => {
     expect(ledgerScreenKey(approval('cat > f\n❯ 1. Yes\n  2. No'))).toBe(
       ledgerScreenKey(approval('cat > f\n  1. Yes\n❯ 2. No')),
