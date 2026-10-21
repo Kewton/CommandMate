@@ -10,7 +10,7 @@
  * @module lib/polling/auto-yes-poller-steps
  */
 
-import { resolveAutoAnswerWithPolicy } from './auto-yes-resolver';
+import { policyLookupMode, resolveAutoAnswerWithPolicy } from './auto-yes-resolver';
 import { getSessionAutoYesPolicy } from './auto-yes-policy';
 import type { checkWorktreeSessionOwnership } from '../cli-tools/worktree-session-ownership';
 import { PARTIAL_ANSWER_SUPPRESSION_REASON } from './auto-yes-suppression-reason';
@@ -74,9 +74,11 @@ export function withheldForEarlierSend(judged: JudgedPrompt, screenKey: string, 
  */
 export function resolveAnswerUnderPolicy(judged: JudgedPrompt): string | null {
   const { worktreeId, cliToolId, instanceId, promptData, frameKey } = judged;
+  // Issue #3822: a failed lookup reaches the resolver as unknown and withholds.
   const policy = getSessionAutoYesPolicy(worktreeId, cliToolId, instanceId);
   const resolution = resolveAutoAnswerWithPolicy(promptData, policy);
   if (resolution.suppressedBy) {
+    const mode = policyLookupMode(policy);
     // Issue #1684: the log line alone leaves a CLI-driven pipeline blind to
     // why its worker stalled. Record the suppression so buildCurrentOutput
     // can publish it (`autoYes.lastSuppression` in capture --json).
@@ -84,17 +86,19 @@ export function resolveAnswerUnderPolicy(judged: JudgedPrompt): string | null {
       judged,
       {
         reason: resolution.suppressedBy,
-        mode: policy?.mode ?? null,
+        mode,
         promptType: promptData.type,
         pattern: resolution.pattern,
+        ...(resolution.policyLookupFailed ? { policyLookupFailed: true as const } : {}),
       },
-      `${frameKey}\u0000${resolution.suppressedBy}\u0000${policy?.mode ?? ''}\u0000${resolution.pattern ?? ''}`,
+      `${frameKey}\u0000${resolution.suppressedBy}\u0000${mode ?? ''}\u0000${resolution.pattern ?? ''}\u0000${resolution.policyLookupFailed ? 'lookup-failed' : ''}`,
       'poller:auto-yes-suppressed-by-policy',
       {
         reason: resolution.suppressedBy,
-        mode: policy?.mode ?? null,
+        mode,
         pattern: resolution.pattern,
         promptType: promptData.type,
+        ...(resolution.policyLookupFailed ? { policyLookupFailed: true } : {}),
       },
     );
   }
