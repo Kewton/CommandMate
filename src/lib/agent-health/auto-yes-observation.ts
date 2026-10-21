@@ -171,13 +171,9 @@ export function autoYesObservationWindow(window: { windowStart: number; windowEn
   return { start: end - (window.windowEnd - window.windowStart), end };
 }
 
-export function measureAutoYesObservation(
-  samples: AutoYesObservationSamples,
-  window: { windowStart: number; windowEnd: number }
-): MetricMeasurement {
-  const { start: s, end: e } = autoYesObservationWindow(window);
-  const windowMs = e - s;
-  const lines = samples.lines
+/** The window's lines in time order (`EVENT_RANK`, then the JSON as written, break ties). */
+function linesInWindow(samples: AutoYesObservationSamples, s: number, e: number): LedgerLine[] {
+  return samples.lines
     .filter((line) => line.atMs >= s && line.atMs <= e)
     .sort(
       (a, b) =>
@@ -185,36 +181,40 @@ export function measureAutoYesObservation(
         (EVENT_RANK.get(a.event) ?? 0) - (EVENT_RANK.get(b.event) ?? 0) ||
         (a.raw < b.raw ? -1 : a.raw > b.raw ? 1 : 0)
     );
-  const alive = lines.filter((line) => line.event === EV.alive);
+}
 
-  // ── coverage (design §4.4, §6.4) ──
-  const spansByPath = new Map<string, Array<[number, number]>>(AUTO_YES_LEDGER_PATHS.map((path) => [path, []]));
-  for (const line of alive) {
-    const segments = Array.isArray(line.data.segments) ? (line.data.segments as unknown[]) : [];
-    for (const segment of segments) {
-      if (typeof segment !== 'object' || segment === null) continue;
-      const { path, startMs, endMs } = segment as Record<string, unknown>;
-      const spans = typeof path === 'string' ? spansByPath.get(path) : undefined;
-      const from = num(startMs);
-      const to = num(endMs);
-      if (spans === undefined || from === null || to === null) continue;
-      spans.push([Math.max(from, s), Math.min(to, e)]);
-    }
+interface Coverage {
+  coveredByPath: ReadonlyArray<readonly [string, number]>;
+  coveredMs: number;
+  pathsMissing: string[];
+}
+
+/** The `[start, end]` spans one `alive` line's segments cover, per ledger path, cut to the window. */
+function addAliveSpans(spansByPath: Map<string, Array<[number, number]>>, line: LedgerLine, s: number, e: number): void {
+  const segments = Array.isArray(line.data.segments) ? (line.data.segments as unknown[]) : [];
+  for (const segment of segments) {
+    if (typeof segment !== 'object' || segment === null) continue;
+    const { path, startMs, endMs } = segment as Record<string, unknown>;
+    const spans = typeof path === 'string' ? spansByPath.get(path) : undefined;
+    const from = num(startMs);
+    const to = num(endMs);
+    if (spans === undefined || from === null || to === null) continue;
+    spans.push([Math.max(from, s), Math.min(to, e)]);
   }
+}
+
+// ── coverage (design §4.4, §6.4) ──
+function measureCoverage(alive: readonly LedgerLine[], s: number, e: number): Coverage {
+  const spansByPath = new Map<string, Array<[number, number]>>(AUTO_YES_LEDGER_PATHS.map((path) => [path, []]));
+  for (const line of alive) addAliveSpans(spansByPath, line, s, e);
   const coveredByPath = AUTO_YES_LEDGER_PATHS.map((path) => [path, unionMs(spansByPath.get(path) ?? [])] as const);
   const coveredMs = Math.max(...coveredByPath.map(([, ms]) => ms));
-  // An `alive` line stands for the span before it: one on the window's first
-  // boundary (or none at all) measured nothing inside the window.
-  if (coveredMs === 0) {
-    return {
-      metricId: 'auto-yes-observation',
-      status: 'skip',
-      reason: '窓の中に Auto-Yes の記録の計測区間が無い（生存の行 auto-yes-ledger-alive が窓の中を覆っていない。計測なし。0 件とは扱わない）',
-    };
-  }
   const pathsMissing = coveredByPath.filter(([, ms]) => ms < coveredMs || ms === 0).map(([path]) => path);
+  return { coveredByPath, coveredMs, pathsMissing };
+}
 
-  // ── errors the ledger swallowed inside the window, per process ──
+// ── errors the ledger swallowed inside the window, per process ──
+function countLedgerErrors(lines: readonly LedgerLine[], alive: readonly LedgerLine[]): number {
   const startedBoots = new Set(lines.filter((line) => line.event === EV.started).map((line) => str(line.data.bootId)));
   const errorsByBoot = new Map<string | null, { first: number; last: number }>();
   for (const line of alive) {
@@ -226,204 +226,303 @@ export function measureAutoYesObservation(
   }
   let ledgerErrors = 0;
   for (const { first, last } of errorsByBoot.values()) ledgerErrors += Math.max(0, last - first);
+  return ledgerErrors;
+}
 
-  // ── one pass over the lines ──
-  const seen = new Set<string>();
-  const closed = new Set<string>();
-  const openAtEnd = new Set<string>();
-  const intervals = new Map<string, Interval>();
-  const resolutions = new Map<string, number>();
-  const resolvedBy = new Map<string, number>();
-  const attempts = new Map<string, number>();
-  let attemptsLate = 0;
-  let answered = 0;
-  let answeredByHuman = 0;
-  let answeredLate = 0;
-  const answeredRecords = new Map<string, MetricRecord>();
-  const attemptRecords = new Map<string, MetricRecord>();
-  const abstainRecords = new Map<string, MetricRecord>();
-  let hookRequests = 0;
-  let hookAllowed = 0;
-  let hookAbstained = 0;
-  const dialogUnobserved = new Set<string>();
-  const identified = new Map<string, string>();
-  const modes = new Map<string, { tool: string; mode: string; instance: string }>();
-  const bump = (map: Map<string, number>, key: string) => map.set(key, (map.get(key) ?? 0) + 1);
-  const identify = (data: Record<string, unknown>) => {
-    const worktreeId = str(data.worktreeId);
-    const instanceId = str(data.instanceId);
-    if (worktreeId !== null && instanceId !== null) identified.set(`${worktreeId}\u0000${instanceId}`, toolOf(data));
+/** What the one pass over the lines collects. */
+interface LinePass {
+  seen: Set<string>;
+  closed: Set<string>;
+  openAtEnd: Set<string>;
+  intervals: Map<string, Interval>;
+  resolutions: Map<string, number>;
+  resolvedBy: Map<string, number>;
+  attempts: Map<string, number>;
+  attemptsLate: number;
+  answered: number;
+  answeredByHuman: number;
+  answeredLate: number;
+  answeredRecords: Map<string, MetricRecord>;
+  attemptRecords: Map<string, MetricRecord>;
+  abstainRecords: Map<string, MetricRecord>;
+  hookRequests: number;
+  hookAllowed: number;
+  hookAbstained: number;
+  dialogUnobserved: Set<string>;
+  identified: Map<string, string>;
+  modes: Map<string, { tool: string; mode: string; instance: string }>;
+}
+
+function createLinePass(): LinePass {
+  return {
+    seen: new Set<string>(),
+    closed: new Set<string>(),
+    openAtEnd: new Set<string>(),
+    intervals: new Map<string, Interval>(),
+    resolutions: new Map<string, number>(),
+    resolvedBy: new Map<string, number>(),
+    attempts: new Map<string, number>(),
+    attemptsLate: 0,
+    answered: 0,
+    answeredByHuman: 0,
+    answeredLate: 0,
+    answeredRecords: new Map<string, MetricRecord>(),
+    attemptRecords: new Map<string, MetricRecord>(),
+    abstainRecords: new Map<string, MetricRecord>(),
+    hookRequests: 0,
+    hookAllowed: 0,
+    hookAbstained: 0,
+    dialogUnobserved: new Set<string>(),
+    identified: new Map<string, string>(),
+    modes: new Map<string, { tool: string; mode: string; instance: string }>(),
   };
+}
 
-  for (const { event, atMs, data } of lines) {
-    const confirmationId = str(data.confirmationId);
-    const late = event === EV.attemptSettled && data.late === true;
-    if (confirmationId !== null && !late) seen.add(confirmationId);
-    const intervalId = str(data.intervalId);
-    if (intervalId !== null && confirmationId !== null) {
-      const interval = intervals.get(intervalId) ?? {
-        confirmationId,
-        tool: toolOf(data),
-        endedStart: null,
-        startedStart: null,
-        checkpointStart: null,
-        endedAt: null,
-        lastAt: atMs,
-        reason: OTHER,
-        endedReason: null,
-        reasonChanged: false,
-      };
-      intervals.set(intervalId, interval);
-      interval.lastAt = Math.max(interval.lastAt, atMs);
-      if (event === EV.withholdStarted) {
-        interval.startedStart = num(data.startedAtMs) ?? atMs;
-        interval.reason = reasonOf(data.reason);
-      } else if (event === EV.withholdReasonChanged) {
-        interval.reasonChanged = true;
-        interval.reason = reasonOf(data.to);
-      } else if (event === EV.checkpoint) {
-        interval.checkpointStart ??= num(data.intervalStartedAtMs);
-        interval.reason = reasonOf(data.reason);
-      } else if (event === EV.withholdEnded) {
-        interval.endedStart = num(data.startedAtMs);
-        interval.endedAt = num(data.endedAtMs) ?? atMs;
-        interval.endedReason = reasonOf(data.lastReason);
-      }
-    }
-    switch (event) {
-      case EV.opened:
-        identify(data);
-        break;
-      case EV.checkpoint:
-        if (confirmationId !== null && atMs === e) openAtEnd.add(confirmationId);
-        break;
-      case EV.closed: {
-        identify(data);
-        if (confirmationId !== null) closed.add(confirmationId);
-        bump(resolutions, known(data.resolution, CONFIRMATION_RESOLUTIONS));
-        bump(resolvedBy, known(data.resolvedBy, CONFIRMATION_RESOLVED_BY));
-        if (data.answeredAtClose === true) {
-          // A person's `/prompt-response` answer (basis `human`, #3820 PR 2) is a
-          // confirmation answered, but not by Auto-Yes: counted apart, kept in
-          // the records under its basis.
-          if (data.basis === 'human') answeredByHuman++;
-          else answered++;
-          const tool = toolOf(data);
-          const basis = basisOf(data.basis);
-          increment(answeredRecords, `${tool}\u0000${basis}`, () => ({ kind: 'answered', tool, basis, count: 0 }));
-        }
-        break;
-      }
-      case EV.attemptSettled: {
-        const tool = toolOf(data);
-        const basis = basisOf(data.basis);
-        const result = known(data.result, ATTEMPT_RESULTS);
-        bump(attempts, result);
-        if (late) {
-          attemptsLate++;
-          if (result === 'ok') answeredLate++;
-        }
-        increment(attemptRecords, `${tool}\u0000${basis}\u0000${result}`, () => ({ kind: 'attempt', tool, basis, result, count: 0 }));
-        break;
-      }
-      case EV.hookRequestClosed: {
-        hookRequests++;
-        if (data.outcome === 'allow') hookAllowed++;
-        else if (data.outcome === 'abstained') {
-          hookAbstained++;
-          const tool = toolOf(data);
-          const reason = known(data.abstainReason, HOOK_ABSTAIN_REASONS);
-          increment(abstainRecords, `${tool}\u0000${reason}`, () => ({ kind: 'hook-abstained', tool, reason, count: 0 }));
-        }
-        const hookRequestId = str(data.hookRequestId);
-        if (data.dialogUnobserved === true && hookRequestId !== null) dialogUnobserved.add(hookRequestId);
-        break;
-      }
-      case EV.hookRequestDialogUnobserved: {
-        const hookRequestId = str(data.hookRequestId);
-        if (hookRequestId !== null) dialogUnobserved.add(hookRequestId);
-        break;
-      }
-      case EV.cliModeObserved: {
-        identify(data);
-        const worktreeId = str(data.worktreeId);
-        const instanceId = str(data.instanceId);
-        if (worktreeId === null || instanceId === null) break;
-        const instance = `${worktreeId}\u0000${instanceId}`;
-        // The latest mode of each session epoch: the lines are in time order.
-        modes.set(`${instance}\u0000${num(data.sessionEpoch) ?? ''}`, {
-          tool: toolOf(data),
-          mode: known(data.mode, CLI_PERMISSION_MODES),
-          instance,
-        });
-        break;
-      }
-    }
+const bump = (map: Map<string, number>, key: string) => map.set(key, (map.get(key) ?? 0) + 1);
+
+function identify(pass: LinePass, data: Record<string, unknown>): void {
+  const worktreeId = str(data.worktreeId);
+  const instanceId = str(data.instanceId);
+  if (worktreeId !== null && instanceId !== null) pass.identified.set(`${worktreeId}\u0000${instanceId}`, toolOf(data));
+}
+
+function applyIntervalEvent(interval: Interval, event: AutoYesLedgerEvent, atMs: number, data: Record<string, unknown>): void {
+  if (event === EV.withholdStarted) {
+    interval.startedStart = num(data.startedAtMs) ?? atMs;
+    interval.reason = reasonOf(data.reason);
+  } else if (event === EV.withholdReasonChanged) {
+    interval.reasonChanged = true;
+    interval.reason = reasonOf(data.to);
+  } else if (event === EV.checkpoint) {
+    interval.checkpointStart ??= num(data.intervalStartedAtMs);
+    interval.reason = reasonOf(data.reason);
+  } else if (event === EV.withholdEnded) {
+    interval.endedStart = num(data.startedAtMs);
+    interval.endedAt = num(data.endedAtMs) ?? atMs;
+    interval.endedReason = reasonOf(data.lastReason);
   }
+}
 
-  // ── withheld time cut to the window, interval by interval (design §4.3) ──
-  const withheldRecords = new Map<string, MetricRecord>();
-  const lengths: number[] = [];
-  const withheldConfirmations = new Set<string>();
-  let withheldIntervalsUntimed = 0;
-  for (const interval of intervals.values()) {
-    const reason = interval.endedReason ?? interval.reason;
-    const record = withheldRecords.get(`${interval.tool}\u0000${reason}`) ?? {
-      kind: 'withheld',
-      tool: interval.tool,
-      reason,
-      intervals: 0,
-      totalMs: 0,
-      maxMs: 0,
-      reasonChanged: 0,
-      untimed: 0,
-    };
-    withheldConfirmations.add(interval.confirmationId);
-    if (interval.reasonChanged) record.reasonChanged = (record.reasonChanged as number) + 1;
-    const start = interval.endedStart ?? interval.startedStart ?? interval.checkpointStart;
-    if (start === null) {
-      // Only a `withhold-reason-changed` line, which has no start: the time is
-      // unknown, so it is counted and not timed — never timed from `s`.
-      withheldIntervalsUntimed++;
-      record.untimed = (record.untimed as number) + 1;
-      withheldRecords.set(`${interval.tool}\u0000${reason}`, record);
-      continue;
-    }
-    const end = interval.endedAt ?? interval.lastAt;
-    const ms = Math.max(0, Math.min(end, e) - Math.max(start, s));
-    lengths.push(ms);
-    record.intervals = (record.intervals as number) + 1;
-    record.totalMs = (record.totalMs as number) + ms;
-    record.maxMs = Math.max(record.maxMs as number, ms);
-    withheldRecords.set(`${interval.tool}\u0000${reason}`, record);
+function trackInterval(pass: LinePass, line: LedgerLine, confirmationId: string | null): void {
+  const { event, atMs, data } = line;
+  const intervalId = str(data.intervalId);
+  if (intervalId === null || confirmationId === null) return;
+  const interval = pass.intervals.get(intervalId) ?? {
+    confirmationId,
+    tool: toolOf(data),
+    endedStart: null,
+    startedStart: null,
+    checkpointStart: null,
+    endedAt: null,
+    lastAt: atMs,
+    reason: OTHER,
+    endedReason: null,
+    reasonChanged: false,
+  };
+  pass.intervals.set(intervalId, interval);
+  interval.lastAt = Math.max(interval.lastAt, atMs);
+  applyIntervalEvent(interval, event, atMs, data);
+}
+
+function onClosed(pass: LinePass, data: Record<string, unknown>, confirmationId: string | null): void {
+  identify(pass, data);
+  if (confirmationId !== null) pass.closed.add(confirmationId);
+  bump(pass.resolutions, known(data.resolution, CONFIRMATION_RESOLUTIONS));
+  bump(pass.resolvedBy, known(data.resolvedBy, CONFIRMATION_RESOLVED_BY));
+  if (data.answeredAtClose === true) {
+    // A person's `/prompt-response` answer (basis `human`, #3820 PR 2) is a
+    // confirmation answered, but not by Auto-Yes: counted apart, kept in
+    // the records under its basis.
+    if (data.basis === 'human') pass.answeredByHuman++;
+    else pass.answered++;
+    const tool = toolOf(data);
+    const basis = basisOf(data.basis);
+    increment(pass.answeredRecords, `${tool}\u0000${basis}`, () => ({ kind: 'answered', tool, basis, count: 0 }));
   }
-  const withheldMsTotal = lengths.reduce((sum, ms) => sum + ms, 0);
-  const stat = (p: number | 'max'): number | null =>
-    lengths.length === 0 ? null : p === 'max' ? Math.max(...lengths) : percentile(lengths, p);
+}
 
-  // ── open at the end, or lost: a confirmation neither closed nor in the last checkpoint ──
+function onAttemptSettled(pass: LinePass, data: Record<string, unknown>, late: boolean): void {
+  const tool = toolOf(data);
+  const basis = basisOf(data.basis);
+  const result = known(data.result, ATTEMPT_RESULTS);
+  bump(pass.attempts, result);
+  if (late) {
+    pass.attemptsLate++;
+    if (result === 'ok') pass.answeredLate++;
+  }
+  increment(pass.attemptRecords, `${tool}\u0000${basis}\u0000${result}`, () => ({ kind: 'attempt', tool, basis, result, count: 0 }));
+}
+
+function onHookRequestClosed(pass: LinePass, data: Record<string, unknown>): void {
+  pass.hookRequests++;
+  if (data.outcome === 'allow') pass.hookAllowed++;
+  else if (data.outcome === 'abstained') {
+    pass.hookAbstained++;
+    const tool = toolOf(data);
+    const reason = known(data.abstainReason, HOOK_ABSTAIN_REASONS);
+    increment(pass.abstainRecords, `${tool}\u0000${reason}`, () => ({ kind: 'hook-abstained', tool, reason, count: 0 }));
+  }
+  const hookRequestId = str(data.hookRequestId);
+  if (data.dialogUnobserved === true && hookRequestId !== null) pass.dialogUnobserved.add(hookRequestId);
+}
+
+function onHookRequestDialogUnobserved(pass: LinePass, data: Record<string, unknown>): void {
+  const hookRequestId = str(data.hookRequestId);
+  if (hookRequestId !== null) pass.dialogUnobserved.add(hookRequestId);
+}
+
+function onCliModeObserved(pass: LinePass, data: Record<string, unknown>): void {
+  identify(pass, data);
+  const worktreeId = str(data.worktreeId);
+  const instanceId = str(data.instanceId);
+  if (worktreeId === null || instanceId === null) return;
+  const instance = `${worktreeId}\u0000${instanceId}`;
+  // The latest mode of each session epoch: the lines are in time order.
+  pass.modes.set(`${instance}\u0000${num(data.sessionEpoch) ?? ''}`, {
+    tool: toolOf(data),
+    mode: known(data.mode, CLI_PERMISSION_MODES),
+    instance,
+  });
+}
+
+function applyLine(pass: LinePass, line: LedgerLine, e: number): void {
+  const { event, atMs, data } = line;
+  const confirmationId = str(data.confirmationId);
+  const late = event === EV.attemptSettled && data.late === true;
+  if (confirmationId !== null && !late) pass.seen.add(confirmationId);
+  trackInterval(pass, line, confirmationId);
+  switch (event) {
+    case EV.opened:
+      identify(pass, data);
+      break;
+    case EV.checkpoint:
+      if (confirmationId !== null && atMs === e) pass.openAtEnd.add(confirmationId);
+      break;
+    case EV.closed:
+      onClosed(pass, data, confirmationId);
+      break;
+    case EV.attemptSettled:
+      onAttemptSettled(pass, data, late);
+      break;
+    case EV.hookRequestClosed:
+      onHookRequestClosed(pass, data);
+      break;
+    case EV.hookRequestDialogUnobserved:
+      onHookRequestDialogUnobserved(pass, data);
+      break;
+    case EV.cliModeObserved:
+      onCliModeObserved(pass, data);
+      break;
+  }
+}
+
+// ── one pass over the lines ──
+function passOverLines(lines: readonly LedgerLine[], e: number): LinePass {
+  const pass = createLinePass();
+  for (const line of lines) applyLine(pass, line, e);
+  return pass;
+}
+
+interface Withheld {
+  records: Map<string, MetricRecord>;
+  lengths: number[];
+  confirmations: Set<string>;
+  untimed: number;
+}
+
+function addWithheldInterval(withheld: Withheld, interval: Interval, s: number, e: number): void {
+  const reason = interval.endedReason ?? interval.reason;
+  const record = withheld.records.get(`${interval.tool}\u0000${reason}`) ?? {
+    kind: 'withheld',
+    tool: interval.tool,
+    reason,
+    intervals: 0,
+    totalMs: 0,
+    maxMs: 0,
+    reasonChanged: 0,
+    untimed: 0,
+  };
+  withheld.confirmations.add(interval.confirmationId);
+  if (interval.reasonChanged) record.reasonChanged = (record.reasonChanged as number) + 1;
+  const start = interval.endedStart ?? interval.startedStart ?? interval.checkpointStart;
+  if (start === null) {
+    // Only a `withhold-reason-changed` line, which has no start: the time is
+    // unknown, so it is counted and not timed — never timed from `s`.
+    withheld.untimed++;
+    record.untimed = (record.untimed as number) + 1;
+    withheld.records.set(`${interval.tool}\u0000${reason}`, record);
+    return;
+  }
+  const end = interval.endedAt ?? interval.lastAt;
+  const ms = Math.max(0, Math.min(end, e) - Math.max(start, s));
+  withheld.lengths.push(ms);
+  record.intervals = (record.intervals as number) + 1;
+  record.totalMs = (record.totalMs as number) + ms;
+  record.maxMs = Math.max(record.maxMs as number, ms);
+  withheld.records.set(`${interval.tool}\u0000${reason}`, record);
+}
+
+// ── withheld time cut to the window, interval by interval (design §4.3) ──
+function measureWithheld(intervals: Map<string, Interval>, s: number, e: number): Withheld {
+  const withheld: Withheld = { records: new Map<string, MetricRecord>(), lengths: [], confirmations: new Set<string>(), untimed: 0 };
+  for (const interval of intervals.values()) addWithheldInterval(withheld, interval, s, e);
+  return withheld;
+}
+
+function withheldStat(lengths: readonly number[], p: number | 'max'): number | null {
+  return lengths.length === 0 ? null : p === 'max' ? Math.max(...lengths) : percentile(lengths, p);
+}
+
+// ── open at the end, or lost: a confirmation neither closed nor in the last checkpoint ──
+function countUnclosed(pass: LinePass): { openAtWindowEnd: number; lostOnRestart: number } {
   let openAtWindowEnd = 0;
   let lostOnRestart = 0;
-  for (const id of seen) {
-    if (closed.has(id)) continue;
-    if (openAtEnd.has(id)) openAtWindowEnd++;
+  for (const id of pass.seen) {
+    if (pass.closed.has(id)) continue;
+    if (pass.openAtEnd.has(id)) openAtWindowEnd++;
     else lostOnRestart++;
   }
+  return { openAtWindowEnd, lostOnRestart };
+}
 
-  // ── the CLI's own permission mode, as far as it was observed (design §3.4) ──
+interface CliModes {
+  records: Map<string, MetricRecord>;
+  observedInstances: Set<string>;
+  unknownInstances: number;
+}
+
+// ── the CLI's own permission mode, as far as it was observed (design §3.4) ──
+function measureCliModes(pass: LinePass): CliModes {
   const modeRecords = new Map<string, MetricRecord>();
   const observedInstances = new Set<string>();
-  for (const { tool, mode, instance } of modes.values()) {
+  for (const { tool, mode, instance } of pass.modes.values()) {
     observedInstances.add(instance);
     increment(modeRecords, `${tool}\u0000${mode}`, () => ({ kind: 'cli-mode', tool, mode, instances: 0 }), 'instances');
   }
   let unknownInstances = 0;
-  for (const [instance, tool] of identified) {
+  for (const [instance, tool] of pass.identified) {
     if (observedInstances.has(instance)) continue;
     unknownInstances++;
     increment(modeRecords, `${tool}\u0000unknown`, () => ({ kind: 'cli-mode', tool, mode: 'unknown', instances: 0 }), 'instances');
   }
+  return { records: modeRecords, observedInstances, unknownInstances };
+}
 
+interface Observed {
+  windowMs: number;
+  coverage: Coverage;
+  ledgerErrors: number;
+  pass: LinePass;
+  withheld: Withheld;
+  unclosed: { openAtWindowEnd: number; lostOnRestart: number };
+  cliModes: CliModes;
+}
+
+function observationMeasurement({ windowMs, coverage, ledgerErrors, pass, withheld, unclosed, cliModes }: Observed): MetricMeasurement {
+  const { coveredByPath, coveredMs, pathsMissing } = coverage;
+  const { attempts, resolutions, resolvedBy, seen, answered } = pass;
+  const lengths = withheld.lengths;
+  const withheldMsTotal = lengths.reduce((sum, ms) => sum + ms, 0);
   const partial = pathsMissing.length > 0 || coveredMs < windowMs || ledgerErrors > 0;
   const count = (map: Map<string, number>, key: string) => map.get(key) ?? 0;
   const withheldMinutes = Math.round((withheldMsTotal / 60_000) * 10) / 10;
@@ -443,17 +542,17 @@ export function measureAutoYesObservation(
       pathsMissing: pathsMissing.join(','),
       ledgerErrors,
       confirmations: seen.size,
-      confirmationsClosed: closed.size,
-      openAtWindowEnd,
-      lostOnRestart,
+      confirmationsClosed: pass.closed.size,
+      openAtWindowEnd: unclosed.openAtWindowEnd,
+      lostOnRestart: unclosed.lostOnRestart,
       answered,
-      answeredByHuman,
-      answeredLate,
+      answeredByHuman: pass.answeredByHuman,
+      answeredLate: pass.answeredLate,
       attemptsOk: count(attempts, 'ok'),
       attemptsPartial: count(attempts, 'partial'),
       attemptsNoKeysSent: count(attempts, 'no-keys-sent'),
       attemptsFailed: count(attempts, 'failed'),
-      attemptsLate,
+      attemptsLate: pass.attemptsLate,
       resolvedAfterAnswer: count(resolutions, 'resolved-after-answer'),
       resolvedWhileWithheld: count(resolutions, 'resolved-while-withheld'),
       resolvedByReply: count(resolutions, 'resolved-by-reply'),
@@ -464,28 +563,54 @@ export function measureAutoYesObservation(
       resolvedByAuto: count(resolvedBy, 'auto'),
       resolvedByHumanUi: count(resolvedBy, 'human-ui'),
       resolvedByUnknown: count(resolvedBy, 'unknown'),
-      withheldConfirmations: withheldConfirmations.size,
+      withheldConfirmations: withheld.confirmations.size,
       withheldIntervals: lengths.length,
-      withheldIntervalsUntimed,
+      withheldIntervalsUntimed: withheld.untimed,
       withheldMsTotal,
-      withheldMsMedian: stat(50),
-      withheldMsP90: stat(90),
-      withheldMsMax: stat('max'),
-      hookRequests,
-      hookAllowed,
-      hookAbstained,
-      dialogUnobserved: dialogUnobserved.size,
-      cliModeObserved: observedInstances.size,
-      cliModeUnknownInstances: identified.size === 0 ? null : unknownInstances,
+      withheldMsMedian: withheldStat(lengths, 50),
+      withheldMsP90: withheldStat(lengths, 90),
+      withheldMsMax: withheldStat(lengths, 'max'),
+      hookRequests: pass.hookRequests,
+      hookAllowed: pass.hookAllowed,
+      hookAbstained: pass.hookAbstained,
+      dialogUnobserved: pass.dialogUnobserved.size,
+      cliModeObserved: cliModes.observedInstances.size,
+      cliModeUnknownInstances: pass.identified.size === 0 ? null : cliModes.unknownInstances,
     },
     records: [
-      ...sortedRecords(answeredRecords),
-      ...sortedRecords(attemptRecords),
-      ...sortedRecords(withheldRecords),
-      ...sortedRecords(abstainRecords),
-      ...sortedRecords(modeRecords),
+      ...sortedRecords(pass.answeredRecords),
+      ...sortedRecords(pass.attemptRecords),
+      ...sortedRecords(withheld.records),
+      ...sortedRecords(pass.abstainRecords),
+      ...sortedRecords(cliModes.records),
     ],
   };
+}
+
+export function measureAutoYesObservation(
+  samples: AutoYesObservationSamples,
+  window: { windowStart: number; windowEnd: number }
+): MetricMeasurement {
+  const { start: s, end: e } = autoYesObservationWindow(window);
+  const windowMs = e - s;
+  const lines = linesInWindow(samples, s, e);
+  const alive = lines.filter((line) => line.event === EV.alive);
+  const coverage = measureCoverage(alive, s, e);
+  // An `alive` line stands for the span before it: one on the window's first
+  // boundary (or none at all) measured nothing inside the window.
+  if (coverage.coveredMs === 0) {
+    return {
+      metricId: 'auto-yes-observation',
+      status: 'skip',
+      reason: '窓の中に Auto-Yes の記録の計測区間が無い（生存の行 auto-yes-ledger-alive が窓の中を覆っていない。計測なし。0 件とは扱わない）',
+    };
+  }
+  const ledgerErrors = countLedgerErrors(lines, alive);
+  const pass = passOverLines(lines, e);
+  const withheld = measureWithheld(pass.intervals, s, e);
+  const unclosed = countUnclosed(pass);
+  const cliModes = measureCliModes(pass);
+  return observationMeasurement({ windowMs, coverage, ledgerErrors, pass, withheld, unclosed, cliModes });
 }
 
 /** One line for the report's `summary` (design §6.2). */
