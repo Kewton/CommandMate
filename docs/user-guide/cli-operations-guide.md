@@ -2063,7 +2063,7 @@ Auto-Yes が OFF の instance で、止まった理由があれば入ります�
 
 | フィールド | 意味 |
 |-----------|------|
-| `reason` | `type-not-allowed`（mode が許さない型）/ `deny-pattern`（denyPatterns がマッチ）/ `deny-pattern-unusable`（評価不能パターンの fail-closed）/ `mode-off` |
+| `reason` | `type-not-allowed`（mode が許さない型）/ `deny-pattern`（denyPatterns がマッチ）/ `deny-pattern-unusable`（評価不能パターンの fail-closed）/ `mode-off` / `policy-lookup-failed`（契約の照会に失敗。下の表） |
 | `mode` | 抑止時点のポリシー mode（`off` / `safe` / `allow-listed`、契約が mode を述べていなければ `null`） |
 | `promptType` | 抑止されたプロンプトの型（例: Claude の編集確認は `multiple_choice`） |
 | `pattern` | `deny-pattern` 系のとき、マッチした denyPattern |
@@ -2079,6 +2079,7 @@ Auto-Yes が OFF の instance で、止まった理由があれば入ります�
 
 | `reason` | 意味 | `commandmate wait` の表示 |
 |----------|------|--------------------------|
+| `policy-lookup-failed`（Issue #3822） | 契約の照会（DB の読み出し）に失敗したので、契約が何を述べているか分からない。「契約なし」とは扱わず答えない（poller はキーを送らず、`PermissionRequest` hook は `allow` を返さず通常の承認ダイアログに任せる）。`mode` は `null`。失敗はキャッシュしないので、照会が戻れば次のポーリングから契約どおりに戻る（契約が無ければ答える）。サーバーログの `policy-lookup-failed` に失敗の内容が出る | 「because the server could not read the execution contract (the database lookup failed), so Auto-Yes does not answer until it can; check the server log for policy-lookup-failed」 |
 | `agent-launch-dialog`（Issue #1829） | 画面の確認が CLI の起動の手順のダイアログ（信頼の確認など）で、その答えは道具自身の起動の手順に属するので Auto-Yes は答えない。起動の手順が終わった後も残り、カーソルが安全な行に無いとき（copilot は `2.` か `3.`、gemini は `1. Trust folder` 以外。Issue #3790）は誰も答えないので、画面で人が答える | 「while the agent's launch dialog was on screen; if it stays after the launch (copilot's cursor on 2. or 3., gemini's not on 1. Trust folder), answer it at the pane」 |
 | `unclassified-frame`（Issue #1924） | 汎用の推定は番号付きの一覧を読んだが、その道具のダイアログ検出が確認と認めなかったので何も送らない。返答の中の番号付きの一覧に `1` と答える事故（#1896）を防ぐ位置 | 「because no tool-specific dialog detector recognised the frame」 |
 | `startup-trust-unhandled`（Issue #3757） | agy の起動時のフォルダ信頼の確認（`Do you trust the contents of this project?`）が画面にある。起動の手順の側が答えるもので、番号が無いので poller はプロンプトとして読めない。起動の窓が終わった後に出た場合は、次の send の準備待ちが答える | 「because agy's startup folder-trust confirmation is the launch's to answer, not Auto-Yes's; the next send confirms it once, or answer it at the pane」 |

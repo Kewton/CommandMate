@@ -1243,7 +1243,7 @@ which left the CLI unable to explain why a worker was stalled while Auto-Yes was
 
 | Field | Meaning |
 |-------|---------|
-| `reason` | `type-not-allowed` (the mode disallows that prompt type) / `deny-pattern` (a denyPattern matched) / `deny-pattern-unusable` (fail-closed on a pattern that could not be evaluated) / `mode-off` |
+| `reason` | `type-not-allowed` (the mode disallows that prompt type) / `deny-pattern` (a denyPattern matched) / `deny-pattern-unusable` (fail-closed on a pattern that could not be evaluated) / `mode-off` / `policy-lookup-failed` (the contract lookup failed; see the table below) |
 | `mode` | The policy mode at suppression time (`off` / `safe` / `allow-listed`, or `null` if the contract states no mode) |
 | `promptType` | The type of the suppressed prompt (Claude's edit confirmation, for instance, is `multiple_choice`) |
 | `pattern` | For the `deny-pattern` reasons, the denyPattern that matched |
@@ -1260,6 +1260,7 @@ The remaining words of the type `AutoYesSuppressionReason` are not policy verdic
 
 | `reason` | Meaning | `commandmate wait` prints |
 |----------|---------|---------------------------|
+| `policy-lookup-failed` (Issue #3822) | Reading the contract (the database lookup) failed, so what the contract states is not known. It is not treated as "no contract" and nothing is answered (the poller sends no keys, and the `PermissionRequest` hook does not return `allow`, leaving it to the ordinary approval dialog). `mode` is `null`. The failure is not cached, so once the lookup works again the next poll follows the contract again (and answers if there is none). The server log line `policy-lookup-failed` carries the failure | "because the server could not read the execution contract (the database lookup failed), so Auto-Yes does not answer until it can; check the server log for policy-lookup-failed" |
 | `agent-launch-dialog` (Issue #1829) | The confirmation on screen is a dialog of the CLI's launch sequence (a trust confirmation, for instance); its answer belongs to the tool's own launch sequence, so Auto-Yes does not answer it. If it stays after the launch with the cursor off the safe row (copilot's on `2.` or `3.`, gemini's on anything but `1. Trust folder`; Issue #3790), nobody answers it, so answer it at the pane | "while the agent's launch dialog was on screen; if it stays after the launch (copilot's cursor on 2. or 3., gemini's not on 1. Trust folder), answer it at the pane" |
 | `unclassified-frame` (Issue #1924) | The generic estimator read a numbered list, but the tool's own dialog detector did not accept it as a confirmation, so nothing is sent. This is the position that stops answering `1` to a numbered list inside a reply (#1896) | "because no tool-specific dialog detector recognised the frame" |
 | `startup-trust-unhandled` (Issue #3757) | agy's startup folder-trust confirmation (`Do you trust the contents of this project?`) is on screen. It belongs to the launch sequence and is unnumbered, so the poller cannot read it as a prompt. If it was drawn after the launch window ended, the next send's readiness wait answers it | "because agy's startup folder-trust confirmation is the launch's to answer, not Auto-Yes's; the next send confirms it once, or answer it at the pane" |
