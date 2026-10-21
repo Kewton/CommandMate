@@ -69,8 +69,12 @@ function normalize(text: string | null): string | null {
  */
 const PERMISSION_OPTION_TAIL_ROWS = 12;
 
-/** The gutter of an option row: the highlight's `>` or the blank of the others. */
-const OPTION_ROW_GUTTER_PATTERN = /^[ \t]*>?[ \t]*/;
+/**
+ * The gutter of an option row: the highlight's glyph or the blank of the others.
+ * The glyphs are the block reader's (`dialog-block.ts`): agy's `>`, and claude's
+ * `❯`, codex's `›` and `●` for the readers that share the poller (#3817).
+ */
+const OPTION_ROW_GUTTER_PATTERN = /^[ \t]*[>\u276F\u203A\u25CF]?[ \t]*/u;
 
 /**
  * The rows the shared block reader adopted as option rows, option 1 first, or
@@ -97,17 +101,47 @@ function adoptedOptionRows(rows: readonly string[], block: NumberedOptionBlock):
 }
 
 /**
+ * An approval target with the gutters of its option rows made the same, or null
+ * when its option rows cannot be told (Issue #3812, shared since #3817).
+ *
+ * The option block is found the way the readers find it
+ * (`findNumberedOptionBlock`, bottom up to `1.`), and taken only when each label
+ * the block reader read is `sameLabel` to the one the screen names. Only the
+ * gutter of the rows the reader adopted as options ({@link adoptedOptionRows})
+ * is made the same; every row above option 1 (the command, a here-document's
+ * `1. item`, its `>` and its indent) and every row folded into a label
+ * (`0. item` included) stays byte for byte.
+ *
+ * @param sameLabel - Whether the label the block reader read (rows under the
+ *   bottom option folded in) is the one the screen names
+ */
+export function approvalTargetWithOptionRowsAligned(
+  approvalTarget: string,
+  options: readonly string[],
+  sameLabel: (read: string, named: string) => boolean
+): string | null {
+  const rows = approvalTarget.split('\n');
+  const block = findNumberedOptionBlock(rows, rows.length, PERMISSION_OPTION_TAIL_ROWS);
+  if (block === null) return null;
+  // The reader folds the rows under the bottom option into its label.
+  const labels = [...block.options];
+  const last = labels.length - 1;
+  if (block.footer !== '') labels[last] = [labels[last], ...block.footer.split('\n')].join(' ').trim();
+  if (labels.length !== options.length || labels.some((label, i) => !sameLabel(label, options[i]))) return null;
+  const adopted = adoptedOptionRows(rows, block);
+  if (adopted === null) return null;
+  const optionRows = new Set(adopted);
+  return rows.map((row, i) => (optionRows.has(i) ? row.replace(OPTION_ROW_GUTTER_PATTERN, '  ') : row)).join('\n');
+}
+
+/**
  * An approval target with the highlight's mark taken out (Issue #3812).
  *
  * agy's permission dialog reads its approval target down to the footer
  * (`detection/tools/antigravity/dialog.ts`), so its option rows are the tail
- * of the target and the `>` moves with every ↑/↓. The option block is found
- * the way that reader finds it (`findNumberedOptionBlock`, bottom up to `1.`),
- * and taken only when its labels are the screen's `options` — what the reader
- * named. Only the gutter of the rows the reader adopted as options
- * ({@link adoptedOptionRows}) is made the same; every row above option 1 (the
- * command, a here-document's `1. item` and its indent) and every row folded
- * into a label (`0. item` included) stays byte for byte.
+ * of the target and the `>` moves with every ↑/↓. Its option rows are aligned
+ * by {@link approvalTargetWithOptionRowsAligned} when the block's labels are
+ * exactly the screen's `options` — what the reader named.
  *
  * Any other kind, a target with no such block, or a block whose labels are not
  * the screen's, is returned as is: a moved highlight then reads as another
@@ -119,18 +153,7 @@ export function approvalTargetWithoutHighlight(
   options: readonly string[]
 ): string | null {
   if (approvalTarget === null || kind !== 'antigravity-permission') return approvalTarget;
-  const rows = approvalTarget.split('\n');
-  const block = findNumberedOptionBlock(rows, rows.length, PERMISSION_OPTION_TAIL_ROWS);
-  if (block === null) return approvalTarget;
-  // The reader folds the rows under the bottom option into its label.
-  const labels = [...block.options];
-  const last = labels.length - 1;
-  if (block.footer !== '') labels[last] = [labels[last], ...block.footer.split('\n')].join(' ').trim();
-  if (labels.length !== options.length || labels.some((label, i) => label !== options[i])) return approvalTarget;
-  const adopted = adoptedOptionRows(rows, block);
-  if (adopted === null) return approvalTarget;
-  const optionRows = new Set(adopted);
-  return rows.map((row, i) => (optionRows.has(i) ? row.replace(OPTION_ROW_GUTTER_PATTERN, '  ') : row)).join('\n');
+  return approvalTargetWithOptionRowsAligned(approvalTarget, options, (read, named) => read === named) ?? approvalTarget;
 }
 
 /** One fixed form of what a screen asks. The highlight is not in it: moving the cursor is the same appearance. */

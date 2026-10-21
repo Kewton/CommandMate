@@ -91,7 +91,7 @@ function yesNoApprovalTarget(
   match: RegExpMatchArray,
 ): string | undefined {
   const { startLine, endLine } = locateMatchLines(tailText, tailStart, match);
-  return joinApprovalTarget(lines, findApprovalContextStart(lines, startLine), endLine + 1);
+  return joinApprovalTarget(lines, findApprovalContextStart(lines, startLine, endLine + 1), endLine + 1);
 }
 
 /**
