@@ -4,7 +4,7 @@
  * away — and the intervals Auto-Yes left it alone, written as structured log
  * lines for agent-health's daily count (design
  * `docs/design/auto-yes-measurement-3820.md`; PR 1: the screen path, PR 2: the
- * hook route, the API adjudication and `/prompt-response`).
+ * hook route, the API adjudication and `/prompt-response`, PR 3: agy's call).
  *
  * ## Records, never decides
  *
@@ -39,6 +39,17 @@
  * call. An opencode approval is a confirmation keyed by its decision id, open
  * until the reply settles it. A `/prompt-response` answer is a confirmation of
  * its own, opened and closed with the request.
+ *
+ * ## agy's call (design §2.4, PR 3)
+ *
+ * agy's `PreToolUse` names its call (`callId`, `<conversationId>:<stepIdx>`).
+ * Its allow still draws the dialog, so the request opens no confirmation; the
+ * screen's confirmation is tied to the call when the receipt that let it
+ * through named one, and carries the request's id. It closes on whichever comes
+ * first: gone from the screen, or the call's `PostToolUse`. A call that ends
+ * with no confirmation ever tied to it gets a `dialogUnobserved` line on its
+ * request — not observed, never "no dialog". A "No" sends no `PostToolUse`, so
+ * that confirmation closes only by going from the screen.
  *
  * ## State
  *
@@ -79,6 +90,7 @@ import {
   type ConfirmationResolvedBy,
   type ConfirmationSource,
   type HookRequestClosedLine,
+  type HookRequestDialogUnobservedLine,
   type LedgerAliveLine,
   type LedgerLineBase,
   type LedgerStartedLine,
@@ -92,7 +104,10 @@ import {
 
 /**
  * The paths this version records (design §6.4): PR 1 the poller's screen path,
- * PR 2 the hook route, the API adjudication and `/prompt-response`.
+ * PR 2 the hook route, the API adjudication and `/prompt-response`. PR 3 ties
+ * agy's request to its dialog but does not add `agy-link` here yet: tests of
+ * PR 1, PR 2 and PR 4 pin this list, and changing their expectations was left
+ * to a later change (design, revision 7).
  */
 export const AUTO_YES_LEDGER_RECORDED_PATHS: readonly AutoYesLedgerPath[] = ['screen', 'hook', 'api', 'prompt-response'];
 
@@ -123,6 +138,9 @@ const MAX_OPEN_HOOK_REQUESTS = 1024;
 
 /** Instances whose last hook request or CLI mode is remembered; the oldest is dropped past it. */
 const MAX_REMEMBERED_INSTANCES = 1024;
+
+/** agy calls whose `PostToolUse` has not come that are remembered; the oldest is dropped past it. */
+const MAX_REMEMBERED_CALLS = 1024;
 
 /** A CLI mode is a word of the CLI's own vocabulary; anything else is logged as `(other)`. */
 const CLI_MODE_WORD = /^[A-Za-z][A-Za-z-]{0,31}$/;
@@ -178,6 +196,8 @@ interface LedgerEntry {
   screenKey: string;
   /** API confirmations: their key in `apiDecisions`. */
   decisionKey?: string;
+  /** agy: the call it is tied to (PR 3). Set once; a different call is another confirmation. */
+  callId?: string;
   epoch: number;
   promptType: string;
   openedAt: number;
@@ -225,6 +245,8 @@ export interface LedgerHookDecision {
   /** The source's `permissionAllowSuppressesDialog`. */
   allowSuppressesDialog: boolean;
   promptType: string;
+  /** agy's call the request asked about (PR 3). */
+  callId?: string;
 }
 
 interface OpenHookRequest {
@@ -243,6 +265,22 @@ interface RecentHookRequest {
   at: number;
   outcome: 'allow' | 'abstained';
   abstainReason?: string;
+}
+
+/** An agy call a closed hook request asked about, until its `PostToolUse` (PR 3). */
+interface LedgerCall {
+  hookRequestId: string;
+  cliToolId: CLIToolType;
+  /** A confirmation on screen was tied to it. */
+  observed: boolean;
+}
+
+/** The confirmation a `PostToolUse` closed, while its dialog may still be read off a stale frame. */
+interface EndedCall {
+  callId: string;
+  screenKey: string;
+  /** The ledger tick that last read it. */
+  seenTick: number;
 }
 
 interface LedgerClock {
@@ -270,6 +308,13 @@ interface LedgerState {
   ticks: Map<string, number>;
   nextTick: number;
   pending: Map<string, PendingAttempt>;
+  /**
+   * `<compositeKey>\u0000<callId>` -> the agy call (PR 3). Optional, like
+   * `endedCalls`: a state made by an older bundle (hot reload) has neither.
+   */
+  calls?: Map<string, LedgerCall>;
+  /** compositeKey -> the confirmation the call's `PostToolUse` closed (PR 3). */
+  endedCalls?: Map<string, EndedCall>;
   errors: number;
   lastAliveAt: number | null;
   clock: LedgerClock | null;
@@ -344,6 +389,8 @@ function ledgerState(): LedgerState {
       ticks: new Map(),
       nextTick: 0,
       pending: new Map(),
+      calls: new Map(),
+      endedCalls: new Map(),
       errors: 0,
       lastAliveAt: null,
       clock: null,
@@ -373,6 +420,20 @@ function guarded<T>(fallback: T, body: (state: LedgerState, now: number) => T): 
     if (state !== undefined) state.errors += 1;
     return fallback;
   }
+}
+
+function callsOf(state: LedgerState): Map<string, LedgerCall> {
+  state.calls ??= new Map();
+  return state.calls;
+}
+
+function endedCallsOf(state: LedgerState): Map<string, EndedCall> {
+  state.endedCalls ??= new Map();
+  return state.endedCalls;
+}
+
+function callKey(compositeKey: string, callId: string): string {
+  return `${compositeKey}\u0000${callId}`;
 }
 
 function keyOf(scope: LedgerScope): string {
@@ -599,7 +660,7 @@ function openEntry(
   compositeKey: string,
   fields: { source: ConfirmationSource; screenKey: string; promptType: string; decisionKey?: string },
   now: number,
-  link: Pick<ConfirmationOpenedLine, 'afterHookAllow' | 'afterHookAbstain'> = {},
+  link: Pick<ConfirmationOpenedLine, 'afterHookAllow' | 'afterHookAbstain' | 'callId' | 'hookRequestId'> = {},
 ): LedgerEntry {
   makeRoom(state, compositeKey, now);
   state.nextConfirmation += 1;
@@ -612,6 +673,7 @@ function openEntry(
     source: fields.source,
     screenKey: fields.screenKey,
     ...(fields.decisionKey !== undefined ? { decisionKey: fields.decisionKey } : {}),
+    ...(link.callId !== undefined ? { callId: link.callId } : {}),
     epoch: getEnterFallbackSessionEpoch(compositeKey),
     promptType: fields.promptType,
     openedAt: now,
@@ -691,6 +753,10 @@ export function endLedgerTick(scope: LedgerScope, tick: number): void {
     state.ticks.delete(compositeKey);
     const entry = currentEntry(state, compositeKey);
     if (entry !== undefined && entry.observedTick !== tick) closeEntry(state, entry, now, { kind: 'gone' });
+    // A tick that read the screen and did not see the dialog of a call that
+    // ended: it is off the screen now, and the next sighting is a new one.
+    const ended = endedCallsOf(state).get(compositeKey);
+    if (ended !== undefined && ended.seenTick !== tick) endedCallsOf(state).delete(compositeKey);
   });
 }
 
@@ -699,15 +765,29 @@ export function endLedgerTick(scope: LedgerScope, tick: number): void {
  * session continues the open one (back to `present` if it was unobservable);
  * anything else closes it as gone and opens a new one.
  *
+ * agy (PR 3, design §2.1・§2.4): `options.callId` is the call the receipt that
+ * let the dialog through asked about. The hook's identity comes before the
+ * screen's: a different call is another confirmation even under the same
+ * screen key (the same command asked twice, no clear read between). A
+ * confirmation with no call yet takes this one. The dialog of a call whose
+ * `PostToolUse` already closed it is not reopened while it is still read.
+ *
  * @param screenKey - `partialAnswerScreenKey` of the prompt (kept in memory, never logged)
  */
-export function observeLedgerScreen(scope: LedgerScope, screenKey: string, promptType: string): void {
+export function observeLedgerScreen(
+  scope: LedgerScope,
+  screenKey: string,
+  promptType: string,
+  options: { callId?: string } = {},
+): void {
   guarded(undefined, (state, now) => {
     const compositeKey = keyOf(scope);
     const epoch = getEnterFallbackSessionEpoch(compositeKey);
     const tick = state.ticks.get(compositeKey) ?? 0;
+    const callId = options.callId;
     let entry = currentEntry(state, compositeKey);
-    if (entry !== undefined && (entry.screenKey !== screenKey || entry.epoch !== epoch)) {
+    const otherCall = entry !== undefined && callId !== undefined && entry.callId !== undefined && entry.callId !== callId;
+    if (entry !== undefined && (entry.screenKey !== screenKey || entry.epoch !== epoch || otherCall)) {
       closeEntry(
         state,
         entry,
@@ -717,16 +797,28 @@ export function observeLedgerScreen(scope: LedgerScope, screenKey: string, promp
       entry = undefined;
     }
     if (entry === undefined) {
+      const ended = endedCallsOf(state).get(compositeKey);
+      if (ended !== undefined && ended.screenKey === screenKey && (callId === undefined || callId === ended.callId)) {
+        ended.seenTick = tick;
+        return;
+      }
+      endedCallsOf(state).delete(compositeKey);
       const opened = openEntry(
         state,
         scope,
         compositeKey,
         { source: 'screen', screenKey, promptType },
         now,
-        hookLink(state, compositeKey, now),
+        { ...hookLink(state, compositeKey, now), ...callLink(state, compositeKey, callId) },
       );
       state.current.set(compositeKey, opened.id);
       return;
+    }
+    if (callId !== undefined && entry.callId === undefined) {
+      // Seen before the receipt was judged for it; tied now, so its call's
+      // `PostToolUse` closes it and the request is not "unobserved".
+      entry.callId = callId;
+      callLink(state, compositeKey, callId);
     }
     if (entry.presence === 'unobservable') {
       if (entry.unobservableSince !== null) entry.unobservableMs += Math.max(0, now - entry.unobservableSince);
@@ -742,6 +834,22 @@ export function observeLedgerScreen(scope: LedgerScope, screenKey: string, promp
     }
     entry.observedTick = tick;
   });
+}
+
+/**
+ * Tie a screen confirmation to agy's call: marks the call observed and gives
+ * the `opened` line its `callId` and the request's id (PR 3).
+ */
+function callLink(
+  state: LedgerState,
+  compositeKey: string,
+  callId: string | undefined,
+): Pick<ConfirmationOpenedLine, 'callId' | 'hookRequestId'> {
+  if (callId === undefined) return {};
+  const call = callsOf(state).get(callKey(compositeKey, callId));
+  if (call === undefined) return { callId };
+  call.observed = true;
+  return { callId, hookRequestId: call.hookRequestId };
 }
 
 /**
@@ -1049,7 +1157,18 @@ export function closeLedgerHookRequest(
       ...(outcome === 'abstained' && abstainReason !== undefined ? { abstainReason } : {}),
       allowSuppressesDialog: decision?.allowSuppressesDialog ?? false,
       replyMs: Math.max(0, now - request.receivedAt),
+      ...(decision?.callId !== undefined ? { callId: decision.callId } : {}),
     });
+    // PR 3: a call the request opened no confirmation for waits for the
+    // screen's confirmation to be tied to it, or for its `PostToolUse`.
+    if (request.compositeKey !== null && decision?.callId !== undefined && confirmation === null) {
+      rememberBounded(
+        callsOf(state),
+        callKey(request.compositeKey, decision.callId),
+        { hookRequestId, cliToolId: request.cliToolId, observed: false },
+        MAX_REMEMBERED_CALLS,
+      );
+    }
     if (request.compositeKey !== null) {
       rememberBounded(
         state.lastHookRequest,
@@ -1058,6 +1177,42 @@ export function closeLedgerHookRequest(
         MAX_REMEMBERED_INSTANCES,
       );
     }
+  });
+}
+
+/**
+ * agy's call `callId` ended: its `PostToolUse` came (design §2.4, §2.6, PR 3).
+ * The screen confirmation tied to it closes as gone, if it had not gone from
+ * the screen first (who answered is not known: `unknown`). A call no
+ * confirmation was ever tied to writes `dialogUnobserved` on its hook request
+ * — and opens nothing. A call this ledger never heard asked about (a restart
+ * in between, a body without `stepIdx`) writes nothing; so does a second
+ * `PostToolUse` for the same call.
+ */
+export function noteLedgerToolCallEnded(scope: LedgerScope, callId: string | null | undefined): void {
+  if (callId === null || callId === undefined) return;
+  guarded(undefined, (state, now) => {
+    const compositeKey = keyOf(scope);
+    for (const entry of [...state.entries.values()]) {
+      if (entry.compositeKey !== compositeKey || entry.callId !== callId) continue;
+      const wasCurrent = state.current.get(compositeKey) === entry.id;
+      closeEntry(state, entry, now, { kind: 'gone' });
+      if (wasCurrent) {
+        endedCallsOf(state).set(compositeKey, { callId, screenKey: entry.screenKey, seenTick: state.ticks.get(compositeKey) ?? 0 });
+      }
+    }
+    const key = callKey(compositeKey, callId);
+    const call = callsOf(state).get(key);
+    if (call === undefined) return;
+    callsOf(state).delete(key);
+    if (call.observed) return;
+    emit<HookRequestDialogUnobservedLine>(state, AUTO_YES_LEDGER_EVENTS.hookRequestDialogUnobserved, {
+      atMs: now,
+      hookRequestId: call.hookRequestId,
+      cliToolId: call.cliToolId,
+      callId,
+      dialogUnobserved: true,
+    });
   });
 }
 

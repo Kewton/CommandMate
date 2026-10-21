@@ -46,6 +46,7 @@ import { applyAgentStopEvent } from '@/lib/hooks/agent-event-service';
 import {
   applyAgentEventToState,
   dropDuplicateAgentEvent,
+  noteToolCallEndedInLedger,
   readAgentEventRequest,
   readEventDetail,
   recordQuestionIfAsked,
@@ -149,6 +150,10 @@ export async function POST(request: NextRequest) {
     warnIfCodexInstanceNotRunning(ctx, logger);
 
     recordQuestionIfAsked(ctx, payload, logger);
+
+    // Issue #3820 (PR 3): agy's `PostToolUse` ends the call the Auto-Yes
+    // ledger tied a confirmation to. Recording only.
+    noteToolCallEndedInLedger(ctx, payload);
 
     if (event !== 'stop') {
       // Recorded for operators wiring hooks up; no state change yet (#1549).

@@ -97,6 +97,17 @@ develop の PR 4（#3834）をこのブランチに取り込んで分かった�
 | `/prompt-response` の人の回答（basis `human`）も `answeredAtClose` の確認なので、`answered`（Auto-Yes の回答）に入る | `human` で閉じた確認は `answered` に数えず **`answeredByHuman`** に数える。ブラウザの自動回答（`browser`）と API の allow（`L1`）は `answered`。`records` の `answered` は根拠の段ごとの内訳のまま（`basis: 'human'` の行が残る）。試行の数（`attemptsOk` ほか）は人の送信も含む | §6.2 |
 | PR 2 の `end: 'stopped'` と経路 `prompt-response` | 集計は区間を `endedAtMs` で終えるので、OFF の後の時間は数えない（API の確認は開いたまま checkpoint に出るが、区間を持たない）。PR 2 の記録は `screen`・`hook`・`api`・`prompt-response` を出すので、`pathsMissing` は `agy-link` だけになる（§6.4 の表のとおり）。PR 4 のテストが PR 1 の経路で固定していた `pathsMissing` の期待値は、この値に直した | §4.3・§6.4 |
 
+### 改訂 7: PR 3（agy の `stepIdx` と結び付け）の実装で直したこと
+
+| 食い違い | 決定と反映 | 節 |
+|---|---|---|
+| `callId` を agy の解析（`parseAntigravityPermissionRequest()`）の戻り値に足すと、取り込んだ fixture の解析結果を丸ごと固定している既存のテスト（`antigravity-permission-1779.test.ts`）の期待値が変わる | `callId` は `PermissionRequestPayload` の任意の欄として足し、値は **route が本文から読んで payload に添える**（`readAntigravityPermissionCallId()`、`src/lib/hooks/sources/antigravity/source.ts`）。解析の戻り値（裁定が判断に使うもの）は変えない。`stepIdx` が無い・数でない本文は `callId` なし | §2.4 |
+| PR 3 で生存の行の `paths` に `agy-link` を足す（§6.4 の表）と、`paths` を固定している PR 1・PR 2・PR 4 のテスト（3 か所）の期待値が変わる。この PR の契約は既存のテストの期待値を変えない | **この PR では `agy-link` を `paths` に足さない**（`AUTO_YES_LEDGER_RECORDED_PATHS` は PR 2 のまま）。集計は引き続き `pathsMissing: agy-link`・`partial: 1` を出す。結び付けの記録（`callId`・`dialogUnobserved`）はこの PR から出る。`agy-link` を足すのは、それらのテストの期待値を直す後の変更（PR 5 か別の契約）とし、§6.4 の「＋PR 3」の行はその変更が入った時点のことと読む | §6.4 |
+| 同じ画面キーのまま別の呼び出しの確認に替わった（同じコマンドの 2 回目、`gone` の tick を挟まない） | 画面キーより hook の識別を優先する（§2.1）: 開いている確認の `callId` と違う `callId` で見えたら、前の確認を `gone` で閉じて新しく開く。`callId` の無い確認に後から `callId` が来たら、その確認に結ぶ（行は足さない。`opened` の行には付かない） | §2.1・§2.4 |
+| `PostToolUse` で閉じた後も、古いフレームに同じ確認が読めることがある（capture の遅れ） | 呼び出しの終わりで閉じた確認は、同じ画面キー（と同じ `callId`）が続く間は開き直さない。読めた tick が途切れたら忘れる | §2.4 |
+| `dialogUnobserved` を要求の行に付ける時点 | 要求の行（`auto-yes-hook-request-closed`）は返事を書いた時点で出るので、`PostToolUse` より先に出る。`dialogUnobserved` は **`auto-yes-hook-request-dialog-unobserved` の行**（`hookRequestId`・`callId`）として後から出す（§3.3 にあった書き方）。同じ呼び出しの 2 回目の `PostToolUse`、要求を聞いていない呼び出し（再起動の後など）は何も出さない | §2.6・§3.3 |
+| 中継が `stepIdx` を足す範囲 | `post_tool_use` のうち **`--tool antigravity` のときだけ**、数（15 桁まで）として足す。ほかのツール・イベントの本文は変えない（#3330・#3450 の claude だけの欄と同じ書き方） | §2.4 |
+
 ---
 
 ## 0. 用語

@@ -590,6 +590,9 @@ function recordHookRequestInLedger(
     ...(decision.behavior === 'allow' ? {} : { abstainReason: decision.reason }),
     allowSuppressesDialog,
     promptType: PERMISSION_REQUEST_PROMPT_TYPE,
+    // PR 3 (design §2.4): agy's call, tying the request to the screen's
+    // confirmation and to the call's `PostToolUse`.
+    ...(payload?.callId ? { callId: payload.callId } : {}),
   });
   if (payload?.permissionMode) {
     observeLedgerCliMode(session, payload.permissionMode);

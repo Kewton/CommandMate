@@ -72,6 +72,34 @@ export interface PermissionRequestPayload {
    * instead of sniffing for a `patch` key a real tool could one day send.
    */
   toolInputNormalization?: ToolInputNormalization | null;
+  /**
+   * One tool call's identity, `<conversationId>:<stepIdx>` (Issue #3820,
+   * design `docs/design/auto-yes-measurement-3820.md` §2.1・§2.4). Only agy's
+   * `PreToolUse` carries a `stepIdx`; every other payload, and an agy body
+   * without a numeric one, has none. Recorded by the Auto-Yes ledger to tie
+   * the request to the dialog and the `PostToolUse` of the same call — never a
+   * decision input.
+   */
+  callId?: string | null;
+}
+
+/** A conversation id a call id may carry: an opaque id, no path or prose. */
+const CALL_ID_CONVERSATION = /^[A-Za-z0-9._-]{1,128}$/;
+
+/**
+ * `<conversationId>:<stepIdx>` (Issue #3820, design §2.1): `stepIdx` is unique
+ * within a conversation and starts again when agy is relaunched, so it is
+ * paired with the conversation. Null unless `stepIdx` is a non-negative safe
+ * integer and the conversation id an opaque id — a body without them is read
+ * as before, with no call id.
+ *
+ * @param conversationId - agy's `conversationId` (the relay's `sessionId`)
+ * @param stepIdx - The body's `stepIdx`, whatever it was
+ */
+export function buildHookCallId(conversationId: string | null | undefined, stepIdx: unknown): string | null {
+  if (typeof conversationId !== 'string' || !CALL_ID_CONVERSATION.test(conversationId)) return null;
+  if (typeof stepIdx !== 'number' || !Number.isSafeInteger(stepIdx) || stepIdx < 0) return null;
+  return `${conversationId}:${stepIdx}`;
 }
 
 function readString(source: Record<string, unknown>, key: string): string | null {
