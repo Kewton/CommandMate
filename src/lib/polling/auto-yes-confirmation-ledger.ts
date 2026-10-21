@@ -104,12 +104,17 @@ import {
 
 /**
  * The paths this version records (design §6.4): PR 1 the poller's screen path,
- * PR 2 the hook route, the API adjudication and `/prompt-response`. PR 3 ties
- * agy's request to its dialog but does not add `agy-link` here yet: tests of
- * PR 1, PR 2 and PR 4 pin this list, and changing their expectations was left
- * to a later change (design, revision 7).
+ * PR 2 the hook route, the API adjudication and `/prompt-response`, PR 3 the
+ * link of agy's request to its dialog (`agy-link`). With all five the daily
+ * count is no longer partial for want of a path.
  */
-export const AUTO_YES_LEDGER_RECORDED_PATHS: readonly AutoYesLedgerPath[] = ['screen', 'hook', 'api', 'prompt-response'];
+export const AUTO_YES_LEDGER_RECORDED_PATHS: readonly AutoYesLedgerPath[] = [
+  'screen',
+  'hook',
+  'api',
+  'prompt-response',
+  'agy-link',
+];
 
 /**
  * A screen confirmation opened this soon after a hook request closed on the
