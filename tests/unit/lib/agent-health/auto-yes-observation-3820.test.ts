@@ -253,6 +253,14 @@ describe('[#3820 PR 4] measured or not (design §4.4)', () => {
     expect(evaluateMetric(result, null)).toMatchObject({ status: 'skip', value: null });
   });
 
+  it('skips a window whose only alive line is on its first boundary (it stands for the hour before)', () => {
+    const id = confirmationId();
+    const result = measure([...alive(S, S), opened(id, S + H), started(id, 1, S + H, 'type-not-allowed')]);
+    expect(result).toMatchObject({ metricId: 'auto-yes-observation', status: 'skip' });
+    // one more boundary inside the window is an hour measured
+    expect(measureOk(alive(S, S + H)).details).toMatchObject({ coveredMs: H });
+  });
+
   it('counts half a day of alive lines as half a day measured', () => {
     const half = alive(S + 12 * H, E, { startedAt: S + 12 * H });
     expect(measureOk(half).details).toMatchObject({ windowMs: 24 * H, coveredMs: 12 * H, gapMs: 12 * H, partial: 1 });
@@ -393,8 +401,8 @@ describe('[#3820 PR 4] withheld time inside the window (design §4.3)', () => {
       withheldMsMedian: 3 * MIN,
     });
     expect(result.records!.filter((r) => r.kind === 'withheld')).toEqual([
-      { kind: 'withheld', tool: 'claude', reason: 'deny-pattern', intervals: 1, totalMs: 3 * MIN, maxMs: 3 * MIN, reasonChanged: 1 },
-      { kind: 'withheld', tool: 'claude', reason: 'type-not-allowed', intervals: 1, totalMs: 5 * MIN, maxMs: 5 * MIN, reasonChanged: 0 },
+      { kind: 'withheld', tool: 'claude', reason: 'deny-pattern', intervals: 1, totalMs: 3 * MIN, maxMs: 3 * MIN, reasonChanged: 1, untimed: 0 },
+      { kind: 'withheld', tool: 'claude', reason: 'type-not-allowed', intervals: 1, totalMs: 5 * MIN, maxMs: 5 * MIN, reasonChanged: 0, untimed: 0 },
     ]);
   });
 
@@ -449,7 +457,7 @@ describe('[#3820 PR 4] withheld time inside the window (design §4.3)', () => {
     const result = measureOk([...FULL_DAY, ...checkpoints]);
     expect(result.details).toMatchObject({ withheldMsTotal: 24 * H, openAtWindowEnd: 1, withheldConfirmations: 1 });
     expect(result.records!.filter((r) => r.kind === 'withheld')).toEqual([
-      { kind: 'withheld', tool: 'antigravity', reason: 'no-hook-receipt', intervals: 1, totalMs: 24 * H, maxMs: 24 * H, reasonChanged: 0 },
+      { kind: 'withheld', tool: 'antigravity', reason: 'no-hook-receipt', intervals: 1, totalMs: 24 * H, maxMs: 24 * H, reasonChanged: 0, untimed: 0 },
     ]);
   });
 
@@ -463,8 +471,8 @@ describe('[#3820 PR 4] withheld time inside the window (design §4.3)', () => {
       checkpoint(id, E, { n: 2, startedAt: E - 20 * MIN, reason: 'answered-recently' }),
     ]);
     expect(result.records!.filter((r) => r.kind === 'withheld')).toEqual([
-      { kind: 'withheld', tool: 'claude', reason: 'answered-recently', intervals: 1, totalMs: 20 * MIN, maxMs: 20 * MIN, reasonChanged: 0 },
-      { kind: 'withheld', tool: 'claude', reason: 'type-not-allowed', intervals: 1, totalMs: 23.5 * H, maxMs: 23.5 * H, reasonChanged: 0 },
+      { kind: 'withheld', tool: 'claude', reason: 'answered-recently', intervals: 1, totalMs: 20 * MIN, maxMs: 20 * MIN, reasonChanged: 0, untimed: 0 },
+      { kind: 'withheld', tool: 'claude', reason: 'type-not-allowed', intervals: 1, totalMs: 23.5 * H, maxMs: 23.5 * H, reasonChanged: 0, untimed: 0 },
     ]);
     expect(result.details).toMatchObject({ withheldIntervals: 2, withheldConfirmations: 1 });
   });
@@ -489,6 +497,29 @@ describe('[#3820 PR 4] withheld time inside the window (design §4.3)', () => {
       coveredMs: 23.5 * H,
       gapMs: 0.5 * H,
     });
+  });
+
+  it('does not time an interval whose start is unknown (only a reason change in the window), and counts it untimed', () => {
+    const [a, b] = [confirmationId(), confirmationId()];
+    const result = measureOk([
+      ...FULL_DAY,
+      // `started` lost (before the window, or missing from the log); a reason change carries no start
+      reasonChanged(a, 1, S + 6 * H, 'type-not-allowed', 'deny-pattern'),
+      // a timed interval next to it is unaffected
+      started(b, 1, S + 8 * H, 'deny-pattern'),
+      ended(b, 1, S + 8 * H, S + 8 * H + 2 * MIN, 'deny-pattern'),
+    ]);
+    expect(result.value).toBe(2);
+    expect(result.details).toMatchObject({
+      withheldMsTotal: 2 * MIN,
+      withheldIntervals: 1,
+      withheldIntervalsUntimed: 1,
+      withheldConfirmations: 2,
+      withheldMsMax: 2 * MIN,
+    });
+    expect(result.records!.filter((r) => r.kind === 'withheld')).toEqual([
+      { kind: 'withheld', tool: 'claude', reason: 'deny-pattern', intervals: 1, totalMs: 2 * MIN, maxMs: 2 * MIN, reasonChanged: 1, untimed: 1 },
+    ]);
   });
 
   it('gives no time to hook requests that abstained', () => {

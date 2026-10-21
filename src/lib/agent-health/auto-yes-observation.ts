@@ -150,7 +150,10 @@ const sortedRecords = (map: Map<string, MetricRecord>): MetricRecord[] =>
 interface Interval {
   confirmationId: string;
   tool: string;
-  /** `withhold-ended`'s `startedAtMs` → `withhold-started`'s → a checkpoint's `intervalStartedAtMs`. */
+  /**
+   * `withhold-ended`'s `startedAtMs` → `withhold-started`'s → a checkpoint's
+   * `intervalStartedAtMs`. All null: the start is unknown and the interval is untimed.
+   */
   endedStart: number | null;
   startedStart: number | null;
   checkpointStart: number | null;
@@ -183,13 +186,6 @@ export function measureAutoYesObservation(
         (a.raw < b.raw ? -1 : a.raw > b.raw ? 1 : 0)
     );
   const alive = lines.filter((line) => line.event === EV.alive);
-  if (alive.length === 0) {
-    return {
-      metricId: 'auto-yes-observation',
-      status: 'skip',
-      reason: '窓の中に Auto-Yes の記録の生存の行（auto-yes-ledger-alive）が無い（計測なし。0 件とは扱わない）',
-    };
-  }
 
   // ── coverage (design §4.4, §6.4) ──
   const spansByPath = new Map<string, Array<[number, number]>>(AUTO_YES_LEDGER_PATHS.map((path) => [path, []]));
@@ -207,6 +203,15 @@ export function measureAutoYesObservation(
   }
   const coveredByPath = AUTO_YES_LEDGER_PATHS.map((path) => [path, unionMs(spansByPath.get(path) ?? [])] as const);
   const coveredMs = Math.max(...coveredByPath.map(([, ms]) => ms));
+  // An `alive` line stands for the span before it: one on the window's first
+  // boundary (or none at all) measured nothing inside the window.
+  if (coveredMs === 0) {
+    return {
+      metricId: 'auto-yes-observation',
+      status: 'skip',
+      reason: '窓の中に Auto-Yes の記録の計測区間が無い（生存の行 auto-yes-ledger-alive が窓の中を覆っていない。計測なし。0 件とは扱わない）',
+    };
+  }
   const pathsMissing = coveredByPath.filter(([, ms]) => ms < coveredMs || ms === 0).map(([path]) => path);
 
   // ── errors the ledger swallowed inside the window, per process ──
@@ -355,12 +360,8 @@ export function measureAutoYesObservation(
   const withheldRecords = new Map<string, MetricRecord>();
   const lengths: number[] = [];
   const withheldConfirmations = new Set<string>();
+  let withheldIntervalsUntimed = 0;
   for (const interval of intervals.values()) {
-    const start = interval.endedStart ?? interval.startedStart ?? interval.checkpointStart ?? s;
-    const end = interval.endedAt ?? interval.lastAt;
-    const ms = Math.max(0, Math.min(end, e) - Math.max(start, s));
-    lengths.push(ms);
-    withheldConfirmations.add(interval.confirmationId);
     const reason = interval.endedReason ?? interval.reason;
     const record = withheldRecords.get(`${interval.tool}\u0000${reason}`) ?? {
       kind: 'withheld',
@@ -370,11 +371,25 @@ export function measureAutoYesObservation(
       totalMs: 0,
       maxMs: 0,
       reasonChanged: 0,
+      untimed: 0,
     };
+    withheldConfirmations.add(interval.confirmationId);
+    if (interval.reasonChanged) record.reasonChanged = (record.reasonChanged as number) + 1;
+    const start = interval.endedStart ?? interval.startedStart ?? interval.checkpointStart;
+    if (start === null) {
+      // Only a `withhold-reason-changed` line, which has no start: the time is
+      // unknown, so it is counted and not timed — never timed from `s`.
+      withheldIntervalsUntimed++;
+      record.untimed = (record.untimed as number) + 1;
+      withheldRecords.set(`${interval.tool}\u0000${reason}`, record);
+      continue;
+    }
+    const end = interval.endedAt ?? interval.lastAt;
+    const ms = Math.max(0, Math.min(end, e) - Math.max(start, s));
+    lengths.push(ms);
     record.intervals = (record.intervals as number) + 1;
     record.totalMs = (record.totalMs as number) + ms;
     record.maxMs = Math.max(record.maxMs as number, ms);
-    if (interval.reasonChanged) record.reasonChanged = (record.reasonChanged as number) + 1;
     withheldRecords.set(`${interval.tool}\u0000${reason}`, record);
   }
   const withheldMsTotal = lengths.reduce((sum, ms) => sum + ms, 0);
@@ -445,6 +460,7 @@ export function measureAutoYesObservation(
       resolvedByUnknown: count(resolvedBy, 'unknown'),
       withheldConfirmations: withheldConfirmations.size,
       withheldIntervals: lengths.length,
+      withheldIntervalsUntimed,
       withheldMsTotal,
       withheldMsMedian: stat(50),
       withheldMsP90: stat(90),

@@ -136,8 +136,8 @@ describe('[#3820 PR 4] the aggregation and the ledger agree', () => {
     expect(result.records).toEqual(
       expect.arrayContaining([
         { kind: 'answered', tool: 'claude', basis: 'L3', count: 1 },
-        { kind: 'withheld', tool: 'claude', reason: 'type-not-allowed', intervals: 1, totalMs: 10_000, maxMs: 10_000, reasonChanged: 0 },
-        { kind: 'withheld', tool: 'claude', reason: 'no-hook-receipt', intervals: 1, totalMs: 20 * 60 * 1000, maxMs: 20 * 60 * 1000, reasonChanged: 0 },
+        { kind: 'withheld', tool: 'claude', reason: 'type-not-allowed', intervals: 1, totalMs: 10_000, maxMs: 10_000, reasonChanged: 0, untimed: 0 },
+        { kind: 'withheld', tool: 'claude', reason: 'no-hook-receipt', intervals: 1, totalMs: 20 * 60 * 1000, maxMs: 20 * 60 * 1000, reasonChanged: 0, untimed: 0 },
       ])
     );
     expect(JSON.stringify(result)).not.toContain('wt-secret');

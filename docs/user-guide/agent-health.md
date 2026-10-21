@@ -445,7 +445,7 @@ tmux -L cm-agent-health kill-server
   - **窓**: 集計の時刻の直前の UTC の時刻の境目（記録が 1 時間ごとに生存の行と checkpoint を出す時刻）で終わる 24 時間。
     境目から集計の時刻までの未確定の末尾は数えず、翌日の窓に入る（翌日の窓はこの窓の終わりから始まる）。そのため、この指標だけは
     共有の窓の始まりより 1 時間前までの行も読む（ほかの指標の数え方は変わらない）
-  - **計測の有無**: 窓の中に生存の行（`auto-yes-ledger-alive`）が 1 つも無ければ skip（計測なし。0 件とは出さない）。
+  - **計測の有無**: 窓の中に計測区間が無ければ（`coveredMs` が 0）skip（計測なし。0 件とは出さない）。生存の行（`auto-yes-ledger-alive`）はその直前の 1 時間を表すので、窓の始まりの境目にある生存の行だけでは計測したことにならない。
     `coveredMs` は生存の行の経路ごとの計測区間を窓で切って足した時間（最も長い経路の値）、`gapMs` は窓との差、
     `coveredMsByPath` は経路ごとの内訳（`screen 86400000 / hook 0 / …`）。`pathsMissing` は計測が `coveredMs` より短い経路。
     `partial` は欠けた経路・欠損の時間・窓の中で増えた記録の例外（`ledgerErrors`）のどれかがあると `1`（部分計測）。
@@ -453,7 +453,8 @@ tmux -L cm-agent-health kill-server
     基準値として比べるのは、同じ経路がそろった日どうしだけ
   - **停止の時間**（= `value`、分）: 停止の区間ごとに、サーバーが計算した始まり・終わりの時刻（無ければ最後の checkpoint の時刻）を
     窓で切って足す。行の間隔から推定しない。前日に始まった区間も窓の中の checkpoint だけで内訳に入る。
-    `withheldMsTotal`・`withheldMsMedian`・`withheldMsP90`・`withheldMsMax`、`withheldConfirmations`・`withheldIntervals`
+    `withheldMsTotal`・`withheldMsMedian`・`withheldMsP90`・`withheldMsMax`、`withheldConfirmations`・`withheldIntervals`。開始の行が欠けて始まりを復元できない区間（理由変更の行には開始の時刻が無い）は時間を足さず、
+    `withheldIntervalsUntimed`（時間不明の区間の数）に件数だけ数える
   - **確認**: `confirmations`（窓の中で開いていた）・`confirmationsClosed`・`openAtWindowEnd`（窓の終わりの checkpoint にある）・
     `lostOnRestart`（閉じる行も窓の終わりの checkpoint も無い。再起動などで記録が途切れた。時間は最後の行までを数える）。
     解消の内訳 `resolvedAfterAnswer` ほか、`resolvedByAuto` / `resolvedByHumanUi` / `resolvedByUnknown`
@@ -463,7 +464,7 @@ tmux -L cm-agent-health kill-server
     `cliModeObserved`（CLI 自身の許可のモードが見えたインスタンスの数）と `cliModeUnknownInstances`（窓の中で識別できたインスタンスのうち
     見えていない数。識別できたインスタンスが無ければ `null`）。どれも CommandMate の回答とは足さない
   - `records`: `answered`（ツール・根拠の段ごとの回答数）・`attempt`（ツール・根拠の段・結果ごと）・`withheld`（ツール・区間の最後の理由ごとの
-    区間の数・合計・最大と、理由が変わった区間の数 `reasonChanged`）・`hook-abstained`（ツール・理由ごと）・`cli-mode`（ツール・モードごとの
+    区間の数・合計・最大と、理由が変わった区間の数 `reasonChanged`、時間不明の区間の数 `untimed`）・`hook-abstained`（ツール・理由ごと）・`cli-mode`（ツール・モードごとの
     インスタンス数。見えないものは `unknown`）
   - 公開リポジトリのため、載るのは件数・時間・ツール名・根拠の段・理由のコード・経路・モードの語彙だけ。worktree・インスタンス・確認・区間・
     hook の要求の id は行の突き合わせにだけ使い、写さない。語彙（`auto-yes-confirmation-ledger-types.ts`）に無い値は `(other)` にまとめる

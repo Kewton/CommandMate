@@ -55,6 +55,8 @@
 | `pathsMissing` を「窓より短い経路」にすると、欠損の時間がある日は `screen` まで欠けた経路に入る | `pathsMissing` は **`coveredMs` より短い経路**（途中から加わった・欠けた経路）。欠損は `gapMs` で表す。`partial` はどちらか（と `ledgerErrors` の増加）で `1` | §6.2・§6.4 |
 | `lostOnRestart` は「別の `bootId` が現れた」場合だけだと、サーバーが止まったまま窓が終わった確認がどこにも数えられない | 閉じる行も窓の終わりの checkpoint も無い確認を、すべて `lostOnRestart` に数える（時間は最後の行までを数える） | §4.3・§6.2 |
 | `resolution` の `resolved-by-reply`・`resolved-before-decision` の欄が §6.2 に無い | `resolvedByReply`・`resolvedBeforeDecision` を足した | §6.2 |
+| 開始の行が欠け、理由変更の行（開始の時刻を持たない）だけが残った区間を窓の先頭から数えると、根拠の無い時間が足される（整合性レビュー P2） | 開始を復元できない区間は時間を足さず、`withheldIntervalsUntimed`（`records` は `untimed`）に件数だけ数える | §4.3・§6.2 |
+| 生存の行があるだけで ok にすると、窓の始まりの境目の生存の行（直前の 1 時間を表す）だけで「停止 0 分」を正常値として出す（整合性レビュー P2） | skip の判定を「窓の中に計測区間がある（`coveredMs` > 0）か」にした | §4.4・§6.1 |
 | 集計が語彙を見分けるには型ではなく値が要る | `auto-yes-confirmation-ledger-types.ts` に語彙の値の一覧（経路・根拠の段・理由・結果・解消・hook の棄権の理由・モード）を足した。型の union と食い違うとコンパイルで落ちる書き方 | §6.1 |
 
 ---
@@ -354,7 +356,7 @@ C の欠点への手当て:
 - `auto-yes-ledger-started`（プロセスで 1 回）と `auto-yes-ledger-alive`（1 時間ごと、checkpoint と同じ格子）を出す。生存の行は「その区間、記録のモジュールが動いていた」の意味で、`bootId` と経路ごとの計測区間 `segments` を持つ
 - 集計は生存の行の `segments` を経路ごとに足して **`coveredMsByPath`**（窓で切る）とし、窓の長さ `windowMs` との差を欠損の時間として出す。**生存の行 1 つで 1 時間を計測済みにしない**: 区間の始まりは同じ `bootId` の前の生存の行か記録の開始で、途中から始まったプロセスはその時刻から数える。比率・中央値などは計測があった時間を分母にする
 - 比べられるか: 経路ごとの計測の時間が窓と違う（途中で経路が増えた・欠損がある）・`ledgerErrors` が窓の中で増えた、のどれかなら `partial: true`
-- 窓の中に生存の行が 1 つも無ければ、`auto-yes-observation` は **skip（計測なし）** にして 0 件と出さない
+- 窓の中に計測区間が無ければ（`coveredMs` が 0）、`auto-yes-observation` は **skip（計測なし）** にして 0 件と出さない。生存の行は直前の区間を表すので、窓の始まりの境目にある生存の行だけでは窓の中を計測したことにならない（改訂 3）
 - 生存の行が来ない原因（ログ水準が `warn` 以上、記録のモジュールが無い版、ログの欠損）は区別しない。どれも「計測なし」
 - 生存と checkpoint の時計は、**記録のモジュールが最初に使われたとき**に 1 つだけ張る（次の時刻の境目までの `setTimeout` を繰り返し、`unref` してプロセスの終了を妨げない）。時計は `globalThis` の状態に置き、再読み込み・2 回目の呼び出しで二重にしない。`server.ts` は変えない（評価時の import を増やすと Next の起動が壊れる前例がある）ので、最初の確認より前の時間は計測なしになる。新しいプロセスは起動しない
 
@@ -393,7 +395,7 @@ C の欠点への手当て:
 
 - `METRIC_IDS` に足し、category は `process`（`src/lib/agent-health/metrics-types.ts:12-30,58`）。`process` は fail にならず、`candidates` は常に空（Issue を立てない）。何を候補にするかは、2 週間ほど数字を見てから別の Issue で決める（`hook-observation` と同じ扱い: `docs/user-guide/agent-health.md:421-422`）
 - 読むのは metrics が既に 1 回読んでいる本番ログ（`metrics-perf.ts` の `addLogLine` が行を配る。`hook-observation` は 155 行で受けている）。同じ読み込みに `addAutoYesObservationLine()` を足す。行は集めてから `atMs` で並べ直して状態を作る（§4.3）
-- 窓は直近 24 時間（`PERF_LOG_WINDOW_HOURS`）。窓の中に生存の行が無いときは skip（§4.4）
+- 窓は直近 24 時間（`PERF_LOG_WINDOW_HOURS`）。窓の中に計測区間が無いときは skip（§4.4）
 - 結果は他の指標と同じく `metrics/<date>.json` に残る（長期の推移の置き場所、§3.2）
 - 公開リポジトリなので、`details` と `records` に載せるのは**件数・時間・ツール名・根拠の段・理由のコード（列挙された語彙だけ）・モードの語彙**。worktree・インスタンス・確認の id・コマンド・質問の文面は写さない。語彙に無い値は `(other)` にまとめる（`metrics-perf.ts` の扱いと同じ）
 
@@ -411,7 +413,7 @@ C の欠点への手当て:
 | `attemptsOk` / `attemptsPartial` / `attemptsNoKeysSent` / `attemptsFailed` / `attemptsLate` | 試行の結果別の数（遅れて戻った結果を含む。`attemptsLate` はその内数） |
 | `resolvedAfterAnswer` / `resolvedWhileWithheld` / `resolvedByReply` / `resolvedBeforeDecision` / `unresolvedAfterSend` / `goneWhileUnobservable` / `abandoned` | §2.6 の `resolution` 別 |
 | `resolvedByAuto` / `resolvedByHumanUi` / `resolvedByUnknown` | §2.6 の `resolvedBy` 別 |
-| `withheldConfirmations` / `withheldIntervals` | 窓の中に停止の区間があった確認の数・区間の数 |
+| `withheldConfirmations` / `withheldIntervals` / `withheldIntervalsUntimed` | 窓の中に停止の区間があった確認の数・時間を切り出せた区間の数・開始を復元できない区間の数（理由変更の行だけが残った。時間は足さない。改訂 3） |
 | `withheldMsTotal` / `withheldMsMedian` / `withheldMsP90` / `withheldMsMax` | 窓の中に切り出した停止の時間（§4.3）の合計と、区間ごとの分布 |
 | `lostOnRestart` | 再起動で閉じなかった確認の数（時間は最後の checkpoint までを上に含め、以降は不明） |
 | `hookRequests` / `hookAllowed` / `hookAbstained` | hook の要求の数と結果別（`hookAbstained` は理由別の内訳を `records` に。時間は持たない、§2.3） |
@@ -421,7 +423,7 @@ C の欠点への手当て:
 `records`（内訳の行。`ci-flaky` と同じく表として持つ）:
 - 回答: `{ kind: 'answered', tool, basis, count }`（ツール別・根拠の段別の回答数）
 - 試行: `{ kind: 'attempt', tool, basis, result, count }`
-- 停止: `{ kind: 'withheld', tool, reason, intervals, totalMs, maxMs, reasonChanged }`（理由別。区間の最後の理由で数え、理由が変わった区間の数は `reasonChanged` として別に数える）
+- 停止: `{ kind: 'withheld', tool, reason, intervals, totalMs, maxMs, reasonChanged, untimed }`（理由別。区間の最後の理由で数え、理由が変わった区間の数は `reasonChanged`、開始を復元できない区間の数は `untimed` として別に数える）
 - hook の棄権: `{ kind: 'hook-abstained', tool, reason, count }`
 - モード: `{ kind: 'cli-mode', tool, mode, instances }`（`mode` は観測した語彙か `unknown`）
 
