@@ -12,6 +12,7 @@ import { createLogger } from '@/lib/logger';
 import { filterCompositeKeysByWorktree } from '../auto-yes-state';
 import { getOrInitGlobal } from '../global-state';
 import { getEnterFallbackSessionEpoch } from './auto-yes-enter-fallback-state';
+import type { LedgerAttemptHandle } from './auto-yes-confirmation-ledger';
 
 const logger = createLogger('auto-yes-poller');
 
@@ -313,14 +314,30 @@ export interface AutoYesSendAttempt {
   moved: boolean;
   /** `pending` until the tick settles it; `expired` when its session's state was dropped. */
   state: 'pending' | 'settled' | 'expired';
+  /**
+   * Issue #3820: the confirmation and the attempt this send is recorded under
+   * in the ledger, taken before the first await like the object itself — a
+   * result that comes back after the confirmation closed still goes to it.
+   * Null when the ledger had no confirmation (or failed).
+   */
+  readonly ledger: LedgerAttemptHandle | null;
 }
 
 /** The sends in flight. globalThis for hot reload (#153), like the Map above. */
 const sendAttempts = getOrInitGlobal('__autoYesSendAttempts', () => new Set<AutoYesSendAttempt>());
 const sendAttemptSeq = getOrInitGlobal('__autoYesSendAttemptSeq', () => ({ last: 0 }));
 
-/** Register a send about to start (the poller, before `sendPromptAnswer`). */
-export function beginSendAttempt(compositeKey: string, screenKey: string, epoch: number): AutoYesSendAttempt {
+/**
+ * Register a send about to start (the poller, before `sendPromptAnswer`).
+ *
+ * @param ledger - Issue #3820: the ledger's handle for this send, if any
+ */
+export function beginSendAttempt(
+  compositeKey: string,
+  screenKey: string,
+  epoch: number,
+  ledger: LedgerAttemptHandle | null = null,
+): AutoYesSendAttempt {
   const attempt: AutoYesSendAttempt = {
     seq: ++sendAttemptSeq.last,
     screenKey,
@@ -328,6 +345,7 @@ export function beginSendAttempt(compositeKey: string, screenKey: string, epoch:
     recordEpoch: epoch,
     moved: false,
     state: 'pending',
+    ledger,
   };
   sendAttempts.add(attempt);
   return attempt;

@@ -123,6 +123,17 @@ import {
 import { AUTO_YES_ENTER_FALLBACK_ANSWER, syncEnterFallbackEpoch } from './polling/auto-yes-poller-enter-fallback';
 import { capturePollerFrame } from './polling/auto-yes-poller-capture';
 import {
+  beginLedgerAttempt,
+  beginLedgerTick,
+  endLedgerTick,
+  noteLedgerPollerStopped,
+  observeLedgerScreen,
+  settleLedgerAttempt,
+  withholdLedgerConfirmation,
+  type LedgerScope,
+} from './polling/auto-yes-confirmation-ledger';
+import type { AnswerBasis, AttemptResult } from './polling/auto-yes-confirmation-ledger-types';
+import {
   resolveAnswerUnderPolicy,
   skippedForUnownedSession,
   withheldForEarlierSend,
@@ -442,6 +453,8 @@ async function tryEnterFallback(
   const ownership = await checkWorktreeSessionOwnership(worktreeId, sessionName);
   if (generation !== undefined && !isTickCurrent(generation)) return false;
   if (ownership === null || ownership.verdict === 'foreign') {
+    // Issue #3820: the ledger's own reason, as `skippedForUnownedSession` records it.
+    withholdLedgerConfirmation(prompt, 'foreign-session');
     warnOncePerFrame(
       pollerState,
       `${frameKey}\u0000${sessionName}\u0000${ownership ? 'foreign' : 'worktree_not_found'}`,
@@ -484,17 +497,21 @@ async function tryEnterFallback(
   }
 
   const receiptEpisode = receiptEpisodeOfSend(cliToolId, worktreeId, instanceId);
+  // Issue #3820: taken before the await, so the result goes to this confirmation.
+  const ledgerAttempt = beginLedgerAttempt(prompt, 'enter-fallback');
   try {
     await sendSpecialKeys(sessionName, ['Enter']);
   } catch (error) {
     // Issue #3796: the Enter may or may not have reached the pane.
     noteAnswerSent(cliToolId, worktreeId, instanceId, true, receiptEpisode);
+    settleLedgerAttempt(ledgerAttempt, 'failed');
     throw error;
   } finally {
     invalidateCache(sessionName);
   }
   // Issue #3796 review E: the Enter is out — for the episode it began for only.
   noteAnswerSent(cliToolId, worktreeId, instanceId, false, receiptEpisode);
+  settleLedgerAttempt(ledgerAttempt, 'ok');
 
   // Issue #3706: the Enter is out, but the per-screen record is the CURRENT
   // session's: when the poller was stopped (the record was forgotten with it)
@@ -724,6 +741,8 @@ function noteNoPromptOnScreen(tick: {
   // reader takes it), but it is one nobody here answers — record why, still
   // as `no_prompt`. Before the warn key is cleared, so the WARN stays once
   // per screen.
+  // Issue #3820: the trust screen records itself in the ledger when it records
+  // its reason (`suppressAntigravityTrustScreen`).
   if (
     cliToolId === 'antigravity' &&
     suppressAntigravityTrustScreen(
@@ -738,10 +757,41 @@ function noteNoPromptOnScreen(tick: {
   }
   pollerState.lastSkipWarnKey = null;
   if (cliToolId === 'antigravity' && !promptDetection.isPrompt) {
-    logIfWithheldForWantOfReceipt(worktreeId, instanceId, compositeKey, () =>
+    const seen = logIfWithheldForWantOfReceipt(worktreeId, instanceId, compositeKey, () =>
       detectPromptOnCleanFrame(cleanOutput, cliToolId, precomputedLines, rawOutput),
     );
+    // Issue #3820: past the receipt window the gated reading says "no prompt"
+    // while the dialog is still up. The ungated reading says it is, so the
+    // ledger keeps the same confirmation (and the same withheld interval)
+    // rather than closing it on every tick outside the window.
+    if (seen !== null) {
+      const scope: LedgerScope = { compositeKey, worktreeId, cliToolId, instanceId };
+      observeLedgerScreen(scope, partialAnswerScreenKey(seen.promptData), seen.promptData.type);
+      if (seen.reason !== null) withholdLedgerConfirmation(scope, seen.reason);
+    }
   }
+}
+
+/**
+ * Issue #3820: the result of a send that threw, as the ledger counts it.
+ * `keysSent` is what the sender said (#3706); a throw that says nothing is a
+ * failure whose keys may or may not be on the pane.
+ */
+function attemptResultOfThrow(keysSent: boolean | null): AttemptResult {
+  if (keysSent === true) return 'partial';
+  if (keysSent === false) return 'no-keys-sent';
+  return 'failed';
+}
+
+/**
+ * Issue #3820: the evidence an answer on the screen path is given on (design
+ * §7 PR 1). A tool's own dialog detector vouched for the frame: `L3`. The
+ * gate did not judge it (a `legacy` tool, a non-multiple-choice prompt): the
+ * generic reading alone, `L4`.
+ */
+function answerBasisOf(prompt: JudgedPrompt): AnswerBasis {
+  const gate = prompt.dialogGate;
+  return gate !== undefined && gate.gated && gate.allowed && gate.dialog !== null ? 'L3' : 'L4';
 }
 
 /**
@@ -763,11 +813,16 @@ function settleFailedTick(
 ): 'no_answer' | 'error' {
   const { worktreeId, cliToolId, instanceId, compositeKey, generation, attempt, sendInFlight, receiptEpisode } =
     tick;
+  const keysSent = error instanceof Error && 'keysSent' in error ? Boolean(error.keysSent) : null;
+  // Issue #3820: the send that was cut short, in the ledger — before the send
+  // record below is settled, whose state says whether it had expired.
+  if (attempt !== null && sendInFlight) {
+    settleLedgerAttempt(attempt.ledger, attemptResultOfThrow(keysSent), { expired: attempt.state === 'expired' });
+  }
   // Issue #3706: a tick that lost its generation — the send stopped part-way
   // (`PromptAnswerAbortedError`), or failed after the grant went — is not a
   // failure of the poller that now holds the key, and not an answer either.
   if (generation !== undefined && !isTickCurrent(generation)) {
-    const keysSent = error instanceof Error && 'keysSent' in error ? Boolean(error.keysSent) : null;
     // A stop with keys already on the pane: the next tick must not type the
     // answer again over them (step 2.5). Recorded under the attempt's key as
     // it is now — the new one when a worktree ID move carried it (#3713).
@@ -821,6 +876,10 @@ export async function detectAndRespondToPrompt(
   // the send short, and the agy receipt gate is told so (`noteAnswerSent`).
   let sendInFlight = false;
   let receiptEpisode: number | null = null;
+  // Issue #3820: the ledger's tick. A tick that read the screen and saw no
+  // confirmation closes the open one as gone when it ends (`endLedgerTick`).
+  const ledgerScope: LedgerScope = { compositeKey, worktreeId, cliToolId, instanceId };
+  const ledgerTick = beginLedgerTick(ledgerScope);
   try {
     // 1. Detect prompt.
     //
@@ -888,6 +947,12 @@ export async function detectAndRespondToPrompt(
       return 'no_prompt';
     }
 
+    // Issue #3820: computed here, before the duplicate check, so the ledger
+    // sees the confirmation on every tick it is on screen (step 2.5 below
+    // reads the same key).
+    const screenKey = partialAnswerScreenKey(promptDetection.promptData);
+    observeLedgerScreen(ledgerScope, screenKey, promptDetection.promptData.type);
+
     // 2. Check for duplicate prompt (Issue #306)
     const promptKey = generatePromptKey(promptDetection.promptData);
     const frameKey = promptFrameKey(promptDetection.promptData);
@@ -914,7 +979,6 @@ export async function detectAndRespondToPrompt(
     // (`partialAnswerScreenKey`: options and approvalTarget count, the cursor
     // does not), or the session is relaunched. Recorded as a suppression, so
     // the prompt Push and `cmate wait` see "withheld", not "answering".
-    const screenKey = partialAnswerScreenKey(promptDetection.promptData);
     if (withheldForEarlierSend(judged, screenKey, epoch)) {
       return 'no_answer';
     }
@@ -961,7 +1025,13 @@ export async function detectAndRespondToPrompt(
       return 'no_answer';
     }
 
-    attempt = beginSendAttempt(compositeKey, screenKey, generation?.sessionEpoch ?? epoch);
+    attempt = beginSendAttempt(
+      compositeKey,
+      screenKey,
+      generation?.sessionEpoch ?? epoch,
+      // Issue #3820: an agy prompt read past the gate is one a hook receipt let through.
+      beginLedgerAttempt(ledgerScope, answerBasisOf(judged), { receiptAccepted: cliToolId === 'antigravity' }),
+    );
     receiptEpisode = receiptEpisodeOfSend(cliToolId, worktreeId, instanceId);
     sendInFlight = true;
     try {
@@ -977,6 +1047,7 @@ export async function detectAndRespondToPrompt(
       invalidateCache(sessionName);
     }
     sendInFlight = false;
+    settleLedgerAttempt(attempt.ledger, 'ok', { expired: attempt.state === 'expired' });
     settleSendAttempt(attempt, false);
     // Issue #3796 review E: the episode the send began for, as on the failure side.
     noteAnswerSent(cliToolId, worktreeId, instanceId, false, receiptEpisode);
@@ -996,6 +1067,8 @@ export async function detectAndRespondToPrompt(
       sendInFlight,
       receiptEpisode,
     });
+  } finally {
+    endLedgerTick(ledgerScope, ledgerTick);
   }
 }
 
@@ -1341,6 +1414,9 @@ export function stopAutoYesPolling(compositeKey: string, reason?: AutoYesPollerS
   // cleanup call this for an instance whose poller may already be gone, and the
   // Enter record must not outlive the grant or the session either way.
   forgetEnterFallback(compositeKey);
+  // Issue #3820: before the early return too — a session ended after its
+  // poller had already stopped still abandons the confirmation left on it.
+  noteLedgerPollerStopped(compositeKey, resolvePollerStopReason(reason, 'unspecified'));
   const pollerState = getPollerState(compositeKey);
   if (!pollerState) return;
 
@@ -1370,6 +1446,7 @@ export function stopAllAutoYesPolling(): void {
     }
     dropSessionWaitWake(key);
     invalidateSessionAutoYesPolicy(key);
+    noteLedgerPollerStopped(key, reason);
     logger.info('poller:stopped', { compositeKey: key, reason });
   }
   autoYesPollerStates.clear();
