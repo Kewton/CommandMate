@@ -791,6 +791,12 @@ const TURN_BOUNDARY_PATTERN =
  */
 export const APPROVAL_TARGET_MAX_LOOKBACK = 12;
 
+/**
+ * A previous tool call's result row (Issue #3817): claude's `⎿`, codex's `└` /
+ * `├` output continuation. Never the user's echo or a quote (`>`).
+ */
+const RESULT_MARKER_PATTERN = /^[⎿└├]/;
+
 /** Width of a row's leading whitespace. */
 function indentOf(line: string): number {
   return line.length - line.trimStart().length;
@@ -830,14 +836,19 @@ function isTurnBoundaryLine(rawLine: string | undefined): boolean {
  *
  * [Issue #3817] A marker row indented deeper than the dialog's frame
  * ({@link panelFrameIndent}) is the body of the command the panel asks about
- * when it sits below the panel's header and a frame row sits above it — the
- * `> quoted` rows of a here-document under a claude panel's ` Bash command`
- * header. Cutting there took the command rows above it out of the deny surface.
- * The previous turn's markers are drawn at or left of the frame (`⏺`, the
- * user's `> msg` / `❯ msg` echo, a rule), or deeper but above the panel's
- * header (claude's `  ⎿` result under its `⏺`): once the scan has passed a
- * frame row other than the question, every marker row ends it, so an older
- * panel's header above that `⎿` is never read as this panel's frame.
+ * when a frame row sits above it — the `> quoted` rows of a here-document
+ * under a claude panel's ` Bash command` header. Cutting there took the command
+ * rows above it out of the deny surface. The previous turn's markers are drawn
+ * at or left of the frame (`⏺`, the user's `> msg` / `❯ msg` echo, a rule), or
+ * deeper with no frame row above them (claude's `  ⎿` result right under its
+ * `⏺`), and both still end the scan.
+ *
+ * A frame row cannot be told from a body row drawn at the frame's column (a
+ * shell here-document's `EOF`), so a frame row is taken as an older panel's
+ * header only in one shape: a tool-use block — a marker row at the frame's
+ * column, then that row, then deeper rows that are all result markers
+ * ({@link RESULT_MARKER_PATTERN}). Anything else between two frame rows is read
+ * as body: when the screen cannot tell, the deny surface is taken wide.
  *
  * Shared by both detector paths: multiple_choice passes its `questionEndIndex`,
  * yes_no the line its pattern matched on.
@@ -857,21 +868,40 @@ export function findApprovalContextStart(
   const frameIndent = panelFrameIndent(lines, questionLineIndex, panelEnd);
   // The lowest deeper marker row with no frame row found above it yet.
   let unenclosed = -1;
-  // A frame row (the panel's header) has been passed: the body is below it.
-  let passedFrame = false;
+  // The deeper rows since the last frame row: are they all result markers?
+  let segmentRows = 0;
+  let segmentAllResults = true;
   for (let i = questionLineIndex - 1; i >= floor; i--) {
     const line = lines[i];
     if (line === undefined || line.trim() === '') continue;
     const atFrame = indentOf(line) <= frameIndent;
-    if (isTurnBoundaryLine(line)) {
-      if (atFrame || passedFrame) return (unenclosed >= 0 ? unenclosed : i) + 1;
-      if (unenclosed < 0) unenclosed = i;
-    } else if (atFrame) {
-      unenclosed = -1;
-      passedFrame = true;
+    const marker = isTurnBoundaryLine(line);
+    if (marker && atFrame) return (unenclosed >= 0 ? unenclosed : i) + 1;
+    if (!atFrame) {
+      if (marker && unenclosed < 0) unenclosed = i;
+      segmentRows++;
+      segmentAllResults &&= RESULT_MARKER_PATTERN.test(line.trim());
+      continue;
     }
+    // A frame row: an older tool-use block's header only in that one shape.
+    if (unenclosed >= 0 && segmentRows > 0 && segmentAllResults && isMarkerRowAtFrameAbove(lines, i, floor, frameIndent)) {
+      return unenclosed + 1;
+    }
+    unenclosed = -1;
+    segmentRows = 0;
+    segmentAllResults = true;
   }
   return unenclosed >= 0 ? unenclosed + 1 : floor;
+}
+
+/** True when the nearest non-blank row above `row` is a marker row at the frame's column. */
+function isMarkerRowAtFrameAbove(lines: string[], row: number, floor: number, frameIndent: number): boolean {
+  for (let i = row - 1; i >= floor; i--) {
+    const line = lines[i];
+    if (line === undefined || line.trim() === '') continue;
+    return indentOf(line) <= frameIndent && isTurnBoundaryLine(line);
+  }
+  return false;
 }
 
 /**

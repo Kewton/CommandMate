@@ -189,6 +189,27 @@ describe('Issue #3817: `> ` rows in the command body do not cut approvalTarget',
     expect(resolution.answer).toBe('1');
   });
 
+  /**
+   * Re-review P2 (Codex): a body row drawn at the frame's column (`EOF` of a
+   * shell here-document under a yes/no prompt) cannot be told from a panel
+   * header, so the deny surface is taken wide: the `> note` row above it is not
+   * read as the previous turn, and `rm -rf work` stays in.
+   */
+  it('(b) a body row at the frame column is not read as a header (yes/no, 0-column EOF)', () => {
+    const pane = ['Command', '  rm -rf work && cat <<EOF', '  > note', 'EOF', 'Proceed? (y/n)'].join('\n');
+    resetDetectPromptCache();
+    const detection = detectPrompt(stripBoxDrawing(stripAnsi(pane)), buildDetectPromptOptions('claude'));
+    expect(detection.isPrompt).toBe(true);
+    const promptData = detection.promptData!;
+    expect(promptData.type).toBe('yes_no');
+    expect(promptData.approvalTarget).toContain('rm -rf work && cat <<EOF');
+    expect(promptData.approvalTarget).toContain('> note');
+
+    const resolution = resolveAutoAnswerWithPolicy(promptData, policy(['rm -rf']));
+    expect(resolution.answer).toBeNull();
+    expect(resolution.suppressedBy).toBe('deny-pattern');
+  });
+
   it('(c) a deeper marker above an unmarked transcript row at the frame column is the previous turn', () => {
     expect(findApprovalContextStart(['⏺ x', '  ⎿ rm -rf old', 'some output', 'Proceed? (y/n)'], 3)).toBe(2);
   });
