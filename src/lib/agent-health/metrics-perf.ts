@@ -22,6 +22,12 @@ import {
   type MetricMeasurement,
 } from './metrics-types';
 import { addHookObservationLine, createHookObservationSamples, type HookObservationSamples } from './hook-observation';
+import {
+  addAutoYesObservationLine,
+  AUTO_YES_OBSERVATION_LOOKBACK_MS,
+  createAutoYesObservationSamples,
+  type AutoYesObservationSamples,
+} from './auto-yes-observation';
 
 export type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
 
@@ -107,6 +113,12 @@ export interface LogAggregate {
   latency: Record<string, LatencySamples>;
   /** The lines `hook-observation` reads (Issue #3311), from the same pass. */
   hook: HookObservationSamples;
+  /**
+   * The Auto-Yes confirmation ledger's lines `auto-yes-observation` reads
+   * (Issue #3820), from the same pass — including those up to one hour before
+   * `windowStart`: its window ends on the last hour boundary (`auto-yes-observation.ts`).
+   */
+  autoYes: AutoYesObservationSamples;
 }
 
 export function createLogAggregate(now: Date, hours = PERF_LOG_WINDOW_HOURS): LogAggregate {
@@ -120,6 +132,7 @@ export function createLogAggregate(now: Date, hours = PERF_LOG_WINDOW_HOURS): Lo
     errors: {},
     latency: {},
     hook: createHookObservationSamples(),
+    autoYes: createAutoYesObservationSamples(),
   };
 }
 
@@ -143,11 +156,17 @@ function latencyOf(data: string | null): { total: number; breakdown: Record<stri
   return { total, breakdown };
 }
 
-/** Count one raw line into the aggregate (lines outside the window only move `oldest`). */
+/**
+ * Count one raw line into the aggregate (lines outside the window only move
+ * `oldest`, except the ledger lines of the hour before it, which `autoYes` keeps).
+ */
 export function addLogLine(agg: LogAggregate, raw: string): void {
   const line = parseLogLine(raw);
   if (line === null) return;
   if (agg.oldest === null || line.time < agg.oldest) agg.oldest = line.time;
+  if (line.time >= agg.windowStart - AUTO_YES_OBSERVATION_LOOKBACK_MS && line.time <= agg.windowEnd) {
+    addAutoYesObservationLine(agg.autoYes, line);
+  }
   if (line.time < agg.windowStart || line.time > agg.windowEnd) return;
   agg.lines++;
   agg.byName[line.name] = (agg.byName[line.name] ?? 0) + 1;
