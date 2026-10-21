@@ -237,6 +237,7 @@ export function measureAutoYesObservation(
   const attempts = new Map<string, number>();
   let attemptsLate = 0;
   let answered = 0;
+  let answeredByHuman = 0;
   let answeredLate = 0;
   const answeredRecords = new Map<string, MetricRecord>();
   const attemptRecords = new Map<string, MetricRecord>();
@@ -302,7 +303,11 @@ export function measureAutoYesObservation(
         bump(resolutions, known(data.resolution, CONFIRMATION_RESOLUTIONS));
         bump(resolvedBy, known(data.resolvedBy, CONFIRMATION_RESOLVED_BY));
         if (data.answeredAtClose === true) {
-          answered++;
+          // A person's `/prompt-response` answer (basis `human`, #3820 PR 2) is a
+          // confirmation answered, but not by Auto-Yes: counted apart, kept in
+          // the records under its basis.
+          if (data.basis === 'human') answeredByHuman++;
+          else answered++;
           const tool = toolOf(data);
           const basis = basisOf(data.basis);
           increment(answeredRecords, `${tool}\u0000${basis}`, () => ({ kind: 'answered', tool, basis, count: 0 }));
@@ -442,6 +447,7 @@ export function measureAutoYesObservation(
       openAtWindowEnd,
       lostOnRestart,
       answered,
+      answeredByHuman,
       answeredLate,
       attemptsOk: count(attempts, 'ok'),
       attemptsPartial: count(attempts, 'partial'),

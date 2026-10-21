@@ -449,17 +449,18 @@ tmux -L cm-agent-health kill-server
     `coveredMs` は生存の行の経路ごとの計測区間を窓で切って足した時間（最も長い経路の値）、`gapMs` は窓との差、
     `coveredMsByPath` は経路ごとの内訳（`screen 86400000 / hook 0 / …`）。`pathsMissing` は計測が `coveredMs` より短い経路。
     `partial` は欠けた経路・欠損の時間・窓の中で増えた記録の例外（`ledgerErrors`）のどれかがあると `1`（部分計測）。
-    hook・API の経路（#3820 PR 2）と agy の結び付け（PR 3）が入るまでは、画面の経路だけなので毎日 `partial: 1`。
+    hook・API・`/prompt-response` の経路（#3820 PR 2）が入っても、agy の結び付け（`agy-link`、PR 3）が入るまでは `pathsMissing` に `agy-link` が残り、毎日 `partial: 1`。
     基準値として比べるのは、同じ経路がそろった日どうしだけ
   - **停止の時間**（= `value`、分）: 停止の区間ごとに、サーバーが計算した始まり・終わりの時刻（無ければ最後の checkpoint の時刻）を
-    窓で切って足す。行の間隔から推定しない。前日に始まった区間も窓の中の checkpoint だけで内訳に入る。
+    窓で切って足す。行の間隔から推定しない。Auto-Yes の OFF などで閉じた区間（`end: 'stopped'`・`'unobservable'`）はそこで終わり、OFF の間の時間は数えない。前日に始まった区間も窓の中の checkpoint だけで内訳に入る。
     `withheldMsTotal`・`withheldMsMedian`・`withheldMsP90`・`withheldMsMax`、`withheldConfirmations`・`withheldIntervals`。開始の行が欠けて始まりを復元できない区間（理由変更の行には開始の時刻が無い）は時間を足さず、
     `withheldIntervalsUntimed`（時間不明の区間の数）に件数だけ数える
   - **確認**: `confirmations`（窓の中で開いていた）・`confirmationsClosed`・`openAtWindowEnd`（窓の終わりの checkpoint にある）・
     `lostOnRestart`（閉じる行も窓の終わりの checkpoint も無い。再起動などで記録が途切れた。時間は最後の行までを数える）。
     解消の内訳 `resolvedAfterAnswer` ほか、`resolvedByAuto` / `resolvedByHumanUi` / `resolvedByUnknown`
-  - **回答と試行**: `answered`（閉じる前に `ok` の試行があった確認。`partial` / `no-keys-sent` / `failed` だけの確認は数えない）、
-    `answeredLate`（閉じた後に戻った `ok`。遅れた行の時刻の窓で数え、`answered` に足さない）、`attemptsOk` ほか結果別の数
+  - **回答と試行**: `answered`（閉じる前に `ok` の試行があった確認のうち、Auto-Yes の回答。ブラウザの自動回答 `browser` を含む。`partial` / `no-keys-sent` / `failed` だけの確認は数えない）、
+    `answeredByHuman`（`/prompt-response` の人の回答 `human` で閉じた確認。Auto-Yes の回答ではないので `answered` に足さない。`records` の `answered` には根拠の段 `human` として残る）、
+    `answeredLate`（閉じた後に戻った `ok`。遅れた行の時刻の窓で数え、`answered` に足さない）、`attemptsOk` ほか結果別の数（人の送信も含む。根拠の段の内訳は `records` の `attempt`）
   - **hook**（PR 2・3 から）: `hookRequests` / `hookAllowed` / `hookAbstained`（棄権に時間は付けない）、`dialogUnobserved`（確認未観測）、
     `cliModeObserved`（CLI 自身の許可のモードが見えたインスタンスの数）と `cliModeUnknownInstances`（窓の中で識別できたインスタンスのうち
     見えていない数。識別できたインスタンスが無ければ `null`）。どれも CommandMate の回答とは足さない

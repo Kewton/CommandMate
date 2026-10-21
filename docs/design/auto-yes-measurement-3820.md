@@ -87,6 +87,16 @@ PR 2 の実装への Codex の整合性レビュー（`.commandmate/tasks/review
 | 生存の行があるだけで ok にすると、窓の始まりの境目の生存の行（直前の 1 時間を表す）だけで「停止 0 分」を正常値として出す（整合性レビュー P2） | skip の判定を「窓の中に計測区間がある（`coveredMs` > 0）か」にした | §4.4・§6.1 |
 | 集計が語彙を見分けるには型ではなく値が要る | `auto-yes-confirmation-ledger-types.ts` に語彙の値の一覧（経路・根拠の段・理由・結果・解消・hook の棄権の理由・モード）を足した。型の union と食い違うとコンパイルで落ちる書き方 | §6.1 |
 
+### 改訂 6: PR 2 と PR 4 の統合で直したこと
+
+develop の PR 4（#3834）をこのブランチに取り込んで分かった食い違いを直した。
+
+| 食い違い | 決定と反映 | 節 |
+|---|---|---|
+| 語彙の値の一覧（`ANSWER_BASES`）に PR 2 の `human` が無い（型が合わず tsc が落ちる。集計では `human` が `(other)` になる） | `auto-yes-confirmation-ledger-types.ts` の一覧に `human` を足した | §0・§6.3 |
+| `/prompt-response` の人の回答（basis `human`）も `answeredAtClose` の確認なので、`answered`（Auto-Yes の回答）に入る | `human` で閉じた確認は `answered` に数えず **`answeredByHuman`** に数える。ブラウザの自動回答（`browser`）と API の allow（`L1`）は `answered`。`records` の `answered` は根拠の段ごとの内訳のまま（`basis: 'human'` の行が残る）。試行の数（`attemptsOk` ほか）は人の送信も含む | §6.2 |
+| PR 2 の `end: 'stopped'` と経路 `prompt-response` | 集計は区間を `endedAtMs` で終えるので、OFF の後の時間は数えない（API の確認は開いたまま checkpoint に出るが、区間を持たない）。PR 2 の記録は `screen`・`hook`・`api`・`prompt-response` を出すので、`pathsMissing` は `agy-link` だけになる（§6.4 の表のとおり）。PR 4 のテストが PR 1 の経路で固定していた `pathsMissing` の期待値は、この値に直した | §4.3・§6.4 |
+
 ---
 
 ## 0. 用語
@@ -439,6 +449,7 @@ C の欠点への手当て:
 | `coveredMsByPath` / `coveredMs` / `windowMs` / `gapMs` / `partial` / `pathsMissing` / `ledgerErrors` | 経路ごとの計測があった時間（`screen 86400000 / hook 0 / …` の文字列）・その最大・窓の長さ（完了済みの境目まで）・欠損の時間（窓 − `coveredMs`）。比べられなければ `partial: 1`（`details` は真偽値を持てないので `1` / `0`）と、`coveredMs` より短い経路（カンマ区切り）。`ledgerErrors` は窓の中で増えた記録の例外の数（§4.4・§6.4） |
 | `confirmations` / `confirmationsClosed` / `openAtWindowEnd` | 窓の中で開いていた確認の数・その中で閉じた数・窓の終わりに開いている数 |
 | `answered` / `answeredLate` | 閉じる前に `ok` の試行があった確認の数（`closed` の `answeredAtClose`。**`partial` / `no-keys-sent` / `failed` だけの確認は含めない**）と、閉じた後に `ok` が戻った試行の数（`late` の行の時刻の窓で数える。`answered` には足さない） |
+| `answeredByHuman` | `/prompt-response` の人の回答（basis `human`）で閉じた確認の数。Auto-Yes の回答ではないので `answered` に足さない（改訂 6） |
 | `attemptsOk` / `attemptsPartial` / `attemptsNoKeysSent` / `attemptsFailed` / `attemptsLate` | 試行の結果別の数（遅れて戻った結果を含む。`attemptsLate` はその内数） |
 | `resolvedAfterAnswer` / `resolvedWhileWithheld` / `resolvedByReply` / `resolvedBeforeDecision` / `unresolvedAfterSend` / `goneWhileUnobservable` / `abandoned` | §2.6 の `resolution` 別 |
 | `resolvedByAuto` / `resolvedByHumanUi` / `resolvedByUnknown` | §2.6 の `resolvedBy` 別 |

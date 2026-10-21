@@ -119,7 +119,9 @@ describe('[#3820 PR 4] the aggregation and the ledger agree', () => {
       windowMs: 24 * H,
       coveredMs: 24 * H,
       partial: 1,
-      pathsMissing: 'hook,api,prompt-response,agy-link',
+      // PR 2 records the hook, API and `/prompt-response` paths too (design
+      // §6.4): only the agy link (PR 3) is still missing.
+      pathsMissing: 'agy-link',
       ledgerErrors: 0,
       confirmations: 3,
       confirmationsClosed: 2,

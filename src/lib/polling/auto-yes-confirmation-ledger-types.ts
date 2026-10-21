@@ -288,7 +288,7 @@ const PATHS: Record<AutoYesLedgerPath, true> = {
 /** Every {@link AutoYesLedgerPath}, in the order the PRs add them (design §6.4). */
 export const AUTO_YES_LEDGER_PATHS = Object.keys(PATHS) as readonly AutoYesLedgerPath[];
 
-const BASES: Record<AnswerBasis, true> = { L1: true, L2: true, L3: true, L4: true, 'enter-fallback': true, browser: true };
+const BASES: Record<AnswerBasis, true> = { L1: true, L2: true, L3: true, L4: true, 'enter-fallback': true, browser: true, human: true };
 export const ANSWER_BASES = Object.keys(BASES) as readonly AnswerBasis[];
 
 const WITHHOLD_REASONS: Record<LedgerWithholdReason, true> = {
