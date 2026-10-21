@@ -20,8 +20,8 @@ import {
   type AntigravityReceiptVerdict,
 } from './antigravity-receipt-episodes';
 import { ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS } from './antigravity-permission-receipts';
-import { resolveAutoAnswerWithPolicy } from './auto-yes-resolver';
-import { getSessionAutoYesPolicyEntry } from './auto-yes-policy';
+import { policyLookupMode, resolveAutoAnswerWithPolicy } from './auto-yes-resolver';
+import { getSessionAutoYesPolicyLookupEntry } from './auto-yes-policy';
 import type { PromptDetectionResult } from '../detection/types';
 import type { PromptData } from '@/types/models';
 import { createLogger } from '@/lib/logger';
@@ -31,6 +31,7 @@ import {
   NO_HOOK_RECEIPT_SUPPRESSION_REASON,
   PARTIAL_ANSWER_SUPPRESSION_REASON,
   type AutoYesSuppressionReason,
+  POLICY_LOOKUP_FAILED_SUPPRESSION_REASON,
 } from './auto-yes-suppression-reason';
 import {
   forgetPolicySuppression,
@@ -123,7 +124,11 @@ export function logIfWithheldForWantOfReceipt(
   // judges a prompt it can read — the base rules first, then the contract — so
   // a prompt the base rules never answer (a checkbox, a typed option) is not
   // blamed on the contract. Policy and task id come from one lookup.
-  const { policy, taskId } = getSessionAutoYesPolicyEntry(worktreeId, 'antigravity', instanceId);
+  // Issue #3822: a failed lookup stays unknown here, as it is for the tick, so
+  // this re-judgement withholds too instead of reading "no contract" and
+  // dropping the `policy-lookup-failed` record the tick made.
+  const { policy, taskId } = getSessionAutoYesPolicyLookupEntry(worktreeId, 'antigravity', instanceId);
+  const mode = policyLookupMode(policy);
   const resolution = resolveAutoAnswerWithPolicy(ungated.promptData, policy);
   // Issue #3767: `answered` is the dialog the gate already let through on this
   // receipt, still up past the window. Unless the contract withheld it, that is
@@ -149,7 +154,7 @@ export function logIfWithheldForWantOfReceipt(
   if (resolution.suppressedBy && !keptPartialAnswer) {
     recordPolicySuppression(worktreeId, 'antigravity', instanceId, {
       reason: resolution.suppressedBy,
-      mode: policy?.mode ?? null,
+      mode,
       promptType: ungated.promptData.type,
       ...(resolution.pattern !== undefined ? { pattern: resolution.pattern } : {}),
     });
@@ -176,9 +181,12 @@ export function logIfWithheldForWantOfReceipt(
       worktreeId,
       instanceId: instanceId ?? 'antigravity',
       reason: resolution.suppressedBy,
-      mode: policy?.mode ?? null,
+      mode,
       taskId,
-      hint: '契約の autoYes が答えを止めている。契約の autoYes を確認',
+      hint:
+        resolution.suppressedBy === POLICY_LOOKUP_FAILED_SUPPRESSION_REASON
+          ? '契約の照会に失敗したので答えていない。サーバーログの policy-lookup-failed を確認'
+          : '契約の autoYes が答えを止めている。契約の autoYes を確認',
     });
     return seen(contractReason ?? null);
   }

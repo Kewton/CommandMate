@@ -13,6 +13,10 @@
  * indefinitely. The TTL is what bounds staleness — a task that starts or ends is
  * picked up within it, without this module having to observe task transitions.
  *
+ * Issue #3822: a failed lookup is not cached. It is "contract unknown", which
+ * the answering paths read as withholding, and holding it for the TTL would
+ * keep withholding after the database recovered; the next poll reads again.
+ *
  * @module lib/polling/auto-yes-policy
  */
 
@@ -21,7 +25,12 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
-import type { AutoYesPolicy } from './auto-yes-resolver';
+import {
+  AUTO_YES_POLICY_UNKNOWN,
+  isAutoYesPolicyUnknown,
+  type AutoYesPolicy,
+  type AutoYesPolicyLookup,
+} from './auto-yes-resolver';
 
 const logger = createLogger('auto-yes-policy');
 
@@ -35,7 +44,8 @@ export const AUTO_YES_POLICY_CACHE_TTL_MS = 5000;
 const MAX_CACHE_ENTRIES = 200;
 
 interface PolicyCacheEntry {
-  policy: AutoYesPolicy | null;
+  /** {@link AUTO_YES_POLICY_UNKNOWN} only for a failed lookup, which is never cached. */
+  policy: AutoYesPolicyLookup;
   /** The active task the policy came from; null with no contract. */
   taskId: string | null;
   expiresAt: number;
@@ -60,17 +70,17 @@ function purgeExpired(now: number): void {
  * Read the policy from the active task, or null when no contract governs this
  * instance.
  *
- * A database failure yields null — the unconstrained behaviour. Failing closed
- * here would suppress auto-yes for every user who has no contract at all, which
- * is the population this feature must not touch; the suppressing decisions
- * (`off`, deny patterns) are made inside the resolver only once a contract has
- * actually been read.
+ * Issue #3822: a database failure yields {@link AUTO_YES_POLICY_UNKNOWN}, not
+ * null. It used to yield null — the unconstrained behaviour — so a contract
+ * stating `off` or a deny pattern was answered past whenever one read failed.
+ * Users without a contract are still untouched: a lookup that succeeds and
+ * finds no task is null, as before, and only a lookup that fails withholds.
  */
 function readPolicy(
   worktreeId: string,
   cliToolId: CLIToolType,
   instanceId: string
-): { policy: AutoYesPolicy | null; taskId: string | null } {
+): { policy: AutoYesPolicyLookup; taskId: string | null } {
   try {
     const task = getActiveTaskForInstance(getDbInstance(), worktreeId, cliToolId, instanceId);
     if (!task) return { policy: null, taskId: null };
@@ -84,7 +94,7 @@ function readPolicy(
       instanceId,
       error: error instanceof Error ? error.message : String(error),
     });
-    return { policy: null, taskId: null };
+    return { policy: AUTO_YES_POLICY_UNKNOWN, taskId: null };
   }
 }
 
@@ -94,14 +104,18 @@ function readPolicy(
  *
  * @param worktreeId - Worktree identifier
  * @param cliToolId - CLI tool being polled
+ * For the paths that answer (the poller and the `PermissionRequest` hook):
+ * the resolver reads {@link AUTO_YES_POLICY_UNKNOWN} as withholding (Issue #3822).
+ *
  * @param instanceId - Agent instance id (defaults to the primary, i.e. cliToolId)
- * @returns The contract's autoYes block, or null when no contract governs this instance
+ * @returns The contract's autoYes block, null when no contract governs this
+ *   instance, or {@link AUTO_YES_POLICY_UNKNOWN} when the lookup failed
  */
 export function getSessionAutoYesPolicy(
   worktreeId: string,
   cliToolId: CLIToolType,
   instanceId?: string
-): AutoYesPolicy | null {
+): AutoYesPolicyLookup {
   return lookupEntry(worktreeId, cliToolId, instanceId).policy;
 }
 
@@ -110,12 +124,31 @@ export function getSessionAutoYesPolicy(
  * #3724), so a log line naming both cannot pair one task's verdict with another
  * task's id when the cache expires between two reads. `taskId` is null when no
  * contract governs the instance.
+ *
+ * For display only (Issue #3822): a failed lookup reads as no contract here
+ * (`policy` and `taskId` null), never as a contract this lookup did not see.
  */
 export function getSessionAutoYesPolicyEntry(
   worktreeId: string,
   cliToolId: CLIToolType,
   instanceId?: string
 ): { policy: AutoYesPolicy | null; taskId: string | null } {
+  const { policy, taskId } = lookupEntry(worktreeId, cliToolId, instanceId);
+  if (isAutoYesPolicyUnknown(policy)) return { policy: null, taskId: null };
+  return { policy, taskId };
+}
+
+/**
+ * {@link getSessionAutoYesPolicyEntry} for a path that judges the prompt again
+ * (Issue #3822): a failed lookup stays {@link AUTO_YES_POLICY_UNKNOWN} instead of
+ * reading as no contract, so the resolver withholds on it as the tick did.
+ * `taskId` is null when no contract governs the instance or the lookup failed.
+ */
+export function getSessionAutoYesPolicyLookupEntry(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string
+): { policy: AutoYesPolicyLookup; taskId: string | null } {
   const { policy, taskId } = lookupEntry(worktreeId, cliToolId, instanceId);
   return { policy, taskId };
 }
@@ -189,6 +222,10 @@ function lookupEntry(
   }
 
   const { policy, taskId } = readPolicy(worktreeId, cliToolId, resolvedInstanceId);
+  if (isAutoYesPolicyUnknown(policy)) {
+    // Issue #3822: not cached, so the next lookup reads again.
+    return { policy, taskId, expiresAt: now };
+  }
 
   if (policyCache.size >= MAX_CACHE_ENTRIES) {
     purgeExpired(now);

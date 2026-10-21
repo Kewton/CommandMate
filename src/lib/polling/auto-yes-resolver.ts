@@ -23,7 +23,10 @@
 
 import { executeRegexWithTimeout, validateStopPattern } from '@/config/auto-yes-config';
 import type { PromptData, PromptType } from '@/types/models';
-import type { AutoYesSuppressionReason } from './auto-yes-suppression-reason';
+import {
+  POLICY_LOOKUP_FAILED_SUPPRESSION_REASON,
+  type AutoYesSuppressionReason,
+} from './auto-yes-suppression-reason';
 import { isMultiSelectPrompt } from '@/lib/prompt-answer-semantic';
 
 /** Auto-answer policy modes; mirrors AUTO_YES_MODES in lib/tasks/contract-parser. */
@@ -47,6 +50,40 @@ export interface AutoYesPolicy {
 }
 
 export type { AutoYesSuppressionReason };
+
+/**
+ * Issue #3822: the contract governing the instance could not be read (the
+ * database lookup failed). Not "no contract": a contract that says `off` or
+ * lists deny patterns may be there, so the answering paths treat it as
+ * withholding, unlike `null`.
+ *
+ * A frozen marker rather than a third state on {@link AutoYesPolicy}, so the
+ * answering paths keep passing what the lookup returned straight to the
+ * resolver. It has no `mode`, so a caller that reads `policy?.mode ?? null`
+ * for a record still gets null; {@link policyLookupMode} says so explicitly.
+ */
+export interface AutoYesPolicyUnknown {
+  readonly lookupFailed: true;
+  readonly mode?: undefined;
+}
+
+/** The one {@link AutoYesPolicyUnknown} value. */
+export const AUTO_YES_POLICY_UNKNOWN: AutoYesPolicyUnknown = Object.freeze({ lookupFailed: true as const });
+
+/** What a policy lookup on an answering path yields: a policy, no contract (null), or unknown. */
+export type AutoYesPolicyLookup = AutoYesPolicy | AutoYesPolicyUnknown | null;
+
+/** Whether the lookup failed, i.e. the contract is not known (Issue #3822). */
+export function isAutoYesPolicyUnknown(
+  policy: AutoYesPolicyLookup | undefined
+): policy is AutoYesPolicyUnknown {
+  return policy !== null && policy !== undefined && 'lookupFailed' in policy && policy.lookupFailed === true;
+}
+
+/** The mode a lookup states, for records and log lines; null for no contract or unknown. */
+export function policyLookupMode(policy: AutoYesPolicyLookup | undefined): AutoYesMode | null {
+  return policy && !isAutoYesPolicyUnknown(policy) ? policy.mode : null;
+}
 
 export interface AutoYesResolution {
   /** The answer to send, or null when nothing should be sent. */
@@ -207,14 +244,21 @@ export interface AutoYesPolicyDenial {
  *
  * @param promptType - How the prompt would be classified on screen
  * @param denyMatchTexts - The only strings deny patterns are matched against
+ * Issue #3822: an unknown policy (the lookup failed) denies before anything
+ * else — it is not "no contract", and answering would ignore an `off` or a deny
+ * pattern the contract may state.
+ *
  * @param policy - Contract policy; null/undefined permits everything
  */
 export function evaluatePolicyAgainstTexts(
   promptType: PromptType,
   denyMatchTexts: string[],
-  policy: AutoYesPolicy | null | undefined
+  policy: AutoYesPolicyLookup | undefined
 ): AutoYesPolicyDenial | null {
   if (!policy) return null;
+  if (isAutoYesPolicyUnknown(policy)) {
+    return { reason: POLICY_LOOKUP_FAILED_SUPPRESSION_REASON };
+  }
 
   if (policy.mode === 'off') {
     return { reason: 'mode-off' };
@@ -242,7 +286,7 @@ export function evaluatePolicyAgainstTexts(
 /** {@link evaluatePolicyAgainstTexts} over a detected on-screen prompt. */
 function evaluatePolicy(
   promptData: PromptData,
-  policy: AutoYesPolicy | null | undefined
+  policy: AutoYesPolicyLookup | undefined
 ): AutoYesPolicyDenial | null {
   return evaluatePolicyAgainstTexts(promptData.type, collectDenyMatchTexts(promptData), policy);
 }
@@ -260,7 +304,7 @@ function evaluatePolicy(
  */
 export function resolveAutoAnswerWithPolicy(
   promptData: PromptData,
-  policy?: AutoYesPolicy | null
+  policy?: AutoYesPolicyLookup
 ): AutoYesResolution {
   const answer = resolveBaseAnswer(promptData);
   if (answer === null) {
@@ -284,7 +328,7 @@ export function resolveAutoAnswerWithPolicy(
  */
 export function resolveAutoAnswer(
   promptData: PromptData,
-  policy?: AutoYesPolicy | null
+  policy?: AutoYesPolicyLookup
 ): string | null {
   return resolveAutoAnswerWithPolicy(promptData, policy).answer;
 }

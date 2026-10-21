@@ -43,8 +43,9 @@ import { getSessionAutoYesPolicy } from '@/lib/polling/auto-yes-policy';
 import {
   evaluatePolicyAgainstTexts,
   MAX_DENY_MATCH_TEXT_LENGTH,
+  policyLookupMode,
   type AutoYesMode,
-  type AutoYesPolicy,
+  type AutoYesPolicyLookup,
   type AutoYesSuppressionReason,
 } from '@/lib/polling/auto-yes-resolver';
 import { recordPolicySuppression } from '@/lib/polling/auto-yes-suppression-state';
@@ -105,7 +106,7 @@ export interface PermissionDecision {
   suppressedBy?: AutoYesSuppressionReason;
   /** The deny pattern responsible, for the escalation log. */
   pattern?: string;
-  /** Policy mode in force (null = contract stated no mode, or no contract). */
+  /** Policy mode in force (null = contract stated no mode, no contract, or unknown). */
   mode?: AutoYesMode | null;
 }
 
@@ -145,9 +146,10 @@ const NO_DECISION = (reason: PermissionDecisionReason): PermissionDecision => ({
 export interface PermissionDecisionDeps {
   /**
    * The contract policy governing this session. Defaults to the `autoYes` block
-   * of the instance's active task, read through the TTL cache.
+   * of the instance's active task, read through the TTL cache, or
+   * `AUTO_YES_POLICY_UNKNOWN` when that read failed (Issue #3822).
    */
-  readPolicy?: (session: PermissionRequestSession) => AutoYesPolicy | null;
+  readPolicy?: (session: PermissionRequestSession) => AutoYesPolicyLookup;
   /**
    * Where an `allow` is recorded for the audit trail. Defaults to the
    * prompt-history row `capture --prompts` reads.
@@ -156,7 +158,7 @@ export interface PermissionDecisionDeps {
 }
 
 /** Production policy source: the active task's contract, TTL-cached. */
-function readContractPolicy(session: PermissionRequestSession): AutoYesPolicy | null {
+function readContractPolicy(session: PermissionRequestSession): AutoYesPolicyLookup {
   return getSessionAutoYesPolicy(session.worktreeId, session.cliToolId, session.instanceId);
 }
 
@@ -172,6 +174,7 @@ function readContractPolicy(session: PermissionRequestSession): AutoYesPolicy | 
  * | payload unreadable | no-decision |
  * | `AskUserQuestion` | no-decision |
  * | Auto-Yes off / expired | no-decision |
+ * | contract lookup failed (Issue #3822) | no-decision + suppression |
  * | policy suppresses (mode off, deny pattern, type) | no-decision + suppression |
  * | otherwise | allow |
  *
@@ -212,17 +215,19 @@ export function decidePermissionRequest(
     collectToolInputMatchTexts(payload.toolName, payload.toolInput, payload.toolInputNormalization),
     policy
   );
+  // Issue #3822: an unknown policy (the lookup failed) is a denial here, so the
+  // hook abstains — the dialog is drawn — rather than allowing unattended.
   if (denial) {
     return {
       behavior: null,
       reason: 'policy-suppressed',
       suppressedBy: denial.reason,
       pattern: denial.pattern,
-      mode: policy?.mode ?? null,
+      mode: policyLookupMode(policy),
     };
   }
 
-  return { behavior: 'allow', reason: 'auto-yes', mode: policy?.mode ?? null };
+  return { behavior: 'allow', reason: 'auto-yes', mode: policyLookupMode(policy) };
 }
 
 /**

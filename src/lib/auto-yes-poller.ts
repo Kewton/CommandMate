@@ -18,7 +18,7 @@ import {
   beginAntigravityFrameRead,
   endAntigravityFrameRead,
 } from './polling/antigravity-receipt-episodes';
-import { resolveAutoAnswerWithPolicy } from './polling/auto-yes-resolver';
+import { policyLookupMode, resolveAutoAnswerWithPolicy } from './polling/auto-yes-resolver';
 import {
   getSessionAutoYesPolicy,
   invalidateSessionAutoYesPolicy,
@@ -394,24 +394,25 @@ async function tryEnterFallback(
     return false;
   }
 
-  // 3. The contract policy, as step 4 reads it.
+  // 3. The contract policy, as step 4 reads it (Issue #3822: a failed lookup withholds).
   const policy = getSessionAutoYesPolicy(worktreeId, cliToolId, instanceId);
   const resolution = resolveAutoAnswerWithPolicy(promptData, policy);
   if (resolution.suppressedBy) {
     pollerState.enterFallbackCandidateKey = null;
+    const mode = policyLookupMode(policy);
     suppressAndWarnOnce(
       prompt,
       {
         reason: resolution.suppressedBy,
-        mode: policy?.mode ?? null,
+        mode,
         promptType: promptData.type,
         pattern: resolution.pattern,
       },
-      `${frameKey}\u0000${resolution.suppressedBy}\u0000${policy?.mode ?? ''}\u0000${resolution.pattern ?? ''}`,
+      `${frameKey}\u0000${resolution.suppressedBy}\u0000${mode ?? ''}\u0000${resolution.pattern ?? ''}`,
       'poller:auto-yes-suppressed-by-policy',
       {
         reason: resolution.suppressedBy,
-        mode: policy?.mode ?? null,
+        mode,
         pattern: resolution.pattern,
         promptType: promptData.type,
         enterFallback: true,
