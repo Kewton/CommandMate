@@ -102,6 +102,7 @@ import {
 } from '@/lib/polling/auto-yes-confirmation-ledger';
 import { AUTO_YES_LEDGER_EVENTS as EV } from '@/lib/polling/auto-yes-confirmation-ledger-types';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { getAgentEventSource } from '@/lib/hooks/sources/registry';
 
 const FIXTURES = join(process.cwd(), 'tests/fixtures/hooks');
 const WT = 'wt-ledger-3820';
@@ -279,6 +280,57 @@ describe('[#3820] an abstention', () => {
     expect({ status, body }).toEqual({ status: 200, body: {} });
     expect(lines(EV.hookRequestClosed)).toEqual([expect.objectContaining({ outcome: 'abstained', abstainReason: 'error' })]);
     expect(lines(EV.closed)).toEqual([expect.objectContaining({ answeredAtClose: false, resolution: 'unresolved-after-send' })]);
+  });
+});
+
+describe('[#3820] a delivery the helper swallowed (review item 4)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('a decide that throws: the same abstention body, recorded as a failed send', async () => {
+    setAutoYesEnabled(WT, 'claude', true, ONE_HOUR_MS);
+    vi.spyOn(getAgentEventSource('claude'), 'decide').mockRejectedValue(new Error('decide threw'));
+
+    const { status, body } = await post('claude');
+
+    expect({ status, body }).toEqual({ status: 200, body: {} });
+    expect(lines(EV.hookRequestClosed)).toEqual([
+      expect.objectContaining({ outcome: 'abstained', abstainReason: 'delivery-failed' }),
+    ]);
+    expect(lines(EV.attemptSettled)).toEqual([expect.objectContaining({ basis: 'L1', result: 'failed' })]);
+    expect(lines(EV.closed)).toEqual([
+      expect.objectContaining({
+        answeredAtClose: false,
+        resolution: 'unresolved-after-send',
+        resolvedBy: 'unknown',
+        abandonReason: 'delivery-failed',
+      }),
+    ]);
+  });
+
+  it('a delivered verdict is still recorded as answered (negative control)', async () => {
+    setAutoYesEnabled(WT, 'claude', true, ONE_HOUR_MS);
+    const decide = vi.spyOn(getAgentEventSource('claude'), 'decide');
+
+    await post('claude');
+
+    expect(decide).toHaveBeenCalledOnce();
+    expect(lines(EV.hookRequestClosed)).toEqual([expect.objectContaining({ outcome: 'allow' })]);
+    expect(lines(EV.closed)).toEqual([expect.objectContaining({ answeredAtClose: true, resolution: 'resolved-by-reply' })]);
+  });
+
+  it('the body does not change with the ledger down', async () => {
+    setAutoYesEnabled(WT, 'claude', true, ONE_HOUR_MS);
+    vi.spyOn(getAgentEventSource('claude'), 'decide').mockRejectedValue(new Error('decide threw'));
+    const baseline = await post('claude');
+    resetAutoYesConfirmationLedgerForTests();
+    setAutoYesLedgerFaultForTests(new Error('ledger down'));
+
+    expect(await post('claude')).toEqual(baseline);
+    setAutoYesLedgerFaultForTests(null);
+    ledgerLoggerFault.current = true;
+    expect(await post('claude')).toEqual(baseline);
   });
 });
 

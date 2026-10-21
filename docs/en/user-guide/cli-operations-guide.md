@@ -1106,7 +1106,25 @@ Everything the server sends except `fullOutput` is printed verbatim.
     "lastEventAt": 1754296400000,
     "lastEventDetail": null,
     "promptWaitingSince": null,
-    "promptWaitingSource": null
+    "promptWaitingSource": null,
+    "source": {
+      "cliToolId": "claude",
+      "kind": "hooks",
+      "capabilities": {
+        "supportedEvents": ["stop", "notification", "session_start", "user_prompt_submit", "session_end", "pre_tool_use", "post_tool_use"],
+        "configScope": "per-instance",
+        "decisionTimeoutSeconds": 5,
+        "permissionHookPredictsDialog": true,
+        "sessionStartMayArriveLate": false,
+        "permissionReplyReleasesPrompt": false,
+        "permissionAllowSuppressesDialog": true,
+        "eventIdentity": null,
+        "resync": "none",
+        "transcriptHistory": "pull",
+        "stopReportsSelfResume": true
+      },
+      "probedActivity": null
+    }
   },
   "model": "claude-opus-5[1m]",
   "reasoningEffort": null,

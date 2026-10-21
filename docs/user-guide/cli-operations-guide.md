@@ -1688,8 +1688,11 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
         "permissionHookPredictsDialog": true,
         "sessionStartMayArriveLate": false,
         "permissionReplyReleasesPrompt": false,
+        "permissionAllowSuppressesDialog": true,
         "eventIdentity": null,
-        "resync": "none"
+        "resync": "none",
+        "transcriptHistory": "pull",
+        "stopReportsSelfResume": true
       },
       "probedActivity": null
     }

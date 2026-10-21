@@ -46,6 +46,7 @@ import { opencodeAgentEventSource } from '@/lib/hooks/sources/opencode/source';
 import type { AgentEventSource, PendingDecision } from '@/lib/hooks/sources/types';
 import {
   noteLedgerApiDecisionReplied,
+  noteLedgerPollerStopped,
   resetAutoYesConfirmationLedgerForTests,
   setAutoYesLedgerClockTimersForTests,
   setAutoYesLedgerFaultForTests,
@@ -138,6 +139,39 @@ describe('[#3820] an opencode approval in the ledger', () => {
     await adjudicatePendingPermission(source(true), TARGET, pending(), null);
 
     expect(vi.mocked(resolvePermissionRequest).mock.calls[0]).toHaveLength(2);
+  });
+});
+
+describe('[#3820] a delivery that comes back after the session ended (review item 2, design §2.5)', () => {
+  /** Delivers, but the session is killed while the delivery is in flight. */
+  function killedDuringDelivery(): AgentEventSource {
+    return {
+      ...opencodeAgentEventSource,
+      decide: async (ref, decision) => {
+        await Promise.resolve();
+        noteLedgerPollerStopped('wt-api-3820:opencode', 'session-killed');
+        recordDecisionDelivery(ref, decision.id, { delivered: true, reason: 'delivered' });
+      },
+    } as AgentEventSource;
+  }
+
+  it('is the late result of the confirmation it was sent for, and opens no second one', async () => {
+    await adjudicatePendingPermission(killedDuringDelivery(), TARGET, pending(), null);
+
+    const [opened] = lines(EV.opened);
+    expect(lines(EV.opened)).toHaveLength(1);
+    expect(lines(EV.attemptSettled)).toEqual([
+      expect.objectContaining({ confirmationId: opened.confirmationId, result: 'ok', late: true }),
+    ]);
+    expect(lines(EV.closed)).toEqual([
+      expect.objectContaining({ confirmationId: opened.confirmationId, resolution: 'unresolved-after-send', abandonReason: 'session-killed' }),
+    ]);
+  });
+
+  it('returns what it returned before', async () => {
+    expect(await adjudicatePendingPermission(killedDuringDelivery(), TARGET, pending(), null)).toEqual(
+      expect.objectContaining({ behavior: 'allow', delivered: true, settled: true })
+    );
   });
 });
 

@@ -852,25 +852,51 @@ export function noteLedgerPollerStopped(compositeKey: string, reason: string): v
   guarded(undefined, (state, now) => {
     state.ticks.delete(compositeKey);
     for (const entry of [...state.entries.values()]) {
-      if (entry.compositeKey !== compositeKey) continue;
-      if (ABANDONING_STOP_REASONS.has(reason)) {
-        closeEntry(state, entry, now, { kind: 'abandoned', reason });
-        continue;
-      }
-      // An API approval is not read off the screen: the poller stopping does
-      // not stop it being seen (its reply still settles it).
-      if (entry.source !== 'screen' || entry.presence === 'unobservable') continue;
-      endInterval(state, entry, 'unobservable', now);
-      entry.presence = 'unobservable';
-      entry.unobservableSince = now;
-      emit<PresenceChangedLine>(state, AUTO_YES_LEDGER_EVENTS.presenceChanged, {
-        atMs: now,
-        confirmationId: entry.id,
-        from: 'present',
-        to: 'unobservable',
-        cause: reason,
-      });
+      if (entry.compositeKey === compositeKey) noteEntryStopped(state, entry, reason, now);
     }
+  });
+}
+
+/**
+ * Every poller of a worktree stopped, or the worktree went: the same as
+ * {@link noteLedgerPollerStopped} for each confirmation the worktree holds,
+ * whether or not a poller was running for its instance (design §4.2). An API
+ * approval is opened with Auto-Yes off too, so the keys of the running pollers
+ * do not name every instance with an open confirmation.
+ */
+export function noteLedgerWorktreeStopped(worktreeId: string, reason: string): void {
+  guarded(undefined, (state, now) => {
+    for (const entry of [...state.entries.values()]) {
+      if (entry.worktreeId !== worktreeId) continue;
+      state.ticks.delete(entry.compositeKey);
+      noteEntryStopped(state, entry, reason, now);
+    }
+  });
+}
+
+function noteEntryStopped(state: LedgerState, entry: LedgerEntry, reason: string, now: number): void {
+  if (ABANDONING_STOP_REASONS.has(reason)) {
+    closeEntry(state, entry, now, { kind: 'abandoned', reason });
+    return;
+  }
+  if (entry.source !== 'screen') {
+    // An API approval is not read off the screen: the poller stopping does not
+    // stop it being seen (its reply still settles it), so it stays open and
+    // `present`. Auto-Yes stopped answering it, though, so a withheld interval
+    // ends here: the time it is off is nobody's withheld time.
+    endInterval(state, entry, 'stopped', now);
+    return;
+  }
+  if (entry.presence === 'unobservable') return;
+  endInterval(state, entry, 'unobservable', now);
+  entry.presence = 'unobservable';
+  entry.unobservableSince = now;
+  emit<PresenceChangedLine>(state, AUTO_YES_LEDGER_EVENTS.presenceChanged, {
+    atMs: now,
+    confirmationId: entry.id,
+    from: 'present',
+    to: 'unobservable',
+    cause: reason,
   });
 }
 
@@ -952,11 +978,16 @@ export function decideLedgerHookRequest(hookRequestId: string | null | undefined
 }
 
 /**
- * The hook route wrote its reply. `delivered: false` is the route's catch-all:
- * whatever had been decided, the agent got an abstention, so the request is
- * closed `abstained` (`error`) and a confirmation it was is closed unanswered.
+ * The hook route wrote its reply. `delivered: false` is a verdict that did not
+ * leave — the route's catch-all, or a delivery whose receipt said so: whatever
+ * had been decided, the agent got an abstention, so the request is closed
+ * `abstained` (`failure`, `error` when omitted) and a confirmation it was is
+ * closed unanswered, its send `failed`.
  */
-export function closeLedgerHookRequest(hookRequestId: string | null | undefined, reply: { delivered: boolean }): void {
+export function closeLedgerHookRequest(
+  hookRequestId: string | null | undefined,
+  reply: { delivered: boolean; failure?: string },
+): void {
   if (hookRequestId === null || hookRequestId === undefined) return;
   guarded(undefined, (state, now) => {
     const request = state.hookRequests.get(hookRequestId);
@@ -964,7 +995,8 @@ export function closeLedgerHookRequest(hookRequestId: string | null | undefined,
     state.hookRequests.delete(hookRequestId);
     const decision = request.decision;
     const outcome = reply.delivered && decision !== null ? decision.outcome : 'abstained';
-    const abstainReason = !reply.delivered ? 'error' : decision === null ? 'undecided' : decision.abstainReason;
+    const failure = reply.failure ?? 'error';
+    const abstainReason = !reply.delivered ? failure : decision === null ? 'undecided' : decision.abstainReason;
     const confirmation = request.confirmation;
     if (confirmation !== null && request.worktreeId !== null) {
       const ok = reply.delivered;
@@ -997,7 +1029,7 @@ export function closeLedgerHookRequest(hookRequestId: string | null | undefined,
         withheldMsTotal: 0,
         unobservableMs: 0,
         intervals: 0,
-        ...(ok ? {} : { abandonReason: 'error' }),
+        ...(ok ? {} : { abandonReason: failure }),
       });
     }
     emit<HookRequestClosedLine>(state, AUTO_YES_LEDGER_EVENTS.hookRequestClosed, {
@@ -1063,18 +1095,43 @@ export interface LedgerApiAdjudication {
   promptType: string;
 }
 
+/** What was decided about a held approval, before its verdict is delivered. */
+export type LedgerApiVerdict = Pick<LedgerApiAdjudication, 'outcome' | 'withholdReason' | 'promptType'>;
+
+/** How the delivery of an `allow` came back. */
+export type LedgerApiDelivery = Pick<LedgerApiAdjudication, 'delivered' | 'settled'>;
+
 /**
- * One adjudication of the approval `decisionId` (design §2.4). The first opens
- * the confirmation; a re-adjudication (re-connect, Auto-Yes switched on)
- * continues it. An `allow` is a send: `delivered` is its result. A settled
- * reply closes it, answered by Auto-Yes.
+ * One adjudication of the approval `decisionId` (design §2.4), in one call.
+ * The same as {@link beginLedgerApiAdjudication} followed at once by
+ * {@link settleLedgerApiAdjudication}; a caller that awaits the delivery in
+ * between uses the two.
  */
 export function recordLedgerApiAdjudication(
   scope: LedgerScope,
   decisionId: string,
   adjudication: LedgerApiAdjudication,
 ): void {
-  guarded(undefined, (state, now) => {
+  settleLedgerApiAdjudication(beginLedgerApiAdjudication(scope, decisionId, adjudication), adjudication);
+}
+
+/**
+ * An adjudication of the approval `decisionId` decided, and its verdict is
+ * about to be delivered (design §2.4). Called before the delivery's first
+ * await, as the screen path takes its handle (§2.5): the first adjudication
+ * opens the confirmation, a re-adjudication (re-connect, Auto-Yes switched on)
+ * continues it, a policy's abstention withholds it. An `allow` is a send,
+ * begun here.
+ *
+ * @returns The send's handle, for {@link settleLedgerApiAdjudication}; null for
+ *   an abstention (or when the ledger failed)
+ */
+export function beginLedgerApiAdjudication(
+  scope: LedgerScope,
+  decisionId: string,
+  verdict: LedgerApiVerdict,
+): LedgerAttemptHandle | null {
+  return guarded<LedgerAttemptHandle | null>(null, (state, now) => {
     const compositeKey = keyOf(scope);
     const decisionKey = `${compositeKey}\u0000${decisionId}`;
     const knownId = state.apiDecisions.get(decisionKey);
@@ -1083,21 +1140,36 @@ export function recordLedgerApiAdjudication(
       entry = openEntry(state, scope, compositeKey, {
         source: 'api',
         screenKey: '',
-        promptType: adjudication.promptType,
+        promptType: verdict.promptType,
         decisionKey,
       }, now);
       state.apiDecisions.set(decisionKey, entry.id);
     }
-    if (adjudication.outcome === 'allow') {
-      const handle = beginAttempt(state, entry, 'L1', false);
-      settleAttempt(state, handle, adjudication.delivered ? 'ok' : 'failed', false, now);
-      if (adjudication.delivered && adjudication.settled) closeEntry(state, entry, now, { kind: 'reply' });
-      return;
-    }
-    if (adjudication.withholdReason !== undefined) {
+    if (verdict.outcome === 'allow') return beginAttempt(state, entry, 'L1', false);
+    if (verdict.withholdReason !== undefined) {
       entry.decision = 'withhold';
-      withhold(state, entry, adjudication.withholdReason, now);
+      withhold(state, entry, verdict.withholdReason, now);
     }
+    return null;
+  });
+}
+
+/**
+ * The delivery of an `allow` came back: `delivered` is the send's result, and
+ * a settled reply closes the confirmation, answered by Auto-Yes. The result
+ * belongs to the confirmation the send was begun for — one that closed
+ * meanwhile (a session killed during the delivery) gets a `late` line and is
+ * neither reopened nor closed again (design §2.5, N1).
+ */
+export function settleLedgerApiAdjudication(
+  handle: LedgerAttemptHandle | null | undefined,
+  delivery: LedgerApiDelivery,
+): void {
+  if (handle === null || handle === undefined) return;
+  guarded(undefined, (state, now) => {
+    settleAttempt(state, handle, delivery.delivered ? 'ok' : 'failed', false, now);
+    const entry = state.entries.get(handle.confirmationId);
+    if (entry !== undefined && delivery.delivered && delivery.settled) closeEntry(state, entry, now, { kind: 'reply' });
   });
 }
 

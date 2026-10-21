@@ -106,8 +106,12 @@ export type ConfirmationResolvedBy = 'auto' | 'human-ui' | 'unknown';
 /** What Auto-Yes last decided about a confirmation. */
 export type ConfirmationDecision = 'answer' | 'withhold' | 'none';
 
-/** Why a withheld interval ended (design §3.3). */
-export type WithholdEnd = 'answered' | 'gone' | 'unobservable' | 'abandoned';
+/**
+ * Why a withheld interval ended (design §3.3). `stopped`: Auto-Yes stopped (its
+ * poller stopped: off, expired, …) while the confirmation stayed open and
+ * `present` — an API approval, which is not read off the screen.
+ */
+export type WithholdEnd = 'answered' | 'gone' | 'unobservable' | 'stopped' | 'abandoned';
 
 /** Fields on every ledger line. */
 export interface LedgerLineBase {

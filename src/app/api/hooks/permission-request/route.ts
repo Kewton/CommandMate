@@ -73,7 +73,9 @@
  * `docs/design/auto-yes-measurement-3820.md` §2.3): the id is issued here once
  * the worktree is resolved, handed to `resolvePermissionRequest`, and the
  * request is closed after the reply is built — `delivered: false` from the
- * catch-all. The ledger never throws, and nothing here reads it back.
+ * catch-all, and when the delivery's receipt says the verdict did not leave
+ * (the helper swallows a `decide` that throws). The ledger never throws, and
+ * nothing here reads it back.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -301,7 +303,16 @@ export async function POST(request: NextRequest) {
     // C2. Whether this leaves through the body of the request the agent is
     // blocked on, or through a second HTTP call to the agent's own server, is
     // the source's business. This route writes whatever comes back.
-    const responseBody = await answerPendingDecision(source, ref, pending, verdict);
+    //
+    // Issue #3820: the helper catches a `decide` that throws and hands back the
+    // empty body, so the catch-all below never hears of it; its receipt is what
+    // tells the ledger the verdict did not leave. The body is written as is.
+    let receiptRefused = false;
+    const responseBody = await answerPendingDecision(source, ref, pending, verdict, {
+      onReceipt: (delivery) => {
+        receiptRefused = delivery?.delivered === false;
+      },
+    });
 
     const elapsedMs = Date.now() - startedAt;
     const detail = {
@@ -326,7 +337,10 @@ export async function POST(request: NextRequest) {
     }
 
     const reply = NextResponse.json(responseBody, { status: 200 });
-    closeLedgerHookRequest(hookRequestId, { delivered: true });
+    closeLedgerHookRequest(
+      hookRequestId,
+      receiptRefused ? { delivered: false, failure: 'delivery-failed' } : { delivered: true }
+    );
     return reply;
   } catch (error: unknown) {
     logger.error('error-processing-permission-request:', {
