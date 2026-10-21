@@ -153,6 +153,46 @@ describe('Issue #3817: `> ` rows in the command body do not cut approvalTarget',
     }
   });
 
+  /**
+   * Review P2 (Codex): the previous turn's own panel header above its `  ⎿`
+   * result must not be read as this panel's frame. The deeper `⎿` sits above
+   * the current panel's header, so it ends the scan.
+   */
+  it('(c) a deeper marker above the panel\'s header is the previous turn, even under an older header', () => {
+    const panel = (description: readonly string[]): string =>
+      [
+        '● old',
+        'Command',
+        '  ⎿ rm -rf old',
+        'Command',
+        '   pwd',
+        ...description,
+        'Do you want to proceed?',
+        `${CURSOR} 1. Yes`,
+        '  2. No',
+      ].join('\n');
+
+    // The order as the review gave it.
+    const exact = promptOf(panel([]));
+    expect(exact.approvalTarget).toContain('pwd');
+    expect(exact.approvalTarget).not.toContain('rm -rf old');
+
+    // `question` reaches 5 rows above the question (a #1699 residual this Issue
+    // leaves alone), so the deny half is judged with the old turn outside it.
+    const described = promptOf(panel(['   Print the working directory', '   before the build', '   starts', '']));
+    expect(described.question).not.toContain('rm -rf');
+    expect(described.approvalTarget).toContain('pwd');
+    expect(described.approvalTarget).not.toContain('rm -rf old');
+
+    const resolution = resolveAutoAnswerWithPolicy(described, policy(['rm -rf']));
+    expect(resolution.suppressedBy).toBeNull();
+    expect(resolution.answer).toBe('1');
+  });
+
+  it('(c) a deeper marker above an unmarked transcript row at the frame column is the previous turn', () => {
+    expect(findApprovalContextStart(['⏺ x', '  ⎿ rm -rf old', 'some output', 'Proceed? (y/n)'], 3)).toBe(2);
+  });
+
   it('a marker row at the frame\'s own column is still the boundary', () => {
     const lines = ['> earlier', 'Bash command', '  > body', 'Proceed?'];
     expect(findApprovalContextStart(lines, 3)).toBe(1);

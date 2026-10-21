@@ -829,13 +829,15 @@ function isTurnBoundaryLine(rawLine: string | undefined): boolean {
  * deny pattern — that poisoning is Issue #1699.
  *
  * [Issue #3817] A marker row indented deeper than the dialog's frame
- * ({@link panelFrameIndent}) is a boundary only when no row of the frame sits
- * above it. One that does — the `> quoted` rows of a here-document under a
- * claude panel's ` Bash command` header — is the body of the command the panel
- * asks about; cutting there took the command rows above it out of the deny
- * surface. The previous turn's markers are drawn at or left of the frame (`⏺`,
- * the user's `> msg` / `❯ msg` echo, a rule), or deeper but above the panel's
- * top row (claude's `  ⎿` result under its `⏺`), and both still end the scan.
+ * ({@link panelFrameIndent}) is the body of the command the panel asks about
+ * when it sits below the panel's header and a frame row sits above it — the
+ * `> quoted` rows of a here-document under a claude panel's ` Bash command`
+ * header. Cutting there took the command rows above it out of the deny surface.
+ * The previous turn's markers are drawn at or left of the frame (`⏺`, the
+ * user's `> msg` / `❯ msg` echo, a rule), or deeper but above the panel's
+ * header (claude's `  ⎿` result under its `⏺`): once the scan has passed a
+ * frame row other than the question, every marker row ends it, so an older
+ * panel's header above that `⎿` is never read as this panel's frame.
  *
  * Shared by both detector paths: multiple_choice passes its `questionEndIndex`,
  * yes_no the line its pattern matched on.
@@ -855,15 +857,18 @@ export function findApprovalContextStart(
   const frameIndent = panelFrameIndent(lines, questionLineIndex, panelEnd);
   // The lowest deeper marker row with no frame row found above it yet.
   let unenclosed = -1;
+  // A frame row (the panel's header) has been passed: the body is below it.
+  let passedFrame = false;
   for (let i = questionLineIndex - 1; i >= floor; i--) {
     const line = lines[i];
     if (line === undefined || line.trim() === '') continue;
     const atFrame = indentOf(line) <= frameIndent;
     if (isTurnBoundaryLine(line)) {
-      if (atFrame) return (unenclosed >= 0 ? unenclosed : i) + 1;
+      if (atFrame || passedFrame) return (unenclosed >= 0 ? unenclosed : i) + 1;
       if (unenclosed < 0) unenclosed = i;
     } else if (atFrame) {
       unenclosed = -1;
+      passedFrame = true;
     }
   }
   return unenclosed >= 0 ? unenclosed + 1 : floor;
