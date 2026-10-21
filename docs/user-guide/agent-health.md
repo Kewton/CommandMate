@@ -389,6 +389,7 @@ tmux -L cm-agent-health kill-server
 | performance | `server-process` | サーバー（`logs/server.pid` の子の `node dist/server/server.js`）の RSS と CPU を 5 秒おきに 6 回（`ps -o rss=,%cpu=`）。あわせて `GET http://127.0.0.1:3000/api/worktrees` を 3 回順に呼び、中央値を `details.apiWorktreesMedianMs` に（401 などは `details.apiWorktreesError` に理由だけ） | RSS の最大（MB） | RSS が新たに 1,500MB 以上／前回比 +50% 以上／CPU 平均が新たに 50% 以上。RSS 1,500MB 以上のままなら `outstanding` |
 | ci | `ci-flaky` | 直近 7 日の develop の push の CI（`gh run list --branch develop --event push`）。失敗したか、やり直した run は、attempt ごとにジョブの結果（`gh run view <id> --attempt <n> --json jobs`）と、失敗したジョブのログ（`--log-failed`）の `FAIL <file> > <name>` の行を読む。失敗したジョブを SHA・ジョブ・attempt の単位で `records` に残し、**テストの失敗**（落ちたテストの名前つき）・**実行環境の障害**（キャンセル・タイムアウト・テストの段まで行かずに落ちた）・**その他**（テストの名前の無い失敗・集約のジョブ）に分け、`details` に件数と **やり直しでの成功**（同じ SHA で attempt によって結果が変わった）の数 | 不安定なテストの本数 | 同じ SHA でやり直して通った run で落ちていたテスト／別の SHA で 2 回以上落ちたテスト（間のコミットがテストと対象を変えたかは見ていない）。最初に落ちてから毎回落ちているテストは**落ち続け**（不具合）として別の種類で出す。前から出ているものは `outstanding` |
 | process | `hook-observation` | 本番ログの直近 24 時間（`log-volume` と同じ 1 回の読み込み）の hook の観測値（Issue #3311）。下の「hook の観測値」 | 写しでない破棄の数 | **なし**（観測だけ。候補にせず、Issue も立てない） |
+| process | `auto-yes-observation` | 本番ログ（`log-volume` と同じ 1 回の読み込み）の Auto-Yes の確認ごとの記録（Issue #3820）。窓は直前の UTC の時刻の境目で終わる 24 時間。下の「Auto-Yes の観測値」 | 窓の中の停止の時間の合計（分） | **なし**（観測だけ。候補にせず、Issue も立てない） |
 
 - **「新たに閾値を超えた」「前回より悪化した」だけが候補**（`candidates`）。前から超えているもの（1,500 行超の 14 本、
   複雑度 25 以上の 83 関数など）は起票せず、`value` と `details` の件数として残す
@@ -412,7 +413,7 @@ tmux -L cm-agent-health kill-server
   state に残り、次の実行はそれと比べる
 - **performance**（Issue #3054）: 本番ログは `scripts/agent-health/production-log.ts` の解決（main worktree の `logs/server.log`）と、
   同じディレクトリの `server.log.1`〜`.3` を読む。「直近 24 時間」は各行の先頭の ISO 時刻で絞る（ローテートの時刻に頼らない）。
-  ログが無い・読めない・24 時間分に満たない（最古の行が 24 時間より新しい）・窓の中に行が無いときは 3 指標とも skip（`hook-observation` も同じ）。
+  ログが無い・読めない・24 時間分に満たない（最古の行が 24 時間より新しい）・窓の中に行が無いときは 3 指標とも skip（`hook-observation`・`auto-yes-observation` も同じ）。
   `server.pid` が無い・そのプロセスが無いときは `server-process` だけ skip。本番サーバーを止めず、設定も変えない（読むのはログ・`ps`・`GET /api/worktrees` だけ）
   - security と同じく、**前から閾値を超えているものも `outstanding`**（初回から）。`fail` は候補か `outstanding` があるとき
   - 公開リポジトリのため、`title`・`evidence`・`details` に載るのは `<tag> <event>` の名前・件数・時間・内訳のフィールド名と数値だけ。
@@ -437,6 +438,36 @@ tmux -L cm-agent-health kill-server
     食い違いが無い日は長さが `null`
   - ログの量: 新しい行は食い違いの終わりの 1 行だけ（`agent-event-duplicate-dropped` は項目が増えただけで行数は同じ）。
     増え方は `log-volume` の `current-output-builder:detection-divergence-resolved` で確かめる
+- **Auto-Yes の観測値**（`auto-yes-observation`、Issue #3820。設計 `docs/design/auto-yes-measurement-3820.md` §6）: 判定は
+  `src/lib/agent-health/auto-yes-observation.ts`。読むのはサーバーの記録（`src/lib/polling/auto-yes-confirmation-ledger.ts`）が
+  `[auto-yes-confirmation-ledger]` で出す行だけ。category は `process`（fail にならず、`candidates` は常に空）。
+  何を候補にするかは、2 週間ほど数字を見てから別の Issue で決める
+  - **窓**: 集計の時刻の直前の UTC の時刻の境目（記録が 1 時間ごとに生存の行と checkpoint を出す時刻）で終わる 24 時間。
+    境目から集計の時刻までの未確定の末尾は数えず、翌日の窓に入る（翌日の窓はこの窓の終わりから始まる）。そのため、この指標だけは
+    共有の窓の始まりより 1 時間前までの行も読む（ほかの指標の数え方は変わらない）
+  - **計測の有無**: 窓の中に計測区間が無ければ（`coveredMs` が 0）skip（計測なし。0 件とは出さない）。生存の行（`auto-yes-ledger-alive`）はその直前の 1 時間を表すので、窓の始まりの境目にある生存の行だけでは計測したことにならない。
+    `coveredMs` は生存の行の経路ごとの計測区間を窓で切って足した時間（最も長い経路の値）、`gapMs` は窓との差、
+    `coveredMsByPath` は経路ごとの内訳（`screen 86400000 / hook 0 / …`）。`pathsMissing` は計測が `coveredMs` より短い経路。
+    `partial` は欠けた経路・欠損の時間・窓の中で増えた記録の例外（`ledgerErrors`）のどれかがあると `1`（部分計測）。
+    hook・API の経路（#3820 PR 2）と agy の結び付け（PR 3）が入るまでは、画面の経路だけなので毎日 `partial: 1`。
+    基準値として比べるのは、同じ経路がそろった日どうしだけ
+  - **停止の時間**（= `value`、分）: 停止の区間ごとに、サーバーが計算した始まり・終わりの時刻（無ければ最後の checkpoint の時刻）を
+    窓で切って足す。行の間隔から推定しない。前日に始まった区間も窓の中の checkpoint だけで内訳に入る。
+    `withheldMsTotal`・`withheldMsMedian`・`withheldMsP90`・`withheldMsMax`、`withheldConfirmations`・`withheldIntervals`。開始の行が欠けて始まりを復元できない区間（理由変更の行には開始の時刻が無い）は時間を足さず、
+    `withheldIntervalsUntimed`（時間不明の区間の数）に件数だけ数える
+  - **確認**: `confirmations`（窓の中で開いていた）・`confirmationsClosed`・`openAtWindowEnd`（窓の終わりの checkpoint にある）・
+    `lostOnRestart`（閉じる行も窓の終わりの checkpoint も無い。再起動などで記録が途切れた。時間は最後の行までを数える）。
+    解消の内訳 `resolvedAfterAnswer` ほか、`resolvedByAuto` / `resolvedByHumanUi` / `resolvedByUnknown`
+  - **回答と試行**: `answered`（閉じる前に `ok` の試行があった確認。`partial` / `no-keys-sent` / `failed` だけの確認は数えない）、
+    `answeredLate`（閉じた後に戻った `ok`。遅れた行の時刻の窓で数え、`answered` に足さない）、`attemptsOk` ほか結果別の数
+  - **hook**（PR 2・3 から）: `hookRequests` / `hookAllowed` / `hookAbstained`（棄権に時間は付けない）、`dialogUnobserved`（確認未観測）、
+    `cliModeObserved`（CLI 自身の許可のモードが見えたインスタンスの数）と `cliModeUnknownInstances`（窓の中で識別できたインスタンスのうち
+    見えていない数。識別できたインスタンスが無ければ `null`）。どれも CommandMate の回答とは足さない
+  - `records`: `answered`（ツール・根拠の段ごとの回答数）・`attempt`（ツール・根拠の段・結果ごと）・`withheld`（ツール・区間の最後の理由ごとの
+    区間の数・合計・最大と、理由が変わった区間の数 `reasonChanged`、時間不明の区間の数 `untimed`）・`hook-abstained`（ツール・理由ごと）・`cli-mode`（ツール・モードごとの
+    インスタンス数。見えないものは `unknown`）
+  - 公開リポジトリのため、載るのは件数・時間・ツール名・根拠の段・理由のコード・経路・モードの語彙だけ。worktree・インスタンス・確認・区間・
+    hook の要求の id は行の突き合わせにだけ使い、写さない。語彙（`auto-yes-confirmation-ledger-types.ts`）に無い値は `(other)` にまとめる
 - 全体は **10 分以内**（3 並列、ツールごとの上限あり。上限に達したものは skip）。2026-10-01 の実測（カバレッジなし）:
   54 秒・149 秒・140 秒（semgrep が最も長く 54〜140 秒）
 
@@ -473,7 +504,7 @@ interface MetricsReport {
     metricId: 'npm-audit' | 'semgrep' | 'secrets' | 'file-size' | 'complexity'
       | 'duplication' | 'unused' | 'outdated' | 'type-safety' | 'coverage'
       | 'api-latency' | 'log-volume' | 'error-rate' | 'server-process'
-      | 'bug-flow' | 'ci-flaky' | 'hook-observation';
+      | 'bug-flow' | 'ci-flaky' | 'hook-observation' | 'auto-yes-observation';
     category: 'security' | 'maintainability' | 'performance' | 'process' | 'ci';
     status: 'pass' | 'fail' | 'skip';
     value: number | null;          // skip のとき null
@@ -490,6 +521,7 @@ interface MetricsReport {
     skipReason?: string;
     details?: Record<string, number | string | null>; // 起票しない件数（500 行超の本数・hook の観測値など）
     records?: Array<Record<string, string | number | string[]>>; // ci-flaky: 失敗したジョブ 1 つ 1 行（sha・workflow・runId・attempt・job・kind・conclusion・tests）
+                                     // auto-yes-observation: kind（answered・attempt・withheld・hook-abstained・cli-mode）ごとの内訳の行
   }>;
   queue: Array<{ key: string; metricId: string; source: 'candidate' | 'outstanding' }>; // 起票する順
   host: { commandmateCommit: string; node: string };

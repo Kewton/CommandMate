@@ -27,13 +27,15 @@ export const METRIC_IDS = [
   'bug-flow',
   'ci-flaky',
   'hook-observation',
+  'auto-yes-observation',
 ] as const;
 
 export type MetricId = (typeof METRIC_IDS)[number];
 
 /**
  * `process`: how the work itself goes (Issue #3185) and what the hooks were
- * observed doing (Issue #3311); recorded only, never a candidate.
+ * observed doing (Issue #3311) and what Auto-Yes did with each confirmation
+ * (Issue #3820); recorded only, never a candidate.
  * `ci`: how reliable develop's CI is (Issue #3310); filed like performance, never dispatched.
  */
 export type MetricCategory = 'security' | 'maintainability' | 'performance' | 'process' | 'ci';
@@ -56,6 +58,7 @@ export const METRIC_CATEGORY: Record<MetricId, MetricCategory> = {
   'bug-flow': 'process',
   'ci-flaky': 'ci',
   'hook-observation': 'process',
+  'auto-yes-observation': 'process',
 };
 
 export function isMetricId(value: string): value is MetricId {
@@ -91,7 +94,10 @@ export const COVERAGE_WEEKDAY_JST = 1;
 
 // performance (Issue #3054; initial values from the 2026-09-28〜10-01 production log)
 
-/** api-latency / log-volume / error-rate / hook-observation read the log lines of this many hours (by each line's ISO time). */
+/**
+ * api-latency / log-volume / error-rate / hook-observation read the log lines of this many hours (by each line's ISO time);
+ * auto-yes-observation reads as many hours ending on the last UTC hour boundary.
+ */
 export const PERF_LOG_WINDOW_HOURS = 24;
 /** `logs/server.log` plus at most this many rotated `server.log.<N>`. */
 export const PERF_LOG_MAX_ROTATED = 3;

@@ -24,6 +24,7 @@
 import { bugFlowSummary } from './bug-flow';
 import { ciFlakySummary } from './ci-flaky';
 import { hookObservationSummary } from './hook-observation';
+import { autoYesObservationSummary } from './auto-yes-observation';
 import { reportDateJst } from './report';
 import { severityRank } from './metrics-parse';
 import {
@@ -462,6 +463,9 @@ function evaluate(m: OkMeasurement, previous: MetricSnapshot | null): Evaluation
       // Observation only (Issue #3311): never a candidate until a later Issue
       // decides, from these numbers, what should be one.
       return { candidates: [], summary: hookObservationSummary(m.details) };
+    case 'auto-yes-observation':
+      // Observation only (Issue #3820), like hook-observation.
+      return { candidates: [], summary: autoYesObservationSummary(m.details) };
   }
 }
 

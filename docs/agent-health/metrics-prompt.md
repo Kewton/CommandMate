@@ -67,6 +67,8 @@
      `queue` に入らないので、この指標から Issue を立てない・コメントしない
    - `hook-observation`（category `process`。hook の写しでない破棄の数・画面と申告の食い違いの回数と長さ）も同じく観測だけの指標。
      `candidates` は常に空で、この指標から Issue を立てない・コメントしない
+   - `auto-yes-observation`（category `process`。Auto-Yes が確認ごとに答えた・止めた件数と停止の時間、計測の有無）も同じく観測だけの指標。
+     `candidates` は常に空で、この指標から Issue を立てない・コメントしない（`details.partial` が 1 の日は部分計測）
 5. 最後に、次の 1 行だけを出力して終わる
    ```
    AGENT_HEALTH_METRICS date=<YYYY-MM-DD> issues_created=<番号をカンマ区切り> issues_commented=<番号をカンマ区切り> skipped=<見送った queue の件数> exit=<EXIT の値>
