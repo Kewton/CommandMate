@@ -242,6 +242,9 @@ export const antigravityAgentEventSource: AgentEventSource = definePushHookSourc
     // Not audited. Default = Claude's current behaviour.
     sessionStartMayArriveLate: false,
     permissionReplyReleasesPrompt: false,
+    // Issue #3820, measured (1.1.12 / 1.1.27 / 1.4.2): agy draws its dialog even
+    // after an `allow`, and the screen's answer is the record — no audit row.
+    permissionAllowSuppressesDialog: false,
     eventIdentity: null,
     resync: 'none',
     // Issue #2198. agy keeps a plain-JSONL transcript per conversation at

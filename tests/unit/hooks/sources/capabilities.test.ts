@@ -62,6 +62,12 @@
  *   promises a detail nothing writes.
  *   Reddened by `tests/unit/hooks/sources/antigravity-self-resume-2614.test.ts`
  *   as well as here.
+ * - `permissionAllowSuppressesDialog` (Issue #3820) — read by
+ *   `resolvePermissionRequest`. Flipping antigravity to `true` puts back the
+ *   `answeredBy: 'auto'` row agy's allow wrote next to the screen's own answer
+ *   (the double record of the design §1.3); flipping claude to `false` loses the
+ *   only record of an approval that drew no dialog. Reddened by
+ *   `tests/unit/hooks/permission-allow-record-3820.test.ts` as well as here.
  *
  * @vitest-environment node
  */
@@ -91,6 +97,7 @@ const _DECLARED_KEYS = [
   'resync',
   'transcriptHistory',
   'stopReportsSelfResume',
+  'permissionAllowSuppressesDialog',
 ] as const;
 
 type DeclaredRow = Pick<AgentSourceCapabilities, (typeof _DECLARED_KEYS)[number]>;
@@ -107,6 +114,7 @@ const ALL_CAPABILITY_KEYS = [
   'configScope',
   'decisionTimeoutSeconds',
   'eventIdentity',
+  'permissionAllowSuppressesDialog',
   'permissionHookPredictsDialog',
   'permissionReplyReleasesPrompt',
   'resync',
@@ -136,6 +144,7 @@ const TABLE: Record<string, DeclaredRow> = {
     resync: 'none',
     transcriptHistory: 'pull',
     // Issue #3430: a `Stop` whose transcript shows unnotified background work.
+    permissionAllowSuppressesDialog: true,
     stopReportsSelfResume: true,
   },
   codex: {
@@ -145,6 +154,7 @@ const TABLE: Record<string, DeclaredRow> = {
     eventIdentity: null,
     resync: 'none',
     transcriptHistory: 'pull',
+    permissionAllowSuppressesDialog: true,
     stopReportsSelfResume: false,
   },
   gemini: {
@@ -154,6 +164,7 @@ const TABLE: Record<string, DeclaredRow> = {
     eventIdentity: null,
     resync: 'none',
     transcriptHistory: null,
+    permissionAllowSuppressesDialog: false,
     stopReportsSelfResume: false,
   },
   copilot: {
@@ -163,6 +174,7 @@ const TABLE: Record<string, DeclaredRow> = {
     eventIdentity: null,
     resync: 'none',
     transcriptHistory: null,
+    permissionAllowSuppressesDialog: true,
     stopReportsSelfResume: false,
   },
   opencode: {
@@ -172,6 +184,7 @@ const TABLE: Record<string, DeclaredRow> = {
     eventIdentity: 'permission-id',
     resync: 'session-status-poll',
     transcriptHistory: 'push',
+    permissionAllowSuppressesDialog: true,
     stopReportsSelfResume: false,
   },
   antigravity: {
@@ -181,6 +194,7 @@ const TABLE: Record<string, DeclaredRow> = {
     eventIdentity: null,
     resync: 'none',
     transcriptHistory: 'pull',
+    permissionAllowSuppressesDialog: false,
     stopReportsSelfResume: true,
   },
   // Issue #2251 (Epic #2249 Phase B). The seventh row, and it is gemini's rather
@@ -199,6 +213,7 @@ const TABLE: Record<string, DeclaredRow> = {
     eventIdentity: null,
     resync: 'none',
     transcriptHistory: 'pull',
+    permissionAllowSuppressesDialog: false,
     stopReportsSelfResume: false,
   },
   // Issue #2934 (Epic #2370 Phase 1). A pull source like opencode.
@@ -215,6 +230,7 @@ const TABLE: Record<string, DeclaredRow> = {
     resync: 'pending-list',
     // Issue #2940: each finished turn is written from the server's own record.
     transcriptHistory: 'push',
+    permissionAllowSuppressesDialog: true,
     stopReportsSelfResume: false,
   },
 };
@@ -239,8 +255,19 @@ function declaredRow(capabilities: AgentSourceCapabilities): DeclaredRow {
     resync: capabilities.resync,
     transcriptHistory: capabilities.transcriptHistory,
     stopReportsSelfResume: capabilities.stopReportsSelfResume,
+    permissionAllowSuppressesDialog: capabilities.permissionAllowSuppressesDialog,
   };
 }
+
+describe('[#3820] permissionAllowSuppressesDialog', () => {
+  it('names the sources whose allow draws no dialog, and agy is not one of them', () => {
+    // agy draws its dialog after an allow (measured on 1.1.12 / 1.1.27 / 1.4.2),
+    // command-code's hook comes after the dialog was answered, gemini is not
+    // measured. The opencode sources approve over their API.
+    const suppressing = Object.keys(TABLE).filter((id) => TABLE[id].permissionAllowSuppressesDialog);
+    expect(suppressing).toEqual(['claude', 'codex', 'copilot', 'opencode', 'opencode-v2']);
+  });
+});
 
 describe('[#1924] AgentSourceCapabilities — the table of §4 D3', () => {
   it.each(Object.keys(TABLE))('%s declares exactly the row the design policy states', (id) => {

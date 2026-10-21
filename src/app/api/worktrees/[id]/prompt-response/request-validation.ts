@@ -13,6 +13,7 @@ import { isCliToolType, isValidInstanceId } from '@/lib/cli-tools/types';
 import type { PromptType, SubmitMode } from '@/types/models';
 import { isValidSubmitMode } from '@/types/models';
 import { isPlanReviewAction, type PlanReviewAction } from '@/lib/cli-tools/command-code-plan-review';
+import { AUTO_YES_BROWSER_ORIGIN, type PromptResponseOrigin } from '@/lib/prompt-response-body-builder';
 import type { StageResult } from './context';
 
 export interface PromptResponseRequest {
@@ -47,6 +48,11 @@ export interface PromptResponseRequest {
    * (esc). Omitted, an answer at that overlay is a comment.
    */
   planReviewAction?: string;
+  /**
+   * Issue #3820: `auto-yes-browser` when the browser's Auto-Yes sent it. Read
+   * by the Auto-Yes ledger only; any other value is ignored, never refused.
+   */
+  origin?: string;
 }
 
 /** A request that passed every body-only check. */
@@ -65,6 +71,8 @@ export interface ValidatedPromptResponse {
   selectionNumbers: number[] | null;
   /** Issue #3125: a comma refusal held until the screen is known not to be a plan review. */
   deferredSelectionError: string | null;
+  /** Issue #3820: the browser's Auto-Yes said it sent this; undefined for everything else. */
+  origin: PromptResponseOrigin | undefined;
 }
 
 /**
@@ -204,6 +212,7 @@ export function validatePromptResponseRequest(
       planReviewAction: body.planReviewAction as PlanReviewAction | undefined,
       selectionNumbers: selection.selectionNumbers,
       deferredSelectionError: selection.deferredSelectionError,
+      origin: body.origin === AUTO_YES_BROWSER_ORIGIN ? AUTO_YES_BROWSER_ORIGIN : undefined,
     },
   };
 }

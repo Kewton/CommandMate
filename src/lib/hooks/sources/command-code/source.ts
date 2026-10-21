@@ -236,6 +236,8 @@ export const commandCodeAgentEventSource: AgentEventSource = definePushHookSourc
     sessionStartMayArriveLate: false,
     // A hook response body releases nothing observable, as on every push source.
     permissionReplyReleasesPrompt: false,
+    // Issue #3820: the hook arrives after the dialog was answered (see above).
+    permissionAllowSuppressesDialog: false,
     // `tool_use_id` is present on both tool events (`call_00_…`) and absent from
     // `SessionStart` and `Stop`, so there is no id covering the frames dedup has
     // to cover. The time window stays. Extraction is declared below regardless,

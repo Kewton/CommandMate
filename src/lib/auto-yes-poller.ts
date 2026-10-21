@@ -129,6 +129,7 @@ import {
   beginLedgerTick,
   endLedgerTick,
   noteLedgerPollerStopped,
+  noteLedgerWorktreeStopped,
   observeLedgerScreen,
   settleLedgerAttempt,
   withholdLedgerConfirmation,
@@ -1515,6 +1516,9 @@ export function stopAutoYesPollingByWorktree(
   pollerKeys.forEach(key => stopAutoYesPolling(key, options?.reason));
   // Issue #3397: and the records of instances whose poller had already stopped.
   forgetEnterFallbacksByWorktree(worktreeId);
+  // Issue #3820: and the ledger's confirmations on them — an API approval is
+  // opened with Auto-Yes off too, so the running pollers do not name them all.
+  noteLedgerWorktreeStopped(worktreeId, resolvePollerStopReason(options?.reason, 'unspecified'));
   if (!options?.keepPartialAnswers) forgetPartialAnswersByWorktree(worktreeId);
 }
 

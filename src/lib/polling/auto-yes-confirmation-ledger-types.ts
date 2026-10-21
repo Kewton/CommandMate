@@ -52,8 +52,12 @@ export type AutoYesLedgerPath = 'screen' | 'hook' | 'api' | 'prompt-response' | 
 /** Where a confirmation was seen or received. */
 export type ConfirmationSource = 'screen' | 'hook' | 'api' | 'prompt-response';
 
-/** The level of evidence an answer was given on (design §0). */
-export type AnswerBasis = 'L1' | 'L2' | 'L3' | 'L4' | 'enter-fallback' | 'browser';
+/**
+ * The level of evidence an answer was given on (design §0). `human` is not
+ * Auto-Yes's: a person's answer through `/prompt-response` (PR 2), recorded
+ * so the browser's Auto-Yes (`browser`) can be told from it.
+ */
+export type AnswerBasis = 'L1' | 'L2' | 'L3' | 'L4' | 'enter-fallback' | 'browser' | 'human';
 
 /**
  * Reasons only the ledger records (design §2.2, §2.5): a stop that is not a
@@ -102,8 +106,12 @@ export type ConfirmationResolvedBy = 'auto' | 'human-ui' | 'unknown';
 /** What Auto-Yes last decided about a confirmation. */
 export type ConfirmationDecision = 'answer' | 'withhold' | 'none';
 
-/** Why a withheld interval ended (design §3.3). */
-export type WithholdEnd = 'answered' | 'gone' | 'unobservable' | 'abandoned';
+/**
+ * Why a withheld interval ended (design §3.3). `stopped`: Auto-Yes stopped (its
+ * poller stopped: off, expired, …) while the confirmation stayed open and
+ * `present` — an API approval, which is not read off the screen.
+ */
+export type WithholdEnd = 'answered' | 'gone' | 'unobservable' | 'stopped' | 'abandoned';
 
 /** Fields on every ledger line. */
 export interface LedgerLineBase {
@@ -243,7 +251,9 @@ export interface ConfirmationClosedLine extends LedgerLineBase {
 export interface HookRequestClosedLine extends LedgerLineBase {
   hookRequestId: string;
   cliToolId: CLIToolType;
+  /** What the agent was answered: a reply the route could not write as decided is `abstained` (`error`). */
   outcome: 'allow' | 'abstained';
+  /** The adjudicator's reason (`policy-suppressed`, `auto-yes-disabled`, …), `worktree-unresolved` or `error`. */
   abstainReason?: string;
   allowSuppressesDialog: boolean;
   replyMs: number;
@@ -278,7 +288,7 @@ const PATHS: Record<AutoYesLedgerPath, true> = {
 /** Every {@link AutoYesLedgerPath}, in the order the PRs add them (design §6.4). */
 export const AUTO_YES_LEDGER_PATHS = Object.keys(PATHS) as readonly AutoYesLedgerPath[];
 
-const BASES: Record<AnswerBasis, true> = { L1: true, L2: true, L3: true, L4: true, 'enter-fallback': true, browser: true };
+const BASES: Record<AnswerBasis, true> = { L1: true, L2: true, L3: true, L4: true, 'enter-fallback': true, browser: true, human: true };
 export const ANSWER_BASES = Object.keys(BASES) as readonly AnswerBasis[];
 
 const WITHHOLD_REASONS: Record<LedgerWithholdReason, true> = {

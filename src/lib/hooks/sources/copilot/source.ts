@@ -226,6 +226,8 @@ export const copilotAgentEventSource: AgentEventSource = definePushHookSource({
     // module comment above.
     sessionStartMayArriveLate: true,
     permissionReplyReleasesPrompt: false,
+    // Issue #3820: an allowed `PreToolUse` runs the call without a dialog.
+    permissionAllowSuppressesDialog: true,
     // Not audited. No captured copilot payload carries a `tool_use_id`, so
     // `'tool-call-id'` would be a guess; whether one exists is still to be
     // measured. Default = Claude's fallback, the time window.

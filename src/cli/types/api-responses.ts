@@ -715,6 +715,17 @@ export interface CurrentOutputResponse {
          */
         eventIdentity: string | null;
         resync: string;
+        /**
+         * Issue #2197: which writer, other than the scraper, records this
+         * tool's replies (`pull` / `push`, or null). String-typed as above, and
+         * optional, as are the two below: a server older than the column sends
+         * none of it.
+         */
+        transcriptHistory?: string | null;
+        /** Issue #2614: whether this source's `stop` says the agent will resume by itself. */
+        stopReportsSelfResume?: boolean;
+        /** Issue #3820: whether answering `allow` means the agent draws no dialog for that call. */
+        permissionAllowSuppressesDialog?: boolean;
       };
       /**
        * Which machinery is speaking for this pane right now (Issue #2054).

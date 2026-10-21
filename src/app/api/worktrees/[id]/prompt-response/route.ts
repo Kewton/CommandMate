@@ -9,6 +9,10 @@
  * (`frame-verification`), the answer's resolution (`answer-resolution`) and the
  * send with what follows it (`answer-delivery`). This file only runs them in
  * order; a route module may export nothing but its HTTP methods (#1946).
+ *
+ * Issue #3820: every response once the session is known to be running goes
+ * through `ledger-record`, which writes it to the Auto-Yes confirmation ledger
+ * and returns it unchanged.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -26,11 +30,16 @@ import { answerViaStructuredDecision } from './structured-decision';
 import { verifyPromptOnScreen } from './frame-verification';
 import { resolveAnswerToSend } from './answer-resolution';
 import { finishAnsweredPrompt, sendResolvedAnswer } from './answer-delivery';
+import { notePromptResponseInLedger } from './ledger-record';
+import type { ValidatedPromptResponse } from './request-validation';
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
+  // Issue #3820: set once the session is known to be running, so the catch-all
+  // records its 500 too.
+  let ledger: { ctx: PromptResponseContext; request: ValidatedPromptResponse } | null = null;
   try {
     const { id: requestedWorktreeId } = await params;
     const id = canonicalWorktreeId(requestedWorktreeId);
@@ -87,35 +96,38 @@ export async function POST(
     }
 
     const ctx: PromptResponseContext = { id, db, cliToolId, instanceId };
+    ledger = { ctx, request };
+    const noted = (response: NextResponse) => notePromptResponseInLedger(ctx, request, response);
 
     // Issue #1898: answer the approval the agent is actually holding, before
     // going anywhere near the pane.
     const structuredResponse = await answerViaStructuredDecision(ctx, request);
-    if (structuredResponse) return structuredResponse;
+    if (structuredResponse) return noted(structuredResponse);
 
     // Get session name for the CLI tool (Issue #868: per-instance)
     const sessionName = cliTool.getSessionName(id, instanceId);
 
     // Issue #161: Re-verify that a prompt is still active before sending keys.
     const verification = await verifyPromptOnScreen(ctx, request, sessionName);
-    if ('response' in verification) return verification.response;
+    if ('response' in verification) return noted(verification.response);
     const verified = verification.value;
 
     // Issues #1681 / #1726 / #2522 / #2755: resolve the answer to the input
     // sent, refusing it with nothing sent when it cannot be right.
     const resolution = resolveAnswerToSend(ctx, request, verified);
-    if ('response' in resolution) return resolution.response;
+    if ('response' in resolution) return noted(resolution.response);
 
     const sendFailure = await sendResolvedAnswer(ctx, request, sessionName, resolution.value, verified.verifiedFrame);
-    if (sendFailure) return sendFailure;
+    if (sendFailure) return noted(sendFailure);
 
-    return finishAnsweredPrompt(ctx, verified.promptCheck, resolution.value);
+    return noted(finishAnsweredPrompt(ctx, verified.promptCheck, resolution.value));
   } catch (error: unknown) {
     logger.error('failed-to-respond-to-prompt:', { error: error instanceof Error ? error.message : String(error) });
     const errorMessage = error instanceof Error ? error.message : 'Internal server error';
-    return NextResponse.json(
+    const failure = NextResponse.json(
       { error: errorMessage },
       { status: 500 }
     );
+    return ledger ? notePromptResponseInLedger(ledger.ctx, ledger.request, failure) : failure;
   }
 }

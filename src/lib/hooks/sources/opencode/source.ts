@@ -366,6 +366,8 @@ export const opencodeAgentEventSource: AgentEventSource = definePullEventSource(
     // `permission.replied` arrives on the same stream and is a positive
     // statement that the dialog is gone (#1898). The only source that can say so.
     permissionReplyReleasesPrompt: true,
+    // Issue #3820: an allow is the approval itself, over the agent's API.
+    permissionAllowSuppressesDialog: true,
     // `per_...` — the id in the reply URL, which is the same id the frame
     // carries (#1899). Real identity, so this source does not need the time
     // window that loses the `stop` of a short turn.

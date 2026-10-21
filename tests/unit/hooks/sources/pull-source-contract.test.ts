@@ -170,6 +170,8 @@ function buildOpencodeSource(server: FakeServer): AgentEventSource {
       permissionHookPredictsDialog: false,
       sessionStartMayArriveLate: false,
       permissionReplyReleasesPrompt: true,
+      // Issue #3820.
+      permissionAllowSuppressesDialog: true,
       eventIdentity: 'permission-id',
       resync: 'session-status-poll',
       // Issue #2197: the tool this fixture stands for has no transcript reader.

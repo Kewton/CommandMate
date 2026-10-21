@@ -137,6 +137,8 @@ export const geminiAgentEventSource: AgentEventSource = definePushHookSource({
     // Not audited. Default = Claude's current behaviour.
     sessionStartMayArriveLate: false,
     permissionReplyReleasesPrompt: false,
+    // Issue #3820: not measured, and no permission hook is registered.
+    permissionAllowSuppressesDialog: false,
     eventIdentity: null,
     resync: 'none',
     // Issue #2197. Nobody but the screen scraper records gemini replies.

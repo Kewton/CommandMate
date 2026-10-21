@@ -46,7 +46,35 @@
 | 整合性レビュー P2-2: 本文が違う確認が同じ id になる | #3817 で `partialAnswerScreenKey` は選択肢の行を読めるときだけその行の印・字下げを揃えるようになったが、読めないときは従来どおり全行の印・字下げを消す（部分送信では 2 つを 1 画面と読む方が安全なため）。記録の識別はこれでは足りないので、**`ledgerScreenKey`** を使う: 選択肢の行を読めるときは `partialAnswerScreenKey` と同じ、読めないときは**検出器が読んだ選択肢（`promptData.options` の番号とラベル）に一致する行だけ**印・字下げを消し、ほかの行（番号つきの本文を含む）はそのまま残す。照合は `1.`・`1)`・ピリオドの無い `1  Yes` を区切りの空白の数によらず受け付ける（再レビューの 2 件: 番号つきの本文が 1 件に潰れる・ピリオドの無い選択肢でカーソルが動くと開き直す） | §2.1 |
 | 整合性レビュー P2-3: agy の専用リーダーの確認が L4 になる | agy の門は `legacy`（`gated: false`）なので門の判定からは L3 にならない。poller が同じ文字列を agy の専用リーダー（`detectAntigravityNumberedDialogPrompt`。`detectPromptOnCleanFrame` は読めればその結果を返す）で読み直し、読めたら **`L3`**（受信の門を通った確認なので `receiptAccepted: true`）、読めなければ汎用の推定で `L4` とする。読み直しは記録の段のためだけで、答えはその前に決まっている | §7 PR 1 |
 
-### 改訂 3: PR 4（日次の集計）の実装で直したこと
+### 改訂 3: PR 2 の実装で直したこと
+
+PR 2 の実装（hook・API・`/prompt-response` の経路）で分かった食い違いを、設計書の側で直した。
+
+| 食い違い | 決定と反映 | 節 |
+|---|---|---|
+| 人の回答の根拠の段が語彙に無い | `/prompt-response` の人の回答を、ブラウザの自動回答（`browser`）と分けて数えるため、`AnswerBasis` に **`human`** を足した（Auto-Yes の回答ではない。`closed` の `decision` は `none`）。PR 4 は知らない値を `(other)` にまとめるので壊れない | §0・§2.6 |
+| `/prompt-response` の確認の開閉 | route が受けた 1 リクエストを **1 件の確認（`source: 'prompt-response'`）** とし、試行 1 つと同時に開いて閉じる。画面の経路の確認とは結ばない（同じ画面を poller も見ていれば、別の `source` の 2 件になる。集計は `source` で分ける）。`ok` なら `resolved-after-answer`（人なら `resolvedBy: 'human-ui'`、ブラウザなら `unknown`）、失敗は `unresolved-after-send`。区間は開かない。記録はセッションが動いていると分かった後の応答だけ（それより前の 400・404 は確認に数えない） | §2.1・§2.6 |
+| hook の要求を開く時点と、返事を書けなかったとき | 要求は route が worktree を引いた直後に開く（`worktree-unresolved` も 1 件の要求として閉じる）。route の catch-all が書くのは棄権の本文なので、要求は `outcome: 'abstained'`・`abstainReason: 'error'` で閉じ、allow で開いていた確認は試行 `failed`・`unresolved-after-send` で閉じる | §2.3 |
+| `afterHookAllow` / `afterHookAbstain` の基準の時刻 | 要求を**閉じた**時刻から `AUTO_YES_LEDGER_HOOK_LINK_WINDOW_MS`（8 秒。agy の受信窓と同じ）以内に、同じインスタンスで画面の確認が開いたとき。要求の id は付けない（同じ呼び出しとは断定しない） | §2.3・§2.4 |
+| opencode の確認を閉じる契機 | `settled` で閉じる（`resolved-by-reply`・`resolvedBy: 'auto'`）ほかに、Auto-Yes が settle しなかった承認は **`permission.replied`（v2 は決着の通知）** を受けた時点で閉じる（`src/lib/hooks/sources/opencode/ingest.ts`・`opencode-v2/ingest.ts`。誰が答えたかは分からないので `unknown`）。ポーラーの停止（Auto-Yes OFF など）では `unobservable` にしない（画面で見ている確認ではない）。セッションの終了では放棄する | §2.4・§4.2 |
+| `permission_mode` | claude だけでなく codex の `PermissionRequest` にも載っている（`tests/fixtures/hooks/codex/permission-request.json`）。どのツールでも本文にあれば記録する。値は語彙の形（英字と `-`、32 文字まで）に限り、外れたら `(other)` | §3.4 |
+| PR 1 のテストが固定していた `paths` | PR 1 の `auto-yes-confirmation-ledger-3820.test.ts` は `paths: ['screen']` を固定していた。§6.4 のとおり PR 2 で `screen`・`hook`・`api`・`prompt-response` に変わるので、その 2 か所の期待値だけを直した | §6.4 |
+
+### 改訂 4: PR 2 の整合性レビュー（5 件）で直したこと
+
+PR 2 の実装への Codex の整合性レビュー（`.commandmate/tasks/review-3820-pr2.md`）の 5 件を、実装と設計書の両方で直した。
+
+| 指摘 | 決定と反映 | 節 |
+|---|---|---|
+| API の停止の区間に Auto-Yes OFF の間の時間が入る | API の確認を開いたまま残すことと、停止の区間を終えることを分けた。セッションを終えない停止（`manual`・`expired`・`not-enabled`・`stop-pattern`・`consecutive-errors`・`shutdown`）では、API の確認は閉じず存在も `present` のまま（返事でまだ決着する）だが、開いている区間は **`end: 'stopped'`**（`WithholdEnd` に足した）で閉じる。OFF の間は区間が無いので checkpoint に時間は入らない。OFF の前に始めた配送が OFF の後に `failed` で戻っても、試行は `failed` と記録するが区間は開き直さない（再レビュー）。ON に戻って再裁定（allow か、方針による停止）したら、その有効期間の区間として扱い、止めるなら同じ確認に新しい区間を開く | §3.3・§4.2 |
+| API の遅れた結果が別の確認の通常の回答になる | 画面の経路と同じく、配送の前（await の前）に確認と試行を取る（`beginLedgerApiAdjudication`）。結果はその試行へ返す（`settleLedgerApiAdjudication`）。配送の間に確認が閉じていれば（kill など）、その確認の `late: true` の行だけを書き、決定の id で確認を開き直さない。一度で書く `recordLedgerApiAdjudication` は 2 つを続けて呼ぶ形で残した | §2.4・§2.5 |
+| poller の無い API の確認が worktree の削除で放棄されない | 記録の後始末を、動いている poller の列挙に頼らない。`stopAutoYesPollingByWorktree`（worktree の削除・セッションの後始末・全エージェントの OFF が通る）は、poller ごとの停止の後に **`noteLedgerWorktreeStopped`** で、その worktree の開いている確認すべてに同じ停止を伝える（削除なら `abandoned(worktree-deleted)`、OFF なら区間を閉じる）。インスタンス単位の停止（`stopAutoYesPolling`）は、poller が無くても記録へ伝える（PR 1 から） | §4.2 |
+| hook の配送のヘルパーが握りつぶした失敗を回答の成功と記録する | `answerPendingDecision` に、既存の配送の受領（receipt）を渡す `onReceipt` を足した（本文は変わらない）。受領が「届いていない」（`decide` が throw した、slot が閉じていた）と言えば、route は要求を `abstained`・`abstainReason: 'delivery-failed'` で閉じ、allow で開いていた確認は試行 `failed`・`unresolved-after-send`（`abandonReason: 'delivery-failed'`）で閉じる。受領が無いときは本文を書いたものとして従来どおり | §2.3 |
+| 新しい能力が CLI の型の写しと説明に無い | `src/cli/types/api-responses.ts` の capabilities に `permissionAllowSuppressesDialog`（と、同じく抜けていた `transcriptHistory`・`stopReportsSelfResume`）を任意の項目として足した。CLI ガイド（ja・en）の `capture --json` の例と、`docs/design/multi-agent-state-architecture.md` §4 D3 の能力の表にも足した | — |
+
+残す制限（この PR では直さない）: `respond` / strict `respond` の回答は記録しない（経路の表に無い）。ブラウザの自動回答が `instanceId` を渡さない件は #3821 でブラウザの自動回答をやめるときに扱う。
+
+### 改訂 5: PR 4（日次の集計）の実装で直したこと
 
 | 食い違い | 決定と反映 | 節 |
 |---|---|---|
@@ -58,6 +86,16 @@
 | 開始の行が欠け、理由変更の行（開始の時刻を持たない）だけが残った区間を窓の先頭から数えると、根拠の無い時間が足される（整合性レビュー P2） | 開始を復元できない区間は時間を足さず、`withheldIntervalsUntimed`（`records` は `untimed`）に件数だけ数える | §4.3・§6.2 |
 | 生存の行があるだけで ok にすると、窓の始まりの境目の生存の行（直前の 1 時間を表す）だけで「停止 0 分」を正常値として出す（整合性レビュー P2） | skip の判定を「窓の中に計測区間がある（`coveredMs` > 0）か」にした | §4.4・§6.1 |
 | 集計が語彙を見分けるには型ではなく値が要る | `auto-yes-confirmation-ledger-types.ts` に語彙の値の一覧（経路・根拠の段・理由・結果・解消・hook の棄権の理由・モード）を足した。型の union と食い違うとコンパイルで落ちる書き方 | §6.1 |
+
+### 改訂 6: PR 2 と PR 4 の統合で直したこと
+
+develop の PR 4（#3834）をこのブランチに取り込んで分かった食い違いを直した。
+
+| 食い違い | 決定と反映 | 節 |
+|---|---|---|
+| 語彙の値の一覧（`ANSWER_BASES`）に PR 2 の `human` が無い（型が合わず tsc が落ちる。集計では `human` が `(other)` になる） | `auto-yes-confirmation-ledger-types.ts` の一覧に `human` を足した | §0・§6.3 |
+| `/prompt-response` の人の回答（basis `human`）も `answeredAtClose` の確認なので、`answered`（Auto-Yes の回答）に入る | `human` で閉じた確認は `answered` に数えず **`answeredByHuman`** に数える。ブラウザの自動回答（`browser`）と API の allow（`L1`）は `answered`。`records` の `answered` は根拠の段ごとの内訳のまま（`basis: 'human'` の行が残る）。試行の数（`attemptsOk` ほか）は人の送信も含む | §6.2 |
+| PR 2 の `end: 'stopped'` と経路 `prompt-response` | 集計は区間を `endedAtMs` で終えるので、OFF の後の時間は数えない（API の確認は開いたまま checkpoint に出るが、区間を持たない）。PR 2 の記録は `screen`・`hook`・`api`・`prompt-response` を出すので、`pathsMissing` は `agy-link` だけになる（§6.4 の表のとおり）。PR 4 のテストが PR 1 の経路で固定していた `pathsMissing` の期待値は、この値に直した | §4.3・§6.4 |
 
 ---
 
@@ -73,7 +111,7 @@
 | 回答可否（`answerability`） | Auto-Yes が今その確認に答えられるか: `answerable`／`withheld`（理由つき）。存在とは独立に動く（§2.2） |
 | 解消 | 確認の存在が `gone` になったこと。誰が消したか（`resolvedBy`）は、因果を確かめられたときだけ書き、それ以外は `unknown` |
 | 停止の区間 | 1 件の確認について、Auto-Yes が答えられない（`withheld`）と判断してから、答えるか、確認が解消するか、観測できなくなるまでの時間。1 件の確認に複数の区間があり得る（§4.1） |
-| 根拠の段 | 基本方針の L1〜L4。L1 = hook / API の判定、L2 = hook の目撃と画面の照合、L3 = ツール専用の規則で認識した画面、L4 = 汎用の文字推定。ほかに今の経路として `enter-fallback`（Enter の補い）と `browser`（ブラウザの自動回答）を別に数える |
+| 根拠の段 | 基本方針の L1〜L4。L1 = hook / API の判定、L2 = hook の目撃と画面の照合、L3 = ツール専用の規則で認識した画面、L4 = 汎用の文字推定。ほかに今の経路として `enter-fallback`（Enter の補い）と `browser`（ブラウザの自動回答）を別に数える。`human` は `/prompt-response` の人の回答で、Auto-Yes の回答ではない（改訂 3） |
 | 計測の有無 | その時間に記録のモジュールが動いていて、ログが出る水準だったか。生存の行で示す（§4.4）。**計測が無い時間を 0 件と扱わない** |
 
 ---
@@ -275,7 +313,7 @@ C の欠点への手当て:
 | `auto-yes-confirmation-opened` | 確認を初めて見た／受けた | `confirmationId`・`worktreeId`・`cliToolId`・`instanceId`・`source`（`screen` / `hook` / `api` / `prompt-response`）・`promptType`・`callId`（あれば）・`hookRequestId`（結べたとき）・`afterHookAllow` / `afterHookAbstain` |
 | `auto-yes-withhold-started` | 停止の区間を開いた | `confirmationId`・`intervalId`（`<confirmationId>#<n>`）・`cliToolId`・`source`・`reason`・`startedAtMs` |
 | `auto-yes-withhold-reason-changed` | 区間の中で理由が変わった | `confirmationId`・`intervalId`・`cliToolId`・`source`・`from`・`to` |
-| `auto-yes-withhold-ended` | 区間を閉じた | `confirmationId`・`intervalId`・`cliToolId`・`source`・`startedAtMs`・`endedAtMs`・`withheldMs`・`end`（`answered` / `gone` / `unobservable` / `abandoned`）・`lastReason` |
+| `auto-yes-withhold-ended` | 区間を閉じた | `confirmationId`・`intervalId`・`cliToolId`・`source`・`startedAtMs`・`endedAtMs`・`withheldMs`・`end`（`answered` / `gone` / `unobservable` / `stopped` / `abandoned`。`stopped` は改訂 4）・`lastReason` |
 | `auto-yes-confirmation-attempt-settled` | 試行の結果が戻った | `confirmationId`・`attemptId`・`basis`・`result`（`ok` / `partial` / `no-keys-sent` / `failed`）・`late`・`expired` |
 | `auto-yes-confirmation-presence-changed` | 存在が `present`↔`unobservable` に変わった | `confirmationId`・`from`・`to`・`cause`（停止の理由など） |
 | `auto-yes-confirmation-checkpoint` | 1 時間ごと（UTC の時刻の境目）、開いている確認ごと。**復元できるスナップショット** | `confirmationId`・`cliToolId`・`source`・`presence`・`answerability`・`withheldMsTotal`（その時点までの累積）。区間が開いていれば `intervalId`・`reason`（今の理由）・`intervalStartedAtMs`・`intervalMs`（その区間のその時点までの長さ） |
@@ -327,6 +365,7 @@ C の欠点への手当て:
 | `ok` の後に同じ確認を再び `withheld` | **新しい区間**を開く | — |
 | 存在が `gone` | 区間を閉じる（`end: 'gone'`） | 閉じる（§2.6 の `resolution`） |
 | Auto-Yes OFF・期限切れ・`stop-pattern`・`consecutive-errors`（`AutoYesPollerStopReason`、`src/config/auto-yes-config.ts:97`） | 区間を閉じる（`end: 'unobservable'`） | 存在を `unobservable` に。閉じない（§2.3 の OFF→ON） |
+| 同じ停止の下の API の確認（opencode の承認。画面では見ていない。改訂 4） | 区間を閉じる（`end: 'stopped'`）。OFF の間は区間に入れない（OFF の後に戻った配送の失敗でも開かない。次の再裁定から新しい有効期間） | 存在は `present` のまま。閉じない（返事でまだ決着する） |
 | ON に戻り、同じ世代・同じ画面キーを見た | 止めるなら新しい区間 | 存在を `present` に戻す |
 | ON に戻り、確認が無い | — | `closed(gone-while-unobservable)` |
 | セッションの終了（`session-killed`・`instance-removed`・`worktree-deleted`・`orphan-swept`・`invalid-key`、`src/lib/auto-yes-lifecycle.ts:110-118`）・セッションの世代交代 | 区間を閉じる（`end: 'abandoned'`） | `closed(abandoned)`、`abandonReason` に停止の理由 |
@@ -339,13 +378,13 @@ C の欠点への手当て:
 **決定: 閉じた確認の集計ではなく、当日（集計の窓）の停止の時間を測る。**
 
 - **checkpoint**: 記録のモジュールは、UTC の時刻の境目（`atMs` が 3,600,000 ms の倍数になる時刻。JST の 0 時もこの格子に乗る）ごとに、開いている確認それぞれについて `auto-yes-confirmation-checkpoint` を 1 行出す。格子は固定で、集計の窓（`PERF_LOG_WINDOW_HOURS` = 24、`metrics-types.ts:95`）の取り方に依存しない。生存の行（§4.4）も同じ時刻に出す
-- **窓の終わりを揃える**: 集計の窓 `[s, e]` の `e` は、集計の時刻以前で最後の**完了済みの時刻の境目**（記録が動いていれば最後の checkpoint・生存の行の時刻）に揃え、`s` = `e` − 24 時間とする。その後の未確定の末尾（境目から集計の時刻まで）は数えない（次の日の窓は `e` から始まるので、そこに入る。改訂 3）
-- **`intervalId` 単位で突き合わせる**: 集計は窓 `[s, e]` の中の行（`atMs` で判定）だけを使う。`s` は共有の読み込みの窓より最大 1 時間前なので、`addLogLine()` は記録の行だけを 1 時間前まで渡す（改訂 3）。区間ごとに `withhold-started`・`withhold-reason-changed`・`withhold-ended`・checkpoint を `intervalId` で集め、窓の中の長さ =
+- **窓の終わりを揃える**: 集計の窓 `[s, e]` の `e` は、集計の時刻以前で最後の**完了済みの時刻の境目**（記録が動いていれば最後の checkpoint・生存の行の時刻）に揃え、`s` = `e` − 24 時間とする。その後の未確定の末尾（境目から集計の時刻まで）は数えない（次の日の窓は `e` から始まるので、そこに入る。改訂 5）
+- **`intervalId` 単位で突き合わせる**: 集計は窓 `[s, e]` の中の行（`atMs` で判定）だけを使う。`s` は共有の読み込みの窓より最大 1 時間前なので、`addLogLine()` は記録の行だけを 1 時間前まで渡す（改訂 5）。区間ごとに `withhold-started`・`withhold-reason-changed`・`withhold-ended`・checkpoint を `intervalId` で集め、窓の中の長さ =
   - `withhold-ended` がある: `[max(startedAtMs, s), min(endedAtMs, e)]`
   - `withhold-ended` が無く checkpoint がある: `[max(intervalStartedAtMs, s), 最後の checkpoint の時刻]`（窓の終わり `e` は最後の境目なので、これで窓の終わりまで）
   - ツール・`source`・理由はどの行にも載っているので、前日に始まった区間でも窓の中の行だけで内訳に入れられる。理由は区間の最後の理由（`withhold-ended` の `lastReason`、無ければ最後の checkpoint の `reason`）で数える
   - 最後の checkpoint の後に区間が終わり、同じ確認で新しい区間が始まっても、`intervalId` が違うので取り違えない
-- **再起動で消えた確認**: 同じ `confirmationId` の `closed` が無く、窓の終わりの checkpoint にも無いもの（その `bootId` の生存の行が途切れた。別の `bootId` が現れない、止まったままのサーバーも含む。改訂 3）。**最後の checkpoint（または最後の行）までの時間は数え**、それ以降は不明として `lostOnRestart`（件数だけ）に出す
+- **再起動で消えた確認**: 同じ `confirmationId` の `closed` が無く、窓の終わりの checkpoint にも無いもの（その `bootId` の生存の行が途切れた。別の `bootId` が現れない、止まったままのサーバーも含む。改訂 5）。**最後の checkpoint（または最後の行）までの時間は数え**、それ以降は不明として `lostOnRestart`（件数だけ）に出す
 - **未完了の件数**: 窓の終わりに開いている確認は `openAtWindowEnd`（件数）と、その窓の中の停止の時間（上の切り出し）を出す。閉じた日に全部の長さが入る第 1 版の案はやめる
 - **並べ方（推奨 7）**: 集計は行を `atMs`（なければ行の時刻）で並べ直してから状態を作る。ログを読む順（最新の `server.log` → ローテート済みの `.1`・`.2`）は時系列ではない
 
@@ -356,7 +395,7 @@ C の欠点への手当て:
 - `auto-yes-ledger-started`（プロセスで 1 回）と `auto-yes-ledger-alive`（1 時間ごと、checkpoint と同じ格子）を出す。生存の行は「その区間、記録のモジュールが動いていた」の意味で、`bootId` と経路ごとの計測区間 `segments` を持つ
 - 集計は生存の行の `segments` を経路ごとに足して **`coveredMsByPath`**（窓で切る）とし、窓の長さ `windowMs` との差を欠損の時間として出す。**生存の行 1 つで 1 時間を計測済みにしない**: 区間の始まりは同じ `bootId` の前の生存の行か記録の開始で、途中から始まったプロセスはその時刻から数える。比率・中央値などは計測があった時間を分母にする
 - 比べられるか: 経路ごとの計測の時間が窓と違う（途中で経路が増えた・欠損がある）・`ledgerErrors` が窓の中で増えた、のどれかなら `partial: true`
-- 窓の中に計測区間が無ければ（`coveredMs` が 0）、`auto-yes-observation` は **skip（計測なし）** にして 0 件と出さない。生存の行は直前の区間を表すので、窓の始まりの境目にある生存の行だけでは窓の中を計測したことにならない（改訂 3）
+- 窓の中に計測区間が無ければ（`coveredMs` が 0）、`auto-yes-observation` は **skip（計測なし）** にして 0 件と出さない。生存の行は直前の区間を表すので、窓の始まりの境目にある生存の行だけでは窓の中を計測したことにならない（改訂 5）
 - 生存の行が来ない原因（ログ水準が `warn` 以上、記録のモジュールが無い版、ログの欠損）は区別しない。どれも「計測なし」
 - 生存と checkpoint の時計は、**記録のモジュールが最初に使われたとき**に 1 つだけ張る（次の時刻の境目までの `setTimeout` を繰り返し、`unref` してプロセスの終了を妨げない）。時計は `globalThis` の状態に置き、再読み込み・2 回目の呼び出しで二重にしない。`server.ts` は変えない（評価時の import を増やすと Next の起動が壊れる前例がある）ので、最初の確認より前の時間は計測なしになる。新しいプロセスは起動しない
 
@@ -410,10 +449,11 @@ C の欠点への手当て:
 | `coveredMsByPath` / `coveredMs` / `windowMs` / `gapMs` / `partial` / `pathsMissing` / `ledgerErrors` | 経路ごとの計測があった時間（`screen 86400000 / hook 0 / …` の文字列）・その最大・窓の長さ（完了済みの境目まで）・欠損の時間（窓 − `coveredMs`）。比べられなければ `partial: 1`（`details` は真偽値を持てないので `1` / `0`）と、`coveredMs` より短い経路（カンマ区切り）。`ledgerErrors` は窓の中で増えた記録の例外の数（§4.4・§6.4） |
 | `confirmations` / `confirmationsClosed` / `openAtWindowEnd` | 窓の中で開いていた確認の数・その中で閉じた数・窓の終わりに開いている数 |
 | `answered` / `answeredLate` | 閉じる前に `ok` の試行があった確認の数（`closed` の `answeredAtClose`。**`partial` / `no-keys-sent` / `failed` だけの確認は含めない**）と、閉じた後に `ok` が戻った試行の数（`late` の行の時刻の窓で数える。`answered` には足さない） |
+| `answeredByHuman` | `/prompt-response` の人の回答（basis `human`）で閉じた確認の数。Auto-Yes の回答ではないので `answered` に足さない（改訂 6） |
 | `attemptsOk` / `attemptsPartial` / `attemptsNoKeysSent` / `attemptsFailed` / `attemptsLate` | 試行の結果別の数（遅れて戻った結果を含む。`attemptsLate` はその内数） |
 | `resolvedAfterAnswer` / `resolvedWhileWithheld` / `resolvedByReply` / `resolvedBeforeDecision` / `unresolvedAfterSend` / `goneWhileUnobservable` / `abandoned` | §2.6 の `resolution` 別 |
 | `resolvedByAuto` / `resolvedByHumanUi` / `resolvedByUnknown` | §2.6 の `resolvedBy` 別 |
-| `withheldConfirmations` / `withheldIntervals` / `withheldIntervalsUntimed` | 窓の中に停止の区間があった確認の数・時間を切り出せた区間の数・開始を復元できない区間の数（理由変更の行だけが残った。時間は足さない。改訂 3） |
+| `withheldConfirmations` / `withheldIntervals` / `withheldIntervalsUntimed` | 窓の中に停止の区間があった確認の数・時間を切り出せた区間の数・開始を復元できない区間の数（理由変更の行だけが残った。時間は足さない。改訂 5） |
 | `withheldMsTotal` / `withheldMsMedian` / `withheldMsP90` / `withheldMsMax` | 窓の中に切り出した停止の時間（§4.3）の合計と、区間ごとの分布 |
 | `lostOnRestart` | 再起動で閉じなかった確認の数（時間は最後の checkpoint までを上に含め、以降は不明） |
 | `hookRequests` / `hookAllowed` / `hookAbstained` | hook の要求の数と結果別（`hookAbstained` は理由別の内訳を `records` に。時間は持たない、§2.3） |
@@ -486,7 +526,9 @@ C の欠点への手当て:
   - `src/lib/hooks/permission-decision-service.ts`（hook の要求の記録と §2.3 の規則、能力が `false` なら `recordAllowedPermission` を呼ばない、`permissionMode` の観測 §3.4）
   - `src/app/api/hooks/permission-request/route.ts`（`permission-request-decided` に `allowSuppressesDialog`、要求を閉じる行）
   - `src/lib/hooks/permission-adjudication.ts`（opencode の試行と解消）
-  - `src/hooks/useAutoYes.ts` と `src/app/api/worktrees/[id]/prompt-response/`（本文に `origin: 'auto-yes-browser'` を足し、計測の記録で `browser` と人を分ける。**`answeredBy` は変えない**。#3821 でブラウザの自動回答をやめるまでの基準の数字を取るため）
+  - `src/hooks/useAutoYes.ts` と `src/app/api/worktrees/[id]/prompt-response/`（本文に `origin: 'auto-yes-browser'` を足し、計測の記録で `browser` と人を分ける。**`answeredBy` は変えない**。#3821 でブラウザの自動回答をやめるまでの基準の数字を取るため）。`origin` の定数は client から読める `src/lib/prompt-response-body-builder.ts` に置き、`useAutoYes.ts` は記録のモジュールを import しない
+  - `src/lib/hooks/sources/opencode/ingest.ts`・`opencode-v2/ingest.ts`（`permission.replied` で opencode の確認を閉じる。改訂 3）
+  - 整合性レビューの分（改訂 4）: `src/lib/hooks/sources/pending-decisions.ts`（`answerPendingDecision` の `onReceipt`）、`src/lib/auto-yes-poller.ts`（`stopAutoYesPollingByWorktree` から `noteLedgerWorktreeStopped`）、`src/cli/types/api-responses.ts`（capabilities の写し）、CLI ガイド（ja・en）の `capture --json` の例、`docs/design/multi-agent-state-architecture.md` §4 D3 の能力の表
   - テスト: 能力の表のテスト（`tests/unit/hooks/sources/capabilities.test.ts`。全ソースが宣言している）、agy の allow で行を書かないこと、claude の allow で今までどおり行を書くこと（陰性）、**hook の route と `/prompt-response`・opencode の配送で、記録とロガーを throw させても応答の本文・状態コードが変わらない故障注入のテスト（推奨 9）**
 - 受入基準:
   - claude / codex / copilot の allow → hook の要求 1 件と確認 1 件（`L1`・`resolved-by-reply`・`resolvedBy: 'auto'`）、`chat_messages` の行 1 行（今と同じ）
@@ -495,6 +537,10 @@ C の欠点への手当て:
   - `PermissionRequest` の `permission_mode` が来る → `cli-mode-observed(first)`、違う値 → `changed`。来ないツール・インスタンスは `unknown`
   - `/prompt-response` の `origin` 付き → `basis: 'browser'`、無し → 人。配送の失敗（`success: false`・500）は `failed` の試行で、回答に数えない
   - opencode の配送の失敗（`delivered: false`）は `failed` の試行で、回答に数えない
+  - Auto-Yes OFF（`manual`）で、止めていた API の確認の区間は `end: 'stopped'` で閉じ、確認は開いたまま。OFF の間は checkpoint の停止の時間に入らない（改訂 4）
+  - API の配送の間に確認が閉じたら、戻った結果はその確認の `late: true` で、確認を開き直さない（改訂 4）
+  - poller の無い API の確認も、worktree の削除で `abandoned(worktree-deleted)` になる（改訂 4）
+  - hook の配送のヘルパーが握りつぶした失敗（`decide` の throw）は、本文はそのままで、要求 `abstained(delivery-failed)`・試行 `failed` と記録する（改訂 4）
   - **陰性（N2）: API の裁定（`permission-adjudication.ts` から `resolvePermissionRequest()`）は hook の要求の行を出さない（`hookRequestId` は hook の route だけが発行する）。opencode の承認要求 1 件 → 確認 1 件・hook の要求 0 件**
 - 依存: PR 1（記録のモジュールと語彙）
 

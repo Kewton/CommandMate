@@ -28,6 +28,17 @@
  * capability block is the whole vocabulary (`docs/design/
  * multi-agent-state-architecture.md` §4 D3).
  *
+ * ## The ledger (Issue #3820)
+ *
+ * Each adjudication is written to the Auto-Yes confirmation ledger as the
+ * approval's confirmation, keyed by the decision id (design
+ * `docs/design/auto-yes-measurement-3820.md` §2.4): an `allow` is a send whose
+ * result is `delivered`, `settled` closes it, a policy's abstention withholds
+ * it. **No hook request is made here** — that id is the hook route's alone
+ * (§2.3, N2), so `resolvePermissionRequest` is called without one. The send is
+ * taken before the delivery is awaited and its result returned to it after
+ * (§2.5). The ledger never throws, and nothing here reads it back.
+ *
  * ## Why `permission-decision-service` is imported dynamically
  *
  * The same reason `sources/opencode/ingest` does it: that module reaches the
@@ -37,6 +48,10 @@
  */
 
 import { createLogger } from '@/lib/logger';
+import {
+  beginLedgerApiAdjudication,
+  settleLedgerApiAdjudication,
+} from '@/lib/polling/auto-yes-confirmation-ledger';
 import { describeAbstain } from './sources/abstain';
 import { answerPendingDecisionWithReceipt } from './sources/pending-decisions';
 import type { AgentEventSource, AgentInstanceRef, PendingDecision, Verdict } from './sources/types';
@@ -125,6 +140,20 @@ export async function adjudicatePendingPermission(
     }
   }
 
+  // Issue #3820: the ledger's send is taken before the delivery's await, as the
+  // screen path takes its handle, so a result that comes back after the
+  // confirmation closed (a kill meanwhile) is that confirmation's late result
+  // rather than the answer of one opened again by the decision id.
+  const ledgerAttempt = beginLedgerApiAdjudication(session, decision.id, {
+    outcome: verdictSource.behavior === 'allow' ? 'allow' : 'abstained',
+    ...(verdictSource.reason === 'policy-suppressed' && verdictSource.suppressedBy
+      ? { withholdReason: verdictSource.suppressedBy }
+      : {}),
+    // `PERMISSION_REQUEST_PROMPT_TYPE`, spelled out: the service is imported
+    // dynamically (above) and its suites mock it down to one export.
+    promptType: 'multiple_choice',
+  });
+
   // C2: the caller does not know whether this writes a response body or opens a
   // second connection, and must not. What it does now get back is whether the
   // verdict landed (#1898).
@@ -143,6 +172,8 @@ export async function adjudicatePendingPermission(
     trigger,
     at: decision.askedAt,
   });
+
+  settleLedgerApiAdjudication(ledgerAttempt, { delivered, settled });
 
   logger.info('permission-decision-adjudicated', {
     worktreeId: target.worktreeId,

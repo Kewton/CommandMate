@@ -65,6 +65,17 @@
  * body. The 4xx therefore never reaches agy as a verdict, and reporting a
  * validation error honestly costs nothing. See
  * `antigravity/hooks-config`'s `buildAntigravityPermissionHookCommand`.
+ *
+ * ## The ledger's hook request (Issue #3820)
+ *
+ * This route is the only place a hook request is opened in the Auto-Yes
+ * confirmation ledger (`lib/polling/auto-yes-confirmation-ledger`, design
+ * `docs/design/auto-yes-measurement-3820.md` §2.3): the id is issued here once
+ * the worktree is resolved, handed to `resolvePermissionRequest`, and the
+ * request is closed after the reply is built — `delivered: false` from the
+ * catch-all, and when the delivery's receipt says the verdict did not leave
+ * (the helper swallows a `decide` that throws). The ledger never throws, and
+ * nothing here reads it back.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -76,6 +87,7 @@ import type { Worktree } from '@/types/models';
 import { resolveWorktreeByCwd, validateHookCwd } from '@/lib/hooks/agent-event-service';
 import {
   PERMISSION_DECISION_SLOW_MS,
+  PERMISSION_REQUEST_PROMPT_TYPE,
   resolvePermissionRequest,
   type PermissionDecision,
 } from '@/lib/hooks/permission-decision-service';
@@ -88,6 +100,11 @@ import {
   type Verdict,
 } from '@/lib/hooks/sources';
 import { recordAntigravityPermissionReceipt } from '@/lib/polling/antigravity-permission-receipts';
+import {
+  beginLedgerHookRequest,
+  closeLedgerHookRequest,
+  decideLedgerHookRequest,
+} from '@/lib/polling/auto-yes-confirmation-ledger';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/hooks-permission-request');
@@ -152,6 +169,9 @@ export async function POST(request: NextRequest) {
   // tool's dialect (#1779). Null until the tool id has been validated, which is
   // also the honest answer for anything that throws before then.
   let source: AgentEventSource | null = null;
+  // Issue #3820: the ledger's id for this request, closed on every way out
+  // below the worktree lookup — the catch-all included.
+  let hookRequestId: string | null = null;
   try {
     const body: unknown = await request.json().catch(() => null);
     if (typeof body !== 'object' || body === null || Array.isArray(body)) {
@@ -193,11 +213,25 @@ export async function POST(request: NextRequest) {
       worktree = resolveWorktreeByCwd(db, cwd.cwd);
     }
 
+    hookRequestId = beginLedgerHookRequest(
+      { worktreeId: worktree?.id ?? null, cliToolId: tool, instanceId: instanceParam ?? tool },
+      startedAt
+    );
+    const allowSuppressesDialog = source.capabilities.permissionAllowSuppressesDialog;
+
     if (!worktree) {
       logger.info('permission-request-unresolved-target', { tool, instanceId: instanceParam });
       // #1779: a hook left configured after a worktree was removed is a normal
       // state and must cost a dialog, not a refused tool call.
-      return NextResponse.json(abstainBody(source), { status: 200 });
+      const unresolved = NextResponse.json(abstainBody(source), { status: 200 });
+      decideLedgerHookRequest(hookRequestId, {
+        outcome: 'abstained',
+        abstainReason: 'worktree-unresolved',
+        allowSuppressesDialog,
+        promptType: PERMISSION_REQUEST_PROMPT_TYPE,
+      });
+      closeLedgerHookRequest(hookRequestId, { delivered: true });
+      return unresolved;
     }
 
     // Issue #1759: the payload is read in the sending tool's dialect (S7) and
@@ -223,7 +257,9 @@ export async function POST(request: NextRequest) {
 
     const decision = resolvePermissionRequest(
       { worktreeId: worktree.id, cliToolId: tool, instanceId: instanceParam ?? tool },
-      payload
+      payload,
+      {},
+      { hookRequestId }
     );
     const verdict = toVerdict(decision);
 
@@ -267,7 +303,16 @@ export async function POST(request: NextRequest) {
     // C2. Whether this leaves through the body of the request the agent is
     // blocked on, or through a second HTTP call to the agent's own server, is
     // the source's business. This route writes whatever comes back.
-    const responseBody = await answerPendingDecision(source, ref, pending, verdict);
+    //
+    // Issue #3820: the helper catches a `decide` that throws and hands back the
+    // empty body, so the catch-all below never hears of it; its receipt is what
+    // tells the ledger the verdict did not leave. The body is written as is.
+    let receiptRefused = false;
+    const responseBody = await answerPendingDecision(source, ref, pending, verdict, {
+      onReceipt: (delivery) => {
+        receiptRefused = delivery?.delivered === false;
+      },
+    });
 
     const elapsedMs = Date.now() - startedAt;
     const detail = {
@@ -279,6 +324,9 @@ export async function POST(request: NextRequest) {
       behavior: decision.behavior,
       reason: decision.reason,
       suppressedBy: decision.suppressedBy,
+      // Issue #3820 (design §5.1): whether this allow answered a confirmation,
+      // or only let agy draw the dialog it draws anyway.
+      allowSuppressesDialog,
       elapsedMs,
     };
     if (elapsedMs > PERMISSION_DECISION_SLOW_MS) {
@@ -288,7 +336,12 @@ export async function POST(request: NextRequest) {
       logger.info('permission-request-decided', detail);
     }
 
-    return NextResponse.json(responseBody, { status: 200 });
+    const reply = NextResponse.json(responseBody, { status: 200 });
+    closeLedgerHookRequest(
+      hookRequestId,
+      receiptRefused ? { delivered: false, failure: 'delivery-failed' } : { delivered: true }
+    );
+    return reply;
   } catch (error: unknown) {
     logger.error('error-processing-permission-request:', {
       error: error instanceof Error ? error.message : String(error),
@@ -298,6 +351,8 @@ export async function POST(request: NextRequest) {
     // a dialog, never an approval, never a stuck agent — and, since #1779, never
     // a refused tool call either, which is what a hard-coded `{}` meant on
     // antigravity.
-    return NextResponse.json(abstainBody(source), { status: 200 });
+    const abstained = NextResponse.json(abstainBody(source), { status: 200 });
+    closeLedgerHookRequest(hookRequestId, { delivered: false });
+    return abstained;
   }
 }

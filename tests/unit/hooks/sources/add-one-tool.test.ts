@@ -81,6 +81,8 @@ const codexSource: AgentEventSource = definePushHookSource({
     permissionHookPredictsDialog: true,
     sessionStartMayArriveLate: false,
     permissionReplyReleasesPrompt: false,
+    // Issue #3820.
+    permissionAllowSuppressesDialog: true,
     eventIdentity: null,
     resync: 'none',
     // Issue #2197: the tool this fixture stands for has no transcript reader.
@@ -192,6 +194,8 @@ describe('copilot: same spellings, different order, shorter fuse', () => {
       permissionHookPredictsDialog: false,
       sessionStartMayArriveLate: true,
       permissionReplyReleasesPrompt: false,
+      // Issue #3820.
+      permissionAllowSuppressesDialog: true,
       eventIdentity: null,
       resync: 'none',
       // Issue #2197: the tool this fixture stands for has no transcript reader.
@@ -259,6 +263,8 @@ describe('gemini: four of the seven are spelled differently', () => {
       permissionHookPredictsDialog: false,
       sessionStartMayArriveLate: false,
       permissionReplyReleasesPrompt: false,
+      // Issue #3820.
+      permissionAllowSuppressesDialog: false,
       eventIdentity: null,
       resync: 'none',
       // Issue #2197: the tool this fixture stands for has no transcript reader.
@@ -326,6 +332,8 @@ describe('antigravity: no event name, no cwd, camelCase, fail-closed', () => {
       permissionHookPredictsDialog: false,
       sessionStartMayArriveLate: false,
       permissionReplyReleasesPrompt: false,
+      // Issue #3820.
+      permissionAllowSuppressesDialog: false,
       eventIdentity: null,
       resync: 'none',
       // The double declares `null` on purpose. The shipped antigravity source

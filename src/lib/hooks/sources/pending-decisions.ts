@@ -181,6 +181,11 @@ export function resetPendingDecisions(): void {
  * function exists, cannot find out without going out of its way — whether the
  * verdict left through the response body or through a second HTTP call.
  *
+ * @param options.onReceipt - Issue #3820: handed the receipt — what
+ *   {@link answerPendingDecisionWithReceipt} returns beside the body — before
+ *   the body is returned. For a caller that records the delivery (the hook
+ *   route's ledger) and writes the body whatever it says; the body is the same
+ *   with or without it.
  * @returns The body to write. `{}` means "nothing to say here", which for a
  *   hook is the measured no-decision reply and for a pull source is simply the
  *   ack of a request whose answer went elsewhere.
@@ -189,9 +194,16 @@ export async function answerPendingDecision(
   source: AgentEventSource,
   ref: AgentInstanceRef,
   decision: PendingDecision,
-  verdict: Verdict
+  verdict: Verdict,
+  options: { onReceipt?: (delivery: DecisionDelivery | null) => void } = {}
 ): Promise<Record<string, unknown>> {
-  return (await answerPendingDecisionWithReceipt(source, ref, decision, verdict)).body;
+  const { body, delivery } = await answerPendingDecisionWithReceipt(source, ref, decision, verdict);
+  try {
+    options.onReceipt?.(delivery);
+  } catch {
+    // The receipt is the caller's record, never a reason to lose the body.
+  }
+  return body;
 }
 
 /** {@link answerPendingDecision} plus what the source said about delivery. */
