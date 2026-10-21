@@ -203,6 +203,7 @@ The decision table:
 | The payload cannot be read | no decision |
 | `tool_name` is `AskUserQuestion` | no decision (always) |
 | Auto-Yes is off or expired | no decision |
+| Reading the contract (the database lookup) failed (Issue #3822) | no decision, plus a `lastSuppression` record (`reason: policy-lookup-failed`). Not treated as "no contract". The failure is not cached, so once the lookup works again the next request follows the rows below |
 | The contract's `autoYes` suppresses it (`mode: off` / a `denyPatterns` match / a disallowed type) | no decision, plus a `lastSuppression` record |
 | Anything else | `allow` |
 

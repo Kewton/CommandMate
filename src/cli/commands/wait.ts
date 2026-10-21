@@ -287,13 +287,20 @@ const CONTRACT_POLICY_CAUSE = 'by contract policy';
  * the poller's stopped-answer branch (`partial-answer`, Issue #3706 / #3713),
  * and the poller's agy trust-screen branch (`startup-trust-unhandled`, Issue #3757),
  * and the poller's question confirm-page branch (`question-confirm-page`, Issue #3748),
- * and the poller's agy receipt-gate branch (`no-hook-receipt`, Issue #3767).
+ * and the poller's agy receipt-gate branch (`no-hook-receipt`, Issue #3767),
+ * and a contract lookup that failed on either of the policy paths
+ * (`policy-lookup-failed`, Issue #3822).
  */
 const SUPPRESSION_CAUSE: Record<AutoYesSuppressionReason, string> = {
   'mode-off': CONTRACT_POLICY_CAUSE,
   'deny-pattern': CONTRACT_POLICY_CAUSE,
   'deny-pattern-unusable': CONTRACT_POLICY_CAUSE,
   'type-not-allowed': CONTRACT_POLICY_CAUSE,
+  // Issue #3822. Not "by contract policy": the contract could not be read at
+  // all, so nothing it says was applied. Withheld rather than answered, since
+  // the contract may state `off`; it clears once the server reads it again.
+  'policy-lookup-failed':
+    'because the server could not read the execution contract (the database lookup failed), so Auto-Yes does not answer until it can; check the server log for policy-lookup-failed',
   // Issue #3790: after the launch window the poller still leaves copilot's and
   // gemini's trust dialogs alone when the cursor is not on the safe row, and
   // nobody else answers them then.
