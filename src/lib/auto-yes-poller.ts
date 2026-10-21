@@ -12,23 +12,15 @@
  */
 
 import type { CLIToolType } from './cli-tools/types';
-import { captureSessionOutput, captureSessionOutputFresh, getSessionPresence } from './session/cli-session';
+import { captureSessionOutputFresh, getSessionPresence } from './session/cli-session';
 import { detectPromptOnCleanFrame } from './polling/response-checker';
 import {
   beginAntigravityFrameRead,
   endAntigravityFrameRead,
-  ANTIGRAVITY_ANSWERED_DIALOG_GRACE_MS,
-  getAntigravityReceiptVerdict,
-  judgeAntigravityPermissionReceipt,
-  getAntigravityAcceptedReceiptAt,
-  markAntigravityAnswerSent,
-  type AntigravityReceiptVerdict,
 } from './polling/antigravity-receipt-episodes';
-import { ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS } from './polling/antigravity-permission-receipts';
 import { resolveAutoAnswerWithPolicy } from './polling/auto-yes-resolver';
 import {
   getSessionAutoYesPolicy,
-  getSessionAutoYesPolicyEntry,
   invalidateSessionAutoYesPolicy,
 } from './polling/auto-yes-policy';
 import { isCodexModelPickerFrame } from './detection/tools/codex/detect';
@@ -83,30 +75,16 @@ import {
   POLLING_INTERVAL_MS,
   COOLDOWN_INTERVAL_MS,
   MAX_BACKOFF_MS,
-  DUPLICATE_RETRY_EXPIRY_MS,
   MAX_CONCURRENT_POLLERS,
   THINKING_CHECK_LINE_COUNT,
   isAutoYesShutdownStarted,
-  type AutoYesState,
 } from './auto-yes-state';
 import { getOrInitGlobal } from './global-state';
-import {
-  CONTRACT_SUPPRESSION_REASONS,
-  NO_HOOK_RECEIPT_SUPPRESSION_REASON,
-  PARTIAL_ANSWER_SUPPRESSION_REASON,
-} from './polling/auto-yes-suppression-reason';
-import {
-  forgetPolicySuppression,
-  getLastPolicySuppression,
-  recordPolicySuppression,
-} from './polling/auto-yes-suppression-state';
 import {
   beginSendAttempt,
   clearPartialAnswers,
   forgetPartialAnswer,
   forgetPartialAnswersByWorktree,
-  getPartialAnswer,
-  hasMovedSendInFlight,
   partialAnswerScreenKey,
   promptFrameKey,
   settleSendAttempt,
@@ -124,6 +102,46 @@ import {
 } from './polling/auto-yes-prompt-suppression';
 
 export type { AutoYesPollerState } from './polling/auto-yes-poller-state';
+import {
+  autoYesPollerStates,
+  getPollerState,
+  isDuplicatePrompt,
+  isPollerCurrent,
+  isSameSession,
+  isTickCurrent,
+  ownedPollerState,
+  resetErrorCount,
+  updateLastServerResponseTimestamp,
+  type AutoYesTickGeneration,
+} from './polling/auto-yes-poller-generation';
+import {
+  logIfWithheldForWantOfReceipt,
+  noteAnswerSent,
+  receiptEpisodeOfSend,
+  withheldNoReceiptLoggedAt,
+} from './polling/auto-yes-poller-receipt-log';
+import { AUTO_YES_ENTER_FALLBACK_ANSWER, syncEnterFallbackEpoch } from './polling/auto-yes-poller-enter-fallback';
+import { capturePollerFrame } from './polling/auto-yes-poller-capture';
+import {
+  resolveAnswerUnderPolicy,
+  skippedForUnownedSession,
+  withheldForEarlierSend,
+} from './polling/auto-yes-poller-steps';
+
+// Issue #3783: split out; re-exported so existing importers are unchanged.
+export {
+  getActivePollerCount,
+  getLastServerResponseTimestamp,
+  isPollerActive,
+  type AutoYesTickGeneration,
+} from './polling/auto-yes-poller-generation';
+export { noHookReceiptHint } from './polling/auto-yes-poller-receipt-log';
+export { AUTO_YES_ENTER_FALLBACK_ANSWER } from './polling/auto-yes-poller-enter-fallback';
+export {
+  captureAndCleanOutput,
+  capturePollerFrame,
+  type CapturedPollerFrame,
+} from './polling/auto-yes-poller-capture';
 
 // =============================================================================
 // Poller Types
@@ -137,56 +155,6 @@ export interface StartPollingResult {
   reason?: string;
 }
 
-// =============================================================================
-// In-memory State (globalThis for hot reload persistence - Issue #153)
-// Issue #525: Map key changed from worktreeId to compositeKey
-// =============================================================================
-
-declare global {
-  // eslint-disable-next-line no-var
-  var __autoYesPollerStates: Map<string, AutoYesPollerState> | undefined;
-  // eslint-disable-next-line no-var
-  var __autoYesWithheldNoReceiptLoggedAt: Map<string, number> | undefined;
-}
-
-/** In-memory storage for poller states (globalThis for hot reload persistence) */
-const autoYesPollerStates = getOrInitGlobal('__autoYesPollerStates', () => new Map<string, AutoYesPollerState>());
-
-/**
- * When `antigravity-autoyes-withheld-no-hook-receipt` was last logged, per
- * compositeKey (Issue #2857). The poller re-reads a static pane every 2s, so the
- * line is limited to one per {@link WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS} per
- * instance. globalThis for the same reason as the poller states above.
- */
-const withheldNoReceiptLoggedAt = getOrInitGlobal('__autoYesWithheldNoReceiptLoggedAt', () => new Map<string, number>());
-
-/**
- * Least gap between two `antigravity-autoyes-withheld-no-hook-receipt` lines for
- * one instance. `antigravity-autoyes-withheld-by-policy` (Issue #3724) shares it.
- */
-const WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS = 60_000;
-
-// =============================================================================
-// Poller State Accessors (compositeKey-based)
-// =============================================================================
-
-/**
- * Get poller state by composite key.
- *
- * @param compositeKey - Composite key (worktreeId:cliToolId)
- * @returns Poller state or undefined
- */
-function getPollerState(compositeKey: string): AutoYesPollerState | undefined {
-  return autoYesPollerStates.get(compositeKey);
-}
-
-/**
- * Get the number of active pollers.
- */
-export function getActivePollerCount(): number {
-  return autoYesPollerStates.size;
-}
-
 /**
  * Clear all poller states.
  * Stops all active pollers before clearing state.
@@ -197,64 +165,6 @@ export function clearAllPollerStates(): void {
   withPollerStopReason('reset', () => stopAllAutoYesPolling());
   autoYesPollerStates.clear();
   withheldNoReceiptLoggedAt.clear();
-}
-
-/**
- * Get the last server response timestamp for a composite key.
- *
- * Issue #525: Changed from (worktreeId) to (compositeKey).
- *
- * @param compositeKey - Composite key (worktreeId:cliToolId)
- * @returns Timestamp (Date.now()) of the last server response, or null if none
- */
-export function getLastServerResponseTimestamp(compositeKey: string): number | null {
-  const pollerState = getPollerState(compositeKey);
-  return pollerState?.lastServerResponseTimestamp ?? null;
-}
-
-/**
- * Check if a server-side auto-yes poller is active for a composite key.
- *
- * Issue #525: Changed from (worktreeId) to (compositeKey).
- *
- * @param compositeKey - Composite key (worktreeId:cliToolId)
- * @returns true if a poller is actively running
- */
-export function isPollerActive(compositeKey: string): boolean {
-  return autoYesPollerStates.has(compositeKey);
-}
-
-/**
- * Update the last server response timestamp.
- *
- * @param compositeKey - Composite key
- * @param timestamp - Timestamp value (Date.now())
- */
-function updateLastServerResponseTimestamp(
-  compositeKey: string,
-  timestamp: number,
-  owner?: AutoYesPollerState,
-): void {
-  const pollerState = ownedPollerState(compositeKey, owner);
-  if (pollerState) {
-    pollerState.lastServerResponseTimestamp = timestamp;
-  }
-}
-
-/**
- * Reset error count for a poller and restore the default polling interval.
- * Called after every poll that ran to the end without an error (Issue #3329)
- * and after an answer is sent.
- *
- * @param compositeKey - Composite key
- * @param owner - The tick's own poller state (Issue #3706); see {@link ownedPollerState}
- */
-function resetErrorCount(compositeKey: string, owner?: AutoYesPollerState): void {
-  const pollerState = ownedPollerState(compositeKey, owner);
-  if (pollerState) {
-    pollerState.consecutiveErrors = 0;
-    pollerState.currentInterval = POLLING_INTERVAL_MS;
-  }
 }
 
 /**
@@ -291,82 +201,6 @@ function incrementErrorCount(compositeKey: string, owner?: AutoYesPollerState): 
   }
 }
 
-// =============================================================================
-// Tick generation (Issue #3706)
-// =============================================================================
-
-/**
- * What one tick acts for — its "generation" — taken at the top of the tick and
- * compared, never re-read by key, after every wait (Issue #3706).
- *
- * The response poller's `PollerOwner` (`polling/poller-owner.ts`) idea, held by the Auto-Yes state itself: the poller state object
- * `startAutoYesPolling` creates is the poller's token (a restart or a
- * disable → enable makes a new one, a stop deletes it), and the
- * {@link AutoYesState} object in `auto-yes-state` is the grant's (an enable
- * and a disable each store a new one). Re-reading by KEY cannot tell the old
- * generation from a new one that took the key over, which is how a tick in
- * flight across a disable → enable used to answer, and to re-arm a second timer
- * over the new poller's.
- */
-export interface AutoYesTickGeneration {
-  readonly compositeKey: string;
-  readonly worktreeId: string;
-  readonly cliToolId: CLIToolType;
-  readonly instanceId: string | undefined;
-  /** The poller state the tick started under. */
-  readonly pollerState: AutoYesPollerState;
-  /** The grant the tick started under. */
-  readonly grant: AutoYesState;
-  /** `getEnterFallbackSessionEpoch` at the start: a relaunch the poller outlived moves it. */
-  readonly sessionEpoch: number;
-  /**
-   * Epoch ms the tick started. A pending prompt row saved after it cannot be the
-   * one this tick read off the screen (Issue #3706, see `finishAnsweredPrompt`).
-   */
-  readonly startedAt: number;
-}
-
-/**
- * The poller state under `compositeKey`, but only when it is `owner` — the
- * tick's own (Issue #3706). Without `owner` (callers outside a tick, and tests
- * driving `detectAndRespondToPrompt` with a hand-built state) it is the plain
- * by-key read this always was.
- */
-function ownedPollerState(compositeKey: string, owner?: AutoYesPollerState): AutoYesPollerState | undefined {
-  const pollerState = getPollerState(compositeKey);
-  if (owner !== undefined && pollerState !== owner) return undefined;
-  return pollerState;
-}
-
-/** Is the tick's poller still the one under its key (not stopped, not replaced)? */
-function isPollerCurrent(generation: AutoYesTickGeneration): boolean {
-  return getPollerState(generation.compositeKey) === generation.pollerState;
-}
-
-/**
- * May the tick still act: its poller, its grant (the same enable, not expired)
- * and its session (no relaunch since) are all still the ones it started under.
- * Checked after capture, after each wait before a key, and inside the send.
- */
-function isTickCurrent(generation: AutoYesTickGeneration): boolean {
-  if (!isPollerCurrent(generation)) return false;
-  // `getAutoYesState` returns the stored object until it expires, when it
-  // stores (and returns) a disabled one — so an expiry fails identity too.
-  const grant = getAutoYesState(generation.worktreeId, generation.cliToolId, generation.instanceId);
-  if (grant !== generation.grant || !grant.enabled) return false;
-  return isSameSession(generation);
-}
-
-/**
- * Is the session the tick answered still the one it started on (Issue #3706)?
- * What the follow-ups of an answer already sent — the response poller restart,
- * the terminal push — are judged by: a disable after the keys landed does not
- * un-send them, a relaunch does make them about another process.
- */
-function isSameSession(generation: AutoYesTickGeneration): boolean {
-  return getEnterFallbackSessionEpoch(generation.compositeKey) === generation.sessionEpoch;
-}
-
 /**
  * End a tick that found its generation gone (Issue #3706). It changes nothing;
  * it re-arms its timer only when its own poller is still the current one — a
@@ -381,22 +215,6 @@ function endStaleTick(generation: AutoYesTickGeneration): void {
     pollerCurrent: isPollerCurrent(generation),
   });
   if (isPollerCurrent(generation)) scheduleNextPoll(generation);
-}
-
-/**
- * Check if the given prompt has already been answered recently.
- *
- * @param pollerState - Current poller state
- * @param promptKey - Composite key of the current prompt
- * @returns true if the prompt key matches and is within the retry expiry window
- */
-function isDuplicatePrompt(
-  pollerState: AutoYesPollerState,
-  promptKey: string
-): boolean {
-  if (pollerState.lastAnsweredPromptKey !== promptKey) return false;
-  if (pollerState.lastAnsweredAt === null) return false;
-  return (Date.now() - pollerState.lastAnsweredAt) < DUPLICATE_RETRY_EXPIRY_MS;
 }
 
 // =============================================================================
@@ -443,74 +261,6 @@ export function validatePollingContext(
 }
 
 /**
- * One tick's capture, in the two spellings this poller needs (Issue #2522).
- *
- * The poller has always cleaned its capture once and thrown the original away.
- * That is the right trade for everything it did with it — the stop-condition
- * delta, the thinking check, the dialog gate and the generic prompt parser all
- * want text with no ANSI and no box drawing — and it is exactly what made
- * Command Code's `AskUserQuestion` unreadable HERE while the status API
- * published it: that screen is anchored on a 200-column U+2500 rule row, and
- * `stripBoxDrawing` blanks precisely that row.
- *
- * So the original is kept instead of being re-derived. Not re-captured: a second
- * `capture-pane` is a second instant, and answering a dialog read off one frame
- * with keys aimed at another is the race `/prompt-response`'s `verifiedFrame`
- * already exists to close. And not "un-cleaned": `stripBoxDrawing` is lossy and
- * non-idempotent, so there is nothing to restore.
- */
-export interface CapturedPollerFrame {
-  /** The capture exactly as tmux returned it: ANSI and box drawing intact. */
-  readonly raw: string;
-  /** `stripBoxDrawing(stripAnsi(raw))` — the spelling every other step reads. */
-  readonly clean: string;
-}
-
-/**
- * Capture tmux session output once, keeping both spellings (Issue #2522).
- *
- * @internal Exported for testing purposes only.
- * @param worktreeId - Worktree identifier
- * @param cliToolId - CLI tool type being polled
- * @param captureLines - Optional number of lines to capture
- * @param instanceId - Optional agent instance ID (Issue #896; defaults to primary session)
- * @returns The tick's raw capture and its cleaned form
- */
-export async function capturePollerFrame(
-  worktreeId: string,
-  cliToolId: CLIToolType,
-  captureLines?: number,
-  instanceId?: string
-): Promise<CapturedPollerFrame> {
-  const lines = captureLines ?? FULL_CAPTURE_LINES;
-  const output = await captureSessionOutput(worktreeId, cliToolId, lines, instanceId);
-  return { raw: output, clean: stripBoxDrawing(stripAnsi(output)) };
-}
-
-/**
- * Capture tmux session output and strip ANSI escape codes.
- *
- * Kept as the cleaned half of {@link capturePollerFrame} so the many callers and
- * tests that only ever wanted that string are untouched; `pollAutoYes` takes the
- * pair. `stripBoxDrawing` still runs exactly once per capture either way.
- *
- * @internal Exported for testing purposes only.
- * @param worktreeId - Worktree identifier
- * @param cliToolId - CLI tool type being polled
- * @param captureLines - Optional number of lines to capture
- * @param instanceId - Optional agent instance ID (Issue #896; defaults to primary session)
- * @returns Cleaned output string (ANSI stripped)
- */
-export async function captureAndCleanOutput(
-  worktreeId: string,
-  cliToolId: CLIToolType,
-  captureLines?: number,
-  instanceId?: string
-): Promise<string> {
-  return (await capturePollerFrame(worktreeId, cliToolId, captureLines, instanceId)).clean;
-}
-
-/**
  * Process stop condition check using delta-based approach.
  *
  * Issue #525: Changed from (worktreeId, ...) to (compositeKey, ...).
@@ -542,248 +292,6 @@ export function processStopConditionDelta(
 
   return false;
 }
-
-/**
- * Say, once a minute, that Auto-Yes left an agy dialog alone for want of a hook
- * receipt (Issue #2857).
- *
- * `detectPromptOnCleanFrame` hands a frame the receipt gate (#2849) withholds
- * back as an ordinary `isPrompt: false`, so the poller cannot tell "no dialog on
- * the pane" from "a dialog agy never asked us about" by looking at the result.
- * The gate is the ONLY thing `receiptScope` changes, so the same frame read
- * without it answering a prompt is exactly the withheld case. That second
- * reading is taken only after the cheap tests: no receipt for this instance in
- * the window (with one, the gate let the frame through and a no-prompt result is
- * a real one) and no line for it in the last minute.
- *
- * Why it is worth a line: a machine whose `~/.gemini/config/hooks.json` points at
- * another server (#2622) never sends us the question, and every real dialog then
- * waits for a human with no sign of why. The line names the file to look at.
- *
- * A stale receipt does not always mean that, though (Issue #3724): a dialog the
- * contract's autoYes withheld got its receipt, the server answered `ask`, and
- * the dialog outlived the window. When `resolveAutoAnswerWithPolicy` on the
- * ungated reading suppresses the answer by contract (the base rules would have
- * answered it), the line is `antigravity-autoyes-withheld-by-policy` instead,
- * naming the reason, the mode and the task. Both share the limit.
- * The response-checker's own `antigravity-dialog-no-recent-receipt` stays at
- * debug — it prints on every tick the same pane is read again.
- *
- * @param compositeKey - The instance's key, for the once-a-minute limit
- * @param readWithoutGate - The same frame read without `receiptScope`
- */
-function logIfWithheldForWantOfReceipt(
-  worktreeId: string,
-  instanceId: string | undefined,
-  compositeKey: string,
-  readWithoutGate: () => PromptDetectionResult,
-): void {
-  // Issue #3767: the gate's own verdict for this tick's candidate. Null means it
-  // never saw one (no dialog), `ok` that it let the frame through.
-  let verdict = getAntigravityReceiptVerdict(worktreeId, instanceId);
-  if (verdict?.ok) return;
-
-  const now = Date.now();
-  const ungated = readWithoutGate();
-  if (!ungated.isPrompt || !ungated.promptData) return;
-  // The gate was not consulted (the gated reading declined the frame on screen
-  // grounds alone) yet the frame reads as a prompt: judge it here.
-  verdict ??= judgeAntigravityPermissionReceipt(worktreeId, instanceId, now);
-  if (verdict.ok) return;
-
-  // Issue #3724: a contract that withholds the answer makes the server reply
-  // `ask`, so the dialog stays up past the receipt window. The cause is then the
-  // contract, not a hooks.json that points elsewhere. Judged exactly as the tick
-  // judges a prompt it can read — the base rules first, then the contract — so
-  // a prompt the base rules never answer (a checkbox, a typed option) is not
-  // blamed on the contract. Policy and task id come from one lookup.
-  const { policy, taskId } = getSessionAutoYesPolicyEntry(worktreeId, 'antigravity', instanceId);
-  const resolution = resolveAutoAnswerWithPolicy(ungated.promptData, policy);
-  // Issue #3767: `answered` is the dialog the gate already let through on this
-  // receipt, still up past the window. Unless the contract withheld it, that is
-  // not a missing receipt: neither recorded nor logged, nor counted for the limit.
-  // Issue #3789: `answered` is also a dialog accepted but never sent to (the
-  // tick recorded its own reason, if any, and that record is kept). One the
-  // poller DID send keys to and still up past the grace is `outlived`, which is
-  // recorded and logged like the others, so the stop is not a silent one.
-  // Issue #3796: the reason the poller recorded for this dialog (partial-answer,
-  // the contract, …) while it could still read it inside the window was not
-  // re-stamped once the window closed — the gated reading stopped seeing the
-  // prompt — so `cmate wait` dropped it as stale a minute later with the dialog
-  // still up. Re-stamped here on every tick the dialog stays — only while it
-  // still holds under this tick's evaluation — and kept over a `no-hook-receipt`
-  // for it: it is the more exact reason.
-  const keptPartialAnswer = refreshEpisodeSuppression(worktreeId, instanceId, verdict, resolution);
-  // Issue #3796 review D: a contract that withholds the prompt now is published
-  // whatever was recorded before — none at all (the window closed before the
-  // tick could read it, or an ended contract's record was dropped and a new one
-  // withholds it again) or another reason. Without it `cmate wait` read no
-  // reason and held the prompt as one Auto-Yes was answering. Only a partial
-  // answer still on screen comes first, as it does on the tick (step 2.5).
-  if (resolution.suppressedBy && !keptPartialAnswer) {
-    recordPolicySuppression(worktreeId, 'antigravity', instanceId, {
-      reason: resolution.suppressedBy,
-      mode: policy?.mode ?? null,
-      promptType: ungated.promptData.type,
-      ...(resolution.pattern !== undefined ? { pattern: resolution.pattern } : {}),
-    });
-  }
-  if (!resolution.suppressedBy && (verdict.cause === 'answered' || keptPartialAnswer)) return;
-
-  const lastLoggedAt = withheldNoReceiptLoggedAt.get(compositeKey);
-  const logDue = lastLoggedAt === undefined || now - lastLoggedAt >= WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS;
-  if (logDue) {
-    for (const [key, loggedAt] of withheldNoReceiptLoggedAt) {
-      if (now - loggedAt >= WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS) withheldNoReceiptLoggedAt.delete(key);
-    }
-    withheldNoReceiptLoggedAt.set(compositeKey, now);
-  }
-  if (resolution.suppressedBy) {
-    if (!logDue) return;
-    logger.info('antigravity-autoyes-withheld-by-policy', {
-      worktreeId,
-      instanceId: instanceId ?? 'antigravity',
-      reason: resolution.suppressedBy,
-      mode: policy?.mode ?? null,
-      taskId,
-      hint: '契約の autoYes が答えを止めている。契約の autoYes を確認',
-    });
-    return;
-  }
-  // Issue #3767: recorded on every tick (the record's `at` follows the prompt
-  // while it stays up), logged once a minute.
-  recordPolicySuppression(worktreeId, 'antigravity', instanceId, {
-    reason: NO_HOOK_RECEIPT_SUPPRESSION_REASON,
-    mode: null,
-    promptType: ungated.promptData.type,
-  });
-  if (!logDue) return;
-  logger.info('antigravity-autoyes-withheld-no-hook-receipt', {
-    worktreeId,
-    instanceId: instanceId ?? 'antigravity',
-    windowMs: ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS,
-    hint: noHookReceiptHint(verdict, now),
-  });
-}
-
-/**
- * Issue #3796: keep the suppression the poller recorded during this dialog's
- * episode current while the dialog it accepted (`answered` / `outlived`) is
- * still up. Only a record made since the dialog was first read, and never the
- * receipt gate's own `no-hook-receipt` (the caller records that itself). A
- * record is kept only while its reason still holds NOW:
- *
- * - `partial-answer` remembers an event: it holds for as long as the dialog
- *   the keys went to stays up (this episode), and is re-stamped here;
- * - a contract reason is the contract's verdict on the prompt, re-evaluated on
- *   every tick (`resolution`): no verdict (the contract ended, or now answers
- *   it) drops the record — the dialog is then `answered` / `outlived` like any
- *   other. A verdict is recorded by the caller (review D), whatever was here;
- * - any other reason is left as it was recorded.
- *
- * @returns true when a `partial-answer` that still holds was re-stamped
- */
-function refreshEpisodeSuppression(
-  worktreeId: string,
-  instanceId: string | undefined,
-  verdict: AntigravityReceiptVerdict,
-  resolution: ReturnType<typeof resolveAutoAnswerWithPolicy>,
-): boolean {
-  if (verdict.cause !== 'answered' && verdict.cause !== 'outlived') return false;
-  const own = getLastPolicySuppression(worktreeId, 'antigravity', instanceId);
-  if (own === null || own.reason === NO_HOOK_RECEIPT_SUPPRESSION_REASON || !(own.at >= verdict.firstSeenAt)) {
-    return false;
-  }
-  if (own.reason === PARTIAL_ANSWER_SUPPRESSION_REASON) {
-    // The memory is the episode's: the dialog the keys went to is still the one
-    // up (same episode, accepted on the same receipt). Not `getPartialAnswer`:
-    // the tick forgets it as soon as the gated reading stops seeing the prompt,
-    // which past the window is every tick.
-    const { at: _recordedAt, ...suppression } = own;
-    recordPolicySuppression(worktreeId, 'antigravity', instanceId, suppression);
-    return true;
-  }
-  if (CONTRACT_SUPPRESSION_REASONS.has(own.reason) && !resolution.suppressedBy) {
-    forgetPolicySuppression(worktreeId, 'antigravity', instanceId);
-  }
-  return false;
-}
-
-/**
- * Issue #3789: keys for an agy dialog the receipt gate accepted reached tmux.
- * Only here does the gate start the grace after which a dialog still up is
- * reported as `outlived`; the tick's `no_answer` exits (another server's session,
- * a partial answer, the base rules or the contract not answering) never get
- * here, so their own records are not overwritten by `no-hook-receipt`.
- *
- * Issue #3796: `interrupted` — the send began and was cut short (stopped
- * part-way, or failed). Its keys may be on the pane and the receipt is spent,
- * so the grace starts here too; without it the dialog stayed `answered`, and
- * silent, for as long as it stayed up.
- */
-function noteAnswerSent(
-  cliToolId: CLIToolType,
-  worktreeId: string,
-  instanceId: string | undefined,
-  interrupted = false,
-  forReceiptAt?: number | null,
-): void {
-  if (cliToolId !== 'antigravity') return;
-  markAntigravityAnswerSent(worktreeId, instanceId, Date.now(), {
-    interrupted,
-    ...(forReceiptAt !== undefined ? { forReceiptAt } : {}),
-  });
-}
-
-/**
- * Issue #3796 review: the agy episode a send is about to go to, read before
- * its first await; null for other tools. Given back to {@link noteAnswerSent}
- * however the send came back — whole, failed or cut short (review E) — so that
- * only that episode is marked — the same
- * idea as the Enter record's generation check in `tryEnterFallback`.
- */
-function receiptEpisodeOfSend(
-  cliToolId: CLIToolType,
-  worktreeId: string,
-  instanceId: string | undefined,
-): number | null {
-  return cliToolId === 'antigravity' ? getAntigravityAcceptedReceiptAt(worktreeId, instanceId) : null;
-}
-
-/**
- * The hint for `antigravity-autoyes-withheld-no-hook-receipt` (Issue #3767):
- * which of the withheld cases it was decides where to look.
- */
-export function noHookReceiptHint(verdict: AntigravityReceiptVerdict, now: number = Date.now()): string {
-  const seconds = verdict.ageMs === null ? null : Math.round(verdict.ageMs / 1000);
-  // `lapsed` says how long ago, so from now: the line repeats once a minute.
-  const secondsAgo = verdict.lastReceiptAt === null ? null : Math.round((now - verdict.lastReceiptAt) / 1000);
-  switch (verdict.cause) {
-    case 'never':
-      return 'hook の受信が一度も無いため Auto-Yes は答えなかった。~/.gemini/config/hooks.json の向き先（#2622）を確認';
-    case 'late':
-      return `最後の受信から ${seconds} 秒後に確認が出た（窓 ${ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS / 1000} 秒の外）ため答えなかった。人が答える（auto-yes --disable → prompt --json → respond --expect-screen）。続くなら ~/.gemini/config/hooks.json の向き先（#2622）も確認`;
-    case 'lapsed':
-      return `最後の受信は ${secondsAgo} 秒前で途絶えている（hook が届かなくなった）。hooks.json の向き先（#2622）と agy の再起動を確認`;
-    case 'predates':
-      return '確認は最後の受信より前から画面に出ていた（引用か別の確認）ため答えなかった。人が答える';
-    case 'used':
-      return '最後の受信は直前の確認に使い済み。この確認に対する受信は無いため答えなかった。人が答える';
-    case 'outlived':
-      if (verdict.answerInterrupted === true) {
-        return `Auto-Yes が最後の受信の確認へ答えを送る途中で送信が止まり（キーの一部が入力に残っている可能性がある）、${ANTIGRAVITY_ANSWERED_DIALOG_GRACE_MS / 1000} 秒を過ぎても確認が画面に残っている。未使用の受信が無いため、もう一度は答えない。人が答える（auto-yes --disable → prompt --json → respond --expect-screen）`;
-      }
-      return `Auto-Yes が最後の受信の確認へキーを送ってから ${ANTIGRAVITY_ANSWERED_DIALOG_GRACE_MS / 1000} 秒を過ぎても、確認が画面に残っている。キーで確認が閉じなかったか、新しい受信の無い別の確認と入れ替わった（画面からは区別できない）。未使用の受信が無いため、もう一度は答えない。人が答える（auto-yes --disable → prompt --json → respond --expect-screen）`;
-    default:
-      return 'hook の受信記録が直近に無いため Auto-Yes は答えなかった。~/.gemini/config/hooks.json の向き先（#2622）を確認';
-  }
-}
-
-/**
- * The audit row's `answer` for the Enter (Issue #3397): not a digit, so the
- * History reads as "Auto-Yes pressed Enter" rather than as a chosen option.
- */
-export const AUTO_YES_ENTER_FALLBACK_ANSWER = '[Enter]';
 
 /**
  * Issue #3397: is the fresh capture still the screen the Enter was decided for?
@@ -1146,22 +654,6 @@ async function finishAnsweredPrompt(
 }
 
 /**
- * Issue #3397: a session begun since the last tick (a relaunch the poller
- * outlived) starts with no screen that had its Enter.
- *
- * @returns The session epoch the tick reads under
- */
-function syncEnterFallbackEpoch(compositeKey: string, pollerState: AutoYesPollerState): number {
-  const epoch = getEnterFallbackSessionEpoch(compositeKey);
-  if ((pollerState.enterFallbackEpoch ?? 0) !== epoch) {
-    pollerState.enterFallbackSentKey = null;
-    pollerState.enterFallbackCandidateKey = null;
-    pollerState.enterFallbackEpoch = epoch;
-  }
-  return epoch;
-}
-
-/**
  * Step 1 of `detectAndRespondToPrompt`: normalise the tick's frame once and
  * read the prompt on it.
  */
@@ -1250,116 +742,6 @@ function noteNoPromptOnScreen(tick: {
       detectPromptOnCleanFrame(cleanOutput, cliToolId, precomputedLines, rawOutput),
     );
   }
-}
-
-/**
- * Step 2.5 of `detectAndRespondToPrompt`: whether an earlier send to this
- * screen keeps the prompt from being answered now.
- *
- * @returns true when the prompt is withheld (the caller returns `no_answer`)
- */
-function withheldForEarlierSend(judged: JudgedPrompt, screenKey: string, epoch: number): boolean {
-  const { worktreeId, cliToolId, instanceId, compositeKey, pollerState, promptData, frameKey } = judged;
-  const partial = getPartialAnswer(compositeKey, epoch);
-  if (partial !== null) {
-    if (partial.screenKey === screenKey) {
-      suppressAndWarnOnce(
-        judged,
-        {
-          reason: PARTIAL_ANSWER_SUPPRESSION_REASON,
-          mode: null,
-          promptType: promptData.type,
-        },
-        `${frameKey}\u0000partial-answer`,
-        'poller:auto-yes-skipped-partial-answer',
-        { promptType: promptData.type, stoppedAt: partial.at },
-      );
-      return true;
-    }
-    // Another prompt is on screen: only the sends at the forgotten one's
-    // screen go with it (#3713) — one in flight at this screen keeps its hold.
-    forgetPartialAnswer(compositeKey, partial.screenKey);
-  }
-  // Issue #3713: a worktree ID move carried an answer still being sent to
-  // this session's key. Its keys may already be on the pane, and how its send
-  // ends is not known yet — so this screen gets no keys until it comes back
-  // (recorded as a partial answer above, or gone).
-  if (hasMovedSendInFlight(compositeKey, epoch, screenKey)) {
-    warnOncePerFrame(
-      pollerState,
-      `${frameKey}\u0000moved-send-in-flight`,
-      'poller:auto-yes-skipped-moved-send-in-flight',
-      { worktreeId, cliToolId, instanceId, promptType: promptData.type },
-    );
-    return true;
-  }
-  return false;
-}
-
-/**
- * Step 4 of `detectAndRespondToPrompt`: the auto answer under the execution
- * contract's policy, recording the suppression when the policy withholds it.
- *
- * @returns The answer to send, or null when there is none
- */
-function resolveAnswerUnderPolicy(judged: JudgedPrompt): string | null {
-  const { worktreeId, cliToolId, instanceId, promptData, frameKey } = judged;
-  const policy = getSessionAutoYesPolicy(worktreeId, cliToolId, instanceId);
-  const resolution = resolveAutoAnswerWithPolicy(promptData, policy);
-  if (resolution.suppressedBy) {
-    // Issue #1684: the log line alone leaves a CLI-driven pipeline blind to
-    // why its worker stalled. Record the suppression so buildCurrentOutput
-    // can publish it (`autoYes.lastSuppression` in capture --json).
-    suppressAndWarnOnce(
-      judged,
-      {
-        reason: resolution.suppressedBy,
-        mode: policy?.mode ?? null,
-        promptType: promptData.type,
-        pattern: resolution.pattern,
-      },
-      `${frameKey}\u0000${resolution.suppressedBy}\u0000${policy?.mode ?? ''}\u0000${resolution.pattern ?? ''}`,
-      'poller:auto-yes-suppressed-by-policy',
-      {
-        reason: resolution.suppressedBy,
-        mode: policy?.mode ?? null,
-        pattern: resolution.pattern,
-        promptType: promptData.type,
-      },
-    );
-  }
-  return resolution.answer;
-}
-
-/**
- * Issue #2865: whether the session is not this server's to type into (another
- * server created it, or the worktree is gone), warning once per frame.
- *
- * @returns true when the caller returns `no_answer`
- */
-function skippedForUnownedSession(
-  judged: JudgedPrompt,
-  sessionName: string,
-  ownership: Awaited<ReturnType<typeof checkWorktreeSessionOwnership>>,
-): boolean {
-  const { worktreeId, cliToolId, instanceId, pollerState, frameKey } = judged;
-  if (ownership === null || ownership.verdict === 'foreign') {
-    warnOncePerFrame(
-      pollerState,
-      `${frameKey}\u0000${sessionName}\u0000${ownership ? 'foreign' : 'worktree_not_found'}`,
-      'poller:auto-yes-skipped-foreign-session',
-      {
-        worktreeId,
-        cliToolId,
-        instanceId,
-        sessionName,
-        sessionPath: ownership?.sessionPath ?? null,
-        reason: ownership ? 'foreign' : 'worktree_not_found',
-      },
-    );
-    return true;
-  }
-  return false;
 }
 
 /**
@@ -2005,7 +1387,6 @@ export function stopAllAutoYesPolling(): void {
 export function getAutoYesPollerCompositeKeys(): string[] {
   return Array.from(autoYesPollerStates.keys());
 }
-
 
 // =============================================================================
 // byWorktree Helpers (Issue #525)
