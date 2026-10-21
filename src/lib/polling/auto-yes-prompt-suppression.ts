@@ -32,6 +32,7 @@ import { isAutoYesDeclinedConfirmPage } from './auto-yes-confirm-page';
 import { recordPolicySuppression, type AutoYesPolicySuppression } from './auto-yes-suppression-state';
 import { evaluateAutoYesDialogGate, type AutoYesDialogGateVerdict } from './auto-yes-dialog-gate';
 import { warnOncePerFrame, type AutoYesPollerState } from './auto-yes-poller-state';
+import { observeLedgerScreen, withholdLedgerConfirmation } from './auto-yes-confirmation-ledger';
 
 /**
  * Issue #3214: the prompt one `detectAndRespondToPrompt` tick is judging, as the
@@ -50,6 +51,12 @@ export interface JudgedPrompt {
   promptKey: string;
   /** `promptFrameKey(promptData)`: what `warnOncePerFrame` tells prompts apart by. */
   frameKey: string;
+  /**
+   * Issue #3820: the dialog gate's verdict, set by `suppressIfNotOursToAnswer`
+   * when it hands the prompt back as ours — what the ledger's evidence level
+   * (`L3` / `L4`) is read from. Absent until then.
+   */
+  dialogGate?: AutoYesDialogGateVerdict;
 }
 
 /**
@@ -72,6 +79,8 @@ export function suppressAndWarnOnce(
 ): void {
   const { worktreeId, cliToolId, instanceId } = prompt;
   recordPolicySuppression(worktreeId, cliToolId, instanceId, suppression);
+  // Issue #3820: the same stop, as an interval of the confirmation on screen.
+  withholdLedgerConfirmation(prompt, suppression.reason);
   warnOncePerFrame(prompt.pollerState, warnFrameKey, event, {
     worktreeId,
     cliToolId,
@@ -351,6 +360,7 @@ export function suppressIfNotOursToAnswer(prompt: JudgedPrompt, frame: Normalize
     return { kind: 'dialog-gate-refused', dialogGate };
   }
 
+  prompt.dialogGate = dialogGate;
   return { kind: 'ours' };
 }
 
@@ -374,6 +384,9 @@ export function suppressUnclassifiedFrame(prompt: JudgedPrompt, dialogGate: Auto
     },
   );
 }
+
+/** Issue #3820: the ledger's screen key for agy's startup trust screen (not a `partialAnswerScreenKey`). */
+const ANTIGRAVITY_TRUST_SCREEN_LEDGER_KEY = 'antigravity-startup-trust';
 
 /**
  * Issue #3757: agy's startup folder-trust screen, which the tick read as no
@@ -413,6 +426,11 @@ export function suppressAntigravityTrustScreen(
     mode: null,
     promptType: 'multiple_choice',
   });
+  // Issue #3820: unnumbered, so no prompt data and no screen key of its own —
+  // the screen is one confirmation for as long as it stays up.
+  const ledgerScope = { worktreeId, cliToolId: 'antigravity' as const, instanceId };
+  observeLedgerScreen(ledgerScope, ANTIGRAVITY_TRUST_SCREEN_LEDGER_KEY, 'multiple_choice');
+  withholdLedgerConfirmation(ledgerScope, STARTUP_TRUST_UNHANDLED_SUPPRESSION_REASON);
   warnOncePerFrame(pollerState, 'antigravity-startup-trust', 'poller:auto-yes-skipped-startup-trust', {
     worktreeId,
     cliToolId: 'antigravity',

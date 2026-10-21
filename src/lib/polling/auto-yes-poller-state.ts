@@ -12,6 +12,7 @@ import { createLogger } from '@/lib/logger';
 import { filterCompositeKeysByWorktree } from '../auto-yes-state';
 import { getOrInitGlobal } from '../global-state';
 import { getEnterFallbackSessionEpoch } from './auto-yes-enter-fallback-state';
+import type { LedgerAttemptHandle } from './auto-yes-confirmation-ledger';
 import { approvalTargetWithOptionRowsAligned } from '../prompt-observation/appearance';
 
 const logger = createLogger('auto-yes-poller');
@@ -210,6 +211,62 @@ function withoutCursorMarks(promptData: PromptData): string {
   return aligned ?? withoutLeadingMarks(target);
 }
 
+/**
+ * Which confirmation the ledger counts a prompt as (Issue #3820): the
+ * {@link partialAnswerScreenKey} reading where the option rows can be told,
+ * and otherwise one that still keeps the body. That key's fallback takes the
+ * marks and indent off every row — for a partial answer, two bodies reading as
+ * one screen holds the prompt for a human, the safe side — but for counting it
+ * makes two confirmations whose commands differ by a `>` or an indent one.
+ * Here only the rows that ARE the options the reader read — the row's number
+ * and label match one of `promptData.options` — lose their gutter (where the
+ * cursor sits); every other row, a numbered line of the body included, stays
+ * byte for byte. The match takes the separator as the readers do: `1.`, `1)`
+ * or a bare `1` followed by any run of spaces (`❯ 1  Yes`).
+ */
+export function ledgerScreenKey(promptData: PromptData): string {
+  if (promptData.type !== 'multiple_choice') return partialAnswerScreenKey(promptData);
+  const target = promptData.approvalTarget ?? '';
+  const aligned = approvalTargetWithOptionRowsAligned(
+    target,
+    promptData.options.map((o) => o.label),
+    (read, named) => read.startsWith(named),
+  );
+  if (aligned !== null) return partialAnswerScreenKey(promptData);
+  const options = promptData.options.map((o) => `${o.number}.${o.label}`).join('\n');
+  return [generatePromptKey(promptData), options, withOptionRowGuttersAligned(target, promptData.options)].join(
+    '\u0000',
+  );
+}
+
+/** A row's leading cursor marks and indentation. */
+const LEADING_MARKS_PATTERN = /^[\s\u276F\u203A>\u25B6\u25BA\u25CF\u25CB\u25C9\u2192]+/u;
+
+/** A row's option number and the text after its separator (`1.`, `1)` or `1`, then spaces). */
+const OPTION_ROW_PATTERN = /^(\d+)(?:[.)]\s*|\s+)(.*)$/u;
+
+const collapseSpaces = (text: string): string => text.replace(/\s+/gu, ' ').trim();
+
+/** Rows that match one of `options` lose their leading marks and indent; the rest stay. */
+function withOptionRowGuttersAligned(
+  text: string,
+  options: ReadonlyArray<{ number: number; label: string }>,
+): string {
+  return text
+    .split('\n')
+    .map((line) => {
+      const row = OPTION_ROW_PATTERN.exec(line.replace(LEADING_MARKS_PATTERN, ''));
+      if (row === null) return line;
+      const rest = collapseSpaces(row[2]);
+      const isOption = options.some((option) => {
+        const label = collapseSpaces(option.label);
+        return option.number === Number(row[1]) && label !== '' && rest.startsWith(label);
+      });
+      return isOption ? line.replace(LEADING_MARKS_PATTERN, '') : line;
+    })
+    .join('\n');
+}
+
 /** Every row's leading marks and indentation taken out (the reading before #3817). */
 function withoutLeadingMarks(text: string): string {
   return text
@@ -333,14 +390,30 @@ export interface AutoYesSendAttempt {
   moved: boolean;
   /** `pending` until the tick settles it; `expired` when its session's state was dropped. */
   state: 'pending' | 'settled' | 'expired';
+  /**
+   * Issue #3820: the confirmation and the attempt this send is recorded under
+   * in the ledger, taken before the first await like the object itself — a
+   * result that comes back after the confirmation closed still goes to it.
+   * Null when the ledger had no confirmation (or failed).
+   */
+  readonly ledger: LedgerAttemptHandle | null;
 }
 
 /** The sends in flight. globalThis for hot reload (#153), like the Map above. */
 const sendAttempts = getOrInitGlobal('__autoYesSendAttempts', () => new Set<AutoYesSendAttempt>());
 const sendAttemptSeq = getOrInitGlobal('__autoYesSendAttemptSeq', () => ({ last: 0 }));
 
-/** Register a send about to start (the poller, before `sendPromptAnswer`). */
-export function beginSendAttempt(compositeKey: string, screenKey: string, epoch: number): AutoYesSendAttempt {
+/**
+ * Register a send about to start (the poller, before `sendPromptAnswer`).
+ *
+ * @param ledger - Issue #3820: the ledger's handle for this send, if any
+ */
+export function beginSendAttempt(
+  compositeKey: string,
+  screenKey: string,
+  epoch: number,
+  ledger: LedgerAttemptHandle | null = null,
+): AutoYesSendAttempt {
   const attempt: AutoYesSendAttempt = {
     seq: ++sendAttemptSeq.last,
     screenKey,
@@ -348,6 +421,7 @@ export function beginSendAttempt(compositeKey: string, screenKey: string, epoch:
     recordEpoch: epoch,
     moved: false,
     state: 'pending',
+    ledger,
   };
   sendAttempts.add(attempt);
   return attempt;

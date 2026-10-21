@@ -23,12 +23,14 @@ import { ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS } from './antigravity-permissi
 import { policyLookupMode, resolveAutoAnswerWithPolicy } from './auto-yes-resolver';
 import { getSessionAutoYesPolicyLookupEntry } from './auto-yes-policy';
 import type { PromptDetectionResult } from '../detection/types';
+import type { PromptData } from '@/types/models';
 import { createLogger } from '@/lib/logger';
 import { getOrInitGlobal } from '../global-state';
 import {
   CONTRACT_SUPPRESSION_REASONS,
   NO_HOOK_RECEIPT_SUPPRESSION_REASON,
   PARTIAL_ANSWER_SUPPRESSION_REASON,
+  type AutoYesSuppressionReason,
   POLICY_LOOKUP_FAILED_SUPPRESSION_REASON,
 } from './auto-yes-suppression-reason';
 import {
@@ -84,27 +86,37 @@ const WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS = 60_000;
  * The response-checker's own `antigravity-dialog-no-recent-receipt` stays at
  * debug — it prints on every tick the same pane is read again.
  *
+ * Issue #3820: says what it saw, for the confirmation ledger. The gated
+ * reading's `isPrompt: false` is not "the dialog is gone": past the receipt
+ * window the dialog is still up, and the ledger keeps it as the same
+ * confirmation. Nothing here changes on that account — the return value is the
+ * ungated reading this function already took, and the reason it recorded.
+ *
  * @param compositeKey - The instance's key, for the once-a-minute limit
  * @param readWithoutGate - The same frame read without `receiptScope`
+ * @returns The prompt the ungated reading saw, with the reason this call
+ *   recorded or kept for it (null when none: a dialog the gate accepted and is
+ *   waiting to be answered); null when no dialog was read past the gate
  */
 export function logIfWithheldForWantOfReceipt(
   worktreeId: string,
   instanceId: string | undefined,
   compositeKey: string,
   readWithoutGate: () => PromptDetectionResult,
-): void {
+): WithheldPastReceiptGate | null {
   // Issue #3767: the gate's own verdict for this tick's candidate. Null means it
   // never saw one (no dialog), `ok` that it let the frame through.
   let verdict = getAntigravityReceiptVerdict(worktreeId, instanceId);
-  if (verdict?.ok) return;
+  if (verdict?.ok) return null;
 
   const now = Date.now();
   const ungated = readWithoutGate();
-  if (!ungated.isPrompt || !ungated.promptData) return;
+  if (!ungated.isPrompt || !ungated.promptData) return null;
+  const promptData = ungated.promptData;
   // The gate was not consulted (the gated reading declined the frame on screen
   // grounds alone) yet the frame reads as a prompt: judge it here.
   verdict ??= judgeAntigravityPermissionReceipt(worktreeId, instanceId, now);
-  if (verdict.ok) return;
+  if (verdict.ok) return null;
 
   // Issue #3724: a contract that withholds the answer makes the server reply
   // `ask`, so the dialog stays up past the receipt window. The cause is then the
@@ -147,7 +159,13 @@ export function logIfWithheldForWantOfReceipt(
       ...(resolution.pattern !== undefined ? { pattern: resolution.pattern } : {}),
     });
   }
-  if (!resolution.suppressedBy && (verdict.cause === 'answered' || keptPartialAnswer)) return;
+  const seen = (reason: AutoYesSuppressionReason | null): WithheldPastReceiptGate => ({ promptData, reason });
+  // What stands recorded for the prompt after this call: a kept partial answer
+  // comes before the contract, as the record above.
+  const contractReason = keptPartialAnswer ? PARTIAL_ANSWER_SUPPRESSION_REASON : resolution.suppressedBy;
+  if (!resolution.suppressedBy && (verdict.cause === 'answered' || keptPartialAnswer)) {
+    return seen(keptPartialAnswer ? PARTIAL_ANSWER_SUPPRESSION_REASON : null);
+  }
 
   const lastLoggedAt = withheldNoReceiptLoggedAt.get(compositeKey);
   const logDue = lastLoggedAt === undefined || now - lastLoggedAt >= WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS;
@@ -158,7 +176,7 @@ export function logIfWithheldForWantOfReceipt(
     withheldNoReceiptLoggedAt.set(compositeKey, now);
   }
   if (resolution.suppressedBy) {
-    if (!logDue) return;
+    if (!logDue) return seen(contractReason ?? null);
     logger.info('antigravity-autoyes-withheld-by-policy', {
       worktreeId,
       instanceId: instanceId ?? 'antigravity',
@@ -170,7 +188,7 @@ export function logIfWithheldForWantOfReceipt(
           ? '契約の照会に失敗したので答えていない。サーバーログの policy-lookup-failed を確認'
           : '契約の autoYes が答えを止めている。契約の autoYes を確認',
     });
-    return;
+    return seen(contractReason ?? null);
   }
   // Issue #3767: recorded on every tick (the record's `at` follows the prompt
   // while it stays up), logged once a minute.
@@ -179,13 +197,23 @@ export function logIfWithheldForWantOfReceipt(
     mode: null,
     promptType: ungated.promptData.type,
   });
-  if (!logDue) return;
+  if (!logDue) return seen(NO_HOOK_RECEIPT_SUPPRESSION_REASON);
   logger.info('antigravity-autoyes-withheld-no-hook-receipt', {
     worktreeId,
     instanceId: instanceId ?? 'antigravity',
     windowMs: ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS,
     hint: noHookReceiptHint(verdict, now),
   });
+  return seen(NO_HOOK_RECEIPT_SUPPRESSION_REASON);
+}
+
+/**
+ * Issue #3820: what {@link logIfWithheldForWantOfReceipt} saw past the receipt
+ * gate — the dialog is still on screen — and why it stands withheld.
+ */
+export interface WithheldPastReceiptGate {
+  promptData: PromptData;
+  reason: AutoYesSuppressionReason | null;
 }
 
 /**

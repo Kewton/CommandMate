@@ -21,6 +21,7 @@ import {
   warnOncePerFrame,
 } from './auto-yes-poller-state';
 import { suppressAndWarnOnce, type JudgedPrompt } from './auto-yes-prompt-suppression';
+import { withholdLedgerConfirmation } from './auto-yes-confirmation-ledger';
 
 /**
  * Step 2.5 of `detectAndRespondToPrompt`: whether an earlier send to this
@@ -55,6 +56,8 @@ export function withheldForEarlierSend(judged: JudgedPrompt, screenKey: string, 
   // ends is not known yet — so this screen gets no keys until it comes back
   // (recorded as a partial answer above, or gone).
   if (hasMovedSendInFlight(compositeKey, epoch, screenKey)) {
+    // Issue #3820: a stop the policy record never carries — the ledger's own reason.
+    withholdLedgerConfirmation(judged, 'moved-send-in-flight');
     warnOncePerFrame(
       pollerState,
       `${frameKey}\u0000moved-send-in-flight`,
@@ -116,6 +119,8 @@ export function skippedForUnownedSession(
 ): boolean {
   const { worktreeId, cliToolId, instanceId, pollerState, frameKey } = judged;
   if (ownership === null || ownership.verdict === 'foreign') {
+    // Issue #3820: as above, the ledger's own reason.
+    withholdLedgerConfirmation(judged, 'foreign-session');
     warnOncePerFrame(
       pollerState,
       `${frameKey}\u0000${sessionName}\u0000${ownership ? 'foreign' : 'worktree_not_found'}`,
