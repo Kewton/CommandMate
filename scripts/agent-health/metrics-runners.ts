@@ -5,7 +5,8 @@
  * `GET /api/worktrees` — read only; the server is never stopped or changed),
  * and for `bug-flow` `bug-flow.ts` (Issue #3185: `gh issue list`, read only),
  * for `ci-flaky` `ci-flaky.ts` (Issue #3310: `gh run list` / `gh run view`, read only),
- * and for `hook-observation` `hook-observation.ts` (Issue #3311: the same log read).
+ * for `hook-observation` `hook-observation.ts` (Issue #3311: the same log read)
+ * and for `auto-yes-observation` `auto-yes-observation.ts` (Issue #3820: the same log read).
  *
  * A runner never throws for a tool problem: a missing binary, no network, a
  * timeout or unreadable output all become `status: 'skip'` with the reason.
@@ -34,6 +35,7 @@ import {
 } from '@/lib/agent-health/metrics-parse';
 import { BUG_FLOW_WINDOW_DAYS, bugFlowWindowStart, measureBugFlow } from '@/lib/agent-health/bug-flow';
 import { measureHookObservation } from '@/lib/agent-health/hook-observation';
+import { AUTO_YES_OBSERVATION_LOOKBACK_MS, measureAutoYesObservation } from '@/lib/agent-health/auto-yes-observation';
 import {
   attemptFailed,
   ciFlakyWindowStart,
@@ -459,7 +461,10 @@ export function listServerLogFiles(serverLog: string): string[] {
   return [serverLog, ...rotated].filter((file) => fs.existsSync(file));
 }
 
-/** Stream every log file into one aggregate; files last written before the window are not read. */
+/**
+ * Stream every log file into one aggregate; files last written before the
+ * window (and the hour `auto-yes-observation` looks back) are not read.
+ */
 export async function aggregateServerLog(files: readonly string[], now: Date): Promise<LogAggregate> {
   const agg = createLogAggregate(now);
   for (const file of files) {
@@ -469,7 +474,7 @@ export async function aggregateServerLog(files: readonly string[], now: Date): P
     } catch {
       continue;
     }
-    if (stat.mtimeMs < agg.windowStart) {
+    if (stat.mtimeMs < agg.windowStart - AUTO_YES_OBSERVATION_LOOKBACK_MS) {
       // Every line is older than the window; one line is enough to say the log reaches back.
       if (agg.oldest === null || stat.mtimeMs < agg.oldest) agg.oldest = stat.mtimeMs;
       continue;
@@ -481,7 +486,7 @@ export async function aggregateServerLog(files: readonly string[], now: Date): P
 }
 
 type LogAggregateResult = { ok: true; agg: LogAggregate } | { ok: false; reason: string };
-/** The log metrics (the three performance ones and hook-observation) share one read per run. */
+/** The log metrics (the three performance ones, hook-observation and auto-yes-observation) share one read per run. */
 const logAggregates = new WeakMap<RunnerContext, Promise<LogAggregateResult>>();
 
 function resolveServerLog(ctx: RunnerContext): string | null {
@@ -694,6 +699,7 @@ export const METRIC_RUNNERS: Record<MetricId, (ctx: RunnerContext) => Promise<Me
   'bug-flow': bugFlow,
   'ci-flaky': ciFlaky,
   'hook-observation': fromServerLog('hook-observation', (agg) => measureHookObservation(agg.hook)),
+  'auto-yes-observation': fromServerLog('auto-yes-observation', (agg) => measureAutoYesObservation(agg.autoYes, agg)),
 };
 
 /**
@@ -716,6 +722,7 @@ export const RUN_ORDER: readonly MetricId[] = [
   'log-volume',
   'error-rate',
   'hook-observation',
+  'auto-yes-observation',
   'ci-flaky',
   'bug-flow',
 ];

@@ -270,3 +270,80 @@ export interface CliModeObservedLine extends LedgerLineBase {
   mode: string;
   change: 'first' | 'changed';
 }
+
+// =============================================================================
+// The vocabulary as values, for a reader that must tell a known code from
+// anything else (the daily aggregation, PR 4, folds the rest into `(other)`).
+// Each list is the keys of a `Record` over its union, so the compiler fails
+// when a member is added to the union and not here, or the other way round.
+// =============================================================================
+
+const PATHS: Record<AutoYesLedgerPath, true> = {
+  screen: true,
+  hook: true,
+  api: true,
+  'prompt-response': true,
+  'agy-link': true,
+};
+/** Every {@link AutoYesLedgerPath}, in the order the PRs add them (design §6.4). */
+export const AUTO_YES_LEDGER_PATHS = Object.keys(PATHS) as readonly AutoYesLedgerPath[];
+
+const BASES: Record<AnswerBasis, true> = { L1: true, L2: true, L3: true, L4: true, 'enter-fallback': true, browser: true };
+export const ANSWER_BASES = Object.keys(BASES) as readonly AnswerBasis[];
+
+const WITHHOLD_REASONS: Record<LedgerWithholdReason, true> = {
+  'mode-off': true,
+  'deny-pattern': true,
+  'deny-pattern-unusable': true,
+  'type-not-allowed': true,
+  'policy-lookup-failed': true,
+  'agent-launch-dialog': true,
+  'unclassified-frame': true,
+  'partial-answer': true,
+  'startup-trust-unhandled': true,
+  'question-confirm-page': true,
+  'no-hook-receipt': true,
+  'send-failed': true,
+  'send-no-keys': true,
+  'foreign-session': true,
+  'moved-send-in-flight': true,
+  'answered-recently': true,
+};
+export const LEDGER_WITHHOLD_REASONS = Object.keys(WITHHOLD_REASONS) as readonly LedgerWithholdReason[];
+
+const RESULTS: Record<AttemptResult, true> = { ok: true, partial: true, 'no-keys-sent': true, failed: true };
+export const ATTEMPT_RESULTS = Object.keys(RESULTS) as readonly AttemptResult[];
+
+const RESOLUTIONS: Record<ConfirmationResolution, true> = {
+  'resolved-after-answer': true,
+  'resolved-while-withheld': true,
+  'resolved-by-reply': true,
+  'resolved-before-decision': true,
+  'unresolved-after-send': true,
+  'gone-while-unobservable': true,
+  abandoned: true,
+};
+export const CONFIRMATION_RESOLUTIONS = Object.keys(RESOLUTIONS) as readonly ConfirmationResolution[];
+
+const RESOLVED_BY: Record<ConfirmationResolvedBy, true> = { auto: true, 'human-ui': true, unknown: true };
+export const CONFIRMATION_RESOLVED_BY = Object.keys(RESOLVED_BY) as readonly ConfirmationResolvedBy[];
+
+/**
+ * Why the hook route answered a request with no decision (PR 2's
+ * `abstainReason`): `PermissionDecisionReason` (`hooks/permission-decision-service.ts`)
+ * less `auto-yes`, the one reason that is a decision (design §2.3).
+ */
+export const HOOK_ABSTAIN_REASONS = [
+  'unknown-payload',
+  'ask-user-question',
+  'auto-yes-disabled',
+  'policy-suppressed',
+  'worktree-unresolved',
+] as const;
+
+/**
+ * The `permission_mode` values claude's `PermissionRequest` is known to carry
+ * (PR 2's `cli-mode-observed`). Another value is still logged as it came; the
+ * daily aggregation counts it as `(other)` (design §6.1).
+ */
+export const CLI_PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'bypassPermissions'] as const;
