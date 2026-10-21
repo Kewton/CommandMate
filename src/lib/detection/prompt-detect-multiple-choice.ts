@@ -769,6 +769,11 @@ function extractInstructionText(
  *
  * Horizontal rules count too: Codex draws one between turns.
  *
+ * [Issue #3817] Not inside the panel's own frame: the command a panel shows can
+ * carry the same glyphs (a here-document's `> quoted` rows), drawn deeper than
+ * the panel's header, question and option rows. See
+ * {@link findApprovalContextStart}.
+ *
  * Anchored at the start of the trimmed line — ReDoS safe (no repetition).
  */
 const TURN_BOUNDARY_PATTERN =
@@ -786,7 +791,28 @@ const TURN_BOUNDARY_PATTERN =
  */
 export const APPROVAL_TARGET_MAX_LOOKBACK = 12;
 
-/** True when this line belongs to a previous turn rather than the prompt panel. */
+/** Width of a row's leading whitespace. */
+function indentOf(line: string): number {
+  return line.length - line.trimStart().length;
+}
+
+/**
+ * The column the dialog's own frame is drawn at (Issue #3817): the least
+ * indented non-blank row from the question down to `panelEnd`. Those rows are
+ * the question, the option block and the footer — claude puts them at column 1
+ * and the command at column 3, codex its `› 1.` cursor at column 0.
+ */
+function panelFrameIndent(lines: string[], questionLineIndex: number, panelEnd: number): number {
+  let indent = Infinity;
+  for (let i = questionLineIndex; i < Math.min(panelEnd, lines.length); i++) {
+    const line = lines[i];
+    if (line === undefined || line.trim() === '') continue;
+    indent = Math.min(indent, indentOf(line));
+  }
+  return indent === Infinity ? 0 : indent;
+}
+
+/** True when this line carries a transcript marker or is a rule. */
 function isTurnBoundaryLine(rawLine: string | undefined): boolean {
   if (rawLine === undefined) return false;
   const line = rawLine.trim();
@@ -802,21 +828,45 @@ function isTurnBoundaryLine(rawLine: string | undefined): boolean {
  * Everything above the returned index is a previous turn and must never reach a
  * deny pattern — that poisoning is Issue #1699.
  *
+ * [Issue #3817] A marker row indented deeper than the dialog's frame
+ * ({@link panelFrameIndent}) is a boundary only when no row of the frame sits
+ * above it. One that does — the `> quoted` rows of a here-document under a
+ * claude panel's ` Bash command` header — is the body of the command the panel
+ * asks about; cutting there took the command rows above it out of the deny
+ * surface. The previous turn's markers are drawn at or left of the frame (`⏺`,
+ * the user's `> msg` / `❯ msg` echo, a rule), or deeper but above the panel's
+ * top row (claude's `  ⎿` result under its `⏺`), and both still end the scan.
+ *
  * Shared by both detector paths: multiple_choice passes its `questionEndIndex`,
  * yes_no the line its pattern matched on.
  *
  * @param lines - Full frame, already ANSI/box stripped
  * @param questionLineIndex - Line the prompt's own question sits on
+ * @param panelEnd - Exclusive end of the dialog's own rows (Issue #3817); their
+ *   least indented row is the frame. Defaults to the question row alone.
  * @returns Index of the first line of the current prompt's own block
  */
-export function findApprovalContextStart(lines: string[], questionLineIndex: number): number {
+export function findApprovalContextStart(
+  lines: string[],
+  questionLineIndex: number,
+  panelEnd: number = questionLineIndex + 1,
+): number {
   const floor = Math.max(0, questionLineIndex - APPROVAL_TARGET_MAX_LOOKBACK);
+  const frameIndent = panelFrameIndent(lines, questionLineIndex, panelEnd);
+  // The lowest deeper marker row with no frame row found above it yet.
+  let unenclosed = -1;
   for (let i = questionLineIndex - 1; i >= floor; i--) {
-    if (isTurnBoundaryLine(lines[i])) {
-      return i + 1;
+    const line = lines[i];
+    if (line === undefined || line.trim() === '') continue;
+    const atFrame = indentOf(line) <= frameIndent;
+    if (isTurnBoundaryLine(line)) {
+      if (atFrame) return (unenclosed >= 0 ? unenclosed : i) + 1;
+      if (unenclosed < 0) unenclosed = i;
+    } else if (atFrame) {
+      unenclosed = -1;
     }
   }
-  return floor;
+  return unenclosed >= 0 ? unenclosed + 1 : floor;
 }
 
 /**
@@ -874,7 +924,7 @@ function extractApprovalTarget(
 
   return joinApprovalTarget(
     lines,
-    Math.max(floor, findApprovalContextStart(lines, questionEndIndex)),
+    Math.max(floor, findApprovalContextStart(lines, questionEndIndex, effectiveEnd)),
     effectiveEnd,
   );
 }
