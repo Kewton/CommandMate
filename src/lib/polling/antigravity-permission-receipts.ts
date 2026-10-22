@@ -23,7 +23,8 @@
  * ## What is kept
  *
  * ONE entry per instance: the tool name and the arrival time of the most recent
- * question. A second question replaces the first, because the only thing asked
+ * question, and the call it asked about (`callId`, Issue #3820) when the body
+ * named one. A second question replaces the first, because the only thing asked
  * of this record is "was there one lately".
  *
  * The screen carries no tool name (only the option labels), so the caller that
@@ -74,6 +75,12 @@ interface PermissionReceipt {
   toolName: string;
   /** Epoch ms the question arrived. */
   at: number;
+  /**
+   * Issue #3820: `<conversationId>:<stepIdx>` of the call asked about, or null
+   * when the body had no `stepIdx`. Recorded for the Auto-Yes ledger only —
+   * nothing here or in the gate reads it to decide.
+   */
+  callId: string | null;
 }
 
 const receipts = getOrInitGlobal('__antigravityPermissionReceipts', () => new Map<string, PermissionReceipt>());
@@ -111,6 +118,8 @@ const observations = getOrInitGlobal('__antigravityReceiptObservations', () => n
  * @param instanceId - Agent instance id (the tool id itself for the primary)
  * @param toolName - Tool the request named, or null when the payload had none
  * @param at - Epoch ms the request arrived
+ * @param callId - Issue #3820: the call the request asked about
+ *   (`PermissionRequestPayload.callId`), null when it named none
  */
 export function recordAntigravityPermissionReceipt(
   worktreeId: string,
@@ -118,10 +127,11 @@ export function recordAntigravityPermissionReceipt(
   instanceId: string,
   toolName: string | null,
   at: number = Date.now(),
+  callId: string | null = null,
 ): void {
   if (toolName === null) return;
   pruneExpiredReceipts(at);
-  receipts.set(buildCompositeKey(worktreeId, cliToolId, instanceId), { toolName, at });
+  receipts.set(buildCompositeKey(worktreeId, cliToolId, instanceId), { toolName, at, callId });
 }
 
 /**
@@ -159,6 +169,18 @@ export function getAntigravityPermissionReceiptAt(
   instanceId: string | undefined,
 ): number | null {
   return receipts.get(buildCompositeKey(worktreeId, cliToolId, instanceId))?.at ?? null;
+}
+
+/**
+ * The call the latest question asked about (Issue #3820), or null when it
+ * named none or none was received. For the ledger only.
+ */
+export function getAntigravityPermissionReceiptCallId(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string | undefined,
+): string | null {
+  return receipts.get(buildCompositeKey(worktreeId, cliToolId, instanceId))?.callId ?? null;
 }
 
 /** Empty the record. Tests only: production entries age out on their own. */

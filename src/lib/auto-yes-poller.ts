@@ -17,6 +17,7 @@ import { detectPromptOnCleanFrame } from './polling/response-checker';
 import {
   beginAntigravityFrameRead,
   endAntigravityFrameRead,
+  getAntigravityAcceptedReceiptCallId,
 } from './polling/antigravity-receipt-episodes';
 import { policyLookupMode, resolveAutoAnswerWithPolicy } from './polling/auto-yes-resolver';
 import {
@@ -770,9 +771,34 @@ function noteNoPromptOnScreen(tick: {
     // rather than closing it on every tick outside the window.
     if (seen !== null) {
       const scope: LedgerScope = { compositeKey, worktreeId, cliToolId, instanceId };
-      observeLedgerScreen(scope, ledgerScreenKey(seen.promptData), seen.promptData.type);
+      observeLedgerScreen(
+        scope,
+        ledgerScreenKey(seen.promptData),
+        seen.promptData.type,
+        ledgerCallOf(cliToolId, worktreeId, instanceId),
+      );
       if (seen.reason !== null) withholdLedgerConfirmation(scope, seen.reason);
     }
+  }
+}
+
+/**
+ * Issue #3820 (design §2.4, PR 3): the agy call the receipt episode on screen
+ * was accepted for, for the ledger to tie the confirmation to. Asked after the
+ * frame was judged; read only to record, and never throws.
+ */
+function ledgerCallOf(
+  cliToolId: CLIToolType,
+  worktreeId: string,
+  instanceId: string | undefined,
+): { callId?: string } {
+  if (cliToolId !== 'antigravity') return {};
+  try {
+    const callId = getAntigravityAcceptedReceiptCallId(worktreeId, instanceId);
+    return callId === null ? {} : { callId };
+  } catch {
+    // Recording only: a failure here ties nothing and changes nothing else.
+    return {};
   }
 }
 
@@ -968,7 +994,13 @@ export async function detectAndRespondToPrompt(
     // The ledger's own key keeps the body (`ledgerScreenKey`): two commands
     // that differ by a `>` or an indent are two confirmations to count.
     const screenKey = partialAnswerScreenKey(promptDetection.promptData);
-    observeLedgerScreen(ledgerScope, ledgerScreenKey(promptDetection.promptData), promptDetection.promptData.type);
+    // agy (PR 3): tied to the call the receipt that let it through asked about.
+    observeLedgerScreen(
+      ledgerScope,
+      ledgerScreenKey(promptDetection.promptData),
+      promptDetection.promptData.type,
+      ledgerCallOf(cliToolId, worktreeId, instanceId),
+    );
 
     // 2. Check for duplicate prompt (Issue #306)
     const promptKey = generatePromptKey(promptDetection.promptData);
