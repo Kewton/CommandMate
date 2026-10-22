@@ -12,7 +12,8 @@
  *  - An interval closed `end: 'stopped'` (Auto-Yes off under an API approval)
  *    counts no time after the OFF, though the approval stays open and on every
  *    checkpoint.
- *  - With PR 2's paths recorded, only `agy-link` (PR 3) is missing.
+ *  - With PR 2's paths recorded, only `agy-link` (PR 3) was missing; since
+ *    PR 3 records it too, nothing is (the value pinned below).
  *
  * Positive control: before this change the human answer was counted in
  * `answered` (and `answeredByHuman` did not exist).
@@ -166,6 +167,8 @@ describe('[#3820 PR 2 × PR 4] the paths a PR 2 ledger records', () => {
     startLedger();
     hours(S + 2 * H, E);
 
-    expect(measure().details).toMatchObject({ pathsMissing: 'agy-link', partial: 1 });
+    // PR 3 added `agy-link` to the ledger's paths (design §6.4): now none is
+    // missing. The mixed PR 2 / PR 3 day is in `auto-yes-observation-pr3-3820.test.ts`.
+    expect(measure().details).toMatchObject({ pathsMissing: '', partial: 0 });
   });
 });

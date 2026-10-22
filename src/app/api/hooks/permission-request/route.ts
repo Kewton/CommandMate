@@ -99,6 +99,7 @@ import {
   type PendingDecision,
   type Verdict,
 } from '@/lib/hooks/sources';
+import { readAntigravityPermissionCallId } from '@/lib/hooks/sources/antigravity/source';
 import { recordAntigravityPermissionReceipt } from '@/lib/polling/antigravity-permission-receipts';
 import {
   beginLedgerHookRequest,
@@ -238,7 +239,13 @@ export async function POST(request: NextRequest) {
     // the verdict is written back in it (S6). The adjudication in between —
     // `resolvePermissionRequest` — was already tool-independent and is
     // untouched.
-    const payload = source.parsePermissionRequest(raw);
+    const parsed = source.parsePermissionRequest(raw);
+    // Issue #3820 (design §2.4): agy's `PreToolUse` names its call
+    // (`conversationId` + `stepIdx`). Put on the payload for the ledger only —
+    // the parse the adjudication judges is unchanged, and a body without a
+    // numeric `stepIdx` has no call id, as before.
+    const callId = tool === 'antigravity' ? readAntigravityPermissionCallId(raw) : null;
+    const payload = parsed !== null && callId !== null ? { ...parsed, callId } : parsed;
 
     // Issue #2849: agy asks about EVERY tool call before it draws a dialog, so
     // "a question named this tool a moment ago" is what tells Auto-Yes a dialog
@@ -252,6 +259,7 @@ export async function POST(request: NextRequest) {
         instanceParam ?? tool,
         payload?.toolName ?? null,
         startedAt,
+        callId,
       );
     }
 

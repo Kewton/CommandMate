@@ -20,6 +20,7 @@ import { getOrInitGlobal } from '../global-state';
 import {
   ANTIGRAVITY_PERMISSION_RECEIPT_WINDOW_MS,
   getAntigravityPermissionReceiptAt,
+  getAntigravityPermissionReceiptCallId,
   hasRecentAntigravityPermissionReceipt,
 } from './antigravity-permission-receipts';
 
@@ -74,6 +75,13 @@ interface FrameObservation {
   lastReadAt: number | null;
   /** Receipt (`at`) this episode was accepted on. */
   acceptedReceiptAt: number | null;
+  /**
+   * Issue #3820: the call (`<conversationId>:<stepIdx>`) the receipt this
+   * episode was accepted on asked about; null when it named none or nothing
+   * was accepted. For the Auto-Yes ledger only — no verdict reads it.
+   * Optional: an entry written before #3820 reads as naming none.
+   */
+  acceptedCallId?: string | null;
   /**
    * Epoch ms the poller's keys for the accepted dialog reached tmux (Issue
    * #3789); null while accepted but not sent (another server's session, a
@@ -154,7 +162,8 @@ function isObservation(v: unknown): v is FrameObservation {
       isTimeOrNull(o[k]),
     ) &&
     (o.verdict === null || typeof o.verdict === 'object') &&
-    (o.answerInterrupted === undefined || typeof o.answerInterrupted === 'boolean')
+    (o.answerInterrupted === undefined || typeof o.answerInterrupted === 'boolean') &&
+    (o.acceptedCallId === undefined || o.acceptedCallId === null || typeof o.acceptedCallId === 'string')
   );
 }
 
@@ -177,6 +186,7 @@ function observationOf(key: string): FrameObservation {
       prevReadAt: null,
       lastReadAt: null,
       acceptedReceiptAt: null,
+      acceptedCallId: null,
       answerSentAt: null,
       answerInterrupted: false,
       usedReceiptAt: null,
@@ -204,6 +214,7 @@ export function beginAntigravityFrameRead(
     o.firstSeenAt = null;
     o.clearAt = null;
     o.acceptedReceiptAt = null;
+    o.acceptedCallId = null;
     o.answerSentAt = null;
     o.answerInterrupted = false;
     o.verdict = null;
@@ -227,6 +238,7 @@ export function endAntigravityFrameRead(
   if (!o || !o.tracking || o.candidateSeen) return;
   o.firstSeenAt = null;
   o.acceptedReceiptAt = null;
+  o.acceptedCallId = null;
   o.answerSentAt = null;
   o.answerInterrupted = false;
   o.verdict = null;
@@ -272,6 +284,19 @@ export function markAntigravityAnswerSent(
  */
 export function getAntigravityAcceptedReceiptAt(worktreeId: string, instanceId: string | undefined): number | null {
   return existingObservation(buildCompositeKey(worktreeId, 'antigravity', instanceId))?.acceptedReceiptAt ?? null;
+}
+
+/**
+ * The call the current episode was accepted for (Issue #3820, design
+ * `docs/design/auto-yes-measurement-3820.md` §2.4): what the Auto-Yes ledger
+ * ties the screen's confirmation to, so the hook request and the `PostToolUse`
+ * of that call find it. Null when nothing is accepted or the receipt named no
+ * call. Read only to record; the gate never consults it.
+ */
+export function getAntigravityAcceptedReceiptCallId(worktreeId: string, instanceId: string | undefined): string | null {
+  const o = existingObservation(buildCompositeKey(worktreeId, 'antigravity', instanceId));
+  if (!o || o.acceptedReceiptAt === null) return null;
+  return o.acceptedCallId ?? null;
 }
 
 /**
@@ -346,6 +371,7 @@ export function judgeAntigravityPermissionReceipt(
     o.firstSeenAt = now;
     o.clearAt = o.prevReadAt;
     o.acceptedReceiptAt = null;
+    o.acceptedCallId = null;
     o.answerSentAt = null;
     o.answerInterrupted = false;
     return judgeAntigravityPermissionReceipt(worktreeId, instanceId, now);
@@ -389,6 +415,7 @@ export function judgeAntigravityPermissionReceipt(
   }
 
   o.acceptedReceiptAt = lastReceiptAt;
+  o.acceptedCallId = getAntigravityPermissionReceiptCallId(worktreeId, 'antigravity', instanceId);
   o.usedReceiptAt = lastReceiptAt;
   return verdict(null);
 }

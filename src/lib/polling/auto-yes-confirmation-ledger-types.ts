@@ -38,7 +38,11 @@ export const AUTO_YES_LEDGER_EVENTS = {
   closed: 'auto-yes-confirmation-closed',
   /** PR 2: written by the hook route only — the API adjudication never makes a hook request. */
   hookRequestClosed: 'auto-yes-hook-request-closed',
-  /** PR 3. */
+  /**
+   * PR 3: the call a hook request asked about ended (agy's `PostToolUse`) and
+   * no confirmation on screen was ever tied to it. Written after the request's
+   * own line, which closed when its reply was written (design §2.6).
+   */
   hookRequestDialogUnobserved: 'auto-yes-hook-request-dialog-unobserved',
   /** PR 2. */
   cliModeObserved: 'auto-yes-cli-mode-observed',
@@ -149,7 +153,9 @@ export interface ConfirmationOpenedLine extends LedgerLineBase {
   instanceId: string;
   source: ConfirmationSource;
   promptType: string;
+  /** PR 3: agy's call (`<conversationId>:<stepIdx>`) the receipt that let the dialog through asked about. */
   callId?: string;
+  /** The hook request that confirmation is tied to: the request itself (`source: 'hook'`), or agy's by `callId` (PR 3). */
   hookRequestId?: string;
   afterHookAllow?: boolean;
   afterHookAbstain?: string;
@@ -257,8 +263,22 @@ export interface HookRequestClosedLine extends LedgerLineBase {
   abstainReason?: string;
   allowSuppressesDialog: boolean;
   replyMs: number;
+  /** PR 3: agy's call (`<conversationId>:<stepIdx>`), when the request named one. */
   callId?: string;
+  /** Never set on this line: the request closes before its call can end. See {@link HookRequestDialogUnobservedLine}. */
   dialogUnobserved?: boolean;
+}
+
+/**
+ * PR 3: the call of an earlier hook request ended (agy's `PostToolUse`) with
+ * no confirmation on screen tied to it — "not observed", never "no dialog was
+ * drawn": a human may have answered between two reads (design §2.6).
+ */
+export interface HookRequestDialogUnobservedLine extends LedgerLineBase {
+  hookRequestId: string;
+  cliToolId: CLIToolType;
+  callId: string;
+  dialogUnobserved: true;
 }
 
 /** PR 2. Identity stays in the log; the daily details carry counts only (design §3.4). */
