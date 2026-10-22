@@ -69,6 +69,7 @@ import {
 } from '@/config/uat-isolation';
 import { SELF_RESUME_PENDING_DETAIL, type AgentEventType } from '@/lib/hooks/agent-event-types';
 import {
+  buildHookCallId,
   MAX_TOOL_NAME_LENGTH,
   type PermissionRequestPayload,
 } from '@/lib/hooks/permission-request-payload';
@@ -143,6 +144,23 @@ export function parseAntigravityPermissionRequest(
     permissionMode: null,
     permissionSuggestions: null,
   };
+}
+
+/**
+ * The call agy's `PreToolUse` asks about, `<conversationId>:<stepIdx>`
+ * (Issue #3820, design `docs/design/auto-yes-measurement-3820.md` §2.4), or
+ * null when the body has no numeric `stepIdx` or no conversation id.
+ *
+ * Read beside {@link parseAntigravityPermissionRequest}, not inside it: the
+ * route puts it on the payload (`callId`) for the Auto-Yes ledger only. The
+ * parsed payload is what the adjudication judges, and it stays exactly what it
+ * was — `stepIdx` is still not a prompt id.
+ *
+ * @param body - Whatever was posted to `/api/hooks/permission-request`
+ */
+export function readAntigravityPermissionCallId(body: unknown): string | null {
+  if (!isPlainObject(body)) return null;
+  return buildHookCallId(readStringField(body, 'conversationId'), body.stepIdx);
 }
 
 /**

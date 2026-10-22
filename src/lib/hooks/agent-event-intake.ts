@@ -19,6 +19,7 @@ import {
   MAX_EVENT_DETAIL_LENGTH,
   type AgentEventType,
 } from '@/lib/hooks/agent-event-types';
+import { buildHookCallId } from '@/lib/hooks/permission-request-payload';
 import { getAgentEventSource } from '@/lib/hooks/sources';
 import type { AgentEventSource, NormalizedAgentEvent } from '@/lib/hooks/sources';
 import {
@@ -31,6 +32,7 @@ import {
   shortSessionTag,
 } from '@/lib/session/agent-event-state';
 import { isSessionRunning } from '@/lib/session/cli-session';
+import { noteLedgerToolCallEnded } from '@/lib/polling/auto-yes-confirmation-ledger';
 import { MAX_STRUCTURED_PROMPT_MESSAGE_LENGTH } from '@/lib/session/structured-prompt';
 import type { createLogger } from '@/lib/logger';
 
@@ -496,4 +498,33 @@ export function recordQuestionIfAsked(
     recordAskUserQuestion(worktree.id, tool, instanceParam, spec, receivedAt);
     logger.info('ask-user-question-recorded', fields);
   }
+}
+
+/**
+ * The call a `post_tool_use` reports ended, `<conversationId>:<stepIdx>`
+ * (Issue #3820, design §2.4), or null. Only agy's body carries a `stepIdx` —
+ * the relay forwards it as a number — and a body without one (an older relay,
+ * any other tool) has no call id and is read exactly as before.
+ */
+export function readToolCallEndedCallId(
+  ctx: Pick<ResolvedAgentEvent, 'event' | 'sessionId'>,
+  payload: Record<string, unknown>
+): string | null {
+  if (ctx.event !== 'post_tool_use') return null;
+  return buildHookCallId(ctx.sessionId ?? readString(payload, 'conversationId'), payload.stepIdx);
+}
+
+/**
+ * Tell the Auto-Yes ledger the call a `post_tool_use` names ended (Issue
+ * #3820, PR 3): the screen confirmation tied to it closes, or its request is
+ * marked `dialogUnobserved`. Recording only — the ledger never throws, and
+ * nothing the route answers depends on it.
+ */
+export function noteToolCallEndedInLedger(ctx: ResolvedAgentEvent, payload: Record<string, unknown>): void {
+  const callId = readToolCallEndedCallId(ctx, payload);
+  if (callId === null) return;
+  noteLedgerToolCallEnded(
+    { worktreeId: ctx.worktree.id, cliToolId: ctx.tool, instanceId: ctx.instanceParam ?? ctx.tool },
+    callId
+  );
 }

@@ -85,6 +85,8 @@ describe('[#3820 PR 4] the aggregation and the ledger agree', () => {
   });
 
   it('reads a day of PR 1’s screen path: one withheld interval, one answer, a partial measurement', () => {
+    // The name is PR 1's; since PR 3 the ledger records every path, so the
+    // measurement is no longer partial (`partial: 0` below).
     tick(null); // the ledger starts (and its `started` line is written) an hour before the window
     hours(S, S + H);
 
@@ -118,10 +120,10 @@ describe('[#3820 PR 4] the aggregation and the ledger agree', () => {
     expect(result.details).toMatchObject({
       windowMs: 24 * H,
       coveredMs: 24 * H,
-      partial: 1,
-      // PR 2 records the hook, API and `/prompt-response` paths too (design
-      // §6.4): only the agy link (PR 3) is still missing.
-      pathsMissing: 'agy-link',
+      // PR 3 records every path (design §6.4): none is missing, and the
+      // measurement is whole.
+      partial: 0,
+      pathsMissing: '',
       ledgerErrors: 0,
       confirmations: 3,
       confirmationsClosed: 2,
