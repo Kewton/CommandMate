@@ -115,6 +115,58 @@ function liveFooter(lines: readonly string[]): number {
   return -1;
 }
 
+/** Index of the `Switch Model` header within {@link PICKER_MAX_ROWS} above the footer, or -1. */
+function findHeader(lines: readonly string[], footer: number): number {
+  const floor = Math.max(0, footer - PICKER_MAX_ROWS);
+  for (let i = footer - 1; i >= floor; i--) {
+    if (PICKER_HEADER_PATTERN.test(lines[i])) return i;
+  }
+  return -1;
+}
+
+/** First row at or after `row` (before `end`) that is not blank. */
+function skipBlank(lines: readonly string[], row: number, end: number): number {
+  while (row < end && isBlank(lines[row])) row++;
+  return row;
+}
+
+/** Row of the first model after the search box and its underline, or -1 when the box is not there. */
+function skipSearchBox(lines: readonly string[], header: number, footer: number): number {
+  let row = skipBlank(lines, header + 1, footer);
+  if (row >= footer || !SEARCH_ROW_PATTERN.test(lines[row])) return -1;
+  row++;
+  if (row >= footer || !SEARCH_UNDERLINE_PATTERN.test(lines[row])) return -1;
+  return skipBlank(lines, row + 1, footer);
+}
+
+/** The model rows from `row` up to a blank row, and where they stopped; null when not a picker. */
+function readOptions(
+  lines: readonly string[],
+  start: number,
+  footer: number
+): { options: string[]; selectedIndex: number; end: number } | null {
+  const options: string[] = [];
+  let selectedIndex = -1;
+  let row = start;
+  for (; row < footer && !isBlank(lines[row]); row++) {
+    if (EFFORT_ROW_PATTERN.test(lines[row])) return null;
+    if (HIGHLIGHTED_ROW_PATTERN.test(lines[row])) {
+      if (selectedIndex >= 0) return null;
+      selectedIndex = options.length;
+    }
+    options.push(labelOf(lines[row]));
+  }
+  if (options.length === 0 || selectedIndex < 0) return null;
+  return { options, selectedIndex, end: row };
+}
+
+/** Whether the `Effort` row follows the models, close enough to the footer. */
+function hasEffortBlock(lines: readonly string[], from: number, footer: number): boolean {
+  const row = skipBlank(lines, from, footer);
+  if (row >= footer || !EFFORT_ROW_PATTERN.test(lines[row])) return false;
+  return footer - row <= EFFORT_BLOCK_MAX_ROWS;
+}
+
 /**
  * Read agy 1.4's `/model` picker when it is the screen open on this frame, or
  * null — see the module comment for what must be on the frame.
@@ -126,39 +178,14 @@ export function readAntigravityModelPicker(text: string): AntigravityModelPicker
   const footer = liveFooter(lines);
   if (footer < 0) return null;
 
-  const floor = Math.max(0, footer - PICKER_MAX_ROWS);
-  let header = -1;
-  for (let i = footer - 1; i >= floor; i--) {
-    if (PICKER_HEADER_PATTERN.test(lines[i])) {
-      header = i;
-      break;
-    }
-  }
+  const header = findHeader(lines, footer);
   if (header < 0) return null;
 
-  let row = header + 1;
-  while (row < footer && isBlank(lines[row])) row++;
-  if (row >= footer || !SEARCH_ROW_PATTERN.test(lines[row])) return null;
-  row++;
-  if (row >= footer || !SEARCH_UNDERLINE_PATTERN.test(lines[row])) return null;
-  row++;
-  while (row < footer && isBlank(lines[row])) row++;
+  const first = skipSearchBox(lines, header, footer);
+  if (first < 0) return null;
 
-  const options: string[] = [];
-  let selectedIndex = -1;
-  for (; row < footer && !isBlank(lines[row]); row++) {
-    if (EFFORT_ROW_PATTERN.test(lines[row])) return null;
-    if (HIGHLIGHTED_ROW_PATTERN.test(lines[row])) {
-      if (selectedIndex >= 0) return null;
-      selectedIndex = options.length;
-    }
-    options.push(labelOf(lines[row]));
-  }
-  if (options.length === 0 || selectedIndex < 0) return null;
+  const models = readOptions(lines, first, footer);
+  if (!models || !hasEffortBlock(lines, models.end, footer)) return null;
 
-  while (row < footer && isBlank(lines[row])) row++;
-  if (row >= footer || !EFFORT_ROW_PATTERN.test(lines[row])) return null;
-  if (footer - row > EFFORT_BLOCK_MAX_ROWS) return null;
-
-  return { question: lines[header].trim(), options, selectedIndex };
+  return { question: lines[header].trim(), options: models.options, selectedIndex: models.selectedIndex };
 }
