@@ -280,10 +280,17 @@ interface LedgerCall {
   observed: boolean;
 }
 
-/** The confirmation a `PostToolUse` closed, while its dialog may still be read off a stale frame. */
+/**
+ * The confirmation a `PostToolUse` closed, while its dialog may still be read
+ * off a stale frame — of the session it was closed in only: a relaunched
+ * session's first sighting is a new confirmation.
+ */
 interface EndedCall {
   callId: string;
   screenKey: string;
+  worktreeId: string;
+  /** The session epoch it was closed in (`getEnterFallbackSessionEpoch`). */
+  epoch: number;
   /** The ledger tick that last read it. */
   seenTick: number;
 }
@@ -318,7 +325,7 @@ interface LedgerState {
    * `endedCalls`: a state made by an older bundle (hot reload) has neither.
    */
   calls?: Map<string, LedgerCall>;
-  /** compositeKey -> the confirmation the call's `PostToolUse` closed (PR 3). */
+  /** compositeKey -> the confirmation the call's `PostToolUse` closed (PR 3), at most {@link MAX_REMEMBERED_INSTANCES}. */
   endedCalls?: Map<string, EndedCall>;
   errors: number;
   lastAliveAt: number | null;
@@ -803,7 +810,12 @@ export function observeLedgerScreen(
     }
     if (entry === undefined) {
       const ended = endedCallsOf(state).get(compositeKey);
-      if (ended !== undefined && ended.screenKey === screenKey && (callId === undefined || callId === ended.callId)) {
+      if (
+        ended !== undefined &&
+        ended.epoch === epoch &&
+        ended.screenKey === screenKey &&
+        (callId === undefined || callId === ended.callId)
+      ) {
         ended.seenTick = tick;
         return;
       }
@@ -972,6 +984,8 @@ function settleAttempt(
 export function noteLedgerPollerStopped(compositeKey: string, reason: string): void {
   guarded(undefined, (state, now) => {
     state.ticks.delete(compositeKey);
+    // No tick reads a stale frame for it any more: the next sighting is new.
+    endedCallsOf(state).delete(compositeKey);
     for (const entry of [...state.entries.values()]) {
       if (entry.compositeKey === compositeKey) noteEntryStopped(state, entry, reason, now);
     }
@@ -987,6 +1001,10 @@ export function noteLedgerPollerStopped(compositeKey: string, reason: string): v
  */
 export function noteLedgerWorktreeStopped(worktreeId: string, reason: string): void {
   guarded(undefined, (state, now) => {
+    const endedCalls = endedCallsOf(state);
+    for (const [compositeKey, ended] of [...endedCalls]) {
+      if (ended.worktreeId === worktreeId) endedCalls.delete(compositeKey);
+    }
     for (const entry of [...state.entries.values()]) {
       if (entry.worktreeId !== worktreeId) continue;
       state.ticks.delete(entry.compositeKey);
@@ -1203,7 +1221,18 @@ export function noteLedgerToolCallEnded(scope: LedgerScope, callId: string | nul
       const wasCurrent = state.current.get(compositeKey) === entry.id;
       closeEntry(state, entry, now, { kind: 'gone' });
       if (wasCurrent) {
-        endedCallsOf(state).set(compositeKey, { callId, screenKey: entry.screenKey, seenTick: state.ticks.get(compositeKey) ?? 0 });
+        rememberBounded(
+          endedCallsOf(state),
+          compositeKey,
+          {
+            callId,
+            screenKey: entry.screenKey,
+            worktreeId: entry.worktreeId,
+            epoch: entry.epoch,
+            seenTick: state.ticks.get(compositeKey) ?? 0,
+          },
+          MAX_REMEMBERED_INSTANCES,
+        );
       }
     }
     const key = callKey(compositeKey, callId);

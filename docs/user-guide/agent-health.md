@@ -449,7 +449,8 @@ tmux -L cm-agent-health kill-server
     `coveredMs` は生存の行の経路ごとの計測区間を窓で切って足した時間（最も長い経路の値）、`gapMs` は窓との差、
     `coveredMsByPath` は経路ごとの内訳（`screen 86400000 / hook 0 / …`）。`pathsMissing` は計測が `coveredMs` より短い経路。
     `partial` は欠けた経路・欠損の時間・窓の中で増えた記録の例外（`ledgerErrors`）のどれかがあると `1`（部分計測）。
-    hook・API・`/prompt-response` の経路（#3820 PR 2）が入っても、agy の結び付け（`agy-link`、PR 3）が入るまでは `pathsMissing` に `agy-link` が残り、毎日 `partial: 1`。
+    agy の結び付け（`agy-link`、#3820 PR 3）が入った版から全経路（画面・hook・API・`/prompt-response`・`agy-link`）が揃い、その版の記録だけの日は `partial: 0`（`pathsMissing` は空）。
+    それより古い版（PR 2 まで）の記録が混ざる窓は `partial: 1`・`pathsMissing: agy-link`。
     基準値として比べるのは、同じ経路がそろった日どうしだけ
   - **停止の時間**（= `value`、分）: 停止の区間ごとに、サーバーが計算した始まり・終わりの時刻（無ければ最後の checkpoint の時刻）を
     窓で切って足す。行の間隔から推定しない。Auto-Yes の OFF などで閉じた区間（`end: 'stopped'`・`'unobservable'`）はそこで終わり、OFF の間の時間は数えない。前日に始まった区間も窓の中の checkpoint だけで内訳に入る。

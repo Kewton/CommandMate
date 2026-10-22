@@ -72,6 +72,7 @@ import {
   resetAntigravityPermissionReceiptsForTests,
 } from '@/lib/polling/antigravity-permission-receipts';
 import {
+  observeLedgerScreen,
   resetAutoYesConfirmationLedgerForTests,
   setAutoYesLedgerClockTimersForTests,
   setAutoYesLedgerFaultForTests,
@@ -227,5 +228,50 @@ describe('[#3820 PR 3] the agent-event route ends the call', () => {
     expect(status).toBe(202);
     expect(body).toEqual({ accepted: true });
     setAutoYesLedgerFaultForTests(null);
+  });
+});
+
+describe('[#3820 PR 3] two calls of the same command inside the duplicate window', () => {
+  const SCOPE = { worktreeId: WT, cliToolId: 'antigravity' as const, instanceId: 'antigravity' };
+
+  it('ends both calls (stepIdx 25 then 27) though the window drops the second PostToolUse as a copy', async () => {
+    await preToolUse({ ...PRE_TOOL_USE, stepIdx: 25 });
+    observeLedgerScreen(SCOPE, 'screen-dialog', 'permission_request', { callId: `${CONVERSATION}:25` });
+    expect((await postToolUse({ stepIdx: 25 })).status).toBe(202);
+    await preToolUse({ ...PRE_TOOL_USE, stepIdx: 27 });
+    observeLedgerScreen(SCOPE, 'screen-dialog-2', 'permission_request', { callId: `${CONVERSATION}:27` });
+    expect((await postToolUse({ stepIdx: 27 })).status).toBe(202);
+
+    const opened = lines(EV.opened);
+    expect(opened.map((line) => line.callId)).toEqual([`${CONVERSATION}:25`, `${CONVERSATION}:27`]);
+    expect(lines(EV.closed).map((line) => line.confirmationId)).toEqual(opened.map((line) => line.confirmationId));
+  });
+
+  it('marks both requests dialogUnobserved when neither dialog was seen', async () => {
+    await preToolUse({ ...PRE_TOOL_USE, stepIdx: 25 });
+    await preToolUse({ ...PRE_TOOL_USE, stepIdx: 27 });
+
+    await postToolUse({ stepIdx: 25 });
+    await postToolUse({ stepIdx: 27 });
+
+    expect(lines(EV.hookRequestDialogUnobserved).map((line) => line.callId)).toEqual([
+      `${CONVERSATION}:25`,
+      `${CONVERSATION}:27`,
+    ]);
+  });
+
+  it('ends a call once when its PostToolUse is delivered twice (negative control)', async () => {
+    await preToolUse({ ...PRE_TOOL_USE, stepIdx: 25 });
+    observeLedgerScreen(SCOPE, 'screen-dialog', 'permission_request', { callId: `${CONVERSATION}:25` });
+
+    const replies = [await postToolUse({ stepIdx: 25 }), await postToolUse({ stepIdx: 25 })];
+
+    expect(replies).toEqual([
+      { status: 202, body: { accepted: true } },
+      { status: 202, body: { accepted: true } },
+    ]);
+    expect(lines(EV.opened)).toHaveLength(1);
+    expect(lines(EV.closed)).toHaveLength(1);
+    expect(lines(EV.hookRequestDialogUnobserved)).toHaveLength(0);
   });
 });
