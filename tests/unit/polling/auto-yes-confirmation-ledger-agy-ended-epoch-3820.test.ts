@@ -2,9 +2,12 @@
  * The memory of a confirmation agy's `PostToolUse` closed (Issue #3820, design
  * `docs/design/auto-yes-measurement-3820.md` §2.4, PR 3): it keeps a stale
  * frame still showing the dialog from being counted again — in the session it
- * was closed in, and no further. A relaunched session, a stopped poller or a
- * stopped worktree forgets it, so their first sighting of the same screen key
- * without a call is a new confirmation. The memory is bounded per instance.
+ * was closed in, and no further. A relaunched session, or a stop that ends the
+ * session (kill, removal, the worktree deleted), forgets it, so the first
+ * sighting of the same screen key without a call is a new confirmation. A stop
+ * that only stops looking (Auto-Yes turned off by hand, expired, an unknown
+ * reason) keeps it: turned back on, the same call's stale frame is not counted
+ * again. The memory is bounded per instance.
  *
  * Driven through the ledger's entry points the way the poller calls them, as
  * `auto-yes-confirmation-ledger-3820.test.ts` does.
@@ -106,7 +109,7 @@ describe('[#3820 PR 3] an ended call is remembered in its own session only', () 
     expect(lines(EV.opened)[1]).not.toHaveProperty('callId');
   });
 
-  it.each([['session-killed'], ['disabled']])(
+  it.each([['session-killed'], ['instance-removed']])(
     'forgets it when the instance’s poller stops (%s)',
     (reason) => {
       seenAndEnded();
@@ -139,5 +142,56 @@ describe('[#3820 PR 3] an ended call is remembered in its own session only', () 
     expect(lines(EV.opened)).toHaveLength(0);
     tick(SCOPE);
     expect(lines(EV.opened)).toHaveLength(1);
+  });
+
+  describe('a stop that only stops looking keeps it (Auto-Yes OFF → ON)', () => {
+    it.each([['manual'], ['expired'], ['not-enabled'], ['stop-pattern'], ['some-future-reason']])(
+      'does not reopen the same call’s stale frame after the poller stops (%s) and restarts',
+      (reason) => {
+        seenAndEnded();
+        noteLedgerPollerStopped(KEY, reason);
+        tick(SCOPE, CALL);
+        tick(SCOPE);
+
+        expect(lines(EV.opened)).toHaveLength(1);
+      },
+    );
+
+    it('does not reopen it after the whole worktree is turned off by hand and on again', () => {
+      seenAndEnded();
+      noteLedgerWorktreeStopped(WT, 'manual');
+      tick(SCOPE, CALL);
+
+      expect(lines(EV.opened)).toHaveLength(1);
+    });
+
+    it('still opens a new one after a manual stop once the session is relaunched (the epoch decides)', () => {
+      seenAndEnded();
+      noteLedgerPollerStopped(KEY, 'manual');
+      beginEnterFallbackSession(WT, 'antigravity', 'antigravity');
+      tick(SCOPE);
+
+      expect(lines(EV.opened)).toHaveLength(2);
+    });
+  });
+
+  describe('a stop that ends the session forgets it', () => {
+    it('opens a new one after the session is killed and relaunched, with no call', () => {
+      seenAndEnded();
+      noteLedgerPollerStopped(KEY, 'session-killed');
+      beginEnterFallbackSession(WT, 'antigravity', 'antigravity');
+      tick(SCOPE);
+
+      expect(lines(EV.opened)).toHaveLength(2);
+    });
+
+    it('opens a new one after the worktree is deleted and its session relaunched, with no call', () => {
+      seenAndEnded();
+      noteLedgerWorktreeStopped(WT, 'worktree-deleted');
+      beginEnterFallbackSession(WT, 'antigravity', 'antigravity');
+      tick(SCOPE);
+
+      expect(lines(EV.opened)).toHaveLength(2);
+    });
   });
 });

@@ -166,6 +166,21 @@ const ABANDONING_STOP_REASONS: ReadonlySet<string> = new Set([
   'reset',
 ]);
 
+/**
+ * The stop reasons among {@link ABANDONING_STOP_REASONS} that end the agent's
+ * session itself: the memory of a call its `PostToolUse` closed (PR 3) goes
+ * with them. Any other reason — Auto-Yes turned off by hand, expired, the stop
+ * pattern, a key handed over, one this list does not know — keeps it, so a
+ * stale frame of that call is not counted again when Auto-Yes comes back on;
+ * the session epoch still tells a relaunched session apart.
+ */
+const SESSION_ENDING_STOP_REASONS: ReadonlySet<string> = new Set([
+  'session-killed',
+  'instance-removed',
+  'worktree-deleted',
+  'orphan-swept',
+]);
+
 /** Which instance a call is about; `compositeKey` is built from the ids when omitted. */
 export interface LedgerScope {
   worktreeId: string;
@@ -984,8 +999,8 @@ function settleAttempt(
 export function noteLedgerPollerStopped(compositeKey: string, reason: string): void {
   guarded(undefined, (state, now) => {
     state.ticks.delete(compositeKey);
-    // No tick reads a stale frame for it any more: the next sighting is new.
-    endedCallsOf(state).delete(compositeKey);
+    // The session is over: no frame of it is read again, the next sighting is new.
+    if (SESSION_ENDING_STOP_REASONS.has(reason)) endedCallsOf(state).delete(compositeKey);
     for (const entry of [...state.entries.values()]) {
       if (entry.compositeKey === compositeKey) noteEntryStopped(state, entry, reason, now);
     }
@@ -1001,9 +1016,11 @@ export function noteLedgerPollerStopped(compositeKey: string, reason: string): v
  */
 export function noteLedgerWorktreeStopped(worktreeId: string, reason: string): void {
   guarded(undefined, (state, now) => {
-    const endedCalls = endedCallsOf(state);
-    for (const [compositeKey, ended] of [...endedCalls]) {
-      if (ended.worktreeId === worktreeId) endedCalls.delete(compositeKey);
+    if (SESSION_ENDING_STOP_REASONS.has(reason)) {
+      const endedCalls = endedCallsOf(state);
+      for (const [compositeKey, ended] of [...endedCalls]) {
+        if (ended.worktreeId === worktreeId) endedCalls.delete(compositeKey);
+      }
     }
     for (const entry of [...state.entries.values()]) {
       if (entry.worktreeId !== worktreeId) continue;
