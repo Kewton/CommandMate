@@ -270,8 +270,15 @@ export interface AgentSourceCapabilities {
   readonly permissionReplyReleasesPrompt: boolean;
   /** 重複判定に使うフレーム固有 id の【出所】。null なら時間窓 dedup にフォールバック */
   readonly eventIdentity: 'permission-id' | 'tool-call-id' | 'message-id' | null;
-  /** 再接続後に状態を取り直す手段（pull 型のみ） */
-  readonly resync: 'none' | 'session-status-poll';
+  /** 再接続後に状態を取り直す手段（pull 型のみ。`pending-list` は Issue #2951 の OpenCode V2） */
+  readonly resync: 'none' | 'session-status-poll' | 'pending-list';
+  // 後から足した列（すべて宣言値）
+  /** scraper 以外で返答を記録する書き手（Issue #2197。'pull' / 'push' / null） */
+  readonly transcriptHistory: 'pull' | 'push' | null;
+  /** stop が「エージェントが自分で再開する」と言うか（Issue #2614。antigravity, claude: true） */
+  readonly stopReportsSelfResume: boolean;
+  /** allow と答えたらその呼び出しにダイアログが出ないか（Issue #3820。claude, codex, copilot, opencode, opencode-v2: true） */
+  readonly permissionAllowSuppressesDialog: boolean;
 }
 ```
 
@@ -297,15 +304,15 @@ id の**抽出そのもの**は各ソース実装（`sources/<tool>/`）の `Age
 
 **`permissionHookPredictsDialog` の判定軸（DR2-014）**: 根拠は `supportedEvents` **ではなく**、「そのソースが **permission hook（`PermissionRequest` / `PreToolUse` → `/api/hooks/permission-request`）を登録しており、その非 allow がダイアログの予告になるか**」である。`supportedEvents` は型コメントが「delivered であって emittable ではない」と明記しており、`pre_tool_use` が無いのは gemini だけでなく codex / copilot / antigravity も同じなので判定軸に使えない。permission hook を登録しているのは claude / codex / copilot / antigravity / opencode で、**gemini だけが登録していない**（`reportPendingDialog` は `resolvePermissionRequest` の中でだけ呼ばれる）。
 
-| ソース | permissionHookPredictsDialog（根拠は permission hook の登録有無と予告性） | sessionStartMayArriveLate | permissionReplyReleasesPrompt | eventIdentity | resync | 既存 decisionTimeoutSeconds（＝送達期限。§4 D3 決定 2） |
-|---|---|---|---|---|---|---|
-| claude | `true`（permission hook を登録。非 allow がダイアログ予告＝実測・現行挙動） | `false` | `false` | `null` | `'none'` | `PERMISSION_REQUEST_TIMEOUT_SECONDS`（5） |
-| codex | `true`（permission hook を登録。予告性は未検証／既定＝claude 相当） | `false`（未検証） | `false` | `null` | `'none'` | `5` |
-| gemini | `false`（**permission hook 自体を登録していない**＝実測） | `false`（未検証） | `false` | `null` | `'none'` | `0`（＝「hook が verdict を待たない」。即 release の意味ではない） |
-| copilot | `false`（permission hook は登録するが全ツール呼び出しで発火し大半は即実行＝#1901 実測） | `true`（#1903 実測） | `false` | `null`（未検証。`tool-call-id` は要実測） | `'none'` | `COPILOT_HOOK_TIMEOUT_SECONDS`（10） |
-| opencode | `false`（hooks ではなく SSE。裁定は自分が行う） | `false` | `true`（#1898 実測） | `'permission-id'`（#1899 実測） | `'session-status-poll'`（#1900） | `null`（送達期限なし） |
-| antigravity | `false`（permission hook は登録するが裁定は受信側。ダイアログ予告にならない） | `false`（未検証） | `false` | `null` | `'none'` | `ANTIGRAVITY_PERMISSION_TIMEOUT_SECONDS`（5） |
-| vibe-local | ソース実装なし（ツール 7・ソース 6 の差分） | — | — | — | — | — |
+| ソース | permissionHookPredictsDialog（根拠は permission hook の登録有無と予告性） | sessionStartMayArriveLate | permissionReplyReleasesPrompt | eventIdentity | resync | 既存 decisionTimeoutSeconds（＝送達期限。§4 D3 決定 2） | transcriptHistory（#2197） | stopReportsSelfResume（#2614） | permissionAllowSuppressesDialog（#3820） |
+|---|---|---|---|---|---|---|---|---|---|
+| claude | `true`（permission hook を登録。非 allow がダイアログ予告＝実測・現行挙動） | `false` | `false` | `null` | `'none'` | `PERMISSION_REQUEST_TIMEOUT_SECONDS`（5） | `'pull'` | `true`（#3430） | `true` |
+| codex | `true`（permission hook を登録。予告性は未検証／既定＝claude 相当） | `false`（未検証） | `false` | `null` | `'none'` | `5` | `'pull'` | `false` | `true` |
+| gemini | `false`（**permission hook 自体を登録していない**＝実測） | `false`（未検証） | `false` | `null` | `'none'` | `0`（＝「hook が verdict を待たない」。即 release の意味ではない） | `null` | `false` | `false`（未検証） |
+| copilot | `false`（permission hook は登録するが全ツール呼び出しで発火し大半は即実行＝#1901 実測） | `true`（#1903 実測） | `false` | `null`（未検証。`tool-call-id` は要実測） | `'none'` | `COPILOT_HOOK_TIMEOUT_SECONDS`（10） | `null` | `false` | `true` |
+| opencode | `false`（hooks ではなく SSE。裁定は自分が行う） | `false` | `true`（#1898 実測） | `'permission-id'`（#1899 実測） | `'session-status-poll'`（#1900） | `null`（送達期限なし） | `'push'` | `false` | `true`（API で承認する） |
+| antigravity | `false`（permission hook は登録するが裁定は受信側。ダイアログ予告にならない） | `false`（未検証） | `false` | `null` | `'none'` | `ANTIGRAVITY_PERMISSION_TIMEOUT_SECONDS`（5） | `'pull'` | `true` | `false`（allow でもダイアログが出る＝実測） |
+| vibe-local | ソース実装なし（ツール 7・ソース 6 の差分） | — | — | — | — | — | — | — | — |
 
 **`configScope: 'global-singleton'` は宣言値であって安全性の保証ではない（DR4-013）**: copilot の `~/.copilot/settings.json` は**全 CommandMate サーバ / 全インスタンスで共有される 1 ファイル**であり、`commandmate start --issue N --auto-port` による複数サーバ同時稼働（CLAUDE.md の公式機能）では**最後に書いた者が勝つ**。capability の宣言値は「設定の粒度」を表すだけで、書き込みの原子性・排他は表さない。書き込み規約は §10「global-singleton 設定ファイルの書き込み規約」に置く。
 

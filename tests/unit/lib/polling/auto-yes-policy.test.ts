@@ -32,6 +32,7 @@ import {
   AUTO_YES_POLICY_CACHE_TTL_MS,
   clearAutoYesPolicyCache,
   getSessionAutoYesPolicy,
+  getSessionAutoYesPolicyEntry,
   invalidateSessionAutoYesPolicy,
 } from '@/lib/polling/auto-yes-policy';
 
@@ -216,13 +217,17 @@ describe('getSessionAutoYesPolicy', () => {
   });
 
   it('falls back to unconstrained behaviour when the lookup throws', () => {
-    // A database failure must not suppress auto-yes: every user without a
-    // contract would otherwise lose auto-answering because of an unrelated fault.
+    // Issue #3822: the display lookup still falls back to "no contract", but
+    // the answering lookup no longer does — null here let one failed read
+    // answer past a contract's `mode: off`. Users without a contract are
+    // untouched: their lookup succeeds and finds no task (tests above).
+    // auto-yes-policy-lookup-failed-3822.test.ts covers the rest.
     seed();
     invalidateSessionAutoYesPolicy('wt-1:claude');
     db.close();
 
-    expect(getSessionAutoYesPolicy('wt-1', 'claude')).toBeNull();
+    expect(getSessionAutoYesPolicyEntry('wt-1', 'claude')).toEqual({ policy: null, taskId: null });
+    expect(getSessionAutoYesPolicy('wt-1', 'claude')).toEqual({ lookupFailed: true });
 
     // Reopen so afterEach's close() has a live handle.
     db = new Database(':memory:');

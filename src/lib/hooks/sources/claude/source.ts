@@ -162,6 +162,9 @@ export const claudeAgentEventSource: AgentEventSource = definePushHookSource({
     // A hook response body releases nothing observable. The dialog is released
     // by the screen, by `Stop`, or by expiry.
     permissionReplyReleasesPrompt: false,
+    // Issue #3820: an allowed `PermissionRequest` draws no dialog — the reply is
+    // the only record, so the audit row is written (#1724).
+    permissionAllowSuppressesDialog: true,
     // `tool_use_id` is present on tool events but absent on `PermissionRequest`
     // (D2), so there is no id that covers the frames dedup has to cover. The
     // time window stays.

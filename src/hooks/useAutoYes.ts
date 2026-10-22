@@ -16,6 +16,10 @@
  * to a human here as it is on the server, judged by the prompt's options
  * (`polling/auto-yes-confirm-shape`; the server's frame predicates are
  * server-only).
+ *
+ * Issue #3820: the answer says it is this hook's (`origin`), so the server's
+ * Auto-Yes ledger can count it apart from a person's. The ledger is server
+ * side and is not imported here; the server's `/prompt-response` records it.
  */
 
 'use client';
@@ -23,7 +27,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { resolveAutoAnswer } from '@/lib/polling/auto-yes-resolver';
 import { isConfirmPageShapedPrompt } from '@/lib/polling/auto-yes-confirm-shape';
-import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
+import { AUTO_YES_BROWSER_ORIGIN, buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import { generatePromptKey } from '@/lib/detection/prompt-key';
 import { isAnswerablePromptData } from '@/types/models';
 import { derivePromptView } from '@/lib/session/prompt-view';
@@ -184,7 +188,8 @@ export function useAutoYes({
 
     // Issue #287: Use shared builder to include promptType and defaultOptionNumber
     // so the API can use cursor-key navigation even when promptCheck re-verification fails.
-    const requestBody = buildPromptResponseBody(answer, cliTool, promptData);
+    // Issue #3820: `origin` only; what is sent and how it is recorded do not change.
+    const requestBody = { ...buildPromptResponseBody(answer, cliTool, promptData), origin: AUTO_YES_BROWSER_ORIGIN };
 
     // Send auto-response via existing prompt-response API
     fetch(`/api/worktrees/${worktreeId}/prompt-response`, {

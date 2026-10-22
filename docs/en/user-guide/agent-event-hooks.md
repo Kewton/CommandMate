@@ -157,7 +157,13 @@ treated as a new turn). Text the operator types into a running turn fires no `Us
 all, so the turn does not change. The relay script (`cmate-agent-event.sh`) never sends the text of
 `prompt`; it sends `"queuedNotice": true` only when the `prompt` of a Claude `UserPromptSubmit` starts
 with `<task-notification>`, and the receiver reads that as the notice mark. The bodies it sends for
-codex and every other tool are unchanged. With both the automatic HTTP hook and a manual relay in
+codex and every other tool are unchanged, with one exception: on agy's (antigravity's) `PostToolUse`,
+when the payload's `stepIdx` (the call's number within the conversation) is a number, it adds
+`"stepIdx": <number>` to the body (Issue #3820). The receiver identifies the call by it and
+`sessionId` (agy's `conversationId`), so the Auto-Yes record ties the `PreToolUse` and the on-screen
+dialog of the same call together (recording only; how Auto-Yes answers does not change). A body
+without `stepIdx` (an older relay or an older agy) is accepted as before. `permission_mode` is not
+sent. With both the automatic HTTP hook and a manual relay in
 place, the same `UserPromptSubmit` arrives twice within 3 seconds and the later copy is dropped as a
 duplicate. When only the dropped copy carried the mark (an older relay that does not send it landed
 first), the receiver puts the running turn back in place of the one the first copy re-opened.
@@ -203,6 +209,7 @@ The decision table:
 | The payload cannot be read | no decision |
 | `tool_name` is `AskUserQuestion` | no decision (always) |
 | Auto-Yes is off or expired | no decision |
+| Reading the contract (the database lookup) failed (Issue #3822) | no decision, plus a `lastSuppression` record (`reason: policy-lookup-failed`). Not treated as "no contract". The failure is not cached, so once the lookup works again the next request follows the rows below |
 | The contract's `autoYes` suppresses it (`mode: off` / a `denyPatterns` match / a disallowed type) | no decision, plus a `lastSuppression` record |
 | Anything else | `allow` |
 

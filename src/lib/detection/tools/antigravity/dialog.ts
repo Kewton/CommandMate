@@ -265,7 +265,7 @@ export function detectAntigravityNumberedDialogPrompt(text: string): PromptDetec
       // nothing from an earlier, already-answered approval is.
       approvalTarget: joinApprovalTarget(
         lines,
-        findApprovalContextStart(lines, dialog.questionRow),
+        findApprovalContextStart(lines, dialog.questionRow, dialog.footerRow),
         dialog.footerRow,
       ),
     },

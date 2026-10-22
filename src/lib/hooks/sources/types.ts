@@ -433,6 +433,26 @@ export interface AgentSourceCapabilities {
    */
   readonly permissionReplyReleasesPrompt: boolean;
   /**
+   * Whether answering `allow` means the agent draws no dialog for that call
+   * (Issue #3820, design `docs/design/auto-yes-measurement-3820.md` §5.1).
+   *
+   * Not {@link AgentSourceCapabilities.permissionHookPredictsDialog}, which is
+   * about a *non*-allow, nor `permissionReplyReleasesPrompt`, which is about
+   * releasing the waiting record. This is what makes an `allow` an answer to a
+   * confirmation: where it is `true` the reply is the only record that
+   * CommandMate approved the call, so `resolvePermissionRequest` writes the
+   * `answeredBy: 'auto'` row and the ledger counts the request as the
+   * confirmation. Where it is `false` the dialog is drawn anyway (agy,
+   * measured on 1.1.12 / 1.1.27 / 1.4.2) or was answered before the hook
+   * arrived (command-code), so the screen's answer is the record and the hook's
+   * allow writes no row.
+   *
+   * `true` for claude, codex, copilot and the two opencode sources (approved
+   * over their API); `false` for antigravity, command-code, gemini (not
+   * measured) and an unregistered tool.
+   */
+  readonly permissionAllowSuppressesDialog: boolean;
+  /**
    * Where a frame-unique id for de-duplication comes from, or null when the
    * source publishes none (Issue #1924, §4 D3 decision 1).
    *

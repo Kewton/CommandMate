@@ -46,6 +46,7 @@ import { applyAgentStopEvent } from '@/lib/hooks/agent-event-service';
 import {
   applyAgentEventToState,
   dropDuplicateAgentEvent,
+  noteToolCallEndedInLedger,
   readAgentEventRequest,
   readEventDetail,
   recordQuestionIfAsked,
@@ -139,6 +140,13 @@ export async function POST(request: NextRequest) {
     // whether the window drops them no longer decides the turn.
     const joinsOpenTurn =
       event === 'user_prompt_submit' && source.promptJoinsOpenTurn?.(payload) === true;
+
+    // Issue #3820 (PR 3): agy's `PostToolUse` ends the call the Auto-Yes
+    // ledger tied a confirmation to. Recording only. Before the duplicate
+    // window, which keys on the session and detail and not on the call: two
+    // calls of the same command (stepIdx 25 and 27) inside it are two ends.
+    // A copy of the same call is a no-op in the ledger.
+    noteToolCallEndedInLedger(ctx, payload);
 
     if (dropDuplicateAgentEvent(ctx, joinsOpenTurn, logger)) {
       return NextResponse.json(ACCEPTED, { status: 202 });

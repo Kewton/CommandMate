@@ -71,6 +71,14 @@ json_string_field() {
     sed -n 's/.*"'"$2"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
 }
 
+# Extract a flat JSON non-negative integer field (digits only). A value that is
+# not a bare run of digits — a string, a negative or fractional number — yields
+# nothing. Text inside a string cannot produce the match: its quotes are escaped.
+json_integer_field() {
+  printf '%s' "$1" | tr -d '\n' |
+    sed -n 's/.*"'"$2"'"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\)[[:space:]]*[,}].*/\1/p'
+}
+
 # Escape a value for embedding in a JSON string literal.
 json_escape() {
   printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
@@ -316,6 +324,20 @@ if [ "$EVENT" = "stop" ] && [ "$TOOL" = "claude" ] && [ -n "$HOOK_JSON" ]; then
       BODY="$BODY,\"transcript_path\":\"$(json_escape "$TRANSCRIPT_PATH")\""
       ;;
   esac
+fi
+# Issue #3820 (design docs/design/auto-yes-measurement-3820.md §2.4). agy's
+# `PostToolUse` names its call by `stepIdx` (unique within a conversation; the
+# conversation is the `sessionId` above), and the server ties it to the
+# `PreToolUse` of the same call — which reaches the permission route directly,
+# not through here — to tell when the call ended. Forwarded as a number on
+# antigravity's post_tool_use only, so every other tool and event keeps the
+# body it had; omitted when the payload has none (an older agy), which the
+# server reads as before. Bounded to 15 digits so it stays a safe integer.
+if [ "$EVENT" = "post_tool_use" ] && [ "$TOOL" = "antigravity" ] && [ -n "$HOOK_JSON" ]; then
+  STEP_IDX="$(json_integer_field "$HOOK_JSON" 'stepIdx')"
+  if [ -n "$STEP_IDX" ] && [ "${#STEP_IDX}" -le 15 ]; then
+    BODY="$BODY,\"stepIdx\":$STEP_IDX"
+  fi
 fi
 BODY="$BODY}"
 

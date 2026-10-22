@@ -1,0 +1,20 @@
+{
+  "version": "0.47.1",
+  "date": "2026-10-23",
+  "highlight": {
+    "ja": "Auto-Yes が実行契約の制限を守らずに答えたり、危険なコマンドを見落としたりする問題を直しました。",
+    "en": "Fixed cases where Auto-Yes answered without honoring the execution contract's limits or missed a dangerous command."
+  },
+  "added": [],
+  "improved": [],
+  "fixed": [
+    {
+      "ja": "実行契約を一時的に読めなかったとき、Auto-Yes が契約の制限を無視して答えていた問題を直しました。読めない間は答えません。",
+      "en": "Fixed Auto-Yes answering without the contract's limits when the execution contract briefly could not be read. It now waits instead."
+    },
+    {
+      "ja": "承認を求めるコマンドの途中に「>」で始まる行があると、その上の危険なコマンドが拒否の判定から漏れていた問題を直しました。",
+      "en": "Fixed a dangerous command being missed by the deny check when the command awaiting approval contained a line starting with \">\"."
+    }
+  ]
+}

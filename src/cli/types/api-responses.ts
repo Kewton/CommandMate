@@ -193,8 +193,10 @@ export interface WorktreeDetailResponse extends WorktreeItem {
  * and `SUPPRESSION_CAUSE` in src/cli/commands/wait.ts is a `Record` over it, so
  * a reason added server-side does not compile until `wait` has its wording.
  *
- * The first four are verdicts of a contract's `autoYes` block. `agent-launch-dialog`
- * is NOT: Issue #1829 records a CLI-lifecycle dialog the poller deliberately
+ * The first four are verdicts of a contract's `autoYes` block. `policy-lookup-failed`
+ * (Issue #3822) is the contract NOT read — the lookup failed — and withheld for
+ * that, not for anything the contract says. `agent-launch-dialog` is NOT a
+ * verdict either: Issue #1829 records a CLI-lifecycle dialog the poller deliberately
  * leaves to the tool's own launch sequence, through the same channel. Anything
  * that phrases a suppression for a human has to tell the two apart — see
  * SUPPRESSION_CAUSE in src/cli/commands/wait.ts.
@@ -270,6 +272,8 @@ export interface CurrentOutputResponse {
     // Mirrors: src/lib/polling/auto-yes-suppression-state.ts AutoYesPolicySuppression
     // (Issue #1684). Non-null once the contract's autoYes policy withheld an
     // answer; `at` is refreshed every poll while the suppressed prompt remains.
+    // The field set is held to the server's by
+    // tests/unit/cli/types/last-suppression-mirror-3822.test.ts (Issue #3822).
     lastSuppression?: {
       /**
        * Normally an {@link AutoYesSuppressionReason}, but deliberately typed as
@@ -711,6 +715,17 @@ export interface CurrentOutputResponse {
          */
         eventIdentity: string | null;
         resync: string;
+        /**
+         * Issue #2197: which writer, other than the scraper, records this
+         * tool's replies (`pull` / `push`, or null). String-typed as above, and
+         * optional, as are the two below: a server older than the column sends
+         * none of it.
+         */
+        transcriptHistory?: string | null;
+        /** Issue #2614: whether this source's `stop` says the agent will resume by itself. */
+        stopReportsSelfResume?: boolean;
+        /** Issue #3820: whether answering `allow` means the agent draws no dialog for that call. */
+        permissionAllowSuppressesDialog?: boolean;
       };
       /**
        * Which machinery is speaking for this pane right now (Issue #2054).

@@ -109,6 +109,8 @@ describe('[#1843] AutoYesSuppressionReason cross-validation', () => {
       'question-confirm-page',
       // Issue #3767: agy's dialog with no matching hook question.
       'no-hook-receipt',
+      // Issue #3822: the contract lookup failed, so nothing was answered.
+      'policy-lookup-failed',
     ];
     const fromServer: ServerSuppressionReason[] = knownToCli;
     expect(new Set(fromServer).size).toBe(knownToCli.length);

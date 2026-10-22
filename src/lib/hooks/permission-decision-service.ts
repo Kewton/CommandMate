@@ -43,11 +43,13 @@ import { getSessionAutoYesPolicy } from '@/lib/polling/auto-yes-policy';
 import {
   evaluatePolicyAgainstTexts,
   MAX_DENY_MATCH_TEXT_LENGTH,
+  policyLookupMode,
   type AutoYesMode,
-  type AutoYesPolicy,
+  type AutoYesPolicyLookup,
   type AutoYesSuppressionReason,
 } from '@/lib/polling/auto-yes-resolver';
 import { recordPolicySuppression } from '@/lib/polling/auto-yes-suppression-state';
+import { decideLedgerHookRequest, observeLedgerCliMode } from '@/lib/polling/auto-yes-confirmation-ledger';
 import {
   recordAskUserQuestion,
   reportPermissionRequestPending,
@@ -105,7 +107,7 @@ export interface PermissionDecision {
   suppressedBy?: AutoYesSuppressionReason;
   /** The deny pattern responsible, for the escalation log. */
   pattern?: string;
-  /** Policy mode in force (null = contract stated no mode, or no contract). */
+  /** Policy mode in force (null = contract stated no mode, no contract, or unknown). */
   mode?: AutoYesMode | null;
 }
 
@@ -145,9 +147,10 @@ const NO_DECISION = (reason: PermissionDecisionReason): PermissionDecision => ({
 export interface PermissionDecisionDeps {
   /**
    * The contract policy governing this session. Defaults to the `autoYes` block
-   * of the instance's active task, read through the TTL cache.
+   * of the instance's active task, read through the TTL cache, or
+   * `AUTO_YES_POLICY_UNKNOWN` when that read failed (Issue #3822).
    */
-  readPolicy?: (session: PermissionRequestSession) => AutoYesPolicy | null;
+  readPolicy?: (session: PermissionRequestSession) => AutoYesPolicyLookup;
   /**
    * Where an `allow` is recorded for the audit trail. Defaults to the
    * prompt-history row `capture --prompts` reads.
@@ -155,8 +158,19 @@ export interface PermissionDecisionDeps {
   recordAllow?: (session: PermissionRequestSession, payload: PermissionRequestPayload) => void;
 }
 
+/** What the hook route passes along with a request (Issue #3820). */
+export interface PermissionRequestOptions {
+  /**
+   * The ledger's id for this hook request, issued by the hook route alone
+   * (design `docs/design/auto-yes-measurement-3820.md` §2.3, N2). The API
+   * adjudication (`permission-adjudication`) passes none, so it makes no hook
+   * request in the ledger.
+   */
+  hookRequestId?: string | null;
+}
+
 /** Production policy source: the active task's contract, TTL-cached. */
-function readContractPolicy(session: PermissionRequestSession): AutoYesPolicy | null {
+function readContractPolicy(session: PermissionRequestSession): AutoYesPolicyLookup {
   return getSessionAutoYesPolicy(session.worktreeId, session.cliToolId, session.instanceId);
 }
 
@@ -172,6 +186,7 @@ function readContractPolicy(session: PermissionRequestSession): AutoYesPolicy | 
  * | payload unreadable | no-decision |
  * | `AskUserQuestion` | no-decision |
  * | Auto-Yes off / expired | no-decision |
+ * | contract lookup failed (Issue #3822) | no-decision + suppression |
  * | policy suppresses (mode off, deny pattern, type) | no-decision + suppression |
  * | otherwise | allow |
  *
@@ -212,22 +227,29 @@ export function decidePermissionRequest(
     collectToolInputMatchTexts(payload.toolName, payload.toolInput, payload.toolInputNormalization),
     policy
   );
+  // Issue #3822: an unknown policy (the lookup failed) is a denial here, so the
+  // hook abstains — the dialog is drawn — rather than allowing unattended.
   if (denial) {
     return {
       behavior: null,
       reason: 'policy-suppressed',
       suppressedBy: denial.reason,
       pattern: denial.pattern,
-      mode: policy?.mode ?? null,
+      mode: policyLookupMode(policy),
     };
   }
 
-  return { behavior: 'allow', reason: 'auto-yes', mode: policy?.mode ?? null };
+  return { behavior: 'allow', reason: 'auto-yes', mode: policyLookupMode(policy) };
 }
 
 /**
  * Persist an `allow` to the prompt history `capture --prompts` reads
  * (Issue #1685's layer).
+ *
+ * Issue #3820: only on a source that declares
+ * {@link AgentSourceCapabilities.permissionAllowSuppressesDialog} — see
+ * {@link resolvePermissionRequest}. On agy the premise below does not hold
+ * (its dialog is drawn after an allow, and the screen's answer is the record).
  *
  * Only `allow` is written here, and that asymmetry is deliberate. An allowed
  * request never draws a dialog, so this row is the *only* record that anything
@@ -460,9 +482,11 @@ function reportPendingDialog(
 export function resolvePermissionRequest(
   session: PermissionRequestSession,
   payload: PermissionRequestPayload | null,
-  deps: PermissionDecisionDeps = {}
+  deps: PermissionDecisionDeps = {},
+  options: PermissionRequestOptions = {}
 ): PermissionDecision {
   const decision = decidePermissionRequest(session, payload, deps);
+  const { capabilities } = getAgentEventSource(session.cliToolId);
 
   // Issue #1902: before anything else, and regardless of the verdict. The
   // adjudicated `tool_input` is not the one copilot sent, and the design
@@ -533,9 +557,44 @@ export function resolvePermissionRequest(
     });
   }
 
-  if (decision.behavior === 'allow' && payload) {
+  // Issue #3820 (design §5.1): an allow is an answer only where it draws no
+  // dialog. On agy the dialog is drawn anyway and the poller's answer writes
+  // the row, so a row here was the same approval twice — and, when agy ran the
+  // call by its own allow-list, an approval CommandMate never gave.
+  if (decision.behavior === 'allow' && payload && capabilities.permissionAllowSuppressesDialog) {
     (deps.recordAllow ?? recordAllowedPermission)(session, payload);
   }
 
+  recordHookRequestInLedger(session, payload, decision, capabilities.permissionAllowSuppressesDialog, options);
+
   return decision;
+}
+
+/**
+ * The ledger's half of a hook request (Issue #3820, design §2.3, §3.4): what was
+ * decided — an allow that draws no dialog is the confirmation, anything else
+ * leaves the waiting to the screen's confirmation — and the CLI's own mode when
+ * the payload states it. Nothing without a `hookRequestId`, which only the hook
+ * route issues. The ledger never throws, and nothing here decides anything.
+ */
+function recordHookRequestInLedger(
+  session: PermissionRequestSession,
+  payload: PermissionRequestPayload | null,
+  decision: PermissionDecision,
+  allowSuppressesDialog: boolean,
+  options: PermissionRequestOptions
+): void {
+  if (!options.hookRequestId) return;
+  decideLedgerHookRequest(options.hookRequestId, {
+    outcome: decision.behavior === 'allow' ? 'allow' : 'abstained',
+    ...(decision.behavior === 'allow' ? {} : { abstainReason: decision.reason }),
+    allowSuppressesDialog,
+    promptType: PERMISSION_REQUEST_PROMPT_TYPE,
+    // PR 3 (design §2.4): agy's call, tying the request to the screen's
+    // confirmation and to the call's `PostToolUse`.
+    ...(payload?.callId ? { callId: payload.callId } : {}),
+  });
+  if (payload?.permissionMode) {
+    observeLedgerCliMode(session, payload.permissionMode);
+  }
 }

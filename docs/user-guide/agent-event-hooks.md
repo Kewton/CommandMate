@@ -150,6 +150,10 @@ Claude Code は、キューにたまった通知（バックグラウンドの�
 中継スクリプト（`cmate-agent-event.sh`）は `prompt` の本文を送らず、Claude の `UserPromptSubmit` の
 `prompt` が `<task-notification>` で始まるときだけ `"queuedNotice": true` を送る。受け口はこれを通知の印として読む。
 codex など Claude 以外の道具の本文は変わらない。
+ただし agy（antigravity）の `PostToolUse` だけは、payload の `stepIdx`（会話の中の呼び出しの番号）が数のとき、
+本文に `"stepIdx": <数>` を足す（Issue #3820）。受け口はこれと `sessionId`（agy の `conversationId`）で呼び出しを識別し、
+Auto-Yes の記録が同じ呼び出しの `PreToolUse` と画面の確認を結び付ける（記録だけで、答え方は変わらない）。
+`stepIdx` の無い本文（古い中継・古い agy）も今までどおり受け付ける。`permission_mode` は送らない。
 自動の HTTP hook と手動の中継を併用していると、同じ `UserPromptSubmit` が 3 秒以内に 2 回届き、後に着いた方は重複として捨てられる。
 捨てられた方だけが印を持っていた（印を送らない古い中継が先に着いた）ときも、受け口は先の配送が開き直したターンを元のターンへ戻す。
 
@@ -190,6 +194,7 @@ Claude は承認ダイアログを**描く前に**この hook を叩き、Comman
 | payload を読めない | no-decision |
 | `tool_name` が `AskUserQuestion` | no-decision（常に） |
 | Auto-Yes が無効／期限切れ | no-decision |
+| 契約の照会（DB の読み出し）に失敗（Issue #3822） | no-decision ＋ `lastSuppression` 記録（`reason: policy-lookup-failed`）。「契約なし」とは扱わない。失敗はキャッシュしないので、照会が戻れば次のリクエストから下の行どおり |
 | 契約 `autoYes` が抑止（`mode: off` / `denyPatterns` 一致 / 型不許可） | no-decision ＋ `lastSuppression` 記録 |
 | 上記以外 | `allow` |
 

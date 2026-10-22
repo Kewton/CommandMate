@@ -73,6 +73,8 @@ export function createLegacyRelaySource(cliToolId: CLIToolType): AgentEventSourc
       permissionHookPredictsDialog: false,
       sessionStartMayArriveLate: false,
       permissionReplyReleasesPrompt: false,
+      // Issue #3820: an unmeasured tool's allow is not assumed to answer a dialog.
+      permissionAllowSuppressesDialog: false,
       eventIdentity: null,
       resync: 'none',
       // Issue #2197. A tool on the compatibility relay has no reader, which
