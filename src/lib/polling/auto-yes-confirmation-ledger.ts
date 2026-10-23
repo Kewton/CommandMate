@@ -122,6 +122,7 @@ import {
   type LedgerHookRequestScope,
   type LedgerScope,
   type LedgerState,
+  type OpenHookRequest,
   type OpenInterval,
 } from './auto-yes-ledger-records';
 
@@ -860,6 +861,52 @@ export function decideLedgerHookRequest(hookRequestId: string | null | undefined
 }
 
 /**
+ * The confirmation a hook request was closes with the request: its one send
+ * settles and it closes answered, or unanswered when the reply did not leave.
+ */
+function settleHookConfirmation(
+  state: LedgerState,
+  now: number,
+  request: OpenHookRequest,
+  worktreeId: string,
+  confirmation: NonNullable<OpenHookRequest['confirmation']>,
+  ok: boolean,
+  failure: string,
+): void {
+  emit<AttemptSettledLine>(state, AUTO_YES_LEDGER_EVENTS.attemptSettled, {
+    atMs: now,
+    confirmationId: confirmation.id,
+    attemptId: `${confirmation.id}.1`,
+    cliToolId: request.cliToolId,
+    basis: 'L1',
+    result: ok ? 'ok' : 'failed',
+    late: false,
+    expired: false,
+  });
+  emit<ConfirmationClosedLine>(state, AUTO_YES_LEDGER_EVENTS.closed, {
+    atMs: now,
+    confirmationId: confirmation.id,
+    worktreeId,
+    cliToolId: request.cliToolId,
+    instanceId: request.instanceId,
+    source: 'hook',
+    promptType: confirmation.promptType,
+    decision: 'answer',
+    basis: 'L1',
+    attempts: { ok: ok ? 1 : 0, partial: 0, noKeysSent: 0, failed: ok ? 0 : 1 },
+    attemptsPending: 0,
+    answeredAtClose: ok,
+    resolution: ok ? 'resolved-by-reply' : 'unresolved-after-send',
+    resolvedBy: ok ? 'auto' : 'unknown',
+    openMs: Math.max(0, now - confirmation.openedAt),
+    withheldMsTotal: 0,
+    unobservableMs: 0,
+    intervals: 0,
+    ...(ok ? {} : { abandonReason: failure }),
+  });
+}
+
+/**
  * The hook route wrote its reply. `delivered: false` is a verdict that did not
  * leave — the route's catch-all, or a delivery whose receipt said so: whatever
  * had been decided, the agent got an abstention, so the request is closed
@@ -881,38 +928,7 @@ export function closeLedgerHookRequest(
     const abstainReason = !reply.delivered ? failure : decision === null ? 'undecided' : decision.abstainReason;
     const confirmation = request.confirmation;
     if (confirmation !== null && request.worktreeId !== null) {
-      const ok = reply.delivered;
-      emit<AttemptSettledLine>(state, AUTO_YES_LEDGER_EVENTS.attemptSettled, {
-        atMs: now,
-        confirmationId: confirmation.id,
-        attemptId: `${confirmation.id}.1`,
-        cliToolId: request.cliToolId,
-        basis: 'L1',
-        result: ok ? 'ok' : 'failed',
-        late: false,
-        expired: false,
-      });
-      emit<ConfirmationClosedLine>(state, AUTO_YES_LEDGER_EVENTS.closed, {
-        atMs: now,
-        confirmationId: confirmation.id,
-        worktreeId: request.worktreeId,
-        cliToolId: request.cliToolId,
-        instanceId: request.instanceId,
-        source: 'hook',
-        promptType: confirmation.promptType,
-        decision: 'answer',
-        basis: 'L1',
-        attempts: { ok: ok ? 1 : 0, partial: 0, noKeysSent: 0, failed: ok ? 0 : 1 },
-        attemptsPending: 0,
-        answeredAtClose: ok,
-        resolution: ok ? 'resolved-by-reply' : 'unresolved-after-send',
-        resolvedBy: ok ? 'auto' : 'unknown',
-        openMs: Math.max(0, now - confirmation.openedAt),
-        withheldMsTotal: 0,
-        unobservableMs: 0,
-        intervals: 0,
-        ...(ok ? {} : { abandonReason: failure }),
-      });
+      settleHookConfirmation(state, now, request, request.worktreeId, confirmation, reply.delivered, failure);
     }
     emit<HookRequestClosedLine>(state, AUTO_YES_LEDGER_EVENTS.hookRequestClosed, {
       atMs: now,
