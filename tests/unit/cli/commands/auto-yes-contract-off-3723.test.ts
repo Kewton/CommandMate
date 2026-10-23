@@ -212,6 +212,21 @@ describe('[#3723] describeContractPolicy', () => {
   });
 });
 
+/**
+ * Issue #3822: on a tool whose dialog gate is `enforce`, `safe` answers only a
+ * `yes_no` the tool's own dialog detector vouches for, so "yes_no prompts only"
+ * alone over-promises. The note names those tools and the generic `(y/n)`.
+ */
+describe('[#3822] the mode: safe note matches what is answered', () => {
+  it('says the enforce tools answer only a vouched-for yes_no, not a generic (y/n)', () => {
+    const [line] = describeContractPolicy({ taskId: 't2', mode: 'safe', allowPromptTypes: [], denyPatternCount: 1 });
+    expect(line).toContain('Auto-Yes answers yes_no prompts only');
+    expect(line).toContain('claude, codex, copilot, opencode and opencode-v2');
+    expect(line).toContain('generic (y/n)');
+    expect(line.endsWith(' 1 deny pattern(s) also escalate matching prompts to a human.')).toBe(true);
+  });
+});
+
 describe('[#3723] commandmate send --auto-yes reads the arming response', () => {
   function stubSend(autoYesBody: Record<string, unknown>): ReturnType<typeof vi.fn> {
     const fn = vi.fn(async (input: unknown) => {

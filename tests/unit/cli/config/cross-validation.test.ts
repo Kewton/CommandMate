@@ -111,6 +111,8 @@ describe('[#1843] AutoYesSuppressionReason cross-validation', () => {
       'no-hook-receipt',
       // Issue #3822: the contract lookup failed, so nothing was answered.
       'policy-lookup-failed',
+      // Issue #3822: a question the agent asks, left to a human.
+      'question-left-to-human',
     ];
     const fromServer: ServerSuppressionReason[] = knownToCli;
     expect(new Set(fromServer).size).toBe(knownToCli.length);
