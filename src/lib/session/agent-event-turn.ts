@@ -32,6 +32,7 @@ import {
 } from '@/lib/session/provisional-turn';
 import type { AgentEventRecord } from '@/lib/session/agent-event-record';
 import { dropsFor, MAX_RECENT_EVENT_KEYS, trimOldestEntries } from '@/lib/session/agent-event-dedup';
+import type { GenerationRef } from '@/lib/session/waiting-episode-state';
 import { getOrInitGlobal } from '../global-state';
 
 // The maps below live on `globalThis`; see the note above `declare global` in
@@ -45,6 +46,8 @@ declare global {
   var __agentEventReopenedTurns: Map<string, { turnId: string; replaced: TurnRecord }> | undefined;
   // eslint-disable-next-line no-var
   var __agentEventTurnSeq: { value: number } | undefined;
+  // eslint-disable-next-line no-var
+  var __agentEventTurnOutcomeSink: TurnOutcomeSink | undefined;
 }
 
 /** compositeKey -> epoch ms the current generation began. See {@link beginAgentEventGeneration}. */
@@ -93,6 +96,94 @@ export const reopenedTurns = getOrInitGlobal(
  * boundary rather than a cosmetic clash.
  */
 const turnSequence = getOrInitGlobal('__agentEventTurnSeq', () => ({ value: 0 }));
+
+// =============================================================================
+// Transition outcomes (Issue #3798)
+// =============================================================================
+//
+// A transition used to return nothing, so a caller could not tell "this stop
+// ended the turn" from "this stop named another session and changed nothing" —
+// `recordAgentEvent` answered `{ recorded: true }` either way. The waiting
+// episode has to be closed only by what actually ended its turn, in the same
+// synchronous step, so every transition now says what it did. Design:
+// `docs/design/issue-3798-waiting-episode.md` §2.2.
+
+/** The events that open, or continue, a turn. */
+export type OpeningEvent = 'user_prompt_submit' | 'pre_tool_use' | 'post_tool_use';
+
+/**
+ * The instance's record just before a transition. `dialog-only` and
+ * `display-only` differ only in whether a live decision is held; both name the
+ * record's `turnId`.
+ */
+export type PreviousTurn =
+  | { kind: 'none' }
+  | { kind: 'dialog-only'; turnId: string; decisions: number; sessionId: string | null }
+  | { kind: 'display-only'; turnId: string }
+  | { kind: 'open-same-session'; turnId: string }
+  | { kind: 'open-other-session'; turnId: string }
+  | { kind: 'closed'; turnId: string; closedBy: TurnCloseReason };
+
+/** What one transition did to the instance's turn (Issue #3798). */
+export type TurnTransitionOutcome =
+  | { kind: 'none' }
+  | { kind: 'opened'; turnId: string; event: OpeningEvent; generation: GenerationRef; previous: PreviousTurn }
+  | { kind: 'continued'; turnId: string }
+  | { kind: 'restored'; restoredTurnId: string; discardedTurnId: string }
+  | { kind: 'stopped'; turnId: string; generation: GenerationRef }
+  | { kind: 'stop-without-turn'; recordTurnId: string; generation: GenerationRef; previous: PreviousTurn }
+  | { kind: 'stop-rejected'; reason: 'other-session' | 'before-generation' }
+  | { kind: 'session-ended'; turnId: string }
+  | { kind: 'session-end-rejected'; reason: 'other-session' | 'no-turn' | 'before-generation' }
+  | { kind: 'decision-opened'; recordTurnId: string; recordKind: 'dialog-only' | 'turn' }
+  /**
+   * A decision released by an explicit answer (`releaseSettledDecision`) only.
+   * The bulk releases — `post_tool_use`, `user_prompt_submit`, `idle_prompt`,
+   * `session_end` — do not produce it: with parallel tools, one tool's
+   * `post_tool_use` says nothing about another tool's dialog.
+   */
+  | { kind: 'decision-answered'; recordTurnId: string; recordKind: 'dialog-only' | 'turn'; before: number; remaining: number }
+  | { kind: 'generation-fenced'; source: 'process-start' | 'session-start'; generation: GenerationRef; fencedTurnId: string | null };
+
+/** Who to tell about an outcome produced outside `recordAgentEvent` (the duplicate-window restore). */
+export type TurnOutcomeSink = (
+  parts: { worktreeId: string; cliToolId: CLIToolType; instanceId?: string },
+  outcomes: TurnTransitionOutcome[]
+) => void;
+
+/**
+ * Install the sink for outcomes this module produces outside a
+ * `recordAgentEvent` call. Registered by `waiting-episode-binding`, through
+ * `globalThis`, so this module imports nothing that imports it back.
+ */
+export function registerTurnOutcomeSink(sink: TurnOutcomeSink): void {
+  globalThis.__agentEventTurnOutcomeSink = sink;
+}
+
+/** A generation as the waiting episode names it. */
+export function toGenerationRef(generation: number | null): GenerationRef {
+  return generation === null ? { kind: 'none' } : { kind: 'opened', at: generation };
+}
+
+/** Live decisions held by a record, counted without retiring the expired ones. */
+export function liveDecisionCount(turn: TurnRecord, now: number): number {
+  return turn.pendingDecisions.filter((decision) => isDecisionLive(decision, now)).length;
+}
+
+/** Describe the instance's record before a transition rewrites it. */
+function describePrevious(turn: TurnRecord | null, eventSessionId: string | null, at: number): PreviousTurn {
+  if (turn === null) return { kind: 'none' };
+  if (turn.closedAt !== null) return { kind: 'closed', turnId: turn.turnId, closedBy: turn.closedBy ?? 'stop' };
+  if (turn.openedAt === null) {
+    const decisions = liveDecisionCount(turn, at);
+    return decisions > 0
+      ? { kind: 'dialog-only', turnId: turn.turnId, decisions, sessionId: turn.sessionId }
+      : { kind: 'display-only', turnId: turn.turnId };
+  }
+  return closesTurn(turn, eventSessionId)
+    ? { kind: 'open-same-session', turnId: turn.turnId }
+    : { kind: 'open-other-session', turnId: turn.turnId };
+}
 
 // =============================================================================
 // Turn model (Issue #1930)
@@ -344,9 +435,21 @@ export function observeScraperCompletionEvidence(
  * were raised by a process that no longer exists, and answering one would
  * deliver a verdict into a slot nobody is holding.
  */
-export function fenceTurnForNewGeneration(key: string, at: number): void {
+export function fenceTurnForNewGeneration(
+  key: string,
+  at: number,
+  source: 'process-start' | 'session-start' = 'session-start'
+): TurnTransitionOutcome {
   const turn = agentTurns.get(key);
-  if (!turn) return;
+  // Issue #3798: reported whether or not a turn existed — the waiting episode
+  // is fenced by its own generation, not by the turn's.
+  const outcome: TurnTransitionOutcome = {
+    kind: 'generation-fenced',
+    source,
+    generation: toGenerationRef(currentGeneration(key)),
+    fencedTurnId: turn?.turnId ?? null,
+  };
+  if (!turn) return outcome;
   evictDecisions(key, turn);
 
   // A turn that had ALREADY ended is left where it is, which means the fence in
@@ -355,7 +458,7 @@ export function fenceTurnForNewGeneration(key: string, at: number): void {
   // new generation would publish `ready` — "the agent finished" — for a session
   // nobody has typed into yet. Before #1930 the same protection came from
   // comparing the event's timestamp against the generation.
-  if (turn.closedAt !== null) return;
+  if (turn.closedAt !== null) return outcome;
 
   // An OPEN turn is closed and carried across, so `capture --json` can say
   // `closedBy: 'generation'` rather than going quiet. `getStructuredSessionState`
@@ -365,6 +468,7 @@ export function fenceTurnForNewGeneration(key: string, at: number): void {
   turn.closedAt = at;
   turn.closedBy = 'generation';
   turn.generationAt = at;
+  return outcome;
 }
 
 /**
@@ -463,28 +567,36 @@ export function fenceTurnForNewGeneration(key: string, at: number): void {
  * boundary. `wait`'s gate stays armed through it; what changes is only what the
  * pane displays.
  */
-export function applyTurnTransition(key: string, record: AgentEventRecord): void {
+export function applyTurnTransition(key: string, record: AgentEventRecord): TurnTransitionOutcome {
   const generation = currentGeneration(key);
   // An event stamped before the current generation was produced by a process
   // that has been replaced. Refusing it here is what makes re-recording a stale
   // `user_prompt_submit` at its original timestamp a no-op.
-  if (generation !== null && record.at < generation) return;
+  if (generation !== null && record.at < generation) {
+    if (record.event === 'stop') return { kind: 'stop-rejected', reason: 'before-generation' };
+    if (record.event === 'session_end') return { kind: 'session-end-rejected', reason: 'before-generation' };
+    return { kind: 'none' };
+  }
 
   switch (record.event) {
-    case 'user_prompt_submit':
+    case 'user_prompt_submit': {
       // Issue #3330: a queued notice the agent attached to its running turn
       // continues that turn; any other prompt is a new one.
-      openTurn(key, record, generation, { continueOpen: record.joinsOpenTurn === true });
+      const outcome = openTurn(key, record, 'user_prompt_submit', generation, {
+        continueOpen: record.joinsOpenTurn === true,
+      });
       releaseAllDecisions(key);
-      return;
-    case 'post_tool_use':
-      openTurn(key, record, generation, { continueOpen: true });
+      return outcome;
+    }
+    case 'post_tool_use': {
+      const outcome = openTurn(key, record, 'post_tool_use', generation, { continueOpen: true });
       // The tool call the dialog was gating has finished, so somebody answered
       // it (Issue #1726). This is the release #1725 could not have: it had no
       // event meaning "the human answered", only `Stop` meaning "the turn
       // ended", which can be minutes later.
       releaseAllDecisions(key);
-      return;
+      return outcome;
+    }
     case 'pre_tool_use':
       // Deliberately leaves the dialog alone (Issue #1726). It is the
       // `AskUserQuestion` invocation, and a picker being *about to be drawn* is
@@ -493,28 +605,26 @@ export function applyTurnTransition(key: string, record: AgentEventRecord): void
       // Issue #3437: and from a source that reports its prompts, it is not the
       // start of a turn when the agent's own `Stop` is the last thing that
       // ended one. See the `after its stop` row above.
-      if (record.promptOpensTurns === true && endedByOwnStop(key)) return;
-      openTurn(key, record, generation, { continueOpen: true });
-      return;
+      if (record.promptOpensTurns === true && endedByOwnStop(key)) return { kind: 'none' };
+      return openTurn(key, record, 'pre_tool_use', generation, { continueOpen: true });
     case 'stop':
-      applyStopToTurn(key, record, generation);
-      return;
-    case 'session_end':
-      applySessionEndToTurn(key, record);
+      return applyStopToTurn(key, record, generation);
+    case 'session_end': {
+      const outcome = applySessionEndToTurn(key, record);
       releaseAllDecisions(key);
-      return;
+      return outcome;
+    }
     case 'session_start':
       // The generation was opened by `recordAgentEvent` before this ran, and
       // `fenceTurnForNewGeneration` closed the turn with it. Nothing further:
       // the frame carries no verdict, so it is not the displayed event either.
-      return;
+      return { kind: 'none' };
     case 'notification':
-      applyNotificationToTurn(key, record, generation);
-      return;
+      return applyNotificationToTurn(key, record, generation);
     default:
       // exhaustive check: a new AgentEventType must decide its transition here
       record.event satisfies never;
-      return;
+      return { kind: 'none' };
   }
 }
 
@@ -567,10 +677,13 @@ function displayOf(record: AgentEventRecord): TurnRecord['displayEvent'] {
 function openTurn(
   key: string,
   record: AgentEventRecord,
+  event: OpeningEvent,
   generation: number | null,
   { continueOpen }: { continueOpen: boolean }
-): void {
+): TurnTransitionOutcome {
   const turn = fencedTurn(key);
+  // Issue #3798: read before anything below rewrites the record.
+  const previous = describePrevious(turn, record.sessionId, record.at);
   const openHere =
     turn !== null &&
     turn.closedAt === null &&
@@ -583,7 +696,7 @@ function openTurn(
     // partway through. Learning it is what lets a later `stop` be matched.
     turn.sessionId ??= record.sessionId;
     turn.scraperCompletionPolls = 0;
-    return;
+    return { kind: 'continued', turnId: turn.turnId };
   }
 
   // A dialog-only record (openedAt null) is not a turn; its decisions belong to
@@ -612,6 +725,7 @@ function openTurn(
     reopenedTurns.set(key, { turnId: opened.turnId, replaced: turn });
     trimOldestEntries(reopenedTurns, MAX_RECENT_EVENT_KEYS);
   }
+  return { kind: 'opened', turnId: opened.turnId, event, generation: toGenerationRef(generation), previous };
 }
 
 /**
@@ -673,6 +787,11 @@ export function joinOpenTurnFromDuplicate(
     scraperCompletionPolls: 0,
   });
   reopenedTurns.delete(key);
+  // Issue #3798: a wait that opened under the discarded turn belongs to the
+  // turn put back. Told through the sink — this runs outside `recordAgentEvent`.
+  globalThis.__agentEventTurnOutcomeSink?.({ worktreeId, cliToolId, instanceId }, [
+    { kind: 'restored', restoredTurnId: replaced.turnId, discardedTurnId: current.turnId },
+  ]);
   return true;
 }
 
@@ -688,19 +807,34 @@ function applyStopToTurn(
   key: string,
   record: AgentEventRecord,
   generation: number | null
-): void {
+): TurnTransitionOutcome {
   const turn = fencedTurn(key);
   if (turn !== null && turn.closedAt === null && turn.openedAt !== null) {
-    if (!closesTurn(turn, record.sessionId)) return;
+    if (!closesTurn(turn, record.sessionId)) return { kind: 'stop-rejected', reason: 'other-session' };
     turn.closedAt = record.at;
     turn.closedBy = 'stop';
     turn.displayEvent = displayOf(record);
     releaseAllDecisions(key);
-    return;
+    return { kind: 'stopped', turnId: turn.turnId, generation: toGenerationRef(generation) };
   }
 
+  const previous = describePrevious(turn, record.sessionId, record.at);
+  // Issue #3798: a dialog raised by one agent session is not ended by another
+  // session's stop. Both ids are needed to tell — a record or a stop with no id
+  // is read as the same session, as `closesTurn` reads it. opencode publishes
+  // `session.idle` for every session its server holds (#1758 §5.6).
+  if (
+    previous.kind === 'dialog-only' &&
+    previous.sessionId !== null &&
+    record.sessionId !== null &&
+    previous.sessionId !== record.sessionId
+  ) {
+    return { kind: 'stop-rejected', reason: 'other-session' };
+  }
+
+  const recordTurnId = nextTurnId(record.at);
   agentTurns.set(key, {
-    turnId: nextTurnId(record.at),
+    turnId: recordTurnId,
     sessionId: record.sessionId,
     openedAt: null,
     closedAt: record.at,
@@ -711,6 +845,7 @@ function applyStopToTurn(
     scraperCompletionPolls: 0,
   });
   boundTurnMap();
+  return { kind: 'stop-without-turn', recordTurnId, generation: toGenerationRef(generation), previous };
 }
 
 /**
@@ -729,12 +864,13 @@ function applyStopToTurn(
  * {@link getStructuredSessionState}), so this is a retirement rather than a
  * different answer.
  */
-function applySessionEndToTurn(key: string, record: AgentEventRecord): void {
+function applySessionEndToTurn(key: string, record: AgentEventRecord): TurnTransitionOutcome {
   const turn = fencedTurn(key);
-  if (turn === null) return;
-  if (!closesTurn(turn, record.sessionId)) return;
+  if (turn === null) return { kind: 'session-end-rejected', reason: 'no-turn' };
+  if (!closesTurn(turn, record.sessionId)) return { kind: 'session-end-rejected', reason: 'other-session' };
   turn.closedAt = record.at;
   turn.closedBy = 'session_end';
+  return { kind: 'session-ended', turnId: turn.turnId };
 }
 
 /**
@@ -748,17 +884,16 @@ function applyNotificationToTurn(
   key: string,
   record: AgentEventRecord,
   generation: number | null
-): void {
+): TurnTransitionOutcome {
   if (record.detail === 'permission_prompt') {
     if (record.promptSettled === true) {
       // Issue #1898: adjudicated before it was recorded, and the verdict
       // reached the agent. There is no dialog and there never was one for a
       // human to answer — opening a record for it published `waiting` for the
       // whole of the tool call that followed (measured at eight seconds).
-      releaseSettledDecision(key, record);
-      return;
+      return releaseSettledDecision(key, record);
     }
-    openDecision(key, generation, {
+    const opened = openDecision(key, generation, {
       source: 'notification',
       at: record.at,
       message: record.message ?? null,
@@ -771,16 +906,17 @@ function applyNotificationToTurn(
       patterns: record.decisionPatterns ?? null,
       decisionId: record.decisionId ?? null,
       bootstrapDisplay: displayOf(record),
+      sessionId: record.sessionId,
     });
-    return;
+    return { kind: 'decision-opened', ...opened };
   }
 
   if (record.detail === PERMISSION_REPLIED_DETAIL) {
     // Issue #1898. The agent's own statement that the dialog is gone — whoever
     // answered it. Not a word this build reads a status from, so it decides
     // nothing; all it does is retire the record.
-    if (record.promptSettled === true) releaseSettledDecision(key, record);
-    return;
+    if (record.promptSettled === true) return releaseSettledDecision(key, record);
+    return { kind: 'none' };
   }
 
   if (record.detail === 'idle_prompt') {
@@ -790,9 +926,9 @@ function applyNotificationToTurn(
     const turn = fencedTurn(key);
     if (turn !== null && turn.closedAt === null) {
       turn.displayEvent = displayOf(record);
-      return;
+      return { kind: 'none' };
     }
-    if (turn !== null) return;
+    if (turn !== null) return { kind: 'none' };
     // Nothing to attach it to — the first thing this instance ever said, or the
     // first since a generation. It still carries a verdict (`ready`), and #1723
     // publishes it, so a display-only record is opened to hold it. `openedAt`
@@ -810,11 +946,12 @@ function applyNotificationToTurn(
       scraperCompletionPolls: 0,
     });
     boundTurnMap();
-    return;
+    return { kind: 'none' };
   }
 
   // An unrecognised notification type is not evidence of anything, and guessing
   // would be worse than the scraper.
+  return { kind: 'none' };
 }
 
 /**
@@ -837,13 +974,19 @@ export function openDecision(
     /** Issue #2031. Bounded here, not by the caller. */
     patterns: readonly unknown[] | null;
     bootstrapDisplay: TurnRecord['displayEvent'];
+    /**
+     * Issue #3798: the agent session that raised the dialog, when the source
+     * said. Kept on a dialog-only record so another session's stop can be told
+     * apart from this one's. Absent or null: unknown, as before.
+     */
+    sessionId?: string | null;
   }
-): void {
+): { recordTurnId: string; recordKind: 'dialog-only' | 'turn' } {
   let turn = fencedTurn(key);
   if (turn === null) {
     turn = {
       turnId: nextTurnId(input.at),
-      sessionId: null,
+      sessionId: input.sessionId ?? null,
       openedAt: null,
       closedAt: null,
       closedBy: null,
@@ -860,7 +1003,7 @@ export function openDecision(
     // late. Re-open a dialog-only record rather than resurrecting the turn.
     turn = {
       turnId: nextTurnId(input.at),
-      sessionId: null,
+      sessionId: input.sessionId ?? null,
       openedAt: null,
       closedAt: null,
       closedBy: null,
@@ -871,7 +1014,15 @@ export function openDecision(
     };
     agentTurns.set(key, turn);
     boundTurnMap();
+  } else if (turn.openedAt === null && turn.sessionId === null) {
+    // A dialog-only record bootstrapped by a forecast with no session learns
+    // the session from the report that confirms it.
+    turn.sessionId = input.sessionId ?? null;
   }
+  const opened = {
+    recordTurnId: turn.turnId,
+    recordKind: turn.openedAt !== null ? ('turn' as const) : ('dialog-only' as const),
+  };
 
   // Issue #1930 / S1: an id that fails validation is DISCARDED, not truncated —
   // a truncated id compares equal to a different id sharing its prefix, and the
@@ -918,7 +1069,7 @@ export function openDecision(
       existing.source = 'notification';
       existing.confirmedAt ??= input.at;
     }
-    return;
+    return opened;
   }
 
   if (turn.pendingDecisions.length >= MAX_PENDING_DECISIONS_PER_TURN) {
@@ -926,7 +1077,7 @@ export function openDecision(
     // approvals than this in one turn is a fact an operator has to be able to
     // see, and the oldest is the one a human has been looking at.
     dropsFor(key).decisionOverflow += 1;
-    return;
+    return opened;
   }
 
   turn.pendingDecisions.push({
@@ -940,6 +1091,7 @@ export function openDecision(
     scraperCorroborated: false,
     recorded: false,
   });
+  return opened;
 }
 
 /** Retire every dialog this instance was holding. */
@@ -957,19 +1109,28 @@ export function releaseAllDecisions(key: string): void {
  * release is unconditional — an unmatched id is a source that publishes none,
  * and refusing to act there would leave the pre-#1898 stall in place for it.
  */
-function releaseSettledDecision(key: string, record: AgentEventRecord): void {
+function releaseSettledDecision(key: string, record: AgentEventRecord): TurnTransitionOutcome {
   const turn = fencedTurn(key);
-  if (turn === null || turn.pendingDecisions.length === 0) return;
+  if (turn === null || turn.pendingDecisions.length === 0) return { kind: 'none' };
+  const before = turn.pendingDecisions.length;
   const settledId = record.decisionId === null || record.decisionId === undefined
     ? null
     : acceptExternalId(record.decisionId);
   if (settledId === null) {
     turn.pendingDecisions = [];
-    return;
+  } else {
+    turn.pendingDecisions = turn.pendingDecisions.filter(
+      (decision) => decision.decisionId !== null && decision.decisionId !== settledId
+    );
   }
-  turn.pendingDecisions = turn.pendingDecisions.filter(
-    (decision) => decision.decisionId !== null && decision.decisionId !== settledId
-  );
+  // Issue #3798: an explicit answer — the one release that ends a wait.
+  return {
+    kind: 'decision-answered',
+    recordTurnId: turn.turnId,
+    recordKind: turn.openedAt !== null ? 'turn' : 'dialog-only',
+    before,
+    remaining: turn.pendingDecisions.length,
+  };
 }
 
 /** Keep the turn map bounded the way every other map in this module is. */
