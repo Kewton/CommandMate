@@ -287,6 +287,7 @@ const CONTRACT_POLICY_CAUSE = 'by contract policy';
  * the poller's stopped-answer branch (`partial-answer`, Issue #3706 / #3713),
  * and the poller's agy trust-screen branch (`startup-trust-unhandled`, Issue #3757),
  * and the poller's question confirm-page branch (`question-confirm-page`, Issue #3748),
+ * and the poller's question branch (`question-left-to-human`, Issue #3822),
  * and the poller's agy receipt-gate branch (`no-hook-receipt`, Issue #3767),
  * and a contract lookup that failed on either of the policy paths
  * (`policy-lookup-failed`, Issue #3822).
@@ -325,6 +326,11 @@ const SUPPRESSION_CAUSE: Record<AutoYesSuppressionReason, string> = {
   // whose wording above says the opposite (nothing recognised the frame).
   'question-confirm-page':
     "because the question's Submit/Cancel confirmation commits the answers as they stand, so Auto-Yes leaves it to a human",
+  // Issue #3822. A question the agent asks the operator (an AskUserQuestion
+  // picker, OpenCode V2's question form): Auto-Yes answers permissions only,
+  // and no contract setting delegates the question.
+  'question-left-to-human':
+    'because the agent is asking a question, and Auto-Yes answers permissions only; answer it at the pane (prompt --json, respond)',
   // Issue #3767. agy's approval dialog has no matching hook question (none, too
   // late, already on screen, or the hook stopped arriving). Not a contract verdict.
   // Issue #3789: nor one left unused — the last was spent on keys Auto-Yes sent,

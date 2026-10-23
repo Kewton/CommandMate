@@ -46,6 +46,8 @@ success:
 ```
 
 > **無人実行の推奨レシピ（Issue #1684）**: 上の `mode: safe` は `yes_no` 型しか自動応答しない。
+> ダイアログの判定が `enforce` の道具（claude・codex・copilot・opencode・opencode-v2）では、その `yes_no` も
+> 道具のダイアログ検出が確認と認めたもの（根拠のあるもの）だけで、汎用の `(y/n)` には答えない（Issue #3822）。
 > **Claude の編集確認（`Do you want to make this edit …?`）は `multiple_choice` 型**
 > （実質 Yes/No＋allow-all の 3 択）なので、safe のままでは編集のたびにワーカーが停止する
 > （出典 #1678 A-2）。無人で走らせる契約は allow-listed に広げ、危険操作は `denyPatterns` で
@@ -457,7 +459,9 @@ enforcement が「契約が無いから従来動作」と「契約が off と言
    > **直前ターンの境界で切った `approvalTarget`** を別フィールドとして持ち、判定はそちら、
    > 表示は従来どおり `instructionText` を使う。
 4. `mode: safe` → `yes_no` のみ従来ルール、他は抑止（#1495 の `/model` オーバーレイ誤検出は
-   この型に該当する）
+   この型に該当する）。ただし契約の判定より前に、ダイアログの判定が `enforce` の道具
+   （claude・codex・copilot・opencode・opencode-v2）では、道具のダイアログ検出が根拠を示さない `yes_no` は
+   `unclassified-frame` で止まる（Issue #3822）。`safe` で答えるのは根拠のある `yes_no` だけになる
 5. `mode: allow-listed` → `allowPromptTypes` に含まれる型のみ従来ルール
 
 `denyPatterns` は **`mode: null` でも効く**。パターンを書いた契約は既にポリシーを述べており、

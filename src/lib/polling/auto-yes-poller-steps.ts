@@ -16,7 +16,7 @@ import type { checkWorktreeSessionOwnership } from '../cli-tools/worktree-sessio
 import {
   PARTIAL_ANSWER_SUPPRESSION_REASON,
   POLICY_LOOKUP_FAILED_SUPPRESSION_REASON,
-  QUESTION_CONFIRM_PAGE_SUPPRESSION_REASON,
+  QUESTION_LEFT_TO_HUMAN_SUPPRESSION_REASON,
 } from './auto-yes-suppression-reason';
 import { getAutoYesState } from '../auto-yes-state';
 import { isAutoYesQuestionPrompt } from './auto-yes-dialog-gate';
@@ -85,9 +85,9 @@ export function withheldForEarlierSend(judged: JudgedPrompt, screenKey: string, 
  * `allow-listed` contract naming `multiple_choice` delegates permission
  * dialogs, not the operator's questions.
  *
- * Recorded as `question-confirm-page` — the reason for the question family's
- * confirm page (#3748), whose meaning ("a question Auto-Yes leaves to a
- * human") this shares; the WARN has its own event name.
+ * Recorded as `question-left-to-human` — a question in general, not the
+ * `Submit` / `Cancel` confirm page that follows one (`question-confirm-page`,
+ * #3748, recorded at step 3.3 before this step is reached).
  *
  * @returns true when the prompt is withheld (the caller returns `no_answer`)
  */
@@ -96,11 +96,11 @@ export function withheldAsQuestion(judged: JudgedPrompt): boolean {
   if (dialogGate === undefined || !isAutoYesQuestionPrompt(promptData, dialogGate)) return false;
   suppressAndWarnOnce(
     judged,
-    { reason: QUESTION_CONFIRM_PAGE_SUPPRESSION_REASON, mode: null, promptType: promptData.type },
+    { reason: QUESTION_LEFT_TO_HUMAN_SUPPRESSION_REASON, mode: null, promptType: promptData.type },
     `${frameKey}\u0000question`,
     'poller:auto-yes-skipped-question',
     {
-      reason: QUESTION_CONFIRM_PAGE_SUPPRESSION_REASON,
+      reason: QUESTION_LEFT_TO_HUMAN_SUPPRESSION_REASON,
       promptType: promptData.type,
       dialogKind: dialogGate.dialog?.kind ?? null,
       question: truncateForLog(promptData.question),

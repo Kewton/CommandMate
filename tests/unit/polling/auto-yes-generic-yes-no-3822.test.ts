@@ -6,7 +6,8 @@
  *   left to a human and recorded as `unclassified-frame` (the user's decision
  *   of 2026-10-20). `legacy` tools are unchanged (#3823).
  * - A question to the operator (an AskUserQuestion picker) is the human's; it
- *   is recorded as `question-confirm-page`.
+ *   is recorded as `question-left-to-human` (the confirm page after it keeps
+ *   `question-confirm-page`).
  * - Right before the first key, the grant and the contract are read again
  *   (past the policy cache): a contract switched to `off`, a deny pattern added
  *   after the tick's lookup, a lookup that now fails, or a grant that ran out
@@ -353,17 +354,17 @@ describe('[#3822] the poller leaves a generic yes/no to a human', () => {
 });
 
 describe('[#3822] the poller leaves a question to a human', () => {
-  it('claude: an AskUserQuestion picker gets no key, recorded as question-confirm-page', async () => {
+  it('claude: an AskUserQuestion picker gets no key, recorded as question-left-to-human', async () => {
     expect(await tick('claude', fixture(CLAUDE_ASK_USER_QUESTION))).toBe('no_answer');
 
     expect(sendPromptAnswer).not.toHaveBeenCalled();
     expect(getLastPolicySuppression(WT, 'claude')).toMatchObject({
-      reason: 'question-confirm-page',
+      reason: 'question-left-to-human',
       mode: null,
       promptType: 'multiple_choice',
     });
     expect(warnings('poller:auto-yes-skipped-question')).toEqual([
-      expect.objectContaining({ reason: 'question-confirm-page', promptType: 'multiple_choice' }),
+      expect.objectContaining({ reason: 'question-left-to-human', promptType: 'multiple_choice' }),
     ]);
   });
 
