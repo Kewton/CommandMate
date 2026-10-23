@@ -13,14 +13,20 @@
 import { policyLookupMode, resolveAutoAnswerWithPolicy } from './auto-yes-resolver';
 import { getSessionAutoYesPolicy } from './auto-yes-policy';
 import type { checkWorktreeSessionOwnership } from '../cli-tools/worktree-session-ownership';
-import { PARTIAL_ANSWER_SUPPRESSION_REASON } from './auto-yes-suppression-reason';
+import {
+  PARTIAL_ANSWER_SUPPRESSION_REASON,
+  POLICY_LOOKUP_FAILED_SUPPRESSION_REASON,
+  QUESTION_CONFIRM_PAGE_SUPPRESSION_REASON,
+} from './auto-yes-suppression-reason';
+import { getAutoYesState } from '../auto-yes-state';
+import { isAutoYesQuestionPrompt } from './auto-yes-dialog-gate';
 import {
   forgetPartialAnswer,
   getPartialAnswer,
   hasMovedSendInFlight,
   warnOncePerFrame,
 } from './auto-yes-poller-state';
-import { suppressAndWarnOnce, type JudgedPrompt } from './auto-yes-prompt-suppression';
+import { suppressAndWarnOnce, truncateForLog, type JudgedPrompt } from './auto-yes-prompt-suppression';
 import { withholdLedgerConfirmation } from './auto-yes-confirmation-ledger';
 
 /**
@@ -67,6 +73,119 @@ export function withheldForEarlierSend(judged: JudgedPrompt, screenKey: string, 
     return true;
   }
   return false;
+}
+
+/**
+ * Step 3.7 of `detectAndRespondToPrompt` (Issue #3822): a question to the
+ * operator is the human's to answer, not Auto-Yes's — Auto-Yes answers
+ * permissions only. Judged on a frame the tool's own rules read
+ * ({@link isAutoYesQuestionPrompt}); a `legacy` tool is unchanged (#3823).
+ *
+ * Not a contract verdict, so `allowPromptTypes` cannot bring it back: an
+ * `allow-listed` contract naming `multiple_choice` delegates permission
+ * dialogs, not the operator's questions.
+ *
+ * Recorded as `question-confirm-page` — the reason for the question family's
+ * confirm page (#3748), whose meaning ("a question Auto-Yes leaves to a
+ * human") this shares; the WARN has its own event name.
+ *
+ * @returns true when the prompt is withheld (the caller returns `no_answer`)
+ */
+export function withheldAsQuestion(judged: JudgedPrompt): boolean {
+  const { promptData, frameKey, dialogGate } = judged;
+  if (dialogGate === undefined || !isAutoYesQuestionPrompt(promptData, dialogGate)) return false;
+  suppressAndWarnOnce(
+    judged,
+    { reason: QUESTION_CONFIRM_PAGE_SUPPRESSION_REASON, mode: null, promptType: promptData.type },
+    `${frameKey}\u0000question`,
+    'poller:auto-yes-skipped-question',
+    {
+      reason: QUESTION_CONFIRM_PAGE_SUPPRESSION_REASON,
+      promptType: promptData.type,
+      dialogKind: dialogGate.dialog?.kind ?? null,
+      question: truncateForLog(promptData.question),
+    },
+  );
+  return true;
+}
+
+/**
+ * The last look before a key (Issue #3822): is the answer still Auto-Yes's to
+ * send? Asked after the last wait before the send (the ownership check, or the
+ * Enter fallback's fresh capture), so nothing it reads can change before the
+ * first key goes out.
+ *
+ * - With a `generation` (a poller tick), Auto-Yes must still be on and inside
+ *   its window. `getAutoYesState` disables an expired grant on read, the
+ *   boundary the hook and the next tick see. Without one (direct callers,
+ *   tests) the grant is not checked, as the tick checks nothing then (#3706).
+ * - The contract is read again past the policy cache, so a switched contract,
+ *   an `off`, or a deny pattern added since the tick's lookup withholds the
+ *   key. A read that fails is "contract unknown" (`policy-lookup-failed`), as
+ *   in step 4, and so is a grant that cannot be read.
+ *
+ * The `PermissionRequest` hook is not asked this: its `allow` IS the answer,
+ * decided against the grant and the contract when the hook is answered, and
+ * nothing is typed afterwards for a later look to stop.
+ *
+ * @param checkGrant - Whether the grant is checked (a tick with a generation)
+ * @returns true when the key is withheld (the caller returns `no_answer`)
+ */
+export function withheldAtSend(judged: JudgedPrompt, checkGrant: boolean): boolean {
+  const { worktreeId, cliToolId, instanceId, pollerState, promptData, frameKey } = judged;
+  if (checkGrant) {
+    let grant: ReturnType<typeof getAutoYesState>;
+    try {
+      grant = getAutoYesState(worktreeId, cliToolId, instanceId);
+    } catch {
+      return withholdAsUnknown(judged);
+    }
+    if (!grant?.enabled) {
+      // Auto-Yes is off: nothing is recorded as withheld (the poller stops on
+      // its next tick and the state says why), only that the key was not sent.
+      warnOncePerFrame(pollerState, `${frameKey}\u0000at-send-disabled`, 'poller:auto-yes-withheld-at-send', {
+        worktreeId,
+        cliToolId,
+        instanceId,
+        reason: grant?.stopReason === 'expired' ? 'expired' : 'auto-yes-disabled',
+        promptType: promptData.type,
+      });
+      return true;
+    }
+  }
+
+  const policy = getSessionAutoYesPolicy(worktreeId, cliToolId, instanceId, { fresh: true });
+  const resolution = resolveAutoAnswerWithPolicy(promptData, policy);
+  if (resolution.suppressedBy) {
+    const mode = policyLookupMode(policy);
+    suppressAndWarnOnce(
+      judged,
+      { reason: resolution.suppressedBy, mode, promptType: promptData.type, pattern: resolution.pattern },
+      `${frameKey}\u0000${resolution.suppressedBy}\u0000${mode ?? ''}\u0000${resolution.pattern ?? ''}`,
+      'poller:auto-yes-suppressed-by-policy',
+      {
+        reason: resolution.suppressedBy,
+        mode,
+        pattern: resolution.pattern,
+        promptType: promptData.type,
+        atSend: true,
+      },
+    );
+    return true;
+  }
+  return false;
+}
+
+function withholdAsUnknown(judged: JudgedPrompt): boolean {
+  const { promptData, frameKey } = judged;
+  suppressAndWarnOnce(
+    judged,
+    { reason: POLICY_LOOKUP_FAILED_SUPPRESSION_REASON, mode: null, promptType: promptData.type },
+    `${frameKey}\u0000${POLICY_LOOKUP_FAILED_SUPPRESSION_REASON}\u0000at-send`,
+    'poller:auto-yes-suppressed-by-policy',
+    { reason: POLICY_LOOKUP_FAILED_SUPPRESSION_REASON, mode: null, promptType: promptData.type, atSend: true },
+  );
+  return true;
 }
 
 /**

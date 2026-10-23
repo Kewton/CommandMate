@@ -108,15 +108,19 @@ function readPolicy(
  * the resolver reads {@link AUTO_YES_POLICY_UNKNOWN} as withholding (Issue #3822).
  *
  * @param instanceId - Agent instance id (defaults to the primary, i.e. cliToolId)
+ * @param options - `fresh: true` reads the task past the cache (and refreshes
+ *   it): the poller's last look before a key (Issue #3822), where a contract
+ *   switched or a deny pattern added within the TTL must already count
  * @returns The contract's autoYes block, null when no contract governs this
  *   instance, or {@link AUTO_YES_POLICY_UNKNOWN} when the lookup failed
  */
 export function getSessionAutoYesPolicy(
   worktreeId: string,
   cliToolId: CLIToolType,
-  instanceId?: string
+  instanceId?: string,
+  options?: { fresh?: boolean }
 ): AutoYesPolicyLookup {
-  return lookupEntry(worktreeId, cliToolId, instanceId).policy;
+  return lookupEntry(worktreeId, cliToolId, instanceId, options?.fresh === true).policy;
 }
 
 /**
@@ -210,20 +214,23 @@ export function getSessionContractPolicySummary(
 function lookupEntry(
   worktreeId: string,
   cliToolId: CLIToolType,
-  instanceId?: string
+  instanceId?: string,
+  fresh = false
 ): PolicyCacheEntry {
   const resolvedInstanceId = instanceId ?? cliToolId;
   const key = buildCompositeKey(worktreeId, cliToolId, resolvedInstanceId);
   const now = Date.now();
 
   const cached = policyCache.get(key);
-  if (cached && cached.expiresAt > now) {
+  if (!fresh && cached && cached.expiresAt > now) {
     return cached;
   }
 
   const { policy, taskId } = readPolicy(worktreeId, cliToolId, resolvedInstanceId);
   if (isAutoYesPolicyUnknown(policy)) {
-    // Issue #3822: not cached, so the next lookup reads again.
+    // Issue #3822: not cached, so the next lookup reads again. A fresh read
+    // that failed also drops what was cached: it is no longer known to hold.
+    if (fresh) policyCache.delete(key);
     return { policy, taskId, expiresAt: now };
   }
 

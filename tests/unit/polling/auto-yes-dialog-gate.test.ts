@@ -190,11 +190,12 @@ describe('[#1928] the kill switch', () => {
 describe('[#1928] only the numbered-list inference is gated', () => {
   it('leaves a yes/no prompt alone', () => {
     // §4 D1 決定 4 names the numbered-list inference, and #1896 is an instance of
-    // it. No tool in the registry has a measured yes/no dialog rule, so gating
-    // that family would make every `(y/n)` prompt a suppression — an unattended
-    // pipeline going quiet, which is the failure the rollout guidance forbids.
+    // it. Issue #3822 (the user's decision of 2026-10-20) gates a `(y/n)` on an
+    // `enforce` tool too — none draws one, so it is left to a human
+    // (`auto-yes-generic-yes-no-3822.test.ts`). What stays "alone" is a `legacy`
+    // tool's, which is unchanged (#3823), and the kill switch's `legacy`.
     const verdict = evaluateAutoYesDialogGate(
-      'claude',
+      'gemini',
       'yes_no',
       'Do you want to proceed? (y/n)',
     );
