@@ -92,6 +92,7 @@ vi.mock('@/lib/hooks/structured-decision-response', () => ({
 vi.mock('@/lib/session/agent-event-state', () => ({ getAskUserQuestion: vi.fn(() => null) }));
 
 import { POST as promptResponse } from '@/app/api/worktrees/[id]/prompt-response/route';
+import { clearManualAnswers } from '@/lib/polling/auto-yes-manual-answer';
 import { detectSessionStatus, STATUS_REASON } from '@/lib/detection/status-detector';
 import { detectPromptWithOptions, extractResponse } from '@/lib/polling/response-checker';
 import { detectAndRespondToPrompt, type AutoYesPollerState } from '@/lib/auto-yes-poller';
@@ -163,10 +164,14 @@ async function promptResponseVerdict(
   const res = await promptResponse(postRequest({ answer, cliTool: 'command-code' }), {
     params: Promise.resolve({ id: WT }),
   });
+  // Issue #3821: a person's answer holds the poller off the instance for a
+  // moment; this file judges the route and the poller apart, so the hold is cleared.
+  clearManualAnswers();
   return { status: res.status, body: (await res.json()) as Record<string, unknown> };
 }
 
 beforeEach(() => {
+  clearManualAnswers();
   db = new Database(':memory:');
   runMigrations(db);
   upsertWorktree(db, {

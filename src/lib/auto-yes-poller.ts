@@ -38,8 +38,14 @@ import {
   clearAutoYesDecisions,
   forgetAutoYesDecision,
   forgetAutoYesDecisionsByWorktree,
+  reaffirmAutoYesAnswering,
   recordAutoYesDecision,
 } from './polling/auto-yes-decision-state';
+import {
+  ANSWERED_BY_HUMAN_DECISION_REASON,
+  getManualAnswerSeq,
+  isManualAnswerHolding,
+} from './polling/auto-yes-manual-answer';
 import { getLastPolicySuppression } from './polling/auto-yes-suppression-state';
 import { NO_AUTO_ANSWER_DECISION_REASON, type AutoYesDecisionReason } from '@/types/auto-yes-decision';
 import { applyEventToActiveTask } from './tasks/task-transition-service';
@@ -556,8 +562,10 @@ function noteNoPromptOnScreen(tick: {
  * Issue #3821: records what one tick decided about the prompt it read, for
  * `current-output` to publish (`autoYesDecision`, see
  * `polling/auto-yes-decision-state`). Tied to the grant and the session epoch
- * the tick read under; a tick that lost its generation (#3706) records nothing,
- * because the grant or the session it decided for is gone.
+ * the tick read under, and to the confirmation (the prompt, and for agy the
+ * hook call its receipt was accepted for); a tick that lost its generation
+ * (#3706) records nothing, because the grant or the session it decided for is
+ * gone.
  */
 function tickDecisionRecorder(tick: {
   worktreeId: string;
@@ -568,20 +576,31 @@ function tickDecisionRecorder(tick: {
   epoch: number;
   generation: AutoYesTickGeneration | undefined;
   startedAt: number;
-}): { answering: () => void; withheld: (fallback: AutoYesDecisionReason) => void } {
+}): {
+  answering: () => void;
+  reaffirmAnswering: () => void;
+  withheld: (fallback: AutoYesDecisionReason) => void;
+} {
   const { worktreeId, cliToolId, instanceId, compositeKey, promptData, epoch, generation, startedAt } = tick;
+  const grantOf = () => generation?.grant ?? getAutoYesState(worktreeId, cliToolId, instanceId);
+  const callId = ledgerCallOf(cliToolId, worktreeId, instanceId).callId ?? null;
   const record = (state: 'answering' | 'withheld', reason: AutoYesDecisionReason | null): void => {
     if (generation !== undefined && !isTickCurrent(generation)) return;
-    recordAutoYesDecision(compositeKey, {
-      state,
-      reason,
-      promptData,
-      grant: generation?.grant ?? getAutoYesState(worktreeId, cliToolId, instanceId),
-      epoch,
-    });
+    recordAutoYesDecision(compositeKey, { state, reason, promptData, callId, grant: grantOf(), epoch });
   };
   return {
     answering: () => record('answering', null),
+    // The duplicate guard's "answered recently" compares the question only, so
+    // it is not evidence this confirmation is the one answered: `answering`
+    // stands only when the record the send made is about this confirmation,
+    // under the same grant and session (review 2). Otherwise nothing stands.
+    reaffirmAnswering: () => {
+      if (generation !== undefined && !isTickCurrent(generation)) {
+        forgetAutoYesDecision(compositeKey);
+        return;
+      }
+      reaffirmAutoYesAnswering(compositeKey, { promptData, callId, grant: grantOf(), epoch });
+    },
     // The reason the step that withheld it recorded on this tick (the #1684
     // record), else the step's own: a stop the policy record never carries.
     withheld: (fallback) => {
@@ -843,6 +862,14 @@ export async function detectAndRespondToPrompt(
       startedAt: tickStartedAt,
     });
 
+    // 1.5. Issue #3821 (review 2): a person began answering on this instance
+    // moments ago. What is on screen may be the very confirmation they are
+    // answering, so it is theirs until the hold passes; Auto-Yes stays on.
+    if (isManualAnswerHolding(compositeKey)) {
+      decision.withheld(ANSWERED_BY_HUMAN_DECISION_REASON);
+      return 'no_answer';
+    }
+
     // 2. Check for duplicate prompt (Issue #306)
     const promptKey = generatePromptKey(promptDetection.promptData);
     const frameKey = promptFrameKey(promptDetection.promptData);
@@ -850,8 +877,8 @@ export async function detectAndRespondToPrompt(
       // Issue #3820: not answered on this tick either — an interval of its own
       // reason, so the count can tell the wait for an answer to land apart.
       withholdLedgerConfirmation(ledgerScope, 'answered-recently');
-      // Issue #3821: answered, and the screen has not been redrawn yet.
-      decision.answering();
+      // Issue #3821: still `answering` only if this is the confirmation the send was for.
+      decision.reaffirmAnswering();
       return 'duplicate';
     }
 
@@ -1028,6 +1055,8 @@ async function pollAutoYes(
     grant,
     sessionEpoch: getEnterFallbackSessionEpoch(compositeKey),
     startedAt: Date.now(),
+    // Issue #3821: a person's answer begun after this is read stops the tick.
+    manualAnswerSeq: getManualAnswerSeq(compositeKey),
   };
   // Issue #3796: this is the session wait's tick (it was scheduled as one) —
   // recorded before anything can fail, for the push gate.

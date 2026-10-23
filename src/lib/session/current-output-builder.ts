@@ -58,6 +58,7 @@ import {
 import { getLastPolicySuppression } from '@/lib/polling/auto-yes-suppression-state';
 import type { AutoYesEnterFallbackPublished } from '@/lib/polling/auto-yes-enter-fallback';
 import { publishAutoYesDecision } from '@/lib/polling/auto-yes-decision-state';
+import { getAntigravityAcceptedReceiptCallId } from '@/lib/polling/antigravity-receipt-episodes';
 import type { AutoYesDecisionPublished } from '@/types/auto-yes-decision';
 import { getPromptDedupSkips } from '@/lib/polling/prompt-dedup-state';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
@@ -660,6 +661,18 @@ function logDetectionDivergence(
       durationMs: resolvedDivergence.durationMs,
       polls: resolvedDivergence.polls,
     });
+  }
+}
+
+/**
+ * Issue #3821: the agy hook call the receipt on screen was accepted for, for
+ * the decision to be matched against; null when unknown. Read only, never throws.
+ */
+function acceptedAgyCallId(worktreeId: string, instanceId: string | undefined): string | null {
+  try {
+    return getAntigravityAcceptedReceiptCallId(worktreeId, instanceId);
+  } catch {
+    return null;
   }
 }
 
@@ -1284,6 +1297,8 @@ async function buildPayload(
       grant: autoYesState,
       promptData:
         promptData !== null && promptAnswerable !== undefined ? statusResult.promptDetection.promptData : null,
+      // agy: the decision is tied to the hook call its receipt was accepted for.
+      callId: cliToolId === 'antigravity' ? acceptedAgyCallId(worktreeId, instanceId) : null,
       pollerActive: isPollerActive(compositeKey),
     }),
     isSelectionListActive,

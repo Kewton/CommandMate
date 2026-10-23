@@ -7,7 +7,8 @@
  * worktree row read, no session check, no structured decision over the
  * agent's API, no keystroke, no ledger record (the id's alias lookup, a read,
  * comes first as for every request). A person's answer (no origin) goes on
- * as before, and drops Auto-Yes's decision about the prompt.
+ * as before, stops a poller tick under way on the instance, and drops
+ * Auto-Yes's decision about the prompt.
  *
  * @vitest-environment node
  */
@@ -52,6 +53,7 @@ import {
   recordAutoYesDecision,
 } from '@/lib/polling/auto-yes-decision-state';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
+import { getManualAnswerSeq, isManualAnswerHolding } from '@/lib/polling/auto-yes-manual-answer';
 
 const WT = 'wt-3821';
 
@@ -147,6 +149,21 @@ describe('[#3821] a person’s answer drops Auto-Yes’s decision about the prom
     decide();
     await post({ answer: '1', cliTool: 'claude' });
     expect(getAutoYesDecisionRecord(key)).toBeNull();
+  });
+
+  it('answered: a tick under way is no longer current, and the poller holds off the instance', async () => {
+    arrangeAnswered();
+    const before = getManualAnswerSeq(key);
+    await post({ answer: '1', cliTool: 'claude' });
+    expect(getManualAnswerSeq(key)).toBe(before + 1);
+    expect(isManualAnswerHolding(key)).toBe(true);
+  });
+
+  it('control: refused as the browser’s Auto-Yes, no tick is stopped', async () => {
+    arrangeAnswered();
+    const before = getManualAnswerSeq(key);
+    await post({ answer: '1', cliTool: 'claude', origin: AUTO_YES_BROWSER_ORIGIN });
+    expect(getManualAnswerSeq(key)).toBe(before);
   });
 
   it('control: refused as the browser’s Auto-Yes, the decision is left alone', async () => {

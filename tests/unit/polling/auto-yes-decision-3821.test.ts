@@ -24,8 +24,13 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+/** Held open by a test while the state moves under a tick waiting on it. */
+let ownershipGate: Promise<void> | null = null;
 vi.mock('@/lib/cli-tools/worktree-session-ownership', () => ({
-  checkWorktreeSessionOwnership: async () => ({ verdict: 'owned', sessionPath: null }),
+  checkWorktreeSessionOwnership: async () => {
+    if (ownershipGate) await ownershipGate;
+    return { verdict: 'owned', sessionPath: null };
+  },
 }));
 
 import Database from 'better-sqlite3';
@@ -37,10 +42,12 @@ let db: Database.Database;
 vi.mock('@/lib/db/db-instance', () => ({ getDbInstance: () => db }));
 
 /** Runs inside the send, so a test can read what is published mid-send. */
-let duringSend: () => void = () => {};
-const sendPromptAnswer = vi.fn(async (_params: { answer: string; promptData?: PromptData }) => {
-  duringSend();
-});
+let duringSend: (params: { stillCurrent?: () => boolean }) => void = () => {};
+const sendPromptAnswer = vi.fn(
+  async (params: { answer: string; promptData?: PromptData; stillCurrent?: () => boolean }) => {
+    duringSend(params);
+  },
+);
 vi.mock('@/lib/prompt-answer-sender', () => ({
   sendPromptAnswer: (params: unknown) => sendPromptAnswer(params as { answer: string }),
 }));
@@ -108,6 +115,13 @@ import {
   getEnterFallbackSessionEpoch,
 } from '@/lib/polling/auto-yes-enter-fallback';
 import { clearPolicySuppressions } from '@/lib/polling/auto-yes-suppression-state';
+import {
+  clearManualAnswers,
+  getManualAnswerSeq,
+  MANUAL_ANSWER_HOLD_MS,
+  noteManualAnswerStarted,
+} from '@/lib/polling/auto-yes-manual-answer';
+import { DUPLICATE_RETRY_EXPIRY_MS } from '@/lib/auto-yes-state';
 import { stripAnsi, stripBoxDrawing } from '@/lib/detection/cli-patterns';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
 
@@ -149,6 +163,7 @@ function enable(): AutoYesState {
 
 function generationOf(state: AutoYesPollerState): AutoYesTickGeneration {
   return {
+    manualAnswerSeq: getManualAnswerSeq(KEY),
     compositeKey: KEY,
     worktreeId: WT,
     cliToolId: 'claude',
@@ -184,7 +199,9 @@ beforeEach(() => {
   runMigrations(db);
   vi.clearAllMocks();
   duringSend = () => {};
+  ownershipGate = null;
   policy = null;
+  clearManualAnswers();
   clearAllAutoYesStates();
   clearAllPollerStates();
   clearPolicySuppressions();
@@ -403,5 +420,208 @@ describe('[#3821] T3: an instance the poller limit refused', () => {
     setAutoYesEnabled(WT, 'claude', true, ONE_HOUR);
     expect(startAutoYesPolling(WT, 'claude').started).toBe(true);
     expect(published(PERMISSION).state).toBe('none');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review 2: a person's answer and a tick under way
+// ---------------------------------------------------------------------------
+
+describe('[#3821] a person’s answer stops a tick already under way', () => {
+  /** A promise and the function that settles it. */
+  function gate(): { promise: Promise<void>; open: () => void } {
+    let open!: () => void;
+    const promise = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    return { promise, open };
+  }
+
+  it('waiting on the ownership check: a manual answer begins, the tick sends nothing', async () => {
+    enable();
+    const held = gate();
+    ownershipGate = held.promise;
+    const pending = tick(PERMISSION);
+    await Promise.resolve();
+
+    noteManualAnswerStarted(KEY);
+    held.open();
+
+    expect(await pending).toBe('no_answer');
+    expect(sendPromptAnswer).not.toHaveBeenCalled();
+    expect(published(PERMISSION).state).not.toBe('answering');
+  });
+
+  it('control: waiting on the ownership check with no manual answer, the tick answers', async () => {
+    enable();
+    const held = gate();
+    ownershipGate = held.promise;
+    const pending = tick(PERMISSION);
+    await Promise.resolve();
+    held.open();
+
+    expect(await pending).toBe('responded');
+    expect(sendPromptAnswer).toHaveBeenCalledTimes(1);
+  });
+
+  it('in the middle of the send: the sender is told the tick is no longer current', async () => {
+    enable();
+    const seen: boolean[] = [];
+    duringSend = ({ stillCurrent }) => {
+      seen.push(stillCurrent?.() ?? true);
+      noteManualAnswerStarted(KEY);
+      seen.push(stillCurrent?.() ?? true);
+    };
+    await tick(PERMISSION);
+    // Before the person: current. After: the sender stops before its next key.
+    expect(seen).toEqual([true, false]);
+    expect(published(PERMISSION).state).not.toBe('answering');
+  });
+
+  it('the next ticks leave the screen to the person for the hold, then answer again (Auto-Yes stays on)', async () => {
+    enable();
+    noteManualAnswerStarted(KEY);
+
+    expect(await tick(PERMISSION)).toBe('no_answer');
+    expect(sendPromptAnswer).not.toHaveBeenCalled();
+    expect(published(PERMISSION)).toMatchObject({ state: 'withheld', reason: 'answered-by-human' });
+    expect(getAutoYesState(WT, 'claude')?.enabled).toBe(true);
+
+    vi.setSystemTime(Date.now() + MANUAL_ANSWER_HOLD_MS);
+    expect(await tick(PERMISSION)).toBe('responded');
+    expect(sendPromptAnswer).toHaveBeenCalledTimes(1);
+  });
+
+  it('another instance’s manual answer leaves this one’s tick alone', async () => {
+    enable();
+    const held = gate();
+    ownershipGate = held.promise;
+    const pending = tick(PERMISSION);
+    await Promise.resolve();
+    noteManualAnswerStarted(buildCompositeKey(WT, 'claude', 'claude-2'));
+    held.open();
+    expect(await pending).toBe('responded');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review 2: the duplicate guard is not evidence of answering
+// ---------------------------------------------------------------------------
+
+describe('[#3821] the duplicate guard keeps answering only for the confirmation sent to', () => {
+  /** The same question, other options: the duplicate guard (type + question) calls it the same. */
+  const SAME_QUESTION_OTHER_OPTIONS = 'Select an option:\n❯ 1. Allow\n  2. Deny';
+
+  it('the same question with other options within the guard: not answering', async () => {
+    enable();
+    expect(await tick(PERMISSION)).toBe('responded');
+    expect(await tick(SAME_QUESTION_OTHER_OPTIONS)).toBe('duplicate');
+    expect(published(SAME_QUESTION_OTHER_OPTIONS).state).toBe('none');
+    // Nor is the earlier answering kept for the screen that was answered.
+    expect(getAutoYesDecisionRecord(KEY)).toBeNull();
+  });
+
+  it('the record dropped (a person answered) and the guard still on: not brought back', async () => {
+    enable();
+    expect(await tick(PERMISSION)).toBe('responded');
+    forgetAutoYesDecision(KEY);
+    expect(await tick(PERMISSION)).toBe('duplicate');
+    expect(published(PERMISSION).state).toBe('none');
+  });
+
+  it('after a manual answer, the same screen within the guard is the person’s, not answering', async () => {
+    enable();
+    expect(await tick(PERMISSION)).toBe('responded');
+    noteManualAnswerStarted(KEY);
+    expect(await tick(PERMISSION)).toBe('no_answer');
+    expect(published(PERMISSION)).toMatchObject({ state: 'withheld', reason: 'answered-by-human' });
+  });
+
+  it('control: the confirmation that was sent to, within the guard: still answering', async () => {
+    enable();
+    expect(await tick(PERMISSION)).toBe('responded');
+    vi.setSystemTime(Date.now() + DUPLICATE_RETRY_EXPIRY_MS - 1);
+    expect(await tick(PERMISSION)).toBe('duplicate');
+    expect(published(PERMISSION).state).toBe('answering');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review 2: what is being approved is part of the confirmation
+// ---------------------------------------------------------------------------
+
+describe('[#3821] a decision is not carried to another approval target', () => {
+  /** agy 1.1.27's file-creation dialog: the file is named only in the approval target. */
+  const CREATE_FILE = readFileSync(
+    path.resolve(__dirname, '../../fixtures/antigravity-live-2364/dialog-create-file.txt'),
+    'utf8',
+  );
+  const CREATE_OTHER_FILE = CREATE_FILE.replaceAll('hello-agy.txt', 'other-file.txt').replaceAll(
+    'hello from antigravity',
+    'something else',
+  );
+  const agyPrompt = (raw: string): PromptData => {
+    const promptData = detectSessionStatus(raw, 'antigravity').promptDetection.promptData;
+    if (!promptData) throw new Error('the frame carries no prompt');
+    return promptData;
+  };
+  /** The same screen read with fewer rows, cut from the top (the status API and the poller differ so). */
+  const fewerRows = (raw: string, firstRow: string): string => {
+    const rows = raw.split('\n');
+    return rows.slice(rows.findLastIndex((row) => row.includes(firstRow))).join('\n');
+  };
+  const key = buildCompositeKey(WT, 'antigravity');
+  const grant: AutoYesState = { enabled: true, enabledAt: 0, expiresAt: Number.MAX_SAFE_INTEGER };
+  const publishFor = (promptData: PromptData, callId: string | null = null) =>
+    publishAutoYesDecision({ compositeKey: key, grant, promptData, callId, pollerActive: true });
+  const record = (promptData: PromptData, callId: string | null = null) =>
+    recordAutoYesDecision(key, {
+      state: 'answering',
+      reason: null,
+      promptData,
+      callId,
+      grant,
+      epoch: getEnterFallbackSessionEpoch(key),
+    });
+
+  it('non-vacuous: the two dialogs share the question and the options, not the target', () => {
+    const a = agyPrompt(CREATE_FILE);
+    const b = agyPrompt(CREATE_OTHER_FILE);
+    expect(b.question).toBe(a.question);
+    expect(JSON.stringify(b.type === 'multiple_choice' ? b.options : [])).toBe(
+      JSON.stringify(a.type === 'multiple_choice' ? a.options : []),
+    );
+    expect(b.approvalTarget).not.toBe(a.approvalTarget);
+  });
+
+  it('the approval target differs only: none', () => {
+    record(agyPrompt(CREATE_FILE));
+    expect(publishFor(agyPrompt(CREATE_OTHER_FILE)).state).toBe('none');
+  });
+
+  it.each([
+    ['from the file row', '~/agy2364-probe/hello-agy.txt'],
+    ['from the diff row', 'hello from antigravity'],
+  ])('control: the same dialog read with fewer rows (%s): still the decision', (_label, firstRow) => {
+    const fewer = agyPrompt(fewerRows(CREATE_FILE, firstRow));
+    expect(fewer.approvalTarget).not.toBe(agyPrompt(CREATE_FILE).approvalTarget);
+    record(agyPrompt(CREATE_FILE));
+    expect(publishFor(fewer).state).toBe('answering');
+    // And the other way round: the poller read fewer rows than the status API.
+    record(fewer);
+    expect(publishFor(agyPrompt(CREATE_FILE)).state).toBe('answering');
+  });
+
+  it('a target one reading has and the other has not: none', () => {
+    const withoutTarget = { ...agyPrompt(CREATE_FILE), approvalTarget: undefined };
+    record(agyPrompt(CREATE_FILE));
+    expect(publishFor(withoutTarget).state).toBe('none');
+  });
+
+  it('agy: a decision tied to a hook call reads none for another call, or when no call is known now', () => {
+    record(agyPrompt(CREATE_FILE), 'call-1');
+    expect(publishFor(agyPrompt(CREATE_FILE), 'call-1').state).toBe('answering');
+    expect(publishFor(agyPrompt(CREATE_FILE), 'call-2').state).toBe('none');
+    expect(publishFor(agyPrompt(CREATE_FILE), null).state).toBe('none');
   });
 });

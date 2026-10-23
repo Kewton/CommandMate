@@ -19,8 +19,9 @@
  * refused with 409 before any side effect (`reason: browser-auto-yes-retired`).
  * One sent by a tab loaded before #3820 added the `origin` carries none and
  * cannot be told from a person's; reloading the tab ends it. A person's answer
- * also drops Auto-Yes's decision about the prompt (`autoYesDecision`), so the
- * next tick decides afresh for whatever the screen shows next.
+ * stops a poller tick under way and holds the poller off the instance for a
+ * moment (`auto-yes-manual-answer`), and drops Auto-Yes's decision about the
+ * prompt (`autoYesDecision`).
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -41,7 +42,7 @@ import { finishAnsweredPrompt, sendResolvedAnswer } from './answer-delivery';
 import { notePromptResponseInLedger } from './ledger-record';
 import type { ValidatedPromptResponse } from './request-validation';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
-import { forgetAutoYesDecision } from '@/lib/polling/auto-yes-decision-state';
+import { noteManualAnswerStarted } from '@/lib/polling/auto-yes-manual-answer';
 import { AUTO_YES_BROWSER_ORIGIN } from '@/lib/prompt-response-body-builder';
 
 /** Issue #3821: the `reason` of the 409 a browser Auto-Yes answer is refused with. */
@@ -123,12 +124,13 @@ export async function POST(
 
     const ctx: PromptResponseContext = { id, db, cliToolId, instanceId };
     ledger = { ctx, request };
-    const noted = (response: NextResponse) => {
-      // Issue #3821: a person answered (or tried to): Auto-Yes's decision about
-      // the prompt is not reused for what the screen shows next.
-      forgetAutoYesDecision(buildCompositeKey(id, cliToolId, instanceId));
-      return notePromptResponseInLedger(ctx, request, response);
-    };
+    const noted = (response: NextResponse) => notePromptResponseInLedger(ctx, request, response);
+
+    // Issue #3821: a person is answering. Before the first key or API call: a
+    // poller tick already under way sends no further key, the next ticks leave
+    // the screen to the person for a moment, and Auto-Yes's decision about the
+    // prompt is dropped. Auto-Yes itself stays on.
+    noteManualAnswerStarted(buildCompositeKey(id, cliToolId, instanceId));
 
     // Issue #1898: answer the approval the agent is actually holding, before
     // going anywhere near the pane.

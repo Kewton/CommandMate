@@ -268,15 +268,15 @@ Only the **server** answers automatically (the poller that reads the screen, hoo
 
 - With Auto Yes on, a confirmation the server is not answering **shows its answer panel**: one the execution contract withholds, a screen CommandMate cannot read, a question from the agent, or a screen of an agent whose poller is not running (the concurrent poller limit was reached, for one). The panel stays hidden only while the server is answering that confirmation
 - A question OpenCode asks over its API always shows its panel, Auto Yes or not. Command Code's Review page is still answered from its manual-action card
-- Answering from the panel by hand leaves Auto Yes on
+- Answering from the panel by hand leaves Auto Yes on. Once you start answering by hand, an automatic answer the server was in the middle of sends no further key, and for about 10 seconds after that the server does not answer that agent's confirmations (so your keys and its keys do not mix)
 - Auto Yes does not answer the screen of an agent with no poller running (hooks approval and the API adjudication run apart from the poller)
 - The single Enter Auto Yes used to send to an unreadable choice screen, and the "Auto responded" notice next to the toggle, are gone
 - A tab opened before this release that still sends an automatic answer is refused by the server with 409. A tab on a bundle from before Auto Yes marked its answers with their origin (before Issue #3820), however, cannot be told from a person answering; reload old tabs
 
 ### Important Notes
 
-- While Auto Yes is active, all confirmations are automatically answered with "Yes"
-- Important changes (file deletions, etc.) are also auto-approved, so use with caution
+- While Auto Yes is active, the server answers the agent's requests for permission to run a tool (editing, creating or deleting files, running commands, …). Important changes (file deletions, etc.) are also auto-approved, so use with caution
+- It does not answer these, and leaves them to you (their answer panel shows): a confirmation the execution contract (`autoYes`) withholds, a question from the agent and its Submit / Cancel page, a screen CommandMate cannot read, a confirmation that needs checkboxes or typed text, a CLI's launch confirmations, any confirmation of an agent whose poller is not running, and the few seconds after you answer from the panel by hand (see "Confirmations Auto Yes Does Not Answer Are Yours to Answer" above)
 - You can disable it by turning off the toggle
 - Auto Yes automatically turns OFF after the selected duration
 - **When the server restarts (`/rebuild`, `commandmate stop`, etc.), an active Auto Yes is turned OFF and does not come back.** The affected instance shows **"Released by restart"** (「再起動で解除」 in the Japanese UI). The label stays until the original grant's deadline, and disappears when you turn the toggle on again or turn it off manually (it is not shown after SIGKILL or a crash). A manual OFF or an expiry does not show it
