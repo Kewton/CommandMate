@@ -174,3 +174,25 @@ describe('[#3822] a question left to a human is counted under its own reason', (
     expect(withheld.map((record) => record.reason).sort()).toEqual(['question-confirm-page', 'question-left-to-human']);
   });
 });
+
+describe('[#3822] a permission dialog with no single allow-once row is counted under its own reason', () => {
+  it('keeps allow-once-unidentified apart from `other`', () => {
+    tick(null);
+    hours(S, S + H);
+    for (let i = 0; i < 2; i += 1) {
+      tick('screen-M', () => withholdLedgerConfirmation(SCOPE, 'allow-once-unidentified'));
+      now += 2_000;
+    }
+    tick(null);
+    hours(S + 2 * H, E);
+
+    const agg = createLogAggregate(NOW);
+    for (const raw of written.lines) addLogLine(agg, raw);
+    const result = measureAutoYesObservation(agg.autoYes, agg);
+
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok') return;
+    const withheld = (result.records ?? []).filter((record) => record.kind === 'withheld');
+    expect(withheld.map((record) => record.reason)).toEqual(['allow-once-unidentified']);
+  });
+});

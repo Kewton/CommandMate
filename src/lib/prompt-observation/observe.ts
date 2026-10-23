@@ -28,6 +28,8 @@
 
 import type { CurrentOutputPayload } from '@/lib/session/current-output-types';
 import { resolveAutoAnswerWithPolicy, type AutoYesPolicy } from '@/lib/polling/auto-yes-resolver';
+import { isBaseRuleSuppressionReason } from '@/lib/polling/auto-yes-suppression-reason';
+import { isCliToolType } from '@/lib/cli-tools/types';
 import { derivePromptView } from '@/lib/session/prompt-view';
 import { isAnswerablePromptData } from '@/types/models';
 import { classifyScreen, type ClassifiedScreen } from './classify';
@@ -241,7 +243,13 @@ function evaluateContract(
   if (!isDecisionKind(classified.kind) || !isAnswerablePromptData(promptData)) {
     return { state: 'not-evaluated', because: 'no-parsed-prompt', contract };
   }
-  const resolution = resolveAutoAnswerWithPolicy(promptData, policy);
+  // Issue #3822: read with the instance's tool, as the poller reads it.
+  const cliToolId = isCliToolType(input.cliToolId) ? input.cliToolId : undefined;
+  const resolution = resolveAutoAnswerWithPolicy(promptData, policy, cliToolId);
+  // Issue #3822: the base rules' withholding is not the contract's verdict.
+  if (resolution.suppressedBy !== null && isBaseRuleSuppressionReason(resolution.suppressedBy)) {
+    return { state: 'base-withholds', reason: resolution.suppressedBy, contract };
+  }
   if (resolution.suppressedBy !== null) {
     return {
       state: 'policy-withholds',
