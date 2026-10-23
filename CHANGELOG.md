@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.47.2] - 2026-10-23
+
+> **Highlight**: 依存パッケージの脆弱性を直すリリースです。`next` を 15.5.28 へ上げ、画像最適化 API の認証なしのリモートコード実行（critical、GHSA-2464-fhr4-w9xw）と Server Actions の DoS（high）を解消しました（#3846）。あわせて `dompurify`（#3847）と `markdown-it`（#3836）の high の advisory も解消しました。v0.47.1 は npm への公開前の監査でこの critical に止められて公開されていないため、v0.47.1 の変更（Auto-Yes の安全側の修正 #3822 / #3817 など）はこの版で初めて npm に出ます。
+
+### Changed
+
+- **refactor(agent-health): `measureAutoYesObservation` を区間ごとの非公開関数へ分け、複雑度を 70 から 2 に下げた** (#3837): 窓の行の整列（`linesInWindow`）・coverage（`measureCoverage`／`addAliveSpans`）・`ledgerErrors`（`countLedgerErrors`）・1 回走査の集計（`passOverLines` と、行ごとの `applyLine`・区間の `trackInterval`／`applyIntervalEvent`・イベントごとの `onClosed`／`onAttemptSettled`／`onHookRequestClosed`／`onHookRequestDialogUnobserved`／`onCliModeObserved`）・停止時間（`measureWithheld`／`addWithheldInterval`／`withheldStat`）・未決着の確認（`countUnclosed`）・CLI の権限モード（`measureCliModes`）・結果の組み立て（`observationMeasurement`）を `src/lib/agent-health/auto-yes-observation.ts` 内に分けた。分けた関数の複雑度は最大 13。公開 API（export の名前・型・戻り値）と計測の結果（status・reason・details の値と並び・records）は変えていない（振る舞いは不変）。
+
+- **refactor(prompt-observation): `readAntigravityModelPicker` を見出し探索・検索欄・選択肢・effort 欄の小関数に分割し複雑度を 25 未満に** (#3801): 同一ファイル内の非 export 関数へ分けただけで、null を返す条件・question・options・selectedIndex は不変（既存テスト antigravity-model-picker-3797 は無改変で通過）。
+
+### Security
+
+- **fix(deps): 間接依存の `dompurify` を 3.3.3 から 3.4.17 へ上げ、high の advisory 1 件を解消** (#3847): GHSA-mrv2-3pqr-j5jr（`IN_PLACE` で親や兄弟を消す hook のあと、切り離した部分木のイベントハンドラが残る。影響範囲 `<= 3.4.16`）。`isomorphic-dompurify` と `mermaid` の範囲の中で lockfile だけを更新した。
+
+- **fix(deps): `next` を 15.5.25 から 15.5.28 へ上げ、critical / high の advisory 2 件を解消** (#3846): GHSA-2464-fhr4-w9xw（画像最適化 API で SVG を扱うときの認証なしのリモートコード実行、critical）と GHSA-p3m5-59mp-jv5r（Server Actions を使う App Router の DoS、high）。影響範囲はどちらも `<= 15.5.27`。v0.47.1 の npm 公開は、この advisory で `publish.yml` の `npm audit --audit-level=critical` に止められた。
+
+- **fix(deps): 間接依存 markdown-it を 14.3.2 → 14.3.3 に更新し GHSA-gfr2-rv44-r23c を解消** (#3836): `@marp-team/marpit` 経由で入る markdown-it の「複数行の link reference definition を既定オプションで描画すると二次時間になる」high の advisory（14.1.0 以上 14.3.3 未満）を、`package-lock.json` の markdown-it だけを 14.3.3 に上げて解消。メジャー更新なし・他の依存は不変で、`npm audit --omit=dev` から該当 advisory が消えることを確認。
+
 ## [0.47.1] - 2026-10-23
 
 > **Highlight**: Auto-Yes の安全側の修正 2 件と、確認の記録を入れたリリースです。実行契約の照会が一瞬失敗しただけで、`mode: off` や deny の契約があっても Auto-Yes が答えていた問題を直し、照会できないときは答えないようにしました（#3822）。承認を求めるコマンドの本文が `> ` 行で切れ、その上の `rm -rf` などが deny の判定から漏れていた問題も直しました（#3817）。あわせて Auto-Yes の確認 1 件ごとに判断・送信・解消と止めた区間をログに残し、agent-health の日次で集計するようにしました（#3820。答え方は変えていない）。

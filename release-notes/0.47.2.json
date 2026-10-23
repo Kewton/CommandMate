@@ -1,0 +1,20 @@
+{
+  "version": "0.47.2",
+  "date": "2026-10-23",
+  "highlight": {
+    "ja": "依存パッケージの脆弱性を直しました。Next.js の重大な脆弱性への対応を含みます。",
+    "en": "Fixed vulnerabilities in dependencies, including a critical one in Next.js."
+  },
+  "added": [],
+  "improved": [],
+  "fixed": [
+    {
+      "ja": "Next.js を更新し、画像の最適化で外部からコードを実行されうる重大な脆弱性と、サービス停止の脆弱性を直しました。",
+      "en": "Updated Next.js to fix a critical vulnerability that could allow remote code execution through image optimization, and a denial-of-service issue."
+    },
+    {
+      "ja": "Markdown の表示に使うライブラリを更新し、高リスクの脆弱性を直しました。",
+      "en": "Updated libraries used to render Markdown to fix high-severity vulnerabilities."
+    }
+  ]
+}
