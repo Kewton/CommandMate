@@ -202,6 +202,34 @@ describe('Issue #3832 (4): question does not reach above the user\'s echo', () =
   });
 
   /**
+   * Review (P3): a body row that starts with the echo's glyph is not the echo.
+   * `approvalTarget` already cuts at it, so `question`'s window is what keeps
+   * the command above it in the deny surface.
+   */
+  it('a `❯ ` / `› ` body row under the command does not cut question (claude and codex shapes)', () => {
+    const panes: Array<[CLIToolType, string[]]> = [
+      // claude: frame at column 1, the body row left of it.
+      ['claude', [' Bash command', '   rm -rf x', '❯ quoted', ' Do you want to proceed?', ' ❯ 1. Yes', '   2. No']],
+      // claude: frame at column 0, the body row at the frame's column.
+      ['claude', ['Bash command', '  rm -rf x', '❯ quoted', 'Do you want to proceed?', '❯ 1. Yes', '  2. No']],
+      // codex: the `› 1.` cursor at column 0.
+      ['codex', [
+        'Would you like to run the following command?', '  $ rm -rf x', '› quoted', 'Run it?',
+        '› 1. Yes, proceed (y)', '  2. No (esc)',
+      ]],
+    ];
+    for (const [tool, lines] of panes) {
+      const promptData = promptOf(lines.join('\n'), tool);
+      expect(promptData.type).toBe('multiple_choice');
+      expect(promptData.question).toContain('rm -rf x');
+
+      const resolution = resolveAutoAnswerWithPolicy(promptData, policy(['rm -rf']));
+      expect(resolution.answer).toBeNull();
+      expect(resolution.suppressedBy).toBe('deny-pattern');
+    }
+  });
+
+  /**
    * `>` is not an echo it can trust (#3817's shape 3): codex's trust dialog
    * opens with `> You are in <dir>`. That row is cut from approvalTarget, and
    * question is what keeps it in the deny surface.

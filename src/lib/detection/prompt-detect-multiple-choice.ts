@@ -4,6 +4,7 @@ import type { DetectPromptOptions, PromptDetectionResult } from './types';
 import type { SubmitMode } from '@/types/models';
 import { normalizeTuiFrameForDetection } from './tui-detection-frame';
 import { CLAUDE_MODEL_OVERLAY_FOOTER_PATTERN } from './cli-patterns';
+import { CLAUDE_TURN_COMPLETE_PATTERN } from './tools/claude/patterns';
 import { optionTakesTypedText } from '@/lib/session/prompt-view';
 import {
   ASK_USER_QUESTION_PICKER_FOOTER_PATTERN,
@@ -712,15 +713,50 @@ function isContinuationLine(rawLine: string, line: string): boolean {
 const USER_ECHO_PATTERN = /^[❯›]\s(?!\s*\d+[.)]\s)/;
 
 /**
- * The lowest row in `[from, questionEndIndex)` that is the user's message echo
- * drawn at or left of the dialog's frame (Issue #3832), or -1.
+ * codex's end-of-turn row (Issue #3832): `Worked for 17s • 19:30`, or the rule
+ * form `─ Worked for 1m 2s ─`. claude's is {@link CLAUDE_TURN_COMPLETE_PATTERN}.
  */
-function findUserEchoRow(lines: string[], questionEndIndex: number, from: number, panelEnd: number): number {
+const CODEX_TURN_COMPLETE_PATTERN = /^─*\s*Worked for\s+(?:\d+h\s*)?(?:\d+m\s*)?\d+s\b/;
+
+/** True when the nearest non-blank row above `row` (down to `floor`) ends a finished turn. */
+function followsFinishedTurn(lines: string[], row: number, floor: number): boolean {
+  for (let i = row - 1; i >= floor; i--) {
+    const line = lines[i];
+    if (line === undefined || line.trim() === '') continue;
+    return CLAUDE_TURN_COMPLETE_PATTERN.test(line) || CODEX_TURN_COMPLETE_PATTERN.test(line.trim());
+  }
+  return false;
+}
+
+/**
+ * The lowest row in `[from, questionEndIndex)` that is the user's message echo
+ * (Issue #3832), or -1.
+ *
+ * A `❯ ` / `› ` row is taken for the echo only when the screen leaves no doubt:
+ * drawn left of the dialog's frame (claude's echo at column 0 against its frame
+ * at 1, codex's at 0 against 2), and right under the previous turn's end-of-turn
+ * row (`✻ Baked for 3s`, `Worked for 17s`). A body row that happens to start
+ * with the glyph — at the frame's column, or under the command it belongs to —
+ * is not one, so the rows above it stay in `question` and the deny surface is
+ * taken wide.
+ */
+function findUserEchoRow(
+  lines: string[],
+  questionEndIndex: number,
+  from: number,
+  panelEnd: number,
+  floor: number,
+): number {
   const frameIndent = panelFrameIndent(lines, questionEndIndex, panelEnd);
   for (let i = questionEndIndex - 1; i >= from; i--) {
     const line = lines[i];
     if (line === undefined || line.trim() === '') continue;
-    if (indentOf(line) <= frameIndent && USER_ECHO_PATTERN.test(line.trim())) return i;
+    if (
+      indentOf(line) < frameIndent && USER_ECHO_PATTERN.test(line.trim())
+      && followsFinishedTurn(lines, i, floor)
+    ) {
+      return i;
+    }
   }
   return -1;
 }
@@ -730,7 +766,7 @@ function findUserEchoRow(lines: string[], questionEndIndex: number, from: number
  * Collects non-empty, non-separator lines from up to 5 lines before questionEndIndex
  * through questionEndIndex itself, joining them with spaces.
  *
- * [Issue #3832] Not above the user's message echo ({@link USER_ECHO_PATTERN}):
+ * [Issue #3832] Not above the user's message echo ({@link findUserEchoRow}):
  * that message opened the current turn, so the rows above it — the previous
  * turn's `⏺ IMPL_COMPLETED` / `✻ Cogitated …`, codex's `• HTTP/2 200` /
  * `Worked for 17s` on the measured screens — are not the prompt's and used to
@@ -759,7 +795,7 @@ function extractQuestionText(
   }
 
   const windowStart = Math.max(floor, questionEndIndex - QUESTION_CONTEXT_LINES);
-  const start = Math.max(windowStart, findUserEchoRow(lines, questionEndIndex, windowStart, panelEnd));
+  const start = Math.max(windowStart, findUserEchoRow(lines, questionEndIndex, windowStart, panelEnd, floor));
   const questionLines: string[] = [];
   for (let i = start; i <= questionEndIndex; i++) {
     const line = lines[i].trim();
@@ -906,7 +942,10 @@ function isTurnBoundaryLine(rawLine: string | undefined): boolean {
  *   (over-suppresses).
  * - A body row carrying a marker at the frame's own column (a here-document's
  *   `> ` drawn at column 0 under a yes/no `(y/n)`) still ends the scan; the
- *   screen cannot tell it from the previous turn's echo.
+ *   screen cannot tell it from the previous turn's echo. This one stays an
+ *   error on the answering side: the command rows above the `> ` leave
+ *   `approvalTarget`, and a yes/no `question` is the prompt line alone, so a
+ *   deny pattern on them can miss.
  *
  * Shared by both detector paths: multiple_choice passes its `questionEndIndex`,
  * yes_no the line its pattern matched on.
