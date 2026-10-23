@@ -125,12 +125,22 @@ export interface PromptObservationPollerRecord {
  * and not "Auto-Yes will answer": the poller has gates of its own (the
  * tool-specific dialog reader, launch dialogs, partial answers) that this does
  * not run. `policy-permits` says only that the contract would not stop it.
+ *
+ * Issue #3822: `base-withholds` is the base rules stopping the answer before the
+ * contract is read (`allow-once-unidentified`: a permission dialog with no
+ * single "allow this call once" row). It is not the contract's verdict and is
+ * reported the same with or without a contract.
  */
 export type PromptObservationContractEvaluation =
   | {
       state: 'policy-withholds';
       reason: AutoYesSuppressionReason;
       pattern?: string;
+      contract: PromptObservationContract | null;
+    }
+  | {
+      state: 'base-withholds';
+      reason: AutoYesSuppressionReason;
       contract: PromptObservationContract | null;
     }
   | { state: 'policy-permits'; contract: PromptObservationContract | null }

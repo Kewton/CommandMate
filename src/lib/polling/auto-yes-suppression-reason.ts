@@ -135,6 +135,23 @@ export const QUESTION_CONFIRM_PAGE_SUPPRESSION_REASON = 'question-confirm-page' 
 /** Issue #3822: the reason the poller records over a question the tool asks the operator. */
 export const QUESTION_LEFT_TO_HUMAN_SUPPRESSION_REASON = 'question-left-to-human' satisfies AutoYesSuppressionReason;
 
+/**
+ * Issue #3822: the reasons `resolveAutoAnswerWithPolicy` returns from its base
+ * rules, before the contract is read. Every other reason it returns is the
+ * contract's verdict ({@link CONTRACT_SUPPRESSION_REASONS} holds both kinds:
+ * both are verdicts on the prompt as it is now). A reader that tells the
+ * operator what stopped the answer — the prompt observation, agy's withheld
+ * log line — must not send them to the contract for one of these.
+ */
+export const BASE_RULE_SUPPRESSION_REASONS: ReadonlySet<AutoYesSuppressionReason> = new Set<AutoYesSuppressionReason>([
+  'allow-once-unidentified',
+]);
+
+/** Whether `reason` is the base rules' withholding rather than the contract's (Issue #3822). */
+export function isBaseRuleSuppressionReason(reason: AutoYesSuppressionReason | string): boolean {
+  return BASE_RULE_SUPPRESSION_REASONS.has(reason as AutoYesSuppressionReason);
+}
+
 /** Issue #3822: the reason the resolver returns over a permission dialog with no single allow-once row. */
 export const ALLOW_ONCE_UNIDENTIFIED_SUPPRESSION_REASON = 'allow-once-unidentified' satisfies AutoYesSuppressionReason;
 
