@@ -187,9 +187,11 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   confirmation and the requester was told; still open), delivered, expired,
   cancelled.
 
-  'relays cancel' cannot withdraw a relay that is being delivered right now:
-  the server answers 409 and the command exits 2 -- the reply still arrives.
-  A relay that is already closed (delivered, expired, cancelled) exits 2 too.
+  'relays cancel' cannot withdraw a relay that is being delivered right now
+  (a reply or a prompt notice): the server answers 409 and the command exits
+  2. The delivery usually goes through; if it fails, the relay stays open and
+  can be cancelled again once that attempt is over. A relay that is already
+  closed (delivered, expired, cancelled) exits 2 too.
 
   A reply is held rather than delivered while the requesting session is
   generating -- typing into a running composer interrupts the turn -- and is
@@ -838,8 +840,10 @@ same CommandMate server, and you can hand work to them.
     commandmate relays --json
     commandmate relays cancel <relay-id>  # withdraw one; nothing is delivered
 
-  A cancel during the delivery itself is refused (409, exit 2) and the reply
-  still arrives; so is one for a relay that is already closed.
+  A cancel during the delivery itself is refused (409, exit 2); the delivery
+  usually goes through, and if it fails the relay stays open and can be
+  cancelled again once that attempt is over. A cancel for a relay that is
+  already closed exits 2 too.
 
   A reply is held rather than delivered while the requesting session is
   generating, and arrives as soon as it is idle again.

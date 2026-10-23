@@ -27,5 +27,9 @@ describe('relays cancel documents the delivering refusal (Issue #3749)', () => {
     expect(section).toMatch(/409/);
     expect(section).toMatch(/exit(s)? 2/);
     expect(section).toMatch(/deliver/);
+    // A failed delivery leaves the relay open; the doc must not promise the
+    // reply arrives regardless.
+    expect(section).toMatch(/stays open/);
+    expect(section).not.toMatch(/reply still arrives/);
   });
 });
