@@ -82,6 +82,16 @@ export type AutoYesSuppressionReason =
    */
   | 'question-left-to-human'
   /**
+   * Issue #3822: a permission dialog is on the pane, and no single row of it
+   * reads as "allow this call once" (`polling/auto-yes-option-effect`): every
+   * row saves a rule (`don't ask again`, `always allow`, `Persist to
+   * settings.json`), changes the permission mode, or denies — or two rows read
+   * as once. Auto-Yes answers the allow-once row only, by its number, so
+   * nothing is sent. Returned by the resolver (the base rules, not the
+   * contract), and re-evaluated on every tick.
+   */
+  | 'allow-once-unidentified'
+  /**
    * Issue #3767: agy's approval dialog is on the pane but Auto-Yes has no
    * unused `PreToolUse` question to match it to (none ever, it appeared after
    * the window, it was already up, the hook stopped arriving, or — Issue #3789 —
@@ -95,7 +105,9 @@ export type AutoYesSuppressionReason =
 /**
  * Issue #3796: the reasons `resolveAutoAnswerWithPolicy` returns — the contract's
  * verdict on the prompt as it is NOW, which a later tick re-evaluates, as
- * opposed to a reason that remembers an event (`partial-answer`).
+ * opposed to a reason that remembers an event (`partial-answer`). Issue #3822
+ * adds the base rules' one withholding, `allow-once-unidentified`, for the same
+ * reason.
  */
 export const CONTRACT_SUPPRESSION_REASONS: ReadonlySet<AutoYesSuppressionReason> = new Set<AutoYesSuppressionReason>([
   'mode-off',
@@ -103,6 +115,9 @@ export const CONTRACT_SUPPRESSION_REASONS: ReadonlySet<AutoYesSuppressionReason>
   'deny-pattern-unusable',
   'type-not-allowed',
   'policy-lookup-failed',
+  // Issue #3822: not the contract's, but the same kind of verdict — on the
+  // prompt as it is now, from `resolveAutoAnswerWithPolicy`, re-evaluated later.
+  'allow-once-unidentified',
 ]);
 
 /** Issue #3822: the reason recorded when the contract lookup failed. */
@@ -119,6 +134,9 @@ export const QUESTION_CONFIRM_PAGE_SUPPRESSION_REASON = 'question-confirm-page' 
 
 /** Issue #3822: the reason the poller records over a question the tool asks the operator. */
 export const QUESTION_LEFT_TO_HUMAN_SUPPRESSION_REASON = 'question-left-to-human' satisfies AutoYesSuppressionReason;
+
+/** Issue #3822: the reason the resolver returns over a permission dialog with no single allow-once row. */
+export const ALLOW_ONCE_UNIDENTIFIED_SUPPRESSION_REASON = 'allow-once-unidentified' satisfies AutoYesSuppressionReason;
 
 /** Issue #3767: the reason the poller records over an agy dialog with no matching hook receipt. */
 export const NO_HOOK_RECEIPT_SUPPRESSION_REASON = 'no-hook-receipt' satisfies AutoYesSuppressionReason;

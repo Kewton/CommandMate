@@ -155,7 +155,7 @@ export function withheldAtSend(judged: JudgedPrompt, checkGrant: boolean): boole
   }
 
   const policy = getSessionAutoYesPolicy(worktreeId, cliToolId, instanceId, { fresh: true });
-  const resolution = resolveAutoAnswerWithPolicy(promptData, policy);
+  const resolution = resolveAutoAnswerWithPolicy(promptData, policy, cliToolId);
   if (resolution.suppressedBy) {
     const mode = policyLookupMode(policy);
     suppressAndWarnOnce(
@@ -198,7 +198,7 @@ export function resolveAnswerUnderPolicy(judged: JudgedPrompt): string | null {
   const { worktreeId, cliToolId, instanceId, promptData, frameKey } = judged;
   // Issue #3822: a failed lookup reaches the resolver as unknown and withholds.
   const policy = getSessionAutoYesPolicy(worktreeId, cliToolId, instanceId);
-  const resolution = resolveAutoAnswerWithPolicy(promptData, policy);
+  const resolution = resolveAutoAnswerWithPolicy(promptData, policy, cliToolId);
   if (resolution.suppressedBy) {
     const mode = policyLookupMode(policy);
     // Issue #1684: the log line alone leaves a CLI-driven pipeline blind to

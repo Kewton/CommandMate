@@ -404,7 +404,7 @@ async function tryEnterFallback(
 
   // 3. The contract policy, as step 4 reads it (Issue #3822: a failed lookup withholds).
   const policy = getSessionAutoYesPolicy(worktreeId, cliToolId, instanceId);
-  const resolution = resolveAutoAnswerWithPolicy(promptData, policy);
+  const resolution = resolveAutoAnswerWithPolicy(promptData, policy, cliToolId);
   if (resolution.suppressedBy) {
     pollerState.enterFallbackCandidateKey = null;
     const mode = policyLookupMode(policy);

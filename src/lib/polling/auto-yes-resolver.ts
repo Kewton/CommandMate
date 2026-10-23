@@ -8,6 +8,10 @@
  *   confirm is a separate row, so a default is half an answer)
  * - multiple_choice with default option -> default option number
  * - multiple_choice without default -> first option number
+ * - Issue #3822: a permission dialog (a row reads as one of the effects in
+ *   `auto-yes-option-effect`) -> the number of its one "allow this call once"
+ *   row, wherever the default is; withheld as `allow-once-unidentified` when
+ *   there is no such row or more than one
  * - option requiring text input -> null (skip)
  * - unknown type -> null (skip)
  *
@@ -24,10 +28,13 @@
 import { executeRegexWithTimeout, validateStopPattern } from '@/config/auto-yes-config';
 import type { PromptData, PromptType } from '@/types/models';
 import {
+  ALLOW_ONCE_UNIDENTIFIED_SUPPRESSION_REASON,
   POLICY_LOOKUP_FAILED_SUPPRESSION_REASON,
   type AutoYesSuppressionReason,
 } from './auto-yes-suppression-reason';
 import { isMultiSelectPrompt } from '@/lib/prompt-answer-semantic';
+import type { CLIToolType } from '@/lib/cli-tools/types';
+import { selectAllowOnceOption } from './auto-yes-option-effect';
 
 /** Auto-answer policy modes; mirrors AUTO_YES_MODES in lib/tasks/contract-parser. */
 export type AutoYesMode = 'off' | 'safe' | 'allow-listed';
@@ -88,7 +95,11 @@ export function policyLookupMode(policy: AutoYesPolicyLookup | undefined): AutoY
 export interface AutoYesResolution {
   /** The answer to send, or null when nothing should be sent. */
   answer: string | null;
-  /** Non-null only when the policy withheld an answer the base rules produced. */
+  /**
+   * Non-null only when an answer was withheld: by the policy, over an answer the
+   * base rules produced, or (Issue #3822) by the base rules themselves over a
+   * permission dialog with no single "allow this call once" row.
+   */
   suppressedBy: AutoYesSuppressionReason | null;
   /** The deny pattern responsible, for the escalation log. */
   pattern?: string;
@@ -111,10 +122,20 @@ export const MAX_DENY_PATTERN_LENGTH = 200;
  */
 export const MAX_DENY_MATCH_TEXT_LENGTH = 20_000;
 
-/** The pre-policy resolution: the rules as they were before Issue #1547. */
-function resolveBaseAnswer(promptData: PromptData): string | null {
+/** The base rules' verdict: an answer, or null with the reason when one was withheld. */
+interface BaseAnswer {
+  answer: string | null;
+  /** Issue #3822: set only when a permission dialog had no single allow-once row. */
+  withheldBy?: AutoYesSuppressionReason;
+}
+
+/**
+ * The pre-policy resolution: the rules as they were before Issue #1547, with
+ * the permission rows read by effect (Issue #3822).
+ */
+function resolveBaseAnswer(promptData: PromptData, cliToolId: CLIToolType | undefined): BaseAnswer {
   if (promptData.type === 'yes_no') {
-    return 'y';
+    return { answer: 'y' };
   }
 
   if (promptData.type === 'multiple_choice') {
@@ -126,24 +147,35 @@ function resolveBaseAnswer(promptData: PromptData): string | null {
     // / `[X]` / `[✔]`) is refused too — the sender answers such a list with
     // Space→Next→Enter, which would tick the default and submit the list.
     if (isMultiSelectPrompt(promptData)) {
-      return null;
+      return { answer: null };
     }
 
-    const defaultOpt = promptData.options.find(o => o.isDefault);
-    const target = defaultOpt ?? promptData.options[0];
+    // Issue #3822: on a permission dialog the default row may save a rule,
+    // change the mode or deny (agy keeps the cursor where it was left), so the
+    // answer is the one row that allows this call once, by its number — never
+    // whatever the cursor or row 1 happens to be.
+    const selection = selectAllowOnceOption(promptData.options, cliToolId);
+    if (selection.kind === 'unidentified') {
+      return { answer: null, withheldBy: ALLOW_ONCE_UNIDENTIFIED_SUPPRESSION_REASON };
+    }
+
+    const target =
+      selection.kind === 'allow-once'
+        ? selection.option
+        : promptData.options.find(o => o.isDefault) ?? promptData.options[0];
 
     if (!target) {
-      return null;
+      return { answer: null };
     }
 
     if (target.requiresTextInput) {
-      return null;
+      return { answer: null };
     }
 
-    return target.number.toString();
+    return { answer: target.number.toString() };
   }
 
-  return null;
+  return { answer: null };
 }
 
 /**
@@ -297,16 +329,27 @@ function evaluatePolicy(
  * `suppressedBy` is set only when an answer was actually withheld, so the
  * escalation log records real suppressions and not prompts the base rules were
  * never going to answer anyway (an empty option list, an option that needs
- * typing). Those still resolve to null, with `suppressedBy` null.
+ * typing). Those still resolve to null, with `suppressedBy` null. Issue #3822:
+ * a permission dialog with no single "allow this call once" row is a
+ * withholding (`allow-once-unidentified`) — it is a dialog Auto-Yes would have
+ * answered before, and the operator must be told why it stopped.
  *
  * @param promptData - Detected prompt
  * @param policy - Contract auto-answer policy; omit for the unconstrained behaviour
+ * @param cliToolId - The tool that drew the prompt, whose permission rows are
+ *   read (Issue #3822). Omitted, every measured tool's wording is read
+ *   (`auto-yes-option-effect`), so a caller that does not know the tool still
+ *   never picks a row that saves a rule or changes the mode.
  */
 export function resolveAutoAnswerWithPolicy(
   promptData: PromptData,
-  policy?: AutoYesPolicyLookup
+  policy?: AutoYesPolicyLookup,
+  cliToolId?: CLIToolType
 ): AutoYesResolution {
-  const answer = resolveBaseAnswer(promptData);
+  const { answer, withheldBy } = resolveBaseAnswer(promptData, cliToolId);
+  if (withheldBy) {
+    return { answer: null, suppressedBy: withheldBy };
+  }
   if (answer === null) {
     return { answer: null, suppressedBy: null };
   }
@@ -324,11 +367,13 @@ export function resolveAutoAnswerWithPolicy(
  *
  * @param promptData - Detected prompt
  * @param policy - Contract auto-answer policy; omit for the unconstrained behaviour
+ * @param cliToolId - The tool that drew the prompt; see {@link resolveAutoAnswerWithPolicy}
  * @returns The answer string to send, or null if auto-answer is not possible
  */
 export function resolveAutoAnswer(
   promptData: PromptData,
-  policy?: AutoYesPolicyLookup
+  policy?: AutoYesPolicyLookup,
+  cliToolId?: CLIToolType
 ): string | null {
-  return resolveAutoAnswerWithPolicy(promptData, policy).answer;
+  return resolveAutoAnswerWithPolicy(promptData, policy, cliToolId).answer;
 }

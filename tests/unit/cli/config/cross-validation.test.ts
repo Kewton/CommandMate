@@ -113,6 +113,8 @@ describe('[#1843] AutoYesSuppressionReason cross-validation', () => {
       'policy-lookup-failed',
       // Issue #3822: a question the agent asks, left to a human.
       'question-left-to-human',
+      // Issue #3822: a permission dialog with no single allow-once row.
+      'allow-once-unidentified',
     ];
     const fromServer: ServerSuppressionReason[] = knownToCli;
     expect(new Set(fromServer).size).toBe(knownToCli.length);
