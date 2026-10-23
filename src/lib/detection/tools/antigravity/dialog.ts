@@ -302,6 +302,13 @@ const NAVIGATE_FOOTER_PATTERN = /↑\/↓/;
 /** How far above the bottom option row the run down from `1.` may reach. */
 const OPTION_RUN_MAX_ROWS = 40;
 
+/**
+ * agy's permission-panel heading rows (`Requesting permission for:`, `Do you
+ * want to proceed?` — `antigravity-live-2364/dialog-bash-*.txt`, agy 1.1.27).
+ * Whole-row matches, so the same words inside a reply's sentence do not count.
+ */
+const PERMISSION_HEADING_PATTERN = /^\s*(?:Requesting permission for:|Do you want to proceed\?)\s*$/;
+
 /** The run of numbered options at the bottom of a frame, read upward from its last row. */
 interface BottomOptionRun {
   /** The rows of the frame, normalized. */
@@ -318,6 +325,8 @@ interface BottomOptionRun {
   readonly feedbackFooter: boolean;
   /** Whether a `↑/↓` footer piece is drawn under the run. */
   readonly navigateFooter: boolean;
+  /** Whether an agy permission heading sits above the run, inside the same panel. */
+  readonly permissionHeading: boolean;
 }
 
 /**
@@ -345,6 +354,7 @@ function readBottomOptionRun(text: string): BottomOptionRun | null {
   let lowest = bottom;
   let highlighted = bottomRow[1] !== undefined;
   let gap = false;
+  let top = last;
   const floor = Math.max(0, last - OPTION_RUN_MAX_ROWS);
   for (let i = last - 1; i >= floor && lowest > 1; i--) {
     const match = OPTION_ROW_PATTERN.exec(lines[i]);
@@ -356,7 +366,19 @@ function readBottomOptionRun(text: string): BottomOptionRun | null {
     if (number >= lowest) break;
     if (number !== lowest - 1) gap = true;
     lowest = number;
+    top = i;
     if (match[1] !== undefined) highlighted = true;
+  }
+
+  // The panel above the run: up to the boundary row that opens it (the `●`
+  // tool-call row, a rule, the previous turn's `>`), or as far as the run may reach.
+  let permissionHeading = false;
+  for (let i = top - 1; i >= Math.max(0, top - OPTION_RUN_MAX_ROWS); i--) {
+    if (ANTIGRAVITY_DIALOG_BOUNDARY_PATTERN.test(lines[i])) break;
+    if (PERMISSION_HEADING_PATTERN.test(lines[i])) {
+      permissionHeading = true;
+      break;
+    }
   }
 
   const below = lines.slice(last + 1).filter(row => row.trim() !== '');
@@ -368,6 +390,7 @@ function readBottomOptionRun(text: string): BottomOptionRun | null {
     highlighted,
     feedbackFooter: below.length > 0 && FEEDBACK_MENU_FOOTER_PATTERN.test(below[0]),
     navigateFooter: below.some(row => NAVIGATE_FOOTER_PATTERN.test(row)),
+    permissionHeading,
   };
 }
 
@@ -421,16 +444,19 @@ export function isAntigravityUnvouchedNumberedScreen(text: string): boolean {
  * - the `/feedback` menu (its `esc Cancel · 1-6 Select` footer directly under
  *   the last option), which #2364 left to the generic parser;
  * - a reply's numbered list (#1928's legacy reading): options `1.` … `N.`,
- *   consecutive with no number missing, none wearing agy's `>` cursor, and no
- *   `↑/↓` footer under them.
+ *   consecutive with no number missing, none wearing agy's `>` cursor, no
+ *   `↑/↓` footer under them, and no agy permission heading (`Requesting
+ *   permission for:` / `Do you want to proceed?`) above them in the same panel.
  *
  * Every other run of options numbered up to `N.` (N ≥ 2) is declined — not by
  * listing what is wrong with it, which is how #3808 left holes: a run with a
  * number missing (`> 1.` / `3.`, which the generic parser's single-gap
  * tolerance reads as a prompt), a run that does not reach `1.` (the cursor row
  * pushed off the top of the pane), a run under a `↑/↓` footer the reader would
- * not take (the login-method screen, a footer a narrow pane cut), and a run
- * wearing a cursor whose footer is below the pane.
+ * not take (the login-method screen, a footer a narrow pane cut), a run
+ * wearing a cursor whose footer is below the pane, and a permission dialog
+ * whose footer AND `>` row (option 3 or 4) are below the pane — its `1.` / `2.`
+ * rows wear no cursor, so only the heading above them tells it from a reply.
  *
  * False when the bottom option row is `1.` (a single `> 1. …` row — a sent
  * message echoed above the spinner — is not a run) or when a bare `>` composer
@@ -442,7 +468,8 @@ export function isAntigravityUnansweredNumberedScreen(text: string): boolean {
   const run = readBottomOptionRun(text);
   if (run === null || run.bottom < 2) return false;
   if (run.feedbackFooter) return false;
-  const replyList = run.lowest === 1 && !run.gap && !run.highlighted && !run.navigateFooter;
+  const replyList = run.lowest === 1 && !run.gap && !run.highlighted && !run.navigateFooter
+    && !run.permissionHeading;
   if (replyList) return false;
   return readAntigravityNumberedDialog(run.lines) === null;
 }

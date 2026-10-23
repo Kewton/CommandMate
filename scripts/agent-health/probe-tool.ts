@@ -43,6 +43,7 @@ import {
   countMatches,
   evaluatePickerScreens,
   evaluateScreen,
+  readsAsAutoYesPrompt,
   screenExpectationHolds,
   type PickerScreenResult,
   type ScreenCheckId,
@@ -138,6 +139,21 @@ export async function readVersion(
   } catch (error) {
     return { version: null, error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+/**
+ * The `isPrompt` a settled picker frame is judged by (Issue #3053): what
+ * Auto-Yes reads it as. agy goes through the Auto-Yes entry (#3818,
+ * `readsAsAutoYesPrompt`); every other tool keeps `detectPrompt` over the
+ * ANSI- and box-stripped frame, as before.
+ */
+export function pickerReadsAsPrompt(
+  cliToolId: ToolProbeSpec['cliToolId'],
+  settled: { frame: string; clean: string }
+): boolean {
+  return readsAsAutoYesPrompt(cliToolId, settled.clean, settled.frame, () =>
+    detectPrompt(stripBoxDrawing(settled.clean), buildDetectPromptOptions(cliToolId)).isPrompt
+  );
 }
 
 class DeadlineExceeded extends Error {}
@@ -340,10 +356,7 @@ class ToolSession {
     if (opened) {
       await sleep(700);
       const settled = await this.look();
-      const isPrompt = detectPrompt(
-        stripBoxDrawing(settled.clean),
-        buildDetectPromptOptions(this.spec.cliToolId)
-      ).isPrompt;
+      const isPrompt = pickerReadsAsPrompt(this.spec.cliToolId, settled);
       seen = { frame: settled.frame, verdict: { ...settled.verdict, isPrompt } };
     }
     const frame = seen?.frame ?? this.lastFrame;

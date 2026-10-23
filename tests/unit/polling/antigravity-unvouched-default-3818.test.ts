@@ -279,6 +279,77 @@ describe('[#3818] numbered agy screens nothing vouches for get no answer (negati
   });
 });
 
+/**
+ * The cursor below what the pane shows (#3818 review): the footer is off the
+ * pane and so is the `>` row (option 3 or 4), so the rows left — `1.`, `2.`
+ * (`3.`), none wearing `>` — have the shape of a reply's list. What tells them
+ * apart is agy's permission heading above them.
+ */
+const CURSOR_BELOW: ReadonlyArray<readonly [string, () => string]> = [
+  ['dialog-bash-oneline, `>` on 4, cut after option 3', () => cursorOnFourCutAfter(3)],
+  ['dialog-bash-oneline, `>` on 4, cut after option 2', () => cursorOnFourCutAfter(2)],
+  ['dialog-bash-wrapped-highlight-4, cut after option 2', () => {
+    const raw = read('antigravity-live-2364/dialog-bash-wrapped-highlight-4.txt');
+    const rows = raw.split('\n');
+    return writeVariant('highlight-4-cut-after-2', rows.slice(0, rowOf(rows, /^\s*3\.\s/)).join('\n'));
+  }],
+];
+
+function writeVariant(name: string, edited: string): string {
+  const file = path.join(tmp, `${name}.txt`);
+  writeFileSync(file, edited);
+  return readFileSync(file, 'utf8');
+}
+
+/** dialog-bash-oneline with the `>` moved from option 1 to option 4, then the rows from `next.` down dropped. */
+function cursorOnFourCutAfter(last: number): string {
+  const rows = PERMISSION.split('\n');
+  const one = rowOf(rows, /^\s*>\s*1\.\s/);
+  const four = rowOf(rows, /^\s*4\.\s/);
+  const moved = rows.map((row, i) =>
+    i === one ? row.replace('> 1.', '  1.') : i === four ? row.replace('  4.', '> 4.') : row);
+  if (moved[one] === rows[one] || moved[four] === rows[four]) throw new Error('the cursor did not move');
+  const cut = rowOf(moved, new RegExp(`^\\s*>?\\s*${last + 1}\\.\\s`));
+  return writeVariant(`cursor-4-cut-after-${last}`, moved.slice(0, cut).join('\n'));
+}
+
+describe('[#3818] the cursor below the visible options: no answer (negative)', () => {
+  it.each(CURSOR_BELOW)('%s: no `>` and no footer are left on screen', (_label, make) => {
+    const clean = asPollerSees(make());
+    expect(clean).not.toMatch(/^\s*>\s*\d+\./m);
+    expect(clean).not.toContain('↑/↓');
+    expect(isAntigravityUnansweredNumberedScreen(clean)).toBe(true);
+  });
+
+  it.each(CURSOR_BELOW)('%s: the shared entry reads no prompt', (_label, make) => {
+    const raw = make();
+    const clean = asPollerSees(raw);
+    const result = detectPromptOnCleanFrame(clean, 'antigravity', clean.split('\n'), raw);
+    expect(result.isPrompt).toBe(false);
+    expect(result.promptData).toBeUndefined();
+  });
+
+  it.each(CURSOR_BELOW)('%s: /prompt-response refuses and sends no key', async (_label, make) => {
+    const { status, body } = await respond(make());
+    expect(status).toBe(200);
+    expect(body).toEqual({ success: false, reason: 'prompt_no_longer_active', answer: '1' });
+    expect(sendPromptAnswer).not.toHaveBeenCalled();
+  });
+
+  it.each(CURSOR_BELOW)('%s: the Auto-Yes poller sends nothing', async (_label, make) => {
+    expect(await autoYes(make())).toBe('no_prompt');
+    expect(sendPromptAnswer).not.toHaveBeenCalled();
+  });
+
+  it('a reply list with no permission heading above it is still answered (control)', () => {
+    const reply = ['  Here are the options:', '', '  1. Keep the branch', '  2. Rebase onto develop', '', '  Which one?'].join('\n');
+    expect(isAntigravityUnansweredNumberedScreen(reply)).toBe(false);
+    expect(detectPromptOnCleanFrame(reply, 'antigravity').isPrompt).toBe(
+      detectPrompt(reply, buildDetectPromptOptions('antigravity')).isPrompt,
+    );
+  });
+});
+
 describe('[#3818] screens that are vouched for are still answered (positive)', () => {
   it.each([
     'antigravity-live-2364/dialog-bash-oneline.txt',
