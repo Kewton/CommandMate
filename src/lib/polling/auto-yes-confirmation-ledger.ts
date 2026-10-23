@@ -405,6 +405,7 @@ function closeEntry(state: LedgerState, entry: LedgerEntry, now: number, how: Cl
   if (entry.decisionKey !== undefined) state.apiDecisions.delete(entry.decisionKey);
 }
 
+/** Open a confirmation and write its `opened` line; the caller indexes it. */
 function openEntry(
   state: LedgerState,
   scope: LedgerScope,
