@@ -21,8 +21,10 @@
  * ## The poller still notifies, and that is deliberate
  *
  * Contrary to the Issue's premise, the edge is *not* observed by a background
- * process: `observeWaitingEdge`'s only caller is `worktree-status-helper`, on
- * the worktree list / detail API probe. So the edge fires when a client is
+ * process: when #1790 was written, `observeWaitingEdge`'s only caller was
+ * `worktree-status-helper`, on the worktree list / detail API probe (Issue
+ * #3798 added the agent's own turn transitions as closers, not as openers). So
+ * the edge fires when a client is
  * looking, and moving push onto it *alone* would have swapped one blind spot
  * (no poller) for a worse one (nobody has the app open — the very situation a
  * phone notification is for). The poller therefore keeps its call, and

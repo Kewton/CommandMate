@@ -151,6 +151,7 @@ export interface WaitingEpisode {
   episodeId: WaitingEpisodeId;
   since: number;                  // 表示・経過時間用。同一性に使わない
   openedAt: number;               // 区間を開いた（replaced で置いた）時刻。フレームの新旧の比較用（R3-1）
+  boundAt: number;                // 最後に binding が変わった時刻（開いたときは openedAt と同じ。rebind で更新。最終レビュー P3-1）
   kind: WaitingKind | null;
   binding: EpisodeBinding;
   openedBy: WaitingObserver;
@@ -286,7 +287,7 @@ export function settleLegacyStop(worktreeId, cliToolId, instanceId, target: Lega
 ### 2.3 不変条件
 
 - **I1** 1 インスタンスに開いている区間は高々 1 つ。区間 ID は再利用しない
-- **I2** `episodeId`・`since`・`openedAt` は開いてから閉じるまで変わらない。変わるのは `kind` と `binding` だけ
+- **I2** `episodeId`・`since`・`openedAt` は開いてから閉じるまで変わらない。変わるのは `kind` と `binding`（と、binding に付く `boundAt`）だけ
 - **I3** rebind は edge を出さない。hold・dedup・reminder は区間 ID に付くので、rebind で延びも縮みもしない
 - **I4** `closed` の edge は「その区間が終わった」ことだけを言う。置き換えは `replaced` を 1 回だけ出す
 - **I5** 区間を開く・閉じる・置き換える・rebind するのは次のどれかの同期区間だけ:
@@ -365,7 +366,7 @@ export function settleLegacyStop(worktreeId, cliToolId, instanceId, target: Lega
 | T21 | `none` | － | － | － | － | － | － | － | － | － |
 
 - ※1 B の X は今作られた turn N なので、遷移の前に `turn(N)` の区間は存在しない（turnId は単調な連番: `agent-event-turn.ts:144-147`）。状態を変えない
-- ※2 T2 の F: `unattributed` の区間を開いた後で dialog だけの記録 R ができた（scraper が先に読んだ確認に hook が追いついた）。T15 で `dialog-only(R)` に付いているのが普通だが、`decision-opened` の outcome を取りこぼしても同じ待ちとして付ける
+- ※2 T2 の F は `lastClosedTurnId` が dialog だけの記録 R そのもののときだけ当たる（R の decision が期限切れで表示だけと同じ形のときに開いた `unattributed` の区間が、その後 R に decision が戻った場合）。「`unattributed` の区間を開いた後で dialog だけの記録 R ができた」形（scraper が先に読んだ確認に hook が追いついた）は、区間の `lastClosedTurnId` が R より前の turn P なので F ではなく G に当たり、T2 では `閉 superseded` になる。この形は T15（`decision-opened`）で `dialog-only(R)` に付け替えておくことで T2 の D に入る。T15 の outcome は `decision-opened` を出す 3 経路すべてが出すので、取りこぼしは `applyTurnOutcomesToEpisode` が throw した場合だけ（最終レビュー P3-3）
 - ※5 T1・T5・T9 の `previous` は dialog だけ／表示だけの記録ではないので、列 D に当たる区間は無い（`dialog-only` の区間はすべて列 E）。状態を変えない
 - T1・T3 の F の rebind は「確認が turn より先に来た」形（agy の最初のツールの確認、開始 hook の遅れ）だけ。`lastClosedTurnId` の一致と、開いた event が `post_tool_use`/`pre_tool_use` であることが条件（R2-4）
 - T4 は `user_prompt_submit` で区間を閉じる（turn model もこのとき decision を全部捨てる）
@@ -393,7 +394,11 @@ export function settleLegacyStop(worktreeId, cliToolId, instanceId, target: Lega
 | `unattributed` | c=unattributed: kept（ただし `freshPrompt` かつ `lastAnswer.episodeId`=今の ID かつ `k`≠null かつ `k`≠`lastAnswer.screenKey` なら replaced）。c=dialog-only(R): 付 dialog-only(R)。c=turn(N): `k`≠null かつ `k`=区間の `promptScreenKey` なら 付 turn(N)、それ以外は replaced（R2-4） | 付 screen(origin null) |
 | `screen(origin O)` | c=turn(O): 付 turn(O)。それ以外: replaced | kept |
 
-（`c` の値は turn / dialog-only / unattributed の 3 種で、表の各セルはこの 3 種すべてを書いた。前提 1 で世代の違う区間は来ない。）
+（`c` の値は turn / dialog-only / unattributed の 3 種で、表の各セルはこの 3 種すべてを書いた。前提 1 が比べるのは**観測の開始時点の世代と今の世代**で、区間の `binding.generation` ではない。区間の `binding.generation` が今と違う（世代更新の適用を取りこぼした、T20 で付け替えた後にさらに世代が変わった等）ときは下の行で扱う。最終レビュー P3-2）
+
+| 開いている区間 | humanHeld=false | humanHeld=true |
+|---|---|---|
+| `binding.generation` が今と違う（種類を問わない） | replaced（binding=c） | replaced（screen） |
 
 **表 O-2: 読みが `not-waiting`・`gone`・`unknown`（閉じる側。開いている区間の binding を問わない: R3-5）**
 
@@ -401,7 +406,7 @@ export function settleLegacyStop(worktreeId, cliToolId, instanceId, target: Lega
 |---|---|---|---|
 | status-helper | 閉 screen-cleared | 閉 session-gone | ignored（status-helper は capture 失敗を従来どおり `not-waiting` として渡す: §9） |
 | response-checker（C2） | 閉 response-recorded | 閉 session-gone | ignored |
-| Auto-Yes poller | 区間が `screen` なら、`frameCapturedAt > 区間の openedAt` のとき 閉 screen-cleared（R3-1）。`screen` 以外なら、`lastAnswer.episodeId` が今の ID のとき 閉 poller-answered（PR 3。それまでは ignored）。どちらでもなければ ignored | 閉 session-gone | ignored |
+| Auto-Yes poller | 区間が `screen` なら、`frameCapturedAt > max(区間の openedAt, boundAt)` のとき 閉 screen-cleared（R3-1、最終レビュー P3-1: screen へ付け替えた後のフレームでなければ閉じない）。`screen` 以外なら、`lastAnswer.episodeId` が今の ID のとき 閉 poller-answered（PR 3。それまでは ignored）。どちらでもなければ ignored | 閉 session-gone | ignored |
 | 区間なし（どの観測者でも） | ignored | ignored | ignored |
 
 どのセルも前提 2（版の照合）を通ったときだけ動く。Auto-Yes poller が `screen` 以外の区間を自分の答え無しに閉じないのは Issue の規則 3（「poller がその区間に答えたときだけ」）による。人が答えた `screen` 以外の区間は stop（T 表）か status-helper が閉じる。
@@ -517,9 +522,9 @@ export function settleLegacyStop(worktreeId, cliToolId, instanceId, target: Lega
 ### 3.3 表の網羅の確かめ方
 
 - **T 表**: 行は `TurnTransitionOutcome` の 12 種を `previous`・`event`・`source`・`remaining` で分けた 21 行。列は区間の状態の 9 種（なし／turn の一致・不一致／dialog-only の一致・不一致／unattributed の一致・不一致／screen／世代違い）。21×9＝189 セルにすべて動作（閉・付・－）を書いた。「－※1」「－※5」は存在しない組み合わせで、来たら既定（状態を変えない＋warn）
-- **表 O-1**: 区間の状態 6 種 × humanHeld 2 種＝12 セル。humanHeld=false のセルは `c` の 3 種（turn / dialog-only / unattributed）すべてを書いた。世代違いは前提 1 で先に落ちる
+- **表 O-1**: 区間の状態 7 種（世代違いの行を含む）× humanHeld 2 種＝14 セル。humanHeld=false のセルは `c` の 3 種（turn / dialog-only / unattributed）すべてを書いた。前提 1 は観測の開始時点の世代を比べるもので、区間の世代違いは O-1 の行で扱う（テスト U に「世代違いの区間 × O-1」のケースを入れる）
 - **表 O-2**: 観測者 3 種 × 読み 3 種、と「区間なし」。binding で分けないので当たらない区間は無い
-- 実装の段では、表をそのまま列挙したテーブル駆動のテスト（§6 の各 PR の `…-table-3798.test.ts`）で 189＋12×3＋12 のケースを回す
+- 実装の段では、表をそのまま列挙したテーブル駆動のテスト（§6 の各 PR の `…-table-3798.test.ts`）で 189＋14×3＋12 のケースを回す
 
 ---
 
@@ -630,6 +635,16 @@ export function settleLegacyStop(worktreeId, cliToolId, instanceId, target: Lega
 - 区間に足すのは欄と閉じる経路だけで、既存の `observeWaitingEdge` の戻り値・edge の形（`waiting`・`since`・`kind`）は変わらない。新しい欄（`cause` 等）を読む購読者はまだ無い
 - `replaced` はこの PR では出ない（観測の照合は 1b）。push 側は since のまま動き、区間が閉じたときの解除通知の動きは今と同じ
 - 後退は §6.0 の 1 件（survey）と、解除が新しいカードを消す形が増えること。どちらも同じ run の 1b・2 で閉じる
+
+**(4) 実装で設計から変えたこと（PR 1a の実装時に確定）**
+
+既存テストの期待値を変えないために、型の置き場所を次のように変えた。規則の表・同期区間の境界・不変条件は変えていない。
+- `getWaitingEpisode()` は `{ since, kind }` のまま返す（`tests/unit/session/waiting-episode-1786.test.ts` が `toEqual` で比べる）。`episodeId`・`binding`・`openedAt`・`boundAt`・`openedBy`・`promptScreenKey` は `getWaitingEpisodeRecord()` で読む。区間の付帯情報は store の区間オブジェクトを鍵にした WeakMap に置く（map を直接書き換えるテストがあるため、付帯情報の無い区間は読んだ時点で `unattributed` として扱う）
+- `onWaitingTransition` の遷移は 7 つの欄のまま（同テストが `toEqual` で比べる）。`cause`・`episodeId`・`previousEpisodeId`・`closeReason` を足した遷移は、新しい購読 `onWaitingEpisodeTransition` で配る。`replaced` は既存の購読者には `waiting: true` の 1 回の edge として届く
+- `recordAgentEvent` の戻り値は `{ recorded: true }` のまま（`tests/unit/session/turn-model.test.ts`・`late-session-start-1903.test.ts` が `toEqual` で比べる）。遷移の結果と区間への作用は `recordAgentEvent` の中で `applyTurnOutcomesToEpisode` に渡し、閉じたことは `waiting-episode-binding` が `waiting-episode-closed-by-turn` の info ログで出す。そのため `agent-event-stop-applied` に `episodeEffect` は足さず、`src/app/api/hooks/agent-event/route.ts` と `src/lib/hooks/agent-event-intake.ts` は変更しなかった
+- `joinOpenTurnFromDuplicate` は真偽値のまま（`agent-event-state` が同じ関数を再 export していることをテストが確かめる）。復元の結果（`restored`）は、`waiting-episode-binding` が globalThis 経由で登録する outcome sink に turn model から渡す
+- claude-done の tool id は `src/lib/hooks/sources/claude/tool-id.ts` の `CLAUDE_CLI_TOOL_ID` を使う（`'claude'` の文字列を新しく書かない）
+- PR 1a の間の既知の動き: `screen` の binding を作る観測は PR 1b なので、起動直後の信頼確認などの区間も `session-start` の世代更新（T20）で閉じる。画面に残っていれば次の観測（status の問い合わせ・応答 poller）が新しい区間として開き直す（通知がもう 1 回出うる）。§6.0 の同じリリースの約束で 1b と一緒に出す
 
 ### 6.2 PR 2: push 側を区間 ID で照合
 
@@ -818,6 +833,14 @@ export function settleLegacyStop(worktreeId, cliToolId, instanceId, target: Lega
 | 7 1a だけでリリースが切られる | P3 | 正しい（develop からいつでも /release できる） | 採用。1 回の run で続けてマージ、Issue のチェックリスト、/release 前の確認コマンド、断片を 1 本で育てる | 6.0 |
 
 ---
+
+### 最終レビュー（P3 3 件。PR 1a の契約で反映）
+
+| 指摘 | 処置 | 反映した節 |
+|---|---|---|
+| P3-1 poller が screen を閉じる条件に、最後に binding が変わった時刻を入れる | 採用。区間に `boundAt` を持たせ、条件を `frameCapturedAt > max(openedAt, boundAt)` にした。PR 1a では `boundAt` を持たせるところまで（閉じる側は PR 1b） | 2.2、I2、表 O-2 |
+| P3-2 「世代違いは前提 1 で先に落ちる」は誤り | 採用。前提 1 は観測の開始時点の世代を比べるもので、区間の `binding.generation` ではない。O-1 に「世代違いの区間」の行（replaced）を足し、テスト U にそのケースを入れる（観測の表のテストは PR 1b） | 表 O-1 の注、3.3 |
+| P3-3 T2 の F の説明 | 採用。`unattributed` の区間を開いた後に dialog だけの記録ができた形は `lastClosedTurnId` が前の turn なので G（閉 superseded）に当たる。T15 で先に付け替えるので取りこぼしは throw のときだけ、と書き直した | ※2 |
 
 ## 11. 実装に進むときに実機で確かめること
 
