@@ -34,6 +34,13 @@ vi.mock('../../../../src/cli/utils/process-inspect', () => ({
   isExitedState: (state: string) => state === 'Z' || state === 'X',
   describeListeners: vi.fn(() => null),
 }));
+// Issue #3752: under the full fs mock the real config dir cannot be resolved, which made the
+// daemon fall back to 'ignore' silently. Give the log path a directory so both outcomes
+// (log opened / log not openable) are decided by the fs mocks alone.
+vi.mock('../../../../src/cli/utils/install-context', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../../src/cli/utils/install-context')>()),
+  getConfigDir: vi.fn(() => '/mock/home/.commandmate'),
+}));
 vi.mock('../../../../src/cli/utils/env-setup', () => ({
   getEnvPath: vi.fn(() => '/mock/home/.commandmate/.env'),
   getPidFilePath: vi.fn(() => '/mock/home/.commandmate/.commandmate.pid'),
@@ -173,6 +180,11 @@ describe('startCommand', () => {
       };
       vi.mocked(childProcess.spawn).mockReturnValue(mockChild as unknown as childProcess.ChildProcess);
 
+      // Issue #3752: the log cannot be opened here, so the server output is discarded.
+      vi.mocked(fs.mkdirSync).mockImplementation(() => {
+        throw new Error('EACCES');
+      });
+
       await startCommand({ daemon: true });
 
       expect(childProcess.spawn).toHaveBeenCalledWith(
@@ -185,6 +197,30 @@ describe('startCommand', () => {
       );
       expect(mockChild.unref).toHaveBeenCalled();
       expect(mockExit).toHaveBeenCalledWith(ExitCode.SUCCESS);
+    });
+
+    it('should hand the server log descriptor to the daemon when the log opens (Issue #3752)', async () => {
+      vi.mocked(fs.existsSync).mockImplementation((path) => typeof path === 'string' && path.endsWith('.env'));
+      vi.mocked(fs.mkdirSync).mockReset();
+      vi.mocked(fs.lstatSync).mockImplementation(() => {
+        const err = new Error('ENOENT') as NodeJS.ErrnoException;
+        err.code = 'ENOENT';
+        throw err;
+      });
+      vi.mocked(fs.openSync).mockReturnValue(3);
+      vi.mocked(fs.writeSync).mockReturnValue(5);
+      vi.mocked(fs.closeSync).mockReturnValue(undefined);
+      const mockChild = { pid: 12345, unref: vi.fn(), on: vi.fn() };
+      vi.mocked(childProcess.spawn).mockReturnValue(mockChild as unknown as childProcess.ChildProcess);
+
+      await startCommand({ daemon: true });
+
+      expect(childProcess.spawn).toHaveBeenCalledWith(
+        'npm',
+        expect.any(Array),
+        expect.objectContaining({ detached: true, stdio: ['ignore', 3, 3] })
+      );
+      expect(fs.closeSync).toHaveBeenCalledWith(3);
     });
 
     it('should fail when already running', async () => {
