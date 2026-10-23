@@ -43,6 +43,22 @@ export interface AutoYesPolicySuppression {
 }
 
 /**
+ * A suppression record that may name the waiting episode the withheld prompt
+ * belonged to (Issue #3798). Present, the push gate matches the record to a
+ * wait by this id rather than by `at >= waitingSince`; absent — every record
+ * written before the poller learns the id — the time comparison applies.
+ *
+ * Kept beside {@link AutoYesPolicySuppression} rather than in it: that
+ * interface is the shape `current-output` publishes, and its key set is held
+ * equal to the CLI's copy (`src/cli/types/api-responses.ts`,
+ * `tests/unit/cli/types/last-suppression-mirror-3822.test.ts`). The id joins
+ * the published shape together with its writer and the CLI side.
+ */
+export interface EpisodeScopedPolicySuppression extends AutoYesPolicySuppression {
+  episodeId?: string;
+}
+
+/**
  * Reached through `globalThis` for the same reason `agent-event-state` is
  * (Issue #1736): the writer and the reader are different route handlers, and
  * under `next dev` each one is bundled separately and would hold its own copy
