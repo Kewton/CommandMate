@@ -128,49 +128,6 @@ export class PidPathResolver implements ResourcePathResolver {
 }
 
 /**
- * Log file path resolver
- *
- * @example
- * ```typescript
- * const resolver = new LogPathResolver();
- * resolver.resolve(); // ~/.commandmate/logs/commandmate.log
- * resolver.resolve(135); // ~/.commandmate/logs/commandmate-135.log
- * ```
- */
-export class LogPathResolver implements ResourcePathResolver {
-  resolve(issueNo?: number): string {
-    const configDir = getConfigDir();
-    const logsDir = path.join(configDir, 'logs');
-    if (issueNo !== undefined) {
-      return path.join(logsDir, `commandmate-${issueNo}.log`);
-    }
-    return path.join(logsDir, 'commandmate.log');
-  }
-
-  validate(targetPath: string): boolean {
-    const configDir = getConfigDir();
-    const logsDir = path.join(configDir, 'logs');
-
-    // SF-SEC-001: try-catch for TOCTOU protection
-    try {
-      const resolved = realpathSync(targetPath);
-      return resolved.startsWith(logsDir);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        // New file - validate logs directory exists within config
-        try {
-          const resolvedLogsDir = realpathSync(logsDir);
-          return resolvedLogsDir.startsWith(configDir);
-        } catch {
-          return false;
-        }
-      }
-      return false;
-    }
-  }
-}
-
-/**
  * Factory function for DbPathResolver
  */
 export function createDbPathResolver(): DbPathResolver {
@@ -182,11 +139,4 @@ export function createDbPathResolver(): DbPathResolver {
  */
 export function createPidPathResolver(): PidPathResolver {
   return new PidPathResolver();
-}
-
-/**
- * Factory function for LogPathResolver
- */
-export function createLogPathResolver(): LogPathResolver {
-  return new LogPathResolver();
 }

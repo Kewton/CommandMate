@@ -156,6 +156,9 @@ rotate_logs() {
 
     # Move current to .1
     mv "$LOG_FILE" "${LOG_FILE}.1"
+    for rotated in "${LOG_FILE}".[0-9]*; do
+        [ -f "$rotated" ] && [ ! -L "$rotated" ] && chmod 600 "$rotated" 2>/dev/null
+    done
 
     echo "Log rotated: ${LOG_FILE} -> ${LOG_FILE}.1"
 }
@@ -250,13 +253,15 @@ if [ "$1" = "--daemon" ] || [ "$1" = "-d" ]; then
     echo "=== Starting production server in background ==="
 
     # Start server in background with nohup
+    # [S4-005] Create the log owner-only up front (0600, as the CLI does), not 0640 after the fact
+    [ -e "$LOG_FILE" ] || (umask 077; : > "$LOG_FILE")
     nohup npm start >> "$LOG_FILE" 2>&1 &
     SERVER_PID=$!
     echo $SERVER_PID > "$PID_FILE" && chmod 600 "$PID_FILE"  # [S4-003]
 
     # Wait a moment for nohup to create the log file, then set permissions
     sleep 1
-    chmod 640 "$LOG_FILE" 2>/dev/null || true  # [S4-005]
+    chmod 600 "$LOG_FILE" 2>/dev/null || true  # [S4-005] same 0600 as the CLI daemon log
 
     # Wait a moment and check if server started
     sleep 3

@@ -20,12 +20,13 @@
  */
 
 import { spawn } from 'child_process';
-import { closeSync, openSync } from 'fs';
+import { closeSync } from 'fs';
 import { join } from 'path';
 import { NextResponse } from 'next/server';
 // Cross-layer import from the CLI utils, matching the update-check route [CONS-001].
 import { ensureConfigDir, isGlobalInstall, isNpxExecution } from '@/cli/utils/install-context';
 import { getDaemonManagerFactory } from '@/cli/utils/daemon-factory';
+import { openServerLog } from '@/cli/utils/daemon';
 import { acquireUpdateLock, releaseUpdateLock } from '@/lib/app-update/update-lock';
 import { checkNpmHasNewerVersion } from '@/lib/app-update/npm-publish-check';
 import { getCurrentVersion } from '@/lib/version-checker';
@@ -145,7 +146,8 @@ function spawnUpdate(logPath: string, relaunchNpx: boolean): void {
   const binPath = join(process.cwd(), 'bin', 'commandmate.js');
   const stableCwd = ensureConfigDir();
 
-  const logFd = openSync(logPath, 'a');
+  // Issue #3752: same owner-only (0600), size-rotated log handling as the daemon's server log.
+  const logFd = openServerLog(logPath);
   try {
     const child = spawn(
       process.execPath,

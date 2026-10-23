@@ -872,7 +872,10 @@ function settleFailedTick(
     logger.info('poller:auto-yes-answer-abandoned', { worktreeId, cliToolId, instanceId, keysSent });
     return 'no_answer';
   }
-  if (attempt !== null) settleSendAttempt(attempt, false);
+  // Issue #3839: a failure with keys already on the pane is held the same way —
+  // the next tick must not type the answer again over them (step 2.5); the
+  // screen leaving or changing forgets it (`forgetPartialAnswer`).
+  if (attempt !== null) settleSendAttempt(attempt, keysSent === true);
   if (sendInFlight) noteAnswerSent(cliToolId, worktreeId, instanceId, true, receiptEpisode);
   incrementErrorCount(compositeKey, generation?.pollerState);
   logger.warn('poller:detect-respond-error', { worktreeId, cliToolId, instanceId });
