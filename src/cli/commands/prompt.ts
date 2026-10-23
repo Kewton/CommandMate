@@ -143,9 +143,11 @@ function formatAutoYesLines(autoYes: PromptObservation['autoYes']): string[] {
   const evaluationDetail =
     evaluation.state === 'policy-withholds'
       ? `policy-withholds reason=${evaluation.reason}${evaluation.pattern !== undefined ? ` pattern=${JSON.stringify(evaluation.pattern)}` : ''}`
-      : evaluation.state === 'not-evaluated'
-        ? `not-evaluated (${evaluation.because})`
-        : evaluation.state;
+      : evaluation.state === 'base-withholds'
+        ? `base-withholds reason=${evaluation.reason}`
+        : evaluation.state === 'not-evaluated'
+          ? `not-evaluated (${evaluation.because})`
+          : evaluation.state;
   lines.push(
     `  contract re-evaluation: ${evaluationDetail}` +
       (evaluation.contract ? ` (task ${evaluation.contract.taskId ?? 'unknown'}, mode=${evaluation.contract.mode ?? 'none'})` : ' (no contract)'),
