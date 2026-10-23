@@ -14,6 +14,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as childProcess from 'child_process';
 import {
   chmodSync,
+  closeSync,
   existsSync,
   fstatSync,
   lstatSync,
@@ -24,6 +25,7 @@ import {
   statSync,
   symlinkSync,
   writeFileSync,
+  writeSync,
 } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -72,7 +74,7 @@ vi.mock('../../../../src/cli/utils/logger', () => ({
   },
 }));
 
-import { DaemonManager, rotateServerLog } from '../../../../src/cli/utils/daemon';
+import { DaemonManager, openServerLog, rotateServerLog } from '../../../../src/cli/utils/daemon';
 import { getServerLogPath } from '../../../../src/cli/utils/paths';
 import { DaemonManagerFactory } from '../../../../src/cli/utils/daemon-factory';
 
@@ -324,6 +326,41 @@ describe('DaemonManager server log (Issue #3731)', () => {
 
       expect(() => rotateServerLog(logPath, 10, 3)).toThrow(/symbolic link/);
       expect(lstatSync(logPath).isSymbolicLink()).toBe(true);
+    });
+  });
+
+  describe('openServerLog (also the GUI update log, Issue #3752)', () => {
+    it('creates the log owner-only (0600) inside a new directory', () => {
+      const logPath = join(ctx.configDir, 'nested', 'update.log');
+      const fd = openServerLog(logPath);
+      closeSync(fd);
+
+      expect(statSync(logPath).mode & 0o777).toBe(0o600);
+    });
+
+    it('tightens an existing 0644 log and appends to it', () => {
+      const logPath = join(ctx.configDir, 'update.log');
+      writeFileSync(logPath, 'old\n', { mode: 0o644 });
+      chmodSync(logPath, 0o644);
+
+      const fd = openServerLog(logPath);
+      writeSync(fd, 'new\n');
+      closeSync(fd);
+
+      expect(statSync(logPath).mode & 0o777).toBe(0o600);
+      expect(readFileSync(logPath, 'utf-8')).toBe('old\nnew\n');
+    });
+
+    it('rotates a log at the size limit into 0600 generations', () => {
+      const logPath = join(ctx.configDir, 'update.log');
+      writeFileSync(logPath, Buffer.alloc(10 * 1024 * 1024), { mode: 0o644 });
+      chmodSync(logPath, 0o644);
+
+      closeSync(openServerLog(logPath));
+
+      expect(statSync(`${logPath}.1`).size).toBe(10 * 1024 * 1024);
+      expect(statSync(`${logPath}.1`).mode & 0o777).toBe(0o600);
+      expect(statSync(logPath).size).toBe(0);
     });
   });
 });

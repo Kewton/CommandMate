@@ -146,7 +146,7 @@ describe('Issue #2132: the daemon path keeps build-and-start.sh’s guarantees',
   });
 
   it('restricts the log file [S4-005] and refuses to rotate a symlink [S4-006]', () => {
-    expect(source).toContain('chmod 640 "$LOG_FILE"');
+    expect(source).toContain('chmod 600 "$LOG_FILE"');
     expect(source).toContain('[S4-006]');
   });
 
