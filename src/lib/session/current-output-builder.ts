@@ -56,11 +56,10 @@ import {
   buildCompositeKey,
 } from '@/lib/polling/auto-yes-manager';
 import { getLastPolicySuppression } from '@/lib/polling/auto-yes-suppression-state';
-import {
-  getLastEnterFallback,
-  publishEnterFallback,
-  type AutoYesEnterFallbackPublished,
-} from '@/lib/polling/auto-yes-enter-fallback';
+import type { AutoYesEnterFallbackPublished } from '@/lib/polling/auto-yes-enter-fallback';
+import { publishAutoYesDecision } from '@/lib/polling/auto-yes-decision-state';
+import { getAntigravityAcceptedReceiptCallId } from '@/lib/polling/antigravity-receipt-episodes';
+import type { AutoYesDecisionPublished } from '@/types/auto-yes-decision';
 import { getPromptDedupSkips } from '@/lib/polling/prompt-dedup-state';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
 import { CACHE_MAX_CAPTURE_LINES, isCaptureWindowSaturated } from '@/lib/tmux/tmux-capture-cache';
@@ -665,6 +664,18 @@ function logDetectionDivergence(
   }
 }
 
+/**
+ * Issue #3821: the agy hook call the receipt on screen was accepted for, for
+ * the decision to be matched against; null when unknown. Read only, never throws.
+ */
+function acceptedAgyCallId(worktreeId: string, instanceId: string | undefined): string | null {
+  try {
+    return getAntigravityAcceptedReceiptCallId(worktreeId, instanceId);
+  } catch {
+    return null;
+  }
+}
+
 /** What {@link buildRunningPayload} publishes for a running session. */
 interface RunningPayloadInput {
   worktreeId: string;
@@ -682,8 +693,14 @@ interface RunningPayloadInput {
   promptData: PromptData | StructuredPromptWaitingData | null;
   promptAnswerable: boolean | undefined;
   autoYesState: ReturnType<typeof getAutoYesState>;
-  /** Issue #3397: the last Enter Auto-Yes sent, judged against this payload's prompt. */
+  /**
+   * Issue #3397: the last Enter Auto-Yes sent, judged against this payload's
+   * prompt. Issue #3821: always null — the Enter is retired; the key stays on
+   * the wire for the clients that read it.
+   */
   lastEnterFallback: AutoYesEnterFallbackPublished | null;
+  /** Issue #3821: Auto-Yes's decision about this payload's screen-read prompt. */
+  autoYesDecision: AutoYesDecisionPublished;
   isSelectionListActive: boolean;
   isPagerActive: boolean;
   isDismissablePanelActive: boolean;
@@ -722,6 +739,7 @@ function buildRunningPayload({
   promptAnswerable,
   autoYesState,
   lastEnterFallback,
+  autoYesDecision,
   isSelectionListActive,
   isPagerActive,
   isDismissablePanelActive,
@@ -764,9 +782,13 @@ function buildRunningPayload({
       // stop pattern actually fired — the state clears it on every other path.
       stopMatchedText: autoYesState?.stopMatchedText,
       // Issue #3397: appended last, after the published fields above. Null when
-      // Auto-Yes never sent its Enter to an unreadable choice screen here.
+      // Auto-Yes never sent its Enter to an unreadable choice screen here —
+      // always, since Issue #3821 retired the Enter.
       lastEnterFallback,
     },
+    // Issue #3821: next to `autoYes`, and about `promptData` above — whether
+    // Auto-Yes is answering it, has left it to a human, or neither.
+    autoYesDecision,
     isSelectionListActive,
     isPagerActive,
     isDismissablePanelActive,
@@ -1264,13 +1286,21 @@ async function buildPayload(
     promptData,
     promptAnswerable,
     autoYesState,
-    // Issue #3397: judged against the screen-read prompt only — the one
-    // `promptAnswerable` is published for, and the one the poller sent its
-    // Enter to. A structured (hook / degraded) prompt is never that screen.
-    lastEnterFallback: publishEnterFallback(
-      getLastEnterFallback(worktreeId, cliToolId, instanceId),
-      promptAnswerable !== undefined ? statusResult.promptDetection.promptData : null,
-    ),
+    // Issue #3821: the Enter is retired; the key is kept, and is null.
+    lastEnterFallback: null,
+    // Issue #3821: judged against the screen-read prompt only — the one
+    // `promptAnswerable` is published for, and the only kind the poller
+    // answers. A structured (hook / degraded) prompt is never that screen, and
+    // reads `none`.
+    autoYesDecision: publishAutoYesDecision({
+      compositeKey,
+      grant: autoYesState,
+      promptData:
+        promptData !== null && promptAnswerable !== undefined ? statusResult.promptDetection.promptData : null,
+      // agy: the decision is tied to the hook call its receipt was accepted for.
+      callId: cliToolId === 'antigravity' ? acceptedAgyCallId(worktreeId, instanceId) : null,
+      pollerActive: isPollerActive(compositeKey),
+    }),
     isSelectionListActive,
     isPagerActive,
     isDismissablePanelActive,

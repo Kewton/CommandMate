@@ -444,6 +444,19 @@ function formatEnterFallbackNotice(data: CurrentOutputResponse, now: number): st
 }
 
 /**
+ * Issue #3821: the server's own word that Auto-Yes left this prompt to a human
+ * (`autoYesDecision.state === 'withheld'`) — `server-poller-inactive` when no
+ * poller runs for the instance, or a stop the suppression record does not
+ * carry. Read only when the server publishes the field; an older one leaves
+ * `wait` holding as before.
+ */
+function decisionWithheldReason(data: CurrentOutputResponse): string | null {
+  const decision = data.autoYesDecision;
+  if (decision?.state !== 'withheld') return null;
+  return decision.reason ?? 'unknown';
+}
+
+/**
  * Whether this server publishes a real turn record (Issue #1930).
  *
  * `dialogPendingMaxMs` landed with the turn model and is set on every payload a
@@ -1152,6 +1165,11 @@ function promptStage(poll: PollContext, state: PollState, data: CurrentOutputRes
     // keeps polling and would otherwise say nothing about why nobody
     // answered, and the agent one is read by pipelines that never see stderr.
     const suppressed = activeSuppression(data, Date.now());
+    // Issue #3821: withheld by the server's decision, with no suppression to say so.
+    const decisionWithheld = suppressed ? null : decisionWithheldReason(data);
+    const decisionNotice = decisionWithheld === null
+      ? null
+      : `  auto-yes is not answering this prompt (reason=${decisionWithheld}); it is a human's to answer.`;
 
     // [DR1-03] Prompt detection exit code
     if (options.onPrompt === 'human') {
@@ -1160,6 +1178,7 @@ function promptStage(poll: PollContext, state: PollState, data: CurrentOutputRes
       if (suppressed) {
         console.error(formatSuppressionNotice(suppressed.suppression, suppressed.ageSeconds));
       }
+      if (decisionNotice) console.error(decisionNotice);
       // Issue #3397: and whether Auto-Yes already pressed Enter on it.
       const enterNotice = formatEnterFallbackNotice(data, Date.now());
       if (enterNotice) console.error(enterNotice);
@@ -1176,7 +1195,8 @@ function promptStage(poll: PollContext, state: PollState, data: CurrentOutputRes
     // poll that shows no prompt ends the hold below and completion is judged
     // as usual. A withheld answer (`suppressed`) and Auto-Yes being off are
     // the gate's other two branches and still exit 10 at once.
-    if (!suppressed && data.autoYes?.enabled === true && autoYesGraceMs > 0) {
+    // Issue #3821: nor does a prompt the server says Auto-Yes left to a human.
+    if (!suppressed && decisionWithheld === null && data.autoYes?.enabled === true && autoYesGraceMs > 0) {
       const now = Date.now();
       if (state.autoYesAnsweringSince === null) {
         state.autoYesAnsweringSince = now;
@@ -1200,7 +1220,7 @@ function promptStage(poll: PollContext, state: PollState, data: CurrentOutputRes
           : `Note: the target's Auto-Yes did not answer the prompt on ${worktreeId} within ` +
               `${autoYesGraceSeconds}s; reporting it.`,
       );
-    } else if (state.autoYesAnsweringSince !== null && !suppressed) {
+    } else if (state.autoYesAnsweringSince !== null && !suppressed && decisionWithheld === null) {
       console.error(`Note: Auto-Yes is no longer enabled on ${worktreeId}; reporting the prompt.`);
     }
 
@@ -1209,6 +1229,7 @@ function promptStage(poll: PollContext, state: PollState, data: CurrentOutputRes
     if (suppressed) {
       console.error(formatSuppressionNotice(suppressed.suppression, suppressed.ageSeconds));
     }
+    if (decisionNotice) console.error(decisionNotice);
     // Issue #3397: stderr only, like the notice above; the exit-10 payload is unchanged.
     const enterNotice = formatEnterFallbackNotice(data, Date.now());
     if (enterNotice) console.error(enterNotice);

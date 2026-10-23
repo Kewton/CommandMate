@@ -181,30 +181,92 @@ self.addEventListener('message', function (event) {
 // This is also why there is no "close and show nothing" branch: a resolution
 // with nothing to close still shows its card. That is the contract, not an
 // oversight.
-function replaceStaleNotifications(title, options) {
+//
+// --- Issue #3798 (the resolution names its episode) -------------------------
+// A resolution may carry `resolvedEpisodeId`: the waiting episode whose card it
+// clears. It can arrive after the card of a NEWER wait in the same worktree
+// (same tag) — the next prompt's push overtook it — and closing that card would
+// hide a wait that is still open.
+//
+// A different id alone does NOT make a card newer. Delivery fails per device,
+// and the server sends a resolution only once nothing in the worktree is still
+// waiting, so a device that missed wait B's card can still be showing wait A's
+// when B's resolution arrives — A is over too, and nothing would ever close it
+// again (the server's mark is spent). Nor does the wait's start (`since`): a
+// structured since is reused by the next wait and can be older than the
+// observation, and two waits can start and end in one millisecond.
+//
+// Newer is proved by `order`: a per-worktree counter the server advances, in
+// one database statement, for every episode-named card it sends and for every
+// resolution it decides (`nextPromptOrder`). A wait open when the resolution
+// was decided would have stopped it, so a card whose order is greater than the
+// resolution's can only be a wait that opened later.
+//
+// So: a card of another episode with a greater order is closed and shown again
+// with the same content, silently (`silent: true`, `renotify: false`), INSTEAD
+// of the resolution; every other card — the resolved episode's, one naming no
+// episode or carrying no order, one sent before the resolution — is closed and
+// the resolution shown in its place, as before. Every branch still calls
+// `showNotification` exactly once, so the `userVisibleOnly` contract above
+// holds. A resolution without the id or the order (a server before #3798)
+// clears the tag as it always has.
+function isNewerThanResolution(card, resolvedEpisodeId, resolvedOrder) {
+  var data = card.data || {};
+  return (
+    typeof resolvedEpisodeId === 'string' &&
+    typeof resolvedOrder === 'number' &&
+    typeof data.episodeId === 'string' &&
+    data.episodeId !== resolvedEpisodeId &&
+    typeof data.order === 'number' &&
+    data.order > resolvedOrder
+  );
+}
+
+function replaceStaleNotifications(title, options, resolvedEpisodeId, resolvedOrder) {
   var registration = self.registration;
   var tag = options.tag;
   var closing;
 
   if (!tag || typeof registration.getNotifications !== 'function') {
-    closing = Promise.resolve();
+    closing = Promise.resolve(null);
   } else {
     closing = registration
       // Correct either way: whether an engine hands back every card carrying the tag or only the newest one, the loop closes exactly what it was handed (iOS is still unmeasured on this point — Issue #2155).
       .getNotifications({ tag: tag })
       .then(function (stale) {
+        var newer = null;
         for (var i = 0; i < stale.length; i++) {
+          if (
+            isNewerThanResolution(stale[i], resolvedEpisodeId, resolvedOrder) &&
+            // Of several, the card the server sent last.
+            (newer === null || stale[i].data.order > newer.data.order)
+          ) {
+            newer = stale[i];
+          }
           stale[i].close();
         }
+        return newer;
       })
       .catch(function (_err) {
         // A registration that cannot enumerate its notifications still has to
         // show one. Showing the replacement below is what keeps the promise;
         // on this path the tag alone collapses the stale card on most engines.
+        return null;
       });
   }
 
-  return closing.then(function () {
+  return closing.then(function (newer) {
+    if (newer) {
+      return registration.showNotification(newer.title, {
+        body: newer.body,
+        tag: tag,
+        renotify: false,
+        silent: true,
+        icon: newer.icon || options.icon,
+        badge: newer.badge || options.badge,
+        data: newer.data,
+      });
+    }
     return registration.showNotification(title, options);
   });
 }
@@ -243,6 +305,16 @@ self.addEventListener('push', function (event) {
   // different, louder instruction.
   if (resolved) options.silent = true;
 
+  // Issue #3798: a waiting card remembers its episode, so a later resolution
+  // can tell it from the card it is clearing. Absent from older payloads.
+  if (typeof payload.episodeId === 'string') options.data.episodeId = payload.episodeId;
+  // ...and its place in the worktree's order, so a later resolution can tell
+  // whether the card was sent after the resolution was decided.
+  if (typeof payload.order === 'number') options.data.order = payload.order;
+  var resolvedEpisodeId =
+    resolved && typeof payload.resolvedEpisodeId === 'string' ? payload.resolvedEpisodeId : null;
+  var resolvedOrder = resolved && typeof payload.order === 'number' ? payload.order : null;
+
   // --- Issue #2155 ---------------------------------------------------------
   // Every TAGGED push takes the close-then-show path, not just resolutions.
   // Safari/iOS does not collapse same-tag cards on a plain `showNotification`,
@@ -253,7 +325,7 @@ self.addEventListener('push', function (event) {
   // nothing to replace and goes straight to `showNotification`.
   event.waitUntil(
     options.tag
-      ? replaceStaleNotifications(title, options)
+      ? replaceStaleNotifications(title, options, resolvedEpisodeId, resolvedOrder)
       : self.registration.showNotification(title, options)
   );
 });

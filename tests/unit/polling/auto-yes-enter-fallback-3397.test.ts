@@ -1,6 +1,14 @@
 /**
- * Auto-Yes sends ONE Enter to a choice screen CommandMate cannot read
+ * Auto-Yes sent ONE Enter to a choice screen CommandMate cannot read
  * (Issue #3397).
+ *
+ * Issue #3821 retired that Enter: every screen below now gets NO keystroke at
+ * all, on any tick, under any `CM_AUTOYES_ENTER_FALLBACK` setting, and is
+ * recorded as left to a human (`unclassified-frame`, the record #3397 found
+ * on it before the Enter existed) — both as the #1684 suppression and as the
+ * tick's decision (`autoYesDecision: withheld`). The cases that asserted an
+ * Enter assert its absence; the frames, the judge (`judgeEnterFallback`, now a
+ * reading nothing sends on) and the session epoch keep their cases.
  *
  * Driven through the real `detectAndRespondToPrompt`, with the transport
  * stubbed at both ends, and asserted on the keystroke the agent would receive:
@@ -120,7 +128,13 @@ import {
   detectAndRespondToPrompt,
   type AutoYesPollerState,
 } from '@/lib/auto-yes-poller';
-import { POLLING_INTERVAL_MS, DUPLICATE_RETRY_EXPIRY_MS } from '@/lib/auto-yes-state';
+import { POLLING_INTERVAL_MS, DUPLICATE_RETRY_EXPIRY_MS, buildCompositeKey } from '@/lib/auto-yes-state';
+import {
+  autoYesConfirmationKey,
+  clearAutoYesDecisions,
+  getAutoYesDecisionRecord,
+} from '@/lib/polling/auto-yes-decision-state';
+import { getEnterFallbackSessionEpoch } from '@/lib/polling/auto-yes-enter-fallback';
 import { clearPolicySuppressions, getLastPolicySuppression } from '@/lib/polling/auto-yes-suppression-state';
 import {
   AUTO_YES_ENTER_FALLBACK_ENV_VAR,
@@ -135,7 +149,7 @@ import {
 } from '@/lib/polling/auto-yes-dialog-gate';
 import { extractComposerText } from '@/lib/detection/composer-text';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
-import { beginEnterFallbackSession, enterFallbackScreenKey } from '@/lib/polling/auto-yes-enter-fallback';
+import { beginEnterFallbackSession } from '@/lib/polling/auto-yes-enter-fallback';
 import { stripAnsi, stripBoxDrawing } from '@/lib/detection/cli-patterns';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
@@ -253,6 +267,7 @@ beforeEach(() => {
   lastTickRaw = '';
   clearPolicySuppressions();
   clearEnterFallbacks();
+  clearAutoYesDecisions();
   delete process.env[AUTO_YES_ENTER_FALLBACK_ENV_VAR];
 });
 
@@ -260,6 +275,7 @@ afterEach(() => {
   db.close();
   clearPolicySuppressions();
   clearEnterFallbacks();
+  clearAutoYesDecisions();
   if (originalEnv === undefined) delete process.env[AUTO_YES_ENTER_FALLBACK_ENV_VAR];
   else process.env[AUTO_YES_ENTER_FALLBACK_ENV_VAR] = originalEnv;
 });
@@ -295,100 +311,94 @@ describe('[#3397] the fixtures read as the Issue describes them', () => {
 });
 
 // ---------------------------------------------------------------------------
-// The Enter is sent
+// The Enter is no longer sent (Issue #3821)
 // ---------------------------------------------------------------------------
 
-describe('[#3397] Enter goes to an unreadable choice screen, once', () => {
+/** The tick's decision about the screen, as `current-output` reads it. */
+const decisionOf = (tool: CLIToolType) => getAutoYesDecisionRecord(buildCompositeKey(WT, tool));
+
+describe('[#3397] Enter goes to an unreadable choice screen, once (#3821: never)', () => {
   it.each([
     ['claude', 'unsupported_dialog_layout', CLAUDE_UNSUPPORTED_LAYOUT],
     ['claude', 'prompt_no_longer_active', CLAUDE_UNRECOGNISED_LIST],
     ['codex', 'prompt_no_longer_active', CODEX_UNRECOGNISED_LIST],
-  ] as const)('%s, %s: one Enter, never a digit', async (tool, refusalReason, raw) => {
+  ] as const)('[#3821] %s, %s: no Enter on any tick, never a digit, left to a human', async (tool, refusalReason, raw) => {
+    expect(assessPromptAnswerability(tool, raw).refusal?.reason).toBe(refusalReason);
     const state = pollerState(tool);
 
-    // First sight: not yet (a frame caught mid-repaint must not get an Enter).
-    expect(await tick(state, raw)).toBe('no_answer');
-    expect(enterCalls()).toHaveLength(0);
-
-    // Second tick, same screen: the Enter.
-    expect(await tick(state, raw)).toBe('responded');
-    expect(sendSpecialKeys).toHaveBeenCalledTimes(1);
-    expect(sendSpecialKeys).toHaveBeenCalledWith(`cm-${WT}-${tool}`, ['Enter']);
+    // Many ticks over the same screen (the Enter went on the second).
+    expect(await ticks(state, raw, 4)).toEqual(['no_answer', 'no_answer', 'no_answer', 'no_answer']);
+    expect(sendSpecialKeys).not.toHaveBeenCalled();
     expect(sendPromptAnswer).not.toHaveBeenCalled();
+    expect(getLastEnterFallback(WT, tool)).toBeNull();
 
-    const record = getLastEnterFallback(WT, tool);
-    expect(record).toMatchObject({ outcome: 'sent', promptType: 'multiple_choice', refusalReason });
+    expect(getLastPolicySuppression(WT, tool)?.reason).toBe('unclassified-frame');
+    expect(decisionOf(tool)).toMatchObject({ state: 'withheld', reason: 'unclassified-frame' });
   });
 
-  it('the record names the screen the status API publishes, so the window can say so', async () => {
-    // The prompt window shows "Auto-Yes sent Enter" only for a record whose
-    // screen matches the prompt `current-output` publishes. The poller and the
-    // status chain read different row counts; the key must survive that.
+  it('[#3821] the decision names the screen the status API publishes, so the window opens for it', async () => {
+    // The panel opens under Auto-Yes for the prompt `current-output` publishes
+    // when the decision about it is not `answering`. The poller and the status
+    // chain read different row counts; the key must survive that.
     const status = detectSessionStatus(CLAUDE_UNSUPPORTED_LAYOUT, 'claude');
     expect(status.hasActivePrompt).toBe(true);
     expect(assessPromptAnswerability('claude', CLAUDE_UNSUPPORTED_LAYOUT).refusal).not.toBeNull();
 
     const state = pollerState('claude');
     await ticks(state, CLAUDE_UNSUPPORTED_LAYOUT, 2);
-    expect(getLastEnterFallback(WT, 'claude')?.screenKey).toBe(
-      enterFallbackScreenKey(status.promptDetection.promptData!),
+    // Since review 3 the record keeps the whole identity (question, options and
+    // the approval target row for row) as one key, the one `current-output` publishes.
+    expect(decisionOf('claude')?.confirmation).toBe(
+      autoYesConfirmationKey({ promptData: status.promptDetection.promptData! }),
     );
   });
 
-  it('the first sight records nothing as withheld, so `cmate wait` holds for Auto-Yes (#2463)', async () => {
+  it('[#3821] the first sight is recorded as withheld: nobody is about to answer it (#2463 does not hold)', async () => {
     const state = pollerState('claude');
     expect(await tick(state, CLAUDE_UNRECOGNISED_LIST)).toBe('no_answer');
-    expect(getLastPolicySuppression(WT, 'claude')).toBeNull();
+    expect(getLastPolicySuppression(WT, 'claude')?.reason).toBe('unclassified-frame');
+    expect(decisionOf('claude')?.state).toBe('withheld');
   });
 
-  it('does what an answered prompt does afterwards: audit row, response poller, push', async () => {
+  it('[#3821] does nothing an answered prompt does: no audit row, no response poller, no push', async () => {
     const state = pollerState('claude');
-    await ticks(state, CLAUDE_UNRECOGNISED_LIST, 2);
+    await ticks(state, CLAUDE_UNRECOGNISED_LIST, 3);
 
-    expect(recordAnsweredPrompt).toHaveBeenCalledTimes(1);
-    expect(recordAnsweredPrompt.mock.calls[0][1]).toMatchObject({
-      answer: AUTO_YES_ENTER_FALLBACK_ANSWER,
-      answeredBy: 'auto',
-    });
-    expect(AUTO_YES_ENTER_FALLBACK_ANSWER).not.toMatch(/^\d+$/);
-    expect(startPolling).toHaveBeenCalledTimes(1);
-    expect(broadcastAfterInteraction).toHaveBeenCalledTimes(1);
-    expect(state.lastAnsweredPromptKey).not.toBeNull();
-    expect(info.mock.calls.some(([event]) => event === 'poller:auto-yes-enter-fallback-sent')).toBe(true);
+    expect(recordAnsweredPrompt).not.toHaveBeenCalled();
+    // The audit answer stays exported: the History shows past `[Enter]` rows.
+    expect(AUTO_YES_ENTER_FALLBACK_ANSWER).toBe('[Enter]');
+    expect(startPolling).not.toHaveBeenCalled();
+    expect(broadcastAfterInteraction).not.toHaveBeenCalled();
+    expect(state.lastAnsweredPromptKey).toBeNull();
+    expect(info.mock.calls.some(([event]) => event === 'poller:auto-yes-enter-fallback-sent')).toBe(false);
   });
 
-  it('the screen still up after the Enter: no second Enter, and `no-effect` is recorded', async () => {
+  it('[#3821] the screen up for many ticks: never an Enter, and no `no-effect` record', async () => {
     const state = pollerState('claude');
-    await ticks(state, CLAUDE_UNSUPPORTED_LAYOUT, 2);
-    expect(enterCalls()).toHaveLength(1);
-
-    // Inside the duplicate guard's window: untouched.
-    expect(await tick(state, CLAUDE_UNSUPPORTED_LAYOUT)).toBe('duplicate');
-
-    // Past it, the same screen, many times over: never another Enter.
-    expireDuplicateGuard(state);
-    expect(await ticks(state, CLAUDE_UNSUPPORTED_LAYOUT, 3)).toEqual(['no_answer', 'no_answer', 'no_answer']);
-    expect(enterCalls()).toHaveLength(1);
-
-    expect(getLastEnterFallback(WT, 'claude')?.outcome).toBe('no-effect');
-    expect(warn.mock.calls.some(([event]) => event === 'poller:auto-yes-enter-fallback-no-effect')).toBe(true);
+    expect(await ticks(state, CLAUDE_UNSUPPORTED_LAYOUT, 6)).toEqual(Array(6).fill('no_answer'));
+    expect(enterCalls()).toHaveLength(0);
+    expect(getLastEnterFallback(WT, 'claude')).toBeNull();
+    expect(warn.mock.calls.some(([event]) => event === 'poller:auto-yes-enter-fallback-no-effect')).toBe(false);
   });
 
-  it('the same screen after a frame with no prompt is still not sent a second Enter', async () => {
+  it('[#3821] the same screen after a frame with no prompt: still no Enter', async () => {
     const state = pollerState('claude');
     await ticks(state, CLAUDE_UNRECOGNISED_LIST, 2);
     await tick(state, 'just some output\n');
+    // No prompt, no decision.
+    expect(decisionOf('claude')).toBeNull();
     await ticks(state, CLAUDE_UNRECOGNISED_LIST, 3);
-    expect(enterCalls()).toHaveLength(1);
+    expect(enterCalls()).toHaveLength(0);
+    expect(decisionOf('claude')?.state).toBe('withheld');
   });
 
-  it('a different screen afterwards gets its own Enter', async () => {
+  it('[#3821] a different screen afterwards gets no Enter either', async () => {
     const state = pollerState('claude');
     await ticks(state, CLAUDE_UNRECOGNISED_LIST, 2);
     await tick(state, 'just some output\n');
     const other = CLAUDE_UNRECOGNISED_LIST.replace('Kubernetes', 'Bare metal');
     await ticks(state, other, 2);
-    expect(enterCalls()).toHaveLength(2);
+    expect(enterCalls()).toHaveLength(0);
   });
 });
 
@@ -455,18 +465,21 @@ describe('[#3397] the contract policy still decides', () => {
     const state = pollerState('claude');
     await ticks(state, CLAUDE_UNRECOGNISED_LIST, 3);
     expect(sendSpecialKeys).not.toHaveBeenCalled();
-    expect(getLastPolicySuppression(WT, 'claude')?.reason).toBe(reason);
+    // Issue #3821: the policy was read for the Enter; with no Enter the frame
+    // is recorded as the gate refused it, as before #3397.
+    expect(reason).toBeTruthy();
+    expect(getLastPolicySuppression(WT, 'claude')?.reason).toBe('unclassified-frame');
     expect(getLastEnterFallback(WT, 'claude')).toBeNull();
   });
 
   it.each([
     ['allow-listed with multiple_choice', { ...base, mode: 'allow-listed' as const, allowPromptTypes: ['multiple_choice' as const] }],
     ['a deny pattern that does not match', { ...base, denyPatterns: ['rm -rf'] }],
-  ])('control — %s: the Enter is sent', async (_label, p) => {
+  ])('[#3821] %s (which let the Enter go): no Enter either', async (_label, p) => {
     policy = p;
     const state = pollerState('claude');
-    await ticks(state, CLAUDE_UNRECOGNISED_LIST, 2);
-    expect(enterCalls()).toHaveLength(1);
+    await ticks(state, CLAUDE_UNRECOGNISED_LIST, 3);
+    expect(enterCalls()).toHaveLength(0);
   });
 });
 
@@ -509,6 +522,20 @@ describe('[#3397] other guards', () => {
     expect(sendSpecialKeys).not.toHaveBeenCalled();
     expect(getLastPolicySuppression(WT, 'claude')?.reason).toBe('unclassified-frame');
   });
+
+  // Issue #3821: the switch cannot bring the Enter back.
+  it.each(['claude=enabled', '*=enabled', 'codex=enabled,claude=enabled'])(
+    '[#3821] %s: nothing is sent, the switch does not bring the Enter back',
+    async (value) => {
+      process.env[AUTO_YES_ENTER_FALLBACK_ENV_VAR] = value;
+      // Non-vacuous: the judge, which reads the switch, calls the frame eligible.
+      expect(judgeEnterFallback('claude', CLAUDE_UNRECOGNISED_LIST).eligible).toBe(true);
+      const state = pollerState('claude');
+      expect(await ticks(state, CLAUDE_UNRECOGNISED_LIST, 4)).toEqual(Array(4).fill('no_answer'));
+      expect(sendSpecialKeys).not.toHaveBeenCalled();
+      expect(getLastEnterFallback(WT, 'claude')).toBeNull();
+    },
+  );
 });
 
 describe('[#3397] judgeEnterFallback', () => {
@@ -582,7 +609,8 @@ describe('[#3397] the Enter is decided on a capture taken past the cache', () =>
     const state = pollerState('claude');
     await ticks(state, CLAUDE_UNRECOGNISED_LIST, 2);
 
-    expect(captureSessionOutputFresh).toHaveBeenCalledTimes(1);
+    // Issue #3821: no Enter is being decided, so no fresh capture is taken.
+    expect(captureSessionOutputFresh).not.toHaveBeenCalled();
     expect(sendSpecialKeys).not.toHaveBeenCalled();
     expect(getLastEnterFallback(WT, 'claude')).toBeNull();
   });
@@ -594,11 +622,11 @@ describe('[#3397] the Enter is decided on a capture taken past the cache', () =>
     expect(sendSpecialKeys).not.toHaveBeenCalled();
   });
 
-  it('control: the fresh pane is the same screen, the Enter goes', async () => {
+  it('[#3821] the fresh pane is the same screen: still no Enter, and no fresh capture', async () => {
     const state = pollerState('claude');
     await ticks(state, CLAUDE_UNRECOGNISED_LIST, 2);
-    expect(captureSessionOutputFresh).toHaveBeenCalledTimes(1);
-    expect(enterCalls()).toHaveLength(1);
+    expect(captureSessionOutputFresh).not.toHaveBeenCalled();
+    expect(enterCalls()).toHaveLength(0);
   });
 
   it('the first tick takes no fresh capture (the cache is only bypassed right before a key)', async () => {
@@ -655,42 +683,50 @@ describe('[#3397] a checkbox list gets no Enter', () => {
 });
 
 describe('[#3397] a relaunched session starts with no screen that had its Enter (review round 2)', () => {
-  it('the same screen on the new process gets its own Enter, and the old record is gone', async () => {
+  // Issue #3821: no Enter on either process. What stays is the session epoch
+  // (shared with every send's generation check and the partial-answer record):
+  // a relaunch still moves it on, and the tick's decision is made under it.
+  it('[#3821] neither process gets an Enter; the decision is made under the new session epoch', async () => {
+    const key = buildCompositeKey(WT, 'claude');
+    const before = getEnterFallbackSessionEpoch(key);
     const state = pollerState('claude');
     await ticks(state, CLAUDE_UNRECOGNISED_LIST, 2);
-    expect(enterCalls()).toHaveLength(1);
+    expect(decisionOf('claude')?.epoch).toBe(before);
 
     // `beginAgentSession` on a relaunch: the poller is NOT stopped.
     beginEnterFallbackSession(WT, 'claude');
-    expect(getLastEnterFallback(WT, 'claude')).toBeNull();
+    expect(getEnterFallbackSessionEpoch(key)).toBe(before + 1);
 
-    // The new process draws the identical dialog (past the #306 duplicate window).
+    // The new process draws the identical dialog.
     expireDuplicateGuard(state);
     await ticks(state, CLAUDE_UNRECOGNISED_LIST, 2);
 
-    expect(enterCalls()).toHaveLength(2);
-    expect(getLastEnterFallback(WT, 'claude')?.outcome).toBe('sent');
+    expect(enterCalls()).toHaveLength(0);
+    expect(decisionOf('claude')).toMatchObject({ state: 'withheld', epoch: before + 1 });
     expect(warn.mock.calls.some(([event]) => event === 'poller:auto-yes-enter-fallback-no-effect')).toBe(false);
   });
 
-  it('control: without a new session, the same screen is no-effect, not a second Enter', async () => {
+  it('[#3821] control: without a new session, the same screen gets no Enter and no `no-effect`', async () => {
     const state = pollerState('claude');
     await ticks(state, CLAUDE_UNRECOGNISED_LIST, 2);
     expireDuplicateGuard(state);
     await ticks(state, CLAUDE_UNRECOGNISED_LIST, 2);
 
-    expect(enterCalls()).toHaveLength(1);
-    expect(getLastEnterFallback(WT, 'claude')?.outcome).toBe('no-effect');
+    expect(enterCalls()).toHaveLength(0);
+    expect(getLastEnterFallback(WT, 'claude')).toBeNull();
   });
 
   it('another instance\'s new session leaves this one alone', async () => {
+    const key = buildCompositeKey(WT, 'claude');
+    const before = getEnterFallbackSessionEpoch(key);
     const state = pollerState('claude');
     await ticks(state, CLAUDE_UNRECOGNISED_LIST, 2);
     beginEnterFallbackSession(WT, 'claude', 'claude-2');
-    expect(getLastEnterFallback(WT, 'claude')?.outcome).toBe('sent');
+    expect(getEnterFallbackSessionEpoch(key)).toBe(before);
     expireDuplicateGuard(state);
     await ticks(state, CLAUDE_UNRECOGNISED_LIST, 2);
-    expect(enterCalls()).toHaveLength(1);
+    expect(enterCalls()).toHaveLength(0);
+    expect(decisionOf('claude')?.epoch).toBe(before);
   });
 });
 

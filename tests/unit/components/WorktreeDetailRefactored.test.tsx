@@ -565,7 +565,12 @@ describe('WorktreeDetailRefactored', () => {
        * hiding the sheet there left a live question answerable by nobody until
        * the operator noticed and turned Auto-Yes off.
        */
-      function arrange(options: { multiSelect: boolean; autoYesEnabled: boolean }): void {
+      function arrange(options: {
+        multiSelect: boolean;
+        autoYesEnabled: boolean;
+        /** Issue #3821: `null` leaves the field out (a server older than it). */
+        autoYesDecision?: Record<string, unknown> | null;
+      }): void {
         mockFetch.mockImplementation((url: string) => {
           if (url.includes('/auto-yes')) {
             return Promise.resolve({
@@ -594,6 +599,11 @@ describe('WorktreeDetailRefactored', () => {
                       { number: 2, label: 'dist', isDefault: false },
                     ],
                   },
+                  // Issue #3821: the server says Auto-Yes is answering — the one
+                  // decision under which a single-select sheet stays hidden.
+                  ...(options.autoYesDecision === null
+                    ? {}
+                    : { autoYesDecision: options.autoYesDecision ?? { state: 'answering', reason: null, observedAt: 1 } }),
                 }),
             });
           }
@@ -623,6 +633,19 @@ describe('WorktreeDetailRefactored', () => {
         });
         await waitFor(() => {
           expect(screen.queryByTestId('mobile-prompt-sheet')).not.toBeInTheDocument();
+        });
+      });
+
+      it.each([
+        ['withheld', { state: 'withheld', reason: 'server-poller-inactive', observedAt: 1 }],
+        ['none (not judged yet)', { state: 'none', reason: null, observedAt: 1 }],
+        ['no decision at all (an older server)', null],
+      ])('[#3821] shows the single-select sheet with Auto-Yes ON when the decision is %s', async (_label, decision) => {
+        arrange({ multiSelect: false, autoYesEnabled: true, autoYesDecision: decision });
+        render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('mobile-prompt-sheet')).toBeInTheDocument();
         });
       });
 

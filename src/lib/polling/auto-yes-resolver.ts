@@ -21,8 +21,9 @@
  * omitting it (or passing one that states nothing) reproduces the pre-#1547
  * behaviour exactly, which is what keeps contract-less operation untouched.
  *
- * Client-safe: no server-only imports, because a 'use client' hook
- * (`hooks/useAutoYes.ts`) imports this module.
+ * Client-safe: no server-only imports. A 'use client' hook
+ * (`hooks/useAutoYes.ts`) imported this module until Issue #3821 retired the
+ * browser's answers; the guard `use-auto-yes-client-imports-3748` still walks it.
  */
 
 import { executeRegexWithTimeout, validateStopPattern } from '@/config/auto-yes-config';

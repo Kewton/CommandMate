@@ -90,6 +90,10 @@ function payload(multiSelect: boolean): Record<string, unknown> {
         { number: 2, label: 'dist', isDefault: false, ...(multiSelect ? { checked: true } : {}) },
       ],
     },
+    // Issue #3821: the server says Auto-Yes is answering — the one decision
+    // under which a single-select panel stays hidden. A checkbox question is
+    // shown even then.
+    autoYesDecision: { state: 'answering', reason: null, observedAt: 1 },
   };
 }
 

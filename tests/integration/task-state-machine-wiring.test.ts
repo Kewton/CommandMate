@@ -91,6 +91,7 @@ import { createTask, getTask, listTaskEvents, type Task } from '@/lib/db';
 import { updateTaskStatus } from '@/lib/db/tasks-db';
 import { parseTaskContract } from '@/lib/tasks/contract-parser';
 import { clearAutoYesPolicyCache } from '@/lib/polling/auto-yes-policy';
+import { clearManualAnswers } from '@/lib/polling/auto-yes-manual-answer';
 import { detectAndRespondToPrompt, type AutoYesPollerState } from '@/lib/auto-yes-poller';
 import { checkForResponse } from '@/lib/polling/response-checker';
 import { stopPolling as resetResponsePollerCache } from '@/lib/polling/response-poller-core';
@@ -197,6 +198,8 @@ function events(taskId: string) {
 }
 
 beforeEach(() => {
+  // Issue #3821: a person's answer in one case holds the poller off the next one's.
+  clearManualAnswers();
   db = new Database(':memory:');
   runMigrations(db);
   resetDetection();

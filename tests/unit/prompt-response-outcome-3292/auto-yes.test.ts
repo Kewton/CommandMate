@@ -10,6 +10,9 @@
  * What the hook then announces ("Auto responded" only for an `answered`
  * reply) is pinned per row in `../prompt-response-outcome-3331/` (Issue #3331).
  *
+ * Issue #3821: the browser no longer answers, so every row now asserts that
+ * nothing is sent — for the approval, its repeats, and a different approval.
+ *
  * @vitest-environment jsdom
  */
 
@@ -56,7 +59,7 @@ describe('[#3292] an answer from browser-side Auto-Yes', () => {
     vi.restoreAllMocks();
   });
 
-  it.each(PROMPT_RESPONSE_ROWS)('%s: sent once, and not again until the display changes', async (_name, testCase) => {
+  it.each(PROMPT_RESPONSE_ROWS)('%s: [#3821] never sent, whatever the reply would be', async (_name, testCase) => {
     const posted: string[] = [];
     vi.stubGlobal(
       'fetch',
@@ -69,18 +72,19 @@ describe('[#3292] an answer from browser-side Auto-Yes', () => {
     const { rerender } = renderHook((props: UseAutoYesParams) => useAutoYes(props), {
       initialProps: params(approval('Do you want to proceed?')),
     });
-    expect(posted).toEqual([`/api/worktrees/${WORKTREE_ID}/prompt-response`]);
+    expect(posted).toEqual([]);
 
-    // The reply lands, then two more polls show the same approval.
+    // Two more polls show the same approval.
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     rerender(params(approval('Do you want to proceed?')));
     rerender(params(approval('Do you want to proceed?')));
-    expect(posted).toHaveLength(1);
+    expect(posted).toEqual([]);
 
-    // The control: a different approval is answered, so the hook is not simply silent.
+    // A different approval (which the hook used to answer) is not answered either.
     rerender(params(approval('Run the migration?')));
-    expect(posted).toHaveLength(2);
+    expect(posted).toEqual([]);
+    expect(testCase.name).toBeTruthy();
   });
 });

@@ -1,8 +1,11 @@
 /**
  * AutoYesToggle - Toggle component for auto-yes mode
  *
- * Displays a toggle switch with countdown timer when enabled
- * and a notification when auto-response occurs.
+ * Displays a toggle switch with countdown timer when enabled.
+ *
+ * Issue #3821: the "Auto responded" notification is gone with the browser's
+ * own Auto-Yes answer it announced; the server's poller answers, and the
+ * answer panel says when it does not.
  *
  * Issue #225: Added duration propagation and HH:MM:SS countdown format
  * Issue #314: Added AutoYesToggleParams interface with stopPattern support
@@ -10,13 +13,12 @@
 
 'use client';
 
-import React, { memo, useEffect, useRef, useState, useCallback } from 'react';
+import React, { memo, useEffect, useState, useCallback } from 'react';
 import { useTranslations } from 'next-intl';
 import { Switch } from '@/components/ui/Switch';
 import { AutoYesConfirmDialog } from './AutoYesConfirmDialog';
 import { formatTimeRemaining, AUTO_YES_COUNTDOWN_INTERVAL_MS } from '@/config/auto-yes-config';
 import type { AutoYesDuration } from '@/config/auto-yes-config';
-import { NOTIFICATION_DISMISS_MS } from '@/config/ui-feedback-config';
 import { getCliToolDisplayNameSafe } from '@/lib/cli-tools/types';
 // Issue #756: AutoYesToggleParams moved to a non-TSX module (`@/types/auto-yes`)
 // so server-side type consumers compiled under tsconfig.server.json can import
@@ -32,8 +34,12 @@ export interface AutoYesToggleProps {
   expiresAt: number | null;
   /** Callback when toggle is clicked (Issue #314: object parameter pattern) */
   onToggle: (params: AutoYesToggleParams) => Promise<void>;
-  /** Last auto-response answer (for notification) */
-  lastAutoResponse: string | null;
+  /**
+   * Last auto-response answer. Issue #3821: no longer shown — the browser no
+   * longer answers, so there is no answer of its own to announce, and this UI
+   * does not make one up. Kept so the callers that pass it compile unchanged.
+   */
+  lastAutoResponse?: string | null;
   /** Currently active CLI tool name (e.g. 'claude', 'codex') */
   cliToolName?: string;
   /** If true, render without outer container styles (for inline embedding) */
@@ -73,7 +79,6 @@ export const AutoYesToggle = memo(function AutoYesToggle({
   enabled,
   expiresAt,
   onToggle,
-  lastAutoResponse,
   cliToolName,
   inline = false,
   showToolName = true,
@@ -83,7 +88,6 @@ export const AutoYesToggle = memo(function AutoYesToggle({
 }: AutoYesToggleProps) {
   const t = useTranslations('autoYes');
   const [timeRemaining, setTimeRemaining] = useState<string>('');
-  const [notification, setNotification] = useState<string | null>(null);
   const [toggling, setToggling] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   // Issue #959: latch that flips the UI to OFF the instant the countdown hits
@@ -128,28 +132,6 @@ export const AutoYesToggle = memo(function AutoYesToggle({
     }, AUTO_YES_COUNTDOWN_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [enabled, expiresAt, onExpire]);
-
-  // Auto-response notification (2 second display)
-  //
-  // Issue #3331: the dismiss timer is not tied to `lastAutoResponse` staying
-  // set. It used to be the effect's cleanup, so the value returning to null
-  // (useAutoYes clears it while the next answer is in flight) cancelled the
-  // timer and left the notice on screen for good. Each non-null value shows
-  // the notice once and restarts the timer; only unmounting cancels it.
-  const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (!lastAutoResponse) return;
-
-    setNotification(`Auto responded: "${lastAutoResponse}"`);
-    if (dismissTimerRef.current) clearTimeout(dismissTimerRef.current);
-    dismissTimerRef.current = setTimeout(() => {
-      dismissTimerRef.current = null;
-      setNotification(null);
-    }, NOTIFICATION_DISMISS_MS);
-  }, [lastAutoResponse]);
-  useEffect(() => () => {
-    if (dismissTimerRef.current) clearTimeout(dismissTimerRef.current);
-  }, []);
 
   // Issue #959: the UI presents as OFF the moment the countdown expires, even
   // before the parent's polled `enabled` prop catches up. Derive a single source
@@ -221,13 +203,6 @@ export const AutoYesToggle = memo(function AutoYesToggle({
           data-testid="auto-yes-released-by-restart"
         >
           {t('releasedByRestart')}
-        </span>
-      )}
-
-      {/* Auto-response notification */}
-      {notification && (
-        <span className="text-sm text-success animate-pulse">
-          {notification}
         </span>
       )}
 

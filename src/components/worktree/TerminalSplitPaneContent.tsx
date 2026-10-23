@@ -502,13 +502,14 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     setDirectInputOpen(false);
   }, []);
 
-  // Issue #2755 / #3397: see `shouldShowPromptPanel`.
+  // Issue #2755 / #3397 / #3821: see `shouldShowPromptPanel`.
   const showPrompt = shouldShowPromptPanel({
     visible: prompt.visible,
     isStarting,
     autoYesEnabled,
     data: prompt.data,
     answerable: prompt.answerable,
+    autoYesDecision: prompt.autoYesDecision,
   });
 
   // Issue #2869: the same prompt window shown again after two Sends in a row

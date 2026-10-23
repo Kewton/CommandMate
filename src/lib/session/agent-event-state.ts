@@ -79,7 +79,16 @@ import {
   openDecision,
   releaseAllDecisions,
   reopenedTurns,
+  type TurnTransitionOutcome,
 } from '@/lib/session/agent-event-turn';
+// Issue #3798: the waiting episode follows the turn in the same synchronous
+// step. Imported for its effect too — it registers the binding resolver the
+// episode store uses — so every bundle that records an event or reads a
+// status (both reach this module) has it.
+import {
+  applyTurnOutcomesToEpisode,
+  clearWaitingEpisodeBindingState,
+} from '@/lib/session/waiting-episode-binding';
 import { getStructuredSessionState } from '@/lib/session/agent-event-structured-state';
 import {
   applyAwaitingInstructionTransition,
@@ -365,6 +374,7 @@ export function recordAgentEvent(
   }
 
   lastAgentEvent.set(key, record);
+  const outcomes: TurnTransitionOutcome[] = [];
   if (record.event === 'session_start') {
     // Issue #2357: a new agent process, whatever model it names first is its
     // STARTING model — recorded below, announced to nobody. Dropped before the
@@ -392,12 +402,17 @@ export function recordAgentEvent(
     // here rather than inside the transition below so the two paths into a new
     // generation — this one and `beginAgentEventGeneration` — close the turn in
     // exactly one place.
-    fenceTurnForNewGeneration(key, record.at);
+    outcomes.push(fenceTurnForNewGeneration(key, record.at, 'session-start'));
   }
   // Issue #1930: after the generation is settled, so a turn opened by this
   // event belongs to the generation the event itself opened.
-  applyTurnTransition(key, record);
+  outcomes.push(applyTurnTransition(key, record));
   applyAwaitingInstructionTransition(key, record);
+  // Issue #3798: last, once every map above says what this delivery did, so
+  // an edge's listeners read the state the delivery left. The stop is recorded,
+  // the turn ended and its wait closed in this one synchronous step; whatever
+  // the caller awaits next (`applyAgentStopEvent`) never touches the episode.
+  applyTurnOutcomesToEpisode({ worktreeId, cliToolId, instanceId }, outcomes);
   return { recorded: true };
 }
 
@@ -444,7 +459,7 @@ export function beginAgentEventGeneration(
   // `closedBy: 'generation'`, so `capture --json` can say why it ended instead
   // of going quiet. The dialogs #1725 kept in a map of their own live on that
   // record now, which is what makes this one call retire both.
-  fenceTurnForNewGeneration(key, at);
+  const fenced = fenceTurnForNewGeneration(key, at, 'process-start');
   // Same reasoning for the question that dialog was asking (Issue #1726).
   askUserQuestion.delete(key);
   // And for "waiting for your input" (Issue #1786): a new process has not asked
@@ -474,6 +489,8 @@ export function beginAgentEventGeneration(
   // has just been replaced. Unlike the time-window keys, they never expire on
   // their own, so a generation is the only thing that retires them.
   recentEventIdentities.delete(key);
+  // Issue #3798: and the wait the replaced process was in (design T19).
+  applyTurnOutcomesToEpisode({ worktreeId, cliToolId, instanceId }, [fenced], at);
 }
 
 /**
@@ -568,7 +585,7 @@ export function reportPermissionRequestPending(
   at: number = Date.now(),
 ): void {
   const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
-  openDecision(key, currentGeneration(key), {
+  const opened = openDecision(key, currentGeneration(key), {
     source: 'permission-request',
     at,
     message: null,
@@ -583,6 +600,9 @@ export function reportPermissionRequestPending(
     // is unaffected — that reads `getLastAgentEvent`, which nothing here writes.
     bootstrapDisplay: { event: 'notification', at, detail: 'permission_prompt' },
   });
+  // Issue #3798 (design R3-6): a decision opened outside `recordAgentEvent`
+  // tells the waiting episode itself.
+  applyTurnOutcomesToEpisode({ worktreeId, cliToolId, instanceId }, [{ kind: 'decision-opened', ...opened }]);
 }
 
 /**
@@ -631,7 +651,7 @@ export function reportQuestionPending(
   at: number = Date.now(),
 ): void {
   const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
-  openDecision(key, currentGeneration(key), {
+  const opened = openDecision(key, currentGeneration(key), {
     source: 'notification',
     at,
     // The question TEXT is not the dialog's `message`: it is published as
@@ -645,6 +665,8 @@ export function reportQuestionPending(
     decisionId: input.decisionId,
     bootstrapDisplay: { event: 'notification', at, detail: input.detail },
   });
+  // Issue #3798 (design R3-6): as for the forecast above.
+  applyTurnOutcomesToEpisode({ worktreeId, cliToolId, instanceId }, [{ kind: 'decision-opened', ...opened }]);
 }
 
 /**
@@ -749,4 +771,6 @@ export function clearAgentStopEvents(): void {
   // listener set is deliberately NOT cleared — a subscription belongs to the
   // process, not to a session, and a suite that armed one expects it to stay.
   modelBaseline.clear();
+  // Issue #3798: and which generation last heard a hook stop.
+  clearWaitingEpisodeBindingState();
 }

@@ -117,7 +117,24 @@ describe('useAutoYes reaches no server-only module (Issue #3748)', () => {
   });
 
   it('useAutoYes.ts and what it imports reach no logger / env / db / fs', () => {
-    const { files, bareFs } = walk(join(SRC, 'hooks/useAutoYes.ts'));
+    // Issue #3821: the hook answers nothing any more and imports nothing of
+    // value, so the walk also starts at the client modules that carry Auto-Yes
+    // on the browser side now — the answer panel's gate and the decision it
+    // reads — and at the two client-bundled modules it used to import, to keep
+    // the size check below from passing on an empty walk.
+    const files = new Set<string>();
+    const bareFs: string[] = [];
+    for (const entry of [
+      'hooks/useAutoYes.ts',
+      'components/worktree/prompt-answer.ts',
+      'types/auto-yes-decision.ts',
+      'lib/polling/auto-yes-confirm-shape.ts',
+      'lib/polling/auto-yes-resolver.ts',
+    ]) {
+      const walked = walk(join(SRC, entry));
+      walked.files.forEach((f) => files.add(f));
+      bareFs.push(...walked.bareFs);
+    }
     expect(files.size).toBeGreaterThan(5);
     expect(serverOnly(files)).toEqual([]);
     expect(bareFs).toEqual([]);
