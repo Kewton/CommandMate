@@ -23,7 +23,11 @@
  * that records the stop (`waiting-episode-binding`), so a tool whose reply
  * arrives on a hook closes its wait with no browser open. That needs each
  * episode to carry an identity and the turn it belongs to; see "identity and
- * attribution" below.
+ * attribution" below. The screen observers — the status probe, the response
+ * poller and now the Auto-Yes poller — go through the same module's
+ * observation tables (`observeWaiting`), which refuse a reading made against an
+ * episode that has moved since the observer started; {@link observeWaitingEdge}
+ * stays for the callers and suites written against #1786.
  *
  * ## Where #1788 / #1790 plug in
  *
@@ -455,6 +459,23 @@ export function rebindEpisode(
 }
 
 /**
+ * Refresh the kind of the open episode `expectedId` (Issue #3798, I10). The
+ * wait goes on: no edge, and the version does not move.
+ *
+ * @returns Whether the episode was still open
+ */
+export function updateEpisodeKind(
+  parts: EpisodeKeyParts,
+  expectedId: WaitingEpisodeId,
+  kind: WaitingKind | null
+): boolean {
+  const view = episodes.get(keyOf(parts));
+  if (view === undefined || metaOf(view).episodeId !== expectedId) return false;
+  view.kind = kind;
+  return true;
+}
+
+/**
  * The meta of an episode in the map. An episode put there without one (a test
  * that wrote the map directly) is given an unattributed identity on first read.
  */
@@ -489,6 +510,20 @@ export function getWaitingEpisodeRecord(
 /** The instance's episode version: it moves on every open, close, replacement and rebind. */
 export function getEpisodeVersion(worktreeId: string, cliToolId: CLIToolType, instanceId?: string): number {
   return versions.get(buildCompositeKey(worktreeId, cliToolId, instanceId)) ?? 0;
+}
+
+/**
+ * Every instance version of one worktree, as of now (Issue #3798): the status
+ * probe fixes them before it lists the tmux sessions. An instance missing from
+ * the map is at version 0.
+ */
+export function snapshotEpisodeVersions(worktreeId: string): Map<string, number> {
+  const prefix = `${worktreeId}${COMPOSITE_KEY_SEPARATOR}`;
+  const snapshot = new Map<string, number>();
+  for (const [key, version] of versions) {
+    if (key.startsWith(prefix)) snapshot.set(key, version);
+  }
+  return snapshot;
 }
 
 /** The last episode that ended for this instance, or null. */
@@ -552,7 +587,11 @@ export interface ObserveWaitingEdgeParams {
  * one per poll.
  *
  * Issue #3798: an episode opened here is bound by the registered resolver
- * (`waiting-episode-binding`), so the turn transitions can end it.
+ * (`waiting-episode-binding`), so the turn transitions can end it. The
+ * production observers no longer call it: they go through
+ * `waiting-episode-binding`'s `observeWaiting`, which also checks that the
+ * episode has not moved since they started and that the frame does not
+ * predate the close of what it shows.
  *
  * @returns The episode's `since` while waiting, or null when it is not.
  */

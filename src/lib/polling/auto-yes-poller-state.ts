@@ -14,6 +14,7 @@ import { getOrInitGlobal } from '../global-state';
 import { getEnterFallbackSessionEpoch } from './auto-yes-enter-fallback-state';
 import type { LedgerAttemptHandle } from './auto-yes-confirmation-ledger';
 import { approvalTargetWithOptionRowsAligned } from '../prompt-observation/appearance';
+import { promptScreenKey } from '../detection/prompt-screen-key';
 
 const logger = createLogger('auto-yes-poller');
 
@@ -169,47 +170,8 @@ export interface PartialAutoYesAnswer {
   seq: number;
 }
 
-/**
- * Which prompt a stopped answer is about (Issue #3706): the type, the question,
- * the option labels and `approvalTarget` — what {@link promptFrameKey} tells
- * apart — but NOT where the cursor is. The keys that were sent may have moved
- * the cursor themselves (a `Down` whose Enter was withheld), and that must not
- * make the same list read as a new one; a different list or a different command
- * under the same question is a new prompt and is answered.
- */
-export function partialAnswerScreenKey(promptData: PromptData): string {
-  const options =
-    promptData.type === 'multiple_choice'
-      ? promptData.options.map((o) => `${o.number}.${o.label}`).join('\n')
-      : promptData.options.join('\n');
-  return [generatePromptKey(promptData), options, withoutCursorMarks(promptData)].join('\u0000');
-}
-
-/**
- * `approvalTarget` with the cursor taken out: the generic parser copies the
- * option panel into it, `❯` row included, so a moved cursor would otherwise
- * read as another prompt.
- *
- * [Issue #3817] Only the rows the block reader adopted as the options are
- * aligned (`approvalTargetWithOptionRowsAligned`, the reading #3812 gives the
- * strict respond), so two commands whose bodies differ by an indent or a `>`
- * are two screens. A label the block reader read may run longer than the
- * prompt's — it folds wrapped rows and the footer in — so it only has to start
- * with it. A yes/no prompt has no cursor and is read as it is. A list whose
- * rows cannot be told that way keeps the old reading below: two bodies then
- * read as one screen, which holds the prompt for a human rather than typing
- * the answer twice.
- */
-function withoutCursorMarks(promptData: PromptData): string {
-  const target = promptData.approvalTarget ?? '';
-  if (promptData.type !== 'multiple_choice') return target;
-  const aligned = approvalTargetWithOptionRowsAligned(
-    target,
-    promptData.options.map((o) => o.label),
-    (read, named) => read.startsWith(named),
-  );
-  return aligned ?? withoutLeadingMarks(target);
-}
+/** Issue #3798: moved to `detection/prompt-screen-key`, where the waiting episodes read it too. */
+export { promptScreenKey as partialAnswerScreenKey } from '../detection/prompt-screen-key';
 
 /**
  * Which confirmation the ledger counts a prompt as (Issue #3820): the
@@ -225,14 +187,14 @@ function withoutCursorMarks(promptData: PromptData): string {
  * or a bare `1` followed by any run of spaces (`❯ 1  Yes`).
  */
 export function ledgerScreenKey(promptData: PromptData): string {
-  if (promptData.type !== 'multiple_choice') return partialAnswerScreenKey(promptData);
+  if (promptData.type !== 'multiple_choice') return promptScreenKey(promptData);
   const target = promptData.approvalTarget ?? '';
   const aligned = approvalTargetWithOptionRowsAligned(
     target,
     promptData.options.map((o) => o.label),
     (read, named) => read.startsWith(named),
   );
-  if (aligned !== null) return partialAnswerScreenKey(promptData);
+  if (aligned !== null) return promptScreenKey(promptData);
   const options = promptData.options.map((o) => `${o.number}.${o.label}`).join('\n');
   return [generatePromptKey(promptData), options, withOptionRowGuttersAligned(target, promptData.options)].join(
     '\u0000',
@@ -264,14 +226,6 @@ function withOptionRowGuttersAligned(
       });
       return isOption ? line.replace(LEADING_MARKS_PATTERN, '') : line;
     })
-    .join('\n');
-}
-
-/** Every row's leading marks and indentation taken out (the reading before #3817). */
-function withoutLeadingMarks(text: string): string {
-  return text
-    .split('\n')
-    .map((line) => line.replace(/^[\s\u276F\u203A>\u25B6\u25BA\u25CF\u25CB\u25C9\u2192]+/u, ''))
     .join('\n');
 }
 

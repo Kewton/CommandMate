@@ -30,6 +30,13 @@ interface CacheEntry {
   capturedLines: number;
   /** Cache write timestamp (Date.now()) */
   timestamp: number;
+  /**
+   * Issue #3798: when the capture this entry holds was started — what a reader
+   * served from the cache, or joined to the in-flight fetch, actually saw the
+   * pane at (at the latest). The waiting episodes compare it with the time an
+   * episode closed: a frame fetched before the close cannot reopen it.
+   */
+  fetchStartedAt: number;
 }
 
 // =========================================================================
@@ -234,11 +241,14 @@ export function getCachedCapture(
  * @param sessionName - tmux session name (cache key)
  * @param output - Captured output string
  * @param capturedLines - Number of lines the output was captured with
+ * @param fetchStartedAt - When the capture began (Issue #3798); defaults to
+ *   now, the write time, for a writer that does not know it
  */
 export function setCachedCapture(
   sessionName: string,
   output: string,
-  capturedLines: number
+  capturedLines: number,
+  fetchStartedAt?: number
 ): void {
   const cache = getCache();
   const now = Date.now();
@@ -270,7 +280,21 @@ export function setCachedCapture(
     output,
     capturedLines,
     timestamp: now,
+    fetchStartedAt: fetchStartedAt ?? now,
   });
+}
+
+/**
+ * When the cached capture of `sessionName` was started, or null when nothing
+ * live is cached (Issue #3798). Read-only: an expired entry is left for the
+ * next read to evict.
+ *
+ * @param sessionName - tmux session name (cache key)
+ */
+export function getCachedCaptureFetchStartedAt(sessionName: string): number | null {
+  const entry = getCache().get(sessionName);
+  if (!entry || Date.now() - entry.timestamp > CACHE_TTL_MS) return null;
+  return entry.fetchStartedAt;
 }
 
 // =========================================================================
@@ -374,6 +398,7 @@ export async function getOrFetchCapture(
   // 3. Create new fetch promise
   // Issue #3734: snapshot the generation before fetchFn() starts
   const generation = getCaptureGeneration(sessionName);
+  const fetchStartedAt = Date.now();
   const fetchPromise = fetchFn();
   inflight.set(sessionName, fetchPromise);
 
@@ -383,7 +408,7 @@ export async function getOrFetchCapture(
     // Cache non-empty results only [SEC4-007], and only when no invalidation
     // happened while waiting (Issue #3734)
     if (output.length > 0 && isCaptureGenerationCurrent(sessionName, generation)) {
-      setCachedCapture(sessionName, output, CACHE_MAX_CAPTURE_LINES);
+      setCachedCapture(sessionName, output, CACHE_MAX_CAPTURE_LINES, fetchStartedAt);
     }
 
     return sliceOutput(output, requestedLines);

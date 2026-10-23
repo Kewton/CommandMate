@@ -1,6 +1,6 @@
 /** Response checking and extraction logic for CLI tool polling (Issue #575 split from response-poller.ts). */
 
-import { captureSessionOutput, isSessionRunning } from '@/lib/session/cli-session';
+import { captureSessionOutput, getCaptureFetchStartedAt, isSessionRunning } from '@/lib/session/cli-session';
 import { getDbInstance } from '@/lib/db/db-instance';
 import {
   createMessage,
@@ -104,7 +104,16 @@ import { isPromptPushSuppressed } from '@/lib/push/prompt-push-gate';
 import { notifyUpstreamFaultPush } from '@/lib/push/failure-push-notifier';
 import { matchUpstreamFault } from '@/lib/detection/upstream-faults';
 import { startWaitingPushNotifier } from '@/lib/push/waiting-push-notifier';
-import { getWaitingEpisode, observeWaitingEdge } from '@/lib/session/waiting-episode-state';
+import {
+  captureFrameTime,
+  commitWaitingObservation,
+  observeWaiting,
+  planWaitingObservation,
+  startWaitingObservation,
+  type CapturedFrameTime,
+  type ObservationStart,
+} from '@/lib/session/waiting-episode-binding';
+import { promptWaitingReading } from '@/lib/detection/waiting-screen-reading';
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
 import {
   isBlankCleanedResponse,
@@ -656,6 +665,11 @@ interface ResponseCheckContext {
   /** `instanceId ?? cliToolId`. */
   resolvedInstanceId: string;
   pollerKey: string;
+  /**
+   * Issue #3798: the waiting episode as this tick found it, fixed before its
+   * first `await`. The reply's close is refused when the episode moved since.
+   */
+  observationStart: ObservationStart;
 }
 
 /**
@@ -815,13 +829,15 @@ function extractCompletedTurn(
  * @param promptDetection - The detection that passed the #2457 gate
  * @param result - The complete extraction this tick made
  * @param isFullScreenTui - True for opencode and copilot, which keep polling after a prompt
+ * @param frameTime - When the frame this prompt was read on was fetched (Issue #3798)
  * @returns What `checkForResponse` returns for this tick
  */
 function savePromptMessage(
   ctx: ResponseCheckContext,
   promptDetection: PromptDetectionResult,
   result: ExtractionResult,
-  isFullScreenTui: boolean
+  isFullScreenTui: boolean,
+  frameTime: CapturedFrameTime
 ): boolean {
   const { db, worktree, worktreeId, cliToolId, instanceId, resolvedInstanceId, pollerKey } = ctx;
 
@@ -837,6 +853,32 @@ function savePromptMessage(
       cliToolId,
       instanceId: resolvedInstanceId,
       generation: currentPollerOwner()?.generation,
+    });
+    return false;
+  }
+
+  // Issue #3798 (design 規則 8): what this prompt does to the waiting episode,
+  // decided BEFORE the dedup below registers its hash. A frame fetched before
+  // the close of the very confirmation it shows — an answer and a stop landed
+  // during the capture — is not a new wait: nothing is saved, registered or
+  // pushed, and the next tick's frame decides. Planned against the state as it
+  // is now (`freshPrompt`), not as the tick found it.
+  const plan = planWaitingObservation({
+    worktreeId,
+    cliToolId,
+    instanceId,
+    observer: 'response-checker',
+    start: ctx.observationStart,
+    reading: promptWaitingReading(promptDetection.promptData ?? null),
+    ...frameTime,
+    freshPrompt: true,
+  });
+  if (plan.action === 'ignored') {
+    logger.info('prompt-observation-stale', {
+      worktreeId,
+      cliToolId,
+      instanceId: resolvedInstanceId,
+      because: plan.ignoredBecause,
     });
     return false;
   }
@@ -907,15 +949,16 @@ function savePromptMessage(
   //  1. the notification is raised first, while it still has the prompt's
   //     own question to quote — it records the episode in the dedup, so
   //     whichever path reports the wait second says nothing;
-  //  2. `observeWaitingEdge` then opens that same episode, which is what
-  //     lets the edge listener (and #1788's WebSocket frame) agree with this
-  //     call about *which* wait this is instead of raising a second one.
+  //  2. the observation is then committed, opening that same episode, which
+  //     is what lets the edge listener (and #1788's WebSocket frame) agree
+  //     with this call about *which* wait this is instead of raising a second
+  //     one.
   //
-  // Both use one timestamp so the episode the notification claims and the
-  // episode the store opens are the same number.
-  const promptObservedAt = Date.now();
-  const promptWaitingSince =
-    getWaitingEpisode(worktreeId, cliToolId, instanceId)?.since ?? promptObservedAt;
+  // Both use the plan's `since` (Issue #3798: the open wait's when it is kept,
+  // the plan's time when the prompt opens or replaces one), so the episode
+  // the notification claims and the episode the store holds are the same.
+  // No `await` from the plan to the commit.
+  const promptWaitingSince = plan.since ?? plan.at;
 
   // Issue #1999: Auto-Yes is a declaration that this session's prompts are
   // answered without a human, so notifying for one is telling the reader the
@@ -944,14 +987,7 @@ function savePromptMessage(
     }).catch(() => {});
   }
 
-  observeWaitingEdge({
-    worktreeId,
-    cliToolId,
-    instanceId,
-    waiting: true,
-    kind: 'prompt',
-    now: promptObservedAt,
-  });
+  commitWaitingObservation(plan);
 
   if (!isFullScreenTui) {
     stopPolling(worktreeId, cliToolId, instanceId);
@@ -1468,7 +1504,18 @@ async function recordCompletedResponse(
   // API, and every later prompt would be folded into that stale episode and
   // silently deduped. Nothing to close is a no-op, and no notification is
   // raised for a closing edge.
-  observeWaitingEdge({ worktreeId, cliToolId, instanceId, waiting: false });
+  //
+  // Issue #3798: only the episode this tick started against — one that opened
+  // or moved while the reader and the log ran is not this reply's to end.
+  observeWaiting({
+    worktreeId,
+    cliToolId,
+    instanceId,
+    observer: 'response-checker',
+    start: ctx.observationStart,
+    reading: { kind: 'not-waiting' },
+    frameCapturedAt: 0,
+  });
 
   // Web Push fan-out (Issue #1125): session completed (running → idle).
   // Fire-and-forget — push is advisory and must never block/break the poller.
@@ -1533,6 +1580,8 @@ export async function checkForResponse(
       instanceId,
       resolvedInstanceId,
       pollerKey,
+      // Issue #3798: before the tick's first `await`.
+      observationStart: startWaitingObservation(worktreeId, cliToolId, instanceId),
     };
 
     // Check if CLI tool session is running
@@ -1600,7 +1649,14 @@ export async function checkForResponse(
     // Capture current output. The requested width IS the capture window, so it is
     // taken from the same constant extractResponse() measures saturation against
     // (Issue #1670) — a literal here would silently decouple the two.
+    const captureRequestedAt = Date.now();
     const output = await captureSessionOutput(worktreeId, cliToolId, CACHE_MAX_CAPTURE_LINES, instanceId);
+    // Issue #3798: when that frame was fetched — from the cache, it may be older
+    // than this tick.
+    const frameTime = captureFrameTime(
+      () => getCaptureFetchStartedAt(worktreeId, cliToolId, instanceId),
+      captureRequestedAt,
+    );
     // Issue #3705: there is no `await` from here to the transcript reader
     // inside the save path, so this one answer covers every write in between —
     // the fault notifier, the TUI accumulator, the prompt sweep, the skip
@@ -1644,7 +1700,7 @@ export async function checkForResponse(
       // after the answer must not re-save the reply underneath, #2230).
       if (owns) resetDuplicateResponseSkipStreak(pollerKey);
       // Asks for itself (#3701), before the prompt dedup.
-      return savePromptMessage(ctx, promptDetection, result, isFullScreenTui);
+      return savePromptMessage(ctx, promptDetection, result, isFullScreenTui, frameTime);
     }
     // Issue #3538: a finished frame without a live prompt ends the run of
     // duplicate prompt ticks, as an unfinished one does in `extractCompletedTurn`.

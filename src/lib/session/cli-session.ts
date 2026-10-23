@@ -18,6 +18,7 @@ import type { SessionTransport } from '@/lib/tmux/session-transport';
 import { getPollingTmuxTransport } from '@/lib/tmux/polling-tmux-transport';
 import {
   getOrFetchCapture,
+  getCachedCaptureFetchStartedAt,
   getCaptureGeneration,
   isCaptureGenerationCurrent,
   setCachedCapture,
@@ -141,6 +142,26 @@ export async function captureSessionOutput(
     log.error('captureSessionOutput:failed', { error: errorMessage });
     throw new Error(`Failed to capture ${cliTool.name} output: ${errorMessage}`);
   }
+}
+
+/**
+ * When the capture {@link captureSessionOutput} now serves for this session was
+ * started, or null when nothing live is cached (Issue #3798). Read right after
+ * a capture, it says how old the frame just read may be: a cached frame can
+ * predate the call by the cache's TTL.
+ *
+ * @param worktreeId - Worktree ID
+ * @param cliToolId - CLI tool ID
+ * @param instanceId - Optional agent instance ID (defaults to primary)
+ * @returns Epoch ms, or null
+ */
+export function getCaptureFetchStartedAt(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId?: string
+): number | null {
+  const { sessionName } = resolveSessionContext(worktreeId, cliToolId, instanceId);
+  return getCachedCaptureFetchStartedAt(sessionName);
 }
 
 /**
