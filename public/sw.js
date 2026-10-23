@@ -181,30 +181,61 @@ self.addEventListener('message', function (event) {
 // This is also why there is no "close and show nothing" branch: a resolution
 // with nothing to close still shows its card. That is the contract, not an
 // oversight.
-function replaceStaleNotifications(title, options) {
+//
+// --- Issue #3798 (the resolution names its episode) -------------------------
+// A resolution may carry `resolvedEpisodeId`: the waiting episode whose card it
+// clears. It can arrive after the card of a NEWER wait in the same worktree
+// (same tag) — the next prompt's push overtook it — and closing that card would
+// hide a wait that is still open. So: cards of the resolved episode, and cards
+// that name no episode, are closed and the resolution shown in their place, as
+// before; a card of a different episode is closed too and then shown again with
+// the same content, silently (`silent: true`, `renotify: false`), INSTEAD of the
+// resolution. Every branch still calls `showNotification` exactly once, so the
+// `userVisibleOnly` contract above holds. A resolution without the id (a mark
+// written before #3798) clears the tag as it always has.
+function replaceStaleNotifications(title, options, resolvedEpisodeId) {
   var registration = self.registration;
   var tag = options.tag;
   var closing;
 
   if (!tag || typeof registration.getNotifications !== 'function') {
-    closing = Promise.resolve();
+    closing = Promise.resolve(null);
   } else {
     closing = registration
       // Correct either way: whether an engine hands back every card carrying the tag or only the newest one, the loop closes exactly what it was handed (iOS is still unmeasured on this point — Issue #2155).
       .getNotifications({ tag: tag })
       .then(function (stale) {
+        var newer = null;
         for (var i = 0; i < stale.length; i++) {
+          var cardEpisodeId = stale[i].data && stale[i].data.episodeId;
+          if (resolvedEpisodeId && cardEpisodeId && cardEpisodeId !== resolvedEpisodeId) {
+            // The last one handed back is the newest card of another episode.
+            newer = stale[i];
+          }
           stale[i].close();
         }
+        return newer;
       })
       .catch(function (_err) {
         // A registration that cannot enumerate its notifications still has to
         // show one. Showing the replacement below is what keeps the promise;
         // on this path the tag alone collapses the stale card on most engines.
+        return null;
       });
   }
 
-  return closing.then(function () {
+  return closing.then(function (newer) {
+    if (newer) {
+      return registration.showNotification(newer.title, {
+        body: newer.body,
+        tag: tag,
+        renotify: false,
+        silent: true,
+        icon: newer.icon || options.icon,
+        badge: newer.badge || options.badge,
+        data: newer.data,
+      });
+    }
     return registration.showNotification(title, options);
   });
 }
@@ -243,6 +274,12 @@ self.addEventListener('push', function (event) {
   // different, louder instruction.
   if (resolved) options.silent = true;
 
+  // Issue #3798: a waiting card remembers its episode, so a later resolution
+  // can tell it from the card it is clearing. Absent from older payloads.
+  if (typeof payload.episodeId === 'string') options.data.episodeId = payload.episodeId;
+  var resolvedEpisodeId =
+    resolved && typeof payload.resolvedEpisodeId === 'string' ? payload.resolvedEpisodeId : null;
+
   // --- Issue #2155 ---------------------------------------------------------
   // Every TAGGED push takes the close-then-show path, not just resolutions.
   // Safari/iOS does not collapse same-tag cards on a plain `showNotification`,
@@ -253,7 +290,7 @@ self.addEventListener('push', function (event) {
   // nothing to replace and goes straight to `showNotification`.
   event.waitUntil(
     options.tag
-      ? replaceStaleNotifications(title, options)
+      ? replaceStaleNotifications(title, options, resolvedEpisodeId)
       : self.registration.showNotification(title, options)
   );
 });

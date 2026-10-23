@@ -87,6 +87,19 @@
  * this module's; it is written up as a remaining limitation in §6.2 of the
  * design note and pinned by `tests/unit/push/restart-card-state-2057.test.ts`.
  *
+ * ## Which episode the card is about (Issue #3798)
+ *
+ * The mark also keeps the id of the waiting episode the card was last sent
+ * for, so the resolution can name it (`resolvedEpisodeId`) and the Service
+ * Worker can leave a newer episode's card alone. The id lives in a second row,
+ * {@link PROMPT_CARD_EPISODE_KEY_PREFIX}`<worktreeId>`, written in the same
+ * statement as the time row — one write, so a reader never sees a new time
+ * with an old id — and its value repeats the time (`<at>:<episodeId>`): an id
+ * whose time is not the time row's is not this card's and reads as none. The
+ * time row's value stays the bare timestamp it was before #3798, so a mark
+ * written by an older server (time row only) reads as a card with no id, and
+ * an older server reading a newer mark sees exactly what it wrote.
+ *
  * @module lib/push/prompt-card-state
  */
 
@@ -105,6 +118,13 @@ const logger = createLogger('push/prompt-card-state');
  * spell another id's key.
  */
 export const PROMPT_CARD_KEY_PREFIX = 'push_prompt_card:';
+
+/**
+ * `app_settings.key` prefix for the episode id beside one worktree's card mark
+ * (Issue #3798). Not matched by `${PROMPT_CARD_KEY_PREFIX}*`: the character
+ * after `push_prompt_card` is `_` here and `:` there.
+ */
+export const PROMPT_CARD_EPISODE_KEY_PREFIX = 'push_prompt_card_episode:';
 
 /**
  * How long a persisted mark is believed.
@@ -150,13 +170,45 @@ export const PROMPT_CARD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 declare global {
   // eslint-disable-next-line no-var
   var __promptPushCards: Map<string, number> | undefined;
+  // eslint-disable-next-line no-var
+  var __promptPushCardEpisodes: Map<string, string | null> | undefined;
 }
 
 /** worktreeId -> epoch ms the most recent prompt card was fanned out. */
 const cards = getOrInitGlobal('__promptPushCards', () => new Map<string, number>());
 
+/**
+ * worktreeId -> the episode id that card was sent for, or null (Issue #3798).
+ * Set and dropped together with {@link cards}; a worktree in `cards` with no
+ * entry here reads as id-less.
+ */
+const cardEpisodes = getOrInitGlobal('__promptPushCardEpisodes', () => new Map<string, string | null>());
+
 function keyFor(worktreeId: string): string {
   return `${PROMPT_CARD_KEY_PREFIX}${worktreeId}`;
+}
+
+function episodeKeyFor(worktreeId: string): string {
+  return `${PROMPT_CARD_EPISODE_KEY_PREFIX}${worktreeId}`;
+}
+
+/** A card mark as storage holds it. */
+interface StoredMark {
+  at: number;
+  /** Null for a mark written without an id, or by a server older than #3798. */
+  episodeId: string | null;
+}
+
+/**
+ * The episode id from its row, if that row belongs to the mark written at `at`.
+ * `<at>:<id>`; an empty id, a different time or a malformed value is no id.
+ */
+function parseEpisodeValue(value: string | undefined, at: number): string | null {
+  if (value === undefined) return null;
+  const sep = value.indexOf(':');
+  if (sep < 0 || value.slice(0, sep) !== String(at)) return null;
+  const id = value.slice(sep + 1);
+  return id === '' ? null : id;
 }
 
 function isExpired(at: number, now: number): boolean {
@@ -164,18 +216,21 @@ function isExpired(at: number, now: number): boolean {
 }
 
 /** The persisted mark for one worktree, or null. Never throws. */
-function readRow(worktreeId: string): number | null {
+function readRow(worktreeId: string): StoredMark | null {
   try {
-    const row = getDbInstance()
-      .prepare('SELECT value FROM app_settings WHERE key = ?')
-      .get(keyFor(worktreeId)) as { value: string } | undefined;
+    const rows = getDbInstance()
+      .prepare('SELECT key, value FROM app_settings WHERE key IN (?, ?)')
+      .all(keyFor(worktreeId), episodeKeyFor(worktreeId)) as Array<{ key: string; value: string }>;
 
+    const row = rows.find((r) => r.key === keyFor(worktreeId));
     if (!row) return null;
     const at = Number.parseInt(row.value, 10);
     // A value nobody can read is treated as no card: it fails towards *not*
     // spending a push, the same direction `decidePromptResolution` chose for a
     // database that cannot answer.
-    return Number.isFinite(at) ? at : null;
+    if (!Number.isFinite(at)) return null;
+    const episodeRow = rows.find((r) => r.key === episodeKeyFor(worktreeId));
+    return { at, episodeId: parseEpisodeValue(episodeRow?.value, at) };
   } catch (error) {
     logger.debug('prompt-card-read-failed', {
       worktreeId,
@@ -208,18 +263,24 @@ function readAllRows(): Array<[string, number]> {
   }
 }
 
-/** Write one worktree's mark through to storage. Never throws. */
-function writeRow(worktreeId: string, at: number): void {
+/**
+ * Write one worktree's mark through to storage. Never throws.
+ *
+ * Issue #3798: the time row and the episode row in one statement — an id-less
+ * mark writes an empty id, so a newer id-less card never leaves an older
+ * card's id behind.
+ */
+function writeRow(worktreeId: string, at: number, episodeId: string | null): void {
   try {
     getDbInstance()
       .prepare(`
         INSERT INTO app_settings (key, value, created_at, updated_at)
-        VALUES (?, ?, ?, ?)
+        VALUES (?, ?, ?, ?), (?, ?, ?, ?)
         ON CONFLICT(key) DO UPDATE SET
           value = excluded.value,
           updated_at = excluded.updated_at
       `)
-      .run(keyFor(worktreeId), String(at), at, at);
+      .run(keyFor(worktreeId), String(at), at, at, episodeKeyFor(worktreeId), `${at}:${episodeId ?? ''}`, at, at);
   } catch (error) {
     logger.debug('prompt-card-write-failed', {
       worktreeId,
@@ -232,8 +293,9 @@ function writeRow(worktreeId: string, at: number): void {
 function deleteRow(worktreeId: string): boolean {
   try {
     return (
-      getDbInstance().prepare('DELETE FROM app_settings WHERE key = ?').run(keyFor(worktreeId))
-        .changes > 0
+      getDbInstance()
+        .prepare('DELETE FROM app_settings WHERE key IN (?, ?)')
+        .run(keyFor(worktreeId), episodeKeyFor(worktreeId)).changes > 0
     );
   } catch (error) {
     logger.debug('prompt-card-delete-failed', {
@@ -250,10 +312,19 @@ function deleteRow(worktreeId: string): boolean {
  * Idempotent by overwrite: a second prompt in the same worktree (another
  * instance, or the #1790 reminder) replaces the same card on the device, so it
  * refreshes the timestamp rather than adding an entry.
+ *
+ * @param episodeId Issue #3798: the waiting episode this card is about, or
+ *   null when the producer did not name one. The last card's id replaces the
+ *   previous one — the device shows one card per worktree.
  */
-export function markPromptCardShown(worktreeId: string, at: number = Date.now()): void {
+export function markPromptCardShown(
+  worktreeId: string,
+  at: number = Date.now(),
+  episodeId: string | null = null
+): void {
   cards.set(worktreeId, at);
-  writeRow(worktreeId, at);
+  cardEpisodes.set(worktreeId, episodeId);
+  writeRow(worktreeId, at, episodeId);
 }
 
 /**
@@ -269,21 +340,39 @@ export function markPromptCardShown(worktreeId: string, at: number = Date.now())
  *   {@link PROMPT_CARD_MAX_AGE_MS} without a fake clock.
  */
 export function hasPromptCard(worktreeId: string, now: number = Date.now()): boolean {
-  const at = cards.get(worktreeId) ?? readRow(worktreeId);
-  if (at === null || at === undefined) return false;
+  const remembered = cards.get(worktreeId);
+  const mark: StoredMark | null =
+    remembered !== undefined
+      ? { at: remembered, episodeId: cardEpisodes.get(worktreeId) ?? null }
+      : readRow(worktreeId);
+  if (mark === null) return false;
 
-  if (isExpired(at, now)) {
+  if (isExpired(mark.at, now)) {
     // Dropped as it is read rather than by a sweep: this is the only question
     // asked about a given worktree's card, so the read is the moment the
     // expiry becomes observable, and there is nothing a background pass would
     // catch earlier.
     cards.delete(worktreeId);
+    cardEpisodes.delete(worktreeId);
     deleteRow(worktreeId);
     return false;
   }
 
-  cards.set(worktreeId, at);
+  cards.set(worktreeId, mark.at);
+  cardEpisodes.set(worktreeId, mark.episodeId);
   return true;
+}
+
+/**
+ * The episode id the worktree's outstanding card was sent for (Issue #3798),
+ * or null — no card, or a card marked without an id (including every mark an
+ * older server wrote). Read the same way {@link hasPromptCard} reads the mark:
+ * memory first, storage after a restart. Does not expire anything; ask
+ * {@link hasPromptCard} first.
+ */
+export function getPromptCardEpisodeId(worktreeId: string): string | null {
+  if (cards.has(worktreeId)) return cardEpisodes.get(worktreeId) ?? null;
+  return readRow(worktreeId)?.episodeId ?? null;
 }
 
 /**
@@ -295,6 +384,7 @@ export function hasPromptCard(worktreeId: string, now: number = Date.now()): boo
  *   from `app_settings` still reports as cleared.
  */
 export function clearPromptCard(worktreeId: string): boolean {
+  cardEpisodes.delete(worktreeId);
   const wasInMemory = cards.delete(worktreeId);
   const wasPersisted = deleteRow(worktreeId);
   return wasInMemory || wasPersisted;
@@ -309,10 +399,11 @@ export function clearPromptCard(worktreeId: string): boolean {
  */
 export function clearAllPromptCards(): void {
   cards.clear();
+  cardEpisodes.clear();
   try {
     getDbInstance()
-      .prepare('DELETE FROM app_settings WHERE key GLOB ?')
-      .run(`${PROMPT_CARD_KEY_PREFIX}*`);
+      .prepare('DELETE FROM app_settings WHERE key GLOB ? OR key GLOB ?')
+      .run(`${PROMPT_CARD_KEY_PREFIX}*`, `${PROMPT_CARD_EPISODE_KEY_PREFIX}*`);
   } catch (error) {
     logger.debug('prompt-card-clear-all-failed', {
       error: error instanceof Error ? error.message : String(error),
@@ -331,6 +422,7 @@ export function clearAllPromptCards(): void {
  */
 export function forgetPromptCardMemory(): void {
   cards.clear();
+  cardEpisodes.clear();
 }
 
 /**

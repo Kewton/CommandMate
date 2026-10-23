@@ -95,6 +95,8 @@ declare global {
 interface WaitingPushRecord {
   /** The episode this instance was last notified about (`WaitingEpisode.since`). */
   since: number;
+  /** That episode's id (Issue #3798), once any notification for it named one. */
+  episodeId?: string;
   /** Whether the one permitted escalation for that episode has been sent. */
   escalated: boolean;
 }
@@ -108,6 +110,13 @@ export interface WaitingDedupEvent {
   instanceId: string;
   /** The episode's `waitingSince` — its identity, not merely its age. */
   since: number;
+  /**
+   * The episode's id (Issue #3798), when the producer knows it. Two waits can
+   * share a `since`; when both this event and the record carry an id, the id
+   * decides. Either side without one, `since` does — so an id-less producer and
+   * the id-bearing notifier still collapse onto one notification per wait.
+   */
+  episodeId?: string | null;
   /** True for the escalation re-notification, which is allowed once per episode. */
   escalated?: boolean;
 }
@@ -128,17 +137,30 @@ export interface WaitingDedupEvent {
  *  - the escalation → allowed exactly once per episode;
  *  - a new episode (the wait ended and another began) → sent again, even if the
  *    prompt text and the elapsed time are identical.
+ *
+ * Issue #3798: "the same episode" is the mixed rule `prompt-push-gate` holds
+ * its hold by — both ids present and equal, or one absent and the `since`s
+ * equal. Kept inline rather than imported: this module stays a leaf.
  */
 export function shouldSendWaitingPush(event: WaitingDedupEvent): boolean {
   const key = `${event.worktreeId}::${event.instanceId}`;
   const escalated = event.escalated === true;
+  const episodeId = event.episodeId ?? undefined;
   const prev = waitingSent.get(key);
+  const sameEpisode =
+    prev !== undefined &&
+    (prev.episodeId !== undefined && episodeId !== undefined
+      ? prev.episodeId === episodeId
+      : prev.since === event.since);
 
-  if (prev && prev.since === event.since && (prev.escalated || !escalated)) {
+  if (prev && sameEpisode && (prev.escalated || !escalated)) {
+    // An id-less producer recorded this wait first; it is named now.
+    if (prev.episodeId === undefined && episodeId !== undefined) prev.episodeId = episodeId;
     return false;
   }
 
-  waitingSent.set(key, { since: event.since, escalated });
+  const recordedId = episodeId ?? (sameEpisode ? prev?.episodeId : undefined);
+  waitingSent.set(key, { since: event.since, ...(recordedId !== undefined ? { episodeId: recordedId } : {}), escalated });
   return true;
 }
 

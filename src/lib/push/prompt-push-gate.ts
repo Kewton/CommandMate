@@ -46,6 +46,9 @@
  * `at` lines up with the current wait. Here that is `at >= waitingSince` — the
  * suppression was recorded at or after this episode opened. A record from an
  * earlier episode is older than `since` and is ignored.
+ * Issue #3798: a record that names its episode (`episodeId`) is matched to a
+ * wait that names one by that id instead, since two episodes can share a
+ * `since`; either side without an id falls back to the time comparison.
  *
  * The poller re-evaluates a suppressed prompt on every poll (the duplicate
  * guard only remembers *answered* prompts), so `at` stays current for as long
@@ -73,6 +76,19 @@
  * moment the gate first held this episode and the poller's last answer, so a
  * second prompt right after an answer gets a full hold of its own. Both
  * producers ask through {@link decideAndLogPromptPush} and share that origin.
+ *
+ * ## Which hold belongs to which wait (Issue #3798)
+ *
+ * A wait is named by its episode id when the caller has one
+ * (`waitingEpisodeId`), and by `waitingSince` when it does not. The two are
+ * matched by the rule {@link isSameWait} states, the same rule the episode
+ * dedup in `notification-dedup` uses: both ids present and equal, or one of
+ * them absent and the `since`s equal. So an id-less producer (the response
+ * poller, opencode's question push) and the id-bearing notifier asking about
+ * one wait share one hold, and the session wait's tick (#3796) is read once,
+ * when that hold begins. A rebind keeps the id, so it keeps the hold and its
+ * end; a replacement brings a new id, so it begins a new hold that reads the
+ * tick at its own start — even when the new wait reuses the old `since`.
  *
  * ## The hold reaches the session wait's tick (Issue #3791)
  *
@@ -118,7 +134,10 @@ import {
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
 import type { AutoYesSuppressionReason } from '@/lib/polling/auto-yes-resolver';
-import { getLastPolicySuppression } from '@/lib/polling/auto-yes-suppression-state';
+import {
+  getLastPolicySuppression,
+  type EpisodeScopedPolicySuppression,
+} from '@/lib/polling/auto-yes-suppression-state';
 import { getOrInitGlobal } from '@/lib/global-state';
 import type { AutoYesPollerState } from '@/lib/polling/auto-yes-poller-state';
 
@@ -141,6 +160,12 @@ export const AUTO_YES_ANSWER_GRACE_MS = Math.max(
 interface AutoYesHoldStart {
   /** The episode's `waitingSince`: a new episode starts a new hold. */
   since: number;
+  /**
+   * The episode's id (Issue #3798), once any caller named it. Written into a
+   * hold an id-less caller began, the first time an id-bearing caller asks
+   * about the same wait.
+   */
+  episodeId?: string;
   firstHeldAt: number;
   /**
    * Issue #3791: the session wait's tick pending when the hold began
@@ -158,6 +183,26 @@ declare global {
 /** compositeKey -> the hold of that session's current episode. globalThis per #1736. */
 const autoYesHolds = getOrInitGlobal('__promptPushAutoYesHolds', () => new Map<string, AutoYesHoldStart>());
 
+/** How a caller names one wait (Issue #3798): its `since`, and its episode id when known. */
+export interface WaitIdentity {
+  since: number;
+  episodeId?: string | null;
+}
+
+/**
+ * Whether two names are the same wait (Issue #3798): both ids present and
+ * equal, or one of them absent and the `since`s equal. The id decides whenever
+ * both sides have one — two waits can share a `since` (the same millisecond, a
+ * structured `at` reused by the next prompt), and one wait keeps its id across
+ * a rebind.
+ */
+export function isSameWait(a: WaitIdentity, b: WaitIdentity): boolean {
+  const aId = a.episodeId ?? null;
+  const bId = b.episodeId ?? null;
+  if (aId !== null && bId !== null) return aId === bId;
+  return a.since === b.since;
+}
+
 /**
  * Where this wait's `auto-yes-answering` hold is counted from (Issue #3757):
  * the later of the moment the gate first held this episode (recorded here on
@@ -170,15 +215,24 @@ const autoYesHolds = getOrInitGlobal('__promptPushAutoYesHolds', () => new Map<s
  * @param now - Epoch ms of the decision; recorded as the start of a new hold
  */
 export function autoYesHoldStartedAt(
-  input: Pick<PromptPushGateInput, 'worktreeId' | 'cliToolId' | 'instanceId' | 'waitingSince'>,
+  input: Pick<PromptPushGateInput, 'worktreeId' | 'cliToolId' | 'instanceId' | 'waitingSince' | 'waitingEpisodeId'>,
   now: number,
 ): number {
   const key = buildCompositeKey(input.worktreeId, input.cliToolId, input.instanceId);
   sweepStaleAutoYesHolds(now);
+  const episodeId = input.waitingEpisodeId ?? undefined;
   let hold = autoYesHolds.get(key);
-  if (hold === undefined || hold.since !== input.waitingSince) {
-    hold = { since: input.waitingSince, firstHeldAt: now, sessionWaitTick: pendingSessionWaitTick(key, now) };
+  if (hold === undefined || !isSameWait(hold, { since: input.waitingSince, episodeId })) {
+    hold = {
+      since: input.waitingSince,
+      ...(episodeId !== undefined ? { episodeId } : {}),
+      firstHeldAt: now,
+      sessionWaitTick: pendingSessionWaitTick(key, now),
+    };
     autoYesHolds.set(key, hold);
+  } else if (hold.episodeId === undefined && episodeId !== undefined) {
+    // Issue #3798: an id-less caller began this hold; the wait is now named.
+    hold.episodeId = episodeId;
   }
   // Issue #3770: Auto-Yes switched off and on again inside one episode starts a
   // fresh hold; the old origin would read the poller's silence while it was off
@@ -234,7 +288,7 @@ function effectiveSessionWaitTickAt(tick: NonNullable<AutoYesHoldStart['sessionW
  * @param now - Epoch ms of the decision; recorded as the start of a new hold
  */
 export function autoYesHoldEndsAt(
-  input: Pick<PromptPushGateInput, 'worktreeId' | 'cliToolId' | 'instanceId' | 'waitingSince'>,
+  input: Pick<PromptPushGateInput, 'worktreeId' | 'cliToolId' | 'instanceId' | 'waitingSince' | 'waitingEpisodeId'>,
   now: number,
 ): number {
   const startedAt = autoYesHoldStartedAt(input, now);
@@ -263,13 +317,19 @@ function sweepStaleAutoYesHolds(now: number): void {
  * Drop the hold of one session (Issue #3770): Auto-Yes went off, or the
  * episode closed.
  *
- * @param since - Issue #3776: drop it only when it is this episode's hold. A
+ * @param wait - Issue #3776: drop it only when it is this episode's hold. A
  *   caller retiring one episode must not take the next episode's origin with it
  *   (that hold would start over, and its notification come up to a hold late).
- *   Omitted, the session's hold goes whatever its episode.
+ *   A number is the episode's `since`; Issue #3798 adds the episode's id, matched
+ *   by {@link isSameWait}. Omitted, the session's hold goes whatever its episode.
  */
-export function forgetAutoYesHold(key: string, since?: number): void {
-  if (since !== undefined && autoYesHolds.get(key)?.since !== since) return;
+export function forgetAutoYesHold(key: string, wait?: number | WaitIdentity): void {
+  if (wait !== undefined) {
+    const hold = autoYesHolds.get(key);
+    if (hold === undefined) return;
+    const identity: WaitIdentity = typeof wait === 'number' ? { since: wait } : wait;
+    if (!isSameWait(hold, identity)) return;
+  }
   autoYesHolds.delete(key);
 }
 
@@ -286,6 +346,12 @@ export interface PromptPushGateInput {
   instanceId?: string;
   /** The waiting episode's `since` (#1786) — the wait's identity, not its age. */
   waitingSince: number;
+  /**
+   * The waiting episode's id (Issue #3798), when the caller knows it. Matched
+   * to holds and suppression records by {@link isSameWait}; omitted, the
+   * `since` comparisons of #3757 / #1684 apply.
+   */
+  waitingEpisodeId?: string | null;
   /** True for the "still waiting" reminder (#1790), which is never suppressed. */
   escalated?: boolean;
   /** Epoch ms the decision is made at; defaults to now (Issue #3757). */
@@ -341,7 +407,7 @@ export interface PromptPushGateDecision {
  * rather than only the outcome.
  */
 export function decidePromptPush(input: PromptPushGateInput): PromptPushGateDecision {
-  const { worktreeId, cliToolId, instanceId, waitingSince } = input;
+  const { worktreeId, cliToolId, instanceId } = input;
 
   const state = getAutoYesState(worktreeId, cliToolId, instanceId);
   if (state === null || !state.enabled) {
@@ -349,7 +415,7 @@ export function decidePromptPush(input: PromptPushGateInput): PromptPushGateDeci
   }
 
   const suppression = getLastPolicySuppression(worktreeId, cliToolId, instanceId);
-  if (suppression !== null && suppression.at >= waitingSince) {
+  if (suppression !== null && suppressionBelongsToWait(suppression, input)) {
     return { suppress: false, reason: 'policy-withheld', suppressedBy: suppression.reason };
   }
 
@@ -364,6 +430,21 @@ export function decidePromptPush(input: PromptPushGateInput): PromptPushGateDeci
   }
 
   return { suppress: true, reason: 'auto-yes-answering' };
+}
+
+/**
+ * Whether a policy-suppression record is about this wait (Issue #3798). By the
+ * episode id when both the record and the caller carry one — a record written
+ * for an earlier episode is not this wait's reason however recent its `at` —
+ * and by #1684's `at >= waitingSince` otherwise.
+ */
+function suppressionBelongsToWait(
+  suppression: EpisodeScopedPolicySuppression,
+  input: Pick<PromptPushGateInput, 'waitingSince' | 'waitingEpisodeId'>,
+): boolean {
+  const waitId = input.waitingEpisodeId ?? null;
+  if (suppression.episodeId !== undefined && waitId !== null) return suppression.episodeId === waitId;
+  return suppression.at >= input.waitingSince;
 }
 
 /**
@@ -404,6 +485,7 @@ export function decideAndLogPromptPush(
     cliToolId: input.cliToolId,
     instanceId: input.instanceId ?? input.cliToolId,
     waitingSince: input.waitingSince,
+    ...(input.waitingEpisodeId ? { waitingEpisodeId: input.waitingEpisodeId } : {}),
     escalated: input.escalated === true,
     reason: decision.reason,
     ...(decision.stopReason !== undefined ? { stopReason: decision.stopReason } : {}),

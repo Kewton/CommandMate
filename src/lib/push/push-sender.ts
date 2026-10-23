@@ -218,6 +218,15 @@ export interface NotificationEvent {
    * which path reported it. Absent, the legacy 30 s content dedup applies.
    */
   waitingSince?: number | null;
+  /**
+   * The waiting episode's id (Issue #3798), beside {@link waitingSince}. Two
+   * waits can share a `since`, so the episode dedup compares ids when both the
+   * record and this event carry one, and the card this sends is marked with it
+   * (`prompt-card-state`) and carries it to the Service Worker
+   * ({@link PushPayload.episodeId}). Absent — the response poller and the
+   * opencode question push today — the `since` alone names the wait, as before.
+   */
+  waitingEpisodeId?: string | null;
   /** Instance id for the episode key; falls back to {@link agentName}. */
   instanceId?: string;
   /** True for the "still waiting" re-notification (Issue #1790). */
@@ -237,6 +246,13 @@ export interface NotificationEvent {
    * resolution is a *displayed* notification and not a silent close.
    */
   resolved?: boolean;
+  /**
+   * The episode whose card a resolution clears (Issue #3798): the id the card
+   * mark carried (`prompt-card-state`). Only meaningful with {@link resolved}.
+   * Absent — a mark written without an id, or before #3798 — the Service Worker
+   * clears the tag as it always has.
+   */
+  resolvedEpisodeId?: string;
   /**
    * A newer build of the agent CLI exists (Issue #2045).
    *
@@ -316,6 +332,19 @@ export interface PushPayload {
    * place.
    */
   resolved?: true;
+  /**
+   * The waiting episode a prompt card is about (Issue #3798). Present only on a
+   * waiting notification whose producer named the episode, and omitted
+   * elsewhere so every payload that shipped before keeps its exact shape.
+   */
+  episodeId?: string;
+  /**
+   * The episode a resolution clears (Issue #3798). The Service Worker closes
+   * only the cards of this episode (and cards that name none) and re-shows a
+   * newer episode's card silently instead of covering it. Omitted, the
+   * resolution clears the tag as before.
+   */
+  resolvedEpisodeId?: string;
 }
 
 /** Collapse whitespace and truncate to a single short line. Never the full terminal. */
@@ -490,6 +519,10 @@ export function buildPushPayload(
     timestamp: now,
     ...(event.waitingKind ? { waitingKind: event.waitingKind } : {}),
     ...(event.resolved === true ? { resolved: true as const } : {}),
+    ...(event.kind === 'prompt' && event.resolved !== true && event.waitingEpisodeId
+      ? { episodeId: event.waitingEpisodeId }
+      : {}),
+    ...(event.resolved === true && event.resolvedEpisodeId ? { resolvedEpisodeId: event.resolvedEpisodeId } : {}),
   };
 }
 
@@ -587,6 +620,7 @@ function passesDedup(event: NotificationEvent): boolean {
       worktreeId: event.worktreeId,
       instanceId: event.instanceId ?? event.agentName ?? '',
       since: event.waitingSince,
+      episodeId: event.waitingEpisodeId,
       escalated: event.escalated,
     });
   }
@@ -630,7 +664,9 @@ export async function notifyPushSubscribers(
     // itself does not mark; it clears, and it does so in its own module so each
     // direction has one writer.
     if (event.kind === 'prompt' && event.resolved !== true) {
-      markPromptCardShown(event.worktreeId, now);
+      // Issue #3798: with the episode's id, so the resolution can tell its own
+      // card from a newer one (`resolvedEpisodeId`).
+      markPromptCardShown(event.worktreeId, now, event.waitingEpisodeId ?? null);
     }
 
     webpush.setVapidDetails(config.subject, config.publicKey, config.privateKey);

@@ -653,6 +653,8 @@ export function settleLegacyStop(worktreeId, cliToolId, instanceId, target: Lega
 - `src/lib/polling/auto-yes-suppression-state.ts`（型の欄 `episodeId?` の追加のみ）
 - `src/lib/push/notification-dedup.ts`、`src/lib/push/push-sender.ts`（`waitingEpisodeId` を通す）
 - `src/lib/push/waiting-push-notifier.ts`（`PendingWait.episodeId`・`replaced` の扱い）
+  - 購読は `onWaitingEpisodeTransition` にする。旧 `onWaitingTransition`（7 欄）のままだと `replaced` が `waiting: true` の edge としか届かず、新しい待ちか同じ待ちかを since でしか判じられない（同じ since の `replaced` を同じ待ちとして古い hold のまま扱い、違う since なら古いタイマーを残したまま hold を作り直す）（PR 1a の実装レビュー P3-1）
+  - 区間 ID は store から `getWaitingEpisodeRecord` で読む（`getWaitingEpisode` は §6.1 (4) のとおり `{ since, kind }` のまま）。O2（`response-checker`）が開いた区間も、edge の `episodeId` と、hold の終わり・分類の猶予・reminder の再判定で読む store の ID が同じになる（P3-1）
 - `src/lib/push/resolution-push-notifier.ts`、`src/lib/push/prompt-card-state.ts`、`public/sw.js`
 - テスト
 
@@ -671,6 +673,15 @@ export function settleLegacyStop(worktreeId, cliToolId, instanceId, target: Lega
 - ID を渡さない呼び手（O2・opencode の質問 push・既存テスト）は since の比較のままで、混在の規則により ID つきの notifier と同じ hold・dedup にまとまる。#3796 の予約 tick は 1 回だけ読まれる
 - `replaced` を受ける処理は入るが、発生するのは 1b から。旧形式のマーク・旧 sw.js・ID の無い解除は今の動き
 - `sw.js` はどの分岐でも `showNotification` を 1 回呼ぶ（`userVisibleOnly` の契約を守る）
+
+**(4) 実装で設計から変えたこと（PR 2 の実装時に確定）**
+
+既存テストの期待値を変えないために、置き場所を次のように変えた。混在の規則・照合の順序は変えていない。
+- 抑止記録の `episodeId?` は `AutoYesPolicySuppression` に足さず、同じファイルの `EpisodeScopedPolicySuppression`（`AutoYesPolicySuppression` を継承）に置いた。`AutoYesPolicySuppression` は `current-output` が公開する形で、キー集合を CLI の写し（`src/cli/types/api-responses.ts`）と等しく保つ型の検査（`tests/unit/cli/types/last-suppression-mirror-3822.test.ts`）があり、欄を足すと型検査が落ちる。gate はこの型で `episodeId` を読む。公開する形への追加は、書き手と CLI 側を変える PR 3 で行う
+- カードのマークの区間 ID は、時刻の行（`push_prompt_card:<worktreeId>`、値は今までどおり時刻だけ）の隣の行 `push_prompt_card_episode:<worktreeId>` に、時刻の行と **同じ 1 つの INSERT 文** で書く（値は `<at>:<episodeId>`。ID が無ければ `<at>:`）。時刻の行の値を変えると `tests/unit/push/restart-card-state-2057.test.ts` の `persistedMark()` の期待（時刻の文字列）が変わるため。ID の行の時刻が時刻の行と違えば（旧い版のサーバーが時刻の行だけを書き換えた）ID 無しとして読む。旧い版のサーバーが書いたマーク（時刻の行だけ）も ID 無し
+- `forgetAutoYesHold(key, wait)` の第 2 引数は、数値（since、#3776 のまま）か `{ since, episodeId }` を受ける。比較は混在の規則（`isSameWait`）
+- `handleWaitingTransition` は ID つきの遷移と 7 欄の遷移の両方を受ける（既存テストが 7 欄で直接呼ぶ）。7 欄のときは store の区間の since が一致すればその ID を使う
+- `sw.js` で別の区間のカードが 2 枚以上あるときは、`getNotifications` が最後に返したもの（最も新しいもの）を出し直す
 
 ### 6.3 PR 1b: 観測の照合と共通の画面の読み方
 
