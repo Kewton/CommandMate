@@ -457,6 +457,8 @@ export interface CurrentOutputResponse {
     state: string;
     reason: string | null;
     observedAt: number;
+    /** Which confirmation the decision is about (an opaque key; null with no prompt). */
+    confirmation?: string | null;
   };
   /**
    * Issue #520: session status from `detectSessionStatus()` — or, since Issue

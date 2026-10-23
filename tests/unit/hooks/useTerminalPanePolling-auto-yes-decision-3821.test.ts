@@ -95,7 +95,7 @@ function polled(extra: Record<string, unknown>): Record<string, unknown> {
 
 function push(
   version: number,
-  data: ReturnType<typeof promptData> | null,
+  data: (ReturnType<typeof promptData> & { approvalTarget?: string }) | null,
   decision?: AutoYesDecisionPublished,
   instanceId = 'claude',
 ): TerminalSnapshotEvent {
@@ -261,6 +261,85 @@ describe('[#3821] useTerminalPanePolling carries the Auto-Yes decision', () => {
       act(() => realtimeMock.emit(push(1, PERMISSION, answering(9_000), 'claude-2')));
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(result.current.prompt.autoYesDecision).toEqual(withheld(1_000));
+    });
+  });
+
+  describe('the same question and options, another approval target (review 3, N1)', () => {
+    /** Two approvals that read alike but for what they approve. */
+    const TARGET_A = { ...PERMISSION, approvalTarget: 'Create file\n~/repo/a.txt\nDo you want to proceed?' };
+    const TARGET_B = { ...PERMISSION, approvalTarget: 'Create file\n~/repo/b.txt\nDo you want to proceed?' };
+    const about = (decision: AutoYesDecisionPublished, confirmation: string): AutoYesDecisionPublished => ({
+      ...decision,
+      confirmation,
+    });
+    const none = (observedAt: number): AutoYesDecisionPublished => ({ state: 'none', reason: null, observedAt });
+
+    it('poll A answering (5s), then a push of B built earlier (none, 3s): B’s none, and the panel opens', async () => {
+      const { result } = await renderPolled(
+        polled({ promptData: TARGET_A, autoYesDecision: about(answering(5_000), 'A') }),
+      );
+      hangPolls();
+      expect(panelUnderAutoYes(result.current.prompt)).toBe(false);
+
+      act(() => realtimeMock.emit(push(1, TARGET_B, about(none(3_000), 'B'))));
+
+      await waitFor(() => expect(result.current.prompt.autoYesDecision).toEqual(about(none(3_000), 'B')));
+      expect(result.current.prompt.data).toEqual(TARGET_B);
+      expect(panelUnderAutoYes(result.current.prompt)).toBe(true);
+    });
+
+    it('push A answering (5s), then a poll of B built earlier (none, 3s): B’s none, and the panel opens', async () => {
+      const { result } = await renderPolled(polled({ promptData: TARGET_A, autoYesDecision: about(none(1_000), 'A') }));
+      act(() => realtimeMock.emit(push(1, TARGET_A, about(answering(5_000), 'A'))));
+      await waitFor(() => expect(result.current.prompt.autoYesDecision?.state).toBe('answering'));
+
+      pollBody = polled({ promptData: TARGET_B, autoYesDecision: about(none(3_000), 'B') });
+      await act(async () => {
+        await result.current.refresh();
+      });
+      expect(result.current.prompt.autoYesDecision).toEqual(about(none(3_000), 'B'));
+      expect(panelUnderAutoYes(result.current.prompt)).toBe(true);
+    });
+
+    it('control: the same confirmation out of order keeps the later decision', async () => {
+      const { result } = await renderPolled(
+        polled({ promptData: TARGET_A, autoYesDecision: about(answering(5_000), 'A') }),
+      );
+      hangPolls();
+      act(() => realtimeMock.emit(push(1, TARGET_A, about(none(3_000), 'A'))));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(result.current.prompt.autoYesDecision).toEqual(about(answering(5_000), 'A'));
+    });
+
+    it('a decision that does not say which confirmation, after one that does: the earlier is dropped', async () => {
+      const { result } = await renderPolled(
+        polled({ promptData: TARGET_A, autoYesDecision: about(answering(5_000), 'A') }),
+      );
+      hangPolls();
+      act(() => realtimeMock.emit(push(1, TARGET_B, none(3_000))));
+      await waitFor(() => expect(result.current.prompt.autoYesDecision).toEqual(none(3_000)));
+      expect(panelUnderAutoYes(result.current.prompt)).toBe(true);
+    });
+
+    it('a push without the key for another approval target: the decision is dropped', async () => {
+      const { result } = await renderPolled(
+        polled({ promptData: TARGET_A, autoYesDecision: about(answering(5_000), 'A') }),
+      );
+      hangPolls();
+      act(() => realtimeMock.emit(push(1, TARGET_B)));
+      await waitFor(() => expect(result.current.prompt.data).toEqual(TARGET_B));
+      expect(result.current.prompt.autoYesDecision).toBeUndefined();
+      expect(panelUnderAutoYes(result.current.prompt)).toBe(true);
+    });
+
+    it('control: a push without the key for the same approval target keeps it', async () => {
+      const { result } = await renderPolled(
+        polled({ promptData: TARGET_A, autoYesDecision: about(answering(5_000), 'A') }),
+      );
+      hangPolls();
+      act(() => realtimeMock.emit(push(1, TARGET_A)));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(result.current.prompt.autoYesDecision).toEqual(about(answering(5_000), 'A'));
     });
   });
 });

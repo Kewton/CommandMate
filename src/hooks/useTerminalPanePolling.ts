@@ -155,6 +155,17 @@ function diffFileSignature(file: AgentSessionDiffFileView): string {
 }
 
 /**
+ * Issue #3821: whether two prompts approve the same thing, as far as the
+ * client can tell — the `approvalTarget` as published, cursor included (a moved
+ * cursor reads as another, which only opens the panel).
+ */
+function sameApprovalTarget(a: unknown, b: unknown): boolean {
+  const targetOf = (data: unknown): unknown =>
+    data !== null && typeof data === 'object' ? (data as { approvalTarget?: unknown }).approvalTarget ?? null : null;
+  return targetOf(a) === targetOf(b);
+}
+
+/**
  * Extends {@link PaneGateState} (Issue #3304): the per-target frame facts are
  * one list shared with the worktree screen's controller, so both surfaces start
  * from, and fall back to, the same "nothing has arrived" values. The members
@@ -641,9 +652,12 @@ export function useTerminalPanePolling({
             autoYesEnterSent: carriesEnterFallback
               ? isAutoYesEnterSentToCurrentPrompt(data.autoYesEnterFallback)
               : sameWindow ? prev.autoYesEnterSent : false,
+            // Issue #3821: by `confirmation` when the delivery carries it; a
+            // delivery that does not keeps it only for the same approval target
+            // too — the same question and options may approve something else.
             autoYesDecision: carriesDecision
               ? laterAutoYesDecision(sameWindow ? prev.autoYesDecision : undefined, data.autoYesDecision)
-              : sameWindow ? prev.autoYesDecision : undefined,
+              : sameWindow && sameApprovalTarget(prev.data, nextData) ? prev.autoYesDecision : undefined,
           };
         });
       } else if (!data.isPromptWaiting && promptVisibleRef.current) {

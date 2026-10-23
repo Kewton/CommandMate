@@ -599,17 +599,65 @@ describe('[#3821] a decision is not carried to another approval target', () => {
     expect(publishFor(agyPrompt(CREATE_OTHER_FILE)).state).toBe('none');
   });
 
+  // Review 2 (R3): a cut is the same dialog only while the hook call ties the
+  // two readings together; the cases without one are below.
   it.each([
     ['from the file row', '~/agy2364-probe/hello-agy.txt'],
     ['from the diff row', 'hello from antigravity'],
   ])('control: the same dialog read with fewer rows (%s): still the decision', (_label, firstRow) => {
     const fewer = agyPrompt(fewerRows(CREATE_FILE, firstRow));
     expect(fewer.approvalTarget).not.toBe(agyPrompt(CREATE_FILE).approvalTarget);
-    record(agyPrompt(CREATE_FILE));
-    expect(publishFor(fewer).state).toBe('answering');
+    record(agyPrompt(CREATE_FILE), 'call-1');
+    expect(publishFor(fewer, 'call-1').state).toBe('answering');
     // And the other way round: the poller read fewer rows than the status API.
+    record(fewer, 'call-1');
+    expect(publishFor(agyPrompt(CREATE_FILE), 'call-1').state).toBe('answering');
+  });
+
+  /** The same dialog for another file: the file row differs, the diff row is the same. */
+  const CREATE_RENAMED_FILE = CREATE_FILE.replaceAll('hello-agy.txt', 'renamed-agy.txt');
+
+  it('non-vacuous: the renamed dialog read from the diff row reads the same rows as the original', () => {
+    expect(agyPrompt(CREATE_RENAMED_FILE).approvalTarget).not.toBe(agyPrompt(CREATE_FILE).approvalTarget);
+    expect(agyPrompt(fewerRows(CREATE_RENAMED_FILE, 'hello from antigravity')).approvalTarget).toBe(
+      agyPrompt(fewerRows(CREATE_FILE, 'hello from antigravity')).approvalTarget,
+    );
+  });
+
+  it('only the file name differs: none', () => {
+    record(agyPrompt(CREATE_FILE));
+    expect(publishFor(agyPrompt(CREATE_RENAMED_FILE)).state).toBe('none');
+  });
+
+  it('only the file name differs, one reading cut to the diff row (nothing names the file): none', () => {
+    record(agyPrompt(CREATE_FILE));
+    expect(publishFor(agyPrompt(fewerRows(CREATE_RENAMED_FILE, 'hello from antigravity'))).state).toBe('none');
+    record(agyPrompt(fewerRows(CREATE_FILE, 'hello from antigravity')));
+    expect(publishFor(agyPrompt(CREATE_RENAMED_FILE)).state).toBe('none');
+  });
+
+  it.each([
+    ['from the file row', '~/agy2364-probe/hello-agy.txt'],
+    ['from the diff row', 'hello from antigravity'],
+  ])('a reading cut from the top (%s) with no hook call to tie it: none, both ways', (_label, firstRow) => {
+    const fewer = agyPrompt(fewerRows(CREATE_FILE, firstRow));
+    record(agyPrompt(CREATE_FILE));
+    expect(publishFor(fewer).state).toBe('none');
     record(fewer);
+    expect(publishFor(agyPrompt(CREATE_FILE)).state).toBe('none');
+  });
+
+  it('control: the same dialog read the same way, no hook call: still the decision', () => {
+    record(agyPrompt(CREATE_FILE));
     expect(publishFor(agyPrompt(CREATE_FILE)).state).toBe('answering');
+  });
+
+  it('confirmation: the same dialog names the same one, another file another', () => {
+    const key = publishFor(agyPrompt(CREATE_FILE)).confirmation;
+    expect(typeof key).toBe('string');
+    expect(publishFor(agyPrompt(CREATE_FILE)).confirmation).toBe(key);
+    expect(publishFor(agyPrompt(CREATE_RENAMED_FILE)).confirmation).not.toBe(key);
+    expect(publishFor(agyPrompt(CREATE_FILE), 'call-1').confirmation).not.toBe(key);
   });
 
   it('a target one reading has and the other has not: none', () => {
@@ -623,5 +671,96 @@ describe('[#3821] a decision is not carried to another approval target', () => {
     expect(publishFor(agyPrompt(CREATE_FILE), 'call-1').state).toBe('answering');
     expect(publishFor(agyPrompt(CREATE_FILE), 'call-2').state).toBe('none');
     expect(publishFor(agyPrompt(CREATE_FILE), null).state).toBe('none');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review 3 (R3): the body is read as it is, as #3817 reads it
+// ---------------------------------------------------------------------------
+
+describe('[#3821] the approval target keeps the body: #3817’s three bodies', () => {
+  const RULE = '─'.repeat(60);
+  /** claude's Bash permission with `command` as its body and the cursor on `cursorAt` (#3817's fixture). */
+  const claudeBash = (command: readonly string[], cursorAt = 1): string => {
+    const option = (n: number, label: string): string => `${n === cursorAt ? ' ❯' : '  '} ${n}. ${label}`;
+    return [
+      '⏺ Writing the notes.',
+      RULE,
+      ' Bash command',
+      '',
+      ...command,
+      '   Write the notes file',
+      '   from the template',
+      '   into the repository root',
+      '   without staging it',
+      '',
+      ' Do you want to proceed?',
+      option(1, 'Yes'),
+      option(2, "Yes, and don't ask again for cat commands in /repo"),
+      option(3, 'No'),
+      '',
+      ' Esc to cancel · Tab to amend',
+    ].join('\n');
+  };
+  const QUOTED = claudeBash(["   cat <<'EOF' > notes.md", '   > rm -rf build', '   EOF']);
+  const UNQUOTED = claudeBash(["   cat <<'EOF' > notes.md", '   rm -rf build', '   EOF']);
+  const INDENTED = claudeBash(["   cat <<'EOF' > notes.md", '       rm -rf build', '   EOF']);
+  const QUOTED_CURSOR_ON_2 = claudeBash(["   cat <<'EOF' > notes.md", '   > rm -rf build', '   EOF'], 2);
+  const grant: AutoYesState = { enabled: true, enabledAt: 0, expiresAt: Number.MAX_SAFE_INTEGER };
+  const record = (raw: string) =>
+    recordAutoYesDecision(KEY, {
+      state: 'answering',
+      reason: null,
+      promptData: statusPrompt(raw),
+      grant,
+      epoch: getEnterFallbackSessionEpoch(KEY),
+    });
+  const publishFor = (raw: string) =>
+    publishAutoYesDecision({ compositeKey: KEY, grant, promptData: statusPrompt(raw), pollerActive: true });
+
+  it('non-vacuous: the same question and options, the bodies differ only by a `>` or an indent', () => {
+    for (const other of [UNQUOTED, INDENTED]) {
+      expect(statusPrompt(other).question).toBe(statusPrompt(QUOTED).question);
+      expect(JSON.stringify(statusPrompt(other).type === 'multiple_choice' ? statusPrompt(other).options : null)).toBe(
+        JSON.stringify(statusPrompt(QUOTED).type === 'multiple_choice' ? statusPrompt(QUOTED).options : null),
+      );
+      expect(statusPrompt(other).approvalTarget).not.toBe(statusPrompt(QUOTED).approvalTarget);
+    }
+    expect(statusPrompt(QUOTED_CURSOR_ON_2).approvalTarget).not.toBe(statusPrompt(QUOTED).approvalTarget);
+  });
+
+  it.each([
+    ['a `>`', QUOTED, UNQUOTED],
+    ['a `>` (the other way)', UNQUOTED, QUOTED],
+    ['an indent', INDENTED, UNQUOTED],
+    ['an indent (the other way)', UNQUOTED, INDENTED],
+  ])('record → publish: bodies that differ by %s are another confirmation (none)', (_label, recorded, shown) => {
+    record(recorded);
+    expect(publishFor(shown).state).toBe('none');
+    expect(publishFor(shown).confirmation).not.toBe(publishFor(recorded).confirmation);
+  });
+
+  it('control — record → publish: only the cursor moved: still the decision, the same confirmation', () => {
+    record(QUOTED);
+    expect(publishFor(QUOTED_CURSOR_ON_2).state).toBe('answering');
+    expect(publishFor(QUOTED_CURSOR_ON_2).confirmation).toBe(publishFor(QUOTED).confirmation);
+  });
+
+  it.each([
+    ['a `>`', UNQUOTED],
+    ['an indent', INDENTED],
+  ])('the duplicate guard: a body that differs by %s within the guard is not answering', async (_label, other) => {
+    enable();
+    expect(await tick(QUOTED)).toBe('responded');
+    expect(published(QUOTED).state).toBe('answering');
+    expect(await tick(other)).toBe('duplicate');
+    expect(published(other).state).toBe('none');
+  });
+
+  it('control — the duplicate guard: only the cursor moved, within the guard: still answering', async () => {
+    enable();
+    expect(await tick(QUOTED)).toBe('responded');
+    expect(await tick(QUOTED_CURSOR_ON_2)).toBe('duplicate');
+    expect(published(QUOTED_CURSOR_ON_2).state).toBe('answering');
   });
 });

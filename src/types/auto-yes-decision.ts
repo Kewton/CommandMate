@@ -55,6 +55,15 @@ export interface AutoYesDecisionPublished {
    * newer one replaced.
    */
   observedAt: number;
+  /**
+   * Which confirmation the decision is about: an opaque key of the payload's
+   * prompt — its question, options and approval target (the cursor on its
+   * option rows aside) and, for agy, the hook call. Null with no prompt. Two
+   * confirmations that read the same in their question and options but
+   * approve different things carry different keys. Absent from a server
+   * without the field.
+   */
+  confirmation?: string | null;
 }
 
 /**
@@ -73,6 +82,12 @@ export function isAutoYesAnswering(decision: Pick<AutoYesDecisionPublished, 'sta
  * paths whose arrival order is not their build order; a decision observed
  * before the one already applied is not applied over it.
  *
+ * Only for the same confirmation (`confirmation`): a window with the same
+ * question and options may approve something else, and a decision about
+ * another confirmation — or one that does not say which (`confirmation`
+ * absent on one side only) — is dropped for the one this delivery carries,
+ * whatever their times. Two without the field are compared by time.
+ *
  * @param previous - What is applied now for this window, if anything
  * @param next - What this delivery carries
  */
@@ -81,6 +96,7 @@ export function laterAutoYesDecision(
   next: AutoYesDecisionPublished | undefined,
 ): AutoYesDecisionPublished | undefined {
   if (previous === undefined || next === undefined) return next;
+  if ((previous.confirmation ?? null) !== (next.confirmation ?? null)) return next;
   return next.observedAt < previous.observedAt ? previous : next;
 }
 

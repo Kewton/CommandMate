@@ -116,6 +116,20 @@ describe('[#3821] terminal_snapshot.autoYesDecision', () => {
     expect(vi.mocked(broadcast)).toHaveBeenCalledTimes(2);
   });
 
+  it('the same state about another confirmation (the body unchanged): pushed', async () => {
+    vi.useFakeTimers();
+    vi.mocked(buildCurrentOutput)
+      .mockResolvedValueOnce(payload({ ...WITHHELD, confirmation: 'A' }))
+      .mockResolvedValueOnce(payload({ ...WITHHELD, confirmation: 'B' }));
+
+    const done = broadcastTerminalSnapshotAfterInteraction('wt-1', 'claude', undefined, [10]);
+    await vi.advanceTimersByTimeAsync(20);
+    await done;
+
+    expect(vi.mocked(broadcast)).toHaveBeenCalledTimes(2);
+    expect(lastSnapshot().autoYesDecision).toEqual({ ...WITHHELD, confirmation: 'B' });
+  });
+
   it('control: only `observedAt` moved (every build moves it): not pushed again', async () => {
     vi.useFakeTimers();
     vi.mocked(buildCurrentOutput)

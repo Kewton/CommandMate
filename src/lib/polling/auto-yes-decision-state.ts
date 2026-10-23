@@ -17,12 +17,16 @@
  * - the SESSION epoch (`getEnterFallbackSessionEpoch`): a relaunch drops it;
  * - the CONFIRMATION ({@link matchesConfirmation}): the question and the
  *   options ({@link enterFallbackScreenKey}), AND what is being approved — the
- *   rows of `approvalTarget` nearest the question, which the poller and the
- *   status API both read whatever their row counts (one reading's rows are a
- *   tail of the other's) — AND, for agy, the hook call the receipt was accepted
- *   for. Two approvals that differ only in their target (agy's file creation
- *   names the file only there) are two confirmations; one whose target or call
- *   cannot be confirmed reads `none`;
+ *   whole `approvalTarget` as read, with only the cursor on its option rows
+ *   taken out ({@link approvalTargetRows}, the body's indent, `>` and blank
+ *   rows kept, as #3817 reads it) — AND, for agy, the hook call the receipt
+ *   was accepted for. Two approvals that differ only in their target (agy's
+ *   file creation names the file only there, two commands that differ by an
+ *   indent) are two confirmations. A reading cut from the top (fewer rows) is
+ *   the same confirmation only while a hook call ties both readings to one
+ *   observation: the rows a cut leaves need not name what is approved (a diff
+ *   row, not the file). One whose target or call cannot be confirmed reads
+ *   `none`;
  * - a TICK not long ago ({@link AUTO_YES_DECISION_STALE_MS}): a live poller
  *   re-decides every tick, so a record nobody refreshed says nothing now.
  *
@@ -53,6 +57,8 @@ import {
 } from '@/types/auto-yes-decision';
 import { getOrInitGlobal } from '../global-state';
 import { enterFallbackScreenKey, getEnterFallbackSessionEpoch } from './auto-yes-enter-fallback-state';
+import { approvalTargetWithoutCursor } from './auto-yes-poller-state';
+import { createHash } from 'crypto';
 
 /**
  * How long a record stays current without a tick refreshing it. The poller
@@ -68,8 +74,8 @@ export interface AutoYesDecisionRecord {
   reason: AutoYesDecisionReason | null;
   /** {@link enterFallbackScreenKey} of the prompt the decision is about. */
   screenKey: string;
-  /** {@link approvalTargetRows} of the prompt the decision is about. */
-  targetRows: readonly string[];
+  /** {@link approvalTargetRows} of the prompt the decision is about (null: it had none). */
+  targetRows: readonly string[] | null;
   /** agy: the hook call the receipt on screen was accepted for, when known. */
   callId: string | null;
   /** The grant the tick acted under (compared by identity). */
@@ -94,42 +100,71 @@ declare global {
 
 const decisions = getOrInitGlobal('__autoYesDecisions', () => new Map<string, AutoYesDecisionRecord>());
 
-/** A selection cursor at the start of a row (`>` agy, `❯` claude, `›` codex). */
-const CURSOR_GLYPH = /^[>❯›]\s*/;
-
 /**
- * The non-empty rows of `approvalTarget`, trimmed, without a leading cursor
- * glyph (the cursor moving is the same confirmation). The rows nearest the
- * question come last, and those are the ones every reading of the screen
- * keeps: a reading of fewer rows cuts the target from the top.
+ * The rows of `approvalTarget` with only the cursor taken out of its option
+ * rows (`approvalTargetWithoutCursor`), or null when the prompt has none. The
+ * body stays as read: an indent, a `>` or a blank row is part of what is
+ * approved (#3817).
  */
-export function approvalTargetRows(promptData: PromptData): string[] {
-  const target = promptData.approvalTarget;
-  if (typeof target !== 'string') return [];
-  return target
-    .split('\n')
-    .map((row) => row.trim().replace(CURSOR_GLYPH, '').trim())
-    .filter((row) => row !== '');
+export function approvalTargetRows(promptData: PromptData): string[] | null {
+  const target = approvalTargetWithoutCursor(promptData);
+  return target === null ? null : target.split('\n');
 }
 
-/** Is the shorter of the two a tail of the longer? Both empty matches; one empty does not. */
-function sameTargetTail(a: readonly string[], b: readonly string[]): boolean {
-  if (a.length === 0 || b.length === 0) return a.length === b.length;
-  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
+function sameRows(a: readonly string[] | null, b: readonly string[] | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.length === b.length && a.every((row, i) => row === b[i]);
+}
+
+/**
+ * Is one reading the other cut from the top? The shorter's rows are the
+ * longer's last rows, as read; its top row may have lost its indent (a reading
+ * trims the row it starts at), and only that one.
+ */
+function isCutFromTop(a: readonly string[] | null, b: readonly string[] | null): boolean {
+  if (a === null || b === null || a.length === b.length) return false;
+  const [shorter, longer] = a.length < b.length ? [a, b] : [b, a];
+  if (shorter.length === 0) return false;
   const offset = longer.length - shorter.length;
-  return shorter.every((row, i) => row === longer[offset + i]);
+  return shorter.every((row, i) =>
+    i === 0 ? row.trimStart() === longer[offset].trimStart() : row === longer[offset + i],
+  );
 }
 
 /**
  * Is `record` about the confirmation `identity` describes? Question and
- * options equal, the approval targets one a tail of the other, and — when the
- * record was tied to an agy call — the same call known now.
+ * options equal, the same agy call when the record was tied to one, and the
+ * approval targets equal row for row — or one cut from the top of the other,
+ * only when that call ties the two readings together. A cut needs that call:
+ * without it, the rows left (a diff row) may not tell this approval from
+ * another one with the same rows (another file name).
  */
 export function matchesConfirmation(record: AutoYesDecisionRecord, identity: AutoYesConfirmationIdentity): boolean {
   if (record.screenKey !== enterFallbackScreenKey(identity.promptData)) return false;
-  if (!sameTargetTail(record.targetRows, approvalTargetRows(identity.promptData))) return false;
   if (record.callId !== null && record.callId !== (identity.callId ?? null)) return false;
-  return true;
+  const rows = approvalTargetRows(identity.promptData);
+  if (sameRows(record.targetRows, rows)) return true;
+  return record.callId !== null && isCutFromTop(record.targetRows, rows);
+}
+
+/**
+ * Which confirmation a published decision is about (`confirmation` on the
+ * wire): question and options, the approval target as
+ * {@link matchesConfirmation} reads it, and the agy call, hashed. A client
+ * holding a decision for one confirmation keeps it over a later delivery only
+ * when both name the same one (`laterAutoYesDecision`).
+ */
+export function autoYesConfirmationKey(identity: AutoYesConfirmationIdentity): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify([
+        enterFallbackScreenKey(identity.promptData),
+        approvalTargetRows(identity.promptData),
+        identity.callId ?? null,
+      ]),
+    )
+    .digest('hex')
+    .slice(0, 32);
 }
 
 /** Record what the tick decided for the prompt on screen. */
@@ -233,14 +268,17 @@ export interface AutoYesDecisionPublishInput {
  * - a record made under this grant and session, about this confirmation
  *   ({@link matchesConfirmation}), refreshed recently: that record;
  * - otherwise `none`.
+ *
+ * Each names the payload's prompt in `confirmation` ({@link autoYesConfirmationKey}; null with none).
  */
 export function publishAutoYesDecision(input: AutoYesDecisionPublishInput): AutoYesDecisionPublished {
   const now = input.now ?? Date.now();
-  const none: AutoYesDecisionPublished = { state: 'none', reason: null, observedAt: now };
   const { compositeKey, grant, promptData } = input;
+  const confirmation = promptData == null ? null : autoYesConfirmationKey({ promptData, callId: input.callId });
+  const none: AutoYesDecisionPublished = { state: 'none', reason: null, observedAt: now, confirmation };
   if (promptData == null || !grant?.enabled) return none;
   if (!input.pollerActive) {
-    return { state: 'withheld', reason: SERVER_POLLER_INACTIVE_DECISION_REASON, observedAt: now };
+    return { state: 'withheld', reason: SERVER_POLLER_INACTIVE_DECISION_REASON, observedAt: now, confirmation };
   }
   const record = decisions.get(compositeKey);
   if (
@@ -252,5 +290,5 @@ export function publishAutoYesDecision(input: AutoYesDecisionPublishInput): Auto
   ) {
     return none;
   }
-  return { state: record.state, reason: record.reason, observedAt: now };
+  return { state: record.state, reason: record.reason, observedAt: now, confirmation };
 }

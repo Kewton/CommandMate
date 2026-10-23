@@ -110,9 +110,11 @@ function snapshotFingerprint(payload: Awaited<ReturnType<typeof buildCurrentOutp
     // Issue #3821: so a decision that changed on a screen that did not
     // (`answering` -> `withheld` on the next tick, say) reaches the push, and
     // the answer panel opens without waiting for the HTTP poll. State and
-    // reason only: `observedAt` moves on every build.
+    // reason only: `observedAt` moves on every build. And the confirmation it
+    // is about, so a decision moved to another approval target is pushed too.
     payload.autoYesDecision?.state ?? null,
     payload.autoYesDecision?.reason ?? null,
+    payload.autoYesDecision?.confirmation ?? null,
     payload.isSelectionListActive ?? false,
     payload.isPagerActive ?? false,
     // Issue #2369: in the fingerprint for the same reason `sessionStatus` is —

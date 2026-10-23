@@ -239,6 +239,29 @@ export function ledgerScreenKey(promptData: PromptData): string {
   );
 }
 
+/**
+ * `approvalTarget` with only the cursor taken out of its option rows, or null
+ * when the prompt has none (Issue #3821, the identity of the confirmation an
+ * Auto-Yes decision is about). The reading {@link ledgerScreenKey} keeps: the
+ * rows the block reader adopted as the options are aligned
+ * (`approvalTargetWithOptionRowsAligned`), else only the rows that ARE the
+ * prompt's options lose their gutter; the body — its indent, a `>`, a blank
+ * row — stays byte for byte, so two commands that differ there are two
+ * confirmations (#3817), and a moved cursor is the same one.
+ */
+export function approvalTargetWithoutCursor(promptData: PromptData): string | null {
+  const target = promptData.approvalTarget;
+  if (typeof target !== 'string') return null;
+  if (promptData.type !== 'multiple_choice') return target;
+  return (
+    approvalTargetWithOptionRowsAligned(
+      target,
+      promptData.options.map((o) => o.label),
+      (read, named) => read.startsWith(named),
+    ) ?? withOptionRowGuttersAligned(target, promptData.options)
+  );
+}
+
 /** A row's leading cursor marks and indentation. */
 const LEADING_MARKS_PATTERN = /^[\s\u276F\u203A>\u25B6\u25BA\u25CF\u25CB\u25C9\u2192]+/u;
 

@@ -79,4 +79,15 @@ describe('[#3821] the decision helpers', () => {
     expect(laterAutoYesDecision(undefined, older)).toBe(older);
     expect(laterAutoYesDecision(newer, undefined)).toBeUndefined();
   });
+
+  it('laterAutoYesDecision: only for the same confirmation; another, or an unknown one, is not kept', () => {
+    const newerA = { state: 'answering' as const, reason: null, observedAt: 5, confirmation: 'A' };
+    const olderA = { state: 'none' as const, reason: null, observedAt: 3, confirmation: 'A' };
+    const olderB = { state: 'none' as const, reason: null, observedAt: 3, confirmation: 'B' };
+    const olderUnknown = { state: 'none' as const, reason: null, observedAt: 3 };
+    expect(laterAutoYesDecision(newerA, olderA)).toBe(newerA);
+    expect(laterAutoYesDecision(newerA, olderB)).toBe(olderB);
+    expect(laterAutoYesDecision(newerA, olderUnknown)).toBe(olderUnknown);
+    expect(laterAutoYesDecision({ ...newerA, confirmation: undefined }, olderA)).toBe(olderA);
+  });
 });

@@ -1306,7 +1306,8 @@ The `current-output` response (`capture --json`) carries Auto-Yes's decision abo
 "autoYesDecision": {
   "state": "withheld",
   "reason": "server-poller-inactive",
-  "observedAt": 1754296400000
+  "observedAt": 1754296400000,
+  "confirmation": "3f1c…"
 }
 ```
 
@@ -1316,7 +1317,7 @@ The `current-output` response (`capture --json`) carries Auto-Yes's decision abo
 | `withheld` | Auto-Yes left this confirmation to a human; `reason` says why (the words of the table above, plus `server-poller-inactive` = Auto-Yes is on but no poller runs for this instance (the concurrent limit, for one), `no-auto-answer` = the base rules have no answer (typed text, a checkbox list), `answered-by-human` = for about 10 seconds after a person began answering from the panel, `foreign-session` / `moved-send-in-flight`) |
 | `none` | No confirmation, Auto-Yes off, or not judged yet. Never read as `answering` |
 
-The decision is what the poller actually judged, and it carries over none of: enabling Auto-Yes again (OFF→ON with the same screen up, or an expiry), a session relaunch, another confirmation, a person's answer (it reads `none` until the next judgement). Whether it is another confirmation is judged on the question and the options, plus what is being approved (the rows of `approvalTarget` nearest the question, whatever number of rows was read) and, for agy, the hook call; when that cannot be confirmed it reads `none`. While the duplicate guard waits after a send, `answering` stands only for the confirmation that was sent to. Two confirmations with the same text in a row, with no screen without a confirmation between them, cannot be told apart from the screen alone. The field is absent when the session is not running.
+The decision is what the poller actually judged, and it carries over none of: enabling Auto-Yes again (OFF→ON with the same screen up, or an expiry), a session relaunch, another confirmation, a person's answer (it reads `none` until the next judgement). Whether it is another confirmation is judged on the question and the options, plus what is being approved (`approvalTarget`, compared as read except for where the cursor sits on the option rows: the body's indentation, `>` and blank rows count, so two commands that differ only by indentation are two confirmations) and, for agy, the hook call. A reading cut from the top (fewer rows) is the same confirmation only while agy's hook call ties the two readings together (the rows left may not tell it from another confirmation that differs only in its file name). When that cannot be confirmed it reads `none`. `confirmation` names the confirmation the decision is about (an opaque key: the same confirmation gives the same value; `null` with no prompt). The PC screen keeps the later of two decisions only when they carry the same `confirmation`, and carries no decision over to another confirmation. While the duplicate guard waits after a send, `answering` stands only for the confirmation that was sent to. Two confirmations with the same text in a row, with no screen without a confirmation between them, cannot be told apart from the screen alone. The field is absent when the session is not running.
 
 With Auto-Yes on, the PC and phone answer panels are shown whenever `state` is not `answering` (and for a response from an older server without the field). A question OpenCode / V2 asks over its API always shows its panel under Auto-Yes. Answering by hand leaves Auto-Yes on.
 
