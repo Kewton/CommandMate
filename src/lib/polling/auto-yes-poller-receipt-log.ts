@@ -167,14 +167,7 @@ export function logIfWithheldForWantOfReceipt(
     return seen(keptPartialAnswer ? PARTIAL_ANSWER_SUPPRESSION_REASON : null);
   }
 
-  const lastLoggedAt = withheldNoReceiptLoggedAt.get(compositeKey);
-  const logDue = lastLoggedAt === undefined || now - lastLoggedAt >= WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS;
-  if (logDue) {
-    for (const [key, loggedAt] of withheldNoReceiptLoggedAt) {
-      if (now - loggedAt >= WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS) withheldNoReceiptLoggedAt.delete(key);
-    }
-    withheldNoReceiptLoggedAt.set(compositeKey, now);
-  }
+  const logDue = claimWithheldLogSlot(compositeKey, now);
   if (resolution.suppressedBy) {
     if (!logDue) return seen(contractReason ?? null);
     logger.info('antigravity-autoyes-withheld-by-policy', {
@@ -205,6 +198,23 @@ export function logIfWithheldForWantOfReceipt(
     hint: noHookReceiptHint(verdict, now),
   });
   return seen(NO_HOOK_RECEIPT_SUPPRESSION_REASON);
+}
+
+/**
+ * Whether a withheld line for `compositeKey` is due at `now` under the
+ * once-a-minute limit; when it is, entries past the interval are pruned and
+ * `now` is taken as this key's last line.
+ */
+function claimWithheldLogSlot(compositeKey: string, now: number): boolean {
+  const lastLoggedAt = withheldNoReceiptLoggedAt.get(compositeKey);
+  const logDue = lastLoggedAt === undefined || now - lastLoggedAt >= WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS;
+  if (logDue) {
+    for (const [key, loggedAt] of withheldNoReceiptLoggedAt) {
+      if (now - loggedAt >= WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS) withheldNoReceiptLoggedAt.delete(key);
+    }
+    withheldNoReceiptLoggedAt.set(compositeKey, now);
+  }
+  return logDue;
 }
 
 /**
