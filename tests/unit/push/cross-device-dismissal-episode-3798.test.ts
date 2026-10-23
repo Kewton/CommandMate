@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import fs from 'fs';
+import fs, { readFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import Database from 'better-sqlite3';
@@ -219,5 +219,178 @@ describe('[#3798] the resolution names the card it clears', () => {
     expect(hasPromptCard(WT, T0 + 1)).toBe(true);
     expect(getPromptCardEpisodeId(WT)).toBeNull();
     for (const p of payloads()) expect(p).not.toHaveProperty('episodeId');
+  });
+});
+
+// --- Per-device delivery, end to end ----------------------------------------
+//
+// The server's payloads, as each device actually received them, fed through the
+// shipped `public/sw.js`. Delivery fails per device, and the resolution goes out
+// only once nothing in the worktree waits, so a device can hold an older card
+// than the one the resolution names; or receive the resolution after a newer
+// wait's card. Only order (`waitingSince` against the resolution's `timestamp`)
+// tells the two apart.
+
+const swSource = readFileSync(path.resolve(__dirname, '../../../public/sw.js'), 'utf8');
+
+interface DeviceCard {
+  title: string;
+  tag: string;
+  body: string;
+  silent?: boolean;
+  data: Record<string, unknown>;
+  close: () => void;
+}
+
+function device() {
+  const shown: DeviceCard[] = [];
+  const listeners: Record<string, (event: unknown) => void> = {};
+  const showNotification = vi.fn((title: string, options: Record<string, unknown>) => {
+    const n: DeviceCard = {
+      title,
+      tag: options.tag as string,
+      body: options.body as string,
+      silent: options.silent as boolean | undefined,
+      data: options.data as Record<string, unknown>,
+      close: () => {
+        const i = shown.indexOf(n);
+        if (i >= 0) shown.splice(i, 1);
+      },
+    };
+    shown.push(n);
+    return Promise.resolve();
+  });
+  const self = {
+    addEventListener: (type: string, handler: (event: unknown) => void) => {
+      listeners[type] = handler;
+    },
+    location: { origin: 'https://app.example' },
+    registration: {
+      showNotification,
+      getNotifications: (filter?: { tag?: string }) =>
+        Promise.resolve(shown.filter((n) => !filter?.tag || n.tag === filter.tag)),
+    },
+    skipWaiting: vi.fn(),
+    clients: { claim: vi.fn(), matchAll: vi.fn(() => Promise.resolve([])), openWindow: vi.fn() },
+  };
+  // eslint-disable-next-line no-new-func
+  new Function('self', 'caches', swSource)(self, { open: vi.fn(), keys: vi.fn(), match: vi.fn(), delete: vi.fn() });
+  return {
+    shown,
+    showNotification,
+    async receive(payload: Record<string, unknown>): Promise<void> {
+      const event: { data: { json: () => unknown }; waitUntil: (p: unknown) => void; _p?: unknown } = {
+        data: { json: () => payload },
+        waitUntil: (p) => {
+          event._p = p;
+        },
+      };
+      listeners.push(event);
+      await event._p;
+    },
+  };
+}
+
+const X = 'https://push.example/a';
+const Y = 'https://push.example/b';
+
+/** Route each delivered payload to its endpoint's inbox; `fails` decides per device. */
+function routeDeliveries(fails: (endpoint: string, payload: Record<string, unknown>) => boolean) {
+  const inbox: Record<string, Array<Record<string, unknown>>> = { [X]: [], [Y]: [] };
+  sendNotification.mockImplementation((sub: { endpoint: string }, raw: string) => {
+    const payload = JSON.parse(raw) as Record<string, unknown>;
+    if (fails(sub.endpoint, payload)) {
+      return Promise.reject(Object.assign(new Error('push service unavailable'), { statusCode: 500 }));
+    }
+    inbox[sub.endpoint].push(payload);
+    return Promise.resolve({ statusCode: 201 });
+  });
+  return inbox;
+}
+
+async function settle(): Promise<void> {
+  await flush();
+  await flush();
+}
+
+describe('[#3798] per-device delivery: the resolution leaves only a newer wait standing', () => {
+  it('old A / resolution B: the device that missed B closes its stale A card', async () => {
+    startWaitingPushNotifier();
+    // B's card is the one whose wait opened at T0 + 100.
+    const inbox = routeDeliveries((endpoint, p) => endpoint === X && p.resolved !== true && p.waitingSince === T0 + 100);
+
+    observeWaitingEdge({ worktreeId: WT, cliToolId: 'claude', waiting: true, kind: 'prompt', now: T0 });
+    const idA = getWaitingEpisodeRecord(WT, 'claude')!.episodeId;
+    await settle();
+    observeWaitingEdge({ worktreeId: WT, cliToolId: 'codex', waiting: true, kind: 'prompt', now: T0 + 100 });
+    const idB = getWaitingEpisodeRecord(WT, 'codex')!.episodeId;
+    await settle();
+    // A ends while B still waits: no resolution.
+    observeWaitingEdge({ worktreeId: WT, cliToolId: 'claude', waiting: false, now: T0 + 200 });
+    await settle();
+    observeWaitingEdge({ worktreeId: WT, cliToolId: 'codex', waiting: false, now: T0 + 300 });
+    await settle();
+
+    // X got A only; Y got A and B. Both got B's resolution.
+    expect(inbox[X].map((p) => p.episodeId ?? p.resolvedEpisodeId)).toEqual([idA, idB]);
+    expect(inbox[X][1]).toMatchObject({ resolved: true, resolvedEpisodeId: idB, timestamp: T0 + 300 });
+    expect(inbox[Y].map((p) => p.episodeId ?? p.resolvedEpisodeId)).toEqual([idA, idB, idB]);
+
+    const x = device();
+    const y = device();
+    for (const p of inbox[X]) await x.receive(p);
+    for (const p of inbox[Y]) await y.receive(p);
+
+    for (const d of [x, y]) {
+      expect(d.shown).toHaveLength(1);
+      expect(d.shown[0].data).toMatchObject({ resolved: true });
+      expect(d.shown[0].silent).toBe(true);
+    }
+    // Before the fix X re-showed A — a finished wait no later push would close.
+    expect(x.shown[0].data.episodeId).toBeUndefined();
+  });
+
+  it('new B / resolution A: the late resolution leaves B standing on the device it overtook', async () => {
+    startWaitingPushNotifier();
+    // Y misses B's card; X receives A's resolution only after B's card.
+    const inbox = routeDeliveries((endpoint, p) => endpoint === Y && p.resolved !== true && p.waitingSince === T0 + 200);
+
+    observeWaitingEdge({ worktreeId: WT, cliToolId: 'claude', waiting: true, kind: 'prompt', now: T0 });
+    const idA = getWaitingEpisodeRecord(WT, 'claude')!.episodeId;
+    await settle();
+    observeWaitingEdge({ worktreeId: WT, cliToolId: 'claude', waiting: false, now: T0 + 100 });
+    await settle();
+    observeWaitingEdge({ worktreeId: WT, cliToolId: 'codex', waiting: true, kind: 'prompt', now: T0 + 200 });
+    const idB = getWaitingEpisodeRecord(WT, 'codex')!.episodeId;
+    await settle();
+
+    expect(inbox[X].map((p) => p.episodeId ?? p.resolvedEpisodeId)).toEqual([idA, idA, idB]);
+    expect(inbox[X][1]).toMatchObject({ resolved: true, timestamp: T0 + 100 });
+    expect(inbox[X][2]).toMatchObject({ episodeId: idB, waitingSince: T0 + 200 });
+    expect(inbox[Y].map((p) => p.episodeId ?? p.resolvedEpisodeId)).toEqual([idA, idA]);
+
+    const x = device();
+    const y = device();
+    // X: A's card, then B's card overtakes A's resolution.
+    await x.receive(inbox[X][0]);
+    await x.receive(inbox[X][2]);
+    await x.receive(inbox[X][1]);
+    for (const p of inbox[Y]) await y.receive(p);
+
+    expect(x.shown).toHaveLength(1);
+    expect(x.shown[0].data).toMatchObject({ episodeId: idB, resolved: false });
+    expect(x.shown[0].silent).toBe(true);
+    expect(x.showNotification).toHaveBeenCalledTimes(3);
+    expect(y.shown).toHaveLength(1);
+    expect(y.shown[0].data).toMatchObject({ resolved: true });
+
+    // B ends: its resolution closes B on X too.
+    observeWaitingEdge({ worktreeId: WT, cliToolId: 'codex', waiting: false, now: T0 + 300 });
+    await settle();
+    const last = inbox[X][inbox[X].length - 1];
+    expect(last).toMatchObject({ resolved: true, resolvedEpisodeId: idB });
+    await x.receive(last);
+    expect(x.shown).toHaveLength(1);
+    expect(x.shown[0].data).toMatchObject({ resolved: true });
   });
 });

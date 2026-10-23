@@ -186,14 +186,39 @@ self.addEventListener('message', function (event) {
 // A resolution may carry `resolvedEpisodeId`: the waiting episode whose card it
 // clears. It can arrive after the card of a NEWER wait in the same worktree
 // (same tag) — the next prompt's push overtook it — and closing that card would
-// hide a wait that is still open. So: cards of the resolved episode, and cards
-// that name no episode, are closed and the resolution shown in their place, as
-// before; a card of a different episode is closed too and then shown again with
-// the same content, silently (`silent: true`, `renotify: false`), INSTEAD of the
-// resolution. Every branch still calls `showNotification` exactly once, so the
-// `userVisibleOnly` contract above holds. A resolution without the id (a mark
-// written before #3798) clears the tag as it always has.
-function replaceStaleNotifications(title, options, resolvedEpisodeId) {
+// hide a wait that is still open.
+//
+// A different id alone does NOT make a card newer. Delivery fails per device,
+// and the server sends a resolution only once nothing in the worktree is still
+// waiting, so a device that missed wait B's card can still be showing wait A's
+// when B's resolution arrives — A is over too, and nothing would ever close it
+// again (the server's mark is spent). Newer is proved by order, not identity:
+// a card is kept only when its wait opened at or after the moment the
+// resolution was decided (`data.waitingSince >= resolvedAt`, both server
+// clock). A wait open at that moment would have stopped the resolution, so such
+// a card can only be a wait that opened later.
+//
+// So: a card of another episode that proves it is newer is closed and shown
+// again with the same content, silently (`silent: true`, `renotify: false`),
+// INSTEAD of the resolution; every other card — the resolved episode's, one
+// naming no episode or no start, one that opened before the resolution — is
+// closed and the resolution shown in its place, as before. Every branch still
+// calls `showNotification` exactly once, so the `userVisibleOnly` contract
+// above holds. A resolution without the id or the time (a mark written before
+// #3798) clears the tag as it always has.
+function isNewerThanResolution(card, resolvedEpisodeId, resolvedAt) {
+  var data = card.data || {};
+  return (
+    typeof resolvedEpisodeId === 'string' &&
+    typeof resolvedAt === 'number' &&
+    typeof data.episodeId === 'string' &&
+    data.episodeId !== resolvedEpisodeId &&
+    typeof data.waitingSince === 'number' &&
+    data.waitingSince >= resolvedAt
+  );
+}
+
+function replaceStaleNotifications(title, options, resolvedEpisodeId, resolvedAt) {
   var registration = self.registration;
   var tag = options.tag;
   var closing;
@@ -207,9 +232,11 @@ function replaceStaleNotifications(title, options, resolvedEpisodeId) {
       .then(function (stale) {
         var newer = null;
         for (var i = 0; i < stale.length; i++) {
-          var cardEpisodeId = stale[i].data && stale[i].data.episodeId;
-          if (resolvedEpisodeId && cardEpisodeId && cardEpisodeId !== resolvedEpisodeId) {
-            // The last one handed back is the newest card of another episode.
+          if (
+            isNewerThanResolution(stale[i], resolvedEpisodeId, resolvedAt) &&
+            // Of several, the wait that opened last (on a tie, the last handed back).
+            (newer === null || stale[i].data.waitingSince >= newer.data.waitingSince)
+          ) {
             newer = stale[i];
           }
           stale[i].close();
@@ -277,8 +304,13 @@ self.addEventListener('push', function (event) {
   // Issue #3798: a waiting card remembers its episode, so a later resolution
   // can tell it from the card it is clearing. Absent from older payloads.
   if (typeof payload.episodeId === 'string') options.data.episodeId = payload.episodeId;
+  // ...and when that wait opened, so a later resolution can tell whether the
+  // card is newer than itself. A resolution's `timestamp` is the moment it was
+  // decided (the closing edge), on the same server clock.
+  if (typeof payload.waitingSince === 'number') options.data.waitingSince = payload.waitingSince;
   var resolvedEpisodeId =
     resolved && typeof payload.resolvedEpisodeId === 'string' ? payload.resolvedEpisodeId : null;
+  var resolvedAt = resolved && typeof payload.timestamp === 'number' ? payload.timestamp : null;
 
   // --- Issue #2155 ---------------------------------------------------------
   // Every TAGGED push takes the close-then-show path, not just resolutions.
@@ -290,7 +322,7 @@ self.addEventListener('push', function (event) {
   // nothing to replace and goes straight to `showNotification`.
   event.waitUntil(
     options.tag
-      ? replaceStaleNotifications(title, options, resolvedEpisodeId)
+      ? replaceStaleNotifications(title, options, resolvedEpisodeId, resolvedAt)
       : self.registration.showNotification(title, options)
   );
 });

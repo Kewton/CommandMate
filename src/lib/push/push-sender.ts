@@ -339,10 +339,19 @@ export interface PushPayload {
    */
   episodeId?: string;
   /**
+   * When that episode opened (Issue #3798), sent beside {@link episodeId} and
+   * only with it. An id says which wait a card is about, not whether it is
+   * newer than a resolution — delivery fails per device — so the Service Worker
+   * keeps a card of another episode only when this is at or after the
+   * resolution's {@link timestamp} (the moment it was decided).
+   */
+  waitingSince?: number;
+  /**
    * The episode a resolution clears (Issue #3798). The Service Worker closes
-   * only the cards of this episode (and cards that name none) and re-shows a
-   * newer episode's card silently instead of covering it. Omitted, the
-   * resolution clears the tag as before.
+   * the cards of this episode, and every card that cannot show it opened after
+   * this resolution ({@link waitingSince}), and re-shows a newer episode's card
+   * silently instead of covering it. Omitted, the resolution clears the tag as
+   * before.
    */
   resolvedEpisodeId?: string;
 }
@@ -520,7 +529,10 @@ export function buildPushPayload(
     ...(event.waitingKind ? { waitingKind: event.waitingKind } : {}),
     ...(event.resolved === true ? { resolved: true as const } : {}),
     ...(event.kind === 'prompt' && event.resolved !== true && event.waitingEpisodeId
-      ? { episodeId: event.waitingEpisodeId }
+      ? {
+          episodeId: event.waitingEpisodeId,
+          ...(typeof event.waitingSince === 'number' ? { waitingSince: event.waitingSince } : {}),
+        }
       : {}),
     ...(event.resolved === true && event.resolvedEpisodeId ? { resolvedEpisodeId: event.resolvedEpisodeId } : {}),
   };

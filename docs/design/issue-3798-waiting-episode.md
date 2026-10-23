@@ -415,10 +415,11 @@ export function settleLegacyStop(worktreeId, cliToolId, instanceId, target: Lega
 - `replaced` は古い区間を消して新しい区間を置き、`cause:'replaced'` の遷移を 1 回だけ出す。解除通知は呼ばれず（`cause==='closed'` のときだけ）、WebSocket は `waiting:true` の新しい since だけを送る。`lastClosed` は置き換えでも古い区間の値で更新する
 - 新しい区間の since: 読みの `structuredSince` が新しい binding に属するならそれ、そうでなければ観測時刻
 - 解除通知の照合:
-  - prompt の push の `data` に `episodeId` を入れる
+  - prompt の push の `data` に `episodeId` と、その区間が開いた時刻 `waitingSince` を入れる（ID を持つ push だけ）
   - `prompt-card-state` のマークに、最後に通知した区間 ID 1 つを時刻と一緒に 1 文で入れる。時刻だけの旧形式は「ID なし」
-  - 解除の push に `resolvedEpisodeId`（マークの ID。無ければ欠く）
-  - `public/sw.js` は、同じ tag の通知のうち `data.episodeId` が `resolvedEpisodeId` と等しいもの・`episodeId` を持たないものを閉じて無音の置き換えを出す。違う `episodeId` の通知が残っていれば、それを閉じてから同じ内容で `silent:true`・`renotify:false` で出し直す。どの分岐でも `showNotification` を必ず 1 回呼ぶ
+  - 解除の push に `resolvedEpisodeId`（マークの ID。無ければ欠く）。解除を決めた時刻は既存の `timestamp`（閉じた縁の時刻）
+  - ID の違いは新旧の証拠にしない。配送は端末ごとに失敗でき、解除は worktree の待機がすべて終わってから送られるので、ある端末に B のカードが届かなければ、B の解除が届いたときその端末には終わった A のカードが残っている（サーバーのマークは使い切っているので、後から閉じ直す push は来ない）。新しさは順序で確かめる: 解除を決めた時点で開いていた区間があれば解除は送られないので、`data.waitingSince >= 解除の timestamp` のカードは解除の後に開いた待機に限られる（両方ともサーバーの時計）
+  - `public/sw.js` は、同じ tag の通知をすべて閉じる。そのうち `data.episodeId` が `resolvedEpisodeId` と違い、かつ `data.waitingSince >= timestamp` のものがあれば、それを同じ内容で `silent:true`・`renotify:false` で出し直す（解除の置き換えは出さない）。無ければ無音の置き換えを出す。解除と同じ ID のカード・`episodeId` か `waitingSince` を持たないカード・解除より前に開いたカード、`timestamp` の無い解除はすべて置き換えの側。どの分岐でも `showNotification` を必ず 1 回呼ぶ
   - `resolvedEpisodeId` の無い解除は今の動き
 
 #### 規則 6（claude-done）
@@ -681,7 +682,7 @@ export function settleLegacyStop(worktreeId, cliToolId, instanceId, target: Lega
 - カードのマークの区間 ID は、時刻の行（`push_prompt_card:<worktreeId>`、値は今までどおり時刻だけ）の隣の行 `push_prompt_card_episode:<worktreeId>` に、時刻の行と **同じ 1 つの INSERT 文** で書く（値は `<at>:<episodeId>`。ID が無ければ `<at>:`）。時刻の行の値を変えると `tests/unit/push/restart-card-state-2057.test.ts` の `persistedMark()` の期待（時刻の文字列）が変わるため。ID の行の時刻が時刻の行と違えば（旧い版のサーバーが時刻の行だけを書き換えた）ID 無しとして読む。旧い版のサーバーが書いたマーク（時刻の行だけ）も ID 無し
 - `forgetAutoYesHold(key, wait)` の第 2 引数は、数値（since、#3776 のまま）か `{ since, episodeId }` を受ける。比較は混在の規則（`isSameWait`）
 - `handleWaitingTransition` は ID つきの遷移と 7 欄の遷移の両方を受ける（既存テストが 7 欄で直接呼ぶ）。7 欄のときは store の区間の since が一致すればその ID を使う
-- `sw.js` で別の区間のカードが 2 枚以上あるときは、`getNotifications` が最後に返したもの（最も新しいもの）を出し直す
+- `sw.js` で解除より新しいと確かめられたカードが 2 枚以上あるときは、`waitingSince` が最も遅いもの（同じなら `getNotifications` が後に返したもの）を出し直す。ID が違うだけのカードは出し直さない（規則 5。端末ごとの配送の失敗で古いカードが残るため）
 
 ### 6.3 PR 1b: 観測の照合と共通の画面の読み方
 
