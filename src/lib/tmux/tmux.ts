@@ -1195,7 +1195,9 @@ export const REPAINT_INVALIDATE_DELAY_MS = 250;
  * Drop the cached frame again once the TUI has had time to repaint.
  *
  * Fire-and-forget on purpose: the route must not wait 250 ms to answer, and the
- * work is one `Map.delete`. The timer is `unref()`ed where the runtime supports
+ * work is synchronous and small — `invalidateCache` drops the cached frame and
+ * the inflight capture and advances the session's generation (Issue #3734), so
+ * a capture started before the repaint is not written back either. The timer is `unref()`ed where the runtime supports
  * it so a pending invalidation can never hold a process (or a test runner) open.
  */
 function scheduleRepaintInvalidation(sessionName: string): void {

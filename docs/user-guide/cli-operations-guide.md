@@ -1470,6 +1470,11 @@ Error: invalid task contract:
 ### 無人実行の Auto-Yes ポリシーは allow-listed を使う（Issue #1684）
 
 契約の `autoYes.mode: safe` は **`yes_no` 型のプロンプトしか自動応答しません**。
+さらに、ダイアログの判定が `enforce` の道具（claude・codex・copilot・opencode・opencode-v2）では、
+**その道具のダイアログ検出が確認と認めない（根拠の無い）`yes_no` には答えません**（Issue #3822。返答の中に引用された `(y/n)` や、
+Auto-Yes を ON にする前から開いていた汎用の `(y/n)` を含む。記録は `unclassified-frame`）。
+ダイアログの判定が `legacy` の道具（既定で gemini・vibe-local・command-code、運用者が `CM_AUTOYES_DIALOG_GATE=<tool>=legacy` を立てた道具）は、
+汎用の `(y/n)` に従来どおり答えます。antigravity は hook の受信がある確認に答えます。
 **Claude の編集確認（`Do you want to make this edit …?`）は `multiple_choice` 型**
 （実質 Yes/No＋allow-all の 3 択）なので、safe のままだと編集のたびにワーカーが停止します。
 無人で走らせる契約は `allow-listed` に広げ、危険操作は `denyPatterns` でエスカレートさせてください。
@@ -2087,6 +2092,7 @@ Auto-Yes が OFF の instance で、止まった理由があれば入ります�
 | `unclassified-frame`（Issue #1924） | 汎用の推定は番号付きの一覧を読んだが、その道具のダイアログ検出が確認と認めなかったので何も送らない。返答の中の番号付きの一覧に `1` と答える事故（#1896）を防ぐ位置 | 「because no tool-specific dialog detector recognised the frame」 |
 | `startup-trust-unhandled`（Issue #3757） | agy の起動時のフォルダ信頼の確認（`Do you trust the contents of this project?`）が画面にある。起動の手順の側が答えるもので、番号が無いので poller はプロンプトとして読めない。起動の窓が終わった後に出た場合は、次の send の準備待ちが答える | 「because agy's startup folder-trust confirmation is the launch's to answer, not Auto-Yes's; the next send confirms it once, or answer it at the pane」 |
 | `question-confirm-page`（Issue #3748） | Command Code と Claude の `AskUserQuestion` の確認画面（`Submit` / `Cancel`）。`Submit` は選択ではなくその時点の回答を確定するので、Auto-Yes は答えず人に任せる | 「because the question's Submit/Cancel confirmation commits the answers as they stand, so Auto-Yes leaves it to a human」 |
+| `question-left-to-human`（Issue #3822） | 道具が操作者に尋ねている質問（Claude の `AskUserQuestion` の選択画面、OpenCode V2 の質問フォーム）が画面にある。Auto-Yes が答えるのは許可だけで、質問は人が答えるので何も送らない。契約の判定ではないので、`allowPromptTypes` に `multiple_choice` を書いても答えない。ただし運用者が `CM_AUTOYES_DIALOG_GATE=<tool>=legacy` を立てると、そのツールの質問（claude の `AskUserQuestion` など）にも従来どおり答える（キルスイッチは質問の見送りも戻す）。ダイアログの判定が既定で `legacy` の道具（command-code など）の質問も、この理由では見送られない。質問の後の `Submit` / `Cancel` の確認画面は `question-confirm-page` のまま | 「because the agent is asking a question, and Auto-Yes answers permissions only; answer it at the pane (prompt --json, respond)」 |
 | `no-hook-receipt`（Issue #3767） | agy の承認ダイアログが画面にあるが、それに対応する hook の問い合わせ（`PreToolUse`）の受信が無い。(1) 受信が一度も無い、(2) ダイアログが最後の受信から窓（8 秒）より後に出た、(3) ダイアログが受信より前から出ていた（返答中の引用など）、(4) 受信が途絶えた、(5) 受信が前のダイアログに使い済み、(6) Auto-Yes が受信の確認へキーを送ってから 18 秒（窓＋観測の猶予＋応答後の待ち）を過ぎても確認が残っている（キーで閉じなかったか、受信の無い別の確認と入れ替わった。Issue #3789。送信が途中で切れた場合も、切れた時点から猶予（18 秒）を数え、過ぎても確認が残れば no-hook-receipt として記録する。入力欄にキーの一部が残っていることがある。ただし、中断の後に、より具体的な抑止の理由（partial-answer）が記録された場合は、その理由を保ち、no-hook-receipt としては記録しない）、のいずれか。サーバーのログ `antigravity-autoyes-withheld-no-hook-receipt` の `hint` が区別する。**止まったときの対処**: `commandmate auto-yes <worktree-id> --disable` → `commandmate prompt <worktree-id> --json` → `commandmate respond <worktree-id> --expect-screen …` で答える（または UI で答える）。一度も受信が無い・途絶えた場合は `~/.gemini/config/hooks.json` の向き先を確認 | 「because there is no unused agy hook permission question for this dialog (none arrived in time, or the last one was spent on keys that did not clear it); answer it yourself (auto-yes --disable, prompt --json, respond --expect-screen) or check hooks.json」 |
 
 [`commandmate prompt --json`](#commandmate-prompt) の `autoYes.pollerRecord`（poller の記録）と `autoYes.contractEvaluation`（契約の再評価）は別の項目ですが、どちらもこの表と上の `reason` と同じ語を使います。
@@ -2571,7 +2577,7 @@ Warning: the contract of task 7f3c… sets autoYes.mode: off, so Auto-Yes is arm
 ```
 
 - `safe` / `allow-listed` は止めずに、答える種類を `Note:` の 1 行で添えます
-  （例: `Note: … sets autoYes.mode: safe; Auto-Yes answers yes_no prompts only.`）
+  （例: `Note: … sets autoYes.mode: safe; Auto-Yes answers yes_no prompts only (on claude, codex, copilot, opencode and opencode-v2, only those the tool itself shows as a confirmation, not a generic (y/n)).`）
 - 契約が無い、または `mode` を指定していない契約では、表示は従来どおりです
 - 判定は poller と同じ方針の読み取り（`getSessionAutoYesPolicy`）を通ります。API では
   `POST /api/worktrees/<id>/auto-yes`（有効化）と `GET …/auto-yes?cliToolId=` の応答の

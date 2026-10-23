@@ -931,7 +931,11 @@ function handleDisconnect(ws: WebSocket): void {
   // what it obtains instead of registering it on a socket that is gone.
   clientInfo.terminalSubscriptionSeq += 1;
   if (clientInfo.terminalSubscription) {
-    void clientInfo.terminalSubscription.unsubscribe();
+    // Issue #3749: not awaited, so a rejection would otherwise surface as an
+    // unhandled rejection.
+    clientInfo.terminalSubscription.unsubscribe().catch(() => {
+      // Best-effort cleanup on disconnect.
+    });
     clientInfo.terminalSubscription = null;
   }
 
@@ -995,7 +999,12 @@ async function handleTerminalSubscribe(ws: WebSocket, message: WebSocketMessage)
     // Detached before the await, so a request arriving meanwhile neither
     // releases it a second time nor has its own registration cleared by ours.
     clientInfo.terminalSubscription = null;
-    await previous.unsubscribe();
+    try {
+      await previous.unsubscribe();
+    } catch {
+      // Issue #3749: best-effort, like the other teardowns. Letting it throw
+      // ended this handler here and the new subscribe silently never happened.
+    }
   }
   if (!isCurrent()) return;
 
@@ -1184,7 +1193,7 @@ async function handleTerminalUnsubscribe(ws: WebSocket): Promise<void> {
   if (!clientInfo) return;
   // Issue #3733: also withdraws a subscribe still in flight, which would
   // otherwise register after this and keep streaming.
-  clientInfo.terminalSubscriptionSeq += 1;
+  const seq = ++clientInfo.terminalSubscriptionSeq;
   const subscription = clientInfo.terminalSubscription;
   if (!subscription) {
     return;
@@ -1197,6 +1206,10 @@ async function handleTerminalUnsubscribe(ws: WebSocket): Promise<void> {
   } catch {
     // Best-effort cleanup during terminal unsubscribe.
   }
+  // Issue #3749: a subscribe that started while the teardown was awaited may
+  // already have said `connected:true`; a `connected:false` sent after it
+  // would contradict the subscription that is now live.
+  if (clients.get(ws) !== clientInfo || clientInfo.terminalSubscriptionSeq !== seq) return;
   sendTerminalEvent(ws, { type: 'terminal_status', connected: false });
 }
 

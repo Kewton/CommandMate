@@ -288,7 +288,18 @@ function addWorktree(id: string): void {
   ).run(id, id, `/repo/${id}`, '/repo', 'repo', Date.now());
 }
 
+
+/**
+ * Issue #3822: an enforce tool's dialog gate refuses a `(y/n)` its own rules do
+ * not vouch for, so the typed-answer path this file exercises (`y`, a wait,
+ * Enter) is reached on claude only under the kill switch's `legacy` — the
+ * setting an operator restores it with. What is pinned here is the send, not
+ * the gate (the gate's refusal: `auto-yes-generic-yes-no-3822.test.ts`).
+ */
+const ORIGINAL_DIALOG_GATE_ENV = process.env.CM_AUTOYES_DIALOG_GATE;
+
 beforeEach(() => {
+  process.env.CM_AUTOYES_DIALOG_GATE = 'claude=legacy';
   vi.useFakeTimers();
   vi.setSystemTime(1_800_000_000_000);
   db = new Database(':memory:');
@@ -310,6 +321,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  if (ORIGINAL_DIALOG_GATE_ENV === undefined) delete process.env.CM_AUTOYES_DIALOG_GATE;
+  else process.env.CM_AUTOYES_DIALOG_GATE = ORIGINAL_DIALOG_GATE_ENV;
   typedKeyGate?.resolve();
   typedKeyGateOnce?.resolve();
   guardReadGate?.resolve();

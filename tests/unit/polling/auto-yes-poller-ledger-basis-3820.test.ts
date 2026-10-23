@@ -147,7 +147,16 @@ describe('[#3820] agy: read by its own reader and let through on a receipt is L3
   );
 
   it('keeps L4 for a yes/no prompt of another tool, which the dialog gate does not judge (negative control)', async () => {
-    expect(await respond('codex', 'Do you want to proceed? (y/n)')).toBe('responded');
+    // Issue #3822: codex's gate (`enforce`) refuses a `(y/n)` its rules do not
+    // vouch for; under `legacy` it is not judged, which is the case pinned here.
+    const originalGateEnv = process.env.CM_AUTOYES_DIALOG_GATE;
+    process.env.CM_AUTOYES_DIALOG_GATE = 'codex=legacy';
+    try {
+      expect(await respond('codex', 'Do you want to proceed? (y/n)')).toBe('responded');
+    } finally {
+      if (originalGateEnv === undefined) delete process.env.CM_AUTOYES_DIALOG_GATE;
+      else process.env.CM_AUTOYES_DIALOG_GATE = originalGateEnv;
+    }
 
     expect(settled()).toEqual([expect.objectContaining({ result: 'ok', basis: 'L4' })]);
     expect(settled()[0]).not.toHaveProperty('receiptAccepted');

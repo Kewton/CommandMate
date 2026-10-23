@@ -140,6 +140,8 @@ import type { AnswerBasis, AttemptResult } from './polling/auto-yes-confirmation
 import {
   resolveAnswerUnderPolicy,
   skippedForUnownedSession,
+  withheldAsQuestion,
+  withheldAtSend,
   withheldForEarlierSend,
 } from './polling/auto-yes-poller-steps';
 
@@ -357,7 +359,9 @@ function isStillEnterFallbackScreen(prompt: JudgedPrompt, fresh: string): boolea
  *  4. the screen must have been eligible on the previous tick as well;
  *  5. the session must be this server's (#2865);
  *  6. a capture taken now, past the capture cache, must still be that screen
- *     ({@link isStillEnterFallbackScreen}).
+ *     ({@link isStillEnterFallbackScreen});
+ *  7. Auto-Yes still on and the contract, read past its cache, still allowing
+ *     it (Issue #3822, `withheldAtSend`).
  *
  * Issue #3706: with a `generation` (a tick of `pollAutoYes`), the waits of
  * steps 5 and 6 are each followed by {@link isTickCurrent}; a tick that lost
@@ -498,6 +502,12 @@ async function tryEnterFallback(
       instanceId,
       promptType: promptData.type,
     });
+    return false;
+  }
+
+  // 7. Issue #3822: the grant and the contract, read again right before the key.
+  if (withheldAtSend(prompt, generation !== undefined)) {
+    pollerState.enterFallbackCandidateKey = null;
     return false;
   }
 
@@ -1056,6 +1066,12 @@ export async function detectAndRespondToPrompt(
       return 'responded';
     }
 
+    // 3.7. Issue #3822: a question to the operator is the human's to answer;
+    // Auto-Yes answers permissions only. See `withheldAsQuestion`.
+    if (withheldAsQuestion(judged)) {
+      return 'no_answer';
+    }
+
     // 4. Resolve auto answer under the execution contract's policy (Issue #1547).
     // Auto-Yes reads the frame itself instead of going through status-detector
     // (it shares the reader, not the verdict), so this is the only place the policy can gate an
@@ -1077,6 +1093,13 @@ export async function detectAndRespondToPrompt(
     const ownership = await checkWorktreeSessionOwnership(worktreeId, sessionName);
     if (generation !== undefined && !isTickCurrent(generation)) return 'no_answer';
     if (skippedForUnownedSession(judged, sessionName, ownership)) {
+      return 'no_answer';
+    }
+
+    // 5.5. Issue #3822: the last look before the first key — Auto-Yes still on
+    // and inside its window, and the contract, read past its cache, still
+    // allowing this answer. No wait between here and the send.
+    if (withheldAtSend(judged, generation !== undefined)) {
       return 'no_answer';
     }
 
