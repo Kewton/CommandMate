@@ -122,6 +122,7 @@ import {
   noteManualAnswerStarted,
 } from '@/lib/polling/auto-yes-manual-answer';
 import { DUPLICATE_RETRY_EXPIRY_MS } from '@/lib/auto-yes-state';
+import { isAutoYesAnswering, laterAutoYesDecision } from '@/types/auto-yes-decision';
 import { stripAnsi, stripBoxDrawing } from '@/lib/detection/cli-patterns';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
 
@@ -599,18 +600,25 @@ describe('[#3821] a decision is not carried to another approval target', () => {
     expect(publishFor(agyPrompt(CREATE_OTHER_FILE)).state).toBe('none');
   });
 
-  // Review 2 (R3): a cut is the same dialog only while the hook call ties the
-  // two readings together; the cases without one are below.
+  // Review 3: the exception that let a reading cut from the top match under
+  // the same hook call is gone (the call known now may be an earlier
+  // dialog's). A target that cannot be compared to its end is not the same
+  // confirmation: none, the panel opens.
   it.each([
     ['from the file row', '~/agy2364-probe/hello-agy.txt'],
     ['from the diff row', 'hello from antigravity'],
-  ])('control: the same dialog read with fewer rows (%s): still the decision', (_label, firstRow) => {
+  ])('the same dialog read with fewer rows (%s), even under the same hook call: none, both ways', (_label, firstRow) => {
     const fewer = agyPrompt(fewerRows(CREATE_FILE, firstRow));
     expect(fewer.approvalTarget).not.toBe(agyPrompt(CREATE_FILE).approvalTarget);
     record(agyPrompt(CREATE_FILE), 'call-1');
-    expect(publishFor(fewer, 'call-1').state).toBe('answering');
+    expect(publishFor(fewer, 'call-1').state).toBe('none');
     // And the other way round: the poller read fewer rows than the status API.
     record(fewer, 'call-1');
+    expect(publishFor(agyPrompt(CREATE_FILE), 'call-1').state).toBe('none');
+  });
+
+  it('control: the same dialog read whole under the same hook call: still the decision', () => {
+    record(agyPrompt(CREATE_FILE), 'call-1');
     expect(publishFor(agyPrompt(CREATE_FILE), 'call-1').state).toBe('answering');
   });
 
@@ -645,6 +653,72 @@ describe('[#3821] a decision is not carried to another approval target', () => {
     expect(publishFor(fewer).state).toBe('none');
     record(fewer);
     expect(publishFor(agyPrompt(CREATE_FILE)).state).toBe('none');
+  });
+
+  it('B (only the file name differs) under A’s accepted call, read whole or cut: A’s decision is not published', () => {
+    // The builder may still read A's call for B's screen before the next tick (review 3, R3).
+    record(agyPrompt(CREATE_FILE), 'call-1');
+    expect(publishFor(agyPrompt(CREATE_RENAMED_FILE), 'call-1').state).toBe('none');
+    expect(publishFor(agyPrompt(fewerRows(CREATE_RENAMED_FILE, 'hello from antigravity')), 'call-1').state).toBe(
+      'none',
+    );
+    record(agyPrompt(fewerRows(CREATE_FILE, 'hello from antigravity')), 'call-1');
+    expect(publishFor(agyPrompt(CREATE_RENAMED_FILE), 'call-1').state).toBe('none');
+  });
+
+  it('a decision recorded with no hook call is not published under one, nor the other way', () => {
+    record(agyPrompt(CREATE_FILE));
+    expect(publishFor(agyPrompt(CREATE_FILE), 'call-1').state).toBe('none');
+    record(agyPrompt(CREATE_FILE), 'call-1');
+    expect(publishFor(agyPrompt(CREATE_FILE)).state).toBe('none');
+  });
+
+  it('confirmation and the match follow one rule: same key exactly when the record is published', () => {
+    const readings: Array<[PromptData, string | null]> = [
+      [agyPrompt(CREATE_FILE), null],
+      [agyPrompt(CREATE_FILE), 'call-1'],
+      [agyPrompt(fewerRows(CREATE_FILE, '~/agy2364-probe/hello-agy.txt')), 'call-1'],
+      [agyPrompt(fewerRows(CREATE_FILE, 'hello from antigravity')), 'call-1'],
+      [agyPrompt(CREATE_RENAMED_FILE), 'call-1'],
+      [agyPrompt(fewerRows(CREATE_RENAMED_FILE, 'hello from antigravity')), 'call-1'],
+    ];
+    for (const [recorded, recordedCall] of readings) {
+      record(recorded, recordedCall);
+      const recordedKey = publishFor(recorded, recordedCall).confirmation;
+      for (const [shown, shownCall] of readings) {
+        const out = publishFor(shown, shownCall);
+        expect(out.state === 'answering').toBe(out.confirmation === recordedKey);
+      }
+    }
+    // Non-vacuous: the whole and the cut readings of one dialog carry different keys.
+    expect(publishFor(agyPrompt(CREATE_FILE), 'call-1').confirmation).not.toBe(
+      publishFor(agyPrompt(fewerRows(CREATE_FILE, 'hello from antigravity')), 'call-1').confirmation,
+    );
+  });
+
+  it('PC: a newer withheld, then an older answering about the same dialog: the decision does not go back', () => {
+    const newer = (() => {
+      vi.setSystemTime(5_000);
+      recordAutoYesDecision(key, {
+        state: 'withheld',
+        reason: 'mode-off',
+        promptData: agyPrompt(CREATE_FILE),
+        grant,
+        epoch: getEnterFallbackSessionEpoch(key),
+      });
+      return publishFor(agyPrompt(CREATE_FILE));
+    })();
+    vi.setSystemTime(3_000);
+    record(agyPrompt(CREATE_FILE));
+    const olderWhole = publishFor(agyPrompt(CREATE_FILE));
+    const olderCut = publishFor(agyPrompt(fewerRows(CREATE_FILE, 'hello from antigravity')));
+    expect(newer).toMatchObject({ state: 'withheld', observedAt: 5_000 });
+    expect(olderWhole).toMatchObject({ state: 'answering', observedAt: 3_000 });
+    // The same reading: compared by time, the newer withheld stays.
+    expect(laterAutoYesDecision(newer, olderWhole)).toBe(newer);
+    // A cut reading of it is never answering, so nothing hides the panel either way.
+    expect(olderCut.state).toBe('none');
+    expect(isAutoYesAnswering(laterAutoYesDecision(newer, olderCut))).toBe(false);
   });
 
   it('control: the same dialog read the same way, no hook call: still the decision', () => {

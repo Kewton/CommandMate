@@ -22,11 +22,13 @@
  *   rows kept, as #3817 reads it) — AND, for agy, the hook call the receipt
  *   was accepted for. Two approvals that differ only in their target (agy's
  *   file creation names the file only there, two commands that differ by an
- *   indent) are two confirmations. A reading cut from the top (fewer rows) is
- *   the same confirmation only while a hook call ties both readings to one
- *   observation: the rows a cut leaves need not name what is approved (a diff
- *   row, not the file). One whose target or call cannot be confirmed reads
- *   `none`;
+ *   indent) are two confirmations. Two readings of one screen that differ in
+ *   how many rows they kept (one cut from the top) are not matched either:
+ *   the rows a cut leaves need not name what is approved (a diff row, not the
+ *   file), and the hook call known now may be an earlier one's (review 3), so
+ *   they read `none` — the panel opens, nothing is sent. The published
+ *   `confirmation` ({@link autoYesConfirmationKey}) is this same identity: a
+ *   record matches exactly when the keys are equal;
  * - a TICK not long ago ({@link AUTO_YES_DECISION_STALE_MS}): a live poller
  *   re-decides every tick, so a record nobody refreshed says nothing now.
  *
@@ -72,12 +74,8 @@ export interface AutoYesDecisionRecord {
   state: 'answering' | 'withheld';
   /** Set for `withheld`. */
   reason: AutoYesDecisionReason | null;
-  /** {@link enterFallbackScreenKey} of the prompt the decision is about. */
-  screenKey: string;
-  /** {@link approvalTargetRows} of the prompt the decision is about (null: it had none). */
-  targetRows: readonly string[] | null;
-  /** agy: the hook call the receipt on screen was accepted for, when known. */
-  callId: string | null;
+  /** {@link autoYesConfirmationKey} of the prompt the decision is about. */
+  confirmation: string;
   /** The grant the tick acted under (compared by identity). */
   grant: AutoYesState | null;
   /** The session epoch the tick read under. */
@@ -111,48 +109,14 @@ export function approvalTargetRows(promptData: PromptData): string[] | null {
   return target === null ? null : target.split('\n');
 }
 
-function sameRows(a: readonly string[] | null, b: readonly string[] | null): boolean {
-  if (a === null || b === null) return a === b;
-  return a.length === b.length && a.every((row, i) => row === b[i]);
-}
-
 /**
- * Is one reading the other cut from the top? The shorter's rows are the
- * longer's last rows, as read; its top row may have lost its indent (a reading
- * trims the row it starts at), and only that one.
- */
-function isCutFromTop(a: readonly string[] | null, b: readonly string[] | null): boolean {
-  if (a === null || b === null || a.length === b.length) return false;
-  const [shorter, longer] = a.length < b.length ? [a, b] : [b, a];
-  if (shorter.length === 0) return false;
-  const offset = longer.length - shorter.length;
-  return shorter.every((row, i) =>
-    i === 0 ? row.trimStart() === longer[offset].trimStart() : row === longer[offset + i],
-  );
-}
-
-/**
- * Is `record` about the confirmation `identity` describes? Question and
- * options equal, the same agy call when the record was tied to one, and the
- * approval targets equal row for row — or one cut from the top of the other,
- * only when that call ties the two readings together. A cut needs that call:
- * without it, the rows left (a diff row) may not tell this approval from
- * another one with the same rows (another file name).
- */
-export function matchesConfirmation(record: AutoYesDecisionRecord, identity: AutoYesConfirmationIdentity): boolean {
-  if (record.screenKey !== enterFallbackScreenKey(identity.promptData)) return false;
-  if (record.callId !== null && record.callId !== (identity.callId ?? null)) return false;
-  const rows = approvalTargetRows(identity.promptData);
-  if (sameRows(record.targetRows, rows)) return true;
-  return record.callId !== null && isCutFromTop(record.targetRows, rows);
-}
-
-/**
- * Which confirmation a published decision is about (`confirmation` on the
- * wire): question and options, the approval target as
- * {@link matchesConfirmation} reads it, and the agy call, hashed. A client
- * holding a decision for one confirmation keeps it over a later delivery only
- * when both name the same one (`laterAutoYesDecision`).
+ * Which confirmation a reading is of: question and options
+ * ({@link enterFallbackScreenKey}), the approval target row for row
+ * ({@link approvalTargetRows}) and the agy call, hashed. The one identity both
+ * the record ({@link matchesConfirmation}) and the wire (`confirmation`, read
+ * by `laterAutoYesDecision`) use: same key, same confirmation; another key,
+ * another confirmation — or the same one read with other rows, which is not
+ * claimed to be the same.
  */
 export function autoYesConfirmationKey(identity: AutoYesConfirmationIdentity): string {
   return createHash('sha256')
@@ -165,6 +129,11 @@ export function autoYesConfirmationKey(identity: AutoYesConfirmationIdentity): s
     )
     .digest('hex')
     .slice(0, 32);
+}
+
+/** Is `record` about the confirmation `identity` describes? The same {@link autoYesConfirmationKey}. */
+export function matchesConfirmation(record: AutoYesDecisionRecord, identity: AutoYesConfirmationIdentity): boolean {
+  return record.confirmation === autoYesConfirmationKey(identity);
 }
 
 /** Record what the tick decided for the prompt on screen. */
@@ -183,9 +152,7 @@ export function recordAutoYesDecision(
   decisions.set(compositeKey, {
     state: decision.state,
     reason: decision.state === 'withheld' ? decision.reason : null,
-    screenKey: enterFallbackScreenKey(decision.promptData),
-    targetRows: approvalTargetRows(decision.promptData),
-    callId: decision.callId ?? null,
+    confirmation: autoYesConfirmationKey(decision),
     grant: decision.grant,
     epoch: decision.epoch,
     at,
@@ -269,12 +236,13 @@ export interface AutoYesDecisionPublishInput {
  *   ({@link matchesConfirmation}), refreshed recently: that record;
  * - otherwise `none`.
  *
- * Each names the payload's prompt in `confirmation` ({@link autoYesConfirmationKey}; null with none).
+ * Each names the payload's prompt in `confirmation` ({@link autoYesConfirmationKey}; null with no prompt).
  */
 export function publishAutoYesDecision(input: AutoYesDecisionPublishInput): AutoYesDecisionPublished {
   const now = input.now ?? Date.now();
   const { compositeKey, grant, promptData } = input;
-  const confirmation = promptData == null ? null : autoYesConfirmationKey({ promptData, callId: input.callId });
+  const confirmation =
+    promptData == null ? null : autoYesConfirmationKey({ promptData, callId: input.callId });
   const none: AutoYesDecisionPublished = { state: 'none', reason: null, observedAt: now, confirmation };
   if (promptData == null || !grant?.enabled) return none;
   if (!input.pollerActive) {
@@ -285,7 +253,7 @@ export function publishAutoYesDecision(input: AutoYesDecisionPublishInput): Auto
     record === undefined ||
     record.grant !== grant ||
     record.epoch !== getEnterFallbackSessionEpoch(compositeKey) ||
-    !matchesConfirmation(record, { promptData, callId: input.callId }) ||
+    record.confirmation !== confirmation ||
     now - record.at > AUTO_YES_DECISION_STALE_MS
   ) {
     return none;

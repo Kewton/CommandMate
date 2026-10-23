@@ -129,7 +129,11 @@ import {
   type AutoYesPollerState,
 } from '@/lib/auto-yes-poller';
 import { POLLING_INTERVAL_MS, DUPLICATE_RETRY_EXPIRY_MS, buildCompositeKey } from '@/lib/auto-yes-state';
-import { clearAutoYesDecisions, getAutoYesDecisionRecord } from '@/lib/polling/auto-yes-decision-state';
+import {
+  autoYesConfirmationKey,
+  clearAutoYesDecisions,
+  getAutoYesDecisionRecord,
+} from '@/lib/polling/auto-yes-decision-state';
 import { getEnterFallbackSessionEpoch } from '@/lib/polling/auto-yes-enter-fallback';
 import { clearPolicySuppressions, getLastPolicySuppression } from '@/lib/polling/auto-yes-suppression-state';
 import {
@@ -145,7 +149,7 @@ import {
 } from '@/lib/polling/auto-yes-dialog-gate';
 import { extractComposerText } from '@/lib/detection/composer-text';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
-import { beginEnterFallbackSession, enterFallbackScreenKey } from '@/lib/polling/auto-yes-enter-fallback';
+import { beginEnterFallbackSession } from '@/lib/polling/auto-yes-enter-fallback';
 import { stripAnsi, stripBoxDrawing } from '@/lib/detection/cli-patterns';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
@@ -342,7 +346,11 @@ describe('[#3397] Enter goes to an unreadable choice screen, once (#3821: never)
 
     const state = pollerState('claude');
     await ticks(state, CLAUDE_UNSUPPORTED_LAYOUT, 2);
-    expect(decisionOf('claude')?.screenKey).toBe(enterFallbackScreenKey(status.promptDetection.promptData!));
+    // Since review 3 the record keeps the whole identity (question, options and
+    // the approval target row for row) as one key, the one `current-output` publishes.
+    expect(decisionOf('claude')?.confirmation).toBe(
+      autoYesConfirmationKey({ promptData: status.promptDetection.promptData! }),
+    );
   });
 
   it('[#3821] the first sight is recorded as withheld: nobody is about to answer it (#2463 does not hold)', async () => {

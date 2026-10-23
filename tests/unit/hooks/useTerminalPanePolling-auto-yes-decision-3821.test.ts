@@ -311,6 +311,17 @@ describe('[#3821] useTerminalPanePolling carries the Auto-Yes decision', () => {
       expect(result.current.prompt.autoYesDecision).toEqual(about(answering(5_000), 'A'));
     });
 
+    it('a newer withheld (5s), then an older answering (3s) about the same confirmation: the decision does not go back', async () => {
+      const { result } = await renderPolled(
+        polled({ promptData: TARGET_A, autoYesDecision: about(withheld(5_000), 'A') }),
+      );
+      hangPolls();
+      act(() => realtimeMock.emit(push(1, TARGET_A, about(answering(3_000), 'A'))));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(result.current.prompt.autoYesDecision).toEqual(about(withheld(5_000), 'A'));
+      expect(panelUnderAutoYes(result.current.prompt)).toBe(true);
+    });
+
     it('a decision that does not say which confirmation, after one that does: the earlier is dropped', async () => {
       const { result } = await renderPolled(
         polled({ promptData: TARGET_A, autoYesDecision: about(answering(5_000), 'A') }),
