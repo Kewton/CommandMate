@@ -190,6 +190,13 @@ function readContractPolicy(session: PermissionRequestSession): AutoYesPolicyLoo
  * | policy suppresses (mode off, deny pattern, type) | no-decision + suppression |
  * | otherwise | allow |
  *
+ * Issue #3822: the screen path reads the grant and the contract once more right
+ * before its first key (`withheldAtSend`). This path has no such moment: the
+ * `allow` returned here IS the answer — Claude runs the call without drawing a
+ * dialog and nothing is typed afterwards — so the grant and the contract it is
+ * judged against are read now, when the hook is answered, and the contract
+ * through the same cache-backed lookup (a failed read withholds, #3830).
+ *
  * @param session - Worktree / tool / instance the request came from
  * @param payload - Parsed payload, or null when it could not be parsed
  * @param deps - Substitutions for the database-backed lookups; see

@@ -12,7 +12,9 @@
  *     `question-confirm-page`; Command Code's page (#3497) is recorded under
  *     the same reason instead of `unclassified-frame`.
  * (c) 陰性対照: Claude's ordinary permission dialog is answered `1` as before,
- *     and `poller:response-sent` now names the question and the answer.
+ *     and `poller:response-sent` now names the question and the answer. An
+ *     `AskUserQuestion` quoting the page's wording is not the page; since
+ *     #3822 it is withheld as a question (`question-left-to-human`).
  *
  * @vitest-environment node
  */
@@ -127,6 +129,8 @@ const CLAUDE_LOOKALIKES = [
   ['an AskUserQuestion asking `Do you want to review your answers before continuing?`', askUserQuestionAsking('Do you want to review your answers before continuing?')],
   ['an AskUserQuestion whose question ends `Ready to submit your answers?`', askUserQuestionAsking('Ready to submit your answers?')],
 ] as const;
+/** Issue #3822: the lookalikes that are questions, left to a human since #3822. */
+const isAskUserQuestionLookalike = (name: string): boolean => name.startsWith('an AskUserQuestion');
 const CC_NO_BACK_HINT = fixture('command-code-askuserquestion-3497', 'review-page-no-back-hint.txt');
 const CC_FREE_TEXT_CONFIRM = COMMAND_CODE_FREE_TEXT_CONFIRM_FRAME;
 
@@ -259,13 +263,37 @@ describe('[#3748] (c) 陰性対照 and the response-sent log', () => {
     expect(String(sent.question).length).toBeGreaterThan(0);
   });
 
-  it.each(CLAUDE_LOOKALIKES)('claude: %s is answered `1`', async (_name, raw) => {
+  it.each(CLAUDE_LOOKALIKES.filter(([name]) => !isAskUserQuestionLookalike(name)))('claude: %s is answered `1`', async (_name, raw) => {
     expect(await respondTo('claude', raw)).toBe('responded');
     expect(sendPromptAnswer).toHaveBeenCalledTimes(1);
     expect(sendPromptAnswer.mock.calls[0][0].answer).toBe('1');
     expect(events(warn, 'poller:auto-yes-skipped-question-confirm')).toEqual([]);
     expect(getLastPolicySuppression(WT, 'claude', 'claude')).toBeNull();
   });
+
+  // Issue #3822 (decided 2026-10-20: Auto-Yes answers permissions only; a
+  // question is the human's). These two were `is answered \`1\``: under #3748
+  // they pinned that the confirm-page predicate does not mistake a question
+  // whose wording quotes the page for the page itself, and the answer `1` was
+  // how that showed. The question is now withheld for being a question, so
+  // what shows the same thing is the reason: `question-left-to-human`, not
+  // `question-confirm-page`, and not the confirm page's WARN.
+  it.each(CLAUDE_LOOKALIKES.filter(([name]) => isAskUserQuestionLookalike(name)))(
+    'claude: %s gets no key, recorded as question-left-to-human rather than the confirm page (#3822)',
+    async (_name, raw) => {
+      expect(await respondTo('claude', raw)).toBe('no_answer');
+      expect(sendPromptAnswer).not.toHaveBeenCalled();
+      expect(events(warn, 'poller:auto-yes-skipped-question-confirm')).toEqual([]);
+      expect(events(warn, 'poller:auto-yes-skipped-question')).toEqual([
+        expect.objectContaining({ reason: 'question-left-to-human', promptType: 'multiple_choice' }),
+      ]);
+      expect(getLastPolicySuppression(WT, 'claude', 'claude')).toMatchObject({
+        reason: 'question-left-to-human',
+        mode: null,
+        promptType: 'multiple_choice',
+      });
+    },
+  );
 
   it('a yes/no prompt logs `y` and a question cut to the logged length', async () => {
     const long = `Apply ${'x'.repeat(MAX_LOGGED_QUESTION_LENGTH + 200)}?`;

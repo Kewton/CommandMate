@@ -93,7 +93,13 @@ export function describeContractPolicy(policy: AutoYesContractPolicy | null | un
     ];
   }
   if (policy.mode === 'safe') {
-    return [`Note: ${task} sets autoYes.mode: safe; Auto-Yes answers yes_no prompts only.${deny}`];
+    // Issue #3822: on a tool whose dialog gate is `enforce`, a `yes_no` the
+    // tool's own dialog detector does not vouch for is left to a human too.
+    return [
+      `Note: ${task} sets autoYes.mode: safe; Auto-Yes answers yes_no prompts only ` +
+        '(on claude, codex, copilot, opencode and opencode-v2, only those the tool itself shows as a confirmation, not a generic (y/n)).' +
+        deny,
+    ];
   }
   if (policy.mode === 'allow-listed') {
     const types = policy.allowPromptTypes.length > 0 ? policy.allowPromptTypes.join(', ') : 'none';

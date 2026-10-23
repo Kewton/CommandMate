@@ -74,6 +74,14 @@ export type AutoYesSuppressionReason =
    */
   | 'question-confirm-page'
   /**
+   * Issue #3822: a question the tool asks the operator (an `AskUserQuestion`
+   * picker, OpenCode V2's question form) is on the pane. Auto-Yes answers
+   * permissions only; the question is the human's, so nothing is sent. Not a
+   * contract verdict — `allowPromptTypes` cannot bring it back. The confirm page
+   * that follows a question keeps its own reason, `question-confirm-page`.
+   */
+  | 'question-left-to-human'
+  /**
    * Issue #3767: agy's approval dialog is on the pane but Auto-Yes has no
    * unused `PreToolUse` question to match it to (none ever, it appeared after
    * the window, it was already up, the hook stopped arriving, or — Issue #3789 —
@@ -108,6 +116,9 @@ export const STARTUP_TRUST_UNHANDLED_SUPPRESSION_REASON = 'startup-trust-unhandl
 
 /** Issue #3748: the reason the poller records over an `AskUserQuestion` confirm page. */
 export const QUESTION_CONFIRM_PAGE_SUPPRESSION_REASON = 'question-confirm-page' satisfies AutoYesSuppressionReason;
+
+/** Issue #3822: the reason the poller records over a question the tool asks the operator. */
+export const QUESTION_LEFT_TO_HUMAN_SUPPRESSION_REASON = 'question-left-to-human' satisfies AutoYesSuppressionReason;
 
 /** Issue #3767: the reason the poller records over an agy dialog with no matching hook receipt. */
 export const NO_HOOK_RECEIPT_SUPPRESSION_REASON = 'no-hook-receipt' satisfies AutoYesSuppressionReason;

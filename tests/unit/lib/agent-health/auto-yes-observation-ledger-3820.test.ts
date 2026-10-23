@@ -147,3 +147,30 @@ describe('[#3820 PR 4] the aggregation and the ledger agree', () => {
     expect(JSON.stringify(result)).not.toContain('wt-secret');
   });
 });
+
+describe('[#3822] a question left to a human is counted under its own reason', () => {
+  it('keeps question-left-to-human apart from the confirm page and from `other`', () => {
+    tick(null);
+    hours(S, S + H);
+    for (let i = 0; i < 3; i += 1) {
+      tick('screen-Q', () => withholdLedgerConfirmation(SCOPE, 'question-left-to-human'));
+      now += 2_000;
+    }
+    tick(null);
+    for (let i = 0; i < 2; i += 1) {
+      tick('screen-P', () => withholdLedgerConfirmation(SCOPE, 'question-confirm-page'));
+      now += 2_000;
+    }
+    tick(null);
+    hours(S + 2 * H, E);
+
+    const agg = createLogAggregate(NOW);
+    for (const raw of written.lines) addLogLine(agg, raw);
+    const result = measureAutoYesObservation(agg.autoYes, agg);
+
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok') return;
+    const withheld = (result.records ?? []).filter((record) => record.kind === 'withheld');
+    expect(withheld.map((record) => record.reason).sort()).toEqual(['question-confirm-page', 'question-left-to-human']);
+  });
+});

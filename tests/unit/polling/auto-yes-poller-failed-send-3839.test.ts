@@ -142,7 +142,18 @@ async function tickOn(state: AutoYesPollerState, prompt: PromptData | null): Pro
 const lines = (event: string): Array<Record<string, unknown>> =>
   mockLogger.info.mock.calls.filter(([name]) => name === event).map(([, fields]) => fields as Record<string, unknown>);
 
+
+/**
+ * Issue #3822: an enforce tool's dialog gate refuses a `(y/n)` its own rules do
+ * not vouch for, so the typed-answer path this file exercises (`y`, a wait,
+ * Enter) is reached on claude only under the kill switch's `legacy` — the
+ * setting an operator restores it with. What is pinned here is the send, not
+ * the gate (the gate's refusal: `auto-yes-generic-yes-no-3822.test.ts`).
+ */
+const ORIGINAL_DIALOG_GATE_ENV = process.env.CM_AUTOYES_DIALOG_GATE;
+
 beforeEach(() => {
+  process.env.CM_AUTOYES_DIALOG_GATE = 'claude=legacy';
   db = new Database(':memory:');
   runMigrations(db);
   vi.clearAllMocks();
@@ -162,6 +173,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  if (ORIGINAL_DIALOG_GATE_ENV === undefined) delete process.env.CM_AUTOYES_DIALOG_GATE;
+  else process.env.CM_AUTOYES_DIALOG_GATE = ORIGINAL_DIALOG_GATE_ENV;
   vi.restoreAllMocks();
   clearAllPollerStates();
   clearPolicySuppressions();
