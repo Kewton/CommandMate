@@ -446,6 +446,19 @@ export interface CurrentOutputResponse {
   lastServerResponseTimestamp?: number | null;
   serverPollerActive?: boolean;
   /**
+   * Mirrors: src/types/auto-yes-decision.ts AutoYesDecisionPublished
+   * (Issue #3821). Auto-Yes's decision about `promptData`: `answering` (an
+   * automatic answer is under way), `withheld` (left to a human, `reason`
+   * says why — `server-poller-inactive` when no server poller runs for the
+   * instance) or `none`. Wire strings, as for `lastSuppression.reason`.
+   * Absent when the session is not running and from an older server.
+   */
+  autoYesDecision?: {
+    state: string;
+    reason: string | null;
+    observedAt: number;
+  };
+  /**
    * Issue #520: session status from `detectSessionStatus()` — or, since Issue
    * #1723, from the agent's own lifecycle events when they are available and
    * the scraper is not reporting a prompt. `sessionStatusReason` says which.

@@ -14,7 +14,10 @@
  * is not answered either (the page cannot be ruled out from here).
  * 陰性: an ordinary yes/no prompt, Claude's ordinary permission dialog (also
  * with the page's wording in its command), and an ordinary prompt with no
- * frame are answered as before.
+ * frame were answered as before.
+ *
+ * Issue #3821: the browser answers nothing at all now, so the 陰性 cases —
+ * the prompts the hook used to answer — assert that nothing is sent either.
  */
 
 import { readFileSync } from 'node:fs';
@@ -91,7 +94,7 @@ describe('useAutoYes - AskUserQuestion confirm page (Issue #3748)', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('陰性: Claude’s ordinary permission dialog is answered `1`', () => {
+  it('[#3821] Claude’s ordinary permission dialog is not answered from the browser either (was `1`)', () => {
     const promptData: PromptData = {
       type: 'multiple_choice',
       question: 'Do you want to proceed?',
@@ -102,11 +105,10 @@ describe('useAutoYes - AskUserQuestion confirm page (Issue #3748)', () => {
       status: 'pending',
     };
     render('claude', promptData, CLAUDE_BASH_APPROVAL);
-    expect(mockFetch).toHaveBeenCalledOnce();
-    expect(JSON.parse(mockFetch.mock.calls[0][1].body).answer).toBe('1');
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('陰性: a yes/no prompt is answered `y`', () => {
+  it('[#3821] a yes/no prompt is not answered from the browser either (was `y`)', () => {
     const promptData: PromptData = {
       type: 'yes_no',
       question: 'Continue?',
@@ -114,8 +116,7 @@ describe('useAutoYes - AskUserQuestion confirm page (Issue #3748)', () => {
       status: 'pending',
     };
     render('claude', promptData, 'Working.\n\nContinue? (y/n)\n');
-    expect(mockFetch).toHaveBeenCalledOnce();
-    expect(JSON.parse(mockFetch.mock.calls[0][1].body).answer).toBe('y');
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it('a Submit / Cancel prompt with no frame is not answered (the page cannot be ruled out)', () => {
@@ -131,7 +132,7 @@ describe('useAutoYes - AskUserQuestion confirm page (Issue #3748)', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('陰性: with no frame, an ordinary permission prompt is answered as before', () => {
+  it('[#3821] with no frame, an ordinary permission prompt is not answered either (was `1`)', () => {
     const promptData: PromptData = {
       type: 'multiple_choice',
       question: 'Do you want to proceed?',
@@ -142,12 +143,11 @@ describe('useAutoYes - AskUserQuestion confirm page (Issue #3748)', () => {
       status: 'pending',
     };
     render('claude', promptData, null);
-    expect(mockFetch).toHaveBeenCalledOnce();
-    expect(JSON.parse(mockFetch.mock.calls[0][1].body).answer).toBe('1');
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it.each(BROWSER_NEGATIVE_FRAMES)(
-    '陰性: %s is answered `1` from the browser',
+    '[#3821] %s is not answered from the browser either (was `1`)',
     (_name, frame) => {
       const promptData: PromptData = {
         type: 'multiple_choice',
@@ -159,8 +159,7 @@ describe('useAutoYes - AskUserQuestion confirm page (Issue #3748)', () => {
         status: 'pending',
       };
       render('claude', promptData, frame);
-      expect(mockFetch).toHaveBeenCalledOnce();
-      expect(JSON.parse(mockFetch.mock.calls[0][1].body).answer).toBe('1');
+      expect(mockFetch).not.toHaveBeenCalled();
     },
   );
 });

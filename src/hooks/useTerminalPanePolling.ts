@@ -16,7 +16,7 @@
  * What it intentionally does NOT own:
  *  - Auto-Yes state — globally keyed by activeCliTab (mobile/header level)
  *  - History messages — globally keyed by activeCliTab
- *  - lastServerResponseTimestamp / serverPollerActive (used by useAutoYes only)
+ *  - lastServerResponseTimestamp / serverPollerActive
  *
  * Polling lifecycle mirrors `useFilePolling`:
  *  - setInterval cadence switches between ACTIVE / IDLE based on isRunning
@@ -53,6 +53,7 @@ import {
   isAutoYesEnterSentToCurrentPrompt,
   type AutoYesEnterFallbackReading,
 } from '@/lib/polling/auto-yes-enter-sent';
+import { laterAutoYesDecision, type AutoYesDecisionPublished } from '@/types/auto-yes-decision';
 import {
   DETAIL_PANE_POLLING_CADENCE,
   isGeneratingStatus,
@@ -292,6 +293,12 @@ export interface PanePromptState {
    * {@link answerable}; false when not known.
    */
   autoYesEnterSent?: boolean;
+  /**
+   * Issue #3821: the server's decision about this window (`autoYesDecision`
+   * on the poll and on the push). Undefined when no delivery path carried one
+   * for it, which the panel's gate reads as "not answering".
+   */
+  autoYesDecision?: AutoYesDecisionPublished;
 }
 
 /**
@@ -322,6 +329,8 @@ type CurrentOutputResponse = Partial<
     | 'startingSince'
     /** Issue #3397: only `lastEnterFallback` is read. See {@link PanePromptState.autoYesEnterSent}. */
     | 'autoYes'
+    /** Issue #3821. See {@link PanePromptState.autoYesDecision}. */
+    | 'autoYesDecision'
   >
 > & {
   promptData?: LivePromptData;
@@ -523,6 +532,8 @@ export function useTerminalPanePolling({
        * `autoYesEnterFallback`. See {@link carriesEnterFallback}.
        */
       autoYesEnterFallback?: AutoYesEnterFallbackReading | null;
+      /** Issue #3821. See {@link carriesDecision}. */
+      autoYesDecision?: AutoYesDecisionPublished;
     },
     /**
      * Whether this delivery path carries `promptAnswerable`. The poll always
@@ -543,6 +554,14 @@ export function useTerminalPanePolling({
      * the same window and dropped for another.
      */
     carriesEnterFallback = false,
+    /**
+     * Issue #3821: whether this delivery path carries `autoYesDecision` — the
+     * poll and the push both do when the server sends the key. Same rule as
+     * {@link carriesAnswerable} when it does not; when it does, a decision
+     * observed before the one applied to the same window is not applied
+     * (`laterAutoYesDecision`: the poll and the push can arrive out of order).
+     */
+    carriesDecision = false,
     ): void => {
       const nextOutput = data.fullOutput ?? data.realtimeSnippet ?? '';
       const rawUnclassified = data.isUnclassifiedActive === true
@@ -622,6 +641,9 @@ export function useTerminalPanePolling({
             autoYesEnterSent: carriesEnterFallback
               ? isAutoYesEnterSentToCurrentPrompt(data.autoYesEnterFallback)
               : sameWindow ? prev.autoYesEnterSent : false,
+            autoYesDecision: carriesDecision
+              ? laterAutoYesDecision(sameWindow ? prev.autoYesDecision : undefined, data.autoYesDecision)
+              : sameWindow ? prev.autoYesDecision : undefined,
           };
         });
       } else if (!data.isPromptWaiting && promptVisibleRef.current) {
@@ -665,7 +687,13 @@ export function useTerminalPanePolling({
 
       // Issue #3397: the Enter record rides on `autoYes`; the shared applier
       // reads it under the push's name.
-      applySnapshot({ ...data, autoYesEnterFallback: data.autoYes?.lastEnterFallback }, true, true);
+      applySnapshot(
+        { ...data, autoYesEnterFallback: data.autoYes?.lastEnterFallback },
+        true,
+        true,
+        // Issue #3821: a server older than the field sends no such key.
+        'autoYesDecision' in data,
+      );
       // Issue #2042: only the poll carries these — the WebSocket push has no
       // `structuredEvents` — so they are applied here rather than in the shared
       // `applySnapshot`. The signature guard keeps the object identity stable
@@ -791,12 +819,14 @@ export function useTerminalPanePolling({
         promptData: snap.promptData ?? null,
         promptAnswerable: snap.promptAnswerable,
         autoYesEnterFallback: snap.autoYesEnterFallback,
+        autoYesDecision: snap.autoYesDecision,
       // Issue #2887: a server that predates the field sends no such key at all
       // (not even `undefined` — `parseRealtimeEvent` unwraps parsed JSON, which
       // has no way to express a key with no value), so `in` is what tells "this
       // push judged the prompt" apart from "this push says nothing about it".
       // Issue #3397: the Enter record, by the same test.
-      }, 'promptAnswerable' in snap, 'autoYesEnterFallback' in snap);
+      // Issue #3821: the decision, by the same test.
+      }, 'promptAnswerable' in snap, 'autoYesEnterFallback' in snap, 'autoYesDecision' in snap);
     });
   }, [enabled, worktreeId, addListener, applySnapshot, markPushHealthy]);
 

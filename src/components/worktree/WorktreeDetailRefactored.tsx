@@ -361,6 +361,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     isPagerActive,
     promptAnswerable,
     promptAutoYesEnterSent,
+    promptAutoYesDecision,
     // Issue #3305: what the docked selection-list pad decides its controls from.
     selectionListReading,
     // Issue #3758: the docked pad's trust-confirmation notice, off the same poll.
@@ -593,7 +594,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     && !showDirectInputKeyboard
     && !activeSessionStarting
     // Issue #3397: a screen CommandMate cannot read is shown under Auto-Yes too.
-    && (!autoYesEnabled || showsPromptUnderAutoYes(state.prompt.data, promptAnswerable));
+    // Issue #3821: and every prompt Auto-Yes is not answering right now.
+    && (!autoYesEnabled || showsPromptUnderAutoYes(state.prompt.data, promptAnswerable, promptAutoYesDecision));
   const {
     showStuckHint: showPromptStuckHint,
     markSubmitted: markPromptSubmitted,

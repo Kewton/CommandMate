@@ -2102,56 +2102,35 @@ Auto-Yes が OFF の instance で、止まった理由があれば入ります�
 契約の `autoYes` を見直してください（`mode: safe` で `multiple_choice` が抑止される場合は
 [allow-listed への切り替え](#無人実行の-auto-yes-ポリシーは-allow-listed-を使うissue-1684)を推奨）。
 
-#### `autoYes.lastEnterFallback`: 読めない選択画面への Enter（Issue #3397）
+#### `autoYesDecision`: Auto-Yes がいまの確認に何をしているか（Issue #3821）
 
-エージェントが出した選択画面を CommandMate が読めないとき、プロンプト欄には
-「この画面は CommandMate から操作できません。」と「直接入力に切り替える」リンクが出ます。
-Auto-Yes が有効なら、この画面に **Enter を 1 回だけ**送ります（その時点で選ばれている選択肢で確定します）。
-送った画面では、プロンプト欄の警告とリンクの代わりに「Auto-Yes が Enter を送りました。」と出ます。Auto-Yes が有効な間はふつうプロンプト欄を出しませんが、CommandMate が読めない画面（`promptAnswerable: false`）では、Auto-Yes 中も PC・スマホともにプロンプト欄を出します（チェックボックスの複数選択と同じ扱い。Auto-Yes はこの 2 つに番号を送らないため）。チェックボックスは `multiSelect` の有無にかかわらず、選択肢が `[ ]` / `[x]` / `[X]` / `[✔]` で始まる一覧も含みます。
+`current-output` の応答（`capture --json`）は、同じ応答の `promptData` について Auto-Yes の判断を載せます。
 
 ```json
-"autoYes": {
-  "enabled": true,
-  "expiresAt": 1754300000000,
-  "lastSuppression": null,
-  "lastEnterFallback": {
-    "outcome": "sent",
-    "promptType": "multiple_choice",
-    "refusalReason": "unsupported_dialog_layout",
-    "sentAt": 1754296400000,
-    "at": 1754296400000,
-    "currentPrompt": true
-  }
+"autoYesDecision": {
+  "state": "withheld",
+  "reason": "server-poller-inactive",
+  "observedAt": 1754296400000
 }
 ```
 
-| フィールド | 意味 |
-|-----------|------|
-| `outcome` | `sent`（Enter を送った）/ `no-effect`（Enter の後も同じ画面が残った。2 回目は送らず人に引き継ぐ） |
-| `promptType` | Enter を送った画面のプロンプトの型 |
-| `refusalReason` | 画面が操作できなかった理由（`unsupported_dialog_layout` / `prompt_no_longer_active`） |
-| `sentAt` | Enter を送った時刻（epoch ms） |
-| `at` | 最後に更新した時刻（`sentAt`、または `no-effect` を見つけた時刻） |
-| `currentPrompt` | この応答の `promptData` と同じ画面についての記録か |
+| `state` | 意味 |
+|---------|------|
+| `answering` | サーバーの poller がこの確認に自動で答えている（送信中、または送信後で画面がまだ書き換わっていない） |
+| `withheld` | Auto-Yes はこの確認に答えず、人に任せた。`reason` が理由（上の表の語のほか、`server-poller-inactive` = Auto-Yes は有効だがこのインスタンスの poller が動いていない（同時実行の上限など）、`no-auto-answer` = 基本の規則に答えが無い（自由入力・チェックボックスなど）、`foreign-session` / `moved-send-in-flight`） |
+| `none` | 確認が無い、Auto-Yes が無効、またはまだ判断していない。`answering` とは扱わない |
 
-送るのは次の **すべて** を満たすときだけです。
+判断は poller が実際に判定した結果で、Auto-Yes の有効化（同じ画面のまま OFF→ON した後や期限切れ）・セッションの再起動・別の確認・人の回答のどれでも引き継ぎません（次の判定まで `none`）。同じ文面の確認が、間に確認の無い画面を挟まずに続いた場合は、画面だけでは別の確認と区別できません。セッションが動いていないときは欄がありません。
 
-- プロンプト欄に「直接入力に切り替える」リンクが出る画面（`promptAnswerable: false` と同じ判定）
-- 選択画面に操作が移っている確証がある: 選択画面のフッターがあるのに配置が読めない（`unsupported_dialog_layout`）、または入力欄が画面に無い（claude / codex）
-- **入力欄が見えていない**（入力欄に文字がある・空・薄字の候補のどれでも送らない。返答が選択肢を引用しているだけの画面への誤送信を防ぐため）
-- 同じ画面を 2 回続けて見た、エージェントが終了していない・生成中でない
-- 実行契約の `autoYes` ポリシーが許す（`mode: off` / `safe`、`denyPatterns` 一致では送らない）、他サーバのセッションではない
-- codex の起動時の画面・`/model` の選択画面ではない
+Auto-Yes が有効でも、PC・スマホの回答欄は `state` が `answering` 以外なら出ます（欄の無い古いサーバーの応答でも出ます）。OpenCode / V2 が API で尋ねる質問は、Auto-Yes 中も常に回答欄を出します。手動で答えても Auto-Yes は有効のままです。
 
-`commandmate wait` は、報告するプロンプトについての記録（`currentPrompt: true`）があれば、stderr に 1 行添えます（`auto-yes sent Enter to this prompt …` / 効かなかったときは `… the same screen is still up (no-effect) …`）。exit 10 の JSON は変わりません。人向けの `capture`（`--json` なし）は本文だけを出すため、この記録は `--json` で読んでください。
+`commandmate wait` は、`withheld` の確認を Auto-Yes の猶予（`--auto-yes-grace`）で待たずにすぐ報告し、stderr に `auto-yes is not answering this prompt (reason=…)` を添えます。prompt の Push 通知は従来どおり猶予の後に届きます。
 
-既定で有効なのは claude と codex だけです。環境変数 `CM_AUTOYES_ENTER_FALLBACK` で
-ツールごとに切り替えられます（`CM_AUTOYES_DIALOG_GATE` と同じ書式）。
+#### `autoYes.lastEnterFallback`: 読めない選択画面への Enter（Issue #3397、Issue #3821 で廃止）
 
-```bash
-CM_AUTOYES_ENTER_FALLBACK='*=disabled'       # 全ツールで送らない
-CM_AUTOYES_ENTER_FALLBACK='codex=disabled'   # codex だけ止める
-```
+CommandMate が読めない選択画面へ Auto-Yes が Enter を 1 回送る動作は **廃止しました**（Issue #3821）。裸の Enter はその時点で選ばれている選択肢をそのまま確定するため、画面が読めない以上、何を確定するかを誰も確かめられないからです。環境変数 `CM_AUTOYES_ENTER_FALLBACK` を設定しても戻りません。こうした画面は Auto-Yes 中も人が答えます（`lastSuppression.reason` は `unclassified-frame`、`autoYesDecision` は `withheld`）。
+
+`autoYes.lastEnterFallback` の欄は互換のため残しており、常に `null` です。過去の監査ログ・履歴に残っている `[Enter]` の回答や、Auto-Yes の計測ログの basis `enter-fallback` は、そのまま読めます。
 
 ### `--pane`: transcript を読む（Issue #1623）
 
@@ -2234,7 +2213,7 @@ JSON 出力（`prompts` は古い順）:
 ```
 
 - **`answeredBy` が応答種別**です: `auto`（サーバ側 auto-yes が自動応答）/ `human`（respond API・
-  チャット UI からの明示応答。ブラウザ側 auto-yes フォールバック経由も `human` になります）/
+  チャット UI からの明示応答。Issue #3821 より前のブラウザ側 auto-yes フォールバック経由も `human` でした）/
   `terminal`（誰かがターミナルで直接応答したと推定される掃引記録）。本機能導入前に解決した行は `null`
 - `--pane` とは併用できません（`--prompts` は履歴、`--pane` は現在の画面を読むため）
 - `--limit` の上限はサーバの履歴取得上限（1000）と同じです

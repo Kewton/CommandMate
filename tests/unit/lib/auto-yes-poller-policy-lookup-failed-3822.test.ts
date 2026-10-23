@@ -248,30 +248,32 @@ describe.each(FAILURES)('[#3822] step 4, %s', (_label, fail) => {
   });
 });
 
+// Issue #3821: the Enter fallback is retired. The unreadable list gets no key
+// whether the lookup fails or succeeds, and the contract is not read for it:
+// the frame is recorded as the dialog gate refused it.
 describe.each(FAILURES)('[#3822] the Enter fallback, %s', (_label, fail) => {
-  it('sends no Enter and records that the lookup failed', async () => {
+  it('[#3821] sends no Enter, and records the frame as the gate refused it (the lookup is not read)', async () => {
     const state = pollerState();
     fail();
     for (let i = 0; i < 3; i++) expect(await rawTick(state, UNRECOGNISED_LIST)).toBe('no_answer');
 
     expect(sendSpecialKeys).not.toHaveBeenCalled();
+    // Issue #3821: not the lookup (nothing reads it for this frame) — the gate's refusal.
     expect(getLastPolicySuppression(WORKTREE_ID, 'claude')).toMatchObject({
-      reason: 'policy-lookup-failed',
+      reason: 'unclassified-frame',
     });
-    expect(suppressionWarnings()).toEqual([
-      expect.objectContaining({ reason: 'policy-lookup-failed', mode: null, enterFallback: true }),
-    ]);
+    expect(suppressionWarnings()).toEqual([]);
   });
 
-  it('sends the Enter once the lookup succeeds', async () => {
+  it('[#3821] sends no Enter once the lookup succeeds either', async () => {
     const state = pollerState();
     fail();
     await rawTick(state, UNRECOGNISED_LIST);
 
     recover();
     expect(await rawTick(state, UNRECOGNISED_LIST)).toBe('no_answer');
-    expect(await rawTick(state, UNRECOGNISED_LIST)).toBe('responded');
-    expect(enterCalls()).toHaveLength(1);
+    expect(await rawTick(state, UNRECOGNISED_LIST)).toBe('no_answer');
+    expect(enterCalls()).toHaveLength(0);
   });
 });
 
@@ -303,10 +305,10 @@ describe('[#3822] controls: a lookup that succeeds behaves as before', () => {
     expect(sendPromptAnswer).toHaveBeenCalledTimes(1);
   });
 
-  it('the Enter fallback with no contract: one Enter on the second tick', async () => {
+  it('[#3821] the Enter fallback (retired) with no contract: no Enter on any tick', async () => {
     const state = pollerState();
     expect(await rawTick(state, UNRECOGNISED_LIST)).toBe('no_answer');
-    expect(await rawTick(state, UNRECOGNISED_LIST)).toBe('responded');
-    expect(enterCalls()).toHaveLength(1);
+    expect(await rawTick(state, UNRECOGNISED_LIST)).toBe('no_answer');
+    expect(enterCalls()).toHaveLength(0);
   });
 });

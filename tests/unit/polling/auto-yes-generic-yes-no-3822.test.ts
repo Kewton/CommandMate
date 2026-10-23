@@ -446,23 +446,26 @@ describe('[#3822] the contract is read again right before the key', () => {
     expect(getLastPolicySuppression(WT, 'claude')).toMatchObject({ reason: 'policy-lookup-failed', mode: null });
   });
 
-  it('the Enter fallback: a deny pattern added after its cached lookup withholds the Enter', async () => {
+  // Issue #3821: the Enter fallback is retired — the unreadable list gets no
+  // key with or without the contract, so the contract is not read for it and
+  // the frame is recorded as the dialog gate refused it.
+  it('[#3821] the Enter fallback (retired): with a deny pattern added, no Enter', async () => {
     process.env[AUTO_YES_ENTER_FALLBACK_ENV_VAR] = 'claude=enabled';
     const state = pollerState('claude');
-    expect(await tick('claude', UNRECOGNISED_LIST, state)).toBe('no_answer'); // seen once, cache primed
+    expect(await tick('claude', UNRECOGNISED_LIST, state)).toBe('no_answer');
     seedTask("autoYes:\n  denyPatterns: ['Kubernetes']\n");
 
     expect(await tick('claude', UNRECOGNISED_LIST, state)).toBe('no_answer');
     expect(enterCalls()).toHaveLength(0);
-    expect(getLastPolicySuppression(WT, 'claude')).toMatchObject({ reason: 'deny-pattern', pattern: 'Kubernetes' });
+    expect(getLastPolicySuppression(WT, 'claude')).toMatchObject({ reason: 'unclassified-frame' });
   });
 
-  it('negative: the Enter fallback with nothing changed sends its one Enter', async () => {
+  it('[#3821] the Enter fallback (retired): with nothing changed, no Enter either', async () => {
     process.env[AUTO_YES_ENTER_FALLBACK_ENV_VAR] = 'claude=enabled';
     const state = pollerState('claude');
     expect(await tick('claude', UNRECOGNISED_LIST, state)).toBe('no_answer');
-    expect(await tick('claude', UNRECOGNISED_LIST, state)).toBe('responded');
-    expect(enterCalls()).toHaveLength(1);
+    expect(await tick('claude', UNRECOGNISED_LIST, state)).toBe('no_answer');
+    expect(enterCalls()).toHaveLength(0);
   });
 });
 

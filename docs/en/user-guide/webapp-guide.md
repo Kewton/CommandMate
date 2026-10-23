@@ -262,6 +262,17 @@ looks and what it depends on.
 
 See [Agent event hooks](./agent-event-hooks.md) for the per-route technical detail.
 
+### Confirmations Auto Yes Does Not Answer Are Yours to Answer (Issue #3821)
+
+Only the **server** answers automatically (the poller that reads the screen, hooks approval, and the API adjudication). **The browser sends no automatic answers.**
+
+- With Auto Yes on, a confirmation the server is not answering **shows its answer panel**: one the execution contract withholds, a screen CommandMate cannot read, a question from the agent, or a screen of an agent whose poller is not running (the concurrent poller limit was reached, for one). The panel stays hidden only while the server is answering that confirmation
+- A question OpenCode asks over its API always shows its panel, Auto Yes or not. Command Code's Review page is still answered from its manual-action card
+- Answering from the panel by hand leaves Auto Yes on
+- Auto Yes does not answer the screen of an agent with no poller running (hooks approval and the API adjudication run apart from the poller)
+- The single Enter Auto Yes used to send to an unreadable choice screen, and the "Auto responded" notice next to the toggle, are gone
+- A tab opened before this release that still sends an automatic answer is refused by the server with 409. A tab on a bundle from before Auto Yes marked its answers with their origin (before Issue #3820), however, cannot be told from a person answering; reload old tabs
+
 ### Important Notes
 
 - While Auto Yes is active, all confirmations are automatically answered with "Yes"

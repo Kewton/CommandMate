@@ -739,6 +739,8 @@ describe('TerminalSplitPaneContent', () => {
         isPromptWaiting: true,
         isUnclassifiedActive: true,
         promptData: { type: 'yes_no', question: 'Continue?' },
+        // Issue #3821: hidden while the server says Auto-Yes is answering it.
+        autoYesDecision: { state: 'answering', reason: null, observedAt: 1 },
       }),
     );
     render(
@@ -847,6 +849,8 @@ describe('TerminalSplitPaneContent', () => {
           thinking: false,
           isPromptWaiting: true,
           promptData: { type: 'yes_no', question: 'Continue?' },
+          // Issue #3821: suppressed while the server says Auto-Yes is answering it.
+          autoYesDecision: { state: 'answering', reason: null, observedAt: 1 },
         }),
       );
       render(

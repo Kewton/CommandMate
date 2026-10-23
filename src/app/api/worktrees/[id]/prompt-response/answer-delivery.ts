@@ -135,7 +135,7 @@ export async function sendResolvedAnswer(
 /**
  * Issue #1685: persist question/options/answer for the audit trail. Skipped
  * when the pre-send capture failed (promptCheck null) — there is nothing
- * trustworthy to record. Shares the useAutoYes attribution caveat in
+ * trustworthy to record. Shares the attribution caveat in
  * {@link finishAnsweredPrompt}.
  */
 function recordAnswerForAudit(
@@ -183,10 +183,10 @@ export function finishAnsweredPrompt(
   // — `instanceId` is undefined for the primary, which `getActiveTaskForInstance`
   // expects to be named by the tool id.
   //
-  // Caveat: the browser-side Auto-Yes fallback (`useAutoYes`) posts here too,
-  // and is recorded as human. It only runs when the server poller is absent,
-  // which is also when nothing else would record the answer at all — an
-  // over-count is preferable to a gap in the log.
+  // Caveat: a tab loaded before #3820 still runs the browser-side Auto-Yes
+  // (`useAutoYes`), which sends no `origin` and is recorded as human. Issue
+  // #3821 retired it: the route refuses the `origin` a later tab sends, and a
+  // reload ends the older ones.
   applyEventToActiveTask(db, id, cliToolId, instanceId ?? cliToolId, 'prompt_answered_human', {
     promptType: effectivePromptData?.type,
   });

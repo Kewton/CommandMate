@@ -107,6 +107,12 @@ function snapshotFingerprint(payload: Awaited<ReturnType<typeof buildCurrentOutp
     // Issue #3397: so "Auto-Yes sent Enter" (and its `no-effect` follow-up)
     // reaches the push even when the frame did not change.
     payload.autoYes?.lastEnterFallback ?? null,
+    // Issue #3821: so a decision that changed on a screen that did not
+    // (`answering` -> `withheld` on the next tick, say) reaches the push, and
+    // the answer panel opens without waiting for the HTTP poll. State and
+    // reason only: `observedAt` moves on every build.
+    payload.autoYesDecision?.state ?? null,
+    payload.autoYesDecision?.reason ?? null,
     payload.isSelectionListActive ?? false,
     payload.isPagerActive ?? false,
     // Issue #2369: in the fingerprint for the same reason `sessionStatus` is —
@@ -189,6 +195,9 @@ function emitTerminalSnapshot(
     // Issue #3397: straight through, like `promptAnswerable` — undefined (and so
     // off the wire) when the payload carries no `autoYes`.
     autoYesEnterFallback: payload.autoYes?.lastEnterFallback,
+    // Issue #3821: straight through as well — absent when the session is not
+    // running (the payload carries none then).
+    autoYesDecision: payload.autoYesDecision,
     isSelectionListActive: payload.isSelectionListActive ?? false,
     isPagerActive: payload.isPagerActive ?? false,
     isDismissablePanelActive: payload.isDismissablePanelActive ?? false,
