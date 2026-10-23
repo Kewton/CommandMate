@@ -16,6 +16,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
 import {
+  clearRelayPending,
   createRelay,
   getRelayById,
   listRelaysWithPendingPayload,
@@ -279,5 +280,31 @@ describe('what is unchanged (Issue #3732)', () => {
     await pumpRelayDeliveries();
 
     expect(withdrawRelay(db, relay.id, NOW + 1).ok).toBe(true);
+  });
+});
+
+describe('a payload whose body alone changed meanwhile (Issue #3749)', () => {
+  it('does not send the listed body, and the next pass sends the new one', async () => {
+    const relay = createRelay(db, { from: A, to: B, hops: 1, expiresAt: NOW + DAY_MS, now: NOW });
+    stashRelayPayload(db, relay.id, 'reply', '[from Codex] first draft', NOW);
+    const hold = deferred<string | null>();
+    findRelayHoldReason.mockReturnValueOnce(hold.promise);
+
+    const pump = pumpRelayDeliveries();
+    await flush();
+    // Same kind, same relay, different body: only the body comparison tells
+    // the listed payload from the one the row carries now.
+    clearRelayPending(db, relay.id, NOW + 1);
+    expect(stashRelayPayload(db, relay.id, 'reply', '[from Codex] final answer', NOW + 2)).toBe(true);
+    hold.resolve(null);
+    await pump;
+
+    expect(sendUserMessage).not.toHaveBeenCalled();
+    expect(getRelayById(db, relay.id)?.state).toBe('pending');
+
+    await pumpRelayDeliveries();
+    expect(sendUserMessage).toHaveBeenCalledTimes(1);
+    expect(String(sendUserMessage.mock.calls[0][1].content)).toContain('final answer');
+    expect(getRelayById(db, relay.id)?.state).toBe('delivered');
   });
 });
