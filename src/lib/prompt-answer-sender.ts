@@ -762,6 +762,7 @@ async function sendCommandCodeMultiSelectAnswer(
   promptData: MultipleChoicePromptData,
   wanted: readonly number[],
   stillCurrent?: () => boolean,
+  touch?: PaneTouch,
 ): Promise<void> {
   const cursor = promptData.options.find((option) => option.isDefault === true);
   if (cursor === undefined) {
@@ -777,7 +778,7 @@ async function sendCommandCodeMultiSelectAnswer(
     ...current.filter((n) => !wanted.includes(n)),
   ].sort((a, b) => a - b);
   if (toggles.length > 0) {
-    await sendSpecialKeysWhileCurrent(sessionName, toggles.map(String), stillCurrent);
+    await sendSpecialKeysWhileCurrent(sessionName, toggles.map(String), stillCurrent, touch);
   }
   const keysSent = toggles.length > 0;
 
@@ -818,6 +819,7 @@ async function sendCommandCodeMultiSelectAnswer(
     sessionName,
     [...downKeys(verified.options.length - cursorNow.number + 1), 'Enter'],
     stillCurrent,
+    touch,
   );
 
   // 4. The second stage. `Submit` opens the Review page and the answer is sent
@@ -835,7 +837,7 @@ async function sendCommandCodeMultiSelectAnswer(
     if (review.hasUnansweredWarning) {
       throw new MultiSelectAnswerRejectedError('review-unanswered', true, wanted);
     }
-    await sendSpecialKeysWhileCurrent(sessionName, ['Enter'], stillCurrent);
+    await sendSpecialKeysWhileCurrent(sessionName, ['Enter'], stillCurrent, touch);
     return;
   }
 
@@ -865,6 +867,29 @@ export class PromptAnswerAbortedError extends Error {
   }
 }
 
+/**
+ * Whether a key of this answer is already on the pane (Issue #3839). Set by
+ * every send that came back, and by one that failed after a key it is known to
+ * have delivered; read when the answer throws.
+ */
+interface PaneTouch {
+  touched: boolean;
+}
+
+/**
+ * A failure after a key reached the pane says so (Issue #3839): `keysSent: true`
+ * is put on it, as on {@link PromptAnswerAbortedError}, so Auto-Yes does not
+ * type the answer again over what is already there. An error that already
+ * names `keysSent` (the refusals and the stop above) keeps its own word, and a
+ * failure before any key is left as it was.
+ */
+function withKeysSent(error: unknown, touch: PaneTouch): unknown {
+  if (touch.touched && error instanceof Error && !('keysSent' in error)) {
+    Object.assign(error, { keysSent: true });
+  }
+  return error;
+}
+
 /** Stop here when the caller's `stillCurrent` says no (Issue #3706). */
 function assertStillCurrent(stillCurrent: (() => boolean) | undefined, keysSent: boolean): void {
   if (stillCurrent && !stillCurrent()) throw new PromptAnswerAbortedError(keysSent);
@@ -879,21 +904,34 @@ async function sendSpecialKeysWhileCurrent(
   sessionName: string,
   keys: string[],
   stillCurrent: (() => boolean) | undefined,
+  touch?: PaneTouch,
 ): Promise<void> {
   if (!stillCurrent) {
     await sendSpecialKeys(sessionName, keys);
+    if (touch && keys.length > 0) touch.touched = true;
     return;
   }
+  // Issue #3839: `shouldContinue` is asked after each key but the last, so the
+  // times it was asked are the keys known to have reached the pane when a
+  // later one fails.
+  let delivered = 0;
   try {
-    await sendSpecialKeys(sessionName, keys, { shouldContinue: stillCurrent });
+    await sendSpecialKeys(sessionName, keys, {
+      shouldContinue: () => {
+        delivered++;
+        return stillCurrent();
+      },
+    });
   } catch (error: unknown) {
     // By name rather than `instanceof`: test doubles of `./tmux/tmux` need not
     // export the class.
     if (error instanceof Error && error.name === 'SpecialKeysAbortedError') {
       throw new PromptAnswerAbortedError(true);
     }
+    if (touch && delivered > 0) touch.touched = true;
     throw error;
   }
+  if (touch && keys.length > 0) touch.touched = true;
 }
 
 export interface SendPromptAnswerParams {
@@ -938,8 +976,21 @@ export interface SendPromptAnswerParams {
  * This function unifies the logic previously duplicated in:
  * - src/app/api/worktrees/[id]/prompt-response/route.ts (L114-187)
  * - src/lib/auto-yes-manager.ts (L340-399)
+ *
+ * A failure after a key of the answer reached the pane carries `keysSent: true`
+ * (Issue #3839); see {@link withKeysSent}.
  */
 export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<void> {
+  const touch: PaneTouch = { touched: false };
+  try {
+    await sendPromptAnswerKeys(params, touch);
+  } catch (error: unknown) {
+    throw withKeysSent(error, touch);
+  }
+}
+
+/** {@link sendPromptAnswer}, noting in `touch` each key that reached the pane. */
+async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneTouch): Promise<void> {
   const { sessionName, answer, cliToolId, promptData, fallbackPromptType, fallbackDefaultOptionNumber, stillCurrent } =
     params;
 
@@ -952,7 +1003,13 @@ export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<
   // a two-stage confirm, not a digit and an Enter.
   const multiSelect = readMultiSelectRequest(params);
   if (multiSelect !== null) {
-    await sendCommandCodeMultiSelectAnswer(sessionName, multiSelect.promptData, multiSelect.wanted, stillCurrent);
+    await sendCommandCodeMultiSelectAnswer(
+      sessionName,
+      multiSelect.promptData,
+      multiSelect.wanted,
+      stillCurrent,
+      touch,
+    );
     invalidateCache(sessionName);
     return;
   }
@@ -1033,7 +1090,7 @@ export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<
       keys.push(...buildNavigationKeys(downToNext));
       // 4. Enter to submit
       keys.push('Enter');
-      await sendSpecialKeysWhileCurrent(sessionName, keys, stillCurrent);
+      await sendSpecialKeysWhileCurrent(sessionName, keys, stillCurrent, touch);
     } else {
       // Single-select: navigate and Enter to select
       const navigationKeys = buildNavigationKeys(offset);
@@ -1051,11 +1108,13 @@ export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<
       const keys: string[] = (isAskUserQuestionPicker && offset === 0)
         ? ['Down', 'Up', 'Enter']
         : [...navigationKeys, 'Enter'];
-      await sendSpecialKeysWhileCurrent(sessionName, keys, stillCurrent);
+      await sendSpecialKeysWhileCurrent(sessionName, keys, stillCurrent, touch);
     }
   } else {
     // Standard CLI prompt: send text + Enter (y/n, Approve?, etc.)
     await sendKeys(sessionName, answer, false);
+    // Issue #3839: the text is on the pane; a failed Enter after it says so.
+    if (answer !== '') touch.touched = true;
 
     // Issue #616: Resolve submitMode and determine whether to suppress Enter
     const resolvedSubmitMode = resolveSubmitMode(params, dialog);
