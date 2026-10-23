@@ -228,8 +228,9 @@ describe('[#3798] the resolution names the card it clears', () => {
 // shipped `public/sw.js`. Delivery fails per device, and the resolution goes out
 // only once nothing in the worktree waits, so a device can hold an older card
 // than the one the resolution names; or receive the resolution after a newer
-// wait's card. Only order (`waitingSince` against the resolution's `timestamp`)
-// tells the two apart.
+// wait's card. Only the push order (`order`, the server's per-worktree counter)
+// tells the two apart — not a different id, and not the wait's `since`, which
+// the next wait can reuse and which two waits can share to the millisecond.
 
 const swSource = readFileSync(path.resolve(__dirname, '../../../public/sw.js'), 'utf8');
 
@@ -308,6 +309,15 @@ function routeDeliveries(fails: (endpoint: string, payload: Record<string, unkno
   return inbox;
 }
 
+function isCodexCard(p: Record<string, unknown>): boolean {
+  return String(p.title).includes('(codex)');
+}
+
+/** The id a payload is about: a card's episode, or the one a resolution clears. */
+function about(p: Record<string, unknown>): unknown {
+  return p.episodeId ?? p.resolvedEpisodeId;
+}
+
 async function settle(): Promise<void> {
   await flush();
   await flush();
@@ -316,8 +326,8 @@ async function settle(): Promise<void> {
 describe('[#3798] per-device delivery: the resolution leaves only a newer wait standing', () => {
   it('old A / resolution B: the device that missed B closes its stale A card', async () => {
     startWaitingPushNotifier();
-    // B's card is the one whose wait opened at T0 + 100.
-    const inbox = routeDeliveries((endpoint, p) => endpoint === X && p.resolved !== true && p.waitingSince === T0 + 100);
+    // B's card is codex's.
+    const inbox = routeDeliveries((endpoint, p) => endpoint === X && p.resolved !== true && isCodexCard(p));
 
     observeWaitingEdge({ worktreeId: WT, cliToolId: 'claude', waiting: true, kind: 'prompt', now: T0 });
     const idA = getWaitingEpisodeRecord(WT, 'claude')!.episodeId;
@@ -353,7 +363,7 @@ describe('[#3798] per-device delivery: the resolution leaves only a newer wait s
   it('new B / resolution A: the late resolution leaves B standing on the device it overtook', async () => {
     startWaitingPushNotifier();
     // Y misses B's card; X receives A's resolution only after B's card.
-    const inbox = routeDeliveries((endpoint, p) => endpoint === Y && p.resolved !== true && p.waitingSince === T0 + 200);
+    const inbox = routeDeliveries((endpoint, p) => endpoint === Y && p.resolved !== true && isCodexCard(p));
 
     observeWaitingEdge({ worktreeId: WT, cliToolId: 'claude', waiting: true, kind: 'prompt', now: T0 });
     const idA = getWaitingEpisodeRecord(WT, 'claude')!.episodeId;
@@ -366,7 +376,7 @@ describe('[#3798] per-device delivery: the resolution leaves only a newer wait s
 
     expect(inbox[X].map((p) => p.episodeId ?? p.resolvedEpisodeId)).toEqual([idA, idA, idB]);
     expect(inbox[X][1]).toMatchObject({ resolved: true, timestamp: T0 + 100 });
-    expect(inbox[X][2]).toMatchObject({ episodeId: idB, waitingSince: T0 + 200 });
+    expect(inbox[X][2]).toMatchObject({ episodeId: idB, order: (inbox[X][1].order as number) + 1 });
     expect(inbox[Y].map((p) => p.episodeId ?? p.resolvedEpisodeId)).toEqual([idA, idA]);
 
     const x = device();
@@ -392,5 +402,136 @@ describe('[#3798] per-device delivery: the resolution leaves only a newer wait s
     await x.receive(last);
     expect(x.shown).toHaveLength(1);
     expect(x.shown[0].data).toMatchObject({ resolved: true });
+  });
+});
+
+describe('[#3798] per-device delivery: the wait\'s since is not the order', () => {
+  it('a next wait that reuses the since: the late resolution leaves it standing', async () => {
+    startWaitingPushNotifier();
+    const inbox = routeDeliveries(() => false);
+
+    // A opens on a structured since T0 and ends at T0 + 1000.
+    observeWaitingEdge({ worktreeId: WT, cliToolId: 'claude', waiting: true, kind: 'prompt', structuredSince: T0, now: T0 });
+    const idA = getWaitingEpisodeRecord(WT, 'claude')!.episodeId;
+    await settle();
+    observeWaitingEdge({ worktreeId: WT, cliToolId: 'claude', waiting: false, now: T0 + 1_000 });
+    await settle();
+    // B is observed at T0 + 2000 and opens on the same structured since T0.
+    observeWaitingEdge({ worktreeId: WT, cliToolId: 'claude', waiting: true, kind: 'prompt', structuredSince: T0, now: T0 + 2_000 });
+    const idB = getWaitingEpisodeRecord(WT, 'claude')!.episodeId;
+    expect(getWaitingEpisodeRecord(WT, 'claude')!.since).toBe(T0);
+    expect(idB).not.toBe(idA);
+    await settle();
+
+    expect(inbox[X].map(about)).toEqual([idA, idA, idB]);
+    const [cardA, resolutionA, cardB] = inbox[X];
+    expect(resolutionA).toMatchObject({ resolved: true, resolvedEpisodeId: idA, timestamp: T0 + 1_000 });
+    expect(cardB.order as number).toBeGreaterThan(resolutionA.order as number);
+
+    // X: B's card overtakes A's resolution. Y: in the order they were sent.
+    const x = device();
+    const y = device();
+    await x.receive(cardA);
+    await x.receive(cardB);
+    await x.receive(resolutionA);
+    for (const p of inbox[Y]) await y.receive(p);
+
+    for (const d of [x, y]) {
+      expect(d.shown).toHaveLength(1);
+      expect(d.shown[0].data).toMatchObject({ episodeId: idB, resolved: false });
+    }
+    // Before the fix (since T0 < the resolution's T0 + 1000) X showed "Handled" over B.
+    expect(x.shown[0].silent).toBe(true);
+  });
+
+  it('same millisecond, old A / resolution B: the device that missed B closes A', async () => {
+    startWaitingPushNotifier();
+    const inbox = routeDeliveries((endpoint, p) => endpoint === X && p.resolved !== true && isCodexCard(p));
+
+    observeWaitingEdge({ worktreeId: WT, cliToolId: 'claude', waiting: true, kind: 'prompt', now: T0 });
+    const idA = getWaitingEpisodeRecord(WT, 'claude')!.episodeId;
+    await settle();
+    observeWaitingEdge({ worktreeId: WT, cliToolId: 'codex', waiting: true, kind: 'prompt', now: T0 });
+    const idB = getWaitingEpisodeRecord(WT, 'codex')!.episodeId;
+    await settle();
+    observeWaitingEdge({ worktreeId: WT, cliToolId: 'claude', waiting: false, now: T0 });
+    await settle();
+    observeWaitingEdge({ worktreeId: WT, cliToolId: 'codex', waiting: false, now: T0 });
+    await settle();
+
+    expect(inbox[X].map(about)).toEqual([idA, idB]);
+    expect(inbox[Y].map(about)).toEqual([idA, idB, idB]);
+    expect(inbox[X][1]).toMatchObject({ resolved: true, timestamp: T0 });
+
+    const x = device();
+    const y = device();
+    for (const p of inbox[X]) await x.receive(p);
+    for (const p of inbox[Y]) await y.receive(p);
+
+    for (const d of [x, y]) {
+      expect(d.shown).toHaveLength(1);
+      expect(d.shown[0].data).toMatchObject({ resolved: true });
+    }
+    // Before the fix X re-showed A: its since T0 >= the resolution's T0.
+    expect(x.shown[0].data.episodeId).toBeUndefined();
+  });
+
+  it('same millisecond, new B / resolution A: the late resolution leaves B standing', async () => {
+    startWaitingPushNotifier();
+    const inbox = routeDeliveries((endpoint, p) => endpoint === Y && p.resolved !== true && isCodexCard(p));
+
+    observeWaitingEdge({ worktreeId: WT, cliToolId: 'claude', waiting: true, kind: 'prompt', now: T0 });
+    const idA = getWaitingEpisodeRecord(WT, 'claude')!.episodeId;
+    await settle();
+    observeWaitingEdge({ worktreeId: WT, cliToolId: 'claude', waiting: false, now: T0 });
+    await settle();
+    observeWaitingEdge({ worktreeId: WT, cliToolId: 'codex', waiting: true, kind: 'prompt', now: T0 });
+    const idB = getWaitingEpisodeRecord(WT, 'codex')!.episodeId;
+    await settle();
+
+    expect(inbox[X].map(about)).toEqual([idA, idA, idB]);
+    expect(inbox[Y].map(about)).toEqual([idA, idA]);
+
+    const x = device();
+    const y = device();
+    await x.receive(inbox[X][0]);
+    await x.receive(inbox[X][2]);
+    await x.receive(inbox[X][1]);
+    for (const p of inbox[Y]) await y.receive(p);
+
+    expect(x.shown).toHaveLength(1);
+    expect(x.shown[0].data).toMatchObject({ episodeId: idB, resolved: false });
+    expect(x.shown[0].silent).toBe(true);
+    expect(x.showNotification).toHaveBeenCalledTimes(3);
+    expect(y.shown).toHaveLength(1);
+    expect(y.shown[0].data).toMatchObject({ resolved: true });
+  });
+
+  it('the order survives a restart and never repeats', async () => {
+    const { nextPromptOrder, PROMPT_ORDER_KEY_PREFIX } = await import('@/lib/push/prompt-card-state');
+    expect(nextPromptOrder(WT, T0)).toBe(1);
+    expect(nextPromptOrder(WT, T0)).toBe(2);
+    // Clearing every card leaves the order alone; another worktree has its own.
+    clearAllPromptCards();
+    forgetPromptCardMemory();
+    expect(nextPromptOrder(WT, T0)).toBe(3);
+    expect(nextPromptOrder('wt-other', T0)).toBe(1);
+    expect(row(`${PROMPT_ORDER_KEY_PREFIX}${WT}`)).toBe('3');
+    // A reopened connection to the same file continues from the stored value.
+    db.close();
+    db = new Database(path.join(tmpDir, 'db.sqlite'));
+    expect(nextPromptOrder(WT, T0)).toBe(4);
+  });
+
+  it('negative: an id-less card and an id-less resolution take no order', async () => {
+    const { notifyPushSubscribers } = await import('@/lib/push/push-sender');
+    await notifyPushSubscribers(
+      { worktreeId: WT, worktreeName: 'feature-x', kind: 'prompt', agentName: 'claude', waitingSince: T0 },
+      T0
+    );
+    await notifyPromptResolved({ worktreeId: WT, agentName: 'claude', at: T0 + 1 });
+    expect(payloads()).toHaveLength(4);
+    for (const p of payloads()) expect(p).not.toHaveProperty('order');
+    expect(row('push_prompt_order:' + WT)).toBeUndefined();
   });
 });

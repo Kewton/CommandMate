@@ -39,7 +39,7 @@ import type { WaitingKind } from '@/lib/session/waiting-kind';
 import { getVapidConfig } from './vapid';
 import { clearPushDeliveryHealth, recordPushDeliveryFailure } from './delivery-health';
 import { shouldSendNotification, shouldSendWaitingPush } from './notification-dedup';
-import { markPromptCardShown } from './prompt-card-state';
+import { markPromptCardShown, nextPromptOrder } from './prompt-card-state';
 
 const logger = createLogger('push/sender');
 
@@ -339,17 +339,18 @@ export interface PushPayload {
    */
   episodeId?: string;
   /**
-   * When that episode opened (Issue #3798), sent beside {@link episodeId} and
-   * only with it. An id says which wait a card is about, not whether it is
-   * newer than a resolution — delivery fails per device — so the Service Worker
-   * keeps a card of another episode only when this is at or after the
-   * resolution's {@link timestamp} (the moment it was decided).
+   * The worktree's prompt push order (Issue #3798, `nextPromptOrder`), on a
+   * card that carries {@link episodeId} and on a resolution that carries
+   * {@link resolvedEpisodeId}, and only there. An id says which wait a card is
+   * about, not whether it is newer than a resolution — delivery fails per
+   * device — so the Service Worker keeps a card of another episode only when
+   * its order is greater than the resolution's.
    */
-  waitingSince?: number;
+  order?: number;
   /**
    * The episode a resolution clears (Issue #3798). The Service Worker closes
-   * the cards of this episode, and every card that cannot show it opened after
-   * this resolution ({@link waitingSince}), and re-shows a newer episode's card
+   * the cards of this episode, and every card it cannot show was sent after
+   * this resolution ({@link order}), and re-shows a newer episode's card
    * silently instead of covering it. Omitted, the resolution clears the tag as
    * before.
    */
@@ -478,7 +479,9 @@ function buildFailureBody(
 export function buildPushPayload(
   event: NotificationEvent,
   locale: string | null | undefined = DEFAULT_LOCALE,
-  now: number = Date.now()
+  now: number = Date.now(),
+  /** Issue #3798: the prompt push order taken for this fan-out, if any. */
+  order: number | null = null
 ): PushPayload {
   const excerpt = buildExcerpt(event.excerpt);
   const agentSuffix = event.agentName ? ` (${event.agentName})` : '';
@@ -529,12 +532,11 @@ export function buildPushPayload(
     ...(event.waitingKind ? { waitingKind: event.waitingKind } : {}),
     ...(event.resolved === true ? { resolved: true as const } : {}),
     ...(event.kind === 'prompt' && event.resolved !== true && event.waitingEpisodeId
-      ? {
-          episodeId: event.waitingEpisodeId,
-          ...(typeof event.waitingSince === 'number' ? { waitingSince: event.waitingSince } : {}),
-        }
+      ? { episodeId: event.waitingEpisodeId, ...(typeof order === 'number' ? { order } : {}) }
       : {}),
-    ...(event.resolved === true && event.resolvedEpisodeId ? { resolvedEpisodeId: event.resolvedEpisodeId } : {}),
+    ...(event.resolved === true && event.resolvedEpisodeId
+      ? { resolvedEpisodeId: event.resolvedEpisodeId, ...(typeof order === 'number' ? { order } : {}) }
+      : {}),
   };
 }
 
@@ -681,6 +683,17 @@ export async function notifyPushSubscribers(
       markPromptCardShown(event.worktreeId, now, event.waitingEpisodeId ?? null);
     }
 
+    // Issue #3798: the order is taken here, synchronously with the decision to
+    // send — for a resolution, in the same tick `notifyPromptResolved` found
+    // nothing waiting — so a card taken after it compares greater on every
+    // device, whichever arrives first. Only pushes the Service Worker compares
+    // take one: an episode-named card, and a resolution naming its episode.
+    const order =
+      event.kind === 'prompt' &&
+      (event.resolved === true ? Boolean(event.resolvedEpisodeId) : Boolean(event.waitingEpisodeId))
+        ? nextPromptOrder(event.worktreeId, now)
+        : null;
+
     webpush.setVapidDetails(config.subject, config.publicKey, config.privateKey);
 
     // Devices can be registered in different languages, so the body is built per
@@ -696,7 +709,7 @@ export async function notifyPushSubscribers(
     const outcomes = (
       await Promise.all(
         Array.from(byLocale, ([locale, subs]) => {
-          const payload = JSON.stringify(buildPushPayload(event, locale, now));
+          const payload = JSON.stringify(buildPushPayload(event, locale, now, order));
           return Promise.all(subs.map((sub) => sendToOne(sub, payload, now)));
         })
       )

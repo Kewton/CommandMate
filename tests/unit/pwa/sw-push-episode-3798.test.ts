@@ -6,11 +6,12 @@
  * A resolution can reach a device after the card of a newer wait in the same
  * worktree (same tag). Cards of the resolved episode, and cards that name none,
  * are closed and the resolution shown, as before; a card of another episode
- * that opened at or after the resolution was decided (`data.waitingSince >=`
- * the resolution's `timestamp`) is closed and shown again with its own content,
- * silently, instead of the resolution. A different id alone is not enough: a
- * device that missed one wait's card can still show an older, finished wait's
- * card, and that one is closed. Every branch calls `showNotification` exactly once — the
+ * sent after the resolution was decided (`data.order` greater than the
+ * resolution's `order`, the server's per-worktree counter) is closed and shown
+ * again with its own content, silently, instead of the resolution. A different
+ * id alone is not enough — a device that missed one wait's card can still show
+ * an older, finished wait's card — nor is the wait's start, which the next
+ * wait can reuse; those cards are closed. Every branch calls `showNotification` exactly once — the
  * `userVisibleOnly` contract (Issue #2001). A resolution without the id keeps
  * today's behaviour.
  *
@@ -73,16 +74,16 @@ function loadServiceWorker(options: LoadOptions = {}) {
 
 const TAG = 'wt-1:prompt';
 
-/** When the resolution in these tests was decided (its payload `timestamp`). */
-const RESOLVED_AT = 1_800_000_010_000;
-/** A wait that opened after that moment, and one that opened before it. */
-const AFTER = RESOLVED_AT + 5_000;
-const BEFORE = RESOLVED_AT - 5_000;
+/** The worktree's prompt push order the resolution in these tests took. */
+const RESOLVED_ORDER = 10;
+/** A card sent after that resolution was decided, and one sent before it. */
+const AFTER = RESOLVED_ORDER + 1;
+const BEFORE = RESOLVED_ORDER - 1;
 
 function card(
   episodeId: string | undefined,
   body = `waiting ${episodeId ?? 'legacy'}`,
-  waitingSince: number | null = episodeId !== undefined ? AFTER : null
+  order: number | null = episodeId !== undefined ? AFTER : null
 ): DisplayedNotification {
   return {
     tag: TAG,
@@ -96,15 +97,16 @@ function card(
       kind: 'prompt',
       resolved: false,
       ...(episodeId !== undefined ? { episodeId } : {}),
-      ...(waitingSince !== null ? { waitingSince } : {}),
+      ...(order !== null ? { order } : {}),
     },
     close: vi.fn(),
   };
 }
 
-function resolution(resolvedEpisodeId?: string, timestamp: number = RESOLVED_AT): Record<string, unknown> {
+function resolution(resolvedEpisodeId?: string, order: number = RESOLVED_ORDER): Record<string, unknown> {
   return {
-    timestamp,
+    timestamp: 1_800_000_010_000,
+    order,
     title: 'feature-x (claude)',
     body: 'Handled',
     tag: TAG,
@@ -188,9 +190,9 @@ describe('[#3798] the resolution names its episode', () => {
     }
   });
 
-  it('two newer cards: the last one handed back (the newest) is the one shown again', async () => {
-    const b = card('wep-b', 'b');
-    const c = card('wep-c', 'c');
+  it('two newer cards: the one the server sent last is the one shown again', async () => {
+    const b = card('wep-b', 'b', AFTER);
+    const c = card('wep-c', 'c', AFTER + 1);
     const { listeners, showNotification } = loadServiceWorker({ displayed: [b, c] });
     await dispatchPush(listeners, resolution('wep-a'));
     expect(b.close).toHaveBeenCalled();
@@ -226,7 +228,7 @@ describe('[#3798] the resolution names its episode', () => {
   });
 });
 
-describe('[#3798] newer is proved by order, not by a different id', () => {
+describe('[#3798] newer is proved by the push order, not by a different id', () => {
   it('old A / resolution B: an older card of another episode is closed, not shown again', async () => {
     // Wait A's card stayed on this device because wait B's card never reached it.
     const oldA = card('wep-a', 'waiting A', BEFORE);
@@ -244,7 +246,7 @@ describe('[#3798] newer is proved by order, not by a different id', () => {
     });
   });
 
-  it('new B / resolution A: a card that opened after the resolution was decided is shown again', async () => {
+  it('new B / resolution A: a card sent after the resolution was decided is shown again', async () => {
     const newB = card('wep-b', 'waiting B', AFTER);
     const { listeners, showNotification } = loadServiceWorker({ displayed: [newB] });
 
@@ -256,28 +258,39 @@ describe('[#3798] newer is proved by order, not by a different id', () => {
       body: 'waiting B',
       silent: true,
       renotify: false,
-      data: expect.objectContaining({ episodeId: 'wep-b', waitingSince: AFTER, resolved: false }),
+      data: expect.objectContaining({ episodeId: 'wep-b', order: AFTER, resolved: false }),
     });
   });
 
-  it('a wait that opened at the very moment the resolution was decided counts as newer', async () => {
-    const tie = card('wep-b', 'waiting B', RESOLVED_AT);
+  it('an order equal to the resolution\'s is not newer (the server never repeats one)', async () => {
+    const tie = card('wep-b', 'waiting B', RESOLVED_ORDER);
     const { listeners, showNotification } = loadServiceWorker({ displayed: [tie] });
     await dispatchPush(listeners, resolution('wep-a'));
-    expect(showNotification.mock.calls[0][1]).toMatchObject({ body: 'waiting B', silent: true });
+    expect(tie.close).toHaveBeenCalledTimes(1);
+    expect(showNotification).toHaveBeenCalledTimes(1);
+    expect(showNotification.mock.calls[0][1]).toMatchObject({ body: 'Handled', silent: true });
   });
 
-  it('a card of another episode without its start, or a resolution without its time, is closed', async () => {
-    const noSince = card('wep-b', 'waiting B', null);
-    const first = loadServiceWorker({ displayed: [noSince] });
+  it('the wait\'s start does not decide: a card with a later since but an earlier order is closed', async () => {
+    const reused = card('wep-b', 'waiting B', BEFORE);
+    reused.data.waitingSince = 1_800_000_099_000;
+    const { listeners, showNotification } = loadServiceWorker({ displayed: [reused] });
+    await dispatchPush(listeners, resolution('wep-a'));
+    expect(reused.close).toHaveBeenCalledTimes(1);
+    expect(showNotification.mock.calls[0][1]).toMatchObject({ body: 'Handled' });
+  });
+
+  it('a card of another episode without an order, or a resolution without one, is closed', async () => {
+    const noOrder = card('wep-b', 'waiting B', null);
+    const first = loadServiceWorker({ displayed: [noOrder] });
     await dispatchPush(first.listeners, resolution('wep-a'));
-    expect(noSince.close).toHaveBeenCalledTimes(1);
+    expect(noOrder.close).toHaveBeenCalledTimes(1);
     expect(first.showNotification.mock.calls[0][1]).toMatchObject({ body: 'Handled' });
 
     const newB = card('wep-b', 'waiting B', AFTER);
     const second = loadServiceWorker({ displayed: [newB] });
-    const { timestamp: _dropped, ...untimed } = resolution('wep-a');
-    await dispatchPush(second.listeners, untimed);
+    const { order: _dropped, ...unordered } = resolution('wep-a');
+    await dispatchPush(second.listeners, unordered);
     expect(newB.close).toHaveBeenCalledTimes(1);
     expect(second.showNotification.mock.calls[0][1]).toMatchObject({ body: 'Handled' });
   });
@@ -294,7 +307,7 @@ describe('[#3798] newer is proved by order, not by a different id', () => {
     expect(showNotification.mock.calls[0][1]).toMatchObject({ body: 'waiting C', silent: true });
   });
 
-  it('a waiting card keeps when its wait opened in data', async () => {
+  it('a waiting card keeps its order in data', async () => {
     const { listeners, showNotification } = loadServiceWorker({ displayed: [] });
     await dispatchPush(listeners, {
       title: 't',
@@ -303,10 +316,10 @@ describe('[#3798] newer is proved by order, not by a different id', () => {
       kind: 'prompt',
       worktreeId: 'wt-1',
       episodeId: 'wep-b',
-      waitingSince: AFTER,
+      order: AFTER,
     });
     expect(showNotification.mock.calls[0][1]).toMatchObject({
-      data: expect.objectContaining({ episodeId: 'wep-b', waitingSince: AFTER }),
+      data: expect.objectContaining({ episodeId: 'wep-b', order: AFTER }),
     });
   });
 });

@@ -127,6 +127,15 @@ export const PROMPT_CARD_KEY_PREFIX = 'push_prompt_card:';
 export const PROMPT_CARD_EPISODE_KEY_PREFIX = 'push_prompt_card_episode:';
 
 /**
+ * `app_settings.key` prefix for one worktree's prompt push order (Issue #3798):
+ * a counter that moves once per episode-named waiting card and once per
+ * resolution that names its episode, so the Service Worker can tell a card
+ * sent after a resolution was decided from one sent before it. Not a card row:
+ * no card GLOB matches it and nothing clears it, so the order never goes back.
+ */
+export const PROMPT_ORDER_KEY_PREFIX = 'push_prompt_order:';
+
+/**
  * How long a persisted mark is believed.
  *
  * The Issue offered two existing lifetimes to copy, and **both are measurably
@@ -325,6 +334,40 @@ export function markPromptCardShown(
   cards.set(worktreeId, at);
   cardEpisodes.set(worktreeId, episodeId);
   writeRow(worktreeId, at, episodeId);
+}
+
+/**
+ * Take this worktree's next prompt push order (Issue #3798). Never throws.
+ *
+ * One statement reads and advances the counter, so two decisions never share a
+ * value — not even within the same millisecond — and it survives a restart
+ * with the database. The episode's `since` cannot do this job: a structured
+ * since is reused by the next episode and can be older than the observation.
+ *
+ * @returns The new value, or null when storage cannot answer; the push then
+ *   carries no order and the Service Worker treats it as it did before #3798.
+ */
+export function nextPromptOrder(worktreeId: string, at: number = Date.now()): number | null {
+  try {
+    const row = getDbInstance()
+      .prepare(`
+        INSERT INTO app_settings (key, value, created_at, updated_at)
+        VALUES (?, '1', ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+          value = CAST(app_settings.value AS INTEGER) + 1,
+          updated_at = excluded.updated_at
+        RETURNING value
+      `)
+      .get(`${PROMPT_ORDER_KEY_PREFIX}${worktreeId}`, at, at) as { value: string | number } | undefined;
+    const order = Number(row?.value);
+    return Number.isSafeInteger(order) && order > 0 ? order : null;
+  } catch (error) {
+    logger.debug('prompt-order-advance-failed', {
+      worktreeId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
 }
 
 /**
