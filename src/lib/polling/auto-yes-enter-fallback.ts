@@ -1,6 +1,20 @@
 /**
  * Auto-Yes's Enter on a choice screen CommandMate cannot read (Issue #3397).
  *
+ * ## Retired (Issue #3821)
+ *
+ * Nothing sends this Enter any more. The poller leaves every frame the dialog
+ * gate refuses to a human (`unclassified-frame`), whatever
+ * {@link judgeEnterFallback} would say and whatever
+ * {@link AUTO_YES_ENTER_FALLBACK_ENV_VAR} is set to: a bare Enter confirms
+ * whatever happens to be selected, and on a screen nothing here can read,
+ * nothing here can say what that is. {@link judgeEnterFallback} stays as a
+ * reading of the frame only; no sending path calls it. The session epoch the
+ * record was keyed on (`./auto-yes-enter-fallback-state`) is still what every
+ * send's generation check and the partial-answer record belong to.
+ *
+ * What follows is how the Enter was decided while it existed.
+ *
  * ## The screen
  *
  * `assessPromptAnswerability` refuses some frames that are plainly a choice

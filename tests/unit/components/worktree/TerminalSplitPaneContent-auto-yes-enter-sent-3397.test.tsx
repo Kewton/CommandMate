@@ -100,6 +100,9 @@ function mockPane() {
       answering: false,
       answerable,
       autoYesEnterSent,
+      // Issue #3821: the server says Auto-Yes is answering — the one decision
+      // under which a readable screen stays hidden.
+      autoYesDecision: { state: 'answering', reason: null, observedAt: 1 },
     },
     agentSession: { session: null, context: null, diff: null },
     setAutoScroll: vi.fn(),

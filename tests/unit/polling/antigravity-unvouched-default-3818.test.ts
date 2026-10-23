@@ -101,6 +101,7 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 import { POST as promptResponse } from '@/app/api/worktrees/[id]/prompt-response/route';
+import { clearManualAnswers } from '@/lib/polling/auto-yes-manual-answer';
 import { buildDetectPromptOptions, stripAnsi, stripBoxDrawing } from '@/lib/detection/cli-patterns';
 import { detectPrompt } from '@/lib/detection/prompt-detector';
 import { detectSessionStatus, STATUS_REASON } from '@/lib/detection/status-detector';
@@ -364,6 +365,9 @@ describe('[#3818] screens that are vouched for are still answered (positive)', (
     expect(status).toBe(200);
     expect(body.success).toBe(true);
 
+    // Issue #3821: a person's answer holds the poller off the instance for a
+    // moment; the two paths are judged apart here, so the hold is cleared.
+    clearManualAnswers();
     sendPromptAnswer.mockClear();
     expect(await autoYes(raw)).toBe('responded');
     expect(sendPromptAnswer.mock.calls.map(([p]) => p.answer)).toEqual(['1']);
@@ -379,6 +383,9 @@ describe('[#3818] screens that are vouched for are still answered (positive)', (
     expect(status).toBe(200);
     expect(body.success).toBe(true);
 
+    // Issue #3821: a person's answer holds the poller off the instance for a
+    // moment; the two paths are judged apart here, so the hold is cleared.
+    clearManualAnswers();
     sendPromptAnswer.mockClear();
     expect(await autoYes(raw)).toBe('responded');
     expect(sendPromptAnswer).toHaveBeenCalledTimes(1);

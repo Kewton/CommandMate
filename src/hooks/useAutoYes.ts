@@ -1,41 +1,29 @@
 /**
- * useAutoYes - Custom hook for auto-yes mode
+ * useAutoYes - the browser's side of Auto-Yes.
  *
- * Handles automatic prompt response when auto-yes is enabled.
- * Uses a ref-based duplicate prevention mechanism to avoid
- * sending the same response multiple times during polling intervals.
+ * Issue #3821: the browser no longer answers prompts. Until this Issue the hook
+ * posted an answer to `/prompt-response` whenever Auto-Yes was on and no server
+ * poller ran for the agent (#501) — with no execution contract applied (a
+ * browser cannot read the task row the policy comes from, #1547), so a poller
+ * refused by the concurrent limit left the contract's `off` and deny patterns
+ * unenforced on exactly that agent. Automatic answers now come from the server
+ * alone: its poller, the `PermissionRequest` hook and the API adjudication. An
+ * agent with no poller is left to a human, and the answer panel says so
+ * (`autoYesDecision: withheld`, `server-poller-inactive`).
  *
- * Issue #138: Added server-side duplicate prevention using lastServerResponseTimestamp.
- * If the server has responded within the last 3 seconds, the client skips responding.
+ * The server refuses an answer that still carries the browser's `origin`
+ * (`auto-yes-browser`, #3820) with 409, so a tab loaded before this release
+ * cannot answer either once it posts one; a tab loaded before #3820 added the
+ * `origin` sends none and cannot be told from a person until it is reloaded.
  *
- * Issue #3331: `lastAutoResponse` is set only once the reply reads `answered`
- * (`readPromptResponseOutcome`), so a refused or failed answer is no longer
- * announced as "Auto responded".
- *
- * Issue #3748: an `AskUserQuestion` confirm page (`Submit` / `Cancel`) is left
- * to a human here as it is on the server, judged by the prompt's options
- * (`polling/auto-yes-confirm-shape`; the server's frame predicates are
- * server-only).
- *
- * Issue #3820: the answer says it is this hook's (`origin`), so the server's
- * Auto-Yes ledger can count it apart from a person's. The ledger is server
- * side and is not imported here; the server's `/prompt-response` records it.
+ * The hook stays, with its parameters, so the callers compile unchanged; it
+ * sends nothing, and `lastAutoResponse` is always null (nothing is announced
+ * that the browser did not do).
  */
 
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { resolveAutoAnswer } from '@/lib/polling/auto-yes-resolver';
-import { isConfirmPageShapedPrompt } from '@/lib/polling/auto-yes-confirm-shape';
-import { AUTO_YES_BROWSER_ORIGIN, buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
-import { generatePromptKey } from '@/lib/detection/prompt-key';
-import { isAnswerablePromptData } from '@/types/models';
-import { derivePromptView } from '@/lib/session/prompt-view';
-import { readPromptResponseOutcome } from '@/lib/prompt-response-outcome';
 import type { LivePromptData } from '@/types/models';
-
-/** Duplicate prevention window in milliseconds (3 seconds) */
-const DUPLICATE_PREVENTION_WINDOW_MS = 3000;
 
 /** Parameters for useAutoYes hook */
 export interface UseAutoYesParams {
@@ -58,154 +46,24 @@ export interface UseAutoYesParams {
   lastServerResponseTimestamp?: number | null;
   /** Whether server-side auto-yes poller is active (Issue #501) */
   serverPollerActive?: boolean;
-  /**
-   * The agent instance the prompt was read from (Issue #3331). Part of the
-   * target a reply is announced for: omitted, it is the tool's primary
-   * (id === cliTool), as in the controller's `polledAgentKey` (#3304).
-   */
+  /** The agent instance the prompt was read from (Issue #3331). */
   instanceId?: string;
-}
-
-/**
- * Who an answer is for: the worktree and the polled agent, built from the
- * same inputs as the controller's `polledAgentKey` (#3304) — the tool and the
- * instance, which is the tool's primary when none is named.
- */
-function autoYesTargetKey(worktreeId: string, cliTool: string, instanceId: string | undefined): string {
-  return `${worktreeId}::${cliTool}::${instanceId ?? cliTool}`;
 }
 
 /** Return value of useAutoYes hook */
 export interface UseAutoYesReturn {
   /**
-   * Most recent auto-response answer the server took (for notification
-   * display). Issue #3331: null while an answer is in flight, so two answers
-   * in a row that are the same string still reach the display as two changes.
+   * The answer the browser sent, for the toggle's notice. Issue #3821: always
+   * null — the browser sends none.
    */
   lastAutoResponse: string | null;
 }
 
 /**
- * Hook that automatically responds to prompts when auto-yes is enabled.
+ * The browser's Auto-Yes: answers nothing (Issue #3821).
  *
- * Uses a ref-based duplicate prevention mechanism combined with server-side
- * timestamp checking to avoid sending the same response multiple times.
- *
- * @param params - Hook parameters including worktree context and prompt state
- * @returns Object containing the last auto-response answer for UI display
+ * @returns `lastAutoResponse: null`
  */
-export function useAutoYes({
-  worktreeId,
-  cliTool,
-  isPromptWaiting,
-  promptData,
-  autoYesEnabled,
-  lastServerResponseTimestamp,
-  serverPollerActive,
-  instanceId,
-}: UseAutoYesParams): UseAutoYesReturn {
-  const lastAutoRespondedRef = useRef<string | null>(null);
-  // Issue #3331: the latest send; a reply to an older one is not announced.
-  const sendSeqRef = useRef(0);
-  // Issue #3331: who the screen shows now. A reply is announced only when it
-  // is still the one its answer was sent for — compared at the reply, like the
-  // controller's fetchers' stale guards, so switching away and back before the
-  // reply still announces it on the agent it was for.
-  const targetKey = autoYesTargetKey(worktreeId, cliTool, instanceId);
-  const currentTargetRef = useRef(targetKey);
-  currentTargetRef.current = targetKey;
-  const [lastAutoResponse, setLastAutoResponse] = useState<string | null>(null);
-
-  useEffect(() => {
-    // Reset when prompt clears
-    if (!isPromptWaiting) {
-      lastAutoRespondedRef.current = null;
-      return;
-    }
-
-    if (!promptData || !autoYesEnabled) return;
-
-    // Issue #1738: the degraded structured form (#1725) arrives here through the
-    // reducer exactly like a parsed prompt, and nothing may answer it — it
-    // carries no options at all, and a bare 'y' on a numbered dialog takes
-    // whichever entry is highlighted rather than the one anybody chose (#1681).
-    //
-    // Behaviour is unchanged: `resolveAutoAnswer` already fell through to null
-    // for an unrecognised `type`, and the duplicate-prevention ref is only
-    // written after a non-null answer. What changes is that the refusal is now
-    // stated where the type says it belongs, instead of resting on a helper
-    // whose `PromptData` parameter this value never satisfied.
-    //
-    // Issue #3184: "answerable at the pane" is the shared view's
-    // `screen-choices`. An `api-choices` payload is answered by the server's
-    // adjudicator over the agent's API, never by keys from here.
-    if (derivePromptView(promptData)?.kind !== 'screen-choices') return;
-    // #3184: type narrowing only — `resolveAutoAnswer` / the body builder take
-    // the closed `PromptData` union (#1725); equivalent to the line above.
-    if (!isAnswerablePromptData(promptData)) return;
-
-    // Issue #501: Skip client-side response entirely when server-side poller is active.
-    // The server poller handles all prompt responses; client responding would cause duplicates.
-    if (serverPollerActive) {
-      return;
-    }
-
-    // Issue #3748: the confirm page the server's poller leaves to a human
-    // (step 3.3 of `detectAndRespondToPrompt`, #3497) is left alone here too.
-    // `Submit` commits whatever stands as the answers; answering it from the
-    // browser undid the server's decline whenever no server poller ran. Judged
-    // by the options (`Submit` / `Cancel`), whatever the frame shows.
-    if (isConfirmPageShapedPrompt(promptData)) return;
-
-    // Issue #138: Skip if server has responded recently (duplicate prevention fallback)
-    if (lastServerResponseTimestamp) {
-      const timeSinceServerResponse = Date.now() - lastServerResponseTimestamp;
-      if (timeSinceServerResponse < DUPLICATE_PREVENTION_WINDOW_MS) {
-        return;
-      }
-    }
-
-    // Generate composite key for duplicate prevention (F002: DRY - shared utility)
-    const promptKey = generatePromptKey({ type: promptData.type, question: promptData.question });
-    if (lastAutoRespondedRef.current === promptKey) return;
-
-    // Issue #1547: no contract policy is applied here. This branch only runs
-    // when the server-side poller is absent (see the serverPollerActive guard
-    // above), and a browser cannot read the task row the policy comes from.
-    // Policy enforcement lives in auto-yes-poller.ts, which is what answers
-    // prompts whenever Auto-Yes is enabled through the API.
-    const answer = resolveAutoAnswer(promptData);
-    if (answer === null) return;
-
-    // Written before the reply: whatever it says, this approval is not answered
-    // again until the display changes (#3292 auto-yes.test.ts).
-    lastAutoRespondedRef.current = promptKey;
-    // Issue #3331: announce nothing until the reply says the answer was taken.
-    // Clearing first also makes a repeat of the same answer a fresh change.
-    setLastAutoResponse(null);
-    const seq = ++sendSeqRef.current;
-    const sentFor = targetKey;
-
-    // Issue #287: Use shared builder to include promptType and defaultOptionNumber
-    // so the API can use cursor-key navigation even when promptCheck re-verification fails.
-    // Issue #3820: `origin` only; what is sent and how it is recorded do not change.
-    const requestBody = { ...buildPromptResponseBody(answer, cliTool, promptData), origin: AUTO_YES_BROWSER_ORIGIN };
-
-    // Send auto-response via existing prompt-response API
-    fetch(`/api/worktrees/${worktreeId}/prompt-response`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
-    })
-      .then(readPromptResponseOutcome)
-      .then((outcome) => {
-        const stillShown = seq === sendSeqRef.current && sentFor === currentTargetRef.current;
-        if (outcome === 'answered' && stillShown) setLastAutoResponse(answer);
-      })
-      .catch((err) => {
-        console.error('[useAutoYes] Failed to send auto-response:', err);
-      });
-  }, [isPromptWaiting, promptData, autoYesEnabled, worktreeId, cliTool, targetKey, lastServerResponseTimestamp, serverPollerActive]);
-
-  return { lastAutoResponse };
+export function useAutoYes(_params: UseAutoYesParams): UseAutoYesReturn {
+  return { lastAutoResponse: null };
 }

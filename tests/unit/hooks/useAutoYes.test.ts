@@ -2,8 +2,14 @@
  * @vitest-environment jsdom
  *
  * Issue #287: Tests for useAutoYes hook
- * Validates that the hook includes promptType and defaultOptionNumber
+ * Validated that the hook included promptType and defaultOptionNumber
  * in the prompt-response API request body.
+ *
+ * Issue #3821: the browser no longer answers. Every case below that sent an
+ * answer now asserts that nothing is sent — with Auto-Yes on, a prompt the
+ * base rules would answer, and no server poller (`serverPollerActive` absent,
+ * the one condition under which the hook used to send) — and that nothing is
+ * announced (`lastAutoResponse` stays null).
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -28,7 +34,7 @@ describe('useAutoYes - promptType/defaultOptionNumber in request body (Issue #28
     vi.restoreAllMocks();
   });
 
-  it('should include promptType=yes_no in request body for yes/no prompts', () => {
+  it('[#3821] sends nothing for a yes/no prompt (was: promptType=yes_no in the body)', () => {
     const promptData: PromptData = {
       type: 'yes_no',
       question: 'Continue?',
@@ -46,18 +52,10 @@ describe('useAutoYes - promptType/defaultOptionNumber in request body (Issue #28
       })
     );
 
-    expect(mockFetch).toHaveBeenCalledOnce();
-    const [url, options] = mockFetch.mock.calls[0];
-    expect(url).toContain('/prompt-response');
-    const body = JSON.parse(options.body);
-    expect(body.promptType).toBe('yes_no');
-    expect(body.answer).toBe('y');
-    expect(body.cliTool).toBe('claude');
-    // yes_no should not have defaultOptionNumber
-    expect(body.defaultOptionNumber).toBeUndefined();
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('should include promptType=multiple_choice and defaultOptionNumber in request body', () => {
+  it('[#3821] sends nothing for a multiple choice with a default (was: promptType and defaultOptionNumber)', () => {
     const promptData: PromptData = {
       type: 'multiple_choice',
       question: 'Choose:',
@@ -79,14 +77,10 @@ describe('useAutoYes - promptType/defaultOptionNumber in request body (Issue #28
       })
     );
 
-    expect(mockFetch).toHaveBeenCalledOnce();
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.promptType).toBe('multiple_choice');
-    expect(body.defaultOptionNumber).toBe(2); // The default option is #2
-    expect(body.answer).toBe('2'); // Auto-answer should be the default option
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('should not include defaultOptionNumber for multiple_choice without default', () => {
+  it('[#3821] sends nothing for a multiple choice without a default', () => {
     const promptData: PromptData = {
       type: 'multiple_choice',
       question: 'Choose:',
@@ -107,12 +101,7 @@ describe('useAutoYes - promptType/defaultOptionNumber in request body (Issue #28
       })
     );
 
-    expect(mockFetch).toHaveBeenCalledOnce();
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.promptType).toBe('multiple_choice');
-    // No default option, so defaultOptionNumber should not be present
-    expect(body.defaultOptionNumber).toBeUndefined();
-    expect(body.answer).toBe('1'); // Falls back to first option
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it('should not send request when autoYesEnabled is false', () => {
@@ -136,7 +125,7 @@ describe('useAutoYes - promptType/defaultOptionNumber in request body (Issue #28
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('should not send duplicate requests for same prompt', () => {
+  it('[#3821] sends nothing on a re-render of the same prompt either', () => {
     const promptData: PromptData = {
       type: 'yes_no',
       question: 'Continue?',
@@ -157,7 +146,7 @@ describe('useAutoYes - promptType/defaultOptionNumber in request body (Issue #28
       }
     );
 
-    expect(mockFetch).toHaveBeenCalledOnce();
+    expect(mockFetch).not.toHaveBeenCalled();
 
     // Re-render with same prompt data
     rerender({
@@ -168,11 +157,10 @@ describe('useAutoYes - promptType/defaultOptionNumber in request body (Issue #28
       autoYesEnabled: true,
     });
 
-    // Should still only have been called once (duplicate prevention)
-    expect(mockFetch).toHaveBeenCalledOnce();
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('should reset lastAutoResponse when prompt clears', async () => {
+  it('[#3821] lastAutoResponse stays null, before and after the prompt clears', async () => {
     const promptData: PromptData = {
       type: 'yes_no',
       question: 'Continue?',
@@ -193,12 +181,11 @@ describe('useAutoYes - promptType/defaultOptionNumber in request body (Issue #28
       }
     );
 
-    // Issue #3331: set once the reply says the answer was taken, not on send.
     expect(result.current.lastAutoResponse).toBeNull();
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    expect(result.current.lastAutoResponse).toBe('y');
+    expect(result.current.lastAutoResponse).toBeNull();
 
     // Clear prompt
     rerender({
@@ -209,8 +196,32 @@ describe('useAutoYes - promptType/defaultOptionNumber in request body (Issue #28
       autoYesEnabled: true,
     });
 
-    // After prompt clears, lastAutoResponse remains (it's the last answer sent)
-    // The ref is reset though, so a new prompt with the same content will be answered again
-    expect(mockFetch).toHaveBeenCalledOnce();
+    expect(result.current.lastAutoResponse).toBeNull();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('[#3821] Auto-Yes on, a readable question and no server poller: nothing is sent (was the one case the hook answered)', () => {
+    const promptData: PromptData = {
+      type: 'multiple_choice',
+      question: 'Which framework?',
+      options: [
+        { number: 1, label: 'React', isDefault: true },
+        { number: 2, label: 'Vue', isDefault: false },
+      ],
+      status: 'pending',
+    };
+    const { result } = renderHook(() =>
+      useAutoYes({
+        worktreeId: 'wt-1',
+        cliTool: 'claude',
+        isPromptWaiting: true,
+        promptData,
+        autoYesEnabled: true,
+        serverPollerActive: false,
+        lastServerResponseTimestamp: null,
+      })
+    );
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(result.current.lastAutoResponse).toBeNull();
   });
 });

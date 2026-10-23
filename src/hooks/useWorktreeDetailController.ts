@@ -47,6 +47,7 @@ import { UPLOADABLE_EXTENSIONS, getMaxFileSize, isUploadableExtension } from '@/
 import { useToast } from '@/components/common/Toast';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { useAutoYes } from '@/hooks/useAutoYes';
+import type { AutoYesDecisionPublished } from '@/types/auto-yes-decision';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import {
   PROMPT_RESPONSE_NOTICES,
@@ -152,6 +153,8 @@ type CurrentOutputResponse = Pick<CurrentOutputResponseBody, 'isRunning'> &
       | 'sessionStatus'
       /** Issue #3179: epoch ms the agent began launching, while it is still starting. */
       | 'startingSince'
+      /** Issue #3821: Auto-Yes's decision about `promptData`; absent from an older server. */
+      | 'autoYesDecision'
     >
   > & {
   /** Issue #1738: may be the degraded structured form published since #1725. */
@@ -467,6 +470,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // (`isAutoYesEnterSentToCurrentPrompt` over `autoYes.lastEnterFallback`).
   // Written and dropped exactly where `promptAnswerable` is.
   const [promptAutoYesEnterSent, setPromptAutoYesEnterSent] = useState(false);
+  // Issue #3821: the server's decision about the prompt on show
+  // (`autoYesDecision`); the phone's sheet is hidden under Auto-Yes only while
+  // it says `answering`. Written and dropped exactly where `promptAnswerable` is.
+  const [promptAutoYesDecision, setPromptAutoYesDecision] = useState<AutoYesDecisionPublished | undefined>(undefined);
   // Issue #473 / #1017 / #2592 / #2809 / #3179: what the phone's docked controls
   // (Navigate pad, prompt sheet, the composer's stop button and mode control)
   // need to know about the active agent's frame. One state rather than a
@@ -939,6 +946,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
           actions.clearPrompt();
           setPromptAnswerable(undefined);
           setPromptAutoYesEnterSent(false);
+          setPromptAutoYesDecision(undefined);
           setSelectionListReading(NO_SELECTION_LIST_READING);
           setPaneGate(CONTROLLER_PANE_GATE_NOTHING_ARRIVED);
         }
@@ -975,6 +983,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         actions.showPrompt(data.promptData, `prompt-${Date.now()}`);
         setPromptAnswerable(data.promptAnswerable);
         setPromptAutoYesEnterSent(isAutoYesEnterSentToCurrentPrompt(data.autoYes?.lastEnterFallback));
+        // One delivery path (this poll, with its stale-response guard), so
+        // the response's own value; absent from an older server.
+        setPromptAutoYesDecision(data.autoYesDecision);
       } else if (!data.isPromptWaiting && state.prompt.visible) {
         actions.clearPrompt();
       }
@@ -1274,6 +1285,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       // (self-resets on the new cliToolId); only non-terminal state is cleared here.
       actions.clearMessages();
       actions.clearPrompt();
+      // Issue #3821: the previous agent's decision is not about the next one's prompt.
+      setPromptAutoYesDecision(undefined);
       // Issue #3304: all of the frame facts, as the pane hook does on the same
       // change — not the selection list alone. Left in place, the previous
       // agent's `ready` kept the mode button enabled over an agent nobody had
@@ -2215,6 +2228,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     promptAnswerable,
     // Issue #3397: MobilePromptSheet's `autoYesEnterSent`.
     promptAutoYesEnterSent,
+    // Issue #3821: whether the phone's sheet is drawn under Auto-Yes.
+    promptAutoYesDecision,
     // Issue #2809: the docked pad's Enter gate on a plan review.
     offersPlanApprove: paneGate.offersPlanApprove,
     // Issue #3758: the docked pad's "terminal action needed (trust)" notice.

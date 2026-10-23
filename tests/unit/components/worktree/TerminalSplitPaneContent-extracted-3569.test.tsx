@@ -20,7 +20,16 @@ const yesNo = {
 };
 
 describe('shouldShowPromptPanel', () => {
-  const base = { visible: true, isStarting: false, autoYesEnabled: false, data: yesNo, answerable: true };
+  // Issue #3821: the server says Auto-Yes is answering this prompt — the one
+  // decision under which the panel may stay hidden.
+  const base = {
+    visible: true,
+    isStarting: false,
+    autoYesEnabled: false,
+    data: yesNo,
+    answerable: true,
+    autoYesDecision: { state: 'answering' as const },
+  };
 
   it('shows a visible prompt with Auto-Yes off', () => {
     expect(shouldShowPromptPanel(base)).toBe(true);

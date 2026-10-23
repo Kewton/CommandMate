@@ -203,6 +203,9 @@ function promptPayload(): Record<string, unknown> {
       ],
     },
     ...(scenario.answerable !== undefined ? { promptAnswerable: scenario.answerable } : {}),
+    // Issue #3821: the server says Auto-Yes is answering — the one decision
+    // under which a readable screen stays hidden.
+    autoYesDecision: { state: 'answering', reason: null, observedAt: 1 },
   };
 }
 

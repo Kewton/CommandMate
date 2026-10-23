@@ -4,9 +4,13 @@
  * §2.6・§8.1, PR 2).
  *
  * The browser's Auto-Yes says so in the body (`origin: 'auto-yes-browser'`);
- * the ledger records it as basis `browser`, anything else as `human`. A failure
+ * the ledger recorded it as basis `browser`, anything else as `human`. A failure
  * (`success: false`, a 500) is a `failed` send, never an answer, and the
  * ledger throwing changes neither the body nor the status.
+ *
+ * Issue #3821: the route refuses the browser's origin with 409 before the
+ * session is touched, so it is not recorded at all any more; the failure
+ * cases below are a person's answer (no origin).
  *
  * Mocks as in `prompt-response-verification.test.ts`: tmux and the capture are
  * absent, the rest is real.
@@ -177,15 +181,17 @@ afterEach(async () => {
 });
 
 describe('[#3820] who answered through /prompt-response', () => {
-  it('records the browser Auto-Yes’s answer as basis browser', async () => {
+  it('[#3821] refuses the browser Auto-Yes’s answer with 409, and records nothing', async () => {
     arrangeTaken();
+    vi.mocked(sendKeys).mockClear();
 
-    const { body } = await post({ answer: 'y', cliTool: 'claude', promptType: 'yes_no', origin: AUTO_YES_BROWSER_ORIGIN });
+    const { status, body } = await post({ answer: 'y', cliTool: 'claude', promptType: 'yes_no', origin: AUTO_YES_BROWSER_ORIGIN });
 
-    expect(body.success).toBe(true);
-    expect(lines(EV.opened)).toEqual([expect.objectContaining({ source: 'prompt-response', promptType: 'yes_no', worktreeId: WT })]);
-    expect(lines(EV.attemptSettled)).toEqual([expect.objectContaining({ basis: 'browser', result: 'ok' })]);
-    expect(lines(EV.closed)).toEqual([expect.objectContaining({ basis: 'browser', answeredAtClose: true, resolvedBy: 'unknown' })]);
+    expect(status).toBe(409);
+    expect(body).toEqual(expect.objectContaining({ reason: 'browser-auto-yes-retired' }));
+    expect(sendKeys).not.toHaveBeenCalled();
+    expect(lines(EV.opened)).toHaveLength(0);
+    expect(lines(EV.attemptSettled)).toHaveLength(0);
   });
 
   it('records an answer without the origin as a person’s', async () => {
@@ -210,17 +216,17 @@ describe('[#3820] who answered through /prompt-response', () => {
   it('counts success: false as a failed send, never as an answer', async () => {
     arrangeGone();
 
-    const { body } = await post({ answer: '1', cliTool: 'claude', origin: AUTO_YES_BROWSER_ORIGIN });
+    const { body } = await post({ answer: '1', cliTool: 'claude' });
 
     expect(body).toEqual(expect.objectContaining({ success: false, reason: 'prompt_no_longer_active' }));
-    expect(lines(EV.attemptSettled)).toEqual([expect.objectContaining({ basis: 'browser', result: 'failed' })]);
+    expect(lines(EV.attemptSettled)).toEqual([expect.objectContaining({ basis: 'human', result: 'failed' })]);
     expect(lines(EV.closed)).toEqual([expect.objectContaining({ answeredAtClose: false, resolution: 'unresolved-after-send' })]);
   });
 
   it('counts a 500 as a failed send', async () => {
     arrangeSendThrows();
 
-    const { status } = await post({ answer: 'y', cliTool: 'claude', origin: AUTO_YES_BROWSER_ORIGIN });
+    const { status } = await post({ answer: 'y', cliTool: 'claude' });
 
     expect(status).toBe(500);
     expect(lines(EV.attemptSettled)).toEqual([expect.objectContaining({ result: 'failed' })]);
@@ -236,11 +242,11 @@ describe('[#3820] who answered through /prompt-response', () => {
 describe('[#3820] the ledger failing changes nothing the caller is told (design §8.1)', () => {
   async function responses() {
     arrangeTaken();
-    const taken = await post({ answer: 'y', cliTool: 'claude', origin: AUTO_YES_BROWSER_ORIGIN });
+    const taken = await post({ answer: 'y', cliTool: 'claude' });
     arrangeGone();
     const gone = await post({ answer: '1', cliTool: 'claude' });
     arrangeSendThrows();
-    const thrown = await post({ answer: 'y', cliTool: 'claude', origin: AUTO_YES_BROWSER_ORIGIN });
+    const thrown = await post({ answer: 'y', cliTool: 'claude' });
     vi.mocked(sendKeys).mockResolvedValue(undefined);
     return { taken, gone, thrown };
   }

@@ -111,9 +111,8 @@ export function withheldAsQuestion(judged: JudgedPrompt): boolean {
 
 /**
  * The last look before a key (Issue #3822): is the answer still Auto-Yes's to
- * send? Asked after the last wait before the send (the ownership check, or the
- * Enter fallback's fresh capture), so nothing it reads can change before the
- * first key goes out.
+ * send? Asked after the last wait before the send (the ownership check), so
+ * nothing it reads can change before the first key goes out.
  *
  * - With a `generation` (a poller tick), Auto-Yes must still be on and inside
  *   its window. `getAutoYesState` disables an expired grant on read, the

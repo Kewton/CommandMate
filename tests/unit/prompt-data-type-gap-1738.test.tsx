@@ -284,7 +284,9 @@ describe('Issue #1738: Auto-Yes never answers the degraded form', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('still answers a real prompt, so the guard is not simply refusing everything', () => {
+  // Issue #3821: the browser answers nothing at all now, so a real prompt is
+  // not answered from here either (the server's poller answers it).
+  it('[#3821] sends nothing for a real prompt either: the browser no longer answers', () => {
     renderHook(() =>
       useAutoYes({
         worktreeId: 'wt-1738',
@@ -295,9 +297,6 @@ describe('Issue #1738: Auto-Yes never answers the degraded form', () => {
       }),
     );
 
-    expect(mockFetch).toHaveBeenCalledOnce();
-    const [url, options] = mockFetch.mock.calls[0] as [string, { body: string }];
-    expect(url).toContain('/prompt-response');
-    expect(JSON.parse(options.body)).toMatchObject({ answer: 'y', promptType: 'yes_no' });
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });

@@ -145,11 +145,12 @@ async function observeWait(data: LivePromptData): Promise<Conclusion> {
   return output.answerVia === 'screen' ? 'screen' : output.answerVia === 'api' ? 'api' : 'none';
 }
 
-/** Browser Auto-Yes answers only a screen prompt whose default is a plain choice. */
-function autoYesShouldSend(view: PromptView): boolean {
-  if (view.kind !== 'screen-choices' || view.multiSelect) return false;
-  const target = view.choices.find((choice) => choice.isDefault) ?? view.choices[0];
-  return target !== undefined && !target.takesText;
+/**
+ * Browser Auto-Yes answered only a screen prompt whose default is a plain
+ * choice. Issue #3821: it answers none — the server's poller answers.
+ */
+function autoYesShouldSend(_view: PromptView): boolean {
+  return false;
 }
 
 describe('one prompt, one conclusion on every surface (#3184)', () => {
