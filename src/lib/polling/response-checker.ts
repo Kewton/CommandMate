@@ -15,7 +15,7 @@ import type { ChatMessage } from '@/types/models';
 import { detectPrompt } from '@/lib/detection/prompt-detector';
 import {
   detectAntigravityNumberedDialogPrompt,
-  isAntigravityUnvouchedNumberedScreen,
+  isAntigravityUnansweredNumberedScreen,
 } from '@/lib/detection/tools/antigravity/dialog';
 import { liveRegionOf, normalizeFrame } from '@/lib/detection/tools/frame';
 import { isQuotedNumberedPrompt } from '@/lib/detection/tools/live-region';
@@ -314,7 +314,13 @@ export function detectPromptOnCleanFrame(
     // reads `> 1. Google OAuth` as an answerable option. Judged without the
     // footer, so a missing footer cannot reopen the generic path. The status
     // verdict publishes the same frame as unclassified (`tools/antigravity/detect.ts`).
-    if (isAntigravityUnvouchedNumberedScreen(cleanOutput)) {
+    //
+    // Issue #3818: and by default — a numbered agy screen keeps the generic
+    // reading only as `/feedback` or as a reply's plain `1. … N.` list, so a
+    // run with a number missing or its `>` row off the pane is no prompt either.
+    // The status verdict keeps #3808's narrower rule: these frames still read
+    // as someone waiting there, they are only not answered from here.
+    if (isAntigravityUnansweredNumberedScreen(cleanOutput)) {
       return { isPrompt: false, cleanContent: cleanOutput.trim() };
     }
   }
