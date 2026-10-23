@@ -34,6 +34,13 @@ vi.mock('../../../../src/cli/utils/process-inspect', () => ({
   isExitedState: (state: string) => state === 'Z' || state === 'X',
   describeListeners: vi.fn(() => null),
 }));
+// Issue #3752: under the full fs mock the real config dir cannot be resolved, which made the
+// daemon fall back to 'ignore' silently. Give the log path a directory so both outcomes
+// (log opened / log not openable) are decided by the fs mocks alone.
+vi.mock('../../../../src/cli/utils/install-context', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../../src/cli/utils/install-context')>()),
+  getConfigDir: vi.fn(() => '/mock/home/.commandmate'),
+}));
 vi.mock('../../../../src/cli/utils/env-setup', () => ({
   getEnvPath: vi.fn(() => '/mock/home/.commandmate/.env'),
   getPidFilePath: vi.fn(() => '/mock/home/.commandmate/.commandmate.pid'),
@@ -135,6 +142,10 @@ describe('runStart', () => {
     it('should start the server through DaemonManager (detached, stdio ignored)', async () => {
       mockEnvPresentAndNotRunning();
       const mockChild = mockSpawnedChild();
+      // Issue #3752: the log cannot be opened here, so the server output is discarded.
+      vi.mocked(fs.mkdirSync).mockImplementation(() => {
+        throw new Error('EACCES');
+      });
 
       await runStart({ daemon: true });
 
@@ -146,6 +157,27 @@ describe('runStart', () => {
           stdio: 'ignore',
         })
       );
+      expect(mockChild.unref).toHaveBeenCalled();
+    });
+
+    it('should hand the server log descriptor to the daemon when the log opens (Issue #3752)', async () => {
+      mockEnvPresentAndNotRunning();
+      const mockChild = mockSpawnedChild();
+      vi.mocked(fs.mkdirSync).mockReset();
+      vi.mocked(fs.lstatSync).mockImplementation(() => {
+        const err = new Error('ENOENT') as NodeJS.ErrnoException;
+        err.code = 'ENOENT';
+        throw err;
+      });
+
+      await runStart({ daemon: true });
+
+      expect(childProcess.spawn).toHaveBeenCalledWith(
+        'npm',
+        expect.any(Array),
+        expect.objectContaining({ detached: true, stdio: ['ignore', 3, 3] })
+      );
+      expect(fs.closeSync).toHaveBeenCalledWith(3);
       expect(mockChild.unref).toHaveBeenCalled();
     });
 
