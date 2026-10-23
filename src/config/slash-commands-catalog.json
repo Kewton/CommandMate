@@ -3928,6 +3928,16 @@
       ],
       "isStandard": true,
       "source": "standard"
+    },
+    {
+      "name": "presets",
+      "descriptionKey": "slashCommands.descriptions.presets",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
     }
   ]
 }
