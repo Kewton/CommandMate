@@ -607,15 +607,15 @@ describe('[#3798] precondition 3: a frame fetched before the close of what it sh
   });
 
   it('captureFrameTime: a cached frame is as old as its fetch; an own fetch is after the request', () => {
-    expect(captureFrameTime(() => ({ fetchStartedAt: NOW + 10, source: 'cache' }), NOW + 50)).toEqual({
+    expect(captureFrameTime(({ fetchStartedAt: NOW + 10, source: 'cache' }), NOW + 50)).toEqual({
       frameCapturedAt: NOW + 10,
       frameFetchedAfterStart: false,
     });
-    expect(captureFrameTime(() => ({ fetchStartedAt: NOW + 60, source: 'fetched' }), NOW + 50)).toEqual({
+    expect(captureFrameTime(({ fetchStartedAt: NOW + 60, source: 'fetched' }), NOW + 50)).toEqual({
       frameCapturedAt: NOW + 50,
       frameFetchedAfterStart: true,
     });
-    expect(captureFrameTime(() => ({ fetchStartedAt: NOW + 50, source: 'fetched' }), NOW + 50)).toEqual({
+    expect(captureFrameTime(({ fetchStartedAt: NOW + 50, source: 'fetched' }), NOW + 50)).toEqual({
       frameCapturedAt: NOW + 50,
       frameFetchedAfterStart: true,
     });
@@ -623,20 +623,25 @@ describe('[#3798] precondition 3: a frame fetched before the close of what it sh
 
   it('captureFrameTime: a cached or joined frame of the request\'s own millisecond is not an own fetch', () => {
     for (const source of ['cache', 'joined'] as const) {
-      expect(captureFrameTime(() => ({ fetchStartedAt: NOW + 50, source }), NOW + 50)).toEqual({
+      expect(captureFrameTime(({ fetchStartedAt: NOW + 50, source }), NOW + 50)).toEqual({
         frameCapturedAt: NOW + 50,
         frameFetchedAfterStart: false,
       });
     }
   });
 
-  it('captureFrameTime: an unknown source is not an own fetch', () => {
-    expect(captureFrameTime(() => null, NOW + 50)).toEqual({ frameCapturedAt: NOW + 50, frameFetchedAfterStart: false });
-    expect(
-      captureFrameTime(() => {
-        throw new Error('replaced module');
-      }, NOW + 50)
-    ).toEqual({ frameCapturedAt: NOW + 50, frameFetchedAfterStart: false });
+  it('captureFrameTime: a frame nothing was reported for is dated before any close, not at the request', () => {
+    expect(captureFrameTime(null, NOW + 50)).toEqual({ frameCapturedAt: 0, frameFetchedAfterStart: false });
+  });
+
+  it('a frame nothing was reported for does not reopen the confirmation the close ended', () => {
+    generation();
+    closeAt(NOW + 1_000, KEY_A);
+    const start = startWaitingObservation(WT, TOOL, TOOL);
+    const p = planWaitingObservation(observation(prompt(), { start, ...captureFrameTime(null, NOW + 1_500) }));
+    expect(p).toMatchObject({ action: 'ignored', ignoredBecause: 'stale-frame' });
+    // Control: another confirmation opens.
+    expect(planWaitingObservation(observation(prompt(PROMPT_B), { start, ...captureFrameTime(null, NOW + 1_500) })).action).toBe('opened');
   });
 
   it('applies to a fresh prompt too (R2-1)', () => {

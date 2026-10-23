@@ -36,16 +36,13 @@ vi.mock('@/lib/tmux/polling-tmux-transport', () => ({
 import type { PromptData } from '@/types/models';
 import type { ScreenReading } from '@/lib/detection/waiting-screen-reading';
 import { promptScreenKey } from '@/lib/detection/prompt-screen-key';
-import {
-  captureSessionOutput,
-  captureSessionOutputFresh,
-  getCaptureFrameMeta,
-} from '@/lib/session/cli-session';
+import { captureSessionOutput, captureSessionOutputFresh } from '@/lib/session/cli-session';
 import { clearAgentStopEvents, recordAgentEvent } from '@/lib/session/agent-event-state';
 import {
-  captureFrameTime,
+  captureObservedFrame,
   observeWaiting,
   startWaitingObservation,
+  type CapturedFrameTime,
   type WaitingObservationPlan,
 } from '@/lib/session/waiting-episode-binding';
 import {
@@ -102,13 +99,15 @@ function waitForAClosedAt(closedAt: number): void {
   expect(closeEpisode(PARTS, e.episodeId, 'turn-stop', closedAt)).toBe(true);
 }
 
-/** A status probe: start, capture through the cache, read `promptData`, observe. */
-async function probe(promptData: PromptData): Promise<WaitingObservationPlan> {
+/** A status probe: start, capture `lines` through the cache, read `promptData`, observe. */
+async function probe(
+  promptData: PromptData,
+  lines = 100,
+): Promise<{ plan: WaitingObservationPlan; frameTime: CapturedFrameTime }> {
   const start = startWaitingObservation(WT, TOOL, TOOL);
-  const requestedAt = Date.now();
-  const output = await captureSessionOutput(WT, TOOL, 100, TOOL);
-  const frameTime = captureFrameTime(() => getCaptureFrameMeta(WT, TOOL, TOOL, output), requestedAt);
-  return observeWaiting({ ...PARTS, observer: 'status-probe', start, reading: prompt(promptData), ...frameTime });
+  const { frameTime } = await captureObservedFrame(() => captureSessionOutput(WT, TOOL, lines, TOOL));
+  const plan = observeWaiting({ ...PARTS, observer: 'status-probe', start, reading: prompt(promptData), ...frameTime });
+  return { plan, frameTime };
 }
 
 beforeEach(() => {
@@ -146,9 +145,9 @@ describe('[#3798] a slow fresh capture is dated by its start', () => {
   it('another observer\'s cache hit on it does not reopen the confirmation the close ended', async () => {
     await slowFreshAcrossTheClose(FRAME_A);
 
-    const plan = await probe(PROMPT_A);
+    const { plan, frameTime } = await probe(PROMPT_A);
     expect(transport.captureSnapshot).toHaveBeenCalledTimes(1);
-    expect(getCaptureFrameMeta(WT, TOOL, TOOL, FRAME_A)).toEqual({ fetchStartedAt: T0, source: 'cache' });
+    expect(frameTime).toEqual({ frameCapturedAt: T0, frameFetchedAfterStart: false });
     expect(plan).toMatchObject({ action: 'ignored', ignoredBecause: 'stale-frame' });
     expect(getWaitingEpisodeRecord(WT, TOOL, TOOL)).toBeNull();
   });
@@ -156,7 +155,7 @@ describe('[#3798] a slow fresh capture is dated by its start', () => {
   it('control: the same write-back showing another confirmation opens it', async () => {
     await slowFreshAcrossTheClose(FRAME_B);
 
-    const plan = await probe(PROMPT_B);
+    const { plan } = await probe(PROMPT_B);
     expect(transport.captureSnapshot).toHaveBeenCalledTimes(1);
     expect(plan.action).toBe('opened');
     expect(getWaitingEpisodeRecord(WT, TOOL, TOOL)?.promptScreenKey).toBe(promptScreenKey(PROMPT_B));
@@ -170,9 +169,9 @@ describe('[#3798] the close\'s own millisecond: where the frame came from decide
     await captureSessionOutput(WT, TOOL, 100, TOOL);
     waitForAClosedAt(T0);
 
-    const plan = await probe(PROMPT_A);
+    const { plan, frameTime } = await probe(PROMPT_A);
     expect(transport.captureSnapshot).toHaveBeenCalledTimes(1);
-    expect(getCaptureFrameMeta(WT, TOOL, TOOL, FRAME_A)).toEqual({ fetchStartedAt: T0, source: 'cache' });
+    expect(frameTime).toEqual({ frameCapturedAt: T0, frameFetchedAfterStart: false });
     expect(plan).toMatchObject({ action: 'ignored', ignoredBecause: 'stale-frame' });
   });
 
@@ -184,9 +183,9 @@ describe('[#3798] the close\'s own millisecond: where the frame came from decide
     const joined = probe(PROMPT_A);
     finish(FRAME_A);
     await first;
-    const plan = await joined;
+    const { plan, frameTime } = await joined;
     expect(transport.captureSnapshot).toHaveBeenCalledTimes(1);
-    expect(getCaptureFrameMeta(WT, TOOL, TOOL, FRAME_A)).toEqual({ fetchStartedAt: T0, source: 'joined' });
+    expect(frameTime).toEqual({ frameCapturedAt: T0, frameFetchedAfterStart: false });
     expect(plan).toMatchObject({ action: 'ignored', ignoredBecause: 'stale-frame' });
   });
 
@@ -198,9 +197,67 @@ describe('[#3798] the close\'s own millisecond: where the frame came from decide
     invalidateCache(SESSION);
     transport.captureSnapshot.mockResolvedValueOnce(FRAME_A);
 
-    const plan = await probe(PROMPT_A);
+    const { plan, frameTime } = await probe(PROMPT_A);
     expect(transport.captureSnapshot).toHaveBeenCalledTimes(2);
-    expect(getCaptureFrameMeta(WT, TOOL, TOOL, FRAME_A)).toEqual({ fetchStartedAt: T0, source: 'fetched' });
+    expect(frameTime).toEqual({ frameCapturedAt: T0, frameFetchedAfterStart: true });
     expect(plan.action).toBe('opened');
+  });
+});
+
+describe('[#3798] two captures of one session at once, of different lengths, each dated by its own frame', () => {
+  /** A long scrollback: the display's 10000-line window and the status probe's 1000 lines differ. */
+  const scrollback = (last: string): string =>
+    [...Array.from({ length: 3_000 }, (_, i) => `line ${i}`), last].join('\n');
+
+  /**
+   * The display's capture starts at T0 and is slow; the close at T0+100; at
+   * T0+200 a long and a short probe both join it, and it comes back after both
+   * asked — so both frames are handed over only once both captures are waiting.
+   */
+  async function longAndShortAfterTheClose(last: string, promptData: PromptData) {
+    const finish = slowCapture();
+    const display = captureSessionOutput(WT, TOOL, 10_000, TOOL);
+    vi.setSystemTime(T0 + 100);
+    waitForAClosedAt(T0 + 100);
+    vi.setSystemTime(T0 + 200);
+    const probes = Promise.all([probe(promptData, 10_000), probe(promptData, 1_000)]);
+    finish(scrollback(last));
+    await display;
+    return probes;
+  }
+
+  it('the closed confirmation A is stale on both', async () => {
+    const [long, short] = await longAndShortAfterTheClose(FRAME_A, PROMPT_A);
+    expect(transport.captureSnapshot).toHaveBeenCalledTimes(1);
+    expect(long.frameTime).toEqual({ frameCapturedAt: T0, frameFetchedAfterStart: false });
+    expect(short.frameTime).toEqual({ frameCapturedAt: T0, frameFetchedAfterStart: false });
+    for (const { plan } of [long, short]) {
+      expect(plan).toMatchObject({ action: 'ignored', ignoredBecause: 'stale-frame' });
+    }
+    expect(getWaitingEpisodeRecord(WT, TOOL, TOOL)).toBeNull();
+  });
+
+  it('control: another confirmation B opens', async () => {
+    const [long, short] = await longAndShortAfterTheClose(FRAME_B, PROMPT_B);
+    expect(long.plan.action).toBe('opened');
+    expect(short.plan.action).toBe('kept');
+    expect(getWaitingEpisodeRecord(WT, TOOL, TOOL)?.promptScreenKey).toBe(promptScreenKey(PROMPT_B));
+  });
+});
+
+describe('[#3798] a capture nothing reports for', () => {
+  it('is dated before any close: the closed confirmation is not reopened, another one is', async () => {
+    waitForAClosedAt(T0);
+    vi.setSystemTime(T0 + 500);
+    const unreported = async (): Promise<string> => FRAME_A;
+    const a = await captureObservedFrame(unreported);
+    expect(a.frameTime).toEqual({ frameCapturedAt: 0, frameFetchedAfterStart: false });
+    const start = startWaitingObservation(WT, TOOL, TOOL);
+    expect(
+      observeWaiting({ ...PARTS, observer: 'status-probe', start, reading: prompt(PROMPT_A), ...a.frameTime }),
+    ).toMatchObject({ action: 'ignored', ignoredBecause: 'stale-frame' });
+    expect(
+      observeWaiting({ ...PARTS, observer: 'status-probe', start, reading: prompt(PROMPT_B), ...a.frameTime }).action,
+    ).toBe('opened');
   });
 });

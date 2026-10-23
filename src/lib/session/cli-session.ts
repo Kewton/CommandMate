@@ -26,7 +26,7 @@ import {
   CACHE_MAX_CAPTURE_LINES,
   type CaptureFrameMeta,
 } from '@/lib/tmux/tmux-capture-cache';
-import { getOrInitGlobal } from '@/lib/global-state';
+import type { AsyncLocalStorage } from 'async_hooks';
 // Issue #2317: this module is one of the two gateways Issue #1922's import guard
 // names, which is why the tmux SURFACE is reached from here and not from
 // `worktree-status-helper.ts`. Static, not `await import()`: the guard's
@@ -49,32 +49,20 @@ export type { CaptureFrameMeta };
 const logger = createLogger('cli-session');
 
 declare global {
+  /**
+   * Issue #3798: where an observer of the waiting episodes asks to be told the
+   * source of the ONE frame the capture it runs inside returns. Set up by
+   * `waiting-episode-binding`'s `captureObservedFrame` (an async context per
+   * call, so two captures of one session running at once never see each
+   * other's); only read here.
+   */
   // eslint-disable-next-line no-var
-  var __cliSessionServedFrames: Map<string, ServedFrame> | undefined;
+  var __captureFrameMetaSink: AsyncLocalStorage<(meta: CaptureFrameMeta) => void> | undefined;
 }
 
-/** How many sessions' last frames are kept (the capture cache's own bound). */
-const SERVED_FRAMES_MAX = 100;
-
-/** The last frame a capture of a session returned, with where it came from (Issue #3798). */
-interface ServedFrame {
-  output: string;
-  meta: CaptureFrameMeta;
-}
-
-function getServedFrames(): Map<string, ServedFrame> {
-  return getOrInitGlobal('__cliSessionServedFrames', () => new Map<string, ServedFrame>());
-}
-
-/** Remember the frame just returned for `sessionName` (bounded like the capture cache). */
-function noteServedFrame(sessionName: string, output: string, meta: CaptureFrameMeta): void {
-  const frames = getServedFrames();
-  frames.delete(sessionName);
-  frames.set(sessionName, { output, meta });
-  if (frames.size > SERVED_FRAMES_MAX) {
-    const oldest = frames.keys().next().value;
-    if (oldest !== undefined) frames.delete(oldest);
-  }
+/** Tell the observer this capture runs for, if any, where its frame came from (Issue #3798). */
+function reportFrameMeta(meta: CaptureFrameMeta): void {
+  globalThis.__captureFrameMetaSink?.getStore()?.(meta);
 }
 
 function getDefaultTransport(): SessionTransport {
@@ -149,7 +137,6 @@ export async function captureSessionOutput(
   const transport = getDefaultTransport();
 
   try {
-    const served: { meta: CaptureFrameMeta | null } = { meta: null };
     const output = await getOrFetchCapture(
       sessionName,
       lines,
@@ -161,13 +148,9 @@ export async function captureSessionOutput(
         }
         return await transport.captureSnapshot(sessionName, { startLine: -CACHE_MAX_CAPTURE_LINES });
       },
-      (meta) => {
-        served.meta = meta;
-      },
+      // Issue #3798: this call's own frame, to the observer it runs for
+      reportFrameMeta,
     );
-    // Issue #3798: what getCaptureFrameMeta() answers for this frame
-    if (served.meta !== null) noteServedFrame(sessionName, output, served.meta);
-    else getServedFrames().delete(sessionName);
 
     log.debug('captureSessionOutput:success', {
       actualLines: output.split('\n').length,
@@ -185,31 +168,6 @@ export async function captureSessionOutput(
     log.error('captureSessionOutput:failed', { error: errorMessage });
     throw new Error(`Failed to capture ${cliTool.name} output: ${errorMessage}`);
   }
-}
-
-/**
- * Where the frame a capture of this session just returned came from, and when
- * the tmux capture that produced it started (Issue #3798) — for `output` only:
- * null when the last frame this module returned for the session is another
- * text (a capture of someone else came in between), or when nothing says.
- * Read right after {@link captureSessionOutput} / {@link captureSessionOutputFresh}
- * with the text it returned.
- *
- * @param worktreeId - Worktree ID
- * @param cliToolId - CLI tool ID
- * @param instanceId - Optional agent instance ID (defaults to primary)
- * @param output - The frame the capture returned
- * @returns The frame's fetch start and source, or null
- */
-export function getCaptureFrameMeta(
-  worktreeId: string,
-  cliToolId: CLIToolType,
-  instanceId: string | undefined,
-  output: string
-): CaptureFrameMeta | null {
-  const { sessionName } = resolveSessionContext(worktreeId, cliToolId, instanceId);
-  const served = getServedFrames().get(sessionName);
-  return served !== undefined && served.output === output ? served.meta : null;
 }
 
 /**
@@ -255,9 +213,8 @@ export async function captureSessionOutputFresh(
       invalidateCache(sessionName);
     }
 
-    const sliced = sliceOutput(output, lines);
-    noteServedFrame(sessionName, sliced, { fetchStartedAt, source: 'fetched' });
-    return sliced;
+    reportFrameMeta({ fetchStartedAt, source: 'fetched' });
+    return sliceOutput(output, lines);
   } catch (error: unknown) {
     // [DA3-005] Invalidate cache on error (TOCTOU safety)
     invalidateCache(sessionName);

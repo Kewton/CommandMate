@@ -37,6 +37,7 @@
  * @module lib/session/waiting-episode-binding
  */
 
+import { AsyncLocalStorage } from 'async_hooks';
 import { buildCompositeKey, COMPOSITE_KEY_SEPARATOR } from '@/lib/auto-yes-state';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { promptScreenKey } from '@/lib/detection/prompt-screen-key';
@@ -85,6 +86,11 @@ declare global {
  * applied. While it names the current generation, the agent's own hook speaks
  * for the end of its turns and `claude-done` does not close (規則 6).
  */
+/** Where `cli-session` reports a frame's source to the observer it runs for (Issue #3798). */
+function frameMetaSink(): AsyncLocalStorage<(meta: CaptureFrameMeta) => void> {
+  return getOrInitGlobal('__captureFrameMetaSink', () => new AsyncLocalStorage<(meta: CaptureFrameMeta) => void>());
+}
+
 const hookStopGeneration = getOrInitGlobal('__waitingHookStopGeneration', () => new Map<string, GenerationRef>());
 
 /** What one outcome did to the open episode. */
@@ -500,28 +506,40 @@ export interface CapturedFrameTime {
 
 /**
  * When the frame a scraper just read was fetched (design §2.2
- * `frameCapturedAt`), from `readMeta` — `cli-session`'s `getCaptureFrameMeta`
- * for the text the capture returned, read right after it. A frame served from
- * the cache, or joined to a fetch already in flight, is as old as that fetch,
- * and is never one this observer fetched itself — even when that fetch started
- * in the very millisecond the observer asked. Only a frame the capture fetched
- * itself, starting at or after `requestedAt` (the moment the observer asked,
- * after its start), counts as fetched after the start. A frame whose source is
- * unknown — another capture's text came in between, or a reader that throws (a
- * test that replaced the capture module) — is dated `requestedAt` and not
- * counted as fetched after the start, so I6 still applies to it.
+ * `frameCapturedAt`), from `meta` — what the capture reported for that one
+ * frame ({@link captureObservedFrame}). A frame served from the cache, or
+ * joined to a fetch already in flight, is as old as that fetch, and is never
+ * one this observer fetched itself — even when that fetch started in the very
+ * millisecond the observer asked. Only a frame the capture fetched itself,
+ * starting at or after `requestedAt` (the moment the observer asked, after its
+ * start), counts as fetched after the start. A frame nothing was reported for
+ * (a capture module a test replaced) is dated 0, before any close (design
+ * §2.6): it opens no wait I6 would hold back, and closes no `screen`.
  */
-export function captureFrameTime(readMeta: () => CaptureFrameMeta | null, requestedAt: number): CapturedFrameTime {
-  try {
-    const meta = readMeta();
-    if (meta === null) return { frameCapturedAt: requestedAt, frameFetchedAfterStart: false };
-    return {
-      frameCapturedAt: Math.min(meta.fetchStartedAt, requestedAt),
-      frameFetchedAfterStart: meta.source === 'fetched' && meta.fetchStartedAt >= requestedAt,
-    };
-  } catch {
-    return { frameCapturedAt: requestedAt, frameFetchedAfterStart: false };
-  }
+export function captureFrameTime(meta: CaptureFrameMeta | null, requestedAt: number): CapturedFrameTime {
+  if (meta === null) return { frameCapturedAt: 0, frameFetchedAfterStart: false };
+  return {
+    frameCapturedAt: Math.min(meta.fetchStartedAt, requestedAt),
+    frameFetchedAfterStart: meta.source === 'fetched' && meta.fetchStartedAt >= requestedAt,
+  };
+}
+
+/**
+ * Run one capture for an observer and date the frame it returns (Issue #3798):
+ * `cli-session` reports where THIS call's frame came from through an async
+ * context set up here, so another capture of the same session running at the
+ * same time — a different number of lines, a different text — cannot stand in
+ * for it.
+ */
+export async function captureObservedFrame<T>(
+  capture: () => Promise<T>
+): Promise<{ frame: T; frameTime: CapturedFrameTime }> {
+  const reported: { meta: CaptureFrameMeta | null } = { meta: null };
+  const requestedAt = Date.now();
+  const frame = await frameMetaSink().run((meta) => {
+    reported.meta = meta;
+  }, capture);
+  return { frame, frameTime: captureFrameTime(reported.meta, requestedAt) };
 }
 
 function screenBinding(generation: GenerationRef, originTurnId: string | null): EpisodeBinding {

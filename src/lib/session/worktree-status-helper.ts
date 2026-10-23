@@ -15,7 +15,7 @@
 
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
-import { captureSessionOutput, getCaptureFrameMeta } from './cli-session';
+import { captureSessionOutput } from './cli-session';
 import {
   detectSessionStatus,
   isGeneratingStatus,
@@ -55,7 +55,7 @@ import {
 } from '@/lib/session/status-evidence';
 import { getWaitingEpisode } from '@/lib/session/waiting-episode-state';
 import {
-  captureFrameTime,
+  captureObservedFrame,
   observeWaiting,
   startWaitingObservation,
   type CapturedFrameTime,
@@ -897,12 +897,11 @@ async function detectInstanceSessionStatus(
       // Issue #2060: counted BEFORE the await, so a capture that throws is still
       // counted as a tmux round-trip that was paid for.
       if (metrics) metrics.captureCount++;
-      const requestedAt = Date.now();
-      const output = await captureSessionOutput(worktreeId, cliToolId, captureLines, instanceId);
-      frameTime = captureFrameTime(
-        () => getCaptureFrameMeta(worktreeId, cliToolId, instanceId, output),
-        requestedAt,
+      const captured = await captureObservedFrame(() =>
+        captureSessionOutput(worktreeId, cliToolId, captureLines, instanceId),
       );
+      const output = captured.frame;
+      frameTime = captured.frameTime;
       const ctx: InstanceProbeContext = { db, worktreeId, cliToolId, instanceId };
       const { compositeKey, statusResult } = readFrameVerdict(frame, ctx, output);
       foldAgentEventsIntoFrame(frame, ctx, output, statusResult, compositeKey);

@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'async_hooks';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/cli-tools/manager', () => ({
@@ -38,7 +39,6 @@ vi.mock('@/lib/tmux/polling-tmux-transport', () => ({
 import {
   captureSessionOutput,
   captureSessionOutputFresh,
-  getCaptureFrameMeta,
   getSessionName,
   isSessionRunning,
 } from '@/lib/session/cli-session';
@@ -106,18 +106,19 @@ describe('cli-session transport integration', () => {
       let finish: (output: string) => void = () => {};
       mockTransport.captureSnapshot.mockReturnValueOnce(new Promise<string>((resolve) => (finish = resolve)));
 
-      const pending = captureSessionOutputFresh('wt-1', 'claude', 500);
+      // What the observer's capture context (waiting-episode-binding) is told.
+      const reported: unknown[] = [];
+      globalThis.__captureFrameMetaSink ??= new AsyncLocalStorage();
+      const pending = globalThis.__captureFrameMetaSink.run(
+        (meta) => reported.push(meta),
+        () => captureSessionOutputFresh('wt-1', 'claude', 500),
+      );
       vi.setSystemTime(startedAt + 2_000);
       finish('slow output');
       await expect(pending).resolves.toBe('slow output');
 
       expect(setCachedCapture).toHaveBeenCalledWith('mcbd-claude-wt-1', 'slow output', 500, startedAt);
-      expect(getCaptureFrameMeta('wt-1', 'claude', undefined, 'slow output')).toEqual({
-        fetchStartedAt: startedAt,
-        source: 'fetched',
-      });
-      // Another text is not this frame.
-      expect(getCaptureFrameMeta('wt-1', 'claude', undefined, 'other output')).toBeNull();
+      expect(reported).toEqual([{ fetchStartedAt: startedAt, source: 'fetched' }]);
     } finally {
       vi.useRealTimers();
     }

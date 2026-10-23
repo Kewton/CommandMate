@@ -26,14 +26,17 @@ vi.mock('@/lib/db/db-instance', () => ({ getDbInstance: () => db }));
 
 const capture = vi.hoisted(() => ({ frame: '', fetchStartedAt: null as number | null }));
 vi.mock('@/lib/session/cli-session', () => ({
-  captureSessionOutput: vi.fn(async () => capture.frame),
+  // Issue #3798: and tells the observer where the frame came from, as cli-session does.
+  captureSessionOutput: vi.fn(async () => {
+    globalThis.__captureFrameMetaSink?.getStore()?.(
+      capture.fetchStartedAt === null
+        ? { fetchStartedAt: Date.now(), source: 'fetched' }
+        : { fetchStartedAt: capture.fetchStartedAt, source: 'cache' },
+    );
+    return capture.frame;
+  }),
   captureSessionOutputFresh: vi.fn(async () => capture.frame),
   getSessionPresence: vi.fn(async () => 'present'),
-  getCaptureFrameMeta: vi.fn(() =>
-    capture.fetchStartedAt === null
-      ? { fetchStartedAt: Date.now(), source: 'fetched' }
-      : { fetchStartedAt: capture.fetchStartedAt, source: 'cache' },
-  ),
 }));
 vi.mock('@/lib/cli-tools/worktree-session-ownership', () => ({
   checkWorktreeSessionOwnership: vi.fn(async () => ({ verdict: 'owned', sessionPath: null })),

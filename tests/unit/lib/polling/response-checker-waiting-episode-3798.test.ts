@@ -31,14 +31,18 @@ vi.mock('web-push', () => ({
 
 const captureSessionOutput = vi.fn<(...a: unknown[]) => Promise<string>>();
 const isSessionRunning = vi.fn<(...a: unknown[]) => Promise<boolean>>();
-type FrameMeta = { fetchStartedAt: number; source: 'fetched' | 'cache' | 'joined' } | null;
+type FrameMeta = { fetchStartedAt: number; source: 'fetched' | 'cache' | 'joined' };
 /** The capture fetched the frame itself, now. */
 const ownFetch = (): FrameMeta => ({ fetchStartedAt: Date.now(), source: 'fetched' });
-const getCaptureFrameMeta = vi.fn<(...a: unknown[]) => FrameMeta>(ownFetch);
+const frameMeta = vi.fn<(...a: unknown[]) => FrameMeta>(ownFetch);
 vi.mock('@/lib/session/cli-session', () => ({
-  captureSessionOutput: (...a: unknown[]) => captureSessionOutput(...a),
+  // Issue #3798: and tells the observer where its frame came from, as cli-session does.
+  captureSessionOutput: async (...a: unknown[]) => {
+    const output = await captureSessionOutput(...a);
+    globalThis.__captureFrameMetaSink?.getStore()?.(frameMeta()!);
+    return output;
+  },
   isSessionRunning: (...a: unknown[]) => isSessionRunning(...a),
-  getCaptureFrameMeta: (...a: unknown[]) => getCaptureFrameMeta(...a),
 }));
 
 const createMessage = vi.fn((_db: unknown, m: Record<string, unknown>) => ({ id: 'msg-1', ...m }));
@@ -147,7 +151,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   sendNotification.mockResolvedValue({ statusCode: 201 });
   isSessionRunning.mockResolvedValue(true);
-  getCaptureFrameMeta.mockImplementation(ownFetch);
+  frameMeta.mockImplementation(ownFetch);
   getSessionState.mockReturnValue({ lastCapturedLine: 0, inProgressMessageId: null });
 
   stopPolling(WT, 'claude');
@@ -190,7 +194,7 @@ async function promptSavedOnce(): Promise<string> {
 function stopDuringCapture(pane: string): void {
   captureSessionOutput.mockImplementationOnce(async () => {
     const fetchedAt = Date.now() - 1;
-    getCaptureFrameMeta.mockReturnValueOnce({ fetchStartedAt: fetchedAt, source: 'cache' });
+    frameMeta.mockReturnValueOnce({ fetchStartedAt: fetchedAt, source: 'cache' });
     event('stop', Date.now());
     return pane;
   });

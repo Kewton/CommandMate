@@ -12,7 +12,7 @@
  */
 
 import type { CLIToolType } from './cli-tools/types';
-import { captureSessionOutputFresh, getCaptureFrameMeta, getSessionPresence } from './session/cli-session';
+import { captureSessionOutputFresh, getSessionPresence } from './session/cli-session';
 import { detectPromptOnCleanFrame } from './polling/response-checker';
 import {
   beginAntigravityFrameRead,
@@ -57,7 +57,7 @@ import { detectSessionStatus } from './detection/status-detector';
 import { isApiAnswerableStructuredWait, peekPromptWaiting } from './session/prompt-waiting-composition';
 import { getAgentEventSource } from './hooks/sources/registry';
 import {
-  captureFrameTime,
+  captureObservedFrame,
   observeWaiting,
   startWaitingObservation,
   type CapturedFrameTime,
@@ -1216,23 +1216,17 @@ async function pollAutoYes(
     // step below exactly as it did; the raw one is carried to the prompt reading
     // so a dialog anchored on box drawing is not invisible to the one path that
     // can answer it without a human.
-    const captureRequestedAt = Date.now();
-    const { raw: rawOutput, clean: cleanOutput } = await capturePollerFrame(
-      worktreeId,
-      cliToolId,
-      captureLines,
-      instanceId,
-    );
+    //
+    // Issue #3798: dated by where that frame came from — the capture goes
+    // through the 5 s cache, so it may predate this tick.
+    const {
+      frame: { raw: rawOutput, clean: cleanOutput },
+      frameTime,
+    } = await captureObservedFrame(() => capturePollerFrame(worktreeId, cliToolId, captureLines, instanceId));
     if (!isTickCurrent(generation)) {
       endStaleTick(generation);
       return;
     }
-    // Issue #3798: the capture goes through the 5 s cache, so the frame may
-    // predate this tick.
-    const frameTime = captureFrameTime(
-      () => getCaptureFrameMeta(worktreeId, cliToolId, instanceId, rawOutput),
-      captureRequestedAt,
-    );
 
     if (pollerState!.waitingForSession) {
       pollerState!.waitingForSession = false;

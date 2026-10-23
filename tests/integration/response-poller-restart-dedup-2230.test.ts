@@ -45,10 +45,14 @@ const stubs = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/session/cli-session', () => ({
-  captureSessionOutput: (...a: unknown[]) => stubs.captureSessionOutput(...a),
+  // Issue #3798: each stubbed capture is the poller's own fetch of the pane,
+  // reported to the observer as cli-session reports it.
+  captureSessionOutput: async (...a: unknown[]) => {
+    const output = await stubs.captureSessionOutput(...a);
+    globalThis.__captureFrameMetaSink?.getStore()?.({ fetchStartedAt: Date.now(), source: 'fetched' });
+    return output;
+  },
   isSessionRunning: (...a: unknown[]) => stubs.isSessionRunning(...a),
-  // Issue #3798: each stubbed capture is the poller's own fetch of the pane.
-  getCaptureFrameMeta: () => ({ fetchStartedAt: Date.now(), source: 'fetched' }),
 }));
 vi.mock('@/lib/db/db-instance', () => ({
   getDbInstance: () => stubs.db.current,

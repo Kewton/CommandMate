@@ -1,6 +1,6 @@
 /** Response checking and extraction logic for CLI tool polling (Issue #575 split from response-poller.ts). */
 
-import { captureSessionOutput, getCaptureFrameMeta, isSessionRunning } from '@/lib/session/cli-session';
+import { captureSessionOutput, isSessionRunning } from '@/lib/session/cli-session';
 import { getDbInstance } from '@/lib/db/db-instance';
 import {
   createMessage,
@@ -105,7 +105,7 @@ import { notifyUpstreamFaultPush } from '@/lib/push/failure-push-notifier';
 import { matchUpstreamFault } from '@/lib/detection/upstream-faults';
 import { startWaitingPushNotifier } from '@/lib/push/waiting-push-notifier';
 import {
-  captureFrameTime,
+  captureObservedFrame,
   commitWaitingObservation,
   observeWaiting,
   planWaitingObservation,
@@ -1649,13 +1649,10 @@ export async function checkForResponse(
     // Capture current output. The requested width IS the capture window, so it is
     // taken from the same constant extractResponse() measures saturation against
     // (Issue #1670) — a literal here would silently decouple the two.
-    const captureRequestedAt = Date.now();
-    const output = await captureSessionOutput(worktreeId, cliToolId, CACHE_MAX_CAPTURE_LINES, instanceId);
-    // Issue #3798: when that frame was fetched — from the cache, it may be older
-    // than this tick.
-    const frameTime = captureFrameTime(
-      () => getCaptureFrameMeta(worktreeId, cliToolId, instanceId, output),
-      captureRequestedAt,
+    // Issue #3798: dated by where that frame came from — from the cache, it may
+    // be older than this tick.
+    const { frame: output, frameTime } = await captureObservedFrame(() =>
+      captureSessionOutput(worktreeId, cliToolId, CACHE_MAX_CAPTURE_LINES, instanceId),
     );
     // Issue #3705: there is no `await` from here to the transcript reader
     // inside the save path, so this one answer covers every write in between —

@@ -23,10 +23,13 @@ vi.mock('@/lib/db/db-instance', () => ({ getDbInstance: () => db }));
 
 const capture = vi.hoisted(() => ({ frame: '' }));
 vi.mock('@/lib/session/cli-session', () => ({
-  captureSessionOutput: vi.fn(async () => capture.frame),
+  // Issue #3798: each capture is the observer's own fetch, reported as cli-session reports it.
+  captureSessionOutput: vi.fn(async () => {
+    globalThis.__captureFrameMetaSink?.getStore()?.({ fetchStartedAt: Date.now(), source: 'fetched' });
+    return capture.frame;
+  }),
   captureSessionOutputFresh: vi.fn(async () => capture.frame),
   getSessionPresence: vi.fn(async () => 'present'),
-  getCaptureFrameMeta: vi.fn(() => ({ fetchStartedAt: Date.now(), source: 'fetched' })),
 }));
 vi.mock('@/lib/cli-tools/worktree-session-ownership', () => ({
   checkWorktreeSessionOwnership: vi.fn(async () => ({ verdict: 'owned', sessionPath: null })),
