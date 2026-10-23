@@ -102,7 +102,9 @@ export function promptWaitingReading(promptData: PromptData | null): ScreenReadi
 
 /**
  * Read one captured frame (design §2.2). The detector is asked without the
- * receipt scope (I9); the structured wait is the caller's to look up.
+ * receipt scope (I9); the structured wait, and whether the app answers it over
+ * the agent's API, are the caller's to look up — the status probe's reading of
+ * the same frame gives the same kind only when both are passed.
  *
  * `verdict` is the detector's answer on this same frame when the caller has
  * already asked for it (to look the structured wait up with), so the frame is
@@ -114,6 +116,12 @@ export function readWaitingScreen(input: {
   lastOutputTimestamp?: Date;
   structuredWaiting: boolean;
   structuredSince: number | null;
+  /**
+   * The structured wait is one the app answers over the agent's API
+   * (`isApiAnswerableStructuredWait`, Issue #3184): a `prompt`, as the status
+   * probe publishes it. The caller's to decide, like the structured wait.
+   */
+  apiAnswerable?: boolean;
   verdict?: StatusDetectionResult;
 }): ScreenReading {
   const verdict = input.verdict ?? detectSessionStatus(input.output, input.cliToolId, input.lastOutputTimestamp);
@@ -127,6 +135,7 @@ export function readWaitingScreen(input: {
       hasActivePrompt: verdict.hasActivePrompt,
       scraperStatus: verdict.status,
       scraperReason: verdict.reason,
+      apiAnswerable: input.apiAnswerable === true,
     }),
     structuredWaiting: input.structuredWaiting,
     structuredSince: input.structuredSince,

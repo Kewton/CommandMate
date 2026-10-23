@@ -41,6 +41,7 @@ import { buildCompositeKey, COMPOSITE_KEY_SEPARATOR } from '@/lib/auto-yes-state
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { promptScreenKey } from '@/lib/detection/prompt-screen-key';
 import type { ScreenReading } from '@/lib/detection/waiting-screen-reading';
+import type { CaptureFrameMeta } from '@/lib/session/cli-session';
 import { createLogger } from '@/lib/logger';
 import {
   currentGeneration,
@@ -396,14 +397,15 @@ export interface WaitingObservation {
   reading: ScreenReading;
   /**
    * When the frame read was fetched (the cached capture's own start for a
-   * frame served from the cache; {@link captureFrameStartedAt}). 0 for a
+   * frame served from the cache; {@link captureFrameTime}). 0 for a
    * reading with no frame (a session that is gone, a reply recorded), which
    * reads as "before any close" (design §2.6).
    */
   frameCapturedAt: number;
   /**
    * The frame was fetched by this observer's own capture, after its
-   * {@link ObservationStart} — not served from the cache. A close the start
+   * {@link ObservationStart} — its source is `fetched`, not the cache or a
+   * fetch joined in flight (an unknown source does not count). A close the start
    * already saw (the version has not moved since) then cannot be newer than
    * the frame, whatever the millisecond clocks say, and I6 does not apply.
    */
@@ -498,25 +500,27 @@ export interface CapturedFrameTime {
 
 /**
  * When the frame a scraper just read was fetched (design §2.2
- * `frameCapturedAt`), from `readFetchStartedAt` — `cli-session`'s
- * `getCaptureFetchStartedAt`, read right after the capture. A frame served
- * from the cache, or joined to a fetch already in flight, is as old as that
- * fetch; one the capture fetched itself started after `requestedAt` (the
- * moment the observer asked, after its start), so the earlier of the two is
- * never later than the frame. Nothing cached — the capture fetched an empty
- * pane — is a frame fetched after `requestedAt` for the same reason, and so is
- * a reader that throws (a test that replaced the capture module).
+ * `frameCapturedAt`), from `readMeta` — `cli-session`'s `getCaptureFrameMeta`
+ * for the text the capture returned, read right after it. A frame served from
+ * the cache, or joined to a fetch already in flight, is as old as that fetch,
+ * and is never one this observer fetched itself — even when that fetch started
+ * in the very millisecond the observer asked. Only a frame the capture fetched
+ * itself, starting at or after `requestedAt` (the moment the observer asked,
+ * after its start), counts as fetched after the start. A frame whose source is
+ * unknown — another capture's text came in between, or a reader that throws (a
+ * test that replaced the capture module) — is dated `requestedAt` and not
+ * counted as fetched after the start, so I6 still applies to it.
  */
-export function captureFrameTime(readFetchStartedAt: () => number | null, requestedAt: number): CapturedFrameTime {
+export function captureFrameTime(readMeta: () => CaptureFrameMeta | null, requestedAt: number): CapturedFrameTime {
   try {
-    const fetchStartedAt = readFetchStartedAt();
-    if (fetchStartedAt === null) return { frameCapturedAt: requestedAt, frameFetchedAfterStart: true };
+    const meta = readMeta();
+    if (meta === null) return { frameCapturedAt: requestedAt, frameFetchedAfterStart: false };
     return {
-      frameCapturedAt: Math.min(fetchStartedAt, requestedAt),
-      frameFetchedAfterStart: fetchStartedAt >= requestedAt,
+      frameCapturedAt: Math.min(meta.fetchStartedAt, requestedAt),
+      frameFetchedAfterStart: meta.source === 'fetched' && meta.fetchStartedAt >= requestedAt,
     };
   } catch {
-    return { frameCapturedAt: requestedAt, frameFetchedAfterStart: true };
+    return { frameCapturedAt: requestedAt, frameFetchedAfterStart: false };
   }
 }
 

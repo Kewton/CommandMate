@@ -38,6 +38,7 @@ vi.mock('@/lib/tmux/polling-tmux-transport', () => ({
 import {
   captureSessionOutput,
   captureSessionOutputFresh,
+  getCaptureFrameMeta,
   getSessionName,
   isSessionRunning,
 } from '@/lib/session/cli-session';
@@ -94,7 +95,32 @@ describe('cli-session transport integration', () => {
 
     await expect(captureSessionOutputFresh('wt-1', 'claude', 500)).resolves.toBe('fresh output');
     expect(mockTransport.captureSnapshot).toHaveBeenCalledWith('mcbd-claude-wt-1', { startLine: -500 });
-    expect(setCachedCapture).toHaveBeenCalledWith('mcbd-claude-wt-1', 'fresh output', 500);
+    expect(setCachedCapture).toHaveBeenCalledWith('mcbd-claude-wt-1', 'fresh output', 500, expect.any(Number));
+  });
+
+  it('[#3798] a fresh capture writes back the time it started, not the time it came back', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const startedAt = 1_800_000_000_000;
+      vi.setSystemTime(startedAt);
+      let finish: (output: string) => void = () => {};
+      mockTransport.captureSnapshot.mockReturnValueOnce(new Promise<string>((resolve) => (finish = resolve)));
+
+      const pending = captureSessionOutputFresh('wt-1', 'claude', 500);
+      vi.setSystemTime(startedAt + 2_000);
+      finish('slow output');
+      await expect(pending).resolves.toBe('slow output');
+
+      expect(setCachedCapture).toHaveBeenCalledWith('mcbd-claude-wt-1', 'slow output', 500, startedAt);
+      expect(getCaptureFrameMeta('wt-1', 'claude', undefined, 'slow output')).toEqual({
+        fetchStartedAt: startedAt,
+        source: 'fetched',
+      });
+      // Another text is not this frame.
+      expect(getCaptureFrameMeta('wt-1', 'claude', undefined, 'other output')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('should invalidate cache when fresh capture fails', async () => {

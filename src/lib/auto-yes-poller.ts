@@ -12,7 +12,7 @@
  */
 
 import type { CLIToolType } from './cli-tools/types';
-import { captureSessionOutputFresh, getCaptureFetchStartedAt, getSessionPresence } from './session/cli-session';
+import { captureSessionOutputFresh, getCaptureFrameMeta, getSessionPresence } from './session/cli-session';
 import { detectPromptOnCleanFrame } from './polling/response-checker';
 import {
   beginAntigravityFrameRead,
@@ -54,7 +54,8 @@ import { getErrorMessage } from './errors';
 import { invalidateCache } from './tmux/tmux-capture-cache';
 import { readWaitingScreen, type ScreenReading } from './detection/waiting-screen-reading';
 import { detectSessionStatus } from './detection/status-detector';
-import { peekPromptWaiting } from './session/prompt-waiting-composition';
+import { isApiAnswerableStructuredWait, peekPromptWaiting } from './session/prompt-waiting-composition';
+import { getAgentEventSource } from './hooks/sources/registry';
 import {
   captureFrameTime,
   observeWaiting,
@@ -1229,7 +1230,7 @@ async function pollAutoYes(
     // Issue #3798: the capture goes through the 5 s cache, so the frame may
     // predate this tick.
     const frameTime = captureFrameTime(
-      () => getCaptureFetchStartedAt(worktreeId, cliToolId, instanceId),
+      () => getCaptureFrameMeta(worktreeId, cliToolId, instanceId, rawOutput),
       captureRequestedAt,
     );
 
@@ -1347,7 +1348,9 @@ function observeWaitingFromTick(tick: {
       const lastResponseAt = tick.pollerState.lastServerResponseTimestamp;
       const lastOutputTimestamp = lastResponseAt ? new Date(lastResponseAt) : undefined;
       // Without the receipt scope (design I9), and with the structured wait
-      // read the way the status probe reads it.
+      // read the way the status probe reads it — the API-answerable one
+      // (#3184) a `prompt` here too, or the two observers would flip the
+      // episode's kind between `prompt` and `menu` on every tick.
       const verdict = detectSessionStatus(tick.rawOutput, cliToolId, lastOutputTimestamp);
       const { structured } = peekPromptWaiting({ worktreeId, cliToolId, instanceId, scraper: verdict });
       reading = readWaitingScreen({
@@ -1356,6 +1359,10 @@ function observeWaitingFromTick(tick: {
         lastOutputTimestamp,
         structuredWaiting: structured !== null,
         structuredSince: structured?.at ?? null,
+        apiAnswerable: isApiAnswerableStructuredWait(
+          structured,
+          getAgentEventSource(cliToolId).capabilities.eventIdentity,
+        ),
         verdict,
       });
     }

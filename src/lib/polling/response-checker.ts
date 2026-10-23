@@ -1,6 +1,6 @@
 /** Response checking and extraction logic for CLI tool polling (Issue #575 split from response-poller.ts). */
 
-import { captureSessionOutput, getCaptureFetchStartedAt, isSessionRunning } from '@/lib/session/cli-session';
+import { captureSessionOutput, getCaptureFrameMeta, isSessionRunning } from '@/lib/session/cli-session';
 import { getDbInstance } from '@/lib/db/db-instance';
 import {
   createMessage,
@@ -1654,7 +1654,7 @@ export async function checkForResponse(
     // Issue #3798: when that frame was fetched — from the cache, it may be older
     // than this tick.
     const frameTime = captureFrameTime(
-      () => getCaptureFetchStartedAt(worktreeId, cliToolId, instanceId),
+      () => getCaptureFrameMeta(worktreeId, cliToolId, instanceId, output),
       captureRequestedAt,
     );
     // Issue #3705: there is no `await` from here to the transcript reader

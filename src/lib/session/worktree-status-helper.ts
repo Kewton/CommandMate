@@ -15,7 +15,7 @@
 
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
-import { captureSessionOutput, getCaptureFetchStartedAt } from './cli-session';
+import { captureSessionOutput, getCaptureFrameMeta } from './cli-session';
 import {
   detectSessionStatus,
   isGeneratingStatus,
@@ -899,7 +899,10 @@ async function detectInstanceSessionStatus(
       if (metrics) metrics.captureCount++;
       const requestedAt = Date.now();
       const output = await captureSessionOutput(worktreeId, cliToolId, captureLines, instanceId);
-      frameTime = captureFrameTime(() => getCaptureFetchStartedAt(worktreeId, cliToolId, instanceId), requestedAt);
+      frameTime = captureFrameTime(
+        () => getCaptureFrameMeta(worktreeId, cliToolId, instanceId, output),
+        requestedAt,
+      );
       const ctx: InstanceProbeContext = { db, worktreeId, cliToolId, instanceId };
       const { compositeKey, statusResult } = readFrameVerdict(frame, ctx, output);
       foldAgentEventsIntoFrame(frame, ctx, output, statusResult, compositeKey);

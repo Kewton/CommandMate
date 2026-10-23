@@ -47,6 +47,8 @@ const stubs = vi.hoisted(() => ({
 vi.mock('@/lib/session/cli-session', () => ({
   captureSessionOutput: (...a: unknown[]) => stubs.captureSessionOutput(...a),
   isSessionRunning: (...a: unknown[]) => stubs.isSessionRunning(...a),
+  // Issue #3798: each stubbed capture is the poller's own fetch of the pane.
+  getCaptureFrameMeta: () => ({ fetchStartedAt: Date.now(), source: 'fetched' }),
 }));
 vi.mock('@/lib/db/db-instance', () => ({
   getDbInstance: () => stubs.db.current,

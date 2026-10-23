@@ -29,7 +29,11 @@ vi.mock('@/lib/session/cli-session', () => ({
   captureSessionOutput: vi.fn(async () => capture.frame),
   captureSessionOutputFresh: vi.fn(async () => capture.frame),
   getSessionPresence: vi.fn(async () => 'present'),
-  getCaptureFetchStartedAt: vi.fn(() => capture.fetchStartedAt),
+  getCaptureFrameMeta: vi.fn(() =>
+    capture.fetchStartedAt === null
+      ? { fetchStartedAt: Date.now(), source: 'fetched' }
+      : { fetchStartedAt: capture.fetchStartedAt, source: 'cache' },
+  ),
 }));
 vi.mock('@/lib/cli-tools/worktree-session-ownership', () => ({
   checkWorktreeSessionOwnership: vi.fn(async () => ({ verdict: 'owned', sessionPath: null })),

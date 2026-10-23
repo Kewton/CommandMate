@@ -31,11 +31,14 @@ vi.mock('web-push', () => ({
 
 const captureSessionOutput = vi.fn<(...a: unknown[]) => Promise<string>>();
 const isSessionRunning = vi.fn<(...a: unknown[]) => Promise<boolean>>();
-const getCaptureFetchStartedAt = vi.fn<(...a: unknown[]) => number | null>(() => null);
+type FrameMeta = { fetchStartedAt: number; source: 'fetched' | 'cache' | 'joined' } | null;
+/** The capture fetched the frame itself, now. */
+const ownFetch = (): FrameMeta => ({ fetchStartedAt: Date.now(), source: 'fetched' });
+const getCaptureFrameMeta = vi.fn<(...a: unknown[]) => FrameMeta>(ownFetch);
 vi.mock('@/lib/session/cli-session', () => ({
   captureSessionOutput: (...a: unknown[]) => captureSessionOutput(...a),
   isSessionRunning: (...a: unknown[]) => isSessionRunning(...a),
-  getCaptureFetchStartedAt: (...a: unknown[]) => getCaptureFetchStartedAt(...a),
+  getCaptureFrameMeta: (...a: unknown[]) => getCaptureFrameMeta(...a),
 }));
 
 const createMessage = vi.fn((_db: unknown, m: Record<string, unknown>) => ({ id: 'msg-1', ...m }));
@@ -144,7 +147,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   sendNotification.mockResolvedValue({ statusCode: 201 });
   isSessionRunning.mockResolvedValue(true);
-  getCaptureFetchStartedAt.mockReturnValue(null);
+  getCaptureFrameMeta.mockImplementation(ownFetch);
   getSessionState.mockReturnValue({ lastCapturedLine: 0, inProgressMessageId: null });
 
   stopPolling(WT, 'claude');
@@ -187,7 +190,7 @@ async function promptSavedOnce(): Promise<string> {
 function stopDuringCapture(pane: string): void {
   captureSessionOutput.mockImplementationOnce(async () => {
     const fetchedAt = Date.now() - 1;
-    getCaptureFetchStartedAt.mockReturnValueOnce(fetchedAt);
+    getCaptureFrameMeta.mockReturnValueOnce({ fetchStartedAt: fetchedAt, source: 'cache' });
     event('stop', Date.now());
     return pane;
   });

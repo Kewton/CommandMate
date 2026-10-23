@@ -41,7 +41,7 @@ vi.mock('@/lib/cli-tools/types', async (importOriginal) => {
 
 vi.mock('@/lib/session/cli-session', () => ({
   captureSessionOutput: vi.fn().mockResolvedValue('$ '),
-  getCaptureFetchStartedAt: vi.fn().mockReturnValue(null),
+  getCaptureFrameMeta: vi.fn(),
 }));
 
 vi.mock('@/lib/detection/status-detector', async (importOriginal) => ({
@@ -63,7 +63,7 @@ vi.mock('@/lib/polling/auto-yes-manager', () => ({
 
 import { detectWorktreeSessionStatus } from '@/lib/session/worktree-status-helper';
 import { detectSessionStatus, STATUS_REASON } from '@/lib/detection/status-detector';
-import { captureSessionOutput, getCaptureFetchStartedAt } from '@/lib/session/cli-session';
+import { captureSessionOutput, getCaptureFrameMeta } from '@/lib/session/cli-session';
 import { clearAgentStopEvents, recordAgentEvent } from '@/lib/session/agent-event-state';
 import { getAgentTurn } from '@/lib/session/agent-event-turn';
 import { TURN_STALE_AFTER_MS } from '@/lib/session/provisional-turn';
@@ -140,6 +140,9 @@ function event(tool: CLIToolType, e: string, at: number, detail: string | null =
 
 const record = (tool: CLIToolType = 'claude') => getWaitingEpisodeRecord(WT, tool, tool);
 
+/** The capture fetched the frame itself, now. */
+const ownFetch = () => ({ fetchStartedAt: Date.now(), source: 'fetched' as const });
+
 let edges: WaitingEpisodeTransition[] = [];
 
 beforeEach(() => {
@@ -147,7 +150,7 @@ beforeEach(() => {
   mockGetMessages.mockReturnValue([]);
   mockGetAgentInstances.mockReturnValue([]);
   vi.mocked(captureSessionOutput).mockResolvedValue('$ ');
-  vi.mocked(getCaptureFetchStartedAt).mockReturnValue(null);
+  vi.mocked(getCaptureFrameMeta).mockImplementation(ownFetch);
   readyFrame();
   clearAgentStopEvents();
   clearWaitingEpisodes();
@@ -214,7 +217,7 @@ describe('[#3798] the probe started before the episode moved (I5, I6)', () => {
       return 'frame';
     });
     // The frame was a cached one, fetched before all that.
-    vi.mocked(getCaptureFetchStartedAt).mockReturnValueOnce(fetchedAt);
+    vi.mocked(getCaptureFrameMeta).mockReturnValueOnce({ fetchStartedAt: fetchedAt, source: 'cache' });
 
     const status = await poll();
     expect(status.sessionStatusByInstance.claude?.isWaitingForResponse).toBe(true);
@@ -240,12 +243,12 @@ describe('[#3798] the probe started before the episode moved (I5, I6)', () => {
     expect(record()).toBeNull();
 
     // The cache still serves the frame fetched before the stop.
-    vi.mocked(getCaptureFetchStartedAt).mockReturnValue(beforeStop);
+    vi.mocked(getCaptureFrameMeta).mockReturnValue({ fetchStartedAt: beforeStop, source: 'cache' });
     await poll();
     expect(record()).toBeNull();
 
     // Control: a frame fetched after the stop showing the same prompt is a wait.
-    vi.mocked(getCaptureFetchStartedAt).mockReturnValue(null);
+    vi.mocked(getCaptureFrameMeta).mockImplementation(ownFetch);
     await new Promise((r) => setTimeout(r, 2));
     await poll();
     expect(record()).not.toBeNull();
@@ -260,7 +263,7 @@ describe('[#3798] the probe started before the episode moved (I5, I6)', () => {
     event('claude', 'stop', Date.now());
 
     promptFrame(yesNo('Run rm?'));
-    vi.mocked(getCaptureFetchStartedAt).mockReturnValue(beforeStop);
+    vi.mocked(getCaptureFrameMeta).mockReturnValue({ fetchStartedAt: beforeStop, source: 'cache' });
     await poll();
     expect(record()).not.toBeNull();
   });

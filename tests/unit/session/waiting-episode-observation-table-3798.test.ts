@@ -607,14 +607,36 @@ describe('[#3798] precondition 3: a frame fetched before the close of what it sh
   });
 
   it('captureFrameTime: a cached frame is as old as its fetch; an own fetch is after the request', () => {
-    expect(captureFrameTime(() => NOW + 10, NOW + 50)).toEqual({ frameCapturedAt: NOW + 10, frameFetchedAfterStart: false });
-    expect(captureFrameTime(() => NOW + 60, NOW + 50)).toEqual({ frameCapturedAt: NOW + 50, frameFetchedAfterStart: true });
-    expect(captureFrameTime(() => null, NOW + 50)).toEqual({ frameCapturedAt: NOW + 50, frameFetchedAfterStart: true });
+    expect(captureFrameTime(() => ({ fetchStartedAt: NOW + 10, source: 'cache' }), NOW + 50)).toEqual({
+      frameCapturedAt: NOW + 10,
+      frameFetchedAfterStart: false,
+    });
+    expect(captureFrameTime(() => ({ fetchStartedAt: NOW + 60, source: 'fetched' }), NOW + 50)).toEqual({
+      frameCapturedAt: NOW + 50,
+      frameFetchedAfterStart: true,
+    });
+    expect(captureFrameTime(() => ({ fetchStartedAt: NOW + 50, source: 'fetched' }), NOW + 50)).toEqual({
+      frameCapturedAt: NOW + 50,
+      frameFetchedAfterStart: true,
+    });
+  });
+
+  it('captureFrameTime: a cached or joined frame of the request\'s own millisecond is not an own fetch', () => {
+    for (const source of ['cache', 'joined'] as const) {
+      expect(captureFrameTime(() => ({ fetchStartedAt: NOW + 50, source }), NOW + 50)).toEqual({
+        frameCapturedAt: NOW + 50,
+        frameFetchedAfterStart: false,
+      });
+    }
+  });
+
+  it('captureFrameTime: an unknown source is not an own fetch', () => {
+    expect(captureFrameTime(() => null, NOW + 50)).toEqual({ frameCapturedAt: NOW + 50, frameFetchedAfterStart: false });
     expect(
       captureFrameTime(() => {
         throw new Error('replaced module');
       }, NOW + 50)
-    ).toEqual({ frameCapturedAt: NOW + 50, frameFetchedAfterStart: true });
+    ).toEqual({ frameCapturedAt: NOW + 50, frameFetchedAfterStart: false });
   });
 
   it('applies to a fresh prompt too (R2-1)', () => {
