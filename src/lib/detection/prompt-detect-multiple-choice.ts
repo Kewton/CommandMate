@@ -704,24 +704,64 @@ function isContinuationLine(rawLine: string, line: string): boolean {
 }
 
 /**
+ * The user's own message echo (Issue #3832): claude's `❯ msg`, codex's `› msg`.
+ * The cursor of an option row (`❯ 1.`) is not one. `>` is left out on purpose:
+ * codex's trust dialog opens with `> You are in <dir>` and a here-document's
+ * body carries `> ` rows, so a `>` row may be the prompt's own.
+ */
+const USER_ECHO_PATTERN = /^[❯›]\s(?!\s*\d+[.)]\s)/;
+
+/**
+ * The lowest row in `[from, questionEndIndex)` that is the user's message echo
+ * drawn at or left of the dialog's frame (Issue #3832), or -1.
+ */
+function findUserEchoRow(lines: string[], questionEndIndex: number, from: number, panelEnd: number): number {
+  const frameIndent = panelFrameIndent(lines, questionEndIndex, panelEnd);
+  for (let i = questionEndIndex - 1; i >= from; i--) {
+    const line = lines[i];
+    if (line === undefined || line.trim() === '') continue;
+    if (indentOf(line) <= frameIndent && USER_ECHO_PATTERN.test(line.trim())) return i;
+  }
+  return -1;
+}
+
+/**
  * Extract question text from the lines around questionEndIndex.
  * Collects non-empty, non-separator lines from up to 5 lines before questionEndIndex
  * through questionEndIndex itself, joining them with spaces.
+ *
+ * [Issue #3832] Not above the user's message echo ({@link USER_ECHO_PATTERN}):
+ * that message opened the current turn, so the rows above it — the previous
+ * turn's `⏺ IMPL_COMPLETED` / `✻ Cogitated …`, codex's `• HTTP/2 200` /
+ * `Worked for 17s` on the measured screens — are not the prompt's and used to
+ * reach the deny surface through `question`. The echo row itself stays. No
+ * other row bounds the window: a `⏺` / `●` / `•` row may be the call the prompt
+ * asks about (codex's `• Calling …`, agy's `● Bash(…)`), and `question` is what
+ * keeps such a row in the deny surface when `approvalTarget` cuts at it.
  *
  * @param lines - Array of output lines
  * @param questionEndIndex - Index of the last line before options, or -1 if not found
  * @param floor - First row the question may start at. Issue #2486: one below an
  *   AskUserQuestion picker's tab row, so neither that row nor the transcript
  *   above it becomes part of the question; 0 when there is none.
+ * @param panelEnd - Exclusive end of the dialog's own rows, which set the frame
+ *   column the echo is drawn at or left of (Issue #3832)
  * @returns Extracted question text, or generic fallback if questionEndIndex is -1
  */
-function extractQuestionText(lines: string[], questionEndIndex: number, floor = 0): string {
+function extractQuestionText(
+  lines: string[],
+  questionEndIndex: number,
+  floor = 0,
+  panelEnd: number = questionEndIndex + 1,
+): string {
   if (questionEndIndex < 0) {
     return 'Please select an option:';
   }
 
+  const windowStart = Math.max(floor, questionEndIndex - QUESTION_CONTEXT_LINES);
+  const start = Math.max(windowStart, findUserEchoRow(lines, questionEndIndex, windowStart, panelEnd));
   const questionLines: string[] = [];
-  for (let i = Math.max(floor, questionEndIndex - QUESTION_CONTEXT_LINES); i <= questionEndIndex; i++) {
+  for (let i = start; i <= questionEndIndex; i++) {
     const line = lines[i].trim();
     if (line && !SEPARATOR_LINE_PATTERN.test(line)) {
       questionLines.push(line);
@@ -850,6 +890,24 @@ function isTurnBoundaryLine(rawLine: string | undefined): boolean {
  * ({@link RESULT_MARKER_PATTERN}). Anything else between two frame rows is read
  * as body: when the screen cannot tell, the deny surface is taken wide.
  *
+ * [Issue #3832] That shape also needs the older header to be one the current
+ * panel draws below it (agy's `Command` above `  ⎿ User declined the tool
+ * call` above its current `Command`). A body can take the shape too — a
+ * 0-column command whose output is an indented `└──` tree, under a `●` row —
+ * and cutting there dropped the command from the deny surface. A body that
+ * repeats the current header word for word is still cut; the screen cannot
+ * tell that one apart.
+ *
+ * Known limits, measured absent on the claude / codex / agy / copilot /
+ * opencode fixtures and the production log (Issue #3832) and left alone:
+ * - An older block's result with a row that is not a result marker (an
+ *   unmarked continuation `     b` under `  ⎿ a`) under a header the current
+ *   panel repeats is read as body: the previous turn enters the deny surface
+ *   (over-suppresses).
+ * - A body row carrying a marker at the frame's own column (a here-document's
+ *   `> ` drawn at column 0 under a yes/no `(y/n)`) still ends the scan; the
+ *   screen cannot tell it from the previous turn's echo.
+ *
  * Shared by both detector paths: multiple_choice passes its `questionEndIndex`,
  * yes_no the line its pattern matched on.
  *
@@ -871,6 +929,8 @@ export function findApprovalContextStart(
   // The deeper rows since the last frame row: are they all result markers?
   let segmentRows = 0;
   let segmentAllResults = true;
+  // Frame rows already passed: the current panel's header among them.
+  const framesBelow = new Set<string>();
   for (let i = questionLineIndex - 1; i >= floor; i--) {
     const line = lines[i];
     if (line === undefined || line.trim() === '') continue;
@@ -883,10 +943,16 @@ export function findApprovalContextStart(
       segmentAllResults &&= RESULT_MARKER_PATTERN.test(line.trim());
       continue;
     }
-    // A frame row: an older tool-use block's header only in that one shape.
-    if (unenclosed >= 0 && segmentRows > 0 && segmentAllResults && isMarkerRowAtFrameAbove(lines, i, floor, frameIndent)) {
+    // A frame row: an older tool-use block's header only in that one shape,
+    // and only when the current panel draws the same header (Issue #3832).
+    const frameText = line.trim();
+    if (
+      unenclosed >= 0 && segmentRows > 0 && segmentAllResults && framesBelow.has(frameText)
+      && isMarkerRowAtFrameAbove(lines, i, floor, frameIndent)
+    ) {
       return unenclosed + 1;
     }
+    framesBelow.add(frameText);
     unenclosed = -1;
     segmentRows = 0;
     segmentAllResults = true;
@@ -933,8 +999,9 @@ export function joinApprovalTarget(lines: string[], start: number, end: number):
  *
  * Residual, deliberately left alone: `question` itself is built from up to
  * {@link QUESTION_CONTEXT_LINES} lines above `questionEndIndex` and is also part
- * of the deny surface. Narrowing that would change prompt dedup keys and what
- * the UI renders, and it is bounded by the options below it either way.
+ * of the deny surface. Issue #3832 only stops it at the user's message echo
+ * (see {@link extractQuestionText}); a previous turn below no echo still
+ * reaches it, which over-suppresses rather than under-suppresses.
  *
  * [Issue #2486] One exception to both: neither reaches above an AskUserQuestion
  * picker's tab row. Everything up there is the transcript — the Bash call Claude
@@ -1399,7 +1466,7 @@ export function detectMultipleChoicePrompt(
   const pickerTop = questionEndIndex < 0
     ? 0
     : findAskUserQuestionTabRow(lines, questionEndIndex, APPROVAL_TARGET_MAX_LOOKBACK) + 1;
-  const question = extractQuestionText(lines, questionEndIndex, pickerTop);
+  const question = extractQuestionText(lines, questionEndIndex, pickerTop, effectiveEnd);
   const instructionText = extractInstructionText(lines, questionEndIndex, effectiveEnd);
   // Issue #1699: the same block, cut at the previous turn's boundary. Display
   // keeps the wide window; deny patterns are judged against this one.
