@@ -17,6 +17,12 @@ vi.mock('@/cli/utils/install-context', () => ({
   ensureConfigDir: vi.fn().mockReturnValue('/home/tester/.commandmate'),
 }));
 
+// Issue #3752: the update log goes through the daemon's owner-only, rotating opener
+// (covered against a real directory in daemon-server-log-3731.test.ts).
+vi.mock('@/cli/utils/daemon', () => ({
+  openServerLog: vi.fn().mockReturnValue(42),
+}));
+
 vi.mock('@/lib/app-update/update-lock', () => ({
   acquireUpdateLock: vi.fn().mockReturnValue(true),
   releaseUpdateLock: vi.fn(),
@@ -43,7 +49,8 @@ vi.mock('@/lib/app-update/npm-publish-check', () => ({
 }));
 
 import { spawn } from 'child_process';
-import { closeSync, openSync } from 'fs';
+import { closeSync } from 'fs';
+import { openServerLog } from '@/cli/utils/daemon';
 import { POST, dynamic } from '@/app/api/app/update/route';
 import { ensureConfigDir, isGlobalInstall, isNpxExecution } from '@/cli/utils/install-context';
 import { acquireUpdateLock, releaseUpdateLock } from '@/lib/app-update/update-lock';
@@ -72,7 +79,7 @@ beforeEach(() => {
   // implementations, so a test that makes this throw would leak into the next.
   vi.mocked(ensureConfigDir).mockReturnValue('/home/tester/.commandmate');
   vi.mocked(acquireUpdateLock).mockReturnValue(true);
-  vi.mocked(openSync).mockReturnValue(42);
+  vi.mocked(openServerLog).mockReturnValue(42);
   vi.mocked(spawn).mockReturnValue({ unref } as unknown as ReturnType<typeof spawn>);
   vi.mocked(checkNpmHasNewerVersion).mockResolvedValue(null);
   mockDaemon(true);
@@ -134,7 +141,7 @@ describe('POST /api/app/update - fixed command guarantee', () => {
   it('redirects child output to the update log instead of inheriting pipes', async () => {
     await POST();
 
-    expect(openSync).toHaveBeenCalledWith('/home/tester/.commandmate/update.log', 'a');
+    expect(openServerLog).toHaveBeenCalledWith('/home/tester/.commandmate/update.log');
     expect(vi.mocked(spawn).mock.calls[0][2]?.stdio).toEqual(['ignore', 42, 42]);
     // The fd is handed to the child; leaving it open would leak it per request.
     expect(closeSync).toHaveBeenCalledWith(42);
