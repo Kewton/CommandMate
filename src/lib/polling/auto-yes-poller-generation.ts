@@ -183,7 +183,8 @@ export function isTickCurrent(generation: AutoYesTickGeneration): boolean {
   // stores (and returns) a disabled one — so an expiry fails identity too.
   const grant = getAutoYesState(generation.worktreeId, generation.cliToolId, generation.instanceId);
   if (grant !== generation.grant || !grant.enabled) return false;
-  // Issue #3821: a person began answering on this instance since the tick started.
+  // Issue #3821: a person began answering on this instance since the tick started
+  // (Issue #3880: or a person's send ended with keys maybe on the pane, holding it).
   if ((generation.manualAnswerSeq ?? 0) !== getManualAnswerSeq(generation.compositeKey)) return false;
   return isSameSession(generation);
 }
