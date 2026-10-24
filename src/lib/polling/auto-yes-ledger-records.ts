@@ -11,6 +11,7 @@
  */
 
 import type { CLIToolType } from '../cli-tools/types';
+import type { AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
 import { createLogger, type Logger } from '@/lib/logger';
 import { getLogConfig } from '@/lib/env';
 import { buildCompositeKey } from '../auto-yes-state';
@@ -111,6 +112,12 @@ export interface LedgerScope {
   cliToolId: CLIToolType;
   instanceId: string | undefined;
   compositeKey?: string;
+  /**
+   * Issue #3863: the answer mode the poller's tick acts under (the screen
+   * path). Recorded on what that tick withholds or sends; absent from every
+   * other path, whose lines carry none.
+   */
+  answerMode?: AutoYesAnswerMode;
 }
 
 /**
@@ -127,6 +134,8 @@ export interface OpenInterval {
   id: string;
   startedAt: number;
   reason: LedgerWithholdReason;
+  /** Issue #3863: the answer mode when the interval began (screen path). */
+  answerMode?: AutoYesAnswerMode;
 }
 
 export interface LedgerEntry {
@@ -150,6 +159,8 @@ export interface LedgerEntry {
   unobservableMs: number;
   decision: ConfirmationDecision;
   basis: AnswerBasis | null;
+  /** Issue #3863: the answer mode of the last decision about it (screen path). */
+  answerMode?: AutoYesAnswerMode;
   interval: OpenInterval | null;
   intervals: number;
   withheldMsClosed: number;
@@ -172,6 +183,8 @@ export interface PendingAttempt {
   cliToolId: CLIToolType;
   basis: AnswerBasis;
   receiptAccepted: boolean;
+  /** Issue #3863: the answer mode the send was made under (screen path). */
+  answerMode?: AutoYesAnswerMode;
 }
 
 /** Which instance a hook request came from; the worktree is null when it named none this server knows. */

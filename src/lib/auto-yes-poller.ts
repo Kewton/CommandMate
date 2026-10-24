@@ -145,6 +145,7 @@ import {
 } from './polling/auto-yes-confirmation-ledger';
 import type { AnswerBasis, AttemptResult } from './polling/auto-yes-confirmation-ledger-types';
 import {
+  answerModeOfTick,
   resolveAnswerUnderPolicy,
   skippedForUnownedSession,
   withheldAsQuestion,
@@ -750,7 +751,9 @@ export async function detectAndRespondToPrompt(
   let receiptEpisode: number | null = null;
   // Issue #3820: the ledger's tick. A tick that read the screen and saw no
   // confirmation closes the open one as gone when it ends (`endLedgerTick`).
-  const ledgerScope: LedgerScope = { compositeKey, worktreeId, cliToolId, instanceId };
+  // Issue #3863: the answer mode this tick acts under, recorded on its ledger lines.
+  const answerMode = answerModeOfTick(worktreeId, cliToolId, instanceId, generation?.grant);
+  const ledgerScope: LedgerScope = { compositeKey, worktreeId, cliToolId, instanceId, answerMode };
   const ledgerTick = beginLedgerTick(ledgerScope);
   // Issue #3821: when this tick began, for the decision's reason (see `tickDecisionRecorder`).
   const tickStartedAt = Date.now();
@@ -891,6 +894,11 @@ export async function detectAndRespondToPrompt(
       promptData: promptDetection.promptData,
       promptKey,
       frameKey,
+      // Issue #3863: for the `recommended` answer mode's choice among a question's options.
+      ...(promptDetection.optionRecommendations !== undefined
+        ? { optionRecommendations: promptDetection.optionRecommendations }
+        : {}),
+      answerMode,
     };
 
     // 2.5. Issue #3706: an earlier answer to this prompt was stopped after some
@@ -923,14 +931,18 @@ export async function detectAndRespondToPrompt(
       return 'no_answer';
     }
 
-    // 3.7. Issue #3822: a question to the operator is the human's to answer;
-    // Auto-Yes answers permissions only. See `withheldAsQuestion`.
+    // 3.7. Issue #3822: a question to the operator is the human's to answer —
+    // under the `careful` answer mode (Issue #3863); under `recommended` a
+    // question reader's picker goes on to step 4. See `withheldAsQuestion`.
     if (withheldAsQuestion(judged)) {
       decision.withheld('question-left-to-human');
       return 'no_answer';
     }
 
     // 4. Resolve auto answer under the execution contract's policy (Issue #1547).
+    // Issue #3863: a question the `recommended` mode answers takes its
+    // recommended option, else its default; one whose recommendation cannot
+    // be told is withheld (`recommended-option-unidentified`).
     // Auto-Yes reads the frame itself instead of going through status-detector
     // (it shares the reader, not the verdict), so this is the only place the policy can gate an
     // auto-answer: a prompt the policy withholds is left for a human, and the

@@ -66,6 +66,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import type { AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
 import { buildCompositeKey } from '../auto-yes-state';
 import { getOrInitGlobal } from '../global-state';
 import { getEnterFallbackSessionEpoch } from './auto-yes-enter-fallback-state';
@@ -75,6 +76,7 @@ import {
   type AttemptResult,
   type AttemptSettledLine,
   type CheckpointLine,
+  type LedgerAnswerModeField,
   type CliModeObservedLine,
   type ConfirmationClosedLine,
   type ConfirmationOpenedLine,
@@ -281,6 +283,8 @@ function runHour(state: LedgerState, at: number): void {
       presence: entry.presence,
       answerability: interval === null ? 'answerable' : 'withheld',
       withheldMsTotal: entry.withheldMsClosed + intervalMs,
+      // Issue #3863: the mode of the open interval, else of the last decision.
+      ...answerModeField(interval?.answerMode ?? entry.answerMode),
       ...(interval !== null
         ? { intervalId: interval.id, reason: interval.reason, intervalStartedAtMs: interval.startedAt, intervalMs }
         : {}),
@@ -292,11 +296,27 @@ function runHour(state: LedgerState, at: number): void {
 // Intervals and closing
 // =============================================================================
 
-function withhold(state: LedgerState, entry: LedgerEntry, reason: LedgerWithholdReason, now: number): void {
+/** Issue #3863: `{ answerMode }` when there is one, else nothing (the line keeps its old shape). */
+function answerModeField(answerMode: AutoYesAnswerMode | undefined): LedgerAnswerModeField {
+  return answerMode === undefined ? {} : { answerMode };
+}
+
+function withhold(
+  state: LedgerState,
+  entry: LedgerEntry,
+  reason: LedgerWithholdReason,
+  now: number,
+  answerMode: AutoYesAnswerMode | undefined = entry.answerMode,
+): void {
   const interval = entry.interval;
   if (interval === null) {
     entry.intervals += 1;
-    const opened: OpenInterval = { id: `${entry.id}#${entry.intervals}`, startedAt: now, reason };
+    const opened: OpenInterval = {
+      id: `${entry.id}#${entry.intervals}`,
+      startedAt: now,
+      reason,
+      ...answerModeField(answerMode),
+    };
     entry.interval = opened;
     emit<WithholdStartedLine>(state, AUTO_YES_LEDGER_EVENTS.withholdStarted, {
       atMs: now,
@@ -306,6 +326,7 @@ function withhold(state: LedgerState, entry: LedgerEntry, reason: LedgerWithhold
       source: entry.source,
       reason,
       startedAtMs: now,
+      ...answerModeField(answerMode),
     });
     return;
   }
@@ -339,6 +360,7 @@ function endInterval(state: LedgerState, entry: LedgerEntry, end: WithholdEnd, n
     withheldMs,
     end,
     lastReason: interval.reason,
+    ...answerModeField(interval.answerMode),
   });
 }
 
@@ -395,6 +417,8 @@ function closeEntry(state: LedgerState, entry: LedgerEntry, now: number, how: Cl
     // The screen path cannot tell Auto-Yes's keys from a human's; only a
     // delivered reply that released it is known to be Auto-Yes's (design §2.6).
     resolvedBy: how.kind === 'reply' ? 'auto' : how.kind === 'gone' ? (how.resolvedBy ?? 'unknown') : 'unknown',
+    // Issue #3863: the mode the last decision about it was made under.
+    ...answerModeField(entry.answerMode),
     openMs: Math.max(0, now - entry.openedAt),
     withheldMsTotal: entry.withheldMsClosed,
     unobservableMs: entry.unobservableMs,
@@ -619,6 +643,7 @@ export function withholdLedgerConfirmation(scope: LedgerScope, reason: LedgerWit
     const entry = currentEntry(state, keyOf(scope));
     if (entry === undefined || entry.presence !== 'present') return;
     entry.decision = 'withhold';
+    if (scope.answerMode !== undefined) entry.answerMode = scope.answerMode;
     withhold(state, entry, reason, now);
   });
 }
@@ -637,6 +662,7 @@ export function beginLedgerAttempt(
   return guarded<LedgerAttemptHandle | null>(null, (state) => {
     const entry = currentEntry(state, keyOf(scope));
     if (entry === undefined) return null;
+    if (scope.answerMode !== undefined) entry.answerMode = scope.answerMode;
     return beginAttempt(state, entry, basis, options.receiptAccepted === true);
   });
 }
@@ -650,7 +676,13 @@ function beginAttempt(state: LedgerState, entry: LedgerEntry, basis: AnswerBasis
     const oldest = state.pending.keys().next().value;
     if (oldest !== undefined) state.pending.delete(oldest);
   }
-  state.pending.set(handle.attemptId, { confirmationId: entry.id, cliToolId: entry.cliToolId, basis, receiptAccepted });
+  state.pending.set(handle.attemptId, {
+    confirmationId: entry.id,
+    cliToolId: entry.cliToolId,
+    basis,
+    receiptAccepted,
+    ...answerModeField(entry.answerMode),
+  });
   return handle;
 }
 
@@ -699,6 +731,7 @@ function settleAttempt(
     late: entry === undefined,
     expired,
     ...(pending.receiptAccepted ? { receiptAccepted: true } : {}),
+    ...answerModeField(pending.answerMode),
   });
   if (entry === undefined) return;
   if (result === 'ok') {

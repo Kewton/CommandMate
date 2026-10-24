@@ -115,6 +115,8 @@ describe('[#1843] AutoYesSuppressionReason cross-validation', () => {
       'question-left-to-human',
       // Issue #3822: a permission dialog with no single allow-once row.
       'allow-once-unidentified',
+      // Issue #3863: a question whose recommended option could not be told.
+      'recommended-option-unidentified',
     ];
     const fromServer: ServerSuppressionReason[] = knownToCli;
     expect(new Set(fromServer).size).toBe(knownToCli.length);

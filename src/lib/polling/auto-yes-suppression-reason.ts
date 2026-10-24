@@ -92,6 +92,17 @@ export type AutoYesSuppressionReason =
    */
   | 'allow-once-unidentified'
   /**
+   * Issue #3863: a question is on the pane, Auto-Yes's answer mode is
+   * `recommended` (answer questions with their recommended option), and which
+   * option that is could not be told: an option whose title the reader could
+   * not separate from its description, two or more options marked
+   * `(Recommended)` / `（推奨）` / `(推奨)`, a chosen option that takes typed
+   * text, or a multi-select question. Nothing is sent. Returned by the
+   * resolver (the base rules, not the contract), and re-evaluated on every
+   * tick.
+   */
+  | 'recommended-option-unidentified'
+  /**
    * Issue #3767: agy's approval dialog is on the pane but Auto-Yes has no
    * unused `PreToolUse` question to match it to (none ever, it appeared after
    * the window, it was already up, the hook stopped arriving, or — Issue #3789 —
@@ -118,6 +129,8 @@ export const CONTRACT_SUPPRESSION_REASONS: ReadonlySet<AutoYesSuppressionReason>
   // Issue #3822: not the contract's, but the same kind of verdict — on the
   // prompt as it is now, from `resolveAutoAnswerWithPolicy`, re-evaluated later.
   'allow-once-unidentified',
+  // Issue #3863: likewise, over a question under the `recommended` answer mode.
+  'recommended-option-unidentified',
 ]);
 
 /** Issue #3822: the reason recorded when the contract lookup failed. */
@@ -145,6 +158,8 @@ export const QUESTION_LEFT_TO_HUMAN_SUPPRESSION_REASON = 'question-left-to-human
  */
 export const BASE_RULE_SUPPRESSION_REASONS: ReadonlySet<AutoYesSuppressionReason> = new Set<AutoYesSuppressionReason>([
   'allow-once-unidentified',
+  // Issue #3863: a question whose recommended option could not be told.
+  'recommended-option-unidentified',
 ]);
 
 /** Whether `reason` is the base rules' withholding rather than the contract's (Issue #3822). */
@@ -154,6 +169,10 @@ export function isBaseRuleSuppressionReason(reason: AutoYesSuppressionReason | s
 
 /** Issue #3822: the reason the resolver returns over a permission dialog with no single allow-once row. */
 export const ALLOW_ONCE_UNIDENTIFIED_SUPPRESSION_REASON = 'allow-once-unidentified' satisfies AutoYesSuppressionReason;
+
+/** Issue #3863: the reason the resolver returns over a question whose recommended option could not be told. */
+export const RECOMMENDED_OPTION_UNIDENTIFIED_SUPPRESSION_REASON =
+  'recommended-option-unidentified' satisfies AutoYesSuppressionReason;
 
 /** Issue #3767: the reason the poller records over an agy dialog with no matching hook receipt. */
 export const NO_HOOK_RECEIPT_SUPPRESSION_REASON = 'no-hook-receipt' satisfies AutoYesSuppressionReason;

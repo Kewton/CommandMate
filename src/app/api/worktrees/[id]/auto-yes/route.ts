@@ -26,7 +26,8 @@ import {
   extractInstanceId,
   type AutoYesState,
 } from '@/lib/polling/auto-yes-manager';
-import { isAutoYesShutdownStarted } from '@/lib/auto-yes-state';
+import { AUTO_YES_ANSWER_MODES, isAutoYesAnswerMode, type AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
+import { autoYesAnswerModeOf, isAutoYesShutdownStarted } from '@/lib/auto-yes-state';
 import { recheckPendingDecisions } from '@/lib/hooks/pending-decision-recheck';
 import {
   getSessionContractPolicySummary,
@@ -62,6 +63,16 @@ const ALLOWED_CLI_TOOLS: readonly CLIToolType[] = CLI_TOOL_IDS;
 interface AutoYesResponse {
   enabled: boolean;
   expiresAt: number | null;
+  /**
+   * Issue #3863: how the enabled grant answers questions (`recommended` /
+   * `careful`) — on a POST, what an omitted `answerMode` resolved to. Omitted
+   * when not enabled, so a disabled state answers exactly what it did. On the
+   * single-target shapes (the `?cliToolId` GET, every POST and the top level of
+   * the whole-worktree GET); the `agents` / `instances` entries keep their
+   * shape and the whole-worktree GET carries `answerModeByInstance` beside
+   * them, as the worktree list carries `autoYesStopReasonByInstance` (#3730).
+   */
+  answerMode?: AutoYesAnswerMode;
   pollingStarted?: boolean;
   /**
    * Issue #1909: which agent this state (or this arming) actually belongs to.
@@ -166,6 +177,14 @@ function buildAutoYesResponse(
   return response;
 }
 
+/**
+ * Issue #3863: a single-target response with the grant's answer mode, when it
+ * is enabled (see {@link AutoYesResponse.answerMode}).
+ */
+function withAnswerMode(response: AutoYesResponse, state: AutoYesState | null): AutoYesResponse {
+  return state?.enabled ? { ...response, answerMode: autoYesAnswerModeOf(state) } : response;
+}
+
 /** The worktree row, or the 404 response to answer with when there is none */
 function findWorktreeOr404(worktreeId: string): Worktree | NextResponse {
   const db = getDbInstance();
@@ -245,7 +264,7 @@ export async function GET(
       }
       const state = getAutoYesState(id, target.cliToolId, target.instanceId);
       return NextResponse.json({
-        ...buildAutoYesResponse(state, undefined, target),
+        ...withAnswerMode(buildAutoYesResponse(state, undefined, target), state),
         contractPolicy: getSessionContractPolicySummary(id, target.cliToolId, target.instanceId),
       });
     }
@@ -254,6 +273,9 @@ export async function GET(
     const compositeKeys = getCompositeKeysByWorktree(id);
     const agentStates: Record<string, ReturnType<typeof buildAutoYesResponse>> = {};
     const instanceStates: Record<string, ReturnType<typeof buildAutoYesResponse>> = {};
+    // Issue #3863: each enabled instance's answer mode, keyed like `instances`
+    // (a primary's instance id is its agent id, so it covers `agents` too).
+    const answerModeByInstance: Record<string, AutoYesAnswerMode> = {};
     // Issue #3753: two keys can share an instanceId under different tools (the
     // roster's tool changed between them). The map is keyed by instanceId, so
     // the roster's tool decides which key speaks for it; without a roster
@@ -284,6 +306,8 @@ export async function GET(
         entry.blockedByContract = true;
       }
       instanceStates[instanceId] = entry;
+      if (state?.enabled) answerModeByInstance[instanceId] = autoYesAnswerModeOf(state);
+      else delete answerModeByInstance[instanceId];
       // Keep the cliTool-level map populated from the primary instance for backward compat.
       if (instanceId === agentId) {
         agentStates[agentId] = { ...entry };
@@ -300,9 +324,10 @@ export async function GET(
     const defaultTarget = resolveSessionTarget(getDbInstance(), id);
     const defaultState = getAutoYesState(id, defaultTarget.cliToolId, defaultTarget.instanceId);
     return NextResponse.json({
-      ...buildAutoYesResponse(defaultState, undefined, defaultTarget),
+      ...withAnswerMode(buildAutoYesResponse(defaultState, undefined, defaultTarget), defaultState),
       agents: agentStates,
       instances: instanceStates,
+      answerModeByInstance,
     });
   } catch (error: unknown) {
     logger.error('error-getting-auto-yes-state:', { error: error instanceof Error ? error.message : String(error) });
@@ -383,6 +408,16 @@ export async function POST(
       }
     }
 
+    // Issue #3863: how questions are answered. Omitted keeps a live grant's
+    // mode and starts a new grant at `recommended` (`setAutoYesEnabled`).
+    if (body.answerMode !== undefined && !isAutoYesAnswerMode(body.answerMode)) {
+      return NextResponse.json(
+        { error: `Invalid answerMode. Allowed values: ${AUTO_YES_ANSWER_MODES.join(', ')}` },
+        { status: 400 }
+      );
+    }
+    const answerMode: AutoYesAnswerMode | undefined = body.answerMode;
+
     // [SEC4-SF-002] Validate cliToolId: reject invalid values (no fallback)
     if (body.cliToolId !== undefined && !isValidCliTool(body.cliToolId)) {
       return NextResponse.json(
@@ -462,14 +497,12 @@ export async function POST(
         return NextResponse.json({ error: 'Server is shutting down' }, { status: 503 });
       }
 
-      state = setAutoYesEnabled(
-        id,
-        cliToolId,
-        true,
-        duration,
-        stopPattern,
-        instanceId
-      );
+      // Issue #3863: the mode is passed only when the request named one, so an
+      // enable without it reaches the setter exactly as before (which keeps a
+      // live grant's mode and starts a new one at `recommended`).
+      state = answerMode === undefined
+        ? setAutoYesEnabled(id, cliToolId, true, duration, stopPattern, instanceId)
+        : setAutoYesEnabled(id, cliToolId, true, duration, stopPattern, instanceId, answerMode);
       const result = startAutoYesPolling(id, cliToolId, instanceId);
       pollingStarted = result.started;
       if (!result.started) {
@@ -543,11 +576,9 @@ export async function POST(
     // request that deliberately named none. `pendingDecisions` (#1898-2) is
     // undefined on that path anyway — nothing is re-judged when nothing is armed.
     const targetedRequest = body.enabled || !!body.instanceId || !!body.cliToolId;
-    const response = buildAutoYesResponse(
-      state,
-      pollingStarted,
-      targetedRequest ? target : undefined,
-      pendingDecisions
+    const response = withAnswerMode(
+      buildAutoYesResponse(state, pollingStarted, targetedRequest ? target : undefined, pendingDecisions),
+      state ?? null
     );
     // Issue #3723: arming answered `enabled: true` even when the contract on
     // this instance says `autoYes.mode: 'off'`, so the poller would answer

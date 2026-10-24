@@ -355,6 +355,8 @@ describe('[#3822] the poller leaves a generic yes/no to a human', () => {
 
 describe('[#3822] the poller leaves a question to a human', () => {
   it('claude: an AskUserQuestion picker gets no key, recorded as question-left-to-human', async () => {
+    // Issue #3863: #3861's rule is the `careful` answer mode's since the modes.
+    setAutoYesEnabled(WT, 'claude', true, 3_600_000, undefined, undefined, 'careful');
     expect(await tick('claude', fixture(CLAUDE_ASK_USER_QUESTION))).toBe('no_answer');
 
     expect(sendPromptAnswer).not.toHaveBeenCalled();
@@ -369,6 +371,8 @@ describe('[#3822] the poller leaves a question to a human', () => {
   });
 
   it('an allow-listed contract naming multiple_choice does not delegate it', async () => {
+    // Issue #3863: under the `careful` answer mode, as above.
+    setAutoYesEnabled(WT, 'claude', true, 3_600_000, undefined, undefined, 'careful');
     seedTask("autoYes:\n  mode: allow-listed\n  allowPromptTypes: [multiple_choice]\n");
     expect(await tick('claude', fixture(CLAUDE_ASK_USER_QUESTION))).toBe('no_answer');
     expect(sendPromptAnswer).not.toHaveBeenCalled();

@@ -7,6 +7,13 @@ import { CLAUDE_MODEL_OVERLAY_FOOTER_PATTERN } from './cli-patterns';
 import { CLAUDE_TURN_COMPLETE_PATTERN } from './tools/claude/patterns';
 import { optionTakesTypedText } from '@/lib/session/prompt-view';
 import {
+  cannotBeWrapOf,
+  isRecommendationMarker,
+  isRecommendedTitle,
+  lowerBoundPaneColumns,
+  type OptionRecommendation,
+} from './option-recommendation';
+import {
   ASK_USER_QUESTION_PICKER_FOOTER_PATTERN,
   findAskUserQuestionTabRow,
   findClaudePreviewPanes,
@@ -1277,6 +1284,12 @@ export function detectMultipleChoicePrompt(
   // Scan from end to find options, using both patterns.
   // ==========================================================================
   const collectedOptions: Array<{ number: number; label: string; isDefault: boolean }> = [];
+  // [Issue #3863] Per collected option (same order): the option row as drawn
+  // and the rows under it, for telling its title from its description.
+  const optionRows: OptionRowReading[] = [];
+  // Continuation rows met since the option below was collected — the rows
+  // UNDER the option the reverse scan reaches next.
+  let rowsBelow: string[] = [];
   let questionEndIndex = -1;
   let continuationLineCount = 0;
 
@@ -1351,6 +1364,8 @@ export function detectMultipleChoicePrompt(
       if (number <= 20 && isValidPrecedingOption(number, collectedOptions)) {
         // [Issue #2486] A label that wrapped beside a preview pane is whole again.
         const label = [defaultMatch[2].trim(), ...paneWrap].join(' ');
+        optionRows.unshift({ row: rawLine, besidePane: paneCut !== undefined || paneWrap.length > 0, rowsBelow });
+        rowsBelow = [];
         paneWrap = [];
         collectedOptions.unshift({ number, label, isDefault: true });
         continuationLineCount = 0;
@@ -1370,6 +1385,8 @@ export function detectMultipleChoicePrompt(
         // Treat as non-option line (e.g., diff line numbers from Codex approval prompts)
       } else {
         const label = [normalMatch[2].trim(), ...paneWrap].join(' ');
+        optionRows.unshift({ row: rawLine, besidePane: paneCut !== undefined || paneWrap.length > 0, rowsBelow });
+        rowsBelow = [];
         paneWrap = [];
         collectedOptions.unshift({ number, label, isDefault: false });
         continuationLineCount = 0;
@@ -1387,6 +1404,12 @@ export function detectMultipleChoicePrompt(
       return noPromptResult(output);
     }
 
+    // [Issue #3863] An indented row under the bottom option: its wrapped title
+    // or its description. Only remembered; the scan goes on as before.
+    if (collectedOptions.length === 0 && line && /^\s{3,}/.test(rawLine)) {
+      rowsBelow.unshift(rawLine);
+    }
+
     // Non-option line handling
     if (collectedOptions.length > 0 && line && !SEPARATOR_LINE_PATTERN.test(line)) {
       // [Issue #460] For deeply indented lines (4+ leading spaces), check
@@ -1396,6 +1419,7 @@ export function detectMultipleChoicePrompt(
       // The 2-space "  Select model" case (Issue #256) is excluded by the 4+ threshold.
       const isDeepIndent = /^\s{4,}/.test(rawLine);
       if (isDeepIndent && isContinuationLine(rawLine, line)) {
+        rowsBelow.unshift(rawLine);
         continuationLineCount++;
         if (continuationLineCount > MAX_DEEP_INDENT_CONTINUATION_LINES) {
           questionEndIndex = i;
@@ -1422,6 +1446,7 @@ export function detectMultipleChoicePrompt(
       // Check if this is a continuation line (indented line between options,
       // or path/filename fragments from terminal width wrapping - Issue #181)
       if (isContinuationLine(rawLine, line)) {
+        rowsBelow.unshift(rawLine);
         continuationLineCount++;
         const maxContinuationLines = /^\s{4,}/.test(rawLine)
           ? MAX_DEEP_INDENT_CONTINUATION_LINES
@@ -1516,5 +1541,55 @@ export function detectMultipleChoicePrompt(
     ? (hasNumberFooter ? 'answer_only' : 'answer_then_enter')
     : undefined;
 
-  return buildMultipleChoiceResult(question, collectedOptions, { instructionText, approvalTarget }, output, truncateRawContentFn, submitMode, hasAskUserQuestionFooter);
+  const result = buildMultipleChoiceResult(question, collectedOptions, { instructionText, approvalTarget }, output, truncateRawContentFn, submitMode, hasAskUserQuestionFooter);
+  // [Issue #3863] Only the AskUserQuestion picker: the one this parser reads
+  // as a question, whose rows are a title and an indented description.
+  if (!hasAskUserQuestionFooter) return result;
+  const paneColumns = lowerBoundPaneColumns(lines);
+  return {
+    ...result,
+    optionRecommendations: collectedOptions.map((option, index) =>
+      readPickerOptionRecommendation(option.label, optionRows[index], paneColumns),
+    ),
+  };
+}
+
+/** [Issue #3863] One collected option's row, and the continuation rows under it, top-down. */
+interface OptionRowReading {
+  /** The option row as drawn (indent, cursor and number included; cut at a preview pane). */
+  row: string;
+  /** Whether the row sits beside a preview pane, where the options column draws no descriptions (#2486). */
+  besidePane: boolean;
+  rowsBelow: string[];
+}
+
+/**
+ * [Issue #3863] What an AskUserQuestion option's title says about being
+ * recommended (`option-recommendation`).
+ *
+ * The picker draws a title row and its description indented under it; a title
+ * too long for the pane wraps to the same indent, so the rows alone do not
+ * say which they are. Read:
+ *
+ * - no row under it: the label is the title;
+ * - beside a preview pane (#2486), where the column draws no descriptions:
+ *   the label — its wrapped rows already joined — is the title, as long as no
+ *   other row is under it;
+ * - the row under it could not be the title's wrap (its first word would have
+ *   fit on the option row, `cannotBeWrapOf`): the label is the title;
+ * - the row under it may be the wrap and holds nothing but a marker: the title
+ *   wrapped right before its marker;
+ * - otherwise `unknown`.
+ */
+function readPickerOptionRecommendation(
+  label: string,
+  reading: OptionRowReading | undefined,
+  paneColumns: number,
+): OptionRecommendation {
+  if (reading === undefined) return 'unknown';
+  const [next] = reading.rowsBelow;
+  if (next === undefined) return isRecommendedTitle(label);
+  if (reading.besidePane) return 'unknown';
+  if (cannotBeWrapOf(reading.row, next, paneColumns)) return isRecommendedTitle(label);
+  return isRecommendationMarker(next) ? true : 'unknown';
 }
