@@ -815,6 +815,34 @@ export function getRestartReleasedAutoYesByWorktree(): Map<string, Record<string
   return byWorktree;
 }
 
+/**
+ * The answer mode of every armed instance, grouped by worktree and keyed by
+ * instance, for the worktree list (Issue #3863).
+ *
+ * Its own map rather than a field on {@link getEnabledAutoYesByWorktree}'s
+ * entries, whose `{ enabled, expiresAt }` shape the list pins (#2512). The same
+ * instances that map holds (armed, read through {@link getAutoYesState} so an
+ * expiry resolved at read time drops out), each with the mode it runs under.
+ *
+ * @returns worktreeId -> instanceId -> mode; worktrees with nothing armed are absent
+ */
+export function getEnabledAutoYesAnswerModeByWorktree(): Map<string, Record<string, AutoYesAnswerMode>> {
+  const byWorktree = new Map<string, Record<string, AutoYesAnswerMode>>();
+  // A snapshot of the keys: an expired read below rewrites its own entry.
+  for (const key of Array.from(autoYesStates.keys())) {
+    const cliToolId = extractCliToolId(key);
+    if (!cliToolId) continue;
+    const worktreeId = extractWorktreeId(key);
+    const instanceId = extractInstanceId(key) ?? cliToolId;
+    const state = getAutoYesState(worktreeId, cliToolId, instanceId);
+    if (!state?.enabled) continue;
+    const entries = byWorktree.get(worktreeId) ?? {};
+    entries[instanceId] = autoYesAnswerModeOf(state);
+    byWorktree.set(worktreeId, entries);
+  }
+  return byWorktree;
+}
+
 // =============================================================================
 // Worktree ID migration (Issue #1621 Phase 3)
 // =============================================================================

@@ -36,7 +36,8 @@ export interface AutoYesToggleParams {
   /**
    * Issue #3863: the answer mode chosen when turning it on. Omitted means the
    * default (`recommended`) — `AutoYesToggle` names a mode only when it is not
-   * the default; the worktree screen's handler sends the default explicitly.
+   * the default; every handler that posts it (the worktree screen, the Sessions
+   * tile) sends the default explicitly.
    */
   answerMode?: AutoYesAnswerMode;
 }
@@ -72,8 +73,9 @@ export interface AutoYesInstanceSummary {
    * Issue #3863: the answer mode of an ENABLED instance (`recommended` /
    * `careful`), on the browser's per-instance state. Omitted when not enabled,
    * and by a server older than the field. The worktree list's entries do not
-   * carry it (their shape is pinned, #2512); `GET .../auto-yes` answers it
-   * in `answerModeByInstance`.
+   * carry it (their shape is pinned, #2512) — the list puts it beside them, in
+   * `autoYesAnswerModeByInstance`; `GET .../auto-yes` answers it in
+   * `answerModeByInstance`.
    */
   answerMode?: AutoYesAnswerMode;
 }

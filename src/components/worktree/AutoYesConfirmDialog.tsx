@@ -21,11 +21,8 @@ import {
   validateStopPattern,
   type AutoYesDuration,
 } from '@/config/auto-yes-config';
-import {
-  AUTO_YES_ANSWER_MODES,
-  DEFAULT_AUTO_YES_ANSWER_MODE,
-  type AutoYesAnswerMode,
-} from '@/types/auto-yes-answer-mode';
+import { DEFAULT_AUTO_YES_ANSWER_MODE, type AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
+import { AutoYesAnswerModeOptions } from './AutoYesAnswerModeOptions';
 
 /** Props for AutoYesConfirmDialog component */
 export interface AutoYesConfirmDialogProps {
@@ -156,38 +153,7 @@ export function AutoYesConfirmDialog({
         </div>
 
         {/* Answer mode (Issue #3863): how a question is answered; permissions are answered under either */}
-        <div className="text-sm text-foreground">
-          <p className="font-medium mb-2" id="auto-yes-answer-mode-label">{t('answerModeLabel')}</p>
-          <div
-            className="flex flex-col gap-2"
-            role="radiogroup"
-            aria-labelledby="auto-yes-answer-mode-label"
-            data-testid="auto-yes-answer-mode-options"
-          >
-            {AUTO_YES_ANSWER_MODES.map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                role="radio"
-                aria-checked={selectedAnswerMode === mode}
-                onClick={() => setSelectedAnswerMode(mode)}
-                className={`w-full py-2 px-3 text-left rounded-md border-2 transition-colors ${
-                  selectedAnswerMode === mode
-                    ? 'border-accent-600 bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-400'
-                    : 'border-border bg-surface dark:bg-surface-2 text-foreground hover:border-muted-foreground'
-                }`}
-                style={{ minHeight: '44px' }}
-                data-testid={`auto-yes-answer-mode-${mode}`}
-              >
-                <span className="block text-sm font-medium">{t(`answerModes.${mode}`)}</span>
-                <span className="block text-xs text-muted-foreground">{t(`answerModeDescriptions.${mode}`)}</span>
-              </button>
-            ))}
-          </div>
-          <p className="mt-2 text-xs text-muted-foreground" data-testid="auto-yes-answer-mode-permission-note">
-            {t('answerModePermissionNote')}
-          </p>
-        </div>
+        <AutoYesAnswerModeOptions value={selectedAnswerMode} onChange={setSelectedAnswerMode} />
 
         {/* Stop Pattern input (Issue #314) */}
         <div className="text-sm text-foreground">

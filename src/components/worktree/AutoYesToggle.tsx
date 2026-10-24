@@ -78,8 +78,8 @@ export interface AutoYesToggleProps {
   /**
    * Issue #3863: the answer mode of the enabled grant (`recommended` /
    * `careful`), shown as a label beside the ON switch. Undefined renders
-   * nothing — a server older than the field, or a surface that cannot read it
-   * (the Sessions tile's list row), is "unknown", never assumed `recommended`.
+   * nothing — a server older than the field is "unknown", never assumed
+   * `recommended`.
    */
   answerMode?: AutoYesAnswerMode;
 }

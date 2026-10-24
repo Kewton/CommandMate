@@ -3,7 +3,7 @@
  * into `onToggle` (Issue #3863).
  *
  * The label is drawn only for a mode the server named: an `answerMode` of
- * undefined (a server older than the field, the Sessions tile's list row) is
+ * undefined (a server older than the field) is
  * "unknown" and draws nothing, rather than a confident おまかせ.
  *
  * @vitest-environment jsdom

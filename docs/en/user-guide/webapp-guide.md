@@ -214,7 +214,8 @@ The dialog that turns Auto Yes on asks how a question from the agent (one that p
 
 - While ON, the mode (**Recommended** / **Careful**; 「おまかせ」 / 「慎重」 in the Japanese UI) is shown beside the toggle — in each PC split, under the phone's composer, and after a change made from another tab, which the periodic re-read picks up
 - Connected to an older server that does not report the mode, no mode is shown (it is not assumed to be Recommended)
-- A tile on the Sessions screen offers the same dialog, but the tile does not show the mode (the list it reads carries none). Turning Auto Yes on from the new-task dialog uses Recommended
+- A tile on the Sessions screen offers the same dialog and, while ON, shows the mode beside its toggle (a reload or a change from another tab shows up on the next list read)
+- In the new-task dialog, picking an Auto Yes duration brings up the same two options (Recommended by default); Auto Yes is turned on in the chosen mode before the message is sent
 - A question's Submit / Cancel page and OpenCode's API questions are answered by you in either mode. Copilot's questions cannot be told apart, so they may be answered even under Careful
 - The CLI and the API can choose it too ([CLI Operations Guide](./cli-operations-guide.md#answer-modes-recommended-and-careful-issue-3863))
 

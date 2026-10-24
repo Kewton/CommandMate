@@ -73,7 +73,26 @@ async function mockApi(page: Page, state: FakeAutoYes): Promise<void> {
       const { pathname } = new URL(request.url());
 
       if (pathname === '/api/worktrees' || pathname.endsWith('/api/worktrees')) {
-        return fulfillJson(route, [worktree]);
+        // The real list's shape (`{ worktrees, repositories }`, read as
+        // `data.worktrees` by the list cache), with the Auto-Yes maps it carries.
+        return fulfillJson(route, {
+          worktrees: [
+            {
+              ...worktree,
+              autoYesByInstance: state.enabled ? { claude: { enabled: true, expiresAt: expiresAt() } } : {},
+              ...(state.enabled && state.mode ? { autoYesAnswerModeByInstance: { claude: state.mode } } : {}),
+            },
+          ],
+          repositories: [
+            {
+              path: worktree.repositoryPath,
+              name: worktree.repositoryName,
+              displayName: worktree.repositoryDisplayName,
+              worktreeCount: 1,
+              visible: true,
+            },
+          ],
+        });
       }
 
       const detailMatch = pathname.match(/\/api\/worktrees\/([^/]+)(\/.*)?$/);
