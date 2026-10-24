@@ -12,7 +12,8 @@
  * - WRITERS decide the kind from a frame (`readPromptScreen` /
  *   `promptDataForStorage`). Only the module that defines them and the two
  *   writers of a `prompt` row that have the frame in hand: the response
- *   poller's save and the Auto-Yes poller's audit row.
+ *   poller's save, the Auto-Yes poller's audit row and a person's answer's
+ *   audit row (`/prompt-response`).
  * - READERS take a stored reading back (`readStoredPromptReading`). Only the
  *   module that defines it and the chat transcript.
  * - The reading's version constant is named only where a reading is defined,
@@ -43,6 +44,11 @@ interface Site {
 }
 
 const WRITERS: readonly Site[] = [
+  {
+    file: 'src/app/api/worktrees/[id]/prompt-response/answer-delivery.ts',
+    why: 'A person’s answer (second review N2): the audit row of the PC and phone panels and `commandmate respond` is stored with the reading of the frame the answer was verified against, as the Auto-Yes audit row is.',
+    proof: 'tests/unit/api/prompt-response-audit-reading-3881.test.ts',
+  },
   {
     file: 'src/lib/polling/prompt-screen-reading.ts',
     why: 'The definition: the one function that reads a frame as question / permission / confirmation, with the predicates the Auto-Yes poller acts on.',

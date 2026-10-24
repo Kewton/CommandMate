@@ -222,10 +222,18 @@ describe('[#3881 P2-1] the poller does not answer a cut target under a deny cont
   });
 
   it('陰性対照: a short capture taken from the start of the history is answered', async () => {
-    // 1000 rows in the 5000-row FULL window: the pane holds nothing above them.
+    // Second review N1: this expectation was `responded` — 1000 rows in the
+    // 5000-row FULL window read as "the pane holds nothing above them". That
+    // holds for a scrollback pane only. Claude draws in the alternate screen,
+    // which keeps no history: the capture is the screen whatever the window,
+    // and this one's first row is a diff row of the panel, not the screen's
+    // top margin — rows may have scrolled off it. So the FULL window (a grant
+    // with a stopPattern) withholds exactly as the REDUCED one does. A short
+    // capture that really starts at the history's top is the scrollback case,
+    // kept below in prompt-reading-alt-screen-top-3881.test.ts.
     seedContract(DENY_RM);
-    expect(await tick(cutTopFrame(), 5000)).toBe('responded');
-    expect(sendPromptAnswer).toHaveBeenCalledTimes(1);
+    expect(await tick(cutTopFrame(), 5000)).toBe('no_answer');
+    expect(sendPromptAnswer).not.toHaveBeenCalled();
   });
 
   it('陰性対照: no deny patterns, nothing to miss — answered on a clipped capture', async () => {

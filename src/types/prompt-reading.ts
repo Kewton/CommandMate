@@ -76,14 +76,26 @@ export type PromptReadingEvidence =
   | 'yes-no-pattern';
 
 /**
- * What the capture says about the frame's first row (Issue #3881 review P2-1).
+ * What the capture says about the frame's first row (Issue #3881 review P2-1,
+ * and the second review's N1 for the alternate screen).
  *
- * - `history-start` — the capture returned fewer rows than its window, so its
- *   first row is the first row of the pane's history;
- * - `clipped` — it filled its window: rows of the pane may be above the first
- *   row, and a `top-unknown` target may be missing its top.
+ * Two kinds of pane, and a window over either:
+ *
+ * - `history-start` — a scrollback pane whose capture returned fewer rows than
+ *   its window: its first row is the first row of the pane's history;
+ * - `clipped` — the capture filled its window: rows of the pane may be above
+ *   the first row, and a `top-unknown` target may be missing its top;
+ * - `screen-start` — an alternate-screen pane (no history at all: the capture
+ *   is the visible screen) captured whole, whose content shows the screen's
+ *   own top margin and stops above its bottom row: the tool has not scrolled
+ *   anything off, so the first row is where its content begins;
+ * - `screen-full` — an alternate-screen pane captured whole whose content
+ *   reaches its top or bottom row: the tool may have scrolled rows off the
+ *   top, and nothing keeps them.
+ *
+ * `clipped` and `screen-full` leave a `top-unknown` target incomplete.
  */
-export type CaptureTop = 'history-start' | 'clipped';
+export type CaptureTop = 'history-start' | 'clipped' | 'screen-start' | 'screen-full';
 
 /** The rows of the frame the reading treats as the live prompt (end exclusive). */
 export interface PromptLiveRange {

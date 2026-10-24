@@ -153,7 +153,7 @@ export async function POST(
     const sendFailure = await sendResolvedAnswer(ctx, request, sessionName, resolution.value, verified.verifiedFrame);
     if (sendFailure) return noted(sendFailure);
 
-    return noted(finishAnsweredPrompt(ctx, verified.promptCheck, resolution.value));
+    return noted(finishAnsweredPrompt(ctx, verified.promptCheck, resolution.value, verified.verifiedFrame));
   } catch (error: unknown) {
     logger.error('failed-to-respond-to-prompt:', { error: error instanceof Error ? error.message : String(error) });
     const errorMessage = error instanceof Error ? error.message : 'Internal server error';

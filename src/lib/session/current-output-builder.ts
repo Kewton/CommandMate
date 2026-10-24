@@ -95,6 +95,7 @@ import {
 import { applyAskUserQuestion } from '@/lib/session/ask-user-question-prompt';
 import { derivePromptView } from '@/lib/session/prompt-view';
 import { assessPromptAnswerability } from '@/lib/polling/auto-yes-dialog-gate';
+import { captureTopOf, withCaptureTopCompleteness } from '@/lib/polling/prompt-screen-reading';
 import { classifyLayerDisagreement, reportLayerDisagreement } from '@/lib/session/layer-disagreement';
 import {
   buildStructuredPromptData,
@@ -347,6 +348,8 @@ interface PromptCompositionInput {
   worktreeId: string;
   cliToolId: CLIToolType;
   output: string;
+  /** The window `output` was captured with (Issue #3881 second review N3). */
+  captureWindowLines: number;
   statusResult: StatusDetectionResult;
   startingSince: number | null;
   promptWaiting: StructuredPromptWaitingState | null;
@@ -371,6 +374,7 @@ function composePromptData({
   worktreeId,
   cliToolId,
   output,
+  captureWindowLines,
   statusResult,
   startingSince,
   promptWaiting,
@@ -388,7 +392,17 @@ function composePromptData({
   // takes it there today (the decision entries publish the same episode's
   // choices) — and this line now re-uses it, so the two surfaces cannot describe
   // different instants.
-  const scraperPromptData = statusResult.promptDetection.promptData;
+  //
+  // Issue #3881 (second review N3): with the capture's top as the Auto-Yes
+  // poller reads it — an approval target whose upward scan reached a top that
+  // may be cut carries `approvalTargetCompleteness: 'top-unknown'`, so the
+  // contract re-evaluation of `observe=1` (`prompt-observation/observe.ts`)
+  // and `wait` read the same completeness the poller acted on, from the same
+  // `captureTopOf` on this payload's own capture window.
+  const scraperPromptData = withCaptureTopCompleteness(
+    statusResult.promptDetection,
+    captureTopOf(output, captureWindowLines, cliToolId),
+  ).promptData;
   const correctedPromptData =
     scraperPromptData && askUserQuestion
       ? applyAskUserQuestion(scraperPromptData, askUserQuestion.spec)
@@ -981,10 +995,8 @@ async function buildPayload(
   // The effective window is the smaller of what this path asks for and what the
   // capture layer will ever fetch — captureSessionOutput() reads at most
   // CACHE_MAX_CAPTURE_LINES regardless of the request.
-  const captureWindowSaturated = isCaptureWindowSaturated(
-    totalLines,
-    Math.min(STATUS_CAPTURE_LINES, CACHE_MAX_CAPTURE_LINES),
-  );
+  const captureWindowLines = Math.min(STATUS_CAPTURE_LINES, CACHE_MAX_CAPTURE_LINES);
+  const captureWindowSaturated = isCaptureWindowSaturated(totalLines, captureWindowLines);
 
   // Issue #1910: saturation of the capture WINDOW is only one of the two ways
   // the cursor dies, and it is the one that never fires for the alternate-screen
@@ -1121,6 +1133,7 @@ async function buildPayload(
     worktreeId,
     cliToolId,
     output,
+    captureWindowLines,
     statusResult,
     startingSince,
     promptWaiting,

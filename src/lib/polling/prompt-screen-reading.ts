@@ -32,7 +32,9 @@
  * @module lib/polling/prompt-screen-reading
  */
 
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import { usesAlternateScreen, type CLIToolType } from '@/lib/cli-tools/types';
+import { TUI_PANE_HEIGHT } from '@/config/tmux-pane-config';
+import { stripAnsi } from '@/lib/detection/cli-patterns';
 import type { PromptDetectionResult } from '@/lib/detection/types';
 import type { PromptData } from '@/types/models';
 import {
@@ -57,11 +59,45 @@ import { selectAllowOnceOption } from './auto-yes-option-effect';
  * (Issue #1922's import rule), and the equivalence is pinned by
  * `tests/unit/lib/polling/prompt-reading-capture-top-3881.test.ts`.
  *
+ * That holds for a scrollback pane only (the second review's N1). A tool in
+ * the alternate screen ({@link usesAlternateScreen}: claude, copilot,
+ * opencode) keeps no history, so its capture is the visible screen whatever
+ * the window, and "fewer rows than the window" says nothing about what the
+ * tool scrolled off. Its capture is read off the screen instead
+ * ({@link screenTopOf}), once the window is known not to have cut it: a window
+ * of at least {@link TUI_PANE_HEIGHT} rows (the tallest alternate-screen pane)
+ * or one the capture did not fill.
+ *
  * @param capture - The capture as returned (or its cleaned spelling: same rows)
  * @param windowLines - The window it was captured with
+ * @param cliToolId - The tool whose pane it is; omitted, the pane is read as a
+ *   scrollback pane (the reading before N1)
  */
-export function captureTopOf(capture: string, windowLines: number): CaptureTop {
-  return windowLines > 0 && capture.split('\n').length >= windowLines ? 'clipped' : 'history-start';
+export function captureTopOf(capture: string, windowLines: number, cliToolId?: CLIToolType): CaptureTop {
+  const filled = windowLines > 0 && capture.split('\n').length >= windowLines;
+  if (cliToolId === undefined || !usesAlternateScreen(cliToolId)) return filled ? 'clipped' : 'history-start';
+  if (filled && windowLines < TUI_PANE_HEIGHT) return 'clipped';
+  return screenTopOf(capture);
+}
+
+/**
+ * An alternate-screen capture taken whole: does its content begin at the top
+ * of what the tool drew? These tools lay their content out from the screen's
+ * top down (a fresh 1000-row claude pane is a blank margin row, the banner,
+ * the turn, and blank rows to the bottom — `tests/fixtures/
+ * claude-confirm-live-3791/`), and one whose content outgrew the screen
+ * scrolls it: then the content reaches the bottom row
+ * (`head-cut-200x12.txt`), and the rows that left the top are gone. So the
+ * first row is the content's own only when the screen shows both its top
+ * margin (a blank first row) and room below (a blank last row); anything else
+ * — a content row at either edge — is `screen-full`, which is the side that
+ * withholds an answer rather than gives one.
+ */
+function screenTopOf(capture: string): CaptureTop {
+  // tmux ends every row with a newline: the last one is not a row of its own.
+  const rows = (capture.endsWith('\n') ? capture.slice(0, -1) : capture).split('\n');
+  const blank = (row: string | undefined): boolean => row === undefined || stripAnsi(row).trim() === '';
+  return rows.length > 1 && blank(rows[0]) && blank(rows[rows.length - 1]) ? 'screen-start' : 'screen-full';
 }
 
 /**
@@ -73,14 +109,15 @@ export function captureTopOf(capture: string, windowLines: number): CaptureTop {
  * whose command began above the capture, and whose rest fell within 12 rows,
  * was answered under a contract that denies the command.
  *
- * A capture that returned the pane's whole history (`history-start`) leaves the
- * detection as it is — that first row really is where the pane begins.
+ * A capture whose first row is where the pane's content begins
+ * (`history-start`, or `screen-start` on the alternate screen) leaves the
+ * detection as it is.
  * Blank-row compaction during detection removes no non-blank row, so it does
  * not change which of the two a frame is.
  *
  * @param detection - The tick's detection of the capture
  * @param captureTop - Where the capture's first row sits ({@link CaptureTop}),
- *   judged by the caller that knows its window (`isCaptureWindowSaturated`)
+ *   judged by the caller that knows its window ({@link captureTopOf})
  */
 export function withCaptureTopCompleteness(
   detection: PromptDetectionResult,
@@ -92,11 +129,16 @@ export function withCaptureTopCompleteness(
     promptData.approvalTarget === undefined ||
     promptData.approvalTargetCompleteness !== undefined ||
     detection.approvalContext?.completeness !== 'top-unknown' ||
-    captureTop !== 'clipped'
+    !captureTopMayBeCut(captureTop)
   ) {
     return detection;
   }
   return { ...detection, promptData: { ...promptData, approvalTargetCompleteness: 'top-unknown' } };
+}
+
+/** Whether rows may be missing above a capture's first row ({@link CaptureTop}). */
+function captureTopMayBeCut(captureTop: CaptureTop): boolean {
+  return captureTop === 'clipped' || captureTop === 'screen-full';
 }
 
 /**

@@ -940,7 +940,7 @@ function savePromptMessage(
 
   // Issue #3881 (review P2-1): whether the frame's first row is the pane's —
   // the capture was taken with `CACHE_MAX_CAPTURE_LINES` (`checkForResponse`).
-  const captureTop = captureTopOf(frame, CACHE_MAX_CAPTURE_LINES);
+  const captureTop = captureTopOf(frame, CACHE_MAX_CAPTURE_LINES, cliToolId);
 
   // Issue #571: Clean TUI decorations from Copilot prompt content before saving
   let promptSaveContent = promptContent;

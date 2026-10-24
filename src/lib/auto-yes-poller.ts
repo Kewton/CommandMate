@@ -530,7 +530,10 @@ function readPromptFrame(
     frame,
   );
   if (cliToolId === 'antigravity') endAntigravityFrameRead(worktreeId, instanceId);
-  return { frame, promptDetection: withCaptureTop(promptDetection, rawOutput ?? cleanOutput, captureWindowLines) };
+  return {
+    frame,
+    promptDetection: withCaptureTop(promptDetection, cliToolId, rawOutput ?? cleanOutput, captureWindowLines),
+  };
 }
 
 /**
@@ -542,22 +545,29 @@ function readPromptFrame(
  */
 function withCaptureTop(
   detection: PromptDetectionResult,
+  cliToolId: CLIToolType,
   capture: string,
   captureWindowLines: number | undefined,
 ): PromptDetectionResult {
-  const captureTop = captureTopOf(capture, captureWindowLines);
+  const captureTop = captureTopOf(capture, captureWindowLines, cliToolId);
   return captureTop === undefined ? detection : withCaptureTopCompleteness(detection, captureTop);
 }
 
 /**
- * Where a poller capture's first row sits (Issue #3881 review P2-1): the
- * capture is the last `captureWindowLines` rows of the pane, so one that came
- * back with fewer rows holds the pane's whole history, and one that filled the
- * window may be cut at its top (#1670's `isCaptureWindowSaturated`).
+ * Where a poller capture's first row sits (Issue #3881 review P2-1): on a
+ * scrollback pane the capture is the last `captureWindowLines` rows, so one
+ * that came back with fewer rows holds the pane's whole history, and one that
+ * filled the window may be cut at its top (#1670's `isCaptureWindowSaturated`);
+ * an alternate-screen pane has no history and is read off its screen (the
+ * second review's N1, `captureTopOf` in `prompt-screen-reading`).
  * Undefined when the window is not known.
  */
-function captureTopOf(capture: string, captureWindowLines: number | undefined): CaptureTop | undefined {
-  return captureWindowLines === undefined ? undefined : captureTopOfWindow(capture, captureWindowLines);
+function captureTopOf(
+  capture: string,
+  captureWindowLines: number | undefined,
+  cliToolId: CLIToolType,
+): CaptureTop | undefined {
+  return captureWindowLines === undefined ? undefined : captureTopOfWindow(capture, captureWindowLines, cliToolId);
 }
 
 /**
@@ -620,6 +630,7 @@ function noteNoPromptOnScreen(tick: {
       // Issue #3881: judged with the same capture-top reading as the tick's prompt.
       withCaptureTop(
         detectPromptOnCleanFrame(cleanOutput, cliToolId, precomputedLines, rawOutput),
+        cliToolId,
         rawOutput ?? cleanOutput,
         captureWindowLines,
       ),
@@ -1136,7 +1147,7 @@ export async function detectAndRespondToPrompt(
     await finishAnsweredPrompt(judged, promptDetection, answer, generation, {
       // The tick's one normalised frame (#3183), not the capture again.
       frame,
-      captureTop: captureTopOf(rawOutput ?? cleanOutput, captureWindowLines),
+      captureTop: captureTopOf(rawOutput ?? cleanOutput, captureWindowLines, cliToolId),
     });
 
     return 'responded';

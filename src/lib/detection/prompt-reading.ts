@@ -36,7 +36,12 @@ const PHASES: ReadonlySet<PromptReadingPhase> = new Set<PromptReadingPhase>(['qu
 const COMPLETENESS: ReadonlySet<ApprovalTargetCompleteness | 'not-measured'> = new Set<
   ApprovalTargetCompleteness | 'not-measured'
 >(['complete', 'truncated', 'top-unknown', 'not-measured']);
-const CAPTURE_TOPS: ReadonlySet<CaptureTop> = new Set<CaptureTop>(['history-start', 'clipped']);
+const CAPTURE_TOPS: ReadonlySet<CaptureTop> = new Set<CaptureTop>([
+  'history-start',
+  'clipped',
+  'screen-start',
+  'screen-full',
+]);
 const EVIDENCE: ReadonlySet<PromptReadingEvidence> = new Set<PromptReadingEvidence>([
   'confirm-page-reader',
   'question-picker-chrome',
