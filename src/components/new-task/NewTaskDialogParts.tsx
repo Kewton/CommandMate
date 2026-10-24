@@ -13,6 +13,8 @@ import { sameTarget, type NewTaskTarget } from '@/lib/new-task/recent-targets';
 import { describeTargetState } from '@/lib/new-task/new-task-targets';
 import type { NewTaskSendResult } from '@/lib/new-task/send-new-task';
 import type { Worktree } from '@/types/models';
+import type { AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
+import { AutoYesAnswerModeOptions } from '@/components/worktree/AutoYesAnswerModeOptions';
 
 export const FIELD_CLASS =
   'w-full px-3 py-2 border border-input rounded-lg bg-surface text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:opacity-60';
@@ -265,11 +267,16 @@ export function AutoYesField({
   autoYesChoice,
   autoYesUnknown,
   onChoiceChange,
+  answerMode,
+  onAnswerModeChange,
 }: {
   armedAutoYes: { expiresAt: number } | null;
   autoYesChoice: AutoYesDuration | null;
   autoYesUnknown: boolean;
   onChoiceChange: (choice: AutoYesDuration | null) => void;
+  /** Issue #3863: the answer mode to arm with, offered once a duration is picked. */
+  answerMode: AutoYesAnswerMode;
+  onAnswerModeChange: (mode: AutoYesAnswerMode) => void;
 }) {
   const t = useTranslations('common');
   const tAutoYes = useTranslations('autoYes');
@@ -310,9 +317,19 @@ export function AutoYesField({
           )}
           <p className="mt-1 text-xs text-muted-foreground">{t('newTask.autoYesScope')}</p>
           {autoYesChoice !== null && (
-            <p className="mt-1 text-xs text-warning-foreground" data-testid="new-task-auto-yes-risk">
-              {tAutoYes('riskWarning')}
-            </p>
+            <>
+              <div className="mt-2">
+                <AutoYesAnswerModeOptions
+                  value={answerMode}
+                  onChange={onAnswerModeChange}
+                  idPrefix="new-task-auto-yes-answer-mode"
+                  labelClassName={LABEL_CLASS}
+                />
+              </div>
+              <p className="mt-1 text-xs text-warning-foreground" data-testid="new-task-auto-yes-risk">
+                {tAutoYes('riskWarning')}
+              </p>
+            </>
           )}
         </>
       )}
