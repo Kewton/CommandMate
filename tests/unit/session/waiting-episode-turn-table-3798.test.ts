@@ -335,3 +335,39 @@ describe('[#3798] outcomes in one delivery are applied in order', () => {
     expect(effects[1].episodeId).toBeNull();
   });
 });
+
+describe('[#3798] T20 × I on a screen (PR 1a review P3-3)', () => {
+  // Column I is "the binding belongs to another generation", and T20 closes it
+  // for every binding but a screen: a session start keeps a person's screen
+  // whatever generation it was bound in, and moves it to the new one.
+  it('a screen of an older generation is rebound to the new generation, not closed', () => {
+    generationStartedAt.set(buildCompositeKey(WT, TOOL, TOOL), G2);
+    const binding: EpisodeBinding = { kind: 'screen', generation: GEN0, originTurnId: 'O' };
+    const opened = openEpisode(PARTS, { since: 100, kind: 'menu', binding, openedBy: 'status-probe' }, 100);
+
+    const effects = applyTurnOutcomesToEpisode(
+      PARTS,
+      [{ kind: 'generation-fenced', source: 'session-start', generation: GEN2, fencedTurnId: null }],
+      500
+    );
+
+    expect(effects[0]).toMatchObject({ action: 'rebound', episodeId: opened.episodeId });
+    expect(getWaitingEpisodeRecord(WT, TOOL, TOOL)).toMatchObject({
+      episodeId: opened.episodeId,
+      since: 100,
+      binding: { kind: 'screen', generation: GEN2, originTurnId: 'O' },
+    });
+  });
+
+  it('control: T19 (process start) closes it', () => {
+    generationStartedAt.set(buildCompositeKey(WT, TOOL, TOOL), G2);
+    const binding: EpisodeBinding = { kind: 'screen', generation: GEN0, originTurnId: 'O' };
+    openEpisode(PARTS, { since: 100, kind: 'menu', binding, openedBy: 'status-probe' }, 100);
+    const effects = applyTurnOutcomesToEpisode(
+      PARTS,
+      [{ kind: 'generation-fenced', source: 'process-start', generation: GEN2, fencedTurnId: null }],
+      500
+    );
+    expect(effects[0].action).toBe('closed');
+  });
+});

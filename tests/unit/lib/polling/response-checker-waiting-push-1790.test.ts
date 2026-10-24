@@ -32,7 +32,13 @@ vi.mock('web-push', () => ({
 const captureSessionOutput = vi.fn<(...a: unknown[]) => Promise<string>>();
 const isSessionRunning = vi.fn<(...a: unknown[]) => Promise<boolean>>();
 vi.mock('@/lib/session/cli-session', () => ({
-  captureSessionOutput: (...a: unknown[]) => captureSessionOutput(...a),
+  // Issue #3798: each stubbed capture is the poller's own fetch of the pane,
+  // reported to the observer as cli-session reports it.
+  captureSessionOutput: async (...a: unknown[]) => {
+    const output = await captureSessionOutput(...a);
+    globalThis.__captureFrameMetaSink?.getStore()?.({ fetchStartedAt: Date.now(), source: 'fetched' });
+    return output;
+  },
   isSessionRunning: (...a: unknown[]) => isSessionRunning(...a),
 }));
 
