@@ -35,7 +35,13 @@
  *      of an Issue with several, execution-key.mjs) and goes to the record (#3883);
  *   5. on an answer with a `DONE:` line appends one row to
  *      `consistency-review.md` and records `review=ok`; anything else records
- *      `review=fail` (run-log.mjs).
+ *      `review=fail` (run-log.mjs);
+ *   6. reads the dependency links of the reviewed worktree and of every
+ *      worktree of its repository (`git worktree list`) before the ask and
+ *      after it: a link under `node_modules` that leads out of its worktree
+ *      and appeared during the review (dependency-links.mjs) means the
+ *      reviewer wrote into a dependency tree. The answer is kept but is not a
+ *      verdict: `review=fail` with the links, exit 1 (#3883 P6).
  *
  * The columns a person judges (unique findings, kind, new/existing,
  * re-judgement, action, pre-review) are written as `未` for the orchestrator to
@@ -60,6 +66,7 @@ import { fileURLToPath } from 'node:url';
 import { appendRecord, runLogPath } from './run-log.mjs';
 import { isInstanceSelector, resolveInstanceThroughCli } from './resolve-instance.mjs';
 import { itemProblem, workItemName } from './execution-key.mjs';
+import { addedLinks, parseWorktreeList, snapshotForeignLinks } from './dependency-links.mjs';
 
 const TEMPLATE_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'templates');
 export const INITIAL_TEMPLATE = path.join(TEMPLATE_DIR, 'consistency-review.md');
@@ -545,6 +552,10 @@ export function main(argv, deps = {}) {
       record('fail', `${label}: ${o.instance} not ready ${READY_STREAK} times in a row within ${READY_MAX_POLLS} polls; not sent`);
       return 1;
     }
+    // The dependency trees the review must not write into (#3883 P6): this worktree's and its siblings'.
+    const listed = run('git', ['-C', worktree, 'worktree', 'list', '--porcelain'], { cwd });
+    const watched = [worktree, ...(listed.status === 0 ? parseWorktreeList(listed.stdout) : [])];
+    const linksBefore = snapshotForeignLinks(watched);
     const asked = now();
     const ask = run(
       o.cli,
@@ -555,6 +566,16 @@ export function main(argv, deps = {}) {
     fs.writeFileSync(file('.err'), ask.stderr);
     const askSec = Math.round((now().getTime() - asked.getTime()) / 1000);
     log(`${label}: ask exit=${ask.status} (${askSec}s)`);
+    const appeared = addedLinks(linksBefore, snapshotForeignLinks(watched));
+    if (appeared.length > 0) {
+      const listing = appeared.map(({ link, target }) => `${link} -> ${target}`);
+      for (const line of listing) error(`dependency link outside its worktree appeared during the review: ${line}`);
+      record(
+        'fail',
+        `${label}: not a verdict — ${appeared.length} dependency link(s) outside their worktree appeared during the review: ${listing.slice(0, 3).join('; ')}${appeared.length > 3 ? '; …' : ''}`
+      );
+      return 1;
+    }
     if (ask.status !== 0) {
       record('fail', `${label}: ask exit=${ask.status} (see ${label}.err)`);
       return 1;

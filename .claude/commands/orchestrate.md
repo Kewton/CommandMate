@@ -107,7 +107,7 @@ TodoWriteツールで作業計画を作成：
 - **開発タスク**: 担当は 1-2b の難易度判定で決める。**易 → `--instance antigravity`**
   （モデルは agy の既定。`--model` は渡さない）、**中 → `--instance claude`（sonnet＝Sonnet 5.5）**、**難 → `--instance claude`（opus）**
   - **Claude のモデルは `--instance` でも `--model` でも決まらない**（`send --model` は copilot / antigravity 専用で、claude に渡すと 400）。
-    セッションの**起動時**に、worktree の `.claude/settings.local.json` から決まる。書くのは 3-1 の `set_claude_model`
+    セッションの**起動時**に、worktree の `.claude/settings.local.json` から決まる。書くのは 3-1 の `launch-worker.mjs`（opus も sonnet も明示して書く）
   - **ワーカーに `/model` を送らない。** Enter が `~/.claude/settings.json` のグローバル既定を書き換える（#1495 / #2297）
   - sonnet 担当がワーカー起因で 2 回不合格になったら opus に格上げする（3-5b）
   - 送り先は `--instance` で指定し、**send / wait / capture / respond で同じ値を渡す**。
@@ -712,57 +712,37 @@ gh issue edit "$bug_issue" --repo Kewton/CommandMate --body "${CURRENT_BODY}${AN
 （両方渡すと exit 2）。stdout に task id が出るので控える（stderr の `Task created:` は人間向け）。
 
 ```bash
-# Claude のモデルは「セッションの起動時」に、worktree の .claude/settings.local.json から決まる。
-# sonnet は {"model":"sonnet"} を書く。opus は model キーを「書かない」＝ ~/.claude/settings.json の既定（opus[1m]）を継ぐ
-# （"opus" と書くと 1M コンテキストが外れる。既定が opus でない環境でだけ jq '.model = "opus"' にする）。
-set_claude_model() {  # <worktree-path> <opus|sonnet>
-  f="$1/.claude/settings.local.json"
-  # このファイルが git に無視されていること（diff にも scope ゲートにも出ないこと）を先に確かめる。無視されていなければ書かない
-  git -C "$1" check-ignore -q .claude/settings.local.json || { echo "NOT ignored: $f" >&2; return 1; }
-  mkdir -p "$1/.claude"; [ -s "$f" ] || echo '{}' > "$f"
-  if [ "$2" = sonnet ]; then jq '.model = "sonnet"' "$f" > "$f.tmp"; else jq 'del(.model)' "$f" > "$f.tmp"; fi
-  mv "$f.tmp" "$f"
+# Claude のモデルは「セッションの起動時」に、worktree の .claude/settings.local.json から決まる。書くのも送るのも
+# scripts/orchestrate/launch-worker.mjs（#3883）。opus も sonnet も毎回明示して書く（opus は opus[1m]）。消して ~/.claude/settings.json
+# の既定を継がせることはしない（既定は利用者が変える。opus 指定が fable で動いた）。git に無視されていないファイルには書かない。
+set_claude_model() {  # <worktree-path> <opus|sonnet>（手で書くとき。下の send は自分で書く）
+  node scripts/orchestrate/launch-worker.mjs set-model --worktree "$1" --model "$2"
 }
 
 # assign.tsv は 1-2b の結果（1 行 = "<issue>\t<claude|antigravity>\t<opus|sonnet|->"）。3 列目は Claude のモデル
 # assign.tsv は fd 3 から読む（stdin にすると、ループの中の commandmatedev が残りの行を読み尽くす。下の注を参照）
 while IFS="$(printf '\t')" read -r issue AGENT MODEL <&3; do
   WT=$(commandmatedev ls --branch "feature/${issue}" --quiet)
-  if [ "$AGENT" = claude ]; then
-    WT_PATH=$(commandmatedev ls --json | jq -r --arg id "$WT" '.[] | select(.id == $id) | .path')
-    # モデルは起動時に固定される。既に Claude のセッションが動いていたら、task を作る「前」に止める
-    commandmatedev instances "$WT" --json | jq -e '.[] | select(.instanceId == "claude" and .running)' > /dev/null \
-      && commandmatedev instances "$WT" kill claude
-    set_claude_model "$WT_PATH" "$MODEL" || { echo "exit=skip issue=${issue} (model not set)"; continue; }
-  fi
-  commandmatedev send "$WT" \
-    --contract ".commandmate/tasks/issue-${issue}.yaml" \
-    --instance "$AGENT" --auto-yes --duration 3h \
-    > "workspace/orchestration/runs/$DATE/send-${issue}.out" 2> "workspace/orchestration/runs/$DATE/send-${issue}.err"
-  echo "exit=$? issue=${issue}"
-  TASK_ID=$(head -1 "workspace/orchestration/runs/$DATE/send-${issue}.out")
-  # 送れたことは exit code ではなく、サーバーに task ができたことで確かめる
-  if curl -s "http://localhost:3000/api/worktrees/$WT/tasks" \
+  WT_DIR=$(commandmatedev ls --json | jq -r --arg id "$WT" '.[] | select(.id == $id) | .path')
+  # Claude（MODEL が opus|sonnet）は、動いているセッションを止め → モデルを書き → 送り → capture --json の model を確かめる。
+  # stderr に model ok / model UNKNOWN / model MISMATCH。合わない・読めないときは 1 回だけ起動し直し、なお合わなければ
+  # セッションを止めて exit 40（MISMATCH）/ 41（UNKNOWN）。
+  # 送信の出力は runs/$DATE/send-<issue>[.a<n>].out / .err（呼び出しごとに排他的に取る）。stdout は task id だけ
+  TASK_ID=$(node scripts/orchestrate/launch-worker.mjs send --run-dir "workspace/orchestration/runs/$DATE" --issue "$issue" \
+    --wt "$WT" --worktree "$WT_DIR" --instance "$AGENT" --model "$MODEL" --contract ".commandmate/tasks/issue-${issue}.yaml")
+  RC=$?; echo "exit=$RC issue=${issue}"
+  # 送れたことは exit code だけでなく、サーバーに task ができたことで確かめる
+  if [ "$RC" = 0 ] && curl -s "http://localhost:3000/api/worktrees/$WT/tasks" \
     | jq -e --arg id "$TASK_ID" '.tasks[] | select(.id == $id)' > /dev/null; then
     SENT=ok; echo "task ok issue=${issue} id=${TASK_ID}"
   else
-    SENT=fail; echo "task MISSING issue=${issue}"
+    SENT=fail; echo "task MISSING issue=${issue} (exit=$RC)"
   fi
   printf '%s\t%s\t%s\t%s\t%s\n' "$issue" "$WT" "$AGENT" "$TASK_ID" "$MODEL" >> "workspace/orchestration/runs/$DATE/tasks.tsv"
   # run の記録（1-5）。送った HEAD を残す。再開時は status の next=send の Issue だけ送り直す
-  WT_DIR=$(commandmatedev ls --json | jq -r --arg id "$WT" '.[] | select(.id == $id) | .path')
   node scripts/orchestrate/run-log.mjs append --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
-    --issue "$issue" --stage send --result "$SENT" --head "$(git -C "$WT_DIR" rev-parse HEAD)" --task "$TASK_ID" \
-    --contract ".commandmate/tasks/issue-${issue}.yaml" --agent "$AGENT" --model "$MODEL"
-  if [ "$AGENT" = claude ]; then
-    # 起動したセッションが実際にどのモデルで動いているかを確かめる（SessionStart の hook とバナーから読まれる）
-    GOT=$(commandmatedev capture "$WT" --instance claude --json | jq -r '.model // ""' | tr 'A-Z' 'a-z')
-    case "$GOT" in
-      *"$MODEL"*) echo "model ok issue=${issue} want=${MODEL} got=${GOT}" ;;
-      "")         echo "model UNKNOWN issue=${issue} want=${MODEL}" ;;
-      *)          echo "model MISMATCH issue=${issue} want=${MODEL} got=${GOT}" ;;
-    esac
-  fi
+    --issue "$issue" --stage send --result "$SENT" --head "$(git -C "$WT_DIR" rev-parse HEAD)" --task "${TASK_ID:--}" \
+    --contract ".commandmate/tasks/issue-${issue}.yaml" --agent "$AGENT" --model "$MODEL" --note "launch exit=$RC"
 done 3< "workspace/orchestration/runs/$DATE/assign.tsv"
 ```
 
@@ -770,16 +750,16 @@ done 3< "workspace/orchestration/runs/$DATE/assign.tsv"
 ループの中の `commandmatedev`（`ls` / `send` / `capture`）が stdin を読み、残りの行を消費する。
 上の雛形は fd 3 から読むので、ループの中のコマンドに `</dev/null` を付けなくてよい。雛形を書き換えて使うときも、
 stdin で読む形に戻さないこと。ループを使わずに 1 件ずつ送るときは、各 `commandmatedev` に `</dev/null` を付ける。
-`task MISSING` が出たら、その Issue は送れていない。`send-<issue>.err` を読み、3-1 の「冷間起動の失敗」に従って再送する。
+`task MISSING` が出たら、その Issue は送れていない。exit 40 / 41 は下の「モデルの確認結果」、それ以外は `send-<issue>[.a<n>].err` を読み、3-1 の「冷間起動の失敗」に従って再送する。
 
 根拠: docs/orchestrate/workers.md#3-1-assigntsv-を-stdin-で読んで止まった実測
 
-**モデルの確認結果の扱い**:
+**モデルの確認結果の扱い**（launch-worker.mjs が stderr に出す。手順は docs/orchestrate/workers.md#3-1-claude-のモデルを契約に固定する）:
 
 - `model ok`: そのまま 3-2 へ
-- `model UNKNOWN`: 20 秒おいて capture をもう一度読む。それでも空なら止めずに進め、8-2 のモデル欄に「未確認」と書く
-- `model MISMATCH`: **1 回だけやり直す**。`commandmatedev instances "$WT" kill claude` → `cat "$WT_PATH/.claude/settings.local.json"` で中身を確かめる →
-  同じ契約で再送し、tasks.tsv の task id を差し替える（exit 99 の再送と同じ扱い）。2 回目も MISMATCH なら、そのモデルのまま進めて 8-3 に書く
+- `model UNKNOWN` / `model MISMATCH`（1 回目）: launch-worker.mjs が自分で 1 回だけ起動し直す。tasks.tsv には最後の task id が入る
+- exit 40（2 回目も `model MISMATCH`）/ 41（2 回目も `model UNKNOWN`）: **セッションは止まっている。その Issue は進めない**（そのモデルのまま続けない）。
+  8-3 に書き、`.claude/settings.local.json` と CommandMate の版を確かめてから、人の判断で送り直す。利用者の `~/.claude/settings.json` は変えない
 - tasks.tsv は 5 列になった（`issue` / `WT` / `AGENT` / `TASK_ID` / `MODEL`）。**`--instance` に渡すのは 3 列目の `AGENT`**（`claude`）で、5 列目ではない
 
 stdout はパイプで切らずファイルに落とす（`| head` で切ると task が pending のまま残る）。
@@ -835,7 +815,7 @@ while IFS="$(printf '\t')" read -r issue WT AGENT TASK_ID MODEL <&3; do
   WT_DIR=$(commandmatedev ls --json | jq -r --arg id "$WT" '.[] | select(.id == $id) | .path')
   node scripts/orchestrate/wait-verify.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
     --issue "$issue" --wt "$WT" --worktree "$WT_DIR" --instance "$AGENT" --task "$TASK_ID" --model "$MODEL"
-  echo "exit=$? issue=${issue}"   # wait のログは runs/$DATE/wait-<issue>.log
+  echo "exit=$? issue=${issue}"   # wait のログは runs/$DATE/wait-<issue>[.a<n>].log（入力の manifest は同じ名前の .env.json）
 done 3< "workspace/orchestration/runs/$DATE/tasks.tsv"
 ```
 
@@ -940,7 +920,7 @@ Antigravity 担当の Issue が、ワーカー起因の不合格を 2 回再指�
 Claude（sonnet）担当の Issue が、ワーカー起因の不合格を 2 回再指示しても合格しなかったとき（3-4 の 3 回目）に行う。
 ユーザーには確認しない。格上げしたことは 8-2 と 8-3 に必ず書く。**モデルは起動時に固定されるので、セッションを作り直す以外に上げる方法は無い。**
 
-格上げするときは docs/orchestrate/switching.md#3-5b-sonnet-から-opus-への格上げ を読み、その手順 1〜5（Claude のセッションだけを止める・モデルの指定を外す・opus 用の契約を作る・送ってモデルを確かめてから待つ・以降は 3-4 に従う）で進める。
+格上げするときは docs/orchestrate/switching.md#3-5b-sonnet-から-opus-への格上げ を読み、その手順 1〜5（Claude のセッションだけを止める・opus を明示して書く・opus 用の契約を作る・送ってモデルを確かめてから待つ・以降は 3-4 に従う）で進める。
 
 **`--phase design` 指定時**: 全ワーカーの設計フェーズ完了を確認して終了。
 
@@ -990,12 +970,18 @@ Phase 3 の `scripts/orchestrate/wait-verify.mjs`（3-3）が exit 0 を返し�
 契約無しで委任した場合（`--contract` が使えない CLI など）だけ、オーケストレーターが直接ゲートを回し、結果を run の記録に書く:
 
 ```bash
-while IFS="$(printf '\t')" read -r issue WT AGENT TASK_ID MODEL <&3; do
+while IFS="$(printf '\t')" read -r issue WT AGENT TASK_ID MODEL COL6 REST <&3; do
+  ITEM=; case "$COL6" in item=?*) ITEM=${COL6#item=} ;; esac   # work item（docs/orchestrate/run-log.md 1-5）。6 列目の無い行は item 無し
+  ITEM_ARGS=(); [ -z "$ITEM" ] || ITEM_ARGS=(--item "$ITEM")
   WT_DIR=$(commandmatedev ls --json | jq -r --arg id "$WT" '.[] | select(.id == $id) | .path')
-  commandmatedev verify "$WT" --json > "workspace/orchestration/runs/$DATE/verify-${issue}.json"; RC=$?; echo "exit=$RC"
+  # 結果のファイルは呼び出しごとに排他的に取る（verify-<issue>[-<item>][.a<n>].json）。2 行目は execution key
+  { read -r OUT; read -r KEY; } < <(node scripts/orchestrate/execution-key.mjs allocate --dir "workspace/orchestration/runs/$DATE" \
+    --prefix verify --issue "$issue" --ext .json --issues "$RUN_ISSUES" --task "${TASK_ID:--}" "${ITEM_ARGS[@]}")
+  commandmatedev verify "$WT" --json > "$OUT"; RC=$?; echo "exit=$RC issue=${issue} item=${ITEM:--}"
   node scripts/orchestrate/run-log.mjs append --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
     --issue "$issue" --stage verify --result "$([ "$RC" = 0 ] && echo ok || echo fail)" \
-    --head "$(git -C "$WT_DIR" rev-parse HEAD)" --agent "$AGENT" --note "exit=$RC (verify without a contract)"
+    --head "$(git -C "$WT_DIR" rev-parse HEAD)" --agent "$AGENT" --note "exit=$RC (verify without a contract) $(basename "$OUT")" \
+    --key "$KEY" "${ITEM_ARGS[@]}"
 done 3< "workspace/orchestration/runs/$DATE/tasks.tsv"
 ```
 
@@ -1320,7 +1306,7 @@ summary.md の末尾に「振り分けの改善案」節を書き、完了報告
 
 - Antigravity から Claude への切り替え（3-5）
 - sonnet から opus への格上げ（3-5b）、または sonnet 担当が再指示を要した（1-2b の「中」の条件が甘い証拠になる）
-- `model MISMATCH` / `model UNKNOWN` のまま進めた（3-1）
+- `model MISMATCH` / `model UNKNOWN` で止まった（3-1。exit 40 / 41）
 - ワーカー起因でない不合格を、オーケストレーターの裁定で合格扱いにした（3-4）
 - 判定表と実際の結果が食い違った（「易」と判定したのに再指示が要った／「難」と判定したが小さい変更で終わった）
 - Antigravity 固有の停止（アンケート画面、冷間起動の失敗、monitor の誤判定など）

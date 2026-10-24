@@ -55,6 +55,11 @@ node scripts/orchestrate/consistency-review.mjs --run-dir "workspace/orchestrati
   ID への解決は capture・ask と同じ `--cli`（`reply <wt> --instance <指定> --json` の `instanceId`）を通すので、`.env`・`CM_BIND`・HTTPS で決まる接続先も同じになる。
   受け付ける `--instance` は CLI・サーバーと同じ条件（instance id か、制御文字を含まない 50 文字以内の alias。`/` を含む alias も可）で、ロック名には解決後の ID を使う（#3633）。
   表の「独自の発見」から「事前レビューの有無」までの列は `未` で入るので、返答を読んで埋める
+  **依存への書き込みを裁定に使わない**（#3883 P6）: ask の前後で、対象の worktree と `git worktree list` の全 worktree の `node_modules` 直下（`@scope/` の下も）の
+  リンクを読む（`scripts/orchestrate/dependency-links.mjs`）。実体のパスが自分の worktree（と自分の `node_modules` の実体）の外を指すリンクが増えた・向き先が変わったら、
+  返答は `review-<N>.json` に残すが表には足さず、`review=fail`（`not a verdict — … dependency link(s) outside their worktree appeared during the review`）・exit 1。
+  stderr に増えたリンクを 1 行ずつ出すので、人が確かめてから外す（スクリプトは消さない）。前から在ったリンクは数えない。雛形も、依存に書かない・
+  実験は `mktemp -d` の隔離コピーの中だけで行い他の worktree の `node_modules` にリンクを作らない、と依頼する
 - **数え方（期限の集計で使う）:** 延べではなく、重複・既報（ワーカーが報告済み・5-3 で処置できた）を除いた「レビューの独自の発見」を、**動作／説明／テスト** と **新規／既存** の 2 軸で数える。指摘の正しさは、一部を別の判定者（Codex と Claude の相互）で再判定する。費用は 1 本あたり、待ち時間・再指示・修正を含めた総時間で測る。後の段（CI・ガード・実機・UAT）で見つかった漏れも記録する
 
 **記録の様式。** 置き場所は `workspace/orchestration/runs/<date>/consistency-review.md`。1 レビュー 1 行の表にする。

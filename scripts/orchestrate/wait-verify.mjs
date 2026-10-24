@@ -47,7 +47,16 @@
  *     the worktree that is still going (`already in progress`, a
  *     re-instruction's old run) is waited out and the verification started
  *     again, and an Auto-Yes that cannot be read back after `--disable` is
- *     `unknown`, not `off`.
+ *     `unknown`, not `off`;
+ *   - which environment a verdict was taken in (#3883 H-8). env-clean does not
+ *     see the content of files that were already there (the global model of
+ *     `~/.claude/settings.json`, the worktree's settings, the lockfile, the
+ *     `node_modules` tree and its versions). The call keeps a manifest of them
+ *     (env-manifest.mjs) at its start, before each verification it starts and
+ *     after the verdict, in `<log>.env.json`. A change during the last
+ *     verification means no verdict (exit 3); a change during the work is
+ *     recorded with the verdict (`env-changed=`), which holds for the
+ *     environment it names (`env=<hash>`).
  *
  * A passed verdict is never reused: it belongs to a task, a contract and an
  * env-clean baseline taken when that task started, none of which a HEAD names.
@@ -70,6 +79,7 @@
  *   node scripts/orchestrate/wait-verify.mjs --auto-yes-off --wt <worktree-id> --instance <agent> [--cli <commandmatedev>]
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { spawn, spawnSync } from 'node:child_process';
@@ -78,6 +88,7 @@ import { appendRecord } from './run-log.mjs';
 import { dirtyPaths } from './dirty-tree.mjs';
 import { resolveInstanceThroughCli } from './resolve-instance.mjs';
 import { allocateLog, claimLog, executionKey, itemProblem, workItemName } from './execution-key.mjs';
+import { diffManifest, manifestHash, takeManifest } from './env-manifest.mjs';
 
 export const DEFAULT_TIMEOUT_SEC = 10800;
 export const DEFAULT_SIGNAL_TIMEOUT_SEC = 1800;
@@ -518,9 +529,11 @@ export function awaitCompletionSignal({ run, sleep, now, o, cwd, since, supersed
  *
  * @returns {{ exitCode: number, log: string, notes: string[], superseded: string | null }}
  */
-export function runVerify({ spawnToLog, run, sleep, now, o, cwd, supersededBy }, args, logFile) {
+export function runVerify({ spawnToLog, run, sleep, now, o, cwd, supersededBy, onVerifyStart }, args, logFile) {
   const notes = [];
   for (let attempt = 1; ; attempt++) {
+    // The environment this verification starts in (#3883 H-8).
+    onVerifyStart?.();
     const exitCode = spawnToLog(o.cli, args, { cwd, logFile });
     const log = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8') : '';
     const busy = VERDICT_EXIT_CODES.includes(exitCode) ? null : busyRunOf(log);
@@ -690,6 +703,7 @@ export function parseArgs(argv) {
  *   run?: typeof defaultRun,
  *   sleep?: (ms: number) => void,
  *   now?: () => Date,
+ *   home?: string,
  *   log?: (line: string) => void,
  *   error?: (line: string) => void,
  * }} [deps]
@@ -739,6 +753,10 @@ export function main(argv, deps = {}) {
     }
     o.logFile = claimed.file;
     const started = now();
+    // The inputs of this execution (#3883 H-8): at the start, before each verification, after the verdict.
+    const home = deps.home ?? os.homedir();
+    const manifest = () => takeManifest({ worktree: o.worktree, home });
+    const env = { start: manifest(), verify: null, end: null, file: `${o.logFile.replace(/\.log$/, '')}.env.json`, closed: null };
     const instance = o.instance;
     /**
      * The baseline from a readable list. `--task` beyond the TASK_LIST_LIMIT
@@ -808,7 +826,12 @@ export function main(argv, deps = {}) {
     ];
     let exitCode = spawnToLog(o.cli, waitArgs, { cwd, logFile: o.logFile, ...(watching ? { watch } : {}) });
     let verdictLog = fs.existsSync(o.logFile) ? fs.readFileSync(o.logFile, 'utf8') : '';
-    const verifyCtx = { spawnToLog, run, sleep, now, o, cwd, supersededBy };
+    const verifyCtx = {
+      spawnToLog, run, sleep, now, o, cwd, supersededBy,
+      onVerifyStart: () => {
+        env.verify = manifest();
+      },
+    };
     /** Notes about the verification (a run waited for) that go into the record. */
     const verifyNotes = [];
     let signal = null;
@@ -848,7 +871,28 @@ export function main(argv, deps = {}) {
     }
     // A newer task that came while the verification ran: its verdict is not the old task's.
     if (!superseded && !signalMissing && VERDICT_EXIT_CODES.includes(exitCode)) superseded = supersededBy();
-    const extraNotes = () => [...verifyNotes, `key=${key()}`].join(' ');
+    /**
+     * The end manifest, taken once and kept next to the log under this call's
+     * key. `duringVerify`: inputs that changed after the last verification
+     * started; `duringTask`: since the call started (#3883 H-8).
+     */
+    const closeEnv = () => {
+      if (env.closed) return env.closed;
+      env.end = manifest();
+      const duringTask = diffManifest(env.start, env.end);
+      const duringVerify = env.verify ? diffManifest(env.verify, env.end) : [];
+      env.closed = { hash: manifestHash(env.end), duringTask, duringVerify };
+      fs.writeFileSync(
+        env.file,
+        `${JSON.stringify({ key: key(), start: env.start, verify: env.verify, end: env.end, changed: { duringTask, duringVerify } }, null, 2)}\n`
+      );
+      return env.closed;
+    };
+    const envNotes = () => {
+      const closed = closeEnv();
+      return [`env=${closed.hash}`, ...(closed.duringTask.length > 0 ? [`env-changed=${closed.duringTask.join(',')}`] : [])];
+    };
+    const extraNotes = () => [...verifyNotes, `key=${key()}`, ...envNotes()].join(' ');
 
     const record = (result, head, note) => {
       const durationSec = Math.round((now().getTime() - started.getTime()) / 1000);
@@ -905,6 +949,16 @@ export function main(argv, deps = {}) {
     const late = supersededBy();
     if (late) {
       record('fail', headNow(), `unconfirmed: ${late}; ${verdict.line} ${extraNotes()} auto-yes=kept`);
+      return UNCONFIRMED_EXIT;
+    }
+    // The inputs changed while the last verification ran: the verdict belongs to neither environment (#3883 H-8).
+    const movedEnv = closeEnv().duringVerify;
+    if (movedEnv.length > 0) {
+      record(
+        'fail',
+        headNow(),
+        `unconfirmed: the inputs changed during the verification (${movedEnv.join(',')}; see ${path.basename(env.file)}); ${verdict.line} ${extraNotes()} auto-yes=kept`
+      );
       return UNCONFIRMED_EXIT;
     }
 

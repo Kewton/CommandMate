@@ -37,6 +37,24 @@ done
 その run では 1 件目の `send` の前でループが止まり、**約 90 分、ワーカーが 1 人も起動していないのに「送信中」と報告した**
 （send の出力ファイルは 1 つも作られず、`GET /api/worktrees/<WT>/tasks` は空だった）。
 
+## 3-1 Claude のモデルを契約に固定する
+
+本体の 3-1・3-5・3-5b（docs/orchestrate/switching.md）は、送信を `scripts/orchestrate/launch-worker.mjs send` で行う（#3883）。手順の写しは作らず、この helper を呼ぶ。
+
+- **書く**: Claude（`--model opus|sonnet`）は、動いているセッションを止めてから、worktree の `.claude/settings.local.json` の `model` に
+  契約のモデルを**毎回明示して**書く（opus は `opus[1m]`、sonnet は `sonnet`。ほかのキーは残す）。以前は opus のとき `model` を消していたので、
+  `~/.claude/settings.json` のグローバル既定を継ぎ、利用者が既定を fable に変えた後の run では opus 指定のワーカーが fable で動いた
+  （2026-10-23、summary-3749-3839）。利用者のグローバル設定は読みも書きもしない。git が無視していないファイル（`git check-ignore` が通らない）や
+  JSON でないファイルには書かず、何も送らずに exit 2
+- **確かめる**: 送った後に `capture --json` の `model` を読む（空なら 20 秒おいて 3 回まで）。契約のモデル（`opus` / `sonnet` の語）を含めば `model ok`。
+  空のままなら `model UNKNOWN`、別のモデルなら `model MISMATCH`
+- **1 回だけ起動し直す**: UNKNOWN / MISMATCH はセッションを止め、モデルを書き直し、同じ契約で送り直す（新しい task になる）。2 回目も一致しなければ
+  セッションを止めて exit 40（MISMATCH）/ 41（UNKNOWN）。**そのモデルのまま task を進めない**
+- **送信の出力**: `runs/<date>/send-<issue>[-<item>][.a<n>].out` / `.err` を呼び出しごとに排他的に取る（`execution-key.mjs`。同じ Issue の送信を並行しても、
+  起動し直しても混ざらない）。stdout は task id だけ。send が失敗したとき（exit 99 など）はその exit code を返し、モデルは確かめない
+- **単独で使うとき**: `launch-worker.mjs set-model --worktree <path> --model <opus|sonnet>`（本体の `set_claude_model` はこれを呼ぶ）、
+  `launch-worker.mjs check-model --wt <WT> --model <opus|sonnet>`（0 / 40 / 41）
+
 ## 3-2 monitor の起動と読み方
 
 より詳細な監視は orchestrate-monitor skill を使う。契約付き委任では**タスク状態を一次ソース**に
@@ -117,6 +135,13 @@ exit 10 にもならない）。
   再試行がログと終了コードを取り合わない（`.exit` にはこの呼び出しだけが知る印が付き、ほかの書き手の `.exit` は読まない）。既にある `--log` を渡すと exit 2。
   記録には work item（`item`）と execution key（`key`）が入る（docs/orchestrate/run-log.md#1-5-同じ-issue-の複数の-prwork-item）
 - **Auto-Yes を切った後の読み返し**: `capture --json` が読めないときは「切れた」とせず読み直す。最後まで読めなければ `auto-yes=unknown`（#3883）
+- **実行の入力の manifest**（#3883 H-8）: env-clean は `$HOME` 直下のエントリの増減を見るが、既にあるファイルの中身は見ない。
+  呼び出しの開始・各検証の開始の直前・裁定の後に、`~/.claude/settings.json` の `model`、worktree の `.claude/settings.local.json`、
+  `package-lock.json` の hash、`node_modules` の所在（実体のパス・リンクか）と package.json の直接の依存の版を読み（`env-manifest.mjs`。HOME 全体は辿らない）、
+  ログと同じ名前の `.env.json` に execution key と一緒に残す。**最後の検証の開始から裁定までに変わっていれば裁定しない**（exit 3、
+  `unconfirmed: the inputs changed during the verification (<項目>)`。2 つの環境にまたがった結果なので、どちらの環境の合格にもしない）。
+  作業中に変わったものは記録に `env-changed=<項目>` と残し、裁定は終わりの manifest（`env=<hash>`）の環境での結果として扱う。
+  `wait --verify` 1 本のとき（検証の開始が分からない）は、変化を記録するだけ
 - **`--instance` はサーバーが解決した id で通す**（#3587）: 最初に `GET /api/worktrees/<WT>/resolve-target?instance=<指定>`（`wait` / `capture` / `send` と同じ権威。
   primary 優先・大小文字・alias の段は route のとおり）を、ほかの呼び出しと同じ `--cli` の `reply <WT> --instance <指定> --json` 越しに引き（#3633。
   `.env`・`CM_BIND`・HTTPS で決まる接続先も、`--cli` のラッパーの設定も同じになる）、待機・検証・task の比較・`capture`・Auto-Yes（`--auto-yes-off` も）の

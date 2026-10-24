@@ -21,9 +21,19 @@
  * The files of an attempt are named after it: `wait-<work item>.log` for the
  * first attempt (the name it always had), `wait-<work item>.a<n>.log` after
  * that, and `.verify.log` / `.reverify.log` / `.exit` derived from that name.
+ * The send of 3-1 (`send-<work item>[.a<n>].out` / `.err`, launch-worker.mjs)
+ * and the contract-less verification of 5-1 (`verify-<work item>[.a<n>].json`)
+ * take their files the same way, so two sends of one Issue never share them.
+ *
+ * Usage (the runbook's shell blocks):
+ *   node scripts/orchestrate/execution-key.mjs allocate --dir <run dir> --prefix <name> --issue <N>
+ *        [--item <work item>] [--ext <.json>] [--issues <range> --task <id|->]
+ *   prints the file taken, and with --issues the execution key on a second line.
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
 /** A work item name: a short label, no dots or slashes (it becomes part of a file name). */
 export const ITEM_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/;
@@ -47,14 +57,14 @@ export function executionKey({ issues, issue, item, taskId, attempt }) {
 }
 
 /**
- * Take the log of a new attempt: the first `<prefix>-<work item>[.a<n>].log`
- * in `dir` that does not exist yet, created with `wx` so a concurrent call
- * cannot take the same one. Returns `{ file, attempt }`.
+ * Take the log of a new attempt: the first `<prefix>-<work item>[.a<n>]<ext>`
+ * (`.log` unless given) in `dir` that does not exist yet, created with `wx` so
+ * a concurrent call cannot take the same one. Returns `{ file, attempt }`.
  */
-export function allocateLog(dir, prefix, workItem) {
+export function allocateLog(dir, prefix, workItem, ext = '.log') {
   fs.mkdirSync(dir, { recursive: true });
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const file = path.join(dir, `${prefix}-${workItem}${attempt === 1 ? '' : `.a${attempt}`}.log`);
+    const file = path.join(dir, `${prefix}-${workItem}${attempt === 1 ? '' : `.a${attempt}`}${ext}`);
     try {
       fs.closeSync(fs.openSync(file, 'wx'));
       return { file, attempt };
@@ -62,7 +72,7 @@ export function allocateLog(dir, prefix, workItem) {
       if (err?.code !== 'EEXIST') throw err;
     }
   }
-  throw new Error(`more than ${MAX_ATTEMPTS} ${prefix} logs of ${workItem} in ${dir}`);
+  throw new Error(`more than ${MAX_ATTEMPTS} ${prefix}${ext} files of ${workItem} in ${dir}`);
 }
 
 /**
@@ -83,3 +93,57 @@ export function claimLog(file) {
   }
   return { file, attempt: 1 };
 }
+
+const USAGE = `Usage:
+  node scripts/orchestrate/execution-key.mjs allocate --dir <run dir> --prefix <name> --issue <N>
+       [--item <work item>] [--ext <.json>] [--issues <range> --task <id|->]`;
+const FLAGS = { '--dir': 'dir', '--prefix': 'prefix', '--issue': 'issue', '--item': 'item', '--ext': 'ext', '--issues': 'issues', '--task': 'taskId' };
+
+/** `allocate`'s arguments, or `{ error }`. */
+export function parseArgs(argv) {
+  if (argv[0] !== 'allocate') return { error: `unknown command: ${argv[0] ?? '(none)'}` };
+  const options = { ext: '.log' };
+  for (let i = 1; i < argv.length; i++) {
+    const arg = argv[i];
+    if (FLAGS[arg] && i + 1 < argv.length) options[FLAGS[arg]] = argv[++i];
+    else return { error: `unknown or incomplete argument: ${arg}` };
+  }
+  for (const flag of ['--dir', '--prefix', '--issue']) {
+    if (!options[FLAGS[flag]]) return { error: `${flag} is required` };
+  }
+  if (!/^[1-9]\d*$/.test(options.issue)) return { error: `--issue must be a positive integer (got ${options.issue})` };
+  if (!/^[a-z][a-z-]{0,31}$/.test(options.prefix)) return { error: `--prefix must be a lowercase name (got ${options.prefix})` };
+  if (!/^\.[a-z]{1,8}$/.test(options.ext)) return { error: `--ext must look like .json (got ${options.ext})` };
+  const badItem = itemProblem(options.item);
+  if (badItem) return { error: badItem };
+  return { options };
+}
+
+/**
+ * @param {string[]} argv
+ * @param {{ log?: (line: string) => void, error?: (line: string) => void }} [deps]
+ * @returns {number} exit code
+ */
+export function main(argv, deps = {}) {
+  const log = deps.log ?? ((line) => console.log(line));
+  const error = deps.error ?? ((line) => console.error(line));
+  const parsed = parseArgs(argv);
+  if (parsed.error) {
+    error(`${parsed.error}\n${USAGE}`);
+    return 2;
+  }
+  const o = parsed.options;
+  try {
+    const issue = Number(o.issue);
+    const { file, attempt } = allocateLog(o.dir, o.prefix, workItemName(issue, o.item), o.ext);
+    log(file);
+    if (o.issues) log(executionKey({ issues: o.issues, issue, item: o.item, taskId: o.taskId === '-' ? null : o.taskId, attempt }));
+    return 0;
+  } catch (err) {
+    error(err instanceof Error ? err.message : String(err));
+    return 1;
+  }
+}
+
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) process.exit(main(process.argv.slice(2)));

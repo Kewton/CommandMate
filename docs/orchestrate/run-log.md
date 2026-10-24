@@ -138,3 +138,5 @@ done 3< <(awk -F'\t' '{
 - 再開は `run-log.mjs status` の work item ごとの行（`#3883/d1`）で、`next` の段から上の雛形の同じ行を呼ぶ
 - 6-4 の一本化は、work item ごとの控え（`module-reference-<issue>-<item>.md`）を読む
 - 再指示（3-4）の `--after-reinstruct` の呼び出しにも同じ `--item` を付ける。最後の 1 本の `--last` は `ITEM_ARGS` の後に足す
+- 3-1 の送信（`launch-worker.mjs send --item`）は `send-<issue>[-<item>][.a<n>].out` / `.err`、5-1 の契約なしの検証は `execution-key.mjs allocate` で
+  `verify-<issue>[-<item>][.a<n>].json` を呼び出しごとに排他的に取り、記録に同じ `--item` と execution key（`--key`）を入れる（#3883。本体の 5-1 の雛形は 6 列目を読む）

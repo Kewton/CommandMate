@@ -1280,3 +1280,70 @@ describe('every Antigravity instance waits for the signal, whatever its id (#388
     expect(h.ran.some((c) => c.args.includes('--pane'))).toBe(false);
   });
 });
+
+describe('the inputs of the execution are kept with the verdict (#3883 H-8)', () => {
+  const t1 = task('t-1', -10);
+  /** A worktree and a HOME of their own, with the files the manifest reads. */
+  function env() {
+    const wt = path.join(tmp, 'wt');
+    const home = path.join(tmp, 'home');
+    fs.mkdirSync(path.join(wt, '.claude'), { recursive: true });
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(wt, '.claude', 'settings.local.json'), '{"model":"opus[1m]"}');
+    fs.writeFileSync(path.join(wt, 'package-lock.json'), '{"lockfileVersion":3}');
+    fs.writeFileSync(path.join(home, '.claude', 'settings.json'), '{"model":"opus[1m]"}');
+    return { wt, home };
+  }
+  /** Run main with `change` applied when the wait (`wait`) or the verification (`verify`) runs. */
+  function go(h: ReturnType<typeof harness>, when: 'wait' | 'verify' | null, change: () => void) {
+    const { wt, home } = env();
+    const inner = h.deps.spawnToLog;
+    h.deps.spawnToLog = (command: string, args: string[], opts: { logFile: string; watch?: () => boolean }) => {
+      if (args[0] === when) change();
+      return inner(command, args, opts);
+    };
+    return main(argv('--worktree', wt), { ...h.deps, home } as Parameters<typeof main>[1]);
+  }
+  const lockfile = () => fs.writeFileSync(path.join(tmp, 'wt', 'package-lock.json'), '{"lockfileVersion":3,"changed":true}');
+  const globalModel = () => fs.writeFileSync(path.join(tmp, 'home', '.claude', 'settings.json'), '{"model":"fable"}');
+
+  it('nothing changed: the verdict names its environment and the manifest is kept under the key (negative control)', () => {
+    const h = harness({ tasks: [t1] });
+    expect(go(h, null, () => {})).toBe(0);
+    const note = records()[0].note as string;
+    expect(note).toMatch(/ env=[0-9a-f]{12} auto-yes=off$/);
+    expect(note).not.toContain('env-changed');
+    const kept = JSON.parse(fs.readFileSync(path.join(runDir, 'wait-3477.env.json'), 'utf8'));
+    expect(kept.key).toBe('3477:3477:t-1:a1');
+    expect(kept.end.globalModel).toBe('opus[1m]');
+    expect(kept.changed).toEqual({ duringTask: [], duringVerify: [] });
+  });
+
+  it('the lockfile changes during the verification → no verdict (exit 3), Auto-Yes kept', () => {
+    const h = harness({ tasks: [t1] });
+    expect(go(h, 'verify', lockfile)).toBe(3);
+    expect(records()[0]).toMatchObject({ result: 'fail' });
+    expect(records()[0].note).toMatch(/^unconfirmed: the inputs changed during the verification \(lockfile; see wait-3477\.env\.json\); exit=0\(passed\)/);
+    expect(h.autoYesCalls()).toEqual([]);
+  });
+
+  it('the global default model changes during the verification → no verdict either', () => {
+    const h = harness({ tasks: [t1] });
+    expect(go(h, 'verify', globalModel)).toBe(3);
+    expect(records()[0].note).toContain('(globalModel;');
+  });
+
+  it('a change while the worker worked is recorded with the verdict, which stands for the end environment', () => {
+    const h = harness({ tasks: [t1] });
+    expect(go(h, 'wait', lockfile)).toBe(0);
+    expect(records()[0]).toMatchObject({ result: 'ok' });
+    expect(records()[0].note).toMatch(/ env=[0-9a-f]{12} env-changed=lockfile auto-yes=off$/);
+  });
+
+  it('wait --verify (no split): a change is recorded, not judged — the moment of the verification is not known', () => {
+    const h = harness();
+    expect(go(h, 'wait', globalModel)).toBe(0);
+    expect(h.spawned[0].args).toContain('--verify');
+    expect(records()[0].note).toContain('env-changed=globalModel');
+  });
+});
