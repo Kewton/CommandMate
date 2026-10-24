@@ -63,7 +63,8 @@ export interface AutoYesPollerState {
   lastAnsweredAt: number | null;
   /**
    * Issue #3791 (review N1): the duplicate guard actually held back the prompt
-   * on screen on the last tick that read it — see `reserveDuplicateRetry`. The
+   * on screen on the last tick that read it — see `reserveDuplicateRetry` —
+   * or a tick is sending that prompt's retry (review N3, `isDuplicateRetryOf`). The
    * push gate reads it (off `globalThis`) to hold that wait until the guard's
    * retry. Optional so hand-built states need not name it.
    */

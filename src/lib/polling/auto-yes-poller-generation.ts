@@ -227,6 +227,21 @@ export function reserveDuplicateRetry(pollerState: AutoYesPollerState, promptKey
 }
 
 /**
+ * Issue #3791 (review N3): is `promptKey` the prompt the guard reserved, its
+ * guard since expired — the tick about to send the retry the reservation
+ * waited for? Its reservation is then kept until that send is settled.
+ */
+export function isDuplicateRetryOf(pollerState: AutoYesPollerState, promptKey: string): boolean {
+  const reservation = pollerState.duplicateRetryReservation;
+  return (
+    reservation !== undefined &&
+    reservation !== null &&
+    reservation.promptKey === promptKey &&
+    reservation.answeredAt === pollerState.lastAnsweredAt
+  );
+}
+
+/**
  * Issue #3791 (review N1): the tick did not hold the prompt back with the
  * guard — another screen, no prompt, a failed tick, no session — so the wait
  * is no longer the guard's retry to wait for.

@@ -127,6 +127,7 @@ import {
   autoYesPollerStates,
   getPollerState,
   isDuplicatePrompt,
+  isDuplicateRetryOf,
   isPollerCurrent,
   isSameSession,
   isTickCurrent,
@@ -769,10 +770,13 @@ export async function detectAndRespondToPrompt(
   const ledgerTick = beginLedgerTick(ledgerScope);
   // Issue #3821: when this tick began, for the decision's reason (see `tickDecisionRecorder`).
   const tickStartedAt = Date.now();
-  // Issue #3791 (review N1): set again below only when the duplicate guard
-  // holds back the prompt this tick reads — before any await, so the push gate
-  // never sees the old screen's reservation for this tick's screen.
-  releaseDuplicateRetry(pollerState);
+  // Issue #3791 (review N1 / N3): the duplicate guard's reservation outlives
+  // this tick only when the guard holds the prompt back again. It stays up
+  // while the tick goes on to send the retry of the reserved prompt (an answer
+  // still on its way), and is released before any await for another screen,
+  // and in `finally` for everything else — withheld, failed, stopped, or
+  // answered (the new answer restarts the hold).
+  let keepDuplicateRetry = false;
   try {
     // 1. Detect prompt.
     //
@@ -895,6 +899,7 @@ export async function detectAndRespondToPrompt(
     if (isDuplicatePrompt(pollerState, promptKey)) {
       // Issue #3791 (review N1): the push gate holds this wait until the retry.
       reserveDuplicateRetry(pollerState, promptKey, tickStartedAt);
+      keepDuplicateRetry = true;
       // Issue #3820: not answered on this tick either — an interval of its own
       // reason, so the count can tell the wait for an answer to land apart.
       withholdLedgerConfirmation(ledgerScope, 'answered-recently');
@@ -902,6 +907,9 @@ export async function detectAndRespondToPrompt(
       decision.reaffirmAnswering();
       return 'duplicate';
     }
+    // Issue #3791 (review N3): another screen than the reserved one — released
+    // now, before the awaits below, so the gate never reads it for this screen.
+    if (!isDuplicateRetryOf(pollerState, promptKey)) releaseDuplicateRetry(pollerState);
 
     const judged: JudgedPrompt = {
       worktreeId,
@@ -1036,6 +1044,7 @@ export async function detectAndRespondToPrompt(
     });
   } finally {
     endLedgerTick(ledgerScope, ledgerTick);
+    if (!keepDuplicateRetry) releaseDuplicateRetry(pollerState);
   }
 }
 

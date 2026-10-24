@@ -17,8 +17,14 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+/** Held open by a test while it asks the gate mid-tick (review N3). */
+let ownershipGate: Promise<void> | null = null;
+let ownershipVerdict: 'owned' | 'foreign' = 'owned';
 vi.mock('@/lib/cli-tools/worktree-session-ownership', () => ({
-  checkWorktreeSessionOwnership: async () => ({ verdict: 'owned', sessionPath: null }),
+  checkWorktreeSessionOwnership: async () => {
+    if (ownershipGate) await ownershipGate;
+    return { verdict: ownershipVerdict, sessionPath: null };
+  },
 }));
 
 import Database from 'better-sqlite3';
@@ -73,6 +79,7 @@ import {
   clearAllAutoYesStates,
   COOLDOWN_INTERVAL_MS,
   DUPLICATE_RETRY_EXPIRY_MS,
+  disableAutoYes,
   getAutoYesState,
   POLLING_INTERVAL_MS,
   setAutoYesEnabled,
@@ -86,6 +93,7 @@ import {
   AUTO_YES_ANSWER_GRACE_MS,
   autoYesHoldEndsAt,
   clearAutoYesHolds,
+  decideAndLogPromptPush,
 } from '@/lib/push/prompt-push-gate';
 import { stripAnsi, stripBoxDrawing } from '@/lib/detection/cli-patterns';
 
@@ -162,6 +170,9 @@ beforeEach(() => {
   runMigrations(db);
   vi.clearAllMocks();
   captureSessionOutput.mockImplementation(async () => '');
+  sendPromptAnswer.mockImplementation(async () => {});
+  ownershipGate = null;
+  ownershipVerdict = 'owned';
   getSessionPresence.mockImplementation(async () => 'present');
   clearManualAnswers();
   clearAllAutoYesStates();
@@ -262,5 +273,140 @@ describe('[#3791 N1] the poller reserves the duplicate guard\'s retry only when 
     expect(await tick(PERMISSION)).toBe('duplicate');
     stopAllAutoYesPolling();
     expect(autoYesHoldEndsAt(wait, Date.now())).toBe(OPENED_AT + AUTO_YES_ANSWER_GRACE_MS);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review N3: the tick that sends the retry keeps the reservation until the send settles
+// ---------------------------------------------------------------------------
+
+/** A promise a test resolves by hand. */
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
+/** Another permission, with another question: not the reserved prompt. */
+const OTHER_PERMISSION = 'Allow this edit to src/app.ts?\n❯ 1. Yes\n  2. No';
+
+/** When the guard has expired: the first tick after it sends the retry. */
+const RETRY_TICK_AT = T0 + DUPLICATE_RETRY_EXPIRY_MS + POLLING_INTERVAL_MS / 2;
+
+/** Answer at T0, the wait held at OPENED_AT, the guard holding the prompt back on its ticks. */
+async function reservedUntilTheGuardExpires(): Promise<void> {
+  await answeredThenWaiting();
+  for (let at = T0 + COOLDOWN_INTERVAL_MS; at < T0 + DUPLICATE_RETRY_EXPIRY_MS; at += POLLING_INTERVAL_MS) {
+    vi.setSystemTime(at);
+    expect(await tick(PERMISSION)).toBe('duplicate');
+  }
+  vi.setSystemTime(RETRY_TICK_AT);
+}
+
+/** What the response checker's re-check of the same wait decides now. */
+function gateReason(): string {
+  return decideAndLogPromptPush({ ...wait, now: Date.now() }).reason;
+}
+
+describe('[#3791 N3] the retry of the reserved prompt keeps the hold while it is being sent', () => {
+  it('positive: held on the ownership check — the hold stays at the retry plus two ticks, then the answer takes over', async () => {
+    await reservedUntilTheGuardExpires();
+    const gate = deferred();
+    ownershipGate = gate.promise;
+
+    const sending = tick(PERMISSION);
+    await vi.advanceTimersByTimeAsync(0);
+    // Mid-tick, past the 9 s of the hold: still Auto-Yes's to answer.
+    expect(Date.now()).toBeGreaterThan(OPENED_AT + AUTO_YES_ANSWER_GRACE_MS);
+    expect(poller().duplicateRetryReservation).not.toBeNull();
+    expect(autoYesHoldEndsAt(wait, Date.now())).toBe(RETRY_HOLD_ENDS_AT);
+    expect(gateReason()).toBe('auto-yes-answering');
+
+    gate.resolve();
+    expect(await sending).toBe('responded');
+    // The new answer takes over: released, and the hold counts from the answer.
+    expect(poller().lastAnsweredAt).toBe(RETRY_TICK_AT);
+    expect(poller().duplicateRetryReservation).toBeNull();
+    expect(autoYesHoldEndsAt(wait, Date.now())).toBe(RETRY_TICK_AT + AUTO_YES_ANSWER_GRACE_MS);
+  });
+
+  it('positive: held inside the sender — the hold stays at the retry plus two ticks', async () => {
+    await reservedUntilTheGuardExpires();
+    const gate = deferred();
+    sendPromptAnswer.mockImplementation(() => gate.promise);
+
+    const sending = tick(PERMISSION);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sendPromptAnswer).toHaveBeenCalledTimes(2);
+    expect(autoYesHoldEndsAt(wait, Date.now())).toBe(RETRY_HOLD_ENDS_AT);
+    expect(gateReason()).toBe('auto-yes-answering');
+
+    gate.resolve();
+    expect(await sending).toBe('responded');
+    expect(poller().duplicateRetryReservation).toBeNull();
+  });
+
+  it('the bound: a send still held past the retry plus two ticks no longer holds the wait', async () => {
+    await reservedUntilTheGuardExpires();
+    const gate = deferred();
+    sendPromptAnswer.mockImplementation(() => gate.promise);
+
+    const sending = tick(PERMISSION);
+    await vi.advanceTimersByTimeAsync(0);
+    vi.setSystemTime(RETRY_HOLD_ENDS_AT);
+    expect(gateReason()).toBe('auto-yes-not-answered');
+
+    gate.resolve();
+    await sending;
+  });
+
+  it('negative: another prompt held on the ownership check — released before the await, the usual 9 s', async () => {
+    await reservedUntilTheGuardExpires();
+    const gate = deferred();
+    ownershipGate = gate.promise;
+
+    const sending = tick(OTHER_PERMISSION);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(poller().duplicateRetryReservation).toBeNull();
+    expect(autoYesHoldEndsAt(wait, Date.now())).toBe(OPENED_AT + AUTO_YES_ANSWER_GRACE_MS);
+    expect(gateReason()).toBe('auto-yes-not-answered');
+
+    gate.resolve();
+    expect(await sending).toBe('responded');
+  });
+
+  it('negative: the retry withheld (a session another server owns) — released', async () => {
+    await reservedUntilTheGuardExpires();
+    ownershipVerdict = 'foreign';
+    expect(await tick(PERMISSION)).toBe('no_answer');
+    expect(poller().lastAnsweredAt).toBe(T0);
+    expect(poller().duplicateRetryReservation).toBeNull();
+    expect(autoYesHoldEndsAt(wait, Date.now())).toBe(OPENED_AT + AUTO_YES_ANSWER_GRACE_MS);
+  });
+
+  it('negative: the retry\'s send fails — released, the usual 9 s', async () => {
+    await reservedUntilTheGuardExpires();
+    sendPromptAnswer.mockRejectedValue(new Error('send failed'));
+    expect(await tick(PERMISSION)).toBe('error');
+    expect(poller().lastAnsweredAt).toBe(T0);
+    expect(poller().duplicateRetryReservation).toBeNull();
+    expect(autoYesHoldEndsAt(wait, Date.now())).toBe(OPENED_AT + AUTO_YES_ANSWER_GRACE_MS);
+  });
+
+  it('negative: Auto-Yes switched off during the retry\'s ownership check — released', async () => {
+    await reservedUntilTheGuardExpires();
+    const gate = deferred();
+    ownershipGate = gate.promise;
+
+    const sending = tick(PERMISSION);
+    await vi.advanceTimersByTimeAsync(0);
+    const state = poller();
+    disableAutoYes(WT, 'claude');
+    gate.resolve();
+    expect(await sending).toBe('no_answer');
+    expect(state.duplicateRetryReservation).toBeNull();
+    expect(decideAndLogPromptPush({ ...wait, now: Date.now() }).reason).toBe('auto-yes-inactive');
   });
 });

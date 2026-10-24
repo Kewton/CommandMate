@@ -115,7 +115,8 @@
  * answered on the first tick after. While the poller reports that the guard
  * actually held back the prompt of this wait (`duplicateRetryReservation`,
  * review N1: its tick matched the guard's key, since this wait opened, and no
- * tick since read another screen, no prompt, no session or failed) the hold
+ * tick since read another screen, no prompt, no session or failed; the tick
+ * sending the retry keeps it until that send is settled, review N3) the hold
  * also lasts until that retry plus two ticks: {@link duplicateRetryHoldEndsAt}.
  * An answer alone does not: a different screen the poller will not answer, or
  * an error backoff, after an answer still notifies at the usual 9 s. Read on
