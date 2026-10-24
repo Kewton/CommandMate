@@ -27,6 +27,13 @@
  * was already merged. 6-2 now merges each (Issue, work item) once, on its
  * latest row, and closes only on the Issue's last one.
  *
+ * N6 (review-3883-d1-5): N5 folded every row without item into one target
+ * per Issue, so an old run's second PR of an Issue (#3880: A1 → A2 → an A1
+ * retry, each PR its own worktree) was dropped as a retry, and the target
+ * left closed the Issue by merge-pr's default. Rows without item are now one
+ * target per (Issue, worktree); every target but the Issue's last gets
+ * `--close -`.
+ *
  * Everything is under os.tmpdir(); bash always, zsh too when it is installed
  * (the orchestrator's shell on macOS).
  *
@@ -581,6 +588,102 @@ describe('6-2 closes the Issue only on its last work item, whatever rows a retry
     const before = replay([...d1, '--close', '3883']);
     expect(before.code).toBe(0);
     expect(before.fakeOf.state.issueState).toBe('CLOSED');
+  });
+});
+
+describe('6-2 keeps each old PR of an Issue, one per worktree, and closes on the last only (#3883 N6)', { timeout: 30_000 }, () => {
+  const mergeBlock = bashBlocks(section(read('docs/orchestrate/run-log.md'), '1-5 work item の run の呼び出し'))[4];
+  const DATE = '2026-10-24';
+  const env = { DATE, RUN_ISSUES: '3880-3884' };
+  // The rows of runs/2026-10-24/tasks.tsv: retry labels in the 6th column, no item=.
+  const OLD_RUN = [
+    ['3880', 'commandmate-issue-3880-a1', 'claude', 'task-a1', 'opus', '3880-a1'],
+    ['3881', 'commandmate-issue-3881-b1', 'claude', 'task-b1', 'opus', '3881-b1'],
+    ['3882', 'commandmate-issue-3882', 'claude', 'task-3882', 'sonnet', '3882'],
+    ['3883', 'commandmate-issue-3883-d1', 'claude', 'task-d1', 'opus', '3883-d1'],
+    ['3880', 'commandmate-issue-3880-a2', 'claude', 'task-a2', 'opus', '3880-a2'],
+    ['3880', 'commandmate-issue-3880-a1', 'claude', 'task-a1-r2', 'opus', '3880-a1-r2'],
+    ['3881', 'commandmate-issue-3881-b1', 'claude', 'task-b1-r2', 'opus', '3881-b1-r2'],
+    ['3881', 'commandmate-issue-3881-b1', 'claude', 'task-b1-r3', 'opus', '3881-b1-r3'],
+    ['3882', 'commandmate-issue-3882', 'claude', 'task-3882-r3', 'opus', '3882-r3'],
+    ['3883', 'commandmate-issue-3883-d1', 'claude', 'task-d1-r2', 'opus', '3883-d1-r2'],
+  ];
+
+  function setUp(rows: string[][]) {
+    const wts = [...new Set(rows.map((row) => row[1]))];
+    fs.writeFileSync(path.join(fake, 'ls.json'), JSON.stringify(wts.map((wt) => ({ id: wt, path: path.join(tmp, 'worktrees', wt) }))));
+    const runDir = path.join(tmp, 'workspace', 'orchestration', 'runs', DATE);
+    fs.mkdirSync(runDir, { recursive: true });
+    fs.writeFileSync(path.join(runDir, 'tasks.tsv'), rows.map((row) => row.join('\t') + '\n').join(''));
+    return { runDir };
+  }
+  /** `#<issue>/<item|-> <worktree> close=<value>`, and `close=(default)` when merge-pr gets no --close. */
+  const merges = () =>
+    calls().map((argv) => {
+      expect(parseMergeArgs(argv.slice(1)).error).toBeUndefined();
+      const value = (flag: string) => (argv.includes(flag) ? argv[argv.indexOf(flag) + 1] : undefined);
+      return `#${value('--issue')}/${value('--item') ?? '-'} ${path.basename(value('--worktree')!)} close=${value('--close') ?? '(default)'}`;
+    });
+
+  for (const shell of SHELLS) {
+    it(`${shell}: the old run — #3880's A1 (its retry row) with --close -, then A2 with the default close; same-worktree retries and single PRs once, default`, () => {
+      setUp(OLD_RUN);
+      const r = sh(shell, mergeBlock, env);
+      expect(r.stderr).toBe('');
+      expect(r.status).toBe(0);
+      expect(merges()).toEqual([
+        '#3880/- commandmate-issue-3880-a1 close=-',
+        '#3881/- commandmate-issue-3881-b1 close=(default)',
+        '#3882/- commandmate-issue-3882 close=(default)',
+        '#3883/- commandmate-issue-3883-d1 close=(default)',
+        '#3880/- commandmate-issue-3880-a2 close=(default)',
+      ]);
+    });
+
+    it(`${shell}: one Issue with rows with and without item cannot tell its last PR: none of them closes it`, () => {
+      setUp([
+        ['3880', 'wt-old', 'claude', 'task-old', 'opus', '3880-a1'],
+        ['3880', 'wt-d1', 'claude', 'task-d1', 'opus', 'item=d1'],
+        ['3880', 'wt-d2', 'claude', 'task-d2', 'opus', 'item=d2'],
+      ]);
+      expect(sh(shell, mergeBlock, env).status).toBe(0);
+      expect(merges()).toEqual(['#3880/- wt-old close=-', '#3880/d1 wt-d1 close=-', '#3880/d2 wt-d2 close=-']);
+    });
+  }
+
+  it('the explicit work items keep their own close: d1, d2, a d1 retry → d1 (default: open), d2 --close', () => {
+    setUp([
+      ['3883', 'wt-d1', 'claude', 'task-d1', 'opus', 'item=d1'],
+      ['3883', 'wt-d2', 'claude', 'task-d2', 'opus', 'item=d2'],
+      ['3883', 'wt-d1', 'claude', 'task-d1-r2', 'opus', 'item=d1'],
+    ]);
+    expect(sh('bash', mergeBlock, env).status).toBe(0);
+    expect(merges()).toEqual(['#3883/d1 wt-d1 close=(default)', '#3883/d2 wt-d2 close=3883']);
+    expect(parseMergeArgs(calls()[0].slice(1)).options?.close).toBe('-');
+  });
+
+  it('replayed through the real merge-pr with A1 already merged: A1 leaves #3880 open (N5 closed it), A2 closes it', () => {
+    const { runDir } = setUp(OLD_RUN);
+    expect(sh('bash', mergeBlock, env).status).toBe(0);
+    const argvOf = (wt: string) =>
+      calls()
+        .find((argv) => path.basename(argv[argv.indexOf('--worktree') + 1]) === wt)!
+        .slice(1)
+        .map((a) => (a === `workspace/orchestration/runs/${DATE}` ? runDir : a));
+    const replay = (argv: string[], branch: string, number: number) => {
+      const merged = openPr({ number, state: 'MERGED', headRefName: branch, title: `fix: ${branch} (#3880)` });
+      const fakeOf = fakeGit({ branch, prs: [merged] });
+      const err: string[] = [];
+      const code = merge(argv, { run: fakeOf.run, sleep: () => undefined, now: () => new Date(Date.UTC(2026, 9, 24, 9)), log: () => undefined, error: (l: string) => err.push(l) } as Parameters<typeof merge>[1]);
+      return { code, err: err.join('\n'), issueState: fakeOf.state.issueState };
+    };
+    const a1 = argvOf('commandmate-issue-3880-a1');
+    expect(replay(a1, 'feature/3880-a1', 9101)).toEqual({ code: 0, err: '', issueState: 'OPEN' });
+    // N5's A1 call had no --close: merge-pr's default closed #3880 before A2.
+    const withoutKeep = a1.filter((a, i) => !(a === '--close' || a1[i - 1] === '--close'));
+    expect(withoutKeep).not.toContain('--close');
+    expect(replay(withoutKeep, 'feature/3880-a1', 9101).issueState).toBe('CLOSED');
+    expect(replay(argvOf('commandmate-issue-3880-a2'), 'feature/3880-a2', 9102)).toEqual({ code: 0, err: '', issueState: 'CLOSED' });
   });
 });
 

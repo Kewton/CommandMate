@@ -46,6 +46,10 @@ work item と読むと、再開した段が別の単位を読み書きし、publ
   なる）。再試行のラベルを残すなら 7 列目に書く
 - **同じ work item の行が複数あるとき**: 6-2 は (Issue, work item) ごとに最新の行だけをマージし、Issue を閉じるのはその Issue の
   最後の対象だけ（`d1`→`d2`→`d1` の再試行なら d1 の最新の行・d2 の順で、d2 だけ `--close`）。最後の行と同じ名前の先の行を終わりとして扱わない
+- **item 無しの行（旧い run）**: 6-2 は (Issue, WT) を 1 つの PR とみなす。同じ WT の行は再試行で最新の 1 行だけ、別の WT は別の PR で
+  どれも残す（#3880 の A1→A2→A1 の再試行なら A1 の最新の行・A2 の順）。最後の対象より前は `--close -`、最後だけ merge-pr の既定で閉じる。
+  切替で WT を変えた行も別の PR に数える。旧い WT の PR を出していなければ、その対象で merge-pr が「no PR」で止まり、後の対象も Issue も
+  閉じないので、どちらの PR を残すかを決めてから残りを呼ぶ
 
 ```bash
 # 3-1: 送った行の 6 列目に item=<work item> を書き（item=d1 など。work item の無い Issue は item= だけ）、send の記録にも同じ --item を付ける
@@ -101,24 +105,33 @@ done 3< "workspace/orchestration/runs/$DATE/tasks.tsv"
 ```
 
 ```bash
-# 6-2: マージの対象は (Issue, work item) ごとに 1 本。同じ work item の再送・切替の行が後にあっても、その最新の行だけを、
-# work item が tasks.tsv に初めて出た順に 1 本ずつ。--item の merge は Issue を閉じない。その Issue の最後の対象だけ --close "$issue"
+# 6-2: マージの対象は 1 PR に 1 本。item= の行は (Issue, work item)、item 無しの行（旧い run・work item の無い Issue）は (Issue, WT)
+# を単位にし（同じ WT は再試行、別の WT は別の PR）、単位ごとの最新の行だけを、その単位が tasks.tsv に初めて出た順に 1 本ずつ。
+# Issue を閉じるのはその Issue の最後の対象だけ。それより前の対象は閉じない（item 無しには --close - を付ける）。
+# item 有りと無しが混ざる Issue はどれが最後か決められないので、全部 --close - にして、全部マージした後に手で閉じる
 while IFS="$(printf '\t')" read -r CLOSE issue WT AGENT TASK_ID MODEL COL6 REST <&3; do
   ITEM=; case "$COL6" in item=?*) ITEM=${COL6#item=} ;; esac   # item= で始まらない 6 列目（旧い run のラベル）は item 無し
   ITEM_ARGS=(); [ -z "$ITEM" ] || ITEM_ARGS=(--item "$ITEM")
-  [ "$CLOSE" != close ] || ITEM_ARGS+=(--close "$issue")
+  case "$CLOSE" in close) ITEM_ARGS+=(--close "$issue") ;; keep) ITEM_ARGS+=(--close -) ;; esac   # default は merge-pr の既定
   WT_DIR=$(commandmatedev ls --json | jq -r --arg id "$WT" '.[] | select(.id == $id) | .path')
   node scripts/orchestrate/merge-pr.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
     --issue "$issue" --worktree "$WT_DIR" "${ITEM_ARGS[@]}"
-  RC=$?; echo "merge exit=$RC issue=${issue} item=${ITEM:--}"
+  RC=$?; echo "merge exit=$RC issue=${issue} item=${ITEM:--} wt=${WT} close=${CLOSE}"
   [ "$RC" = 0 ] || break   # 止まったら、その PR を直してから同じ雛形を回し直す（マージ済みの PR は merge-pr が記録だけ足して飛ばす）
 done 3< <(awk -F'\t' '{
-    it = ($6 ~ /^item=./) ? substr($6, 6) : ""; k = $1 SUBSEP it
-    if (!(k in row)) { order[++n] = k; issueOf[k] = $1; itemOf[k] = it }
+    it = ($6 ~ /^item=./) ? substr($6, 6) : ""
+    k = (it != "") ? $1 SUBSEP "item" SUBSEP it : $1 SUBSEP "wt" SUBSEP $2
+    if (!(k in row)) { order[++n] = k; issueOf[k] = $1; withItem[k] = (it != ""); if (it != "") items[$1]++; else plain[$1]++ }
     row[k] = $0
   } END {
-    for (j = 1; j <= n; j++) if (itemOf[order[j]] != "") last[issueOf[order[j]]] = order[j]
-    for (j = 1; j <= n; j++) print (order[j] == last[issueOf[order[j]]] ? "close" : "-") "\t" row[order[j]]
+    for (j = 1; j <= n; j++) last[issueOf[order[j]]] = order[j]
+    for (j = 1; j <= n; j++) {
+      k = order[j]; i = issueOf[k]
+      if (items[i] && plain[i]) c = "keep"
+      else if (k != last[i]) c = withItem[k] ? "default" : "keep"
+      else c = withItem[k] ? "close" : "default"
+      print c "\t" row[k]
+    }
   }' "workspace/orchestration/runs/$DATE/tasks.tsv")
 ```
 
