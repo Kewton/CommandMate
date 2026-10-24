@@ -39,13 +39,19 @@ agy 用の目印を使い、`realtimeSnippet` と `content` の長い方から�
 検証が途中の成果物ですべて通ると、未完成の変更がマージに進む。wait が返ったら、まず合図を確かめる:
 
 ```bash
-commandmatedev capture "$WT" --instance antigravity --pane --tail 40 \
-  | perl -pe 's/\e\[[0-9;]*m//g' \
-  | grep -qE '^[[:space:]]*IMPL_COMPLETED[[:space:]]*$' && echo "signal: done" || echo "signal: not yet"
+# 合図は「この task の」返事の中で探す（#3883）。$INSTANCE は antigravity-2 などの追加 instance でもよい
+TASK_CREATED=$(commandmatedev task show "$TASK_ID" --json | jq -r '.task.createdAt')
+commandmatedev reply "$WT" --instance "$INSTANCE" --since "$TASK_CREATED" --json \
+  | jq -r '.reply // empty' \
+  | grep -qE '^[[:space:]]*IMPL_COMPLETED([[:space:]]+head=[0-9a-f]{7,40})?[[:space:]]*$' && echo "signal: done" || echo "signal: not yet"
 ```
 
 - **行全体が `IMPL_COMPLETED` である行だけ**を合図として数える。goal の文面（「最後に `IMPL_COMPLETED` とだけ出力する」）も
   画面に表示されるので、部分一致では誤判定する
+- 画面（`capture --pane`）の裸の `IMPL_COMPLETED` では決めない。前の task の行が画面に残ったまま、この task の途中のターン終了
+  （`schedule` など）が来ることがあり、ターン終了の時刻はその行がこの task のものかを示さない（#3883）。返事がまだ無い（`reply: null`）・
+  読めないときに画面で数えてよいのは、今の HEAD を名指す `IMPL_COMPLETED head=<sha>` で、`git log -1 --format=%cI` がこの task の作成
+  （`$TASK_CREATED`）より後のときだけ。それ以外は `not yet` として待つ
 - `not yet` なら、合図が出るまで待つ。作業が続いているかは、`capture --prompts` と commits の増加で確かめる
 - 合図が出たら、wait の検証が合図より前に始まっていないかを確かめる。
   比べるのは、「wait が起動した検証の開始時刻」と「最後のターン終了の時刻」（合図を出したターンの終了）の 2 つ。

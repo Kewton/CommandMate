@@ -22,13 +22,19 @@
  * The result goes to the `pr` stage of `run-log.mjs` with the PR number, the
  * pushed HEAD and the work HEAD under it.
  *
+ * `--item <work item>` (#3883): one PR of an Issue that has several. Only that
+ * work item's records are read and the `pr` record carries it, so another PR
+ * of the Issue — its records at its own HEAD — neither stops this one nor
+ * stands for it. The PRs the run record has for the Issue's other work items
+ * are not taken for "two PRs for one Issue".
+ *
  * Exit code: 0 published (or already open / merged), 1 a condition failed or a
  * command failed, 2 usage error or a dirty tree.
  *
  * Usage:
  *   node scripts/orchestrate/publish-pr.mjs --run-dir <dir> --issues <range> --issue <N> --worktree <path>
  *        [--branch <name>] [--base develop] [--repo Kewton/CommandMate] [--title <text>] [--body-file <file>]
- *        [--label <a,b>] [--allow-other-pr]
+ *        [--label <a,b>] [--allow-other-pr] [--item <work item>]
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -51,14 +57,16 @@ import {
   moduleReferenceBackup,
   moduleReferenceFragment,
   prsOfBranch,
+  itemOption,
   refersToIssue,
+  siblingPrNumbers,
   withGhRetry,
   workHeadOf,
 } from './pr-common.mjs';
 
 const USAGE = `Usage:
   node scripts/orchestrate/publish-pr.mjs --run-dir <dir> --issues <range> --issue <N> --worktree <path>
-       [--branch <name>] [--base ${DEFAULT_BASE_BRANCH}] [--repo ${DEFAULT_REPO}] [--title <text>] [--body-file <file>] [--label <a,b>] [--allow-other-pr]`;
+       [--branch <name>] [--base ${DEFAULT_BASE_BRANCH}] [--repo ${DEFAULT_REPO}] [--title <text>] [--body-file <file>] [--label <a,b>] [--allow-other-pr] [--item <work item>]`;
 
 const FLAGS = {
   '--run-dir': 'runDir',
@@ -71,6 +79,7 @@ const FLAGS = {
   '--title': 'title',
   '--body-file': 'bodyFile',
   '--label': 'label',
+  '--item': 'item',
 };
 const SWITCHES = { '--allow-other-pr': 'allowOtherPr' };
 
@@ -85,6 +94,9 @@ export function parseArgs(argv) {
   for (const flag of ['--run-dir', '--issues', '--issue', '--worktree']) {
     if (!options[FLAGS[flag]]) return { error: `${flag} is required` };
   }
+  const item = itemOption(options);
+  if ('error' in item) return { error: item.error };
+  options.item = item.item;
   return { options };
 }
 
@@ -129,6 +141,7 @@ export function main(argv, deps = {}) {
     return 2;
   }
   const issue = Number(o.issue);
+  const item = o.item;
   const baseRef = `origin/${o.base}`;
 
   try {
@@ -149,7 +162,7 @@ export function main(argv, deps = {}) {
       const { file } = appendRecord(
         o.runDir,
         o.issues,
-        { issue, stage: 'pr', result: 'ok', head, workHead, note: `pr=#${prNumber} ${note}` },
+        { issue, item, stage: 'pr', result: 'ok', head, workHead, note: `pr=#${prNumber} ${note}` },
         now()
       );
       log(`recorded -> ${file}`);
@@ -164,15 +177,17 @@ export function main(argv, deps = {}) {
     const { records } = readRecords(o.runDir, o.issues);
     const markers = markerFiles(run, o.worktree);
     const problems = [
-      ...missingRecords(records, issue, { head, workHead }),
+      ...missingRecords(records, issue, { head, workHead }, item),
       ...(markers.length > 0 ? [`conflict markers in ${markers.join(', ')} (6-2)`] : []),
-      ...fragmentProblems(run, { worktree: o.worktree, runDir: o.runDir, issue, baseRef }),
+      ...fragmentProblems(run, { worktree: o.worktree, runDir: o.runDir, issue, baseRef, item }),
     ];
     if (!open && !o.allowOtherPr) {
       // Every open PR, filtered here: a search would miss a body reference or a branch name.
       const others = ghJson(run, ['pr', 'list', '--repo', o.repo, '--state', 'open', '--limit', '500', '--json', 'number,title,body,headRefName']);
+      // The run's own PRs of the Issue's other work items are meant; any other PR of the Issue still stops the run.
+      const siblings = siblingPrNumbers(records, issue, item);
       for (const pr of others) {
-        if (pr.headRefName !== branch && refersToIssue(pr, issue)) {
+        if (pr.headRefName !== branch && !siblings.has(pr.number) && refersToIssue(pr, issue)) {
           problems.push(`#${pr.number} (${pr.headRefName}) is already open for #${issue} — pass --allow-other-pr if both are meant`);
         }
       }
@@ -186,7 +201,7 @@ export function main(argv, deps = {}) {
     const fragment = moduleReferenceFragment(o.worktree, issue);
     if (fs.existsSync(fragment)) {
       fs.mkdirSync(o.runDir, { recursive: true });
-      fs.copyFileSync(fragment, moduleReferenceBackup(o.runDir, issue));
+      fs.copyFileSync(fragment, moduleReferenceBackup(o.runDir, issue, item));
     }
 
     const push = run('git', ['-C', o.worktree, 'push', '-u', 'origin', branch]);

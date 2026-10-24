@@ -111,8 +111,24 @@ const NOT_STARTED_EXIT = 21;
 export const VERDICT_EXIT_CODES = [0, 20, 21];
 /** The verdict could not be tied to the finished work. */
 export const UNCONFIRMED_EXIT = 3;
-/** Instances whose turn end is not trusted as completion without the signal (3-3, #2605). */
+/**
+ * Tools whose turn end is not trusted as completion without the signal (3-3,
+ * #2605). Matched against the tool the instance runs (`cliToolId`), so a second
+ * instance (`antigravity-2`) and an alias of it need the signal too (#3883).
+ */
 export const SIGNAL_INSTANCES = ['antigravity'];
+
+/**
+ * Whether the completion signal is needed before a verdict: `--require-signal`,
+ * or an instance of a SIGNAL_INSTANCES tool. The tool is the one the server
+ * resolved (`o.cliToolId`); a server that does not name it leaves the instance
+ * id, and an id of the form `<tool>-<n>` (the roster's ids) counts as that tool.
+ */
+export function needsCompletionSignal(o) {
+  if (o.requireSignal) return true;
+  if (o.cliToolId) return SIGNAL_INSTANCES.includes(o.cliToolId);
+  return SIGNAL_INSTANCES.some((tool) => o.instance === tool || String(o.instance).startsWith(`${tool}-`));
+}
 const EXIT_MEANINGS = {
   0: 'passed',
   20: 'failed',
@@ -243,16 +259,18 @@ export function summarizeVerdict(log, exitCode) {
  * Whether a pane (or a reply) shows the completion signal on a line of its own
  * (3-3: the goal text also contains the word). A signal that names its HEAD
  * (`IMPL_COMPLETED head=<sha>`) counts only for that HEAD when `head` is given
- * (#3883); the bare line the goal asks for counts as before.
+ * (#3883); the bare line the goal asks for counts as before, unless
+ * `requireHead` (a pane read with a task known: only a line naming its HEAD).
  */
-export function hasCompletionSignal(pane, { head } = {}) {
+export function hasCompletionSignal(pane, { head, requireHead = false } = {}) {
   return pane
     .replace(/\u001b\[[0-9;]*m/g, '')
     .split('\n')
     .some((line) => {
       const match = /^[\s]*IMPL_COMPLETED(?:[\s]+head=([0-9a-f]{7,40}))?[\s]*$/.exec(line);
       if (!match) return false;
-      return !match[1] || !head || head.startsWith(match[1]);
+      if (!match[1]) return !requireHead;
+      return !head || head.startsWith(match[1]);
     });
 }
 
@@ -333,11 +351,14 @@ function querySafely(run, cli, args, cwd) {
  *
  * @param {string} wt
  * @param {string} selector
- * @param {{ cwd?: string, cli?: string, run?: typeof defaultRun }} [options]
- * @returns {{ instanceId: string } | { error: string }}
+ * `withTool` also returns the tool the instance runs (`cliToolId`), which
+ * decides whether the completion signal is needed (#3883).
+ *
+ * @param {{ cwd?: string, cli?: string, run?: typeof defaultRun, withTool?: boolean }} [options]
+ * @returns {{ instanceId: string, cliToolId?: string } | { error: string }}
  */
-export function defaultResolveTarget(wt, selector, { cwd, cli = 'commandmatedev', run = defaultRun } = {}) {
-  return resolveInstanceThroughCli(run, cli, wt, selector, { cwd, timeoutMs: QUERY_TIMEOUT_MS });
+export function defaultResolveTarget(wt, selector, { cwd, cli = 'commandmatedev', run = defaultRun, withTool = false } = {}) {
+  return resolveInstanceThroughCli(run, cli, wt, selector, { cwd, timeoutMs: QUERY_TIMEOUT_MS, withTool });
 }
 
 /** The instance a task was sent to: its instance id, or the agent's primary instance. */
@@ -438,14 +459,18 @@ export function disableAutoYes({ run, sleep, cli, wt, instance, cwd, error }) {
 
 /**
  * Wait until the completion signal of this task is seen (3-3, #2605), and
- * name the HEAD it was seen at (#3883 H-6). A signal is this task's when
+ * name the HEAD it was seen at (#3883 H-6). With a task to date it by
+ * (`since`: the task's creation), a signal is this task's only when
  *   - it is in this task's reply (`reply --since <task start> --json`: the
- *     transcript turns of the instance from the task's creation on). A reply
- *     without it is "not yet", whatever an older line on the pane says; or
- *   - the instance has no such reply (a tool without a transcript reader, or
- *     an older server), it is on the pane, and a turn of the instance ended
- *     after the task was created (`capture --json` `lastStopEventAt`). An
- *     unreadable turn end is noted (`last-stop=unknown`), not guessed.
+ *     transcript turns of the instance from the task's creation on), or
+ *   - the reply has nothing (`reply: null` — no reply yet, or none written)
+ *     or cannot be read, and the pane shows `IMPL_COMPLETED head=<sha>` naming
+ *     the current HEAD, committed at or after the task was created: a commit
+ *     of this task that an earlier task's line cannot name.
+ * A bare `IMPL_COMPLETED` on the pane is not enough with a task known: the
+ * line of an earlier task stays on the screen, and a turn of this task that
+ * ended mid-work (`schedule`, a stop hook) does not make it this task's.
+ * Nothing that ties the line to the task is "not yet", until --signal-timeout.
  * A signal that names its HEAD must name the current one. With no task to
  * date it by (`since` null: the ledger does not show the task), the pane line
  * is taken as before and noted `signal-task=unknown`.
@@ -465,13 +490,13 @@ export function awaitCompletionSignal({ run, sleep, now, o, cwd, since, supersed
       if (hasCompletionSignal(reply, { head })) return { seen: true, head, note: 'signal=seen(reply)' };
     } else {
       const pane = run(o.cli, ['capture', o.wt, '--instance', o.instance, '--pane', '--tail', '40'], { cwd });
-      if (pane.status === 0 && hasCompletionSignal(pane.stdout, { head })) {
-        if (!sinceIso) return { seen: true, head, note: 'signal=seen signal-task=unknown' };
-        const state = readJson(run, o.cli, ['capture', o.wt, '--instance', o.instance, '--json'], cwd);
-        const lastStop = typeof state?.lastStopEventAt === 'number' ? state.lastStopEventAt : null;
-        if (lastStop === null) return { seen: true, head, note: 'signal=seen signal-turn=unknown' };
-        if (lastStop >= since) return { seen: true, head, note: 'signal=seen' };
-        // The line is on the pane, but no turn of this task has ended: it is an earlier task's.
+      const screen = pane.status === 0 ? pane.stdout : '';
+      if (!sinceIso) {
+        if (hasCompletionSignal(screen, { head })) return { seen: true, head, note: 'signal=seen signal-task=unknown' };
+      } else if (hasCompletionSignal(screen, { head, requireHead: true })) {
+        // The line names this HEAD; it is this task's when this HEAD is a commit of this task.
+        const committedAt = Date.parse(git(run, o.worktree, ['log', '-1', '--format=%cI', head]).trim());
+        if (Number.isFinite(committedAt) && committedAt >= since) return { seen: true, head, note: 'signal=seen(pane,head)' };
       }
     }
     const newer = supersededBy?.();
@@ -538,7 +563,7 @@ export function confirmCompletion(ctx) {
 
   // 1. The completion signal, for instances whose turn end can come mid-work.
   let signal = ctx.signal ?? null;
-  if (!signal && (o.requireSignal || SIGNAL_INSTANCES.includes(o.instance))) {
+  if (!signal && needsCompletionSignal(o)) {
     const seen = awaitCompletionSignal({ ...ctx, since: ctx.since ?? null });
     if (!seen.seen) return { state: 'working', exitCode, log, reason: seen.reason, reverified: false };
     signal = seen;
@@ -684,12 +709,13 @@ export function main(argv, deps = {}) {
   // One id for everything that follows — the wait, the verifications, the task
   // comparison, capture and Auto-Yes: tasks carry the resolved id, not the alias.
   // Unresolvable means nothing is sent and nothing is waited for (#3587 review 2-3).
-  const target = resolveTarget(o.wt, o.instance, { cwd, cli: o.cli, run });
+  const target = resolveTarget(o.wt, o.instance, { cwd, cli: o.cli, run, withTool: true });
   if ('error' in target) {
     error(`cannot resolve --instance '${o.instance}' in ${o.wt}: ${target.error}`);
     return 2;
   }
   o.instance = target.instanceId;
+  o.cliToolId = target.cliToolId ?? null;
 
   try {
     if (o.autoYesOff) {
@@ -770,7 +796,7 @@ export function main(argv, deps = {}) {
     // This script starts `verify` itself, after one more check (#3587). An
     // instance whose turn end can come mid-work is split too: its verification
     // starts only after its completion signal (#3883 P4), not at the hook_stop.
-    const needsSignal = o.requireSignal || SIGNAL_INSTANCES.includes(instance);
+    const needsSignal = needsCompletionSignal(o);
     const split = o.afterReinstruct || watching || needsSignal;
     const waitArgs = [
       'wait', o.wt, '--instance', instance, '--on-prompt', 'human',

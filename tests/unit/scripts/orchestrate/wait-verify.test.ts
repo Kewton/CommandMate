@@ -104,6 +104,8 @@ function harness({
   replies = [] as (string | null)[],
   captureJsonFails = 0,
   verifySequence = [] as { exit: number; log: string }[],
+  resolvedTools = {} as Record<string, string>,
+  replyFails = false,
 } = {}) {
   const spawned: Call[] = [];
   const ran: Call[] = [];
@@ -183,6 +185,7 @@ function harness({
       }
       if (args[0] === 'reply' && args.includes('--since') && !args[args.indexOf('--since') + 1].startsWith('9999')) {
         // #3883 H-6: this task's reply (`reply --since <task start>`); none by default, as for a tool without a transcript reader.
+        if (replyFails) return { status: 1, stdout: '', stderr: 'HTTP 503' };
         const reply = replies.length === 0 ? null : replies[Math.min(replyIndex, replies.length - 1)];
         replyIndex += 1;
         return ok(JSON.stringify({ worktreeId: args[1], instanceId: args[args.indexOf('--instance') + 1], reply }));
@@ -191,7 +194,8 @@ function harness({
         // `reply --json` resolves --instance through the server, as defaultResolveTarget asks it (#3633 A).
         if (resolveError) return { status: 2, stdout: '', stderr: `Error: ${resolveError}` };
         const selector = args[args.indexOf('--instance') + 1];
-        return ok(JSON.stringify({ worktreeId: args[1], instanceId: resolved[selector] ?? selector, reply: null }));
+        const tool = resolvedTools[selector];
+        return ok(JSON.stringify({ worktreeId: args[1], instanceId: resolved[selector] ?? selector, ...(tool ? { cliToolId: tool } : {}), reply: null }));
       }
       if (args[0] === 'verify' && args[1] === 'history') {
         if (historyStartMinute !== undefined) return ok(JSON.stringify([{ id: 99, startedAt: iso(historyStartMinute) }]));
@@ -213,7 +217,9 @@ function harness({
     },
     // The server's resolve-target: an alias maps through `resolved`, anything else names itself.
     resolveTarget: (wt: string, selector: string) =>
-      resolveError ? { error: resolveError } : { instanceId: resolved[selector] ?? selector },
+      resolveError
+        ? { error: resolveError }
+        : { instanceId: resolved[selector] ?? selector, ...(resolvedTools[selector] ? { cliToolId: resolvedTools[selector] } : {}) },
     sleep: (ms: number) => {
       sleeps.push(ms);
       clock += ms;
@@ -838,6 +844,13 @@ describe('defaultResolveTarget asks the server through the CLI’s ApiClient (#3
     expect(defaultResolveTarget('wt-1', 'codex 2', { cwd: tmp, cli: fakeCli() })).toEqual({ instanceId: 'codex-2' });
   });
 
+  it('withTool: the tool behind the instance comes too, for the signal rule (#3883)', () => {
+    expect(defaultResolveTarget('wt-1', 'codex 2', { cwd: tmp, cli: fakeCli(), withTool: true })).toEqual({
+      instanceId: 'codex-2',
+      cliToolId: 'codex',
+    });
+  });
+
   it('an error from the route is an error, not the selector as given', () => {
     const result = defaultResolveTarget('wt-1', 'Main', { cwd: tmp, cli: fakeCli() });
     expect(result).toHaveProperty('error');
@@ -1048,11 +1061,40 @@ describe('the completion signal is this task’s, at this HEAD (#3883 H-6, P4)',
     expect(h.autoYesCalls()).toEqual([]);
   });
 
-  it('the same pane after a turn of this task ended is taken (negative control)', () => {
+  it('the same pane after a turn of this task ended is still not this task’s: the turn may have ended mid-work', () => {
+    // review-3883-d1 (2) P2-1: an earlier task's line stays on the screen, and this task's
+    // `schedule` / stop hook ends a turn without finishing — the stop time says nothing about the line.
     const h = harness({ tasks: [t1], pane: ['IMPL_COMPLETED'], lastStopMinute: 4 });
+    expect(main(agy(), h.deps)).toBe(3);
+    expect(kinds(h)).toEqual(['wait']);
+    expect(records()[0].note).toMatch(/^unconfirmed: no IMPL_COMPLETED line within 60s; /);
+    expect(h.autoYesCalls()).toEqual([]);
+  });
+
+  it('no reply yet and the turn end unknown: a bare line on the pane is not taken either', () => {
+    const h = harness({ tasks: [t1], pane: ['IMPL_COMPLETED'], lastStopMinute: null });
+    expect(main(agy(), h.deps)).toBe(3);
+    expect(kinds(h)).toEqual(['wait']);
+  });
+
+  it('a reply that cannot be read is not "no reply": the bare pane line still does not count', () => {
+    const h = harness({ tasks: [t1], pane: ['IMPL_COMPLETED'], lastStopMinute: 4, replyFails: true });
+    expect(main(agy(), h.deps)).toBe(3);
+    expect(kinds(h)).toEqual(['wait']);
+  });
+
+  it('a pane line naming this HEAD, committed during this task, is this task’s (negative control)', () => {
+    // The task was created at 00:58; the HEAD was committed at 01:03.
+    const h = harness({ tasks: [t1], pane: [`IMPL_COMPLETED head=${'a'.repeat(12)}`], replyFails: true });
     expect(main(agy(), h.deps)).toBe(0);
     expect(kinds(h)).toEqual(['wait', 'verify']);
-    expect(records()[0].note).toContain('signal=seen');
+    expect(records()[0].note).toContain('signal=seen(pane,head)');
+  });
+
+  it('a pane line naming this HEAD committed before the task is an earlier task’s', () => {
+    const h = harness({ tasks: [t1], pane: [`IMPL_COMPLETED head=${'a'.repeat(12)}`], commitMinute: -5 });
+    expect(main(agy(), h.deps)).toBe(3);
+    expect(kinds(h)).toEqual(['wait']);
   });
 
   it('this task’s reply decides over the pane: a reply without the signal is not yet, whatever the pane shows', () => {
@@ -1191,5 +1233,50 @@ describe('a signal with no task to date it by (#3883, negative control)', () => 
     expect(main(args, h.deps)).toBe(0);
     expect(records()[0].note).toContain('signal=seen signal-task=unknown');
     expect(h.ran.some((c) => c.args[0] === 'reply' && !c.args.includes('9999-12-31T23:59:59Z'))).toBe(false);
+  });
+});
+
+describe('every Antigravity instance waits for the signal, whatever its id (#3883, review-3883-d1 P2-2)', () => {
+  const base = (instance: string, ...extra: string[]) =>
+    [...argv().map((a) => (a === 'claude' ? instance : a)), '--signal-timeout', '60', ...extra];
+
+  it('a second instance (antigravity-2): a mid-work turn end starts no verification', () => {
+    const h = harness({ pane: ['working…'], resolvedTools: { 'antigravity-2': 'antigravity' } });
+    expect(main(base('antigravity-2'), h.deps)).toBe(3);
+    expect(h.spawned).toHaveLength(1);
+    expect(h.spawned[0].args).not.toContain('--verify');
+    expect(h.autoYesCalls()).toEqual([]);
+  });
+
+  it('an alias of it: the tool the server resolved decides, not the name given', () => {
+    const h = harness({ pane: ['working…'], resolved: { 'agy b': 'antigravity-2' }, resolvedTools: { 'agy b': 'antigravity' } });
+    expect(main(base('agy b'), h.deps)).toBe(3);
+    expect(h.spawned.map((c) => c.args)).toEqual([['wait', 'wt-1', '--instance', 'antigravity-2', '--on-prompt', 'human', '--timeout', '10800']]);
+  });
+
+  it('through the CLI (no injected resolver): the cliToolId of `reply --json` is read', () => {
+    const h = harness({ pane: ['working…'], resolved: { 'agy b': 'antigravity-2' }, resolvedTools: { 'agy b': 'antigravity' } });
+    const { resolveTarget: _injected, ...deps } = h.deps;
+    expect(main(base('agy b'), deps)).toBe(3);
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait']);
+  });
+
+  it('a server that does not name the tool: an id of the form antigravity-<n> still needs the signal', () => {
+    const h = harness({ pane: ['working…'] });
+    expect(main(base('antigravity-2'), h.deps)).toBe(3);
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait']);
+  });
+
+  it('the signal seen: the second instance is verified (negative control)', () => {
+    const h = harness({ pane: ['IMPL_COMPLETED'], resolvedTools: { 'antigravity-2': 'antigravity' } });
+    expect(main(base('antigravity-2'), h.deps)).toBe(0);
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait', 'verify']);
+  });
+
+  it('another tool’s second instance (codex-2) does not wait for the signal (negative control)', () => {
+    const h = harness({ pane: ['no signal'], resolvedTools: { 'codex-2': 'codex' } });
+    expect(main(base('codex-2'), h.deps)).toBe(0);
+    expect(h.spawned[0].args).toContain('--verify');
+    expect(h.ran.some((c) => c.args.includes('--pane'))).toBe(false);
   });
 });

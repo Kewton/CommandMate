@@ -21,4 +21,10 @@ module-reference の一本化を重ねた HEAD の記録には、`--work-head <�
 `item` の無い行（#3883 より前の行も）は Issue 自身の行として、今までどおりに読む。`wait-verify.mjs` と `consistency-review.mjs` も `--item` を受け取り、
 記録・ログ名（`wait-<issue>-<item>.log`、`review-<issue>-<item>.md`）に同じ名前を使う。`wait-verify.mjs` の記録には、その実行の
 **execution key**（`<run の Issue 範囲>:<work item>:<task id>:a<試行の番号>`）が `key` として入る。
-`precheck.mjs` / `publish-pr.mjs` / `merge-pr.mjs` はまだ `--item` を取らず、Issue のすべての行を見る（HEAD つきの段は HEAD で絞られるので、別の PR の行で通ることは無い）。
+`precheck.mjs` / `publish-pr.mjs` / `merge-pr.mjs` も `--item` を取り、その work item の行だけを読み、書く行にも `item` を入れる（#3883）。
+各段の最新の行を Issue 全体で取ると、別の PR が後から書いた行で「no result」と止まり（2026-10-24 の run）、別の PR の `unit` ゲートの合格で
+`Unit Tests` の待ちを飛ばしていた。`--item` を付けないときは `item` の無い行（Issue 自身の行）だけを読む。work item の行は混ぜない。
+precheck のログは `precheck-<issue>[-<item>]-<短い SHA>.log`（同じ HEAD の再実行は `.a<n>.log`。前のログを上書きしない）、
+module-reference の断片の写しは `module-reference-<issue>[-<item>].md`。`publish-pr.mjs` は、run の記録にある同じ Issue の別の work item の PR を
+「同じ Issue の 2 本目の PR」として止めない（記録に無い PR は今までどおり止める）。`merge-pr.mjs --item` は、`--close <N>` を付けない限り Issue を閉じない
+（最後の PR の呼び出しで `--close <N>` を付ける）。
