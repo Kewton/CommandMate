@@ -36,7 +36,7 @@ import {
   isBaseRuleSuppressionReason,
   QUESTION_LEFT_TO_HUMAN_SUPPRESSION_REASON,
 } from '@/lib/polling/auto-yes-suppression-reason';
-import { classifyAutoYesQuestion } from '@/lib/polling/auto-yes-dialog-gate';
+import { autoYesQuestionTreatment, classifyAutoYesQuestion } from '@/lib/polling/auto-yes-dialog-gate';
 import { detectPromptOnCleanFrame } from '@/lib/polling/response-checker';
 import { stripAnsi, stripBoxDrawing } from '@/lib/detection/cli-patterns';
 import { DEFAULT_AUTO_YES_ANSWER_MODE, type AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
@@ -247,28 +247,33 @@ function pollerRecordOf(
  * Issue #3863: how the poller's base rules would treat the payload's prompt as
  * a question, under the answer mode in effect (`autoYesAnswerMode`; the
  * default, `recommended`, while Auto-Yes is off — what turning it on starts
- * at). Only for a question reader's picker (`classifyAutoYesQuestion`, the
- * poller's own reading):
+ * at). Read with the poller's own classification (`classifyAutoYesQuestion`,
+ * with the instance's tool) and its own table (`autoYesQuestionTreatment`),
+ * so the two cannot disagree about one screen (Issue #3881, review N3):
  *
- * - `careful`: left to a human (`question-left-to-human`, the poller's step 3.7);
- * - `recommended`: answered with its recommended option, so the resolver is
- *   handed what the reader says about each option's title, read again off the
- *   same capture the payload was built from (`fullOutput`) on the poller's
- *   path (`detectPromptOnCleanFrame`) — and withholds
+ * - `left-to-human` (`question-left-to-human`, the poller's step 3.7): a
+ *   question reader's picker under `careful`, and — Issue #3881 — a copilot /
+ *   codex list nothing marks as a question or a permission (`unidentified`)
+ *   under `careful`;
+ * - `answered`: a picker under `recommended`, with its recommended option, so
+ *   the resolver is handed what the reader says about each option's title,
+ *   read again off the same capture the payload was built from (`fullOutput`)
+ *   on the poller's path (`detectPromptOnCleanFrame`) — and withholds
  *   `recommended-option-unidentified` where the poller does.
  *
- * Anything else: undefined (the prompt is read as it always was).
+ * Anything else (an unidentified list under `recommended` among them):
+ * undefined — the prompt is read as it always was, its default row.
  */
 function questionTreatmentOf(
   payload: ObservationPayload,
   promptData: NonNullable<ObservationPayload['promptData']>,
   cliToolId: CLIToolType | undefined,
 ): { kind: 'left-to-human' } | { kind: 'answered'; question: AutoYesQuestionAnswering } | undefined {
-  if (!isAnswerablePromptData(promptData) || classifyAutoYesQuestion(promptData, undefined) !== 'picker') {
-    return undefined;
-  }
+  if (!isAnswerablePromptData(promptData)) return undefined;
   const answerMode: AutoYesAnswerMode = payload.autoYesAnswerMode ?? DEFAULT_AUTO_YES_ANSWER_MODE;
-  if (answerMode === 'careful') return { kind: 'left-to-human' };
+  const treatment = autoYesQuestionTreatment(classifyAutoYesQuestion(promptData, undefined, cliToolId), answerMode);
+  if (treatment === 'left-to-human') return { kind: 'left-to-human' };
+  if (treatment === 'base-rules') return undefined;
   return { kind: 'answered', question: { optionRecommendations: recommendationsOn(payload.fullOutput, cliToolId) } };
 }
 

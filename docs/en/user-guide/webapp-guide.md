@@ -216,7 +216,7 @@ The dialog that turns Auto Yes on asks how a question from the agent (one that p
 - Connected to an older server that does not report the mode, no mode is shown (it is not assumed to be Recommended)
 - A tile on the Sessions screen offers the same dialog and, while ON, shows the mode beside its toggle (a reload or a change from another tab shows up on the next list read)
 - In the new-task dialog, picking an Auto Yes duration brings up the same two options (Recommended by default); Auto Yes is turned on in the chosen mode before the message is sent
-- A question's Submit / Cancel page and OpenCode's API questions are answered by you in either mode. Copilot's questions cannot be told apart, so they may be answered even under Careful
+- A question's Submit / Cancel page and OpenCode's API questions are answered by you in either mode. Copilot's and codex's questions carry no question marker on screen, so under Careful a copilot / codex numbered list whose options do not read as permission wording (`Yes` / `Allow` and so on) is left to you as possibly a question (under Recommended it is answered as before)
 - The CLI and the API can choose it too ([CLI Operations Guide](./cli-operations-guide.md#answer-modes-recommended-and-careful-issue-3863))
 
 ### Active Duration

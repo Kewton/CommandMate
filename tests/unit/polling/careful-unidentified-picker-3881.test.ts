@@ -96,6 +96,9 @@ import {
 import { clearAutoYesDecisions } from '@/lib/polling/auto-yes-decision-state';
 import type { AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
 import type { PromptData } from '@/types/models';
+import { buildPromptObservation, type ObservationPayload } from '@/lib/prompt-observation/observe';
+import { STATUS_REASON } from '@/lib/detection/status-reason';
+import { formatPromptObservation } from '../../../src/cli/commands/prompt';
 
 const WT = 'wt-3881-careful';
 const ROOT = path.resolve(__dirname, '../..');
@@ -296,5 +299,77 @@ describe('[#3881] what does not change (negative)', () => {
     enable('codex', mode);
     expect(await tick('codex', CODEX_APPROVAL)).toBe('responded');
     expect(sentAnswers()).toEqual(['1']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review N3: the observation's contract re-evaluation reads it as the poller does
+// ---------------------------------------------------------------------------
+
+describe('[#3881 review N3] observe=1 and commandmate prompt read the list as the poller does', () => {
+  const NOW = 1_800_000_000_000;
+
+  function observe(tool: CLIToolType, raw: string, answerMode: AutoYesAnswerMode) {
+    const text = clean(raw);
+    const promptData = detectPromptOnCleanFrame(text, tool, text.split('\n'), raw).promptData ?? null;
+    const payload: ObservationPayload = {
+      isRunning: true,
+      sessionName: `mcbd-${tool}-${WT}`,
+      sessionStatus: 'waiting',
+      sessionStatusReason: STATUS_REASON.PROMPT_DETECTED,
+      fullOutput: raw,
+      isPromptWaiting: true,
+      promptData,
+      promptView: null,
+      isSelectionListActive: false,
+      isPagerActive: false,
+      isDismissablePanelActive: false,
+      isUnclassifiedActive: false,
+      startingSince: null,
+      autoYes: { enabled: true, expiresAt: null, lastSuppression: null, lastEnterFallback: null },
+      serverPollerActive: true,
+      autoYesAnswerMode: answerMode,
+    };
+    return buildPromptObservation({
+      worktreeId: WT,
+      cliToolId: tool,
+      instanceId: tool,
+      resolvedBy: 'explicit',
+      payload,
+      sessionGeneration: NOW - 60_000,
+      contract: { policy: null, taskId: null },
+      appearance: { note: () => NOW - 5_000, forget: () => {} },
+      now: NOW,
+    });
+  }
+
+  it.each(UNIDENTIFIED)('%s, careful: base-withholds question-left-to-human, as the poller withholds it', async (_label, tool, frame) => {
+    const raw = frame();
+    const observation = observe(tool, raw, 'careful');
+    expect(observation.autoYes.contractEvaluation).toEqual({
+      state: 'base-withholds',
+      reason: 'question-left-to-human',
+      contract: null,
+    });
+    expect(formatPromptObservation(observation, NOW)).toContain('base-withholds reason=question-left-to-human');
+    enable(tool, 'careful');
+    expect(await tick(tool, raw)).toBe('no_answer');
+    expect(getLastPolicySuppression(WT, tool)?.reason).toBe('question-left-to-human');
+  });
+
+  it.each(UNIDENTIFIED)('%s, recommended: policy-permits (its default row), and the poller answers', async (_label, tool, frame) => {
+    const raw = frame();
+    expect(observe(tool, raw, 'recommended').autoYes.contractEvaluation).toEqual({ state: 'policy-permits', contract: null });
+    enable(tool, 'recommended');
+    expect(await tick(tool, raw)).toBe('responded');
+  });
+
+  it.each([
+    ['copilot permission dialog', 'copilot', () => COPILOT_PERMISSION],
+    ['codex approval', 'codex', () => CODEX_APPROVAL],
+  ] as ReadonlyArray<[string, CLIToolType, () => string]>)('陰性対照: %s under careful reads as a permission in both', async (_label, tool, frame) => {
+    expect(observe(tool, frame(), 'careful').autoYes.contractEvaluation).toEqual({ state: 'policy-permits', contract: null });
+    enable(tool, 'careful');
+    expect(await tick(tool, frame())).toBe('responded');
   });
 });

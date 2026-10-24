@@ -195,7 +195,7 @@ function scanApprovalContext(
     const atFrame = indentOf(line) <= frameIndent;
     const marker = isTurnBoundaryLine(line);
     if (marker && atFrame) {
-      return { start: (unenclosed >= 0 ? unenclosed : i) + 1, completeness: 'complete', boundaryRow: i };
+      return { start: (unenclosed >= 0 ? unenclosed : i) + 1, completeness: 'complete', cutFrom: i };
     }
     if (!atFrame) {
       if (marker && unenclosed < 0) unenclosed = i;
@@ -210,7 +210,7 @@ function scanApprovalContext(
       unenclosed >= 0 && segmentRows > 0 && segmentAllResults && framesBelow.has(frameText)
       && isMarkerRowAtFrameAbove(lines, i, floor, frameIndent)
     ) {
-      return { start: unenclosed + 1, completeness: 'complete', boundaryRow: i };
+      return { start: unenclosed + 1, completeness: 'complete', cutFrom: i };
     }
     framesBelow.add(frameText);
     unenclosed = -1;
@@ -220,6 +220,7 @@ function scanApprovalContext(
   return {
     start: unenclosed >= 0 ? unenclosed + 1 : floor,
     completeness: scanEndCompleteness(lines, floor),
+    cutFrom: floor,
   };
 }
 
@@ -230,8 +231,14 @@ export interface ApprovalContextRange {
 }
 
 interface ApprovalContextScan extends ApprovalContextRange {
-  /** The row the scan stopped on, when it stopped at a boundary rather than ran out. */
-  boundaryRow?: number;
+  /**
+   * The first row the scan read and left out of the target: the boundary it
+   * stopped on, or the floor it ran out at. Rows `cutFrom` … `start - 1` are
+   * what was cut — the boundary row and, when a deeper marker row with no
+   * frame row above it set the start (#3817), every row down to that marker
+   * (Issue #3881, review N2).
+   */
+  cutFrom: number;
 }
 
 /**
@@ -248,7 +255,9 @@ const AMBIGUOUS_BOUNDARY_PATTERN = /^>/;
  * A yes/no prompt has no panel of its own, so its frame is the prompt line's
  * column, and a here-document's `> ` continuation rows drawn at that column
  * end the scan exactly like the previous turn's `> msg` echo: the screen
- * cannot tell the two apart. Stopped on such a row, the boundary is not known
+ * cannot tell the two apart. The same holds for a deeper `> ` row that set
+ * the start under a `●` boundary (a here-document indented under its command,
+ * review N2). Cut at such a row, the boundary is not known
  * to be the previous turn's, so the target is `truncated` — not the whole
  * request: a deny pattern that misses it withholds as `deny-pattern-unusable`
  * rather than passing (the resolver's `approvalTargetCompleteness`). The
@@ -264,9 +273,14 @@ export function findYesNoApprovalContextRange(
   promptLine: number,
   panelEnd: number,
 ): ApprovalContextRange {
-  const { start, completeness, boundaryRow } = scanApprovalContext(lines, promptLine, panelEnd);
-  const boundary = boundaryRow === undefined ? undefined : lines[boundaryRow]?.trim();
-  if (completeness === 'complete' && boundary !== undefined && AMBIGUOUS_BOUNDARY_PATTERN.test(boundary)) {
+  const { start, completeness, cutFrom } = scanApprovalContext(lines, promptLine, panelEnd);
+  // Review N2: every row that was cut, not only the row the scan stopped on —
+  // a deeper `> ` row (a here-document indented under its command) sets the
+  // start below the boundary, and the command above it is cut with it.
+  const cutByQuote = lines
+    .slice(cutFrom, start)
+    .some(row => row !== undefined && AMBIGUOUS_BOUNDARY_PATTERN.test(row.trim()));
+  if (completeness === 'complete' && cutByQuote) {
     return { start, completeness: 'truncated' };
   }
   return { start, completeness };

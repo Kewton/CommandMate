@@ -1504,9 +1504,9 @@ export interface WaitPromptOutput {
   approvalTarget?: string;
   /**
    * Issue #3881: the same fields as on {@link PromptData}, for the prompt this
-   * output was built from. `wait` copies its fields one by one
-   * (`src/cli/commands/wait.ts`) and does not copy these yet, so today they
-   * are absent; declared so the copy of the shape stays whole.
+   * output was built from, copied by `wait` (`src/cli/commands/wait.ts`) when
+   * the server sent them. Absent otherwise (older servers; `reading` is on
+   * stored rows, so a live payload usually carries none).
    */
   approvalTargetCompleteness?: PromptData['approvalTargetCompleteness'];
   reading?: PromptData['reading'];

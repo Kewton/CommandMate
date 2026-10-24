@@ -85,9 +85,18 @@ function locateMatchLines(
 interface YesNoCandidate {
   match: RegExpMatchArray;
   defaultOption?: 'yes' | 'no';
+  /** Issue #3881 (review N1): `Approve?` builds its question differently. */
+  approve: boolean;
   startLine: number;
   endLine: number;
 }
+
+/**
+ * Pattern 5: `Approve?` on its own line or at the end of one. A candidate on
+ * the same terms as {@link YES_NO_PATTERNS} (Issue #3881, review N1), after
+ * them in the tie-break order.
+ */
+const APPROVE_PATTERN = /^(.*?)Approve\?\s*$/m;
 
 /**
  * Every yes/no match in the tail window, oldest first (Issue #3881, H-4).
@@ -97,14 +106,30 @@ interface YesNoCandidate {
  * which candidate wins changed. Sorted by the row the match ends on, then by
  * where it starts, then by pattern order (a row cannot end in two spellings,
  * so the last key only keeps the order deterministic).
+ *
+ * Review N1: `Approve?` is one of the five spellings, not a fallback tried
+ * only when the four found nothing — that let an older `Old? (y/n)` beat the
+ * live `Approve?` under it, and left `Approve?`s in one block uncompared.
  */
 function findYesNoCandidates(lastLines: string, tailStart: number): YesNoCandidate[] {
   const candidates: (YesNoCandidate & { offset: number; order: number })[] = [];
-  YES_NO_PATTERNS.forEach((pattern, order) => {
+  const spellings = [
+    ...YES_NO_PATTERNS.map(p => ({ regex: p.regex, defaultOption: p.defaultOption, approve: false })),
+    { regex: APPROVE_PATTERN, defaultOption: undefined, approve: true },
+  ];
+  spellings.forEach((pattern, order) => {
     const global = new RegExp(pattern.regex.source, `${pattern.regex.flags}g`);
     for (const match of lastLines.matchAll(global)) {
       const { startLine, endLine } = locateMatchLines(lastLines, tailStart, match);
-      candidates.push({ match, defaultOption: pattern.defaultOption, startLine, endLine, offset: match.index ?? 0, order });
+      candidates.push({
+        match,
+        defaultOption: pattern.defaultOption,
+        approve: pattern.approve,
+        startLine,
+        endLine,
+        offset: match.index ?? 0,
+        order,
+      });
     }
   });
   candidates.sort((a, b) => a.endLine - b.endLine || a.offset - b.offset || a.order - b.order);
@@ -268,38 +293,23 @@ export function detectPrompt(output: string, options?: DetectPromptOptions): Pro
     return multipleChoiceResult;
   }
 
-  // Patterns 1-4: Yes/no patterns (data-driven matching). Issue #3881 (H-4):
-  // the latest candidate in the window, not the first pattern's first match.
+  // Patterns 1-5: the yes/no spellings and `Approve?` (data-driven matching).
+  // Issue #3881 (H-4, review N1): the latest candidate in the window among all
+  // five, not the first pattern's first match, and the older ones are what its
+  // block is checked against.
   const trimmedLastLines = lastLines.trim();
   const yesNoCandidates = findYesNoCandidates(lastLines, tailStart);
   const live = yesNoCandidates[yesNoCandidates.length - 1];
   if (live) {
+    const block = yesNoApprovalTarget(lines, lastLines, tailStart, live.match, yesNoCandidates.slice(0, -1));
+    if (live.approve) {
+      const content = live.match[1].trim();
+      // If there's content before "Approve?", include it in the question
+      const question = content ? `${content} Approve?` : 'Approve?';
+      return yesNoPromptResult(question, content || 'Approve?', trimmedLastLines, block);
+    }
     const question = live.match[1].trim();
-    return yesNoPromptResult(
-      question,
-      question,
-      trimmedLastLines,
-      yesNoApprovalTarget(lines, lastLines, tailStart, live.match, yesNoCandidates.slice(0, -1)),
-      live.defaultOption,
-    );
-  }
-
-  // Pattern 5: Approve?
-  // Matches "Approve?" on its own line or at the end of a line
-  // Issue #3881 (H-4): the latest one in the window, like the patterns above.
-  const approvePattern = /^(.*?)Approve\?\s*$/gm;
-  const approveMatch = [...lastLines.matchAll(approvePattern)].pop();
-
-  if (approveMatch) {
-    const content = approveMatch[1].trim();
-    // If there's content before "Approve?", include it in the question
-    const question = content ? `${content} Approve?` : 'Approve?';
-    return yesNoPromptResult(
-      question,
-      content || 'Approve?',
-      trimmedLastLines,
-      yesNoApprovalTarget(lines, lastLines, tailStart, approveMatch),
-    );
+    return yesNoPromptResult(question, question, trimmedLastLines, block, live.defaultOption);
   }
 
   // No prompt detected

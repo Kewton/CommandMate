@@ -19,7 +19,11 @@ import {
   QUESTION_LEFT_TO_HUMAN_SUPPRESSION_REASON,
 } from './auto-yes-suppression-reason';
 import { autoYesAnswerModeOf, getAutoYesState, type AutoYesState } from '../auto-yes-state';
-import { classifyAutoYesQuestion, type AutoYesQuestionKind } from './auto-yes-dialog-gate';
+import {
+  autoYesQuestionTreatment,
+  classifyAutoYesQuestion,
+  type AutoYesQuestionKind,
+} from './auto-yes-dialog-gate';
 import type { AutoYesQuestionAnswering } from './auto-yes-resolver';
 import { DEFAULT_AUTO_YES_ANSWER_MODE, type AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
 import type { CLIToolType } from '../cli-tools/types';
@@ -114,8 +118,9 @@ export function questionAnsweringOf(
   judged: JudgedPrompt,
   answerMode: AutoYesAnswerMode,
 ): AutoYesQuestionAnswering | undefined {
-  if (answerMode !== 'recommended') return undefined;
-  if (classifyAutoYesQuestion(judged.promptData, judged.dialogGate) !== 'picker') return undefined;
+  // Issue #3881 (review N3): the shared table, which the observation reads too.
+  const kind = classifyAutoYesQuestion(judged.promptData, judged.dialogGate, judged.cliToolId);
+  if (autoYesQuestionTreatment(kind, answerMode) !== 'recommended-choice') return undefined;
   return { optionRecommendations: judged.optionRecommendations };
 }
 
@@ -151,7 +156,7 @@ export function withheldAsQuestion(judged: JudgedPrompt): boolean {
   const kind = classifyAutoYesQuestion(promptData, dialogGate, cliToolId);
   if (kind === null) return false;
   const answerMode = judged.answerMode ?? DEFAULT_AUTO_YES_ANSWER_MODE;
-  if (kind !== 'question-form' && answerMode === 'recommended') return false;
+  if (autoYesQuestionTreatment(kind, answerMode) !== 'left-to-human') return false;
   withholdQuestion(judged, answerMode, false, kind);
   return true;
 }
@@ -232,7 +237,10 @@ export function withheldAtSend(judged: JudgedPrompt, checkGrant: boolean): boole
     }
     answerMode = autoYesAnswerModeOf(grant);
     const questionKind = classifyAutoYesQuestion(promptData, judged.dialogGate, cliToolId);
-    if (answerMode === 'careful' && (questionKind === 'picker' || questionKind === 'unidentified')) {
+    if (
+      answerMode === 'careful' && questionKind !== null
+      && autoYesQuestionTreatment(questionKind, answerMode) === 'left-to-human'
+    ) {
       withholdQuestion(judged, answerMode, true, questionKind);
       return true;
     }

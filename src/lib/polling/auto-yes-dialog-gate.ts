@@ -72,6 +72,7 @@ import {
 import { readCommandCodeQuestionDialog } from '@/lib/detection/tools/command-code/dialog';
 import type { PromptData, PromptType } from '@/types/models';
 import { selectAllowOnceOption } from './auto-yes-option-effect';
+import type { AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
 
 /**
  * What to do with a tool's measured dialog rules.
@@ -432,6 +433,33 @@ export function classifyAutoYesQuestion(
 
 /** What {@link classifyAutoYesQuestion} reads a question as. */
 export type AutoYesQuestionKind = 'question-form' | 'picker' | 'unidentified';
+
+/**
+ * What the answer mode does with a prompt {@link classifyAutoYesQuestion} read
+ * (Issue #3863, #3881). The one table the poller (step 3.7, the last look
+ * before the key, the resolver's question input) and the observation's
+ * contract re-evaluation (`prompt-observation/observe.ts`) both read, so the
+ * two cannot disagree about one screen (review N3):
+ *
+ * - `left-to-human` — not answered (`question-left-to-human`): a question
+ *   form under every mode; a picker or an unidentified list under `careful`;
+ * - `recommended-choice` — answered with its recommended option: a picker
+ *   under `recommended`;
+ * - `base-rules` — answered as any other prompt (its allow-once row or its
+ *   default): no question, or an unidentified list under `recommended`.
+ */
+export type AutoYesQuestionTreatment = 'left-to-human' | 'recommended-choice' | 'base-rules';
+
+/** See {@link AutoYesQuestionTreatment}. */
+export function autoYesQuestionTreatment(
+  kind: AutoYesQuestionKind | null,
+  answerMode: AutoYesAnswerMode,
+): AutoYesQuestionTreatment {
+  if (kind === null) return 'base-rules';
+  if (kind === 'question-form') return 'left-to-human';
+  if (answerMode === 'careful') return 'left-to-human';
+  return kind === 'picker' ? 'recommended-choice' : 'base-rules';
+}
 
 /**
  * The tools whose question screens nothing on the screen tells from their
