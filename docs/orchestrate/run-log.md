@@ -13,6 +13,8 @@ module-reference の一本化を重ねた HEAD の記録には、`--work-head <�
 `--head` / `--work-head` は **`git rev-parse HEAD` の 40 桁の SHA だけ**を受け付ける（短い SHA は exit 2 で拒否。`publish-pr.mjs` が 40 桁で記録を探すため、短い SHA で書くと「記録が無い」と読まれる、#3664）。すでに記録された 7 桁の行は `status` が読める。
 この規則は `publish-pr.mjs` / `merge-pr.mjs` の止まる条件と同じ関数（`unmetStage`）なので、再開先と公開側の判定はずれない。
 `verify` は `scripts/orchestrate/wait-verify.mjs`（3-3）、`precheck` は `scripts/orchestrate/precheck.mjs`（6-1-1）が自分で書く。
+`verify` / `precheck` の行は、所要時間を待ちと実行に分けた `queueSec`・`mutexSec`・`runSec` を持てる（#3884。省略可能で、無い行は今までどおり読む。
+docs/orchestrate/ci-merge.md#6-1-1-重い検証の資源制御と待ちの記録）。
 
 ## 1-5 同じ Issue の複数の PR（work item）
 
