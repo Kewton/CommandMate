@@ -215,7 +215,16 @@ const VERIFY_WINDOW_LINES = 12;
 type ComposerRead =
   | { kind: 'absent' }
   | { kind: 'empty' }
-  | { kind: 'text'; text: string; rows: string[] };
+  | {
+      kind: 'text';
+      text: string;
+      rows: string[];
+      /**
+       * Every line the composer holds, gutter stripped — only when it was read
+       * with `extractComposerText` ({@link readSubmitComposer}, Issue #3880).
+       */
+      whole?: string;
+    };
 
 /**
  * Read the composer out of a captured frame.
@@ -289,7 +298,7 @@ function withoutTrailingBlankRows(lines: string[]): string[] {
   return lines.slice(0, end);
 }
 
-/** Default bounded read-back attempts before giving up (throwing). */
+/** Default bounded recovery Enters (each read back) before giving up (throwing). */
 const DEFAULT_VERIFY_ATTEMPTS = 4;
 
 /**
@@ -347,7 +356,11 @@ export interface SubmitVerifiedSendParams {
   submitEnterCount?: number;
   /** ms between the initial Enter presses when submitEnterCount > 1. */
   interEnterWaitMs?: number;
-  /** Bounded read-back attempts. Default DEFAULT_VERIFY_ATTEMPTS (4). */
+  /**
+   * Bounded recovery Enters while the message is still pending. Default
+   * DEFAULT_VERIFY_ATTEMPTS (4). Each is read back, so the pane is read up to
+   * one more time than this (Issue #3880).
+   */
   verifyAttempts?: number;
   /**
    * ms to wait before each read-back capture. Default
@@ -537,6 +550,17 @@ function comparePasteToken(token: PasteToken, message: string): PasteLandedState
  * and its first line is the input line. Every other frame (a one-row
  * composer, an empty or ghost one, none at all, another tool) is read exactly
  * as before.
+ *
+ * Issue #3880 (H-2): this is also the reader before Enter
+ * ({@link classifyPasteLanded}) and in the error text ({@link describeComposer}).
+ * The paste check used to read the twelve-row tail with {@link readComposer}
+ * alone, so a codex composer taller than that window (a 20-line paste, or 600
+ * bytes wrapped in a narrow pane) put its `›` row above the window — `unseen`,
+ * and the body that was in the composer was withdrawn and reported as not
+ * landed — and a continuation row starting with `>` (a Markdown quote) was taken
+ * for the input line — `mismatch`. The same frame read after Enter was
+ * `pending`. One reader on both sides of Enter keeps the two verdicts about the
+ * same composer.
  */
 function readSubmitComposer(
   output: string,
@@ -548,7 +572,7 @@ function readSubmitComposer(
   if (cliToolId === 'codex' && reader === 'input-line-marker') {
     const read = extractComposerText(output, cliToolId);
     if (read.state === 'content' && read.text.includes('\n')) {
-      return { kind: 'text', text: firstNonBlankLine(read.text), rows: read.text.split('\n') };
+      return { kind: 'text', text: firstNonBlankLine(read.text), rows: read.text.split('\n'), whole: read.text };
     }
   }
   return readComposer(reader, lines, windowLines);
@@ -666,8 +690,13 @@ export function isSubmitted(
  *   3. Anything else — the idle placeholder, a ghost suggestion, no composer —
  *      shows nothing of the body. `unseen`, which the caller decides about.
  *
- * Reads the same tail window as {@link classifySubmit}, so a history echo of an
- * earlier message above the composer is never mistaken for this one.
+ * Reads the composer the way {@link classifySubmit} does
+ * ({@link readSubmitComposer}), so a history echo of an earlier message above the
+ * composer is never mistaken for this one, and a frame both functions see holds
+ * the same composer for both (Issue #3880). A multi-row codex composer is
+ * compared as a whole, whitespace removed (wrapping and continuation indent
+ * proof): the body's beginning is `landed`, text from inside the body is
+ * `mismatch`.
  */
 export function classifyPasteLanded(
   output: string,
@@ -676,11 +705,25 @@ export function classifyPasteLanded(
   composerSpec: ComposerSpec = resolveComposerSpec(cliToolId)
 ): PasteLandedState {
   const lines = withoutTrailingBlankRows(stripAnsi(output).split('\n'));
-  const composer = readComposer(composerSpec.reader, lines, lines.slice(-VERIFY_WINDOW_LINES));
+  const composer = readSubmitComposer(
+    output,
+    cliToolId,
+    composerSpec.reader,
+    lines,
+    lines.slice(-VERIFY_WINDOW_LINES)
+  );
   if (composer.kind !== 'text') return 'unseen';
 
-  const { tokens, rest } = findPasteTokens(composer.text);
+  // `whole` keeps the rows under a placeholder, so a placeholder plus typed text is `rest`.
+  const { tokens, rest } = findPasteTokens(composer.whole ?? composer.text);
   if (tokens.length === 0) {
+    if (composer.whole !== undefined) {
+      const shown = compactText(composer.whole);
+      const body = compactText(message);
+      if (body.startsWith(shown)) return 'landed';
+      if (body.includes(shown)) return 'mismatch';
+      return 'unseen';
+    }
     if (inputMatchesBody(composer.text, message)) return 'landed';
     if (message.includes(composer.text)) return 'mismatch';
     return 'unseen';
@@ -730,9 +773,15 @@ async function pasteBody(sessionName: string, message: string): Promise<void> {
 }
 
 /** The composer's first row, for an error message a person has to act on. */
-function describeComposer(output: string, composerSpec: ComposerSpec): string {
+function describeComposer(output: string, cliToolId: CLIToolType, composerSpec: ComposerSpec): string {
   const lines = withoutTrailingBlankRows(stripAnsi(output).split('\n'));
-  const composer = readComposer(composerSpec.reader, lines, lines.slice(-VERIFY_WINDOW_LINES));
+  const composer = readSubmitComposer(
+    output,
+    cliToolId,
+    composerSpec.reader,
+    lines,
+    lines.slice(-VERIFY_WINDOW_LINES)
+  );
   if (composer.kind === 'absent') return 'no composer on screen';
   if (composer.kind === 'empty') return 'an empty composer';
   const text = composer.text.length > 80 ? `${composer.text.slice(0, 80)}…` : composer.text;
@@ -813,7 +862,7 @@ async function confirmPasteLanded(params: {
 
   const bytes = Buffer.byteLength(message, 'utf8');
   const lineCount = message.split('\n').length;
-  const shown = describeComposer(output, composer);
+  const shown = describeComposer(output, cliToolId, composer);
   await withdrawUnsentBody(sessionName, cliToolId, composer);
   invalidateCache(sessionName);
   logger.error('paste-not-landed', { sessionName, cliToolId, state, bytes, lines: lineCount, shown });
@@ -889,7 +938,7 @@ async function confirmTypedBodyLanded(params: {
   }
 
   const bytes = Buffer.byteLength(message, 'utf8');
-  const shown = describeComposer(output, composer);
+  const shown = describeComposer(output, cliToolId, composer);
   await withdrawUnsentBody(sessionName, cliToolId, composer);
   invalidateCache(sessionName);
   logger.error('typed-body-not-landed', { sessionName, cliToolId, bytes, attempts, shown });
@@ -990,9 +1039,10 @@ export async function clearComposerBeforeSend(
  *
  * The body and Enter are always separate tmux commands (never batched), so the
  * TUI cannot swallow the Enter inside a bracketed-paste buffer. After the
- * initial submit the pane is read back up to `verifyAttempts` times; each time
- * it is still pending an extra Enter is sent. If submit can never be confirmed
- * the function THROWS — callers must surface that as a failure, never as
+ * initial submit the pane is read back; each time it is still pending an extra
+ * Enter is sent, up to `verifyAttempts` of them, and every Enter — the last one
+ * included (Issue #3880) — is read back before a verdict. If submit can never
+ * be confirmed the function THROWS — callers must surface that as a failure, never as
  * success (Issues #1469/#1470/#1471).
  *
  * A body longer than {@link LITERAL_SEND_MAX_BYTES} is pasted instead of typed,
@@ -1073,8 +1123,14 @@ export async function sendMessageWithSubmitVerification(
 
   // 4. Read-back verification: confirm the message left the input box, resend
   //    Enter while it is still pending, and throw if it never submits.
+  //
+  //    Every Enter is followed by a read (Issue #3880, H-1): `attempts` resends
+  //    take `attempts + 1` reads. The loop used to resend on its last pending read
+  //    and throw straight after, so a message that only that last Enter submitted
+  //    was reported "could not be confirmed" — a sent message as exit 99. The
+  //    last read sends nothing: no Enter goes out that is not read back.
   const attempts = Math.max(1, verifyAttempts);
-  for (let attempt = 0; attempt < attempts; attempt++) {
+  for (let attempt = 0; attempt <= attempts; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, verifyDelayMs));
 
     const output = await capturePane(sessionName, { startLine: -composer.verifyCaptureLines });
@@ -1106,6 +1162,9 @@ export async function sendMessageWithSubmitVerification(
         `Message was replaced by a TUI autocompletion for session ${sessionName}; the input no longer matches the sent text. Cleared the input line without submitting to avoid executing a different command.`
       );
     }
+
+    // state === 'pending' after the final resend's read-back: give up below.
+    if (attempt === attempts) break;
 
     // state === 'pending' — still typed-but-unsent, resend a single Enter and re-check.
     logger.warn('submit-not-confirmed:resending-enter', {
