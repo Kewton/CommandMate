@@ -280,7 +280,12 @@ export function findYesNoApprovalContextRange(
   const cutByQuote = lines
     .slice(cutFrom, start)
     .some(row => row !== undefined && AMBIGUOUS_BOUNDARY_PATTERN.test(row.trim()));
-  if (completeness === 'complete' && cutByQuote) {
+  // Review N4: whatever the scan's own end said. A scan that ran up to the
+  // frame's first row (`top-unknown`) still cut those rows inside the frame,
+  // and a capture known to start at the history's top would otherwise clear
+  // it (`withCaptureTopCompleteness` adds nothing to a `history-start`): the
+  // cut is a fact about rows on screen, not about the capture's top.
+  if (cutByQuote) {
     return { start, completeness: 'truncated' };
   }
   return { start, completeness };
