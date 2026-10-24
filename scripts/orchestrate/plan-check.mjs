@@ -24,7 +24,7 @@
  *       invariant: "record, compare and publish use the same key"
  *
  * Rules (each violation is one line `plan-check: <rule>: …`):
- *   plan            the file's own shape (unknown item, an item in no wave or in two, …)
+ *   plan            the file's own shape (unknown item, an item in no wave or in two, a state named twice, …)
  *   shared-writer   two items of one wave write the same shared state
  *   routes-missing  an item writes a shared state but its contract has no routes table (or no contract)
  *   routes-contract the contract config does not generate (an incomplete routes table is here)
@@ -143,12 +143,20 @@ export function checkPlan(plan, { baseDir = process.cwd(), load = loadConfig } =
   // Shared state: one writer per wave, and every writer carries the routes its readers use.
   const states = plan.sharedState === undefined ? [] : plan.sharedState;
   if (!Array.isArray(states)) add('plan', 'sharedState: must be a list');
+  // One record per state: the writers of one wave and the readers a writer covers are judged per
+  // record, so a state split over two records would hide two writers in one wave (#3884 review N1).
+  /** @type {Map<string, number>} */
+  const stateIndex = new Map();
   (Array.isArray(states) ? states : []).forEach((state, index) => {
     const at = `sharedState[${index}]`;
     if (!isMapping(state) || typeof state.state !== 'string' || state.state.trim() === '') {
       return add('plan', `${at}: state (its name) is required`);
     }
-    const name = state.state;
+    const name = state.state.trim();
+    if (stateIndex.has(name)) {
+      return add('plan', `${at}: state "${name}" is already sharedState[${stateIndex.get(name)}] — write its writers and readers in one record`);
+    }
+    stateIndex.set(name, index);
     if (typeof state.invariant !== 'string' || state.invariant.trim() === '') add('plan', `${name}: invariant (what must not break) is required`);
     const writers = Array.isArray(state.writers) ? state.writers : [];
     if (writers.length === 0) add('plan', `${name}: writers: at least one { item, code } is required`);

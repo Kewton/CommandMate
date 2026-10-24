@@ -37,6 +37,7 @@ sharedState:
     invariant: "記録・比較・公開は同じキーを使い、await の後に古いキーで書かない"
 ```
 
+- **1 つの状態は 1 行（1 レコード）に書く。** 同じ名前の `state` を 2 行に分けると `plan` で止まる（行ごとに判定すると、同じ波の書き手と読者の一覧が分かれて見えなくなるため）
 - **書き手が 2 つ以上の item にある状態は、書き手を別々の波に置く**（先行の 1 本に寄せ、読者側をその後に置く）。同じ波に置くと `shared-writer` で止まる
 - 書き手の item は契約の設定に `routes` を書く。読む経路（`readers[].route`）のそれぞれに、テストを結び付けたセルが要る（無いと `routes-missing` / `routes-reader`）
 - 重いゲート（`unit` / `integration` / `build` / `e2e`）を持つ item は、1 つの波に `heavyGateLimit` 本まで。`unit-related` は数えない（既定のゲートで、全 item が持つ）
@@ -87,7 +88,7 @@ node scripts/orchestrate/plan-check.mjs check --plan "workspace/orchestration/ru
 
 | 規則 | 止まる条件 | 直し方 |
 |---|---|---|
-| `plan` | 状態ファイルの形の誤り（知らない item、どの波にも無い・2 つの波にある item など） | ファイルを直す |
+| `plan` | 状態ファイルの形の誤り（知らない item、どの波にも無い・2 つの波にある item、同じ名前の `state` が 2 行など） | ファイルを直す |
 | `shared-writer` | 同じ共有状態の書き手が同じ波に 2 本以上 | 書き手を別の波へ（先行 1 本に寄せる） |
 | `routes-missing` | 共有状態を書く item に契約の設定が無い・設定に `routes` が無い | 設定に `routes` を書く |
 | `routes-contract` | 契約の設定が生成できない（表のセルの欠け・理由の無い除外を含む） | 出た項目を直す |

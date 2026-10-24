@@ -130,6 +130,46 @@ describe('positive: shared writers in one wave', () => {
     ]);
   });
 
+  it('a state split over two records with one writer each in the same wave is refused (review N1)', () => {
+    const plan = normalPlan();
+    const [state] = plan.sharedState;
+    plan.waves = [{ id: '1', items: ['a1', 'a2', 'b1'] }];
+    plan.sharedState = [
+      { ...state, writers: [state.writers[0]], readers: [state.readers[0]] },
+      { ...state, state: ` ${state.state} `, writers: [state.writers[1]], readers: [state.readers[1]] },
+    ];
+    const { status, lines } = run(plan);
+    expect(status).toBe(1);
+    expect(lines).toEqual([
+      'plan-check: plan: sharedState[1]: state "auto-yes-confirmation-key" is already sharedState[0] — write its writers and readers in one record',
+    ]);
+  });
+
+  it('negative: two records with the same name in different waves are refused too', () => {
+    const plan = normalPlan();
+    const [state] = plan.sharedState;
+    plan.sharedState = [
+      { ...state, writers: [state.writers[0]] },
+      { ...state, writers: [state.writers[1]] },
+    ];
+    expect(rules(run(plan).lines)).toEqual(['plan']);
+  });
+
+  it('negative: two differently named states, one writer each in the same wave, pass', () => {
+    const plan = normalPlan();
+    const [state] = plan.sharedState;
+    plan.waves = [{ id: '1', items: ['a1', 'a2', 'b1'] }];
+    plan.sharedState = [
+      { ...state, writers: [state.writers[0]] },
+      { ...state, state: 'prompt-push-grace', writers: [state.writers[1]] },
+    ];
+    expect(run(plan).status).toBe(0);
+  });
+
+  it('negative: one record with both writers in different waves passes (the normal plan)', () => {
+    expect(run(normalPlan()).status).toBe(0);
+  });
+
   it('one item listed twice as a writer is still one writer', () => {
     const plan = normalPlan();
     plan.sharedState[0].writers.push({ item: 'a1', code: 'another function' });
