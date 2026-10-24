@@ -213,3 +213,24 @@ export function isDuplicatePrompt(
   if (pollerState.lastAnsweredAt === null) return false;
   return (Date.now() - pollerState.lastAnsweredAt) < DUPLICATE_RETRY_EXPIRY_MS;
 }
+
+/**
+ * Issue #3791 (review N1): publish that the duplicate guard held back the
+ * prompt on screen on this tick ({@link isDuplicatePrompt} was true), for the
+ * push gate to hold the wait until the guard's retry. Only the guard's own
+ * verdict sets it: an answer alone (`lastAnsweredAt`) says nothing about the
+ * screen now up — another prompt, or a failed tick, is not held by the guard.
+ */
+export function reserveDuplicateRetry(pollerState: AutoYesPollerState, promptKey: string, now: number): void {
+  if (pollerState.lastAnsweredAt === null) return;
+  pollerState.duplicateRetryReservation = { promptKey, answeredAt: pollerState.lastAnsweredAt, observedAt: now };
+}
+
+/**
+ * Issue #3791 (review N1): the tick did not hold the prompt back with the
+ * guard — another screen, no prompt, a failed tick, no session — so the wait
+ * is no longer the guard's retry to wait for.
+ */
+export function releaseDuplicateRetry(pollerState: AutoYesPollerState): void {
+  pollerState.duplicateRetryReservation = null;
+}

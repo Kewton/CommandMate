@@ -131,6 +131,8 @@ import {
   isSameSession,
   isTickCurrent,
   ownedPollerState,
+  releaseDuplicateRetry,
+  reserveDuplicateRetry,
   resetErrorCount,
   updateLastServerResponseTimestamp,
   type AutoYesTickGeneration,
@@ -214,6 +216,8 @@ function incrementErrorCount(compositeKey: string, owner?: AutoYesPollerState): 
   if (pollerState) {
     pollerState.consecutiveErrors++;
     pollerState.currentInterval = calculateBackoffInterval(pollerState.consecutiveErrors);
+    // Issue #3791 (review N1): a failed tick held nothing back with the duplicate guard.
+    releaseDuplicateRetry(pollerState);
 
     // Issue #499 Item 5: Auto-stop after consecutive error threshold.
     //
@@ -765,6 +769,10 @@ export async function detectAndRespondToPrompt(
   const ledgerTick = beginLedgerTick(ledgerScope);
   // Issue #3821: when this tick began, for the decision's reason (see `tickDecisionRecorder`).
   const tickStartedAt = Date.now();
+  // Issue #3791 (review N1): set again below only when the duplicate guard
+  // holds back the prompt this tick reads — before any await, so the push gate
+  // never sees the old screen's reservation for this tick's screen.
+  releaseDuplicateRetry(pollerState);
   try {
     // 1. Detect prompt.
     //
@@ -885,6 +893,8 @@ export async function detectAndRespondToPrompt(
     const promptKey = generatePromptKey(promptDetection.promptData);
     const frameKey = promptFrameKey(promptDetection.promptData);
     if (isDuplicatePrompt(pollerState, promptKey)) {
+      // Issue #3791 (review N1): the push gate holds this wait until the retry.
+      reserveDuplicateRetry(pollerState, promptKey, tickStartedAt);
       // Issue #3820: not answered on this tick either — an interval of its own
       // reason, so the count can tell the wait for an answer to land apart.
       withholdLedgerConfirmation(ledgerScope, 'answered-recently');
@@ -1158,6 +1168,8 @@ async function pollAutoYes(
       return;
     }
     if (sessionMissing) {
+      // Issue #3791 (review N1): no screen for the duplicate guard to hold back.
+      releaseDuplicateRetry(generation.pollerState);
       // Issue #3798: a session that is gone is waiting for nobody.
       observeWaitingFromTick({
         worktreeId,
