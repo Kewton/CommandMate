@@ -175,10 +175,10 @@
     },
     {
       "tool": "codex",
-      "version": "0.163.0",
-      "source": "openai/codex, codex-rs/tui/src/slash_command.rs at tag rust-v0.161.0 — every `enum SlashCommand` variant except the two whose description() is the internal \"DO NOT USE\" marker (MemoryDrop / MemoryUpdate). 63 variants, 61 active. Names are not the identifiers: the enum carries #[strum(serialize_all = \"kebab-case\")] with per-variant overrides, so AutoReview reads as \"approve\", MultiAgents as \"subagents\" and ElevateSandbox as \"setup-default-sandbox\" (Pwd / Pets / Stop keep their to_string spelling). Read 2026-09-28 (#2914): diffing the enum against rust-v0.154.0 (the #2497 read) adds Voice, Tui, Daemon and Warnings and removes SandboxReadRoot (\"sandbox-add-read-dir\") and Personality, so the set moves 58 -> 60. Read 2026-10-08 (#3423): rust-v0.161.0 adds Daybreak (\"daybreak\"), 60 -> 61. Read 2026-10-17 (#3722): rust-v0.163.0 adds Config (\"config\", description \"configure Codex preferences\") after Compact; Archive only moves to another match arm, so the set is unchanged apart from Config, 61 -> 62.",
-      "observedAt": "2026-10-17",
-      "issue": 3722,
+      "version": "0.164.0",
+      "source": "openai/codex, codex-rs/tui/src/slash_command.rs at tag rust-v0.164.0 — every `enum SlashCommand` variant except the two whose description() is the internal \"DO NOT USE\" marker (MemoryDrop / MemoryUpdate). 65 variants, 63 active. Names are not the identifiers: the enum carries #[strum(serialize_all = \"kebab-case\")] with per-variant overrides, so AutoReview reads as \"approve\", MultiAgents as \"subagents\" and ElevateSandbox as \"setup-default-sandbox\" (Pwd / Pets / Stop keep their to_string spelling). Read 2026-09-28 (#2914): diffing the enum against rust-v0.154.0 (the #2497 read) adds Voice, Tui, Daemon and Warnings and removes SandboxReadRoot (\"sandbox-add-read-dir\") and Personality, so the set moves 58 -> 60. Read 2026-10-08 (#3423): rust-v0.161.0 adds Daybreak (\"daybreak\"), 60 -> 61. Read 2026-10-17 (#3722): rust-v0.163.0 adds Config (\"config\", description \"configure Codex preferences\") after Compact; Archive only moves to another match arm, so the set is unchanged apart from Config, 61 -> 62. Read 2026-10-24 (#3869): rust-v0.164.0 adds Presets (\"presets\", description \"run or save reusable prompts and slash commands\") right after Model; the other hunks only widen supports_inline_args (Model / Permissions / Title / Statusline) and a match arm, so the set is unchanged apart from Presets, 62 -> 63.",
+      "observedAt": "2026-10-24",
+      "issue": 3869,
       "commands": [
         "agents",
         "app",
@@ -217,6 +217,7 @@
         "pets",
         "plan",
         "plugins",
+        "presets",
         "ps",
         "pwd",
         "quit",
