@@ -416,10 +416,11 @@ export function settleLegacyStop(worktreeId, cliToolId, instanceId, target: Lega
 - `replaced` は古い区間を消して新しい区間を置き、`cause:'replaced'` の遷移を 1 回だけ出す。解除通知は呼ばれず（`cause==='closed'` のときだけ）、WebSocket は `waiting:true` の新しい since だけを送る。`lastClosed` は置き換えでも古い区間の値で更新する
 - 新しい区間の since: 読みの `structuredSince` が新しい binding に属するならそれ、そうでなければ観測時刻
 - 解除通知の照合:
-  - prompt の push の `data` に `episodeId` を入れる
+  - prompt の push の `data` に `episodeId` と、worktree 単位の順序の値 `order` を入れる（ID を持つ push だけ）
   - `prompt-card-state` のマークに、最後に通知した区間 ID 1 つを時刻と一緒に 1 文で入れる。時刻だけの旧形式は「ID なし」
-  - 解除の push に `resolvedEpisodeId`（マークの ID。無ければ欠く）
-  - `public/sw.js` は、同じ tag の通知のうち `data.episodeId` が `resolvedEpisodeId` と等しいもの・`episodeId` を持たないものを閉じて無音の置き換えを出す。違う `episodeId` の通知が残っていれば、それを閉じてから同じ内容で `silent:true`・`renotify:false` で出し直す。どの分岐でも `showNotification` を必ず 1 回呼ぶ
+  - 解除の push に `resolvedEpisodeId`（マークの ID。無ければ欠く）と、解除を決めた時点の `order`
+  - ID の違いは新旧の証拠にしない。配送は端末ごとに失敗でき、解除は worktree の待機がすべて終わってから送られるので、ある端末に B のカードが届かなければ、B の解除が届いたときその端末には終わった A のカードが残っている（サーバーのマークは使い切っているので、後から閉じ直す push は来ない）。区間の since も新旧の証拠にしない。since は structuredSince を優先する値で、次の区間が同じ値を使い回せ（観測より古くなりうる）、別の区間と同じミリ秒にもなりうる。新しさは順序の値で確かめる: `order` は worktree ごとの単調な連番で、`app_settings` の `push_prompt_order:<worktreeId>` に置き、ID つきの待機のカードを送るとき・ID つきの解除を決めたときに 1 文（`INSERT … ON CONFLICT DO UPDATE … RETURNING`）で 1 つ進めて読む。値は重ならず、サーバーを再起動しても DB に残る。解除の値は `notifyPromptResolved` が「何も待っていない」と決めたのと同じ同期区間で取るので、解除を決めた時点で開いていた区間があれば解除は送られず、`data.order > 解除の order` のカードは解除の後に開いた待機に限られる。DB を作り直すと連番は 1 からになる（そのときは購読も消えている）
+  - `public/sw.js` は、同じ tag の通知をすべて閉じる。そのうち `data.episodeId` が `resolvedEpisodeId` と違い、かつ `data.order` が解除の `order` より大きいものがあれば、それを同じ内容で `silent:true`・`renotify:false` で出し直す（解除の置き換えは出さない）。無ければ無音の置き換えを出す。解除と同じ ID のカード・`episodeId` か `order` を持たないカード（古いサーバーのカード）・解除より前に送られたカード、`order` の無い解除はすべて置き換えの側。どの分岐でも `showNotification` を必ず 1 回呼ぶ
   - `resolvedEpisodeId` の無い解除は今の動き
 
 #### 規則 6（claude-done）
@@ -654,6 +655,8 @@ export function settleLegacyStop(worktreeId, cliToolId, instanceId, target: Lega
 - `src/lib/polling/auto-yes-suppression-state.ts`（型の欄 `episodeId?` の追加のみ）
 - `src/lib/push/notification-dedup.ts`、`src/lib/push/push-sender.ts`（`waitingEpisodeId` を通す）
 - `src/lib/push/waiting-push-notifier.ts`（`PendingWait.episodeId`・`replaced` の扱い）
+  - 購読は `onWaitingEpisodeTransition` にする。旧 `onWaitingTransition`（7 欄）のままだと `replaced` が `waiting: true` の edge としか届かず、新しい待ちか同じ待ちかを since でしか判じられない（同じ since の `replaced` を同じ待ちとして古い hold のまま扱い、違う since なら古いタイマーを残したまま hold を作り直す）（PR 1a の実装レビュー P3-1）
+  - 区間 ID は store から `getWaitingEpisodeRecord` で読む（`getWaitingEpisode` は §6.1 (4) のとおり `{ since, kind }` のまま）。O2（`response-checker`）が開いた区間も、edge の `episodeId` と、hold の終わり・分類の猶予・reminder の再判定で読む store の ID が同じになる（P3-1）
 - `src/lib/push/resolution-push-notifier.ts`、`src/lib/push/prompt-card-state.ts`、`public/sw.js`
 - テスト
 
@@ -672,6 +675,16 @@ export function settleLegacyStop(worktreeId, cliToolId, instanceId, target: Lega
 - ID を渡さない呼び手（O2・opencode の質問 push・既存テスト）は since の比較のままで、混在の規則により ID つきの notifier と同じ hold・dedup にまとまる。#3796 の予約 tick は 1 回だけ読まれる
 - `replaced` を受ける処理は入るが、発生するのは 1b から。旧形式のマーク・旧 sw.js・ID の無い解除は今の動き
 - `sw.js` はどの分岐でも `showNotification` を 1 回呼ぶ（`userVisibleOnly` の契約を守る）
+
+**(4) 実装で設計から変えたこと（PR 2 の実装時に確定）**
+
+既存テストの期待値を変えないために、置き場所を次のように変えた。混在の規則・照合の順序は変えていない。
+- 抑止記録の `episodeId?` は `AutoYesPolicySuppression` に足さず、同じファイルの `EpisodeScopedPolicySuppression`（`AutoYesPolicySuppression` を継承）に置いた。`AutoYesPolicySuppression` は `current-output` が公開する形で、キー集合を CLI の写し（`src/cli/types/api-responses.ts`）と等しく保つ型の検査（`tests/unit/cli/types/last-suppression-mirror-3822.test.ts`）があり、欄を足すと型検査が落ちる。gate はこの型で `episodeId` を読む。公開する形への追加は、書き手と CLI 側を変える PR 3 で行う
+- カードのマークの区間 ID は、時刻の行（`push_prompt_card:<worktreeId>`、値は今までどおり時刻だけ）の隣の行 `push_prompt_card_episode:<worktreeId>` に、時刻の行と **同じ 1 つの INSERT 文** で書く（値は `<at>:<episodeId>`。ID が無ければ `<at>:`）。時刻の行の値を変えると `tests/unit/push/restart-card-state-2057.test.ts` の `persistedMark()` の期待（時刻の文字列）が変わるため。ID の行の時刻が時刻の行と違えば（旧い版のサーバーが時刻の行だけを書き換えた）ID 無しとして読む。旧い版のサーバーが書いたマーク（時刻の行だけ）も ID 無し
+- `forgetAutoYesHold(key, wait)` の第 2 引数は、数値（since、#3776 のまま）か `{ since, episodeId }` を受ける。比較は混在の規則（`isSameWait`）
+- `handleWaitingTransition` は ID つきの遷移と 7 欄の遷移の両方を受ける（既存テストが 7 欄で直接呼ぶ）。7 欄のときは store の区間の since が一致すればその ID を使う
+- `sw.js` で解除より新しいと確かめられたカードが 2 枚以上あるときは、`order` が最も大きいものを出し直す。ID が違うだけ・since が遅いだけのカードは出し直さない（規則 5。端末ごとの配送の失敗で古いカードが残り、since は次の区間が使い回すため）
+- 新旧の順序は区間の since ではなく、worktree ごとの連番 `push_prompt_order:<worktreeId>`（`prompt-card-state` の `nextPromptOrder`）で持つ。カードの行と違って解除でも消さないので、値は戻らない。ID の無い push（応答 poller など）と ID の無い解除は連番を進めず、`order` も載せない
 
 ### 6.3 PR 1b: 観測の照合と共通の画面の読み方
 

@@ -19,6 +19,7 @@ import {
 } from '../auto-yes-state';
 import { getOrInitGlobal } from '../global-state';
 import type { AutoYesPollerState } from './auto-yes-poller-state';
+import { getManualAnswerSeq } from './auto-yes-manual-answer';
 
 // =============================================================================
 // In-memory State (globalThis for hot reload persistence - Issue #153)
@@ -145,6 +146,12 @@ export interface AutoYesTickGeneration {
    * one this tick read off the screen (Issue #3706, see `finishAnsweredPrompt`).
    */
   readonly startedAt: number;
+  /**
+   * Issue #3821: `getManualAnswerSeq` at the start. A person's answer begun
+   * since moves it, and the tick sends no further key. Absent (hand-built
+   * generations in tests) reads as 0.
+   */
+  readonly manualAnswerSeq?: number;
 }
 
 /**
@@ -166,7 +173,8 @@ export function isPollerCurrent(generation: AutoYesTickGeneration): boolean {
 
 /**
  * May the tick still act: its poller, its grant (the same enable, not expired)
- * and its session (no relaunch since) are all still the ones it started under.
+ * and its session (no relaunch since) are all still the ones it started under,
+ * and no person has begun answering on the instance since (Issue #3821).
  * Checked after capture, after each wait before a key, and inside the send.
  */
 export function isTickCurrent(generation: AutoYesTickGeneration): boolean {
@@ -175,6 +183,8 @@ export function isTickCurrent(generation: AutoYesTickGeneration): boolean {
   // stores (and returns) a disabled one — so an expiry fails identity too.
   const grant = getAutoYesState(generation.worktreeId, generation.cliToolId, generation.instanceId);
   if (grant !== generation.grant || !grant.enabled) return false;
+  // Issue #3821: a person began answering on this instance since the tick started.
+  if ((generation.manualAnswerSeq ?? 0) !== getManualAnswerSeq(generation.compositeKey)) return false;
   return isSameSession(generation);
 }
 

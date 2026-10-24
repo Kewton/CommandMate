@@ -6,8 +6,8 @@
  * answers. On Kewton/Musunest#283 that was the worker's own proposal, which the
  * worker then implemented as though a human had approved it. So neither the
  * server's poller (`suppressIfNotOursToAnswer`, step 3.3) nor the browser's
- * fallback (`useAutoYes`, which answers only while no server poller runs) sends
- * a key to them.
+ * fallback (`useAutoYes`, which answered only while no server poller ran, and
+ * since Issue #3821 answers nothing) sends a key to them.
  *
  * Server-only: `normalizeFrame` and the tools' detectors reach `logger` → `env`
  * → `fs`. The browser judges by the prompt's options instead

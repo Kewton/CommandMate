@@ -10,6 +10,10 @@
  * Enter fallback's own screen judgement are stood in for (refused, eligible):
  * no live agy capture draws a screen they refuse, and they are not under test.
  *
+ * Issue #3821: the Enter fallback is retired. The same two ticks over the same
+ * refused dialog now send nothing — not on the same generation, not across a
+ * stop → enable — so no episode is marked answered by an Enter at all.
+ *
  * @vitest-environment node
  */
 
@@ -147,9 +151,9 @@ function receiptAt(ms: number): void {
 }
 
 /**
- * The poller's two ticks over the dialog, at 5s (seen once) and 6s (the Enter,
- * whose await runs `during`). With `restart`, Auto-Yes is stopped and enabled
- * again inside that await.
+ * The poller's two ticks over the dialog, at 5s (seen once) and 6s (where the
+ * Enter went). With `restart`, Auto-Yes is stopped and enabled again between
+ * them, and `during` runs there (Issue #3821: no Enter's await to run it in).
  */
 async function enterSentAt6s(restart: boolean, during: () => Promise<void>): Promise<string> {
   vi.setSystemTime(T0 + 5_000);
@@ -168,13 +172,11 @@ async function enterSentAt6s(restart: boolean, during: () => Promise<void>): Pro
   };
   try {
     expect(await tickAt(5_000, DIALOG, state, generation)).toBe('no_answer');
-    sendSpecialKeys.mockImplementationOnce(async () => {
-      if (restart) {
-        stopAutoYesPolling(KEY);
-        expect(startAutoYesPolling(WORKTREE_ID, 'antigravity', 'antigravity').started).toBe(true);
-      }
-      await during();
-    });
+    if (restart) {
+      stopAutoYesPolling(KEY);
+      expect(startAutoYesPolling(WORKTREE_ID, 'antigravity', 'antigravity').started).toBe(true);
+    }
+    await during();
     return await tickAt(6_000, DIALOG, state, generation);
   } finally {
     stopAutoYesPolling(KEY);
@@ -203,34 +205,31 @@ afterEach(() => {
 });
 
 describe('[#3796 review E] an Enter that comes back whole marks only the episode it was sent for', () => {
-  it('negative: stop → enable during the Enter, the successor accepts a newer receipt, the old Enter comes back whole — that episode\'s answer time is left alone', async () => {
+  it('[#3821] stop → enable between the ticks, the successor accepts a newer receipt: no Enter on either generation', async () => {
     receiptAt(0);
     expect(await tickAt(3_000, IDLE)).toBe('no_prompt');
-    await enterSentAt6s(true, async () => {
-      expect(await tickAt(7_000, IDLE)).toBe('no_prompt');
-      receiptAt(8_000);
-      // Seen once by the successor (its Enter waits for a second look):
-      // accepted on the 8s receipt, nothing sent.
-      expect(await tickAt(10_000, DIALOG)).toBe('no_answer');
-    });
-    expect(sendSpecialKeys).toHaveBeenCalledTimes(1);
+    expect(
+      await enterSentAt6s(true, async () => {
+        expect(await tickAt(7_000, IDLE)).toBe('no_prompt');
+        receiptAt(8_000);
+        expect(await tickAt(10_000, DIALOG)).toBe('no_answer');
+      }),
+    ).not.toBe('responded');
+    expect(sendSpecialKeys).not.toHaveBeenCalled();
 
-    for (const ms of [17_000, 22_000, 27_000, 32_000, 37_000]) expect(await tickAt(ms, DIALOG)).toBe('no_prompt');
-    // Before the review fix the old Enter's return started this dialog's grace
-    // at 10s, and from 28s it read as an answer of ours that outlived it.
-    expect(withheldLines()).toHaveLength(0);
-    expect(sendSpecialKeys).toHaveBeenCalledTimes(1);
+    for (const ms of [17_000, 22_000, 27_000]) await tickAt(ms, DIALOG);
+    expect(sendSpecialKeys).not.toHaveBeenCalled();
   });
 
-  it('positive: the same generation\'s Enter still starts its grace', async () => {
+  it('[#3821] the same generation: no Enter, so no grace of an Enter is started', async () => {
     receiptAt(0);
     expect(await tickAt(3_000, IDLE)).toBe('no_prompt');
-    expect(await enterSentAt6s(false, async () => {})).toBe('responded');
-    expect(sendSpecialKeys).toHaveBeenCalledTimes(1);
-    for (const ms of [11_000, 16_000, 21_000]) expect(await tickAt(ms, DIALOG)).toBe('no_prompt');
-    expect(withheldLines()).toHaveLength(0);
-    expect(await tickAt(6_000 + ANTIGRAVITY_ANSWERED_DIALOG_GRACE_MS + 1, DIALOG)).toBe('no_prompt');
-    expect(withheldLines()).toHaveLength(1);
-    expect(withheldLines()[0][1].hint).toContain('画面に残っている');
+    expect(await enterSentAt6s(false, async () => {})).toBe('no_answer');
+    expect(sendSpecialKeys).not.toHaveBeenCalled();
+    for (const ms of [11_000, 16_000, 21_000]) await tickAt(ms, DIALOG);
+    expect(sendSpecialKeys).not.toHaveBeenCalled();
+    // Nothing was sent, so nothing reads as an answer of ours that outlived its dialog.
+    expect(withheldLines().some(([, line]) => String(line.hint ?? '').includes('画面に残っている'))).toBe(false);
+    expect(ANTIGRAVITY_ANSWERED_DIALOG_GRACE_MS).toBeGreaterThan(0);
   });
 });

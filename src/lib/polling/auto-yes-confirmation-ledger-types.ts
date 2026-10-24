@@ -323,6 +323,7 @@ const WITHHOLD_REASONS: Record<LedgerWithholdReason, true> = {
   'startup-trust-unhandled': true,
   'question-confirm-page': true,
   'question-left-to-human': true,
+  'allow-once-unidentified': true,
   'no-hook-receipt': true,
   'send-failed': true,
   'send-no-keys': true,

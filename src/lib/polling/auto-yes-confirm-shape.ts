@@ -1,8 +1,9 @@
 /**
  * The browser's reading of an `AskUserQuestion` confirm page (Issue #3748).
  *
- * Client-safe: types and string comparisons only. `useAutoYes` runs in the
- * client bundle, so this module must not reach `detection/tools/frame`,
+ * Client-safe: types and string comparisons only. `useAutoYes` ran in the
+ * client bundle (Issue #3821 made it answer nothing, so nothing in the
+ * browser asks this any more; kept client-safe all the same), so this module must not reach `detection/tools/frame`,
  * `cli-patterns`, `logger`, `env`, `db` or `fs` — the frame predicates the
  * server's poller uses (`polling/auto-yes-confirm-page`) do, through
  * `logger` → `env` → `db-path-resolver` → `fs`, and broke `next build`.

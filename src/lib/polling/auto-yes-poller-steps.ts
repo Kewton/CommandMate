@@ -111,9 +111,8 @@ export function withheldAsQuestion(judged: JudgedPrompt): boolean {
 
 /**
  * The last look before a key (Issue #3822): is the answer still Auto-Yes's to
- * send? Asked after the last wait before the send (the ownership check, or the
- * Enter fallback's fresh capture), so nothing it reads can change before the
- * first key goes out.
+ * send? Asked after the last wait before the send (the ownership check), so
+ * nothing it reads can change before the first key goes out.
  *
  * - With a `generation` (a poller tick), Auto-Yes must still be on and inside
  *   its window. `getAutoYesState` disables an expired grant on read, the
@@ -155,7 +154,7 @@ export function withheldAtSend(judged: JudgedPrompt, checkGrant: boolean): boole
   }
 
   const policy = getSessionAutoYesPolicy(worktreeId, cliToolId, instanceId, { fresh: true });
-  const resolution = resolveAutoAnswerWithPolicy(promptData, policy);
+  const resolution = resolveAutoAnswerWithPolicy(promptData, policy, cliToolId);
   if (resolution.suppressedBy) {
     const mode = policyLookupMode(policy);
     suppressAndWarnOnce(
@@ -198,7 +197,7 @@ export function resolveAnswerUnderPolicy(judged: JudgedPrompt): string | null {
   const { worktreeId, cliToolId, instanceId, promptData, frameKey } = judged;
   // Issue #3822: a failed lookup reaches the resolver as unknown and withholds.
   const policy = getSessionAutoYesPolicy(worktreeId, cliToolId, instanceId);
-  const resolution = resolveAutoAnswerWithPolicy(promptData, policy);
+  const resolution = resolveAutoAnswerWithPolicy(promptData, policy, cliToolId);
   if (resolution.suppressedBy) {
     const mode = policyLookupMode(policy);
     // Issue #1684: the log line alone leaves a CLI-driven pipeline blind to

@@ -28,6 +28,7 @@ import { createLogger } from '@/lib/logger';
 import { getOrInitGlobal } from '../global-state';
 import {
   CONTRACT_SUPPRESSION_REASONS,
+  isBaseRuleSuppressionReason,
   NO_HOOK_RECEIPT_SUPPRESSION_REASON,
   PARTIAL_ANSWER_SUPPRESSION_REASON,
   type AutoYesSuppressionReason,
@@ -129,7 +130,7 @@ export function logIfWithheldForWantOfReceipt(
   // dropping the `policy-lookup-failed` record the tick made.
   const { policy, taskId } = getSessionAutoYesPolicyLookupEntry(worktreeId, 'antigravity', instanceId);
   const mode = policyLookupMode(policy);
-  const resolution = resolveAutoAnswerWithPolicy(ungated.promptData, policy);
+  const resolution = resolveAutoAnswerWithPolicy(ungated.promptData, policy, 'antigravity');
   // Issue #3767: `answered` is the dialog the gate already let through on this
   // receipt, still up past the window. Unless the contract withheld it, that is
   // not a missing receipt: neither recorded nor logged, nor counted for the limit.
@@ -176,10 +177,7 @@ export function logIfWithheldForWantOfReceipt(
       reason: resolution.suppressedBy,
       mode,
       taskId,
-      hint:
-        resolution.suppressedBy === POLICY_LOOKUP_FAILED_SUPPRESSION_REASON
-          ? '契約の照会に失敗したので答えていない。サーバーログの policy-lookup-failed を確認'
-          : '契約の autoYes が答えを止めている。契約の autoYes を確認',
+      hint: withheldHint(resolution.suppressedBy),
     });
     return seen(contractReason ?? null);
   }
@@ -198,6 +196,21 @@ export function logIfWithheldForWantOfReceipt(
     hint: noHookReceiptHint(verdict, now),
   });
   return seen(NO_HOOK_RECEIPT_SUPPRESSION_REASON);
+}
+
+/**
+ * The hint of `antigravity-autoyes-withheld-by-policy` for `reason`. Issue
+ * #3822: the base rules' withholding (`allow-once-unidentified`) is not the
+ * contract's, so the line does not send the operator to the contract for it.
+ */
+function withheldHint(reason: AutoYesSuppressionReason): string {
+  if (reason === POLICY_LOOKUP_FAILED_SUPPRESSION_REASON) {
+    return '契約の照会に失敗したので答えていない。サーバーログの policy-lookup-failed を確認';
+  }
+  if (isBaseRuleSuppressionReason(reason)) {
+    return '今回だけ許可の選択肢を 1 つに特定できないので答えていない（基本の判定。契約の判定ではない）。画面で答える';
+  }
+  return '契約の autoYes が答えを止めている。契約の autoYes を確認';
 }
 
 /**

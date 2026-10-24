@@ -11,6 +11,14 @@
 
 import type { AutoYesDuration, AutoYesStopReason } from '@/config/auto-yes-config';
 
+// Issue #3821: re-exported from here so every program that reads the shared
+// models also reads the `autoYesDecision` field `./auto-yes-decision` declares.
+export type {
+  AutoYesDecisionPublished,
+  AutoYesDecisionReason,
+  AutoYesDecisionState,
+} from './auto-yes-decision';
+
 /** Parameters for auto-yes toggle callback (Issue #314) */
 export interface AutoYesToggleParams {
   enabled: boolean;

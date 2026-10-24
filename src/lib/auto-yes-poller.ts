@@ -7,49 +7,58 @@
  * Issue #525: Composite key migration (worktreeId:cliToolId) for per-agent auto-yes.
  *
  * Dependencies: auto-yes-state.ts (composite keys / state), polling/* (prompt
- * detection, resolver, policy, dialog gate, enter fallback, poller state),
- * cli-tools/*, session/cli-session.ts, tmux/*, detection/*, db/*, tasks/*.
+ * detection, resolver, policy, dialog gate, session epoch, poller state,
+ * decision record), cli-tools/*, session/cli-session.ts, tmux/*, detection/*,
+ * db/*, tasks/*.
+ *
+ * Issue #3821: this poller (with the hook / API adjudication) is what answers
+ * automatically. The browser no longer answers, and the Enter sent to a choice
+ * screen CommandMate could not read (#3397) is gone: such a screen is left to a
+ * human, recorded as `unclassified-frame`.
  */
 
 import type { CLIToolType } from './cli-tools/types';
-import { captureSessionOutputFresh, getSessionPresence } from './session/cli-session';
+import { getSessionPresence } from './session/cli-session';
 import { detectPromptOnCleanFrame } from './polling/response-checker';
 import {
   beginAntigravityFrameRead,
   endAntigravityFrameRead,
   getAntigravityAcceptedReceiptCallId,
 } from './polling/antigravity-receipt-episodes';
-import { policyLookupMode, resolveAutoAnswerWithPolicy } from './polling/auto-yes-resolver';
-import {
-  getSessionAutoYesPolicy,
-  invalidateSessionAutoYesPolicy,
-} from './polling/auto-yes-policy';
-import { isCodexModelPickerFrame } from './detection/tools/codex/detect';
+import { invalidateSessionAutoYesPolicy } from './polling/auto-yes-policy';
 import { normalizeFrame } from './detection/tools/frame';
 import { detectAntigravityNumberedDialogPrompt } from './detection/tools/antigravity/dialog';
-import { evaluateAutoYesDialogGate, type AutoYesDialogGateVerdict } from './polling/auto-yes-dialog-gate';
 import {
   clearEnterFallbacks,
-  enterFallbackScreenKey,
   forgetEnterFallback,
   forgetEnterFallbacksByWorktree,
   getEnterFallbackSessionEpoch,
-  judgeEnterFallback,
-  recordEnterFallbackNoEffect,
-  recordEnterFallbackSent,
 } from './polling/auto-yes-enter-fallback';
+import {
+  clearAutoYesDecisions,
+  forgetAutoYesDecision,
+  forgetAutoYesDecisionsByWorktree,
+  reaffirmAutoYesAnswering,
+  recordAutoYesDecision,
+} from './polling/auto-yes-decision-state';
+import {
+  ANSWERED_BY_HUMAN_DECISION_REASON,
+  getManualAnswerSeq,
+  isManualAnswerHolding,
+} from './polling/auto-yes-manual-answer';
+import { getLastPolicySuppression } from './polling/auto-yes-suppression-state';
+import { NO_AUTO_ANSWER_DECISION_REASON, type AutoYesDecisionReason } from '@/types/auto-yes-decision';
 import { applyEventToActiveTask } from './tasks/task-transition-service';
 import { getDbInstance } from './db/db-instance';
 import { recordAnsweredPrompt, type RecordAnsweredPromptResult } from './db/chat-db';
 import { checkWorktreeSessionOwnership } from './cli-tools/worktree-session-ownership';
 import { sendPromptAnswer } from './prompt-answer-sender';
-import { isMultiSelectPrompt } from './prompt-answer-semantic';
-import { sendSpecialKeys } from './tmux/tmux';
 import { onTmuxSessionCreated } from './tmux/session-created-signal';
 import { CLIToolManager } from './cli-tools/manager';
-import { stripAnsi, stripBoxDrawing, detectThinking, getCodexLifecycleDialog } from './detection/cli-patterns';
+import { detectThinking } from './detection/cli-patterns';
 import { generatePromptKey } from './detection/prompt-key';
 import type { PromptDetectionResult } from './detection/types';
+import type { PromptData } from '@/types/models';
 import { getErrorMessage } from './errors';
 import { invalidateCache } from './tmux/tmux-capture-cache';
 import { readWaitingScreen, type ScreenReading } from './detection/waiting-screen-reading';
@@ -102,12 +111,10 @@ import {
   partialAnswerScreenKey,
   promptFrameKey,
   settleSendAttempt,
-  warnOncePerFrame,
   type AutoYesPollerState,
   type AutoYesSendAttempt,
 } from './polling/auto-yes-poller-state';
 import {
-  suppressAndWarnOnce,
   suppressAntigravityTrustScreen,
   suppressIfNotOursToAnswer,
   suppressUnclassifiedFrame,
@@ -134,7 +141,7 @@ import {
   receiptEpisodeOfSend,
   withheldNoReceiptLoggedAt,
 } from './polling/auto-yes-poller-receipt-log';
-import { AUTO_YES_ENTER_FALLBACK_ANSWER, syncEnterFallbackEpoch } from './polling/auto-yes-poller-enter-fallback';
+import { syncEnterFallbackEpoch } from './polling/auto-yes-poller-enter-fallback';
 import { capturePollerFrame } from './polling/auto-yes-poller-capture';
 import {
   beginLedgerAttempt,
@@ -322,251 +329,6 @@ export function processStopConditionDelta(
 }
 
 /**
- * Issue #3397: is the fresh capture still the screen the Enter was decided for?
- * Re-reads it the way one tick does — prompt reading, the same `promptFrameKey`,
- * codex's launch dialogs and `/model` picker, the dialog gate refusing with no
- * dialog vouched for, and `judgeEnterFallback` (input box off screen, tool
- * alive, not thinking). The policy and the checkbox rule read `promptData`,
- * which the equal `promptFrameKey` already pins (type, question, options).
- */
-function isStillEnterFallbackScreen(prompt: JudgedPrompt, fresh: string): boolean {
-  const { worktreeId, cliToolId, instanceId, frameKey } = prompt;
-  const clean = stripBoxDrawing(stripAnsi(fresh));
-  const frame = normalizeFrame(fresh, cliToolId);
-  const detection = detectPromptOnCleanFrame(
-    clean,
-    cliToolId,
-    clean.split('\n'),
-    fresh,
-    { worktreeId, instanceId },
-    frame,
-  );
-  if (!detection.isPrompt || !detection.promptData) return false;
-  if (promptFrameKey(detection.promptData) !== frameKey) return false;
-  if (cliToolId === 'codex' && (getCodexLifecycleDialog(frame) || isCodexModelPickerFrame(frame))) {
-    return false;
-  }
-  const gate = evaluateAutoYesDialogGate(cliToolId, detection.promptData.type, frame);
-  if (gate.allowed || gate.dialog !== null) return false;
-  return judgeEnterFallback(cliToolId, fresh).eligible;
-}
-
-/**
- * Issue #3397: a frame the dialog gate refused may still be a choice screen
- * CommandMate cannot read — the one the prompt window offers direct input for.
- * Send ONE Enter there (confirm whatever is selected), under every condition
- * `judgeEnterFallback` and this function check; otherwise record the refusal as
- * step 3.5 always did.
- *
- * Order, each one able to stop the Enter:
- *  1. `judgeEnterFallback` (rollout table, refusal, composer off screen, tool
- *     alive, not thinking) — and the gate must not have vouched for a dialog it
- *     refused to type into (opencode's `keys` strip, #1893);
- *  2. the screen already had its Enter: record `no-effect`, send nothing;
- *  3. the contract policy, exactly as step 4 applies it (mode, allow-listed
- *     types, deny patterns over the question, options and `approvalTarget`);
- *     a prompt the base rules would not answer (multi-select, typed text) gets
- *     nothing either;
- *  4. the screen must have been eligible on the previous tick as well;
- *  5. the session must be this server's (#2865);
- *  6. a capture taken now, past the capture cache, must still be that screen
- *     ({@link isStillEnterFallbackScreen});
- *  7. Auto-Yes still on and the contract, read past its cache, still allowing
- *     it (Issue #3822, `withheldAtSend`).
- *
- * Issue #3706: with a `generation` (a tick of `pollAutoYes`), the waits of
- * steps 5 and 6 are each followed by {@link isTickCurrent}; a tick that lost
- * its generation sends nothing and changes nothing.
- *
- * @returns true when the Enter was sent; the caller returns `responded`
- */
-async function tryEnterFallback(
-  prompt: JudgedPrompt,
-  promptDetection: PromptDetectionResult,
-  dialogGate: AutoYesDialogGateVerdict,
-  rawOutput: string | undefined,
-  generation?: AutoYesTickGeneration,
-): Promise<boolean> {
-  const { worktreeId, cliToolId, instanceId, pollerState, promptData, frameKey } = prompt;
-
-  const judgement = dialogGate.dialog === null ? judgeEnterFallback(cliToolId, rawOutput) : null;
-  if (judgement === null || !judgement.eligible) {
-    pollerState.enterFallbackCandidateKey = null;
-    suppressUnclassifiedFrame(prompt, dialogGate);
-    return false;
-  }
-
-  const screenKey = enterFallbackScreenKey(promptData);
-
-  // 2. The Enter did not move the screen on. Another one would be a guess.
-  if (pollerState.enterFallbackSentKey === frameKey) {
-    pollerState.enterFallbackCandidateKey = null;
-    recordEnterFallbackNoEffect(worktreeId, cliToolId, instanceId, screenKey);
-    suppressUnclassifiedFrame(prompt, dialogGate);
-    warnOncePerFrame(pollerState, `${frameKey}\u0000enter-fallback-no-effect`, 'poller:auto-yes-enter-fallback-no-effect', {
-      worktreeId,
-      cliToolId,
-      instanceId,
-      promptType: promptData.type,
-      refusalReason: judgement.refusalReason,
-    });
-    return false;
-  }
-
-  // 3. The contract policy, as step 4 reads it (Issue #3822: a failed lookup withholds).
-  const policy = getSessionAutoYesPolicy(worktreeId, cliToolId, instanceId);
-  const resolution = resolveAutoAnswerWithPolicy(promptData, policy);
-  if (resolution.suppressedBy) {
-    pollerState.enterFallbackCandidateKey = null;
-    const mode = policyLookupMode(policy);
-    suppressAndWarnOnce(
-      prompt,
-      {
-        reason: resolution.suppressedBy,
-        mode,
-        promptType: promptData.type,
-        pattern: resolution.pattern,
-      },
-      `${frameKey}\u0000${resolution.suppressedBy}\u0000${mode ?? ''}\u0000${resolution.pattern ?? ''}`,
-      'poller:auto-yes-suppressed-by-policy',
-      {
-        reason: resolution.suppressedBy,
-        mode,
-        pattern: resolution.pattern,
-        promptType: promptData.type,
-        enterFallback: true,
-      },
-    );
-    return false;
-  }
-  // A checkbox list is out of scope whatever the parser's flag says: the
-  // labels' boxes (`[ ]` / `[x]` / `[X]` / `[✔]`, the one reading in
-  // `prompt-answer-semantic` the sender shares) count too, so an Enter never
-  // submits a half-ticked list (Issue #3397; the base rules' #2755 reading
-  // covers `multiSelect` only).
-  if (
-    resolution.answer === null ||
-    (promptData.type === 'multiple_choice' && isMultiSelectPrompt(promptData))
-  ) {
-    pollerState.enterFallbackCandidateKey = null;
-    suppressUnclassifiedFrame(prompt, dialogGate);
-    return false;
-  }
-
-  // 4. Seen once: wait for the next tick to see the same screen again.
-  // Nothing is recorded as withheld here: Auto-Yes is about to answer, and a
-  // fresh `lastSuppression` would make `cmate wait` report the prompt to a
-  // human at once instead of holding for Auto-Yes (#2463).
-  if (pollerState.enterFallbackCandidateKey !== frameKey) {
-    pollerState.enterFallbackCandidateKey = frameKey;
-    logger.debug('poller:auto-yes-enter-fallback-candidate', {
-      worktreeId,
-      cliToolId,
-      instanceId,
-      promptType: promptData.type,
-    });
-    return false;
-  }
-
-  // 5. Never another server's session (Issue #2865).
-  const sessionName = CLIToolManager.getInstance().getTool(cliToolId).getSessionName(worktreeId, instanceId);
-  const ownership = await checkWorktreeSessionOwnership(worktreeId, sessionName);
-  if (generation !== undefined && !isTickCurrent(generation)) return false;
-  if (ownership === null || ownership.verdict === 'foreign') {
-    // Issue #3820: the ledger's own reason, as `skippedForUnownedSession` records it.
-    withholdLedgerConfirmation(prompt, 'foreign-session');
-    warnOncePerFrame(
-      pollerState,
-      `${frameKey}\u0000${sessionName}\u0000${ownership ? 'foreign' : 'worktree_not_found'}`,
-      'poller:auto-yes-skipped-foreign-session',
-      {
-        worktreeId,
-        cliToolId,
-        instanceId,
-        sessionName,
-        sessionPath: ownership?.sessionPath ?? null,
-        reason: ownership ? 'foreign' : 'worktree_not_found',
-        enterFallback: true,
-      },
-    );
-    return false;
-  }
-
-  // 6. The last look before the key, at a capture taken NOW. The two ticks of
-  // step 4 read through the capture cache, whose TTL is longer than the poll
-  // interval, so "seen twice" can be one stale frame read twice: a redraw caught
-  // with its input box missing (#2457's repaint) while the real pane already
-  // has the box back. Everything that decided the Enter is judged again on the
-  // fresh frame; any difference sends nothing, and the next tick starts over.
-  const fresh = await captureSessionOutputFresh(
-    worktreeId,
-    cliToolId,
-    (rawOutput ?? '').split('\n').length,
-    instanceId,
-  );
-  if (generation !== undefined && !isTickCurrent(generation)) return false;
-  if (!isStillEnterFallbackScreen(prompt, fresh)) {
-    pollerState.enterFallbackCandidateKey = null;
-    logger.debug('poller:auto-yes-enter-fallback-fresh-frame-differs', {
-      worktreeId,
-      cliToolId,
-      instanceId,
-      promptType: promptData.type,
-    });
-    return false;
-  }
-
-  // 7. Issue #3822: the grant and the contract, read again right before the key.
-  if (withheldAtSend(prompt, generation !== undefined)) {
-    pollerState.enterFallbackCandidateKey = null;
-    return false;
-  }
-
-  const receiptEpisode = receiptEpisodeOfSend(cliToolId, worktreeId, instanceId);
-  // Issue #3820: taken before the await, so the result goes to this confirmation.
-  const ledgerAttempt = beginLedgerAttempt(prompt, 'enter-fallback');
-  try {
-    await sendSpecialKeys(sessionName, ['Enter']);
-  } catch (error) {
-    // Issue #3796: the Enter may or may not have reached the pane.
-    noteAnswerSent(cliToolId, worktreeId, instanceId, true, receiptEpisode);
-    settleLedgerAttempt(ledgerAttempt, 'failed');
-    throw error;
-  } finally {
-    invalidateCache(sessionName);
-  }
-  // Issue #3796 review E: the Enter is out — for the episode it began for only.
-  noteAnswerSent(cliToolId, worktreeId, instanceId, false, receiptEpisode);
-  settleLedgerAttempt(ledgerAttempt, 'ok');
-
-  // Issue #3706: the Enter is out, but the per-screen record is the CURRENT
-  // session's: when the poller was stopped (the record was forgotten with it)
-  // or a new session began while `send-keys` was awaited, the return of this
-  // send must not put the record back. The audit row below is kept either way.
-  if (generation === undefined || (isPollerCurrent(generation) && isSameSession(generation))) {
-    pollerState.enterFallbackSentKey = frameKey;
-    pollerState.enterFallbackCandidateKey = null;
-    recordEnterFallbackSent(worktreeId, cliToolId, instanceId, {
-      promptType: promptData.type,
-      refusalReason: judgement.refusalReason,
-      screenKey,
-      ...(generation !== undefined ? { epoch: generation.sessionEpoch } : {}),
-    });
-  }
-  logger.info('poller:auto-yes-enter-fallback-sent', {
-    worktreeId,
-    cliToolId,
-    instanceId,
-    promptType: promptData.type,
-    refusalReason: judgement.refusalReason,
-    composerState: judgement.composerState,
-  });
-
-  await finishAnsweredPrompt(prompt, promptDetection, AUTO_YES_ENTER_FALLBACK_ANSWER, generation);
-  return true;
-}
-
-/**
  * Issue #3214: steps 6 and 7 of `detectAndRespondToPrompt` and everything after
  * them -- what is done once the answer has reached tmux, in the order it always
  * ran. Awaited inside that function's `try`, so a throw here still ends the
@@ -613,7 +375,7 @@ async function finishAnsweredPrompt(
 
   // Issue #3748: what was answered and with what — the question (cut to
   // MAX_LOGGED_QUESTION_LENGTH, never the full text) and the answer sent (the
-  // option number, `y`, or `[Enter]`) — so an answer that should not have been
+  // option number or `y`) — so an answer that should not have been
   // given can be told from the log alone.
   logger.info('poller:response-sent', {
     worktreeId,
@@ -734,6 +496,9 @@ function readPromptFrame(
 /**
  * What `detectAndRespondToPrompt` does to the poller state on a frame with no
  * prompt to answer, before it returns `no_prompt`.
+ *
+ * @returns agy's dialog the ungated reading still sees past the receipt gate
+ *   (Issue #3821: the decision published for it), else null
  */
 function noteNoPromptOnScreen(tick: {
   worktreeId: string;
@@ -746,7 +511,7 @@ function noteNoPromptOnScreen(tick: {
   cleanOutput: string;
   precomputedLines: string[] | undefined;
   rawOutput: string | undefined;
-}): void {
+}): ReturnType<typeof logIfWithheldForWantOfReceipt> {
   const {
     worktreeId,
     cliToolId,
@@ -762,7 +527,6 @@ function noteNoPromptOnScreen(tick: {
   forgetPartialAnswer(compositeKey);
   pollerState.lastAnsweredPromptKey = null;
   pollerState.lastAnsweredAt = null;
-  pollerState.enterFallbackCandidateKey = null;
   // Issue #3757: agy's trust screen reads as no prompt (unnumbered: neither
   // reader takes it), but it is one nobody here answers — record why, still
   // as `no_prompt`. Before the warn key is cleared, so the WARN stays once
@@ -779,7 +543,7 @@ function noteNoPromptOnScreen(tick: {
       CLIToolManager.getInstance().getTool(cliToolId).getSessionName(worktreeId, instanceId),
     )
   ) {
-    return;
+    return null;
   }
   pollerState.lastSkipWarnKey = null;
   if (cliToolId === 'antigravity' && !promptDetection.isPrompt) {
@@ -800,7 +564,61 @@ function noteNoPromptOnScreen(tick: {
       );
       if (seen.reason !== null) withholdLedgerConfirmation(scope, seen.reason);
     }
+    return seen;
   }
+  return null;
+}
+
+/**
+ * Issue #3821: records what one tick decided about the prompt it read, for
+ * `current-output` to publish (`autoYesDecision`, see
+ * `polling/auto-yes-decision-state`). Tied to the grant and the session epoch
+ * the tick read under, and to the confirmation (the prompt, and for agy the
+ * hook call its receipt was accepted for); a tick that lost its generation
+ * (#3706) records nothing, because the grant or the session it decided for is
+ * gone.
+ */
+function tickDecisionRecorder(tick: {
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  instanceId: string | undefined;
+  compositeKey: string;
+  promptData: PromptData;
+  epoch: number;
+  generation: AutoYesTickGeneration | undefined;
+  startedAt: number;
+}): {
+  answering: () => void;
+  reaffirmAnswering: () => void;
+  withheld: (fallback: AutoYesDecisionReason) => void;
+} {
+  const { worktreeId, cliToolId, instanceId, compositeKey, promptData, epoch, generation, startedAt } = tick;
+  const grantOf = () => generation?.grant ?? getAutoYesState(worktreeId, cliToolId, instanceId);
+  const callId = ledgerCallOf(cliToolId, worktreeId, instanceId).callId ?? null;
+  const record = (state: 'answering' | 'withheld', reason: AutoYesDecisionReason | null): void => {
+    if (generation !== undefined && !isTickCurrent(generation)) return;
+    recordAutoYesDecision(compositeKey, { state, reason, promptData, callId, grant: grantOf(), epoch });
+  };
+  return {
+    answering: () => record('answering', null),
+    // The duplicate guard's "answered recently" compares the question only, so
+    // it is not evidence this confirmation is the one answered: `answering`
+    // stands only when the record the send made is about this confirmation,
+    // under the same grant and session (review 2). Otherwise nothing stands.
+    reaffirmAnswering: () => {
+      if (generation !== undefined && !isTickCurrent(generation)) {
+        forgetAutoYesDecision(compositeKey);
+        return;
+      }
+      reaffirmAutoYesAnswering(compositeKey, { promptData, callId, grant: grantOf(), epoch });
+    },
+    // The reason the step that withheld it recorded on this tick (the #1684
+    // record), else the step's own: a stop the policy record never carries.
+    withheld: (fallback) => {
+      const recorded = getLastPolicySuppression(worktreeId, cliToolId, instanceId);
+      record('withheld', recorded !== null && recorded.at >= startedAt ? recorded.reason : fallback);
+    },
+  };
 }
 
 /**
@@ -917,8 +735,8 @@ function settleFailedTick(
  *   (Issue #2522). Omitting it costs Command Code's `AskUserQuestion` and
  *   nothing else; see {@link capturePollerFrame}.
  * @param generation - The calling tick's generation (Issue #3706). Given, every
- *   wait before a key — the ownership check, the Enter fallback's fresh capture,
- *   each wait inside the send — is followed by {@link isTickCurrent}, and a tick
+ *   wait before a key — the ownership check and each wait inside the send — is
+ *   followed by {@link isTickCurrent}, and a tick
  *   that lost it types nothing more and returns `no_answer`. Omitted (direct
  *   callers, tests), nothing is checked, as before.
  * @returns 'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'
@@ -945,6 +763,8 @@ export async function detectAndRespondToPrompt(
   // confirmation closes the open one as gone when it ends (`endLedgerTick`).
   const ledgerScope: LedgerScope = { compositeKey, worktreeId, cliToolId, instanceId };
   const ledgerTick = beginLedgerTick(ledgerScope);
+  // Issue #3821: when this tick began, for the decision's reason (see `tickDecisionRecorder`).
+  const tickStartedAt = Date.now();
   try {
     // 1. Detect prompt.
     //
@@ -997,7 +817,10 @@ export async function detectAndRespondToPrompt(
     );
 
     if (!promptDetection.isPrompt || !promptDetection.promptData) {
-      noteNoPromptOnScreen({
+      // Issue #3821: no prompt, no decision — except agy's dialog the receipt
+      // gate keeps from this reading while the status API still shows it.
+      forgetAutoYesDecision(compositeKey);
+      const withheldPastGate = noteNoPromptOnScreen({
         worktreeId,
         cliToolId,
         instanceId,
@@ -1009,6 +832,18 @@ export async function detectAndRespondToPrompt(
         precomputedLines,
         rawOutput,
       });
+      if (withheldPastGate !== null && withheldPastGate.reason !== null) {
+        tickDecisionRecorder({
+          worktreeId,
+          cliToolId,
+          instanceId,
+          compositeKey,
+          promptData: withheldPastGate.promptData,
+          epoch,
+          generation,
+          startedAt: tickStartedAt,
+        }).withheld(withheldPastGate.reason);
+      }
       return 'no_prompt';
     }
 
@@ -1026,6 +861,26 @@ export async function detectAndRespondToPrompt(
       ledgerCallOf(cliToolId, worktreeId, instanceId),
     );
 
+    // Issue #3821: what this tick decides about the prompt, for `current-output`.
+    const decision = tickDecisionRecorder({
+      worktreeId,
+      cliToolId,
+      instanceId,
+      compositeKey,
+      promptData: promptDetection.promptData,
+      epoch,
+      generation,
+      startedAt: tickStartedAt,
+    });
+
+    // 1.5. Issue #3821 (review 2): a person began answering on this instance
+    // moments ago. What is on screen may be the very confirmation they are
+    // answering, so it is theirs until the hold passes; Auto-Yes stays on.
+    if (isManualAnswerHolding(compositeKey)) {
+      decision.withheld(ANSWERED_BY_HUMAN_DECISION_REASON);
+      return 'no_answer';
+    }
+
     // 2. Check for duplicate prompt (Issue #306)
     const promptKey = generatePromptKey(promptDetection.promptData);
     const frameKey = promptFrameKey(promptDetection.promptData);
@@ -1033,6 +888,8 @@ export async function detectAndRespondToPrompt(
       // Issue #3820: not answered on this tick either — an interval of its own
       // reason, so the count can tell the wait for an answer to land apart.
       withholdLedgerConfirmation(ledgerScope, 'answered-recently');
+      // Issue #3821: still `answering` only if this is the confirmation the send was for.
+      decision.reaffirmAnswering();
       return 'duplicate';
     }
 
@@ -1056,30 +913,31 @@ export async function detectAndRespondToPrompt(
     // does not), or the session is relaunched. Recorded as a suppression, so
     // the prompt Push and `cmate wait` see "withheld", not "answering".
     if (withheldForEarlierSend(judged, screenKey, epoch)) {
+      decision.withheld('moved-send-in-flight');
       return 'no_answer';
     }
 
     // 3., 3.2., 3.5. Frames that are not Auto-Yes's to answer: see
     // `suppressIfNotOursToAnswer`.
     const notOurs = suppressIfNotOursToAnswer(judged, frame);
-    if (notOurs.kind !== 'dialog-gate-refused') {
-      pollerState.enterFallbackCandidateKey = null;
-    }
     if (notOurs.kind === 'left-alone') {
+      decision.withheld('unclassified-frame');
       return 'no_answer';
     }
-    // 3.6. Issue #3397: a refused frame may be a choice screen CommandMate
-    // cannot read; with Auto-Yes on it gets one Enter. See `tryEnterFallback`.
+    // 3.6. A frame the dialog gate refused is left to a human, whatever it is.
+    // Issue #3821: including a choice screen CommandMate cannot read, which got
+    // one bare Enter (#3397) until this Issue retired it — an Enter confirms
+    // whatever happens to be selected, and nothing here can say what that is.
     if (notOurs.kind === 'dialog-gate-refused') {
-      if (!(await tryEnterFallback(judged, promptDetection, notOurs.dialogGate, rawOutput, generation))) {
-        return 'no_answer';
-      }
-      return 'responded';
+      suppressUnclassifiedFrame(judged, notOurs.dialogGate);
+      decision.withheld('unclassified-frame');
+      return 'no_answer';
     }
 
     // 3.7. Issue #3822: a question to the operator is the human's to answer;
     // Auto-Yes answers permissions only. See `withheldAsQuestion`.
     if (withheldAsQuestion(judged)) {
+      decision.withheld('question-left-to-human');
       return 'no_answer';
     }
 
@@ -1091,6 +949,7 @@ export async function detectAndRespondToPrompt(
     // polling/response-checker.ts) is what tells them it is waiting.
     const answer = resolveAnswerUnderPolicy(judged);
     if (answer === null) {
+      decision.withheld(NO_AUTO_ANSWER_DECISION_REASON);
       return 'no_answer';
     }
 
@@ -1104,6 +963,7 @@ export async function detectAndRespondToPrompt(
     const ownership = await checkWorktreeSessionOwnership(worktreeId, sessionName);
     if (generation !== undefined && !isTickCurrent(generation)) return 'no_answer';
     if (skippedForUnownedSession(judged, sessionName, ownership)) {
+      decision.withheld('foreign-session');
       return 'no_answer';
     }
 
@@ -1111,9 +971,12 @@ export async function detectAndRespondToPrompt(
     // and inside its window, and the contract, read past its cache, still
     // allowing this answer. No wait between here and the send.
     if (withheldAtSend(judged, generation !== undefined)) {
+      decision.withheld(NO_AUTO_ANSWER_DECISION_REASON);
       return 'no_answer';
     }
 
+    // Issue #3821: from here until the screen is redrawn, Auto-Yes is answering.
+    decision.answering();
     attempt = beginSendAttempt(
       compositeKey,
       screenKey,
@@ -1148,6 +1011,9 @@ export async function detectAndRespondToPrompt(
 
     return 'responded';
   } catch (error) {
+    // Issue #3821: a tick that failed has decided nothing the next one will not
+    // decide again; until then the prompt is not "being answered".
+    if (generation === undefined || isTickCurrent(generation)) forgetAutoYesDecision(compositeKey);
     return settleFailedTick(error, {
       worktreeId,
       cliToolId,
@@ -1200,6 +1066,8 @@ async function pollAutoYes(
     grant,
     sessionEpoch: getEnterFallbackSessionEpoch(compositeKey),
     startedAt: Date.now(),
+    // Issue #3821: a person's answer begun after this is read stops the tick.
+    manualAnswerSeq: getManualAnswerSeq(compositeKey),
   };
   // Issue #3796: this is the session wait's tick (it was scheduled as one) —
   // recorded before anything can fail, for the push gate.
@@ -1592,6 +1460,8 @@ export function stopAutoYesPolling(compositeKey: string, reason?: AutoYesPollerS
   // cleanup call this for an instance whose poller may already be gone, and the
   // Enter record must not outlive the grant or the session either way.
   forgetEnterFallback(compositeKey);
+  // Issue #3821: and the decision, for the same reason.
+  forgetAutoYesDecision(compositeKey);
   // Issue #3820: before the early return too — a session ended after its
   // poller had already stopped still abandons the confirmation left on it.
   noteLedgerPollerStopped(compositeKey, resolvePollerStopReason(reason, 'unspecified'));
@@ -1629,6 +1499,7 @@ export function stopAllAutoYesPolling(): void {
   }
   autoYesPollerStates.clear();
   clearEnterFallbacks();
+  clearAutoYesDecisions();
   clearPartialAnswers();
 }
 
@@ -1672,6 +1543,7 @@ export function stopAutoYesPollingByWorktree(
   pollerKeys.forEach(key => stopAutoYesPolling(key, options?.reason));
   // Issue #3397: and the records of instances whose poller had already stopped.
   forgetEnterFallbacksByWorktree(worktreeId);
+  forgetAutoYesDecisionsByWorktree(worktreeId);
   // Issue #3820: and the ledger's confirmations on them — an API approval is
   // opened with Auto-Yes off too, so the running pollers do not name them all.
   noteLedgerWorktreeStopped(worktreeId, resolvePollerStopReason(options?.reason, 'unspecified'));

@@ -771,7 +771,7 @@ kind は `promptData.type` や `sessionStatusReason`（`antigravity_selection_li
 | `screen.answerVia` | 回答経路: `screen`（`respond` のキー送出）/ `api`（decision）/ `strict`（agy の信頼確認。`respond --expect-screen` で答えられる）/ `terminal`（今は `respond` で答えられない）/ `none` |
 | `autoYes.enabled` / `pollerActive` | Auto-Yes の有効状態 / サーバの poller が動いているか |
 | `autoYes.pollerRecord` | poller（または permission hook）が最後に「答えなかった」と記録したもの。`screenCorrelation` はこの画面との対応で、記録は画面を名指ししないため `unknown` / `type-mismatch` / `no-prompt-on-screen` のどれか |
-| `autoYes.contractEvaluation` | 契約の方針を**いま**この画面に当てた結果（`policy-withholds` + 理由 / `policy-permits` / `no-base-answer` / `not-evaluated`）。理由の語は `AutoYesSuppressionReason` と同じ（[理由語の表](#autoyeslastsuppression-ポリシー抑止の観測issue-1684)） |
+| `autoYes.contractEvaluation` | 契約の方針を**いま**この画面に当てた結果（`policy-withholds` + 理由 / `base-withholds` + 理由 / `policy-permits` / `no-base-answer` / `not-evaluated`）。`base-withholds`（Issue #3822）は契約より前の基本の判定で見送ったことを表し、契約の有無によらない（今は `allow-once-unidentified` だけ。契約を見直しても答えは戻らない）。理由の語は `AutoYesSuppressionReason` と同じ（[理由語の表](#autoyeslastsuppression-ポリシー抑止の観測issue-1684)） |
 | `lastSend` | このインスタンスへの直近の send の結末（Issue #3759）。`{ at, state, reason }`。`state` は `not-sent`（本文のキーを 1 つも打つ前に失敗。例: `prompt-not-ready`）/ `sent`（送信を確かめた）/ `indeterminate`（一部を打った後に失敗、または結果を確かめられない。composer に本文が残っていれば `reason: composer-residue`）。サーバ起動後に記録が無ければ null、古いサーバでは項目自体が無い |
 
 **`lastSend` が何であっても、CommandMate は自動で再送しません。** 再送するのは利用者か監督のエージェントです。`not-sent` は自分で送り直してください（入力欄が戻ってから）。**`indeterminate` のときは再送しないでください。** 先に `commandmate capture <worktree-id> --pane` で画面を見て、本文が入力欄に残っていないか・既に送られていないかを確かめます（確かめずに送ると二重に届くことがあります）。`send` が `prompt not ready` などで失敗したときのエラーにも、同じ状態（`[send state: not-sent (prompt-not-ready): …]`）が書かれます。
@@ -2093,6 +2093,7 @@ Auto-Yes が OFF の instance で、止まった理由があれば入ります�
 | `startup-trust-unhandled`（Issue #3757） | agy の起動時のフォルダ信頼の確認（`Do you trust the contents of this project?`）が画面にある。起動の手順の側が答えるもので、番号が無いので poller はプロンプトとして読めない。起動の窓が終わった後に出た場合は、次の send の準備待ちが答える | 「because agy's startup folder-trust confirmation is the launch's to answer, not Auto-Yes's; the next send confirms it once, or answer it at the pane」 |
 | `question-confirm-page`（Issue #3748） | Command Code と Claude の `AskUserQuestion` の確認画面（`Submit` / `Cancel`）。`Submit` は選択ではなくその時点の回答を確定するので、Auto-Yes は答えず人に任せる | 「because the question's Submit/Cancel confirmation commits the answers as they stand, so Auto-Yes leaves it to a human」 |
 | `question-left-to-human`（Issue #3822） | 道具が操作者に尋ねている質問（Claude の `AskUserQuestion` の選択画面、OpenCode V2 の質問フォーム）が画面にある。Auto-Yes が答えるのは許可だけで、質問は人が答えるので何も送らない。契約の判定ではないので、`allowPromptTypes` に `multiple_choice` を書いても答えない。ただし運用者が `CM_AUTOYES_DIALOG_GATE=<tool>=legacy` を立てると、そのツールの質問（claude の `AskUserQuestion` など）にも従来どおり答える（キルスイッチは質問の見送りも戻す）。ダイアログの判定が既定で `legacy` の道具（command-code など）の質問も、この理由では見送られない。質問の後の `Submit` / `Cancel` の確認画面は `question-confirm-page` のまま | 「because the agent is asking a question, and Auto-Yes answers permissions only; answer it at the pane (prompt --json, respond)」 |
+| `allow-once-unidentified`（Issue #3822） | 許可の確認が画面にあるが、「今回だけ許可」と読める選択肢が 1 つに決まらない（無い、または 2 つ以上ある）ので何も送らない。Auto-Yes が選ぶのは今回だけ許可の選択肢だけで、カーソルや既定がどこにあってもその番号を送る。永続の許可（`don't ask again`・`always allow`・`Persist to settings.json` など）・モードの変更（`allow all edits`・`Full Access` など）・拒否は選ばない。選択肢の読みは claude・codex・agy（antigravity）・command-code・copilot の実機の画面の文言から作ってあり、どの行も読めない番号付きの一覧は従来どおり（既定の選択肢、無ければ 1 番）。契約の判定ではないので `mode` は契約のまま記録され、`commandmate prompt --json` の `autoYes.contractEvaluation` は `policy-withholds` ではなく `base-withholds` になる | 「because no single option of the permission dialog allows this call only (the others save a rule, change the permission mode, or deny); Auto-Yes does not pick those, so answer it at the pane (prompt --json, respond)」 |
 | `no-hook-receipt`（Issue #3767） | agy の承認ダイアログが画面にあるが、それに対応する hook の問い合わせ（`PreToolUse`）の受信が無い。(1) 受信が一度も無い、(2) ダイアログが最後の受信から窓（8 秒）より後に出た、(3) ダイアログが受信より前から出ていた（返答中の引用など）、(4) 受信が途絶えた、(5) 受信が前のダイアログに使い済み、(6) Auto-Yes が受信の確認へキーを送ってから 18 秒（窓＋観測の猶予＋応答後の待ち）を過ぎても確認が残っている（キーで閉じなかったか、受信の無い別の確認と入れ替わった。Issue #3789。送信が途中で切れた場合も、切れた時点から猶予（18 秒）を数え、過ぎても確認が残れば no-hook-receipt として記録する。入力欄にキーの一部が残っていることがある。ただし、中断の後に、より具体的な抑止の理由（partial-answer）が記録された場合は、その理由を保ち、no-hook-receipt としては記録しない）、のいずれか。サーバーのログ `antigravity-autoyes-withheld-no-hook-receipt` の `hint` が区別する。**止まったときの対処**: `commandmate auto-yes <worktree-id> --disable` → `commandmate prompt <worktree-id> --json` → `commandmate respond <worktree-id> --expect-screen …` で答える（または UI で答える）。一度も受信が無い・途絶えた場合は `~/.gemini/config/hooks.json` の向き先を確認 | 「because there is no unused agy hook permission question for this dialog (none arrived in time, or the last one was spent on keys that did not clear it); answer it yourself (auto-yes --disable, prompt --json, respond --expect-screen) or check hooks.json」 |
 
 [`commandmate prompt --json`](#commandmate-prompt) の `autoYes.pollerRecord`（poller の記録）と `autoYes.contractEvaluation`（契約の再評価）は別の項目ですが、どちらもこの表と上の `reason` と同じ語を使います。
@@ -2102,56 +2103,36 @@ Auto-Yes が OFF の instance で、止まった理由があれば入ります�
 契約の `autoYes` を見直してください（`mode: safe` で `multiple_choice` が抑止される場合は
 [allow-listed への切り替え](#無人実行の-auto-yes-ポリシーは-allow-listed-を使うissue-1684)を推奨）。
 
-#### `autoYes.lastEnterFallback`: 読めない選択画面への Enter（Issue #3397）
+#### `autoYesDecision`: Auto-Yes がいまの確認に何をしているか（Issue #3821）
 
-エージェントが出した選択画面を CommandMate が読めないとき、プロンプト欄には
-「この画面は CommandMate から操作できません。」と「直接入力に切り替える」リンクが出ます。
-Auto-Yes が有効なら、この画面に **Enter を 1 回だけ**送ります（その時点で選ばれている選択肢で確定します）。
-送った画面では、プロンプト欄の警告とリンクの代わりに「Auto-Yes が Enter を送りました。」と出ます。Auto-Yes が有効な間はふつうプロンプト欄を出しませんが、CommandMate が読めない画面（`promptAnswerable: false`）では、Auto-Yes 中も PC・スマホともにプロンプト欄を出します（チェックボックスの複数選択と同じ扱い。Auto-Yes はこの 2 つに番号を送らないため）。チェックボックスは `multiSelect` の有無にかかわらず、選択肢が `[ ]` / `[x]` / `[X]` / `[✔]` で始まる一覧も含みます。
+`current-output` の応答（`capture --json`）は、同じ応答の `promptData` について Auto-Yes の判断を載せます。
 
 ```json
-"autoYes": {
-  "enabled": true,
-  "expiresAt": 1754300000000,
-  "lastSuppression": null,
-  "lastEnterFallback": {
-    "outcome": "sent",
-    "promptType": "multiple_choice",
-    "refusalReason": "unsupported_dialog_layout",
-    "sentAt": 1754296400000,
-    "at": 1754296400000,
-    "currentPrompt": true
-  }
+"autoYesDecision": {
+  "state": "withheld",
+  "reason": "server-poller-inactive",
+  "observedAt": 1754296400000,
+  "confirmation": "3f1c…"
 }
 ```
 
-| フィールド | 意味 |
-|-----------|------|
-| `outcome` | `sent`（Enter を送った）/ `no-effect`（Enter の後も同じ画面が残った。2 回目は送らず人に引き継ぐ） |
-| `promptType` | Enter を送った画面のプロンプトの型 |
-| `refusalReason` | 画面が操作できなかった理由（`unsupported_dialog_layout` / `prompt_no_longer_active`） |
-| `sentAt` | Enter を送った時刻（epoch ms） |
-| `at` | 最後に更新した時刻（`sentAt`、または `no-effect` を見つけた時刻） |
-| `currentPrompt` | この応答の `promptData` と同じ画面についての記録か |
+| `state` | 意味 |
+|---------|------|
+| `answering` | サーバーの poller がこの確認に自動で答えている（送信中、または送信後で画面がまだ書き換わっていない） |
+| `withheld` | Auto-Yes はこの確認に答えず、人に任せた。`reason` が理由（上の表の語のほか、`server-poller-inactive` = Auto-Yes は有効だがこのインスタンスの poller が動いていない（同時実行の上限など）、`no-auto-answer` = 基本の規則に答えが無い（自由入力・チェックボックスなど）、`answered-by-human` = 人が回答欄から答え始めて約 10 秒の間、`foreign-session` / `moved-send-in-flight`） |
+| `none` | 確認が無い、Auto-Yes が無効、またはまだ判断していない。`answering` とは扱わない |
 
-送るのは次の **すべて** を満たすときだけです。
+判断は poller が実際に判定した結果で、Auto-Yes の有効化（同じ画面のまま OFF→ON した後や期限切れ）・セッションの再起動・別の確認・人の回答のどれでも引き継ぎません（次の判定まで `none`）。別の確認かどうかは、質問と選択肢に加えて承認の対象（`approvalTarget`。選択肢の行のカーソルの位置だけは見ず、本文の字下げ・`>`・空行はそのまま比べる。字下げだけ違うコマンドは別の確認）と、agy では hook の呼び出しで見ます。承認の対象を最後まで照合できない読み（上が切れて行数の少ない読み）は、agy の hook の呼び出しが同じでも同じ確認とせず `none` にします（残った行だけでは、ファイル名だけ違う別の確認と区別できないことがあるため。回答欄が出る側で、自動の送信には影響しません）。対応が確かめられないときも `none` です。`confirmation` は判断がどの確認についてのものかを表す識別子です（中身に意味は無い。サーバーが同じ確認と判定する読みは同じ値、値が違えば別の確認として扱う。同じ画面でも読んだ行数が違えば値は違う。確認が無いときは `null`）。PC の画面は、同じ `confirmation` のときだけ新しい方の判断を残し、別の確認の判断は引き継ぎません。送信後の重複抑止の間も、`answering` は送信した確認と同じ確認にだけ続けます。同じ文面の確認が、間に確認の無い画面を挟まずに続いた場合は、画面だけでは別の確認と区別できません。セッションが動いていないときは欄がありません。
 
-- プロンプト欄に「直接入力に切り替える」リンクが出る画面（`promptAnswerable: false` と同じ判定）
-- 選択画面に操作が移っている確証がある: 選択画面のフッターがあるのに配置が読めない（`unsupported_dialog_layout`）、または入力欄が画面に無い（claude / codex）
-- **入力欄が見えていない**（入力欄に文字がある・空・薄字の候補のどれでも送らない。返答が選択肢を引用しているだけの画面への誤送信を防ぐため）
-- 同じ画面を 2 回続けて見た、エージェントが終了していない・生成中でない
-- 実行契約の `autoYes` ポリシーが許す（`mode: off` / `safe`、`denyPatterns` 一致では送らない）、他サーバのセッションではない
-- codex の起動時の画面・`/model` の選択画面ではない
+Auto-Yes が有効でも、PC・スマホの回答欄は `state` が `answering` 以外なら出ます（欄の無い古いサーバーの応答でも出ます）。OpenCode / V2 が API で尋ねる質問は、Auto-Yes 中も常に回答欄を出します。手動で答えても Auto-Yes は有効のままです。
 
-`commandmate wait` は、報告するプロンプトについての記録（`currentPrompt: true`）があれば、stderr に 1 行添えます（`auto-yes sent Enter to this prompt …` / 効かなかったときは `… the same screen is still up (no-effect) …`）。exit 10 の JSON は変わりません。人向けの `capture`（`--json` なし）は本文だけを出すため、この記録は `--json` で読んでください。
+`commandmate wait` は、`withheld` の確認を Auto-Yes の猶予（`--auto-yes-grace`）で待たずにすぐ報告し、stderr に `auto-yes is not answering this prompt (reason=…)` を添えます。prompt の Push 通知は従来どおり猶予の後に届きます。
 
-既定で有効なのは claude と codex だけです。環境変数 `CM_AUTOYES_ENTER_FALLBACK` で
-ツールごとに切り替えられます（`CM_AUTOYES_DIALOG_GATE` と同じ書式）。
+#### `autoYes.lastEnterFallback`: 読めない選択画面への Enter（Issue #3397、Issue #3821 で廃止）
 
-```bash
-CM_AUTOYES_ENTER_FALLBACK='*=disabled'       # 全ツールで送らない
-CM_AUTOYES_ENTER_FALLBACK='codex=disabled'   # codex だけ止める
-```
+CommandMate が読めない選択画面へ Auto-Yes が Enter を 1 回送る動作は **廃止しました**（Issue #3821）。裸の Enter はその時点で選ばれている選択肢をそのまま確定するため、画面が読めない以上、何を確定するかを誰も確かめられないからです。環境変数 `CM_AUTOYES_ENTER_FALLBACK` を設定しても戻りません。こうした画面は Auto-Yes 中も人が答えます（`lastSuppression.reason` は `unclassified-frame`、`autoYesDecision` は `withheld`）。
+
+`autoYes.lastEnterFallback` の欄は互換のため残しており、常に `null` です。過去の監査ログ・履歴に残っている `[Enter]` の回答や、Auto-Yes の計測ログの basis `enter-fallback` は、そのまま読めます。
 
 ### `--pane`: transcript を読む（Issue #1623）
 
@@ -2234,7 +2215,7 @@ JSON 出力（`prompts` は古い順）:
 ```
 
 - **`answeredBy` が応答種別**です: `auto`（サーバ側 auto-yes が自動応答）/ `human`（respond API・
-  チャット UI からの明示応答。ブラウザ側 auto-yes フォールバック経由も `human` になります）/
+  チャット UI からの明示応答。Issue #3821 より前のブラウザ側 auto-yes フォールバック経由も `human` でした）/
   `terminal`（誰かがターミナルで直接応答したと推定される掃引記録）。本機能導入前に解決した行は `null`
 - `--pane` とは併用できません（`--prompts` は履歴、`--pane` は現在の画面を読むため）
 - `--limit` の上限はサーバの履歴取得上限（1000）と同じです

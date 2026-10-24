@@ -3,9 +3,10 @@
  *
  * A tick takes its poller state, its grant and its session epoch at the top and
  * compares them — by identity, never by re-reading the key — after every wait:
- * the capture, the ownership check, the Enter fallback's fresh capture, the
- * sender's guard read and the delays between its keys, and when it re-arms its
- * timer. Each wait here is held open with a deferred promise while the state
+ * the capture, the ownership check, the sender's guard read and the delays
+ * between its keys, and when it re-arms its timer. (Issue #3821 retired the
+ * Enter fallback and its fresh capture; its cases now assert that no Enter and
+ * no fresh capture happen on any generation.) Each wait here is held open with a deferred promise while the state
  * moves, then released.
  *
  * Driven through the real poller and the real `sendPromptAnswer`; only the ends
@@ -325,15 +326,15 @@ describe('[#3706] a stop during a wait: no input not yet issued is started', () 
     expect(startResponsePolling).not.toHaveBeenCalled();
   });
 
-  it("stopped during the Enter fallback's fresh capture: no Enter", async () => {
+  it("[#3821] the unreadable list: no fresh capture is taken and no Enter, stopped or not", async () => {
     process.env[AUTO_YES_ENTER_FALLBACK_ENV_VAR] = 'claude=enabled';
     pane = CLAUDE_UNRECOGNISED_LIST;
     enable();
-    await firstTick(); // seen once: the candidate
+    await firstTick();
     freshGate = deferred();
     await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
     await settle();
-    expect(captureSessionOutputFresh).toHaveBeenCalledTimes(1);
+    expect(captureSessionOutputFresh).not.toHaveBeenCalled();
 
     disable();
     freshGate.resolve();
@@ -358,15 +359,15 @@ describe('[#3706] a stop during a wait: no input not yet issued is started', () 
     expect(keysSent.slice(0, 2)).toEqual(['y', '<Enter>']);
   });
 
-  it('negative: the Enter fallback still sends its one Enter', async () => {
+  it('[#3821] the unreadable list on a live generation: no Enter (the fallback is retired)', async () => {
     process.env[AUTO_YES_ENTER_FALLBACK_ENV_VAR] = 'claude=enabled';
     pane = CLAUDE_UNRECOGNISED_LIST;
     enable();
     await firstTick();
-    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS * 3);
     await settle();
-    expect(keysSent).toEqual(['Enter']);
-    expect(recordAnsweredPrompt).toHaveBeenCalledTimes(1);
+    expect(keysSent).toEqual([]);
+    expect(recordAnsweredPrompt).not.toHaveBeenCalled();
   });
 });
 
@@ -622,37 +623,38 @@ describe('[#3706] P2-1: a session relaunched while the answer was being sent', (
   });
 });
 
+// Issue #3821: no Enter goes out any more, so there is no record to put back
+// or to keep; each case asserts that nothing is sent, recorded or audited,
+// whatever happens around the tick.
 describe("[#3706] P2-2: the Enter fallback's record after a stop or a relaunch", () => {
-  async function fallbackUpToTheEnter(during: () => void): Promise<void> {
+  async function fallbackTicks(between: () => void): Promise<void> {
     process.env[AUTO_YES_ENTER_FALLBACK_ENV_VAR] = 'claude=enabled';
     pane = CLAUDE_UNRECOGNISED_LIST;
     enable();
-    sendSpecialKeys.mockImplementationOnce(async (_s, keys) => {
-      keysSent.push(...keys);
-      during();
-    });
-    await firstTick(); // seen once: the candidate
+    await firstTick();
+    between();
     await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
     await settle();
   }
 
-  it('a relaunch during the Enter: no record for the new session, the audit is kept', async () => {
-    await fallbackUpToTheEnter(() => beginEnterFallbackSession(WT, 'claude'));
-    expect(keysSent).toEqual(['Enter']);
+  it('[#3821] a relaunch between ticks: no Enter, no record, no audit row', async () => {
+    await fallbackTicks(() => beginEnterFallbackSession(WT, 'claude'));
+    expect(keysSent).toEqual([]);
     expect(getLastEnterFallback(WT, 'claude')).toBeNull();
-    expect(recordAnsweredPrompt).toHaveBeenCalledTimes(1);
+    expect(recordAnsweredPrompt).not.toHaveBeenCalled();
   });
 
-  it('a stop during the Enter: the forgotten record is not put back, the audit is kept', async () => {
-    await fallbackUpToTheEnter(() => disable());
-    expect(keysSent).toEqual(['Enter']);
+  it('[#3821] a stop between ticks: no Enter, no record, no audit row', async () => {
+    await fallbackTicks(() => disable());
+    expect(keysSent).toEqual([]);
     expect(getLastEnterFallback(WT, 'claude')).toBeNull();
-    expect(recordAnsweredPrompt).toHaveBeenCalledTimes(1);
+    expect(recordAnsweredPrompt).not.toHaveBeenCalled();
   });
 
-  it('negative: an Enter that lands in the same generation is recorded as sent', async () => {
-    await fallbackUpToTheEnter(() => {});
-    expect(getLastEnterFallback(WT, 'claude')?.outcome).toBe('sent');
+  it('[#3821] negative: nothing in between, and still no Enter', async () => {
+    await fallbackTicks(() => {});
+    expect(keysSent).toEqual([]);
+    expect(getLastEnterFallback(WT, 'claude')).toBeNull();
   });
 });
 

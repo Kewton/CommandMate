@@ -16,6 +16,12 @@
  *  4. a REAL response — `buildCurrentOutput` over a frame, with a record in the
  *     store — carries exactly the copy's fields, each of the copy's type.
  *
+ * Issue #3821: the Enter is retired, and the server keeps the key on the wire
+ * as null for the clients that read it. The type checks (1-3) stand; the real
+ * responses (4) now carry `lastEnterFallback: null` whatever the store holds,
+ * and the store's own record (still kept per session epoch) is read directly
+ * where a case is about the epoch.
+ *
  * Both types are read with the TypeScript compiler, as in the #3300 test.
  *
  * @vitest-environment node
@@ -49,6 +55,7 @@ import { detectSessionStatus } from '@/lib/detection/status-detector';
 import {
   clearEnterFallbacks,
   enterFallbackScreenKey,
+  getLastEnterFallback,
   recordEnterFallbackNoEffect,
   recordEnterFallbackSent,
 } from '@/lib/polling/auto-yes-enter-fallback';
@@ -247,7 +254,7 @@ describe('[#3397] a real response carries what the copy declares', () => {
     expect(payload.autoYes?.lastEnterFallback).toBeNull();
   });
 
-  it('every field the copy declares, of the copy\'s type, and nothing else', async () => {
+  it('[#3821] a record in the store: the wire still carries the key, as null', async () => {
     recordEnterFallbackSent(WT, 'claude', undefined, {
       promptType: 'multiple_choice',
       refusalReason: 'unsupported_dialog_layout',
@@ -259,37 +266,21 @@ describe('[#3397] a real response carries what the copy declares', () => {
     const wire = JSON.parse(JSON.stringify(payload)) as {
       autoYes: { lastEnterFallback: Record<string, unknown> | null };
     };
-    const record = wire.autoYes.lastEnterFallback;
-    expect(record).not.toBeNull();
-
-    expect(Object.keys(record!).sort()).toEqual([...cli.keys()].sort());
-    for (const [name, shape] of cli) {
-      if (!shape.optional) expect(record).toHaveProperty(name);
-      const value = record![name];
-      if (value === null) expect(shape.nullable).toBe(true);
-      else expect(shape.kinds).toContain(typeof value);
-    }
-    expect(record).toEqual({
-      outcome: 'sent',
-      promptType: 'multiple_choice',
-      refusalReason: 'unsupported_dialog_layout',
-      sentAt: 1_000,
-      at: 1_000,
-      currentPrompt: true,
-    });
+    expect(wire.autoYes).toHaveProperty('lastEnterFallback');
+    expect(wire.autoYes.lastEnterFallback).toBeNull();
   });
 
-  it('currentPrompt is false for a record about another screen', async () => {
+  it('[#3821] a record about another screen: null as well', async () => {
     recordEnterFallbackSent(WT, 'claude', undefined, {
       promptType: 'multiple_choice',
       refusalReason: 'prompt_no_longer_active',
       screenKey: 'multiple_choice:Some other question?',
     });
     const payload = await buildCurrentOutput({} as Database.Database, WT, 'claude');
-    expect(payload.autoYes?.lastEnterFallback?.currentPrompt).toBe(false);
+    expect(payload.autoYes?.lastEnterFallback).toBeNull();
   });
 
-  it('`no-effect` is published as such', async () => {
+  it('[#3821] a `no-effect` record: null as well', async () => {
     const screenKey = enterFallbackScreenKey(promptOnFrame());
     recordEnterFallbackSent(WT, 'claude', undefined, {
       promptType: 'multiple_choice',
@@ -298,7 +289,7 @@ describe('[#3397] a real response carries what the copy declares', () => {
     }, 1_000);
     recordEnterFallbackNoEffect(WT, 'claude', undefined, screenKey, 20_000);
     const payload = await buildCurrentOutput({} as Database.Database, WT, 'claude');
-    expect(payload.autoYes?.lastEnterFallback).toMatchObject({ outcome: 'no-effect', sentAt: 1_000, at: 20_000 });
+    expect(payload.autoYes?.lastEnterFallback).toBeNull();
   });
 
   it('another instance\'s record is not published', async () => {
@@ -322,10 +313,11 @@ describe('[#3397] a real response carries what the copy declares', () => {
 
     afterEach(() => clearAllAutoYesStates());
 
-    it('control: with the record in place, it is published for this prompt', async () => {
+    it('[#3821] control: with the record in place, it is kept in the store and not published', async () => {
       recordForThisFrame();
       const payload = await buildCurrentOutput({} as Database.Database, WT, 'claude');
-      expect(payload.autoYes?.lastEnterFallback?.currentPrompt).toBe(true);
+      expect(getLastEnterFallback(WT, 'claude')).not.toBeNull();
+      expect(payload.autoYes?.lastEnterFallback).toBeNull();
     });
 
     it('stopAutoYesPolling (kill-session, the disable route) → null', async () => {
@@ -377,8 +369,10 @@ describe('[#3397] a real response carries what the copy declares', () => {
       beginAgentSession({ worktreeId: WT, cliToolId: 'claude', instanceId: 'claude-2' });
       resetSessionStartingState();
 
+      // Issue #3821: the epoch is what this is about; the wire is null either way.
+      expect(getLastEnterFallback(WT, 'claude')).not.toBeNull();
       const payload = await buildCurrentOutput({} as Database.Database, WT, 'claude');
-      expect(payload.autoYes?.lastEnterFallback?.currentPrompt).toBe(true);
+      expect(payload.autoYes?.lastEnterFallback).toBeNull();
     });
   });
 });

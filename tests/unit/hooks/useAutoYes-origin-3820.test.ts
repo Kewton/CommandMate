@@ -5,6 +5,10 @@
  * (`origin: 'auto-yes-browser'`), so the server's ledger can count it apart
  * from a person's answer. Nothing else in the body changes, and a person's
  * answer — built by the same builder — carries no origin.
+ *
+ * Issue #3821: the browser's Auto-Yes posts nothing any more (the server
+ * refuses this origin with 409, `prompt-response-browser-origin-3821`); the
+ * builder still marks a person's answer by leaving the origin off.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -36,15 +40,14 @@ describe('[#3820] the browser Auto-Yes’s origin', () => {
     vi.restoreAllMocks();
   });
 
-  it('is on the body it posts, beside what the body always carried', () => {
+  it('[#3821] is never posted: the hook posts no body at all', () => {
     renderHook(() =>
       useAutoYes({ worktreeId: 'wt-1', cliTool: 'claude', isPromptWaiting: true, promptData: PROMPT, autoYesEnabled: true })
     );
 
-    expect(mockFetch).toHaveBeenCalledOnce();
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body).toEqual({ ...buildPromptResponseBody('1', 'claude', PROMPT), origin: AUTO_YES_BROWSER_ORIGIN });
-    expect(body.origin).toBe('auto-yes-browser');
+    expect(mockFetch).not.toHaveBeenCalled();
+    // The value the server refuses is still the one #3820 named.
+    expect(AUTO_YES_BROWSER_ORIGIN).toBe('auto-yes-browser');
   });
 
   it('is not on the body a person’s answer is built with', () => {
