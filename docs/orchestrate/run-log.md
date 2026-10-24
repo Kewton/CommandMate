@@ -28,3 +28,79 @@ precheck のログは `precheck-<issue>[-<item>]-<短い SHA>.log`（同じ HEAD
 module-reference の断片の写しは `module-reference-<issue>[-<item>].md`。`publish-pr.mjs` は、run の記録にある同じ Issue の別の work item の PR を
 「同じ Issue の 2 本目の PR」として止めない（記録に無い PR は今までどおり止める）。`merge-pr.mjs --item` は、`--close <N>` を付けない限り Issue を閉じない
 （最後の PR の呼び出しで `--close <N>` を付ける）。
+
+## 1-5 work item の run の呼び出し
+
+同じ Issue の PR が 2 本以上ある run は、**3-1 の送信から 6-2 のマージまで、全段に同じ `--item` を渡す**（#3883）。1 段でも落とすと、
+その段は Issue 自身（`item` の無い行）の記録を読み書きし、後の段が「no result」で止まる・`status` の `next` と実際の作業が分かれる。
+work item は **tasks.tsv の 6 列目**に書き、各段はその行から `--item` を作る。6 列目の無い行（work item の無い Issue・#3883 より前の
+tasks.tsv）は `--item` を付けずに呼ぶ（今までどおり Issue 自身の記録）。本体の 3-3・5-1 の雛形は 5 列で読むので、
+6 列の tasks.tsv にはこの節の雛形を使う（5 列の雛形で読むと 5 列目のモデルに work item がつながって入る）。
+
+```bash
+# 3-1: 送った行の 6 列目に work item を書き（d1 など。work item の無い Issue は空）、send の記録にも同じ --item を付ける
+ITEM_ARGS=(); [ -z "$ITEM" ] || ITEM_ARGS=(--item "$ITEM")
+printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$issue" "$WT" "$AGENT" "$TASK_ID" "$MODEL" "$ITEM" >> "workspace/orchestration/runs/$DATE/tasks.tsv"
+node scripts/orchestrate/run-log.mjs append --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
+  --issue "$issue" --stage send --result "$SENT" --head "$(git -C "$WT_DIR" rev-parse HEAD)" --task "$TASK_ID" \
+  --contract "$CONTRACT" --agent "$AGENT" --model "$MODEL" "${ITEM_ARGS[@]}"
+```
+
+```bash
+# 3-3: 待機と検証。ログは runs/$DATE/wait-<issue>[-<item>].log
+while IFS="$(printf '\t')" read -r issue WT AGENT TASK_ID MODEL ITEM <&3; do
+  ITEM_ARGS=(); [ -z "$ITEM" ] || ITEM_ARGS=(--item "$ITEM")
+  WT_DIR=$(commandmatedev ls --json | jq -r --arg id "$WT" '.[] | select(.id == $id) | .path')
+  node scripts/orchestrate/wait-verify.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
+    --issue "$issue" --wt "$WT" --worktree "$WT_DIR" --instance "$AGENT" --task "$TASK_ID" --model "$MODEL" "${ITEM_ARGS[@]}"
+  echo "exit=$? issue=${issue} item=${ITEM:--}"
+done 3< "workspace/orchestration/runs/$DATE/tasks.tsv"
+```
+
+```bash
+# 5-2b: 整合性レビュー。work item の worktree を --worktree で名指す（省くと --item の既定は ../commandmate-issue-<N>-<item>。
+# Issue の ../commandmate-issue-<N> は見ない）。保存先は runs/$DATE/review-<issue>[-<item>].md
+while IFS="$(printf '\t')" read -r issue WT AGENT TASK_ID MODEL ITEM <&3; do
+  ITEM_ARGS=(); [ -z "$ITEM" ] || ITEM_ARGS=(--item "$ITEM")
+  WT_DIR=$(commandmatedev ls --json | jq -r --arg id "$WT" '.[] | select(.id == $id) | .path')
+  node scripts/orchestrate/consistency-review.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
+    --issue "$issue" --head "$(git -C "$WT_DIR" rev-parse HEAD)" \
+    --brief "workspace/orchestration/runs/$DATE/brief-review-${issue}${ITEM:+-$ITEM}.txt" --worktree "$WT_DIR" "${ITEM_ARGS[@]}"
+  echo "review exit=$? issue=${issue} item=${ITEM:--}"
+done 3< "workspace/orchestration/runs/$DATE/tasks.tsv"
+```
+
+```bash
+# 5-3 の処置を終えた行の findings、6-1-1 の precheck、6-1 の公開（precheck が通った行だけ）
+while IFS="$(printf '\t')" read -r issue WT AGENT TASK_ID MODEL ITEM <&3; do
+  ITEM_ARGS=(); [ -z "$ITEM" ] || ITEM_ARGS=(--item "$ITEM")
+  WT_DIR=$(commandmatedev ls --json | jq -r --arg id "$WT" '.[] | select(.id == $id) | .path')
+  node scripts/orchestrate/run-log.mjs append --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
+    --issue "$issue" --stage findings --result ok --head "$(git -C "$WT_DIR" rev-parse HEAD)" "${ITEM_ARGS[@]}"
+  node scripts/orchestrate/precheck.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
+    --issue "$issue" --worktree "$WT_DIR" "${ITEM_ARGS[@]}"
+  RC=$?; echo "precheck exit=$RC issue=${issue} item=${ITEM:--}"   # runs/$DATE/precheck-<issue>[-<item>]-<sha>.log
+  [ "$RC" = 0 ] || continue
+  node scripts/orchestrate/publish-pr.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
+    --issue "$issue" --worktree "$WT_DIR" --label feature "${ITEM_ARGS[@]}"
+  echo "publish exit=$? issue=${issue} item=${ITEM:--}"   # module-reference の控えは runs/$DATE/module-reference-<issue>[-<item>].md
+done 3< "workspace/orchestration/runs/$DATE/tasks.tsv"
+```
+
+```bash
+# 6-2: tasks.tsv の順に 1 本ずつ。--item の merge は Issue を閉じない。その Issue の最後の行の PR だけ --close "$issue" を足す
+while IFS="$(printf '\t')" read -r issue WT AGENT TASK_ID MODEL ITEM <&3; do
+  ITEM_ARGS=(); [ -z "$ITEM" ] || ITEM_ARGS=(--item "$ITEM")
+  LAST_ITEM=$(awk -F'\t' -v i="$issue" '$1 == i { last = $6 } END { print last }' "workspace/orchestration/runs/$DATE/tasks.tsv")
+  [ -z "$ITEM" ] || [ "$ITEM" != "$LAST_ITEM" ] || ITEM_ARGS+=(--close "$issue")
+  WT_DIR=$(commandmatedev ls --json | jq -r --arg id "$WT" '.[] | select(.id == $id) | .path')
+  node scripts/orchestrate/merge-pr.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
+    --issue "$issue" --worktree "$WT_DIR" "${ITEM_ARGS[@]}"
+  RC=$?; echo "merge exit=$RC issue=${issue} item=${ITEM:--}"
+  [ "$RC" = 0 ] || break   # 止まったら、その PR を直してから同じ行から再開する
+done 3< "workspace/orchestration/runs/$DATE/tasks.tsv"
+```
+
+- 再開は `run-log.mjs status` の work item ごとの行（`#3883/d1`）で、`next` の段から上の雛形の同じ行を呼ぶ
+- 6-4 の一本化は、work item ごとの控え（`module-reference-<issue>-<item>.md`）を読む
+- 再指示（3-4）の `--after-reinstruct` の呼び出しにも同じ `--item` を付ける。最後の 1 本の `--last` は `ITEM_ARGS` の後に足す

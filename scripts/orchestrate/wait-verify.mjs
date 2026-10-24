@@ -261,6 +261,9 @@ export function summarizeVerdict(log, exitCode) {
  * (`IMPL_COMPLETED head=<sha>`) counts only for that HEAD when `head` is given
  * (#3883); the bare line the goal asks for counts as before, unless
  * `requireHead` (a pane read with a task known: only a line naming its HEAD).
+ *
+ * @param {string} pane
+ * @param {{ head?: string, requireHead?: boolean }} [options]
  */
 export function hasCompletionSignal(pane, { head, requireHead = false } = {}) {
   return pane

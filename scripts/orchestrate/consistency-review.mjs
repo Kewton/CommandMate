@@ -496,7 +496,9 @@ export function main(argv, deps = {}) {
     o.instance = resolved.id;
   }
   const issue = Number(o.issue);
-  const worktree = path.resolve(cwd, o.worktree ?? path.join('..', `commandmate-issue-${issue}`));
+  // The default worktree is the work item's (`../commandmate-issue-3883-d1` with `--item d1`, #3883), not
+  // the Issue's: another PR's worktree would be reviewed when its HEAD happened to match.
+  const worktree = path.resolve(cwd, o.worktree ?? path.join('..', `commandmate-issue-${workItemName(issue, o.item)}`));
   const lock = path.resolve(cwd, o.lock ?? path.join('workspace', 'proposals', localDate(now()), o.instance === REVIEWER_INSTANCE ? '.lock' : `.lock-${o.instance}`));
   const started = now();
   let head = o.head;
