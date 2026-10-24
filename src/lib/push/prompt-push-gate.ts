@@ -108,6 +108,16 @@
  * that tick forward to a poll interval, and the hold follows it — the tick is
  * only ever read earlier than it was when the hold began.
  *
+ * The other tick past the 9 s is the duplicate guard's (#306). A prompt with
+ * the type and question of the one the poller just answered — Claude's
+ * consecutive Bash approvals all ask `Do you want to proceed?` — is not
+ * answered for `DUPLICATE_RETRY_EXPIRY_MS` (10 s) after that answer, and is
+ * answered on the first tick after. While the guard is armed
+ * (`lastAnsweredAt`, cleared by the poller on any tick without a prompt) the
+ * hold also lasts until that retry plus two ticks:
+ * {@link duplicateRetryHoldEndsAt}. Read on every decision, not once: it only
+ * moves when the poller answers again, which restarts the hold anyway.
+ *
  * ## The reminder is never muted
  *
  * `runEscalationTick` has already established that the wait is still open — it
@@ -126,6 +136,7 @@
 import {
   buildCompositeKey,
   COOLDOWN_INTERVAL_MS,
+  DUPLICATE_RETRY_EXPIRY_MS,
   getAutoYesState,
   MAX_BACKOFF_MS,
   POLLING_INTERVAL_MS,
@@ -283,7 +294,8 @@ function effectiveSessionWaitTickAt(tick: NonNullable<AutoYesHoldStart['sessionW
  * When this wait's `auto-yes-answering` hold ends (Issue #3791): a full
  * {@link AUTO_YES_ANSWER_GRACE_MS} after {@link autoYesHoldStartedAt}, and not
  * before {@link AUTO_YES_ANSWER_AFTER_TICK_MS} past the session wait's tick
- * pending when the hold began — while the poller that scheduled it still runs.
+ * pending when the hold began — while the poller that scheduled it still runs —
+ * nor past the duplicate guard's retry while it is armed.
  *
  * @param now - Epoch ms of the decision; recorded as the start of a new hold
  */
@@ -295,13 +307,27 @@ export function autoYesHoldEndsAt(
   const key = buildCompositeKey(input.worktreeId, input.cliToolId, input.instanceId);
   const tick = autoYesHolds.get(key)?.sessionWaitTick;
   const graceEndsAt = startedAt + AUTO_YES_ANSWER_GRACE_MS;
+  const holdEndsAt = Math.max(graceEndsAt, duplicateRetryHoldEndsAt(key));
   // A poller stopped or replaced since (disable, off → on) will not tick.
-  if (tick === undefined || globalThis.__autoYesPollerStates?.get(key) !== tick.poller) return graceEndsAt;
+  if (tick === undefined || globalThis.__autoYesPollerStates?.get(key) !== tick.poller) return holdEndsAt;
   // Kept on the hold: an earlier tick once adopted is not lost when the poller
   // later reschedules (an ordinary tick after a failed capture, a new session
   // wait) — the hold never moves back out.
   tick.at = effectiveSessionWaitTickAt(tick);
-  return Math.max(graceEndsAt, tick.at + AUTO_YES_ANSWER_AFTER_TICK_MS);
+  return Math.max(holdEndsAt, tick.at + AUTO_YES_ANSWER_AFTER_TICK_MS);
+}
+
+/**
+ * Issue #3791: when the duplicate guard (#306) lets the running poller answer
+ * again, plus {@link AUTO_YES_ANSWER_AFTER_TICK_MS} — or -Infinity when the
+ * guard is not armed (no answer, or a tick without a prompt since). Read off
+ * the poller's state on `globalThis` for the reason
+ * {@link autoYesHoldStartedAt} gives.
+ */
+function duplicateRetryHoldEndsAt(key: string): number {
+  const answeredAt = globalThis.__autoYesPollerStates?.get(key)?.lastAnsweredAt;
+  if (typeof answeredAt !== 'number') return -Infinity;
+  return answeredAt + DUPLICATE_RETRY_EXPIRY_MS + AUTO_YES_ANSWER_AFTER_TICK_MS;
 }
 
 /** A hold older than this is dropped (Issue #3770): its episode is long over. */

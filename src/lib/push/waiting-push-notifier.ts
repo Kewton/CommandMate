@@ -297,7 +297,7 @@ function holdForAutoYesAnswer(wait: PendingWait, now: number): void {
   const existing = answerGraceTimers.get(key);
   if (existing !== undefined) clearTimeout(existing);
   // From the gate's own origin, not `since` (Issue #3757 review), and past the
-  // poller's session-wait tick (Issue #3791). Capped at the grace, so a clock
+  // poller's session-wait tick or its duplicate guard's retry (Issue #3791). Capped at the grace, so a clock
   // that went backwards cannot arm an overflowing timer, and a longer hold is
   // asked about again every grace: a poller stopped meanwhile ends it then
   // rather than at a tick that will not come.
