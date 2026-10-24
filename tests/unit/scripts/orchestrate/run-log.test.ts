@@ -16,6 +16,7 @@ import {
   appendRecord,
   findLatest,
   headsOf,
+  latestByStage,
   main,
   makeRecord,
   readRecords,
@@ -324,5 +325,57 @@ describe('the work HEAD and the published HEAD (#3477 review of PR 3, 3c-5)', ()
   it('takes --work-head on the command line', () => {
     expect(main(['append', '--run-dir', runDir, '--issues', '1', '--issue', '1', '--stage', 'pr', '--result', 'ok', '--head', HEAD_M, '--work-head', HEAD_A])).toBe(0);
     expect(readRecords(runDir, '1').records[0]).toMatchObject({ head: HEAD_M, workHead: HEAD_A });
+  });
+});
+
+describe('the work items of one Issue are resumed on their own (#3883 H-9)', () => {
+  const rec = (stage: string, head: string | null, item?: string, result = 'ok') =>
+    makeRecord({ issue: 3883, stage, result, head, ...(item ? { item } : {}) }, at(0));
+  const passedUpTo = (head: string, item?: string) =>
+    ['contract', 'send', 'verify', 'review', 'findings', 'precheck', 'pr', 'ci'].map((stage) => rec(stage, head, item));
+
+  it('PR d1 merged does not finish PR d2, and PR d2’s HEAD does not re-open PR d1’s checks', () => {
+    const records = [...passedUpTo(HEAD_A, 'd1'), rec('merge', HEAD_A, 'd1'), rec('contract', null, 'd2'), rec('send', HEAD_B, 'd2')];
+    const summary = summarize(records);
+    expect(summary.map((s) => [s.issue, s.item, s.next, s.head])).toEqual([
+      [3883, 'd1', null, HEAD_A],
+      [3883, 'd2', 'verify', HEAD_B],
+    ]);
+    expect(headsOf(records, 3883, 'd1')).toEqual({ head: HEAD_A, workHead: HEAD_A });
+    expect(latestByStage(records, 3883, 'd2').merge).toBeUndefined();
+  });
+
+  it('without work items an Issue resumes exactly as before (negative control)', () => {
+    const records = [...passedUpTo(HEAD_A), rec('merge', HEAD_A)];
+    const [item] = summarize(records);
+    expect(item).toMatchObject({ issue: 3883, reached: 'merge', next: null });
+    expect('item' in item).toBe(false);
+    expect('item' in records[0]).toBe(false);
+    expect('key' in records[0]).toBe(false);
+  });
+
+  it('records written before #3883 (no item) are the Issue’s own; any-item lookups still see every record', () => {
+    const records = [rec('verify', HEAD_A), rec('verify', HEAD_B, 'd2', 'fail')];
+    expect(latestByStage(records, 3883).verify.head).toBe(HEAD_B);
+    expect(latestByStage(records, 3883, null).verify.head).toBe(HEAD_A);
+    expect(findLatest(records, { issue: 3883, stage: 'verify', item: null })?.head).toBe(HEAD_A);
+    expect(findLatest(records, { issue: 3883, stage: 'verify', item: 'd2' })?.result).toBe('fail');
+    expect(findLatest(records, { issue: 3883, stage: 'verify' })?.head).toBe(HEAD_B);
+  });
+
+  it('rejects an item that cannot name a file', () => {
+    expect(() => makeRecord({ issue: 1, stage: 'send', result: 'ok', item: '../x' })).toThrow(/item/);
+  });
+
+  it('CLI: append --item --key, and status names the work item', () => {
+    const cli = (...args: string[]) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8' });
+    const common = ['--run-dir', runDir, '--issues', '3883'];
+    expect(cli('append', ...common, '--issue', '3883', '--stage', 'send', '--result', 'ok', '--item', 'd1', '--key', '3883:3883-d1:t-1:a1').status).toBe(0);
+    expect(cli('append', ...common, '--issue', '3883', '--stage', 'send', '--result', 'ok').status).toBe(0);
+    const [record] = readRecords(runDir, '3883').records;
+    expect(record).toMatchObject({ item: 'd1', key: '3883:3883-d1:t-1:a1' });
+    const status = cli('status', ...common).stdout;
+    expect(status).toContain('#3883\treached=send');
+    expect(status).toContain('#3883/d1\treached=send');
   });
 });

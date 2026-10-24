@@ -14,8 +14,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
-import { latestByStage, unmetStage } from './run-log.mjs';
+import { itemOf, latestByStage, unmetStage } from './run-log.mjs';
 import { IGNORED_DIRTY, dirtyPaths } from './dirty-tree.mjs';
+import { itemProblem, workItemName } from './execution-key.mjs';
 
 export { IGNORED_DIRTY, dirtyPaths };
 
@@ -235,10 +236,13 @@ export function workHeadOf(run, worktree, head) {
 /**
  * What the run record lacks at `{ head, workHead }`: REQUIRED_RECORDS judged by
  * run-log.mjs `unmetStage`, so a publish stops exactly where `status` says the
- * run has to resume.
+ * run has to resume. `item` is the work item (run-log.mjs inItem): the scripts
+ * pass `--item`, or null for the Issue's own records, so another PR of the same
+ * Issue — its later records, at its own HEAD — neither stops nor passes this one
+ * (#3883). Left out, every record of the Issue is read, as before.
  */
-export function missingRecords(records, issue, heads) {
-  const stages = latestByStage(records, issue);
+export function missingRecords(records, issue, heads, item) {
+  const stages = latestByStage(records, issue, item);
   return REQUIRED_RECORDS.map(({ stage, why }) => {
     const reason = unmetStage(stage, stages[stage], heads);
     return reason ? `${reason} (${why})` : null;
@@ -270,8 +274,35 @@ export function moduleReferenceFragment(worktree, issue) {
   return path.join(worktree, 'dev-reports', 'module-reference', `issue-${issue}.md`);
 }
 
-export function moduleReferenceBackup(runDir, issue) {
-  return path.join(runDir, `module-reference-${issue}.md`);
+/** The run directory's copy of the fragment: one per work item (`module-reference-3883-d1.md`, #3883). */
+export function moduleReferenceBackup(runDir, issue, item) {
+  return path.join(runDir, `module-reference-${workItemName(issue, item)}.md`);
+}
+
+/**
+ * `--item` of precheck / publish-pr / merge-pr (#3883): the work item whose
+ * records are read and written. Absent is null — the Issue's own records, the
+ * unit `status` resumes for records without `item` — never "any work item".
+ */
+export function itemOption(options) {
+  const problem = itemProblem(options.item);
+  if (problem) return { error: problem };
+  return { item: options.item ? String(options.item) : null };
+}
+
+/**
+ * The PR numbers the run record has for the Issue's other work items (`pr`
+ * stage, `pr=#N` in the note). Those PRs are this Issue's on purpose (#3883):
+ * publish-pr does not take them for a second PR of the same work.
+ */
+export function siblingPrNumbers(records, issue, item) {
+  const numbers = new Set();
+  for (const record of records) {
+    if (record.issue !== issue || record.stage !== 'pr' || itemOf(record) === item) continue;
+    const match = /(?:^|\s)pr=#(\d+)\b/.exec(record.note ?? '');
+    if (match) numbers.add(Number(match[1]));
+  }
+  return numbers;
 }
 
 /**
@@ -279,14 +310,14 @@ export function moduleReferenceBackup(runDir, issue) {
  * fragment must be in the branch's commits; the module-reference one is in
  * dev-reports/ (never committed), or in the run directory's copy of it.
  */
-export function fragmentProblems(run, { worktree, runDir, issue, baseRef }) {
+export function fragmentProblems(run, { worktree, runDir, issue, baseRef, item = null }) {
   const problems = [];
   const fragment = `changelog.d/${issue}.md`;
   const status = lines(git(run, worktree, ['diff', '--name-status', '--no-renames', `${baseRef}...HEAD`, '--', 'changelog.d/']));
   if (!status.some((line) => /^[AM]\s/.test(line) && line.replace(/^[AM]\s+/, '') === fragment)) {
     problems.push(`${fragment} is not in the branch's commits (6-4)`);
   }
-  if (!fs.existsSync(moduleReferenceFragment(worktree, issue)) && !fs.existsSync(moduleReferenceBackup(runDir, issue))) {
+  if (!fs.existsSync(moduleReferenceFragment(worktree, issue)) && !fs.existsSync(moduleReferenceBackup(runDir, issue, item))) {
     problems.push(`dev-reports/module-reference/issue-${issue}.md is missing (6-4)`);
   }
   return problems;

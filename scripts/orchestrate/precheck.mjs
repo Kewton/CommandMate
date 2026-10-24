@@ -28,12 +28,19 @@
  * steps (`unit-related` selects tests differently, so its pass says nothing
  * about the guards or the tests naming a changed path).
  *
+ * One Issue can carry several PRs: `--item <work item>` (#3883) reads and
+ * writes that work item's records only (run-log.mjs inItem; without it the
+ * Issue's own records), and the log is that work item's next free
+ * `precheck-<issue>[-<item>]-<short>[.a<n>].log` — a rerun on the same HEAD
+ * does not overwrite the log of the run before.
+ *
  * Exit code: 0 ok (or reused), 1 a step failed, 2 usage error or a dirty tree
  * (the result would not belong to HEAD).
  *
  * Usage:
  *   node scripts/orchestrate/precheck.mjs --run-dir <dir> --issues <range> --issue <N> --worktree <path>
  *        [--base origin/develop] [--kind <feature|bug|refactor|docs>] [--metrics] [--build] [--allow-removed-tests] [--force]
+ *        [--item <work item>]
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -41,8 +48,9 @@ import process from 'node:process';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { appendRecord, findLatest, readRecords } from './run-log.mjs';
-import { workHeadOf } from './pr-common.mjs';
+import { itemOption, workHeadOf } from './pr-common.mjs';
 import { dirtyPaths } from './dirty-tree.mjs';
+import { allocateLog, workItemName } from './execution-key.mjs';
 
 export const DEFAULT_BASE = 'origin/develop';
 /** Run order: cheap and decisive first, the test runs last. */
@@ -214,9 +222,17 @@ const lines = (text) => text.split('\n').map((l) => l.trim()).filter(Boolean);
 
 const USAGE = `Usage:
   node scripts/orchestrate/precheck.mjs --run-dir <dir> --issues <range> --issue <N> --worktree <path>
-       [--base ${DEFAULT_BASE}] [--kind <feature|bug|refactor|docs>] [--metrics] [--build] [--allow-removed-tests] [--force]`;
+       [--base ${DEFAULT_BASE}] [--kind <feature|bug|refactor|docs>] [--metrics] [--build] [--allow-removed-tests] [--force] [--item <work item>]`;
 
-const FLAGS = { '--run-dir': 'runDir', '--issues': 'issues', '--issue': 'issue', '--worktree': 'worktree', '--base': 'base', '--kind': 'kind' };
+const FLAGS = {
+  '--run-dir': 'runDir',
+  '--issues': 'issues',
+  '--issue': 'issue',
+  '--worktree': 'worktree',
+  '--base': 'base',
+  '--kind': 'kind',
+  '--item': 'item',
+};
 const SWITCHES = { '--metrics': 'metrics', '--build': 'build', '--allow-removed-tests': 'allowRemovedTests', '--force': 'force' };
 
 export function parseArgs(argv) {
@@ -230,6 +246,9 @@ export function parseArgs(argv) {
   for (const flag of ['--run-dir', '--issues', '--issue', '--worktree']) {
     if (!options[FLAGS[flag]]) return { error: `${flag} is required` };
   }
+  const item = itemOption(options);
+  if ('error' in item) return { error: item.error };
+  options.item = item.item;
   return { options };
 }
 
@@ -257,13 +276,15 @@ export function main(argv, deps = {}) {
   }
   const o = parsed.options;
   const issue = Number(o.issue);
+  const item = o.item;
+  const name = `#${issue}${item ? `/${item}` : ''}`;
 
   try {
     const head = git(run, o.worktree, ['rev-parse', 'HEAD']).trim();
     const short = head.slice(0, 7);
     const dirty = dirtyPaths(run, o.worktree);
     if (dirty.length > 0) {
-      error(`precheck #${issue}: uncommitted changes in ${o.worktree} — the result would not belong to ${short}:\n  ${dirty.join('\n  ')}`);
+      error(`precheck ${name}: uncommitted changes in ${o.worktree} — the result would not belong to ${short}:\n  ${dirty.join('\n  ')}`);
       return 2;
     }
 
@@ -280,23 +301,22 @@ export function main(argv, deps = {}) {
 
     const { records } = readRecords(o.runDir, o.issues);
     if (!o.force) {
-      const previous = findLatest(records, { issue, stage: 'precheck', head });
+      const previous = findLatest(records, { issue, item, stage: 'precheck', head });
       if (previous && previous.result === 'ok') {
         const done = parseNote(previous.note);
         const missing = toRun.filter((step) => done[step] !== 'ok');
         const sameOptions = (previous.note ?? '').split(/\s+/).includes(opts);
         if (missing.length === 0 && sameOptions) {
-          log(`precheck #${issue} reused: ok at ${short} (${previous.at}) — pass --force to run again`);
+          log(`precheck ${name} reused: ok at ${short} (${previous.at}) — pass --force to run again`);
           return 0;
         }
-        log(`precheck #${issue}: the ok record at ${short} ${sameOptions ? `did not run ${missing.join(', ')}` : 'was taken with other options'} — running`);
+        log(`precheck ${name}: the ok record at ${short} ${sameOptions ? `did not run ${missing.join(', ')}` : 'was taken with other options'} — running`);
       }
     }
-    const verified = passedGates(findLatest(records, { issue, stage: 'verify', head }));
+    const verified = passedGates(findLatest(records, { issue, item, stage: 'verify', head }));
 
-    const logFile = path.join(o.runDir, `precheck-${issue}-${short}.log`);
-    fs.mkdirSync(o.runDir, { recursive: true });
-    fs.writeFileSync(logFile, `precheck #${issue} ${head} base=${o.base}\n`);
+    const { file: logFile } = allocateLog(o.runDir, 'precheck', `${workItemName(issue, item)}-${short}`);
+    fs.writeFileSync(logFile, `precheck ${name} ${head} base=${o.base}\n`);
     const started = now();
     const results = {};
     for (const step of steps) {
@@ -333,8 +353,8 @@ export function main(argv, deps = {}) {
     // The work HEAD under this one: a precheck of a refreshed HEAD stands for the
     // published HEAD, not for the worker's checks (run-log.mjs WORK_STAGES).
     const workHead = workHeadOf(run, o.worktree, head);
-    const { file } = appendRecord(o.runDir, o.issues, { issue, stage: 'precheck', result, head, workHead, durationSec, note }, now());
-    log(`precheck #${issue} ${short} ${result}: ${note}`);
+    const { file } = appendRecord(o.runDir, o.issues, { issue, item, stage: 'precheck', result, head, workHead, durationSec, note }, now());
+    log(`precheck ${name} ${short} ${result}: ${note}`);
     log(`recorded -> ${file} (log: ${logFile})`);
     return result === 'ok' ? 0 : 1;
   } catch (err) {

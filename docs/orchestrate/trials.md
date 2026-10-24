@@ -44,7 +44,7 @@ node scripts/orchestrate/consistency-review.mjs --run-dir "workspace/orchestrati
 # 再レビュー: … --rereview --previous "workspace/orchestration/runs/$DATE/review-<N>.md"
 ```
 
-  スクリプトが行うこと: worktree（既定 `../commandmate-issue-<N>`、`--worktree` で指定）の HEAD が `--head` と同じかを確かめる → Codex のロック
+  スクリプトが行うこと: worktree（既定 `../commandmate-issue-<N>`、`--item` を付けると `../commandmate-issue-<N>-<item>`、`--worktree` で指定）の HEAD が `--head` と同じかを確かめる → Codex のロック
   （`workspace/proposals/<date>/.lock` を mkdir で取る。ほかの Codex への依頼と共有。中の `owner.json` に持ち主の pid・host・開始時刻を書く。
   持ち主が既に居ない（kill されたレビューが残した）ロックは外して取り（外すのは `<lock>.reclaim` を mkdir で取った待機者 1 人だけで、持ち主を読み直して同じ死んだ持ち主のときだけ動かす。別の待機者が取った新しいロックは動かさない。`.reclaim` を残して kill された場合は消すよう告げて止まる）、生きている持ち主のロックは 1 分ごとに stderr へ `lock … held by pid …` を出して待つ。
   待ちの上限は ask の上限＋600 秒（3000 秒）で、超えたら `review=fail`。`owner.json` の無いロックは持ち主を判断できないので待つ（#3633））→ `capture --instance codex --json` の `sessionStatus` が
