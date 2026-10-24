@@ -26,6 +26,8 @@ import type { PromptDetectionResult } from '../detection/types';
 import type { PromptData } from '@/types/models';
 import { createLogger } from '@/lib/logger';
 import { getOrInitGlobal } from '../global-state';
+import { promptScreenKey } from '../detection/prompt-screen-key';
+import { partialAnswerCovers } from './auto-yes-poller-state';
 import {
   CONTRACT_SUPPRESSION_REASONS,
   isBaseRuleSuppressionReason,
@@ -95,7 +97,15 @@ const WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS = 60_000;
  * ungated reading this function already took, and the reason it recorded.
  *
  * @param compositeKey - The instance's key, for the once-a-minute limit
+ * Issue #3880: a person's send that may have left keys on the pane holds the
+ * dialog (`partial-answer`), but no tick inside the window published it — the
+ * manual hold kept them off it — so there is no record to re-stamp. Given that
+ * hold's screen, a dialog still up at it is withheld as `partial-answer` here,
+ * before the contract and the receipt (as on the tick, step 2.5).
+ *
  * @param readWithoutGate - The same frame read without `receiptScope`
+ * @param personHoldScreenKey - The screen of a person's hold the tick had
+ *   (`PartialAutoYesAnswer.byPerson`), else null
  * @returns The prompt the ungated reading saw, with the reason this call
  *   recorded or kept for it (null when none: a dialog the gate accepted and is
  *   waiting to be answered); null when no dialog was read past the gate
@@ -105,6 +115,7 @@ export function logIfWithheldForWantOfReceipt(
   instanceId: string | undefined,
   compositeKey: string,
   readWithoutGate: () => PromptDetectionResult,
+  personHoldScreenKey: string | null = null,
 ): WithheldPastReceiptGate | null {
   // Issue #3767: the gate's own verdict for this tick's candidate. Null means it
   // never saw one (no dialog), `ok` that it let the frame through.
@@ -119,6 +130,15 @@ export function logIfWithheldForWantOfReceipt(
   // grounds alone) yet the frame reads as a prompt: judge it here.
   verdict ??= judgeAntigravityPermissionReceipt(worktreeId, instanceId, now);
   if (verdict.ok) return null;
+
+  if (personHoldScreenKey !== null && partialAnswerCovers(personHoldScreenKey, promptScreenKey(promptData))) {
+    recordPolicySuppression(worktreeId, 'antigravity', instanceId, {
+      reason: PARTIAL_ANSWER_SUPPRESSION_REASON,
+      mode: null,
+      promptType: promptData.type,
+    });
+    return { promptData, reason: PARTIAL_ANSWER_SUPPRESSION_REASON, keptPersonHold: true };
+  }
 
   // Issue #3724: a contract that withholds the answer makes the server reply
   // `ask`, so the dialog stays up past the receipt window. The cause is then the
@@ -242,6 +262,8 @@ function claimWithheldLogSlot(compositeKey: string, now: number): boolean {
 export interface WithheldPastReceiptGate {
   promptData: PromptData;
   reason: AutoYesSuppressionReason | null;
+  /** Issue #3880: the dialog is the one a person's hold is at; the caller keeps the hold. */
+  keptPersonHold?: true;
 }
 
 /**

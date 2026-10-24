@@ -108,8 +108,12 @@ import {
   clearPartialAnswers,
   forgetPartialAnswer,
   forgetPartialAnswersByWorktree,
+  getPartialAnswer,
+  keepPartialAnswerByPerson,
   ledgerScreenKey,
+  partialAnswerCovers,
   partialAnswerScreenKey,
+  personSendsInFlight,
   promptFrameKey,
   settleSendAttempt,
   type AutoYesPollerState,
@@ -512,6 +516,7 @@ function noteNoPromptOnScreen(tick: {
   cliToolId: CLIToolType;
   instanceId: string | undefined;
   compositeKey: string;
+  epoch: number;
   pollerState: AutoYesPollerState;
   frame: ReturnType<typeof normalizeFrame>;
   promptDetection: PromptDetectionResult;
@@ -524,6 +529,7 @@ function noteNoPromptOnScreen(tick: {
     cliToolId,
     instanceId,
     compositeKey,
+    epoch,
     pollerState,
     frame,
     promptDetection,
@@ -531,7 +537,27 @@ function noteNoPromptOnScreen(tick: {
     precomputedLines,
     rawOutput,
   } = tick;
-  forgetPartialAnswer(compositeKey);
+  // Issue #3880: a person's hold, which agy's dialog past the receipt window
+  // keeps (below) — the gated reading's "no prompt" is not the dialog gone.
+  const personHold = cliToolId === 'antigravity' ? getPartialAnswer(compositeKey, epoch) : null;
+  // The same for a person's send still in flight: one at the dialog the
+  // ungated reading still shows is not expired, so its outcome, coming back
+  // unknown, still holds the dialog. The ungated reading is taken once.
+  let ungated: PromptDetectionResult | undefined;
+  const readWithoutGate = (): PromptDetectionResult =>
+    (ungated ??= detectPromptOnCleanFrame(cleanOutput, cliToolId, precomputedLines, rawOutput));
+  const personSends = cliToolId === 'antigravity' ? personSendsInFlight(compositeKey, epoch) : [];
+  const dialogUp = personSends.length > 0 ? readWithoutGate() : null;
+  const dialogUpKey = dialogUp?.isPrompt && dialogUp.promptData ? partialAnswerScreenKey(dialogUp.promptData) : null;
+  forgetPartialAnswer(
+    compositeKey,
+    undefined,
+    new Set(
+      dialogUpKey === null
+        ? []
+        : personSends.filter((attempt) => partialAnswerCovers(attempt.screenKey, dialogUpKey)),
+    ),
+  );
   pollerState.lastAnsweredPromptKey = null;
   pollerState.lastAnsweredAt = null;
   // Issue #3757: agy's trust screen reads as no prompt (unnumbered: neither
@@ -554,9 +580,16 @@ function noteNoPromptOnScreen(tick: {
   }
   pollerState.lastSkipWarnKey = null;
   if (cliToolId === 'antigravity' && !promptDetection.isPrompt) {
-    const seen = logIfWithheldForWantOfReceipt(worktreeId, instanceId, compositeKey, () =>
-      detectPromptOnCleanFrame(cleanOutput, cliToolId, precomputedLines, rawOutput),
+    const seen = logIfWithheldForWantOfReceipt(
+      worktreeId,
+      instanceId,
+      compositeKey,
+      readWithoutGate,
+      personHold?.byPerson ? personHold.screenKey : null,
     );
+    if (personHold?.byPerson && seen?.keptPersonHold) {
+      keepPartialAnswerByPerson(compositeKey, personHold, partialAnswerScreenKey(seen.promptData));
+    }
     // Issue #3820: past the receipt window the gated reading says "no prompt"
     // while the dialog is still up. The ungated reading says it is, so the
     // ledger keeps the same confirmation (and the same withheld interval)
@@ -701,6 +734,13 @@ function settleFailedTick(
   const { worktreeId, cliToolId, instanceId, compositeKey, generation, attempt, sendInFlight, receiptEpisode } =
     tick;
   const keysSent = error instanceof Error && 'keysSent' in error ? Boolean(error.keysSent) : null;
+  // Issue #3880: a tmux call that ended without an exit status may have left
+  // the answer on the pane though no key is known to be there (`keysSent` is
+  // not true, and the ledger counts it `failed`). Held as a partial answer is:
+  // the next tick does not send it again at the same confirmation (step 2.5).
+  // Read off the error like `keysSent` (`AnswerDelivery` in prompt-answer-sender).
+  const delivery = error instanceof Error && 'answerDelivery' in error ? error.answerDelivery : null;
+  const mayBeOnPane = keysSent === true || delivery === 'indeterminate';
   // Issue #3820: the send that was cut short, in the ledger — before the send
   // record below is settled, whose state says whether it had expired.
   if (attempt !== null && sendInFlight) {
@@ -713,18 +753,19 @@ function settleFailedTick(
     // A stop with keys already on the pane: the next tick must not type the
     // answer again over them (step 2.5). Recorded under the attempt's key as
     // it is now — the new one when a worktree ID move carried it (#3713).
-    if (attempt !== null) settleSendAttempt(attempt, keysSent === true);
+    if (attempt !== null) settleSendAttempt(attempt, mayBeOnPane);
     if (sendInFlight) noteAnswerSent(cliToolId, worktreeId, instanceId, true, receiptEpisode);
-    logger.info('poller:auto-yes-answer-abandoned', { worktreeId, cliToolId, instanceId, keysSent });
+    logger.info('poller:auto-yes-answer-abandoned', { worktreeId, cliToolId, instanceId, keysSent, delivery });
     return 'no_answer';
   }
   // Issue #3839: a failure with keys already on the pane is held the same way —
   // the next tick must not type the answer again over them (step 2.5); the
-  // screen leaving or changing forgets it (`forgetPartialAnswer`).
-  if (attempt !== null) settleSendAttempt(attempt, keysSent === true);
+  // screen leaving or changing forgets it (`forgetPartialAnswer`). Issue #3880:
+  // so is a send whose outcome is not known (`mayBeOnPane` above).
+  if (attempt !== null) settleSendAttempt(attempt, mayBeOnPane);
   if (sendInFlight) noteAnswerSent(cliToolId, worktreeId, instanceId, true, receiptEpisode);
   incrementErrorCount(compositeKey, generation?.pollerState);
-  logger.warn('poller:detect-respond-error', { worktreeId, cliToolId, instanceId });
+  logger.warn('poller:detect-respond-error', { worktreeId, cliToolId, instanceId, delivery });
   return 'error';
 }
 
@@ -850,6 +891,7 @@ export async function detectAndRespondToPrompt(
         cliToolId,
         instanceId,
         compositeKey,
+        epoch,
         pollerState,
         frame,
         promptDetection,

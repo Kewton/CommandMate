@@ -345,7 +345,11 @@ const SUPPRESSION_CAUSE: Record<AutoYesSuppressionReason, string> = {
   // Issue #3713 (#3706's reason). Not "by contract policy" either: an earlier
   // Auto-Yes answer was stopped with some of its keys already in the input, and
   // typing it again would append to them, so the prompt waits for a human.
-  'partial-answer': 'because an earlier answer left partial input; Auto-Yes is waiting for a human',
+  // Issue #3880: or a send of it (Auto-Yes's, or a person's that failed) ended
+  // without tmux confirming it, and no key may be known to be there. The #3713
+  // sentence is kept as it was and the other case follows it.
+  'partial-answer':
+    "because an earlier answer left partial input; Auto-Yes is waiting for a human (or that answer's send could not be confirmed, so the input may hold it: check the pane, then answer; an answer that goes through releases the hold)",
   // Issue #3757. agy's startup folder-trust screen: the launch's to confirm, not
   // Auto-Yes's, and agy drew it after the launch window had ended.
   'startup-trust-unhandled':
