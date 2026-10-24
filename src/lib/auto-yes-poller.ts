@@ -18,16 +18,9 @@
  */
 
 import type { CLIToolType } from './cli-tools/types';
-import { getSessionPresence } from './session/cli-session';
 import { detectPromptOnCleanFrame } from './polling/response-checker';
-import {
-  beginAntigravityFrameRead,
-  endAntigravityFrameRead,
-  getAntigravityAcceptedReceiptCallId,
-} from './polling/antigravity-receipt-episodes';
 import { invalidateSessionAutoYesPolicy } from './polling/auto-yes-policy';
 import { normalizeFrame } from './detection/tools/frame';
-import { detectAntigravityNumberedDialogPrompt } from './detection/tools/antigravity/dialog';
 import {
   clearEnterFallbacks,
   forgetEnterFallback,
@@ -38,16 +31,13 @@ import {
   clearAutoYesDecisions,
   forgetAutoYesDecision,
   forgetAutoYesDecisionsByWorktree,
-  reaffirmAutoYesAnswering,
-  recordAutoYesDecision,
 } from './polling/auto-yes-decision-state';
 import {
   ANSWERED_BY_HUMAN_DECISION_REASON,
   getManualAnswerSeq,
   isManualAnswerHolding,
 } from './polling/auto-yes-manual-answer';
-import { getLastPolicySuppression } from './polling/auto-yes-suppression-state';
-import { NO_AUTO_ANSWER_DECISION_REASON, type AutoYesDecisionReason } from '@/types/auto-yes-decision';
+import { NO_AUTO_ANSWER_DECISION_REASON } from '@/types/auto-yes-decision';
 import { applyEventToActiveTask } from './tasks/task-transition-service';
 import { getDbInstance } from './db/db-instance';
 import { recordAnsweredPrompt, type RecordAnsweredPromptResult } from './db/chat-db';
@@ -73,7 +63,7 @@ import {
   type CapturedFrameTime,
   type ObservationStart,
 } from './session/waiting-episode-binding';
-import { getEpisodeVersion, getWaitingEpisodeRecord } from './session/waiting-episode-state';
+import { getWaitingEpisodeRecord } from './session/waiting-episode-state';
 import {
   THINKING_POLLING_INTERVAL_MS,
   REDUCED_CAPTURE_LINES,
@@ -107,21 +97,15 @@ import { getOrInitGlobal } from './global-state';
 import {
   beginSendAttempt,
   clearPartialAnswers,
-  forgetPartialAnswer,
   forgetPartialAnswersByWorktree,
-  getPartialAnswer,
-  keepPartialAnswerByPerson,
   ledgerScreenKey,
-  partialAnswerCovers,
   partialAnswerScreenKey,
-  personSendsInFlight,
   promptFrameKey,
   settleSendAttempt,
   type AutoYesPollerState,
   type AutoYesSendAttempt,
 } from './polling/auto-yes-poller-state';
 import {
-  suppressAntigravityTrustScreen,
   suppressIfNotOursToAnswer,
   suppressUnclassifiedFrame,
   truncateForLog,
@@ -145,18 +129,13 @@ import {
   type AutoYesTickGeneration,
 } from './polling/auto-yes-poller-generation';
 import {
-  logIfWithheldForWantOfReceipt,
   noteAnswerSent,
   receiptEpisodeOfSend,
   withheldNoReceiptLoggedAt,
 } from './polling/auto-yes-poller-receipt-log';
 import { syncEnterFallbackEpoch } from './polling/auto-yes-poller-enter-fallback';
 import { capturePollerFrame } from './polling/auto-yes-poller-capture';
-import {
-  captureTopOf as captureTopOfWindow,
-  promptDataForStorage,
-  withCaptureTopCompleteness,
-} from './polling/prompt-screen-reading';
+import { promptDataForStorage } from './polling/prompt-screen-reading';
 import {
   beginLedgerAttempt,
   beginLedgerTick,
@@ -168,7 +147,18 @@ import {
   withholdLedgerConfirmation,
   type LedgerScope,
 } from './polling/auto-yes-confirmation-ledger';
-import type { AnswerBasis, AttemptResult } from './polling/auto-yes-confirmation-ledger-types';
+import {
+  answerBasisOf,
+  attemptResultOfThrow,
+  captureTopOf,
+  ledgerCallOf,
+  noteNoPromptOnScreen,
+  readPromptFrame,
+  tickDecisionRecorder,
+  type CaptureExtent,
+} from './auto-yes-poller-tick';
+import { fixAnswerTarget, answerTargetHolds, type AnswerTarget, type TickObservation } from './auto-yes-poller-answer-target';
+import { isSessionMissing } from './auto-yes-poller-session-presence';
 import {
   answerModeOfTick,
   resolveAnswerUnderPolicy,
@@ -186,6 +176,8 @@ export {
   type AutoYesTickGeneration,
 } from './polling/auto-yes-poller-generation';
 export { noHookReceiptHint } from './polling/auto-yes-poller-receipt-log';
+// Issue #3893: split out; re-exported so existing importers are unchanged.
+export { getAutoYesPollerCompositeKeys, isAnyPollerActiveForWorktree } from './auto-yes-poller-keys';
 export { AUTO_YES_ENTER_FALLBACK_ANSWER } from './polling/auto-yes-poller-enter-fallback';
 export {
   captureAndCleanOutput,
@@ -502,314 +494,6 @@ function auditPromptData(
 }
 
 /**
- * Step 1 of `detectAndRespondToPrompt`: normalise the tick's frame once and
- * read the prompt on it.
- */
-function readPromptFrame(
-  worktreeId: string,
-  cliToolId: CLIToolType,
-  cleanOutput: string,
-  precomputedLines: string[] | undefined,
-  instanceId: string | undefined,
-  rawOutput: string | undefined,
-  captureExtent: CaptureExtent | undefined,
-): { frame: ReturnType<typeof normalizeFrame>; promptDetection: PromptDetectionResult } {
-  const receiptScope = { worktreeId, instanceId };
-  // Issue #3183: the ONE frame every judgement below reads — normalised once,
-  // from the capture as captured (the input-box markers are rule rows the
-  // cleaned spelling has blanked), and handed as the same object to the
-  // prompt reading, the codex launch guards and the dialog gate. That is what
-  // makes "the status chain and Auto-Yes read the same live region" a fact
-  // rather than a hope: there is no second normalisation to disagree with.
-  const frame = normalizeFrame(rawOutput ?? cleanOutput, cliToolId);
-  // Issue #3767: bracket the read so the receipt gate can tell when an agy
-  // dialog first appeared, not only what time this tick is.
-  if (cliToolId === 'antigravity') beginAntigravityFrameRead(worktreeId, instanceId);
-  const promptDetection = detectPromptOnCleanFrame(
-    cleanOutput,
-    cliToolId,
-    precomputedLines,
-    rawOutput,
-    receiptScope,
-    frame,
-  );
-  if (cliToolId === 'antigravity') endAntigravityFrameRead(worktreeId, instanceId);
-  return {
-    frame,
-    promptDetection: withCaptureTop(promptDetection, cliToolId, rawOutput ?? cleanOutput, captureExtent),
-  };
-}
-
-/**
- * Issue #3881 (review P2-1): an approval target whose upward scan reached the
- * top of a capture that filled its window is marked `top-unknown`, so the
- * resolver does not answer on a deny miss. Without the window (a direct
- * caller, a test) the capture's extent is not known and nothing is added, as
- * before.
- */
-function withCaptureTop(
-  detection: PromptDetectionResult,
-  cliToolId: CLIToolType,
-  capture: string,
-  captureExtent: CaptureExtent | undefined,
-): PromptDetectionResult {
-  const captureTop = captureTopOf(capture, captureExtent, cliToolId);
-  return captureTop === undefined ? detection : withCaptureTopCompleteness(detection, captureTop);
-}
-
-/**
- * The window a tick's capture was taken with, and whether that window dropped
- * rows from the top of what tmux returned when the capture layer said
- * (Issue #3881: review P2-1, third review N4).
- */
-interface CaptureExtent {
-  windowLines: number;
-  headCut?: boolean;
-}
-
-/**
- * Where a poller capture's first row sits (Issue #3881 review P2-1): on a
- * scrollback pane the capture is the last `windowLines` rows, so one
- * that came back with fewer rows holds the pane's whole history, and one that
- * filled the window may be cut at its top (#1670's `isCaptureWindowSaturated`)
- * unless the capture layer said it was not (the fourth review's N5: `headCut`);
- * an alternate-screen pane has no history and is read off its screen (the
- * second review's N1, `captureTopOf` in `prompt-screen-reading`), unless the
- * window cut it (the third review's N4: `headCut`).
- * Undefined when the window is not known.
- */
-function captureTopOf(
-  capture: string,
-  captureExtent: CaptureExtent | undefined,
-  cliToolId: CLIToolType,
-): CaptureTop | undefined {
-  return captureExtent === undefined
-    ? undefined
-    : captureTopOfWindow(capture, captureExtent.windowLines, cliToolId, captureExtent.headCut);
-}
-
-/**
- * What `detectAndRespondToPrompt` does to the poller state on a frame with no
- * prompt to answer, before it returns `no_prompt`.
- *
- * @returns agy's dialog the ungated reading still sees past the receipt gate
- *   (Issue #3821: the decision published for it), else null
- */
-function noteNoPromptOnScreen(tick: {
-  worktreeId: string;
-  cliToolId: CLIToolType;
-  instanceId: string | undefined;
-  compositeKey: string;
-  epoch: number;
-  pollerState: AutoYesPollerState;
-  frame: ReturnType<typeof normalizeFrame>;
-  promptDetection: PromptDetectionResult;
-  cleanOutput: string;
-  precomputedLines: string[] | undefined;
-  rawOutput: string | undefined;
-  captureExtent: CaptureExtent | undefined;
-}): ReturnType<typeof logIfWithheldForWantOfReceipt> {
-  const {
-    worktreeId,
-    cliToolId,
-    instanceId,
-    compositeKey,
-    epoch,
-    pollerState,
-    frame,
-    promptDetection,
-    cleanOutput,
-    precomputedLines,
-    rawOutput,
-    captureExtent,
-  } = tick;
-  // Issue #3880: a person's hold, which agy's dialog past the receipt window
-  // keeps (below) — the gated reading's "no prompt" is not the dialog gone.
-  const personHold = cliToolId === 'antigravity' ? getPartialAnswer(compositeKey, epoch) : null;
-  // The same for a person's send still in flight: one at the dialog the
-  // ungated reading still shows is not expired, so its outcome, coming back
-  // unknown, still holds the dialog. The ungated reading is taken once.
-  // Issue #3881: with the same capture-top reading as the tick's prompt, so the
-  // receipt log judges the contract on the frame's known top. The screen key
-  // (`partialAnswerScreenKey`) does not read `approvalTargetCompleteness`, so
-  // the in-flight sends are matched as before.
-  let ungated: PromptDetectionResult | undefined;
-  const readWithoutGate = (): PromptDetectionResult =>
-    (ungated ??= withCaptureTop(
-      detectPromptOnCleanFrame(cleanOutput, cliToolId, precomputedLines, rawOutput),
-      cliToolId,
-      rawOutput ?? cleanOutput,
-      captureExtent,
-    ));
-  const personSends = cliToolId === 'antigravity' ? personSendsInFlight(compositeKey, epoch) : [];
-  const dialogUp = personSends.length > 0 ? readWithoutGate() : null;
-  const dialogUpKey = dialogUp?.isPrompt && dialogUp.promptData ? partialAnswerScreenKey(dialogUp.promptData) : null;
-  forgetPartialAnswer(
-    compositeKey,
-    undefined,
-    new Set(
-      dialogUpKey === null
-        ? []
-        : personSends.filter((attempt) => partialAnswerCovers(attempt.screenKey, dialogUpKey)),
-    ),
-  );
-  pollerState.lastAnsweredPromptKey = null;
-  pollerState.lastAnsweredAt = null;
-  // Issue #3757: agy's trust screen reads as no prompt (unnumbered: neither
-  // reader takes it), but it is one nobody here answers — record why, still
-  // as `no_prompt`. Before the warn key is cleared, so the WARN stays once
-  // per screen.
-  // Issue #3820: the trust screen records itself in the ledger when it records
-  // its reason (`suppressAntigravityTrustScreen`).
-  if (
-    cliToolId === 'antigravity' &&
-    suppressAntigravityTrustScreen(
-      worktreeId,
-      instanceId,
-      pollerState,
-      frame,
-      CLIToolManager.getInstance().getTool(cliToolId).getSessionName(worktreeId, instanceId),
-    )
-  ) {
-    return null;
-  }
-  pollerState.lastSkipWarnKey = null;
-  if (cliToolId === 'antigravity' && !promptDetection.isPrompt) {
-    const seen = logIfWithheldForWantOfReceipt(
-      worktreeId,
-      instanceId,
-      compositeKey,
-      readWithoutGate,
-      personHold?.byPerson ? personHold.screenKey : null,
-    );
-    if (personHold?.byPerson && seen?.keptPersonHold) {
-      keepPartialAnswerByPerson(compositeKey, personHold, partialAnswerScreenKey(seen.promptData));
-    }
-    // Issue #3820: past the receipt window the gated reading says "no prompt"
-    // while the dialog is still up. The ungated reading says it is, so the
-    // ledger keeps the same confirmation (and the same withheld interval)
-    // rather than closing it on every tick outside the window.
-    if (seen !== null) {
-      const scope: LedgerScope = { compositeKey, worktreeId, cliToolId, instanceId };
-      observeLedgerScreen(
-        scope,
-        ledgerScreenKey(seen.promptData),
-        seen.promptData.type,
-        ledgerCallOf(cliToolId, worktreeId, instanceId),
-      );
-      if (seen.reason !== null) withholdLedgerConfirmation(scope, seen.reason);
-    }
-    return seen;
-  }
-  return null;
-}
-
-/**
- * Issue #3821: records what one tick decided about the prompt it read, for
- * `current-output` to publish (`autoYesDecision`, see
- * `polling/auto-yes-decision-state`). Tied to the grant and the session epoch
- * the tick read under, and to the confirmation (the prompt, and for agy the
- * hook call its receipt was accepted for); a tick that lost its generation
- * (#3706) records nothing, because the grant or the session it decided for is
- * gone.
- */
-function tickDecisionRecorder(tick: {
-  worktreeId: string;
-  cliToolId: CLIToolType;
-  instanceId: string | undefined;
-  compositeKey: string;
-  promptData: PromptData;
-  epoch: number;
-  generation: AutoYesTickGeneration | undefined;
-  startedAt: number;
-}): {
-  answering: () => void;
-  reaffirmAnswering: () => void;
-  withheld: (fallback: AutoYesDecisionReason) => void;
-} {
-  const { worktreeId, cliToolId, instanceId, compositeKey, promptData, epoch, generation, startedAt } = tick;
-  const grantOf = () => generation?.grant ?? getAutoYesState(worktreeId, cliToolId, instanceId);
-  const callId = ledgerCallOf(cliToolId, worktreeId, instanceId).callId ?? null;
-  const record = (state: 'answering' | 'withheld', reason: AutoYesDecisionReason | null): void => {
-    if (generation !== undefined && !isTickCurrent(generation)) return;
-    recordAutoYesDecision(compositeKey, { state, reason, promptData, callId, grant: grantOf(), epoch });
-  };
-  return {
-    answering: () => record('answering', null),
-    // The duplicate guard's "answered recently" compares the question only, so
-    // it is not evidence this confirmation is the one answered: `answering`
-    // stands only when the record the send made is about this confirmation,
-    // under the same grant and session (review 2). Otherwise nothing stands.
-    reaffirmAnswering: () => {
-      if (generation !== undefined && !isTickCurrent(generation)) {
-        forgetAutoYesDecision(compositeKey);
-        return;
-      }
-      reaffirmAutoYesAnswering(compositeKey, { promptData, callId, grant: grantOf(), epoch });
-    },
-    // The reason the step that withheld it recorded on this tick (the #1684
-    // record), else the step's own: a stop the policy record never carries.
-    withheld: (fallback) => {
-      const recorded = getLastPolicySuppression(worktreeId, cliToolId, instanceId);
-      record('withheld', recorded !== null && recorded.at >= startedAt ? recorded.reason : fallback);
-    },
-  };
-}
-
-/**
- * Issue #3820 (design §2.4, PR 3): the agy call the receipt episode on screen
- * was accepted for, for the ledger to tie the confirmation to. Asked after the
- * frame was judged; read only to record, and never throws.
- */
-function ledgerCallOf(
-  cliToolId: CLIToolType,
-  worktreeId: string,
-  instanceId: string | undefined,
-): { callId?: string } {
-  if (cliToolId !== 'antigravity') return {};
-  try {
-    const callId = getAntigravityAcceptedReceiptCallId(worktreeId, instanceId);
-    return callId === null ? {} : { callId };
-  } catch {
-    // Recording only: a failure here ties nothing and changes nothing else.
-    return {};
-  }
-}
-
-/**
- * Issue #3820: the result of a send that threw, as the ledger counts it.
- * `keysSent` is what the sender said (#3706); a throw that says nothing is a
- * failure whose keys may or may not be on the pane.
- */
-function attemptResultOfThrow(keysSent: boolean | null): AttemptResult {
-  if (keysSent === true) return 'partial';
-  if (keysSent === false) return 'no-keys-sent';
-  return 'failed';
-}
-
-/**
- * Issue #3820: the evidence an answer on the screen path is given on (design
- * §7 PR 1). A tool's own dialog detector vouched for the frame: `L3`. The
- * gate did not judge it (a `legacy` tool, a non-multiple-choice prompt): the
- * generic reading alone, `L4`.
- *
- * agy's gate is `legacy` (`gated: false`), yet its prompts are read by its own
- * reader first (`detectPromptOnCleanFrame` returns that reader's result
- * whenever it reads the frame). Which reader it was is not on the detection
- * result, so it is asked of the same reader on the same text here — for the
- * label only; the answer was decided before this is called. Read by agy's own
- * reader, and through the receipt gate (the tick's reading carried the
- * receipt scope): `L3`, with `receiptAccepted` on the attempt.
- */
-function answerBasisOf(prompt: JudgedPrompt, cleanOutput: string): AnswerBasis {
-  if (prompt.cliToolId === 'antigravity') {
-    return detectAntigravityNumberedDialogPrompt(cleanOutput) !== null ? 'L3' : 'L4';
-  }
-  const gate = prompt.dialogGate;
-  return gate !== undefined && gate.gated && gate.allowed && gate.dialog !== null ? 'L3' : 'L4';
-}
-
-/**
  * The `catch` of `detectAndRespondToPrompt`: settles the send in flight and
  * tells an abandoned tick from a failed one.
  */
@@ -990,6 +674,7 @@ export async function detectAndRespondToPrompt(
       instanceId,
       rawOutput,
       captureExtent,
+      detectPromptOnCleanFrame,
     );
 
     if (!promptDetection.isPrompt || !promptDetection.promptData) {
@@ -1009,6 +694,7 @@ export async function detectAndRespondToPrompt(
         precomputedLines,
         rawOutput,
         captureExtent,
+        detectPromptOnCleanFrame,
       });
       if (withheldPastGate !== null && withheldPastGate.reason !== null) {
         tickDecisionRecorder({
@@ -1398,50 +1084,6 @@ async function pollAutoYes(
 }
 
 /**
- * The wait an answer goes to, fixed in the synchronous step the send begins in
- * (Issue #3798): the episode open then, or none and the version it was at.
- */
-interface AnswerTarget {
-  episodeId: string | null;
-  version: number;
-}
-
-function fixAnswerTarget(worktreeId: string, cliToolId: CLIToolType, instanceId: string | undefined): AnswerTarget {
-  return {
-    episodeId: getWaitingEpisodeRecord(worktreeId, cliToolId, instanceId)?.episodeId ?? null,
-    version: getEpisodeVersion(worktreeId, cliToolId, instanceId),
-  };
-}
-
-/**
- * Whether the wait is still the one the answer was sent to: the same episode
- * open, as it was when the send began (the version has not moved) or rebound
- * since to a binding the answer may still be for — the hook of the turn the
- * answer resumed may have landed during the send — but not to a `screen`: a
- * survey or a picker another observer saw during the send is newer than the
- * prompt these keys answered, and re-observing that prompt would turn the
- * person's screen back into a wait Auto-Yes answered. When none was open,
- * none opened or closed since.
- */
-function answerTargetHolds(
-  target: AnswerTarget,
-  worktreeId: string,
-  cliToolId: CLIToolType,
-  instanceId: string | undefined
-): boolean {
-  if (target.episodeId === null) return getEpisodeVersion(worktreeId, cliToolId, instanceId) === target.version;
-  const episode = getWaitingEpisodeRecord(worktreeId, cliToolId, instanceId);
-  if (episode?.episodeId !== target.episodeId) return false;
-  return getEpisodeVersion(worktreeId, cliToolId, instanceId) === target.version || episode.binding.kind !== 'screen';
-}
-
-/** What a tick fixed for its waiting-episode observations (Issue #3798). */
-interface TickObservation {
-  start: ObservationStart;
-  frameTime: CapturedFrameTime;
-}
-
-/**
  * The answer the poller just sent, as an observation of the waiting episodes
  * (Issue #3798, design §2.5 "Auto-Yes poller", PR 3). Called in the
  * synchronous step the send returns to, before anything else is awaited: the
@@ -1559,24 +1201,6 @@ function observeWaitingFromTick(tick: {
       instanceId,
       error: getErrorMessage(error),
     });
-  }
-}
-
-/**
- * Whether a failed capture failed because the session does not exist
- * (Issue #3329). Asked of tmux (`has-session`'s exit code), not read off the
- * error text. `unknown` — tmux timed out or could not be run — is not "absent":
- * the failure is counted as before, so a broken tmux still stops Auto-Yes.
- */
-async function isSessionMissing(
-  worktreeId: string,
-  cliToolId: CLIToolType,
-  instanceId?: string,
-): Promise<boolean> {
-  try {
-    return (await getSessionPresence(worktreeId, cliToolId, instanceId)) === 'absent';
-  } catch {
-    return false;
   }
 }
 
@@ -1818,17 +1442,6 @@ export function stopAllAutoYesPolling(): void {
   clearPartialAnswers();
 }
 
-/**
- * Get all composite keys that have active auto-yes poller entries.
- *
- * Issue #525: Returns composite keys (worktreeId:cliToolId).
- *
- * @returns Array of composite keys present in the autoYesPollerStates Map
- */
-export function getAutoYesPollerCompositeKeys(): string[] {
-  return Array.from(autoYesPollerStates.keys());
-}
-
 // =============================================================================
 // byWorktree Helpers (Issue #525)
 // =============================================================================
@@ -1863,18 +1476,4 @@ export function stopAutoYesPollingByWorktree(
   // opened with Auto-Yes off too, so the running pollers do not name them all.
   noteLedgerWorktreeStopped(worktreeId, resolvePollerStopReason(options?.reason, 'unspecified'));
   if (!options?.keepPartialAnswers) forgetPartialAnswersByWorktree(worktreeId);
-}
-
-/**
- * Check if any auto-yes poller is active for a given worktreeId.
- * Uses shared filterCompositeKeysByWorktree (DRY).
- *
- * @param worktreeId - Worktree identifier
- * @returns true if any poller is active for this worktree
- */
-export function isAnyPollerActiveForWorktree(worktreeId: string): boolean {
-  return filterCompositeKeysByWorktree(
-    Array.from(autoYesPollerStates.keys()),
-    worktreeId
-  ).length > 0;
 }
