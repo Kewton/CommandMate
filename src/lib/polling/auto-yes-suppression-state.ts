@@ -27,6 +27,7 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { PromptType } from '@/types/models';
 import type { AutoYesMode, AutoYesSuppressionReason } from './auto-yes-resolver';
 import { getOrInitGlobal } from '../global-state';
+import { getWaitingEpisodeRecord } from '../session/waiting-episode-state';
 
 /** What the policy withheld, and why — the log line's payload, made queryable. */
 export interface AutoYesPolicySuppression {
@@ -40,23 +41,21 @@ export interface AutoYesPolicySuppression {
   pattern?: string;
   /** Epoch ms of the suppression; refreshed on every poll that re-suppresses. */
   at: number;
+  /**
+   * The waiting episode open for this instance when the record was written
+   * (Issue #3798), or the one a caller carried over from an earlier record of
+   * the same dialog (`auto-yes-poller-receipt-log`). Present, the push gate and
+   * `cmate wait` match the record to a wait by this id rather than by time;
+   * absent — no wait was open yet — the time comparison applies.
+   */
+  episodeId?: string;
 }
 
 /**
- * A suppression record that may name the waiting episode the withheld prompt
- * belonged to (Issue #3798). Present, the push gate matches the record to a
- * wait by this id rather than by `at >= waitingSince`; absent — every record
- * written before the poller learns the id — the time comparison applies.
- *
- * Kept beside {@link AutoYesPolicySuppression} rather than in it: that
- * interface is the shape `current-output` publishes, and its key set is held
- * equal to the CLI's copy (`src/cli/types/api-responses.ts`,
- * `tests/unit/cli/types/last-suppression-mirror-3822.test.ts`). The id joins
- * the published shape together with its writer and the CLI side.
+ * The name the push gate reads the record under (Issue #3798). The id now
+ * belongs to the published record itself ({@link AutoYesPolicySuppression}).
  */
-export interface EpisodeScopedPolicySuppression extends AutoYesPolicySuppression {
-  episodeId?: string;
-}
+export type EpisodeScopedPolicySuppression = AutoYesPolicySuppression;
 
 /**
  * Reached through `globalThis` for the same reason `agent-event-state` is
@@ -86,6 +85,10 @@ const lastPolicySuppressions = getOrInitGlobal('__autoYesPolicySuppressions', ()
 /**
  * Record that the policy withheld an answer for `instanceId`'s current prompt.
  *
+ * Issue #3798: the record names the waiting episode open for the instance at
+ * this moment — unless the caller names one (a record carried over for the
+ * same dialog) — so it is never taken for the reason of a later wait.
+ *
  * @param at - Epoch ms; defaults to now. Overridable so tests are deterministic.
  */
 export function recordPolicySuppression(
@@ -95,9 +98,12 @@ export function recordPolicySuppression(
   suppression: Omit<AutoYesPolicySuppression, 'at'>,
   at: number = Date.now()
 ): void {
+  const { episodeId: carried, ...rest } = suppression;
+  const episodeId = carried ?? getWaitingEpisodeRecord(worktreeId, cliToolId, instanceId)?.episodeId;
   lastPolicySuppressions.set(buildCompositeKey(worktreeId, cliToolId, instanceId), {
-    ...suppression,
+    ...rest,
     at,
+    ...(episodeId !== undefined ? { episodeId } : {}),
   });
 }
 

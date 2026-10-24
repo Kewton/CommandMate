@@ -456,7 +456,7 @@ export function settleLegacyStop(worktreeId, cliToolId, instanceId, target: Lega
 | claude-done | `captureLegacyStopTarget`（`:47` の後） | `settleLegacyStop`（`:72` の後、`:100` の前） | `:100` 以降で触れない |
 | status-helper | 呼び手が `listSessions()` を呼ぶ前（`worktrees/route.ts:138` の前、`[id]/route.ts:67` の前）に全インスタンス分の `ObservationStart` を取り `detectWorktreeSessionStatus` に渡す。渡されなければ `detectInstanceSessionStatus` の冒頭 | `observeWaiting`（`:884` の位置）。`frameCapturedAt` は `captureSessionOutputWithMeta` から | — |
 | 応答 poller | `start`（`checkForResponse` の `:1533` の前） | O2: `savePromptMessage` の中（plan は `isDuplicatePrompt` の前）、C2: `:1465` | — |
-| Auto-Yes poller | `start`（tick の capture の await の前。`auto-yes-poller.ts:1172` 付近） | `no_prompt` を返す直前（`:991` 付近）の `observeWaiting`（screen の open/rebind/閉じるは PR 1b、答えた区間を閉じるのは PR 3）。答えの送信を始める同期区間（PR 3） | — |
+| Auto-Yes poller | `start`（tick の capture の await の前。`auto-yes-poller.ts:1172` 付近） | `no_prompt` を返す直前（`:991` 付近）の `observeWaiting`（screen の open/rebind/閉じるは PR 1b、答えた区間を閉じるのは PR 3）。答えの送信が返った同期区間（PR 3。`noteAnswerSent` の後、`finishAnsweredPrompt` の await の前。tick が世代を失っていれば観測しない） | — |
 
 ### 2.6 失敗時の扱い
 
@@ -761,6 +761,12 @@ export function settleLegacyStop(worktreeId, cliToolId, instanceId, target: Lega
   - `poller-answered prompt types (opencode numbered choice, copilot ≤3 options): a second prompt with a different screen key in the same turn is replaced and held, not allowed at once`
 - `tests/unit/cli/wait-suppression-episode-3798.test.ts` — `different episode ids make the suppression stale`、`missing ids fall back to the 60 s window`
 - 保留ブランチの `auto-yes-poller-close-answered-wait-3798` の survey/picker・信頼確認・受信待ちの対照を、`lastAnswer.episodeId` で書き直したもの
+
+**(実装での決定)**
+- 答えの観測は「送信を始める同期区間」ではなく **送信が返った同期区間**（`sendPromptAnswer` の後、`finishAnsweredPrompt` の最初の await の前）に置き、tick が世代を失っていれば（#3706: 許可の取り消し・再付与、session の作り直し）観測も `lastAnswer` の記録もしない。#3706 の「世代を失った tick は『答えた』を表すものを書かない」に合わせるため（`auto-yes-poller-generation-3706.test.ts` の、送信中に許可を出し直した tick が後続を残さない対照が、送信の前に開いた区間の通知タイマーで崩れる）。送信の間に stop が届いて区間が閉じた場合は、送信の前に取ったフレームなので I6 で `ignored` になり、`lastAnswer` を記録しない
+- `lastAnswer` は送信の失敗・途中停止（throw）では記録しない（答えていない）
+- 抑止記録の `episodeId` は `recordPolicySuppression` が書く時点で開いている区間から取る（呼び手が `episodeId` を渡せばそれを使う。agy の受信ログの再刻印は元の記録の ID を引き継ぐ）。記録の型 `AutoYesPolicySuppression` に `episodeId?` を足し、`EpisodeScopedPolicySuppression` はその別名にした
+- `current-output` は `autoYes.waitingEpisodeId`（今開いている区間 ID か null）を `lastSuppression` と同じ同期区間で読んで載せる。`wait` は両方の ID があれば ID の一致で決め（違う・区間が無い → 古い記録、同じ → 年齢を問わずこの待ちの理由。push gate と同じ）、どちらかが無ければ 60 秒の窓
 
 **(3) 単独で develop に入っても壊れない理由**
 - poller が閉じるのは自分が答えた区間だけで、`screen` の扱いは 1b のまま。gate は 2 で ID を読めるので、書き手が増えるだけ

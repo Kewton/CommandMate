@@ -56,6 +56,7 @@ import {
   buildCompositeKey,
 } from '@/lib/polling/auto-yes-manager';
 import { getLastPolicySuppression } from '@/lib/polling/auto-yes-suppression-state';
+import { getWaitingEpisodeRecord } from '@/lib/session/waiting-episode-state';
 import type { AutoYesEnterFallbackPublished } from '@/lib/polling/auto-yes-enter-fallback';
 import { publishAutoYesDecision } from '@/lib/polling/auto-yes-decision-state';
 import { getAntigravityAcceptedReceiptCallId } from '@/lib/polling/antigravity-receipt-episodes';
@@ -778,6 +779,9 @@ function buildRunningPayload({
       expiresAt: autoYesState?.enabled ? autoYesState.expiresAt : null,
       stopReason: autoYesState?.stopReason,
       lastSuppression: getLastPolicySuppression(worktreeId, cliToolId, instanceId),
+      // Issue #3798: read in the same step as the record above, which names the
+      // wait it was written for — `cmate wait` holds the two against each other.
+      waitingEpisodeId: getWaitingEpisodeRecord(worktreeId, cliToolId, instanceId)?.episodeId ?? null,
       // Issue #1694: undefined (so the key is absent from the JSON) unless a
       // stop pattern actually fired — the state clears it on every other path.
       stopMatchedText: autoYesState?.stopMatchedText,

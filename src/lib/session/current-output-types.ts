@@ -447,6 +447,14 @@ export interface CurrentOutputPayload {
      */
     lastSuppression: AutoYesPolicySuppression | null;
     /**
+     * The waiting episode open for this instance when the payload was built,
+     * or null when none is (Issue #3798). `lastSuppression.episodeId` names
+     * the wait the record was written for: a different id here means the
+     * record is about an earlier wait. Optional so payloads built elsewhere
+     * need not name it; absent, readers fall back to the record's age.
+     */
+    waitingEpisodeId?: string | null;
+    /**
      * Short excerpt of what `--stop-pattern` matched, present only while
      * `stopReason === 'stop_pattern_matched'` (Issue #1694).
      *

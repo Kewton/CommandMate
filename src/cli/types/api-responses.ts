@@ -286,7 +286,20 @@ export interface CurrentOutputResponse {
       promptType: string;
       pattern?: string;
       at: number;
+      /**
+       * The waiting episode the record was written for (Issue #3798). Absent
+       * when no wait was open, or from a server older than the field.
+       */
+      episodeId?: string;
     } | null;
+    /**
+     * Mirrors: src/lib/session/current-output-types.ts
+     * CurrentOutputPayload.autoYes.waitingEpisodeId (Issue #3798). The waiting
+     * episode open when the payload was built, or null. `lastSuppression` is
+     * this wait's only when its `episodeId` is this; absent (an older server),
+     * the record's age decides as before.
+     */
+    waitingEpisodeId?: string | null;
     /**
      * Mirrors: src/lib/auto-yes-state.ts AutoYesState.stopMatchedText
      * (Issue #1694). Short excerpt of what `--stop-pattern` matched, with one

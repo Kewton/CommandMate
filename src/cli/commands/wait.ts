@@ -241,6 +241,13 @@ function describePaneObstruction(data: CurrentOutputResponse): string {
  * error runs towards reporting — a withheld answer to an earlier prompt, under a
  * minute old, still ends the hold, which is the pre-#2463 exit rather than a
  * new failure.
+ *
+ * Issue #3798: a server that names the waiting episodes does what the push gate
+ * does — the record's `episodeId` against the payload's
+ * `autoYes.waitingEpisodeId`, which decide when both are present: another id
+ * (or no wait open) is a record of an earlier wait, however recent; the same
+ * id is this wait's. Either one missing (an older server, a record written
+ * before any wait was open), this window decides as before.
  */
 const SUPPRESSION_FRESH_MS = 60_000;
 
@@ -258,8 +265,13 @@ function activeSuppression(
   const suppression = data.autoYes?.lastSuppression;
   if (!suppression) return null;
   const ageMs = now - suppression.at;
-  // A negative age is clock skew between the CLI and the server, not staleness.
-  if (ageMs > SUPPRESSION_FRESH_MS) return null;
+  const waitId = data.autoYes?.waitingEpisodeId;
+  if (suppression.episodeId !== undefined && waitId !== undefined) {
+    if (suppression.episodeId !== waitId) return null;
+  } else if (ageMs > SUPPRESSION_FRESH_MS) {
+    // A negative age is clock skew between the CLI and the server, not staleness.
+    return null;
+  }
   return { suppression, ageSeconds: Math.max(0, Math.round(ageMs / 1000)) };
 }
 

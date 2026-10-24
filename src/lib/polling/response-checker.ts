@@ -114,6 +114,8 @@ import {
   type ObservationStart,
 } from '@/lib/session/waiting-episode-binding';
 import { promptWaitingReading } from '@/lib/detection/waiting-screen-reading';
+import { buildCompositeKey } from '@/lib/auto-yes-state';
+import { getAutoYesLastAnswer } from './auto-yes-poller-state';
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
 import {
   isBlankCleanedResponse,
@@ -862,7 +864,9 @@ function savePromptMessage(
   // the close of the very confirmation it shows — an answer and a stop landed
   // during the capture — is not a new wait: nothing is saved, registered or
   // pushed, and the next tick's frame decides. Planned against the state as it
-  // is now (`freshPrompt`), not as the tick found it.
+  // is now (`freshPrompt`), not as the tick found it. With the Auto-Yes
+  // poller's last answer (PR 3): another confirmation in the wait it answered
+  // is a new wait (R1-7), with a hold of its own rather than the spent one.
   const plan = planWaitingObservation({
     worktreeId,
     cliToolId,
@@ -872,6 +876,7 @@ function savePromptMessage(
     reading: promptWaitingReading(promptDetection.promptData ?? null),
     ...frameTime,
     freshPrompt: true,
+    lastAnswer: getAutoYesLastAnswer(buildCompositeKey(worktreeId, cliToolId, instanceId)),
   });
   if (plan.action === 'ignored') {
     logger.info('prompt-observation-stale', {
