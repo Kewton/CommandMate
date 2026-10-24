@@ -205,6 +205,36 @@ describe('[#3863] answers and withheld intervals by answer mode', () => {
     expect(result.details).toMatchObject({ answered: 1, answeredRecommended: 0, answeredCareful: 0, answeredAnswerModeUnknown: 1 });
   });
 
+  it('[#3882] a first success outside the window, or a missing attempt line, leaves it unknown', () => {
+    const attempt = (id: string, n: number, at: number, ok: boolean, mode: string) =>
+      line<AttemptSettledLine>(EV.attemptSettled, {
+        atMs: at,
+        confirmationId: id,
+        attemptId: `${id}.${n}`,
+        cliToolId: 'claude',
+        basis: 'L3',
+        result: ok ? 'ok' : 'failed',
+        late: false,
+        expired: false,
+        answerMode: mode,
+      } as never);
+    const result = measureOk([
+      ...aliveDay(),
+      // attempt 1 (a success) is before the window; the one in it names a mode
+      attempt(`${BOOT}-1`, 1, S - H, true, 'careful'),
+      attempt(`${BOOT}-1`, 2, S + H - 1000, true, 'recommended'),
+      closed(`${BOOT}-1`, S + H, 'careful'),
+      // attempt 1's line is missing (numbers jump to 2)
+      attempt(`${BOOT}-2`, 2, S + 2 * H - 1000, true, 'recommended'),
+      closed(`${BOOT}-2`, S + 2 * H, 'careful'),
+      // positive: 1 failed, 2 succeeded, both seen
+      attempt(`${BOOT}-3`, 1, S + 3 * H - 2000, false, 'careful'),
+      attempt(`${BOOT}-3`, 2, S + 3 * H - 1000, true, 'recommended'),
+      closed(`${BOOT}-3`, S + 3 * H, 'careful'),
+    ]);
+    expect(result.details).toMatchObject({ answered: 3, answeredRecommended: 1, answeredCareful: 0, answeredAnswerModeUnknown: 2 });
+  });
+
   it('[#3882] negative: a person\'s answer stays counted apart', () => {
     const result = measureOk([...aliveDay(), closed(`${BOOT}-1`, S + H, 'careful', { basis: 'human' })]);
     expect(result.details).toMatchObject({ answered: 0, answeredByHuman: 1, answeredCareful: 0 });

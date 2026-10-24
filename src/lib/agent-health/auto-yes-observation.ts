@@ -259,8 +259,8 @@ interface LinePass {
   answeredRecords: Map<string, MetricRecord>;
   /** Issue #3863: Auto-Yes's answers by answer mode. */
   answeredByMode: Map<AnswerModeKey, number>;
-  /** Issue #3882: confirmation ID → the mode its first successful (non-late) attempt line named. */
-  okAttemptMode: Map<string, AnswerModeKey>;
+  /** Issue #3882: confirmation ID → attempt number → the (non-late) attempt lines seen in the window. */
+  attemptLines: Map<string, Map<number, { ok: boolean; mode: AnswerModeKey }>>;
   attemptRecords: Map<string, MetricRecord>;
   abstainRecords: Map<string, MetricRecord>;
   hookRequests: number;
@@ -286,7 +286,7 @@ function createLinePass(): LinePass {
     answeredLate: 0,
     answeredRecords: new Map<string, MetricRecord>(),
     answeredByMode: new Map<AnswerModeKey, number>(),
-    okAttemptMode: new Map<string, AnswerModeKey>(),
+    attemptLines: new Map(),
     attemptRecords: new Map<string, MetricRecord>(),
     abstainRecords: new Map<string, MetricRecord>(),
     hookRequests: 0,
@@ -366,8 +366,7 @@ function onClosed(pass: LinePass, data: Record<string, unknown>, confirmationId:
       // reload, an old log) is never filled from `answerMode` (the last
       // decision's); only a successful attempt line with the same
       // confirmation ID that names a mode restores it, else it is unknown.
-      const attemptMode = confirmationId === null ? undefined : pass.okAttemptMode.get(confirmationId);
-      const mode = data.answeredAnswerMode !== undefined ? answerModeOf(data.answeredAnswerMode) : (attemptMode ?? 'unknown');
+      const mode = data.answeredAnswerMode !== undefined ? answerModeOf(data.answeredAnswerMode) : restoredAnswerMode(pass, confirmationId);
       pass.answeredByMode.set(mode, (pass.answeredByMode.get(mode) ?? 0) + 1);
     }
     const tool = toolOf(data);
@@ -376,11 +375,38 @@ function onClosed(pass: LinePass, data: Record<string, unknown>, confirmationId:
   }
 }
 
+/** The `N` of an attempt ID `<confirmationId>.N` (N ≥ 1), else null. */
+function attemptNumberOf(confirmationId: string | null, attemptId: unknown): number | null {
+  if (confirmationId === null || typeof attemptId !== 'string' || !attemptId.startsWith(`${confirmationId}.`)) return null;
+  const suffix = attemptId.slice(confirmationId.length + 1);
+  return /^[1-9]\d*$/.test(suffix) ? Number(suffix) : null;
+}
+
+/**
+ * Issue #3882: the mode of the first successful attempt, only when that
+ * success is provably the first — every attempt before it (numbers 1..n-1)
+ * was seen in the window and failed. A success outside the window or a missing
+ * line (a gap in the numbers) leaves it unknown; so does a first success
+ * that names no mode.
+ */
+function restoredAnswerMode(pass: LinePass, confirmationId: string | null): AnswerModeKey {
+  const lines = confirmationId === null ? undefined : pass.attemptLines.get(confirmationId);
+  if (lines === undefined) return 'unknown';
+  for (let n = 1; n <= lines.size; n++) {
+    const line = lines.get(n);
+    if (line === undefined) return 'unknown';
+    if (line.ok) return line.mode;
+  }
+  return 'unknown';
+}
+
 function onAttemptSettled(pass: LinePass, data: Record<string, unknown>, late: boolean): void {
   const attemptConfirmationId = str(data.confirmationId);
-  if (!late && attemptConfirmationId !== null && data.result === 'ok' && !pass.okAttemptMode.has(attemptConfirmationId)) {
-    // The first success decides, even when it names no mode: a later one must not fill it in.
-    pass.okAttemptMode.set(attemptConfirmationId, answerModeOf(data.answerMode));
+  const attemptNumber = attemptNumberOf(attemptConfirmationId, data.attemptId);
+  if (!late && attemptConfirmationId !== null && attemptNumber !== null) {
+    const lines = pass.attemptLines.get(attemptConfirmationId) ?? new Map();
+    pass.attemptLines.set(attemptConfirmationId, lines);
+    lines.set(attemptNumber, { ok: data.result === 'ok', mode: answerModeOf(data.answerMode) });
   }
   const tool = toolOf(data);
   const basis = basisOf(data.basis);
