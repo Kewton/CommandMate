@@ -115,6 +115,41 @@ afterEach(() => {
 });
 
 describe('[#3759] classifySendFailure', () => {
+  it('[#3880] a tmux failure that quotes the body (its argv) is indeterminate, whatever the body says', () => {
+    // tmux.ts wraps the child_process error, whose message carries the argv —
+    // and the argv of a literal send is the body.
+    const typed = (body: string): Error =>
+      new Error(
+        'Failed to send message to Codex: Failed to send keys to tmux session: ' +
+          `Command failed: tmux send-keys -t =mcbd-codex-wt-1: -l -- ${body}`
+      );
+    expect(classifySendFailure(typed('Explain prompt not ready.'))).toEqual({ state: 'indeterminate', reason: 'send-error' });
+    expect(classifySendFailure(typed('why does it say: still holds unsent text after 3 clear passes?'))).toEqual({
+      state: 'indeterminate',
+      reason: 'send-error',
+    });
+    expect(
+      classifySendFailure(
+        new Error('Failed to send message to Claude: Command failed: tmux send-keys -t =s: -l -- prompt not ready')
+      )
+    ).toEqual({ state: 'indeterminate', reason: 'send-error' });
+    expect(
+      classifySendFailure(
+        new Error('Failed to send message to Codex: Failed to paste message into tmux session: Command failed: tmux paste-buffer')
+      )
+    ).toEqual({ state: 'indeterminate', reason: 'send-error' });
+    // The real readiness refusals carry no tmux failure and stay not-sent.
+    expect(classifySendFailure(new Error(AGY_NOT_READY))).toEqual({ state: 'not-sent', reason: 'prompt-not-ready' });
+    expect(
+      classifySendFailure(new Error('Failed to send message to Codex: Codex prompt not ready: timed out waiting for the input prompt before sending'))
+    ).toEqual({ state: 'not-sent', reason: 'prompt-not-ready' });
+    expect(
+      classifySendFailure(
+        new Error('Failed to send message to Command Code: Command Code prompt not ready: timed out waiting for the composer before sending')
+      )
+    ).toEqual({ state: 'not-sent', reason: 'prompt-not-ready' });
+  });
+
   it('[#3880] the body quoted in a body-not-landed error never makes it not-sent', () => {
     // The composer's first row is the user's own text, and it says `prompt not ready`.
     expect(

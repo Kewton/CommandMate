@@ -306,6 +306,73 @@ describe('Issue #3880 review: a UI excerpt is not proof the whole body arrived',
   });
 });
 
+describe('Issue #3880 review 2 (N1): a one-row excerpt is not proof the whole body arrived', () => {
+  const HEAD = 'Read the brief below and answer in Japanese.';
+  const PARAGRAPH = asciiOfBytes(600);
+  /** A one-line paragraph, a blank line, then 600 bytes: the excerpt stops at the blank row. */
+  const BODY = `${HEAD}\n\n${PARAGRAPH}`;
+  /** Rows of a later paragraph: indented like every codex continuation row. */
+  const continuation = (text: string): string[] =>
+    composerRows(text, 200).map((row, i) => (i === 0 ? `  ${row.slice(GLYPH.length)}` : row));
+
+  it('the excerpt of every frame below is one row (the branch the review named)', () => {
+    const read = extractComposerText(codexFrame([...composerRows(HEAD, 200), '', ...continuation(PARAGRAPH)]), 'codex');
+    expect(read.state).toBe('content');
+    expect(read.text).toBe(HEAD);
+  });
+
+  it('only the first line drawn -> pasting, not landed', () => {
+    expect(classifyPasteLanded(codexFrame(composerRows(HEAD, 200)), 'codex', BODY)).toBe('pasting');
+    expect(classifyPasteLanded(codexFrame(composerRows(HEAD, 200)), 'codex', `${HEAD}\n${numberedLines(20)}`)).toBe(
+      'pasting'
+    );
+  });
+
+  it('the one-line paragraph and its blank row, nothing after -> pasting, not landed', () => {
+    expect(classifyPasteLanded(codexFrame([...composerRows(HEAD, 200), '']), 'codex', BODY)).toBe('pasting');
+  });
+
+  it('the tail of the last paragraph missing -> pasting, not landed', () => {
+    const frame = codexFrame([...composerRows(HEAD, 200), '', ...continuation(PARAGRAPH.slice(0, 400))]);
+    expect(classifyPasteLanded(frame, 'codex', BODY)).toBe('pasting');
+  });
+
+  it('a different last paragraph -> mismatch', () => {
+    const frame = codexFrame([...composerRows(HEAD, 200), '', ...continuation(asciiOfBytes(600).replace(/review/g, 'REVIEW'))]);
+    expect(classifyPasteLanded(frame, 'codex', BODY)).toBe('mismatch');
+  });
+
+  it('the whole body drawn -> landed', () => {
+    const frame = codexFrame([...composerRows(HEAD, 200), '', ...continuation(PARAGRAPH)]);
+    expect(classifyPasteLanded(frame, 'codex', BODY)).toBe('landed');
+  });
+
+  it('send: a composer that only ever shows the first line fails before Enter', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.clearAllMocks();
+      vi.mocked(execFile).mockImplementation(((_f: string, _a: string[], _o: unknown, cb: (e: Error | null) => void) => {
+        queueMicrotask(() => cb(null));
+        return { stdin: { end: () => undefined } };
+      }) as never);
+      const partial = codexFrame([...composerRows(HEAD, 200), '']);
+      vi.mocked(capturePane).mockImplementation((async (_s: string, arg?: unknown) =>
+        typeof arg === 'number' ? IDLE : partial) as never);
+
+      const p = sendMessageWithSubmitVerification({ sessionName: 'mcbd-codex-head', message: BODY, cliToolId: 'codex' });
+      const settled = p.then(() => null, (e: unknown) => e);
+      await vi.runAllTimersAsync();
+      const error = await settled;
+
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toMatch(/had not finished arriving/);
+      expect(vi.mocked(sendSpecialKeys).mock.calls.filter((c) => Array.isArray(c[1]) && c[1][0] === 'Enter')).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('Issue #3880 review: the body\'s own words never turn indeterminate into not-sent', () => {
   it('a failed paste whose shown first line says "prompt not ready" stays indeterminate/body-not-landed', async () => {
     vi.useFakeTimers();

@@ -221,7 +221,7 @@ type ComposerRead =
       rows: string[];
       /**
        * Every row from the composer's `›` row down to the footer, ANSI and glyph
-       * stripped — only for a multi-row codex composer ({@link readSubmitComposer},
+       * stripped — for every codex composer holding text ({@link readSubmitComposer},
        * Issue #3880). Read from the raw frame, not from `extractComposerText`,
        * whose text is a UI excerpt (cut at 2,000 characters, 40 rows and the
        * first blank row) and so cannot say the whole body is there.
@@ -601,13 +601,17 @@ function readSubmitComposer(
 ): ComposerRead {
   if (cliToolId === 'codex' && reader === 'input-line-marker') {
     const read = extractComposerText(output, cliToolId);
-    if (read.state === 'content' && read.text.includes('\n')) {
-      return {
-        kind: 'text',
-        text: firstNonBlankLine(read.text),
-        rows: read.text.split('\n'),
-        region: codexComposerRegion(output) ?? read.text,
-      };
+    if (read.state === 'content') {
+      const region = codexComposerRegion(output) ?? read.text;
+      if (read.text.includes('\n')) {
+        return { kind: 'text', text: firstNonBlankLine(read.text), rows: read.text.split('\n'), region };
+      }
+      // Issue #3880 (N1): a one-row excerpt is read as before for its verdict
+      // after Enter, but still carries the whole region — `head` with the rest of
+      // the body under a blank row is one excerpt row and must not pass for the
+      // whole body before Enter.
+      const single = readComposer(reader, lines, windowLines);
+      return single.kind === 'text' ? { ...single, region } : single;
     }
   }
   return readComposer(reader, lines, windowLines);
