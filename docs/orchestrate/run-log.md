@@ -140,3 +140,7 @@ done 3< <(awk -F'\t' '{
 - 再指示（3-4）の `--after-reinstruct` の呼び出しにも同じ `--item` を付ける。最後の 1 本の `--last` は `ITEM_ARGS` の後に足す
 - 3-1 の送信（`launch-worker.mjs send --item`）は `send-<issue>[-<item>][.a<n>].out` / `.err`、5-1 の契約なしの検証は `execution-key.mjs allocate` で
   `verify-<issue>[-<item>][.a<n>].json` を呼び出しごとに排他的に取り、記録に同じ `--item` と execution key（`--key`）を入れる（#3883。本体の 5-1 の雛形は 6 列目を読む）
+- 5-1 の契約なしの検証も、wait-verify と同じ実行の入力の manifest を残す（#3883 N6）: `env-manifest.mjs start` を `verify` の直前、`end` を直後に呼び、
+  `verify-<issue>[-<item>][.a<n>].env.json` に execution key と一緒に置く。`end` は記録の note に足す `env=<hash>` を出し、検証中に入力が変わっていれば
+  `env-changed-during-verify=<項目>` と exit 3（雛形は `RC=3`＝`verify=fail` にする。裁定にしない）。precheck / publish / merge はこの `env=` を 3-3 の記録と同じに照らし合わせる
+  （docs/orchestrate/workers.md の「合格を使う地点も環境を照らし合わせる」）

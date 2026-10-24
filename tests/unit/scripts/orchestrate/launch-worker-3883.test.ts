@@ -16,7 +16,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   EXIT_MODEL_MISMATCH,
   EXIT_MODEL_UNKNOWN,
+  EXIT_STOP_UNCONFIRMED,
+  INIT_MESSAGE,
   MODEL_READS,
+  READY_MAX_POLLS,
+  STOP_READS,
   MODEL_SETTINGS,
   classifyModel,
   main,
@@ -160,29 +164,53 @@ describe('classifyModel', () => {
   });
 });
 
-/** A fake commandmatedev: send answers with task ids, capture --json with the models in turn. */
-function fakeCli({ models = [] as (string | null)[], sendExit = 0, running = true, ignored = true } = {}) {
+/**
+ * A fake commandmatedev: the starting message starts the session, a contract
+ * send answers with a task id, capture --json reports the models in turn (and
+ * `ready`), kill stops the session unless told not to.
+ */
+function fakeCli({
+  models = [] as (string | null)[],
+  sendExit = 0,
+  running = true,
+  ignored = true,
+  killExit = 0,
+  killStops = true,
+  listExit = 0,
+  ready = true,
+} = {}) {
   const calls: string[][] = [];
   const sleeps: number[] = [];
-  let sends = 0;
+  let tasks = 0;
+  let inits = 0;
   let captures = 0;
+  let alive = running;
   const run = (command: string, args: string[]) => {
     calls.push([command, ...args]);
     if (command === 'git') return { status: ignored ? 0 : 1, stdout: '', stderr: '' };
     if (args[0] === 'instances' && args[2] === '--json') {
-      return { status: 0, stdout: JSON.stringify([{ instanceId: 'claude', running }]), stderr: '' };
+      return listExit === 0 ? { status: 0, stdout: JSON.stringify([{ instanceId: 'claude', running: alive }]), stderr: '' } : { status: listExit, stdout: '', stderr: 'ECONNREFUSED' };
     }
-    if (args[0] === 'instances' && args[2] === 'kill') return { status: 0, stdout: '', stderr: 'Session killed: claude' };
+    if (args[0] === 'instances' && args[2] === 'kill') {
+      if (killExit !== 0) return { status: killExit, stdout: '', stderr: 'Error: Failed to kill session' };
+      if (killStops) alive = false;
+      return { status: 0, stdout: '', stderr: 'Session killed: claude' };
+    }
     if (args[0] === 'send') {
-      sends += 1;
-      return sendExit === 0
-        ? { status: 0, stdout: `task-${sends}\n`, stderr: `Task created: task-${sends}\n` }
-        : { status: sendExit, stdout: '', stderr: 'prompt not ready' };
+      if (sendExit !== 0) return { status: sendExit, stdout: '', stderr: 'prompt not ready' };
+      alive = true;
+      if (!args.includes('--contract')) {
+        inits += 1;
+        return { status: 0, stdout: '', stderr: `Message sent. init-${inits}\n` };
+      }
+      tasks += 1;
+      return { status: 0, stdout: `task-${tasks}\n`, stderr: `Task created: task-${tasks}\n` };
     }
     if (args[0] === 'capture') {
       const model = models[Math.min(captures, models.length - 1)] ?? null;
       captures += 1;
-      return { status: 0, stdout: JSON.stringify(model === null ? { sessionStatus: 'running' } : { model }), stderr: '' };
+      const sessionStatus = ready ? 'ready' : 'running';
+      return { status: 0, stdout: JSON.stringify(model === null ? { sessionStatus } : { model, sessionStatus }), stderr: '' };
     }
     throw new Error(`unexpected ${command} ${args.join(' ')}`);
   };
@@ -200,7 +228,13 @@ function go(fake: ReturnType<typeof fakeCli>, argv: string[]) {
   return { code, out, log };
 }
 const verbs = (fake: ReturnType<typeof fakeCli>) =>
-  fake.calls.map((c) => (c[0] === 'git' ? 'git' : c[1] === 'instances' ? `instances ${c[3]}` : c[1]));
+  fake.calls.map((c) =>
+    c[0] === 'git' ? 'git' : c[1] === 'instances' ? `instances ${c[3]}` : c[1] === 'send' ? (c.includes('--contract') ? 'send contract' : 'send init') : c[1]
+  );
+const contractSends = (fake: ReturnType<typeof fakeCli>) => fake.calls.filter((c) => c[1] === 'send' && c.includes('--contract'));
+const autoYes = (fake: ReturnType<typeof fakeCli>) => fake.calls.filter((c) => c.includes('--auto-yes'));
+/** A stop that was asked for and then read back as stopped. */
+const STOP = ['instances --json', 'instances kill', 'instances --json'];
 
 describe('send: model pinned, sent, checked (P3)', () => {
   it('stops a running session, writes the model, sends, then reads the model back', () => {
@@ -208,9 +242,10 @@ describe('send: model pinned, sent, checked (P3)', () => {
     const r = go(fake, sendArgv('--model', 'opus'));
     expect(r.code).toBe(0);
     expect(r.out).toEqual(['task-1']);
-    expect(verbs(fake)).toEqual(['instances --json', 'instances kill', 'git', 'send', 'capture']);
+    expect(verbs(fake)).toEqual([...STOP, 'git', 'send init', 'capture', 'capture', 'capture', 'send contract']);
     expect(localSettings()).toEqual({ model: 'opus[1m]' });
-    expect(fake.calls.find((c) => c[1] === 'send')).toEqual([
+    expect(fake.calls.find((c) => c[1] === 'send')).toEqual(['commandmatedev', 'send', 'wt-1', INIT_MESSAGE, '--instance', 'claude']);
+    expect(contractSends(fake)[0]).toEqual([
       'commandmatedev', 'send', 'wt-1', '--contract', '.commandmate/tasks/issue-3883.yaml', '--instance', 'claude', '--auto-yes', '--duration', '3h',
     ]);
     expect(r.log.join('\n')).toContain('model ok issue=3883 want=opus got=claude-opus-5-5');
@@ -220,10 +255,10 @@ describe('send: model pinned, sent, checked (P3)', () => {
     const fake = fakeCli({ models: ['claude-fable-5-1', 'claude-opus-5-5'] });
     const r = go(fake, sendArgv('--model', 'opus'));
     expect(r.code).toBe(0);
-    expect(r.out).toEqual(['task-2']);
+    expect(r.out).toEqual(['task-1']);
     expect(verbs(fake)).toEqual([
-      'instances --json', 'instances kill', 'git', 'send', 'capture', 'instances kill',
-      'instances --json', 'instances kill', 'git', 'send', 'capture',
+      ...STOP, 'git', 'send init', 'capture', ...STOP,
+      'instances --json', 'git', 'send init', 'capture', 'capture', 'capture', 'send contract',
     ]);
     expect(r.log.join('\n')).toContain('model MISMATCH issue=3883 want=opus got=claude-fable-5-1 attempt=1');
   });
@@ -232,9 +267,12 @@ describe('send: model pinned, sent, checked (P3)', () => {
     const fake = fakeCli({ models: ['claude-fable-5-1'] });
     const r = go(fake, sendArgv('--model', 'opus'));
     expect(r.code).toBe(EXIT_MODEL_MISMATCH);
-    expect(r.out).toEqual(['task-2']);
-    expect(verbs(fake).slice(-1)).toEqual(['instances kill']);
+    expect(r.out).toEqual([]);
+    expect(verbs(fake).slice(-3)).toEqual(STOP);
     expect(fake.calls.filter((c) => c[1] === 'send')).toHaveLength(2);
+    // The contract and Auto-Yes never reached a session on the wrong model.
+    expect(contractSends(fake)).toEqual([]);
+    expect(autoYes(fake)).toEqual([]);
   });
 
   it('an unknown model is read again, restarts once, and fails as unknown', () => {
@@ -243,14 +281,16 @@ describe('send: model pinned, sent, checked (P3)', () => {
     expect(r.code).toBe(EXIT_MODEL_UNKNOWN);
     expect(fake.calls.filter((c) => c[1] === 'capture')).toHaveLength(MODEL_READS * 2);
     expect(fake.sleeps.length).toBe((MODEL_READS - 1) * 2);
-    expect(verbs(fake).slice(-1)).toEqual(['instances kill']);
+    expect(verbs(fake).slice(-3)).toEqual(STOP);
+    expect(contractSends(fake)).toEqual([]);
     expect(r.log.join('\n')).toContain('model UNKNOWN issue=3883 want=sonnet got=- attempt=2');
   });
 
   it('a model that shows up on a later read is taken (no restart)', () => {
     const fake = fakeCli({ models: [null, 'claude-sonnet-5-5'] });
     expect(go(fake, sendArgv('--model', 'sonnet')).code).toBe(0);
-    expect(fake.calls.filter((c) => c[1] === 'send')).toHaveLength(1);
+    expect(verbs(fake).filter((v) => v === 'send init')).toHaveLength(1);
+    expect(contractSends(fake)).toHaveLength(1);
   });
 
   it('a settings file git does not ignore: nothing is sent (exit 2)', () => {
@@ -264,7 +304,7 @@ describe('send: model pinned, sent, checked (P3)', () => {
     const r = go(fake, [...sendArgv('--model', '-').map((a) => (a === 'claude' ? 'antigravity' : a))]);
     expect(r.code).toBe(0);
     expect(r.out).toEqual(['task-1']);
-    expect(verbs(fake)).toEqual(['send']);
+    expect(verbs(fake)).toEqual(['send contract']);
     expect(fs.existsSync(path.join(worktree, '.claude'))).toBe(false);
   });
 
@@ -277,6 +317,72 @@ describe('send: model pinned, sent, checked (P3)', () => {
   });
 });
 
+describe('send: the contract and Auto-Yes go out only after the model is confirmed (#3883 N1)', () => {
+  it('the starting message carries no contract and no Auto-Yes, and the contract follows the model check', () => {
+    const fake = fakeCli({ models: ['claude-opus-5-5'] });
+    expect(go(fake, sendArgv('--model', 'opus')).code).toBe(0);
+    const v = verbs(fake);
+    const firstCapture = v.indexOf('capture');
+    expect(v.indexOf('send init')).toBeLessThan(firstCapture);
+    expect(v.indexOf('send contract')).toBeGreaterThan(firstCapture);
+    expect(autoYes(fake)).toEqual(contractSends(fake));
+    const init = fake.calls.find((c) => c[1] === 'send')!;
+    expect(init).not.toContain('--contract');
+    expect(init).not.toContain('--auto-yes');
+  });
+
+  it('a session that does not come back ready after the starting message is stopped and the contract is not sent', () => {
+    const fake = fakeCli({ models: ['claude-opus-5-5'], ready: false });
+    const r = go(fake, sendArgv('--model', 'opus'));
+    expect(r.code).toBe(1);
+    expect(contractSends(fake)).toEqual([]);
+    expect(fake.calls.filter((c) => c[1] === 'capture')).toHaveLength(1 + READY_MAX_POLLS);
+    expect(verbs(fake).slice(-3)).toEqual(STOP);
+    expect(r.log.join('\n')).toMatch(/not ready: .*contract not sent/);
+  });
+});
+
+describe('send: a stop is confirmed before anything more is sent (#3883 N2)', () => {
+  it('a kill that fails: nothing is written or sent, exit 42 and the fact is said', () => {
+    const fake = fakeCli({ models: ['claude-opus-5-5'], killExit: 1 });
+    const r = go(fake, sendArgv('--model', 'opus'));
+    expect(r.code).toBe(EXIT_STOP_UNCONFIRMED);
+    expect(verbs(fake)).toEqual(['instances --json', 'instances kill']);
+    expect(fs.existsSync(path.join(worktree, '.claude'))).toBe(false);
+    expect(r.log.join('\n')).toMatch(/stop UNCONFIRMED claude of wt-1: .*kill exit=1 Error: Failed to kill session/);
+  });
+
+  it('a kill that exits 0 but leaves the session running is not a stop', () => {
+    const fake = fakeCli({ models: ['claude-opus-5-5'], killStops: false });
+    const r = go(fake, sendArgv('--model', 'opus'));
+    expect(r.code).toBe(EXIT_STOP_UNCONFIRMED);
+    expect(fake.calls.filter((c) => c[1] === 'instances' && c[3] === '--json')).toHaveLength(1 + STOP_READS);
+    expect(fake.calls.some((c) => c[1] === 'send')).toBe(false);
+    expect(r.log.join('\n')).toMatch(/still running after 3 reads/);
+  });
+
+  it('an instance list that cannot be read is not a stop', () => {
+    const fake = fakeCli({ models: ['claude-opus-5-5'], listExit: 1 });
+    expect(go(fake, sendArgv('--model', 'opus')).code).toBe(EXIT_STOP_UNCONFIRMED);
+    expect(fake.calls.some((c) => c[1] === 'send')).toBe(false);
+  });
+
+  it('a mismatch whose stop fails is not restarted: the old session gets no second start and no contract', () => {
+    const fake = fakeCli({ models: ['claude-fable-5-1'], running: false, killExit: 1 });
+    const r = go(fake, sendArgv('--model', 'opus'));
+    expect(r.code).toBe(EXIT_STOP_UNCONFIRMED);
+    expect(fake.calls.filter((c) => c[1] === 'send')).toHaveLength(1);
+    expect(contractSends(fake)).toEqual([]);
+    expect(verbs(fake).slice(-2)).toEqual(['instances --json', 'instances kill']);
+  });
+
+  it('a session that is not running is not killed (negative control)', () => {
+    const fake = fakeCli({ models: ['claude-opus-5-5'], running: false, killExit: 1 });
+    expect(go(fake, sendArgv('--model', 'opus')).code).toBe(0);
+    expect(fake.calls.some((c) => c[3] === 'kill')).toBe(false);
+  });
+});
+
 describe('send: files of its own per send (#3883 send-<issue>.out)', () => {
   it('two sends of one Issue do not share .out / .err, and a work item names its own', () => {
     const fake = fakeCli({ models: ['claude-opus-5-5'] });
@@ -285,6 +391,7 @@ describe('send: files of its own per send (#3883 send-<issue>.out)', () => {
     go(fake, sendArgv('--model', 'opus', '--item', 'd2'));
     expect(fs.readdirSync(runDir).sort()).toEqual([
       'send-3883-d2.err', 'send-3883-d2.out', 'send-3883.a2.err', 'send-3883.a2.out', 'send-3883.err', 'send-3883.out',
+      'send-init-3883-d2.err', 'send-init-3883-d2.out', 'send-init-3883.a2.err', 'send-init-3883.a2.out', 'send-init-3883.err', 'send-init-3883.out',
     ]);
     expect(fs.readFileSync(path.join(runDir, 'send-3883.out'), 'utf8')).toBe('task-1\n');
     expect(fs.readFileSync(path.join(runDir, 'send-3883.a2.out'), 'utf8')).toBe('task-2\n');
@@ -293,8 +400,11 @@ describe('send: files of its own per send (#3883 send-<issue>.out)', () => {
   it('a restart takes the next files too (the first send stays readable)', () => {
     const fake = fakeCli({ models: ['claude-fable-5-1', 'claude-opus-5-5'] });
     go(fake, sendArgv('--model', 'opus'));
+    expect(fs.readFileSync(path.join(runDir, 'send-init-3883.err'), 'utf8')).toBe('Message sent. init-1\n');
+    expect(fs.readFileSync(path.join(runDir, 'send-init-3883.a2.err'), 'utf8')).toBe('Message sent. init-2\n');
+    // The contract went out once, after the restart's model matched.
     expect(fs.readFileSync(path.join(runDir, 'send-3883.out'), 'utf8')).toBe('task-1\n');
-    expect(fs.readFileSync(path.join(runDir, 'send-3883.a2.out'), 'utf8')).toBe('task-2\n');
+    expect(fs.existsSync(path.join(runDir, 'send-3883.a2.out'))).toBe(false);
   });
 });
 

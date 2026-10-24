@@ -46,12 +46,18 @@ done
   `~/.claude/settings.json` のグローバル既定を継ぎ、利用者が既定を fable に変えた後の run では opus 指定のワーカーが fable で動いた
   （2026-10-23、summary-3749-3839）。利用者のグローバル設定は読みも書きもしない。git が無視していないファイル（`git check-ignore` が通らない）や
   JSON でないファイルには書かず、何も送らずに exit 2
-- **確かめる**: 送った後に `capture --json` の `model` を読む（空なら 20 秒おいて 3 回まで）。契約のモデル（`opus` / `sonnet` の語）を含めば `model ok`。
-  空のままなら `model UNKNOWN`、別のモデルなら `model MISMATCH`
-- **1 回だけ起動し直す**: UNKNOWN / MISMATCH はセッションを止め、モデルを書き直し、同じ契約で送り直す（新しい task になる）。2 回目も一致しなければ
-  セッションを止めて exit 40（MISMATCH）/ 41（UNKNOWN）。**そのモデルのまま task を進めない**
+- **契約より先に起動して確かめる**（#3883 N1）: セッションは契約ではなく、作業を頼まない短いメッセージ（`INIT_MESSAGE`。Auto-Yes も付けない）で起動する。
+  その後に `capture --json` の `model` を読む（空なら 20 秒おいて 3 回まで）。契約のモデル（`opus` / `sonnet` の語）を含めば `model ok`。
+  空のままなら `model UNKNOWN`、別のモデルなら `model MISMATCH`。`model ok` のときだけ、`sessionStatus` が `ready` を 2 回続けて読む（10 秒おき、30 回まで）のを待って
+  契約と Auto-Yes を送る。ready にならなければセッションを止め、契約は送らずに exit 1
+- **1 回だけ起動し直す**: UNKNOWN / MISMATCH はセッションを止め、モデルを書き直し、起動のメッセージから送り直す。2 回目も一致しなければ
+  セッションを止めて exit 40（MISMATCH）/ 41（UNKNOWN）。**契約も Auto-Yes もそのセッションには送らない**（tasks.tsv の task id は空になる）
+- **止めたことを確かめる**（#3883 N2）: 止めるたびに `instances <WT> kill` の exit code と、その後の `instances <WT> --json` で `running` でないこと
+  （5 秒おいて 3 回まで読む）を確かめる。kill が失敗した・まだ動いている・一覧が読めないときは、`stop UNCONFIRMED …` を出し、
+  設定の書き換えも再送もせずに exit 42（kill API は止められないとセッションを残して 500 を返す）。人が止めてから送り直す
 - **送信の出力**: `runs/<date>/send-<issue>[-<item>][.a<n>].out` / `.err` を呼び出しごとに排他的に取る（`execution-key.mjs`。同じ Issue の送信を並行しても、
-  起動し直しても混ざらない）。stdout は task id だけ。send が失敗したとき（exit 99 など）はその exit code を返し、モデルは確かめない
+  起動し直しても混ざらない）。起動のメッセージの出力は `send-init-<issue>[-<item>][.a<n>].out` / `.err`。stdout は task id だけ。
+  send が失敗したとき（exit 99 など）はその exit code を返し、モデルは確かめない
 - **単独で使うとき**: `launch-worker.mjs set-model --worktree <path> --model <opus|sonnet>`（本体の `set_claude_model` はこれを呼ぶ）、
   `launch-worker.mjs check-model --wt <WT> --model <opus|sonnet>`（0 / 40 / 41）
 
@@ -141,7 +147,14 @@ exit 10 にもならない）。
   ログと同じ名前の `.env.json` に execution key と一緒に残す。**最後の検証の開始から裁定までに変わっていれば裁定しない**（exit 3、
   `unconfirmed: the inputs changed during the verification (<項目>)`。2 つの環境にまたがった結果なので、どちらの環境の合格にもしない）。
   作業中に変わったものは記録に `env-changed=<項目>` と残し、裁定は終わりの manifest（`env=<hash>`）の環境での結果として扱う。
-  `wait --verify` 1 本のとき（検証の開始が分からない）は、変化を記録するだけ
+  `wait --verify` 1 本のとき（CLI の中で検証する）は、ログにターン終了の行（`Completed:`）が出た時点で manifest を取り、それ以降の変化は同じく裁定しない。
+  `Completed:` が出ないまま裁定が来て、開始から何かが変わっていたら、いつ変わったか分からないので裁定しない（exit 3）
+- **合格を使う地点も環境を照らし合わせる**（#3883 N3）: precheck の「verify が通したゲートを省く」と、publish-pr / merge-pr の記録の確認
+  （`pr-common.mjs` の `missingRecords`）は、verify の記録の `env=<hash>` の manifest（同じ execution key の `.env.json`）を今の worktree の manifest と比べる。
+  違えば省かない・公開もマージもしない（`verify: environment changed — … verify again`）。`env=` があるのに manifest が run のフォルダに無いときも同じ（`missing`）。
+  HEAD が verify の HEAD より進んでいる（6-2 の develop 取り込み・6-4 の一本化）ときは、コミットに付いて変わる lockfile と依存の版は比べず、
+  git の外の入力（モデル・settings・`node_modules` の所在）だけを比べる（新しい HEAD の precheck がそれらを回す）。
+  **`env=` の無い記録**（H-8 より前の記録。この変更が入ったときに進行中の run の記録）は従来どおり使い、`warning: verify at <sha>: no env= in the record …` を出す
 - **`--instance` はサーバーが解決した id で通す**（#3587）: 最初に `GET /api/worktrees/<WT>/resolve-target?instance=<指定>`（`wait` / `capture` / `send` と同じ権威。
   primary 優先・大小文字・alias の段は route のとおり）を、ほかの呼び出しと同じ `--cli` の `reply <WT> --instance <指定> --json` 越しに引き（#3633。
   `.env`・`CM_BIND`・HTTPS で決まる接続先も、`--cli` のラッパーの設定も同じになる）、待機・検証・task の比較・`capture`・Auto-Yes（`--auto-yes-off` も）の

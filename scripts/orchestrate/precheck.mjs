@@ -43,6 +43,7 @@
  *        [--item <work item>]
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
@@ -51,6 +52,7 @@ import { appendRecord, findLatest, readRecords } from './run-log.mjs';
 import { itemOption, workHeadOf } from './pr-common.mjs';
 import { dirtyPaths } from './dirty-tree.mjs';
 import { allocateLog, workItemName } from './execution-key.mjs';
+import { verifyEnvState } from './env-manifest.mjs';
 
 export const DEFAULT_BASE = 'origin/develop';
 /** Run order: cheap and decisive first, the test runs last. */
@@ -313,7 +315,17 @@ export function main(argv, deps = {}) {
         log(`precheck ${name}: the ok record at ${short} ${sameOptions ? `did not run ${missing.join(', ')}` : 'was taken with other options'} — running`);
       }
     }
-    const verified = passedGates(findLatest(records, { issue, item, stage: 'verify', head }));
+    // A pass taken in another environment than this one is not reused (#3883 N3); one from before env= is, with a warning.
+    const verifyRecord = findLatest(records, { issue, item, stage: 'verify', head });
+    let verified = passedGates(verifyRecord);
+    if (verified.length > 0) {
+      const env = verifyEnvState(verifyRecord, { runDir: o.runDir, worktree: o.worktree, home: deps.home ?? os.homedir(), head });
+      if (env.state === 'unrecorded') log(`  warning: verify at ${short}: ${env.detail}`);
+      else if (env.state !== 'same') {
+        log(`  verify at ${short} not reused: environment ${env.state} — ${env.detail}`);
+        verified = [];
+      }
+    }
 
     const { file: logFile } = allocateLog(o.runDir, 'precheck', `${workItemName(issue, item)}-${short}`);
     fs.writeFileSync(logFile, `precheck ${name} ${head} base=${o.base}\n`);

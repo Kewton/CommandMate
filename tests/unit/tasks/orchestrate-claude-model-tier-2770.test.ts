@@ -73,19 +73,27 @@ const launcher = readFileSync(path.join(REPO_ROOT, LAUNCHER_PATH), 'utf-8');
  * The calls launch-worker.mjs makes for one Claude send whose session reports
  * `reported`, against a fake CLI and git (#3883). Files go under os.tmpdir().
  */
-function launchCalls(reported: string): { code: number; calls: string[] } {
+function launchCalls(reported: string): { code: number; calls: string[]; contractAt: number[] } {
   const tmp = mkdtempSync(path.join(os.tmpdir(), 'cm-2770-launch-'));
   try {
     const calls: string[] = [];
+    /** Where in `calls` the contract went out (the session is started first without it, #3883 N1). */
+    const contractAt: number[] = [];
+    let running = true;
     const run = (command: string, args: string[]) => {
       if (command === 'git') {
         calls.push(`git ${args.slice(2).join(' ')}`);
         return { status: 0, stdout: '', stderr: '' };
       }
       calls.push(args[0] === 'instances' ? `instances ${args[2]}` : args[0]);
-      if (args[0] === 'instances' && args[2] === '--json') return { status: 0, stdout: '[{"instanceId":"claude","running":true}]', stderr: '' };
-      if (args[0] === 'send') return { status: 0, stdout: 'task-1\n', stderr: '' };
-      if (args[0] === 'capture') return { status: 0, stdout: JSON.stringify({ model: reported }), stderr: '' };
+      if (args[0] === 'instances' && args[2] === '--json') return { status: 0, stdout: JSON.stringify([{ instanceId: 'claude', running }]), stderr: '' };
+      if (args[0] === 'instances' && args[2] === 'kill') running = false;
+      if (args[0] === 'send') {
+        running = true;
+        if (args.includes('--contract')) contractAt.push(calls.length - 1);
+        return { status: 0, stdout: args.includes('--contract') ? 'task-1\n' : '', stderr: '' };
+      }
+      if (args[0] === 'capture') return { status: 0, stdout: JSON.stringify({ model: reported, sessionStatus: 'ready' }), stderr: '' };
       return { status: 0, stdout: '', stderr: '' };
     };
     const code = launchWorker(
@@ -93,7 +101,7 @@ function launchCalls(reported: string): { code: number; calls: string[] } {
         '--instance', 'claude', '--model', 'opus', '--contract', '.commandmate/tasks/issue-2770.yaml'],
       { run, sleep: () => {}, out: () => {}, log: () => {}, error: () => {} }
     );
-    return { code, calls };
+    return { code, calls, contractAt };
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -189,12 +197,15 @@ describe('/orchestrate 3-1: the model is set before the first send, and checked 
     expect(body).toContain('node scripts/orchestrate/launch-worker.mjs send');
     expect(body).toContain('--instance "$AGENT" --model "$MODEL" --contract ".commandmate/tasks/issue-${issue}.yaml"');
     expect(body).not.toMatch(/^\s*commandmatedev send "\$WT"/m);
-    const { code, calls } = launchCalls('claude-opus-5-5');
+    const { code, calls, contractAt } = launchCalls('claude-opus-5-5');
     expect(code).toBe(0);
     const set = calls.indexOf('git check-ignore -q .claude/settings.local.json');
     expect(set).toBeGreaterThan(-1);
     expect(calls.indexOf('send')).toBeGreaterThan(set);
     expect(calls.indexOf('capture')).toBeGreaterThan(calls.indexOf('send'));
+    // #3883 N1: the send that starts the session carries no contract; the contract goes out after the model was read.
+    expect(contractAt).toHaveLength(1);
+    expect(contractAt[0]).toBeGreaterThan(calls.indexOf('capture'));
   });
 
   it('stops a running Claude session before changing its model', () => {
@@ -205,10 +216,12 @@ describe('/orchestrate 3-1: the model is set before the first send, and checked 
   });
 
   it('does not go on with a model that does not match after one restart (#3883)', () => {
-    const { code, calls } = launchCalls('claude-fable-5-1');
+    const { code, calls, contractAt } = launchCalls('claude-fable-5-1');
     expect(code).toBe(40);
     expect(calls.filter((call) => call === 'send')).toHaveLength(2);
-    expect(calls[calls.length - 1]).toBe('instances kill');
+    // #3883 N1 / N2: the session is killed and read back as stopped, and the contract never went to it.
+    expect(calls.slice(-2)).toEqual(['instances kill', 'instances --json']);
+    expect(contractAt).toEqual([]);
   });
 
   it('still addresses the session as $AGENT, and records the model as a fifth column', () => {

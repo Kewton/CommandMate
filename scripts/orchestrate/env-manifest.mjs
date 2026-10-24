@@ -18,10 +18,27 @@
  * environments: it is not taken. A change while the worker worked is recorded
  * with the verdict (`env-changed=<fields>`), and the verdict is the result in
  * the environment of the end manifest (`env=<hash>`), not in another one.
+ *
+ * The runbook's verification without a contract (5-1) has no wait-verify: it
+ * calls `start` before `commandmatedev verify` and `end` after it (#3883 N6),
+ * which keep the same `<file>.env.json` under the same execution key, so
+ * precheck / publish / merge compare it the same way (verifyEnvState).
+ *
+ * Usage:
+ *   node scripts/orchestrate/env-manifest.mjs start --worktree <path> --file <x.env.json> --key <execution key>
+ *   node scripts/orchestrate/env-manifest.mjs end --worktree <path> --file <x.env.json>
+ *
+ * `start` writes the manifest (exit 0). `end` takes the manifest again, keeps
+ * both and prints the note for the record: `env=<hash>`; exit 0 when nothing
+ * changed during the verification, 3 when an input did (`env-changed-during-verify=<fields>`
+ * is printed too, the verdict is not taken), 2 on a usage error or a missing start.
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
 /** What a file that exists but cannot be read or parsed reads as (not the same as absent). */
 export const UNREADABLE = '<unreadable>';
@@ -129,3 +146,128 @@ export function diffManifest(before, after) {
 export function manifestHash(manifest) {
   return crypto.createHash('sha256').update(JSON.stringify(manifest)).digest('hex').slice(0, 12);
 }
+
+/** The `env=<hash>` of a record's note; null for a record taken before #3883 H-8 recorded it. */
+export function recordedEnvHash(note) {
+  const match = /(?:^|\s)env=(\S+)/.exec(note ?? '');
+  return match ? match[1] : null;
+}
+
+/**
+ * The manifest kept for a record: the `<log>.env.json` in `runDir` whose key is
+ * the record's and whose end manifest has the recorded hash; null if none.
+ */
+export function keptManifest(runDir, key, hash) {
+  let names;
+  try {
+    names = fs.readdirSync(runDir).filter((name) => name.endsWith('.env.json'));
+  } catch {
+    return null;
+  }
+  for (const name of names.sort()) {
+    try {
+      const kept = JSON.parse(fs.readFileSync(path.join(runDir, name), 'utf8'));
+      if (kept?.key === key && kept.end && manifestHash(kept.end) === hash) return { file: name, manifest: kept.end };
+    } catch {
+      // another writer's half-written file, or not ours
+    }
+  }
+  return null;
+}
+
+/**
+ * The inputs a later commit may change on its own: a refresh (6-2) or a fold
+ * (6-4) on top of the verified commit changes the lockfile and the installed
+ * versions with the code, and the precheck of the new HEAD runs on them. The
+ * inputs outside git (the models, the local settings, which `node_modules`)
+ * are compared at any HEAD.
+ */
+const FOLLOWS_HEAD = (field) => field === 'lockfile' || field.startsWith('packages.');
+
+/**
+ * Whether a passed verification still holds for the environment of `worktree`
+ * now (#3883 N3): the manifest kept with the record (keptManifest) against a
+ * manifest taken now.
+ *
+ * - `unrecorded`: the note has no `env=` (a record from before #3883 H-8). It
+ *   is taken as before; the caller says so (a warning), so the run in progress
+ *   when this landed is not stopped by its own earlier records.
+ * - `missing`: the note names an environment whose manifest is not in the run
+ *   directory (or is not the one hashed) — nothing to compare, so re-verify.
+ * - `changed`: an input differs (`fields`) — re-verify.
+ * - `same`.
+ *
+ * @param {{ note?: string, key?: string, head?: string }} record
+ * @param {{ runDir: string, worktree: string, home: string, head?: string }} where
+ *   `head`: the HEAD the result is used at; another than the record's ignores the inputs that follow HEAD.
+ * @returns {{ state: 'same' | 'unrecorded' | 'missing' | 'changed', fields: string[], detail: string }}
+ */
+export function verifyEnvState(record, { runDir, worktree, home, head }) {
+  const hash = recordedEnvHash(record?.note);
+  if (hash === null) return { state: 'unrecorded', fields: [], detail: 'no env= in the record (taken before #3883 H-8): used as before' };
+  const kept = record?.key ? keptManifest(runDir, record.key, hash) : null;
+  if (!kept) return { state: 'missing', fields: [], detail: `env=${hash}: no manifest with that hash under key ${record?.key ?? '-'} in ${runDir}` };
+  const sameHead = !head || head === record.head;
+  const fields = diffManifest(kept.manifest, takeManifest({ worktree, home })).filter((field) => sameHead || !FOLLOWS_HEAD(field));
+  return fields.length > 0
+    ? { state: 'changed', fields, detail: `env=${hash} (${kept.file}) differs now in ${fields.join(',')}` }
+    : { state: 'same', fields: [], detail: `env=${hash}` };
+}
+
+const USAGE = `Usage:
+  node scripts/orchestrate/env-manifest.mjs start --worktree <path> --file <x.env.json> --key <execution key>
+  node scripts/orchestrate/env-manifest.mjs end --worktree <path> --file <x.env.json>`;
+
+/**
+ * @param {string[]} argv
+ * @param {{ home?: string, out?: (line: string) => void, error?: (line: string) => void }} [deps]
+ * @returns {number} exit code
+ */
+export function main(argv, deps = {}) {
+  const home = deps.home ?? os.homedir();
+  const out = deps.out ?? ((line) => console.log(line));
+  const error = deps.error ?? ((line) => console.error(line));
+  const [command, ...rest] = argv;
+  const o = {};
+  for (let i = 0; i < rest.length; i += 2) {
+    const flag = { '--worktree': 'worktree', '--file': 'file', '--key': 'key' }[rest[i]];
+    if (!flag || i + 1 >= rest.length) {
+      error(`unknown or incomplete argument: ${rest[i]}\n${USAGE}`);
+      return 2;
+    }
+    o[flag] = rest[i + 1];
+  }
+  if (command !== 'start' && command !== 'end') {
+    error(`unknown command: ${command ?? '(none)'}\n${USAGE}`);
+    return 2;
+  }
+  if (!o.worktree || !o.file?.endsWith('.env.json') || (command === 'start' && !o.key)) {
+    error(`--worktree, --file <*.env.json>${command === 'start' ? ' and --key' : ''} are required\n${USAGE}`);
+    return 2;
+  }
+  if (command === 'start') {
+    const manifest = takeManifest({ worktree: o.worktree, home });
+    fs.mkdirSync(path.dirname(o.file), { recursive: true });
+    // The verification starts right after: here the start and the verification's start are one moment.
+    fs.writeFileSync(o.file, `${JSON.stringify({ key: o.key, start: manifest, verify: manifest, end: null }, null, 2)}\n`);
+    return 0;
+  }
+  let kept;
+  try {
+    kept = JSON.parse(fs.readFileSync(o.file, 'utf8'));
+  } catch {
+    kept = null;
+  }
+  if (!kept?.verify || !kept.key) {
+    error(`${o.file}: no start manifest (run start before the verification)`);
+    return 2;
+  }
+  const end = takeManifest({ worktree: o.worktree, home });
+  const duringVerify = diffManifest(kept.verify, end);
+  fs.writeFileSync(o.file, `${JSON.stringify({ ...kept, end, changed: { duringTask: [], duringVerify } }, null, 2)}\n`);
+  out([`env=${manifestHash(end)}`, ...(duringVerify.length > 0 ? [`env-changed-during-verify=${duringVerify.join(',')}`] : [])].join(' '));
+  return duringVerify.length > 0 ? 3 : 0;
+}
+
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) process.exit(main(process.argv.slice(2)));

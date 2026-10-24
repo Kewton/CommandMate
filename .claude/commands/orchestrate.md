@@ -724,9 +724,9 @@ set_claude_model() {  # <worktree-path> <opus|sonnet>（手で書くとき。下
 while IFS="$(printf '\t')" read -r issue AGENT MODEL <&3; do
   WT=$(commandmatedev ls --branch "feature/${issue}" --quiet)
   WT_DIR=$(commandmatedev ls --json | jq -r --arg id "$WT" '.[] | select(.id == $id) | .path')
-  # Claude（MODEL が opus|sonnet）は、動いているセッションを止め → モデルを書き → 送り → capture --json の model を確かめる。
-  # stderr に model ok / model UNKNOWN / model MISMATCH。合わない・読めないときは 1 回だけ起動し直し、なお合わなければ
-  # セッションを止めて exit 40（MISMATCH）/ 41（UNKNOWN）。
+  # Claude（MODEL が opus|sonnet）は、動いているセッションを止め → モデルを書き → 作業を頼まない起動のメッセージ → capture --json の model を
+  # 確かめ → 一致してから契約と Auto-Yes を送る。stderr に model ok / model UNKNOWN / model MISMATCH。合わない・読めないときは 1 回だけ起動し直し、
+  # なお合わなければセッションを止めて exit 40（MISMATCH）/ 41（UNKNOWN）。契約は送らない。止めたことを確かめられなければ exit 42
   # 送信の出力は runs/$DATE/send-<issue>[.a<n>].out / .err（呼び出しごとに排他的に取る）。stdout は task id だけ
   TASK_ID=$(node scripts/orchestrate/launch-worker.mjs send --run-dir "workspace/orchestration/runs/$DATE" --issue "$issue" \
     --wt "$WT" --worktree "$WT_DIR" --instance "$AGENT" --model "$MODEL" --contract ".commandmate/tasks/issue-${issue}.yaml")
@@ -750,16 +750,17 @@ done 3< "workspace/orchestration/runs/$DATE/assign.tsv"
 ループの中の `commandmatedev`（`ls` / `send` / `capture`）が stdin を読み、残りの行を消費する。
 上の雛形は fd 3 から読むので、ループの中のコマンドに `</dev/null` を付けなくてよい。雛形を書き換えて使うときも、
 stdin で読む形に戻さないこと。ループを使わずに 1 件ずつ送るときは、各 `commandmatedev` に `</dev/null` を付ける。
-`task MISSING` が出たら、その Issue は送れていない。exit 40 / 41 は下の「モデルの確認結果」、それ以外は `send-<issue>[.a<n>].err` を読み、3-1 の「冷間起動の失敗」に従って再送する。
+`task MISSING` が出たら、その Issue は送れていない。exit 40 / 41 / 42 は下の「モデルの確認結果」、それ以外は `send-<issue>[.a<n>].err` を読み、3-1 の「冷間起動の失敗」に従って再送する。
 
 根拠: docs/orchestrate/workers.md#3-1-assigntsv-を-stdin-で読んで止まった実測
 
 **モデルの確認結果の扱い**（launch-worker.mjs が stderr に出す。手順は docs/orchestrate/workers.md#3-1-claude-のモデルを契約に固定する）:
 
 - `model ok`: そのまま 3-2 へ
-- `model UNKNOWN` / `model MISMATCH`（1 回目）: launch-worker.mjs が自分で 1 回だけ起動し直す。tasks.tsv には最後の task id が入る
-- exit 40（2 回目も `model MISMATCH`）/ 41（2 回目も `model UNKNOWN`）: **セッションは止まっている。その Issue は進めない**（そのモデルのまま続けない）。
+- `model UNKNOWN` / `model MISMATCH`（1 回目）: launch-worker.mjs が自分で 1 回だけ起動し直す（契約はまだ送っていない）
+- exit 40（2 回目も `model MISMATCH`）/ 41（2 回目も `model UNKNOWN`）: **セッションは止まっている。契約は送られていない。その Issue は進めない**（そのモデルのまま続けない）。
   8-3 に書き、`.claude/settings.local.json` と CommandMate の版を確かめてから、人の判断で送り直す。利用者の `~/.claude/settings.json` は変えない
+- exit 42（`stop UNCONFIRMED`）: kill が失敗した・まだ動いている。**何も送り直さない**。人がセッションを止めたことを確かめてから送り直す
 - tasks.tsv は 5 列になった（`issue` / `WT` / `AGENT` / `TASK_ID` / `MODEL`）。**`--instance` に渡すのは 3 列目の `AGENT`**（`claude`）で、5 列目ではない
 
 stdout はパイプで切らずファイルに落とす（`| head` で切ると task が pending のまま残る）。
@@ -977,10 +978,14 @@ while IFS="$(printf '\t')" read -r issue WT AGENT TASK_ID MODEL COL6 REST <&3; d
   # 結果のファイルは呼び出しごとに排他的に取る（verify-<issue>[-<item>][.a<n>].json）。2 行目は execution key
   { read -r OUT; read -r KEY; } < <(node scripts/orchestrate/execution-key.mjs allocate --dir "workspace/orchestration/runs/$DATE" \
     --prefix verify --issue "$issue" --ext .json --issues "$RUN_ISSUES" --task "${TASK_ID:--}" "${ITEM_ARGS[@]}")
-  commandmatedev verify "$WT" --json > "$OUT"; RC=$?; echo "exit=$RC issue=${issue} item=${ITEM:--}"
+  # 検証の前後の入力（モデル・設定・依存）を同じ key で残す。検証中に変わったら exit 3＝裁定にしない（docs/orchestrate/run-log.md）
+  node scripts/orchestrate/env-manifest.mjs start --worktree "$WT_DIR" --file "${OUT%.json}.env.json" --key "$KEY"
+  commandmatedev verify "$WT" --json > "$OUT"; RC=$?
+  ENV_NOTE=$(node scripts/orchestrate/env-manifest.mjs end --worktree "$WT_DIR" --file "${OUT%.json}.env.json") || RC=3
+  echo "exit=$RC issue=${issue} item=${ITEM:--}"
   node scripts/orchestrate/run-log.mjs append --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
     --issue "$issue" --stage verify --result "$([ "$RC" = 0 ] && echo ok || echo fail)" \
-    --head "$(git -C "$WT_DIR" rev-parse HEAD)" --agent "$AGENT" --note "exit=$RC (verify without a contract) $(basename "$OUT")" \
+    --head "$(git -C "$WT_DIR" rev-parse HEAD)" --agent "$AGENT" --note "exit=$RC (verify without a contract) $(basename "$OUT") $ENV_NOTE" \
     --key "$KEY" "${ITEM_ARGS[@]}"
 done 3< "workspace/orchestration/runs/$DATE/tasks.tsv"
 ```
@@ -1306,7 +1311,7 @@ summary.md の末尾に「振り分けの改善案」節を書き、完了報告
 
 - Antigravity から Claude への切り替え（3-5）
 - sonnet から opus への格上げ（3-5b）、または sonnet 担当が再指示を要した（1-2b の「中」の条件が甘い証拠になる）
-- `model MISMATCH` / `model UNKNOWN` で止まった（3-1。exit 40 / 41）
+- `model MISMATCH` / `model UNKNOWN` / `stop UNCONFIRMED` で止まった（3-1。exit 40 / 41 / 42）
 - ワーカー起因でない不合格を、オーケストレーターの裁定で合格扱いにした（3-4）
 - 判定表と実際の結果が食い違った（「易」と判定したのに再指示が要った／「難」と判定したが小さい変更で終わった）
 - Antigravity 固有の停止（アンケート画面、冷間起動の失敗、monitor の誤判定など）

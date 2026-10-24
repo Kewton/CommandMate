@@ -15,6 +15,11 @@
  * A worktree owns its own directory and the real directory of its
  * `node_modules` (which may be a link to a shared tree); a link into either is
  * the worktree's own (a workspace package, a hoisted copy) and not reported.
+ * The entry `node_modules` itself is read too (#3883 N4): when it is a link
+ * whose target is outside the worktree, it is reported like any other link, so
+ * a `node_modules` that becomes a link to another tree during the review — or
+ * a shared one pointed elsewhere — is a link that appeared (or moved), while a
+ * shared tree that was already there before the review stays the baseline.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -45,15 +50,26 @@ function entriesOf(dir) {
 }
 
 /**
- * The links under `<worktree>/node_modules` (direct entries and `@scope/*`)
- * whose target is outside the worktree, as `{ link, target }`.
+ * The links under `<worktree>/node_modules` (direct entries and `@scope/*`),
+ * and `node_modules` itself, whose target is outside the worktree, as `{ link, target }`.
  */
 export function foreignLinks(worktree) {
   const nodeModules = path.join(worktree, 'node_modules');
-  const realModules = realOrNull(nodeModules);
-  if (!realModules) return [];
-  const roots = [realOrNull(worktree) ?? path.resolve(worktree), realModules];
+  const realWorktree = realOrNull(worktree) ?? path.resolve(worktree);
   const found = [];
+  let entry;
+  try {
+    entry = fs.lstatSync(nodeModules);
+  } catch {
+    return [];
+  }
+  if (entry.isSymbolicLink()) {
+    const target = linkTarget(nodeModules);
+    if (!isInside(target, realWorktree)) found.push({ link: nodeModules, target });
+  }
+  const realModules = realOrNull(nodeModules);
+  if (!realModules) return found;
+  const roots = [realWorktree, realModules];
   const look = (dir) => {
     for (const entry of entriesOf(dir)) {
       const full = path.join(dir, entry.name);

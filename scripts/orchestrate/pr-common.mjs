@@ -17,6 +17,7 @@ import { spawnSync } from 'node:child_process';
 import { itemOf, latestByStage, unmetStage } from './run-log.mjs';
 import { IGNORED_DIRTY, dirtyPaths } from './dirty-tree.mjs';
 import { itemProblem, workItemName } from './execution-key.mjs';
+import { verifyEnvState } from './env-manifest.mjs';
 
 export { IGNORED_DIRTY, dirtyPaths };
 
@@ -240,12 +241,27 @@ export function workHeadOf(run, worktree, head) {
  * pass `--item`, or null for the Issue's own records, so another PR of the same
  * Issue — its later records, at its own HEAD — neither stops nor passes this one
  * (#3883). Left out, every record of the Issue is read, as before.
+ *
+ * With `env` (#3883 N3), a passed verify is also held to the environment it
+ * was taken in (env-manifest.mjs verifyEnvState): an input that differs now, or
+ * an `env=` whose manifest is not in the run directory, is a missing verify
+ * (re-verify, 3-3 / 5-1). A record without `env=` (taken before H-8) is used
+ * as before and `env.warn` says so.
+ *
+ * @param {{ runDir: string, worktree: string, home: string, warn?: (line: string) => void }} [env]
  */
-export function missingRecords(records, issue, heads, item) {
+export function missingRecords(records, issue, heads, item, env) {
   const stages = latestByStage(records, issue, item);
   return REQUIRED_RECORDS.map(({ stage, why }) => {
     const reason = unmetStage(stage, stages[stage], heads);
-    return reason ? `${reason} (${why})` : null;
+    if (reason) return `${reason} (${why})`;
+    if (stage !== 'verify' || !env) return null;
+    const state = verifyEnvState(stages.verify, { ...env, head: heads.head });
+    if (state.state === 'unrecorded') {
+      env.warn?.(`warning: verify at ${String(stages.verify.head ?? '-').slice(0, 7)}: ${state.detail}`);
+      return null;
+    }
+    return state.state === 'same' ? null : `verify: environment ${state.state} — ${state.detail}; verify again (${why})`;
   }).filter(Boolean);
 }
 

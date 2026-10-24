@@ -48,6 +48,7 @@
  *        [--pr <number>] [--branch <name>] [--base develop] [--repo Kewton/CommandMate]
  *        [--close <N|->] [--last] [--unit-related] [--ci-timeout <sec>] [--poll <sec>] [--item <work item>]
  */
+import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -295,7 +296,9 @@ export function main(argv, deps = {}) {
     const workHead = workHeadOf(run, o.worktree, head);
     let { records } = readRecords(o.runDir, o.issues);
     const problems = [
-      ...missingRecords(records, issue, { head, workHead }, item).filter((reason) => !reason.startsWith('precheck:')),
+      ...missingRecords(records, issue, { head, workHead }, item, {
+        runDir: o.runDir, worktree: o.worktree, home: deps.home ?? os.homedir(), warn: log,
+      }).filter((reason) => !reason.startsWith('precheck:')),
       ...fragmentProblems(run, { worktree: o.worktree, runDir: o.runDir, issue, baseRef, item }),
     ];
     if (problems.length > 0) {
@@ -344,7 +347,7 @@ export function main(argv, deps = {}) {
           ...optionsFromNote(workPrecheck.note, baseRef),
           ...(item ? ['--item', item] : []),
         ],
-        { run, now, log, error, findTestsNaming: findNaming }
+        { run, now, log, error, findTestsNaming: findNaming, home: deps.home }
       );
       if (code !== 0) {
         error(`merge #${issue}: the precheck of ${head.slice(0, 7)} did not pass${refreshed ? ' after the refresh' : ''} — not pushed`);

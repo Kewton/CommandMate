@@ -124,7 +124,7 @@ function harness({
     spawnToLog: (
       command: string,
       args: string[],
-      { logFile, watch }: { logFile: string; watch?: () => boolean }
+      { logFile, watch, onOutput }: { logFile: string; watch?: () => boolean; onOutput?: (text: string) => void }
     ) => {
       spawned.push({ command, args });
       const isVerify = args[0] === 'verify';
@@ -144,6 +144,8 @@ function harness({
       // #3883: verifications that answer in turn (a 409 first, then the run of this call).
       const next = isVerify ? verifySequence.shift() : undefined;
       fs.writeFileSync(logFile, next ? next.log : isVerify ? verifyLog : waitLog);
+      // The log as the caller reads it while the command runs (`wait --verify`'s turn end, #3883 N5).
+      onOutput?.(fs.readFileSync(logFile, 'utf8'));
       clock += 600_000; // each run takes ten minutes
       if (isVerify && commitDuringReverify) commitAt = (clock - T0) / 60_000 + 1;
       return next ? next.exit : isVerify ? verifyExit : waitExit;
@@ -1341,9 +1343,43 @@ describe('the inputs of the execution are kept with the verdict (#3883 H-8)', ()
   });
 
   it('wait --verify (no split): a change is recorded, not judged — the moment of the verification is not known', () => {
+    // #3883 N5: the change comes while the worker works, before the turn end the CLI prints (`Completed:`), after
+    // which it verifies. The manifest is taken at that line, so this change is the work's (recorded, exit 0), and
+    // the same change after the line is not (below).
     const h = harness();
     expect(go(h, 'wait', globalModel)).toBe(0);
     expect(h.spawned[0].args).toContain('--verify');
     expect(records()[0].note).toContain('env-changed=globalModel');
+    const kept = JSON.parse(fs.readFileSync(path.join(runDir, 'wait-3477.env.json'), 'utf8'));
+    expect(kept.verify.globalModel).toBe('fable');
+    expect(kept.changed).toEqual({ duringTask: ['globalModel'], duringVerify: [] });
+  });
+
+  it('wait --verify (no split): a change after the turn end, while the CLI verifies → no verdict (exit 3), Auto-Yes kept (#3883 N5)', () => {
+    const h = harness();
+    const { wt, home } = env();
+    const inner = h.deps.spawnToLog;
+    h.deps.spawnToLog = (command: string, args: string[], opts: { logFile: string; onOutput?: (text: string) => void }) =>
+      inner(command, args, {
+        ...opts,
+        onOutput: (text: string) => {
+          opts.onOutput?.(text);
+          globalModel();
+        },
+      });
+    expect(main(argv('--worktree', wt), { ...h.deps, home } as Parameters<typeof main>[1])).toBe(3);
+    expect(h.spawned[0].args).toContain('--verify');
+    expect(records()[0].note).toMatch(/^unconfirmed: the inputs changed during the verification \(globalModel; see wait-3477\.env\.json\)/);
+    expect(h.autoYesCalls()).toEqual([]);
+  });
+
+  it('wait --verify (no split) whose turn end never showed: a change cannot be placed → no verdict (#3883 N5)', () => {
+    const noTurnEnd = PASS_LOG.split('\n').filter((line) => !line.startsWith('Completed:')).join('\n');
+    const h = harness({ waitLog: noTurnEnd });
+    expect(go(h, 'wait', globalModel)).toBe(3);
+    expect(records()[0].note).toMatch(/^unconfirmed: the inputs changed \(globalModel; .*\) and the start of the verification was not seen/);
+    // Without a change the same log is a verdict as before (negative control).
+    const again = harness({ waitLog: noTurnEnd });
+    expect(go(again, null, () => {})).toBe(0);
   });
 });

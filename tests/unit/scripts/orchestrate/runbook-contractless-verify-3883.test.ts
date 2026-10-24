@@ -48,7 +48,11 @@ beforeEach(() => {
     `#!/bin/sh
 case "$1" in
   ls) cat "$FAKE_LS" ;;
-  verify) printf '{"worktree":"%s"}\\n' "$2"; [ "$2" = wt-2 ] && exit 20; exit 0 ;;
+  verify)
+    printf '{"worktree":"%s"}\\n' "$2"
+    # An input that changes while the verification runs (#3883 N6): the global model, another value per call.
+    [ -n "$FAKE_CHANGE" ] && { mkdir -p "$HOME/.claude"; printf '{"model":"m%s"}\\n' "$$" > "$HOME/.claude/settings.json"; }
+    [ "$2" = wt-2 ] && exit 20; exit 0 ;;
   *) exit 2 ;;
 esac
 `,
@@ -70,7 +74,7 @@ afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-function run(shell: string) {
+function run(shell: string, extraEnv: Record<string, string> = {}) {
   const args = shell === 'zsh' ? ['-f', '-c', block] : ['--noprofile', '--norc', '-c', block];
   return spawnSync(shell, args, {
     cwd: tmp,
@@ -82,6 +86,7 @@ function run(shell: string) {
       FAKE_LS: path.join(tmp, 'ls.json'),
       DATE: '2026-10-25',
       RUN_ISSUES: '3700,3880,3883',
+      ...extraEnv,
     } as unknown as NodeJS.ProcessEnv,
   });
 }
@@ -92,7 +97,7 @@ describe.each(SHELLS)('5-1 in %s', (shell) => {
     const second = run(shell);
     expect(second.status, second.stderr).toBe(0);
     const runDir = path.join(tmp, 'workspace', 'orchestration', 'runs', '2026-10-25');
-    expect(fs.readdirSync(runDir).filter((f) => f.startsWith('verify-')).sort()).toEqual([
+    expect(fs.readdirSync(runDir).filter((f) => f.startsWith('verify-') && !f.endsWith('.env.json')).sort()).toEqual([
       'verify-3700.a2.json', 'verify-3700.json',
       'verify-3880.a2.json', 'verify-3880.json',
       'verify-3883-d1.a2.json', 'verify-3883-d1.json',
@@ -111,6 +116,24 @@ describe.each(SHELLS)('5-1 in %s', (shell) => {
       [3883, 'd2', '3700,3880,3883:3883-d2:t-2:a2', 'fail'],
       [3880, null, '3700,3880,3883:3880:-:a2', 'ok'],
     ]);
-    expect(records[2].note).toBe('exit=20 (verify without a contract) verify-3883-d2.json');
+    expect(records[2].note).toMatch(/^exit=20 \(verify without a contract\) verify-3883-d2\.json env=[0-9a-f]{12}$/);
+  });
+
+  it('each verification keeps the manifest of its inputs under its key, and a change during it is not a verdict (#3883 N6)', () => {
+    expect(run(shell).status).toBe(0);
+    const runDir = path.join(tmp, 'workspace', 'orchestration', 'runs', '2026-10-25');
+    const kept = JSON.parse(fs.readFileSync(path.join(runDir, 'verify-3883-d1.env.json'), 'utf8'));
+    expect(kept.key).toBe('3700,3880,3883:3883-d1:t-1:a1');
+    expect(kept.changed).toEqual({ duringTask: [], duringVerify: [] });
+    const first = readRecords(runDir, '3700,3880,3883').records.filter((r) => r.stage === 'verify');
+    expect(first.every((r) => /(?:^| )env=[0-9a-f]{12}$/.test(r.note ?? ''))).toBe(true);
+
+    const changed = run(shell, { FAKE_CHANGE: '1' });
+    expect(changed.status, changed.stderr).toBe(0);
+    const second = readRecords(runDir, '3700,3880,3883').records.filter((r) => r.stage === 'verify').slice(4);
+    // wt-1 passed and wt-2 failed as before, but no row is a verdict: the global model moved during each verification.
+    expect(second.map((r) => r.result)).toEqual(['fail', 'fail', 'fail', 'fail']);
+    expect(second[0].note).toMatch(/^exit=3 \(verify without a contract\) verify-3700\.a2\.json env=[0-9a-f]{12} env-changed-during-verify=globalModel$/);
+    expect(JSON.parse(fs.readFileSync(path.join(runDir, 'verify-3700.a2.env.json'), 'utf8')).changed.duringVerify).toEqual(['globalModel']);
   });
 });

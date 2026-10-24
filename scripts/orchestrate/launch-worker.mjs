@@ -12,20 +12,29 @@
  *
  * Here the model is always written explicitly (MODEL_SETTINGS), only into a
  * settings file git ignores, and the global settings are neither read nor
- * written. After the send the model the session reports (`capture --json`'s
- * `model`) must match: unknown or another model restarts the session once
- * (kill, write again, send again); still not matching, the session is
- * stopped so the task does not go on, and the call fails (40 / 41).
+ * written. The contract is not what starts the session: a short message that
+ * asks for no work (INIT_MESSAGE, no Auto-Yes) starts it, and the model the
+ * session reports (`capture --json`'s `model`) must match before the contract
+ * and Auto-Yes go out. Unknown or another model restarts the session once
+ * (stop, write again, start again); still not matching, the session is stopped
+ * and the call fails (40 / 41) with the contract never sent. Every stop is
+ * checked — the kill's exit code and the instance no longer running — and a
+ * stop that cannot be confirmed fails the call (42) without sending anything
+ * more, so a session on the old model is never handed the contract.
  *
  * The send's output goes to `send-<issue>[-<item>][.a<n>].out` / `.err` in the
- * run directory, taken exclusively (execution-key.mjs), so two sends of one
- * Issue never write to the same files. stdout is the task id only.
+ * run directory (the starting message's to `send-init-…`), taken exclusively
+ * (execution-key.mjs), so two sends of one Issue never write to the same
+ * files. stdout is the task id only.
  *
- * Exit code (send): 0 sent (and for Claude the model matched); 40 the model
- * did not match after one restart; 41 the model could not be read after one
- * restart (the session is stopped in both); 2 a usage error or a settings file
- * git does not ignore (nothing sent); 1 any other failure; otherwise the
- * `send`'s own exit code (99 = not sent, 3-1's cold start).
+ * Exit code (send): 0 sent (and for Claude the model matched before the
+ * contract went out); 40 the model did not match after one restart; 41 the
+ * model could not be read after one restart (the session is stopped and the
+ * contract not sent in both); 42 a stop could not be confirmed (nothing more
+ * sent); 2 a usage error or a settings file git does not ignore (nothing
+ * sent); 1 any other failure (the session did not come back ready after the
+ * starting message: stopped, contract not sent); otherwise the `send`'s own
+ * exit code (99 = not sent, 3-1's cold start).
  *
  * Usage:
  *   node scripts/orchestrate/launch-worker.mjs send --run-dir <dir> --issue <N> [--item <work item>]
@@ -56,6 +65,17 @@ export const MODEL_READ_INTERVAL_SEC = 20;
 export const LAUNCH_ATTEMPTS = 2;
 export const EXIT_MODEL_MISMATCH = 40;
 export const EXIT_MODEL_UNKNOWN = 41;
+export const EXIT_STOP_UNCONFIRMED = 42;
+/** Reads of the instance list after a kill before the stop counts as unconfirmed, and the pause between them. */
+export const STOP_READS = 3;
+export const STOP_READ_INTERVAL_SEC = 5;
+/** `capture --json` reads of `sessionStatus: ready` in a row before the contract goes out, the most reads, and the pause. */
+export const READY_STREAK = 2;
+export const READY_MAX_POLLS = 30;
+export const READY_POLL_SEC = 10;
+/** Starts the session without handing it the contract: no work, no files, no Auto-Yes. */
+export const INIT_MESSAGE =
+  'セッションの起動とモデルの確認です（作業の依頼ではありません）。まだ何も実行せず、ファイルにも触らず、「OK」とだけ返してください。依頼は次のメッセージで送ります。';
 
 function defaultSleep(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -123,20 +143,60 @@ export function checkModel({ run, sleep, cli, wt, instance, want }) {
   return { verdict: classifyModel(got, want), got };
 }
 
-/** Stop the instance's session if one is running (the model is read only when a session starts). */
-function stopSession(run, cli, wt, instance) {
+/** true / false whether the instance's session runs, null when the list cannot be read. */
+function readRunning(run, cli, wt, instance) {
   const listed = run(cli, ['instances', wt, '--json']);
-  let running = true; // unreadable: stop it anyway, a stop of a stopped session is harmless
-  if (listed.status === 0) {
-    try {
-      const rows = JSON.parse(listed.stdout);
-      running = Array.isArray(rows) && rows.some((row) => row?.instanceId === instance && row?.running);
-    } catch {
-      running = true;
-    }
+  if (listed.status !== 0) return null;
+  try {
+    const rows = JSON.parse(listed.stdout);
+    return Array.isArray(rows) ? rows.some((row) => row?.instanceId === instance && row?.running) : null;
+  } catch {
+    return null;
   }
-  if (running) run(cli, ['instances', wt, 'kill', instance]);
-  return running;
+}
+
+/**
+ * Stop the instance's session if one is running (the model is read only when a
+ * session starts) and confirm it stopped: the kill exits 0 and the list then
+ * reads the instance as not running. The kill API leaves the session alive and
+ * answers 500 when it cannot stop it (kill-session/route.ts), so neither the
+ * request alone nor an unreadable list counts as stopped.
+ *
+ * @returns {{ ok: boolean, killed: boolean, detail: string }}
+ */
+export function stopSession({ run, sleep, cli, wt, instance }) {
+  const before = readRunning(run, cli, wt, instance);
+  if (before === false) return { ok: true, killed: false, detail: 'not running' };
+  const kill = run(cli, ['instances', wt, 'kill', instance]);
+  // Unreadable before: the kill may fail only because nothing ran; the list after decides.
+  if (before === true && kill.status !== 0) {
+    return { ok: false, killed: true, detail: `kill exit=${kill.status} ${String(kill.stderr ?? '').trim().split('\n').pop() ?? ''}`.trim() };
+  }
+  let after = null;
+  for (let read = 1; read <= STOP_READS; read++) {
+    after = readRunning(run, cli, wt, instance);
+    if (after === false) return { ok: true, killed: true, detail: `kill exit=${kill.status}` };
+    if (read < STOP_READS) sleep(STOP_READ_INTERVAL_SEC * 1000);
+  }
+  return { ok: false, killed: true, detail: `kill exit=${kill.status}, ${after === null ? 'instance list unreadable' : 'still running'} after ${STOP_READS} reads` };
+}
+
+/** Wait until the session reads `sessionStatus: ready` READY_STREAK times in a row; false if it never does. */
+export function waitReady({ run, sleep, cli, wt, instance }) {
+  let streak = 0;
+  for (let poll = 1; poll <= READY_MAX_POLLS; poll++) {
+    const out = run(cli, ['capture', wt, '--instance', instance, '--json']);
+    let status = null;
+    try {
+      status = out.status === 0 ? JSON.parse(out.stdout)?.sessionStatus : null;
+    } catch {
+      status = null;
+    }
+    streak = status === 'ready' ? streak + 1 : 0;
+    if (streak >= READY_STREAK) return true;
+    if (poll < READY_MAX_POLLS) sleep(READY_POLL_SEC * 1000);
+  }
+  return false;
 }
 
 const USAGE = `Usage:
@@ -226,41 +286,57 @@ export function main(argv, deps = {}) {
 
     const issue = Number(o.issue);
     const workItem = workItemName(issue, o.item);
-    const pinned = o.model !== '-';
-    let taskId = '';
-    for (let attempt = 1; attempt <= LAUNCH_ATTEMPTS; attempt++) {
-      if (pinned) {
-        // The model is read when the session starts: stop a running one, then write the model, then send.
-        if (stopSession(run, o.cli, o.wt, o.instance)) log(`stopped the running ${o.instance} session of ${o.wt}`);
-        const { value } = setModel(run, o.worktree, o.model);
-        log(`model ${value} -> ${path.join(o.worktree, SETTINGS_FILE)}`);
-      }
-      const { file: outFile } = allocateLog(o.runDir, 'send', workItem, '.out');
-      const errFile = outFile.replace(/\.out$/, '.err');
-      const sent = run(o.cli, [
-        'send', o.wt, '--contract', o.contract, '--instance', o.instance, '--auto-yes', '--duration', o.duration,
-      ]);
+    const ctx = { run, sleep, cli: o.cli, wt: o.wt, instance: o.instance };
+    /** Send and keep the output in files of this send's own; the first stdout line is the task id. */
+    const sendTo = (prefix, args) => {
+      const { file: outFile } = allocateLog(o.runDir, prefix, workItem, '.out');
+      const sent = run(o.cli, ['send', o.wt, ...args]);
       fs.writeFileSync(outFile, sent.stdout);
-      fs.writeFileSync(errFile, sent.stderr);
-      taskId = sent.stdout.split('\n')[0].trim();
-      log(`send exit=${sent.status} issue=${workItem} task=${taskId || '-'} (${path.basename(outFile)})`);
-      if (sent.status !== 0 || !pinned) {
-        if (taskId) out(taskId);
-        return sent.status;
+      fs.writeFileSync(outFile.replace(/\.out$/, '.err'), sent.stderr);
+      return { ...sent, taskId: sent.stdout.split('\n')[0].trim(), name: path.basename(outFile) };
+    };
+    /** Stop and confirm, or say the stop is unconfirmed (the caller then sends nothing more). */
+    const stopped = (why) => {
+      const stop = stopSession(ctx);
+      if (stop.ok) {
+        if (stop.killed) log(`stopped ${o.instance} of ${o.wt}: ${why} (${stop.detail})`);
+        return true;
       }
-      const { verdict, got } = checkModel({ run, sleep, cli: o.cli, wt: o.wt, instance: o.instance, want: o.model });
+      log(`stop UNCONFIRMED ${o.instance} of ${o.wt}: ${why} (${stop.detail}); nothing more is sent — stop it by hand`);
+      return false;
+    };
+    const contractArgs = ['--contract', o.contract, '--instance', o.instance, '--auto-yes', '--duration', o.duration];
+
+    if (o.model === '-') {
+      const sent = sendTo('send', contractArgs);
+      log(`send exit=${sent.status} issue=${workItem} task=${sent.taskId || '-'} (${sent.name})`);
+      if (sent.taskId) out(sent.taskId);
+      return sent.status;
+    }
+    for (let attempt = 1; attempt <= LAUNCH_ATTEMPTS; attempt++) {
+      // The model is read when the session starts: stop a running one, write the model, start it without the contract.
+      if (!stopped('before writing the model')) return EXIT_STOP_UNCONFIRMED;
+      const { value } = setModel(run, o.worktree, o.model);
+      log(`model ${value} -> ${path.join(o.worktree, SETTINGS_FILE)}`);
+      const init = sendTo('send-init', [INIT_MESSAGE, '--instance', o.instance]);
+      log(`start exit=${init.status} issue=${workItem} (${init.name}, no contract, no Auto-Yes)`);
+      if (init.status !== 0) return init.status;
+      const { verdict, got } = checkModel({ ...ctx, want: o.model });
       log(`model ${verdict === 'ok' ? 'ok' : verdict.toUpperCase()} issue=${workItem} want=${o.model} got=${got || '-'} attempt=${attempt}`);
-      if (verdict === 'ok') {
-        out(taskId);
-        return 0;
+      if (verdict !== 'ok') {
+        // Not the contract's model (or not known to be): the contract does not go to this session.
+        if (!stopped(`model ${verdict} on attempt ${attempt}`)) return EXIT_STOP_UNCONFIRMED;
+        if (attempt === LAUNCH_ATTEMPTS) return verdict === 'mismatch' ? EXIT_MODEL_MISMATCH : EXIT_MODEL_UNKNOWN;
+        continue;
       }
-      // Not the contract's model (or not known to be): the task must not go on in this session.
-      run(o.cli, ['instances', o.wt, 'kill', o.instance]);
-      log(`stopped ${o.instance} of ${o.wt}: model ${verdict} on attempt ${attempt}`);
-      if (attempt === LAUNCH_ATTEMPTS) {
-        if (taskId) out(taskId);
-        return verdict === 'mismatch' ? EXIT_MODEL_MISMATCH : EXIT_MODEL_UNKNOWN;
+      if (!waitReady(ctx)) {
+        log(`not ready: ${o.instance} of ${o.wt} did not read ready ${READY_STREAK} times in a row after the starting message; contract not sent`);
+        return stopped('not ready after the starting message') ? 1 : EXIT_STOP_UNCONFIRMED;
       }
+      const sent = sendTo('send', contractArgs);
+      log(`send exit=${sent.status} issue=${workItem} task=${sent.taskId || '-'} (${sent.name})`);
+      if (sent.taskId) out(sent.taskId);
+      return sent.status;
     }
     return 1;
   } catch (err) {

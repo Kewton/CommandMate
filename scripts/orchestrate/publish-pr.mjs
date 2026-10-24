@@ -177,7 +177,7 @@ export function main(argv, deps = {}) {
     const { records } = readRecords(o.runDir, o.issues);
     const markers = markerFiles(run, o.worktree);
     const problems = [
-      ...missingRecords(records, issue, { head, workHead }, item),
+      ...missingRecords(records, issue, { head, workHead }, item, { runDir: o.runDir, worktree: o.worktree, home: deps.home ?? os.homedir(), warn: log }),
       ...(markers.length > 0 ? [`conflict markers in ${markers.join(', ')} (6-2)`] : []),
       ...fragmentProblems(run, { worktree: o.worktree, runDir: o.runDir, issue, baseRef, item }),
     ];
