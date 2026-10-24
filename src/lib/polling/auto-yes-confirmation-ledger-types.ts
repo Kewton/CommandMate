@@ -242,6 +242,13 @@ export interface AttemptCounts {
 }
 
 export interface ConfirmationClosedLine extends LedgerLineBase, LedgerAnswerModeField {
+  /**
+   * Issue #3863: the answer mode of the send that answered it (the first `ok`
+   * attempt's), when one did and it named a mode. `answerMode` is the last
+   * decision's, which a mode change after the answer moves; a reader counting
+   * answers by mode reads this one.
+   */
+  answeredAnswerMode?: LedgerAnswerModeField['answerMode'];
   confirmationId: string;
   worktreeId: string;
   cliToolId: CLIToolType;

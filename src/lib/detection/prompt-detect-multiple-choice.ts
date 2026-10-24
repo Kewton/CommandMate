@@ -1578,7 +1578,11 @@ interface OptionRowReading {
  * - the row under it could not be the title's wrap (its first word would have
  *   fit on the option row, `cannotBeWrapOf`): the label is the title;
  * - the row under it may be the wrap and holds nothing but a marker: the title
- *   wrapped right before its marker;
+ *   wrapped right before its marker — and ends there only if nothing after
+ *   the marker continues it: no further row, or a row that could not be the
+ *   marker row's wrap (its first word would have fit after the marker). A row
+ *   that may still be the title wrapping on (a word too long to fit after the
+ *   marker) leaves the title's end, and so the marker's place, unknown;
  * - otherwise `unknown`.
  */
 function readPickerOptionRecommendation(
@@ -1591,5 +1595,8 @@ function readPickerOptionRecommendation(
   if (next === undefined) return isRecommendedTitle(label);
   if (reading.besidePane) return 'unknown';
   if (cannotBeWrapOf(reading.row, next, paneColumns)) return isRecommendedTitle(label);
-  return isRecommendationMarker(next) ? true : 'unknown';
+  if (!isRecommendationMarker(next)) return 'unknown';
+  const after = reading.rowsBelow[1];
+  if (after === undefined || cannotBeWrapOf(next, after, paneColumns)) return true;
+  return 'unknown';
 }

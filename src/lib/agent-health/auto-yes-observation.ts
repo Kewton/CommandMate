@@ -356,8 +356,11 @@ function onClosed(pass: LinePass, data: Record<string, unknown>, confirmationId:
     if (data.basis === 'human') pass.answeredByHuman++;
     else {
       pass.answered++;
-      // Issue #3863: by the mode the closing line names (the last decision's).
-      const mode = answerModeOf(data.answerMode);
+      // Issue #3863: by the mode of the send that answered it
+      // (`answeredAnswerMode`) — not the last decision's, which a mode change
+      // while the answered screen waits to be redrawn moves. A line without it
+      // (no send named a mode) falls back to the closing line's `answerMode`.
+      const mode = answerModeOf(data.answeredAnswerMode ?? data.answerMode);
       pass.answeredByMode.set(mode, (pass.answeredByMode.get(mode) ?? 0) + 1);
     }
     const tool = toolOf(data);
