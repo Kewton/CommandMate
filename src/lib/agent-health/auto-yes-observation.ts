@@ -259,8 +259,11 @@ interface LinePass {
   answeredRecords: Map<string, MetricRecord>;
   /** Issue #3863: Auto-Yes's answers by answer mode. */
   answeredByMode: Map<AnswerModeKey, number>;
-  /** Issue #3882: confirmation ID → attempt number → the (non-late) attempt lines seen in the window. */
-  attemptLines: Map<string, Map<number, { ok: boolean; mode: AnswerModeKey }>>;
+  /**
+   * Issue #3882: confirmation ID → attempt ID → the (non-late) attempt lines
+   * seen in the window, in the order their results came back.
+   */
+  attemptLines: Map<string, Map<string, { n: number; ok: boolean; mode: AnswerModeKey }>>;
   attemptRecords: Map<string, MetricRecord>;
   abstainRecords: Map<string, MetricRecord>;
   hookRequests: number;
@@ -366,7 +369,7 @@ function onClosed(pass: LinePass, data: Record<string, unknown>, confirmationId:
       // reload, an old log) is never filled from `answerMode` (the last
       // decision's); only a successful attempt line with the same
       // confirmation ID that names a mode restores it, else it is unknown.
-      const mode = data.answeredAnswerMode !== undefined ? answerModeOf(data.answeredAnswerMode) : restoredAnswerMode(pass, confirmationId);
+      const mode = data.answeredAnswerMode !== undefined ? answerModeOf(data.answeredAnswerMode) : restoredAnswerMode(pass, confirmationId, data);
       pass.answeredByMode.set(mode, (pass.answeredByMode.get(mode) ?? 0) + 1);
     }
     const tool = toolOf(data);
@@ -383,21 +386,26 @@ function attemptNumberOf(confirmationId: string | null, attemptId: unknown): num
 }
 
 /**
- * Issue #3882: the mode of the first successful attempt, only when that
- * success is provably the first — every attempt before it (numbers 1..n-1)
- * was seen in the window and failed. A success outside the window or a missing
- * line (a gap in the numbers) leaves it unknown; so does a first success
- * that names no mode.
+ * Issue #3882: the mode of the first successful attempt — the first to come
+ * back, as the ledger fixes it (`settleAttempt`), not the lowest number: sends
+ * are numbered when they begin and can come back out of order. Restored only
+ * when that success is provably the first: the closed line's success count
+ * (`attempts.ok`) equals the distinct successful attempts seen in the window,
+ * so none came back before the window or went missing, and every attempt
+ * numbered before it (1..n-1) was seen too. Anything short of that — and a
+ * first success that names no mode — leaves it unknown.
  */
-function restoredAnswerMode(pass: LinePass, confirmationId: string | null): AnswerModeKey {
+function restoredAnswerMode(pass: LinePass, confirmationId: string | null, closedData: Record<string, unknown>): AnswerModeKey {
   const lines = confirmationId === null ? undefined : pass.attemptLines.get(confirmationId);
-  if (lines === undefined) return 'unknown';
-  for (let n = 1; n <= lines.size; n++) {
-    const line = lines.get(n);
-    if (line === undefined) return 'unknown';
-    if (line.ok) return line.mode;
-  }
-  return 'unknown';
+  const attempts = closedData.attempts;
+  const okCount = attempts !== null && typeof attempts === 'object' ? num((attempts as Record<string, unknown>).ok) : null;
+  if (lines === undefined || okCount === null) return 'unknown';
+  const successes = [...lines.values()].filter((line) => line.ok);
+  const first = successes[0];
+  if (first === undefined || successes.length !== okCount) return 'unknown';
+  const numbers = new Set([...lines.values()].map((line) => line.n));
+  for (let n = 1; n < first.n; n++) if (!numbers.has(n)) return 'unknown';
+  return first.mode;
 }
 
 function onAttemptSettled(pass: LinePass, data: Record<string, unknown>, late: boolean): void {
@@ -406,7 +414,9 @@ function onAttemptSettled(pass: LinePass, data: Record<string, unknown>, late: b
   if (!late && attemptConfirmationId !== null && attemptNumber !== null) {
     const lines = pass.attemptLines.get(attemptConfirmationId) ?? new Map();
     pass.attemptLines.set(attemptConfirmationId, lines);
-    lines.set(attemptNumber, { ok: data.result === 'ok', mode: answerModeOf(data.answerMode) });
+    // A send settles once; a repeated line keeps the first's place and result.
+    const attemptId = data.attemptId as string;
+    if (!lines.has(attemptId)) lines.set(attemptId, { n: attemptNumber, ok: data.result === 'ok', mode: answerModeOf(data.answerMode) });
   }
   const tool = toolOf(data);
   const basis = basisOf(data.basis);
