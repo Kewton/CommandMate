@@ -30,7 +30,8 @@
  * @vitest-environment node
  */
 
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 // Issue #2865: the poller answers only a session created in the worktree's own
@@ -137,8 +138,16 @@ async function respondTo(
   name: string,
   state: AutoYesPollerState = pollerState(),
 ): Promise<'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'> {
+  return respondToRaw(frame(name), state);
+}
+
+/** {@link respondTo} over a frame given as text (a capture with its cursor moved, #3822). */
+async function respondToRaw(
+  raw: string,
+  state: AutoYesPollerState = pollerState(),
+): Promise<'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'> {
   recordAntigravityPermissionReceipt(WORKTREE_ID, 'antigravity', 'antigravity', 'run_command');
-  const clean = asPollerSees(frame(name));
+  const clean = asPollerSees(raw);
   return detectAndRespondToPrompt(
     WORKTREE_ID,
     state,
@@ -158,10 +167,35 @@ beforeEach(() => {
   clearAutoYesPolicyCache();
 });
 
+let tmp: string | null = null;
+
+/**
+ * Issue #3822: the live `dialog-bash-wrapped` capture with agy's `>` moved from
+ * row 1 to row `to`, written to a temp dir and read back. agy keeps the `>`
+ * where the operator left it, so a dialog can open with it on any row.
+ */
+function withCursorOn(to: number): string {
+  const lines = stripAnsi(frame('dialog-bash-wrapped')).split('\n');
+  const from = lines.findIndex((line) => line.startsWith('> 1. '));
+  const target = lines.findIndex((line) => line.startsWith(`  ${to}. `));
+  expect(from).toBeGreaterThanOrEqual(0);
+  expect(target).toBeGreaterThan(from);
+  lines[from] = `  ${lines[from].slice(2)}`;
+  lines[target] = `> ${lines[target].slice(2)}`;
+  tmp ??= mkdtempSync(path.join(os.tmpdir(), 'auto-yes-poller-2368-'));
+  const file = path.join(tmp, `dialog-bash-wrapped-cursor-${to}.txt`);
+  writeFileSync(file, lines.join('\n'));
+  return readFileSync(file, 'utf8');
+}
+
 afterEach(() => {
   resetAntigravityPermissionReceiptsForTests();
   clearPolicySuppressions();
   db.close();
+  if (tmp !== null) {
+    rmSync(tmp, { recursive: true, force: true });
+    tmp = null;
+  }
 });
 
 describe('[#2368] the wrapped four-option Bash approval is answered', () => {
@@ -183,18 +217,36 @@ describe('[#2368] the wrapped four-option Bash approval is answered', () => {
     expect(params.promptData.options.map((o) => o.number)).toEqual([1, 2, 3, 4]);
   });
 
-  it('never picks an "always allow" option — it follows the `>` gutter', async () => {
+  // Issue #3822 (the decision of this Issue): renamed from "never picks an
+  // "always allow" option — it follows the `>` gutter". Auto-Yes no longer
+  // follows the cursor: it answers the one row that allows this call only
+  // (`polling/auto-yes-option-effect`), by its number, wherever the `>` is. The
+  // old expectation — the live `highlight-4` capture (cursor on `4. No`)
+  // answered `4` — is now `1`.
+  it('picks the allow-once `1. Yes` wherever the `>` is — never the "always allow" 2 or 3, nor 4. No', async () => {
     // agy 1.1.27 puts `2. Yes, and always allow in this conversation …` and
-    // `3. … (Persist to settings.json)` between Yes and No. The default is the
-    // row wearing the `>`, and on this frame that is option 1.
+    // `3. … (Persist to settings.json)` between Yes and No.
     await respondTo('dialog-bash-wrapped');
     expect(answersSent()).toEqual(['1']);
 
     sendPromptAnswer.mockClear();
-    // The same dialog with the cursor moved to `4. No` answers 4, which proves
-    // the `1` above came from the gutter and not from "first option wins".
+    // The live capture with the cursor on `4. No` (was answered 4 before #3822).
     expect(await respondTo('dialog-bash-wrapped-highlight-4')).toBe('responded');
-    expect(answersSent()).toEqual(['4']);
+    expect(answersSent()).toEqual(['1']);
+  });
+
+  // Issue #3822: what the renamed test above used to prove — that `1` is not
+  // picked because it is first, and that the persistent rows are never sent —
+  // kept with the cursor on each persistent row. Before #3822 these answered
+  // the cursor's row (2, then 3).
+  it.each([2, 3])('with the `>` on the "always allow" row %s, still answers 1', async (row) => {
+    expect(await respondToRaw(withCursorOn(row))).toBe('responded');
+    const [params] = sendPromptAnswer.mock.calls[0] as unknown as [
+      { promptData: { options: { number: number; isDefault?: boolean }[] } },
+    ];
+    // The control is real: the reader put the default on the moved row.
+    expect(params.promptData.options.find((option) => option.isDefault)?.number).toBe(row);
+    expect(answersSent()).toEqual(['1']);
   });
 
   it('folds the six-option repeat-denial menu too', async () => {

@@ -288,6 +288,7 @@ const CONTRACT_POLICY_CAUSE = 'by contract policy';
  * and the poller's agy trust-screen branch (`startup-trust-unhandled`, Issue #3757),
  * and the poller's question confirm-page branch (`question-confirm-page`, Issue #3748),
  * and the poller's question branch (`question-left-to-human`, Issue #3822),
+ * and the resolver's permission-row reading (`allow-once-unidentified`, Issue #3822),
  * and the poller's agy receipt-gate branch (`no-hook-receipt`, Issue #3767),
  * and a contract lookup that failed on either of the policy paths
  * (`policy-lookup-failed`, Issue #3822).
@@ -331,6 +332,11 @@ const SUPPRESSION_CAUSE: Record<AutoYesSuppressionReason, string> = {
   // and no contract setting delegates the question.
   'question-left-to-human':
     'because the agent is asking a question, and Auto-Yes answers permissions only; answer it at the pane (prompt --json, respond)',
+  // Issue #3822. A permission dialog none of whose rows allows this call only
+  // (each saves a rule, changes the mode or denies), or two of which read so.
+  // Auto-Yes never picks a row that outlives this call, so it waits for a human.
+  'allow-once-unidentified':
+    'because no single option of the permission dialog allows this call only (the others save a rule, change the permission mode, or deny); Auto-Yes does not pick those, so answer it at the pane (prompt --json, respond)',
   // Issue #3767. agy's approval dialog has no matching hook question (none, too
   // late, already on screen, or the hook stopped arriving). Not a contract verdict.
   // Issue #3789: nor one left unused — the last was spent on keys Auto-Yes sent,
