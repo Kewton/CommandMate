@@ -180,8 +180,25 @@ export function isCaptureGenerationCurrent(sessionName: string, generation: Capt
 // =========================================================================
 
 /**
- * Slice output from the end to return the last requestedLines lines.
- * If requestedLines >= total lines, returns the full output.
+ * A capture's rows (Issue #3881 third review N4). tmux ends every row with a
+ * newline, so the last one terminates a row and is not a row of its own: a
+ * 1000-row pane comes back as 1000 rows and a terminator, which `split` makes
+ * 1001 elements.
+ */
+function rowsOf(output: string): { rows: string[]; terminated: boolean } {
+  const terminated = output.endsWith('\n');
+  return { rows: (terminated ? output.slice(0, -1) : output).split('\n'), terminated };
+}
+
+/**
+ * Slice output from the end to return the last requestedLines rows.
+ * If requestedLines >= total rows, returns the full output.
+ *
+ * Issue #3881 (third review N4): counted in rows, the terminator kept. Counted
+ * in `split` elements, the terminator took one of the requested rows, so a
+ * 1000-row pane asked for 1000 rows lost its first row — on an
+ * alternate-screen pane, the row that says whether the content begins at the
+ * top of the screen.
  *
  * @param fullOutput - Full captured output string
  * @param requestedLines - Number of lines requested from the end
@@ -190,10 +207,22 @@ export function isCaptureGenerationCurrent(sessionName: string, generation: Capt
 export function sliceOutput(fullOutput: string, requestedLines: number): string {
   if (fullOutput === '') return '';
 
-  const lines = fullOutput.split('\n');
-  if (requestedLines >= lines.length) return fullOutput;
+  const { rows, terminated } = rowsOf(fullOutput);
+  if (requestedLines >= rows.length) return fullOutput;
 
-  return lines.slice(-requestedLines).join('\n');
+  return rows.slice(-requestedLines).join('\n') + (terminated ? '\n' : '');
+}
+
+/**
+ * Whether {@link sliceOutput} drops rows from the top of `fullOutput` (Issue
+ * #3881 third review N4): the one fact about a capture's top that its row count
+ * cannot tell when the window is exactly the pane's height.
+ *
+ * @param fullOutput - Full captured output string
+ * @param requestedLines - Number of lines requested from the end
+ */
+export function sliceCutsHead(fullOutput: string, requestedLines: number): boolean {
+  return fullOutput !== '' && requestedLines < rowsOf(fullOutput).rows.length;
 }
 
 // =========================================================================
@@ -398,19 +427,25 @@ export interface CaptureFrameMeta {
  * @param fetchFn - Function to fetch output on cache miss
  * @param onServed - Told where the returned frame came from (Issue #3798),
  *   right before it is returned; not called when the capture throws
+ * @param onSliced - Told whether the slice to `requestedLines` dropped rows
+ *   from the top of what tmux returned (Issue #3881 third review N4,
+ *   {@link sliceCutsHead}), right before it is returned
  * @returns Captured output (sliced to requestedLines)
  */
 export async function getOrFetchCapture(
   sessionName: string,
   requestedLines: number,
   fetchFn: () => Promise<string>,
-  onServed?: (meta: CaptureFrameMeta) => void
+  onServed?: (meta: CaptureFrameMeta) => void,
+  onSliced?: (headCut: boolean) => void
 ): Promise<string> {
   // 1. Check cache first
   const cachedStartedAt = getCachedCaptureFetchStartedAt(sessionName);
   const cached = getCachedCapture(sessionName, requestedLines);
   if (cached !== null) {
     if (cachedStartedAt !== null) onServed?.({ fetchStartedAt: cachedStartedAt, source: 'cache' });
+    const entry = getCache().get(sessionName);
+    if (entry) onSliced?.(sliceCutsHead(entry.output, requestedLines));
     return cached;
   }
 
@@ -421,6 +456,7 @@ export async function getOrFetchCapture(
     const joinedStartedAt = getInflightStartedAt().get(existingPromise);
     const result = await existingPromise;
     if (joinedStartedAt !== undefined) onServed?.({ fetchStartedAt: joinedStartedAt, source: 'joined' });
+    onSliced?.(sliceCutsHead(result, requestedLines));
     return sliceOutput(result, requestedLines);
   }
 
@@ -442,6 +478,7 @@ export async function getOrFetchCapture(
     }
 
     onServed?.({ fetchStartedAt, source: 'fetched' });
+    onSliced?.(sliceCutsHead(output, requestedLines));
     return sliceOutput(output, requestedLines);
   } finally {
     // Clean up inflight entry, unless an invalidation already replaced it

@@ -69,7 +69,7 @@ import {
 } from '../../cli-patterns';
 import {
   buildMultipleChoiceResult,
-  findApprovalContextStart,
+  findApprovalContextRange,
   joinApprovalTarget,
 } from '../../prompt-detect-multiple-choice';
 import { normalizeTuiFrameForDetection } from '../../tui-detection-frame';
@@ -249,6 +249,7 @@ export function detectAntigravityNumberedDialogPrompt(text: string): PromptDetec
   const lines = normalized.split('\n');
   const dialog = readAntigravityNumberedDialog(lines);
   if (dialog === null) return null;
+  const range = findApprovalContextRange(lines, dialog.questionRow, dialog.footerRow);
 
   return buildMultipleChoiceResult(
     dialog.question,
@@ -263,11 +264,9 @@ export function detectAntigravityNumberedDialogPrompt(text: string): PromptDetec
       // turn's boundary and below at the footer, so the command in the
       // `Requesting permission for:` block and in the labels is judged and
       // nothing from an earlier, already-answered approval is.
-      approvalTarget: joinApprovalTarget(
-        lines,
-        findApprovalContextStart(lines, dialog.questionRow, dialog.footerRow),
-        dialog.footerRow,
-      ),
+      approvalTarget: joinApprovalTarget(lines, range.start, dialog.footerRow),
+      // Issue #3881: and whether its top is a boundary.
+      approvalContext: { startRow: range.start, endRow: dialog.footerRow, completeness: range.completeness },
     },
     normalized,
     truncateRawContent,

@@ -1,5 +1,7 @@
 /** Approval-context boundary logic split out of prompt-detect-multiple-choice.ts (Issue #3866). */
 
+import type { ApprovalTargetCompleteness } from '@/types/prompt-reading';
+
 /**
  * Pattern for separator lines (horizontal rules).
  * Matches lines consisting only of dash (-) or em-dash (─) characters.
@@ -137,6 +139,33 @@ export function findApprovalContextStart(
   questionLineIndex: number,
   panelEnd: number = questionLineIndex + 1,
 ): number {
+  return findApprovalContextRange(lines, questionLineIndex, panelEnd).start;
+}
+
+/**
+ * Where {@link findApprovalContextStart} put the top of the approval context,
+ * and whether that top is a boundary (Issue #3881, H-3).
+ *
+ * The start index alone cannot say it. A scan that runs out at
+ * {@link APPROVAL_TARGET_MAX_LOOKBACK} returns the same kind of number as one
+ * that stopped at the previous turn's marker, and `joinApprovalTarget` turns
+ * either into an ordinary string — so a deny pattern whose only match is the
+ * 13th row above a yes/no question missed, and the resolver took the miss as
+ * a pass. The completeness travels with the start instead:
+ *
+ * - `complete` — the scan stopped at a boundary (a marker at the frame, an
+ *   older tool-use block);
+ * - `truncated` — it ran out at the cap with a non-blank row still above it;
+ * - `top-unknown` — it reached the frame's first row without a boundary.
+ *
+ * A scan that ran out at the cap over blank rows only is `complete`: nothing
+ * above it could belong to the panel.
+ */
+export function findApprovalContextRange(
+  lines: string[],
+  questionLineIndex: number,
+  panelEnd: number = questionLineIndex + 1,
+): { start: number; completeness: ApprovalTargetCompleteness } {
   const floor = Math.max(0, questionLineIndex - APPROVAL_TARGET_MAX_LOOKBACK);
   const frameIndent = panelFrameIndent(lines, questionLineIndex, panelEnd);
   // The lowest deeper marker row with no frame row found above it yet.
@@ -151,7 +180,7 @@ export function findApprovalContextStart(
     if (line === undefined || line.trim() === '') continue;
     const atFrame = indentOf(line) <= frameIndent;
     const marker = isTurnBoundaryLine(line);
-    if (marker && atFrame) return (unenclosed >= 0 ? unenclosed : i) + 1;
+    if (marker && atFrame) return { start: (unenclosed >= 0 ? unenclosed : i) + 1, completeness: 'complete' };
     if (!atFrame) {
       if (marker && unenclosed < 0) unenclosed = i;
       segmentRows++;
@@ -165,14 +194,27 @@ export function findApprovalContextStart(
       unenclosed >= 0 && segmentRows > 0 && segmentAllResults && framesBelow.has(frameText)
       && isMarkerRowAtFrameAbove(lines, i, floor, frameIndent)
     ) {
-      return unenclosed + 1;
+      return { start: unenclosed + 1, completeness: 'complete' };
     }
     framesBelow.add(frameText);
     unenclosed = -1;
     segmentRows = 0;
     segmentAllResults = true;
   }
-  return unenclosed >= 0 ? unenclosed + 1 : floor;
+  return {
+    start: unenclosed >= 0 ? unenclosed + 1 : floor,
+    completeness: scanEndCompleteness(lines, floor),
+  };
+}
+
+/** How complete a scan that ran down to `floor` without a boundary is (Issue #3881). */
+function scanEndCompleteness(lines: string[], floor: number): ApprovalTargetCompleteness {
+  if (floor === 0) return 'top-unknown';
+  for (let i = 0; i < floor; i++) {
+    const line = lines[i];
+    if (line !== undefined && line.trim() !== '') return 'truncated';
+  }
+  return 'complete';
 }
 
 /** True when the nearest non-blank row above `row` is a marker row at the frame's column. */

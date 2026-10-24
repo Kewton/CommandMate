@@ -224,6 +224,7 @@ import {
   type ExtractionResult,
   buildPromptExtractionResult,
 } from './response-checker-extraction-result';
+import { captureTopOf, promptDataForStorage, withCaptureTopCompleteness } from './prompt-screen-reading';
 export {
   type ExtractionResult,
   incompleteResult,
@@ -854,6 +855,7 @@ function committedEpisodeId(plan: WaitingObservationPlan, committed: Observation
  * @param result - The complete extraction this tick made
  * @param isFullScreenTui - True for opencode and copilot, which keep polling after a prompt
  * @param frameTime - When the frame this prompt was read on was fetched (Issue #3798)
+ * @param frame - The capture the prompt was read on, for the stored reading (Issue #3881)
  * @returns What `checkForResponse` returns for this tick
  */
 function savePromptMessage(
@@ -861,7 +863,8 @@ function savePromptMessage(
   promptDetection: PromptDetectionResult,
   result: ExtractionResult,
   isFullScreenTui: boolean,
-  frameTime: CapturedFrameTime
+  frameTime: CapturedFrameTime,
+  frame: string,
 ): boolean {
   const { db, worktree, worktreeId, cliToolId, instanceId, resolvedInstanceId, pollerKey } = ctx;
 
@@ -935,6 +938,10 @@ function savePromptMessage(
     return false;
   }
 
+  // Issue #3881 (review P2-1): whether the frame's first row is the pane's —
+  // the capture was taken with `CACHE_MAX_CAPTURE_LINES` (`checkForResponse`).
+  const captureTop = captureTopOf(frame, CACHE_MAX_CAPTURE_LINES, cliToolId);
+
   // Issue #571: Clean TUI decorations from Copilot prompt content before saving
   let promptSaveContent = promptContent;
   if (cliToolId === 'copilot') {
@@ -950,7 +957,18 @@ function savePromptMessage(
     role: 'assistant',
     content: promptSaveContent,
     messageType: 'prompt',
-    promptData: promptDetection.promptData,
+    // Issue #3881: with what the frame was read as — the kind, the live rows,
+    // the target's completeness — so the chat transcript and every later
+    // reader take it as stated instead of deciding it again from the strings.
+    // Review P2-1: the capture window says whether the frame's top is the
+    // pane's (`captureTop`, and `top-unknown` on a target that reached a cut top),
+    // as the Auto-Yes poller reads its own frame.
+    promptData: promptDataForStorage(
+      cliToolId,
+      frame,
+      withCaptureTopCompleteness(promptDetection, captureTop),
+      captureTop,
+    ),
     timestamp: new Date(),
     cliToolId,
     instanceId: resolvedInstanceId,
@@ -1729,7 +1747,7 @@ export async function checkForResponse(
       // after the answer must not re-save the reply underneath, #2230).
       if (owns) resetDuplicateResponseSkipStreak(pollerKey);
       // Asks for itself (#3701), before the prompt dedup.
-      return savePromptMessage(ctx, promptDetection, result, isFullScreenTui, frameTime);
+      return savePromptMessage(ctx, promptDetection, result, isFullScreenTui, frameTime, output);
     }
     // Issue #3538: a finished frame without a live prompt ends the run of
     // duplicate prompt ticks, as an unfinished one does in `extractCompletedTurn`.

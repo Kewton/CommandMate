@@ -10,8 +10,10 @@
  * @module lib/polling/auto-yes-poller-capture
  */
 
+import { AsyncLocalStorage } from 'async_hooks';
 import type { CLIToolType } from '../cli-tools/types';
 import { captureSessionOutput } from '../session/cli-session';
+import { getOrInitGlobal } from '../global-state';
 import { stripAnsi, stripBoxDrawing } from '../detection/cli-patterns';
 import { FULL_CAPTURE_LINES } from '@/config/auto-yes-config';
 
@@ -37,6 +39,19 @@ export interface CapturedPollerFrame {
   readonly raw: string;
   /** `stripBoxDrawing(stripAnsi(raw))` — the spelling every other step reads. */
   readonly clean: string;
+  /**
+   * Issue #3881 (third review N4): whether the capture window dropped rows
+   * from the top of what tmux returned. Absent when the capture layer did not
+   * say (a test that replaced it). The row count cannot tell this when the
+   * window is the pane's height: a 1000-row alternate screen and a longer
+   * pane cut to 1000 rows come back the same size.
+   */
+  readonly headCut?: boolean;
+}
+
+/** Where `cli-session` reports whether the capture it runs inside cut the pane's top (Issue #3881 N4). */
+function headCutSink(): AsyncLocalStorage<(headCut: boolean) => void> {
+  return getOrInitGlobal('__captureHeadCutSink', () => new AsyncLocalStorage<(headCut: boolean) => void>());
 }
 
 /**
@@ -56,8 +71,15 @@ export async function capturePollerFrame(
   instanceId?: string
 ): Promise<CapturedPollerFrame> {
   const lines = captureLines ?? FULL_CAPTURE_LINES;
-  const output = await captureSessionOutput(worktreeId, cliToolId, lines, instanceId);
-  return { raw: output, clean: stripBoxDrawing(stripAnsi(output)) };
+  const reported: { headCut?: boolean } = {};
+  const output = await headCutSink().run((headCut) => {
+    reported.headCut = headCut;
+  }, () => captureSessionOutput(worktreeId, cliToolId, lines, instanceId));
+  return {
+    raw: output,
+    clean: stripBoxDrawing(stripAnsi(output)),
+    ...(reported.headCut !== undefined ? { headCut: reported.headCut } : {}),
+  };
 }
 
 /**

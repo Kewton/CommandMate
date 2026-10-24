@@ -23,6 +23,7 @@ import {
   setCachedCapture,
   invalidateCache,
   sliceOutput,
+  sliceCutsHead,
   CACHE_MAX_CAPTURE_LINES,
   type CaptureFrameMeta,
 } from '@/lib/tmux/tmux-capture-cache';
@@ -58,11 +59,24 @@ declare global {
    */
   // eslint-disable-next-line no-var
   var __captureFrameMetaSink: AsyncLocalStorage<(meta: CaptureFrameMeta) => void> | undefined;
+  /**
+   * Issue #3881 (third review N4): where a reader of a capture's top asks to
+   * be told whether the capture it runs inside dropped rows from the top of
+   * what tmux returned. Set up by the Auto-Yes poller's
+   * `capturePollerFrame`; only read here, the same way as the sink above.
+   */
+  // eslint-disable-next-line no-var
+  var __captureHeadCutSink: AsyncLocalStorage<(headCut: boolean) => void> | undefined;
 }
 
 /** Tell the observer this capture runs for, if any, where its frame came from (Issue #3798). */
 function reportFrameMeta(meta: CaptureFrameMeta): void {
   globalThis.__captureFrameMetaSink?.getStore()?.(meta);
+}
+
+/** Tell the observer this capture runs for, if any, whether its window cut the pane's top (Issue #3881 N4). */
+function reportHeadCut(headCut: boolean): void {
+  globalThis.__captureHeadCutSink?.getStore()?.(headCut);
 }
 
 function getDefaultTransport(): SessionTransport {
@@ -150,6 +164,8 @@ export async function captureSessionOutput(
       },
       // Issue #3798: this call's own frame, to the observer it runs for
       reportFrameMeta,
+      // Issue #3881 (third review N4): and whether the window cut its top
+      reportHeadCut,
     );
 
     log.debug('captureSessionOutput:success', {
@@ -214,6 +230,8 @@ export async function captureSessionOutputFresh(
     }
 
     reportFrameMeta({ fetchStartedAt, source: 'fetched' });
+    const headCutSink = globalThis.__captureHeadCutSink?.getStore();
+    if (headCutSink) headCutSink(sliceCutsHead(output, lines));
     return sliceOutput(output, lines);
   } catch (error: unknown) {
     // [DA3-005] Invalidate cache on error (TOCTOU safety)

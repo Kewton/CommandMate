@@ -17,10 +17,19 @@ import {
   FreeTextAtChoiceOnlyPromptError,
   MultiSelectAnswerRejectedError,
 } from '@/lib/prompt-answer-sender';
+import type { PromptData } from '@/types/models';
+import {
+  abandonManualSend,
+  noteManualSendStarting,
+  settleManualAnswer,
+  type ManualAnswerOutcome,
+  type ManualAnswerTicket,
+} from '@/lib/polling/auto-yes-manual-answer';
 import type { AnswerResolution } from '@/lib/prompt-answer-semantic';
 import { startPolling } from '@/lib/polling/response-poller';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
+import { captureTopOf, promptDataForStorage } from '@/lib/polling/prompt-screen-reading';
 import { findTextFollowUp } from './text-follow-up';
 import { logger, logRefused, type PromptResponseContext } from './context';
 import type { ValidatedPromptResponse } from './request-validation';
@@ -99,8 +108,39 @@ function sendErrorResponse(
 }
 
 /**
+ * What a failed manual send left on the pane, for the answer Auto-Yes holds
+ * there (Issue #3880). The refusals are before any key; a transport failure
+ * says what it did (`keysSent`, `answerDelivery` from `sendPromptAnswer`).
+ * Null for an error that says neither: the hold is left as it was.
+ */
+function manualOutcomeOfSendError(error: unknown): ManualAnswerOutcome | null {
+  if (
+    error instanceof PromptAnswerRejectedError ||
+    error instanceof FreeTextAnswerRejectedError ||
+    error instanceof FreeTextAtChoiceOnlyPromptError
+  ) {
+    return 'not-sent';
+  }
+  if (!(error instanceof Error)) return null;
+  const keysSent = 'keysSent' in error ? error.keysSent : undefined;
+  const delivery = 'answerDelivery' in error ? error.answerDelivery : undefined;
+  if (keysSent === true || delivery === 'indeterminate') return 'may-be-on-pane';
+  if (keysSent === false) return 'not-sent';
+  return null;
+}
+
+/**
  * Send the resolved answer to tmux. Null once it was sent; otherwise the
  * refusal or the transport failure to return.
+ *
+ * Issue #3880: how the send ended is reported to Auto-Yes
+ * (`settleManualAnswer`), so a manual send that may have left keys on the pane
+ * keeps the confirmation off Auto-Yes's hands after the manual hold, as one of
+ * Auto-Yes's own would. `screenPromptData` is the prompt the fresh capture
+ * read — the screen such a hold is recorded at, fixed with the session epoch
+ * right before the first key (`noteManualSendStarting`); with neither it nor
+ * the resolved prompt (the capture failed) the hold is at an unidentified
+ * screen.
  */
 export async function sendResolvedAnswer(
   ctx: PromptResponseContext,
@@ -108,8 +148,11 @@ export async function sendResolvedAnswer(
   sessionName: string,
   resolved: ResolvedAnswer,
   verifiedFrame: string | null,
+  manualAnswer: ManualAnswerTicket,
+  screenPromptData?: PromptData | null,
 ): Promise<NextResponse | null> {
   const { resolution, effectivePromptData } = resolved;
+  noteManualSendStarting(manualAnswer, screenPromptData ?? effectivePromptData);
   // Send answer to tmux
   // Issue #287 Bug2: Uses shared sendPromptAnswer() to unify logic
   // with auto-yes-manager.ts, including fallback handling.
@@ -127,9 +170,47 @@ export async function sendResolvedAnswer(
       frame: verifiedFrame ?? undefined,
     });
   } catch (error: unknown) {
+    const outcome = manualOutcomeOfSendError(error);
+    if (outcome !== null) settleManualAnswer(manualAnswer, outcome);
+    else abandonManualSend(manualAnswer);
     return sendErrorResponse(ctx, error, request.answer, resolution);
   }
+  settleManualAnswer(manualAnswer, 'answered');
   return null;
+}
+
+/**
+ * The window `frame-verification`'s `captureFrame` takes the verified frame
+ * with: `captureSessionOutputFresh`'s default, which it does not override
+ * (pinned by `tests/unit/api/prompt-response-audit-reading-3881.test.ts`).
+ */
+const VERIFIED_FRAME_WINDOW_LINES = 5000;
+
+/**
+ * The `promptData` a person's answer is recorded with (Issue #3881 second
+ * review N2): the answered prompt with `promptDataForStorage`'s reading of the
+ * frame the answer was verified against — the same reading the Auto-Yes
+ * poller's audit row and the response poller's save store. A pending row the
+ * response poller saved keeps its own reading (`recordAnsweredPrompt` spreads
+ * it); this is what a row created here, or one saved without a reading, gets.
+ * Without the verified frame there is nothing to read, and the prompt is
+ * recorded as before.
+ */
+function auditPromptData(
+  ctx: PromptResponseContext,
+  promptCheck: PromptDetectionResult,
+  effectivePromptData: PromptData,
+  verifiedFrame: string | null,
+): PromptData {
+  if (verifiedFrame === null) return effectivePromptData;
+  return (
+    promptDataForStorage(
+      ctx.cliToolId,
+      verifiedFrame,
+      { ...promptCheck, promptData: effectivePromptData },
+      captureTopOf(verifiedFrame, VERIFIED_FRAME_WINDOW_LINES, ctx.cliToolId),
+    ) ?? effectivePromptData
+  );
 }
 
 /**
@@ -142,6 +223,7 @@ function recordAnswerForAudit(
   ctx: PromptResponseContext,
   promptCheck: PromptDetectionResult | null,
   resolved: ResolvedAnswer,
+  verifiedFrame: string | null,
 ): void {
   const { resolution, effectivePromptData } = resolved;
   if (!promptCheck?.isPrompt || !effectivePromptData) return;
@@ -154,7 +236,8 @@ function recordAnswerForAudit(
       worktreeId: ctx.id,
       cliToolId: ctx.cliToolId,
       instanceId: ctx.instanceId ?? ctx.cliToolId,
-      promptData: effectivePromptData,
+      // Issue #3881 (second review N2): with the reading of the verified frame.
+      promptData: auditPromptData(ctx, promptCheck, effectivePromptData, verifiedFrame),
       answer: resolution.input,
       answeredBy: 'human',
       content: promptCheck.rawContent || promptCheck.cleanContent,
@@ -171,11 +254,18 @@ function recordAnswerForAudit(
   }
 }
 
-/** Everything after the answer reached tmux, ending in the success body. */
+/**
+ * Everything after the answer reached tmux, ending in the success body.
+ *
+ * @param verifiedFrame - The frame the prompt was re-verified against, raw
+ *   (null when that capture failed): the audit row's reading is read off it
+ *   (Issue #3881 second review N2)
+ */
 export function finishAnsweredPrompt(
   ctx: PromptResponseContext,
   promptCheck: PromptDetectionResult | null,
   resolved: ResolvedAnswer,
+  verifiedFrame: string | null = null,
 ): NextResponse {
   const { id, db, cliToolId, instanceId } = ctx;
   const { resolution, structuredResolution, effectivePromptData } = resolved;
@@ -191,7 +281,7 @@ export function finishAnsweredPrompt(
     promptType: effectivePromptData?.type,
   });
 
-  recordAnswerForAudit(ctx, promptCheck, resolved);
+  recordAnswerForAudit(ctx, promptCheck, resolved, verifiedFrame);
 
   // The prompt poller normally stops while waiting for input. Resume response
   // persistence and independently push the TUI redraw after this interaction.

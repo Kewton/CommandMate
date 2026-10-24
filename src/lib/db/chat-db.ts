@@ -1012,7 +1012,12 @@ export function recordAnsweredPrompt(
   const answeredAt = new Date().toISOString();
 
   if (target) {
-    const updated = { ...target.parsed, status: 'answered', answer, answeredAt, answeredBy };
+    // Issue #3881 (review P2-2): the row keeps the reading it was saved with;
+    // one saved without a reading (before #3881) takes the answerer's, so a
+    // row's classification does not depend on which writer came first.
+    const reading =
+      target.parsed.reading === undefined && promptData.reading !== undefined ? { reading: promptData.reading } : {};
+    const updated = { ...target.parsed, ...reading, status: 'answered', answer, answeredAt, answeredBy };
     updatePromptData(db, target.id, updated);
     return { message: getMessageById(db, target.id)!, created: false };
   }

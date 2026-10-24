@@ -1,6 +1,6 @@
 /** Multiple choice prompt detection logic extracted from prompt-detector.ts (Issue #575). */
 
-import type { DetectPromptOptions, PromptDetectionResult } from './types';
+import type { ApprovalContextReading, DetectPromptOptions, PromptDetectionResult } from './types';
 import type { SubmitMode } from '@/types/models';
 import { normalizeTuiFrameForDetection } from './tui-detection-frame';
 import { CLAUDE_MODEL_OVERLAY_FOOTER_PATTERN } from './cli-patterns';
@@ -21,7 +21,7 @@ import {
 import {
   APPROVAL_TARGET_MAX_LOOKBACK,
   SEPARATOR_LINE_PATTERN,
-  findApprovalContextStart,
+  findApprovalContextRange,
   indentOf,
   joinApprovalTarget,
   panelFrameIndent,
@@ -29,6 +29,7 @@ import {
 
 export {
   APPROVAL_TARGET_MAX_LOOKBACK,
+  findApprovalContextRange,
   findApprovalContextStart,
   joinApprovalTarget,
 } from './prompt-detect-multiple-choice-approval-context';
@@ -880,16 +881,30 @@ function extractApprovalTarget(
   questionEndIndex: number,
   effectiveEnd: number,
   floor = 0,
-): string | undefined {
+): ApprovalTargetBlock | undefined {
   if (questionEndIndex < 0) {
     return undefined;
   }
 
-  return joinApprovalTarget(
-    lines,
-    Math.max(floor, findApprovalContextStart(lines, questionEndIndex, effectiveEnd)),
-    effectiveEnd,
-  );
+  const range = findApprovalContextRange(lines, questionEndIndex, effectiveEnd);
+  // Issue #3881: the picker's tab row is a boundary of its own, so a scan it
+  // cuts short is complete whatever the scan said about the rows above.
+  const bounded = floor > 0 && floor >= range.start;
+  const start = Math.max(floor, range.start);
+  return {
+    approvalTarget: joinApprovalTarget(lines, start, effectiveEnd),
+    approvalContext: {
+      startRow: start,
+      endRow: effectiveEnd,
+      completeness: bounded ? 'complete' : range.completeness,
+    },
+  };
+}
+
+/** What {@link extractApprovalTarget} read: the target and the rows it was cut from (Issue #3881). */
+interface ApprovalTargetBlock {
+  approvalTarget: string | undefined;
+  approvalContext: ApprovalContextReading;
 }
 
 /**
@@ -911,13 +926,18 @@ function extractApprovalTarget(
 export function buildMultipleChoiceResult(
   question: string,
   collectedOptions: ReadonlyArray<{ number: number; label: string; isDefault: boolean }>,
-  context: { instructionText?: string; approvalTarget?: string } | undefined,
+  context: {
+    instructionText?: string;
+    approvalTarget?: string;
+    /** Issue #3881: the rows the target was cut from, when a scan bounded it. */
+    approvalContext?: ApprovalContextReading;
+  } | undefined,
   output: string,
   truncateRawContentFn: (content: string) => string,
   submitMode?: SubmitMode,
   isAskUserQuestion?: boolean,
 ): PromptDetectionResult {
-  const { instructionText, approvalTarget } = context ?? {};
+  const { instructionText, approvalTarget, approvalContext } = context ?? {};
   return {
     isPrompt: true,
     promptData: {
@@ -937,11 +957,16 @@ export function buildMultipleChoiceResult(
       status: 'pending',
       instructionText,
       ...(approvalTarget !== undefined ? { approvalTarget } : {}),
+      // Issue #3881 (H-3): only the case the resolver must act on.
+      ...(approvalTarget !== undefined && approvalContext?.completeness === 'truncated'
+        ? { approvalTargetCompleteness: 'truncated' as const }
+        : {}),
       ...(submitMode ? { submitMode } : {}),
       ...(isAskUserQuestion ? { isAskUserQuestion: true } : {}),
     },
     cleanContent: question.trim(),
     rawContent: truncateRawContentFn(output.trim()),  // Issue #235: complete prompt output (truncated) [MF-001]
+    ...(approvalContext !== undefined ? { approvalContext } : {}),
   };
 }
 
@@ -1349,14 +1374,14 @@ export function detectMultipleChoicePrompt(
   const instructionText = extractInstructionText(lines, questionEndIndex, effectiveEnd);
   // Issue #1699: the same block, cut at the previous turn's boundary. Display
   // keeps the wide window; deny patterns are judged against this one.
-  const approvalTarget = extractApprovalTarget(lines, questionEndIndex, effectiveEnd, pickerTop);
+  const approvalBlock = extractApprovalTarget(lines, questionEndIndex, effectiveEnd, pickerTop);
 
   // Issue #616: Determine submitMode from confirmation footer (detected in single-pass above)
   const submitMode: SubmitMode | undefined = hasConfirmationFooter
     ? (hasNumberFooter ? 'answer_only' : 'answer_then_enter')
     : undefined;
 
-  const result = buildMultipleChoiceResult(question, collectedOptions, { instructionText, approvalTarget }, output, truncateRawContentFn, submitMode, hasAskUserQuestionFooter);
+  const result = buildMultipleChoiceResult(question, collectedOptions, { instructionText, ...approvalBlock }, output, truncateRawContentFn, submitMode, hasAskUserQuestionFooter);
   // [Issue #3863] Only the AskUserQuestion picker: the one this parser reads
   // as a question, whose rows are a title and an indented description.
   if (!hasAskUserQuestionFooter) return result;

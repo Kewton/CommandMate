@@ -1524,6 +1524,17 @@ describe('Issue #3713: the partial-answer suppression has its own wording', () =
     expect(output.autoYesSuppression).toMatchObject({ reason: 'partial-answer', mode: null, promptType: 'yes_no' });
   });
 
+  it('[#3880] also names a send whose outcome could not be confirmed, and what releases it', async () => {
+    mockFetchSequence([{ data: suppressedPrompt({ ...partial, at: Date.now() }) }]);
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+
+    const stderr = stderrOf();
+    expect(stderr).toContain("or that answer's send could not be confirmed, so the input may hold it");
+    expect(stderr).toContain('an answer that goes through releases the hold');
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
+  });
+
   it('negative: an unknown reason is still named verbatim as unrecognised', async () => {
     mockFetchSequence([{ data: suppressedPrompt({ ...partial, reason: 'partial-answer-2', at: Date.now() }) }]);
     const { createWaitCommand } = await import('../../../../src/cli/commands/wait');

@@ -93,10 +93,11 @@ describe('tmux-capture-cache', () => {
 
     it('should handle output with trailing newline (off-by-one check) [DA3-001]', () => {
       const output = 'line1\nline2\nline3\n';
-      // 4 elements after split: ['line1', 'line2', 'line3', '']
+      // Issue #3881 (third review N4): 3 rows and tmux's terminator, not 4 rows.
+      // Counted as 4 split elements, the terminator took one of the 2 requested
+      // rows and a 1000-row pane asked for 1000 lost its first row ('line3\n').
       const result = sliceOutput(output, 2);
-      // last 2 elements: 'line3' and ''
-      expect(result).toBe('line3\n');
+      expect(result).toBe('line2\nline3\n');
     });
 
     it('should handle large output (10000 lines)', () => {

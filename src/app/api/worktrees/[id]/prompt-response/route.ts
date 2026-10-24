@@ -42,7 +42,7 @@ import { finishAnsweredPrompt, sendResolvedAnswer } from './answer-delivery';
 import { notePromptResponseInLedger } from './ledger-record';
 import type { ValidatedPromptResponse } from './request-validation';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
-import { noteManualAnswerStarted } from '@/lib/polling/auto-yes-manual-answer';
+import { noteManualAnswerStarted, settleManualAnswer } from '@/lib/polling/auto-yes-manual-answer';
 import { AUTO_YES_BROWSER_ORIGIN } from '@/lib/prompt-response-body-builder';
 
 /** Issue #3821: the `reason` of the 409 a browser Auto-Yes answer is refused with. */
@@ -130,7 +130,9 @@ export async function POST(
     // poller tick already under way sends no further key, the next ticks leave
     // the screen to the person for a moment, and Auto-Yes's decision about the
     // prompt is dropped. Auto-Yes itself stays on.
-    noteManualAnswerStarted(buildCompositeKey(id, cliToolId, instanceId));
+    // Issue #3880: what an answer Auto-Yes holds becomes is decided by how this
+    // one ENDS (`settleManualAnswer`), not by its start.
+    const manualAnswer = noteManualAnswerStarted(buildCompositeKey(id, cliToolId, instanceId));
 
     // Issue #1898: answer the approval the agent is actually holding, before
     // going anywhere near the pane.
@@ -141,6 +143,8 @@ export async function POST(
     const sessionName = cliTool.getSessionName(id, instanceId);
 
     // Issue #161: Re-verify that a prompt is still active before sending keys.
+    // Issue #3880: no `settleManualAnswer` for this response — it may be a
+    // Command Code plan review answered (or failed) here, keys and all.
     const verification = await verifyPromptOnScreen(ctx, request, sessionName);
     if ('response' in verification) return noted(verification.response);
     const verified = verification.value;
@@ -148,12 +152,24 @@ export async function POST(
     // Issues #1681 / #1726 / #2522 / #2755: resolve the answer to the input
     // sent, refusing it with nothing sent when it cannot be right.
     const resolution = resolveAnswerToSend(ctx, request, verified);
-    if ('response' in resolution) return noted(resolution.response);
+    if ('response' in resolution) {
+      // Issue #3880: refused before any key — nothing of the person's answer is on the pane.
+      settleManualAnswer(manualAnswer, 'not-sent');
+      return noted(resolution.response);
+    }
 
-    const sendFailure = await sendResolvedAnswer(ctx, request, sessionName, resolution.value, verified.verifiedFrame);
+    const sendFailure = await sendResolvedAnswer(
+      ctx,
+      request,
+      sessionName,
+      resolution.value,
+      verified.verifiedFrame,
+      manualAnswer,
+      verified.promptCheck?.isPrompt ? verified.promptCheck.promptData : null,
+    );
     if (sendFailure) return noted(sendFailure);
 
-    return noted(finishAnsweredPrompt(ctx, verified.promptCheck, resolution.value));
+    return noted(finishAnsweredPrompt(ctx, verified.promptCheck, resolution.value, verified.verifiedFrame));
   } catch (error: unknown) {
     logger.error('failed-to-respond-to-prompt:', { error: error instanceof Error ? error.message : String(error) });
     const errorMessage = error instanceof Error ? error.message : 'Internal server error';

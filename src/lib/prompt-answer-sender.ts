@@ -6,7 +6,7 @@
  * the promptType/defaultOptionNumber fallback introduced in Bug1).
  */
 
-import { capturePane, sendKeys, sendSpecialKeys } from './tmux/tmux';
+import { capturePane, sendKeys, sendSpecialKeys, type KeyDeliveryState } from './tmux/tmux';
 import type { CLIToolType } from './cli-tools/types';
 import { normalizeFrame } from '@/lib/detection/tools/frame';
 import { getToolStatusDetector } from '@/lib/detection/tools/registry';
@@ -877,15 +877,51 @@ interface PaneTouch {
 }
 
 /**
+ * What a failed answer did to the pane, as far as the transport could see
+ * (Issue #3880): the tmux module's `KeyDeliveryState` for the whole answer.
+ * `delivered` here is a failure after some of its keys were seen to reach tmux.
+ */
+export type AnswerDelivery = KeyDeliveryState;
+
+/**
+ * What the tmux call that failed did (Issue #3880), when the error came from
+ * the transport (`TmuxSendError`, by name: test doubles of `./tmux/tmux` need
+ * not export the class); null for any other error.
+ */
+function transportDeliveryOf(error: unknown): Exclude<KeyDeliveryState, 'delivered'> | null {
+  if (!(error instanceof Error) || error.name !== 'TmuxSendError') return null;
+  const delivery = (error as { delivery?: unknown }).delivery;
+  return delivery === 'not-started' || delivery === 'indeterminate' ? delivery : null;
+}
+
+/**
  * A failure after a key reached the pane says so (Issue #3839): `keysSent: true`
  * is put on it, as on {@link PromptAnswerAbortedError}, so Auto-Yes does not
  * type the answer again over what is already there. An error that already
  * names `keysSent` (the refusals and the stop above) keeps its own word, and a
  * failure before any key is left as it was.
+ *
+ * Issue #3880: a transport failure also gets `answerDelivery` ({@link AnswerDelivery};
+ * the tmux error's own `delivery` is that one call's).
+ * `indeterminate` — the tmux call ended without an exit status, and its key may
+ * be on the pane — is NOT `keysSent: true` (no key is known to be there; the
+ * ledger counts it `failed`, #3820) but Auto-Yes holds it all the same. A
+ * transport refusal before any key is `keysSent: false`: known not sent, free
+ * to be sent again.
  */
 function withKeysSent(error: unknown, touch: PaneTouch): unknown {
-  if (touch.touched && error instanceof Error && !('keysSent' in error)) {
+  if (!(error instanceof Error)) return error;
+  const transport = transportDeliveryOf(error);
+  if (transport !== null) {
+    const answerDelivery: AnswerDelivery =
+      transport === 'indeterminate' ? 'indeterminate' : touch.touched ? 'delivered' : 'not-started';
+    Object.assign(error, { answerDelivery });
+  }
+  if ('keysSent' in error) return error;
+  if (touch.touched) {
     Object.assign(error, { keysSent: true });
+  } else if (transport === 'not-started') {
+    Object.assign(error, { keysSent: false });
   }
   return error;
 }
@@ -907,7 +943,13 @@ async function sendSpecialKeysWhileCurrent(
   touch?: PaneTouch,
 ): Promise<void> {
   if (!stillCurrent) {
-    await sendSpecialKeys(sessionName, keys);
+    try {
+      await sendSpecialKeys(sessionName, keys);
+    } catch (error: unknown) {
+      // Issue #3880: without `shouldContinue` the count comes from the error.
+      if (touch && keysDeliveredOf(error) > 0) touch.touched = true;
+      throw error;
+    }
     if (touch && keys.length > 0) touch.touched = true;
     return;
   }
@@ -928,10 +970,20 @@ async function sendSpecialKeysWhileCurrent(
     if (error instanceof Error && error.name === 'SpecialKeysAbortedError') {
       throw new PromptAnswerAbortedError(true);
     }
-    if (touch && delivered > 0) touch.touched = true;
+    if (touch && Math.max(delivered, keysDeliveredOf(error)) > 0) touch.touched = true;
     throw error;
   }
   if (touch && keys.length > 0) touch.touched = true;
+}
+
+/**
+ * The keys a failed `sendSpecialKeys` says tmux took before the one that
+ * failed (Issue #3880, `TmuxSendError.keysDelivered`); 0 when it says none.
+ */
+function keysDeliveredOf(error: unknown): number {
+  if (!(error instanceof Error) || error.name !== 'TmuxSendError') return 0;
+  const count = (error as { keysDelivered?: unknown }).keysDelivered;
+  return typeof count === 'number' && Number.isFinite(count) && count > 0 ? count : 0;
 }
 
 export interface SendPromptAnswerParams {
@@ -978,7 +1030,8 @@ export interface SendPromptAnswerParams {
  * - src/lib/auto-yes-manager.ts (L340-399)
  *
  * A failure after a key of the answer reached the pane carries `keysSent: true`
- * (Issue #3839); see {@link withKeysSent}.
+ * (Issue #3839), and a transport failure its `answerDelivery` (Issue #3880);
+ * see {@link withKeysSent}.
  */
 export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<void> {
   const touch: PaneTouch = { touched: false };
