@@ -223,8 +223,10 @@ export interface NotificationEvent {
    * waits can share a `since`, so the episode dedup compares ids when both the
    * record and this event carry one, and the card this sends is marked with it
    * (`prompt-card-state`) and carries it to the Service Worker
-   * ({@link PushPayload.episodeId}). Absent — the response poller and the
-   * opencode question push today — the `since` alone names the wait, as before.
+   * ({@link PushPayload.episodeId}). The response poller names the episode
+   * its commit settled on (Issue #3798, `fanOutAfterCommit`). Absent — the
+   * opencode question push today, or a commit that changed nothing — the
+   * `since` alone names the wait, as before.
    */
   waitingEpisodeId?: string | null;
   /** Instance id for the episode key; falls back to {@link agentName}. */

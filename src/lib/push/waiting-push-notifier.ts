@@ -64,6 +64,17 @@
  * (a test driving {@link handleWaitingTransition} with the #1786 shape) is
  * compared by `since`, as before.
  *
+ * A wait the Auto-Yes poller answered and has not yet seen gone is asked
+ * about again, a grace apart, for as long as it lasts (the gate's
+ * `auto-yes-answered`): it notifies only once it turns into a screen a person
+ * drives, and a replacement brings an edge of its own.
+ *
+ * A producer that fans out for the wait it is opening (the response poller,
+ * with the prompt's question to quote) commits the episode inside
+ * {@link fanOutAfterCommit}: the edge's gate runs after the producer's
+ * fan-out, so both name the episode the store just gave the wait and the
+ * producer's notification is the one the episode dedup lets through.
+ *
  * Everything here is advisory: a failure must not disturb the status read that
  * observed the edge (`emit` contains listener throws) nor the poller.
  *
@@ -163,6 +174,8 @@ declare global {
   var __waitingPushGraceTimers: Map<string, ReturnType<typeof setTimeout>> | undefined;
   // eslint-disable-next-line no-var
   var __waitingPushAnswerGraceTimers: Map<string, ReturnType<typeof setTimeout>> | undefined;
+  // eslint-disable-next-line no-var
+  var __waitingPushDeferredGates: Map<string, Array<() => void>> | undefined;
 }
 
 const pending = getOrInitGlobal('__waitingPushPending', () => new Map<string, PendingWait>());
@@ -179,6 +192,46 @@ const answerGraceTimers = getOrInitGlobal(
   '__waitingPushAnswerGraceTimers',
   () => new Map<string, ReturnType<typeof setTimeout>>(),
 );
+
+/**
+ * Composite key -> the edge gates held back while a producer commits the
+ * episode and fans out for it ({@link fanOutAfterCommit}, Issue #3798).
+ */
+const deferredGates = getOrInitGlobal('__waitingPushDeferredGates', () => new Map<string, Array<() => void>>());
+
+/**
+ * Commit a waiting episode and fan out for it, in that order, with the gate
+ * the episode's own edge runs held back until the fan-out is done (Issue
+ * #3798). The producer then names the episode id the commit just created —
+ * to the gate and to the fan-out — and its notification, carrying what only
+ * the producer has (the prompt's question), claims the episode dedup before
+ * the edge's id-named one asks for the same episode. All synchronous: the
+ * held gates run before this returns, whatever the fan-out threw.
+ *
+ * @param commit - The store write; its edge reaches this module during it
+ * @param fanOut - Given what `commit` returned
+ * @returns What `commit` returned
+ */
+export function fanOutAfterCommit<T>(
+  parts: { worktreeId: string; cliToolId: CLIToolType; instanceId?: string },
+  commit: () => T,
+  fanOut: (committed: T) => void
+): T {
+  const key = buildCompositeKey(parts.worktreeId, parts.cliToolId, parts.instanceId);
+  const outermost = !deferredGates.has(key);
+  if (outermost) deferredGates.set(key, []);
+  try {
+    const committed = commit();
+    fanOut(committed);
+    return committed;
+  } finally {
+    if (outermost) {
+      const held = deferredGates.get(key) ?? [];
+      deferredGates.delete(key);
+      for (const run of held) run();
+    }
+  }
+}
 
 /**
  * The worktree's display name, for the notification title.
@@ -280,6 +333,9 @@ function gateAndSend(wait: PendingWait, now: number, recheck = false): void {
     // when it ends; a wait Auto-Yes did answer is gone from the episode store
     // by then and nothing is sent.
     if (decision.reason === 'auto-yes-answering') holdForAutoYesAnswer(wait, now);
+    // Issue #3798: answered, and not yet seen gone — ask again a grace later,
+    // so the screen a person drives that may follow still notifies.
+    else if (decision.reason === 'auto-yes-answered') holdForAutoYesAnswer(wait, now, AUTO_YES_ANSWER_GRACE_MS);
     return;
   }
 
@@ -292,7 +348,7 @@ function gateAndSend(wait: PendingWait, now: number, recheck = false): void {
  * answered — a screen the poller cannot read and records nothing about — stayed
  * silent until the escalation reminder, ten minutes later.
  */
-function holdForAutoYesAnswer(wait: PendingWait, now: number): void {
+function holdForAutoYesAnswer(wait: PendingWait, now: number, afterMs?: number): void {
   const key = buildCompositeKey(wait.worktreeId, wait.cliToolId, wait.instanceId);
   const existing = answerGraceTimers.get(key);
   if (existing !== undefined) clearTimeout(existing);
@@ -311,7 +367,9 @@ function holdForAutoYesAnswer(wait: PendingWait, now: number): void {
     },
     now,
   );
-  const delay = Math.min(AUTO_YES_ANSWER_GRACE_MS, Math.max(0, holdEndsAt - now));
+  // Issue #3798: an answered wait whose hold is over is asked about again
+  // `afterMs` later; the hold's end is already behind it.
+  const delay = afterMs ?? Math.min(AUTO_YES_ANSWER_GRACE_MS, Math.max(0, holdEndsAt - now));
   const timer = setTimeout(() => {
     answerGraceTimers.delete(key);
     releaseAutoYesHold(key, wait);
@@ -482,6 +540,13 @@ export function handleWaitingTransition(transition: WaitingTransition | WaitingE
     return;
   }
 
+  // Issue #3798: a producer is fanning out for this very edge; its gate runs
+  // after that (`fanOutAfterCommit`).
+  const held = deferredGates.get(key);
+  if (held !== undefined) {
+    held.push(() => gateAndSend(wait, transition.at));
+    return;
+  }
   gateAndSend(wait, transition.at);
 }
 

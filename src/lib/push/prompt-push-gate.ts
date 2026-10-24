@@ -48,7 +48,10 @@
  * earlier episode is older than `since` and is ignored.
  * Issue #3798: a record that names its episode (`episodeId`) is matched to a
  * wait that names one by that id instead, since two episodes can share a
- * `since`; either side without an id falls back to the time comparison.
+ * `since`; either side without an id falls back to the time comparison. A
+ * record of the episode the poller then answered (`lastAnswer`), written
+ * before that answer, is not the wait's reason any more: the success path of
+ * a send does not clear the record, and the answer is the newer fact.
  *
  * The poller re-evaluates a suppressed prompt on every poll (the duplicate
  * guard only remembers *answered* prompts), so `at` stays current for as long
@@ -83,8 +86,9 @@
  * (`waitingEpisodeId`), and by `waitingSince` when it does not. The two are
  * matched by the rule {@link isSameWait} states, the same rule the episode
  * dedup in `notification-dedup` uses: both ids present and equal, or one of
- * them absent and the `since`s equal. So an id-less producer (the response
- * poller, opencode's question push) and the id-bearing notifier asking about
+ * them absent and the `since`s equal. So an id-less producer (opencode's
+ * question push, or the response poller when its commit changed nothing —
+ * otherwise it names the episode it committed) and the id-bearing notifier asking about
  * one wait share one hold, and the session wait's tick (#3796) is read once,
  * when that hold begins. A rebind keeps the id, so it keeps the hold and its
  * end; a replacement brings a new id, so it begins a new hold that reads the
@@ -124,6 +128,22 @@
  * after the wait may already be held, and the notifier asks again when the 9 s
  * end.
  *
+ * ## A wait the poller answered is not "not answered" (Issue #3798)
+ *
+ * The poller records which episode its answer went to (`lastAnswer`, read off
+ * its state on `globalThis` like the answer's time), and closes that episode
+ * when the confirmation is gone. Until a frame says so — the agent works on
+ * over frames no rule reads — the episode stays open, and its hold can run
+ * out. That end is not "Auto-Yes did not answer": when the wait asked about
+ * names its id and it is the answered episode, still open and not a screen
+ * only a person drives, the gate says `auto-yes-answered` and stays quiet.
+ * Another confirmation in the same turn is another episode (R1-7), and a
+ * survey or a picker after the answer turns the episode into a `screen`: both
+ * notify as before. Without an id on either side nothing is matched, and the
+ * hold's end notifies as before. The hold itself is unchanged — its start, its
+ * end, the session wait's tick (#3796) and the duplicate guard's retry (#3791)
+ * are counted as above.
+ *
  * ## The reminder is never muted
  *
  * `runEscalationTick` has already established that the wait is still open — it
@@ -153,10 +173,12 @@ import { createLogger } from '@/lib/logger';
 import type { AutoYesSuppressionReason } from '@/lib/polling/auto-yes-resolver';
 import {
   getLastPolicySuppression,
+  suppressionPredatesAnswer,
   type EpisodeScopedPolicySuppression,
 } from '@/lib/polling/auto-yes-suppression-state';
 import { getOrInitGlobal } from '@/lib/global-state';
 import type { AutoYesPollerState } from '@/lib/polling/auto-yes-poller-state';
+import { getWaitingEpisodeRecord } from '@/lib/session/waiting-episode-state';
 
 const logger = createLogger('push/prompt-gate');
 
@@ -425,7 +447,13 @@ export type PromptPushGateReason =
    * Issue #3757: Auto-Yes is on, nothing says why it has not answered, and
    * {@link AUTO_YES_ANSWER_GRACE_MS} has passed — it is not going to.
    */
-  | 'auto-yes-not-answered';
+  | 'auto-yes-not-answered'
+  /**
+   * Issue #3798: the hold is over, but the poller answered this very episode
+   * ({@link autoYesAnsweredWait}) and it has not closed yet. Quiet; the
+   * notifier asks again while the wait lasts.
+   */
+  | 'auto-yes-answered';
 
 export interface PromptPushGateDecision {
   /** True when no notification should be fanned out for this wait. */
@@ -453,7 +481,12 @@ export function decidePromptPush(input: PromptPushGateInput): PromptPushGateDeci
   }
 
   const suppression = getLastPolicySuppression(worktreeId, cliToolId, instanceId);
-  if (suppression !== null && suppressionBelongsToWait(suppression, input)) {
+  if (
+    suppression !== null &&
+    suppressionBelongsToWait(suppression, input) &&
+    // The answer that came after the record is the newer fact (Issue #3798).
+    !suppressionPredatesAnswer(suppression, input.waitingEpisodeId, answerTo(input))
+  ) {
     return { suppress: false, reason: 'policy-withheld', suppressedBy: suppression.reason };
   }
 
@@ -464,10 +497,36 @@ export function decidePromptPush(input: PromptPushGateInput): PromptPushGateDeci
   const holdEndsAt =
     input.holdEndsAt ?? (input.holdStartedAt !== undefined ? input.holdStartedAt + AUTO_YES_ANSWER_GRACE_MS : undefined);
   if (holdEndsAt !== undefined && (input.now ?? Date.now()) >= holdEndsAt) {
+    if (autoYesAnsweredWait(input)) return { suppress: true, reason: 'auto-yes-answered' };
     return { suppress: false, reason: 'auto-yes-not-answered' };
   }
 
   return { suppress: true, reason: 'auto-yes-answering' };
+}
+
+/**
+ * Whether the Auto-Yes poller answered this wait (Issue #3798): the caller
+ * names the episode, the poller's `lastAnswer` names the same one, and that
+ * episode is still the one open and not a screen only a person drives (a
+ * survey or a picker after the answer is rebound to `screen` under the same
+ * id, and a person has to act on it). Read off the poller state on
+ * `globalThis`, as {@link autoYesHoldStartedAt} reads the answer's time.
+ */
+export function autoYesAnsweredWait(
+  input: Pick<PromptPushGateInput, 'worktreeId' | 'cliToolId' | 'instanceId' | 'waitingEpisodeId'>,
+): boolean {
+  const waitId = input.waitingEpisodeId ?? null;
+  if (waitId === null || answerTo(input)?.episodeId !== waitId) return false;
+  const episode = getWaitingEpisodeRecord(input.worktreeId, input.cliToolId, input.instanceId);
+  return episode !== null && episode.episodeId === waitId && episode.binding.kind !== 'screen';
+}
+
+/** The poller's `lastAnswer` for this instance, read off `globalThis` (Issue #3798). */
+function answerTo(
+  input: Pick<PromptPushGateInput, 'worktreeId' | 'cliToolId' | 'instanceId'>,
+): { episodeId: string; at: number } | null {
+  const key = buildCompositeKey(input.worktreeId, input.cliToolId, input.instanceId);
+  return globalThis.__autoYesPollerStates?.get(key)?.lastAnswer ?? null;
 }
 
 /**

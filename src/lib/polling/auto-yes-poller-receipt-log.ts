@@ -277,6 +277,9 @@ function refreshEpisodeSuppression(
     // up (same episode, accepted on the same receipt). Not `getPartialAnswer`:
     // the tick forgets it as soon as the gated reading stops seeing the prompt,
     // which past the window is every tick.
+    // Issue #3798: re-stamped under the waiting episode it was recorded for
+    // (`episodeId` is carried over), not whichever is open now — the keys went
+    // to that wait's dialog.
     const { at: _recordedAt, ...suppression } = own;
     recordPolicySuppression(worktreeId, 'antigravity', instanceId, suppression);
     return true;

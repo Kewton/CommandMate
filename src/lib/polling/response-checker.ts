@@ -103,7 +103,7 @@ import { isPromptPushSuppressed } from '@/lib/push/prompt-push-gate';
 // Issue #2000: deep path for the same reason as the two imports above.
 import { notifyUpstreamFaultPush } from '@/lib/push/failure-push-notifier';
 import { matchUpstreamFault } from '@/lib/detection/upstream-faults';
-import { startWaitingPushNotifier } from '@/lib/push/waiting-push-notifier';
+import { fanOutAfterCommit, startWaitingPushNotifier } from '@/lib/push/waiting-push-notifier';
 import {
   captureObservedFrame,
   commitWaitingObservation,
@@ -111,9 +111,14 @@ import {
   planWaitingObservation,
   startWaitingObservation,
   type CapturedFrameTime,
+  type ObservationAction,
   type ObservationStart,
+  type WaitingObservationPlan,
 } from '@/lib/session/waiting-episode-binding';
+import { getWaitingEpisodeRecord } from '@/lib/session/waiting-episode-state';
 import { promptWaitingReading } from '@/lib/detection/waiting-screen-reading';
+import { buildCompositeKey } from '@/lib/auto-yes-state';
+import { getAutoYesLastAnswer } from './auto-yes-poller-state';
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
 import {
   isBlankCleanedResponse,
@@ -818,6 +823,25 @@ function extractCompletedTurn(
 }
 
 /**
+ * The episode a committed prompt observation left this wait in (Issue #3798):
+ * the one kept or rebound, the one the commit just opened or put in place, or
+ * null when the commit changed nothing.
+ */
+function committedEpisodeId(plan: WaitingObservationPlan, committed: ObservationAction): string | null {
+  const obs = plan.observation;
+  switch (committed) {
+    case 'kept':
+    case 'rebound':
+      return plan.episodeId;
+    case 'opened':
+    case 'replaced':
+      return getWaitingEpisodeRecord(obs.worktreeId, obs.cliToolId, obs.instanceId)?.episodeId ?? null;
+    default:
+      return null;
+  }
+}
+
+/**
  * Save a live prompt as a prompt message, and raise what follows from it: the
  * task event, the push notification and the waiting episode.
  *
@@ -862,7 +886,9 @@ function savePromptMessage(
   // the close of the very confirmation it shows — an answer and a stop landed
   // during the capture — is not a new wait: nothing is saved, registered or
   // pushed, and the next tick's frame decides. Planned against the state as it
-  // is now (`freshPrompt`), not as the tick found it.
+  // is now (`freshPrompt`), not as the tick found it. With the Auto-Yes
+  // poller's last answer (PR 3): another confirmation in the wait it answered
+  // is a new wait (R1-7), with a hold of its own rather than the spent one.
   const plan = planWaitingObservation({
     worktreeId,
     cliToolId,
@@ -872,6 +898,7 @@ function savePromptMessage(
     reading: promptWaitingReading(promptDetection.promptData ?? null),
     ...frameTime,
     freshPrompt: true,
+    lastAnswer: getAutoYesLastAnswer(buildCompositeKey(worktreeId, cliToolId, instanceId)),
   });
   if (plan.action === 'ignored') {
     logger.info('prompt-observation-stale', {
@@ -944,19 +971,17 @@ function savePromptMessage(
   // Fire-and-forget — push is advisory and must never block/break the poller.
   //
   // Issue #1790: the wait is now named by #1786's episode rather than by the
-  // prompt text. The two lines below are ordered, not incidental:
-  //
-  //  1. the notification is raised first, while it still has the prompt's
-  //     own question to quote — it records the episode in the dedup, so
-  //     whichever path reports the wait second says nothing;
-  //  2. the observation is then committed, opening that same episode, which
-  //     is what lets the edge listener (and #1788's WebSocket frame) agree
-  //     with this call about *which* wait this is instead of raising a second
-  //     one.
-  //
-  // Both use the plan's `since` (Issue #3798: the open wait's when it is kept,
-  // the plan's time when the prompt opens or replaces one), so the episode
-  // the notification claims and the episode the store holds are the same.
+  // prompt text. Issue #3798: and by the episode's id, which the store gives
+  // a wait only when it opens or replaces one. So the observation is committed
+  // first and the notification raised with the id the commit settled on —
+  // the kept or rebound wait's, or the one just opened — inside
+  // `fanOutAfterCommit`, which holds the edge listener's own gate back until
+  // this fan-out is done: the notification that quotes the prompt's question
+  // still records the episode in the dedup first, and the listener (and
+  // #1788's WebSocket frame) agree with it about *which* wait this is — the
+  // same id to the gate's hold and suppression record, the dedup and the
+  // card's order. A commit that changed nothing (the episode moved since the
+  // plan) names no id, and the plan's `since` decides as before.
   // No `await` from the plan to the commit.
   const promptWaitingSince = plan.since ?? plan.at;
 
@@ -967,27 +992,34 @@ function savePromptMessage(
   // reminder all see the wait exactly as they did before. The gate runs
   // before the call rather than inside it because `shouldSendWaitingPush`
   // records the episode the moment it decides to send.
-  if (
-    !isPromptPushSuppressed({
-      worktreeId,
-      cliToolId,
-      instanceId,
-      waitingSince: promptWaitingSince,
-    })
-  ) {
-    void notifyPushSubscribers({
-      worktreeId,
-      worktreeName: worktree.name,
-      kind: 'prompt',
-      agentName: resolvedInstanceId,
-      instanceId: resolvedInstanceId,
-      waitingKind: 'prompt',
-      waitingSince: promptWaitingSince,
-      excerpt: promptDetection.promptData?.question ?? promptSaveContent,
-    }).catch(() => {});
-  }
-
-  commitWaitingObservation(plan);
+  fanOutAfterCommit(
+    { worktreeId, cliToolId, instanceId },
+    () => commitWaitingObservation(plan),
+    (committed) => {
+      const waitingEpisodeId = committedEpisodeId(plan, committed);
+      if (
+        !isPromptPushSuppressed({
+          worktreeId,
+          cliToolId,
+          instanceId,
+          waitingSince: promptWaitingSince,
+          waitingEpisodeId,
+        })
+      ) {
+        void notifyPushSubscribers({
+          worktreeId,
+          worktreeName: worktree.name,
+          kind: 'prompt',
+          agentName: resolvedInstanceId,
+          instanceId: resolvedInstanceId,
+          waitingKind: 'prompt',
+          waitingSince: promptWaitingSince,
+          waitingEpisodeId,
+          excerpt: promptDetection.promptData?.question ?? promptSaveContent,
+        }).catch(() => {});
+      }
+    }
+  );
 
   if (!isFullScreenTui) {
     stopPolling(worktreeId, cliToolId, instanceId);

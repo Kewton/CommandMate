@@ -241,6 +241,16 @@ function describePaneObstruction(data: CurrentOutputResponse): string {
  * error runs towards reporting — a withheld answer to an earlier prompt, under a
  * minute old, still ends the hold, which is the pre-#2463 exit rather than a
  * new failure.
+ *
+ * Issue #3798: a server that names the waiting episodes does what the push gate
+ * does — the record's `episodeId` against the payload's
+ * `autoYes.waitingEpisodeId`, which decide when both are present: another id
+ * (or no wait open) is a record of an earlier wait, however recent; the same
+ * id is this wait's. Either one missing (an older server, a record written
+ * before any wait was open), this window decides as before. Whichever
+ * decides, a record the server marks `lastSuppressionAnswered` — Auto-Yes
+ * answered the open wait after it was written — is history, not this wait's
+ * reason, as the push gate reads it: the hold goes on.
  */
 const SUPPRESSION_FRESH_MS = 60_000;
 
@@ -264,8 +274,14 @@ function activeSuppression(
   const suppression = data.autoYes?.lastSuppression;
   if (!suppression) return null;
   const ageMs = now - suppression.at;
-  // A negative age is clock skew between the CLI and the server, not staleness.
-  if (ageMs > SUPPRESSION_FRESH_MS) return null;
+  const waitId = data.autoYes?.waitingEpisodeId;
+  if (suppression.episodeId !== undefined && waitId !== undefined) {
+    if (suppression.episodeId !== waitId) return null;
+  } else if (ageMs > SUPPRESSION_FRESH_MS) {
+    // A negative age is clock skew between the CLI and the server, not staleness.
+    return null;
+  }
+  if (data.autoYes?.lastSuppressionAnswered === true) return null;
   const answerMode = data.autoYesAnswerMode;
   return {
     suppression,
@@ -2150,8 +2166,11 @@ The observation on exit 10 (Issue #3755):
   \`commandmate prompt <id> --json\` prints, read off the capture the exit was
   decided on — the screen's kind, an observation token, and Auto-Yes as two
   separate items (the poller's record, the contract re-evaluated now). It
-  changes no exit code, hold or grace. autoYesSuppression keeps its meaning (a
-  record under a minute old); a missing record does not mean Auto-Yes can answer.
+  changes no exit code, hold or grace. autoYesSuppression keeps its meaning
+  (the record of this wait: the same waiting-episode id when the record and
+  the server both name one, else a record under a minute old; either way not
+  one written before Auto-Yes answered this wait, as the push gate reads it);
+  a missing record does not mean Auto-Yes can answer.
 `)
     .action(async (worktreeIds: string[], options: PollWorktreeOptions) => {
       try {

@@ -286,7 +286,21 @@ export interface CurrentOutputResponse {
       promptType: string;
       pattern?: string;
       at: number;
+      /**
+       * The waiting episode the record was written for (Issue #3798). Absent
+       * when no wait was open, or from a server older than the field.
+       */
+      episodeId?: string;
     } | null;
+    /**
+     * Mirrors: src/lib/session/current-output-types.ts
+     * CurrentOutputPayload.autoYes.waitingEpisodeId (Issue #3798). The waiting
+     * episode open when the payload was built, or null. `lastSuppression` is
+     * this wait's only when its `episodeId` is this — and not when
+     * `lastSuppressionAnswered` says Auto-Yes answered this wait after it;
+     * absent (an older server), the record's age decides as before.
+     */
+    waitingEpisodeId?: string | null;
     /**
      * Mirrors: src/lib/auto-yes-state.ts AutoYesState.stopMatchedText
      * (Issue #1694). Short excerpt of what `--stop-pattern` matched, with one
@@ -320,6 +334,14 @@ export interface CurrentOutputResponse {
       /** Whether the record is about the prompt in this same response. */
       currentPrompt: boolean;
     } | null;
+    /**
+     * Mirrors: src/lib/session/current-output-types.ts
+     * CurrentOutputPayload.autoYes.lastSuppressionAnswered (Issue #3798). True
+     * when Auto-Yes answered the wait `waitingEpisodeId` names after
+     * `lastSuppression` was written: the record is history, not this wait's
+     * reason, as the push gate reads it. Absent (an older server) reads as false.
+     */
+    lastSuppressionAnswered?: boolean;
   };
   thinking?: boolean;
   cliToolId?: string;
@@ -1477,8 +1499,9 @@ export interface WaitPromptOutput {
    * #3755): the screen's kind, an observation token, and Auto-Yes as two
    * separate items — the poller's record and the contract re-evaluated now.
    * Absent when the server is older than the field. `autoYesSuppression` above
-   * keeps its meaning (a record under a minute old); this does not read the
-   * record's time as "the reason this prompt is unanswered".
+   * keeps its meaning (the record of this wait: by the episode ids when both
+   * are present, Issue #3798, else a record under a minute old); this does not
+   * read the record's time as "the reason this prompt is unanswered".
    */
   observation?: PromptObservation;
   [key: string]: unknown;

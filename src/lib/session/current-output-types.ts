@@ -440,12 +440,26 @@ export interface CurrentOutputPayload {
     stopReason?: string;
     /**
      * Last answer the contract's autoYes policy withheld for this session, or
-     * null when it never withheld one (Issue #1684). Refreshed every poll while
-     * the suppressed prompt stays on screen, so `at` being current together
-     * with `isPromptWaiting` means the suppression is the reason the session is
-     * waiting right now.
+     * null when it never withheld one (Issue #1684). Whether it is the reason
+     * the session is waiting right now: when both its `episodeId` and
+     * `waitingEpisodeId` below are present, the ids decide — the same id is
+     * this wait's reason however old `at` is, another id an earlier wait's
+     * however recent (Issue #3798). Only when either is missing does the age
+     * decide: the record is refreshed every poll while the suppressed prompt
+     * stays on screen, so `at` being current together with `isPromptWaiting`
+     * reads as this wait's reason. Either way, a record older than the
+     * Auto-Yes answer to the open wait is history, not its reason
+     * (`lastSuppressionAnswered`), as the push gate reads it.
      */
     lastSuppression: AutoYesPolicySuppression | null;
+    /**
+     * The waiting episode open for this instance when the payload was built,
+     * or null when none is (Issue #3798). `lastSuppression.episodeId` names
+     * the wait the record was written for: a different id here means the
+     * record is about an earlier wait. Optional so payloads built elsewhere
+     * need not name it; absent, readers fall back to the record's age.
+     */
+    waitingEpisodeId?: string | null;
     /**
      * Short excerpt of what `--stop-pattern` matched, present only while
      * `stopReason === 'stop_pattern_matched'` (Issue #1694).
@@ -469,6 +483,17 @@ export interface CurrentOutputPayload {
      * `outcome: 'sent'` with `currentPrompt: true`.
      */
     lastEnterFallback: AutoYesEnterFallbackPublished | null;
+    /**
+     * Whether the Auto-Yes poller answered the wait open now
+     * (`waitingEpisodeId`) after `lastSuppression` was written (Issue #3798):
+     * the send's success path keeps the record as history, but the answer is
+     * the newer fact, so the record is not this wait's reason. The push gate's
+     * own reading (`suppressionPredatesAnswer`). False with no record, no wait
+     * open, no answer, an answer to another wait, or a record written at or
+     * after the answer. Optional so payloads built elsewhere need not name it;
+     * absent reads as false.
+     */
+    lastSuppressionAnswered?: boolean;
   };
   isSelectionListActive?: boolean;
   isPagerActive?: boolean;

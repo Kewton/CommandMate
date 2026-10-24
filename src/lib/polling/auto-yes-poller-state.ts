@@ -103,6 +103,36 @@ export interface AutoYesPollerState {
    * process's identical dialog is not taken for the one that had its Enter.
    */
   enterFallbackEpoch?: number;
+  /**
+   * Issue #3798 (design §2.2, PR 3): the waiting episode the poller's last
+   * answer went to, and the confirmation it answered. Written in the
+   * synchronous step the send returns to, together with the observation that
+   * opens (or keeps) that episode. A frame with nothing left to answer then
+   * closes that episode — and only that one: an episode it did not answer, or
+   * one opened after the answer, has another id. Optional so hand-built states
+   * need not name it.
+   */
+  lastAnswer?: AutoYesLastAnswer | null;
+}
+
+/** What {@link AutoYesPollerState.lastAnswer} records (Issue #3798). */
+export interface AutoYesLastAnswer {
+  /** The waiting episode the answer went to. */
+  episodeId: string;
+  /** {@link partialAnswerScreenKey} of the confirmation answered. */
+  screenKey: string;
+  /** Epoch ms the answer was observed (the send had returned). */
+  at: number;
+}
+
+/**
+ * The Auto-Yes poller's last answer for one instance (Issue #3798), for the
+ * other observers of the same waiting episode (the response poller). Read off
+ * `globalThis` (`__autoYesPollerStates`) as the push gate reads the poller's
+ * answer time, so a reader need not import the poller.
+ */
+export function getAutoYesLastAnswer(compositeKey: string): AutoYesLastAnswer | null {
+  return globalThis.__autoYesPollerStates?.get(compositeKey)?.lastAnswer ?? null;
 }
 
 /**

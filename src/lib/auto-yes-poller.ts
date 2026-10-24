@@ -61,7 +61,7 @@ import type { PromptDetectionResult } from './detection/types';
 import type { PromptData } from '@/types/models';
 import { getErrorMessage } from './errors';
 import { invalidateCache } from './tmux/tmux-capture-cache';
-import { readWaitingScreen, type ScreenReading } from './detection/waiting-screen-reading';
+import { promptWaitingReading, readWaitingScreen, type ScreenReading } from './detection/waiting-screen-reading';
 import { detectSessionStatus } from './detection/status-detector';
 import { isApiAnswerableStructuredWait, peekPromptWaiting } from './session/prompt-waiting-composition';
 import { getAgentEventSource } from './hooks/sources/registry';
@@ -72,6 +72,7 @@ import {
   type CapturedFrameTime,
   type ObservationStart,
 } from './session/waiting-episode-binding';
+import { getEpisodeVersion, getWaitingEpisodeRecord } from './session/waiting-episode-state';
 import {
   THINKING_POLLING_INTERVAL_MS,
   REDUCED_CAPTURE_LINES,
@@ -745,6 +746,10 @@ function settleFailedTick(
  *   followed by {@link isTickCurrent}, and a tick
  *   that lost it types nothing more and returns `no_answer`. Omitted (direct
  *   callers, tests), nothing is checked, as before.
+ * @param observation - Issue #3798: the tick's waiting-episode start, fixed
+ *   before its capture, and when that capture's frame was fetched. The answer
+ *   is observed against them ({@link observeAnsweredPrompt}). Omitted (direct
+ *   callers, tests), the start is fixed here and the frame dated 0.
  * @returns 'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'
  */
 export async function detectAndRespondToPrompt(
@@ -755,9 +760,14 @@ export async function detectAndRespondToPrompt(
   precomputedLines?: string[],
   instanceId?: string,
   rawOutput?: string,
-  generation?: AutoYesTickGeneration
+  generation?: AutoYesTickGeneration,
+  observation?: TickObservation
 ): Promise<'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'> {
   const compositeKey = buildCompositeKey(worktreeId, cliToolId, instanceId);
+  const tickObservation: TickObservation = observation ?? {
+    start: startWaitingObservation(worktreeId, cliToolId, instanceId),
+    frameTime: { frameCapturedAt: 0, frameFetchedAfterStart: false },
+  };
   // Issue #3706 / #3713: the send in flight, settled without an await once it
   // comes back — as a partial answer when it was stopped with keys on the pane.
   let attempt: AutoYesSendAttempt | null = null;
@@ -1017,6 +1027,8 @@ export async function detectAndRespondToPrompt(
       }),
     );
     receiptEpisode = receiptEpisodeOfSend(cliToolId, worktreeId, instanceId);
+    // Issue #3798: the wait this answer goes to, fixed as the send begins.
+    const answerTarget = fixAnswerTarget(worktreeId, cliToolId, instanceId);
     sendInFlight = true;
     try {
       await sendPromptAnswer({
@@ -1035,6 +1047,14 @@ export async function detectAndRespondToPrompt(
     settleSendAttempt(attempt, false);
     // Issue #3796 review E: the episode the send began for, as on the failure side.
     noteAnswerSent(cliToolId, worktreeId, instanceId, false, receiptEpisode);
+    // Issue #3798: the wait this answer went to — opened if none is open — so
+    // the frame that shows the confirmation gone closes it. Once the keys are
+    // out, only by a tick that still acts for this instance (#3706: one that
+    // lost its grant or session writes nothing that says "answered"), and only
+    // for the wait fixed as the send began.
+    if (generation === undefined || isTickCurrent(generation)) {
+      observeAnsweredPrompt(judged, screenKey, tickObservation, answerTarget);
+    }
 
     // 6., 7. The answer reached tmux: see `finishAnsweredPrompt`.
     await finishAnsweredPrompt(judged, promptDetection, answer, generation);
@@ -1144,6 +1164,7 @@ async function pollAutoYes(
     // 4. Detect and respond to prompt
     const result = await detectAndRespondToPrompt(
       worktreeId, pollerState!, cliToolId, cleanOutput, lines, instanceId, rawOutput, generation,
+      { start: observationStart, frameTime },
     );
     if (!isTickCurrent(generation)) {
       endStaleTick(generation);
@@ -1216,16 +1237,115 @@ async function pollAutoYes(
 }
 
 /**
+ * The wait an answer goes to, fixed in the synchronous step the send begins in
+ * (Issue #3798): the episode open then, or none and the version it was at.
+ */
+interface AnswerTarget {
+  episodeId: string | null;
+  version: number;
+}
+
+function fixAnswerTarget(worktreeId: string, cliToolId: CLIToolType, instanceId: string | undefined): AnswerTarget {
+  return {
+    episodeId: getWaitingEpisodeRecord(worktreeId, cliToolId, instanceId)?.episodeId ?? null,
+    version: getEpisodeVersion(worktreeId, cliToolId, instanceId),
+  };
+}
+
+/**
+ * Whether the wait is still the one the answer was sent to: the same episode
+ * open, as it was when the send began (the version has not moved) or rebound
+ * since to a binding the answer may still be for — the hook of the turn the
+ * answer resumed may have landed during the send — but not to a `screen`: a
+ * survey or a picker another observer saw during the send is newer than the
+ * prompt these keys answered, and re-observing that prompt would turn the
+ * person's screen back into a wait Auto-Yes answered. When none was open,
+ * none opened or closed since.
+ */
+function answerTargetHolds(
+  target: AnswerTarget,
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string | undefined
+): boolean {
+  if (target.episodeId === null) return getEpisodeVersion(worktreeId, cliToolId, instanceId) === target.version;
+  const episode = getWaitingEpisodeRecord(worktreeId, cliToolId, instanceId);
+  if (episode?.episodeId !== target.episodeId) return false;
+  return getEpisodeVersion(worktreeId, cliToolId, instanceId) === target.version || episode.binding.kind !== 'screen';
+}
+
+/** What a tick fixed for its waiting-episode observations (Issue #3798). */
+interface TickObservation {
+  start: ObservationStart;
+  frameTime: CapturedFrameTime;
+}
+
+/**
+ * The answer the poller just sent, as an observation of the waiting episodes
+ * (Issue #3798, design §2.5 "Auto-Yes poller", PR 3). Called in the
+ * synchronous step the send returns to, before anything else is awaited: the
+ * confirmation answered is a fresh prompt (planned against the episode as it
+ * is now, I5 (d)), so a wait opens if none is open, and a second confirmation
+ * of the same turn after an answer (another screen key) replaces the answered
+ * wait (R1-7) — a new hold, not the old wait's spent one. The episode the plan
+ * leaves open is recorded as `lastAnswer`; a plan refused (another generation,
+ * or a frame fetched before the close of this very confirmation — a stop that
+ * landed during the send) records none, so nothing is closed on the strength
+ * of it. Nor does a send whose wait moved under it (`target`, fixed as the
+ * send began): another wait opened during the send — a hook, another
+ * observer — is not the one these keys answered, and nothing is planned or
+ * recorded for it; `lastAnswer` stays as it was — and so for the same wait
+ * rebound during the send to a person's `screen`. Advisory, like
+ * {@link observeWaitingFromTick}.
+ */
+function observeAnsweredPrompt(
+  prompt: JudgedPrompt,
+  screenKey: string,
+  observation: TickObservation,
+  target: AnswerTarget
+): void {
+  const { worktreeId, cliToolId, instanceId, pollerState, promptData } = prompt;
+  try {
+    if (!answerTargetHolds(target, worktreeId, cliToolId, instanceId)) {
+      logger.debug('poller:answer-target-moved', { worktreeId, cliToolId, instanceId, target: target.episodeId });
+      return;
+    }
+    const plan = observeWaiting({
+      worktreeId,
+      cliToolId,
+      instanceId,
+      observer: 'auto-yes-poller',
+      start: observation.start,
+      reading: promptWaitingReading(promptData),
+      ...observation.frameTime,
+      freshPrompt: true,
+      lastAnswer: pollerState.lastAnswer ?? null,
+    });
+    const episode = plan.action === 'ignored' ? null : getWaitingEpisodeRecord(worktreeId, cliToolId, instanceId);
+    pollerState.lastAnswer = episode === null ? null : { episodeId: episode.episodeId, screenKey, at: plan.at };
+  } catch (error) {
+    pollerState.lastAnswer = null;
+    logger.debug('poller:waiting-observation-failed', {
+      worktreeId,
+      cliToolId,
+      instanceId,
+      error: getErrorMessage(error),
+    });
+  }
+}
+
+/**
  * Tell the waiting episodes what this tick saw (Issue #3798, design §2.5,
  * PR 1b): a frame with nothing for Auto-Yes to answer, read the way the status
  * probe reads it — without the agy receipt window — or a session that is gone.
  *
  * What it can do is table O-1 for a waiting frame (a survey or a picker after
  * an answer opens, or turns the wait into, a person's `screen`), and on the
- * closing side only a `screen` this tick saw cleared on a frame fetched after
- * it became one, or any wait of a session that is gone. A wait the poller did
- * not answer is not its to close (PR 3). Advisory: a failure is logged and the
- * tick goes on.
+ * closing side a `screen` this tick saw cleared on a frame fetched after it
+ * became one, the wait the poller answered (`lastAnswer`, PR 3), or any wait
+ * of a session that is gone. A wait the poller did not answer — or answered
+ * before it was replaced — is not its to close. Advisory: a failure is logged
+ * and the tick goes on.
  */
 function observeWaitingFromTick(tick: {
   worktreeId: string;
@@ -1269,6 +1389,7 @@ function observeWaitingFromTick(tick: {
       start: tick.start,
       reading,
       ...tick.frameTime,
+      lastAnswer: tick.pollerState.lastAnswer ?? null,
     });
   } catch (error) {
     logger.debug('poller:waiting-observation-failed', {
