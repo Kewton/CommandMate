@@ -17,7 +17,7 @@ import { spawnSync } from 'node:child_process';
 import { itemOf, latestByStage, unmetStage } from './run-log.mjs';
 import { IGNORED_DIRTY, dirtyPaths } from './dirty-tree.mjs';
 import { itemProblem, workItemName } from './execution-key.mjs';
-import { verifyEnvState } from './env-manifest.mjs';
+import { FOLLOWS_HEAD, verifyEnvState } from './env-manifest.mjs';
 
 export { IGNORED_DIRTY, dirtyPaths };
 
@@ -50,6 +50,8 @@ export const REQUIRED_RECORDS = [
   { stage: 'findings', why: '5-3' },
   { stage: 'precheck', why: '6-1-1' },
 ];
+/** Stages whose passed record is held to the environment it was taken in (#3883 N3, N9). */
+export const ENV_BOUND_STAGES = ['verify', 'precheck'];
 /** 6-2: the sweep runs over every tracked file, never a fixed list of shared files. */
 export const MARKER_PATTERN = '^(<<<<<<< |>>>>>>> |={7}$)';
 
@@ -242,26 +244,41 @@ export function workHeadOf(run, worktree, head) {
  * Issue — its later records, at its own HEAD — neither stops nor passes this one
  * (#3883). Left out, every record of the Issue is read, as before.
  *
- * With `env` (#3883 N3), a passed verify is also held to the environment it
- * was taken in (env-manifest.mjs verifyEnvState): an input that differs now, or
- * an `env=` whose manifest is not in the run directory, is a missing verify
- * (re-verify, 3-3 / 5-1). A record without `env=` (taken before H-8) is used
- * as before and `env.warn` says so.
+ * With `env` (#3883 N3, N9), a passed verify and a passed precheck are also
+ * held to the environment they were taken in (env-manifest.mjs
+ * verifyEnvState): an input that differs now, or an `env=` whose manifest is
+ * not in the run directory, is a missing record of that stage (verify again /
+ * precheck again). The lockfile and the installed versions of a verify on an
+ * earlier HEAD (a refresh or a fold on top) are left out only when the
+ * precheck of the current HEAD was taken in this environment (its own
+ * manifest is `same` now, or it is a record from before H-8) — that precheck
+ * checked the code with them. A record without `env=` (taken before H-8) is
+ * used as before and `env.warn` says so.
  *
  * @param {{ runDir: string, worktree: string, home: string, warn?: (line: string) => void }} [env]
  */
 export function missingRecords(records, issue, heads, item, env) {
   const stages = latestByStage(records, issue, item);
+  const where = env ? { runDir: env.runDir, worktree: env.worktree, home: env.home } : null;
+  const precheckNow =
+    where && stages.precheck?.head === heads.head && stages.precheck.result === 'ok' &&
+    ['same', 'unrecorded'].includes(verifyEnvState(stages.precheck, where).state);
   return REQUIRED_RECORDS.map(({ stage, why }) => {
     const reason = unmetStage(stage, stages[stage], heads);
     if (reason) return `${reason} (${why})`;
-    if (stage !== 'verify' || !env) return null;
-    const state = verifyEnvState(stages.verify, { ...env, head: heads.head });
+    if (!ENV_BOUND_STAGES.includes(stage) || !where) return null;
+    const record = stages[stage];
+    const coveredByPrecheck = stage === 'verify' && record.head !== heads.head && precheckNow;
+    const state = verifyEnvState(record, { ...where, ...(coveredByPrecheck ? { ignore: FOLLOWS_HEAD } : {}) });
     if (state.state === 'unrecorded') {
-      env.warn?.(`warning: verify at ${String(stages.verify.head ?? '-').slice(0, 7)}: ${state.detail}`);
+      env.warn?.(`warning: ${stage} at ${String(record.head ?? '-').slice(0, 7)}: ${state.detail}`);
       return null;
     }
-    return state.state === 'same' ? null : `verify: environment ${state.state} — ${state.detail}; verify again (${why})`;
+    if (state.state === 'same') return null;
+    const precheckHint = stage === 'verify' && record.head !== heads.head && state.fields.some(FOLLOWS_HEAD)
+      ? ` (no precheck of ${String(heads.head).slice(0, 7)} in this environment covers the dependencies)`
+      : '';
+    return `${stage}: environment ${state.state} — ${state.detail}${precheckHint}; ${stage === 'verify' ? 'verify' : 'precheck'} again (${why})`;
   }).filter(Boolean);
 }
 

@@ -178,16 +178,17 @@ export function keptManifest(runDir, key, hash) {
 /**
  * The inputs a later commit may change on its own: a refresh (6-2) or a fold
  * (6-4) on top of the verified commit changes the lockfile and the installed
- * versions with the code, and the precheck of the new HEAD runs on them. The
- * inputs outside git (the models, the local settings, which `node_modules`)
- * are compared at any HEAD.
+ * versions with the code. They are left out of a comparison only when the
+ * caller has a check of the current HEAD taken in the current environment (a
+ * precheck whose own manifest is `same` now, #3883 N9) — never for the HEAD
+ * difference alone. The inputs outside git are compared in every case.
  */
-const FOLLOWS_HEAD = (field) => field === 'lockfile' || field.startsWith('packages.');
+export const FOLLOWS_HEAD = (field) => field === 'lockfile' || field.startsWith('packages.');
 
 /**
- * Whether a passed verification still holds for the environment of `worktree`
- * now (#3883 N3): the manifest kept with the record (keptManifest) against a
- * manifest taken now.
+ * Whether a passed verification (or precheck, #3883 N9) still holds for the
+ * environment of `worktree` now (#3883 N3): the manifest kept with the record
+ * (keptManifest) against a manifest taken now.
  *
  * - `unrecorded`: the note has no `env=` (a record from before #3883 H-8). It
  *   is taken as before; the caller says so (a warning), so the run in progress
@@ -198,17 +199,16 @@ const FOLLOWS_HEAD = (field) => field === 'lockfile' || field.startsWith('packag
  * - `same`.
  *
  * @param {{ note?: string, key?: string, head?: string }} record
- * @param {{ runDir: string, worktree: string, home: string, head?: string }} where
- *   `head`: the HEAD the result is used at; another than the record's ignores the inputs that follow HEAD.
+ * @param {{ runDir: string, worktree: string, home: string, ignore?: (field: string) => boolean }} where
+ *   `ignore`: inputs another check covers now (FOLLOWS_HEAD under a precheck of the current HEAD that is `same`).
  * @returns {{ state: 'same' | 'unrecorded' | 'missing' | 'changed', fields: string[], detail: string }}
  */
-export function verifyEnvState(record, { runDir, worktree, home, head }) {
+export function verifyEnvState(record, { runDir, worktree, home, ignore }) {
   const hash = recordedEnvHash(record?.note);
   if (hash === null) return { state: 'unrecorded', fields: [], detail: 'no env= in the record (taken before #3883 H-8): used as before' };
   const kept = record?.key ? keptManifest(runDir, record.key, hash) : null;
   if (!kept) return { state: 'missing', fields: [], detail: `env=${hash}: no manifest with that hash under key ${record?.key ?? '-'} in ${runDir}` };
-  const sameHead = !head || head === record.head;
-  const fields = diffManifest(kept.manifest, takeManifest({ worktree, home })).filter((field) => sameHead || !FOLLOWS_HEAD(field));
+  const fields = diffManifest(kept.manifest, takeManifest({ worktree, home })).filter((field) => !ignore?.(field));
   return fields.length > 0
     ? { state: 'changed', fields, detail: `env=${hash} (${kept.file}) differs now in ${fields.join(',')}` }
     : { state: 'same', fields: [], detail: `env=${hash}` };

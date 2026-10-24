@@ -16,7 +16,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { appendRecord } from '../../../../scripts/orchestrate/run-log.mjs';
-import { manifestHash, takeManifest, verifyEnvState } from '../../../../scripts/orchestrate/env-manifest.mjs';
+import { FOLLOWS_HEAD, manifestHash, takeManifest, verifyEnvState } from '../../../../scripts/orchestrate/env-manifest.mjs';
 import { missingRecords } from '../../../../scripts/orchestrate/pr-common.mjs';
 import { main as precheck } from '../../../../scripts/orchestrate/precheck.mjs';
 import { main as publish } from '../../../../scripts/orchestrate/publish-pr.mjs';
@@ -66,6 +66,41 @@ const globalModel = (model: string) => fs.writeFileSync(path.join(home, '.claude
 const lockfile = () => fs.writeFileSync(path.join(worktree, 'package-lock.json'), '{"lockfileVersion":3,"changed":true}\n');
 const latestVerify = () => JSON.parse(fs.readFileSync(fs.readdirSync(runDir).filter((f) => f.startsWith('run-')).map((f) => path.join(runDir, f))[0], 'utf8').trim().split('\n').pop()!);
 
+/**
+ * precheck.mjs at `head` with a fake git and fake checks; `during` runs inside the first check (an input that
+ * moves while the precheck runs).
+ */
+function runPrecheck({ head = HEAD_A, force = true, during }: { head?: string; force?: boolean; during?: () => void } = {}) {
+  const out: string[] = [];
+  const checks: string[] = [];
+  const deps = {
+    run: (command: string, args: string[]) => {
+      if (command === 'git') {
+        const sub = args.slice(2);
+        if (sub[0] === 'rev-parse') return { status: 0, stdout: `${head}\n`, stderr: '' };
+        if (sub[0] === 'log') return { status: 0, stdout: `${head} ${'f'.repeat(40)}\n`, stderr: '' };
+        if (sub[0] === 'diff-tree') return { status: 0, stdout: 'src/a.ts\n', stderr: '' };
+        if (sub.includes('--diff-filter=ACMR')) return { status: 0, stdout: 'src/a.ts\n', stderr: '' };
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      if (checks.length === 0) during?.();
+      checks.push(args[0]);
+      return { status: 0, stdout: '', stderr: '' };
+    },
+    findTestsNaming: () => [],
+    now: () => new Date(Date.UTC(2026, 9, 25, 2, 0)),
+    home,
+    log: (line: string) => out.push(line),
+    error: (line: string) => out.push(line),
+  };
+  const code = precheck(['--run-dir', runDir, '--issues', '3477', '--issue', '3477', '--worktree', worktree, ...(force ? ['--force'] : [])], deps);
+  return { code, out: out.join('\n'), checks };
+}
+const allRecords = () =>
+  fs.readdirSync(runDir).filter((f) => f.startsWith('run-')).flatMap((f) =>
+    fs.readFileSync(path.join(runDir, f), 'utf8').trim().split('\n').map((line) => JSON.parse(line))
+  );
+
 describe('verifyEnvState', () => {
   const where = () => ({ runDir, worktree, home });
 
@@ -92,42 +127,19 @@ describe('verifyEnvState', () => {
     expect(verifyEnvState(latestVerify(), where()).state).toBe('missing');
   });
 
-  it('at another HEAD (a refresh on top) the lockfile follows the commits; the models do not', () => {
+  it('the lockfile is left out only when the caller says another check covers it; the models never (#3883 N9)', () => {
     recordVerify();
     lockfile();
-    expect(verifyEnvState(latestVerify(), { ...where(), head: HEAD_B }).state).toBe('same');
-    expect(verifyEnvState(latestVerify(), { ...where(), head: HEAD_A })).toMatchObject({ state: 'changed', fields: ['lockfile'] });
+    // A HEAD difference alone no longer leaves anything out.
+    expect(verifyEnvState(latestVerify(), where())).toMatchObject({ state: 'changed', fields: ['lockfile'] });
+    expect(verifyEnvState(latestVerify(), { ...where(), ignore: FOLLOWS_HEAD }).state).toBe('same');
     globalModel('fable');
-    expect(verifyEnvState(latestVerify(), { ...where(), head: HEAD_B })).toMatchObject({ state: 'changed', fields: ['globalModel'] });
+    expect(verifyEnvState(latestVerify(), { ...where(), ignore: FOLLOWS_HEAD })).toMatchObject({ state: 'changed', fields: ['globalModel'] });
   });
 });
 
 describe('precheck: the verify’s gates are reused only in the same environment', () => {
-  function run() {
-    const out: string[] = [];
-    const checks: string[] = [];
-    const deps = {
-      run: (command: string, args: string[]) => {
-        if (command === 'git') {
-          const sub = args.slice(2);
-          if (sub[0] === 'rev-parse') return { status: 0, stdout: `${HEAD_A}\n`, stderr: '' };
-          if (sub[0] === 'log') return { status: 0, stdout: `${HEAD_A} ${'f'.repeat(40)}\n`, stderr: '' };
-          if (sub[0] === 'diff-tree') return { status: 0, stdout: 'src/a.ts\n', stderr: '' };
-          if (sub.includes('--diff-filter=ACMR')) return { status: 0, stdout: 'src/a.ts\n', stderr: '' };
-          return { status: 0, stdout: '', stderr: '' };
-        }
-        checks.push(args[0]);
-        return { status: 0, stdout: '', stderr: '' };
-      },
-      findTestsNaming: () => [],
-      now: () => new Date(Date.UTC(2026, 9, 25, 2, 0)),
-      home,
-      log: (line: string) => out.push(line),
-      error: (line: string) => out.push(line),
-    };
-    const code = precheck(['--run-dir', runDir, '--issues', '3477', '--issue', '3477', '--worktree', worktree, '--force'], deps);
-    return { code, out: out.join('\n'), checks };
-  }
+  const run = () => runPrecheck();
 
   it('same environment: lint / typecheck are not repeated (negative control)', () => {
     recordVerify();
@@ -218,5 +230,82 @@ describe('publish / merge: a verify of another environment is a missing verify',
     );
     expect(missingRecords(records, 3477, { head: HEAD_A, workHead: HEAD_A }, null)).toEqual([]);
     expect(missingRecords(records, 3477, { head: HEAD_A, workHead: HEAD_A }, null, { runDir, worktree, home })).toHaveLength(1);
+  });
+});
+
+describe('a precheck is tied to the environment it ran in (#3883 N9)', () => {
+  it('records env= under its key, and its early return is taken only in the same environment', () => {
+    const first = runPrecheck({ force: false });
+    expect(first.code).toBe(0);
+    const record = allRecords().find((r) => r.stage === 'precheck');
+    expect(record.note).toMatch(/ key=3477:3477:precheck-aaaaaaa:a1 env=[0-9a-f]{12}$/);
+    expect(record.key).toBe('3477:3477:precheck-aaaaaaa:a1');
+    expect(verifyEnvState(record, { runDir, worktree, home }).state).toBe('same');
+    // Same HEAD, options and environment: reused (negative control).
+    const again = runPrecheck({ force: false });
+    expect(again.checks).toEqual([]);
+    expect(again.out).toContain('reused: ok at aaaaaaa');
+    // Only the installed version moved: run again, not reused.
+    fs.writeFileSync(path.join(worktree, 'node_modules', 'vitest', 'package.json'), '{"version":"4.2.0"}');
+    const moved = runPrecheck({ force: false });
+    expect(moved.checks.length).toBeGreaterThan(0);
+    expect(moved.out).toMatch(/was taken in another environment \(changed — .*packages\.vitest/);
+  });
+
+  it('a precheck record from before env= is still reused, with a warning', () => {
+    const first = runPrecheck({ force: false });
+    expect(first.code).toBe(0);
+    const file = fs.readdirSync(runDir).find((f) => f.startsWith('run-'))!;
+    const legacy = fs.readFileSync(path.join(runDir, file), 'utf8').replace(/ key=\S+ env=[0-9a-f]{12}/, '');
+    fs.writeFileSync(path.join(runDir, file), legacy);
+    globalModel('fable');
+    const r = runPrecheck({ force: false });
+    expect(r.checks).toEqual([]);
+    expect(r.out).toMatch(/warning: precheck at aaaaaaa: no env= in the record/);
+  });
+
+  it('an input that moves while the precheck runs fails it', () => {
+    const r = runPrecheck({ during: lockfile });
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/the inputs changed during the precheck \(lockfile; see precheck-3477-aaaaaaa\.env\.json\) — fail/);
+    expect(allRecords().find((x) => x.stage === 'precheck')).toMatchObject({ result: 'fail' });
+  });
+
+  it('a verify of an earlier HEAD: a changed lockfile is covered only by a precheck of this HEAD in this environment', () => {
+    const where = { runDir, worktree, home };
+    recordVerify(HEAD_A);
+    for (const stage of ['review', 'findings']) appendRecord(runDir, '3477', { issue: 3477, stage, result: 'ok', head: HEAD_A });
+    lockfile();
+    const heads = { head: HEAD_B, workHead: HEAD_A };
+    // No precheck of HEAD_B: the HEAD difference alone does not leave the lockfile out.
+    expect(missingRecords(allRecords(), 3477, heads, null, where).join('\n')).toMatch(/verify: environment changed — .*lockfile \(no precheck of bbbbbbb in this environment/);
+    // A precheck of HEAD_B taken now covers it.
+    expect(runPrecheck({ head: HEAD_B }).code).toBe(0);
+    expect(missingRecords(allRecords(), 3477, heads, null, where)).toEqual([]);
+    // The versions move again after that precheck: neither it nor the verify holds.
+    fs.writeFileSync(path.join(worktree, 'node_modules', 'vitest', 'package.json'), '{"version":"4.2.0"}');
+    const reasons = missingRecords(allRecords(), 3477, heads, null, where).join('\n');
+    expect(reasons).toMatch(/precheck: environment changed — .*packages\.vitest/);
+    expect(reasons).toMatch(/verify: environment changed — .*packages\.vitest/);
+  });
+
+  it('merge runs the precheck of its HEAD again when the inputs moved since it passed', () => {
+    // The precheck ran before the lockfile moved; the verify after (so it is the current environment's).
+    for (const stage of ['review', 'findings']) appendRecord(runDir, '3477', { issue: 3477, stage, result: 'ok', head: HEAD_A });
+    expect(runPrecheck().code).toBe(0);
+    lockfile();
+    recordVerify();
+    const prechecks = () => allRecords().filter((r) => r.stage === 'precheck');
+    const out: string[] = [];
+    const fake = fakeGit({ prs: [openPr()], checks: [[{ name: 'Lint', bucket: 'pass' }, { name: 'Build', bucket: 'pass' }, { name: 'Unit Tests', bucket: 'pass' }]] });
+    const code = merge(['--run-dir', runDir, '--issues', '3477', '--issue', '3477', '--worktree', worktree], {
+      run: fake.run, home, sleep: () => {}, now: () => new Date(Date.UTC(2026, 9, 25, 3, 0)),
+      findTestsNaming: () => [], log: (l: string) => out.push(l), error: (l: string) => out.push(l),
+    } as Parameters<typeof merge>[1]);
+    expect(code, out.join('\n')).toBe(0);
+    // A second precheck of the same HEAD, in the environment of now.
+    expect(prechecks()).toHaveLength(2);
+    expect(verifyEnvState(prechecks()[1], { runDir, worktree, home }).state).toBe('same');
+    expect(out.join('\n')).toMatch(/was taken in another environment \(changed — .*lockfile/);
   });
 });

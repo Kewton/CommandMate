@@ -51,8 +51,8 @@ import { fileURLToPath } from 'node:url';
 import { appendRecord, findLatest, readRecords } from './run-log.mjs';
 import { itemOption, workHeadOf } from './pr-common.mjs';
 import { dirtyPaths } from './dirty-tree.mjs';
-import { allocateLog, workItemName } from './execution-key.mjs';
-import { verifyEnvState } from './env-manifest.mjs';
+import { allocateLog, executionKey, workItemName } from './execution-key.mjs';
+import { diffManifest, manifestHash, takeManifest, verifyEnvState } from './env-manifest.mjs';
 
 export const DEFAULT_BASE = 'origin/develop';
 /** Run order: cheap and decisive first, the test runs last. */
@@ -302,24 +302,30 @@ export function main(argv, deps = {}) {
     const opts = optionsToken(o);
 
     const { records } = readRecords(o.runDir, o.issues);
+    const home = deps.home ?? os.homedir();
+    const where = { runDir: o.runDir, worktree: o.worktree, home };
     if (!o.force) {
       const previous = findLatest(records, { issue, item, stage: 'precheck', head });
       if (previous && previous.result === 'ok') {
         const done = parseNote(previous.note);
         const missing = toRun.filter((step) => done[step] !== 'ok');
         const sameOptions = (previous.note ?? '').split(/\s+/).includes(opts);
-        if (missing.length === 0 && sameOptions) {
+        // The result holds for the environment it was taken in (#3883 N9); one from before env= is reused with a warning.
+        const env = verifyEnvState(previous, where);
+        if (missing.length === 0 && sameOptions && env.state !== 'changed' && env.state !== 'missing') {
+          if (env.state === 'unrecorded') log(`  warning: precheck at ${short}: ${env.detail}`);
           log(`precheck ${name} reused: ok at ${short} (${previous.at}) — pass --force to run again`);
           return 0;
         }
-        log(`precheck ${name}: the ok record at ${short} ${sameOptions ? `did not run ${missing.join(', ')}` : 'was taken with other options'} — running`);
+        const why = !sameOptions ? 'was taken with other options' : missing.length > 0 ? `did not run ${missing.join(', ')}` : `was taken in another environment (${env.state} — ${env.detail})`;
+        log(`precheck ${name}: the ok record at ${short} ${why} — running`);
       }
     }
     // A pass taken in another environment than this one is not reused (#3883 N3); one from before env= is, with a warning.
     const verifyRecord = findLatest(records, { issue, item, stage: 'verify', head });
     let verified = passedGates(verifyRecord);
     if (verified.length > 0) {
-      const env = verifyEnvState(verifyRecord, { runDir: o.runDir, worktree: o.worktree, home: deps.home ?? os.homedir(), head });
+      const env = verifyEnvState(verifyRecord, where);
       if (env.state === 'unrecorded') log(`  warning: verify at ${short}: ${env.detail}`);
       else if (env.state !== 'same') {
         log(`  verify at ${short} not reused: environment ${env.state} — ${env.detail}`);
@@ -327,9 +333,12 @@ export function main(argv, deps = {}) {
       }
     }
 
-    const { file: logFile } = allocateLog(o.runDir, 'precheck', `${workItemName(issue, item)}-${short}`);
+    const { file: logFile, attempt } = allocateLog(o.runDir, 'precheck', `${workItemName(issue, item)}-${short}`);
     fs.writeFileSync(logFile, `precheck ${name} ${head} base=${o.base}\n`);
     const started = now();
+    // The inputs the checks ran on, kept under this precheck's key next to its log (#3883 N9).
+    const key = executionKey({ issues: o.issues, issue, item, taskId: `precheck-${short}`, attempt });
+    const envStart = takeManifest({ worktree: o.worktree, home });
     const results = {};
     for (const step of steps) {
       const { command, reason } = plan[step];
@@ -359,13 +368,23 @@ export function main(argv, deps = {}) {
       log(`  ${step} ${results[step]} (exit ${out.status}, ${((Date.now() - t0) / 1000).toFixed(1)}s)`);
     }
 
-    const result = Object.values(results).includes('fail') ? 'fail' : 'ok';
-    const note = `${steps.map((step) => `${step}=${results[step]}`).join(' ')} ${opts}`;
+    const envEnd = takeManifest({ worktree: o.worktree, home });
+    const envMoved = diffManifest(envStart, envEnd);
+    const envFile = `${logFile.replace(/\.log$/, '')}.env.json`;
+    fs.writeFileSync(
+      envFile,
+      `${JSON.stringify({ key, start: envStart, verify: envStart, end: envEnd, changed: { duringTask: [], duringVerify: envMoved } }, null, 2)}\n`
+    );
+    // Inputs that changed while the checks ran: the result belongs to neither environment.
+    if (envMoved.length > 0) log(`  the inputs changed during the precheck (${envMoved.join(',')}; see ${path.basename(envFile)}) — fail`);
+    const result = Object.values(results).includes('fail') || envMoved.length > 0 ? 'fail' : 'ok';
+    const envNote = `key=${key} env=${manifestHash(envEnd)}${envMoved.length > 0 ? ` env-changed-during-precheck=${envMoved.join(',')}` : ''}`;
+    const note = `${steps.map((step) => `${step}=${results[step]}`).join(' ')} ${opts} ${envNote}`;
     const durationSec = Math.round((now().getTime() - started.getTime()) / 1000);
     // The work HEAD under this one: a precheck of a refreshed HEAD stands for the
     // published HEAD, not for the worker's checks (run-log.mjs WORK_STAGES).
     const workHead = workHeadOf(run, o.worktree, head);
-    const { file } = appendRecord(o.runDir, o.issues, { issue, item, stage: 'precheck', result, head, workHead, durationSec, note }, now());
+    const { file } = appendRecord(o.runDir, o.issues, { issue, item, stage: 'precheck', result, head, workHead, durationSec, note, key }, now());
     log(`precheck ${name} ${short} ${result}: ${note}`);
     log(`recorded -> ${file} (log: ${logFile})`);
     return result === 'ok' ? 0 : 1;

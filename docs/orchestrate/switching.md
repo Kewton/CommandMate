@@ -27,7 +27,7 @@
    ```bash
    AGENT=claude; MODEL=opus          # 切替先は常に opus。sonnet には切り替えない
    # 3-1 と同じ launch-worker.mjs: opus を明示して書き（前の run の sonnet 指定も上書き）、起動して実効モデルを確かめてから契約を送る。
-   # 合わなければ 1 回だけ起動し直し、なお合わなければセッションを止めて exit 40 / 41、止めたと確かめられなければ 42（3-1 のモデルの確認結果の扱い）
+   # 合わなければ 1 回だけ起動し直し、なお合わなければセッションを止めて exit 40 / 41、止めた・Auto-Yes を切ったと確かめられなければ 42 / 43（3-1 のモデルの確認結果の扱い）
    TASK_ID=$(node scripts/orchestrate/launch-worker.mjs send --run-dir "workspace/orchestration/runs/$DATE" --issue "$issue" \
      --wt "$WT" --worktree "$WT_PATH" --instance claude --model "$MODEL" --contract ".commandmate/tasks/issue-${issue}-claude.yaml") \
      && commandmatedev wait "$WT" --instance claude --on-prompt human --verify --timeout 10800
@@ -48,7 +48,7 @@
 4. **送って、モデルを確かめてから待つ**。tasks.tsv には切替の行を追記する（元の行は残す）。
    ```bash
    AGENT=claude; MODEL=opus
-   # 書く → 起動 → capture --json の model が opus を含むかを確かめてから契約を送る（3-1 と同じ helper。exit 40 / 41 / 42 なら待たずに止める）
+   # 書く → 起動 → capture --json の model が opus を含むかを確かめてから契約を送る（3-1 と同じ helper。exit 40〜43 なら待たずに止める）
    TASK_ID=$(node scripts/orchestrate/launch-worker.mjs send --run-dir "workspace/orchestration/runs/$DATE" --issue "$issue" \
      --wt "$WT" --worktree "$WT_PATH" --instance claude --model "$MODEL" --contract ".commandmate/tasks/issue-${issue}-opus.yaml") \
      && commandmatedev wait "$WT" --instance claude --on-prompt human --verify --timeout 10800

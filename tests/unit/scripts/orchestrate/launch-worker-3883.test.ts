@@ -16,7 +16,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   EXIT_MODEL_MISMATCH,
   EXIT_MODEL_UNKNOWN,
+  EXIT_AUTO_YES_UNCONFIRMED,
   EXIT_STOP_UNCONFIRMED,
+  DISARM_ATTEMPTS,
   INIT_MESSAGE,
   MODEL_READS,
   READY_MAX_POLLS,
@@ -178,18 +180,32 @@ function fakeCli({
   killStops = true,
   listExit = 0,
   ready = true,
+  armed = false,
+  disableExit = 0,
+  disableSticks = false,
 } = {}) {
   const calls: string[][] = [];
   const sleeps: number[] = [];
+  /** Whether the Auto-Yes grant was on at each starting message (it must never be, #3883 N7). */
+  const armedAtInit: boolean[] = [];
   let tasks = 0;
   let inits = 0;
   let captures = 0;
   let alive = running;
+  // The grant is the worktree × instance's, kept whether or not a session runs (as the state store keeps it).
+  let grant = armed;
   const run = (command: string, args: string[]) => {
     calls.push([command, ...args]);
     if (command === 'git') return { status: ignored ? 0 : 1, stdout: '', stderr: '' };
     if (args[0] === 'instances' && args[2] === '--json') {
-      return listExit === 0 ? { status: 0, stdout: JSON.stringify([{ instanceId: 'claude', running: alive }]), stderr: '' } : { status: listExit, stdout: '', stderr: 'ECONNREFUSED' };
+      return listExit === 0
+        ? { status: 0, stdout: JSON.stringify([{ instanceId: 'claude', running: alive, autoYes: grant }]), stderr: '' }
+        : { status: listExit, stdout: '', stderr: 'ECONNREFUSED' };
+    }
+    if (args[0] === 'auto-yes' && args.includes('--disable')) {
+      if (disableExit !== 0) return { status: disableExit, stdout: '', stderr: 'Error: server down' };
+      if (!disableSticks) grant = false;
+      return { status: 0, stdout: '', stderr: '' };
     }
     if (args[0] === 'instances' && args[2] === 'kill') {
       if (killExit !== 0) return { status: killExit, stdout: '', stderr: 'Error: Failed to kill session' };
@@ -199,7 +215,9 @@ function fakeCli({
     if (args[0] === 'send') {
       if (sendExit !== 0) return { status: sendExit, stdout: '', stderr: 'prompt not ready' };
       alive = true;
+      if (args.includes('--auto-yes')) grant = true;
       if (!args.includes('--contract')) {
+        armedAtInit.push(grant);
         inits += 1;
         return { status: 0, stdout: '', stderr: `Message sent. init-${inits}\n` };
       }
@@ -214,7 +232,7 @@ function fakeCli({
     }
     throw new Error(`unexpected ${command} ${args.join(' ')}`);
   };
-  return { run, calls, sleeps, sleep: (ms: number) => sleeps.push(ms) };
+  return { run, calls, sleeps, armedAtInit, sleep: (ms: number) => sleeps.push(ms) };
 }
 
 const sendArgv = (...extra: string[]) => [
@@ -235,6 +253,8 @@ const contractSends = (fake: ReturnType<typeof fakeCli>) => fake.calls.filter((c
 const autoYes = (fake: ReturnType<typeof fakeCli>) => fake.calls.filter((c) => c.includes('--auto-yes'));
 /** A stop that was asked for and then read back as stopped. */
 const STOP = ['instances --json', 'instances kill', 'instances --json'];
+/** Auto-Yes turned off and read back off (#3883 N7). */
+const DISARM = ['auto-yes', 'instances --json'];
 
 describe('send: model pinned, sent, checked (P3)', () => {
   it('stops a running session, writes the model, sends, then reads the model back', () => {
@@ -242,7 +262,7 @@ describe('send: model pinned, sent, checked (P3)', () => {
     const r = go(fake, sendArgv('--model', 'opus'));
     expect(r.code).toBe(0);
     expect(r.out).toEqual(['task-1']);
-    expect(verbs(fake)).toEqual([...STOP, 'git', 'send init', 'capture', 'capture', 'capture', 'send contract']);
+    expect(verbs(fake)).toEqual([...STOP, ...DISARM, 'git', 'send init', 'capture', 'capture', 'capture', 'send contract']);
     expect(localSettings()).toEqual({ model: 'opus[1m]' });
     expect(fake.calls.find((c) => c[1] === 'send')).toEqual(['commandmatedev', 'send', 'wt-1', INIT_MESSAGE, '--instance', 'claude']);
     expect(contractSends(fake)[0]).toEqual([
@@ -257,8 +277,8 @@ describe('send: model pinned, sent, checked (P3)', () => {
     expect(r.code).toBe(0);
     expect(r.out).toEqual(['task-1']);
     expect(verbs(fake)).toEqual([
-      ...STOP, 'git', 'send init', 'capture', ...STOP,
-      'instances --json', 'git', 'send init', 'capture', 'capture', 'capture', 'send contract',
+      ...STOP, ...DISARM, 'git', 'send init', 'capture', ...STOP,
+      'instances --json', ...DISARM, 'git', 'send init', 'capture', 'capture', 'capture', 'send contract',
     ]);
     expect(r.log.join('\n')).toContain('model MISMATCH issue=3883 want=opus got=claude-fable-5-1 attempt=1');
   });
@@ -339,6 +359,43 @@ describe('send: the contract and Auto-Yes go out only after the model is confirm
     expect(fake.calls.filter((c) => c[1] === 'capture')).toHaveLength(1 + READY_MAX_POLLS);
     expect(verbs(fake).slice(-3)).toEqual(STOP);
     expect(r.log.join('\n')).toMatch(/not ready: .*contract not sent/);
+  });
+});
+
+describe('send: Auto-Yes is off before the session starts, with or without a session (#3883 N7)', () => {
+  it('a grant left on with no session running is turned off and read back off before the starting message', () => {
+    const fake = fakeCli({ models: ['claude-opus-5-5'], running: false, armed: true });
+    expect(go(fake, sendArgv('--model', 'opus')).code).toBe(0);
+    expect(fake.calls.some((c) => c[3] === 'kill')).toBe(false);
+    expect(fake.calls.find((c) => c[1] === 'auto-yes')).toEqual(['commandmatedev', 'auto-yes', 'wt-1', '--disable', '--instance', 'claude']);
+    expect(fake.armedAtInit).toEqual([false]);
+    // Auto-Yes comes back only with the contract.
+    expect(autoYes(fake)).toEqual(contractSends(fake));
+  });
+
+  it('every start of a restart is preceded by the disable too', () => {
+    const fake = fakeCli({ models: ['claude-fable-5-1', 'claude-opus-5-5'], armed: true });
+    expect(go(fake, sendArgv('--model', 'opus')).code).toBe(0);
+    expect(fake.armedAtInit).toEqual([false, false]);
+    expect(fake.calls.filter((c) => c[1] === 'auto-yes')).toHaveLength(2);
+  });
+
+  it('a disable that fails, or a grant still on after it: nothing is written or sent, exit 43', () => {
+    for (const opts of [{ disableExit: 1 }, { disableSticks: true }]) {
+      const fake = fakeCli({ models: ['claude-opus-5-5'], running: false, armed: true, ...opts });
+      const r = go(fake, sendArgv('--model', 'opus'));
+      expect(r.code).toBe(EXIT_AUTO_YES_UNCONFIRMED);
+      expect(fake.calls.some((c) => c[1] === 'send')).toBe(false);
+      expect(fake.calls.filter((c) => c[1] === 'auto-yes')).toHaveLength(DISARM_ATTEMPTS);
+      expect(r.log.join('\n')).toMatch(/auto-yes UNCONFIRMED claude of wt-1: .*\(after 3 attempts\)/);
+    }
+    expect(fs.existsSync(path.join(worktree, '.claude'))).toBe(false);
+  });
+
+  it('a grant that was off is still confirmed off (negative control: the start goes on)', () => {
+    const fake = fakeCli({ models: ['claude-opus-5-5'], running: false, armed: false });
+    expect(go(fake, sendArgv('--model', 'opus')).code).toBe(0);
+    expect(fake.armedAtInit).toEqual([false]);
   });
 });
 

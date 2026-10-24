@@ -726,7 +726,7 @@ while IFS="$(printf '\t')" read -r issue AGENT MODEL <&3; do
   WT_DIR=$(commandmatedev ls --json | jq -r --arg id "$WT" '.[] | select(.id == $id) | .path')
   # Claude（MODEL が opus|sonnet）は、動いているセッションを止め → モデルを書き → 作業を頼まない起動のメッセージ → capture --json の model を
   # 確かめ → 一致してから契約と Auto-Yes を送る。stderr に model ok / model UNKNOWN / model MISMATCH。合わない・読めないときは 1 回だけ起動し直し、
-  # なお合わなければセッションを止めて exit 40（MISMATCH）/ 41（UNKNOWN）。契約は送らない。止めたことを確かめられなければ exit 42
+  # なお合わなければセッションを止めて exit 40（MISMATCH）/ 41（UNKNOWN）。契約は送らない。止めた・Auto-Yes を切ったと確かめられなければ 42 / 43
   # 送信の出力は runs/$DATE/send-<issue>[.a<n>].out / .err（呼び出しごとに排他的に取る）。stdout は task id だけ
   TASK_ID=$(node scripts/orchestrate/launch-worker.mjs send --run-dir "workspace/orchestration/runs/$DATE" --issue "$issue" \
     --wt "$WT" --worktree "$WT_DIR" --instance "$AGENT" --model "$MODEL" --contract ".commandmate/tasks/issue-${issue}.yaml")
@@ -750,7 +750,7 @@ done 3< "workspace/orchestration/runs/$DATE/assign.tsv"
 ループの中の `commandmatedev`（`ls` / `send` / `capture`）が stdin を読み、残りの行を消費する。
 上の雛形は fd 3 から読むので、ループの中のコマンドに `</dev/null` を付けなくてよい。雛形を書き換えて使うときも、
 stdin で読む形に戻さないこと。ループを使わずに 1 件ずつ送るときは、各 `commandmatedev` に `</dev/null` を付ける。
-`task MISSING` が出たら、その Issue は送れていない。exit 40 / 41 / 42 は下の「モデルの確認結果」、それ以外は `send-<issue>[.a<n>].err` を読み、3-1 の「冷間起動の失敗」に従って再送する。
+`task MISSING` が出たら、その Issue は送れていない。exit 40〜43 は下の「モデルの確認結果」、それ以外は `send-<issue>[.a<n>].err` を読み、3-1 の「冷間起動の失敗」に従って再送する。
 
 根拠: docs/orchestrate/workers.md#3-1-assigntsv-を-stdin-で読んで止まった実測
 
@@ -761,6 +761,7 @@ stdin で読む形に戻さないこと。ループを使わずに 1 件ずつ�
 - exit 40（2 回目も `model MISMATCH`）/ 41（2 回目も `model UNKNOWN`）: **セッションは止まっている。契約は送られていない。その Issue は進めない**（そのモデルのまま続けない）。
   8-3 に書き、`.claude/settings.local.json` と CommandMate の版を確かめてから、人の判断で送り直す。利用者の `~/.claude/settings.json` は変えない
 - exit 42（`stop UNCONFIRMED`）: kill が失敗した・まだ動いている。**何も送り直さない**。人がセッションを止めたことを確かめてから送り直す
+- exit 43（`auto-yes UNCONFIRMED`）: 起動の前に Auto-Yes を切れたと確かめられない。何も送っていない。`auto-yes --disable` を確かめてから送り直す
 - tasks.tsv は 5 列になった（`issue` / `WT` / `AGENT` / `TASK_ID` / `MODEL`）。**`--instance` に渡すのは 3 列目の `AGENT`**（`claude`）で、5 列目ではない
 
 stdout はパイプで切らずファイルに落とす（`| head` で切ると task が pending のまま残る）。
@@ -802,7 +803,7 @@ commandmatedev ls --branch feature/
 
 ### 3-3. 完了待機と検証（`wait --verify`）
 
-**`scripts/orchestrate/wait-verify.mjs` で待つ**（#3477）。`commandmatedev wait --verify` を呼び、裁定が**作業の終わりの状態のもの**だと
+**`scripts/orchestrate/wait-verify.mjs` で待つ**（#3477）。`commandmatedev wait` の後に実行の入力を記録してから `verify` を呼び（#3883。`wait --verify` は使わない）、裁定が**作業の終わりの状態のもの**だと
 確かめてから（下の「完了の合図」と「合図の前に始まった検証」をスクリプトが行う）Auto-Yes を切り、判定の行（`GATE` / `RESULT` / `Completed`）を
 1 行に要約して、run の記録（1-5）の `verify` 段に、検証が見た HEAD つきで書く。
 exit code は裁定（0 / 20 / 21）か wait のもの（10 / 124 …）なので、3-4 の表がそのまま使える。
@@ -1311,7 +1312,7 @@ summary.md の末尾に「振り分けの改善案」節を書き、完了報告
 
 - Antigravity から Claude への切り替え（3-5）
 - sonnet から opus への格上げ（3-5b）、または sonnet 担当が再指示を要した（1-2b の「中」の条件が甘い証拠になる）
-- `model MISMATCH` / `model UNKNOWN` / `stop UNCONFIRMED` で止まった（3-1。exit 40 / 41 / 42）
+- `model MISMATCH` / `model UNKNOWN` / `stop UNCONFIRMED` / `auto-yes UNCONFIRMED` で止まった（3-1。exit 40〜43）
 - ワーカー起因でない不合格を、オーケストレーターの裁定で合格扱いにした（3-4）
 - 判定表と実際の結果が食い違った（「易」と判定したのに再指示が要った／「難」と判定したが小さい変更で終わった）
 - Antigravity 固有の停止（アンケート画面、冷間起動の失敗、monitor の誤判定など）

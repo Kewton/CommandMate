@@ -23,9 +23,9 @@
  *   - a second contract sent to the same worktree and instance while this
  *     waits (#3587): the worker's turn end then belongs to the new task, and
  *     verifying the old one (narrower scope) only fails and holds the gates.
- *     When the ledger shows the task this call is about, the wait runs without
- *     `--verify` and this script starts `verify --task` itself, so the moment
- *     before a verification is its own. The task list is read while waiting,
+ *     The wait runs without `--verify` and this script starts `verify --task`
+ *     itself (every call since #3883 N8), so the moment before a verification
+ *     is its own. The task list is read while waiting,
  *     right before every verification and again before the verdict is taken;
  *     a newer task ends the call without a verdict. A `--task` older than the
  *     newest TASK_LIST_LIMIT is read on its own (`task show`), and a list that
@@ -56,11 +56,11 @@
  *     after the verdict, in `<log>.env.json`. A change during the last
  *     verification means no verdict (exit 3); a change during the work is
  *     recorded with the verdict (`env-changed=`), which holds for the
- *     environment it names (`env=<hash>`). `wait --verify` (not split)
- *     verifies inside the CLI: the manifest is taken when its log shows the
- *     turn end (`Completed:`), after which the CLI starts the verification;
- *     a verdict whose turn end was never seen, with a change since the start,
- *     is not taken either (the change cannot be placed).
+ *     environment it names (`env=<hash>`). Every call waits with a plain
+ *     `wait` and starts `verify` itself (#3883 N8): `wait --verify` started
+ *     the verification inside the CLI right after the turn end, so no manifest
+ *     could be taken between the two; a manifest read off its log was taken
+ *     after the verification had begun.
  *
  * A passed verdict is never reused: it belongs to a task, a contract and an
  * env-clean baseline taken when that task started, none of which a HEAD names.
@@ -182,24 +182,12 @@ function stopWatched(pid) {
  * not make the wait return later. The status is written with a token of this
  * call (#3883), so an `.exit` left by another attempt, or written by another
  * process to the same name, is never read as this command's status.
- *
- * With `onOutput`, the command runs the same way and `onOutput(log)` is called
- * with the log so far every EXIT_POLL_MS and once at the end, so the caller
- * sees a line (`Completed:`) close to when it is written (#3883 N5).
- *
- * @param {string} command
- * @param {string[]} args
- * @param {{ cwd?: string, logFile: string, watch?: () => boolean, onOutput?: (log: string) => void, pollMs?: number }} options
- * @returns {number}
  */
-export function defaultSpawnToLog(command, args, { cwd, logFile, watch, onOutput, pollMs = SIGNAL_POLL_SEC * 1000 }) {
+export function defaultSpawnToLog(command, args, { cwd, logFile, watch, pollMs = SIGNAL_POLL_SEC * 1000 }) {
   fs.mkdirSync(path.dirname(logFile), { recursive: true });
   const fd = fs.openSync(logFile, 'w');
-  const output = () => {
-    if (onOutput) onOutput(fs.readFileSync(logFile, 'utf8'));
-  };
   try {
-    if (!watch && !onOutput) {
+    if (!watch) {
       const result = spawnSync(command, args, { cwd, stdio: ['ignore', fd, fd] });
       if (result.error) throw result.error;
       return result.status ?? 1;
@@ -217,12 +205,8 @@ export function defaultSpawnToLog(command, args, { cwd, logFile, watch, onOutput
       let sinceWatch = 0;
       for (;;) {
         const status = readExitFile(exitFile, token);
-        if (status !== null) {
-          output();
-          return status;
-        }
-        output();
-        if (watch && sinceWatch >= pollMs) {
+        if (status !== null) return status;
+        if (sinceWatch >= pollMs) {
           sinceWatch = 0;
           if (watch()) {
             stopWatched(child.pid);
@@ -832,26 +816,15 @@ export function main(argv, deps = {}) {
         taskId: o.taskId ?? (baseline.found ? baseline.id : null),
         attempt: claimed.attempt,
       });
-    // Watched, the wait does not verify: `wait --verify` starts the verification
-    // inside the CLI, where no check can come between the turn end and the run.
-    // This script starts `verify` itself, after one more check (#3587). An
-    // instance whose turn end can come mid-work is split too: its verification
-    // starts only after its completion signal (#3883 P4), not at the hook_stop.
+    // The wait does not verify: `wait --verify` starts the verification inside
+    // the CLI, where no check can come between the turn end and the run (#3587)
+    // and no manifest can be taken before it starts (#3883 N8). This script
+    // starts `verify` itself, after one more check and with the manifest taken
+    // first (runVerify's onVerifyStart). An instance whose turn end can come
+    // mid-work starts it only after its completion signal (#3883 P4).
     const needsSignal = needsCompletionSignal(o);
-    const split = o.afterReinstruct || watching || needsSignal;
-    const waitArgs = [
-      'wait', o.wt, '--instance', instance, '--on-prompt', 'human',
-      ...(split ? [] : ['--verify']),
-      '--timeout', o.timeout,
-    ];
-    // Not split, the CLI verifies after the turn end it prints: the manifest is taken when the line shows (#3883 N5).
-    const inCliVerify = { seen: false };
-    const onOutput = (text) => {
-      if (inCliVerify.seen || !/^Completed: /m.test(text)) return;
-      inCliVerify.seen = true;
-      env.verify = manifest();
-    };
-    let exitCode = spawnToLog(o.cli, waitArgs, { cwd, logFile: o.logFile, ...(watching ? { watch } : {}), ...(split ? {} : { onOutput }) });
+    const waitArgs = ['wait', o.wt, '--instance', instance, '--on-prompt', 'human', '--timeout', o.timeout];
+    let exitCode = spawnToLog(o.cli, waitArgs, { cwd, logFile: o.logFile, ...(watching ? { watch } : {}) });
     let verdictLog = fs.existsSync(o.logFile) ? fs.readFileSync(o.logFile, 'utf8') : '';
     const verifyCtx = {
       spawnToLog, run, sleep, now, o, cwd, supersededBy,
@@ -864,13 +837,10 @@ export function main(argv, deps = {}) {
     let signal = null;
     let signalMissing = null;
 
-    // `wait --verify` whose verification could not start because another run
-    // of the worktree was going: that run is waited out and this call verifies.
-    const busyAfterWait = !split && !VERDICT_EXIT_CODES.includes(exitCode) && busyRunOf(verdictLog) !== null;
     const verifiable = exitCode === 0 || (!o.afterReinstruct && exitCode === NOT_STARTED_EXIT);
-    if (((split && verifiable) || busyAfterWait) && !superseded) {
+    if (verifiable && !superseded) {
       superseded = supersededBy();
-      if (!superseded && needsSignal && !busyAfterWait) {
+      if (!superseded && needsSignal) {
         const seen = awaitCompletionSignal({ ...verifyCtx, since: baseline.found ? baseline.createdAt : null });
         if (seen.seen) signal = seen;
         else if (seen.reason.startsWith('a newer task ')) superseded = seen.reason;
@@ -979,17 +949,7 @@ export function main(argv, deps = {}) {
       return UNCONFIRMED_EXIT;
     }
     // The inputs changed while the last verification ran: the verdict belongs to neither environment (#3883 H-8).
-    const closedEnv = closeEnv();
-    const movedEnv = closedEnv.duringVerify;
-    if (!split && env.verify === null && closedEnv.duringTask.length > 0) {
-      // `wait --verify` whose turn end never showed: the change may have come during its verification (#3883 N5).
-      record(
-        'fail',
-        headNow(),
-        `unconfirmed: the inputs changed (${closedEnv.duringTask.join(',')}; see ${path.basename(env.file)}) and the start of the verification was not seen; ${verdict.line} ${extraNotes()} auto-yes=kept`
-      );
-      return UNCONFIRMED_EXIT;
-    }
+    const movedEnv = closeEnv().duringVerify;
     if (movedEnv.length > 0) {
       record(
         'fail',

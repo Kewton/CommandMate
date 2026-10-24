@@ -16,7 +16,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { UNREADABLE, diffManifest, main as envCli, manifestHash, takeManifest } from '../../../../scripts/orchestrate/env-manifest.mjs';
-import { defaultSpawnToLog } from '../../../../scripts/orchestrate/wait-verify.mjs';
 import { addedLinks, foreignLinks, parseWorktreeList, snapshotForeignLinks } from '../../../../scripts/orchestrate/dependency-links.mjs';
 import { main as review } from '../../../../scripts/orchestrate/consistency-review.mjs';
 import { main as allocate } from '../../../../scripts/orchestrate/execution-key.mjs';
@@ -140,22 +139,6 @@ describe('env-manifest.mjs start / end (5-1, #3883 N6)', () => {
     expect(cli(['start', '--worktree', wt, '--file', path.join(tmp, 'x.json'), '--key', 'k'], home).code).toBe(2);
     expect(cli(['start', '--worktree', wt, '--file', path.join(tmp, 'x.env.json')], home).code).toBe(2);
     expect(fs.existsSync(path.join(tmp, 'x.env.json'))).toBe(false);
-  });
-});
-
-describe('wait-verify defaultSpawnToLog onOutput (#3883 N5)', () => {
-  it('shows the log while the command runs, so a line is seen before the command ends', () => {
-    const logFile = path.join(tmp, 'wait.log');
-    const seen: { completed: boolean; done: boolean }[] = [];
-    const code = defaultSpawnToLog('sh', ['-c', 'echo "Completed: wt-1 (basis=hook_stop)"; sleep 1; echo GATE-DONE; exit 20'], {
-      cwd: tmp,
-      logFile,
-      onOutput: (text: string) => seen.push({ completed: /^Completed: /m.test(text), done: text.includes('GATE-DONE') }),
-    });
-    expect(code).toBe(20);
-    // The turn end was seen while the rest had not been written yet, and the last call has all of it.
-    expect(seen.some((s) => s.completed && !s.done)).toBe(true);
-    expect(seen[seen.length - 1]).toEqual({ completed: true, done: true });
   });
 });
 

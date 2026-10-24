@@ -53,6 +53,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { appendRecord, findLatest, inItem, latestByStage, readRecords, unmetStage } from './run-log.mjs';
+import { verifyEnvState } from './env-manifest.mjs';
 import { BUILD_STEPS, findTestsNaming, main as runPrecheck, optionsFromNote, parseNote, passedGates } from './precheck.mjs';
 import {
   DEFAULT_BASE_BRANCH,
@@ -329,8 +330,12 @@ export function main(argv, deps = {}) {
       return 1;
     }
     // The precheck is recorded per HEAD, so a HEAD pushed earlier (publish-pr.mjs
-    // after a refresh) is checked here too unless it already passed.
-    if (unmetStage('precheck', latestByStage(records, issue, item).precheck, { head, workHead })) {
+    // after a refresh) is checked here too unless it already passed — in this
+    // environment (#3883 N9: precheck.mjs runs it again when the inputs moved).
+    const headPrecheck = latestByStage(records, issue, item).precheck;
+    const precheckEnv = headPrecheck ? verifyEnvState(headPrecheck, { runDir: o.runDir, worktree: o.worktree, home: deps.home ?? os.homedir() }) : null;
+    if (precheckEnv?.state === 'unrecorded') log(`merge #${issue}: warning: precheck at ${head.slice(0, 7)}: ${precheckEnv.detail}`);
+    if (unmetStage('precheck', headPrecheck, { head, workHead }) || precheckEnv?.state === 'changed' || precheckEnv?.state === 'missing') {
       // The options come from the precheck of the work HEAD; when a fold commit on top made the
       // precheck run on the published HEAD only, from the Issue's latest precheck=ok (any HEAD).
       // Without either the options would be guessed (kind lost → suppressions=skip): stop (#3527).

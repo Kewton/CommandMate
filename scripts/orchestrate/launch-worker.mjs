@@ -20,7 +20,11 @@
  * and the call fails (40 / 41) with the contract never sent. Every stop is
  * checked — the kill's exit code and the instance no longer running — and a
  * stop that cannot be confirmed fails the call (42) without sending anything
- * more, so a session on the old model is never handed the contract.
+ * more, so a session on the old model is never handed the contract. Auto-Yes
+ * is armed per worktree × instance and outlives the session (a grant left on
+ * answers whatever the next session shows), so before every start it is
+ * turned off and read back off from the state store (`instances --json`'s
+ * `autoYes`), whether a session ran or not; unconfirmed, nothing is sent (43).
  *
  * The send's output goes to `send-<issue>[-<item>][.a<n>].out` / `.err` in the
  * run directory (the starting message's to `send-init-…`), taken exclusively
@@ -31,6 +35,7 @@
  * contract went out); 40 the model did not match after one restart; 41 the
  * model could not be read after one restart (the session is stopped and the
  * contract not sent in both); 42 a stop could not be confirmed (nothing more
+ * sent); 43 Auto-Yes could not be confirmed off before the start (nothing
  * sent); 2 a usage error or a settings file git does not ignore (nothing
  * sent); 1 any other failure (the session did not come back ready after the
  * starting message: stopped, contract not sent); otherwise the `send`'s own
@@ -66,6 +71,10 @@ export const LAUNCH_ATTEMPTS = 2;
 export const EXIT_MODEL_MISMATCH = 40;
 export const EXIT_MODEL_UNKNOWN = 41;
 export const EXIT_STOP_UNCONFIRMED = 42;
+export const EXIT_AUTO_YES_UNCONFIRMED = 43;
+/** `auto-yes --disable` + read-back attempts before the start, and the pause between them. */
+export const DISARM_ATTEMPTS = 3;
+export const DISARM_INTERVAL_SEC = 2;
 /** Reads of the instance list after a kill before the stop counts as unconfirmed, and the pause between them. */
 export const STOP_READS = 3;
 export const STOP_READ_INTERVAL_SEC = 5;
@@ -143,16 +152,47 @@ export function checkModel({ run, sleep, cli, wt, instance, want }) {
   return { verdict: classifyModel(got, want), got };
 }
 
-/** true / false whether the instance's session runs, null when the list cannot be read. */
-function readRunning(run, cli, wt, instance) {
+/** The instance's row of `instances --json`: the row, undefined when the list has none, null when it cannot be read. */
+function readRow(run, cli, wt, instance) {
   const listed = run(cli, ['instances', wt, '--json']);
   if (listed.status !== 0) return null;
   try {
     const rows = JSON.parse(listed.stdout);
-    return Array.isArray(rows) ? rows.some((row) => row?.instanceId === instance && row?.running) : null;
+    return Array.isArray(rows) ? rows.find((row) => row?.instanceId === instance) : null;
   } catch {
     return null;
   }
+}
+
+/** true / false whether the instance's session runs, null when the list cannot be read. */
+function readRunning(run, cli, wt, instance) {
+  const row = readRow(run, cli, wt, instance);
+  return row === null ? null : Boolean(row?.running);
+}
+
+/**
+ * Turn the instance's Auto-Yes off and read it back off (#3883 N7). The grant
+ * belongs to the worktree × instance, not to a session: a session that is not
+ * running does not mean it is off, and the poller keeps it for the next
+ * session. `instances --json` reads `autoYes` from the state store, with or
+ * without a session; only a readable row with `autoYes` not true is "off".
+ *
+ * @returns {{ ok: boolean, detail: string }}
+ */
+export function disarmAutoYes({ run, sleep, cli, wt, instance }) {
+  let detail = '';
+  for (let attempt = 1; attempt <= DISARM_ATTEMPTS; attempt++) {
+    const off = run(cli, ['auto-yes', wt, '--disable', '--instance', instance]);
+    if (off.status !== 0) {
+      detail = `auto-yes --disable exit=${off.status} ${String(off.stderr ?? '').trim().split('\n').pop() ?? ''}`.trim();
+    } else {
+      const row = readRow(run, cli, wt, instance);
+      if (row && row.autoYes !== true) return { ok: true, detail: 'off' };
+      detail = row === null ? 'instance list unreadable after --disable' : row === undefined ? `${instance} not in the instance list` : 'still on after --disable';
+    }
+    if (attempt < DISARM_ATTEMPTS) sleep(DISARM_INTERVAL_SEC * 1000);
+  }
+  return { ok: false, detail: `${detail} (after ${DISARM_ATTEMPTS} attempts)` };
 }
 
 /**
@@ -316,6 +356,12 @@ export function main(argv, deps = {}) {
     for (let attempt = 1; attempt <= LAUNCH_ATTEMPTS; attempt++) {
       // The model is read when the session starts: stop a running one, write the model, start it without the contract.
       if (!stopped('before writing the model')) return EXIT_STOP_UNCONFIRMED;
+      // A grant left on would answer the starting session's screens before its model is known.
+      const disarm = disarmAutoYes(ctx);
+      if (!disarm.ok) {
+        log(`auto-yes UNCONFIRMED ${o.instance} of ${o.wt}: ${disarm.detail}; nothing is sent — turn it off by hand`);
+        return EXIT_AUTO_YES_UNCONFIRMED;
+      }
       const { value } = setModel(run, o.worktree, o.model);
       log(`model ${value} -> ${path.join(o.worktree, SETTINGS_FILE)}`);
       const init = sendTo('send-init', [INIT_MESSAGE, '--instance', o.instance]);
