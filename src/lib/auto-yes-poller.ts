@@ -508,7 +508,7 @@ function readPromptFrame(
   precomputedLines: string[] | undefined,
   instanceId: string | undefined,
   rawOutput: string | undefined,
-  captureWindowLines: number | undefined,
+  captureExtent: CaptureExtent | undefined,
 ): { frame: ReturnType<typeof normalizeFrame>; promptDetection: PromptDetectionResult } {
   const receiptScope = { worktreeId, instanceId };
   // Issue #3183: the ONE frame every judgement below reads — normalised once,
@@ -532,7 +532,7 @@ function readPromptFrame(
   if (cliToolId === 'antigravity') endAntigravityFrameRead(worktreeId, instanceId);
   return {
     frame,
-    promptDetection: withCaptureTop(promptDetection, cliToolId, rawOutput ?? cleanOutput, captureWindowLines),
+    promptDetection: withCaptureTop(promptDetection, cliToolId, rawOutput ?? cleanOutput, captureExtent),
   };
 }
 
@@ -547,27 +547,40 @@ function withCaptureTop(
   detection: PromptDetectionResult,
   cliToolId: CLIToolType,
   capture: string,
-  captureWindowLines: number | undefined,
+  captureExtent: CaptureExtent | undefined,
 ): PromptDetectionResult {
-  const captureTop = captureTopOf(capture, captureWindowLines, cliToolId);
+  const captureTop = captureTopOf(capture, captureExtent, cliToolId);
   return captureTop === undefined ? detection : withCaptureTopCompleteness(detection, captureTop);
 }
 
 /**
+ * The window a tick's capture was taken with, and whether that window dropped
+ * rows from the top of what tmux returned when the capture layer said
+ * (Issue #3881: review P2-1, third review N4).
+ */
+interface CaptureExtent {
+  windowLines: number;
+  headCut?: boolean;
+}
+
+/**
  * Where a poller capture's first row sits (Issue #3881 review P2-1): on a
- * scrollback pane the capture is the last `captureWindowLines` rows, so one
+ * scrollback pane the capture is the last `windowLines` rows, so one
  * that came back with fewer rows holds the pane's whole history, and one that
  * filled the window may be cut at its top (#1670's `isCaptureWindowSaturated`);
  * an alternate-screen pane has no history and is read off its screen (the
- * second review's N1, `captureTopOf` in `prompt-screen-reading`).
+ * second review's N1, `captureTopOf` in `prompt-screen-reading`), unless the
+ * window cut it (the third review's N4: `headCut`).
  * Undefined when the window is not known.
  */
 function captureTopOf(
   capture: string,
-  captureWindowLines: number | undefined,
+  captureExtent: CaptureExtent | undefined,
   cliToolId: CLIToolType,
 ): CaptureTop | undefined {
-  return captureWindowLines === undefined ? undefined : captureTopOfWindow(capture, captureWindowLines, cliToolId);
+  return captureExtent === undefined
+    ? undefined
+    : captureTopOfWindow(capture, captureExtent.windowLines, cliToolId, captureExtent.headCut);
 }
 
 /**
@@ -588,7 +601,7 @@ function noteNoPromptOnScreen(tick: {
   cleanOutput: string;
   precomputedLines: string[] | undefined;
   rawOutput: string | undefined;
-  captureWindowLines: number | undefined;
+  captureExtent: CaptureExtent | undefined;
 }): ReturnType<typeof logIfWithheldForWantOfReceipt> {
   const {
     worktreeId,
@@ -601,7 +614,7 @@ function noteNoPromptOnScreen(tick: {
     cleanOutput,
     precomputedLines,
     rawOutput,
-    captureWindowLines,
+    captureExtent,
   } = tick;
   forgetPartialAnswer(compositeKey);
   pollerState.lastAnsweredPromptKey = null;
@@ -632,7 +645,7 @@ function noteNoPromptOnScreen(tick: {
         detectPromptOnCleanFrame(cleanOutput, cliToolId, precomputedLines, rawOutput),
         cliToolId,
         rawOutput ?? cleanOutput,
-        captureWindowLines,
+        captureExtent,
       ),
     );
     // Issue #3820: past the receipt window the gated reading says "no prompt"
@@ -834,6 +847,10 @@ function settleFailedTick(
  *   `top-unknown`, and a deny miss on it is not a pass. Omitted (direct
  *   callers, tests), nothing is known about the capture's extent, as before.
  *   The same window says where the audit row's frame begins (`captureTop`).
+ * @param captureHeadCut - Issue #3881 (third review N4): whether that window
+ *   dropped rows from the top of what tmux returned, as the capture layer said
+ *   ({@link capturePollerFrame}'s `headCut`). At a window of the pane's height
+ *   the row count cannot tell. Omitted, judged from the row count as before.
  * @returns 'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'
  */
 export async function detectAndRespondToPrompt(
@@ -847,8 +864,11 @@ export async function detectAndRespondToPrompt(
   generation?: AutoYesTickGeneration,
   observation?: TickObservation,
   captureWindowLines?: number,
+  captureHeadCut?: boolean,
 ): Promise<'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'> {
   const compositeKey = buildCompositeKey(worktreeId, cliToolId, instanceId);
+  const captureExtent: CaptureExtent | undefined =
+    captureWindowLines === undefined ? undefined : { windowLines: captureWindowLines, headCut: captureHeadCut };
   const tickObservation: TickObservation = observation ?? {
     start: startWaitingObservation(worktreeId, cliToolId, instanceId),
     frameTime: { frameCapturedAt: 0, frameFetchedAfterStart: false },
@@ -924,7 +944,7 @@ export async function detectAndRespondToPrompt(
       precomputedLines,
       instanceId,
       rawOutput,
-      captureWindowLines,
+      captureExtent,
     );
 
     if (!promptDetection.isPrompt || !promptDetection.promptData) {
@@ -942,7 +962,7 @@ export async function detectAndRespondToPrompt(
         cleanOutput,
         precomputedLines,
         rawOutput,
-        captureWindowLines,
+        captureExtent,
       });
       if (withheldPastGate !== null && withheldPastGate.reason !== null) {
         tickDecisionRecorder({
@@ -1147,7 +1167,7 @@ export async function detectAndRespondToPrompt(
     await finishAnsweredPrompt(judged, promptDetection, answer, generation, {
       // The tick's one normalised frame (#3183), not the capture again.
       frame,
-      captureTop: captureTopOf(rawOutput ?? cleanOutput, captureWindowLines, cliToolId),
+      captureTop: captureTopOf(rawOutput ?? cleanOutput, captureExtent, cliToolId),
     });
 
     return 'responded';
@@ -1230,7 +1250,7 @@ async function pollAutoYes(
     // Issue #3798: dated by where that frame came from — the capture goes
     // through the 5 s cache, so it may predate this tick.
     const {
-      frame: { raw: rawOutput, clean: cleanOutput },
+      frame: { raw: rawOutput, clean: cleanOutput, headCut },
       frameTime,
     } = await captureObservedFrame(() => capturePollerFrame(worktreeId, cliToolId, captureLines, instanceId));
     if (!isTickCurrent(generation)) {
@@ -1256,8 +1276,10 @@ async function pollAutoYes(
     const result = await detectAndRespondToPrompt(
       worktreeId, pollerState!, cliToolId, cleanOutput, lines, instanceId, rawOutput, generation,
       { start: observationStart, frameTime },
-      // Issue #3881 (review P2-1): the window this capture was taken with.
+      // Issue #3881 (review P2-1): the window this capture was taken with,
+      // and (third review N4) whether it cut the pane's top.
       captureLines,
+      headCut,
     );
     if (!isTickCurrent(generation)) {
       endStaleTick(generation);

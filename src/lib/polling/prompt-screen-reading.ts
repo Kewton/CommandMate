@@ -64,20 +64,45 @@ import { selectAllowOnceOption } from './auto-yes-option-effect';
  * opencode) keeps no history, so its capture is the visible screen whatever
  * the window, and "fewer rows than the window" says nothing about what the
  * tool scrolled off. Its capture is read off the screen instead
- * ({@link screenTopOf}), once the window is known not to have cut it: a window
- * of at least {@link TUI_PANE_HEIGHT} rows (the tallest alternate-screen pane)
- * or one the capture did not fill.
+ * ({@link screenTopOf}), once the window is known not to have cut it.
+ *
+ * Whether it did (the third review's N4): the capture layer says so when the
+ * caller asks (`headCut`, the Auto-Yes poller's `capturePollerFrame`). The row
+ * count alone cannot tell at a window of exactly {@link TUI_PANE_HEIGHT} rows
+ * (the tallest alternate-screen pane, and the poller's REDUCED window): a
+ * whole 1000-row screen and a longer pane cut to its last 1000 rows come back
+ * the same size. Above that height it can: a cut capture has as many rows as
+ * its window, more than any alternate screen holds, and a capture that tall
+ * is a pane with history (the tool is not in the alternate screen), read as
+ * a scrollback pane. Below it, a capture that filled its window is `clipped`
+ * unless the capture layer said otherwise.
  *
  * @param capture - The capture as returned (or its cleaned spelling: same rows)
  * @param windowLines - The window it was captured with
  * @param cliToolId - The tool whose pane it is; omitted, the pane is read as a
  *   scrollback pane (the reading before N1)
+ * @param headCut - Whether the window dropped rows from the top of what tmux
+ *   returned, when the capture layer said; omitted, judged from the row count
  */
-export function captureTopOf(capture: string, windowLines: number, cliToolId?: CLIToolType): CaptureTop {
+export function captureTopOf(
+  capture: string,
+  windowLines: number,
+  cliToolId?: CLIToolType,
+  headCut?: boolean,
+): CaptureTop {
   const filled = windowLines > 0 && capture.split('\n').length >= windowLines;
-  if (cliToolId === undefined || !usesAlternateScreen(cliToolId)) return filled ? 'clipped' : 'history-start';
-  if (filled && windowLines < TUI_PANE_HEIGHT) return 'clipped';
+  if (cliToolId === undefined || !usesAlternateScreen(cliToolId)) {
+    return filled || headCut === true ? 'clipped' : 'history-start';
+  }
+  if (headCut === true) return 'clipped';
+  if (screenRowsOf(capture).length > TUI_PANE_HEIGHT) return filled ? 'clipped' : 'history-start';
+  if (headCut === undefined && filled && windowLines < TUI_PANE_HEIGHT) return 'clipped';
   return screenTopOf(capture);
+}
+
+/** A capture's rows: tmux ends every row with a newline, and the last one is not a row of its own. */
+function screenRowsOf(capture: string): string[] {
+  return (capture.endsWith('\n') ? capture.slice(0, -1) : capture).split('\n');
 }
 
 /**
@@ -94,8 +119,7 @@ export function captureTopOf(capture: string, windowLines: number, cliToolId?: C
  * withholds an answer rather than gives one.
  */
 function screenTopOf(capture: string): CaptureTop {
-  // tmux ends every row with a newline: the last one is not a row of its own.
-  const rows = (capture.endsWith('\n') ? capture.slice(0, -1) : capture).split('\n');
+  const rows = screenRowsOf(capture);
   const blank = (row: string | undefined): boolean => row === undefined || stripAnsi(row).trim() === '';
   return rows.length > 1 && blank(rows[0]) && blank(rows[rows.length - 1]) ? 'screen-start' : 'screen-full';
 }
