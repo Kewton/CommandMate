@@ -111,7 +111,9 @@ import {
   getPartialAnswer,
   keepPartialAnswerByPerson,
   ledgerScreenKey,
+  partialAnswerCovers,
   partialAnswerScreenKey,
+  personSendsInFlight,
   promptFrameKey,
   settleSendAttempt,
   type AutoYesPollerState,
@@ -538,7 +540,24 @@ function noteNoPromptOnScreen(tick: {
   // Issue #3880: a person's hold, which agy's dialog past the receipt window
   // keeps (below) — the gated reading's "no prompt" is not the dialog gone.
   const personHold = cliToolId === 'antigravity' ? getPartialAnswer(compositeKey, epoch) : null;
-  forgetPartialAnswer(compositeKey);
+  // The same for a person's send still in flight: one at the dialog the
+  // ungated reading still shows is not expired, so its outcome, coming back
+  // unknown, still holds the dialog. The ungated reading is taken once.
+  let ungated: PromptDetectionResult | undefined;
+  const readWithoutGate = (): PromptDetectionResult =>
+    (ungated ??= detectPromptOnCleanFrame(cleanOutput, cliToolId, precomputedLines, rawOutput));
+  const personSends = cliToolId === 'antigravity' ? personSendsInFlight(compositeKey, epoch) : [];
+  const dialogUp = personSends.length > 0 ? readWithoutGate() : null;
+  const dialogUpKey = dialogUp?.isPrompt && dialogUp.promptData ? partialAnswerScreenKey(dialogUp.promptData) : null;
+  forgetPartialAnswer(
+    compositeKey,
+    undefined,
+    new Set(
+      dialogUpKey === null
+        ? []
+        : personSends.filter((attempt) => partialAnswerCovers(attempt.screenKey, dialogUpKey)),
+    ),
+  );
   pollerState.lastAnsweredPromptKey = null;
   pollerState.lastAnsweredAt = null;
   // Issue #3757: agy's trust screen reads as no prompt (unnumbered: neither
@@ -565,7 +584,7 @@ function noteNoPromptOnScreen(tick: {
       worktreeId,
       instanceId,
       compositeKey,
-      () => detectPromptOnCleanFrame(cleanOutput, cliToolId, precomputedLines, rawOutput),
+      readWithoutGate,
       personHold?.byPerson ? personHold.screenKey : null,
     );
     if (personHold?.byPerson && seen?.keptPersonHold) {

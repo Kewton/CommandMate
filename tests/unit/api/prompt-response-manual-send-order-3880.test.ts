@@ -14,6 +14,10 @@
  *   way types nothing after the wait.
  * - N4: agy's dialog past the receipt window keeps a person's hold, and says
  *   why (`partial-answer`).
+ * - N5 (review 3): an answer that waited in the re-verification and sent after
+ *   one begun later holds what IT typed — its send is the newer one.
+ * - N6 (review 3): agy's gated "no prompt" while a person's send is still in
+ *   tmux does not drop it when the dialog is still up.
  *
  * Runs the real route, answer resolution and delivery, `sendPromptAnswer` and
  * `detectAndRespondToPrompt`; the screen reading, the frame verification and
@@ -103,6 +107,8 @@ vi.mock('@/lib/cli-tools/manager', () => ({
 // The route's own collaborators.
 /** The prompt the route's fresh capture reads; `captureFailed`: that capture failed. */
 const route = vi.hoisted(() => ({ prompt: null as unknown, captureFailed: false }));
+/** Held open by a test: the next re-verification reads its prompt, then waits here. */
+const verification = vi.hoisted(() => ({ gate: null as Promise<void> | null, entered: () => {} }));
 vi.mock('@/lib/db', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/db')>()),
   getWorktreeById: vi.fn((_db: unknown, id: string) => ({ id, path: `/repo/${id}`, cliToolId: 'claude' })),
@@ -119,16 +125,23 @@ vi.mock('@/app/api/worktrees/[id]/prompt-response/structured-decision', () => ({
 vi.mock('@/app/api/worktrees/[id]/prompt-response/frame-verification', () => ({
   // The capture failing: what `verifyPromptOnScreen` hands on (it does not
   // block a manual answer, frame-verification.ts `captureFrame`).
-  verifyPromptOnScreen: vi.fn(async () => ({
-    value: route.captureFailed
-      ? { promptCheck: null, verifiedFrame: null, isCommandCodeQuestion: false, verificationFailed: true }
-      : {
-          promptCheck: { isPrompt: true, promptData: route.prompt, cleanContent: 'pane', rawContent: 'pane' },
-          verifiedFrame: 'pane',
-          isCommandCodeQuestion: false,
-          verificationFailed: false,
-        },
-  })),
+  verifyPromptOnScreen: vi.fn(async () => {
+    const { prompt, captureFailed } = route;
+    const gate = verification.gate;
+    verification.gate = null;
+    verification.entered();
+    if (gate) await gate;
+    return {
+      value: captureFailed
+        ? { promptCheck: null, verifiedFrame: null, isCommandCodeQuestion: false, verificationFailed: true }
+        : {
+            promptCheck: { isPrompt: true, promptData: prompt, cleanContent: 'pane', rawContent: 'pane' },
+            verifiedFrame: 'pane',
+            isCommandCodeQuestion: false,
+            verificationFailed: false,
+          },
+    };
+  }),
 }));
 vi.mock('@/app/api/worktrees/[id]/prompt-response/ledger-record', () => ({
   notePromptResponseInLedger: vi.fn(async (_ctx: unknown, _request: unknown, response: unknown) => response),
@@ -303,6 +316,8 @@ beforeEach(() => {
   screen.gated = false;
   ownership.gate = null;
   ownership.entered = () => {};
+  verification.gate = null;
+  verification.entered = () => {};
   clearAllPollerStates();
   clearManualAnswers();
   clearPartialAnswers();
@@ -559,6 +574,98 @@ describe('[#3880 N4] agy: a person\'s hold past the receipt window', () => {
     expect(await tickOn(pollerState('antigravity'), proceed('git push'))).toBe('no_prompt');
 
     expect(getLastPolicySuppression(WORKTREE_ID, 'antigravity', 'antigravity')?.reason).not.toBe('partial-answer');
+    expect(getPartialAnswer(AGY_KEY, getEnterFallbackSessionEpoch(AGY_KEY))).toBeNull();
+  });
+});
+
+describe('[#3880 N5] an answer that waited before its first key, sent after a later one', () => {
+  it('B sends while A waits in the re-verification, then A sends: A\'s screen is the one held', async () => {
+    const gate = deferred();
+    const entered = deferred();
+    verification.gate = gate.promise;
+    verification.entered = entered.resolve;
+    // A begins at "npm run build" and waits in the re-verification.
+    const a = personAnswers(proceed('npm run build'));
+    await entered.promise;
+    // B begins after A, and sends first: its outcome is unknown at "npm test".
+    steps.push({ fail: 'indeterminate' });
+    expect(await personAnswers(proceed('npm test'))).toBe(500);
+    // Then A sends, its outcome unknown too.
+    steps.push({ fail: 'indeterminate' });
+    gate.resolve();
+    expect(await a).toBe(500);
+
+    now += MANUAL_ANSWER_HOLD_MS;
+    // "npm run build" is what was typed last: held, not answered over A's `y`.
+    expect(await tickOn(pollerState(), proceed('npm run build'))).toBe('no_answer');
+    expect(delivered).toEqual(['y', 'y']);
+  });
+
+  it('negative: A waits, B sends, A is refused before any key: B\'s hold stays', async () => {
+    const gate = deferred();
+    const entered = deferred();
+    verification.gate = gate.promise;
+    verification.entered = entered.resolve;
+    const a = personAnswers(proceed('npm run build'));
+    await entered.promise;
+    steps.push({ fail: 'indeterminate' });
+    expect(await personAnswers(proceed('npm test'))).toBe(500);
+    steps.push({ fail: 'not-started' });
+    gate.resolve();
+    expect(await a).toBe(500);
+
+    now += MANUAL_ANSWER_HOLD_MS;
+    // A began before B's send was registered, so it does not release B's hold.
+    expect(await tickOn(pollerState(), proceed('npm test'))).toBe('no_answer');
+    expect(delivered).toEqual(['y']);
+  });
+});
+
+describe('[#3880 N6] agy: a gated tick while a person\'s send is still in tmux', () => {
+  const AGY_KEY = buildCompositeKey(WORKTREE_ID, 'antigravity', 'antigravity');
+
+  /** A person's send to agy's `dialog` that has not come back yet; `end` reports it ended with keys maybe on the pane. */
+  function personsSendInFlight(dialog: PromptData): { end: () => void } {
+    const answer = noteManualAnswerStarted(AGY_KEY, now);
+    noteManualSendStarting(answer, dialog);
+    return { end: () => settleManualAnswer(answer, 'may-be-on-pane', now) };
+  }
+
+  it('the dialog still up: the send is kept, and its late unknown outcome holds the dialog', async () => {
+    const dialog = proceed('rm -rf build');
+    const send = personsSendInFlight(dialog);
+    now += 9_000;
+    screen.gated = true;
+    const state = pollerState('antigravity');
+    expect(await tickOn(state, dialog)).toBe('no_prompt');
+    send.end();
+
+    expect(getPartialAnswer(AGY_KEY, getEnterFallbackSessionEpoch(AGY_KEY))).not.toBeNull();
+    expect(await tickOn(state, dialog)).toBe('no_prompt');
+    expect(getLastPolicySuppression(WORKTREE_ID, 'antigravity', 'antigravity')?.reason).toBe('partial-answer');
+    now += MANUAL_ANSWER_HOLD_MS;
+    screen.gated = false;
+    expect(await tickOn(state, dialog)).toBe('no_answer');
+    expect(delivered).toEqual([]);
+  });
+
+  it('negative: the dialog gone meanwhile: the late outcome records nothing', async () => {
+    const send = personsSendInFlight(proceed('rm -rf build'));
+    now += 9_000;
+    screen.gated = true;
+    expect(await tickOn(pollerState('antigravity'), null)).toBe('no_prompt');
+    send.end();
+
+    expect(getPartialAnswer(AGY_KEY, getEnterFallbackSessionEpoch(AGY_KEY))).toBeNull();
+  });
+
+  it('negative: another dialog up meanwhile: the late outcome records nothing', async () => {
+    const send = personsSendInFlight(proceed('rm -rf build'));
+    now += 9_000;
+    screen.gated = true;
+    expect(await tickOn(pollerState('antigravity'), proceed('git push'))).toBe('no_prompt');
+    send.end();
+
     expect(getPartialAnswer(AGY_KEY, getEnterFallbackSessionEpoch(AGY_KEY))).toBeNull();
   });
 });

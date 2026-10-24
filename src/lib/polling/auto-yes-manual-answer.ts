@@ -60,13 +60,14 @@ const marks = getOrInitGlobal('__autoYesManualAnswers', () => new Map<string, Ma
 
 /**
  * One person's answer, from its start to its end (Issue #3880). What its end
- * does to Auto-Yes's hold is about THIS answer: its place among the sends is
- * taken as it begins (`order`), and its send — once there is one — carries the
- * screen and the session epoch fixed right before the first key.
+ * does to Auto-Yes's hold is about THIS answer, in two orders kept apart: the
+ * hold it releases is one recorded before it began (`order`), and what its
+ * send records is ordered by that send — its place among the sends, the screen
+ * and the session epoch all fixed right before the first key.
  */
 export interface ManualAnswerTicket {
   readonly compositeKey: string;
-  /** Its place among the sends (`nextSendOrder`), taken as it began. */
+  /** Where it began among the sends (`nextSendOrder`): the cutoff of the hold it releases. */
   readonly order: number;
   /** Its send, from right before the first key ({@link noteManualSendStarting}). */
   attempt: AutoYesSendAttempt | null;
@@ -89,7 +90,7 @@ export function noteManualAnswerStarted(compositeKey: string, at: number = Date.
 export function noteManualSendStarting(ticket: ManualAnswerTicket, promptData: PromptData | null | undefined): void {
   if (ticket.attempt !== null) return;
   const screenKey = promptData ? partialAnswerScreenKey(promptData) : UNIDENTIFIED_SCREEN_KEY;
-  ticket.attempt = beginManualSendAttempt(ticket.compositeKey, screenKey, ticket.order);
+  ticket.attempt = beginManualSendAttempt(ticket.compositeKey, screenKey);
 }
 
 /**
@@ -117,7 +118,7 @@ export type ManualAnswerOutcome = 'answered' | 'not-sent' | 'may-be-on-pane';
  *   pane, or a tick's — stays.
  * - `may-be-on-pane`: the send records a hold at its screen (unidentified
  *   when none was read), as Auto-Yes's own does: only for the session epoch it
- *   went to, never over a hold of a send begun after it, and not at all when
+ *   went to, never over a hold of a send registered after it, and not at all when
  *   the screen it typed at was seen gone since. And every tick under way stops
  *   (the manual-answer sequence moves on): one that read no hold before its
  *   last wait does not type over this one.

@@ -350,6 +350,8 @@ export function getPartialAnswer(compositeKey: string, epoch: number): PartialAu
   return partial;
 }
 
+const NO_ATTEMPTS: ReadonlySet<AutoYesSendAttempt> = new Set();
+
 /**
  * Forget it: the prompt left the screen, another prompt came up, or the session ended.
  *
@@ -361,6 +363,8 @@ export function getPartialAnswer(compositeKey: string, epoch: number): PartialAu
  * and records as before. Expiring is the mark: it drops the attempt from the
  * registry, so no per-key "forgotten up to seq" state has to outlive it.
  *
+ * @param spare - Issue #3880: sends that are not expired (a person's, at agy's
+ *   dialog the ungated reading still shows)
  * @param screenKey - Given when the memory is dropped because ANOTHER prompt is
  *   on screen (re-instruction 3): only the sends at the forgotten memory's
  *   screen are expired. A send at the screen now shown (Y, carried here by a
@@ -368,13 +372,30 @@ export function getPartialAnswer(compositeKey: string, epoch: number): PartialAu
  *   stop is still remembered when it comes back. Omitted (the prompt left the
  *   screen), every send under the key is expired.
  */
-export function forgetPartialAnswer(compositeKey: string, screenKey?: string): void {
+export function forgetPartialAnswer(
+  compositeKey: string,
+  screenKey?: string,
+  spare: ReadonlySet<AutoYesSendAttempt> = NO_ATTEMPTS,
+): void {
   partialAnswers.delete(compositeKey);
   for (const attempt of [...sendAttempts]) {
     if (attempt.recordKey !== compositeKey) continue;
     if (screenKey !== undefined && attempt.screenKey !== screenKey) continue;
+    if (spare.has(attempt)) continue;
     expireSendAttempt(attempt);
   }
+}
+
+/**
+ * A person's sends still in flight under this key, to this session epoch
+ * (Issue #3880): agy's gated reading seeing no prompt does not say the screen
+ * they type at is gone, so the tick checks the ungated reading before it
+ * expires them ({@link forgetPartialAnswer}'s `spare`).
+ */
+export function personSendsInFlight(compositeKey: string, epoch: number): AutoYesSendAttempt[] {
+  return [...sendAttempts].filter(
+    (attempt) => attempt.byPerson === true && attempt.recordKey === compositeKey && attempt.recordEpoch === epoch,
+  );
 }
 
 /**
@@ -437,8 +458,10 @@ export function keepPartialAnswerByPerson(compositeKey: string, partial: Partial
 
 /**
  * A place in the order sends are registered in (Issue #3880): a person's
- * answer takes one as it begins, so what it later releases or records is
- * compared with the sends begun before and after it.
+ * answer takes one as it begins, so the hold it releases when it ends is only
+ * one recorded by a send registered before it began. What its own send
+ * records is ordered by that send's registration instead
+ * ({@link beginManualSendAttempt}).
  */
 export function nextSendOrder(): number {
   return ++sendAttemptSeq.last;
@@ -486,8 +509,8 @@ export interface AutoYesSendAttempt {
   state: 'pending' | 'settled' | 'expired';
   /**
    * Issue #3880: a person's send (`/prompt-response`), registered right before
-   * its first key. Its `seq` is the order its answer began in; its `screenKey`
-   * may be {@link UNIDENTIFIED_SCREEN_KEY}.
+   * its first key, its `seq` taken then; its `screenKey` may be
+   * {@link UNIDENTIFIED_SCREEN_KEY}.
    */
   readonly byPerson?: true;
   /**
@@ -529,15 +552,17 @@ export function beginSendAttempt(
 
 /**
  * Register a person's send about to start (Issue #3880): the screen it types
- * at and the session epoch it goes to, fixed now, and `order` — taken when
- * their answer began ({@link nextSendOrder}) — as its place among the sends.
+ * at and the session epoch it goes to, fixed now, and its place among the
+ * sends taken now too, as Auto-Yes's own is — not when the answer began: an
+ * answer that waited before its first key (the re-verification of the screen)
+ * may send after one begun later, and then its keys are the newer ones.
  * Settled with {@link settleSendAttempt} like Auto-Yes's own, so it records a
  * hold only for the session the keys went to, never over a hold of a send
- * begun after it, and not at all once the screen it typed at was seen gone.
+ * registered after it, and not at all once the screen it typed at was seen gone.
  */
-export function beginManualSendAttempt(compositeKey: string, screenKey: string, order: number): AutoYesSendAttempt {
+export function beginManualSendAttempt(compositeKey: string, screenKey: string): AutoYesSendAttempt {
   const attempt: AutoYesSendAttempt = {
-    seq: order,
+    seq: ++sendAttemptSeq.last,
     screenKey,
     recordKey: compositeKey,
     recordEpoch: getEnterFallbackSessionEpoch(compositeKey),
