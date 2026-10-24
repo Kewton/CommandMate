@@ -44,6 +44,8 @@ work item と読むと、再開した段が別の単位を読み書きし、publ
   `--item` を付ける。既に `item` 無しの記録がある Issue は、マージまで `item` 無しで通す（記録は移せない。途中で `item=` を書くと、それまでの
   verify・review の記録を読めない）。同じ work item の再送・再指示・切替の行も同じ `item=<名前>` を書く（`-r2` を名前に足すと別の work item に
   なる）。再試行のラベルを残すなら 7 列目に書く
+- **同じ work item の行が複数あるとき**: 6-2 は (Issue, work item) ごとに最新の行だけをマージし、Issue を閉じるのはその Issue の
+  最後の対象だけ（`d1`→`d2`→`d1` の再試行なら d1 の最新の行・d2 の順で、d2 だけ `--close`）。最後の行と同じ名前の先の行を終わりとして扱わない
 
 ```bash
 # 3-1: 送った行の 6 列目に item=<work item> を書き（item=d1 など。work item の無い Issue は item= だけ）、send の記録にも同じ --item を付ける
@@ -99,18 +101,25 @@ done 3< "workspace/orchestration/runs/$DATE/tasks.tsv"
 ```
 
 ```bash
-# 6-2: tasks.tsv の順に 1 本ずつ。--item の merge は Issue を閉じない。その Issue の最後の行の PR だけ --close "$issue" を足す
-while IFS="$(printf '\t')" read -r issue WT AGENT TASK_ID MODEL COL6 REST <&3; do
+# 6-2: マージの対象は (Issue, work item) ごとに 1 本。同じ work item の再送・切替の行が後にあっても、その最新の行だけを、
+# work item が tasks.tsv に初めて出た順に 1 本ずつ。--item の merge は Issue を閉じない。その Issue の最後の対象だけ --close "$issue"
+while IFS="$(printf '\t')" read -r CLOSE issue WT AGENT TASK_ID MODEL COL6 REST <&3; do
   ITEM=; case "$COL6" in item=?*) ITEM=${COL6#item=} ;; esac   # item= で始まらない 6 列目（旧い run のラベル）は item 無し
   ITEM_ARGS=(); [ -z "$ITEM" ] || ITEM_ARGS=(--item "$ITEM")
-  LAST_ITEM=$(awk -F'\t' -v i="$issue" '$1 == i && $6 ~ /^item=./ { last = substr($6, 6) } END { print last }' "workspace/orchestration/runs/$DATE/tasks.tsv")
-  [ -z "$ITEM" ] || [ "$ITEM" != "$LAST_ITEM" ] || ITEM_ARGS+=(--close "$issue")
+  [ "$CLOSE" != close ] || ITEM_ARGS+=(--close "$issue")
   WT_DIR=$(commandmatedev ls --json | jq -r --arg id "$WT" '.[] | select(.id == $id) | .path')
   node scripts/orchestrate/merge-pr.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
     --issue "$issue" --worktree "$WT_DIR" "${ITEM_ARGS[@]}"
   RC=$?; echo "merge exit=$RC issue=${issue} item=${ITEM:--}"
-  [ "$RC" = 0 ] || break   # 止まったら、その PR を直してから同じ行から再開する
-done 3< "workspace/orchestration/runs/$DATE/tasks.tsv"
+  [ "$RC" = 0 ] || break   # 止まったら、その PR を直してから同じ雛形を回し直す（マージ済みの PR は merge-pr が記録だけ足して飛ばす）
+done 3< <(awk -F'\t' '{
+    it = ($6 ~ /^item=./) ? substr($6, 6) : ""; k = $1 SUBSEP it
+    if (!(k in row)) { order[++n] = k; issueOf[k] = $1; itemOf[k] = it }
+    row[k] = $0
+  } END {
+    for (j = 1; j <= n; j++) if (itemOf[order[j]] != "") last[issueOf[order[j]]] = order[j]
+    for (j = 1; j <= n; j++) print (order[j] == last[issueOf[order[j]]] ? "close" : "-") "\t" row[order[j]]
+  }' "workspace/orchestration/runs/$DATE/tasks.tsv")
 ```
 
 - 再開は `run-log.mjs status` の work item ごとの行（`#3883/d1`）で、`next` の段から上の雛形の同じ行を呼ぶ

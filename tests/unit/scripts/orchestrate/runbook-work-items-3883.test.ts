@@ -21,6 +21,12 @@
  * item; the old run's shape resumes, through the real precheck and publish,
  * without `--item`.
  *
+ * N5 (review-3883-d1-4): with rows item=d1 → item=d2 → item=d1 (a retry),
+ * 6-2 compared the item name with the Issue's last row and closed the Issue
+ * on the first d1 too — before d2 was merged, and again on a resume where d1
+ * was already merged. 6-2 now merges each (Issue, work item) once, on its
+ * latest row, and closes only on the Issue's last one.
+ *
  * Everything is under os.tmpdir(); bash always, zsh too when it is installed
  * (the orchestrator's shell on macOS).
  *
@@ -36,8 +42,8 @@ import { hasCompletionSignal, parseArgs as parseWaitVerifyArgs } from '../../../
 import { parseArgs as parseReviewArgs } from '../../../../scripts/orchestrate/consistency-review.mjs';
 import { main as precheck, parseArgs as parsePrecheckArgs } from '../../../../scripts/orchestrate/precheck.mjs';
 import { main as publish, parseArgs as parsePublishArgs } from '../../../../scripts/orchestrate/publish-pr.mjs';
-import { parseArgs as parseMergeArgs } from '../../../../scripts/orchestrate/merge-pr.mjs';
-import { DEVELOP, fakeGit } from './pr-fake';
+import { main as merge, parseArgs as parseMergeArgs } from '../../../../scripts/orchestrate/merge-pr.mjs';
+import { DEVELOP, fakeGit, openPr } from './pr-fake';
 import { main as runLog, readRecords, summarize } from '../../../../scripts/orchestrate/run-log.mjs';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
@@ -411,8 +417,8 @@ describe('an old run whose 6th column is a retry label resumes without --item (#
         'wait-verify #3883',
         'wait-verify #3884',
         ...['3882', '3883', '3883', '3884'].flatMap((issue) => [`run-log #${issue}`, `precheck #${issue}`, `publish-pr #${issue}`]),
+        // 6-2 merges each (Issue, work item) once, on its latest row: the retry row of #3883 is not merged twice.
         'merge-pr #3882',
-        'merge-pr #3883',
         'merge-pr #3883',
         'merge-pr #3884',
       ]);
@@ -478,6 +484,103 @@ describe('an old run whose 6th column is a retry label resumes without --item (#
     expect(sh('bash', blocks[1], env).status).toBe(0);
     const items = calls().map((argv) => (argv.includes('--item') ? argv[argv.indexOf('--item') + 1] : null));
     expect(items).toEqual([null, null, null, null, 'd2']);
+  });
+});
+
+describe('6-2 closes the Issue only on its last work item, whatever rows a retry adds (#3883 N5)', { timeout: 30_000 }, () => {
+  const blocks = bashBlocks(section(read('docs/orchestrate/run-log.md'), '1-5 work item の run の呼び出し'));
+  const mergeBlock = blocks[4];
+  const DATE = '2026-10-24';
+  const env = { DATE, RUN_ISSUES: '3700-3883' };
+
+  function setUp(rows: string[][]) {
+    const ls = [...new Set(rows.map((row) => row[1]))].map((wt) => ({ id: wt, path: path.join(tmp, 'worktrees', wt) }));
+    fs.writeFileSync(path.join(fake, 'ls.json'), JSON.stringify(ls));
+    const runDir = path.join(tmp, 'workspace', 'orchestration', 'runs', DATE);
+    fs.mkdirSync(runDir, { recursive: true });
+    fs.writeFileSync(path.join(runDir, 'tasks.tsv'), rows.map((row) => row.join('\t') + '\n').join(''));
+    return { runDir, dirOf: (wt: string) => ls.find((w) => w.id === wt)!.path };
+  }
+  const merges = (dirOf: (wt: string) => string, wts: string[]) => {
+    const value = (argv: string[], flag: string) => (argv.includes(flag) ? argv[argv.indexOf(flag) + 1] : '-');
+    return calls().map((argv) => {
+      expect(parseMergeArgs(argv.slice(1)).error).toBeUndefined();
+      const wt = wts.find((w) => dirOf(w) === value(argv, '--worktree')) ?? '?';
+      return `#${value(argv, '--issue')}/${value(argv, '--item')} ${wt} close=${value(argv, '--close')}`;
+    });
+  };
+
+  for (const shell of SHELLS) {
+    it(`${shell}: d1, d2, then a d1 retry — d1 once on its retry row, then d2 with --close; the first d1 does not close`, () => {
+      const rows = [
+        ['3883', 'wt-d1', 'antigravity', 'task-d1', '-', 'item=d1'],
+        ['3700', 'wt-a', 'claude', 'task-a', 'opus'],
+        ['3883', 'wt-d2', 'claude', 'task-d2', 'opus', 'item=d2'],
+        // The retry of d1 (switched to Claude in another worktree: switching.md appends the row, keeping the first).
+        ['3883', 'wt-d1-claude', 'claude', 'task-d1-r2', 'opus', 'item=d1', '3883-d1-r2'],
+      ];
+      const { dirOf } = setUp(rows);
+      const r = sh(shell, mergeBlock, env);
+      expect(r.stderr).toBe('');
+      expect(r.status).toBe(0);
+      expect(merges(dirOf, ['wt-d1', 'wt-a', 'wt-d2', 'wt-d1-claude'])).toEqual([
+        '#3883/d1 wt-d1-claude close=-',
+        '#3700/- wt-a close=-',
+        '#3883/d2 wt-d2 close=3883',
+      ]);
+    });
+
+    it(`${shell}: d1, d2, then a d2 retry — d1, then d2 once on its retry row with --close`, () => {
+      const rows = [
+        ['3883', 'wt-d1', 'claude', 'task-d1', 'opus', 'item=d1'],
+        ['3883', 'wt-d2', 'claude', 'task-d2', 'opus', 'item=d2'],
+        ['3883', 'wt-d2-b', 'claude', 'task-d2-r2', 'opus', 'item=d2'],
+      ];
+      const { dirOf } = setUp(rows);
+      expect(sh(shell, mergeBlock, env).status).toBe(0);
+      expect(merges(dirOf, ['wt-d1', 'wt-d2', 'wt-d2-b'])).toEqual(['#3883/d1 wt-d1 close=-', '#3883/d2 wt-d2-b close=3883']);
+    });
+  }
+
+  it('a stop on d1 does not reach d2, so no call closes the Issue', () => {
+    const { dirOf } = setUp([
+      ['3883', 'wt-d1', 'claude', 'task-d1', 'opus', 'item=d1'],
+      ['3883', 'wt-d2', 'claude', 'task-d2', 'opus', 'item=d2'],
+      ['3883', 'wt-d1', 'claude', 'task-d1-r2', 'opus', 'item=d1'],
+    ]);
+    // The fake node fails merge-pr: the loop stops on the first target.
+    fs.writeFileSync(path.join(bin, 'node'), `#!/bin/sh\n"$REAL_NODE" -e 'require("fs").appendFileSync(process.env.CALLS, JSON.stringify(process.argv.slice(1)) + "\\n")' -- "$@"\nexit 1\n`, { mode: 0o755 });
+    const r = sh('bash', mergeBlock, env);
+    expect(r.stdout).toContain('merge exit=1 issue=3883 item=d1');
+    expect(merges(dirOf, ['wt-d1', 'wt-d2'])).toEqual(['#3883/d1 wt-d1 close=-']);
+  });
+
+  it('a resume where d1 is already merged: the real merge-pr records d1 and leaves the Issue open; the old --close on d1 would close it', () => {
+    const { runDir } = setUp([
+      ['3883', 'wt-d1', 'claude', 'task-d1', 'opus', 'item=d1'],
+      ['3883', 'wt-d2', 'claude', 'task-d2', 'opus', 'item=d2'],
+      ['3883', 'wt-d1', 'claude', 'task-d1-r2', 'opus', 'item=d1'],
+    ]);
+    expect(sh('bash', mergeBlock, env).status).toBe(0);
+    const d1 = calls()[0].slice(1).map((a) => (a === `workspace/orchestration/runs/${DATE}` ? runDir : a));
+    expect(d1).toContain('d1');
+    const replay = (argv: string[]) => {
+      const merged = openPr({ number: 9001, state: 'MERGED', headRefName: 'feature/3883-d1', title: 'fix(orchestrate): d1 (#3883)' });
+      const fakeOf = fakeGit({ branch: 'feature/3883-d1', prs: [merged] });
+      const err: string[] = [];
+      const code = merge(argv, { run: fakeOf.run, sleep: () => undefined, now: () => new Date(Date.UTC(2026, 9, 24, 9)), log: () => undefined, error: (l: string) => err.push(l) } as Parameters<typeof merge>[1]);
+      return { code, err: err.join('\n'), fakeOf };
+    };
+    const resumed = replay(d1);
+    expect(resumed.err).toBe('');
+    expect(resumed.code).toBe(0);
+    expect(resumed.fakeOf.state.issueState).toBe('OPEN');
+    expect(resumed.fakeOf.ghCalls('issue close')).toEqual([]);
+    expect(readRecords(runDir, '3700-3883').records.map((rec) => [rec.item, rec.stage, rec.result])).toEqual([['d1', 'merge', 'ok']]);
+    // Before N5 the first d1 row got --close 3883 (its name was the last row's): that call closes the Issue before d2.
+    const before = replay([...d1, '--close', '3883']);
+    expect(before.code).toBe(0);
+    expect(before.fakeOf.state.issueState).toBe('CLOSED');
   });
 });
 
