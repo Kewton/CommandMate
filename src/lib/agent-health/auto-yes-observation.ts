@@ -263,7 +263,7 @@ interface LinePass {
    * Issue #3882: confirmation ID → attempt ID → the (non-late) attempt lines
    * seen in the window, in the order their results came back.
    */
-  attemptLines: Map<string, Map<string, { n: number; ok: boolean; mode: AnswerModeKey }>>;
+  attemptLines: Map<string, Map<string, { n: number; atMs: number; ok: boolean; mode: AnswerModeKey }>>;
   attemptRecords: Map<string, MetricRecord>;
   abstainRecords: Map<string, MetricRecord>;
   hookRequests: number;
@@ -394,6 +394,11 @@ function attemptNumberOf(confirmationId: string | null, attemptId: unknown): num
  * so none came back before the window or went missing, and every attempt
  * numbered before it (1..n-1) was seen too. Anything short of that — and a
  * first success that names no mode — leaves it unknown.
+ *
+ * The lines carry no settle order finer than `atMs` (lines at the same
+ * millisecond are sorted by their JSON, not by when they were written), so
+ * successes at the earliest `atMs` are all candidates for the first: their
+ * modes must agree, and every one of them must pass the number check.
  */
 function restoredAnswerMode(pass: LinePass, confirmationId: string | null, closedData: Record<string, unknown>): AnswerModeKey {
   const lines = confirmationId === null ? undefined : pass.attemptLines.get(confirmationId);
@@ -401,14 +406,18 @@ function restoredAnswerMode(pass: LinePass, confirmationId: string | null, close
   const okCount = attempts !== null && typeof attempts === 'object' ? num((attempts as Record<string, unknown>).ok) : null;
   if (lines === undefined || okCount === null) return 'unknown';
   const successes = [...lines.values()].filter((line) => line.ok);
-  const first = successes[0];
-  if (first === undefined || successes.length !== okCount) return 'unknown';
+  if (successes.length === 0 || successes.length !== okCount) return 'unknown';
+  const earliest = Math.min(...successes.map((line) => line.atMs));
+  const firsts = successes.filter((line) => line.atMs === earliest);
+  const mode = firsts[0].mode;
+  if (firsts.some((line) => line.mode !== mode)) return 'unknown';
   const numbers = new Set([...lines.values()].map((line) => line.n));
-  for (let n = 1; n < first.n; n++) if (!numbers.has(n)) return 'unknown';
-  return first.mode;
+  const lastFirst = Math.max(...firsts.map((line) => line.n));
+  for (let n = 1; n < lastFirst; n++) if (!numbers.has(n)) return 'unknown';
+  return mode;
 }
 
-function onAttemptSettled(pass: LinePass, data: Record<string, unknown>, late: boolean): void {
+function onAttemptSettled(pass: LinePass, data: Record<string, unknown>, atMs: number, late: boolean): void {
   const attemptConfirmationId = str(data.confirmationId);
   const attemptNumber = attemptNumberOf(attemptConfirmationId, data.attemptId);
   if (!late && attemptConfirmationId !== null && attemptNumber !== null) {
@@ -416,7 +425,7 @@ function onAttemptSettled(pass: LinePass, data: Record<string, unknown>, late: b
     pass.attemptLines.set(attemptConfirmationId, lines);
     // A send settles once; a repeated line keeps the first's place and result.
     const attemptId = data.attemptId as string;
-    if (!lines.has(attemptId)) lines.set(attemptId, { n: attemptNumber, ok: data.result === 'ok', mode: answerModeOf(data.answerMode) });
+    if (!lines.has(attemptId)) lines.set(attemptId, { n: attemptNumber, atMs, ok: data.result === 'ok', mode: answerModeOf(data.answerMode) });
   }
   const tool = toolOf(data);
   const basis = basisOf(data.basis);
@@ -478,7 +487,7 @@ function applyLine(pass: LinePass, line: LedgerLine, e: number): void {
       onClosed(pass, data, confirmationId);
       break;
     case EV.attemptSettled:
-      onAttemptSettled(pass, data, late);
+      onAttemptSettled(pass, data, atMs, late);
       break;
     case EV.hookRequestClosed:
       onHookRequestClosed(pass, data);

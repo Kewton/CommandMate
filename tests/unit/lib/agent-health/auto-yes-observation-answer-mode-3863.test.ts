@@ -266,6 +266,44 @@ describe('[#3863] answers and withheld intervals by answer mode', () => {
     expect(result.details).toMatchObject({ answered: 2, answeredRecommended: 0, answeredCareful: 1, answeredAnswerModeUnknown: 1 });
   });
 
+  it('[#3882] successes at the same millisecond: unknown unless their modes agree, whatever the input order', () => {
+    // Lines at the same atMs are sorted by their JSON, not by when they were
+    // written: which came back first is not known.
+    const attempt = (id: string, n: number, at: number, mode: string) =>
+      line<AttemptSettledLine>(EV.attemptSettled, {
+        atMs: at,
+        confirmationId: id,
+        attemptId: `${id}.${n}`,
+        cliToolId: 'claude',
+        basis: 'L3',
+        result: 'ok',
+        late: false,
+        expired: false,
+        answerMode: mode,
+      } as never);
+    const twoOk = { attempts: { ok: 2, partial: 0, noKeysSent: 0, failed: 0 } };
+    const day = (order: 'written' | 'reversed') => {
+      const tied = [
+        // attempt 2 (careful) came back first, attempt 1 (recommended) at the same ms
+        attempt(`${BOOT}-1`, 2, S + H - 1000, 'careful'),
+        attempt(`${BOOT}-1`, 1, S + H - 1000, 'recommended'),
+        closed(`${BOOT}-1`, S + H, 'recommended', twoOk),
+        // the same ms and the same mode: that mode
+        attempt(`${BOOT}-2`, 2, S + 2 * H - 1000, 'careful'),
+        attempt(`${BOOT}-2`, 1, S + 2 * H - 1000, 'careful'),
+        closed(`${BOOT}-2`, S + 2 * H, 'recommended', twoOk),
+        // different ms: the earlier one
+        attempt(`${BOOT}-3`, 2, S + 3 * H - 2000, 'careful'),
+        attempt(`${BOOT}-3`, 1, S + 3 * H - 1000, 'recommended'),
+        closed(`${BOOT}-3`, S + 3 * H, 'recommended', twoOk),
+      ];
+      return measureOk([...aliveDay(), ...(order === 'written' ? tied : [...tied].reverse())]);
+    };
+    for (const order of ['written', 'reversed'] as const) {
+      expect(day(order).details).toMatchObject({ answered: 3, answeredRecommended: 0, answeredCareful: 2, answeredAnswerModeUnknown: 1 });
+    }
+  });
+
   it('[#3882] negative: fewer successes seen than the closed line counts leaves it unknown', () => {
     const attempt = (id: string, n: number, at: number, ok: boolean, mode: string) =>
       line<AttemptSettledLine>(EV.attemptSettled, {
