@@ -107,6 +107,14 @@ export function clearSendAttempts(): void {
 }
 
 /**
+ * The wordings of a failed tmux call that can carry the message body: `tmux.ts`
+ * wraps the child_process error (`Command failed: tmux …argv…`) as
+ * `Failed to send keys to tmux session: …` and the like (Issue #3880).
+ */
+const TMUX_TRANSPORT_FAILURE =
+  /Command failed: tmux |Failed to send (?:special )?keys? to tmux session|Failed to send special key:|Failed to paste message into tmux session/;
+
+/**
  * Where a failed `ICLITool.sendMessage` stopped, read from its error.
  *
  * Only failures whose wording says the body was never typed are `not-sent`;
@@ -131,12 +139,10 @@ export function classifySendFailure(error: unknown): { state: SendAttemptState; 
     return { state: 'not-sent', reason: 'plan-review' };
   }
   const message = error instanceof Error ? error.message : String(error);
-  // The readiness waits of every tool throw before typing anything.
-  if (/prompt not ready/i.test(message)) return { state: 'not-sent', reason: 'prompt-not-ready' };
-  // #1880: refused before the body, after only the clear keys (C-e / C-u).
-  if (/still holds unsent text after \d+ clear passes/.test(message)) {
-    return { state: 'not-sent', reason: 'composer-not-empty' };
-  }
+  // Issue #3880: the "after the body was typed" wordings are matched FIRST. A
+  // body-not-landed error quotes what the composer shows — the user's own text —
+  // and a body that says `prompt not ready` must not turn "may have been typed"
+  // into "was not typed". Indeterminate wins whenever its wording is present.
   // #2464 / #3366: typed, never submitted, taken back out best-effort.
   if (/Enter was not pressed, so nothing was submitted/.test(message)) {
     return { state: 'indeterminate', reason: 'body-not-landed' };
@@ -148,6 +154,17 @@ export function classifySendFailure(error: unknown): { state: SendAttemptState; 
   // #1471: typed, Enter sent (more than once), never confirmed.
   if (/submit could not be confirmed/i.test(message)) {
     return { state: 'indeterminate', reason: 'submit-unconfirmed' };
+  }
+  // Issue #3880 (N2): a failed tmux call quotes its argv — and the argv of a
+  // literal send IS the body (`Command failed: tmux send-keys -t =s: -l -- <body>`).
+  // Whether any of the body reached the pane is unknown, and the body's own words
+  // (`Explain prompt not ready.`) must not be read as a readiness refusal below.
+  if (TMUX_TRANSPORT_FAILURE.test(message)) return { state: 'indeterminate', reason: 'send-error' };
+  // The readiness waits of every tool throw before typing anything.
+  if (/prompt not ready/i.test(message)) return { state: 'not-sent', reason: 'prompt-not-ready' };
+  // #1880: refused before the body, after only the clear keys (C-e / C-u).
+  if (/still holds unsent text after \d+ clear passes/.test(message)) {
+    return { state: 'not-sent', reason: 'composer-not-empty' };
   }
   return { state: 'indeterminate', reason: 'send-error' };
 }
