@@ -37,26 +37,86 @@ import type { PromptDetectionResult } from '@/lib/detection/types';
 import type { PromptData } from '@/types/models';
 import {
   PROMPT_READING_VERSION,
+  type CaptureTop,
   type PromptReading,
   type PromptReadingEvidence,
 } from '@/types/prompt-reading';
-import { isAutoYesDeclinedConfirmFrame } from './auto-yes-confirm-page';
+import type { NormalizedFrame } from '@/lib/detection/tools/types';
+import { isAutoYesDeclinedConfirmFrame, isAutoYesDeclinedConfirmPage } from './auto-yes-confirm-page';
 import { selectAllowOnceOption } from './auto-yes-option-effect';
+
+/**
+ * Where the first row of a capture sits in the pane (Issue #3881 review P2-1).
+ *
+ * Every capture is the last `windowLines` rows of the pane
+ * (`captureSessionOutput` → `sliceOutput`), so one that came back with fewer
+ * rows than its window holds the pane's whole history and its first row is
+ * the history's first; one that filled the window may have been cut there.
+ * The same test as `isCaptureWindowSaturated` (#1670) on the row count —
+ * restated, not imported: this module may not reach `tmux-capture-cache`
+ * (Issue #1922's import rule), and the equivalence is pinned by
+ * `tests/unit/lib/polling/prompt-reading-capture-top-3881.test.ts`.
+ *
+ * @param capture - The capture as returned (or its cleaned spelling: same rows)
+ * @param windowLines - The window it was captured with
+ */
+export function captureTopOf(capture: string, windowLines: number): CaptureTop {
+  return windowLines > 0 && capture.split('\n').length >= windowLines ? 'clipped' : 'history-start';
+}
+
+/**
+ * The detection with `approvalTargetCompleteness: 'top-unknown'` on its prompt
+ * when the target's upward scan reached the frame's first row without a
+ * boundary and that row is not known to be the top of the pane's history
+ * (Issue #3881 review P2-1). Before this, `top-unknown` stayed on the
+ * detection only and the resolver read such a target as complete: a confirm
+ * whose command began above the capture, and whose rest fell within 12 rows,
+ * was answered under a contract that denies the command.
+ *
+ * A capture that returned the pane's whole history (`history-start`) leaves the
+ * detection as it is — that first row really is where the pane begins.
+ * Blank-row compaction during detection removes no non-blank row, so it does
+ * not change which of the two a frame is.
+ *
+ * @param detection - The tick's detection of the capture
+ * @param captureTop - Where the capture's first row sits ({@link CaptureTop}),
+ *   judged by the caller that knows its window (`isCaptureWindowSaturated`)
+ */
+export function withCaptureTopCompleteness(
+  detection: PromptDetectionResult,
+  captureTop: CaptureTop,
+): PromptDetectionResult {
+  const promptData = detection.promptData;
+  if (
+    !promptData ||
+    promptData.approvalTarget === undefined ||
+    promptData.approvalTargetCompleteness !== undefined ||
+    detection.approvalContext?.completeness !== 'top-unknown' ||
+    captureTop !== 'clipped'
+  ) {
+    return detection;
+  }
+  return { ...detection, promptData: { ...promptData, approvalTargetCompleteness: 'top-unknown' } };
+}
 
 /**
  * Read the prompt's screen as a kind of dialog.
  *
  * @param cliToolId - The tool that drew the frame
  * @param frame - The capture the prompt was detected on (ANSI and box drawing
- *   as captured), or null when the caller has none — then no confirm page can
- *   be read off it
+ *   as captured), or the tick's own `normalizeFrame` of it — the Auto-Yes
+ *   poller passes that, so a tick still normalises its capture once (#3183) —
+ *   or null when the caller has none: then no confirm page can be read off it
  * @param detection - The detection of that frame
+ * @param captureTop - Where `frame`'s first row sits in the pane, when the
+ *   caller knows its capture window (Issue #3881 review P2-1)
  * @returns The reading, or null when the detection carries no prompt
  */
 export function readPromptScreen(
   cliToolId: CLIToolType,
-  frame: string | null,
+  frame: string | NormalizedFrame | null,
   detection: PromptDetectionResult,
+  captureTop?: CaptureTop,
 ): PromptReading | null {
   const promptData = detection.promptData;
   if (!promptData) return null;
@@ -66,9 +126,13 @@ export function readPromptScreen(
     version: PROMPT_READING_VERSION,
     ...(context ? { liveRange: { startRow: context.startRow, endRow: context.endRow } } : {}),
     approvalTarget: context?.completeness ?? ('not-measured' as const),
+    ...(captureTop !== undefined ? { captureTop } : {}),
   };
 
-  if (isAutoYesDeclinedConfirmFrame(cliToolId, frame)) {
+  const confirmPage = typeof frame === 'object' && frame !== null
+    ? isAutoYesDeclinedConfirmPage(cliToolId, frame)
+    : isAutoYesDeclinedConfirmFrame(cliToolId, frame);
+  if (confirmPage) {
     return { ...base, kind: 'confirmation', phase: 'confirmation', evidence: ['confirm-page-reader'] };
   }
 
@@ -90,14 +154,17 @@ export function readPromptScreen(
 /**
  * The `promptData` a `prompt` row is saved with: the detection's, with what
  * {@link readPromptScreen} read stored beside it. Undefined when the detection
- * carries none, exactly as before.
+ * carries none, exactly as before. Both writers of a new `prompt` row from a
+ * frame use it: the response poller's save, and (review P2-2) the Auto-Yes
+ * poller's audit row when it answers before any row was saved.
  */
 export function promptDataForStorage(
   cliToolId: CLIToolType,
-  frame: string | null,
+  frame: string | NormalizedFrame | null,
   detection: PromptDetectionResult,
+  captureTop?: CaptureTop,
 ): PromptData | undefined {
-  const reading = readPromptScreen(cliToolId, frame, detection);
+  const reading = readPromptScreen(cliToolId, frame, detection, captureTop);
   if (!detection.promptData || reading === null) return detection.promptData;
   return { ...detection.promptData, reading };
 }

@@ -18,6 +18,7 @@
 import {
   PROMPT_READING_VERSION,
   type ApprovalTargetCompleteness,
+  type CaptureTop,
   type PromptReading,
   type PromptReadingEvidence,
   type PromptReadingKind,
@@ -35,6 +36,7 @@ const PHASES: ReadonlySet<PromptReadingPhase> = new Set<PromptReadingPhase>(['qu
 const COMPLETENESS: ReadonlySet<ApprovalTargetCompleteness | 'not-measured'> = new Set<
   ApprovalTargetCompleteness | 'not-measured'
 >(['complete', 'truncated', 'top-unknown', 'not-measured']);
+const CAPTURE_TOPS: ReadonlySet<CaptureTop> = new Set<CaptureTop>(['history-start', 'clipped']);
 const EVIDENCE: ReadonlySet<PromptReadingEvidence> = new Set<PromptReadingEvidence>([
   'confirm-page-reader',
   'question-picker-chrome',
@@ -76,6 +78,9 @@ export function readStoredPromptReading(promptData: unknown): PromptReading | nu
   const evidence = reading.evidence;
   if (!Array.isArray(evidence) || !evidence.every((e) => EVIDENCE.has(e as PromptReadingEvidence))) return null;
 
+  const captureTop = reading.captureTop;
+  if (captureTop !== undefined && !CAPTURE_TOPS.has(captureTop as CaptureTop)) return null;
+
   const range = reading.liveRange;
   if (range !== undefined && !(isRecord(range) && isRow(range.startRow) && isRow(range.endRow))) return null;
 
@@ -85,6 +90,7 @@ export function readStoredPromptReading(promptData: unknown): PromptReading | nu
     ...(phase !== undefined ? { phase: phase as PromptReadingPhase } : {}),
     ...(isRecord(range) ? { liveRange: { startRow: range.startRow as number, endRow: range.endRow as number } } : {}),
     approvalTarget,
+    ...(captureTop !== undefined ? { captureTop: captureTop as CaptureTop } : {}),
     evidence: [...(evidence as PromptReadingEvidence[])],
   };
 }

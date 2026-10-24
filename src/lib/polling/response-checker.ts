@@ -224,7 +224,7 @@ import {
   type ExtractionResult,
   buildPromptExtractionResult,
 } from './response-checker-extraction-result';
-import { promptDataForStorage } from './prompt-screen-reading';
+import { captureTopOf, promptDataForStorage, withCaptureTopCompleteness } from './prompt-screen-reading';
 export {
   type ExtractionResult,
   incompleteResult,
@@ -938,6 +938,10 @@ function savePromptMessage(
     return false;
   }
 
+  // Issue #3881 (review P2-1): whether the frame's first row is the pane's —
+  // the capture was taken with `CACHE_MAX_CAPTURE_LINES` (`checkForResponse`).
+  const captureTop = captureTopOf(frame, CACHE_MAX_CAPTURE_LINES);
+
   // Issue #571: Clean TUI decorations from Copilot prompt content before saving
   let promptSaveContent = promptContent;
   if (cliToolId === 'copilot') {
@@ -956,7 +960,15 @@ function savePromptMessage(
     // Issue #3881: with what the frame was read as — the kind, the live rows,
     // the target's completeness — so the chat transcript and every later
     // reader take it as stated instead of deciding it again from the strings.
-    promptData: promptDataForStorage(cliToolId, frame, promptDetection),
+    // Review P2-1: the capture window says whether the frame's top is the
+    // pane's (`captureTop`, and `top-unknown` on a target that reached a cut top),
+    // as the Auto-Yes poller reads its own frame.
+    promptData: promptDataForStorage(
+      cliToolId,
+      frame,
+      withCaptureTopCompleteness(promptDetection, captureTop),
+      captureTop,
+    ),
     timestamp: new Date(),
     cliToolId,
     instanceId: resolvedInstanceId,

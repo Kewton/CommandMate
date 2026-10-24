@@ -59,6 +59,7 @@ import { detectThinking } from './detection/cli-patterns';
 import { generatePromptKey } from './detection/prompt-key';
 import type { PromptDetectionResult } from './detection/types';
 import type { PromptData } from '@/types/models';
+import type { CaptureTop } from '@/types/prompt-reading';
 import { getErrorMessage } from './errors';
 import { invalidateCache } from './tmux/tmux-capture-cache';
 import { promptWaitingReading, readWaitingScreen, type ScreenReading } from './detection/waiting-screen-reading';
@@ -147,6 +148,11 @@ import {
 } from './polling/auto-yes-poller-receipt-log';
 import { syncEnterFallbackEpoch } from './polling/auto-yes-poller-enter-fallback';
 import { capturePollerFrame } from './polling/auto-yes-poller-capture';
+import {
+  captureTopOf as captureTopOfWindow,
+  promptDataForStorage,
+  withCaptureTopCompleteness,
+} from './polling/prompt-screen-reading';
 import {
   beginLedgerAttempt,
   beginLedgerTick,
@@ -350,12 +356,16 @@ export function processStopConditionDelta(
  *   tick's own poller state only, never to a successor under the same key, and
  *   the response poller restart and the terminal push are skipped when the
  *   session was relaunched meanwhile.
+ * @param capture - Issue #3881 (review P2-2): the tick's frame and its capture
+ *   window, so an audit row this answer creates carries the same reading the
+ *   response poller's save gives a row (`promptDataForStorage`)
  */
 async function finishAnsweredPrompt(
   prompt: JudgedPrompt,
   promptDetection: PromptDetectionResult,
   answer: string,
   generation?: AutoYesTickGeneration,
+  capture?: { frame: ReturnType<typeof normalizeFrame>; captureTop: CaptureTop | undefined },
 ): Promise<void> {
   const { worktreeId, cliToolId, instanceId, compositeKey, pollerState, promptData, promptKey } =
     prompt;
@@ -420,7 +430,10 @@ async function finishAnsweredPrompt(
       worktreeId,
       cliToolId,
       instanceId: instanceId ?? cliToolId,
-      promptData,
+      // Issue #3881 (review P2-2): with the reading of the frame it answered,
+      // so a row this creates is classified as the response poller's row for
+      // the same screen would be — not by whichever of the two wrote first.
+      promptData: auditPromptData(cliToolId, promptDetection, promptData, capture),
       answer,
       answeredBy: 'auto',
       content: promptDetection.rawContent || promptDetection.cleanContent,
@@ -466,6 +479,25 @@ async function finishAnsweredPrompt(
 }
 
 /**
+ * The `promptData` an Auto-Yes audit row is recorded with (Issue #3881 review
+ * P2-2): the answered prompt with `promptDataForStorage`'s reading of the
+ * tick's frame. A pending row the response poller saved keeps its own reading
+ * (`recordAnsweredPrompt` spreads it); this is what a row created here, or one
+ * saved without a reading, gets.
+ */
+function auditPromptData(
+  cliToolId: CLIToolType,
+  promptDetection: PromptDetectionResult,
+  promptData: PromptData,
+  capture: { frame: ReturnType<typeof normalizeFrame>; captureTop: CaptureTop | undefined } | undefined,
+): PromptData {
+  return (
+    promptDataForStorage(cliToolId, capture?.frame ?? null, { ...promptDetection, promptData }, capture?.captureTop)
+    ?? promptData
+  );
+}
+
+/**
  * Step 1 of `detectAndRespondToPrompt`: normalise the tick's frame once and
  * read the prompt on it.
  */
@@ -476,6 +508,7 @@ function readPromptFrame(
   precomputedLines: string[] | undefined,
   instanceId: string | undefined,
   rawOutput: string | undefined,
+  captureWindowLines: number | undefined,
 ): { frame: ReturnType<typeof normalizeFrame>; promptDetection: PromptDetectionResult } {
   const receiptScope = { worktreeId, instanceId };
   // Issue #3183: the ONE frame every judgement below reads — normalised once,
@@ -497,7 +530,34 @@ function readPromptFrame(
     frame,
   );
   if (cliToolId === 'antigravity') endAntigravityFrameRead(worktreeId, instanceId);
-  return { frame, promptDetection };
+  return { frame, promptDetection: withCaptureTop(promptDetection, rawOutput ?? cleanOutput, captureWindowLines) };
+}
+
+/**
+ * Issue #3881 (review P2-1): an approval target whose upward scan reached the
+ * top of a capture that filled its window is marked `top-unknown`, so the
+ * resolver does not answer on a deny miss. Without the window (a direct
+ * caller, a test) the capture's extent is not known and nothing is added, as
+ * before.
+ */
+function withCaptureTop(
+  detection: PromptDetectionResult,
+  capture: string,
+  captureWindowLines: number | undefined,
+): PromptDetectionResult {
+  const captureTop = captureTopOf(capture, captureWindowLines);
+  return captureTop === undefined ? detection : withCaptureTopCompleteness(detection, captureTop);
+}
+
+/**
+ * Where a poller capture's first row sits (Issue #3881 review P2-1): the
+ * capture is the last `captureWindowLines` rows of the pane, so one that came
+ * back with fewer rows holds the pane's whole history, and one that filled the
+ * window may be cut at its top (#1670's `isCaptureWindowSaturated`).
+ * Undefined when the window is not known.
+ */
+function captureTopOf(capture: string, captureWindowLines: number | undefined): CaptureTop | undefined {
+  return captureWindowLines === undefined ? undefined : captureTopOfWindow(capture, captureWindowLines);
 }
 
 /**
@@ -518,6 +578,7 @@ function noteNoPromptOnScreen(tick: {
   cleanOutput: string;
   precomputedLines: string[] | undefined;
   rawOutput: string | undefined;
+  captureWindowLines: number | undefined;
 }): ReturnType<typeof logIfWithheldForWantOfReceipt> {
   const {
     worktreeId,
@@ -530,6 +591,7 @@ function noteNoPromptOnScreen(tick: {
     cleanOutput,
     precomputedLines,
     rawOutput,
+    captureWindowLines,
   } = tick;
   forgetPartialAnswer(compositeKey);
   pollerState.lastAnsweredPromptKey = null;
@@ -555,7 +617,12 @@ function noteNoPromptOnScreen(tick: {
   pollerState.lastSkipWarnKey = null;
   if (cliToolId === 'antigravity' && !promptDetection.isPrompt) {
     const seen = logIfWithheldForWantOfReceipt(worktreeId, instanceId, compositeKey, () =>
-      detectPromptOnCleanFrame(cleanOutput, cliToolId, precomputedLines, rawOutput),
+      // Issue #3881: judged with the same capture-top reading as the tick's prompt.
+      withCaptureTop(
+        detectPromptOnCleanFrame(cleanOutput, cliToolId, precomputedLines, rawOutput),
+        rawOutput ?? cleanOutput,
+        captureWindowLines,
+      ),
     );
     // Issue #3820: past the receipt window the gated reading says "no prompt"
     // while the dialog is still up. The ungated reading says it is, so the
@@ -750,6 +817,12 @@ function settleFailedTick(
  *   before its capture, and when that capture's frame was fetched. The answer
  *   is observed against them ({@link observeAnsweredPrompt}). Omitted (direct
  *   callers, tests), the start is fixed here and the frame dated 0.
+ * @param captureWindowLines - Issue #3881 (review P2-1): the window the
+ *   capture was taken with. Given, a capture that filled it is read as
+ *   possibly cut at its top: an approval target that reached that top is
+ *   `top-unknown`, and a deny miss on it is not a pass. Omitted (direct
+ *   callers, tests), nothing is known about the capture's extent, as before.
+ *   The same window says where the audit row's frame begins (`captureTop`).
  * @returns 'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'
  */
 export async function detectAndRespondToPrompt(
@@ -761,7 +834,8 @@ export async function detectAndRespondToPrompt(
   instanceId?: string,
   rawOutput?: string,
   generation?: AutoYesTickGeneration,
-  observation?: TickObservation
+  observation?: TickObservation,
+  captureWindowLines?: number,
 ): Promise<'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'> {
   const compositeKey = buildCompositeKey(worktreeId, cliToolId, instanceId);
   const tickObservation: TickObservation = observation ?? {
@@ -839,6 +913,7 @@ export async function detectAndRespondToPrompt(
       precomputedLines,
       instanceId,
       rawOutput,
+      captureWindowLines,
     );
 
     if (!promptDetection.isPrompt || !promptDetection.promptData) {
@@ -856,6 +931,7 @@ export async function detectAndRespondToPrompt(
         cleanOutput,
         precomputedLines,
         rawOutput,
+        captureWindowLines,
       });
       if (withheldPastGate !== null && withheldPastGate.reason !== null) {
         tickDecisionRecorder({
@@ -1057,7 +1133,11 @@ export async function detectAndRespondToPrompt(
     }
 
     // 6., 7. The answer reached tmux: see `finishAnsweredPrompt`.
-    await finishAnsweredPrompt(judged, promptDetection, answer, generation);
+    await finishAnsweredPrompt(judged, promptDetection, answer, generation, {
+      // The tick's one normalised frame (#3183), not the capture again.
+      frame,
+      captureTop: captureTopOf(rawOutput ?? cleanOutput, captureWindowLines),
+    });
 
     return 'responded';
   } catch (error) {
@@ -1165,6 +1245,8 @@ async function pollAutoYes(
     const result = await detectAndRespondToPrompt(
       worktreeId, pollerState!, cliToolId, cleanOutput, lines, instanceId, rawOutput, generation,
       { start: observationStart, frameTime },
+      // Issue #3881 (review P2-1): the window this capture was taken with.
+      captureLines,
     );
     if (!isTickCurrent(generation)) {
       endStaleTick(generation);

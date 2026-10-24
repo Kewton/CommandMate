@@ -320,7 +320,7 @@ export interface AutoYesPolicyDenial {
  *
  * @param policy - Contract policy; null/undefined permits everything
  * @param denySurfaceIncomplete - Issue #3881: the texts are known to be only
- *   part of what the prompt asks about (a truncated approval target), so a
+ *   part of what the prompt asks about (`approvalTargetCompleteness`), so a
  *   deny miss withholds as `deny-pattern-unusable`. The hook's structured call
  *   is whole and leaves it false.
  */
@@ -348,7 +348,8 @@ export function evaluatePolicyAgainstTexts(
   }
   // Issue #3881 (H-3): no pattern matched, but the texts are not the whole
   // request — the approval target's upward scan stopped at its line cap with
-  // rows above it, and the command may start there. A miss on part of the
+  // rows above it, or (review P2-1) at the top of a capture that filled its
+  // window, and the command may start there. A miss on part of the
   // request is not a pass: the patterns could not be evaluated against what
   // the prompt asks, which is `deny-pattern-unusable`'s fail-closed case.
   // Only when the contract lists patterns; with none there is nothing to miss.
@@ -376,7 +377,8 @@ function evaluatePolicy(
     promptData.type,
     collectDenyMatchTexts(promptData),
     policy,
-    promptData.approvalTargetCompleteness === 'truncated',
+    // Issue #3881: cut at the line cap, or at the top of a clipped capture.
+    promptData.approvalTargetCompleteness !== undefined,
   );
 }
 

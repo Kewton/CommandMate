@@ -448,14 +448,22 @@ export interface BasePromptData {
    */
   approvalTarget?: string;
   /**
-   * Issue #3881 (H-3): `truncated` when the upward scan that bounds
-   * {@link approvalTarget} stopped at its line cap with rows still above it,
-   * so what the panel asks about may begin above the target. The resolver
-   * then does not take a deny pattern's miss as a pass. Absent means the scan
-   * stopped at a boundary, at the frame's top, or never ran — every row before
-   * this field, too.
+   * Issue #3881: the approval target may not be the whole request, so the
+   * resolver does not take a deny pattern's miss on it as a pass.
+   *
+   * - `truncated` (H-3) — the upward scan that bounds {@link approvalTarget}
+   *   stopped at its line cap with rows still above it. Set by the detectors.
+   * - `top-unknown` (review P2-1) — the scan reached the frame's first row
+   *   without a boundary AND the capture filled its window, so the pane may
+   *   hold the top of the request above the frame. Set only by a caller that
+   *   knows how its capture was windowed (the Auto-Yes poller,
+   *   `withCaptureTopCompleteness`); a capture that returned the pane's whole
+   *   history leaves it absent.
+   *
+   * Absent means the scan stopped at a boundary, reached the confirmed top of
+   * the pane's history, or never ran — every row before this field, too.
    */
-  approvalTargetCompleteness?: 'truncated';
+  approvalTargetCompleteness?: 'truncated' | 'top-unknown';
   /**
    * Issue #3881: what the screen was read as when the row was saved — the
    * kind, the live rows, the target's completeness and the evidence. Written

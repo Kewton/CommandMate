@@ -10,8 +10,9 @@
  * 16-column confirm page. So the decision now has a fixed home too:
  *
  * - WRITERS decide the kind from a frame (`readPromptScreen` /
- *   `promptDataForStorage`). Only the module that defines them, and the one
- *   save that has the frame in hand.
+ *   `promptDataForStorage`). Only the module that defines them and the two
+ *   writers of a `prompt` row that have the frame in hand: the response
+ *   poller's save and the Auto-Yes poller's audit row.
  * - READERS take a stored reading back (`readStoredPromptReading`). Only the
  *   module that defines it and the chat transcript.
  * - The reading's version constant is named only where a reading is defined,
@@ -46,6 +47,11 @@ const WRITERS: readonly Site[] = [
     file: 'src/lib/polling/prompt-screen-reading.ts',
     why: 'The definition: the one function that reads a frame as question / permission / confirmation, with the predicates the Auto-Yes poller acts on.',
     proof: E2E_PROOF,
+  },
+  {
+    file: 'src/lib/auto-yes-poller.ts',
+    why: 'The Auto-Yes audit row (review P2-2): an answer recorded before the response poller saved the prompt creates the row, so it is stored with the reading of the frame the tick answered (its one normalised frame), not the bare promptData.',
+    proof: 'tests/unit/lib/polling/prompt-reading-audit-row-3881.test.ts',
   },
   {
     file: 'src/lib/polling/response-checker.ts',

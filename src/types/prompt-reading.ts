@@ -75,6 +75,16 @@ export type PromptReadingEvidence =
   /** A yes/no confirmation pattern (`(y/n)`, `[y/N]`, `Approve?` …). */
   | 'yes-no-pattern';
 
+/**
+ * What the capture says about the frame's first row (Issue #3881 review P2-1).
+ *
+ * - `history-start` — the capture returned fewer rows than its window, so its
+ *   first row is the first row of the pane's history;
+ * - `clipped` — it filled its window: rows of the pane may be above the first
+ *   row, and a `top-unknown` target may be missing its top.
+ */
+export type CaptureTop = 'history-start' | 'clipped';
+
 /** The rows of the frame the reading treats as the live prompt (end exclusive). */
 export interface PromptLiveRange {
   startRow: number;
@@ -91,5 +101,7 @@ export interface PromptReading {
   liveRange?: PromptLiveRange;
   /** `not-measured` when the reader built the target without the upward scan. */
   approvalTarget: ApprovalTargetCompleteness | 'not-measured';
+  /** Absent when the writer did not know how its capture was windowed. */
+  captureTop?: CaptureTop;
   evidence: PromptReadingEvidence[];
 }
