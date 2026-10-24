@@ -2,6 +2,7 @@
 
 import type { PromptData } from '@/types/models';
 import type { OptionRecommendation } from './option-recommendation';
+import type { ApprovalTargetCompleteness } from '@/types/prompt-reading';
 
 /**
  * Options for prompt detection behavior customization.
@@ -94,4 +95,23 @@ export interface PromptDetectionResult {
    * payloads), and this is a reading for Auto-Yes, not part of the prompt.
    */
   optionRecommendations?: readonly OptionRecommendation[];
+  /**
+   * Issue #3881: the rows `promptData.approvalTarget` was cut from (end
+   * exclusive, in the detector's cleaned frame) and whether its top is a
+   * boundary (`findApprovalContextRange`). Set by the readers that bound the
+   * target with that scan — the yes/no patterns, the generic multiple-choice
+   * parser, agy's numbered dialog — and absent otherwise.
+   *
+   * Beside `promptData` for the reason `optionRecommendations` is: a reading
+   * of the frame, not part of the prompt. Only `truncated` also goes on the
+   * prompt (`approvalTargetCompleteness`), because the resolver has to see it.
+   */
+  approvalContext?: ApprovalContextReading;
+}
+
+/** Issue #3881: see {@link PromptDetectionResult.approvalContext}. */
+export interface ApprovalContextReading {
+  startRow: number;
+  endRow: number;
+  completeness: ApprovalTargetCompleteness;
 }
