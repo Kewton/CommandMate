@@ -12,6 +12,11 @@
  *   `auto-yes-option-effect`) -> the number of its one "allow this call once"
  *   row, wherever the default is; withheld as `allow-once-unidentified` when
  *   there is no such row or more than one
+ * - Issue #3863: a question under the `recommended` answer mode (the caller
+ *   passes `question`) -> its recommended option, else its default; withheld
+ *   as `recommended-option-unidentified` when that cannot be told
+ *   (`auto-yes-question-choice`). A question that reads as a permission
+ *   dialog keeps the allow-once rule above.
  * - option requiring text input -> null (skip)
  * - unknown type -> null (skip)
  *
@@ -31,11 +36,14 @@ import type { PromptData, PromptType } from '@/types/models';
 import {
   ALLOW_ONCE_UNIDENTIFIED_SUPPRESSION_REASON,
   POLICY_LOOKUP_FAILED_SUPPRESSION_REASON,
+  RECOMMENDED_OPTION_UNIDENTIFIED_SUPPRESSION_REASON,
   type AutoYesSuppressionReason,
 } from './auto-yes-suppression-reason';
 import { isMultiSelectPrompt } from '@/lib/prompt-answer-semantic';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { selectAllowOnceOption } from './auto-yes-option-effect';
+import { chooseRecommendedOption } from './auto-yes-question-choice';
+import type { OptionRecommendation } from '@/lib/detection/option-recommendation';
 
 /** Auto-answer policy modes; mirrors AUTO_YES_MODES in lib/tasks/contract-parser. */
 export type AutoYesMode = 'off' | 'safe' | 'allow-listed';
@@ -123,6 +131,16 @@ export const MAX_DENY_PATTERN_LENGTH = 200;
  */
 export const MAX_DENY_MATCH_TEXT_LENGTH = 20_000;
 
+/**
+ * Issue #3863: the prompt is a question Auto-Yes answers under the
+ * `recommended` answer mode, and what its reader said about each option's
+ * title (`PromptDetectionResult.optionRecommendations`; absent reads as
+ * unknown).
+ */
+export interface AutoYesQuestionAnswering {
+  optionRecommendations: readonly OptionRecommendation[] | undefined;
+}
+
 /** The base rules' verdict: an answer, or null with the reason when one was withheld. */
 interface BaseAnswer {
   answer: string | null;
@@ -134,12 +152,31 @@ interface BaseAnswer {
  * The pre-policy resolution: the rules as they were before Issue #1547, with
  * the permission rows read by effect (Issue #3822).
  */
-function resolveBaseAnswer(promptData: PromptData, cliToolId: CLIToolType | undefined): BaseAnswer {
+function resolveBaseAnswer(
+  promptData: PromptData,
+  cliToolId: CLIToolType | undefined,
+  question: AutoYesQuestionAnswering | undefined,
+): BaseAnswer {
   if (promptData.type === 'yes_no') {
     return { answer: 'y' };
   }
 
   if (promptData.type === 'multiple_choice') {
+    // Issue #3863: a question answered with its recommended option. Not for a
+    // question whose rows read as a permission dialog — a recommendation never
+    // picks which permission to grant (#3822's rule below decides that).
+    if (question !== undefined && selectAllowOnceOption(promptData.options, cliToolId).kind === 'not-a-permission-dialog') {
+      const choice = chooseRecommendedOption(
+        promptData.options,
+        question.optionRecommendations,
+        isMultiSelectPrompt(promptData),
+      );
+      return choice.kind === 'chosen'
+        ? { answer: choice.option.number.toString() }
+        : { answer: null, withheldBy: RECOMMENDED_OPTION_UNIDENTIFIED_SUPPRESSION_REASON };
+    }
+
+
     // Issue #2755: a checkbox question. A number ticks a box and the confirm is
     // a separate row, so "the default option" is not an answer — it is half of
     // one. Auto-Yes refuses the prompt instead of ticking something and stopping.
@@ -341,13 +378,18 @@ function evaluatePolicy(
  *   read (Issue #3822). Omitted, every measured tool's wording is read
  *   (`auto-yes-option-effect`), so a caller that does not know the tool still
  *   never picks a row that saves a rule or changes the mode.
+ * @param question - Issue #3863: given when the prompt is a question the
+ *   `recommended` answer mode answers; the answer is then its recommended
+ *   option (else its default). The contract is evaluated afterwards exactly
+ *   as for any answer — on the prompt as read, whichever option was chosen.
  */
 export function resolveAutoAnswerWithPolicy(
   promptData: PromptData,
   policy?: AutoYesPolicyLookup,
-  cliToolId?: CLIToolType
+  cliToolId?: CLIToolType,
+  question?: AutoYesQuestionAnswering
 ): AutoYesResolution {
-  const { answer, withheldBy } = resolveBaseAnswer(promptData, cliToolId);
+  const { answer, withheldBy } = resolveBaseAnswer(promptData, cliToolId, question);
   if (withheldBy) {
     return { answer: null, suppressedBy: withheldBy };
   }

@@ -1,6 +1,7 @@
 /** Shared type definitions for prompt detection modules. */
 
 import type { PromptData } from '@/types/models';
+import type { OptionRecommendation } from './option-recommendation';
 
 /**
  * Options for prompt detection behavior customization.
@@ -81,4 +82,16 @@ export interface PromptDetectionResult {
    * undefined when no prompt is detected.
    */
   rawContent?: string;
+  /**
+   * Issue #3863: per option of `promptData` (same order), what its title says
+   * about being recommended — see `option-recommendation`. Set only by the
+   * readers that can tell a title from its description (Claude's
+   * AskUserQuestion picker, Command Code's question reader); absent
+   * otherwise, which a reader of it takes as `'unknown'` for every option.
+   *
+   * Beside `promptData` rather than on its options: the option objects are
+   * pinned byte for byte where they are stored and compared (#2755's golden
+   * payloads), and this is a reading for Auto-Yes, not part of the prompt.
+   */
+  optionRecommendations?: readonly OptionRecommendation[];
 }

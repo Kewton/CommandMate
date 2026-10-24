@@ -65,6 +65,7 @@ import { useAppUpdate } from '@/contexts/AppUpdateContext';
 import { type AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
 import { isReleasedByRestart, type AutoYesStopReason } from '@/config/auto-yes-config';
 import type { AutoYesInstanceSummary } from '@/types/auto-yes';
+import { DEFAULT_AUTO_YES_ANSWER_MODE, isAutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
 import type { CurrentOutputResponseBody } from '@/lib/session/current-output-types';
 import {
   PANE_GATE_NOTHING_ARRIVED,
@@ -155,6 +156,8 @@ type CurrentOutputResponse = Pick<CurrentOutputResponseBody, 'isRunning'> &
       | 'startingSince'
       /** Issue #3821: Auto-Yes's decision about `promptData`; absent from an older server. */
       | 'autoYesDecision'
+      /** Issue #3863: the enabled grant's answer mode; absent while off and from an older server. */
+      | 'autoYesAnswerMode'
     >
   > & {
   /** Issue #1738: may be the degraded structured form published since #1725. */
@@ -587,6 +590,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const autoYesBlockedByContract = autoYesStateMap.get(activeInstanceId)?.blockedByContract === true;
   // Issue #3730: OFF because the last server restart released the grant.
   const autoYesReleasedByRestart = isReleasedByRestart(autoYesStateMap.get(activeInstanceId));
+  // Issue #3863: the active instance's answer mode; undefined when off or unknown.
+  const autoYesAnswerMode = autoYesStateMap.get(activeInstanceId)?.answerMode;
   // Issue #3723: gates the contract re-read below.
   const anyAutoYesEnabled = useMemo(
     () => Array.from(autoYesStateMap.values()).some((entry) => entry.enabled),
@@ -1036,10 +1041,20 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
           // Issue #3723: this poll does not carry the contract verdict, so the
           // last one read is kept for as long as the instance stays armed.
           const blocked = autoYes.enabled && prev.get(seedInstanceId)?.blockedByContract === true;
+          // Issue #3863: the poll names the answer mode beside `autoYes` while
+          // the session runs and Auto-Yes is on. When it does not (a stopped
+          // session, an older server), the mode last read for this armed
+          // instance is kept — never assumed `recommended`.
+          const answerMode = !autoYes.enabled
+            ? undefined
+            : isAutoYesAnswerMode(data.autoYesAnswerMode)
+              ? data.autoYesAnswerMode
+              : prev.get(seedInstanceId)?.answerMode;
           next.set(seedInstanceId, {
             enabled: autoYes.enabled,
             expiresAt: autoYes.expiresAt,
             ...(blocked ? { blockedByContract: true } : {}),
+            ...(answerMode ? { answerMode } : {}),
             // Issue #3730: this poll carries the full stop reason, so the
             // restart notice the whole-worktree GET seeded survives it — and
             // goes when the server stops reporting it.
@@ -1091,6 +1106,13 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       if (latestAutoYesRequestIdRef.current !== requestId) return;
       const instances = data?.instances;
       if (!instances || typeof instances !== 'object') return;
+      // Issue #3863: each enabled instance's answer mode, beside `instances`
+      // (whose entries keep their shape). A server older than the map sends
+      // none: the mode is unknown and nothing is shown.
+      const answerModes: Record<string, unknown> =
+        data.answerModeByInstance && typeof data.answerModeByInstance === 'object'
+          ? data.answerModeByInstance
+          : {};
       const next = new Map<string, AutoYesInstanceSummary>();
       for (const [instanceId, raw] of Object.entries(instances)) {
         if (raw && typeof raw === 'object') {
@@ -1101,11 +1123,14 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
             stopReason?: string;
           };
           const enabled = s.enabled ?? false;
+          const answerMode = answerModes[instanceId];
           next.set(instanceId, {
             enabled,
             expiresAt: s.expiresAt ?? null,
             // Issue #3723
             ...(enabled && s.blockedByContract === true ? { blockedByContract: true } : {}),
+            // Issue #3863
+            ...(enabled && isAutoYesAnswerMode(answerMode) ? { answerMode } : {}),
             // Issue #3730: a server older than the field sends none — plain OFF.
             ...(!enabled && s.stopReason === 'server-restart' ? { stopReason: 'server-restart' as const } : {}),
           });
@@ -1530,6 +1555,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
               instanceId: effectiveInstanceId,
               duration: params.duration,
               stopPattern: params.stopPattern,
+              // Issue #3863: the mode chosen in the dialog, the default named
+              // explicitly — so turning it on from a screen that read OFF while
+              // another tab had it on in `careful` still means what was chosen.
+              ...(params.enabled ? { answerMode: params.answerMode ?? DEFAULT_AUTO_YES_ANSWER_MODE } : {}),
             }),
           });
           if (response.ok) {
@@ -1546,10 +1575,15 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
               const next = new Map(prev);
               // Issue #3723: the arming response names the contract policy.
               const blocked = data.enabled === true && data.contractPolicy?.mode === 'off';
+              // Issue #3863: the mode the server armed with (an older server names none).
+              const answerMode = data.enabled === true && isAutoYesAnswerMode(data.answerMode)
+                ? data.answerMode
+                : undefined;
               next.set(effectiveInstanceId, {
                 enabled: data.enabled,
                 expiresAt: data.expiresAt,
                 ...(blocked ? { blockedByContract: true } : {}),
+                ...(answerMode ? { answerMode } : {}),
               });
               return next;
             });
@@ -2149,6 +2183,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     autoYesExpiresAt,
     autoYesBlockedByContract,
     autoYesReleasedByRestart,
+    autoYesAnswerMode,
     autoYesStateMap,
     diffContent,
     diffFilePath,

@@ -73,7 +73,7 @@ import {
   clearAllPollerStates,
   type AutoYesPollerState,
 } from '@/lib/auto-yes-poller';
-import { POLLING_INTERVAL_MS, clearAllAutoYesStates } from '@/lib/auto-yes-state';
+import { POLLING_INTERVAL_MS, clearAllAutoYesStates, setAutoYesEnabled } from '@/lib/auto-yes-state';
 import { upsertWorktree } from '@/lib/db';
 import { clearAutoYesPolicyCache } from '@/lib/polling/auto-yes-policy';
 import {
@@ -281,6 +281,8 @@ describe('[#3748] (c) 陰性対照 and the response-sent log', () => {
   it.each(CLAUDE_LOOKALIKES.filter(([name]) => isAskUserQuestionLookalike(name)))(
     'claude: %s gets no key, recorded as question-left-to-human rather than the confirm page (#3822)',
     async (_name, raw) => {
+      // Issue #3863: #3861's rule is the `careful` answer mode's since the modes.
+      setAutoYesEnabled(WT, 'claude', true, undefined, undefined, 'claude', 'careful');
       expect(await respondTo('claude', raw)).toBe('no_answer');
       expect(sendPromptAnswer).not.toHaveBeenCalled();
       expect(events(warn, 'poller:auto-yes-skipped-question-confirm')).toEqual([]);

@@ -24,6 +24,11 @@
  * vocabulary only — anything else becomes `(other)`. Worktree, instance,
  * confirmation, interval and hook request ids pair lines up and are never
  * copied out.
+ *
+ * Issue #3863: answers and withheld intervals are also counted by the Auto-Yes
+ * answer mode their line names (`recommended` / `careful`). A line without
+ * one — the hook and API paths, and every line written before the field — is
+ * counted as `unknown`, never as either mode.
  */
 
 import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
@@ -40,6 +45,7 @@ import {
   LEDGER_WITHHOLD_REASONS,
   type AutoYesLedgerEvent,
 } from '@/lib/polling/auto-yes-confirmation-ledger-types';
+import { AUTO_YES_ANSWER_MODES } from '@/types/auto-yes-answer-mode';
 import type { ParsedLogLine } from './metrics-perf';
 import type { MetricMeasurement, MetricRecord } from './metrics-types';
 
@@ -97,6 +103,12 @@ function known(value: unknown, vocabulary: readonly string[]): string {
 const toolOf = (data: Record<string, unknown>) => known(data.cliToolId, CLI_TOOL_IDS);
 const reasonOf = (value: unknown) => known(value, LEDGER_WITHHOLD_REASONS);
 const basisOf = (value: unknown) => known(value, ANSWER_BASES);
+/** Issue #3863: the answer mode a line names, or `unknown` (absent, or not a mode this build knows). */
+const answerModeOf = (value: unknown): AnswerModeKey =>
+  typeof value === 'string' && (AUTO_YES_ANSWER_MODES as readonly string[]).includes(value)
+    ? (value as AnswerModeKey)
+    : 'unknown';
+type AnswerModeKey = 'recommended' | 'careful' | 'unknown';
 
 /**
  * Take one line of the shared read (in its window or up to
@@ -163,6 +175,8 @@ interface Interval {
   reason: string;
   endedReason: string | null;
   reasonChanged: boolean;
+  /** Issue #3863: the answer mode its lines name (`unknown` until one does). */
+  answerMode: AnswerModeKey;
 }
 
 /** The window `[start, end]`: the last completed grid boundary at or before `windowEnd`, and as long as the shared one. */
@@ -243,6 +257,8 @@ interface LinePass {
   answeredByHuman: number;
   answeredLate: number;
   answeredRecords: Map<string, MetricRecord>;
+  /** Issue #3863: Auto-Yes's answers by answer mode. */
+  answeredByMode: Map<AnswerModeKey, number>;
   attemptRecords: Map<string, MetricRecord>;
   abstainRecords: Map<string, MetricRecord>;
   hookRequests: number;
@@ -267,6 +283,7 @@ function createLinePass(): LinePass {
     answeredByHuman: 0,
     answeredLate: 0,
     answeredRecords: new Map<string, MetricRecord>(),
+    answeredByMode: new Map<AnswerModeKey, number>(),
     attemptRecords: new Map<string, MetricRecord>(),
     abstainRecords: new Map<string, MetricRecord>(),
     hookRequests: 0,
@@ -287,6 +304,8 @@ function identify(pass: LinePass, data: Record<string, unknown>): void {
 }
 
 function applyIntervalEvent(interval: Interval, event: AutoYesLedgerEvent, atMs: number, data: Record<string, unknown>): void {
+  // Issue #3863: the first line that names a mode decides it.
+  if (interval.answerMode === 'unknown') interval.answerMode = answerModeOf(data.answerMode);
   if (event === EV.withholdStarted) {
     interval.startedStart = num(data.startedAtMs) ?? atMs;
     interval.reason = reasonOf(data.reason);
@@ -318,6 +337,7 @@ function trackInterval(pass: LinePass, line: LedgerLine, confirmationId: string 
     reason: OTHER,
     endedReason: null,
     reasonChanged: false,
+    answerMode: 'unknown',
   };
   pass.intervals.set(intervalId, interval);
   interval.lastAt = Math.max(interval.lastAt, atMs);
@@ -334,7 +354,15 @@ function onClosed(pass: LinePass, data: Record<string, unknown>, confirmationId:
     // confirmation answered, but not by Auto-Yes: counted apart, kept in
     // the records under its basis.
     if (data.basis === 'human') pass.answeredByHuman++;
-    else pass.answered++;
+    else {
+      pass.answered++;
+      // Issue #3863: by the mode of the send that answered it
+      // (`answeredAnswerMode`) — not the last decision's, which a mode change
+      // while the answered screen waits to be redrawn moves. A line without it
+      // (no send named a mode) falls back to the closing line's `answerMode`.
+      const mode = answerModeOf(data.answeredAnswerMode ?? data.answerMode);
+      pass.answeredByMode.set(mode, (pass.answeredByMode.get(mode) ?? 0) + 1);
+    }
     const tool = toolOf(data);
     const basis = basisOf(data.basis);
     increment(pass.answeredRecords, `${tool}\u0000${basis}`, () => ({ kind: 'answered', tool, basis, count: 0 }));
@@ -428,10 +456,13 @@ interface Withheld {
   lengths: number[];
   confirmations: Set<string>;
   untimed: number;
+  /** Issue #3863: intervals by answer mode, timed or not. */
+  byMode: Map<AnswerModeKey, number>;
 }
 
 function addWithheldInterval(withheld: Withheld, interval: Interval, s: number, e: number): void {
   const reason = interval.endedReason ?? interval.reason;
+  withheld.byMode.set(interval.answerMode, (withheld.byMode.get(interval.answerMode) ?? 0) + 1);
   const record = withheld.records.get(`${interval.tool}\u0000${reason}`) ?? {
     kind: 'withheld',
     tool: interval.tool,
@@ -464,7 +495,13 @@ function addWithheldInterval(withheld: Withheld, interval: Interval, s: number, 
 
 // ── withheld time cut to the window, interval by interval (design §4.3) ──
 function measureWithheld(intervals: Map<string, Interval>, s: number, e: number): Withheld {
-  const withheld: Withheld = { records: new Map<string, MetricRecord>(), lengths: [], confirmations: new Set<string>(), untimed: 0 };
+  const withheld: Withheld = {
+    records: new Map<string, MetricRecord>(),
+    lengths: [],
+    confirmations: new Set<string>(),
+    untimed: 0,
+    byMode: new Map<AnswerModeKey, number>(),
+  };
   for (const interval of intervals.values()) addWithheldInterval(withheld, interval, s, e);
   return withheld;
 }
@@ -576,6 +613,15 @@ function observationMeasurement({ windowMs, coverage, ledgerErrors, pass, withhe
       dialogUnobserved: pass.dialogUnobserved.size,
       cliModeObserved: cliModes.observedInstances.size,
       cliModeUnknownInstances: pass.identified.size === 0 ? null : cliModes.unknownInstances,
+      // Issue #3863: Auto-Yes's answers and withheld intervals by the answer
+      // mode their lines name; `Unknown` is a line naming none (another path,
+      // or written before the field).
+      answeredRecommended: pass.answeredByMode.get('recommended') ?? 0,
+      answeredCareful: pass.answeredByMode.get('careful') ?? 0,
+      answeredAnswerModeUnknown: pass.answeredByMode.get('unknown') ?? 0,
+      withheldIntervalsRecommended: withheld.byMode.get('recommended') ?? 0,
+      withheldIntervalsCareful: withheld.byMode.get('careful') ?? 0,
+      withheldIntervalsAnswerModeUnknown: withheld.byMode.get('unknown') ?? 0,
     },
     records: [
       ...sortedRecords(pass.answeredRecords),

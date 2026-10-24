@@ -115,6 +115,9 @@ function snapshotFingerprint(payload: Awaited<ReturnType<typeof buildCurrentOutp
     payload.autoYesDecision?.state ?? null,
     payload.autoYesDecision?.reason ?? null,
     payload.autoYesDecision?.confirmation ?? null,
+    // Issue #3863: so a mode change on a screen that did not change reaches the
+    // push too (the answer mode decides whether a question waits for a human).
+    payload.autoYesAnswerMode ?? null,
     payload.isSelectionListActive ?? false,
     payload.isPagerActive ?? false,
     // Issue #2369: in the fingerprint for the same reason `sessionStatus` is —
@@ -200,6 +203,8 @@ function emitTerminalSnapshot(
     // Issue #3821: straight through as well — absent when the session is not
     // running (the payload carries none then).
     autoYesDecision: payload.autoYesDecision,
+    // Issue #3863: straight through — the key is absent while Auto-Yes is off.
+    ...(payload.autoYesAnswerMode !== undefined ? { autoYesAnswerMode: payload.autoYesAnswerMode } : {}),
     isSelectionListActive: payload.isSelectionListActive ?? false,
     isPagerActive: payload.isPagerActive ?? false,
     isDismissablePanelActive: payload.isDismissablePanelActive ?? false,

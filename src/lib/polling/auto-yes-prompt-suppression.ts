@@ -7,6 +7,8 @@
 import type { CLIToolType } from '../cli-tools/types';
 import type { PromptData } from '@/types/models';
 import type { NormalizedFrame } from '../detection/tools/types';
+import type { OptionRecommendation } from '../detection/option-recommendation';
+import type { AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
 import { isCodexModelPickerFrame } from '../detection/tools/codex/detect';
 import { getCodexLifecycleDialog } from '../detection/cli-patterns';
 import { isAntigravityTrustScreen } from '../detection/tools/antigravity/patterns';
@@ -57,6 +59,18 @@ export interface JudgedPrompt {
    * (`L3` / `L4`) is read from. Absent until then.
    */
   dialogGate?: AutoYesDialogGateVerdict;
+  /**
+   * Issue #3863: what the reader said about each option's title
+   * (`PromptDetectionResult.optionRecommendations`), for the `recommended`
+   * answer mode's choice. Absent when the reader said nothing.
+   */
+  optionRecommendations?: readonly OptionRecommendation[];
+  /**
+   * Issue #3863: the answer mode the tick acts under (`answerModeOfTick`).
+   * Also what the ledger records on this tick's lines (the prompt doubles as
+   * its scope). Absent reads as `recommended`, the default.
+   */
+  answerMode?: AutoYesAnswerMode;
 }
 
 /**

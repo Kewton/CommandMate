@@ -61,6 +61,14 @@ export interface AutoYesPollerState {
   lastAnsweredPromptKey: string | null;
   /** Timestamp when lastAnsweredPromptKey was set (for retry expiry) */
   lastAnsweredAt: number | null;
+  /**
+   * Issue #3791 (review N1): the duplicate guard actually held back the prompt
+   * on screen on the last tick that read it — see `reserveDuplicateRetry` —
+   * or a tick is sending that prompt's retry (review N3, `isDuplicateRetryOf`). The
+   * push gate reads it (off `globalThis`) to hold that wait until the guard's
+   * retry. Optional so hand-built states need not name it.
+   */
+  duplicateRetryReservation?: DuplicateRetryReservation | null;
   /** Baseline output length for stop condition delta check (Issue #314 fix) */
   stopCheckBaselineLength: number;
   /**
@@ -125,6 +133,19 @@ export interface AutoYesLastAnswer {
  */
 export function getAutoYesLastAnswer(compositeKey: string): AutoYesLastAnswer | null {
   return globalThis.__autoYesPollerStates?.get(compositeKey)?.lastAnswer ?? null;
+}
+
+/**
+ * Issue #3791 (review N1): the duplicate guard (#306) held back the prompt on
+ * screen, and the poller will answer it again once the guard expires.
+ */
+export interface DuplicateRetryReservation {
+  /** The guard's key (`lastAnsweredPromptKey`) the prompt matched. */
+  promptKey: string;
+  /** The answer the guard counts from (`lastAnsweredAt` then). */
+  answeredAt: number;
+  /** Epoch ms of the latest tick that held the prompt back. */
+  observedAt: number;
 }
 
 /**

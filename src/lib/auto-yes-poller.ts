@@ -128,10 +128,13 @@ import {
   autoYesPollerStates,
   getPollerState,
   isDuplicatePrompt,
+  isDuplicateRetryOf,
   isPollerCurrent,
   isSameSession,
   isTickCurrent,
   ownedPollerState,
+  releaseDuplicateRetry,
+  reserveDuplicateRetry,
   resetErrorCount,
   updateLastServerResponseTimestamp,
   type AutoYesTickGeneration,
@@ -157,6 +160,7 @@ import {
 } from './polling/auto-yes-confirmation-ledger';
 import type { AnswerBasis, AttemptResult } from './polling/auto-yes-confirmation-ledger-types';
 import {
+  answerModeOfTick,
   resolveAnswerUnderPolicy,
   skippedForUnownedSession,
   withheldAsQuestion,
@@ -215,6 +219,8 @@ function incrementErrorCount(compositeKey: string, owner?: AutoYesPollerState): 
   if (pollerState) {
     pollerState.consecutiveErrors++;
     pollerState.currentInterval = calculateBackoffInterval(pollerState.consecutiveErrors);
+    // Issue #3791 (review N1): a failed tick held nothing back with the duplicate guard.
+    releaseDuplicateRetry(pollerState);
 
     // Issue #499 Item 5: Auto-stop after consecutive error threshold.
     //
@@ -771,10 +777,19 @@ export async function detectAndRespondToPrompt(
   let receiptEpisode: number | null = null;
   // Issue #3820: the ledger's tick. A tick that read the screen and saw no
   // confirmation closes the open one as gone when it ends (`endLedgerTick`).
-  const ledgerScope: LedgerScope = { compositeKey, worktreeId, cliToolId, instanceId };
+  // Issue #3863: the answer mode this tick acts under, recorded on its ledger lines.
+  const answerMode = answerModeOfTick(worktreeId, cliToolId, instanceId, generation?.grant);
+  const ledgerScope: LedgerScope = { compositeKey, worktreeId, cliToolId, instanceId, answerMode };
   const ledgerTick = beginLedgerTick(ledgerScope);
   // Issue #3821: when this tick began, for the decision's reason (see `tickDecisionRecorder`).
   const tickStartedAt = Date.now();
+  // Issue #3791 (review N1 / N3): the duplicate guard's reservation outlives
+  // this tick only when the guard holds the prompt back again. It stays up
+  // while the tick goes on to send the retry of the reserved prompt (an answer
+  // still on its way), and is released before any await for another screen,
+  // and in `finally` for everything else — withheld, failed, stopped, or
+  // answered (the new answer restarts the hold).
+  let keepDuplicateRetry = false;
   try {
     // 1. Detect prompt.
     //
@@ -895,6 +910,9 @@ export async function detectAndRespondToPrompt(
     const promptKey = generatePromptKey(promptDetection.promptData);
     const frameKey = promptFrameKey(promptDetection.promptData);
     if (isDuplicatePrompt(pollerState, promptKey)) {
+      // Issue #3791 (review N1): the push gate holds this wait until the retry.
+      reserveDuplicateRetry(pollerState, promptKey, tickStartedAt);
+      keepDuplicateRetry = true;
       // Issue #3820: not answered on this tick either — an interval of its own
       // reason, so the count can tell the wait for an answer to land apart.
       withholdLedgerConfirmation(ledgerScope, 'answered-recently');
@@ -902,6 +920,9 @@ export async function detectAndRespondToPrompt(
       decision.reaffirmAnswering();
       return 'duplicate';
     }
+    // Issue #3791 (review N3): another screen than the reserved one — released
+    // now, before the awaits below, so the gate never reads it for this screen.
+    if (!isDuplicateRetryOf(pollerState, promptKey)) releaseDuplicateRetry(pollerState);
 
     const judged: JudgedPrompt = {
       worktreeId,
@@ -912,6 +933,11 @@ export async function detectAndRespondToPrompt(
       promptData: promptDetection.promptData,
       promptKey,
       frameKey,
+      // Issue #3863: for the `recommended` answer mode's choice among a question's options.
+      ...(promptDetection.optionRecommendations !== undefined
+        ? { optionRecommendations: promptDetection.optionRecommendations }
+        : {}),
+      answerMode,
     };
 
     // 2.5. Issue #3706: an earlier answer to this prompt was stopped after some
@@ -944,14 +970,18 @@ export async function detectAndRespondToPrompt(
       return 'no_answer';
     }
 
-    // 3.7. Issue #3822: a question to the operator is the human's to answer;
-    // Auto-Yes answers permissions only. See `withheldAsQuestion`.
+    // 3.7. Issue #3822: a question to the operator is the human's to answer —
+    // under the `careful` answer mode (Issue #3863); under `recommended` a
+    // question reader's picker goes on to step 4. See `withheldAsQuestion`.
     if (withheldAsQuestion(judged)) {
       decision.withheld('question-left-to-human');
       return 'no_answer';
     }
 
     // 4. Resolve auto answer under the execution contract's policy (Issue #1547).
+    // Issue #3863: a question the `recommended` mode answers takes its
+    // recommended option, else its default; one whose recommendation cannot
+    // be told is withheld (`recommended-option-unidentified`).
     // Auto-Yes reads the frame itself instead of going through status-detector
     // (it shares the reader, not the verdict), so this is the only place the policy can gate an
     // auto-answer: a prompt the policy withholds is left for a human, and the
@@ -1046,6 +1076,7 @@ export async function detectAndRespondToPrompt(
     });
   } finally {
     endLedgerTick(ledgerScope, ledgerTick);
+    if (!keepDuplicateRetry) releaseDuplicateRetry(pollerState);
   }
 }
 
@@ -1179,6 +1210,8 @@ async function pollAutoYes(
       return;
     }
     if (sessionMissing) {
+      // Issue #3791 (review N1): no screen for the duplicate guard to hold back.
+      releaseDuplicateRetry(generation.pollerState);
       // Issue #3798: a session that is gone is waiting for nobody.
       observeWaitingFromTick({
         worktreeId,

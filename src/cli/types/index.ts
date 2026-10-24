@@ -415,6 +415,8 @@ export interface RemoteOptions {
 export interface SendOptions {
   agent?: string;
   autoYes?: boolean;
+  /** Issue #3863: `--auto-yes-answer-mode` — the answer mode `--auto-yes` arms with */
+  autoYesAnswerMode?: string;
   duration?: string;
   stopPattern?: string;
   token?: string;
@@ -592,6 +594,8 @@ export interface AutoYesOptions {
   /** Issue #896: agent instance ID (defaults to the agent's primary instance) */
   instance?: string;
   token?: string;
+  /** Issue #3863: `recommended` | `careful` — how questions are answered while on */
+  answerMode?: string;
 }
 
 /**

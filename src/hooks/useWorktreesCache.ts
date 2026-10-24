@@ -77,8 +77,11 @@ export const INITIAL_LOAD_RETRY_DELAYS_MS = [2000, 5000, 10000] as const;
  *   every instance of a tool, and one instance's edge cannot decide it: an alias
  *   going quiet says nothing about the primary. It stays poll-driven (≤20s),
  *   which costs a stale dot rather than a wrong one.
+ *
+ * Exported for the Sessions tile's Auto-Yes tests (Issue #3863), which pin that
+ * a copy made here carries the Auto-Yes maps over by reference.
  */
-function applyWaitingEdge(
+export function applyWaitingEdge(
   wt: Worktree,
   edge: { waiting: boolean; instance?: string | null; waitingKind?: string | null },
 ): Worktree {

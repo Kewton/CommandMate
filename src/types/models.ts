@@ -12,6 +12,7 @@ import type {
 } from '@/lib/session/structured-prompt';
 import type { AutoYesInstanceSummary } from '@/types/auto-yes';
 import type { AutoYesStopReason } from '@/config/auto-yes-config';
+import type { AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
 
 export type { AgentInstance };
 
@@ -305,6 +306,14 @@ export interface Worktree {
    * omits the key from a row with none.
    */
   autoYesStopReasonByInstance?: Partial<Record<string, AutoYesStopReason>>;
+  /**
+   * The answer mode of each armed instance (Issue #3863), keyed like
+   * {@link autoYesByInstance} and beside it rather than in it (that map's entry
+   * shape is pinned, #2512). Only `GET /api/worktrees` fills it in, on both
+   * paths, and omits the key from a row with nothing armed. A server older than
+   * the field omits it always: an armed instance with no entry is "unknown".
+   */
+  autoYesAnswerModeByInstance?: Partial<Record<string, AutoYesAnswerMode>>;
   /**
    * Latest chat-message time per agent instance (Issue #2838), keyed like
    * {@link sessionStatusByInstance}. Only `GET /api/worktrees` fills it in, on

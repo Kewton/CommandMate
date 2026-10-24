@@ -58,6 +58,7 @@ import {
 import { getLastPolicySuppression, suppressionPredatesAnswer } from '@/lib/polling/auto-yes-suppression-state';
 import { getAutoYesLastAnswer } from '@/lib/polling/auto-yes-poller-state';
 import { getWaitingEpisodeRecord } from '@/lib/session/waiting-episode-state';
+import { autoYesAnswerModeOf } from '@/lib/auto-yes-state';
 import type { AutoYesEnterFallbackPublished } from '@/lib/polling/auto-yes-enter-fallback';
 import { publishAutoYesDecision } from '@/lib/polling/auto-yes-decision-state';
 import { getAntigravityAcceptedReceiptCallId } from '@/lib/polling/antigravity-receipt-episodes';
@@ -802,6 +803,9 @@ function buildRunningPayload({
     // Issue #3821: next to `autoYes`, and about `promptData` above — whether
     // Auto-Yes is answering it, has left it to a human, or neither.
     autoYesDecision,
+    // Issue #3863: how a question on this screen is treated while Auto-Yes is
+    // on; the key is absent while it is off.
+    ...(autoYesState?.enabled ? { autoYesAnswerMode: autoYesAnswerModeOf(autoYesState) } : {}),
     isSelectionListActive,
     isPagerActive,
     isDismissablePanelActive,

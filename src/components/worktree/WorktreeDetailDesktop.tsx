@@ -626,6 +626,8 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
       const paneAutoYesBlockedByContract = paneAutoYes?.blockedByContract === true;
       // Issue #3730: OFF because the last server restart released this pane's grant.
       const paneAutoYesReleasedByRestart = isReleasedByRestart(paneAutoYes);
+      // Issue #3863: this pane's answer mode; undefined when off or unknown.
+      const paneAutoYesAnswerMode = paneAutoYes?.answerMode;
       // Issue #743/#875: derive THIS pane's AI agent status. Splits are
       // per-instance, so resolve from the per-instance status map keyed by the
       // pane's instanceId (alias instances show their own status); fall back to
@@ -685,6 +687,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
           }}
           autoYesBlockedByContract={paneAutoYesBlockedByContract}
           autoYesReleasedByRestart={paneAutoYesReleasedByRestart}
+          autoYesAnswerMode={paneAutoYesAnswerMode}
           // Issue #756: History domain group. Issue #744: embedded per-split
           // HistoryPane. Each split fetches its OWN cliToolId's messages
           // (useSplitMessages) and shows them only in its own pane. History

@@ -1,0 +1,12 @@
+
+[1m[38;5;231mReview your answers[0m
+
+ ● Which goal should this change pursue first?
+   [38;5;114m→ Speed[39m
+ ● How wide should the scope be?
+   [38;5;114m→ Narrow[39m
+
+[38;5;246mReady to submit your answers?[39m
+
+[38;5;153m❯[39m [38;5;246m1. [38;5;153mSubmit answers[39m
+  [38;5;246m2. [39mCancel

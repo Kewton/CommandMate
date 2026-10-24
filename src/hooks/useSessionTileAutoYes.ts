@@ -34,7 +34,25 @@
  * "Resolved" is not "rendered": the cache applies a refresh inside
  * `startTransition`, so the row this hook sees when the promise settles is
  * still the pre-refresh one. That row is what is recorded, and the override
- * lets go on the first render that carries a different one.
+ * lets go on the first render whose Auto-Yes came from a later list read.
+ *
+ * "Replaced" means a list read, not a new row object (Issue #3863): the cache
+ * also copies a row for a WebSocket status edge (a wait, a session start),
+ * carrying the Auto-Yes maps over by reference — the same, possibly stale,
+ * values. Only a list read builds a new `autoYesByInstance`, so its identity
+ * (see {@link tileAutoYesSource}) is what tells the two apart; a status copy
+ * after a failed refresh keeps the route's answer on screen.
+ *
+ * ## Answer mode (Issue #3863)
+ *
+ * The row's `autoYesAnswerModeByInstance` names the mode of each armed
+ * instance, so the tile labels its toggle as the worktree screen does, and a
+ * re-read (another tab's change, a reload) restores it. The route's answer
+ * carries the mode it stored, held like the rest of the answer. A mode nobody
+ * named (a server older than the field) is left unknown and draws no label.
+ * Enabling always names the mode — the default too — because the route reads
+ * an omitted mode on an instance that is already on as "keep the current one",
+ * and the tile may not have seen another tab turn it on.
  *
  * ## Expiry
  *
@@ -53,6 +71,10 @@ import type { AutoYesInstanceSummary, AutoYesToggleParams } from '@/types/auto-y
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { Worktree } from '@/types/models';
 import { isReleasedByRestart } from '@/config/auto-yes-config';
+import {
+  DEFAULT_AUTO_YES_ANSWER_MODE,
+  isAutoYesAnswerMode,
+} from '@/types/auto-yes-answer-mode';
 
 /** What a tile with nothing armed reads. One object, so memoised readers stay stable. */
 export const AUTO_YES_OFF: Readonly<AutoYesInstanceSummary> = Object.freeze({
@@ -78,9 +100,12 @@ export const AUTO_YES_RELEASED_BY_RESTART: Readonly<AutoYesInstanceSummary> = Ob
  * Issue #3730: an OFF instance the row lists in `autoYesStopReasonByInstance`
  * as `server-restart` reads as {@link AUTO_YES_RELEASED_BY_RESTART}, so the
  * tile says why, as the worktree screen does. Any other value there is ignored.
+ *
+ * Issue #3863: an enabled instance carries the mode the row names for it in
+ * `autoYesAnswerModeByInstance`; anything else there leaves the mode out.
  */
 export function readTileAutoYes(
-  worktree: Pick<Worktree, 'autoYesByInstance' | 'autoYesStopReasonByInstance'>,
+  worktree: Pick<Worktree, 'autoYesByInstance' | 'autoYesStopReasonByInstance' | 'autoYesAnswerModeByInstance'>,
   instanceId: string,
 ): Readonly<AutoYesInstanceSummary> {
   const entry = worktree.autoYesByInstance?.[instanceId];
@@ -89,9 +114,11 @@ export function readTileAutoYes(
       ? AUTO_YES_RELEASED_BY_RESTART
       : AUTO_YES_OFF;
   }
+  const answerMode = worktree.autoYesAnswerModeByInstance?.[instanceId];
   return {
     enabled: true,
     expiresAt: typeof entry.expiresAt === 'number' ? entry.expiresAt : null,
+    ...(isAutoYesAnswerMode(answerMode) ? { answerMode } : {}),
   };
 }
 
@@ -108,16 +135,32 @@ export interface TileAutoYesOverride {
   settledRow: Worktree | null;
 }
 
+/**
+ * What identifies the list read a row's Auto-Yes came from (Issue #3863): its
+ * `autoYesByInstance` map, which every `GET /api/worktrees` builds anew and a
+ * WebSocket status copy carries over by reference. A row without the map (a
+ * server older than #2512) falls back to the row itself.
+ */
+export function tileAutoYesSource(row: Worktree): object {
+  return row.autoYesByInstance ?? row;
+}
+
 /** Whether an override has done its job. Pure, so the release rule is testable alone. */
 export function isTileAutoYesOverrideReleased(
   override: TileAutoYesOverride,
   stored: Readonly<AutoYesInstanceSummary>,
   row: Worktree,
 ): boolean {
+  // Issue #3863: a mode the route named lands only once the row names it too.
   const landed =
     stored.enabled === override.value.enabled &&
-    (!stored.enabled || stored.expiresAt === override.value.expiresAt);
-  const superseded = override.settledRow !== null && row !== override.settledRow;
+    (!stored.enabled ||
+      (stored.expiresAt === override.value.expiresAt &&
+        (override.value.answerMode === undefined || stored.answerMode === override.value.answerMode)));
+  // A later list read, not merely a copied row (a WebSocket status edge keeps
+  // the stale maps by reference): see the module comment.
+  const superseded =
+    override.settledRow !== null && tileAutoYesSource(row) !== tileAutoYesSource(override.settledRow);
   return landed || superseded;
 }
 
@@ -135,6 +178,8 @@ export interface UseSessionTileAutoYesResult {
   expiresAt: number | null;
   /** Issue #3730: OFF because the last server restart released the grant. */
   releasedByRestart: boolean;
+  /** Issue #3863: the answer mode while ON, when the server named one. */
+  answerMode?: AutoYesInstanceSummary['answerMode'];
   /** `AutoYesToggle`'s `onToggle`. Never rejects. */
   toggle: (params: AutoYesToggleParams) => Promise<void>;
 }
@@ -180,16 +225,20 @@ export function useSessionTileAutoYes({
             instanceId,
             duration: params.duration,
             stopPattern: params.stopPattern,
+            // Issue #3863: named on every enabling, the default too — an
+            // omitted mode on an instance already on keeps its current mode.
+            ...(params.enabled ? { answerMode: params.answerMode ?? DEFAULT_AUTO_YES_ANSWER_MODE } : {}),
           }),
         });
         // A refused toggle changed nothing on the server, so the row is still
         // the truth and there is nothing to hold.
         if (!response.ok) return;
-        const data = (await response.json()) as { enabled?: unknown; expiresAt?: unknown };
+        const data = (await response.json()) as { enabled?: unknown; expiresAt?: unknown; answerMode?: unknown };
         const enabled = data.enabled === true;
         answer = {
           enabled,
           expiresAt: enabled && typeof data.expiresAt === 'number' ? data.expiresAt : null,
+          ...(enabled && isAutoYesAnswerMode(data.answerMode) ? { answerMode: data.answerMode } : {}),
         };
       } catch {
         return;
@@ -214,6 +263,7 @@ export function useSessionTileAutoYes({
     enabled: shown.enabled,
     expiresAt: shown.expiresAt,
     releasedByRestart: isReleasedByRestart(shown),
+    ...(shown.enabled && shown.answerMode ? { answerMode: shown.answerMode } : {}),
     toggle,
   };
 }
