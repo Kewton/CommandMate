@@ -161,6 +161,13 @@ export interface LedgerEntry {
   basis: AnswerBasis | null;
   /** Issue #3863: the answer mode of the last decision about it (screen path). */
   answerMode?: AutoYesAnswerMode;
+  /**
+   * Issue #3863: the answer mode of the send that answered it (the first `ok`
+   * attempt's). Kept apart from {@link answerMode}: a later decision — a
+   * mode changed while the answered screen waits to be redrawn — does not
+   * change the mode it was answered under.
+   */
+  answeredAnswerMode?: AutoYesAnswerMode;
   interval: OpenInterval | null;
   intervals: number;
   withheldMsClosed: number;

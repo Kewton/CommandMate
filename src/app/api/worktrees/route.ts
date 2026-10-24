@@ -24,6 +24,7 @@ import {
   detectWorktreeSessionStatus,
   type WorktreeSessionStatus,
 } from '@/lib/session/worktree-status-helper';
+import { startWorktreeWaitingObservations } from '@/lib/session/waiting-episode-binding';
 import { parseIncludeParam, parseIncludeStatusParam } from '@/lib/api/worktrees-include-parser';
 import { isWorktreeStalled } from '@/lib/detection/stalled-detector';
 import { getNextAction, getReviewStatus } from '@/lib/session/next-action-helper';
@@ -134,6 +135,12 @@ export async function GET(request: NextRequest) {
 
     if (includeStatus) {
       const statusStartedAt = performance.now();
+      // Issue #3798: the waiting episodes' starts, fixed before the list below —
+      // a session that starts (and opens a wait) after it must not be ended as
+      // gone by a probe that never saw it.
+      const observationStarts = new Map(
+        worktrees.map((worktree) => [worktree.id, startWorktreeWaitingObservations(worktree.id)])
+      );
       // Issue #405: Batch query all tmux sessions once (N+1 elimination)
       const tmuxSessions = await listSessions();
       listSessionsMs = performance.now() - statusStartedAt;
@@ -154,6 +161,7 @@ export async function GET(request: NextRequest) {
             markPendingPromptsAsAnswered,
             getAgentInstances,
             metrics,
+            observationStarts.get(worktree.id),
           );
           statusByWorktree.set(worktree.id, status);
         })

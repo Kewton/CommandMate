@@ -129,7 +129,11 @@ export interface PromptObservationPollerRecord {
  * Issue #3822: `base-withholds` is the base rules stopping the answer before the
  * contract is read (`allow-once-unidentified`: a permission dialog with no
  * single "allow this call once" row). It is not the contract's verdict and is
- * reported the same with or without a contract.
+ * reported the same with or without a contract. Issue #3863 adds the question
+ * a question reader read, as the poller's base rules treat it under the answer
+ * mode in effect: `question-left-to-human` under `careful`, and
+ * `recommended-option-unidentified` under `recommended` when the recommended
+ * option cannot be told.
  */
 export type PromptObservationContractEvaluation =
   | {

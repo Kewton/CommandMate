@@ -417,8 +417,10 @@ function closeEntry(state: LedgerState, entry: LedgerEntry, now: number, how: Cl
     // The screen path cannot tell Auto-Yes's keys from a human's; only a
     // delivered reply that released it is known to be Auto-Yes's (design §2.6).
     resolvedBy: how.kind === 'reply' ? 'auto' : how.kind === 'gone' ? (how.resolvedBy ?? 'unknown') : 'unknown',
-    // Issue #3863: the mode the last decision about it was made under.
+    // Issue #3863: the mode the last decision about it was made under, and
+    // the mode of the send that answered it (which a later decision does not move).
     ...answerModeField(entry.answerMode),
+    ...(entry.answeredAnswerMode !== undefined ? { answeredAnswerMode: entry.answeredAnswerMode } : {}),
     openMs: Math.max(0, now - entry.openedAt),
     withheldMsTotal: entry.withheldMsClosed,
     unobservableMs: entry.unobservableMs,
@@ -736,6 +738,8 @@ function settleAttempt(
   if (entry === undefined) return;
   if (result === 'ok') {
     entry.attempts.ok += 1;
+    // Issue #3863: the first send that answered it says which mode answered it.
+    if (!entry.answered && pending.answerMode !== undefined) entry.answeredAnswerMode = pending.answerMode;
     entry.answered = true;
     endInterval(state, entry, 'answered', now);
     return;

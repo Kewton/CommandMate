@@ -98,6 +98,12 @@ import {
 import { AUTO_YES_LEDGER_EVENTS as EV } from '@/lib/polling/auto-yes-confirmation-ledger-types';
 import type { AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
 import { clearAutoYesDecisions, publishAutoYesDecision } from '@/lib/polling/auto-yes-decision-state';
+import { buildPromptObservation, type ObservationPayload } from '@/lib/prompt-observation/observe';
+import { STATUS_REASON } from '@/lib/detection/status-reason';
+import { AUTO_YES_LEDGER_LOG_MODULE } from '@/lib/polling/auto-yes-confirmation-ledger-types';
+import { measureAutoYesObservation, AUTO_YES_OBSERVATION_GRID_MS } from '@/lib/agent-health/auto-yes-observation';
+import { addLogLine, createLogAggregate } from '@/lib/agent-health/metrics-perf';
+import { formatPromptObservation } from '../../../src/cli/commands/prompt';
 
 const WT = 'wt-3863';
 const ROOT = path.resolve(__dirname, '../..');
@@ -159,6 +165,28 @@ const CLAUDE_MARKER_WRAPPED = (): string =>
     [`2.\u001b[39m ${CLAUDE_OPTION_2_TITLE}`, `2.\u001b[39m ${LONG_TITLE}${' '.repeat(10)}\n     (Recommended)`],
   ]);
 /** Option 2's title fills the pane: the row under it may be its wrap or its description. */
+/**
+ * Review N1: option 2's title fills the pane, a marker stands alone on the
+ * next row, and the row after it holds a word too long to fit after the marker
+ * — the title may wrap on past the marker, so where it ends is not known.
+ */
+const CLAUDE_MARKER_MID_TITLE = (): string =>
+  variant(CLAUDE_QUESTION, [
+    [CLAUDE_OPTION_1_TITLE, CLAUDE_OPTION_1_PLAIN],
+    [
+      `2.\u001b[39m ${CLAUDE_OPTION_2_TITLE}`,
+      `2.\u001b[39m ${LONG_TITLE}${' '.repeat(10)}\n     (Recommended)\n     ${'continuation-of-the-same-title-'.repeat(6)}`,
+    ],
+  ]);
+/** Review N1: the marker ends the title and a plain description follows. */
+const CLAUDE_MARKER_THEN_DESCRIPTION = (): string =>
+  variant(CLAUDE_QUESTION, [
+    [CLAUDE_OPTION_1_TITLE, CLAUDE_OPTION_1_PLAIN],
+    [
+      `2.\u001b[39m ${CLAUDE_OPTION_2_TITLE}`,
+      `2.\u001b[39m ${LONG_TITLE}${' '.repeat(10)}\n     (Recommended)\n     Read files only; no command is run.`,
+    ],
+  ]);
 const CLAUDE_TITLE_UNDELIMITED = (): string =>
   variant(CLAUDE_QUESTION, [[`2.\u001b[39m ${CLAUDE_OPTION_2_TITLE}`, `2.\u001b[39m ${LONG_TITLE}`]]);
 
@@ -522,5 +550,165 @@ describe('[#3863] the decision a mode made does not outlive the mode', () => {
     const raw = CLAUDE_REC_ON_BOTH();
     expect(await tick('claude', raw)).toBe('no_answer');
     expect(published(raw)).toMatchObject({ state: 'withheld', reason: 'recommended-option-unidentified' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review (2): N1 — the title's end after a wrapped marker
+// ---------------------------------------------------------------------------
+
+describe('[#3863 review N1] a marker on its own row ends the title only when nothing after it continues it', () => {
+  it("a word after the marker that may still be the title wrapping: 'unknown', and no key", async () => {
+    const raw = CLAUDE_MARKER_MID_TITLE();
+    expect(recommendationsOf('claude', raw)).toEqual([false, 'unknown', false, false]);
+    enable('claude', 'recommended');
+    expect(await tick('claude', raw)).toBe('no_answer');
+    expect(getLastPolicySuppression(WT, 'claude')).toMatchObject({ reason: 'recommended-option-unidentified' });
+  });
+
+  it('the marker, then a plain description: recommended, and option 2 is answered', async () => {
+    const raw = CLAUDE_MARKER_THEN_DESCRIPTION();
+    expect(recommendationsOf('claude', raw)).toEqual([false, true, false, false]);
+    enable('claude', 'recommended');
+    expect(await tick('claude', raw)).toBe('responded');
+    expect(sentAnswers()).toEqual(['2']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review (2): N2 — the prompt observation reads the question as the poller does
+// ---------------------------------------------------------------------------
+
+describe('[#3863 review N2] the observation’s base verdict is the poller’s', () => {
+  const NOW = 1_800_000_000_000;
+
+  function observe(raw: string, answerMode?: AutoYesAnswerMode) {
+    const clean = stripBoxDrawing(stripAnsi(raw));
+    const promptData = detectPromptOnCleanFrame(clean, 'claude', clean.split('\n'), raw).promptData ?? null;
+    const payload: ObservationPayload = {
+      isRunning: true,
+      sessionName: `mcbd-claude-${WT}`,
+      sessionStatus: 'waiting',
+      sessionStatusReason: STATUS_REASON.PROMPT_DETECTED,
+      fullOutput: raw,
+      isPromptWaiting: true,
+      promptData,
+      promptView: null,
+      isSelectionListActive: false,
+      isPagerActive: false,
+      isDismissablePanelActive: false,
+      isUnclassifiedActive: false,
+      startingSince: null,
+      autoYes: { enabled: true, expiresAt: null, lastSuppression: null, lastEnterFallback: null },
+      serverPollerActive: true,
+      ...(answerMode === undefined ? {} : { autoYesAnswerMode: answerMode }),
+    };
+    return buildPromptObservation({
+      worktreeId: WT,
+      cliToolId: 'claude',
+      instanceId: 'claude',
+      resolvedBy: 'explicit',
+      payload,
+      sessionGeneration: NOW - 60_000,
+      contract: { policy: null, taskId: null },
+      appearance: { note: () => NOW - 5_000, forget: () => {} },
+      now: NOW,
+    });
+  }
+
+  it.each([
+    ['two recommended options', CLAUDE_REC_ON_BOTH],
+    ['a title that cannot be told from its description', CLAUDE_TITLE_UNDELIMITED],
+  ] as const)('%s, no contract, no poller record: base-withholds in the observation, withheld by the poller', async (_name, frame) => {
+    const raw = frame();
+    for (const mode of ['recommended', undefined] as const) {
+      const observation = observe(raw, mode);
+      expect(observation.autoYes.pollerRecord).toBeNull();
+      expect(observation.autoYes.contractEvaluation).toEqual({
+        state: 'base-withholds',
+        reason: 'recommended-option-unidentified',
+        contract: null,
+      });
+    }
+    enable('claude', 'recommended');
+    expect(await tick('claude', raw)).toBe('no_answer');
+    expect(getLastPolicySuppression(WT, 'claude')).toMatchObject({ reason: 'recommended-option-unidentified' });
+  });
+
+  it('careful: base-withholds question-left-to-human, as the poller withholds it', async () => {
+    expect(observe(CLAUDE_QUESTION, 'careful').autoYes.contractEvaluation).toEqual({
+      state: 'base-withholds',
+      reason: 'question-left-to-human',
+      contract: null,
+    });
+    enable('claude', 'careful');
+    expect(await tick('claude', CLAUDE_QUESTION)).toBe('no_answer');
+    expect(getLastPolicySuppression(WT, 'claude')).toMatchObject({ reason: 'question-left-to-human' });
+  });
+
+  it('negative: one recommended option under recommended: policy-permits, and the poller answers', async () => {
+    expect(observe(CLAUDE_QUESTION, 'recommended').autoYes.contractEvaluation).toEqual({ state: 'policy-permits', contract: null });
+    enable('claude', 'recommended');
+    expect(await tick('claude', CLAUDE_QUESTION)).toBe('responded');
+  });
+
+  it('negative: a permission is read as before', () => {
+    expect(observe(CLAUDE_BASH_APPROVAL, 'careful').autoYes.contractEvaluation).toEqual({ state: 'policy-permits', contract: null });
+  });
+
+  it('commandmate prompt’s human lines name the reason', () => {
+    const text = formatPromptObservation(observe(CLAUDE_REC_ON_BOTH(), 'recommended'), NOW);
+    expect(text).toContain('contract re-evaluation: base-withholds reason=recommended-option-unidentified (no contract)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review (2): N3 — answers are counted by the mode of the send that answered
+// ---------------------------------------------------------------------------
+
+describe('[#3863 review N3] a mode changed after the answer does not move the answer’s mode', () => {
+  it('recommended send → careful → duplicate → gone: the closing line and the daily count say recommended', async () => {
+    const state = pollerState('claude');
+    enable('claude', 'recommended');
+    expect(await tick('claude', CLAUDE_QUESTION, state)).toBe('responded');
+    enable('claude', 'careful');
+    expect(await tick('claude', CLAUDE_QUESTION, state)).toBe('duplicate');
+    expect(await tick('claude', 'nothing on screen\n', state)).toBe('no_prompt');
+
+    expect(ledger(EV.closed)).toEqual([
+      expect.objectContaining({ answeredAtClose: true, answerMode: 'careful', answeredAnswerMode: 'recommended' }),
+    ]);
+
+    // The whole log, through the daily aggregation.
+    const H = AUTO_YES_OBSERVATION_GRID_MS;
+    const at = Date.now();
+    const now = new Date(at + 1.5 * H);
+    const end = Math.floor(now.getTime() / H) * H;
+    const logLine = (event: string, data: Record<string, unknown>) =>
+      `[${new Date(Number(data.atMs ?? at)).toISOString()}] [INFO] [${AUTO_YES_LEDGER_LOG_MODULE}] ${event} ${JSON.stringify(data)}`;
+    const agg = createLogAggregate(now);
+    for (let t = end - 24 * H; t <= end; t += H) {
+      addLogLine(
+        agg,
+        logLine(EV.alive, {
+          ledgerVersion: 1,
+          bootId: 'b',
+          atMs: t,
+          logLevel: 'info',
+          segments: [{ path: 'screen', startMs: t - H, endMs: t }],
+          openConfirmations: 0,
+          openIntervals: 0,
+          ledgerErrors: 0,
+        }),
+      );
+    }
+    for (const [event, data] of mockLogger.info.mock.calls) {
+      if (typeof event === 'string' && Object.values(EV).includes(event as never)) {
+        addLogLine(agg, logLine(event, data as Record<string, unknown>));
+      }
+    }
+    const measured = measureAutoYesObservation(agg.autoYes, agg);
+    if (measured.status !== 'ok') throw new Error(`expected ok, got skip: ${measured.reason}`);
+    expect(measured.details).toMatchObject({ answered: 1, answeredRecommended: 1, answeredCareful: 0 });
   });
 });

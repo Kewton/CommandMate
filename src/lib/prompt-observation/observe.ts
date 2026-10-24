@@ -27,9 +27,20 @@
  */
 
 import type { CurrentOutputPayload } from '@/lib/session/current-output-types';
-import { resolveAutoAnswerWithPolicy, type AutoYesPolicy } from '@/lib/polling/auto-yes-resolver';
-import { isBaseRuleSuppressionReason } from '@/lib/polling/auto-yes-suppression-reason';
-import { isCliToolType } from '@/lib/cli-tools/types';
+import {
+  resolveAutoAnswerWithPolicy,
+  type AutoYesPolicy,
+  type AutoYesQuestionAnswering,
+} from '@/lib/polling/auto-yes-resolver';
+import {
+  isBaseRuleSuppressionReason,
+  QUESTION_LEFT_TO_HUMAN_SUPPRESSION_REASON,
+} from '@/lib/polling/auto-yes-suppression-reason';
+import { classifyAutoYesQuestion } from '@/lib/polling/auto-yes-dialog-gate';
+import { detectPromptOnCleanFrame } from '@/lib/polling/response-checker';
+import { stripAnsi, stripBoxDrawing } from '@/lib/detection/cli-patterns';
+import { DEFAULT_AUTO_YES_ANSWER_MODE, type AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
+import { isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
 import { derivePromptView } from '@/lib/session/prompt-view';
 import { isAnswerablePromptData } from '@/types/models';
 import { classifyScreen, type ClassifiedScreen } from './classify';
@@ -66,6 +77,7 @@ export type ObservationPayload = Pick<
   | 'startingSince'
   | 'autoYes'
   | 'serverPollerActive'
+  | 'autoYesAnswerMode'
 >;
 
 /** Everything one observation is built from. */
@@ -231,6 +243,45 @@ function pollerRecordOf(
   };
 }
 
+/**
+ * Issue #3863: how the poller's base rules would treat the payload's prompt as
+ * a question, under the answer mode in effect (`autoYesAnswerMode`; the
+ * default, `recommended`, while Auto-Yes is off — what turning it on starts
+ * at). Only for a question reader's picker (`classifyAutoYesQuestion`, the
+ * poller's own reading):
+ *
+ * - `careful`: left to a human (`question-left-to-human`, the poller's step 3.7);
+ * - `recommended`: answered with its recommended option, so the resolver is
+ *   handed what the reader says about each option's title, read again off the
+ *   same capture the payload was built from (`fullOutput`) on the poller's
+ *   path (`detectPromptOnCleanFrame`) — and withholds
+ *   `recommended-option-unidentified` where the poller does.
+ *
+ * Anything else: undefined (the prompt is read as it always was).
+ */
+function questionTreatmentOf(
+  payload: ObservationPayload,
+  promptData: NonNullable<ObservationPayload['promptData']>,
+  cliToolId: CLIToolType | undefined,
+): { kind: 'left-to-human' } | { kind: 'answered'; question: AutoYesQuestionAnswering } | undefined {
+  if (!isAnswerablePromptData(promptData) || classifyAutoYesQuestion(promptData, undefined) !== 'picker') {
+    return undefined;
+  }
+  const answerMode: AutoYesAnswerMode = payload.autoYesAnswerMode ?? DEFAULT_AUTO_YES_ANSWER_MODE;
+  if (answerMode === 'careful') return { kind: 'left-to-human' };
+  return { kind: 'answered', question: { optionRecommendations: recommendationsOn(payload.fullOutput, cliToolId) } };
+}
+
+/** What the poller's reading of `frame` says about each option's title (Issue #3863), or undefined. */
+function recommendationsOn(
+  frame: string | undefined,
+  cliToolId: CLIToolType | undefined,
+): AutoYesQuestionAnswering['optionRecommendations'] {
+  if (!frame || cliToolId === undefined) return undefined;
+  const clean = stripBoxDrawing(stripAnsi(frame));
+  return detectPromptOnCleanFrame(clean, cliToolId, clean.split('\n'), frame).optionRecommendations;
+}
+
 function evaluateContract(
   input: ObservationInput,
   classified: ClassifiedScreen | null
@@ -245,7 +296,17 @@ function evaluateContract(
   }
   // Issue #3822: read with the instance's tool, as the poller reads it.
   const cliToolId = isCliToolType(input.cliToolId) ? input.cliToolId : undefined;
-  const resolution = resolveAutoAnswerWithPolicy(promptData, policy, cliToolId);
+  // Issue #3863: a question, as the poller's base rules treat it under the answer mode.
+  const question = questionTreatmentOf(input.payload, promptData, cliToolId);
+  if (question?.kind === 'left-to-human') {
+    return { state: 'base-withholds', reason: QUESTION_LEFT_TO_HUMAN_SUPPRESSION_REASON, contract };
+  }
+  const resolution = resolveAutoAnswerWithPolicy(
+    promptData,
+    policy,
+    cliToolId,
+    question?.kind === 'answered' ? question.question : undefined,
+  );
   // Issue #3822: the base rules' withholding is not the contract's verdict.
   if (resolution.suppressedBy !== null && isBaseRuleSuppressionReason(resolution.suppressedBy)) {
     return { state: 'base-withholds', reason: resolution.suppressedBy, contract };

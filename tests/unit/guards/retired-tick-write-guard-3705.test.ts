@@ -103,7 +103,7 @@ const TARGETS: Target[] = [
     writes: [
       'markOrSettleStructuredHistoryRecheck',
       'markPendingPromptsAsAnswered',
-      'observeWaitingEdge',
+      'observeWaiting',
       'notifyPushSubscribers',
       'updateSessionState',
     ],

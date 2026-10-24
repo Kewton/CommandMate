@@ -53,7 +53,16 @@ import {
   observeStatusEvidence,
   type StatusEvidence,
 } from '@/lib/session/status-evidence';
-import { observeWaitingEdge } from '@/lib/session/waiting-episode-state';
+import { getWaitingEpisode } from '@/lib/session/waiting-episode-state';
+import {
+  captureObservedFrame,
+  observeWaiting,
+  startWaitingObservation,
+  type CapturedFrameTime,
+  type ObservationStart,
+  type WorktreeObservationStarts,
+} from '@/lib/session/waiting-episode-binding';
+import { waitingReadingFromVerdict, type ScreenReading } from '@/lib/detection/waiting-screen-reading';
 // Issue #1783 adds the model readers alongside #1786's `isAwaitingInstruction`;
 // Issue #1784 promotes them to `getResolvedAgentModelInfo`, which folds in what
 // the capture below showed.
@@ -554,6 +563,10 @@ interface InstanceFrameState {
   // Issue #2775: whether no rule could read the frame. False when there was no
   // frame to read, like the two above, and published only when true.
   isUnclassified: boolean;
+  // Issue #3798: the frame as the waiting episodes read it (whether only a
+  // person can end the wait, and which prompt it shows). Null when there was no
+  // frame to read.
+  reading: ScreenReading | null;
 }
 
 /**
@@ -708,6 +721,15 @@ function foldAgentEventsIntoFrame(
         getAgentEventSource(cliToolId).capabilities.eventIdentity,
       ),
   });
+  // Issue #3798: the reading the other two observers make of a frame, from the
+  // verdict and the composed flag above.
+  frame.reading = waitingReadingFromVerdict({
+    verdict: statusResult,
+    waiting: frame.isWaitingForResponse,
+    waitingKind: frame.waitingKind,
+    structuredWaiting: frame.startingSince === null && peek.structured !== null,
+    structuredSince: frame.structuredWaitingSince,
+  });
 }
 
 /**
@@ -811,7 +833,12 @@ async function detectInstanceSessionStatus(
   getMessages: typeof GetMessagesFn,
   markPendingPromptsAsAnswered: typeof MarkPendingFn,
   metrics?: StatusDetectionMetrics,
+  observationStart?: ObservationStart,
 ): Promise<CliToolSessionStatus> {
+  // Issue #3798: fixed before the first `await` (by the route, before it listed
+  // the sessions, when it passed one), so a wait that opened or closed while
+  // this probe waited is not undone by what the probe read.
+  const start = observationStart ?? startWaitingObservation(worktreeId, cliToolId, instanceId);
   // Issue #405: Use Set.has() instead of individual hasSession() calls
   const sessionExists = sessionNameSet.has(sessionName);
   let isRunning = sessionExists;
@@ -855,7 +882,10 @@ async function detectInstanceSessionStatus(
     statusEvidence: null,
     sessionStatusReason: null,
     isUnclassified: false,
+    reading: null,
   };
+  // Issue #3798: when the frame read below was fetched; 0 until there is one.
+  let frameTime: CapturedFrameTime = { frameCapturedAt: 0, frameFetchedAfterStart: false };
   if (isRunning) {
     try {
       // Issue #1933: the per-tool ladder that used to live here — and that made
@@ -867,7 +897,11 @@ async function detectInstanceSessionStatus(
       // Issue #2060: counted BEFORE the await, so a capture that throws is still
       // counted as a tmux round-trip that was paid for.
       if (metrics) metrics.captureCount++;
-      const output = await captureSessionOutput(worktreeId, cliToolId, captureLines, instanceId);
+      const captured = await captureObservedFrame(() =>
+        captureSessionOutput(worktreeId, cliToolId, captureLines, instanceId),
+      );
+      const output = captured.frame;
+      frameTime = captured.frameTime;
       const ctx: InstanceProbeContext = { db, worktreeId, cliToolId, instanceId };
       const { compositeKey, statusResult } = readFrameVerdict(frame, ctx, output);
       foldAgentEventsIntoFrame(frame, ctx, output, statusResult, compositeKey);
@@ -881,14 +915,24 @@ async function detectInstanceSessionStatus(
   // Issue #1786: the single place the waiting edge is observed. #1788 (WS push)
   // and #1790 (push notifications) subscribe with `onWaitingTransition` rather
   // than adding a second detector of their own — see `waiting-episode-state`.
-  const waitingSince = observeWaitingEdge({
+  //
+  // Issue #3798: through the observation tables (`waiting-episode-binding`).
+  // A session that is not running ends the wait as gone; a capture that threw
+  // still reads as "not waiting", as #1786 decided — both only while the
+  // episode is the one this probe started against.
+  const reading: ScreenReading = !isRunning ? { kind: 'gone' } : frame.reading ?? { kind: 'not-waiting' };
+  observeWaiting({
     worktreeId,
     cliToolId,
     instanceId,
-    waiting: frame.isWaitingForResponse,
-    kind: frame.waitingKind,
-    structuredSince: frame.structuredWaitingSince,
+    observer: 'status-probe',
+    start,
+    reading,
+    ...frameTime,
   });
+  const waitingSince = frame.isWaitingForResponse
+    ? getWaitingEpisode(worktreeId, cliToolId, instanceId)?.since ?? null
+    : null;
 
   // Issue #1783 / #1784: the model and reasoning effort, folded from the agent's
   // own hooks and from the frame captured above. Independent of the waiting
@@ -1031,6 +1075,9 @@ function describeEventSourceFor(
  * @param metrics - Optional accumulator for the tmux round-trips this pass issues
  *   (Issue #2060). Mutated in place; safe to share across concurrent calls, which
  *   is how the list route sums one number over every worktree.
+ * @param observationStarts - The waiting episodes' starts, fixed by the route
+ *   before it listed the sessions (Issue #3798,
+ *   `startWorktreeWaitingObservations`). Absent, each probe fixes its own.
  * @returns Aggregated session status for the worktree
  */
 export async function detectWorktreeSessionStatus(
@@ -1041,6 +1088,7 @@ export async function detectWorktreeSessionStatus(
   markPendingPromptsAsAnswered: typeof MarkPendingFn,
   getAgentInstances: typeof GetAgentInstancesFn,
   metrics?: StatusDetectionMetrics,
+  observationStarts?: WorktreeObservationStarts,
 ): Promise<WorktreeSessionStatus> {
   // Issue #649: Skip status detection for global assistant sessions.
   // Global sessions are not real worktrees and should not appear in the sidebar.
@@ -1094,6 +1142,7 @@ export async function detectWorktreeSessionStatus(
         getMessages,
         markPendingPromptsAsAnswered,
         metrics,
+        observationStarts?.startFor(probe.cliToolId, probe.instanceId),
       );
       return { ...probe, status };
     })
