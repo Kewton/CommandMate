@@ -31,6 +31,7 @@ import {
   isBaseRuleSuppressionReason,
   NO_HOOK_RECEIPT_SUPPRESSION_REASON,
   PARTIAL_ANSWER_SUPPRESSION_REASON,
+  RECOMMENDED_OPTION_UNIDENTIFIED_SUPPRESSION_REASON,
   type AutoYesSuppressionReason,
   POLICY_LOOKUP_FAILED_SUPPRESSION_REASON,
 } from './auto-yes-suppression-reason';
@@ -206,6 +207,10 @@ export function logIfWithheldForWantOfReceipt(
 function withheldHint(reason: AutoYesSuppressionReason): string {
   if (reason === POLICY_LOOKUP_FAILED_SUPPRESSION_REASON) {
     return '契約の照会に失敗したので答えていない。サーバーログの policy-lookup-failed を確認';
+  }
+  // Issue #3863: the other base-rule withholding, over a question's recommended option.
+  if (reason === RECOMMENDED_OPTION_UNIDENTIFIED_SUPPRESSION_REASON) {
+    return '質問の推奨の選択肢を 1 つに特定できないので答えていない（基本の判定。契約の判定ではない）。画面で答える';
   }
   if (isBaseRuleSuppressionReason(reason)) {
     return '今回だけ許可の選択肢を 1 つに特定できないので答えていない（基本の判定。契約の判定ではない）。画面で答える';

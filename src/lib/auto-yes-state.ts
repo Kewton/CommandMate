@@ -15,6 +15,7 @@ import { isValidWorktreeId } from './security/path-validator';
 import { isCliToolType, type CLIToolType } from './cli-tools/types';
 import { createLogger } from '@/lib/logger';
 import type { AutoYesInstanceSummary } from '@/types/auto-yes';
+import { DEFAULT_AUTO_YES_ANSWER_MODE, type AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
 import { getOrInitGlobal } from './global-state';
 
 const logger = createLogger('auto-yes-state');
@@ -133,6 +134,27 @@ export interface AutoYesState {
    * {@link STOP_MATCH_EXCERPT_TRUNCATION_MARKER} appended when it does not fit.
    */
   stopMatchedText?: string;
+  /**
+   * How Auto-Yes answers a question the agent asks (Issue #3863): `recommended`
+   * answers it with its recommended option (else the default), `careful`
+   * leaves it to a human. Set by every enable ({@link setAutoYesEnabled}), so
+   * a mode change is a new state object — a tick holding the old one is no
+   * longer current (#3706) and sends nothing under the old mode.
+   *
+   * Optional only for a state kept from before the field (hot reload keeps
+   * the map on `globalThis`): read it through {@link autoYesAnswerModeOf},
+   * which reads that absence as `recommended`.
+   */
+  answerMode?: AutoYesAnswerMode;
+}
+
+/**
+ * The answer mode a state stands for (Issue #3863): its own, or
+ * `recommended` for a state that predates the field. Not meaningful on a
+ * disabled state, whose mode a later enable does not inherit.
+ */
+export function autoYesAnswerModeOf(state: Pick<AutoYesState, 'answerMode'>): AutoYesAnswerMode {
+  return state.answerMode ?? DEFAULT_AUTO_YES_ANSWER_MODE;
 }
 
 // =============================================================================
@@ -232,6 +254,12 @@ export function getAutoYesState(
  *                   Defaults to DEFAULT_AUTO_YES_DURATION (1 hour) when omitted.
  * @param stopPattern - Optional regex pattern for stop condition (Issue #314).
  * @param instanceId - Optional instance identifier (Issue #896; defaults to primary).
+ * @param answerMode - Issue #3863: how questions are answered. Omitted, an
+ *   enable over a LIVE grant keeps that grant's mode, and any other enable —
+ *   from off, or over a grant that has run out — starts at `recommended`.
+ *   Whether the grant is live is read through {@link getAutoYesState}, which
+ *   turns an expired grant into a disabled one first, so an enable at or after
+ *   the deadline is a new grant, not a continuation. Ignored when disabling.
  */
 export function setAutoYesEnabled(
   worktreeId: string,
@@ -239,10 +267,12 @@ export function setAutoYesEnabled(
   enabled: boolean,
   duration?: AutoYesDuration,
   stopPattern?: string,
-  instanceId?: string
+  instanceId?: string,
+  answerMode?: AutoYesAnswerMode
 ): AutoYesState {
   const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
   if (enabled) {
+    const current = answerMode === undefined ? getAutoYesState(worktreeId, cliToolId, instanceId) : null;
     const now = Date.now();
     const effectiveDuration = duration ?? DEFAULT_AUTO_YES_DURATION;
     const state: AutoYesState = {
@@ -250,6 +280,7 @@ export function setAutoYesEnabled(
       enabledAt: now,
       expiresAt: now + effectiveDuration,
       stopPattern,
+      answerMode: answerMode ?? (current?.enabled ? autoYesAnswerModeOf(current) : DEFAULT_AUTO_YES_ANSWER_MODE),
     };
     autoYesStates.set(key, state);
     notifyChangeAfterShutdown();

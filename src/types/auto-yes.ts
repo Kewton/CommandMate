@@ -10,6 +10,7 @@
  */
 
 import type { AutoYesDuration, AutoYesStopReason } from '@/config/auto-yes-config';
+import type { AutoYesAnswerMode } from './auto-yes-answer-mode';
 
 // Issue #3821: re-exported from here so every program that reads the shared
 // models also reads the `autoYesDecision` field `./auto-yes-decision` declares.
@@ -18,6 +19,14 @@ export type {
   AutoYesDecisionReason,
   AutoYesDecisionState,
 } from './auto-yes-decision';
+
+// Issue #3863: the answer mode, declared dependency-free for the CLI build.
+export {
+  AUTO_YES_ANSWER_MODES,
+  DEFAULT_AUTO_YES_ANSWER_MODE,
+  isAutoYesAnswerMode,
+  type AutoYesAnswerMode,
+} from './auto-yes-answer-mode';
 
 /** Parameters for auto-yes toggle callback (Issue #314) */
 export interface AutoYesToggleParams {
@@ -53,4 +62,12 @@ export interface AutoYesInstanceSummary {
    * state carry it in this field.
    */
   stopReason?: AutoYesStopReason;
+  /**
+   * Issue #3863: the answer mode of an ENABLED instance (`recommended` /
+   * `careful`), on the browser's per-instance state. Omitted when not enabled,
+   * and by a server older than the field. The worktree list's entries do not
+   * carry it (their shape is pinned, #2512); `GET .../auto-yes` answers it
+   * in `answerModeByInstance`.
+   */
+  answerMode?: AutoYesAnswerMode;
 }

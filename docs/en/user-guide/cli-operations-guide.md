@@ -256,7 +256,12 @@ Send a message to a worktree's agent (async). Starts the session automatically i
 commandmate send <worktree-id> "<message>"
 commandmate send <worktree-id> "<message>" --instance codex
 commandmate send <worktree-id> "<message>" --auto-yes --duration 3h
+commandmate send <worktree-id> "<message>" --auto-yes --auto-yes-answer-mode careful  # questions are yours
 ```
+
+`--auto-yes-answer-mode <m>` picks the answer mode `--auto-yes` arms with (`recommended` / `careful`;
+see [Answer Modes](#answer-modes-recommended-and-careful-issue-3863)). Without `--auto-yes` it is
+an error (exit 2). Omitted, a new grant is `recommended` and a grant that is on keeps its mode (Issue #3863).
 
 ### Naming the target: use `--instance` (Issue #1638)
 
@@ -1288,8 +1293,9 @@ The remaining words of the type `AutoYesSuppressionReason` are not policy verdic
 | `unclassified-frame` (Issue #1924) | The generic estimator read a numbered list, but the tool's own dialog detector did not accept it as a confirmation, so nothing is sent. This is the position that stops answering `1` to a numbered list inside a reply (#1896) | "because no tool-specific dialog detector recognised the frame" |
 | `startup-trust-unhandled` (Issue #3757) | agy's startup folder-trust confirmation (`Do you trust the contents of this project?`) is on screen. It belongs to the launch sequence and is unnumbered, so the poller cannot read it as a prompt. If it was drawn after the launch window ended, the next send's readiness wait answers it | "because agy's startup folder-trust confirmation is the launch's to answer, not Auto-Yes's; the next send confirms it once, or answer it at the pane" |
 | `question-confirm-page` (Issue #3748) | The `AskUserQuestion` confirm page (`Submit` / `Cancel`) of Command Code and Claude. `Submit` picks nothing; it commits the answers as they stand, so Auto-Yes does not answer and leaves it to a human | "because the question's Submit/Cancel confirmation commits the answers as they stand, so Auto-Yes leaves it to a human" |
-| `question-left-to-human` (Issue #3822) | A question the tool asks the operator (Claude's `AskUserQuestion` picker, OpenCode V2's question form) is on the pane. Auto-Yes answers permissions only; the question is the human's, so nothing is sent. Not a contract verdict, so naming `multiple_choice` in `allowPromptTypes` does not make it answered. An operator who sets `CM_AUTOYES_DIALOG_GATE=<tool>=legacy`, though, gets that tool's questions (claude's `AskUserQuestion` and the like) answered as before: the kill switch brings back the question too. A question on a tool whose dialog gate is `legacy` by default (command-code and others) is not withheld under this reason either. The `Submit` / `Cancel` confirm page after a question stays `question-confirm-page` | "because the agent is asking a question, and Auto-Yes answers permissions only; answer it at the pane (prompt --json, respond)" |
+| `question-left-to-human` (Issue #3822 / #3863) | A question the tool asks the operator is on the pane and the answer mode is `careful`, so nothing is sent (claude's `AskUserQuestion` picker and command-code's question). OpenCode V2's question form is withheld under this reason in either mode. Not a contract verdict, so naming `multiple_choice` in `allowPromptTypes` does not make it answered. Neither `CM_AUTOYES_DIALOG_GATE=<tool>=legacy` (the kill switch) nor a tool whose dialog gate is `legacy` by default (command-code and others) changes it: under `careful` the question is withheld (Issue #3863 took the question reading off the dialog gate). Copilot's question is not told apart, so it is out of scope. The `Submit` / `Cancel` confirm page after a question stays `question-confirm-page`. Under `recommended` a question is answered with its recommended option ([Answer Modes](#answer-modes-recommended-and-careful-issue-3863)) | "because the agent is asking a question, and Auto-Yes answers permissions only (the careful answer mode, or a question form no mode answers); answer it at the pane (prompt --json, respond), or turn Auto-Yes on with --answer-mode recommended to have it pick the recommended option" |
 | `allow-once-unidentified` (Issue #3822) | A permission dialog is on screen, but no single option reads as "allow this call only" (there is none, or there are two or more), so nothing is sent. Auto-Yes picks only the allow-once option, and sends its number wherever the cursor or the default is. It never picks a persistent allow (`don't ask again`, `always allow`, `Persist to settings.json`, …), a mode change (`allow all edits`, `Full Access`, …) or a denial. The options are read from the wording of live captures of claude, codex, agy (antigravity), command-code and copilot; a numbered list none of whose rows is recognised is answered as before (the default option, or 1). Not a contract verdict, so `mode` is recorded as the contract states it, and `autoYes.contractEvaluation` in `commandmate prompt --json` is `base-withholds`, not `policy-withholds` | "because no single option of the permission dialog allows this call only (the others save a rule, change the permission mode, or deny); Auto-Yes does not pick those, so answer it at the pane (prompt --json, respond)" |
+| `recommended-option-unidentified` (Issue #3863) | The answer mode is `recommended` and a question is on the pane, but which option to answer with cannot be told, so nothing is sent: two or more options are recommended (a title ending in `(Recommended)` / `（推奨）` / `(推奨)`), an option's title cannot be told from its description, the option to pick takes typed text, or the question is multi-select. Not a contract verdict (a withholding of the base rules). `autoYes.contractEvaluation` in `commandmate prompt --json` reads the same screen under the same mode and reports `base-withholds` with this `reason` too (and `base-withholds` with `question-left-to-human` for a question under `careful`). Judged again on every poll | "because the question's recommended option could not be told (two or more marked recommended, a title it could not tell from its description, a typed-text or multi-select answer); answer it at the pane (prompt --json, respond)" |
 | `no-hook-receipt` (Issue #3767) | agy's approval dialog is on screen but there is no matching hook question (`PreToolUse`) on record: (1) none was ever received, (2) the dialog appeared after the window (8 s) from the last one, (3) the dialog was already up before the question arrived (a quotation in a reply, for instance), (4) the questions stopped arriving, (5) the question was already spent on an earlier dialog, or (6) a dialog is still up 18 s (window + observation slack + post-answer cooldown) after Auto-Yes sent keys to the one its question was for — the keys did not clear it, or a dialog with no question of its own replaced it (Issue #3789). Even if sending is cut short part-way, the grace (18 s) is counted from that point, and if the confirmation remains after it has passed, it is recorded as no-hook-receipt. Part of the keys may remain in the input. However, if a more specific suppression reason (partial-answer) was recorded after the interruption, that reason is kept and it is not recorded as no-hook-receipt. The `hint` of the server log line `antigravity-autoyes-withheld-no-hook-receipt` tells them apart. **When it stalls**: `commandmate auto-yes <worktree-id> --disable`, then `commandmate prompt <worktree-id> --json`, then `commandmate respond <worktree-id> --expect-screen …` (or answer in the UI). If no question was ever received or they stopped, check where `~/.gemini/config/hooks.json` points | "because there is no unused agy hook permission question for this dialog (none arrived in time, or the last one was spent on keys that did not clear it); answer it yourself (auto-yes --disable, prompt --json, respond --expect-screen) or check hooks.json" |
 
 In [`commandmate prompt --json`](#commandmate-prompt), `autoYes.pollerRecord` (the poller's record) and `autoYes.contractEvaluation` (the contract re-evaluated now) are separate fields, but both use the same words as this table and the `reason` row above.
@@ -1715,6 +1721,7 @@ commandmate auto-yes <worktree-id> --enable --duration 3h
 commandmate auto-yes <worktree-id> --enable --stop-pattern "error"
 commandmate auto-yes <worktree-id> --disable
 commandmate auto-yes <worktree-id> --enable --instance codex-2  # Scoped to one instance
+commandmate auto-yes <worktree-id> --enable --answer-mode careful  # Questions are yours (careful)
 ```
 
 ### Options
@@ -1725,10 +1732,40 @@ commandmate auto-yes <worktree-id> --enable --instance codex-2  # Scoped to one 
 | `--disable` | Turn Auto-Yes off |
 | `--duration <d>` | How long it stays on (1h, 3h, 8h) |
 | `--stop-pattern <p>` | Stop automatically when the pattern appears in terminal output |
+| `--answer-mode <m>` | The answer mode (`recommended` / `careful`; see [Answer Modes](#answer-modes-recommended-and-careful-issue-3863) below). With `--enable` only. Omitted: `recommended` for a new grant, the current mode for a grant that is on (Issue #3863) |
 | `--instance <id>` | **The recommended way to name the target.** The instance ID; Auto-Yes is controlled independently of the other instances |
 | `--agent <id>` | A helper for instances that are not in the roster (unnecessary when `--instance` alone is enough) |
 
 Enabled for an instance whose session is not running, Auto-Yes stays on until it expires (`--duration`) and answers once the session starts (Issue #3329); while it waits it checks once a minute. It stops with `consecutive_errors` only when failures keep coming in a row: the session exists but its screen cannot be read or the answer cannot be sent, or tmux itself cannot be asked.
+
+### Answer Modes: Recommended and Careful (Issue #3863)
+
+When you turn Auto-Yes on you choose how it treats a **question** the agent asks.
+
+| Mode | A question (claude's `AskUserQuestion`, command-code's question) | A permission |
+|------|------------------------------------------------------------------|--------------|
+| `recommended` (the default) | Answered with its recommended option (rules below) | Only the "allow this call once" option is picked (Issue #3822) |
+| `careful` | Not answered; a person answers it (`question-left-to-human`) | The same |
+
+The option `recommended` picks:
+
+- exactly one option whose **title** (told apart from its description line; a wrapped title is read joined) ends in a standalone `(Recommended)`, `（推奨）` or `(推奨)`: that option, wherever it is in the list and wherever the cursor is;
+- no recommended option: the default (the cursor's option, else option 1);
+- nothing — the question is left to a person (`recommended-option-unidentified`) — when two or more are recommended, an option's title cannot be told from its description, the option to pick takes typed text (`Type something` and the like), or the question is multi-select. The same words at the end of a description do not count.
+
+Under either mode these are never answered automatically: the `Submit` / `Cancel` confirm page after a question (`question-confirm-page`), OpenCode / V2's questions (the question form and the API question), and anything the contract withholds. Copilot's question cannot be told from its pickers, so it is out of scope and may be answered even under `careful`. `CM_AUTOYES_DIALOG_GATE=<tool>=legacy` (the kill switch) does not change how a question is treated (`careful` still leaves it to a person).
+
+- **The mode is set each time Auto-Yes is turned on** (worktree × instance). From off (an expiry included) it starts afresh, `recommended` when omitted; turning it on again while it is on keeps the current mode when omitted. After a mode change no decision made under the old mode carries over, even with the same screen up
+- **The contract**: the contract's `autoYes` is the ceiling and the answer mode sits below it ([task-contract.md](../../design/task-contract.md) §2.4)
+- **Where it shows**: `auto-yes --enable` and `send --auto-yes` print one `Answer mode: …` line when a mode was given or it is not the default (`recommended`). It is also `autoYesAnswerMode` in `capture --json` (while on), `autoYesAnswerMode` on an `instances --json` row (while on), and `answerMode=…` on `wait`'s withholding line and `autoYesSuppression.answerMode` in the exit-10 JSON
+- **API**: `answerMode` in the body of `POST /api/worktrees/<id>/auto-yes` (`recommended` / `careful`; anything else is 400). The responses (the POST, `GET …/auto-yes?cliToolId=` and the top level of `GET …/auto-yes`) carry `answerMode` while on. `GET …/auto-yes` gives each instance's mode in `answerModeByInstance` (the `agents` / `instances` entries keep their shape)
+- **Records**: the Auto-Yes measurement records (decision lines, send attempts, withheld intervals, checkpoints) carry the `answerMode` of the moment. Older records have none, and the daily count reads them as "unknown"
+
+```console
+$ commandmate auto-yes proj-cc --enable --answer-mode careful
+Auto-yes enabled for proj-cc (claude).
+Answer mode: careful (questions are left to you; permissions are still answered).
+```
 
 ### The Target Agent Is the Worktree's Default (Issue #1909)
 

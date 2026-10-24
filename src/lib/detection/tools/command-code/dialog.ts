@@ -81,7 +81,13 @@ import {
   readCommandCodeReviewPage,
   type CommandCodeQuestionRegion,
 } from '../../selection-shape';
-import { findNumberedOptionBlock } from '../dialog-block';
+import { findNumberedOptionBlock, parseNumberedOptionRow } from '../dialog-block';
+import {
+  cannotBeWrapOf,
+  isRecommendedTitle,
+  lowerBoundPaneColumns,
+  type OptionRecommendation,
+} from '../../option-recommendation';
 import type { PromptDetectionResult } from '../../types';
 import { truncateRawContent } from '../../truncate-raw-content';
 
@@ -472,6 +478,12 @@ export function readCommandCodeQuestionDialog(
     region,
     prompt: {
       ...built,
+      // Issue #3863: beside the payload, never in it — see `PromptDetectionResult`.
+      optionRecommendations: readCommandCodeOptionRecommendations(
+        lines,
+        regionRows.slice(block.firstRow),
+        labels.length,
+      ),
       promptData: {
         ...promptData,
         // Only ever added, never set to `false`: see the `checked` note above.
@@ -490,6 +502,71 @@ export function readCommandCodeQuestionDialog(
       },
     },
   };
+}
+
+/** The option row's own prefix — indent, gutter, cursor and number — up to where its label starts. */
+const OPTION_ROW_PREFIX_PATTERN = /^[^\S\n]*[│┃]?[^\S\n]*[❯›●>]?[^\S\n]*\d{1,2}[.)][^\S\n]+/;
+
+/**
+ * What each option's title says about being recommended (Issue #3863,
+ * `option-recommendation`), read off the option rows again — the block reader
+ * joins everything under an option into its label, and this screen says
+ * which rows are the title.
+ *
+ * Measured on the reported capture (#2521, 1.53.0): an option's description
+ * starts on its own row at the option's LABEL column (`❯ 1. ` → five spaces),
+ * and only what the pane wraps lands further left (column 0 or 1). So under an
+ * option row:
+ *
+ * - a row at or right of the label column starts the description, and
+ *   everything after it is description;
+ * - a row left of it, before any description, is the title wrapping — unless
+ *   the row above could not have wrapped into it (its first word would have
+ *   fit there, `cannotBeWrapOf`), in which case it is a description drawn
+ *   further left (the synthetic indent 0 / 1 / 2 shapes #2522 reads), and the
+ *   rest is description too;
+ * - `Submit` / `Next` and the hint bar under the last option are nobody's.
+ *
+ * Every option `'unknown'` when the walk does not find the same options the
+ * reading did.
+ *
+ * @param frameRows - Every row of the capture, for the pane's width
+ * @param optionRows - The region's rows from option 1's row on
+ * @param optionCount - How many options the reading found
+ */
+function readCommandCodeOptionRecommendations(
+  frameRows: readonly string[],
+  optionRows: readonly string[],
+  optionCount: number,
+): OptionRecommendation[] {
+  const paneColumns = lowerBoundPaneColumns(frameRows);
+  const titles: string[][] = [];
+  let labelColumn = 0;
+  let lastTitleRow = '';
+  let inDescription = false;
+  for (const row of optionRows) {
+    if (row.trim() === '') continue;
+    const parsed = parseNumberedOptionRow(row);
+    if (parsed !== null && parsed.number === titles.length + 1) {
+      titles.push([parsed.label]);
+      labelColumn = OPTION_ROW_PREFIX_PATTERN.exec(row)?.[0].length ?? 0;
+      lastTitleRow = row;
+      inDescription = false;
+      continue;
+    }
+    if (titles.length === 0) break;
+    if (COMMAND_CODE_CONFIRM_ROW_PATTERN.test(row) || COMMAND_CODE_QUESTION_HINT_BAR_PATTERN.test(row)) continue;
+    if (inDescription) continue;
+    const indent = row.length - row.trimStart().length;
+    if (indent >= labelColumn || cannotBeWrapOf(lastTitleRow, row, paneColumns)) {
+      inDescription = true;
+      continue;
+    }
+    titles[titles.length - 1].push(row.trim());
+    lastTitleRow = row;
+  }
+  if (titles.length !== optionCount) return Array.from({ length: optionCount }, () => 'unknown' as const);
+  return titles.map((rows) => isRecommendedTitle(rows.join(' ')));
 }
 
 /**
