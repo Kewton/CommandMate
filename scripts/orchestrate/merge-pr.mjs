@@ -296,9 +296,12 @@ export function main(argv, deps = {}) {
     //    to merge is step 4's: that HEAD may not exist yet.
     const workHead = workHeadOf(run, o.worktree, head);
     let { records } = readRecords(o.runDir, o.issues);
+    const envWhere = { runDir: o.runDir, worktree: o.worktree, home: deps.home ?? os.homedir() };
+    // A verify of an earlier HEAD that differs only in the dependencies waits for step 4's precheck (#3883 N10).
+    const deferred = [];
     const problems = [
       ...missingRecords(records, issue, { head, workHead }, item, {
-        runDir: o.runDir, worktree: o.worktree, home: deps.home ?? os.homedir(), warn: log,
+        ...envWhere, warn: log, defer: (reason) => deferred.push(reason),
       }).filter((reason) => !reason.startsWith('precheck:')),
       ...fragmentProblems(run, { worktree: o.worktree, runDir: o.runDir, issue, baseRef, item }),
     ];
@@ -335,7 +338,13 @@ export function main(argv, deps = {}) {
     const headPrecheck = latestByStage(records, issue, item).precheck;
     const precheckEnv = headPrecheck ? verifyEnvState(headPrecheck, { runDir: o.runDir, worktree: o.worktree, home: deps.home ?? os.homedir() }) : null;
     if (precheckEnv?.state === 'unrecorded') log(`merge #${issue}: warning: precheck at ${head.slice(0, 7)}: ${precheckEnv.detail}`);
-    if (unmetStage('precheck', headPrecheck, { head, workHead }) || precheckEnv?.state === 'changed' || precheckEnv?.state === 'missing') {
+    for (const reason of deferred) log(`merge #${issue}: ${reason}`);
+    if (
+      unmetStage('precheck', headPrecheck, { head, workHead }) ||
+      precheckEnv?.state === 'changed' ||
+      precheckEnv?.state === 'missing' ||
+      deferred.length > 0
+    ) {
       // The options come from the precheck of the work HEAD; when a fold commit on top made the
       // precheck run on the published HEAD only, from the Issue's latest precheck=ok (any HEAD).
       // Without either the options would be guessed (kind lost → suppressions=skip): stop (#3527).
@@ -356,6 +365,15 @@ export function main(argv, deps = {}) {
       );
       if (code !== 0) {
         error(`merge #${issue}: the precheck of ${head.slice(0, 7)} did not pass${refreshed ? ' after the refresh' : ''} — not pushed`);
+        return 1;
+      }
+    }
+    if (deferred.length > 0) {
+      // The precheck of this HEAD passed in this environment: the verify's environment is judged again, now without deferring.
+      records = readRecords(o.runDir, o.issues).records;
+      const still = missingRecords(records, issue, { head, workHead }, item, { ...envWhere, warn: log }).filter((reason) => reason.startsWith('verify:'));
+      if (still.length > 0) {
+        error(`merge #${issue} ${head.slice(0, 7)}: not merged — after the precheck the run record still lacks:\n  ${still.join('\n  ')}`);
         return 1;
       }
     }

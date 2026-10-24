@@ -159,6 +159,9 @@ exit 10 にもならない）。
   HEAD が verify の HEAD より進んでいる（6-2 の develop 取り込み・6-4 の一本化）ときに lockfile と依存の版を比べないのは、
   **今の HEAD の precheck が今の環境で通っている**（その precheck の manifest も今と同じ）ときだけ（#3883 N9）。HEAD が違うことだけでは外さない。
   git の外の入力（モデル・settings・`node_modules` の所在）はいつも比べる。
+  merge-pr はこの「依存だけの差」で先に止めず（#3883 N10）、今の HEAD の precheck を走らせてから、合格したときだけ verify の環境を判定し直す
+  （develop の取り込みで lockfile が変わり precheck が一度落ちた後の再試行で、precheck がやり直される）。precheck が落ちれば止まり、
+  モデル・settings・`node_modules` の所在の差は precheck を走らせる前に止める（verify をやり直す）。
 - **precheck の結果も環境に結び付ける**（#3883 N9）: precheck.mjs はチェックの前後に manifest を取り、`precheck-<…>.env.json` に
   key（`<run>:<work item>:precheck-<sha>:a<n>`）と残し、記録に `key=… env=<hash>` を足す。チェックの最中に入力が変われば `fail`
   （`env-changed-during-precheck=<項目>`）。同じ HEAD・同じオプションの ok の記録を再利用する早期 return、publish（`missingRecords`）、

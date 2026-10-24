@@ -255,7 +255,13 @@ export function workHeadOf(run, worktree, head) {
  * checked the code with them. A record without `env=` (taken before H-8) is
  * used as before and `env.warn` says so.
  *
- * @param {{ runDir: string, worktree: string, home: string, warn?: (line: string) => void }} [env]
+ * With `env.defer` (merge-pr.mjs, #3883 N10), a verify of an earlier HEAD that
+ * differs from now only in those inputs, with no such precheck yet, is handed
+ * to `defer` instead of being a missing record: the caller runs the precheck of
+ * the current HEAD first and asks again without `defer`. Any other difference
+ * (the models, the local settings, `node_modules`'s location) is still missing.
+ *
+ * @param {{ runDir: string, worktree: string, home: string, warn?: (line: string) => void, defer?: (reason: string) => void }} [env]
  */
 export function missingRecords(records, issue, heads, item, env) {
   const stages = latestByStage(records, issue, item);
@@ -275,6 +281,11 @@ export function missingRecords(records, issue, heads, item, env) {
       return null;
     }
     if (state.state === 'same') return null;
+    const depsOnly = stage === 'verify' && record.head !== heads.head && state.state === 'changed' && state.fields.every(FOLLOWS_HEAD);
+    if (depsOnly && env.defer) {
+      env.defer(`verify at ${String(record.head).slice(0, 7)}: ${state.detail} — waits for the precheck of ${String(heads.head).slice(0, 7)}`);
+      return null;
+    }
     const precheckHint = stage === 'verify' && record.head !== heads.head && state.fields.some(FOLLOWS_HEAD)
       ? ` (no precheck of ${String(heads.head).slice(0, 7)} in this environment covers the dependencies)`
       : '';

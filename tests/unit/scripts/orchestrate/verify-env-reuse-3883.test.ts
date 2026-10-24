@@ -309,3 +309,76 @@ describe('a precheck is tied to the environment it ran in (#3883 N9)', () => {
     expect(out.join('\n')).toMatch(/was taken in another environment \(changed — .*lockfile/);
   });
 });
+
+describe('merge after a refresh: a dependencies-only difference waits for the precheck of the new HEAD (#3883 N10)', () => {
+  const GREEN = [{ name: 'Lint', bucket: 'pass' as const }, { name: 'Build', bucket: 'pass' as const }, { name: 'Unit Tests', bucket: 'pass' as const }];
+  /**
+   * H (HEAD_A): verify, review, findings and a precheck pass. R (HEAD_B, a merge of develop on H): the lockfile
+   * changed and R's precheck failed once. `change` moves something else too before the retry.
+   */
+  function retryAfterRefresh({ change, failCommands = [] as string[] }: { change?: () => void; failCommands?: string[] } = {}) {
+    recordVerify(HEAD_A);
+    for (const stage of ['review', 'findings']) appendRecord(runDir, '3477', { issue: 3477, stage, result: 'ok', head: HEAD_A });
+    expect(runPrecheck({ head: HEAD_A }).code).toBe(0);
+    lockfile();
+    // R's precheck failed (e.g. a test with the new dependency): the latest record of R.
+    appendRecord(runDir, '3477', { issue: 3477, stage: 'precheck', result: 'fail', head: HEAD_B, workHead: HEAD_A, note: 'tests=fail' });
+    change?.();
+    const out: string[] = [];
+    const fake = fakeGit({
+      head: HEAD_B,
+      firstParent: [`${HEAD_B} ${HEAD_A} ${'d'.repeat(40)}`, `${HEAD_A} ${'d'.repeat(40)}`],
+      prs: [openPr({ headRefOid: HEAD_B })],
+      checks: [GREEN],
+      failCommands,
+    });
+    const code = merge(['--run-dir', runDir, '--issues', '3477', '--issue', '3477', '--worktree', worktree], {
+      run: fake.run, home, sleep: () => {}, now: () => new Date(Date.UTC(2026, 9, 25, 3, 0)),
+      findTestsNaming: () => [], log: (l: string) => out.push(l), error: (l: string) => out.push(l),
+    } as Parameters<typeof merge>[1]);
+    const prechecksOfR = allRecords().filter((r) => r.stage === 'precheck' && r.head === HEAD_B);
+    return { code, out: out.join('\n'), fake, prechecksOfR };
+  }
+
+  it('the retry runs the precheck of R, and with it passed the merge goes on', () => {
+    const r = retryAfterRefresh();
+    expect(r.code, r.out).toBe(0);
+    expect(r.prechecksOfR.map((x) => x.result)).toEqual(['fail', 'ok']);
+    expect(verifyEnvState(r.prechecksOfR[1], { runDir, worktree, home }).state).toBe('same');
+    expect(r.out).toMatch(/verify at aaaaaaa: .*lockfile — waits for the precheck of bbbbbbb/);
+    expect(r.fake.ghCalls('pr merge')).toHaveLength(1);
+  });
+
+  it('a precheck of R that fails again: not merged (the check is not passed over)', () => {
+    const r = retryAfterRefresh({ failCommands: ['npx vitest'] });
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/the precheck of bbbbbbb did not pass — not pushed/);
+    expect(r.fake.ghCalls('pr merge')).toHaveLength(0);
+  });
+
+  it('a model or a local setting that moved too is not deferred: it stops before any precheck, asking for verify', () => {
+    for (const change of [() => globalModel('fable'), () => fs.writeFileSync(path.join(worktree, '.claude', 'settings.local.json'), '{"model":"sonnet"}\n')]) {
+      fs.rmSync(runDir, { recursive: true, force: true });
+      fs.writeFileSync(path.join(worktree, 'package-lock.json'), '{"lockfileVersion":3}\n');
+      globalModel('opus[1m]');
+      fs.writeFileSync(path.join(worktree, '.claude', 'settings.local.json'), '{"model":"opus[1m]"}\n');
+      fs.mkdirSync(runDir, { recursive: true });
+      const r = retryAfterRefresh({ change });
+      expect(r.code).toBe(1);
+      expect(r.out).toMatch(/verify: environment changed — .*(globalModel|localSettings)/);
+      expect(r.prechecksOfR).toHaveLength(1);
+      expect(r.fake.ghCalls('pr merge')).toHaveLength(0);
+    }
+  });
+
+  it('the same verify HEAD as now: a dependencies-only difference is not deferred (verify again)', () => {
+    recordVerify(HEAD_A);
+    for (const stage of ['review', 'findings']) appendRecord(runDir, '3477', { issue: 3477, stage, result: 'ok', head: HEAD_A });
+    expect(runPrecheck({ head: HEAD_A }).code).toBe(0);
+    lockfile();
+    const deferred: string[] = [];
+    const reasons = missingRecords(allRecords(), 3477, { head: HEAD_A, workHead: HEAD_A }, null, { runDir, worktree, home, defer: (r: string) => deferred.push(r) });
+    expect(deferred).toEqual([]);
+    expect(reasons.join('\n')).toMatch(/verify: environment changed — .*lockfile/);
+  });
+});
