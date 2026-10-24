@@ -368,6 +368,7 @@ export function settleLegacyStop(worktreeId, cliToolId, instanceId, target: Lega
 - ※1 B の X は今作られた turn N なので、遷移の前に `turn(N)` の区間は存在しない（turnId は単調な連番: `agent-event-turn.ts:144-147`）。状態を変えない
 - ※2 T2 の F は `lastClosedTurnId` が dialog だけの記録 R そのもののときだけ当たる（R の decision が期限切れで表示だけと同じ形のときに開いた `unattributed` の区間が、その後 R に decision が戻った場合）。「`unattributed` の区間を開いた後で dialog だけの記録 R ができた」形（scraper が先に読んだ確認に hook が追いついた）は、区間の `lastClosedTurnId` が R より前の turn P なので F ではなく G に当たり、T2 では `閉 superseded` になる。この形は T15（`decision-opened`）で `dialog-only(R)` に付け替えておくことで T2 の D に入る。T15 の outcome は `decision-opened` を出す 3 経路すべてが出すので、取りこぼしは `applyTurnOutcomesToEpisode` が throw した場合だけ（最終レビュー P3-3）
 - ※5 T1・T5・T9 の `previous` は dialog だけ／表示だけの記録ではないので、列 D に当たる区間は無い（`dialog-only` の区間はすべて列 E）。状態を変えない
+- T20 の I 列（最終レビュー P3-3）: 区間が `screen` なら、`binding.generation` が今と違っても閉じず、H 列と同じく世代だけを新しくして付け替える（`verdictForOutcome` は `generation-fenced(session-start)` × `screen` を世代の照合より先に見る）。I 列の「閉 generation」は `screen` 以外の binding のこと。テストは `waiting-episode-turn-table-3798.test.ts` の `T20 × I on a screen`
 - T1・T3 の F の rebind は「確認が turn より先に来た」形（agy の最初のツールの確認、開始 hook の遅れ）だけ。`lastClosedTurnId` の一致と、開いた event が `post_tool_use`/`pre_tool_use` であることが条件（R2-4）
 - T4 は `user_prompt_submit` で区間を閉じる（turn model もこのとき decision を全部捨てる）
 - T17 は **明示の回答**（`permission_prompt` の `promptSettled`、`permission_replied`、respond の構造化回答・配信・再確認）による release だけ。`post_tool_use`・`user_prompt_submit`・`idle_prompt`・`session_end` の一括 release は `decision-answered` を出さない（claude の並列ツールで、ツール A の `post_tool_use` がツール B の確認の区間を閉じないため。R3-3）
@@ -725,6 +726,22 @@ export function settleLegacyStop(worktreeId, cliToolId, instanceId, target: Lega
 - 観測が閉じる条件は今より狭くならない（status-helper・C2 は版の照合が足されるだけ）。閉じない区間は表 O-2 が binding を問わず閉じる
 - O2 が見送るのは「閉じた区間と同じ確認を、閉じる前のフレームで読んだ」ときだけで、ハッシュを登録しないので次の tick で取り直せる
 - 同じ turn の 2 つ目の確認は kept のまま（今と同じ。悪化ではない。3 で閉じる）
+
+**(4) 実装で設計から変えたこと（PR 1b の実装時に確定）**
+
+既存テストの期待値と mock を変えないために、次のように置いた。表 O-1・O-2、前提 1〜3、I5・I6 の規則は変えていない。
+- フレームの時刻: `captureSessionOutputWithMeta` は足さず、観測者は capture を `waiting-episode-binding` の `captureObservedFrame(() => captureSessionOutput(…))` で包む。包んだ呼び出しごとの非同期の文脈（`AsyncLocalStorage`、`globalThis.__captureFrameMetaSink`）に、`cli-session` がその呼び出しの返すフレームを作った tmux の取得の開始時刻と取得元（`fetched`＝この呼び出しの取得／`cache`／`joined`＝取得中の値への合流）を知らせる（`tmux-capture-cache` の `getOrFetchCapture` の第 4 引数 `onServed` から。`captureSessionOutputFresh` は取得の前に固定した時刻を書き戻し（`setCachedCapture` の第 4 引数）にも渡す）。セッションの最後の 1 件や本文の照合には頼らないので、同じ session の行数の違う capture（表示用 10000 行と status の 1000 行）が並行しても互いの値を取らない。`cli-session` を `{ captureSessionOutput }` だけで丸ごと mock する既存テスト（status-helper・Auto-Yes poller の約 50 本）が新しい関数を持たず、`captureSessionOutput` の呼び先や引数を変えると全部が落ちるため。何も知らされなかった（mock）フレームは要求した時刻で代用せず 0（§2.6、どの終了よりも前）にし、I6 で開かない側・Auto-Yes poller が `screen` を閉じない側に倒す
+- I6 の補足（`frameFetchedAfterStart`）: 取得元が `fetched` で、取得の開始が観測者の要求の後（開始の後）のフレームで、開始から版が動いていなければ、最後の終了は開始より前なので I6 を当てない。ミリ秒の時計では「閉じた同じミリ秒に取りに行ったフレーム」を前後で区別できず、終了の直後の tick（`response-checker-waiting-push-1790` の「返答で閉じた後の同じ本文の確認」）が見送られるため。`cache`・`joined`・何も知らされなかったとき、開始の後に版が動いたときは時刻で比べる（同じミリ秒の cache hit は終了前の値でありうる。`tests/unit/session/waiting-episode-frame-source-3798.test.ts`）
+- 共通の読みの種類: Auto-Yes poller も status-helper と同じく、構造化の待ちが API で答えられるもの（#3184 の `isApiAnswerableStructuredWait`）なら `readWaitingScreen` に `apiAnswerable` を渡して `prompt` と読む。kept の観測は区間の kind を書き換えるので、片方だけが `menu` と読むと交互の観測で kind と通知の文言が入れ替わる
+- `freshPrompt` の観測（O2）が `ignored` になるのは I6 と世代違い（前提 1）。どちらでも保存・dedup の登録・push をせず `return false`（ログ `prompt-observation-stale`、`because` に理由）
+- status-helper の読み: `readWaitingScreen` を二度呼ばず、同じフレームの判定（`detectSessionStatus` の結果と、構造化の待ち・起動中の扱いを合わせた待ちの判定）から `waitingReadingFromVerdict` で作る。`humanHeld` の決め方は同じ関数の中にだけある（I9）。session が動いていなければ `gone`、capture の throw は §9 のとおり `not-waiting`
+- 経路の開始: 一覧・詳細の route は `listSessions()` の前に `startWorktreeWaitingObservations(worktreeId)`（その worktree の全インスタンスの版と世代を一度に固定）を取り、`detectWorktreeSessionStatus` の最後の引数で渡す。status-helper を mock する route のテストがあるため、関数は `waiting-episode-binding` に置いた
+- Auto-Yes poller: 観測は `detectAndRespondToPrompt` の中ではなく `pollAutoYes` で、`no_prompt` が返った後に行う（開始は capture の前、フレームの時刻は capture の直後）。session が無いと分かった tick（catch の `sessionMissing`）は `gone` を渡す。読みは表 O-1 のすべての行に当てる（`screen` 以外の待ちも開く・付け替える）。閉じる側は表 O-2 のとおり `screen` と `gone` だけ。失敗は debug ログだけで tick を止めない。構造化の待ちは `peekPromptWaiting`（構造化の記録を読む関数を 1 つのモジュールに限る `send-guard-structured-1737` の規則のため）
+- `replaced` の新しい区間の since: 読みの `structuredSince` が古い区間の since より後ならそれ、そうでなければ観測時刻
+- `replaced` の古い区間の終了理由: 古い binding の世代が違えば `generation`、新しい binding が `turn`/`dialog-only` なら `turn-superseded`、それ以外は `screen-cleared`
+- `partialAnswerScreenKey` は `src/lib/detection/prompt-screen-key.ts` の `promptScreenKey` に移し、`auto-yes-poller-state.ts` は同じ名前で re-export する（`ledgerScreenKey` も `promptScreenKey` を呼ぶ）
+- resolver の登録（PR 1a の実装レビュー P3-2）: 3 つの観測者は `waiting-episode-binding` を直接 import する。`tests/unit/guards/waiting-episode-binding-import-3798.test.ts` が、区間を書く関数を呼ぶモジュールがこの 3 つだけで、どれも binding を import していることを確かめる
+- `tests/unit/guards/retired-tick-write-guard-3705.test.ts` の `recordCompletedResponse` の対象は、`observeWaitingEdge` を `observeWaiting` に置き換えた（guard は列挙した書き込みが全部関数の中にあることを求めるので、足すのではなく置き換え）。`savePromptMessage` は先頭の `mayActForPollerKey` の判定の下にあり、対象の関数の数（21）を変えないため足していない
 
 ### 6.4 PR 3: Auto-Yes poller の終了・答えでの区間・2 つ目の確認・抑止記録・wait
 

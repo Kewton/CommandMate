@@ -18,6 +18,7 @@ import { validateAgentInstancesInput } from '@/lib/agent-instances-validator';
 import { listSessions } from '@/lib/tmux/tmux';
 import { checkSessionOwnership, ownedSessionNameSet } from '@/lib/cli-tools/session-ownership';
 import { detectWorktreeSessionStatus } from '@/lib/session/worktree-status-helper';
+import { startWorktreeWaitingObservations } from '@/lib/session/waiting-episode-binding';
 import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import { createLogger } from '@/lib/logger';
 import { releaseAutoYes } from '@/lib/auto-yes-lifecycle';
@@ -64,6 +65,10 @@ export async function GET(
     // Issue #405: Batch query all tmux sessions once (N+1 elimination). Only the
     // session status detection depends on the session name set, so it chains off
     // listSessions() while git status runs concurrently above.
+    //
+    // Issue #3798: the waiting episodes' starts are fixed before the list, so a
+    // session that starts after it keeps the wait it opened.
+    const observationStarts = startWorktreeWaitingObservations(id);
     const sessionStatusPromise = listSessions().then((tmuxSessions) => {
       // Issue #2865: only sessions created in this worktree's directory count.
       const sessionNameSet = ownedSessionNameSet(tmuxSessions, worktree.path);
@@ -74,6 +79,8 @@ export async function GET(
         getMessages,
         markPendingPromptsAsAnswered,
         getAgentInstances,
+        undefined,
+        observationStarts,
       );
     });
 

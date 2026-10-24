@@ -61,6 +61,17 @@ import type { PromptDetectionResult } from './detection/types';
 import type { PromptData } from '@/types/models';
 import { getErrorMessage } from './errors';
 import { invalidateCache } from './tmux/tmux-capture-cache';
+import { readWaitingScreen, type ScreenReading } from './detection/waiting-screen-reading';
+import { detectSessionStatus } from './detection/status-detector';
+import { isApiAnswerableStructuredWait, peekPromptWaiting } from './session/prompt-waiting-composition';
+import { getAgentEventSource } from './hooks/sources/registry';
+import {
+  captureObservedFrame,
+  observeWaiting,
+  startWaitingObservation,
+  type CapturedFrameTime,
+  type ObservationStart,
+} from './session/waiting-episode-binding';
 import {
   THINKING_POLLING_INTERVAL_MS,
   REDUCED_CAPTURE_LINES,
@@ -1061,6 +1072,8 @@ async function pollAutoYes(
   // Issue #3796: this is the session wait's tick (it was scheduled as one) —
   // recorded before anything can fail, for the push gate.
   if (pollerState!.sessionWaitTickAt !== undefined) pollerState!.sessionWaitTickRanAt = generation.startedAt;
+  // Issue #3798: the waiting episode as this tick found it, before its first wait.
+  const observationStart = startWaitingObservation(worktreeId, cliToolId, instanceId);
 
   try {
     // 2. Capture and clean output
@@ -1071,12 +1084,13 @@ async function pollAutoYes(
     // step below exactly as it did; the raw one is carried to the prompt reading
     // so a dialog anchored on box drawing is not invisible to the one path that
     // can answer it without a human.
-    const { raw: rawOutput, clean: cleanOutput } = await capturePollerFrame(
-      worktreeId,
-      cliToolId,
-      captureLines,
-      instanceId,
-    );
+    //
+    // Issue #3798: dated by where that frame came from — the capture goes
+    // through the 5 s cache, so it may predate this tick.
+    const {
+      frame: { raw: rawOutput, clean: cleanOutput },
+      frameTime,
+    } = await captureObservedFrame(() => capturePollerFrame(worktreeId, cliToolId, captureLines, instanceId));
     if (!isTickCurrent(generation)) {
       endStaleTick(generation);
       return;
@@ -1118,6 +1132,15 @@ async function pollAutoYes(
 
     // 5. Thinking check
     if (result === 'no_prompt') {
+      observeWaitingFromTick({
+        worktreeId,
+        cliToolId,
+        instanceId,
+        start: observationStart,
+        frameTime,
+        pollerState: generation.pollerState,
+        rawOutput,
+      });
       const recentLines = lines.slice(-THINKING_CHECK_LINE_COUNT).join('\n');
       if (detectThinking(cliToolId, recentLines)) {
         scheduleNextPoll(generation, THINKING_POLLING_INTERVAL_MS);
@@ -1135,6 +1158,16 @@ async function pollAutoYes(
       return;
     }
     if (sessionMissing) {
+      // Issue #3798: a session that is gone is waiting for nobody.
+      observeWaitingFromTick({
+        worktreeId,
+        cliToolId,
+        instanceId,
+        start: observationStart,
+        frameTime: { frameCapturedAt: 0, frameFetchedAfterStart: false },
+        pollerState: generation.pollerState,
+        rawOutput: null,
+      });
       if (!pollerState!.waitingForSession) {
         pollerState!.waitingForSession = true;
         logger.info('poller:waiting-for-session', { worktreeId, cliToolId, instanceId });
@@ -1147,6 +1180,71 @@ async function pollAutoYes(
   }
 
   scheduleNextPoll(generation);
+}
+
+/**
+ * Tell the waiting episodes what this tick saw (Issue #3798, design §2.5,
+ * PR 1b): a frame with nothing for Auto-Yes to answer, read the way the status
+ * probe reads it — without the agy receipt window — or a session that is gone.
+ *
+ * What it can do is table O-1 for a waiting frame (a survey or a picker after
+ * an answer opens, or turns the wait into, a person's `screen`), and on the
+ * closing side only a `screen` this tick saw cleared on a frame fetched after
+ * it became one, or any wait of a session that is gone. A wait the poller did
+ * not answer is not its to close (PR 3). Advisory: a failure is logged and the
+ * tick goes on.
+ */
+function observeWaitingFromTick(tick: {
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  instanceId: string | undefined;
+  start: ObservationStart;
+  frameTime: CapturedFrameTime;
+  pollerState: AutoYesPollerState;
+  rawOutput: string | null;
+}): void {
+  const { worktreeId, cliToolId, instanceId } = tick;
+  try {
+    let reading: ScreenReading = { kind: 'gone' };
+    if (tick.rawOutput !== null) {
+      const lastResponseAt = tick.pollerState.lastServerResponseTimestamp;
+      const lastOutputTimestamp = lastResponseAt ? new Date(lastResponseAt) : undefined;
+      // Without the receipt scope (design I9), and with the structured wait
+      // read the way the status probe reads it — the API-answerable one
+      // (#3184) a `prompt` here too, or the two observers would flip the
+      // episode's kind between `prompt` and `menu` on every tick.
+      const verdict = detectSessionStatus(tick.rawOutput, cliToolId, lastOutputTimestamp);
+      const { structured } = peekPromptWaiting({ worktreeId, cliToolId, instanceId, scraper: verdict });
+      reading = readWaitingScreen({
+        cliToolId,
+        output: tick.rawOutput,
+        lastOutputTimestamp,
+        structuredWaiting: structured !== null,
+        structuredSince: structured?.at ?? null,
+        apiAnswerable: isApiAnswerableStructuredWait(
+          structured,
+          getAgentEventSource(cliToolId).capabilities.eventIdentity,
+        ),
+        verdict,
+      });
+    }
+    observeWaiting({
+      worktreeId,
+      cliToolId,
+      instanceId,
+      observer: 'auto-yes-poller',
+      start: tick.start,
+      reading,
+      ...tick.frameTime,
+    });
+  } catch (error) {
+    logger.debug('poller:waiting-observation-failed', {
+      worktreeId,
+      cliToolId,
+      instanceId,
+      error: getErrorMessage(error),
+    });
+  }
 }
 
 /**
