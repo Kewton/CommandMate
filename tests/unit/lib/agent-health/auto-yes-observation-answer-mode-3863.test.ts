@@ -16,6 +16,7 @@ import type { MetricMeasurement } from '@/lib/agent-health/metrics-types';
 import {
   AUTO_YES_LEDGER_EVENTS as EV,
   AUTO_YES_LEDGER_LOG_MODULE,
+  type AttemptSettledLine,
   type ConfirmationClosedLine,
   type LedgerAliveLine,
   type LedgerLineBase,
@@ -115,8 +116,8 @@ describe('[#3863] answers and withheld intervals by answer mode', () => {
   it('counts each mode, and a line naming none as unknown', () => {
     const result = measureOk([
       ...aliveDay(),
-      closed(`${BOOT}-1`, S + 1 * H, 'recommended'),
-      closed(`${BOOT}-2`, S + 2 * H, 'recommended'),
+      closed(`${BOOT}-1`, S + 1 * H, 'recommended', { answeredAnswerMode: 'recommended' }),
+      closed(`${BOOT}-2`, S + 2 * H, 'recommended', { answeredAnswerMode: 'recommended' }),
       closed(`${BOOT}-3`, S + 3 * H),
       ...withheldInterval(`${BOOT}-4`, S + 4 * H, 'careful'),
       ...withheldInterval(`${BOOT}-5`, S + 5 * H),
@@ -136,7 +137,54 @@ describe('[#3863] answers and withheld intervals by answer mode', () => {
   });
 
   it('negative: a mode this build does not know is not counted as either', () => {
-    const result = measureOk([...aliveDay(), closed(`${BOOT}-1`, S + H, 'bold')]);
+    const result = measureOk([...aliveDay(), closed(`${BOOT}-1`, S + H, 'bold', { answeredAnswerMode: 'bold' as never })]);
     expect(result.details).toMatchObject({ answered: 1, answeredRecommended: 0, answeredCareful: 0, answeredAnswerModeUnknown: 1 });
+  });
+
+  it('[#3882] a closed line with no answeredAnswerMode is unknown, not the last decision\'s mode', () => {
+    const result = measureOk([...aliveDay(), closed(`${BOOT}-1`, S + H, 'careful'), closed(`${BOOT}-2`, S + 2 * H, 'recommended')]);
+    expect(result.details).toMatchObject({ answered: 2, answeredRecommended: 0, answeredCareful: 0, answeredAnswerModeUnknown: 2 });
+  });
+
+  it('[#3882] a legacy entry carried over a hot reload (answered, no snapshot, now careful) is unknown', () => {
+    const legacy = closed(`${BOOT}-1`, S + H, 'careful', { attempts: { ok: 1, partial: 0, noKeysSent: 0, failed: 0 } });
+    expect(JSON.parse(legacy.slice(legacy.indexOf('{'))).answeredAnswerMode).toBeUndefined();
+    const result = measureOk([...aliveDay(), legacy]);
+    expect(result.details).toMatchObject({ answeredCareful: 0, answeredAnswerModeUnknown: 1 });
+  });
+
+  it('[#3882] positive: recommended answer then a switch to careful counts as recommended', () => {
+    const result = measureOk([...aliveDay(), closed(`${BOOT}-1`, S + H, 'careful', { answeredAnswerMode: 'recommended' })]);
+    expect(result.details).toMatchObject({ answeredRecommended: 1, answeredCareful: 0, answeredAnswerModeUnknown: 0 });
+  });
+
+  it('[#3882] restores from a successful attempt line of the same confirmation ID only', () => {
+    const attempt = (id: string, at: number, result: string, mode: string) =>
+      line<AttemptSettledLine>(EV.attemptSettled, {
+        atMs: at,
+        confirmationId: id,
+        attemptId: `${id}.a1`,
+        cliToolId: 'claude',
+        basis: 'L3',
+        result,
+        late: false,
+        expired: false,
+        answerMode: mode,
+      } as never);
+    const result = measureOk([
+      ...aliveDay(),
+      attempt(`${BOOT}-1`, S + H - 1000, 'ok', 'recommended'),
+      closed(`${BOOT}-1`, S + H, 'careful'),
+      attempt(`${BOOT}-2`, S + 2 * H - 1000, 'ok', 'recommended'),
+      closed(`${BOOT}-3`, S + 3 * H, 'careful'),
+      attempt(`${BOOT}-4`, S + 4 * H - 1000, 'failed', 'recommended'),
+      closed(`${BOOT}-4`, S + 4 * H, 'careful'),
+    ]);
+    expect(result.details).toMatchObject({ answered: 3, answeredRecommended: 1, answeredCareful: 0, answeredAnswerModeUnknown: 2 });
+  });
+
+  it('[#3882] negative: a person\'s answer stays counted apart', () => {
+    const result = measureOk([...aliveDay(), closed(`${BOOT}-1`, S + H, 'careful', { basis: 'human' })]);
+    expect(result.details).toMatchObject({ answered: 0, answeredByHuman: 1, answeredCareful: 0 });
   });
 });

@@ -259,6 +259,8 @@ interface LinePass {
   answeredRecords: Map<string, MetricRecord>;
   /** Issue #3863: Auto-Yes's answers by answer mode. */
   answeredByMode: Map<AnswerModeKey, number>;
+  /** Issue #3882: confirmation ID → the mode its first successful (non-late) attempt line named. */
+  okAttemptMode: Map<string, AnswerModeKey>;
   attemptRecords: Map<string, MetricRecord>;
   abstainRecords: Map<string, MetricRecord>;
   hookRequests: number;
@@ -284,6 +286,7 @@ function createLinePass(): LinePass {
     answeredLate: 0,
     answeredRecords: new Map<string, MetricRecord>(),
     answeredByMode: new Map<AnswerModeKey, number>(),
+    okAttemptMode: new Map<string, AnswerModeKey>(),
     attemptRecords: new Map<string, MetricRecord>(),
     abstainRecords: new Map<string, MetricRecord>(),
     hookRequests: 0,
@@ -358,9 +361,13 @@ function onClosed(pass: LinePass, data: Record<string, unknown>, confirmationId:
       pass.answered++;
       // Issue #3863: by the mode of the send that answered it
       // (`answeredAnswerMode`) — not the last decision's, which a mode change
-      // while the answered screen waits to be redrawn moves. A line without it
-      // (no send named a mode) falls back to the closing line's `answerMode`.
-      const mode = answerModeOf(data.answeredAnswerMode ?? data.answerMode);
+      // while the answered screen waits to be redrawn moves.
+      // Issue #3882: a line without it (a legacy entry carried over a hot
+      // reload, an old log) is never filled from `answerMode` (the last
+      // decision's); only a successful attempt line with the same
+      // confirmation ID that names a mode restores it, else it is unknown.
+      const attemptMode = confirmationId === null ? undefined : pass.okAttemptMode.get(confirmationId);
+      const mode = data.answeredAnswerMode !== undefined ? answerModeOf(data.answeredAnswerMode) : (attemptMode ?? 'unknown');
       pass.answeredByMode.set(mode, (pass.answeredByMode.get(mode) ?? 0) + 1);
     }
     const tool = toolOf(data);
@@ -370,6 +377,11 @@ function onClosed(pass: LinePass, data: Record<string, unknown>, confirmationId:
 }
 
 function onAttemptSettled(pass: LinePass, data: Record<string, unknown>, late: boolean): void {
+  const attemptConfirmationId = str(data.confirmationId);
+  if (!late && attemptConfirmationId !== null && data.result === 'ok' && !pass.okAttemptMode.has(attemptConfirmationId)) {
+    const attemptMode = answerModeOf(data.answerMode);
+    if (attemptMode !== 'unknown') pass.okAttemptMode.set(attemptConfirmationId, attemptMode);
+  }
   const tool = toolOf(data);
   const basis = basisOf(data.basis);
   const result = known(data.result, ATTEMPT_RESULTS);
