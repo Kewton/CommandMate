@@ -766,7 +766,7 @@ export function settleLegacyStop(worktreeId, cliToolId, instanceId, target: Lega
 - 答えの観測は「送信を始める同期区間」ではなく **送信が返った同期区間**（`sendPromptAnswer` の後、`finishAnsweredPrompt` の最初の await の前）に置き、tick が世代を失っていれば（#3706: 許可の取り消し・再付与、session の作り直し）観測も `lastAnswer` の記録もしない。#3706 の「世代を失った tick は『答えた』を表すものを書かない」に合わせるため（`auto-yes-poller-generation-3706.test.ts` の、送信中に許可を出し直した tick が後続を残さない対照が、送信の前に開いた区間の通知タイマーで崩れる）。送信の間に stop が届いて区間が閉じた場合は、送信の前に取ったフレームなので I6 で `ignored` になり、`lastAnswer` を記録しない
 - `lastAnswer` は送信の失敗・途中停止（throw）では記録しない（答えていない）
 - 抑止記録の `episodeId` は `recordPolicySuppression` が書く時点で開いている区間から取る（呼び手が `episodeId` を渡せばそれを使う。agy の受信ログの再刻印は元の記録の ID を引き継ぐ）。記録の型 `AutoYesPolicySuppression` に `episodeId?` を足し、`EpisodeScopedPolicySuppression` はその別名にした
-- `current-output` は `autoYes.waitingEpisodeId`（今開いている区間 ID か null）を `lastSuppression` と同じ同期区間で読んで載せる。`wait` は両方の ID があれば ID の一致で決め（違う・区間が無い → 古い記録、同じ → 年齢を問わずこの待ちの理由。push gate と同じ）、どちらかが無ければ 60 秒の窓
+- `current-output` は `autoYes.waitingEpisodeId`（今開いている区間 ID か null）を `lastSuppression` と同じ同期区間で読んで載せる。`wait` は両方の ID があれば ID の一致で決め（違う・区間が無い → 古い記録、同じ → 年齢を問わずこの待ちの理由。push gate と同じ）、どちらかが無ければ 60 秒の窓。どちらの場合も、poller がその待ちに答えた後なら答える前の記録は理由にしない（再レビュー N3。`current-output` の `autoYes.lastSuppressionAnswered`）
 
 **(レビュー後の決定。整合性レビュー R1〜R4 への対応)**
 - R1（送信の await の間の区間の入れ替わり）: 送信を始める同期区間で、答えの対象（その時に開いている区間 ID。無ければ区間の版）を固定する。送信が返ったら、同じ区間 ID がまだ開いているとき（無かったときは版が動いていないとき）だけ観測して `lastAnswer` を記録する。途中で A が閉じて B が開いた・区間が無かったのに開いた、は記録しない（`lastAnswer` は前のまま）。送信中の rebind（答えで再開した turn の hook など）は同じ区間なので記録する — 版の一致まで求めると、この rebind で答えた区間が閉じなくなり元の不具合に戻るため
@@ -777,6 +777,7 @@ export function settleLegacyStop(worktreeId, cliToolId, instanceId, target: Lega
 **(再レビュー後の決定。N1・N2 への対応)**
 - N1（送信中に同じ区間が人用の `screen` へ rebind された）: 答えの対象は、同じ区間 ID が開いていて、送信開始時から版が動いていないか、動いていても今の binding が `screen` でないときだけ成り立つ。送信中に別の観測者が survey・picker を読んで `screen` にした区間は、答えた prompt より新しい観測なので、古い prompt で観測し直さず `lastAnswer` も記録しない（区間は `screen` のまま、猶予の終わりに通知）。turn・`unattributed` への rebind（答えで再開した turn に結び直る等）は従来どおり記録する
 - N2（答える前の抑止記録が答え済みの判定に勝つ）: 送信の成功経路は抑止記録を消さないので、gate は、呼び手の区間 ID が poller の `lastAnswer` の区間で、抑止記録の `at` が答えの `at` より前なら、その記録をこの待ちの理由と読まない（以降は hold と `auto-yes-answered` の判定）。答えと同時刻以降の新しい抑止・別の区間への答え・ID の無い呼び手は従来どおり `policy-withheld`、人用の `screen` になった区間は猶予の終わりに通知する。抑止記録自体は消さない（`current-output` の `lastSuppression` の公開は変えない）
+- N3（`wait` が答える前の抑止を今の理由と読む）: 判定を `auto-yes-suppression-state.ts` の `suppressionPredatesAnswer`（記録の `at` < poller の `lastAnswer.at`、答えの区間 ID が今開いている区間）に置き、gate と `current-output` の両方がそれを使う。`current-output` は `autoYes.lastSuppressionAnswered`（真偽値、`autoYes` の末尾）で結果を公開し、`wait` の `activeSuppression` は ID の一致・60 秒の窓のどちらで決めた場合も、これが真なら記録を今の理由にしない（猶予を続ける）。履歴の `lastSuppression` はそのまま載せる。古いサーバ（フィールド無し）は偽と読み従来どおり
 
 **(3) 単独で develop に入っても壊れない理由**
 - poller が閉じるのは自分が答えた区間だけで、`screen` の扱いは 1b のまま。gate は 2 で ID を読めるので、書き手が増えるだけ

@@ -121,6 +121,25 @@ export function getLastPolicySuppression(
 }
 
 /**
+ * Whether the record is older than the Auto-Yes answer to the wait it would
+ * explain (Issue #3798): the poller's last answer (`lastAnswer`) went to
+ * `waitingEpisodeId`, the wait open now, after the record was written. The
+ * success path of a send does not clear the record — it stays as history —
+ * but the answer is the newer fact, so the record is not that wait's reason
+ * any more. The push gate and `current-output` (`lastSuppressionAnswered`,
+ * which `cmate wait` reads) both decide it here. A record written at or after
+ * the answer, an answer to another episode, no answer and no wait id are not.
+ */
+export function suppressionPredatesAnswer(
+  suppression: Pick<AutoYesPolicySuppression, 'at'>,
+  waitingEpisodeId: string | null | undefined,
+  answer: { episodeId: string; at: number } | null
+): boolean {
+  if (waitingEpisodeId === null || waitingEpisodeId === undefined || answer === null) return false;
+  return answer.episodeId === waitingEpisodeId && suppression.at < answer.at;
+}
+
+/**
  * Drop the record of one session (Issue #3796): the reason it gives no longer
  * holds for the prompt still on screen (the contract that withheld it changed),
  * so leaving it to age out would have `cmate wait` report a stale reason for up

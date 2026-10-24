@@ -247,7 +247,10 @@ function describePaneObstruction(data: CurrentOutputResponse): string {
  * `autoYes.waitingEpisodeId`, which decide when both are present: another id
  * (or no wait open) is a record of an earlier wait, however recent; the same
  * id is this wait's. Either one missing (an older server, a record written
- * before any wait was open), this window decides as before.
+ * before any wait was open), this window decides as before. Whichever
+ * decides, a record the server marks `lastSuppressionAnswered` — Auto-Yes
+ * answered the open wait after it was written — is history, not this wait's
+ * reason, as the push gate reads it: the hold goes on.
  */
 const SUPPRESSION_FRESH_MS = 60_000;
 
@@ -272,6 +275,7 @@ function activeSuppression(
     // A negative age is clock skew between the CLI and the server, not staleness.
     return null;
   }
+  if (data.autoYes?.lastSuppressionAnswered === true) return null;
   return { suppression, ageSeconds: Math.max(0, Math.round(ageMs / 1000)) };
 }
 
@@ -2139,8 +2143,9 @@ The observation on exit 10 (Issue #3755):
   separate items (the poller's record, the contract re-evaluated now). It
   changes no exit code, hold or grace. autoYesSuppression keeps its meaning
   (the record of this wait: the same waiting-episode id when the record and
-  the server both name one, else a record under a minute old); a missing
-  record does not mean Auto-Yes can answer.
+  the server both name one, else a record under a minute old; either way not
+  one written before Auto-Yes answered this wait, as the push gate reads it);
+  a missing record does not mean Auto-Yes can answer.
 `)
     .action(async (worktreeIds: string[], options: PollWorktreeOptions) => {
       try {

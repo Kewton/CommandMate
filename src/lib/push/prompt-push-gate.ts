@@ -155,6 +155,7 @@ import { createLogger } from '@/lib/logger';
 import type { AutoYesSuppressionReason } from '@/lib/polling/auto-yes-resolver';
 import {
   getLastPolicySuppression,
+  suppressionPredatesAnswer,
   type EpisodeScopedPolicySuppression,
 } from '@/lib/polling/auto-yes-suppression-state';
 import { getOrInitGlobal } from '@/lib/global-state';
@@ -444,7 +445,8 @@ export function decidePromptPush(input: PromptPushGateInput): PromptPushGateDeci
   if (
     suppression !== null &&
     suppressionBelongsToWait(suppression, input) &&
-    !suppressionPredatesAnswer(suppression, input)
+    // The answer that came after the record is the newer fact (Issue #3798).
+    !suppressionPredatesAnswer(suppression, input.waitingEpisodeId, answerTo(input))
   ) {
     return { suppress: false, reason: 'policy-withheld', suppressedBy: suppression.reason };
   }
@@ -486,25 +488,6 @@ function answerTo(
 ): { episodeId: string; at: number } | null {
   const key = buildCompositeKey(input.worktreeId, input.cliToolId, input.instanceId);
   return globalThis.__autoYesPollerStates?.get(key)?.lastAnswer ?? null;
-}
-
-/**
- * Whether the policy's reason for this wait is older than the answer the
- * poller then sent to it (Issue #3798): the same episode withheld once — a
- * contract that changed, a lookup that failed — and answered after, by a send
- * whose success path does not clear the record. The answer is the newer fact,
- * so the record is not this wait's reason any more. A suppression written at
- * or after the answer, one for another episode, and a caller that names no
- * episode keep #1684's `policy-withheld`.
- */
-function suppressionPredatesAnswer(
-  suppression: EpisodeScopedPolicySuppression,
-  input: Pick<PromptPushGateInput, 'worktreeId' | 'cliToolId' | 'instanceId' | 'waitingEpisodeId'>,
-): boolean {
-  const waitId = input.waitingEpisodeId ?? null;
-  if (waitId === null) return false;
-  const answer = answerTo(input);
-  return answer !== null && answer.episodeId === waitId && suppression.at < answer.at;
 }
 
 /**

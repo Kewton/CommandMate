@@ -44,6 +44,8 @@ import {
   closeEpisode,
   openEpisode,
 } from '@/lib/session/waiting-episode-state';
+import { autoYesPollerStates } from '@/lib/polling/auto-yes-poller-generation';
+import type { AutoYesPollerState } from '@/lib/polling/auto-yes-poller-state';
 import { buildClaude1000RowPermissionFrame } from '../../fixtures/claude-1000-row-prompt';
 
 const WT = 'wt-3798-sup';
@@ -118,5 +120,47 @@ describe('[#3798] current-output publishes the wait next to the record', () => {
   it('no wait open: null', async () => {
     const payload = await buildCurrentOutput({} as Database.Database, WT, 'claude');
     expect(payload.autoYes?.waitingEpisodeId).toBeNull();
+  });
+});
+
+describe('[#3798] current-output says whether Auto-Yes answered the wait after the record (review N3)', () => {
+  const KEY = 'wt-3798-sup:claude';
+  const T = 1_800_000_000_000;
+
+  function answered(episodeId: string, at: number): void {
+    autoYesPollerStates.set(KEY, { lastAnswer: { episodeId, screenKey: 'k', at } } as unknown as AutoYesPollerState);
+  }
+
+  afterEach(() => {
+    autoYesPollerStates.delete(KEY);
+  });
+
+  it('positive: the record of the open wait, written before the answer to it — lastSuppressionAnswered', async () => {
+    const wait = openWait();
+    recordPolicySuppression(WT, 'claude', 'claude', WITHHELD, T);
+    answered(wait.episodeId, T + 1);
+    const payload = await buildCurrentOutput({} as Database.Database, WT, 'claude');
+    expect(payload.autoYes?.lastSuppressionAnswered).toBe(true);
+    // The record itself is still published, as history.
+    expect(payload.autoYes?.lastSuppression).toMatchObject({ episodeId: wait.episodeId, at: T });
+  });
+
+  it('negative: no answer, an answer at or before the record, or to another wait — false', async () => {
+    const wait = openWait();
+    recordPolicySuppression(WT, 'claude', 'claude', WITHHELD, T);
+    const read = async () => (await buildCurrentOutput({} as Database.Database, WT, 'claude')).autoYes?.lastSuppressionAnswered;
+    expect(await read()).toBe(false);
+    answered(wait.episodeId, T);
+    expect(await read()).toBe(false);
+    answered(wait.episodeId, T - 1);
+    expect(await read()).toBe(false);
+    answered('another-episode', T + 1);
+    expect(await read()).toBe(false);
+  });
+
+  it('negative: no record — false', async () => {
+    const wait = openWait();
+    answered(wait.episodeId, T + 1);
+    expect((await buildCurrentOutput({} as Database.Database, WT, 'claude')).autoYes?.lastSuppressionAnswered).toBe(false);
   });
 });

@@ -55,7 +55,8 @@ import {
   isPollerActive,
   buildCompositeKey,
 } from '@/lib/polling/auto-yes-manager';
-import { getLastPolicySuppression } from '@/lib/polling/auto-yes-suppression-state';
+import { getLastPolicySuppression, suppressionPredatesAnswer } from '@/lib/polling/auto-yes-suppression-state';
+import { getAutoYesLastAnswer } from '@/lib/polling/auto-yes-poller-state';
 import { getWaitingEpisodeRecord } from '@/lib/session/waiting-episode-state';
 import type { AutoYesEnterFallbackPublished } from '@/lib/polling/auto-yes-enter-fallback';
 import { publishAutoYesDecision } from '@/lib/polling/auto-yes-decision-state';
@@ -756,6 +757,8 @@ function buildRunningPayload({
   paneObstruction,
   composer,
 }: RunningPayloadInput): CurrentOutputPayload {
+  const lastSuppression = getLastPolicySuppression(worktreeId, cliToolId, instanceId);
+  const waitingEpisodeId = getWaitingEpisodeRecord(worktreeId, cliToolId, instanceId)?.episodeId ?? null;
   return {
     isRunning: true,
     sessionName,
@@ -778,10 +781,10 @@ function buildRunningPayload({
       enabled: autoYesState?.enabled ?? false,
       expiresAt: autoYesState?.enabled ? autoYesState.expiresAt : null,
       stopReason: autoYesState?.stopReason,
-      lastSuppression: getLastPolicySuppression(worktreeId, cliToolId, instanceId),
+      lastSuppression,
       // Issue #3798: read in the same step as the record above, which names the
       // wait it was written for — `cmate wait` holds the two against each other.
-      waitingEpisodeId: getWaitingEpisodeRecord(worktreeId, cliToolId, instanceId)?.episodeId ?? null,
+      waitingEpisodeId,
       // Issue #1694: undefined (so the key is absent from the JSON) unless a
       // stop pattern actually fired — the state clears it on every other path.
       stopMatchedText: autoYesState?.stopMatchedText,
@@ -789,6 +792,12 @@ function buildRunningPayload({
       // Auto-Yes never sent its Enter to an unreadable choice screen here —
       // always, since Issue #3821 retired the Enter.
       lastEnterFallback,
+      // Issue #3798: appended last. Whether the poller answered the open wait
+      // after the record above was written — the push gate's own reading, so
+      // `cmate wait` does not take that record for this wait's reason.
+      lastSuppressionAnswered:
+        lastSuppression !== null &&
+        suppressionPredatesAnswer(lastSuppression, waitingEpisodeId, getAutoYesLastAnswer(compositeKey)),
     },
     // Issue #3821: next to `autoYes`, and about `promptData` above — whether
     // Auto-Yes is answering it, has left it to a human, or neither.

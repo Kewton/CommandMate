@@ -64,7 +64,11 @@ const baseOutput = {
 };
 
 /** A prompt frame whose record was written at `at`, for `episodeId`, while `waitingEpisodeId` is open. */
-function promptFrame(record: { at: number; episodeId?: string }, waitingEpisodeId?: string | null) {
+function promptFrame(
+  record: { at: number; episodeId?: string },
+  waitingEpisodeId?: string | null,
+  lastSuppressionAnswered?: boolean,
+) {
   return {
     ...baseOutput,
     autoYes: {
@@ -79,6 +83,7 @@ function promptFrame(record: { at: number; episodeId?: string }, waitingEpisodeI
         ...(record.episodeId !== undefined ? { episodeId: record.episodeId } : {}),
       },
       ...(waitingEpisodeId !== undefined ? { waitingEpisodeId } : {}),
+      ...(lastSuppressionAnswered !== undefined ? { lastSuppressionAnswered } : {}),
     },
   };
 }
@@ -147,5 +152,36 @@ describe('[#3798] wait: the suppression record and the waiting episode', () => {
     await waitThroughGrace(repeat(promptFrame({ at: Date.now() - 10 * 60_000 }, 'wep-b'), 12).map((f) => f.data));
     expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
     expect(payload().autoYesSuppression).toBeUndefined();
+  });
+});
+
+describe('[#3798] wait: a record older than the Auto-Yes answer to this wait (review N3)', () => {
+  it('positive: the same id, but the server says Auto-Yes answered this wait after it — the hold goes on', async () => {
+    await waitThroughGrace(repeat(promptFrame({ at: Date.now(), episodeId: 'wep-a' }, 'wep-a', true), 12).map((f) => f.data));
+
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
+    expect(stderr()).toContain(HOLD_LINE);
+    expect(payload().autoYesSuppression).toBeUndefined();
+    expect(stderr()).not.toContain('auto-yes suppressed');
+  });
+
+  it('positive: the 60 s window too — a fresh record that names no wait, answered after — the hold goes on', async () => {
+    await waitThroughGrace(repeat(promptFrame({ at: Date.now() }, 'wep-a', true), 12).map((f) => f.data));
+    expect(stderr()).toContain(HOLD_LINE);
+    expect(payload().autoYesSuppression).toBeUndefined();
+  });
+
+  it('control: not answered after it (false, or an older server without the field) — exit 10 at once with the record', async () => {
+    for (const answeredAfter of [false, undefined]) {
+      mockFetchSequence([{ data: promptFrame({ at: Date.now() - 10 * 60_000, episodeId: 'wep-a' }, 'wep-a', answeredAfter) }]);
+      await startWait();
+      expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
+      expect(payload().autoYesSuppression).toMatchObject({ reason: 'deny-pattern', pattern: 'npm test' });
+      expect(stderr()).not.toContain(HOLD_LINE);
+      mockConsoleLog.mockClear();
+      mockConsoleError.mockClear();
+      mockExit.mockClear();
+      restoreFetch();
+    }
   });
 });

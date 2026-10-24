@@ -296,8 +296,9 @@ export interface CurrentOutputResponse {
      * Mirrors: src/lib/session/current-output-types.ts
      * CurrentOutputPayload.autoYes.waitingEpisodeId (Issue #3798). The waiting
      * episode open when the payload was built, or null. `lastSuppression` is
-     * this wait's only when its `episodeId` is this; absent (an older server),
-     * the record's age decides as before.
+     * this wait's only when its `episodeId` is this — and not when
+     * `lastSuppressionAnswered` says Auto-Yes answered this wait after it;
+     * absent (an older server), the record's age decides as before.
      */
     waitingEpisodeId?: string | null;
     /**
@@ -333,6 +334,14 @@ export interface CurrentOutputResponse {
       /** Whether the record is about the prompt in this same response. */
       currentPrompt: boolean;
     } | null;
+    /**
+     * Mirrors: src/lib/session/current-output-types.ts
+     * CurrentOutputPayload.autoYes.lastSuppressionAnswered (Issue #3798). True
+     * when Auto-Yes answered the wait `waitingEpisodeId` names after
+     * `lastSuppression` was written: the record is history, not this wait's
+     * reason, as the push gate reads it. Absent (an older server) reads as false.
+     */
+    lastSuppressionAnswered?: boolean;
   };
   thinking?: boolean;
   cliToolId?: string;
