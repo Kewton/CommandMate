@@ -34,7 +34,14 @@
  * "Resolved" is not "rendered": the cache applies a refresh inside
  * `startTransition`, so the row this hook sees when the promise settles is
  * still the pre-refresh one. That row is what is recorded, and the override
- * lets go on the first render that carries a different one.
+ * lets go on the first render whose Auto-Yes came from a later list read.
+ *
+ * "Replaced" means a list read, not a new row object (Issue #3863): the cache
+ * also copies a row for a WebSocket status edge (a wait, a session start),
+ * carrying the Auto-Yes maps over by reference — the same, possibly stale,
+ * values. Only a list read builds a new `autoYesByInstance`, so its identity
+ * (see {@link tileAutoYesSource}) is what tells the two apart; a status copy
+ * after a failed refresh keeps the route's answer on screen.
  *
  * ## Answer mode (Issue #3863)
  *
@@ -128,6 +135,16 @@ export interface TileAutoYesOverride {
   settledRow: Worktree | null;
 }
 
+/**
+ * What identifies the list read a row's Auto-Yes came from (Issue #3863): its
+ * `autoYesByInstance` map, which every `GET /api/worktrees` builds anew and a
+ * WebSocket status copy carries over by reference. A row without the map (a
+ * server older than #2512) falls back to the row itself.
+ */
+export function tileAutoYesSource(row: Worktree): object {
+  return row.autoYesByInstance ?? row;
+}
+
 /** Whether an override has done its job. Pure, so the release rule is testable alone. */
 export function isTileAutoYesOverrideReleased(
   override: TileAutoYesOverride,
@@ -140,7 +157,10 @@ export function isTileAutoYesOverrideReleased(
     (!stored.enabled ||
       (stored.expiresAt === override.value.expiresAt &&
         (override.value.answerMode === undefined || stored.answerMode === override.value.answerMode)));
-  const superseded = override.settledRow !== null && row !== override.settledRow;
+  // A later list read, not merely a copied row (a WebSocket status edge keeps
+  // the stale maps by reference): see the module comment.
+  const superseded =
+    override.settledRow !== null && tileAutoYesSource(row) !== tileAutoYesSource(override.settledRow);
   return landed || superseded;
 }
 

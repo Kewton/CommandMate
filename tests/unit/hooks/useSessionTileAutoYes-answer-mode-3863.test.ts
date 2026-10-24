@@ -26,8 +26,10 @@ vi.mock('@/components/providers/WorktreesCacheProvider', () => ({
 import {
   isTileAutoYesOverrideReleased,
   readTileAutoYes,
+  tileAutoYesSource,
   useSessionTileAutoYes,
 } from '@/hooks/useSessionTileAutoYes';
+import { applyWaitingEdge } from '@/hooks/useWorktreesCache';
 
 const EXPIRES = 1_900_000_000_000;
 
@@ -248,5 +250,109 @@ describe('[#3863] readTileAutoYes / isTileAutoYesOverrideReleased and the mode',
       isTileAutoYesOverrideReleased(override, { enabled: true, expiresAt: EXPIRES, answerMode: 'recommended' }, base),
     ).toBe(false);
     expect(isTileAutoYesOverrideReleased(override, answered, base)).toBe(true);
+  });
+});
+
+describe('[#3863] a WebSocket status copy of the row is not a list read', () => {
+  /** A list row as `GET /api/worktrees` builds it: fresh maps every read. */
+  function listRow(state: { enabled: boolean; mode?: AutoYesAnswerMode }): Worktree {
+    return {
+      ...row(
+        state.enabled ? { codex: { enabled: true, expiresAt: EXPIRES } } : {},
+        state.enabled && state.mode ? { codex: state.mode } : undefined,
+      ),
+      isWaitingForResponse: false,
+    } as Worktree;
+  }
+
+  /** The two copies `useWorktreesCache` makes on a `session_status_changed` push. */
+  const statusCopies: Array<[string, (wt: Worktree) => Worktree]> = [
+    ['a waiting edge', (wt) => applyWaitingEdge(wt, { waiting: true, instance: 'codex', waitingKind: null })],
+    ['a running edge', (wt) => ({ ...wt, isSessionRunning: true })],
+  ];
+
+  it('the cache’s status copy keeps the Auto-Yes maps by reference (what the rule relies on)', () => {
+    const before = listRow({ enabled: true, mode: 'recommended' });
+    for (const [, copy] of statusCopies) {
+      const after = copy(before);
+      expect(after).not.toBe(before);
+      expect(tileAutoYesSource(after)).toBe(tileAutoYesSource(before));
+    }
+    expect(tileAutoYesSource(listRow({ enabled: true, mode: 'recommended' }))).not.toBe(tileAutoYesSource(before));
+  });
+
+  it.each(statusCopies)(
+    'keeps a careful answer over a stale recommended row after a failed refresh and %s',
+    async (_label, copy) => {
+      fakeServer({ enabled: true, mode: 'recommended' });
+      cache.refresh.mockImplementation(() => Promise.reject(new Error('offline')));
+      const stale = listRow({ enabled: true, mode: 'recommended' });
+      const { result, rerender } = renderHook(
+        ({ worktree }) => useSessionTileAutoYes({ worktree, cliToolId: 'codex', instanceId: 'codex' }),
+        { initialProps: { worktree: stale } },
+      );
+      expect(result.current.answerMode).toBe('recommended');
+
+      await act(async () => {
+        await result.current.toggle({ enabled: true, duration: 3_600_000, answerMode: 'careful' });
+      });
+      expect(result.current.answerMode).toBe('careful');
+
+      rerender({ worktree: copy(stale) });
+      expect(result.current).toMatchObject({ enabled: true, answerMode: 'careful' });
+
+      // The next good list read is the truth, landed or not.
+      rerender({ worktree: listRow({ enabled: true, mode: 'careful' }) });
+      expect(result.current.answerMode).toBe('careful');
+      rerender({ worktree: listRow({ enabled: true, mode: 'recommended' }) });
+      expect(result.current.answerMode).toBe('recommended');
+    },
+  );
+
+  it('keeps ON over a stale OFF row after a failed refresh and a status copy, until a list read says otherwise', async () => {
+    cache.refresh.mockImplementation(() => Promise.reject(new Error('offline')));
+    const stale = listRow({ enabled: false });
+    const { result, rerender } = renderHook(
+      ({ worktree }) => useSessionTileAutoYes({ worktree, cliToolId: 'codex', instanceId: 'codex' }),
+      { initialProps: { worktree: stale } },
+    );
+
+    await act(async () => {
+      await result.current.toggle({ enabled: true, duration: 3_600_000, answerMode: 'careful' });
+    });
+    rerender({ worktree: applyWaitingEdge(stale, { waiting: true, instance: 'codex', waitingKind: null }) });
+    expect(result.current).toMatchObject({ enabled: true, answerMode: 'careful' });
+
+    // A list read that disagrees (a stop pattern matched meanwhile) releases it.
+    rerender({ worktree: listRow({ enabled: false }) });
+    expect(result.current.enabled).toBe(false);
+    expect(result.current.answerMode).toBeUndefined();
+  });
+
+  it('releases on a later list read after a successful refresh (negative control: superseded still works)', async () => {
+    const stale = listRow({ enabled: true, mode: 'recommended' });
+    const { result, rerender } = renderHook(
+      ({ worktree }) => useSessionTileAutoYes({ worktree, cliToolId: 'codex', instanceId: 'codex' }),
+      { initialProps: { worktree: stale } },
+    );
+
+    await act(async () => {
+      await result.current.toggle({ enabled: true, duration: 3_600_000, answerMode: 'careful' });
+    });
+    rerender({ worktree: listRow({ enabled: true, mode: 'recommended' }) });
+    expect(result.current.answerMode).toBe('recommended');
+  });
+
+  it('isTileAutoYesOverrideReleased: a copied row with the same maps does not supersede; new maps do', () => {
+    const settled = listRow({ enabled: true, mode: 'recommended' });
+    const override = {
+      instanceId: 'codex',
+      value: { enabled: true, expiresAt: EXPIRES, answerMode: 'careful' as const },
+      settledRow: settled,
+    };
+    const stored = readTileAutoYes(settled, 'codex');
+
+    expect(isTileAutoYesOverrideReleased(override, stored, { ...settled, isSessionRunning: true })).toBe(false);
+    expect(isTileAutoYesOverrideReleased(override, stored, listRow({ enabled: true, mode: 'recommended' }))).toBe(true);
   });
 });
