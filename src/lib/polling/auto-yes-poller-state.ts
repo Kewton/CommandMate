@@ -219,6 +219,27 @@ export interface PartialAutoYesAnswer {
    * a send begun earlier that comes back later does not overwrite it.
    */
   seq: number;
+  /**
+   * Issue #3880: recorded for a person's send ({@link beginManualSendAttempt}).
+   * Past agy's receipt window it is kept while the dialog stays up (the tick's
+   * gated reading no longer sees it; `logIfWithheldForWantOfReceipt`).
+   */
+  byPerson?: true;
+}
+
+/**
+ * The screen key of a person's send made with no prompt read off the screen
+ * (Issue #3880: the capture before it failed). A hold at it covers whatever
+ * confirmation the next tick reads, and takes that confirmation's key there
+ * ({@link identifyPartialAnswerScreen}); from then on it is released like any
+ * other — the screen changing, the session relaunched, a person's answer going
+ * through — and before then by a frame with no prompt on it.
+ */
+export const UNIDENTIFIED_SCREEN_KEY = '\u0000unidentified-screen';
+
+/** Whether a hold (or a send) at `heldScreenKey` covers the confirmation at `screenKey`. */
+export function partialAnswerCovers(heldScreenKey: string, screenKey: string): boolean {
+  return heldScreenKey === screenKey || heldScreenKey === UNIDENTIFIED_SCREEN_KEY;
 }
 
 /** Issue #3798: moved to `detection/prompt-screen-key`, where the waiting episodes read it too. */
@@ -381,28 +402,46 @@ export function forgetPartialAnswersByWorktree(worktreeId: string): void {
 /**
  * A person's answer went through, or was refused before any key (Issue #3880):
  * the answer Auto-Yes held at that confirmation is theirs now, so the hold is
- * dropped. Only the record: a send still in flight records what it did when it
- * comes back. Not called when a person's own send may have left keys on the
- * pane, nor at the START of their answer — a manual send that fails keeps it
- * ({@link holdPartialAnswerForManualSend}).
+ * dropped — only one recorded before the person's answer began (`before`, its
+ * {@link nextSendOrder}). A hold recorded since, by a send begun after theirs
+ * (another person's from another screen, a tick's), is about what that send
+ * did and stays. Only the record: a send still in flight records what it did
+ * when it comes back. Not called when a person's own send may have left keys
+ * on the pane, nor at the START of their answer.
  */
-export function releasePartialAnswerToHuman(compositeKey: string): void {
-  partialAnswers.delete(compositeKey);
+export function releasePartialAnswerToHuman(compositeKey: string, before: number): void {
+  const recorded = partialAnswers.get(compositeKey);
+  if (recorded !== undefined && recorded.seq < before) partialAnswers.delete(compositeKey);
 }
 
 /**
- * A person's send ended with keys on the pane, or with its outcome unknown
- * (Issue #3880): Auto-Yes must not type at the same confirmation once the
- * manual answer's own hold passes. A hold already recorded for this session
- * stays as it is; otherwise one is recorded at `screenKey` under the current
- * session epoch, and released the same ways as one Auto-Yes recorded (the
- * screen changing, the session relaunched, a person's answer going through).
+ * The hold's screen, now that a tick read the confirmation on screen (Issue
+ * #3880): a hold at {@link UNIDENTIFIED_SCREEN_KEY} takes `screenKey`.
  */
-export function holdPartialAnswerForManualSend(compositeKey: string, screenKey: string, at: number = Date.now()): void {
-  const epoch = getEnterFallbackSessionEpoch(compositeKey);
+export function identifyPartialAnswerScreen(compositeKey: string, screenKey: string): void {
   const recorded = partialAnswers.get(compositeKey);
-  if (recorded !== undefined && recorded.epoch === epoch && recorded.screenKey === screenKey) return;
-  partialAnswers.set(compositeKey, { screenKey, epoch, at, seq: ++sendAttemptSeq.last });
+  if (recorded?.screenKey === UNIDENTIFIED_SCREEN_KEY) partialAnswers.set(compositeKey, { ...recorded, screenKey });
+}
+
+/**
+ * Put back a person's hold the tick dropped because its gated reading saw no
+ * prompt, while agy's dialog it is about is still up past the receipt window
+ * (Issue #3880). Only into the same session, and over nothing newer.
+ */
+export function keepPartialAnswerByPerson(compositeKey: string, partial: PartialAutoYesAnswer, screenKey: string): void {
+  if (getEnterFallbackSessionEpoch(compositeKey) !== partial.epoch) return;
+  const recorded = partialAnswers.get(compositeKey);
+  if (recorded !== undefined && recorded.seq > partial.seq) return;
+  partialAnswers.set(compositeKey, { ...partial, screenKey });
+}
+
+/**
+ * A place in the order sends are registered in (Issue #3880): a person's
+ * answer takes one as it begins, so what it later releases or records is
+ * compared with the sends begun before and after it.
+ */
+export function nextSendOrder(): number {
+  return ++sendAttemptSeq.last;
 }
 
 /** Forget every one, and expire every send in flight: server shutdown, and a test seam. */
@@ -446,6 +485,12 @@ export interface AutoYesSendAttempt {
   /** `pending` until the tick settles it; `expired` when its session's state was dropped. */
   state: 'pending' | 'settled' | 'expired';
   /**
+   * Issue #3880: a person's send (`/prompt-response`), registered right before
+   * its first key. Its `seq` is the order its answer began in; its `screenKey`
+   * may be {@link UNIDENTIFIED_SCREEN_KEY}.
+   */
+  readonly byPerson?: true;
+  /**
    * Issue #3820: the confirmation and the attempt this send is recorded under
    * in the ledger, taken before the first await like the object itself — a
    * result that comes back after the confirmation closed still goes to it.
@@ -483,6 +528,29 @@ export function beginSendAttempt(
 }
 
 /**
+ * Register a person's send about to start (Issue #3880): the screen it types
+ * at and the session epoch it goes to, fixed now, and `order` — taken when
+ * their answer began ({@link nextSendOrder}) — as its place among the sends.
+ * Settled with {@link settleSendAttempt} like Auto-Yes's own, so it records a
+ * hold only for the session the keys went to, never over a hold of a send
+ * begun after it, and not at all once the screen it typed at was seen gone.
+ */
+export function beginManualSendAttempt(compositeKey: string, screenKey: string, order: number): AutoYesSendAttempt {
+  const attempt: AutoYesSendAttempt = {
+    seq: order,
+    screenKey,
+    recordKey: compositeKey,
+    recordEpoch: getEnterFallbackSessionEpoch(compositeKey),
+    moved: false,
+    state: 'pending',
+    byPerson: true,
+    ledger: null,
+  };
+  sendAttempts.add(attempt);
+  return attempt;
+}
+
+/**
  * The send came back. `keysSent` — it was stopped with keys already on the
  * pane, or (Issue #3880) a tmux call of it ended without an exit status and
  * its keys may be there — records the partial answer under the attempt's key
@@ -507,6 +575,7 @@ export function settleSendAttempt(attempt: AutoYesSendAttempt, keysSent: boolean
     epoch: attempt.recordEpoch,
     at,
     seq: attempt.seq,
+    ...(attempt.byPerson ? { byPerson: true as const } : {}),
   });
 }
 
@@ -528,7 +597,7 @@ export function hasMovedSendInFlight(compositeKey: string, epoch: number, screen
       attempt.moved &&
       attempt.recordKey === compositeKey &&
       attempt.recordEpoch === epoch &&
-      attempt.screenKey === screenKey
+      partialAnswerCovers(attempt.screenKey, screenKey)
     ) {
       return true;
     }

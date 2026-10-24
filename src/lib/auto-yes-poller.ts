@@ -108,6 +108,8 @@ import {
   clearPartialAnswers,
   forgetPartialAnswer,
   forgetPartialAnswersByWorktree,
+  getPartialAnswer,
+  keepPartialAnswerByPerson,
   ledgerScreenKey,
   partialAnswerScreenKey,
   promptFrameKey,
@@ -512,6 +514,7 @@ function noteNoPromptOnScreen(tick: {
   cliToolId: CLIToolType;
   instanceId: string | undefined;
   compositeKey: string;
+  epoch: number;
   pollerState: AutoYesPollerState;
   frame: ReturnType<typeof normalizeFrame>;
   promptDetection: PromptDetectionResult;
@@ -524,6 +527,7 @@ function noteNoPromptOnScreen(tick: {
     cliToolId,
     instanceId,
     compositeKey,
+    epoch,
     pollerState,
     frame,
     promptDetection,
@@ -531,6 +535,9 @@ function noteNoPromptOnScreen(tick: {
     precomputedLines,
     rawOutput,
   } = tick;
+  // Issue #3880: a person's hold, which agy's dialog past the receipt window
+  // keeps (below) — the gated reading's "no prompt" is not the dialog gone.
+  const personHold = cliToolId === 'antigravity' ? getPartialAnswer(compositeKey, epoch) : null;
   forgetPartialAnswer(compositeKey);
   pollerState.lastAnsweredPromptKey = null;
   pollerState.lastAnsweredAt = null;
@@ -554,9 +561,16 @@ function noteNoPromptOnScreen(tick: {
   }
   pollerState.lastSkipWarnKey = null;
   if (cliToolId === 'antigravity' && !promptDetection.isPrompt) {
-    const seen = logIfWithheldForWantOfReceipt(worktreeId, instanceId, compositeKey, () =>
-      detectPromptOnCleanFrame(cleanOutput, cliToolId, precomputedLines, rawOutput),
+    const seen = logIfWithheldForWantOfReceipt(
+      worktreeId,
+      instanceId,
+      compositeKey,
+      () => detectPromptOnCleanFrame(cleanOutput, cliToolId, precomputedLines, rawOutput),
+      personHold?.byPerson ? personHold.screenKey : null,
     );
+    if (personHold?.byPerson && seen?.keptPersonHold) {
+      keepPartialAnswerByPerson(compositeKey, personHold, partialAnswerScreenKey(seen.promptData));
+    }
     // Issue #3820: past the receipt window the gated reading says "no prompt"
     // while the dialog is still up. The ungated reading says it is, so the
     // ledger keeps the same confirmation (and the same withheld interval)
@@ -858,6 +872,7 @@ export async function detectAndRespondToPrompt(
         cliToolId,
         instanceId,
         compositeKey,
+        epoch,
         pollerState,
         frame,
         promptDetection,

@@ -132,8 +132,7 @@ export async function POST(
     // prompt is dropped. Auto-Yes itself stays on.
     // Issue #3880: what an answer Auto-Yes holds becomes is decided by how this
     // one ENDS (`settleManualAnswer`), not by its start.
-    const compositeKey = buildCompositeKey(id, cliToolId, instanceId);
-    noteManualAnswerStarted(compositeKey);
+    const manualAnswer = noteManualAnswerStarted(buildCompositeKey(id, cliToolId, instanceId));
 
     // Issue #1898: answer the approval the agent is actually holding, before
     // going anywhere near the pane.
@@ -155,7 +154,7 @@ export async function POST(
     const resolution = resolveAnswerToSend(ctx, request, verified);
     if ('response' in resolution) {
       // Issue #3880: refused before any key — nothing of the person's answer is on the pane.
-      settleManualAnswer(compositeKey, 'not-sent');
+      settleManualAnswer(manualAnswer, 'not-sent');
       return noted(resolution.response);
     }
 
@@ -165,6 +164,7 @@ export async function POST(
       sessionName,
       resolution.value,
       verified.verifiedFrame,
+      manualAnswer,
       verified.promptCheck?.isPrompt ? verified.promptCheck.promptData : null,
     );
     if (sendFailure) return noted(sendFailure);

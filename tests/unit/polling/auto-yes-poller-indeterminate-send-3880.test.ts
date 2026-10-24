@@ -278,9 +278,9 @@ describe('[#3880] the hold is released (not for ever)', () => {
     failNext = { at: 'text', delivery: 'indeterminate' };
     const state = pollerState();
     await tickOn(state, proceed('npm test'));
-    noteManualAnswerStarted(COMPOSITE_KEY, now);
+    const answer = noteManualAnswerStarted(COMPOSITE_KEY, now);
     // Their answer went through (review P2: the end of it releases, not the start).
-    settleManualAnswer(COMPOSITE_KEY, 'answered');
+    settleManualAnswer(answer, 'answered');
     expect(await tickOn(state, proceed('npm test'))).toBe('no_answer');
     now += MANUAL_ANSWER_HOLD_MS;
     expect(await tickOn(state, proceed('npm test'))).toBe('responded');

@@ -18,8 +18,13 @@ import {
   MultiSelectAnswerRejectedError,
 } from '@/lib/prompt-answer-sender';
 import type { PromptData } from '@/types/models';
-import { buildCompositeKey } from '@/lib/auto-yes-state';
-import { settleManualAnswer, type ManualAnswerOutcome } from '@/lib/polling/auto-yes-manual-answer';
+import {
+  abandonManualSend,
+  noteManualSendStarting,
+  settleManualAnswer,
+  type ManualAnswerOutcome,
+  type ManualAnswerTicket,
+} from '@/lib/polling/auto-yes-manual-answer';
 import type { AnswerResolution } from '@/lib/prompt-answer-semantic';
 import { startPolling } from '@/lib/polling/response-poller';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
@@ -131,7 +136,10 @@ function manualOutcomeOfSendError(error: unknown): ManualAnswerOutcome | null {
  * (`settleManualAnswer`), so a manual send that may have left keys on the pane
  * keeps the confirmation off Auto-Yes's hands after the manual hold, as one of
  * Auto-Yes's own would. `screenPromptData` is the prompt the fresh capture
- * read — the screen such a hold is recorded at.
+ * read — the screen such a hold is recorded at, fixed with the session epoch
+ * right before the first key (`noteManualSendStarting`); with neither it nor
+ * the resolved prompt (the capture failed) the hold is at an unidentified
+ * screen.
  */
 export async function sendResolvedAnswer(
   ctx: PromptResponseContext,
@@ -139,10 +147,11 @@ export async function sendResolvedAnswer(
   sessionName: string,
   resolved: ResolvedAnswer,
   verifiedFrame: string | null,
+  manualAnswer: ManualAnswerTicket,
   screenPromptData?: PromptData | null,
 ): Promise<NextResponse | null> {
-  const compositeKey = buildCompositeKey(ctx.id, ctx.cliToolId, ctx.instanceId);
   const { resolution, effectivePromptData } = resolved;
+  noteManualSendStarting(manualAnswer, screenPromptData ?? effectivePromptData);
   // Send answer to tmux
   // Issue #287 Bug2: Uses shared sendPromptAnswer() to unify logic
   // with auto-yes-manager.ts, including fallback handling.
@@ -161,10 +170,11 @@ export async function sendResolvedAnswer(
     });
   } catch (error: unknown) {
     const outcome = manualOutcomeOfSendError(error);
-    if (outcome !== null) settleManualAnswer(compositeKey, outcome, screenPromptData ?? effectivePromptData);
+    if (outcome !== null) settleManualAnswer(manualAnswer, outcome);
+    else abandonManualSend(manualAnswer);
     return sendErrorResponse(ctx, error, request.answer, resolution);
   }
-  settleManualAnswer(compositeKey, 'answered');
+  settleManualAnswer(manualAnswer, 'answered');
   return null;
 }
 

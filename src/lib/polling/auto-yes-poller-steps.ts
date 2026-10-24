@@ -27,6 +27,8 @@ import {
   forgetPartialAnswer,
   getPartialAnswer,
   hasMovedSendInFlight,
+  identifyPartialAnswerScreen,
+  partialAnswerCovers,
   warnOncePerFrame,
 } from './auto-yes-poller-state';
 import { suppressAndWarnOnce, truncateForLog, type JudgedPrompt } from './auto-yes-prompt-suppression';
@@ -42,7 +44,10 @@ export function withheldForEarlierSend(judged: JudgedPrompt, screenKey: string, 
   const { worktreeId, cliToolId, instanceId, compositeKey, pollerState, promptData, frameKey } = judged;
   const partial = getPartialAnswer(compositeKey, epoch);
   if (partial !== null) {
-    if (partial.screenKey === screenKey) {
+    if (partialAnswerCovers(partial.screenKey, screenKey)) {
+      // Issue #3880: a person's send made with no prompt read (the capture
+      // failed) holds the first confirmation read after it, as that one.
+      identifyPartialAnswerScreen(compositeKey, screenKey);
       suppressAndWarnOnce(
         judged,
         {

@@ -30,9 +30,13 @@ import { DUPLICATE_RETRY_EXPIRY_MS } from '@/lib/auto-yes-state';
 import { getOrInitGlobal } from '../global-state';
 import { forgetAutoYesDecision } from './auto-yes-decision-state';
 import {
-  holdPartialAnswerForManualSend,
+  beginManualSendAttempt,
+  nextSendOrder,
   partialAnswerScreenKey,
   releasePartialAnswerToHuman,
+  settleSendAttempt,
+  UNIDENTIFIED_SCREEN_KEY,
+  type AutoYesSendAttempt,
 } from './auto-yes-poller-state';
 import type { PromptData } from '@/types/models';
 
@@ -54,10 +58,38 @@ declare global {
 
 const marks = getOrInitGlobal('__autoYesManualAnswers', () => new Map<string, ManualAnswerMark>());
 
+/**
+ * One person's answer, from its start to its end (Issue #3880). What its end
+ * does to Auto-Yes's hold is about THIS answer: its place among the sends is
+ * taken as it begins (`order`), and its send — once there is one — carries the
+ * screen and the session epoch fixed right before the first key.
+ */
+export interface ManualAnswerTicket {
+  readonly compositeKey: string;
+  /** Its place among the sends (`nextSendOrder`), taken as it began. */
+  readonly order: number;
+  /** Its send, from right before the first key ({@link noteManualSendStarting}). */
+  attempt: AutoYesSendAttempt | null;
+}
+
 /** A person began answering on this instance (called before the first key or API call). */
-export function noteManualAnswerStarted(compositeKey: string, at: number = Date.now()): void {
+export function noteManualAnswerStarted(compositeKey: string, at: number = Date.now()): ManualAnswerTicket {
   marks.set(compositeKey, { seq: (marks.get(compositeKey)?.seq ?? 0) + 1, at });
   forgetAutoYesDecision(compositeKey);
+  return { compositeKey, order: nextSendOrder(), attempt: null };
+}
+
+/**
+ * The person's keys are about to go out (Issue #3880), at the confirmation
+ * `promptData` is — or, when no prompt could be read off the screen (the
+ * capture before the send failed), at an unidentified one. Registered as a
+ * send in flight, so a screen seen gone, a relaunch, or a worktree going away
+ * before it ends keeps its end from recording a hold.
+ */
+export function noteManualSendStarting(ticket: ManualAnswerTicket, promptData: PromptData | null | undefined): void {
+  if (ticket.attempt !== null) return;
+  const screenKey = promptData ? partialAnswerScreenKey(promptData) : UNIDENTIFIED_SCREEN_KEY;
+  ticket.attempt = beginManualSendAttempt(ticket.compositeKey, screenKey, ticket.order);
 }
 
 /**
@@ -76,27 +108,45 @@ export type ManualAnswerOutcome = 'answered' | 'not-sent' | 'may-be-on-pane';
  * Auto-Yes holds — the start only stops the tick under way and holds the
  * poller off for {@link MANUAL_ANSWER_HOLD_MS} — so a manual send that fails
  * cannot leave the confirmation free for Auto-Yes to type at again once that
- * hold passes:
+ * hold passes. Everything is matched to THIS answer (`ticket`), not to the
+ * instance's key alone:
  *
- * - `answered` / `not-sent`: the held answer is released (the person answered,
- *   or saw the screen and nothing of theirs is on it).
- * - `may-be-on-pane`: the hold stays, or — when there was none — is recorded
- *   at `promptData`'s screen (nothing is recorded without it).
+ * - `answered` / `not-sent`: the hold recorded before this answer began is
+ *   released (the person answered, or saw the screen and nothing of theirs is
+ *   on it). One recorded since — by another person's send that may be on the
+ *   pane, or a tick's — stays.
+ * - `may-be-on-pane`: the send records a hold at its screen (unidentified
+ *   when none was read), as Auto-Yes's own does: only for the session epoch it
+ *   went to, never over a hold of a send begun after it, and not at all when
+ *   the screen it typed at was seen gone since. And every tick under way stops
+ *   (the manual-answer sequence moves on): one that read no hold before its
+ *   last wait does not type over this one.
  *
  * An end nobody reports (the agent's API answered it, the route threw) leaves
  * the hold as it was.
  */
 export function settleManualAnswer(
-  compositeKey: string,
+  ticket: ManualAnswerTicket,
   outcome: ManualAnswerOutcome,
-  promptData?: PromptData | null,
   at: number = Date.now(),
 ): void {
+  const { compositeKey, attempt } = ticket;
   if (outcome !== 'may-be-on-pane') {
-    releasePartialAnswerToHuman(compositeKey);
+    if (attempt !== null) settleSendAttempt(attempt, false, at);
+    releasePartialAnswerToHuman(compositeKey, ticket.order);
     return;
   }
-  if (promptData) holdPartialAnswerForManualSend(compositeKey, partialAnswerScreenKey(promptData), at);
+  if (attempt !== null) settleSendAttempt(attempt, true, at);
+  const mark = marks.get(compositeKey);
+  if (mark !== undefined) marks.set(compositeKey, { ...mark, seq: mark.seq + 1 });
+}
+
+/**
+ * A person's send ended in a way that says nothing of its keys (Issue #3880):
+ * it is no longer in flight, and the hold is left as it was.
+ */
+export function abandonManualSend(ticket: ManualAnswerTicket): void {
+  if (ticket.attempt !== null) settleSendAttempt(ticket.attempt, false);
 }
 
 /** The instance's manual-answer sequence (0 until a person answers there). */
