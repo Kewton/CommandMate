@@ -18,7 +18,7 @@ import { buildCompositeKey, clearAllAutoYesStates, setAutoYesEnabled } from '@/l
 import { autoYesPollerStates } from '@/lib/polling/auto-yes-poller-generation';
 import type { AutoYesPollerState } from '@/lib/polling/auto-yes-poller-state';
 import { autoYesAnsweredWait, clearAutoYesHolds, decidePromptPush } from '@/lib/push/prompt-push-gate';
-import { clearPolicySuppressions } from '@/lib/polling/auto-yes-suppression-state';
+import { clearPolicySuppressions, recordPolicySuppression } from '@/lib/polling/auto-yes-suppression-state';
 import {
   clearWaitingEpisodes,
   closeEpisode,
@@ -135,5 +135,45 @@ describe('[#3798] the hold of an answered wait', () => {
       suppress: false,
       reason: 'escalation-reminder',
     });
+  });
+});
+
+describe('[#3798] a policy suppression and the answer to the same wait (review N2)', () => {
+  function withhold(at: number, episodeId?: string): void {
+    recordPolicySuppression(WT, 'claude', 'claude', { reason: 'mode-off', mode: 'off', promptType: 'yes_no', episodeId }, at);
+  }
+
+  it('positive: withheld before the answer to the same episode — not its reason any more', () => {
+    const a = openWait();
+    withhold(NOW - 1);
+    answered(a.episodeId);
+    expect(decide({ since: a.since, episodeId: a.episodeId })).toEqual({ suppress: true, reason: 'auto-yes-answered' });
+    expect(decide({ since: a.since, episodeId: a.episodeId }, { holdOver: false })).toMatchObject({ reason: 'auto-yes-answering' });
+  });
+
+  it('negative: withheld at or after the answer — policy-withheld', () => {
+    const a = openWait();
+    answered(a.episodeId);
+    withhold(NOW);
+    expect(decide({ since: a.since, episodeId: a.episodeId })).toMatchObject({ suppress: false, reason: 'policy-withheld' });
+    withhold(NOW + 1);
+    expect(decide({ since: a.since, episodeId: a.episodeId })).toMatchObject({ suppress: false, reason: 'policy-withheld' });
+  });
+
+  it('negative: the answer was to another episode, or the caller names none — policy-withheld', () => {
+    const a = openWait();
+    withhold(NOW - 1);
+    answered('another-episode');
+    expect(decide({ since: a.since, episodeId: a.episodeId })).toMatchObject({ reason: 'policy-withheld' });
+    answered(a.episodeId);
+    expect(decide({ since: NOW - 1 })).toMatchObject({ reason: 'policy-withheld' });
+  });
+
+  it('negative: a person\'s screen under the answered id, withheld before — rings at its hold end', () => {
+    const a = openWait();
+    withhold(NOW - 1);
+    answered(a.episodeId);
+    rebindEpisode(PARTS, a.episodeId, { kind: 'screen', generation: NONE, originTurnId: null }, NOW + 1);
+    expect(decide({ since: a.since, episodeId: a.episodeId })).toMatchObject({ suppress: false, reason: 'auto-yes-not-answered' });
   });
 });

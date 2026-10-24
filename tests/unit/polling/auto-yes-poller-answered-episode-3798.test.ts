@@ -85,10 +85,10 @@ import { buildCompositeKey, clearAllAutoYesStates, COOLDOWN_INTERVAL_MS, POLLING
 import { clearAllPollerStates, startAutoYesPolling, stopAllAutoYesPolling } from '@/lib/auto-yes-poller';
 import { getAutoYesLastAnswer, partialAnswerScreenKey } from '@/lib/polling/auto-yes-poller-state';
 import { detectPromptOnCleanFrame } from '@/lib/polling/response-checker';
-import { clearPolicySuppressions } from '@/lib/polling/auto-yes-suppression-state';
+import { clearPolicySuppressions, recordPolicySuppression } from '@/lib/polling/auto-yes-suppression-state';
 import { clearAutoYesPolicyCache } from '@/lib/polling/auto-yes-policy';
 import { clearAgentStopEvents, recordAgentEvent } from '@/lib/session/agent-event-state';
-import { startWaitingObservation } from '@/lib/session/waiting-episode-binding';
+import { observeWaiting, resolveEpisodeBinding, startWaitingObservation } from '@/lib/session/waiting-episode-binding';
 import { clearAutoYesHolds, decidePromptPush, autoYesHoldStartedAt } from '@/lib/push/prompt-push-gate';
 import { resetNotificationDedup, resetWaitingPushDedup } from '@/lib/push/notification-dedup';
 import { startWaitingPushNotifier, stopWaitingPushNotifier } from '@/lib/push/waiting-push-notifier';
@@ -477,6 +477,93 @@ describe('[#3798] an answered wait whose hold runs out over unreadable frames do
     expect(promptPushes()).toBe(0);
     await vi.advanceTimersByTimeAsync(2_000);
     expect(sendPromptAnswer).not.toHaveBeenCalled();
+    expect(promptPushes()).toBe(1);
+  });
+});
+
+describe('[#3798] a person\'s screen seen during the send is not turned back into the answered prompt (review N1)', () => {
+  /** What the status probe does on a survey or a picker drawn during the send: a frame only a person ends. */
+  function observeHumanHeld(): void {
+    const plan = observeWaiting({
+      worktreeId: WT,
+      cliToolId: TOOL,
+      instanceId: TOOL,
+      observer: 'status-probe',
+      start: startWaitingObservation(WT, TOOL, TOOL),
+      reading: { kind: 'waiting', waitingKind: 'prompt', humanHeld: true, promptData: null, structuredSince: null },
+      frameCapturedAt: Date.now(),
+      frameFetchedAfterStart: true,
+    });
+    expect(plan.action).toBe('rebound');
+  }
+
+  it('positive: A rebound to a screen during the send stays a screen, nothing is recorded for it, and it notifies', async () => {
+    startWaitingPushNotifier();
+    const a = openWait();
+    sendPromptAnswer.mockImplementationOnce(async () => {
+      observeHumanHeld();
+      expect(record()?.binding.kind).toBe('screen');
+    });
+    await pollerTick(CONFIRM);
+    expect(sendPromptAnswer).toHaveBeenCalledTimes(1);
+    expect(record()).toMatchObject({ episodeId: a.episodeId });
+    expect(record()?.binding.kind).toBe('screen');
+    expect(lastAnswer()).toBeNull();
+
+    // Frames no rule reads, past the hold: the person's screen rings.
+    for (let i = 0; i < 4; i += 1) await pollerTick(UNREADABLE, COOLDOWN_INTERVAL_MS);
+    expect(record()?.episodeId).toBe(a.episodeId);
+    expect(record()?.binding.kind).toBe('screen');
+    expect(promptPushes()).toBe(1);
+  });
+
+  it('negative: A rebound to a turn during the send is still A — recorded', async () => {
+    // A turn open (its generation fixed by the tick), the wait not yet bound to it.
+    event('user_prompt_submit');
+    const a = openWait();
+    sendPromptAnswer.mockImplementationOnce(async () => {
+      // The binding catching up with that turn during the send.
+      const binding = resolveEpisodeBinding(PARTS, Date.now());
+      expect(binding.kind).toBe('turn');
+      expect(rebindEpisode(PARTS, a.episodeId, binding, Date.now())).toBe(true);
+    });
+    await pollerTick(CONFIRM);
+    expect(lastAnswer()?.episodeId).toBe(a.episodeId);
+    expect(record()).toMatchObject({ episodeId: a.episodeId, binding: { kind: 'turn' } });
+  });
+});
+
+describe('[#3798] a policy reason older than the answer is not the answered wait\'s reason (review N2)', () => {
+  function withhold(at: number = Date.now()): void {
+    recordPolicySuppression(WT, TOOL, TOOL, { reason: 'mode-off', mode: 'off', promptType: 'yes_no' }, at);
+  }
+
+  it('positive: the notifier running from the start — withheld once, then answered, the hold over — no prompt push', async () => {
+    startWaitingPushNotifier();
+    const a = openWait();
+    withhold();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(promptPushes()).toBe(0);
+    await pollerTick(CONFIRM);
+    expect(sendPromptAnswer).toHaveBeenCalledTimes(1);
+    expect(lastAnswer()?.episodeId).toBe(a.episodeId);
+
+    for (let i = 0; i < 10; i += 1) await pollerTick(UNREADABLE, COOLDOWN_INTERVAL_MS);
+    expect(Date.now() - a.openedAt).toBeGreaterThan(30_000);
+    expect(record()?.episodeId).toBe(a.episodeId);
+    expect(promptPushes()).toBe(0);
+  });
+
+  it('positive control: a suppression written after the answer is the reason — it notifies', async () => {
+    startWaitingPushNotifier();
+    const a = openWait();
+    await pollerTick(CONFIRM);
+    expect(lastAnswer()?.episodeId).toBe(a.episodeId);
+    await vi.advanceTimersByTimeAsync(1_000);
+    withhold();
+
+    for (let i = 0; i < 4; i += 1) await pollerTick(UNREADABLE, COOLDOWN_INTERVAL_MS);
+    expect(record()?.episodeId).toBe(a.episodeId);
     expect(promptPushes()).toBe(1);
   });
 });

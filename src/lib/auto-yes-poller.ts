@@ -1221,8 +1221,13 @@ function fixAnswerTarget(worktreeId: string, cliToolId: CLIToolType, instanceId:
 
 /**
  * Whether the wait is still the one the answer was sent to: the same episode
- * open (a rebind keeps it — the hook of the turn the answer resumed may have
- * landed during the send), or, when none was, none opened or closed since.
+ * open, as it was when the send began (the version has not moved) or rebound
+ * since to a binding the answer may still be for — the hook of the turn the
+ * answer resumed may have landed during the send — but not to a `screen`: a
+ * survey or a picker another observer saw during the send is newer than the
+ * prompt these keys answered, and re-observing that prompt would turn the
+ * person's screen back into a wait Auto-Yes answered. When none was open,
+ * none opened or closed since.
  */
 function answerTargetHolds(
   target: AnswerTarget,
@@ -1231,7 +1236,9 @@ function answerTargetHolds(
   instanceId: string | undefined
 ): boolean {
   if (target.episodeId === null) return getEpisodeVersion(worktreeId, cliToolId, instanceId) === target.version;
-  return getWaitingEpisodeRecord(worktreeId, cliToolId, instanceId)?.episodeId === target.episodeId;
+  const episode = getWaitingEpisodeRecord(worktreeId, cliToolId, instanceId);
+  if (episode?.episodeId !== target.episodeId) return false;
+  return getEpisodeVersion(worktreeId, cliToolId, instanceId) === target.version || episode.binding.kind !== 'screen';
 }
 
 /** What a tick fixed for its waiting-episode observations (Issue #3798). */
@@ -1254,7 +1261,8 @@ interface TickObservation {
  * of it. Nor does a send whose wait moved under it (`target`, fixed as the
  * send began): another wait opened during the send — a hook, another
  * observer — is not the one these keys answered, and nothing is planned or
- * recorded for it; `lastAnswer` stays as it was. Advisory, like
+ * recorded for it; `lastAnswer` stays as it was — and so for the same wait
+ * rebound during the send to a person's `screen`. Advisory, like
  * {@link observeWaitingFromTick}.
  */
 function observeAnsweredPrompt(

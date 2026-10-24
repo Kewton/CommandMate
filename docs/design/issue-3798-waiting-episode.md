@@ -774,6 +774,10 @@ export function settleLegacyStop(worktreeId, cliToolId, instanceId, target: Lega
 - R3（応答 poller の区間 ID）: 区間 ID は commit で決まる（開く・置き換えるときに store が付ける）ので、応答 poller は commit を先にして、確定した ID（kept・rebound は計画の ID、opened・replaced は commit 後の区間の ID、commit が何も変えなければ null）を gate と fan-out に渡す。commit の edge で通知器が走らせる gate は `fanOutAfterCommit`（`waiting-push-notifier.ts`）で応答 poller の fan-out の後まで止めるので、質問の文を持つ応答 poller の通知が先に区間の dedup を取り、edge の通知は同じ ID で落ちる（#1790 の「通知が先」を ID つきで保つ）
 - R4: `wait` の抑止記録の説明（日英の `cli-operations-guide.md`、`wait --help`、`current-output-types.ts` の `lastSuppression`、CLI の型の JSDoc）を「両方に ID があれば一致で判断、欠落のときだけ 60 秒」に揃えた
 
+**(再レビュー後の決定。N1・N2 への対応)**
+- N1（送信中に同じ区間が人用の `screen` へ rebind された）: 答えの対象は、同じ区間 ID が開いていて、送信開始時から版が動いていないか、動いていても今の binding が `screen` でないときだけ成り立つ。送信中に別の観測者が survey・picker を読んで `screen` にした区間は、答えた prompt より新しい観測なので、古い prompt で観測し直さず `lastAnswer` も記録しない（区間は `screen` のまま、猶予の終わりに通知）。turn・`unattributed` への rebind（答えで再開した turn に結び直る等）は従来どおり記録する
+- N2（答える前の抑止記録が答え済みの判定に勝つ）: 送信の成功経路は抑止記録を消さないので、gate は、呼び手の区間 ID が poller の `lastAnswer` の区間で、抑止記録の `at` が答えの `at` より前なら、その記録をこの待ちの理由と読まない（以降は hold と `auto-yes-answered` の判定）。答えと同時刻以降の新しい抑止・別の区間への答え・ID の無い呼び手は従来どおり `policy-withheld`、人用の `screen` になった区間は猶予の終わりに通知する。抑止記録自体は消さない（`current-output` の `lastSuppression` の公開は変えない）
+
 **(3) 単独で develop に入っても壊れない理由**
 - poller が閉じるのは自分が答えた区間だけで、`screen` の扱いは 1b のまま。gate は 2 で ID を読めるので、書き手が増えるだけ
 - `wait` は欄が無いサーバーでは 60 秒の窓に戻る（互換）

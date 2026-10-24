@@ -48,7 +48,10 @@
  * earlier episode is older than `since` and is ignored.
  * Issue #3798: a record that names its episode (`episodeId`) is matched to a
  * wait that names one by that id instead, since two episodes can share a
- * `since`; either side without an id falls back to the time comparison.
+ * `since`; either side without an id falls back to the time comparison. A
+ * record of the episode the poller then answered (`lastAnswer`), written
+ * before that answer, is not the wait's reason any more: the success path of
+ * a send does not clear the record, and the answer is the newer fact.
  *
  * The poller re-evaluates a suppressed prompt on every poll (the duplicate
  * guard only remembers *answered* prompts), so `at` stays current for as long
@@ -438,7 +441,11 @@ export function decidePromptPush(input: PromptPushGateInput): PromptPushGateDeci
   }
 
   const suppression = getLastPolicySuppression(worktreeId, cliToolId, instanceId);
-  if (suppression !== null && suppressionBelongsToWait(suppression, input)) {
+  if (
+    suppression !== null &&
+    suppressionBelongsToWait(suppression, input) &&
+    !suppressionPredatesAnswer(suppression, input)
+  ) {
     return { suppress: false, reason: 'policy-withheld', suppressedBy: suppression.reason };
   }
 
@@ -468,12 +475,36 @@ export function autoYesAnsweredWait(
   input: Pick<PromptPushGateInput, 'worktreeId' | 'cliToolId' | 'instanceId' | 'waitingEpisodeId'>,
 ): boolean {
   const waitId = input.waitingEpisodeId ?? null;
-  if (waitId === null) return false;
-  const key = buildCompositeKey(input.worktreeId, input.cliToolId, input.instanceId);
-  const answer = globalThis.__autoYesPollerStates?.get(key)?.lastAnswer ?? null;
-  if (answer === null || answer.episodeId !== waitId) return false;
+  if (waitId === null || answerTo(input)?.episodeId !== waitId) return false;
   const episode = getWaitingEpisodeRecord(input.worktreeId, input.cliToolId, input.instanceId);
   return episode !== null && episode.episodeId === waitId && episode.binding.kind !== 'screen';
+}
+
+/** The poller's `lastAnswer` for this instance, read off `globalThis` (Issue #3798). */
+function answerTo(
+  input: Pick<PromptPushGateInput, 'worktreeId' | 'cliToolId' | 'instanceId'>,
+): { episodeId: string; at: number } | null {
+  const key = buildCompositeKey(input.worktreeId, input.cliToolId, input.instanceId);
+  return globalThis.__autoYesPollerStates?.get(key)?.lastAnswer ?? null;
+}
+
+/**
+ * Whether the policy's reason for this wait is older than the answer the
+ * poller then sent to it (Issue #3798): the same episode withheld once — a
+ * contract that changed, a lookup that failed — and answered after, by a send
+ * whose success path does not clear the record. The answer is the newer fact,
+ * so the record is not this wait's reason any more. A suppression written at
+ * or after the answer, one for another episode, and a caller that names no
+ * episode keep #1684's `policy-withheld`.
+ */
+function suppressionPredatesAnswer(
+  suppression: EpisodeScopedPolicySuppression,
+  input: Pick<PromptPushGateInput, 'worktreeId' | 'cliToolId' | 'instanceId' | 'waitingEpisodeId'>,
+): boolean {
+  const waitId = input.waitingEpisodeId ?? null;
+  if (waitId === null) return false;
+  const answer = answerTo(input);
+  return answer !== null && answer.episodeId === waitId && suppression.at < answer.at;
 }
 
 /**
