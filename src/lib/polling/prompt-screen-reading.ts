@@ -77,6 +77,16 @@ import { selectAllowOnceOption } from './auto-yes-option-effect';
  * a scrollback pane. Below it, a capture that filled its window is `clipped`
  * unless the capture layer said otherwise.
  *
+ * And the capture layer's word decides on a scrollback pane too (the fourth
+ * review's N5). `headCut === false` is a known whole history, not an unknown
+ * top: tmux returned `min(history, N)` history rows plus the visible pane for
+ * a `-S -N`, so a capture it cut has more rows than any window it serves and
+ * the slice cuts it too — a capture the slice did not cut is everything from
+ * the history's first row. Only without that word is a capture that filled
+ * its window `clipped`; "filled" is counted in rows ({@link screenRowsOf}),
+ * so a trailing newline does not turn a 999-row capture into a full
+ * 1000-row window.
+ *
  * @param capture - The capture as returned (or its cleaned spelling: same rows)
  * @param windowLines - The window it was captured with
  * @param cliToolId - The tool whose pane it is; omitted, the pane is read as a
@@ -90,12 +100,13 @@ export function captureTopOf(
   cliToolId?: CLIToolType,
   headCut?: boolean,
 ): CaptureTop {
-  const filled = windowLines > 0 && capture.split('\n').length >= windowLines;
-  if (cliToolId === undefined || !usesAlternateScreen(cliToolId)) {
-    return filled || headCut === true ? 'clipped' : 'history-start';
-  }
   if (headCut === true) return 'clipped';
-  if (screenRowsOf(capture).length > TUI_PANE_HEIGHT) return filled ? 'clipped' : 'history-start';
+  const rows = screenRowsOf(capture).length;
+  const filled = windowLines > 0 && rows >= windowLines;
+  // A known whole history (`headCut === false`) wins over a full window.
+  const historyTop: CaptureTop = filled && headCut === undefined ? 'clipped' : 'history-start';
+  if (cliToolId === undefined || !usesAlternateScreen(cliToolId)) return historyTop;
+  if (rows > TUI_PANE_HEIGHT) return historyTop;
   if (headCut === undefined && filled && windowLines < TUI_PANE_HEIGHT) return 'clipped';
   return screenTopOf(capture);
 }

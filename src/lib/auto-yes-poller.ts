@@ -567,7 +567,8 @@ interface CaptureExtent {
  * Where a poller capture's first row sits (Issue #3881 review P2-1): on a
  * scrollback pane the capture is the last `windowLines` rows, so one
  * that came back with fewer rows holds the pane's whole history, and one that
- * filled the window may be cut at its top (#1670's `isCaptureWindowSaturated`);
+ * filled the window may be cut at its top (#1670's `isCaptureWindowSaturated`)
+ * unless the capture layer said it was not (the fourth review's N5: `headCut`);
  * an alternate-screen pane has no history and is read off its screen (the
  * second review's N1, `captureTopOf` in `prompt-screen-reading`), unless the
  * window cut it (the third review's N4: `headCut`).

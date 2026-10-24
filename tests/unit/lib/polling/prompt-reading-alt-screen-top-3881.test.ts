@@ -208,7 +208,10 @@ describe('[#3881 N1] captureTopOf reads an alternate screen off the screen', () 
 
   it('陽性対照: read as a scrollback pane (the first fix), the two screens swap', () => {
     for (const [, window] of WINDOWS) expect(captureTopOf(scrolledScreen(), window)).toBe('history-start');
-    expect(captureTopOf(wholeScreen(), REDUCED_CAPTURE_LINES)).toBe('clipped');
+    // Issue #3881 (fourth review N5): "filled" counts rows, so the 1000-row
+    // screen is spelled as tmux returns it (terminated); `wholeScreen()` alone
+    // ends in a blank row, which reads as 999 rows and a terminator.
+    expect(captureTopOf(`${wholeScreen()}\n`, REDUCED_CAPTURE_LINES)).toBe('clipped');
     // …and the resolver followed: the scrolled screen's deny miss passed, the whole one was withheld.
     expect(resolvedUnder(scrolledScreen(), 'history-start')).toMatchObject({ suppressedBy: null });
     expect(resolvedUnder(wholeScreen(), 'clipped')).toMatchObject({ suppressedBy: 'deny-pattern-unusable' });
@@ -217,7 +220,10 @@ describe('[#3881 N1] captureTopOf reads an alternate screen off the screen', () 
   it('陰性対照: a scrollback pane is read as before', () => {
     expect(usesAlternateScreen('codex')).toBe(false);
     expect(captureTopOf(scrolledScreen(), FULL_CAPTURE_LINES, 'codex')).toBe('history-start');
-    expect(captureTopOf(wholeScreen(), REDUCED_CAPTURE_LINES, 'codex')).toBe('clipped');
+    // Issue #3881 (fourth review N5): "filled" counts rows, so the 1000-row
+    // screen is spelled as tmux returns it (terminated); `wholeScreen()` alone
+    // ends in a blank row, which reads as 999 rows and a terminator.
+    expect(captureTopOf(`${wholeScreen()}\n`, REDUCED_CAPTURE_LINES, 'codex')).toBe('clipped');
     expect(captureTopOf(wholeScreen(), FULL_CAPTURE_LINES, 'codex')).toBe('history-start');
   });
 
