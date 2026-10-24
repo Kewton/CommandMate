@@ -7,9 +7,9 @@
 import { createLogger } from '@/lib/logger';
 import {
   detectMultipleChoicePrompt,
-  findApprovalContextRange,
   joinApprovalTarget,
 } from './prompt-detect-multiple-choice';
+import { findYesNoApprovalContextRange } from './prompt-detect-multiple-choice-approval-context';
 import type { ApprovalContextReading, DetectPromptOptions, PromptDetectionResult } from './types';
 import { normalizeTuiFrameForDetection } from './tui-detection-frame';
 import { truncateRawContent } from './truncate-raw-content';
@@ -36,7 +36,13 @@ let lastOutputTail: string | null = null;
 /**
  * Yes/no pattern definitions for data-driven matching.
  * Each entry defines a regex pattern and its associated default option.
- * Patterns are evaluated in order; the first match wins.
+ *
+ * Issue #3881 (H-4): every pattern's every match in the tail window is a
+ * candidate, and the LATEST one (the lowest on the pane) is the prompt — see
+ * {@link findYesNoCandidates}. Before, the patterns were tried in this order
+ * and the first match of the first pattern won, so an older `(y/n)` quoted in
+ * the transcript beat the live `[y/N]` under it, and the deny patterns were
+ * judged against the old prompt's rows.
  *
  * Pattern format:
  *   - regex: Must have a capture group (1) for the question text
@@ -75,6 +81,36 @@ function locateMatchLines(
   return { startLine, endLine: startLine + countNewlines(match[0]) };
 }
 
+/** One yes/no match in the tail window (Issue #3881, H-4). */
+interface YesNoCandidate {
+  match: RegExpMatchArray;
+  defaultOption?: 'yes' | 'no';
+  startLine: number;
+  endLine: number;
+}
+
+/**
+ * Every yes/no match in the tail window, oldest first (Issue #3881, H-4).
+ *
+ * Matched against the same joined window with the same patterns as before, so
+ * a line reads as a candidate exactly when it read as a prompt before; only
+ * which candidate wins changed. Sorted by the row the match ends on, then by
+ * where it starts, then by pattern order (a row cannot end in two spellings,
+ * so the last key only keeps the order deterministic).
+ */
+function findYesNoCandidates(lastLines: string, tailStart: number): YesNoCandidate[] {
+  const candidates: (YesNoCandidate & { offset: number; order: number })[] = [];
+  YES_NO_PATTERNS.forEach((pattern, order) => {
+    const global = new RegExp(pattern.regex.source, `${pattern.regex.flags}g`);
+    for (const match of lastLines.matchAll(global)) {
+      const { startLine, endLine } = locateMatchLines(lastLines, tailStart, match);
+      candidates.push({ match, defaultOption: pattern.defaultOption, startLine, endLine, offset: match.index ?? 0, order });
+    }
+  });
+  candidates.sort((a, b) => a.endLine - b.endLine || a.offset - b.offset || a.order - b.order);
+  return candidates;
+}
+
 /**
  * What a yes/no prompt is asking approval for (Issue #1699).
  *
@@ -89,13 +125,24 @@ function yesNoApprovalTarget(
   tailText: string,
   tailStart: number,
   match: RegExpMatchArray,
+  olderCandidates: readonly YesNoCandidate[] = [],
 ): YesNoApprovalBlock {
   const { startLine, endLine } = locateMatchLines(tailText, tailStart, match);
-  const range = findApprovalContextRange(lines, startLine, endLine + 1);
+  // Issue #3881: a here-document's `> ` row at the prompt's column is not a
+  // known boundary (limit 3 of #3832) — `truncated`, not complete.
+  const range = findYesNoApprovalContextRange(lines, startLine, endLine + 1);
+  // Issue #3881 (H-4): another yes/no prompt inside this prompt's own block
+  // means the block holds two questions, and which rows the live one asks
+  // about cannot be told from the screen — not the whole request either.
+  const contested = olderCandidates.some(c => c.endLine >= range.start && c.endLine < startLine);
   return {
     approvalTarget: joinApprovalTarget(lines, range.start, endLine + 1),
     // Issue #3881 (H-3): whether the scan above stopped at a boundary.
-    approvalContext: { startRow: range.start, endRow: endLine + 1, completeness: range.completeness },
+    approvalContext: {
+      startRow: range.start,
+      endRow: endLine + 1,
+      completeness: contested ? 'truncated' : range.completeness,
+    },
   };
 }
 
@@ -221,26 +268,27 @@ export function detectPrompt(output: string, options?: DetectPromptOptions): Pro
     return multipleChoiceResult;
   }
 
-  // Patterns 1-4: Yes/no patterns (data-driven matching)
+  // Patterns 1-4: Yes/no patterns (data-driven matching). Issue #3881 (H-4):
+  // the latest candidate in the window, not the first pattern's first match.
   const trimmedLastLines = lastLines.trim();
-  for (const pattern of YES_NO_PATTERNS) {
-    const match = lastLines.match(pattern.regex);
-    if (match) {
-      const question = match[1].trim();
-      return yesNoPromptResult(
-        question,
-        question,
-        trimmedLastLines,
-        yesNoApprovalTarget(lines, lastLines, tailStart, match),
-        pattern.defaultOption,
-      );
-    }
+  const yesNoCandidates = findYesNoCandidates(lastLines, tailStart);
+  const live = yesNoCandidates[yesNoCandidates.length - 1];
+  if (live) {
+    const question = live.match[1].trim();
+    return yesNoPromptResult(
+      question,
+      question,
+      trimmedLastLines,
+      yesNoApprovalTarget(lines, lastLines, tailStart, live.match, yesNoCandidates.slice(0, -1)),
+      live.defaultOption,
+    );
   }
 
   // Pattern 5: Approve?
   // Matches "Approve?" on its own line or at the end of a line
-  const approvePattern = /^(.*?)Approve\?\s*$/m;
-  const approveMatch = lastLines.match(approvePattern);
+  // Issue #3881 (H-4): the latest one in the window, like the patterns above.
+  const approvePattern = /^(.*?)Approve\?\s*$/gm;
+  const approveMatch = [...lastLines.matchAll(approvePattern)].pop();
 
   if (approveMatch) {
     const content = approveMatch[1].trim();

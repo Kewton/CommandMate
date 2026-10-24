@@ -71,6 +71,7 @@ import {
 } from '@/lib/detection/tools/antigravity/dialog';
 import { readCommandCodeQuestionDialog } from '@/lib/detection/tools/command-code/dialog';
 import type { PromptData, PromptType } from '@/types/models';
+import { selectAllowOnceOption } from './auto-yes-option-effect';
 
 /**
  * What to do with a tool's measured dialog rules.
@@ -393,21 +394,53 @@ export const AUTO_YES_QUESTION_DIALOG_KINDS: ReadonlySet<string> = new Set(['que
  * Claude classifies by the context rows above the options, which on a
  * permission dialog are the command being approved (#3748).
  *
- * Copilot's question (`ask_user`) is neither: nothing on its screen tells it
- * from its pickers, so it is not judged a question (#3863 leaves it out).
+ * - `'unidentified'` (Issue #3881, the second half: finding 3) — given the
+ *   tool, a numbered list on copilot or codex
+ *   ({@link QUESTION_EVIDENCE_UNREAD_TOOLS}) that is neither of the above and
+ *   whose rows do not read as a permission dialog
+ *   (`auto-yes-option-effect`, the wording measured on their live captures).
+ *   Copilot's question (`ask_user`) and codex's `request_user_input` draw the
+ *   same picker as their menus: copilot calls anything without `do you want
+ *   to` a `picker`, codex anything with a `?` above it a `permission`, and
+ *   neither sets `isAskUserQuestion`. So such a list is not known to be a
+ *   question, nor known not to be one. Left to a human under `careful`;
+ *   under `recommended` it is answered exactly as before (not as a question).
  *
  * @param promptData - The prompt the tick read
  * @param gate - {@link evaluateAutoYesDialogGate}'s verdict for the same frame, if it ran
+ * @param cliToolId - The tool that drew it; omitted, no list is `'unidentified'`
+ *   (the reading before #3881's second half)
  */
 export function classifyAutoYesQuestion(
   promptData: PromptData,
   gate: AutoYesDialogGateVerdict | undefined,
-): 'question-form' | 'picker' | null {
+  cliToolId?: CLIToolType,
+): AutoYesQuestionKind | null {
   if (gate?.gated === true && gate.dialog !== null && AUTO_YES_QUESTION_DIALOG_KINDS.has(gate.dialog.kind)) {
     return 'question-form';
   }
-  return promptData.type === 'multiple_choice' && promptData.isAskUserQuestion === true ? 'picker' : null;
+  if (promptData.type !== 'multiple_choice') return null;
+  if (promptData.isAskUserQuestion === true) return 'picker';
+  if (
+    cliToolId !== undefined && QUESTION_EVIDENCE_UNREAD_TOOLS.has(cliToolId)
+    && selectAllowOnceOption(promptData.options, cliToolId).kind === 'not-a-permission-dialog'
+  ) {
+    return 'unidentified';
+  }
+  return null;
 }
+
+/** What {@link classifyAutoYesQuestion} reads a question as. */
+export type AutoYesQuestionKind = 'question-form' | 'picker' | 'unidentified';
+
+/**
+ * The tools whose question screens nothing on the screen tells from their
+ * other pickers (Issue #3881, finding 3): copilot's `ask_user`, codex's
+ * `request_user_input`. Neither module reads a question's chrome; their dialog
+ * kinds are guesses from the words above the options
+ * (`tools/copilot/prompt.ts`, `tools/codex/prompt.ts`).
+ */
+export const QUESTION_EVIDENCE_UNREAD_TOOLS: ReadonlySet<CLIToolType> = new Set<CLIToolType>(['copilot', 'codex']);
 
 /**
  * Is the prompt a question to the operator rather than a permission, on a

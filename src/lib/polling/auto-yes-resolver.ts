@@ -128,6 +128,11 @@ export const MAX_DENY_PATTERN_LENGTH = 200;
  * A prompt question or option label is a few hundred characters; the bound only
  * exists so a pathological pane cannot make every poll scan megabytes with 32
  * patterns. Matching is over the head of the field, deterministically.
+ *
+ * Issue #3881: a field cut here was not shown to the patterns whole, exactly
+ * like an approval target cut at its 12-row cap, so a miss over its head is
+ * not a pass: it withholds as `deny-pattern-unusable` (no pattern named). A
+ * match inside the head is still `deny-pattern`.
  */
 export const MAX_DENY_MATCH_TEXT_LENGTH = 20_000;
 
@@ -258,13 +263,15 @@ interface DenyOutcome {
  * Patterns are screened by {@link validateStopPattern} (length, safe-regex2
  * catastrophic-backtracking detection, syntax) before execution, which is the
  * same ReDoS defence the stop-pattern path uses. A pattern that fails screening
- * — or whose execution throws — is reported as `unusable`, not skipped.
+ * — or whose execution throws — is reported as `unusable`, not skipped. So is
+ * a miss when a text was cut at {@link MAX_DENY_MATCH_TEXT_LENGTH} (Issue #3881).
  */
 function evaluateDenyPatterns(rawTexts: string[], patterns: string[]): DenyOutcome {
   if (patterns.length === 0) {
     return { outcome: 'no-match' };
   }
 
+  const headCut = rawTexts.some(text => text.length > MAX_DENY_MATCH_TEXT_LENGTH);
   const texts = rawTexts.map(text =>
     text.length > MAX_DENY_MATCH_TEXT_LENGTH ? text.slice(0, MAX_DENY_MATCH_TEXT_LENGTH) : text
   );
@@ -286,7 +293,9 @@ function evaluateDenyPatterns(rawTexts: string[], patterns: string[]): DenyOutco
     }
   }
 
-  return { outcome: 'no-match' };
+  // Issue #3881: no pattern matched the heads, but a field's tail was never
+  // shown to them — evaluated over part of the request, which is no pass.
+  return headCut ? { outcome: 'unusable' } : { outcome: 'no-match' };
 }
 
 /** A policy denial, or null when the policy permits the answer. */
@@ -353,6 +362,8 @@ export function evaluatePolicyAgainstTexts(
   // request is not a pass: the patterns could not be evaluated against what
   // the prompt asks, which is `deny-pattern-unusable`'s fail-closed case.
   // Only when the contract lists patterns; with none there is nothing to miss.
+  // (A field cut at MAX_DENY_MATCH_TEXT_LENGTH is the same case, reported by
+  // evaluateDenyPatterns as `unusable` above.)
   if (denySurfaceIncomplete && policy.denyPatterns.length > 0) {
     return { reason: 'deny-pattern-unusable' };
   }

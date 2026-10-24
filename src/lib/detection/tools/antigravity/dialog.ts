@@ -472,3 +472,19 @@ export function isAntigravityUnansweredNumberedScreen(text: string): boolean {
   if (replyList) return false;
   return readAntigravityNumberedDialog(run.lines) === null;
 }
+
+/**
+ * Is this agy frame the `/feedback` menu — its `esc Cancel · 1-6 Select`
+ * footer directly under the bottom run of options? (Issue #3881)
+ *
+ * The one numbered agy screen the generic multiple-choice parser is left to
+ * read (#2364) that is a known menu of agy's own rather than a list a reply
+ * drew. The answering entry asks it when a hook receipt is all that would
+ * otherwise vouch for a generic reading (`response-checker-dialog-gate`'s
+ * `isAntigravityGenericReadingOnScreen`).
+ *
+ * @param text - ANSI-stripped capture, box drawing optional
+ */
+export function isAntigravityFeedbackMenuScreen(text: string): boolean {
+  return readBottomOptionRun(text)?.feedbackFooter === true;
+}

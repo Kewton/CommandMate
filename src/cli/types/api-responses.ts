@@ -1178,6 +1178,33 @@ export interface PromptData {
    */
   approvalTarget?: string;
   /**
+   * Issue #3881: set when `approvalTarget` is known not to be the whole of
+   * what the prompt asks about — cut at its 12-row scan cap or at an
+   * ambiguous `>` boundary (`truncated`), or reaching the top of a capture
+   * that may have been cut (`top-unknown`). A deny miss on it withholds as
+   * `deny-pattern-unusable`.
+   *
+   * Mirrors: src/types/models.ts BasePromptData.approvalTargetCompleteness.
+   */
+  approvalTargetCompleteness?: 'truncated' | 'top-unknown';
+  /**
+   * Issue #3881: what the screen was read as when the row was saved (kind,
+   * phase, live rows, the target's completeness, evidence). Absent on a row
+   * saved before #3881 or by a producer with no frame. The wire's shape, kept
+   * loose like `options`: the CLI does not read it.
+   *
+   * Mirrors: src/types/prompt-reading.ts PromptReading.
+   */
+  reading?: {
+    version: number;
+    kind: string;
+    phase?: string;
+    liveRange?: { startRow: number; endRow: number };
+    approvalTarget: string;
+    captureTop?: string;
+    evidence: string[];
+  };
+  /**
    * The verdicts a structured approval accepts, when this payload is the
    * degraded `unclassified` form for a source that can be answered by decision
    * id (Issue #1898).
@@ -1475,6 +1502,14 @@ export interface WaitPromptOutput {
    * see what a `deny-pattern` verdict below was actually judged against.
    */
   approvalTarget?: string;
+  /**
+   * Issue #3881: the same fields as on {@link PromptData}, for the prompt this
+   * output was built from. `wait` copies its fields one by one
+   * (`src/cli/commands/wait.ts`) and does not copy these yet, so today they
+   * are absent; declared so the copy of the shape stays whole.
+   */
+  approvalTargetCompleteness?: PromptData['approvalTargetCompleteness'];
+  reading?: PromptData['reading'];
   /**
    * Set when the contract's autoYes policy withheld an answer for this session
    * (Issue #1699). Without it, a prompt an operator has to answer by hand is

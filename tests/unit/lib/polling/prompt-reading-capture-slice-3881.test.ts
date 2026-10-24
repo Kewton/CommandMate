@@ -213,7 +213,11 @@ describe('[#3881 N4] the capture layer counts rows, not split elements', () => {
   it('陽性対照: without the capture layer’s word, the cut taller pane reads as a whole screen', async () => {
     pane.raw = TALLER;
     const { raw } = await capturePollerFrame(WT, 'claude', REDUCED_CAPTURE_LINES);
-    expect(captureTopOf(raw, REDUCED_CAPTURE_LINES, 'claude')).toBe('screen-start');
+    // Issue #3881 (second half, contract decision (5b)): no longer. Without
+    // the capture layer's word a capture that filled its 1000-row window is
+    // `clipped`, not read off the screen's blank edges — the hole this
+    // control documented is closed.
+    expect(captureTopOf(raw, REDUCED_CAPTURE_LINES, 'claude')).toBe('clipped');
     expect(captureTopOf(raw, REDUCED_CAPTURE_LINES, 'claude', true)).toBe('clipped');
   });
 });
