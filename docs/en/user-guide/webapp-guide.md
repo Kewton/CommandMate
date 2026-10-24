@@ -200,7 +200,23 @@ Useful when you want to run continuous processes without interruption.
    - Default is **1 hour**
    - Select the minimum time needed for your work
 5. The description text changes dynamically based on your selection (e.g., "Will automatically turn OFF after 3 hours.")
-6. Click **"Agree and Enable"**
+6. **Choose how questions are answered** ("Answer questions with the recommended option (Recommended)" / "Answer questions yourself (Careful)"; see "Answer Modes" below)
+7. Click **"Agree and Enable"**
+
+### Answer Modes (Issue #3863)
+
+The dialog that turns Auto Yes on asks how a question from the agent (one that picks a single option) is answered. You choose each time you turn it on, and the dialog always opens with **Recommended** selected.
+
+| Option | Questions | Permission confirmations |
+|--------|-----------|--------------------------|
+| **Answer questions with the recommended option (Recommended)** (default) | Answered with the option marked as recommended (a title ending in `(Recommended)` / `（推奨）`), or the default option (the cursor, else option 1) when none is. A question with two or more recommended options, or one it cannot read that far, is left for you to answer from the answer panel | Answered automatically ("allow this once" is chosen) |
+| **Answer questions yourself (Careful)** | Not answered. Auto Yes stays ON and you answer from the answer panel | Answered automatically ("allow this once" is chosen) |
+
+- While ON, the mode (**Recommended** / **Careful**; 「おまかせ」 / 「慎重」 in the Japanese UI) is shown beside the toggle — in each PC split, under the phone's composer, and after a change made from another tab, which the periodic re-read picks up
+- Connected to an older server that does not report the mode, no mode is shown (it is not assumed to be Recommended)
+- A tile on the Sessions screen offers the same dialog, but the tile does not show the mode (the list it reads carries none). Turning Auto Yes on from the new-task dialog uses Recommended
+- A question's Submit / Cancel page and OpenCode's API questions are answered by you in either mode. Copilot's questions cannot be told apart, so they may be answered even under Careful
+- The CLI and the API can choose it too ([CLI Operations Guide](./cli-operations-guide.md#answer-modes-recommended-and-careful-issue-3863))
 
 ### Active Duration
 
@@ -223,7 +239,8 @@ POST /api/worktrees/:id/auto-yes
 
 {
   "enabled": true,
-  "duration": 3600000 | 10800000 | 28800000  // Optional (default: 3600000)
+  "duration": 3600000 | 10800000 | 28800000,  // Optional (default: 3600000)
+  "answerMode": "recommended" | "careful"     // Optional (Issue #3863; recommended for a new grant, the current mode for one that is on)
 }
 ```
 
@@ -276,7 +293,7 @@ Only the **server** answers automatically (the poller that reads the screen, hoo
 ### Important Notes
 
 - While Auto Yes is active, the server answers the agent's requests for permission to run a tool (editing, creating or deleting files, running commands, …). Important changes (file deletions, etc.) are also auto-approved, so use with caution
-- It does not answer these, and leaves them to you (their answer panel shows): a confirmation the execution contract (`autoYes`) withholds, a question from the agent and its Submit / Cancel page, a screen CommandMate cannot read, a confirmation that needs checkboxes or typed text, a CLI's launch confirmations, any confirmation of an agent whose poller is not running, and the few seconds after you answer from the panel by hand (see "Confirmations Auto Yes Does Not Answer Are Yours to Answer" above)
+- It does not answer these, and leaves them to you (their answer panel shows): a confirmation the execution contract (`autoYes`) withholds, a question from the agent under the Careful mode (or one whose recommended option cannot be told under Recommended) and its Submit / Cancel page, a screen CommandMate cannot read, a confirmation that needs checkboxes or typed text, a CLI's launch confirmations, any confirmation of an agent whose poller is not running, and the few seconds after you answer from the panel by hand (see "Confirmations Auto Yes Does Not Answer Are Yours to Answer" above)
 - You can disable it by turning off the toggle
 - Auto Yes automatically turns OFF after the selected duration
 - **When the server restarts (`/rebuild`, `commandmate stop`, etc.), an active Auto Yes is turned OFF and does not come back.** The affected instance shows **"Released by restart"** (「再起動で解除」 in the Japanese UI). The label stays until the original grant's deadline, and disappears when you turn the toggle on again or turn it off manually (it is not shown after SIGKILL or a crash). A manual OFF or an expiry does not show it

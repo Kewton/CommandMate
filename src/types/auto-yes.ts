@@ -33,6 +33,12 @@ export interface AutoYesToggleParams {
   enabled: boolean;
   duration?: AutoYesDuration;
   stopPattern?: string;
+  /**
+   * Issue #3863: the answer mode chosen when turning it on. Omitted means the
+   * default (`recommended`) — `AutoYesToggle` names a mode only when it is not
+   * the default; the worktree screen's handler sends the default explicitly.
+   */
+  answerMode?: AutoYesAnswerMode;
 }
 
 /**

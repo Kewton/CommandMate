@@ -180,6 +180,10 @@ export function useSessionTileAutoYes({
             instanceId,
             duration: params.duration,
             stopPattern: params.stopPattern,
+            // Issue #3863: the mode picked in the dialog, when it is not the
+            // default (omitted = the default, the body this hook's test pins).
+            // The list row carries no mode, so the tile shows none.
+            ...(params.enabled && params.answerMode ? { answerMode: params.answerMode } : {}),
           }),
         });
         // A refused toggle changed nothing on the server, so the row is still

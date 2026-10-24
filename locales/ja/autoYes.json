@@ -11,7 +11,7 @@
   "enableTitleWithTool": "Auto Yesモードを有効にしますか？（{toolName}）",
   "featureDescription": "機能説明",
   "yesNoAutoResponse": "yes/no確認 → 自動で「yes」を送信",
-  "multipleChoiceAutoSelect": "複数選択肢 → デフォルトまたは先頭の選択肢を自動選択",
+  "multipleChoiceAutoSelect": "質問の選択肢 → 下で選ぶ「質問への答え方」に従う",
   "autoDisableAfter": "{duration}後に自動でOFFになります。",
   "appliesOnlyToCurrent": "※ Auto Yesは現在選択中の{toolName}セッションのみに適用されます。他のCLIツールには影響しません。",
   "duration": "有効時間",
@@ -19,6 +19,24 @@
     "1h": "1時間",
     "3h": "3時間",
     "8h": "8時間"
+  },
+  "answerModeLabel": "質問への答え方",
+  "answerModes": {
+    "recommended": "質問は推奨で回答（おまかせ）",
+    "careful": "質問は自分で回答（慎重）"
+  },
+  "answerModeDescriptions": {
+    "recommended": "エージェントからの質問に、推奨と書かれた選択肢（無ければ既定の選択肢）で自動で答えます",
+    "careful": "エージェントからの質問には自動で答えず、回答欄からあなたが答えます"
+  },
+  "answerModePermissionNote": "どちらを選んでも、許可の確認（ファイルの編集やコマンドの実行など）には自動で答えます（「今回だけ許可」を選択）。",
+  "answerModeBadge": {
+    "recommended": "おまかせ",
+    "careful": "慎重"
+  },
+  "answerModeBadgeTitle": {
+    "recommended": "質問は推奨で回答（おまかせ）。許可の確認にも自動で答えます",
+    "careful": "質問は自分で回答（慎重）。許可の確認には自動で答えます"
   },
   "aboutRisks": "リスクについて",
   "riskWarning": "自動応答により、意図しない操作（ファイルの削除・上書き等）が実行される可能性があります。内容を十分に理解した上でご利用ください。",

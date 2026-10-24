@@ -6,6 +6,7 @@
  *
  * Issue #225: Added duration selection (1h/3h/8h)
  * Issue #314: Added stop pattern (regex) input field
+ * Issue #3863: Added the answer mode (おまかせ `recommended` / 慎重 `careful`)
  */
 
 'use client';
@@ -20,13 +21,24 @@ import {
   validateStopPattern,
   type AutoYesDuration,
 } from '@/config/auto-yes-config';
+import {
+  AUTO_YES_ANSWER_MODES,
+  DEFAULT_AUTO_YES_ANSWER_MODE,
+  type AutoYesAnswerMode,
+} from '@/types/auto-yes-answer-mode';
 
 /** Props for AutoYesConfirmDialog component */
 export interface AutoYesConfirmDialogProps {
   /** Whether the dialog is open */
   isOpen: boolean;
-  /** Callback when user confirms enabling auto-yes with selected duration and optional stop pattern */
-  onConfirm: (duration: AutoYesDuration, stopPattern?: string) => void;
+  /**
+   * Callback when user confirms enabling auto-yes with selected duration and optional stop pattern.
+   *
+   * Issue #3863: `answerMode` is passed only when the user picked a mode other
+   * than the default (`recommended`); omitted means the default. The two-argument
+   * call for the default is the shape the callers' tests pin.
+   */
+  onConfirm: (duration: AutoYesDuration, stopPattern?: string, answerMode?: AutoYesAnswerMode) => void;
   /** Callback when user cancels */
   onCancel: () => void;
   /** Name of the CLI tool Auto Yes will target */
@@ -43,6 +55,7 @@ export function AutoYesConfirmDialog({
   const tCommon = useTranslations('common');
   const [selectedDuration, setSelectedDuration] = useState<AutoYesDuration>(DEFAULT_AUTO_YES_DURATION);
   const [stopPattern, setStopPattern] = useState<string>('');
+  const [selectedAnswerMode, setSelectedAnswerMode] = useState<AutoYesAnswerMode>(DEFAULT_AUTO_YES_ANSWER_MODE);
   const [regexError, setRegexError] = useState<string | null>(null);
   const [showRegexTips, setShowRegexTips] = useState(false);
   const tipsRef = useRef<HTMLDivElement>(null);
@@ -52,9 +65,11 @@ export function AutoYesConfirmDialog({
     t(DURATION_LABELS[duration].replace('autoYes.', ''));
 
   // Reset stopPattern, regexError, and tips when dialog opens/closes (DS1-F008)
+  // Issue #3863: the answer mode too — each enabling starts from the default.
   useEffect(() => {
     if (isOpen) {
       setStopPattern('');
+      setSelectedAnswerMode(DEFAULT_AUTO_YES_ANSWER_MODE);
       setRegexError(null);
       setShowRegexTips(false);
     }
@@ -88,7 +103,11 @@ export function AutoYesConfirmDialog({
 
   const handleConfirm = () => {
     const trimmed = stopPattern.trim();
-    onConfirm(selectedDuration, trimmed || undefined);
+    if (selectedAnswerMode === DEFAULT_AUTO_YES_ANSWER_MODE) {
+      onConfirm(selectedDuration, trimmed || undefined);
+    } else {
+      onConfirm(selectedDuration, trimmed || undefined, selectedAnswerMode);
+    }
   };
 
   return (
@@ -134,6 +153,40 @@ export function AutoYesConfirmDialog({
               </button>
             ))}
           </div>
+        </div>
+
+        {/* Answer mode (Issue #3863): how a question is answered; permissions are answered under either */}
+        <div className="text-sm text-foreground">
+          <p className="font-medium mb-2" id="auto-yes-answer-mode-label">{t('answerModeLabel')}</p>
+          <div
+            className="flex flex-col gap-2"
+            role="radiogroup"
+            aria-labelledby="auto-yes-answer-mode-label"
+            data-testid="auto-yes-answer-mode-options"
+          >
+            {AUTO_YES_ANSWER_MODES.map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                role="radio"
+                aria-checked={selectedAnswerMode === mode}
+                onClick={() => setSelectedAnswerMode(mode)}
+                className={`w-full py-2 px-3 text-left rounded-md border-2 transition-colors ${
+                  selectedAnswerMode === mode
+                    ? 'border-accent-600 bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-400'
+                    : 'border-border bg-surface dark:bg-surface-2 text-foreground hover:border-muted-foreground'
+                }`}
+                style={{ minHeight: '44px' }}
+                data-testid={`auto-yes-answer-mode-${mode}`}
+              >
+                <span className="block text-sm font-medium">{t(`answerModes.${mode}`)}</span>
+                <span className="block text-xs text-muted-foreground">{t(`answerModeDescriptions.${mode}`)}</span>
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground" data-testid="auto-yes-answer-mode-permission-note">
+            {t('answerModePermissionNote')}
+          </p>
         </div>
 
         {/* Stop Pattern input (Issue #314) */}

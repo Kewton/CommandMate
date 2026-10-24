@@ -88,6 +88,7 @@ import { ChatSurface, isChatCardSelectionListOpen } from '@/components/worktree/
 import { useChatSurfaceLiveState } from '@/hooks/useChatSurfaceLiveState';
 import { PaneResizer } from '@/components/worktree/PaneResizer';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
+import type { AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
 import { useTerminalPanePolling } from '@/hooks/useTerminalPanePolling';
 import { useSplitMessages } from '@/hooks/useSplitMessages';
 import { useOptimisticPaneMessages, useDiscardPending } from '@/hooks/useOptimisticPaneMessages';
@@ -213,6 +214,12 @@ export interface TerminalSplitPaneContentProps extends TerminalSplitPaneCoreProp
    * reason as `autoYesBlockedByContract`.
    */
   autoYesReleasedByRestart?: boolean;
+  /**
+   * Issue #3863: the answer mode of this split's enabled Auto-Yes grant;
+   * undefined when off or unknown (an older server). A sibling of `autoYes`
+   * for the same reason as `autoYesBlockedByContract`.
+   */
+  autoYesAnswerMode?: AutoYesAnswerMode;
   /** History domain group (Issue #756). Optional; pre-#744 callers omit it. */
   history?: HistoryPaneProps;
   /**
@@ -309,6 +316,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   autoYes,
   autoYesBlockedByContract = false,
   autoYesReleasedByRestart = false,
+  autoYesAnswerMode,
   history,
   onDropInstance,
   draggedInstanceId,
@@ -1251,6 +1259,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
                 inline
                 blockedByContract={autoYesBlockedByContract}
                 releasedByRestart={autoYesReleasedByRestart}
+                answerMode={autoYesAnswerMode}
               />
             }
             // Issue #2766 / #2797: the direct-input toggle, in the toolbar's end
@@ -1392,6 +1401,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       autoYesExpiresAt,
       autoYesBlockedByContract,
       autoYesReleasedByRestart,
+      autoYesAnswerMode,
       lastAutoResponse,
       onAutoYesToggle,
       // Issue #2766: the bar's ONLY gate. Leaving it out of this list is the

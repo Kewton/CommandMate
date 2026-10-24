@@ -9,6 +9,7 @@
  *
  * Issue #225: Added duration propagation and HH:MM:SS countdown format
  * Issue #314: Added AutoYesToggleParams interface with stopPattern support
+ * Issue #3863: the answer mode — chosen in the confirm dialog, shown beside the ON switch
  */
 
 'use client';
@@ -24,6 +25,7 @@ import { getCliToolDisplayNameSafe } from '@/lib/cli-tools/types';
 // so server-side type consumers compiled under tsconfig.server.json can import
 // it without TS6142. Re-exported here for backward compatibility.
 import type { AutoYesToggleParams } from '@/types/auto-yes';
+import type { AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
 export type { AutoYesToggleParams };
 
 /** Props for AutoYesToggle component */
@@ -73,6 +75,13 @@ export interface AutoYesToggleProps {
    * switch says so; nothing is re-enabled. Optional, false by default.
    */
   releasedByRestart?: boolean;
+  /**
+   * Issue #3863: the answer mode of the enabled grant (`recommended` /
+   * `careful`), shown as a label beside the ON switch. Undefined renders
+   * nothing — a server older than the field, or a surface that cannot read it
+   * (the Sessions tile's list row), is "unknown", never assumed `recommended`.
+   */
+  answerMode?: AutoYesAnswerMode;
 }
 
 export const AutoYesToggle = memo(function AutoYesToggle({
@@ -85,6 +94,7 @@ export const AutoYesToggle = memo(function AutoYesToggle({
   onExpire,
   blockedByContract = false,
   releasedByRestart = false,
+  answerMode,
 }: AutoYesToggleProps) {
   const t = useTranslations('autoYes');
   const [timeRemaining, setTimeRemaining] = useState<string>('');
@@ -149,10 +159,13 @@ export const AutoYesToggle = memo(function AutoYesToggle({
     }
   }, [displayEnabled, onToggle]);
 
-  const handleConfirm = useCallback((duration: AutoYesDuration, stopPattern?: string) => {
+  const handleConfirm = useCallback((duration: AutoYesDuration, stopPattern?: string, chosenMode?: AutoYesAnswerMode) => {
     setShowConfirmDialog(false);
     setToggling(true);
-    onToggle({ enabled: true, duration, stopPattern }).finally(() => setToggling(false));
+    // Issue #3863: the dialog names a mode only when it is not the default, and
+    // so does this call (an omitted `answerMode` is the default).
+    onToggle({ enabled: true, duration, stopPattern, ...(chosenMode ? { answerMode: chosenMode } : {}) })
+      .finally(() => setToggling(false));
   }, [onToggle]);
 
   const handleCancel = useCallback(() => {
@@ -181,6 +194,18 @@ export const AutoYesToggle = memo(function AutoYesToggle({
       {displayEnabled && timeRemaining && (
         <span className="text-sm text-muted-foreground" aria-label={t('timeRemaining')}>
           {timeRemaining}
+        </span>
+      )}
+
+      {/* Issue #3863: how a question is answered while ON; unknown shows nothing */}
+      {displayEnabled && answerMode && (
+        <span
+          className="text-xs font-medium text-muted-foreground"
+          title={t(`answerModeBadgeTitle.${answerMode}`)}
+          data-testid="auto-yes-answer-mode"
+          data-answer-mode={answerMode}
+        >
+          {t(`answerModeBadge.${answerMode}`)}
         </span>
       )}
 

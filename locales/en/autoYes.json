@@ -11,7 +11,7 @@
   "enableTitleWithTool": "Enable Auto Yes mode? ({toolName})",
   "featureDescription": "Feature description",
   "yesNoAutoResponse": "yes/no confirmation → Automatically sends \"yes\"",
-  "multipleChoiceAutoSelect": "Multiple choice → Automatically selects default or first option",
+  "multipleChoiceAutoSelect": "Questions with options → follow \"How questions are answered\" below",
   "autoDisableAfter": "Will automatically turn OFF after {duration}.",
   "appliesOnlyToCurrent": "* Auto Yes applies only to the currently selected {toolName} session. It does not affect other CLI tools.",
   "duration": "Duration",
@@ -19,6 +19,24 @@
     "1h": "1 hour",
     "3h": "3 hours",
     "8h": "8 hours"
+  },
+  "answerModeLabel": "How questions are answered",
+  "answerModes": {
+    "recommended": "Answer questions with the recommended option (Recommended)",
+    "careful": "Answer questions yourself (Careful)"
+  },
+  "answerModeDescriptions": {
+    "recommended": "A question from the agent is answered automatically with the option marked as recommended (or the default option when none is)",
+    "careful": "A question from the agent is not answered automatically; you answer it from the answer panel"
+  },
+  "answerModePermissionNote": "Either way, permission confirmations (editing files, running commands, and so on) are answered automatically (\"allow this once\" is chosen).",
+  "answerModeBadge": {
+    "recommended": "Recommended",
+    "careful": "Careful"
+  },
+  "answerModeBadgeTitle": {
+    "recommended": "Questions are answered with the recommended option (Recommended). Permission confirmations are answered too",
+    "careful": "Questions are left for you to answer (Careful). Permission confirmations are answered automatically"
   },
   "aboutRisks": "About risks",
   "riskWarning": "Automatic responses may result in unintended operations (such as file deletion or overwriting). Please use only after fully understanding the implications.",
