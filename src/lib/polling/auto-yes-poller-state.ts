@@ -379,13 +379,30 @@ export function forgetPartialAnswersByWorktree(worktreeId: string): void {
 }
 
 /**
- * A person began answering on this instance (Issue #3880): the answer held
- * for them is theirs now, so the hold is dropped — the manual answer's own
- * hold (`auto-yes-manual-answer`) keeps the poller off meanwhile. Only the
- * record: a send still in flight records what it did when it comes back.
+ * A person's answer went through, or was refused before any key (Issue #3880):
+ * the answer Auto-Yes held at that confirmation is theirs now, so the hold is
+ * dropped. Only the record: a send still in flight records what it did when it
+ * comes back. Not called when a person's own send may have left keys on the
+ * pane, nor at the START of their answer — a manual send that fails keeps it
+ * ({@link holdPartialAnswerForManualSend}).
  */
 export function releasePartialAnswerToHuman(compositeKey: string): void {
   partialAnswers.delete(compositeKey);
+}
+
+/**
+ * A person's send ended with keys on the pane, or with its outcome unknown
+ * (Issue #3880): Auto-Yes must not type at the same confirmation once the
+ * manual answer's own hold passes. A hold already recorded for this session
+ * stays as it is; otherwise one is recorded at `screenKey` under the current
+ * session epoch, and released the same ways as one Auto-Yes recorded (the
+ * screen changing, the session relaunched, a person's answer going through).
+ */
+export function holdPartialAnswerForManualSend(compositeKey: string, screenKey: string, at: number = Date.now()): void {
+  const epoch = getEnterFallbackSessionEpoch(compositeKey);
+  const recorded = partialAnswers.get(compositeKey);
+  if (recorded !== undefined && recorded.epoch === epoch && recorded.screenKey === screenKey) return;
+  partialAnswers.set(compositeKey, { screenKey, epoch, at, seq: ++sendAttemptSeq.last });
 }
 
 /** Forget every one, and expire every send in flight: server shutdown, and a test seam. */

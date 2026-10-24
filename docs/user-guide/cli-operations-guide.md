@@ -2079,11 +2079,16 @@ Auto-Yes が OFF の instance で、止まった理由があれば入ります�
 | `pattern` | `deny-pattern` 系のとき、マッチした denyPattern |
 | `at` | 抑止時刻（epoch ms）。抑止されたプロンプトが画面に残っている間は毎ポーリング更新される |
 
-ポリシー以外の理由も同じ欄に載ります。`partial-answer`（Issue #3706 / #3713）は、Auto-Yes が回答のキーの一部
-（Enter の前の `y` など）を送った後で止めたため、同じプロンプトには再入力せず人に任せている状態です
-（`mode` は `null`）。worktree ID の移行でセッションが新しい ID へ移っても、この扱いは移った先で続きます。
-`commandmate wait` はこの理由に「because an earlier answer left partial input; Auto-Yes is waiting for a human」と
-表示します（exit 10 と JSON の `reason` は他の理由と同じ扱い）。入力欄に残った文字を確かめてから応答してください。
+ポリシー以外の理由も同じ欄に載ります。`partial-answer`（Issue #3706 / #3713 / #3880）は、前の回答が入力欄に残った、
+または前の回答の送信の結果を確認できなかったため、同じプロンプトには再入力せず人に任せている状態です（`mode` は `null`）。
+前者は回答のキーの一部（Enter の前の `y` など）を送った後で止めた場合、後者は tmux への送信が終了コード無しで終わった
+（timeout など）場合で、キーが 1 つも届いていない可能性もあります。人の回答（`commandmate respond` や画面の回答）の
+送信が同じように失敗したときも、この状態になります（または続きます）。worktree ID の移行でセッションが新しい ID へ
+移っても、この扱いは移った先で続きます。`commandmate wait` はこの理由に「because an earlier answer left partial input;
+Auto-Yes is waiting for a human (or that answer's send could not be confirmed, so the input may hold it: check the pane,
+then answer; an answer that goes through releases the hold)」と表示します（exit 10 と JSON の `reason` は他の理由と
+同じ扱い）。入力欄を確かめてから応答してください。人の回答が通る（または何も送らずに断られる）と、この扱いは解けます。
+画面が別のプロンプトに変わる・プロンプトが消える・セッションを起動し直すことでも解けます。
 
 型 `AutoYesSuppressionReason` の残りの語も、すべてポリシーの判定ではないので `mode` は `null` になることがあります。`commandmate wait` の表示の文言を添えます。
 

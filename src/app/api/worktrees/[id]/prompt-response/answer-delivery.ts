@@ -17,6 +17,9 @@ import {
   FreeTextAtChoiceOnlyPromptError,
   MultiSelectAnswerRejectedError,
 } from '@/lib/prompt-answer-sender';
+import type { PromptData } from '@/types/models';
+import { buildCompositeKey } from '@/lib/auto-yes-state';
+import { settleManualAnswer, type ManualAnswerOutcome } from '@/lib/polling/auto-yes-manual-answer';
 import type { AnswerResolution } from '@/lib/prompt-answer-semantic';
 import { startPolling } from '@/lib/polling/response-poller';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
@@ -99,8 +102,36 @@ function sendErrorResponse(
 }
 
 /**
+ * What a failed manual send left on the pane, for the answer Auto-Yes holds
+ * there (Issue #3880). The refusals are before any key; a transport failure
+ * says what it did (`keysSent`, `answerDelivery` from `sendPromptAnswer`).
+ * Null for an error that says neither: the hold is left as it was.
+ */
+function manualOutcomeOfSendError(error: unknown): ManualAnswerOutcome | null {
+  if (
+    error instanceof PromptAnswerRejectedError ||
+    error instanceof FreeTextAnswerRejectedError ||
+    error instanceof FreeTextAtChoiceOnlyPromptError
+  ) {
+    return 'not-sent';
+  }
+  if (!(error instanceof Error)) return null;
+  const keysSent = 'keysSent' in error ? error.keysSent : undefined;
+  const delivery = 'answerDelivery' in error ? error.answerDelivery : undefined;
+  if (keysSent === true || delivery === 'indeterminate') return 'may-be-on-pane';
+  if (keysSent === false) return 'not-sent';
+  return null;
+}
+
+/**
  * Send the resolved answer to tmux. Null once it was sent; otherwise the
  * refusal or the transport failure to return.
+ *
+ * Issue #3880: how the send ended is reported to Auto-Yes
+ * (`settleManualAnswer`), so a manual send that may have left keys on the pane
+ * keeps the confirmation off Auto-Yes's hands after the manual hold, as one of
+ * Auto-Yes's own would. `screenPromptData` is the prompt the fresh capture
+ * read — the screen such a hold is recorded at.
  */
 export async function sendResolvedAnswer(
   ctx: PromptResponseContext,
@@ -108,7 +139,9 @@ export async function sendResolvedAnswer(
   sessionName: string,
   resolved: ResolvedAnswer,
   verifiedFrame: string | null,
+  screenPromptData?: PromptData | null,
 ): Promise<NextResponse | null> {
+  const compositeKey = buildCompositeKey(ctx.id, ctx.cliToolId, ctx.instanceId);
   const { resolution, effectivePromptData } = resolved;
   // Send answer to tmux
   // Issue #287 Bug2: Uses shared sendPromptAnswer() to unify logic
@@ -127,8 +160,11 @@ export async function sendResolvedAnswer(
       frame: verifiedFrame ?? undefined,
     });
   } catch (error: unknown) {
+    const outcome = manualOutcomeOfSendError(error);
+    if (outcome !== null) settleManualAnswer(compositeKey, outcome, screenPromptData ?? effectivePromptData);
     return sendErrorResponse(ctx, error, request.answer, resolution);
   }
+  settleManualAnswer(compositeKey, 'answered');
   return null;
 }
 

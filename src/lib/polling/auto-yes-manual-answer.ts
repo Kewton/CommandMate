@@ -13,8 +13,10 @@
  *  - holds the instance for {@link MANUAL_ANSWER_HOLD_MS}: a tick that reads a
  *    confirmation meanwhile leaves it to the person (`answered-by-human`)
  *    instead of answering what they may be answering right now;
- *  - drops the published decision;
- *  - drops the answer the poller held at that confirmation (Issue #3880).
+ *  - drops the published decision.
+ *
+ * How the answer ENDED decides what happens to an answer the poller holds at
+ * that confirmation (Issue #3880, {@link settleManualAnswer}).
  *
  * Auto-Yes itself stays on: past the hold the poller answers again.
  *
@@ -27,7 +29,12 @@
 import { DUPLICATE_RETRY_EXPIRY_MS } from '@/lib/auto-yes-state';
 import { getOrInitGlobal } from '../global-state';
 import { forgetAutoYesDecision } from './auto-yes-decision-state';
-import { releasePartialAnswerToHuman } from './auto-yes-poller-state';
+import {
+  holdPartialAnswerForManualSend,
+  partialAnswerScreenKey,
+  releasePartialAnswerToHuman,
+} from './auto-yes-poller-state';
+import type { PromptData } from '@/types/models';
 
 /** How long a manual answer keeps the poller off the instance's confirmations. */
 export const MANUAL_ANSWER_HOLD_MS = DUPLICATE_RETRY_EXPIRY_MS;
@@ -51,8 +58,45 @@ const marks = getOrInitGlobal('__autoYesManualAnswers', () => new Map<string, Ma
 export function noteManualAnswerStarted(compositeKey: string, at: number = Date.now()): void {
   marks.set(compositeKey, { seq: (marks.get(compositeKey)?.seq ?? 0) + 1, at });
   forgetAutoYesDecision(compositeKey);
-  // Issue #3880: an answer Auto-Yes held (part-way, or of unknown outcome) is the person's now.
-  releasePartialAnswerToHuman(compositeKey);
+}
+
+/**
+ * How a person's answer ended, for the answer Auto-Yes holds at the
+ * confirmation (Issue #3880, see {@link settleManualAnswer}):
+ *
+ * - `answered`: every key of it reached tmux.
+ * - `not-sent`: refused, or failed, before any key reached the pane.
+ * - `may-be-on-pane`: some of its keys are on the pane, or a tmux call of it
+ *   ended with its outcome unknown.
+ */
+export type ManualAnswerOutcome = 'answered' | 'not-sent' | 'may-be-on-pane';
+
+/**
+ * A person's answer ended (Issue #3880). Starting one does not touch what
+ * Auto-Yes holds — the start only stops the tick under way and holds the
+ * poller off for {@link MANUAL_ANSWER_HOLD_MS} — so a manual send that fails
+ * cannot leave the confirmation free for Auto-Yes to type at again once that
+ * hold passes:
+ *
+ * - `answered` / `not-sent`: the held answer is released (the person answered,
+ *   or saw the screen and nothing of theirs is on it).
+ * - `may-be-on-pane`: the hold stays, or — when there was none — is recorded
+ *   at `promptData`'s screen (nothing is recorded without it).
+ *
+ * An end nobody reports (the agent's API answered it, the route threw) leaves
+ * the hold as it was.
+ */
+export function settleManualAnswer(
+  compositeKey: string,
+  outcome: ManualAnswerOutcome,
+  promptData?: PromptData | null,
+  at: number = Date.now(),
+): void {
+  if (outcome !== 'may-be-on-pane') {
+    releasePartialAnswerToHuman(compositeKey);
+    return;
+  }
+  if (promptData) holdPartialAnswerForManualSend(compositeKey, partialAnswerScreenKey(promptData), at);
 }
 
 /** The instance's manual-answer sequence (0 until a person answers there). */

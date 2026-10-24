@@ -1277,12 +1277,18 @@ which left the CLI unable to explain why a worker was stalled while Auto-Yes was
 | `pattern` | For the `deny-pattern` reasons, the denyPattern that matched |
 | `at` | When it was suppressed (epoch ms). Refreshed on every poll while the suppressed prompt is still on screen |
 
-Reasons other than the policy land in the same field. `partial-answer` (Issue #3706 / #3713) means Auto-Yes
-stopped an answer after some of its keys (a `y` before its Enter, for instance) had reached the pane, so it
-does not type at the same prompt again and leaves it to a human (`mode` is `null`). When a worktree ID move
-carries the session to a new ID, this carries on under the new ID. `commandmate wait` prints it as
-"because an earlier answer left partial input; Auto-Yes is waiting for a human" (exit 10 and the JSON
-`reason` are handled as for any other reason). Check what is left in the input before answering.
+Reasons other than the policy land in the same field. `partial-answer` (Issue #3706 / #3713 / #3880) means an
+earlier answer left input behind, or the outcome of its send could not be confirmed, so Auto-Yes does not type
+at the same prompt again and leaves it to a human (`mode` is `null`). The first is an answer stopped after some
+of its keys (a `y` before its Enter, for instance) had reached the pane; the second is a send to tmux that ended
+without an exit status (a timeout, for instance), where possibly no key arrived at all. A person's answer
+(`commandmate respond`, or one given on screen) whose send fails the same way leads to it too (or keeps it).
+When a worktree ID move carries the session to a new ID, this carries on under the new ID. `commandmate wait`
+prints it as "because an earlier answer left partial input; Auto-Yes is waiting for a human (or that answer's
+send could not be confirmed, so the input may hold it: check the pane, then answer; an answer that goes through
+releases the hold)" (exit 10 and the JSON `reason` are handled as for any other reason). Check the input before
+answering. A person's answer that goes through (or is refused with nothing sent) releases it, and so does the
+screen moving to another prompt, the prompt leaving the screen, or the session being relaunched.
 
 The remaining words of the type `AutoYesSuppressionReason` are not policy verdicts either, so `mode` can be `null`. The wording `commandmate wait` prints is quoted alongside.
 

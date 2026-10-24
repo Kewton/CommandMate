@@ -9,8 +9,8 @@
  * typing `y` again over it. The ledger (#3820) still counts the attempt
  * `failed` — "may or may not be on the pane" — not `partial`. A refusal before
  * any key (`not-started`) is free to be sent again, and the hold is not for
- * ever: the screen changing, the session being relaunched, or a person
- * answering releases it.
+ * ever: the screen changing, the session being relaunched, or a person's
+ * answer going through releases it (its start alone does not).
  *
  * Drives the real `detectAndRespondToPrompt` and `sendPromptAnswer`, as
  * `auto-yes-poller-failed-send-3839.test.ts` does; the screen reading and the
@@ -105,7 +105,12 @@ import {
   detectAndRespondToPrompt,
   type AutoYesPollerState,
 } from '@/lib/auto-yes-poller';
-import { noteManualAnswerStarted, clearManualAnswers, MANUAL_ANSWER_HOLD_MS } from '@/lib/polling/auto-yes-manual-answer';
+import {
+  noteManualAnswerStarted,
+  clearManualAnswers,
+  MANUAL_ANSWER_HOLD_MS,
+  settleManualAnswer,
+} from '@/lib/polling/auto-yes-manual-answer';
 import { beginEnterFallbackSession } from '@/lib/polling/auto-yes-enter-fallback-state';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import { clearPolicySuppressions } from '@/lib/polling/auto-yes-suppression-state';
@@ -274,9 +279,21 @@ describe('[#3880] the hold is released (not for ever)', () => {
     const state = pollerState();
     await tickOn(state, proceed('npm test'));
     noteManualAnswerStarted(COMPOSITE_KEY, now);
+    // Their answer went through (review P2: the end of it releases, not the start).
+    settleManualAnswer(COMPOSITE_KEY, 'answered');
     expect(await tickOn(state, proceed('npm test'))).toBe('no_answer');
     now += MANUAL_ANSWER_HOLD_MS;
     expect(await tickOn(state, proceed('npm test'))).toBe('responded');
+  });
+
+  it('negative: a person only starting to answer does not release it', async () => {
+    failNext = { at: 'text', delivery: 'indeterminate' };
+    const state = pollerState();
+    await tickOn(state, proceed('npm test'));
+    noteManualAnswerStarted(COMPOSITE_KEY, now);
+    now += MANUAL_ANSWER_HOLD_MS;
+    expect(await tickOn(state, proceed('npm test'))).toBe('no_answer');
+    expect(delivered).toEqual(['y']);
   });
 
   it('negative: with nothing changed, the hold stays', async () => {
