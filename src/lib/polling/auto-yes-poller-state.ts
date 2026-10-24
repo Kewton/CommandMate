@@ -378,6 +378,16 @@ export function forgetPartialAnswersByWorktree(worktreeId: string): void {
   }
 }
 
+/**
+ * A person began answering on this instance (Issue #3880): the answer held
+ * for them is theirs now, so the hold is dropped — the manual answer's own
+ * hold (`auto-yes-manual-answer`) keeps the poller off meanwhile. Only the
+ * record: a send still in flight records what it did when it comes back.
+ */
+export function releasePartialAnswerToHuman(compositeKey: string): void {
+  partialAnswers.delete(compositeKey);
+}
+
 /** Forget every one, and expire every send in flight: server shutdown, and a test seam. */
 export function clearPartialAnswers(): void {
   partialAnswers.clear();
@@ -457,10 +467,12 @@ export function beginSendAttempt(
 
 /**
  * The send came back. `keysSent` — it was stopped with keys already on the
- * pane — records the partial answer under the attempt's key as it is now, when
- * that key's session is still the one the keys went to; otherwise (sent in
- * full, stopped before any key, or failed) only the attempt itself is removed.
- * A second call, or a call on an expired attempt, does nothing.
+ * pane, or (Issue #3880) a tmux call of it ended without an exit status and
+ * its keys may be there — records the partial answer under the attempt's key
+ * as it is now, when that key's session is still the one the keys went to;
+ * otherwise (sent in full, stopped before any key, or failed with nothing
+ * sent) only the attempt itself is removed. A second call, or a call on an
+ * expired attempt, does nothing.
  */
 export function settleSendAttempt(attempt: AutoYesSendAttempt, keysSent: boolean, at: number = Date.now()): void {
   if (attempt.state !== 'pending') return;

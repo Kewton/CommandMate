@@ -13,7 +13,8 @@
  *  - holds the instance for {@link MANUAL_ANSWER_HOLD_MS}: a tick that reads a
  *    confirmation meanwhile leaves it to the person (`answered-by-human`)
  *    instead of answering what they may be answering right now;
- *  - drops the published decision.
+ *  - drops the published decision;
+ *  - drops the answer the poller held at that confirmation (Issue #3880).
  *
  * Auto-Yes itself stays on: past the hold the poller answers again.
  *
@@ -26,6 +27,7 @@
 import { DUPLICATE_RETRY_EXPIRY_MS } from '@/lib/auto-yes-state';
 import { getOrInitGlobal } from '../global-state';
 import { forgetAutoYesDecision } from './auto-yes-decision-state';
+import { releasePartialAnswerToHuman } from './auto-yes-poller-state';
 
 /** How long a manual answer keeps the poller off the instance's confirmations. */
 export const MANUAL_ANSWER_HOLD_MS = DUPLICATE_RETRY_EXPIRY_MS;
@@ -49,6 +51,8 @@ const marks = getOrInitGlobal('__autoYesManualAnswers', () => new Map<string, Ma
 export function noteManualAnswerStarted(compositeKey: string, at: number = Date.now()): void {
   marks.set(compositeKey, { seq: (marks.get(compositeKey)?.seq ?? 0) + 1, at });
   forgetAutoYesDecision(compositeKey);
+  // Issue #3880: an answer Auto-Yes held (part-way, or of unknown outcome) is the person's now.
+  releasePartialAnswerToHuman(compositeKey);
 }
 
 /** The instance's manual-answer sequence (0 until a person answers there). */
