@@ -165,6 +165,9 @@ const sub = await reg.pushManager.subscribe({
 閉じるエッジを起動点にした理由: `observeWaitingEdge({ waiting: false })` は
 **ポーラ（`response-checker`）と状態プローブ（`worktree-status-helper`）の両方**が呼ぶ。
 #1790 が開くエッジで両プロデューサをまとめたのと同じ形で、1 箇所を塞げば両方に効く。
+（Issue #3798 以降、両者は `waiting-episode-binding` の `observeWaiting` を通り、turn の遷移（stop 等）と
+Auto-Yes poller も区間を閉じる。閉じるエッジが `onWaitingTransition` に届く 1 箇所であることは変わらない。
+[Issue #3798 の設計書](./issue-3798-waiting-episode.md) §2.4）
 
 ---
 
@@ -236,7 +239,12 @@ Issue 本文は「再起動で印が消える ⇒ `no-card`」と書いている
 #### 採った対処: 印だけを永続化する（B を塞ぐ）
 
 `prompt-card-state` は印を `app_settings`（migration v27 の汎用 KV。**マイグレーション追加なし**）へ
-worktree ごと 1 行で書き、この プロセスに記憶が無いときはそこから読み戻す。SQL は
+worktree ごとに書き、この プロセスに記憶が無いときはそこから読み戻す。保存は 2 行で、1 文（1 回の
+`INSERT … ON CONFLICT`）で一緒に書く: 時刻の行 `push_prompt_card:<worktreeId>`（値は時刻だけ。#3798 より前と
+同じ形）と、最後に通知した waiting の区間 ID の行 `push_prompt_card_episode:<worktreeId>`（値は `<時刻>:<区間 ID>`。
+ID なしの印は ID を空で書く）。読むときは、区間 ID の行の時刻が時刻の行と一致しなければその ID を無視して
+「ID なし」として扱う（互換規則。古いサーバが書いた時刻の行だけの印も「ID なし」になる）。区間 ID を持たせた
+理由と解除通知での照合は [Issue #3798 の設計書](./issue-3798-waiting-episode.md) の規則 5 を参照。SQL は
 `escalation-settings` と同じ理由で `lib/push/` 側に置いた（唯一の消費者の隣・DB 側に 4 つ目の
 リーダを増やさない）。in-memory Map は前段のキャッシュとして残す（両層は同じタイムスタンプを持つので、
 DB は backing store であって第二の意見ではない）。
