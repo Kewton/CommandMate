@@ -33,14 +33,22 @@ module-reference の断片の写しは `module-reference-<issue>[-<item>].md`。
 
 同じ Issue の PR が 2 本以上ある run は、**3-1 の送信から 6-2 のマージまで、全段に同じ `--item` を渡す**（#3883）。1 段でも落とすと、
 その段は Issue 自身（`item` の無い行）の記録を読み書きし、後の段が「no result」で止まる・`status` の `next` と実際の作業が分かれる。
-work item は **tasks.tsv の 6 列目**に書き、各段はその行から `--item` を作る。6 列目の無い行（work item の無い Issue・#3883 より前の
-tasks.tsv）は `--item` を付けずに呼ぶ（今までどおり Issue 自身の記録）。本体の 3-3・5-1 の雛形は 5 列で読むので、
-6 列の tasks.tsv にはこの節の雛形を使う（5 列の雛形で読むと 5 列目のモデルに work item がつながって入る）。
+work item は **tasks.tsv の 6 列目に `item=<名前>` と書いて明示する**（`item=d1`）。各段は `item=` で始まる 6 列目からだけ `--item` を作る。
+6 列目が無い行・`item=` で始まらない行（#3883 より前の run が 6 列目に書いた `3883-d1`・`3883-d1-r2` などの再試行ラベル）・`item=` だけの行は
+`--item` を付けずに呼ぶ（今までどおり Issue 自身の記録）。**列の数で新旧を分けない**: 旧い run の記録は `item` が無いので、6 列目のラベルを
+work item と読むと、再開した段が別の単位を読み書きし、publish・merge が「verify: no result」で止まる。本体の 3-3・5-1 の雛形は 5 列で読むので、
+6 列の tasks.tsv（旧い run のラベル付きも）にはこの節の雛形を使う（5 列の雛形で読むと 5 列目のモデルに 6 列目がつながって入る）。
+
+- **旧い run の再開**: tasks.tsv も記録も書き換えず、この節の雛形でそのまま読む。ラベルは `item=` で始まらないので、全段が `item` 無しのまま続く
+- **work item への切り替え**: 切り替えるのは、これから送る（3-1）Issue だけ。その行の 6 列目に `item=<名前>` を書き、send の記録から
+  `--item` を付ける。既に `item` 無しの記録がある Issue は、マージまで `item` 無しで通す（記録は移せない。途中で `item=` を書くと、それまでの
+  verify・review の記録を読めない）。同じ work item の再送・再指示・切替の行も同じ `item=<名前>` を書く（`-r2` を名前に足すと別の work item に
+  なる）。再試行のラベルを残すなら 7 列目に書く
 
 ```bash
-# 3-1: 送った行の 6 列目に work item を書き（d1 など。work item の無い Issue は空）、send の記録にも同じ --item を付ける
+# 3-1: 送った行の 6 列目に item=<work item> を書き（item=d1 など。work item の無い Issue は item= だけ）、send の記録にも同じ --item を付ける
 ITEM_ARGS=(); [ -z "$ITEM" ] || ITEM_ARGS=(--item "$ITEM")
-printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$issue" "$WT" "$AGENT" "$TASK_ID" "$MODEL" "$ITEM" >> "workspace/orchestration/runs/$DATE/tasks.tsv"
+printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$issue" "$WT" "$AGENT" "$TASK_ID" "$MODEL" "item=$ITEM" >> "workspace/orchestration/runs/$DATE/tasks.tsv"
 node scripts/orchestrate/run-log.mjs append --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
   --issue "$issue" --stage send --result "$SENT" --head "$(git -C "$WT_DIR" rev-parse HEAD)" --task "$TASK_ID" \
   --contract "$CONTRACT" --agent "$AGENT" --model "$MODEL" "${ITEM_ARGS[@]}"
@@ -48,7 +56,8 @@ node scripts/orchestrate/run-log.mjs append --run-dir "workspace/orchestration/r
 
 ```bash
 # 3-3: 待機と検証。ログは runs/$DATE/wait-<issue>[-<item>].log
-while IFS="$(printf '\t')" read -r issue WT AGENT TASK_ID MODEL ITEM <&3; do
+while IFS="$(printf '\t')" read -r issue WT AGENT TASK_ID MODEL COL6 REST <&3; do
+  ITEM=; case "$COL6" in item=?*) ITEM=${COL6#item=} ;; esac   # item= で始まらない 6 列目（旧い run のラベル）は item 無し
   ITEM_ARGS=(); [ -z "$ITEM" ] || ITEM_ARGS=(--item "$ITEM")
   WT_DIR=$(commandmatedev ls --json | jq -r --arg id "$WT" '.[] | select(.id == $id) | .path')
   node scripts/orchestrate/wait-verify.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
@@ -60,7 +69,8 @@ done 3< "workspace/orchestration/runs/$DATE/tasks.tsv"
 ```bash
 # 5-2b: 整合性レビュー。work item の worktree を --worktree で名指す（省くと --item の既定は ../commandmate-issue-<N>-<item>。
 # Issue の ../commandmate-issue-<N> は見ない）。保存先は runs/$DATE/review-<issue>[-<item>].md
-while IFS="$(printf '\t')" read -r issue WT AGENT TASK_ID MODEL ITEM <&3; do
+while IFS="$(printf '\t')" read -r issue WT AGENT TASK_ID MODEL COL6 REST <&3; do
+  ITEM=; case "$COL6" in item=?*) ITEM=${COL6#item=} ;; esac   # item= で始まらない 6 列目（旧い run のラベル）は item 無し
   ITEM_ARGS=(); [ -z "$ITEM" ] || ITEM_ARGS=(--item "$ITEM")
   WT_DIR=$(commandmatedev ls --json | jq -r --arg id "$WT" '.[] | select(.id == $id) | .path')
   node scripts/orchestrate/consistency-review.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
@@ -72,7 +82,8 @@ done 3< "workspace/orchestration/runs/$DATE/tasks.tsv"
 
 ```bash
 # 5-3 の処置を終えた行の findings、6-1-1 の precheck、6-1 の公開（precheck が通った行だけ）
-while IFS="$(printf '\t')" read -r issue WT AGENT TASK_ID MODEL ITEM <&3; do
+while IFS="$(printf '\t')" read -r issue WT AGENT TASK_ID MODEL COL6 REST <&3; do
+  ITEM=; case "$COL6" in item=?*) ITEM=${COL6#item=} ;; esac   # item= で始まらない 6 列目（旧い run のラベル）は item 無し
   ITEM_ARGS=(); [ -z "$ITEM" ] || ITEM_ARGS=(--item "$ITEM")
   WT_DIR=$(commandmatedev ls --json | jq -r --arg id "$WT" '.[] | select(.id == $id) | .path')
   node scripts/orchestrate/run-log.mjs append --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
@@ -89,9 +100,10 @@ done 3< "workspace/orchestration/runs/$DATE/tasks.tsv"
 
 ```bash
 # 6-2: tasks.tsv の順に 1 本ずつ。--item の merge は Issue を閉じない。その Issue の最後の行の PR だけ --close "$issue" を足す
-while IFS="$(printf '\t')" read -r issue WT AGENT TASK_ID MODEL ITEM <&3; do
+while IFS="$(printf '\t')" read -r issue WT AGENT TASK_ID MODEL COL6 REST <&3; do
+  ITEM=; case "$COL6" in item=?*) ITEM=${COL6#item=} ;; esac   # item= で始まらない 6 列目（旧い run のラベル）は item 無し
   ITEM_ARGS=(); [ -z "$ITEM" ] || ITEM_ARGS=(--item "$ITEM")
-  LAST_ITEM=$(awk -F'\t' -v i="$issue" '$1 == i { last = $6 } END { print last }' "workspace/orchestration/runs/$DATE/tasks.tsv")
+  LAST_ITEM=$(awk -F'\t' -v i="$issue" '$1 == i && $6 ~ /^item=./ { last = substr($6, 6) } END { print last }' "workspace/orchestration/runs/$DATE/tasks.tsv")
   [ -z "$ITEM" ] || [ "$ITEM" != "$LAST_ITEM" ] || ITEM_ARGS+=(--close "$issue")
   WT_DIR=$(commandmatedev ls --json | jq -r --arg id "$WT" '.[] | select(.id == $id) | .path')
   node scripts/orchestrate/merge-pr.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \

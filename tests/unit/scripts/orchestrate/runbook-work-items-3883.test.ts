@@ -14,6 +14,13 @@
  * and a fake `commandmatedev`, and the signal half is compared with the
  * helper's hasCompletionSignal.
  *
+ * N4 (review-3883-d1-3): a run started before #3883 already has a 6th column
+ * — a retry label (`3883-d1`, `3883-d1-r2`) — and run records without `item`.
+ * Reading that column as the work item made a resumed publish look for
+ * another unit's records ("verify: no result"). Only `item=<name>` is a work
+ * item; the old run's shape resumes, through the real precheck and publish,
+ * without `--item`.
+ *
  * Everything is under os.tmpdir(); bash always, zsh too when it is installed
  * (the orchestrator's shell on macOS).
  *
@@ -27,9 +34,10 @@ import { spawnSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { hasCompletionSignal, parseArgs as parseWaitVerifyArgs } from '../../../../scripts/orchestrate/wait-verify.mjs';
 import { parseArgs as parseReviewArgs } from '../../../../scripts/orchestrate/consistency-review.mjs';
-import { parseArgs as parsePrecheckArgs } from '../../../../scripts/orchestrate/precheck.mjs';
-import { parseArgs as parsePublishArgs } from '../../../../scripts/orchestrate/publish-pr.mjs';
+import { main as precheck, parseArgs as parsePrecheckArgs } from '../../../../scripts/orchestrate/precheck.mjs';
+import { main as publish, parseArgs as parsePublishArgs } from '../../../../scripts/orchestrate/publish-pr.mjs';
 import { parseArgs as parseMergeArgs } from '../../../../scripts/orchestrate/merge-pr.mjs';
+import { DEVELOP, fakeGit } from './pr-fake';
 import { main as runLog, readRecords, summarize } from '../../../../scripts/orchestrate/run-log.mjs';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
@@ -226,7 +234,7 @@ describe('the work item blocks of the runbook pass the same --item to every stag
         expect(r.status).toBe(0);
       }
       expect(fs.readFileSync(path.join(runDir, 'tasks.tsv'), 'utf8').split('\n').filter(Boolean)).toEqual(
-        rows.map((row) => [row.issue, row.wt, row.agent, row.task, row.model, row.item].join('\t'))
+        rows.map((row) => [row.issue, row.wt, row.agent, row.task, row.model, `item=${row.item}`].join('\t'))
       );
       // The recorded send calls go through the real run-log CLI, into a run record under os.tmpdir().
       for (const argv of calls()) {
@@ -252,7 +260,7 @@ describe('the work item blocks of the runbook pass the same --item to every stag
       fs.writeFileSync(
         path.join(runDir, 'tasks.tsv'),
         // The old row has five columns, exactly as 3-1 of the runbook writes it.
-        rows.map((row) => [row.issue, row.wt, row.agent, row.task, row.model, ...(row.item ? [row.item] : [])].join('\t') + '\n').join('')
+        rows.map((row) => [row.issue, row.wt, row.agent, row.task, row.model, ...(row.item ? [`item=${row.item}`] : [])].join('\t') + '\n').join('')
       );
       for (const block of blocks.slice(1)) {
         const r = sh(shell, block, env);
@@ -346,6 +354,130 @@ describe('the work item blocks of the runbook pass the same --item to every stag
     expect(sh('bash', block, env).status).toBe(0);
     const [argv] = calls();
     expect(argv[argv.indexOf('--model') + 1]).toBe('opus\td1');
+  });
+});
+
+// The shape of runs/2026-10-24: tasks.tsv rows with a retry label in the 6th column, run records without item.
+describe('an old run whose 6th column is a retry label resumes without --item (#3883 N4)', { timeout: 30_000 }, () => {
+  const blocks = bashBlocks(section(read('docs/orchestrate/run-log.md'), '1-5 work item の run の呼び出し'));
+  const DATE = '2026-10-24';
+  const RUN_ISSUES = '3880-3884';
+  const env = { DATE, RUN_ISSUES };
+  const rows = [
+    ['3882', 'commandmate-issue-3882', 'claude', 'task-3882', 'sonnet', '3882'],
+    ['3883', 'commandmate-issue-3883-d1', 'claude', 'task-d1', 'opus', '3883-d1'],
+    ['3883', 'commandmate-issue-3883-d1', 'claude', 'task-d1-r2', 'opus', '3883-d1-r2'],
+    // `item=` with no name, and a label after it, is still no work item.
+    ['3884', 'commandmate-issue-3884', 'claude', 'task-3884', 'opus', 'item=', '3884-r2'],
+  ];
+
+  function setUp() {
+    const ls: { id: string; path: string }[] = [];
+    const heads: Record<string, string> = {};
+    for (const wt of new Set(rows.map((row) => row[1]))) {
+      const dir = path.join(tmp, 'worktrees', wt);
+      heads[wt] = repo(dir).commit(1);
+      fs.mkdirSync(path.join(dir, 'dev-reports', 'module-reference'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'dev-reports', 'module-reference', 'issue-3883.md'), '旧い run の追記\n');
+      ls.push({ id: wt, path: dir });
+    }
+    fs.writeFileSync(path.join(fake, 'ls.json'), JSON.stringify(ls));
+    const runDir = path.join(tmp, 'workspace', 'orchestration', 'runs', DATE);
+    fs.mkdirSync(runDir, { recursive: true });
+    fs.writeFileSync(path.join(runDir, 'tasks.tsv'), rows.map((row) => row.join('\t') + '\n').join(''));
+    // The records of the old run: send (label as note), then verify and review of the retry, all without item.
+    const head = heads['commandmate-issue-3883-d1'];
+    const append = (stage: string, extra: string[]) =>
+      expect(runLog(['append', '--run-dir', runDir, '--issues', RUN_ISSUES, '--issue', '3883', '--stage', stage, '--result', 'ok', ...extra])).toBe(0);
+    append('send', ['--head', DEVELOP, '--task', 'task-d1', '--agent', 'claude', '--model', 'opus', '--note', '3883-d1']);
+    append('send', ['--head', DEVELOP, '--task', 'task-d1-r2', '--agent', 'claude', '--model', 'opus', '--note', '3883-d1-r2']);
+    append('verify', ['--head', head, '--task', 'task-d1-r2', '--note', 'exit=0(passed) result=passed basis=hook_stop passed=lint,typecheck,unit-related failed=-']);
+    append('review', ['--head', head]);
+    return { runDir, head, dirOf: (wt: string) => ls.find((w) => w.id === wt)!.path };
+  }
+
+  for (const shell of SHELLS) {
+    it(`${shell}: wait, findings, precheck, publish and merge of every old row get no --item, and the model stays the 5th column`, () => {
+      setUp();
+      for (const block of [blocks[1], blocks[3], blocks[4]]) {
+        const r = sh(shell, block, env);
+        expect(r.stderr).toBe('');
+        expect(r.status).toBe(0);
+      }
+      const seen = calls();
+      expect(seen.map((argv) => `${path.basename(argv[0], '.mjs')} #${argv[argv.indexOf('--issue') + 1]}`)).toEqual([
+        'wait-verify #3882',
+        'wait-verify #3883',
+        'wait-verify #3883',
+        'wait-verify #3884',
+        ...['3882', '3883', '3883', '3884'].flatMap((issue) => [`run-log #${issue}`, `precheck #${issue}`, `publish-pr #${issue}`]),
+        'merge-pr #3882',
+        'merge-pr #3883',
+        'merge-pr #3883',
+        'merge-pr #3884',
+      ]);
+      for (const argv of seen) {
+        expect(argv, argv.join(' ')).not.toContain('--item');
+        expect(argv).not.toContain('--close');
+      }
+      const models = seen.filter((argv) => argv[0].endsWith('wait-verify.mjs')).map((argv) => argv[argv.indexOf('--model') + 1]);
+      expect(models).toEqual(['sonnet', 'opus', 'opus', 'opus']);
+      for (const argv of seen.filter((a) => a[0].endsWith('wait-verify.mjs'))) expect(parseWaitVerifyArgs(argv.slice(1)).error).toBeUndefined();
+    });
+  }
+
+  it('the resumed calls, replayed through the real run-log, precheck and publish, find the old run’s records; the label as --item does not', () => {
+    const { runDir, head } = setUp();
+    expect(sh('bash', blocks[3], env).status).toBe(0);
+    const mapped = (argv: string[]) => argv.slice(1).map((a) => (a === `workspace/orchestration/runs/${DATE}` ? runDir : a));
+    // The first #3883 row: findings, precheck, publish.
+    const [findings, precheckArgv, publishArgv] = calls().filter((argv) => argv[argv.indexOf('--issue') + 1] === '3883').slice(0, 3);
+    const fakeOf = () =>
+      fakeGit({
+        head,
+        branch: 'feature/3883-d1',
+        firstParent: [`${head} ${DEVELOP}`],
+        commitFiles: { [head]: ['scripts/orchestrate/wait-verify.mjs', 'changelog.d/3883.md'] },
+        changelogStatus: 'A\tchangelog.d/3883.md',
+        changed: ['scripts/orchestrate/wait-verify.mjs', 'changelog.d/3883.md'],
+      });
+    const run = (fn: typeof precheck, argv: string[]) => {
+      const err: string[] = [];
+      let clock = Date.UTC(2026, 9, 24, 9, 0);
+      const code = fn(argv, {
+        run: fakeOf().run,
+        sleep: (ms: number) => {
+          clock += ms;
+        },
+        now: () => new Date(clock),
+        findTestsNaming: () => [],
+        log: () => undefined,
+        error: (l: string) => err.push(l),
+      } as Parameters<typeof precheck>[1]);
+      return { code, err: err.join('\n') };
+    };
+    expect(runLog(mapped(findings))).toBe(0);
+    expect(run(precheck, mapped(precheckArgv)).code).toBe(0);
+
+    // Before N4 the label was the work item: the same publish with --item <label> finds no verify of its own.
+    const asItem = run(publish, [...mapped(publishArgv), '--item', '3883-d1-r2']);
+    expect(asItem.code).toBe(1);
+    expect(asItem.err).toMatch(/verify: no result for/);
+
+    const published = run(publish, mapped(publishArgv));
+    expect(published.err).toBe('');
+    expect(published.code).toBe(0);
+    const records = readRecords(runDir, RUN_ISSUES).records;
+    expect(records.every((r) => r.item === undefined || r.item === null)).toBe(true);
+    expect(summarize(records).map((s) => [s.issue, s.item ?? null, s.reached])).toEqual([[3883, null, 'pr']]);
+  });
+
+  it('a row that names its work item with item=<name> still gets it, next to the old rows', () => {
+    const { runDir } = setUp();
+    fs.appendFileSync(path.join(runDir, 'tasks.tsv'), '3883\tcommandmate-issue-3883-d1\tclaude\ttask-d2\topus\titem=d2\n');
+    expect(sh('bash', blocks[1], env).status).toBe(0);
+    const items = calls().map((argv) => (argv.includes('--item') ? argv[argv.indexOf('--item') + 1] : null));
+    expect(items).toEqual([null, null, null, null, 'd2']);
   });
 });
 
