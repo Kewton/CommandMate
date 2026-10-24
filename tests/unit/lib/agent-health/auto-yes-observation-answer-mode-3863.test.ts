@@ -163,7 +163,7 @@ describe('[#3863] answers and withheld intervals by answer mode', () => {
       line<AttemptSettledLine>(EV.attemptSettled, {
         atMs: at,
         confirmationId: id,
-        attemptId: `${id}.a1`,
+        attemptId: `${id}.1`,
         cliToolId: 'claude',
         basis: 'L3',
         result,
@@ -188,7 +188,7 @@ describe('[#3863] answers and withheld intervals by answer mode', () => {
       line<AttemptSettledLine>(EV.attemptSettled, {
         atMs: at,
         confirmationId: id,
-        attemptId: `${id}.a${n}`,
+        attemptId: `${id}.${n}`,
         cliToolId: 'claude',
         basis: 'L3',
         result: 'ok',
