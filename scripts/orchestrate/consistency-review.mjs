@@ -28,8 +28,11 @@
  *   3. sends the brief built from templates/consistency-review.md (or
  *      consistency-review-rereview.md with the previous answer) with
  *      `ask <wt> <brief> --instance <resolved id> --timeout 2400 --json`;
- *   4. writes `review-<N>[b|c…].{prompt.txt,json,err,md}` to the run directory,
- *      the `.md` being the answer without the thinking;
+ *   4. writes `review-<N>[-<item>][b|c…].{prompt.txt,json,err,md}` to the run
+ *      directory, the `.md` being the answer without the thinking. The
+ *      `.prompt.txt` is created exclusively, so two reviews of one Issue never
+ *      take the same name; `--item` names the work item of the review (one PR
+ *      of an Issue with several, execution-key.mjs) and goes to the record (#3883);
  *   5. on an answer with a `DONE:` line appends one row to
  *      `consistency-review.md` and records `review=ok`; anything else records
  *      `review=fail` (run-log.mjs).
@@ -46,6 +49,7 @@
  *   node scripts/orchestrate/consistency-review.mjs --run-dir <dir> --issues <range> --issue <N>
  *        --head <sha> --brief <file> [--rereview --previous <review md>]
  *        [--worktree <path>] [--wt <reviewer worktree-id>] [--lock <dir>] [--cli <commandmatedev>] [--instance <id|alias>]
+ *        [--item <work item>]
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -55,6 +59,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { appendRecord, runLogPath } from './run-log.mjs';
 import { isInstanceSelector, resolveInstanceThroughCli } from './resolve-instance.mjs';
+import { itemProblem, workItemName } from './execution-key.mjs';
 
 const TEMPLATE_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'templates');
 export const INITIAL_TEMPLATE = path.join(TEMPLATE_DIR, 'consistency-review.md');
@@ -166,24 +171,50 @@ export function buildPrompt({ issue, head, worktree, branch, brief, previous }, 
   }).trimEnd()}\n`;
 }
 
-/** `review-<N>`, then `review-<N>b`, `review-<N>c` … — the first name no earlier review of the run used. */
-export function nextReviewLabel(runDir, issue) {
-  for (const suffix of ['', ...'bcdefghijklmnopqrstuvwxyz']) {
-    const label = `review-${issue}${suffix}`;
-    if (!['.md', '.json', '.prompt.txt'].some((ext) => fs.existsSync(path.join(runDir, `${label}${ext}`)))) return label;
+const REVIEW_SUFFIXES = ['', ...'bcdefghijklmnopqrstuvwxyz'];
+const usedLabel = (runDir, label) => ['.md', '.json', '.prompt.txt'].some((ext) => fs.existsSync(path.join(runDir, `${label}${ext}`)));
+
+/**
+ * `review-<N>`, then `review-<N>b`, `review-<N>c` … — the first name no earlier
+ * review of the run used. With `item` (#3883) the work item is in the name:
+ * `review-<N>-<item>`.
+ */
+export function nextReviewLabel(runDir, issue, item) {
+  for (const suffix of REVIEW_SUFFIXES) {
+    const label = `review-${workItemName(issue, item)}${suffix}`;
+    if (!usedLabel(runDir, label)) return label;
   }
-  throw new Error(`too many reviews of #${issue} in ${runDir}`);
+  throw new Error(`too many reviews of #${workItemName(issue, item)} in ${runDir}`);
+}
+
+/**
+ * Take the next label and write its `.prompt.txt` in one step (`wx`): a
+ * review started at the same time takes the next name instead of writing
+ * over this one's files (#3883). Returns the label.
+ */
+export function claimReviewLabel(runDir, issue, item, prompt) {
+  for (const suffix of REVIEW_SUFFIXES) {
+    const label = `review-${workItemName(issue, item)}${suffix}`;
+    if (usedLabel(runDir, label)) continue;
+    try {
+      fs.writeFileSync(path.join(runDir, `${label}.prompt.txt`), prompt, { flag: 'wx' });
+      return label;
+    } catch (err) {
+      if (err?.code !== 'EEXIST') throw err;
+    }
+  }
+  throw new Error(`too many reviews of #${workItemName(issue, item)} in ${runDir}`);
 }
 
 /** Append one row to `consistency-review.md` (created with its header if absent); returns the row. */
-export function appendReviewRow(file, { issue, rereview, head, durationSec, doneLine }) {
+export function appendReviewRow(file, { issue, item, rereview, head, durationSec, doneLine }) {
   const existing = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
   const numbers = [...existing.matchAll(/^\|\s*(\d+)\s*\|/gm)].map((m) => Number(m[1]));
   const next = numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
   const count = findingCount(doneLine);
   const cells = [
     String(next),
-    `#${issue}${rereview ? ' 再レビュー' : ''}`,
+    `#${issue}${item ? `/${item}` : ''}${rereview ? ' 再レビュー' : ''}`,
     'Codex',
     head.slice(0, 7),
     `${durationSec} 秒`,
@@ -387,7 +418,7 @@ function resolveInstance(run, o, cwd) {
 
 const USAGE = `Usage:
   node scripts/orchestrate/consistency-review.mjs --run-dir <dir> --issues <range> --issue <N> --head <sha> --brief <file>
-       [--rereview --previous <review md>] [--worktree <path>] [--wt <reviewer worktree-id>] [--lock <dir>] [--cli <commandmatedev>] [--instance <id|alias>]`;
+       [--rereview --previous <review md>] [--worktree <path>] [--wt <reviewer worktree-id>] [--lock <dir>] [--cli <commandmatedev>] [--instance <id|alias>] [--item <work item>]`;
 
 const FLAGS = {
   '--run-dir': 'runDir',
@@ -401,6 +432,7 @@ const FLAGS = {
   '--lock': 'lock',
   '--cli': 'cli',
   '--instance': 'instance',
+  '--item': 'item',
 };
 const SWITCHES = { '--rereview': 'rereview' };
 
@@ -423,6 +455,7 @@ export function parseArgs(argv) {
   }
   if (!isInstanceSelector(options.instance)) return { error: `--instance must be an instance id or alias (got ${options.instance})` };
   if (!/^[1-9]\d*$/.test(options.issue)) return { error: `--issue must be a positive integer (got ${options.issue})` };
+  if (itemProblem(options.item)) return { error: itemProblem(options.item) };
   if (!/^[0-9a-f]{7,40}$/.test(options.head)) return { error: `--head must be a commit sha (got ${options.head})` };
   if (options.rereview && !options.previous) return { error: '--rereview needs --previous <review md>' };
   if (!options.rereview && options.previous) return { error: '--previous is only for --rereview' };
@@ -474,7 +507,7 @@ export function main(argv, deps = {}) {
     const { file } = appendRecord(
       o.runDir,
       o.issues,
-      { issue, stage: 'review', result, head, agent: o.instance, durationSec, note },
+      { issue, stage: 'review', result, head, agent: o.instance, durationSec, note, item: o.item },
       now()
     );
     log(`review #${issue} ${head.slice(0, 7)} ${result}: ${note}`);
@@ -494,7 +527,6 @@ export function main(argv, deps = {}) {
     const branch = branchOut.status === 0 ? branchOut.stdout.trim() : '-';
 
     fs.mkdirSync(o.runDir, { recursive: true });
-    label = nextReviewLabel(o.runDir, issue);
     const prompt = buildPrompt({
       issue,
       head: full,
@@ -503,8 +535,8 @@ export function main(argv, deps = {}) {
       brief: fs.readFileSync(o.brief, 'utf8'),
       previous: o.rereview ? fs.readFileSync(o.previous, 'utf8') : undefined,
     });
+    label = claimReviewLabel(o.runDir, issue, o.item, prompt);
     const file = (ext) => path.join(o.runDir, `${label}${ext}`);
-    fs.writeFileSync(file('.prompt.txt'), prompt);
 
     lockOwner = acquireLock(lock, { sleep, now, error });
     if (!waitReady({ run, sleep, cli: o.cli, wt: o.wt, cwd, instance: o.instance })) {
@@ -545,6 +577,7 @@ export function main(argv, deps = {}) {
     const durationSec = record('ok', `${label}: ${doneLine}`);
     const row = appendReviewRow(path.join(o.runDir, 'consistency-review.md'), {
       issue,
+      item: o.item,
       rereview: o.rereview,
       head: full,
       durationSec,
@@ -556,7 +589,7 @@ export function main(argv, deps = {}) {
     const message = err instanceof Error ? err.message : String(err);
     error(message);
     try {
-      record('fail', `${label ?? `review-${issue}`}: ${message}`);
+      record('fail', `${label ?? `review-${workItemName(issue, o.item)}`}: ${message}`);
     } catch (recordErr) {
       error(recordErr instanceof Error ? recordErr.message : String(recordErr));
     }

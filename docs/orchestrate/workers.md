@@ -98,10 +98,22 @@ exit 10 にもならない）。
 ## 3-3 wait-verify.mjs が行う完了の確定
 
 - **完了の確定**（下の 2 つの手順と同じことをスクリプトが行う）: Antigravity（と `--require-signal` を付けた担当）は、
-  行全体が `IMPL_COMPLETED` の行が画面に出るまで 30 秒ごとに待つ。次に、直近の検証の開始時刻（`verify history`）と
+  行全体が `IMPL_COMPLETED` の行が出るまで 30 秒ごとに待ち、**合図を見るまで検証を始めない**（`wait --verify` ではなく `wait` → 合図 → `verify --task` に分ける。
+  作業の途中のターン終了で検証を走らせない、#3883）。合図は**この task のもの**だけを数える: この task の返事（`reply "$WT" --instance <id> --since <task の作成時刻> --json`）が
+  読めるときはその返事の中の行で決め（画面に前の task の合図が残っていても、返事に無ければまだ）、返事が無い担当（transcript を読めないツールなど）は画面の行を、
+  この task の作成の後にターンが終わっている（`lastStopEventAt`）ときだけ数える。`IMPL_COMPLETED head=<sha>` の形なら、その HEAD が今の HEAD のときだけ数え、
+  合図を見た後に HEAD が動いたら検証をやり直す。次に、**この呼び出しの検証の開始時刻**（ログの `Verifying: <WT> (run <id>)` の run を `verify show <id> --json` で読む。
+  worktree の最新の run（`verify history --limit 1`）は使わない。その間に別の run が始まっていることがある、#3883）と
   最後のターン終了（`capture --json` の `lastStopEventAt`）と最後のコミットの時刻と作業ツリーを比べる。検証の開始の後にコミットがあるか、
   最後のターン終了より前に始まって作業ツリーに変更があれば、検証は途中の状態を見ているので `verify "$WT" --task "$TASK_ID"` でやり直し、
   その結果を記録する。時刻が読めないときは推測せず、記録の要約に `run-start=unknown` / `last-stop=unknown` と残す
+- **検証が `already in progress` で始められないとき**（再指示の前の古い run がまだ動いている、#3883）: その run（`(run <id>)`）が `running` でなくなるまで
+  30 秒ごとに `verify show` で待ち（3600 秒まで）、検証を始め直す（3 回まで）。裁定はこの呼び出しが始めた run のもの。記録の要約に `waited-for=run <id>` と残す
+- **実行ごとのファイル**（#3883）: ログは呼び出しごとに新しい名前を排他的に取る（1 回目は `wait-<issue>.log`、同じ work item の 2 回目からは `wait-<issue>.a<n>.log`。
+  `--item <名前>` を付けると `wait-<issue>-<名前>.log`）。`.verify.log` / `.reverify.log` / `.exit` はその名前から作るので、同じ Issue の 2 本の PR や
+  再試行がログと終了コードを取り合わない（`.exit` にはこの呼び出しだけが知る印が付き、ほかの書き手の `.exit` は読まない）。既にある `--log` を渡すと exit 2。
+  記録には work item（`item`）と execution key（`key`）が入る（docs/orchestrate/run-log.md#1-5-同じ-issue-の複数の-prwork-item）
+- **Auto-Yes を切った後の読み返し**: `capture --json` が読めないときは「切れた」とせず読み直す。最後まで読めなければ `auto-yes=unknown`（#3883）
 - **`--instance` はサーバーが解決した id で通す**（#3587）: 最初に `GET /api/worktrees/<WT>/resolve-target?instance=<指定>`（`wait` / `capture` / `send` と同じ権威。
   primary 優先・大小文字・alias の段は route のとおり）を、ほかの呼び出しと同じ `--cli` の `reply <WT> --instance <指定> --json` 越しに引き（#3633。
   `.env`・`CM_BIND`・HTTPS で決まる接続先も、`--cli` のラッパーの設定も同じになる）、待機・検証・task の比較・`capture`・Auto-Yes（`--auto-yes-off` も）の

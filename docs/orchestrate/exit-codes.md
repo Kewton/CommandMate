@@ -77,7 +77,11 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
 |---|---|
 | `no IMPL_COMPLETED line within <秒>s` / `the verification saw an earlier state …` / `a commit landed during the re-verification` | ワーカーはまだ作業中。capture で確かめ、作業中なら同じ引数で待ち直す |
 | `uncommitted changes: …` | 未コミットの変更がある。commit するよう再指示する |
+| `no IMPL_COMPLETED line within <秒>s`（記録に `waited-for` も検証の行も無い） | 合図が要る担当（Antigravity・`--require-signal`）は、**合図を見るまで検証を始めない**（#3883）。作業の途中のターン終了だったので、capture で確かめて同じ引数で待ち直す。画面に前の task の `IMPL_COMPLETED` が残っていても、この task のターンが終わっていなければ（この task の返事に合図が無ければ）合図とは数えない |
 | `a newer task <新しい id> was created for this instance after task <古い id>` | 待機中に同じ instance へ新しい契約が送られた（#3587）。ワーカーは新しい task を作業中なので Auto-Yes は切られていない（`auto-yes=kept`）。古い task の裁定は取らず、tasks.tsv の task id を新しい id に差し替えて **`wait-verify.mjs --task <新しい id>`** を呼び直す（ほかの引数は同じ） |
+
+記録の要約の `waited-for=run <id>` は、検証を始めようとしたときに同じ worktree の別の検証（再指示の前の古い run など）が動いていた（`already in progress`）ので、その run の終了を待ってから検証をやり直したという意味（#3883）。裁定はこの呼び出しが始めた run（ログの `Verifying: … (run <id>)`）のもので、待った run の結果は使わない。`waited-for=run <id>(still running)` は 3600 秒待っても終わらなかったという意味で、exit は `verify` のもの（99）のまま、Auto-Yes は切られていない。
+要約の `auto-yes=unknown` は、`--disable` は通ったが状態を読み返せなかった（`capture --json` が失敗した）という意味（#3883）。切れたとは確かめられていないので、`wait-verify.mjs --auto-yes-off` で切り直す（exit 0 になるまで）。
 
 新しい task の検出は、基準の task が task 一覧（新しい順に 20 件）から外れても `task show` で個別に読んで続ける（#3633）。task 一覧が開始時に読めなかったときも、`wait` と `verify` を分けた経路で待ち始めの task への結び付けを保つ（`--task` が無ければ、一覧が読めた時点で基準を取り直す）。
 

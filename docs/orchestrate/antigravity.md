@@ -48,11 +48,12 @@ commandmatedev capture "$WT" --instance antigravity --pane --tail 40 \
   画面に表示されるので、部分一致では誤判定する
 - `not yet` なら、合図が出るまで待つ。作業が続いているかは、`capture --prompts` と commits の増加で確かめる
 - 合図が出たら、wait の検証が合図より前に始まっていないかを確かめる。
-  比べるのは、「wait が起動した直近の検証の開始時刻」と「最後のターン終了の時刻」（合図を出したターンの終了）の 2 つ:
+  比べるのは、「wait が起動した検証の開始時刻」と「最後のターン終了の時刻」（合図を出したターンの終了）の 2 つ。
+  検証は wait のログの `Verifying: <WT> (run <id>)` の run id で引く（worktree の最新の run は、その後に始まった別の run のことがある、#3883）:
 
   ```bash
-  RUN_STARTED=$(curl -s "http://localhost:3000/api/worktrees/$WT/verify/runs" \
-    | jq -r '[.runs[] | select(.trigger == "wait")][0].startedAt')          # 例 2026-09-17T01:28:40.776Z
+  RUN_ID=$(grep -oE '^Verifying: [^ ]+ \(run [0-9]+\)' "$WAIT_LOG" | tail -1 | grep -oE '[0-9]+\)$' | tr -d ')')
+  RUN_STARTED=$(commandmatedev verify show "$RUN_ID" --json | jq -r '.startedAt')   # 例 2026-09-17T01:28:40.776Z
   LAST_STOP=$(commandmatedev capture "$WT" --instance antigravity --json | jq -r '.lastStopEventAt')   # epoch ms
   node -e "console.log(Date.parse(process.argv[1]) < Number(process.argv[2]) ? 'before-signal' : 'after-signal')" \
     "$RUN_STARTED" "$LAST_STOP"
