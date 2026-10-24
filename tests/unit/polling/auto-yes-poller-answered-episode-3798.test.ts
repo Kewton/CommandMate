@@ -374,3 +374,109 @@ describe('[#3798] a second confirmation after an answer is a new wait', () => {
     expect(edges.map((e) => e.cause)).toEqual(['opened']);
   });
 });
+
+describe('[#3798] the answer is recorded for the wait the send began for (review R1)', () => {
+  it('positive: A closed and B opened while the send is in flight — nothing recorded for B, and B is not closed as answered', async () => {
+    const a = openWait();
+    let b: ReturnType<typeof openWait> | null = null;
+    sendPromptAnswer.mockImplementationOnce(async () => {
+      expect(closeEpisode(PARTS, a.episodeId, 'turn-stop', Date.now())).toBe(true);
+      b = openWait();
+    });
+    await pollerTick(CONFIRM);
+    expect(sendPromptAnswer).toHaveBeenCalledTimes(1);
+    expect(b).not.toBeNull();
+    expect(record()?.episodeId).toBe(b!.episodeId);
+    expect(lastAnswer()).toBeNull();
+
+    // The confirmation gone: B, which nobody answered, stays.
+    await pollerTick(IDLE, COOLDOWN_INTERVAL_MS);
+    expect(record()?.episodeId).toBe(b!.episodeId);
+    expect(edges.some((e) => e.closeReason === 'poller-answered')).toBe(false);
+  });
+
+  it('positive: no wait at the send, one opened during it — not taken for the answered one', async () => {
+    let b: ReturnType<typeof openWait> | null = null;
+    sendPromptAnswer.mockImplementationOnce(async () => {
+      b = openWait();
+    });
+    await pollerTick(CONFIRM);
+    expect(record()?.episodeId).toBe(b!.episodeId);
+    expect(lastAnswer()).toBeNull();
+  });
+
+  it('negative: A rebound during the send is still A — recorded, and closed on the cleared screen', async () => {
+    const a = openWait();
+    sendPromptAnswer.mockImplementationOnce(async () => {
+      expect(
+        rebindEpisode(
+          PARTS,
+          a.episodeId,
+          { kind: 'unattributed', generation: startWaitingObservation(WT, TOOL, TOOL).generation, lastClosedTurnId: 'other' },
+          Date.now(),
+        ),
+      ).toBe(true);
+    });
+    await pollerTick(CONFIRM);
+    expect(lastAnswer()?.episodeId).toBe(a.episodeId);
+
+    await pollerTick(IDLE, COOLDOWN_INTERVAL_MS);
+    expect(record()).toBeNull();
+    expect(edges.at(-1)).toMatchObject({ cause: 'closed', previousEpisodeId: a.episodeId, closeReason: 'poller-answered' });
+  });
+});
+
+describe('[#3798] an answered wait whose hold runs out over unreadable frames does not notify (review R2)', () => {
+  const PERSON_SCREEN = { kind: 'screen' as const, originTurnId: null };
+
+  it('positive: the notifier running from before the answer, the agent working on over frames no rule reads past the hold — no prompt push', async () => {
+    startWaitingPushNotifier();
+    await pollerTick(CONFIRM);
+    const answered = record()!;
+    expect(lastAnswer()?.episodeId).toBe(answered.episodeId);
+
+    // Well past the hold (9 s) and several re-asks of the notifier.
+    for (let i = 0; i < 10; i += 1) await pollerTick(UNREADABLE, COOLDOWN_INTERVAL_MS);
+    expect(Date.now() - answered.openedAt).toBeGreaterThan(30_000);
+    expect(record()?.episodeId).toBe(answered.episodeId);
+    expect(promptPushes()).toBe(0);
+
+    // Then the screen clears: closed as answered, still nothing sent.
+    await pollerTick(IDLE, COOLDOWN_INTERVAL_MS);
+    expect(record()).toBeNull();
+    expect(promptPushes()).toBe(0);
+  });
+
+  it('positive control: the answered wait turns into a screen a person drives — it notifies within a hold', async () => {
+    startWaitingPushNotifier();
+    await pollerTick(CONFIRM);
+    const answered = record()!;
+    await pollerTick(UNREADABLE, 10_000);
+    expect(promptPushes()).toBe(0);
+
+    // What the poller does on a survey or a picker after the answer (see
+    // `auto-yes-poller-close-answered-wait-3798.test.ts`): the same id, now a person's screen.
+    expect(
+      rebindEpisode(
+        PARTS,
+        answered.episodeId,
+        { ...PERSON_SCREEN, generation: startWaitingObservation(WT, TOOL, TOOL).generation },
+        Date.now(),
+      ),
+    ).toBe(true);
+    await pollerTick(UNREADABLE, 10_000);
+    expect(record()?.episodeId).toBe(answered.episodeId);
+    expect(promptPushes()).toBe(1);
+  });
+
+  it('positive control: a wait the poller did not answer, on a frame it cannot read, rings once its 9 s hold is over (as before)', async () => {
+    startWaitingPushNotifier();
+    capture.frame = UNREADABLE;
+    openWait();
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(promptPushes()).toBe(0);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(sendPromptAnswer).not.toHaveBeenCalled();
+    expect(promptPushes()).toBe(1);
+  });
+});

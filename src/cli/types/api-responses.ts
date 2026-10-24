@@ -1463,8 +1463,9 @@ export interface WaitPromptOutput {
    * #3755): the screen's kind, an observation token, and Auto-Yes as two
    * separate items — the poller's record and the contract re-evaluated now.
    * Absent when the server is older than the field. `autoYesSuppression` above
-   * keeps its meaning (a record under a minute old); this does not read the
-   * record's time as "the reason this prompt is unanswered".
+   * keeps its meaning (the record of this wait: by the episode ids when both
+   * are present, Issue #3798, else a record under a minute old); this does not
+   * read the record's time as "the reason this prompt is unanswered".
    */
   observation?: PromptObservation;
   [key: string]: unknown;

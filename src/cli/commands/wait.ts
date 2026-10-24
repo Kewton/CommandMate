@@ -2137,8 +2137,10 @@ The observation on exit 10 (Issue #3755):
   \`commandmate prompt <id> --json\` prints, read off the capture the exit was
   decided on — the screen's kind, an observation token, and Auto-Yes as two
   separate items (the poller's record, the contract re-evaluated now). It
-  changes no exit code, hold or grace. autoYesSuppression keeps its meaning (a
-  record under a minute old); a missing record does not mean Auto-Yes can answer.
+  changes no exit code, hold or grace. autoYesSuppression keeps its meaning
+  (the record of this wait: the same waiting-episode id when the record and
+  the server both name one, else a record under a minute old); a missing
+  record does not mean Auto-Yes can answer.
 `)
     .action(async (worktreeIds: string[], options: PollWorktreeOptions) => {
       try {

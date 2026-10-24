@@ -83,8 +83,9 @@
  * (`waitingEpisodeId`), and by `waitingSince` when it does not. The two are
  * matched by the rule {@link isSameWait} states, the same rule the episode
  * dedup in `notification-dedup` uses: both ids present and equal, or one of
- * them absent and the `since`s equal. So an id-less producer (the response
- * poller, opencode's question push) and the id-bearing notifier asking about
+ * them absent and the `since`s equal. So an id-less producer (opencode's
+ * question push, or the response poller when its commit changed nothing —
+ * otherwise it names the episode it committed) and the id-bearing notifier asking about
  * one wait share one hold, and the session wait's tick (#3796) is read once,
  * when that hold begins. A rebind keeps the id, so it keeps the hold and its
  * end; a replacement brings a new id, so it begins a new hold that reads the
@@ -107,6 +108,21 @@
  * replaced meanwhile will not tick. Issue #3796: the session's creation brings
  * that tick forward to a poll interval, and the hold follows it — the tick is
  * only ever read earlier than it was when the hold began.
+ *
+ * ## A wait the poller answered is not "not answered" (Issue #3798)
+ *
+ * The poller records which episode its answer went to (`lastAnswer`, read off
+ * its state on `globalThis` like the answer's time), and closes that episode
+ * when the confirmation is gone. Until a frame says so — the agent works on
+ * over frames no rule reads — the episode stays open, and its hold can run
+ * out. That end is not "Auto-Yes did not answer": when the wait asked about
+ * names its id and it is the answered episode, still open and not a screen
+ * only a person drives, the gate says `auto-yes-answered` and stays quiet.
+ * Another confirmation in the same turn is another episode (R1-7), and a
+ * survey or a picker after the answer turns the episode into a `screen`: both
+ * notify as before. Without an id on either side nothing is matched, and the
+ * hold's end notifies as before. The hold itself is unchanged — its start, its
+ * end and the session wait's tick (#3796) are counted as above.
  *
  * ## The reminder is never muted
  *
@@ -140,6 +156,7 @@ import {
 } from '@/lib/polling/auto-yes-suppression-state';
 import { getOrInitGlobal } from '@/lib/global-state';
 import type { AutoYesPollerState } from '@/lib/polling/auto-yes-poller-state';
+import { getWaitingEpisodeRecord } from '@/lib/session/waiting-episode-state';
 
 const logger = createLogger('push/prompt-gate');
 
@@ -387,7 +404,13 @@ export type PromptPushGateReason =
    * Issue #3757: Auto-Yes is on, nothing says why it has not answered, and
    * {@link AUTO_YES_ANSWER_GRACE_MS} has passed — it is not going to.
    */
-  | 'auto-yes-not-answered';
+  | 'auto-yes-not-answered'
+  /**
+   * Issue #3798: the hold is over, but the poller answered this very episode
+   * ({@link autoYesAnsweredWait}) and it has not closed yet. Quiet; the
+   * notifier asks again while the wait lasts.
+   */
+  | 'auto-yes-answered';
 
 export interface PromptPushGateDecision {
   /** True when no notification should be fanned out for this wait. */
@@ -426,10 +449,31 @@ export function decidePromptPush(input: PromptPushGateInput): PromptPushGateDeci
   const holdEndsAt =
     input.holdEndsAt ?? (input.holdStartedAt !== undefined ? input.holdStartedAt + AUTO_YES_ANSWER_GRACE_MS : undefined);
   if (holdEndsAt !== undefined && (input.now ?? Date.now()) >= holdEndsAt) {
+    if (autoYesAnsweredWait(input)) return { suppress: true, reason: 'auto-yes-answered' };
     return { suppress: false, reason: 'auto-yes-not-answered' };
   }
 
   return { suppress: true, reason: 'auto-yes-answering' };
+}
+
+/**
+ * Whether the Auto-Yes poller answered this wait (Issue #3798): the caller
+ * names the episode, the poller's `lastAnswer` names the same one, and that
+ * episode is still the one open and not a screen only a person drives (a
+ * survey or a picker after the answer is rebound to `screen` under the same
+ * id, and a person has to act on it). Read off the poller state on
+ * `globalThis`, as {@link autoYesHoldStartedAt} reads the answer's time.
+ */
+export function autoYesAnsweredWait(
+  input: Pick<PromptPushGateInput, 'worktreeId' | 'cliToolId' | 'instanceId' | 'waitingEpisodeId'>,
+): boolean {
+  const waitId = input.waitingEpisodeId ?? null;
+  if (waitId === null) return false;
+  const key = buildCompositeKey(input.worktreeId, input.cliToolId, input.instanceId);
+  const answer = globalThis.__autoYesPollerStates?.get(key)?.lastAnswer ?? null;
+  if (answer === null || answer.episodeId !== waitId) return false;
+  const episode = getWaitingEpisodeRecord(input.worktreeId, input.cliToolId, input.instanceId);
+  return episode !== null && episode.episodeId === waitId && episode.binding.kind !== 'screen';
 }
 
 /**

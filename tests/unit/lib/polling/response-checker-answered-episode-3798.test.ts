@@ -70,11 +70,16 @@ import { upsertPushSubscription } from '@/lib/db/push-subscriptions-db';
 import { resetNotificationDedup, resetWaitingPushDedup } from '@/lib/push/notification-dedup';
 import { startWaitingPushNotifier, stopWaitingPushNotifier } from '@/lib/push/waiting-push-notifier';
 import { clearAgentStopEvents, recordAgentEvent } from '@/lib/session/agent-event-state';
-import { buildCompositeKey, clearAllAutoYesStates, setAutoYesEnabled } from '@/lib/auto-yes-state';
+import { buildCompositeKey, clearAllAutoYesStates, getAutoYesState, setAutoYesEnabled } from '@/lib/auto-yes-state';
 import { autoYesPollerStates } from '@/lib/polling/auto-yes-poller-generation';
 import { partialAnswerScreenKey, type AutoYesPollerState } from '@/lib/polling/auto-yes-poller-state';
 import { clearAutoYesHolds } from '@/lib/push/prompt-push-gate';
-import { clearPolicySuppressions } from '@/lib/polling/auto-yes-suppression-state';
+import { clearAllPromptCards, getPromptCardEpisodeId } from '@/lib/push/prompt-card-state';
+import {
+  clearPolicySuppressions,
+  getLastPolicySuppression,
+  recordPolicySuppression,
+} from '@/lib/polling/auto-yes-suppression-state';
 import { detectPromptOnCleanFrame } from '@/lib/polling/response-checker';
 import {
   clearWaitingEpisodes,
@@ -184,6 +189,7 @@ beforeEach(() => {
   clearWaitingTransitionListeners();
   resetNotificationDedup();
   resetWaitingPushDedup();
+  clearAllPromptCards();
   startWaitingPushNotifier();
   edges = [];
   onWaitingEpisodeTransition((t) => edges.push(t));
@@ -251,5 +257,78 @@ describe('[#3798] the response poller and the Auto-Yes poller\'s last answer', (
     await tick(PROMPT_PANE);
     expect(record()?.episodeId).toBe(first.episodeId);
     expect(edges.map((e) => e.cause)).toEqual(['opened']);
+  });
+});
+
+describe('[#3798] the response poller names the episode it commits to the gate and the fan-out (review R3)', () => {
+  const WITHHELD = { reason: 'deny-pattern' as const, mode: 'allow-listed' as const, promptType: 'multiple_choice' as const };
+  const promptPayloads = () =>
+    sendNotification.mock.calls
+      .map(([, payload]) => JSON.parse(payload as string) as { kind: string; episodeId?: string; order?: number; body: string })
+      .filter((p) => p.kind === 'prompt');
+
+  it('positive: a suppression recorded for A in the very millisecond B replaces it is not B\'s reason — B is held, no push', async () => {
+    expect(await tick(PROMPT_PANE)).toBe(true);
+    const first = record()!;
+    autoYesAnswered(first.episodeId, PROMPT_PANE);
+
+    vi.setSystemTime(Date.now() + 30_000);
+    recordPolicySuppression(WT, 'claude', 'claude', WITHHELD);
+    const stale = getLastPolicySuppression(WT, 'claude', 'claude')!;
+    expect(stale.episodeId).toBe(first.episodeId);
+
+    expect(await tick(OTHER_PROMPT_PANE)).toBe(true);
+    const second = record()!;
+    expect(second.episodeId).not.toBe(first.episodeId);
+    // Precondition: the same millisecond, so `at >= since` alone reads A's record as B's.
+    expect(second.since).toBe(stale.at);
+    expect(promptPushes()).toBe(0);
+  });
+
+  it('negative: a suppression recorded for B itself is B\'s reason — it rings at once', async () => {
+    expect(await tick(PROMPT_PANE)).toBe(true);
+    const first = record()!;
+    autoYesAnswered(first.episodeId, PROMPT_PANE);
+    vi.setSystemTime(Date.now() + 30_000);
+    expect(await tick(OTHER_PROMPT_PANE)).toBe(true);
+    const second = record()!;
+    expect(promptPushes()).toBe(0);
+
+    // The poller withholds B on its next tick; a later read of B (the dedup
+    // reset, as after a restart) asks the gate with B's id.
+    recordPolicySuppression(WT, 'claude', 'claude', WITHHELD);
+    expect(getLastPolicySuppression(WT, 'claude', 'claude')?.episodeId).toBe(second.episodeId);
+    vi.setSystemTime(Date.now() + 1_000);
+    resetWaitingPushDedup();
+    expect(await tick(OTHER_PROMPT_PANE)).toBe(true);
+    expect(record()?.episodeId).toBe(second.episodeId);
+    expect(promptPushes()).toBe(1);
+  });
+
+  it('the card: one push, carrying the committed episode\'s id and an order, and the prompt\'s own question', async () => {
+    setAutoYesEnabled(WT, 'claude', false);
+    expect(getAutoYesState(WT, 'claude', 'claude')?.enabled).toBe(false);
+    expect(await tick(PROMPT_PANE)).toBe(true);
+    const opened = record()!;
+    const payloads = promptPayloads();
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]).toMatchObject({ episodeId: opened.episodeId, order: expect.any(Number) });
+    expect(payloads[0].body).toContain('useVirtualKeyboard.ts');
+    expect(getPromptCardEpisodeId(WT)).toBe(opened.episodeId);
+  });
+
+  it('the card of a replacement names the new episode', async () => {
+    setAutoYesEnabled(WT, 'claude', false);
+    expect(await tick(PROMPT_PANE)).toBe(true);
+    const first = record()!;
+    autoYesAnswered(first.episodeId, PROMPT_PANE);
+    vi.setSystemTime(Date.now() + 30_000);
+    expect(await tick(OTHER_PROMPT_PANE)).toBe(true);
+    const second = record()!;
+    expect(second.episodeId).not.toBe(first.episodeId);
+    const payloads = promptPayloads();
+    expect(payloads.map((p) => p.episodeId)).toEqual([first.episodeId, second.episodeId]);
+    expect(payloads[1].order!).toBeGreaterThan(payloads[0].order!);
+    expect(payloads[1].body).toContain('package.json');
   });
 });

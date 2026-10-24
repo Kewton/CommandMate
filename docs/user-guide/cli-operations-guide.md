@@ -513,7 +513,7 @@ esac
 }
 ```
 
-Issue #3755 以降、exit 10 の JSON には `observation` が加わります（プロンプト・選択リスト・未分類画面の 3 つの検出経路の exit 10 に付きます。`wait` が exit 10 を返すのはこの 3 経路だけです）。中身は [`commandmate prompt --json`](#commandmate-prompt) と同じで、exit を決めた同じ capture から読んだものです。終了コード・待機・猶予は変わりません。`autoYesSuppression`（1 分以内の記録）は従来どおりですが、記録の時刻だけで「答えなかった理由」と読まず、`observation.autoYes` の `pollerRecord` と `contractEvaluation` を見てください。古いサーバでは `observation` は付きません。
+Issue #3755 以降、exit 10 の JSON には `observation` が加わります（プロンプト・選択リスト・未分類画面の 3 つの検出経路の exit 10 に付きます。`wait` が exit 10 を返すのはこの 3 経路だけです）。中身は [`commandmate prompt --json`](#commandmate-prompt) と同じで、exit を決めた同じ capture から読んだものです。終了コード・待機・猶予は変わりません。`autoYesSuppression` は従来どおりですが（Issue #3798 以降、記録とサーバの応答の両方に待ちの区間の ID があれば ID の一致で判断し、記録の古さは問いません。どちらかに ID が無いときだけ 1 分以内の記録を採ります）、記録の時刻だけで「答えなかった理由」と読まず、`observation.autoYes` の `pollerRecord` と `contractEvaluation` を見てください。古いサーバでは `observation` は付きません。
 
 ### exit 10 の `type`（種別）
 

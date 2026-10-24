@@ -402,7 +402,7 @@ esac
 }
 ```
 
-Since Issue #3755 the exit-10 JSON also carries `observation` (on the exit 10 of all three detection paths — prompt, selection list and unclassified screen, which are the only ones `wait` exits 10 from): the same payload as [`commandmate prompt --json`](#commandmate-prompt), read off the capture the exit was decided on. Exit codes, holds and grace are unchanged. `autoYesSuppression` (a record under a minute old) keeps its meaning, but do not read the record's time alone as "why nobody answered" — read `pollerRecord` and `contractEvaluation` under `observation.autoYes`. An older server sends no `observation`.
+Since Issue #3755 the exit-10 JSON also carries `observation` (on the exit 10 of all three detection paths — prompt, selection list and unclassified screen, which are the only ones `wait` exits 10 from): the same payload as [`commandmate prompt --json`](#commandmate-prompt), read off the capture the exit was decided on. Exit codes, holds and grace are unchanged. `autoYesSuppression` keeps its meaning (since Issue #3798, when both the record and the server's payload name the waiting episode, the ids decide whatever the record's age; only when either id is missing is a record under a minute old taken), but do not read the record's time alone as "why nobody answered" — read `pollerRecord` and `contractEvaluation` under `observation.autoYes`. An older server sends no `observation`.
 
 ### The `type` field of exit 10
 

@@ -72,7 +72,7 @@ import {
   type CapturedFrameTime,
   type ObservationStart,
 } from './session/waiting-episode-binding';
-import { getWaitingEpisodeRecord } from './session/waiting-episode-state';
+import { getEpisodeVersion, getWaitingEpisodeRecord } from './session/waiting-episode-state';
 import {
   THINKING_POLLING_INTERVAL_MS,
   REDUCED_CAPTURE_LINES,
@@ -997,6 +997,8 @@ export async function detectAndRespondToPrompt(
       }),
     );
     receiptEpisode = receiptEpisodeOfSend(cliToolId, worktreeId, instanceId);
+    // Issue #3798: the wait this answer goes to, fixed as the send begins.
+    const answerTarget = fixAnswerTarget(worktreeId, cliToolId, instanceId);
     sendInFlight = true;
     try {
       await sendPromptAnswer({
@@ -1017,10 +1019,11 @@ export async function detectAndRespondToPrompt(
     noteAnswerSent(cliToolId, worktreeId, instanceId, false, receiptEpisode);
     // Issue #3798: the wait this answer went to — opened if none is open — so
     // the frame that shows the confirmation gone closes it. Once the keys are
-    // out, and only by a tick that still acts for this instance (#3706: one
-    // that lost its grant or session writes nothing that says "answered").
+    // out, only by a tick that still acts for this instance (#3706: one that
+    // lost its grant or session writes nothing that says "answered"), and only
+    // for the wait fixed as the send began.
     if (generation === undefined || isTickCurrent(generation)) {
-      observeAnsweredPrompt(judged, screenKey, tickObservation);
+      observeAnsweredPrompt(judged, screenKey, tickObservation, answerTarget);
     }
 
     // 6., 7. The answer reached tmux: see `finishAnsweredPrompt`.
@@ -1200,6 +1203,37 @@ async function pollAutoYes(
   scheduleNextPoll(generation);
 }
 
+/**
+ * The wait an answer goes to, fixed in the synchronous step the send begins in
+ * (Issue #3798): the episode open then, or none and the version it was at.
+ */
+interface AnswerTarget {
+  episodeId: string | null;
+  version: number;
+}
+
+function fixAnswerTarget(worktreeId: string, cliToolId: CLIToolType, instanceId: string | undefined): AnswerTarget {
+  return {
+    episodeId: getWaitingEpisodeRecord(worktreeId, cliToolId, instanceId)?.episodeId ?? null,
+    version: getEpisodeVersion(worktreeId, cliToolId, instanceId),
+  };
+}
+
+/**
+ * Whether the wait is still the one the answer was sent to: the same episode
+ * open (a rebind keeps it — the hook of the turn the answer resumed may have
+ * landed during the send), or, when none was, none opened or closed since.
+ */
+function answerTargetHolds(
+  target: AnswerTarget,
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string | undefined
+): boolean {
+  if (target.episodeId === null) return getEpisodeVersion(worktreeId, cliToolId, instanceId) === target.version;
+  return getWaitingEpisodeRecord(worktreeId, cliToolId, instanceId)?.episodeId === target.episodeId;
+}
+
 /** What a tick fixed for its waiting-episode observations (Issue #3798). */
 interface TickObservation {
   start: ObservationStart;
@@ -1217,11 +1251,24 @@ interface TickObservation {
  * leaves open is recorded as `lastAnswer`; a plan refused (another generation,
  * or a frame fetched before the close of this very confirmation — a stop that
  * landed during the send) records none, so nothing is closed on the strength
- * of it. Advisory, like {@link observeWaitingFromTick}.
+ * of it. Nor does a send whose wait moved under it (`target`, fixed as the
+ * send began): another wait opened during the send — a hook, another
+ * observer — is not the one these keys answered, and nothing is planned or
+ * recorded for it; `lastAnswer` stays as it was. Advisory, like
+ * {@link observeWaitingFromTick}.
  */
-function observeAnsweredPrompt(prompt: JudgedPrompt, screenKey: string, observation: TickObservation): void {
+function observeAnsweredPrompt(
+  prompt: JudgedPrompt,
+  screenKey: string,
+  observation: TickObservation,
+  target: AnswerTarget
+): void {
   const { worktreeId, cliToolId, instanceId, pollerState, promptData } = prompt;
   try {
+    if (!answerTargetHolds(target, worktreeId, cliToolId, instanceId)) {
+      logger.debug('poller:answer-target-moved', { worktreeId, cliToolId, instanceId, target: target.episodeId });
+      return;
+    }
     const plan = observeWaiting({
       worktreeId,
       cliToolId,

@@ -440,10 +440,14 @@ export interface CurrentOutputPayload {
     stopReason?: string;
     /**
      * Last answer the contract's autoYes policy withheld for this session, or
-     * null when it never withheld one (Issue #1684). Refreshed every poll while
-     * the suppressed prompt stays on screen, so `at` being current together
-     * with `isPromptWaiting` means the suppression is the reason the session is
-     * waiting right now.
+     * null when it never withheld one (Issue #1684). Whether it is the reason
+     * the session is waiting right now: when both its `episodeId` and
+     * `waitingEpisodeId` below are present, the ids decide — the same id is
+     * this wait's reason however old `at` is, another id an earlier wait's
+     * however recent (Issue #3798). Only when either is missing does the age
+     * decide: the record is refreshed every poll while the suppressed prompt
+     * stays on screen, so `at` being current together with `isPromptWaiting`
+     * reads as this wait's reason.
      */
     lastSuppression: AutoYesPolicySuppression | null;
     /**
