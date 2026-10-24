@@ -120,10 +120,14 @@ function isTurnBoundaryLine(rawLine: string | undefined): boolean {
  *   (over-suppresses).
  * - A body row carrying a marker at the frame's own column (a here-document's
  *   `> ` drawn at column 0 under a yes/no `(y/n)`) still ends the scan; the
- *   screen cannot tell it from the previous turn's echo. This one stays an
- *   error on the answering side: the command rows above the `> ` leave
- *   `approvalTarget`, and a yes/no `question` is the prompt line alone, so a
- *   deny pattern on them can miss.
+ *   screen cannot tell it from the previous turn's echo. The command rows
+ *   above the `> ` leave `approvalTarget`, and a yes/no `question` is the
+ *   prompt line alone. Issue #3881 (the second half) no longer lets that be
+ *   an answer: the yes/no path ({@link findYesNoApprovalContextRange}) reads
+ *   a scan that stopped on a `>` row as `truncated`, so a deny miss withholds
+ *   instead of passing. The boundary itself is left where it was.
+ * - agy's older panel under a header the current one does not draw is read as
+ *   body (over-suppresses), as is the first limit above; both stay.
  *
  * Shared by both detector paths: multiple_choice passes its `questionEndIndex`,
  * yes_no the line its pattern matched on.
@@ -165,7 +169,17 @@ export function findApprovalContextRange(
   lines: string[],
   questionLineIndex: number,
   panelEnd: number = questionLineIndex + 1,
-): { start: number; completeness: ApprovalTargetCompleteness } {
+): ApprovalContextRange {
+  const { start, completeness } = scanApprovalContext(lines, questionLineIndex, panelEnd);
+  return { start, completeness };
+}
+
+/** {@link findApprovalContextRange}, with the row the scan stopped on (Issue #3881). */
+function scanApprovalContext(
+  lines: string[],
+  questionLineIndex: number,
+  panelEnd: number,
+): ApprovalContextScan {
   const floor = Math.max(0, questionLineIndex - APPROVAL_TARGET_MAX_LOOKBACK);
   const frameIndent = panelFrameIndent(lines, questionLineIndex, panelEnd);
   // The lowest deeper marker row with no frame row found above it yet.
@@ -180,7 +194,9 @@ export function findApprovalContextRange(
     if (line === undefined || line.trim() === '') continue;
     const atFrame = indentOf(line) <= frameIndent;
     const marker = isTurnBoundaryLine(line);
-    if (marker && atFrame) return { start: (unenclosed >= 0 ? unenclosed : i) + 1, completeness: 'complete' };
+    if (marker && atFrame) {
+      return { start: (unenclosed >= 0 ? unenclosed : i) + 1, completeness: 'complete', cutFrom: i };
+    }
     if (!atFrame) {
       if (marker && unenclosed < 0) unenclosed = i;
       segmentRows++;
@@ -194,7 +210,7 @@ export function findApprovalContextRange(
       unenclosed >= 0 && segmentRows > 0 && segmentAllResults && framesBelow.has(frameText)
       && isMarkerRowAtFrameAbove(lines, i, floor, frameIndent)
     ) {
-      return { start: unenclosed + 1, completeness: 'complete' };
+      return { start: unenclosed + 1, completeness: 'complete', cutFrom: i };
     }
     framesBelow.add(frameText);
     unenclosed = -1;
@@ -204,7 +220,75 @@ export function findApprovalContextRange(
   return {
     start: unenclosed >= 0 ? unenclosed + 1 : floor,
     completeness: scanEndCompleteness(lines, floor),
+    cutFrom: floor,
   };
+}
+
+/** What {@link findApprovalContextRange} read (Issue #3881). */
+export interface ApprovalContextRange {
+  start: number;
+  completeness: ApprovalTargetCompleteness;
+}
+
+interface ApprovalContextScan extends ApprovalContextRange {
+  /**
+   * The first row the scan read and left out of the target: the boundary it
+   * stopped on, or the floor it ran out at. Rows `cutFrom` … `start - 1` are
+   * what was cut — the boundary row and, when a deeper marker row with no
+   * frame row above it set the start (#3817), every row down to that marker
+   * (Issue #3881, review N2).
+   */
+  cutFrom: number;
+}
+
+/**
+ * A here-document's continuation rows, or a quotation: `>` at the start of a
+ * row is the one marker a shell's own output draws (PS2), so a scan that
+ * stops on it may have stopped inside the command (Issue #3881).
+ */
+const AMBIGUOUS_BOUNDARY_PATTERN = /^>/;
+
+/**
+ * {@link findApprovalContextRange} for a yes/no prompt (Issue #3881, the
+ * second half: limit 3 of #3832).
+ *
+ * A yes/no prompt has no panel of its own, so its frame is the prompt line's
+ * column, and a here-document's `> ` continuation rows drawn at that column
+ * end the scan exactly like the previous turn's `> msg` echo: the screen
+ * cannot tell the two apart. The same holds for a deeper `> ` row that set
+ * the start under a `●` boundary (a here-document indented under its command,
+ * review N2). Cut at such a row, the boundary is not known
+ * to be the previous turn's, so the target is `truncated` — not the whole
+ * request: a deny pattern that misses it withholds as `deny-pattern-unusable`
+ * rather than passing (the resolver's `approvalTargetCompleteness`). The
+ * boundary is not moved: widening the target past a real echo would put the
+ * previous turn's text on the deny surface (#1699).
+ *
+ * Multiple choice keeps {@link findApprovalContextRange}: its panels draw the
+ * command deeper than their frame (#3817), and claude's legacy `> msg` echo at
+ * the frame is a real boundary there.
+ */
+export function findYesNoApprovalContextRange(
+  lines: string[],
+  promptLine: number,
+  panelEnd: number,
+): ApprovalContextRange {
+  const { start, completeness, cutFrom } = scanApprovalContext(lines, promptLine, panelEnd);
+  // Review N2: every row that was cut, not only the row the scan stopped on —
+  // a deeper `> ` row (a here-document indented under its command) sets the
+  // start below the boundary, and the command above it is cut with it.
+  const cutByQuote = lines
+    .slice(cutFrom, start)
+    .some(row => row !== undefined && AMBIGUOUS_BOUNDARY_PATTERN.test(row.trim()));
+  // Review N4: whatever the scan's own end said. A scan that ran up to the
+  // frame's first row (`top-unknown`) still cut those rows inside the frame,
+  // and a capture known to start at the history's top would otherwise clear
+  // it (`withCaptureTopCompleteness` adds nothing to a `history-start`): the
+  // cut is a fact about rows on screen, not about the capture's top.
+  if (cutByQuote) {
+    return { start, completeness: 'truncated' };
+  }
+  return { start, completeness };
 }
 
 /** How complete a scan that ran down to `floor` without a boundary is (Issue #3881). */

@@ -11,6 +11,8 @@ import { createLogger } from '@/lib/logger';
 const logger = createLogger('response-poller');
 
 import { judgeAntigravityPermissionReceipt } from './antigravity-receipt-episodes';
+import { isAntigravityFeedbackMenuScreen } from '@/lib/detection/tools/antigravity/dialog';
+import { selectAllowOnceOption } from './auto-yes-option-effect';
 // Issue #2457: the same rollout table, `hasDialogRules` cross-check and
 // `detectDialog` seam Auto-Yes reads, reached through the presence helper rather
 // than through `evaluateAutoYesDialogGate` — see `isNumberedDialogVouched`.
@@ -54,6 +56,44 @@ export function isWithheldForWantOfReceipt(scope: AntigravityReceiptScope | unde
     instanceId: scope.instanceId ?? 'antigravity',
   });
   return true;
+}
+
+/**
+ * Does the screen itself show that the generic parser's agy reading is one
+ * CommandMate may answer? (Issue #3881, the second half: finding 8)
+ *
+ * Asked by the answering entry (`detectPromptOnCleanFrame` with a receipt
+ * scope) only for a reading agy's own reader did not take and
+ * `isAntigravityUnansweredNumberedScreen` let through — in practice a reply's
+ * plain `1. … N.` list (#1928's legacy reading). Before this, such a list was
+ * answered whenever agy's hook had recorded a tool call a moment earlier
+ * (#2849). The receipt says a tool call happened; it says nothing about
+ * whether THIS list is that call's approval UI, so on its own it is not
+ * evidence. The screen must show some:
+ *
+ * - agy's `/feedback` menu (its own footer under the options), the generic
+ *   reading #2364 left in place;
+ * - option rows agy's measured permission wording reads as (`Yes`, `Yes, run
+ *   command`, `Yes, and always allow …` — `auto-yes-option-effect`).
+ *
+ * The heading (`Requesting permission for:` / `Do you want to proceed?`), the
+ * `>` cursor and the `↑/↓ Navigate` footer are the other evidence, and a frame
+ * that shows them reaches no generic reading: agy's reader answers it, or
+ * `isAntigravityUnansweredNumberedScreen` declines it (#3808, #3818).
+ *
+ * A yes/no reading is not a numbered list and is left as it was.
+ *
+ * @param cleanOutput - The frame the reading came off (ANSI and box drawing stripped)
+ * @param reading - The generic parser's reading of it
+ */
+export function isAntigravityGenericReadingOnScreen(
+  cleanOutput: string,
+  reading: PromptDetectionResult,
+): boolean {
+  const promptData = reading.promptData;
+  if (promptData?.type !== 'multiple_choice') return true;
+  if (isAntigravityFeedbackMenuScreen(cleanOutput)) return true;
+  return selectAllowOnceOption(promptData.options, 'antigravity').kind !== 'not-a-permission-dialog';
 }
 
 /**

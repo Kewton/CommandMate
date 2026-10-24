@@ -969,6 +969,13 @@ function buildPromptOutput(
     ...(promptData.approvalTarget !== undefined && {
       approvalTarget: promptData.approvalTarget,
     }),
+    // Issue #3881: whether that target is the whole request (a `deny-pattern-
+    // unusable` verdict below is read against it), and what the screen was
+    // read as, when the server sent them.
+    ...(promptData.approvalTargetCompleteness !== undefined && {
+      approvalTargetCompleteness: promptData.approvalTargetCompleteness,
+    }),
+    ...(promptData.reading !== undefined && { reading: promptData.reading }),
     ...(suppressed && {
       autoYesSuppression: {
         reason: suppressed.suppression.reason,
