@@ -379,8 +379,8 @@ function onClosed(pass: LinePass, data: Record<string, unknown>, confirmationId:
 function onAttemptSettled(pass: LinePass, data: Record<string, unknown>, late: boolean): void {
   const attemptConfirmationId = str(data.confirmationId);
   if (!late && attemptConfirmationId !== null && data.result === 'ok' && !pass.okAttemptMode.has(attemptConfirmationId)) {
-    const attemptMode = answerModeOf(data.answerMode);
-    if (attemptMode !== 'unknown') pass.okAttemptMode.set(attemptConfirmationId, attemptMode);
+    // The first success decides, even when it names no mode: a later one must not fill it in.
+    pass.okAttemptMode.set(attemptConfirmationId, answerModeOf(data.answerMode));
   }
   const tool = toolOf(data);
   const basis = basisOf(data.basis);

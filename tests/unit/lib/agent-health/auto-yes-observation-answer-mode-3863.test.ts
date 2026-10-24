@@ -183,6 +183,28 @@ describe('[#3863] answers and withheld intervals by answer mode', () => {
     expect(result.details).toMatchObject({ answered: 3, answeredRecommended: 1, answeredCareful: 0, answeredAnswerModeUnknown: 2 });
   });
 
+  it('[#3882] an earlier success naming no mode is not filled in by a later success naming one', () => {
+    const attempt = (id: string, n: number, at: number, mode?: string) =>
+      line<AttemptSettledLine>(EV.attemptSettled, {
+        atMs: at,
+        confirmationId: id,
+        attemptId: `${id}.a${n}`,
+        cliToolId: 'claude',
+        basis: 'L3',
+        result: 'ok',
+        late: false,
+        expired: false,
+        ...(mode === undefined ? {} : { answerMode: mode }),
+      } as never);
+    const result = measureOk([
+      ...aliveDay(),
+      attempt(`${BOOT}-1`, 1, S + H - 2000),
+      attempt(`${BOOT}-1`, 2, S + H - 1000, 'recommended'),
+      closed(`${BOOT}-1`, S + H, 'careful'),
+    ]);
+    expect(result.details).toMatchObject({ answered: 1, answeredRecommended: 0, answeredCareful: 0, answeredAnswerModeUnknown: 1 });
+  });
+
   it('[#3882] negative: a person\'s answer stays counted apart', () => {
     const result = measureOk([...aliveDay(), closed(`${BOOT}-1`, S + H, 'careful', { basis: 'human' })]);
     expect(result.details).toMatchObject({ answered: 0, answeredByHuman: 1, answeredCareful: 0 });
