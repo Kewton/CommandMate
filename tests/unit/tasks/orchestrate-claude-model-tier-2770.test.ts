@@ -12,7 +12,11 @@
  *     session that does not exist, and `wait` would sit on it until timeout.
  *  2. **The model is fixed when the session starts.** It is written to the
  *     worktree's `.claude/settings.local.json` BEFORE the first send, and the
- *     only way to raise sonnet to opus is a new session (3-5b).
+ *     only way to raise sonnet to opus is a new session (3-5b). Since #3883 it
+ *     is written explicitly for opus too (it used to be deleted, so opus
+ *     inherited the operator's global default), by one helper —
+ *     scripts/orchestrate/launch-worker.mjs — that 3-1, 3-5 and 3-5b all call,
+ *     and a session whose model does not match after one restart is stopped.
  *  3. **`/model` must never be sent to a worker.** Enter on that picker rewrites
  *     the operator's global default (#1495 / #2297).
  *
@@ -28,8 +32,10 @@
 
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';
-import { readFileSync, readdirSync } from 'fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'fs';
+import os from 'os';
 import path from 'path';
+import { MODEL_SETTINGS, main as launchWorker, parseArgs as parseLaunchArgs } from '../../../scripts/orchestrate/launch-worker.mjs';
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const ORCHESTRATE_PATH = '.claude/commands/orchestrate.md';
@@ -58,6 +64,47 @@ function section(id: string): string {
   const body = (end === -1 ? rest : rest.slice(0, end)).join('\n');
   expect(body.trim().length, `section ${id} is empty`).toBeGreaterThan(200);
   return body;
+}
+
+const LAUNCHER_PATH = 'scripts/orchestrate/launch-worker.mjs';
+const launcher = readFileSync(path.join(REPO_ROOT, LAUNCHER_PATH), 'utf-8');
+
+/**
+ * The calls launch-worker.mjs makes for one Claude send whose session reports
+ * `reported`, against a fake CLI and git (#3883). Files go under os.tmpdir().
+ */
+function launchCalls(reported: string): { code: number; calls: string[]; contractAt: number[] } {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), 'cm-2770-launch-'));
+  try {
+    const calls: string[] = [];
+    /** Where in `calls` the contract went out (the session is started first without it, #3883 N1). */
+    const contractAt: number[] = [];
+    let running = true;
+    const run = (command: string, args: string[]) => {
+      if (command === 'git') {
+        calls.push(`git ${args.slice(2).join(' ')}`);
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      calls.push(args[0] === 'instances' ? `instances ${args[2]}` : args[0]);
+      if (args[0] === 'instances' && args[2] === '--json') return { status: 0, stdout: JSON.stringify([{ instanceId: 'claude', running }]), stderr: '' };
+      if (args[0] === 'instances' && args[2] === 'kill') running = false;
+      if (args[0] === 'send') {
+        running = true;
+        if (args.includes('--contract')) contractAt.push(calls.length - 1);
+        return { status: 0, stdout: args.includes('--contract') ? 'task-1\n' : '', stderr: '' };
+      }
+      if (args[0] === 'capture') return { status: 0, stdout: JSON.stringify({ model: reported, sessionStatus: 'ready' }), stderr: '' };
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    const code = launchWorker(
+      ['send', '--run-dir', path.join(tmp, 'runs'), '--issue', '2770', '--wt', 'wt-1', '--worktree', path.join(tmp, 'wt'),
+        '--instance', 'claude', '--model', 'opus', '--contract', '.commandmate/tasks/issue-2770.yaml'],
+      { run, sleep: () => {}, out: () => {}, log: () => {}, error: () => {} }
+    );
+    return { code, calls, contractAt };
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 }
 
 /** `model:` from a markdown file's leading `---` block, or null. */
@@ -132,31 +179,56 @@ describe('/orchestrate 3-1: the model is set before the first send, and checked 
     expect(body).toContain('read -r issue AGENT MODEL');
   });
 
+  // #3883: the model is written by launch-worker.mjs, explicitly for both tiers, into the
+  // worktree-local file only if git ignores it. The runbook's set_claude_model calls it.
   it('writes the model into the worktree-local settings file, only if git ignores it', () => {
     expect(body).toContain('set_claude_model()');
     expect(body).toContain('.claude/settings.local.json');
-    expect(body).toContain('check-ignore -q .claude/settings.local.json');
-    expect(body).toContain(`jq '.model = "sonnet"'`);
-    expect(body).toContain(`jq 'del(.model)'`);
+    expect(body).toContain('launch-worker.mjs set-model --worktree "$1" --model "$2"');
+    expect(launcher).toContain(`'check-ignore', '-q', SETTINGS_FILE`);
+    expect(launcher).toContain(`path.join('.claude', 'settings.local.json')`);
+    // Both tiers are written; opus is no longer deleted to inherit the global default.
+    expect(MODEL_SETTINGS).toEqual({ opus: 'opus[1m]', sonnet: 'sonnet' });
+    expect(body).not.toContain('del(.model)');
+    expect(launcher).not.toContain('del(.model)');
   });
 
   it('sets the model BEFORE the send and reads it back AFTER', () => {
-    const set = body.indexOf('set_claude_model "$WT_PATH" "$MODEL"');
-    const send = body.indexOf('commandmatedev send "$WT"');
-    const check = body.indexOf(`jq -r '.model // ""'`);
+    expect(body).toContain('node scripts/orchestrate/launch-worker.mjs send');
+    expect(body).toContain('--instance "$AGENT" --model "$MODEL" --contract ".commandmate/tasks/issue-${issue}.yaml"');
+    expect(body).not.toMatch(/^\s*commandmatedev send "\$WT"/m);
+    const { code, calls, contractAt } = launchCalls('claude-opus-5-5');
+    expect(code).toBe(0);
+    const set = calls.indexOf('git check-ignore -q .claude/settings.local.json');
     expect(set).toBeGreaterThan(-1);
-    expect(send).toBeGreaterThan(set);
-    expect(check).toBeGreaterThan(send);
+    expect(calls.indexOf('send')).toBeGreaterThan(set);
+    expect(calls.indexOf('capture')).toBeGreaterThan(calls.indexOf('send'));
+    // #3883 N1: the send that starts the session carries no contract; the contract goes out after the model was read.
+    expect(contractAt).toHaveLength(1);
+    expect(contractAt[0]).toBeGreaterThan(calls.indexOf('capture'));
   });
 
   it('stops a running Claude session before changing its model', () => {
-    const kill = body.indexOf('commandmatedev instances "$WT" kill claude');
+    const { calls } = launchCalls('claude-opus-5-5');
+    const kill = calls.indexOf('instances kill');
     expect(kill).toBeGreaterThan(-1);
-    expect(kill).toBeLessThan(body.indexOf('set_claude_model "$WT_PATH" "$MODEL"'));
+    expect(kill).toBeLessThan(calls.indexOf('git check-ignore -q .claude/settings.local.json'));
+  });
+
+  it('does not go on with a model that does not match after one restart (#3883)', () => {
+    const { code, calls, contractAt } = launchCalls('claude-fable-5-1');
+    expect(code).toBe(40);
+    expect(calls.filter((call) => call === 'send')).toHaveLength(2);
+    // #3883 N1 / N2: the session is killed and read back as stopped, and the contract never went to it.
+    expect(calls.slice(-2)).toEqual(['instances kill', 'instances --json']);
+    expect(contractAt).toEqual([]);
   });
 
   it('still addresses the session as $AGENT, and records the model as a fifth column', () => {
-    expect(body).toContain('--instance "$AGENT" --auto-yes --duration 3h');
+    expect(body).toContain('--instance "$AGENT" --model "$MODEL"');
+    const parsed = parseLaunchArgs(['send', '--run-dir', 'r', '--issue', '1', '--wt', 'w', '--worktree', '/w', '--instance', 'claude', '--contract', 'c']);
+    expect(parsed.options).toMatchObject({ duration: '3h' });
+    expect(launcher).toContain(`'--instance', o.instance, '--auto-yes', '--duration', o.duration`);
     expect(body).toContain(`printf '%s\\t%s\\t%s\\t%s\\t%s\\n' "$issue" "$WT" "$AGENT" "$TASK_ID" "$MODEL"`);
   });
 
@@ -184,18 +256,24 @@ describe('/orchestrate 3-4 / 3-5 / 3-5b: where each tier goes after two failures
     expect(row).toContain('Claude（opus）担当は人間へエスカレーション');
   });
 
+  // #3883: 3-5 / 3-5b call the same launch-worker.mjs as 3-1 (opus written, checked, restarted once).
   it('3-5 switches an Antigravity Issue to opus, never to sonnet', () => {
-    expect(`${section('3-5')}\n${docSection('switching.md', '3-5 Antigravity から Claude への切り替え')}`).toContain('set_claude_model "$WT_PATH" opus');
+    const body = `${section('3-5')}\n${docSection('switching.md', '3-5 Antigravity から Claude への切り替え')}`;
+    expect(body).toContain('AGENT=claude; MODEL=opus');
+    expect(body).toContain('--instance claude --model "$MODEL" --contract ".commandmate/tasks/issue-${issue}-claude.yaml"');
+    expect(body).toContain('node scripts/orchestrate/launch-worker.mjs send');
+    expect(body).not.toMatch(/MODEL=sonnet|--model sonnet/);
   });
 
   it('3-5b kills the session first, clears the model, and sends a new contract', () => {
     const body = `${section('3-5b')}\n${docSection('switching.md', '3-5b sonnet から opus への格上げ')}`;
     const kill = body.indexOf('commandmatedev instances "$WT" kill claude');
-    const clear = body.indexOf('set_claude_model "$WT_PATH" opus');
+    const clear = body.indexOf('node scripts/orchestrate/launch-worker.mjs send');
     const send = body.indexOf('issue-${issue}-opus.yaml');
     expect(kill).toBeGreaterThan(-1);
     expect(clear).toBeGreaterThan(kill);
     expect(send).toBeGreaterThan(clear);
+    expect(body).toContain('AGENT=claude; MODEL=opus');
     expect(body).toContain('引き継ぎ（前任: Claude sonnet');
     expect(body).toMatch(/起動時に固定/);
   });

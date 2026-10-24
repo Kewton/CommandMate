@@ -17,6 +17,7 @@ import { spawnSync } from 'node:child_process';
 import { itemOf, latestByStage, unmetStage } from './run-log.mjs';
 import { IGNORED_DIRTY, dirtyPaths } from './dirty-tree.mjs';
 import { itemProblem, workItemName } from './execution-key.mjs';
+import { FOLLOWS_HEAD, verifyEnvState } from './env-manifest.mjs';
 
 export { IGNORED_DIRTY, dirtyPaths };
 
@@ -49,6 +50,8 @@ export const REQUIRED_RECORDS = [
   { stage: 'findings', why: '5-3' },
   { stage: 'precheck', why: '6-1-1' },
 ];
+/** Stages whose passed record is held to the environment it was taken in (#3883 N3, N9). */
+export const ENV_BOUND_STAGES = ['verify', 'precheck'];
 /** 6-2: the sweep runs over every tracked file, never a fixed list of shared files. */
 export const MARKER_PATTERN = '^(<<<<<<< |>>>>>>> |={7}$)';
 
@@ -240,12 +243,53 @@ export function workHeadOf(run, worktree, head) {
  * pass `--item`, or null for the Issue's own records, so another PR of the same
  * Issue — its later records, at its own HEAD — neither stops nor passes this one
  * (#3883). Left out, every record of the Issue is read, as before.
+ *
+ * With `env` (#3883 N3, N9), a passed verify and a passed precheck are also
+ * held to the environment they were taken in (env-manifest.mjs
+ * verifyEnvState): an input that differs now, or an `env=` whose manifest is
+ * not in the run directory, is a missing record of that stage (verify again /
+ * precheck again). The lockfile and the installed versions of a verify on an
+ * earlier HEAD (a refresh or a fold on top) are left out only when the
+ * precheck of the current HEAD was taken in this environment (its own
+ * manifest is `same` now, or it is a record from before H-8) — that precheck
+ * checked the code with them. A record without `env=` (taken before H-8) is
+ * used as before and `env.warn` says so.
+ *
+ * With `env.defer` (merge-pr.mjs, #3883 N10), a verify of an earlier HEAD that
+ * differs from now only in those inputs, with no such precheck yet, is handed
+ * to `defer` instead of being a missing record: the caller runs the precheck of
+ * the current HEAD first and asks again without `defer`. Any other difference
+ * (the models, the local settings, `node_modules`'s location) is still missing.
+ *
+ * @param {{ runDir: string, worktree: string, home: string, warn?: (line: string) => void, defer?: (reason: string) => void }} [env]
  */
-export function missingRecords(records, issue, heads, item) {
+export function missingRecords(records, issue, heads, item, env) {
   const stages = latestByStage(records, issue, item);
+  const where = env ? { runDir: env.runDir, worktree: env.worktree, home: env.home } : null;
+  const precheckNow =
+    where && stages.precheck?.head === heads.head && stages.precheck.result === 'ok' &&
+    ['same', 'unrecorded'].includes(verifyEnvState(stages.precheck, where).state);
   return REQUIRED_RECORDS.map(({ stage, why }) => {
     const reason = unmetStage(stage, stages[stage], heads);
-    return reason ? `${reason} (${why})` : null;
+    if (reason) return `${reason} (${why})`;
+    if (!ENV_BOUND_STAGES.includes(stage) || !where) return null;
+    const record = stages[stage];
+    const coveredByPrecheck = stage === 'verify' && record.head !== heads.head && precheckNow;
+    const state = verifyEnvState(record, { ...where, ...(coveredByPrecheck ? { ignore: FOLLOWS_HEAD } : {}) });
+    if (state.state === 'unrecorded') {
+      env.warn?.(`warning: ${stage} at ${String(record.head ?? '-').slice(0, 7)}: ${state.detail}`);
+      return null;
+    }
+    if (state.state === 'same') return null;
+    const depsOnly = stage === 'verify' && record.head !== heads.head && state.state === 'changed' && state.fields.every(FOLLOWS_HEAD);
+    if (depsOnly && env.defer) {
+      env.defer(`verify at ${String(record.head).slice(0, 7)}: ${state.detail} — waits for the precheck of ${String(heads.head).slice(0, 7)}`);
+      return null;
+    }
+    const precheckHint = stage === 'verify' && record.head !== heads.head && state.fields.some(FOLLOWS_HEAD)
+      ? ` (no precheck of ${String(heads.head).slice(0, 7)} in this environment covers the dependencies)`
+      : '';
+    return `${stage}: environment ${state.state} — ${state.detail}${precheckHint}; ${stage === 'verify' ? 'verify' : 'precheck'} again (${why})`;
   }).filter(Boolean);
 }
 

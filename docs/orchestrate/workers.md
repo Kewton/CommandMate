@@ -37,6 +37,34 @@ done
 その run では 1 件目の `send` の前でループが止まり、**約 90 分、ワーカーが 1 人も起動していないのに「送信中」と報告した**
 （send の出力ファイルは 1 つも作られず、`GET /api/worktrees/<WT>/tasks` は空だった）。
 
+## 3-1 Claude のモデルを契約に固定する
+
+本体の 3-1・3-5・3-5b（docs/orchestrate/switching.md）は、送信を `scripts/orchestrate/launch-worker.mjs send` で行う（#3883）。手順の写しは作らず、この helper を呼ぶ。
+
+- **書く**: Claude（`--model opus|sonnet`）は、動いているセッションを止めてから、worktree の `.claude/settings.local.json` の `model` に
+  契約のモデルを**毎回明示して**書く（opus は `opus[1m]`、sonnet は `sonnet`。ほかのキーは残す）。以前は opus のとき `model` を消していたので、
+  `~/.claude/settings.json` のグローバル既定を継ぎ、利用者が既定を fable に変えた後の run では opus 指定のワーカーが fable で動いた
+  （2026-10-23、summary-3749-3839）。利用者のグローバル設定は読みも書きもしない。git が無視していないファイル（`git check-ignore` が通らない）や
+  JSON でないファイルには書かず、何も送らずに exit 2
+- **契約より先に起動して確かめる**（#3883 N1）: セッションは契約ではなく、作業を頼まない短いメッセージ（`INIT_MESSAGE`。Auto-Yes も付けない）で起動する。
+  その後に `capture --json` の `model` を読む（空なら 20 秒おいて 3 回まで）。契約のモデル（`opus` / `sonnet` の語）を含めば `model ok`。
+  空のままなら `model UNKNOWN`、別のモデルなら `model MISMATCH`。`model ok` のときだけ、`sessionStatus` が `ready` を 2 回続けて読む（10 秒おき、30 回まで）のを待って
+  契約と Auto-Yes を送る。ready にならなければセッションを止め、契約は送らずに exit 1
+- **1 回だけ起動し直す**: UNKNOWN / MISMATCH はセッションを止め、モデルを書き直し、起動のメッセージから送り直す。2 回目も一致しなければ
+  セッションを止めて exit 40（MISMATCH）/ 41（UNKNOWN）。**契約も Auto-Yes もそのセッションには送らない**（tasks.tsv の task id は空になる）
+- **止めたことを確かめる**（#3883 N2）: 止めるたびに `instances <WT> kill` の exit code と、その後の `instances <WT> --json` で `running` でないこと
+  （5 秒おいて 3 回まで読む）を確かめる。kill が失敗した・まだ動いている・一覧が読めないときは、`stop UNCONFIRMED …` を出し、
+  設定の書き換えも再送もせずに exit 42（kill API は止められないとセッションを残して 500 を返す）。人が止めてから送り直す
+- **起動の前に Auto-Yes を切る**（#3883 N7）: Auto-Yes は worktree × instance ごとに残り、セッションが無くても次のセッションの画面に答える。
+  そこで起動のたびに（セッションが動いていなくても）`auto-yes <WT> --disable --instance <id>` を送り、`instances <WT> --json` の `autoYes`（状態の保存先の値）が
+  true でないことを読み返す（2 秒おきに 3 回まで）。切れたと確かめられなければ `auto-yes UNCONFIRMED …` を出し、何も書かず何も送らずに exit 43。
+  Auto-Yes は契約の送信（`--auto-yes`）で初めて入る
+- **送信の出力**: `runs/<date>/send-<issue>[-<item>][.a<n>].out` / `.err` を呼び出しごとに排他的に取る（`execution-key.mjs`。同じ Issue の送信を並行しても、
+  起動し直しても混ざらない）。起動のメッセージの出力は `send-init-<issue>[-<item>][.a<n>].out` / `.err`。stdout は task id だけ。
+  send が失敗したとき（exit 99 など）はその exit code を返し、モデルは確かめない
+- **単独で使うとき**: `launch-worker.mjs set-model --worktree <path> --model <opus|sonnet>`（本体の `set_claude_model` はこれを呼ぶ）、
+  `launch-worker.mjs check-model --wt <WT> --model <opus|sonnet>`（0 / 40 / 41）
+
 ## 3-2 monitor の起動と読み方
 
 より詳細な監視は orchestrate-monitor skill を使う。契約付き委任では**タスク状態を一次ソース**に
@@ -117,16 +145,38 @@ exit 10 にもならない）。
   再試行がログと終了コードを取り合わない（`.exit` にはこの呼び出しだけが知る印が付き、ほかの書き手の `.exit` は読まない）。既にある `--log` を渡すと exit 2。
   記録には work item（`item`）と execution key（`key`）が入る（docs/orchestrate/run-log.md#1-5-同じ-issue-の複数の-prwork-item）
 - **Auto-Yes を切った後の読み返し**: `capture --json` が読めないときは「切れた」とせず読み直す。最後まで読めなければ `auto-yes=unknown`（#3883）
+- **実行の入力の manifest**（#3883 H-8）: env-clean は `$HOME` 直下のエントリの増減を見るが、既にあるファイルの中身は見ない。
+  呼び出しの開始・各検証の開始の直前・裁定の後に、`~/.claude/settings.json` の `model`、worktree の `.claude/settings.local.json`、
+  `package-lock.json` の hash、`node_modules` の所在（実体のパス・リンクか）と package.json の直接の依存の版を読み（`env-manifest.mjs`。HOME 全体は辿らない）、
+  ログと同じ名前の `.env.json` に execution key と一緒に残す。**最後の検証の開始から裁定までに変わっていれば裁定しない**（exit 3、
+  `unconfirmed: the inputs changed during the verification (<項目>)`。2 つの環境にまたがった結果なので、どちらの環境の合格にもしない）。
+  作業中に変わったものは記録に `env-changed=<項目>` と残し、裁定は終わりの manifest（`env=<hash>`）の環境での結果として扱う。
+  **どの呼び出しも `wait --verify` を使わない**（#3883 N8）: `wait --verify` は CLI の中でターン終了の行を出した直後に検証を始めるので、
+  その前に manifest を取れない（ログを後から読んで取ると、検証の始まりの後の値になる）。task を見張らない呼び出しも `--verify` なしの `wait` → manifest → `verify` に分ける
+- **合格を使う地点も環境を照らし合わせる**（#3883 N3）: precheck の「verify が通したゲートを省く」と、publish-pr / merge-pr の記録の確認
+  （`pr-common.mjs` の `missingRecords`）は、verify の記録の `env=<hash>` の manifest（同じ execution key の `.env.json`）を今の worktree の manifest と比べる。
+  違えば省かない・公開もマージもしない（`verify: environment changed — … verify again`）。`env=` があるのに manifest が run のフォルダに無いときも同じ（`missing`）。
+  HEAD が verify の HEAD より進んでいる（6-2 の develop 取り込み・6-4 の一本化）ときに lockfile と依存の版を比べないのは、
+  **今の HEAD の precheck が今の環境で通っている**（その precheck の manifest も今と同じ）ときだけ（#3883 N9）。HEAD が違うことだけでは外さない。
+  git の外の入力（モデル・settings・`node_modules` の所在）はいつも比べる。
+  merge-pr はこの「依存だけの差」で先に止めず（#3883 N10）、今の HEAD の precheck を走らせてから、合格したときだけ verify の環境を判定し直す
+  （develop の取り込みで lockfile が変わり precheck が一度落ちた後の再試行で、precheck がやり直される）。precheck が落ちれば止まり、
+  モデル・settings・`node_modules` の所在の差は precheck を走らせる前に止める（verify をやり直す）。
+- **precheck の結果も環境に結び付ける**（#3883 N9）: precheck.mjs はチェックの前後に manifest を取り、`precheck-<…>.env.json` に
+  key（`<run>:<work item>:precheck-<sha>:a<n>`）と残し、記録に `key=… env=<hash>` を足す。チェックの最中に入力が変われば `fail`
+  （`env-changed-during-precheck=<項目>`）。同じ HEAD・同じオプションの ok の記録を再利用する早期 return、publish（`missingRecords`）、
+  merge の「その HEAD の precheck は済み」の判断は、その manifest を今と比べ、違えば・manifest が無ければ precheck をやり直す。`env=` の無い旧い precheck の記録は警告して従来どおり使う
+  **`env=` の無い記録**（H-8 より前の記録。この変更が入ったときに進行中の run の記録）は従来どおり使い、`warning: verify at <sha>: no env= in the record …` を出す
 - **`--instance` はサーバーが解決した id で通す**（#3587）: 最初に `GET /api/worktrees/<WT>/resolve-target?instance=<指定>`（`wait` / `capture` / `send` と同じ権威。
   primary 優先・大小文字・alias の段は route のとおり）を、ほかの呼び出しと同じ `--cli` の `reply <WT> --instance <指定> --json` 越しに引き（#3633。
   `.env`・`CM_BIND`・HTTPS で決まる接続先も、`--cli` のラッパーの設定も同じになる）、待機・検証・task の比較・`capture`・Auto-Yes（`--auto-yes-off` も）の
   すべてにその id を使う。解決できない（曖昧な alias・サーバーに届かない・CLI が起動できない）ときは **exit 2** で、何も送らず待たない
 - **新しい task が来たら裁定しない**（#3587）: 開始時に `commandmatedev task list "$WT" --json` を読み、渡された task（`--task`。無ければ
-  その instance の、呼び出しの開始までに作られた最新の task）が一覧にあれば、`wait --verify` 1 本ではなく
-  **`--verify` なしの `wait` → 新しい task の確認 → `verify "$WT" --task <task> --instance <id>`** に分け、検証を始める直前をスクリプトが握る
+  その instance の、呼び出しの開始までに作られた最新の task）が一覧にあれば、
+  **`--verify` なしの `wait` → 新しい task の確認 → `verify "$WT" --task <task> --instance <id>`** で、検証を始める直前をスクリプトが握る
   （`wait --verify` は CLI の中で検証を始めるので、その前に割り込めない。`--instance` は `wait --verify` と同じ裁定にするため渡す。OpenCode の作業証跡は
   instance ごとに読まれる）。開始時の一覧が読めないときも分けて見張り、一覧が読めた時点で基準を取り直す（それまでに読めなければ `--task` が無い限り
-  `verify` は task をサーバーに任せる）。一覧が読めて task が無いときだけ従来どおり `wait --verify` 1 本で、確認はしない。
+  `verify` は task をサーバーに任せる）。一覧が読めて task が無いときは、新しい task の確認はしないが、同じく `wait` → `verify` に分ける（#3883 N8）。
   `--task` が一覧（新しい順に 20 件）の外にあるときは `task show <task> --json` で個別に読み、作成時刻で比べて見張りを続ける（開始時も、一覧が読めた時点で基準を取り直すときも）。
   開始時の一覧の照会が失敗したら、`wait` を始める前に 5 秒おきに読み直す（3 回まで）。`wait --verify` が待ち始める前に task を結び付けるのと同じく、待ち始めの task に `verify --task` を結び付けるため（#3633）。
   確認は、待機中（30 秒ごと）・`verify` の直前（再検証の前・Antigravity の合図待ちの周回も）・検証が終わって裁定を確定する前（Auto-Yes を切る前）に
