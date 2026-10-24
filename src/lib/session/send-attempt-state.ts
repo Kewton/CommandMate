@@ -131,12 +131,10 @@ export function classifySendFailure(error: unknown): { state: SendAttemptState; 
     return { state: 'not-sent', reason: 'plan-review' };
   }
   const message = error instanceof Error ? error.message : String(error);
-  // The readiness waits of every tool throw before typing anything.
-  if (/prompt not ready/i.test(message)) return { state: 'not-sent', reason: 'prompt-not-ready' };
-  // #1880: refused before the body, after only the clear keys (C-e / C-u).
-  if (/still holds unsent text after \d+ clear passes/.test(message)) {
-    return { state: 'not-sent', reason: 'composer-not-empty' };
-  }
+  // Issue #3880: the "after the body was typed" wordings are matched FIRST. A
+  // body-not-landed error quotes what the composer shows — the user's own text —
+  // and a body that says `prompt not ready` must not turn "may have been typed"
+  // into "was not typed". Indeterminate wins whenever its wording is present.
   // #2464 / #3366: typed, never submitted, taken back out best-effort.
   if (/Enter was not pressed, so nothing was submitted/.test(message)) {
     return { state: 'indeterminate', reason: 'body-not-landed' };
@@ -148,6 +146,12 @@ export function classifySendFailure(error: unknown): { state: SendAttemptState; 
   // #1471: typed, Enter sent (more than once), never confirmed.
   if (/submit could not be confirmed/i.test(message)) {
     return { state: 'indeterminate', reason: 'submit-unconfirmed' };
+  }
+  // The readiness waits of every tool throw before typing anything.
+  if (/prompt not ready/i.test(message)) return { state: 'not-sent', reason: 'prompt-not-ready' };
+  // #1880: refused before the body, after only the clear keys (C-e / C-u).
+  if (/still holds unsent text after \d+ clear passes/.test(message)) {
+    return { state: 'not-sent', reason: 'composer-not-empty' };
   }
   return { state: 'indeterminate', reason: 'send-error' };
 }

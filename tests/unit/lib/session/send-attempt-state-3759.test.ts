@@ -115,6 +115,27 @@ afterEach(() => {
 });
 
 describe('[#3759] classifySendFailure', () => {
+  it('[#3880] the body quoted in a body-not-landed error never makes it not-sent', () => {
+    // The composer's first row is the user's own text, and it says `prompt not ready`.
+    expect(
+      classifySendFailure(
+        new Error(
+          'Failed to send message to Codex: Message body did not arrive intact for session s: the paste had not finished ' +
+            'arriving after 2000ms (the composer shows "prompt not ready: why does agy say this?"); the message is 1200 bytes / 21 lines. ' +
+            'Enter was not pressed, so nothing was submitted (Issue #2464).'
+        )
+      )
+    ).toEqual({ state: 'indeterminate', reason: 'body-not-landed' });
+    expect(
+      classifySendFailure(
+        new Error(
+          'Message body did not appear in the composer for session s within 5000ms (it shows "still holds unsent text after 3 clear passes"); ' +
+            'the message is 300 bytes. Enter was not pressed, so nothing was submitted (Issue #3366).'
+        )
+      )
+    ).toEqual({ state: 'indeterminate', reason: 'body-not-landed' });
+  });
+
   it('reads every tool\'s readiness timeout as not-sent (positive: #3746)', () => {
     expect(classifySendFailure(new Error(AGY_NOT_READY))).toEqual({ state: 'not-sent', reason: 'prompt-not-ready' });
     expect(

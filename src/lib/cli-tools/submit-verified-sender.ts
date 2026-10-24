@@ -99,7 +99,7 @@ import {
 } from '@/config/cli-tool-timing-config';
 import { createLogger } from '@/lib/logger';
 import { clearComposer } from '@/lib/session/composer-clear';
-import { extractComposerText, SUPPORTED_COMPOSER_TOOLS } from '@/lib/detection/composer-text';
+import { extractComposerText, findCodexInputBox, SUPPORTED_COMPOSER_TOOLS } from '@/lib/detection/composer-text';
 
 const logger = createLogger('cli-tools/submit-verified-sender');
 
@@ -220,10 +220,13 @@ type ComposerRead =
       text: string;
       rows: string[];
       /**
-       * Every line the composer holds, gutter stripped — only when it was read
-       * with `extractComposerText` ({@link readSubmitComposer}, Issue #3880).
+       * Every row from the composer's `›` row down to the footer, ANSI and glyph
+       * stripped — only for a multi-row codex composer ({@link readSubmitComposer},
+       * Issue #3880). Read from the raw frame, not from `extractComposerText`,
+       * whose text is a UI excerpt (cut at 2,000 characters, 40 rows and the
+       * first blank row) and so cannot say the whole body is there.
        */
-      whole?: string;
+      region?: string;
     };
 
 /**
@@ -562,6 +565,33 @@ function comparePasteToken(token: PasteToken, message: string): PasteLandedState
  * `pending`. One reader on both sides of Enter keeps the two verdicts about the
  * same composer.
  */
+/**
+ * Everything a codex composer holds, for deciding that a pasted body arrived in
+ * full (Issue #3880).
+ *
+ * `extractComposerText` answers for the UI: its text stops at 2,000 characters,
+ * at 40 rows and at the composer's first blank row, so a composer that matches
+ * it may still be missing the rest of the body — or hold something after it.
+ * This reads the raw rows instead, from the `›` row down to the last block of
+ * the frame (codex's model / cwd footer), so a body with blank lines, more than
+ * 40 rows or more than 2,000 characters is compared whole, and anything typed
+ * after the body is part of what is compared.
+ */
+function codexComposerRegion(output: string): string | null {
+  const raw = output.split('\n');
+  const box = findCodexInputBox(raw);
+  if (box === null) return null;
+  const isBlank = (row: string): boolean => stripAnsi(row).trim() === '';
+  let end = raw.length - 1;
+  while (end >= 0 && isBlank(raw[end])) end--;
+  let lastBlockStart = end;
+  while (lastBlockStart > 0 && !isBlank(raw[lastBlockStart - 1])) lastBlockStart--;
+  const stop = lastBlockStart > box.lastRow ? lastBlockStart - 1 : end;
+  const rows = raw.slice(box.firstRow, stop + 1).map((row) => stripAnsi(row));
+  rows[0] = rows[0].replace(/^\s*\u203A ?/, '');
+  return rows.join('\n');
+}
+
 function readSubmitComposer(
   output: string,
   cliToolId: CLIToolType,
@@ -572,7 +602,12 @@ function readSubmitComposer(
   if (cliToolId === 'codex' && reader === 'input-line-marker') {
     const read = extractComposerText(output, cliToolId);
     if (read.state === 'content' && read.text.includes('\n')) {
-      return { kind: 'text', text: firstNonBlankLine(read.text), rows: read.text.split('\n'), whole: read.text };
+      return {
+        kind: 'text',
+        text: firstNonBlankLine(read.text),
+        rows: read.text.split('\n'),
+        region: codexComposerRegion(output) ?? read.text,
+      };
     }
   }
   return readComposer(reader, lines, windowLines);
@@ -694,9 +729,13 @@ export function isSubmitted(
  * ({@link readSubmitComposer}), so a history echo of an earlier message above the
  * composer is never mistaken for this one, and a frame both functions see holds
  * the same composer for both (Issue #3880). A multi-row codex composer is
- * compared as a whole, whitespace removed (wrapping and continuation indent
- * proof): the body's beginning is `landed`, text from inside the body is
- * `mismatch`.
+ * compared as a whole ({@link codexComposerRegion}), whitespace removed
+ * (wrapping and continuation indent proof): only the WHOLE body is `landed`;
+ * the body's beginning alone is `pasting` (never enough to press Enter on), the
+ * body plus anything else or text from inside it is `mismatch`. The whole body
+ * is checked before placeholders, so a body that itself quotes
+ * `[Pasted Content 600 chars]` is its own text, not codex's placeholder; a real
+ * placeholder is only ever the composer's first row.
  */
 export function classifyPasteLanded(
   output: string,
@@ -714,16 +753,30 @@ export function classifyPasteLanded(
   );
   if (composer.kind !== 'text') return 'unseen';
 
-  // `whole` keeps the rows under a placeholder, so a placeholder plus typed text is `rest`.
-  const { tokens, rest } = findPasteTokens(composer.whole ?? composer.text);
-  if (tokens.length === 0) {
-    if (composer.whole !== undefined) {
-      const shown = compactText(composer.whole);
-      const body = compactText(message);
-      if (body.startsWith(shown)) return 'landed';
-      if (body.includes(shown)) return 'mismatch';
-      return 'unseen';
+  if (composer.region !== undefined) {
+    const shown = compactText(composer.region);
+    const body = compactText(message);
+    if (shown === body) return 'landed';
+    const placeholder = findPasteTokens(composer.text);
+    if (placeholder.tokens.length > 0) {
+      // A placeholder plus anything else — on its row or under it — is not the body as sent.
+      const below = compactText(composer.region.split('\n').slice(1).join('\n'));
+      if (placeholder.tokens.length > 1 || placeholder.rest !== '' || below !== '') return 'mismatch';
+      return comparePasteToken(placeholder.tokens[0], message);
     }
+    if (body.startsWith(shown)) return 'pasting';
+    // The body's beginning followed by something else, the body plus more, or a
+    // piece from inside it: the composer holds something other than the body.
+    if (inputMatchesBody(composer.text, message) || shown.startsWith(body) || body.includes(shown)) {
+      return 'mismatch';
+    }
+    return 'unseen';
+  }
+
+  // The whole body on one row is the body, even when it quotes a placeholder.
+  if (compactText(composer.text) === compactText(message)) return 'landed';
+  const { tokens, rest } = findPasteTokens(composer.text);
+  if (tokens.length === 0) {
     if (inputMatchesBody(composer.text, message)) return 'landed';
     if (message.includes(composer.text)) return 'mismatch';
     return 'unseen';

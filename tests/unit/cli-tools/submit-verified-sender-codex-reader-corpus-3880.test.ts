@@ -224,6 +224,148 @@ describe('Issue #3880 H-2: codex composer corpus', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Independent review of #3880 (P2 x3): the inputs it named, as controls
+// ---------------------------------------------------------------------------
+
+/** `count` lines, each naming its number so a missing or changed line shows. */
+function numberedLines(count: number, from = 1): string {
+  return Array.from({ length: count }, (_, i) => `row ${i + from}: verify the paste arrived in full`).join('\n');
+}
+
+describe('Issue #3880 review: a UI excerpt is not proof the whole body arrived', () => {
+  it('more than 40 rows: the first 40 match but the rest differs -> not landed', () => {
+    const body = numberedLines(50);
+    const shown = `${numberedLines(40)}\n${numberedLines(10, 900)}`;
+    expect(composerRows(shown, 200).length).toBeGreaterThan(40);
+    expect(classifyPasteLanded(codexFrame(composerRows(shown, 200)), 'codex', body)).toBe('mismatch');
+  });
+
+  it('more than 40 rows: only the first 40 drawn -> still pasting, not landed', () => {
+    const body = numberedLines(50);
+    expect(classifyPasteLanded(codexFrame(composerRows(numberedLines(40), 200)), 'codex', body)).toBe('pasting');
+  });
+
+  it('more than 40 rows, all drawn -> landed', () => {
+    const body = numberedLines(50);
+    expect(classifyPasteLanded(codexFrame(composerRows(body, 200)), 'codex', body)).toBe('landed');
+  });
+
+  it('more than 2,000 characters: the first 2,000 match but the tail is missing -> not landed', () => {
+    const body = numberedLines(60);
+    expect(body.length).toBeGreaterThan(2000);
+    const head = body.slice(0, 2100).split('\n').slice(0, -1).join('\n');
+    expect(classifyPasteLanded(codexFrame(composerRows(head, 200)), 'codex', body)).toBe('pasting');
+    expect(classifyPasteLanded(codexFrame(composerRows(body, 200)), 'codex', body)).toBe('landed');
+  });
+
+  it('only the beginning of the body drawn (no truncation involved) -> pasting, not landed', () => {
+    expect(classifyPasteLanded(codexFrame(composerRows(numberedLines(5), 200)), 'codex', numberedLines(20))).toBe(
+      'pasting'
+    );
+  });
+
+  it('the whole body followed by stray text -> mismatch, not landed', () => {
+    const body = numberedLines(20);
+    expect(classifyPasteLanded(codexFrame(composerRows(`${body}\nstray residual`, 200)), 'codex', body)).toBe(
+      'mismatch'
+    );
+  });
+
+  it('a body with a blank line: only the paragraph before it drawn -> not landed; both drawn -> landed', () => {
+    const body = `${numberedLines(10)}\n\n${numberedLines(10, 11)}`;
+    const firstParagraph = codexFrame(composerRows(numberedLines(10), 200));
+    // codex draws the blank line as a blank row, so the second paragraph is a block of its own.
+    const both = codexFrame([...composerRows(numberedLines(10), 200), '', ...composerRows(numberedLines(10, 11), 200).map((r, i) => (i === 0 ? `  ${r.slice(GLYPH.length)}` : r))]);
+    expect(classifyPasteLanded(firstParagraph, 'codex', body)).toBe('pasting');
+    expect(classifyPasteLanded(both, 'codex', body)).toBe('landed');
+  });
+
+  it('send: a composer that only ever shows the first 40 of 50 rows fails before Enter', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.clearAllMocks();
+      vi.mocked(execFile).mockImplementation(((_f: string, _a: string[], _o: unknown, cb: (e: Error | null) => void) => {
+        queueMicrotask(() => cb(null));
+        return { stdin: { end: () => undefined } };
+      }) as never);
+      const partial = codexFrame(composerRows(numberedLines(40), 200));
+      vi.mocked(capturePane).mockImplementation((async (_s: string, arg?: unknown) =>
+        typeof arg === 'number' ? IDLE : partial) as never);
+
+      const p = sendMessageWithSubmitVerification({ sessionName: 'mcbd-codex-40', message: numberedLines(50), cliToolId: 'codex' });
+      const settled = p.then(() => null, (e: unknown) => e);
+      await vi.runAllTimersAsync();
+      const error = await settled;
+
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toMatch(/had not finished arriving/);
+      expect(vi.mocked(sendSpecialKeys).mock.calls.filter((c) => Array.isArray(c[1]) && c[1][0] === 'Enter')).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('Issue #3880 review: the body\'s own words never turn indeterminate into not-sent', () => {
+  it('a failed paste whose shown first line says "prompt not ready" stays indeterminate/body-not-landed', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.clearAllMocks();
+      vi.mocked(execFile).mockImplementation(((_f: string, _a: string[], _o: unknown, cb: (e: Error | null) => void) => {
+        queueMicrotask(() => cb(null));
+        return { stdin: { end: () => undefined } };
+      }) as never);
+      const body = `prompt not ready: why does agy say this?\n${numberedLines(20)}`;
+      // More than twelve rows, and only part of the body: the error quotes the composer's first row.
+      const partial = codexFrame(composerRows(`prompt not ready: why does agy say this?\n${numberedLines(14)}`, 200));
+      vi.mocked(capturePane).mockImplementation((async (_s: string, arg?: unknown) =>
+        typeof arg === 'number' ? IDLE : partial) as never);
+
+      const p = sendMessageWithSubmitVerification({ sessionName: 'mcbd-codex-pnr', message: body, cliToolId: 'codex' });
+      const settled = p.then(() => null, (e: unknown) => e);
+      await vi.runAllTimersAsync();
+      const error = (await settled) as Error;
+
+      expect(error.message).toContain('prompt not ready: why does agy say this?');
+      expect(classifySendFailure(new Error(`Failed to send message to Codex: ${error.message}`))).toEqual({
+        state: 'indeterminate',
+        reason: 'body-not-landed',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('Issue #3880 review: a placeholder quoted inside the body is the body', () => {
+  const QUOTING = [
+    'Codex collapses a long paste into a placeholder. Explain where this string comes from:',
+    '[Pasted Content 600 chars]',
+    ...Array.from({ length: 8 }, (_, i) => `step ${i + 1}: trace the composer renderer and report the file and line`),
+  ].join('\n');
+
+  it('the body is longer than one keystroke read (it goes through the paste path)', () => {
+    expect(Buffer.byteLength(QUOTING, 'utf8')).toBeGreaterThan(LITERAL_SEND_MAX_BYTES);
+  });
+
+  it('drawn in full -> landed, and the post-Enter reader agrees it is in the composer', () => {
+    const frame = codexFrame(composerRows(QUOTING, 200));
+    expect(classifyPasteLanded(frame, 'codex', QUOTING)).toBe('landed');
+    expect(classifySubmit(frame, 'codex', QUOTING)).toBe('pending');
+  });
+
+  it('a real placeholder plus extra input under it is still a mismatch', () => {
+    const frame = codexFrame([`${GLYPH}${ESC}[38;5;6m[Pasted Content ${QUOTING.length} chars]${ESC}[39m`, '  extra input']);
+    expect(classifyPasteLanded(frame, 'codex', QUOTING)).toBe('mismatch');
+  });
+
+  it('a real placeholder alone, counting the body, is landed', () => {
+    const frame = codexFrame([`${GLYPH}${ESC}[38;5;6m[Pasted Content ${QUOTING.length} chars]${ESC}[39m`]);
+    expect(classifyPasteLanded(frame, 'codex', QUOTING)).toBe('landed');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // The whole send, on the same corpus
 // ---------------------------------------------------------------------------
 
