@@ -14,8 +14,13 @@
  * existing, read-only subcommand that resolves the selector with the CLI's own
  * `resolveCommandTarget` (GET /resolve-target: primary first, exact alias
  * before case-folded, an ambiguous alias exit 2 with the candidates) and
- * prints the resolved `instanceId`. It needs no running session. `--since` in
- * the far future keeps the reply itself empty; only the id is read.
+ * prints the resolved `instanceId`, and the tool behind it (`cliToolId`). It
+ * needs no running session. `--since` in the far future keeps the reply itself
+ * empty; only the id and the tool are read.
+ *
+ * The tool is kept apart from the id (#3883): `antigravity-2` or an alias of it
+ * is an Antigravity instance whose id is not `antigravity`, so a rule for a
+ * tool must read `cliToolId`, not compare the id.
  */
 
 /** Matches `isValidInstanceId` (src/lib/cli-tools/types.ts, src/cli/utils/api-client.ts). */
@@ -47,10 +52,11 @@ export function isInstanceSelector(value) {
  * @param {string} cli the CLI the script was given (`--cli`)
  * @param {string} wt
  * @param {string} selector
- * @param {{ cwd?: string, timeoutMs?: number }} [options]
- * @returns {{ instanceId: string } | { error: string }} never throws
+ * @param {{ cwd?: string, timeoutMs?: number, withTool?: boolean }} [options]
+ * @returns {{ instanceId: string, cliToolId?: string } | { error: string }} never throws
+ *   (`cliToolId` only with `withTool`, and only when the CLI printed one)
  */
-export function resolveInstanceThroughCli(run, cli, wt, selector, { cwd, timeoutMs } = {}) {
+export function resolveInstanceThroughCli(run, cli, wt, selector, { cwd, timeoutMs, withTool = false } = {}) {
   try {
     const out = run(cli, ['reply', wt, '--instance', selector, '--since', REPLY_SINCE_NEVER, '--json'], {
       cwd,
@@ -68,7 +74,8 @@ export function resolveInstanceThroughCli(run, cli, wt, selector, { cwd, timeout
     if (typeof answer?.instanceId !== 'string' || answer.instanceId === '') {
       return { error: `no instance in the answer: ${String(out.stdout).trim()}` };
     }
-    return { instanceId: answer.instanceId };
+    const tool = withTool && typeof answer.cliToolId === 'string' && answer.cliToolId !== '' ? { cliToolId: answer.cliToolId } : {};
+    return { instanceId: answer.instanceId, ...tool };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

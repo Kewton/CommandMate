@@ -276,6 +276,7 @@ mkdir -p workspace/orchestration/runs/$DATE
 **run の記録**（#3477）: 各 Issue の段（`contract` / `send` / `verify` / `review`（5-2b）/ `findings`（5-3）/ `precheck` / `pr` / `ci` / `merge`。
 この順が run の順で、整合性レビューと指摘の処置は PR の前、CI はゲートと並走（6-1-1））が終わるたびに、`scripts/orchestrate/run-log.mjs` で 1 行を追記する。置き場所は `workspace/orchestration/runs/$DATE/run-$RUN_ISSUES.jsonl`。
 記録の中身（1 行の項目）と `status` の `next` の決まり（作業の HEAD と公開する HEAD・`skip` の扱い・`--work-head`）は、HEAD を重ねたコミットを手で記録するときと、再開先が思ったものと違うときに docs/orchestrate/run-log.md#1-5-記録の中身と-next-の決まり を読む。
+**同じ Issue の PR が 2 本以上ある run は、3-1 の送信から 6-2 のマージまで全段に同じ `--item` を渡す**（tasks.tsv の 6 列目に `item=<名前>` と明示する。列の数では分けず、6 列目にラベルを書いた旧い run は `item` 無しのまま再開する。#3883）。各段の雛形は docs/orchestrate/run-log.md#1-5-work-item-の-run-の呼び出し を読む。
 
 **セッションが落ちたら、会話の記録ではなくこれを読んで再開する**:
 
@@ -838,6 +839,7 @@ while IFS="$(printf '\t')" read -r issue WT AGENT TASK_ID MODEL <&3; do
 done 3< "workspace/orchestration/runs/$DATE/tasks.tsv"
 ```
 
+- tasks.tsv に 6 列目（`item=<名前>`・旧い run のラベル）がある run は、この雛形ではなく docs/orchestrate/run-log.md#1-5-work-item-の-run-の呼び出し の雛形で待つ（5 列で読むとモデルに 6 列目がつながる）
 - スクリプトは `wait` に `--instance "$AGENT"` を必ず付ける（`wait` に `--agent` は無い。付けないと既定の claude を待つ）。
 - `--on-prompt human` も必ず付ける。既定（`agent`）はプロンプト検出で即 exit 10 を返すため、
   監督ループが空回りする。
@@ -1051,7 +1053,7 @@ PR を出す前に、次も確かめる:
 
 PR の作成とマージは、次の 2 本のスクリプトを呼ぶ（#3477）。ワーカーに `/create-pr` を送る流れは使わない。止まる条件と run の記録を持たないためである。
 
-- `scripts/orchestrate/publish-pr.mjs`（6-1）: push・module-reference の断片の控え（`runs/$DATE/module-reference-<N>.md`）・PR の作成。記録の `pr` 段
+- `scripts/orchestrate/publish-pr.mjs`（6-1）: push・module-reference の断片の控え（`runs/$DATE/module-reference-<N>[-<item>].md`）・PR の作成。記録の `pr` 段
 - `scripts/orchestrate/merge-pr.mjs`（6-2・6-3）: develop が進んでいれば試しのマージ・CI の待ち（落ちたジョブは HEAD ごとに 1 回だけ再実行）・
   squash でマージ・Issue のクローズ（`--close -` なら閉じない。1 本の Issue を複数の PR に分けたときの途中の PR など）。記録の `ci`・`merge` 段
 
@@ -1085,6 +1087,8 @@ node scripts/orchestrate/publish-pr.mjs --run-dir "workspace/orchestration/runs/
 echo "exit=$?"   # 0 → PR がある（作った・既に開いていた・マージ済み） / 1 → 出力の欠けた記録・断片を埋めて再実行 / 2 → 作業ツリーが汚れている
 ```
 
+work item の PR（1-5）は、precheck・publish・merge にも同じ `--item` を付ける（docs/orchestrate/run-log.md#1-5-work-item-の-run-の呼び出し）。
+
 ### 6-1-1. PR はゲートの**前**に出す（CI とローカルゲートを並走させる）
 
 `wait --verify` / `verify --gates` のローカルゲートと CI は**同じテストを見ている**。
@@ -1098,7 +1102,7 @@ echo "exit=$?"   # 0 → PR がある（作った・既に開いていた・マ�
 # 段の順: verify（3-3）→ review（5-2b）→ findings（5-3）→ precheck → PR → CI（残りのゲートと並走）→ merge
 node scripts/orchestrate/precheck.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
   --issue "$issue" --worktree "$WT_DIR"            # 整理の Issue は --kind refactor、計測の Issue は --metrics を足す
-echo "exit=$?"   # 0 → PR を出す / 1 → runs/$DATE/precheck-<issue>-<sha>.log で落ちた段を読み、再指示 / 2 → 作業ツリーが汚れている
+echo "exit=$?"   # 0 → PR を出す / 1 → runs/$DATE/precheck-<issue>[-<item>]-<sha>.log で落ちた段を読み、再指示 / 2 → 作業ツリーが汚れている
 ```
 
 - precheck の段（何を走らせるか）と、結果を走らせずに再利用する条件は、precheck が落ちたときと、走らずに再利用されたことを確かめるときに docs/orchestrate/ci-merge.md#6-1-1-precheck-の段と再利用 を読む
@@ -1191,6 +1195,7 @@ CHANGELOG は書き写さない。ワーカーがコミットした `changelog.d
 # module-reference: 行キーごとに既存行の注記セルへ追記（行を増やさない）。
 # publish-pr.mjs が PR を出すときに run のディレクトリへ控えている（dev-reports/ は worktree と一緒に消える）
 cat "workspace/orchestration/runs/$DATE/module-reference-<N>.md"
+cat "workspace/orchestration/runs/$DATE/module-reference-<N>-<item>.md"   # work item の PR（1-5）は work item ごとの控え
 ```
 
 一本化のコミットは `docs/module-reference.md` だけを変え、trailer を付ける（無いと再指示の後の scope ゲートが落ちる）:

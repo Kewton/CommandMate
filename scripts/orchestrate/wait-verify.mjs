@@ -30,7 +30,24 @@
  *     a newer task ends the call without a verdict. A `--task` older than the
  *     newest TASK_LIST_LIMIT is read on its own (`task show`), and a list that
  *     fails at the start is read again before the wait begins, so the call
- *     stays tied to the task it started on (#3633).
+ *     stays tied to the task it started on (#3633);
+ *   - which execution a file or a signal belongs to (#3883). The log was
+ *     `wait-<issue>.log` for every PR and every attempt of an Issue, and the
+ *     watched wait's `.exit` next to it, so two calls could share a log and
+ *     read each other's exit status. Each call now takes a log of its own
+ *     (execution-key.mjs: `wait-<issue>[-<item>][.a<n>].log`, created
+ *     exclusively; an existing `--log` is refused), the `.exit` carries a
+ *     token only this call knows, and the record carries the work item and
+ *     the execution key. The verification is judged by the run id it printed
+ *     (`Verifying: <wt> (run <id>)`, read back with `verify show`), not by the
+ *     newest run of the worktree. The completion signal is taken from this
+ *     task's reply (`reply --since <task start>`), or from the pane only after
+ *     a turn of this task ended, and is tied to the HEAD it was seen at; for
+ *     an instance that needs it, no verification starts before it. A run of
+ *     the worktree that is still going (`already in progress`, a
+ *     re-instruction's old run) is waited out and the verification started
+ *     again, and an Auto-Yes that cannot be read back after `--disable` is
+ *     `unknown`, not `off`.
  *
  * A passed verdict is never reused: it belongs to a task, a contract and an
  * env-clean baseline taken when that task started, none of which a HEAD names.
@@ -49,7 +66,7 @@
  *   node scripts/orchestrate/wait-verify.mjs --run-dir <dir> --issues <range> --issue <N>
  *        --wt <worktree-id> --worktree <path> --instance <agent>
  *        [--task <id>] [--model <opus|sonnet|->] [--timeout <sec>] [--log <file>]
- *        [--after-reinstruct] [--require-signal] [--signal-timeout <sec>] [--cli <commandmatedev>]
+ *        [--after-reinstruct] [--require-signal] [--signal-timeout <sec>] [--cli <commandmatedev>] [--item <work item>]
  *   node scripts/orchestrate/wait-verify.mjs --auto-yes-off --wt <worktree-id> --instance <agent> [--cli <commandmatedev>]
  */
 import fs from 'node:fs';
@@ -60,6 +77,7 @@ import { fileURLToPath } from 'node:url';
 import { appendRecord } from './run-log.mjs';
 import { dirtyPaths } from './dirty-tree.mjs';
 import { resolveInstanceThroughCli } from './resolve-instance.mjs';
+import { allocateLog, claimLog, executionKey, itemProblem, workItemName } from './execution-key.mjs';
 
 export const DEFAULT_TIMEOUT_SEC = 10800;
 export const DEFAULT_SIGNAL_TIMEOUT_SEC = 1800;
@@ -79,14 +97,38 @@ export const QUERY_TIMEOUT_MS = 15_000;
  */
 export const START_TASK_ATTEMPTS = 3;
 export const START_TASK_RETRY_MS = 5_000;
+/**
+ * A verification of the worktree that is still running when this call starts
+ * its own (`already in progress`, 409): waited for up to this long, polled
+ * every SIGNAL_POLL_SEC, and the verification started again at most
+ * VERIFY_BUSY_ATTEMPTS times (#3883).
+ */
+export const VERIFY_BUSY_TIMEOUT_SEC = 3600;
+export const VERIFY_BUSY_ATTEMPTS = 3;
 /** `wait`'s "no session was ever seen" (VerifyExitCode.NOT_STARTED); `wait --verify` still verifies it. */
 const NOT_STARTED_EXIT = 21;
 /** Exit codes that are a verdict: the gates ran and judged the work. */
 export const VERDICT_EXIT_CODES = [0, 20, 21];
 /** The verdict could not be tied to the finished work. */
 export const UNCONFIRMED_EXIT = 3;
-/** Instances whose turn end is not trusted as completion without the signal (3-3, #2605). */
+/**
+ * Tools whose turn end is not trusted as completion without the signal (3-3,
+ * #2605). Matched against the tool the instance runs (`cliToolId`), so a second
+ * instance (`antigravity-2`) and an alias of it need the signal too (#3883).
+ */
 export const SIGNAL_INSTANCES = ['antigravity'];
+
+/**
+ * Whether the completion signal is needed before a verdict: `--require-signal`,
+ * or an instance of a SIGNAL_INSTANCES tool. The tool is the one the server
+ * resolved (`o.cliToolId`); a server that does not name it leaves the instance
+ * id, and an id of the form `<tool>-<n>` (the roster's ids) counts as that tool.
+ */
+export function needsCompletionSignal(o) {
+  if (o.requireSignal) return true;
+  if (o.cliToolId) return SIGNAL_INSTANCES.includes(o.cliToolId);
+  return SIGNAL_INSTANCES.some((tool) => o.instance === tool || String(o.instance).startsWith(`${tool}-`));
+}
 const EXIT_MEANINGS = {
   0: 'passed',
   20: 'failed',
@@ -95,10 +137,11 @@ const EXIT_MEANINGS = {
   124: 'timeout',
 };
 
-function readExitFile(file) {
+/** The exit status in `file` written with `token`, or null (absent, half-written, or another writer's). */
+function readExitFile(file, token) {
   try {
-    const text = fs.readFileSync(file, 'utf8').trim();
-    return /^\d+$/.test(text) ? Number(text) : null;
+    const match = /^(\S+) (\d+)$/.exec(fs.readFileSync(file, 'utf8').trim());
+    return match && match[1] === token ? Number(match[2]) : null;
   } catch {
     return null;
   }
@@ -121,7 +164,9 @@ function stopWatched(pid) {
  * to the log) so this synchronous caller can look around while it runs:
  * `watch()` is asked every `pollMs`, and a truthy answer stops the command
  * (#3587). The exit status is looked for every EXIT_POLL_MS, so watching does
- * not make the wait return later.
+ * not make the wait return later. The status is written with a token of this
+ * call (#3883), so an `.exit` left by another attempt, or written by another
+ * process to the same name, is never read as this command's status.
  */
 export function defaultSpawnToLog(command, args, { cwd, logFile, watch, pollMs = SIGNAL_POLL_SEC * 1000 }) {
   fs.mkdirSync(path.dirname(logFile), { recursive: true });
@@ -133,17 +178,18 @@ export function defaultSpawnToLog(command, args, { cwd, logFile, watch, pollMs =
       return result.status ?? 1;
     }
     const exitFile = `${logFile}.exit`;
+    const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     fs.rmSync(exitFile, { force: true });
-    const child = spawn('sh', ['-c', '"$@"; echo $? > "$CM_WATCHED_EXIT_FILE"', 'sh', command, ...args], {
+    const child = spawn('sh', ['-c', '"$@"; echo "$CM_WATCHED_EXIT_TOKEN $?" > "$CM_WATCHED_EXIT_FILE"', 'sh', command, ...args], {
       cwd,
       stdio: ['ignore', fd, fd],
-      env: { ...process.env, CM_WATCHED_EXIT_FILE: exitFile },
+      env: { ...process.env, CM_WATCHED_EXIT_FILE: exitFile, CM_WATCHED_EXIT_TOKEN: token },
     });
     child.unref();
     try {
       let sinceWatch = 0;
       for (;;) {
-        const status = readExitFile(exitFile);
+        const status = readExitFile(exitFile, token);
         if (status !== null) return status;
         if (sinceWatch >= pollMs) {
           sinceWatch = 0;
@@ -209,12 +255,41 @@ export function summarizeVerdict(log, exitCode) {
   return { exitCode, meaning, result, basis, passed, failed, line };
 }
 
-/** Whether a pane shows the completion signal on a line of its own (3-3: the goal text also contains the word). */
-export function hasCompletionSignal(pane) {
+/**
+ * Whether a pane (or a reply) shows the completion signal on a line of its own
+ * (3-3: the goal text also contains the word). A signal that names its HEAD
+ * (`IMPL_COMPLETED head=<sha>`) counts only for that HEAD when `head` is given
+ * (#3883); the bare line the goal asks for counts as before, unless
+ * `requireHead` (a pane read with a task known: only a line naming its HEAD).
+ *
+ * @param {string} pane
+ * @param {{ head?: string, requireHead?: boolean }} [options]
+ */
+export function hasCompletionSignal(pane, { head, requireHead = false } = {}) {
   return pane
     .replace(/\u001b\[[0-9;]*m/g, '')
     .split('\n')
-    .some((line) => /^[\s]*IMPL_COMPLETED[\s]*$/.test(line));
+    .some((line) => {
+      const match = /^[\s]*IMPL_COMPLETED(?:[\s]+head=([0-9a-f]{7,40}))?[\s]*$/.exec(line);
+      if (!match) return false;
+      if (!match[1]) return !requireHead;
+      return !head || head.startsWith(match[1]);
+    });
+}
+
+/** The id of the last verification run a `wait --verify` / `verify` log started (`Verifying: <wt> (run <id>)`), or null. */
+export function runIdOf(log) {
+  return [...log.matchAll(/^Verifying: \S+ \(run (\d+)\)/gm)].pop()?.[1] ?? null;
+}
+
+/**
+ * The run that kept a verification from starting (`already in progress`, the
+ * verify route's 409, src/cli/utils/verify-runner.ts), as `{ runId }` (null
+ * when the message does not name it), or null when the log is not that.
+ */
+export function busyRunOf(log) {
+  const match = /A verification run is already in progress for '[^']*'(?: \(run (\d+)\))?/.exec(log);
+  return match ? { runId: match[1] ?? null } : null;
 }
 
 function git(run, worktree, args) {
@@ -233,10 +308,22 @@ function readJson(run, cli, args, cwd) {
   }
 }
 
-/** Epoch ms the newest verification run of the worktree started, or null. */
-function latestRunStart(run, cli, wt, cwd) {
-  const runs = readJson(run, cli, ['verify', 'history', '--worktree', wt, '--limit', '1', '--json'], cwd);
-  const started = Array.isArray(runs) && runs[0] ? Date.parse(runs[0].startedAt) : NaN;
+/**
+ * One verification run by the id it printed (`verify show <id> --json`), or
+ * null. Not the worktree's newest run (`history --limit 1`): after this run
+ * ended another may have started, and its start time is not this verdict's
+ * (#3883 H-5). A run of another worktree is not this one either.
+ */
+function readRun(run, cli, wt, runId, cwd) {
+  if (!runId) return null;
+  const shown = querySafely(run, cli, ['verify', 'show', String(runId), '--json'], cwd);
+  const view = shown?.run ?? shown;
+  return view && String(view.id) === String(runId) && (!view.worktreeId || view.worktreeId === wt) ? view : null;
+}
+
+/** Epoch ms the verification run `runId` started, or null. */
+function runStart(run, cli, wt, runId, cwd) {
+  const started = Date.parse(readRun(run, cli, wt, runId, cwd)?.startedAt);
   return Number.isFinite(started) ? started : null;
 }
 
@@ -267,11 +354,14 @@ function querySafely(run, cli, args, cwd) {
  *
  * @param {string} wt
  * @param {string} selector
- * @param {{ cwd?: string, cli?: string, run?: typeof defaultRun }} [options]
- * @returns {{ instanceId: string } | { error: string }}
+ * `withTool` also returns the tool the instance runs (`cliToolId`), which
+ * decides whether the completion signal is needed (#3883).
+ *
+ * @param {{ cwd?: string, cli?: string, run?: typeof defaultRun, withTool?: boolean }} [options]
+ * @returns {{ instanceId: string, cliToolId?: string } | { error: string }}
  */
-export function defaultResolveTarget(wt, selector, { cwd, cli = 'commandmatedev', run = defaultRun } = {}) {
-  return resolveInstanceThroughCli(run, cli, wt, selector, { cwd, timeoutMs: QUERY_TIMEOUT_MS });
+export function defaultResolveTarget(wt, selector, { cwd, cli = 'commandmatedev', run = defaultRun, withTool = false } = {}) {
+  return resolveInstanceThroughCli(run, cli, wt, selector, { cwd, timeoutMs: QUERY_TIMEOUT_MS, withTool });
 }
 
 /** The instance a task was sent to: its instance id, or the agent's primary instance. */
@@ -339,67 +429,169 @@ export function supersededReason(newer, baseline) {
  * Turn Auto-Yes off and read it back, retrying. Asked on every call — a failure
  * on one call is not remembered as "done" by the next.
  *
- * @returns {'off' | 'NOT-disabled'}
+ * A read-back that fails (capture exits non-zero, or its JSON does not parse)
+ * is not "off" (#3883 H-7): the disable may well have worked, but nothing
+ * confirmed it. It is asked again, and `unknown` if no read ever answers.
+ *
+ * @returns {'off' | 'NOT-disabled' | 'unknown'}
  */
 export function disableAutoYes({ run, sleep, cli, wt, instance, cwd, error }) {
   let last = '';
+  let outcome = 'NOT-disabled';
   for (let attempt = 1; attempt <= AUTO_YES_ATTEMPTS; attempt++) {
     const off = run(cli, ['auto-yes', wt, '--disable', '--instance', instance], { cwd });
     if (off.status === 0) {
-      // `autoYes` is absent when the session is not running; only `enabled: true` is "still on".
       const state = readJson(run, cli, ['capture', wt, '--instance', instance, '--json'], cwd);
-      if (state?.autoYes?.enabled !== true) return 'off';
-      last = 'still enabled after --disable';
+      // `autoYes` is absent when the session is not running; only `enabled: true` is "still on".
+      if (state !== null && typeof state === 'object' && state.autoYes?.enabled !== true) return 'off';
+      outcome = state === null || typeof state !== 'object' ? 'unknown' : 'NOT-disabled';
+      last = outcome === 'unknown' ? 'the state could not be read back after --disable' : 'still enabled after --disable';
     } else {
+      outcome = 'NOT-disabled';
       last = (off.stderr || off.stdout).trim();
     }
     if (attempt < AUTO_YES_ATTEMPTS) sleep(2000);
   }
-  error(`WARNING: auto-yes --disable failed for ${wt} (${instance}): ${last} (after ${AUTO_YES_ATTEMPTS} attempts)`);
-  return 'NOT-disabled';
+  error(
+    outcome === 'unknown'
+      ? `WARNING: auto-yes for ${wt} (${instance}) is unknown: ${last} (after ${AUTO_YES_ATTEMPTS} attempts)`
+      : `WARNING: auto-yes --disable failed for ${wt} (${instance}): ${last} (after ${AUTO_YES_ATTEMPTS} attempts)`
+  );
+  return outcome;
+}
+
+/**
+ * Wait until the completion signal of this task is seen (3-3, #2605), and
+ * name the HEAD it was seen at (#3883 H-6). With a task to date it by
+ * (`since`: the task's creation), a signal is this task's only when
+ *   - it is in this task's reply (`reply --since <task start> --json`: the
+ *     transcript turns of the instance from the task's creation on), or
+ *   - the reply has nothing (`reply: null` — no reply yet, or none written)
+ *     or cannot be read, and the pane shows `IMPL_COMPLETED head=<sha>` naming
+ *     the current HEAD, committed at or after the task was created: a commit
+ *     of this task that an earlier task's line cannot name.
+ * A bare `IMPL_COMPLETED` on the pane is not enough with a task known: the
+ * line of an earlier task stays on the screen, and a turn of this task that
+ * ended mid-work (`schedule`, a stop hook) does not make it this task's.
+ * Nothing that ties the line to the task is "not yet", until --signal-timeout.
+ * A signal that names its HEAD must name the current one. With no task to
+ * date it by (`since` null: the ledger does not show the task), the pane line
+ * is taken as before and noted `signal-task=unknown`.
+ *
+ * @returns {{ seen: true, head: string, note: string } | { seen: false, reason: string }}
+ */
+export function awaitCompletionSignal({ run, sleep, now, o, cwd, since, supersededBy }) {
+  const deadline = now().getTime() + Number(o.signalTimeout) * 1000;
+  const sinceIso = typeof since === 'number' ? new Date(since).toISOString() : null;
+  for (;;) {
+    const head = git(run, o.worktree, ['rev-parse', 'HEAD']).trim();
+    const replied = sinceIso
+      ? querySafely(run, o.cli, ['reply', o.wt, '--instance', o.instance, '--since', sinceIso, '--json'], cwd)
+      : null;
+    const reply = typeof replied?.reply === 'string' ? replied.reply : null;
+    if (reply !== null) {
+      if (hasCompletionSignal(reply, { head })) return { seen: true, head, note: 'signal=seen(reply)' };
+    } else {
+      const pane = run(o.cli, ['capture', o.wt, '--instance', o.instance, '--pane', '--tail', '40'], { cwd });
+      const screen = pane.status === 0 ? pane.stdout : '';
+      if (!sinceIso) {
+        if (hasCompletionSignal(screen, { head })) return { seen: true, head, note: 'signal=seen signal-task=unknown' };
+      } else if (hasCompletionSignal(screen, { head, requireHead: true })) {
+        // The line names this HEAD; it is this task's when this HEAD is a commit of this task.
+        const committedAt = Date.parse(git(run, o.worktree, ['log', '-1', '--format=%cI', head]).trim());
+        if (Number.isFinite(committedAt) && committedAt >= since) return { seen: true, head, note: 'signal=seen(pane,head)' };
+      }
+    }
+    const newer = supersededBy?.();
+    if (newer) return { seen: false, reason: newer };
+    if (now().getTime() >= deadline) return { seen: false, reason: `no IMPL_COMPLETED line within ${o.signalTimeout}s` };
+    sleep(SIGNAL_POLL_SEC * 1000);
+  }
+}
+
+/**
+ * Run `verify` into `logFile`, and when another run of the worktree is still
+ * going (`already in progress`: a re-instruction's old run, or one a person
+ * started), wait for that run to end and start again (#3883 P4) — rather than
+ * taking the 409's exit 99 as the result. The verdict is the run this call
+ * started (its `Verifying: … (run <id>)` line), never the run waited for.
+ *
+ * @returns {{ exitCode: number, log: string, notes: string[], superseded: string | null }}
+ */
+export function runVerify({ spawnToLog, run, sleep, now, o, cwd, supersededBy }, args, logFile) {
+  const notes = [];
+  for (let attempt = 1; ; attempt++) {
+    const exitCode = spawnToLog(o.cli, args, { cwd, logFile });
+    const log = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8') : '';
+    const busy = VERDICT_EXIT_CODES.includes(exitCode) ? null : busyRunOf(log);
+    if (!busy) return { exitCode, log, notes, superseded: null };
+    const waited = awaitRunEnd({ run, sleep, now, o, cwd, supersededBy }, busy.runId);
+    notes.push(`waited-for=run ${busy.runId ?? '?'}${waited.ended ? '' : '(still running)'}`);
+    if (waited.superseded) return { exitCode, log, notes, superseded: waited.superseded };
+    if (!waited.ended || attempt >= VERIFY_BUSY_ATTEMPTS) return { exitCode, log, notes, superseded: null };
+  }
+}
+
+/** Wait for the verification run `runId` to leave `running` (or, unnamed, one poll interval). */
+function awaitRunEnd({ run, sleep, now, o, cwd, supersededBy }, runId) {
+  const deadline = now().getTime() + VERIFY_BUSY_TIMEOUT_SEC * 1000;
+  for (;;) {
+    if (!runId) {
+      sleep(SIGNAL_POLL_SEC * 1000);
+      return { ended: true, superseded: supersededBy?.() ?? null };
+    }
+    const view = readRun(run, o.cli, o.wt, runId, cwd);
+    if (view && view.status !== 'running') return { ended: true, superseded: supersededBy?.() ?? null };
+    const newer = supersededBy?.();
+    if (newer) return { ended: false, superseded: newer };
+    if (now().getTime() >= deadline) return { ended: false, superseded: null };
+    sleep(SIGNAL_POLL_SEC * 1000);
+  }
 }
 
 /**
  * Tie a verdict to the finished work (3-3).
  *
+ * `ctx.signal` is the completion signal main() already waited for before the
+ * verification (#3883); without it the signal, when one is needed, is waited
+ * for here, as before. The verification's start is read by the run id its log
+ * printed (H-5).
+ *
  * @returns {{ state: 'confirmed' | 'working' | 'dirty', exitCode: number, log: string, reason: string, reverified: boolean }}
  */
 export function confirmCompletion(ctx) {
-  const { run, sleep, now, o, cwd, verdict } = ctx;
+  const { run, now, o, cwd, verdict } = ctx;
   let { exitCode, log } = verdict;
   const notes = [];
 
   // 1. The completion signal, for instances whose turn end can come mid-work.
-  if (o.requireSignal || SIGNAL_INSTANCES.includes(o.instance)) {
-    const deadline = now().getTime() + Number(o.signalTimeout) * 1000;
-    for (;;) {
-      const pane = run(o.cli, ['capture', o.wt, '--instance', o.instance, '--pane', '--tail', '40'], { cwd });
-      if (pane.status === 0 && hasCompletionSignal(pane.stdout)) break;
-      const newer = ctx.supersededBy?.();
-      if (newer) return { state: 'working', exitCode, log, reason: newer, reverified: false };
-      if (now().getTime() >= deadline) {
-        return { state: 'working', exitCode, log, reason: `no IMPL_COMPLETED line within ${o.signalTimeout}s`, reverified: false };
-      }
-      sleep(SIGNAL_POLL_SEC * 1000);
-    }
-    notes.push('signal=seen');
+  let signal = ctx.signal ?? null;
+  if (!signal && needsCompletionSignal(o)) {
+    const seen = awaitCompletionSignal({ ...ctx, since: ctx.since ?? null });
+    if (!seen.seen) return { state: 'working', exitCode, log, reason: seen.reason, reverified: false };
+    signal = seen;
   }
+  if (signal) notes.push(signal.note);
 
   // 2. Did the verification see the final state? It did not if a commit landed
-  //    after it started, or if it started before the last turn end and the tree
-  //    has changed since (3-3 "before-signal").
-  const started = latestRunStart(run, o.cli, o.wt, cwd);
+  //    after it started, if the HEAD moved after the completion signal, or if
+  //    it started before the last turn end and the tree has changed since
+  //    (3-3 "before-signal").
+  const runId = runIdOf(log);
+  const started = runStart(run, o.cli, o.wt, runId, cwd);
   const state = readJson(run, o.cli, ['capture', o.wt, '--instance', o.instance, '--json'], cwd);
   const lastStop = typeof state?.lastStopEventAt === 'number' ? state.lastStopEventAt : null;
   const committedAt = Date.parse(git(run, o.worktree, ['log', '-1', '--format=%cI']).trim());
   const dirty = dirtyPaths(run, o.worktree);
   const beforeSignal = started !== null && lastStop !== null && started < lastStop;
   const committedAfter = started !== null && Number.isFinite(committedAt) && committedAt > started;
+  const movedSinceSignal = signal !== null && git(run, o.worktree, ['rev-parse', 'HEAD']).trim() !== signal.head;
+  if (runId) notes.push(`run=${runId}`);
   if (started === null) notes.push('run-start=unknown');
   if (lastStop === null) notes.push('last-stop=unknown');
 
   let reverified = false;
-  if (committedAfter || (beforeSignal && dirty.length > 0)) {
+  if (committedAfter || movedSinceSignal || (beforeSignal && dirty.length > 0)) {
     if (!o.taskId) {
       return {
         state: 'working',
@@ -413,10 +605,13 @@ export function confirmCompletion(ctx) {
     if (newer) return { state: 'working', exitCode, log, reason: newer, reverified };
     const reLog = `${o.logFile.replace(/\.log$/, '')}.reverify.log`;
     const reStart = now().getTime();
-    exitCode = ctx.spawnToLog(o.cli, ['verify', o.wt, '--task', o.taskId, '--instance', o.instance], { cwd, logFile: reLog });
-    log = fs.existsSync(reLog) ? fs.readFileSync(reLog, 'utf8') : '';
+    const again = runVerify(ctx, ['verify', o.wt, '--task', o.taskId, '--instance', o.instance], reLog);
+    ({ exitCode, log } = again);
     reverified = true;
-    notes.push('reverified=verify --task');
+    notes.push('reverified=verify --task', ...again.notes);
+    if (again.superseded) return { state: 'working', exitCode, log, reason: again.superseded, reverified };
+    const reRun = runIdOf(log);
+    if (reRun) notes.push(`run=${reRun}`);
     const recommitted = Date.parse(git(run, o.worktree, ['log', '-1', '--format=%cI']).trim());
     if (Number.isFinite(recommitted) && recommitted > reStart) {
       return { state: 'working', exitCode, log, reason: 'a commit landed during the re-verification', reverified };
@@ -435,6 +630,7 @@ export function confirmCompletion(ctx) {
 const USAGE = `Usage:
   node scripts/orchestrate/wait-verify.mjs --run-dir <dir> --issues <range> --issue <N> --wt <worktree-id> --worktree <path> --instance <agent>
        [--task <id>] [--model <opus|sonnet|->] [--timeout <sec>] [--log <file>] [--after-reinstruct] [--require-signal] [--signal-timeout <sec>] [--cli <commandmatedev>]
+       [--item <work item>]
   node scripts/orchestrate/wait-verify.mjs --auto-yes-off --wt <worktree-id> --instance <agent> [--cli <commandmatedev>]`;
 
 const FLAGS = {
@@ -450,6 +646,7 @@ const FLAGS = {
   '--signal-timeout': 'signalTimeout',
   '--log': 'log',
   '--cli': 'cli',
+  '--item': 'item',
 };
 const SWITCHES = { '--after-reinstruct': 'afterReinstruct', '--require-signal': 'requireSignal', '--auto-yes-off': 'autoYesOff' };
 
@@ -480,6 +677,8 @@ export function parseArgs(argv) {
   // 3-4: after a re-instruction the task has ended, so `wait --verify` would judge
   // an unattached run (scope SKIP, env-clean ERROR). The task must be named.
   if (options.afterReinstruct && !options.taskId) return { error: '--after-reinstruct needs --task <id>' };
+  const badItem = itemProblem(options.item);
+  if (badItem) return { error: badItem };
   return { options };
 }
 
@@ -513,12 +712,13 @@ export function main(argv, deps = {}) {
   // One id for everything that follows — the wait, the verifications, the task
   // comparison, capture and Auto-Yes: tasks carry the resolved id, not the alias.
   // Unresolvable means nothing is sent and nothing is waited for (#3587 review 2-3).
-  const target = resolveTarget(o.wt, o.instance, { cwd, cli: o.cli, run });
+  const target = resolveTarget(o.wt, o.instance, { cwd, cli: o.cli, run, withTool: true });
   if ('error' in target) {
     error(`cannot resolve --instance '${o.instance}' in ${o.wt}: ${target.error}`);
     return 2;
   }
   o.instance = target.instanceId;
+  o.cliToolId = target.cliToolId ?? null;
 
   try {
     if (o.autoYesOff) {
@@ -528,7 +728,16 @@ export function main(argv, deps = {}) {
     }
 
     const issue = Number(o.issue);
-    o.logFile = o.log ?? path.join(o.runDir, `wait-${issue}.log`);
+    // A log of this attempt's own (#3883): the work item's next free name, or `--log` if it is new.
+    let claimed;
+    try {
+      claimed = o.log ? claimLog(o.log) : allocateLog(o.runDir, 'wait', workItemName(issue, o.item));
+    } catch (err) {
+      if (!err?.usage) throw err;
+      error(`${err.message}\n${USAGE}`);
+      return 2;
+    }
+    o.logFile = claimed.file;
     const started = now();
     const instance = o.instance;
     /**
@@ -576,10 +785,22 @@ export function main(argv, deps = {}) {
       superseded = supersededBy();
       return superseded !== null;
     };
+    /** This attempt's execution key (execution-key.mjs): the task is the one the call is tied to. */
+    const key = () =>
+      executionKey({
+        issues: o.issues,
+        issue,
+        item: o.item,
+        taskId: o.taskId ?? (baseline.found ? baseline.id : null),
+        attempt: claimed.attempt,
+      });
     // Watched, the wait does not verify: `wait --verify` starts the verification
     // inside the CLI, where no check can come between the turn end and the run.
-    // This script starts `verify` itself, after one more check (#3587).
-    const split = o.afterReinstruct || watching;
+    // This script starts `verify` itself, after one more check (#3587). An
+    // instance whose turn end can come mid-work is split too: its verification
+    // starts only after its completion signal (#3883 P4), not at the hook_stop.
+    const needsSignal = needsCompletionSignal(o);
+    const split = o.afterReinstruct || watching || needsSignal;
     const waitArgs = [
       'wait', o.wt, '--instance', instance, '--on-prompt', 'human',
       ...(split ? [] : ['--verify']),
@@ -587,68 +808,103 @@ export function main(argv, deps = {}) {
     ];
     let exitCode = spawnToLog(o.cli, waitArgs, { cwd, logFile: o.logFile, ...(watching ? { watch } : {}) });
     let verdictLog = fs.existsSync(o.logFile) ? fs.readFileSync(o.logFile, 'utf8') : '';
+    const verifyCtx = { spawnToLog, run, sleep, now, o, cwd, supersededBy };
+    /** Notes about the verification (a run waited for) that go into the record. */
+    const verifyNotes = [];
+    let signal = null;
+    let signalMissing = null;
 
+    // `wait --verify` whose verification could not start because another run
+    // of the worktree was going: that run is waited out and this call verifies.
+    const busyAfterWait = !split && !VERDICT_EXIT_CODES.includes(exitCode) && busyRunOf(verdictLog) !== null;
     const verifiable = exitCode === 0 || (!o.afterReinstruct && exitCode === NOT_STARTED_EXIT);
-    if (split && !superseded && verifiable) {
+    if (((split && verifiable) || busyAfterWait) && !superseded) {
       superseded = supersededBy();
-      if (!superseded) {
+      if (!superseded && needsSignal && !busyAfterWait) {
+        const seen = awaitCompletionSignal({ ...verifyCtx, since: baseline.found ? baseline.createdAt : null });
+        if (seen.seen) signal = seen;
+        else if (seen.reason.startsWith('a newer task ')) superseded = seen.reason;
+        else signalMissing = seen.reason;
+      }
+      if (!superseded && !signalMissing) {
         // 3-4: `wait` → `verify --task`. The gates are the contract's plus the builtins.
         // The instance is passed as `wait --verify` passes it: OpenCode's work
         // evidence is read per instance, so leaving it out changes the verdict.
         // No task known (the list never read) leaves the task to the server, as `wait --verify` does.
         const verifyTask = o.taskId ?? (baseline.found ? baseline.id : null);
         const verifyLog = `${o.logFile.replace(/\.log$/, '')}.verify.log`;
-        const verifyExit = spawnToLog(
-          o.cli,
+        const verified = runVerify(
+          verifyCtx,
           ['verify', o.wt, ...(verifyTask ? ['--task', verifyTask] : []), '--instance', instance],
-          { cwd, logFile: verifyLog }
+          verifyLog
         );
+        verifyNotes.push(...verified.notes);
+        superseded = verified.superseded;
         verdictLog = o.afterReinstruct ? '' : verdictLog;
-        verdictLog += fs.existsSync(verifyLog) ? fs.readFileSync(verifyLog, 'utf8') : '';
+        verdictLog += verified.log;
         // As `wait --verify` folds it: a green run does not turn "never started" into a pass.
-        exitCode = exitCode === NOT_STARTED_EXIT && verifyExit === 0 ? NOT_STARTED_EXIT : verifyExit;
+        exitCode = exitCode === NOT_STARTED_EXIT && verified.exitCode === 0 ? NOT_STARTED_EXIT : verified.exitCode;
       }
     }
     // A newer task that came while the verification ran: its verdict is not the old task's.
-    if (!superseded && VERDICT_EXIT_CODES.includes(exitCode)) superseded = supersededBy();
+    if (!superseded && !signalMissing && VERDICT_EXIT_CODES.includes(exitCode)) superseded = supersededBy();
+    const extraNotes = () => [...verifyNotes, `key=${key()}`].join(' ');
 
     const record = (result, head, note) => {
       const durationSec = Math.round((now().getTime() - started.getTime()) / 1000);
       const { file } = appendRecord(
         o.runDir,
         o.issues,
-        { issue, stage: 'verify', result, head, taskId: o.taskId, agent: o.instance, model: o.model, durationSec, note },
+        {
+          issue,
+          stage: 'verify',
+          result,
+          head,
+          taskId: o.taskId,
+          agent: o.instance,
+          model: o.model,
+          durationSec,
+          note,
+          item: o.item,
+          key: key(),
+        },
         now()
       );
-      log(`verify #${issue} ${head.slice(0, 7)} ${result}: ${note}`);
+      log(`verify #${workItemName(issue, o.item)} ${head.slice(0, 7)} ${result}: ${note}`);
       log(`recorded -> ${file} (log: ${o.logFile})`);
     };
     const headNow = () => git(run, o.worktree, ['rev-parse', 'HEAD']).trim();
 
     if (superseded) {
       // The worker is working on the newer task: Auto-Yes stays, and no verdict is taken on the old one.
-      record('fail', headNow(), `unconfirmed: ${superseded}; ${summarizeVerdict(verdictLog, exitCode).line} auto-yes=kept`);
+      record('fail', headNow(), `unconfirmed: ${superseded}; ${summarizeVerdict(verdictLog, exitCode).line} ${extraNotes()} auto-yes=kept`);
+      return UNCONFIRMED_EXIT;
+    }
+
+    if (signalMissing) {
+      // No signal: the turn end was mid-work, so nothing was verified and Auto-Yes stays.
+      record('fail', headNow(), `unconfirmed: ${signalMissing}; ${summarizeVerdict(verdictLog, exitCode).line} ${extraNotes()} auto-yes=kept`);
       return UNCONFIRMED_EXIT;
     }
 
     if (!VERDICT_EXIT_CODES.includes(exitCode)) {
       // No verdict (prompt, timeout, error): the worker may still be working, so Auto-Yes stays.
-      record('fail', headNow(), `${summarizeVerdict(verdictLog, exitCode).line} auto-yes=kept`);
+      record('fail', headNow(), `${summarizeVerdict(verdictLog, exitCode).line} ${extraNotes()} auto-yes=kept`);
       return exitCode;
     }
 
     const confirmed = confirmCompletion({
-      run, sleep, now, spawnToLog, o, cwd, verdict: { exitCode, log: verdictLog }, supersededBy,
+      ...verifyCtx, verdict: { exitCode, log: verdictLog }, signal, since: baseline.found ? baseline.createdAt : null,
     });
     const verdict = summarizeVerdict(confirmed.log, confirmed.exitCode);
     if (confirmed.state === 'working') {
-      record('fail', headNow(), `unconfirmed: ${confirmed.reason}; ${verdict.line} auto-yes=kept`);
+      record('fail', headNow(), `unconfirmed: ${confirmed.reason}; ${verdict.line} ${extraNotes()} auto-yes=kept`);
       return UNCONFIRMED_EXIT;
     }
     // Last check before the verdict is taken and Auto-Yes goes off (a re-verification or the signal wait may have run).
     const late = supersededBy();
     if (late) {
-      record('fail', headNow(), `unconfirmed: ${late}; ${verdict.line} auto-yes=kept`);
+      record('fail', headNow(), `unconfirmed: ${late}; ${verdict.line} ${extraNotes()} auto-yes=kept`);
       return UNCONFIRMED_EXIT;
     }
 
@@ -657,11 +913,11 @@ export function main(argv, deps = {}) {
     // The tree is clean here (or the record is a fail), so this HEAD is what the verification saw.
     const head = headNow();
     if (confirmed.state === 'dirty') {
-      record('fail', head, `unconfirmed: ${confirmed.reason}; ${verdict.line} auto-yes=${autoYes}`);
+      record('fail', head, `unconfirmed: ${confirmed.reason}; ${verdict.line} ${extraNotes()} auto-yes=${autoYes}`);
       return confirmed.exitCode === 0 ? UNCONFIRMED_EXIT : confirmed.exitCode;
     }
     const extra = confirmed.reason ? ` ${confirmed.reason}` : '';
-    record(confirmed.exitCode === 0 ? 'ok' : 'fail', head, `${verdict.line}${extra} auto-yes=${autoYes}`);
+    record(confirmed.exitCode === 0 ? 'ok' : 'fail', head, `${verdict.line}${extra} ${extraNotes()} auto-yes=${autoYes}`);
     return confirmed.exitCode;
   } catch (err) {
     error(err instanceof Error ? err.message : String(err));
