@@ -108,6 +108,22 @@
  * that tick forward to a poll interval, and the hold follows it — the tick is
  * only ever read earlier than it was when the hold began.
  *
+ * The other tick past the 9 s is the duplicate guard's (#306). A prompt with
+ * the type and question of the one the poller just answered — Claude's
+ * consecutive Bash approvals all ask `Do you want to proceed?` — is not
+ * answered for `DUPLICATE_RETRY_EXPIRY_MS` (10 s) after that answer, and is
+ * answered on the first tick after. While the poller reports that the guard
+ * actually held back the prompt of this wait (`duplicateRetryReservation`,
+ * review N1: its tick matched the guard's key, since this wait opened, and no
+ * tick since read another screen, no prompt, no session or failed; the tick
+ * sending the retry keeps it until that send is settled, review N3) the hold
+ * also lasts until that retry plus two ticks: {@link duplicateRetryHoldEndsAt}.
+ * An answer alone does not: a different screen the poller will not answer, or
+ * an error backoff, after an answer still notifies at the usual 9 s. Read on
+ * every decision, not once: the reservation appears on the poller's next tick,
+ * after the wait may already be held, and the notifier asks again when the 9 s
+ * end.
+ *
  * ## The reminder is never muted
  *
  * `runEscalationTick` has already established that the wait is still open — it
@@ -126,6 +142,7 @@
 import {
   buildCompositeKey,
   COOLDOWN_INTERVAL_MS,
+  DUPLICATE_RETRY_EXPIRY_MS,
   getAutoYesState,
   MAX_BACKOFF_MS,
   POLLING_INTERVAL_MS,
@@ -283,7 +300,8 @@ function effectiveSessionWaitTickAt(tick: NonNullable<AutoYesHoldStart['sessionW
  * When this wait's `auto-yes-answering` hold ends (Issue #3791): a full
  * {@link AUTO_YES_ANSWER_GRACE_MS} after {@link autoYesHoldStartedAt}, and not
  * before {@link AUTO_YES_ANSWER_AFTER_TICK_MS} past the session wait's tick
- * pending when the hold began — while the poller that scheduled it still runs.
+ * pending when the hold began — while the poller that scheduled it still runs —
+ * nor past the duplicate guard's retry the poller reserved for this wait.
  *
  * @param now - Epoch ms of the decision; recorded as the start of a new hold
  */
@@ -295,13 +313,33 @@ export function autoYesHoldEndsAt(
   const key = buildCompositeKey(input.worktreeId, input.cliToolId, input.instanceId);
   const tick = autoYesHolds.get(key)?.sessionWaitTick;
   const graceEndsAt = startedAt + AUTO_YES_ANSWER_GRACE_MS;
+  const holdEndsAt = Math.max(graceEndsAt, duplicateRetryHoldEndsAt(key, input.waitingSince));
   // A poller stopped or replaced since (disable, off → on) will not tick.
-  if (tick === undefined || globalThis.__autoYesPollerStates?.get(key) !== tick.poller) return graceEndsAt;
+  if (tick === undefined || globalThis.__autoYesPollerStates?.get(key) !== tick.poller) return holdEndsAt;
   // Kept on the hold: an earlier tick once adopted is not lost when the poller
   // later reschedules (an ordinary tick after a failed capture, a new session
   // wait) — the hold never moves back out.
   tick.at = effectiveSessionWaitTickAt(tick);
-  return Math.max(graceEndsAt, tick.at + AUTO_YES_ANSWER_AFTER_TICK_MS);
+  return Math.max(holdEndsAt, tick.at + AUTO_YES_ANSWER_AFTER_TICK_MS);
+}
+
+/**
+ * Issue #3791: when the duplicate guard (#306) lets the running poller answer
+ * again, plus {@link AUTO_YES_ANSWER_AFTER_TICK_MS} — or -Infinity unless the
+ * poller reserved that retry for this wait (review N1): a reservation on the
+ * live poller (`__autoYesPollerStates`, so a stopped or replaced one has none),
+ * made by a tick since the wait opened, for the answer the guard still counts
+ * from. Read off `globalThis` for the reason {@link autoYesHoldStartedAt} gives.
+ */
+function duplicateRetryHoldEndsAt(key: string, waitingSince: number): number {
+  const poller = globalThis.__autoYesPollerStates?.get(key);
+  const reservation = poller?.duplicateRetryReservation;
+  if (poller === undefined || reservation === undefined || reservation === null) return -Infinity;
+  if (reservation.observedAt < waitingSince) return -Infinity;
+  if (reservation.answeredAt !== poller.lastAnsweredAt || reservation.promptKey !== poller.lastAnsweredPromptKey) {
+    return -Infinity;
+  }
+  return reservation.answeredAt + DUPLICATE_RETRY_EXPIRY_MS + AUTO_YES_ANSWER_AFTER_TICK_MS;
 }
 
 /** A hold older than this is dropped (Issue #3770): its episode is long over. */
