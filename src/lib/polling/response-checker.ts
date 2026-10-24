@@ -224,6 +224,7 @@ import {
   type ExtractionResult,
   buildPromptExtractionResult,
 } from './response-checker-extraction-result';
+import { promptDataForStorage } from './prompt-screen-reading';
 export {
   type ExtractionResult,
   incompleteResult,
@@ -854,6 +855,7 @@ function committedEpisodeId(plan: WaitingObservationPlan, committed: Observation
  * @param result - The complete extraction this tick made
  * @param isFullScreenTui - True for opencode and copilot, which keep polling after a prompt
  * @param frameTime - When the frame this prompt was read on was fetched (Issue #3798)
+ * @param frame - The capture the prompt was read on, for the stored reading (Issue #3881)
  * @returns What `checkForResponse` returns for this tick
  */
 function savePromptMessage(
@@ -861,7 +863,8 @@ function savePromptMessage(
   promptDetection: PromptDetectionResult,
   result: ExtractionResult,
   isFullScreenTui: boolean,
-  frameTime: CapturedFrameTime
+  frameTime: CapturedFrameTime,
+  frame: string,
 ): boolean {
   const { db, worktree, worktreeId, cliToolId, instanceId, resolvedInstanceId, pollerKey } = ctx;
 
@@ -950,7 +953,10 @@ function savePromptMessage(
     role: 'assistant',
     content: promptSaveContent,
     messageType: 'prompt',
-    promptData: promptDetection.promptData,
+    // Issue #3881: with what the frame was read as — the kind, the live rows,
+    // the target's completeness — so the chat transcript and every later
+    // reader take it as stated instead of deciding it again from the strings.
+    promptData: promptDataForStorage(cliToolId, frame, promptDetection),
     timestamp: new Date(),
     cliToolId,
     instanceId: resolvedInstanceId,
@@ -1729,7 +1735,7 @@ export async function checkForResponse(
       // after the answer must not re-save the reply underneath, #2230).
       if (owns) resetDuplicateResponseSkipStreak(pollerKey);
       // Asks for itself (#3701), before the prompt dedup.
-      return savePromptMessage(ctx, promptDetection, result, isFullScreenTui, frameTime);
+      return savePromptMessage(ctx, promptDetection, result, isFullScreenTui, frameTime, output);
     }
     // Issue #3538: a finished frame without a live prompt ends the run of
     // duplicate prompt ticks, as an unfinished one does in `extractCompletedTurn`.

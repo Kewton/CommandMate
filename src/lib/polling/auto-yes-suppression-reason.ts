@@ -4,7 +4,10 @@
  * `deny-pattern-unusable` is the fail-closed case: a deny pattern that cannot be
  * evaluated (unsafe, unparseable, or over-long) suppresses instead of being
  * skipped. Ignoring it would silently drop the protection the contract author
- * asked for, which is the more dangerous of the two directions.
+ * asked for, which is the more dangerous of the two directions. Issue #3881:
+ * also when the patterns could only be run against part of the request — the
+ * approval target was cut at its line cap (`approvalTargetCompleteness`) and
+ * none matched the part that was read; that case carries no `pattern`.
  */
 export type AutoYesSuppressionReason =
   | 'mode-off'

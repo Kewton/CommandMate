@@ -13,6 +13,7 @@ import type {
 import type { AutoYesInstanceSummary } from '@/types/auto-yes';
 import type { AutoYesStopReason } from '@/config/auto-yes-config';
 import type { AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
+import type { PromptReading } from '@/types/prompt-reading';
 
 export type { AgentInstance };
 
@@ -446,6 +447,22 @@ export interface BasePromptData {
    * Undefined when the frame gave no block to attribute to this prompt.
    */
   approvalTarget?: string;
+  /**
+   * Issue #3881 (H-3): `truncated` when the upward scan that bounds
+   * {@link approvalTarget} stopped at its line cap with rows still above it,
+   * so what the panel asks about may begin above the target. The resolver
+   * then does not take a deny pattern's miss as a pass. Absent means the scan
+   * stopped at a boundary, at the frame's top, or never ran — every row before
+   * this field, too.
+   */
+  approvalTargetCompleteness?: 'truncated';
+  /**
+   * Issue #3881: what the screen was read as when the row was saved — the
+   * kind, the live rows, the target's completeness and the evidence. Written
+   * by the response poller's save only; never on a live detection. Readers
+   * take it as stated; a row without it is read by their compatibility rules.
+   */
+  reading?: PromptReading;
 }
 
 /**

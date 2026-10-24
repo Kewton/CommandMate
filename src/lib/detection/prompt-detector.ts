@@ -7,10 +7,10 @@
 import { createLogger } from '@/lib/logger';
 import {
   detectMultipleChoicePrompt,
-  findApprovalContextStart,
+  findApprovalContextRange,
   joinApprovalTarget,
 } from './prompt-detect-multiple-choice';
-import type { DetectPromptOptions, PromptDetectionResult } from './types';
+import type { ApprovalContextReading, DetectPromptOptions, PromptDetectionResult } from './types';
 import { normalizeTuiFrameForDetection } from './tui-detection-frame';
 import { truncateRawContent } from './truncate-raw-content';
 
@@ -89,9 +89,20 @@ function yesNoApprovalTarget(
   tailText: string,
   tailStart: number,
   match: RegExpMatchArray,
-): string | undefined {
+): YesNoApprovalBlock {
   const { startLine, endLine } = locateMatchLines(tailText, tailStart, match);
-  return joinApprovalTarget(lines, findApprovalContextStart(lines, startLine, endLine + 1), endLine + 1);
+  const range = findApprovalContextRange(lines, startLine, endLine + 1);
+  return {
+    approvalTarget: joinApprovalTarget(lines, range.start, endLine + 1),
+    // Issue #3881 (H-3): whether the scan above stopped at a boundary.
+    approvalContext: { startRow: range.start, endRow: endLine + 1, completeness: range.completeness },
+  };
+}
+
+/** What {@link yesNoApprovalTarget} read (Issue #3881). */
+interface YesNoApprovalBlock {
+  approvalTarget: string | undefined;
+  approvalContext: ApprovalContextReading;
 }
 
 /**
@@ -102,7 +113,8 @@ function yesNoApprovalTarget(
  * @param question - The question text
  * @param cleanContent - The clean content string
  * @param rawContent - The raw content string (last 20 lines, trimmed)
- * @param approvalTarget - Issue #1699 deny-match surface for this prompt
+ * @param approvalBlock - Issue #1699 deny-match surface for this prompt, and
+ *   (Issue #3881) the rows it was cut from and whether its top is a boundary
  * @param defaultOption - Optional default option ('yes' or 'no')
  * @returns PromptDetectionResult with isPrompt: true and yes_no prompt data
  */
@@ -110,7 +122,7 @@ function yesNoPromptResult(
   question: string,
   cleanContent: string,
   rawContent: string,
-  approvalTarget: string | undefined,
+  { approvalTarget, approvalContext }: YesNoApprovalBlock,
   defaultOption?: 'yes' | 'no',
 ): PromptDetectionResult {
   return {
@@ -127,9 +139,15 @@ function yesNoPromptResult(
       // apart is the whole fix — the wide window is a scrollback view and a
       // deny pattern matched against it fires on turns that are already done.
       ...(approvalTarget !== undefined && { approvalTarget }),
+      // Issue #3881 (H-3): a target the line cap cut short is not the whole
+      // request, and the resolver must not take a deny miss on it as a pass.
+      ...(approvalTarget !== undefined && approvalContext.completeness === 'truncated' && {
+        approvalTargetCompleteness: 'truncated' as const,
+      }),
     },
     cleanContent,
     rawContent,
+    approvalContext,
   };
 }
 

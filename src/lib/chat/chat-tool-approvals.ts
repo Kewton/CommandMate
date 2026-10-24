@@ -60,6 +60,8 @@
 import type { ChatMessage } from '@/types/models';
 import { derivePromptView } from '@/lib/session/prompt-view';
 import { ASK_USER_QUESTION_TAB_BAR_PREFIX_PATTERN } from '@/lib/detection/tools/claude/picker-chrome';
+import { readStoredPromptReading } from '@/lib/detection/prompt-reading';
+import type { PromptReading } from '@/types/prompt-reading';
 
 // ============================================================================
 // Constants
@@ -270,6 +272,12 @@ export interface ToolApprovalEntry {
    * the answer.
    */
   confirmationOutcome?: ToolApprovalOutcome;
+  /**
+   * Issue #3881: `reading` when {@link kind} / {@link phase} were taken from
+   * the reading stored with the row (`promptData.reading`), as stated. Absent
+   * when the row had none and the compatibility rules decided them.
+   */
+  classifiedFrom?: 'reading';
 }
 
 /** How many of each kind a group holds, after folding (Issue #2460). */
@@ -486,6 +494,14 @@ export function isPermissionAuditMessage(message: ChatMessage | null | undefined
  *     question;
  *  4. everything else keeps its pre-#2460 treatment.
  *
+ * [Issue #3881] Ahead of 2–4, a row saved with a reading (`promptData.reading`,
+ * read off the live frame with the predicates the Auto-Yes poller acts on)
+ * is classified by it and nothing else ({@link classifyByReading}). Rules 2–4
+ * are the compatibility reader for rows without one: they decide from the
+ * stored `question` / `options`, which the save has already cut down — on
+ * Claude's 16-column confirm page to `Submit` / `Cancel` and a question with
+ * no review list, which rule 3 then missed.
+ *
  * `content` and `instructionText` are never consulted. Both hold whole panes —
  * the measured confirmation row's `instructionText` was an unrelated
  * `echo "=== commandcode インストール状況 ==="` — so a fallback that read them
@@ -495,8 +511,11 @@ function classifyToolApprovalRow(
   message: ChatMessage,
   record: Record<string, unknown> | null,
   confirmation: SubmitConfirmationShape,
-): { kind: ToolApprovalKind; phase?: ToolApprovalPhase } {
+): { kind: ToolApprovalKind; phase?: ToolApprovalPhase; classifiedFrom?: 'reading' } {
   if (isPermissionAuditMessage(message)) return { kind: 'approval' };
+
+  const reading = readStoredPromptReading(record);
+  if (reading !== null) return { ...classifyByReading(reading), classifiedFrom: 'reading' };
 
   if (record?.isAskUserQuestion === true) {
     const isConfirmation = confirmation.hasTail || confirmation.hasSubmitOptions;
@@ -508,6 +527,28 @@ function classifyToolApprovalRow(
   }
 
   return { kind: 'approval' };
+}
+
+/**
+ * The chip a stored reading stands for (Issue #3881).
+ *
+ * `confirmation` is the submission screen of a question set, so it is a
+ * question's `confirmation` phase. `permission` and `menu` are approvals.
+ * `unknown` is drawn as an approval too — the transcript's default chip, not
+ * a statement that the row is no question: the reading stays `unknown` in the
+ * row, and nothing here guesses a question out of its text.
+ */
+function classifyByReading(reading: PromptReading): { kind: ToolApprovalKind; phase?: ToolApprovalPhase } {
+  switch (reading.kind) {
+    case 'confirmation':
+      return { kind: 'question', phase: 'confirmation' };
+    case 'question':
+      return { kind: 'question', phase: reading.phase ?? 'question' };
+    case 'permission':
+    case 'menu':
+    case 'unknown':
+      return { kind: 'approval' };
+  }
 }
 
 /**
@@ -534,7 +575,7 @@ export function toToolApprovalEntry(message: ChatMessage, runId = 0): ToolApprov
   const summary = typeof message.summary === 'string' ? message.summary : '';
 
   const confirmation = readSubmitConfirmation(question, record?.options);
-  const { kind, phase } = classifyToolApprovalRow(message, record, confirmation);
+  const { kind, phase, classifiedFrom } = classifyToolApprovalRow(message, record, confirmation);
 
   let outcome: ToolApprovalOutcome;
   if (isPermissionAudit) {
@@ -609,6 +650,7 @@ export function toToolApprovalEntry(message: ChatMessage, runId = 0): ToolApprov
     reviewQuestions: confirmation.reviewQuestions,
     scopeKey,
     runId,
+    ...(classifiedFrom ? { classifiedFrom } : {}),
   };
 }
 
