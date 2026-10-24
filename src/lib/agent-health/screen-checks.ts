@@ -11,6 +11,8 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import { stripBoxDrawing } from '@/lib/detection/cli-patterns';
 import { SELECTION_LIST_REASONS } from '@/lib/detection/status-detector';
 import { detectPromptOnCleanFrame } from '@/lib/polling/response-checker';
+import { isAntigravityGenericReadingOnScreen } from '@/lib/polling/response-checker-dialog-gate';
+import { detectAntigravityNumberedDialogPrompt } from '@/lib/detection/tools/antigravity/dialog';
 import { paneEvidence, truncateEvidence } from './report';
 import type { AgentHealthCheckStatus } from './types';
 
@@ -91,7 +93,10 @@ export function pickerVerdictHolds(verdict: ScreenVerdict, expectPrompt: boolean
  * agy through the Auto-Yes poller's own entry (`detectPromptOnCleanFrame`), so
  * agy's dialog reader and its refusal of numbered screens nothing vouches for
  * (#3808, #3818) apply here as they do to the keystrokes — `detectPrompt` alone
- * reads those screens as answerable. Every other tool keeps the caller's
+ * reads those screens as answerable. Issue #3881: and the condition the
+ * poller adds once a hook receipt is in hand (a generic reading needs evidence
+ * on the screen), kept apart from the receipt, which the frame does not
+ * carry. Every other tool keeps the caller's
  * `detectPrompt` reading, unchanged: `tests/unit/guards/prompt-detector-single-entry-2368.test.ts`
  * keeps the direct callers of `detectPrompt` to a named set, so it is handed in.
  *
@@ -106,7 +111,19 @@ export function readsAsAutoYesPrompt(
   readGeneric: () => boolean
 ): boolean {
   if (cliToolId === 'antigravity') {
-    return detectPromptOnCleanFrame(stripBoxDrawing(clean), cliToolId, undefined, rawFrame).isPrompt;
+    const cleaned = stripBoxDrawing(clean);
+    // Read as a display reads it (no receipt scope: the probe has no hook
+    // receipt to consult, and whether one arrived is not a property of the
+    // frame) …
+    const reading = detectPromptOnCleanFrame(cleaned, cliToolId, undefined, rawFrame);
+    if (!reading.isPrompt) return false;
+    // … then with the screen-evidence condition the poller applies once a
+    // receipt is in hand (Issue #3881): a generic reading agy's reader did not
+    // take is an Auto-Yes prompt only when the screen shows `/feedback` or
+    // agy's permission rows. So a reply's plain list reads as no prompt here,
+    // as it does to the poller, whatever the receipt.
+    return detectAntigravityNumberedDialogPrompt(cleaned) !== null
+      || isAntigravityGenericReadingOnScreen(cleaned, reading);
   }
   return readGeneric();
 }

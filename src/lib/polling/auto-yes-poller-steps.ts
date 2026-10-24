@@ -19,7 +19,11 @@ import {
   QUESTION_LEFT_TO_HUMAN_SUPPRESSION_REASON,
 } from './auto-yes-suppression-reason';
 import { autoYesAnswerModeOf, getAutoYesState, type AutoYesState } from '../auto-yes-state';
-import { classifyAutoYesQuestion } from './auto-yes-dialog-gate';
+import {
+  autoYesQuestionTreatment,
+  classifyAutoYesQuestion,
+  type AutoYesQuestionKind,
+} from './auto-yes-dialog-gate';
 import type { AutoYesQuestionAnswering } from './auto-yes-resolver';
 import { DEFAULT_AUTO_YES_ANSWER_MODE, type AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
 import type { CLIToolType } from '../cli-tools/types';
@@ -114,8 +118,9 @@ export function questionAnsweringOf(
   judged: JudgedPrompt,
   answerMode: AutoYesAnswerMode,
 ): AutoYesQuestionAnswering | undefined {
-  if (answerMode !== 'recommended') return undefined;
-  if (classifyAutoYesQuestion(judged.promptData, judged.dialogGate) !== 'picker') return undefined;
+  // Issue #3881 (review N3): the shared table, which the observation reads too.
+  const kind = classifyAutoYesQuestion(judged.promptData, judged.dialogGate, judged.cliToolId);
+  if (autoYesQuestionTreatment(kind, answerMode) !== 'recommended-choice') return undefined;
   return { optionRecommendations: judged.optionRecommendations };
 }
 
@@ -131,7 +136,10 @@ export function questionAnsweringOf(
  *   option (`auto-yes-question-choice`). Judged without the dialog gate, so a
  *   `legacy` tool and the `CM_AUTOYES_DIALOG_GATE` kill switch change nothing
  *   here;
- * - OpenCode V2's question form — left to a human under either mode.
+ * - OpenCode V2's question form — left to a human under either mode;
+ * - Issue #3881: a copilot / codex numbered list nothing marks as a question
+ *   or as a permission (`'unidentified'`) — left to a human under `careful`;
+ *   under `recommended` it goes on to step 4 and is answered as before.
  *
  * Not a contract verdict, so `allowPromptTypes` cannot bring it back: an
  * `allow-listed` contract naming `multiple_choice` delegates permission
@@ -144,17 +152,22 @@ export function questionAnsweringOf(
  * @returns true when the prompt is withheld (the caller returns `no_answer`)
  */
 export function withheldAsQuestion(judged: JudgedPrompt): boolean {
-  const { promptData, dialogGate } = judged;
-  const kind = classifyAutoYesQuestion(promptData, dialogGate);
+  const { promptData, dialogGate, cliToolId } = judged;
+  const kind = classifyAutoYesQuestion(promptData, dialogGate, cliToolId);
   if (kind === null) return false;
   const answerMode = judged.answerMode ?? DEFAULT_AUTO_YES_ANSWER_MODE;
-  if (kind === 'picker' && answerMode === 'recommended') return false;
-  withholdQuestion(judged, answerMode, false);
+  if (autoYesQuestionTreatment(kind, answerMode) !== 'left-to-human') return false;
+  withholdQuestion(judged, answerMode, false, kind);
   return true;
 }
 
 /** Record a question left to a human (`question-left-to-human`), warning once per frame. */
-function withholdQuestion(judged: JudgedPrompt, answerMode: AutoYesAnswerMode, atSend: boolean): void {
+function withholdQuestion(
+  judged: JudgedPrompt,
+  answerMode: AutoYesAnswerMode,
+  atSend: boolean,
+  kind: AutoYesQuestionKind,
+): void {
   const { promptData, frameKey, dialogGate } = judged;
   suppressAndWarnOnce(
     judged,
@@ -165,6 +178,8 @@ function withholdQuestion(judged: JudgedPrompt, answerMode: AutoYesAnswerMode, a
       reason: QUESTION_LEFT_TO_HUMAN_SUPPRESSION_REASON,
       promptType: promptData.type,
       dialogKind: dialogGate?.dialog?.kind ?? null,
+      // Issue #3881: `unidentified` — not known to be a question, nor not one.
+      questionKind: kind,
       question: truncateForLog(promptData.question),
       answerMode,
       ...(atSend ? { atSend: true } : {}),
@@ -221,8 +236,12 @@ export function withheldAtSend(judged: JudgedPrompt, checkGrant: boolean): boole
       return true;
     }
     answerMode = autoYesAnswerModeOf(grant);
-    if (answerMode === 'careful' && classifyAutoYesQuestion(promptData, judged.dialogGate) === 'picker') {
-      withholdQuestion(judged, answerMode, true);
+    const questionKind = classifyAutoYesQuestion(promptData, judged.dialogGate, cliToolId);
+    if (
+      answerMode === 'careful' && questionKind !== null
+      && autoYesQuestionTreatment(questionKind, answerMode) === 'left-to-human'
+    ) {
+      withholdQuestion(judged, answerMode, true, questionKind);
       return true;
     }
   }

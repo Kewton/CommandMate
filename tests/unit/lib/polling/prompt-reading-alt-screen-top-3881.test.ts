@@ -195,7 +195,12 @@ describe('[#3881 N1] captureTopOf reads an alternate screen off the screen', () 
   it.each(WINDOWS)('whole screen, window %s: screen-start', (_label, window) => {
     expect(captureTopOf(wholeScreen(), window, 'claude')).toBe('screen-start');
     // tmux ends every row with a newline; the last one is not a row.
-    expect(captureTopOf(`${wholeScreen()}\n`, window, 'claude')).toBe('screen-start');
+    // Issue #3881 (second half, contract decision (5b)): at a window of
+    // exactly the pane height, the 1000-row spelling fills the window, and
+    // only the capture layer's word (`headCut === false`) says it was not cut;
+    // unreported, it is `clipped` (prompt-reading-headcut-unreported-3881).
+    const reported = window === REDUCED_CAPTURE_LINES ? false : undefined;
+    expect(captureTopOf(`${wholeScreen()}\n`, window, 'claude', reported)).toBe('screen-start');
   });
 
   it('a content row on the top row is screen-full even with room below', () => {

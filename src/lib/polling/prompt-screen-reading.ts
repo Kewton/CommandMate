@@ -24,10 +24,16 @@
  * Server-only: the confirm-page reader reaches `logger` → `env` → `fs`. The
  * client reads what this wrote through `lib/detection/prompt-reading`.
  *
- * Which tools' screens carry more evidence (agy's receipt-backed lists,
- * copilot's and codex's questions) is the second half of #3881; this module is
- * where it goes, and `tests/unit/guards/prompt-reading-sites-3881.test.ts`
- * keeps it the only place.
+ * The second half of #3881 added no evidence here, on purpose: agy's
+ * receipt-backed reply list and copilot's / codex's questions have none on
+ * their screens, and they read `unknown` here as they did. What changed is
+ * what the answering paths do with that absence — agy's reply list is not
+ * answered on a receipt alone (`response-checker-dialog-gate`'s
+ * `isAntigravityGenericReadingOnScreen`), and the `careful` answer mode
+ * leaves copilot's / codex's unidentified lists to a human
+ * (`classifyAutoYesQuestion`'s `unidentified`). New evidence, when a reader
+ * learns some, goes in here; `tests/unit/guards/prompt-reading-sites-3881.test.ts`
+ * keeps this the only place.
  *
  * @module lib/polling/prompt-screen-reading
  */
@@ -74,8 +80,14 @@ import { selectAllowOnceOption } from './auto-yes-option-effect';
  * the same size. Above that height it can: a cut capture has as many rows as
  * its window, more than any alternate screen holds, and a capture that tall
  * is a pane with history (the tool is not in the alternate screen), read as
- * a scrollback pane. Below it, a capture that filled its window is `clipped`
- * unless the capture layer said otherwise.
+ * a scrollback pane. At or below it, a capture that filled its window is
+ * `clipped` unless the capture layer said otherwise (`headCut === false`):
+ * #3881's second half (review (5b)) took away the 1000-row exception, where
+ * an unreported cut on a window of exactly {@link TUI_PANE_HEIGHT} rows was
+ * read off the screen — blank first and last rows are what a longer pane cut
+ * to its last 1000 rows can show too, so they cannot stand in for the capture
+ * layer's word. `undefined` (not reported) and `false` (reported whole) are
+ * two answers, not one.
  *
  * And the capture layer's word decides on a scrollback pane too (the fourth
  * review's N5). `headCut === false` is a known whole history, not an unknown
@@ -107,7 +119,8 @@ export function captureTopOf(
   const historyTop: CaptureTop = filled && headCut === undefined ? 'clipped' : 'history-start';
   if (cliToolId === undefined || !usesAlternateScreen(cliToolId)) return historyTop;
   if (rows > TUI_PANE_HEIGHT) return historyTop;
-  if (headCut === undefined && filled && windowLines < TUI_PANE_HEIGHT) return 'clipped';
+  // Not reported, and the window was filled: nothing says the top was not cut.
+  if (headCut === undefined && filled) return 'clipped';
   return screenTopOf(capture);
 }
 

@@ -232,6 +232,7 @@ export {
 } from './response-checker-extraction-result';
 import {
   type AntigravityReceiptScope,
+  isAntigravityGenericReadingOnScreen,
   isWithheldForWantOfReceipt,
   isNumberedDialogVouched,
 } from './response-checker-dialog-gate';
@@ -284,8 +285,10 @@ import {
  * @param receiptScope - whose frame this is, when the caller answers it
  *   automatically (Issue #2849). For agy only: a frame that reads as a prompt is
  *   then handed back as no prompt unless agy asked CommandMate about a tool call
- *   for that instance a moment ago. Omitted, the reading is not gated — which is
- *   what every caller that only DISPLAYS the frame wants.
+ *   for that instance a moment ago — and (Issue #3881) a generic numbered
+ *   reading also needs evidence on the screen itself
+ *   (`isAntigravityGenericReadingOnScreen`). Omitted, the reading is not gated —
+ *   which is what every caller that only DISPLAYS the frame wants.
  * @param frame - the SAME tick's `normalizeFrame(raw, cliToolId)`, when the
  *   caller built one (Issue #3183). The Auto-Yes poller builds it once and hands
  *   the same object to the dialog gate, so the quotation veto below and the gate
@@ -397,6 +400,16 @@ export function detectPromptOnCleanFrame(
   // agy's reader declines, and #2851 showed it can read a quotation — so a gate
   // that covered only the reader's exit would leave this one open.
   if (cliToolId === 'antigravity' && result.isPrompt && isWithheldForWantOfReceipt(receiptScope)) {
+    return { isPrompt: false, cleanContent: cleanOutput.trim() };
+  }
+  // Issue #3881 (finding 8): and with a receipt, the receipt alone does not
+  // vouch for a generic reading — a reply's plain numbered list is answered
+  // only when the screen itself shows a known menu or agy's permission rows.
+  // Only for the caller that answers (a receipt scope); a display keeps it.
+  if (
+    cliToolId === 'antigravity' && result.isPrompt && receiptScope !== undefined
+    && !isAntigravityGenericReadingOnScreen(cleanOutput, result)
+  ) {
     return { isPrompt: false, cleanContent: cleanOutput.trim() };
   }
   return result;
