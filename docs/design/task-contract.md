@@ -497,6 +497,20 @@ enforcement が「契約が無いから従来動作」と「契約が off と言
 画面に残っている間は `at` が更新され続ける — `isPromptWaiting: true` かつ `at` が新しければ
 「いまポリシー抑止で停止している」と読める。露出のみで、この記録を読んで挙動を変えるものは無い。
 
+**Auto-Yes の答え方のモードとの関係**（Issue #3863）: Auto-Yes を ON にするとき選ぶ答え方のモード
+（`recommended` = おまかせ、既定 / `careful` = 慎重）は、契約の `autoYes` の**下**に置かれる。
+契約は上限で、答えるのは「認識された入力に対する全条件の AND」が通ったときだけである。
+
+- 2 つのモードの違いは「画面の単一選択の質問（claude の `AskUserQuestion`、command-code の質問）に
+  答えるか」だけ。`recommended` は推奨（タイトルの末尾の `(Recommended)` / `（推奨）` / `(推奨)`、
+  無ければ既定）で答え、`careful` は答えない（`question-left-to-human`）
+- モードは契約が抑止したものを戻さない。`mode: off`・`denyPatterns`・`safe` の型外（質問は
+  `multiple_choice`）・`allow-listed` の型外・契約不明は、どちらのモードでも答えない。
+  `denyPatterns` は候補を選ぶ前の情報（質問文・`approvalTarget`・全選択肢ラベル）に従来どおり照合する
+- 逆に、契約はモードの見送りを戻さない。`allow-listed` に `multiple_choice` を書いても、
+  `careful` の質問は答えない
+- 許可の確認は両モードとも答える（#3822 の「今回だけ許可」の選択肢だけ）
+
 適用範囲は**サーバ側 Auto-Yes ポーラーのみ**。クライアント側 `hooks/useAutoYes.ts` は
 サーバポーラーが動いていないときだけ応答するフォールバックで、DB を読めないためポリシーを
 知らない（`src/hooks/useAutoYes.ts` の注記を参照）。

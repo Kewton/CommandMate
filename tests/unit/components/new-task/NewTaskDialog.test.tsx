@@ -277,7 +277,14 @@ describe('[#3511] NewTaskDialog — sending', () => {
     await waitFor(() => expect(nav.push).toHaveBeenCalled());
     const posts = server.calls.filter((c) => c.method === 'POST');
     expect(posts.map((c) => c.url)).toEqual(['/api/worktrees/wt-a-main/auto-yes', '/api/worktrees/wt-a-main/send']);
-    expect(posts[0].body).toEqual({ enabled: true, cliToolId: 'codex', instanceId: 'codex-2', duration: 10800000 });
+    // Issue #3863: arming names the answer mode, the default too.
+    expect(posts[0].body).toEqual({
+      enabled: true,
+      cliToolId: 'codex',
+      instanceId: 'codex-2',
+      duration: 10800000,
+      answerMode: 'recommended',
+    });
   });
 
   it('never re-arms an Auto-Yes that is already on', async () => {

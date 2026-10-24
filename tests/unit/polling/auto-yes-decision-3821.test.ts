@@ -102,6 +102,7 @@ import {
   setAutoYesEnabled,
   type AutoYesState,
 } from '@/lib/auto-yes-state';
+import type { AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
 import {
   AUTO_YES_DECISION_STALE_MS,
   clearAutoYesDecisions,
@@ -156,8 +157,9 @@ function statusPrompt(raw: string): PromptData {
   return promptData;
 }
 
-function enable(): AutoYesState {
-  const grant = setAutoYesEnabled(WT, 'claude', true, ONE_HOUR);
+/** Issue #3863: `answerMode` omitted is a new grant's default (`recommended`). */
+function enable(answerMode?: AutoYesAnswerMode): AutoYesState {
+  const grant = setAutoYesEnabled(WT, 'claude', true, ONE_HOUR, undefined, undefined, answerMode);
   expect(startAutoYesPolling(WT, 'claude').started).toBe(true);
   return grant;
 }
@@ -320,7 +322,8 @@ describe('[#3821] the tick decides', () => {
   });
 
   it('withheld with the step’s reason: a question to the operator (#3822, unchanged)', async () => {
-    enable();
+    // Issue #3863: #3861's rule is the `careful` answer mode's since the modes.
+    enable('careful');
     expect(await tick(ASK_USER_QUESTION)).toBe('no_answer');
     expect(sendPromptAnswer).not.toHaveBeenCalled();
     expect(published(ASK_USER_QUESTION)).toMatchObject({ state: 'withheld', reason: 'question-left-to-human' });

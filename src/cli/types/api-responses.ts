@@ -461,6 +461,15 @@ export interface CurrentOutputResponse {
     confirmation?: string | null;
   };
   /**
+   * Issue #3863: how Auto-Yes answers questions on this instance while it is
+   * on — `recommended` (with the recommended option, else the default) or
+   * `careful` (left to a human). Beside `autoYes`, like `autoYesDecision`.
+   * Absent while Auto-Yes is off, when the session is not running, and from a
+   * server older than the field. Mirrors: src/types/auto-yes-answer-mode.ts
+   * AutoYesAnswerMode, typed as the wire's `string` for a newer server.
+   */
+  autoYesAnswerMode?: string;
+  /**
    * Issue #520: session status from `detectSessionStatus()` — or, since Issue
    * #1723, from the agent's own lifecycle events when they are available and
    * the scraper is not reporting a prompt. `sessionStatusReason` says which.
@@ -1332,6 +1341,12 @@ export interface StructuredDecisionResult {
 export interface AutoYesSetResult {
   enabled: boolean;
   expiresAt: number | null;
+  /**
+   * Issue #3863: the answer mode the instance is on with (`recommended` /
+   * `careful`) — what an omitted `answerMode` resolved to, too. Absent when
+   * not enabled and from an older server.
+   */
+  answerMode?: string;
   pollingStarted?: boolean;
   /**
    * Approvals that were already pending and got re-judged by this call
@@ -1410,6 +1425,12 @@ export interface AutoYesStatesResponse {
      */
     stopReason?: string;
   }>;
+  /**
+   * Issue #3863: each ENABLED instance's answer mode (`recommended` /
+   * `careful`), keyed like `instances`. Beside the map rather than in its
+   * entries, whose shape is kept. Absent from older servers.
+   */
+  answerModeByInstance?: Record<string, string>;
 }
 
 /** wait exit 10 CLI extended output type */
@@ -1444,6 +1465,12 @@ export interface WaitPromptOutput {
     promptType: string;
     pattern?: string;
     ageSeconds: number;
+    /**
+     * Issue #3863: the Auto-Yes answer mode in effect (`recommended` /
+     * `careful`), from `autoYesAnswerMode`. Absent when the server publishes
+     * none (older, or Auto-Yes off). The wire's `string`, like `mode`.
+     */
+    answerMode?: string;
   };
   /**
    * One prompt observation of the frame this exit was decided on (Issue

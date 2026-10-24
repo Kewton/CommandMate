@@ -371,22 +371,59 @@ function judgeYesNoPresence(
 export const AUTO_YES_QUESTION_DIALOG_KINDS: ReadonlySet<string> = new Set(['question']);
 
 /**
- * Is the prompt a question to the operator rather than a permission? (Issue
- * #3822: Auto-Yes answers permissions only; a question is the human's.)
+ * What kind of question to the operator a prompt is, if it is one (Issue
+ * #3863):
  *
- * Judged on a gated frame only — the tool's own rules read it — so a `legacy`
- * tool (Command Code's question reader, agy) is unchanged (#3823). Evidence is
- * the dialog kind the tool reported ({@link AUTO_YES_QUESTION_DIALOG_KINDS}) or
- * the parser's AskUserQuestion footer (`isAskUserQuestion`, `Enter to select ·
- * … navigate`), which is the picker's own chrome rather than its text.
+ * - `'question-form'` — a question form the tool's own dialog rules read
+ *   ({@link AUTO_YES_QUESTION_DIALOG_KINDS}: OpenCode V2's). Left to a human
+ *   under every answer mode, as before; only on a gated frame, where those
+ *   rules ran;
+ * - `'picker'` — a picker a question reader read: Claude's AskUserQuestion
+ *   (the parser's own footer, `Enter to select · … navigate`) or Command
+ *   Code's question screen (its reader). Both set `isAskUserQuestion`, off the
+ *   picker's chrome rather than its text. Answered under the `recommended`
+ *   answer mode, left to a human under `careful`;
+ * - null — not a question (a permission, a yes/no, a list).
+ *
+ * The picker is judged WITHOUT the dialog gate (#3863): the gate's mode
+ * (`enforce` / `legacy`, and the `CM_AUTOYES_DIALOG_GATE` kill switch) says
+ * whether a frame's numbered list may be answered at all, not whether it is a
+ * question, so `legacy` does not turn a question into something Auto-Yes
+ * answers under `careful`. Claude's dialog kind `ask_user` is not evidence:
+ * Claude classifies by the context rows above the options, which on a
+ * permission dialog are the command being approved (#3748).
+ *
+ * Copilot's question (`ask_user`) is neither: nothing on its screen tells it
+ * from its pickers, so it is not judged a question (#3863 leaves it out).
+ *
+ * @param promptData - The prompt the tick read
+ * @param gate - {@link evaluateAutoYesDialogGate}'s verdict for the same frame, if it ran
+ */
+export function classifyAutoYesQuestion(
+  promptData: PromptData,
+  gate: AutoYesDialogGateVerdict | undefined,
+): 'question-form' | 'picker' | null {
+  if (gate?.gated === true && gate.dialog !== null && AUTO_YES_QUESTION_DIALOG_KINDS.has(gate.dialog.kind)) {
+    return 'question-form';
+  }
+  return promptData.type === 'multiple_choice' && promptData.isAskUserQuestion === true ? 'picker' : null;
+}
+
+/**
+ * Is the prompt a question to the operator rather than a permission, on a
+ * GATED frame? (Issue #3822.)
+ *
+ * The reading #3822 first shipped: a question only where the tool's own rules
+ * ran. Since Issue #3863 the poller reads {@link classifyAutoYesQuestion},
+ * which judges the picker without the gate (so the kill switch and the
+ * `legacy` tools do not change how a question is treated); this stays the
+ * gated half of that reading.
  *
  * @param promptData - The prompt the tick read
  * @param gate - {@link evaluateAutoYesDialogGate}'s verdict for the same frame
  */
 export function isAutoYesQuestionPrompt(promptData: PromptData, gate: AutoYesDialogGateVerdict): boolean {
-  if (!gate.gated) return false;
-  if (gate.dialog !== null && AUTO_YES_QUESTION_DIALOG_KINDS.has(gate.dialog.kind)) return true;
-  return promptData.type === 'multiple_choice' && promptData.isAskUserQuestion === true;
+  return gate.gated && classifyAutoYesQuestion(promptData, gate) !== null;
 }
 
 /**

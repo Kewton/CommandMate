@@ -34,7 +34,11 @@ import { getLastMessageAtByInstance } from '@/lib/db/chat-db';
 import { getDefaultSelectedAgents } from '@/lib/db/app-settings-db';
 import { resolveSelectedAgents } from '@/lib/selected-agents-validator';
 import { deriveSessionStatus, isUnclassifiedCliStatus } from '@/lib/session/status-mapping';
-import { getEnabledAutoYesByWorktree, getRestartReleasedAutoYesByWorktree } from '@/lib/auto-yes-state';
+import {
+  getEnabledAutoYesAnswerModeByWorktree,
+  getEnabledAutoYesByWorktree,
+  getRestartReleasedAutoYesByWorktree,
+} from '@/lib/auto-yes-state';
 import { isSessionAutoYesBlockedByContract } from '@/lib/polling/auto-yes-policy';
 import { getSessionNamespace } from '@/lib/cli-tools/session-namespace';
 import { createLogger } from '@/lib/logger';
@@ -188,6 +192,12 @@ export async function GET(request: NextRequest) {
     // entry as armed. Omitted from a row with none, so the row is the shape it
     // was.
     const restartReleasedByWorktree = getRestartReleasedAutoYesByWorktree();
+    // Issue #3863: the answer mode of each armed instance, as
+    // `{ [instanceId]: 'recommended' | 'careful' }`, so a `/sessions` tile can
+    // label its toggle as the worktree screen does. Beside `autoYesByInstance`
+    // (its entries' shape is pinned, #2512) and omitted from a row with nothing
+    // armed, like the stop reasons above.
+    const answerModeByWorktree = getEnabledAutoYesAnswerModeByWorktree();
     const worktreesWithStatus = worktrees.map((worktree) => {
       const agentInstances = agentInstancesByWorktree.get(worktree.id) ?? [];
       const status = statusByWorktree.get(worktree.id);
@@ -206,6 +216,8 @@ export async function GET(request: NextRequest) {
         lastActivityByWorktree.get(worktree.id) ?? {};
       const restartReleased = restartReleasedByWorktree.get(worktree.id);
       const autoYesStopReason = restartReleased ? { autoYesStopReasonByInstance: restartReleased } : {};
+      const answerModes = answerModeByWorktree.get(worktree.id);
+      const autoYesAnswerMode = answerModes ? { autoYesAnswerModeByInstance: answerModes } : {};
 
       // `?includeStatus=0`: the status keys are OMITTED rather than zeroed. All
       // of them are optional on `Worktree`, and absence is the only honest way
@@ -214,7 +226,7 @@ export async function GET(request: NextRequest) {
       // dot. The review block goes with it: `nextAction` / `reviewStatus` are
       // derived from the status, so there is nothing to derive them from.
       if (!status) {
-        return { ...worktree, agentInstances, sessionNotes, autoYesByInstance, lastActivityByInstance, ...autoYesStopReason };
+        return { ...worktree, agentInstances, sessionNotes, autoYesByInstance, lastActivityByInstance, ...autoYesStopReason, ...autoYesAnswerMode };
       }
 
       const base = {
@@ -225,6 +237,7 @@ export async function GET(request: NextRequest) {
         autoYesByInstance,
         lastActivityByInstance,
         ...autoYesStopReason,
+        ...autoYesAnswerMode,
       };
 
       // Issue #600: Add review fields when ?include=review

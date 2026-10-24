@@ -288,6 +288,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     autoYesExpiresAt,
     autoYesBlockedByContract,
     autoYesReleasedByRestart,
+    autoYesAnswerMode,
     autoYesStateMap,
     diffContent,
     diffFilePath,
@@ -1201,6 +1202,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                       showToolName={false}
                       blockedByContract={autoYesBlockedByContract}
                       releasedByRestart={autoYesReleasedByRestart}
+                      answerMode={autoYesAnswerMode}
                     />
                   }
                 />

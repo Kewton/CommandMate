@@ -15,10 +15,13 @@
  *   running for the instance, …);
  * - `none` — no confirmation, or one not judged yet. Never read as answering.
  *
- * Client-safe: no imports, so the browser hooks and the server read one shape.
+ * Client-safe: no imports but the dependency-free answer mode (Issue #3863),
+ * so the browser hooks and the server read one shape.
  *
  * @module types/auto-yes-decision
  */
+
+import type { AutoYesAnswerMode } from './auto-yes-answer-mode';
 
 /** What Auto-Yes is doing about the confirmation on screen. */
 export type AutoYesDecisionState = 'answering' | 'withheld' | 'none';
@@ -111,6 +114,15 @@ declare module '@/lib/session/current-output-types' {
      * running, and from a server older than the field.
      */
     autoYesDecision?: AutoYesDecisionPublished;
+    /**
+     * Issue #3863: the answer mode of the Auto-Yes grant `autoYes` describes,
+     * while it is enabled — how a question on this screen is treated
+     * (`recommended`: answered with its recommended option, else its default;
+     * `careful`: left to a human). Absent while Auto-Yes is off, when the
+     * session is not running, and from an older server. Beside `autoYes`
+     * rather than in it, for the reason `autoYesDecision` is.
+     */
+    autoYesAnswerMode?: AutoYesAnswerMode;
   }
 }
 
@@ -121,5 +133,11 @@ declare module '@/lib/realtime/types' {
      * Absent when the session is not running and from an older server.
      */
     autoYesDecision?: AutoYesDecisionPublished;
+    /**
+     * Issue #3863: `autoYesAnswerMode` of the same payload, straight through.
+     * Absent while Auto-Yes is off, when the session is not running, and from
+     * an older server.
+     */
+    autoYesAnswerMode?: AutoYesAnswerMode;
   }
 }

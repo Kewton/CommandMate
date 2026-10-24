@@ -64,6 +64,13 @@ type InstanceRow = {
    */
   autoYesStopReason?: 'server-restart';
   /**
+   * Issue #3863: the answer mode of the armed grant (`recommended` /
+   * `careful`) — how a question on this instance is treated. Present only
+   * while Auto-Yes is on and the server names one, so every other row prints
+   * the JSON it did. `--json` only: the table's `AUTO_YES` column is unchanged.
+   */
+  autoYesAnswerMode?: string;
+  /**
    * Issue #1785: what the server said this instance is running, or null.
    *
    * Verbatim. `cliTool` above answers "which agent", which the roster already
@@ -401,7 +408,7 @@ async function fetchOpencodeSessions(
  * session's own reading, which is what this command printed before.
  */
 /** One instance's Auto-Yes as the state store reports it (Issue #3300 / #3723). */
-type ArmedAutoYes = { enabled: boolean; blockedByContract: boolean; releasedByRestart: boolean };
+type ArmedAutoYes = { enabled: boolean; blockedByContract: boolean; releasedByRestart: boolean; answerMode?: string };
 
 async function fetchArmedAutoYes(
   client: ApiClient,
@@ -413,6 +420,7 @@ async function fetchArmedAutoYes(
     );
     const states = response?.instances;
     if (!states || typeof states !== 'object') return null;
+    const modes = response?.answerModeByInstance;
     return new Map(
       Object.entries(states).map(([instanceId, state]): [string, ArmedAutoYes] => {
         const enabled = state?.enabled === true;
@@ -421,6 +429,8 @@ async function fetchArmedAutoYes(
           blockedByContract: enabled && state?.blockedByContract === true,
           // Issue #3730: a server older than the field sends none — plain `no`.
           releasedByRestart: !enabled && state?.stopReason === 'server-restart',
+          // Issue #3863: an older server sends none — the row then carries none.
+          ...(enabled && typeof modes?.[instanceId] === 'string' ? { answerMode: modes[instanceId] } : {}),
         }];
       })
     );
@@ -463,6 +473,10 @@ async function listInstances(
         // is not running. Replaced below when the server names the armed
         // instances itself (Issue #3300).
         autoYes: output.autoYes?.enabled ?? false,
+        // Issue #3863: the session's own reading of the mode, replaced below too.
+        ...(output.autoYes?.enabled === true && typeof output.autoYesAnswerMode === 'string'
+          ? { autoYesAnswerMode: output.autoYesAnswerMode }
+          : {}),
         // Issue #1785: pass-through. `?? null` collapses "this daemon predates
         // the field" into the same null the server sends for "nothing knows" —
         // the CLI has no way to tell those apart and no reason to.
@@ -489,11 +503,13 @@ async function listInstances(
   const armed = instances.length > 0 ? await fetchArmedAutoYes(client, worktreeId) : null;
   const rows: InstanceRow[] = armed === null
     ? sessionRows
-    : sessionRows.map(row => {
+    : sessionRows.map(({ autoYesAnswerMode: _sessionMode, ...row }) => {
       const entry = armed.get(row.instanceId);
       return {
         ...row,
         autoYes: entry?.enabled ?? false,
+        // Issue #3863: the state store's mode, beside the arming it belongs to.
+        ...(entry?.answerMode !== undefined ? { autoYesAnswerMode: entry.answerMode } : {}),
         // Issue #3723: only the state store says this, so only this path sets it.
         ...(entry?.blockedByContract ? { autoYesBlockedByContract: true as const } : {}),
         // Issue #3730: likewise only the state store knows the restart took it.

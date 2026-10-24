@@ -29,6 +29,8 @@
  * glyph or an SGR attribute, so both spellings parse to the same block.
  */
 
+import { isRecommendedTitle, type OptionRecommendation } from '../option-recommendation';
+
 /**
  * One numbered option row.
  *
@@ -80,12 +82,34 @@ export interface NumberedOptionBlock {
   readonly lastRow: number;
   /** The non-blank rows between {@link lastRow} and the region end, joined. */
   readonly footer: string;
+  /**
+   * Issue #3863: per option (same order as {@link options}), what its title
+   * says about being recommended (`option-recommendation`). This reader joins
+   * the rows under an option into its label without knowing whether they are
+   * the title wrapping or a description, so an option with such rows is
+   * `'unknown'`, and one drawn on a single row is read off its label. The
+   * rows under the BOTTOM option are {@link footer} here, not part of it; a
+   * tool that folds them back into that option judges it itself.
+   */
+  readonly optionRecommendations: readonly OptionRecommendation[];
 }
 
-interface ParsedOptionRow {
+/** One option row, as {@link parseNumberedOptionRow} reads it. */
+export interface ParsedOptionRow {
   glyph: string | undefined;
   number: number;
   label: string;
+}
+
+/**
+ * Read one row as a numbered option row (`❯ 1. label`), or null.
+ *
+ * Exported for a tool module that walks the block's rows again to tell an
+ * option's title from its description (Issue #3863), so it reads an option
+ * row exactly as this reader does.
+ */
+export function parseNumberedOptionRow(row: string): ParsedOptionRow | null {
+  return parseOptionRow(row);
 }
 
 function parseOptionRow(row: string): ParsedOptionRow | null {
@@ -151,6 +175,8 @@ export function findNumberedOptionBlock(
 
   // 2. Walk up the run, collecting each option and any wrapped rows above it.
   const collected: ParsedOptionRow[] = [bottom];
+  // Issue #3863: whether rows were folded into each collected option's label.
+  const folded: boolean[] = [false];
   let expected = bottom.number - 1;
   let row = cursor - 1;
   let spanned = 1;
@@ -169,6 +195,7 @@ export function findNumberedOptionBlock(
     const parsed = parseOptionRow(text);
     if (parsed && parsed.number === expected) {
       collected.unshift({ ...parsed, label: [parsed.label, ...pending].join(' ').trim() });
+      folded.unshift(pending.length > 0);
       pending = [];
       expected--;
       row--;
@@ -190,5 +217,8 @@ export function findNumberedOptionBlock(
     firstRow: row + 1,
     lastRow,
     footer: footerRows.join('\n'),
+    optionRecommendations: collected.map((option, index) =>
+      folded[index] ? 'unknown' : isRecommendedTitle(option.label),
+    ),
   };
 }

@@ -18,8 +18,11 @@ import {
   POLICY_LOOKUP_FAILED_SUPPRESSION_REASON,
   QUESTION_LEFT_TO_HUMAN_SUPPRESSION_REASON,
 } from './auto-yes-suppression-reason';
-import { getAutoYesState } from '../auto-yes-state';
-import { isAutoYesQuestionPrompt } from './auto-yes-dialog-gate';
+import { autoYesAnswerModeOf, getAutoYesState, type AutoYesState } from '../auto-yes-state';
+import { classifyAutoYesQuestion } from './auto-yes-dialog-gate';
+import type { AutoYesQuestionAnswering } from './auto-yes-resolver';
+import { DEFAULT_AUTO_YES_ANSWER_MODE, type AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
+import type { CLIToolType } from '../cli-tools/types';
 import {
   forgetPartialAnswer,
   getPartialAnswer,
@@ -76,10 +79,54 @@ export function withheldForEarlierSend(judged: JudgedPrompt, screenKey: string, 
 }
 
 /**
+ * The answer mode a tick acts under (Issue #3863): the grant the tick read
+ * (its generation's, #3706), or — for a direct caller with no generation —
+ * the instance's grant as it stands, if it is on. Neither: the default,
+ * `recommended`. A grant that cannot be read is `careful`, the mode that
+ * answers less.
+ */
+export function answerModeOfTick(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string | undefined,
+  grant: AutoYesState | undefined,
+): AutoYesAnswerMode {
+  if (grant !== undefined) return autoYesAnswerModeOf(grant);
+  try {
+    const state = getAutoYesState(worktreeId, cliToolId, instanceId);
+    return state?.enabled ? autoYesAnswerModeOf(state) : DEFAULT_AUTO_YES_ANSWER_MODE;
+  } catch {
+    return 'careful';
+  }
+}
+
+/**
+ * Issue #3863: what the resolver needs to answer the prompt as a question
+ * under `answerMode`, or undefined when it is not answered as one — not a
+ * question reader's picker, or the mode is `careful` (which never answers it).
+ */
+export function questionAnsweringOf(
+  judged: JudgedPrompt,
+  answerMode: AutoYesAnswerMode,
+): AutoYesQuestionAnswering | undefined {
+  if (answerMode !== 'recommended') return undefined;
+  if (classifyAutoYesQuestion(judged.promptData, judged.dialogGate) !== 'picker') return undefined;
+  return { optionRecommendations: judged.optionRecommendations };
+}
+
+/**
  * Step 3.7 of `detectAndRespondToPrompt` (Issue #3822): a question to the
- * operator is the human's to answer, not Auto-Yes's — Auto-Yes answers
- * permissions only. Judged on a frame the tool's own rules read
- * ({@link isAutoYesQuestionPrompt}); a `legacy` tool is unchanged (#3823).
+ * operator is left to the human when Auto-Yes's answer mode says so.
+ *
+ * Issue #3863: which questions, by {@link classifyAutoYesQuestion}:
+ *
+ * - a question reader's picker (Claude's AskUserQuestion, Command Code's
+ *   question screen) — left to a human under the `careful` answer mode; under
+ *   `recommended` it goes on to step 4, which answers it with its recommended
+ *   option (`auto-yes-question-choice`). Judged without the dialog gate, so a
+ *   `legacy` tool and the `CM_AUTOYES_DIALOG_GATE` kill switch change nothing
+ *   here;
+ * - OpenCode V2's question form — left to a human under either mode.
  *
  * Not a contract verdict, so `allowPromptTypes` cannot bring it back: an
  * `allow-listed` contract naming `multiple_choice` delegates permission
@@ -92,8 +139,18 @@ export function withheldForEarlierSend(judged: JudgedPrompt, screenKey: string, 
  * @returns true when the prompt is withheld (the caller returns `no_answer`)
  */
 export function withheldAsQuestion(judged: JudgedPrompt): boolean {
+  const { promptData, dialogGate } = judged;
+  const kind = classifyAutoYesQuestion(promptData, dialogGate);
+  if (kind === null) return false;
+  const answerMode = judged.answerMode ?? DEFAULT_AUTO_YES_ANSWER_MODE;
+  if (kind === 'picker' && answerMode === 'recommended') return false;
+  withholdQuestion(judged, answerMode, false);
+  return true;
+}
+
+/** Record a question left to a human (`question-left-to-human`), warning once per frame. */
+function withholdQuestion(judged: JudgedPrompt, answerMode: AutoYesAnswerMode, atSend: boolean): void {
   const { promptData, frameKey, dialogGate } = judged;
-  if (dialogGate === undefined || !isAutoYesQuestionPrompt(promptData, dialogGate)) return false;
   suppressAndWarnOnce(
     judged,
     { reason: QUESTION_LEFT_TO_HUMAN_SUPPRESSION_REASON, mode: null, promptType: promptData.type },
@@ -102,11 +159,12 @@ export function withheldAsQuestion(judged: JudgedPrompt): boolean {
     {
       reason: QUESTION_LEFT_TO_HUMAN_SUPPRESSION_REASON,
       promptType: promptData.type,
-      dialogKind: dialogGate.dialog?.kind ?? null,
+      dialogKind: dialogGate?.dialog?.kind ?? null,
       question: truncateForLog(promptData.question),
+      answerMode,
+      ...(atSend ? { atSend: true } : {}),
     },
   );
-  return true;
 }
 
 /**
@@ -122,6 +180,11 @@ export function withheldAsQuestion(judged: JudgedPrompt): boolean {
  *   an `off`, or a deny pattern added since the tick's lookup withholds the
  *   key. A read that fails is "contract unknown" (`policy-lookup-failed`), as
  *   in step 4, and so is a grant that cannot be read.
+ * - Issue #3863: the answer mode is read off that grant again. A question the
+ *   `careful` mode leaves to a human gets no key, whatever the tick began
+ *   under; the question's answer is resolved again under the mode as it is.
+ *   (A mode change replaces the grant, so a tick that began under the old one
+ *   has usually stopped at its last generation check already.)
  *
  * The `PermissionRequest` hook is not asked this: its `allow` IS the answer,
  * decided against the grant and the contract when the hook is answered, and
@@ -132,6 +195,7 @@ export function withheldAsQuestion(judged: JudgedPrompt): boolean {
  */
 export function withheldAtSend(judged: JudgedPrompt, checkGrant: boolean): boolean {
   const { worktreeId, cliToolId, instanceId, pollerState, promptData, frameKey } = judged;
+  let answerMode = judged.answerMode ?? DEFAULT_AUTO_YES_ANSWER_MODE;
   if (checkGrant) {
     let grant: ReturnType<typeof getAutoYesState>;
     try {
@@ -151,10 +215,15 @@ export function withheldAtSend(judged: JudgedPrompt, checkGrant: boolean): boole
       });
       return true;
     }
+    answerMode = autoYesAnswerModeOf(grant);
+    if (answerMode === 'careful' && classifyAutoYesQuestion(promptData, judged.dialogGate) === 'picker') {
+      withholdQuestion(judged, answerMode, true);
+      return true;
+    }
   }
 
   const policy = getSessionAutoYesPolicy(worktreeId, cliToolId, instanceId, { fresh: true });
-  const resolution = resolveAutoAnswerWithPolicy(promptData, policy, cliToolId);
+  const resolution = resolveAutoAnswerWithPolicy(promptData, policy, cliToolId, questionAnsweringOf(judged, answerMode));
   if (resolution.suppressedBy) {
     const mode = policyLookupMode(policy);
     suppressAndWarnOnce(
@@ -197,7 +266,13 @@ export function resolveAnswerUnderPolicy(judged: JudgedPrompt): string | null {
   const { worktreeId, cliToolId, instanceId, promptData, frameKey } = judged;
   // Issue #3822: a failed lookup reaches the resolver as unknown and withholds.
   const policy = getSessionAutoYesPolicy(worktreeId, cliToolId, instanceId);
-  const resolution = resolveAutoAnswerWithPolicy(promptData, policy, cliToolId);
+  // Issue #3863: a question the `recommended` mode answers takes its recommended option.
+  const resolution = resolveAutoAnswerWithPolicy(
+    promptData,
+    policy,
+    cliToolId,
+    questionAnsweringOf(judged, judged.answerMode ?? DEFAULT_AUTO_YES_ANSWER_MODE),
+  );
   if (resolution.suppressedBy) {
     const mode = policyLookupMode(policy);
     // Issue #1684: the log line alone leaves a CLI-driven pipeline blind to

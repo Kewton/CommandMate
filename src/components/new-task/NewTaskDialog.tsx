@@ -59,6 +59,7 @@ import {
   type NewTaskSendResult,
 } from '@/lib/new-task/send-new-task';
 import { isSendNewTaskChord } from '@/lib/new-task/new-task-shortcut';
+import { DEFAULT_AUTO_YES_ANSWER_MODE, type AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
 import {
   AutoYesField,
   FailureNotice,
@@ -95,6 +96,8 @@ export function NewTaskDialog() {
   const [content, setContent] = useState('');
   const [model, setModel] = useState('');
   const [autoYesChoice, setAutoYesChoice] = useState<AutoYesDuration | null>(null);
+  // Issue #3863: the answer mode to arm with; the default until another is picked.
+  const [autoYesAnswerMode, setAutoYesAnswerMode] = useState<AutoYesAnswerMode>(DEFAULT_AUTO_YES_ANSWER_MODE);
   const [sending, setSending] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [isMac, setIsMac] = useState(false);
@@ -256,6 +259,7 @@ export function NewTaskDialog() {
       content: content.trim(),
       model: modelAvailability?.selectable ? model : undefined,
       autoYesDuration: armedAutoYes ? null : autoYesChoice,
+      autoYesAnswerMode,
     });
     sendingRef.current = false;
     setCloseLocked(false);
@@ -272,6 +276,7 @@ export function NewTaskDialog() {
       });
       setArmedHere((prev) => ({ ...prev, [targetKey]: armedNow }));
       setAutoYesChoice(null);
+      setAutoYesAnswerMode(DEFAULT_AUTO_YES_ANSWER_MODE);
     }
     if (!result.ok) {
       setFailure(result);
@@ -296,6 +301,7 @@ export function NewTaskDialog() {
     model,
     armedAutoYes,
     autoYesChoice,
+    autoYesAnswerMode,
     closeNewTask,
     setCloseLocked,
     router,
@@ -382,6 +388,8 @@ export function NewTaskDialog() {
                 autoYesChoice={autoYesChoice}
                 autoYesUnknown={autoYesUnknown}
                 onChoiceChange={setAutoYesChoice}
+                answerMode={autoYesAnswerMode}
+                onAnswerModeChange={setAutoYesAnswerMode}
               />
             </div>
           </>
