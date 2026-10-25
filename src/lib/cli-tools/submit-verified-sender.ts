@@ -98,7 +98,7 @@ import {
   TUI_MESSAGE_PROCESSED_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
 import { createLogger } from '@/lib/logger';
-import { clearComposer, findCodexLiveComposerRow } from '@/lib/session/composer-clear';
+import { clearComposer, codexDialogBelow, findCodexLiveComposerRow } from '@/lib/session/composer-clear';
 import {
   extractComposerText,
   findCodexInputBox,
@@ -647,18 +647,29 @@ function readSubmitComposer(
     const windowStart = lines.length - windowLines.length;
     const read = extractComposerText(output, cliToolId);
     if (read.state === 'content') {
+      const box = findCodexInputBox(raw);
+      // Issue #3906: a dialog option drawn below the composer the extractor
+      // located means the dialog is what the pane shows now, on every branch
+      // below — that composer is one left from before, not this send's.
+      if (box !== null && codexDialogBelow(raw, box.firstRow)) return { kind: 'absent' };
+      const outsideWindow = box !== null && box.firstRow < windowStart;
       const region = codexComposerRegion(output) ?? read.text;
       if (read.text.includes('\n')) {
-        return { kind: 'text', text: firstNonBlankLine(read.text), rows: read.text.split('\n'), region };
+        // Issue #3906: a composer of many rows with no blank line (20 lines) has
+        // its `›` row above the window too, and is marked so like the others.
+        return {
+          kind: 'text',
+          text: firstNonBlankLine(read.text),
+          rows: read.text.split('\n'),
+          region,
+          ...(outsideWindow ? { outsideWindow } : {}),
+        };
       }
       // Issue #3906 (1): the `›` row sits above the twelve-row window (a one-line
       // paragraph, a blank line, then a tall one). The marker reader would see no
       // input line there — `unseen` before Enter, `submitted` after it — so the
       // composer `extractComposerText` located is read instead, whole.
-      // A dialog drawn under it (its highlighted option is the bottom-most `›`
-      // row) is what the pane shows now: the composer is read as before.
-      const box = findCodexInputBox(raw);
-      if (box !== null && box.firstRow < windowStart && findCodexLiveComposerRow(raw) === box.firstRow) {
+      if (outsideWindow && findCodexLiveComposerRow(raw) === box.firstRow) {
         return { kind: 'text', text: read.text.trim(), rows: [raw[box.firstRow]], region, outsideWindow: true };
       }
       // Issue #3880 (N1): a one-row excerpt is read as before for its verdict

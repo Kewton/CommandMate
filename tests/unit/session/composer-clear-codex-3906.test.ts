@@ -177,3 +177,40 @@ describe('Issue #3906: findCodexLiveComposerRow', () => {
     expect(read.text).not.toContain('GPT');
   });
 });
+
+describe('Issue #3906 re-review 2 (1): clearComposer and a dialog below a composer the extractor finds', () => {
+  const ROWS = composerRows('row 1: old\nrow 2: old\nrow 3: old');
+  const DIALOG_FRAME = [
+    ...TRANSCRIPT,
+    ...ROWS,
+    '',
+    `${ESC}[1m${ESC}[38;5;6m› 1. Yes, proceed (y)${ESC}[0m`,
+    '  2. No, and tell Codex what to do differently (esc)',
+  ].join('\n');
+
+  it('the frame: the extractor reads the old composer as content', () => {
+    expect(extractComposerText(DIALOG_FRAME, 'codex').state).toBe('content');
+  });
+
+  it('positive: no clear keys into the dialog — no_composer, 0 passes (was content, passes sent)', async () => {
+    const sendClear = vi.fn().mockResolvedValue(undefined);
+    const result = await clearComposer('sess', 'codex', { capture: async () => DIALOG_FRAME, sendClear, delay: noDelay });
+    expect(sendClear).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ cleared: false, passes: 0, state: 'no_composer' });
+  });
+
+  it('negative: the same rows as the live composer are cleared', async () => {
+    const sendClear = vi.fn().mockResolvedValue(undefined);
+    const result = await clearComposer('sess', 'codex', {
+      capture: captureSequence(codexFrame(ROWS), IDLE),
+      sendClear,
+      delay: noDelay,
+    });
+    expect(sendClear).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ cleared: true, passes: 1, state: 'ghost' });
+  });
+
+  it('an attribute-free `›` row (a stripped capture) is never taken for the live composer', () => {
+    expect(findCodexLiveComposerRow(['› 1. Update now', '  2. Skip', '', 'Press enter to continue'])).toBe(-1);
+  });
+});

@@ -608,3 +608,59 @@ describe('Issue #3906 re-review (4): the withdrawal clears what the sender read 
     expect(vi.mocked(clearComposerLine)).toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Re-review 2: the extractor's multi-row branch follows the same two rules
+// ---------------------------------------------------------------------------
+
+describe('Issue #3906 re-review 2 (1): a dialog below a multi-row composer the extractor finds', () => {
+  const BODY = numberedLines(3);
+  /** The old composer is the 2nd block from the bottom; the dialog's option block is the last. */
+  const DIALOG_FRAME = [
+    ...TRANSCRIPT,
+    ...composerRows(BODY),
+    '',
+    `${ESC}[1m${ESC}[38;5;6m› 1. Yes, proceed (y)${ESC}[0m`,
+    '  2. No, and tell Codex what to do differently (esc)',
+  ].join('\n');
+  const LIVE_FRAME = codexFrame(composerRows(BODY));
+
+  it('the frame: the extractor reads the old composer as multi-row content', () => {
+    const read = extractComposerText(DIALOG_FRAME, 'codex');
+    expect(read.state).toBe('content');
+    expect(read.text).toContain('\n');
+  });
+
+  it('positive: not pending, not landed — submitted / unseen (was pending / landed)', () => {
+    expect(classifySubmit(DIALOG_FRAME, 'codex', BODY)).toBe('submitted');
+    expect(classifyPasteLanded(DIALOG_FRAME, 'codex', BODY)).toBe('unseen');
+  });
+
+  it('negative: the same rows as the live composer at the bottom are still pending / landed', () => {
+    expect(classifySubmit(LIVE_FRAME, 'codex', BODY)).toBe('pending');
+    expect(classifyPasteLanded(LIVE_FRAME, 'codex', BODY)).toBe('landed');
+  });
+});
+
+describe('Issue #3906 re-review 2 (2): a 20-row composer with no blank line, `›` above the window', () => {
+  const BODY = numberedLines(20);
+  const OTHER = codexFrame(composerRows(`something else typed here\n${numberedLines(19, 2)}`));
+  const SAME = codexFrame(composerRows(BODY));
+
+  it('the frames: the extractor reads multi-row content, the `›` row is above the window', () => {
+    for (const frame of [OTHER, SAME]) {
+      const read = extractComposerText(frame, 'codex');
+      expect(read.state).toBe('content');
+      expect(read.text).toContain('\n');
+      expect(glyphAndWindow(frame).glyph).toBeLessThan(glyphAndWindow(frame).windowStart);
+    }
+  });
+
+  it('positive: a first line that is not the body is indeterminate (was submitted)', () => {
+    expect(classifySubmit(OTHER, 'codex', BODY)).toBe('indeterminate');
+  });
+
+  it('negative: the body itself is still pending', () => {
+    expect(classifySubmit(SAME, 'codex', BODY)).toBe('pending');
+  });
+});
