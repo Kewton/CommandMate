@@ -58,8 +58,12 @@ describe('orchestrate re-instruct verification (Issue #3118)', () => {
     expect(row).toContain('--task');
   });
 
-  it('3-5 (switch to a new contract) keeps `wait ... --verify`', () => {
-    expect(`${section('3-5')}\n${docSection('switching.md', '3-5 Antigravity から Claude への切り替え')}`).toMatch(/wait .*--verify/);
+  it('3-5 (switch to a new contract) waits and verifies bound to the new task', () => {
+    const body = `${section('3-5')}\n${docSection('switching.md', '3-5 Antigravity から Claude への切り替え')}`;
+    expect(body).toMatch(/wait .*--verify|wait-verify\.mjs[\s\S]*--task "\$TASK_ID"/);
+    // not the re-instruct two-step of 3-4
+    expect(body).not.toContain('commandmatedev wait "$WT"');
+    expect(body).not.toContain('verify "$WT" --task');
   });
 });
 

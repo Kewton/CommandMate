@@ -169,7 +169,7 @@ const MODULE_REFERENCE = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*|\bvi\
 /** Files whose import declarations can be type-only. */
 const TYPED_FILE = /\.(?:[cm]?ts|tsx)$/;
 /** Cheap filter: a file without `type` in it has no type-only declaration to parse for. */
-const MAY_HAVE_TYPE_ONLY = /\btype\b/;
+const MAY_HAVE_TYPE_ONLY = /\btype(?:of)?\b|\bimport\s*\(|\bimport\s+\w+\s*=/;
 const require = createRequire(import.meta.url);
 /** @type {typeof import('typescript') | null | undefined} */
 let typescript;
@@ -235,14 +235,31 @@ function runtimeReferences(text, file) {
   if (!TYPED_FILE.test(file) || !MAY_HAVE_TYPE_ONLY.test(text)) return text;
   const ts = loadTypescript();
   if (!ts) return text;
-  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, false, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
-  let out = text;
-  // Back to front, so earlier offsets stay valid; the length is kept for the same reason.
-  for (const statement of [...source.statements].reverse()) {
-    if (!isTypeOnlyDeclaration(ts, statement)) continue;
-    const from = statement.getStart(source);
-    out = out.slice(0, from) + ' '.repeat(statement.end - from) + out.slice(statement.end);
+  let source;
+  try {
+    source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, false, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  } catch {
+    return text; // A parser failure errs wide.
   }
+  // A file that did not parse cannot be told apart reliably: keep every reference (the wide side).
+  if (source.parseDiagnostics && source.parseDiagnostics.length > 0) return text;
+  /** @type {Array<[number, number]>} */
+  const ranges = [];
+  for (const statement of source.statements) {
+    if (isTypeOnlyDeclaration(ts, statement)) ranges.push([statement.getStart(source), statement.end]);
+  }
+  // `import('x').T` / `typeof import('x')` in a type position and `import type x = require('y')` are erased too.
+  const visit = (node) => {
+    if (ts.isImportTypeNode(node) || (ts.isImportEqualsDeclaration(node) && node.isTypeOnly)) {
+      ranges.push([node.getStart(source), node.end]);
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  // Blanked to the same length, so the offsets of the other ranges stay valid.
+  let out = text;
+  for (const [from, end] of ranges) out = out.slice(0, from) + ' '.repeat(end - from) + out.slice(end);
   return out;
 }
 
