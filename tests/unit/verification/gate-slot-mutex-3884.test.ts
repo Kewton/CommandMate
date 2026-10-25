@@ -17,13 +17,15 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { execFileSync } from 'child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { runMigrations } from '@/lib/db/db-migrations';
 import { getVerificationRun, upsertWorktree } from '@/lib/db';
+import { listVerificationRunsForPeriod } from '@/lib/db/verification-db';
 import type { VerificationGateResult } from '@/lib/db';
 import {
+  cancelVerification,
   MAX_CONCURRENT_VERIFICATIONS,
   MUTEX_LOG_PREFIX,
   startVerification,
@@ -283,6 +285,62 @@ describe('a mutex wait does not hold a verification slot (Issue #3884 H-11)', ()
   }, 30_000);
 });
 
+describe('cancelling a run that gave its slot back for a mutex (Issue #3884 N3)', () => {
+  it('closes a run cancelled in its mutex wait without waiting for the two slots to come free', async () => {
+    const sharedLog = join(tempDir('gate-slot-3884-log-'), 'order.log');
+    await holdHeavyLock();
+    const runA = await startRun('wt-n3-a', gateConfig('unit', 'a', sharedLog, '0', HEAVY));
+    expect(await until(() => gateOf(runA, 'unit') !== undefined)).toBe(true);
+    // B and C take both slots for longer than the cancel endpoint waits (8s).
+    const runB = await startRun('wt-n3-b', gateConfig('lint', 'b', sharedLog, '10'));
+    const runC = await startRun('wt-n3-c', gateConfig('lint', 'c', sharedLog, '10'));
+    expect(
+      await until(() => logLines(sharedLog).filter((line) => line.endsWith('-start')).length === 2)
+    ).toBe(true);
+
+    const startedAt = Date.now();
+    const outcome = await cancelVerification(runA);
+    // Before N3 the cancelled wait went on to queue for a slot behind B and C,
+    // and the endpoint answered `requested` with A still `running`.
+    expect(outcome).toEqual({ kind: 'cancelled', status: 'cancelled' });
+    expect(Date.now() - startedAt).toBeLessThan(5000);
+    expect(getVerificationRun(db, runA)?.status).toBe('cancelled');
+    // B and C are untouched: still running, and A never started.
+    expect(logLines(sharedLog)).toEqual(expect.arrayContaining(['b-start', 'c-start']));
+    expect(logLines(sharedLog)).not.toContain('a-start');
+    expect(logLines(sharedLog).some((line) => line.endsWith('-end'))).toBe(false);
+
+    await Promise.all([cancelVerification(runB), cancelVerification(runC)]);
+  }, 40_000);
+
+  it('releases the lock of a run cancelled while it waits for a slot after taking the lock', async () => {
+    const sharedLog = join(tempDir('gate-slot-3884-log-'), 'order.log');
+    await holdHeavyLock();
+    const runA = await startRun('wt-n3l-a', gateConfig('unit', 'a', sharedLog, '0', HEAVY));
+    expect(await until(() => gateOf(runA, 'unit') !== undefined)).toBe(true);
+    const runB = await startRun('wt-n3l-b', gateConfig('lint', 'b', sharedLog, '10'));
+    const runC = await startRun('wt-n3l-c', gateConfig('lint', 'c', sharedLog, '10'));
+    expect(
+      await until(() => logLines(sharedLog).filter((line) => line.endsWith('-start')).length === 2)
+    ).toBe(true);
+    // The lock comes free and A takes it; A then waits for a slot B and C hold.
+    releaseHeavyLock();
+    const lockDir = join(lockRoot, `${HEAVY}.lock`);
+    expect(await until(() => existsSync(lockDir))).toBe(true);
+
+    const startedAt = Date.now();
+    const outcome = await cancelVerification(runA);
+    expect(outcome).toEqual({ kind: 'cancelled', status: 'cancelled' });
+    expect(Date.now() - startedAt).toBeLessThan(5000);
+    expect(gateOf(runA, 'unit')?.status).toBe('skipped');
+    expect(logLines(sharedLog)).not.toContain('a-start');
+    // The lock is not left held for a run that will never use it.
+    expect(existsSync(lockDir)).toBe(false);
+
+    await Promise.all([cancelVerification(runB), cancelVerification(runC)]);
+  }, 40_000);
+});
+
 describe('[timing]: waits and execution recorded apart (Issue #3884)', () => {
   it('records queue, mutex and run for a mutexed gate, next to the [mutex] waited=', async () => {
     const sharedLog = join(tempDir('gate-slot-3884-log-'), 'order.log');
@@ -306,6 +364,24 @@ describe('[timing]: waits and execution recorded apart (Issue #3884)', () => {
     // The first line is still the [mutex] marker the CLI and the reader take first.
     expect(gate?.logTail?.split('\n')[0]).toMatch(new RegExp(`^\\${MUTEX_LOG_PREFIX} `));
     expect(gate?.logTail?.trimEnd().split('\n').at(-1)).toMatch(new RegExp(`^\\${TIMING_LOG_PREFIX} `));
+  }, 20_000);
+
+  it('reaches the history listing as numbers, the way verify history --json reads it (N4)', async () => {
+    const sharedLog = join(tempDir('gate-slot-3884-log-'), 'order.log');
+    await holdHeavyLock();
+    const runId = await startRun('wt-timing-history', gateConfig('unit', 'h', sharedLog, '0', HEAVY));
+    expect(await until(() => gateOf(runId, 'unit') !== undefined)).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    releaseHeavyLock();
+    await waitForVerification(runId);
+
+    const stored = timingOf(gateOf(runId, 'unit')?.logTail);
+    const listed = listVerificationRunsForPeriod(db).find((run) => run.id === runId);
+    const unit = listed?.gates.find((gate) => gate.gateId === 'unit');
+    expect(stored).not.toBeNull();
+    expect(unit?.timing).toEqual({ queueSec: stored?.queue, mutexSec: stored?.mutex, runSec: stored?.run });
+    // The built-in gates waited for nothing: no timing for them.
+    expect(listed?.gates.find((gate) => gate.gateId === 'work-evidence')).not.toHaveProperty('timing');
   }, 20_000);
 
   it('keeps a mutex-wait skip reading as mutex-wait, with the wait on the timing line', async () => {

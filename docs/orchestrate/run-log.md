@@ -98,7 +98,7 @@ while IFS="$(printf '\t')" read -r issue WT AGENT TASK_ID MODEL COL6 REST <&3; d
     --issue "$issue" --stage findings --result ok --head "$(git -C "$WT_DIR" rev-parse HEAD)" "${ITEM_ARGS[@]}"
   node scripts/orchestrate/precheck.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
     --issue "$issue" --worktree "$WT_DIR" "${ITEM_ARGS[@]}"
-  RC=$?; echo "precheck exit=$RC issue=${issue} item=${ITEM:--}"   # runs/$DATE/precheck-<issue>[-<item>]-<sha>.log
+  RC=$?; echo "precheck exit=$RC issue=${issue} item=${ITEM:--}"   # runs/$DATE/precheck-<issue>[-<item>]-<sha>.log。3 は cpu.heavy が空かず裁定不能（再実行する。ci-merge.md 6-1-1）
   [ "$RC" = 0 ] || continue
   node scripts/orchestrate/publish-pr.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
     --issue "$issue" --worktree "$WT_DIR" --label feature "${ITEM_ARGS[@]}"

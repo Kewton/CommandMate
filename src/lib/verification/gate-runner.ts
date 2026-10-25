@@ -229,8 +229,10 @@ export const FLAKY_LOG_PREFIX = '[flaky]';
  * the CLI reads). Written only for a gate that has a `mutex` or that waited for
  * a slot: a gate that did neither has no wait to report, and its log stays
  * byte-identical to before the marker existed. Travels on `log_tail` like
- * `waited=` does, so it reaches `verify --json` and `verify history` without a
- * migration.
+ * `waited=` does, so it reaches `verify --json` and `verify show` without a
+ * migration; the history listing, which carries no log, reads this one line
+ * into numbers (verification-db.ts parseGateTiming, the `timing` of a gate
+ * summary — keep the two formats in step).
  */
 export const TIMING_LOG_PREFIX = '[timing]';
 
@@ -367,14 +369,33 @@ const slotWaiters: Array<() => void> = [];
  *        `mutex` and now holds that machine-wide lock: every second it spends
  *        here is a second the lock is held with nothing running under it.
  */
-function acquireSlot(priority = false): Promise<void> {
+function acquireSlot(priority = false, cancellation?: RunCancellation): Promise<boolean> {
   if (activeVerifications < MAX_CONCURRENT_VERIFICATIONS) {
     activeVerifications += 1;
-    return Promise.resolve();
+    return Promise.resolve(true);
   }
-  return new Promise<void>((resolve) => {
-    if (priority) slotWaiters.unshift(resolve);
-    else slotWaiters.push(resolve);
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    let unregister = (): void => {};
+    const grant = (): void => {
+      settled = true;
+      unregister();
+      resolve(true);
+    };
+    if (priority) slotWaiters.unshift(grant);
+    else slotWaiters.push(grant);
+    // Issue #3884 N3: a cancelled wait leaves the queue instead of waiting for
+    // whatever the other slots are executing. Leaving takes nothing, so there
+    // is nothing to hand back.
+    if (cancellation) {
+      unregister = cancellation.register(() => {
+        if (settled) return;
+        settled = true;
+        const at = slotWaiters.indexOf(grant);
+        if (at >= 0) slotWaiters.splice(at, 1);
+        resolve(false);
+      });
+    }
   });
 }
 
@@ -416,16 +437,21 @@ class RunSlot {
     return this.held;
   }
 
-  async acquire(priority = false): Promise<void> {
-    if (this.held) return;
+  /**
+   * @param cancellation when given, a cancel abandons the wait (Issue #3884 N3)
+   * @returns false when the wait was abandoned: no slot is held
+   */
+  async acquire(priority = false, cancellation?: RunCancellation): Promise<boolean> {
+    if (this.held) return true;
     // Only a real queue counts: a free slot is taken without a wait, and a
     // gate that never waited must not grow a `queue=0.0s` line (its log stays
     // byte-identical to before #3884).
     const queued = activeVerifications >= MAX_CONCURRENT_VERIFICATIONS;
     const startedAt = Date.now();
-    await acquireSlot(priority);
-    this.held = true;
+    const taken = await acquireSlot(priority, cancellation);
+    this.held = taken;
     if (queued) this.queuedMs += Math.max(1, Date.now() - startedAt);
+    return taken;
   }
 
   /** Idempotent: a slot already handed back is not released twice. */
@@ -885,8 +911,12 @@ async function runGateAttempt(
   });
   waits.mutexMs += lock.waitedMs;
   // Taken back even when the lock was not: the run goes on to record (or run)
-  // the gates after this one, and those are under the same bound.
-  await slot.acquire(true);
+  // the gates after this one, and those are under the same bound. Not by a
+  // cancelled run (#3884 N3): it executes nothing more, and waiting for the
+  // gates the other slots are running would keep its worktree held past the
+  // cancel endpoint's budget. The wait for the slot is cancellable too — the
+  // latch is read below, and the lock released, once it returns.
+  if (!cancellation.cancelled) await slot.acquire(true, cancellation);
   waits.queueMs += slot.takeQueuedMs();
   if (!lock.acquired) {
     const recordedAt = Date.now();

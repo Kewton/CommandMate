@@ -63,6 +63,7 @@ function seedRun(opts: {
   daysAgo?: number;
   gateId?: string;
   status?: 'passed' | 'failed';
+  logTail?: string;
 }): number {
   const run = createVerificationRun(db, { worktreeId: opts.worktreeId, trigger: 'manual' });
   const gate = createGateResult(db, run.id, {
@@ -74,7 +75,7 @@ function seedRun(opts: {
     status: opts.status ?? 'failed',
     exitCode: opts.status === 'passed' ? 0 : 1,
     durationMs: 45_000,
-    logTail: LOG_BODY,
+    logTail: opts.logTail ?? LOG_BODY,
   });
   finishVerificationRun(db, run.id, opts.status ?? 'failed');
   if (opts.daysAgo !== undefined) setStartedAt(run.id, Date.now() - opts.daysAgo * MS_PER_DAY);
@@ -133,6 +134,24 @@ describe('GET /api/verification/runs — the listing never carries log bodies', 
     const res = await list('http://localhost/api/verification/runs');
 
     expect(JSON.stringify(await res.json())).not.toContain('FAILING ASSERTION');
+  });
+});
+
+describe('GET /api/verification/runs — the gate timing (Issue #3884)', () => {
+  it('carries the [timing] numbers of a gate, still without its log', async () => {
+    seedRun({ worktreeId: 'wt-1', logTail: `${LOG_BODY}\n[timing] queue=4.0s mutex=120.5s run=45.0s` });
+    seedRun({ worktreeId: 'wt-2' });
+
+    const res = await list('http://localhost/api/verification/runs');
+    const body = await res.json();
+
+    const byWorktree = new Map(body.runs.map((run: { worktreeId: string }) => [run.worktreeId, run]));
+    const timed = byWorktree.get('wt-1') as { gates: Array<Record<string, unknown>> };
+    const untimed = byWorktree.get('wt-2') as { gates: Array<Record<string, unknown>> };
+    expect(timed.gates[0].timing).toEqual({ queueSec: 4, mutexSec: 120.5, runSec: 45 });
+    // A run without the line keeps the five fields it always had.
+    expect(untimed.gates[0]).not.toHaveProperty('timing');
+    expect(JSON.stringify(body)).not.toContain('FAILING ASSERTION');
   });
 });
 

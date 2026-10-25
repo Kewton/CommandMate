@@ -17,6 +17,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readRecords } from '../../../../scripts/orchestrate/run-log.mjs';
 import {
   ALWAYS_TESTS,
+  EXIT_HELD,
+  HELD,
   HEAVY_LOCK_TIMEOUT_SEC,
   HEAVY_MUTEX,
   HEAVY_RELATED_SOURCES,
@@ -25,6 +27,7 @@ import {
   estimateRelatedTests,
   machineLockRoot,
   main,
+  parseNote,
   planSteps,
 } from '../../../../scripts/orchestrate/precheck.mjs';
 import { UNIT_RELATED_GATE } from '../../../../scripts/orchestrate/contract.mjs';
@@ -99,6 +102,39 @@ describe('estimateRelatedTests', () => {
     expect(estimateRelatedTests(tmp, [])).toBe(0);
     expect(estimateRelatedTests(path.join(tmp, 'absent'), ['src/lib/db/index.ts'])).toBe(0);
   });
+
+  it('counts the tests reaching a source through another module, as vitest related does (N2)', () => {
+    // src/lib/env.ts -> src/lib/logger.ts -> HEAVY_TEST_FILES tests: only one test names env.ts.
+    write('src/lib/env.ts', 'export const env = {};\n');
+    write('src/lib/logger.ts', "import { env } from './env';\nexport const logger = env;\n");
+    write('src/lib/session/run.ts', "export { logger } from '@/lib/logger';\n");
+    for (let i = 0; i < HEAVY_TEST_FILES; i++) {
+      // Some through logger directly, some one module further, by alias or relative path.
+      const spec = i % 3 === 0 ? '@/lib/session/run' : i % 3 === 1 ? '@/lib/logger' : '../../../src/lib/logger.js';
+      write(`tests/unit/many/t${i}.test.ts`, `import { logger } from '${spec}';\n`);
+    }
+    write('tests/unit/env.test.ts', "import { env } from '@/lib/env';\n");
+    write('tests/unit/other.test.ts', "import { other } from '@/lib/other';\n");
+    write('src/lib/other.ts', 'export const other = 1;\n');
+
+    const count = estimateRelatedTests(tmp, ['src/lib/env.ts']);
+    expect(count).toBe(HEAVY_TEST_FILES + 1);
+    expect(planSteps({ changed: ['src/lib/env.ts'], deleted: [] }, { base, relatedTests: count }).related.heavy).toBe(true);
+  });
+
+  it('keeps a truly narrow source narrow, a cycle and a helper included (negative control)', () => {
+    write('src/lib/leaf.ts', "import { b } from './cycle-b';\nexport const leaf = b;\n");
+    write('src/lib/cycle-b.ts', "import { leaf } from './leaf';\nexport const b = 1;\nexport const c = leaf;\n");
+    write('tests/helpers/leaf-helper.ts', "export { leaf } from '@/lib/leaf';\n");
+    write('tests/unit/leaf.test.ts', "import { leaf } from '@tests/helpers/leaf-helper';\n");
+    write('tests/unit/cycle.test.ts', "vi.mock('@/lib/cycle-b');\n");
+    write('tests/unit/pkg.test.ts', "import { describe } from 'vitest';\n");
+    for (let i = 0; i < HEAVY_TEST_FILES; i++) write(`tests/unit/many/t${i}.test.ts`, "import { x } from '@/lib/unrelated';\n");
+
+    const count = estimateRelatedTests(tmp, ['src/lib/leaf.ts']);
+    expect(count).toBe(2);
+    expect(planSteps({ changed: ['src/lib/leaf.ts'], deleted: [] }, { base, relatedTests: count }).related.heavy).toBe(false);
+  });
 });
 
 /** git and the checks, faked; `naming` is what findTestsNaming answers. */
@@ -167,12 +203,45 @@ describe('main: the lock is taken around a heavy step only', () => {
     expect(record).toMatchObject({ result: 'ok', mutexSec: 42 });
   });
 
-  it('runs the step anyway when the lock stays held for the whole budget (no verdict turns on it)', () => {
+  it('leaves the step unrun and the precheck undecided when the lock stays held for the whole budget (N1)', () => {
     const h = harness({ naming: manyTests(HEAVY_TEST_FILES), lockWaitMs: 1000, acquired: false });
-    expect(main(argv(), h.deps)).toBe(0);
-    expect(h.events).toContain('run npx vitest run');
-    expect(h.events.some((e) => e.includes(`ran without ${HEAVY_MUTEX}: held by pid 1 on elsewhere`))).toBe(true);
-    expect(readRecords(runDir, '3884').records[0].result).toBe('ok');
+    // Neither ok (0) nor a failed step (1): a held precheck is to be run again.
+    expect(main(argv(), h.deps)).toBe(EXIT_HELD);
+    expect(h.events).not.toContain('run npx vitest run');
+    expect(h.events.some((e) => e.includes(`tests ${HELD} (not run: ${HEAVY_MUTEX} held by pid 1 on elsewhere`))).toBe(true);
+    const [record] = readRecords(runDir, '3884').records;
+    expect(record).toMatchObject({ stage: 'precheck', result: 'skip', mutexSec: 1 });
+    expect(parseNote(record.note).tests).toBe(HELD);
+    // The narrow related step still ran, outside the lock, and passed.
+    expect(parseNote(record.note).related).toBe('ok');
+  });
+
+  it('does not wait again for the second heavy step once the first was held', () => {
+    const h = harness({ naming: manyTests(HEAVY_TEST_FILES), acquired: false, lockWaitMs: 5 });
+    h.deps.estimateRelatedTests = () => HEAVY_TEST_FILES;
+    expect(main(argv(), h.deps)).toBe(EXIT_HELD);
+    expect(h.events.filter((e) => e.startsWith('lock'))).toHaveLength(1);
+    expect(h.events.filter((e) => e.startsWith('run npx vitest'))).toEqual([]);
+    const note = parseNote(readRecords(runDir, '3884').records[0].note);
+    expect(note).toMatchObject({ related: HELD, tests: HELD });
+  });
+
+  it('still reports a failed step as a failure when another step was held', () => {
+    const h = harness({ naming: manyTests(HEAVY_TEST_FILES), acquired: false });
+    const run = h.deps.run;
+    h.deps.run = (command: string, args: string[]) =>
+      command === 'npx' && args[0] === 'tsc' ? { status: 2, stdout: '', stderr: 'TS2322' } : run(command, args);
+    expect(main(argv(), h.deps)).toBe(1);
+    expect(readRecords(runDir, '3884').records[0].result).toBe('fail');
+  });
+
+  it('does not reuse a held precheck: the next run on the same HEAD runs again', () => {
+    const held = harness({ naming: manyTests(HEAVY_TEST_FILES), acquired: false });
+    expect(main(argv(), held.deps)).toBe(EXIT_HELD);
+    const free = harness({ naming: manyTests(HEAVY_TEST_FILES) });
+    expect(main(argv(), free.deps)).toBe(0);
+    expect(free.events).toContain('run npx vitest run');
+    expect(readRecords(runDir, '3884').records.map((r: { result: string }) => r.result)).toEqual(['skip', 'ok']);
   });
 });
 

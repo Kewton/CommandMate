@@ -22,7 +22,10 @@
  * H-10), so it does not run beside another worktree's suite and flip a verdict
  * by load. A narrow one does not: the guards and docs alone never take the lock
  * (HEAVY_TEST_FILES / HEAVY_RELATED_SOURCES). The lock wait is recorded apart
- * from the execution (`mutexSec` / `runSec` of the record).
+ * from the execution (`mutexSec` / `runSec` of the record). A lock that stays
+ * held for the whole budget leaves the step unrun and the precheck undecided
+ * (`<step>=held`, result `skip`, exit 3) — neither ok nor a failed test, and
+ * worth running again once the machine is quieter.
  *
  * The result goes to the `precheck` stage of `run-log.mjs` with the HEAD it
  * ran on. An `ok` precheck for the same HEAD and the same options (base, kind,
@@ -42,7 +45,8 @@
  * does not overwrite the log of the run before.
  *
  * Exit code: 0 ok (or reused), 1 a step failed, 2 usage error or a dirty tree
- * (the result would not belong to HEAD).
+ * (the result would not belong to HEAD), 3 held: a heavy step could not take
+ * cpu.heavy within HEAVY_LOCK_TIMEOUT_SEC and was not run (EXIT_HELD; retry).
  *
  * Usage:
  *   node scripts/orchestrate/precheck.mjs --run-dir <dir> --issues <range> --issue <N> --worktree <path>
@@ -63,6 +67,14 @@ import { allocateLog, executionKey, workItemName } from './execution-key.mjs';
 import { diffManifest, manifestHash, takeManifest, verifyEnvState } from './env-manifest.mjs';
 
 export const DEFAULT_BASE = 'origin/develop';
+/**
+ * The exit code of a precheck a heavy step could not run in (Issue #3884 N1):
+ * cpu.heavy stayed held for the whole budget. Not a verdict — the same as the
+ * verify gate a mutex wait skips (gate-runner.ts mutexWaitTimeoutLog).
+ */
+export const EXIT_HELD = 3;
+/** The step status of a heavy step left unrun for want of the lock. */
+export const HELD = 'held';
 /** Run order: cheap and decisive first, the test runs last. */
 export const STEPS = ['changelog', 'removed-tests', 'eslint', 'lint-sh', 'suppressions', 'tsc', 'related', 'tests'];
 /** The verify-stage gate whose pass on the same HEAD already covers a step. */
@@ -101,8 +113,9 @@ export const HEAVY_MUTEX = 'cpu.heavy';
 export const HEAVY_TEST_FILES = 50;
 /**
  * `vitest related` is heavy from this many changed sources on, whatever the
- * estimate says: the estimate (estimateRelatedTests) counts direct importers
- * only, and a change across 20 modules reaches far past them.
+ * estimate says: the estimate (estimateRelatedTests) follows the static import
+ * graph, and a change across 20 modules is wide whatever the graph misses
+ * (a path built at run time, a setup file).
  */
 export const HEAVY_RELATED_SOURCES = 20;
 /** The wait budget: the `timeoutSec` of the `unit` gate the lock is shared with (verify.yaml). */
@@ -147,30 +160,115 @@ function sourceSpecifiers(file) {
   return specifiers;
 }
 
+/** Where the import graph of estimateRelatedTests is read: the code a unit test can reach. */
+const GRAPH_ROOTS = ['src', 'scripts', 'tests'];
+const GRAPH_SKIP_DIRS = new Set(['node_modules', '.next', 'dist', 'e2e', 'fixtures']);
+/** A static or dynamic module reference: `from '…'`, `import '…'`, `import('…')`, `require('…')`, `vi.mock('…')`. */
+const MODULE_REFERENCE = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*|\bvi\.(?:mock|doMock|importActual)\s*\(\s*)(['"`])([^'"`\n]+)\1/g;
+const RESOLVE_SUFFIXES = ['', '.ts', '.tsx', '.js', '.mjs', '.cjs', '.jsx', '/index.ts', '/index.tsx', '/index.js', '/index.mjs'];
+/** The tsconfig `paths` (and vitest `alias`) of this repository. */
+const PATH_ALIASES = [
+  ['@/', 'src/'],
+  ['@tests/', 'tests/'],
+];
+
+/** Every code file under GRAPH_ROOTS, repo-relative with `/`. */
+function listGraphFiles(worktree) {
+  const files = [];
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (!GRAPH_SKIP_DIRS.has(entry.name)) walk(full);
+      } else if (CODE_FILE.test(entry.name)) files.push(path.relative(worktree, full).split(path.sep).join('/'));
+    }
+  };
+  for (const root of GRAPH_ROOTS) walk(path.join(worktree, root));
+  return files;
+}
+
+/** The repo file `specifier` (written in `from`) names, or null for a package or a file outside the graph. */
+function resolveModule(from, specifier, known) {
+  let target = null;
+  for (const [alias, dir] of PATH_ALIASES) {
+    if (specifier.startsWith(alias)) target = dir + specifier.slice(alias.length);
+  }
+  if (target === null && specifier.startsWith('.')) target = path.posix.join(path.posix.dirname(from), specifier);
+  if (target === null) return null;
+  target = path.posix.normalize(target.split('?')[0]);
+  // ESM TypeScript names `./x.js` for x.ts.
+  const stems = [target, target.replace(/\.(?:[cm]?js|jsx)$/, '')];
+  for (const stem of stems) {
+    for (const suffix of RESOLVE_SUFFIXES) {
+      if (known.has(stem + suffix)) return stem + suffix;
+    }
+  }
+  return null;
+}
+
 /**
- * How many unit test files `vitest related` will at least run for `sources`:
- * the files under tests/unit naming one of them by path or import specifier
- * (Issue #3884 H-10). A lower bound — a test reaching a source through another
- * module is not counted — which is why HEAVY_RELATED_SOURCES caps it too.
+ * How many unit test files `vitest related` will run for `sources` (Issue #3884
+ * H-10 / N2). `vitest related` follows the import graph transitively, so a test
+ * reaching a source through another module counts: a change to a module every
+ * logger user imports is as wide as the logger's users, however few tests name
+ * the module itself. The graph is the static and dynamic module references of
+ * src / scripts / tests (aliases `@/` and `@tests/`, relative paths), resolved
+ * to files; a test that names a source only by path in its text (a fixture, a
+ * `vi.mock` of a path the graph cannot resolve) is counted too. Erring wide is
+ * the safe side — a step counted heavy only waits for the lock it should share.
  */
 export function estimateRelatedTests(worktree, sources) {
   const root = path.join(worktree, 'tests', 'unit');
   if (sources.length === 0 || !fs.existsSync(root)) return 0;
+  const files = listGraphFiles(worktree);
+  const known = new Set(files);
+  /** @type {Map<string, Set<string>>} module -> the files referencing it */
+  const importers = new Map();
+  /** @type {Map<string, string>} */
+  const texts = new Map();
+  for (const file of files) {
+    let text;
+    try {
+      text = fs.readFileSync(path.join(worktree, file), 'utf8');
+    } catch {
+      continue;
+    }
+    texts.set(file, text);
+    for (const match of text.matchAll(MODULE_REFERENCE)) {
+      const target = resolveModule(file, match[2], known);
+      if (target === null || target === file) continue;
+      if (!importers.has(target)) importers.set(target, new Set());
+      importers.get(target).add(file);
+    }
+  }
+  const isUnitTest = (file) => TEST_FILE.test(file);
+  const reached = new Set(sources);
+  const queue = [...sources];
+  while (queue.length > 0) {
+    const current = queue.pop();
+    for (const importer of importers.get(current) ?? []) {
+      if (reached.has(importer)) continue;
+      reached.add(importer);
+      queue.push(importer);
+    }
+  }
+  const tests = new Set([...reached].filter((file) => isUnitTest(file) && !sources.includes(file)));
+  // The tests naming a source by path or import specifier as a whole module name
+  // (`@/lib/db` must not count a test of `@/lib/dbx` or `@/lib/db/x`).
   const specifiers = sources.flatMap(sourceSpecifiers);
-  // A specifier is matched as a whole module name: `@/lib/db` must not count a test of `@/lib/dbx` or `@/lib/db/x`.
   const pattern = new RegExp(
     `(?:${specifiers.map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})(?![\\w/-])`
   );
-  let count = 0;
-  const walk = (dir) => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) walk(full);
-      else if (/\.test\.tsx?$/.test(entry.name) && pattern.test(fs.readFileSync(full, 'utf8'))) count += 1;
-    }
-  };
-  walk(root);
-  return count;
+  for (const [file, text] of texts) {
+    if (isUnitTest(file) && pattern.test(text)) tests.add(file);
+  }
+  return tests.size;
 }
 
 /**
@@ -248,7 +346,7 @@ export function planSteps({ changed, deleted }, { base, kind, metrics = false, b
 export function parseNote(note) {
   /** @type {Record<string, string>} */
   const steps = {};
-  for (const match of String(note ?? '').matchAll(/(?:^|\s)([a-z-]+)=(ok|fail|skip)\b/g)) steps[match[1]] = match[2];
+  for (const match of String(note ?? '').matchAll(/(?:^|\s)([a-z-]+)=(ok|fail|skip|held)\b/g)) steps[match[1]] = match[2];
   return steps;
 }
 
@@ -512,6 +610,8 @@ export function main(argv, deps = {}) {
     // The waits and the execution, apart (#3884): `durationSec` is the whole precheck.
     let mutexMs = 0;
     let runMs = 0;
+    // Set once a heavy step waited out the budget: the steps after it do not wait again.
+    let heldBy = null;
     for (const step of steps) {
       const { command, reason, heavy } = plan[step];
       if (step === 'removed-tests') {
@@ -534,14 +634,27 @@ export function main(argv, deps = {}) {
       }
       const [cmd, args] = command;
       // A wide test step waits for cpu.heavy (#3884 H-10). A lock that stays held for the
-      // whole budget does not fail the step: it runs unlocked, as every precheck did before.
+      // whole budget leaves the step unrun (N1): running it beside the holder is the
+      // load-flipped verdict the lock exists to prevent, and failing it would record
+      // a resource conflict as a test failure.
+      if (heavy && heldBy !== null) {
+        results[step] = HELD;
+        fs.appendFileSync(logFile, `\n## ${step}: not run — ${HEAVY_MUTEX} ${heldBy}\n`);
+        log(`  ${step} ${HELD} (not run: ${HEAVY_MUTEX} ${heldBy})`);
+        continue;
+      }
       const lock = heavy ? acquireHeavyLock(HEAVY_LOCK_TIMEOUT_SEC * 1000) : null;
       let waitNote = '';
       if (lock) {
         mutexMs += lock.waitedMs;
-        waitNote = lock.acquired
-          ? `, waited ${HEAVY_MUTEX} ${(lock.waitedMs / 1000).toFixed(1)}s`
-          : `, ran without ${HEAVY_MUTEX}: held${lock.heldBy ? ` by ${lock.heldBy}` : ''} for ${(lock.waitedMs / 1000).toFixed(1)}s`;
+        if (!lock.acquired) {
+          heldBy = `held${lock.heldBy ? ` by ${lock.heldBy}` : ''} for ${(lock.waitedMs / 1000).toFixed(1)}s`;
+          results[step] = HELD;
+          fs.appendFileSync(logFile, `\n## ${step}: not run — ${HEAVY_MUTEX} ${heldBy}\n`);
+          log(`  ${step} ${HELD} (not run: ${HEAVY_MUTEX} ${heldBy})`);
+          continue;
+        }
+        waitNote = `, waited ${HEAVY_MUTEX} ${(lock.waitedMs / 1000).toFixed(1)}s`;
       }
       const t0 = Date.now();
       let out;
@@ -566,7 +679,9 @@ export function main(argv, deps = {}) {
     );
     // Inputs that changed while the checks ran: the result belongs to neither environment.
     if (envMoved.length > 0) log(`  the inputs changed during the precheck (${envMoved.join(',')}; see ${path.basename(envFile)}) — fail`);
-    const result = Object.values(results).includes('fail') || envMoved.length > 0 ? 'fail' : 'ok';
+    // A failed step is a verdict whatever else was held; a held step with no failure is none (#3884 N1).
+    const held = Object.values(results).includes(HELD);
+    const result = Object.values(results).includes('fail') || envMoved.length > 0 ? 'fail' : held ? 'skip' : 'ok';
     const envNote = `key=${key} env=${manifestHash(envEnd)}${envMoved.length > 0 ? ` env-changed-during-precheck=${envMoved.join(',')}` : ''}`;
     const note = `${steps.map((step) => `${step}=${results[step]}`).join(' ')} ${opts} ${envNote}`;
     const durationSec = Math.round((now().getTime() - started.getTime()) / 1000);
@@ -592,8 +707,11 @@ export function main(argv, deps = {}) {
       now()
     );
     log(`precheck ${name} ${short} ${result}: ${note}`);
+    if (result === 'skip') {
+      log(`  undecided: ${HEAVY_MUTEX} was not free within ${HEAVY_LOCK_TIMEOUT_SEC}s — not a test failure; run the precheck again (exit ${EXIT_HELD})`);
+    }
     log(`recorded -> ${file} (log: ${logFile})`);
-    return result === 'ok' ? 0 : 1;
+    return result === 'ok' ? 0 : result === 'skip' ? EXIT_HELD : 1;
   } catch (err) {
     error(err instanceof Error ? err.message : String(err));
     return 1;

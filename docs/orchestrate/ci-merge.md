@@ -104,13 +104,22 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 - **待ちと実行を分けて記録する**: `mutex` を持つゲートと、枠を待ったゲートの `log_tail` の最後の行に
   `[timing] queue=<秒>s mutex=<秒>s run=<秒>s` が入る（`queue` は枠の待ち、`mutex` はロックの待ち、`run` はコマンドそのもの＝
   `duration_ms`）。`[mutex] waited=` は今までどおり 1 行目にある。どちらも待たなかったゲートには何も足さない。
-  `log_tail` に載るので `commandmate verify --json`・`verify history --json` に出る
+  `log_tail` に載るので `commandmate verify --json`・`verify show` に出る。ログ本文を持たない `verify history --json`
+  （`GET /api/verification/runs`）には、この行だけを数に直した `timing`（`{ queueSec, mutexSec, runSec }`）がゲートごとに載る。
+  行の無いゲート（待ちの無いもの・この行ができる前の run）は `timing` を持たない
+- **verify の取消し**: `mutex` を待つ間に枠を返した run を取消すと、枠を取り直さずに閉じる。ロックを取った後の枠待ちも取消せ、
+  そのときはロックを返す。ほかの 2 枠が長いゲートを実行中でも、取消しはその終了を待たない
 - **precheck**（`scripts/orchestrate/precheck.mjs`）は、テストの段が広いときだけ `cpu.heavy` を取る:
   `tests` は、明示したテスト（変更したテスト＋変更したパスを名指しするテスト）が **50 ファイル以上**のとき。`tests/unit/guards`・
   `tests/unit/docs` は数えない（毎回走る軽い確認で、ここに一律に mutex を付けない）。`related` は、変更した `src/`・`scripts/` の
-  ファイルを import 名かパスで名指しする unit テストが **50 ファイル以上**か、変更したファイルが **20 以上**のとき。
+  ファイルに **import をたどって届く** unit テスト（`vitest related` と同じく間接の import も数える。`src/`・`scripts/`・`tests/` の
+  静的・動的な import、`@/`・`@tests/` と相対パス。パスで名指しするテストも足す）が **50 ファイル以上**か、変更したファイルが **20 以上**のとき。
+  直接の import だけ数えると、`env.ts` のように直接の利用者は少ないが `logger.ts` を通じて千を超えるテストに届く変更を軽い扱いにしていた。
   50 は tests/unit（2026-10-25 時点で 2436 ファイル）の約 2% で、ロック無しで走ってきた guards＋docs（58 ファイル）と同じ程度の量。
-  ロックの待ちの上限は `unit` ゲートと同じ 5400 秒で、待ち切ったら**ロック無しで走らせる**（以前と同じ動き。資源の衝突を不合格にしない）
+  ロックの待ちの上限は `unit` ゲートと同じ 5400 秒で、待ち切ったらその段は**走らせない**（`<段>=held`）。ほかの段が落ちていなければ
+  precheck は**裁定不能**として記録の結果を `skip` にし、**exit 3** で終わる（ok の 0 とも、段が落ちた 1 とも別。資源の衝突を
+  テストの不合格にしない）。同じ HEAD で走らせ直せばよい（`skip` は再利用しない）。待ち切った後の重い段は待ち直さずに `held` にする。
+  ロック無しで重ねて走らせると、ロックが防ぐはずの負荷由来の裁定を記録してしまう
 - **run の記録**: `verify` / `precheck` の行は、`durationSec` を `queueSec`（枠の待ち）・`mutexSec`（ロックの待ち）・`runSec`（実行）に
   分けて持てる（`run-log.mjs append --queue-sec / --mutex-sec / --run-sec`。無い行は今までどおり読む）。precheck は自分で
   `mutexSec`・`runSec` を書く

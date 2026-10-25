@@ -101,3 +101,10 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
   存在しないペインへ撃つことになる）。届かなかった介入は stderr に `NOT delivered` と出る
 - **セッションが起動していない** → `commandmatedev ls` で存在確認、必要なら再送
 - 判別のための知見は orchestrate-monitor skill の STARTED ガード（`verify-completion.sh`）を参照
+
+## 6-1-1 precheck の exit 3
+
+`precheck.mjs` の exit 3 は「重いテストの段が `cpu.heavy` を 5400 秒待っても取れず、走らせなかった」（#3884）。
+テストの不合格（exit 1）ではないので、ワーカーへ再指示しない。記録の `precheck` 段は `skip`、要約は `<段>=held`。
+別の worktree の `unit` / `integration` / `unit-related` が終わってから、同じ行の precheck を走らせ直す（`skip` は再利用されない）。
+しきい値と待ちの記録は [ci-merge.md の 6-1-1](./ci-merge.md) を見る。
