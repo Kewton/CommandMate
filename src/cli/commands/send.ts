@@ -9,7 +9,7 @@ import type { SendOptions } from '../types';
 import type { AutoYesContractPolicy, AutoYesSetResult, TaskCreateResponse, TaskView } from '../types/api-responses';
 import { ApiClient, ApiError, assertResponseShape, isValidWorktreeId, MAX_STOP_PATTERN_LENGTH } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
-import { parseDurationToMs, ALLOWED_DURATIONS } from '../config/duration-constants';
+import { parseDurationToMs, AUTO_YES_DURATION_FLAG_RANGE, DEFAULT_DURATION_FLAG } from '../config/duration-constants';
 import { isCliToolId, CLI_TOOL_IDS } from '../config/cli-tool-ids';
 import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
 import {
@@ -35,9 +35,6 @@ import {
   REPLY_TO_OPTION_DESCRIPTION,
 } from './relays';
 import { postMessage, registerRelayForMessage } from './message-dispatch';
-
-/** Auto-yes duration used when --duration is omitted. */
-const DEFAULT_AUTO_YES_DURATION = '1h';
 
 /**
  * The message length `send` is verified to deliver whole (Issue #2464): the
@@ -71,10 +68,10 @@ function promptWaitingFallback(worktreeId: string): string {
  * behind for a message that was never sent.
  */
 function resolveAutoYesDurationMs(duration: string | undefined): number {
-  const durationMs = parseDurationToMs(duration ?? DEFAULT_AUTO_YES_DURATION);
+  const durationMs = parseDurationToMs(duration ?? DEFAULT_DURATION_FLAG);
 
   if (durationMs === null) {
-    console.error(`Error: Invalid duration. Must be one of: ${ALLOWED_DURATIONS.join(', ')}`);
+    console.error(`Error: Invalid duration. Must be ${AUTO_YES_DURATION_FLAG_RANGE} (e.g. 5h).`);
     process.exit(ExitCode.CONFIG_ERROR);
   }
 
@@ -313,7 +310,7 @@ function validateSendArgs(worktreeId: string, message: string | undefined, optio
   // Issue #1608: every option that can be judged from its own value is
   // judged here, before the first side effect. --duration used to be the
   // exception: enableAutoYes() validated it, and that runs after
-  // --contract has already created the task row, so `--duration 2h` left
+  // --contract has already created the task row, so `--duration 25h` left
   // a `pending` task for a message that was never sent. Validated
   // unconditionally, like --stop-pattern and --model above: a value the
   // CLI cannot honour is an error whether or not --auto-yes accompanies it.
@@ -399,7 +396,7 @@ export function createSendCommand(): Command {
     )
     .option('--auto-yes', 'Enable auto-yes before sending (session-wide, no policy guard; for unattended runs prefer --contract with an autoYes policy)')
     .option('--auto-yes-answer-mode <mode>', `With --auto-yes: ${ANSWER_MODE_OPTION_DESCRIPTION}`)
-    .option('--duration <duration>', `Auto-yes duration (${ALLOWED_DURATIONS.join(', ')})`)
+    .option('--duration <duration>', `Auto-yes duration (${AUTO_YES_DURATION_FLAG_RANGE}, e.g. 1h, 3h, 8h; default ${DEFAULT_DURATION_FLAG})`)
     .option('--stop-pattern <pattern>', 'Auto-yes stop pattern (regex). Matched against terminal output; cannot block commands (use the task contract\'s autoYes.denyPatterns for that)')
     .option('--contract <path>', 'Execution contract path relative to the worktree root (e.g. .commandmate/tasks/my-task.yaml). Records a task and sends the contract preamble plus its goal.')
     .option('--ignore-structured-prompt', 'Send even if only the agent\'s hooks report an open dialog (Issue #1737). Use when the pane looks idle but sends are refused; a prompt visible in the terminal is still refused.')

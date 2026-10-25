@@ -3,8 +3,8 @@
 import React from 'react';
 import { useTranslations } from 'next-intl';
 import {
-  ALLOWED_DURATIONS,
-  DURATION_LABELS,
+  AUTO_YES_DURATIONS,
+  autoYesDurationToHours,
   formatTimeRemaining,
   isAllowedDuration,
   type AutoYesDuration,
@@ -302,10 +302,11 @@ export function AutoYesField({
             className={FIELD_CLASS}
           >
             <option value="">{t(autoYesUnknown ? 'newTask.autoYesKeepUnknown' : 'newTask.autoYesKeep')}</option>
-            {ALLOWED_DURATIONS.map((duration) => (
+            {/* Issue #3913: every whole hour from 1 to 24 */}
+            {AUTO_YES_DURATIONS.map((duration) => (
               <option key={duration} value={duration}>
                 {t('newTask.autoYesEnableFor', {
-                  duration: tAutoYes(DURATION_LABELS[duration].replace('autoYes.', '')),
+                  duration: tAutoYes('durationHours', { hours: autoYesDurationToHours(duration) }),
                 })}
               </option>
             ))}

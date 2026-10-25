@@ -5,6 +5,8 @@
  * duration selection radio buttons, and stop pattern input before enabling auto-yes mode.
  *
  * Issue #225: Added duration selection (1h/3h/8h)
+ * Issue #3913: 1h/3h/8h stay as presets; "その他" opens a 1〜24h select.
+ *   Every opening starts at 1h — a long grant is chosen explicitly each time.
  * Issue #314: Added stop pattern (regex) input field
  * Issue #3863: Added the answer mode (おまかせ `recommended` / 慎重 `careful`)
  */
@@ -15,9 +17,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import { Modal } from '@/components/ui/Modal';
 import {
-  ALLOWED_DURATIONS,
+  AUTO_YES_DURATIONS,
+  PRESET_AUTO_YES_DURATIONS,
   DEFAULT_AUTO_YES_DURATION,
-  DURATION_LABELS,
+  autoYesDurationToHours,
+  isAllowedDuration,
   validateStopPattern,
   type AutoYesDuration,
 } from '@/config/auto-yes-config';
@@ -42,6 +46,15 @@ export interface AutoYesConfirmDialogProps {
   cliToolName?: string;
 }
 
+/** Issue #3913: the duration buttons' look (presets and "その他" alike) */
+function durationButtonClass(selected: boolean): string {
+  return `flex-1 py-2 px-3 text-sm font-medium rounded-md border-2 transition-colors ${
+    selected
+      ? 'border-accent-600 bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-400'
+      : 'border-border bg-surface dark:bg-surface-2 text-foreground hover:border-muted-foreground'
+  }`;
+}
+
 export function AutoYesConfirmDialog({
   isOpen,
   onConfirm,
@@ -51,20 +64,26 @@ export function AutoYesConfirmDialog({
   const t = useTranslations('autoYes');
   const tCommon = useTranslations('common');
   const [selectedDuration, setSelectedDuration] = useState<AutoYesDuration>(DEFAULT_AUTO_YES_DURATION);
+  /** Issue #3913: "その他" is chosen, so the 1〜24h select is shown */
+  const [customDuration, setCustomDuration] = useState(false);
   const [stopPattern, setStopPattern] = useState<string>('');
   const [selectedAnswerMode, setSelectedAnswerMode] = useState<AutoYesAnswerMode>(DEFAULT_AUTO_YES_ANSWER_MODE);
   const [regexError, setRegexError] = useState<string | null>(null);
   const [showRegexTips, setShowRegexTips] = useState(false);
   const tipsRef = useRef<HTMLDivElement>(null);
 
-  /** Resolve a DURATION_LABELS value (e.g. 'autoYes.durations.1h') to a translated string */
+  /** Issue #3913: the display name, e.g. 「5時間」 / "5 hours" (ICU plural) */
   const durationLabel = (duration: AutoYesDuration): string =>
-    t(DURATION_LABELS[duration].replace('autoYes.', ''));
+    t('durationHours', { hours: autoYesDurationToHours(duration) });
 
   // Reset stopPattern, regexError, and tips when dialog opens/closes (DS1-F008)
   // Issue #3863: the answer mode too — each enabling starts from the default.
+  // Issue #3913: and the duration — the dialog stays mounted (AutoYesToggle),
+  // so without this the last choice (say 24h) would be the next default.
   useEffect(() => {
     if (isOpen) {
+      setSelectedDuration(DEFAULT_AUTO_YES_DURATION);
+      setCustomDuration(false);
       setStopPattern('');
       setSelectedAnswerMode(DEFAULT_AUTO_YES_ANSWER_MODE);
       setRegexError(null);
@@ -134,22 +153,54 @@ export function AutoYesConfirmDialog({
         <div className="text-sm text-foreground">
           <p className="font-medium mb-2">{t('duration')}</p>
           <div className="flex gap-2">
-            {ALLOWED_DURATIONS.map((duration) => (
+            {PRESET_AUTO_YES_DURATIONS.map((duration) => (
               <button
                 key={duration}
                 type="button"
-                onClick={() => setSelectedDuration(duration)}
-                className={`flex-1 py-2 px-3 text-sm font-medium rounded-md border-2 transition-colors ${
-                  selectedDuration === duration
-                    ? 'border-accent-600 bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-400'
-                    : 'border-border bg-surface dark:bg-surface-2 text-foreground hover:border-muted-foreground'
-                }`}
+                onClick={() => {
+                  setCustomDuration(false);
+                  setSelectedDuration(duration);
+                }}
+                className={durationButtonClass(!customDuration && selectedDuration === duration)}
                 style={{ minHeight: '44px' }}
+                aria-pressed={!customDuration && selectedDuration === duration}
+                data-testid={`auto-yes-duration-${autoYesDurationToHours(duration)}h`}
               >
                 {durationLabel(duration)}
               </button>
             ))}
+            <button
+              type="button"
+              onClick={() => setCustomDuration(true)}
+              className={durationButtonClass(customDuration)}
+              style={{ minHeight: '44px' }}
+              aria-pressed={customDuration}
+              data-testid="auto-yes-duration-other"
+            >
+              {t('durationOther')}
+            </button>
           </div>
+          {customDuration && (
+            <select
+              value={selectedDuration}
+              onChange={(e) => {
+                const value = Number(e.target.value);
+                if (isAllowedDuration(value)) setSelectedDuration(value);
+              }}
+              aria-label={t('durationSelectLabel')}
+              className="mt-2 w-full px-3 py-2 border border-input rounded-md text-sm bg-surface dark:bg-surface-2 text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              data-testid="auto-yes-duration-select"
+            >
+              {AUTO_YES_DURATIONS.map((duration) => (
+                <option key={duration} value={duration}>
+                  {durationLabel(duration)}
+                </option>
+              ))}
+            </select>
+          )}
+          <p className="mt-2 text-xs text-muted-foreground" data-testid="auto-yes-long-duration-note">
+            {t('longDurationNote')}
+          </p>
         </div>
 
         {/* Answer mode (Issue #3863): how a question is answered; permissions are answered under either */}

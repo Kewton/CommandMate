@@ -58,7 +58,7 @@ describe('AutoYesToggle', () => {
       fireEvent.click(screen.getByRole('switch'));
 
       // Select 3h duration button
-      fireEvent.click(screen.getByText('autoYes.durations.3h'));
+      fireEvent.click(screen.getByTestId('auto-yes-duration-3h'));
 
       fireEvent.click(screen.getByText('autoYes.agreeAndEnable'));
 

@@ -15,11 +15,10 @@
   "autoDisableAfter": "Will automatically turn OFF after {duration}.",
   "appliesOnlyToCurrent": "* Auto Yes applies only to the currently selected {toolName} session. It does not affect other CLI tools.",
   "duration": "Duration",
-  "durations": {
-    "1h": "1 hour",
-    "3h": "3 hours",
-    "8h": "8 hours"
-  },
+  "durationHours": "{hours, plural, one {# hour} other {# hours}}",
+  "durationOther": "Other",
+  "durationSelectLabel": "Duration (1-24 hours)",
+  "longDurationNote": "A longer duration also means more permission checks (file edits, commands and so on) answered automatically. Permission checks are answered automatically in careful mode too.",
   "answerModeLabel": "How questions are answered",
   "answerModes": {
     "recommended": "Answer questions with the recommended option (Recommended)",

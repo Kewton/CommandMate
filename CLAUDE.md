@@ -236,7 +236,7 @@ npm run db:reset      # DBリセット
 - **`--model`**: `send` の新規起動時のみ有効（claude/antigravity）。稼働中のセッションへ指定すると 400
 - **wait**: `--timeout <秒>` 超過は exit 124。`--on-prompt human` でプロンプト検出後も待機継続。`wait` に `--agent` は無い。`--verify` は完了検知後に検証ゲートを実行し、不合格 exit 20 / 作業証跡ゼロ exit 21
 - **verify**: `commandmate verify <worktree-id> [--gates lint,unit] [--json]`。合格 0 / 不合格 20 / 作業証跡ゼロ 21（`.commandmate/verify.yaml`）
-- **auto-yes**: `commandmate auto-yes <worktree-id> --enable --duration 3h`。duration は 1h / 3h / 8h のみ（既定 1h）。`--disable` で無効化
+- **auto-yes**: `commandmate auto-yes <worktree-id> --enable --duration 3h`。duration は 1h〜24h（1 時間刻み。既定 1h）。`--disable` で無効化
 - **instances**: roster の追加は `commandmate instances <worktree-id> add --agent codex`。roster 外 ID のアドホック起動は `commandmate send <worktree-id> "メッセージ" --agent codex --instance codex-3 --register`（`--agent` 必須）
 - **update**: 非対話環境で `--yes` が無いと exit 2（`commandmate update --yes`）。`--check` は変更しない
 - **remote**: `--provider cloudflare` は公開 Tunnel のため `--yes` が必須（非対話環境も）。`--provider tailscale` は承認不要

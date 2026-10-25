@@ -196,10 +196,12 @@ Useful when you want to run continuous processes without interruption.
 1. Open the worktree detail view
 2. Turn on the **"Auto Yes"** toggle at the top of the screen
 3. A confirmation dialog appears
-4. **Select the active duration** (1 hour / 3 hours / 8 hours)
-   - Default is **1 hour**
+4. **Select the active duration** (1-24 hours, in whole hours)
+   - The common **1 hour / 3 hours / 8 hours** are buttons; for anything else press **Other** and pick from the 1-24 hour list
+   - Every time the dialog opens it starts at **1 hour** (the previous choice is not remembered, so 24 hours and the like are chosen explicitly each time)
+   - A longer duration also means more permission checks answered automatically (careful mode answers permission checks too)
    - Select the minimum time needed for your work
-5. The description text changes dynamically based on your selection (e.g., "Will automatically turn OFF after 3 hours.")
+5. The description text changes dynamically based on your selection (e.g., "Will automatically turn OFF after 5 hours.")
 6. **Choose how questions are answered** ("Answer questions with the recommended option (Recommended)" / "Answer questions yourself (Careful)"; see "Answer Modes" below)
 7. Click **"Agree and Enable"**
 
@@ -221,15 +223,18 @@ The dialog that turns Auto Yes on asks how a question from the agent (one that p
 
 ### Active Duration
 
-| Option | Milliseconds | Intended Use Case |
+| Option (examples) | Milliseconds | Intended Use Case |
 |--------|-------------|-------------------|
-| **1 hour** (default) | 3,600,000 | Normal development work, short tasks |
-| **3 hours** | 10,800,000 | Medium-scale implementation work |
-| **8 hours** | 28,800,000 | Long batch-processing tasks (regular progress checks recommended) |
+| **1 hour** (default, button) | 3,600,000 | Normal development work, short tasks |
+| **3 hours** (button) | 10,800,000 | Medium-scale implementation work |
+| **8 hours** (button) | 28,800,000 | Long batch-processing tasks (regular progress checks recommended) |
+| **24 hours** (Other, the maximum) | 86,400,000 | Overnight work. It keeps answering while you are away, so narrowing it with a stop pattern or the contract's `autoYes` is recommended |
+
+Any whole number of hours from 1 to 24 can be chosen (Issue #3913); the rows above are examples, and the millisecond value is hours × 3,600,000. The Auto Yes field of the New task dialog offers the same 1-24 hours ("Leave off" is unchanged).
 
 A countdown timer always shows the remaining time.
 - **Under 1 hour**: `MM:SS` format (e.g., `45:30`)
-- **1 hour or more**: `H:MM:SS` format (e.g., `2:15:30`)
+- **1 hour or more**: `H:MM:SS` format (e.g., `2:15:30`; a 24-hour grant starts at `24:00:00`)
 
 ### API Specification (for developers)
 
@@ -240,13 +245,13 @@ POST /api/worktrees/:id/auto-yes
 
 {
   "enabled": true,
-  "duration": 3600000 | 10800000 | 28800000,  // Optional (default: 3600000)
+  "duration": 3600000,  // Optional. 1-24 hours (a multiple of 3600000, 3600000-86400000; default: 3600000)
   "answerMode": "recommended" | "careful"     // Optional (Issue #3863; recommended for a new grant, the current mode for one that is on)
 }
 ```
 
 - **When duration is omitted**: Defaults to 1 hour (3,600,000 ms) for backward compatibility
-- **Invalid duration value**: Returns 400 error
+- **Invalid duration value**: Out of range, fractional or non-number values return a 400 error (checked only when enabling; `enabled: false` ignores duration)
 - **Security**: 5-layer defense with worktreeId format validation -> JSON parse validation -> type validation -> whitelist validation
 
 ### Approval Routes Differ by Agent

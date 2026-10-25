@@ -45,7 +45,7 @@
 | 数字 | 値 | 出典 |
 |---|---|---|
 | 対応エージェント | 8 種 | §2 の数え方 |
-| Auto Yes の有効時間 | 1 ・ 3 ・ 8 時間から選ぶ（既定 1 時間）。時間切れか停止パターンの一致で自動で無効になる | `src/config/auto-yes-config.ts` の `ALLOWED_DURATIONS` ・ `DEFAULT_AUTO_YES_DURATION`、`src/lib/auto-yes-state.ts` の `disableAutoYes`（理由 `expired` / `stop_pattern_matched`） |
+| Auto Yes の有効時間 | 1〜24 時間から 1 時間刻みで選ぶ（1 ・ 3 ・ 8 時間はボタン、既定 1 時間）。時間切れか停止パターンの一致で自動で無効になる | `src/config/auto-yes-duration.ts` の `AUTO_YES_DURATIONS` ・ `PRESET_AUTO_YES_DURATIONS` ・ `DEFAULT_AUTO_YES_DURATION`、`src/lib/auto-yes-state.ts` の `disableAutoYes`（理由 `expired` / `stop_pattern_matched`） |
 | 公式 Catalog の Skill | 15 件（2026-09-16 時点） | `gh api repos/Kewton/commandmate-skills/contents/skills`、`commandmate skill list`。増減するので、見出しに件数を書かない |
 | 対応 OS | macOS ・ Linux ・ Windows（WSL2）。ネイティブ Windows は非対応 | CommandMate は tmux に依存する |
 | ライセンス | MIT | `LICENSE` |

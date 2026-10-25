@@ -109,7 +109,8 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
                            With --auto-yes: recommended (questions answered with the
                            recommended option, else the default) or careful
                            (questions left to you). See auto-yes below
-    --duration <d>         Auto-yes duration: 1h, 3h, 8h (default: 1h)
+    --duration <d>         Auto-yes duration: 1h-24h, whole hours, e.g. 1h, 3h, 8h
+                           (default: 1h)
     --stop-pattern <p>     Auto-yes stop condition (regex; matches terminal output,
                            cannot block commands -- see auto-yes below)
     --ignore-structured-prompt

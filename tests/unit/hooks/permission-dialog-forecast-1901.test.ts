@@ -70,7 +70,7 @@ vi.mock('@/lib/polling/auto-yes-policy', () => ({
 }));
 
 const WORKTREE_ID = 'wt-1901';
-/** ALLOWED_DURATIONS[0]; the default Auto-Yes window. */
+/** AUTO_YES_DURATIONS[0]; the default Auto-Yes window. */
 const ONE_HOUR_MS = 3_600_000;
 
 const CLAUDE_FIXTURE_DIR = join(process.cwd(), 'tests/fixtures/hooks/claude');
