@@ -781,11 +781,13 @@
     margin-bottom: 0;
   }
   /* [Issue #3912] A code block is drawn inside `CodeBlockWithCopy`'s wrapper,
-     so the first/last rule above reaches the wrapper and not the `<pre>`. */
-  .chat-md > .code-block-with-copy:first-child > pre {
+     so the first/last rule above reaches the wrapper and not the `<pre>`.
+     `chat-code-block` is on the wrapper whether or not it has a button (an
+     empty fence has none and no `code-block-with-copy`). */
+  .chat-md > .chat-code-block:first-child > pre {
     margin-top: 0;
   }
-  .chat-md > .code-block-with-copy:last-child > pre {
+  .chat-md > .chat-code-block:last-child > pre {
     margin-bottom: 0;
   }
   .chat-md p {

@@ -881,12 +881,14 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
       // off a mermaid fence is code and gets the button like any other. This
       // `pre` is the only one in the map, so the mermaid one can never replace
       // it, and it keeps every attribute react-markdown and search put on it
-      // (only `node` is held back from the DOM).
+      // (only `node` is held back from the DOM). `chat-code-block` rides on the
+      // wrapper with or without a button (an empty fence gets none), so the
+      // body's first/last margin rule in globals.css reaches every `<pre>`.
       pre: ({ node: _node, children, ...rest }) =>
         renderDiagrams && isMermaidPreChild(children) ? (
           <>{children}</>
         ) : (
-          <CodeBlockWithCopy>
+          <CodeBlockWithCopy className="chat-code-block">
             <pre {...rest}>{children}</pre>
           </CodeBlockWithCopy>
         ),

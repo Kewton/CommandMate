@@ -384,6 +384,51 @@ describe('[#3912] the button stays out of search and selection', () => {
   });
 });
 
+describe('[#3912] the body’s first and last code block keep no outer margin', () => {
+  // jsdom computes no CSS, so the structure the margin rule matches is checked
+  // here and the rule itself is read from globals.css below.
+  const EDGE = '.chat-md > .chat-code-block';
+
+  it('positive: an empty first fence and a whitespace-only last fence are wrapped for the margin rule, with no button', () => {
+    const { container } = render(
+      <ChatMessageBubble
+        message={message({ content: ['```', '```', '', 'middle', '', '```', '   ', '```'].join('\n') })}
+        showHeader
+        onFilePathClick={vi.fn()}
+      />,
+    );
+    const body = container.querySelector('.chat-md') as HTMLElement;
+    const first = body.firstElementChild as HTMLElement;
+    const last = body.lastElementChild as HTMLElement;
+    for (const edge of [first, last]) {
+      expect(edge.matches(EDGE)).toBe(true);
+      expect(edge.firstElementChild?.tagName).toBe('PRE');
+      expect(edge.matches(COPY_BLOCK)).toBe(false);
+      expect(within(edge).queryByRole('button')).toBeNull();
+    }
+  });
+
+  it('negative: a fence with code is wrapped as before, with its button', () => {
+    const { container } = render(
+      <ChatMessageBubble
+        message={message({ content: '```js\nconst x = 1;\n```' })}
+        showHeader
+        onFilePathClick={vi.fn()}
+      />,
+    );
+    const block = (container.querySelector('.chat-md') as HTMLElement).firstElementChild as HTMLElement;
+    expect(block.matches(EDGE)).toBe(true);
+    expect(block.matches(COPY_BLOCK)).toBe(true);
+    expect(within(block).getAllByRole('button', { name: 'Copy' })).toHaveLength(1);
+  });
+
+  it('globals.css zeroes the edge margins through the chat wrapper, not the copy-only class', () => {
+    const css = fs.readFileSync(path.join(process.cwd(), 'src/app/globals.css'), 'utf8');
+    expect(css).toMatch(/\.chat-md > \.chat-code-block:first-child > pre \{\s*margin-top: 0;/);
+    expect(css).toMatch(/\.chat-md > \.chat-code-block:last-child > pre \{\s*margin-bottom: 0;/);
+  });
+});
+
 // ============================================================================
 // Search over a transcript holding code blocks
 // ============================================================================
