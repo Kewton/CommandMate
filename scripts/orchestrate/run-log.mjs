@@ -24,11 +24,17 @@
  * `status` resumes each work item on its own (`#3883/d1`). A record without
  * `item` — every record written before #3883 — belongs to the Issue itself.
  *
+ * A `verify` / `precheck` record may split its `durationSec` into the waits
+ * and the execution (Issue #3884): `queueSec` (waiting for a verification
+ * slot), `mutexSec` (waiting for a machine-wide lock such as `cpu.heavy`) and
+ * `runSec` (the checks themselves). Each is written only when given, so a
+ * record without them — every record before #3884 — reads as it always did.
+ *
  * Usage:
  *   node scripts/orchestrate/run-log.mjs append --run-dir <dir> --issues <range> --issue <N>
  *        --stage <stage> --result <ok|fail|skip> [--head <sha>] [--work-head <sha>] [--task <id>] [--contract <path>]
  *        [--agent <claude|antigravity>] [--model <opus|sonnet|->] [--duration-sec <n>] [--note <text>]
- *        [--item <work item>] [--key <execution key>]
+ *        [--item <work item>] [--key <execution key>] [--queue-sec <n>] [--mutex-sec <n>] [--run-sec <n>]
  *   node scripts/orchestrate/run-log.mjs status --run-dir <dir> --issues <range> [--json]
  */
 import fs from 'node:fs';
@@ -75,6 +81,9 @@ function optionalString(value) {
   return value === undefined || value === null || value === '' ? null : String(value);
 }
 
+/** The fields a record splits its duration into (#3884), with the flag each is given by. */
+export const TIMING_FIELDS = { queueSec: '--queue-sec', mutexSec: '--mutex-sec', runSec: '--run-sec' };
+
 // publish-pr.mjs looks a record up by `git rev-parse HEAD` (40 digits), so a short sha
 // recorded by hand would read as "no record" there. The `append` command line rejects
 // it (#3664); makeRecord itself still takes 7-40 digits for other scripts' callers, and
@@ -101,6 +110,15 @@ export function makeRecord(input, now = new Date()) {
     durationSec = Number(input.durationSec);
     if (!Number.isFinite(durationSec) || durationSec < 0) problems.push(`duration-sec: must be a number >= 0 (got ${input.durationSec})`);
   }
+  /** @type {Record<string, number>} */
+  const timing = {};
+  for (const [field, flag] of Object.entries(TIMING_FIELDS)) {
+    const value = input[field];
+    if (value === undefined || value === null || value === '') continue;
+    const seconds = Number(value);
+    if (!Number.isFinite(seconds) || seconds < 0) problems.push(`${flag.slice(2)}: must be a number >= 0 (got ${value})`);
+    else timing[field] = seconds;
+  }
   const item = optionalString(input.item);
   const badItem = itemProblem(item);
   if (badItem) problems.push(badItem.replace('--item', 'item'));
@@ -121,6 +139,8 @@ export function makeRecord(input, now = new Date()) {
     agent: optionalString(input.agent),
     model: optionalString(input.model),
     durationSec,
+    // Only when given (#3884); a record without them is read as before.
+    ...timing,
     note: optionalString(input.note),
     at: now.toISOString(),
   };
@@ -288,7 +308,7 @@ function formatStatus(summary, skipped) {
 }
 
 const USAGE = `Usage:
-  node scripts/orchestrate/run-log.mjs append --run-dir <dir> --issues <range> --issue <N> --stage <${STAGES.join('|')}> --result <${RESULTS.join('|')}> [--head <sha>] [--work-head <sha>] [--task <id>] [--contract <path>] [--agent <name>] [--model <name>] [--duration-sec <n>] [--note <text>] [--item <work item>] [--key <execution key>]
+  node scripts/orchestrate/run-log.mjs append --run-dir <dir> --issues <range> --issue <N> --stage <${STAGES.join('|')}> --result <${RESULTS.join('|')}> [--head <sha>] [--work-head <sha>] [--task <id>] [--contract <path>] [--agent <name>] [--model <name>] [--duration-sec <n>] [--note <text>] [--item <work item>] [--key <execution key>] [--queue-sec <n>] [--mutex-sec <n>] [--run-sec <n>]
   node scripts/orchestrate/run-log.mjs status --run-dir <dir> --issues <range> [--json]`;
 
 const FLAGS = {
@@ -307,6 +327,7 @@ const FLAGS = {
   '--note': 'note',
   '--item': 'item',
   '--key': 'key',
+  ...Object.fromEntries(Object.entries(TIMING_FIELDS).map(([field, flag]) => [flag, field])),
 };
 
 export function main(argv, now = new Date()) {

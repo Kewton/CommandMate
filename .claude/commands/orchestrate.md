@@ -256,6 +256,7 @@ Antigravity は `.claude/commands` を読まないので、`/pm-auto-issue2dev`
 - **影響ファイル**: Issue本文の「影響ファイル」セクションから抽出
 - **共通ファイル**: 複数Issueが同じファイルを変更する場合のコンフリクトリスク
 - **依存関係**: Issue間の前後関係（A の成果物が B の入力になるか）
+- **共有状態**: 複数の経路が読む値・記録・キーを変える Issue は、状態・書き手・公開値・読む経路・不変条件を `plan-$RUN_ISSUES.state.yaml` に書く（書き方は docs/orchestrate/plan-check.md#1-4-状態ファイルの書き方 を読む。#3884）
 
 ### 1-4. 並列実行可否の判定
 
@@ -263,7 +264,10 @@ Antigravity は `.claude/commands` を読まないので、`/pm-auto-issue2dev`
 独立:     共通ファイルなし → 完全並列
 弱依存:   共通ファイルあるが変更箇所が異なる → 並列可（設計突合で確認）
 強依存:   A の出力が B の入力 → 直列実行（A完了後にB開始）
+強依存:   同じ共有状態の書き手が複数 → 別の波（行が違っても弱依存にしない）
 ```
+
+状態ファイルがある run は、3-1 の送信の前に `node scripts/orchestrate/plan-check.mjs check --plan <state file>` を通す（exit 1 なら送らない。無い run は skipped で今までどおり）。
 
 ### 1-5. 実行計画の記録
 
@@ -405,6 +409,7 @@ node scripts/orchestrate/contract.mjs generate \
 - 生成が失敗したとき・止まったときは docs/orchestrate/contract.md#2-4-生成器が止まる条件 を読む（検査する制約・goal の上限・scope に書けないファイル・再実行と `--force`）
 - 2-4-2 の差し替え（テスト全体）は雛形に入っていない。生成した契約に手で足す
 - `kind: refactor` では 2-4-3 の整理の決まりが goal に入り、gates の既定が `[lint, typecheck]` になる。`tests/` の下の glob を scope に書くと生成が失敗する
+- 共有状態を書く item は、設定に `routes`（経路表と割込み表）を書く。書き方は docs/orchestrate/plan-check.md#2-4-経路表と割込み表の書き方 を読む（省略時の goal は変わらない）
 
 - **`requireCommit: true` を外さない**（#3430）。外すと未コミットの変更も作業証跡に数え、ワーカーがコミット前に
   ターンを閉じたとき `wait --verify` が exit 0 を返す。契約の「1 つにコミットする」と裁定をそろえる。
@@ -1014,7 +1019,7 @@ orchestrate の道具の置き場所は #3477 で `scripts/orchestrate/`（`lint
 - **担当:** Codex（暫定。優位が実証されたとは扱わない）。Claude を足すのは、重大な変更・ワーカーが「未確認」と書いた所・判断が割れた所（隔離・所有・security に限らない）
 - **再レビュー:** 自動は 3 回まで。3 回目の後に重大な指摘が残ったら、**止めて人の判断へ**（別の Issue に送ってマージしない）
 - **進め方と記録:** 対象の PR でレビューするときは docs/orchestrate/trials.md#5-2b-整合性レビューの進め方と記録 を読み、その手順（Codex のセッション・数え方・記録の様式・再指示の書き方・前回の指摘の確かめ方）で行う
-- **呼び出し:** `node scripts/orchestrate/consistency-review.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" --issue <N> --head <sha> --brief <file>`（再レビューは `--rereview --previous <前回の review-<N>.md>` を足す）。ロック・ready 待ち・送信・`review-<N>.*` の保存・記録の `review` 段までを 1 回で行う。終了コード: 0=`DONE:` 行あり（`review=ok`）/ 1=失敗（`review=fail`）/ 2=引数の誤り（何も送らず記録もしない）
+- **呼び出し:** `node scripts/orchestrate/consistency-review.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" --issue <N> --head <sha> --brief <file>`（再レビューは `--rereview --previous <前回の review-<N>.md>` を足す。状態ファイルがある run は `--routes`、docs/orchestrate/plan-check.md#2-4-4-事前レビューと-5-2b-に渡す一覧）。ロック・ready 待ち・送信・`review-<N>.*` の保存・記録の `review` 段までを 1 回で行う。終了コード: 0=`DONE:` 行あり（`review=ok`）/ 1=失敗（`review=fail`）/ 2=引数の誤り（何も送らず記録もしない）
 
 **2026-10-20 の集計の手順。** 期限の日に docs/orchestrate/trials.md#5-2b-2026-10-20-の集計の手順 を読む。
 

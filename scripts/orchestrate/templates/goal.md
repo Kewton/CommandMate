@@ -2,12 +2,14 @@
 #! scripts/orchestrate/contract.mjs が `{{…}}` を Issue ごとの設定で埋め、`#!` で始まる行を落とす。
 #! 担当（Claude / Antigravity）で雛形を分けない。Antigravity は `.claude/commands` を読まないので、どの節も省かない。
 #! `{{REFACTOR_RULES}}` には kind: refactor のときだけ refactor-rules.md（2-4-3 の整理の決まり）が入る。
+#! `{{ROUTES}}` には設定に routes があるときだけ経路表と割込み表が入る（#3884）。無ければ行ごと消え、goal は変わらない。
 #! `{{ISSUE_BODY}}` には Issue 本文（事象 / 原因 / 確定仕様 / 受入基準）が入る。原因は file:line つきで書かれていること。
 {{ISSUE_URL}} を実装する（{{KIND_LABEL}}）。
 スラッシュコマンドは使わず、このメッセージの手順どおりに直接実装すること。
 確認や質問は求めず、最後まで自分で進めること。
 {{DECISIONS}}
 {{ISSUE_BODY}}
+{{ROUTES}}
 
 ## 実装の進め方
 1. まず対象のコードを読み、上の説明が実コードと合っているか確かめる（行番号は古いことがある。名前で探す）。
