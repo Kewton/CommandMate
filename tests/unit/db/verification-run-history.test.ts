@@ -18,6 +18,7 @@ import {
   finishGateResult,
   finishVerificationRun,
   listVerificationRunsForPeriod,
+  parseGateTiming,
   DEFAULT_RUN_HISTORY_LIMIT,
   MAX_RUN_HISTORY_LIMIT,
   MAX_RUN_HISTORY_DAYS,
@@ -125,6 +126,50 @@ describe('listVerificationRunsForPeriod — gate summaries carry no log bodies',
     createVerificationRun(db, { worktreeId: 'wt-1', trigger: 'manual' });
 
     expect(listVerificationRunsForPeriod(db)[0].gates).toEqual([]);
+  });
+});
+
+describe('listVerificationRunsForPeriod — the [timing] numbers, and only them (Issue #3884)', () => {
+  const TIMED_LOG = `${'SECRET BUILD OUTPUT\n'.repeat(400)}[timing] queue=12.5s mutex=3600.0s run=190.2s`;
+
+  it('carries the waits and the execution of a gate whose log ends with a [timing] line', () => {
+    seedRun({ worktreeId: 'wt-1', gateId: 'unit', logTail: TIMED_LOG });
+
+    const [run] = listVerificationRunsForPeriod(db);
+
+    expect(run.gates[0]).toEqual({
+      gateId: 'unit',
+      status: 'passed',
+      exitCode: 0,
+      durationMs: 1234,
+      source: 'verify.yaml',
+      timing: { queueSec: 12.5, mutexSec: 3600, runSec: 190.2 },
+    });
+    // The numbers, not the log: the body above the line stays out.
+    expect(run.gates[0]).not.toHaveProperty('logTail');
+    expect(JSON.stringify(run)).not.toContain('SECRET BUILD OUTPUT');
+    expect(JSON.stringify(run)).not.toContain('[timing]');
+  });
+
+  it('leaves timing out for a gate without the line, and for a line not at the end', () => {
+    seedRun({ worktreeId: 'wt-old', logTail: 'ok\n' });
+    seedRun({ worktreeId: 'wt-mid', logTail: '[timing] queue=1.0s mutex=0.0s run=1.0s\nlater output' });
+    const run = createVerificationRun(db, { worktreeId: 'wt-null', trigger: 'manual' });
+    createGateResult(db, run.id, { gateId: 'lint', command: 'npm run lint', source: 'verify.yaml' });
+
+    for (const listed of listVerificationRunsForPeriod(db)) {
+      expect(listed.gates[0]).not.toHaveProperty('timing');
+    }
+  });
+
+  it('parses exactly the line the runner writes', () => {
+    expect(parseGateTiming('x\n[timing] queue=0.0s mutex=42.0s run=5.1s\n')).toEqual({
+      queueSec: 0,
+      mutexSec: 42,
+      runSec: 5.1,
+    });
+    expect(parseGateTiming('[timing] queue=1s mutex=2s')).toBeNull();
+    expect(parseGateTiming(null)).toBeNull();
   });
 });
 
