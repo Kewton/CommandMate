@@ -114,6 +114,8 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
   `tests/unit/docs` は数えない（毎回走る軽い確認で、ここに一律に mutex を付けない）。`related` は、変更した `src/`・`scripts/` の
   ファイルに **import をたどって届く** unit テスト（`vitest related` と同じく間接の import も数える。`src/`・`scripts/`・`tests/` の
   静的・動的な import、`@/`・`@tests/` と相対パス。パスで名指しするテストも足す）が **50 ファイル以上**か、変更したファイルが **20 以上**のとき。
+  型だけの参照（`import type`・`export type`・指定子がすべて `type` の `import { type A }`）はたどらない（変換で消え、`vitest related` も
+  たどらない。一部だけ `type` の import は実行時の参照として数える）。
   直接の import だけ数えると、`env.ts` のように直接の利用者は少ないが `logger.ts` を通じて千を超えるテストに届く変更を軽い扱いにしていた。
   50 は tests/unit（2026-10-25 時点で 2436 ファイル）の約 2% で、ロック無しで走ってきた guards＋docs（58 ファイル）と同じ程度の量。
   ロックの待ちの上限は `unit` ゲートと同じ 5400 秒で、待ち切ったらその段は**走らせない**（`<段>=held`）。ほかの段が落ちていなければ

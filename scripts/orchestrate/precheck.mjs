@@ -165,6 +165,25 @@ const GRAPH_ROOTS = ['src', 'scripts', 'tests'];
 const GRAPH_SKIP_DIRS = new Set(['node_modules', '.next', 'dist', 'e2e', 'fixtures']);
 /** A static or dynamic module reference: `from '…'`, `import '…'`, `import('…')`, `require('…')`, `vi.mock('…')`. */
 const MODULE_REFERENCE = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*|\bvi\.(?:mock|doMock|importActual)\s*\(\s*)(['"`])([^'"`\n]+)\1/g;
+/** `import type … from '…'` / `export type … from '…'` (not a default import named `type`). */
+const TYPE_ONLY_STATEMENT = /\b(?:import|export)\s+type\s+(?!from\b)[^;'"`]*?\bfrom\s*(['"])[^'"\n]+\1/g;
+/** `import { … } from '…'` / `export { … } from '…'`: type-only when every specifier is `type X`. */
+const BRACED_STATEMENT = /\b(?:import|export)\s*\{([^}]*)\}\s*from\s*(['"])[^'"\n]+\2/g;
+
+/**
+ * `text` without its type-only module references (Issue #3884 N5). The
+ * transform erases them, so `vitest related`, which follows the transformed
+ * module's dependencies, never reaches a module through them: a types file
+ * read by a thousand modules as types alone runs only its runtime readers'
+ * tests. An import with one value specifier (`{ type A, b }`) stays an edge.
+ */
+function runtimeReferences(text) {
+  return text.replace(TYPE_ONLY_STATEMENT, '').replace(BRACED_STATEMENT, (statement, list) => {
+    const specifiers = list.split(',').map((part) => part.trim()).filter(Boolean);
+    return specifiers.length > 0 && specifiers.every((part) => /^type\s+/.test(part)) ? '' : statement;
+  });
+}
+
 const RESOLVE_SUFFIXES = ['', '.ts', '.tsx', '.js', '.mjs', '.cjs', '.jsx', '/index.ts', '/index.tsx', '/index.js', '/index.mjs'];
 /** The tsconfig `paths` (and vitest `alias`) of this repository. */
 const PATH_ALIASES = [
@@ -222,6 +241,8 @@ function resolveModule(from, specifier, known) {
  * to files; a test that names a source only by path in its text (a fixture, a
  * `vi.mock` of a path the graph cannot resolve) is counted too. Erring wide is
  * the safe side — a step counted heavy only waits for the lock it should share.
+ * Type-only references are not edges (runtimeReferences): the transform erases
+ * them, and vitest follows the transformed dependencies.
  */
 export function estimateRelatedTests(worktree, sources) {
   const root = path.join(worktree, 'tests', 'unit');
@@ -239,8 +260,9 @@ export function estimateRelatedTests(worktree, sources) {
     } catch {
       continue;
     }
+    // The naming match below reads the whole text; only the graph drops type-only edges.
     texts.set(file, text);
-    for (const match of text.matchAll(MODULE_REFERENCE)) {
+    for (const match of runtimeReferences(text).matchAll(MODULE_REFERENCE)) {
       const target = resolveModule(file, match[2], known);
       if (target === null || target === file) continue;
       if (!importers.has(target)) importers.set(target, new Set());

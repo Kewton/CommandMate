@@ -122,6 +122,39 @@ describe('estimateRelatedTests', () => {
     expect(planSteps({ changed: ['src/lib/env.ts'], deleted: [] }, { base, relatedTests: count }).related.heavy).toBe(true);
   });
 
+  it('does not follow type-only references, which the transform erases (N5)', () => {
+    // src/lib/types.ts: read as types by many modules and tests, at run time by two.
+    write('src/lib/types.ts', 'export interface T { a: number }\nexport const KIND = 1;\n');
+    write('src/lib/a.ts', "import type { T } from './types';\nexport const a = (t: T) => t;\n");
+    write('src/lib/b.ts', "import { type T } from '@/lib/types';\nexport type { T } from './types';\nexport const b = 1;\n");
+    write('src/lib/c.ts', "export type { T } from './types';\nimport type * as all from './types';\nexport const c = 1;\n");
+    write('src/lib/runtime.ts', "import { type T, KIND } from './types';\nexport const r: T = { a: KIND };\n");
+    for (let i = 0; i < HEAVY_TEST_FILES; i++) {
+      const module = ['a', 'b', 'c'][i % 3];
+      write(`tests/unit/many/t${i}.test.ts`, `import { ${module} } from '@/lib/${module}';\n`);
+    }
+    write('tests/unit/runtime.test.ts', "import { r } from '@/lib/runtime';\n");
+    write('tests/unit/kind.test.ts', "import { KIND } from '../../src/lib/types';\n");
+
+    const count = estimateRelatedTests(tmp, ['src/lib/types.ts']);
+    // runtime.test (through the mixed import) and kind.test (a value import).
+    expect(count).toBe(2);
+    expect(planSteps({ changed: ['src/lib/types.ts'], deleted: [] }, { base, relatedTests: count }).related.heavy).toBe(false);
+  });
+
+  it('stays heavy for a source with HEAVY_TEST_FILES runtime readers, type imports beside them', () => {
+    write('src/lib/types.ts', 'export const KIND = 1;\n');
+    write('src/lib/mixed.ts', "import { type T, KIND } from './types';\nimport type { U } from './types';\nexport const m = KIND;\n");
+    write('src/lib/default.ts', "import KIND_DEFAULT, { type T } from './types';\nexport const d = KIND_DEFAULT;\n");
+    for (let i = 0; i < HEAVY_TEST_FILES; i++) {
+      write(`tests/unit/many/t${i}.test.ts`, `import { x } from '@/lib/${i % 2 === 0 ? 'mixed' : 'default'}';\n`);
+    }
+
+    const count = estimateRelatedTests(tmp, ['src/lib/types.ts']);
+    expect(count).toBe(HEAVY_TEST_FILES);
+    expect(planSteps({ changed: ['src/lib/types.ts'], deleted: [] }, { base, relatedTests: count }).related.heavy).toBe(true);
+  });
+
   it('keeps a truly narrow source narrow, a cycle and a helper included (negative control)', () => {
     write('src/lib/leaf.ts', "import { b } from './cycle-b';\nexport const leaf = b;\n");
     write('src/lib/cycle-b.ts', "import { leaf } from './leaf';\nexport const b = 1;\nexport const c = leaf;\n");
