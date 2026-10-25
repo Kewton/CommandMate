@@ -58,7 +58,15 @@ vi.mock('@/lib/tmux/tmux', () => ({
   }),
 }));
 
-vi.mock('@/lib/session/cli-session', () => ({ captureSessionOutput: vi.fn() }));
+/** The frame `/respond` captures right before its send (review P2); `fail` makes that capture throw. */
+const sendScreen = vi.hoisted(() => ({ fail: false }));
+vi.mock('@/lib/session/cli-session', () => ({
+  captureSessionOutput: vi.fn(),
+  captureSessionOutputFresh: vi.fn(async () => {
+    if (sendScreen.fail) throw new Error('capture failed');
+    return 'respond-frame';
+  }),
+}));
 vi.mock('@/lib/polling/response-poller', () => ({ startPolling: vi.fn() }));
 vi.mock('@/lib/realtime/terminal-broadcast', () => ({
   broadcastTerminalSnapshotAfterInteraction: vi.fn().mockResolvedValue(undefined),
@@ -89,6 +97,26 @@ vi.mock('@/lib/polling/response-checker', async (importOriginal) => ({
   detectPromptOnCleanFrame: () =>
     screen.prompt === null ? { isPrompt: false } : { isPrompt: true, promptData: screen.prompt },
 }));
+
+// `/respond`'s reading of that frame is the prompt on screen (`screen.prompt`);
+// every other reading is the real one.
+vi.mock('@/lib/polling/auto-yes-dialog-gate', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/lib/polling/auto-yes-dialog-gate')>();
+  return {
+    ...original,
+    assessPromptAnswerability: (cliToolId: Parameters<typeof original.assessPromptAnswerability>[0], frame: string) => {
+      const assessed = original.assessPromptAnswerability(cliToolId, frame);
+      if (frame !== 'respond-frame') return assessed;
+      return {
+        ...assessed,
+        refusal: null,
+        promptCheck: screen.prompt === null
+          ? { isPrompt: false, cleanContent: '' }
+          : { isPrompt: true, promptData: screen.prompt, cleanContent: '' },
+      };
+    },
+  };
+});
 
 const mockLogger = vi.hoisted(() => {
   const logger = {
@@ -161,9 +189,12 @@ async function tickOn(state: AutoYesPollerState, prompt: PromptData | null): Pro
   return result;
 }
 
-/** A person answers `yes` to the stored prompt row of the prompt on screen, by `messageId`. */
-async function personAnswersRow(prompt: PromptData): Promise<number> {
-  screen.prompt = prompt;
+/**
+ * A person answers `yes` to the stored prompt row of `prompt`, by `messageId`,
+ * while `onScreen` (by default the same prompt) is what the screen shows at the send.
+ */
+async function personAnswersRow(prompt: PromptData, onScreen: PromptData | null = prompt): Promise<number> {
+  screen.prompt = onScreen;
   const row = createMessage(db, {
     worktreeId: WORKTREE_ID,
     cliToolId: 'claude',
@@ -205,6 +236,7 @@ beforeEach(() => {
   delivered = [];
   failNext = null;
   failAfter = null;
+  sendScreen.fail = false;
   clearAllPollerStates();
   clearManualAnswers();
   clearPartialAnswers();
@@ -306,5 +338,42 @@ describe('[#3907] nothing held; the person\'s own send through /respond is cut s
     await personAnswersRow(proceed('npm test'));
     now += MANUAL_ANSWER_HOLD_MS;
     expect(await tickOn(state, proceed('npm run build'))).toBe('responded');
+  });
+});
+
+describe('[#3907 review P2] the send is registered at the screen it goes to, not the stored row\'s', () => {
+  it('row A, screen B at the send, outcome unknown: after the hold, the tick does not type at B again', async () => {
+    failNext = { at: 'text', delivery: 'indeterminate' };
+    const state = pollerState();
+
+    expect(await personAnswersRow(proceed('npm test'), proceed('npm run build'))).toBe(500);
+    now += MANUAL_ANSWER_HOLD_MS;
+    expect(await tickOn(state, proceed('npm run build'))).toBe('no_answer');
+    expect(delivered).toEqual(['y']);
+  });
+
+  it('the screen cannot be read at the send: held as an unidentified screen, B is not typed at again', async () => {
+    failNext = { at: 'text', delivery: 'indeterminate' };
+    sendScreen.fail = true;
+    const state = pollerState();
+
+    expect(await personAnswersRow(proceed('npm test'), proceed('npm run build'))).toBe(500);
+    now += MANUAL_ANSWER_HOLD_MS;
+    expect(await tickOn(state, proceed('npm run build'))).toBe('no_answer');
+    expect(delivered).toEqual(['y']);
+  });
+
+  it('negative: row A, screen B at the send, the answer goes through: B is answered after the hold', async () => {
+    const state = pollerState();
+
+    expect(await personAnswersRow(proceed('npm test'), proceed('npm run build'))).toBe(200);
+    now += MANUAL_ANSWER_HOLD_MS;
+    expect(await tickOn(state, proceed('npm run build'))).toBe('responded');
+  });
+
+  it('negative: the frame is read once for the send', async () => {
+    const { captureSessionOutputFresh } = await import('@/lib/session/cli-session');
+    expect(await personAnswersRow(proceed('npm test'))).toBe(200);
+    expect(captureSessionOutputFresh).toHaveBeenCalledTimes(1);
   });
 });

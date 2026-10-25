@@ -22,7 +22,10 @@ import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/termin
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
-import { isAnswerablePromptData } from '@/types/models';
+import { isAnswerablePromptData, type PromptData } from '@/types/models';
+import type { CLIToolType } from '@/lib/cli-tools/types';
+import { captureSessionOutputFresh } from '@/lib/session/cli-session';
+import { assessPromptAnswerability } from '@/lib/polling/auto-yes-dialog-gate';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import {
   abandonManualSend,
@@ -58,6 +61,32 @@ function manualOutcomeOfSendError(error: unknown): ManualAnswerOutcome | null {
   if (keysSent === true || delivery === 'indeterminate') return 'may-be-on-pane';
   if (keysSent === false) return 'not-sent';
   return null;
+}
+
+/**
+ * The prompt on the screen the stored-message branch is about to send at
+ * (Issue #3907, review P2), for the send it registers with Auto-Yes
+ * (`noteManualSendStarting`). Read off a fresh capture with the same reading
+ * `/prompt-response` re-verifies with (`assessPromptAnswerability`), not off
+ * the stored row: the row was read before the ownership check's await, and a
+ * hold at the row's screen is dropped as "another prompt" when the screen
+ * has moved on — leaving the screen the keys actually went to free for
+ * Auto-Yes. Null when the capture fails or no prompt is read: the hold is
+ * then at an unidentified screen, which covers the next confirmation read.
+ */
+async function promptOnScreenAtSend(
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string,
+): Promise<PromptData | null> {
+  try {
+    const frame = await captureSessionOutputFresh(worktreeId, cliToolId, undefined, instanceId);
+    const { promptCheck } = assessPromptAnswerability(cliToolId, frame);
+    return promptCheck?.isPrompt ? promptCheck.promptData ?? null : null;
+  } catch {
+    logger.warn('failed-to-read-screen-before-send');
+    return null;
+  }
 }
 
 /**
@@ -332,7 +361,9 @@ export async function POST(
 
 
     // Send answer to tmux via shared sendPromptAnswer() (Issue #616)
-    noteManualSendStarting(manualAnswer, promptData);
+    // Issue #3907 (review P2): registered at the screen read right before the
+    // first key, as `/prompt-response` does — not at the stored row's.
+    noteManualSendStarting(manualAnswer, await promptOnScreenAtSend(id, cliToolId, instanceId));
     try {
       await sendPromptAnswer({
         sessionName,
