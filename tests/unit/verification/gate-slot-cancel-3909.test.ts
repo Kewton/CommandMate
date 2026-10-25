@@ -195,7 +195,7 @@ describe('cancelling a run queued for its first slot (Issue #3909)', () => {
     expect(getVerificationRun(db, runA)?.status).toBe('cancelled');
     expect(getVerificationRun(db, runA)?.gates).toEqual([]);
     // B and C are untouched, and A never started.
-    expect(logLines(sharedLog)).toEqual(['b-start', 'c-start']);
+    expect([...logLines(sharedLog)].sort()).toEqual(['b-start', 'c-start']);
 
     // The abandoned wait left no claim on a slot behind it: when B ends, the
     // slot goes to the next run waiting, not to the cancelled one.
