@@ -24,6 +24,7 @@ ${ISSUE_BODY}
 3. 対策案を策定（即座対策、恒久対策、予防策）" \
     --agent copilot --model claude-sonnet-5 --auto-yes --duration 1h
 
+  # この send は launch-worker.mjs を通さない: 読むだけの分析で契約を使わず、claude のワーカーではなく copilot に送るため。
   commandmatedev capture "$WORKTREE_ID" --instance copilot --pane --tail 20
   # 画面のモデル表記を確認し、想定外のモデルで動いていないかを確かめる
 

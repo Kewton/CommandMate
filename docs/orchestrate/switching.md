@@ -30,7 +30,8 @@
    # 合わなければ 1 回だけ起動し直し、なお合わなければセッションを止めて exit 40 / 41、止めた・Auto-Yes を切ったと確かめられなければ 42 / 43（3-1 のモデルの確認結果の扱い）
    TASK_ID=$(node scripts/orchestrate/launch-worker.mjs send --run-dir "workspace/orchestration/runs/$DATE" --issue "$issue" \
      --wt "$WT" --worktree "$WT_PATH" --instance claude --model "$MODEL" --contract ".commandmate/tasks/issue-${issue}-claude.yaml") \
-     && commandmatedev wait "$WT" --instance claude --on-prompt human --verify --timeout 10800
+     && node scripts/orchestrate/wait-verify.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
+       --issue "$issue" --wt "$WT" --worktree "$WT_PATH" --instance claude --task "$TASK_ID" --model "$MODEL"
    ```
 4. 以降は通常の Claude 担当として 3-4 に従う（ワーカー起因の不合格 2 回で人間へエスカレーション）。
 
@@ -51,6 +52,7 @@
    # 書く → 起動 → capture --json の model が opus を含むかを確かめてから契約を送る（3-1 と同じ helper。exit 40〜43 なら待たずに止める）
    TASK_ID=$(node scripts/orchestrate/launch-worker.mjs send --run-dir "workspace/orchestration/runs/$DATE" --issue "$issue" \
      --wt "$WT" --worktree "$WT_PATH" --instance claude --model "$MODEL" --contract ".commandmate/tasks/issue-${issue}-opus.yaml") \
-     && commandmatedev wait "$WT" --instance claude --on-prompt human --verify --timeout 10800
+     && node scripts/orchestrate/wait-verify.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
+       --issue "$issue" --wt "$WT" --worktree "$WT_PATH" --instance claude --task "$TASK_ID" --model "$MODEL"
    ```
 5. 以降は通常の Claude（opus）担当として 3-4 に従う（ワーカー起因の不合格 2 回で人間へエスカレーション）。
