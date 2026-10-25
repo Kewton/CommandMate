@@ -9,6 +9,11 @@
  * `COPY_FEEDBACK_RESET_SHORT_MS` (1.5s), then reverts to the Copy icon. The
  * timer is cleared on unmount and de-duplicated on rapid clicks.
  *
+ * [Issue #3912] The button is not part of the text it sits on: it carries
+ * `data-search-skip` (search leaves its `Copy` / `Copied` caption out, so a
+ * hit and its mark stay on the real text) and `select-none` (a selected range
+ * copied with Cmd/Ctrl+C does not pick the caption up).
+ *
  * @module components/common/CopyButton
  */
 
@@ -17,6 +22,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import { COPY_FEEDBACK_RESET_SHORT_MS } from '@/config/ui-feedback-config';
+import { SEARCH_SKIP_ATTR } from '@/lib/terminal-highlight-dom';
 
 function IconCopy() {
   return (
@@ -75,7 +81,8 @@ export function CopyButton({ text, className = '', label = 'Copy' }: CopyButtonP
     <button
       type="button"
       onClick={handleClick}
-      className={`inline-flex items-center gap-1 rounded border border-border bg-surface px-2 py-0.5 text-[11px] font-medium text-foreground transition-colors hover:bg-muted ${className}`}
+      {...{ [SEARCH_SKIP_ATTR]: 'true' }}
+      className={`select-none inline-flex items-center gap-1 rounded border border-border bg-surface px-2 py-0.5 text-[11px] font-medium text-foreground transition-colors hover:bg-muted ${className}`}
       aria-label={copied ? 'Copied' : label}
       title={copied ? 'Copied!' : label}
     >

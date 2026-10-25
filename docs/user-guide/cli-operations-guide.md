@@ -1211,6 +1211,15 @@ gates:
 GATE e2e PASS (exit=0, 190.0s, waited=42.3s)
 ```
 
+サーバが待ちを `[timing]` の行に記録したゲート（`mutex` を持つゲートと、同時実行の枠を待った
+ゲート。Issue #3884）は、`waited=` の代わりに待ちと実行を 3 つに分けて出します（Issue #3909）。
+`queue` は同時実行の枠（2 本）の待ち、`mutex` はロックの待ち、`run` はコマンドそのものです。
+どちらも待たなかったゲートと、#3884 より前のサーバの run は上の形のままです。
+
+```
+GATE unit PASS (exit=0, 600.0s, queue=30.0s, mutex=120.0s, run=600.0s)
+```
+
 ロックが `timeoutSec` の間ずっと空かなければ、ゲートは **TIMEOUT ではなく SKIP** になります。
 
 ```
@@ -1394,6 +1403,13 @@ commandmate verify show 42 --json                      # JSON で出力
 ```
 #42  2026-07-31T04:12:00.000Z  myrepo-feature-101  manual  failed  failed: unit,build
 #41  2026-07-31T03:58:00.000Z  myrepo-feature-101  wait    passed
+```
+
+待ちを記録したゲート（上の `[timing]`）がある run は、行末にそのゲートの待ちと実行が付きます（Issue #3909）。
+`--json` では各ゲートの `timing`（`{ queueSec, mutexSec, runSec }`）です。
+
+```
+#43  2026-07-31T05:02:00.000Z  myrepo-feature-102  wait    passed  timing: unit(queue=30.0s mutex=120.0s run=600.0s)
 ```
 
 一覧には**ゲートのログ本文（logTail）は含まれません**。500 run 分のログ末尾を毎回返すと一覧が MB 級になるためで、ログが必要なときは `verify show` を使います。`--json` の一覧に `logTail` フィールドは存在しません（`null` ではなく不在です）。

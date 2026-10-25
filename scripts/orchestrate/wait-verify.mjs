@@ -19,7 +19,9 @@
  *     off only once the verdict is confirmed (the worker may still be working
  *     before that), retried, and read back;
  *   - the verdict itself, which lived only in the wait log. It goes to the
- *     `verify` stage of `run-log.mjs`, with the HEAD the verification saw;
+ *     `verify` stage of `run-log.mjs`, with the HEAD the verification saw and,
+ *     when the gates recorded it, the waits apart from the execution
+ *     (`queueSec` / `mutexSec` / `runSec`, verifyTiming, #3909);
  *   - a second contract sent to the same worktree and instance while this
  *     waits (#3587): the worker's turn end then belongs to the new task, and
  *     verifying the old one (narrower scope) only fails and holds the gates.
@@ -270,6 +272,67 @@ export function summarizeVerdict(log, exitCode) {
   return { exitCode, meaning, result, basis, passed, failed, line };
 }
 
+/** A gate's `[timing]` marker (src/lib/verification/gate-runner.ts timingMarker): its log tail's last line. */
+const TIMING_MARKER = /(?:^|\n)\[timing\] queue=(\d+(?:\.\d+)?)s mutex=(\d+(?:\.\d+)?)s run=(\d+(?:\.\d+)?)s\s*$/;
+/** A retried gate's both runs (`[flaky] … duration=45.0s,44.0s …`, gate-runner.ts FLAKY_LOG_PREFIX). */
+const FLAKY_DURATIONS = /^\[flaky\] runs=\d+ outcome=\S+ exit=\S+ duration=(\S+) verdict=\S+$/m;
+/** `12.3s`, or a retried gate's `45.0s,44.0s`. */
+const DURATIONS = /^\d+(?:\.\d+)?s(?:,\d+(?:\.\d+)?s)*$/;
+const sumSeconds = (text) => text.split(',').reduce((sum, d) => sum + Number(d.slice(0, -1)), 0);
+const splitOf = (queue, mutex, execution) => ({
+  queueSec: Math.round(queue),
+  mutexSec: Math.round(mutex),
+  runSec: Math.round(execution),
+});
+
+/**
+ * The waits and the execution of a verification, as the optional `queueSec` /
+ * `mutexSec` / `runSec` of a run-log.mjs record (Issue #3909).
+ *
+ * From the run itself (`view`, `verify show <id> --json` of the run
+ * {@link runIdOf} names): each gate's stored log tail and duration, so nothing
+ * a gate printed can be read as another gate (#3909 review 3). A gate with the
+ * `[timing]` marker (#3884) adds its three numbers — a mutex-wait SKIP
+ * included, whose GATE line shows only the reason (review 1); any other gate
+ * waited for nothing and adds its duration to `run` only (a retried gate both
+ * runs, a TIMEOUT its budget — review 2).
+ *
+ * `{}` (nothing to write, the record reads as before) when the run could not
+ * be read — the CLI's text is never parsed instead: a failing gate's log is
+ * echoed there unprefixed, and a `GATE …` line inside it would be counted —
+ * and when no gate has the marker: a server older than it, or a run in which
+ * nothing waited, has no split to report.
+ *
+ * @param {{ gates?: Array<{ durationMs?: number | null, logTail?: string | null }> } | null} view
+ * @returns {{ queueSec?: number, mutexSec?: number, runSec?: number }}
+ */
+export function verifyTiming(view) {
+  return Array.isArray(view?.gates) ? runTiming(view.gates) : {};
+}
+
+/** {@link verifyTiming} from the stored gates of one run. */
+function runTiming(gates) {
+  let queue = 0;
+  let mutex = 0;
+  let execution = 0;
+  let timed = false;
+  for (const gate of gates) {
+    const tail = typeof gate.logTail === 'string' ? gate.logTail : '';
+    const marker = TIMING_MARKER.exec(tail);
+    if (marker) {
+      timed = true;
+      queue += Number(marker[1]);
+      mutex += Number(marker[2]);
+      execution += Number(marker[3]);
+      continue;
+    }
+    const flaky = FLAKY_DURATIONS.exec(tail)?.[1];
+    if (flaky && DURATIONS.test(flaky)) execution += sumSeconds(flaky);
+    else if (typeof gate.durationMs === 'number') execution += gate.durationMs / 1000;
+  }
+  return timed ? splitOf(queue, mutex, execution) : {};
+}
+
 /**
  * Whether a pane (or a reply) shows the completion signal on a line of its own
  * (3-3: the goal text also contains the word). A signal that names its HEAD
@@ -292,9 +355,20 @@ export function hasCompletionSignal(pane, { head, requireHead = false } = {}) {
     });
 }
 
-/** The id of the last verification run a `wait --verify` / `verify` log started (`Verifying: <wt> (run <id>)`), or null. */
+/**
+ * The id of the verification run one `verify` call's log started — its FIRST
+ * `Verifying: <wt> (run <id>)` — or null. The one rule for which run a log is
+ * about: the timing, the completion check and the record's `run=` all take it
+ * (#3909 review).
+ *
+ * The first, because the log holds one CLI call (defaultSpawnToLog opens it
+ * `w`; a refused start prints no `Verifying:`) and the CLI prints that line
+ * before any gate: a later one can only be a failing gate's own log, echoed
+ * unprefixed under its GATE line. A log without such an echo has one line, so
+ * the first is the last that was read before.
+ */
 export function runIdOf(log) {
-  return [...log.matchAll(/^Verifying: \S+ \(run (\d+)\)/gm)].pop()?.[1] ?? null;
+  return /^Verifying: \S+ \(run (\d+)\)/m.exec(log)?.[1] ?? null;
 }
 
 /**
@@ -572,7 +646,8 @@ function awaitRunEnd({ run, sleep, now, o, cwd, supersededBy }, runId) {
  * `ctx.signal` is the completion signal main() already waited for before the
  * verification (#3883); without it the signal, when one is needed, is waited
  * for here, as before. The verification's start is read by the run id its log
- * printed (H-5).
+ * printed (H-5): `verdict.runId` when main() took it from the verification's
+ * own log (runIdOf), else runIdOf of the folded log.
  *
  * @returns {{ state: 'confirmed' | 'working' | 'dirty', exitCode: number, log: string, reason: string, reverified: boolean }}
  */
@@ -594,7 +669,8 @@ export function confirmCompletion(ctx) {
   //    after it started, if the HEAD moved after the completion signal, or if
   //    it started before the last turn end and the tree has changed since
   //    (3-3 "before-signal").
-  const runId = runIdOf(log);
+  // The run main() took from the verification's own log; the folded log may also hold the wait's.
+  let runId = verdict.runId !== undefined ? verdict.runId : runIdOf(log);
   const started = runStart(run, o.cli, o.wt, runId, cwd);
   const state = readJson(run, o.cli, ['capture', o.wt, '--instance', o.instance, '--json'], cwd);
   const lastStop = typeof state?.lastStopEventAt === 'number' ? state.lastStopEventAt : null;
@@ -627,8 +703,8 @@ export function confirmCompletion(ctx) {
     reverified = true;
     notes.push('reverified=verify --task', ...again.notes);
     if (again.superseded) return { state: 'working', exitCode, log, reason: again.superseded, reverified };
-    const reRun = runIdOf(log);
-    if (reRun) notes.push(`run=${reRun}`);
+    runId = runIdOf(log);
+    if (runId) notes.push(`run=${runId}`);
     const recommitted = Date.parse(git(run, o.worktree, ['log', '-1', '--format=%cI']).trim());
     if (Number.isFinite(recommitted) && recommitted > reStart) {
       return { state: 'working', exitCode, log, reason: 'a commit landed during the re-verification', reverified };
@@ -826,6 +902,8 @@ export function main(argv, deps = {}) {
     const waitArgs = ['wait', o.wt, '--instance', instance, '--on-prompt', 'human', '--timeout', o.timeout];
     let exitCode = spawnToLog(o.cli, waitArgs, { cwd, logFile: o.logFile, ...(watching ? { watch } : {}) });
     let verdictLog = fs.existsSync(o.logFile) ? fs.readFileSync(o.logFile, 'utf8') : '';
+    /** The run the verification started (runIdOf): its gates are the record's timing (#3909). */
+    let verifyRunId = null;
     const verifyCtx = {
       spawnToLog, run, sleep, now, o, cwd, supersededBy,
       onVerifyStart: () => {
@@ -862,6 +940,7 @@ export function main(argv, deps = {}) {
         superseded = verified.superseded;
         verdictLog = o.afterReinstruct ? '' : verdictLog;
         verdictLog += verified.log;
+        verifyRunId = runIdOf(verified.log);
         // As `wait --verify` folds it: a green run does not turn "never started" into a pass.
         exitCode = exitCode === NOT_STARTED_EXIT && verified.exitCode === 0 ? NOT_STARTED_EXIT : verified.exitCode;
       }
@@ -905,6 +984,8 @@ export function main(argv, deps = {}) {
           agent: o.instance,
           model: o.model,
           durationSec,
+          // The waits and the execution apart (#3909); absent when no gate recorded a split.
+          ...verifyTiming(readRun(run, o.cli, o.wt, verifyRunId, cwd)),
           note,
           item: o.item,
           key: key(),
@@ -935,9 +1016,11 @@ export function main(argv, deps = {}) {
     }
 
     const confirmed = confirmCompletion({
-      ...verifyCtx, verdict: { exitCode, log: verdictLog }, signal, since: baseline.found ? baseline.createdAt : null,
+      ...verifyCtx, verdict: { exitCode, log: verdictLog, ...(verifyRunId ? { runId: verifyRunId } : {}) }, signal, since: baseline.found ? baseline.createdAt : null,
     });
     const verdict = summarizeVerdict(confirmed.log, confirmed.exitCode);
+    // A re-verification (3-3) is the run the verdict is now taken on.
+    if (confirmed.reverified) verifyRunId = runIdOf(confirmed.log);
     if (confirmed.state === 'working') {
       record('fail', headNow(), `unconfirmed: ${confirmed.reason}; ${verdict.line} ${extraNotes()} auto-yes=kept`);
       return UNCONFIRMED_EXIT;
