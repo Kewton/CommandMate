@@ -14,7 +14,9 @@ module-reference の一本化を重ねた HEAD の記録には、`--work-head <�
 この規則は `publish-pr.mjs` / `merge-pr.mjs` の止まる条件と同じ関数（`unmetStage`）なので、再開先と公開側の判定はずれない。
 `verify` は `scripts/orchestrate/wait-verify.mjs`（3-3）、`precheck` は `scripts/orchestrate/precheck.mjs`（6-1-1）が自分で書く。
 `verify` / `precheck` の行は、所要時間を待ちと実行に分けた `queueSec`・`mutexSec`・`runSec` を持てる（#3884。省略可能で、無い行は今までどおり読む。
-docs/orchestrate/ci-merge.md#6-1-1-重い検証の資源制御と待ちの記録）。
+docs/orchestrate/ci-merge.md#6-1-1-重い検証の資源制御と待ちの記録）。`wait-verify.mjs` は、最後の `verify` が始めた run の各ゲートの `[timing]`
+を `verify show <id> --json` で読んで合計して渡す（#3909。mutex 待ちの SKIP も入る。`runSec` には待ちの無いゲートの duration も足す。run を読めないときは書かない。GATE 行からは読まない）。どのゲートもそれを持たない verify（古いサーバ、何も待たなかった run）の行にも書かない。
+`status --json` の `stages.verify` で読める。
 
 ## 1-5 同じ Issue の複数の PR（work item）
 

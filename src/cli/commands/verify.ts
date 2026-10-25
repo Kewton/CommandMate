@@ -48,6 +48,7 @@ import { ApiClient, ApiError, isValidWorktreeId, isValidInstanceId } from '../ut
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import {
   FLAKY_GATE_LABEL,
+  formatGateTiming,
   parseFlakyMarker,
   parseGateIds,
   runVerification,
@@ -187,13 +188,22 @@ function inheritedFlag<T>(own: T | undefined, command: Command, key: string): T 
  * The run id leads the line even though it is not in the requested field list:
  * without it there is no way to reach `verify show`, which is the only reason
  * to read this listing in the first place.
+ *
+ * Gates that carry `timing` (#3884) are named after the verdict with their
+ * waits and execution apart (#3909), so "this run took 40 minutes" can be read
+ * as a queue, a lock or a slow suite without opening every run. A run none of
+ * whose gates waited keeps the line it always had.
  */
 function formatHistoryLine(run: VerificationRunSummaryView): string {
   const failed = run.gates
     .filter((gate) => FAILED_GATE_STATUSES.has(gate.status))
     .map((gate) => gate.gateId);
   const suffix = failed.length > 0 ? `  failed: ${failed.join(',')}` : '';
-  return `#${run.id}  ${run.startedAt}  ${run.worktreeId}  ${run.trigger}  ${run.status}${suffix}`;
+  const timed = run.gates.flatMap((gate) =>
+    gate.timing ? [`${gate.gateId}(${formatGateTiming(gate.timing, ' ')})`] : []
+  );
+  const timing = timed.length > 0 ? `  timing: ${timed.join(' ')}` : '';
+  return `#${run.id}  ${run.startedAt}  ${run.worktreeId}  ${run.trigger}  ${run.status}${suffix}${timing}`;
 }
 
 export function createVerifyCommand(): Command {
