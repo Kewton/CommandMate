@@ -469,7 +469,8 @@ describe('parseArgs / set-model / check-model', () => {
   it('rejects unknown models, a missing model for set-model, a bad duration and a bad item', () => {
     expect(parseArgs(['set-model', '--worktree', worktree]).error).toMatch(/--model is required/);
     expect(parseArgs(['set-model', '--worktree', worktree, '--model', 'fable']).error).toMatch(/--model must be/);
-    expect(parseArgs([...sendArgv('--model', 'opus'), '--duration', '2h']).error).toMatch(/--duration/);
+    // Issue #3913: 1h-24h is valid now; the bad duration moved from 2h to 25h.
+    expect(parseArgs([...sendArgv('--model', 'opus'), '--duration', '25h']).error).toMatch(/--duration/);
     expect(parseArgs([...sendArgv(), '--item', '../x']).error).toMatch(/--item/);
     expect(parseArgs(sendArgv()).options).toMatchObject({ model: '-', duration: '3h', cli: 'commandmatedev' });
   });

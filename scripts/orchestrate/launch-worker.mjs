@@ -44,7 +44,7 @@
  * Usage:
  *   node scripts/orchestrate/launch-worker.mjs send --run-dir <dir> --issue <N> [--item <work item>]
  *        --wt <worktree-id> --worktree <path> --instance <agent> --contract <file>
- *        [--model <opus|sonnet|->] [--duration <1h|3h|8h>] [--cli <commandmatedev>]
+ *        [--model <opus|sonnet|->] [--duration <1h..24h>] [--cli <commandmatedev>]
  *   node scripts/orchestrate/launch-worker.mjs set-model --worktree <path> --model <opus|sonnet>
  *   node scripts/orchestrate/launch-worker.mjs check-model --wt <worktree-id> --model <opus|sonnet>
  *        [--instance <id>] [--cli <commandmatedev>]
@@ -239,10 +239,19 @@ export function waitReady({ run, sleep, cli, wt, instance }) {
   return false;
 }
 
+/**
+ * The `--duration` format the CLI accepts (Issue #3913): `1h`〜`24h`, whole
+ * hours. A copy of AUTO_YES_DURATION_FLAG_PATTERN in
+ * src/config/auto-yes-duration.ts (this .mjs cannot import TypeScript);
+ * tests/unit/scripts/orchestrate/launch-worker-duration-3913.test.ts keeps the
+ * two equal.
+ */
+export const DURATION_FLAG_PATTERN = /^(?:[1-9]|1[0-9]|2[0-4])h$/;
+
 const USAGE = `Usage:
   node scripts/orchestrate/launch-worker.mjs send --run-dir <dir> --issue <N> [--item <work item>]
        --wt <worktree-id> --worktree <path> --instance <agent> --contract <file>
-       [--model <opus|sonnet|->] [--duration <1h|3h|8h>] [--cli <commandmatedev>]
+       [--model <opus|sonnet|->] [--duration <1h..24h>] [--cli <commandmatedev>]
   node scripts/orchestrate/launch-worker.mjs set-model --worktree <path> --model <opus|sonnet>
   node scripts/orchestrate/launch-worker.mjs check-model --wt <worktree-id> --model <opus|sonnet> [--instance <id>] [--cli <commandmatedev>]`;
 
@@ -280,7 +289,7 @@ export function parseArgs(argv) {
   if (!models.includes(options.model)) return { error: `--model must be one of ${models.join(' / ')} (got ${options.model})` };
   if (command === 'send') {
     if (!/^[1-9]\d*$/.test(options.issue)) return { error: `--issue must be a positive integer (got ${options.issue})` };
-    if (!['1h', '3h', '8h'].includes(options.duration)) return { error: `--duration must be 1h, 3h or 8h (got ${options.duration})` };
+    if (!DURATION_FLAG_PATTERN.test(options.duration)) return { error: `--duration must be 1h..24h in whole hours (got ${options.duration})` };
     const badItem = itemProblem(options.item);
     if (badItem) return { error: badItem };
   }

@@ -307,7 +307,8 @@ describe('send argument validation', () => {
  */
 describe('send option validation happens before the task row is created', () => {
   const CONTRACT = ['--contract', '.commandmate/tasks/t.yaml'];
-  const INVALID_DURATION = 'Error: Invalid duration. Must be one of: 1h, 3h, 8h';
+  // Issue #3913: the range widened to 1h-24h; the negatives moved from 2h to 25h.
+  const INVALID_DURATION = 'Error: Invalid duration. Must be 1h-24h, whole hours (e.g. 5h).';
 
   /** Every route the command could reach, so an early call is recorded rather than rejected. */
   function mockAllRoutes() {
@@ -338,7 +339,7 @@ describe('send option validation happens before the task row is created', () => 
       'claude',
       '--auto-yes',
       '--duration',
-      '2h',
+      '25h',
     ]);
 
     expect(mockConsoleError).toHaveBeenCalledWith(INVALID_DURATION);
@@ -416,7 +417,7 @@ describe('send option validation happens before the task row is created', () => 
     },
     {
       name: '--duration',
-      argv: ['wt1', ...CONTRACT, '--auto-yes', '--duration', '2h'],
+      argv: ['wt1', ...CONTRACT, '--auto-yes', '--duration', '25h'],
       error: INVALID_DURATION,
     },
   ];
@@ -445,6 +446,41 @@ describe('send option validation happens before the task row is created', () => 
       calls.findIndex((c) => c.url.includes('/send'))
     );
     expect(mockConsoleError).toHaveBeenCalledWith('Message sent.');
+  });
+
+  /**
+   * Issue #3913: every combination of --contract and --auto-yes rejects an
+   * out-of-range --duration before the first request — no task row, no send,
+   * no Auto-Yes enable.
+   */
+  it.each([
+    ['--contract and --auto-yes', [...CONTRACT, '--auto-yes']],
+    ['--contract without --auto-yes', [...CONTRACT]],
+    ['--auto-yes without --contract', ['hello', '--auto-yes']],
+    ['neither', ['hello']],
+  ])('[#3913] rejects --duration 0h / 25h / 1.5h / 01h with %s, before any request', async (_label, rest) => {
+    for (const bad of ['0h', '25h', '1.5h', '01h']) {
+      mockConsoleError.mockClear();
+      const calls = mockAllRoutes();
+
+      const code = await runSendUntilExit(['wt1', ...rest, '--duration', bad]);
+
+      expect(mockConsoleError).toHaveBeenCalledWith(INVALID_DURATION);
+      expect(code).toBe(ExitCode.CONFIG_ERROR);
+      expect(calls).toEqual([]);
+    }
+  });
+
+  it.each([
+    ['2h', 7_200_000],
+    ['5h', 18_000_000],
+    ['24h', 86_400_000],
+  ])('[#3913] --auto-yes --duration %s carries %i ms in the POST', async (flag, ms) => {
+    const calls = mockAllRoutes();
+
+    await runSend(['wt1', 'hello', '--auto-yes', '--duration', flag]);
+
+    expect(calls.find((c) => c.url.includes('/auto-yes'))?.body).toEqual({ enabled: true, duration: ms });
   });
 
   it('defaults to 1h when --duration is omitted', async () => {

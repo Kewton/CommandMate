@@ -7,34 +7,26 @@
  *
  * Issue #225: Duration selection feature
  * Issue #314: Stop condition (regex) validation
+ * Issue #3913: Durations widened to 1〜24 hours (defined in auto-yes-duration.ts)
  */
 
 import safeRegex from 'safe-regex2';
 import { TUI_PANE_HEIGHT } from '@/config/tmux-pane-config';
 
-/** Allowed Auto-Yes durations in milliseconds */
-export const ALLOWED_DURATIONS = [3600000, 10800000, 28800000] as const;
-
-/** Auto-Yes duration type (literal union from ALLOWED_DURATIONS) */
-export type AutoYesDuration = typeof ALLOWED_DURATIONS[number];
-
-/** Default Auto-Yes duration (1 hour = 3600000ms) */
-export const DEFAULT_AUTO_YES_DURATION: AutoYesDuration = 3600000;
-
-/** i18n translation keys for each duration value */
-export const DURATION_LABELS: Record<AutoYesDuration, string> = {
-  3600000: 'autoYes.durations.1h',
-  10800000: 'autoYes.durations.3h',
-  28800000: 'autoYes.durations.8h',
-};
-
-/**
- * Type guard: check whether a value is a valid AutoYesDuration.
- * Replaces `as AutoYesDuration` casts with a runtime-safe check.
- */
-export function isAllowedDuration(value: unknown): value is AutoYesDuration {
-  return typeof value === 'number' && (ALLOWED_DURATIONS as readonly number[]).includes(value);
-}
+// Issue #3913: the duration definitions live in the dependency-free
+// `auto-yes-duration.ts` so the CLI can re-export them; re-exported here so
+// server and browser code keep importing from this module.
+export {
+  AUTO_YES_DURATIONS,
+  PRESET_AUTO_YES_DURATIONS,
+  DEFAULT_AUTO_YES_DURATION,
+  MIN_AUTO_YES_HOURS,
+  MAX_AUTO_YES_HOURS,
+  isAllowedDuration,
+  autoYesDurationToHours,
+  hoursToAutoYesDuration,
+  type AutoYesDuration,
+} from './auto-yes-duration';
 
 // =============================================================================
 // Polling Interval Constants (Issue #499)

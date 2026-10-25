@@ -287,7 +287,7 @@ commandmate send <worktree-id> "<message>" --auto-yes --auto-yes-answer-mode car
 | `--model <model>` | 使うモデル（copilot / antigravity / claude のみ）。**copilot** はセッション内で切り替える。**antigravity と claude は起動フラグ**なので、この send がセッションを起動するときだけ効き、稼働中のセッションに渡すと 400 になる（切り替えるにはセッションを止めてから送り直す）。claude の値は別名（`sonnet` / `opus` / `opus[1m]`）か完全な ID（`claude-sonnet-5`）。送り先（`--instance` か `--agent`）の指定が必須 | ツールの既定 |
 | `--auto-yes` | 送信前にAuto-Yesを有効化 | - |
 | `--auto-yes-answer-mode <m>` | `--auto-yes` で有効にするときの答え方のモード（`recommended` / `careful`。[答え方のモード](#答え方のモードおまかせ慎重issue-3863)）。`--auto-yes` なしで指定すると exit 2（Issue #3863） | 新たに有効にするなら `recommended`、有効中なら今のモードのまま |
-| `--duration <d>` | Auto-Yesの有効期間（1h, 3h, 8h） | 1h |
+| `--duration <d>` | Auto-Yesの有効期間（`1h`〜`24h`、1 時間刻み。例: `1h` / `3h` / `8h`）。範囲の外は `--auto-yes` の有無にかかわらず exit 2 | 1h |
 | `--stop-pattern <p>` | Auto-Yes停止条件（正規表現、ターミナル出力への照合。[auto-yes の注意](#--stop-pattern-はターミナル出力への照合コマンドの抑止には使えない)参照） | - |
 
 > `--instance` の詳細（ID規約・rosterとの関係）は [マルチセッション（1エージェント複数セッション）](#マルチセッション1エージェント複数セッション) を参照してください。
@@ -2545,7 +2545,7 @@ commandmate auto-yes <worktree-id> --enable --answer-mode careful  # 質問は�
 |-----------|------|
 | `--enable` | Auto-Yesを有効化 |
 | `--disable` | Auto-Yesを無効化 |
-| `--duration <d>` | 有効期間（1h, 3h, 8h） |
+| `--duration <d>` | 有効期間（`1h`〜`24h`、1 時間刻み。例: `1h` / `3h` / `8h`。既定 `1h`）。小文字の `h` のみ、`01h`・`1.5h`・`90m` などは exit 2 |
 | `--stop-pattern <p>` | 指定パターンがターミナル出力に出現したら自動停止 |
 | `--answer-mode <m>` | 答え方のモード（`recommended` / `careful`。下の[答え方のモード](#答え方のモードおまかせ慎重issue-3863)）。`--enable` のときだけ。省略すると、新たに有効にするなら `recommended`、有効中なら今のモードのまま（Issue #3863） |
 | `--instance <id>` | **対象の推奨指定方法**。対象インスタンスID。他インスタンスと独立してAuto-Yesを制御 |
@@ -3716,10 +3716,10 @@ Warning: Response may not have been applied. Reason: prompt_no_longer_active
 ### 不正なdurationエラー
 
 ```
-Error: Invalid duration. Must be one of: 1h, 3h, 8h
+Error: Invalid duration. Must be 1h-24h, whole hours (e.g. 5h).
 ```
 
-**対処**: `--duration` には `1h`, `3h`, `8h` のいずれかを指定してください。
+**対処**: `--duration` には `1h`〜`24h` の整数時間（小文字の `h`、先頭のゼロ・符号・小数なし。例: `5h`）を指定してください。
 
 ### 不正なagentエラー
 

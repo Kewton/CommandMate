@@ -302,7 +302,7 @@ commandmate send "$WT" "Quick check" --agent codex --instance codex-3 --register
 | `--register` | Register the `--instance` session into the roster | - |
 | `--model <model>` | Model to use (copilot / antigravity / claude only). **copilot** switches inside the session. **antigravity and claude take it as a launch flag**: it applies only when this send starts the session, and a running session answers 400 (stop the session and resend to switch). For claude the value is an alias (`sonnet` / `opus` / `opus[1m]`) or a full id (`claude-sonnet-5`). The target must be named (`--instance` or `--agent`) | The tool's default |
 | `--auto-yes` | Enable auto-yes before sending | - |
-| `--duration <d>` | Auto-yes duration (1h, 3h, 8h) | 1h |
+| `--duration <d>` | Auto-yes duration (`1h`-`24h`, whole hours; e.g. `1h` / `3h` / `8h`). Out of range exits 2 with or without `--auto-yes` | 1h |
 | `--stop-pattern <p>` | Auto-yes stop condition (regex) | - |
 
 ### Finding Worktree IDs
@@ -1736,7 +1736,7 @@ commandmate auto-yes <worktree-id> --enable --answer-mode careful  # Questions a
 |--------|-------------|
 | `--enable` | Turn Auto-Yes on |
 | `--disable` | Turn Auto-Yes off |
-| `--duration <d>` | How long it stays on (1h, 3h, 8h) |
+| `--duration <d>` | How long it stays on (`1h`-`24h`, whole hours; e.g. `1h` / `3h` / `8h`; default `1h`). Lower-case `h` only; `01h`, `1.5h`, `90m` and the like exit 2 |
 | `--stop-pattern <p>` | Stop automatically when the pattern appears in terminal output |
 | `--answer-mode <m>` | The answer mode (`recommended` / `careful`; see [Answer Modes](#answer-modes-recommended-and-careful-issue-3863) below). With `--enable` only. Omitted: `recommended` for a new grant, the current mode for a grant that is on (Issue #3863) |
 | `--instance <id>` | **The recommended way to name the target.** The instance ID; Auto-Yes is controlled independently of the other instances |
@@ -2693,7 +2693,7 @@ Warning: Response may not have been applied. Reason: prompt_no_longer_active
 ### Invalid duration / agent errors
 
 ```
-Error: Invalid duration. Must be one of: 1h, 3h, 8h
+Error: Invalid duration. Must be 1h-24h, whole hours (e.g. 5h).
 Error: Invalid agent. Must be one of: claude, codex, gemini, vibe-local, opencode, copilot, antigravity, command-code, opencode-v2
 ```
 

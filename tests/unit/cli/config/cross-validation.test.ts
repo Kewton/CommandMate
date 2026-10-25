@@ -4,35 +4,34 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { DURATION_MAP, parseDurationToMs } from '../../../../src/cli/config/duration-constants';
+import {
+  AUTO_YES_DURATIONS as CLI_AUTO_YES_DURATIONS,
+  parseDurationToMs,
+} from '../../../../src/cli/config/duration-constants';
 import { CLI_TOOL_IDS } from '../../../../src/cli/config/cli-tool-ids';
 
 import type { AutoYesSuppressionReason as CliSuppressionReason } from '../../../../src/cli/types/api-responses';
 
 // Import server-side sources of truth
-import { ALLOWED_DURATIONS as SERVER_ALLOWED_DURATIONS } from '../../../../src/config/auto-yes-config';
+import { AUTO_YES_DURATIONS as SERVER_AUTO_YES_DURATIONS } from '../../../../src/config/auto-yes-config';
 import { CLI_TOOL_IDS as SERVER_CLI_TOOL_IDS } from '../../../../src/lib/cli-tools/types';
 import type { AutoYesSuppressionReason as ServerSuppressionReason } from '../../../../src/lib/polling/auto-yes-resolver';
 
 describe('[IA3-04] Duration constants cross-validation', () => {
-  it('CLI DURATION_MAP values match server ALLOWED_DURATIONS', () => {
-    const cliDurationValues = Object.values(DURATION_MAP).sort();
-    const serverDurationValues = [...SERVER_ALLOWED_DURATIONS].sort();
-    expect(cliDurationValues).toEqual(serverDurationValues);
+  // Issue #3913: 1h〜24h. The CLI re-exports the server's definitions, so the
+  // values below agree by construction; the reference check keeps it that way.
+  it('CLI AUTO_YES_DURATIONS is the same reference as the server source of truth', () => {
+    expect(CLI_AUTO_YES_DURATIONS).toBe(SERVER_AUTO_YES_DURATIONS);
   });
 
-  it('parseDurationToMs output values are all in server ALLOWED_DURATIONS', () => {
-    for (const key of Object.keys(DURATION_MAP)) {
-      const ms = parseDurationToMs(key);
-      expect(ms).not.toBeNull();
-      expect((SERVER_ALLOWED_DURATIONS as readonly number[]).includes(ms!)).toBe(true);
-    }
+  it('parseDurationToMs maps all 24 flags to the server values, in order', () => {
+    const parsed = Array.from({ length: 24 }, (_, i) => parseDurationToMs(`${i + 1}h`));
+    expect(parsed).toEqual([...SERVER_AUTO_YES_DURATIONS]);
   });
 
-  it('every server ALLOWED_DURATION has a CLI mapping', () => {
-    const cliValues = new Set(Object.values(DURATION_MAP));
-    for (const serverDuration of SERVER_ALLOWED_DURATIONS) {
-      expect(cliValues.has(serverDuration)).toBe(true);
+  it('every server duration has a CLI flag', () => {
+    for (const serverDuration of SERVER_AUTO_YES_DURATIONS) {
+      expect(parseDurationToMs(`${serverDuration / 3_600_000}h`)).toBe(serverDuration);
     }
   });
 });
