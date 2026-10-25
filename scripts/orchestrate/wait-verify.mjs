@@ -286,79 +286,28 @@ const splitOf = (queue, mutex, execution) => ({
 });
 
 /**
- * The id of the run a `verify` log is about: its FIRST `Verifying: … (run <id>)`.
- * The log holds one CLI call (defaultSpawnToLog opens it `w`; a refused start
- * prints no `Verifying:`), and the CLI prints that line before any gate, so
- * a later one can only be a gate's own log echoed under its GATE line (#3909
- * review 3). runIdOf reads the last one, which such a log can fool.
- */
-export function timingRunIdOf(log) {
-  return /^Verifying: \S+ \(run (\d+)\)/m.exec(log)?.[1] ?? null;
-}
-
-/**
  * The waits and the execution of a verification, as the optional `queueSec` /
  * `mutexSec` / `runSec` of a run-log.mjs record (Issue #3909).
  *
- * From the run itself when `view` (`verify show <id> --json`) carries its
- * gates: each gate's stored log tail and duration, so nothing a gate printed
- * can be read as another gate (#3909 review 3). A gate with the `[timing]`
- * marker (#3884) adds its three numbers — a mutex-wait SKIP included, whose
- * GATE line shows only the reason (review 1); any other gate waited for
- * nothing and adds its duration to `run` only (a retried gate both runs, a
- * TIMEOUT its budget — review 2).
+ * From the run itself (`view`, `verify show <id> --json` of the run
+ * {@link runIdOf} names): each gate's stored log tail and duration, so nothing
+ * a gate printed can be read as another gate (#3909 review 3). A gate with the
+ * `[timing]` marker (#3884) adds its three numbers — a mutex-wait SKIP
+ * included, whose GATE line shows only the reason (review 1); any other gate
+ * waited for nothing and adds its duration to `run` only (a retried gate both
+ * runs, a TIMEOUT its budget — review 2).
  *
- * Without the view (the server did not answer), from the `verify` log's GATE
- * lines after the last `Verifying:`: the same sums, read off the CLI's text
- * (formatDetail), where a failing gate's echoed log is not told apart from the
- * runner's lines.
+ * `{}` (nothing to write, the record reads as before) when the run could not
+ * be read — the CLI's text is never parsed instead: a failing gate's log is
+ * echoed there unprefixed, and a `GATE …` line inside it would be counted —
+ * and when no gate has the marker: a server older than it, or a run in which
+ * nothing waited, has no split to report.
  *
- * `{}` (nothing to write, the record reads as before) when no gate has the
- * marker: a server older than it, or a run in which nothing waited, has no
- * split to report.
- *
- * @param {string} log
- * @param {{ gates?: Array<{ durationMs?: number | null, logTail?: string | null }> } | null} [view]
+ * @param {{ gates?: Array<{ durationMs?: number | null, logTail?: string | null }> } | null} view
  * @returns {{ queueSec?: number, mutexSec?: number, runSec?: number }}
  */
-export function verifyTiming(log, view = null) {
-  if (Array.isArray(view?.gates)) return runTiming(view.gates);
-  const starts = [...log.matchAll(/^Verifying: /gm)];
-  const section = starts.length > 0 ? log.slice(starts[starts.length - 1].index) : log;
-  const lines = section.split('\n');
-  let queue = 0;
-  let mutex = 0;
-  let execution = 0;
-  let timed = false;
-  lines.forEach((line, at) => {
-    const match = /^GATE \S+ ([A-Z]+) \((.*)\)(?: \[contract\])?$/.exec(line);
-    if (!match) return;
-    const timing = /(?:^|, )queue=(\d+(?:\.\d+)?)s, mutex=(\d+(?:\.\d+)?)s, run=(\d+(?:\.\d+)?)s$/.exec(match[2]);
-    if (timing) {
-      timed = true;
-      queue += Number(timing[1]);
-      mutex += Number(timing[2]);
-      execution += Number(timing[3]);
-      return;
-    }
-    if (match[1] === 'SKIP') {
-      // The line is the reason only; the marker, when the server wrote one, ends the log printed under it.
-      const below = lines.slice(at + 1);
-      const next = below.findIndex((l) => /^(?:GATE|RESULT|NOTICE) /.test(l));
-      const marker = TIMING_MARKER.exec(below.slice(0, next < 0 ? below.length : next).join('\n').trimEnd());
-      if (marker) {
-        timed = true;
-        queue += Number(marker[1]);
-        mutex += Number(marker[2]);
-        execution += Number(marker[3]);
-      }
-      return;
-    }
-    // `exit=0, 12.3s`, a TIMEOUT's `600.0s` (no exit field) or a retried gate's `exit=1,0, 45.0s,44.0s`.
-    const duration = match[2].split(', ').find((field) => DURATIONS.test(field));
-    if (duration) execution += sumSeconds(duration);
-  });
-  return timed ? splitOf(queue, mutex, execution) : {};
+export function verifyTiming(view) {
+  return Array.isArray(view?.gates) ? runTiming(view.gates) : {};
 }
 
 /** {@link verifyTiming} from the stored gates of one run. */
@@ -406,9 +355,20 @@ export function hasCompletionSignal(pane, { head, requireHead = false } = {}) {
     });
 }
 
-/** The id of the last verification run a `wait --verify` / `verify` log started (`Verifying: <wt> (run <id>)`), or null. */
+/**
+ * The id of the verification run one `verify` call's log started — its FIRST
+ * `Verifying: <wt> (run <id>)` — or null. The one rule for which run a log is
+ * about: the timing, the completion check and the record's `run=` all take it
+ * (#3909 review).
+ *
+ * The first, because the log holds one CLI call (defaultSpawnToLog opens it
+ * `w`; a refused start prints no `Verifying:`) and the CLI prints that line
+ * before any gate: a later one can only be a failing gate's own log, echoed
+ * unprefixed under its GATE line. A log without such an echo has one line, so
+ * the first is the last that was read before.
+ */
 export function runIdOf(log) {
-  return [...log.matchAll(/^Verifying: \S+ \(run (\d+)\)/gm)].pop()?.[1] ?? null;
+  return /^Verifying: \S+ \(run (\d+)\)/m.exec(log)?.[1] ?? null;
 }
 
 /**
@@ -686,7 +646,8 @@ function awaitRunEnd({ run, sleep, now, o, cwd, supersededBy }, runId) {
  * `ctx.signal` is the completion signal main() already waited for before the
  * verification (#3883); without it the signal, when one is needed, is waited
  * for here, as before. The verification's start is read by the run id its log
- * printed (H-5).
+ * printed (H-5): `verdict.runId` when main() took it from the verification's
+ * own log (runIdOf), else runIdOf of the folded log.
  *
  * @returns {{ state: 'confirmed' | 'working' | 'dirty', exitCode: number, log: string, reason: string, reverified: boolean }}
  */
@@ -708,7 +669,8 @@ export function confirmCompletion(ctx) {
   //    after it started, if the HEAD moved after the completion signal, or if
   //    it started before the last turn end and the tree has changed since
   //    (3-3 "before-signal").
-  const runId = runIdOf(log);
+  // The run main() took from the verification's own log; the folded log may also hold the wait's.
+  let runId = verdict.runId !== undefined ? verdict.runId : runIdOf(log);
   const started = runStart(run, o.cli, o.wt, runId, cwd);
   const state = readJson(run, o.cli, ['capture', o.wt, '--instance', o.instance, '--json'], cwd);
   const lastStop = typeof state?.lastStopEventAt === 'number' ? state.lastStopEventAt : null;
@@ -741,8 +703,8 @@ export function confirmCompletion(ctx) {
     reverified = true;
     notes.push('reverified=verify --task', ...again.notes);
     if (again.superseded) return { state: 'working', exitCode, log, reason: again.superseded, reverified };
-    const reRun = runIdOf(log);
-    if (reRun) notes.push(`run=${reRun}`);
+    runId = runIdOf(log);
+    if (runId) notes.push(`run=${runId}`);
     const recommitted = Date.parse(git(run, o.worktree, ['log', '-1', '--format=%cI']).trim());
     if (Number.isFinite(recommitted) && recommitted > reStart) {
       return { state: 'working', exitCode, log, reason: 'a commit landed during the re-verification', reverified };
@@ -940,8 +902,8 @@ export function main(argv, deps = {}) {
     const waitArgs = ['wait', o.wt, '--instance', instance, '--on-prompt', 'human', '--timeout', o.timeout];
     let exitCode = spawnToLog(o.cli, waitArgs, { cwd, logFile: o.logFile, ...(watching ? { watch } : {}) });
     let verdictLog = fs.existsSync(o.logFile) ? fs.readFileSync(o.logFile, 'utf8') : '';
-    /** The log of the verification the record is about (verifyTiming reads the run it started). */
-    let timingLog = '';
+    /** The run the verification started (runIdOf): its gates are the record's timing (#3909). */
+    let verifyRunId = null;
     const verifyCtx = {
       spawnToLog, run, sleep, now, o, cwd, supersededBy,
       onVerifyStart: () => {
@@ -978,7 +940,7 @@ export function main(argv, deps = {}) {
         superseded = verified.superseded;
         verdictLog = o.afterReinstruct ? '' : verdictLog;
         verdictLog += verified.log;
-        timingLog = verified.log;
+        verifyRunId = runIdOf(verified.log);
         // As `wait --verify` folds it: a green run does not turn "never started" into a pass.
         exitCode = exitCode === NOT_STARTED_EXIT && verified.exitCode === 0 ? NOT_STARTED_EXIT : verified.exitCode;
       }
@@ -1023,7 +985,7 @@ export function main(argv, deps = {}) {
           model: o.model,
           durationSec,
           // The waits and the execution apart (#3909); absent when no gate recorded a split.
-          ...verifyTiming(timingLog, readRun(run, o.cli, o.wt, timingRunIdOf(timingLog), cwd)),
+          ...verifyTiming(readRun(run, o.cli, o.wt, verifyRunId, cwd)),
           note,
           item: o.item,
           key: key(),
@@ -1054,11 +1016,11 @@ export function main(argv, deps = {}) {
     }
 
     const confirmed = confirmCompletion({
-      ...verifyCtx, verdict: { exitCode, log: verdictLog }, signal, since: baseline.found ? baseline.createdAt : null,
+      ...verifyCtx, verdict: { exitCode, log: verdictLog, ...(verifyRunId ? { runId: verifyRunId } : {}) }, signal, since: baseline.found ? baseline.createdAt : null,
     });
     const verdict = summarizeVerdict(confirmed.log, confirmed.exitCode);
     // A re-verification (3-3) is the run the verdict is now taken on.
-    if (confirmed.reverified) timingLog = confirmed.log;
+    if (confirmed.reverified) verifyRunId = runIdOf(confirmed.log);
     if (confirmed.state === 'working') {
       record('fail', headNow(), `unconfirmed: ${confirmed.reason}; ${verdict.line} ${extraNotes()} auto-yes=kept`);
       return UNCONFIRMED_EXIT;
