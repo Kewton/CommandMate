@@ -155,6 +155,20 @@ describe('estimateRelatedTests', () => {
     expect(planSteps({ changed: ['src/lib/types.ts'], deleted: [] }, { base, relatedTests: count }).related.heavy).toBe(true);
   });
 
+  it.each([
+    ['import { type as value }', "import { type as value } from './source';\nexport const m = value;\n"],
+    ['export { type as value }', "export { type as value } from './source';\n"],
+    ['import type /* comment */ from', "import type /* the default export */ from './source';\nexport const m = type;\n"],
+  ])('follows %s, which binds a value named type, to the tests behind it (N6)', (_form, middle) => {
+    write('src/lib/source.ts', 'const type = 1;\nexport { type };\nexport default type;\n');
+    write('src/lib/middle.ts', middle);
+    for (let i = 0; i < HEAVY_TEST_FILES; i++) write(`tests/unit/many/t${i}.test.ts`, "import { m } from '@/lib/middle';\n");
+
+    const count = estimateRelatedTests(tmp, ['src/lib/source.ts']);
+    expect(count).toBe(HEAVY_TEST_FILES);
+    expect(planSteps({ changed: ['src/lib/source.ts'], deleted: [] }, { base, relatedTests: count }).related.heavy).toBe(true);
+  });
+
   it('keeps a truly narrow source narrow, a cycle and a helper included (negative control)', () => {
     write('src/lib/leaf.ts', "import { b } from './cycle-b';\nexport const leaf = b;\n");
     write('src/lib/cycle-b.ts', "import { leaf } from './leaf';\nexport const b = 1;\nexport const c = leaf;\n");

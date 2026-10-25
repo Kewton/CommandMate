@@ -59,6 +59,7 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { appendRecord, findLatest, readRecords } from './run-log.mjs';
 import { itemOption, workHeadOf } from './pr-common.mjs';
@@ -165,23 +166,84 @@ const GRAPH_ROOTS = ['src', 'scripts', 'tests'];
 const GRAPH_SKIP_DIRS = new Set(['node_modules', '.next', 'dist', 'e2e', 'fixtures']);
 /** A static or dynamic module reference: `from '…'`, `import '…'`, `import('…')`, `require('…')`, `vi.mock('…')`. */
 const MODULE_REFERENCE = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*|\bvi\.(?:mock|doMock|importActual)\s*\(\s*)(['"`])([^'"`\n]+)\1/g;
-/** `import type … from '…'` / `export type … from '…'` (not a default import named `type`). */
-const TYPE_ONLY_STATEMENT = /\b(?:import|export)\s+type\s+(?!from\b)[^;'"`]*?\bfrom\s*(['"])[^'"\n]+\1/g;
-/** `import { … } from '…'` / `export { … } from '…'`: type-only when every specifier is `type X`. */
-const BRACED_STATEMENT = /\b(?:import|export)\s*\{([^}]*)\}\s*from\s*(['"])[^'"\n]+\2/g;
+/** Files whose import declarations can be type-only. */
+const TYPED_FILE = /\.(?:[cm]?ts|tsx)$/;
+/** Cheap filter: a file without `type` in it has no type-only declaration to parse for. */
+const MAY_HAVE_TYPE_ONLY = /\btype\b/;
+const require = createRequire(import.meta.url);
+/** @type {typeof import('typescript') | null | undefined} */
+let typescript;
+
+/** The repository's own `typescript` (a devDependency), loaded once; null when it is not installed. */
+function loadTypescript() {
+  if (typescript === undefined) {
+    try {
+      typescript = require('typescript');
+    } catch {
+      typescript = null;
+    }
+  }
+  return typescript;
+}
 
 /**
- * `text` without its type-only module references (Issue #3884 N5). The
- * transform erases them, so `vitest related`, which follows the transformed
- * module's dependencies, never reaches a module through them: a types file
- * read by a thousand modules as types alone runs only its runtime readers'
- * tests. An import with one value specifier (`{ type A, b }`) stays an edge.
+ * Whether an import / export declaration is erased by the transform (Issue
+ * #3884 N5 / N6): `import type …` / `export type …`, or a clause whose every
+ * specifier is `type X` with no default import. Read from the syntax tree, so
+ * `{ type as value }` (a value named `type`) and `import type /* … *\/ from`
+ * (a default import named `type`) stay runtime edges.
  */
-function runtimeReferences(text) {
-  return text.replace(TYPE_ONLY_STATEMENT, '').replace(BRACED_STATEMENT, (statement, list) => {
-    const specifiers = list.split(',').map((part) => part.trim()).filter(Boolean);
-    return specifiers.length > 0 && specifiers.every((part) => /^type\s+/.test(part)) ? '' : statement;
-  });
+function isTypeOnlyDeclaration(ts, statement) {
+  if (ts.isImportDeclaration(statement)) {
+    const clause = statement.importClause;
+    if (!clause) return false; // `import './x'`: a side effect.
+    if (clause.isTypeOnly) return true;
+    const bindings = clause.namedBindings;
+    return (
+      !clause.name &&
+      bindings !== undefined &&
+      ts.isNamedImports(bindings) &&
+      bindings.elements.length > 0 &&
+      bindings.elements.every((element) => element.isTypeOnly)
+    );
+  }
+  if (ts.isExportDeclaration(statement) && statement.moduleSpecifier) {
+    if (statement.isTypeOnly) return true;
+    const clause = statement.exportClause;
+    return (
+      clause !== undefined &&
+      ts.isNamedExports(clause) &&
+      clause.elements.length > 0 &&
+      clause.elements.every((element) => element.isTypeOnly)
+    );
+  }
+  return false;
+}
+
+/**
+ * `text` with its type-only module references blanked out (Issue #3884 N5).
+ * The transform erases them, so `vitest related`, which follows the
+ * transformed module's dependencies, never reaches a module through them: a
+ * types file read by a thousand modules as types alone runs only its runtime
+ * readers' tests. An import with one value specifier (`{ type A, b }`) stays
+ * an edge. The declarations are told apart by the TypeScript parser (N6); the
+ * module references themselves are still read by MODULE_REFERENCE, which also
+ * sees `import()` / `require` / `vi.mock`. Without `typescript` installed
+ * nothing is blanked — the estimate errs wide, as before N5.
+ */
+function runtimeReferences(text, file) {
+  if (!TYPED_FILE.test(file) || !MAY_HAVE_TYPE_ONLY.test(text)) return text;
+  const ts = loadTypescript();
+  if (!ts) return text;
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, false, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  let out = text;
+  // Back to front, so earlier offsets stay valid; the length is kept for the same reason.
+  for (const statement of [...source.statements].reverse()) {
+    if (!isTypeOnlyDeclaration(ts, statement)) continue;
+    const from = statement.getStart(source);
+    out = out.slice(0, from) + ' '.repeat(statement.end - from) + out.slice(statement.end);
+  }
+  return out;
 }
 
 const RESOLVE_SUFFIXES = ['', '.ts', '.tsx', '.js', '.mjs', '.cjs', '.jsx', '/index.ts', '/index.tsx', '/index.js', '/index.mjs'];
@@ -262,7 +324,7 @@ export function estimateRelatedTests(worktree, sources) {
     }
     // The naming match below reads the whole text; only the graph drops type-only edges.
     texts.set(file, text);
-    for (const match of runtimeReferences(text).matchAll(MODULE_REFERENCE)) {
+    for (const match of runtimeReferences(text, file).matchAll(MODULE_REFERENCE)) {
       const target = resolveModule(file, match[2], known);
       if (target === null || target === file) continue;
       if (!importers.has(target)) importers.set(target, new Set());
