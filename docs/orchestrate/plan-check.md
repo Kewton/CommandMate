@@ -38,6 +38,7 @@ sharedState:
 ```
 
 - **1 つの状態は 1 行（1 レコード）に書く。** 同じ名前の `state` を 2 行に分けると `plan` で止まる（行ごとに判定すると、同じ波の書き手と読者の一覧が分かれて見えなくなるため）
+- **状態の名前の照合**は、前後の空白の除去・Unicode の NFKC 正規化・内部の連続する空白を 1 つに畳む・大文字小文字を区別しない、の 4 つを行った名前で行う。`Auto-Yes Key` と `auto-yes  key`、全角の `ＡＵＴＯ` と `AUTO` は同じ状態（2 行に分けると `plan` で止まる）。`auto-yes-key` と `auto yes key` のように、空白以外の文字が違うものは別の状態
 - **書き手が 2 つ以上の item にある状態は、書き手を別々の波に置く**（先行の 1 本に寄せ、読者側をその後に置く）。同じ波に置くと `shared-writer` で止まる
 - 書き手の item は契約の設定に `routes` を書く。読む経路（`readers[].route`）のそれぞれに、テストを結び付けたセルが要る（無いと `routes-missing` / `routes-reader`）
 - 重いゲート（`unit` / `integration` / `build` / `e2e`）を持つ item は、1 つの波に `heavyGateLimit` 本まで。`unit-related` は数えない（既定のゲートで、全 item が持つ）
@@ -106,6 +107,7 @@ node scripts/orchestrate/plan-check.mjs routes --plan "workspace/orchestration/r
   --item <item> > "workspace/orchestration/runs/$DATE/routes-<item>.md"
 ```
 
+`routes` も同じ検査を通す。違反がある plan では一覧を出さず、違反を `check` と同じ形で stderr に出して exit 1 になる。
 出力は、その item が書く共有状態ごとの不変条件・書き手・公開値・読む経路と、契約の経路表・割込み表。
 事前レビューでは半ページの文書の後に貼り、5-2b では `consistency-review.mjs … --routes routes-<item>.md` で渡す。
 最後の独立レビュー（再レビュー）の雛形は、前回の指摘の判定に加えて、**修正した共通規則の全読者**を一覧と呼び出しの連鎖の両方で再確認させる。

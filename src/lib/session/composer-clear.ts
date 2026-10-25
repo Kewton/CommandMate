@@ -31,10 +31,103 @@
 
 import { capturePane, clearComposerLine } from '@/lib/tmux/tmux';
 import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
-import { extractComposerText, type ComposerTextState } from '@/lib/detection/composer-text';
+import {
+  extractComposerText,
+  findCodexInputBox,
+  isCodexBoldGutterRow,
+  isCodexComposerRow,
+  readCodexComposerFrom,
+  type ComposerTextResult,
+  type ComposerTextState,
+} from '@/lib/detection/composer-text';
+import { readCodexGlyphRowKind } from '@/lib/detection/tools/codex/cli-patterns';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('composer-clear');
+
+/**
+ * The live codex composer's `\u203A` row, wherever it is in the frame (Issue #3906).
+ *
+ * Read from the bottom, in the order `findCodexBottomGlyphRow` reads a frame:
+ * a dialog's highlighted option (`readCodexGlyphRowKind` → `'option'`) reached
+ * before any composer row means the dialog is what the pane shows now, and a
+ * composer row above it is one left there from before (codex-live-1671) — so
+ * the answer is -1, not that row. The transcript echo of a sent message is
+ * skipped, dim ({@link isCodexComposerRow} rejects it) or not
+ * ({@link isCodexBoldGutterRow}).
+ *
+ * @param rows - The capture split into rows, ANSI intact
+ * @returns The row's index, or -1 when no live composer row is drawn
+ */
+export function findCodexLiveComposerRow(rows: string[]): number {
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const kind = readCodexGlyphRowKind(rows[i]);
+    if (kind === 'option') return -1;
+    if (kind === 'composer' && isLiveComposerRow(rows[i])) return i;
+  }
+  return -1;
+}
+
+/**
+ * A composer row by every reading: {@link isCodexComposerRow}, and not the
+ * bold-not-dim echo ({@link isCodexBoldGutterRow}). The caller has already had
+ * `readCodexGlyphRowKind` call it `'composer'`, which also requires ANSI
+ * attributes: an attribute-free `›` row (a stripped capture, where a dialog
+ * option reads the same as a composer) is never taken (Issue #3906).
+ */
+function isLiveComposerRow(row: string): boolean {
+  return isCodexComposerRow(row) && !isCodexBoldGutterRow(row);
+}
+
+/**
+ * Whether a dialog, not a composer, is what the pane shows below `row` (Issue #3906).
+ *
+ * The same bottom-up reading as {@link findCodexLiveComposerRow}, stopped at
+ * `row`: a dialog's highlighted option reached first means the composer at
+ * `row` — even one `findCodexInputBox` located among the frame's last blocks —
+ * was left there from before the dialog opened. A live composer row reached
+ * first means it was not.
+ *
+ * @param rows - The capture split into rows, ANSI intact
+ * @param row - Index of the composer's `\u203A` row
+ */
+export function codexDialogBelow(rows: string[], row: number): boolean {
+  for (let i = rows.length - 1; i > row; i--) {
+    const kind = readCodexGlyphRowKind(rows[i]);
+    if (kind === 'option') return true;
+    if (kind === 'composer' && isLiveComposerRow(rows[i])) return false;
+  }
+  return false;
+}
+
+/**
+ * The composer as this loop reads it.
+ *
+ * {@link extractComposerText}, and for codex one more reading when it finds no
+ * composer (Issue #3906): a body of more paragraphs than the extractor's four
+ * blocks — the partly arrived paste the sender reads as `pasting` and withdraws
+ * through this function — is still a composer holding text. Only `content` is
+ * taken from that reading; anything else stays `no_composer`, so a frame this
+ * reading cannot vouch for is never reported as emptied.
+ *
+ * A composer the extractor does find is still not the live one when a dialog
+ * option is drawn below it ({@link codexDialogBelow}): that frame is
+ * `no_composer`, so no `C-e`+`C-u` goes into the dialog.
+ */
+function readClearComposer(capture: string, cliToolId: string): ComposerTextResult {
+  const read = extractComposerText(capture, cliToolId);
+  if (cliToolId !== 'codex') return read;
+  const rows = capture.split('\n');
+  if (read.state !== 'no_composer') {
+    const box = findCodexInputBox(rows);
+    if (box !== null && codexDialogBelow(rows, box.firstRow)) return { text: '', state: 'no_composer' };
+    return read;
+  }
+  const row = findCodexLiveComposerRow(rows);
+  if (row < 0) return read;
+  const held = readCodexComposerFrom(rows, row);
+  return held.state === 'content' ? held : read;
+}
 
 /**
  * Upper bound on `C-e`+`C-u` passes.
@@ -112,7 +205,7 @@ export async function clearComposer(
   const maxPasses = options.maxPasses ?? MAX_COMPOSER_CLEAR_PASSES;
 
   let passes = 0;
-  let result = extractComposerText(await capture(sessionName), cliToolId);
+  let result = readClearComposer(await capture(sessionName), cliToolId);
 
   // Snapshot before the first pass: every later read shows less of it (a pass
   // eats one row), so this is the only moment the full text exists.
@@ -122,7 +215,7 @@ export async function clearComposer(
     await sendClear(sessionName);
     passes++;
     await delay(COMPOSER_CLEAR_REDRAW_DELAY_MS);
-    result = extractComposerText(await capture(sessionName), cliToolId);
+    result = readClearComposer(await capture(sessionName), cliToolId);
   }
 
   // Whatever happened above, the cached frame is now stale: the poller and the
