@@ -264,8 +264,12 @@ function isBlankRow(line: string | undefined): boolean {
  * A bare `\u203A` with nothing after it is accepted: `capture-pane` trims trailing
  * whitespace, so that is what a composer with neither text nor placeholder looks
  * like, and calling it `no_composer` would be a worse answer than `empty`.
+ *
+ * Exported for the send path (Issue #3906): when {@link findCodexInputBox}'s
+ * block bound cannot reach a composer split by many blank rows, the sender
+ * still has to tell the real `\u203A` row from these look-alikes.
  */
-function isCodexComposerRow(line: string | undefined): boolean {
+export function isCodexComposerRow(line: string | undefined): boolean {
   if (line === undefined) return false;
   const chars = scanAttributedChars(line);
   if (chars.length === 0 || chars[0].ch !== CODEX_PROMPT_GLYPH) return false;

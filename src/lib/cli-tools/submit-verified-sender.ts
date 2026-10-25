@@ -99,7 +99,12 @@ import {
 } from '@/config/cli-tool-timing-config';
 import { createLogger } from '@/lib/logger';
 import { clearComposer } from '@/lib/session/composer-clear';
-import { extractComposerText, findCodexInputBox, SUPPORTED_COMPOSER_TOOLS } from '@/lib/detection/composer-text';
+import {
+  extractComposerText,
+  findCodexInputBox,
+  isCodexComposerRow,
+  SUPPORTED_COMPOSER_TOOLS,
+} from '@/lib/detection/composer-text';
 
 const logger = createLogger('cli-tools/submit-verified-sender');
 
@@ -581,15 +586,59 @@ function codexComposerRegion(output: string): string | null {
   const raw = output.split('\n');
   const box = findCodexInputBox(raw);
   if (box === null) return null;
+  return codexRegionFrom(raw, box.firstRow, box.lastRow);
+}
+
+/**
+ * {@link codexComposerRegion} from a known `›` row (Issue #3906): the rows from
+ * `firstRow` down to the frame's last block (the footer), ANSI and glyph
+ * stripped. `lastRow` is the end of the `›` row's own block, so a composer that
+ * is itself the frame's last block is read to the end.
+ */
+function codexRegionFrom(raw: string[], firstRow: number, lastRow: number): string {
   const isBlank = (row: string): boolean => stripAnsi(row).trim() === '';
   let end = raw.length - 1;
   while (end >= 0 && isBlank(raw[end])) end--;
   let lastBlockStart = end;
   while (lastBlockStart > 0 && !isBlank(raw[lastBlockStart - 1])) lastBlockStart--;
-  const stop = lastBlockStart > box.lastRow ? lastBlockStart - 1 : end;
-  const rows = raw.slice(box.firstRow, stop + 1).map((row) => stripAnsi(row));
+  const stop = lastBlockStart > lastRow ? lastBlockStart - 1 : end;
+  const rows = raw.slice(firstRow, stop + 1).map((row) => stripAnsi(row));
   rows[0] = rows[0].replace(/^\s*\u203A ?/, '');
   return rows.join('\n');
+}
+
+/** End (inclusive) of the blank-row-delimited block that starts at `row`. */
+function blockEndFrom(raw: string[], row: number): number {
+  let end = row;
+  while (end + 1 < raw.length && stripAnsi(raw[end + 1]).trim() !== '') end++;
+  return end;
+}
+
+/**
+ * A codex composer that the bounded readers cannot reach (Issue #3906).
+ *
+ * `extractComposerText` searches only the frame's last four blank-row-delimited
+ * blocks, and {@link readComposer} only the last twelve drawn rows. A pasted body
+ * with many paragraphs puts its `›` row above both, and the old answer was either
+ * `absent` (paste `unseen`, but `submitted` after Enter) or the first row read
+ * through the twelve-row window without the rest (`landed` on the first line
+ * alone). This finds the bottom-most real composer row (not the dim transcript
+ * echo, not a dialog's bold option — {@link isCodexComposerRow}) in the drawn
+ * frame and returns its index, or -1.
+ */
+function lastCodexComposerRow(raw: string[], drawnRows: number): number {
+  for (let i = drawnRows - 1; i >= 0; i--) {
+    if (isCodexComposerRow(raw[i])) return i;
+  }
+  return -1;
+}
+
+/** The bottom-most row of `windowLines` the marker reader takes as the input line, as a frame index. */
+function markerRowIndex(windowLines: string[], windowStart: number): number {
+  for (let i = windowLines.length - 1; i >= 0; i--) {
+    if (INPUT_LINE_MARKER.test(windowLines[i])) return windowStart + i;
+  }
+  return -1;
 }
 
 function readSubmitComposer(
@@ -597,14 +646,25 @@ function readSubmitComposer(
   cliToolId: CLIToolType,
   reader: ComposerSpec['reader'],
   lines: string[],
-  windowLines: string[]
+  windowLines: string[],
+  message?: string
 ): ComposerRead {
   if (cliToolId === 'codex' && reader === 'input-line-marker') {
+    const raw = output.split('\n');
+    const windowStart = lines.length - windowLines.length;
     const read = extractComposerText(output, cliToolId);
     if (read.state === 'content') {
       const region = codexComposerRegion(output) ?? read.text;
       if (read.text.includes('\n')) {
         return { kind: 'text', text: firstNonBlankLine(read.text), rows: read.text.split('\n'), region };
+      }
+      // Issue #3906 (1): the `›` row sits above the twelve-row window (a one-line
+      // paragraph, a blank line, then a tall one). The marker reader would see no
+      // input line there — `unseen` before Enter, `submitted` after it — so the
+      // composer `extractComposerText` located is read instead, whole.
+      const box = findCodexInputBox(raw);
+      if (box !== null && box.firstRow < windowStart) {
+        return { kind: 'text', text: read.text.trim(), rows: [raw[box.firstRow]], region };
       }
       // Issue #3880 (N1): a one-row excerpt is read as before for its verdict
       // after Enter, but still carries the whole region — `head` with the rest of
@@ -612,6 +672,29 @@ function readSubmitComposer(
       // whole body before Enter.
       const single = readComposer(reader, lines, windowLines);
       return single.kind === 'text' ? { ...single, region } : single;
+    }
+    if (read.state === 'no_composer') {
+      // Issue #3906 (2): more paragraphs than the four blocks the extractor
+      // searches. Whatever the marker reader takes must carry the whole region,
+      // so the composer's first line alone never passes for the body.
+      const composerRow = lastCodexComposerRow(raw, lines.length);
+      if (composerRow >= 0) {
+        const region = codexRegionFrom(raw, composerRow, blockEndFrom(raw, composerRow));
+        const text = stripInputMarker(stripAnsi(raw[composerRow]));
+        if (composerRow >= windowStart) {
+          const single = readComposer(reader, lines, windowLines);
+          if (single.kind === 'text' && markerRowIndex(windowLines, windowStart) === composerRow) {
+            return { ...single, region };
+          }
+          return single;
+        }
+        // Above the window as well. Only a row holding the body's first line is
+        // taken for this send's composer: a composer row left above a full-screen
+        // dialog (codex-live-1671) is still `absent`, as it was.
+        if (message !== undefined && text.length > 0 && inputMatchesBody(text, message)) {
+          return { kind: 'text', text, rows: [raw[composerRow]], region };
+        }
+      }
     }
   }
   return readComposer(reader, lines, windowLines);
@@ -668,7 +751,7 @@ export function classifySubmit(
     return 'submitted';
   }
 
-  const composer = readSubmitComposer(output, cliToolId, composerSpec.reader, lines, windowLines);
+  const composer = readSubmitComposer(output, cliToolId, composerSpec.reader, lines, windowLines, message);
 
   // B. No composer visible (scrolled off / dialog / still starting), or the
   //    composer is empty => the message left the box => submitted.
@@ -740,6 +823,11 @@ export function isSubmitted(
  * is checked before placeholders, so a body that itself quotes
  * `[Pasted Content 600 chars]` is its own text, not codex's placeholder; a real
  * placeholder is only ever the composer's first row.
+ *
+ * Issue #3906: a codex composer outside the twelve-row window, or split into
+ * more blocks than `extractComposerText` searches, is still read with its whole
+ * region ({@link readSubmitComposer}), so neither `unseen` for a body that is
+ * there nor `landed` on its first line alone.
  */
 export function classifyPasteLanded(
   output: string,
@@ -753,7 +841,8 @@ export function classifyPasteLanded(
     cliToolId,
     composerSpec.reader,
     lines,
-    lines.slice(-VERIFY_WINDOW_LINES)
+    lines.slice(-VERIFY_WINDOW_LINES),
+    message
   );
   if (composer.kind !== 'text') return 'unseen';
 
@@ -830,14 +919,20 @@ async function pasteBody(sessionName: string, message: string): Promise<void> {
 }
 
 /** The composer's first row, for an error message a person has to act on. */
-function describeComposer(output: string, cliToolId: CLIToolType, composerSpec: ComposerSpec): string {
+function describeComposer(
+  output: string,
+  cliToolId: CLIToolType,
+  composerSpec: ComposerSpec,
+  message: string
+): string {
   const lines = withoutTrailingBlankRows(stripAnsi(output).split('\n'));
   const composer = readSubmitComposer(
     output,
     cliToolId,
     composerSpec.reader,
     lines,
-    lines.slice(-VERIFY_WINDOW_LINES)
+    lines.slice(-VERIFY_WINDOW_LINES),
+    message
   );
   if (composer.kind === 'absent') return 'no composer on screen';
   if (composer.kind === 'empty') return 'an empty composer';
@@ -919,7 +1014,7 @@ async function confirmPasteLanded(params: {
 
   const bytes = Buffer.byteLength(message, 'utf8');
   const lineCount = message.split('\n').length;
-  const shown = describeComposer(output, cliToolId, composer);
+  const shown = describeComposer(output, cliToolId, composer, message);
   await withdrawUnsentBody(sessionName, cliToolId, composer);
   invalidateCache(sessionName);
   logger.error('paste-not-landed', { sessionName, cliToolId, state, bytes, lines: lineCount, shown });
@@ -957,6 +1052,20 @@ function visibleTypedBody(message: string): string {
   return lines.slice(0, blank < 0 ? lines.length : blank).join('\n');
 }
 
+/** Whether the whole codex composer, read past the bounded readers (Issue #3906), is exactly `message`. */
+function codexComposerShowsWholeBody(output: string, message: string, composerSpec: ComposerSpec): boolean {
+  const lines = withoutTrailingBlankRows(stripAnsi(output).split('\n'));
+  const composer = readSubmitComposer(
+    output,
+    'codex',
+    composerSpec.reader,
+    lines,
+    lines.slice(-VERIFY_WINDOW_LINES),
+    message
+  );
+  return composer.kind === 'text' && composer.region !== undefined && compactText(composer.region) === compactText(message);
+}
+
 /**
  * Wait until the composer shows the typed body; only then may Enter be pressed
  * (Issue #3366).
@@ -992,10 +1101,13 @@ async function confirmTypedBodyLanded(params: {
     output = await capturePane(sessionName, { startLine: -composer.verifyCaptureLines });
     const read = extractComposerText(output, cliToolId);
     if (read.state === 'content' && compactText(read.text) === expected) return;
+    // Issue #3906: a body of more paragraphs than the extractor's four blocks is
+    // never `content` there; the whole composer showing the whole body is.
+    if (cliToolId === 'codex' && codexComposerShowsWholeBody(output, message, composer)) return;
   }
 
   const bytes = Buffer.byteLength(message, 'utf8');
-  const shown = describeComposer(output, cliToolId, composer);
+  const shown = describeComposer(output, cliToolId, composer, message);
   await withdrawUnsentBody(sessionName, cliToolId, composer);
   invalidateCache(sessionName);
   logger.error('typed-body-not-landed', { sessionName, cliToolId, bytes, attempts, shown });
