@@ -26,7 +26,8 @@
  *   2. waits until `capture --instance <id> --json` reads `ready` three times
  *      in a row;
  *   3. sends the brief built from templates/consistency-review.md (or
- *      consistency-review-rereview.md with the previous answer) with
+ *      consistency-review-rereview.md with the previous answer; `--routes`
+ *      adds the plan's interrupt order and readers, plan-check.mjs routes, #3884) with
  *      `ask <wt> <brief> --instance <resolved id> --timeout 2400 --json`;
  *   4. writes `review-<N>[-<item>][b|c…].{prompt.txt,json,err,md}` to the run
  *      directory, the `.md` being the answer without the thinking. The
@@ -55,7 +56,7 @@
  *   node scripts/orchestrate/consistency-review.mjs --run-dir <dir> --issues <range> --issue <N>
  *        --head <sha> --brief <file> [--rereview --previous <review md>]
  *        [--worktree <path>] [--wt <reviewer worktree-id>] [--lock <dir>] [--cli <commandmatedev>] [--instance <id|alias>]
- *        [--item <work item>]
+ *        [--item <work item>] [--routes <plan-check.mjs routes output>]
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -151,14 +152,21 @@ export function renderTemplate(template, values) {
   return rendered;
 }
 
+/** What the brief says in place of the routes table when the run has none (#3884). */
+export const NO_ROUTES =
+  '（渡されていない。plan に共有状態の表が無い run。差分から、変えた共有状態・関数・定数を読む経路を自分で探す）';
+
 /**
  * The brief sent to Codex. `previous` (the earlier answer) makes it a
  * re-review: the previous findings are judged first, then the review as usual.
  *
- * @param {{ issue: number, head: string, worktree: string, branch: string, brief: string, previous?: string }} input
+ * `routes` (plan-check.mjs routes) is the interrupt order and the readers of
+ * the shared states the change writes; without it the brief says there is none.
+ *
+ * @param {{ issue: number, head: string, worktree: string, branch: string, brief: string, previous?: string, routes?: string }} input
  * @param {{ initial?: string, rereview?: string }} [templates]
  */
-export function buildPrompt({ issue, head, worktree, branch, brief, previous }, templates = {}) {
+export function buildPrompt({ issue, head, worktree, branch, brief, previous, routes }, templates = {}) {
   const initial = templates.initial ?? fs.readFileSync(INITIAL_TEMPLATE, 'utf8');
   const body = renderTemplate(initial, {
     ISSUE: issue,
@@ -166,6 +174,7 @@ export function buildPrompt({ issue, head, worktree, branch, brief, previous }, 
     WORKTREE: worktree,
     BRANCH: branch,
     BRIEF: String(brief).trimEnd(),
+    ROUTES: routes === undefined || routes === null || String(routes).trim() === '' ? NO_ROUTES : String(routes).trimEnd(),
   }).trimEnd();
   if (previous === undefined || previous === null) return `${body}\n`;
   const rereview = templates.rereview ?? fs.readFileSync(REREVIEW_TEMPLATE, 'utf8');
@@ -425,7 +434,8 @@ function resolveInstance(run, o, cwd) {
 
 const USAGE = `Usage:
   node scripts/orchestrate/consistency-review.mjs --run-dir <dir> --issues <range> --issue <N> --head <sha> --brief <file>
-       [--rereview --previous <review md>] [--worktree <path>] [--wt <reviewer worktree-id>] [--lock <dir>] [--cli <commandmatedev>] [--instance <id|alias>] [--item <work item>]`;
+       [--rereview --previous <review md>] [--worktree <path>] [--wt <reviewer worktree-id>] [--lock <dir>] [--cli <commandmatedev>] [--instance <id|alias>] [--item <work item>]
+       [--routes <plan-check.mjs routes output>]`;
 
 const FLAGS = {
   '--run-dir': 'runDir',
@@ -440,6 +450,7 @@ const FLAGS = {
   '--cli': 'cli',
   '--instance': 'instance',
   '--item': 'item',
+  '--routes': 'routes',
 };
 const SWITCHES = { '--rereview': 'rereview' };
 
@@ -468,6 +479,7 @@ export function parseArgs(argv) {
   if (!options.rereview && options.previous) return { error: '--previous is only for --rereview' };
   if (!fs.existsSync(options.brief)) return { error: `--brief: no such file ${options.brief}` };
   if (options.previous && !fs.existsSync(options.previous)) return { error: `--previous: no such file ${options.previous}` };
+  if (options.routes && !fs.existsSync(options.routes)) return { error: `--routes: no such file ${options.routes}` };
   return { options };
 }
 
@@ -543,6 +555,7 @@ export function main(argv, deps = {}) {
       branch,
       brief: fs.readFileSync(o.brief, 'utf8'),
       previous: o.rereview ? fs.readFileSync(o.previous, 'utf8') : undefined,
+      routes: o.routes ? fs.readFileSync(o.routes, 'utf8') : undefined,
     });
     label = claimReviewLabel(o.runDir, issue, o.item, prompt);
     const file = (ext) => path.join(o.runDir, `${label}${ext}`);
