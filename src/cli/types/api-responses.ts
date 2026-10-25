@@ -286,7 +286,21 @@ export interface CurrentOutputResponse {
       promptType: string;
       pattern?: string;
       at: number;
+      /**
+       * The waiting episode the record was written for (Issue #3798). Absent
+       * when no wait was open, or from a server older than the field.
+       */
+      episodeId?: string;
     } | null;
+    /**
+     * Mirrors: src/lib/session/current-output-types.ts
+     * CurrentOutputPayload.autoYes.waitingEpisodeId (Issue #3798). The waiting
+     * episode open when the payload was built, or null. `lastSuppression` is
+     * this wait's only when its `episodeId` is this — and not when
+     * `lastSuppressionAnswered` says Auto-Yes answered this wait after it;
+     * absent (an older server), the record's age decides as before.
+     */
+    waitingEpisodeId?: string | null;
     /**
      * Mirrors: src/lib/auto-yes-state.ts AutoYesState.stopMatchedText
      * (Issue #1694). Short excerpt of what `--stop-pattern` matched, with one
@@ -320,6 +334,14 @@ export interface CurrentOutputResponse {
       /** Whether the record is about the prompt in this same response. */
       currentPrompt: boolean;
     } | null;
+    /**
+     * Mirrors: src/lib/session/current-output-types.ts
+     * CurrentOutputPayload.autoYes.lastSuppressionAnswered (Issue #3798). True
+     * when Auto-Yes answered the wait `waitingEpisodeId` names after
+     * `lastSuppression` was written: the record is history, not this wait's
+     * reason, as the push gate reads it. Absent (an older server) reads as false.
+     */
+    lastSuppressionAnswered?: boolean;
   };
   thinking?: boolean;
   cliToolId?: string;
@@ -445,6 +467,30 @@ export interface CurrentOutputResponse {
   lastKnownStatusAt?: number | null;
   lastServerResponseTimestamp?: number | null;
   serverPollerActive?: boolean;
+  /**
+   * Mirrors: src/types/auto-yes-decision.ts AutoYesDecisionPublished
+   * (Issue #3821). Auto-Yes's decision about `promptData`: `answering` (an
+   * automatic answer is under way), `withheld` (left to a human, `reason`
+   * says why — `server-poller-inactive` when no server poller runs for the
+   * instance) or `none`. Wire strings, as for `lastSuppression.reason`.
+   * Absent when the session is not running and from an older server.
+   */
+  autoYesDecision?: {
+    state: string;
+    reason: string | null;
+    observedAt: number;
+    /** Which confirmation the decision is about (an opaque key; null with no prompt). */
+    confirmation?: string | null;
+  };
+  /**
+   * Issue #3863: how Auto-Yes answers questions on this instance while it is
+   * on — `recommended` (with the recommended option, else the default) or
+   * `careful` (left to a human). Beside `autoYes`, like `autoYesDecision`.
+   * Absent while Auto-Yes is off, when the session is not running, and from a
+   * server older than the field. Mirrors: src/types/auto-yes-answer-mode.ts
+   * AutoYesAnswerMode, typed as the wire's `string` for a newer server.
+   */
+  autoYesAnswerMode?: string;
   /**
    * Issue #520: session status from `detectSessionStatus()` — or, since Issue
    * #1723, from the agent's own lifecycle events when they are available and
@@ -1132,6 +1178,33 @@ export interface PromptData {
    */
   approvalTarget?: string;
   /**
+   * Issue #3881: set when `approvalTarget` is known not to be the whole of
+   * what the prompt asks about — cut at its 12-row scan cap or at an
+   * ambiguous `>` boundary (`truncated`), or reaching the top of a capture
+   * that may have been cut (`top-unknown`). A deny miss on it withholds as
+   * `deny-pattern-unusable`.
+   *
+   * Mirrors: src/types/models.ts BasePromptData.approvalTargetCompleteness.
+   */
+  approvalTargetCompleteness?: 'truncated' | 'top-unknown';
+  /**
+   * Issue #3881: what the screen was read as when the row was saved (kind,
+   * phase, live rows, the target's completeness, evidence). Absent on a row
+   * saved before #3881 or by a producer with no frame. The wire's shape, kept
+   * loose like `options`: the CLI does not read it.
+   *
+   * Mirrors: src/types/prompt-reading.ts PromptReading.
+   */
+  reading?: {
+    version: number;
+    kind: string;
+    phase?: string;
+    liveRange?: { startRow: number; endRow: number };
+    approvalTarget: string;
+    captureTop?: string;
+    evidence: string[];
+  };
+  /**
    * The verdicts a structured approval accepts, when this payload is the
    * degraded `unclassified` form for a source that can be answered by decision
    * id (Issue #1898).
@@ -1317,6 +1390,12 @@ export interface StructuredDecisionResult {
 export interface AutoYesSetResult {
   enabled: boolean;
   expiresAt: number | null;
+  /**
+   * Issue #3863: the answer mode the instance is on with (`recommended` /
+   * `careful`) — what an omitted `answerMode` resolved to, too. Absent when
+   * not enabled and from an older server.
+   */
+  answerMode?: string;
   pollingStarted?: boolean;
   /**
    * Approvals that were already pending and got re-judged by this call
@@ -1395,6 +1474,12 @@ export interface AutoYesStatesResponse {
      */
     stopReason?: string;
   }>;
+  /**
+   * Issue #3863: each ENABLED instance's answer mode (`recommended` /
+   * `careful`), keyed like `instances`. Beside the map rather than in its
+   * entries, whose shape is kept. Absent from older servers.
+   */
+  answerModeByInstance?: Record<string, string>;
 }
 
 /** wait exit 10 CLI extended output type */
@@ -1418,6 +1503,14 @@ export interface WaitPromptOutput {
    */
   approvalTarget?: string;
   /**
+   * Issue #3881: the same fields as on {@link PromptData}, for the prompt this
+   * output was built from, copied by `wait` (`src/cli/commands/wait.ts`) when
+   * the server sent them. Absent otherwise (older servers; `reading` is on
+   * stored rows, so a live payload usually carries none).
+   */
+  approvalTargetCompleteness?: PromptData['approvalTargetCompleteness'];
+  reading?: PromptData['reading'];
+  /**
    * Set when the contract's autoYes policy withheld an answer for this session
    * (Issue #1699). Without it, a prompt an operator has to answer by hand is
    * indistinguishable on stdout from one nobody configured Auto-Yes for — which
@@ -1429,14 +1522,21 @@ export interface WaitPromptOutput {
     promptType: string;
     pattern?: string;
     ageSeconds: number;
+    /**
+     * Issue #3863: the Auto-Yes answer mode in effect (`recommended` /
+     * `careful`), from `autoYesAnswerMode`. Absent when the server publishes
+     * none (older, or Auto-Yes off). The wire's `string`, like `mode`.
+     */
+    answerMode?: string;
   };
   /**
    * One prompt observation of the frame this exit was decided on (Issue
    * #3755): the screen's kind, an observation token, and Auto-Yes as two
    * separate items — the poller's record and the contract re-evaluated now.
    * Absent when the server is older than the field. `autoYesSuppression` above
-   * keeps its meaning (a record under a minute old); this does not read the
-   * record's time as "the reason this prompt is unanswered".
+   * keeps its meaning (the record of this wait: by the episode ids when both
+   * are present, Issue #3798, else a record under a minute old); this does not
+   * read the record's time as "the reason this prompt is unanswered".
    */
   observation?: PromptObservation;
   [key: string]: unknown;
@@ -2087,6 +2187,18 @@ export interface VerificationGateSummaryView {
   durationMs: number | null;
   /** Where the gate was declared (Issue #1791). */
   source?: VerificationGateSource | null;
+  /**
+   * The gate's waits and execution, apart (Issue #3884). Absent for a gate
+   * with neither a `mutex` nor a slot wait, and for runs recorded before it.
+   */
+  timing?: VerificationGateTimingView;
+}
+
+/** Mirrors: src/lib/db/verification-db.ts VerificationGateTiming (seconds). */
+export interface VerificationGateTimingView {
+  queueSec: number;
+  mutexSec: number;
+  runSec: number;
 }
 
 /** Mirrors: src/lib/db/verification-db.ts VerificationRunWithGateSummaries. */

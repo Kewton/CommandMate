@@ -31,7 +31,7 @@ type _NoCliOnlyField = AssertNever<Exclude<keyof CliLastSuppression, keyof AutoY
 type _ServerValuesFit = AssertAssignable<CliLastSuppression, AutoYesPolicySuppression>;
 
 /** Every field of the CLI copy, listed once; `satisfies` keeps it to real keys. */
-const CLI_FIELDS = ['reason', 'mode', 'promptType', 'pattern', 'at'] as const satisfies readonly (keyof CliLastSuppression)[];
+const CLI_FIELDS = ['reason', 'mode', 'promptType', 'pattern', 'at', 'episodeId'] as const satisfies readonly (keyof CliLastSuppression)[];
 type _ListIsComplete = AssertNever<Exclude<keyof CliLastSuppression, (typeof CLI_FIELDS)[number]>>;
 
 afterEach(() => {

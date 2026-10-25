@@ -55,6 +55,16 @@
  *    exist, so a single-device install sends exactly as many pushes as it did
  *    before this module was written — zero extra.
  *
+ * ## Which card it clears (Issue #3798)
+ *
+ * The resolution names the episode the card mark was last sent for
+ * (`resolvedEpisodeId`). A resolution can reach a device after the card of a
+ * newer wait in the same worktree — the next prompt's push overtook it — and
+ * without the name the Service Worker would close that newer, still-true card.
+ * With it, the worker closes only this episode's cards (and cards that name no
+ * episode) and re-shows the newer one silently. A mark without an id sends a
+ * resolution without one, which the worker handles exactly as before.
+ *
  * `completion` and `failure` cards are deliberately left alone; the reasoning
  * for each is in the design note under "which kinds are cleared".
  *
@@ -70,7 +80,7 @@ import { countPushSubscriptionsForKind } from '@/lib/db/push-subscriptions-db';
 import { getWorktreeById } from '@/lib/db/worktree-db';
 import { createLogger } from '@/lib/logger';
 import { hasOpenWaitingEpisode } from '@/lib/session/waiting-episode-state';
-import { clearPromptCard, hasPromptCard } from './prompt-card-state';
+import { clearPromptCard, getPromptCardEpisodeId, hasPromptCard } from './prompt-card-state';
 import { notifyPushSubscribers } from './push-sender';
 import { isPushConfigured } from './vapid';
 
@@ -215,6 +225,10 @@ export async function notifyPromptResolved(input: PromptResolvedInput): Promise<
     ...(decision.deviceCount !== undefined ? { deviceCount: decision.deviceCount } : {}),
   };
 
+  // Issue #3798: read before the mark is cleared below; `decidePromptResolution`
+  // has just adopted it into memory, so this is not a second query.
+  const resolvedEpisodeId = decision.send ? getPromptCardEpisodeId(worktreeId) : null;
+
   if (decision.reason !== 'still-waiting') {
     clearPromptCard(worktreeId);
   }
@@ -239,6 +253,7 @@ export async function notifyPromptResolved(input: PromptResolvedInput): Promise<
         kind: 'prompt',
         agentName,
         resolved: true,
+        ...(resolvedEpisodeId !== null ? { resolvedEpisodeId } : {}),
       },
       at
     );

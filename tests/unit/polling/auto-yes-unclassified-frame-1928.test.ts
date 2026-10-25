@@ -244,7 +244,15 @@ describe('[#1928] the gate does not switch Auto-Yes off', () => {
       AGENT_WROTE_A_LIST,
     );
 
-    expect(result).toBe('responded');
+    // Issue #3881 (second half, contract decision (2)): this frame used to be
+    // answered (`responded`) — the reply's list, with nothing on the screen
+    // tying it to the tool call the receipt records. That was finding 8, and
+    // it is what #1928's own acceptance criterion forbids ("返答本文の番号リスト
+    // … で Auto-Yes が撃たないことを pin"). The list is now no prompt on the
+    // answering entry (`isAntigravityGenericReadingOnScreen`), an earlier layer
+    // than the gate under test — which is still not what stops it: nothing is
+    // recorded as a #1928 (or any) suppression, agy stays ungated.
+    expect(result).toBe('no_prompt');
     expect(getLastPolicySuppression(WORKTREE_ID, 'antigravity')).toBeNull();
   });
 

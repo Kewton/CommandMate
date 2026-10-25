@@ -13,6 +13,15 @@
  * Issue #3820: every response once the session is known to be running goes
  * through `ledger-record`, which writes it to the Auto-Yes confirmation ledger
  * and returns it unchanged.
+ *
+ * Issue #3821: the browser no longer answers for Auto-Yes. A request carrying
+ * its `origin` (`auto-yes-browser`) — a tab loaded before this release — is
+ * refused with 409 before any side effect (`reason: browser-auto-yes-retired`).
+ * One sent by a tab loaded before #3820 added the `origin` carries none and
+ * cannot be told from a person's; reloading the tab ends it. A person's answer
+ * stops a poller tick under way and holds the poller off the instance for a
+ * moment (`auto-yes-manual-answer`), and drops Auto-Yes's decision about the
+ * prompt (`autoYesDecision`).
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -32,6 +41,12 @@ import { resolveAnswerToSend } from './answer-resolution';
 import { finishAnsweredPrompt, sendResolvedAnswer } from './answer-delivery';
 import { notePromptResponseInLedger } from './ledger-record';
 import type { ValidatedPromptResponse } from './request-validation';
+import { buildCompositeKey } from '@/lib/auto-yes-state';
+import { noteManualAnswerStarted, settleManualAnswer } from '@/lib/polling/auto-yes-manual-answer';
+import { AUTO_YES_BROWSER_ORIGIN } from '@/lib/prompt-response-body-builder';
+
+/** Issue #3821: the `reason` of the 409 a browser Auto-Yes answer is refused with. */
+const BROWSER_AUTO_YES_RETIRED_REASON = 'browser-auto-yes-retired';
 
 export async function POST(
   req: NextRequest,
@@ -56,6 +71,18 @@ export async function POST(
     const validated = validatePromptResponseRequest(body);
     if ('response' in validated) return validated.response;
     const request = validated.value;
+    // Issue #3821: before the first side effect — read so far are only the
+    // id's alias (`canonicalWorktreeId`) and the body; no worktree row, no
+    // session, no structured decision, no keys, no ledger record.
+    if (request.origin === AUTO_YES_BROWSER_ORIGIN) {
+      return NextResponse.json(
+        {
+          error: 'Auto-Yes no longer answers from the browser; reload the page.',
+          reason: BROWSER_AUTO_YES_RETIRED_REASON,
+        },
+        { status: 409 },
+      );
+    }
     const { cliToolParam, instanceId } = request;
 
     const db = getDbInstance();
@@ -99,6 +126,14 @@ export async function POST(
     ledger = { ctx, request };
     const noted = (response: NextResponse) => notePromptResponseInLedger(ctx, request, response);
 
+    // Issue #3821: a person is answering. Before the first key or API call: a
+    // poller tick already under way sends no further key, the next ticks leave
+    // the screen to the person for a moment, and Auto-Yes's decision about the
+    // prompt is dropped. Auto-Yes itself stays on.
+    // Issue #3880: what an answer Auto-Yes holds becomes is decided by how this
+    // one ENDS (`settleManualAnswer`), not by its start.
+    const manualAnswer = noteManualAnswerStarted(buildCompositeKey(id, cliToolId, instanceId));
+
     // Issue #1898: answer the approval the agent is actually holding, before
     // going anywhere near the pane.
     const structuredResponse = await answerViaStructuredDecision(ctx, request);
@@ -108,6 +143,8 @@ export async function POST(
     const sessionName = cliTool.getSessionName(id, instanceId);
 
     // Issue #161: Re-verify that a prompt is still active before sending keys.
+    // Issue #3880: no `settleManualAnswer` for this response — it may be a
+    // Command Code plan review answered (or failed) here, keys and all.
     const verification = await verifyPromptOnScreen(ctx, request, sessionName);
     if ('response' in verification) return noted(verification.response);
     const verified = verification.value;
@@ -115,12 +152,24 @@ export async function POST(
     // Issues #1681 / #1726 / #2522 / #2755: resolve the answer to the input
     // sent, refusing it with nothing sent when it cannot be right.
     const resolution = resolveAnswerToSend(ctx, request, verified);
-    if ('response' in resolution) return noted(resolution.response);
+    if ('response' in resolution) {
+      // Issue #3880: refused before any key — nothing of the person's answer is on the pane.
+      settleManualAnswer(manualAnswer, 'not-sent');
+      return noted(resolution.response);
+    }
 
-    const sendFailure = await sendResolvedAnswer(ctx, request, sessionName, resolution.value, verified.verifiedFrame);
+    const sendFailure = await sendResolvedAnswer(
+      ctx,
+      request,
+      sessionName,
+      resolution.value,
+      verified.verifiedFrame,
+      manualAnswer,
+      verified.promptCheck?.isPrompt ? verified.promptCheck.promptData : null,
+    );
     if (sendFailure) return noted(sendFailure);
 
-    return noted(finishAnsweredPrompt(ctx, verified.promptCheck, resolution.value));
+    return noted(finishAnsweredPrompt(ctx, verified.promptCheck, resolution.value, verified.verifiedFrame));
   } catch (error: unknown) {
     logger.error('failed-to-respond-to-prompt:', { error: error instanceof Error ? error.message : String(error) });
     const errorMessage = error instanceof Error ? error.message : 'Internal server error';

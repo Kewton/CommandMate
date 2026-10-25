@@ -24,6 +24,11 @@
  * vocabulary only — anything else becomes `(other)`. Worktree, instance,
  * confirmation, interval and hook request ids pair lines up and are never
  * copied out.
+ *
+ * Issue #3863: answers and withheld intervals are also counted by the Auto-Yes
+ * answer mode their line names (`recommended` / `careful`). A line without
+ * one — the hook and API paths, and every line written before the field — is
+ * counted as `unknown`, never as either mode.
  */
 
 import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
@@ -40,6 +45,7 @@ import {
   LEDGER_WITHHOLD_REASONS,
   type AutoYesLedgerEvent,
 } from '@/lib/polling/auto-yes-confirmation-ledger-types';
+import { AUTO_YES_ANSWER_MODES } from '@/types/auto-yes-answer-mode';
 import type { ParsedLogLine } from './metrics-perf';
 import type { MetricMeasurement, MetricRecord } from './metrics-types';
 
@@ -97,6 +103,12 @@ function known(value: unknown, vocabulary: readonly string[]): string {
 const toolOf = (data: Record<string, unknown>) => known(data.cliToolId, CLI_TOOL_IDS);
 const reasonOf = (value: unknown) => known(value, LEDGER_WITHHOLD_REASONS);
 const basisOf = (value: unknown) => known(value, ANSWER_BASES);
+/** Issue #3863: the answer mode a line names, or `unknown` (absent, or not a mode this build knows). */
+const answerModeOf = (value: unknown): AnswerModeKey =>
+  typeof value === 'string' && (AUTO_YES_ANSWER_MODES as readonly string[]).includes(value)
+    ? (value as AnswerModeKey)
+    : 'unknown';
+type AnswerModeKey = 'recommended' | 'careful' | 'unknown';
 
 /**
  * Take one line of the shared read (in its window or up to
@@ -163,6 +175,8 @@ interface Interval {
   reason: string;
   endedReason: string | null;
   reasonChanged: boolean;
+  /** Issue #3863: the answer mode its lines name (`unknown` until one does). */
+  answerMode: AnswerModeKey;
 }
 
 /** The window `[start, end]`: the last completed grid boundary at or before `windowEnd`, and as long as the shared one. */
@@ -243,6 +257,13 @@ interface LinePass {
   answeredByHuman: number;
   answeredLate: number;
   answeredRecords: Map<string, MetricRecord>;
+  /** Issue #3863: Auto-Yes's answers by answer mode. */
+  answeredByMode: Map<AnswerModeKey, number>;
+  /**
+   * Issue #3882: confirmation ID → attempt ID → the (non-late) attempt lines
+   * seen in the window, in the order their results came back.
+   */
+  attemptLines: Map<string, Map<string, { n: number; atMs: number; ok: boolean; mode: AnswerModeKey }>>;
   attemptRecords: Map<string, MetricRecord>;
   abstainRecords: Map<string, MetricRecord>;
   hookRequests: number;
@@ -267,6 +288,8 @@ function createLinePass(): LinePass {
     answeredByHuman: 0,
     answeredLate: 0,
     answeredRecords: new Map<string, MetricRecord>(),
+    answeredByMode: new Map<AnswerModeKey, number>(),
+    attemptLines: new Map(),
     attemptRecords: new Map<string, MetricRecord>(),
     abstainRecords: new Map<string, MetricRecord>(),
     hookRequests: 0,
@@ -287,6 +310,8 @@ function identify(pass: LinePass, data: Record<string, unknown>): void {
 }
 
 function applyIntervalEvent(interval: Interval, event: AutoYesLedgerEvent, atMs: number, data: Record<string, unknown>): void {
+  // Issue #3863: the first line that names a mode decides it.
+  if (interval.answerMode === 'unknown') interval.answerMode = answerModeOf(data.answerMode);
   if (event === EV.withholdStarted) {
     interval.startedStart = num(data.startedAtMs) ?? atMs;
     interval.reason = reasonOf(data.reason);
@@ -318,6 +343,7 @@ function trackInterval(pass: LinePass, line: LedgerLine, confirmationId: string 
     reason: OTHER,
     endedReason: null,
     reasonChanged: false,
+    answerMode: 'unknown',
   };
   pass.intervals.set(intervalId, interval);
   interval.lastAt = Math.max(interval.lastAt, atMs);
@@ -334,14 +360,73 @@ function onClosed(pass: LinePass, data: Record<string, unknown>, confirmationId:
     // confirmation answered, but not by Auto-Yes: counted apart, kept in
     // the records under its basis.
     if (data.basis === 'human') pass.answeredByHuman++;
-    else pass.answered++;
+    else {
+      pass.answered++;
+      // Issue #3863: by the mode of the send that answered it
+      // (`answeredAnswerMode`) — not the last decision's, which a mode change
+      // while the answered screen waits to be redrawn moves.
+      // Issue #3882: a line without it (a legacy entry carried over a hot
+      // reload, an old log) is never filled from `answerMode` (the last
+      // decision's); only a successful attempt line with the same
+      // confirmation ID that names a mode restores it, else it is unknown.
+      const mode = data.answeredAnswerMode !== undefined ? answerModeOf(data.answeredAnswerMode) : restoredAnswerMode(pass, confirmationId, data);
+      pass.answeredByMode.set(mode, (pass.answeredByMode.get(mode) ?? 0) + 1);
+    }
     const tool = toolOf(data);
     const basis = basisOf(data.basis);
     increment(pass.answeredRecords, `${tool}\u0000${basis}`, () => ({ kind: 'answered', tool, basis, count: 0 }));
   }
 }
 
-function onAttemptSettled(pass: LinePass, data: Record<string, unknown>, late: boolean): void {
+/** The `N` of an attempt ID `<confirmationId>.N` (N ≥ 1), else null. */
+function attemptNumberOf(confirmationId: string | null, attemptId: unknown): number | null {
+  if (confirmationId === null || typeof attemptId !== 'string' || !attemptId.startsWith(`${confirmationId}.`)) return null;
+  const suffix = attemptId.slice(confirmationId.length + 1);
+  return /^[1-9]\d*$/.test(suffix) ? Number(suffix) : null;
+}
+
+/**
+ * Issue #3882: the mode of the first successful attempt — the first to come
+ * back, as the ledger fixes it (`settleAttempt`), not the lowest number: sends
+ * are numbered when they begin and can come back out of order. Restored only
+ * when that success is provably the first: the closed line's success count
+ * (`attempts.ok`) equals the distinct successful attempts seen in the window,
+ * so none came back before the window or went missing, and every attempt
+ * numbered before it (1..n-1) was seen too. Anything short of that — and a
+ * first success that names no mode — leaves it unknown.
+ *
+ * The lines carry no settle order finer than `atMs` (lines at the same
+ * millisecond are sorted by their JSON, not by when they were written), so
+ * successes at the earliest `atMs` are all candidates for the first: their
+ * modes must agree, and every one of them must pass the number check.
+ */
+function restoredAnswerMode(pass: LinePass, confirmationId: string | null, closedData: Record<string, unknown>): AnswerModeKey {
+  const lines = confirmationId === null ? undefined : pass.attemptLines.get(confirmationId);
+  const attempts = closedData.attempts;
+  const okCount = attempts !== null && typeof attempts === 'object' ? num((attempts as Record<string, unknown>).ok) : null;
+  if (lines === undefined || okCount === null) return 'unknown';
+  const successes = [...lines.values()].filter((line) => line.ok);
+  if (successes.length === 0 || successes.length !== okCount) return 'unknown';
+  const earliest = Math.min(...successes.map((line) => line.atMs));
+  const firsts = successes.filter((line) => line.atMs === earliest);
+  const mode = firsts[0].mode;
+  if (firsts.some((line) => line.mode !== mode)) return 'unknown';
+  const numbers = new Set([...lines.values()].map((line) => line.n));
+  const lastFirst = Math.max(...firsts.map((line) => line.n));
+  for (let n = 1; n < lastFirst; n++) if (!numbers.has(n)) return 'unknown';
+  return mode;
+}
+
+function onAttemptSettled(pass: LinePass, data: Record<string, unknown>, atMs: number, late: boolean): void {
+  const attemptConfirmationId = str(data.confirmationId);
+  const attemptNumber = attemptNumberOf(attemptConfirmationId, data.attemptId);
+  if (!late && attemptConfirmationId !== null && attemptNumber !== null) {
+    const lines = pass.attemptLines.get(attemptConfirmationId) ?? new Map();
+    pass.attemptLines.set(attemptConfirmationId, lines);
+    // A send settles once; a repeated line keeps the first's place and result.
+    const attemptId = data.attemptId as string;
+    if (!lines.has(attemptId)) lines.set(attemptId, { n: attemptNumber, atMs, ok: data.result === 'ok', mode: answerModeOf(data.answerMode) });
+  }
   const tool = toolOf(data);
   const basis = basisOf(data.basis);
   const result = known(data.result, ATTEMPT_RESULTS);
@@ -402,7 +487,7 @@ function applyLine(pass: LinePass, line: LedgerLine, e: number): void {
       onClosed(pass, data, confirmationId);
       break;
     case EV.attemptSettled:
-      onAttemptSettled(pass, data, late);
+      onAttemptSettled(pass, data, atMs, late);
       break;
     case EV.hookRequestClosed:
       onHookRequestClosed(pass, data);
@@ -428,10 +513,13 @@ interface Withheld {
   lengths: number[];
   confirmations: Set<string>;
   untimed: number;
+  /** Issue #3863: intervals by answer mode, timed or not. */
+  byMode: Map<AnswerModeKey, number>;
 }
 
 function addWithheldInterval(withheld: Withheld, interval: Interval, s: number, e: number): void {
   const reason = interval.endedReason ?? interval.reason;
+  withheld.byMode.set(interval.answerMode, (withheld.byMode.get(interval.answerMode) ?? 0) + 1);
   const record = withheld.records.get(`${interval.tool}\u0000${reason}`) ?? {
     kind: 'withheld',
     tool: interval.tool,
@@ -464,7 +552,13 @@ function addWithheldInterval(withheld: Withheld, interval: Interval, s: number, 
 
 // ── withheld time cut to the window, interval by interval (design §4.3) ──
 function measureWithheld(intervals: Map<string, Interval>, s: number, e: number): Withheld {
-  const withheld: Withheld = { records: new Map<string, MetricRecord>(), lengths: [], confirmations: new Set<string>(), untimed: 0 };
+  const withheld: Withheld = {
+    records: new Map<string, MetricRecord>(),
+    lengths: [],
+    confirmations: new Set<string>(),
+    untimed: 0,
+    byMode: new Map<AnswerModeKey, number>(),
+  };
   for (const interval of intervals.values()) addWithheldInterval(withheld, interval, s, e);
   return withheld;
 }
@@ -576,6 +670,15 @@ function observationMeasurement({ windowMs, coverage, ledgerErrors, pass, withhe
       dialogUnobserved: pass.dialogUnobserved.size,
       cliModeObserved: cliModes.observedInstances.size,
       cliModeUnknownInstances: pass.identified.size === 0 ? null : cliModes.unknownInstances,
+      // Issue #3863: Auto-Yes's answers and withheld intervals by the answer
+      // mode their lines name; `Unknown` is a line naming none (another path,
+      // or written before the field).
+      answeredRecommended: pass.answeredByMode.get('recommended') ?? 0,
+      answeredCareful: pass.answeredByMode.get('careful') ?? 0,
+      answeredAnswerModeUnknown: pass.answeredByMode.get('unknown') ?? 0,
+      withheldIntervalsRecommended: withheld.byMode.get('recommended') ?? 0,
+      withheldIntervalsCareful: withheld.byMode.get('careful') ?? 0,
+      withheldIntervalsAnswerModeUnknown: withheld.byMode.get('unknown') ?? 0,
     },
     records: [
       ...sortedRecords(pass.answeredRecords),

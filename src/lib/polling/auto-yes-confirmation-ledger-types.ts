@@ -17,6 +17,17 @@
 
 import type { CLIToolType } from '../cli-tools/types';
 import type { AutoYesSuppressionReason } from './auto-yes-suppression-reason';
+import type { AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
+
+/**
+ * Issue #3863: on the screen path's decision lines — a withheld interval, a
+ * send, a checkpoint, the closing line — the Auto-Yes answer mode the poller
+ * decided under. Absent from the other paths and from lines written before the
+ * field; a reader counts those as "unknown", never as either mode.
+ */
+export interface LedgerAnswerModeField {
+  answerMode?: AutoYesAnswerMode;
+}
 
 /** The version of this vocabulary, on every line (`ledgerVersion`). */
 export const AUTO_YES_LEDGER_VERSION = 1;
@@ -169,7 +180,7 @@ export interface WithholdLineBase extends LedgerLineBase {
   source: ConfirmationSource;
 }
 
-export interface WithholdStartedLine extends WithholdLineBase {
+export interface WithholdStartedLine extends WithholdLineBase, LedgerAnswerModeField {
   reason: LedgerWithholdReason;
   startedAtMs: number;
 }
@@ -179,7 +190,7 @@ export interface WithholdReasonChangedLine extends WithholdLineBase {
   to: LedgerWithholdReason;
 }
 
-export interface WithholdEndedLine extends WithholdLineBase {
+export interface WithholdEndedLine extends WithholdLineBase, LedgerAnswerModeField {
   startedAtMs: number;
   endedAtMs: number;
   withheldMs: number;
@@ -187,7 +198,7 @@ export interface WithholdEndedLine extends WithholdLineBase {
   lastReason: LedgerWithholdReason;
 }
 
-export interface AttemptSettledLine extends LedgerLineBase {
+export interface AttemptSettledLine extends LedgerLineBase, LedgerAnswerModeField {
   confirmationId: string;
   attemptId: string;
   cliToolId: CLIToolType;
@@ -209,7 +220,7 @@ export interface PresenceChangedLine extends LedgerLineBase {
 }
 
 /** A snapshot the aggregation can rebuild an interval from with no earlier line (design §4.3). */
-export interface CheckpointLine extends LedgerLineBase {
+export interface CheckpointLine extends LedgerLineBase, LedgerAnswerModeField {
   confirmationId: string;
   cliToolId: CLIToolType;
   source: ConfirmationSource;
@@ -230,7 +241,14 @@ export interface AttemptCounts {
   failed: number;
 }
 
-export interface ConfirmationClosedLine extends LedgerLineBase {
+export interface ConfirmationClosedLine extends LedgerLineBase, LedgerAnswerModeField {
+  /**
+   * Issue #3863: the answer mode of the send that answered it (the first `ok`
+   * attempt's), when one did and it named a mode. `answerMode` is the last
+   * decision's, which a mode change after the answer moves; a reader counting
+   * answers by mode reads this one.
+   */
+  answeredAnswerMode?: LedgerAnswerModeField['answerMode'];
   confirmationId: string;
   worktreeId: string;
   cliToolId: CLIToolType;
@@ -322,6 +340,9 @@ const WITHHOLD_REASONS: Record<LedgerWithholdReason, true> = {
   'partial-answer': true,
   'startup-trust-unhandled': true,
   'question-confirm-page': true,
+  'question-left-to-human': true,
+  'allow-once-unidentified': true,
+  'recommended-option-unidentified': true,
   'no-hook-receipt': true,
   'send-failed': true,
   'send-no-keys': true,

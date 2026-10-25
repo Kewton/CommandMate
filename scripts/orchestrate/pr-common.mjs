@@ -14,8 +14,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
-import { latestByStage, unmetStage } from './run-log.mjs';
+import { itemOf, latestByStage, unmetStage } from './run-log.mjs';
 import { IGNORED_DIRTY, dirtyPaths } from './dirty-tree.mjs';
+import { itemProblem, workItemName } from './execution-key.mjs';
+import { FOLLOWS_HEAD, verifyEnvState } from './env-manifest.mjs';
 
 export { IGNORED_DIRTY, dirtyPaths };
 
@@ -48,6 +50,8 @@ export const REQUIRED_RECORDS = [
   { stage: 'findings', why: '5-3' },
   { stage: 'precheck', why: '6-1-1' },
 ];
+/** Stages whose passed record is held to the environment it was taken in (#3883 N3, N9). */
+export const ENV_BOUND_STAGES = ['verify', 'precheck'];
 /** 6-2: the sweep runs over every tracked file, never a fixed list of shared files. */
 export const MARKER_PATTERN = '^(<<<<<<< |>>>>>>> |={7}$)';
 
@@ -235,13 +239,57 @@ export function workHeadOf(run, worktree, head) {
 /**
  * What the run record lacks at `{ head, workHead }`: REQUIRED_RECORDS judged by
  * run-log.mjs `unmetStage`, so a publish stops exactly where `status` says the
- * run has to resume.
+ * run has to resume. `item` is the work item (run-log.mjs inItem): the scripts
+ * pass `--item`, or null for the Issue's own records, so another PR of the same
+ * Issue — its later records, at its own HEAD — neither stops nor passes this one
+ * (#3883). Left out, every record of the Issue is read, as before.
+ *
+ * With `env` (#3883 N3, N9), a passed verify and a passed precheck are also
+ * held to the environment they were taken in (env-manifest.mjs
+ * verifyEnvState): an input that differs now, or an `env=` whose manifest is
+ * not in the run directory, is a missing record of that stage (verify again /
+ * precheck again). The lockfile and the installed versions of a verify on an
+ * earlier HEAD (a refresh or a fold on top) are left out only when the
+ * precheck of the current HEAD was taken in this environment (its own
+ * manifest is `same` now, or it is a record from before H-8) — that precheck
+ * checked the code with them. A record without `env=` (taken before H-8) is
+ * used as before and `env.warn` says so.
+ *
+ * With `env.defer` (merge-pr.mjs, #3883 N10), a verify of an earlier HEAD that
+ * differs from now only in those inputs, with no such precheck yet, is handed
+ * to `defer` instead of being a missing record: the caller runs the precheck of
+ * the current HEAD first and asks again without `defer`. Any other difference
+ * (the models, the local settings, `node_modules`'s location) is still missing.
+ *
+ * @param {{ runDir: string, worktree: string, home: string, warn?: (line: string) => void, defer?: (reason: string) => void }} [env]
  */
-export function missingRecords(records, issue, heads) {
-  const stages = latestByStage(records, issue);
+export function missingRecords(records, issue, heads, item, env) {
+  const stages = latestByStage(records, issue, item);
+  const where = env ? { runDir: env.runDir, worktree: env.worktree, home: env.home } : null;
+  const precheckNow =
+    where && stages.precheck?.head === heads.head && stages.precheck.result === 'ok' &&
+    ['same', 'unrecorded'].includes(verifyEnvState(stages.precheck, where).state);
   return REQUIRED_RECORDS.map(({ stage, why }) => {
     const reason = unmetStage(stage, stages[stage], heads);
-    return reason ? `${reason} (${why})` : null;
+    if (reason) return `${reason} (${why})`;
+    if (!ENV_BOUND_STAGES.includes(stage) || !where) return null;
+    const record = stages[stage];
+    const coveredByPrecheck = stage === 'verify' && record.head !== heads.head && precheckNow;
+    const state = verifyEnvState(record, { ...where, ...(coveredByPrecheck ? { ignore: FOLLOWS_HEAD } : {}) });
+    if (state.state === 'unrecorded') {
+      env.warn?.(`warning: ${stage} at ${String(record.head ?? '-').slice(0, 7)}: ${state.detail}`);
+      return null;
+    }
+    if (state.state === 'same') return null;
+    const depsOnly = stage === 'verify' && record.head !== heads.head && state.state === 'changed' && state.fields.every(FOLLOWS_HEAD);
+    if (depsOnly && env.defer) {
+      env.defer(`verify at ${String(record.head).slice(0, 7)}: ${state.detail} — waits for the precheck of ${String(heads.head).slice(0, 7)}`);
+      return null;
+    }
+    const precheckHint = stage === 'verify' && record.head !== heads.head && state.fields.some(FOLLOWS_HEAD)
+      ? ` (no precheck of ${String(heads.head).slice(0, 7)} in this environment covers the dependencies)`
+      : '';
+    return `${stage}: environment ${state.state} — ${state.detail}${precheckHint}; ${stage === 'verify' ? 'verify' : 'precheck'} again (${why})`;
   }).filter(Boolean);
 }
 
@@ -270,8 +318,35 @@ export function moduleReferenceFragment(worktree, issue) {
   return path.join(worktree, 'dev-reports', 'module-reference', `issue-${issue}.md`);
 }
 
-export function moduleReferenceBackup(runDir, issue) {
-  return path.join(runDir, `module-reference-${issue}.md`);
+/** The run directory's copy of the fragment: one per work item (`module-reference-3883-d1.md`, #3883). */
+export function moduleReferenceBackup(runDir, issue, item) {
+  return path.join(runDir, `module-reference-${workItemName(issue, item)}.md`);
+}
+
+/**
+ * `--item` of precheck / publish-pr / merge-pr (#3883): the work item whose
+ * records are read and written. Absent is null — the Issue's own records, the
+ * unit `status` resumes for records without `item` — never "any work item".
+ */
+export function itemOption(options) {
+  const problem = itemProblem(options.item);
+  if (problem) return { error: problem };
+  return { item: options.item ? String(options.item) : null };
+}
+
+/**
+ * The PR numbers the run record has for the Issue's other work items (`pr`
+ * stage, `pr=#N` in the note). Those PRs are this Issue's on purpose (#3883):
+ * publish-pr does not take them for a second PR of the same work.
+ */
+export function siblingPrNumbers(records, issue, item) {
+  const numbers = new Set();
+  for (const record of records) {
+    if (record.issue !== issue || record.stage !== 'pr' || itemOf(record) === item) continue;
+    const match = /(?:^|\s)pr=#(\d+)\b/.exec(record.note ?? '');
+    if (match) numbers.add(Number(match[1]));
+  }
+  return numbers;
 }
 
 /**
@@ -279,14 +354,14 @@ export function moduleReferenceBackup(runDir, issue) {
  * fragment must be in the branch's commits; the module-reference one is in
  * dev-reports/ (never committed), or in the run directory's copy of it.
  */
-export function fragmentProblems(run, { worktree, runDir, issue, baseRef }) {
+export function fragmentProblems(run, { worktree, runDir, issue, baseRef, item = null }) {
   const problems = [];
   const fragment = `changelog.d/${issue}.md`;
   const status = lines(git(run, worktree, ['diff', '--name-status', '--no-renames', `${baseRef}...HEAD`, '--', 'changelog.d/']));
   if (!status.some((line) => /^[AM]\s/.test(line) && line.replace(/^[AM]\s+/, '') === fragment)) {
     problems.push(`${fragment} is not in the branch's commits (6-4)`);
   }
-  if (!fs.existsSync(moduleReferenceFragment(worktree, issue)) && !fs.existsSync(moduleReferenceBackup(runDir, issue))) {
+  if (!fs.existsSync(moduleReferenceFragment(worktree, issue)) && !fs.existsSync(moduleReferenceBackup(runDir, issue, item))) {
     problems.push(`dev-reports/module-reference/issue-${issue}.md is missing (6-4)`);
   }
   return problems;

@@ -24,7 +24,12 @@ import {
   INSTANCE_SELECTOR_ERROR,
 } from './instances';
 import { resolveCommandTarget } from './command-target';
-import { describeContractPolicy } from './auto-yes';
+import {
+  ANSWER_MODE_OPTION_DESCRIPTION,
+  describeAnswerMode,
+  describeContractPolicy,
+  validateAnswerModeOption,
+} from './auto-yes';
 import {
   ALLOW_RELAY_CHAIN_DESCRIPTION,
   REPLY_TO_OPTION_DESCRIPTION,
@@ -111,6 +116,10 @@ async function enableAutoYes(
   if (options.stopPattern) {
     autoYesBody.stopPattern = options.stopPattern;
   }
+  // Issue #3863: sent only when given, so the server keeps a live grant's mode.
+  if (options.autoYesAnswerMode !== undefined) {
+    autoYesBody.answerMode = options.autoYesAnswerMode;
+  }
 
   // Issue #3723: the response is read now. It names what the contract on the
   // instance lets Auto-Yes answer; with `autoYes.mode: off` the poller this
@@ -120,6 +129,9 @@ async function enableAutoYes(
     autoYesBody,
   );
   console.error('Auto-yes enabled.');
+  // Issue #3863: the mode the server put it on with.
+  const modeLine = describeAnswerMode(result?.answerMode, options.autoYesAnswerMode !== undefined);
+  if (modeLine !== null) console.error(modeLine);
   // The server's reading wins when it has one. It has none for a `--contract`
   // send armed before the message goes out: the task is still `pending`, which
   // the server does not count as governing the instance (ACTIVE_TASK_STATUSES).
@@ -272,6 +284,13 @@ function validateSendArgs(worktreeId: string, message: string | undefined, optio
     process.exit(ExitCode.CONFIG_ERROR);
   }
 
+  // Issue #3863: a value the server would refuse, and a mode with nothing to arm.
+  validateAnswerModeOption(options.autoYesAnswerMode, '--auto-yes-answer-mode');
+  if (options.autoYesAnswerMode !== undefined && !options.autoYes) {
+    console.error('Error: --auto-yes-answer-mode requires --auto-yes.');
+    process.exit(ExitCode.CONFIG_ERROR);
+  }
+
   // Issue #1000: --register requires --instance, and requires --agent
   // unless the instance id is itself a primary CLI tool id (e.g. claude).
   if (options.register) {
@@ -379,6 +398,7 @@ export function createSendCommand(): Command {
         + ' flag: it applies only when this send starts the session, and a running session answers 400'
     )
     .option('--auto-yes', 'Enable auto-yes before sending (session-wide, no policy guard; for unattended runs prefer --contract with an autoYes policy)')
+    .option('--auto-yes-answer-mode <mode>', `With --auto-yes: ${ANSWER_MODE_OPTION_DESCRIPTION}`)
     .option('--duration <duration>', `Auto-yes duration (${ALLOWED_DURATIONS.join(', ')})`)
     .option('--stop-pattern <pattern>', 'Auto-yes stop pattern (regex). Matched against terminal output; cannot block commands (use the task contract\'s autoYes.denyPatterns for that)')
     .option('--contract <path>', 'Execution contract path relative to the worktree root (e.g. .commandmate/tasks/my-task.yaml). Records a task and sends the contract preamble plus its goal.')

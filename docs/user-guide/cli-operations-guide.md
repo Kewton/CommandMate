@@ -274,6 +274,7 @@ commandmate send <worktree-id> "<message>" --agent codex --instance codex-3 --re
 commandmate send <worktree-id> "<message>" --auto-yes          # Auto-Yes有効化
 commandmate send <worktree-id> "<message>" --auto-yes --duration 3h
 commandmate send <worktree-id> "<message>" --auto-yes --stop-pattern "FAILED"
+commandmate send <worktree-id> "<message>" --auto-yes --auto-yes-answer-mode careful  # 質問は自分で答える
 ```
 
 ### オプション
@@ -285,6 +286,7 @@ commandmate send <worktree-id> "<message>" --auto-yes --stop-pattern "FAILED"
 | `--register` | `--instance` で指定したセッションをroster（エージェントインスタンス一覧）に登録 | - |
 | `--model <model>` | 使うモデル（copilot / antigravity / claude のみ）。**copilot** はセッション内で切り替える。**antigravity と claude は起動フラグ**なので、この send がセッションを起動するときだけ効き、稼働中のセッションに渡すと 400 になる（切り替えるにはセッションを止めてから送り直す）。claude の値は別名（`sonnet` / `opus` / `opus[1m]`）か完全な ID（`claude-sonnet-5`）。送り先（`--instance` か `--agent`）の指定が必須 | ツールの既定 |
 | `--auto-yes` | 送信前にAuto-Yesを有効化 | - |
+| `--auto-yes-answer-mode <m>` | `--auto-yes` で有効にするときの答え方のモード（`recommended` / `careful`。[答え方のモード](#答え方のモードおまかせ慎重issue-3863)）。`--auto-yes` なしで指定すると exit 2（Issue #3863） | 新たに有効にするなら `recommended`、有効中なら今のモードのまま |
 | `--duration <d>` | Auto-Yesの有効期間（1h, 3h, 8h） | 1h |
 | `--stop-pattern <p>` | Auto-Yes停止条件（正規表現、ターミナル出力への照合。[auto-yes の注意](#--stop-pattern-はターミナル出力への照合コマンドの抑止には使えない)参照） | - |
 
@@ -513,7 +515,7 @@ esac
 }
 ```
 
-Issue #3755 以降、exit 10 の JSON には `observation` が加わります（プロンプト・選択リスト・未分類画面の 3 つの検出経路の exit 10 に付きます。`wait` が exit 10 を返すのはこの 3 経路だけです）。中身は [`commandmate prompt --json`](#commandmate-prompt) と同じで、exit を決めた同じ capture から読んだものです。終了コード・待機・猶予は変わりません。`autoYesSuppression`（1 分以内の記録）は従来どおりですが、記録の時刻だけで「答えなかった理由」と読まず、`observation.autoYes` の `pollerRecord` と `contractEvaluation` を見てください。古いサーバでは `observation` は付きません。
+Issue #3755 以降、exit 10 の JSON には `observation` が加わります（プロンプト・選択リスト・未分類画面の 3 つの検出経路の exit 10 に付きます。`wait` が exit 10 を返すのはこの 3 経路だけです）。中身は [`commandmate prompt --json`](#commandmate-prompt) と同じで、exit を決めた同じ capture から読んだものです。終了コード・待機・猶予は変わりません。`autoYesSuppression` は従来どおりですが（Issue #3798 以降、記録とサーバの応答の両方に待ちの区間の ID があれば ID の一致で判断し、記録の古さは問いません。どちらかに ID が無いときだけ 1 分以内の記録を採ります。どちらの場合も、Auto-Yes がその待ちに答える前に書かれた記録はこの待ちの理由と読まず、猶予を続けます。push の通知の判定と同じです）、記録の時刻だけで「答えなかった理由」と読まず、`observation.autoYes` の `pollerRecord` と `contractEvaluation` を見てください。古いサーバでは `observation` は付きません。
 
 ### exit 10 の `type`（種別）
 
@@ -771,7 +773,7 @@ kind は `promptData.type` や `sessionStatusReason`（`antigravity_selection_li
 | `screen.answerVia` | 回答経路: `screen`（`respond` のキー送出）/ `api`（decision）/ `strict`（agy の信頼確認。`respond --expect-screen` で答えられる）/ `terminal`（今は `respond` で答えられない）/ `none` |
 | `autoYes.enabled` / `pollerActive` | Auto-Yes の有効状態 / サーバの poller が動いているか |
 | `autoYes.pollerRecord` | poller（または permission hook）が最後に「答えなかった」と記録したもの。`screenCorrelation` はこの画面との対応で、記録は画面を名指ししないため `unknown` / `type-mismatch` / `no-prompt-on-screen` のどれか |
-| `autoYes.contractEvaluation` | 契約の方針を**いま**この画面に当てた結果（`policy-withholds` + 理由 / `policy-permits` / `no-base-answer` / `not-evaluated`）。理由の語は `AutoYesSuppressionReason` と同じ（[理由語の表](#autoyeslastsuppression-ポリシー抑止の観測issue-1684)） |
+| `autoYes.contractEvaluation` | 契約の方針を**いま**この画面に当てた結果（`policy-withholds` + 理由 / `base-withholds` + 理由 / `policy-permits` / `no-base-answer` / `not-evaluated`）。`base-withholds`（Issue #3822）は契約より前の基本の判定で見送ったことを表し、契約の有無によらない（今は `allow-once-unidentified` だけ。契約を見直しても答えは戻らない）。理由の語は `AutoYesSuppressionReason` と同じ（[理由語の表](#autoyeslastsuppression-ポリシー抑止の観測issue-1684)） |
 | `lastSend` | このインスタンスへの直近の send の結末（Issue #3759）。`{ at, state, reason }`。`state` は `not-sent`（本文のキーを 1 つも打つ前に失敗。例: `prompt-not-ready`）/ `sent`（送信を確かめた）/ `indeterminate`（一部を打った後に失敗、または結果を確かめられない。composer に本文が残っていれば `reason: composer-residue`）。サーバ起動後に記録が無ければ null、古いサーバでは項目自体が無い |
 
 **`lastSend` が何であっても、CommandMate は自動で再送しません。** 再送するのは利用者か監督のエージェントです。`not-sent` は自分で送り直してください（入力欄が戻ってから）。**`indeterminate` のときは再送しないでください。** 先に `commandmate capture <worktree-id> --pane` で画面を見て、本文が入力欄に残っていないか・既に送られていないかを確かめます（確かめずに送ると二重に届くことがあります）。`send` が `prompt not ready` などで失敗したときのエラーにも、同じ状態（`[send state: not-sent (prompt-not-ready): …]`）が書かれます。
@@ -1470,6 +1472,11 @@ Error: invalid task contract:
 ### 無人実行の Auto-Yes ポリシーは allow-listed を使う（Issue #1684）
 
 契約の `autoYes.mode: safe` は **`yes_no` 型のプロンプトしか自動応答しません**。
+さらに、ダイアログの判定が `enforce` の道具（claude・codex・copilot・opencode・opencode-v2）では、
+**その道具のダイアログ検出が確認と認めない（根拠の無い）`yes_no` には答えません**（Issue #3822。返答の中に引用された `(y/n)` や、
+Auto-Yes を ON にする前から開いていた汎用の `(y/n)` を含む。記録は `unclassified-frame`）。
+ダイアログの判定が `legacy` の道具（既定で gemini・vibe-local・command-code、運用者が `CM_AUTOYES_DIALOG_GATE=<tool>=legacy` を立てた道具）は、
+汎用の `(y/n)` に従来どおり答えます。antigravity は hook の受信がある確認に答えます。
 **Claude の編集確認（`Do you want to make this edit …?`）は `multiple_choice` 型**
 （実質 Yes/No＋allow-all の 3 択）なので、safe のままだと編集のたびにワーカーが停止します。
 無人で走らせる契約は `allow-listed` に広げ、危険操作は `denyPatterns` でエスカレートさせてください。
@@ -2066,17 +2073,22 @@ Auto-Yes が OFF の instance で、止まった理由があれば入ります�
 
 | フィールド | 意味 |
 |-----------|------|
-| `reason` | `type-not-allowed`（mode が許さない型）/ `deny-pattern`（denyPatterns がマッチ）/ `deny-pattern-unusable`（評価不能パターンの fail-closed）/ `mode-off` / `policy-lookup-failed`（契約の照会に失敗。下の表） |
+| `reason` | `type-not-allowed`（mode が許さない型）/ `deny-pattern`（denyPatterns がマッチ）/ `deny-pattern-unusable`（評価できないときの fail-closed。評価不能パターンのほか、denyPatterns がどれにも一致しなくても照合した対象が依頼の全体でないとき — 承認対象が上端の欠けたキャプチャで始まる、上への走査が 12 行の上限で止まった・`>` の行（here-document の続きと前のターンの入力の区別がつかない）で止まった、yes/no の承認対象の中に別の yes/no がある、文字数の上限（1 項目 20,000 文字）で末尾が欠けた — も、この理由で答えない。`pattern` は付かない。Issue #3881）/ `mode-off` / `policy-lookup-failed`（契約の照会に失敗。下の表） |
 | `mode` | 抑止時点のポリシー mode（`off` / `safe` / `allow-listed`、契約が mode を述べていなければ `null`） |
 | `promptType` | 抑止されたプロンプトの型（例: Claude の編集確認は `multiple_choice`） |
 | `pattern` | `deny-pattern` 系のとき、マッチした denyPattern |
 | `at` | 抑止時刻（epoch ms）。抑止されたプロンプトが画面に残っている間は毎ポーリング更新される |
 
-ポリシー以外の理由も同じ欄に載ります。`partial-answer`（Issue #3706 / #3713）は、Auto-Yes が回答のキーの一部
-（Enter の前の `y` など）を送った後で止めたため、同じプロンプトには再入力せず人に任せている状態です
-（`mode` は `null`）。worktree ID の移行でセッションが新しい ID へ移っても、この扱いは移った先で続きます。
-`commandmate wait` はこの理由に「because an earlier answer left partial input; Auto-Yes is waiting for a human」と
-表示します（exit 10 と JSON の `reason` は他の理由と同じ扱い）。入力欄に残った文字を確かめてから応答してください。
+ポリシー以外の理由も同じ欄に載ります。`partial-answer`（Issue #3706 / #3713 / #3880）は、前の回答が入力欄に残った、
+または前の回答の送信の結果を確認できなかったため、同じプロンプトには再入力せず人に任せている状態です（`mode` は `null`）。
+前者は回答のキーの一部（Enter の前の `y` など）を送った後で止めた場合、後者は tmux への送信が終了コード無しで終わった
+（timeout など）場合で、キーが 1 つも届いていない可能性もあります。人の回答（`commandmate respond` や画面の回答）の
+送信が同じように失敗したときも、この状態になります（または続きます）。worktree ID の移行でセッションが新しい ID へ
+移っても、この扱いは移った先で続きます。`commandmate wait` はこの理由に「because an earlier answer left partial input;
+Auto-Yes is waiting for a human (or that answer's send could not be confirmed, so the input may hold it: check the pane,
+then answer; an answer that goes through releases the hold)」と表示します（exit 10 と JSON の `reason` は他の理由と
+同じ扱い）。入力欄を確かめてから応答してください。人の回答が通る（または何も送らずに断られる）と、この扱いは解けます。
+画面が別のプロンプトに変わる・プロンプトが消える・セッションを起動し直すことでも解けます。
 
 型 `AutoYesSuppressionReason` の残りの語も、すべてポリシーの判定ではないので `mode` は `null` になることがあります。`commandmate wait` の表示の文言を添えます。
 
@@ -2087,6 +2099,9 @@ Auto-Yes が OFF の instance で、止まった理由があれば入ります�
 | `unclassified-frame`（Issue #1924） | 汎用の推定は番号付きの一覧を読んだが、その道具のダイアログ検出が確認と認めなかったので何も送らない。返答の中の番号付きの一覧に `1` と答える事故（#1896）を防ぐ位置 | 「because no tool-specific dialog detector recognised the frame」 |
 | `startup-trust-unhandled`（Issue #3757） | agy の起動時のフォルダ信頼の確認（`Do you trust the contents of this project?`）が画面にある。起動の手順の側が答えるもので、番号が無いので poller はプロンプトとして読めない。起動の窓が終わった後に出た場合は、次の send の準備待ちが答える | 「because agy's startup folder-trust confirmation is the launch's to answer, not Auto-Yes's; the next send confirms it once, or answer it at the pane」 |
 | `question-confirm-page`（Issue #3748） | Command Code と Claude の `AskUserQuestion` の確認画面（`Submit` / `Cancel`）。`Submit` は選択ではなくその時点の回答を確定するので、Auto-Yes は答えず人に任せる | 「because the question's Submit/Cancel confirmation commits the answers as they stand, so Auto-Yes leaves it to a human」 |
+| `question-left-to-human`（Issue #3822 / #3863） | 道具が操作者に尋ねている質問が画面にあり、答え方のモードが `careful`（慎重）なので何も送らない（claude の `AskUserQuestion` の選択画面と command-code の質問）。OpenCode V2 の質問フォームは、どちらのモードでもこの理由で見送る。契約の判定ではないので、`allowPromptTypes` に `multiple_choice` を書いても答えない。`CM_AUTOYES_DIALOG_GATE=<tool>=legacy`（キルスイッチ）を立てても、ダイアログの判定が既定で `legacy` の道具（command-code など）でも、慎重なら質問は見送る（Issue #3863 で質問の判別をダイアログの判定から切り離した）。copilot の質問（`ask_user`）と codex の質問（`request_user_input`）は画面に質問の目印が無いので、選択肢の行が許可の文言（実機で採取した `Yes` / `Allow` など）として読めない copilot / codex の番号付きリストを、慎重なら質問かもしれないものとしてこの理由で見送る（おまかせでは従来どおり答える。Issue #3881）。質問の後の `Submit` / `Cancel` の確認画面は `question-confirm-page` のまま。おまかせ（`recommended`）では質問に推奨で答える（[答え方のモード](#答え方のモードおまかせ慎重issue-3863)） | 「because the agent is asking a question, and Auto-Yes answers permissions only (the careful answer mode, or a question form no mode answers); answer it at the pane (prompt --json, respond), or turn Auto-Yes on with --answer-mode recommended to have it pick the recommended option」 |
+| `allow-once-unidentified`（Issue #3822） | 許可の確認が画面にあるが、「今回だけ許可」と読める選択肢が 1 つに決まらない（無い、または 2 つ以上ある）ので何も送らない。Auto-Yes が選ぶのは今回だけ許可の選択肢だけで、カーソルや既定がどこにあってもその番号を送る。永続の許可（`don't ask again`・`always allow`・`Persist to settings.json` など）・モードの変更（`allow all edits`・`Full Access` など）・拒否は選ばない。選択肢の読みは claude・codex・agy（antigravity）・command-code・copilot の実機の画面の文言から作ってあり、どの行も読めない番号付きの一覧は従来どおり（既定の選択肢、無ければ 1 番）。契約の判定ではないので `mode` は契約のまま記録され、`commandmate prompt --json` の `autoYes.contractEvaluation` は `policy-withholds` ではなく `base-withholds` になる | 「because no single option of the permission dialog allows this call only (the others save a rule, change the permission mode, or deny); Auto-Yes does not pick those, so answer it at the pane (prompt --json, respond)」 |
+| `recommended-option-unidentified`（Issue #3863） | 答え方のモードが `recommended`（おまかせ）で質問が画面にあるが、どの選択肢で答えるかが決まらないので何も送らない: 推奨（タイトルの末尾の `(Recommended)` / `（推奨）` / `(推奨)`）が 2 つ以上ある、タイトルと説明を区別できない選択肢がある、選ぶ選択肢が自由記述、複数選択の質問。契約の判定ではない（基本の規則の見送り）。`commandmate prompt --json` の `autoYes.contractEvaluation` も同じ画面・同じモードで読み直して `base-withholds`（`reason` はこの語）になり、慎重のときの質問は `base-withholds`（`question-left-to-human`）になる。毎回のポーリングで判定し直す | 「because the question's recommended option could not be told (two or more marked recommended, a title it could not tell from its description, a typed-text or multi-select answer); answer it at the pane (prompt --json, respond)」 |
 | `no-hook-receipt`（Issue #3767） | agy の承認ダイアログが画面にあるが、それに対応する hook の問い合わせ（`PreToolUse`）の受信が無い。(1) 受信が一度も無い、(2) ダイアログが最後の受信から窓（8 秒）より後に出た、(3) ダイアログが受信より前から出ていた（返答中の引用など）、(4) 受信が途絶えた、(5) 受信が前のダイアログに使い済み、(6) Auto-Yes が受信の確認へキーを送ってから 18 秒（窓＋観測の猶予＋応答後の待ち）を過ぎても確認が残っている（キーで閉じなかったか、受信の無い別の確認と入れ替わった。Issue #3789。送信が途中で切れた場合も、切れた時点から猶予（18 秒）を数え、過ぎても確認が残れば no-hook-receipt として記録する。入力欄にキーの一部が残っていることがある。ただし、中断の後に、より具体的な抑止の理由（partial-answer）が記録された場合は、その理由を保ち、no-hook-receipt としては記録しない）、のいずれか。サーバーのログ `antigravity-autoyes-withheld-no-hook-receipt` の `hint` が区別する。**止まったときの対処**: `commandmate auto-yes <worktree-id> --disable` → `commandmate prompt <worktree-id> --json` → `commandmate respond <worktree-id> --expect-screen …` で答える（または UI で答える）。一度も受信が無い・途絶えた場合は `~/.gemini/config/hooks.json` の向き先を確認 | 「because there is no unused agy hook permission question for this dialog (none arrived in time, or the last one was spent on keys that did not clear it); answer it yourself (auto-yes --disable, prompt --json, respond --expect-screen) or check hooks.json」 |
 
 [`commandmate prompt --json`](#commandmate-prompt) の `autoYes.pollerRecord`（poller の記録）と `autoYes.contractEvaluation`（契約の再評価）は別の項目ですが、どちらもこの表と上の `reason` と同じ語を使います。
@@ -2096,56 +2111,36 @@ Auto-Yes が OFF の instance で、止まった理由があれば入ります�
 契約の `autoYes` を見直してください（`mode: safe` で `multiple_choice` が抑止される場合は
 [allow-listed への切り替え](#無人実行の-auto-yes-ポリシーは-allow-listed-を使うissue-1684)を推奨）。
 
-#### `autoYes.lastEnterFallback`: 読めない選択画面への Enter（Issue #3397）
+#### `autoYesDecision`: Auto-Yes がいまの確認に何をしているか（Issue #3821）
 
-エージェントが出した選択画面を CommandMate が読めないとき、プロンプト欄には
-「この画面は CommandMate から操作できません。」と「直接入力に切り替える」リンクが出ます。
-Auto-Yes が有効なら、この画面に **Enter を 1 回だけ**送ります（その時点で選ばれている選択肢で確定します）。
-送った画面では、プロンプト欄の警告とリンクの代わりに「Auto-Yes が Enter を送りました。」と出ます。Auto-Yes が有効な間はふつうプロンプト欄を出しませんが、CommandMate が読めない画面（`promptAnswerable: false`）では、Auto-Yes 中も PC・スマホともにプロンプト欄を出します（チェックボックスの複数選択と同じ扱い。Auto-Yes はこの 2 つに番号を送らないため）。チェックボックスは `multiSelect` の有無にかかわらず、選択肢が `[ ]` / `[x]` / `[X]` / `[✔]` で始まる一覧も含みます。
+`current-output` の応答（`capture --json`）は、同じ応答の `promptData` について Auto-Yes の判断を載せます。
 
 ```json
-"autoYes": {
-  "enabled": true,
-  "expiresAt": 1754300000000,
-  "lastSuppression": null,
-  "lastEnterFallback": {
-    "outcome": "sent",
-    "promptType": "multiple_choice",
-    "refusalReason": "unsupported_dialog_layout",
-    "sentAt": 1754296400000,
-    "at": 1754296400000,
-    "currentPrompt": true
-  }
+"autoYesDecision": {
+  "state": "withheld",
+  "reason": "server-poller-inactive",
+  "observedAt": 1754296400000,
+  "confirmation": "3f1c…"
 }
 ```
 
-| フィールド | 意味 |
-|-----------|------|
-| `outcome` | `sent`（Enter を送った）/ `no-effect`（Enter の後も同じ画面が残った。2 回目は送らず人に引き継ぐ） |
-| `promptType` | Enter を送った画面のプロンプトの型 |
-| `refusalReason` | 画面が操作できなかった理由（`unsupported_dialog_layout` / `prompt_no_longer_active`） |
-| `sentAt` | Enter を送った時刻（epoch ms） |
-| `at` | 最後に更新した時刻（`sentAt`、または `no-effect` を見つけた時刻） |
-| `currentPrompt` | この応答の `promptData` と同じ画面についての記録か |
+| `state` | 意味 |
+|---------|------|
+| `answering` | サーバーの poller がこの確認に自動で答えている（送信中、または送信後で画面がまだ書き換わっていない） |
+| `withheld` | Auto-Yes はこの確認に答えず、人に任せた。`reason` が理由（上の表の語のほか、`server-poller-inactive` = Auto-Yes は有効だがこのインスタンスの poller が動いていない（同時実行の上限など）、`no-auto-answer` = 基本の規則に答えが無い（自由入力・チェックボックスなど）、`answered-by-human` = 人が回答欄から答え始めて約 10 秒の間、`foreign-session` / `moved-send-in-flight`） |
+| `none` | 確認が無い、Auto-Yes が無効、またはまだ判断していない。`answering` とは扱わない |
 
-送るのは次の **すべて** を満たすときだけです。
+判断は poller が実際に判定した結果で、Auto-Yes の有効化（同じ画面のまま OFF→ON した後や期限切れ）・セッションの再起動・別の確認・人の回答のどれでも引き継ぎません（次の判定まで `none`）。別の確認かどうかは、質問と選択肢に加えて承認の対象（`approvalTarget`。選択肢の行のカーソルの位置だけは見ず、本文の字下げ・`>`・空行はそのまま比べる。字下げだけ違うコマンドは別の確認）と、agy では hook の呼び出しで見ます。承認の対象を最後まで照合できない読み（上が切れて行数の少ない読み）は、agy の hook の呼び出しが同じでも同じ確認とせず `none` にします（残った行だけでは、ファイル名だけ違う別の確認と区別できないことがあるため。回答欄が出る側で、自動の送信には影響しません）。対応が確かめられないときも `none` です。`confirmation` は判断がどの確認についてのものかを表す識別子です（中身に意味は無い。サーバーが同じ確認と判定する読みは同じ値、値が違えば別の確認として扱う。同じ画面でも読んだ行数が違えば値は違う。確認が無いときは `null`）。PC の画面は、同じ `confirmation` のときだけ新しい方の判断を残し、別の確認の判断は引き継ぎません。送信後の重複抑止の間も、`answering` は送信した確認と同じ確認にだけ続けます。同じ文面の確認が、間に確認の無い画面を挟まずに続いた場合は、画面だけでは別の確認と区別できません。セッションが動いていないときは欄がありません。
 
-- プロンプト欄に「直接入力に切り替える」リンクが出る画面（`promptAnswerable: false` と同じ判定）
-- 選択画面に操作が移っている確証がある: 選択画面のフッターがあるのに配置が読めない（`unsupported_dialog_layout`）、または入力欄が画面に無い（claude / codex）
-- **入力欄が見えていない**（入力欄に文字がある・空・薄字の候補のどれでも送らない。返答が選択肢を引用しているだけの画面への誤送信を防ぐため）
-- 同じ画面を 2 回続けて見た、エージェントが終了していない・生成中でない
-- 実行契約の `autoYes` ポリシーが許す（`mode: off` / `safe`、`denyPatterns` 一致では送らない）、他サーバのセッションではない
-- codex の起動時の画面・`/model` の選択画面ではない
+Auto-Yes が有効でも、PC・スマホの回答欄は `state` が `answering` 以外なら出ます（欄の無い古いサーバーの応答でも出ます）。OpenCode / V2 が API で尋ねる質問は、Auto-Yes 中も常に回答欄を出します。手動で答えても Auto-Yes は有効のままです。
 
-`commandmate wait` は、報告するプロンプトについての記録（`currentPrompt: true`）があれば、stderr に 1 行添えます（`auto-yes sent Enter to this prompt …` / 効かなかったときは `… the same screen is still up (no-effect) …`）。exit 10 の JSON は変わりません。人向けの `capture`（`--json` なし）は本文だけを出すため、この記録は `--json` で読んでください。
+`commandmate wait` は、`withheld` の確認を Auto-Yes の猶予（`--auto-yes-grace`）で待たずにすぐ報告し、stderr に `auto-yes is not answering this prompt (reason=…)` を添えます。prompt の Push 通知は従来どおり猶予の後に届きます。
 
-既定で有効なのは claude と codex だけです。環境変数 `CM_AUTOYES_ENTER_FALLBACK` で
-ツールごとに切り替えられます（`CM_AUTOYES_DIALOG_GATE` と同じ書式）。
+#### `autoYes.lastEnterFallback`: 読めない選択画面への Enter（Issue #3397、Issue #3821 で廃止）
 
-```bash
-CM_AUTOYES_ENTER_FALLBACK='*=disabled'       # 全ツールで送らない
-CM_AUTOYES_ENTER_FALLBACK='codex=disabled'   # codex だけ止める
-```
+CommandMate が読めない選択画面へ Auto-Yes が Enter を 1 回送る動作は **廃止しました**（Issue #3821）。裸の Enter はその時点で選ばれている選択肢をそのまま確定するため、画面が読めない以上、何を確定するかを誰も確かめられないからです。環境変数 `CM_AUTOYES_ENTER_FALLBACK` を設定しても戻りません。こうした画面は Auto-Yes 中も人が答えます（`lastSuppression.reason` は `unclassified-frame`、`autoYesDecision` は `withheld`）。
+
+`autoYes.lastEnterFallback` の欄は互換のため残しており、常に `null` です。過去の監査ログ・履歴に残っている `[Enter]` の回答や、Auto-Yes の計測ログの basis `enter-fallback` は、そのまま読めます。
 
 ### `--pane`: transcript を読む（Issue #1623）
 
@@ -2228,7 +2223,7 @@ JSON 出力（`prompts` は古い順）:
 ```
 
 - **`answeredBy` が応答種別**です: `auto`（サーバ側 auto-yes が自動応答）/ `human`（respond API・
-  チャット UI からの明示応答。ブラウザ側 auto-yes フォールバック経由も `human` になります）/
+  チャット UI からの明示応答。Issue #3821 より前のブラウザ側 auto-yes フォールバック経由も `human` でした）/
   `terminal`（誰かがターミナルで直接応答したと推定される掃引記録）。本機能導入前に解決した行は `null`
 - `--pane` とは併用できません（`--prompts` は履歴、`--pane` は現在の画面を読むため）
 - `--limit` の上限はサーバの履歴取得上限（1000）と同じです
@@ -2525,6 +2520,7 @@ commandmate auto-yes <worktree-id> --enable --stop-pattern "error"  # 停止条�
 commandmate auto-yes <worktree-id> --disable                    # 無効化
 commandmate auto-yes <worktree-id> --enable --instance codex    # プライマリインスタンス指定
 commandmate auto-yes <worktree-id> --enable --instance codex-2  # 追加インスタンス個別制御
+commandmate auto-yes <worktree-id> --enable --answer-mode careful  # 質問は自分で答える（慎重）
 ```
 
 ### オプション
@@ -2535,10 +2531,40 @@ commandmate auto-yes <worktree-id> --enable --instance codex-2  # 追加イン�
 | `--disable` | Auto-Yesを無効化 |
 | `--duration <d>` | 有効期間（1h, 3h, 8h） |
 | `--stop-pattern <p>` | 指定パターンがターミナル出力に出現したら自動停止 |
+| `--answer-mode <m>` | 答え方のモード（`recommended` / `careful`。下の[答え方のモード](#答え方のモードおまかせ慎重issue-3863)）。`--enable` のときだけ。省略すると、新たに有効にするなら `recommended`、有効中なら今のモードのまま（Issue #3863） |
 | `--instance <id>` | **対象の推奨指定方法**。対象インスタンスID。他インスタンスと独立してAuto-Yesを制御 |
 | `--agent <id>` | roster に無いインスタンス向けの補助（`--instance` 単独で足りる場合は不要） |
 
 セッションが動いていないインスタンスで有効にしても、Auto-Yes は期限（`--duration`）まで有効のまま待ち、セッションが起動したら答えます（Issue #3329）。待っている間の確認は 1 分ごとです。止まる（`consecutive_errors`）のは、セッションはあるのに画面が読めない・答えを送れない失敗や、tmux に問い合わせられない失敗が続いたときです。
+
+### 答え方のモード（おまかせ／慎重）（Issue #3863）
+
+Auto-Yes を有効にするとき、エージェントが尋ねる**質問**にどう答えるかを選べます。
+
+| モード | 質問（claude の `AskUserQuestion`、command-code の質問） | 許可の確認 |
+|-------|-------------------------------------------------------|-----------|
+| `recommended`（おまかせ、既定） | 推奨の選択肢で答える（下の規則） | 「今回だけ許可」の選択肢だけを選ぶ（Issue #3822） |
+| `careful`（慎重） | 答えない。人が答える（`question-left-to-human`） | 同じ |
+
+おまかせで選ぶ選択肢:
+
+- 選択肢の**タイトル**（説明の行とは区別する。折り返したタイトルはつなげて読む）の末尾に、独立した `(Recommended)`・`（推奨）`・`(推奨)` がちょうど 1 つあれば、それを選ぶ（1 番でなくても、カーソルがどこにあっても）
+- 推奨が 1 つも無ければ既定（カーソルの選択肢、無ければ 1 番）
+- 次のときは答えない（`recommended-option-unidentified`）: 推奨が 2 つ以上、タイトルと説明を区別できない選択肢がある、選ぶ選択肢が自由記述（`Type something` など）、複数選択の質問。説明の末尾に同じ表記があっても推奨とは数えない
+
+どちらのモードでも次は自動で答えません: 質問の後の `Submit` / `Cancel` の確認画面（`question-confirm-page`）、OpenCode / V2 の質問（質問フォームと API の質問）、契約が抑止したもの。copilot の質問（`ask_user`）と codex の質問（`request_user_input`）は、画面に質問と判別する根拠がありません。そこで慎重では、選択肢の行が許可の文言（実機で採取した `Yes` / `Allow` / `Always allow` など）として読めない copilot / codex の番号付きリストを、質問かどうか決められないものとして答えず人へ渡します（`question-left-to-human`。Issue #3881）。許可の文言が読める確認画面は今までどおり「今回だけ許可」で答えます。おまかせでは、決められないリストも従来どおり答えます。`CM_AUTOYES_DIALOG_GATE=<tool>=legacy`（キルスイッチ）は質問の扱いを変えません（慎重なら質問には答えません）。
+
+- **モードは有効にするたびに決まります**（worktree × instance）。無効（期限切れを含む）から有効にするときは新しく始まり、省略すれば `recommended`。有効中にもう一度有効にするときは、省略すれば今のモードのままです。モードを変えると、同じ画面のままでも前のモードの判断は残りません
+- **契約との関係**: 契約の `autoYes` が上限で、モードはその下です（[task-contract.md](../design/task-contract.md) §2.4）
+- **見えるところ**: `auto-yes --enable` と `send --auto-yes` は、モードを指定したとき、または既定（`recommended`）以外のときに `Answer mode: …` の 1 行を出します。`capture --json` の `autoYesAnswerMode`（有効中だけ）、`instances --json` の行の `autoYesAnswerMode`（有効中だけ）、`wait` の見送りの行の `answerMode=…` と exit 10 の JSON の `autoYesSuppression.answerMode` にも出ます
+- **API**: `POST /api/worktrees/<id>/auto-yes` の body の `answerMode`（`recommended` / `careful`、それ以外は 400）。応答（POST と `GET …/auto-yes?cliToolId=`、`GET …/auto-yes` の最上位）の `answerMode` は有効中だけ。`GET …/auto-yes` は各インスタンスのモードを `answerModeByInstance` に載せます（`agents` / `instances` の各項目の形は変えません）
+- **記録**: Auto-Yes の計測の記録（判断の行・送信の試行・見送りの区間・checkpoint）に、その時点の `answerMode` が残ります。過去の記録には無く、集計では「不明」と数えます
+
+```console
+$ commandmate auto-yes proj-cc --enable --answer-mode careful
+Auto-yes enabled for proj-cc (claude).
+Answer mode: careful (questions are left to you; permissions are still answered).
+```
 
 ### 対象エージェントは worktree の既定（Issue #1909）
 
@@ -2571,7 +2597,7 @@ Warning: the contract of task 7f3c… sets autoYes.mode: off, so Auto-Yes is arm
 ```
 
 - `safe` / `allow-listed` は止めずに、答える種類を `Note:` の 1 行で添えます
-  （例: `Note: … sets autoYes.mode: safe; Auto-Yes answers yes_no prompts only.`）
+  （例: `Note: … sets autoYes.mode: safe; Auto-Yes answers yes_no prompts only (on claude, codex, copilot, opencode and opencode-v2, only those the tool itself shows as a confirmation, not a generic (y/n)).`）
 - 契約が無い、または `mode` を指定していない契約では、表示は従来どおりです
 - 判定は poller と同じ方針の読み取り（`getSessionAutoYesPolicy`）を通ります。API では
   `POST /api/worktrees/<id>/auto-yes`（有効化）と `GET …/auto-yes?cliToolId=` の応答の

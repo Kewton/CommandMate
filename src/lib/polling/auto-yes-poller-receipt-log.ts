@@ -26,10 +26,14 @@ import type { PromptDetectionResult } from '../detection/types';
 import type { PromptData } from '@/types/models';
 import { createLogger } from '@/lib/logger';
 import { getOrInitGlobal } from '../global-state';
+import { promptScreenKey } from '../detection/prompt-screen-key';
+import { partialAnswerCovers } from './auto-yes-poller-state';
 import {
   CONTRACT_SUPPRESSION_REASONS,
+  isBaseRuleSuppressionReason,
   NO_HOOK_RECEIPT_SUPPRESSION_REASON,
   PARTIAL_ANSWER_SUPPRESSION_REASON,
+  RECOMMENDED_OPTION_UNIDENTIFIED_SUPPRESSION_REASON,
   type AutoYesSuppressionReason,
   POLICY_LOOKUP_FAILED_SUPPRESSION_REASON,
 } from './auto-yes-suppression-reason';
@@ -93,7 +97,15 @@ const WITHHELD_NO_RECEIPT_LOG_INTERVAL_MS = 60_000;
  * ungated reading this function already took, and the reason it recorded.
  *
  * @param compositeKey - The instance's key, for the once-a-minute limit
+ * Issue #3880: a person's send that may have left keys on the pane holds the
+ * dialog (`partial-answer`), but no tick inside the window published it — the
+ * manual hold kept them off it — so there is no record to re-stamp. Given that
+ * hold's screen, a dialog still up at it is withheld as `partial-answer` here,
+ * before the contract and the receipt (as on the tick, step 2.5).
+ *
  * @param readWithoutGate - The same frame read without `receiptScope`
+ * @param personHoldScreenKey - The screen of a person's hold the tick had
+ *   (`PartialAutoYesAnswer.byPerson`), else null
  * @returns The prompt the ungated reading saw, with the reason this call
  *   recorded or kept for it (null when none: a dialog the gate accepted and is
  *   waiting to be answered); null when no dialog was read past the gate
@@ -103,6 +115,7 @@ export function logIfWithheldForWantOfReceipt(
   instanceId: string | undefined,
   compositeKey: string,
   readWithoutGate: () => PromptDetectionResult,
+  personHoldScreenKey: string | null = null,
 ): WithheldPastReceiptGate | null {
   // Issue #3767: the gate's own verdict for this tick's candidate. Null means it
   // never saw one (no dialog), `ok` that it let the frame through.
@@ -118,6 +131,15 @@ export function logIfWithheldForWantOfReceipt(
   verdict ??= judgeAntigravityPermissionReceipt(worktreeId, instanceId, now);
   if (verdict.ok) return null;
 
+  if (personHoldScreenKey !== null && partialAnswerCovers(personHoldScreenKey, promptScreenKey(promptData))) {
+    recordPolicySuppression(worktreeId, 'antigravity', instanceId, {
+      reason: PARTIAL_ANSWER_SUPPRESSION_REASON,
+      mode: null,
+      promptType: promptData.type,
+    });
+    return { promptData, reason: PARTIAL_ANSWER_SUPPRESSION_REASON, keptPersonHold: true };
+  }
+
   // Issue #3724: a contract that withholds the answer makes the server reply
   // `ask`, so the dialog stays up past the receipt window. The cause is then the
   // contract, not a hooks.json that points elsewhere. Judged exactly as the tick
@@ -129,7 +151,7 @@ export function logIfWithheldForWantOfReceipt(
   // dropping the `policy-lookup-failed` record the tick made.
   const { policy, taskId } = getSessionAutoYesPolicyLookupEntry(worktreeId, 'antigravity', instanceId);
   const mode = policyLookupMode(policy);
-  const resolution = resolveAutoAnswerWithPolicy(ungated.promptData, policy);
+  const resolution = resolveAutoAnswerWithPolicy(ungated.promptData, policy, 'antigravity');
   // Issue #3767: `answered` is the dialog the gate already let through on this
   // receipt, still up past the window. Unless the contract withheld it, that is
   // not a missing receipt: neither recorded nor logged, nor counted for the limit.
@@ -176,10 +198,7 @@ export function logIfWithheldForWantOfReceipt(
       reason: resolution.suppressedBy,
       mode,
       taskId,
-      hint:
-        resolution.suppressedBy === POLICY_LOOKUP_FAILED_SUPPRESSION_REASON
-          ? '契約の照会に失敗したので答えていない。サーバーログの policy-lookup-failed を確認'
-          : '契約の autoYes が答えを止めている。契約の autoYes を確認',
+      hint: withheldHint(resolution.suppressedBy),
     });
     return seen(contractReason ?? null);
   }
@@ -198,6 +217,25 @@ export function logIfWithheldForWantOfReceipt(
     hint: noHookReceiptHint(verdict, now),
   });
   return seen(NO_HOOK_RECEIPT_SUPPRESSION_REASON);
+}
+
+/**
+ * The hint of `antigravity-autoyes-withheld-by-policy` for `reason`. Issue
+ * #3822: the base rules' withholding (`allow-once-unidentified`) is not the
+ * contract's, so the line does not send the operator to the contract for it.
+ */
+function withheldHint(reason: AutoYesSuppressionReason): string {
+  if (reason === POLICY_LOOKUP_FAILED_SUPPRESSION_REASON) {
+    return '契約の照会に失敗したので答えていない。サーバーログの policy-lookup-failed を確認';
+  }
+  // Issue #3863: the other base-rule withholding, over a question's recommended option.
+  if (reason === RECOMMENDED_OPTION_UNIDENTIFIED_SUPPRESSION_REASON) {
+    return '質問の推奨の選択肢を 1 つに特定できないので答えていない（基本の判定。契約の判定ではない）。画面で答える';
+  }
+  if (isBaseRuleSuppressionReason(reason)) {
+    return '今回だけ許可の選択肢を 1 つに特定できないので答えていない（基本の判定。契約の判定ではない）。画面で答える';
+  }
+  return '契約の autoYes が答えを止めている。契約の autoYes を確認';
 }
 
 /**
@@ -224,6 +262,8 @@ function claimWithheldLogSlot(compositeKey: string, now: number): boolean {
 export interface WithheldPastReceiptGate {
   promptData: PromptData;
   reason: AutoYesSuppressionReason | null;
+  /** Issue #3880: the dialog is the one a person's hold is at; the caller keeps the hold. */
+  keptPersonHold?: true;
 }
 
 /**
@@ -259,6 +299,9 @@ function refreshEpisodeSuppression(
     // up (same episode, accepted on the same receipt). Not `getPartialAnswer`:
     // the tick forgets it as soon as the gated reading stops seeing the prompt,
     // which past the window is every tick.
+    // Issue #3798: re-stamped under the waiting episode it was recorded for
+    // (`episodeId` is carried over), not whichever is open now — the keys went
+    // to that wait's dialog.
     const { at: _recordedAt, ...suppression } = own;
     recordPolicySuppression(worktreeId, 'antigravity', instanceId, suppression);
     return true;

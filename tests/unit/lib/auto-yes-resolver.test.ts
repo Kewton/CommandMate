@@ -479,12 +479,18 @@ describe('auto-yes-resolver', () => {
       it('does not scan past the bound', () => {
         // Asserting the *value* rather than elapsed wall-clock time is what makes
         // this a real guard: it fails if the truncation is removed.
+        //
+        // Issue #3881 (second half, contract decision (5a)): the tail the bound
+        // cut was never shown to the patterns, so the miss is no longer a pass —
+        // it withholds as `deny-pattern-unusable` with no pattern named. Were the
+        // truncation removed, `DANGER` would match and this would read
+        // `deny-pattern` with the pattern, so the guard still holds.
         expect(
-          resolveAutoAnswer(
+          resolveAutoAnswerWithPolicy(
             { ...yesNo, question: `${'x'.repeat(MAX_DENY_MATCH_TEXT_LENGTH)}DANGER` },
             policy({ denyPatterns: ['DANGER'] })
           )
-        ).toBe('y');
+        ).toEqual({ answer: null, suppressedBy: 'deny-pattern-unusable', pattern: undefined });
       });
     });
 

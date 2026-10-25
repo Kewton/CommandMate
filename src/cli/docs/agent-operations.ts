@@ -105,6 +105,10 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     --auto-yes             Enable auto-yes before sending (session-wide, no policy
                            guard -- for unattended runs prefer --contract with an
                            autoYes policy: mode / denyPatterns)
+    --auto-yes-answer-mode <m>
+                           With --auto-yes: recommended (questions answered with the
+                           recommended option, else the default) or careful
+                           (questions left to you). See auto-yes below
     --duration <d>         Auto-yes duration: 1h, 3h, 8h (default: 1h)
     --stop-pattern <p>     Auto-yes stop condition (regex; matches terminal output,
                            cannot block commands -- see auto-yes below)
@@ -186,6 +190,12 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   States: pending (the worker has not finished), prompt (it stopped on a
   confirmation and the requester was told; still open), delivered, expired,
   cancelled.
+
+  'relays cancel' cannot withdraw a relay that is being delivered right now
+  (a reply or a prompt notice): the server answers 409 and the command exits
+  2. The delivery usually goes through; if it fails, the relay stays open and
+  can be cancelled again once that attempt is over. A relay that is already
+  closed (delivered, expired, cancelled) exits 2 too.
 
   A reply is held rather than delivered while the requesting session is
   generating -- typing into a running composer interrupts the turn -- and is
@@ -445,6 +455,18 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   commandmate auto-yes <id> --enable --stop-pattern "error"
   commandmate auto-yes <id> --disable                   # Disable
   commandmate auto-yes <id> --enable --instance codex-2 # Scoped to one instance
+  commandmate auto-yes <id> --enable --answer-mode careful  # Questions are yours
+
+  --answer-mode (Issue #3863) decides how a question the agent asks (claude's
+  AskUserQuestion, command-code's question) is treated: recommended (the
+  default) answers it with the option whose title ends in (Recommended) /
+  （推奨） / (推奨), else the default option, and leaves it to you when that
+  cannot be told (recommended-option-unidentified); careful leaves every such
+  question to you (question-left-to-human). Permissions are answered alike
+  (allow this call once), and the Submit/Cancel confirm page, OpenCode V2's
+  questions and whatever the contract withholds are never answered. Omitted,
+  a new grant is recommended and a grant that is on keeps its mode. The mode
+  shows as autoYesAnswerMode in capture --json / instances --json.
 
   --stop-pattern matches new terminal output, not the commands an agent runs.
   It cannot block a command; a build log that merely prints the pattern
@@ -833,6 +855,11 @@ same CommandMate server, and you can hand work to them.
     commandmate relays                    # what you are owed and what you owe
     commandmate relays --json
     commandmate relays cancel <relay-id>  # withdraw one; nothing is delivered
+
+  A cancel during the delivery itself is refused (409, exit 2); the delivery
+  usually goes through, and if it fails the relay stays open and can be
+  cancelled again once that attempt is over. A cancel for a relay that is
+  already closed exits 2 too.
 
   A reply is held rather than delivered while the requesting session is
   generating, and arrives as soon as it is idle again.

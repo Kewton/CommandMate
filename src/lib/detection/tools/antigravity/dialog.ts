@@ -69,7 +69,7 @@ import {
 } from '../../cli-patterns';
 import {
   buildMultipleChoiceResult,
-  findApprovalContextStart,
+  findApprovalContextRange,
   joinApprovalTarget,
 } from '../../prompt-detect-multiple-choice';
 import { normalizeTuiFrameForDetection } from '../../tui-detection-frame';
@@ -249,6 +249,7 @@ export function detectAntigravityNumberedDialogPrompt(text: string): PromptDetec
   const lines = normalized.split('\n');
   const dialog = readAntigravityNumberedDialog(lines);
   if (dialog === null) return null;
+  const range = findApprovalContextRange(lines, dialog.questionRow, dialog.footerRow);
 
   return buildMultipleChoiceResult(
     dialog.question,
@@ -263,11 +264,9 @@ export function detectAntigravityNumberedDialogPrompt(text: string): PromptDetec
       // turn's boundary and below at the footer, so the command in the
       // `Requesting permission for:` block and in the labels is judged and
       // nothing from an earlier, already-answered approval is.
-      approvalTarget: joinApprovalTarget(
-        lines,
-        findApprovalContextStart(lines, dialog.questionRow, dialog.footerRow),
-        dialog.footerRow,
-      ),
+      approvalTarget: joinApprovalTarget(lines, range.start, dialog.footerRow),
+      // Issue #3881: and whether its top is a boundary.
+      approvalContext: { startRow: range.start, endRow: dialog.footerRow, completeness: range.completeness },
     },
     normalized,
     truncateRawContent,
@@ -291,8 +290,108 @@ const OPTION_ROW_PATTERN = /^\s*(>)?\s*(\d+)\.\s+\S/;
  */
 const FEEDBACK_MENU_FOOTER_PATTERN = /^\s*esc Cancel\s*·\s*\d+-\d+\s+Select\b/;
 
+/**
+ * Any piece of agy's `↑/↓ Navigate` footer (`↑/↓ Navigate · tab Amend`, a footer
+ * a narrow pane cut at `↑/↓ Nav`, another version's `↑/↓ Navigate · enter
+ * Select`). Only looked for UNDER the last option, so a footer left in the
+ * scrollback by an earlier, answered dialog does not count.
+ */
+const NAVIGATE_FOOTER_PATTERN = /↑\/↓/;
+
 /** How far above the bottom option row the run down from `1.` may reach. */
 const OPTION_RUN_MAX_ROWS = 40;
+
+/**
+ * agy's permission-panel heading rows (`Requesting permission for:`, `Do you
+ * want to proceed?` — `antigravity-live-2364/dialog-bash-*.txt`, agy 1.1.27).
+ * Whole-row matches, so the same words inside a reply's sentence do not count.
+ */
+const PERMISSION_HEADING_PATTERN = /^\s*(?:Requesting permission for:|Do you want to proceed\?)\s*$/;
+
+/** The run of numbered options at the bottom of a frame, read upward from its last row. */
+interface BottomOptionRun {
+  /** The rows of the frame, normalized. */
+  readonly lines: readonly string[];
+  /** The number on the bottom option row. */
+  readonly bottom: number;
+  /** The smallest number the run reached (1 when it reached `1.`). */
+  readonly lowest: number;
+  /** Whether a number was skipped on the way up (`3.` directly over `1.`). */
+  readonly gap: boolean;
+  /** Whether a row of the run wears agy's `>` cursor. */
+  readonly highlighted: boolean;
+  /** Whether the first non-blank row under the run is the `/feedback` menu footer. */
+  readonly feedbackFooter: boolean;
+  /** Whether a `↑/↓` footer piece is drawn under the run. */
+  readonly navigateFooter: boolean;
+  /** Whether an agy permission heading sits above the run, inside the same panel. */
+  readonly permissionHeading: boolean;
+}
+
+/**
+ * Read the bottom run of options, or null when the frame has none or a bare
+ * `>` composer is drawn under it — agy paints none while a screen replaces it,
+ * so those options are a quotation (the #3183 quotation veto judges them).
+ *
+ * The run is read upward while the numbers descend: a number that does not (a
+ * different list above) or a boundary row ends it.
+ */
+function readBottomOptionRun(text: string): BottomOptionRun | null {
+  const lines = normalizeTuiFrameForDetection(text).split('\n');
+  let last = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (ANTIGRAVITY_PROMPT_PATTERN.test(lines[i])) return null;
+    if (OPTION_ROW_PATTERN.test(lines[i])) {
+      last = i;
+      break;
+    }
+  }
+  if (last < 0) return null;
+
+  const bottomRow = OPTION_ROW_PATTERN.exec(lines[last])!;
+  const bottom = Number(bottomRow[2]);
+  let lowest = bottom;
+  let highlighted = bottomRow[1] !== undefined;
+  let gap = false;
+  let top = last;
+  const floor = Math.max(0, last - OPTION_RUN_MAX_ROWS);
+  for (let i = last - 1; i >= floor && lowest > 1; i--) {
+    const match = OPTION_ROW_PATTERN.exec(lines[i]);
+    if (match === null) {
+      if (ANTIGRAVITY_DIALOG_BOUNDARY_PATTERN.test(lines[i])) break;
+      continue;
+    }
+    const number = Number(match[2]);
+    if (number >= lowest) break;
+    if (number !== lowest - 1) gap = true;
+    lowest = number;
+    top = i;
+    if (match[1] !== undefined) highlighted = true;
+  }
+
+  // The panel above the run: up to the boundary row that opens it (the `●`
+  // tool-call row, a rule, the previous turn's `>`), or as far as the run may reach.
+  let permissionHeading = false;
+  for (let i = top - 1; i >= Math.max(0, top - OPTION_RUN_MAX_ROWS); i--) {
+    if (ANTIGRAVITY_DIALOG_BOUNDARY_PATTERN.test(lines[i])) break;
+    if (PERMISSION_HEADING_PATTERN.test(lines[i])) {
+      permissionHeading = true;
+      break;
+    }
+  }
+
+  const below = lines.slice(last + 1).filter(row => row.trim() !== '');
+  return {
+    lines,
+    bottom,
+    lowest,
+    gap,
+    highlighted,
+    feedbackFooter: below.length > 0 && FEEDBACK_MENU_FOOTER_PATTERN.test(below[0]),
+    navigateFooter: below.some(row => NAVIGATE_FOOTER_PATTERN.test(row)),
+    permissionHeading,
+  };
+}
 
 /**
  * Is this an agy screen with numbered options that the permission reader does
@@ -313,40 +412,79 @@ const OPTION_RUN_MAX_ROWS = 40;
  * False for the `/feedback` menu (its `esc Cancel · 1-6 Select` footer directly
  * under the last option), which keeps the generic reading #2364 left it.
  *
- * Callers treat true as "no prompt to answer": a human drives the screen.
+ * The STATUS verdict's rule (`antigravity/detect.ts`: such a frame is
+ * unclassified, not `prompt_detected`). Whether a frame may be ANSWERED is the
+ * wider {@link isAntigravityUnansweredNumberedScreen} (#3818): a screen this
+ * rule leaves to the generic parser can still be one a human is waiting on.
  *
  * @param text - ANSI-stripped capture, box drawing optional
  */
 export function isAntigravityUnvouchedNumberedScreen(text: string): boolean {
-  const lines = normalizeTuiFrameForDetection(text).split('\n');
-  let last = -1;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (ANTIGRAVITY_PROMPT_PATTERN.test(lines[i])) return false;
-    if (OPTION_ROW_PATTERN.test(lines[i])) {
-      last = i;
-      break;
-    }
-  }
-  if (last < 0) return false;
+  const run = readBottomOptionRun(text);
+  if (run === null || run.bottom < 2) return false;
+  if (run.lowest !== 1 || run.gap || !run.highlighted) return false;
+  if (run.feedbackFooter) return false;
+  return readAntigravityNumberedDialog(run.lines) === null;
+}
 
-  // The run, read upward from the bottom option: N., N-1., … 1.
-  let expected = Number(OPTION_ROW_PATTERN.exec(lines[last])![2]);
-  if (expected < 2) return false;
-  let highlighted = OPTION_ROW_PATTERN.exec(lines[last])![1] !== undefined;
-  const floor = Math.max(0, last - OPTION_RUN_MAX_ROWS);
-  for (let i = last - 1; i >= floor && expected > 1; i--) {
-    const match = OPTION_ROW_PATTERN.exec(lines[i]);
-    if (match === null) {
-      if (ANTIGRAVITY_DIALOG_BOUNDARY_PATTERN.test(lines[i])) return false;
-      continue;
-    }
-    if (Number(match[2]) !== expected - 1) return false;
-    expected--;
-    if (match[1] !== undefined) highlighted = true;
-  }
-  if (expected !== 1 || !highlighted) return false;
+/**
+ * May CommandMate NOT answer this agy numbered screen? (Issue #3818)
+ *
+ * The rule of every surface that sends a key — the Auto-Yes entry
+ * (`detectPromptOnCleanFrame`), `/prompt-response`'s re-verification
+ * (`assessPromptAnswerability`) and agent-health's `readsAsAutoYesPrompt` —
+ * asked after {@link readAntigravityNumberedDialog} declined the frame. Not the
+ * status verdict's: that one says whether a human is waiting, and keeps
+ * {@link isAntigravityUnvouchedNumberedScreen}.
+ *
+ * On agy the generic multiple-choice parser's reading is answered only for the
+ * two shapes vouched for here:
+ *
+ * - the `/feedback` menu (its `esc Cancel · 1-6 Select` footer directly under
+ *   the last option), which #2364 left to the generic parser;
+ * - a reply's numbered list (#1928's legacy reading): options `1.` … `N.`,
+ *   consecutive with no number missing, none wearing agy's `>` cursor, no
+ *   `↑/↓` footer under them, and no agy permission heading (`Requesting
+ *   permission for:` / `Do you want to proceed?`) above them in the same panel.
+ *
+ * Every other run of options numbered up to `N.` (N ≥ 2) is declined — not by
+ * listing what is wrong with it, which is how #3808 left holes: a run with a
+ * number missing (`> 1.` / `3.`, which the generic parser's single-gap
+ * tolerance reads as a prompt), a run that does not reach `1.` (the cursor row
+ * pushed off the top of the pane), a run under a `↑/↓` footer the reader would
+ * not take (the login-method screen, a footer a narrow pane cut), a run
+ * wearing a cursor whose footer is below the pane, and a permission dialog
+ * whose footer AND `>` row (option 3 or 4) are below the pane — its `1.` / `2.`
+ * rows wear no cursor, so only the heading above them tells it from a reply.
+ *
+ * False when the bottom option row is `1.` (a single `> 1. …` row — a sent
+ * message echoed above the spinner — is not a run) or when a bare `>` composer
+ * is drawn under the options (a quotation, judged by the #3183 veto).
+ *
+ * @param text - ANSI-stripped capture, box drawing optional
+ */
+export function isAntigravityUnansweredNumberedScreen(text: string): boolean {
+  const run = readBottomOptionRun(text);
+  if (run === null || run.bottom < 2) return false;
+  if (run.feedbackFooter) return false;
+  const replyList = run.lowest === 1 && !run.gap && !run.highlighted && !run.navigateFooter
+    && !run.permissionHeading;
+  if (replyList) return false;
+  return readAntigravityNumberedDialog(run.lines) === null;
+}
 
-  const footer = lines.slice(last + 1).find(row => row.trim() !== '');
-  if (footer !== undefined && FEEDBACK_MENU_FOOTER_PATTERN.test(footer)) return false;
-  return readAntigravityNumberedDialog(lines) === null;
+/**
+ * Is this agy frame the `/feedback` menu — its `esc Cancel · 1-6 Select`
+ * footer directly under the bottom run of options? (Issue #3881)
+ *
+ * The one numbered agy screen the generic multiple-choice parser is left to
+ * read (#2364) that is a known menu of agy's own rather than a list a reply
+ * drew. The answering entry asks it when a hook receipt is all that would
+ * otherwise vouch for a generic reading (`response-checker-dialog-gate`'s
+ * `isAntigravityGenericReadingOnScreen`).
+ *
+ * @param text - ANSI-stripped capture, box drawing optional
+ */
+export function isAntigravityFeedbackMenuScreen(text: string): boolean {
+  return readBottomOptionRun(text)?.feedbackFooter === true;
 }

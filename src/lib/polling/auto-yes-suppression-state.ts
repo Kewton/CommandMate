@@ -27,6 +27,7 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { PromptType } from '@/types/models';
 import type { AutoYesMode, AutoYesSuppressionReason } from './auto-yes-resolver';
 import { getOrInitGlobal } from '../global-state';
+import { getWaitingEpisodeRecord } from '../session/waiting-episode-state';
 
 /** What the policy withheld, and why — the log line's payload, made queryable. */
 export interface AutoYesPolicySuppression {
@@ -40,7 +41,21 @@ export interface AutoYesPolicySuppression {
   pattern?: string;
   /** Epoch ms of the suppression; refreshed on every poll that re-suppresses. */
   at: number;
+  /**
+   * The waiting episode open for this instance when the record was written
+   * (Issue #3798), or the one a caller carried over from an earlier record of
+   * the same dialog (`auto-yes-poller-receipt-log`). Present, the push gate and
+   * `cmate wait` match the record to a wait by this id rather than by time;
+   * absent — no wait was open yet — the time comparison applies.
+   */
+  episodeId?: string;
 }
+
+/**
+ * The name the push gate reads the record under (Issue #3798). The id now
+ * belongs to the published record itself ({@link AutoYesPolicySuppression}).
+ */
+export type EpisodeScopedPolicySuppression = AutoYesPolicySuppression;
 
 /**
  * Reached through `globalThis` for the same reason `agent-event-state` is
@@ -70,6 +85,10 @@ const lastPolicySuppressions = getOrInitGlobal('__autoYesPolicySuppressions', ()
 /**
  * Record that the policy withheld an answer for `instanceId`'s current prompt.
  *
+ * Issue #3798: the record names the waiting episode open for the instance at
+ * this moment — unless the caller names one (a record carried over for the
+ * same dialog) — so it is never taken for the reason of a later wait.
+ *
  * @param at - Epoch ms; defaults to now. Overridable so tests are deterministic.
  */
 export function recordPolicySuppression(
@@ -79,9 +98,12 @@ export function recordPolicySuppression(
   suppression: Omit<AutoYesPolicySuppression, 'at'>,
   at: number = Date.now()
 ): void {
+  const { episodeId: carried, ...rest } = suppression;
+  const episodeId = carried ?? getWaitingEpisodeRecord(worktreeId, cliToolId, instanceId)?.episodeId;
   lastPolicySuppressions.set(buildCompositeKey(worktreeId, cliToolId, instanceId), {
-    ...suppression,
+    ...rest,
     at,
+    ...(episodeId !== undefined ? { episodeId } : {}),
   });
 }
 
@@ -96,6 +118,25 @@ export function getLastPolicySuppression(
   instanceId?: string
 ): AutoYesPolicySuppression | null {
   return lastPolicySuppressions.get(buildCompositeKey(worktreeId, cliToolId, instanceId)) ?? null;
+}
+
+/**
+ * Whether the record is older than the Auto-Yes answer to the wait it would
+ * explain (Issue #3798): the poller's last answer (`lastAnswer`) went to
+ * `waitingEpisodeId`, the wait open now, after the record was written. The
+ * success path of a send does not clear the record — it stays as history —
+ * but the answer is the newer fact, so the record is not that wait's reason
+ * any more. The push gate and `current-output` (`lastSuppressionAnswered`,
+ * which `cmate wait` reads) both decide it here. A record written at or after
+ * the answer, an answer to another episode, no answer and no wait id are not.
+ */
+export function suppressionPredatesAnswer(
+  suppression: Pick<AutoYesPolicySuppression, 'at'>,
+  waitingEpisodeId: string | null | undefined,
+  answer: { episodeId: string; at: number } | null
+): boolean {
+  if (waitingEpisodeId === null || waitingEpisodeId === undefined || answer === null) return false;
+  return answer.episodeId === waitingEpisodeId && suppression.at < answer.at;
 }
 
 /**

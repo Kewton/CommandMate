@@ -1,15 +1,38 @@
 /** Multiple choice prompt detection logic extracted from prompt-detector.ts (Issue #575). */
 
-import type { DetectPromptOptions, PromptDetectionResult } from './types';
+import type { ApprovalContextReading, DetectPromptOptions, PromptDetectionResult } from './types';
 import type { SubmitMode } from '@/types/models';
 import { normalizeTuiFrameForDetection } from './tui-detection-frame';
 import { CLAUDE_MODEL_OVERLAY_FOOTER_PATTERN } from './cli-patterns';
+import { CLAUDE_TURN_COMPLETE_PATTERN } from './tools/claude/patterns';
 import { optionTakesTypedText } from '@/lib/session/prompt-view';
+import {
+  cannotBeWrapOf,
+  isRecommendationMarker,
+  isRecommendedTitle,
+  lowerBoundPaneColumns,
+  type OptionRecommendation,
+} from './option-recommendation';
 import {
   ASK_USER_QUESTION_PICKER_FOOTER_PATTERN,
   findAskUserQuestionTabRow,
   findClaudePreviewPanes,
 } from './tools/claude/picker-chrome';
+import {
+  APPROVAL_TARGET_MAX_LOOKBACK,
+  SEPARATOR_LINE_PATTERN,
+  findApprovalContextRange,
+  indentOf,
+  joinApprovalTarget,
+  panelFrameIndent,
+} from './prompt-detect-multiple-choice-approval-context';
+
+export {
+  APPROVAL_TARGET_MAX_LOOKBACK,
+  findApprovalContextRange,
+  findApprovalContextStart,
+  joinApprovalTarget,
+} from './prompt-detect-multiple-choice-approval-context';
 
 // ============================================================================
 // Constants
@@ -245,14 +268,6 @@ export function maskClaudeChrome(lines: readonly string[], chrome: ClaudeChrome)
  * Anchored, no nested quantifiers — ReDoS safe (S4-001).
  */
 const PANE_WRAPPED_LABEL_PATTERN = /^\s{3,}\S/;
-
-/**
- * Pattern for separator lines (horizontal rules).
- * Matches lines consisting only of dash (-) or em-dash (─) characters.
- * Used to skip separator lines in question extraction and non-option line handling.
- * Anchored at both ends -- ReDoS safe (S4-001).
- */
-const SEPARATOR_LINE_PATTERN = /^[-─]+$/;
 
 /**
  * How many lines above `questionEndIndex` the question text is collected from.
@@ -704,24 +719,99 @@ function isContinuationLine(rawLine: string, line: string): boolean {
 }
 
 /**
+ * The user's own message echo (Issue #3832): claude's `❯ msg`, codex's `› msg`.
+ * The cursor of an option row (`❯ 1.`) is not one. `>` is left out on purpose:
+ * codex's trust dialog opens with `> You are in <dir>` and a here-document's
+ * body carries `> ` rows, so a `>` row may be the prompt's own.
+ */
+const USER_ECHO_PATTERN = /^[❯›]\s(?!\s*\d+[.)]\s)/;
+
+/**
+ * codex's end-of-turn row (Issue #3832): `Worked for 17s • 19:30`, or the rule
+ * form `─ Worked for 1m 2s ─`. claude's is {@link CLAUDE_TURN_COMPLETE_PATTERN}.
+ */
+const CODEX_TURN_COMPLETE_PATTERN = /^─*\s*Worked for\s+(?:\d+h\s*)?(?:\d+m\s*)?\d+s\b/;
+
+/** True when the nearest non-blank row above `row` (down to `floor`) ends a finished turn. */
+function followsFinishedTurn(lines: string[], row: number, floor: number): boolean {
+  for (let i = row - 1; i >= floor; i--) {
+    const line = lines[i];
+    if (line === undefined || line.trim() === '') continue;
+    return CLAUDE_TURN_COMPLETE_PATTERN.test(line) || CODEX_TURN_COMPLETE_PATTERN.test(line.trim());
+  }
+  return false;
+}
+
+/**
+ * The lowest row in `[from, questionEndIndex)` that is the user's message echo
+ * (Issue #3832), or -1.
+ *
+ * A `❯ ` / `› ` row is taken for the echo only when the screen leaves no doubt:
+ * drawn left of the dialog's frame (claude's echo at column 0 against its frame
+ * at 1, codex's at 0 against 2), and right under the previous turn's end-of-turn
+ * row (`✻ Baked for 3s`, `Worked for 17s`). A body row that happens to start
+ * with the glyph — at the frame's column, or under the command it belongs to —
+ * is not one, so the rows above it stay in `question` and the deny surface is
+ * taken wide.
+ */
+function findUserEchoRow(
+  lines: string[],
+  questionEndIndex: number,
+  from: number,
+  panelEnd: number,
+  floor: number,
+): number {
+  const frameIndent = panelFrameIndent(lines, questionEndIndex, panelEnd);
+  for (let i = questionEndIndex - 1; i >= from; i--) {
+    const line = lines[i];
+    if (line === undefined || line.trim() === '') continue;
+    if (
+      indentOf(line) < frameIndent && USER_ECHO_PATTERN.test(line.trim())
+      && followsFinishedTurn(lines, i, floor)
+    ) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/**
  * Extract question text from the lines around questionEndIndex.
  * Collects non-empty, non-separator lines from up to 5 lines before questionEndIndex
  * through questionEndIndex itself, joining them with spaces.
+ *
+ * [Issue #3832] Not above the user's message echo ({@link findUserEchoRow}):
+ * that message opened the current turn, so the rows above it — the previous
+ * turn's `⏺ IMPL_COMPLETED` / `✻ Cogitated …`, codex's `• HTTP/2 200` /
+ * `Worked for 17s` on the measured screens — are not the prompt's and used to
+ * reach the deny surface through `question`. The echo row itself stays. No
+ * other row bounds the window: a `⏺` / `●` / `•` row may be the call the prompt
+ * asks about (codex's `• Calling …`, agy's `● Bash(…)`), and `question` is what
+ * keeps such a row in the deny surface when `approvalTarget` cuts at it.
  *
  * @param lines - Array of output lines
  * @param questionEndIndex - Index of the last line before options, or -1 if not found
  * @param floor - First row the question may start at. Issue #2486: one below an
  *   AskUserQuestion picker's tab row, so neither that row nor the transcript
  *   above it becomes part of the question; 0 when there is none.
+ * @param panelEnd - Exclusive end of the dialog's own rows, which set the frame
+ *   column the echo is drawn at or left of (Issue #3832)
  * @returns Extracted question text, or generic fallback if questionEndIndex is -1
  */
-function extractQuestionText(lines: string[], questionEndIndex: number, floor = 0): string {
+function extractQuestionText(
+  lines: string[],
+  questionEndIndex: number,
+  floor = 0,
+  panelEnd: number = questionEndIndex + 1,
+): string {
   if (questionEndIndex < 0) {
     return 'Please select an option:';
   }
 
+  const windowStart = Math.max(floor, questionEndIndex - QUESTION_CONTEXT_LINES);
+  const start = Math.max(windowStart, findUserEchoRow(lines, questionEndIndex, windowStart, panelEnd, floor));
   const questionLines: string[] = [];
-  for (let i = Math.max(floor, questionEndIndex - QUESTION_CONTEXT_LINES); i <= questionEndIndex; i++) {
+  for (let i = start; i <= questionEndIndex; i++) {
     const line = lines[i].trim();
     if (line && !SEPARATOR_LINE_PATTERN.test(line)) {
       questionLines.push(line);
@@ -757,168 +847,6 @@ function extractInstructionText(
 }
 
 /**
- * Lines that mean "the previous turn ended here" when scanning upward.
- *
- * Every supported CLI renders its transcript as marker-prefixed rows — Claude's
- * tool-use `⏺` and result `⎿`, Codex's activity `•`, its approval receipts `✔`
- * / `✗`, the user's own `›` / `❯` / `>` echo, and its output continuation `└`.
- * The lines a prompt panel puts above its question (a header such as "Bash
- * command", the command itself, a one-line description) never carry one, which
- * is what makes this usable as the panel's upper edge after `stripBoxDrawing`
- * has erased the real box border.
- *
- * Horizontal rules count too: Codex draws one between turns.
- *
- * [Issue #3817] Not inside the panel's own frame: the command a panel shows can
- * carry the same glyphs (a here-document's `> quoted` rows), drawn deeper than
- * the panel's header, question and option rows. See
- * {@link findApprovalContextStart}.
- *
- * Anchored at the start of the trimmed line — ReDoS safe (no repetition).
- */
-const TURN_BOUNDARY_PATTERN =
-  /^[⏺⎿●○•✔✓✖✗✘›»❯└├>]/;
-
-/**
- * How far above the question the approval context may reach (Issue #1699).
- *
- * The boundary marker above is the actual fix; this cap only exists so a frame
- * that happens to contain no marker at all (a bare shell `(y/n)` prompt under
- * plain command output) cannot drag an unbounded scrollback window into the
- * deny surface the way the old fixed 19-line lookback did. Sized for the
- * tallest real permission panel measured: header + blank + a wrapped multi-line
- * command + description + blank.
- */
-export const APPROVAL_TARGET_MAX_LOOKBACK = 12;
-
-/**
- * A previous tool call's result row (Issue #3817): claude's `⎿`, codex's `└` /
- * `├` output continuation. Never the user's echo or a quote (`>`).
- */
-const RESULT_MARKER_PATTERN = /^[⎿└├]/;
-
-/** Width of a row's leading whitespace. */
-function indentOf(line: string): number {
-  return line.length - line.trimStart().length;
-}
-
-/**
- * The column the dialog's own frame is drawn at (Issue #3817): the least
- * indented non-blank row from the question down to `panelEnd`. Those rows are
- * the question, the option block and the footer — claude puts them at column 1
- * and the command at column 3, codex its `› 1.` cursor at column 0.
- */
-function panelFrameIndent(lines: string[], questionLineIndex: number, panelEnd: number): number {
-  let indent = Infinity;
-  for (let i = questionLineIndex; i < Math.min(panelEnd, lines.length); i++) {
-    const line = lines[i];
-    if (line === undefined || line.trim() === '') continue;
-    indent = Math.min(indent, indentOf(line));
-  }
-  return indent === Infinity ? 0 : indent;
-}
-
-/** True when this line carries a transcript marker or is a rule. */
-function isTurnBoundaryLine(rawLine: string | undefined): boolean {
-  if (rawLine === undefined) return false;
-  const line = rawLine.trim();
-  if (line === '') return false;
-  return TURN_BOUNDARY_PATTERN.test(line) || SEPARATOR_LINE_PATTERN.test(line);
-}
-
-/**
- * First line index that still belongs to *this* prompt, scanning upward.
- *
- * Walks up from `questionLineIndex - 1` and stops just below the nearest turn
- * boundary; with no boundary in reach it falls back to the lookback cap.
- * Everything above the returned index is a previous turn and must never reach a
- * deny pattern — that poisoning is Issue #1699.
- *
- * [Issue #3817] A marker row indented deeper than the dialog's frame
- * ({@link panelFrameIndent}) is the body of the command the panel asks about
- * when a frame row sits above it — the `> quoted` rows of a here-document
- * under a claude panel's ` Bash command` header. Cutting there took the command
- * rows above it out of the deny surface. The previous turn's markers are drawn
- * at or left of the frame (`⏺`, the user's `> msg` / `❯ msg` echo, a rule), or
- * deeper with no frame row above them (claude's `  ⎿` result right under its
- * `⏺`), and both still end the scan.
- *
- * A frame row cannot be told from a body row drawn at the frame's column (a
- * shell here-document's `EOF`), so a frame row is taken as an older panel's
- * header only in one shape: a tool-use block — a marker row at the frame's
- * column, then that row, then deeper rows that are all result markers
- * ({@link RESULT_MARKER_PATTERN}). Anything else between two frame rows is read
- * as body: when the screen cannot tell, the deny surface is taken wide.
- *
- * Shared by both detector paths: multiple_choice passes its `questionEndIndex`,
- * yes_no the line its pattern matched on.
- *
- * @param lines - Full frame, already ANSI/box stripped
- * @param questionLineIndex - Line the prompt's own question sits on
- * @param panelEnd - Exclusive end of the dialog's own rows (Issue #3817); their
- *   least indented row is the frame. Defaults to the question row alone.
- * @returns Index of the first line of the current prompt's own block
- */
-export function findApprovalContextStart(
-  lines: string[],
-  questionLineIndex: number,
-  panelEnd: number = questionLineIndex + 1,
-): number {
-  const floor = Math.max(0, questionLineIndex - APPROVAL_TARGET_MAX_LOOKBACK);
-  const frameIndent = panelFrameIndent(lines, questionLineIndex, panelEnd);
-  // The lowest deeper marker row with no frame row found above it yet.
-  let unenclosed = -1;
-  // The deeper rows since the last frame row: are they all result markers?
-  let segmentRows = 0;
-  let segmentAllResults = true;
-  for (let i = questionLineIndex - 1; i >= floor; i--) {
-    const line = lines[i];
-    if (line === undefined || line.trim() === '') continue;
-    const atFrame = indentOf(line) <= frameIndent;
-    const marker = isTurnBoundaryLine(line);
-    if (marker && atFrame) return (unenclosed >= 0 ? unenclosed : i) + 1;
-    if (!atFrame) {
-      if (marker && unenclosed < 0) unenclosed = i;
-      segmentRows++;
-      segmentAllResults &&= RESULT_MARKER_PATTERN.test(line.trim());
-      continue;
-    }
-    // A frame row: an older tool-use block's header only in that one shape.
-    if (unenclosed >= 0 && segmentRows > 0 && segmentAllResults && isMarkerRowAtFrameAbove(lines, i, floor, frameIndent)) {
-      return unenclosed + 1;
-    }
-    unenclosed = -1;
-    segmentRows = 0;
-    segmentAllResults = true;
-  }
-  return unenclosed >= 0 ? unenclosed + 1 : floor;
-}
-
-/** True when the nearest non-blank row above `row` is a marker row at the frame's column. */
-function isMarkerRowAtFrameAbove(lines: string[], row: number, floor: number, frameIndent: number): boolean {
-  for (let i = row - 1; i >= floor; i--) {
-    const line = lines[i];
-    if (line === undefined || line.trim() === '') continue;
-    return indentOf(line) <= frameIndent && isTurnBoundaryLine(line);
-  }
-  return false;
-}
-
-/**
- * Join a slice of the frame into an approval-target string.
- *
- * @returns The trimmed block, or undefined when it is empty
- */
-export function joinApprovalTarget(lines: string[], start: number, end: number): string | undefined {
-  const joined = lines
-    .slice(start, end)
-    .map(l => l.trimEnd())
-    .join('\n')
-    .trim();
-  return joined.length > 0 ? joined : undefined;
-}
-
-/**
  * Extract what this multiple-choice prompt is asking approval for (Issue #1699).
  *
  * Same lower bound as {@link extractInstructionText} — the panel runs through
@@ -933,8 +861,9 @@ export function joinApprovalTarget(lines: string[], start: number, end: number):
  *
  * Residual, deliberately left alone: `question` itself is built from up to
  * {@link QUESTION_CONTEXT_LINES} lines above `questionEndIndex` and is also part
- * of the deny surface. Narrowing that would change prompt dedup keys and what
- * the UI renders, and it is bounded by the options below it either way.
+ * of the deny surface. Issue #3832 only stops it at the user's message echo
+ * (see {@link extractQuestionText}); a previous turn below no echo still
+ * reaches it, which over-suppresses rather than under-suppresses.
  *
  * [Issue #2486] One exception to both: neither reaches above an AskUserQuestion
  * picker's tab row. Everything up there is the transcript — the Bash call Claude
@@ -952,16 +881,30 @@ function extractApprovalTarget(
   questionEndIndex: number,
   effectiveEnd: number,
   floor = 0,
-): string | undefined {
+): ApprovalTargetBlock | undefined {
   if (questionEndIndex < 0) {
     return undefined;
   }
 
-  return joinApprovalTarget(
-    lines,
-    Math.max(floor, findApprovalContextStart(lines, questionEndIndex, effectiveEnd)),
-    effectiveEnd,
-  );
+  const range = findApprovalContextRange(lines, questionEndIndex, effectiveEnd);
+  // Issue #3881: the picker's tab row is a boundary of its own, so a scan it
+  // cuts short is complete whatever the scan said about the rows above.
+  const bounded = floor > 0 && floor >= range.start;
+  const start = Math.max(floor, range.start);
+  return {
+    approvalTarget: joinApprovalTarget(lines, start, effectiveEnd),
+    approvalContext: {
+      startRow: start,
+      endRow: effectiveEnd,
+      completeness: bounded ? 'complete' : range.completeness,
+    },
+  };
+}
+
+/** What {@link extractApprovalTarget} read: the target and the rows it was cut from (Issue #3881). */
+interface ApprovalTargetBlock {
+  approvalTarget: string | undefined;
+  approvalContext: ApprovalContextReading;
 }
 
 /**
@@ -983,13 +926,18 @@ function extractApprovalTarget(
 export function buildMultipleChoiceResult(
   question: string,
   collectedOptions: ReadonlyArray<{ number: number; label: string; isDefault: boolean }>,
-  context: { instructionText?: string; approvalTarget?: string } | undefined,
+  context: {
+    instructionText?: string;
+    approvalTarget?: string;
+    /** Issue #3881: the rows the target was cut from, when a scan bounded it. */
+    approvalContext?: ApprovalContextReading;
+  } | undefined,
   output: string,
   truncateRawContentFn: (content: string) => string,
   submitMode?: SubmitMode,
   isAskUserQuestion?: boolean,
 ): PromptDetectionResult {
-  const { instructionText, approvalTarget } = context ?? {};
+  const { instructionText, approvalTarget, approvalContext } = context ?? {};
   return {
     isPrompt: true,
     promptData: {
@@ -1009,11 +957,16 @@ export function buildMultipleChoiceResult(
       status: 'pending',
       instructionText,
       ...(approvalTarget !== undefined ? { approvalTarget } : {}),
+      // Issue #3881 (H-3): only the case the resolver must act on.
+      ...(approvalTarget !== undefined && approvalContext?.completeness === 'truncated'
+        ? { approvalTargetCompleteness: 'truncated' as const }
+        : {}),
       ...(submitMode ? { submitMode } : {}),
       ...(isAskUserQuestion ? { isAskUserQuestion: true } : {}),
     },
     cleanContent: question.trim(),
     rawContent: truncateRawContentFn(output.trim()),  // Issue #235: complete prompt output (truncated) [MF-001]
+    ...(approvalContext !== undefined ? { approvalContext } : {}),
   };
 }
 
@@ -1075,6 +1028,86 @@ export function detectMultipleChoicePrompt(
 
   const lines = output.split('\n');
 
+  const { scanStart, effectiveEnd, hasAskUserQuestionFooter } = findScanWindow(lines);
+  const scanWindow = lines.slice(scanStart, effectiveEnd);
+
+  if (hasModelOverlayFooter(scanWindow)) {
+    return noPromptResult(output);
+  }
+
+  const { hasConfirmationFooter, hasNumberFooter } = findConfirmationFooter(scanWindow);
+
+  // ==========================================================================
+  // Pass 1: Check for ❯ indicator existence in scan window
+  // If no ❯ lines found and requireDefault is true, there is no multiple_choice prompt.
+  // When requireDefault is false, skip this gate entirely to allow ❯-less detection.
+  // ==========================================================================
+  if (requireDefault) {
+    const hasDefaultLine = hasDefaultOptionLine(scanWindow);
+
+    if (!hasDefaultLine && !hasConfirmationFooter) {
+      return noPromptResult(output);
+    }
+  }
+
+  const scan = collectOptions(lines, scanStart, effectiveEnd);
+  if (scan === null) {
+    return noPromptResult(output);
+  }
+  const { collectedOptions, optionRows, questionEndIndex } = scan;
+
+  if (!passesOptionValidation(collectedOptions, requireDefault, hasConfirmationFooter, questionEndIndex, lines, scanStart)) {
+    return noPromptResult(output);
+  }
+
+  // [Issue #2486] An AskUserQuestion picker's tab row is the dialog's top edge:
+  // the row is chrome and everything above it is transcript. Found once so
+  // `question` and `approvalTarget` start at the same row; 0 on a frame with no
+  // tab row, which leaves every other prompt exactly as it was. `instructionText`
+  // keeps its wide window — it is the human's view, and on a preview picker the
+  // pane it carries is what the question asks the human to look at.
+  const pickerTop = questionEndIndex < 0
+    ? 0
+    : findAskUserQuestionTabRow(lines, questionEndIndex, APPROVAL_TARGET_MAX_LOOKBACK) + 1;
+  const question = extractQuestionText(lines, questionEndIndex, pickerTop, effectiveEnd);
+  const instructionText = extractInstructionText(lines, questionEndIndex, effectiveEnd);
+  // Issue #1699: the same block, cut at the previous turn's boundary. Display
+  // keeps the wide window; deny patterns are judged against this one.
+  const approvalBlock = extractApprovalTarget(lines, questionEndIndex, effectiveEnd, pickerTop);
+
+  // Issue #616: Determine submitMode from confirmation footer (detected in single-pass above)
+  const submitMode: SubmitMode | undefined = hasConfirmationFooter
+    ? (hasNumberFooter ? 'answer_only' : 'answer_then_enter')
+    : undefined;
+
+  const result = buildMultipleChoiceResult(question, collectedOptions, { instructionText, ...approvalBlock }, output, truncateRawContentFn, submitMode, hasAskUserQuestionFooter);
+  // [Issue #3863] Only the AskUserQuestion picker: the one this parser reads
+  // as a question, whose rows are a title and an indented description.
+  if (!hasAskUserQuestionFooter) return result;
+  const paneColumns = lowerBoundPaneColumns(lines);
+  return {
+    ...result,
+    optionRecommendations: collectedOptions.map((option, index) =>
+      readPickerOptionRecommendation(option.label, optionRows[index], paneColumns),
+    ),
+  };
+}
+
+/** One collected option, as detectMultipleChoicePrompt() gathers it. */
+interface CollectedOption {
+  number: number;
+  label: string;
+  isDefault: boolean;
+}
+
+/** The scan window of detectMultipleChoicePrompt(). */
+interface ScanWindowBounds {
+  scanStart: number;
+  effectiveEnd: number;
+  hasAskUserQuestionFooter: boolean;
+}
+
+function findScanWindow(lines: string[]): ScanWindowBounds {
   // Strip trailing empty lines (tmux terminal padding) before computing scan window.
   // tmux buffers often end with many empty padding lines that would shift the
   // scan window away from the actual prompt content.
@@ -1110,8 +1143,10 @@ export function detectMultipleChoicePrompt(
       break;
     }
   }
-  const scanWindow = lines.slice(scanStart, effectiveEnd);
+  return { scanStart, effectiveEnd, hasAskUserQuestionFooter };
+}
 
+function hasModelOverlayFooter(scanWindow: string[]): boolean {
   // [Issue #1495] Claude `/model` local-settings overlay guard.
   // The `/model` overlay renders a ❯-marked numbered model list ("1. Default …
   // 5. Haiku") under a "Select model" header, which the option-collection logic
@@ -1127,10 +1162,13 @@ export function detectMultipleChoicePrompt(
   // selection list via CLAUDE_SELECTION_LIST_FOOTER (NavigationButtons + ESC hatch).
   for (const rawLine of scanWindow) {
     if (CLAUDE_MODEL_OVERLAY_FOOTER_PATTERN.test(rawLine)) {
-      return noPromptResult(output);
+      return true;
     }
   }
+  return false;
+}
 
+function findConfirmationFooter(scanWindow: string[]): { hasConfirmationFooter: boolean; hasNumberFooter: boolean } {
   // Single-pass footer detection: identify both confirmation footer presence and
   // specific "press number to confirm" variant in one iteration (Issue #616).
   let hasConfirmationFooter = false;
@@ -1145,34 +1183,58 @@ export function detectMultipleChoicePrompt(
       break; // Both patterns are subsets of CONFIRMATION_FOOTER; one match suffices
     }
   }
+  return { hasConfirmationFooter, hasNumberFooter };
+}
 
-  // ==========================================================================
-  // Pass 1: Check for ❯ indicator existence in scan window
-  // If no ❯ lines found and requireDefault is true, there is no multiple_choice prompt.
-  // When requireDefault is false, skip this gate entirely to allow ❯-less detection.
-  // ==========================================================================
-  if (requireDefault) {
-    let hasDefaultLine = false;
-    for (const rawLine of scanWindow) {
-      const line = rawLine.trim();
-      if (DEFAULT_OPTION_PATTERN.test(line)) {
-        hasDefaultLine = true;
-        break;
-      }
-    }
-
-    if (!hasDefaultLine && !hasConfirmationFooter) {
-      return noPromptResult(output);
+function hasDefaultOptionLine(scanWindow: string[]): boolean {
+  for (const rawLine of scanWindow) {
+    const line = rawLine.trim();
+    if (DEFAULT_OPTION_PATTERN.test(line)) {
+      return true;
     }
   }
+  return false;
+}
 
+/** State of the Pass 2 reverse scan, shared by its per-row helpers. */
+interface OptionScanState {
+  collectedOptions: CollectedOption[];
+  optionRows: OptionRowReading[];
+  rowsBelow: string[];
+  questionEndIndex: number;
+  continuationLineCount: number;
+  paneWrap: string[];
+}
+
+/** What the reverse scan does after a row: go on to the row above, or stop. */
+type ScanStep = 'continue' | 'break';
+
+/** Pass 2 result; `null` from collectOptions() is the user input prompt barrier. */
+interface OptionScanResult {
+  collectedOptions: CollectedOption[];
+  optionRows: OptionRowReading[];
+  questionEndIndex: number;
+}
+
+function collectOptions(lines: string[], scanStart: number, effectiveEnd: number): OptionScanResult | null {
   // ==========================================================================
   // Pass 2: Collect options (executed when Pass 1 passes or is skipped)
   // Scan from end to find options, using both patterns.
   // ==========================================================================
-  const collectedOptions: Array<{ number: number; label: string; isDefault: boolean }> = [];
-  let questionEndIndex = -1;
-  let continuationLineCount = 0;
+  const state: OptionScanState = {
+    collectedOptions: [],
+    // [Issue #3863] Per collected option (same order): the option row as drawn
+    // and the rows under it, for telling its title from its description.
+    optionRows: [],
+    // Continuation rows met since the option below was collected — the rows
+    // UNDER the option the reverse scan reaches next.
+    rowsBelow: [],
+    questionEndIndex: -1,
+    continuationLineCount: 0,
+    // [Issue #2486] Wrapped label rows beside a preview pane, held for the option
+    // ABOVE them, which the reverse scan has not reached yet.
+    paneWrap: [],
+  };
 
   // [Issue #1708] Claude's bottom-anchored task panel is an overlay, not part of
   // the prompt frame. Resolved as a block up front because the reverse scan meets
@@ -1182,9 +1244,6 @@ export function detectMultipleChoicePrompt(
   // rows the scan likewise meets before the top border that identifies it — and
   // some of which it shares with the options column.
   const chrome = findClaudeChrome(lines, scanStart, effectiveEnd);
-  // [Issue #2486] Wrapped label rows beside a preview pane, held for the option
-  // ABOVE them, which the reverse scan has not reached yet.
-  let paneWrap: string[] = [];
 
   for (let i = effectiveEnd - 1; i >= scanStart; i--) {
     // [Issue #1708] Chrome rows are metadata. Same handling as the
@@ -1192,7 +1251,7 @@ export function detectMultipleChoicePrompt(
     // the options rendered ABOVE the panel (or beside the pane) are still
     // reachable.
     if (chrome.rows.has(i)) {
-      continuationLineCount++;
+      state.continuationLineCount++;
       continue;
     }
 
@@ -1204,71 +1263,12 @@ export function detectMultipleChoicePrompt(
     const rawLine = paneCut === undefined ? lines[i] : lines[i].slice(0, paneCut).trimEnd();
     const line = rawLine.trim();
 
-    // [Issue #2486] See PANE_WRAPPED_LABEL_PATTERN: the tail of the label above.
-    if (paneCut !== undefined && PANE_WRAPPED_LABEL_PATTERN.test(rawLine)) {
-      paneWrap.unshift(line);
-      continuationLineCount++;
+    if (isMetadataRow(state, rawLine, line, paneCut)) {
       continue;
     }
 
-    // Collapsed preview markers like "[… 12 lines] ctrl + a view all" are
-    // metadata, not selectable options. Skip them before option parsing to
-    // avoid misclassifying "12" as an option number.
-    if (COLLAPSED_OUTPUT_PATTERN.test(line)) {
-      continuationLineCount++;
+    if (tryCollectOption(state, rawLine, line, paneCut)) {
       continue;
-    }
-
-    // [Issue #704] Claude v2.1.142 renders summary lines like "… +1 pending"
-    // BELOW the real options. Without this guard, NORMAL_OPTION_PATTERN below
-    // would match the summary line as `option N / label='pending'`, which
-    // would then poison isValidPrecedingOption() and cause every real option
-    // above (1./2./3.) to be rejected — resulting in collectedOptions.length<2
-    // and a spurious no_prompt verdict. Treat the summary line as metadata
-    // (same continuation handling as COLLAPSED_OUTPUT_PATTERN above) so the
-    // reverse scan continues into the actual option block.
-    //
-    // Defense-in-depth: works alongside the S2 effectiveEnd trim above. Either
-    // S1 or S2 alone is sufficient to fix Issue #704; keeping both protects
-    // against future Claude renderings where the footer line text changes
-    // (S1 still catches) or the summary line wording changes (S2 still
-    // catches via footer trim).
-    if (SUMMARY_LINE_PATTERN.test(line)) {
-      continuationLineCount++;
-      continue;
-    }
-
-    // Try DEFAULT_OPTION_PATTERN first (❯ indicator)
-    const defaultMatch = line.match(DEFAULT_OPTION_PATTERN);
-    if (defaultMatch) {
-      const number = parseInt(defaultMatch[1], 10);
-      if (number <= 20 && isValidPrecedingOption(number, collectedOptions)) {
-        // [Issue #2486] A label that wrapped beside a preview pane is whole again.
-        const label = [defaultMatch[2].trim(), ...paneWrap].join(' ');
-        paneWrap = [];
-        collectedOptions.unshift({ number, label, isDefault: true });
-        continuationLineCount = 0;
-        continue;
-      }
-    }
-
-    // Try NORMAL_OPTION_PATTERN (no ❯ indicator)
-    const normalMatch = line.match(NORMAL_OPTION_PATTERN);
-    if (normalMatch) {
-      const number = parseInt(normalMatch[1], 10);
-      // Skip unreasonably large option numbers (e.g., "[… 373 lines]" from Codex
-      // collapsed output matches as option 373). CLI prompts never exceed 20 options.
-      if (number > 20) {
-        // Treat as non-option line
-      } else if (!isValidPrecedingOption(number, collectedOptions)) {
-        // Treat as non-option line (e.g., diff line numbers from Codex approval prompts)
-      } else {
-        const label = [normalMatch[2].trim(), ...paneWrap].join(' ');
-        paneWrap = [];
-        collectedOptions.unshift({ number, label, isDefault: false });
-        continuationLineCount = 0;
-        continue;
-      }
     }
 
     // [Issue #287 Bug3] User input prompt barrier:
@@ -1277,71 +1277,187 @@ export function detectMultipleChoicePrompt(
     // user input prompt (e.g., "❯ 1", "❯ /command") or idle prompt ("❯").
     // Anything above this line in the scrollback is historical conversation text,
     // not an active prompt. Stop scanning to prevent false positives.
-    if (collectedOptions.length === 0 && (line.startsWith('\u276F') || line.startsWith('\u25CF') || line.startsWith('\u203A'))) {
-      return noPromptResult(output);
+    if (state.collectedOptions.length === 0 && (line.startsWith('❯') || line.startsWith('●') || line.startsWith('›'))) {
+      return null;
+    }
+
+    // [Issue #3863] An indented row under the bottom option: its wrapped title
+    // or its description. Only remembered; the scan goes on as before.
+    if (state.collectedOptions.length === 0 && line && /^\s{3,}/.test(rawLine)) {
+      state.rowsBelow.unshift(rawLine);
     }
 
     // Non-option line handling
-    if (collectedOptions.length > 0 && line && !SEPARATOR_LINE_PATTERN.test(line)) {
-      // [Issue #460] For deeply indented lines (4+ leading spaces), check
-      // continuation BEFORE question keywords. These are option description
-      // lines (e.g., "     Let Gemini CLI decide the best model...") that may
-      // contain keywords like "decide" or "select" but are NOT question lines.
-      // The 2-space "  Select model" case (Issue #256) is excluded by the 4+ threshold.
-      const isDeepIndent = /^\s{4,}/.test(rawLine);
-      if (isDeepIndent && isContinuationLine(rawLine, line)) {
-        continuationLineCount++;
-        if (continuationLineCount > MAX_DEEP_INDENT_CONTINUATION_LINES) {
-          questionEndIndex = i;
-          break;
-        }
-        continue;
-      }
-
-      // [MF-001 / Issue #256] Check if line is a question-like line BEFORE
-      // continuation check. This preserves isContinuationLine()'s SRP by not
-      // mixing question detection into it. Without this pre-check, indented
-      // question lines (e.g., "  Select model") could be misclassified as
-      // continuation lines by isContinuationLine()'s hasLeadingSpaces check.
-      //
-      // [SF-S4-003] Both this pre-check and SEC-001b upward scan use the same
-      // isQuestionLikeLine() function intentionally (DRY). If a question line is
-      // caught here, SEC-001b upward scan is not needed (questionEndIndex line
-      // itself passes isQuestionLikeLine()).
-      if (isQuestionLikeLine(line)) {
-        questionEndIndex = i;
+    if (state.collectedOptions.length > 0 && line && !SEPARATOR_LINE_PATTERN.test(line)) {
+      if (scanNonOptionLine(state, rawLine, line, i) === 'break') {
         break;
       }
-
-      // Check if this is a continuation line (indented line between options,
-      // or path/filename fragments from terminal width wrapping - Issue #181)
-      if (isContinuationLine(rawLine, line)) {
-        continuationLineCount++;
-        const maxContinuationLines = /^\s{4,}/.test(rawLine)
-          ? MAX_DEEP_INDENT_CONTINUATION_LINES
-          : MAX_CONTINUATION_LINES;
-        // Issue #372: Codex TUI indents all output with 2 spaces, causing
-        // every line to match isContinuationLine(). Limit the scan distance
-        // to prevent traversing into body text where numbered lists would be
-        // collected as false options.
-        if (continuationLineCount > maxContinuationLines) {
-          questionEndIndex = i;
-          break;
-        }
-        // Skip continuation lines and continue scanning for more options
-        continue;
-      }
-
-      // Found a non-empty, non-separator line before options - likely the question
-      questionEndIndex = i;
-      break;
     }
   }
 
+  return {
+    collectedOptions: state.collectedOptions,
+    optionRows: state.optionRows,
+    questionEndIndex: state.questionEndIndex,
+  };
+}
+
+/** Rows the reverse scan skips as metadata without ending the scan. */
+function isMetadataRow(state: OptionScanState, rawLine: string, line: string, paneCut: number | undefined): boolean {
+  // [Issue #2486] See PANE_WRAPPED_LABEL_PATTERN: the tail of the label above.
+  if (paneCut !== undefined && PANE_WRAPPED_LABEL_PATTERN.test(rawLine)) {
+    state.paneWrap.unshift(line);
+    state.continuationLineCount++;
+    return true;
+  }
+
+  // Collapsed preview markers like "[… 12 lines] ctrl + a view all" are
+  // metadata, not selectable options. Skip them before option parsing to
+  // avoid misclassifying "12" as an option number.
+  if (COLLAPSED_OUTPUT_PATTERN.test(line)) {
+    state.continuationLineCount++;
+    return true;
+  }
+
+  // [Issue #704] Claude v2.1.142 renders summary lines like "… +1 pending"
+  // BELOW the real options. Without this guard, NORMAL_OPTION_PATTERN below
+  // would match the summary line as `option N / label='pending'`, which
+  // would then poison isValidPrecedingOption() and cause every real option
+  // above (1./2./3.) to be rejected — resulting in collectedOptions.length<2
+  // and a spurious no_prompt verdict. Treat the summary line as metadata
+  // (same continuation handling as COLLAPSED_OUTPUT_PATTERN above) so the
+  // reverse scan continues into the actual option block.
+  //
+  // Defense-in-depth: works alongside the S2 effectiveEnd trim above. Either
+  // S1 or S2 alone is sufficient to fix Issue #704; keeping both protects
+  // against future Claude renderings where the footer line text changes
+  // (S1 still catches) or the summary line wording changes (S2 still
+  // catches via footer trim).
+  if (SUMMARY_LINE_PATTERN.test(line)) {
+    state.continuationLineCount++;
+    return true;
+  }
+  return false;
+}
+
+/** Collects the row as an option when either option pattern accepts it. */
+function tryCollectOption(state: OptionScanState, rawLine: string, line: string, paneCut: number | undefined): boolean {
+  // Try DEFAULT_OPTION_PATTERN first (❯ indicator)
+  const defaultMatch = line.match(DEFAULT_OPTION_PATTERN);
+  if (defaultMatch) {
+    const number = parseInt(defaultMatch[1], 10);
+    if (number <= 20 && isValidPrecedingOption(number, state.collectedOptions)) {
+      // [Issue #2486] A label that wrapped beside a preview pane is whole again.
+      collectOption(state, rawLine, number, defaultMatch[2], true, paneCut);
+      return true;
+    }
+  }
+
+  // Try NORMAL_OPTION_PATTERN (no ❯ indicator)
+  const normalMatch = line.match(NORMAL_OPTION_PATTERN);
+  if (normalMatch) {
+    const number = parseInt(normalMatch[1], 10);
+    // Skip unreasonably large option numbers (e.g., "[… 373 lines]" from Codex
+    // collapsed output matches as option 373). CLI prompts never exceed 20 options.
+    if (number > 20) {
+      // Treat as non-option line
+    } else if (!isValidPrecedingOption(number, state.collectedOptions)) {
+      // Treat as non-option line (e.g., diff line numbers from Codex approval prompts)
+    } else {
+      collectOption(state, rawLine, number, normalMatch[2], false, paneCut);
+      return true;
+    }
+  }
+  return false;
+}
+
+function collectOption(
+  state: OptionScanState,
+  rawLine: string,
+  number: number,
+  matchedLabel: string,
+  isDefault: boolean,
+  paneCut: number | undefined,
+): void {
+  const label = [matchedLabel.trim(), ...state.paneWrap].join(' ');
+  state.optionRows.unshift({ row: rawLine, besidePane: paneCut !== undefined || state.paneWrap.length > 0, rowsBelow: state.rowsBelow });
+  state.rowsBelow = [];
+  state.paneWrap = [];
+  state.collectedOptions.unshift({ number, label, isDefault });
+  state.continuationLineCount = 0;
+}
+
+/** A non-empty, non-separator, non-option row above collected options. */
+function scanNonOptionLine(state: OptionScanState, rawLine: string, line: string, i: number): ScanStep {
+  // [Issue #460] For deeply indented lines (4+ leading spaces), check
+  // continuation BEFORE question keywords. These are option description
+  // lines (e.g., "     Let Gemini CLI decide the best model...") that may
+  // contain keywords like "decide" or "select" but are NOT question lines.
+  // The 2-space "  Select model" case (Issue #256) is excluded by the 4+ threshold.
+  const isDeepIndent = /^\s{4,}/.test(rawLine);
+  if (isDeepIndent && isContinuationLine(rawLine, line)) {
+    state.rowsBelow.unshift(rawLine);
+    state.continuationLineCount++;
+    if (state.continuationLineCount > MAX_DEEP_INDENT_CONTINUATION_LINES) {
+      state.questionEndIndex = i;
+      return 'break';
+    }
+    return 'continue';
+  }
+
+  // [MF-001 / Issue #256] Check if line is a question-like line BEFORE
+  // continuation check. This preserves isContinuationLine()'s SRP by not
+  // mixing question detection into it. Without this pre-check, indented
+  // question lines (e.g., "  Select model") could be misclassified as
+  // continuation lines by isContinuationLine()'s hasLeadingSpaces check.
+  //
+  // [SF-S4-003] Both this pre-check and SEC-001b upward scan use the same
+  // isQuestionLikeLine() function intentionally (DRY). If a question line is
+  // caught here, SEC-001b upward scan is not needed (questionEndIndex line
+  // itself passes isQuestionLikeLine()).
+  if (isQuestionLikeLine(line)) {
+    state.questionEndIndex = i;
+    return 'break';
+  }
+
+  // Check if this is a continuation line (indented line between options,
+  // or path/filename fragments from terminal width wrapping - Issue #181)
+  if (isContinuationLine(rawLine, line)) {
+    state.rowsBelow.unshift(rawLine);
+    state.continuationLineCount++;
+    const maxContinuationLines = /^\s{4,}/.test(rawLine)
+      ? MAX_DEEP_INDENT_CONTINUATION_LINES
+      : MAX_CONTINUATION_LINES;
+    // Issue #372: Codex TUI indents all output with 2 spaces, causing
+    // every line to match isContinuationLine(). Limit the scan distance
+    // to prevent traversing into body text where numbered lists would be
+    // collected as false options.
+    if (state.continuationLineCount > maxContinuationLines) {
+      state.questionEndIndex = i;
+      return 'break';
+    }
+    // Skip continuation lines and continue scanning for more options
+    return 'continue';
+  }
+
+  // Found a non-empty, non-separator line before options - likely the question
+  state.questionEndIndex = i;
+  return 'break';
+}
+
+/** Layers 3–5: whether the collected options make a prompt. */
+function passesOptionValidation(
+  collectedOptions: CollectedOption[],
+  requireDefault: boolean,
+  hasConfirmationFooter: boolean,
+  questionEndIndex: number,
+  lines: string[],
+  scanStart: number,
+): boolean {
   // Layer 3: Consecutive number validation (defensive measure)
   const optionNumbers = collectedOptions.map(opt => opt.number);
   if (!isConsecutiveFromOne(optionNumbers)) {
-    return noPromptResult(output);
+    return false;
   }
 
   // Layer 4: Must have at least 2 options. When requireDefault is true,
@@ -1349,7 +1465,7 @@ export function detectMultipleChoicePrompt(
   const hasDefaultIndicator = collectedOptions.some(opt => opt.isDefault);
   const allowMissingDefaultIndicator = requireDefault && hasConfirmationFooter;
   if (collectedOptions.length < 2 || (requireDefault && !hasDefaultIndicator && !allowMissingDefaultIndicator)) {
-    return noPromptResult(output);
+    return false;
   }
 
   // Layer 5 [SEC-001]: Enhanced question line validation for requireDefaultIndicator=false.
@@ -1365,50 +1481,81 @@ export function detectMultipleChoicePrompt(
   // (「実装方針を選んでください」) be detected. Indicator-less frames (#193 capture
   // artifacts) still go through SEC-001a/b unchanged.
   if (!requireDefault && !hasDefaultIndicator) {
-    // SEC-001a: No question line found (questionEndIndex === -1) - reject.
-    // Prevents generic question fallback from triggering Auto-Yes
-    // on plain numbered lists that happen to be consecutive from 1.
-    if (questionEndIndex === -1) {
-      return noPromptResult(output);
-    }
+    return passesQuestionLineValidation(questionEndIndex, lines, scanStart);
+  }
+  return true;
+}
 
-    // SEC-001b: Question line exists but is not actually a question/selection request.
-    // Validates that the question line contains a question mark or a selection keyword
-    // with colon, distinguishing "Select an option:" from "Recommendations:".
-    //
-    // [Issue #256] Enhanced with upward scan via findQuestionLineInRange() (SF-003).
-    // When questionEndIndex line itself is not a question-like line, scan upward
-    // within QUESTION_SCAN_RANGE to find a question line above it. This handles:
-    // - Multi-line question wrapping where ? is on a line above questionEndIndex
-    // - Model selection prompts where "Select model" is above description lines
-    const questionLine = lines[questionEndIndex]?.trim() ?? '';
-    if (!isQuestionLikeLine(questionLine)) {
-      // Upward scan: look for a question-like line above questionEndIndex
-      if (!findQuestionLineInRange(lines, questionEndIndex, QUESTION_SCAN_RANGE, scanStart)) {
-        return noPromptResult(output);
-      }
-    }
+function passesQuestionLineValidation(questionEndIndex: number, lines: string[], scanStart: number): boolean {
+  // SEC-001a: No question line found (questionEndIndex === -1) - reject.
+  // Prevents generic question fallback from triggering Auto-Yes
+  // on plain numbered lists that happen to be consecutive from 1.
+  if (questionEndIndex === -1) {
+    return false;
   }
 
-  // [Issue #2486] An AskUserQuestion picker's tab row is the dialog's top edge:
-  // the row is chrome and everything above it is transcript. Found once so
-  // `question` and `approvalTarget` start at the same row; 0 on a frame with no
-  // tab row, which leaves every other prompt exactly as it was. `instructionText`
-  // keeps its wide window — it is the human's view, and on a preview picker the
-  // pane it carries is what the question asks the human to look at.
-  const pickerTop = questionEndIndex < 0
-    ? 0
-    : findAskUserQuestionTabRow(lines, questionEndIndex, APPROVAL_TARGET_MAX_LOOKBACK) + 1;
-  const question = extractQuestionText(lines, questionEndIndex, pickerTop);
-  const instructionText = extractInstructionText(lines, questionEndIndex, effectiveEnd);
-  // Issue #1699: the same block, cut at the previous turn's boundary. Display
-  // keeps the wide window; deny patterns are judged against this one.
-  const approvalTarget = extractApprovalTarget(lines, questionEndIndex, effectiveEnd, pickerTop);
+  // SEC-001b: Question line exists but is not actually a question/selection request.
+  // Validates that the question line contains a question mark or a selection keyword
+  // with colon, distinguishing "Select an option:" from "Recommendations:".
+  //
+  // [Issue #256] Enhanced with upward scan via findQuestionLineInRange() (SF-003).
+  // When questionEndIndex line itself is not a question-like line, scan upward
+  // within QUESTION_SCAN_RANGE to find a question line above it. This handles:
+  // - Multi-line question wrapping where ? is on a line above questionEndIndex
+  // - Model selection prompts where "Select model" is above description lines
+  const questionLine = lines[questionEndIndex]?.trim() ?? '';
+  if (!isQuestionLikeLine(questionLine)) {
+    // Upward scan: look for a question-like line above questionEndIndex
+    if (!findQuestionLineInRange(lines, questionEndIndex, QUESTION_SCAN_RANGE, scanStart)) {
+      return false;
+    }
+  }
+  return true;
+}
 
-  // Issue #616: Determine submitMode from confirmation footer (detected in single-pass above)
-  const submitMode: SubmitMode | undefined = hasConfirmationFooter
-    ? (hasNumberFooter ? 'answer_only' : 'answer_then_enter')
-    : undefined;
+/** [Issue #3863] One collected option's row, and the continuation rows under it, top-down. */
+interface OptionRowReading {
+  /** The option row as drawn (indent, cursor and number included; cut at a preview pane). */
+  row: string;
+  /** Whether the row sits beside a preview pane, where the options column draws no descriptions (#2486). */
+  besidePane: boolean;
+  rowsBelow: string[];
+}
 
-  return buildMultipleChoiceResult(question, collectedOptions, { instructionText, approvalTarget }, output, truncateRawContentFn, submitMode, hasAskUserQuestionFooter);
+/**
+ * [Issue #3863] What an AskUserQuestion option's title says about being
+ * recommended (`option-recommendation`).
+ *
+ * The picker draws a title row and its description indented under it; a title
+ * too long for the pane wraps to the same indent, so the rows alone do not
+ * say which they are. Read:
+ *
+ * - no row under it: the label is the title;
+ * - beside a preview pane (#2486), where the column draws no descriptions:
+ *   the label — its wrapped rows already joined — is the title, as long as no
+ *   other row is under it;
+ * - the row under it could not be the title's wrap (its first word would have
+ *   fit on the option row, `cannotBeWrapOf`): the label is the title;
+ * - the row under it may be the wrap and holds nothing but a marker: the title
+ *   wrapped right before its marker — and ends there only if nothing after
+ *   the marker continues it: no further row, or a row that could not be the
+ *   marker row's wrap (its first word would have fit after the marker). A row
+ *   that may still be the title wrapping on (a word too long to fit after the
+ *   marker) leaves the title's end, and so the marker's place, unknown;
+ * - otherwise `unknown`.
+ */
+function readPickerOptionRecommendation(
+  label: string,
+  reading: OptionRowReading | undefined,
+  paneColumns: number,
+): OptionRecommendation {
+  if (reading === undefined) return 'unknown';
+  const [next] = reading.rowsBelow;
+  if (next === undefined) return isRecommendedTitle(label);
+  if (reading.besidePane) return 'unknown';
+  if (cannotBeWrapOf(reading.row, next, paneColumns)) return isRecommendedTitle(label);
+  if (!isRecommendationMarker(next)) return 'unknown';
+  const after = reading.rowsBelow[1];
+  if (after === undefined || cannotBeWrapOf(next, after, paneColumns)) return true;
+  return 'unknown';
 }

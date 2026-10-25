@@ -46,6 +46,8 @@ success:
 ```
 
 > **無人実行の推奨レシピ（Issue #1684）**: 上の `mode: safe` は `yes_no` 型しか自動応答しない。
+> ダイアログの判定が `enforce` の道具（claude・codex・copilot・opencode・opencode-v2）では、その `yes_no` も
+> 道具のダイアログ検出が確認と認めたもの（根拠のあるもの）だけで、汎用の `(y/n)` には答えない（Issue #3822）。
 > **Claude の編集確認（`Do you want to make this edit …?`）は `multiple_choice` 型**
 > （実質 Yes/No＋allow-all の 3 択）なので、safe のままでは編集のたびにワーカーが停止する
 > （出典 #1678 A-2）。無人で走らせる契約は allow-listed に広げ、危険操作は `denyPatterns` で
@@ -457,7 +459,9 @@ enforcement が「契約が無いから従来動作」と「契約が off と言
    > **直前ターンの境界で切った `approvalTarget`** を別フィールドとして持ち、判定はそちら、
    > 表示は従来どおり `instructionText` を使う。
 4. `mode: safe` → `yes_no` のみ従来ルール、他は抑止（#1495 の `/model` オーバーレイ誤検出は
-   この型に該当する）
+   この型に該当する）。ただし契約の判定より前に、ダイアログの判定が `enforce` の道具
+   （claude・codex・copilot・opencode・opencode-v2）では、道具のダイアログ検出が根拠を示さない `yes_no` は
+   `unclassified-frame` で止まる（Issue #3822）。`safe` で答えるのは根拠のある `yes_no` だけになる
 5. `mode: allow-listed` → `allowPromptTypes` に含まれる型のみ従来ルール
 
 `denyPatterns` は **`mode: null` でも効く**。パターンを書いた契約は既にポリシーを述べており、
@@ -492,6 +496,20 @@ enforcement が「契約が無いから従来動作」と「契約が off と言
 抑止されたプロンプトはポーラーの重複ガードに載らず毎 poll 再評価されるため、プロンプトが
 画面に残っている間は `at` が更新され続ける — `isPromptWaiting: true` かつ `at` が新しければ
 「いまポリシー抑止で停止している」と読める。露出のみで、この記録を読んで挙動を変えるものは無い。
+
+**Auto-Yes の答え方のモードとの関係**（Issue #3863）: Auto-Yes を ON にするとき選ぶ答え方のモード
+（`recommended` = おまかせ、既定 / `careful` = 慎重）は、契約の `autoYes` の**下**に置かれる。
+契約は上限で、答えるのは「認識された入力に対する全条件の AND」が通ったときだけである。
+
+- 2 つのモードの違いは「画面の単一選択の質問（claude の `AskUserQuestion`、command-code の質問）に
+  答えるか」だけ。`recommended` は推奨（タイトルの末尾の `(Recommended)` / `（推奨）` / `(推奨)`、
+  無ければ既定）で答え、`careful` は答えない（`question-left-to-human`）
+- モードは契約が抑止したものを戻さない。`mode: off`・`denyPatterns`・`safe` の型外（質問は
+  `multiple_choice`）・`allow-listed` の型外・契約不明は、どちらのモードでも答えない。
+  `denyPatterns` は候補を選ぶ前の情報（質問文・`approvalTarget`・全選択肢ラベル）に従来どおり照合する
+- 逆に、契約はモードの見送りを戻さない。`allow-listed` に `multiple_choice` を書いても、
+  `careful` の質問は答えない
+- 許可の確認は両モードとも答える（#3822 の「今回だけ許可」の選択肢だけ）
 
 適用範囲は**サーバ側 Auto-Yes ポーラーのみ**。クライアント側 `hooks/useAutoYes.ts` は
 サーバポーラーが動いていないときだけ応答するフォールバックで、DB を読めないためポリシーを

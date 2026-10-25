@@ -11,6 +11,8 @@
 
 - **書くもの（半ページ）:** 「何が・いつ・どの経路で起きるか」。入力の取り方、状態の寿命と消える条件、同じ値を読む他の経路、画面に出る条件。
   **事実と見立てを分け、参照したコード（file:line）と未確認の事項を必ず書く**
+- **入力に添えるもの（#3884）:** run に状態ファイルがあれば、`plan-check.mjs routes --item <item>` の出力（割込みの順序、書く共有状態ごとの不変条件・書き手・公開値・読む経路、契約の経路表と割込み表）を文書の後に貼る。
+  依頼には「一覧に無い読者・順序の穴も挙げてほしい」と足す。書き方は docs/orchestrate/plan-check.md#2-4-4-事前レビューと-5-2b-に渡す一覧
 - **Codex への依頼の形:** `--agent codex` に 1 本ずつ（セッションは直列）。半ページの文書を渡し、「設計の穴（寿命・経路・競合・他の読み手）を、
   守るべき条件・全経路・対照のテストの形で挙げてほしい」と頼む。コードの書き方の指摘は求めない
 - **指摘の契約への入れ方:** 指摘を契約の goal に「守るべき条件」「全経路の一覧」「対照のテスト（陽性・陰性）」として書き、
@@ -34,7 +36,7 @@
 
 - **Codex のセッション:** 1 つを直列で使う。依頼は 1 本ずつ（ロック）。待ち時間を記録する
 - **依頼の手順:** run ごとに `review-<N>.sh` を手で写さず、`scripts/orchestrate/consistency-review.mjs` を 1 回呼ぶ（#3528）。
-  `--brief` には、その Issue の変更の種類と特に見たいこと（数行）だけを書く。依頼文の残り（目的・対象・手順・出力の形・触ってはいけないもの・`DONE:` の締め方）は
+  `--brief` には、その Issue の変更の種類と特に見たいこと（数行）だけを書く。状態ファイルがある run は `--routes <plan-check.mjs routes の出力>` を足すと、依頼文に「割込み順序と読者の一覧」が入る（無いときは「渡されていない」と入る。#3884）。依頼文の残り（目的・対象・手順・出力の形・触ってはいけないもの・`DONE:` の締め方）は
   雛形 `scripts/orchestrate/templates/consistency-review.md` から作られ、再レビュー（`--rereview --previous <前回の review-<N>.md>`）は
   `consistency-review-rereview.md` が前回の指摘ごとの判定を先に書かせる
 
@@ -44,7 +46,7 @@ node scripts/orchestrate/consistency-review.mjs --run-dir "workspace/orchestrati
 # 再レビュー: … --rereview --previous "workspace/orchestration/runs/$DATE/review-<N>.md"
 ```
 
-  スクリプトが行うこと: worktree（既定 `../commandmate-issue-<N>`、`--worktree` で指定）の HEAD が `--head` と同じかを確かめる → Codex のロック
+  スクリプトが行うこと: worktree（既定 `../commandmate-issue-<N>`、`--item` を付けると `../commandmate-issue-<N>-<item>`、`--worktree` で指定）の HEAD が `--head` と同じかを確かめる → Codex のロック
   （`workspace/proposals/<date>/.lock` を mkdir で取る。ほかの Codex への依頼と共有。中の `owner.json` に持ち主の pid・host・開始時刻を書く。
   持ち主が既に居ない（kill されたレビューが残した）ロックは外して取り（外すのは `<lock>.reclaim` を mkdir で取った待機者 1 人だけで、持ち主を読み直して同じ死んだ持ち主のときだけ動かす。別の待機者が取った新しいロックは動かさない。`.reclaim` を残して kill された場合は消すよう告げて止まる）、生きている持ち主のロックは 1 分ごとに stderr へ `lock … held by pid …` を出して待つ。
   待ちの上限は ask の上限＋600 秒（3000 秒）で、超えたら `review=fail`。`owner.json` の無いロックは持ち主を判断できないので待つ（#3633））→ `capture --instance codex --json` の `sessionStatus` が
@@ -55,6 +57,11 @@ node scripts/orchestrate/consistency-review.mjs --run-dir "workspace/orchestrati
   ID への解決は capture・ask と同じ `--cli`（`reply <wt> --instance <指定> --json` の `instanceId`）を通すので、`.env`・`CM_BIND`・HTTPS で決まる接続先も同じになる。
   受け付ける `--instance` は CLI・サーバーと同じ条件（instance id か、制御文字を含まない 50 文字以内の alias。`/` を含む alias も可）で、ロック名には解決後の ID を使う（#3633）。
   表の「独自の発見」から「事前レビューの有無」までの列は `未` で入るので、返答を読んで埋める
+  **依存への書き込みを裁定に使わない**（#3883 P6）: ask の前後で、対象の worktree と `git worktree list` の全 worktree の `node_modules` 直下（`@scope/` の下も）の
+  リンクを読む（`scripts/orchestrate/dependency-links.mjs`）。実体のパスが自分の worktree（と自分の `node_modules` の実体）の外を指すリンクが増えた・向き先が変わったら、
+  返答は `review-<N>.json` に残すが表には足さず、`review=fail`（`not a verdict — … dependency link(s) outside their worktree appeared during the review`）・exit 1。
+  stderr に増えたリンクを 1 行ずつ出すので、人が確かめてから外す（スクリプトは消さない）。前から在ったリンクは数えない。雛形も、依存に書かない・
+  実験は `mktemp -d` の隔離コピーの中だけで行い他の worktree の `node_modules` にリンクを作らない、と依頼する
 - **数え方（期限の集計で使う）:** 延べではなく、重複・既報（ワーカーが報告済み・5-3 で処置できた）を除いた「レビューの独自の発見」を、**動作／説明／テスト** と **新規／既存** の 2 軸で数える。指摘の正しさは、一部を別の判定者（Codex と Claude の相互）で再判定する。費用は 1 本あたり、待ち時間・再指示・修正を含めた総時間で測る。後の段（CI・ガード・実機・UAT）で見つかった漏れも記録する
 
 **記録の様式。** 置き場所は `workspace/orchestration/runs/<date>/consistency-review.md`。1 レビュー 1 行の表にする。
@@ -67,3 +74,4 @@ node scripts/orchestrate/consistency-review.mjs --run-dir "workspace/orchestrati
 **守るべき条件・全経路・対照のテストに言い換えて**契約に書く。守るべき条件は 1 文で、全経路は直す場所の一覧で、対照のテストは陽性と陰性の組で示す。
 
 **再レビューでは、前回の指摘が解消したかを先に確かめる。** 新しい指摘を探す前に、前回の指摘を 1 件ずつ「解消／一部未対応／未対応」に判定して記録する。
+続けて、**前回の指摘への修正で変わった共通の規則（共有状態・関数・定数・型）の全読者**を、一覧と呼び出しの連鎖の両方で再確認させる（雛形 `consistency-review-rereview.md` の (0b)。#3884）。再レビューの上限（自動は 3 回まで）は変えない。

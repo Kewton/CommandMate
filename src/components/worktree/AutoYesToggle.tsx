@@ -1,27 +1,31 @@
 /**
  * AutoYesToggle - Toggle component for auto-yes mode
  *
- * Displays a toggle switch with countdown timer when enabled
- * and a notification when auto-response occurs.
+ * Displays a toggle switch with countdown timer when enabled.
+ *
+ * Issue #3821: the "Auto responded" notification is gone with the browser's
+ * own Auto-Yes answer it announced; the server's poller answers, and the
+ * answer panel says when it does not.
  *
  * Issue #225: Added duration propagation and HH:MM:SS countdown format
  * Issue #314: Added AutoYesToggleParams interface with stopPattern support
+ * Issue #3863: the answer mode — chosen in the confirm dialog, shown beside the ON switch
  */
 
 'use client';
 
-import React, { memo, useEffect, useRef, useState, useCallback } from 'react';
+import React, { memo, useEffect, useState, useCallback } from 'react';
 import { useTranslations } from 'next-intl';
 import { Switch } from '@/components/ui/Switch';
 import { AutoYesConfirmDialog } from './AutoYesConfirmDialog';
 import { formatTimeRemaining, AUTO_YES_COUNTDOWN_INTERVAL_MS } from '@/config/auto-yes-config';
 import type { AutoYesDuration } from '@/config/auto-yes-config';
-import { NOTIFICATION_DISMISS_MS } from '@/config/ui-feedback-config';
 import { getCliToolDisplayNameSafe } from '@/lib/cli-tools/types';
 // Issue #756: AutoYesToggleParams moved to a non-TSX module (`@/types/auto-yes`)
 // so server-side type consumers compiled under tsconfig.server.json can import
 // it without TS6142. Re-exported here for backward compatibility.
 import type { AutoYesToggleParams } from '@/types/auto-yes';
+import type { AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
 export type { AutoYesToggleParams };
 
 /** Props for AutoYesToggle component */
@@ -32,8 +36,12 @@ export interface AutoYesToggleProps {
   expiresAt: number | null;
   /** Callback when toggle is clicked (Issue #314: object parameter pattern) */
   onToggle: (params: AutoYesToggleParams) => Promise<void>;
-  /** Last auto-response answer (for notification) */
-  lastAutoResponse: string | null;
+  /**
+   * Last auto-response answer. Issue #3821: no longer shown — the browser no
+   * longer answers, so there is no answer of its own to announce, and this UI
+   * does not make one up. Kept so the callers that pass it compile unchanged.
+   */
+  lastAutoResponse?: string | null;
   /** Currently active CLI tool name (e.g. 'claude', 'codex') */
   cliToolName?: string;
   /** If true, render without outer container styles (for inline embedding) */
@@ -67,23 +75,29 @@ export interface AutoYesToggleProps {
    * switch says so; nothing is re-enabled. Optional, false by default.
    */
   releasedByRestart?: boolean;
+  /**
+   * Issue #3863: the answer mode of the enabled grant (`recommended` /
+   * `careful`), shown as a label beside the ON switch. Undefined renders
+   * nothing — a server older than the field is "unknown", never assumed
+   * `recommended`.
+   */
+  answerMode?: AutoYesAnswerMode;
 }
 
 export const AutoYesToggle = memo(function AutoYesToggle({
   enabled,
   expiresAt,
   onToggle,
-  lastAutoResponse,
   cliToolName,
   inline = false,
   showToolName = true,
   onExpire,
   blockedByContract = false,
   releasedByRestart = false,
+  answerMode,
 }: AutoYesToggleProps) {
   const t = useTranslations('autoYes');
   const [timeRemaining, setTimeRemaining] = useState<string>('');
-  const [notification, setNotification] = useState<string | null>(null);
   const [toggling, setToggling] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   // Issue #959: latch that flips the UI to OFF the instant the countdown hits
@@ -129,28 +143,6 @@ export const AutoYesToggle = memo(function AutoYesToggle({
     return () => clearInterval(interval);
   }, [enabled, expiresAt, onExpire]);
 
-  // Auto-response notification (2 second display)
-  //
-  // Issue #3331: the dismiss timer is not tied to `lastAutoResponse` staying
-  // set. It used to be the effect's cleanup, so the value returning to null
-  // (useAutoYes clears it while the next answer is in flight) cancelled the
-  // timer and left the notice on screen for good. Each non-null value shows
-  // the notice once and restarts the timer; only unmounting cancels it.
-  const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (!lastAutoResponse) return;
-
-    setNotification(`Auto responded: "${lastAutoResponse}"`);
-    if (dismissTimerRef.current) clearTimeout(dismissTimerRef.current);
-    dismissTimerRef.current = setTimeout(() => {
-      dismissTimerRef.current = null;
-      setNotification(null);
-    }, NOTIFICATION_DISMISS_MS);
-  }, [lastAutoResponse]);
-  useEffect(() => () => {
-    if (dismissTimerRef.current) clearTimeout(dismissTimerRef.current);
-  }, []);
-
   // Issue #959: the UI presents as OFF the moment the countdown expires, even
   // before the parent's polled `enabled` prop catches up. Derive a single source
   // of truth so the visual state, click behaviour and countdown all agree.
@@ -167,10 +159,13 @@ export const AutoYesToggle = memo(function AutoYesToggle({
     }
   }, [displayEnabled, onToggle]);
 
-  const handleConfirm = useCallback((duration: AutoYesDuration, stopPattern?: string) => {
+  const handleConfirm = useCallback((duration: AutoYesDuration, stopPattern?: string, chosenMode?: AutoYesAnswerMode) => {
     setShowConfirmDialog(false);
     setToggling(true);
-    onToggle({ enabled: true, duration, stopPattern }).finally(() => setToggling(false));
+    // Issue #3863: the dialog names a mode only when it is not the default, and
+    // so does this call (an omitted `answerMode` is the default).
+    onToggle({ enabled: true, duration, stopPattern, ...(chosenMode ? { answerMode: chosenMode } : {}) })
+      .finally(() => setToggling(false));
   }, [onToggle]);
 
   const handleCancel = useCallback(() => {
@@ -202,6 +197,18 @@ export const AutoYesToggle = memo(function AutoYesToggle({
         </span>
       )}
 
+      {/* Issue #3863: how a question is answered while ON; unknown shows nothing */}
+      {displayEnabled && answerMode && (
+        <span
+          className="text-xs font-medium text-muted-foreground"
+          title={t(`answerModeBadgeTitle.${answerMode}`)}
+          data-testid="auto-yes-answer-mode"
+          data-answer-mode={answerMode}
+        >
+          {t(`answerModeBadge.${answerMode}`)}
+        </span>
+      )}
+
       {/* Issue #3723: armed, but the contract keeps Auto-Yes from answering */}
       {displayEnabled && blockedByContract && (
         <span
@@ -221,13 +228,6 @@ export const AutoYesToggle = memo(function AutoYesToggle({
           data-testid="auto-yes-released-by-restart"
         >
           {t('releasedByRestart')}
-        </span>
-      )}
-
-      {/* Auto-response notification */}
-      {notification && (
-        <span className="text-sm text-success animate-pulse">
-          {notification}
         </span>
       )}
 

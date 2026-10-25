@@ -19,16 +19,29 @@
  * the work HEAD and the rest on the published HEAD; `status` and the publishing
  * scripts (pr-common.mjs) both use it.
  *
+ * One Issue can carry several PRs. A record names its work item with `item`
+ * (`--item d1`, execution-key.mjs) and the attempt it came from with `key`;
+ * `status` resumes each work item on its own (`#3883/d1`). A record without
+ * `item` — every record written before #3883 — belongs to the Issue itself.
+ *
+ * A `verify` / `precheck` record may split its `durationSec` into the waits
+ * and the execution (Issue #3884): `queueSec` (waiting for a verification
+ * slot), `mutexSec` (waiting for a machine-wide lock such as `cpu.heavy`) and
+ * `runSec` (the checks themselves). Each is written only when given, so a
+ * record without them — every record before #3884 — reads as it always did.
+ *
  * Usage:
  *   node scripts/orchestrate/run-log.mjs append --run-dir <dir> --issues <range> --issue <N>
  *        --stage <stage> --result <ok|fail|skip> [--head <sha>] [--work-head <sha>] [--task <id>] [--contract <path>]
  *        [--agent <claude|antigravity>] [--model <opus|sonnet|->] [--duration-sec <n>] [--note <text>]
+ *        [--item <work item>] [--key <execution key>] [--queue-sec <n>] [--mutex-sec <n>] [--run-sec <n>]
  *   node scripts/orchestrate/run-log.mjs status --run-dir <dir> --issues <range> [--json]
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { itemProblem } from './execution-key.mjs';
 
 /**
  * In run order: the consistency review (5-2b) and the out-of-body findings
@@ -68,6 +81,9 @@ function optionalString(value) {
   return value === undefined || value === null || value === '' ? null : String(value);
 }
 
+/** The fields a record splits its duration into (#3884), with the flag each is given by. */
+export const TIMING_FIELDS = { queueSec: '--queue-sec', mutexSec: '--mutex-sec', runSec: '--run-sec' };
+
 // publish-pr.mjs looks a record up by `git rev-parse HEAD` (40 digits), so a short sha
 // recorded by hand would read as "no record" there. The `append` command line rejects
 // it (#3664); makeRecord itself still takes 7-40 digits for other scripts' callers, and
@@ -94,6 +110,19 @@ export function makeRecord(input, now = new Date()) {
     durationSec = Number(input.durationSec);
     if (!Number.isFinite(durationSec) || durationSec < 0) problems.push(`duration-sec: must be a number >= 0 (got ${input.durationSec})`);
   }
+  /** @type {Record<string, number>} */
+  const timing = {};
+  for (const [field, flag] of Object.entries(TIMING_FIELDS)) {
+    const value = input[field];
+    if (value === undefined || value === null || value === '') continue;
+    const seconds = Number(value);
+    if (!Number.isFinite(seconds) || seconds < 0) problems.push(`${flag.slice(2)}: must be a number >= 0 (got ${value})`);
+    else timing[field] = seconds;
+  }
+  const item = optionalString(input.item);
+  const badItem = itemProblem(item);
+  if (badItem) problems.push(badItem.replace('--item', 'item'));
+  const key = optionalString(input.key);
   if (problems.length > 0) throw new Error(problems.join('\n'));
   return {
     issue,
@@ -102,11 +131,16 @@ export function makeRecord(input, now = new Date()) {
     head,
     // Only when the published HEAD is not the work itself (a refresh / fold on top).
     ...(workHead !== null && workHead !== head ? { workHead } : {}),
+    // Only for a work item of its own (#3883); a record without one is the Issue's.
+    ...(item !== null ? { item } : {}),
+    ...(key !== null ? { key } : {}),
     taskId: optionalString(input.taskId),
     contract: optionalString(input.contract),
     agent: optionalString(input.agent),
     model: optionalString(input.model),
     durationSec,
+    // Only when given (#3884); a record without them is read as before.
+    ...timing,
     note: optionalString(input.note),
     at: now.toISOString(),
   };
@@ -156,20 +190,37 @@ export function readRecords(runDir, issues) {
   return { file, records, skipped };
 }
 
-/** The latest record matching every given field (`issue`, `stage`, `head`, `result`), or null. */
+/** The work item a record belongs to: its `item`, or null for the Issue itself (every record before #3883). */
+export const itemOf = (record) => record.item ?? null;
+
+/**
+ * Whether `record` belongs to the work item `item`. `undefined` is "any work
+ * item of the Issue" — what every caller got before #3883 — and `null` the
+ * Issue's own records (no `item`).
+ */
+export function inItem(record, item) {
+  return item === undefined || itemOf(record) === item;
+}
+
+/**
+ * The latest record matching every given field (`issue`, `stage`, `head`,
+ * `result`, and `item` as inItem reads it), or null.
+ */
 export function findLatest(records, criteria) {
+  const { item, ...fields } = criteria;
   for (let i = records.length - 1; i >= 0; i--) {
     const record = records[i];
-    if (Object.entries(criteria).every(([key, value]) => value === undefined || record[key] === value)) return record;
+    if (!inItem(record, item)) continue;
+    if (Object.entries(fields).every(([key, value]) => value === undefined || record[key] === value)) return record;
   }
   return null;
 }
 
-/** The latest record of each stage for one Issue (any HEAD). */
-export function latestByStage(records, issue) {
+/** The latest record of each stage for one Issue (any HEAD), or for one of its work items (`item`, inItem). */
+export function latestByStage(records, issue, item) {
   /** @type {Record<string, any>} */
   const stages = {};
-  for (const record of records) if (record.issue === issue) stages[record.stage] = record;
+  for (const record of records) if (record.issue === issue && inItem(record, item)) stages[record.stage] = record;
   return stages;
 }
 
@@ -192,11 +243,11 @@ export function unmetStage(stage, record, { head, workHead }) {
  * The HEADs an Issue is at, read from its records: the latest recorded HEAD,
  * and the work HEAD that HEAD was built on (its `workHead`, else itself).
  */
-export function headsOf(records, issue) {
+export function headsOf(records, issue, item) {
   let head = null;
   let workHead = null;
   for (const record of records) {
-    if (record.issue !== issue || !record.head) continue;
+    if (record.issue !== issue || !inItem(record, item) || !record.head) continue;
     if (record.head !== head) workHead = null;
     head = record.head;
     if (record.workHead) workHead = record.workHead;
@@ -209,26 +260,35 @@ export function headsOf(records, issue) {
  * Issue's HEADs (headsOf). `next` is the first stage that is not satisfied —
  * so a stage that failed after later ones passed is where the run goes back
  * to, and a moved HEAD re-opens every check. A merged Issue is done.
+ *
+ * Each work item of an Issue (`item`, #3883) is resumed on its own: PR 1a's
+ * merge does not finish PR 2, and PR 2's HEAD does not re-open PR 1a's checks.
+ * The Issue's own records (no `item`) come first, then its items by name.
  */
 export function summarize(records) {
   const issues = [...new Set(records.map((record) => record.issue))].sort((a, b) => a - b);
-  return issues.map((issue) => {
-    const stages = latestByStage(records, issue);
-    const { head, workHead } = headsOf(records, issue);
+  const units = issues.flatMap((issue) => {
+    const items = [...new Set(records.filter((r) => r.issue === issue).map(itemOf))];
+    return items.sort((a, b) => (a === null ? -1 : b === null ? 1 : a.localeCompare(b))).map((item) => ({ issue, item }));
+  });
+  return units.map(({ issue, item }) => {
+    const stages = latestByStage(records, issue, item);
+    const { head, workHead } = headsOf(records, issue, item);
     const unmet = (stage) => {
       if (stage === 'contract' && !stages.contract && stages.send && PASSED.has(stages.send.result)) return null;
       return unmetStage(stage, stages[stage], { head, workHead });
     };
+    const of = { issue, ...(item !== null ? { item } : {}) };
     if (stages.merge && PASSED.has(stages.merge.result)) {
-      return { issue, reached: 'merge', next: null, reason: null, head, workHead, stages };
+      return { ...of, reached: 'merge', next: null, reason: null, head, workHead, stages };
     }
     let reached = null;
     for (const stage of STAGES) {
       const reason = unmet(stage);
-      if (reason) return { issue, reached, next: stage, reason, head, workHead, stages };
+      if (reason) return { ...of, reached, next: stage, reason, head, workHead, stages };
       reached = stage;
     }
-    return { issue, reached, next: null, reason: null, head, workHead, stages };
+    return { ...of, reached, next: null, reason: null, head, workHead, stages };
   });
 }
 
@@ -239,7 +299,7 @@ function formatStatus(summary, skipped) {
       .map((stage) => `${stage}=${item.stages[stage].result}`)
       .join(' ');
     lines.push(
-      `#${item.issue}\treached=${item.reached ?? '-'}\tnext=${item.next ?? 'done'}\thead=${item.head ?? '-'}${item.workHead && item.workHead !== item.head ? `\twork=${item.workHead}` : ''}\t${stageText}` +
+      `#${item.issue}${item.item ? `/${item.item}` : ''}\treached=${item.reached ?? '-'}\tnext=${item.next ?? 'done'}\thead=${item.head ?? '-'}${item.workHead && item.workHead !== item.head ? `\twork=${item.workHead}` : ''}\t${stageText}` +
         (item.reason ? `\t(${item.reason})` : '')
     );
   }
@@ -248,7 +308,7 @@ function formatStatus(summary, skipped) {
 }
 
 const USAGE = `Usage:
-  node scripts/orchestrate/run-log.mjs append --run-dir <dir> --issues <range> --issue <N> --stage <${STAGES.join('|')}> --result <${RESULTS.join('|')}> [--head <sha>] [--work-head <sha>] [--task <id>] [--contract <path>] [--agent <name>] [--model <name>] [--duration-sec <n>] [--note <text>]
+  node scripts/orchestrate/run-log.mjs append --run-dir <dir> --issues <range> --issue <N> --stage <${STAGES.join('|')}> --result <${RESULTS.join('|')}> [--head <sha>] [--work-head <sha>] [--task <id>] [--contract <path>] [--agent <name>] [--model <name>] [--duration-sec <n>] [--note <text>] [--item <work item>] [--key <execution key>] [--queue-sec <n>] [--mutex-sec <n>] [--run-sec <n>]
   node scripts/orchestrate/run-log.mjs status --run-dir <dir> --issues <range> [--json]`;
 
 const FLAGS = {
@@ -265,6 +325,9 @@ const FLAGS = {
   '--model': 'model',
   '--duration-sec': 'durationSec',
   '--note': 'note',
+  '--item': 'item',
+  '--key': 'key',
+  ...Object.fromEntries(Object.entries(TIMING_FIELDS).map(([field, flag]) => [flag, field])),
 };
 
 export function main(argv, now = new Date()) {
@@ -295,7 +358,7 @@ export function main(argv, now = new Date()) {
         return 2;
       }
       const { file, record } = appendRecord(options.runDir, options.issues, options, now);
-      console.log(`recorded #${record.issue} ${record.stage}=${record.result} -> ${file}`);
+      console.log(`recorded #${record.issue}${record.item ? `/${record.item}` : ''} ${record.stage}=${record.result} -> ${file}`);
       return 0;
     }
     const { file, records, skipped } = readRecords(options.runDir, options.issues);

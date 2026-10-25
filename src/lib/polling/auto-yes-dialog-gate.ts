@@ -36,12 +36,17 @@
  *
  * A `yes_no` prompt is a different inference — `detectPrompt` requires an
  * explicit `(y/n)`-shaped token in the text rather than deriving it from layout
- * — and NO tool in the registry has a measured yes/no dialog rule to gate it
- * against. Gating an inference for which no positive rule exists is the failure
- * mode the rollout guidance is written to prevent: every such prompt would
- * become a suppression, and the operator would see a worker that had silently
- * gone quiet. When a tool's yes/no dialog is measured and fixtured, widen this
- * the same way a tool is added to the table.
+ * — and NO tool in the registry has a measured yes/no dialog rule. Until Issue
+ * #3822 that was the reason to leave it ungated. It is now the reason to refuse
+ * it on an `enforce` tool, in {@link evaluateAutoYesDialogGate} only: none of
+ * those tools draws a `(y/n)` dialog, so a `(y/n)` on their pane is text — a
+ * reply quoting one, a shell command's prompt — and typing `y` at it answers
+ * nothing the tool asked (the user's decision of 2026-10-20: a generic yes/no
+ * without the tool's own evidence is left to a human). The tool can still vouch
+ * for the frame through `detectDialog`, exactly as for a numbered list. The
+ * `legacy` tools are unchanged (#3823), and so is
+ * {@link evaluateDialogPresence}: a `(y/n)` row a human may answer still
+ * belongs in History.
  *
  * ## What "allowed" does NOT mean
  *
@@ -62,10 +67,12 @@ import { detectPrompt, type PromptDetectionResult } from '@/lib/detection/prompt
 import { stripAnsi, stripBoxDrawing, buildDetectPromptOptions } from '@/lib/detection/cli-patterns';
 import {
   detectAntigravityNumberedDialogPrompt,
-  isAntigravityUnvouchedNumberedScreen,
+  isAntigravityUnansweredNumberedScreen,
 } from '@/lib/detection/tools/antigravity/dialog';
 import { readCommandCodeQuestionDialog } from '@/lib/detection/tools/command-code/dialog';
-import type { PromptType } from '@/types/models';
+import type { PromptData, PromptType } from '@/types/models';
+import { selectAllowOnceOption } from './auto-yes-option-effect';
+import type { AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
 
 /**
  * What to do with a tool's measured dialog rules.
@@ -229,7 +236,10 @@ export interface AutoYesDialogGateVerdict {
   gated: boolean;
 }
 
-/** The only prompt family this gate judges. See the module docstring. */
+/**
+ * The only prompt family the presence gate judges. Auto-Yes's gate also judges
+ * `yes_no` (Issue #3822); see the module docstring.
+ */
 const GATED_PROMPT_TYPE: PromptType = 'multiple_choice';
 
 /**
@@ -258,12 +268,10 @@ export function evaluateAutoYesDialogGate(
   // `judgeDialogPresence` holds that rule; Issue #2457 split it out so the
   // history-save and `/prompt-response` paths judge a frame the same way this
   // one does instead of re-deriving the rollout table.
-  const presence = judgeDialogPresence(
-    cliToolId,
-    promptType,
-    cleanOutput,
-    resolveAutoYesDialogGateMode(cliToolId, env),
-  );
+  const mode = resolveAutoYesDialogGateMode(cliToolId, env);
+  const presence = promptType === 'yes_no'
+    ? judgeYesNoPresence(cliToolId, cleanOutput, mode)
+    : judgeDialogPresence(cliToolId, promptType, cleanOutput, mode);
 
   return {
     // `keys` is a dialog and still not answerable: opencode's button strip takes
@@ -331,6 +339,152 @@ function judgeDialogPresence(
   const dialog = detector.detectDialog(typeof frame === 'string' ? normalizeFrame(frame, cliToolId) : frame);
 
   return { present: dialog !== null, dialog, mode, gated: true };
+}
+
+/**
+ * Issue #3822: the Auto-Yes gate's reading of a `yes_no` candidate. Judged on
+ * the same terms as a numbered one — the rollout table and the `hasDialogRules`
+ * cross-check — so a `legacy` tool, or one with no rules, stays ungated. An
+ * `enforce` tool answers only where its own `detectDialog` vouched for the
+ * frame; none of their rules reads a `(y/n)` row, so in practice it is refused.
+ */
+function judgeYesNoPresence(
+  cliToolId: CLIToolType,
+  frame: string | NormalizedFrame,
+  mode: AutoYesDialogGateMode,
+): DialogPresenceVerdict {
+  const detector = getToolStatusDetector(cliToolId);
+  if (!detector.hasDialogRules || mode === 'legacy') {
+    return { present: true, dialog: null, mode, gated: false };
+  }
+  const dialog = detector.detectDialog(typeof frame === 'string' ? normalizeFrame(frame, cliToolId) : frame);
+  return { present: dialog !== null, dialog, mode, gated: true };
+}
+
+/**
+ * The dialog kinds that are a question to the operator, not a permission
+ * (Issue #3822): OpenCode V2's question form, read off its own key hints.
+ *
+ * Not Claude's `ask_user`: Claude classifies by the context rows above the
+ * options, which on a permission dialog are the command being approved — a
+ * `grep "Ready to submit your answers?"` approval reads `ask_user` (#3748's
+ * controls), and it is a permission.
+ */
+export const AUTO_YES_QUESTION_DIALOG_KINDS: ReadonlySet<string> = new Set(['question']);
+
+/**
+ * What kind of question to the operator a prompt is, if it is one (Issue
+ * #3863):
+ *
+ * - `'question-form'` — a question form the tool's own dialog rules read
+ *   ({@link AUTO_YES_QUESTION_DIALOG_KINDS}: OpenCode V2's). Left to a human
+ *   under every answer mode, as before; only on a gated frame, where those
+ *   rules ran;
+ * - `'picker'` — a picker a question reader read: Claude's AskUserQuestion
+ *   (the parser's own footer, `Enter to select · … navigate`) or Command
+ *   Code's question screen (its reader). Both set `isAskUserQuestion`, off the
+ *   picker's chrome rather than its text. Answered under the `recommended`
+ *   answer mode, left to a human under `careful`;
+ * - null — not a question (a permission, a yes/no, a list).
+ *
+ * The picker is judged WITHOUT the dialog gate (#3863): the gate's mode
+ * (`enforce` / `legacy`, and the `CM_AUTOYES_DIALOG_GATE` kill switch) says
+ * whether a frame's numbered list may be answered at all, not whether it is a
+ * question, so `legacy` does not turn a question into something Auto-Yes
+ * answers under `careful`. Claude's dialog kind `ask_user` is not evidence:
+ * Claude classifies by the context rows above the options, which on a
+ * permission dialog are the command being approved (#3748).
+ *
+ * - `'unidentified'` (Issue #3881, the second half: finding 3) — given the
+ *   tool, a numbered list on copilot or codex
+ *   ({@link QUESTION_EVIDENCE_UNREAD_TOOLS}) that is neither of the above and
+ *   whose rows do not read as a permission dialog
+ *   (`auto-yes-option-effect`, the wording measured on their live captures).
+ *   Copilot's question (`ask_user`) and codex's `request_user_input` draw the
+ *   same picker as their menus: copilot calls anything without `do you want
+ *   to` a `picker`, codex anything with a `?` above it a `permission`, and
+ *   neither sets `isAskUserQuestion`. So such a list is not known to be a
+ *   question, nor known not to be one. Left to a human under `careful`;
+ *   under `recommended` it is answered exactly as before (not as a question).
+ *
+ * @param promptData - The prompt the tick read
+ * @param gate - {@link evaluateAutoYesDialogGate}'s verdict for the same frame, if it ran
+ * @param cliToolId - The tool that drew it; omitted, no list is `'unidentified'`
+ *   (the reading before #3881's second half)
+ */
+export function classifyAutoYesQuestion(
+  promptData: PromptData,
+  gate: AutoYesDialogGateVerdict | undefined,
+  cliToolId?: CLIToolType,
+): AutoYesQuestionKind | null {
+  if (gate?.gated === true && gate.dialog !== null && AUTO_YES_QUESTION_DIALOG_KINDS.has(gate.dialog.kind)) {
+    return 'question-form';
+  }
+  if (promptData.type !== 'multiple_choice') return null;
+  if (promptData.isAskUserQuestion === true) return 'picker';
+  if (
+    cliToolId !== undefined && QUESTION_EVIDENCE_UNREAD_TOOLS.has(cliToolId)
+    && selectAllowOnceOption(promptData.options, cliToolId).kind === 'not-a-permission-dialog'
+  ) {
+    return 'unidentified';
+  }
+  return null;
+}
+
+/** What {@link classifyAutoYesQuestion} reads a question as. */
+export type AutoYesQuestionKind = 'question-form' | 'picker' | 'unidentified';
+
+/**
+ * What the answer mode does with a prompt {@link classifyAutoYesQuestion} read
+ * (Issue #3863, #3881). The one table the poller (step 3.7, the last look
+ * before the key, the resolver's question input) and the observation's
+ * contract re-evaluation (`prompt-observation/observe.ts`) both read, so the
+ * two cannot disagree about one screen (review N3):
+ *
+ * - `left-to-human` — not answered (`question-left-to-human`): a question
+ *   form under every mode; a picker or an unidentified list under `careful`;
+ * - `recommended-choice` — answered with its recommended option: a picker
+ *   under `recommended`;
+ * - `base-rules` — answered as any other prompt (its allow-once row or its
+ *   default): no question, or an unidentified list under `recommended`.
+ */
+export type AutoYesQuestionTreatment = 'left-to-human' | 'recommended-choice' | 'base-rules';
+
+/** See {@link AutoYesQuestionTreatment}. */
+export function autoYesQuestionTreatment(
+  kind: AutoYesQuestionKind | null,
+  answerMode: AutoYesAnswerMode,
+): AutoYesQuestionTreatment {
+  if (kind === null) return 'base-rules';
+  if (kind === 'question-form') return 'left-to-human';
+  if (answerMode === 'careful') return 'left-to-human';
+  return kind === 'picker' ? 'recommended-choice' : 'base-rules';
+}
+
+/**
+ * The tools whose question screens nothing on the screen tells from their
+ * other pickers (Issue #3881, finding 3): copilot's `ask_user`, codex's
+ * `request_user_input`. Neither module reads a question's chrome; their dialog
+ * kinds are guesses from the words above the options
+ * (`tools/copilot/prompt.ts`, `tools/codex/prompt.ts`).
+ */
+export const QUESTION_EVIDENCE_UNREAD_TOOLS: ReadonlySet<CLIToolType> = new Set<CLIToolType>(['copilot', 'codex']);
+
+/**
+ * Is the prompt a question to the operator rather than a permission, on a
+ * GATED frame? (Issue #3822.)
+ *
+ * The reading #3822 first shipped: a question only where the tool's own rules
+ * ran. Since Issue #3863 the poller reads {@link classifyAutoYesQuestion},
+ * which judges the picker without the gate (so the kill switch and the
+ * `legacy` tools do not change how a question is treated); this stays the
+ * gated half of that reading.
+ *
+ * @param promptData - The prompt the tick read
+ * @param gate - {@link evaluateAutoYesDialogGate}'s verdict for the same frame
+ */
+export function isAutoYesQuestionPrompt(promptData: PromptData, gate: AutoYesDialogGateVerdict): boolean {
+  return gate.gated && classifyAutoYesQuestion(promptData, gate) !== null;
 }
 
 /**
@@ -529,8 +683,9 @@ export function assessPromptAnswerability(
   // Issue #3808: a numbered agy screen agy's reader declines (the login-method
   // screen, a permission dialog whose `tab Amend` footer is cut or off the
   // pane) is no prompt — not the generic parser's reading of its `1. / 2.` rows.
+  // #3818: by default, so a run with a number missing is declined too.
   const declinedAgyScreen = cliToolId === 'antigravity' && toolDialog === null
-    && isAntigravityUnvouchedNumberedScreen(cleanOutput);
+    && isAntigravityUnansweredNumberedScreen(cleanOutput);
 
   const isCommandCodeQuestion = commandCodeQuestion.kind === 'prompt';
   const candidate: PromptDetectionResult = (commandCodeQuestion.kind === 'prompt' ? commandCodeQuestion.prompt : null)

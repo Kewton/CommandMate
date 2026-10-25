@@ -48,18 +48,24 @@ describe('[#3397] resolveAutoAnswer and checkbox labels', () => {
   });
 });
 
+// Issue #3821: the gate takes the server's decision too. These cases pass
+// `answering` — the one decision under which the panel may stay hidden — so
+// each still says what it said: a list Auto-Yes refuses and an unreadable
+// screen are shown even then, a readable single choice is not.
+const ANSWERING = { state: 'answering' } as const;
+
 describe('[#3397] the panels show what Auto-Yes refuses', () => {
   it.each(BOXES)('%s labels: shown under Auto-Yes', (box) => {
     const prompt = list([`${box} Option A`, `${box} Option B`]);
     expect(isMultiSelectPrompt(prompt)).toBe(true);
-    expect(showsPromptUnderAutoYes(prompt, undefined)).toBe(true);
+    expect(showsPromptUnderAutoYes(prompt, undefined, ANSWERING)).toBe(true);
   });
 
   it('an unreadable screen: shown under Auto-Yes', () => {
-    expect(showsPromptUnderAutoYes(list(['Option A', 'Option B']), false)).toBe(true);
+    expect(showsPromptUnderAutoYes(list(['Option A', 'Option B']), false, ANSWERING)).toBe(true);
   });
 
   it.each([[true], [undefined]])('a readable single choice (answerable %s): hidden under Auto-Yes', (answerable) => {
-    expect(showsPromptUnderAutoYes(list(['Option A', 'Option B']), answerable)).toBe(false);
+    expect(showsPromptUnderAutoYes(list(['Option A', 'Option B']), answerable, ANSWERING)).toBe(false);
   });
 });

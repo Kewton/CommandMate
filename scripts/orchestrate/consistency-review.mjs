@@ -26,13 +26,23 @@
  *   2. waits until `capture --instance <id> --json` reads `ready` three times
  *      in a row;
  *   3. sends the brief built from templates/consistency-review.md (or
- *      consistency-review-rereview.md with the previous answer) with
+ *      consistency-review-rereview.md with the previous answer; `--routes`
+ *      adds the plan's interrupt order and readers, plan-check.mjs routes, #3884) with
  *      `ask <wt> <brief> --instance <resolved id> --timeout 2400 --json`;
- *   4. writes `review-<N>[b|c…].{prompt.txt,json,err,md}` to the run directory,
- *      the `.md` being the answer without the thinking;
+ *   4. writes `review-<N>[-<item>][b|c…].{prompt.txt,json,err,md}` to the run
+ *      directory, the `.md` being the answer without the thinking. The
+ *      `.prompt.txt` is created exclusively, so two reviews of one Issue never
+ *      take the same name; `--item` names the work item of the review (one PR
+ *      of an Issue with several, execution-key.mjs) and goes to the record (#3883);
  *   5. on an answer with a `DONE:` line appends one row to
  *      `consistency-review.md` and records `review=ok`; anything else records
- *      `review=fail` (run-log.mjs).
+ *      `review=fail` (run-log.mjs);
+ *   6. reads the dependency links of the reviewed worktree and of every
+ *      worktree of its repository (`git worktree list`) before the ask and
+ *      after it: a link under `node_modules` that leads out of its worktree
+ *      and appeared during the review (dependency-links.mjs) means the
+ *      reviewer wrote into a dependency tree. The answer is kept but is not a
+ *      verdict: `review=fail` with the links, exit 1 (#3883 P6).
  *
  * The columns a person judges (unique findings, kind, new/existing,
  * re-judgement, action, pre-review) are written as `未` for the orchestrator to
@@ -46,6 +56,7 @@
  *   node scripts/orchestrate/consistency-review.mjs --run-dir <dir> --issues <range> --issue <N>
  *        --head <sha> --brief <file> [--rereview --previous <review md>]
  *        [--worktree <path>] [--wt <reviewer worktree-id>] [--lock <dir>] [--cli <commandmatedev>] [--instance <id|alias>]
+ *        [--item <work item>] [--routes <plan-check.mjs routes output>]
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -55,6 +66,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { appendRecord, runLogPath } from './run-log.mjs';
 import { isInstanceSelector, resolveInstanceThroughCli } from './resolve-instance.mjs';
+import { itemProblem, workItemName } from './execution-key.mjs';
+import { addedLinks, parseWorktreeList, snapshotForeignLinks } from './dependency-links.mjs';
 
 const TEMPLATE_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'templates');
 export const INITIAL_TEMPLATE = path.join(TEMPLATE_DIR, 'consistency-review.md');
@@ -139,14 +152,21 @@ export function renderTemplate(template, values) {
   return rendered;
 }
 
+/** What the brief says in place of the routes table when the run has none (#3884). */
+export const NO_ROUTES =
+  '（渡されていない。plan に共有状態の表が無い run。差分から、変えた共有状態・関数・定数を読む経路を自分で探す）';
+
 /**
  * The brief sent to Codex. `previous` (the earlier answer) makes it a
  * re-review: the previous findings are judged first, then the review as usual.
  *
- * @param {{ issue: number, head: string, worktree: string, branch: string, brief: string, previous?: string }} input
+ * `routes` (plan-check.mjs routes) is the interrupt order and the readers of
+ * the shared states the change writes; without it the brief says there is none.
+ *
+ * @param {{ issue: number, head: string, worktree: string, branch: string, brief: string, previous?: string, routes?: string }} input
  * @param {{ initial?: string, rereview?: string }} [templates]
  */
-export function buildPrompt({ issue, head, worktree, branch, brief, previous }, templates = {}) {
+export function buildPrompt({ issue, head, worktree, branch, brief, previous, routes }, templates = {}) {
   const initial = templates.initial ?? fs.readFileSync(INITIAL_TEMPLATE, 'utf8');
   const body = renderTemplate(initial, {
     ISSUE: issue,
@@ -154,6 +174,7 @@ export function buildPrompt({ issue, head, worktree, branch, brief, previous }, 
     WORKTREE: worktree,
     BRANCH: branch,
     BRIEF: String(brief).trimEnd(),
+    ROUTES: routes === undefined || routes === null || String(routes).trim() === '' ? NO_ROUTES : String(routes).trimEnd(),
   }).trimEnd();
   if (previous === undefined || previous === null) return `${body}\n`;
   const rereview = templates.rereview ?? fs.readFileSync(REREVIEW_TEMPLATE, 'utf8');
@@ -166,24 +187,50 @@ export function buildPrompt({ issue, head, worktree, branch, brief, previous }, 
   }).trimEnd()}\n`;
 }
 
-/** `review-<N>`, then `review-<N>b`, `review-<N>c` … — the first name no earlier review of the run used. */
-export function nextReviewLabel(runDir, issue) {
-  for (const suffix of ['', ...'bcdefghijklmnopqrstuvwxyz']) {
-    const label = `review-${issue}${suffix}`;
-    if (!['.md', '.json', '.prompt.txt'].some((ext) => fs.existsSync(path.join(runDir, `${label}${ext}`)))) return label;
+const REVIEW_SUFFIXES = ['', ...'bcdefghijklmnopqrstuvwxyz'];
+const usedLabel = (runDir, label) => ['.md', '.json', '.prompt.txt'].some((ext) => fs.existsSync(path.join(runDir, `${label}${ext}`)));
+
+/**
+ * `review-<N>`, then `review-<N>b`, `review-<N>c` … — the first name no earlier
+ * review of the run used. With `item` (#3883) the work item is in the name:
+ * `review-<N>-<item>`.
+ */
+export function nextReviewLabel(runDir, issue, item) {
+  for (const suffix of REVIEW_SUFFIXES) {
+    const label = `review-${workItemName(issue, item)}${suffix}`;
+    if (!usedLabel(runDir, label)) return label;
   }
-  throw new Error(`too many reviews of #${issue} in ${runDir}`);
+  throw new Error(`too many reviews of #${workItemName(issue, item)} in ${runDir}`);
+}
+
+/**
+ * Take the next label and write its `.prompt.txt` in one step (`wx`): a
+ * review started at the same time takes the next name instead of writing
+ * over this one's files (#3883). Returns the label.
+ */
+export function claimReviewLabel(runDir, issue, item, prompt) {
+  for (const suffix of REVIEW_SUFFIXES) {
+    const label = `review-${workItemName(issue, item)}${suffix}`;
+    if (usedLabel(runDir, label)) continue;
+    try {
+      fs.writeFileSync(path.join(runDir, `${label}.prompt.txt`), prompt, { flag: 'wx' });
+      return label;
+    } catch (err) {
+      if (err?.code !== 'EEXIST') throw err;
+    }
+  }
+  throw new Error(`too many reviews of #${workItemName(issue, item)} in ${runDir}`);
 }
 
 /** Append one row to `consistency-review.md` (created with its header if absent); returns the row. */
-export function appendReviewRow(file, { issue, rereview, head, durationSec, doneLine }) {
+export function appendReviewRow(file, { issue, item, rereview, head, durationSec, doneLine }) {
   const existing = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
   const numbers = [...existing.matchAll(/^\|\s*(\d+)\s*\|/gm)].map((m) => Number(m[1]));
   const next = numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
   const count = findingCount(doneLine);
   const cells = [
     String(next),
-    `#${issue}${rereview ? ' 再レビュー' : ''}`,
+    `#${issue}${item ? `/${item}` : ''}${rereview ? ' 再レビュー' : ''}`,
     'Codex',
     head.slice(0, 7),
     `${durationSec} 秒`,
@@ -387,7 +434,8 @@ function resolveInstance(run, o, cwd) {
 
 const USAGE = `Usage:
   node scripts/orchestrate/consistency-review.mjs --run-dir <dir> --issues <range> --issue <N> --head <sha> --brief <file>
-       [--rereview --previous <review md>] [--worktree <path>] [--wt <reviewer worktree-id>] [--lock <dir>] [--cli <commandmatedev>] [--instance <id|alias>]`;
+       [--rereview --previous <review md>] [--worktree <path>] [--wt <reviewer worktree-id>] [--lock <dir>] [--cli <commandmatedev>] [--instance <id|alias>] [--item <work item>]
+       [--routes <plan-check.mjs routes output>]`;
 
 const FLAGS = {
   '--run-dir': 'runDir',
@@ -401,6 +449,8 @@ const FLAGS = {
   '--lock': 'lock',
   '--cli': 'cli',
   '--instance': 'instance',
+  '--item': 'item',
+  '--routes': 'routes',
 };
 const SWITCHES = { '--rereview': 'rereview' };
 
@@ -423,11 +473,13 @@ export function parseArgs(argv) {
   }
   if (!isInstanceSelector(options.instance)) return { error: `--instance must be an instance id or alias (got ${options.instance})` };
   if (!/^[1-9]\d*$/.test(options.issue)) return { error: `--issue must be a positive integer (got ${options.issue})` };
+  if (itemProblem(options.item)) return { error: itemProblem(options.item) };
   if (!/^[0-9a-f]{7,40}$/.test(options.head)) return { error: `--head must be a commit sha (got ${options.head})` };
   if (options.rereview && !options.previous) return { error: '--rereview needs --previous <review md>' };
   if (!options.rereview && options.previous) return { error: '--previous is only for --rereview' };
   if (!fs.existsSync(options.brief)) return { error: `--brief: no such file ${options.brief}` };
   if (options.previous && !fs.existsSync(options.previous)) return { error: `--previous: no such file ${options.previous}` };
+  if (options.routes && !fs.existsSync(options.routes)) return { error: `--routes: no such file ${options.routes}` };
   return { options };
 }
 
@@ -463,7 +515,9 @@ export function main(argv, deps = {}) {
     o.instance = resolved.id;
   }
   const issue = Number(o.issue);
-  const worktree = path.resolve(cwd, o.worktree ?? path.join('..', `commandmate-issue-${issue}`));
+  // The default worktree is the work item's (`../commandmate-issue-3883-d1` with `--item d1`, #3883), not
+  // the Issue's: another PR's worktree would be reviewed when its HEAD happened to match.
+  const worktree = path.resolve(cwd, o.worktree ?? path.join('..', `commandmate-issue-${workItemName(issue, o.item)}`));
   const lock = path.resolve(cwd, o.lock ?? path.join('workspace', 'proposals', localDate(now()), o.instance === REVIEWER_INSTANCE ? '.lock' : `.lock-${o.instance}`));
   const started = now();
   let head = o.head;
@@ -474,7 +528,7 @@ export function main(argv, deps = {}) {
     const { file } = appendRecord(
       o.runDir,
       o.issues,
-      { issue, stage: 'review', result, head, agent: o.instance, durationSec, note },
+      { issue, stage: 'review', result, head, agent: o.instance, durationSec, note, item: o.item },
       now()
     );
     log(`review #${issue} ${head.slice(0, 7)} ${result}: ${note}`);
@@ -494,7 +548,6 @@ export function main(argv, deps = {}) {
     const branch = branchOut.status === 0 ? branchOut.stdout.trim() : '-';
 
     fs.mkdirSync(o.runDir, { recursive: true });
-    label = nextReviewLabel(o.runDir, issue);
     const prompt = buildPrompt({
       issue,
       head: full,
@@ -502,15 +555,20 @@ export function main(argv, deps = {}) {
       branch,
       brief: fs.readFileSync(o.brief, 'utf8'),
       previous: o.rereview ? fs.readFileSync(o.previous, 'utf8') : undefined,
+      routes: o.routes ? fs.readFileSync(o.routes, 'utf8') : undefined,
     });
+    label = claimReviewLabel(o.runDir, issue, o.item, prompt);
     const file = (ext) => path.join(o.runDir, `${label}${ext}`);
-    fs.writeFileSync(file('.prompt.txt'), prompt);
 
     lockOwner = acquireLock(lock, { sleep, now, error });
     if (!waitReady({ run, sleep, cli: o.cli, wt: o.wt, cwd, instance: o.instance })) {
       record('fail', `${label}: ${o.instance} not ready ${READY_STREAK} times in a row within ${READY_MAX_POLLS} polls; not sent`);
       return 1;
     }
+    // The dependency trees the review must not write into (#3883 P6): this worktree's and its siblings'.
+    const listed = run('git', ['-C', worktree, 'worktree', 'list', '--porcelain'], { cwd });
+    const watched = [worktree, ...(listed.status === 0 ? parseWorktreeList(listed.stdout) : [])];
+    const linksBefore = snapshotForeignLinks(watched);
     const asked = now();
     const ask = run(
       o.cli,
@@ -521,6 +579,16 @@ export function main(argv, deps = {}) {
     fs.writeFileSync(file('.err'), ask.stderr);
     const askSec = Math.round((now().getTime() - asked.getTime()) / 1000);
     log(`${label}: ask exit=${ask.status} (${askSec}s)`);
+    const appeared = addedLinks(linksBefore, snapshotForeignLinks(watched));
+    if (appeared.length > 0) {
+      const listing = appeared.map(({ link, target }) => `${link} -> ${target}`);
+      for (const line of listing) error(`dependency link outside its worktree appeared during the review: ${line}`);
+      record(
+        'fail',
+        `${label}: not a verdict — ${appeared.length} dependency link(s) outside their worktree appeared during the review: ${listing.slice(0, 3).join('; ')}${appeared.length > 3 ? '; …' : ''}`
+      );
+      return 1;
+    }
     if (ask.status !== 0) {
       record('fail', `${label}: ask exit=${ask.status} (see ${label}.err)`);
       return 1;
@@ -545,6 +613,7 @@ export function main(argv, deps = {}) {
     const durationSec = record('ok', `${label}: ${doneLine}`);
     const row = appendReviewRow(path.join(o.runDir, 'consistency-review.md'), {
       issue,
+      item: o.item,
       rereview: o.rereview,
       head: full,
       durationSec,
@@ -556,7 +625,7 @@ export function main(argv, deps = {}) {
     const message = err instanceof Error ? err.message : String(err);
     error(message);
     try {
-      record('fail', `${label ?? `review-${issue}`}: ${message}`);
+      record('fail', `${label ?? `review-${workItemName(issue, o.item)}`}: ${message}`);
     } catch (recordErr) {
       error(recordErr instanceof Error ? recordErr.message : String(recordErr));
     }

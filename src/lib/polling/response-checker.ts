@@ -15,7 +15,7 @@ import type { ChatMessage } from '@/types/models';
 import { detectPrompt } from '@/lib/detection/prompt-detector';
 import {
   detectAntigravityNumberedDialogPrompt,
-  isAntigravityUnvouchedNumberedScreen,
+  isAntigravityUnansweredNumberedScreen,
 } from '@/lib/detection/tools/antigravity/dialog';
 import { liveRegionOf, normalizeFrame } from '@/lib/detection/tools/frame';
 import { isQuotedNumberedPrompt } from '@/lib/detection/tools/live-region';
@@ -103,8 +103,22 @@ import { isPromptPushSuppressed } from '@/lib/push/prompt-push-gate';
 // Issue #2000: deep path for the same reason as the two imports above.
 import { notifyUpstreamFaultPush } from '@/lib/push/failure-push-notifier';
 import { matchUpstreamFault } from '@/lib/detection/upstream-faults';
-import { startWaitingPushNotifier } from '@/lib/push/waiting-push-notifier';
-import { getWaitingEpisode, observeWaitingEdge } from '@/lib/session/waiting-episode-state';
+import { fanOutAfterCommit, startWaitingPushNotifier } from '@/lib/push/waiting-push-notifier';
+import {
+  captureObservedFrame,
+  commitWaitingObservation,
+  observeWaiting,
+  planWaitingObservation,
+  startWaitingObservation,
+  type CapturedFrameTime,
+  type ObservationAction,
+  type ObservationStart,
+  type WaitingObservationPlan,
+} from '@/lib/session/waiting-episode-binding';
+import { getWaitingEpisodeRecord } from '@/lib/session/waiting-episode-state';
+import { promptWaitingReading } from '@/lib/detection/waiting-screen-reading';
+import { buildCompositeKey } from '@/lib/auto-yes-state';
+import { getAutoYesLastAnswer } from './auto-yes-poller-state';
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
 import {
   isBlankCleanedResponse,
@@ -210,6 +224,7 @@ import {
   type ExtractionResult,
   buildPromptExtractionResult,
 } from './response-checker-extraction-result';
+import { captureTopOf, promptDataForStorage, withCaptureTopCompleteness } from './prompt-screen-reading';
 export {
   type ExtractionResult,
   incompleteResult,
@@ -217,6 +232,7 @@ export {
 } from './response-checker-extraction-result';
 import {
   type AntigravityReceiptScope,
+  isAntigravityGenericReadingOnScreen,
   isWithheldForWantOfReceipt,
   isNumberedDialogVouched,
 } from './response-checker-dialog-gate';
@@ -269,8 +285,10 @@ import {
  * @param receiptScope - whose frame this is, when the caller answers it
  *   automatically (Issue #2849). For agy only: a frame that reads as a prompt is
  *   then handed back as no prompt unless agy asked CommandMate about a tool call
- *   for that instance a moment ago. Omitted, the reading is not gated — which is
- *   what every caller that only DISPLAYS the frame wants.
+ *   for that instance a moment ago — and (Issue #3881) a generic numbered
+ *   reading also needs evidence on the screen itself
+ *   (`isAntigravityGenericReadingOnScreen`). Omitted, the reading is not gated —
+ *   which is what every caller that only DISPLAYS the frame wants.
  * @param frame - the SAME tick's `normalizeFrame(raw, cliToolId)`, when the
  *   caller built one (Issue #3183). The Auto-Yes poller builds it once and hands
  *   the same object to the dialog gate, so the quotation veto below and the gate
@@ -314,7 +332,13 @@ export function detectPromptOnCleanFrame(
     // reads `> 1. Google OAuth` as an answerable option. Judged without the
     // footer, so a missing footer cannot reopen the generic path. The status
     // verdict publishes the same frame as unclassified (`tools/antigravity/detect.ts`).
-    if (isAntigravityUnvouchedNumberedScreen(cleanOutput)) {
+    //
+    // Issue #3818: and by default — a numbered agy screen keeps the generic
+    // reading only as `/feedback` or as a reply's plain `1. … N.` list, so a
+    // run with a number missing or its `>` row off the pane is no prompt either.
+    // The status verdict keeps #3808's narrower rule: these frames still read
+    // as someone waiting there, they are only not answered from here.
+    if (isAntigravityUnansweredNumberedScreen(cleanOutput)) {
       return { isPrompt: false, cleanContent: cleanOutput.trim() };
     }
   }
@@ -376,6 +400,16 @@ export function detectPromptOnCleanFrame(
   // agy's reader declines, and #2851 showed it can read a quotation — so a gate
   // that covered only the reader's exit would leave this one open.
   if (cliToolId === 'antigravity' && result.isPrompt && isWithheldForWantOfReceipt(receiptScope)) {
+    return { isPrompt: false, cleanContent: cleanOutput.trim() };
+  }
+  // Issue #3881 (finding 8): and with a receipt, the receipt alone does not
+  // vouch for a generic reading — a reply's plain numbered list is answered
+  // only when the screen itself shows a known menu or agy's permission rows.
+  // Only for the caller that answers (a receipt scope); a display keeps it.
+  if (
+    cliToolId === 'antigravity' && result.isPrompt && receiptScope !== undefined
+    && !isAntigravityGenericReadingOnScreen(cleanOutput, result)
+  ) {
     return { isPrompt: false, cleanContent: cleanOutput.trim() };
   }
   return result;
@@ -650,6 +684,11 @@ interface ResponseCheckContext {
   /** `instanceId ?? cliToolId`. */
   resolvedInstanceId: string;
   pollerKey: string;
+  /**
+   * Issue #3798: the waiting episode as this tick found it, fixed before its
+   * first `await`. The reply's close is refused when the episode moved since.
+   */
+  observationStart: ObservationStart;
 }
 
 /**
@@ -798,6 +837,25 @@ function extractCompletedTurn(
 }
 
 /**
+ * The episode a committed prompt observation left this wait in (Issue #3798):
+ * the one kept or rebound, the one the commit just opened or put in place, or
+ * null when the commit changed nothing.
+ */
+function committedEpisodeId(plan: WaitingObservationPlan, committed: ObservationAction): string | null {
+  const obs = plan.observation;
+  switch (committed) {
+    case 'kept':
+    case 'rebound':
+      return plan.episodeId;
+    case 'opened':
+    case 'replaced':
+      return getWaitingEpisodeRecord(obs.worktreeId, obs.cliToolId, obs.instanceId)?.episodeId ?? null;
+    default:
+      return null;
+  }
+}
+
+/**
  * Save a live prompt as a prompt message, and raise what follows from it: the
  * task event, the push notification and the waiting episode.
  *
@@ -809,13 +867,17 @@ function extractCompletedTurn(
  * @param promptDetection - The detection that passed the #2457 gate
  * @param result - The complete extraction this tick made
  * @param isFullScreenTui - True for opencode and copilot, which keep polling after a prompt
+ * @param frameTime - When the frame this prompt was read on was fetched (Issue #3798)
+ * @param frame - The capture the prompt was read on, for the stored reading (Issue #3881)
  * @returns What `checkForResponse` returns for this tick
  */
 function savePromptMessage(
   ctx: ResponseCheckContext,
   promptDetection: PromptDetectionResult,
   result: ExtractionResult,
-  isFullScreenTui: boolean
+  isFullScreenTui: boolean,
+  frameTime: CapturedFrameTime,
+  frame: string,
 ): boolean {
   const { db, worktree, worktreeId, cliToolId, instanceId, resolvedInstanceId, pollerKey } = ctx;
 
@@ -831,6 +893,35 @@ function savePromptMessage(
       cliToolId,
       instanceId: resolvedInstanceId,
       generation: currentPollerOwner()?.generation,
+    });
+    return false;
+  }
+
+  // Issue #3798 (design 規則 8): what this prompt does to the waiting episode,
+  // decided BEFORE the dedup below registers its hash. A frame fetched before
+  // the close of the very confirmation it shows — an answer and a stop landed
+  // during the capture — is not a new wait: nothing is saved, registered or
+  // pushed, and the next tick's frame decides. Planned against the state as it
+  // is now (`freshPrompt`), not as the tick found it. With the Auto-Yes
+  // poller's last answer (PR 3): another confirmation in the wait it answered
+  // is a new wait (R1-7), with a hold of its own rather than the spent one.
+  const plan = planWaitingObservation({
+    worktreeId,
+    cliToolId,
+    instanceId,
+    observer: 'response-checker',
+    start: ctx.observationStart,
+    reading: promptWaitingReading(promptDetection.promptData ?? null),
+    ...frameTime,
+    freshPrompt: true,
+    lastAnswer: getAutoYesLastAnswer(buildCompositeKey(worktreeId, cliToolId, instanceId)),
+  });
+  if (plan.action === 'ignored') {
+    logger.info('prompt-observation-stale', {
+      worktreeId,
+      cliToolId,
+      instanceId: resolvedInstanceId,
+      because: plan.ignoredBecause,
     });
     return false;
   }
@@ -860,6 +951,10 @@ function savePromptMessage(
     return false;
   }
 
+  // Issue #3881 (review P2-1): whether the frame's first row is the pane's —
+  // the capture was taken with `CACHE_MAX_CAPTURE_LINES` (`checkForResponse`).
+  const captureTop = captureTopOf(frame, CACHE_MAX_CAPTURE_LINES, cliToolId);
+
   // Issue #571: Clean TUI decorations from Copilot prompt content before saving
   let promptSaveContent = promptContent;
   if (cliToolId === 'copilot') {
@@ -875,7 +970,18 @@ function savePromptMessage(
     role: 'assistant',
     content: promptSaveContent,
     messageType: 'prompt',
-    promptData: promptDetection.promptData,
+    // Issue #3881: with what the frame was read as — the kind, the live rows,
+    // the target's completeness — so the chat transcript and every later
+    // reader take it as stated instead of deciding it again from the strings.
+    // Review P2-1: the capture window says whether the frame's top is the
+    // pane's (`captureTop`, and `top-unknown` on a target that reached a cut top),
+    // as the Auto-Yes poller reads its own frame.
+    promptData: promptDataForStorage(
+      cliToolId,
+      frame,
+      withCaptureTopCompleteness(promptDetection, captureTop),
+      captureTop,
+    ),
     timestamp: new Date(),
     cliToolId,
     instanceId: resolvedInstanceId,
@@ -896,20 +1002,19 @@ function savePromptMessage(
   // Fire-and-forget — push is advisory and must never block/break the poller.
   //
   // Issue #1790: the wait is now named by #1786's episode rather than by the
-  // prompt text. The two lines below are ordered, not incidental:
-  //
-  //  1. the notification is raised first, while it still has the prompt's
-  //     own question to quote — it records the episode in the dedup, so
-  //     whichever path reports the wait second says nothing;
-  //  2. `observeWaitingEdge` then opens that same episode, which is what
-  //     lets the edge listener (and #1788's WebSocket frame) agree with this
-  //     call about *which* wait this is instead of raising a second one.
-  //
-  // Both use one timestamp so the episode the notification claims and the
-  // episode the store opens are the same number.
-  const promptObservedAt = Date.now();
-  const promptWaitingSince =
-    getWaitingEpisode(worktreeId, cliToolId, instanceId)?.since ?? promptObservedAt;
+  // prompt text. Issue #3798: and by the episode's id, which the store gives
+  // a wait only when it opens or replaces one. So the observation is committed
+  // first and the notification raised with the id the commit settled on —
+  // the kept or rebound wait's, or the one just opened — inside
+  // `fanOutAfterCommit`, which holds the edge listener's own gate back until
+  // this fan-out is done: the notification that quotes the prompt's question
+  // still records the episode in the dedup first, and the listener (and
+  // #1788's WebSocket frame) agree with it about *which* wait this is — the
+  // same id to the gate's hold and suppression record, the dedup and the
+  // card's order. A commit that changed nothing (the episode moved since the
+  // plan) names no id, and the plan's `since` decides as before.
+  // No `await` from the plan to the commit.
+  const promptWaitingSince = plan.since ?? plan.at;
 
   // Issue #1999: Auto-Yes is a declaration that this session's prompts are
   // answered without a human, so notifying for one is telling the reader the
@@ -918,34 +1023,34 @@ function savePromptMessage(
   // reminder all see the wait exactly as they did before. The gate runs
   // before the call rather than inside it because `shouldSendWaitingPush`
   // records the episode the moment it decides to send.
-  if (
-    !isPromptPushSuppressed({
-      worktreeId,
-      cliToolId,
-      instanceId,
-      waitingSince: promptWaitingSince,
-    })
-  ) {
-    void notifyPushSubscribers({
-      worktreeId,
-      worktreeName: worktree.name,
-      kind: 'prompt',
-      agentName: resolvedInstanceId,
-      instanceId: resolvedInstanceId,
-      waitingKind: 'prompt',
-      waitingSince: promptWaitingSince,
-      excerpt: promptDetection.promptData?.question ?? promptSaveContent,
-    }).catch(() => {});
-  }
-
-  observeWaitingEdge({
-    worktreeId,
-    cliToolId,
-    instanceId,
-    waiting: true,
-    kind: 'prompt',
-    now: promptObservedAt,
-  });
+  fanOutAfterCommit(
+    { worktreeId, cliToolId, instanceId },
+    () => commitWaitingObservation(plan),
+    (committed) => {
+      const waitingEpisodeId = committedEpisodeId(plan, committed);
+      if (
+        !isPromptPushSuppressed({
+          worktreeId,
+          cliToolId,
+          instanceId,
+          waitingSince: promptWaitingSince,
+          waitingEpisodeId,
+        })
+      ) {
+        void notifyPushSubscribers({
+          worktreeId,
+          worktreeName: worktree.name,
+          kind: 'prompt',
+          agentName: resolvedInstanceId,
+          instanceId: resolvedInstanceId,
+          waitingKind: 'prompt',
+          waitingSince: promptWaitingSince,
+          waitingEpisodeId,
+          excerpt: promptDetection.promptData?.question ?? promptSaveContent,
+        }).catch(() => {});
+      }
+    }
+  );
 
   if (!isFullScreenTui) {
     stopPolling(worktreeId, cliToolId, instanceId);
@@ -1462,7 +1567,18 @@ async function recordCompletedResponse(
   // API, and every later prompt would be folded into that stale episode and
   // silently deduped. Nothing to close is a no-op, and no notification is
   // raised for a closing edge.
-  observeWaitingEdge({ worktreeId, cliToolId, instanceId, waiting: false });
+  //
+  // Issue #3798: only the episode this tick started against — one that opened
+  // or moved while the reader and the log ran is not this reply's to end.
+  observeWaiting({
+    worktreeId,
+    cliToolId,
+    instanceId,
+    observer: 'response-checker',
+    start: ctx.observationStart,
+    reading: { kind: 'not-waiting' },
+    frameCapturedAt: 0,
+  });
 
   // Web Push fan-out (Issue #1125): session completed (running → idle).
   // Fire-and-forget — push is advisory and must never block/break the poller.
@@ -1527,6 +1643,8 @@ export async function checkForResponse(
       instanceId,
       resolvedInstanceId,
       pollerKey,
+      // Issue #3798: before the tick's first `await`.
+      observationStart: startWaitingObservation(worktreeId, cliToolId, instanceId),
     };
 
     // Check if CLI tool session is running
@@ -1594,7 +1712,11 @@ export async function checkForResponse(
     // Capture current output. The requested width IS the capture window, so it is
     // taken from the same constant extractResponse() measures saturation against
     // (Issue #1670) — a literal here would silently decouple the two.
-    const output = await captureSessionOutput(worktreeId, cliToolId, CACHE_MAX_CAPTURE_LINES, instanceId);
+    // Issue #3798: dated by where that frame came from — from the cache, it may
+    // be older than this tick.
+    const { frame: output, frameTime } = await captureObservedFrame(() =>
+      captureSessionOutput(worktreeId, cliToolId, CACHE_MAX_CAPTURE_LINES, instanceId),
+    );
     // Issue #3705: there is no `await` from here to the transcript reader
     // inside the save path, so this one answer covers every write in between —
     // the fault notifier, the TUI accumulator, the prompt sweep, the skip
@@ -1638,7 +1760,7 @@ export async function checkForResponse(
       // after the answer must not re-save the reply underneath, #2230).
       if (owns) resetDuplicateResponseSkipStreak(pollerKey);
       // Asks for itself (#3701), before the prompt dedup.
-      return savePromptMessage(ctx, promptDetection, result, isFullScreenTui);
+      return savePromptMessage(ctx, promptDetection, result, isFullScreenTui, frameTime, output);
     }
     // Issue #3538: a finished frame without a live prompt ends the run of
     // duplicate prompt ticks, as an unfinished one does in `extractCompletedTurn`.

@@ -7,6 +7,7 @@
 import { showsPromptUnderAutoYes } from '@/components/worktree/prompt-answer';
 
 type PromptGateData = Parameters<typeof showsPromptUnderAutoYes>[0];
+type PromptGateDecision = Parameters<typeof showsPromptUnderAutoYes>[2];
 
 export function shouldShowPromptPanel({
   visible,
@@ -14,12 +15,15 @@ export function shouldShowPromptPanel({
   autoYesEnabled,
   data,
   answerable,
+  autoYesDecision,
 }: {
   visible: boolean;
   isStarting: boolean;
   autoYesEnabled: boolean;
   data: PromptGateData;
   answerable: boolean | undefined;
+  /** Issue #3821: the server's decision about this prompt (`autoYesDecision`). */
+  autoYesDecision: PromptGateDecision;
 }): boolean {
   // Issue #2755: Auto-Yes hides the answer panel, because the poller is
   // supposed to be answering instead — and on a CHECKBOX question it is
@@ -32,9 +36,11 @@ export function shouldShowPromptPanel({
   // (`prompt.answerable === false`): Auto-Yes sends it at most one Enter, and
   // the panel is where that — or the direct-input link when it did not take —
   // is said. See `showsPromptUnderAutoYes`.
+  // Issue #3821: and every prompt Auto-Yes is not answering right now — the
+  // panel is hidden only while the server says `answering`.
   return (
     visible && !isStarting
-    && (!autoYesEnabled || showsPromptUnderAutoYes(data, answerable))
+    && (!autoYesEnabled || showsPromptUnderAutoYes(data, answerable, autoYesDecision))
   );
 }
 

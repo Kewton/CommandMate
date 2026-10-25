@@ -176,7 +176,7 @@ Issue 本文の 3 点は、実コードと合っていた（行番号は 1 か�
 | hook の棄権の理由 | `PermissionDecisionReason`（`permission-decision-service.ts:80-92`。`ask-user-question`・`auto-yes-disabled`・`policy-suppressed` ほか） | 棄権した要求を理由別に数える語彙（§2.3） |
 | opencode の判定の最後の 1 件 | `src/lib/hooks/permission-decision-state.ts:99`（`lastDecisions.set`）、書き手 `src/lib/hooks/permission-adjudication.ts:136` | `delivered` / `releasedPrompt` を持つ。これも上書き |
 | poller の送信ログ `poller:response-sent` | `src/lib/auto-yes-poller.ts:575-583` | 送った答えと質問（500 文字まで）。判断の根拠は無い |
-| poller の送信の試行 | `AutoYesSendAttempt`・`beginSendAttempt()`・`settleSendAttempt()`（`src/lib/polling/auto-yes-poller-state.ts:286-360`、#3713）。失敗の分岐は `settleFailedTick()`（`src/lib/auto-yes-poller.ts:751-783`） | await の前に登録したオブジェクトを tick が持ち、戻ったら `keysSent` で部分送信を記録する。止まった世代の送信は `poller:auto-yes-answer-abandoned`（776 行、`keysSent` つき）。**世代が生きている失敗（782 行の `poller:detect-respond-error`）では `keysSent` を読んでいない**（§2.5 の `failed`） |
+| poller の送信の試行 | `AutoYesSendAttempt`・`beginSendAttempt()`・`settleSendAttempt()`（`src/lib/polling/auto-yes-poller-state.ts:286-360`、#3713）。失敗の分岐は `settleFailedTick()`（`src/lib/auto-yes-poller.ts:852-893`） | await の前に登録したオブジェクトを tick が持ち、戻ったら `keysSent` で部分送信を記録する。止まった世代の送信は `poller:auto-yes-answer-abandoned`（`keysSent` つき）。世代が生きている失敗（`poller:detect-respond-error`）でも、#3839 から `keysSent === true` なら途中で止まった答えとして記録する（`settleSendAttempt(attempt, keysSent === true)`。次の tick は打ち直さない）。`keysSent` が分からない throw だけが §2.5 の `failed` |
 | agy の受信記録 | `src/lib/polling/antigravity-permission-receipts.ts:72-76`（`{ toolName, at }` だけ）、書き手 `route.ts:213-221` | 8 秒の受信窓。`toolCall.args`・`stepIdx`・`conversationId` は捨てている |
 | agy の受信のエピソード | `src/lib/polling/antigravity-receipt-episodes.ts`（`beginAntigravityFrameRead` 195 行・`endAntigravityFrameRead` 221 行・`markAntigravityAnswerSent` 256 行） | 「ダイアログを最初に見た時刻」と「どの受信で受理したか」を既に持っている。agy の確認の識別の土台になる |
 | agy の受信窓の外の確認 | `src/lib/auto-yes-poller.ts:739-743`（`isPrompt` が false のとき `logIfWithheldForWantOfReceipt()` が `detectPromptOnCleanFrame()` で門を通さずに読み直す） | **受信窓の外では、確認が画面に残っていても `isPrompt: false` になる**。存在の判断はこの読み直しの結果で行う（§2.2） |
@@ -268,7 +268,7 @@ hook の要求の記録（`hookRequestId`、§3.3）と確認の記録（`confir
 | `ok` | `sendPromptAnswer()` が戻った | — |
 | `partial` | 中断され、`keysSent === true`（キーの一部が画面にある。#3706） | `partial-answer`（今と同じ。`auto-yes-suppression-reason.ts:46`） |
 | `no-keys-sent` | 中断・失敗で、`keysSent === false`（キーを 1 つも送っていない） | `send-no-keys`（記録だけの理由）。**`partial-answer` にしない** |
-| `failed` | throw して `keysSent` が分からない（世代が生きている失敗。`settleFailedTick()` の 779-782 行は今 `keysSent` を読まない） | `send-failed`（記録だけの理由） |
+| `failed` | throw して `keysSent` が分からない（`keysSent` を持たない例外。世代が生きている失敗でも、`keysSent === true` なら #3839 から上の `partial`、`false` なら `no-keys-sent` として記録する — `settleFailedTick()` の `attemptResultOfThrow()`） | `send-failed`（記録だけの理由） |
 
   hook の試行は「応答を書けた → `ok`／書けなかった → `failed`」、opencode は `delivered` で `ok` / `failed`、`/prompt-response` は API の結果（`success: false`・500 は `failed`）。
 - **区間**: 最初の `partial` / `no-keys-sent` / `failed` で停止の区間を始める（それより前に `withheld` の区間が開いていれば、理由の変化として続ける）。後の試行が `ok` になったら区間を終える。`ok` の後に同じ確認が再び止められたら（重複の抑止・方針の変化など）、**新しい区間**を開く

@@ -21,8 +21,10 @@
  * ## The poller still notifies, and that is deliberate
  *
  * Contrary to the Issue's premise, the edge is *not* observed by a background
- * process: `observeWaitingEdge`'s only caller is `worktree-status-helper`, on
- * the worktree list / detail API probe. So the edge fires when a client is
+ * process: when #1790 was written, `observeWaitingEdge`'s only caller was
+ * `worktree-status-helper`, on the worktree list / detail API probe (Issue
+ * #3798 added the agent's own turn transitions as closers, not as openers). So
+ * the edge fires when a client is
  * looking, and moving push onto it *alone* would have swapped one blind spot
  * (no poller) for a worse one (nobody has the app open — the very situation a
  * phone notification is for). The poller therefore keeps its call, and
@@ -49,6 +51,30 @@
  * under whatever the episode is called at that point. One notification either
  * way — no correction push, and nothing at all if the wait ended meanwhile.
  *
+ * ## Which wait is which (Issue #3798)
+ *
+ * A wait is its episode's id, not its `since`: two waits can share a `since`,
+ * and the episode store can put a new wait in place of an old one in one step
+ * (`replaced`). So this subscribes with `onWaitingEpisodeTransition`, which
+ * says which of the three happened, and every re-read of the store — the end of
+ * a classification hold, the end of an Auto-Yes hold, the reminder — compares
+ * the id it reads with `getWaitingEpisodeRecord`. A replacement drops the old
+ * wait's timers and hold and starts the new wait's from scratch, and sends no
+ * resolution: nobody stopped waiting. A pending wait that came without an id
+ * (a test driving {@link handleWaitingTransition} with the #1786 shape) is
+ * compared by `since`, as before.
+ *
+ * A wait the Auto-Yes poller answered and has not yet seen gone is asked
+ * about again, a grace apart, for as long as it lasts (the gate's
+ * `auto-yes-answered`): it notifies only once it turns into a screen a person
+ * drives, and a replacement brings an edge of its own.
+ *
+ * A producer that fans out for the wait it is opening (the response poller,
+ * with the prompt's question to quote) commits the episode inside
+ * {@link fanOutAfterCommit}: the edge's gate runs after the producer's
+ * fan-out, so both name the episode the store just gave the wait and the
+ * producer's notification is the one the episode dedup lets through.
+ *
  * Everything here is advisory: a failure must not disturb the status read that
  * observed the edge (`emit` contains listener throws) nor the poller.
  *
@@ -61,8 +87,10 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById } from '@/lib/db/worktree-db';
 import { createLogger } from '@/lib/logger';
 import {
-  getWaitingEpisode,
-  onWaitingTransition,
+  getWaitingEpisodeRecord,
+  onWaitingEpisodeTransition,
+  type WaitingEpisodeRecord,
+  type WaitingEpisodeTransition,
   type WaitingTransition,
 } from '@/lib/session/waiting-episode-state';
 import type { WaitingKind } from '@/lib/session/waiting-kind';
@@ -73,6 +101,7 @@ import {
   forgetAutoYesHold,
   decideAndLogPromptPush,
   isPromptPushSuppressed,
+  isSameWait,
 } from './prompt-push-gate';
 import { notifyPushSubscribers } from './push-sender';
 import { notifyPromptResolved } from './resolution-push-notifier';
@@ -113,7 +142,20 @@ interface PendingWait {
   cliToolId: CLIToolType;
   instanceId: string | undefined;
   since: number;
+  /** The episode's id (Issue #3798), or null when the edge did not carry one. */
+  episodeId: string | null;
   kind: WaitingKind | null;
+}
+
+/**
+ * The open episode, when it is still `wait` (Issue #3798): the same id, or —
+ * for a wait that came without one — the same `since`. Null when the wait is
+ * over or another one is open.
+ */
+function currentEpisodeOf(wait: PendingWait): WaitingEpisodeRecord | null {
+  const episode = getWaitingEpisodeRecord(wait.worktreeId, wait.cliToolId, wait.instanceId);
+  if (episode === null) return null;
+  return isSameWait(episode, wait) ? episode : null;
 }
 
 /**
@@ -132,6 +174,8 @@ declare global {
   var __waitingPushGraceTimers: Map<string, ReturnType<typeof setTimeout>> | undefined;
   // eslint-disable-next-line no-var
   var __waitingPushAnswerGraceTimers: Map<string, ReturnType<typeof setTimeout>> | undefined;
+  // eslint-disable-next-line no-var
+  var __waitingPushDeferredGates: Map<string, Array<() => void>> | undefined;
 }
 
 const pending = getOrInitGlobal('__waitingPushPending', () => new Map<string, PendingWait>());
@@ -148,6 +192,46 @@ const answerGraceTimers = getOrInitGlobal(
   '__waitingPushAnswerGraceTimers',
   () => new Map<string, ReturnType<typeof setTimeout>>(),
 );
+
+/**
+ * Composite key -> the edge gates held back while a producer commits the
+ * episode and fans out for it ({@link fanOutAfterCommit}, Issue #3798).
+ */
+const deferredGates = getOrInitGlobal('__waitingPushDeferredGates', () => new Map<string, Array<() => void>>());
+
+/**
+ * Commit a waiting episode and fan out for it, in that order, with the gate
+ * the episode's own edge runs held back until the fan-out is done (Issue
+ * #3798). The producer then names the episode id the commit just created —
+ * to the gate and to the fan-out — and its notification, carrying what only
+ * the producer has (the prompt's question), claims the episode dedup before
+ * the edge's id-named one asks for the same episode. All synchronous: the
+ * held gates run before this returns, whatever the fan-out threw.
+ *
+ * @param commit - The store write; its edge reaches this module during it
+ * @param fanOut - Given what `commit` returned
+ * @returns What `commit` returned
+ */
+export function fanOutAfterCommit<T>(
+  parts: { worktreeId: string; cliToolId: CLIToolType; instanceId?: string },
+  commit: () => T,
+  fanOut: (committed: T) => void
+): T {
+  const key = buildCompositeKey(parts.worktreeId, parts.cliToolId, parts.instanceId);
+  const outermost = !deferredGates.has(key);
+  if (outermost) deferredGates.set(key, []);
+  try {
+    const committed = commit();
+    fanOut(committed);
+    return committed;
+  } finally {
+    if (outermost) {
+      const held = deferredGates.get(key) ?? [];
+      deferredGates.delete(key);
+      for (const run of held) run();
+    }
+  }
+}
 
 /**
  * The worktree's display name, for the notification title.
@@ -181,6 +265,7 @@ async function sendWaitingPush(
         instanceId,
         waitingKind: wait.kind,
         waitingSince: wait.since,
+        waitingEpisodeId: wait.episodeId,
         escalated,
       },
       // The deciding tick's clock, not a fresh reading: the reminder's body
@@ -238,6 +323,7 @@ function gateAndSend(wait: PendingWait, now: number, recheck = false): void {
       cliToolId: wait.cliToolId,
       instanceId: wait.instanceId,
       waitingSince: wait.since,
+      waitingEpisodeId: wait.episodeId,
       now,
     },
     { recheck },
@@ -247,6 +333,9 @@ function gateAndSend(wait: PendingWait, now: number, recheck = false): void {
     // when it ends; a wait Auto-Yes did answer is gone from the episode store
     // by then and nothing is sent.
     if (decision.reason === 'auto-yes-answering') holdForAutoYesAnswer(wait, now);
+    // Issue #3798: answered, and not yet seen gone — ask again a grace later,
+    // so the screen a person drives that may follow still notifies.
+    else if (decision.reason === 'auto-yes-answered') holdForAutoYesAnswer(wait, now, AUTO_YES_ANSWER_GRACE_MS);
     return;
   }
 
@@ -259,23 +348,31 @@ function gateAndSend(wait: PendingWait, now: number, recheck = false): void {
  * answered — a screen the poller cannot read and records nothing about — stayed
  * silent until the escalation reminder, ten minutes later.
  */
-function holdForAutoYesAnswer(wait: PendingWait, now: number): void {
+function holdForAutoYesAnswer(wait: PendingWait, now: number, afterMs?: number): void {
   const key = buildCompositeKey(wait.worktreeId, wait.cliToolId, wait.instanceId);
   const existing = answerGraceTimers.get(key);
   if (existing !== undefined) clearTimeout(existing);
   // From the gate's own origin, not `since` (Issue #3757 review), and past the
-  // poller's session-wait tick (Issue #3791). Capped at the grace, so a clock
+  // poller's session-wait tick or the duplicate guard's retry it reserved (Issue #3791). Capped at the grace, so a clock
   // that went backwards cannot arm an overflowing timer, and a longer hold is
   // asked about again every grace: a poller stopped meanwhile ends it then
   // rather than at a tick that will not come.
   const holdEndsAt = autoYesHoldEndsAt(
-    { worktreeId: wait.worktreeId, cliToolId: wait.cliToolId, instanceId: wait.instanceId, waitingSince: wait.since },
+    {
+      worktreeId: wait.worktreeId,
+      cliToolId: wait.cliToolId,
+      instanceId: wait.instanceId,
+      waitingSince: wait.since,
+      waitingEpisodeId: wait.episodeId,
+    },
     now,
   );
-  const delay = Math.min(AUTO_YES_ANSWER_GRACE_MS, Math.max(0, holdEndsAt - now));
+  // Issue #3798: an answered wait whose hold is over is asked about again
+  // `afterMs` later; the hold's end is already behind it.
+  const delay = afterMs ?? Math.min(AUTO_YES_ANSWER_GRACE_MS, Math.max(0, holdEndsAt - now));
   const timer = setTimeout(() => {
     answerGraceTimers.delete(key);
-    releaseAutoYesHold(key, wait.since);
+    releaseAutoYesHold(key, wait);
   }, delay);
   // Never hold the process open for it, as with the other timers here.
   (timer as { unref?: () => void }).unref?.();
@@ -286,15 +383,15 @@ function holdForAutoYesAnswer(wait: PendingWait, now: number): void {
  * The Auto-Yes hold ended: notify unless the wait is over or is another one
  * (Issue #3757). Read from the episode store, as {@link releaseHeldWait} does.
  */
-function releaseAutoYesHold(key: string, since: number): void {
+function releaseAutoYesHold(key: string, wait: PendingWait): void {
   const held = pending.get(key);
-  if (held === undefined || held.since !== since) return;
+  if (held === undefined || !isSameWait(held, wait)) return;
 
-  const episode = getWaitingEpisode(held.worktreeId, held.cliToolId, held.instanceId);
-  if (episode === null || episode.since !== held.since) {
+  const episode = currentEpisodeOf(held);
+  if (episode === null) {
     pending.delete(key);
     // Issue #3776: this episode's hold only — the next one may hold already.
-    forgetAutoYesHold(key, held.since);
+    forgetAutoYesHold(key, { since: held.since, episodeId: held.episodeId });
     stopEscalationTimerIfIdle();
     return;
   }
@@ -322,8 +419,8 @@ function releaseHeldWait(key: string): void {
   // Gone means the closing edge dropped it, or a reminder already claimed it.
   if (held === undefined) return;
 
-  const episode = getWaitingEpisode(held.worktreeId, held.cliToolId, held.instanceId);
-  if (episode === null || episode.since !== held.since) {
+  const episode = currentEpisodeOf(held);
+  if (episode === null) {
     pending.delete(key);
     stopEscalationTimerIfIdle();
     return;
@@ -365,13 +462,14 @@ function stopEscalationTimerIfIdle(): void {
  * Exported for tests, which drive it directly rather than through the
  * subscription so a failure points at this function and not at #1786's store.
  */
-export function handleWaitingTransition(transition: WaitingTransition): void {
+export function handleWaitingTransition(transition: WaitingTransition | WaitingEpisodeTransition): void {
   // Nothing downstream can do anything without VAPID keys, so an install
   // without push does not track waits, does not read the database and does not
   // start a timer — it is inert rather than merely quiet.
   if (!isPushConfigured()) return;
 
   const key = buildCompositeKey(transition.worktreeId, transition.cliToolId, transition.instanceId);
+  const cause = 'cause' in transition ? transition.cause : null;
 
   if (!transition.waiting || transition.since === null) {
     // Issue #2156: a wait still inside its grace is answered, not notified.
@@ -400,11 +498,23 @@ export function handleWaitingTransition(transition: WaitingTransition): void {
     return;
   }
 
+  // Issue #3798: a new wait in place of the old one. The old wait's holds and
+  // timers go — it is over — and no resolution is sent: nobody stopped
+  // waiting, and the new wait's card is about to replace the old one anyway.
+  if (cause === 'replaced') {
+    const old = pending.get(key);
+    cancelGrace(key);
+    pending.delete(key);
+    const previousEpisodeId = 'previousEpisodeId' in transition ? transition.previousEpisodeId : null;
+    forgetAutoYesHold(key, { since: old?.since ?? transition.since, episodeId: previousEpisodeId ?? old?.episodeId });
+  }
+
   const wait: PendingWait = {
     worktreeId: transition.worktreeId,
     cliToolId: transition.cliToolId,
     instanceId: transition.instanceId,
     since: transition.since,
+    episodeId: episodeIdOf(transition),
     kind: transition.kind,
   };
 
@@ -430,7 +540,26 @@ export function handleWaitingTransition(transition: WaitingTransition): void {
     return;
   }
 
+  // Issue #3798: a producer is fanning out for this very edge; its gate runs
+  // after that (`fanOutAfterCommit`).
+  const held = deferredGates.get(key);
+  if (held !== undefined) {
+    held.push(() => gateAndSend(wait, transition.at));
+    return;
+  }
   gateAndSend(wait, transition.at);
+}
+
+/**
+ * The id of the wait an opening edge is about (Issue #3798). The episode edge
+ * carries it; an edge in the #1786 shape (a test calling
+ * {@link handleWaitingTransition} directly) is matched to the open episode by
+ * its `since`, read with `getWaitingEpisodeRecord`.
+ */
+function episodeIdOf(transition: WaitingTransition | WaitingEpisodeTransition): string | null {
+  if ('episodeId' in transition) return transition.episodeId;
+  const episode = getWaitingEpisodeRecord(transition.worktreeId, transition.cliToolId, transition.instanceId);
+  return episode !== null && episode.since === transition.since ? episode.episodeId : null;
 }
 
 /**
@@ -452,8 +581,8 @@ export function runEscalationTick(now: number = Date.now()): void {
     // still going: it is written by the status probe, so an answer given in
     // another tab — or a wait whose closing edge this module never saw — is
     // caught here even when `pending` still lists it.
-    const episode = getWaitingEpisode(wait.worktreeId, wait.cliToolId, wait.instanceId);
-    if (episode === null || episode.since !== wait.since) {
+    const episode = currentEpisodeOf(wait);
+    if (episode === null) {
       pending.delete(key);
       continue;
     }
@@ -473,6 +602,7 @@ export function runEscalationTick(now: number = Date.now()): void {
         cliToolId: wait.cliToolId,
         instanceId: wait.instanceId,
         waitingSince: wait.since,
+        waitingEpisodeId: wait.episodeId,
         escalated: true,
       })
     ) {
@@ -501,7 +631,8 @@ export function runEscalationTick(now: number = Date.now()): void {
 export function startWaitingPushNotifier(): () => void {
   stopWaitingPushNotifier();
 
-  const unsubscribe = onWaitingTransition((transition) => {
+  // Issue #3798: the episode edge, so a replacement is told from a new wait.
+  const unsubscribe = onWaitingEpisodeTransition((transition) => {
     handleWaitingTransition(transition);
   });
 

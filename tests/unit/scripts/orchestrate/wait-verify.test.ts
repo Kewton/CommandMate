@@ -99,6 +99,13 @@ function harness({
   resolved = {} as Record<string, string>,
   resolveError = null as string | null,
   shown = {} as Record<string, TaskRow>,
+  historyStartMinute = undefined as number | undefined,
+  runs = {} as Record<string, { startedAt?: string; status?: string; worktreeId?: string }[]>,
+  replies = [] as (string | null)[],
+  captureJsonFails = 0,
+  verifySequence = [] as { exit: number; log: string }[],
+  resolvedTools = {} as Record<string, string>,
+  replyFails = false,
 } = {}) {
   const spawned: Call[] = [];
   const ran: Call[] = [];
@@ -110,6 +117,9 @@ function harness({
   let paneIndex = 0;
   let taskList = tasks;
   let verifyCalls = 0;
+  let replyIndex = 0;
+  let captureJsonCalls = 0;
+  const showCalls: Record<string, number> = {};
   const deps = {
     spawnToLog: (
       command: string,
@@ -131,10 +141,12 @@ function harness({
       if (isVerify && tasksDuringVerify && ++verifyCalls === verifyCallForTasks) taskList = tasksDuringVerify;
       // Between the watch's last look and the turn end.
       if (!isVerify && tasksAfterWait) taskList = tasksAfterWait;
-      fs.writeFileSync(logFile, isVerify ? verifyLog : waitLog);
+      // #3883: verifications that answer in turn (a 409 first, then the run of this call).
+      const next = isVerify ? verifySequence.shift() : undefined;
+      fs.writeFileSync(logFile, next ? next.log : isVerify ? verifyLog : waitLog);
       clock += 600_000; // each run takes ten minutes
       if (isVerify && commitDuringReverify) commitAt = (clock - T0) / 60_000 + 1;
-      return isVerify ? verifyExit : waitExit;
+      return next ? next.exit : isVerify ? verifyExit : waitExit;
     },
     run: (command: string, args: string[], opts?: { timeoutMs?: number }) => {
       ran.push({ command, args, opts });
@@ -155,6 +167,8 @@ function harness({
         return ok(screen);
       }
       if (args[0] === 'capture' && args.includes('--json')) {
+        // #3883 H-7: a read-back that fails (server busy) is not a state.
+        if (++captureJsonCalls <= captureJsonFails) return { status: 1, stdout: '', stderr: 'HTTP 503' };
         return ok(
           JSON.stringify({
             lastStopEventAt: lastStopMinute === null ? null : T0 + lastStopMinute * 60_000,
@@ -169,20 +183,43 @@ function harness({
         const one = shown[args[2]];
         return one ? ok(JSON.stringify({ task: one, lastVerificationRun: null })) : { status: 1, stdout: '', stderr: 'Error: task not found' };
       }
+      if (args[0] === 'reply' && args.includes('--since') && !args[args.indexOf('--since') + 1].startsWith('9999')) {
+        // #3883 H-6: this task's reply (`reply --since <task start>`); none by default, as for a tool without a transcript reader.
+        if (replyFails) return { status: 1, stdout: '', stderr: 'HTTP 503' };
+        const reply = replies.length === 0 ? null : replies[Math.min(replyIndex, replies.length - 1)];
+        replyIndex += 1;
+        return ok(JSON.stringify({ worktreeId: args[1], instanceId: args[args.indexOf('--instance') + 1], reply }));
+      }
       if (args[0] === 'reply') {
         // `reply --json` resolves --instance through the server, as defaultResolveTarget asks it (#3633 A).
         if (resolveError) return { status: 2, stdout: '', stderr: `Error: ${resolveError}` };
         const selector = args[args.indexOf('--instance') + 1];
-        return ok(JSON.stringify({ worktreeId: args[1], instanceId: resolved[selector] ?? selector, reply: null }));
+        const tool = resolvedTools[selector];
+        return ok(JSON.stringify({ worktreeId: args[1], instanceId: resolved[selector] ?? selector, ...(tool ? { cliToolId: tool } : {}), reply: null }));
       }
       if (args[0] === 'verify' && args[1] === 'history') {
+        if (historyStartMinute !== undefined) return ok(JSON.stringify([{ id: 99, startedAt: iso(historyStartMinute) }]));
         return ok(JSON.stringify(runStartMinute === null ? [] : [{ id: 1, startedAt: iso(runStartMinute) }]));
+      }
+      if (args[0] === 'verify' && args[1] === 'show') {
+        // The run a log printed (`Verifying: wt-1 (run <id>)`), read by its id (#3883 H-5).
+        const id = args[2];
+        const states = runs[id];
+        if (states) {
+          const n = showCalls[id] = (showCalls[id] ?? 0) + 1;
+          const view = states[Math.min(n - 1, states.length - 1)];
+          return ok(JSON.stringify({ run: { id: Number(id), worktreeId: 'wt-1', status: 'passed', startedAt: iso(runStartMinute ?? 0), ...view } }));
+        }
+        if (runStartMinute === null) return { status: 4, stdout: '', stderr: `Verification run ${id} not found.` };
+        return ok(JSON.stringify({ run: { id: Number(id), worktreeId: 'wt-1', status: 'passed', startedAt: iso(runStartMinute) } }));
       }
       throw new Error(`unexpected ${command} ${args.join(' ')}`);
     },
     // The server's resolve-target: an alias maps through `resolved`, anything else names itself.
     resolveTarget: (wt: string, selector: string) =>
-      resolveError ? { error: resolveError } : { instanceId: resolved[selector] ?? selector },
+      resolveError
+        ? { error: resolveError }
+        : { instanceId: resolved[selector] ?? selector, ...(resolvedTools[selector] ? { cliToolId: resolvedTools[selector] } : {}) },
     sleep: (ms: number) => {
       sleeps.push(ms);
       clock += ms;
@@ -231,11 +268,11 @@ describe('the wait command (3-3)', () => {
   it('always passes --instance, --on-prompt human and --verify', () => {
     const h = harness();
     expect(main(argv(), h.deps)).toBe(0);
+    // #3883 N8: the verification is never started inside `wait` (`wait --verify`): the manifest is taken
+    // before it, so `verify` is its own call, with the same instance, right after the wait.
     expect(h.spawned).toEqual([
-      {
-        command: 'commandmatedev',
-        args: ['wait', 'wt-1', '--instance', 'claude', '--on-prompt', 'human', '--verify', '--timeout', '10800'],
-      },
+      { command: 'commandmatedev', args: ['wait', 'wt-1', '--instance', 'claude', '--on-prompt', 'human', '--timeout', '10800'] },
+      { command: 'commandmatedev', args: ['verify', 'wt-1', '--task', 't-1', '--instance', 'claude'] },
     ]);
   });
 
@@ -335,7 +372,7 @@ describe('the run record', () => {
       taskId: 't-1',
       agent: 'claude',
       model: 'opus',
-      durationSec: 600,
+      durationSec: 1200, // the wait and the verification (#3883 N8), ten minutes each in the fake
     });
     expect(records()[0].note).toContain('passed=work-evidence,scope,lint,typecheck,unit-related@contract');
   });
@@ -361,7 +398,7 @@ describe('a passed verdict is never reused (#3477 review 1)', () => {
     appendRecord(runDir, '3477', { issue: 3477, stage: 'verify', result: 'ok', head: HEAD_A, taskId: 't-0' });
     const h = harness();
     expect(main(argv(), h.deps)).toBe(0);
-    expect(h.spawned).toHaveLength(1);
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait', 'verify']);
     expect(records()).toHaveLength(2);
   });
 
@@ -399,8 +436,9 @@ describe('the verdict is tied to the finished work (3-3, #3477 review 2)', () =>
   it('a commit after the verification started → verify --task again, and the re-verification is recorded', () => {
     const h = harness({ commitMinute: 7, verifyLog: FAIL_LOG, verifyExit: 20 });
     expect(main(argv(), h.deps)).toBe(20);
-    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait', 'verify']);
-    expect(h.spawned[1].args).toEqual(['verify', 'wt-1', '--task', 't-1', '--instance', 'claude']);
+    // The verification, then its re-verification (#3883 N8: the first is no longer inside `wait`).
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait', 'verify', 'verify']);
+    expect(h.spawned[2].args).toEqual(['verify', 'wt-1', '--task', 't-1', '--instance', 'claude']);
     expect(records()[0]).toMatchObject({ result: 'fail', head: HEAD_A });
     expect(records()[0].note).toContain('reverified=verify --task');
     expect(records()[0].note).toContain('failed=scope:FAIL');
@@ -410,13 +448,13 @@ describe('the verdict is tied to the finished work (3-3, #3477 review 2)', () =>
   it('started before the last turn end with changes since → re-verify', () => {
     const h = harness({ lastStopMinute: 8, status: ' M src/a.ts\n' });
     main(argv(), h.deps);
-    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait', 'verify']);
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait', 'verify', 'verify']);
   });
 
   it('started before the last turn end, nothing changed since → the verdict stands (3-3)', () => {
     const h = harness({ lastStopMinute: 8 });
     expect(main(argv(), h.deps)).toBe(0);
-    expect(h.spawned).toHaveLength(1);
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait', 'verify']);
     expect(records()[0].note).toContain('timing=before-signal(no change since)');
   });
 
@@ -514,7 +552,9 @@ describe('a newer task on the same worktree ends the call without a verdict (#35
   it('the task is not in the ledger → the wait verifies as before, unwatched', () => {
     const h = harness({ tasks: [task('t-0', -20)], tasksDuringWait: newTask });
     expect(main(argv(), h.deps)).toBe(0);
-    expect(h.spawned[0].args).toContain('--verify');
+    // Unwatched, it still verifies — as its own `verify` after the wait (#3883 N8), not inside it.
+    expect(h.spawned[0].args).not.toContain('--verify');
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait', 'verify']);
   });
 
   it('after a re-instruction: no verify --task on the old task', () => {
@@ -598,8 +638,10 @@ describe('a newer task on the same worktree ends the call without a verdict (#35
   it('unwatched (no task in the ledger): the instance still reaches the verification, through wait --verify', () => {
     const h = harness();
     main(argv(), h.deps);
+    // #3883 N8: through `verify --instance` after the wait, not `wait --verify`.
     expect(h.spawned.map((c) => c.args)).toEqual([
-      ['wait', 'wt-1', '--instance', 'claude', '--on-prompt', 'human', '--verify', '--timeout', '10800'],
+      ['wait', 'wt-1', '--instance', 'claude', '--on-prompt', 'human', '--timeout', '10800'],
+      ['verify', 'wt-1', '--task', 't-1', '--instance', 'claude'],
     ]);
   });
 
@@ -807,6 +849,13 @@ describe('defaultResolveTarget asks the server through the CLI’s ApiClient (#3
     expect(defaultResolveTarget('wt-1', 'codex 2', { cwd: tmp, cli: fakeCli() })).toEqual({ instanceId: 'codex-2' });
   });
 
+  it('withTool: the tool behind the instance comes too, for the signal rule (#3883)', () => {
+    expect(defaultResolveTarget('wt-1', 'codex 2', { cwd: tmp, cli: fakeCli(), withTool: true })).toEqual({
+      instanceId: 'codex-2',
+      cliToolId: 'codex',
+    });
+  });
+
   it('an error from the route is an error, not the selector as given', () => {
     const result = defaultResolveTarget('wt-1', 'Main', { cwd: tmp, cli: fakeCli() });
     expect(result).toHaveProperty('error');
@@ -831,7 +880,8 @@ describe('the instance is resolved through --cli, like every other call (#3633 A
     expect(main(args, deps)).toBe(0);
     expect(h.ran[0]).toMatchObject({ command: 'cm-3107', args: expect.arrayContaining(['reply', 'wt-1', '--instance', 'codex 2', '--json']) });
     expect(servers(h)).toEqual(new Set(['127.0.0.1:3107']));
-    expect(h.spawned[0].args).toEqual(['wait', 'wt-1', '--instance', 'codex-2', '--on-prompt', 'human', '--verify', '--timeout', '10800']);
+    expect(h.spawned[0].args).toEqual(['wait', 'wt-1', '--instance', 'codex-2', '--on-prompt', 'human', '--timeout', '10800']);
+    expect(h.spawned[1]).toEqual({ command: 'cm-3107', args: ['verify', 'wt-1', '--task', 't-1', '--instance', 'codex-2'] });
   });
 
   it('negative control: the default CLI resolves and waits on the default server', () => {
@@ -904,5 +954,429 @@ describe('the call stays tied to the task it started on (#3633 B)', () => {
     expect(main(noTask, h.deps)).toBe(0);
     expect(h.spawned.map((c) => c.args)[1]).toEqual(['verify', 'wt-1', '--task', 't-1', '--instance', 'claude']);
     expect(h.autoYesCalls()).toHaveLength(1);
+  });
+});
+
+describe('one log, one .exit and one record per execution (#3883)', () => {
+  it('two PRs of one Issue waited for at the same time: separate logs, records and resume points', () => {
+    const first = harness();
+    const second = harness({ waitLog: `second PR\n${PASS_LOG}` });
+    const spawn = first.deps.spawnToLog;
+    let secondExit: number | null = null;
+    // The second call runs while the first is still waiting.
+    first.deps.spawnToLog = (command, args, opts) => {
+      if (args[0] === 'wait' && secondExit === null) secondExit = main(argv('--item', 'd2'), second.deps);
+      return spawn(command, args, opts);
+    };
+    expect(main(argv('--item', 'd1'), first.deps)).toBe(0);
+    expect(secondExit).toBe(0);
+    expect(fs.readFileSync(path.join(runDir, 'wait-3477-d1.log'), 'utf8')).toBe(PASS_LOG);
+    expect(fs.readFileSync(path.join(runDir, 'wait-3477-d2.log'), 'utf8')).toBe(`second PR\n${PASS_LOG}`);
+    expect(fs.existsSync(path.join(runDir, 'wait-3477.log'))).toBe(false);
+    expect(records().map((r: { item?: string; key?: string }) => [r.item, r.key])).toEqual([
+      ['d2', '3477:3477-d2:t-1:a1'],
+      ['d1', '3477:3477-d1:t-1:a1'],
+    ]);
+    // PR d1 merged does not finish PR d2.
+    appendRecord(runDir, '3477', { issue: 3477, stage: 'merge', result: 'ok', head: HEAD_A, item: 'd1' });
+    const summary = summarize(records());
+    expect(summary.map((s: { item?: string; next: string | null }) => [s.item, s.next])).toEqual([
+      ['d1', null],
+      ['d2', 'contract'],
+    ]);
+  });
+
+  it('two attempts of one work item at the same time: the second takes the next log, the first keeps its own', () => {
+    const first = harness();
+    const second = harness({ waitLog: `attempt 2\n${PASS_LOG}` });
+    const spawn = first.deps.spawnToLog;
+    let secondExit: number | null = null;
+    first.deps.spawnToLog = (command, args, opts) => {
+      if (args[0] === 'wait' && secondExit === null) secondExit = main(argv(), second.deps);
+      return spawn(command, args, opts);
+    };
+    expect(main(argv(), first.deps)).toBe(0);
+    expect(fs.readFileSync(path.join(runDir, 'wait-3477.log'), 'utf8')).toBe(PASS_LOG);
+    expect(fs.readFileSync(path.join(runDir, 'wait-3477.a2.log'), 'utf8')).toBe(`attempt 2\n${PASS_LOG}`);
+    expect(records().map((r: { key?: string }) => r.key)).toEqual(['3477:3477:t-1:a2', '3477:3477:t-1:a1']);
+    // No work item: the record is the Issue's, as before.
+    expect(records().every((r: Record<string, unknown>) => !('item' in r))).toBe(true);
+  });
+
+  it('a --log that already exists is another attempt’s: exit 2, nothing waited for', () => {
+    const logFile = path.join(tmp, 'mine.log');
+    fs.writeFileSync(logFile, 'an earlier attempt\n');
+    const h = harness();
+    expect(main(argv('--log', logFile), h.deps)).toBe(2);
+    expect(h.spawned).toEqual([]);
+    expect(fs.readFileSync(logFile, 'utf8')).toBe('an earlier attempt\n');
+    expect(h.err.join('\n')).toMatch(/already exists/);
+    // A new --log is taken as before (negative control).
+    const fresh = harness();
+    expect(main(argv('--log', path.join(tmp, 'new.log')), fresh.deps)).toBe(0);
+    expect(fs.readFileSync(path.join(tmp, 'new.log'), 'utf8')).toBe(PASS_LOG);
+  });
+
+  it('rejects an --item that cannot be part of a file name', () => {
+    expect(main(argv('--item', '../x'), harness().deps)).toBe(2);
+    expect(parseArgs(['--run-dir', 'r', ...ARGS, '--item', 'd1.b']).error).toMatch(/--item/);
+  });
+
+  it('defaultSpawnToLog: an .exit written by someone else is not this command’s exit status', () => {
+    const logFile = path.join(tmp, 'w.log');
+    // Another attempt (or a stale run) writes "0" to the same .exit while this command still runs.
+    const script = `require('fs').writeFileSync(${JSON.stringify(`${logFile}.exit`)}, '0\\n'); setTimeout(() => process.exit(7), 1500)`;
+    const status = defaultSpawnToLog(process.execPath, ['-e', script], { cwd: tmp, logFile, watch: () => false, pollMs: 100 });
+    expect(status).toBe(7);
+  });
+
+  it('the verification start is read by the run id the log printed, not the worktree’s newest run', () => {
+    // Run 12 started at 01:05; a later run (01:08) is the newest in history; the commit landed at 01:07.
+    const h = harness({ commitMinute: 7, historyStartMinute: 8 });
+    expect(main(argv(), h.deps)).toBe(0);
+    // The verification and its re-verification (run 12's start, 01:05, is before the commit; #3883 N8 adds the first).
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait', 'verify', 'verify']);
+    expect(records()[0].note).toContain('run=12');
+    expect(h.ran.some((c) => c.args[0] === 'verify' && c.args[1] === 'history')).toBe(false);
+  });
+
+  it('a log without a run id: the start is unknown — another run of the history is not taken', () => {
+    const h = harness({ waitExit: 20, waitLog: FAIL_LOG, commitMinute: 3, historyStartMinute: 1 });
+    expect(main(argv(), h.deps)).toBe(20);
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait']);
+    expect(records()[0].note).toContain('run-start=unknown');
+  });
+
+  it('a run id of another worktree is not this verification’s start', () => {
+    const h = harness({ commitMinute: 7, runs: { '12': [{ worktreeId: 'wt-9' }] } });
+    expect(main(argv(), h.deps)).toBe(0);
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait', 'verify']);
+    expect(records()[0].note).toContain('run-start=unknown');
+  });
+});
+
+describe('the completion signal is this task’s, at this HEAD (#3883 H-6, P4)', () => {
+  const t1 = task('t-1', -2);
+  const agy = (...extra: string[]) => [...argv().map((a) => (a === 'claude' ? 'antigravity' : a)), '--signal-timeout', '60', ...extra];
+  const kinds = (h: ReturnType<typeof harness>) => h.spawned.map((c) => c.args[0]);
+
+  it('a signal left on the pane by an earlier task (no turn of this task ended) is not taken: no verification', () => {
+    const h = harness({ tasks: [t1], pane: ['IMPL_COMPLETED'], lastStopMinute: -5 });
+    expect(main(agy(), h.deps)).toBe(3);
+    expect(kinds(h)).toEqual(['wait']);
+    expect(records()[0].note).toMatch(/^unconfirmed: no IMPL_COMPLETED line within 60s; /);
+    expect(h.autoYesCalls()).toEqual([]);
+  });
+
+  it('the same pane after a turn of this task ended is still not this task’s: the turn may have ended mid-work', () => {
+    // review-3883-d1 (2) P2-1: an earlier task's line stays on the screen, and this task's
+    // `schedule` / stop hook ends a turn without finishing — the stop time says nothing about the line.
+    const h = harness({ tasks: [t1], pane: ['IMPL_COMPLETED'], lastStopMinute: 4 });
+    expect(main(agy(), h.deps)).toBe(3);
+    expect(kinds(h)).toEqual(['wait']);
+    expect(records()[0].note).toMatch(/^unconfirmed: no IMPL_COMPLETED line within 60s; /);
+    expect(h.autoYesCalls()).toEqual([]);
+  });
+
+  it('no reply yet and the turn end unknown: a bare line on the pane is not taken either', () => {
+    const h = harness({ tasks: [t1], pane: ['IMPL_COMPLETED'], lastStopMinute: null });
+    expect(main(agy(), h.deps)).toBe(3);
+    expect(kinds(h)).toEqual(['wait']);
+  });
+
+  it('a reply that cannot be read is not "no reply": the bare pane line still does not count', () => {
+    const h = harness({ tasks: [t1], pane: ['IMPL_COMPLETED'], lastStopMinute: 4, replyFails: true });
+    expect(main(agy(), h.deps)).toBe(3);
+    expect(kinds(h)).toEqual(['wait']);
+  });
+
+  it('a pane line naming this HEAD, committed during this task, is this task’s (negative control)', () => {
+    // The task was created at 00:58; the HEAD was committed at 01:03.
+    const h = harness({ tasks: [t1], pane: [`IMPL_COMPLETED head=${'a'.repeat(12)}`], replyFails: true });
+    expect(main(agy(), h.deps)).toBe(0);
+    expect(kinds(h)).toEqual(['wait', 'verify']);
+    expect(records()[0].note).toContain('signal=seen(pane,head)');
+  });
+
+  it('a pane line naming this HEAD committed before the task is an earlier task’s', () => {
+    const h = harness({ tasks: [t1], pane: [`IMPL_COMPLETED head=${'a'.repeat(12)}`], commitMinute: -5 });
+    expect(main(agy(), h.deps)).toBe(3);
+    expect(kinds(h)).toEqual(['wait']);
+  });
+
+  it('this task’s reply decides over the pane: a reply without the signal is not yet, whatever the pane shows', () => {
+    const h = harness({ tasks: [t1], pane: ['IMPL_COMPLETED'], replies: ['still working on the tests'] });
+    expect(main(agy(), h.deps)).toBe(3);
+    expect(kinds(h)).toEqual(['wait']);
+    const since = h.ran.find((c) => c.args[0] === 'reply' && c.args.includes('--since') && !c.args.includes('9999-12-31T23:59:59Z'));
+    expect(since?.args[since.args.indexOf('--since') + 1]).toBe(iso(-2));
+  });
+
+  it('the signal in this task’s reply is taken', () => {
+    const h = harness({ tasks: [t1], pane: ['nothing'], replies: ['done\nIMPL_COMPLETED'] });
+    expect(main(agy(), h.deps)).toBe(0);
+    expect(records()[0].note).toContain('signal=seen(reply)');
+  });
+
+  it('a signal that names another HEAD is not this HEAD’s', () => {
+    expect(main(agy(), harness({ tasks: [t1], replies: [`IMPL_COMPLETED head=${'b'.repeat(7)}`] }).deps)).toBe(3);
+    expect(main(agy(), harness({ tasks: [t1], replies: [`IMPL_COMPLETED head=${'a'.repeat(7)}`] }).deps)).toBe(0);
+  });
+
+  it('a mid-work turn end (hook_stop, no signal yet) starts no verification — not even inside wait --verify', () => {
+    const h = harness({ pane: ['working…'] });
+    expect(main(agy(), h.deps)).toBe(3);
+    expect(h.spawned).toHaveLength(1);
+    expect(h.spawned[0].args).not.toContain('--verify');
+  });
+
+  it('the verification starts once the signal is seen', () => {
+    const h = harness({ pane: ['working…', 'working…', 'IMPL_COMPLETED'] });
+    expect(main(agy(), h.deps)).toBe(0);
+    expect(kinds(h)).toEqual(['wait', 'verify']);
+    // The pane was read until the signal, and only then was the verification started (no re-wait after it).
+    expect(h.sleeps.filter((ms) => ms === 30_000)).toHaveLength(2);
+  });
+});
+
+describe('another run of the worktree is waited out, and only this call’s run is judged (#3883 P4)', () => {
+  const t1 = task('t-1', -10);
+  const busy = (run: number) => `Error: A verification run is already in progress for 'wt-1' (run ${run}). Wait for it to finish, then retry.\n`;
+  const OWN_FAIL = `Verifying: wt-1 (run 13)\n${FAIL_LOG}`;
+
+  it('after a re-instruction: the old run is still going → wait for it, verify again, the verdict is the new run’s', () => {
+    const h = harness({
+      verifySequence: [{ exit: 99, log: busy(7) }, { exit: 20, log: OWN_FAIL }],
+      runs: { '7': [{ status: 'running' }, { status: 'cancelled' }] },
+    });
+    expect(main(argv('--after-reinstruct'), h.deps)).toBe(20);
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait', 'verify', 'verify']);
+    expect(records()[0].note).toContain('waited-for=run 7');
+    expect(records()[0].note).toContain('failed=scope:FAIL');
+    expect(h.ran.filter((c) => c.args[0] === 'verify' && c.args[1] === 'show' && c.args[2] === '7')).toHaveLength(2);
+  });
+
+  it('wait --verify that hit another run: that run is waited out and this call verifies', () => {
+    // #3883 N8: the wait no longer verifies; the verification it is followed by is the one that meets the other run.
+    const h = harness({
+      waitLog: 'Completed: wt-1 (basis=hook_stop)\n',
+      verifySequence: [{ exit: 99, log: busy(7) }, { exit: 0, log: PASS_LOG }],
+      runs: { '7': [{ status: 'passed' }] },
+    });
+    expect(main(argv(), h.deps)).toBe(0);
+    expect(h.spawned.map((c) => c.args)).toEqual([
+      ['wait', 'wt-1', '--instance', 'claude', '--on-prompt', 'human', '--timeout', '10800'],
+      ['verify', 'wt-1', '--task', 't-1', '--instance', 'claude'],
+      ['verify', 'wt-1', '--task', 't-1', '--instance', 'claude'],
+    ]);
+    expect(records()[0].note).toContain('waited-for=run 7');
+    expect(h.autoYesCalls()).toHaveLength(1);
+    // The turn end the wait saw is still named.
+    expect(records()[0].note).toContain('basis=hook_stop');
+  });
+
+  it('a run that never ends: exit stays a non-verdict, recorded, Auto-Yes kept', () => {
+    const h = harness({
+      tasks: [t1],
+      verifySequence: [{ exit: 99, log: busy(7) }],
+      runs: { '7': [{ status: 'running' }] },
+    });
+    expect(main(argv(), h.deps)).toBe(99);
+    expect(records()[0].note).toContain('waited-for=run 7(still running)');
+    expect(h.autoYesCalls()).toEqual([]);
+  });
+
+  it('a newer task while waiting for the old run → exit 3, no second verification', () => {
+    const h = harness({
+      tasks: [t1],
+      verifySequence: [{ exit: 99, log: busy(7) }],
+      runs: { '7': [{ status: 'running' }] },
+    });
+    const fakeRun = h.deps.run;
+    let shown = false;
+    h.deps.run = (command: string, args: string[], opts?: { timeoutMs?: number }) => {
+      if (args[0] === 'verify' && args[1] === 'show') shown = true;
+      // Once the old run has been looked at, the task list shows a second contract.
+      if (shown && args[0] === 'task' && args[1] === 'list') {
+        return { status: 0, stdout: JSON.stringify([task('t-2', 30), t1]), stderr: '' };
+      }
+      return fakeRun(command, args, opts);
+    };
+    expect(main(argv(), h.deps)).toBe(3);
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait', 'verify']);
+  });
+});
+
+describe('Auto-Yes that cannot be read back is unknown, not off (#3883 H-7)', () => {
+  it('every read-back after --disable fails → auto-yes=unknown, asked again each time', () => {
+    const h = harness({ captureJsonFails: 99 });
+    expect(main(argv(), h.deps)).toBe(0);
+    expect(h.autoYesCalls()).toHaveLength(3);
+    expect(records()[0].note).toContain('auto-yes=unknown');
+    expect(h.err.join('\n')).toMatch(/auto-yes for wt-1 \(claude\) is unknown/);
+  });
+
+  it('--auto-yes-off: a read-back that fails once is asked again, and off only once it reads', () => {
+    const once = harness({ captureJsonFails: 1 });
+    expect(main(['--auto-yes-off', '--wt', 'wt-1', '--instance', 'claude'], once.deps)).toBe(0);
+    expect(once.autoYesCalls()).toHaveLength(2);
+    const never = harness({ captureJsonFails: 99 });
+    expect(main(['--auto-yes-off', '--wt', 'wt-1', '--instance', 'claude'], never.deps)).toBe(1);
+    expect(never.out.join('\n')).toContain('auto-yes wt-1 (claude): unknown');
+  });
+
+  it('a capture that answers with something other than a state object is not off either', () => {
+    const h = harness();
+    const fakeRun = h.deps.run;
+    h.deps.run = (command: string, args: string[], opts?: { timeoutMs?: number }) =>
+      args[0] === 'capture' && args.includes('--json') ? { status: 0, stdout: 'null', stderr: '' } : fakeRun(command, args, opts);
+    expect(main(['--auto-yes-off', '--wt', 'wt-1', '--instance', 'claude'], h.deps)).toBe(1);
+  });
+});
+
+describe('a signal with no task to date it by (#3883, negative control)', () => {
+  it('the ledger does not show the task: the pane line is taken as before, noted signal-task=unknown', () => {
+    // The worker finished before this call started; nothing says which task the line is of.
+    const h = harness({ pane: ['IMPL_COMPLETED'], lastStopMinute: -30 });
+    const args = [...argv().map((a) => (a === 'claude' ? 'antigravity' : a)), '--signal-timeout', '60'];
+    expect(main(args, h.deps)).toBe(0);
+    expect(records()[0].note).toContain('signal=seen signal-task=unknown');
+    expect(h.ran.some((c) => c.args[0] === 'reply' && !c.args.includes('9999-12-31T23:59:59Z'))).toBe(false);
+  });
+});
+
+describe('every Antigravity instance waits for the signal, whatever its id (#3883, review-3883-d1 P2-2)', () => {
+  const base = (instance: string, ...extra: string[]) =>
+    [...argv().map((a) => (a === 'claude' ? instance : a)), '--signal-timeout', '60', ...extra];
+
+  it('a second instance (antigravity-2): a mid-work turn end starts no verification', () => {
+    const h = harness({ pane: ['working…'], resolvedTools: { 'antigravity-2': 'antigravity' } });
+    expect(main(base('antigravity-2'), h.deps)).toBe(3);
+    expect(h.spawned).toHaveLength(1);
+    expect(h.spawned[0].args).not.toContain('--verify');
+    expect(h.autoYesCalls()).toEqual([]);
+  });
+
+  it('an alias of it: the tool the server resolved decides, not the name given', () => {
+    const h = harness({ pane: ['working…'], resolved: { 'agy b': 'antigravity-2' }, resolvedTools: { 'agy b': 'antigravity' } });
+    expect(main(base('agy b'), h.deps)).toBe(3);
+    expect(h.spawned.map((c) => c.args)).toEqual([['wait', 'wt-1', '--instance', 'antigravity-2', '--on-prompt', 'human', '--timeout', '10800']]);
+  });
+
+  it('through the CLI (no injected resolver): the cliToolId of `reply --json` is read', () => {
+    const h = harness({ pane: ['working…'], resolved: { 'agy b': 'antigravity-2' }, resolvedTools: { 'agy b': 'antigravity' } });
+    const { resolveTarget: _injected, ...deps } = h.deps;
+    expect(main(base('agy b'), deps)).toBe(3);
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait']);
+  });
+
+  it('a server that does not name the tool: an id of the form antigravity-<n> still needs the signal', () => {
+    const h = harness({ pane: ['working…'] });
+    expect(main(base('antigravity-2'), h.deps)).toBe(3);
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait']);
+  });
+
+  it('the signal seen: the second instance is verified (negative control)', () => {
+    const h = harness({ pane: ['IMPL_COMPLETED'], resolvedTools: { 'antigravity-2': 'antigravity' } });
+    expect(main(base('antigravity-2'), h.deps)).toBe(0);
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait', 'verify']);
+  });
+
+  it('another tool’s second instance (codex-2) does not wait for the signal (negative control)', () => {
+    const h = harness({ pane: ['no signal'], resolvedTools: { 'codex-2': 'codex' } });
+    expect(main(base('codex-2'), h.deps)).toBe(0);
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait', 'verify']);
+    expect(h.ran.some((c) => c.args.includes('--pane'))).toBe(false);
+  });
+});
+
+describe('the inputs of the execution are kept with the verdict (#3883 H-8)', () => {
+  const t1 = task('t-1', -10);
+  /** A worktree and a HOME of their own, with the files the manifest reads. */
+  function env() {
+    const wt = path.join(tmp, 'wt');
+    const home = path.join(tmp, 'home');
+    fs.mkdirSync(path.join(wt, '.claude'), { recursive: true });
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(wt, '.claude', 'settings.local.json'), '{"model":"opus[1m]"}');
+    fs.writeFileSync(path.join(wt, 'package-lock.json'), '{"lockfileVersion":3}');
+    fs.writeFileSync(path.join(home, '.claude', 'settings.json'), '{"model":"opus[1m]"}');
+    return { wt, home };
+  }
+  /** Run main with `change` applied when the wait (`wait`) or the verification (`verify`) runs. */
+  function go(h: ReturnType<typeof harness>, when: 'wait' | 'verify' | null, change: () => void) {
+    const { wt, home } = env();
+    const inner = h.deps.spawnToLog;
+    h.deps.spawnToLog = (command: string, args: string[], opts: { logFile: string; watch?: () => boolean }) => {
+      if (args[0] === when) change();
+      return inner(command, args, opts);
+    };
+    return main(argv('--worktree', wt), { ...h.deps, home } as Parameters<typeof main>[1]);
+  }
+  const lockfile = () => fs.writeFileSync(path.join(tmp, 'wt', 'package-lock.json'), '{"lockfileVersion":3,"changed":true}');
+  const globalModel = () => fs.writeFileSync(path.join(tmp, 'home', '.claude', 'settings.json'), '{"model":"fable"}');
+
+  it('nothing changed: the verdict names its environment and the manifest is kept under the key (negative control)', () => {
+    const h = harness({ tasks: [t1] });
+    expect(go(h, null, () => {})).toBe(0);
+    const note = records()[0].note as string;
+    expect(note).toMatch(/ env=[0-9a-f]{12} auto-yes=off$/);
+    expect(note).not.toContain('env-changed');
+    const kept = JSON.parse(fs.readFileSync(path.join(runDir, 'wait-3477.env.json'), 'utf8'));
+    expect(kept.key).toBe('3477:3477:t-1:a1');
+    expect(kept.end.globalModel).toBe('opus[1m]');
+    expect(kept.changed).toEqual({ duringTask: [], duringVerify: [] });
+  });
+
+  it('the lockfile changes during the verification → no verdict (exit 3), Auto-Yes kept', () => {
+    const h = harness({ tasks: [t1] });
+    expect(go(h, 'verify', lockfile)).toBe(3);
+    expect(records()[0]).toMatchObject({ result: 'fail' });
+    expect(records()[0].note).toMatch(/^unconfirmed: the inputs changed during the verification \(lockfile; see wait-3477\.env\.json\); exit=0\(passed\)/);
+    expect(h.autoYesCalls()).toEqual([]);
+  });
+
+  it('the global default model changes during the verification → no verdict either', () => {
+    const h = harness({ tasks: [t1] });
+    expect(go(h, 'verify', globalModel)).toBe(3);
+    expect(records()[0].note).toContain('(globalModel;');
+  });
+
+  it('a change while the worker worked is recorded with the verdict, which stands for the end environment', () => {
+    const h = harness({ tasks: [t1] });
+    expect(go(h, 'wait', lockfile)).toBe(0);
+    expect(records()[0]).toMatchObject({ result: 'ok' });
+    expect(records()[0].note).toMatch(/ env=[0-9a-f]{12} env-changed=lockfile auto-yes=off$/);
+  });
+
+  it('wait --verify (no split): a change is recorded, not judged — the moment of the verification is not known', () => {
+    // #3883 N8: no call verifies inside `wait` any more, so the moment is known for every call: the manifest is
+    // taken right before `verify` starts. A change while the worker worked is the work's (recorded, exit 0).
+    const h = harness();
+    expect(go(h, 'wait', globalModel)).toBe(0);
+    expect(h.spawned[0].args).not.toContain('--verify');
+    expect(records()[0].note).toContain('env-changed=globalModel');
+    const kept = JSON.parse(fs.readFileSync(path.join(runDir, 'wait-3477.env.json'), 'utf8'));
+    expect(kept.verify.globalModel).toBe('fable');
+    expect(kept.changed).toEqual({ duringTask: ['globalModel'], duringVerify: [] });
+  });
+
+  it('a call that was not split before: a change as soon as the verification starts → no verdict (exit 3), Auto-Yes kept (#3883 N8)', () => {
+    // The verification of `wait --verify` began right after its turn-end line; a manifest read off the log came
+    // after that start. Now the manifest is taken before `verify` is started, so even a change at its first moment counts.
+    const h = harness();
+    expect(go(h, 'verify', globalModel)).toBe(3);
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait', 'verify']);
+    expect(records()[0].note).toMatch(/^unconfirmed: the inputs changed during the verification \(globalModel; see wait-3477\.env\.json\)/);
+    expect(h.autoYesCalls()).toEqual([]);
+  });
+
+  it('a call that was not split before, with a log that shows no turn end: a change during the work is the work’s (#3883 N8)', () => {
+    const noTurnEnd = PASS_LOG.split('\n').filter((line) => !line.startsWith('Completed:')).join('\n');
+    expect(go(harness({ waitLog: noTurnEnd }), 'wait', globalModel)).toBe(0);
+    expect(records()[0].note).toContain('env-changed=globalModel');
+    // The same change during the verification is still not a verdict (positive control).
+    fs.rmSync(runDir, { recursive: true, force: true });
+    expect(go(harness({ waitLog: noTurnEnd }), 'verify', globalModel)).toBe(3);
   });
 });

@@ -16,7 +16,7 @@ import { findClaudeChrome } from '../../prompt-detect-multiple-choice';
 import { positiveVerdict } from '../verdicts';
 import { STATUS_REASON } from '../../status-reason';
 import { detectClaudeDialog } from './prompt';
-import { findAskUserQuestionTabRow } from './picker-chrome';
+import { findAskUserQuestionTabRow, isAskUserQuestionTabRow } from './picker-chrome';
 import { STATUS_CHECK_LINE_COUNT, liveRegionOf } from '../frame';
 import { CLAUDE_LIVE_REGION } from './live-region';
 import { createToolStatusDetector } from '../run-detection';
@@ -72,10 +72,19 @@ export function findClaudeTranscriptTail(contentLines: readonly string[]): numbe
   return index;
 }
 
-/** The confirmation page's question, as the whole row (Issue #3748). */
-const CLAUDE_SUBMIT_CONFIRM_QUESTION_ROW = /^\s*Ready to submit your answers\?\s*$/;
+/** The confirmation page's question (Issue #3748), the whole of its paragraph. */
+const CLAUDE_SUBMIT_CONFIRM_QUESTION = 'Ready to submit your answers?';
+/**
+ * How many rows the question may wrap onto (Issue #3791): two at 24 and at 16
+ * columns, measured; the bound keeps a long paragraph from being joined.
+ */
+const CLAUDE_SUBMIT_CONFIRM_QUESTION_MAX_ROWS = 3;
 /** Its option 1, as the whole row, cursor or not. */
 const CLAUDE_SUBMIT_ANSWERS_OPTION_ROW = /^\s*(?:❯\s*)?1\.\s+Submit answers\s*$/;
+/** Option 1 wrapped under its label (Issue #3791, measured at 16 columns): `❯ 1. Submit` … */
+const CLAUDE_SUBMIT_ANSWERS_WRAPPED_HEAD_ROW = /^\s*(?:❯\s*)?1\.\s+Submit\s*$/;
+/** … then `answers`, indented, on the next row. */
+const CLAUDE_SUBMIT_ANSWERS_WRAPPED_TAIL_ROW = /^\s+answers\s*$/;
 /** Its option 2, as the whole row, cursor or not. */
 const CLAUDE_SUBMIT_CANCEL_OPTION_ROW = /^\s*(?:❯\s*)?2\.\s+Cancel\s*$/;
 /** The multi-question tab bar's `✔ Submit` tab — only that bar leads to this page. */
@@ -85,6 +94,24 @@ const CLAUDE_SUBMIT_TAB_PATTERN = /✔\s*Submit/;
  * question and answer (`● …` / `→ …`) between them, wrapped at the pane width.
  */
 const CLAUDE_SUBMIT_CONFIRM_TAB_LOOKBACK = 200;
+/** The heading of the page's answer list (Issue #3791), the whole of its paragraph. */
+const CLAUDE_SUBMIT_REVIEW_HEADING = 'Review your answers';
+/** How many rows the heading may wrap onto: two at 16 columns, measured. */
+const CLAUDE_SUBMIT_REVIEW_HEADING_MAX_ROWS = 2;
+/**
+ * A row of the answer list between the heading and the question (Issue
+ * #3791), as measured at 16 to 200 columns: ` ● question`, ` │ ● question` and
+ * ` │   …` (a long question's gutter), and the question's continuation and its
+ * `→ answer` indented three columns.
+ */
+const CLAUDE_SUBMIT_REVIEW_LIST_ROW = /^ (?:[●│] | {2,}\S)/;
+/**
+ * The tab bar wrapped onto two rows (Issue #3791, measured at 16 columns):
+ * the arrow and the checkboxes on the first, `✔` closing it …
+ */
+const CLAUDE_SUBMIT_TAB_WRAPPED_GLYPH_ROW = /^\s?←(?:\s*[☐☒☑])+\s*✔\s*$/;
+/** … and the headings on the second, `Submit→` closing it. */
+const CLAUDE_SUBMIT_TAB_WRAPPED_LABEL_ROW = /^[^←→☐☒☑✔]*\bSubmit\s*→\s*$/;
 
 /** The nearest non-blank row above `row`, or -1. */
 function previousNonBlankRow(lines: readonly string[], row: number): number {
@@ -95,6 +122,68 @@ function previousNonBlankRow(lines: readonly string[], row: number): number {
 }
 
 /**
+ * The paragraph whose last row is `lastRow`: its first row, and its rows
+ * trimmed and joined with one space — how a sentence wrapped at the pane width
+ * reads again. At most `maxRows` rows; a longer paragraph reads as null text.
+ */
+function paragraphEndingAt(
+  lines: readonly string[],
+  lastRow: number,
+  maxRows: number,
+): { top: number; text: string | null } {
+  let top = lastRow;
+  while (top > 0 && lines[top - 1].trim() !== '') top--;
+  if (lastRow - top + 1 > maxRows) return { top, text: null };
+  const text = lines.slice(top, lastRow + 1).map(row => row.trim()).join(' ');
+  return { top, text };
+}
+
+/** The first row of option 1 right above `cancelRow` (whole, or wrapped as measured), or -1. */
+function submitOptionTopRow(lines: readonly string[], cancelRow: number): number {
+  const row = cancelRow - 1;
+  if (row < 0) return -1;
+  if (CLAUDE_SUBMIT_ANSWERS_OPTION_ROW.test(lines[row])) return row;
+  if (
+    row >= 1 &&
+    CLAUDE_SUBMIT_ANSWERS_WRAPPED_TAIL_ROW.test(lines[row]) &&
+    CLAUDE_SUBMIT_ANSWERS_WRAPPED_HEAD_ROW.test(lines[row - 1])
+  ) {
+    return row - 1;
+  }
+  return -1;
+}
+
+/** Whether `row` ends the tab bar: the whole bar, or its wrapped second row under its first. */
+function endsSubmitTabBar(lines: readonly string[], row: number): boolean {
+  if (isAskUserQuestionTabRow(lines[row]) && CLAUDE_SUBMIT_TAB_PATTERN.test(lines[row])) return true;
+  return (
+    row >= 1 &&
+    CLAUDE_SUBMIT_TAB_WRAPPED_LABEL_ROW.test(lines[row]) &&
+    CLAUDE_SUBMIT_TAB_WRAPPED_GLYPH_ROW.test(lines[row - 1])
+  );
+}
+
+/**
+ * The page read from the question up through its answer list (Issue #3791),
+ * where the tab bar is not within {@link CLAUDE_SUBMIT_CONFIRM_TAB_LOOKBACK}
+ * rows or not on screen at all. Every row between the question and the top of
+ * the list is a row of the list ({@link CLAUDE_SUBMIT_REVIEW_LIST_ROW}); above
+ * the list is the `Review your answers` heading with the tab bar right above
+ * it, or nothing: a pane shorter than the page shows its bottom only (measured
+ * at 40x30 and 200x12), so the list or the heading is then the frame's top.
+ */
+function readsUpThroughReviewList(lines: readonly string[], questionTop: number): boolean {
+  let row = questionTop - 1;
+  while (row >= 0 && (lines[row].trim() === '' || CLAUDE_SUBMIT_REVIEW_LIST_ROW.test(lines[row]))) row--;
+  if (row < 0) return true;
+
+  const heading = paragraphEndingAt(lines, row, CLAUDE_SUBMIT_REVIEW_HEADING_MAX_ROWS);
+  if (heading.text !== CLAUDE_SUBMIT_REVIEW_HEADING) return false;
+  const tabRow = previousNonBlankRow(lines, heading.top);
+  return tabRow < 0 || endsSubmitTabBar(lines, tabRow);
+}
+
+/**
  * Is this frame Claude's `AskUserQuestion` confirmation page? (Issue #3748)
  *
  * Read strictly, row by row, from the end of the transcript up — all of:
@@ -102,9 +191,19 @@ function previousNonBlankRow(lines: readonly string[], row: number): number {
  *  1. the transcript's last row ({@link findClaudeTranscriptTail}, which steps
  *     over Claude's chrome) is `2. Cancel`, the row above it `1. Submit
  *     answers`, and the cursor `❯` is on one of the two;
- *  2. the nearest non-blank row above the options IS `Ready to submit your
- *     answers?` — the whole row, not a row that contains it;
+ *  2. the nearest paragraph above the options IS `Ready to submit your
+ *     answers?` — the whole paragraph, not one that contains it;
  *  3. the multi-question tab bar (`←  ☒ …  ✔ Submit  →`) sits above that.
+ *
+ * Issue #3791 reads the shapes a live Claude 2.1.310 drew
+ * (`tests/fixtures/claude-confirm-live-3791/`), and only those: in a narrow
+ * pane the question, the heading and option 1 wrap at the pane width and the
+ * tab bar wraps onto two rows; long questions put the tab bar more than 200
+ * rows up; a pane shorter than the page cuts its head off, tab bar included.
+ * The last two are read up through the answer list
+ * ({@link readsUpThroughReviewList}) and only on a frame with no input box —
+ * the page replaces it. An unknown footer under `2. Cancel` was never drawn,
+ * so a frame with one is still not this page.
  *
  * Deliberately NOT `detectClaudeDialog`'s `ask_user` kind: that classifies by a
  * substring of the four rows above the options, so a Bash approval whose command
@@ -120,15 +219,20 @@ export function isClaudeAskUserQuestionConfirmPage(frame: NormalizedFrame): bool
   const cancelRow = findClaudeTranscriptTail(lines);
   if (cancelRow < 0 || !CLAUDE_SUBMIT_CANCEL_OPTION_ROW.test(lines[cancelRow])) return false;
 
-  const submitRow = cancelRow - 1;
-  if (submitRow < 0 || !CLAUDE_SUBMIT_ANSWERS_OPTION_ROW.test(lines[submitRow])) return false;
+  const submitRow = submitOptionTopRow(lines, cancelRow);
+  if (submitRow < 0) return false;
   if (!lines[submitRow].includes('❯') && !lines[cancelRow].includes('❯')) return false;
 
-  const questionRow = previousNonBlankRow(lines, submitRow);
-  if (questionRow < 0 || !CLAUDE_SUBMIT_CONFIRM_QUESTION_ROW.test(lines[questionRow])) return false;
+  const questionEnd = previousNonBlankRow(lines, submitRow);
+  if (questionEnd < 0) return false;
+  const question = paragraphEndingAt(lines, questionEnd, CLAUDE_SUBMIT_CONFIRM_QUESTION_MAX_ROWS);
+  if (question.text !== CLAUDE_SUBMIT_CONFIRM_QUESTION) return false;
 
-  const tabRow = findAskUserQuestionTabRow(lines, questionRow, CLAUDE_SUBMIT_CONFIRM_TAB_LOOKBACK);
-  return tabRow >= 0 && CLAUDE_SUBMIT_TAB_PATTERN.test(lines[tabRow]);
+  const tabRow = findAskUserQuestionTabRow(lines, question.top, CLAUDE_SUBMIT_CONFIRM_TAB_LOOKBACK);
+  if (tabRow >= 0 && CLAUDE_SUBMIT_TAB_PATTERN.test(lines[tabRow])) return true;
+
+  if (findClaudeInputBox(lines as string[]) !== null) return false;
+  return readsUpThroughReviewList(lines, question.top);
 }
 
 /**

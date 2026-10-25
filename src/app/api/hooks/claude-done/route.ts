@@ -17,6 +17,8 @@ import { broadcastMessage } from '@/lib/ws-server';
 import { parseClaudeOutput } from '@/lib/claude-output';
 import { recordClaudeConversation } from '@/lib/conversation-logger';
 import { applyAgentStopEvent } from '@/lib/hooks/agent-event-service';
+import { CLAUDE_CLI_TOOL_ID } from '@/lib/hooks/sources/claude/tool-id';
+import { captureLegacyStopTarget, settleLegacyStop } from '@/lib/session/waiting-episode-binding';
 import { createLogger } from '@/lib/logger';
 import { readJsonObjectBody } from '@/lib/api/read-json-body';
 
@@ -51,6 +53,13 @@ export async function POST(request: NextRequest) {
         { status: 404 }
       );
     }
+
+    // Issue #3798: the waiting episode this stop is about, fixed before the
+    // first await below. This endpoint names no agent session, so a wait that
+    // opens while the capture and the log run is not this stop's to close; the
+    // body read above comes first because the worktree id is in it — a limit
+    // the design records (docs/design/issue-3798-waiting-episode.md 規則 6).
+    const stopTarget = captureLegacyStopTarget(worktree.id, CLAUDE_CLI_TOOL_ID, CLAUDE_CLI_TOOL_ID);
 
     // Capture Claude output from tmux
     let output: string;
@@ -93,6 +102,11 @@ export async function POST(request: NextRequest) {
       worktreeId: body.worktreeId,
       message,
     });
+
+    // Issue #3798: close the episode fixed above if it is still the open one
+    // and no hook `stop` of this generation already speaks for the turn.
+    // Synchronous, and before the await below, which never touches the episode.
+    settleLegacyStop(worktree.id, CLAUDE_CLI_TOOL_ID, CLAUDE_CLI_TOOL_ID, stopTarget);
 
     // Same effects as POST /api/hooks/agent-event with {tool:'claude',event:'stop'}.
     // Runs last so a task-log or verification failure cannot cost this endpoint

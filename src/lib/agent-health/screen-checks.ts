@@ -7,7 +7,12 @@
  * testable without a CLI.
  */
 
+import type { CLIToolType } from '@/lib/cli-tools/types';
+import { stripBoxDrawing } from '@/lib/detection/cli-patterns';
 import { SELECTION_LIST_REASONS } from '@/lib/detection/status-detector';
+import { detectPromptOnCleanFrame } from '@/lib/polling/response-checker';
+import { isAntigravityGenericReadingOnScreen } from '@/lib/polling/response-checker-dialog-gate';
+import { detectAntigravityNumberedDialogPrompt } from '@/lib/detection/tools/antigravity/dialog';
 import { paneEvidence, truncateEvidence } from './report';
 import type { AgentHealthCheckStatus } from './types';
 
@@ -18,8 +23,9 @@ export interface ScreenVerdict {
   hasActivePrompt: boolean;
   evidence: 'positive' | 'none';
   /**
-   * `detectPrompt(...).isPrompt` on the same frame — what Auto-Yes reads
-   * (Issue #3053). Only `screen-picker` reads it; absent elsewhere.
+   * What Auto-Yes reads the same frame as (Issue #3053) — fill it with
+   * {@link readsAsAutoYesPrompt}, which reads agy through the Auto-Yes entry
+   * (#3818). Only `screen-picker` reads it; absent elsewhere.
    */
   isPrompt?: boolean;
 }
@@ -78,6 +84,48 @@ export function pickerVerdictHolds(verdict: ScreenVerdict, expectPrompt: boolean
     SELECTION_LIST_REASONS.has(verdict.reason) &&
     verdict.isPrompt === expectPrompt
   );
+}
+
+/**
+ * The `isPrompt` a picker frame must be judged by: what Auto-Yes reads it as
+ * (Issue #3053, #3818).
+ *
+ * agy through the Auto-Yes poller's own entry (`detectPromptOnCleanFrame`), so
+ * agy's dialog reader and its refusal of numbered screens nothing vouches for
+ * (#3808, #3818) apply here as they do to the keystrokes — `detectPrompt` alone
+ * reads those screens as answerable. Issue #3881: and the condition the
+ * poller adds once a hook receipt is in hand (a generic reading needs evidence
+ * on the screen), kept apart from the receipt, which the frame does not
+ * carry. Every other tool keeps the caller's
+ * `detectPrompt` reading, unchanged: `tests/unit/guards/prompt-detector-single-entry-2368.test.ts`
+ * keeps the direct callers of `detectPrompt` to a named set, so it is handed in.
+ *
+ * @param clean - the frame ANSI-stripped, box drawing intact
+ * @param rawFrame - the same frame as captured
+ * @param readGeneric - `detectPrompt(...).isPrompt` over `clean`, for non-agy tools
+ */
+export function readsAsAutoYesPrompt(
+  cliToolId: CLIToolType,
+  clean: string,
+  rawFrame: string,
+  readGeneric: () => boolean
+): boolean {
+  if (cliToolId === 'antigravity') {
+    const cleaned = stripBoxDrawing(clean);
+    // Read as a display reads it (no receipt scope: the probe has no hook
+    // receipt to consult, and whether one arrived is not a property of the
+    // frame) …
+    const reading = detectPromptOnCleanFrame(cleaned, cliToolId, undefined, rawFrame);
+    if (!reading.isPrompt) return false;
+    // … then with the screen-evidence condition the poller applies once a
+    // receipt is in hand (Issue #3881): a generic reading agy's reader did not
+    // take is an Auto-Yes prompt only when the screen shows `/feedback` or
+    // agy's permission rows. So a reply's plain list reads as no prompt here,
+    // as it does to the poller, whatever the receipt.
+    return detectAntigravityNumberedDialogPrompt(cleaned) !== null
+      || isAntigravityGenericReadingOnScreen(cleaned, reading);
+  }
+  return readGeneric();
 }
 
 export function describeVerdict(verdict: ScreenVerdict): string {

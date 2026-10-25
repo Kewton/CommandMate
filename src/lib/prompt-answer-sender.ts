@@ -6,7 +6,7 @@
  * the promptType/defaultOptionNumber fallback introduced in Bug1).
  */
 
-import { capturePane, sendKeys, sendSpecialKeys } from './tmux/tmux';
+import { capturePane, sendKeys, sendSpecialKeys, type KeyDeliveryState } from './tmux/tmux';
 import type { CLIToolType } from './cli-tools/types';
 import { normalizeFrame } from '@/lib/detection/tools/frame';
 import { getToolStatusDetector } from '@/lib/detection/tools/registry';
@@ -762,6 +762,7 @@ async function sendCommandCodeMultiSelectAnswer(
   promptData: MultipleChoicePromptData,
   wanted: readonly number[],
   stillCurrent?: () => boolean,
+  touch?: PaneTouch,
 ): Promise<void> {
   const cursor = promptData.options.find((option) => option.isDefault === true);
   if (cursor === undefined) {
@@ -777,7 +778,7 @@ async function sendCommandCodeMultiSelectAnswer(
     ...current.filter((n) => !wanted.includes(n)),
   ].sort((a, b) => a - b);
   if (toggles.length > 0) {
-    await sendSpecialKeysWhileCurrent(sessionName, toggles.map(String), stillCurrent);
+    await sendSpecialKeysWhileCurrent(sessionName, toggles.map(String), stillCurrent, touch);
   }
   const keysSent = toggles.length > 0;
 
@@ -818,6 +819,7 @@ async function sendCommandCodeMultiSelectAnswer(
     sessionName,
     [...downKeys(verified.options.length - cursorNow.number + 1), 'Enter'],
     stillCurrent,
+    touch,
   );
 
   // 4. The second stage. `Submit` opens the Review page and the answer is sent
@@ -835,7 +837,7 @@ async function sendCommandCodeMultiSelectAnswer(
     if (review.hasUnansweredWarning) {
       throw new MultiSelectAnswerRejectedError('review-unanswered', true, wanted);
     }
-    await sendSpecialKeysWhileCurrent(sessionName, ['Enter'], stillCurrent);
+    await sendSpecialKeysWhileCurrent(sessionName, ['Enter'], stillCurrent, touch);
     return;
   }
 
@@ -865,6 +867,65 @@ export class PromptAnswerAbortedError extends Error {
   }
 }
 
+/**
+ * Whether a key of this answer is already on the pane (Issue #3839). Set by
+ * every send that came back, and by one that failed after a key it is known to
+ * have delivered; read when the answer throws.
+ */
+interface PaneTouch {
+  touched: boolean;
+}
+
+/**
+ * What a failed answer did to the pane, as far as the transport could see
+ * (Issue #3880): the tmux module's `KeyDeliveryState` for the whole answer.
+ * `delivered` here is a failure after some of its keys were seen to reach tmux.
+ */
+export type AnswerDelivery = KeyDeliveryState;
+
+/**
+ * What the tmux call that failed did (Issue #3880), when the error came from
+ * the transport (`TmuxSendError`, by name: test doubles of `./tmux/tmux` need
+ * not export the class); null for any other error.
+ */
+function transportDeliveryOf(error: unknown): Exclude<KeyDeliveryState, 'delivered'> | null {
+  if (!(error instanceof Error) || error.name !== 'TmuxSendError') return null;
+  const delivery = (error as { delivery?: unknown }).delivery;
+  return delivery === 'not-started' || delivery === 'indeterminate' ? delivery : null;
+}
+
+/**
+ * A failure after a key reached the pane says so (Issue #3839): `keysSent: true`
+ * is put on it, as on {@link PromptAnswerAbortedError}, so Auto-Yes does not
+ * type the answer again over what is already there. An error that already
+ * names `keysSent` (the refusals and the stop above) keeps its own word, and a
+ * failure before any key is left as it was.
+ *
+ * Issue #3880: a transport failure also gets `answerDelivery` ({@link AnswerDelivery};
+ * the tmux error's own `delivery` is that one call's).
+ * `indeterminate` — the tmux call ended without an exit status, and its key may
+ * be on the pane — is NOT `keysSent: true` (no key is known to be there; the
+ * ledger counts it `failed`, #3820) but Auto-Yes holds it all the same. A
+ * transport refusal before any key is `keysSent: false`: known not sent, free
+ * to be sent again.
+ */
+function withKeysSent(error: unknown, touch: PaneTouch): unknown {
+  if (!(error instanceof Error)) return error;
+  const transport = transportDeliveryOf(error);
+  if (transport !== null) {
+    const answerDelivery: AnswerDelivery =
+      transport === 'indeterminate' ? 'indeterminate' : touch.touched ? 'delivered' : 'not-started';
+    Object.assign(error, { answerDelivery });
+  }
+  if ('keysSent' in error) return error;
+  if (touch.touched) {
+    Object.assign(error, { keysSent: true });
+  } else if (transport === 'not-started') {
+    Object.assign(error, { keysSent: false });
+  }
+  return error;
+}
+
 /** Stop here when the caller's `stillCurrent` says no (Issue #3706). */
 function assertStillCurrent(stillCurrent: (() => boolean) | undefined, keysSent: boolean): void {
   if (stillCurrent && !stillCurrent()) throw new PromptAnswerAbortedError(keysSent);
@@ -879,21 +940,50 @@ async function sendSpecialKeysWhileCurrent(
   sessionName: string,
   keys: string[],
   stillCurrent: (() => boolean) | undefined,
+  touch?: PaneTouch,
 ): Promise<void> {
   if (!stillCurrent) {
-    await sendSpecialKeys(sessionName, keys);
+    try {
+      await sendSpecialKeys(sessionName, keys);
+    } catch (error: unknown) {
+      // Issue #3880: without `shouldContinue` the count comes from the error.
+      if (touch && keysDeliveredOf(error) > 0) touch.touched = true;
+      throw error;
+    }
+    if (touch && keys.length > 0) touch.touched = true;
     return;
   }
+  // Issue #3839: `shouldContinue` is asked after each key but the last, so the
+  // times it was asked are the keys known to have reached the pane when a
+  // later one fails.
+  let delivered = 0;
   try {
-    await sendSpecialKeys(sessionName, keys, { shouldContinue: stillCurrent });
+    await sendSpecialKeys(sessionName, keys, {
+      shouldContinue: () => {
+        delivered++;
+        return stillCurrent();
+      },
+    });
   } catch (error: unknown) {
     // By name rather than `instanceof`: test doubles of `./tmux/tmux` need not
     // export the class.
     if (error instanceof Error && error.name === 'SpecialKeysAbortedError') {
       throw new PromptAnswerAbortedError(true);
     }
+    if (touch && Math.max(delivered, keysDeliveredOf(error)) > 0) touch.touched = true;
     throw error;
   }
+  if (touch && keys.length > 0) touch.touched = true;
+}
+
+/**
+ * The keys a failed `sendSpecialKeys` says tmux took before the one that
+ * failed (Issue #3880, `TmuxSendError.keysDelivered`); 0 when it says none.
+ */
+function keysDeliveredOf(error: unknown): number {
+  if (!(error instanceof Error) || error.name !== 'TmuxSendError') return 0;
+  const count = (error as { keysDelivered?: unknown }).keysDelivered;
+  return typeof count === 'number' && Number.isFinite(count) && count > 0 ? count : 0;
 }
 
 export interface SendPromptAnswerParams {
@@ -938,8 +1028,22 @@ export interface SendPromptAnswerParams {
  * This function unifies the logic previously duplicated in:
  * - src/app/api/worktrees/[id]/prompt-response/route.ts (L114-187)
  * - src/lib/auto-yes-manager.ts (L340-399)
+ *
+ * A failure after a key of the answer reached the pane carries `keysSent: true`
+ * (Issue #3839), and a transport failure its `answerDelivery` (Issue #3880);
+ * see {@link withKeysSent}.
  */
 export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<void> {
+  const touch: PaneTouch = { touched: false };
+  try {
+    await sendPromptAnswerKeys(params, touch);
+  } catch (error: unknown) {
+    throw withKeysSent(error, touch);
+  }
+}
+
+/** {@link sendPromptAnswer}, noting in `touch` each key that reached the pane. */
+async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneTouch): Promise<void> {
   const { sessionName, answer, cliToolId, promptData, fallbackPromptType, fallbackDefaultOptionNumber, stillCurrent } =
     params;
 
@@ -952,7 +1056,13 @@ export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<
   // a two-stage confirm, not a digit and an Enter.
   const multiSelect = readMultiSelectRequest(params);
   if (multiSelect !== null) {
-    await sendCommandCodeMultiSelectAnswer(sessionName, multiSelect.promptData, multiSelect.wanted, stillCurrent);
+    await sendCommandCodeMultiSelectAnswer(
+      sessionName,
+      multiSelect.promptData,
+      multiSelect.wanted,
+      stillCurrent,
+      touch,
+    );
     invalidateCache(sessionName);
     return;
   }
@@ -1033,7 +1143,7 @@ export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<
       keys.push(...buildNavigationKeys(downToNext));
       // 4. Enter to submit
       keys.push('Enter');
-      await sendSpecialKeysWhileCurrent(sessionName, keys, stillCurrent);
+      await sendSpecialKeysWhileCurrent(sessionName, keys, stillCurrent, touch);
     } else {
       // Single-select: navigate and Enter to select
       const navigationKeys = buildNavigationKeys(offset);
@@ -1051,11 +1161,13 @@ export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<
       const keys: string[] = (isAskUserQuestionPicker && offset === 0)
         ? ['Down', 'Up', 'Enter']
         : [...navigationKeys, 'Enter'];
-      await sendSpecialKeysWhileCurrent(sessionName, keys, stillCurrent);
+      await sendSpecialKeysWhileCurrent(sessionName, keys, stillCurrent, touch);
     }
   } else {
     // Standard CLI prompt: send text + Enter (y/n, Approve?, etc.)
     await sendKeys(sessionName, answer, false);
+    // Issue #3839: the text is on the pane; a failed Enter after it says so.
+    if (answer !== '') touch.touched = true;
 
     // Issue #616: Resolve submitMode and determine whether to suppress Enter
     const resolvedSubmitMode = resolveSubmitMode(params, dialog);

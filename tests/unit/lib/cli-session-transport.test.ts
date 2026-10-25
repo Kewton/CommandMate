@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'async_hooks';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/cli-tools/manager', () => ({
@@ -94,7 +95,33 @@ describe('cli-session transport integration', () => {
 
     await expect(captureSessionOutputFresh('wt-1', 'claude', 500)).resolves.toBe('fresh output');
     expect(mockTransport.captureSnapshot).toHaveBeenCalledWith('mcbd-claude-wt-1', { startLine: -500 });
-    expect(setCachedCapture).toHaveBeenCalledWith('mcbd-claude-wt-1', 'fresh output', 500);
+    expect(setCachedCapture).toHaveBeenCalledWith('mcbd-claude-wt-1', 'fresh output', 500, expect.any(Number));
+  });
+
+  it('[#3798] a fresh capture writes back the time it started, not the time it came back', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const startedAt = 1_800_000_000_000;
+      vi.setSystemTime(startedAt);
+      let finish: (output: string) => void = () => {};
+      mockTransport.captureSnapshot.mockReturnValueOnce(new Promise<string>((resolve) => (finish = resolve)));
+
+      // What the observer's capture context (waiting-episode-binding) is told.
+      const reported: unknown[] = [];
+      globalThis.__captureFrameMetaSink ??= new AsyncLocalStorage();
+      const pending = globalThis.__captureFrameMetaSink.run(
+        (meta) => reported.push(meta),
+        () => captureSessionOutputFresh('wt-1', 'claude', 500),
+      );
+      vi.setSystemTime(startedAt + 2_000);
+      finish('slow output');
+      await expect(pending).resolves.toBe('slow output');
+
+      expect(setCachedCapture).toHaveBeenCalledWith('mcbd-claude-wt-1', 'slow output', 500, startedAt);
+      expect(reported).toEqual([{ fetchStartedAt: startedAt, source: 'fetched' }]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('should invalidate cache when fresh capture fails', async () => {

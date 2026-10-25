@@ -3,9 +3,10 @@
  *
  * A tick takes its poller state, its grant and its session epoch at the top and
  * compares them — by identity, never by re-reading the key — after every wait:
- * the capture, the ownership check, the Enter fallback's fresh capture, the
- * sender's guard read and the delays between its keys, and when it re-arms its
- * timer. Each wait here is held open with a deferred promise while the state
+ * the capture, the ownership check, the sender's guard read and the delays
+ * between its keys, and when it re-arms its timer. (Issue #3821 retired the
+ * Enter fallback and its fresh capture; its cases now assert that no Enter and
+ * no fresh capture happen on any generation.) Each wait here is held open with a deferred promise while the state
  * moves, then released.
  *
  * Driven through the real poller and the real `sendPromptAnswer`; only the ends
@@ -216,6 +217,18 @@ async function firstTick(): Promise<void> {
 }
 
 const originalEnv = process.env[AUTO_YES_ENTER_FALLBACK_ENV_VAR];
+const originalGateEnv = process.env.CM_AUTOYES_DIALOG_GATE;
+
+/**
+ * Issue #3822: claude's dialog gate refuses a `(y/n)` its rules do not vouch
+ * for, so the typed-answer path these tests stop part-way (`y`, a wait, Enter)
+ * is reached on claude only under the kill switch's `legacy`. What is pinned
+ * is the stop, not the gate (`auto-yes-generic-yes-no-3822.test.ts`).
+ */
+function showTypedPrompt(): void {
+  pane = PROMPT_TYPED;
+  process.env.CM_AUTOYES_DIALOG_GATE = 'claude=legacy';
+}
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -247,6 +260,8 @@ afterEach(() => {
   vi.useRealTimers();
   if (originalEnv === undefined) delete process.env[AUTO_YES_ENTER_FALLBACK_ENV_VAR];
   else process.env[AUTO_YES_ENTER_FALLBACK_ENV_VAR] = originalEnv;
+  if (originalGateEnv === undefined) delete process.env.CM_AUTOYES_DIALOG_GATE;
+  else process.env.CM_AUTOYES_DIALOG_GATE = originalGateEnv;
 });
 
 // ---------------------------------------------------------------------------
@@ -297,7 +312,7 @@ describe('[#3706] a stop during a wait: no input not yet issued is started', () 
   });
 
   it('stopped between the typed answer and its Enter: the Enter is not sent', async () => {
-    pane = PROMPT_TYPED;
+    showTypedPrompt();
     enable();
     await firstTick(); // the sender now waits TUI_TEXT_INPUT_WAIT_MS before the Enter
     expect(keysSent).toEqual(['y']);
@@ -311,15 +326,15 @@ describe('[#3706] a stop during a wait: no input not yet issued is started', () 
     expect(startResponsePolling).not.toHaveBeenCalled();
   });
 
-  it("stopped during the Enter fallback's fresh capture: no Enter", async () => {
+  it("[#3821] the unreadable list: no fresh capture is taken and no Enter, stopped or not", async () => {
     process.env[AUTO_YES_ENTER_FALLBACK_ENV_VAR] = 'claude=enabled';
     pane = CLAUDE_UNRECOGNISED_LIST;
     enable();
-    await firstTick(); // seen once: the candidate
+    await firstTick();
     freshGate = deferred();
     await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
     await settle();
-    expect(captureSessionOutputFresh).toHaveBeenCalledTimes(1);
+    expect(captureSessionOutputFresh).not.toHaveBeenCalled();
 
     disable();
     freshGate.resolve();
@@ -338,21 +353,21 @@ describe('[#3706] a stop during a wait: no input not yet issued is started', () 
     expect(startResponsePolling).toHaveBeenCalledTimes(1);
 
     keysSent = [];
-    pane = PROMPT_TYPED;
+    showTypedPrompt();
     await vi.advanceTimersByTimeAsync(60_000);
     await settle();
     expect(keysSent.slice(0, 2)).toEqual(['y', '<Enter>']);
   });
 
-  it('negative: the Enter fallback still sends its one Enter', async () => {
+  it('[#3821] the unreadable list on a live generation: no Enter (the fallback is retired)', async () => {
     process.env[AUTO_YES_ENTER_FALLBACK_ENV_VAR] = 'claude=enabled';
     pane = CLAUDE_UNRECOGNISED_LIST;
     enable();
     await firstTick();
-    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
+    await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS * 3);
     await settle();
-    expect(keysSent).toEqual(['Enter']);
-    expect(recordAnsweredPrompt).toHaveBeenCalledTimes(1);
+    expect(keysSent).toEqual([]);
+    expect(recordAnsweredPrompt).not.toHaveBeenCalled();
   });
 });
 
@@ -372,7 +387,7 @@ describe('[#3706] disable → enable during a tick: the old tick leaves the new 
     const freshTimer = fresh?.timerId;
     expect(vi.getTimerCount()).toBe(1);
 
-    pane = PROMPT_TYPED;
+    showTypedPrompt();
     const oldGate = captureGate;
     captureGate = null;
     oldGate.resolve();
@@ -522,7 +537,7 @@ describe('[#3706] an answer already sent', () => {
   });
 
   it('a send stopped part-way is not recorded as an answer, nor as an error', async () => {
-    pane = PROMPT_TYPED;
+    showTypedPrompt();
     enable();
     await firstTick();
     // A renewal under the same poller: the old tick's grant is gone.
@@ -608,44 +623,45 @@ describe('[#3706] P2-1: a session relaunched while the answer was being sent', (
   });
 });
 
+// Issue #3821: no Enter goes out any more, so there is no record to put back
+// or to keep; each case asserts that nothing is sent, recorded or audited,
+// whatever happens around the tick.
 describe("[#3706] P2-2: the Enter fallback's record after a stop or a relaunch", () => {
-  async function fallbackUpToTheEnter(during: () => void): Promise<void> {
+  async function fallbackTicks(between: () => void): Promise<void> {
     process.env[AUTO_YES_ENTER_FALLBACK_ENV_VAR] = 'claude=enabled';
     pane = CLAUDE_UNRECOGNISED_LIST;
     enable();
-    sendSpecialKeys.mockImplementationOnce(async (_s, keys) => {
-      keysSent.push(...keys);
-      during();
-    });
-    await firstTick(); // seen once: the candidate
+    await firstTick();
+    between();
     await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
     await settle();
   }
 
-  it('a relaunch during the Enter: no record for the new session, the audit is kept', async () => {
-    await fallbackUpToTheEnter(() => beginEnterFallbackSession(WT, 'claude'));
-    expect(keysSent).toEqual(['Enter']);
+  it('[#3821] a relaunch between ticks: no Enter, no record, no audit row', async () => {
+    await fallbackTicks(() => beginEnterFallbackSession(WT, 'claude'));
+    expect(keysSent).toEqual([]);
     expect(getLastEnterFallback(WT, 'claude')).toBeNull();
-    expect(recordAnsweredPrompt).toHaveBeenCalledTimes(1);
+    expect(recordAnsweredPrompt).not.toHaveBeenCalled();
   });
 
-  it('a stop during the Enter: the forgotten record is not put back, the audit is kept', async () => {
-    await fallbackUpToTheEnter(() => disable());
-    expect(keysSent).toEqual(['Enter']);
+  it('[#3821] a stop between ticks: no Enter, no record, no audit row', async () => {
+    await fallbackTicks(() => disable());
+    expect(keysSent).toEqual([]);
     expect(getLastEnterFallback(WT, 'claude')).toBeNull();
-    expect(recordAnsweredPrompt).toHaveBeenCalledTimes(1);
+    expect(recordAnsweredPrompt).not.toHaveBeenCalled();
   });
 
-  it('negative: an Enter that lands in the same generation is recorded as sent', async () => {
-    await fallbackUpToTheEnter(() => {});
-    expect(getLastEnterFallback(WT, 'claude')?.outcome).toBe('sent');
+  it('[#3821] negative: nothing in between, and still no Enter', async () => {
+    await fallbackTicks(() => {});
+    expect(keysSent).toEqual([]);
+    expect(getLastEnterFallback(WT, 'claude')).toBeNull();
   });
 });
 
 describe('[#3706] P2-3: an answer stopped with keys already on the pane', () => {
   /** Type `y`, then stop the Enter with `stop`; then let `ticks` more ticks run. */
   async function stopAfterTheY(stop: () => void, ticks = 3): Promise<void> {
-    pane = PROMPT_TYPED;
+    showTypedPrompt();
     enable();
     await firstTick();
     expect(keysSent).toEqual(['y']);
@@ -678,7 +694,7 @@ describe('[#3706] P2-3: an answer stopped with keys already on the pane', () => 
     pane = 'idle';
     await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS);
     await settle();
-    pane = PROMPT_TYPED;
+    showTypedPrompt();
     await vi.advanceTimersByTimeAsync(POLLING_INTERVAL_MS * 3);
     await settle();
     expect(keysSent.slice(0, 3)).toEqual(['y', 'y', '<Enter>']);
@@ -747,6 +763,7 @@ function enableTool(tool: CLIToolType, worktreeId = WT): void {
 
 /** Type the answer to `first`, stop its Enter with a renewal, then show `next` for 3 ticks. */
 async function stopTheAnswerThenShow(tool: CLIToolType, first: string, typed: string, next: string): Promise<void> {
+  if (first === PROMPT_TYPED) showTypedPrompt();
   pane = first;
   enableTool(tool);
   await firstTick();

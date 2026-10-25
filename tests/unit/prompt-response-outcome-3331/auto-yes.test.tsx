@@ -16,6 +16,11 @@
  * A reply that lands after the screen moved to another worktree, tool or
  * instance is not announced there.
  *
+ * Issue #3821: the browser no longer answers and the toggle no longer has a
+ * notice. Every case now asserts what remains true of all of the above —
+ * nothing is announced, for any reply, on any agent, for any value the toggle
+ * is handed — rather than when the notice comes and goes.
+ *
  * @vitest-environment jsdom
  */
 
@@ -84,7 +89,7 @@ describe('[#3331] browser-side Auto-Yes announces only an answer that was taken'
     vi.restoreAllMocks();
   });
 
-  it.each(PROMPT_RESPONSE_ROWS)('%s: lastAutoResponse follows the reply', async (_name, testCase) => {
+  it.each(PROMPT_RESPONSE_ROWS)('%s: [#3821] lastAutoResponse stays null, whatever the reply', async (_name, testCase) => {
     vi.stubGlobal('fetch', vi.fn(() => replyOf(testCase)));
 
     const { result } = renderHook((props: UseAutoYesParams) => useAutoYes(props), {
@@ -94,23 +99,21 @@ describe('[#3331] browser-side Auto-Yes announces only an answer that was taken'
     expect(result.current.lastAutoResponse).toBeNull();
 
     await settle();
-    expect(result.current.lastAutoResponse).toBe(testCase.outcome === 'answered' ? '1' : null);
+    expect(result.current.lastAutoResponse).toBeNull();
+    expect(testCase.outcome).toBeTruthy();
   });
 
-  it.each(PROMPT_RESPONSE_ROWS)('%s: the toggle says "Auto responded" only when answered', async (_name, testCase) => {
+  it.each(PROMPT_RESPONSE_ROWS)('%s: [#3821] the toggle never says "Auto responded"', async (_name, testCase) => {
     vi.stubGlobal('fetch', vi.fn(() => replyOf(testCase)));
 
     render(<Harness {...params(approval('Do you want to proceed?'))} />);
     await settle();
 
-    if (testCase.outcome === 'answered') {
-      expect(screen.getByText(NOTICE)).toBeInTheDocument();
-    } else {
-      expect(screen.queryByText(/Auto responded/)).not.toBeInTheDocument();
-    }
+    expect(screen.queryByText(/Auto responded/)).not.toBeInTheDocument();
+    expect(testCase.outcome).toBeTruthy();
   });
 
-  it('two answers in a row that are the same string reach the display as two changes', async () => {
+  it('[#3821] two approvals in a row: nothing reaches the display', async () => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(jsonReply(200, { success: true }))));
     const seen: Array<string | null> = [];
 
@@ -126,7 +129,7 @@ describe('[#3331] browser-side Auto-Yes announces only an answer that was taken'
     rerender(params(approval('Run the migration?')));
     await settle();
 
-    expect(seen).toEqual([null, '1', null, '1']);
+    expect(seen).toEqual([null]);
   });
 });
 
@@ -170,7 +173,7 @@ describe('[#3331] a reply is announced only for the agent it was sent for', () =
     expect(screen.queryByText(/Auto responded/)).not.toBeInTheDocument();
   });
 
-  it('control: staying on the agent, the late reply is announced', async () => {
+  it('[#3821] staying on the agent: nothing is sent, so nothing is announced', async () => {
     const { land } = delayedFetch();
     const { rerender } = render(<Harness {...params(approval('Do you want to proceed?'))} />);
 
@@ -178,10 +181,11 @@ describe('[#3331] a reply is announced only for the agent it was sent for', () =
     land();
     await settle();
 
-    expect(screen.getByText(NOTICE)).toBeInTheDocument();
+    expect(screen.queryByText(/Auto responded/)).not.toBeInTheDocument();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('control: switching away and back before the reply, it is announced on the agent it was for', async () => {
+  it('[#3821] switching away and back: nothing is announced either', async () => {
     const { land } = delayedFetch();
     const { rerender } = render(<Harness {...params(approval('Do you want to proceed?'))} />);
 
@@ -190,11 +194,12 @@ describe('[#3331] a reply is announced only for the agent it was sent for', () =
     land();
     await settle();
 
-    expect(screen.getByText(NOTICE)).toBeInTheDocument();
+    expect(screen.queryByText(/Auto responded/)).not.toBeInTheDocument();
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
 
-describe('[#3331] AutoYesToggle: the notice is shown once per answer and then goes', () => {
+describe('[#3331] AutoYesToggle: the notice is shown once per answer and then goes (#3821: never shown)', () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -209,50 +214,30 @@ describe('[#3331] AutoYesToggle: the notice is shown once per answer and then go
     );
   }
 
-  it('goes on time even when the value returns to null before then', () => {
+  it('[#3821] a value handed to the toggle is not shown, then or later', () => {
     const { rerender } = render(toggle('1'));
-    expect(screen.getByText(NOTICE)).toBeInTheDocument();
+    expect(screen.queryByText(NOTICE)).not.toBeInTheDocument();
 
     rerender(toggle(null));
-    expect(screen.getByText(NOTICE)).toBeInTheDocument();
-
     act(() => {
       vi.advanceTimersByTime(NOTIFICATION_DISMISS_MS);
     });
     expect(screen.queryByText(NOTICE)).not.toBeInTheDocument();
   });
 
-  it('a second answer of the same string (with null between) is shown again, and goes again', () => {
+  it('[#3821] the same string twice (with null between) is not shown either', () => {
     const { rerender } = render(toggle('1'));
-    act(() => {
-      vi.advanceTimersByTime(NOTIFICATION_DISMISS_MS);
-    });
-    expect(screen.queryByText(NOTICE)).not.toBeInTheDocument();
-
     rerender(toggle(null));
     rerender(toggle('1'));
-    expect(screen.getByText(NOTICE)).toBeInTheDocument();
-
-    act(() => {
-      vi.advanceTimersByTime(NOTIFICATION_DISMISS_MS);
-    });
     expect(screen.queryByText(NOTICE)).not.toBeInTheDocument();
   });
 
-  it('control: a new answer before the notice goes restarts its time', () => {
+  it('[#3821] another string is not shown either', () => {
     const { rerender } = render(toggle('1'));
-    act(() => {
-      vi.advanceTimersByTime(NOTIFICATION_DISMISS_MS - 100);
-    });
     rerender(toggle(null));
     rerender(toggle('2'));
     act(() => {
       vi.advanceTimersByTime(200);
-    });
-    expect(screen.getByText('Auto responded: "2"')).toBeInTheDocument();
-
-    act(() => {
-      vi.advanceTimersByTime(NOTIFICATION_DISMISS_MS);
     });
     expect(screen.queryByText(/Auto responded/)).not.toBeInTheDocument();
   });

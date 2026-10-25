@@ -260,7 +260,16 @@ export async function POST(
       return NextResponse.json(foreignSessionErrorBody(sessionName, ownership.sessionPath), { status: 409 });
     }
 
-    // Update prompt data
+    // Update prompt data.
+    //
+    // Issue #3881: the row's `reading` (what the screen was read as when it was
+    // saved) travels through the spread untouched. A row saved before #3881
+    // has none, and none is made here: a reading is read off the frame, and
+    // this route holds only the stored strings — reading those again is the
+    // very re-derivation #3881 removed (a 16-column confirm page would come
+    // back `unknown` and draw as a tool approval). So an old row stays an old
+    // row, and the chat surface reads it with its compatibility rules
+    // (`lib/chat/chat-tool-approvals`), exactly as before it was answered.
     const updatedPromptData = {
       ...promptData,
       status: 'answered' as const,

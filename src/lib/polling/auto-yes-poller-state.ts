@@ -14,6 +14,7 @@ import { getOrInitGlobal } from '../global-state';
 import { getEnterFallbackSessionEpoch } from './auto-yes-enter-fallback-state';
 import type { LedgerAttemptHandle } from './auto-yes-confirmation-ledger';
 import { approvalTargetWithOptionRowsAligned } from '../prompt-observation/appearance';
+import { promptScreenKey } from '../detection/prompt-screen-key';
 
 const logger = createLogger('auto-yes-poller');
 
@@ -60,6 +61,14 @@ export interface AutoYesPollerState {
   lastAnsweredPromptKey: string | null;
   /** Timestamp when lastAnsweredPromptKey was set (for retry expiry) */
   lastAnsweredAt: number | null;
+  /**
+   * Issue #3791 (review N1): the duplicate guard actually held back the prompt
+   * on screen on the last tick that read it — see `reserveDuplicateRetry` —
+   * or a tick is sending that prompt's retry (review N3, `isDuplicateRetryOf`). The
+   * push gate reads it (off `globalThis`) to hold that wait until the guard's
+   * retry. Optional so hand-built states need not name it.
+   */
+  duplicateRetryReservation?: DuplicateRetryReservation | null;
   /** Baseline output length for stop condition delta check (Issue #314 fix) */
   stopCheckBaselineLength: number;
   /**
@@ -94,6 +103,49 @@ export interface AutoYesPollerState {
    * process's identical dialog is not taken for the one that had its Enter.
    */
   enterFallbackEpoch?: number;
+  /**
+   * Issue #3798 (design §2.2, PR 3): the waiting episode the poller's last
+   * answer went to, and the confirmation it answered. Written in the
+   * synchronous step the send returns to, together with the observation that
+   * opens (or keeps) that episode. A frame with nothing left to answer then
+   * closes that episode — and only that one: an episode it did not answer, or
+   * one opened after the answer, has another id. Optional so hand-built states
+   * need not name it.
+   */
+  lastAnswer?: AutoYesLastAnswer | null;
+}
+
+/** What {@link AutoYesPollerState.lastAnswer} records (Issue #3798). */
+export interface AutoYesLastAnswer {
+  /** The waiting episode the answer went to. */
+  episodeId: string;
+  /** {@link partialAnswerScreenKey} of the confirmation answered. */
+  screenKey: string;
+  /** Epoch ms the answer was observed (the send had returned). */
+  at: number;
+}
+
+/**
+ * The Auto-Yes poller's last answer for one instance (Issue #3798), for the
+ * other observers of the same waiting episode (the response poller). Read off
+ * `globalThis` (`__autoYesPollerStates`) as the push gate reads the poller's
+ * answer time, so a reader need not import the poller.
+ */
+export function getAutoYesLastAnswer(compositeKey: string): AutoYesLastAnswer | null {
+  return globalThis.__autoYesPollerStates?.get(compositeKey)?.lastAnswer ?? null;
+}
+
+/**
+ * Issue #3791 (review N1): the duplicate guard (#306) held back the prompt on
+ * screen, and the poller will answer it again once the guard expires.
+ */
+export interface DuplicateRetryReservation {
+  /** The guard's key (`lastAnsweredPromptKey`) the prompt matched. */
+  promptKey: string;
+  /** The answer the guard counts from (`lastAnsweredAt` then). */
+  answeredAt: number;
+  /** Epoch ms of the latest tick that held the prompt back. */
+  observedAt: number;
 }
 
 /**
@@ -167,49 +219,31 @@ export interface PartialAutoYesAnswer {
    * a send begun earlier that comes back later does not overwrite it.
    */
   seq: number;
+  /**
+   * Issue #3880: recorded for a person's send ({@link beginManualSendAttempt}).
+   * Past agy's receipt window it is kept while the dialog stays up (the tick's
+   * gated reading no longer sees it; `logIfWithheldForWantOfReceipt`).
+   */
+  byPerson?: true;
 }
 
 /**
- * Which prompt a stopped answer is about (Issue #3706): the type, the question,
- * the option labels and `approvalTarget` — what {@link promptFrameKey} tells
- * apart — but NOT where the cursor is. The keys that were sent may have moved
- * the cursor themselves (a `Down` whose Enter was withheld), and that must not
- * make the same list read as a new one; a different list or a different command
- * under the same question is a new prompt and is answered.
+ * The screen key of a person's send made with no prompt read off the screen
+ * (Issue #3880: the capture before it failed). A hold at it covers whatever
+ * confirmation the next tick reads, and takes that confirmation's key there
+ * ({@link identifyPartialAnswerScreen}); from then on it is released like any
+ * other — the screen changing, the session relaunched, a person's answer going
+ * through — and before then by a frame with no prompt on it.
  */
-export function partialAnswerScreenKey(promptData: PromptData): string {
-  const options =
-    promptData.type === 'multiple_choice'
-      ? promptData.options.map((o) => `${o.number}.${o.label}`).join('\n')
-      : promptData.options.join('\n');
-  return [generatePromptKey(promptData), options, withoutCursorMarks(promptData)].join('\u0000');
+export const UNIDENTIFIED_SCREEN_KEY = '\u0000unidentified-screen';
+
+/** Whether a hold (or a send) at `heldScreenKey` covers the confirmation at `screenKey`. */
+export function partialAnswerCovers(heldScreenKey: string, screenKey: string): boolean {
+  return heldScreenKey === screenKey || heldScreenKey === UNIDENTIFIED_SCREEN_KEY;
 }
 
-/**
- * `approvalTarget` with the cursor taken out: the generic parser copies the
- * option panel into it, `❯` row included, so a moved cursor would otherwise
- * read as another prompt.
- *
- * [Issue #3817] Only the rows the block reader adopted as the options are
- * aligned (`approvalTargetWithOptionRowsAligned`, the reading #3812 gives the
- * strict respond), so two commands whose bodies differ by an indent or a `>`
- * are two screens. A label the block reader read may run longer than the
- * prompt's — it folds wrapped rows and the footer in — so it only has to start
- * with it. A yes/no prompt has no cursor and is read as it is. A list whose
- * rows cannot be told that way keeps the old reading below: two bodies then
- * read as one screen, which holds the prompt for a human rather than typing
- * the answer twice.
- */
-function withoutCursorMarks(promptData: PromptData): string {
-  const target = promptData.approvalTarget ?? '';
-  if (promptData.type !== 'multiple_choice') return target;
-  const aligned = approvalTargetWithOptionRowsAligned(
-    target,
-    promptData.options.map((o) => o.label),
-    (read, named) => read.startsWith(named),
-  );
-  return aligned ?? withoutLeadingMarks(target);
-}
+/** Issue #3798: moved to `detection/prompt-screen-key`, where the waiting episodes read it too. */
+export { promptScreenKey as partialAnswerScreenKey } from '../detection/prompt-screen-key';
 
 /**
  * Which confirmation the ledger counts a prompt as (Issue #3820): the
@@ -225,17 +259,40 @@ function withoutCursorMarks(promptData: PromptData): string {
  * or a bare `1` followed by any run of spaces (`❯ 1  Yes`).
  */
 export function ledgerScreenKey(promptData: PromptData): string {
-  if (promptData.type !== 'multiple_choice') return partialAnswerScreenKey(promptData);
+  if (promptData.type !== 'multiple_choice') return promptScreenKey(promptData);
   const target = promptData.approvalTarget ?? '';
   const aligned = approvalTargetWithOptionRowsAligned(
     target,
     promptData.options.map((o) => o.label),
     (read, named) => read.startsWith(named),
   );
-  if (aligned !== null) return partialAnswerScreenKey(promptData);
+  if (aligned !== null) return promptScreenKey(promptData);
   const options = promptData.options.map((o) => `${o.number}.${o.label}`).join('\n');
   return [generatePromptKey(promptData), options, withOptionRowGuttersAligned(target, promptData.options)].join(
     '\u0000',
+  );
+}
+
+/**
+ * `approvalTarget` with only the cursor taken out of its option rows, or null
+ * when the prompt has none (Issue #3821, the identity of the confirmation an
+ * Auto-Yes decision is about). The reading {@link ledgerScreenKey} keeps: the
+ * rows the block reader adopted as the options are aligned
+ * (`approvalTargetWithOptionRowsAligned`), else only the rows that ARE the
+ * prompt's options lose their gutter; the body — its indent, a `>`, a blank
+ * row — stays byte for byte, so two commands that differ there are two
+ * confirmations (#3817), and a moved cursor is the same one.
+ */
+export function approvalTargetWithoutCursor(promptData: PromptData): string | null {
+  const target = promptData.approvalTarget;
+  if (typeof target !== 'string') return null;
+  if (promptData.type !== 'multiple_choice') return target;
+  return (
+    approvalTargetWithOptionRowsAligned(
+      target,
+      promptData.options.map((o) => o.label),
+      (read, named) => read.startsWith(named),
+    ) ?? withOptionRowGuttersAligned(target, promptData.options)
   );
 }
 
@@ -267,14 +324,6 @@ function withOptionRowGuttersAligned(
     .join('\n');
 }
 
-/** Every row's leading marks and indentation taken out (the reading before #3817). */
-function withoutLeadingMarks(text: string): string {
-  return text
-    .split('\n')
-    .map((line) => line.replace(/^[\s\u276F\u203A>\u25B6\u25BA\u25CF\u25CB\u25C9\u2192]+/u, ''))
-    .join('\n');
-}
-
 declare global {
   // eslint-disable-next-line no-var
   var __autoYesPartialAnswers: Map<string, PartialAutoYesAnswer> | undefined;
@@ -301,6 +350,8 @@ export function getPartialAnswer(compositeKey: string, epoch: number): PartialAu
   return partial;
 }
 
+const NO_ATTEMPTS: ReadonlySet<AutoYesSendAttempt> = new Set();
+
 /**
  * Forget it: the prompt left the screen, another prompt came up, or the session ended.
  *
@@ -312,6 +363,8 @@ export function getPartialAnswer(compositeKey: string, epoch: number): PartialAu
  * and records as before. Expiring is the mark: it drops the attempt from the
  * registry, so no per-key "forgotten up to seq" state has to outlive it.
  *
+ * @param spare - Issue #3880: sends that are not expired (a person's, at agy's
+ *   dialog the ungated reading still shows)
  * @param screenKey - Given when the memory is dropped because ANOTHER prompt is
  *   on screen (re-instruction 3): only the sends at the forgotten memory's
  *   screen are expired. A send at the screen now shown (Y, carried here by a
@@ -319,13 +372,30 @@ export function getPartialAnswer(compositeKey: string, epoch: number): PartialAu
  *   stop is still remembered when it comes back. Omitted (the prompt left the
  *   screen), every send under the key is expired.
  */
-export function forgetPartialAnswer(compositeKey: string, screenKey?: string): void {
+export function forgetPartialAnswer(
+  compositeKey: string,
+  screenKey?: string,
+  spare: ReadonlySet<AutoYesSendAttempt> = NO_ATTEMPTS,
+): void {
   partialAnswers.delete(compositeKey);
   for (const attempt of [...sendAttempts]) {
     if (attempt.recordKey !== compositeKey) continue;
     if (screenKey !== undefined && attempt.screenKey !== screenKey) continue;
+    if (spare.has(attempt)) continue;
     expireSendAttempt(attempt);
   }
+}
+
+/**
+ * A person's sends still in flight under this key, to this session epoch
+ * (Issue #3880): agy's gated reading seeing no prompt does not say the screen
+ * they type at is gone, so the tick checks the ungated reading before it
+ * expires them ({@link forgetPartialAnswer}'s `spare`).
+ */
+export function personSendsInFlight(compositeKey: string, epoch: number): AutoYesSendAttempt[] {
+  return [...sendAttempts].filter(
+    (attempt) => attempt.byPerson === true && attempt.recordKey === compositeKey && attempt.recordEpoch === epoch,
+  );
 }
 
 /**
@@ -348,6 +418,53 @@ export function forgetPartialAnswersByWorktree(worktreeId: string): void {
   for (const attempt of [...sendAttempts]) {
     if (inWorktree.has(attempt.recordKey)) expireSendAttempt(attempt);
   }
+}
+
+/**
+ * A person's answer went through, or was refused before any key (Issue #3880):
+ * the answer Auto-Yes held at that confirmation is theirs now, so the hold is
+ * dropped — only one recorded before the person's answer began (`before`, its
+ * {@link nextSendOrder}). A hold recorded since, by a send begun after theirs
+ * (another person's from another screen, a tick's), is about what that send
+ * did and stays. Only the record: a send still in flight records what it did
+ * when it comes back. Not called when a person's own send may have left keys
+ * on the pane, nor at the START of their answer.
+ */
+export function releasePartialAnswerToHuman(compositeKey: string, before: number): void {
+  const recorded = partialAnswers.get(compositeKey);
+  if (recorded !== undefined && recorded.seq < before) partialAnswers.delete(compositeKey);
+}
+
+/**
+ * The hold's screen, now that a tick read the confirmation on screen (Issue
+ * #3880): a hold at {@link UNIDENTIFIED_SCREEN_KEY} takes `screenKey`.
+ */
+export function identifyPartialAnswerScreen(compositeKey: string, screenKey: string): void {
+  const recorded = partialAnswers.get(compositeKey);
+  if (recorded?.screenKey === UNIDENTIFIED_SCREEN_KEY) partialAnswers.set(compositeKey, { ...recorded, screenKey });
+}
+
+/**
+ * Put back a person's hold the tick dropped because its gated reading saw no
+ * prompt, while agy's dialog it is about is still up past the receipt window
+ * (Issue #3880). Only into the same session, and over nothing newer.
+ */
+export function keepPartialAnswerByPerson(compositeKey: string, partial: PartialAutoYesAnswer, screenKey: string): void {
+  if (getEnterFallbackSessionEpoch(compositeKey) !== partial.epoch) return;
+  const recorded = partialAnswers.get(compositeKey);
+  if (recorded !== undefined && recorded.seq > partial.seq) return;
+  partialAnswers.set(compositeKey, { ...partial, screenKey });
+}
+
+/**
+ * A place in the order sends are registered in (Issue #3880): a person's
+ * answer takes one as it begins, so the hold it releases when it ends is only
+ * one recorded by a send registered before it began. What its own send
+ * records is ordered by that send's registration instead
+ * ({@link beginManualSendAttempt}).
+ */
+export function nextSendOrder(): number {
+  return ++sendAttemptSeq.last;
 }
 
 /** Forget every one, and expire every send in flight: server shutdown, and a test seam. */
@@ -391,6 +508,12 @@ export interface AutoYesSendAttempt {
   /** `pending` until the tick settles it; `expired` when its session's state was dropped. */
   state: 'pending' | 'settled' | 'expired';
   /**
+   * Issue #3880: a person's send (`/prompt-response`), registered right before
+   * its first key, its `seq` taken then; its `screenKey` may be
+   * {@link UNIDENTIFIED_SCREEN_KEY}.
+   */
+  readonly byPerson?: true;
+  /**
    * Issue #3820: the confirmation and the attempt this send is recorded under
    * in the ledger, taken before the first await like the object itself — a
    * result that comes back after the confirmation closed still goes to it.
@@ -428,11 +551,38 @@ export function beginSendAttempt(
 }
 
 /**
+ * Register a person's send about to start (Issue #3880): the screen it types
+ * at and the session epoch it goes to, fixed now, and its place among the
+ * sends taken now too, as Auto-Yes's own is — not when the answer began: an
+ * answer that waited before its first key (the re-verification of the screen)
+ * may send after one begun later, and then its keys are the newer ones.
+ * Settled with {@link settleSendAttempt} like Auto-Yes's own, so it records a
+ * hold only for the session the keys went to, never over a hold of a send
+ * registered after it, and not at all once the screen it typed at was seen gone.
+ */
+export function beginManualSendAttempt(compositeKey: string, screenKey: string): AutoYesSendAttempt {
+  const attempt: AutoYesSendAttempt = {
+    seq: ++sendAttemptSeq.last,
+    screenKey,
+    recordKey: compositeKey,
+    recordEpoch: getEnterFallbackSessionEpoch(compositeKey),
+    moved: false,
+    state: 'pending',
+    byPerson: true,
+    ledger: null,
+  };
+  sendAttempts.add(attempt);
+  return attempt;
+}
+
+/**
  * The send came back. `keysSent` — it was stopped with keys already on the
- * pane — records the partial answer under the attempt's key as it is now, when
- * that key's session is still the one the keys went to; otherwise (sent in
- * full, stopped before any key, or failed) only the attempt itself is removed.
- * A second call, or a call on an expired attempt, does nothing.
+ * pane, or (Issue #3880) a tmux call of it ended without an exit status and
+ * its keys may be there — records the partial answer under the attempt's key
+ * as it is now, when that key's session is still the one the keys went to;
+ * otherwise (sent in full, stopped before any key, or failed with nothing
+ * sent) only the attempt itself is removed. A second call, or a call on an
+ * expired attempt, does nothing.
  */
 export function settleSendAttempt(attempt: AutoYesSendAttempt, keysSent: boolean, at: number = Date.now()): void {
   if (attempt.state !== 'pending') return;
@@ -450,6 +600,7 @@ export function settleSendAttempt(attempt: AutoYesSendAttempt, keysSent: boolean
     epoch: attempt.recordEpoch,
     at,
     seq: attempt.seq,
+    ...(attempt.byPerson ? { byPerson: true as const } : {}),
   });
 }
 
@@ -471,7 +622,7 @@ export function hasMovedSendInFlight(compositeKey: string, epoch: number, screen
       attempt.moved &&
       attempt.recordKey === compositeKey &&
       attempt.recordEpoch === epoch &&
-      attempt.screenKey === screenKey
+      partialAnswerCovers(attempt.screenKey, screenKey)
     ) {
       return true;
     }

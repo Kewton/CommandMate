@@ -19,6 +19,7 @@ import {
 } from '../auto-yes-state';
 import { getOrInitGlobal } from '../global-state';
 import type { AutoYesPollerState } from './auto-yes-poller-state';
+import { getManualAnswerSeq } from './auto-yes-manual-answer';
 
 // =============================================================================
 // In-memory State (globalThis for hot reload persistence - Issue #153)
@@ -145,6 +146,12 @@ export interface AutoYesTickGeneration {
    * one this tick read off the screen (Issue #3706, see `finishAnsweredPrompt`).
    */
   readonly startedAt: number;
+  /**
+   * Issue #3821: `getManualAnswerSeq` at the start. A person's answer begun
+   * since moves it, and the tick sends no further key. Absent (hand-built
+   * generations in tests) reads as 0.
+   */
+  readonly manualAnswerSeq?: number;
 }
 
 /**
@@ -166,7 +173,8 @@ export function isPollerCurrent(generation: AutoYesTickGeneration): boolean {
 
 /**
  * May the tick still act: its poller, its grant (the same enable, not expired)
- * and its session (no relaunch since) are all still the ones it started under.
+ * and its session (no relaunch since) are all still the ones it started under,
+ * and no person has begun answering on the instance since (Issue #3821).
  * Checked after capture, after each wait before a key, and inside the send.
  */
 export function isTickCurrent(generation: AutoYesTickGeneration): boolean {
@@ -175,6 +183,9 @@ export function isTickCurrent(generation: AutoYesTickGeneration): boolean {
   // stores (and returns) a disabled one — so an expiry fails identity too.
   const grant = getAutoYesState(generation.worktreeId, generation.cliToolId, generation.instanceId);
   if (grant !== generation.grant || !grant.enabled) return false;
+  // Issue #3821: a person began answering on this instance since the tick started
+  // (Issue #3880: or a person's send ended with keys maybe on the pane, holding it).
+  if ((generation.manualAnswerSeq ?? 0) !== getManualAnswerSeq(generation.compositeKey)) return false;
   return isSameSession(generation);
 }
 
@@ -202,4 +213,40 @@ export function isDuplicatePrompt(
   if (pollerState.lastAnsweredPromptKey !== promptKey) return false;
   if (pollerState.lastAnsweredAt === null) return false;
   return (Date.now() - pollerState.lastAnsweredAt) < DUPLICATE_RETRY_EXPIRY_MS;
+}
+
+/**
+ * Issue #3791 (review N1): publish that the duplicate guard held back the
+ * prompt on screen on this tick ({@link isDuplicatePrompt} was true), for the
+ * push gate to hold the wait until the guard's retry. Only the guard's own
+ * verdict sets it: an answer alone (`lastAnsweredAt`) says nothing about the
+ * screen now up — another prompt, or a failed tick, is not held by the guard.
+ */
+export function reserveDuplicateRetry(pollerState: AutoYesPollerState, promptKey: string, now: number): void {
+  if (pollerState.lastAnsweredAt === null) return;
+  pollerState.duplicateRetryReservation = { promptKey, answeredAt: pollerState.lastAnsweredAt, observedAt: now };
+}
+
+/**
+ * Issue #3791 (review N3): is `promptKey` the prompt the guard reserved, its
+ * guard since expired — the tick about to send the retry the reservation
+ * waited for? Its reservation is then kept until that send is settled.
+ */
+export function isDuplicateRetryOf(pollerState: AutoYesPollerState, promptKey: string): boolean {
+  const reservation = pollerState.duplicateRetryReservation;
+  return (
+    reservation !== undefined &&
+    reservation !== null &&
+    reservation.promptKey === promptKey &&
+    reservation.answeredAt === pollerState.lastAnsweredAt
+  );
+}
+
+/**
+ * Issue #3791 (review N1): the tick did not hold the prompt back with the
+ * guard — another screen, no prompt, a failed tick, no session — so the wait
+ * is no longer the guard's retry to wait for.
+ */
+export function releaseDuplicateRetry(pollerState: AutoYesPollerState): void {
+  pollerState.duplicateRetryReservation = null;
 }

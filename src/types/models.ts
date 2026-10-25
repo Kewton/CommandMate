@@ -12,6 +12,8 @@ import type {
 } from '@/lib/session/structured-prompt';
 import type { AutoYesInstanceSummary } from '@/types/auto-yes';
 import type { AutoYesStopReason } from '@/config/auto-yes-config';
+import type { AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
+import type { PromptReading } from '@/types/prompt-reading';
 
 export type { AgentInstance };
 
@@ -306,6 +308,14 @@ export interface Worktree {
    */
   autoYesStopReasonByInstance?: Partial<Record<string, AutoYesStopReason>>;
   /**
+   * The answer mode of each armed instance (Issue #3863), keyed like
+   * {@link autoYesByInstance} and beside it rather than in it (that map's entry
+   * shape is pinned, #2512). Only `GET /api/worktrees` fills it in, on both
+   * paths, and omits the key from a row with nothing armed. A server older than
+   * the field omits it always: an armed instance with no entry is "unknown".
+   */
+  autoYesAnswerModeByInstance?: Partial<Record<string, AutoYesAnswerMode>>;
+  /**
    * Latest chat-message time per agent instance (Issue #2838), keyed like
    * {@link sessionStatusByInstance}. Only `GET /api/worktrees` fills it in, on
    * both paths (it is a DB value, not a tmux reading). An instance without any
@@ -437,6 +447,30 @@ export interface BasePromptData {
    * Undefined when the frame gave no block to attribute to this prompt.
    */
   approvalTarget?: string;
+  /**
+   * Issue #3881: the approval target may not be the whole request, so the
+   * resolver does not take a deny pattern's miss on it as a pass.
+   *
+   * - `truncated` (H-3) — the upward scan that bounds {@link approvalTarget}
+   *   stopped at its line cap with rows still above it. Set by the detectors.
+   * - `top-unknown` (review P2-1) — the scan reached the frame's first row
+   *   without a boundary AND the capture filled its window, so the pane may
+   *   hold the top of the request above the frame. Set only by a caller that
+   *   knows how its capture was windowed (the Auto-Yes poller,
+   *   `withCaptureTopCompleteness`); a capture that returned the pane's whole
+   *   history leaves it absent.
+   *
+   * Absent means the scan stopped at a boundary, reached the confirmed top of
+   * the pane's history, or never ran — every row before this field, too.
+   */
+  approvalTargetCompleteness?: 'truncated' | 'top-unknown';
+  /**
+   * Issue #3881: what the screen was read as when the row was saved — the
+   * kind, the live rows, the target's completeness and the evidence. Written
+   * by the response poller's save only; never on a live detection. Readers
+   * take it as stated; a row without it is read by their compatibility rules.
+   */
+  reading?: PromptReading;
 }
 
 /**

@@ -24,6 +24,7 @@ import {
   detectWorktreeSessionStatus,
   type WorktreeSessionStatus,
 } from '@/lib/session/worktree-status-helper';
+import { startWorktreeWaitingObservations } from '@/lib/session/waiting-episode-binding';
 import { parseIncludeParam, parseIncludeStatusParam } from '@/lib/api/worktrees-include-parser';
 import { isWorktreeStalled } from '@/lib/detection/stalled-detector';
 import { getNextAction, getReviewStatus } from '@/lib/session/next-action-helper';
@@ -33,7 +34,11 @@ import { getLastMessageAtByInstance } from '@/lib/db/chat-db';
 import { getDefaultSelectedAgents } from '@/lib/db/app-settings-db';
 import { resolveSelectedAgents } from '@/lib/selected-agents-validator';
 import { deriveSessionStatus, isUnclassifiedCliStatus } from '@/lib/session/status-mapping';
-import { getEnabledAutoYesByWorktree, getRestartReleasedAutoYesByWorktree } from '@/lib/auto-yes-state';
+import {
+  getEnabledAutoYesAnswerModeByWorktree,
+  getEnabledAutoYesByWorktree,
+  getRestartReleasedAutoYesByWorktree,
+} from '@/lib/auto-yes-state';
 import { isSessionAutoYesBlockedByContract } from '@/lib/polling/auto-yes-policy';
 import { getSessionNamespace } from '@/lib/cli-tools/session-namespace';
 import { createLogger } from '@/lib/logger';
@@ -134,6 +139,12 @@ export async function GET(request: NextRequest) {
 
     if (includeStatus) {
       const statusStartedAt = performance.now();
+      // Issue #3798: the waiting episodes' starts, fixed before the list below —
+      // a session that starts (and opens a wait) after it must not be ended as
+      // gone by a probe that never saw it.
+      const observationStarts = new Map(
+        worktrees.map((worktree) => [worktree.id, startWorktreeWaitingObservations(worktree.id)])
+      );
       // Issue #405: Batch query all tmux sessions once (N+1 elimination)
       const tmuxSessions = await listSessions();
       listSessionsMs = performance.now() - statusStartedAt;
@@ -154,6 +165,7 @@ export async function GET(request: NextRequest) {
             markPendingPromptsAsAnswered,
             getAgentInstances,
             metrics,
+            observationStarts.get(worktree.id),
           );
           statusByWorktree.set(worktree.id, status);
         })
@@ -180,6 +192,12 @@ export async function GET(request: NextRequest) {
     // entry as armed. Omitted from a row with none, so the row is the shape it
     // was.
     const restartReleasedByWorktree = getRestartReleasedAutoYesByWorktree();
+    // Issue #3863: the answer mode of each armed instance, as
+    // `{ [instanceId]: 'recommended' | 'careful' }`, so a `/sessions` tile can
+    // label its toggle as the worktree screen does. Beside `autoYesByInstance`
+    // (its entries' shape is pinned, #2512) and omitted from a row with nothing
+    // armed, like the stop reasons above.
+    const answerModeByWorktree = getEnabledAutoYesAnswerModeByWorktree();
     const worktreesWithStatus = worktrees.map((worktree) => {
       const agentInstances = agentInstancesByWorktree.get(worktree.id) ?? [];
       const status = statusByWorktree.get(worktree.id);
@@ -198,6 +216,8 @@ export async function GET(request: NextRequest) {
         lastActivityByWorktree.get(worktree.id) ?? {};
       const restartReleased = restartReleasedByWorktree.get(worktree.id);
       const autoYesStopReason = restartReleased ? { autoYesStopReasonByInstance: restartReleased } : {};
+      const answerModes = answerModeByWorktree.get(worktree.id);
+      const autoYesAnswerMode = answerModes ? { autoYesAnswerModeByInstance: answerModes } : {};
 
       // `?includeStatus=0`: the status keys are OMITTED rather than zeroed. All
       // of them are optional on `Worktree`, and absence is the only honest way
@@ -206,7 +226,7 @@ export async function GET(request: NextRequest) {
       // dot. The review block goes with it: `nextAction` / `reviewStatus` are
       // derived from the status, so there is nothing to derive them from.
       if (!status) {
-        return { ...worktree, agentInstances, sessionNotes, autoYesByInstance, lastActivityByInstance, ...autoYesStopReason };
+        return { ...worktree, agentInstances, sessionNotes, autoYesByInstance, lastActivityByInstance, ...autoYesStopReason, ...autoYesAnswerMode };
       }
 
       const base = {
@@ -217,6 +237,7 @@ export async function GET(request: NextRequest) {
         autoYesByInstance,
         lastActivityByInstance,
         ...autoYesStopReason,
+        ...autoYesAnswerMode,
       };
 
       // Issue #600: Add review fields when ?include=review

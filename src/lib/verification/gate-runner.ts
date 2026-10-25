@@ -146,6 +146,9 @@ const ENV_CLEAN_GATE_COMMAND =
  * once turns a verification request into a fork bomb on a developer laptop.
  * Excess runs queue rather than fail: the run row already exists and its
  * caller has the id, so a queued run is honest about what will happen.
+ *
+ * A bound on gates *executing*, not on runs open: a run waiting for a gate's
+ * `mutex` gives its slot back for the wait (Issue #3884, see RunSlot).
  */
 export const MAX_CONCURRENT_VERIFICATIONS = 2;
 
@@ -208,6 +211,43 @@ export const MUTEX_WAIT_SKIP_REASON = 'reason=mutex-wait';
  * cannot import this module — `tsconfig.cli.json` compiles `src/cli/**` alone.
  */
 export const FLAKY_LOG_PREFIX = '[flaky]';
+
+/**
+ * Marker line carrying a command gate's waits and its execution, apart, into
+ * `log_tail` (Issue #3884).
+ *
+ * `[timing] queue=<s> mutex=<s> run=<s>`: `queue` is the time the run waited
+ * for a {@link MAX_CONCURRENT_VERIFICATIONS} slot before and during this gate
+ * (the first command gate also carries the run's initial queue), `mutex` the
+ * time it waited for the gate's machine-wide lock, and `run` the gate's own
+ * command — `duration_ms`, which still never includes either wait (#1771).
+ * Three numbers because "this run took 40 minutes" has three different fixes:
+ * fewer runs at once, fewer heavy gates, or a faster suite.
+ *
+ * The last line, so the first line keeps meaning what it meant (the skip
+ * reason a reader of a `skipped` gate takes, the `[mutex]` / `[flaky]` marker
+ * the CLI reads). Written only for a gate that has a `mutex` or that waited for
+ * a slot: a gate that did neither has no wait to report, and its log stays
+ * byte-identical to before the marker existed. Travels on `log_tail` like
+ * `waited=` does, so it reaches `verify --json` and `verify show` without a
+ * migration; the history listing, which carries no log, reads this one line
+ * into numbers (verification-db.ts parseGateTiming, the `timing` of a gate
+ * summary — keep the two formats in step).
+ */
+export const TIMING_LOG_PREFIX = '[timing]';
+
+/** The waits one command gate accumulated across its attempts (Issue #3884). */
+interface GateWaits {
+  queueMs: number;
+  mutexMs: number;
+}
+
+function timingMarker(waits: GateWaits, runMs: number): string {
+  return (
+    `${TIMING_LOG_PREFIX} queue=${formatSeconds(waits.queueMs)} ` +
+    `mutex=${formatSeconds(waits.mutexMs)} run=${formatSeconds(runMs)}`
+  );
+}
 
 /**
  * What a retried gate's two runs amounted to.
@@ -323,13 +363,39 @@ function notRun(logTail: string): GateOutcome {
 let activeVerifications = 0;
 const slotWaiters: Array<() => void> = [];
 
-function acquireSlot(): Promise<void> {
+/**
+ * @param priority queue ahead of every run still waiting to start (Issue #3884).
+ *        Used by a run that gave its slot back while it waited for a gate's
+ *        `mutex` and now holds that machine-wide lock: every second it spends
+ *        here is a second the lock is held with nothing running under it.
+ */
+function acquireSlot(priority = false, cancellation?: RunCancellation): Promise<boolean> {
   if (activeVerifications < MAX_CONCURRENT_VERIFICATIONS) {
     activeVerifications += 1;
-    return Promise.resolve();
+    return Promise.resolve(true);
   }
-  return new Promise<void>((resolve) => {
-    slotWaiters.push(resolve);
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    let unregister = (): void => {};
+    const grant = (): void => {
+      settled = true;
+      unregister();
+      resolve(true);
+    };
+    if (priority) slotWaiters.unshift(grant);
+    else slotWaiters.push(grant);
+    // Issue #3884 N3: a cancelled wait leaves the queue instead of waiting for
+    // whatever the other slots are executing. Leaving takes nothing, so there
+    // is nothing to hand back.
+    if (cancellation) {
+      unregister = cancellation.register(() => {
+        if (settled) return;
+        settled = true;
+        const at = slotWaiters.indexOf(grant);
+        if (at >= 0) slotWaiters.splice(at, 1);
+        resolve(false);
+      });
+    }
   });
 }
 
@@ -342,6 +408,65 @@ function releaseSlot(): void {
     return;
   }
   activeVerifications -= 1;
+}
+
+/**
+ * One run's hold on a {@link MAX_CONCURRENT_VERIFICATIONS} slot (Issue #3884 H-11).
+ *
+ * The slot bounds what *executes*, not what waits. A run used to take its slot
+ * up front and keep it while a gate queued for its `mutex` (`cpu.heavy`, up to
+ * the gate's whole `timeoutSec`), so one run holding the lock and one waiting
+ * for it filled both slots, and a third run could not start even its 5-second
+ * `lint`. {@link runGateAttempt} now hands the slot back while it waits for the
+ * lock and takes it again — ahead of the runs still waiting to start — once the
+ * lock is held. At most {@link MAX_CONCURRENT_VERIFICATIONS} gates still
+ * execute at once, and the heavy gates stay one per machine under their mutex,
+ * so the load a gate is judged under does not grow.
+ *
+ * No deadlock: a run waiting for a lock holds no slot, so every slot holder is
+ * executing a gate, and each gate ends within its own `timeoutSec`.
+ *
+ * Also the clock for the `queue=` of {@link TIMING_LOG_PREFIX}: the time spent
+ * waiting for a slot since the last {@link RunSlot.takeQueuedMs}.
+ */
+class RunSlot {
+  private held = false;
+  private queuedMs = 0;
+
+  get isHeld(): boolean {
+    return this.held;
+  }
+
+  /**
+   * @param cancellation when given, a cancel abandons the wait (Issue #3884 N3)
+   * @returns false when the wait was abandoned: no slot is held
+   */
+  async acquire(priority = false, cancellation?: RunCancellation): Promise<boolean> {
+    if (this.held) return true;
+    // Only a real queue counts: a free slot is taken without a wait, and a
+    // gate that never waited must not grow a `queue=0.0s` line (its log stays
+    // byte-identical to before #3884).
+    const queued = activeVerifications >= MAX_CONCURRENT_VERIFICATIONS;
+    const startedAt = Date.now();
+    const taken = await acquireSlot(priority, cancellation);
+    this.held = taken;
+    if (queued) this.queuedMs += Math.max(1, Date.now() - startedAt);
+    return taken;
+  }
+
+  /** Idempotent: a slot already handed back is not released twice. */
+  release(): void {
+    if (!this.held) return;
+    this.held = false;
+    releaseSlot();
+  }
+
+  /** The slot wait accumulated since the previous call, and reset it. */
+  takeQueuedMs(): number {
+    const queued = this.queuedMs;
+    this.queuedMs = 0;
+    return queued;
+  }
 }
 
 /**
@@ -751,7 +876,9 @@ async function runGateAttempt(
   worktreePath: string,
   maxLogTailBytes: number,
   gateEnv: Record<string, string>,
-  cancellation: RunCancellation
+  cancellation: RunCancellation,
+  slot: RunSlot,
+  waits: GateWaits
 ): Promise<GateOutcome> {
   const mutex = gate.mutex;
   if (!mutex) {
@@ -773,10 +900,24 @@ async function runGateAttempt(
   // cancelled while queued behind the lock used to stay `running` for up to
   // half an hour — holding the worktree against the very endpoint that exists
   // to release it.
+  //
+  // Issue #3884 H-11: the run's slot is handed back for as long as the lock is
+  // busy (never when it is free — `onWait` fires only once a claim has failed),
+  // and taken back ahead of the runs still waiting to start. See RunSlot.
   const lock = await acquireMachineLock(mutex, {
     timeoutMs: gate.timeoutSec * 1000,
     shouldAbandon: () => cancellation.cancelled,
+    onWait: () => slot.release(),
   });
+  waits.mutexMs += lock.waitedMs;
+  // Taken back even when the lock was not: the run goes on to record (or run)
+  // the gates after this one, and those are under the same bound. Not by a
+  // cancelled run (#3884 N3): it executes nothing more, and waiting for the
+  // gates the other slots are running would keep its worktree held past the
+  // cancel endpoint's budget. The wait for the slot is cancellable too — the
+  // latch is read below, and the lock released, once it returns.
+  if (!cancellation.cancelled) await slot.acquire(true, cancellation);
+  waits.queueMs += slot.takeQueuedMs();
   if (!lock.acquired) {
     const recordedAt = Date.now();
     return {
@@ -842,15 +983,47 @@ async function runCommandGate(
   worktreePath: string,
   maxLogTailBytes: number,
   gateEnv: Record<string, string>,
-  cancellation: RunCancellation
+  cancellation: RunCancellation,
+  slot: RunSlot
 ): Promise<GateOutcome> {
-  const first = await runGateAttempt(gate, worktreePath, maxLogTailBytes, gateEnv, cancellation);
+  // The slot wait since the previous command gate (for the first one, since
+  // the run was opened) belongs to this gate: it is what kept it from starting.
+  const waits: GateWaits = { queueMs: slot.takeQueuedMs(), mutexMs: 0 };
+  const outcome = await runCommandGateAttempts(
+    gate,
+    worktreePath,
+    maxLogTailBytes,
+    gateEnv,
+    cancellation,
+    slot,
+    waits
+  );
+  if (!gate.mutex && waits.queueMs === 0) return outcome;
+  return {
+    ...outcome,
+    logTail: `${outcome.logTail ? `${outcome.logTail}\n` : ''}${timingMarker(waits, outcome.durationMs)}`,
+  };
+}
+
+/** {@link runCommandGate}'s attempts, with the waits they accumulate. */
+async function runCommandGateAttempts(
+  gate: VerifyGate,
+  worktreePath: string,
+  maxLogTailBytes: number,
+  gateEnv: Record<string, string>,
+  cancellation: RunCancellation,
+  slot: RunSlot,
+  waits: GateWaits
+): Promise<GateOutcome> {
+  const attempt = (): Promise<GateOutcome> =>
+    runGateAttempt(gate, worktreePath, maxLogTailBytes, gateEnv, cancellation, slot, waits);
+  const first = await attempt();
   // A cancelled attempt reports `skipped`, so the retry below is already ruled
   // out by the status check: an operator's Stop must not buy a second run of
   // the very command they stopped.
   if (gate.retryOnFail !== 1 || first.status !== 'failed') return first;
 
-  const second = await runGateAttempt(gate, worktreePath, maxLogTailBytes, gateEnv, cancellation);
+  const second = await attempt();
   if (second.status !== 'passed' && second.status !== 'failed') {
     // The retry reached no verdict of its own, so there is nothing to compare
     // the first run against. The first run's FAIL stands unchanged — reporting
@@ -1385,7 +1558,9 @@ async function executeRun(
   detachedContract: Task | null,
   envClean: EnvCleanContext,
   /** Issue #2063: the operator's Stop switch for this run. */
-  cancellation: RunCancellation
+  cancellation: RunCancellation,
+  /** Issue #3884: handed back while a gate waits for its mutex. */
+  slot: RunSlot
 ): Promise<VerificationRunTerminalStatus> {
   const { maxLogTailBytes, skipInPrimaryCheckout } = config.options;
   const { runWorkEvidence, gates } = selection;
@@ -1626,7 +1801,7 @@ async function executeRun(
     }
 
     const outcome = await runGate(gate.id, gate.command, gate.source, () =>
-      runCommandGate(gate, worktreePath, maxLogTailBytes, gateEnv(), cancellation)
+      runCommandGate(gate, worktreePath, maxLogTailBytes, gateEnv(), cancellation, slot)
     );
     statuses.push(outcome.status);
   }
@@ -1939,8 +2114,9 @@ export async function startVerification(
     baseline: resolvedSelection.runEnvClean && taskId ? loadEnvSnapshot(taskId) : null,
     decision: envCleanDecision,
   };
+  const slot = new RunSlot();
   const completion = (async (): Promise<VerificationRunTerminalStatus> => {
-    await acquireSlot();
+    await slot.acquire();
     let terminalStatus: VerificationRunTerminalStatus = 'error';
     try {
       // Cancelled while queued behind MAX_CONCURRENT_VERIFICATIONS: nothing was
@@ -1964,7 +2140,8 @@ export async function startVerification(
         task,
         detachedContract,
         envCleanContext,
-        cancellation
+        cancellation,
+        slot
       );
       terminalStatus = status;
       finishVerificationRun(db, run.id, status);
@@ -1989,7 +2166,7 @@ export async function startVerification(
       // after the task transition so the run's own history is complete before
       // anything is said about it.
       notifyRunFailure(db, input, run.id, taskId, terminalStatus);
-      releaseSlot();
+      slot.release();
       inFlight.delete(run.id);
       cancellations.delete(run.id);
     }

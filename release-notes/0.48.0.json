@@ -1,0 +1,57 @@
+{
+  "version": "0.48.0",
+  "date": "2026-10-25",
+  "highlight": {
+    "ja": "Auto-Yes の答え方を見直しました。質問への答え方を「おまかせ」と「慎重」から選べ、判断できない確認には答えず人に返します。",
+    "en": "Auto-Yes now lets you choose how it answers (Recommended or Careful), and leaves confirmations it cannot judge to you."
+  },
+  "added": [
+    {
+      "ja": "Auto-Yes に答え方のモードを追加しました。おまかせは質問に推奨の選択肢で答え、慎重は質問を人に任せます。",
+      "en": "Added answer modes to Auto-Yes: Recommended answers questions with the recommended option, Careful leaves questions to you."
+    }
+  ],
+  "improved": [],
+  "fixed": [
+    {
+      "ja": "Auto-Yes が許可の確認で、常に許可やモード変更ではなく「今回だけ許可」を選ぶようにしました。",
+      "en": "Auto-Yes now picks only the allow-this-time option on permission prompts, never permanent permission or mode changes."
+    },
+    {
+      "ja": "Auto-Yes が根拠の無い y/n や読めない選択画面に答えないようにし、ブラウザからの自動回答をやめました。",
+      "en": "Auto-Yes no longer answers unverified y/n prompts or unreadable choice screens, and the browser no longer answers automatically."
+    },
+    {
+      "ja": "送信に失敗した、または届いたか分からない回答を、Auto-Yes が同じ確認へ打ち直す問題を直しました。",
+      "en": "Fixed Auto-Yes re-sending an answer to the same prompt after a failed or uncertain send."
+    },
+    {
+      "ja": "確認画面の種類を一度で判定し、Auto-Yes とチャットの表示が食い違わないようにしました。",
+      "en": "Confirmation screens are now classified once, so Auto-Yes and the chat view no longer disagree about them."
+    },
+    {
+      "ja": "Antigravity の番号付きの画面に、Auto-Yes が既定で答えないようにしました。",
+      "en": "Auto-Yes no longer answers numbered Antigravity screens by default."
+    },
+    {
+      "ja": "Auto-Yes が答えた後に、答えていないという誤った通知が出る問題を直しました。",
+      "en": "Fixed false notifications saying Auto-Yes had not answered after it did."
+    },
+    {
+      "ja": "狭い・低いペインで Claude の確認画面を見落とす問題を直しました。",
+      "en": "Fixed Claude confirmation screens being missed in narrow or short panes."
+    },
+    {
+      "ja": "ターミナルの表示が、購読の切り替えで止まったり切断と表示されたりする問題を直しました。",
+      "en": "Fixed the terminal view stopping or showing as disconnected when switching subscriptions."
+    },
+    {
+      "ja": "サーバーと更新のログファイルの権限を本人だけが読める設定にそろえ、大きくなったら切り替えるようにしました。",
+      "en": "Server and update log files are now readable only by you and are rotated when they grow large."
+    },
+    {
+      "ja": "依存パッケージを更新し、高リスクの脆弱性を直しました。",
+      "en": "Updated a dependency to fix a high-severity vulnerability."
+    }
+  ]
+}

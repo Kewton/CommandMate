@@ -256,7 +256,12 @@ Send a message to a worktree's agent (async). Starts the session automatically i
 commandmate send <worktree-id> "<message>"
 commandmate send <worktree-id> "<message>" --instance codex
 commandmate send <worktree-id> "<message>" --auto-yes --duration 3h
+commandmate send <worktree-id> "<message>" --auto-yes --auto-yes-answer-mode careful  # questions are yours
 ```
+
+`--auto-yes-answer-mode <m>` picks the answer mode `--auto-yes` arms with (`recommended` / `careful`;
+see [Answer Modes](#answer-modes-recommended-and-careful-issue-3863)). Without `--auto-yes` it is
+an error (exit 2). Omitted, a new grant is `recommended` and a grant that is on keeps its mode (Issue #3863).
 
 ### Naming the target: use `--instance` (Issue #1638)
 
@@ -402,7 +407,7 @@ esac
 }
 ```
 
-Since Issue #3755 the exit-10 JSON also carries `observation` (on the exit 10 of all three detection paths — prompt, selection list and unclassified screen, which are the only ones `wait` exits 10 from): the same payload as [`commandmate prompt --json`](#commandmate-prompt), read off the capture the exit was decided on. Exit codes, holds and grace are unchanged. `autoYesSuppression` (a record under a minute old) keeps its meaning, but do not read the record's time alone as "why nobody answered" — read `pollerRecord` and `contractEvaluation` under `observation.autoYes`. An older server sends no `observation`.
+Since Issue #3755 the exit-10 JSON also carries `observation` (on the exit 10 of all three detection paths — prompt, selection list and unclassified screen, which are the only ones `wait` exits 10 from): the same payload as [`commandmate prompt --json`](#commandmate-prompt), read off the capture the exit was decided on. Exit codes, holds and grace are unchanged. `autoYesSuppression` keeps its meaning (since Issue #3798, when both the record and the server's payload name the waiting episode, the ids decide whatever the record's age; only when either id is missing is a record under a minute old taken; either way a record written before Auto-Yes answered that wait is not its reason and the hold goes on, as the push gate reads it), but do not read the record's time alone as "why nobody answered" — read `pollerRecord` and `contractEvaluation` under `observation.autoYes`. An older server sends no `observation`.
 
 ### The `type` field of exit 10
 
@@ -547,7 +552,7 @@ To answer a screen only while it is still the one observed, pass its kind and to
 | `screen.answerVia` | How it is answered: `screen` (keys via `respond`) / `api` (a decision) / `strict` (agy's folder-trust screen: answered by `respond --expect-screen`) / `terminal` (`respond` cannot answer it today) / `none` |
 | `autoYes.enabled` / `pollerActive` | Whether Auto-Yes is on / whether the server's poller runs |
 | `autoYes.pollerRecord` | What the poller (or the permission hook) last recorded as withheld. `screenCorrelation` relates it to this screen; the record names no screen, so it is `unknown` / `type-mismatch` / `no-prompt-on-screen` |
-| `autoYes.contractEvaluation` | The contract's policy applied to this screen **now** (`policy-withholds` + reason / `policy-permits` / `no-base-answer` / `not-evaluated`). Reasons use the `AutoYesSuppressionReason` words ([reason table](#autoyeslastsuppression-observing-a-policy-suppression-issue-1684)) |
+| `autoYes.contractEvaluation` | The contract's policy applied to this screen **now** (`policy-withholds` + reason / `base-withholds` + reason / `policy-permits` / `no-base-answer` / `not-evaluated`). `base-withholds` (Issue #3822) means the base rules withheld the answer before the contract was read, with or without a contract (today only `allow-once-unidentified`; changing the contract does not bring the answer back). Reasons use the `AutoYesSuppressionReason` words ([reason table](#autoyeslastsuppression-observing-a-policy-suppression-issue-1684)) |
 | `lastSend` | How the last send to this instance ended (Issue #3759): `{ at, state, reason }`. `state` is `not-sent` (it failed before any key of the body was typed, e.g. `prompt-not-ready`) / `sent` (the submit was confirmed) / `indeterminate` (it failed after part of it may have been typed, or the outcome could not be read back; `reason: composer-residue` when the body is still in the composer). Null when this server has no record since it started; absent from an older server |
 
 **Whatever `lastSend` says, CommandMate never resends.** The sender — you or the supervising agent — does. Resend a `not-sent` message yourself once the input prompt is back. **Do not resend an `indeterminate` one** before checking the pane with `commandmate capture <worktree-id> --pane` (is the body still in the composer, or was it already submitted?); resending blind can deliver it twice. A `send` that fails with `prompt not ready` and the like carries the same state in its error (`[send state: not-sent (prompt-not-ready): …]`).
@@ -939,6 +944,11 @@ would hide an agent weakening the gates that judge it. The contract is already s
 ### Use an allow-listed Auto-Yes Policy for Unattended Runs (Issue #1684)
 
 A contract's `autoYes.mode: safe` **only answers `yes_no` prompts automatically**.
+On a tool whose dialog gate is `enforce` (claude, codex, copilot, opencode, opencode-v2) it also
+**does not answer a `yes_no` the tool's own dialog detector does not vouch for** (Issue #3822: a `(y/n)` quoted in a reply,
+or a generic `(y/n)` already open when Auto-Yes was turned on; recorded as `unclassified-frame`).
+A tool whose dialog gate is `legacy` (gemini, vibe-local and command-code by default, or a tool an operator set with
+`CM_AUTOYES_DIALOG_GATE=<tool>=legacy`) answers a generic `(y/n)` as before; antigravity answers a dialog its hook asked about.
 **Claude's edit confirmation (`Do you want to make this edit …?`) is a `multiple_choice` prompt**
 (effectively Yes/No plus allow-all, three options), so under `safe` the worker stops on every edit.
 Widen an unattended contract to `allow-listed` and escalate dangerous operations with `denyPatterns`.
@@ -1261,18 +1271,24 @@ which left the CLI unable to explain why a worker was stalled while Auto-Yes was
 
 | Field | Meaning |
 |-------|---------|
-| `reason` | `type-not-allowed` (the mode disallows that prompt type) / `deny-pattern` (a denyPattern matched) / `deny-pattern-unusable` (fail-closed on a pattern that could not be evaluated) / `mode-off` / `policy-lookup-failed` (the contract lookup failed; see the table below) |
+| `reason` | `type-not-allowed` (the mode disallows that prompt type) / `deny-pattern` (a denyPattern matched) / `deny-pattern-unusable` (fail-closed when the patterns could not be evaluated: a pattern that could not be evaluated, or no pattern matched but what was matched is not the whole request — an approval target that begins at the top of a capture that may have been cut, an upward scan that stopped at its 12-row cap or at a `>` row (a here-document's continuation cannot be told from the previous turn's echo), another yes/no prompt inside a yes/no prompt's own block, or a text cut at the 20,000-character limit per field; no `pattern` then. Issue #3881) / `mode-off` / `policy-lookup-failed` (the contract lookup failed; see the table below) |
 | `mode` | The policy mode at suppression time (`off` / `safe` / `allow-listed`, or `null` if the contract states no mode) |
 | `promptType` | The type of the suppressed prompt (Claude's edit confirmation, for instance, is `multiple_choice`) |
 | `pattern` | For the `deny-pattern` reasons, the denyPattern that matched |
 | `at` | When it was suppressed (epoch ms). Refreshed on every poll while the suppressed prompt is still on screen |
 
-Reasons other than the policy land in the same field. `partial-answer` (Issue #3706 / #3713) means Auto-Yes
-stopped an answer after some of its keys (a `y` before its Enter, for instance) had reached the pane, so it
-does not type at the same prompt again and leaves it to a human (`mode` is `null`). When a worktree ID move
-carries the session to a new ID, this carries on under the new ID. `commandmate wait` prints it as
-"because an earlier answer left partial input; Auto-Yes is waiting for a human" (exit 10 and the JSON
-`reason` are handled as for any other reason). Check what is left in the input before answering.
+Reasons other than the policy land in the same field. `partial-answer` (Issue #3706 / #3713 / #3880) means an
+earlier answer left input behind, or the outcome of its send could not be confirmed, so Auto-Yes does not type
+at the same prompt again and leaves it to a human (`mode` is `null`). The first is an answer stopped after some
+of its keys (a `y` before its Enter, for instance) had reached the pane; the second is a send to tmux that ended
+without an exit status (a timeout, for instance), where possibly no key arrived at all. A person's answer
+(`commandmate respond`, or one given on screen) whose send fails the same way leads to it too (or keeps it).
+When a worktree ID move carries the session to a new ID, this carries on under the new ID. `commandmate wait`
+prints it as "because an earlier answer left partial input; Auto-Yes is waiting for a human (or that answer's
+send could not be confirmed, so the input may hold it: check the pane, then answer; an answer that goes through
+releases the hold)" (exit 10 and the JSON `reason` are handled as for any other reason). Check the input before
+answering. A person's answer that goes through (or is refused with nothing sent) releases it, and so does the
+screen moving to another prompt, the prompt leaving the screen, or the session being relaunched.
 
 The remaining words of the type `AutoYesSuppressionReason` are not policy verdicts either, so `mode` can be `null`. The wording `commandmate wait` prints is quoted alongside.
 
@@ -1283,6 +1299,9 @@ The remaining words of the type `AutoYesSuppressionReason` are not policy verdic
 | `unclassified-frame` (Issue #1924) | The generic estimator read a numbered list, but the tool's own dialog detector did not accept it as a confirmation, so nothing is sent. This is the position that stops answering `1` to a numbered list inside a reply (#1896) | "because no tool-specific dialog detector recognised the frame" |
 | `startup-trust-unhandled` (Issue #3757) | agy's startup folder-trust confirmation (`Do you trust the contents of this project?`) is on screen. It belongs to the launch sequence and is unnumbered, so the poller cannot read it as a prompt. If it was drawn after the launch window ended, the next send's readiness wait answers it | "because agy's startup folder-trust confirmation is the launch's to answer, not Auto-Yes's; the next send confirms it once, or answer it at the pane" |
 | `question-confirm-page` (Issue #3748) | The `AskUserQuestion` confirm page (`Submit` / `Cancel`) of Command Code and Claude. `Submit` picks nothing; it commits the answers as they stand, so Auto-Yes does not answer and leaves it to a human | "because the question's Submit/Cancel confirmation commits the answers as they stand, so Auto-Yes leaves it to a human" |
+| `question-left-to-human` (Issue #3822 / #3863) | A question the tool asks the operator is on the pane and the answer mode is `careful`, so nothing is sent (claude's `AskUserQuestion` picker and command-code's question). OpenCode V2's question form is withheld under this reason in either mode. Not a contract verdict, so naming `multiple_choice` in `allowPromptTypes` does not make it answered. Neither `CM_AUTOYES_DIALOG_GATE=<tool>=legacy` (the kill switch) nor a tool whose dialog gate is `legacy` by default (command-code and others) changes it: under `careful` the question is withheld (Issue #3863 took the question reading off the dialog gate). Copilot's question (`ask_user`) and codex's (`request_user_input`) carry no question marker on screen, so under `careful` a copilot / codex numbered list whose rows do not read as permission wording (the measured `Yes` / `Allow` and so on) is withheld under this reason as possibly a question (answered as before under `recommended`; Issue #3881). The `Submit` / `Cancel` confirm page after a question stays `question-confirm-page`. Under `recommended` a question is answered with its recommended option ([Answer Modes](#answer-modes-recommended-and-careful-issue-3863)) | "because the agent is asking a question, and Auto-Yes answers permissions only (the careful answer mode, or a question form no mode answers); answer it at the pane (prompt --json, respond), or turn Auto-Yes on with --answer-mode recommended to have it pick the recommended option" |
+| `allow-once-unidentified` (Issue #3822) | A permission dialog is on screen, but no single option reads as "allow this call only" (there is none, or there are two or more), so nothing is sent. Auto-Yes picks only the allow-once option, and sends its number wherever the cursor or the default is. It never picks a persistent allow (`don't ask again`, `always allow`, `Persist to settings.json`, …), a mode change (`allow all edits`, `Full Access`, …) or a denial. The options are read from the wording of live captures of claude, codex, agy (antigravity), command-code and copilot; a numbered list none of whose rows is recognised is answered as before (the default option, or 1). Not a contract verdict, so `mode` is recorded as the contract states it, and `autoYes.contractEvaluation` in `commandmate prompt --json` is `base-withholds`, not `policy-withholds` | "because no single option of the permission dialog allows this call only (the others save a rule, change the permission mode, or deny); Auto-Yes does not pick those, so answer it at the pane (prompt --json, respond)" |
+| `recommended-option-unidentified` (Issue #3863) | The answer mode is `recommended` and a question is on the pane, but which option to answer with cannot be told, so nothing is sent: two or more options are recommended (a title ending in `(Recommended)` / `（推奨）` / `(推奨)`), an option's title cannot be told from its description, the option to pick takes typed text, or the question is multi-select. Not a contract verdict (a withholding of the base rules). `autoYes.contractEvaluation` in `commandmate prompt --json` reads the same screen under the same mode and reports `base-withholds` with this `reason` too (and `base-withholds` with `question-left-to-human` for a question under `careful`). Judged again on every poll | "because the question's recommended option could not be told (two or more marked recommended, a title it could not tell from its description, a typed-text or multi-select answer); answer it at the pane (prompt --json, respond)" |
 | `no-hook-receipt` (Issue #3767) | agy's approval dialog is on screen but there is no matching hook question (`PreToolUse`) on record: (1) none was ever received, (2) the dialog appeared after the window (8 s) from the last one, (3) the dialog was already up before the question arrived (a quotation in a reply, for instance), (4) the questions stopped arriving, (5) the question was already spent on an earlier dialog, or (6) a dialog is still up 18 s (window + observation slack + post-answer cooldown) after Auto-Yes sent keys to the one its question was for — the keys did not clear it, or a dialog with no question of its own replaced it (Issue #3789). Even if sending is cut short part-way, the grace (18 s) is counted from that point, and if the confirmation remains after it has passed, it is recorded as no-hook-receipt. Part of the keys may remain in the input. However, if a more specific suppression reason (partial-answer) was recorded after the interruption, that reason is kept and it is not recorded as no-hook-receipt. The `hint` of the server log line `antigravity-autoyes-withheld-no-hook-receipt` tells them apart. **When it stalls**: `commandmate auto-yes <worktree-id> --disable`, then `commandmate prompt <worktree-id> --json`, then `commandmate respond <worktree-id> --expect-screen …` (or answer in the UI). If no question was ever received or they stopped, check where `~/.gemini/config/hooks.json` points | "because there is no unused agy hook permission question for this dialog (none arrived in time, or the last one was spent on keys that did not clear it); answer it yourself (auto-yes --disable, prompt --json, respond --expect-screen) or check hooks.json" |
 
 In [`commandmate prompt --json`](#commandmate-prompt), `autoYes.pollerRecord` (the poller's record) and `autoYes.contractEvaluation` (the contract re-evaluated now) are separate fields, but both use the same words as this table and the `reason` row above.
@@ -1292,56 +1311,36 @@ suppression right now**. Either answer it as a human with `commandmate respond`,
 contract's `autoYes` (when `mode: safe` is suppressing `multiple_choice`, switching to
 [allow-listed](#use-an-allow-listed-auto-yes-policy-for-unattended-runs-issue-1684) is recommended).
 
-#### `autoYes.lastEnterFallback`: An Enter on an Unreadable Choice Screen (Issue #3397)
+#### `autoYesDecision`: What Auto-Yes Is Doing About the Confirmation (Issue #3821)
 
-When CommandMate cannot read a choice screen the agent drew, the prompt window says
-"CommandMate cannot operate this screen." and offers "Switch to direct input". With Auto-Yes on,
-CommandMate sends **one Enter** to that screen (confirming whatever is selected at that moment).
-On a screen it was sent to, the prompt window says "Auto-Yes sent Enter." instead of the warning and the link. The prompt window is normally hidden while Auto-Yes is on, but for a screen CommandMate cannot read (`promptAnswerable: false`) it is shown under Auto-Yes too, on PC and phone alike — as it is for a checkbox (multi-select) question, since Auto-Yes sends neither a number. A checkbox question is one flagged `multiSelect`, or a list whose options start with `[ ]` / `[x]` / `[X]` / `[✔]`.
+The `current-output` response (`capture --json`) carries Auto-Yes's decision about the `promptData` of the same response.
 
 ```json
-"autoYes": {
-  "enabled": true,
-  "expiresAt": 1754300000000,
-  "lastSuppression": null,
-  "lastEnterFallback": {
-    "outcome": "sent",
-    "promptType": "multiple_choice",
-    "refusalReason": "unsupported_dialog_layout",
-    "sentAt": 1754296400000,
-    "at": 1754296400000,
-    "currentPrompt": true
-  }
+"autoYesDecision": {
+  "state": "withheld",
+  "reason": "server-poller-inactive",
+  "observedAt": 1754296400000,
+  "confirmation": "3f1c…"
 }
 ```
 
-| Field | Meaning |
-|-------|---------|
-| `outcome` | `sent` (the Enter was sent) / `no-effect` (the same screen was still up afterwards; no second Enter is sent and the screen is left to a human) |
-| `promptType` | The type of the prompt the Enter was sent to |
-| `refusalReason` | Why the screen could not be operated (`unsupported_dialog_layout` / `prompt_no_longer_active`) |
-| `sentAt` | When the Enter was sent (epoch ms) |
-| `at` | When the record last changed (`sentAt`, or when `no-effect` was found) |
-| `currentPrompt` | Whether the record is about the same screen as this response's `promptData` |
+| `state` | Meaning |
+|---------|---------|
+| `answering` | The server's poller is answering this confirmation (sending, or sent and the screen not redrawn yet) |
+| `withheld` | Auto-Yes left this confirmation to a human; `reason` says why (the words of the table above, plus `server-poller-inactive` = Auto-Yes is on but no poller runs for this instance (the concurrent limit, for one), `no-auto-answer` = the base rules have no answer (typed text, a checkbox list), `answered-by-human` = for about 10 seconds after a person began answering from the panel, `foreign-session` / `moved-send-in-flight`) |
+| `none` | No confirmation, Auto-Yes off, or not judged yet. Never read as `answering` |
 
-The Enter is sent only when **all** of the following hold:
+The decision is what the poller actually judged, and it carries over none of: enabling Auto-Yes again (OFF→ON with the same screen up, or an expiry), a session relaunch, another confirmation, a person's answer (it reads `none` until the next judgement). Whether it is another confirmation is judged on the question and the options, plus what is being approved (`approvalTarget`, compared as read except for where the cursor sits on the option rows: the body's indentation, `>` and blank rows count, so two commands that differ only by indentation are two confirmations) and, for agy, the hook call. A reading whose approval target cannot be compared to its end (cut from the top, fewer rows) is not taken for the same confirmation, even under the same agy hook call, and reads `none` (the rows left may not tell it from another confirmation that differs only in its file name; this only shows the answer panel and does not change what is sent automatically). When the match cannot be confirmed otherwise it reads `none` too. `confirmation` names the confirmation the decision is about (an opaque key: readings the server judges to be the same confirmation carry the same value, and different values are different confirmations; the same screen read with a different number of rows gives a different value; `null` with no prompt). The PC screen keeps the later of two decisions only when they carry the same `confirmation`, and carries no decision over to another confirmation. While the duplicate guard waits after a send, `answering` stands only for the confirmation that was sent to. Two confirmations with the same text in a row, with no screen without a confirmation between them, cannot be told apart from the screen alone. The field is absent when the session is not running.
 
-- the prompt window offers "Switch to direct input" for the screen (the same judgement as `promptAnswerable: false`);
-- there is evidence the focus is on a choice screen: the picker's footer is on screen but its layout could not be read (`unsupported_dialog_layout`), or the input box is not on screen (claude / codex);
-- **the input box is not on screen** (nothing is sent whether it holds text, is empty or shows a dim suggestion — this keeps an agent's reply that merely quotes a list from being "answered");
-- the same screen was seen on two polls in a row, and the agent has neither exited nor is still generating;
-- the contract's `autoYes` policy allows it (nothing is sent under `mode: off` / `safe` or on a `denyPatterns` match), and the session is not another server's;
-- it is not codex's launch screens or its `/model` picker.
+With Auto-Yes on, the PC and phone answer panels are shown whenever `state` is not `answering` (and for a response from an older server without the field). A question OpenCode / V2 asks over its API always shows its panel under Auto-Yes. Answering by hand leaves Auto-Yes on.
 
-When the prompt it reports has a record (`currentPrompt: true`), `commandmate wait` adds one line on stderr (`auto-yes sent Enter to this prompt …`, or `… the same screen is still up (no-effect) …` when it did not take). The exit-10 JSON is unchanged. Plain `capture` (without `--json`) prints the transcript only, so read the record with `--json`.
+`commandmate wait` reports a `withheld` prompt at once instead of holding it for the Auto-Yes grace (`--auto-yes-grace`), with `auto-yes is not answering this prompt (reason=…)` on stderr. The prompt Push notification still arrives after its grace, as before.
 
-Only claude and codex are enabled by default. Switch it per tool with the `CM_AUTOYES_ENTER_FALLBACK`
-environment variable (same syntax as `CM_AUTOYES_DIALOG_GATE`).
+#### `autoYes.lastEnterFallback`: An Enter on an Unreadable Choice Screen (Issue #3397, retired in Issue #3821)
 
-```bash
-CM_AUTOYES_ENTER_FALLBACK='*=disabled'       # never send it
-CM_AUTOYES_ENTER_FALLBACK='codex=disabled'   # stop it for codex only
-```
+The single Enter Auto-Yes sent to a choice screen CommandMate cannot read is **retired** (Issue #3821): a bare Enter confirms whatever happens to be selected, and on a screen nothing can read, nobody can check what that is. Setting `CM_AUTOYES_ENTER_FALLBACK` does not bring it back. Such a screen is answered by a person under Auto-Yes too (`lastSuppression.reason` is `unclassified-frame`, `autoYesDecision` is `withheld`).
+
+The `autoYes.lastEnterFallback` field stays for compatibility and is always `null`. Past `[Enter]` answers in the audit log and the History, and the `enter-fallback` basis in the Auto-Yes measurement log, still read as they were.
 
 ### `--pane`: Reading the Transcript (Issue #1623)
 
@@ -1427,7 +1426,7 @@ JSON output (`prompts` is oldest first):
 ```
 
 - **`answeredBy` names who answered**: `auto` (the server-side auto-yes), `human` (an explicit answer
-  through the respond API or the chat UI — the browser-side auto-yes fallback also counts as `human`),
+  through the respond API or the chat UI — before Issue #3821 the browser-side auto-yes fallback counted as `human` too),
   or `terminal` (a sweep record inferring that somebody answered directly in the terminal). Rows
   resolved before this feature landed are `null`
 - It cannot be combined with `--pane` (`--prompts` reads history, `--pane` reads the current screen)
@@ -1728,6 +1727,7 @@ commandmate auto-yes <worktree-id> --enable --duration 3h
 commandmate auto-yes <worktree-id> --enable --stop-pattern "error"
 commandmate auto-yes <worktree-id> --disable
 commandmate auto-yes <worktree-id> --enable --instance codex-2  # Scoped to one instance
+commandmate auto-yes <worktree-id> --enable --answer-mode careful  # Questions are yours (careful)
 ```
 
 ### Options
@@ -1738,10 +1738,40 @@ commandmate auto-yes <worktree-id> --enable --instance codex-2  # Scoped to one 
 | `--disable` | Turn Auto-Yes off |
 | `--duration <d>` | How long it stays on (1h, 3h, 8h) |
 | `--stop-pattern <p>` | Stop automatically when the pattern appears in terminal output |
+| `--answer-mode <m>` | The answer mode (`recommended` / `careful`; see [Answer Modes](#answer-modes-recommended-and-careful-issue-3863) below). With `--enable` only. Omitted: `recommended` for a new grant, the current mode for a grant that is on (Issue #3863) |
 | `--instance <id>` | **The recommended way to name the target.** The instance ID; Auto-Yes is controlled independently of the other instances |
 | `--agent <id>` | A helper for instances that are not in the roster (unnecessary when `--instance` alone is enough) |
 
 Enabled for an instance whose session is not running, Auto-Yes stays on until it expires (`--duration`) and answers once the session starts (Issue #3329); while it waits it checks once a minute. It stops with `consecutive_errors` only when failures keep coming in a row: the session exists but its screen cannot be read or the answer cannot be sent, or tmux itself cannot be asked.
+
+### Answer Modes: Recommended and Careful (Issue #3863)
+
+When you turn Auto-Yes on you choose how it treats a **question** the agent asks.
+
+| Mode | A question (claude's `AskUserQuestion`, command-code's question) | A permission |
+|------|------------------------------------------------------------------|--------------|
+| `recommended` (the default) | Answered with its recommended option (rules below) | Only the "allow this call once" option is picked (Issue #3822) |
+| `careful` | Not answered; a person answers it (`question-left-to-human`) | The same |
+
+The option `recommended` picks:
+
+- exactly one option whose **title** (told apart from its description line; a wrapped title is read joined) ends in a standalone `(Recommended)`, `（推奨）` or `(推奨)`: that option, wherever it is in the list and wherever the cursor is;
+- no recommended option: the default (the cursor's option, else option 1);
+- nothing — the question is left to a person (`recommended-option-unidentified`) — when two or more are recommended, an option's title cannot be told from its description, the option to pick takes typed text (`Type something` and the like), or the question is multi-select. The same words at the end of a description do not count.
+
+Under either mode these are never answered automatically: the `Submit` / `Cancel` confirm page after a question (`question-confirm-page`), OpenCode / V2's questions (the question form and the API question), and anything the contract withholds. Copilot's question (`ask_user`) and codex's (`request_user_input`) cannot be told from their other pickers on screen. So under `careful`, a copilot / codex numbered list whose rows do not read as permission wording (the measured `Yes` / `Allow` / `Always allow` and so on) is not answered and is left to a person as something that cannot be decided to be a question or not (`question-left-to-human`; Issue #3881). A permission dialog whose wording reads is still answered with its "allow this call once" row. Under `recommended`, such a list is answered as before. `CM_AUTOYES_DIALOG_GATE=<tool>=legacy` (the kill switch) does not change how a question is treated (`careful` still leaves it to a person).
+
+- **The mode is set each time Auto-Yes is turned on** (worktree × instance). From off (an expiry included) it starts afresh, `recommended` when omitted; turning it on again while it is on keeps the current mode when omitted. After a mode change no decision made under the old mode carries over, even with the same screen up
+- **The contract**: the contract's `autoYes` is the ceiling and the answer mode sits below it ([task-contract.md](../../design/task-contract.md) §2.4)
+- **Where it shows**: `auto-yes --enable` and `send --auto-yes` print one `Answer mode: …` line when a mode was given or it is not the default (`recommended`). It is also `autoYesAnswerMode` in `capture --json` (while on), `autoYesAnswerMode` on an `instances --json` row (while on), and `answerMode=…` on `wait`'s withholding line and `autoYesSuppression.answerMode` in the exit-10 JSON
+- **API**: `answerMode` in the body of `POST /api/worktrees/<id>/auto-yes` (`recommended` / `careful`; anything else is 400). The responses (the POST, `GET …/auto-yes?cliToolId=` and the top level of `GET …/auto-yes`) carry `answerMode` while on. `GET …/auto-yes` gives each instance's mode in `answerModeByInstance` (the `agents` / `instances` entries keep their shape)
+- **Records**: the Auto-Yes measurement records (decision lines, send attempts, withheld intervals, checkpoints) carry the `answerMode` of the moment. Older records have none, and the daily count reads them as "unknown"
+
+```console
+$ commandmate auto-yes proj-cc --enable --answer-mode careful
+Auto-yes enabled for proj-cc (claude).
+Answer mode: careful (questions are left to you; permissions are still answered).
+```
 
 ### The Target Agent Is the Worktree's Default (Issue #1909)
 
@@ -1774,7 +1804,7 @@ Warning: the contract of task 7f3c… sets autoYes.mode: off, so Auto-Yes is arm
 ```
 
 - `safe` / `allow-listed` are not blocked; one `Note:` line names what gets answered
-  (e.g. `Note: … sets autoYes.mode: safe; Auto-Yes answers yes_no prompts only.`)
+  (e.g. `Note: … sets autoYes.mode: safe; Auto-Yes answers yes_no prompts only (on claude, codex, copilot, opencode and opencode-v2, only those the tool itself shows as a confirmation, not a generic (y/n)).`)
 - With no contract, or a contract that states no `mode`, the output is what it was
 - The verdict goes through the poller's own policy read (`getSessionAutoYesPolicy`). On the API it
   is `contractPolicy` (`{ taskId, mode, allowPromptTypes, denyPatternCount }` or `null`) on the

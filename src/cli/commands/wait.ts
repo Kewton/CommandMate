@@ -241,6 +241,16 @@ function describePaneObstruction(data: CurrentOutputResponse): string {
  * error runs towards reporting — a withheld answer to an earlier prompt, under a
  * minute old, still ends the hold, which is the pre-#2463 exit rather than a
  * new failure.
+ *
+ * Issue #3798: a server that names the waiting episodes does what the push gate
+ * does — the record's `episodeId` against the payload's
+ * `autoYes.waitingEpisodeId`, which decide when both are present: another id
+ * (or no wait open) is a record of an earlier wait, however recent; the same
+ * id is this wait's. Either one missing (an older server, a record written
+ * before any wait was open), this window decides as before. Whichever
+ * decides, a record the server marks `lastSuppressionAnswered` — Auto-Yes
+ * answered the open wait after it was written — is history, not this wait's
+ * reason, as the push gate reads it: the hold goes on.
  */
 const SUPPRESSION_FRESH_MS = 60_000;
 
@@ -248,19 +258,36 @@ type LastSuppression = NonNullable<
   NonNullable<CurrentOutputResponse['autoYes']>['lastSuppression']
 >;
 
-/** The suppression currently blocking this session, or null. */
+/**
+ * The suppression currently blocking this session, or null.
+ *
+ * Issue #3863: with the Auto-Yes answer mode in effect (`autoYesAnswerMode`)
+ * when the server publishes one — what `question-left-to-human` and
+ * `recommended-option-unidentified` depend on.
+ */
 function activeSuppression(
   data: CurrentOutputResponse,
   now: number,
-): { suppression: LastSuppression; ageSeconds: number } | null {
+): { suppression: LastSuppression; ageSeconds: number; answerMode?: string } | null {
   // No `autoYes` at all (a session that is not running, Issue #3300) reads as
   // "nothing was withheld", the same as a null record.
   const suppression = data.autoYes?.lastSuppression;
   if (!suppression) return null;
   const ageMs = now - suppression.at;
-  // A negative age is clock skew between the CLI and the server, not staleness.
-  if (ageMs > SUPPRESSION_FRESH_MS) return null;
-  return { suppression, ageSeconds: Math.max(0, Math.round(ageMs / 1000)) };
+  const waitId = data.autoYes?.waitingEpisodeId;
+  if (suppression.episodeId !== undefined && waitId !== undefined) {
+    if (suppression.episodeId !== waitId) return null;
+  } else if (ageMs > SUPPRESSION_FRESH_MS) {
+    // A negative age is clock skew between the CLI and the server, not staleness.
+    return null;
+  }
+  if (data.autoYes?.lastSuppressionAnswered === true) return null;
+  const answerMode = data.autoYesAnswerMode;
+  return {
+    suppression,
+    ageSeconds: Math.max(0, Math.round(ageMs / 1000)),
+    ...(answerMode !== undefined ? { answerMode } : {}),
+  };
 }
 
 /** The wording for the four reasons a contract's `autoYes` block really authors. */
@@ -287,6 +314,10 @@ const CONTRACT_POLICY_CAUSE = 'by contract policy';
  * the poller's stopped-answer branch (`partial-answer`, Issue #3706 / #3713),
  * and the poller's agy trust-screen branch (`startup-trust-unhandled`, Issue #3757),
  * and the poller's question confirm-page branch (`question-confirm-page`, Issue #3748),
+ * and the poller's question branch (`question-left-to-human`, Issue #3822),
+ * and the resolver's permission-row reading (`allow-once-unidentified`, Issue #3822),
+ * and the resolver's choice of a question's recommended option
+ * (`recommended-option-unidentified`, Issue #3863),
  * and the poller's agy receipt-gate branch (`no-hook-receipt`, Issue #3767),
  * and a contract lookup that failed on either of the policy paths
  * (`policy-lookup-failed`, Issue #3822).
@@ -314,7 +345,11 @@ const SUPPRESSION_CAUSE: Record<AutoYesSuppressionReason, string> = {
   // Issue #3713 (#3706's reason). Not "by contract policy" either: an earlier
   // Auto-Yes answer was stopped with some of its keys already in the input, and
   // typing it again would append to them, so the prompt waits for a human.
-  'partial-answer': 'because an earlier answer left partial input; Auto-Yes is waiting for a human',
+  // Issue #3880: or a send of it (Auto-Yes's, or a person's that failed) ended
+  // without tmux confirming it, and no key may be known to be there. The #3713
+  // sentence is kept as it was and the other case follows it.
+  'partial-answer':
+    "because an earlier answer left partial input; Auto-Yes is waiting for a human (or that answer's send could not be confirmed, so the input may hold it: check the pane, then answer; an answer that goes through releases the hold)",
   // Issue #3757. agy's startup folder-trust screen: the launch's to confirm, not
   // Auto-Yes's, and agy drew it after the launch window had ended.
   'startup-trust-unhandled':
@@ -325,6 +360,22 @@ const SUPPRESSION_CAUSE: Record<AutoYesSuppressionReason, string> = {
   // whose wording above says the opposite (nothing recognised the frame).
   'question-confirm-page':
     "because the question's Submit/Cancel confirmation commits the answers as they stand, so Auto-Yes leaves it to a human",
+  // Issue #3822. A question the agent asks the operator (an AskUserQuestion
+  // picker, OpenCode V2's question form): Auto-Yes answers permissions only,
+  // and no contract setting delegates the question. Issue #3863: since the
+  // answer modes, that is the `careful` mode's rule (and OpenCode V2's form
+  // under either mode); `answerMode=` on the line says which mode was on.
+  'question-left-to-human':
+    'because the agent is asking a question, and Auto-Yes answers permissions only (the careful answer mode, or a question form no mode answers); answer it at the pane (prompt --json, respond), or turn Auto-Yes on with --answer-mode recommended to have it pick the recommended option',
+  // Issue #3822. A permission dialog none of whose rows allows this call only
+  // (each saves a rule, changes the mode or denies), or two of which read so.
+  // Auto-Yes never picks a row that outlives this call, so it waits for a human.
+  'allow-once-unidentified':
+    'because no single option of the permission dialog allows this call only (the others save a rule, change the permission mode, or deny); Auto-Yes does not pick those, so answer it at the pane (prompt --json, respond)',
+  // Issue #3863. The recommended answer mode answers a question with its one
+  // recommended option (else its default), and could not tell which that is.
+  'recommended-option-unidentified':
+    "because the question's recommended option could not be told (two or more marked recommended, a title it could not tell from its description, a typed-text or multi-select answer); answer it at the pane (prompt --json, respond)",
   // Issue #3767. agy's approval dialog has no matching hook question (none, too
   // late, already on screen, or the hook stopped arriving). Not a contract verdict.
   // Issue #3789: nor one left unused — the last was spent on keys Auto-Yes sent,
@@ -360,7 +411,7 @@ function suppressionCause(reason: string): string {
  * in the payload either way, so the prefix is the only part that can lie — and it
  * did, for every non-contract suppression.
  */
-function formatSuppressionNotice(suppression: LastSuppression, ageSeconds: number): string {
+function formatSuppressionNotice(suppression: LastSuppression, ageSeconds: number, answerMode?: string): string {
   const parts = [
     `reason=${suppression.reason}`,
     `mode=${suppression.mode ?? 'none'}`,
@@ -368,6 +419,10 @@ function formatSuppressionNotice(suppression: LastSuppression, ageSeconds: numbe
   ];
   if (suppression.pattern !== undefined) {
     parts.push(`pattern=${JSON.stringify(suppression.pattern)}`);
+  }
+  // Issue #3863: the Auto-Yes answer mode in effect, when the server says.
+  if (answerMode !== undefined) {
+    parts.push(`answerMode=${answerMode}`);
   }
   const cause = suppressionCause(suppression.reason);
   return `  auto-yes suppressed this prompt ${cause}: ${parts.join(' ')} (${ageSeconds}s ago)`;
@@ -429,6 +484,19 @@ function formatEnterFallbackNotice(data: CurrentOutputResponse, now: number): st
       `answer it in the terminal: ${detail} ${ago}`;
   }
   return `  auto-yes Enter record for this prompt: outcome=${record.outcome} ${detail} ${ago}`;
+}
+
+/**
+ * Issue #3821: the server's own word that Auto-Yes left this prompt to a human
+ * (`autoYesDecision.state === 'withheld'`) — `server-poller-inactive` when no
+ * poller runs for the instance, or a stop the suppression record does not
+ * carry. Read only when the server publishes the field; an older one leaves
+ * `wait` holding as before.
+ */
+function decisionWithheldReason(data: CurrentOutputResponse): string | null {
+  const decision = data.autoYesDecision;
+  if (decision?.state !== 'withheld') return null;
+  return decision.reason ?? 'unknown';
 }
 
 /**
@@ -901,6 +969,13 @@ function buildPromptOutput(
     ...(promptData.approvalTarget !== undefined && {
       approvalTarget: promptData.approvalTarget,
     }),
+    // Issue #3881: whether that target is the whole request (a `deny-pattern-
+    // unusable` verdict below is read against it), and what the screen was
+    // read as, when the server sent them.
+    ...(promptData.approvalTargetCompleteness !== undefined && {
+      approvalTargetCompleteness: promptData.approvalTargetCompleteness,
+    }),
+    ...(promptData.reading !== undefined && { reading: promptData.reading }),
     ...(suppressed && {
       autoYesSuppression: {
         reason: suppressed.suppression.reason,
@@ -910,6 +985,8 @@ function buildPromptOutput(
           pattern: suppressed.suppression.pattern,
         }),
         ageSeconds: suppressed.ageSeconds,
+        // Issue #3863: the answer mode in effect, when the server publishes it.
+        ...(suppressed.answerMode !== undefined && { answerMode: suppressed.answerMode }),
       },
     }),
   };
@@ -1140,14 +1217,20 @@ function promptStage(poll: PollContext, state: PollState, data: CurrentOutputRes
     // keeps polling and would otherwise say nothing about why nobody
     // answered, and the agent one is read by pipelines that never see stderr.
     const suppressed = activeSuppression(data, Date.now());
+    // Issue #3821: withheld by the server's decision, with no suppression to say so.
+    const decisionWithheld = suppressed ? null : decisionWithheldReason(data);
+    const decisionNotice = decisionWithheld === null
+      ? null
+      : `  auto-yes is not answering this prompt (reason=${decisionWithheld}); it is a human's to answer.`;
 
     // [DR1-03] Prompt detection exit code
     if (options.onPrompt === 'human') {
       // Block and continue polling - user handles prompt manually
       console.error(`Prompt detected on ${worktreeId}. Waiting for human response...`);
       if (suppressed) {
-        console.error(formatSuppressionNotice(suppressed.suppression, suppressed.ageSeconds));
+        console.error(formatSuppressionNotice(suppressed.suppression, suppressed.ageSeconds, suppressed.answerMode));
       }
+      if (decisionNotice) console.error(decisionNotice);
       // Issue #3397: and whether Auto-Yes already pressed Enter on it.
       const enterNotice = formatEnterFallbackNotice(data, Date.now());
       if (enterNotice) console.error(enterNotice);
@@ -1164,7 +1247,8 @@ function promptStage(poll: PollContext, state: PollState, data: CurrentOutputRes
     // poll that shows no prompt ends the hold below and completion is judged
     // as usual. A withheld answer (`suppressed`) and Auto-Yes being off are
     // the gate's other two branches and still exit 10 at once.
-    if (!suppressed && data.autoYes?.enabled === true && autoYesGraceMs > 0) {
+    // Issue #3821: nor does a prompt the server says Auto-Yes left to a human.
+    if (!suppressed && decisionWithheld === null && data.autoYes?.enabled === true && autoYesGraceMs > 0) {
       const now = Date.now();
       if (state.autoYesAnsweringSince === null) {
         state.autoYesAnsweringSince = now;
@@ -1188,15 +1272,16 @@ function promptStage(poll: PollContext, state: PollState, data: CurrentOutputRes
           : `Note: the target's Auto-Yes did not answer the prompt on ${worktreeId} within ` +
               `${autoYesGraceSeconds}s; reporting it.`,
       );
-    } else if (state.autoYesAnsweringSince !== null && !suppressed) {
+    } else if (state.autoYesAnsweringSince !== null && !suppressed && decisionWithheld === null) {
       console.error(`Note: Auto-Yes is no longer enabled on ${worktreeId}; reporting the prompt.`);
     }
 
     // Default (agent mode): output prompt info and exit 10
     const promptOutput = buildPromptOutput(worktreeId, data, data.promptData, suppressed);
     if (suppressed) {
-      console.error(formatSuppressionNotice(suppressed.suppression, suppressed.ageSeconds));
+      console.error(formatSuppressionNotice(suppressed.suppression, suppressed.ageSeconds, suppressed.answerMode));
     }
+    if (decisionNotice) console.error(decisionNotice);
     // Issue #3397: stderr only, like the notice above; the exit-10 payload is unchanged.
     const enterNotice = formatEnterFallbackNotice(data, Date.now());
     if (enterNotice) console.error(enterNotice);
@@ -1228,7 +1313,7 @@ function selectionListStage(poll: PollContext, data: CurrentOutputResponse): Sta
       // selection lists, so a policy can be the reason this one is stuck too.
       const suppressed = activeSuppression(data, Date.now());
       if (suppressed) {
-        console.error(formatSuppressionNotice(suppressed.suppression, suppressed.ageSeconds));
+        console.error(formatSuppressionNotice(suppressed.suppression, suppressed.ageSeconds, suppressed.answerMode));
       }
       // Issue #3730
       const restartNotice = formatRestartReleaseNotice(worktreeId, data, poll.options.instance);
@@ -2092,8 +2177,11 @@ The observation on exit 10 (Issue #3755):
   \`commandmate prompt <id> --json\` prints, read off the capture the exit was
   decided on — the screen's kind, an observation token, and Auto-Yes as two
   separate items (the poller's record, the contract re-evaluated now). It
-  changes no exit code, hold or grace. autoYesSuppression keeps its meaning (a
-  record under a minute old); a missing record does not mean Auto-Yes can answer.
+  changes no exit code, hold or grace. autoYesSuppression keeps its meaning
+  (the record of this wait: the same waiting-episode id when the record and
+  the server both name one, else a record under a minute old; either way not
+  one written before Auto-Yes answered this wait, as the push gate reads it);
+  a missing record does not mean Auto-Yes can answer.
 `)
     .action(async (worktreeIds: string[], options: PollWorktreeOptions) => {
       try {

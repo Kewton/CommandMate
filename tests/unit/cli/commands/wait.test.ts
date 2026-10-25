@@ -1524,6 +1524,17 @@ describe('Issue #3713: the partial-answer suppression has its own wording', () =
     expect(output.autoYesSuppression).toMatchObject({ reason: 'partial-answer', mode: null, promptType: 'yes_no' });
   });
 
+  it('[#3880] also names a send whose outcome could not be confirmed, and what releases it', async () => {
+    mockFetchSequence([{ data: suppressedPrompt({ ...partial, at: Date.now() }) }]);
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+
+    const stderr = stderrOf();
+    expect(stderr).toContain("or that answer's send could not be confirmed, so the input may hold it");
+    expect(stderr).toContain('an answer that goes through releases the hold');
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
+  });
+
   it('negative: an unknown reason is still named verbatim as unrecognised', async () => {
     mockFetchSequence([{ data: suppressedPrompt({ ...partial, reason: 'partial-answer-2', at: Date.now() }) }]);
     const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
@@ -1613,6 +1624,96 @@ describe('Issue #3748: the question confirm-page suppression has its own wording
     expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
     const output = JSON.parse(mockConsoleLog.mock.calls[0][0]);
     expect(output.autoYesSuppression).toMatchObject({ reason: 'question-confirm-page', mode: null });
+  });
+});
+
+/**
+ * Issue #3822: `question-left-to-human` (a question the agent asks the
+ * operator, which Auto-Yes leaves to a human) has its own wording — neither the
+ * confirm page's nor a contract verdict's.
+ */
+describe('Issue #3822: the question suppression has its own wording', () => {
+  const stderrOf = () => mockConsoleError.mock.calls.map(c => String(c[0])).join('\n');
+
+  it('names the question, exits 10 and keeps the raw reason in --json', async () => {
+    mockFetchSequence([{
+      data: {
+        ...baseOutput,
+        isRunning: true,
+        isPromptWaiting: true,
+        sessionStatus: 'waiting' as const,
+        promptData: {
+          type: 'multiple_choice',
+          question: 'Which approach should I take?',
+          options: [
+            { number: 1, label: 'Refactor first', isDefault: true },
+            { number: 2, label: 'Patch in place', isDefault: false },
+          ],
+          status: 'pending',
+        },
+        autoYes: {
+          enabled: true,
+          expiresAt: null,
+          lastSuppression: { reason: 'question-left-to-human', mode: null, promptType: 'multiple_choice', at: Date.now() },
+        },
+      },
+    }]);
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+
+    const stderr = stderrOf();
+    expect(stderr).toContain('because the agent is asking a question, and Auto-Yes answers permissions only');
+    expect(stderr).toContain('reason=question-left-to-human');
+    expect(stderr).not.toContain('Submit/Cancel confirmation');
+    expect(stderr).not.toContain('by contract policy');
+    expect(stderr).not.toContain('does not recognise');
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
+    const output = JSON.parse(mockConsoleLog.mock.calls[0][0]);
+    expect(output.autoYesSuppression).toMatchObject({ reason: 'question-left-to-human', mode: null });
+  });
+});
+
+/**
+ * Issue #3822: `allow-once-unidentified` (a permission dialog none of whose
+ * rows allows this call only) has its own wording — not a contract verdict's.
+ */
+describe('Issue #3822: the allow-once suppression has its own wording', () => {
+  const stderrOf = () => mockConsoleError.mock.calls.map(c => String(c[0])).join('\n');
+
+  it('names the dialog, exits 10 and keeps the raw reason in --json', async () => {
+    mockFetchSequence([{
+      data: {
+        ...baseOutput,
+        isRunning: true,
+        isPromptWaiting: true,
+        sessionStatus: 'waiting' as const,
+        promptData: {
+          type: 'multiple_choice',
+          question: 'Update Model Permissions',
+          options: [
+            { number: 1, label: 'Ask for approval (current)', isDefault: true },
+            { number: 2, label: 'Approve for me', isDefault: false },
+            { number: 3, label: 'Full Access', isDefault: false },
+          ],
+          status: 'pending',
+        },
+        autoYes: {
+          enabled: true,
+          expiresAt: null,
+          lastSuppression: { reason: 'allow-once-unidentified', mode: null, promptType: 'multiple_choice', at: Date.now() },
+        },
+      },
+    }]);
+    const { createWaitCommand } = await import('../../../../src/cli/commands/wait');
+    await createWaitCommand().parseAsync(['node', 'wait', 'wt1']);
+
+    const stderr = stderrOf();
+    expect(stderr).toContain('because no single option of the permission dialog allows this call only');
+    expect(stderr).toContain('reason=allow-once-unidentified');
+    expect(stderr).not.toContain('by contract policy');
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.PROMPT_DETECTED);
+    const output = JSON.parse(mockConsoleLog.mock.calls[0][0]);
+    expect(output.autoYesSuppression).toMatchObject({ reason: 'allow-once-unidentified', mode: null });
   });
 });
 

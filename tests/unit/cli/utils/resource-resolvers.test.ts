@@ -1,7 +1,7 @@
 /**
  * Resource Resolvers Tests
  * Issue #136: Phase 1 - Task 1.2
- * Tests for DbPathResolver, PidPathResolver, LogPathResolver
+ * Tests for DbPathResolver, PidPathResolver
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -19,10 +19,8 @@ import {
   ResourcePathResolver,
   DbPathResolver,
   PidPathResolver,
-  LogPathResolver,
   createDbPathResolver,
   createPidPathResolver,
-  createLogPathResolver,
 } from '../../../../src/cli/utils/resource-resolvers';
 import { getConfigDir } from '../../../../src/cli/utils/install-context';
 
@@ -200,70 +198,6 @@ describe('resource-resolvers', () => {
     });
   });
 
-  describe('LogPathResolver', () => {
-    describe('resolve', () => {
-      it('should return main log path when no issueNo provided', () => {
-        const resolver = new LogPathResolver();
-        const result = resolver.resolve();
-
-        expect(result).toBe(path.join(mockConfigDir, 'logs', 'commandmate.log'));
-      });
-
-      it('should return issue-specific log path', () => {
-        const resolver = new LogPathResolver();
-        const result = resolver.resolve(135);
-
-        expect(result).toBe(path.join(mockConfigDir, 'logs', 'commandmate-135.log'));
-      });
-
-      it('should handle various issue numbers', () => {
-        const resolver = new LogPathResolver();
-
-        expect(resolver.resolve(1)).toContain('commandmate-1.log');
-        expect(resolver.resolve(999)).toContain('commandmate-999.log');
-      });
-    });
-
-    describe('validate', () => {
-      it('should return true for valid log path within logs directory', () => {
-        const logsDir = path.join(mockConfigDir, 'logs');
-        const validPath = path.join(logsDir, 'commandmate.log');
-        vi.mocked(fs.realpathSync).mockReturnValue(validPath);
-
-        const resolver = new LogPathResolver();
-        const result = resolver.validate(validPath);
-
-        expect(result).toBe(true);
-      });
-
-      it('should return false for path outside logs directory', () => {
-        vi.mocked(fs.realpathSync).mockReturnValue('/var/log/evil.log');
-
-        const resolver = new LogPathResolver();
-        const result = resolver.validate('/var/log/evil.log');
-
-        expect(result).toBe(false);
-      });
-
-      it('should handle ENOENT by checking logs directory exists within config', () => {
-        const logsDir = path.join(mockConfigDir, 'logs');
-
-        vi.mocked(fs.realpathSync)
-          .mockImplementationOnce(() => {
-            const error = new Error('ENOENT') as NodeJS.ErrnoException;
-            error.code = 'ENOENT';
-            throw error;
-          })
-          .mockReturnValueOnce(logsDir);
-
-        const resolver = new LogPathResolver();
-        const result = resolver.validate(path.join(logsDir, 'new.log'));
-
-        expect(result).toBe(true);
-      });
-    });
-  });
-
   describe('Factory functions', () => {
     it('createDbPathResolver should return DbPathResolver instance', () => {
       const resolver = createDbPathResolver();
@@ -273,11 +207,6 @@ describe('resource-resolvers', () => {
     it('createPidPathResolver should return PidPathResolver instance', () => {
       const resolver = createPidPathResolver();
       expect(resolver).toBeInstanceOf(PidPathResolver);
-    });
-
-    it('createLogPathResolver should return LogPathResolver instance', () => {
-      const resolver = createLogPathResolver();
-      expect(resolver).toBeInstanceOf(LogPathResolver);
     });
   });
 

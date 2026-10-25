@@ -55,12 +55,14 @@ import {
   isPollerActive,
   buildCompositeKey,
 } from '@/lib/polling/auto-yes-manager';
-import { getLastPolicySuppression } from '@/lib/polling/auto-yes-suppression-state';
-import {
-  getLastEnterFallback,
-  publishEnterFallback,
-  type AutoYesEnterFallbackPublished,
-} from '@/lib/polling/auto-yes-enter-fallback';
+import { getLastPolicySuppression, suppressionPredatesAnswer } from '@/lib/polling/auto-yes-suppression-state';
+import { getAutoYesLastAnswer } from '@/lib/polling/auto-yes-poller-state';
+import { getWaitingEpisodeRecord } from '@/lib/session/waiting-episode-state';
+import { autoYesAnswerModeOf } from '@/lib/auto-yes-state';
+import type { AutoYesEnterFallbackPublished } from '@/lib/polling/auto-yes-enter-fallback';
+import { publishAutoYesDecision } from '@/lib/polling/auto-yes-decision-state';
+import { getAntigravityAcceptedReceiptCallId } from '@/lib/polling/antigravity-receipt-episodes';
+import type { AutoYesDecisionPublished } from '@/types/auto-yes-decision';
 import { getPromptDedupSkips } from '@/lib/polling/prompt-dedup-state';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
 import { CACHE_MAX_CAPTURE_LINES, isCaptureWindowSaturated } from '@/lib/tmux/tmux-capture-cache';
@@ -93,6 +95,7 @@ import {
 import { applyAskUserQuestion } from '@/lib/session/ask-user-question-prompt';
 import { derivePromptView } from '@/lib/session/prompt-view';
 import { assessPromptAnswerability } from '@/lib/polling/auto-yes-dialog-gate';
+import { captureTopOf, withCaptureTopCompleteness } from '@/lib/polling/prompt-screen-reading';
 import { classifyLayerDisagreement, reportLayerDisagreement } from '@/lib/session/layer-disagreement';
 import {
   buildStructuredPromptData,
@@ -345,6 +348,8 @@ interface PromptCompositionInput {
   worktreeId: string;
   cliToolId: CLIToolType;
   output: string;
+  /** The window `output` was captured with (Issue #3881 second review N3). */
+  captureWindowLines: number;
   statusResult: StatusDetectionResult;
   startingSince: number | null;
   promptWaiting: StructuredPromptWaitingState | null;
@@ -369,6 +374,7 @@ function composePromptData({
   worktreeId,
   cliToolId,
   output,
+  captureWindowLines,
   statusResult,
   startingSince,
   promptWaiting,
@@ -386,7 +392,17 @@ function composePromptData({
   // takes it there today (the decision entries publish the same episode's
   // choices) — and this line now re-uses it, so the two surfaces cannot describe
   // different instants.
-  const scraperPromptData = statusResult.promptDetection.promptData;
+  //
+  // Issue #3881 (second review N3): with the capture's top as the Auto-Yes
+  // poller reads it — an approval target whose upward scan reached a top that
+  // may be cut carries `approvalTargetCompleteness: 'top-unknown'`, so the
+  // contract re-evaluation of `observe=1` (`prompt-observation/observe.ts`)
+  // and `wait` read the same completeness the poller acted on, from the same
+  // `captureTopOf` on this payload's own capture window.
+  const scraperPromptData = withCaptureTopCompleteness(
+    statusResult.promptDetection,
+    captureTopOf(output, captureWindowLines, cliToolId),
+  ).promptData;
   const correctedPromptData =
     scraperPromptData && askUserQuestion
       ? applyAskUserQuestion(scraperPromptData, askUserQuestion.spec)
@@ -665,6 +681,18 @@ function logDetectionDivergence(
   }
 }
 
+/**
+ * Issue #3821: the agy hook call the receipt on screen was accepted for, for
+ * the decision to be matched against; null when unknown. Read only, never throws.
+ */
+function acceptedAgyCallId(worktreeId: string, instanceId: string | undefined): string | null {
+  try {
+    return getAntigravityAcceptedReceiptCallId(worktreeId, instanceId);
+  } catch {
+    return null;
+  }
+}
+
 /** What {@link buildRunningPayload} publishes for a running session. */
 interface RunningPayloadInput {
   worktreeId: string;
@@ -682,8 +710,14 @@ interface RunningPayloadInput {
   promptData: PromptData | StructuredPromptWaitingData | null;
   promptAnswerable: boolean | undefined;
   autoYesState: ReturnType<typeof getAutoYesState>;
-  /** Issue #3397: the last Enter Auto-Yes sent, judged against this payload's prompt. */
+  /**
+   * Issue #3397: the last Enter Auto-Yes sent, judged against this payload's
+   * prompt. Issue #3821: always null — the Enter is retired; the key stays on
+   * the wire for the clients that read it.
+   */
   lastEnterFallback: AutoYesEnterFallbackPublished | null;
+  /** Issue #3821: Auto-Yes's decision about this payload's screen-read prompt. */
+  autoYesDecision: AutoYesDecisionPublished;
   isSelectionListActive: boolean;
   isPagerActive: boolean;
   isDismissablePanelActive: boolean;
@@ -722,6 +756,7 @@ function buildRunningPayload({
   promptAnswerable,
   autoYesState,
   lastEnterFallback,
+  autoYesDecision,
   isSelectionListActive,
   isPagerActive,
   isDismissablePanelActive,
@@ -737,6 +772,8 @@ function buildRunningPayload({
   paneObstruction,
   composer,
 }: RunningPayloadInput): CurrentOutputPayload {
+  const lastSuppression = getLastPolicySuppression(worktreeId, cliToolId, instanceId);
+  const waitingEpisodeId = getWaitingEpisodeRecord(worktreeId, cliToolId, instanceId)?.episodeId ?? null;
   return {
     isRunning: true,
     sessionName,
@@ -759,14 +796,30 @@ function buildRunningPayload({
       enabled: autoYesState?.enabled ?? false,
       expiresAt: autoYesState?.enabled ? autoYesState.expiresAt : null,
       stopReason: autoYesState?.stopReason,
-      lastSuppression: getLastPolicySuppression(worktreeId, cliToolId, instanceId),
+      lastSuppression,
+      // Issue #3798: read in the same step as the record above, which names the
+      // wait it was written for — `cmate wait` holds the two against each other.
+      waitingEpisodeId,
       // Issue #1694: undefined (so the key is absent from the JSON) unless a
       // stop pattern actually fired — the state clears it on every other path.
       stopMatchedText: autoYesState?.stopMatchedText,
       // Issue #3397: appended last, after the published fields above. Null when
-      // Auto-Yes never sent its Enter to an unreadable choice screen here.
+      // Auto-Yes never sent its Enter to an unreadable choice screen here —
+      // always, since Issue #3821 retired the Enter.
       lastEnterFallback,
+      // Issue #3798: appended last. Whether the poller answered the open wait
+      // after the record above was written — the push gate's own reading, so
+      // `cmate wait` does not take that record for this wait's reason.
+      lastSuppressionAnswered:
+        lastSuppression !== null &&
+        suppressionPredatesAnswer(lastSuppression, waitingEpisodeId, getAutoYesLastAnswer(compositeKey)),
     },
+    // Issue #3821: next to `autoYes`, and about `promptData` above — whether
+    // Auto-Yes is answering it, has left it to a human, or neither.
+    autoYesDecision,
+    // Issue #3863: how a question on this screen is treated while Auto-Yes is
+    // on; the key is absent while it is off.
+    ...(autoYesState?.enabled ? { autoYesAnswerMode: autoYesAnswerModeOf(autoYesState) } : {}),
     isSelectionListActive,
     isPagerActive,
     isDismissablePanelActive,
@@ -942,10 +995,8 @@ async function buildPayload(
   // The effective window is the smaller of what this path asks for and what the
   // capture layer will ever fetch — captureSessionOutput() reads at most
   // CACHE_MAX_CAPTURE_LINES regardless of the request.
-  const captureWindowSaturated = isCaptureWindowSaturated(
-    totalLines,
-    Math.min(STATUS_CAPTURE_LINES, CACHE_MAX_CAPTURE_LINES),
-  );
+  const captureWindowLines = Math.min(STATUS_CAPTURE_LINES, CACHE_MAX_CAPTURE_LINES);
+  const captureWindowSaturated = isCaptureWindowSaturated(totalLines, captureWindowLines);
 
   // Issue #1910: saturation of the capture WINDOW is only one of the two ways
   // the cursor dies, and it is the one that never fires for the alternate-screen
@@ -1082,6 +1133,7 @@ async function buildPayload(
     worktreeId,
     cliToolId,
     output,
+    captureWindowLines,
     statusResult,
     startingSince,
     promptWaiting,
@@ -1264,13 +1316,21 @@ async function buildPayload(
     promptData,
     promptAnswerable,
     autoYesState,
-    // Issue #3397: judged against the screen-read prompt only — the one
-    // `promptAnswerable` is published for, and the one the poller sent its
-    // Enter to. A structured (hook / degraded) prompt is never that screen.
-    lastEnterFallback: publishEnterFallback(
-      getLastEnterFallback(worktreeId, cliToolId, instanceId),
-      promptAnswerable !== undefined ? statusResult.promptDetection.promptData : null,
-    ),
+    // Issue #3821: the Enter is retired; the key is kept, and is null.
+    lastEnterFallback: null,
+    // Issue #3821: judged against the screen-read prompt only — the one
+    // `promptAnswerable` is published for, and the only kind the poller
+    // answers. A structured (hook / degraded) prompt is never that screen, and
+    // reads `none`.
+    autoYesDecision: publishAutoYesDecision({
+      compositeKey,
+      grant: autoYesState,
+      promptData:
+        promptData !== null && promptAnswerable !== undefined ? statusResult.promptDetection.promptData : null,
+      // agy: the decision is tied to the hook call its receipt was accepted for.
+      callId: cliToolId === 'antigravity' ? acceptedAgyCallId(worktreeId, instanceId) : null,
+      pollerActive: isPollerActive(compositeKey),
+    }),
     isSelectionListActive,
     isPagerActive,
     isDismissablePanelActive,

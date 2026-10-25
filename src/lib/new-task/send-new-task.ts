@@ -26,6 +26,7 @@
 import { ApiError, fetchApiResponse, type ApiRequestOptions } from '@/lib/api-client';
 import { getSendTimeoutMs, resolveDefaultTimeoutMs } from '@/config/api-timeout-config';
 import type { AutoYesDuration } from '@/config/auto-yes-config';
+import { DEFAULT_AUTO_YES_ANSWER_MODE, type AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { NewTaskTarget } from './recent-targets';
 
@@ -148,6 +149,13 @@ export interface SendNewTaskInput {
   model?: string;
   /** Arm Auto-Yes for this long first; null leaves it as it is. */
   autoYesDuration: AutoYesDuration | null;
+  /**
+   * Issue #3863: the answer mode to arm with; omitted is the default
+   * (`recommended`). Always named in the arming request, because the route
+   * reads an omitted mode on an instance already on as "keep the current one",
+   * and the dialog's list may predate another tab arming it.
+   */
+  autoYesAnswerMode?: AutoYesAnswerMode;
 }
 
 type Request = (url: string, options?: ApiRequestOptions) => Promise<Response>;
@@ -209,6 +217,7 @@ export async function sendNewTask(
             cliToolId,
             instanceId: target.instanceId,
             duration,
+            answerMode: input.autoYesAnswerMode ?? DEFAULT_AUTO_YES_ANSWER_MODE,
           }),
         });
         if (!response.ok) {

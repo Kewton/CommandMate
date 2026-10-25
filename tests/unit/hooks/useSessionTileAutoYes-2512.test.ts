@@ -123,6 +123,8 @@ describe('useSessionTileAutoYes', () => {
       cliToolId: 'codex',
       instanceId: 'codex-2',
       duration: 3_600_000,
+      // Issue #3863: enabling names the answer mode, the default too.
+      answerMode: 'recommended',
     });
     expect(cache.refresh).toHaveBeenCalledTimes(1);
     expect(result.current).toMatchObject({ enabled: true, expiresAt: EXPIRES });

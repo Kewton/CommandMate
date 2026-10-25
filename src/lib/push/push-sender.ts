@@ -39,7 +39,7 @@ import type { WaitingKind } from '@/lib/session/waiting-kind';
 import { getVapidConfig } from './vapid';
 import { clearPushDeliveryHealth, recordPushDeliveryFailure } from './delivery-health';
 import { shouldSendNotification, shouldSendWaitingPush } from './notification-dedup';
-import { markPromptCardShown } from './prompt-card-state';
+import { markPromptCardShown, nextPromptOrder } from './prompt-card-state';
 
 const logger = createLogger('push/sender');
 
@@ -218,6 +218,17 @@ export interface NotificationEvent {
    * which path reported it. Absent, the legacy 30 s content dedup applies.
    */
   waitingSince?: number | null;
+  /**
+   * The waiting episode's id (Issue #3798), beside {@link waitingSince}. Two
+   * waits can share a `since`, so the episode dedup compares ids when both the
+   * record and this event carry one, and the card this sends is marked with it
+   * (`prompt-card-state`) and carries it to the Service Worker
+   * ({@link PushPayload.episodeId}). The response poller names the episode
+   * its commit settled on (Issue #3798, `fanOutAfterCommit`). Absent — the
+   * opencode question push today, or a commit that changed nothing — the
+   * `since` alone names the wait, as before.
+   */
+  waitingEpisodeId?: string | null;
   /** Instance id for the episode key; falls back to {@link agentName}. */
   instanceId?: string;
   /** True for the "still waiting" re-notification (Issue #1790). */
@@ -237,6 +248,13 @@ export interface NotificationEvent {
    * resolution is a *displayed* notification and not a silent close.
    */
   resolved?: boolean;
+  /**
+   * The episode whose card a resolution clears (Issue #3798): the id the card
+   * mark carried (`prompt-card-state`). Only meaningful with {@link resolved}.
+   * Absent — a mark written without an id, or before #3798 — the Service Worker
+   * clears the tag as it always has.
+   */
+  resolvedEpisodeId?: string;
   /**
    * A newer build of the agent CLI exists (Issue #2045).
    *
@@ -316,6 +334,29 @@ export interface PushPayload {
    * place.
    */
   resolved?: true;
+  /**
+   * The waiting episode a prompt card is about (Issue #3798). Present only on a
+   * waiting notification whose producer named the episode, and omitted
+   * elsewhere so every payload that shipped before keeps its exact shape.
+   */
+  episodeId?: string;
+  /**
+   * The worktree's prompt push order (Issue #3798, `nextPromptOrder`), on a
+   * card that carries {@link episodeId} and on a resolution that carries
+   * {@link resolvedEpisodeId}, and only there. An id says which wait a card is
+   * about, not whether it is newer than a resolution — delivery fails per
+   * device — so the Service Worker keeps a card of another episode only when
+   * its order is greater than the resolution's.
+   */
+  order?: number;
+  /**
+   * The episode a resolution clears (Issue #3798). The Service Worker closes
+   * the cards of this episode, and every card it cannot show was sent after
+   * this resolution ({@link order}), and re-shows a newer episode's card
+   * silently instead of covering it. Omitted, the resolution clears the tag as
+   * before.
+   */
+  resolvedEpisodeId?: string;
 }
 
 /** Collapse whitespace and truncate to a single short line. Never the full terminal. */
@@ -440,7 +481,9 @@ function buildFailureBody(
 export function buildPushPayload(
   event: NotificationEvent,
   locale: string | null | undefined = DEFAULT_LOCALE,
-  now: number = Date.now()
+  now: number = Date.now(),
+  /** Issue #3798: the prompt push order taken for this fan-out, if any. */
+  order: number | null = null
 ): PushPayload {
   const excerpt = buildExcerpt(event.excerpt);
   const agentSuffix = event.agentName ? ` (${event.agentName})` : '';
@@ -490,6 +533,12 @@ export function buildPushPayload(
     timestamp: now,
     ...(event.waitingKind ? { waitingKind: event.waitingKind } : {}),
     ...(event.resolved === true ? { resolved: true as const } : {}),
+    ...(event.kind === 'prompt' && event.resolved !== true && event.waitingEpisodeId
+      ? { episodeId: event.waitingEpisodeId, ...(typeof order === 'number' ? { order } : {}) }
+      : {}),
+    ...(event.resolved === true && event.resolvedEpisodeId
+      ? { resolvedEpisodeId: event.resolvedEpisodeId, ...(typeof order === 'number' ? { order } : {}) }
+      : {}),
   };
 }
 
@@ -587,6 +636,7 @@ function passesDedup(event: NotificationEvent): boolean {
       worktreeId: event.worktreeId,
       instanceId: event.instanceId ?? event.agentName ?? '',
       since: event.waitingSince,
+      episodeId: event.waitingEpisodeId,
       escalated: event.escalated,
     });
   }
@@ -630,8 +680,21 @@ export async function notifyPushSubscribers(
     // itself does not mark; it clears, and it does so in its own module so each
     // direction has one writer.
     if (event.kind === 'prompt' && event.resolved !== true) {
-      markPromptCardShown(event.worktreeId, now);
+      // Issue #3798: with the episode's id, so the resolution can tell its own
+      // card from a newer one (`resolvedEpisodeId`).
+      markPromptCardShown(event.worktreeId, now, event.waitingEpisodeId ?? null);
     }
+
+    // Issue #3798: the order is taken here, synchronously with the decision to
+    // send — for a resolution, in the same tick `notifyPromptResolved` found
+    // nothing waiting — so a card taken after it compares greater on every
+    // device, whichever arrives first. Only pushes the Service Worker compares
+    // take one: an episode-named card, and a resolution naming its episode.
+    const order =
+      event.kind === 'prompt' &&
+      (event.resolved === true ? Boolean(event.resolvedEpisodeId) : Boolean(event.waitingEpisodeId))
+        ? nextPromptOrder(event.worktreeId, now)
+        : null;
 
     webpush.setVapidDetails(config.subject, config.publicKey, config.privateKey);
 
@@ -648,7 +711,7 @@ export async function notifyPushSubscribers(
     const outcomes = (
       await Promise.all(
         Array.from(byLocale, ([locale, subs]) => {
-          const payload = JSON.stringify(buildPushPayload(event, locale, now));
+          const payload = JSON.stringify(buildPushPayload(event, locale, now, order));
           return Promise.all(subs.map((sub) => sendToOne(sub, payload, now)));
         })
       )

@@ -32,18 +32,28 @@
  *   6. `gh pr merge --squash --match-head-commit <HEAD>`, recorded in the
  *      `merge` stage, then `gh issue close` unless `--close -`.
  *
+ * `--item <work item>` (#3883): one PR of an Issue that has several. Every
+ * record it reads is that work item's, every record it writes (and the
+ * precheck it runs) carries it, so the other PRs of the Issue neither stop
+ * nor pass it — another PR's full `unit` gate does not spare this one's wait
+ * for `Unit Tests`. An Issue with several PRs is not closed by the merge of
+ * one: with `--item` the Issue stays open unless `--close <N>` is given (the
+ * last PR's call).
+ *
  * Exit code: 0 merged (or already merged), 1 a condition or a command failed,
  * 2 usage error or a dirty tree, 124 the CI did not settle within --ci-timeout.
  *
  * Usage:
  *   node scripts/orchestrate/merge-pr.mjs --run-dir <dir> --issues <range> --issue <N> --worktree <path>
  *        [--pr <number>] [--branch <name>] [--base develop] [--repo Kewton/CommandMate]
- *        [--close <N|->] [--last] [--unit-related] [--ci-timeout <sec>] [--poll <sec>]
+ *        [--close <N|->] [--last] [--unit-related] [--ci-timeout <sec>] [--poll <sec>] [--item <work item>]
  */
+import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { appendRecord, findLatest, latestByStage, readRecords, unmetStage } from './run-log.mjs';
+import { appendRecord, findLatest, inItem, latestByStage, readRecords, unmetStage } from './run-log.mjs';
+import { verifyEnvState } from './env-manifest.mjs';
 import { BUILD_STEPS, findTestsNaming, main as runPrecheck, optionsFromNote, parseNote, passedGates } from './precheck.mjs';
 import {
   DEFAULT_BASE_BRANCH,
@@ -55,6 +65,7 @@ import {
   ghJson,
   ghWrite,
   git,
+  itemOption,
   lines,
   markerFiles,
   missingRecords,
@@ -132,7 +143,7 @@ export function builtLikeCi(precheckRecord) {
 const USAGE = `Usage:
   node scripts/orchestrate/merge-pr.mjs --run-dir <dir> --issues <range> --issue <N> --worktree <path>
        [--pr <number>] [--branch <name>] [--base ${DEFAULT_BASE_BRANCH}] [--repo ${DEFAULT_REPO}]
-       [--close <N|->] [--last] [--unit-related] [--ci-timeout <sec>] [--poll <sec>]`;
+       [--close <N|->] [--last] [--unit-related] [--ci-timeout <sec>] [--poll <sec>] [--item <work item>]`;
 
 const FLAGS = {
   '--run-dir': 'runDir',
@@ -146,6 +157,7 @@ const FLAGS = {
   '--close': 'close',
   '--ci-timeout': 'ciTimeout',
   '--poll': 'poll',
+  '--item': 'item',
 };
 const SWITCHES = { '--last': 'last', '--unit-related': 'unitRelated' };
 
@@ -168,7 +180,11 @@ export function parseArgs(argv) {
   for (const flag of ['--run-dir', '--issues', '--issue', '--worktree']) {
     if (!options[FLAGS[flag]]) return { error: `${flag} is required` };
   }
-  options.close = options.close ?? options.issue;
+  const item = itemOption(options);
+  if ('error' in item) return { error: item.error };
+  options.item = item.item;
+  // One PR of several does not close the Issue; the last one's call names it (#3883).
+  options.close = options.close ?? (options.item ? '-' : options.issue);
   return { options };
 }
 
@@ -216,12 +232,13 @@ export function main(argv, deps = {}) {
     return 2;
   }
   const issue = Number(o.issue);
+  const item = o.item;
   const baseRef = `origin/${o.base}`;
   const started = now();
 
   const record = (stage, result, head, note, workHead = null) => {
     const durationSec = Math.round((now().getTime() - started.getTime()) / 1000);
-    const { file } = appendRecord(o.runDir, o.issues, { issue, stage, result, head, workHead, durationSec, note }, now());
+    const { file } = appendRecord(o.runDir, o.issues, { issue, item, stage, result, head, workHead, durationSec, note }, now());
     log(`${stage} #${issue} ${head.slice(0, 7)} ${result}: ${note} -> ${file}`);
   };
 
@@ -256,7 +273,7 @@ export function main(argv, deps = {}) {
     // 1. Never merge twice: finish what a merged PR leaves (the record, the Issue).
     if (pr.state === 'MERGED') {
       const { records } = readRecords(o.runDir, o.issues);
-      if (!findLatest(records, { issue, stage: 'merge', head: pr.headRefOid, result: 'ok' })) {
+      if (!findLatest(records, { issue, item, stage: 'merge', head: pr.headRefOid, result: 'ok' })) {
         record('merge', 'ok', pr.headRefOid, `pr=#${pr.number} already-merged`);
       }
       log(`merge #${issue}: #${pr.number} is already merged — issue ${o.close}: ${closeIssue(pr.number)}`);
@@ -279,9 +296,14 @@ export function main(argv, deps = {}) {
     //    to merge is step 4's: that HEAD may not exist yet.
     const workHead = workHeadOf(run, o.worktree, head);
     let { records } = readRecords(o.runDir, o.issues);
+    const envWhere = { runDir: o.runDir, worktree: o.worktree, home: deps.home ?? os.homedir() };
+    // A verify of an earlier HEAD that differs only in the dependencies waits for step 4's precheck (#3883 N10).
+    const deferred = [];
     const problems = [
-      ...missingRecords(records, issue, { head, workHead }).filter((reason) => !reason.startsWith('precheck:')),
-      ...fragmentProblems(run, { worktree: o.worktree, runDir: o.runDir, issue, baseRef }),
+      ...missingRecords(records, issue, { head, workHead }, item, {
+        ...envWhere, warn: log, defer: (reason) => deferred.push(reason),
+      }).filter((reason) => !reason.startsWith('precheck:')),
+      ...fragmentProblems(run, { worktree: o.worktree, runDir: o.runDir, issue, baseRef, item }),
     ];
     if (problems.length > 0) {
       error(`merge #${issue} ${head.slice(0, 7)}: not merged — the run record or the PR lacks:\n  ${problems.join('\n  ')}`);
@@ -311,14 +333,24 @@ export function main(argv, deps = {}) {
       return 1;
     }
     // The precheck is recorded per HEAD, so a HEAD pushed earlier (publish-pr.mjs
-    // after a refresh) is checked here too unless it already passed.
-    if (unmetStage('precheck', latestByStage(records, issue).precheck, { head, workHead })) {
+    // after a refresh) is checked here too unless it already passed — in this
+    // environment (#3883 N9: precheck.mjs runs it again when the inputs moved).
+    const headPrecheck = latestByStage(records, issue, item).precheck;
+    const precheckEnv = headPrecheck ? verifyEnvState(headPrecheck, { runDir: o.runDir, worktree: o.worktree, home: deps.home ?? os.homedir() }) : null;
+    if (precheckEnv?.state === 'unrecorded') log(`merge #${issue}: warning: precheck at ${head.slice(0, 7)}: ${precheckEnv.detail}`);
+    for (const reason of deferred) log(`merge #${issue}: ${reason}`);
+    if (
+      unmetStage('precheck', headPrecheck, { head, workHead }) ||
+      precheckEnv?.state === 'changed' ||
+      precheckEnv?.state === 'missing' ||
+      deferred.length > 0
+    ) {
       // The options come from the precheck of the work HEAD; when a fold commit on top made the
       // precheck run on the published HEAD only, from the Issue's latest precheck=ok (any HEAD).
       // Without either the options would be guessed (kind lost → suppressions=skip): stop (#3527).
       const workPrecheck =
-        findLatest(records, { issue, stage: 'precheck', head: workHead, result: 'ok' }) ??
-        findLatest(records, { issue, stage: 'precheck', result: 'ok' });
+        findLatest(records, { issue, item, stage: 'precheck', head: workHead, result: 'ok' }) ??
+        findLatest(records, { issue, item, stage: 'precheck', result: 'ok' });
       if (!workPrecheck) {
         error(`merge #${issue}: no precheck=ok record to take the options from (kind etc.) — run precheck.mjs on the work HEAD first; not pushed`);
         return 1;
@@ -327,11 +359,21 @@ export function main(argv, deps = {}) {
         [
           '--run-dir', o.runDir, '--issues', o.issues, '--issue', String(issue), '--worktree', o.worktree,
           ...optionsFromNote(workPrecheck.note, baseRef),
+          ...(item ? ['--item', item] : []),
         ],
-        { run, now, log, error, findTestsNaming: findNaming }
+        { run, now, log, error, findTestsNaming: findNaming, home: deps.home }
       );
       if (code !== 0) {
         error(`merge #${issue}: the precheck of ${head.slice(0, 7)} did not pass${refreshed ? ' after the refresh' : ''} — not pushed`);
+        return 1;
+      }
+    }
+    if (deferred.length > 0) {
+      // The precheck of this HEAD passed in this environment: the verify's environment is judged again, now without deferring.
+      records = readRecords(o.runDir, o.issues).records;
+      const still = missingRecords(records, issue, { head, workHead }, item, { ...envWhere, warn: log }).filter((reason) => reason.startsWith('verify:'));
+      if (still.length > 0) {
+        error(`merge #${issue} ${head.slice(0, 7)}: not merged — after the precheck the run record still lacks:\n  ${still.join('\n  ')}`);
         return 1;
       }
     }
@@ -343,10 +385,12 @@ export function main(argv, deps = {}) {
 
     // 5. The checks of this HEAD.
     records = readRecords(o.runDir, o.issues).records;
-    const needBuild = !builtLikeCi(findLatest(records, { issue, stage: 'precheck', head }));
-    const verify = latestByStage(records, issue).verify ?? null;
+    const needBuild = !builtLikeCi(findLatest(records, { issue, item, stage: 'precheck', head }));
+    const verify = latestByStage(records, issue, item).verify ?? null;
     const need = { needBuild, needUnit: o.unitRelated || !ranFullUnit(verify), last: o.last };
-    const rerunDone = records.some((r) => r.issue === issue && r.stage === 'ci' && r.head === head && /(^| )rerun=/.test(r.note ?? ''));
+    const rerunDone = records.some(
+      (r) => r.issue === issue && inItem(r, item) && r.stage === 'ci' && r.head === head && /(^| )rerun=/.test(r.note ?? '')
+    );
     let rerun = rerunDone;
     const deadline = now().getTime() + Number(o.ciTimeout) * 1000;
     let verdict;

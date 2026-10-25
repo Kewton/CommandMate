@@ -4,7 +4,11 @@
  * `deny-pattern-unusable` is the fail-closed case: a deny pattern that cannot be
  * evaluated (unsafe, unparseable, or over-long) suppresses instead of being
  * skipped. Ignoring it would silently drop the protection the contract author
- * asked for, which is the more dangerous of the two directions.
+ * asked for, which is the more dangerous of the two directions. Issue #3881:
+ * also when the patterns could only be run against part of the request — the
+ * approval target was cut at its line cap, or at the top of a capture that
+ * filled its window (`approvalTargetCompleteness`), and none matched the part
+ * that was read; that case carries no `pattern`.
  */
 export type AutoYesSuppressionReason =
   | 'mode-off'
@@ -74,6 +78,35 @@ export type AutoYesSuppressionReason =
    */
   | 'question-confirm-page'
   /**
+   * Issue #3822: a question the tool asks the operator (an `AskUserQuestion`
+   * picker, OpenCode V2's question form) is on the pane. Auto-Yes answers
+   * permissions only; the question is the human's, so nothing is sent. Not a
+   * contract verdict — `allowPromptTypes` cannot bring it back. The confirm page
+   * that follows a question keeps its own reason, `question-confirm-page`.
+   */
+  | 'question-left-to-human'
+  /**
+   * Issue #3822: a permission dialog is on the pane, and no single row of it
+   * reads as "allow this call once" (`polling/auto-yes-option-effect`): every
+   * row saves a rule (`don't ask again`, `always allow`, `Persist to
+   * settings.json`), changes the permission mode, or denies — or two rows read
+   * as once. Auto-Yes answers the allow-once row only, by its number, so
+   * nothing is sent. Returned by the resolver (the base rules, not the
+   * contract), and re-evaluated on every tick.
+   */
+  | 'allow-once-unidentified'
+  /**
+   * Issue #3863: a question is on the pane, Auto-Yes's answer mode is
+   * `recommended` (answer questions with their recommended option), and which
+   * option that is could not be told: an option whose title the reader could
+   * not separate from its description, two or more options marked
+   * `(Recommended)` / `（推奨）` / `(推奨)`, a chosen option that takes typed
+   * text, or a multi-select question. Nothing is sent. Returned by the
+   * resolver (the base rules, not the contract), and re-evaluated on every
+   * tick.
+   */
+  | 'recommended-option-unidentified'
+  /**
    * Issue #3767: agy's approval dialog is on the pane but Auto-Yes has no
    * unused `PreToolUse` question to match it to (none ever, it appeared after
    * the window, it was already up, the hook stopped arriving, or — Issue #3789 —
@@ -87,7 +120,9 @@ export type AutoYesSuppressionReason =
 /**
  * Issue #3796: the reasons `resolveAutoAnswerWithPolicy` returns — the contract's
  * verdict on the prompt as it is NOW, which a later tick re-evaluates, as
- * opposed to a reason that remembers an event (`partial-answer`).
+ * opposed to a reason that remembers an event (`partial-answer`). Issue #3822
+ * adds the base rules' one withholding, `allow-once-unidentified`, for the same
+ * reason.
  */
 export const CONTRACT_SUPPRESSION_REASONS: ReadonlySet<AutoYesSuppressionReason> = new Set<AutoYesSuppressionReason>([
   'mode-off',
@@ -95,6 +130,11 @@ export const CONTRACT_SUPPRESSION_REASONS: ReadonlySet<AutoYesSuppressionReason>
   'deny-pattern-unusable',
   'type-not-allowed',
   'policy-lookup-failed',
+  // Issue #3822: not the contract's, but the same kind of verdict — on the
+  // prompt as it is now, from `resolveAutoAnswerWithPolicy`, re-evaluated later.
+  'allow-once-unidentified',
+  // Issue #3863: likewise, over a question under the `recommended` answer mode.
+  'recommended-option-unidentified',
 ]);
 
 /** Issue #3822: the reason recorded when the contract lookup failed. */
@@ -108,6 +148,35 @@ export const STARTUP_TRUST_UNHANDLED_SUPPRESSION_REASON = 'startup-trust-unhandl
 
 /** Issue #3748: the reason the poller records over an `AskUserQuestion` confirm page. */
 export const QUESTION_CONFIRM_PAGE_SUPPRESSION_REASON = 'question-confirm-page' satisfies AutoYesSuppressionReason;
+
+/** Issue #3822: the reason the poller records over a question the tool asks the operator. */
+export const QUESTION_LEFT_TO_HUMAN_SUPPRESSION_REASON = 'question-left-to-human' satisfies AutoYesSuppressionReason;
+
+/**
+ * Issue #3822: the reasons `resolveAutoAnswerWithPolicy` returns from its base
+ * rules, before the contract is read. Every other reason it returns is the
+ * contract's verdict ({@link CONTRACT_SUPPRESSION_REASONS} holds both kinds:
+ * both are verdicts on the prompt as it is now). A reader that tells the
+ * operator what stopped the answer — the prompt observation, agy's withheld
+ * log line — must not send them to the contract for one of these.
+ */
+export const BASE_RULE_SUPPRESSION_REASONS: ReadonlySet<AutoYesSuppressionReason> = new Set<AutoYesSuppressionReason>([
+  'allow-once-unidentified',
+  // Issue #3863: a question whose recommended option could not be told.
+  'recommended-option-unidentified',
+]);
+
+/** Whether `reason` is the base rules' withholding rather than the contract's (Issue #3822). */
+export function isBaseRuleSuppressionReason(reason: AutoYesSuppressionReason | string): boolean {
+  return BASE_RULE_SUPPRESSION_REASONS.has(reason as AutoYesSuppressionReason);
+}
+
+/** Issue #3822: the reason the resolver returns over a permission dialog with no single allow-once row. */
+export const ALLOW_ONCE_UNIDENTIFIED_SUPPRESSION_REASON = 'allow-once-unidentified' satisfies AutoYesSuppressionReason;
+
+/** Issue #3863: the reason the resolver returns over a question whose recommended option could not be told. */
+export const RECOMMENDED_OPTION_UNIDENTIFIED_SUPPRESSION_REASON =
+  'recommended-option-unidentified' satisfies AutoYesSuppressionReason;
 
 /** Issue #3767: the reason the poller records over an agy dialog with no matching hook receipt. */
 export const NO_HOOK_RECEIPT_SUPPRESSION_REASON = 'no-hook-receipt' satisfies AutoYesSuppressionReason;

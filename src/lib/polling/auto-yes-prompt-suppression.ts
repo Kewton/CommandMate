@@ -7,6 +7,8 @@
 import type { CLIToolType } from '../cli-tools/types';
 import type { PromptData } from '@/types/models';
 import type { NormalizedFrame } from '../detection/tools/types';
+import type { OptionRecommendation } from '../detection/option-recommendation';
+import type { AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
 import { isCodexModelPickerFrame } from '../detection/tools/codex/detect';
 import { getCodexLifecycleDialog } from '../detection/cli-patterns';
 import { isAntigravityTrustScreen } from '../detection/tools/antigravity/patterns';
@@ -57,6 +59,18 @@ export interface JudgedPrompt {
    * (`L3` / `L4`) is read from. Absent until then.
    */
   dialogGate?: AutoYesDialogGateVerdict;
+  /**
+   * Issue #3863: what the reader said about each option's title
+   * (`PromptDetectionResult.optionRecommendations`), for the `recommended`
+   * answer mode's choice. Absent when the reader said nothing.
+   */
+  optionRecommendations?: readonly OptionRecommendation[];
+  /**
+   * Issue #3863: the answer mode the tick acts under (`answerModeOfTick`).
+   * Also what the ledger records on this tick's lines (the prompt doubles as
+   * its scope). Absent reads as `recommended`, the default.
+   */
+  answerMode?: AutoYesAnswerMode;
 }
 
 /**
@@ -107,8 +121,8 @@ export function truncateForLog(question: string): string {
 
 /**
  * What `suppressIfNotOursToAnswer` decided: carry on and answer, the prompt was
- * left alone (and recorded), or the dialog gate refused it (Issue #3397: the
- * caller tries the Enter fallback before recording the refusal).
+ * left alone (and recorded), or the dialog gate refused it (the caller records
+ * the refusal; Issue #3821 retired the Enter it tried first, #3397).
  */
 export type NotOursToAnswerVerdict =
   | { kind: 'ours' }
@@ -311,8 +325,8 @@ export function suppressIfNotOursToAnswer(prompt: JudgedPrompt, frame: Normalize
   //
   // Issue #3748: Claude's confirmation page (`Ready to submit your answers?` /
   // `❯ 1. Submit answers` / `2. Cancel`) is the same page and is declined the
-  // same way. Judged by `isAutoYesDeclinedConfirmPage`, which the browser's
-  // fallback (`useAutoYes`) asks too, and recorded with a reason of its own,
+  // same way. Judged by `isAutoYesDeclinedConfirmPage` (the browser's fallback,
+  // `useAutoYes`, read the same page by its options until #3821 retired it), and recorded with a reason of its own,
   // `question-confirm-page`, which `cmate wait` names as such (it reused
   // `unclassified-frame`, whose wording says no detector recognised the frame).
   if (isAutoYesDeclinedConfirmPage(cliToolId, frame)) {

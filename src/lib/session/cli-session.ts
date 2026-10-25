@@ -23,8 +23,11 @@ import {
   setCachedCapture,
   invalidateCache,
   sliceOutput,
+  sliceCutsHead,
   CACHE_MAX_CAPTURE_LINES,
+  type CaptureFrameMeta,
 } from '@/lib/tmux/tmux-capture-cache';
+import type { AsyncLocalStorage } from 'async_hooks';
 // Issue #2317: this module is one of the two gateways Issue #1922's import guard
 // names, which is why the tmux SURFACE is reached from here and not from
 // `worktree-status-helper.ts`. Static, not `await import()`: the guard's
@@ -42,7 +45,39 @@ import {
 import { getPaneCurrentCommand, probeSession, sendSpecialKeys, type SessionPresence } from '@/lib/tmux/tmux';
 import { isLiveAttachEligibleSession } from './tmux-session-surface';
 
+export type { CaptureFrameMeta };
+
 const logger = createLogger('cli-session');
+
+declare global {
+  /**
+   * Issue #3798: where an observer of the waiting episodes asks to be told the
+   * source of the ONE frame the capture it runs inside returns. Set up by
+   * `waiting-episode-binding`'s `captureObservedFrame` (an async context per
+   * call, so two captures of one session running at once never see each
+   * other's); only read here.
+   */
+  // eslint-disable-next-line no-var
+  var __captureFrameMetaSink: AsyncLocalStorage<(meta: CaptureFrameMeta) => void> | undefined;
+  /**
+   * Issue #3881 (third review N4): where a reader of a capture's top asks to
+   * be told whether the capture it runs inside dropped rows from the top of
+   * what tmux returned. Set up by the Auto-Yes poller's
+   * `capturePollerFrame`; only read here, the same way as the sink above.
+   */
+  // eslint-disable-next-line no-var
+  var __captureHeadCutSink: AsyncLocalStorage<(headCut: boolean) => void> | undefined;
+}
+
+/** Tell the observer this capture runs for, if any, where its frame came from (Issue #3798). */
+function reportFrameMeta(meta: CaptureFrameMeta): void {
+  globalThis.__captureFrameMetaSink?.getStore()?.(meta);
+}
+
+/** Tell the observer this capture runs for, if any, whether its window cut the pane's top (Issue #3881 N4). */
+function reportHeadCut(headCut: boolean): void {
+  globalThis.__captureHeadCutSink?.getStore()?.(headCut);
+}
 
 function getDefaultTransport(): SessionTransport {
   return getPollingTmuxTransport();
@@ -116,14 +151,22 @@ export async function captureSessionOutput(
   const transport = getDefaultTransport();
 
   try {
-    const output = await getOrFetchCapture(sessionName, lines, async () => {
-      // fetchFn: check session existence then capture
-      const exists = await transport.sessionExists(sessionName);
-      if (!exists) {
-        throw new Error(`${cliTool.name} session ${sessionName} does not exist`);
-      }
-      return await transport.captureSnapshot(sessionName, { startLine: -CACHE_MAX_CAPTURE_LINES });
-    });
+    const output = await getOrFetchCapture(
+      sessionName,
+      lines,
+      async () => {
+        // fetchFn: check session existence then capture
+        const exists = await transport.sessionExists(sessionName);
+        if (!exists) {
+          throw new Error(`${cliTool.name} session ${sessionName} does not exist`);
+        }
+        return await transport.captureSnapshot(sessionName, { startLine: -CACHE_MAX_CAPTURE_LINES });
+      },
+      // Issue #3798: this call's own frame, to the observer it runs for
+      reportFrameMeta,
+      // Issue #3881 (third review N4): and whether the window cut its top
+      reportHeadCut,
+    );
 
     log.debug('captureSessionOutput:success', {
       actualLines: output.split('\n').length,
@@ -169,6 +212,9 @@ export async function captureSessionOutputFresh(
 
   // Issue #3734: snapshot the generation before the capture starts
   const generation = getCaptureGeneration(sessionName);
+  // Issue #3798: and the time, so the cache says when this frame was fetched,
+  // not when a slow capture came back
+  const fetchStartedAt = Date.now();
 
   try {
     const output = await transport.captureSnapshot(sessionName, { startLine: -lines });
@@ -177,12 +223,15 @@ export async function captureSessionOutputFresh(
     // invalidated while waiting: the output may predate a send (Issue #3734).
     if (output.length > 0) {
       if (isCaptureGenerationCurrent(sessionName, generation)) {
-        setCachedCapture(sessionName, output, lines);
+        setCachedCapture(sessionName, output, lines, fetchStartedAt);
       }
     } else {
       invalidateCache(sessionName);
     }
 
+    reportFrameMeta({ fetchStartedAt, source: 'fetched' });
+    const headCutSink = globalThis.__captureHeadCutSink?.getStore();
+    if (headCutSink) headCutSink(sliceCutsHead(output, lines));
     return sliceOutput(output, lines);
   } catch (error: unknown) {
     // [DA3-005] Invalidate cache on error (TOCTOU safety)

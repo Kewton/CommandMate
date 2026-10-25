@@ -30,6 +30,13 @@ interface CacheEntry {
   capturedLines: number;
   /** Cache write timestamp (Date.now()) */
   timestamp: number;
+  /**
+   * Issue #3798: when the capture this entry holds was started — what a reader
+   * served from the cache, or joined to the in-flight fetch, actually saw the
+   * pane at (at the latest). The waiting episodes compare it with the time an
+   * episode closed: a frame fetched before the close cannot reopen it.
+   */
+  fetchStartedAt: number;
 }
 
 // =========================================================================
@@ -99,6 +106,8 @@ declare global {
   var __tmuxCaptureCacheInflight: Map<string, Promise<string>> | undefined;
   // eslint-disable-next-line no-var
   var __tmuxCaptureCacheGeneration: GenerationState | undefined;
+  // eslint-disable-next-line no-var
+  var __tmuxCaptureCacheInflightStartedAt: WeakMap<Promise<string>, number> | undefined;
 }
 
 /**
@@ -124,6 +133,11 @@ function getCache(): Map<string, CacheEntry> {
 
 function getInflight(): Map<string, Promise<string>> {
   return getOrInitGlobal('__tmuxCaptureCacheInflight', () => new Map<string, Promise<string>>());
+}
+
+/** When each in-flight fetch started (Issue #3798), for the callers that join it. */
+function getInflightStartedAt(): WeakMap<Promise<string>, number> {
+  return getOrInitGlobal('__tmuxCaptureCacheInflightStartedAt', () => new WeakMap<Promise<string>, number>());
 }
 
 function getGenerationState(): GenerationState {
@@ -166,8 +180,25 @@ export function isCaptureGenerationCurrent(sessionName: string, generation: Capt
 // =========================================================================
 
 /**
- * Slice output from the end to return the last requestedLines lines.
- * If requestedLines >= total lines, returns the full output.
+ * A capture's rows (Issue #3881 third review N4). tmux ends every row with a
+ * newline, so the last one terminates a row and is not a row of its own: a
+ * 1000-row pane comes back as 1000 rows and a terminator, which `split` makes
+ * 1001 elements.
+ */
+function rowsOf(output: string): { rows: string[]; terminated: boolean } {
+  const terminated = output.endsWith('\n');
+  return { rows: (terminated ? output.slice(0, -1) : output).split('\n'), terminated };
+}
+
+/**
+ * Slice output from the end to return the last requestedLines rows.
+ * If requestedLines >= total rows, returns the full output.
+ *
+ * Issue #3881 (third review N4): counted in rows, the terminator kept. Counted
+ * in `split` elements, the terminator took one of the requested rows, so a
+ * 1000-row pane asked for 1000 rows lost its first row — on an
+ * alternate-screen pane, the row that says whether the content begins at the
+ * top of the screen.
  *
  * @param fullOutput - Full captured output string
  * @param requestedLines - Number of lines requested from the end
@@ -176,10 +207,22 @@ export function isCaptureGenerationCurrent(sessionName: string, generation: Capt
 export function sliceOutput(fullOutput: string, requestedLines: number): string {
   if (fullOutput === '') return '';
 
-  const lines = fullOutput.split('\n');
-  if (requestedLines >= lines.length) return fullOutput;
+  const { rows, terminated } = rowsOf(fullOutput);
+  if (requestedLines >= rows.length) return fullOutput;
 
-  return lines.slice(-requestedLines).join('\n');
+  return rows.slice(-requestedLines).join('\n') + (terminated ? '\n' : '');
+}
+
+/**
+ * Whether {@link sliceOutput} drops rows from the top of `fullOutput` (Issue
+ * #3881 third review N4): the one fact about a capture's top that its row count
+ * cannot tell when the window is exactly the pane's height.
+ *
+ * @param fullOutput - Full captured output string
+ * @param requestedLines - Number of lines requested from the end
+ */
+export function sliceCutsHead(fullOutput: string, requestedLines: number): boolean {
+  return fullOutput !== '' && requestedLines < rowsOf(fullOutput).rows.length;
 }
 
 // =========================================================================
@@ -234,11 +277,14 @@ export function getCachedCapture(
  * @param sessionName - tmux session name (cache key)
  * @param output - Captured output string
  * @param capturedLines - Number of lines the output was captured with
+ * @param fetchStartedAt - When the capture began (Issue #3798); every writer
+ *   in this app passes it. Defaults to now, the write time
  */
 export function setCachedCapture(
   sessionName: string,
   output: string,
-  capturedLines: number
+  capturedLines: number,
+  fetchStartedAt?: number
 ): void {
   const cache = getCache();
   const now = Date.now();
@@ -270,7 +316,21 @@ export function setCachedCapture(
     output,
     capturedLines,
     timestamp: now,
+    fetchStartedAt: fetchStartedAt ?? now,
   });
+}
+
+/**
+ * When the cached capture of `sessionName` was started, or null when nothing
+ * live is cached (Issue #3798). Read-only: an expired entry is left for the
+ * next read to evict.
+ *
+ * @param sessionName - tmux session name (cache key)
+ */
+function getCachedCaptureFetchStartedAt(sessionName: string): number | null {
+  const entry = getCache().get(sessionName);
+  if (!entry || Date.now() - entry.timestamp > CACHE_TTL_MS) return null;
+  return entry.fetchStartedAt;
 }
 
 // =========================================================================
@@ -333,11 +393,26 @@ export function resetCacheForTesting(): void {
   globalThis.__tmuxCaptureCache = undefined;
   globalThis.__tmuxCaptureCacheInflight = undefined;
   globalThis.__tmuxCaptureCacheGeneration = undefined;
+  globalThis.__tmuxCaptureCacheInflightStartedAt = undefined;
 }
 
 // =========================================================================
 // getOrFetchCapture() - singleflight pattern
 // =========================================================================
+
+/**
+ * Where the frame {@link getOrFetchCapture} returned came from (Issue #3798):
+ * a fetch this call started (`fetched`), the cache (`cache`), or a fetch
+ * another caller had in flight (`joined`).
+ */
+export type CaptureSource = 'fetched' | 'cache' | 'joined';
+
+/** When the frame a capture returned was fetched, and by whom (Issue #3798). */
+export interface CaptureFrameMeta {
+  /** When the tmux capture that produced the frame started. */
+  fetchStartedAt: number;
+  source: CaptureSource;
+}
 
 /**
  * Get capture output from cache or fetch it.
@@ -350,16 +425,27 @@ export function resetCacheForTesting(): void {
  * @param sessionName - tmux session name
  * @param requestedLines - Number of lines requested
  * @param fetchFn - Function to fetch output on cache miss
+ * @param onServed - Told where the returned frame came from (Issue #3798),
+ *   right before it is returned; not called when the capture throws
+ * @param onSliced - Told whether the slice to `requestedLines` dropped rows
+ *   from the top of what tmux returned (Issue #3881 third review N4,
+ *   {@link sliceCutsHead}), right before it is returned
  * @returns Captured output (sliced to requestedLines)
  */
 export async function getOrFetchCapture(
   sessionName: string,
   requestedLines: number,
-  fetchFn: () => Promise<string>
+  fetchFn: () => Promise<string>,
+  onServed?: (meta: CaptureFrameMeta) => void,
+  onSliced?: (headCut: boolean) => void
 ): Promise<string> {
   // 1. Check cache first
+  const cachedStartedAt = getCachedCaptureFetchStartedAt(sessionName);
   const cached = getCachedCapture(sessionName, requestedLines);
   if (cached !== null) {
+    if (cachedStartedAt !== null) onServed?.({ fetchStartedAt: cachedStartedAt, source: 'cache' });
+    const entry = getCache().get(sessionName);
+    if (entry) onSliced?.(sliceCutsHead(entry.output, requestedLines));
     return cached;
   }
 
@@ -367,15 +453,20 @@ export async function getOrFetchCapture(
   const inflight = getInflight();
   const existingPromise = inflight.get(sessionName);
   if (existingPromise) {
+    const joinedStartedAt = getInflightStartedAt().get(existingPromise);
     const result = await existingPromise;
+    if (joinedStartedAt !== undefined) onServed?.({ fetchStartedAt: joinedStartedAt, source: 'joined' });
+    onSliced?.(sliceCutsHead(result, requestedLines));
     return sliceOutput(result, requestedLines);
   }
 
   // 3. Create new fetch promise
   // Issue #3734: snapshot the generation before fetchFn() starts
   const generation = getCaptureGeneration(sessionName);
+  const fetchStartedAt = Date.now();
   const fetchPromise = fetchFn();
   inflight.set(sessionName, fetchPromise);
+  getInflightStartedAt().set(fetchPromise, fetchStartedAt);
 
   try {
     const output = await fetchPromise;
@@ -383,9 +474,11 @@ export async function getOrFetchCapture(
     // Cache non-empty results only [SEC4-007], and only when no invalidation
     // happened while waiting (Issue #3734)
     if (output.length > 0 && isCaptureGenerationCurrent(sessionName, generation)) {
-      setCachedCapture(sessionName, output, CACHE_MAX_CAPTURE_LINES);
+      setCachedCapture(sessionName, output, CACHE_MAX_CAPTURE_LINES, fetchStartedAt);
     }
 
+    onServed?.({ fetchStartedAt, source: 'fetched' });
+    onSliced?.(sliceCutsHead(output, requestedLines));
     return sliceOutput(output, requestedLines);
   } finally {
     // Clean up inflight entry, unless an invalidation already replaced it

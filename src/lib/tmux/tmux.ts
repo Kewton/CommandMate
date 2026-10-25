@@ -595,8 +595,9 @@ export interface SendKeysOptions {
  * @param sendEnter - Whether to send Enter key after the command (default: true)
  * @param options - {@link SendKeysOptions}; pass `{ literal: true }` for text
  *
- * @throws {Error} If session doesn't exist, command fails, or `literal` is
- *   combined with `sendEnter`
+ * @throws {TmuxSendError} If session doesn't exist, command fails, or `literal` is
+ *   combined with `sendEnter`; its `delivery` says whether the keys may be on
+ *   the pane (Issue #3880). A normal return is `delivered`: tmux exited 0.
  *
  * @example
  * ```typescript
@@ -614,8 +615,10 @@ export async function sendKeys(
   options?: SendKeysOptions
 ): Promise<void> {
   if (options?.literal && sendEnter) {
-    throw new Error(
-      'sendKeys: { literal: true } cannot be combined with sendEnter — a trailing C-m would be typed as text. Send Enter as a separate key.'
+    throw new TmuxSendError(
+      'sendKeys: { literal: true } cannot be combined with sendEnter — a trailing C-m would be typed as text. Send Enter as a separate key.',
+      'not-started',
+      0,
     );
   }
 
@@ -637,8 +640,61 @@ export async function sendKeys(
     await execFileAsync('tmux', args, { timeout: DEFAULT_TIMEOUT });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to send keys to tmux session: ${errorMessage}`);
+    throw new TmuxSendError(
+      `Failed to send keys to tmux session: ${errorMessage}`,
+      deliveryOfExecFailure(error),
+      0,
+    );
   }
+}
+
+/**
+ * How far one `tmux send-keys` got (Issue #3880).
+ *
+ * - `not-started`: no key of it reached tmux — refused before the call (an
+ *   invalid key, `literal` with `sendEnter`), the binary could not be started,
+ *   or tmux itself answered with an exit status (it resolves the target and
+ *   the arguments before it injects a key, so a non-zero status is a refusal).
+ * - `delivered`: tmux was seen to exit normally. Only that: whether the TUI
+ *   took the key, and whether the screen moved, are other questions.
+ * - `indeterminate`: the call ended without an exit status — it timed out and
+ *   was killed, or died to a signal. tmux may already have injected the key.
+ *
+ * Not `SendAttemptState` (`session/send-attempt-types`): its `sent` is a
+ * confirmed submit of a whole message, read off the screen, not a process exit.
+ */
+export type KeyDeliveryState = 'not-started' | 'delivered' | 'indeterminate';
+
+/**
+ * A `sendKeys` / `sendSpecialKeys` that failed, with how far it got
+ * (Issue #3880). The message is the one these functions always threw.
+ */
+export class TmuxSendError extends Error {
+  constructor(
+    message: string,
+    /** What the call that failed did; a failed call is never `delivered`. */
+    readonly delivery: Exclude<KeyDeliveryState, 'delivered'>,
+    /** How many keys before it tmux was seen to take (`sendSpecialKeys`; 0 for `sendKeys`). */
+    readonly keysDelivered: number,
+  ) {
+    super(message);
+    this.name = 'TmuxSendError';
+  }
+}
+
+/**
+ * Which {@link KeyDeliveryState} a rejected `execFile` of `tmux send-keys` is
+ * (Issue #3880). Read off the error's shape, never its wording: an exit status
+ * (`code` a number) is tmux refusing the command, an errno string (`ENOENT`)
+ * is a process that never ran, and anything else — `killed` by the timeout, a
+ * `signal`, an error of no known shape — may have left the key on the pane.
+ */
+export function deliveryOfExecFailure(error: unknown): Exclude<KeyDeliveryState, 'delivered'> {
+  if (typeof error !== 'object' || error === null) return 'indeterminate';
+  const { code, killed, signal } = error as { code?: unknown; killed?: unknown; signal?: unknown };
+  if (killed === true || (typeof signal === 'string' && signal !== '')) return 'indeterminate';
+  if (typeof code === 'number' || typeof code === 'string') return 'not-started';
+  return 'indeterminate';
 }
 
 /**
@@ -761,7 +817,9 @@ export class SpecialKeysAbortedError extends Error {
  * @param sessionName - Target session name
  * @param keys - Array of tmux special key names (e.g., ['Down', 'Down', 'Space', 'Enter'])
  * @param options - Optional `shouldContinue`, asked after each delay (Issue #3706)
- * @throws {Error} If any key name is not in the allowed set, or if tmux command fails
+ * @throws {TmuxSendError} If any key name is not in the allowed set (`not-started`,
+ *   nothing sent), or if a tmux command fails — with the keys before it that
+ *   tmux took and what the failing call did (Issue #3880)
  * @throws {SpecialKeysAbortedError} If `shouldContinue` returned false between two keys
  */
 export async function sendSpecialKeys(
@@ -774,13 +832,16 @@ export async function sendSpecialKeys(
   // Validate all keys are in the allowed set (command injection prevention)
   for (const key of keys) {
     if (!ALLOWED_SPECIAL_KEYS.has(key)) {
-      throw new Error(`Invalid special key: ${key}`);
+      throw new TmuxSendError(`Invalid special key: ${key}`, 'not-started', 0);
     }
   }
 
+  // Issue #3880: the keys tmux was seen to take, for the error of a later one.
+  let delivered = 0;
   try {
     for (let i = 0; i < keys.length; i++) {
       await execFileAsync('tmux', ['send-keys', '-t', exactTarget(sessionName), keys[i]], { timeout: DEFAULT_TIMEOUT });
+      delivered = i + 1;
       // Delay between key presses (skip after the last key)
       if (i < keys.length - 1) {
         await new Promise(resolve => setTimeout(resolve, SPECIAL_KEY_DELAY_MS));
@@ -792,7 +853,11 @@ export async function sendSpecialKeys(
   } catch (error: unknown) {
     if (error instanceof SpecialKeysAbortedError) throw error;
     const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to send special keys to tmux session: ${errorMessage}`);
+    throw new TmuxSendError(
+      `Failed to send special keys to tmux session: ${errorMessage}`,
+      deliveryOfExecFailure(error),
+      delivered,
+    );
   }
 }
 
@@ -1195,7 +1260,9 @@ export const REPAINT_INVALIDATE_DELAY_MS = 250;
  * Drop the cached frame again once the TUI has had time to repaint.
  *
  * Fire-and-forget on purpose: the route must not wait 250 ms to answer, and the
- * work is one `Map.delete`. The timer is `unref()`ed where the runtime supports
+ * work is synchronous and small — `invalidateCache` drops the cached frame and
+ * the inflight capture and advances the session's generation (Issue #3734), so
+ * a capture started before the repaint is not written back either. The timer is `unref()`ed where the runtime supports
  * it so a pending invalidation can never hold a process (or a test runner) open.
  */
 function scheduleRepaintInvalidation(sessionName: string): void {

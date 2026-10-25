@@ -8,6 +8,15 @@
  *   confirm is a separate row, so a default is half an answer)
  * - multiple_choice with default option -> default option number
  * - multiple_choice without default -> first option number
+ * - Issue #3822: a permission dialog (a row reads as one of the effects in
+ *   `auto-yes-option-effect`) -> the number of its one "allow this call once"
+ *   row, wherever the default is; withheld as `allow-once-unidentified` when
+ *   there is no such row or more than one
+ * - Issue #3863: a question under the `recommended` answer mode (the caller
+ *   passes `question`) -> its recommended option, else its default; withheld
+ *   as `recommended-option-unidentified` when that cannot be told
+ *   (`auto-yes-question-choice`). A question that reads as a permission
+ *   dialog keeps the allow-once rule above.
  * - option requiring text input -> null (skip)
  * - unknown type -> null (skip)
  *
@@ -17,17 +26,24 @@
  * omitting it (or passing one that states nothing) reproduces the pre-#1547
  * behaviour exactly, which is what keeps contract-less operation untouched.
  *
- * Client-safe: no server-only imports, because a 'use client' hook
- * (`hooks/useAutoYes.ts`) imports this module.
+ * Client-safe: no server-only imports. A 'use client' hook
+ * (`hooks/useAutoYes.ts`) imported this module until Issue #3821 retired the
+ * browser's answers; the guard `use-auto-yes-client-imports-3748` still walks it.
  */
 
 import { executeRegexWithTimeout, validateStopPattern } from '@/config/auto-yes-config';
 import type { PromptData, PromptType } from '@/types/models';
 import {
+  ALLOW_ONCE_UNIDENTIFIED_SUPPRESSION_REASON,
   POLICY_LOOKUP_FAILED_SUPPRESSION_REASON,
+  RECOMMENDED_OPTION_UNIDENTIFIED_SUPPRESSION_REASON,
   type AutoYesSuppressionReason,
 } from './auto-yes-suppression-reason';
 import { isMultiSelectPrompt } from '@/lib/prompt-answer-semantic';
+import type { CLIToolType } from '@/lib/cli-tools/types';
+import { selectAllowOnceOption } from './auto-yes-option-effect';
+import { chooseRecommendedOption } from './auto-yes-question-choice';
+import type { OptionRecommendation } from '@/lib/detection/option-recommendation';
 
 /** Auto-answer policy modes; mirrors AUTO_YES_MODES in lib/tasks/contract-parser. */
 export type AutoYesMode = 'off' | 'safe' | 'allow-listed';
@@ -88,7 +104,11 @@ export function policyLookupMode(policy: AutoYesPolicyLookup | undefined): AutoY
 export interface AutoYesResolution {
   /** The answer to send, or null when nothing should be sent. */
   answer: string | null;
-  /** Non-null only when the policy withheld an answer the base rules produced. */
+  /**
+   * Non-null only when an answer was withheld: by the policy, over an answer the
+   * base rules produced, or (Issue #3822) by the base rules themselves over a
+   * permission dialog with no single "allow this call once" row.
+   */
   suppressedBy: AutoYesSuppressionReason | null;
   /** The deny pattern responsible, for the escalation log. */
   pattern?: string;
@@ -108,16 +128,60 @@ export const MAX_DENY_PATTERN_LENGTH = 200;
  * A prompt question or option label is a few hundred characters; the bound only
  * exists so a pathological pane cannot make every poll scan megabytes with 32
  * patterns. Matching is over the head of the field, deterministically.
+ *
+ * Issue #3881: a field cut here was not shown to the patterns whole, exactly
+ * like an approval target cut at its 12-row cap, so a miss over its head is
+ * not a pass: it withholds as `deny-pattern-unusable` (no pattern named). A
+ * match inside the head is still `deny-pattern`.
  */
 export const MAX_DENY_MATCH_TEXT_LENGTH = 20_000;
 
-/** The pre-policy resolution: the rules as they were before Issue #1547. */
-function resolveBaseAnswer(promptData: PromptData): string | null {
+/**
+ * Issue #3863: the prompt is a question Auto-Yes answers under the
+ * `recommended` answer mode, and what its reader said about each option's
+ * title (`PromptDetectionResult.optionRecommendations`; absent reads as
+ * unknown).
+ */
+export interface AutoYesQuestionAnswering {
+  optionRecommendations: readonly OptionRecommendation[] | undefined;
+}
+
+/** The base rules' verdict: an answer, or null with the reason when one was withheld. */
+interface BaseAnswer {
+  answer: string | null;
+  /** Issue #3822: set only when a permission dialog had no single allow-once row. */
+  withheldBy?: AutoYesSuppressionReason;
+}
+
+/**
+ * The pre-policy resolution: the rules as they were before Issue #1547, with
+ * the permission rows read by effect (Issue #3822).
+ */
+function resolveBaseAnswer(
+  promptData: PromptData,
+  cliToolId: CLIToolType | undefined,
+  question: AutoYesQuestionAnswering | undefined,
+): BaseAnswer {
   if (promptData.type === 'yes_no') {
-    return 'y';
+    return { answer: 'y' };
   }
 
   if (promptData.type === 'multiple_choice') {
+    // Issue #3863: a question answered with its recommended option. Not for a
+    // question whose rows read as a permission dialog — a recommendation never
+    // picks which permission to grant (#3822's rule below decides that).
+    if (question !== undefined && selectAllowOnceOption(promptData.options, cliToolId).kind === 'not-a-permission-dialog') {
+      const choice = chooseRecommendedOption(
+        promptData.options,
+        question.optionRecommendations,
+        isMultiSelectPrompt(promptData),
+      );
+      return choice.kind === 'chosen'
+        ? { answer: choice.option.number.toString() }
+        : { answer: null, withheldBy: RECOMMENDED_OPTION_UNIDENTIFIED_SUPPRESSION_REASON };
+    }
+
+
     // Issue #2755: a checkbox question. A number ticks a box and the confirm is
     // a separate row, so "the default option" is not an answer — it is half of
     // one. Auto-Yes refuses the prompt instead of ticking something and stopping.
@@ -126,24 +190,35 @@ function resolveBaseAnswer(promptData: PromptData): string | null {
     // / `[X]` / `[✔]`) is refused too — the sender answers such a list with
     // Space→Next→Enter, which would tick the default and submit the list.
     if (isMultiSelectPrompt(promptData)) {
-      return null;
+      return { answer: null };
     }
 
-    const defaultOpt = promptData.options.find(o => o.isDefault);
-    const target = defaultOpt ?? promptData.options[0];
+    // Issue #3822: on a permission dialog the default row may save a rule,
+    // change the mode or deny (agy keeps the cursor where it was left), so the
+    // answer is the one row that allows this call once, by its number — never
+    // whatever the cursor or row 1 happens to be.
+    const selection = selectAllowOnceOption(promptData.options, cliToolId);
+    if (selection.kind === 'unidentified') {
+      return { answer: null, withheldBy: ALLOW_ONCE_UNIDENTIFIED_SUPPRESSION_REASON };
+    }
+
+    const target =
+      selection.kind === 'allow-once'
+        ? selection.option
+        : promptData.options.find(o => o.isDefault) ?? promptData.options[0];
 
     if (!target) {
-      return null;
+      return { answer: null };
     }
 
     if (target.requiresTextInput) {
-      return null;
+      return { answer: null };
     }
 
-    return target.number.toString();
+    return { answer: target.number.toString() };
   }
 
-  return null;
+  return { answer: null };
 }
 
 /**
@@ -188,13 +263,15 @@ interface DenyOutcome {
  * Patterns are screened by {@link validateStopPattern} (length, safe-regex2
  * catastrophic-backtracking detection, syntax) before execution, which is the
  * same ReDoS defence the stop-pattern path uses. A pattern that fails screening
- * — or whose execution throws — is reported as `unusable`, not skipped.
+ * — or whose execution throws — is reported as `unusable`, not skipped. So is
+ * a miss when a text was cut at {@link MAX_DENY_MATCH_TEXT_LENGTH} (Issue #3881).
  */
 function evaluateDenyPatterns(rawTexts: string[], patterns: string[]): DenyOutcome {
   if (patterns.length === 0) {
     return { outcome: 'no-match' };
   }
 
+  const headCut = rawTexts.some(text => text.length > MAX_DENY_MATCH_TEXT_LENGTH);
   const texts = rawTexts.map(text =>
     text.length > MAX_DENY_MATCH_TEXT_LENGTH ? text.slice(0, MAX_DENY_MATCH_TEXT_LENGTH) : text
   );
@@ -216,7 +293,9 @@ function evaluateDenyPatterns(rawTexts: string[], patterns: string[]): DenyOutco
     }
   }
 
-  return { outcome: 'no-match' };
+  // Issue #3881: no pattern matched the heads, but a field's tail was never
+  // shown to them — evaluated over part of the request, which is no pass.
+  return headCut ? { outcome: 'unusable' } : { outcome: 'no-match' };
 }
 
 /** A policy denial, or null when the policy permits the answer. */
@@ -249,11 +328,16 @@ export interface AutoYesPolicyDenial {
  * pattern the contract may state.
  *
  * @param policy - Contract policy; null/undefined permits everything
+ * @param denySurfaceIncomplete - Issue #3881: the texts are known to be only
+ *   part of what the prompt asks about (`approvalTargetCompleteness`), so a
+ *   deny miss withholds as `deny-pattern-unusable`. The hook's structured call
+ *   is whole and leaves it false.
  */
 export function evaluatePolicyAgainstTexts(
   promptType: PromptType,
   denyMatchTexts: string[],
-  policy: AutoYesPolicyLookup | undefined
+  policy: AutoYesPolicyLookup | undefined,
+  denySurfaceIncomplete = false,
 ): AutoYesPolicyDenial | null {
   if (!policy) return null;
   if (isAutoYesPolicyUnknown(policy)) {
@@ -270,6 +354,18 @@ export function evaluatePolicyAgainstTexts(
   }
   if (deny.outcome === 'unusable') {
     return { reason: 'deny-pattern-unusable', pattern: deny.pattern };
+  }
+  // Issue #3881 (H-3): no pattern matched, but the texts are not the whole
+  // request — the approval target's upward scan stopped at its line cap with
+  // rows above it, or (review P2-1) at the top of a capture that filled its
+  // window, and the command may start there. A miss on part of the
+  // request is not a pass: the patterns could not be evaluated against what
+  // the prompt asks, which is `deny-pattern-unusable`'s fail-closed case.
+  // Only when the contract lists patterns; with none there is nothing to miss.
+  // (A field cut at MAX_DENY_MATCH_TEXT_LENGTH is the same case, reported by
+  // evaluateDenyPatterns as `unusable` above.)
+  if (denySurfaceIncomplete && policy.denyPatterns.length > 0) {
+    return { reason: 'deny-pattern-unusable' };
   }
 
   if (policy.mode === 'safe') {
@@ -288,7 +384,13 @@ function evaluatePolicy(
   promptData: PromptData,
   policy: AutoYesPolicyLookup | undefined
 ): AutoYesPolicyDenial | null {
-  return evaluatePolicyAgainstTexts(promptData.type, collectDenyMatchTexts(promptData), policy);
+  return evaluatePolicyAgainstTexts(
+    promptData.type,
+    collectDenyMatchTexts(promptData),
+    policy,
+    // Issue #3881: cut at the line cap, or at the top of a clipped capture.
+    promptData.approvalTargetCompleteness !== undefined,
+  );
 }
 
 /**
@@ -297,16 +399,32 @@ function evaluatePolicy(
  * `suppressedBy` is set only when an answer was actually withheld, so the
  * escalation log records real suppressions and not prompts the base rules were
  * never going to answer anyway (an empty option list, an option that needs
- * typing). Those still resolve to null, with `suppressedBy` null.
+ * typing). Those still resolve to null, with `suppressedBy` null. Issue #3822:
+ * a permission dialog with no single "allow this call once" row is a
+ * withholding (`allow-once-unidentified`) — it is a dialog Auto-Yes would have
+ * answered before, and the operator must be told why it stopped.
  *
  * @param promptData - Detected prompt
  * @param policy - Contract auto-answer policy; omit for the unconstrained behaviour
+ * @param cliToolId - The tool that drew the prompt, whose permission rows are
+ *   read (Issue #3822). Omitted, every measured tool's wording is read
+ *   (`auto-yes-option-effect`), so a caller that does not know the tool still
+ *   never picks a row that saves a rule or changes the mode.
+ * @param question - Issue #3863: given when the prompt is a question the
+ *   `recommended` answer mode answers; the answer is then its recommended
+ *   option (else its default). The contract is evaluated afterwards exactly
+ *   as for any answer — on the prompt as read, whichever option was chosen.
  */
 export function resolveAutoAnswerWithPolicy(
   promptData: PromptData,
-  policy?: AutoYesPolicyLookup
+  policy?: AutoYesPolicyLookup,
+  cliToolId?: CLIToolType,
+  question?: AutoYesQuestionAnswering
 ): AutoYesResolution {
-  const answer = resolveBaseAnswer(promptData);
+  const { answer, withheldBy } = resolveBaseAnswer(promptData, cliToolId, question);
+  if (withheldBy) {
+    return { answer: null, suppressedBy: withheldBy };
+  }
   if (answer === null) {
     return { answer: null, suppressedBy: null };
   }
@@ -324,11 +442,13 @@ export function resolveAutoAnswerWithPolicy(
  *
  * @param promptData - Detected prompt
  * @param policy - Contract auto-answer policy; omit for the unconstrained behaviour
+ * @param cliToolId - The tool that drew the prompt; see {@link resolveAutoAnswerWithPolicy}
  * @returns The answer string to send, or null if auto-answer is not possible
  */
 export function resolveAutoAnswer(
   promptData: PromptData,
-  policy?: AutoYesPolicyLookup
+  policy?: AutoYesPolicyLookup,
+  cliToolId?: CLIToolType
 ): string | null {
-  return resolveAutoAnswerWithPolicy(promptData, policy).answer;
+  return resolveAutoAnswerWithPolicy(promptData, policy, cliToolId).answer;
 }

@@ -823,6 +823,8 @@ function SessionTileCard({
                 onToggle={autoYes.toggle}
                 // Issue #3730: the same label the worktree screen shows.
                 releasedByRestart={autoYes.releasedByRestart}
+                // Issue #3863: the answer mode while ON, as the worktree screen shows it.
+                answerMode={autoYes.answerMode}
                 lastAutoResponse={null}
                 cliToolName={cliToolId}
                 inline

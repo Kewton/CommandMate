@@ -5,7 +5,8 @@
 import type { useTranslations } from 'next-intl';
 import type { LivePromptData } from '@/types/models';
 import { isMultiSelectPrompt as isMultiSelectPromptData } from '@/lib/prompt-answer-semantic';
-import { promptHeadingMessage, type PromptViewHeading } from '@/lib/session/prompt-view';
+import { derivePromptView, promptHeadingMessage, type PromptViewHeading } from '@/lib/session/prompt-view';
+import { isAutoYesAnswering, type AutoYesDecisionPublished } from '@/types/auto-yes-decision';
 
 /**
  * Which question the panel is currently showing (Issue #2755).
@@ -87,17 +88,39 @@ export function isMultiSelectPrompt(promptData: LivePromptData | null | undefine
 }
 
 /**
- * Whether the prompt window is drawn while Auto-Yes is on (Issue #2755 /
- * #3397): only for a prompt Auto-Yes does not answer by number — a checkbox
- * question, or a screen CommandMate cannot read (`answerable === false`, the
- * status API's `promptAnswerable`). On the second, Auto-Yes sends at most one
- * Enter, and the window is where "Auto-Yes sent Enter" — or, when it did not
- * take, the warning and the direct-input link — is said. A readable
- * single-choice prompt (answerable true or not judged) stays hidden.
+ * Is this a question the agent asked over its API (OpenCode / V2's structured
+ * `question`)? Issue #3821: Auto-Yes answers permissions, never the operator's
+ * questions, so its window is drawn whatever Auto-Yes is doing.
+ */
+export function isApiQuestionPrompt(promptData: LivePromptData | null | undefined): boolean {
+  const view = derivePromptView(promptData);
+  return view?.kind === 'api-choices' && view.heading.kind === 'agent-question';
+}
+
+/**
+ * Whether the prompt window is drawn while Auto-Yes is on.
+ *
+ * Issue #3821: for every prompt Auto-Yes is not answering right now — the
+ * window stays hidden only while the server's decision about this prompt
+ * (`autoYesDecision`) says `answering`. `withheld` (the contract, a screen it
+ * cannot read, no poller for the instance, …), `none` (not judged yet) and no
+ * decision at all (a server older than the field) draw it, so a confirmation
+ * Auto-Yes leaves alone is never left with no way to answer it.
+ *
+ * Drawn whatever the decision says: a checkbox question (Issue #2755 — the
+ * base rules never answer one), a screen CommandMate cannot read
+ * (`answerable === false`, the status API's `promptAnswerable`, #3397) and a
+ * question asked over the agent's API.
  */
 export function showsPromptUnderAutoYes(
   promptData: LivePromptData | null | undefined,
   answerable: boolean | undefined,
+  decision: Pick<AutoYesDecisionPublished, 'state'> | null | undefined,
 ): boolean {
-  return isMultiSelectPrompt(promptData) || answerable === false;
+  return (
+    isMultiSelectPrompt(promptData) ||
+    answerable === false ||
+    isApiQuestionPrompt(promptData) ||
+    !isAutoYesAnswering(decision)
+  );
 }

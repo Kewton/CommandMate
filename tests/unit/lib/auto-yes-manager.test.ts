@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach, onTestFinished } from 'vitest';
 // Issue #2865: the poller answers only a session created in the worktree's own
 // directory. Ownership itself is covered by tests/unit/tmux/session-ownership.test.ts.
 vi.mock('@/lib/cli-tools/worktree-session-ownership', () => ({
@@ -74,6 +74,24 @@ vi.mock('@/lib/cli-tools/manager', () => ({
 vi.mock('@/lib/db/db-instance', () => ({
   getDbInstance: () => ({ prepare: () => ({ get: () => undefined }) }),
 }));
+
+/**
+ * Issue #3822: claude's dialog gate (`enforce`) no longer answers a `(y/n)` its
+ * own dialog detector does not vouch for — the bare `Do you want to proceed?
+ * (y/n)` these tests use as a stand-in prompt. What they pin is the poller's
+ * machinery (duplicate prevention, the retry window, the cooldown, the send,
+ * the stop condition), not the gate, so each one runs claude under the kill
+ * switch's `legacy`, the setting an operator restores the old answer with.
+ * The gate's refusal itself: tests/unit/polling/auto-yes-generic-yes-no-3822.test.ts.
+ */
+function useLegacyClaudeDialogGate(): void {
+  const original = process.env.CM_AUTOYES_DIALOG_GATE;
+  process.env.CM_AUTOYES_DIALOG_GATE = 'claude=legacy';
+  onTestFinished(() => {
+    if (original === undefined) delete process.env.CM_AUTOYES_DIALOG_GATE;
+    else process.env.CM_AUTOYES_DIALOG_GATE = original;
+  });
+}
 
 describe('auto-yes-manager', () => {
   beforeEach(() => {
@@ -622,6 +640,7 @@ describe('auto-yes-manager', () => {
   // ==========================================================================
   describe('Issue #191: detectThinking windowing', () => {
     it('should detect prompt when stale thinking summary exists in early buffer lines (Issue #191)', async () => {
+      useLegacyClaudeDialogGate();
       const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { sendKeys } = await import('@/lib/tmux/tmux');
 
@@ -811,6 +830,7 @@ describe('auto-yes-manager', () => {
     });
 
     it('should call sendKeys (not sendSpecialKeys) for Claude yes/no prompt', async () => {
+      useLegacyClaudeDialogGate();
       const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { sendKeys, sendSpecialKeys } = await import('@/lib/tmux/tmux');
 
@@ -1027,6 +1047,7 @@ describe('auto-yes-manager', () => {
   // ==========================================================================
   describe('Issue #306: pollAutoYes - duplicate prevention', () => {
     it('should not send duplicate response for same prompt', async () => {
+      useLegacyClaudeDialogGate();
       const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { sendKeys } = await import('@/lib/tmux/tmux');
 
@@ -1062,6 +1083,7 @@ describe('auto-yes-manager', () => {
     });
 
     it('should reset lastAnsweredPromptKey when no prompt detected', async () => {
+      useLegacyClaudeDialogGate();
       const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { sendKeys } = await import('@/lib/tmux/tmux');
 
@@ -1100,6 +1122,7 @@ describe('auto-yes-manager', () => {
     });
 
     it('should skip response when same promptKey detected consecutively without reset (F009)', async () => {
+      useLegacyClaudeDialogGate();
       const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { sendKeys } = await import('@/lib/tmux/tmux');
 
@@ -1143,6 +1166,7 @@ describe('auto-yes-manager', () => {
 
   describe('Issue #306: pollAutoYes - cooldown', () => {
     it('should use cooldown interval after successful response', async () => {
+      useLegacyClaudeDialogGate();
       const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { sendKeys } = await import('@/lib/tmux/tmux');
 
@@ -1715,6 +1739,7 @@ describe('auto-yes-manager', () => {
     });
 
     it('should retry same promptKey after DUPLICATE_RETRY_EXPIRY_MS expires', async () => {
+      useLegacyClaudeDialogGate();
       const { sendKeys } = await import('@/lib/tmux/tmux');
       vi.mocked(sendKeys).mockReset();
       vi.mocked(sendKeys).mockResolvedValue(undefined);
@@ -1744,6 +1769,7 @@ describe('auto-yes-manager', () => {
     });
 
     it('should return responded after successful yes/no answer', async () => {
+      useLegacyClaudeDialogGate();
       const { sendKeys } = await import('@/lib/tmux/tmux');
       vi.mocked(sendKeys).mockReset();
       vi.mocked(sendKeys).mockResolvedValue(undefined);
@@ -1800,6 +1826,7 @@ describe('auto-yes-manager', () => {
     });
 
     it('should return error and call incrementErrorCount on send failure', async () => {
+      useLegacyClaudeDialogGate();
       const { sendKeys } = await import('@/lib/tmux/tmux');
       vi.mocked(sendKeys).mockReset();
       vi.mocked(sendKeys).mockRejectedValue(new Error('tmux send failed'));
@@ -1951,6 +1978,7 @@ describe('auto-yes-manager', () => {
     });
 
     it('should continue polling when stop condition does not match', async () => {
+      useLegacyClaudeDialogGate();
       const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { sendKeys } = await import('@/lib/tmux/tmux');
 
@@ -2056,6 +2084,7 @@ describe('auto-yes-manager', () => {
     });
 
     it('should preserve poller state (lastAnsweredPromptKey, lastServerResponseTimestamp) on reuse', async () => {
+      useLegacyClaudeDialogGate();
       const { captureSessionOutput } = await import('@/lib/session/cli-session');
       const { sendKeys } = await import('@/lib/tmux/tmux');
 

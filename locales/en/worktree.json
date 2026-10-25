@@ -421,7 +421,8 @@
       "claude-in-chrome": "Have Claude carry out a task in your browser through Claude in Chrome",
       "plugin-authoring": "Load the reference Claude uses to write a mod",
       "slides": "Make a new Claude Slides presentation from your brief",
-      "daybreak": "Turn Daybreak on or off"
+      "daybreak": "Turn Daybreak on or off",
+      "presets": "Run or save reusable prompts and slash commands"
     }
   },
   "session": {
