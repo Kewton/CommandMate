@@ -84,6 +84,8 @@ import { splitChatUserBody, useChatImageScope } from '@/lib/chat/chat-image';
 import { ChatImage } from '@/components/worktree/ChatImage';
 import { ChatVideo } from '@/components/worktree/ChatVideo';
 import { MERMAID_MARKDOWN_COMPONENTS } from '@/components/worktree/mermaid-markdown';
+import { isMermaidPreChild } from '@/components/worktree/mermaid-block-utils';
+import { CodeBlockWithCopy } from '@/components/common/CodeBlockWithCopy';
 import { MermaidRawOffsetContext } from '@/components/worktree/mermaid-raw-offset';
 import {
   CHAT_SEARCH_SECTION_REASONING,
@@ -776,7 +778,8 @@ const CHAT_SANITIZE_SCHEMA = {
  * unfenced `<T>` in ordinary prose. File paths stay clickable by splicing the
  * linkifier into the block elements it can safely reach; `code` and `pre` are
  * left alone, since a path inside a fence is part of a command and a `<button>`
- * there would break selection and copy. The one exception (#3503): with
+ * there would break selection and copy. A block's own copy button (#3912) sits
+ * beside the `<pre>`, not inside it. The one exception (#3503): with
  * `renderDiagrams`, a ```mermaid fence is drawn by the shared
  * `MERMAID_MARKDOWN_COMPONENTS` — the answer, the reasoning and the tool log
  * alike, since all three take this one `components` map.
@@ -868,9 +871,25 @@ export const ChatMarkdownBody = memo(function ChatMarkdownBody({
           />
         );
       },
-      // [#3503] `code` / `pre` stay react-markdown's defaults unless diagrams
-      // are on; with them on, only a mermaid fence renders differently.
-      ...(renderDiagrams ? MERMAID_MARKDOWN_COMPONENTS : {}),
+      // [#3503] `code` stays react-markdown's default unless diagrams are on;
+      // with them on, only a mermaid fence renders differently.
+      ...(renderDiagrams ? { code: MERMAID_MARKDOWN_COMPONENTS.code } : {}),
+      // [#3912] Every code block gets the shared copy button — the file
+      // preview's `CodeBlockWithCopy`, outside the scrolling `<pre>` so it stays
+      // put. The one exception is a fence drawn as a diagram, whose frame is
+      // passed through as `MERMAID_MARKDOWN_COMPONENTS.pre` would; with diagrams
+      // off a mermaid fence is code and gets the button like any other. This
+      // `pre` is the only one in the map, so the mermaid one can never replace
+      // it, and it keeps every attribute react-markdown and search put on it
+      // (only `node` is held back from the DOM).
+      pre: ({ node: _node, children, ...rest }) =>
+        renderDiagrams && isMermaidPreChild(children) ? (
+          <>{children}</>
+        ) : (
+          <CodeBlockWithCopy>
+            <pre {...rest}>{children}</pre>
+          </CodeBlockWithCopy>
+        ),
     };
   }, [onFilePathClick, renderDiagrams]);
 
