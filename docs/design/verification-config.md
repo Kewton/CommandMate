@@ -568,10 +568,17 @@ claudemd-size / route-exports。各 0.1〜0.3s）は失敗を秒で返すため�
 
 #### 9.2.1 `mutex` が届かない範囲 — 手で回すフル `test:unit`（Issue #1985）
 
-`mutex` を取るのは `gate-runner.ts` の `runGateAttempt` **だけ**である。したがって
-`cpu.heavy` が保証するのは「**ゲートとして**起動されたフル `test:unit` は同時に 1 本」
-までであって、ワーカーや開発者が手で叩く `npm run test:unit`（`NODE_ENV=test vitest run
-tests/unit`）はこの枠の外側にある。
+`mutex` のロックを取るのは次の 3 箇所**だけ**である（Issue #3909 で precheck の追加後に合わせて直した）。
+
+| 取る場所 | いつ取るか |
+|---|---|
+| `gate-runner.ts` の `runGateAttempt` | `mutex` を宣言したゲートの試行ごと（CommandMate の runner） |
+| `.claude/skills/cmate-verify/scripts/verify-run.sh`（＋ `.agents/...` のコピー） | 同じく試行ごと（standalone runner、同じパス規約） |
+| `scripts/orchestrate/precheck.mjs`（`acquireMachineLockSync`） | `/orchestrate` 6-1-1 の `related` / `tests` の段が広いときだけ `cpu.heavy` を取る（#3884 H-10。ガードと docs だけの狭い段は取らない） |
+
+したがって `cpu.heavy` が保証するのは「**ゲートとして、または precheck の広い段として**起動された
+重いスイートは同時に 1 本」までであって、ワーカーや開発者が手で叩く `npm run test:unit`
+（`NODE_ENV=test vitest run tests/unit`）はこの枠の外側にある。
 
 ここを機構で塞ぐ案（vitest の `globalSetup` から同じロックを取る）は**採らない**。
 すでに `cpu.heavy` を保有した `unit` ゲートがそのコマンドを起動するため、ロックを 2 回取って
@@ -585,6 +592,21 @@ tests/unit`）はこの枠の外側にある。
 測った最遅実測から逆算してある。実測（N=1..4 のスイープ、ガード値の導出、N=4 では
 ガードでは直らない形で 4 本とも赤になること）は
 [docs/qa/1985-real-shell-budget-concurrency.md](../qa/1985-real-shell-budget-concurrency.md)。
+
+#### 9.2.2 実行枠（`MAX_CONCURRENT_VERIFICATIONS`）と取消し（Issue #3884 H-11 / N3、#3909）
+
+CommandMate の runner は、同時に**実行**するゲートを `MAX_CONCURRENT_VERIFICATIONS`（= 2）本に
+抑える。枠は「実行するゲート」の上限で、待っている run の数ではない。ゲートが `mutex` を待つ間は
+枠を返し、ロックを取ったら、始まるのを待っている run より先に枠を取り直す（#3884 H-11）。
+
+**枠の待ちはどこでも取り消せる。** mutex の後の取り直しは #3884 N3 から、run の**最初の**枠の待ちは
+#3909 から、取消しで待ちの列を抜ける。以前は最初の枠の待ちだけが取り消せず、2 枠が長いゲートを
+実行している間に取り消した run は、そのどちらかが終わるまで `running` のまま worktree を握り、
+取消し API は `requested`（202）を返していた。今はすぐ `cancelled` で閉じ、ゲートの行は 1 本も
+作らない。抜けた待ちは枠を持っていないので、空いた枠は次に待っている run へ渡る
+（対照は `tests/unit/verification/gate-slot-cancel-3909.test.ts`: 2 枠が埋まった状態で取り消す陽性対照と、
+取り消さなければ今までどおり枠が空いてから走る陰性対照）。`requested` が返るのは、実行中のゲートが
+取消しの予算（`CANCEL_SETTLE_TIMEOUT_MS`）の間に終わり切らなかったときだけである。
 
 ### 9.3 待ち時間は duration と別に記録する
 
@@ -630,6 +652,47 @@ FLAKY を `PASS` と綴ってしまうと、この機能が可視化するため
 GATE 行に載せる（`work-evidence` の `commits=`/`uncommitted=` と scope ゲートの証跡が既に
 使っている経路）。行頭アンカーで照合するので、ゲート自身の出力に `waited=` が現れても
 拾わない。
+
+#### 9.3.1 待ちを 3 つに分ける `[timing]`（Issue #3884、表示と記録は #3909）
+
+`waited=` が言うのはロックの待ちだけで、実行枠（§9.2.2）の待ちは数えない。「この run は 40 分
+かかった」には、同時の run を減らす・重いゲートを減らす・スイートを速くする、の 3 つの別々の
+直し方があるので、CommandMate の runner は `mutex` を持つゲートと枠を待ったゲートの `log_tail` の
+**最後の行**に次を書く（どちらも待たなかったゲートには何も足さない。出力は 1 バイトも変わらない）。
+
+```
+[timing] queue=<n.n>s mutex=<n.n>s run=<n.n>s
+```
+
+`queue` は枠の待ち（run の最初の枠の待ちは最初のコマンドゲートに入る）、`mutex` はロックの待ち
+（試行をまたいで合計）、`run` はコマンドそのもの ＝ `duration_ms`（再実行したゲートは両ランの合計。
+待ちは今までどおり足さない）。読む側は次のとおりで、どれも**この行の無いゲートは今までの表示のまま**:
+
+| 読む側 | 出し方 |
+|---|---|
+| `commandmate verify` / `wait --verify` の GATE 行 | `GATE unit PASS (exit=0, 600.0s, queue=30.0s, mutex=120.0s, run=600.0s)`。`waited=` の代わりに出す（`mutex=` が同じロックの待ち）。行の無いゲート・#3884 より前のサーバは `waited=` のまま。mutex 待ちの SKIP は理由の行（`reason=mutex-wait waited=…`）のまま |
+| `verify history --json` | ゲートごとの `timing`（`{ queueSec, mutexSec, runSec }`、`verification-db.ts` の `parseGateTiming`） |
+| `verify history`（人向け） | 行末に `  timing: unit(queue=30.0s mutex=120.0s run=600.0s) …`。timing を持つゲートだけを並べる |
+| `/orchestrate` の run の記録 | `wait-verify.mjs` が最後の verify の GATE 行を合計し、`verify` の記録の `queueSec` / `mutexSec` / `runSec` に渡す（`runSec` は行の無いゲートの duration も足す）。どのゲートも出さなかった run には書かない。`run-log.mjs status --json` の `stages.verify` で読める |
+
+CLI は行末アンカーで照合する（`src/cli/utils/verify-runner.ts` の `parseTimingMarker`）。ゲート自身の
+出力が途中に `[timing]` を印字しても拾わない。CLI 側の写しとサーバ側の `parseGateTiming` が同じ数を
+読むことは `tests/unit/cli/utils/verify-runner-timing-3909.test.ts` が固定している。
+
+**standalone runner（`verify-run.sh`）は `waited=` の独自形式のまま**である（#3909 で揃えなかった）。理由:
+
+- `verify-run.sh` は commandmate-skills の `skills/cmate-verify/scripts/verify-run.sh` と
+  **byte-identical** で、`.claude/skills/sync-map.json` の sha256 pin（ゲートは
+  `tests/unit/skills/sync-map.test.ts`）が編集した瞬間に赤くする。挙動を変えるのは counterpart を先に
+  直して逐語コピーする手順であり（§9.5、#1611 のドリフト）、CommandMate の Issue の中で片側だけを
+  書き換えることはできない。
+- 数の意味は既に対応している: standalone には実行枠が無い（ゲートを 1 本ずつ順に走らせる）ので
+  `queue` は常に 0、`waited=` が `mutex`、`duration=` が `run` に当たる。足りないのは綴りだけである。
+
+揃えるなら、counterpart の `verify-run.sh` で `mutex` を宣言したゲートの stderr に
+`[timing] queue=0.0s mutex=<n>.0s run=<n>.0s` を `[mutex]` の行と同じ扱いで足し（stdout の GATE 行は
+変えない —— 空白区切りの GATE 行を読む他リポジトリの読み手がいる）、逐語コピーと pin の更新を
+1 つの PR で行う。
 
 ### 9.4 ロックが取れないまま timeout に達したとき
 

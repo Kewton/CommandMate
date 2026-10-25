@@ -15,6 +15,7 @@ import { ExitCode, VerifyExitCode } from '../types';
 import type {
   VerificationFlakyDetail,
   VerificationGateResultView,
+  VerificationGateTimingView,
   VerificationRunStatus,
   VerificationRunView,
   VerifyRunResponse,
@@ -46,6 +47,52 @@ export const MUTEX_LOG_PREFIX = '[mutex]';
  * `waited=` cannot supply the number.
  */
 const MUTEX_WAITED_PATTERN = /^\[mutex\] [^\n]*?\bwaited=([0-9]+(?:\.[0-9]+)?s)/m;
+
+/**
+ * Marker line carrying a gate's waits and its execution apart; mirrors
+ * TIMING_LOG_PREFIX in lib/verification/gate-runner.ts (Issue #3884 / #3909).
+ *
+ * Mirrored rather than imported for the same reason the mutex prefix is, and
+ * pinned to the runner's spelling (and to verification-db.ts parseGateTiming,
+ * which reads the same line for the history listing) by
+ * `tests/unit/cli/utils/verify-runner-timing-3909.test.ts`.
+ */
+export const TIMING_LOG_PREFIX = '[timing]';
+
+/**
+ * The runner writes the marker as the LAST line of the log tail, so the match is
+ * anchored to the end: a gate whose own output prints a `[timing]` line earlier
+ * in the log cannot supply the numbers.
+ */
+const TIMING_PATTERN =
+  /(?:^|\n)\[timing\] queue=(\d+(?:\.\d+)?)s mutex=(\d+(?:\.\d+)?)s run=(\d+(?:\.\d+)?)s\s*$/;
+
+/**
+ * Read a gate's `[timing]` marker back into seconds (Issue #3909).
+ *
+ * @returns null for a gate with neither a `mutex` nor a slot wait, and for runs
+ *          recorded before the marker existed — those keep their old display.
+ */
+export function parseTimingMarker(
+  logTail: string | null | undefined
+): VerificationGateTimingView | null {
+  const match = TIMING_PATTERN.exec(logTail ?? '');
+  if (!match) return null;
+  return { queueSec: Number(match[1]), mutexSec: Number(match[2]), runSec: Number(match[3]) };
+}
+
+/**
+ * `queue=… mutex=… run=…` in one decimal second, the spelling the marker uses.
+ * Shared by the GATE line (`, ` between fields, like its other fields) and the
+ * history listing (` `, inside one gate's parentheses).
+ */
+export function formatGateTiming(timing: VerificationGateTimingView, separator = ', '): string {
+  return [
+    `queue=${timing.queueSec.toFixed(1)}s`,
+    `mutex=${timing.mutexSec.toFixed(1)}s`,
+    `run=${timing.runSec.toFixed(1)}s`,
+  ].join(separator);
+}
 
 /**
  * Marker a retried gate writes into its log tail; mirrors FLAKY_LOG_PREFIX in
@@ -252,6 +299,17 @@ function formatDetail(gate: VerificationGateResultView): string {
   // the gate's command took, the wait is what the machine made it queue for.
   // Adding them would hide contention inside a number that timeout budgets and
   // "did this gate get slower" are read from.
+  //
+  // A gate with the `[timing]` marker (#3884) shows all three numbers instead
+  // of `waited=` (#3909): `mutex=` is the same lock wait summed over the
+  // gate's attempts, and `queue=` is the slot wait `waited=` never covered. A
+  // gate without the marker — no wait of either kind, or a server older than
+  // #3884 — keeps the line it always had.
+  const timing = parseTimingMarker(gate.logTail);
+  if (timing) {
+    parts.push(formatGateTiming(timing));
+    return parts.join(', ');
+  }
   const waited = MUTEX_WAITED_PATTERN.exec(gate.logTail ?? '');
   if (waited) parts.push(`waited=${waited[1]}`);
   return parts.join(', ');

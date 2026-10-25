@@ -21,6 +21,7 @@ import {
   newerTask,
   parseArgs,
   summarizeVerdict,
+  verifyTiming,
 } from '../../../../scripts/orchestrate/wait-verify.mjs';
 
 const HEAD_A = 'a'.repeat(40);
@@ -390,6 +391,55 @@ describe('the run record', () => {
     h.deps.run = () => ({ status: 128, stdout: '', stderr: 'not a git repository' });
     expect(main(argv(), h.deps)).toBe(1);
     expect(h.err.join('\n')).toMatch(/not a git repository/);
+  });
+});
+
+/** A verification whose heavy gate queued for a slot and for cpu.heavy (Issue #3909). */
+const TIMED_LOG = [
+  'Verifying: wt-1 (run 12)',
+  'GATE work-evidence PASS (commits=1, uncommitted=0)',
+  'GATE lint PASS (exit=0, 30.2s)',
+  'GATE typecheck PASS (exit=0, 40.0s, queue=4.6s, mutex=0.0s, run=40.0s)',
+  'GATE unit-related PASS (exit=0, 600.0s, queue=30.0s, mutex=120.4s, run=600.0s) [contract]',
+  'GATE unit FLAKY (exit=1,0, 45.0s,44.0s)',
+  'RESULT passed',
+  '',
+].join('\n');
+
+describe('the waits and the execution of the verification (Issue #3909)', () => {
+  it('sums the GATE lines of the last verification in the log', () => {
+    // 30.2 + 40.0 + 600.0 + 45.0 + 44.0 = 759.2 executed; 34.6 and 120.4 waited.
+    expect(verifyTiming(TIMED_LOG)).toEqual({ queueSec: 35, mutexSec: 120, runSec: 759 });
+    // A refused start followed by the run: only the run that judged counts.
+    const refusedFirst = `${TIMED_LOG.replace('Verifying: wt-1 (run 12)', 'Verifying: wt-1 (run 11)')}` +
+      'Verifying: wt-1 (run 13)\nGATE lint PASS (exit=0, 1.0s, queue=2.0s, mutex=0.0s, run=1.0s)\nRESULT passed\n';
+    expect(verifyTiming(refusedFirst)).toEqual({ queueSec: 2, mutexSec: 0, runSec: 1 });
+  });
+
+  it('gives nothing to record when no gate printed the split (negative control)', () => {
+    // An older CLI, or a run in which nothing waited: the record reads as before #3909.
+    expect(verifyTiming(PASS_LOG)).toEqual({});
+    expect(verifyTiming('GATE e2e PASS (exit=0, 190.0s, waited=42.3s)\nRESULT passed\n')).toEqual({});
+    expect(verifyTiming('')).toEqual({});
+  });
+
+  it('passes the split to the verify record, where run-log.mjs summarize reads it', () => {
+    const h = harness({ verifyLog: TIMED_LOG });
+    appendRecord(runDir, '3477', { issue: 3477, stage: 'send', result: 'ok', head: HEAD_A });
+    expect(main(argv(), h.deps)).toBe(0);
+    expect(records()).toHaveLength(2);
+    expect(records()[1]).toMatchObject({ stage: 'verify', result: 'ok', durationSec: 1200, queueSec: 35, mutexSec: 120, runSec: 759 });
+    const [item] = summarize(records());
+    expect(item.stages.verify).toMatchObject({ queueSec: 35, mutexSec: 120, runSec: 759 });
+    expect(item.next).toBe('review');
+  });
+
+  it('writes a record without the split for a verification that printed none (negative control)', () => {
+    const h = harness();
+    main(argv(), h.deps);
+    for (const field of ['queueSec', 'mutexSec', 'runSec']) expect(records()[0]).not.toHaveProperty(field);
+    const [item] = summarize(records());
+    expect(item.stages.verify.result).toBe('ok');
   });
 });
 

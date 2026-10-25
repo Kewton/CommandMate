@@ -19,7 +19,9 @@
  *     off only once the verdict is confirmed (the worker may still be working
  *     before that), retried, and read back;
  *   - the verdict itself, which lived only in the wait log. It goes to the
- *     `verify` stage of `run-log.mjs`, with the HEAD the verification saw;
+ *     `verify` stage of `run-log.mjs`, with the HEAD the verification saw and,
+ *     when the gates printed it, the waits apart from the execution
+ *     (`queueSec` / `mutexSec` / `runSec`, verifyTiming, #3909);
  *   - a second contract sent to the same worktree and instance while this
  *     waits (#3587): the worker's turn end then belongs to the new task, and
  *     verifying the old one (narrower scope) only fails and holds the gates.
@@ -268,6 +270,48 @@ export function summarizeVerdict(log, exitCode) {
     `exit=${exitCode}(${meaning}) result=${result ?? '-'} basis=${basis ?? '-'} ` +
     `passed=${passed.join(',') || '-'} failed=${failed.join(',') || '-'}`;
   return { exitCode, meaning, result, basis, passed, failed, line };
+}
+
+/**
+ * The waits and the execution of the last verification in a `verify` log, as
+ * the optional `queueSec` / `mutexSec` / `runSec` of a run-log.mjs record
+ * (Issue #3909).
+ *
+ * Read from the GATE lines (src/cli/utils/verify-runner.ts formatDetail): a
+ * gate whose log carries the `[timing]` marker (#3884) prints `queue=… mutex=…
+ * run=…`; any other gate waited for nothing, so it adds its duration to `run`
+ * only. Only the lines after the last `Verifying:` count — a log can hold a
+ * refused start and the run that followed. `{}` (nothing to write, the record
+ * reads as before) when no gate printed the marker: a CLI or server older than
+ * the marker, or a run in which nothing waited, has no split to report.
+ *
+ * @returns {{ queueSec?: number, mutexSec?: number, runSec?: number }}
+ */
+export function verifyTiming(log) {
+  const starts = [...log.matchAll(/^Verifying: /gm)];
+  const section = starts.length > 0 ? log.slice(starts[starts.length - 1].index) : log;
+  const seconds = (text) => Number(text.slice(0, -1));
+  let queue = 0;
+  let mutex = 0;
+  let execution = 0;
+  let timed = false;
+  for (const match of section.matchAll(/^GATE \S+ [A-Z]+ \((.*)\)(?: \[contract\])?$/gm)) {
+    const timing = /(?:^|, )queue=(\d+(?:\.\d+)?)s, mutex=(\d+(?:\.\d+)?)s, run=(\d+(?:\.\d+)?)s$/.exec(match[1]);
+    if (timing) {
+      timed = true;
+      queue += Number(timing[1]);
+      mutex += Number(timing[2]);
+      execution += Number(timing[3]);
+      continue;
+    }
+    // `exit=0, 12.3s` or a retried gate's `exit=1,0, 45.0s,44.0s` (both runs executed).
+    const duration = match[1].split(', ')[1];
+    if (duration && /^\d+(?:\.\d+)?s(?:,\d+(?:\.\d+)?s)*$/.test(duration)) {
+      execution += duration.split(',').map(seconds).reduce((a, b) => a + b, 0);
+    }
+  }
+  if (!timed) return {};
+  return { queueSec: Math.round(queue), mutexSec: Math.round(mutex), runSec: Math.round(execution) };
 }
 
 /**
@@ -826,6 +870,8 @@ export function main(argv, deps = {}) {
     const waitArgs = ['wait', o.wt, '--instance', instance, '--on-prompt', 'human', '--timeout', o.timeout];
     let exitCode = spawnToLog(o.cli, waitArgs, { cwd, logFile: o.logFile, ...(watching ? { watch } : {}) });
     let verdictLog = fs.existsSync(o.logFile) ? fs.readFileSync(o.logFile, 'utf8') : '';
+    /** The log of the verification the record is about (verifyTiming reads its last run). */
+    let timingLog = '';
     const verifyCtx = {
       spawnToLog, run, sleep, now, o, cwd, supersededBy,
       onVerifyStart: () => {
@@ -862,6 +908,7 @@ export function main(argv, deps = {}) {
         superseded = verified.superseded;
         verdictLog = o.afterReinstruct ? '' : verdictLog;
         verdictLog += verified.log;
+        timingLog = verified.log;
         // As `wait --verify` folds it: a green run does not turn "never started" into a pass.
         exitCode = exitCode === NOT_STARTED_EXIT && verified.exitCode === 0 ? NOT_STARTED_EXIT : verified.exitCode;
       }
@@ -905,6 +952,8 @@ export function main(argv, deps = {}) {
           agent: o.instance,
           model: o.model,
           durationSec,
+          // The waits and the execution apart (#3909); absent when the gates printed no split.
+          ...verifyTiming(timingLog),
           note,
           item: o.item,
           key: key(),
@@ -938,6 +987,8 @@ export function main(argv, deps = {}) {
       ...verifyCtx, verdict: { exitCode, log: verdictLog }, signal, since: baseline.found ? baseline.createdAt : null,
     });
     const verdict = summarizeVerdict(confirmed.log, confirmed.exitCode);
+    // A re-verification (3-3) is the run the verdict is now taken on.
+    if (confirmed.reverified) timingLog = confirmed.log;
     if (confirmed.state === 'working') {
       record('fail', headNow(), `unconfirmed: ${confirmed.reason}; ${verdict.line} ${extraNotes()} auto-yes=kept`);
       return UNCONFIRMED_EXIT;
