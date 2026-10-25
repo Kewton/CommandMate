@@ -673,7 +673,7 @@ GATE 行に載せる（`work-evidence` の `commits=`/`uncommitted=` と scope �
 | `commandmate verify` / `wait --verify` の GATE 行 | `GATE unit PASS (exit=0, 600.0s, queue=30.0s, mutex=120.0s, run=600.0s)`。`waited=` の代わりに出す（`mutex=` が同じロックの待ち）。行の無いゲート・#3884 より前のサーバは `waited=` のまま。mutex 待ちの SKIP は理由の行（`reason=mutex-wait waited=…`）のまま |
 | `verify history --json` | ゲートごとの `timing`（`{ queueSec, mutexSec, runSec }`、`verification-db.ts` の `parseGateTiming`） |
 | `verify history`（人向け） | 行末に `  timing: unit(queue=30.0s mutex=120.0s run=600.0s) …`。timing を持つゲートだけを並べる |
-| `/orchestrate` の run の記録 | `wait-verify.mjs` が最後の verify の GATE 行を合計し、`verify` の記録の `queueSec` / `mutexSec` / `runSec` に渡す（`runSec` は行の無いゲートの duration も足す）。どのゲートも出さなかった run には書かない。`run-log.mjs status --json` の `stages.verify` で読める |
+| `/orchestrate` の run の記録 | `wait-verify.mjs` が最後の verify の run（ログの最初の `Verifying: … (run <id>)`）を `verify show <id> --json` で読み、ゲートごとの行を合計して `verify` の記録の `queueSec` / `mutexSec` / `runSec` に渡す。mutex 待ちの SKIP（GATE 行は理由だけ）も入り、`runSec` は行の無いゲートの duration（再実行は両ラン、exit の無い TIMEOUT も）を足す。保存された行を読むので、失敗したゲートのログ本文に出た別 run の `GATE …` / `Verifying:` は数えない。サーバが答えないときだけ GATE 行から読む。どのゲートも行を持たない run には書かない。`run-log.mjs status --json` の `stages.verify` で読める |
 
 CLI は行末アンカーで照合する（`src/cli/utils/verify-runner.ts` の `parseTimingMarker`）。ゲート自身の
 出力が途中に `[timing]` を印字しても拾わない。CLI 側の写しとサーバ側の `parseGateTiming` が同じ数を

@@ -21,6 +21,7 @@ import {
   newerTask,
   parseArgs,
   summarizeVerdict,
+  timingRunIdOf,
   verifyTiming,
 } from '../../../../scripts/orchestrate/wait-verify.mjs';
 
@@ -101,7 +102,7 @@ function harness({
   resolveError = null as string | null,
   shown = {} as Record<string, TaskRow>,
   historyStartMinute = undefined as number | undefined,
-  runs = {} as Record<string, { startedAt?: string; status?: string; worktreeId?: string }[]>,
+  runs = {} as Record<string, { startedAt?: string; status?: string; worktreeId?: string; gates?: unknown[] }[]>,
   replies = [] as (string | null)[],
   captureJsonFails = 0,
   verifySequence = [] as { exit: number; log: string }[],
@@ -440,6 +441,84 @@ describe('the waits and the execution of the verification (Issue #3909)', () => 
     for (const field of ['queueSec', 'mutexSec', 'runSec']) expect(records()[0]).not.toHaveProperty(field);
     const [item] = summarize(records());
     expect(item.stages.verify.result).toBe('ok');
+  });
+});
+
+/** A gate's stored row, as `verify show --json` returns it. */
+const gateRow = (gateId: string, status: string, durationMs: number | null, logTail: string | null, exitCode: number | null = 0) =>
+  ({ gateId, status, exitCode, durationMs, logTail });
+const MUTEX_SKIP_TAIL = [
+  'reason=mutex-wait waited=600.0s',
+  '[mutex] name=cpu.heavy lock=/tmp/x.lock (held by run 3)',
+  "Gate 'unit' declares mutex 'cpu.heavy' and the machine-wide lock stayed held for its whole 600s budget",
+].join('\n');
+
+describe('the split counts every gate the run recorded, and only the run’s own (#3909 review)', () => {
+  // Review 1: the GATE line of a mutex-wait SKIP is its reason; the wait is in the stored marker.
+  it('a mutex-wait SKIP adds its wait — alone, or beside a gate that ran', () => {
+    const skipped = gateRow('unit', 'skipped', null, `${MUTEX_SKIP_TAIL}\n[timing] queue=5.0s mutex=600.0s run=0.0s`, null);
+    expect(verifyTiming('', { gates: [skipped] })).toEqual({ queueSec: 5, mutexSec: 600, runSec: 0 });
+    expect(verifyTiming('', { gates: [gateRow('lint', 'passed', 30_200, null), skipped] })).toEqual({ queueSec: 5, mutexSec: 600, runSec: 30 });
+    // The CLI's lines when the run cannot be read: the marker ends the log printed under the SKIP.
+    const text = ['Verifying: wt-1 (run 12)', 'GATE lint PASS (exit=0, 30.2s)', 'GATE unit SKIP (reason=mutex-wait waited=600.0s)', skipped.logTail, 'RESULT error', ''].join('\n');
+    expect(verifyTiming(text)).toEqual({ queueSec: 5, mutexSec: 600, runSec: 30 });
+  });
+
+  it('a SKIP of a server older than the marker (waited= only) reads as before (negative control)', () => {
+    const old = gateRow('unit', 'skipped', null, MUTEX_SKIP_TAIL, null);
+    expect(verifyTiming('', { gates: [gateRow('lint', 'passed', 30_200, null), old] })).toEqual({});
+    const text = ['Verifying: wt-1 (run 12)', 'GATE lint PASS (exit=0, 30.2s)', 'GATE unit SKIP (reason=mutex-wait waited=600.0s)', MUTEX_SKIP_TAIL, 'RESULT error', ''].join('\n');
+    expect(verifyTiming(text)).toEqual({});
+  });
+
+  // Review 2: the CLI leaves the exit field out when there is none (a TIMEOUT).
+  it('a TIMEOUT without an exit code adds its duration to run', () => {
+    const timed = gateRow('unit', 'passed', 40_000, '[timing] queue=4.0s mutex=0.0s run=40.0s');
+    const timeout = gateRow('build', 'timeout', 600_000, '…\n[gate exceeded 600s and was terminated (SIGTERM)]', null);
+    expect(verifyTiming('', { gates: [timed, timeout] })).toEqual({ queueSec: 4, mutexSec: 0, runSec: 640 });
+    const text = ['Verifying: wt-1 (run 12)', 'GATE unit PASS (exit=0, 40.0s, queue=4.0s, mutex=0.0s, run=40.0s)', 'GATE build TIMEOUT (600.0s)', '[gate exceeded 600s and was terminated (SIGTERM)]', 'RESULT failed', ''].join('\n');
+    expect(verifyTiming(text)).toEqual({ queueSec: 4, mutexSec: 0, runSec: 640 });
+  });
+
+  it('a gate with its exit field reads as before (negative control)', () => {
+    const timed = gateRow('unit', 'passed', 40_000, '[timing] queue=4.0s mutex=0.0s run=40.0s');
+    expect(verifyTiming('', { gates: [timed, gateRow('build', 'failed', 600_000, 'boom', 1)] })).toEqual({ queueSec: 4, mutexSec: 0, runSec: 640 });
+    const text = ['Verifying: wt-1 (run 12)', 'GATE unit PASS (exit=0, 40.0s, queue=4.0s, mutex=0.0s, run=40.0s)', 'GATE build FAIL (exit=1, 600.0s)', 'boom', 'RESULT failed', ''].join('\n');
+    expect(verifyTiming(text)).toEqual({ queueSec: 4, mutexSec: 0, runSec: 640 });
+    // A retried gate's stored marker: both runs.
+    const flaky = gateRow('unit', 'passed', 44_000, '[flaky] runs=2 outcome=flaky exit=1,0 duration=45.0s,44.0s verdict=pass\n[timing] queue=0.0s mutex=1.0s run=89.0s');
+    expect(verifyTiming('', { gates: [flaky, gateRow('lint', 'passed', 1_000, '[flaky] runs=2 outcome=flaky exit=1,0 duration=2.0s,1.0s verdict=pass')] })).toEqual({ queueSec: 0, mutexSec: 1, runSec: 92 });
+  });
+
+  // Review 3: a failing gate's log is echoed unprefixed under its GATE line.
+  const RUN_12 = [gateRow('scope', 'failed', 100, 'outside scope: src/x.ts', 1), gateRow('unit', 'passed', 600_000, '[timing] queue=30.0s mutex=120.0s run=600.0s')];
+  const ECHOED = [
+    'Verifying: wt-1 (run 12)',
+    'GATE scope FAIL (exit=1, 0.1s)',
+    'Verifying: wt-1 (run 99)',
+    'GATE unit PASS (exit=0, 5.0s, queue=50.0s, mutex=50.0s, run=5.0s)',
+    'outside scope: src/x.ts',
+    'GATE unit PASS (exit=0, 600.0s, queue=30.0s, mutex=120.0s, run=600.0s)',
+    'RESULT failed',
+    '',
+  ].join('\n');
+  const CLEAN = ECHOED.replace('Verifying: wt-1 (run 99)\nGATE unit PASS (exit=0, 5.0s, queue=50.0s, mutex=50.0s, run=5.0s)\n', '');
+
+  it('lines inside a gate’s echoed log are not the run’s: the record reads the run it started', () => {
+    expect(timingRunIdOf(ECHOED)).toBe('12');
+    expect(verifyTiming(ECHOED, { gates: RUN_12 })).toEqual({ queueSec: 30, mutexSec: 120, runSec: 600 });
+    const h = harness({ verifyExit: 20, verifyLog: ECHOED, runs: { '12': [{ status: 'failed', gates: RUN_12 }] } });
+    main(argv(), h.deps);
+    expect(records()[0]).toMatchObject({ stage: 'verify', queueSec: 30, mutexSec: 120, runSec: 600 });
+  });
+
+  it('a run without an echoed log gives the same split (negative control)', () => {
+    expect(timingRunIdOf(CLEAN)).toBe('12');
+    expect(verifyTiming(CLEAN, { gates: RUN_12 })).toEqual({ queueSec: 30, mutexSec: 120, runSec: 600 });
+    expect(verifyTiming(CLEAN)).toEqual({ queueSec: 30, mutexSec: 120, runSec: 600 });
+    const h = harness({ verifyExit: 20, verifyLog: CLEAN, runs: { '12': [{ status: 'failed', gates: RUN_12 }] } });
+    main(argv(), h.deps);
+    expect(records()[0]).toMatchObject({ stage: 'verify', queueSec: 30, mutexSec: 120, runSec: 600 });
   });
 });
 

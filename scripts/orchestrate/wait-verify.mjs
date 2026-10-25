@@ -20,7 +20,7 @@
  *     before that), retried, and read back;
  *   - the verdict itself, which lived only in the wait log. It goes to the
  *     `verify` stage of `run-log.mjs`, with the HEAD the verification saw and,
- *     when the gates printed it, the waits apart from the execution
+ *     when the gates recorded it, the waits apart from the execution
  *     (`queueSec` / `mutexSec` / `runSec`, verifyTiming, #3909);
  *   - a second contract sent to the same worktree and instance while this
  *     waits (#3587): the worker's turn end then belongs to the new task, and
@@ -272,46 +272,116 @@ export function summarizeVerdict(log, exitCode) {
   return { exitCode, meaning, result, basis, passed, failed, line };
 }
 
+/** A gate's `[timing]` marker (src/lib/verification/gate-runner.ts timingMarker): its log tail's last line. */
+const TIMING_MARKER = /(?:^|\n)\[timing\] queue=(\d+(?:\.\d+)?)s mutex=(\d+(?:\.\d+)?)s run=(\d+(?:\.\d+)?)s\s*$/;
+/** A retried gate's both runs (`[flaky] … duration=45.0s,44.0s …`, gate-runner.ts FLAKY_LOG_PREFIX). */
+const FLAKY_DURATIONS = /^\[flaky\] runs=\d+ outcome=\S+ exit=\S+ duration=(\S+) verdict=\S+$/m;
+/** `12.3s`, or a retried gate's `45.0s,44.0s`. */
+const DURATIONS = /^\d+(?:\.\d+)?s(?:,\d+(?:\.\d+)?s)*$/;
+const sumSeconds = (text) => text.split(',').reduce((sum, d) => sum + Number(d.slice(0, -1)), 0);
+const splitOf = (queue, mutex, execution) => ({
+  queueSec: Math.round(queue),
+  mutexSec: Math.round(mutex),
+  runSec: Math.round(execution),
+});
+
 /**
- * The waits and the execution of the last verification in a `verify` log, as
- * the optional `queueSec` / `mutexSec` / `runSec` of a run-log.mjs record
- * (Issue #3909).
+ * The id of the run a `verify` log is about: its FIRST `Verifying: … (run <id>)`.
+ * The log holds one CLI call (defaultSpawnToLog opens it `w`; a refused start
+ * prints no `Verifying:`), and the CLI prints that line before any gate, so
+ * a later one can only be a gate's own log echoed under its GATE line (#3909
+ * review 3). runIdOf reads the last one, which such a log can fool.
+ */
+export function timingRunIdOf(log) {
+  return /^Verifying: \S+ \(run (\d+)\)/m.exec(log)?.[1] ?? null;
+}
+
+/**
+ * The waits and the execution of a verification, as the optional `queueSec` /
+ * `mutexSec` / `runSec` of a run-log.mjs record (Issue #3909).
  *
- * Read from the GATE lines (src/cli/utils/verify-runner.ts formatDetail): a
- * gate whose log carries the `[timing]` marker (#3884) prints `queue=… mutex=…
- * run=…`; any other gate waited for nothing, so it adds its duration to `run`
- * only. Only the lines after the last `Verifying:` count — a log can hold a
- * refused start and the run that followed. `{}` (nothing to write, the record
- * reads as before) when no gate printed the marker: a CLI or server older than
- * the marker, or a run in which nothing waited, has no split to report.
+ * From the run itself when `view` (`verify show <id> --json`) carries its
+ * gates: each gate's stored log tail and duration, so nothing a gate printed
+ * can be read as another gate (#3909 review 3). A gate with the `[timing]`
+ * marker (#3884) adds its three numbers — a mutex-wait SKIP included, whose
+ * GATE line shows only the reason (review 1); any other gate waited for
+ * nothing and adds its duration to `run` only (a retried gate both runs, a
+ * TIMEOUT its budget — review 2).
  *
+ * Without the view (the server did not answer), from the `verify` log's GATE
+ * lines after the last `Verifying:`: the same sums, read off the CLI's text
+ * (formatDetail), where a failing gate's echoed log is not told apart from the
+ * runner's lines.
+ *
+ * `{}` (nothing to write, the record reads as before) when no gate has the
+ * marker: a server older than it, or a run in which nothing waited, has no
+ * split to report.
+ *
+ * @param {string} log
+ * @param {{ gates?: Array<{ durationMs?: number | null, logTail?: string | null }> } | null} [view]
  * @returns {{ queueSec?: number, mutexSec?: number, runSec?: number }}
  */
-export function verifyTiming(log) {
+export function verifyTiming(log, view = null) {
+  if (Array.isArray(view?.gates)) return runTiming(view.gates);
   const starts = [...log.matchAll(/^Verifying: /gm)];
   const section = starts.length > 0 ? log.slice(starts[starts.length - 1].index) : log;
-  const seconds = (text) => Number(text.slice(0, -1));
+  const lines = section.split('\n');
   let queue = 0;
   let mutex = 0;
   let execution = 0;
   let timed = false;
-  for (const match of section.matchAll(/^GATE \S+ [A-Z]+ \((.*)\)(?: \[contract\])?$/gm)) {
-    const timing = /(?:^|, )queue=(\d+(?:\.\d+)?)s, mutex=(\d+(?:\.\d+)?)s, run=(\d+(?:\.\d+)?)s$/.exec(match[1]);
+  lines.forEach((line, at) => {
+    const match = /^GATE \S+ ([A-Z]+) \((.*)\)(?: \[contract\])?$/.exec(line);
+    if (!match) return;
+    const timing = /(?:^|, )queue=(\d+(?:\.\d+)?)s, mutex=(\d+(?:\.\d+)?)s, run=(\d+(?:\.\d+)?)s$/.exec(match[2]);
     if (timing) {
       timed = true;
       queue += Number(timing[1]);
       mutex += Number(timing[2]);
       execution += Number(timing[3]);
+      return;
+    }
+    if (match[1] === 'SKIP') {
+      // The line is the reason only; the marker, when the server wrote one, ends the log printed under it.
+      const below = lines.slice(at + 1);
+      const next = below.findIndex((l) => /^(?:GATE|RESULT|NOTICE) /.test(l));
+      const marker = TIMING_MARKER.exec(below.slice(0, next < 0 ? below.length : next).join('\n').trimEnd());
+      if (marker) {
+        timed = true;
+        queue += Number(marker[1]);
+        mutex += Number(marker[2]);
+        execution += Number(marker[3]);
+      }
+      return;
+    }
+    // `exit=0, 12.3s`, a TIMEOUT's `600.0s` (no exit field) or a retried gate's `exit=1,0, 45.0s,44.0s`.
+    const duration = match[2].split(', ').find((field) => DURATIONS.test(field));
+    if (duration) execution += sumSeconds(duration);
+  });
+  return timed ? splitOf(queue, mutex, execution) : {};
+}
+
+/** {@link verifyTiming} from the stored gates of one run. */
+function runTiming(gates) {
+  let queue = 0;
+  let mutex = 0;
+  let execution = 0;
+  let timed = false;
+  for (const gate of gates) {
+    const tail = typeof gate.logTail === 'string' ? gate.logTail : '';
+    const marker = TIMING_MARKER.exec(tail);
+    if (marker) {
+      timed = true;
+      queue += Number(marker[1]);
+      mutex += Number(marker[2]);
+      execution += Number(marker[3]);
       continue;
     }
-    // `exit=0, 12.3s` or a retried gate's `exit=1,0, 45.0s,44.0s` (both runs executed).
-    const duration = match[1].split(', ')[1];
-    if (duration && /^\d+(?:\.\d+)?s(?:,\d+(?:\.\d+)?s)*$/.test(duration)) {
-      execution += duration.split(',').map(seconds).reduce((a, b) => a + b, 0);
-    }
+    const flaky = FLAKY_DURATIONS.exec(tail)?.[1];
+    if (flaky && DURATIONS.test(flaky)) execution += sumSeconds(flaky);
+    else if (typeof gate.durationMs === 'number') execution += gate.durationMs / 1000;
   }
-  if (!timed) return {};
-  return { queueSec: Math.round(queue), mutexSec: Math.round(mutex), runSec: Math.round(execution) };
+  return timed ? splitOf(queue, mutex, execution) : {};
 }
 
 /**
@@ -870,7 +940,7 @@ export function main(argv, deps = {}) {
     const waitArgs = ['wait', o.wt, '--instance', instance, '--on-prompt', 'human', '--timeout', o.timeout];
     let exitCode = spawnToLog(o.cli, waitArgs, { cwd, logFile: o.logFile, ...(watching ? { watch } : {}) });
     let verdictLog = fs.existsSync(o.logFile) ? fs.readFileSync(o.logFile, 'utf8') : '';
-    /** The log of the verification the record is about (verifyTiming reads its last run). */
+    /** The log of the verification the record is about (verifyTiming reads the run it started). */
     let timingLog = '';
     const verifyCtx = {
       spawnToLog, run, sleep, now, o, cwd, supersededBy,
@@ -952,8 +1022,8 @@ export function main(argv, deps = {}) {
           agent: o.instance,
           model: o.model,
           durationSec,
-          // The waits and the execution apart (#3909); absent when the gates printed no split.
-          ...verifyTiming(timingLog),
+          // The waits and the execution apart (#3909); absent when no gate recorded a split.
+          ...verifyTiming(timingLog, readRun(run, o.cli, o.wt, timingRunIdOf(timingLog), cwd)),
           note,
           item: o.item,
           key: key(),

@@ -210,7 +210,8 @@ describe('cancelling a run queued for its first slot (Issue #3909)', () => {
   it('still runs a queued run that is not cancelled, with its queue on the record', async () => {
     // Negative control: making the wait abandonable must not make it skippable.
     const sharedLog = join(tempDir('gate-slot-3909-log-'), 'order.log');
-    const [runB, runC] = await fillBothSlots('wt-q-2', sharedLog, '0.6');
+    // Long enough that A's repository is made while both still execute, under a loaded runner too.
+    const [runB, runC] = await fillBothSlots('wt-q-2', sharedLog, '3');
     const runA = await startRun('wt-q-2-a', gateConfig('lint', 'a', sharedLog, '0'));
     expect(getVerificationRun(db, runA)?.gates).toEqual([]);
 
