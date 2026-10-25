@@ -8,7 +8,12 @@ import { readJsonObjectBody } from '@/lib/api/read-json-body';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getMessageById, updatePromptData, getWorktreeById } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
+import {
+  sendPromptAnswer,
+  PromptAnswerRejectedError,
+  FreeTextAnswerRejectedError,
+  FreeTextAtChoiceOnlyPromptError,
+} from '@/lib/prompt-answer-sender';
 import { startPolling } from '@/lib/polling/response-poller';
 import { getAnswerInput } from '@/lib/detection/prompt-detector';
 import { broadcastMessage } from '@/lib/ws-server';
@@ -18,9 +23,42 @@ import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
 import { isAnswerablePromptData } from '@/types/models';
+import { buildCompositeKey } from '@/lib/auto-yes-state';
+import {
+  abandonManualSend,
+  noteManualAnswerStarted,
+  noteManualSendStarting,
+  settleManualAnswer,
+  type ManualAnswerOutcome,
+} from '@/lib/polling/auto-yes-manual-answer';
 import { respondByDecisionId, respondToSolePendingDecision } from './structured-decision';
 
 const logger = createLogger('api/respond');
+
+/**
+ * What a failed send of the stored-message branch left on the pane, for the
+ * answer Auto-Yes holds there (Issue #3907, the same reading as
+ * `/prompt-response`'s `manualOutcomeOfSendError` in
+ * `prompt-response/answer-delivery.ts`, which is private to that route). The
+ * refusals are before any key; a transport failure says what it did
+ * (`keysSent`, `answerDelivery` from `sendPromptAnswer`). Null for an error
+ * that says neither: the hold is left as it was.
+ */
+function manualOutcomeOfSendError(error: unknown): ManualAnswerOutcome | null {
+  if (
+    error instanceof PromptAnswerRejectedError ||
+    error instanceof FreeTextAnswerRejectedError ||
+    error instanceof FreeTextAtChoiceOnlyPromptError
+  ) {
+    return 'not-sent';
+  }
+  if (!(error instanceof Error)) return null;
+  const keysSent = 'keysSent' in error ? error.keysSent : undefined;
+  const delivery = 'answerDelivery' in error ? error.answerDelivery : undefined;
+  if (keysSent === true || delivery === 'indeterminate') return 'may-be-on-pane';
+  if (keysSent === false) return 'not-sent';
+  return null;
+}
 
 /**
  * POST /api/worktrees/[id]/respond
@@ -260,6 +298,16 @@ export async function POST(
       return NextResponse.json(foreignSessionErrorBody(sessionName, ownership.sessionPath), { status: 409 });
     }
 
+    // Issue #3907: a person is answering at the pane, as on `/prompt-response`
+    // (#3821 / #3880): before the first key a poller tick under way sends no
+    // further key and the next ticks leave the screen to the person, and how
+    // this answer ENDS decides what becomes of an answer Auto-Yes holds at the
+    // confirmation (`settleManualAnswer` below). Without it a send here that
+    // timed out with its keys on the pane left the confirmation free for
+    // Auto-Yes to type at again, and one that went through left Auto-Yes's own
+    // unknown send held.
+    const manualAnswer = noteManualAnswerStarted(buildCompositeKey(id, cliToolId, instanceId));
+
     // Update prompt data.
     //
     // Issue #3881: the row's `reading` (what the screen was read as when it was
@@ -284,6 +332,7 @@ export async function POST(
 
 
     // Send answer to tmux via shared sendPromptAnswer() (Issue #616)
+    noteManualSendStarting(manualAnswer, promptData);
     try {
       await sendPromptAnswer({
         sessionName,
@@ -293,12 +342,16 @@ export async function POST(
       });
       logger.info('prompt-answer-sent');
     } catch (error: unknown) {
+      const outcome = manualOutcomeOfSendError(error);
+      if (outcome !== null) settleManualAnswer(manualAnswer, outcome);
+      else abandonManualSend(manualAnswer);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return NextResponse.json(
         { error: `Failed to send answer to tmux: ${errorMessage}` },
         { status: 500 }
       );
     }
+    settleManualAnswer(manualAnswer, 'answered');
 
     // Issue #1548: a person answered. This branch needs a stored messageId, so
     // unlike /prompt-response it has no automated caller to be confused with.
@@ -306,6 +359,9 @@ export async function POST(
     // caller: the composer's `PromptPanel` reaches this route on the
     // `decisionId` shape and `commandmate respond` on the id-less one, and
     // neither comes through here.
+    // Issue #3907: kept rather than retired — it is the public body shape the
+    // route's suites and integration tests post — and so it reports its end to
+    // Auto-Yes (`settleManualAnswer` above) like `/prompt-response` does.
     applyEventToActiveTask(db, id, cliToolId, instanceId, 'prompt_answered_human', {
       promptType: promptData.type,
     });
