@@ -355,7 +355,7 @@ export function main(argv, deps = {}) {
         error(`merge #${issue}: no precheck=ok record to take the options from (kind etc.) — run precheck.mjs on the work HEAD first; not pushed`);
         return 1;
       }
-      const code = runPrecheck(
+      const code = (deps.runPrecheck ?? runPrecheck)(
         [
           '--run-dir', o.runDir, '--issues', o.issues, '--issue', String(issue), '--worktree', o.worktree,
           ...optionsFromNote(workPrecheck.note, baseRef),
@@ -363,6 +363,11 @@ export function main(argv, deps = {}) {
         ],
         { run, now, log, error, findTestsNaming: findNaming, home: deps.home }
       );
+      if (code === 3) {
+        // precheck exit 3: a heavy step could not take the machine lock — undecided, not failed.
+        error(`merge #${issue}: the precheck of ${head.slice(0, 7)} is on hold (the heavy-step lock was not taken) — not pushed; run merge-pr again to continue`);
+        return 3;
+      }
       if (code !== 0) {
         error(`merge #${issue}: the precheck of ${head.slice(0, 7)} did not pass${refreshed ? ' after the refresh' : ''} — not pushed`);
         return 1;
