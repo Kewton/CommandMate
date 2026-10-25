@@ -153,10 +153,11 @@ export function checkPlan(plan, { baseDir = process.cwd(), load = loadConfig } =
       return add('plan', `${at}: state (its name) is required`);
     }
     const name = state.state.trim();
-    if (stateIndex.has(name)) {
-      return add('plan', `${at}: state "${name}" is already sharedState[${stateIndex.get(name)}] — write its writers and readers in one record`);
+    const key = stateKey(name);
+    if (stateIndex.has(key)) {
+      return add('plan', `${at}: state "${name}" is already sharedState[${stateIndex.get(key)}] — write its writers and readers in one record`);
     }
-    stateIndex.set(name, index);
+    stateIndex.set(key, index);
     if (typeof state.invariant !== 'string' || state.invariant.trim() === '') add('plan', `${name}: invariant (what must not break) is required`);
     const writers = Array.isArray(state.writers) ? state.writers : [];
     if (writers.length === 0) add('plan', `${name}: writers: at least one { item, code } is required`);
@@ -223,6 +224,11 @@ export function checkPlan(plan, { baseDir = process.cwd(), load = loadConfig } =
   return { violations, items };
 }
 
+/** The name a state is matched by: NFKC, inner whitespace folded to one space, case-insensitive. */
+export function stateKey(name) {
+  return name.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLowerCase();
+}
+
 /** Read a state file (YAML or JSON) and check it. */
 export function checkPlanFile(file, options = {}) {
   const plan = YAML.parse(fs.readFileSync(file, 'utf8'));
@@ -235,7 +241,12 @@ export function checkPlanFile(file, options = {}) {
  */
 export function routesBrief(file, itemId, options = {}) {
   const plan = YAML.parse(fs.readFileSync(file, 'utf8'));
-  const { items } = checkPlan(plan, { baseDir: path.dirname(path.resolve(file)), ...options });
+  const { items, violations } = checkPlan(plan, { baseDir: path.dirname(path.resolve(file)), ...options });
+  if (violations.length > 0) {
+    const error = new Error(`${violations.length} violation(s) — fix the plan first (plan-check check)`);
+    error.violations = violations;
+    throw error;
+  }
   const item = items.get(itemId);
   if (!item) throw new Error(`${file}: no item "${itemId}"`);
   const lines = [`## 割込み順序と読者の一覧（plan-check.mjs routes、item ${itemId}）`, '', '### この item が書く共有状態'];
@@ -306,6 +317,10 @@ export function main(argv, { stdout = process.stdout, stderr = process.stderr } 
     if (!o.json) stdout.write(`plan-check: ok (${items.size} items)\n`);
     return 0;
   } catch (error) {
+    if (error.violations) {
+      for (const v of error.violations) stderr.write(`plan-check: ${v.rule}: ${v.message}\n`);
+      return 1;
+    }
     stderr.write(`plan-check: ${error.message}\n`);
     return o.command === 'routes' ? 2 : 1;
   }
