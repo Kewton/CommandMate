@@ -49,6 +49,10 @@ function recordReady(
 }
 
 function runMain(fake: ReturnType<typeof fakeGit>, ...extra: string[]) {
+  return runMainWith(fake, {}, ...extra);
+}
+
+function runMainWith(fake: ReturnType<typeof fakeGit>, extraDeps: Record<string, unknown>, ...extra: string[]) {
   const out: string[] = [];
   const err: string[] = [];
   let clock = Date.UTC(2026, 9, 9, 3, 0);
@@ -61,6 +65,7 @@ function runMain(fake: ReturnType<typeof fakeGit>, ...extra: string[]) {
     findTestsNaming: () => ['tests/unit/scripts/orchestrate/orchestrate-md-calls.test.ts'],
     log: (l: string) => out.push(l),
     error: (l: string) => err.push(l),
+    ...extraDeps,
   });
   return { code, out: out.join('\n'), err: err.join('\n') };
 }
@@ -263,6 +268,20 @@ describe('main: stops before merging', () => {
     expect(code).toBe(1);
     expect(err).toContain('the precheck of ccccccc did not pass');
     expect(fake.ghCalls('pr merge')).toHaveLength(0);
+  });
+
+  it('returns exit 3 and says "on hold" when the refresh precheck exits 3; exit 1 stays a failure', () => {
+    recordReady();
+    const held = fakeGit({ prs: [openPr()], behind: true, checks: [GREEN] });
+    const r = runMainWith(held, { runPrecheck: () => 3 });
+    expect(r.code).toBe(3);
+    expect(r.err).toContain('on hold');
+    expect(r.err).not.toContain('did not pass');
+    expect(held.ghCalls('pr merge')).toHaveLength(0);
+    const failed = fakeGit({ prs: [openPr()], behind: true, checks: [GREEN] });
+    const f = runMainWith(failed, { runPrecheck: () => 1 });
+    expect(f.code).toBe(1);
+    expect(f.err).toContain('did not pass');
   });
 
   it('does not run the precheck again for a HEAD that already passed it (negative control)', () => {
