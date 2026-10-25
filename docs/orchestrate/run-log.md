@@ -13,6 +13,8 @@ module-reference の一本化を重ねた HEAD の記録には、`--work-head <�
 `--head` / `--work-head` は **`git rev-parse HEAD` の 40 桁の SHA だけ**を受け付ける（短い SHA は exit 2 で拒否。`publish-pr.mjs` が 40 桁で記録を探すため、短い SHA で書くと「記録が無い」と読まれる、#3664）。すでに記録された 7 桁の行は `status` が読める。
 この規則は `publish-pr.mjs` / `merge-pr.mjs` の止まる条件と同じ関数（`unmetStage`）なので、再開先と公開側の判定はずれない。
 `verify` は `scripts/orchestrate/wait-verify.mjs`（3-3）、`precheck` は `scripts/orchestrate/precheck.mjs`（6-1-1）が自分で書く。
+`verify` / `precheck` の行は、所要時間を待ちと実行に分けた `queueSec`・`mutexSec`・`runSec` を持てる（#3884。省略可能で、無い行は今までどおり読む。
+docs/orchestrate/ci-merge.md#6-1-1-重い検証の資源制御と待ちの記録）。
 
 ## 1-5 同じ Issue の複数の PR（work item）
 
@@ -96,7 +98,7 @@ while IFS="$(printf '\t')" read -r issue WT AGENT TASK_ID MODEL COL6 REST <&3; d
     --issue "$issue" --stage findings --result ok --head "$(git -C "$WT_DIR" rev-parse HEAD)" "${ITEM_ARGS[@]}"
   node scripts/orchestrate/precheck.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
     --issue "$issue" --worktree "$WT_DIR" "${ITEM_ARGS[@]}"
-  RC=$?; echo "precheck exit=$RC issue=${issue} item=${ITEM:--}"   # runs/$DATE/precheck-<issue>[-<item>]-<sha>.log
+  RC=$?; echo "precheck exit=$RC issue=${issue} item=${ITEM:--}"   # runs/$DATE/precheck-<issue>[-<item>]-<sha>.log。3 は cpu.heavy が空かず裁定不能（再実行する。ci-merge.md 6-1-1）
   [ "$RC" = 0 ] || continue
   node scripts/orchestrate/publish-pr.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
     --issue "$issue" --worktree "$WT_DIR" --label feature "${ITEM_ARGS[@]}"

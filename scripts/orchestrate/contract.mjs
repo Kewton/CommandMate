@@ -24,6 +24,12 @@
  *   issueBody: "…"           # or issueBodyFile: <path relative to the config>
  *   isolatedLiveCheck: [server, tmux]   # allow an isolated live check (orchestrate.md 2-5 / 2-6)
  *   refactor: { mergesCopies: true }    # kind: refactor only, and required there (orchestrate.md 2-4-3)
+ *   routes:                  # optional: the route × interrupt table (orchestrate.md 2-4, #3884)
+ *     order: ["…"]           # the interrupt order the change must keep (await points, record → compare)
+ *     exclude: { columns: { push: "<reason>" }, rows: { legacy: "<reason>" } }
+ *     cells: [{ row: disable, column: poller, tests: ["tests/unit/…test.ts"] },
+ *             { row: disable, column: hook, excluded: "<reason>" }]
+ *     extraColumns: [tile]   # routes beyond ROUTE_COLUMNS (extraRows likewise)
  *
  * The checks below hold the OUTPUT contract to the limits of the canonical
  * parser (src/lib/tasks/contract-parser.ts `parseTaskContract`), so a config
@@ -67,6 +73,35 @@ export const UNIT_RELATED_GATE = {
   timeoutSec: 5400,
   mutex: 'cpu.heavy',
 };
+
+/**
+ * The routes table (#3884): columns are the paths that read or publish a shared
+ * state, rows the interrupts a change has to survive. Every cell is either tied
+ * to a test or excluded with a reason — a table that only exists passes nothing.
+ */
+export const ROUTE_COLUMNS = {
+  poller: 'poller',
+  hook: 'hook',
+  'prompt-response': 'prompt-response',
+  'current-output': 'current-output',
+  ws: 'WS',
+  push: 'push',
+  wait: 'wait',
+  observe: '観測',
+  pc: 'PC',
+  mobile: 'スマホ／タイル',
+};
+export const ROUTE_ROWS = {
+  disable: '無効化',
+  'manual-answer': '手動回答',
+  'interval-change': '区間変更',
+  'generation-change': '世代変更',
+  missing: '欠落',
+  legacy: '旧形式',
+};
+const ROUTE_TOKEN = /^[a-z0-9][a-z0-9-]{0,31}$/;
+/** A test a cell is tied to: a test file under tests/, optionally `<file> > <test name>`. */
+const ROUTE_TEST = /^tests\/[^\s]+\.(?:test|spec)\.[cm]?[jt]sx?(?: > .+)?$/;
 
 const KINDS = {
   feature: { label: '機能追加', section: 'Added', type: 'feat' },
@@ -264,6 +299,8 @@ export function normalizeConfig(raw, options = {}) {
     problems.push(`refactor: only for kind refactor (got kind ${kindName})`);
   }
 
+  const routes = raw.routes === undefined ? null : normalizeRoutes(raw.routes, problems);
+
   if (problems.length > 0) throw new ContractConfigError(problems);
   return {
     issue,
@@ -283,7 +320,133 @@ export function normalizeConfig(raw, options = {}) {
     issueBody: issueBody === null ? null : issueBody.trim(),
     isolatedLiveCheck,
     mergesCopies,
+    routes,
   };
+}
+
+function extraTokens(value, name, known, problems) {
+  const tokens = stringList(value, name, problems);
+  tokens.forEach((token, index) => {
+    if (!ROUTE_TOKEN.test(token)) problems.push(`${name}[${index}]: "${token}" must match ${ROUTE_TOKEN.source}`);
+    else if (token in known || tokens.indexOf(token) !== index) problems.push(`${name}[${index}]: "${token}" is already a ${name.endsWith('Columns') ? 'column' : 'row'}`);
+  });
+  return tokens;
+}
+
+function reasonMap(value, name, known, problems) {
+  if (value === undefined) return {};
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    problems.push(`${name}: must be a mapping of name → reason`);
+    return {};
+  }
+  /** @type {Record<string, string>} */
+  const reasons = {};
+  for (const [key, reason] of Object.entries(value)) {
+    if (!known.includes(key)) problems.push(`${name}: unknown "${key}" (one of ${known.join(' / ')})`);
+    else if (typeof reason !== 'string' || reason.trim() === '') problems.push(`${name}.${key}: the reason must be a non-empty string`);
+    else reasons[key] = reason.trim();
+  }
+  return reasons;
+}
+
+/**
+ * Validate `routes` (#3884). Every row × column is covered by exactly one of:
+ * a cell with tests, a cell excluded with a reason, or a whole row / column
+ * excluded with a reason. At least one cell must name a test.
+ *
+ * @returns {{ columns: string[], rows: string[], labels: Record<string, string>, order: string[],
+ *   excludedColumns: Record<string, string>, excludedRows: Record<string, string>,
+ *   cells: Array<{ row: string, column: string, tests?: string[], excluded?: string }> } | null}
+ */
+export function normalizeRoutes(raw, problems) {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    problems.push('routes: must be a mapping (order / exclude / cells / extraColumns / extraRows)');
+    return null;
+  }
+  const allowed = ['order', 'exclude', 'cells', 'extraColumns', 'extraRows'];
+  for (const key of Object.keys(raw)) {
+    if (!allowed.includes(key)) problems.push(`routes.${key}: unknown key (one of ${allowed.join(' / ')})`);
+  }
+  const columns = [...Object.keys(ROUTE_COLUMNS), ...extraTokens(raw.extraColumns, 'routes.extraColumns', ROUTE_COLUMNS, problems)];
+  const rows = [...Object.keys(ROUTE_ROWS), ...extraTokens(raw.extraRows, 'routes.extraRows', ROUTE_ROWS, problems)];
+  const labels = { ...Object.fromEntries(columns.map((c) => [c, c])), ...Object.fromEntries(rows.map((r) => [r, r])), ...ROUTE_COLUMNS, ...ROUTE_ROWS };
+  const order = stringList(raw.order, 'routes.order', problems);
+
+  const exclude = raw.exclude ?? {};
+  if (exclude === null || typeof exclude !== 'object' || Array.isArray(exclude)) problems.push('routes.exclude: must be a mapping (columns / rows)');
+  const excludedColumns = reasonMap(exclude?.columns, 'routes.exclude.columns', columns, problems);
+  const excludedRows = reasonMap(exclude?.rows, 'routes.exclude.rows', rows, problems);
+
+  /** @type {Array<{ row: string, column: string, tests?: string[], excluded?: string }>} */
+  const cells = [];
+  const seen = new Set();
+  const rawCells = raw.cells === undefined ? [] : raw.cells;
+  if (!Array.isArray(rawCells)) problems.push('routes.cells: must be a list');
+  (Array.isArray(rawCells) ? rawCells : []).forEach((cell, index) => {
+    const at = `routes.cells[${index}]`;
+    if (cell === null || typeof cell !== 'object' || Array.isArray(cell)) {
+      problems.push(`${at}: must be a mapping { row, column, tests | excluded }`);
+      return;
+    }
+    const { row, column } = cell;
+    if (!rows.includes(row)) return problems.push(`${at}: unknown row "${row}" (one of ${rows.join(' / ')})`);
+    if (!columns.includes(column)) return problems.push(`${at}: unknown column "${column}" (one of ${columns.join(' / ')})`);
+    const name = `${row} × ${column}`;
+    if (seen.has(name)) return problems.push(`${at}: ${name} is listed twice`);
+    seen.add(name);
+    if (row in excludedRows) return problems.push(`${at}: ${name} is in row ${row}, already excluded`);
+    if (column in excludedColumns) return problems.push(`${at}: ${name} is in column ${column}, already excluded`);
+    const hasTests = cell.tests !== undefined;
+    const hasReason = cell.excluded !== undefined;
+    if (hasTests === hasReason) return problems.push(`${at}: ${name} needs exactly one of tests / excluded`);
+    if (hasReason) {
+      if (typeof cell.excluded !== 'string' || cell.excluded.trim() === '') return problems.push(`${at}: ${name} excluded needs a reason`);
+      cells.push({ row, column, excluded: cell.excluded.trim() });
+      return;
+    }
+    const tests = stringList(cell.tests, `${at}.tests`, problems);
+    if (tests.length === 0) return problems.push(`${at}: ${name} needs at least one test`);
+    const bad = tests.filter((test) => !ROUTE_TEST.test(test));
+    if (bad.length > 0) return problems.push(`${at}: ${name} tests must be test files under tests/ (got ${bad.join(', ')})`);
+    cells.push({ row, column, tests });
+  });
+
+  const uncovered = [];
+  for (const row of rows) {
+    if (row in excludedRows) continue;
+    for (const column of columns) {
+      if (!(column in excludedColumns) && !seen.has(`${row} × ${column}`)) uncovered.push(`${row} × ${column}`);
+    }
+  }
+  if (uncovered.length > 0) {
+    problems.push(`routes: ${uncovered.length} cell(s) have neither a test nor a reason: ${uncovered.join(', ')}`);
+  }
+  if (uncovered.length === 0 && !cells.some((cell) => cell.tests)) {
+    problems.push('routes: every cell is excluded — tie at least one cell to a test');
+  }
+  return { columns, rows, labels, order, excludedColumns, excludedRows, cells };
+}
+
+/** The columns of a normalized routes table that have at least one cell tied to a test. */
+export function testedColumns(routes) {
+  return new Set(routes.cells.filter((cell) => cell.tests).map((cell) => cell.column));
+}
+
+/** The routes table as goal / brief lines (a row is an interrupt, a column a route). */
+export function routesSection(routes, heading = '## 経路表と割込み表（行＝割込み、列＝経路。この契約で守る）') {
+  const label = (name) => routes.labels[name] ?? name;
+  const lines = ['', heading];
+  if (routes.order.length > 0) lines.push('割込みの順序（変えない）:', ...routes.order.map((item) => `- ${item}`));
+  lines.push('必要なセル（結び付けたテストを書く・通す）:');
+  for (const cell of routes.cells.filter((c) => c.tests)) {
+    lines.push(`- ${label(cell.row)} × ${label(cell.column)}: ${cell.tests.join(', ')}`);
+  }
+  lines.push('除外したセル（理由）:');
+  for (const [column, reason] of Object.entries(routes.excludedColumns)) lines.push(`- 列 ${label(column)}（全行）: ${reason}`);
+  for (const [row, reason] of Object.entries(routes.excludedRows)) lines.push(`- 行 ${label(row)}（全列）: ${reason}`);
+  for (const cell of routes.cells.filter((c) => c.excluded)) lines.push(`- ${label(cell.row)} × ${label(cell.column)}: ${cell.excluded}`);
+  lines.push('必要なセルのテストが無いまま完了しない。除外したセルや表に無い経路に変更が及ぶと分かったら、そこを変更せず「本文に無い指摘」として報告する。');
+  return lines.join('\n');
 }
 
 /** Replace `{{NAME}}`; a line that is only a placeholder whose value is empty is dropped. */
@@ -368,6 +531,7 @@ export function renderGoal(config) {
     KIND_LABEL: config.kindLabel,
     DECISIONS: decisions,
     ISSUE_BODY: issueBody,
+    ROUTES: config.routes ? routesSection(config.routes) : '',
     SCOPE: config.scope.join(', '),
     TIER_RULE: config.model === 'sonnet' ? `- ${SONNET_RULE}` : '',
     PROCESS_RULE: processRule(config),

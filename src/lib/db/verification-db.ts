@@ -166,6 +166,39 @@ export interface VerificationGateSummary {
   durationMs: number | null;
   /** Where the gate was declared (#1791); null on rows written before v56. */
   source: VerificationGateSource | null;
+  /**
+   * The gate's waits and execution, apart (Issue #3884), read from the
+   * `[timing]` line the runner appends to `log_tail`. Absent for a gate that
+   * has none: one that neither has a `mutex` nor waited for a slot, and every
+   * gate recorded before the line existed.
+   */
+  timing?: VerificationGateTiming;
+}
+
+/** The `[timing] queue=<s> mutex=<s> run=<s>` line of a gate, in seconds (gate-runner.ts TIMING_LOG_PREFIX). */
+export interface VerificationGateTiming {
+  /** Waiting for a MAX_CONCURRENT_VERIFICATIONS slot. */
+  queueSec: number;
+  /** Waiting for the gate's machine-wide `mutex`. */
+  mutexSec: number;
+  /** The command itself — `durationMs`, to a tenth of a second. */
+  runSec: number;
+}
+
+/**
+ * How much of a gate's `log_tail` the history listing reads: enough for the
+ * `[timing]` line, which is the last line — never the log body.
+ */
+const TIMING_TAIL_CHARS = 200;
+
+/** The last line of `logEnd`, when it is the runner's `[timing]` line. */
+const TIMING_LINE = /(?:^|\n)\[timing\] queue=(\d+(?:\.\d+)?)s mutex=(\d+(?:\.\d+)?)s run=(\d+(?:\.\d+)?)s\s*$/;
+
+/** The {@link VerificationGateTiming} of a gate whose `log_tail` ends with `logEnd`, or null. */
+export function parseGateTiming(logEnd: string | null | undefined): VerificationGateTiming | null {
+  const match = TIMING_LINE.exec(logEnd ?? '');
+  if (!match) return null;
+  return { queueSec: Number(match[1]), mutexSec: Number(match[2]), runSec: Number(match[3]) };
 }
 
 /** A run with per-gate verdicts but no log bodies, for history listings. */
@@ -523,7 +556,8 @@ function clampInt(value: number | undefined, fallback: number, min: number, max:
 
 /**
  * Recent runs across worktrees, newest first, each with its gate verdicts but
- * no log bodies (Issue #1593).
+ * no log bodies (Issue #1593). A gate's `[timing]` line is the one piece of its
+ * log that is carried, parsed into numbers (`timing`, Issue #3884).
  *
  * `worktreeId` is optional because the advisor that consumes this (#1594) looks
  * at a repository's trend, not one worktree's. Ordering follows the same
@@ -569,7 +603,8 @@ export function listVerificationRunsForPeriod(
   const placeholders = runRows.map(() => '?').join(', ');
   const gateRows = db
     .prepare(`
-      SELECT run_id, gate_id, status, exit_code, duration_ms, source
+      SELECT run_id, gate_id, status, exit_code, duration_ms, source,
+             substr(log_tail, -${TIMING_TAIL_CHARS}) AS log_end
       FROM verification_gate_results
       WHERE run_id IN (${placeholders})
       ORDER BY started_at ASC, id ASC
@@ -581,6 +616,7 @@ export function listVerificationRunsForPeriod(
     exit_code: number | null;
     duration_ms: number | null;
     source: string | null;
+    log_end: string | null;
   }>;
 
   const byRun = new Map<number, VerificationGateSummary[]>();
@@ -592,6 +628,9 @@ export function listVerificationRunsForPeriod(
       durationMs: row.duration_ms,
       source: (row.source as VerificationGateSource | null) ?? null,
     };
+    // Only the numbers leave this function: the log stays out of the listing (#3884).
+    const timing = parseGateTiming(row.log_end);
+    if (timing) summary.timing = timing;
     const bucket = byRun.get(row.run_id);
     if (bucket) bucket.push(summary);
     else byRun.set(row.run_id, [summary]);
