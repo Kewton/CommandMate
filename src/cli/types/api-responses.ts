@@ -2187,6 +2187,18 @@ export interface VerificationGateSummaryView {
   durationMs: number | null;
   /** Where the gate was declared (Issue #1791). */
   source?: VerificationGateSource | null;
+  /**
+   * The gate's waits and execution, apart (Issue #3884). Absent for a gate
+   * with neither a `mutex` nor a slot wait, and for runs recorded before it.
+   */
+  timing?: VerificationGateTimingView;
+}
+
+/** Mirrors: src/lib/db/verification-db.ts VerificationGateTiming (seconds). */
+export interface VerificationGateTimingView {
+  queueSec: number;
+  mutexSec: number;
+  runSec: number;
 }
 
 /** Mirrors: src/lib/db/verification-db.ts VerificationRunWithGateSummaries. */

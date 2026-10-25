@@ -140,6 +140,16 @@ export interface AcquireMachineLockOptions {
    * threading a controller through four call frames.
    */
   shouldAbandon?: () => boolean;
+  /**
+   * Called once, the first time the claim fails and the waiter is about to
+   * sleep (Issue #3884 H-11).
+   *
+   * Not called when the lock is taken on the first claim. The gate runner hands
+   * its verification slot back here, so a run queued behind a busy lock does
+   * not also keep a third run's light gates from starting — and a lock that was
+   * free costs no slot churn at all.
+   */
+  onWait?: () => void;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -233,6 +243,7 @@ export async function acquireMachineLock(
   // A stale record is broken at most once per token, so a directory nobody can
   // remove degrades into ordinary waiting instead of a spin loop.
   const broken = new Set<string>();
+  let waiting = false;
 
   for (;;) {
     // Issue #2063. Checked before the claim as well as after the sleep, so a
@@ -283,6 +294,10 @@ export async function acquireMachineLock(
     const now = Date.now();
     if (now >= deadline) {
       return { acquired: false, waitedMs: now - startedAt, heldBy: describeOwner(holder) };
+    }
+    if (!waiting) {
+      waiting = true;
+      options.onWait?.();
     }
     await sleep(Math.min(pollIntervalMs, deadline - now));
   }

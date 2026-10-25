@@ -235,6 +235,29 @@ describe('verify history — JSON output', () => {
     expect(parsed[0].gates[0].gateId).toBe('lint');
   });
 
+  it('carries a gate’s queue / mutex / run timing, and omits it for a gate without one (Issue #3884)', async () => {
+    const timed = summary({
+      gates: [
+        {
+          gateId: 'unit',
+          status: 'passed',
+          exitCode: 0,
+          durationMs: 190_200,
+          source: 'verify.yaml',
+          timing: { queueSec: 12.5, mutexSec: 3600, runSec: 190.2 },
+        },
+      ],
+    });
+    mockFetch([{ data: { runs: [timed, summary({ id: 8 })] } }]);
+
+    const cmd = await loadCommand();
+    await cmd.parseAsync(['node', 'verify', 'history', '--json']);
+
+    const parsed = JSON.parse(mockConsoleLog.mock.calls[0][0] as string);
+    expect(parsed[0].gates[0].timing).toEqual({ queueSec: 12.5, mutexSec: 3600, runSec: 190.2 });
+    expect(parsed[1].gates[0]).not.toHaveProperty('timing');
+  });
+
   it('prints an empty array rather than a prose message when nothing matched', async () => {
     mockFetch([{ data: { runs: [] } }]);
 
