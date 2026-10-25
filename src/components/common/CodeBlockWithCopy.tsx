@@ -13,11 +13,20 @@
  *   (default `as="div"`, sitting outside the scrollable `<pre>` so the button
  *   stays pinned while code scrolls horizontally).
  *
+ * Chat's `ChatMarkdownBody` wraps its `<pre>` the same way (Issue #3912).
+ *
  * The button is hidden by default on pointer/desktop widths and revealed on
- * hover/focus; on small (touch) widths it is always visible since hover is
- * unavailable. The copy target is the plain text content of the code block
+ * hover/focus; on small widths, and on any device without hover
+ * (`@media (hover: none)`, the `code-copy-button` rule in globals.css), it is
+ * always visible. The copy target is the plain text content of the code block
  * (highlight.js decoration markup stripped), extracted via
  * {@link extractCodeText}.
+ *
+ * [Issue #3912] Only the button is kept out of search and selection
+ * (`CopyButton` marks itself); the wrapper and the code are not, so search
+ * still reaches the code and a selected range still copies it. The wrapper's
+ * `code-block-with-copy` class reserves room on the `<pre>`'s right so a short
+ * line never runs under the button.
  *
  * @module components/common/CodeBlockWithCopy
  */
@@ -82,14 +91,15 @@ export function CodeBlockWithCopy({
     return <Wrapper className={className || undefined}>{children}</Wrapper>;
   }
 
-  const wrapperClass = `relative group ${as === 'span' ? 'block ' : ''}${className}`.trim();
+  const wrapperClass =
+    `code-block-with-copy relative group ${as === 'span' ? 'block ' : ''}${className}`.trim();
 
   return (
     <Wrapper className={wrapperClass} data-testid="code-block-with-copy">
       {children}
       <CopyButton
         text={text}
-        className="absolute right-2 top-2 z-10 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 focus:opacity-100"
+        className="code-copy-button absolute right-2 top-2 z-10 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 focus:opacity-100"
       />
     </Wrapper>
   );

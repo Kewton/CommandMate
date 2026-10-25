@@ -6,7 +6,9 @@
  * The file preview keeps its own `pre` (it adds a copy button to every other
  * block) but asks the same {@link isMermaidPreChild} and draws the same
  * {@link MermaidCodeBlock}, so all three surfaces share the one judgment and the
- * one diagram frame.
+ * one diagram frame. Since #3912 chat does the same: it takes only `code` from
+ * here and writes its own `pre` (copy button on every non-diagram block), so
+ * this `pre` is History's.
  *
  * Everything that is not a mermaid fence renders exactly as react-markdown's
  * defaults would — same element, same props — so non-mermaid code, its

@@ -186,7 +186,13 @@ describe('[#2544] the clipboard holds the source of what is drawn', () => {
 
     // ...is the copied text, rendered by the same renderer.
     const { container } = render(<ChatMarkdownBody content={copied} onFilePathClick={vi.fn()} />);
-    expect(container.querySelector('[data-testid]')).toBeNull();
+    // No chips leaked into the copy; the code block's copy button (#3912) may
+    // carry its own testid, and it is drawn on both sides alike.
+    expect(
+      container.querySelector(
+        `[data-testid="${CHAT_THINKING_GROUP_TESTID}"], [data-testid="${CHAT_TOOL_LOG_GROUP_TESTID}"]`,
+      ),
+    ).toBeNull();
     expect(drawn.innerHTML).toBe(container.innerHTML);
   });
 });

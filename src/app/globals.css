@@ -780,6 +780,16 @@
   .chat-md > *:last-child {
     margin-bottom: 0;
   }
+  /* [Issue #3912] A code block is drawn inside `CodeBlockWithCopy`'s wrapper,
+     so the first/last rule above reaches the wrapper and not the `<pre>`.
+     `chat-code-block` is on the wrapper whether or not it has a button (an
+     empty fence has none and no `code-block-with-copy`). */
+  .chat-md > .chat-code-block:first-child > pre {
+    margin-top: 0;
+  }
+  .chat-md > .chat-code-block:last-child > pre {
+    margin-bottom: 0;
+  }
   .chat-md p {
     margin: 0.5em 0;
     white-space: pre-wrap;
@@ -930,6 +940,25 @@
     transition-duration: 0.01ms !important;
     transition-delay: 0ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * [Issue #3912] `CodeBlockWithCopy` (chat, file preview, file page). Outside
+ * @layer so both rules win over the surfaces' own `pre` padding (`.chat-md pre`,
+ * `.prose pre`) and over the button's `md:opacity-0`.
+ * - The `<pre>` keeps room on its right for the button, so a one-line command
+ *   never runs under it. The button sits outside the `<pre>`, so it stays put
+ *   while the code scrolls sideways.
+ * - A device without hover (phones, tablets — at any width) cannot reveal the
+ *   button by hovering, so it is always shown there.
+ */
+.code-block-with-copy > pre {
+  padding-right: 5.5rem;
+}
+@media (hover: none) {
+  .code-copy-button {
+    opacity: 1;
   }
 }
 
