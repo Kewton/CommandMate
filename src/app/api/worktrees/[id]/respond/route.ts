@@ -63,29 +63,48 @@ function manualOutcomeOfSendError(error: unknown): ManualAnswerOutcome | null {
   return null;
 }
 
+/** The screen the stored-message branch sends at: the frame, and the prompt read off it. */
+interface ScreenAtSend {
+  /** The raw capture, or undefined when it could not be taken. */
+  frame: string | undefined;
+  promptData: PromptData | null;
+}
+
 /**
- * The prompt on the screen the stored-message branch is about to send at
- * (Issue #3907, review P2), for the send it registers with Auto-Yes
- * (`noteManualSendStarting`). Read off a fresh capture with the same reading
- * `/prompt-response` re-verifies with (`assessPromptAnswerability`), not off
- * the stored row: the row was read before the ownership check's await, and a
- * hold at the row's screen is dropped as "another prompt" when the screen
- * has moved on — leaving the screen the keys actually went to free for
- * Auto-Yes. Null when the capture fails or no prompt is read: the hold is
- * then at an unidentified screen, which covers the next confirmation read.
+ * The screen the stored-message branch is about to send at (Issue #3907,
+ * review P2), for the send it registers with Auto-Yes
+ * (`noteManualSendStarting`) AND for `sendPromptAnswer`'s own checks: one
+ * frame for both, as `/prompt-response` hands its verified frame to the
+ * sender. Read off a fresh capture with the same reading `/prompt-response`
+ * re-verifies with (`assessPromptAnswerability`), not off the stored row: the
+ * row was read before the ownership check's await, and a hold at the row's
+ * screen is dropped as "another prompt" when the screen has moved on —
+ * leaving the screen the keys actually went to free for Auto-Yes. Without
+ * the frame passed on, a numeric answer's guard re-read the pane, and a
+ * screen changed in that await was not the one registered.
+ *
+ * When the capture fails or no prompt is read, `promptData` is null: the hold
+ * is then at an unidentified screen, which covers the next confirmation read
+ * (and the sender reads the pane itself when there is no frame).
  */
-async function promptOnScreenAtSend(
+async function screenAtSend(
   worktreeId: string,
   cliToolId: CLIToolType,
   instanceId: string,
-): Promise<PromptData | null> {
+): Promise<ScreenAtSend> {
+  let frame: string;
   try {
-    const frame = await captureSessionOutputFresh(worktreeId, cliToolId, undefined, instanceId);
-    const { promptCheck } = assessPromptAnswerability(cliToolId, frame);
-    return promptCheck?.isPrompt ? promptCheck.promptData ?? null : null;
+    frame = await captureSessionOutputFresh(worktreeId, cliToolId, undefined, instanceId);
   } catch {
     logger.warn('failed-to-read-screen-before-send');
-    return null;
+    return { frame: undefined, promptData: null };
+  }
+  try {
+    const { promptCheck } = assessPromptAnswerability(cliToolId, frame);
+    return { frame, promptData: promptCheck?.isPrompt ? promptCheck.promptData ?? null : null };
+  } catch {
+    logger.warn('failed-to-read-screen-before-send');
+    return { frame, promptData: null };
   }
 }
 
@@ -362,14 +381,18 @@ export async function POST(
 
     // Send answer to tmux via shared sendPromptAnswer() (Issue #616)
     // Issue #3907 (review P2): registered at the screen read right before the
-    // first key, as `/prompt-response` does — not at the stored row's.
-    noteManualSendStarting(manualAnswer, await promptOnScreenAtSend(id, cliToolId, instanceId));
+    // first key, as `/prompt-response` does — not at the stored row's — and
+    // that same frame is what the sender judges the answer against, so the
+    // screen registered is the screen the keys go to.
+    const atSend = await screenAtSend(id, cliToolId, instanceId);
+    noteManualSendStarting(manualAnswer, atSend.promptData);
     try {
       await sendPromptAnswer({
         sessionName,
         answer: input,
         cliToolId,
         promptData: promptData,
+        frame: atSend.frame,
       });
       logger.info('prompt-answer-sent');
     } catch (error: unknown) {

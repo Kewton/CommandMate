@@ -30,6 +30,9 @@ let db: Database.Database;
 
 vi.mock('@/lib/db/db-instance', () => ({ getDbInstance: () => db }));
 
+/** Review P2 (2nd): what the screen turns into while the sender reads the pane itself. */
+const guardRead = vi.hoisted(() => ({ switchTo: null as unknown, failSpecialKeys: false }));
+
 /** Every key that reached the pane, in order (a key that landed and then timed out included). */
 let delivered: string[] = [];
 type Failure = { at: 'text' | 'enter'; delivery: 'not-started' | 'indeterminate' };
@@ -37,7 +40,12 @@ type Failure = { at: 'text' | 'enter'; delivery: 'not-started' | 'indeterminate'
 let failNext: Failure | null = null;
 let failAfter: Failure | null = null;
 vi.mock('@/lib/tmux/tmux', () => ({
-  capturePane: vi.fn(async () => ''),
+  // The sender's own read of the pane (`readGuardFrame` when it is handed no
+  // frame). `guardRead.switchTo` models the screen changing during that await.
+  capturePane: vi.fn(async () => {
+    if (guardRead.switchTo !== null) screen.prompt = guardRead.switchTo;
+    return '';
+  }),
   sendKeys: vi.fn(async (_session: string, keys: string, enter = true) => {
     const key = enter ? `${keys}<Enter>` : keys;
     const fail = failNext;
@@ -55,6 +63,15 @@ vi.mock('@/lib/tmux/tmux', () => ({
   }),
   sendSpecialKeys: vi.fn(async (_session: string, keys: string[]) => {
     delivered.push(...keys);
+    // Review P2 (2nd): the special keys landed and the call timed out.
+    if (guardRead.failSpecialKeys) {
+      guardRead.failSpecialKeys = false;
+      throw Object.assign(new Error('Failed to send special keys to tmux session: Command failed'), {
+        name: 'TmuxSendError',
+        delivery: 'indeterminate',
+        keysDelivered: 0,
+      });
+    }
   }),
 }));
 
@@ -193,7 +210,11 @@ async function tickOn(state: AutoYesPollerState, prompt: PromptData | null): Pro
  * A person answers `yes` to the stored prompt row of `prompt`, by `messageId`,
  * while `onScreen` (by default the same prompt) is what the screen shows at the send.
  */
-async function personAnswersRow(prompt: PromptData, onScreen: PromptData | null = prompt): Promise<number> {
+async function personAnswersRow(
+  prompt: PromptData,
+  onScreen: PromptData | null = prompt,
+  answer = 'yes',
+): Promise<number> {
   screen.prompt = onScreen;
   const row = createMessage(db, {
     worktreeId: WORKTREE_ID,
@@ -209,7 +230,7 @@ async function personAnswersRow(prompt: PromptData, onScreen: PromptData | null 
     new Request(`http://localhost:3000/api/worktrees/${WORKTREE_ID}/respond`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messageId: row.id, answer: 'yes' }),
+      body: JSON.stringify({ messageId: row.id, answer }),
     }) as unknown as NextRequest,
     { params: Promise.resolve({ id: WORKTREE_ID }) },
   );
@@ -237,6 +258,8 @@ beforeEach(() => {
   failNext = null;
   failAfter = null;
   sendScreen.fail = false;
+  guardRead.switchTo = null;
+  guardRead.failSpecialKeys = false;
   clearAllPollerStates();
   clearManualAnswers();
   clearPartialAnswers();
@@ -375,5 +398,50 @@ describe('[#3907 review P2] the send is registered at the screen it goes to, not
     const { captureSessionOutputFresh } = await import('@/lib/session/cli-session');
     expect(await personAnswersRow(proceed('npm test'))).toBe(200);
     expect(captureSessionOutputFresh).toHaveBeenCalledTimes(1);
+  });
+});
+
+const choose = (command: string): PromptData => ({
+  type: 'multiple_choice',
+  question: 'Do you want to proceed?',
+  status: 'pending',
+  options: [
+    { number: 1, label: 'Yes', isDefault: true },
+    { number: 2, label: 'No', isDefault: false },
+  ],
+  approvalTarget: command,
+});
+
+describe('[#3907 review P2, 2nd] a numeric answer is sent at the frame it was registered at', () => {
+  it('the sender is handed that frame: no second read of the pane where B could turn into C', async () => {
+    const { capturePane } = await import('@/lib/tmux/tmux');
+    guardRead.switchTo = choose('npm run deploy');
+    guardRead.failSpecialKeys = true;
+    const state = pollerState();
+
+    expect(await personAnswersRow(choose('npm test'), choose('npm run build'), '1')).toBe(500);
+    expect(capturePane).not.toHaveBeenCalled();
+    now += MANUAL_ANSWER_HOLD_MS;
+    // The screen the keys went to is the one registered: it is not typed at again.
+    expect(await tickOn(state, screen.prompt as PromptData)).toBe('no_answer');
+    expect(delivered).toHaveLength(1);
+  });
+
+  it('negative: a numeric answer on an unchanged screen that goes through is released as before', async () => {
+    const state = pollerState();
+
+    expect(await personAnswersRow(choose('npm test'), choose('npm test'), '1')).toBe(200);
+    now += MANUAL_ANSWER_HOLD_MS;
+    expect(await tickOn(state, choose('npm test'))).toBe('responded');
+  });
+
+  it('negative: a `yes` answer is sent with the frame too, and behaves as before', async () => {
+    const { capturePane } = await import('@/lib/tmux/tmux');
+    const state = pollerState();
+
+    expect(await personAnswersRow(proceed('npm test'))).toBe(200);
+    expect(capturePane).not.toHaveBeenCalled();
+    now += MANUAL_ANSWER_HOLD_MS;
+    expect(await tickOn(state, proceed('npm test'))).toBe('responded');
   });
 });
