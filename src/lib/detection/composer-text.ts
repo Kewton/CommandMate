@@ -284,6 +284,27 @@ export function isCodexComposerRow(line: string | undefined): boolean {
 }
 
 /**
+ * Whether a codex `\u203A` row has its gutter space inside the glyph's bold span
+ * (Issue #3906).
+ *
+ * codex also draws the transcript echo of a sent message with a bold glyph that
+ * is NOT dim — `ESC[1m\u203A ESC[0m` + text (measured on 0.153.2 and 0.160.0:
+ * `tests/fixtures/codex-live-2310/turn-submitted-no-status.txt:36`,
+ * `codex-multiline-composer-3205/tc104-raw-pane.txt:20`,
+ * `codex-dialogs-0157/approval.txt:24`) — which {@link isCodexComposerRow}
+ * accepts. Every measured composer resets right after its glyph
+ * (`ESC[1m\u203AESC[0m `), and every echo carries the space in the glyph's span,
+ * dim or not. {@link findCodexInputBox} does not need this — it only looks at
+ * the frame's last blocks, where the live composer is — but a search that climbs
+ * past them into the transcript does.
+ */
+export function isCodexBoldGutterRow(line: string | undefined): boolean {
+  if (line === undefined) return false;
+  const chars = scanAttributedChars(line);
+  return chars.length > 1 && chars[0].ch === CODEX_PROMPT_GLYPH && chars[1].ch === ' ' && chars[1].bold;
+}
+
+/**
  * Locate codex's composer in a captured pane (Issue #1890).
  *
  * codex draws no box, so there is no separator pair to walk: the composer is a
@@ -502,7 +523,38 @@ export function extractComposerText(rawCapture: string, cliToolId: string): Comp
   const lines = rawCapture.split('\n');
   const region = locateComposer(lines, cliToolId);
   if (region === null) return { text: '', state: 'no_composer' };
+  return readComposerRegion(lines, region);
+}
 
+/**
+ * Read a codex composer from a known `\u203A` row (Issue #3906).
+ *
+ * {@link findCodexInputBox} only searches the frame's last four blocks, and
+ * takes the composer's own block alone: a body of several paragraphs puts its
+ * `\u203A` row higher up, and its text stops at the first blank row. This reads
+ * from `firstRow` down to the frame's last block — codex's model / cwd footer —
+ * blank rows included, under the same dim rule as {@link extractComposerText}.
+ * When the composer's own block is the frame's last block it is read to the end.
+ *
+ * Whether `firstRow` is the live composer — not a row left above a dialog — is
+ * the caller's question; this only reads it.
+ *
+ * @param lines - Captured pane lines, ANSI intact
+ * @param firstRow - Index of a row {@link isCodexComposerRow} accepts
+ */
+export function readCodexComposerFrom(lines: string[], firstRow: number): ComposerTextResult {
+  let end = lines.length - 1;
+  while (end >= 0 && isBlankRow(lines[end])) end--;
+  let lastBlockStart = end;
+  while (lastBlockStart > 0 && !isBlankRow(lines[lastBlockStart - 1])) lastBlockStart--;
+  let ownBlockEnd = firstRow;
+  while (ownBlockEnd + 1 < lines.length && !isBlankRow(lines[ownBlockEnd + 1])) ownBlockEnd++;
+  const lastRow = lastBlockStart > ownBlockEnd ? lastBlockStart - 1 : end;
+  return readComposerRegion(lines, { firstRow, lastRow, glyph: CODEX_PROMPT_GLYPH_PATTERN });
+}
+
+/** The text of a located composer region, under the dim rule. */
+function readComposerRegion(lines: string[], region: ComposerRegion): ComposerTextResult {
   const realRows: string[] = [];
   const renderedRows: string[] = [];
   for (let i = region.firstRow; i <= region.lastRow; i++) {

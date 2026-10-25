@@ -98,11 +98,11 @@ import {
   TUI_MESSAGE_PROCESSED_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
 import { createLogger } from '@/lib/logger';
-import { clearComposer } from '@/lib/session/composer-clear';
+import { clearComposer, findCodexLiveComposerRow } from '@/lib/session/composer-clear';
 import {
   extractComposerText,
   findCodexInputBox,
-  isCodexComposerRow,
+  readCodexComposerFrom,
   SUPPORTED_COMPOSER_TOOLS,
 } from '@/lib/detection/composer-text';
 
@@ -232,6 +232,14 @@ type ComposerRead =
        * first blank row) and so cannot say the whole body is there.
        */
       region?: string;
+      /**
+       * The composer's `›` row is above the twelve-row window (Issue #3906), so
+       * it was found by {@link findCodexLiveComposerRow} / `findCodexInputBox`
+       * rather than by the marker reader. Text there that is neither the body
+       * nor a `/…` command is not taken for an emptied composer:
+       * {@link classifySubmit} answers `indeterminate` for it, not `submitted`.
+       */
+      outsideWindow?: boolean;
     };
 
 /**
@@ -310,15 +318,19 @@ function withoutTrailingBlankRows(lines: string[]): string[] {
 const DEFAULT_VERIFY_ATTEMPTS = 4;
 
 /**
- * Three-valued classification of the read-back pane (Issue #1501).
+ * Classification of the read-back pane (Issue #1501).
  *
- *   submitted - the message left the input box (or the tool is generating).
- *   pending   - the message is still verbatim on the input line -> resend Enter.
- *   replaced  - the input line holds DIFFERENT text than we typed (a TUI popup
- *               autocompleted/replaced the command) -> clear the line and throw,
- *               never resend Enter.
+ *   submitted     - the message left the input box (or the tool is generating).
+ *   pending       - the message is still verbatim on the input line -> resend Enter.
+ *   replaced      - the input line holds DIFFERENT text than we typed (a TUI popup
+ *                   autocompleted/replaced the command) -> clear the line and throw,
+ *                   never resend Enter.
+ *   indeterminate - a codex composer above the read window holds text that is
+ *                   neither the body nor a command (Issue #3906): not evidence
+ *                   that the message left, nor that Enter would send it. Read
+ *                   again without Enter; throw if it never resolves.
  */
-export type SubmitState = 'submitted' | 'pending' | 'replaced';
+export type SubmitState = 'submitted' | 'pending' | 'replaced' | 'indeterminate';
 
 /**
  * How much of a PASTED body the composer shows, read before Enter (Issue #2464).
@@ -614,25 +626,6 @@ function blockEndFrom(raw: string[], row: number): number {
   return end;
 }
 
-/**
- * A codex composer that the bounded readers cannot reach (Issue #3906).
- *
- * `extractComposerText` searches only the frame's last four blank-row-delimited
- * blocks, and {@link readComposer} only the last twelve drawn rows. A pasted body
- * with many paragraphs puts its `›` row above both, and the old answer was either
- * `absent` (paste `unseen`, but `submitted` after Enter) or the first row read
- * through the twelve-row window without the rest (`landed` on the first line
- * alone). This finds the bottom-most real composer row (not the dim transcript
- * echo, not a dialog's bold option — {@link isCodexComposerRow}) in the drawn
- * frame and returns its index, or -1.
- */
-function lastCodexComposerRow(raw: string[], drawnRows: number): number {
-  for (let i = drawnRows - 1; i >= 0; i--) {
-    if (isCodexComposerRow(raw[i])) return i;
-  }
-  return -1;
-}
-
 /** The bottom-most row of `windowLines` the marker reader takes as the input line, as a frame index. */
 function markerRowIndex(windowLines: string[], windowStart: number): number {
   for (let i = windowLines.length - 1; i >= 0; i--) {
@@ -662,9 +655,11 @@ function readSubmitComposer(
       // paragraph, a blank line, then a tall one). The marker reader would see no
       // input line there — `unseen` before Enter, `submitted` after it — so the
       // composer `extractComposerText` located is read instead, whole.
+      // A dialog drawn under it (its highlighted option is the bottom-most `›`
+      // row) is what the pane shows now: the composer is read as before.
       const box = findCodexInputBox(raw);
-      if (box !== null && box.firstRow < windowStart) {
-        return { kind: 'text', text: read.text.trim(), rows: [raw[box.firstRow]], region };
+      if (box !== null && box.firstRow < windowStart && findCodexLiveComposerRow(raw) === box.firstRow) {
+        return { kind: 'text', text: read.text.trim(), rows: [raw[box.firstRow]], region, outsideWindow: true };
       }
       // Issue #3880 (N1): a one-row excerpt is read as before for its verdict
       // after Enter, but still carries the whole region — `head` with the rest of
@@ -676,8 +671,12 @@ function readSubmitComposer(
     if (read.state === 'no_composer') {
       // Issue #3906 (2): more paragraphs than the four blocks the extractor
       // searches. Whatever the marker reader takes must carry the whole region,
-      // so the composer's first line alone never passes for the body.
-      const composerRow = lastCodexComposerRow(raw, lines.length);
+      // so the composer's first line alone never passes for the body. The row is
+      // the live composer only when no dialog option is drawn below it
+      // ({@link findCodexLiveComposerRow}, the order `findCodexBottomGlyphRow`
+      // reads a frame in): a composer row left above an approval dialog is
+      // never this send's composer, however its text reads.
+      const composerRow = findCodexLiveComposerRow(raw);
       if (composerRow >= 0) {
         const region = codexRegionFrom(raw, composerRow, blockEndFrom(raw, composerRow));
         const text = stripInputMarker(stripAnsi(raw[composerRow]));
@@ -688,12 +687,23 @@ function readSubmitComposer(
           }
           return single;
         }
-        // Above the window as well. Only a row holding the body's first line is
-        // taken for this send's composer: a composer row left above a full-screen
-        // dialog (codex-live-1671) is still `absent`, as it was.
+        // Above the window as well, with no dialog below it.
         if (message !== undefined && text.length > 0 && inputMatchesBody(text, message)) {
-          return { kind: 'text', text, rows: [raw[composerRow]], region };
+          return { kind: 'text', text, rows: [raw[composerRow]], region, outsideWindow: true };
         }
+        // Not the body's first line. A composer whose own block is empty or
+        // placeholder-only is empty; real text is read too — a `/…` command
+        // there is `replaced` as it is inside the window, and anything else is
+        // not proof that the message left ({@link classifySubmit}: `indeterminate`).
+        const held = readCodexComposerFrom(raw.slice(0, blockEndFrom(raw, composerRow) + 1), composerRow);
+        if (held.state !== 'content') return { kind: 'empty' };
+        return {
+          kind: 'text',
+          text: firstNonBlankLine(held.text),
+          rows: [raw[composerRow]],
+          region,
+          outsideWindow: true,
+        };
       }
     }
   }
@@ -711,7 +721,9 @@ function readSubmitComposer(
  *   E. A DIFFERENT slash command is in the composer    -> replaced (TUI popup
  *      autocompleted the command; clear the line and throw, never resend Enter).
  *   F. Any other non-empty text (idle placeholder/hint) -> submitted (unchanged
- *      pre-#1501 permissive default, so normal sends never spuriously fail).
+ *      pre-#1501 permissive default, so normal sends never spuriously fail) —
+ *      except in a codex composer above the read window -> indeterminate
+ *      (Issue #3906).
  *
  * C–F are scoped to the composer only, so the user-message echo that a TUI
  * prints into its history above the prompt never causes a false verdict.
@@ -777,8 +789,11 @@ export function classifySubmit(
   }
 
   // F. Non-empty, non-command steady-state text (idle placeholder / hint) =>
-  //    submitted, preserving the pre-#1501 permissive default.
-  return 'submitted';
+  //    submitted, preserving the pre-#1501 permissive default. Not for a codex
+  //    composer above the window (Issue #3906): before #3906 that frame was
+  //    read as no composer at all; text there that is not the body says
+  //    neither that the message left nor that Enter would send it.
+  return composer.outsideWindow ? 'indeterminate' : 'submitted';
 }
 
 /**
@@ -1079,6 +1094,11 @@ function codexComposerShowsWholeBody(output: string, message: string, composerSp
  * a prefix is not enough, because codex can draw the first keystrokes before it
  * decides the rest are a burst.
  *
+ * On codex the verdict is the whole composer against the whole body
+ * ({@link codexComposerShowsWholeBody}, Issue #3906): the extractor's text is
+ * the body's first paragraph at most, so on its own it would let Enter go on a
+ * body whose later paragraphs had not been drawn.
+ *
  * A body that never appears is taken back out and the send THROWS without
  * Enter — nothing was submitted, so the caller must not print `Message sent.`.
  *
@@ -1099,11 +1119,16 @@ async function confirmTypedBodyLanded(params: {
   for (let attempt = 0; attempt < Math.max(1, attempts); attempt++) {
     await new Promise((resolve) => setTimeout(resolve, TYPED_BODY_POLL_MS));
     output = await capturePane(sessionName, { startLine: -composer.verifyCaptureLines });
+    // Issue #3906: on codex the whole composer must show the whole body. The
+    // extractor's excerpt stops at the first blank row, so its match is only
+    // the first paragraph — a five-paragraph body with one paragraph drawn
+    // would pass on it — and it cannot reach a body of more than four blocks.
+    if (cliToolId === 'codex') {
+      if (codexComposerShowsWholeBody(output, message, composer)) return;
+      continue;
+    }
     const read = extractComposerText(output, cliToolId);
     if (read.state === 'content' && compactText(read.text) === expected) return;
-    // Issue #3906: a body of more paragraphs than the extractor's four blocks is
-    // never `content` there; the whole composer showing the whole body is.
-    if (cliToolId === 'codex' && codexComposerShowsWholeBody(output, message, composer)) return;
   }
 
   const bytes = Buffer.byteLength(message, 'utf8');
@@ -1332,8 +1357,15 @@ export async function sendMessageWithSubmitVerification(
       );
     }
 
-    // state === 'pending' after the final resend's read-back: give up below.
+    // state === 'pending' / 'indeterminate' after the final read-back: give up below.
     if (attempt === attempts) break;
+
+    // state === 'indeterminate' (Issue #3906) — no Enter: the composer does not
+    // show the body, so another Enter could submit whatever it does show.
+    if (state === 'indeterminate') {
+      logger.warn('submit-not-confirmed:composer-unreadable', { sessionName, cliToolId, attempt });
+      continue;
+    }
 
     // state === 'pending' — still typed-but-unsent, resend a single Enter and re-check.
     logger.warn('submit-not-confirmed:resending-enter', {

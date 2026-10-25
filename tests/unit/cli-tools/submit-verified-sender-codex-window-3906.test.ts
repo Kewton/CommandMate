@@ -66,7 +66,7 @@ import {
 } from '@/lib/cli-tools/submit-verified-sender';
 import { extractComposerText } from '@/lib/detection/composer-text';
 import { classifySendFailure } from '@/lib/session/send-attempt-state';
-import { sendSpecialKeys, capturePane } from '@/lib/tmux/tmux';
+import { sendSpecialKeys, capturePane, clearComposerLine } from '@/lib/tmux/tmux';
 
 const ESC = '\u001b';
 const TC104 = readFileSync(
@@ -372,5 +372,239 @@ describe('Issue #3906: a typed body of many short paragraphs (awaitTypedBody)', 
     const error = await sendTyped(BODY);
     expect(error).toBeInstanceOf(Error);
     expect(enterCount()).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Re-review (整合性レビュー 1 回目): the four conditions, each as a pair
+// ---------------------------------------------------------------------------
+
+const APPROVAL_DIALOG = [
+  'Would you like to run the following command?',
+  '',
+  '  $ npm run build',
+  '',
+  `${ESC}[1m${ESC}[38;5;6m› 1. Yes, proceed (y)${ESC}[0m`,
+  '  2. No, and tell Codex what to do differently (esc)',
+  '',
+  'Press enter to confirm or esc to cancel',
+];
+
+describe('Issue #3906 re-review (1): a dialog at the bottom wins over a composer row above the window', () => {
+  const BODY = paragraphs(9);
+  /** The body's own rows (first line included) above the window, an approval dialog at the bottom. */
+  const DIALOG_FRAME = [...TRANSCRIPT, ...composerRows(BODY), '', ...APPROVAL_DIALOG].join('\n');
+
+  it('the frame: the old composer row is above the window and holds the body\'s first line', () => {
+    const { glyph, windowStart } = glyphAndWindow(DIALOG_FRAME);
+    expect(glyph).toBeGreaterThanOrEqual(0);
+    expect(glyph).toBeLessThan(windowStart);
+    expect(extractComposerText(DIALOG_FRAME, 'codex').state).toBe('no_composer');
+  });
+
+  it('positive: not pending (no Enter into the dialog) — submitted / unseen', () => {
+    expect(classifySubmit(DIALOG_FRAME, 'codex', BODY)).toBe('submitted');
+    expect(classifyPasteLanded(DIALOG_FRAME, 'codex', BODY)).toBe('unseen');
+  });
+
+  it('positive: the live codex 0.157 approval frame, its echo row matching the body, is not pending', () => {
+    const frame = readFileSync(path.resolve(__dirname, '../../fixtures/codex-dialogs-0157/approval.txt'), 'utf-8');
+    expect(classifySubmit(frame, 'codex', 'Run the shell command: touch probe.txt')).toBe('submitted');
+  });
+
+  it('negative: the same rows with the composer at the bottom (no dialog) are still pending', () => {
+    expect(classifySubmit(codexFrame(composerRows(BODY)), 'codex', BODY)).toBe('pending');
+  });
+});
+
+describe('Issue #3906 re-review (2): a composer above the window that is not the body is not submitted', () => {
+  const BODY = `/review the composer reader\n\n${paragraphs(8)}`;
+  const REPLACED = codexFrame(composerRows(`/teamwork-preview the composer reader\n\n${paragraphs(8)}`));
+  const OTHER = codexFrame(composerRows(`something else typed here\n\n${paragraphs(8)}`));
+
+  it('the frames: the `›` row is above the window and the extractor finds no composer', () => {
+    for (const frame of [REPLACED, OTHER]) {
+      const { glyph, windowStart } = glyphAndWindow(frame);
+      expect(glyph).toBeLessThan(windowStart);
+      expect(extractComposerText(frame, 'codex').state).toBe('no_composer');
+    }
+  });
+
+  it('positive: a different `/…` command there is replaced (was submitted)', () => {
+    expect(classifySubmit(REPLACED, 'codex', BODY)).toBe('replaced');
+  });
+
+  it('positive: other text there is indeterminate (was submitted)', () => {
+    expect(classifySubmit(OTHER, 'codex', BODY)).toBe('indeterminate');
+  });
+
+  it('positive: the extractor-found composer above the window, holding other text, is indeterminate', () => {
+    const frame = codexFrame(composerRows(`something else typed here\n\n${numberedLines(20)}`));
+    expect(extractComposerText(frame, 'codex').state).toBe('content');
+    expect(glyphAndWindow(frame).glyph).toBeLessThan(glyphAndWindow(frame).windowStart);
+    expect(classifySubmit(frame, 'codex', `Read the list below.\n\n${numberedLines(20)}`)).toBe('indeterminate');
+  });
+
+  it('negative: an empty composer above the window (placeholder only) is still submitted', () => {
+    const frame = [...TRANSCRIPT, IDLE_ROW, '', ...paragraphs(8).split('\n').map((l) => (l === '' ? '' : `  ${l}`)), '', FOOTER].join('\n');
+    expect(classifySubmit(frame, 'codex', BODY)).toBe('submitted');
+  });
+
+  it('negative: the composer gone under an approval dialog is still submitted', () => {
+    const frame = [...TRANSCRIPT, `${GLYPH}echo left before the dialog`, '', ...APPROVAL_DIALOG].join('\n');
+    expect(classifySubmit(frame, 'codex', BODY)).toBe('submitted');
+  });
+});
+
+describe('Issue #3906 re-review (1)(2): the whole send', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.mocked(execFile).mockImplementation(((
+      _file: string,
+      _args: string[],
+      _options: unknown,
+      callback: (error: Error | null) => void
+    ) => {
+      queueMicrotask(() => callback(null));
+      return { stdin: { end: () => undefined } };
+    }) as never);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('(1) positive: an approval dialog right after Enter, the body rows above it: one Enter, sent', async () => {
+    const body = paragraphs(9);
+    const dialog = [...TRANSCRIPT, ...composerRows(body), '', ...APPROVAL_DIALOG].join('\n');
+    scriptPane(codexFrame(composerRows(body)), dialog);
+    expect(await send(body)).toBeNull();
+    expect(enterCount()).toBe(1);
+  });
+
+  it('(2) positive: replaced above the window after Enter: throws replaced, no second Enter', async () => {
+    const body = `/review the composer reader\n\n${paragraphs(8)}`;
+    scriptPane(
+      codexFrame(composerRows(body)),
+      codexFrame(composerRows(`/teamwork-preview the composer reader\n\n${paragraphs(8)}`))
+    );
+    const error = await send(body);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/replaced by a TUI autocompletion/);
+    expect(enterCount()).toBe(1);
+  });
+
+  it('(2) positive: other text above the window after Enter: never success, no further Enter, indeterminate', async () => {
+    const body = paragraphs(9);
+    scriptPane(codexFrame(composerRows(body)), codexFrame(composerRows(`something else typed here\n\n${paragraphs(8)}`)));
+    const error = await send(body);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/submit could not be confirmed/);
+    expect(enterCount()).toBe(1);
+    expect(classifySendFailure(new Error(`Failed to send message to Codex: ${(error as Error).message}`))).toEqual({
+      state: 'indeterminate',
+      reason: 'submit-unconfirmed',
+    });
+  });
+
+  it('(2) negative: the composer gone under an approval dialog after Enter: one Enter, sent', async () => {
+    const body = paragraphs(9);
+    const dialog = [...TRANSCRIPT, `${GLYPH}echo left before the dialog`, '', ...APPROVAL_DIALOG].join('\n');
+    scriptPane(codexFrame(composerRows(body)), dialog);
+    expect(await send(body)).toBeNull();
+    expect(enterCount()).toBe(1);
+  });
+});
+
+describe('Issue #3906 re-review (3): a short typed body must show in full', () => {
+  const BODY = ['a', 'b', 'c', 'd', 'e'].map((p) => `paragraph ${p}: short`).join('\n\n');
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function sendTyped(message: string): Promise<unknown> {
+    const p = sendMessageWithSubmitVerification({
+      sessionName: 'mcbd-codex-3906-typed-full',
+      message,
+      cliToolId: 'codex',
+      awaitTypedBody: true,
+      typedBodyAttempts: 5,
+    });
+    const settled = p.then(() => null, (error: unknown) => error);
+    await vi.runAllTimersAsync();
+    return settled;
+  }
+
+  it('the frame: the extractor reads the first paragraph, which is all that is drawn', () => {
+    const frame = codexFrame(composerRows('paragraph a: short'));
+    const read = extractComposerText(frame, 'codex');
+    expect(read).toEqual({ state: 'content', text: 'paragraph a: short' });
+  });
+
+  it('positive: only the first paragraph drawn — not landed, no Enter (was landed on the first paragraph)', async () => {
+    scriptPane(codexFrame(composerRows('paragraph a: short')), IDLE);
+    const error = await sendTyped(BODY);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/did not appear in the composer/);
+    expect(enterCount()).toBe(0);
+  });
+
+  it('negative: all five paragraphs drawn — landed, one Enter', async () => {
+    scriptPane(codexFrame(composerRows(BODY)), IDLE);
+    expect(await sendTyped(BODY)).toBeNull();
+    expect(enterCount()).toBe(1);
+  });
+
+  it('negative: a one-paragraph body drawn — landed, one Enter', async () => {
+    scriptPane(codexFrame(composerRows('paragraph a: short')), IDLE);
+    expect(await sendTyped('paragraph a: short')).toBeNull();
+    expect(enterCount()).toBe(1);
+  });
+});
+
+describe('Issue #3906 re-review (4): the withdrawal clears what the sender read as pasting', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.mocked(execFile).mockImplementation(((
+      _file: string,
+      _args: string[],
+      _options: unknown,
+      callback: (error: Error | null) => void
+    ) => {
+      queueMicrotask(() => callback(null));
+      return { stdin: { end: () => undefined } };
+    }) as never);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('positive: four of five paragraphs ever drawn — the withdrawal sends clear keys (was none)', async () => {
+    const body = paragraphs(5);
+    const partial = codexFrame(composerRows(paragraphs(4)));
+    // The clear reads with a numeric capture length: its first read (the
+    // pre-send clear) sees an idle composer, the withdrawal's reads see the
+    // partial body until a clear pass has gone out. The paste check sees it too.
+    let clearReads = 0;
+    vi.mocked(capturePane).mockImplementation((async (_session: string, arg?: unknown) => {
+      if (typeof arg !== 'number') return partial;
+      clearReads++;
+      if (clearReads === 1) return IDLE;
+      return vi.mocked(clearComposerLine).mock.calls.length > 0 ? IDLE : partial;
+    }) as never);
+    const error = await send(body);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/had not finished arriving/);
+    expect(enterCount()).toBe(0);
+    expect(vi.mocked(clearComposerLine)).toHaveBeenCalled();
   });
 });
