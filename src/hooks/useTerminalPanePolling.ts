@@ -42,7 +42,7 @@ import type {
 } from '@/types/agent-session';
 import { useRealtime } from '@/hooks/useRealtimeConnection';
 import type { RealtimeEvent, TerminalSnapshotEvent, SessionStatusEvent } from '@/lib/realtime/types';
-import { extractComposerText } from '@/lib/detection/composer-text';
+import { extractLiveComposerText } from '@/lib/detection/composer-text';
 import { buildRealtimeSnippet } from '@/lib/realtime-snippet';
 import { detectAgentMode } from '@/lib/detection/agent-mode';
 import type { CurrentOutputResponseBody } from '@/lib/session/current-output-types';
@@ -236,7 +236,7 @@ export interface PaneTerminalState extends PaneGateState {
    * Text sitting unsent in the CLI's composer, or `''` (Issue #1879).
    *
    * Derived on the client from the frame this pane already holds, by the same
-   * `extractComposerText` the server runs for `capture --json`. Deriving rather
+   * `extractLiveComposerText` the server runs for `capture --json`. Deriving rather
    * than reading a payload field is what keeps the two delivery paths equal:
    * `terminal_snapshot` (the WebSocket push, which carries the frame and a fixed
    * set of flags) and `/current-output` (the HTTP poll, throttled to 15s while
@@ -247,7 +247,9 @@ export interface PaneTerminalState extends PaneGateState {
    * placeholder a CLI paints into an EMPTY composer (Claude's rotating
    * suggestion, codex's `Ask Codex to do anything` since #1890), which is the
    * whole reason the extraction reads the raw ANSI frame rather than the
-   * rendered text.
+   * rendered text. Empty too for a codex composer left above a dialog that has
+   * opened below it (Issue #3927): [Clear] cannot reach it and [Run]'s Enter
+   * would land in the dialog.
    */
   composerText: string;
   /**
@@ -601,7 +603,7 @@ export function useTerminalPanePolling({
       // line, and here the user is looking at the exact text they are about to
       // run. A dead session has no composer.
       const composerText = data.isRunning
-        ? extractComposerText(nextOutput, inFlightCliToolRef.current).text
+        ? extractLiveComposerText(nextOutput, inFlightCliToolRef.current).text
         : '';
 
       // Issue #2592: same treatment, same reason — off the frame, on every

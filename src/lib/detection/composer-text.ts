@@ -92,6 +92,13 @@
  * server does. That is deliberate — `useTerminalPanePolling` derives the
  * composer text client-side from the frame it already has, which keeps the
  * WebSocket push path and the HTTP poll path from disagreeing.
+ *
+ * That is also why the "a dialog below the composer means no composer" rule
+ * (Issue #3927, {@link codexDialogBelow}) lives here rather than next to the
+ * clear in `session/composer-clear.ts`: the clear, the published
+ * `composerText` and the browser's own reading all go through
+ * {@link extractLiveComposerText}, and `tools/codex/cli-patterns.ts`, whose
+ * `readCodexGlyphRowKind` the rule was first written on, imports the logger.
  */
 
 import { stripAnsi } from './ansi';
@@ -304,6 +311,96 @@ export function isCodexBoldGutterRow(line: string | undefined): boolean {
   return chars.length > 1 && chars[0].ch === CODEX_PROMPT_GLYPH && chars[1].ch === ' ' && chars[1].bold;
 }
 
+/** What a codex `\u203A` row is (Issue #3927; the kinds `readCodexGlyphRowKind` names). */
+type CodexGlyphRowKind = 'composer' | 'transcript-echo' | 'option';
+
+/**
+ * Classify one raw codex row whose first rendered glyph is `\u203A` (Issue #3927).
+ *
+ * The same reading as `readCodexGlyphRowKind` in `tools/codex/cli-patterns.ts`,
+ * re-stated on this module's SGR scan because that module imports the logger
+ * and this one is read by the browser bundle. In order: no attributes at all →
+ * null (a stripped capture, where every `\u203A` use reads the same); a dim
+ * glyph → the transcript echo; a bold label → a dialog option; a dim label →
+ * the composer's placeholder; a coloured glyph whose label is drawn in the
+ * same colour → a dialog option (from 0.155.1 the composer's glyph is
+ * coloured too, but it resets before its label); anything else → the composer.
+ * `tests/unit/lib/detection/composer-text-dialog-below-3927.test.ts` holds the
+ * two readings equal over the codex fixtures.
+ *
+ * @param rawRow - One row of the capture, ANSI intact
+ */
+function readCodexGlyphRow(rawRow: string): CodexGlyphRowKind | null {
+  if (!rawRow.includes('\x1b')) return null;
+  const chars = scanAttributedChars(rawRow);
+  const glyphIndex = chars.findIndex(c => c.ch.trim() !== '');
+  if (glyphIndex < 0 || chars[glyphIndex].ch !== CODEX_PROMPT_GLYPH) return null;
+  const glyph = chars[glyphIndex];
+  if (glyph.dim) return 'transcript-echo';
+  const label = chars.slice(glyphIndex + 1).find(c => c.ch.trim() !== '');
+  if (label?.bold) return 'option';
+  if (label?.dim) return 'composer';
+  if (glyph.fg !== null && label?.fg === glyph.fg) return 'option';
+  return 'composer';
+}
+
+/**
+ * A composer row by every reading: {@link isCodexComposerRow}, and not the
+ * bold-not-dim echo ({@link isCodexBoldGutterRow}). The caller has already had
+ * {@link readCodexGlyphRow} call it `'composer'`, which also requires ANSI
+ * attributes: an attribute-free `\u203A` row (a stripped capture, where a dialog
+ * option reads the same as a composer) is never taken (Issue #3906).
+ */
+function isLiveComposerRow(row: string): boolean {
+  return isCodexComposerRow(row) && !isCodexBoldGutterRow(row);
+}
+
+/**
+ * The live codex composer's `\u203A` row, wherever it is in the frame (Issue #3906).
+ *
+ * Read from the bottom, in the order `findCodexBottomGlyphRow` reads a frame:
+ * a dialog's highlighted option reached before any composer row means the
+ * dialog is what the pane shows now, and a composer row above it is one left
+ * there from before (codex-live-1671) — so the answer is -1, not that row. The
+ * transcript echo of a sent message is skipped, dim ({@link isCodexComposerRow}
+ * rejects it) or not ({@link isCodexBoldGutterRow}).
+ *
+ * Moved here from `session/composer-clear.ts` by Issue #3927, with
+ * {@link codexDialogBelow}, so the browser can read the same rule.
+ *
+ * @param rows - The capture split into rows, ANSI intact
+ * @returns The row's index, or -1 when no live composer row is drawn
+ */
+export function findCodexLiveComposerRow(rows: string[]): number {
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const kind = readCodexGlyphRow(rows[i]);
+    if (kind === 'option') return -1;
+    if (kind === 'composer' && isLiveComposerRow(rows[i])) return i;
+  }
+  return -1;
+}
+
+/**
+ * Whether a dialog, not a composer, is what the pane shows below `row` (Issue #3906).
+ *
+ * The same bottom-up reading as {@link findCodexLiveComposerRow}, stopped at
+ * `row`: a dialog's highlighted option reached first means the composer at
+ * `row` — even one {@link findCodexInputBox} located among the frame's last
+ * blocks — was left there from before the dialog opened. A live composer row
+ * reached first means it was not.
+ *
+ * @param rows - The capture split into rows, ANSI intact
+ * @param row - Index of the composer's `\u203A` row
+ */
+export function codexDialogBelow(rows: string[], row: number): boolean {
+  for (let i = rows.length - 1; i > row; i--) {
+    const kind = readCodexGlyphRow(rows[i]);
+    if (kind === 'option') return true;
+    if (kind === 'composer' && isLiveComposerRow(rows[i])) return false;
+  }
+  return false;
+}
+
 /**
  * Locate codex's composer in a captured pane (Issue #1890).
  *
@@ -357,12 +454,20 @@ interface AttributedChar {
    * {@link isCodexComposerRow}. Claude's reader ignores it.
    */
   bold: boolean;
+  /**
+   * The foreground colour as its SGR arguments (`'5;6'`, `'2;255;178;66'`,
+   * `'36'`), or null for the default. Only {@link readCodexGlyphRow} reads it
+   * (Issue #3927): a dialog paints its highlighted row's glyph and label in one
+   * colour.
+   */
+  fg: string | null;
 }
 
 /** The running SGR state a row is scanned with. */
 interface SgrState {
   dim: boolean;
   bold: boolean;
+  fg: string | null;
 }
 
 /**
@@ -379,23 +484,26 @@ interface SgrState {
  */
 function applySgr(params: string, state: SgrState): SgrState {
   const parts = params === '' ? ['0'] : params.split(';');
-  let { dim, bold } = state;
+  let { dim, bold, fg } = state;
   for (let i = 0; i < parts.length; i++) {
     const code = parts[i] === '' ? 0 : Number(parts[i]);
     if (Number.isNaN(code)) continue;
     if (code === 38 || code === 48 || code === 58) {
       const mode = parts[i + 1] === '' || parts[i + 1] === undefined ? -1 : Number(parts[i + 1]);
       // 5 = 256-colour (one argument), 2 = 24-bit RGB (three arguments).
-      if (mode === 5) i += 2;
-      else if (mode === 2) i += 4;
-      else i += 1;
+      const argCount = mode === 5 ? 2 : mode === 2 ? 4 : 1;
+      if (code === 38) fg = parts.slice(i + 1, i + 1 + argCount).join(';');
+      i += argCount;
       continue;
     }
-    if (code === 0 || code === 22) { dim = false; bold = false; }
+    if (code === 0) { dim = false; bold = false; fg = null; }
+    else if (code === 22) { dim = false; bold = false; }
     else if (code === 1) bold = true;
     else if (code === 2) dim = true;
+    else if (code === 39) fg = null;
+    else if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97)) fg = String(code);
   }
-  return { dim, bold };
+  return { dim, bold, fg };
 }
 
 /**
@@ -408,12 +516,12 @@ function applySgr(params: string, state: SgrState): SgrState {
  */
 function scanAttributedChars(line: string): AttributedChar[] {
   const out: AttributedChar[] = [];
-  let state: SgrState = { dim: false, bold: false };
+  let state: SgrState = { dim: false, bold: false, fg: null };
   let i = 0;
   while (i < line.length) {
     const ch = line[i];
     if (ch !== '\x1b') {
-      out.push({ ch, dim: state.dim, bold: state.bold });
+      out.push({ ch, dim: state.dim, bold: state.bold, fg: state.fg });
       i++;
       continue;
     }
@@ -524,6 +632,38 @@ export function extractComposerText(rawCapture: string, cliToolId: string): Comp
   const region = locateComposer(lines, cliToolId);
   if (region === null) return { text: '', state: 'no_composer' };
   return readComposerRegion(lines, region);
+}
+
+/**
+ * The composer the pane shows NOW — {@link extractComposerText}, less a codex
+ * composer that a dialog has opened below (Issue #3927).
+ *
+ * codex draws on the normal screen, so a composer row from before a dialog
+ * opened can still sit among the frame's last blocks, above the dialog's
+ * highlighted option. {@link extractComposerText} locates it and reports its
+ * old text as `content`; this reports `no_composer`, the answer the clear
+ * (`session/composer-clear.ts`) has given that frame since #3906. The two
+ * display paths — the published `composerText`
+ * (`session/current-output-builder.ts`) and the browser's own reading
+ * (`hooks/useTerminalPanePolling.ts`) — read through this, so the unsent bar
+ * neither shows text its [Clear] cannot remove nor offers a [Run] whose Enter
+ * would land in the dialog.
+ *
+ * {@link extractComposerText} itself keeps its reading. The sender
+ * (`cli-tools/submit-verified-sender.ts`) applies {@link codexDialogBelow} to
+ * the box it locates on its own branches, and Auto-Yes's Enter fallback and
+ * the send-residue check are left reading the box as before.
+ *
+ * @param rawCapture - A pane capture with ANSI attributes intact
+ * @param cliToolId - The CLI whose session was captured
+ */
+export function extractLiveComposerText(rawCapture: string, cliToolId: string): ComposerTextResult {
+  const read = extractComposerText(rawCapture, cliToolId);
+  if (cliToolId !== 'codex' || read.state === 'no_composer' || read.state === 'unsupported_tool') return read;
+  const lines = rawCapture.split('\n');
+  const box = findCodexInputBox(lines);
+  if (box !== null && codexDialogBelow(lines, box.firstRow)) return { text: '', state: 'no_composer' };
+  return read;
 }
 
 /**
