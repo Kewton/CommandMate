@@ -3,20 +3,19 @@
  *
  * On 2026-10-25 a 7,464-byte / 58-line `ask` to codex 0.164.0 failed as
  * `paste-not-landed {"state":"unseen"}` — the idle placeholder for the whole
- * 2 s — and afterwards `[Pasted Content 3575 chars]` sat in the composer, where
- * nothing withdrew it. What is pinned here, by scripting the frames the send
- * reads:
+ * 2 s — and afterwards `[Pasted Content 3575 chars]` sat in the composer.
  *
- *   - after an `unseen` verdict the composer is watched for
- *     `PASTE_LATE_ARRIVAL_WINDOW_MS` inside the send, BEFORE it throws;
- *   - a placeholder that shows up in that window is withdrawn (`C-e`+`BSpace`);
- *   - one that never shows up gets no key at all, and the send still fails;
- *   - one that cannot be withdrawn is logged after `paste-not-landed` and named
- *     in the error.
+ * Watching for the late placeholder inside the failed send was tried and taken
+ * back out of this Issue: without sends to one instance being serialised, what
+ * the watch reads cannot be told apart from another send's paste (review of
+ * 2026-10-27). What is pinned here:
  *
- * Plus the count check behind the 3,575 of a 7,464-byte body: a placeholder's
- * `N chars` is compared with the body's code points, so a Japanese body is
- * `landed` at its character count and `pasting` below it.
+ *   - an `unseen` paste still fails right after the 2-second wait, with the
+ *     withdrawal of #2464 and no extra watch (as on develop);
+ *   - a placeholder left behind is taken out by the NEXT send's pre-send clear,
+ *     with `C-e`+`BSpace` (the part of #3937 that stays);
+ *   - the count check behind the 3,575 of a 7,464-byte body: a placeholder's
+ *     `N chars` is compared with the body's code points.
  *
  * @vitest-environment node
  */
@@ -53,22 +52,10 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 import { execFile } from 'child_process';
-import {
-  sendMessageWithSubmitVerification,
-  classifyPasteLanded,
-  PASTE_LATE_ARRIVAL_WINDOW_MS,
-} from '@/lib/cli-tools/submit-verified-sender';
-import {
-  sendKeys,
-  sendSpecialKeys,
-  capturePane,
-  clearComposerLine,
-  clearComposerPasteToken,
-  clearInputLine,
-} from '@/lib/tmux/tmux';
-import { MAX_COMPOSER_CLEAR_PASSES } from '@/lib/session/composer-clear';
+import * as sender from '@/lib/cli-tools/submit-verified-sender';
+import { sendMessageWithSubmitVerification, classifyPasteLanded } from '@/lib/cli-tools/submit-verified-sender';
+import { sendSpecialKeys, capturePane, clearComposerLine, clearComposerPasteToken } from '@/lib/tmux/tmux';
 import { classifySendFailure } from '@/lib/session/send-attempt-state';
-import { extractComposerText } from '@/lib/detection/composer-text';
 
 const SESSION = 'mcbd-codex-late-paste';
 const FIXTURES = path.resolve(__dirname, '../../fixtures');
@@ -91,60 +78,52 @@ const JA_CHARS = [...JA_BODY].length;
 const enterCount = (): number =>
   vi.mocked(sendSpecialKeys).mock.calls.filter((c) => Array.isArray(c[1]) && c[1][0] === 'Enter').length;
 
-/** tmux argv of every execFile call (load-buffer / paste-buffer). */
-let tmuxCalls: string[][] = [];
+/** Every pane read, in order: `clear` for clearComposer's reads, `verify` for the sender's. */
+let reads: string[] = [];
 
 /**
  * Script the pane. `clearReads` serve clearComposer's numeric-signature reads
  * (the pre-send clear, then the withdrawal); `verifyReads` serve the sender's
- * `{ startLine }` reads — the 2-second wait, then the late-arrival watch. The
- * last frame of each list repeats.
+ * `{ startLine }` reads. The last frame of each list repeats.
  */
-function scriptPane(options: { clearReads: string[]; verifyReads: string[] }): void {
+function scriptPane(options: { clearReads: string[]; verifyReads: string[] | ((enters: number) => string) }): void {
   let clearIndex = 0;
   let verifyIndex = 0;
   vi.mocked(capturePane).mockImplementation((async (_session: string, arg?: unknown) => {
-    if (typeof arg === 'number') return options.clearReads[Math.min(clearIndex++, options.clearReads.length - 1)];
-    return options.verifyReads[Math.min(verifyIndex++, options.verifyReads.length - 1)];
+    if (typeof arg === 'number') {
+      reads.push('clear');
+      return options.clearReads[Math.min(clearIndex++, options.clearReads.length - 1)];
+    }
+    reads.push('verify');
+    const verifyReads = options.verifyReads;
+    if (typeof verifyReads === 'function') return verifyReads(enterCount());
+    return verifyReads[Math.min(verifyIndex++, verifyReads.length - 1)];
   }) as never);
 }
 
-const verifyReadCount = (): number =>
-  vi.mocked(capturePane).mock.calls.filter((c) => typeof c[1] !== 'number').length;
-
-/** Runs the send to completion; `events` records when the promise settled. */
-async function send(events: string[]): Promise<Error | null> {
-  const p = sendMessageWithSubmitVerification({ sessionName: SESSION, message: JA_BODY, cliToolId: 'codex' });
-  const settled = p.then(
-    () => { events.push('settled'); return null; },
-    (error: unknown) => { events.push('settled'); return error as Error; }
+async function send(): Promise<Error | null> {
+  const settled = sendMessageWithSubmitVerification({ sessionName: SESSION, message: JA_BODY, cliToolId: 'codex' }).then(
+    () => null,
+    (error: unknown) => error as Error
   );
   await vi.runAllTimersAsync();
   return settled;
 }
 
-const unseenWait = (): string[] => Array(20).fill(IDLE);
-
 describe('submit-verified-sender: a paste drawn late (Issue #3937)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
-    tmuxCalls = [];
+    reads = [];
     vi.mocked(execFile).mockImplementation(((
       _file: string,
-      args: string[],
+      _args: string[],
       _options: unknown,
       callback: (error: Error | null) => void
     ) => {
-      tmuxCalls.push(args);
       queueMicrotask(() => callback(null));
       return { stdin: { end: () => undefined } };
     }) as never);
-    vi.mocked(sendKeys).mockResolvedValue(undefined);
-    vi.mocked(sendSpecialKeys).mockResolvedValue(undefined);
-    vi.mocked(clearInputLine).mockResolvedValue(undefined);
-    vi.mocked(clearComposerLine).mockResolvedValue(undefined);
-    vi.mocked(clearComposerPasteToken).mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -152,7 +131,7 @@ describe('submit-verified-sender: a paste drawn late (Issue #3937)', () => {
   });
 
   it('the body is pasted (over LITERAL_SEND_MAX_BYTES) and its bytes are not its characters', () => {
-    expect(Buffer.byteLength(JA_BODY, 'utf8')).toBeGreaterThan(5000);
+    expect(Buffer.byteLength(JA_BODY, 'utf8')).toBeGreaterThan(sender.LITERAL_SEND_MAX_BYTES);
     expect(JA_CHARS).toBeLessThan(Buffer.byteLength(JA_BODY, 'utf8') / 2);
   });
 
@@ -170,179 +149,39 @@ describe('submit-verified-sender: a paste drawn late (Issue #3937)', () => {
     });
   });
 
-  it('a placeholder drawn inside the window is withdrawn before the send fails', async () => {
-    const events: string[] = [];
-    vi.mocked(clearComposerPasteToken).mockImplementation(async () => { events.push('bspace'); });
-    scriptPane({
-      // pre-send clear: idle. Withdrawal: the late placeholder, then idle.
-      clearReads: [IDLE, tokenFrame(JA_CHARS), IDLE],
-      verifyReads: [...unseenWait(), IDLE, IDLE, tokenFrame(JA_CHARS)],
-    });
-
-    const error = await send(events);
-
-    expect(error?.message).toMatch(/never appeared in the composer/);
-    expect(error?.message).toMatch(/Enter was not pressed, so nothing was submitted/);
-    expect(error?.message).toMatch(/It appeared 750ms later and was taken back out\./);
-    expect(enterCount()).toBe(0);
-    expect(events).toEqual(['bspace', 'settled']);
-    expect(clearComposerLine).not.toHaveBeenCalled();
-    expect(loggerSpies.error).toHaveBeenCalledWith(
-      'paste-not-landed',
-      expect.objectContaining({ cliToolId: 'codex', state: 'unseen' })
-    );
-    expect(loggerSpies.warn).toHaveBeenCalledWith(
-      'paste-late-withdrawn',
-      expect.objectContaining({ lateState: 'landed', afterMs: 750, passes: 1 })
-    );
-    expect(loggerSpies.error).not.toHaveBeenCalledWith('paste-late-withdraw-failed', expect.anything());
-  });
-
-  it('nothing drawn inside the window: no key is sent, and the send fails', async () => {
-    const events: string[] = [];
+  it('an unseen paste fails right after the 2 s wait and is withdrawn, with no late watch', async () => {
+    expect('PASTE_LATE_ARRIVAL_WINDOW_MS' in sender).toBe(false);
     scriptPane({ clearReads: [IDLE], verifyReads: [IDLE] });
 
-    const error = await send(events);
+    const error = await send();
 
     expect(error?.message).toMatch(/never appeared in the composer/);
     expect(error?.message).not.toMatch(/appeared \d+ms later/);
+    expect(classifySendFailure(error)).toEqual({ state: 'indeterminate', reason: 'body-not-landed' });
     expect(enterCount()).toBe(0);
-    expect(clearComposerLine).not.toHaveBeenCalled();
-    expect(clearComposerPasteToken).not.toHaveBeenCalled();
-    expect(sendKeys).not.toHaveBeenCalled();
-    expect(tmuxCalls.map((args) => args[0])).toEqual(['load-buffer', 'paste-buffer']);
-    // The whole window was watched: 2 s of the wait, then the window.
-    expect(verifyReadCount()).toBe(20 + PASTE_LATE_ARRIVAL_WINDOW_MS / 250);
-    expect(loggerSpies.warn).not.toHaveBeenCalledWith('paste-late-withdrawn', expect.anything());
-    expect(loggerSpies.error).not.toHaveBeenCalledWith('paste-late-withdraw-failed', expect.anything());
+    // 20 reads of the 2-second wait, then the withdrawal's read — nothing in between.
+    expect(reads).toEqual(['clear', ...Array(20).fill('verify'), 'clear']);
   });
 
-  it('a late placeholder that cannot be withdrawn is logged after paste-not-landed and named in the error', async () => {
-    const events: string[] = [];
-    // Fewer characters than the body: this body still arriving (`pasting`), so it is ours to withdraw.
-    // (A count above the body's is another send's — see the race tests below.)
-    const partial = tokenFrame(JA_CHARS - 100);
+  it('a placeholder left behind is taken out by the next send with C-e+BSpace, and that send goes through', async () => {
     scriptPane({
-      clearReads: [IDLE, partial],
-      verifyReads: [...unseenWait(), partial],
+      // pre-send clear: the leftover placeholder, then idle after the BSpace pass.
+      clearReads: [tokenFrame(3575), IDLE],
+      verifyReads: (enters) => (enters > 0 ? IDLE : tokenFrame(JA_CHARS)),
     });
 
-    const error = await send(events);
+    const error = await send();
 
-    expect(error?.message).toMatch(/It appeared 250ms later and could not be taken back out/);
-    expect(enterCount()).toBe(0);
-    expect(clearComposerPasteToken).toHaveBeenCalledTimes(MAX_COMPOSER_CLEAR_PASSES);
-    const names = loggerSpies.error.mock.calls.map((c) => c[0]);
-    expect(names.indexOf('paste-not-landed')).toBeGreaterThanOrEqual(0);
-    expect(names.indexOf('paste-late-withdraw-failed')).toBeGreaterThan(names.indexOf('paste-not-landed'));
-    expect(loggerSpies.error).toHaveBeenCalledWith(
-      'paste-late-withdraw-failed',
-      expect.objectContaining({
-        lateState: 'pasting',
-        passes: MAX_COMPOSER_CLEAR_PASSES,
-        remainingState: 'content',
-        remainingText: `[Pasted Content ${JA_CHARS - 100} chars]`,
-      })
-    );
+    expect(error).toBeNull();
+    expect(clearComposerPasteToken).toHaveBeenCalledTimes(1);
+    expect(clearComposerLine).not.toHaveBeenCalled();
+    expect(enterCount()).toBe(1);
   });
 
-  describe('another send pastes into the same composer during the watch (review P1)', () => {
-    /** Another send's text, typed (not a placeholder): nothing of this body. */
-    const OTHER_TYPED = LIVE_TOKEN.replace(
-      '\x1b[38;5;6m[Pasted Content 12288 chars]\x1b[39m',
-      'please run the tests again'
-    );
+  it('a paste that lands within the 2 s is still sent with one Enter', async () => {
+    scriptPane({ clearReads: [IDLE], verifyReads: (enters) => (enters > 0 ? IDLE : tokenFrame(JA_CHARS)) });
 
-    it('positive: a placeholder that is not this body (count above it) is left in place, no key is sent', async () => {
-      const events: string[] = [];
-      const other = tokenFrame(JA_CHARS + 500);
-      expect(classifyPasteLanded(other, 'codex', JA_BODY)).toBe('mismatch');
-      scriptPane({ clearReads: [IDLE, other], verifyReads: [...unseenWait(), IDLE, other] });
-
-      const error = await send(events);
-
-      expect(error?.message).toMatch(/never appeared in the composer/);
-      expect(error?.message).toMatch(/Something that is not this message appeared in the composer 500ms later and was left in place\./);
-      expect(classifySendFailure(error)).toEqual({ state: 'indeterminate', reason: 'body-not-landed' });
-      expect(enterCount()).toBe(0);
-      expect(clearComposerPasteToken).not.toHaveBeenCalled();
-      expect(clearComposerLine).not.toHaveBeenCalled();
-      expect(loggerSpies.warn).toHaveBeenCalledWith(
-        'paste-late-foreign',
-        expect.objectContaining({ lateState: 'mismatch', afterMs: 500 })
-      );
-      expect(loggerSpies.warn).not.toHaveBeenCalledWith('paste-late-withdrawn', expect.anything());
-      expect(loggerSpies.error).not.toHaveBeenCalledWith('paste-late-withdraw-failed', expect.anything());
-    });
-
-    it('positive: text that is not this body, typed during the watch, is not cleared', async () => {
-      const events: string[] = [];
-      expect(extractComposerText(OTHER_TYPED, 'codex')).toEqual({ text: 'please run the tests again', state: 'content' });
-      expect(classifyPasteLanded(OTHER_TYPED, 'codex', JA_BODY)).toBe('unseen');
-      scriptPane({ clearReads: [IDLE, OTHER_TYPED], verifyReads: [...unseenWait(), IDLE, OTHER_TYPED] });
-
-      const error = await send(events);
-
-      expect(error?.message).toMatch(/never appeared in the composer/);
-      expect(classifySendFailure(error)).toEqual({ state: 'indeterminate', reason: 'body-not-landed' });
-      expect(clearComposerPasteToken).not.toHaveBeenCalled();
-      expect(clearComposerLine).not.toHaveBeenCalled();
-    });
-
-    it('negative: this body drawn late is still withdrawn', async () => {
-      const events: string[] = [];
-      scriptPane({
-        clearReads: [IDLE, tokenFrame(JA_CHARS), IDLE],
-        verifyReads: [...unseenWait(), tokenFrame(JA_CHARS)],
-      });
-
-      const error = await send(events);
-
-      expect(error?.message).toMatch(/It appeared 250ms later and was taken back out\./);
-      expect(clearComposerPasteToken).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  describe('a watch whose read throws (review P2)', () => {
-    it('logs it, still tries the withdrawal, and fails as body-not-landed', async () => {
-      const events: string[] = [];
-      const reads: string[] = [];
-      let verifyReads = 0;
-      vi.mocked(capturePane).mockImplementation((async (_session: string, arg?: unknown) => {
-        if (typeof arg === 'number') {
-          reads.push('clear');
-          return IDLE;
-        }
-        verifyReads++;
-        reads.push(verifyReads > 20 ? 'watch-throws' : 'verify');
-        if (verifyReads > 20) throw new Error('Failed to capture pane: tmux went away');
-        return IDLE;
-      }) as never);
-
-      const error = await send(events);
-
-      expect(error?.message).toMatch(/never appeared in the composer/);
-      expect(error?.message).toMatch(/Enter was not pressed, so nothing was submitted/);
-      expect(error?.message).toMatch(/Watching the composer for a late paste failed; a withdrawal was tried\./);
-      expect(classifySendFailure(error)).toEqual({ state: 'indeterminate', reason: 'body-not-landed' });
-      expect(enterCount()).toBe(0);
-      expect(verifyReads).toBe(21);
-      // The withdrawal ran: clearComposer read the composer after the watch failed.
-      expect(reads.slice(reads.indexOf('watch-throws') + 1)).toContain('clear');
-      const names = loggerSpies.error.mock.calls.map((c) => c[0]);
-      expect(names).toContain('paste-late-watch-failed');
-      expect(names.indexOf('paste-not-landed')).toBeGreaterThan(names.indexOf('paste-late-watch-failed'));
-    });
-  });
-
-  it('a paste that lands within the 2 s is still sent with one Enter, without the window', async () => {
-    const events: string[] = [];
-    vi.mocked(capturePane).mockImplementation((async (_session: string, arg?: unknown) => {
-      if (typeof arg === 'number') return IDLE;
-      return enterCount() > 0 ? IDLE : tokenFrame(JA_CHARS);
-    }) as never);
-
-    const error = await send(events);
+    const error = await send();
 
     expect(error).toBeNull();
     expect(enterCount()).toBe(1);

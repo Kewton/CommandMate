@@ -98,7 +98,7 @@ import {
   TUI_MESSAGE_PROCESSED_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
 import { createLogger } from '@/lib/logger';
-import { clearComposer, type ClearComposerResult } from '@/lib/session/composer-clear';
+import { clearComposer } from '@/lib/session/composer-clear';
 import {
   codexDialogBelow,
   extractComposerText,
@@ -145,21 +145,6 @@ const PASTE_LANDED_POLL_MS = 100;
 
 /** Composer reads before a paste that has not fully appeared is abandoned (2 s). */
 const DEFAULT_PASTE_LANDED_ATTEMPTS = 20;
-
-/**
- * How long a paste that was still `unseen` after {@link DEFAULT_PASTE_LANDED_ATTEMPTS}
- * is watched for before the send fails (Issue #3937).
- *
- * The failure is already decided by then; this only decides whether something
- * has to be taken back out. On 2026-10-25 codex 0.164.0 showed its idle
- * placeholder for the whole 2 s and a `[Pasted Content 3575 chars]` placeholder
- * afterwards, which nothing withdrew. How late it arrived was not measured, so
- * the window is generous — it is only ever spent on a send that has failed.
- */
-export const PASTE_LATE_ARRIVAL_WINDOW_MS = 10_000;
-
-/** How often the composer is read during {@link PASTE_LATE_ARRIVAL_WINDOW_MS}. */
-const PASTE_LATE_ARRIVAL_POLL_MS = 250;
 
 /**
  * How often the composer is read while a TYPED body is expected to appear in it
@@ -994,12 +979,13 @@ async function withdrawUnsentBody(
   sessionName: string,
   cliToolId: CLIToolType,
   composerSpec: ComposerSpec
-): Promise<ClearComposerResult | null> {
+): Promise<void> {
   try {
     if (composerSpec.clearBeforeSend) {
-      return await clearComposer(sessionName, cliToolId);
+      await clearComposer(sessionName, cliToolId);
+    } else {
+      await clearInputLine(sessionName);
     }
-    await clearInputLine(sessionName);
   } catch (clearError: unknown) {
     logger.error('paste-withdraw-failed', {
       sessionName,
@@ -1007,31 +993,6 @@ async function withdrawUnsentBody(
       error: clearError instanceof Error ? clearError.message : String(clearError),
     });
   }
-  return null;
-}
-
-/**
- * Keep reading a composer whose paste was `unseen` for
- * {@link PASTE_LATE_ARRIVAL_WINDOW_MS} (Issue #3937): the first frame that shows
- * any of the body — a placeholder of any count, or its text — or `null` when
- * none did. Awaited inside the send, so the withdrawal that follows finishes
- * before the caller hears of the failure and sends again.
- */
-async function awaitLatePaste(params: {
-  sessionName: string;
-  message: string;
-  cliToolId: CLIToolType;
-  composer: ComposerSpec;
-}): Promise<{ state: PasteLandedState; afterMs: number } | null> {
-  const { sessionName, message, cliToolId, composer } = params;
-  for (let waited = 0; waited < PASTE_LATE_ARRIVAL_WINDOW_MS; ) {
-    await new Promise((resolve) => setTimeout(resolve, PASTE_LATE_ARRIVAL_POLL_MS));
-    waited += PASTE_LATE_ARRIVAL_POLL_MS;
-    const output = await capturePane(sessionName, { startLine: -composer.verifyCaptureLines });
-    const state = classifyPasteLanded(output, cliToolId, message, composer);
-    if (state !== 'unseen') return { state, afterMs: waited };
-  }
-  return null;
 }
 
 /**
@@ -1053,23 +1014,6 @@ async function awaitLatePaste(params: {
  * `unseen` on any other tool proceeds, with a warning: those composers are
  * drawn in ways this module has not measured, and refusing on them would turn
  * "cannot see it" into "did not send it" for every long message they get.
- *
- * Issue #3937: before an `unseen` failure is thrown, the composer is watched for
- * {@link PASTE_LATE_ARRIVAL_WINDOW_MS} ({@link awaitLatePaste}). A body drawn
- * late is withdrawn like any other; one that stays out of sight is never sent
- * a key; one that cannot be withdrawn is logged (`paste-late-withdraw-failed`)
- * and named in the error.
- *
- * Nothing serialises two sends to one instance, so while this send watches,
- * another one (a second device, a timer, the terminal) may paste into the same
- * composer. The watch therefore withdraws only what reads as THIS body
- * (`landed` / `pasting`). Anything else drawn in the window — a placeholder
- * whose count is not this body's (`mismatch`), or text that is not part of it
- * (still `unseen`) — is left in place (a foreign placeholder is named in the
- * error), because the only thing a withdrawal could take out there is somebody
- * else's message. A watch
- * whose read throws is logged (`paste-late-watch-failed`) and the withdrawal is
- * still tried, so the failure stays `body-not-landed`.
  *
  * @throws Error when the body cannot be confirmed in the composer
  */
@@ -1099,47 +1043,9 @@ async function confirmPasteLanded(params: {
   const bytes = Buffer.byteLength(message, 'utf8');
   const lineCount = message.split('\n').length;
   const shown = describeComposer(output, cliToolId, composer, message);
-  // Issue #3937: a paste unseen for the whole wait may still be drawn later
-  // (codex 0.164.0 left `[Pasted Content 3575 chars]` behind). Watch for it
-  // before withdrawing, so the one withdrawal below also takes it back out.
-  let late: { state: PasteLandedState; afterMs: number } | null = null;
-  let watchFailed = false;
-  if (state === 'unseen') {
-    try {
-      late = await awaitLatePaste({ sessionName, message, cliToolId, composer });
-    } catch (watchError: unknown) {
-      watchFailed = true;
-      logger.error('paste-late-watch-failed', {
-        sessionName,
-        cliToolId,
-        error: watchError instanceof Error ? watchError.message : String(watchError),
-      });
-    }
-  }
-  // After the watch, withdraw only what reads as this body: what else is in the
-  // composer then can only be another send's (or a person's) text.
-  const lateIsOurs = late !== null && (late.state === 'landed' || late.state === 'pasting');
-  const mayWithdraw = state !== 'unseen' || watchFailed || lateIsOurs;
-  const withdrawn = mayWithdraw ? await withdrawUnsentBody(sessionName, cliToolId, composer) : null;
+  await withdrawUnsentBody(sessionName, cliToolId, composer);
   invalidateCache(sessionName);
   logger.error('paste-not-landed', { sessionName, cliToolId, state, bytes, lines: lineCount, shown });
-  if (late !== null && !lateIsOurs) {
-    logger.warn('paste-late-foreign', { sessionName, cliToolId, lateState: late.state, afterMs: late.afterMs });
-  } else if (late !== null) {
-    const record = {
-      sessionName,
-      cliToolId,
-      lateState: late.state,
-      afterMs: late.afterMs,
-      passes: withdrawn?.passes ?? 0,
-      remainingState: withdrawn?.state ?? null,
-    };
-    if (withdrawn?.cleared) {
-      logger.warn('paste-late-withdrawn', record);
-    } else {
-      logger.error('paste-late-withdraw-failed', { ...record, remainingText: withdrawn?.remainingText ?? '' });
-    }
-  }
 
   const what =
     state === 'mismatch'
@@ -1147,18 +1053,9 @@ async function confirmPasteLanded(params: {
       : state === 'pasting'
         ? `the paste had not finished arriving after ${attempts * PASTE_LANDED_POLL_MS}ms (the composer shows ${shown})`
         : `the message never appeared in the composer (${shown})`;
-  const lateNote = watchFailed
-    ? ' Watching the composer for a late paste failed; a withdrawal was tried.'
-    : late === null
-      ? ''
-      : !lateIsOurs
-        ? ` Something that is not this message appeared in the composer ${late.afterMs}ms later and was left in place.`
-        : withdrawn?.cleared
-        ? ` It appeared ${late.afterMs}ms later and was taken back out.`
-        : ` It appeared ${late.afterMs}ms later and could not be taken back out; the composer still holds it.`;
   throw new Error(
     `Message body did not arrive intact for session ${sessionName}: ${what}; the message is ${bytes} bytes / ${lineCount} lines. ` +
-      `Enter was not pressed, so nothing was submitted (Issue #2464).${lateNote}`
+      'Enter was not pressed, so nothing was submitted (Issue #2464).'
   );
 }
 
@@ -1265,9 +1162,8 @@ async function confirmTypedBodyLanded(params: {
  * Delegates the how to {@link clearComposer} (#1879), which already sends
  * `C-e`+`C-u` — the `C-e` is what makes a column-0 cursor clearable — in a
  * read-back-verified loop, so a multi-row residual is not left half-eaten and
- * claude's dim ghost suggestions do not spin it to its cap (a codex composer
- * holding only a paste placeholder gets `C-e`+`BSpace` instead, Issue #3937).
- * This function is the policy layer on top: which tools take part, and which outcomes are failures.
+ * claude's dim ghost suggestions do not spin it to its cap. This function is the
+ * policy layer on top: which tools take part, and which outcomes are failures.
  *
  * Exactly one outcome is a failure: **a participating tool still reporting
  * `content` after the pass cap**. That is a composer this code demonstrably
