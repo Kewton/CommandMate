@@ -68,6 +68,15 @@ export const UPSTREAM_FAULTS: readonly UpstreamFault[] = [
     pattern: /\bmaximum context length is \d+ tokens\b/i,
     selfRetrying: false,
   },
+  {
+    // codex ends the turn with `Selected model is at capacity` and does not
+    // answer (Issue #3936); the same model will not, so the cue is to switch
+    // instance or model. Anchored on the sentence, not on "at capacity": the
+    // 529 line above says "The API is at capacity" and is `overloaded`.
+    id: 'model-capacity',
+    pattern: /\bSelected model is at capacity\b/i,
+    selfRetrying: false,
+  },
   { id: 'limit-reached', pattern: /\blimit reached\b/i, selfRetrying: false },
   { id: 'api-error', pattern: /\bAPI Error(?::|\s+\d{3})/i, selfRetrying: false },
 ];

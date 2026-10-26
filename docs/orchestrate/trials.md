@@ -50,10 +50,16 @@ node scripts/orchestrate/consistency-review.mjs --run-dir "workspace/orchestrati
   （`workspace/proposals/<date>/.lock` を mkdir で取る。ほかの Codex への依頼と共有。中の `owner.json` に持ち主の pid・host・開始時刻を書く。
   持ち主が既に居ない（kill されたレビューが残した）ロックは外して取り（外すのは `<lock>.reclaim` を mkdir で取った待機者 1 人だけで、持ち主を読み直して同じ死んだ持ち主のときだけ動かす。別の待機者が取った新しいロックは動かさない。`.reclaim` を残して kill された場合は消すよう告げて止まる）、生きている持ち主のロックは 1 分ごとに stderr へ `lock … held by pid …` を出して待つ。
   待ちの上限は ask の上限＋600 秒（3000 秒）で、超えたら `review=fail`。`owner.json` の無いロックは持ち主を判断できないので待つ（#3633））→ `capture --instance codex --json` の `sessionStatus` が
-  ready を 3 回続けて読むまで待つ → `ask <wt> <依頼文> --instance codex --timeout 2400 --json` → 返答の本文（行頭の `> **Thinking (` より前。
+  ready を 3 回続けて読むまで待つ（**止まっている instance は起動してから待つ**: 最初の読みが `isRunning: false`／`sessionStatusReason: session_not_running` なら、
+  作業を頼まない短い起動の文（`START_MESSAGE`。launch-worker の `INIT_MESSAGE` と同じ趣旨）を `send <wt> <文> --instance <id>` で 1 回だけ送り、
+  出力を `review-<N>.start.out` / `.start.err` に残してから、短い上限（30 回）で ready を待つ。起動の send が失敗したら依頼は送らず `review=fail`（note に send の exit code）。
+  動いている instance（`running` など）は今までどおり待つだけで、起動の文は送らない。#3936）→ `ask <wt> <依頼文> --instance codex --timeout 2400 --json` → 返答の本文（行頭の `> **Thinking (` より前。
   本文が `> **Thinking**` を引用していても切れない）を `review-<N>.md` に保存（2 回目からは `review-<N>b.md`・`c`…。依頼文・JSON・stderr も同じ名前で残す）→
   `DONE:` 行があれば下の表に 1 行を足し、run の記録に `review=ok`、無ければ・依頼が失敗したら `review=fail`。exit は 0（`DONE:` あり）／1（失敗。記録済み）／2（引数の誤り。何も送らない）。
-  レビューの相手を変えるとき（Codex の `stream disconnected` が続くときなど）は `--instance codex-2` を足す（既定 `codex`）。capture・ask・記録の agent・ロック（`.lock-<id>`）が同じ値になる（alias も渡せる。サーバーの resolve-target で実 ID に直し、解決できなければ exit 2）ので、`--cli` のラッパーは要らない（#3618）。
+  **ask の exit 11（上流のエラー）は他の失敗と分けて記録する**（#3936）: 相手の画面に上流のエラー（codex の `Selected model is at capacity`＝`id=model-capacity` など、
+  `src/lib/detection/upstream-faults.ts` の一覧）が出て、ターンが答えないまま終わった。note は `upstream fault id=<id> (…) on <instance>; ask exit=11, not a verdict — switch --instance`。
+  同じモデルでは答えないので、この note を見たら下の `--instance codex-2` へ切り替えて依頼し直す（スクリプトは自動では切り替えない。ロックと記録の agent が変わるため人が決める）。
+  レビューの相手を変えるとき（上の exit 11 の note が出たとき、Codex の `stream disconnected` が続くときなど）は `--instance codex-2` を足す（既定 `codex`）。capture・ask・記録の agent・ロック（`.lock-<id>`）が同じ値になる（alias も渡せる。サーバーの resolve-target で実 ID に直し、解決できなければ exit 2）ので、`--cli` のラッパーは要らない（#3618）。
   ID への解決は capture・ask と同じ `--cli`（`reply <wt> --instance <指定> --json` の `instanceId`）を通すので、`.env`・`CM_BIND`・HTTPS で決まる接続先も同じになる。
   受け付ける `--instance` は CLI・サーバーと同じ条件（instance id か、制御文字を含まない 50 文字以内の alias。`/` を含む alias も可）で、ロック名には解決後の ID を使う（#3633）。
   表の「独自の発見」から「事前レビューの有無」までの列は `未` で入るので、返答を読んで埋める
