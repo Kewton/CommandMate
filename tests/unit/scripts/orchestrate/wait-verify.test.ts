@@ -18,6 +18,7 @@ import {
   defaultRun,
   defaultSpawnToLog,
   main,
+  mutexWaitOnly,
   newerTask,
   parseArgs,
   runIdOf,
@@ -1523,5 +1524,208 @@ describe('the inputs of the execution are kept with the verdict (#3883 H-8)', ()
     // The same change during the verification is still not a verdict (positive control).
     fs.rmSync(runDir, { recursive: true, force: true });
     expect(go(harness({ waitLog: noTurnEnd }), 'verify', globalModel)).toBe(3);
+  });
+});
+
+describe('a verification that only waited for a mutex is started again (#3938)', () => {
+  const t1 = task('t-1', -10);
+  const skipTail = (mutex: number) => `${MUTEX_SKIP_TAIL}\n[timing] queue=5.0s mutex=${mutex}.0s run=0.0s`;
+  /** The stored run of a verification whose unit-related never got cpu.heavy. */
+  const mutexRun = (mutex = 5400) => ({
+    status: 'error',
+    gates: [gateRow('lint', 'passed', 30_000, null), gateRow('unit-related', 'skipped', null, skipTail(mutex), null)],
+  });
+  const passRun = (mutex = 100) => ({
+    status: 'passed',
+    gates: [gateRow('lint', 'passed', 30_000, null), gateRow('unit-related', 'passed', 600_000, `ok\n[timing] queue=1.0s mutex=${mutex}.0s run=600.0s`)],
+  });
+  const skipLog = (id: number) =>
+    `Verifying: wt-1 (run ${id})\nGATE lint PASS (exit=0, 30.0s)\nGATE unit-related SKIP (reason=mutex-wait waited=5400.0s) [contract]\nRESULT error\n`;
+  const passLog = (id: number) => PASS_LOG.replace('(run 12)', `(run ${id})`);
+  const verifies = (h: ReturnType<typeof harness>) => h.spawned.filter((c) => c.args[0] === 'verify').map((c) => c.args);
+  const log = (name: string) => fs.readFileSync(path.join(runDir, name), 'utf8');
+
+  describe('mutexWaitOnly', () => {
+    it('only mutex-wait SKIPs beside passes → true', () => {
+      expect(mutexWaitOnly(mutexRun())).toBe(true);
+    });
+
+    it('another SKIP, a FAIL, a TIMEOUT, an unread run or an unread reason → false (negative control)', () => {
+      const withGate = (row: ReturnType<typeof gateRow>) => ({ gates: [...mutexRun().gates, row] });
+      expect(mutexWaitOnly(withGate(gateRow('scope', 'skipped', null, 'reason=cancelled', null)))).toBe(false);
+      expect(mutexWaitOnly(withGate(gateRow('scope', 'skipped', null, 'reason=primary-checkout', null)))).toBe(false);
+      expect(mutexWaitOnly(withGate(gateRow('lint', 'failed', 1_000, 'boom', 1)))).toBe(false);
+      expect(mutexWaitOnly(withGate(gateRow('build', 'timeout', 600_000, '…', null)))).toBe(false);
+      expect(mutexWaitOnly(withGate(gateRow('unit', 'skipped', null, null, null)))).toBe(false);
+      // The reason is read from the first line only, never from the body.
+      expect(mutexWaitOnly({ gates: [gateRow('unit', 'skipped', null, `reason=cancelled\n${MUTEX_SKIP_TAIL}`, null)] })).toBe(false);
+      expect(mutexWaitOnly(passRun())).toBe(false);
+      expect(mutexWaitOnly(null)).toBe(false);
+      expect(mutexWaitOnly({})).toBe(false);
+    });
+  });
+
+  it('--task: verify again, each try keeps its run and log, and the record sums the waits', () => {
+    const h = harness({
+      tasks: [t1],
+      verifySequence: [{ exit: 99, log: skipLog(12) }, { exit: 0, log: passLog(13) }],
+      runs: { '12': [mutexRun()], '13': [passRun()] },
+    });
+    expect(main(argv(), h.deps)).toBe(0);
+    expect(verifies(h)).toEqual([
+      ['verify', 'wt-1', '--task', 't-1', '--instance', 'claude'],
+      ['verify', 'wt-1', '--task', 't-1', '--instance', 'claude'],
+    ]);
+    expect(log('wait-3477.verify.log')).toContain('(run 12)');
+    expect(log('wait-3477.verify.try2.log')).toContain('(run 13)');
+    expect(records()[0]).toMatchObject({ result: 'ok', mutexSec: 5500, queueSec: 6 });
+    expect(records()[0].note).toContain('mutex-requeue=1 mutex-runs=12,13 mutexSec-total=5500');
+    expect(records()[0].note).toContain('run=13');
+    expect(h.autoYesCalls()).toHaveLength(1);
+  });
+
+  it('--after-reinstruct: the same requeue, logs and sum', () => {
+    const h = harness({
+      tasks: [t1],
+      verifySequence: [{ exit: 99, log: skipLog(12) }, { exit: 20, log: `Verifying: wt-1 (run 13)\n${FAIL_LOG}` }],
+      runs: { '12': [mutexRun()], '13': [{ ...passRun(), status: 'failed' }] },
+    });
+    expect(main(argv('--after-reinstruct'), h.deps)).toBe(20);
+    expect(verifies(h)).toHaveLength(2);
+    expect(log('wait-3477.verify.try2.log')).toContain('(run 13)');
+    expect(records()[0]).toMatchObject({ result: 'fail', mutexSec: 5500 });
+    expect(records()[0].note).toContain('mutex-requeue=1 mutex-runs=12,13');
+  });
+
+  it('the limit: after --mutex-retries new starts the 99 is returned, with the count and every try kept', () => {
+    const h = harness({
+      tasks: [t1],
+      verifySequence: [12, 13, 14].map((id) => ({ exit: 99, log: skipLog(id) })),
+      runs: { '12': [mutexRun()], '13': [mutexRun()], '14': [mutexRun()] },
+    });
+    expect(main(argv(), h.deps)).toBe(99);
+    expect(verifies(h)).toHaveLength(3);
+    for (const [name, id] of [['wait-3477.verify.log', 12], ['wait-3477.verify.try2.log', 13], ['wait-3477.verify.try3.log', 14]] as const) {
+      expect(log(name)).toContain(`(run ${id})`);
+    }
+    expect(records()[0]).toMatchObject({ result: 'fail', mutexSec: 16200 });
+    expect(records()[0].note).toContain('mutex-requeue=2 mutex-runs=12,13,14 mutexSec-total=16200 mutex-requeue-limit');
+    expect(h.autoYesCalls()).toEqual([]);
+  });
+
+  it('--mutex-retries 0 keeps the old behaviour: one verification, exit 99', () => {
+    const h = harness({ tasks: [t1], verifySequence: [{ exit: 99, log: skipLog(12) }], runs: { '12': [mutexRun()] } });
+    expect(main(argv('--mutex-retries', '0'), h.deps)).toBe(99);
+    expect(verifies(h)).toHaveLength(1);
+    expect(records()[0].note).toContain('mutex-requeue=0 mutex-runs=12');
+    expect(parseArgs([...argv(), '--mutex-retries', 'x']).error).toMatch(/--mutex-retries/);
+  });
+
+  it.each([
+    ['another SKIP reason', { gates: [gateRow('scope', 'skipped', null, 'reason=cancelled', null), gateRow('unit', 'skipped', null, skipTail(5400), null)] }],
+    ['a FAIL beside the mutex-wait', { gates: [gateRow('lint', 'failed', 1_000, 'boom', 1), gateRow('unit', 'skipped', null, skipTail(5400), null)] }],
+    ['a TIMEOUT beside the mutex-wait', { gates: [gateRow('build', 'timeout', 600_000, '…', null), gateRow('unit', 'skipped', null, skipTail(5400), null)] }],
+    ['a reason that cannot be read', { gates: [gateRow('unit', 'skipped', null, null, null)] }],
+  ])('%s → not started again, exit 99 as before (negative control)', (_name, view) => {
+    const h = harness({ tasks: [t1], verifySequence: [{ exit: 99, log: skipLog(12) }, { exit: 0, log: passLog(13) }], runs: { '12': [view] } });
+    expect(main(argv(), h.deps)).toBe(99);
+    expect(verifies(h)).toHaveLength(1);
+    expect(records()[0].note).not.toContain('mutex-requeue');
+  });
+
+  it('the run cannot be read, or the log names no run → not started again, exit 99', () => {
+    const unread = harness({ tasks: [t1], runStartMinute: null, verifySequence: [{ exit: 99, log: skipLog(12) }, { exit: 0, log: passLog(13) }] });
+    expect(main(argv(), unread.deps)).toBe(99);
+    expect(verifies(unread)).toHaveLength(1);
+    fs.rmSync(runDir, { recursive: true, force: true });
+    const noId = harness({
+      tasks: [t1],
+      verifySequence: [{ exit: 99, log: skipLog(12).replace(/^Verifying.*\n/, '') }, { exit: 0, log: passLog(13) }],
+      runs: { '12': [mutexRun()] },
+    });
+    expect(main(argv(), noId.deps)).toBe(99);
+    expect(verifies(noId)).toHaveLength(1);
+  });
+
+  it('a newer task before the requeue → exit 3 without a verdict, no second verification (#3587)', () => {
+    const h = harness({
+      tasks: [t1],
+      tasksDuringVerify: [task('t-2', 30), t1],
+      verifySequence: [{ exit: 99, log: skipLog(12) }, { exit: 0, log: passLog(13) }],
+      runs: { '12': [mutexRun()] },
+    });
+    expect(main(argv(), h.deps)).toBe(3);
+    expect(verifies(h)).toHaveLength(1);
+    expect(records()[0].note).toMatch(/^unconfirmed: a newer task t-2/);
+    expect(h.autoYesCalls()).toEqual([]);
+  });
+
+  it('the HEAD moved during the try → not started again, exit 99', () => {
+    const h = harness({ tasks: [t1], verifySequence: [{ exit: 99, log: skipLog(12) }, { exit: 0, log: passLog(13) }], runs: { '12': [mutexRun()] } });
+    let moved = false;
+    const spawn = h.deps.spawnToLog;
+    h.deps.spawnToLog = (command: string, args: string[], opts: { logFile: string; watch?: () => boolean }) => {
+      if (args[0] === 'verify') moved = true;
+      return spawn(command, args, opts);
+    };
+    const fakeRun = h.deps.run;
+    h.deps.run = (command: string, args: string[], opts?: { timeoutMs?: number }) =>
+      moved && command === 'git' && args[2] === 'rev-parse' ? { status: 0, stdout: `${'b'.repeat(40)}\n`, stderr: '' } : fakeRun(command, args, opts);
+    expect(main(argv(), h.deps)).toBe(99);
+    expect(verifies(h)).toHaveLength(1);
+    expect(records()[0].note).toContain('mutex-requeue-stopped=head-moved');
+  });
+
+  it('the manifest is taken again before the new start: a change during the sent-back try is the work’s', () => {
+    const wt = path.join(tmp, 'wt');
+    const home = path.join(tmp, 'home');
+    fs.mkdirSync(path.join(wt, '.claude'), { recursive: true });
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(wt, 'package-lock.json'), '{"lockfileVersion":3}');
+    const h = harness({
+      tasks: [t1],
+      verifySequence: [{ exit: 99, log: skipLog(12) }, { exit: 0, log: passLog(13) }],
+      runs: { '12': [mutexRun()], '13': [passRun()] },
+    });
+    let n = 0;
+    const spawn = h.deps.spawnToLog;
+    h.deps.spawnToLog = (command: string, args: string[], opts: { logFile: string; watch?: () => boolean }) => {
+      if (args[0] === 'verify' && ++n === 1) fs.writeFileSync(path.join(wt, 'package-lock.json'), '{"changed":true}');
+      return spawn(command, args, opts);
+    };
+    expect(main(argv('--worktree', wt), { ...h.deps, home } as Parameters<typeof main>[1])).toBe(0);
+    expect(records()[0].note).toContain('env-changed=lockfile');
+    expect(records()[0].note).not.toContain('unconfirmed');
+  });
+
+  describe('the re-verification confirmCompletion starts (a commit after the verification started)', () => {
+    it('is started again on a mutex wait: its own logs, the sum of its tries only', () => {
+      const h = harness({
+        tasks: [t1],
+        commitMinute: 6,
+        verifySequence: [{ exit: 0, log: passLog(12) }, { exit: 99, log: skipLog(13) }, { exit: 0, log: passLog(14) }],
+        runs: { '12': [passRun(7)], '13': [mutexRun()], '14': [passRun()] },
+      });
+      expect(main(argv(), h.deps)).toBe(0);
+      expect(verifies(h)).toHaveLength(3);
+      expect(log('wait-3477.reverify.log')).toContain('(run 13)');
+      expect(log('wait-3477.reverify.try2.log')).toContain('(run 14)');
+      expect(records()[0]).toMatchObject({ result: 'ok', mutexSec: 5500 });
+      expect(records()[0].note).toContain('reverified=verify --task mutex-requeue=1 mutex-runs=13,14 mutexSec-total=5500');
+    });
+
+    it('stops at the limit with exit 99 and the count recorded', () => {
+      const h = harness({
+        tasks: [t1],
+        commitMinute: 6,
+        verifySequence: [{ exit: 0, log: passLog(12) }, ...[13, 14, 15].map((id) => ({ exit: 99, log: skipLog(id) }))],
+        runs: { '12': [passRun(7)], '13': [mutexRun()], '14': [mutexRun()], '15': [mutexRun()] },
+      });
+      expect(main(argv(), h.deps)).toBe(99);
+      expect(verifies(h)).toHaveLength(4);
+      expect(log('wait-3477.reverify.try3.log')).toContain('(run 15)');
+      expect(records()[0]).toMatchObject({ result: 'fail', mutexSec: 16200 });
+      expect(records()[0].note).toContain('mutex-requeue=2 mutex-runs=13,14,15 mutexSec-total=16200 mutex-requeue-limit');
+    });
   });
 });
