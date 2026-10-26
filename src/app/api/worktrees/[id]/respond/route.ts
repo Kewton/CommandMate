@@ -8,12 +8,7 @@ import { readJsonObjectBody } from '@/lib/api/read-json-body';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getMessageById, updatePromptData, getWorktreeById } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import {
-  sendPromptAnswer,
-  PromptAnswerRejectedError,
-  FreeTextAnswerRejectedError,
-  FreeTextAtChoiceOnlyPromptError,
-} from '@/lib/prompt-answer-sender';
+import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
 import { startPolling } from '@/lib/polling/response-poller';
 import { getAnswerInput } from '@/lib/detection/prompt-detector';
 import { broadcastMessage } from '@/lib/ws-server';
@@ -32,36 +27,11 @@ import {
   noteManualAnswerStarted,
   noteManualSendStarting,
   settleManualAnswer,
-  type ManualAnswerOutcome,
 } from '@/lib/polling/auto-yes-manual-answer';
+import { manualOutcomeOfSendError } from '../prompt-response/answer-delivery';
 import { respondByDecisionId, respondToSolePendingDecision } from './structured-decision';
 
 const logger = createLogger('api/respond');
-
-/**
- * What a failed send of the stored-message branch left on the pane, for the
- * answer Auto-Yes holds there (Issue #3907, the same reading as
- * `/prompt-response`'s `manualOutcomeOfSendError` in
- * `prompt-response/answer-delivery.ts`, which is private to that route). The
- * refusals are before any key; a transport failure says what it did
- * (`keysSent`, `answerDelivery` from `sendPromptAnswer`). Null for an error
- * that says neither: the hold is left as it was.
- */
-function manualOutcomeOfSendError(error: unknown): ManualAnswerOutcome | null {
-  if (
-    error instanceof PromptAnswerRejectedError ||
-    error instanceof FreeTextAnswerRejectedError ||
-    error instanceof FreeTextAtChoiceOnlyPromptError
-  ) {
-    return 'not-sent';
-  }
-  if (!(error instanceof Error)) return null;
-  const keysSent = 'keysSent' in error ? error.keysSent : undefined;
-  const delivery = 'answerDelivery' in error ? error.answerDelivery : undefined;
-  if (keysSent === true || delivery === 'indeterminate') return 'may-be-on-pane';
-  if (keysSent === false) return 'not-sent';
-  return null;
-}
 
 /** The screen the stored-message branch sends at: the frame, and the prompt read off it. */
 interface ScreenAtSend {
