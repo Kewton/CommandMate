@@ -113,7 +113,7 @@ function sendErrorResponse(
  * says what it did (`keysSent`, `answerDelivery` from `sendPromptAnswer`).
  * Null for an error that says neither: the hold is left as it was.
  */
-function manualOutcomeOfSendError(error: unknown): ManualAnswerOutcome | null {
+export function manualOutcomeOfSendError(error: unknown): ManualAnswerOutcome | null {
   if (
     error instanceof PromptAnswerRejectedError ||
     error instanceof FreeTextAnswerRejectedError ||
