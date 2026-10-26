@@ -85,6 +85,27 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
 
 新しい task の検出は、基準の task が task 一覧（新しい順に 20 件）から外れても `task show` で個別に読んで続ける（#3633）。task 一覧が開始時に読めなかったときも、`wait` と `verify` を分けた経路で待ち始めの task への結び付けを保つ（`--task` が無ければ、一覧が読めた時点で基準を取り直す）。
 
+## 3-4 99 の対応
+
+`wait-verify.mjs` の exit 99 は「検証が裁定に至らなかった」（裁定不能。作業の不合格ではない）。ゲートの `mutex`（`cpu.heavy` など）が
+`timeoutSec` の間ずっと埋まっていて、コマンドを始められなかったゲートは `reason=mutex-wait` の SKIP になり、run は exit 99 になる
+（並列の検証が多いとき。2026-10-25〜26 の run では 23 回中 6 回）。
+
+- **自動で並び直す**（#3938）: `wait-verify.mjs` は、`verify show <run> --json` で読んだ run のゲートについて、SKIP がすべて
+  `logTail` の 1 行目が `reason=mutex-wait` で、それ以外のゲートが PASS のときだけ、同じ引数で `verify` を始め直す。上限は
+  `--mutex-retries <回数>`（既定 2）。通常の検証・`--after-reinstruct` の再検証・3-3 の確認が始める再検証のどれでも同じ。
+  始め直す前に、新しい task（あれば exit 3、3-4 3 の対応）・HEAD（最初の開始から動いていたら始め直さない）を確かめ直し、
+  環境の manifest を取り直す
+- **ログと記録**: 1 回目は `wait-<N>.verify.log`（再検証は `.reverify.log`）、2 回目からは `wait-<N>.verify.try<k>.log` に残る。
+  記録の要約に `mutex-requeue=<始め直した回数> mutex-runs=<run id の並び> mutexSec-total=<秒>` が載り、記録の `mutexSec`
+  （`queueSec`・`runSec` も）は全試行の合計になる
+- **始め直さないとき**: run が `cancelled` など passed・failed・error 以外で終わった（最後のゲートの mutex 待ちが切れた後、
+  実行枠を取り直す間に取り消すと、ゲートは `mutex-wait` の SKIP のまま run は `cancelled` になる。取り消しは並び直しで覆さない）・run が読めない・ログに run id が無い・SKIP の理由が読めない・`mutex-wait` 以外の SKIP（取消し・primary
+  checkout など）や FAIL・TIMEOUT がある、のどれかなら、今までどおり exit 99 を返す。中身を `verify show <run> --json` で見る
+- **上限に達したとき**（要約に `mutex-requeue-limit`）・**HEAD が動いたとき**（`mutex-requeue-stopped=head-moved`）: exit 99 のまま、
+  Auto-Yes は切られていない（3-3 の確認が始める再検証が裁定に至らなかったときも同じ）。並列の検証が減ってから（または直列に）`wait-verify.mjs --after-reinstruct --task <id>` で検証し直す。
+  再指示の回数には数えない。HEAD が動いたときは、ワーカーがまだ作業中でないかを capture で先に確かめる
+
 ## 3-4 21 の対応
 
 - **composer に本文が残っている** → Enter 未確定。`tmux send-keys -t "mcbd-${AGENT}-$WT" Enter` で確定させる
