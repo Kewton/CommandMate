@@ -107,6 +107,16 @@ import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
 import { startPolling } from '@/lib/polling/response-poller';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
 import { createLogger } from '@/lib/logger';
+import { buildCompositeKey } from '@/lib/auto-yes-state';
+import {
+  abandonManualSend,
+  noteManualAnswerStarted,
+  noteManualSendStarting,
+  settleManualAnswer,
+} from '@/lib/polling/auto-yes-manual-answer';
+import type { DecisionDelivery } from '@/lib/hooks/sources/pending-decisions';
+import { manualOutcomeOfSendError } from '../prompt-response/answer-delivery';
+import { screenAtSend } from './screen-at-send';
 
 const logger = createLogger('api/respond/structured-decision');
 
@@ -628,7 +638,7 @@ async function answerPendingApproval({
     );
   }
 
-  const { delivery } = await answerPendingDecisionWithReceipt(source, target, decision, verdict);
+  const delivery = await deliverManualVerdict({ source, target, decision, verdict, worktreeId, cliToolId, instanceId });
   const delivered = delivery?.delivered === true;
 
   await settleAnsweredDecision({
@@ -667,6 +677,57 @@ async function answerPendingApproval({
       decisionId: decision.id,
     },
   });
+}
+
+/**
+ * Deliver a person's verdict as a manual answer Auto-Yes is told about (Issue
+ * #3925), in the order the stored-message branch uses (`route.ts`): the start
+ * is noted once every refusal is behind (so a refused request never touches
+ * Auto-Yes), the screen is read and the send registered at it right before the
+ * call, and how the call ended settles the ticket. Without it a structured
+ * answer — the composer's `PromptPanel` and `commandmate respond` — neither
+ * stopped a tick under way nor held the next ones off the confirmation it was
+ * answering.
+ *
+ * The end is read off the source's receipt: `delivered: true` is `answered`,
+ * `delivered: false` (the source says the verdict did not reach the agent) is
+ * `not-sent`, and no receipt says nothing of the outcome, so the send is only
+ * abandoned. A throw is classified as the stored-message branch classifies its
+ * send errors (`manualOutcomeOfSendError`) and rethrown for the route's 500.
+ */
+async function deliverManualVerdict({
+  source,
+  target,
+  decision,
+  verdict,
+  worktreeId,
+  cliToolId,
+  instanceId,
+}: {
+  source: ReturnType<typeof getAgentEventSource>;
+  target: AgentInstanceRef;
+  decision: PendingDecision;
+  verdict: Verdict;
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  instanceId: string;
+}): Promise<DecisionDelivery | null> {
+  const manualAnswer = noteManualAnswerStarted(buildCompositeKey(worktreeId, cliToolId, instanceId));
+  let delivery: DecisionDelivery | null;
+  try {
+    const atSend = await screenAtSend(worktreeId, cliToolId, instanceId);
+    noteManualSendStarting(manualAnswer, atSend.promptData);
+    ({ delivery } = await answerPendingDecisionWithReceipt(source, target, decision, verdict));
+  } catch (error: unknown) {
+    // Also covers a throw before the send was registered: nothing is left in flight.
+    const outcome = manualOutcomeOfSendError(error);
+    if (outcome !== null) settleManualAnswer(manualAnswer, outcome);
+    else abandonManualSend(manualAnswer);
+    throw error;
+  }
+  if (delivery === null) abandonManualSend(manualAnswer);
+  else settleManualAnswer(manualAnswer, delivery.delivered ? 'answered' : 'not-sent');
+  return delivery;
 }
 
 /**
@@ -817,7 +878,7 @@ async function answerPendingQuestion({
   }
 
   const verdict = questionAnswerVerdict(resolution.resolved);
-  const { delivery } = await answerPendingDecisionWithReceipt(source, target, decision, verdict);
+  const delivery = await deliverManualVerdict({ source, target, decision, verdict, worktreeId, cliToolId, instanceId });
   const delivered = delivery?.delivered === true;
 
   await settleAnsweredDecision({
