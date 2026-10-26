@@ -123,8 +123,10 @@ export type ManualAnswerOutcome = 'answered' | 'not-sent' | 'may-be-on-pane';
  *   (the manual-answer sequence moves on): one that read no hold before its
  *   last wait does not type over this one.
  *
- * An end nobody reports (the agent's API answered it, the route threw) leaves
- * the hold as it was.
+ * An end nobody reports (a send that threw saying nothing of its keys, a
+ * verdict the agent's API gave no receipt for — both only abandoned; a
+ * structured verdict `/prompt-response` refused) leaves the hold as it was. A verdict delivered over the
+ * agent's API reports its receipt like a send (Issue #3925).
  */
 export function settleManualAnswer(
   ticket: ManualAnswerTicket,

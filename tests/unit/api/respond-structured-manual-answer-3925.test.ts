@@ -12,7 +12,14 @@
  * and the end reported (delivered / not delivered / no receipt / thrown), and
  * that no refusal touches Auto-Yes at all.
  *
- * Runs the real route, the real structured module and the real ticket
+ * Consistency review 1 (Issue #3925): the screen is read only after the
+ * session's ownership is known, never from a pane another server owns or one
+ * the worktree row cannot vouch for (#2885) — the verdict still goes over the
+ * API and its end is still reported. And `/prompt-response`'s structured stage
+ * reports the end of the same verdict as `/respond` does, so a hold of an
+ * earlier send of unknown outcome is released or kept alike on both URLs.
+ *
+ * Runs the real routes, the real structured modules and the real ticket
  * functions (wrapped in spies); the opencode client, tmux and the screen
  * capture are stubbed.
  *
@@ -105,7 +112,16 @@ vi.mock('@/lib/polling/auto-yes-dialog-gate', async (importOriginal) => {
   };
 });
 
+/** Whose session holds the name: the real check, replaceable per test. */
+vi.mock('@/lib/cli-tools/worktree-session-ownership', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/cli-tools/worktree-session-ownership')>();
+  return { ...actual, checkWorktreeSessionOwnership: vi.fn(actual.checkWorktreeSessionOwnership) };
+});
+
 vi.mock('@/lib/tmux/tmux', () => ({
+  // The session is up (`/prompt-response` answers only a running one); with the
+  // name-only ownership above it is this server's.
+  hasSession: vi.fn().mockResolvedValue(true),
   sendKeys: vi.fn().mockResolvedValue(undefined),
   sendSpecialKeys: vi.fn().mockResolvedValue(undefined),
 }));
@@ -132,6 +148,11 @@ vi.mock('@/lib/db/db-instance', () => {
 });
 
 import { POST as respond } from '@/app/api/worktrees/[id]/respond/route';
+import { POST as promptResponse } from '@/app/api/worktrees/[id]/prompt-response/route';
+import { checkWorktreeSessionOwnership } from '@/lib/cli-tools/worktree-session-ownership';
+import { captureSessionOutputFresh } from '@/lib/session/cli-session';
+import { clearPartialAnswers, getPartialAnswer } from '@/lib/polling/auto-yes-poller-state';
+import { getEnterFallbackSessionEpoch } from '@/lib/polling/auto-yes-enter-fallback-state';
 import {
   fetchOpencodePendingPermissions,
   fetchOpencodePendingQuestions,
@@ -184,13 +205,14 @@ function opencodeWorktree(id: string): Worktree {
   };
 }
 
-function post(body: Record<string, unknown>): Promise<Response> {
-  const request = new Request('http://localhost:3000/api/worktrees/wt-alpha/respond', {
+function post(body: Record<string, unknown>, route: 'respond' | 'prompt-response' = 'respond'): Promise<Response> {
+  const request = new Request(`http://localhost:3000/api/worktrees/wt-alpha/${route}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   }) as unknown as NextRequest;
-  return respond(request, { params: Promise.resolve({ id: 'wt-alpha' }) }) as unknown as Promise<Response>;
+  const handler = route === 'respond' ? respond : promptResponse;
+  return handler(request, { params: Promise.resolve({ id: 'wt-alpha' }) }) as unknown as Promise<Response>;
 }
 
 let db: Database.Database;
@@ -200,6 +222,7 @@ beforeEach(async () => {
   steps.length = 0;
   delivery.next = null;
   clearManualAnswers();
+  clearPartialAnswers();
   db = new Database(':memory:');
   runMigrations(db);
   const { setMockDb } = await import('@/lib/db/db-instance');
@@ -227,6 +250,7 @@ beforeEach(async () => {
 afterEach(() => {
   resetOpencodePortAssignments();
   clearManualAnswers();
+  clearPartialAnswers();
   db.close();
 });
 
@@ -358,5 +382,114 @@ describe('a refusal never notes a manual answer', () => {
     const response = await post({ decisionId: 'bad id!', answer: '1' });
     expect(response.status).toBe(400);
     expectUntouched();
+  });
+});
+
+describe.each(CASES)('$name: the screen is read only from a pane this server owns (review P1)', ({ kind, body }) => {
+  beforeEach(() => hold(kind));
+
+  it.each([
+    ['another server owns the session', { verdict: 'foreign' as const, sessionPath: '/somewhere/else' }],
+    ['the worktree row cannot vouch for the session', null],
+  ])('%s: no capture, the send registered at no screen, delivered and settled', async (_label, ownership) => {
+    vi.mocked(checkWorktreeSessionOwnership).mockResolvedValue(ownership);
+
+    const response = await post(body);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ success: true });
+    expect(vi.mocked(captureSessionOutputFresh)).not.toHaveBeenCalled();
+    expect(steps).toEqual(['started', 'send-starting', 'deliver', 'settle']);
+    expect(vi.mocked(noteManualSendStarting)).toHaveBeenCalledWith(expect.anything(), null);
+    expect(vi.mocked(settleManualAnswer)).toHaveBeenCalledWith(expect.anything(), 'answered');
+    expect(vi.mocked(replyOpencodePermission).mock.calls.length + vi.mocked(replyOpencodeQuestion).mock.calls.length)
+      .toBe(1);
+  });
+
+  it('negative: this server\'s session is checked first, then captured before the send, as before', async () => {
+    vi.mocked(checkWorktreeSessionOwnership).mockResolvedValue({ verdict: 'owned', sessionPath: '/tmp/wt-alpha' });
+
+    const response = await post(body);
+
+    expect(response.status).toBe(200);
+    expect(steps).toEqual(['started', 'capture', 'send-starting', 'deliver', 'settle']);
+    expect(vi.mocked(noteManualSendStarting)).toHaveBeenCalledWith(expect.anything(), SCREEN_PROMPT);
+    expect(vi.mocked(checkWorktreeSessionOwnership)).toHaveBeenCalledTimes(1);
+    const [checked] = vi.mocked(checkWorktreeSessionOwnership).mock.invocationCallOrder;
+    const [captured] = vi.mocked(captureSessionOutputFresh).mock.invocationCallOrder;
+    expect(checked).toBeLessThan(captured);
+  });
+});
+
+describe('the same approval through /respond and /prompt-response settles the earlier hold alike (review P2)', () => {
+  const epoch = () => getEnterFallbackSessionEpoch(PRIMARY_KEY);
+
+  /** A person's earlier send to this confirmation that may have left keys on the pane. */
+  function earlierSendOfUnknownOutcome(): void {
+    const earlier = noteManualAnswerStarted(PRIMARY_KEY);
+    noteManualSendStarting(earlier, SCREEN_PROMPT);
+    settleManualAnswer(earlier, 'may-be-on-pane');
+    expect(getPartialAnswer(PRIMARY_KEY, epoch())).not.toBeNull();
+    steps.length = 0;
+    vi.mocked(settleManualAnswer).mockClear();
+    vi.mocked(abandonManualSend).mockClear();
+  }
+
+  beforeEach(() => {
+    hold('permission');
+    earlierSendOfUnknownOutcome();
+  });
+
+  describe.each(['respond', 'prompt-response'] as const)('/%s', (route) => {
+    const body = route === 'respond' ? { decisionId: PERMISSION, answer: '1' } : { answer: '1' };
+
+    it('delivered: settled answered, and the earlier hold is released', async () => {
+      const response = await post(body, route);
+
+      expect(await response.json()).toMatchObject({ success: true, resolved: { via: 'structured-decision' } });
+      expect(vi.mocked(settleManualAnswer)).toHaveBeenCalledWith(expect.anything(), 'answered');
+      expect(getPartialAnswer(PRIMARY_KEY, epoch())).toBeNull();
+    });
+
+    it('not delivered: settled not-sent, and the earlier hold is released', async () => {
+      failReply('permission');
+
+      const response = await post(body, route);
+
+      expect(await response.json()).toMatchObject({ success: false, reason: 'decision_not_delivered' });
+      expect(vi.mocked(settleManualAnswer)).toHaveBeenCalledWith(expect.anything(), 'not-sent');
+      expect(getPartialAnswer(PRIMARY_KEY, epoch())).toBeNull();
+    });
+
+    it('a throw that says nothing of its outcome: only abandoned, and the earlier hold stays', async () => {
+      delivery.next = new Error('decide blew up');
+
+      const response = await post(body, route);
+
+      expect(response.status).toBe(500);
+      expect(vi.mocked(settleManualAnswer)).not.toHaveBeenCalled();
+      expect(vi.mocked(abandonManualSend)).toHaveBeenCalledTimes(1);
+      expect(getPartialAnswer(PRIMARY_KEY, epoch())).not.toBeNull();
+    });
+  });
+
+  it('/respond, no receipt: only abandoned, and the earlier hold stays', async () => {
+    delivery.next = 'no-receipt';
+
+    const response = await post({ decisionId: PERMISSION, answer: '1' });
+
+    expect(await response.json()).toMatchObject({ success: false });
+    expect(vi.mocked(settleManualAnswer)).not.toHaveBeenCalled();
+    expect(getPartialAnswer(PRIMARY_KEY, epoch())).not.toBeNull();
+  });
+
+  it('negative: /prompt-response refusing the verdict reports nothing, and the earlier hold stays', async () => {
+    const response = await post({ answer: '9' }, 'prompt-response');
+
+    expect(await response.json()).toMatchObject({ success: false, reason: 'answer_out_of_range' });
+    expect(steps).not.toContain('deliver');
+    expect(vi.mocked(settleManualAnswer)).not.toHaveBeenCalled();
+    expect(vi.mocked(abandonManualSend)).not.toHaveBeenCalled();
+    expect(getPartialAnswer(PRIMARY_KEY, epoch())).not.toBeNull();
   });
 });

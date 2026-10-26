@@ -10,7 +10,9 @@ import { answerStructuredDecision } from '@/lib/hooks/structured-decision-respon
 import { startPolling } from '@/lib/polling/response-poller';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
+import type { ManualAnswerTicket } from '@/lib/polling/auto-yes-manual-answer';
 import { logRefused, type PromptResponseContext } from './context';
+import { settleManualSendError, settleManualVerdictReceipt } from './answer-delivery';
 import type { ValidatedPromptResponse } from './request-validation';
 
 /**
@@ -31,22 +33,38 @@ import type { ValidatedPromptResponse } from './request-validation';
  *
  * Issue #3125: never for a plan review action, which names no decision, nor for
  * an answer whose comma refusal is only deferred.
+ *
+ * Issue #3925 (review P2): a verdict delivered here reports its end on the
+ * person's ticket as `/respond`'s structured branch does
+ * (`settleManualVerdictReceipt`, `settleManualSendError`), so the same approval
+ * answered through either URL leaves Auto-Yes the same hold. Declined and
+ * refused answers report nothing: the keystroke path carries on with the
+ * ticket, and a refusal leaves the hold as it was. `answerStructuredDecision`
+ * reports the receipt only as `delivered: boolean` — no receipt arrives here as
+ * `false`, so it is settled `not-sent` rather than only abandoned.
  */
 export async function answerViaStructuredDecision(
   ctx: PromptResponseContext,
   request: ValidatedPromptResponse,
+  manualAnswer: ManualAnswerTicket,
 ): Promise<NextResponse | null> {
   const { id, db, cliToolId, instanceId } = ctx;
   const { answer, useDefault } = request;
-  const structuredDecision = request.planReviewAction !== undefined || request.deferredSelectionError !== null
-    ? ({ kind: 'not-applicable', reason: 'no-decision-identity' } as const)
-    : await answerStructuredDecision({
-      worktreeId: id,
-      cliToolId,
-      instanceId,
-      answer,
-      useDefault,
-    });
+  let structuredDecision: Awaited<ReturnType<typeof answerStructuredDecision>>;
+  try {
+    structuredDecision = request.planReviewAction !== undefined || request.deferredSelectionError !== null
+      ? ({ kind: 'not-applicable', reason: 'no-decision-identity' } as const)
+      : await answerStructuredDecision({
+        worktreeId: id,
+        cliToolId,
+        instanceId,
+        answer,
+        useDefault,
+      });
+  } catch (error: unknown) {
+    settleManualSendError(manualAnswer, error);
+    throw error;
+  }
   if (structuredDecision.kind === 'refused') {
     logRefused(ctx, { reason: structuredDecision.reason });
     return NextResponse.json({
@@ -58,6 +76,7 @@ export async function answerViaStructuredDecision(
   }
   if (structuredDecision.kind === 'answered') {
     const { option, decisionId, delivered } = structuredDecision;
+    settleManualVerdictReceipt(manualAnswer, delivered);
     // Issue #1548: a person answered, attributed exactly as the keystroke
     // path attributes it.
     applyEventToActiveTask(db, id, cliToolId, instanceId ?? cliToolId, 'prompt_answered_human', {

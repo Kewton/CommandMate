@@ -20,12 +20,11 @@ import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/
 import { isAnswerablePromptData } from '@/types/models';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import {
-  abandonManualSend,
   noteManualAnswerStarted,
   noteManualSendStarting,
   settleManualAnswer,
 } from '@/lib/polling/auto-yes-manual-answer';
-import { manualOutcomeOfSendError } from '../prompt-response/answer-delivery';
+import { settleManualSendError } from '../prompt-response/answer-delivery';
 import { respondByDecisionId, respondToSolePendingDecision } from './structured-decision';
 import { screenAtSend } from './screen-at-send';
 
@@ -319,9 +318,7 @@ export async function POST(
       });
       logger.info('prompt-answer-sent');
     } catch (error: unknown) {
-      const outcome = manualOutcomeOfSendError(error);
-      if (outcome !== null) settleManualAnswer(manualAnswer, outcome);
-      else abandonManualSend(manualAnswer);
+      settleManualSendError(manualAnswer, error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return NextResponse.json(
         { error: `Failed to send answer to tmux: ${errorMessage}` },
