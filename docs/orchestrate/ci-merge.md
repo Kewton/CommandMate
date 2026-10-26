@@ -125,6 +125,8 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 - **run の記録**: `verify` / `precheck` の行は、`durationSec` を `queueSec`（枠の待ち）・`mutexSec`（ロックの待ち）・`runSec`（実行）に
   分けて持てる（`run-log.mjs append --queue-sec / --mutex-sec / --run-sec`。無い行は今までどおり読む）。precheck は自分で
   `mutexSec`・`runSec` を書く
+- **待ち切った verify**: `reason=mutex-wait` の SKIP だけで exit 99 になった検証は、`wait-verify.mjs` が `--mutex-retries`（既定 2）回まで
+  自動で並び直す（#3938）。手順と記録の読み方は docs/orchestrate/exit-codes.md#3-4-99-の対応
 
 ## 6-2 統合破壊の実測
 
