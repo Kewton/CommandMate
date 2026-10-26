@@ -98,10 +98,12 @@ import {
   TUI_MESSAGE_PROCESSED_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
 import { createLogger } from '@/lib/logger';
-import { clearComposer, codexDialogBelow, findCodexLiveComposerRow } from '@/lib/session/composer-clear';
+import { clearComposer } from '@/lib/session/composer-clear';
 import {
+  codexDialogBelow,
   extractComposerText,
   findCodexInputBox,
+  findCodexLiveComposerRow,
   readCodexComposerFrom,
   SUPPORTED_COMPOSER_TOOLS,
 } from '@/lib/detection/composer-text';
