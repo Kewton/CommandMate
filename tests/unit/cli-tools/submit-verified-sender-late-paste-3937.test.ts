@@ -67,6 +67,8 @@ import {
   clearInputLine,
 } from '@/lib/tmux/tmux';
 import { MAX_COMPOSER_CLEAR_PASSES } from '@/lib/session/composer-clear';
+import { classifySendFailure } from '@/lib/session/send-attempt-state';
+import { extractComposerText } from '@/lib/detection/composer-text';
 
 const SESSION = 'mcbd-codex-late-paste';
 const FIXTURES = path.resolve(__dirname, '../../fixtures');
@@ -217,9 +219,12 @@ describe('submit-verified-sender: a paste drawn late (Issue #3937)', () => {
 
   it('a late placeholder that cannot be withdrawn is logged after paste-not-landed and named in the error', async () => {
     const events: string[] = [];
+    // Fewer characters than the body: this body still arriving (`pasting`), so it is ours to withdraw.
+    // (A count above the body's is another send's — see the race tests below.)
+    const partial = tokenFrame(JA_CHARS - 100);
     scriptPane({
-      clearReads: [IDLE, tokenFrame(3575)],
-      verifyReads: [...unseenWait(), tokenFrame(3575)],
+      clearReads: [IDLE, partial],
+      verifyReads: [...unseenWait(), partial],
     });
 
     const error = await send(events);
@@ -233,12 +238,101 @@ describe('submit-verified-sender: a paste drawn late (Issue #3937)', () => {
     expect(loggerSpies.error).toHaveBeenCalledWith(
       'paste-late-withdraw-failed',
       expect.objectContaining({
-        lateState: 'mismatch', // 3,575 is more than this body's characters
+        lateState: 'pasting',
         passes: MAX_COMPOSER_CLEAR_PASSES,
         remainingState: 'content',
-        remainingText: '[Pasted Content 3575 chars]',
+        remainingText: `[Pasted Content ${JA_CHARS - 100} chars]`,
       })
     );
+  });
+
+  describe('another send pastes into the same composer during the watch (review P1)', () => {
+    /** Another send's text, typed (not a placeholder): nothing of this body. */
+    const OTHER_TYPED = LIVE_TOKEN.replace(
+      '\x1b[38;5;6m[Pasted Content 12288 chars]\x1b[39m',
+      'please run the tests again'
+    );
+
+    it('positive: a placeholder that is not this body (count above it) is left in place, no key is sent', async () => {
+      const events: string[] = [];
+      const other = tokenFrame(JA_CHARS + 500);
+      expect(classifyPasteLanded(other, 'codex', JA_BODY)).toBe('mismatch');
+      scriptPane({ clearReads: [IDLE, other], verifyReads: [...unseenWait(), IDLE, other] });
+
+      const error = await send(events);
+
+      expect(error?.message).toMatch(/never appeared in the composer/);
+      expect(error?.message).toMatch(/Something that is not this message appeared in the composer 500ms later and was left in place\./);
+      expect(classifySendFailure(error)).toEqual({ state: 'indeterminate', reason: 'body-not-landed' });
+      expect(enterCount()).toBe(0);
+      expect(clearComposerPasteToken).not.toHaveBeenCalled();
+      expect(clearComposerLine).not.toHaveBeenCalled();
+      expect(loggerSpies.warn).toHaveBeenCalledWith(
+        'paste-late-foreign',
+        expect.objectContaining({ lateState: 'mismatch', afterMs: 500 })
+      );
+      expect(loggerSpies.warn).not.toHaveBeenCalledWith('paste-late-withdrawn', expect.anything());
+      expect(loggerSpies.error).not.toHaveBeenCalledWith('paste-late-withdraw-failed', expect.anything());
+    });
+
+    it('positive: text that is not this body, typed during the watch, is not cleared', async () => {
+      const events: string[] = [];
+      expect(extractComposerText(OTHER_TYPED, 'codex')).toEqual({ text: 'please run the tests again', state: 'content' });
+      expect(classifyPasteLanded(OTHER_TYPED, 'codex', JA_BODY)).toBe('unseen');
+      scriptPane({ clearReads: [IDLE, OTHER_TYPED], verifyReads: [...unseenWait(), IDLE, OTHER_TYPED] });
+
+      const error = await send(events);
+
+      expect(error?.message).toMatch(/never appeared in the composer/);
+      expect(classifySendFailure(error)).toEqual({ state: 'indeterminate', reason: 'body-not-landed' });
+      expect(clearComposerPasteToken).not.toHaveBeenCalled();
+      expect(clearComposerLine).not.toHaveBeenCalled();
+    });
+
+    it('negative: this body drawn late is still withdrawn', async () => {
+      const events: string[] = [];
+      scriptPane({
+        clearReads: [IDLE, tokenFrame(JA_CHARS), IDLE],
+        verifyReads: [...unseenWait(), tokenFrame(JA_CHARS)],
+      });
+
+      const error = await send(events);
+
+      expect(error?.message).toMatch(/It appeared 250ms later and was taken back out\./);
+      expect(clearComposerPasteToken).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('a watch whose read throws (review P2)', () => {
+    it('logs it, still tries the withdrawal, and fails as body-not-landed', async () => {
+      const events: string[] = [];
+      const reads: string[] = [];
+      let verifyReads = 0;
+      vi.mocked(capturePane).mockImplementation((async (_session: string, arg?: unknown) => {
+        if (typeof arg === 'number') {
+          reads.push('clear');
+          return IDLE;
+        }
+        verifyReads++;
+        reads.push(verifyReads > 20 ? 'watch-throws' : 'verify');
+        if (verifyReads > 20) throw new Error('Failed to capture pane: tmux went away');
+        return IDLE;
+      }) as never);
+
+      const error = await send(events);
+
+      expect(error?.message).toMatch(/never appeared in the composer/);
+      expect(error?.message).toMatch(/Enter was not pressed, so nothing was submitted/);
+      expect(error?.message).toMatch(/Watching the composer for a late paste failed; a withdrawal was tried\./);
+      expect(classifySendFailure(error)).toEqual({ state: 'indeterminate', reason: 'body-not-landed' });
+      expect(enterCount()).toBe(0);
+      expect(verifyReads).toBe(21);
+      // The withdrawal ran: clearComposer read the composer after the watch failed.
+      expect(reads.slice(reads.indexOf('watch-throws') + 1)).toContain('clear');
+      const names = loggerSpies.error.mock.calls.map((c) => c[0]);
+      expect(names).toContain('paste-late-watch-failed');
+      expect(names.indexOf('paste-not-landed')).toBeGreaterThan(names.indexOf('paste-late-watch-failed'));
+    });
   });
 
   it('a paste that lands within the 2 s is still sent with one Enter, without the window', async () => {
