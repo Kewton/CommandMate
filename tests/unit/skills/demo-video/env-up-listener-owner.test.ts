@@ -275,6 +275,20 @@ describe('env-up listener ownership (Issue #3463)', () => {
     expect(readState().CM_DEMO_PID).toBe(String(stubPid()));
   }, 60_000);
 
+  // Issue #3935: the stderr fix must not cost the process group env-down
+  // signals the whole tree by.
+  it('starts the server as the leader of its own process group', async () => {
+    const { done } = runEnvUp(ENV_UP, envUpEnv(`node ${STUB_FORKS}`, 'stub-owner-forks.js'));
+    const result = await done;
+    expect(result.stderr).toBe('');
+    expect(result.status, result.stderr).toBe(0);
+    const state = readState();
+    const pgid = spawnSync('ps', ['-o', 'pgid=', '-p', state.CM_DEMO_PID], { encoding: 'utf8' })
+      .stdout.trim();
+    expect(pgid).toBe(state.CM_DEMO_PID);
+    expect(state.CM_DEMO_PGID).toBe(state.CM_DEMO_PID);
+  }, 60_000);
+
   it('boots when a child of the server it started is the listener', async () => {
     const { done } = runEnvUp(ENV_UP, envUpEnv(`node ${STUB_FORKS}`, 'stub-owner-forks.js'));
     const result = await done;
