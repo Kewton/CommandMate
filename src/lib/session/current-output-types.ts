@@ -655,7 +655,7 @@ export interface CurrentOutputPayload {
    * default.
    */
   upstreamFault: {
-    /** {@link UpstreamFault.id} — `overloaded` / `retrying` / `limit-reached` / `api-error`. */
+    /** {@link UpstreamFault.id} — `overloaded` / `retrying` / `context-limit` / `model-capacity` / `limit-reached` / `api-error`. */
     id: string;
     /** The whole line that matched, trimmed and bounded. */
     matchedText: string;

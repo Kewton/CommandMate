@@ -944,7 +944,7 @@ export interface CurrentOutputResponse {
    * server it dials.
    */
   upstreamFault?: {
-    /** `overloaded` / `retrying` / `limit-reached` / `api-error`. */
+    /** `overloaded` / `retrying` / `context-limit` / `model-capacity` / `limit-reached` / `api-error` (`UPSTREAM_FAULTS`). */
     id: string;
     /** The whole line that matched, trimmed and bounded to 200 UTF-8 bytes. */
     matchedText: string;

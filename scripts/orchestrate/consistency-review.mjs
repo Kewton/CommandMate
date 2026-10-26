@@ -24,7 +24,11 @@
  *      was killed) is taken over, and a live one is waited for with a
  *      `lock held by pid …` line on stderr every minute (#3633);
  *   2. waits until `capture --instance <id> --json` reads `ready` three times
- *      in a row;
+ *      in a row; a reviewer whose first read says it is not running (and has
+ *      no `startingSince`: one already starting is only waited for) is first
+ *      started with one short message that asks for no work (START_MESSAGE,
+ *      `send`; its output in `review-<N>….start.{out,err}`) and then waited
+ *      for START_READY_MAX_POLLS (#3936);
  *   3. sends the brief built from templates/consistency-review.md (or
  *      consistency-review-rereview.md with the previous answer; `--routes`
  *      adds the plan's interrupt order and readers, plan-check.mjs routes, #3884) with
@@ -36,7 +40,10 @@
  *      of an Issue with several, execution-key.mjs) and goes to the record (#3883);
  *   5. on an answer with a `DONE:` line appends one row to
  *      `consistency-review.md` and records `review=ok`; anything else records
- *      `review=fail` (run-log.mjs);
+ *      `review=fail` (run-log.mjs). An `ask` exit 11 is an upstream fault on
+ *      the reviewer's screen (`Selected model is at capacity` …): the note
+ *      says `upstream fault id=<id>` so the person can switch `--instance`
+ *      (it is not switched here: the lock and the recorded agent would change, #3936);
  *   6. reads the dependency links of the reviewed worktree and of every
  *      worktree of its repository (`git worktree list`) before the ask and
  *      after it: a link under `node_modules` that leads out of its worktree
@@ -79,6 +86,21 @@ export const ASK_TIMEOUT_SEC = 2400;
 export const READY_STREAK = 3;
 export const READY_POLL_SEC = 10;
 export const READY_MAX_POLLS = 180;
+/**
+ * Polls after the starting message (#3936): the session was started for this
+ * review, so a long wait means it did not come up, not that it is busy.
+ */
+export const START_READY_MAX_POLLS = 30;
+/**
+ * Starts a reviewer that is not running (#3936), in the spirit of
+ * launch-worker.mjs INIT_MESSAGE: no work, no files. The brief goes in the ask
+ * after `ready`, because a long brief sent into a cold start is the
+ * `prompt not ready` (exit 99, not sent) launch-worker separates out.
+ */
+export const START_MESSAGE =
+  'レビュー役のセッションの起動です（作業の依頼ではありません）。まだ何も実行せず、ファイルにも触らず、「OK」とだけ返してください。依頼は次のメッセージで送ります。';
+/** `ask`'s exit code for an upstream fault on the screen (WaitExitCode.UPSTREAM_FAULT, #1839). */
+export const ASK_UPSTREAM_FAULT_EXIT = 11;
 export const LOCK_POLL_SEC = 15;
 /**
  * How long a live owner's lock is waited for: one ask plus a margin (#3633).
@@ -400,22 +422,79 @@ function releaseLock(lock, owner) {
   fs.rmSync(lock, { recursive: true, force: true });
 }
 
-/** Wait until the reviewer reads `ready` READY_STREAK times in a row; false if it never does. */
-function waitReady({ run, sleep, cli, wt, cwd, instance }) {
+/**
+ * `capture --json` of the reviewer: its status, and whether its session is
+ * stopped (nothing running and nothing starting; false when unreadable).
+ *
+ * A launch in progress has no pane yet and reads `isRunning: false` /
+ * `session_not_running` too; the server tells it apart with `startingSince`
+ * (current-output-builder, #3179). That one is waited for: a starting message
+ * on top of it would race the send that is starting it.
+ */
+function readReviewer(out) {
+  try {
+    const data = out.status === 0 ? JSON.parse(out.stdout) : null;
+    if (!data) return { status: null, notRunning: false };
+    const notRunning = data.isRunning === false || data.sessionStatusReason === 'session_not_running';
+    const starting = typeof data.startingSince === 'number';
+    return { status: data.sessionStatus ?? null, notRunning: notRunning && !starting };
+  } catch {
+    return { status: null, notRunning: false };
+  }
+}
+
+/**
+ * Wait until the reviewer reads `ready` READY_STREAK times in a row.
+ *
+ * A reviewer whose first read says its session is not running (and not
+ * starting) never reads `ready` on its own (#3936: codex-2 waited out all 180 polls). It is started
+ * once with `start()` — the send API starts a stopped session — and then given
+ * START_READY_MAX_POLLS. A running one (`running`, `waiting`, …) is waited for
+ * as before.
+ *
+ * @returns {{ ready: boolean, started: null | { status: number }, maxPolls: number }}
+ */
+function waitReady({ run, sleep, cli, wt, cwd, instance, start }) {
   let streak = 0;
-  for (let i = 0; i < READY_MAX_POLLS; i++) {
-    const out = run(cli, ['capture', wt, '--instance', instance, '--json'], { cwd });
-    let status = null;
-    try {
-      status = out.status === 0 ? JSON.parse(out.stdout).sessionStatus : null;
-    } catch {
-      status = null;
+  let started = null;
+  let maxPolls = READY_MAX_POLLS;
+  for (let i = 0; i < maxPolls; i++) {
+    const { status, notRunning } = readReviewer(run(cli, ['capture', wt, '--instance', instance, '--json'], { cwd }));
+    if (i === 0 && started === null && notRunning) {
+      started = start();
+      if (started.status !== 0) return { ready: false, started, maxPolls };
+      maxPolls = START_READY_MAX_POLLS;
+      i = -1;
+      streak = 0;
+      sleep(READY_POLL_SEC * 1000);
+      continue;
     }
     streak = status === 'ready' ? streak + 1 : 0;
-    if (streak >= READY_STREAK) return true;
+    if (streak >= READY_STREAK) return { ready: true, started, maxPolls };
     sleep(READY_POLL_SEC * 1000);
   }
-  return false;
+  return { ready: false, started, maxPolls };
+}
+
+/**
+ * The `upstreamFault` of a failed `ask --json` (exit 11): `{ id, matchedText }`,
+ * or null. Its stdout may carry the prompt payload on a line of its own before
+ * the pretty-printed fault object (ask.ts reportWaitFailure), so each object
+ * that starts a line is tried, the last first.
+ */
+export function parseUpstreamFault(stdout) {
+  const text = String(stdout ?? '');
+  const starts = [];
+  for (let i = 0; i < text.length; i++) if (text[i] === '{' && (i === 0 || text[i - 1] === '\n')) starts.push(i);
+  for (const start of starts.reverse()) {
+    try {
+      const fault = JSON.parse(text.slice(start))?.upstreamFault;
+      if (fault && typeof fault.id === 'string') return { id: fault.id, matchedText: String(fault.matchedText ?? '') };
+    } catch {
+      // not a whole JSON value from here; try the previous one
+    }
+  }
+  return null;
 }
 
 /**
@@ -561,8 +640,21 @@ export function main(argv, deps = {}) {
     const file = (ext) => path.join(o.runDir, `${label}${ext}`);
 
     lockOwner = acquireLock(lock, { sleep, now, error });
-    if (!waitReady({ run, sleep, cli: o.cli, wt: o.wt, cwd, instance: o.instance })) {
-      record('fail', `${label}: ${o.instance} not ready ${READY_STREAK} times in a row within ${READY_MAX_POLLS} polls; not sent`);
+    const start = () => {
+      const sent = run(o.cli, ['send', o.wt, START_MESSAGE, '--instance', o.instance], { cwd });
+      fs.writeFileSync(file('.start.out'), sent.stdout);
+      fs.writeFileSync(file('.start.err'), sent.stderr);
+      log(`${label}: ${o.instance} was not running; start exit=${sent.status} (no brief)`);
+      return { status: sent.status };
+    };
+    const waited = waitReady({ run, sleep, cli: o.cli, wt: o.wt, cwd, instance: o.instance, start });
+    if (waited.started && waited.started.status !== 0) {
+      record('fail', `${label}: ${o.instance} was not running and starting it failed (send exit=${waited.started.status}, see ${label}.start.err); not sent`);
+      return 1;
+    }
+    if (!waited.ready) {
+      const after = waited.started ? ' after starting it' : '';
+      record('fail', `${label}: ${o.instance} not ready ${READY_STREAK} times in a row within ${waited.maxPolls} polls${after}; not sent`);
       return 1;
     }
     // The dependency trees the review must not write into (#3883 P6): this worktree's and its siblings'.
@@ -587,6 +679,15 @@ export function main(argv, deps = {}) {
         'fail',
         `${label}: not a verdict — ${appeared.length} dependency link(s) outside their worktree appeared during the review: ${listing.slice(0, 3).join('; ')}${appeared.length > 3 ? '; …' : ''}`
       );
+      return 1;
+    }
+    if (ask.status === ASK_UPSTREAM_FAULT_EXIT) {
+      // Not a review that failed: the reviewer's model did not answer (#3936). The person decides on another --instance.
+      const fault = parseUpstreamFault(ask.stdout);
+      const what = fault ? `id=${fault.id}${fault.matchedText ? ` (${JSON.stringify(fault.matchedText)})` : ''}` : 'id unknown';
+      // Only model-capacity is "this model will not answer"; overloaded / retrying retry on their own (selfRetrying).
+      const next = fault?.id === 'model-capacity' ? 'switch --instance' : 'retry later or switch --instance, by the id';
+      record('fail', `${label}: upstream fault ${what} on ${o.instance}; ask exit=${ask.status}, not a verdict — ${next} (see ${label}.err)`);
       return 1;
     }
     if (ask.status !== 0) {
