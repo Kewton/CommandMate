@@ -82,7 +82,7 @@ import {
   structuredDecisionOptionsFor,
   type StructuredDecisionOption,
 } from '@/lib/session/structured-prompt';
-import { answerPendingDecisionWithReceipt } from './sources/pending-decisions';
+import { answerPendingDecisionWithReceipt, type DecisionDelivery } from './sources/pending-decisions';
 import { getAgentEventSource } from './sources/registry';
 import type { AgentInstanceRef, PendingDecision, Verdict } from './sources/types';
 import { PERMISSION_REPLIED_DETAIL } from './agent-event-types';
@@ -143,6 +143,13 @@ export type StructuredDecisionOutcome =
       decisionId: string;
       option: StructuredDecisionOption;
       delivered: boolean;
+      /**
+       * The source's receipt as it came back, or null when it gave none
+       * (Issue #3925). `delivered` folds null into false; a caller that has to
+       * tell "not delivered" from "outcome unknown" — the manual-answer ticket
+       * of `/prompt-response`'s structured stage — reads this instead.
+       */
+      receipt: DecisionDelivery | null;
     };
 
 /** Why the structured path declined to handle this request. */
@@ -546,5 +553,5 @@ export async function answerStructuredDecision({
     delivered,
   });
 
-  return { kind: 'answered', decisionId: decision.id, option, delivered };
+  return { kind: 'answered', decisionId: decision.id, option, delivered, receipt: delivery };
 }

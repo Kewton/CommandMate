@@ -18,6 +18,8 @@
  * API and its end is still reported. And `/prompt-response`'s structured stage
  * reports the end of the same verdict as `/respond` does, so a hold of an
  * earlier send of unknown outcome is released or kept alike on both URLs.
+ * Consistency review 2: that includes a verdict the source gave no receipt
+ * for, which only abandons the send on both URLs and keeps the hold.
  *
  * Runs the real routes, the real structured modules and the real ticket
  * functions (wrapped in spies); the opencode client, tmux and the screen
@@ -467,6 +469,18 @@ describe('the same approval through /respond and /prompt-response settles the ea
       const response = await post(body, route);
 
       expect(response.status).toBe(500);
+      expect(vi.mocked(settleManualAnswer)).not.toHaveBeenCalled();
+      expect(vi.mocked(abandonManualSend)).toHaveBeenCalledTimes(1);
+      expect(getPartialAnswer(PRIMARY_KEY, epoch())).not.toBeNull();
+    });
+
+    it('no receipt (outcome unknown): only abandoned, and the earlier hold stays (review 2)', async () => {
+      delivery.next = 'no-receipt';
+
+      const response = await post(body, route);
+
+      expect(await response.json()).toMatchObject({ success: false, resolved: { via: 'structured-decision' } });
+      expect(steps.slice(-2)).toEqual(['deliver', 'abandon']);
       expect(vi.mocked(settleManualAnswer)).not.toHaveBeenCalled();
       expect(vi.mocked(abandonManualSend)).toHaveBeenCalledTimes(1);
       expect(getPartialAnswer(PRIMARY_KEY, epoch())).not.toBeNull();

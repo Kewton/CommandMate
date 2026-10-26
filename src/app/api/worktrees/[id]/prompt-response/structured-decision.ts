@@ -39,9 +39,10 @@ import type { ValidatedPromptResponse } from './request-validation';
  * (`settleManualVerdictReceipt`, `settleManualSendError`), so the same approval
  * answered through either URL leaves Auto-Yes the same hold. Declined and
  * refused answers report nothing: the keystroke path carries on with the
- * ticket, and a refusal leaves the hold as it was. `answerStructuredDecision`
- * reports the receipt only as `delivered: boolean` — no receipt arrives here as
- * `false`, so it is settled `not-sent` rather than only abandoned.
+ * ticket, and a refusal leaves the hold as it was. The end is read off the
+ * outcome's `receipt`, not its `delivered`, which folds no receipt into
+ * `false`: no receipt says nothing of the outcome, so the send is only
+ * abandoned, as on `/respond` (consistency review 2).
  */
 export async function answerViaStructuredDecision(
   ctx: PromptResponseContext,
@@ -75,8 +76,8 @@ export async function answerViaStructuredDecision(
     });
   }
   if (structuredDecision.kind === 'answered') {
-    const { option, decisionId, delivered } = structuredDecision;
-    settleManualVerdictReceipt(manualAnswer, delivered);
+    const { option, decisionId, delivered, receipt } = structuredDecision;
+    settleManualVerdictReceipt(manualAnswer, receipt === null ? null : receipt.delivered);
     // Issue #1548: a person answered, attributed exactly as the keystroke
     // path attributes it.
     applyEventToActiveTask(db, id, cliToolId, instanceId ?? cliToolId, 'prompt_answered_human', {
