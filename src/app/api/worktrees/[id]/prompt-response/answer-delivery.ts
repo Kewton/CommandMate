@@ -130,6 +130,30 @@ export function manualOutcomeOfSendError(error: unknown): ManualAnswerOutcome | 
 }
 
 /**
+ * A person's send threw (Issue #3880): settled by what the error says of it
+ * ({@link manualOutcomeOfSendError}), or only abandoned when it says nothing.
+ * Shared by every manual send (Issue #3925): this route's keystrokes,
+ * `/respond`'s stored-message branch and both structured stages.
+ */
+export function settleManualSendError(manualAnswer: ManualAnswerTicket, error: unknown): void {
+  const outcome = manualOutcomeOfSendError(error);
+  if (outcome !== null) settleManualAnswer(manualAnswer, outcome);
+  else abandonManualSend(manualAnswer);
+}
+
+/**
+ * A person's verdict delivered over the agent's API ended with this receipt
+ * (Issue #3925), for `/respond`'s structured branch and this route's
+ * structured stage alike: `true` (it reached the agent) is `answered`, `false`
+ * (the source says it did not) is `not-sent`, and no receipt (`null`) says
+ * nothing of the outcome, so the send is only abandoned.
+ */
+export function settleManualVerdictReceipt(manualAnswer: ManualAnswerTicket, delivered: boolean | null): void {
+  if (delivered === null) abandonManualSend(manualAnswer);
+  else settleManualAnswer(manualAnswer, delivered ? 'answered' : 'not-sent');
+}
+
+/**
  * Send the resolved answer to tmux. Null once it was sent; otherwise the
  * refusal or the transport failure to return.
  *
@@ -170,9 +194,7 @@ export async function sendResolvedAnswer(
       frame: verifiedFrame ?? undefined,
     });
   } catch (error: unknown) {
-    const outcome = manualOutcomeOfSendError(error);
-    if (outcome !== null) settleManualAnswer(manualAnswer, outcome);
-    else abandonManualSend(manualAnswer);
+    settleManualSendError(manualAnswer, error);
     return sendErrorResponse(ctx, error, request.answer, resolution);
   }
   settleManualAnswer(manualAnswer, 'answered');

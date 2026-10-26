@@ -17,66 +17,18 @@ import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/termin
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
-import { isAnswerablePromptData, type PromptData } from '@/types/models';
-import type { CLIToolType } from '@/lib/cli-tools/types';
-import { captureSessionOutputFresh } from '@/lib/session/cli-session';
-import { assessPromptAnswerability } from '@/lib/polling/auto-yes-dialog-gate';
+import { isAnswerablePromptData } from '@/types/models';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import {
-  abandonManualSend,
   noteManualAnswerStarted,
   noteManualSendStarting,
   settleManualAnswer,
 } from '@/lib/polling/auto-yes-manual-answer';
-import { manualOutcomeOfSendError } from '../prompt-response/answer-delivery';
+import { settleManualSendError } from '../prompt-response/answer-delivery';
 import { respondByDecisionId, respondToSolePendingDecision } from './structured-decision';
+import { screenAtSend } from './screen-at-send';
 
 const logger = createLogger('api/respond');
-
-/** The screen the stored-message branch sends at: the frame, and the prompt read off it. */
-interface ScreenAtSend {
-  /** The raw capture, or undefined when it could not be taken. */
-  frame: string | undefined;
-  promptData: PromptData | null;
-}
-
-/**
- * The screen the stored-message branch is about to send at (Issue #3907,
- * review P2), for the send it registers with Auto-Yes
- * (`noteManualSendStarting`) AND for `sendPromptAnswer`'s own checks: one
- * frame for both, as `/prompt-response` hands its verified frame to the
- * sender. Read off a fresh capture with the same reading `/prompt-response`
- * re-verifies with (`assessPromptAnswerability`), not off the stored row: the
- * row was read before the ownership check's await, and a hold at the row's
- * screen is dropped as "another prompt" when the screen has moved on —
- * leaving the screen the keys actually went to free for Auto-Yes. Without
- * the frame passed on, a numeric answer's guard re-read the pane, and a
- * screen changed in that await was not the one registered.
- *
- * When the capture fails or no prompt is read, `promptData` is null: the hold
- * is then at an unidentified screen, which covers the next confirmation read
- * (and the sender reads the pane itself when there is no frame).
- */
-async function screenAtSend(
-  worktreeId: string,
-  cliToolId: CLIToolType,
-  instanceId: string,
-): Promise<ScreenAtSend> {
-  let frame: string;
-  try {
-    frame = await captureSessionOutputFresh(worktreeId, cliToolId, undefined, instanceId);
-  } catch {
-    logger.warn('failed-to-read-screen-before-send');
-    return { frame: undefined, promptData: null };
-  }
-  try {
-    const { promptCheck } = assessPromptAnswerability(cliToolId, frame);
-    return { frame, promptData: promptCheck?.isPrompt ? promptCheck.promptData ?? null : null };
-  } catch {
-    logger.warn('failed-to-read-screen-before-send');
-    return { frame, promptData: null };
-  }
-}
 
 /**
  * POST /api/worktrees/[id]/respond
@@ -366,9 +318,7 @@ export async function POST(
       });
       logger.info('prompt-answer-sent');
     } catch (error: unknown) {
-      const outcome = manualOutcomeOfSendError(error);
-      if (outcome !== null) settleManualAnswer(manualAnswer, outcome);
-      else abandonManualSend(manualAnswer);
+      settleManualSendError(manualAnswer, error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return NextResponse.json(
         { error: `Failed to send answer to tmux: ${errorMessage}` },
