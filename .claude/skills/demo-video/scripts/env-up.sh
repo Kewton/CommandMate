@@ -561,6 +561,22 @@ PROC_MATCH="${CM_DEMO_PROC_MATCH:-server.ts}"
 log "starting server on $BASE_URL"
 # `set -m` puts the background job in its own process group, so env-down can
 # signal the whole tree (tsx forks a child that owns the listener) by PGID.
+#
+# Issue #3935: with job control on, bash calls setpgid(child, child) in BOTH the
+# parent and the forked child. When the parent's call lands first, the child's
+# own call can fail with EPERM (seen on macOS, ~0.7% of forks under load), and
+# the child prints `child setpgid (N to N): Operation not permitted` to the
+# stderr it inherited — before the subshell's own redirection applies, so it
+# landed on env-up's stderr. The group is still right (the parent's call
+# succeeded; SERVER_PGID below is read back either way), so only the message is
+# wrong. The `{ … } 2>>"$LOG_FILE"` sends whatever bash writes to stderr while
+# job control is on to the server log instead. The subshell appends (`>>`)
+# after the truncation here, so such a line survives in the log for diagnosis.
+# Not chosen: dropping `set -m` for a child that calls setpgrp itself (perl or
+# a wrapper) — a new tool dependency, and the parent could then read the PGID
+# before the child had changed it.
+: >"$LOG_FILE" || die "cannot write the server log at $LOG_FILE"
+{
 set -m
 (
   cd "$REPO_ROOT" || exit 1
@@ -585,9 +601,10 @@ set -m
     CM_ROOT_DIR="$SEED_ROOT" \
     CM_LOG_LEVEL=warn \
     $SERVER_CMD
-) >"$LOG_FILE" 2>&1 &
+) >>"$LOG_FILE" 2>&1 &
 SERVER_PID=$!
 set +m
+} 2>>"$LOG_FILE"
 
 SERVER_PGID="$(ps -o pgid= -p "$SERVER_PID" 2>/dev/null | tr -d ' ')"
 
