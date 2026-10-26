@@ -30,8 +30,9 @@
  *
  * [Run] posts `['Enter']` to the EXISTING special-keys endpoint (no new API:
  * `NAVIGATION_KEY_VALUES` has carried `'Enter'` since #473). [Clear] posts to
- * `clear-composer`, which loops `C-e`+`C-u` and reads the frame back — one `C-u`
- * is not enough, as #1878 §5-1 measured.
+ * `clear-composer`, which loops `C-e`+`C-u` (`C-e`+`BSpace` when a codex
+ * composer holds only a `[Pasted Content N chars]` placeholder, #3937) and reads
+ * the frame back — one `C-u` is not enough, as #1878 §5-1 measured.
  */
 
 import { useCallback, useState } from 'react';

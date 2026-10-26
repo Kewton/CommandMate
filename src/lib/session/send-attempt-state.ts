@@ -162,7 +162,8 @@ export function classifySendFailure(error: unknown): { state: SendAttemptState; 
   if (TMUX_TRANSPORT_FAILURE.test(message)) return { state: 'indeterminate', reason: 'send-error' };
   // The readiness waits of every tool throw before typing anything.
   if (/prompt not ready/i.test(message)) return { state: 'not-sent', reason: 'prompt-not-ready' };
-  // #1880: refused before the body, after only the clear keys (C-e / C-u).
+  // #1880: refused before the body, after only the clear keys (C-e / C-u, or C-e / BSpace
+  // for a codex composer holding only a paste placeholder, #3937).
   if (/still holds unsent text after \d+ clear passes/.test(message)) {
     return { state: 'not-sent', reason: 'composer-not-empty' };
   }

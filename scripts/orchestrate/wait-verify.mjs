@@ -73,7 +73,10 @@
  * verdict could not be tied to the finished work (no completion signal, a
  * commit after the verification started without a task to re-verify, or
  * uncommitted changes behind a pass, or a newer task for the same instance).
- * 2 is a usage error or an `--instance` the server cannot resolve (nothing is
+ * A 99 whose run SKIPped gates only for `reason=mutex-wait` is not returned
+ * at once: the verification is started again up to `--mutex-retries` times
+ * (default DEFAULT_MUTEX_RETRIES, #3938), and 99 is returned once that limit
+ * is reached. 2 is a usage error or an `--instance` the server cannot resolve (nothing is
  * sent then); 1 means the verdict
  * could not be recorded.
  *
@@ -82,6 +85,7 @@
  *        --wt <worktree-id> --worktree <path> --instance <agent>
  *        [--task <id>] [--model <opus|sonnet|->] [--timeout <sec>] [--log <file>]
  *        [--after-reinstruct] [--require-signal] [--signal-timeout <sec>] [--cli <commandmatedev>] [--item <work item>]
+ *        [--mutex-retries <n>]
  *   node scripts/orchestrate/wait-verify.mjs --auto-yes-off --wt <worktree-id> --instance <agent> [--cli <commandmatedev>]
  */
 import fs from 'node:fs';
@@ -122,6 +126,18 @@ export const START_TASK_RETRY_MS = 5_000;
  */
 export const VERIFY_BUSY_TIMEOUT_SEC = 3600;
 export const VERIFY_BUSY_ATTEMPTS = 3;
+/**
+ * A verification that reached no verdict only because a gate's machine-wide
+ * mutex stayed held for its whole budget (`reason=mutex-wait`, exit 99) is
+ * started again up to this many times (`--mutex-retries`, #3938).
+ */
+export const DEFAULT_MUTEX_RETRIES = 2;
+/** `verify`'s "no verdict was reached" (a SKIP aggregates the run to `error`). */
+const NO_VERDICT_EXIT = 99;
+/** The first line of a gate's log tail when its mutex never came free (gate-runner.ts MUTEX_WAIT_SKIP_REASON). */
+const MUTEX_WAIT_REASON = /^reason=mutex-wait(?:\s|$)/;
+/** The run statuses a requeue may follow: the run ended by itself (a mutex-wait SKIP aggregates to `error`). */
+const RUN_ENDS = ['passed', 'failed', 'error'];
 /** `wait`'s "no session was ever seen" (VerifyExitCode.NOT_STARTED); `wait --verify` still verifies it. */
 const NOT_STARTED_EXIT = 21;
 /** Exit codes that are a verdict: the gates ran and judged the work. */
@@ -336,11 +352,21 @@ const splitOf = (queue, mutex, execution) => ({
  * @param {{ gates?: Array<{ durationMs?: number | null, logTail?: string | null }> } | null} view
  * @returns {{ queueSec?: number, mutexSec?: number, runSec?: number }}
  */
-export function verifyTiming(view) {
-  return Array.isArray(view?.gates) ? runTiming(view.gates) : {};
+export function verifyTiming(view, earlier = []) {
+  // `earlier`: the runs of the same verification that a mutex wait sent back (#3938); their waits are this one's too.
+  const total = { queue: 0, mutex: 0, execution: 0, timed: false };
+  for (const one of [...earlier, view]) {
+    if (!Array.isArray(one?.gates)) continue;
+    const t = runTiming(one.gates);
+    total.queue += t.queue;
+    total.mutex += t.mutex;
+    total.execution += t.execution;
+    total.timed ||= t.timed;
+  }
+  return total.timed ? splitOf(total.queue, total.mutex, total.execution) : {};
 }
 
-/** {@link verifyTiming} from the stored gates of one run. */
+/** The unrounded split of one run's stored gates; `timed` says a gate had the marker. */
 function runTiming(gates) {
   let queue = 0;
   let mutex = 0;
@@ -360,7 +386,37 @@ function runTiming(gates) {
     if (flaky && DURATIONS.test(flaky)) execution += sumSeconds(flaky);
     else if (typeof gate.durationMs === 'number') execution += gate.durationMs / 1000;
   }
-  return timed ? splitOf(queue, mutex, execution) : {};
+  return { queue, mutex, execution, timed };
+}
+
+/**
+ * Whether a stored run reached no verdict only because of mutex waits (#3938):
+ * at least one gate SKIPped with `reason=mutex-wait` on the first line of its
+ * stored log tail, and every other gate passed. Any other SKIP (a cancel, the
+ * primary-checkout guard), a FAIL, a TIMEOUT or an ERROR is not — and neither
+ * is a run that could not be read (null): the reason is never taken from the
+ * CLI's GATE lines (#3928). Nor is a run that ended other than passed /
+ * failed / error: a run cancelled while its last gate, past the mutex wait,
+ * took its slot back keeps that gate's mutex-wait SKIP but is `cancelled`
+ * (gate-runner.ts runGates), and a cancel is not to be undone (#3938 review 1).
+ */
+export function mutexWaitOnly(view) {
+  if (!Array.isArray(view?.gates) || !RUN_ENDS.includes(view.status)) return false;
+  let waited = 0;
+  for (const gate of view.gates) {
+    const status = String(gate?.status ?? '');
+    if (status === 'passed') continue;
+    if (status !== 'skipped') return false;
+    const first = (typeof gate.logTail === 'string' ? gate.logTail : '').split('\n')[0];
+    if (!MUTEX_WAIT_REASON.test(first)) return false;
+    waited += 1;
+  }
+  return waited > 0;
+}
+
+/** The log of try `k` of a verification: the first keeps `logFile`, the others `<log>.try<k>.log` (#3938). */
+export function tryLogFile(logFile, attempt) {
+  return attempt === 1 ? logFile : `${logFile.replace(/\.log$/, '')}.try${attempt}.log`;
 }
 
 /**
@@ -629,6 +685,56 @@ export function awaitCompletionSignal({ run, sleep, now, o, cwd, since, supersed
 }
 
 /**
+ * Run `verify` into `logFile` ({@link runVerifyOnce}), and when its run
+ * reached no verdict only because a gate's mutex stayed held for its whole
+ * budget ({@link mutexWaitOnly}), start it again, up to `o.mutexRetries`
+ * times (#3938) — the requeue a person did by hand with `--after-reinstruct`.
+ * Before each new start the checks of a start are made again: a newer task
+ * ends it (superseded), a HEAD that moved since the first start stops it (the
+ * worker is still committing; the exit 99 stands), and the manifest is taken
+ * again (onVerifyStart). Each try keeps its own log ({@link tryLogFile}); the
+ * runs sent back are returned as `earlier`, so the record's split is the sum
+ * of all tries, and the note names them (`mutex-requeue=<n>`).
+ *
+ * @returns {{ exitCode: number, log: string, notes: string[], superseded: string | null, earlier: object[] }}
+ */
+export function runVerify(ctx, args, logFile) {
+  const { run, o, cwd, supersededBy } = ctx;
+  const retries = Number(o.mutexRetries ?? DEFAULT_MUTEX_RETRIES);
+  const head = git(run, o.worktree, ['rev-parse', 'HEAD']).trim();
+  const notes = [];
+  const tries = [];
+  /** The result of `one`, the last try; `sentBack`: `one`'s run is itself one of `tries` (no new start followed). */
+  const finish = (one, sentBack, extra = []) => {
+    if (tries.length === 0) return { ...one, notes, earlier: [] };
+    const earlier = (sentBack ? tries.slice(0, -1) : tries).map((t) => t.view);
+    const last = sentBack ? tries.at(-1).view : readRun(run, o.cli, o.wt, runIdOf(one.log), cwd);
+    const runs = [...tries.map((t) => t.runId), ...(sentBack ? [] : [runIdOf(one.log) ?? '?'])];
+    const total = verifyTiming(last, earlier).mutexSec;
+    notes.push(
+      `mutex-requeue=${runs.length - 1}`,
+      `mutex-runs=${runs.join(',')}`,
+      ...(total === undefined ? [] : [`mutexSec-total=${total}`]),
+      ...extra
+    );
+    return { ...one, notes, earlier };
+  };
+  for (let attempt = 1; ; attempt++) {
+    const one = runVerifyOnce(ctx, args, tryLogFile(logFile, attempt));
+    notes.push(...one.notes);
+    if (one.superseded || one.exitCode !== NO_VERDICT_EXIT) return finish(one, false);
+    const runId = runIdOf(one.log);
+    const view = readRun(run, o.cli, o.wt, runId, cwd);
+    if (!mutexWaitOnly(view)) return finish(one, false);
+    tries.push({ runId, view });
+    if (attempt > retries) return finish(one, true, ['mutex-requeue-limit']);
+    const newer = supersededBy?.();
+    if (newer) return finish({ ...one, superseded: newer }, true);
+    if (git(run, o.worktree, ['rev-parse', 'HEAD']).trim() !== head) return finish(one, true, ['mutex-requeue-stopped=head-moved']);
+  }
+}
+
+/**
  * Run `verify` into `logFile`, and when another run of the worktree is still
  * going (`already in progress`: a re-instruction's old run, or one a person
  * started), wait for that run to end and start again (#3883 P4) — rather than
@@ -637,7 +743,7 @@ export function awaitCompletionSignal({ run, sleep, now, o, cwd, since, supersed
  *
  * @returns {{ exitCode: number, log: string, notes: string[], superseded: string | null }}
  */
-export function runVerify({ spawnToLog, run, sleep, now, o, cwd, supersededBy, onVerifyStart }, args, logFile) {
+function runVerifyOnce({ spawnToLog, run, sleep, now, o, cwd, supersededBy, onVerifyStart }, args, logFile) {
   const notes = [];
   for (let attempt = 1; ; attempt++) {
     // The environment this verification starts in (#3883 H-8).
@@ -679,7 +785,10 @@ function awaitRunEnd({ run, sleep, now, o, cwd, supersededBy }, runId) {
  * printed (H-5): `verdict.runId` when main() took it from the verification's
  * own log (runIdOf), else runIdOf of the folded log.
  *
- * @returns {{ state: 'confirmed' | 'working' | 'dirty', exitCode: number, log: string, reason: string, reverified: boolean }}
+ * A re-verification's runs that a mutex wait sent back (runVerify, #3938) are
+ * returned as `earlier`, for the record's split.
+ *
+ * @returns {{ state: 'confirmed' | 'working' | 'dirty', exitCode: number, log: string, reason: string, reverified: boolean, earlier?: object[] }}
  */
 export function confirmCompletion(ctx) {
   const { run, now, o, cwd, verdict } = ctx;
@@ -714,6 +823,7 @@ export function confirmCompletion(ctx) {
   if (lastStop === null) notes.push('last-stop=unknown');
 
   let reverified = false;
+  let earlier = [];
   if (committedAfter || movedSinceSignal || (beforeSignal && dirty.length > 0)) {
     if (!o.taskId) {
       return {
@@ -731,13 +841,14 @@ export function confirmCompletion(ctx) {
     const again = runVerify(ctx, ['verify', o.wt, '--task', o.taskId, '--instance', o.instance], reLog);
     ({ exitCode, log } = again);
     reverified = true;
+    earlier = again.earlier;
     notes.push('reverified=verify --task', ...again.notes);
-    if (again.superseded) return { state: 'working', exitCode, log, reason: again.superseded, reverified };
+    if (again.superseded) return { state: 'working', exitCode, log, reason: again.superseded, reverified, earlier };
     runId = runIdOf(log);
     if (runId) notes.push(`run=${runId}`);
     const recommitted = Date.parse(git(run, o.worktree, ['log', '-1', '--format=%cI']).trim());
     if (Number.isFinite(recommitted) && recommitted > reStart) {
-      return { state: 'working', exitCode, log, reason: 'a commit landed during the re-verification', reverified };
+      return { state: 'working', exitCode, log, reason: 'a commit landed during the re-verification', reverified, earlier };
     }
   } else if (beforeSignal) {
     notes.push('timing=before-signal(no change since)');
@@ -745,15 +856,15 @@ export function confirmCompletion(ctx) {
 
   const after = dirtyPaths(run, o.worktree);
   if (after.length > 0) {
-    return { state: 'dirty', exitCode, log, reason: `uncommitted changes: ${after.slice(0, 5).join(', ')}`, reverified };
+    return { state: 'dirty', exitCode, log, reason: `uncommitted changes: ${after.slice(0, 5).join(', ')}`, reverified, earlier };
   }
-  return { state: 'confirmed', exitCode, log, reason: notes.join(' '), reverified };
+  return { state: 'confirmed', exitCode, log, reason: notes.join(' '), reverified, earlier };
 }
 
 const USAGE = `Usage:
   node scripts/orchestrate/wait-verify.mjs --run-dir <dir> --issues <range> --issue <N> --wt <worktree-id> --worktree <path> --instance <agent>
        [--task <id>] [--model <opus|sonnet|->] [--timeout <sec>] [--log <file>] [--after-reinstruct] [--require-signal] [--signal-timeout <sec>] [--cli <commandmatedev>]
-       [--item <work item>]
+       [--item <work item>] [--mutex-retries <n>]
   node scripts/orchestrate/wait-verify.mjs --auto-yes-off --wt <worktree-id> --instance <agent> [--cli <commandmatedev>]`;
 
 const FLAGS = {
@@ -770,6 +881,7 @@ const FLAGS = {
   '--log': 'log',
   '--cli': 'cli',
   '--item': 'item',
+  '--mutex-retries': 'mutexRetries',
 };
 const SWITCHES = { '--after-reinstruct': 'afterReinstruct', '--require-signal': 'requireSignal', '--auto-yes-off': 'autoYesOff' };
 
@@ -780,6 +892,7 @@ export function parseArgs(argv) {
     autoYesOff: false,
     timeout: String(DEFAULT_TIMEOUT_SEC),
     signalTimeout: String(DEFAULT_SIGNAL_TIMEOUT_SEC),
+    mutexRetries: String(DEFAULT_MUTEX_RETRIES),
     cli: 'commandmatedev',
   };
   for (let i = 0; i < argv.length; i++) {
@@ -797,6 +910,7 @@ export function parseArgs(argv) {
   for (const flag of ['--timeout', '--signal-timeout']) {
     if (!/^\d+$/.test(options[FLAGS[flag]])) return { error: `${flag} must be seconds (got ${options[FLAGS[flag]]})` };
   }
+  if (!/^\d+$/.test(options.mutexRetries)) return { error: `--mutex-retries must be a count (got ${options.mutexRetries})` };
   // 3-4: after a re-instruction the task has ended, so `wait --verify` would judge
   // an unattached run (scope SKIP, env-clean ERROR). The task must be named.
   if (options.afterReinstruct && !options.taskId) return { error: '--after-reinstruct needs --task <id>' };
@@ -934,6 +1048,8 @@ export function main(argv, deps = {}) {
     let verdictLog = fs.existsSync(o.logFile) ? fs.readFileSync(o.logFile, 'utf8') : '';
     /** The run the verification started (runIdOf): its gates are the record's timing (#3909). */
     let verifyRunId = null;
+    /** The runs before it that a mutex wait sent back (#3938): their waits count in the record's split. */
+    let verifyEarlier = [];
     const verifyCtx = {
       spawnToLog, run, sleep, now, o, cwd, supersededBy,
       onVerifyStart: () => {
@@ -971,6 +1087,7 @@ export function main(argv, deps = {}) {
         verdictLog = o.afterReinstruct ? '' : verdictLog;
         verdictLog += verified.log;
         verifyRunId = runIdOf(verified.log);
+        verifyEarlier = verified.earlier;
         // As `wait --verify` folds it: a green run does not turn "never started" into a pass.
         exitCode = exitCode === NOT_STARTED_EXIT && verified.exitCode === 0 ? NOT_STARTED_EXIT : verified.exitCode;
       }
@@ -1018,7 +1135,7 @@ export function main(argv, deps = {}) {
           model: o.model,
           durationSec,
           // The waits and the execution apart (#3909); absent when no gate recorded a split.
-          ...verifyTiming(view),
+          ...verifyTiming(view, verifyEarlier),
           note,
           item: o.item,
           key: key(),
@@ -1053,7 +1170,10 @@ export function main(argv, deps = {}) {
     });
     const verdictLine = (view) => summarizeVerdict(confirmed.log, confirmed.exitCode, view).line;
     // A re-verification (3-3) is the run the verdict is now taken on.
-    if (confirmed.reverified) verifyRunId = runIdOf(confirmed.log);
+    if (confirmed.reverified) {
+      verifyRunId = runIdOf(confirmed.log);
+      verifyEarlier = confirmed.earlier ?? [];
+    }
     if (confirmed.state === 'working') {
       record('fail', headNow(), (view) => `unconfirmed: ${confirmed.reason}; ${verdictLine(view)} ${extraNotes()} auto-yes=kept`);
       return UNCONFIRMED_EXIT;
@@ -1073,6 +1193,17 @@ export function main(argv, deps = {}) {
         (view) => `unconfirmed: the inputs changed during the verification (${movedEnv.join(',')}; see ${path.basename(env.file)}); ${verdictLine(view)} ${extraNotes()} auto-yes=kept`
       );
       return UNCONFIRMED_EXIT;
+    }
+
+    // A re-verification that reached no verdict (99 after the mutex requeues, …) is
+    // treated as the normal path treats one: the worker may still be working, so Auto-Yes stays (#3938 review 1).
+    if (!VERDICT_EXIT_CODES.includes(confirmed.exitCode)) {
+      const line = (view) =>
+        confirmed.state === 'dirty'
+          ? `unconfirmed: ${confirmed.reason}; ${verdictLine(view)}`
+          : `${verdictLine(view)}${confirmed.reason ? ` ${confirmed.reason}` : ''}`;
+      record('fail', headNow(), (view) => `${line(view)} ${extraNotes()} auto-yes=kept`);
+      return confirmed.exitCode;
     }
 
     // The worker's turn is over: nothing is left for Auto-Yes to answer.
