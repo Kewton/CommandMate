@@ -449,7 +449,7 @@ commandmate wait <worktree-id> --fail-on-upstream-fault  # 上流障害で compo
 |:------:|------|---------------|
 | 0 | 正常完了（`--verify` 指定時は検証にも合格） | `capture` で結果取得 |
 | 10 | プロンプト検出（`--on-prompt agent` 時） | `respond` で応答し、再度 `wait` |
-| 11 | 上流障害（`--fail-on-upstream-fault` 指定時。`ask` は常時、Issue #1839 / #3011）。`id=context-limit` は文脈上限で、`instances <wt> kill <instance>` で新しいセッションにして送り直す | **`verify` を回さず**時間をおいて同じ内容を再 `send` |
+| 11 | 上流障害（`--fail-on-upstream-fault` 指定時。`ask` は常時、Issue #1839 / #3011）。`id=context-limit` は文脈上限で、`instances <wt> kill <instance>` で新しいセッションにして送り直す。`id=model-capacity` は同じモデルでは答えないので、別の instance・別のモデルへ送る（#3936） | **`verify` を回さず**時間をおいて同じ内容を再 `send` |
 | 20 | 検証ゲート不合格（`--verify`） | `verify --json` で失敗ゲートを確認し修正 |
 | 21 | 作業証跡ゼロ（コミットも未コミット変更も無い）／セッションが一度も稼働していない | エージェントが着手していない。再度 `send` |
 | 124 | タイムアウト | `capture` で状況確認、再度 `wait` or 中断 |
@@ -686,6 +686,10 @@ hooks 設定を使って観測した結果です（詳細は
 commandmate instances "$WT" kill "$INSTANCE"   # セッションを止める
 commandmate ask "$WT" "$SAME_MESSAGE" --instance "$INSTANCE"   # 新しいセッションで送り直す
 ```
+
+`id=model-capacity`（Issue #3936）は codex が行頭の `■ Selected model is at capacity` でターンを閉じた状態で、
+選んだモデルが混雑して答えていません。同じモデルの同じセッションへ再送しても通らないので、別の instance
+（例 `--instance codex-2`）か別のモデルへ送ってください。返答の本文がこの文言を引用しているだけ（行頭が `■ ` でない）なら一致しません。
 
 #### `--fail-on-upstream-fault`
 
@@ -2041,7 +2045,7 @@ commandmate capture <worktree-id> --instance worker-7 --json | jq -r '.resolvedB
 
 | フィールド | 意味 |
 |-----------|------|
-| `id` | `overloaded`（`5xx Overloaded`）/ `retrying`（`Retrying in Ns · attempt N/M`）/ `limit-reached` / `api-error` |
+| `id` | `overloaded`（`5xx Overloaded`）/ `retrying`（`Retrying in Ns · attempt N/M`）/ `context-limit`（`maximum context length is N tokens`、#3011）/ `model-capacity`（codex の行頭 `■ Selected model is at capacity`、#3936）/ `limit-reached` / `api-error` |
 | `matchedText` | 一致した**行そのもの**（前後の行は含まない）。200 UTF-8 バイトで切り詰め、切ったときだけ `…[truncated]` が付く |
 | `at` | 判定に使ったフレームの取得時刻（epoch ms） |
 

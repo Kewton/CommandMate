@@ -61,6 +61,25 @@ describe('model-capacity upstream fault (Issue #3936)', () => {
     expect(matchUpstreamFault(buildRealtimeSnippet(shortSession))).toBeNull();
   });
 
+  // Review of eaeab6d (P1): the wording alone also sits in healthy replies that
+  // quote it — this Issue, its review, a reply explaining the error. Only codex's
+  // own error row (`■ ` at column 0) is the fault.
+  it.each([
+    ['a codex reply naming the error', '• エラー名は Selected model is at capacity です。'],
+    ['a codex reply quoting the row on an indented line', '• 画面には次の行が出ていました:\n  ■ Selected model is at capacity. Please try a different model.'],
+    ['a codex input echo of a brief that quotes it', '› ■ Selected model is at capacity. Please try a different model. を検出してください'],
+    ['a claude reply quoting it', '⏺ codex の画面に「■ Selected model is at capacity」が出ていました。'],
+    ['a claude continuation line quoting it', '⏺ 引用します:\n  ■ Selected model is at capacity. Please try a different model.'],
+    ['a mid-line quote with backticks', 'The row `■ Selected model is at capacity.` is the cue to switch instance.'],
+  ])('does not match %s', (_label, frame) => {
+    expect(matchUpstreamFault(frame)).toBeNull();
+  });
+
+  it('negative control: the synthetic frame with the row quoted by an indented reply line has no fault', () => {
+    const quoted = CAPACITY_FRAME.replace(CAPACITY_LINE, `  ${CAPACITY_LINE}`);
+    expect(matchUpstreamFault(buildRealtimeSnippet(quoted))).toBeNull();
+  });
+
   it.each([
     ['the 529 storm line (claude), which says "at capacity" too', 'API Error: Repeated 529 Overloaded errors. The API is at capacity.'],
     ['prose about choosing a model', 'Selected model: gpt-5.6-terra. Use /model to switch if the model is at capacity later.'],

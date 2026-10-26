@@ -103,6 +103,7 @@ import { isPromptPushSuppressed } from '@/lib/push/prompt-push-gate';
 // Issue #2000: deep path for the same reason as the two imports above.
 import { notifyUpstreamFaultPush } from '@/lib/push/failure-push-notifier';
 import { matchUpstreamFault } from '@/lib/detection/upstream-faults';
+import { buildRealtimeSnippet } from '@/lib/realtime-snippet';
 import { fanOutAfterCommit, startWaitingPushNotifier } from '@/lib/push/waiting-push-notifier';
 import {
   captureObservedFrame,
@@ -127,20 +128,6 @@ import {
 } from './response-checker-blank-response';
 
 /**
- * How many rows from the bottom of a capture the upstream-fault check reads
- * (Issue #2000).
- *
- * The same 100 as `current-output-builder`'s `realtimeSnippet`, and for the
- * reason #1839 gives there: the wider capture keeps a banner from an hour ago
- * in scope, and "is this happening now" is the only question worth ringing a
- * phone about. Keeping the two windows equal also means the notification and
- * the `upstreamFault` field an operator reads in `capture --json` are judging
- * the same rows — a fault that rang but is invisible in the payload next to it
- * is unverifiable.
- */
-const UPSTREAM_FAULT_SCAN_ROWS = 100;
-
-/**
  * Raise a push notification when this frame shows a NEW upstream fault
  * (Issue #2000).
  *
@@ -161,8 +148,17 @@ function observeUpstreamFaultForPush(
   instanceId: string | undefined,
   output: string
 ): void {
-  const snippet = output.split('\n').slice(-UPSTREAM_FAULT_SCAN_ROWS).join('\n');
-  const match = matchUpstreamFault(snippet);
+  // The rows `current-output-builder` publishes as `realtimeSnippet` and judges
+  // `upstreamFault` on (#1839), cut by the same function rather than a copy of
+  // its window. The reason is #1839's: the wider capture keeps a banner from an
+  // hour ago in scope, and "is this happening now" is the only question worth
+  // ringing a phone about. Sharing the cut also means the notification and the
+  // `upstreamFault` an operator reads in `capture --json` judge the same rows —
+  // a fault that rang but is invisible in the payload next to it is
+  // unverifiable. Issue #3936: the plain last 100 rows (#2000) drifted from the
+  // snippet when #2768 anchored it to the last row with content, so an inline
+  // codex pane showed `model-capacity` in the capture and never rang.
+  const match = matchUpstreamFault(buildRealtimeSnippet(output));
   // Fire-and-forget, like every other push call in this file: the poller must
   // not slow down or break because a notification could not be delivered.
   void notifyUpstreamFaultPush({

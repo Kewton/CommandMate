@@ -24,7 +24,8 @@
  *      was killed) is taken over, and a live one is waited for with a
  *      `lock held by pid …` line on stderr every minute (#3633);
  *   2. waits until `capture --instance <id> --json` reads `ready` three times
- *      in a row; a reviewer whose first read says it is not running is first
+ *      in a row; a reviewer whose first read says it is not running (and has
+ *      no `startingSince`: one already starting is only waited for) is first
  *      started with one short message that asks for no work (START_MESSAGE,
  *      `send`; its output in `review-<N>….start.{out,err}`) and then waited
  *      for START_READY_MAX_POLLS (#3936);
@@ -421,12 +422,22 @@ function releaseLock(lock, owner) {
   fs.rmSync(lock, { recursive: true, force: true });
 }
 
-/** `capture --json` of the reviewer: its status, and whether its session is not running (null when unreadable). */
+/**
+ * `capture --json` of the reviewer: its status, and whether its session is
+ * stopped (nothing running and nothing starting; false when unreadable).
+ *
+ * A launch in progress has no pane yet and reads `isRunning: false` /
+ * `session_not_running` too; the server tells it apart with `startingSince`
+ * (current-output-builder, #3179). That one is waited for: a starting message
+ * on top of it would race the send that is starting it.
+ */
 function readReviewer(out) {
   try {
     const data = out.status === 0 ? JSON.parse(out.stdout) : null;
     if (!data) return { status: null, notRunning: false };
-    return { status: data.sessionStatus ?? null, notRunning: data.isRunning === false || data.sessionStatusReason === 'session_not_running' };
+    const notRunning = data.isRunning === false || data.sessionStatusReason === 'session_not_running';
+    const starting = typeof data.startingSince === 'number';
+    return { status: data.sessionStatus ?? null, notRunning: notRunning && !starting };
   } catch {
     return { status: null, notRunning: false };
   }
@@ -435,8 +446,8 @@ function readReviewer(out) {
 /**
  * Wait until the reviewer reads `ready` READY_STREAK times in a row.
  *
- * A reviewer whose first read says its session is not running never reads
- * `ready` on its own (#3936: codex-2 waited out all 180 polls). It is started
+ * A reviewer whose first read says its session is not running (and not
+ * starting) never reads `ready` on its own (#3936: codex-2 waited out all 180 polls). It is started
  * once with `start()` — the send API starts a stopped session — and then given
  * START_READY_MAX_POLLS. A running one (`running`, `waiting`, …) is waited for
  * as before.
@@ -674,7 +685,9 @@ export function main(argv, deps = {}) {
       // Not a review that failed: the reviewer's model did not answer (#3936). The person decides on another --instance.
       const fault = parseUpstreamFault(ask.stdout);
       const what = fault ? `id=${fault.id}${fault.matchedText ? ` (${JSON.stringify(fault.matchedText)})` : ''}` : 'id unknown';
-      record('fail', `${label}: upstream fault ${what} on ${o.instance}; ask exit=${ask.status}, not a verdict — switch --instance (see ${label}.err)`);
+      // Only model-capacity is "this model will not answer"; overloaded / retrying retry on their own (selfRetrying).
+      const next = fault?.id === 'model-capacity' ? 'switch --instance' : 'retry later or switch --instance, by the id';
+      record('fail', `${label}: upstream fault ${what} on ${o.instance}; ask exit=${ask.status}, not a verdict — ${next} (see ${label}.err)`);
       return 1;
     }
     if (ask.status !== 0) {

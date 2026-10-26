@@ -99,6 +99,14 @@ describe('ask exit 11: upstream fault (#3936)', () => {
     expect(fs.existsSync(path.join(runDir, 'consistency-review.md'))).toBe(false);
   });
 
+  it('a self-retrying fault (overloaded) is not told to switch the model', () => {
+    captures = [READY];
+    askResult = { status: 11, stdout: faultStdout('overloaded', '529 Overloaded'), stderr: '' };
+    expect(go()).toBe(1);
+    expect(review()?.note).toContain('upstream fault id=overloaded');
+    expect(review()?.note).toContain('retry later or switch --instance, by the id');
+  });
+
   it('exit 11 without a readable fault still says upstream fault', () => {
     captures = [READY];
     askResult = { status: 11, stdout: '', stderr: '' };
@@ -161,6 +169,22 @@ describe('a reviewer that is not running is started first (#3936)', () => {
     expect(verbs().filter((v) => v === 'capture')).toHaveLength(1 + START_READY_MAX_POLLS);
     expect(verbs()).not.toContain('ask');
     expect(review()?.note).toContain(`within ${START_READY_MAX_POLLS} polls after starting it; not sent`);
+  });
+
+  // Review of eaeab6d (P2): before the pane exists a launch already in progress
+  // reads isRunning:false / session_not_running too; `startingSince` tells it apart.
+  it('a reviewer that is already starting (startingSince) is waited for, not sent the starting message', () => {
+    captures = [{ ...STOPPED, startingSince: 1_787_500_000_000 }, RUNNING, READY];
+    expect(go()).toBe(0);
+    expect(verbs()).not.toContain('send');
+    expect(verbs()).toEqual(['capture', 'capture', 'capture', 'capture', 'capture', 'ask']);
+    expect(fs.existsSync(path.join(runDir, 'review-3936.start.out'))).toBe(false);
+  });
+
+  it('negative control: startingSince null is a stopped reviewer, started once', () => {
+    captures = [{ ...STOPPED, startingSince: null }, READY];
+    expect(go()).toBe(0);
+    expect(verbs().filter((v) => v === 'send')).toHaveLength(1);
   });
 
   it.each([

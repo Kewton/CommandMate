@@ -73,8 +73,15 @@ export const UPSTREAM_FAULTS: readonly UpstreamFault[] = [
     // answer (Issue #3936); the same model will not, so the cue is to switch
     // instance or model. Anchored on the sentence, not on "at capacity": the
     // 529 line above says "The API is at capacity" and is `overloaded`.
+    //
+    // And on codex's own error row, not on the sentence alone: `■ ` at column
+    // 0, the shape codex 0.160.0 draws its errors in (measured on
+    // `■ Conversation interrupted`). A reply that names or quotes the error —
+    // this Issue, its review — is indented (`• ` / `  `), and an input echo
+    // starts with `› `; matching those would fail a healthy turn with exit 11.
+    // The capacity row itself is unmeasured (the fixture is synthetic).
     id: 'model-capacity',
-    pattern: /\bSelected model is at capacity\b/i,
+    pattern: /^■ Selected model is at capacity\b/im,
     selfRetrying: false,
   },
   { id: 'limit-reached', pattern: /\blimit reached\b/i, selfRetrying: false },
@@ -136,8 +143,9 @@ export function matchUpstreamFault(frame: string): UpstreamFaultMatch | null {
   const clean = stripAnsi(frame);
   for (const fault of UPSTREAM_FAULTS) {
     const match = fault.pattern.exec(clean);
-    // The patterns are unanchored and stateless (no /g), so `exec` cannot carry
-    // a lastIndex between calls — but reading `index` requires exec regardless.
+    // The patterns are stateless (no /g; only `model-capacity` is anchored, to a
+    // line start with /m), so `exec` cannot carry a lastIndex between calls —
+    // but reading `index` requires exec regardless.
     if (!match) continue;
     const lineStart = clean.lastIndexOf('\n', match.index) + 1;
     const lineEnd = clean.indexOf('\n', match.index);

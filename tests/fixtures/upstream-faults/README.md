@@ -13,7 +13,10 @@
 - **土台は実測の画面。** `../codex-idle-composer-0155/idle-after-turn.txt`（codex-cli 0.155.1 のアイドル入力欄、実測・匿名化済み）の
   1-based 126 行目（`Worked for 2m 32s · done 3:01 AM`、ターン終了の行）を、上の 1 行に差し替えただけ。ほかの 1001 行・ANSI・入力欄の行（129 行目）は元とバイト一致
 - 行頭の `■ ` は codex 0.160.0 の実測のエラー行（`../startup-screen-3293/codex-0.160.0-first-turn-interrupted.txt` の `■ Conversation interrupted …`）の形に合わせた。
-  capacity の行が実際にこの形・この位置（入力欄の直上、`realtimeSnippet` の末尾 100 行の内側）に出るかは**確かめていない**
+  capacity の行が実際にこの形（行頭 `■ `、列 0）・この位置（入力欄の直上）に出るかは**確かめていない**。規則 `model-capacity` はこの行頭の形に錨を置いている
+  （返答の本文が文言を引用しているだけの行に当たらないため。整合性レビュー P1）
+- 配置は inline の codex の形で、内容はステータス行の 131 行目で終わり（入力欄は 129 行目）、その下の約 870 行は空。`realtimeSnippet` は末尾が空なので内容の最終行まで戻って切り出す（#2768）。
+  push の判定（`response-checker`）も同じ切り出しを使う（#3936。以前は生の末尾 100 行で、この画面では null だった）
 - 確かめられること: 規則がこの行に当たること、行を差し替えても codex の状態判定が `ready` のままであること。
   確かめられないこと: 実機の画面で capacity の行が入力欄に戻った後も `realtimeSnippet` に残るか、`current-output` が `ready` かつ
   `isUnclassifiedActive !== true` の経路でこの画面を返すか。実機の frame が採れたら、この合成と差し替える
