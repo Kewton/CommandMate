@@ -246,18 +246,48 @@ function defaultSleep(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+/** The gates of a log, each id once: a failing gate's echoed body may hold `GATE …` lines of its own (#3928). */
+function logGates(log) {
+  const gates = [];
+  for (const match of log.matchAll(/^GATE (\S+) ([A-Z]+)\b.*$/gm)) {
+    if (gates.some((g) => g.id === match[1])) continue;
+    gates.push({ id: match[1], label: match[2], contract: match[0].endsWith(' [contract]') });
+  }
+  return gates;
+}
+
+const GATE_LABELS = { passed: 'PASS', failed: 'FAIL', timeout: 'TIMEOUT', skipped: 'SKIP', error: 'ERROR' };
+
+/** The gates of the stored run (verify-runner.ts gateLabel), the same source as {@link verifyTiming} (#3928). */
+function storedGates(rows) {
+  const gates = [];
+  for (const row of rows) {
+    const status = String(row.status ?? '');
+    const flaky = /^\[flaky\] runs=\d+ outcome=flaky\b/m.test(typeof row.logTail === 'string' ? row.logTail : '');
+    gates.push({
+      id: row.gateId,
+      label: flaky ? 'FLAKY' : (GATE_LABELS[status] ?? status.toUpperCase()),
+      contract: row.source === 'contract',
+    });
+  }
+  return gates;
+}
+
 /**
  * The verdict lines of a `wait --verify` / `verify` log, folded into one line.
  * Reads `GATE <id> <LABEL> … [contract]`, `RESULT <status>` and
  * `Completed: … (basis=…)` (src/cli/utils/verify-runner.ts, src/cli/commands/wait.ts).
  * A gate the contract defined is listed as `<id>@contract`: its command is the
  * contract's, not verify.yaml's, so nothing outside this task may lean on it.
+ * With `view` (the stored run, as {@link verifyTiming} reads) the gates come from it,
+ * else from the log, each id once (#3928).
+ *
+ * @param {string} log
+ * @param {number} exitCode
+ * @param {{ gates?: Array<Record<string, unknown>> } | null} [view]
  */
-export function summarizeVerdict(log, exitCode) {
-  const gates = [];
-  for (const match of log.matchAll(/^GATE (\S+) ([A-Z]+)\b.*$/gm)) {
-    gates.push({ id: match[1], label: match[2], contract: match[0].endsWith(' [contract]') });
-  }
+export function summarizeVerdict(log, exitCode, view = null) {
+  const gates = Array.isArray(view?.gates) ? storedGates(view.gates) : logGates(log);
   const result = [...log.matchAll(/^RESULT (\S+)/gm)].pop()?.[1] ?? null;
   const basis = [...log.matchAll(/^Completed: \S+ \(basis=([^),\s]+)/gm)].pop()?.[1] ?? null;
   const name = (g) => (g.contract ? `${g.id}@contract` : g.id);
@@ -970,8 +1000,11 @@ export function main(argv, deps = {}) {
     };
     const extraNotes = () => [...verifyNotes, `key=${key()}`, ...envNotes()].join(' ');
 
-    const record = (result, head, note) => {
+    const record = (result, head, noteOf) => {
       const durationSec = Math.round((now().getTime() - started.getTime()) / 1000);
+      // The note and the timing take their gates from one read of the stored run (#3928).
+      const view = readRun(run, o.cli, o.wt, verifyRunId, cwd);
+      const note = typeof noteOf === 'function' ? noteOf(view) : noteOf;
       const { file } = appendRecord(
         o.runDir,
         o.issues,
@@ -985,7 +1018,7 @@ export function main(argv, deps = {}) {
           model: o.model,
           durationSec,
           // The waits and the execution apart (#3909); absent when no gate recorded a split.
-          ...verifyTiming(readRun(run, o.cli, o.wt, verifyRunId, cwd)),
+          ...verifyTiming(view),
           note,
           item: o.item,
           key: key(),
@@ -999,36 +1032,36 @@ export function main(argv, deps = {}) {
 
     if (superseded) {
       // The worker is working on the newer task: Auto-Yes stays, and no verdict is taken on the old one.
-      record('fail', headNow(), `unconfirmed: ${superseded}; ${summarizeVerdict(verdictLog, exitCode).line} ${extraNotes()} auto-yes=kept`);
+      record('fail', headNow(), (view) => `unconfirmed: ${superseded}; ${summarizeVerdict(verdictLog, exitCode, view).line} ${extraNotes()} auto-yes=kept`);
       return UNCONFIRMED_EXIT;
     }
 
     if (signalMissing) {
       // No signal: the turn end was mid-work, so nothing was verified and Auto-Yes stays.
-      record('fail', headNow(), `unconfirmed: ${signalMissing}; ${summarizeVerdict(verdictLog, exitCode).line} ${extraNotes()} auto-yes=kept`);
+      record('fail', headNow(), (view) => `unconfirmed: ${signalMissing}; ${summarizeVerdict(verdictLog, exitCode, view).line} ${extraNotes()} auto-yes=kept`);
       return UNCONFIRMED_EXIT;
     }
 
     if (!VERDICT_EXIT_CODES.includes(exitCode)) {
       // No verdict (prompt, timeout, error): the worker may still be working, so Auto-Yes stays.
-      record('fail', headNow(), `${summarizeVerdict(verdictLog, exitCode).line} ${extraNotes()} auto-yes=kept`);
+      record('fail', headNow(), (view) => `${summarizeVerdict(verdictLog, exitCode, view).line} ${extraNotes()} auto-yes=kept`);
       return exitCode;
     }
 
     const confirmed = confirmCompletion({
       ...verifyCtx, verdict: { exitCode, log: verdictLog, ...(verifyRunId ? { runId: verifyRunId } : {}) }, signal, since: baseline.found ? baseline.createdAt : null,
     });
-    const verdict = summarizeVerdict(confirmed.log, confirmed.exitCode);
+    const verdictLine = (view) => summarizeVerdict(confirmed.log, confirmed.exitCode, view).line;
     // A re-verification (3-3) is the run the verdict is now taken on.
     if (confirmed.reverified) verifyRunId = runIdOf(confirmed.log);
     if (confirmed.state === 'working') {
-      record('fail', headNow(), `unconfirmed: ${confirmed.reason}; ${verdict.line} ${extraNotes()} auto-yes=kept`);
+      record('fail', headNow(), (view) => `unconfirmed: ${confirmed.reason}; ${verdictLine(view)} ${extraNotes()} auto-yes=kept`);
       return UNCONFIRMED_EXIT;
     }
     // Last check before the verdict is taken and Auto-Yes goes off (a re-verification or the signal wait may have run).
     const late = supersededBy();
     if (late) {
-      record('fail', headNow(), `unconfirmed: ${late}; ${verdict.line} ${extraNotes()} auto-yes=kept`);
+      record('fail', headNow(), (view) => `unconfirmed: ${late}; ${verdictLine(view)} ${extraNotes()} auto-yes=kept`);
       return UNCONFIRMED_EXIT;
     }
     // The inputs changed while the last verification ran: the verdict belongs to neither environment (#3883 H-8).
@@ -1037,7 +1070,7 @@ export function main(argv, deps = {}) {
       record(
         'fail',
         headNow(),
-        `unconfirmed: the inputs changed during the verification (${movedEnv.join(',')}; see ${path.basename(env.file)}); ${verdict.line} ${extraNotes()} auto-yes=kept`
+        (view) => `unconfirmed: the inputs changed during the verification (${movedEnv.join(',')}; see ${path.basename(env.file)}); ${verdictLine(view)} ${extraNotes()} auto-yes=kept`
       );
       return UNCONFIRMED_EXIT;
     }
@@ -1047,11 +1080,11 @@ export function main(argv, deps = {}) {
     // The tree is clean here (or the record is a fail), so this HEAD is what the verification saw.
     const head = headNow();
     if (confirmed.state === 'dirty') {
-      record('fail', head, `unconfirmed: ${confirmed.reason}; ${verdict.line} ${extraNotes()} auto-yes=${autoYes}`);
+      record('fail', head, (view) => `unconfirmed: ${confirmed.reason}; ${verdictLine(view)} ${extraNotes()} auto-yes=${autoYes}`);
       return confirmed.exitCode === 0 ? UNCONFIRMED_EXIT : confirmed.exitCode;
     }
     const extra = confirmed.reason ? ` ${confirmed.reason}` : '';
-    record(confirmed.exitCode === 0 ? 'ok' : 'fail', head, `${verdict.line}${extra} ${extraNotes()} auto-yes=${autoYes}`);
+    record(confirmed.exitCode === 0 ? 'ok' : 'fail', head, (view) => `${verdictLine(view)}${extra} ${extraNotes()} auto-yes=${autoYes}`);
     return confirmed.exitCode;
   } catch (err) {
     error(err instanceof Error ? err.message : String(err));
