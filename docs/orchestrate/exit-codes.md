@@ -99,10 +99,11 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
 - **ログと記録**: 1 回目は `wait-<N>.verify.log`（再検証は `.reverify.log`）、2 回目からは `wait-<N>.verify.try<k>.log` に残る。
   記録の要約に `mutex-requeue=<始め直した回数> mutex-runs=<run id の並び> mutexSec-total=<秒>` が載り、記録の `mutexSec`
   （`queueSec`・`runSec` も）は全試行の合計になる
-- **始め直さないとき**: run が読めない・ログに run id が無い・SKIP の理由が読めない・`mutex-wait` 以外の SKIP（取消し・primary
+- **始め直さないとき**: run が `cancelled` など passed・failed・error 以外で終わった（最後のゲートの mutex 待ちが切れた後、
+  実行枠を取り直す間に取り消すと、ゲートは `mutex-wait` の SKIP のまま run は `cancelled` になる。取り消しは並び直しで覆さない）・run が読めない・ログに run id が無い・SKIP の理由が読めない・`mutex-wait` 以外の SKIP（取消し・primary
   checkout など）や FAIL・TIMEOUT がある、のどれかなら、今までどおり exit 99 を返す。中身を `verify show <run> --json` で見る
 - **上限に達したとき**（要約に `mutex-requeue-limit`）・**HEAD が動いたとき**（`mutex-requeue-stopped=head-moved`）: exit 99 のまま、
-  Auto-Yes は切られていない。並列の検証が減ってから（または直列に）`wait-verify.mjs --after-reinstruct --task <id>` で検証し直す。
+  Auto-Yes は切られていない（3-3 の確認が始める再検証が裁定に至らなかったときも同じ）。並列の検証が減ってから（または直列に）`wait-verify.mjs --after-reinstruct --task <id>` で検証し直す。
   再指示の回数には数えない。HEAD が動いたときは、ワーカーがまだ作業中でないかを capture で先に確かめる
 
 ## 3-4 21 の対応

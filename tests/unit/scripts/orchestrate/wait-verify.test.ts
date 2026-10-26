@@ -1729,3 +1729,64 @@ describe('a verification that only waited for a mutex is started again (#3938)',
     });
   });
 });
+
+describe('a cancelled run and a re-verification without a verdict (#3938 review 1)', () => {
+  const t1 = task('t-1', -10);
+  const skipTail = `${MUTEX_SKIP_TAIL}\n[timing] queue=5.0s mutex=5400.0s run=0.0s`;
+  const mutexGates = [gateRow('lint', 'passed', 30_000, null), gateRow('unit-related', 'skipped', null, skipTail, null)];
+  const skipLog = (id: number) =>
+    `Verifying: wt-1 (run ${id})\nGATE lint PASS (exit=0, 30.0s)\nGATE unit-related SKIP (reason=mutex-wait waited=5400.0s) [contract]\nRESULT error\n`;
+  const passLog = (id: number) => PASS_LOG.replace('(run 12)', `(run ${id})`);
+  const verifies = (h: ReturnType<typeof harness>) => h.spawned.filter((c) => c.args[0] === 'verify');
+
+  // The last gate's mutex expired, then the run was cancelled while it took its slot back:
+  // the gate is a mutex-wait SKIP, the run is cancelled (gate-runner.ts runGateAttempt / runGates).
+  it('a cancelled run whose gates read as mutex-wait only → not started again, exit 99, Auto-Yes kept', () => {
+    expect(mutexWaitOnly({ status: 'cancelled', gates: mutexGates })).toBe(false);
+    const h = harness({
+      tasks: [t1],
+      verifySequence: [{ exit: 99, log: skipLog(12) }, { exit: 0, log: passLog(13) }],
+      runs: { '12': [{ status: 'cancelled', gates: mutexGates }] },
+    });
+    expect(main(argv(), h.deps)).toBe(99);
+    expect(verifies(h)).toHaveLength(1);
+    expect(records()[0].note).not.toContain('mutex-requeue');
+    expect(h.autoYesCalls()).toEqual([]);
+  });
+
+  it('the same gates on an error run are started again (negative control)', () => {
+    expect(mutexWaitOnly({ status: 'error', gates: mutexGates })).toBe(true);
+    const h = harness({
+      tasks: [t1],
+      verifySequence: [{ exit: 99, log: skipLog(12) }, { exit: 0, log: passLog(13) }],
+      runs: { '12': [{ status: 'error', gates: mutexGates }] },
+    });
+    expect(main(argv(), h.deps)).toBe(0);
+    expect(verifies(h)).toHaveLength(2);
+  });
+
+  it('the re-verification confirmCompletion starts ends at the limit (99) → Auto-Yes kept, as on the normal path', () => {
+    const h = harness({
+      tasks: [t1],
+      commitMinute: 6,
+      verifySequence: [{ exit: 0, log: passLog(12) }, ...[13, 14, 15].map((id) => ({ exit: 99, log: skipLog(id) }))],
+      runs: { '13': [{ status: 'error', gates: mutexGates }], '14': [{ status: 'error', gates: mutexGates }], '15': [{ status: 'error', gates: mutexGates }] },
+    });
+    expect(main(argv(), h.deps)).toBe(99);
+    expect(h.autoYesCalls()).toEqual([]);
+    expect(records()[0]).toMatchObject({ result: 'fail' });
+    expect(records()[0].note).toContain('mutex-requeue-limit');
+    expect(records()[0].note).toContain('auto-yes=kept');
+  });
+
+  it('a re-verification with a verdict still turns Auto-Yes off (negative control)', () => {
+    const h = harness({
+      tasks: [t1],
+      commitMinute: 6,
+      verifySequence: [{ exit: 0, log: passLog(12) }, { exit: 20, log: `Verifying: wt-1 (run 13)\n${FAIL_LOG}` }],
+    });
+    expect(main(argv(), h.deps)).toBe(20);
+    expect(h.autoYesCalls()).toHaveLength(1);
+    expect(records()[0].note).toContain('auto-yes=off');
+  });
+});

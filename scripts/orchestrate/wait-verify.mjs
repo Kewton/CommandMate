@@ -136,6 +136,8 @@ export const DEFAULT_MUTEX_RETRIES = 2;
 const NO_VERDICT_EXIT = 99;
 /** The first line of a gate's log tail when its mutex never came free (gate-runner.ts MUTEX_WAIT_SKIP_REASON). */
 const MUTEX_WAIT_REASON = /^reason=mutex-wait(?:\s|$)/;
+/** The run statuses a requeue may follow: the run ended by itself (a mutex-wait SKIP aggregates to `error`). */
+const RUN_ENDS = ['passed', 'failed', 'error'];
 /** `wait`'s "no session was ever seen" (VerifyExitCode.NOT_STARTED); `wait --verify` still verifies it. */
 const NOT_STARTED_EXIT = 21;
 /** Exit codes that are a verdict: the gates ran and judged the work. */
@@ -393,10 +395,13 @@ function runTiming(gates) {
  * stored log tail, and every other gate passed. Any other SKIP (a cancel, the
  * primary-checkout guard), a FAIL, a TIMEOUT or an ERROR is not — and neither
  * is a run that could not be read (null): the reason is never taken from the
- * CLI's GATE lines (#3928).
+ * CLI's GATE lines (#3928). Nor is a run that ended other than passed /
+ * failed / error: a run cancelled while its last gate, past the mutex wait,
+ * took its slot back keeps that gate's mutex-wait SKIP but is `cancelled`
+ * (gate-runner.ts runGates), and a cancel is not to be undone (#3938 review 1).
  */
 export function mutexWaitOnly(view) {
-  if (!Array.isArray(view?.gates)) return false;
+  if (!Array.isArray(view?.gates) || !RUN_ENDS.includes(view.status)) return false;
   let waited = 0;
   for (const gate of view.gates) {
     const status = String(gate?.status ?? '');
@@ -1188,6 +1193,17 @@ export function main(argv, deps = {}) {
         (view) => `unconfirmed: the inputs changed during the verification (${movedEnv.join(',')}; see ${path.basename(env.file)}); ${verdictLine(view)} ${extraNotes()} auto-yes=kept`
       );
       return UNCONFIRMED_EXIT;
+    }
+
+    // A re-verification that reached no verdict (99 after the mutex requeues, …) is
+    // treated as the normal path treats one: the worker may still be working, so Auto-Yes stays (#3938 review 1).
+    if (!VERDICT_EXIT_CODES.includes(confirmed.exitCode)) {
+      const line = (view) =>
+        confirmed.state === 'dirty'
+          ? `unconfirmed: ${confirmed.reason}; ${verdictLine(view)}`
+          : `${verdictLine(view)}${confirmed.reason ? ` ${confirmed.reason}` : ''}`;
+      record('fail', headNow(), (view) => `${line(view)} ${extraNotes()} auto-yes=kept`);
+      return confirmed.exitCode;
     }
 
     // The worker's turn is over: nothing is left for Auto-Yes to answer.
