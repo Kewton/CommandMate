@@ -679,8 +679,9 @@ export interface CurrentOutputPayload {
    * measured from, and a tool other than opencode is not looked at at all.
    *
    * Deliberately shaped like {@link upstreamFault} — `{id, matchedText, at}`,
-   * judged on `realtimeSnippet`, published on every poll and read by nobody by
-   * default. The two answer the same kind of question ("something the detector
+   * judged on `realtimeSnippet` (`upstreamFault` additionally reads codex's last
+   * transcript row above it on a split screen, #3946; this field does not),
+   * published on every poll and read by nobody by default. The two answer the same kind of question ("something the detector
    * cannot fix is on the screen, and here is the evidence"), and one shape means
    * `capture --json | jq` reads them the same way.
    *
