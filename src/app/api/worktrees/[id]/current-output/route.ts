@@ -6,6 +6,13 @@
  * (`lib/prompt-observation`) of the same capture. Opt-in: this is the 5-second
  * polling path of every pane, and an observation mints a token; the callers
  * that need one (`commandmate prompt`, `commandmate wait`) ask for it.
+ *
+ * Issue #3956: `?fresh=1` reads the pane past the capture cache (TTL 5 s), the
+ * way the WS streamer's `captureFreshPayload` does — through `buildCurrentOutput`'s
+ * `freshCapture`, since a route may not reach `lib/tmux` itself. Opt-in for the
+ * same reason as `observe`: `commandmate wait` re-reads a pane every 500 ms
+ * after a `Stop` to see when it has settled, and two answers from one cached
+ * capture would always agree.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -111,10 +118,14 @@ export async function GET(
 
     // Issue #1120: payload assembly is shared with the WS terminal streamer via
     // buildCurrentOutput() so the pull (HTTP) and push (WS) paths stay identical.
-    const payload = await buildCurrentOutput(db, id, target.cliToolId, target.instanceId, {
-      resolvedBy: target.resolvedBy,
-      conflict: target.conflict,
-    });
+    // Issue #3956: past the capture cache only when asked. Every pane polls here
+    // every 5 seconds, and the cache is what keeps those polls from each running
+    // a capture.
+    const resolution = { resolvedBy: target.resolvedBy, conflict: target.conflict };
+    const payload =
+      url.searchParams.get('fresh') === '1'
+        ? await buildCurrentOutput(db, id, target.cliToolId, target.instanceId, resolution, { freshCapture: true })
+        : await buildCurrentOutput(db, id, target.cliToolId, target.instanceId, resolution);
 
     // Issue #1929 (§4 D2 / DR3-013): whether the detector's rules were read off
     // the build that is installed. This is the 5-second polling path, so the

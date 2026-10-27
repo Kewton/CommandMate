@@ -1731,6 +1731,17 @@ function readyCompletionBasis(
 }
 
 /**
+ * The path {@link settleAfterHookStop} re-reads the pane on (Issue #3956):
+ * `?fresh=1` past the server's capture cache, whose 5 s TTL would otherwise
+ * answer two reads 500 ms apart with the same capture and read a pane still
+ * drawing as settled. A server older than the parameter ignores it and answers
+ * as before, from the cache.
+ */
+export function settleCurrentOutputPath(worktreeId: string, instanceId?: string): string {
+  return `${observedCurrentOutputPath(worktreeId, instanceId)}&fresh=1`;
+}
+
+/**
  * The frame a `hook_stop` completion is judged on, once the pane has settled
  * (Issue #3956).
  *
@@ -1743,7 +1754,8 @@ function readyCompletionBasis(
  * So the pane is read again every {@link HOOK_STOP_SETTLE_INTERVAL_MS} until two
  * reads in a row carry the same frame, and that frame is the one judged. The
  * bound is {@link HOOK_STOP_SETTLE_MAX_MS}: a pane still drawing then is judged
- * on the last frame read rather than held. A read that fails ends the settle on
+ * on the last frame read rather than held. The re-reads ask for a fresh capture
+ * ({@link settleCurrentOutputPath}); the poll that saw the `Stop` does not. A read that fails ends the settle on
  * the frame before it (an `ApiError` still ends the wait, as on any poll).
  */
 async function settleAfterHookStop(
@@ -1759,7 +1771,7 @@ async function settleAfterHookStop(
     let next: CurrentOutputResponse;
     try {
       next = await client.get<CurrentOutputResponse>(
-        observedCurrentOutputPath(worktreeId, options.instance),
+        settleCurrentOutputPath(worktreeId, options.instance),
       );
     } catch (error) {
       if (error instanceof ApiError) throw error;

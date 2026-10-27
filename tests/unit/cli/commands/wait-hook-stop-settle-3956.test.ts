@@ -15,6 +15,7 @@ import { WaitExitCode } from '../../../../src/cli/types';
 import {
   HOOK_STOP_SETTLE_INTERVAL_MS,
   HOOK_STOP_SETTLE_MAX_MS,
+  settleCurrentOutputPath,
 } from '../../../../src/cli/commands/wait';
 
 const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
@@ -233,5 +234,37 @@ describe('hook_stop settle under --fail-on-upstream-fault (Issue #3956)', () => 
 
     expect(result.exitCode).toBe(WaitExitCode.UPSTREAM_FAULT);
     expect(result.upstreamFault).toEqual({ id: 'model-capacity', matchedText: FAULT_LINE });
+  });
+
+  it('re-reads the pane past the server cache (`fresh=1`); the Stop poll does not', async () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    mockFetchSequence([
+      { data: turn(now, false, 'rows 1-200') },
+      { data: turn(now, true, 'rows 1-445') },
+      { data: turn(now, true, 'rows 1-480') },
+      { data: turn(now, true, 'rows 1-480') },
+    ]);
+
+    const cmd = await importWait();
+    const pending = cmd.parseAsync(['node', 'wait', 'wt1', '--fail-on-upstream-fault']);
+    await vi.advanceTimersByTimeAsync(12_000);
+    await pending;
+
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+    const urls = vi
+      .mocked(global.fetch)
+      .mock.calls.map(c => String(c[0]))
+      .filter(u => u.includes('/current-output'));
+    expect(urls).toHaveLength(4);
+    expect(urls.slice(0, 2).every(u => !u.includes('fresh=1'))).toBe(true);
+    expect(urls.slice(2).every(u => u.includes('observe=1&fresh=1'))).toBe(true);
+  });
+
+  it('settleCurrentOutputPath adds fresh=1 to the observed path', () => {
+    expect(settleCurrentOutputPath('wt1')).toBe('/api/worktrees/wt1/current-output?observe=1&fresh=1');
+    expect(settleCurrentOutputPath('wt1', 'codex-2')).toBe(
+      '/api/worktrees/wt1/current-output?instance=codex-2&observe=1&fresh=1',
+    );
   });
 });
