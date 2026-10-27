@@ -50,6 +50,11 @@ import { getWorktreeById } from '@/lib/db';
 import { hasSession } from '@/lib/tmux/tmux';
 import { clearComposer } from '@/lib/session/composer-clear';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
+import {
+  INSTANCE_INPUT_LOCK_WAIT_MS,
+  resetInstanceInputLocks,
+  withInstanceInputLock,
+} from '@/lib/session/instance-input-lock';
 
 function createRequest(body: unknown): NextRequest {
   return new NextRequest('http://localhost:3000/api/worktrees/wt-1/clear-composer', {
@@ -162,5 +167,75 @@ describe('POST /api/worktrees/[id]/clear-composer (Issue #1879)', () => {
 
     expect(res.status).toBe(500);
     await expect(res.json()).resolves.toEqual({ error: 'Failed to clear the composer' });
+  });
+});
+
+/**
+ * Issue #3945: a Clear pressed while a send is typing, checking or withdrawing
+ * its body waits for that send, instead of erasing the body under it.
+ */
+describe('POST /api/worktrees/[id]/clear-composer under the input lock (Issue #3945)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetInstanceInputLocks();
+    vi.mocked(getWorktreeById).mockReturnValue(
+      { id: 'wt-1', name: 'test', path: '/path' } as ReturnType<typeof getWorktreeById>,
+    );
+    vi.mocked(hasSession).mockResolvedValue(true);
+    vi.mocked(clearComposer).mockResolvedValue({
+      cleared: true, passes: 0, state: 'empty', remainingText: '', discardedText: '',
+    });
+  });
+
+  it('waits for a send in progress on the same instance before clearing', async () => {
+    const events: string[] = [];
+    vi.mocked(clearComposer).mockImplementation(async () => {
+      events.push('clear');
+      return { cleared: true, passes: 0, state: 'empty', remainingText: '', discardedText: '' };
+    });
+    let release!: () => void;
+    const send = withInstanceInputLock('mcbd-claude-wt-1', async () => {
+      events.push('send:start');
+      await new Promise<void>((resolve) => (release = resolve));
+      events.push('send:end');
+    });
+
+    const response = POST(createRequest({ cliToolId: 'claude' }), defaultParams);
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(events).toEqual(['send:start']);
+
+    release();
+    await send;
+    expect((await response).status).toBe(200);
+    expect(events).toEqual(['send:start', 'send:end', 'clear']);
+  });
+
+  it('negative: another instance\'s send does not hold it up', async () => {
+    let release!: () => void;
+    const send = withInstanceInputLock('mcbd-claude-2-wt-1', () => new Promise<void>((resolve) => (release = resolve)));
+    const res = await POST(createRequest({ cliToolId: 'claude' }), defaultParams);
+    expect(res.status).toBe(200);
+    expect(clearComposer).toHaveBeenCalledTimes(1);
+    release();
+    await send;
+  });
+
+  it('409 INSTANCE_INPUT_BUSY, nothing cleared, when the send holds the composer past the wait', async () => {
+    vi.useFakeTimers();
+    try {
+      let release!: () => void;
+      const send = withInstanceInputLock('mcbd-claude-wt-1', () => new Promise<void>((resolve) => (release = resolve)));
+      const response = POST(createRequest({ cliToolId: 'claude' }), defaultParams);
+      await vi.advanceTimersByTimeAsync(INSTANCE_INPUT_LOCK_WAIT_MS);
+      const res = await response;
+      expect(res.status).toBe(409);
+      await expect(res.json()).resolves.toMatchObject({ code: 'INSTANCE_INPUT_BUSY' });
+      expect(clearComposer).not.toHaveBeenCalled();
+      release();
+      await send;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

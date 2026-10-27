@@ -54,6 +54,7 @@ import { createLogger } from '@/lib/logger';
 import { missingToolError } from './install-hints';
 import { beginLaunchWindow, endLaunchWindow, recordLaunchDialogPress } from './launch-window';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
+import { withInstanceInputLock, type InstanceInputTicket } from '@/lib/session/instance-input-lock';
 
 const logger = createLogger('cli-tools/copilot');
 
@@ -275,6 +276,18 @@ export function judgeCopilotModelSwitch(
 }
 
 /** The pane's bottom non-blank row, squeezed, for an error message a person reads. */
+/**
+ * Throw unless `ticket` still owns the composer (Issue #3945): right before a
+ * key this module types itself, so a send whose session was replaced while it
+ * waited cannot type into the new one.
+ */
+function assertCopilotInputOwner(ticket: InstanceInputTicket, step: string): void {
+  if (ticket.isCurrent()) return;
+  throw new Error(
+    `Session ${ticket.sessionName} was handed to another writer before ${step}; input lock lost, nothing was typed (Issue #3945).`
+  );
+}
+
 function describeBottomRow(output: string): string {
   const lines = stripAnsi(output).split('\n');
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -723,20 +736,28 @@ export class CopilotTool extends BaseCLITool {
     await this.requireSession('Copilot', worktreeId, instanceId, { relaunch: true });
 
     try {
-      // Verify Copilot is at prompt state before sending
-      await this.waitForPrompt(sessionName);
-
       // Check if this is a slash command that triggers a selection list
       const slashCmd = this.extractSlashCommand(message);
       if (slashCmd && SELECTION_LIST_COMMANDS.has(slashCmd)) {
         // For selection list commands: send text + Enter, then wait for
         // the selection list to appear. Do NOT send additional input after.
-        await sendKeys(sessionName, message, true);
-        await this.waitForSelectionList(sessionName);
+        //
+        // Issue #3945: this types into the composer without the shared sender,
+        // so it takes the instance's input lock itself — from the readiness
+        // read (fresh, under the lock) to the picker that answers it.
+        await withInstanceInputLock(sessionName, async (ticket) => {
+          await this.waitForPrompt(sessionName);
+          assertCopilotInputOwner(ticket, 'the selection-list command');
+          await sendKeys(sessionName, message, true);
+          await this.waitForSelectionList(sessionName);
+        });
         invalidateCache(sessionName);
         logger.info('sent-selection-list-command-to-copilot', { command: slashCmd });
         return;
       }
+
+      // Verify Copilot is at prompt state before sending
+      await this.waitForPrompt(sessionName);
 
       // Issue #1471: Body/Enter separation + read-back submit verification via the
       // shared helper (replaces the old type -> C-m -> `\n`-gated paste recovery).
@@ -819,39 +840,51 @@ export class CopilotTool extends BaseCLITool {
     await this.requireSession('Copilot', worktreeId, instanceId, { relaunch: false });
 
     try {
-      const idle = await this.waitForPrompt(sessionName, COPILOT_MODEL_SWITCH_TIMEOUT_MS, 'idle');
-      if (!idle.ready) {
-        throw new Error(
-          `copilot did not become idle within ${COPILOT_MODEL_SWITCH_TIMEOUT_MS}ms, so /model was not sent ` +
-            `(bottom row: ${describeBottomRow(idle.output)})`
-        );
-      }
-      const before = readCopilotModelSwitchOutcomes(idle.output, modelName);
-
-      // Send /model <modelName> command with Enter. An argument means an
-      // in-place switch, never a picker (Issue #1895).
-      await sendKeys(sessionName, `/model ${modelName}`, true);
-
-      const verdict = await this.waitForModelSwitchOutcome(sessionName, modelName, before);
-      invalidateCache(sessionName);
-
-      if (verdict.kind === 'rejected') {
-        logger.warn('copilot-model-rejected', { model: modelName, reason: verdict.reason });
-        throw new Error(`copilot refused it: ${verdict.reason}`);
-      }
-      if (verdict.kind === 'pending') {
-        logger.warn('copilot-model-switch-unconfirmed', { model: modelName, bottomRow: verdict.bottomRow });
-        throw new Error(
-          `copilot printed no answer to /model within ${COPILOT_MODEL_SWITCH_TIMEOUT_MS}ms ` +
-            `(bottom row: ${verdict.bottomRow}); the switch may still take effect, and nothing further was typed`
-        );
-      }
-
-      logger.info('copilot-model-switched', { model: modelName });
+      // Issue #3945: `/model` is typed into the composer, so it is one writer's
+      // turn like the selection-list branch — from the idle read to the answer.
+      await withInstanceInputLock(sessionName, (ticket) => this.switchModelUnderInputLock(sessionName, modelName, ticket));
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to switch Copilot model to ${modelName}: ${errorMessage}`);
     }
+  }
+
+  /** {@link sendModelCommand}'s keys and waits, as the composer's only writer (Issue #3945). */
+  private async switchModelUnderInputLock(
+    sessionName: string,
+    modelName: string,
+    ticket: InstanceInputTicket
+  ): Promise<void> {
+    const idle = await this.waitForPrompt(sessionName, COPILOT_MODEL_SWITCH_TIMEOUT_MS, 'idle');
+    if (!idle.ready) {
+      throw new Error(
+        `copilot did not become idle within ${COPILOT_MODEL_SWITCH_TIMEOUT_MS}ms, so /model was not sent ` +
+          `(bottom row: ${describeBottomRow(idle.output)})`
+      );
+    }
+    const before = readCopilotModelSwitchOutcomes(idle.output, modelName);
+
+    // Send /model <modelName> command with Enter. An argument means an
+    // in-place switch, never a picker (Issue #1895).
+    assertCopilotInputOwner(ticket, '/model');
+    await sendKeys(sessionName, `/model ${modelName}`, true);
+
+    const verdict = await this.waitForModelSwitchOutcome(sessionName, modelName, before);
+    invalidateCache(sessionName);
+
+    if (verdict.kind === 'rejected') {
+      logger.warn('copilot-model-rejected', { model: modelName, reason: verdict.reason });
+      throw new Error(`copilot refused it: ${verdict.reason}`);
+    }
+    if (verdict.kind === 'pending') {
+      logger.warn('copilot-model-switch-unconfirmed', { model: modelName, bottomRow: verdict.bottomRow });
+      throw new Error(
+        `copilot printed no answer to /model within ${COPILOT_MODEL_SWITCH_TIMEOUT_MS}ms ` +
+          `(bottom row: ${verdict.bottomRow}); the switch may still take effect, and nothing further was typed`
+      );
+    }
+
+    logger.info('copilot-model-switched', { model: modelName });
   }
 
   /**

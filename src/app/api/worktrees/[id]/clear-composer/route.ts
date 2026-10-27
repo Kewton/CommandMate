@@ -18,6 +18,12 @@
  * cliToolId → instanceId → worktree row → session existence), so this endpoint
  * is no more reachable than the one next to it. Rate limiting is intentionally
  * not implemented here for the same reason it is not there ([DR4-001]).
+ *
+ * Issue #3945: the clear takes the instance's input lock, so a Clear pressed
+ * while a send is typing, checking or withdrawing its body waits for that send
+ * to finish instead of erasing the body under it. A send that holds the
+ * composer past the lock's wait gets a 409 `INSTANCE_INPUT_BUSY`, with nothing
+ * cleared.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -30,11 +36,19 @@ import { getDbInstance } from '@/lib/db/db-instance';
 // for (`.eslintrc.json` §4 D4), in place of the `hasSession` it used before.
 import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/tmux/session-ownership';
 import { clearComposer } from '@/lib/session/composer-clear';
+import {
+  InstanceInputLockTimeoutError,
+  InstanceInputSessionReplacedError,
+  withInstanceInputLock,
+} from '@/lib/session/instance-input-lock';
 import { createLogger } from '@/lib/logger';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 
 const logger = createLogger('api/clear-composer');
+
+/** Stable `code` for a Clear that could not get the composer from a send (Issue #3945). */
+const INSTANCE_INPUT_BUSY_CODE = 'INSTANCE_INPUT_BUSY';
 
 export async function POST(
   req: NextRequest,
@@ -77,7 +91,18 @@ export async function POST(
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     }
 
-    const result = await clearComposer(sessionName, cliToolId);
+    let result;
+    try {
+      // The clear runs whole under the lock; nothing else types into this
+      // composer until it returns, so its passes need no owner check of their own.
+      result = await withInstanceInputLock(sessionName, () => clearComposer(sessionName, cliToolId));
+    } catch (error) {
+      if (error instanceof InstanceInputLockTimeoutError || error instanceof InstanceInputSessionReplacedError) {
+        logger.warn('clear-composer-input-busy', { sessionName, error: error.message });
+        return NextResponse.json({ error: error.message, code: INSTANCE_INPUT_BUSY_CODE }, { status: 409 });
+      }
+      throw error;
+    }
     // Push the post-clear frame so the bar disappears without waiting for the
     // (WebSocket-throttled) poll. Best-effort, exactly as in special-keys.
     void broadcastTerminalSnapshotAfterInteraction(id, cliToolId, instanceId as string | undefined);

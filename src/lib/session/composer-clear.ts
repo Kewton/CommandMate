@@ -65,7 +65,7 @@ export { codexDialogBelow, findCodexLiveComposerRow };
  * option is drawn below it ({@link codexDialogBelow}): that frame is
  * `no_composer`, so no `C-e`+`C-u` goes into the dialog.
  */
-function readClearComposer(capture: string, cliToolId: string): ComposerTextResult {
+export function readClearComposer(capture: string, cliToolId: string): ComposerTextResult {
   const read = extractLiveComposerText(capture, cliToolId);
   if (cliToolId !== 'codex' || read.state !== 'no_composer') return read;
   const rows = capture.split('\n');
@@ -155,6 +155,18 @@ export interface ClearComposerOptions {
   delay?: (ms: number) => Promise<void>;
   /** Override the pass cap (tests). */
   maxPasses?: number;
+  /**
+   * A frame the caller has just captured the way this function would (Issue
+   * #3945): taken as the first read instead of capturing again. The sender's
+   * re-check under the input lock reads the pane once and hands it on.
+   */
+  initialCapture?: string;
+  /**
+   * Asked right before each pass's keys (Issue #3945): false stops the loop
+   * without sending them — the caller no longer owns the composer
+   * (`InstanceInputTicket.isCurrent`). The result is then `cleared: false`.
+   */
+  beforePass?: () => boolean;
 }
 
 const defaultDelay = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
@@ -180,13 +192,18 @@ export async function clearComposer(
   const maxPasses = options.maxPasses ?? MAX_COMPOSER_CLEAR_PASSES;
 
   let passes = 0;
-  let result = readClearComposer(await capture(sessionName), cliToolId);
+  let result = readClearComposer(options.initialCapture ?? (await capture(sessionName)), cliToolId);
 
   // Snapshot before the first pass: every later read shows less of it (a pass
   // eats one row), so this is the only moment the full text exists.
   const discardedText = result.state === 'content' ? result.text : '';
 
   while (result.state === 'content' && passes < maxPasses) {
+    if (options.beforePass !== undefined && !options.beforePass()) {
+      // Issue #3945: the composer is another writer's now; its text is not ours to erase.
+      logger.warn('composer-clear:not-owner', { sessionName, cliToolId, passes });
+      break;
+    }
     if (isCodexPasteTokenOnly(result, cliToolId)) {
       await (options.sendClearPasteToken ?? clearComposerPasteToken)(sessionName);
     } else {

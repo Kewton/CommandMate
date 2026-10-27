@@ -78,6 +78,16 @@
  * codex, Enter now waits until the composer shows the typed body
  * ({@link confirmTypedBodyLanded}); a body that never appears THROWS before
  * Enter, as #2464 does for a paste.
+ *
+ * Issue #3945 is two sends to one instance at once. A send that withdrew its
+ * body, or cleared before typing, erased whatever was in the composer — another
+ * send's body included — and a codex placeholder carries only a count, so a
+ * late one could not be told from the next send's. A send now runs as the
+ * instance's only writer (`lib/session/instance-input-lock`), re-reads the pane
+ * once it owns it if it had to queue ({@link recheckComposerBeforeInput}),
+ * checks it still owns the composer before every key, watches an `unseen`
+ * paste a little longer before giving up, and leaves a mark for a body that
+ * may still arrive, which the next send waits out ({@link waitOutCarriedPaste}).
  */
 
 import * as childProcess from 'child_process';
@@ -98,7 +108,17 @@ import {
   TUI_MESSAGE_PROCESSED_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
 import { createLogger } from '@/lib/logger';
-import { clearComposer } from '@/lib/session/composer-clear';
+import { getOrInitGlobal } from '@/lib/global-state';
+import { clearComposer, readClearComposer } from '@/lib/session/composer-clear';
+import { detectSessionStatus } from '@/lib/detection/status-detector';
+import {
+  LATE_PASTE_OBSERVE_MS,
+  clearExpiredCarriedPasteMark,
+  getCarriedPasteMark,
+  leaveCarriedPasteMark,
+  withInstanceInputLock,
+  type InstanceInputTicket,
+} from '@/lib/session/instance-input-lock';
 import {
   codexDialogBelow,
   extractComposerText,
@@ -165,8 +185,29 @@ const DEFAULT_TYPED_BODY_ATTEMPTS = 100;
 /** Per-command timeout for `load-buffer` / `paste-buffer`, as for every other tmux call. */
 const PASTE_COMMAND_TIMEOUT_MS = 5000;
 
-/** Makes each send's tmux paste buffer name unique within this process. */
-let pasteBufferSeq = 0;
+declare global {
+  // eslint-disable-next-line no-var
+  var __submitPasteBufferSeq: { last: number } | undefined;
+}
+
+/**
+ * Makes each send's tmux paste buffer name unique within this process — on
+ * `globalThis` (Issue #3945 review #11): tmux buffers are server-wide, and a
+ * module-local counter restarts at 0 in every bundle `next dev` loads this file
+ * into, so two sessions' sends could load into one buffer name (the second
+ * `load-buffer` overwriting the first before its `paste-buffer`).
+ */
+const pasteBufferSeq = getOrInitGlobal('__submitPasteBufferSeq', () => ({ last: 0 }));
+
+/**
+ * Rows read for the re-check under the input lock (Issue #3945). The same
+ * capture `clearComposer` takes for its first read, so on a tool that clears
+ * before sending that read is the re-check's frame and no extra read is made.
+ */
+const RECHECK_CAPTURE_LINES = 200;
+
+/** How often a send waiting out a carried paste mark reads the composer (Issue #3945). */
+const CARRIED_MARK_POLL_MS = 200;
 
 /**
  * A slash-command sitting on the input line (Issue #1501).
@@ -935,7 +976,8 @@ function runTmux(args: string[], input?: string): Promise<void> {
  * @throws Error when either tmux command fails
  */
 async function pasteBody(sessionName: string, message: string): Promise<void> {
-  const bufferName = `cm-send-${process.pid}-${++pasteBufferSeq}`;
+  pasteBufferSeq.last += 1;
+  const bufferName = `cm-send-${process.pid}-${pasteBufferSeq.last}`;
   try {
     await runTmux(['load-buffer', '-b', bufferName, '-'], message);
     await runTmux(['paste-buffer', '-p', '-r', '-d', '-b', bufferName, '-t', exactTarget(sessionName)]);
@@ -974,25 +1016,169 @@ function describeComposer(
  * Leaving it would put the fragment in front of the next message. claude and
  * codex go through the verified #1879 loop (a paste can span rows); the rest
  * get the single `C-u` the #1501 path already sends to them.
+ *
+ * @returns Whether the composer was confirmed empty afterwards (Issue #3945):
+ *   false for a `C-u` nothing can read back, a failed clear, and a ticket that
+ *   no longer owns the composer (no key is sent then).
  */
 async function withdrawUnsentBody(
   sessionName: string,
   cliToolId: CLIToolType,
-  composerSpec: ComposerSpec
-): Promise<void> {
+  composerSpec: ComposerSpec,
+  ticket: InstanceInputTicket
+): Promise<boolean> {
+  // Issue #3945: only this send's own composer is taken back. A ticket that is
+  // no longer current means another writer owns the composer now, and what it
+  // holds is that writer's.
+  if (!ticket.isCurrent()) {
+    logger.error('paste-withdraw-skipped-not-owner', { sessionName, cliToolId, generation: ticket.generation });
+    return false;
+  }
   try {
     if (composerSpec.clearBeforeSend) {
-      await clearComposer(sessionName, cliToolId);
-    } else {
-      await clearInputLine(sessionName);
+      const result = await clearComposer(sessionName, cliToolId, { beforePass: () => ticket.isCurrent() });
+      return result.cleared;
     }
+    await clearInputLine(sessionName);
+    // One `C-u` into a composer nothing here can read: sent, never confirmed.
+    return false;
   } catch (clearError: unknown) {
     logger.error('paste-withdraw-failed', {
       sessionName,
       cliToolId,
       error: clearError instanceof Error ? clearError.message : String(clearError),
     });
+    return false;
   }
+}
+
+/**
+ * Throw unless `ticket` still owns the composer (Issue #3945 stage 3). Called
+ * right before every key a send sends — body, paste, each Enter — so work still
+ * in flight after its ownership ended cannot reach the next owner's composer.
+ *
+ * @param typed - Whether any of the body may already be in the composer, which
+ *   decides how the failure classifies (`not-sent` before the body only).
+ */
+function assertInputOwner(ticket: InstanceInputTicket, cliToolId: CLIToolType, step: string, typed: boolean): void {
+  if (ticket.isCurrent()) return;
+  logger.error('input-lock-lost', { sessionName: ticket.sessionName, cliToolId, step, generation: ticket.generation });
+  if (!typed) {
+    throw new Error(
+      `Session ${ticket.sessionName} was handed to another writer before ${step}; input lock lost, nothing was typed (Issue #3945).`
+    );
+  }
+  throw new Error(
+    `Session ${ticket.sessionName} was handed to another writer before ${step}; part of the message may be in its composer (Issue #3945).`
+  );
+}
+
+/**
+ * Re-read the pane under the input lock, before anything is typed (Issue #3945
+ * stage 2).
+ *
+ * The prompt guard and the tool's readiness wait ran before the lock was taken,
+ * and a dialog may have opened while this send queued behind another one. This
+ * read goes to tmux directly (`capturePane`, never the TTL cache), and its frame
+ * is one of three things:
+ *
+ *   - a dialog (`detectSessionStatus().hasActivePrompt`) — refused, `not-sent`
+ *     with the prompt guard's reason (`prompt-waiting`);
+ *   - unreadable (the capture or the detector threw) — refused, `not-sent`:
+ *     typing into a pane nobody could read is the failure this exists for;
+ *   - anything else — returned, for the pre-send clear to take as its first read.
+ *
+ * The scraper's reading only: the structured (hooks) layer is the prompt
+ * guard's, consulted before the lock.
+ *
+ * @throws Error worded for `classifySendFailure` (`prompt-waiting` / `recheck-failed`)
+ */
+export async function recheckComposerBeforeInput(sessionName: string, cliToolId: CLIToolType): Promise<string> {
+  let frame: string;
+  let dialog: boolean;
+  try {
+    frame = await capturePane(sessionName, RECHECK_CAPTURE_LINES);
+    dialog = detectSessionStatus(frame, cliToolId).hasActivePrompt;
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error('input-recheck-failed', { sessionName, cliToolId, error: message });
+    throw new Error(
+      `Could not re-read session ${sessionName} before typing (${message}); nothing was typed (Issue #3945).`
+    );
+  }
+  if (dialog) {
+    logger.warn('input-recheck-prompt-waiting', { sessionName, cliToolId });
+    throw new Error(
+      `A prompt dialog opened in session ${sessionName} while this send waited for its composer ` +
+        '(re-checked under the input lock); nothing was typed (Issue #3945).'
+    );
+  }
+  return frame;
+}
+
+/**
+ * Hold off typing while a carried paste mark is fresh (Issue #3945 stage 4).
+ *
+ * A previous send gave up on a body that may still be drawn. Until the mark
+ * expires, nothing of this send is typed: a placeholder of the same count as
+ * this body would be taken for it ({@link classifyPasteLanded} cannot tell
+ * them apart). What appears meanwhile is taken out at once — it is the previous
+ * send's, and this owner is the one left to handle it. A tool whose composer is
+ * not readable (no `clearBeforeSend`) only waits.
+ *
+ * @returns Whether there was a mark to wait out
+ */
+async function waitOutCarriedPaste(
+  sessionName: string,
+  cliToolId: CLIToolType,
+  composer: ComposerSpec,
+  ticket: InstanceInputTicket
+): Promise<boolean> {
+  const mark = getCarriedPasteMark(sessionName);
+  if (mark === null) return false;
+  logger.warn('carried-paste-mark-wait', {
+    sessionName,
+    cliToolId,
+    originGeneration: mark.originGeneration,
+    generation: ticket.generation,
+    remainingMs: mark.expiresAt - Date.now(),
+  });
+  while (Date.now() < mark.expiresAt) {
+    await new Promise((resolve) => setTimeout(resolve, Math.min(CARRIED_MARK_POLL_MS, mark.expiresAt - Date.now())));
+    if (!composer.clearBeforeSend) continue;
+    assertInputOwner(ticket, cliToolId, 'the carried paste wait', false);
+    let frame: string;
+    try {
+      frame = await capturePane(sessionName, RECHECK_CAPTURE_LINES);
+    } catch {
+      // The re-check after the wait decides about a pane that cannot be read.
+      continue;
+    }
+    if (readClearComposer(frame, cliToolId).state !== 'content') continue;
+    const result = await clearComposer(sessionName, cliToolId, {
+      initialCapture: frame,
+      beforePass: () => ticket.isCurrent(),
+    });
+    invalidateCache(sessionName);
+    logger.warn('carried-paste-withdrawn', {
+      sessionName,
+      cliToolId,
+      originGeneration: mark.originGeneration,
+      cleared: result.cleared,
+      discardedText: result.discardedText,
+    });
+  }
+  clearExpiredCarriedPasteMark(ticket);
+  return true;
+}
+
+/** Whether the composer in `output` holds any text at all, read as the sender reads it. */
+function composerHoldsText(output: string, cliToolId: CLIToolType, composerSpec: ComposerSpec, message: string): boolean {
+  const lines = withoutTrailingBlankRows(stripAnsi(output).split('\n'));
+  return (
+    readSubmitComposer(output, cliToolId, composerSpec.reader, lines, lines.slice(-VERIFY_WINDOW_LINES), message)
+      .kind === 'text'
+  );
 }
 
 /**
@@ -1015,6 +1201,16 @@ async function withdrawUnsentBody(
  * drawn in ways this module has not measured, and refusing on them would turn
  * "cannot see it" into "did not send it" for every long message they get.
  *
+ * Issue #3945 (stage 4): an `unseen` on a measured tool is not given up at the
+ * end of the 2 s. The composer is watched for {@link LATE_PASTE_OBSERVE_MS}
+ * more, still under the input lock — so whatever appears in it is this send's
+ * (or a person's typing), never another send's — and a placeholder or body that
+ * appears is withdrawn before the throw. A read that throws is a failure like
+ * the others: withdrawn, `body-not-landed`. When the body may still arrive —
+ * nothing of it was ever seen, it was only partly there, a read failed, or the
+ * withdrawal could not be confirmed — a carried mark holds the next send off
+ * the composer ({@link leaveCarriedPasteMark}).
+ *
  * @throws Error when the body cannot be confirmed in the composer
  */
 async function confirmPasteLanded(params: {
@@ -1023,36 +1219,73 @@ async function confirmPasteLanded(params: {
   cliToolId: CLIToolType;
   composer: ComposerSpec;
   attempts: number;
+  ticket: InstanceInputTicket;
 }): Promise<void> {
-  const { sessionName, message, cliToolId, composer, attempts } = params;
+  const { sessionName, message, cliToolId, composer, attempts, ticket } = params;
   let state: PasteLandedState = 'unseen';
   let output = '';
-  for (let attempt = 0; attempt < Math.max(1, attempts); attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, PASTE_LANDED_POLL_MS));
-    output = await capturePane(sessionName, { startLine: -composer.verifyCaptureLines });
-    state = classifyPasteLanded(output, cliToolId, message, composer);
-    if (state === 'landed' || state === 'mismatch') break;
+  let readError: string | null = null;
+  /** ms after the 2 s check that something of the body appeared, during the late watch. */
+  let lateAfterMs: number | null = null;
+  try {
+    for (let attempt = 0; attempt < Math.max(1, attempts); attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, PASTE_LANDED_POLL_MS));
+      output = await capturePane(sessionName, { startLine: -composer.verifyCaptureLines });
+      state = classifyPasteLanded(output, cliToolId, message, composer);
+      if (state === 'landed' || state === 'mismatch') break;
+    }
+    if (state === 'unseen' && composer.clearBeforeSend) {
+      const observeAttempts = Math.ceil(LATE_PASTE_OBSERVE_MS / PASTE_LANDED_POLL_MS);
+      for (let attempt = 1; attempt <= observeAttempts; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, PASTE_LANDED_POLL_MS));
+        output = await capturePane(sessionName, { startLine: -composer.verifyCaptureLines });
+        state = classifyPasteLanded(output, cliToolId, message, composer);
+        if (state !== 'unseen') {
+          lateAfterMs = attempt * PASTE_LANDED_POLL_MS;
+          break;
+        }
+      }
+    }
+  } catch (error: unknown) {
+    readError = error instanceof Error ? error.message : String(error);
   }
 
-  if (state === 'landed') return;
-  if (state === 'unseen' && !composer.clearBeforeSend) {
+  if (readError === null && lateAfterMs === null && state === 'landed') return;
+  if (readError === null && state === 'unseen' && !composer.clearBeforeSend) {
     logger.warn('paste-landed-unverified', { sessionName, cliToolId, bytes: Buffer.byteLength(message, 'utf8') });
     return;
   }
 
   const bytes = Buffer.byteLength(message, 'utf8');
   const lineCount = message.split('\n').length;
-  const shown = describeComposer(output, cliToolId, composer, message);
-  await withdrawUnsentBody(sessionName, cliToolId, composer);
+  const shown = readError === null ? describeComposer(output, cliToolId, composer, message) : 'an unreadable pane';
+  const withdrawn = await withdrawUnsentBody(sessionName, cliToolId, composer, ticket);
   invalidateCache(sessionName);
-  logger.error('paste-not-landed', { sessionName, cliToolId, state, bytes, lines: lineCount, shown });
+  const mayStillArrive = readError !== null || state === 'unseen' || state === 'pasting' || !withdrawn;
+  if (mayStillArrive) leaveCarriedPasteMark(ticket);
+  logger.error('paste-not-landed', {
+    sessionName,
+    cliToolId,
+    state,
+    bytes,
+    lines: lineCount,
+    shown,
+    lateAfterMs,
+    readError,
+    withdrawn,
+    carried: mayStillArrive,
+  });
 
   const what =
-    state === 'mismatch'
-      ? `the composer does not hold the message as sent (it shows ${shown})`
-      : state === 'pasting'
-        ? `the paste had not finished arriving after ${attempts * PASTE_LANDED_POLL_MS}ms (the composer shows ${shown})`
-        : `the message never appeared in the composer (${shown})`;
+    readError !== null
+      ? `the composer could not be read while the paste was checked (${readError})`
+      : lateAfterMs !== null
+        ? `the paste appeared ${lateAfterMs}ms after the ${attempts * PASTE_LANDED_POLL_MS}ms check and was taken back out (the composer showed ${shown})`
+        : state === 'mismatch'
+          ? `the composer does not hold the message as sent (it shows ${shown})`
+          : state === 'pasting'
+            ? `the paste had not finished arriving after ${attempts * PASTE_LANDED_POLL_MS}ms (the composer shows ${shown})`
+            : `the message never appeared in the composer (${shown})`;
   throw new Error(
     `Message body did not arrive intact for session ${sessionName}: ${what}; the message is ${bytes} bytes / ${lineCount} lines. ` +
       'Enter was not pressed, so nothing was submitted (Issue #2464).'
@@ -1062,6 +1295,30 @@ async function confirmPasteLanded(params: {
 /** The text with every whitespace character removed — wrapping and indent proof. */
 function compactText(text: string): string {
   return text.replace(/\s+/g, '');
+}
+
+/**
+ * Whether the composer shows a paste placeholder whose count is not this body's
+ * (Issue #3945): one counting fewer or more, or more than one placeholder.
+ */
+function composerShowsForeignPasteToken(
+  output: string,
+  cliToolId: CLIToolType,
+  message: string,
+  composerSpec: ComposerSpec
+): boolean {
+  const lines = withoutTrailingBlankRows(stripAnsi(output).split('\n'));
+  const composer = readSubmitComposer(
+    output,
+    cliToolId,
+    composerSpec.reader,
+    lines,
+    lines.slice(-VERIFY_WINDOW_LINES),
+    message
+  );
+  if (composer.kind !== 'text') return false;
+  if (!composer.rows.some((row) => findPasteTokens(row).tokens.length > 0)) return false;
+  return classifyPasteLanded(output, cliToolId, message, composerSpec) !== 'landed';
 }
 
 /**
@@ -1123,32 +1380,44 @@ async function confirmTypedBodyLanded(params: {
   cliToolId: CLIToolType;
   composer: ComposerSpec;
   attempts: number;
+  ticket: InstanceInputTicket;
 }): Promise<void> {
-  const { sessionName, message, cliToolId, composer, attempts } = params;
+  const { sessionName, message, cliToolId, composer, attempts, ticket } = params;
   const expected = compactText(visibleTypedBody(message));
   if (expected === '') return;
 
   let output = '';
-  for (let attempt = 0; attempt < Math.max(1, attempts); attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, TYPED_BODY_POLL_MS));
-    output = await capturePane(sessionName, { startLine: -composer.verifyCaptureLines });
-    // Issue #3906: on codex the whole composer must show the whole body. The
-    // extractor's excerpt stops at the first blank row, so its match is only
-    // the first paragraph — a five-paragraph body with one paragraph drawn
-    // would pass on it — and it cannot reach a body of more than four blocks.
-    if (cliToolId === 'codex') {
-      if (codexComposerShowsWholeBody(output, message, composer)) return;
-      continue;
+  let readError: string | null = null;
+  try {
+    for (let attempt = 0; attempt < Math.max(1, attempts); attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, TYPED_BODY_POLL_MS));
+      output = await capturePane(sessionName, { startLine: -composer.verifyCaptureLines });
+      // Issue #3906: on codex the whole composer must show the whole body. The
+      // extractor's excerpt stops at the first blank row, so its match is only
+      // the first paragraph — a five-paragraph body with one paragraph drawn
+      // would pass on it — and it cannot reach a body of more than four blocks.
+      if (cliToolId === 'codex') {
+        if (codexComposerShowsWholeBody(output, message, composer)) return;
+        continue;
+      }
+      const read = extractComposerText(output, cliToolId);
+      if (read.state === 'content' && compactText(read.text) === expected) return;
     }
-    const read = extractComposerText(output, cliToolId);
-    if (read.state === 'content' && compactText(read.text) === expected) return;
+  } catch (error: unknown) {
+    readError = error instanceof Error ? error.message : String(error);
   }
 
   const bytes = Buffer.byteLength(message, 'utf8');
-  const shown = describeComposer(output, cliToolId, composer, message);
-  await withdrawUnsentBody(sessionName, cliToolId, composer);
+  const shown = readError === null ? describeComposer(output, cliToolId, composer, message) : 'an unreadable pane';
+  // Issue #3945: a body never seen (codex can draw a burst late), a read that
+  // threw, or a withdrawal that was not confirmed may still put text in the
+  // composer after this throw — the next send waits that out.
+  const seen = readError === null && composerHoldsText(output, cliToolId, composer, message);
+  const withdrawn = await withdrawUnsentBody(sessionName, cliToolId, composer, ticket);
   invalidateCache(sessionName);
-  logger.error('typed-body-not-landed', { sessionName, cliToolId, bytes, attempts, shown });
+  const mayStillArrive = !seen || !withdrawn;
+  if (mayStillArrive) leaveCarriedPasteMark(ticket);
+  logger.error('typed-body-not-landed', { sessionName, cliToolId, bytes, attempts, shown, readError, carried: mayStillArrive });
   throw new Error(
     `Message body did not appear in the composer for session ${sessionName} within ` +
       `${attempts * TYPED_BODY_POLL_MS}ms (it shows ${shown}); the message is ${bytes} bytes. ` +
@@ -1206,11 +1475,19 @@ async function confirmTypedBodyLanded(params: {
 export async function clearComposerBeforeSend(
   sessionName: string,
   cliToolId: CLIToolType,
-  composerSpec: ComposerSpec = resolveComposerSpec(cliToolId)
+  composerSpec: ComposerSpec = resolveComposerSpec(cliToolId),
+  options: { initialCapture?: string; ticket?: InstanceInputTicket } = {}
 ): Promise<void> {
   if (!composerSpec.clearBeforeSend) return;
 
-  const result = await clearComposer(sessionName, cliToolId);
+  // Issue #3945: the first read is the re-check's frame, and every pass asks
+  // first whether this send still owns the composer.
+  const { ticket } = options;
+  const result = await clearComposer(sessionName, cliToolId, {
+    ...(options.initialCapture !== undefined ? { initialCapture: options.initialCapture } : {}),
+    ...(ticket !== undefined ? { beforePass: () => ticket.isCurrent() } : {}),
+  });
+  if (ticket !== undefined) assertInputOwner(ticket, cliToolId, 'the pre-send clear', false);
 
   if (result.state === 'content') {
     logger.error('pre-send-composer-clear-failed', {
@@ -1256,12 +1533,23 @@ export async function clearComposerBeforeSend(
  * and Enter waits until the composer shows all of it (Issue #2464); a body that
  * does not arrive intact THROWS before Enter, with nothing submitted.
  *
+ * Issue #3945: the whole of it — clear, body, Enter, read-back, withdrawal —
+ * runs as the session's only writer ({@link withInstanceInputLock}); before
+ * anything is typed the pane is re-read under the lock
+ * ({@link recheckComposerBeforeInput}) and a carried paste mark is waited out
+ * ({@link waitOutCarriedPaste}, then the re-check again).
+ *
  * @throws Error when the body does not arrive intact, or submit cannot be
- *   confirmed within the bounded attempts.
+ *   confirmed within the bounded attempts; `InstanceInputLockTimeoutError`
+ *   when the composer was not free in time (nothing typed).
  */
 export async function sendMessageWithSubmitVerification(
   params: SubmitVerifiedSendParams
 ): Promise<void> {
+  await withInstanceInputLock(params.sessionName, (ticket) => sendUnderInputLock(params, ticket));
+}
+
+async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: InstanceInputTicket): Promise<void> {
   const {
     sessionName,
     message,
@@ -1277,18 +1565,41 @@ export async function sendMessageWithSubmitVerification(
   } = params;
   const submitEnterCount = params.submitEnterCount ?? composer.submitEnterCount;
 
+  // -1. Issue #3945: a send that queued for the composer re-reads the pane now
+  //     that it owns it — a dialog may have opened behind the writer ahead of
+  //     it — and so does one that waits out a previous send's carried paste,
+  //     after the wait. A send admitted at once read the pane (prompt guard,
+  //     the tool's readiness wait) just before asking, and costs exactly the
+  //     reads it did before #3945: #1880's promise that an unmeasured tool's
+  //     send is byte-for-byte unchanged holds while nothing contends.
+  let frame: string | undefined;
+  if (ticket.waited) frame = await recheckComposerBeforeInput(sessionName, cliToolId);
+  if (await waitOutCarriedPaste(sessionName, cliToolId, composer, ticket)) {
+    frame = await recheckComposerBeforeInput(sessionName, cliToolId);
+  }
+
   // 0. Empty the composer first (Issue #1880). The body below is typed at the
   //    TUI's current cursor position, so anything already in the box would be
   //    spliced into it. Throws for a claude composer that could not be emptied.
-  await clearComposerBeforeSend(sessionName, cliToolId, composer);
+  await clearComposerBeforeSend(sessionName, cliToolId, composer, {
+    ...(frame !== undefined ? { initialCapture: frame } : {}),
+    ticket,
+  });
 
   if (Buffer.byteLength(message, 'utf8') > LITERAL_SEND_MAX_BYTES) {
     // 1'. A body that would reach the TUI as more than one pty read is pasted
     //     as ONE bracketed paste, and Enter waits until the composer shows all
     //     of it (Issue #2464). Typed, Claude Code would keep only its last read.
     const pastedAt = Date.now();
-    await pasteBody(sessionName, message);
-    await confirmPasteLanded({ sessionName, message, cliToolId, composer, attempts: pasteLandedAttempts });
+    assertInputOwner(ticket, cliToolId, 'the paste', false);
+    try {
+      await pasteBody(sessionName, message);
+    } catch (error: unknown) {
+      // Whether tmux put any of it into the pane is unknown.
+      leaveCarriedPasteMark(ticket);
+      throw error;
+    }
+    await confirmPasteLanded({ sessionName, message, cliToolId, composer, attempts: pasteLandedAttempts, ticket });
     // 2'. Keep the tool's own registration delay as a floor.
     const remaining = textInputWaitMs - (Date.now() - pastedAt);
     if (remaining > 0) {
@@ -1305,6 +1616,7 @@ export async function sendMessageWithSubmitVerification(
     //    nowhere at all, with `rc 0`. All four measured on tmux 3.5a; the argv is
     //    built in `lib/tmux/key-sequence.ts`, which carries the table.
     const typedAt = Date.now();
+    assertInputOwner(ticket, cliToolId, 'the body', false);
     await sendKeys(sessionName, message, false, { literal: true });
 
     // 2. Let the TUI register the input before pressing Enter. On codex that
@@ -1312,7 +1624,7 @@ export async function sendMessageWithSubmitVerification(
     //    while codex still holds the keystrokes as a paste burst becomes a
     //    newline, and the body stays unsent. The fixed wait stays as a floor.
     if (awaitTypedBody && SUPPORTED_COMPOSER_TOOLS.has(cliToolId)) {
-      await confirmTypedBodyLanded({ sessionName, message, cliToolId, composer, attempts: typedBodyAttempts });
+      await confirmTypedBodyLanded({ sessionName, message, cliToolId, composer, attempts: typedBodyAttempts, ticket });
     }
     const remaining = textInputWaitMs - (Date.now() - typedAt);
     if (remaining > 0) {
@@ -1322,6 +1634,7 @@ export async function sendMessageWithSubmitVerification(
 
   // 3. Submit as a separate command (double Enter for vibe-local's IME mode).
   for (let i = 0; i < Math.max(1, submitEnterCount); i++) {
+    assertInputOwner(ticket, cliToolId, 'Enter', true);
     await sendSpecialKeys(sessionName, ['Enter']);
     if (i < submitEnterCount - 1) {
       await new Promise((resolve) => setTimeout(resolve, interEnterWaitMs));
@@ -1355,7 +1668,11 @@ export async function sendMessageWithSubmitVerification(
       // (flavor B). Clear the input line (best-effort) and surface the failure
       // to the caller instead of ever resending Enter.
       try {
-        await clearInputLine(sessionName);
+        if (ticket.isCurrent()) {
+          await clearInputLine(sessionName);
+        } else {
+          logger.error('submit-clear-input-skipped-not-owner', { sessionName, cliToolId, generation: ticket.generation });
+        }
       } catch (clearError: unknown) {
         logger.error('submit-clear-input-failed', {
           sessionName,
@@ -1380,12 +1697,23 @@ export async function sendMessageWithSubmitVerification(
       continue;
     }
 
+    // Issue #3945 (review #1): a paste placeholder that does not count this
+    // body is not this body. It can only be a paste that arrived after the
+    // initial Enter (a carried send's, past its mark), and another Enter would
+    // submit it. One that counts exactly this body cannot be told apart: that
+    // Enter is the accepted gap (LATE_TOKEN_AFTER_ENTER_SAME_COUNT in the tests).
+    if (composerShowsForeignPasteToken(output, cliToolId, message, composer)) {
+      logger.warn('submit-not-confirmed:foreign-paste-token', { sessionName, cliToolId, attempt });
+      continue;
+    }
+
     // state === 'pending' — still typed-but-unsent, resend a single Enter and re-check.
     logger.warn('submit-not-confirmed:resending-enter', {
       sessionName,
       cliToolId,
       attempt,
     });
+    assertInputOwner(ticket, cliToolId, 'a resent Enter', true);
     await sendSpecialKeys(sessionName, ['Enter']);
   }
 
