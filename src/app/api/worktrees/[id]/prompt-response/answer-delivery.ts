@@ -187,6 +187,7 @@ export async function sendResolvedAnswer(
   verifiedFrame: string | null,
   manualAnswer: ManualAnswerTicket,
   screenPromptData?: PromptData | null,
+  readMark?: number,
 ): Promise<NextResponse | null> {
   const { resolution, effectivePromptData } = resolved;
   noteManualSendStarting(manualAnswer, screenPromptData ?? effectivePromptData);
@@ -205,6 +206,9 @@ export async function sendResolvedAnswer(
       // Issue #2033: the frame the prompt was re-verified against, raw. Undefined
       // only when that capture failed, where the sender reads the pane itself.
       frame: verifiedFrame ?? undefined,
+      // Issue #3952 review P2-1: taken before that frame's capture, so a send
+      // admitted between the capture and the answer's keys makes it read again.
+      readMark,
     });
   } catch (error: unknown) {
     settleManualSendError(manualAnswer, error);

@@ -213,7 +213,9 @@ describe('[#3952] an answer that arrives during a send', () => {
     held.release();
     await held.done;
     await answer;
-    expect(delivered).toEqual(['<send>', 'Enter']);
+    // Review P1-1: the keys are placed from where the cursor is now (on 2),
+    // not from the reading before the wait — a bare Enter would confirm 2.
+    expect(delivered).toEqual(['<send>', 'Up', 'Enter']);
   });
 
   it('positive: the screen cannot be read after the send — nothing is typed', async () => {
@@ -287,5 +289,122 @@ describe('[#3952] an answer that arrives during a send', () => {
     await answer;
     await send;
     expect(delivered).toEqual(['Down', 'Enter', '<send>']);
+  });
+});
+
+/** The numbered permission dialog's reading, with the cursor on `cursorOn`. */
+const choicePrompt = (cursorOn: 1 | 2): PromptData => ({
+  type: 'multiple_choice',
+  question: 'Bash command npm test Do you want to proceed?',
+  status: 'pending',
+  options: [
+    { number: 1, label: 'Yes', isDefault: cursorOn === 1 },
+    { number: 2, label: 'No, and tell Claude what to do differently (esc)', isDefault: cursorOn === 2, requiresTextInput: true },
+  ],
+});
+
+describe('[#3952 review P1-1] cursor keys come from the screen read after the wait', () => {
+  it('positive: the cursor moved from 2 to 1 while the answer "2" waited — Down, Enter (not a bare Enter on 1)', async () => {
+    const held = holdSend();
+    const answer = sendPromptAnswer({
+      sessionName: SESSION,
+      answer: '2',
+      cliToolId: 'claude',
+      promptData: choicePrompt(2),
+      frame: choiceFrame('npm test', 2),
+    });
+    await flush();
+    vi.mocked(capturePane).mockResolvedValue(choiceFrame('npm test', 1));
+    held.release();
+    await held.done;
+    await answer;
+    expect(delivered).toEqual(['<send>', 'Down', 'Enter']);
+  });
+
+  it('negative: the cursor did not move — the same keys as without a wait', async () => {
+    const held = holdSend();
+    const answer = sendPromptAnswer({
+      sessionName: SESSION,
+      answer: '2',
+      cliToolId: 'claude',
+      promptData: choicePrompt(1),
+      frame: choiceFrame('npm test', 1),
+    });
+    await flush();
+    vi.mocked(capturePane).mockResolvedValue(choiceFrame('npm test', 1));
+    held.release();
+    await held.done;
+    await answer;
+    expect(delivered).toEqual(['<send>', 'Down', 'Enter']);
+  });
+
+  it('negative: no wait — the keys come from the caller’s reading, nothing is read again', async () => {
+    vi.mocked(capturePane).mockClear();
+    await sendPromptAnswer({
+      sessionName: SESSION,
+      answer: '2',
+      cliToolId: 'claude',
+      promptData: choicePrompt(2),
+      frame: choiceFrame('npm test', 2),
+    });
+    expect(delivered).toEqual(['Enter']);
+    expect(capturePane).not.toHaveBeenCalled();
+  });
+});
+
+describe('[#3952 review P1-2] the caller’s last look is taken again right before the first key', () => {
+  it('positive: no longer allowed once the wait is over — nothing is typed (answer-withheld)', async () => {
+    let allowed = true;
+    const stillAllowedAtSend = vi.fn(() => allowed);
+    vi.mocked(capturePane).mockResolvedValue(YES_NO_FRAME);
+    const held = holdSend();
+    const answer = sendPromptAnswer({
+      sessionName: SESSION,
+      answer: 'y',
+      cliToolId: 'claude',
+      promptData: YES_NO,
+      stillAllowedAtSend,
+    });
+    await flush();
+    allowed = false;
+    held.release();
+    await held.done;
+    const error = await answer.catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(PromptAnswerNotDeliveredError);
+    expect(error).toMatchObject({ skip: 'answer-withheld', keysSent: false, reason: 'answer_not_delivered' });
+    expect(delivered).toEqual(['<send>']);
+    expect(stillAllowedAtSend).toHaveBeenCalledTimes(1);
+  });
+
+  it('negative: still allowed after the wait — answered', async () => {
+    const stillAllowedAtSend = vi.fn(() => true);
+    vi.mocked(capturePane).mockResolvedValue(YES_NO_FRAME);
+    const held = holdSend();
+    const answer = sendPromptAnswer({
+      sessionName: SESSION,
+      answer: 'y',
+      cliToolId: 'claude',
+      promptData: YES_NO,
+      stillAllowedAtSend,
+    });
+    await flush();
+    held.release();
+    await held.done;
+    await answer;
+    expect(delivered).toEqual(['<send>', 'y', '<Enter>']);
+    expect(stillAllowedAtSend).toHaveBeenCalledTimes(1);
+  });
+
+  it('negative: no wait — not asked again (the caller looked right before the call)', async () => {
+    const stillAllowedAtSend = vi.fn(() => false);
+    await sendPromptAnswer({
+      sessionName: SESSION,
+      answer: 'y',
+      cliToolId: 'claude',
+      promptData: YES_NO,
+      stillAllowedAtSend,
+    });
+    expect(delivered).toEqual(['y', '<Enter>']);
+    expect(stillAllowedAtSend).not.toHaveBeenCalled();
   });
 });

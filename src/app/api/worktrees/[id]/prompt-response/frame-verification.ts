@@ -56,6 +56,12 @@ export interface VerifiedPrompt {
    */
   isCommandCodeQuestion: boolean;
   verificationFailed: boolean;
+  /**
+   * Issue #3952 review P2-1: the session's input order, taken right before the
+   * capture, for the send — so an answer a message send came between is read
+   * again, as the plan review's is.
+   */
+  readMark: number;
 }
 
 /**
@@ -154,6 +160,7 @@ function assessFrame(
     verifiedFrame: captured.verifiedFrame,
     isCommandCodeQuestion: false,
     verificationFailed: captured.verificationFailed,
+    readMark: captured.readMark,
   };
   if (verified.verificationFailed || verified.verifiedFrame === null) return { value: verified };
 

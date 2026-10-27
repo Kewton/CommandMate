@@ -13,6 +13,7 @@ import { createLogger } from '@/lib/logger';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { captureSessionOutputFresh } from '@/lib/session/cli-session';
 import { assessPromptAnswerability } from '@/lib/polling/auto-yes-dialog-gate';
+import { instanceInputReadMark } from '@/lib/session/instance-input-lock';
 import type { PromptData } from '@/types/models';
 
 const logger = createLogger('api/respond');
@@ -22,6 +23,12 @@ export interface ScreenAtSend {
   /** The raw capture, or undefined when it could not be taken. */
   frame: string | undefined;
   promptData: PromptData | null;
+  /**
+   * Issue #3952 review P2-1: the session's input order, taken right before the
+   * capture — handed to `sendPromptAnswer` so a send admitted after this read
+   * makes the answer read the screen again.
+   */
+  readMark: number;
 }
 
 /**
@@ -49,18 +56,19 @@ export async function screenAtSend(
   cliToolId: CLIToolType,
   instanceId: string,
 ): Promise<ScreenAtSend> {
+  const readMark = instanceInputReadMark();
   let frame: string;
   try {
     frame = await captureSessionOutputFresh(worktreeId, cliToolId, undefined, instanceId);
   } catch {
     logger.warn('failed-to-read-screen-before-send');
-    return { frame: undefined, promptData: null };
+    return { frame: undefined, promptData: null, readMark };
   }
   try {
     const { promptCheck } = assessPromptAnswerability(cliToolId, frame);
-    return { frame, promptData: promptCheck?.isPrompt ? promptCheck.promptData ?? null : null };
+    return { frame, promptData: promptCheck?.isPrompt ? promptCheck.promptData ?? null : null, readMark };
   } catch {
     logger.warn('failed-to-read-screen-before-send');
-    return { frame, promptData: null };
+    return { frame, promptData: null, readMark };
   }
 }

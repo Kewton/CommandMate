@@ -61,6 +61,21 @@ vi.mock('@/lib/polling/response-checker', async (importOriginal) => ({
     screen.prompt === null ? { isPrompt: false } : { isPrompt: true, promptData: screen.prompt },
 }));
 
+/**
+ * Issue #3952 review P1-2: the contract as the fresh lookup reads it; null
+ * passes through to the real lookup.
+ */
+const contract = vi.hoisted(() => ({ override: null as unknown }));
+vi.mock('@/lib/polling/auto-yes-policy', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/polling/auto-yes-policy')>();
+  return {
+    ...actual,
+    getSessionAutoYesPolicy: (...args: Parameters<typeof actual.getSessionAutoYesPolicy>) =>
+      (contract.override as ReturnType<typeof actual.getSessionAutoYesPolicy> | null) ??
+      actual.getSessionAutoYesPolicy(...args),
+  };
+});
+
 const mockLogger = vi.hoisted(() => {
   const logger = {
     debug: vi.fn(),
@@ -161,6 +176,7 @@ beforeEach(() => {
   });
   mockLogger.info.mockImplementation(() => {});
   resetInstanceInputLocks();
+  contract.override = null;
 });
 
 afterEach(() => {
@@ -240,5 +256,50 @@ describe('[#3952] Auto-Yes answers after a send in progress, only to the same pr
     expect(await tickOn(state, YES_NO)).toBe('responded');
     expect(delivered).toEqual(['y', '<Enter>']);
     expect(capturePane).not.toHaveBeenCalled();
+  });
+});
+
+describe('[#3952 review P1-2] the contract is read again right before the first key', () => {
+  it('positive: the contract turned off while the answer waited — nothing typed, no_answer, no error', async () => {
+    const state = pollerState();
+    vi.mocked(capturePane).mockResolvedValue(YES_NO_FRAME);
+    const held = holdSend();
+    const tick = tickOn(state, YES_NO);
+    await flush();
+    expect(delivered).toEqual(['<send>']);
+    contract.override = { mode: 'off', allowPromptTypes: [], denyPatterns: [] };
+    held.release();
+    await held.done;
+    expect(await tick).toBe('no_answer');
+    expect(delivered).toEqual(['<send>']);
+    expect(state.consecutiveErrors).toBe(0);
+    expect(lines('poller:auto-yes-answer-not-delivered')).toEqual([
+      expect.objectContaining({ skip: 'answer-withheld' }),
+    ]);
+  });
+
+  it('positive: a deny pattern added while the answer waited — nothing typed', async () => {
+    const state = pollerState();
+    vi.mocked(capturePane).mockResolvedValue(YES_NO_FRAME);
+    const held = holdSend();
+    const tick = tickOn(state, YES_NO);
+    await flush();
+    contract.override = { mode: 'safe', allowPromptTypes: [], denyPatterns: ['proceed'] };
+    held.release();
+    await held.done;
+    expect(await tick).toBe('no_answer');
+    expect(delivered).toEqual(['<send>']);
+  });
+
+  it('negative: the contract unchanged after the wait — answered', async () => {
+    const state = pollerState();
+    vi.mocked(capturePane).mockResolvedValue(YES_NO_FRAME);
+    const held = holdSend();
+    const tick = tickOn(state, YES_NO);
+    await flush();
+    held.release();
+    await held.done;
+    expect(await tick).toBe('responded');
+    expect(delivered).toEqual(['<send>', 'y', '<Enter>']);
   });
 });

@@ -42,7 +42,7 @@ import { applyEventToActiveTask } from './tasks/task-transition-service';
 import { getDbInstance } from './db/db-instance';
 import { recordAnsweredPrompt, type RecordAnsweredPromptResult } from './db/chat-db';
 import { checkWorktreeSessionOwnership } from './cli-tools/worktree-session-ownership';
-import { sendPromptAnswer } from './prompt-answer-sender';
+import { sendPromptAnswer, type SendPromptAnswerParams } from './prompt-answer-sender';
 import { instanceInputReadMark } from '@/lib/session/instance-input-lock';
 import { onTmuxSessionCreated } from './tmux/session-created-signal';
 import { CLIToolManager } from './cli-tools/manager';
@@ -891,17 +891,28 @@ export async function detectAndRespondToPrompt(
     // Issue #3798: the wait this answer goes to, fixed as the send begins.
     const answerTarget = fixAnswerTarget(worktreeId, cliToolId, instanceId);
     sendInFlight = true;
+    const answerParams: SendPromptAnswerParams = {
+      sessionName,
+      answer,
+      cliToolId,
+      promptData: promptDetection.promptData,
+      // Issue #3706: asked after each wait inside the send.
+      ...(generation !== undefined ? { stillCurrent: () => isTickCurrent(generation) } : {}),
+      // Issue #3952: an answer that had to wait for a send is read again.
+      readMark,
+    };
+    // Issue #3952 review P1-2: and step 5.5's last look is taken again after
+    // that wait, right before the first key — the contract or the grant may
+    // have changed while the answer waited for the input. Not enumerable: the
+    // params stay the plain record of what was answered (as the ledger's
+    // fault-injection test compares them across runs); the sender reads it as
+    // the field it is.
+    Object.defineProperty(answerParams, 'stillAllowedAtSend', {
+      value: () => !withheldAtSend(judged, generation !== undefined),
+      enumerable: false,
+    });
     try {
-      await sendPromptAnswer({
-        sessionName,
-        answer,
-        cliToolId,
-        promptData: promptDetection.promptData,
-        // Issue #3706: asked after each wait inside the send.
-        ...(generation !== undefined ? { stillCurrent: () => isTickCurrent(generation) } : {}),
-        // Issue #3952: an answer that had to wait for a send is read again.
-        readMark,
-      });
+      await sendPromptAnswer(answerParams);
     } finally {
       invalidateCache(sessionName);
     }

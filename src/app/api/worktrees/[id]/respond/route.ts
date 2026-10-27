@@ -315,6 +315,8 @@ export async function POST(
         cliToolId,
         promptData: promptData,
         frame: atSend.frame,
+        // Issue #3952 review P2-1: the mark taken before that frame's capture.
+        readMark: atSend.readMark,
       });
       logger.info('prompt-answer-sent');
     } catch (error: unknown) {

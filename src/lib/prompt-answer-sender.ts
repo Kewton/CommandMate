@@ -863,8 +863,15 @@ async function sendCommandCodeMultiSelectAnswer(
  */
 export const ANSWER_NOT_DELIVERED_REASON = 'answer_not_delivered';
 
-const NOT_DELIVERED_WHY: Record<InstanceInputAnswerSkip, string> = {
+/**
+ * Why an answer was not typed: the lock's own reasons, or (review P1-2) the
+ * caller's last look before the first key said the answer is no longer its to send.
+ */
+export type PromptAnswerNotDeliveredSkip = InstanceInputAnswerSkip | 'answer-withheld';
+
+const NOT_DELIVERED_WHY: Record<PromptAnswerNotDeliveredSkip, string> = {
   'target-changed': 'the prompt it was for was no longer on screen once the input in progress had finished',
+  'answer-withheld': 'the answer was no longer allowed once the input in progress had finished',
   'recheck-failed': 'the screen could not be read again once the input in progress had finished',
   'input-lock-timeout': 'another input held the session past the wait',
   'session-replaced': 'the session was replaced while the answer waited',
@@ -882,7 +889,7 @@ export class PromptAnswerNotDeliveredError extends Error {
   readonly reason = ANSWER_NOT_DELIVERED_REASON;
   readonly keysSent = false;
 
-  constructor(readonly skip: InstanceInputAnswerSkip, sessionName: string) {
+  constructor(readonly skip: PromptAnswerNotDeliveredSkip, sessionName: string) {
     super(`The answer was not sent to ${sessionName}: ${NOT_DELIVERED_WHY[skip]} (${skip}). Nothing was typed.`);
     this.name = 'PromptAnswerNotDeliveredError';
   }
@@ -927,35 +934,55 @@ function samePromptTarget(target: PromptData, now: PromptData): boolean {
  * writer (Issue #3952): the caller still acts (Auto-Yes's `stillCurrent`), and
  * a fresh capture still shows the prompt the answer was decided for — the one
  * read off the caller's frame, else the caller's `promptData`, else any
- * answerable prompt.
+ * answerable prompt. Returns that fresh reading, or null when it does not.
  */
-async function answerTargetStillOnScreen(params: SendPromptAnswerParams): Promise<boolean> {
-  if (params.stillCurrent && !params.stillCurrent()) return false;
+async function answerTargetStillOnScreen(params: SendPromptAnswerParams): Promise<PromptData | null> {
+  if (params.stillCurrent && !params.stillCurrent()) return null;
   const now = readAnswerablePrompt(params.cliToolId, await capturePane(params.sessionName, GUARD_CAPTURE_LINES));
-  if (now === null) return false;
+  if (now === null) return null;
   const target = (params.frame !== undefined ? readAnswerablePrompt(params.cliToolId, params.frame) : null)
     ?? params.promptData
     ?? null;
-  return target === null || samePromptTarget(target, now);
+  return target === null || samePromptTarget(target, now) ? now : null;
 }
 
 /**
+ * The keys of an answer, typed as the session's input writer. Given the prompt
+ * as read again under the lock (null when nothing was read again), it types
+ * and returns nothing, or returns why it typed nothing — before any key.
+ */
+type InputWriterSend = (reread: PromptData | null) => Promise<'target-changed' | void>;
+
+/**
  * Run an answer's keys as the session's input writer (Issue #3952): a send in
- * progress is waited out, and the prompt is read again after it. Refused, the
+ * progress is waited out, and the prompt is read again after it. The keys are
+ * built from that fresh reading (review P1-1: the cursor may have moved), and
+ * the caller's `stillAllowedAtSend` is asked again right before the first key
+ * (review P1-2: the contract may have changed during the wait). Refused, the
  * answer throws {@link PromptAnswerNotDeliveredError} with nothing typed.
  */
 async function sendAsInputWriter(
   params: SendPromptAnswerParams,
   readMark: number,
-  send: () => Promise<void>,
+  send: InputWriterSend,
 ): Promise<void> {
+  let reread: PromptData | null = null;
   const outcome = await answerUnderInstanceInputLock(
     params.sessionName,
     readMark,
-    () => answerTargetStillOnScreen(params),
-    send,
+    async () => {
+      reread = await answerTargetStillOnScreen(params);
+      return reread !== null;
+    },
+    async (): Promise<PromptAnswerNotDeliveredSkip | void> => {
+      // Only after a wait: without one, the caller's own last look came right
+      // before this call and nothing could have changed it since.
+      if (reread !== null && params.stillAllowedAtSend && !params.stillAllowedAtSend()) return 'answer-withheld';
+      return send(reread);
+    },
   );
   if (!outcome.answered) throw new PromptAnswerNotDeliveredError(outcome.reason, params.sessionName);
+  if (outcome.value !== undefined) throw new PromptAnswerNotDeliveredError(outcome.value, params.sessionName);
 }
 
 /**
@@ -1128,11 +1155,21 @@ export interface SendPromptAnswerParams {
   /**
    * {@link instanceInputReadMark} taken before the screen the answer was decided
    * on was read (Issue #3952). An answer that sends an Enter types as the
-   * session's input writer; when another writer was admitted after this mark,
+   * session's input writer; when a send was admitted or let go after this mark,
    * the prompt is read again before the first key. Omitted, it is taken when
    * this function is called.
    */
   readMark?: number;
+  /**
+   * The caller's last look before a key (Issue #3952 review P1-2), asked again
+   * under the session's input lock once the answer had to wait for another
+   * writer and read the screen again, right before its first key. `false`
+   * types nothing ({@link PromptAnswerNotDeliveredError}, skip
+   * `answer-withheld`). Auto-Yes passes its contract and grant check
+   * (`withheldAtSend`), which it otherwise made before the wait. Omitted,
+   * nothing more is asked.
+   */
+  stillAllowedAtSend?: () => boolean;
 }
 
 /**
@@ -1182,15 +1219,13 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
   // a two-stage confirm, not a digit and an Enter.
   const multiSelect = readMultiSelectRequest(params);
   if (multiSelect !== null) {
-    await sendAsInputWriter(params, readMark, () =>
-      sendCommandCodeMultiSelectAnswer(
-        sessionName,
-        multiSelect.promptData,
-        multiSelect.wanted,
-        stillCurrent,
-        touch,
-      ),
-    );
+    await sendAsInputWriter(params, readMark, async (reread) => {
+      // Review P1-1: the toggles come from the ticks on the screen they go
+      // to — read again after a wait — not from the reading the request saw.
+      const shown = reread === null ? multiSelect.promptData : reread;
+      if (shown.type !== 'multiple_choice' || shown.multiSelect !== true) return 'target-changed';
+      await sendCommandCodeMultiSelectAnswer(sessionName, shown, multiSelect.wanted, stillCurrent, touch);
+    });
     invalidateCache(sessionName);
     return;
   }
@@ -1238,41 +1273,49 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
   if (isCursorNavMultiChoice) {
     const targetNum = parseInt(answer, 10);
 
-    let defaultNum: number;
-    let mcOptions: Array<{ number: number; label: string; isDefault?: boolean }> | null = null;
+    /**
+     * The keys for the answer on a screen read as `shown`. Issue #3952 review
+     * P1-1: called again with the prompt as read under the input lock after a
+     * wait, so the offset is from where the cursor IS — a cursor that moved
+     * while the answer waited would otherwise turn "2" into a bare Enter on 1.
+     */
+    const cursorKeys = (shown: PromptData | undefined): string[] => {
+      let defaultNum: number;
+      let mcOptions: Array<{ number: number; label: string; isDefault?: boolean }> | null = null;
 
-    if (promptData?.type === 'multiple_choice') {
-      // Primary path: use fresh promptData
-      mcOptions = promptData.options;
-      const defaultOption = mcOptions.find(o => o.isDefault);
-      defaultNum = defaultOption?.number ?? 1;
-    } else {
-      // Fallback path (Issue #287): promptData is undefined or type mismatch, use fallback fields
-      defaultNum = fallbackDefaultOptionNumber ?? 1;
-    }
+      if (shown?.type === 'multiple_choice') {
+        // Primary path: use fresh promptData
+        mcOptions = shown.options;
+        const defaultOption = mcOptions.find(o => o.isDefault);
+        defaultNum = defaultOption?.number ?? 1;
+      } else {
+        // Fallback path (Issue #287): promptData is undefined or type mismatch, use fallback fields
+        defaultNum = fallbackDefaultOptionNumber ?? 1;
+      }
 
-    const offset = targetNum - defaultNum;
+      const offset = targetNum - defaultNum;
 
-    // Detect multi-select (checkbox) prompts by checking for [ ] in option labels.
-    // Multi-select prompts require: Space to toggle checkbox -> navigate to "Next" -> Enter.
-    // Single-select prompts require: navigate to option -> Enter.
-    // Note: multi-select detection is only possible when promptData succeeded (mcOptions available).
-    const isMultiSelect = mcOptions !== null && hasCheckboxOptions(mcOptions);
+      // Detect multi-select (checkbox) prompts by checking for [ ] in option labels.
+      // Multi-select prompts require: Space to toggle checkbox -> navigate to "Next" -> Enter.
+      // Single-select prompts require: navigate to option -> Enter.
+      // Note: multi-select detection is only possible when promptData succeeded (mcOptions available).
+      const isMultiSelect = mcOptions !== null && hasCheckboxOptions(mcOptions);
 
-    if (isMultiSelect && mcOptions !== null) {
-      // Multi-select: toggle checkbox, then navigate to "Next" and submit
-      const checkboxCount = mcOptions.filter(o => hasCheckboxOptions([o])).length;
-      const keys: string[] = [
-        ...buildNavigationKeys(offset),  // 1. Navigate to target option
-        'Space',                          // 2. Toggle checkbox
-      ];
-      // 3. Navigate to "Next" button (positioned right after all checkbox options)
-      const downToNext = checkboxCount - targetNum + 1;
-      keys.push(...buildNavigationKeys(downToNext));
-      // 4. Enter to submit
-      keys.push('Enter');
-      await sendAsInputWriter(params, readMark, () => sendSpecialKeysWhileCurrent(sessionName, keys, stillCurrent, touch));
-    } else {
+      if (isMultiSelect && mcOptions !== null) {
+        // Multi-select: toggle checkbox, then navigate to "Next" and submit
+        const checkboxCount = mcOptions.filter(o => hasCheckboxOptions([o])).length;
+        const keys: string[] = [
+          ...buildNavigationKeys(offset),  // 1. Navigate to target option
+          'Space',                          // 2. Toggle checkbox
+        ];
+        // 3. Navigate to "Next" button (positioned right after all checkbox options)
+        const downToNext = checkboxCount - targetNum + 1;
+        keys.push(...buildNavigationKeys(downToNext));
+        // 4. Enter to submit
+        keys.push('Enter');
+        return keys;
+      }
+
       // Single-select: navigate and Enter to select
       const navigationKeys = buildNavigationKeys(offset);
 
@@ -1284,13 +1327,20 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
       // the Up/Down navigation already engages the cursor, so no extra nudge is
       // needed. Old-format numbered prompts (isAskUserQuestion unset) keep their
       // exact prior key sequence, so their response behavior is unchanged.
-      const isAskUserQuestionPicker = promptData?.type === 'multiple_choice'
-        && promptData.isAskUserQuestion === true;
-      const keys: string[] = (isAskUserQuestionPicker && offset === 0)
+      const isAskUserQuestionPicker = shown?.type === 'multiple_choice'
+        && shown.isAskUserQuestion === true;
+      return (isAskUserQuestionPicker && offset === 0)
         ? ['Down', 'Up', 'Enter']
         : [...navigationKeys, 'Enter'];
-      await sendAsInputWriter(params, readMark, () => sendSpecialKeysWhileCurrent(sessionName, keys, stillCurrent, touch));
-    }
+    };
+
+    await sendAsInputWriter(params, readMark, async (reread) => {
+      // A re-read that is not a choice list says nothing about the cursor:
+      // the keys cannot be placed, so none are typed.
+      if (reread !== null && reread.type !== 'multiple_choice') return 'target-changed';
+      const keys = cursorKeys(reread ?? promptData);
+      await sendSpecialKeysWhileCurrent(sessionName, keys, stillCurrent, touch);
+    });
   } else {
     // Issue #616: Resolve submitMode and determine whether to suppress Enter
     const resolvedSubmitMode = resolveSubmitMode(params, dialog);

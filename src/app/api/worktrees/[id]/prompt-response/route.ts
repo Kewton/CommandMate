@@ -167,6 +167,7 @@ export async function POST(
       verified.verifiedFrame,
       manualAnswer,
       verified.promptCheck?.isPrompt ? verified.promptCheck.promptData : null,
+      verified.readMark,
     );
     if (sendFailure) return noted(sendFailure);
 

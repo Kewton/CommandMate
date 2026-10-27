@@ -221,7 +221,7 @@ declare global {
   // eslint-disable-next-line no-var
   var __instanceInputLocks: Map<string, LockEntry> | undefined;
   // eslint-disable-next-line no-var
-  var __instanceInputGeneration: { last: number; lastExclusive?: number } | undefined;
+  var __instanceInputGeneration: { last: number; lastExclusive?: number; exclusiveEvents?: number } | undefined;
   // eslint-disable-next-line no-var
   var __instanceInputRevoked: WeakSet<InstanceInputTicket> | undefined;
   // eslint-disable-next-line no-var
@@ -229,7 +229,20 @@ declare global {
 }
 
 const entries = getOrInitGlobal('__instanceInputLocks', () => new Map<string, LockEntry>());
-const generationSeq = getOrInitGlobal('__instanceInputGeneration', () => ({ last: 0, lastExclusive: 0 }));
+const generationSeq = getOrInitGlobal('__instanceInputGeneration', () => ({
+  last: 0,
+  lastExclusive: 0,
+  exclusiveEvents: 0,
+}));
+
+/**
+ * Count an `exclusive` writer coming or going (Issue #3952 review P2-2). The
+ * read mark moves on both, so a read taken while a send held the composer is
+ * read again once that send has let go, even when no other send came in.
+ */
+function noteExclusiveEvent(): void {
+  generationSeq.exclusiveEvents = (generationSeq.exclusiveEvents ?? 0) + 1;
+}
 /**
  * Tickets revoked by a session replacement (review-2 P1). On `globalThis`, not
  * a field read through `instanceof`: under `next dev` a ticket can be issued by
@@ -263,7 +276,10 @@ function pruneEntry(sessionName: string): void {
 
 function issueTicket(sessionName: string, waited: boolean, mode: InstanceInputMode = 'exclusive'): TicketImpl {
   generationSeq.last += 1;
-  if (mode === 'exclusive') generationSeq.lastExclusive = generationSeq.last;
+  if (mode === 'exclusive') {
+    generationSeq.lastExclusive = generationSeq.last;
+    noteExclusiveEvent();
+  }
   return new TicketImpl(sessionName, generationSeq.last, waited, mode);
 }
 
@@ -332,6 +348,7 @@ function release(ticket: TicketImpl): void {
   } else {
     if (entry.owner !== ticket) return;
     entry.owner = null;
+    noteExclusiveEvent();
   }
   admitWaiters(ticket.sessionName, entry);
   pruneEntry(ticket.sessionName);
@@ -383,13 +400,18 @@ export async function withInstanceInputLock<T>(
 }
 
 /**
- * Where the order of `exclusive` admissions stands now (Issue #3952). An
- * answer takes it right before it reads the screen it will answer, and hands it
- * to {@link answerUnderInstanceInputLock}: a send admitted after it may have
- * typed between that read and the answer's keys.
+ * Where the order of `exclusive` writers stands now (Issue #3952). An answer
+ * takes it right before it reads the screen it will answer, and hands it to
+ * {@link answerUnderInstanceInputLock}: a send admitted after it may have typed
+ * between that read and the answer's keys. It moves when a send is admitted
+ * and when one lets go (review P2-2): a read taken while a send held the
+ * composer saw a screen that send was still typing at, and an answer admitted
+ * after that send let go — without queueing, and with no other send since —
+ * must read it again as well. The count is process-wide, not per session: a
+ * send to another session costs a needless re-read, never a missed one.
  */
 export function instanceInputReadMark(): number {
-  return generationSeq.lastExclusive ?? 0;
+  return generationSeq.exclusiveEvents ?? 0;
 }
 
 /** Why {@link answerUnderInstanceInputLock} typed nothing (Issue #3952). */
@@ -423,9 +445,9 @@ function skipOfLockError(error: unknown): InstanceInputAnswerSkip | null {
  * (Issue #3952): after any send that holds the composer, and with every send
  * held off until it is done.
  *
- * The screen was read before the lock. When a send was admitted after that
- * read (`readMark`, from {@link instanceInputReadMark}) or the answer had to
- * queue, the screen may have moved under it: `stillApplies` reads it again,
+ * The screen was read before the lock. When a send was admitted or let go
+ * after that read (`readMark`, from {@link instanceInputReadMark}) or the
+ * answer had to queue, the screen may have moved under it: `stillApplies` reads it again,
  * and the answer is typed only when it still says yes. A call that joins its
  * context's own ticket (the readiness wait inside a send that holds the lock)
  * held the composer since before its read, so nothing is read again.
@@ -567,6 +589,7 @@ export function invalidateInstanceInput(sessionName: string): void {
     entry.owner.revoked = true;
     revokedTickets.add(entry.owner);
     entry.owner = null;
+    noteExclusiveEvent();
   }
   for (const holder of [...entry.shared]) {
     if (holder === own) continue;

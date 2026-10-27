@@ -78,7 +78,8 @@ export async function answerCommandCodePlanReview(args: {
       return now !== null && now.phase === state.phase &&
         samePlan(plan, planCommandCodePlanReviewKeys(now, { action, text: answer, useDefault }));
     },
-    () => sendCommandCodePlanReviewKeys(sessionName, plan.steps)
+    // Issue #3952 review P2-3: every step is sent only while the ticket is current.
+    (ticket) => sendCommandCodePlanReviewKeys(sessionName, plan.steps, undefined, () => ticket.isCurrent())
   );
   if (!outcome.answered) {
     return {

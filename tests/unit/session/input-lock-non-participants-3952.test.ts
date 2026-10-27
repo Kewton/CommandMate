@@ -120,3 +120,34 @@ describe('[#3952] a person’s input is neither refused nor held', () => {
     expect(read('docs/en/user-guide/cli-operations-guide.md')).toContain('input lock (#3952)');
   });
 });
+
+describe('[#3952 review P2-4] the guide names only the automatic answers that take part', () => {
+  /** The guide's row that says which paths take part, by its marker in each language. */
+  const rowOf = (file: string, marker: string): string =>
+    read(file).split('\n').find((line) => line.startsWith('|') && line.includes(marker)) ?? '';
+
+  it('positive: the participating row names codex, copilot and Antigravity, not every launch answer', () => {
+    const ja = rowOf('docs/user-guide/cli-operations-guide.md', '| 参加する');
+    const en = rowOf('docs/en/user-guide/cli-operations-guide.md', '| Takes part');
+    expect(ja).toContain('codex の起動時と送信前の自動回答');
+    expect(ja).toContain('copilot と Antigravity のフォルダー trust');
+    expect(ja).not.toContain('・起動時と送信前の自動回答');
+    expect(en).toContain("codex's automatic answers at launch and before a send");
+    expect(en).toContain("copilot's and Antigravity's automatic folder-trust answers");
+    expect(en).not.toContain(', the automatic answers at launch');
+  });
+
+  it('positive: Claude’s trust and Gemini’s launch dialog are listed as not taking part', () => {
+    const ja = rowOf('docs/user-guide/cli-operations-guide.md', 'Claude の trust ダイアログ');
+    const en = rowOf('docs/en/user-guide/cli-operations-guide.md', "Claude's trust dialog");
+    expect(ja).toContain('Gemini');
+    expect(ja).toContain('参加しない');
+    expect(en).toContain('Gemini');
+    expect(en).toContain('Does not take part');
+  });
+
+  it('negative: the implementation is unchanged — Claude’s and Gemini’s launch answers use no input lock', () => {
+    expect(read('src/lib/session/claude-session.ts')).not.toMatch(/instance-input-lock/);
+    expect(read('src/lib/cli-tools/gemini.ts')).not.toMatch(/instance-input-lock/);
+  });
+});

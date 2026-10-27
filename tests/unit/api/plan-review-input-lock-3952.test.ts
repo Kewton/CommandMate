@@ -31,9 +31,15 @@ import { answerCommandCodePlanReview } from '@/app/api/worktrees/[id]/prompt-res
 import { readCommandCodePlanReviewState } from '@/lib/detection/tools/command-code/plan-review-state';
 import {
   instanceInputReadMark,
+  invalidateInstanceInput,
   resetInstanceInputLocks,
   withInstanceInputLock,
 } from '@/lib/session/instance-input-lock';
+import {
+  PlanReviewInputLostError,
+  sendCommandCodePlanReviewKeys,
+  type PlanReviewKeyStep,
+} from '@/lib/cli-tools/command-code-plan-review';
 
 const SESSION = 'mcbd-command-code-wt-3952';
 const FIXTURES = path.resolve(__dirname, '../../fixtures/command-code-plan-review-3125');
@@ -151,5 +157,68 @@ describe('[#3952] plan-review keys and the input lock', () => {
     expect(result.sent).toBe(true);
     expect(events).toEqual(['Escape']);
     expect(recapture).not.toHaveBeenCalled();
+  });
+});
+
+describe('[#3952 review P2-3] a plan review answer whose input was taken mid-keys', () => {
+  it('positive: the session is replaced between the comment’s keys — the rest are not sent', async () => {
+    vi.useFakeTimers();
+    const answering = answerCommandCodePlanReview({
+      sessionName: SESSION,
+      state,
+      action: 'comment',
+      answer: 'please split this step',
+      useDefault: false,
+      readMark: instanceInputReadMark(),
+      recapture: async () => INITIAL,
+    });
+    const settled = answering.then(
+      () => null,
+      (error: unknown) => error,
+    );
+    await vi.advanceTimersByTimeAsync(10);
+    expect(events).toEqual(['Enter']);
+    invalidateInstanceInput(SESSION);
+    await vi.runAllTimersAsync();
+    const error = await settled;
+    expect(error).toBeInstanceOf(PlanReviewInputLostError);
+    expect(error).toMatchObject({ stepsSent: 1 });
+    expect(events).toEqual(['Enter']);
+  });
+
+  it('negative: the ticket stays current — every step is sent', async () => {
+    vi.useFakeTimers();
+    const answering = answerCommandCodePlanReview({
+      sessionName: SESSION,
+      state,
+      action: 'comment',
+      answer: 'please split this step',
+      useDefault: false,
+      readMark: instanceInputReadMark(),
+      recapture: async () => INITIAL,
+    });
+    await vi.runAllTimersAsync();
+    await answering;
+    expect(events).toEqual(['Enter', 'text:please split this step', 'Enter']);
+  });
+
+  it('sendCommandCodePlanReviewKeys: asked before each step; no check given, all steps go out', async () => {
+    const steps: PlanReviewKeyStep[] = [
+      { kind: 'key', key: 'Enter' },
+      { kind: 'text', text: 'x' },
+      { kind: 'key', key: 'C-r' },
+    ];
+    let current = true;
+    const sleep = vi.fn(async () => {
+      current = false;
+    });
+    await expect(sendCommandCodePlanReviewKeys(SESSION, steps, sleep, () => current)).rejects.toBeInstanceOf(
+      PlanReviewInputLostError,
+    );
+    expect(events).toEqual(['Enter']);
+
+    events = [];
+    await sendCommandCodePlanReviewKeys(SESSION, steps, async () => {});
+    expect(events).toEqual(['Enter', 'text:x', 'C-r']);
   });
 });
