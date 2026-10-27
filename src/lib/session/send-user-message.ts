@@ -30,7 +30,15 @@
  *
  * Every attempt that reaches the ownership check also records how it ended —
  * not-sent / sent / indeterminate — for `prompt --json`'s `lastSend` (Issue
- * #3759, `./send-attempt-state`). Nothing is resent on any outcome.
+ * #3759, `./send-attempt-state`). Nothing is resent on any outcome. The
+ * caller can also be handed its own attempt (`onAttempt`, Issue #3945), so it
+ * describes this send rather than whichever send to the instance recorded last.
+ *
+ * Issue #3945: for the tools whose composer is read after a failure (claude,
+ * codex), step 4 runs under the instance's input lock, the failure read
+ * included — a read made after the lock was released could be reading the next
+ * send's body. The tool's own sender joins that lock rather than queueing
+ * behind it (`instance-input-lock`).
  *
  * Out of scope (kept in the HTTP layer / caller): request/body validation,
  * content trimming/size limits, imagePath validation, CLI-tool availability
@@ -68,6 +76,7 @@ import {
 import type { SendAttemptReason, SendAttemptState } from '@/lib/session/send-attempt-types';
 import { extractComposerText, SUPPORTED_COMPOSER_TOOLS } from '@/lib/detection/composer-text';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
+import { withInstanceInputLock } from '@/lib/session/instance-input-lock';
 import type { CopilotTool } from '@/lib/cli-tools/copilot';
 import { formatImagePathFallbackMessage } from '@/lib/cli-tools/opencode';
 import type { ChatMessage, MessageType } from '@/types/models';
@@ -108,6 +117,12 @@ export interface SendUserMessageParams {
    * ever released; a prompt the scraper can see is still refused.
    */
   ignoreStructuredPromptGuard?: boolean;
+  /**
+   * Told how THIS attempt ended, as it is recorded for `lastSend` (Issue
+   * #3945). The shared record holds the instance's last attempt, which with
+   * concurrent sends may be another request's — same text included.
+   */
+  onAttempt?: (attempt: { state: SendAttemptState; reason: SendAttemptReason }) => void;
 }
 
 /** Result of {@link sendUserMessage}. */
@@ -242,6 +257,7 @@ export async function sendUserMessage(
   // unchanged; recording never throws.
   const settle = (state: SendAttemptState, reason: SendAttemptReason): void => {
     recordSendAttempt({ worktreeId, cliToolId, instanceId: resolvedInstanceId }, { state, reason, content });
+    params.onAttempt?.({ state, reason });
   };
 
   // Issue #2865: the send route checks ownership itself, but the timer manager
@@ -421,48 +437,75 @@ export async function sendUserMessage(
     logger.error('failed-to-detect-orphaned-messages:', { error: getErrorMessage(error) });
   }
 
-  // 4. Send message to CLI tool.
-  try {
-    // Issue #474: Image-aware sending
-    if (absoluteImagePath) {
-      if (isImageCapableCLITool(cliTool)) {
-        // Image-capable tool: use native image sending
-        await cliTool.sendMessageWithImage(worktreeId, content, absoluteImagePath, instanceId);
+  // 4. Send message to CLI tool (run below). Returns the failure, or null when sent.
+  async function deliver(): Promise<{
+    error: unknown;
+    failure: { state: SendAttemptState; reason: SendAttemptReason };
+  } | null> {
+    try {
+      // Issue #474: Image-aware sending
+      if (absoluteImagePath) {
+        if (isImageCapableCLITool(cliTool)) {
+          // Image-capable tool: use native image sending
+          await cliTool.sendMessageWithImage(worktreeId, content, absoluteImagePath, instanceId);
+        } else {
+          // Fallback: embed path in message. Issue #2035 moved the wording to
+          // `@/lib/cli-tools/opencode` so this branch and opencode's own fallback
+          // — reached when a pane has no server to attach through — cannot drift
+          // apart; the behaviour of this line is unchanged.
+          await cliTool.sendMessage(
+            worktreeId,
+            formatImagePathFallbackMessage(content, absoluteImagePath),
+            instanceId
+          );
+        }
       } else {
-        // Fallback: embed path in message. Issue #2035 moved the wording to
-        // `@/lib/cli-tools/opencode` so this branch and opencode's own fallback
-        // — reached when a pane has no server to attach through — cannot drift
-        // apart; the behaviour of this line is unchanged.
-        await cliTool.sendMessage(
-          worktreeId,
-          formatImagePathFallbackMessage(content, absoluteImagePath),
-          instanceId
-        );
+        // Issue #1906: every tool — copilot included — goes through its own
+        // `ICLITool.sendMessage`. copilot used to be special-cased here with a raw
+        // `sendKeys` + delayed Enter, which skipped `CopilotTool.sendMessage`
+        // entirely: no `waitForPrompt` (so a folder-trust dialog was typed into,
+        // #1886), no selection-list branch (#1895), and — because nothing read the
+        // pane back — no #1471 "the Enter was swallowed" failure, so a typed-but-
+        // unsent message was reported as sent. It also flattened `\n+` to spaces,
+        // which silently turned a contract preamble or a Markdown body into one
+        // line. Measured on copilot 1.0.80 (private tmux socket, `tmux -L`):
+        // `send-keys` with literal newlines leaves the body multi-line in the
+        // composer (`❯ line one` / `  line two` / `  line three`) and a SEPARATE
+        // Enter submits all of it — the transcript echo keeps the line breaks — so
+        // the flattening is not needed to make Enter submit and is now gone.
+        await cliTool.sendMessage(worktreeId, content, instanceId);
       }
-    } else {
-      // Issue #1906: every tool — copilot included — goes through its own
-      // `ICLITool.sendMessage`. copilot used to be special-cased here with a raw
-      // `sendKeys` + delayed Enter, which skipped `CopilotTool.sendMessage`
-      // entirely: no `waitForPrompt` (so a folder-trust dialog was typed into,
-      // #1886), no selection-list branch (#1895), and — because nothing read the
-      // pane back — no #1471 "the Enter was swallowed" failure, so a typed-but-
-      // unsent message was reported as sent. It also flattened `\n+` to spaces,
-      // which silently turned a contract preamble or a Markdown body into one
-      // line. Measured on copilot 1.0.80 (private tmux socket, `tmux -L`):
-      // `send-keys` with literal newlines leaves the body multi-line in the
-      // composer (`❯ line one` / `  line two` / `  line three`) and a SEPARATE
-      // Enter submits all of it — the transcript echo keeps the line breaks — so
-      // the flattening is not needed to make Enter submit and is now gone.
-      await cliTool.sendMessage(worktreeId, content, instanceId);
+      return null;
+    } catch (error) {
+      logger.error('failed-to-send-message-to:', { error: getErrorMessage(error) });
+      // Issue #3759: not-sent only when the error says the body was never typed.
+      let failure = classifySendFailure(error);
+      if (failure.reason === 'submit-unconfirmed' && (await composerStillHolds(worktreeId, cliToolId, instanceId, content))) {
+        failure = { state: 'indeterminate', reason: 'composer-residue' };
+      }
+      return { error, failure };
     }
-  } catch (error) {
-    logger.error('failed-to-send-message-to:', { error: getErrorMessage(error) });
-    // Issue #3759: not-sent only when the error says the body was never typed.
-    let failure = classifySendFailure(error);
-    if (failure.reason === 'submit-unconfirmed' && (await composerStillHolds(worktreeId, cliToolId, instanceId, content))) {
-      failure = { state: 'indeterminate', reason: 'composer-residue' };
-    }
+  }
+
+  // Issue #3945: under the input lock for the tools whose composer is read
+  // after a failure, so that read is of this send's composer. Not for the
+  // others — opencode's HTTP delivery never touches the composer, and holding
+  // the lock across it would stall a concurrent tmux send for nothing; their
+  // tmux path takes the lock inside the shared sender.
+  const delivery = SUPPORTED_COMPOSER_TOOLS.has(cliToolId)
+    ? await withInstanceInputLock(sessionName, () => deliver()).catch((error: unknown) => ({
+        error,
+        failure: classifySendFailure(error),
+      }))
+    : await deliver();
+  if (delivery !== null) {
+    const { error, failure } = delivery;
     settle(failure.state, failure.reason);
+    // Issue #3945: a dialog found by the re-check under the lock is the prompt
+    // guard's refusal, found late — answered as that refusal (relay holds it).
+    if (failure.reason === 'prompt-waiting') {
+      return { ok: false, stage: 'prompt_waiting', error: promptWaitingMessage(worktreeId) };
+    }
     if (isSessionStartTimeoutError(error)) {
       return { ok: false, stage: 'send', error: error.message, code: SESSION_STARTING_CODE };
     }

@@ -55,6 +55,7 @@ import {
   PROMPT_WAITING_CODE,
 } from '@/lib/session/prompt-waiting-guard';
 import { createLogger } from '@/lib/logger';
+import { classifySendFailure } from '@/lib/session/send-attempt-state';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
 
@@ -190,7 +191,22 @@ export async function POST(
     // matches on the first poll and the wait returns immediately. It only spends
     // its window when the composer is genuinely gone — i.e. a dialog is up, which
     // is exactly when typing was the wrong thing to do.
-    await cliTool.sendMessage(id, command, instanceId);
+    //
+    // Issue #3945: the send waits its turn for the instance's composer (the
+    // input lock in the shared sender) and re-reads the pane once it has it. A
+    // dialog found then is the refusal above, found late — the same 409.
+    try {
+      await cliTool.sendMessage(id, command, instanceId);
+    } catch (error) {
+      if (classifySendFailure(error).reason === 'prompt-waiting') {
+        logger.info('terminal-send-refused-prompt-waiting-under-lock', { worktreeId: id, cliToolId: target.cliToolId });
+        return NextResponse.json(
+          { error: promptWaitingMessage(id), code: PROMPT_WAITING_CODE },
+          { status: 409 }
+        );
+      }
+      throw error;
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

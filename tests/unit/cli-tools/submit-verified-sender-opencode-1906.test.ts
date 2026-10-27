@@ -262,6 +262,7 @@ describe('opencode submit verification (#1906)', () => {
       vi.useFakeTimers();
       try {
         vi.mocked(capturePane)
+          .mockResolvedValueOnce(TURN_COMPLETE) // Issue #3945: the re-check under the input lock
           .mockResolvedValueOnce(RESIDUAL) // 1st read-back: still typed
           .mockResolvedValue(TURN_COMPLETE); // after the resend: box empty
 

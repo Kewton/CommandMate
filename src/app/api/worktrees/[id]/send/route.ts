@@ -26,6 +26,7 @@ import { probeRunningSessionHookUrl } from '@/lib/cli-tools/base';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType, type ICLITool } from '@/lib/cli-tools/types';
 import { sendUserMessage } from '@/lib/session/send-user-message';
 import { PROMPT_WAITING_CODE } from '@/lib/session/prompt-waiting-guard';
+import type { SendAttemptState } from '@/lib/session/send-attempt-types';
 import {
   describeSendAttemptState,
   getLastSendAttempt,
@@ -438,6 +439,8 @@ export async function POST(
     // sendUserMessage service so manual sends and Timer-fired sends (executeTimer)
     // record identically in chat_messages / Message History.
     const sendStartedAt = Date.now();
+    // Issue #3945: this request's own attempt, as the service recorded it.
+    let ownAttempt: { state: SendAttemptState; reason: string } | null = null;
     const result = await sendUserMessage(db, {
       worktreeId: id,
       content: trimmedContent,
@@ -449,6 +452,9 @@ export async function POST(
       copilotModel: cliToolId === 'copilot' ? body.model : undefined,
       // Issue #1737: `commandmate send --ignore-structured-prompt`.
       ignoreStructuredPromptGuard: body.ignoreStructuredPromptGuard === true,
+      onAttempt: (attempt) => {
+        ownAttempt = attempt;
+      },
     });
 
     if (!result.ok) {
@@ -486,12 +492,19 @@ export async function POST(
       }
       // Issue #3759: say whether the message can be resent (`not-sent`) or must
       // not be before the pane is checked (`indeterminate`). Nothing resends it.
-      // The record must be this request's: same message, made after it began.
-      const attempt = getLastSendAttempt(sendAttemptInstance);
-      const sendState =
-        attempt !== null && attempt.at >= Math.floor(sendStartedAt) && attempt.messageDigest === sendMessageDigest(trimmedContent)
-          ? ` ${describeSendAttemptState(attempt)}`
-          : '';
+      // The record must be this request's. Issue #3945: the service hands this
+      // request its own attempt; the shared record (same message, made after
+      // the request began) is only the fallback for a service that did not —
+      // with two concurrent sends of one text it cannot say whose it is.
+      const recorded = getLastSendAttempt(sendAttemptInstance);
+      const attempt: { state: SendAttemptState; reason: string } | null =
+        ownAttempt ??
+        (recorded !== null &&
+        recorded.at >= Math.floor(sendStartedAt) &&
+        recorded.messageDigest === sendMessageDigest(trimmedContent)
+          ? recorded
+          : null);
+      const sendState = attempt !== null ? ` ${describeSendAttemptState(attempt)}` : '';
       return NextResponse.json(
         { error: `Failed to send message to ${cliTool.name}: ${result.error}${sendState}` },
         { status: 500 }

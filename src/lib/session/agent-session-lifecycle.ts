@@ -45,6 +45,8 @@ import {
 import { archiveSupersededSessionMessages } from '@/lib/session/session-generation-archive';
 import { markSessionStarting } from '@/lib/session/session-starting-state';
 import { beginEnterFallbackSession } from '@/lib/polling/auto-yes-enter-fallback-state';
+import { invalidateInstanceInput } from '@/lib/session/instance-input-lock';
+import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('lib/session/agent-session-lifecycle');
@@ -93,6 +95,22 @@ export function beginAgentSession(target: AgentInstanceRef, at: number = Date.no
   // to. A relaunch does not stop the Auto-Yes poller, so the record (and the
   // poller's keys, through the epoch) are expired here, with the generation.
   beginEnterFallbackSession(target.worktreeId, target.cliToolId, target.instanceId);
+
+  // Issue #3945: the composer is a new process's. A carried paste mark of the
+  // old one no longer describes it, sends still waiting for the old composer
+  // must not type into this one, and an old send still in flight loses its
+  // ticket. A send relaunching its own pane keeps its own (see
+  // `invalidateInstanceInput`). In memory only; a name that does not resolve
+  // has no lock to expire.
+  try {
+    invalidateInstanceInput(resolveSessionName(target.cliToolId, target.worktreeId, target.instanceId));
+  } catch (error) {
+    logger.warn('instance-input-invalidate-failed', {
+      worktreeId: target.worktreeId,
+      cliToolId: target.cliToolId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   const after = getAgentEventDropCounts(
     target.worktreeId,

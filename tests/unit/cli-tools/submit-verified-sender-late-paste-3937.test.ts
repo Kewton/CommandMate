@@ -8,10 +8,13 @@
  * Watching for the late placeholder inside the failed send was tried and taken
  * back out of this Issue: without sends to one instance being serialised, what
  * the watch reads cannot be told apart from another send's paste (review of
- * 2026-10-27). What is pinned here:
+ * 2026-10-27). Issue #3945 serialised them (`instance-input-lock`) and put the
+ * watch back: an `unseen` paste is now watched for `LATE_PASTE_OBSERVE_MS`
+ * more under the lock before it fails (its own tests:
+ * `submit-verified-sender-input-lock-3945.test.ts`). What is pinned here:
  *
- *   - an `unseen` paste still fails right after the 2-second wait, with the
- *     withdrawal of #2464 and no extra watch (as on develop);
+ *   - an `unseen` paste fails after the 2-second wait plus the #3945 watch,
+ *     with the withdrawal of #2464 and no other read in between;
  *   - a placeholder left behind is taken out by the NEXT send's pre-send clear,
  *     with `C-e`+`BSpace` (the part of #3937 that stays);
  *   - the count check behind the 3,575 of a 7,464-byte body: a placeholder's
@@ -56,6 +59,7 @@ import * as sender from '@/lib/cli-tools/submit-verified-sender';
 import { sendMessageWithSubmitVerification, classifyPasteLanded } from '@/lib/cli-tools/submit-verified-sender';
 import { sendSpecialKeys, capturePane, clearComposerLine, clearComposerPasteToken } from '@/lib/tmux/tmux';
 import { classifySendFailure } from '@/lib/session/send-attempt-state';
+import { LATE_PASTE_OBSERVE_MS, resetInstanceInputLocks } from '@/lib/session/instance-input-lock';
 
 const SESSION = 'mcbd-codex-late-paste';
 const FIXTURES = path.resolve(__dirname, '../../fixtures');
@@ -115,6 +119,8 @@ describe('submit-verified-sender: a paste drawn late (Issue #3937)', () => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     reads = [];
+    // Issue #3945: a failed send leaves a carried paste mark for the next one.
+    resetInstanceInputLocks();
     vi.mocked(execFile).mockImplementation(((
       _file: string,
       _args: string[],
@@ -159,8 +165,10 @@ describe('submit-verified-sender: a paste drawn late (Issue #3937)', () => {
     expect(error?.message).not.toMatch(/appeared \d+ms later/);
     expect(classifySendFailure(error)).toEqual({ state: 'indeterminate', reason: 'body-not-landed' });
     expect(enterCount()).toBe(0);
-    // 20 reads of the 2-second wait, then the withdrawal's read — nothing in between.
-    expect(reads).toEqual(['clear', ...Array(20).fill('verify'), 'clear']);
+    // 20 reads of the 2-second wait, then (Issue #3945, which supersedes this
+    // test's "no late watch") the late watch's reads, then the withdrawal's
+    // read — nothing else in between.
+    expect(reads).toEqual(['clear', ...Array(20 + LATE_PASTE_OBSERVE_MS / 100).fill('verify'), 'clear']);
   });
 
   it('a placeholder left behind is taken out by the next send with C-e+BSpace, and that send goes through', async () => {
