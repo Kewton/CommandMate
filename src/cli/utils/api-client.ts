@@ -374,12 +374,18 @@ export class ApiClient {
   /**
    * HTTP GET request
    * [DR1-05] Generic type parameter specified at call site
+   *
+   * Issue #3956: `init.signal` bounds the request; an aborted one throws an
+   * `ApiError` like any other network failure, so a caller that set a deadline
+   * reads `signal.aborted` to tell the two apart. Omitted, the request is as
+   * before (no `signal` key on the fetch init).
    */
-  async get<T>(path: string): Promise<T> {
+  async get<T>(path: string, init?: { signal?: AbortSignal }): Promise<T> {
     try {
       const response = await fetch(`${this.baseUrl}${path}`, {
         method: 'GET',
         headers: this.getHeaders(),
+        ...(init?.signal ? { signal: init.signal } : {}),
       });
 
       if (!response.ok) {
