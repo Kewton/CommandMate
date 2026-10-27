@@ -119,6 +119,7 @@ import {
   clearExpiredCarriedPasteMark,
   getCarriedPasteMark,
   leaveCarriedPasteMark,
+  noteInputStart,
   withInstanceInputLock,
   type InstanceInputTicket,
 } from '@/lib/session/instance-input-lock';
@@ -1563,6 +1564,11 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
   //    TUI's current cursor position, so anything already in the box would be
   //    spliced into it. Throws for a claude composer that could not be emptied.
   await clearComposerBeforeSend(sessionName, cliToolId, composer, { initialCapture: frame, ticket });
+
+  // Issue #3953: the send's stamp is taken here — after the lock, the carried
+  // mark, the re-check and the clear, right before the body's first key — so a
+  // previous turn that ended during any of them is older than this send.
+  noteInputStart();
 
   if (Buffer.byteLength(message, 'utf8') > LITERAL_SEND_MAX_BYTES) {
     // 1'. A body that would reach the TUI as more than one pty read is pasted

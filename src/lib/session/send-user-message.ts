@@ -81,7 +81,7 @@ import {
 } from '@/lib/session/send-attempt-types';
 import { extractComposerText, SUPPORTED_COMPOSER_TOOLS } from '@/lib/detection/composer-text';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
-import { withInstanceInputLock } from '@/lib/session/instance-input-lock';
+import { observeInputStart, withInstanceInputLock } from '@/lib/session/instance-input-lock';
 import type { CopilotTool } from '@/lib/cli-tools/copilot';
 import { formatImagePathFallbackMessage } from '@/lib/cli-tools/opencode';
 import type { ChatMessage, MessageType } from '@/types/models';
@@ -397,11 +397,17 @@ export async function sendUserMessage(
   // behind a dialog (refused by the prompt guard above), and returns at once
   // while a turn is running. A send without `--model` skips step 1, so its stamp
   // is read at the same point as before.
-  const userMessageTimestamp = new Date();
+  //
+  // Issue #3953: this is now the pending row's stamp, and the user row's only
+  // when the sender did not report when input started (see step 4). The waits
+  // between here and the first key — the input lock, a carried paste mark, the
+  // re-read and the clear — can last a minute, and a previous turn that ended
+  // inside them is not this send's.
+  const pendingResponseTimestamp = new Date();
 
   // 2. Save any pending assistant response before sending the new user message.
   try {
-    await savePendingAssistantResponse(db, worktreeId, cliToolId, userMessageTimestamp, instanceId);
+    await savePendingAssistantResponse(db, worktreeId, cliToolId, pendingResponseTimestamp, instanceId);
   } catch (error) {
     // Log but don't fail - user message should still be saved
     logger.error('failed-to-save-pending-assistant-response:', { error: getErrorMessage(error) });
@@ -449,45 +455,16 @@ export async function sendUserMessage(
     logger.error('failed-to-detect-orphaned-messages:', { error: getErrorMessage(error) });
   }
 
-  // 4. Send message to CLI tool (run below). Returns the failure, or null when sent.
-  async function deliver(): Promise<{
-    error: unknown;
-    failure: { state: SendAttemptState; reason: SendAttemptReason };
-  } | null> {
+  // 4. Send message to CLI tool (run below). Returns the failure, or when sent
+  // the moment the sender started typing the body (Issue #3953; null for a
+  // path that does not report it).
+  async function deliver(): Promise<
+    | { error: unknown; failure: { state: SendAttemptState; reason: SendAttemptReason } }
+    | { sent: true; inputStartedAt: Date | null }
+  > {
     try {
-      // Issue #474: Image-aware sending
-      if (absoluteImagePath) {
-        if (isImageCapableCLITool(cliTool)) {
-          // Image-capable tool: use native image sending
-          await cliTool.sendMessageWithImage(worktreeId, content, absoluteImagePath, instanceId);
-        } else {
-          // Fallback: embed path in message. Issue #2035 moved the wording to
-          // `@/lib/cli-tools/opencode` so this branch and opencode's own fallback
-          // — reached when a pane has no server to attach through — cannot drift
-          // apart; the behaviour of this line is unchanged.
-          await cliTool.sendMessage(
-            worktreeId,
-            formatImagePathFallbackMessage(content, absoluteImagePath),
-            instanceId
-          );
-        }
-      } else {
-        // Issue #1906: every tool — copilot included — goes through its own
-        // `ICLITool.sendMessage`. copilot used to be special-cased here with a raw
-        // `sendKeys` + delayed Enter, which skipped `CopilotTool.sendMessage`
-        // entirely: no `waitForPrompt` (so a folder-trust dialog was typed into,
-        // #1886), no selection-list branch (#1895), and — because nothing read the
-        // pane back — no #1471 "the Enter was swallowed" failure, so a typed-but-
-        // unsent message was reported as sent. It also flattened `\n+` to spaces,
-        // which silently turned a contract preamble or a Markdown body into one
-        // line. Measured on copilot 1.0.80 (private tmux socket, `tmux -L`):
-        // `send-keys` with literal newlines leaves the body multi-line in the
-        // composer (`❯ line one` / `  line two` / `  line three`) and a SEPARATE
-        // Enter submits all of it — the transcript echo keeps the line breaks — so
-        // the flattening is not needed to make Enter submit and is now gone.
-        await cliTool.sendMessage(worktreeId, content, instanceId);
-      }
-      return null;
+      const { inputStartedAt } = await observeInputStart(sendToTool);
+      return { sent: true, inputStartedAt };
     } catch (error) {
       logger.error('failed-to-send-message-to:', { error: getErrorMessage(error) });
       // Issue #3759: not-sent only when the error says the body was never typed.
@@ -496,6 +473,41 @@ export async function sendUserMessage(
         failure = { state: 'indeterminate', reason: 'composer-residue' };
       }
       return { error, failure };
+    }
+  }
+
+  async function sendToTool(): Promise<void> {
+    // Issue #474: Image-aware sending
+    if (absoluteImagePath) {
+      if (isImageCapableCLITool(cliTool)) {
+        // Image-capable tool: use native image sending
+        await cliTool.sendMessageWithImage(worktreeId, content, absoluteImagePath, instanceId);
+      } else {
+        // Fallback: embed path in message. Issue #2035 moved the wording to
+        // `@/lib/cli-tools/opencode` so this branch and opencode's own fallback
+        // — reached when a pane has no server to attach through — cannot drift
+        // apart; the behaviour of this line is unchanged.
+        await cliTool.sendMessage(
+          worktreeId,
+          formatImagePathFallbackMessage(content, absoluteImagePath),
+          instanceId
+        );
+      }
+    } else {
+      // Issue #1906: every tool — copilot included — goes through its own
+      // `ICLITool.sendMessage`. copilot used to be special-cased here with a raw
+      // `sendKeys` + delayed Enter, which skipped `CopilotTool.sendMessage`
+      // entirely: no `waitForPrompt` (so a folder-trust dialog was typed into,
+      // #1886), no selection-list branch (#1895), and — because nothing read the
+      // pane back — no #1471 "the Enter was swallowed" failure, so a typed-but-
+      // unsent message was reported as sent. It also flattened `\n+` to spaces,
+      // which silently turned a contract preamble or a Markdown body into one
+      // line. Measured on copilot 1.0.80 (private tmux socket, `tmux -L`):
+      // `send-keys` with literal newlines leaves the body multi-line in the
+      // composer (`❯ line one` / `  line two` / `  line three`) and a SEPARATE
+      // Enter submits all of it — the transcript echo keeps the line breaks — so
+      // the flattening is not needed to make Enter submit and is now gone.
+      await cliTool.sendMessage(worktreeId, content, instanceId);
     }
   }
 
@@ -510,7 +522,7 @@ export async function sendUserMessage(
         failure: classifySendFailure(error),
       }))
     : await deliver();
-  if (delivery !== null) {
+  if (!('sent' in delivery)) {
     const { error, failure } = delivery;
     settle(failure.state, failure.reason);
     // Issue #3945: a dialog found by the re-check under the lock is the prompt
@@ -524,6 +536,19 @@ export async function sendUserMessage(
     return { ok: false, stage: 'send', error: getErrorMessage(error) };
   }
   settle('sent', 'submitted');
+
+  // Issue #3953: the user row, `updateLastUserMessage` and so `wait`'s #1975
+  // gate take the moment the body started going in — later than any turn that
+  // ended before it, earlier than the `stop` of the turn it starts (a stamp
+  // taken after the send could be later than a turn that ends at once). Never
+  // earlier than the pending row's stamp, which stays before it by
+  // ASSISTANT_TIMESTAMP_OFFSET_MS. A path that does not report input (opencode's
+  // HTTP delivery) keeps the stamp read before step 2, as before.
+  const inputStartedAt = delivery.inputStartedAt;
+  const userMessageTimestamp =
+    inputStartedAt !== null && inputStartedAt.getTime() > pendingResponseTimestamp.getTime()
+      ? inputStartedAt
+      : pendingResponseTimestamp;
 
   // 5. Create user message in database (History source: chat_messages).
   const message = createMessage(db, {

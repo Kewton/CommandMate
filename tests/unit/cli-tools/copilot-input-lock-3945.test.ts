@@ -57,6 +57,7 @@ import { capturePane, sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
 import {
   getCarriedPasteMark,
   leaveCarriedPasteMark,
+  observeInputStart,
   resetInstanceInputLocks,
   withInstanceInputLock,
 } from '@/lib/session/instance-input-lock';
@@ -189,6 +190,19 @@ describe('copilot keys outside the shared sender take the input lock (Issue #394
       await command;
       expect(typedAt['/model']).toBeGreaterThanOrEqual(expiresAt);
       expect(getCarriedPasteMark(tool.getSessionName('wt-1'))).toBeNull();
+    });
+
+    it('Issue #3953: the selection-list command reports input starting at its first key, after the mark', async () => {
+      const t0 = Date.now();
+      const expiresAt = await leaveMark();
+      logTyping(pickerAfterModel);
+      const command = observeInputStart(() => tool.sendMessage('wt-1', '/model'));
+      await vi.runAllTimersAsync();
+      const { inputStartedAt } = await command;
+      expect(inputStartedAt).not.toBeNull();
+      expect(inputStartedAt!.getTime()).toBe(typedAt['/model']);
+      expect(inputStartedAt!.getTime()).toBeGreaterThanOrEqual(expiresAt);
+      expect(inputStartedAt!.getTime()).toBeGreaterThan(t0);
     });
 
     it('/model <id> is typed only after the mark expires', async () => {
