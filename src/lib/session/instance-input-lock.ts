@@ -188,11 +188,20 @@ declare global {
   // eslint-disable-next-line no-var
   var __instanceInputGeneration: { last: number } | undefined;
   // eslint-disable-next-line no-var
+  var __instanceInputRevoked: WeakSet<InstanceInputTicket> | undefined;
+  // eslint-disable-next-line no-var
   var __instanceInputOwnerScope: AsyncLocalStorage<ReadonlyMap<string, InstanceInputTicket>> | undefined;
 }
 
 const entries = getOrInitGlobal('__instanceInputLocks', () => new Map<string, LockEntry>());
 const generationSeq = getOrInitGlobal('__instanceInputGeneration', () => ({ last: 0 }));
+/**
+ * Tickets revoked by a session replacement (review-2 P1). On `globalThis`, not
+ * a field read through `instanceof`: under `next dev` a ticket can be issued by
+ * one load of this module (the releasing owner's) and read by another (the
+ * waiter's), and a per-load class would not recognise it.
+ */
+const revokedTickets = getOrInitGlobal('__instanceInputRevoked', () => new WeakSet<InstanceInputTicket>());
 const ownerScope = getOrInitGlobal(
   '__instanceInputOwnerScope',
   () => new AsyncLocalStorage<ReadonlyMap<string, InstanceInputTicket>>()
@@ -290,7 +299,7 @@ export async function withInstanceInputLock<T>(
   const inScope = ownerScope.getStore()?.get(sessionName);
   if (inScope !== undefined) {
     if (inScope.isCurrent()) return fn(inScope);
-    if (inScope instanceof TicketImpl && inScope.revoked) {
+    if (revokedTickets.has(inScope)) {
       logger.warn('instance-input-stale-context-refused', { sessionName, generation: inScope.generation });
       throw new InstanceInputOwnershipLostError(sessionName);
     }
@@ -388,6 +397,7 @@ export function invalidateInstanceInput(sessionName: string): void {
   const own = currentInstanceInputTicket(sessionName);
   if (entry.owner !== null && entry.owner !== own) {
     entry.owner.revoked = true;
+    revokedTickets.add(entry.owner);
     entry.owner = null;
   }
   const waiters = entry.queue.splice(0, entry.queue.length);

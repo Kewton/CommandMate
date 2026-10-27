@@ -25,6 +25,7 @@ import {
   capturePane,
 } from '../tmux/tmux';
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
+import { recheckComposerBeforeInput } from '@/lib/session/composer-clear';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import {
   COPILOT_PROMPT_PATTERN,
@@ -55,6 +56,7 @@ import { missingToolError } from './install-hints';
 import { beginLaunchWindow, endLaunchWindow, recordLaunchDialogPress } from './launch-window';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 import {
+  leaveCarriedPasteMark,
   waitOutCarriedPasteMark,
   withInstanceInputLock,
   type InstanceInputTicket,
@@ -290,6 +292,22 @@ function assertCopilotInputOwner(ticket: InstanceInputTicket, step: string): voi
   throw new Error(
     `Session ${ticket.sessionName} was handed to another writer before ${step}; input lock lost, nothing was typed (Issue #3945).`
   );
+}
+
+/**
+ * Type `text` + Enter as the composer's owner. A failure that may have put part
+ * of it on the pane (anything but a `send-keys` tmux never started,
+ * `TmuxSendError.delivery`) leaves the carried paste mark, as the shared
+ * sender's typed body does (review-2): the next send waits out what may still
+ * be drawn.
+ */
+async function typeLeavingMarkOnFailure(sessionName: string, text: string, ticket: InstanceInputTicket): Promise<void> {
+  try {
+    await sendKeys(sessionName, text, true);
+  } catch (error: unknown) {
+    if ((error as { delivery?: unknown } | null)?.delivery !== 'not-started') leaveCarriedPasteMark(ticket);
+    throw error;
+  }
 }
 
 function describeBottomRow(output: string): string {
@@ -752,9 +770,20 @@ export class CopilotTool extends BaseCLITool {
         // waits out a carried paste mark first, as a normal send does.
         await withInstanceInputLock(sessionName, async (ticket) => {
           await waitOutCarriedPasteMark(ticket);
-          await this.waitForPrompt(sessionName);
+          // review-2: a composer that never came up (a dialog, an unreadable
+          // pane, a time-out) is not typed into. The shared sender's re-check
+          // then refuses on the same terms right before the keys: a dialog is
+          // `prompt-waiting`, a pane that cannot be read `recheck-failed`.
+          const prompt = await this.waitForPrompt(sessionName);
+          await recheckComposerBeforeInput(sessionName, 'copilot');
+          if (!prompt.ready) {
+            throw new Error(
+              `copilot prompt not ready within ${COPILOT_PROMPT_WAIT_TIMEOUT_MS}ms, so ${message} was not sent ` +
+                `(bottom row: ${describeBottomRow(prompt.output)}); nothing was typed`
+            );
+          }
           assertCopilotInputOwner(ticket, 'the selection-list command');
-          await sendKeys(sessionName, message, true);
+          await typeLeavingMarkOnFailure(sessionName, message, ticket);
           await this.waitForSelectionList(sessionName);
         });
         invalidateCache(sessionName);
@@ -876,7 +905,7 @@ export class CopilotTool extends BaseCLITool {
     // Send /model <modelName> command with Enter. An argument means an
     // in-place switch, never a picker (Issue #1895).
     assertCopilotInputOwner(ticket, '/model');
-    await sendKeys(sessionName, `/model ${modelName}`, true);
+    await typeLeavingMarkOnFailure(sessionName, `/model ${modelName}`, ticket);
 
     const verdict = await this.waitForModelSwitchOutcome(sessionName, modelName, before);
     invalidateCache(sessionName);

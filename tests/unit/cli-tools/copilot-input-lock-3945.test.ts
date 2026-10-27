@@ -49,7 +49,10 @@ vi.mock('@/lib/logger', () => ({
   }),
 }));
 
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { CopilotTool } from '@/lib/cli-tools/copilot';
+import { classifySendFailure } from '@/lib/session/send-attempt-state';
 import { capturePane, sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
 import {
   getCarriedPasteMark,
@@ -215,6 +218,100 @@ describe('copilot keys outside the shared sender take the input lock (Issue #394
       await vi.runAllTimersAsync();
       await expect(switching).resolves.toBeUndefined();
       expect(typedAt['/model gpt-5.6-terra'] - t1).toBeLessThan(1_000);
+    });
+  });
+  // Consistency review 2: copilot's own keys refuse on the shared sender's
+  // terms right before typing, and leave the mark when typing failed part-way.
+  describe('review-2', () => {
+    const DIALOG_FRAME = readFileSync(
+      path.resolve(__dirname, '../../unit/lib/detection/fixtures/copilot-live-1885/permission-dialog.txt'),
+      'utf8'
+    );
+    let recheck: () => string;
+
+    beforeEach(() => {
+      recheck = () => frame;
+      // The re-check reads 200 rows; copilot's own readiness poll reads 50.
+      vi.mocked(capturePane).mockImplementation((async (_s: string, lines: unknown) =>
+        lines === 200 ? recheck() : frame) as never);
+      vi.mocked(sendKeys).mockImplementation((async (_s: string, text: string) => {
+        keys.push(`type:${text}`);
+        if (text === '/model') setTimeout(() => (frame = PICKER_FRAME), 100);
+        if (text.startsWith('/model ')) setTimeout(() => (frame = FRAMES.SWITCH_AFTER()), 300);
+      }) as never);
+    });
+
+    async function settle<T>(run: Promise<T>): Promise<unknown> {
+      const settled = run.then(() => null, (error: unknown) => error);
+      await vi.runAllTimersAsync();
+      return settled;
+    }
+
+    describe('the selection-list command refuses as the shared sender does', () => {
+      it('a dialog by the time of the keys: nothing typed, prompt-waiting', async () => {
+        recheck = () => DIALOG_FRAME;
+        const error = await settle(tool.sendMessage('wt-1', '/model'));
+        expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'prompt-waiting' });
+        expect(keys).toEqual([]);
+      });
+
+      it('a pane that cannot be re-read: nothing typed, recheck-failed', async () => {
+        recheck = () => {
+          throw new Error('Command failed: tmux capture-pane -t =x: -p');
+        };
+        const error = await settle(tool.sendMessage('wt-1', '/model'));
+        expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'recheck-failed' });
+        expect(keys).toEqual([]);
+      });
+
+      it('a composer that never came up (ready: false): nothing typed, not-sent', async () => {
+        frame = ' loading…';
+        const error = await settle(tool.sendMessage('wt-1', '/model'));
+        expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'prompt-not-ready' });
+        expect(keys).toEqual([]);
+      });
+
+      it('negative: an idle composer is typed into as before', async () => {
+        expect(await settle(tool.sendMessage('wt-1', '/model'))).toBeNull();
+        expect(keys).toEqual(['type:/model']);
+      });
+    });
+
+    describe('a direct keystroke that failed leaves the mark unless tmux never started it', () => {
+      const failing = (delivery: string | undefined): Error =>
+        Object.assign(new Error('Command failed: tmux send-keys -t =s: -l -- /model'), delivery ? { delivery } : {});
+      const failNextType = (error: Error): void => {
+        vi.mocked(sendKeys).mockImplementationOnce((async () => {
+          throw error;
+        }) as never);
+      };
+      const mark = () => getCarriedPasteMark(tool.getSessionName('wt-1'));
+
+      it.each([
+        ['indeterminate', failing('indeterminate')],
+        ['an error of no known shape', failing(undefined)],
+      ])('selection-list command, %s: the mark is left', async (_label, error) => {
+        failNextType(error);
+        await settle(tool.sendMessage('wt-1', '/model'));
+        expect(mark()).not.toBeNull();
+      });
+
+      it('/model <id>, indeterminate: the mark is left', async () => {
+        frame = FRAMES.SWITCH_BEFORE();
+        failNextType(failing('indeterminate'));
+        await settle(tool.sendModelCommand('wt-1', 'gpt-5.6-terra'));
+        expect(mark()).not.toBeNull();
+      });
+
+      it('negative: not-started leaves no mark, on both', async () => {
+        failNextType(failing('not-started'));
+        await settle(tool.sendMessage('wt-1', '/model'));
+        expect(mark()).toBeNull();
+        frame = FRAMES.SWITCH_BEFORE();
+        failNextType(failing('not-started'));
+        await settle(tool.sendModelCommand('wt-1', 'gpt-5.6-terra'));
+        expect(mark()).toBeNull();
+      });
     });
   });
 });

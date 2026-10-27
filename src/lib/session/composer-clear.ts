@@ -39,6 +39,8 @@ import {
   type ComposerTextResult,
   type ComposerTextState,
 } from '@/lib/detection/composer-text';
+import { detectSessionStatus } from '@/lib/detection/status-detector';
+import type { CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('composer-clear');
@@ -230,4 +232,51 @@ export async function clearComposer(
   }
 
   return { cleared, passes, state: result.state, remainingText: result.text, discardedText };
+}
+
+/**
+ * Re-read the pane under the input lock, before anything is typed (Issue #3945
+ * stage 2).
+ *
+ * The prompt guard and the tool's readiness wait ran before the lock was taken,
+ * and a dialog may have opened since — while this send queued behind another
+ * one, or in a wait that follows readiness. Every send makes it (review-1 #4). This
+ * read goes to tmux directly (`capturePane`, never the TTL cache), and its frame
+ * is one of three things:
+ *
+ *   - a dialog (`detectSessionStatus().hasActivePrompt`) — refused, `not-sent`
+ *     with the prompt guard's reason (`prompt-waiting`);
+ *   - unreadable (the capture or the detector threw) — refused, `not-sent`:
+ *     typing into a pane nobody could read is the failure this exists for;
+ *   - anything else — returned, for the pre-send clear to take as its first read.
+ *
+ * Also taken by copilot's selection-list keys right before they are typed
+ * (review-2), with the same refusals.
+ *
+ * The scraper's reading only: the structured (hooks) layer is the prompt
+ * guard's, consulted before the lock.
+ *
+ * @throws Error worded for `classifySendFailure` (`prompt-waiting` / `recheck-failed`)
+ */
+export async function recheckComposerBeforeInput(sessionName: string, cliToolId: CLIToolType): Promise<string> {
+  let frame: string;
+  let dialog: boolean;
+  try {
+    frame = await capturePane(sessionName, CLEAR_READBACK_CAPTURE_LINES);
+    dialog = detectSessionStatus(frame, cliToolId).hasActivePrompt;
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error('input-recheck-failed', { sessionName, cliToolId, error: message });
+    throw new Error(
+      `Could not re-read session ${sessionName} before typing (${message}); nothing was typed (Issue #3945).`
+    );
+  }
+  if (dialog) {
+    logger.warn('input-recheck-prompt-waiting', { sessionName, cliToolId });
+    throw new Error(
+      `A prompt dialog is open in session ${sessionName} ` +
+        '(re-checked under the input lock); nothing was typed (Issue #3945).'
+    );
+  }
+  return frame;
 }

@@ -329,6 +329,54 @@ describe('instance input lock (Issue #3945)', () => {
       expect(events).toEqual(['fresh']);
     });
 
+    it('a revoked ticket issued by another load of the module is still refused (review-2 P1)', async () => {
+      vi.resetModules();
+      const second = await import('@/lib/session/instance-input-lock');
+      const gateA = deferred();
+      const gateB = deferred();
+      const events: string[] = [];
+      // A (this load) holds; B (the second load) queues, so A's release hands
+      // B a ticket made by this load's class.
+      const a = withInstanceInputLock(S, () => gateA.promise);
+      const b = second
+        .withInstanceInputLock(S, async () => {
+          await gateB.promise; // B's readiness wait
+          return second.withInstanceInputLock(S, async () => {
+            events.push('inner');
+          });
+        })
+        .catch((error: unknown) => error);
+      await flush();
+      gateA.resolve();
+      await a;
+      await flush();
+      second.invalidateInstanceInput(S);
+      gateB.resolve();
+      const error = (await b) as { code?: string };
+      expect(error.code).toBe('INSTANCE_INPUT_OWNERSHIP_LOST');
+      expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'input-lock-lost' });
+      expect(events).toEqual([]);
+    });
+
+    it('negative: across the two loads, an owner not replaced is joined', async () => {
+      vi.resetModules();
+      const second = await import('@/lib/session/instance-input-lock');
+      const gateA = deferred();
+      const tickets: InstanceInputTicket[] = [];
+      const a = withInstanceInputLock(S, () => gateA.promise);
+      const b = second.withInstanceInputLock(S, async (outer) => {
+        tickets.push(outer);
+        await second.withInstanceInputLock(S, async (inner) => {
+          tickets.push(inner);
+        });
+      });
+      await flush();
+      gateA.resolve();
+      await Promise.all([a, b]);
+      expect(tickets).toHaveLength(2);
+      expect(tickets[1]).toBe(tickets[0]);
+    });
+
     it('negative: work outliving an owner that simply finished acquires a ticket of its own', async () => {
       const gate = deferred();
       let detached: Promise<InstanceInputTicket> | null = null;

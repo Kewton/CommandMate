@@ -109,8 +109,11 @@ import {
 } from '@/config/cli-tool-timing-config';
 import { createLogger } from '@/lib/logger';
 import { getOrInitGlobal } from '@/lib/global-state';
-import { clearComposer, readClearComposer } from '@/lib/session/composer-clear';
-import { detectSessionStatus } from '@/lib/detection/status-detector';
+import { clearComposer, readClearComposer, recheckComposerBeforeInput } from '@/lib/session/composer-clear';
+
+// Issue #3945 (review-2): moved next to the clear it feeds, so copilot's own
+// keys can take it without the shared sender. Re-exported for its callers here.
+export { recheckComposerBeforeInput };
 import {
   LATE_PASTE_OBSERVE_MS,
   clearExpiredCarriedPasteMark,
@@ -1091,50 +1094,6 @@ function assertInputOwner(ticket: InstanceInputTicket, cliToolId: CLIToolType, s
   throw new Error(
     `Session ${ticket.sessionName} was handed to another writer before ${step}; part of the message may be in its composer (Issue #3945).`
   );
-}
-
-/**
- * Re-read the pane under the input lock, before anything is typed (Issue #3945
- * stage 2).
- *
- * The prompt guard and the tool's readiness wait ran before the lock was taken,
- * and a dialog may have opened since — while this send queued behind another
- * one, or in a wait that follows readiness. Every send makes it (review-1 #4). This
- * read goes to tmux directly (`capturePane`, never the TTL cache), and its frame
- * is one of three things:
- *
- *   - a dialog (`detectSessionStatus().hasActivePrompt`) — refused, `not-sent`
- *     with the prompt guard's reason (`prompt-waiting`);
- *   - unreadable (the capture or the detector threw) — refused, `not-sent`:
- *     typing into a pane nobody could read is the failure this exists for;
- *   - anything else — returned, for the pre-send clear to take as its first read.
- *
- * The scraper's reading only: the structured (hooks) layer is the prompt
- * guard's, consulted before the lock.
- *
- * @throws Error worded for `classifySendFailure` (`prompt-waiting` / `recheck-failed`)
- */
-export async function recheckComposerBeforeInput(sessionName: string, cliToolId: CLIToolType): Promise<string> {
-  let frame: string;
-  let dialog: boolean;
-  try {
-    frame = await capturePane(sessionName, RECHECK_CAPTURE_LINES);
-    dialog = detectSessionStatus(frame, cliToolId).hasActivePrompt;
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    logger.error('input-recheck-failed', { sessionName, cliToolId, error: message });
-    throw new Error(
-      `Could not re-read session ${sessionName} before typing (${message}); nothing was typed (Issue #3945).`
-    );
-  }
-  if (dialog) {
-    logger.warn('input-recheck-prompt-waiting', { sessionName, cliToolId });
-    throw new Error(
-      `A prompt dialog is open in session ${sessionName} ` +
-        '(re-checked under the input lock); nothing was typed (Issue #3945).'
-    );
-  }
-  return frame;
 }
 
 /**
