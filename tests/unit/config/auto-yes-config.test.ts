@@ -3,13 +3,15 @@
  *
  * Issue #225: Duration selection feature - configuration constants,
  * type guard, and formatTimeRemaining utility.
+ * Issue #3913: 1〜24 whole hours (AUTO_YES_DURATIONS) with 1h/3h/8h presets;
+ *   DURATION_LABELS retired for an ICU display name.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
-  ALLOWED_DURATIONS,
+  AUTO_YES_DURATIONS,
+  PRESET_AUTO_YES_DURATIONS,
   DEFAULT_AUTO_YES_DURATION,
-  DURATION_LABELS,
   isAllowedDuration,
   formatTimeRemaining,
   validateStopPattern,
@@ -35,34 +37,48 @@ describe('auto-yes-config', () => {
     });
   });
 
-  describe('ALLOWED_DURATIONS', () => {
-    it('should contain exactly 3 duration values', () => {
-      expect(ALLOWED_DURATIONS).toHaveLength(3);
+  describe('AUTO_YES_DURATIONS (Issue #3913)', () => {
+    it('should contain exactly 24 duration values, 1 to 24 whole hours', () => {
+      expect(AUTO_YES_DURATIONS).toHaveLength(24);
+      expect([...AUTO_YES_DURATIONS]).toEqual(Array.from({ length: 24 }, (_, i) => (i + 1) * 3600000));
     });
 
     it('should contain 1 hour (3600000ms)', () => {
-      expect(ALLOWED_DURATIONS).toContain(3600000);
+      expect(AUTO_YES_DURATIONS).toContain(3600000);
     });
 
     it('should contain 3 hours (10800000ms)', () => {
-      expect(ALLOWED_DURATIONS).toContain(10800000);
+      expect(AUTO_YES_DURATIONS).toContain(10800000);
     });
 
     it('should contain 8 hours (28800000ms)', () => {
-      expect(ALLOWED_DURATIONS).toContain(28800000);
+      expect(AUTO_YES_DURATIONS).toContain(28800000);
+    });
+
+    it('should contain 24 hours (86400000ms) as the upper bound', () => {
+      expect(AUTO_YES_DURATIONS.at(-1)).toBe(86400000);
     });
 
     it('should be sorted in ascending order', () => {
-      for (let i = 1; i < ALLOWED_DURATIONS.length; i++) {
-        expect(ALLOWED_DURATIONS[i]).toBeGreaterThan(ALLOWED_DURATIONS[i - 1]);
+      for (let i = 1; i < AUTO_YES_DURATIONS.length; i++) {
+        expect(AUTO_YES_DURATIONS[i]).toBeGreaterThan(AUTO_YES_DURATIONS[i - 1]);
       }
     });
 
     it('should be typed as a readonly tuple (as const)', () => {
-      // "as const" enforces readonly at compile time in TypeScript.
-      // At runtime, verify the values match expected literal numbers.
-      const values: readonly number[] = ALLOWED_DURATIONS;
-      expect(values).toEqual([3600000, 10800000, 28800000]);
+      // Type-level check: the array should be assignable to readonly number[]
+      // but individual elements should be literal types
+      const values: readonly number[] = AUTO_YES_DURATIONS;
+      expect(values.length).toBe(24);
+    });
+  });
+
+  describe('PRESET_AUTO_YES_DURATIONS (Issue #3913)', () => {
+    it('should keep 1h / 3h / 8h as the presets, each an allowed duration', () => {
+      expect([...PRESET_AUTO_YES_DURATIONS]).toEqual([3600000, 10800000, 28800000]);
+      for (const preset of PRESET_AUTO_YES_DURATIONS) {
+        expect(isAllowedDuration(preset)).toBe(true);
+      }
     });
   });
 
@@ -71,45 +87,34 @@ describe('auto-yes-config', () => {
       expect(DEFAULT_AUTO_YES_DURATION).toBe(3600000);
     });
 
-    it('should be a member of ALLOWED_DURATIONS', () => {
-      expect(ALLOWED_DURATIONS).toContain(DEFAULT_AUTO_YES_DURATION);
-    });
-  });
-
-  describe('DURATION_LABELS', () => {
-    it('should have a label for every allowed duration', () => {
-      for (const duration of ALLOWED_DURATIONS) {
-        expect(DURATION_LABELS[duration]).toBeDefined();
-        expect(typeof DURATION_LABELS[duration]).toBe('string');
-        expect(DURATION_LABELS[duration].length).toBeGreaterThan(0);
-      }
-    });
-
-    it('should have correct i18n translation keys', () => {
-      expect(DURATION_LABELS[3600000]).toBe('autoYes.durations.1h');
-      expect(DURATION_LABELS[10800000]).toBe('autoYes.durations.3h');
-      expect(DURATION_LABELS[28800000]).toBe('autoYes.durations.8h');
+    it('should be a member of AUTO_YES_DURATIONS', () => {
+      expect(AUTO_YES_DURATIONS).toContain(DEFAULT_AUTO_YES_DURATION);
     });
   });
 
   describe('isAllowedDuration', () => {
     it('should return true for all allowed duration values', () => {
-      expect(isAllowedDuration(3600000)).toBe(true);
-      expect(isAllowedDuration(10800000)).toBe(true);
-      expect(isAllowedDuration(28800000)).toBe(true);
+      for (let hours = 1; hours <= 24; hours++) {
+        expect(isAllowedDuration(hours * 3600000)).toBe(true);
+      }
     });
 
     it('should return false for non-allowed numbers', () => {
       expect(isAllowedDuration(0)).toBe(false);
       expect(isAllowedDuration(1000)).toBe(false);
-      expect(isAllowedDuration(7200000)).toBe(false);   // 2 hours - not allowed
-      expect(isAllowedDuration(86400000)).toBe(false);   // 24 hours - not allowed
-      expect(isAllowedDuration(-3600000)).toBe(false);   // negative
+      expect(isAllowedDuration(25 * 3600000)).toBe(false);  // 25 hours - over the limit
+      expect(isAllowedDuration(1.5 * 3600000)).toBe(false); // 1.5 hours - not a whole hour
+      expect(isAllowedDuration(3600001)).toBe(false);       // 1 ms off
+      expect(isAllowedDuration(86399999)).toBe(false);      // 1 ms short of 24h
+      expect(isAllowedDuration(-3600000)).toBe(false);      // negative
     });
 
     it('should return false for non-number types', () => {
       expect(isAllowedDuration('3600000')).toBe(false);
+      expect(isAllowedDuration('86400000')).toBe(false);
       expect(isAllowedDuration(null)).toBe(false);
+      expect(isAllowedDuration(false)).toBe(false);
+      expect(isAllowedDuration([3600000])).toBe(false);
       expect(isAllowedDuration(undefined)).toBe(false);
       expect(isAllowedDuration(true)).toBe(false);
       expect(isAllowedDuration({})).toBe(false);
@@ -200,6 +205,13 @@ describe('auto-yes-config', () => {
       const now = 1700000000000;
       vi.setSystemTime(now);
       expect(formatTimeRemaining(now + 28800000)).toBe('8:00:00');
+    });
+
+    it('should format 5 hours and 24 hours at the start of the grant (Issue #3913)', () => {
+      const now = 1700000000000;
+      vi.setSystemTime(now);
+      expect(formatTimeRemaining(now + 5 * 3600000)).toBe('5:00:00');
+      expect(formatTimeRemaining(now + 24 * 3600000)).toBe('24:00:00');
     });
 
     it('should pad minutes and seconds with leading zeros in H:MM:SS', () => {

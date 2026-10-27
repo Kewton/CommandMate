@@ -113,7 +113,7 @@ function sendErrorResponse(
  * says what it did (`keysSent`, `answerDelivery` from `sendPromptAnswer`).
  * Null for an error that says neither: the hold is left as it was.
  */
-function manualOutcomeOfSendError(error: unknown): ManualAnswerOutcome | null {
+export function manualOutcomeOfSendError(error: unknown): ManualAnswerOutcome | null {
   if (
     error instanceof PromptAnswerRejectedError ||
     error instanceof FreeTextAnswerRejectedError ||
@@ -127,6 +127,30 @@ function manualOutcomeOfSendError(error: unknown): ManualAnswerOutcome | null {
   if (keysSent === true || delivery === 'indeterminate') return 'may-be-on-pane';
   if (keysSent === false) return 'not-sent';
   return null;
+}
+
+/**
+ * A person's send threw (Issue #3880): settled by what the error says of it
+ * ({@link manualOutcomeOfSendError}), or only abandoned when it says nothing.
+ * Shared by every manual send (Issue #3925): this route's keystrokes,
+ * `/respond`'s stored-message branch and both structured stages.
+ */
+export function settleManualSendError(manualAnswer: ManualAnswerTicket, error: unknown): void {
+  const outcome = manualOutcomeOfSendError(error);
+  if (outcome !== null) settleManualAnswer(manualAnswer, outcome);
+  else abandonManualSend(manualAnswer);
+}
+
+/**
+ * A person's verdict delivered over the agent's API ended with this receipt
+ * (Issue #3925), for `/respond`'s structured branch and this route's
+ * structured stage alike: `true` (it reached the agent) is `answered`, `false`
+ * (the source says it did not) is `not-sent`, and no receipt (`null`) says
+ * nothing of the outcome, so the send is only abandoned.
+ */
+export function settleManualVerdictReceipt(manualAnswer: ManualAnswerTicket, delivered: boolean | null): void {
+  if (delivered === null) abandonManualSend(manualAnswer);
+  else settleManualAnswer(manualAnswer, delivered ? 'answered' : 'not-sent');
 }
 
 /**
@@ -170,9 +194,7 @@ export async function sendResolvedAnswer(
       frame: verifiedFrame ?? undefined,
     });
   } catch (error: unknown) {
-    const outcome = manualOutcomeOfSendError(error);
-    if (outcome !== null) settleManualAnswer(manualAnswer, outcome);
-    else abandonManualSend(manualAnswer);
+    settleManualSendError(manualAnswer, error);
     return sendErrorResponse(ctx, error, request.answer, resolution);
   }
   settleManualAnswer(manualAnswer, 'answered');

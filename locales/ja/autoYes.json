@@ -15,11 +15,10 @@
   "autoDisableAfter": "{duration}後に自動でOFFになります。",
   "appliesOnlyToCurrent": "※ Auto Yesは現在選択中の{toolName}セッションのみに適用されます。他のCLIツールには影響しません。",
   "duration": "有効時間",
-  "durations": {
-    "1h": "1時間",
-    "3h": "3時間",
-    "8h": "8時間"
-  },
+  "durationHours": "{hours}時間",
+  "durationOther": "その他",
+  "durationSelectLabel": "有効時間（1〜24時間）",
+  "longDurationNote": "有効時間を長くすると、そのぶん自動で答える許可の確認（ファイルの編集やコマンドの実行など）も増えます。慎重のモードでも、許可の確認には自動で答えます。",
   "answerModeLabel": "質問への答え方",
   "answerModes": {
     "recommended": "質問は推奨で回答（おまかせ）",

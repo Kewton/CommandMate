@@ -64,14 +64,14 @@ describe('AutoYesConfirmDialog', () => {
   describe('Duration Selection Buttons', () => {
     it('should display three duration buttons', () => {
       render(<AutoYesConfirmDialog {...defaultProps} />);
-      expect(screen.getByText('autoYes.durations.1h')).toBeDefined();
-      expect(screen.getByText('autoYes.durations.3h')).toBeDefined();
-      expect(screen.getByText('autoYes.durations.8h')).toBeDefined();
+      expect(screen.getByTestId('auto-yes-duration-1h')).toBeDefined();
+      expect(screen.getByTestId('auto-yes-duration-3h')).toBeDefined();
+      expect(screen.getByTestId('auto-yes-duration-8h')).toBeDefined();
     });
 
     it('should have 1 hour selected by default (highlighted style)', () => {
       render(<AutoYesConfirmDialog {...defaultProps} />);
-      const btn1h = screen.getByText('autoYes.durations.1h');
+      const btn1h = screen.getByTestId('auto-yes-duration-1h');
       expect(btn1h.className).toContain('border-accent-600');
     });
 
@@ -82,12 +82,12 @@ describe('AutoYesConfirmDialog', () => {
 
     it('should allow changing duration selection', () => {
       render(<AutoYesConfirmDialog {...defaultProps} />);
-      const btn3h = screen.getByText('autoYes.durations.3h');
+      const btn3h = screen.getByTestId('auto-yes-duration-3h');
 
       fireEvent.click(btn3h);
       expect(btn3h.className).toContain('border-accent-600');
 
-      const btn1h = screen.getByText('autoYes.durations.1h');
+      const btn1h = screen.getByTestId('auto-yes-duration-1h');
       expect(btn1h.className).not.toContain('border-accent-600');
     });
   });
@@ -100,13 +100,13 @@ describe('AutoYesConfirmDialog', () => {
 
     it('should update duration text when 3 hours is selected', () => {
       render(<AutoYesConfirmDialog {...defaultProps} />);
-      fireEvent.click(screen.getByText('autoYes.durations.3h'));
+      fireEvent.click(screen.getByTestId('auto-yes-duration-3h'));
       expect(screen.getByText(/autoYes\.autoDisableAfter/)).toBeDefined();
     });
 
     it('should update duration text when 8 hours is selected', () => {
       render(<AutoYesConfirmDialog {...defaultProps} />);
-      fireEvent.click(screen.getByText('autoYes.durations.8h'));
+      fireEvent.click(screen.getByTestId('auto-yes-duration-8h'));
       expect(screen.getByText(/autoYes\.autoDisableAfter/)).toBeDefined();
     });
   });
@@ -121,7 +121,7 @@ describe('AutoYesConfirmDialog', () => {
 
     it('should call onConfirm with selected 3-hour duration', () => {
       render(<AutoYesConfirmDialog {...defaultProps} />);
-      fireEvent.click(screen.getByText('autoYes.durations.3h'));
+      fireEvent.click(screen.getByTestId('auto-yes-duration-3h'));
       fireEvent.click(screen.getByText('autoYes.agreeAndEnable'));
       expect(defaultProps.onConfirm).toHaveBeenCalledTimes(1);
       expect(defaultProps.onConfirm).toHaveBeenCalledWith(10800000, undefined);
@@ -129,7 +129,7 @@ describe('AutoYesConfirmDialog', () => {
 
     it('should call onConfirm with selected 8-hour duration', () => {
       render(<AutoYesConfirmDialog {...defaultProps} />);
-      fireEvent.click(screen.getByText('autoYes.durations.8h'));
+      fireEvent.click(screen.getByTestId('auto-yes-duration-8h'));
       fireEvent.click(screen.getByText('autoYes.agreeAndEnable'));
       expect(defaultProps.onConfirm).toHaveBeenCalledTimes(1);
       expect(defaultProps.onConfirm).toHaveBeenCalledWith(28800000, undefined);

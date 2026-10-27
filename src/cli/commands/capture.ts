@@ -8,7 +8,12 @@
 import { Command } from 'commander';
 import { ExitCode } from '../types';
 import type { CaptureOptions } from '../types';
-import type { CurrentOutputResponse, PromptMessageResponse, WorktreeDetailResponse } from '../types/api-responses';
+import type {
+  CapturePromptEntry,
+  CurrentOutputResponse,
+  PromptMessageResponse,
+  WorktreeDetailResponse,
+} from '../types/api-responses';
 import { MAX_MESSAGES_LIMIT } from '../../config/history-display-config';
 import { ApiClient, isValidWorktreeId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
@@ -215,7 +220,7 @@ async function capturePrompts(worktreeId: string, options: CaptureOptions): Prom
         {
           worktreeId,
           count: prompts.length,
-          prompts: prompts.map((m) => ({
+          prompts: prompts.map((m): CapturePromptEntry => ({
             id: m.id,
             timestamp: m.timestamp,
             cliToolId: m.cliToolId ?? null,
@@ -230,6 +235,11 @@ async function capturePrompts(worktreeId: string, options: CaptureOptions): Prom
             // Issue #1699: what the contract's denyPatterns were judged against.
             // Null on rows recorded before the field existed.
             approvalTarget: m.promptData!.approvalTarget ?? null,
+            // Issue #3907: what `wait` passes on beside it (#3881) — whether that
+            // target is the whole request, and what the screen was read as when
+            // the row was saved. Null on rows saved without them.
+            approvalTargetCompleteness: m.promptData!.approvalTargetCompleteness ?? null,
+            reading: m.promptData!.reading ?? null,
             // Issue #1725: which structured signal reported an unclassified row,
             // or null when the row is a plain detection failure (#1708).
             source: typeof m.promptData!.source === 'string' ? m.promptData!.source : null,

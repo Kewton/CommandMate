@@ -1,0 +1,12 @@
+{
+  "base": "long-body-2464/codex-pasted-content.capture",
+  "replaces": "[Pasted Content 12288 chars]",
+  "rows": {
+    "token-only": "\u001b[1m›\u001b[0m \u001b[38;5;6m[Pasted Content 3575 chars]\u001b[39m",
+    "token-then-typed": "\u001b[1m›\u001b[0m \u001b[38;5;6m[Pasted Content 3575 chars]\u001b[39m and one more line",
+    "two-tokens": "\u001b[1m›\u001b[0m \u001b[38;5;6m[Pasted Content 3575 chars]\u001b[39m\u001b[38;5;6m[Pasted Content 120 chars]\u001b[39m",
+    "quoted-among-text": "\u001b[1m›\u001b[0m see [Pasted Content 600 chars] above",
+    "quoted-exact": "\u001b[1m›\u001b[0m [Pasted Content 600 chars]",
+    "quoted-exact-bspaced": "\u001b[1m›\u001b[0m [Pasted Content 600 chars"
+  }
+}

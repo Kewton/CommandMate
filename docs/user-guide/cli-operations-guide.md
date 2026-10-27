@@ -287,7 +287,7 @@ commandmate send <worktree-id> "<message>" --auto-yes --auto-yes-answer-mode car
 | `--model <model>` | 使うモデル（copilot / antigravity / claude のみ）。**copilot** はセッション内で切り替える。**antigravity と claude は起動フラグ**なので、この send がセッションを起動するときだけ効き、稼働中のセッションに渡すと 400 になる（切り替えるにはセッションを止めてから送り直す）。claude の値は別名（`sonnet` / `opus` / `opus[1m]`）か完全な ID（`claude-sonnet-5`）。送り先（`--instance` か `--agent`）の指定が必須 | ツールの既定 |
 | `--auto-yes` | 送信前にAuto-Yesを有効化 | - |
 | `--auto-yes-answer-mode <m>` | `--auto-yes` で有効にするときの答え方のモード（`recommended` / `careful`。[答え方のモード](#答え方のモードおまかせ慎重issue-3863)）。`--auto-yes` なしで指定すると exit 2（Issue #3863） | 新たに有効にするなら `recommended`、有効中なら今のモードのまま |
-| `--duration <d>` | Auto-Yesの有効期間（1h, 3h, 8h） | 1h |
+| `--duration <d>` | Auto-Yesの有効期間（`1h`〜`24h`、1 時間刻み。例: `1h` / `3h` / `8h`）。範囲の外は `--auto-yes` の有無にかかわらず exit 2 | 1h |
 | `--stop-pattern <p>` | Auto-Yes停止条件（正規表現、ターミナル出力への照合。[auto-yes の注意](#--stop-pattern-はターミナル出力への照合コマンドの抑止には使えない)参照） | - |
 
 > `--instance` の詳細（ID規約・rosterとの関係）は [マルチセッション（1エージェント複数セッション）](#マルチセッション1エージェント複数セッション) を参照してください。
@@ -449,7 +449,7 @@ commandmate wait <worktree-id> --fail-on-upstream-fault  # 上流障害で compo
 |:------:|------|---------------|
 | 0 | 正常完了（`--verify` 指定時は検証にも合格） | `capture` で結果取得 |
 | 10 | プロンプト検出（`--on-prompt agent` 時） | `respond` で応答し、再度 `wait` |
-| 11 | 上流障害（`--fail-on-upstream-fault` 指定時。`ask` は常時、Issue #1839 / #3011）。`id=context-limit` は文脈上限で、`instances <wt> kill <instance>` で新しいセッションにして送り直す | **`verify` を回さず**時間をおいて同じ内容を再 `send` |
+| 11 | 上流障害（`--fail-on-upstream-fault` 指定時。`ask` は常時、Issue #1839 / #3011）。`id=context-limit` は文脈上限で、`instances <wt> kill <instance>` で新しいセッションにして送り直す。`id=model-capacity` は同じモデルでは答えないので、別の instance・別のモデルへ送る（#3936） | **`verify` を回さず**時間をおいて同じ内容を再 `send` |
 | 20 | 検証ゲート不合格（`--verify`） | `verify --json` で失敗ゲートを確認し修正 |
 | 21 | 作業証跡ゼロ（コミットも未コミット変更も無い）／セッションが一度も稼働していない | エージェントが着手していない。再度 `send` |
 | 124 | タイムアウト | `capture` で状況確認、再度 `wait` or 中断 |
@@ -686,6 +686,10 @@ hooks 設定を使って観測した結果です（詳細は
 commandmate instances "$WT" kill "$INSTANCE"   # セッションを止める
 commandmate ask "$WT" "$SAME_MESSAGE" --instance "$INSTANCE"   # 新しいセッションで送り直す
 ```
+
+`id=model-capacity`（Issue #3936）は codex が行頭の `■ Selected model is at capacity` でターンを閉じた状態で、
+選んだモデルが混雑して答えていません。同じモデルの同じセッションへ再送しても通らないので、別の instance
+（例 `--instance codex-2`）か別のモデルへ送ってください。返答の本文がこの文言を引用しているだけ（行頭が `■ ` でない）なら一致しません。
 
 #### `--fail-on-upstream-fault`
 
@@ -1211,6 +1215,15 @@ gates:
 GATE e2e PASS (exit=0, 190.0s, waited=42.3s)
 ```
 
+サーバが待ちを `[timing]` の行に記録したゲート（`mutex` を持つゲートと、同時実行の枠を待った
+ゲート。Issue #3884）は、`waited=` の代わりに待ちと実行を 3 つに分けて出します（Issue #3909）。
+`queue` は同時実行の枠（2 本）の待ち、`mutex` はロックの待ち、`run` はコマンドそのものです。
+どちらも待たなかったゲートと、#3884 より前のサーバの run は上の形のままです。
+
+```
+GATE unit PASS (exit=0, 600.0s, queue=30.0s, mutex=120.0s, run=600.0s)
+```
+
 ロックが `timeoutSec` の間ずっと空かなければ、ゲートは **TIMEOUT ではなく SKIP** になります。
 
 ```
@@ -1394,6 +1407,13 @@ commandmate verify show 42 --json                      # JSON で出力
 ```
 #42  2026-07-31T04:12:00.000Z  myrepo-feature-101  manual  failed  failed: unit,build
 #41  2026-07-31T03:58:00.000Z  myrepo-feature-101  wait    passed
+```
+
+待ちを記録したゲート（上の `[timing]`）がある run は、行末にそのゲートの待ちと実行が付きます（Issue #3909）。
+`--json` では各ゲートの `timing`（`{ queueSec, mutexSec, runSec }`）です。
+
+```
+#43  2026-07-31T05:02:00.000Z  myrepo-feature-102  wait    passed  timing: unit(queue=30.0s mutex=120.0s run=600.0s)
 ```
 
 一覧には**ゲートのログ本文（logTail）は含まれません**。500 run 分のログ末尾を毎回返すと一覧が MB 級になるためで、ログが必要なときは `verify show` を使います。`--json` の一覧に `logTail` フィールドは存在しません（`null` ではなく不在です）。
@@ -2025,7 +2045,7 @@ commandmate capture <worktree-id> --instance worker-7 --json | jq -r '.resolvedB
 
 | フィールド | 意味 |
 |-----------|------|
-| `id` | `overloaded`（`5xx Overloaded`）/ `retrying`（`Retrying in Ns · attempt N/M`）/ `limit-reached` / `api-error` |
+| `id` | `overloaded`（`5xx Overloaded`）/ `retrying`（`Retrying in Ns · attempt N/M`）/ `context-limit`（`maximum context length is N tokens`、#3011）/ `model-capacity`（codex の行頭 `■ Selected model is at capacity`、#3936）/ `limit-reached` / `api-error` |
 | `matchedText` | 一致した**行そのもの**（前後の行は含まない）。200 UTF-8 バイトで切り詰め、切ったときだけ `…[truncated]` が付く |
 | `at` | 判定に使ったフレームの取得時刻（epoch ms） |
 
@@ -2529,7 +2549,7 @@ commandmate auto-yes <worktree-id> --enable --answer-mode careful  # 質問は�
 |-----------|------|
 | `--enable` | Auto-Yesを有効化 |
 | `--disable` | Auto-Yesを無効化 |
-| `--duration <d>` | 有効期間（1h, 3h, 8h） |
+| `--duration <d>` | 有効期間（`1h`〜`24h`、1 時間刻み。例: `1h` / `3h` / `8h`。既定 `1h`）。小文字の `h` のみ、`01h`・`1.5h`・`90m` などは exit 2 |
 | `--stop-pattern <p>` | 指定パターンがターミナル出力に出現したら自動停止 |
 | `--answer-mode <m>` | 答え方のモード（`recommended` / `careful`。下の[答え方のモード](#答え方のモードおまかせ慎重issue-3863)）。`--enable` のときだけ。省略すると、新たに有効にするなら `recommended`、有効中なら今のモードのまま（Issue #3863） |
 | `--instance <id>` | **対象の推奨指定方法**。対象インスタンスID。他インスタンスと独立してAuto-Yesを制御 |
@@ -3700,10 +3720,10 @@ Warning: Response may not have been applied. Reason: prompt_no_longer_active
 ### 不正なdurationエラー
 
 ```
-Error: Invalid duration. Must be one of: 1h, 3h, 8h
+Error: Invalid duration. Must be 1h-24h, whole hours (e.g. 5h).
 ```
 
-**対処**: `--duration` には `1h`, `3h`, `8h` のいずれかを指定してください。
+**対処**: `--duration` には `1h`〜`24h` の整数時間（小文字の `h`、先頭のゼロ・符号・小数なし。例: `5h`）を指定してください。
 
 ### 不正なagentエラー
 

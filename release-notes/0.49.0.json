@@ -1,0 +1,45 @@
+{
+  "version": "0.49.0",
+  "date": "2026-10-27",
+  "highlight": {
+    "ja": "Auto-Yes の有効時間を 1〜24 時間から選べるようになり、チャットのコードブロックをワンクリックでコピーできるようになりました。",
+    "en": "You can now choose any Auto-Yes duration from 1 to 24 hours, and copy chat code blocks with one click."
+  },
+  "added": [
+    {
+      "ja": "Auto-Yes の有効時間を 1〜24 時間の 1 時間刻みで選べるようになりました。",
+      "en": "Auto-Yes can now stay on for any whole number of hours from 1 to 24."
+    },
+    {
+      "ja": "チャットのコードブロックにコピーボタンが付きました。",
+      "en": "Code blocks in chat now have a copy button."
+    }
+  ],
+  "improved": [],
+  "fixed": [
+    {
+      "ja": "codex の入力欄に貼り付けの印が残り、次の送信ができなくなる問題を直しました。",
+      "en": "Fixed a leftover paste marker in the Codex input box that blocked the next message."
+    },
+    {
+      "ja": "codex のモデルが混雑しているとき、それを検出せずに長く待ち続ける問題を直しました。",
+      "en": "Fixed long waits when the Codex model was at capacity; this is now detected as an upstream failure."
+    },
+    {
+      "ja": "codex の長い入力の送信が、届いたかどうかを誤って判定することがある問題を直しました。",
+      "en": "Fixed Codex sends with long input sometimes being misjudged as delivered or not."
+    },
+    {
+      "ja": "確認ダイアログの下に隠れた codex の古い入力が、未送信バーに出続ける問題を直しました。",
+      "en": "Fixed old Codex input hidden under a dialog staying in the unsent message bar."
+    },
+    {
+      "ja": "入力欄から確認に答えたとき、Auto-Yes に手動の回答として伝わらない問題を直しました。",
+      "en": "Fixed answers given from the input panel not being reported to Auto-Yes as manual answers."
+    },
+    {
+      "ja": "CLI の確認画面の一覧と回答で、一部の情報が落ちたり Auto-Yes に伝わらなかったりする問題を直しました。",
+      "en": "Fixed the CLI prompt listing dropping some details, and some CLI answers not being reported to Auto-Yes."
+    }
+  ]
+}

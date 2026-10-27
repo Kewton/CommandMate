@@ -56,7 +56,7 @@ describe('[#3863] AutoYesConfirmDialog answer mode', () => {
   it('confirming 慎重 passes careful as the third argument, beside the duration and stop pattern', () => {
     renderDialog();
     fireEvent.click(screen.getByTestId('auto-yes-answer-mode-careful'));
-    fireEvent.click(screen.getByText('autoYes.durations.3h'));
+    fireEvent.click(screen.getByTestId('auto-yes-duration-3h'));
     fireEvent.change(screen.getByTestId('stop-pattern-input'), { target: { value: 'rm -rf' } });
 
     expect(screen.getByTestId('auto-yes-answer-mode-careful').getAttribute('aria-checked')).toBe('true');

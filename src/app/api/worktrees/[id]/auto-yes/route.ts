@@ -380,12 +380,13 @@ export async function POST(
       );
     }
 
-    // [SEC-SF-002] Validate duration if provided (whitelist check with type guard)
+    // [SEC-SF-002] Validate duration if provided (whitelist check with type guard).
+    // Issue #3913: 1〜24 whole hours; disabling still ignores duration.
     let duration: AutoYesDuration = DEFAULT_AUTO_YES_DURATION;
     if (body.enabled && body.duration !== undefined) {
       if (!isAllowedDuration(body.duration)) {
         return NextResponse.json(
-          { error: 'Invalid duration value. Allowed values: 3600000, 10800000, 28800000' },
+          { error: 'Invalid duration value. Allowed values: 1-24 hours (a multiple of 3600000 ms, 3600000-86400000)' },
           { status: 400 }
         );
       }

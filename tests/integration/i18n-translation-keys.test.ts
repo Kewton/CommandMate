@@ -31,11 +31,47 @@ function getNestedKeys(obj: Record<string, unknown>, prefix = ''): string[] {
 }
 
 /**
- * Extract parameter placeholders like {name}, {tool} from a translation string.
+ * Split a message into its top-level `{...}` groups (nested braces kept whole).
+ * Returns the text inside each group.
+ */
+function topLevelBraceGroups(value: string): string[] {
+  const groups: string[] = [];
+  let depth = 0;
+  let start = -1;
+  for (let i = 0; i < value.length; i++) {
+    if (value[i] === '{') {
+      if (depth === 0) start = i + 1;
+      depth++;
+    } else if (value[i] === '}' && depth > 0) {
+      depth--;
+      if (depth === 0) groups.push(value.slice(start, i));
+    }
+  }
+  return groups;
+}
+
+/**
+ * Extract the argument names a translation string uses, as a sorted set.
+ *
+ * `{name}` counts as `name`. An ICU plural / select (`{name, plural, one {...} other {...}}`)
+ * counts as `name`; its `#` and option texts are not arguments, but an argument
+ * inside an option text (`{dir}` in `one {# file in {dir}}`) is.
  */
 function extractPlaceholders(value: string): string[] {
-  const matches = value.match(/\{[^}]+\}/g);
-  return matches ? matches.sort() : [];
+  const names = new Set<string>();
+  const collect = (message: string): void => {
+    for (const group of topLevelBraceGroups(message)) {
+      const parts = group.split(',');
+      names.add(parts[0].trim());
+      if (parts.length >= 3) {
+        // `name, type, options...` — option bodies are messages themselves
+        const options = parts.slice(2).join(',');
+        for (const body of topLevelBraceGroups(options)) collect(body);
+      }
+    }
+  };
+  collect(value);
+  return [...names].sort();
 }
 
 /**
@@ -100,6 +136,35 @@ describe('i18n Translation Key Parity', () => {
       });
     });
   }
+
+  // Issue #3913: the first plural message (autoYes.durationHours) — compare argument names
+  describe('extractPlaceholders', () => {
+    it('treats an ICU plural and a plain placeholder with the same argument as matching', () => {
+      expect(extractPlaceholders('{hours, plural, one {# hour} other {# hours}}')).toEqual(
+        extractPlaceholders('{hours}時間'),
+      );
+      expect(extractPlaceholders('{hours}時間')).toEqual(['hours']);
+    });
+
+    it('still reports a mismatch when the argument names differ', () => {
+      expect(extractPlaceholders('{hours}')).not.toEqual(extractPlaceholders('{count}'));
+      expect(extractPlaceholders('{hours, plural, one {# hour} other {# hours}}')).not.toEqual(
+        extractPlaceholders('{count}件'),
+      );
+    });
+
+    it('counts an argument inside a plural option text', () => {
+      expect(extractPlaceholders('{n, plural, one {# file in {dir}} other {# files in {dir}}}')).toEqual([
+        'dir',
+        'n',
+      ]);
+    });
+
+    it('reads plain placeholders as before', () => {
+      expect(extractPlaceholders('Run {tool} on {name}')).toEqual(['name', 'tool']);
+      expect(extractPlaceholders('no placeholders')).toEqual([]);
+    });
+  });
 
   it('should cover all supported locales', () => {
     for (const locale of SUPPORTED_LOCALES) {

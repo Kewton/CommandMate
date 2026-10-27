@@ -18,7 +18,15 @@ import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
 import { isAnswerablePromptData } from '@/types/models';
+import { buildCompositeKey } from '@/lib/auto-yes-state';
+import {
+  noteManualAnswerStarted,
+  noteManualSendStarting,
+  settleManualAnswer,
+} from '@/lib/polling/auto-yes-manual-answer';
+import { settleManualSendError } from '../prompt-response/answer-delivery';
 import { respondByDecisionId, respondToSolePendingDecision } from './structured-decision';
+import { screenAtSend } from './screen-at-send';
 
 const logger = createLogger('api/respond');
 
@@ -260,6 +268,16 @@ export async function POST(
       return NextResponse.json(foreignSessionErrorBody(sessionName, ownership.sessionPath), { status: 409 });
     }
 
+    // Issue #3907: a person is answering at the pane, as on `/prompt-response`
+    // (#3821 / #3880): before the first key a poller tick under way sends no
+    // further key and the next ticks leave the screen to the person, and how
+    // this answer ENDS decides what becomes of an answer Auto-Yes holds at the
+    // confirmation (`settleManualAnswer` below). Without it a send here that
+    // timed out with its keys on the pane left the confirmation free for
+    // Auto-Yes to type at again, and one that went through left Auto-Yes's own
+    // unknown send held.
+    const manualAnswer = noteManualAnswerStarted(buildCompositeKey(id, cliToolId, instanceId));
+
     // Update prompt data.
     //
     // Issue #3881: the row's `reading` (what the screen was read as when it was
@@ -284,21 +302,30 @@ export async function POST(
 
 
     // Send answer to tmux via shared sendPromptAnswer() (Issue #616)
+    // Issue #3907 (review P2): registered at the screen read right before the
+    // first key, as `/prompt-response` does — not at the stored row's — and
+    // that same frame is what the sender judges the answer against, so the
+    // screen registered is the screen the keys go to.
+    const atSend = await screenAtSend(id, cliToolId, instanceId);
+    noteManualSendStarting(manualAnswer, atSend.promptData);
     try {
       await sendPromptAnswer({
         sessionName,
         answer: input,
         cliToolId,
         promptData: promptData,
+        frame: atSend.frame,
       });
       logger.info('prompt-answer-sent');
     } catch (error: unknown) {
+      settleManualSendError(manualAnswer, error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return NextResponse.json(
         { error: `Failed to send answer to tmux: ${errorMessage}` },
         { status: 500 }
       );
     }
+    settleManualAnswer(manualAnswer, 'answered');
 
     // Issue #1548: a person answered. This branch needs a stored messageId, so
     // unlike /prompt-response it has no automated caller to be confused with.
@@ -306,6 +333,9 @@ export async function POST(
     // caller: the composer's `PromptPanel` reaches this route on the
     // `decisionId` shape and `commandmate respond` on the id-less one, and
     // neither comes through here.
+    // Issue #3907: kept rather than retired — it is the public body shape the
+    // route's suites and integration tests post — and so it reports its end to
+    // Auto-Yes (`settleManualAnswer` above) like `/prompt-response` does.
     applyEventToActiveTask(db, id, cliToolId, instanceId, 'prompt_answered_human', {
       promptType: promptData.type,
     });

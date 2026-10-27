@@ -19,8 +19,9 @@
  * Three answers, deliberately distinct:
  *   - 200 — the run stopped and closed while this request waited.
  *   - 202 — signalled and latched, still winding down (a gate ignoring SIGTERM
- *     is SIGKILLed after a grace, and a run queued for a concurrency slot
- *     closes when the slot reaches it). The caller polls, as it already does.
+ *     is SIGKILLed after a grace). A run still waiting for a concurrency
+ *     slot — even the first one — leaves the wait on cancel (#3909) and
+ *     closes without starting a gate. The caller polls, as it already does.
  *   - 409 — nothing to cancel: the run had already reached a verdict, or it is
  *     an orphan of a previous server process that no signal can reach.
  */

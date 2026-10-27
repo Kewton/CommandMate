@@ -247,3 +247,62 @@ describe('capture --prompts renders unclassified frames distinctly (Issue #1708)
     });
   });
 });
+
+describe('capture --prompts --json carries the stored reading and completeness (Issue #3907)', () => {
+  const reading = {
+    version: 1,
+    kind: 'confirmation',
+    phase: 'confirmation',
+    approvalTarget: 'not-measured',
+    captureTop: 'unknown',
+    evidence: ['confirm-page-reader'],
+  };
+  const withAudit = {
+    ...samplePromptMessages[0],
+    id: 'msg-3907',
+    promptData: {
+      ...samplePromptMessages[0].promptData,
+      approvalTarget: 'rm -rf build',
+      approvalTargetCompleteness: 'top-unknown',
+      reading,
+    },
+  };
+
+  it('emits approvalTargetCompleteness and reading as the row stored them', async () => {
+    mockFetchResponse([withAudit]);
+    await runCapture(['wt1', '--prompts', '--json']);
+
+    const output = JSON.parse(mockConsoleLog.mock.calls[0][0] as string);
+    expect(output.prompts[0]).toMatchObject({
+      id: 'msg-3907',
+      approvalTarget: 'rm -rf build',
+      approvalTargetCompleteness: 'top-unknown',
+      reading,
+    });
+  });
+
+  it('negative: a row saved without them reads null, and the other fields are unchanged', async () => {
+    mockFetchResponse(samplePromptMessages);
+    await runCapture(['wt1', '--prompts', '--json']);
+
+    const output = JSON.parse(mockConsoleLog.mock.calls[0][0] as string);
+    expect(output.prompts[0].approvalTargetCompleteness).toBeNull();
+    expect(output.prompts[0].reading).toBeNull();
+    expect(output.prompts[0]).toMatchObject({
+      id: 'msg-1',
+      approvalTarget: null,
+      answer: 'yes',
+      answeredBy: 'auto',
+      source: null,
+    });
+  });
+
+  it('negative: the text listing does not grow the audit fields', async () => {
+    mockFetchResponse([withAudit]);
+    await runCapture(['wt1', '--prompts']);
+
+    const text = mockConsoleLog.mock.calls[0][0] as string;
+    expect(text).not.toContain('top-unknown');
+    expect(text).not.toContain('confirm-page-reader');
+  });
+});

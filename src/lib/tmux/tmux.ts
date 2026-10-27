@@ -1179,6 +1179,34 @@ export async function clearComposerLine(sessionName: string): Promise<void> {
 }
 
 /**
+ * Send one `C-e` + `BSpace` pass: take a collapsed paste placeholder out of the
+ * composer (Issue #3937).
+ *
+ * codex folds a pasted body into one `[Pasted Content N chars]` placeholder.
+ * `C-e`+`C-u` left one in place for all 12 passes (`composer-clear:not-cleared`,
+ * 2026-10-25), and one `BSpace` sent by hand removed it whole. The caller
+ * ({@link module:lib/session/composer-clear}) sends this only when the composer
+ * shows that placeholder and nothing else — after `C-e` the cursor sits right
+ * behind it — and reads the frame back afterwards like any other pass. Same
+ * literal-keys / one-invocation rules as {@link clearComposerLine}.
+ *
+ * @param sessionName - Target session name
+ * @throws {Error} If the tmux command fails
+ */
+export async function clearComposerPasteToken(sessionName: string): Promise<void> {
+  try {
+    await execFileAsync(
+      'tmux',
+      ['send-keys', '-t', exactTarget(sessionName), 'C-e', 'BSpace'],
+      { timeout: DEFAULT_TIMEOUT },
+    );
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to clear tmux composer paste placeholder: ${errorMessage}`);
+  }
+}
+
+/**
  * Allowed navigation key names for special-keys API validation.
  * Used for TUI navigation sequences (e.g., Up/Down cursor, Enter/Escape selection).
  *

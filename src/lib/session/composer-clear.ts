@@ -29,12 +29,71 @@
  * frame back to the browser.
  */
 
-import { capturePane, clearComposerLine } from '@/lib/tmux/tmux';
+import { capturePane, clearComposerLine, clearComposerPasteToken } from '@/lib/tmux/tmux';
 import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
-import { extractComposerText, type ComposerTextState } from '@/lib/detection/composer-text';
+import {
+  codexDialogBelow,
+  extractLiveComposerText,
+  findCodexLiveComposerRow,
+  readCodexComposerFrom,
+  type ComposerTextResult,
+  type ComposerTextState,
+} from '@/lib/detection/composer-text';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('composer-clear');
+
+/**
+ * Issue #3927: the "a dialog below the composer means no composer" rule moved
+ * to `detection/composer-text.ts`, where the browser can read it too. Re-exported
+ * for the callers that took it from here.
+ */
+export { codexDialogBelow, findCodexLiveComposerRow };
+
+/**
+ * The composer as this loop reads it.
+ *
+ * {@link extractLiveComposerText} — the reading the unsent bar is drawn from
+ * (Issue #3927) — and for codex one more reading when it finds no
+ * composer (Issue #3906): a body of more paragraphs than the extractor's four
+ * blocks — the partly arrived paste the sender reads as `pasting` and withdraws
+ * through this function — is still a composer holding text. Only `content` is
+ * taken from that reading; anything else stays `no_composer`, so a frame this
+ * reading cannot vouch for is never reported as emptied.
+ *
+ * A composer the extractor does find is still not the live one when a dialog
+ * option is drawn below it ({@link codexDialogBelow}): that frame is
+ * `no_composer`, so no `C-e`+`C-u` goes into the dialog.
+ */
+function readClearComposer(capture: string, cliToolId: string): ComposerTextResult {
+  const read = extractLiveComposerText(capture, cliToolId);
+  if (cliToolId !== 'codex' || read.state !== 'no_composer') return read;
+  const rows = capture.split('\n');
+  const row = findCodexLiveComposerRow(rows);
+  if (row < 0) return read;
+  const held = readCodexComposerFrom(rows, row);
+  return held.state === 'content' ? held : read;
+}
+
+/**
+ * A codex composer holding exactly one collapsed paste placeholder and nothing
+ * else (Issue #3937) — the one frame a pass sends `C-e`+`BSpace` for instead of
+ * `C-e`+`C-u` ({@link clearComposerPasteToken}).
+ *
+ * Anything more than the bare placeholder keeps the `C-e`+`C-u` pass, because
+ * none of it has been measured on a live codex: a placeholder with typed text
+ * after it (`C-e`+`BSpace` would eat the last typed character, not the
+ * placeholder), two placeholders, and a body quoting the placeholder's wording
+ * among other text. A body that is nothing but that wording typed out is not
+ * told apart here; one `BSpace` takes its `]`, and from the next read on it is
+ * ordinary text again — `C-e`+`C-u` — so the read-back still decides.
+ */
+const CODEX_PASTE_TOKEN_ONLY = /^\[Pasted Content \d+ chars?\]$/;
+
+/** Whether a pass over this reading should send `C-e`+`BSpace` (Issue #3937). */
+export function isCodexPasteTokenOnly(read: ComposerTextResult, cliToolId: string): boolean {
+  return cliToolId === 'codex' && read.state === 'content' && CODEX_PASTE_TOKEN_ONLY.test(read.text.trim());
+}
 
 /**
  * Upper bound on `C-e`+`C-u` passes.
@@ -59,7 +118,10 @@ export interface ClearComposerResult {
    * input box on screen — see the note where it is computed.
    */
   cleared: boolean;
-  /** How many `C-e`+`C-u` passes were sent. Zero when it was already empty. */
+  /**
+   * How many passes were sent — `C-e`+`C-u`, or `C-e`+`BSpace` for a codex
+   * paste placeholder (Issue #3937). Zero when it was already empty.
+   */
   passes: number;
   /** What the composer looked like on the final read-back. */
   state: ComposerTextState;
@@ -83,6 +145,12 @@ export interface ClearComposerOptions {
   capture?: (sessionName: string) => Promise<string>;
   /** Injection seam for tests. Defaults to {@link clearComposerLine}. */
   sendClear?: (sessionName: string) => Promise<void>;
+  /**
+   * The pass for a codex composer holding only a paste placeholder
+   * ({@link isCodexPasteTokenOnly}, Issue #3937). Injection seam for tests.
+   * Defaults to {@link clearComposerPasteToken}.
+   */
+  sendClearPasteToken?: (sessionName: string) => Promise<void>;
   /** Injection seam for tests. Defaults to a real timer. */
   delay?: (ms: number) => Promise<void>;
   /** Override the pass cap (tests). */
@@ -112,17 +180,21 @@ export async function clearComposer(
   const maxPasses = options.maxPasses ?? MAX_COMPOSER_CLEAR_PASSES;
 
   let passes = 0;
-  let result = extractComposerText(await capture(sessionName), cliToolId);
+  let result = readClearComposer(await capture(sessionName), cliToolId);
 
   // Snapshot before the first pass: every later read shows less of it (a pass
   // eats one row), so this is the only moment the full text exists.
   const discardedText = result.state === 'content' ? result.text : '';
 
   while (result.state === 'content' && passes < maxPasses) {
-    await sendClear(sessionName);
+    if (isCodexPasteTokenOnly(result, cliToolId)) {
+      await (options.sendClearPasteToken ?? clearComposerPasteToken)(sessionName);
+    } else {
+      await sendClear(sessionName);
+    }
     passes++;
     await delay(COMPOSER_CLEAR_REDRAW_DELAY_MS);
-    result = extractComposerText(await capture(sessionName), cliToolId);
+    result = readClearComposer(await capture(sessionName), cliToolId);
   }
 
   // Whatever happened above, the cached frame is now stale: the poller and the

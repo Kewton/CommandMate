@@ -136,7 +136,8 @@ export async function POST(
 
     // Issue #1898: answer the approval the agent is actually holding, before
     // going anywhere near the pane.
-    const structuredResponse = await answerViaStructuredDecision(ctx, request);
+    // Issue #3925: a verdict delivered there reports its end on this ticket.
+    const structuredResponse = await answerViaStructuredDecision(ctx, request, manualAnswer);
     if (structuredResponse) return noted(structuredResponse);
 
     // Get session name for the CLI tool (Issue #868: per-instance)

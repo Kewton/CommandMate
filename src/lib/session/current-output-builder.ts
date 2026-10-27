@@ -15,7 +15,7 @@ import {
   observeSessionStartingFrame,
   startingStatusResult,
 } from '@/lib/session/session-starting-state';
-import { extractComposerText } from '@/lib/detection/composer-text';
+import { extractLiveComposerText } from '@/lib/detection/composer-text';
 import { matchUpstreamFault } from '@/lib/detection/upstream-faults';
 import {
   detectOpenCodePaneObstruction,
@@ -731,7 +731,7 @@ interface RunningPayloadInput {
   effort: ReturnType<typeof getResolvedAgentModelInfo>['effort'];
   upstreamFaultMatch: ReturnType<typeof matchUpstreamFault>;
   paneObstruction: OpenCodePaneObstruction | null;
-  composer: ReturnType<typeof extractComposerText>;
+  composer: ReturnType<typeof extractLiveComposerText>;
 }
 
 /**
@@ -1260,7 +1260,8 @@ async function buildPayload(
   // Issue #1879: structural, and computed here next to the other frame readers
   // rather than inside a status branch — the bar it feeds must appear on the
   // strength of what is in the box, never on the strength of a status verdict.
-  const composer = extractComposerText(output, cliToolId);
+  // Issue #3927: the live box — a codex composer left above a dialog is not one.
+  const composer = extractLiveComposerText(output, cliToolId);
 
   // Issue #1839: judged on exactly what is published as `realtimeSnippet`, not
   // on `output`. The wider capture keeps a banner from an hour ago in scope, and

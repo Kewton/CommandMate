@@ -815,6 +815,7 @@ exit code は裁定（0 / 20 / 21）か wait のもの（10 / 124 …）なの�
 **3 は「裁定を作業の終わりに結び付けられない」**（合図が `--signal-timeout`（既定 1800 秒）の間に出ない・検証の開始の後にコミットがあり `--task` が無い・
 再検証の最中にコミットされた・合格なのに作業ツリーに未コミットの変更がある）。記録は `fail`。capture で状況を見て、待ち直すか再指示する。
 1 は記録の失敗、2 は引数の誤り。
+**合格行の HEAD が期待したもの（再指示・merge の後のもの）か確かめる。** ワーカーが何もしないままターンを終えると、前の HEAD で合格が返る。
 
 ```bash
 # tasks.tsv（3-1）は 1 行 = "<issue>\t<WT>\t<AGENT>\t<TASK_ID>\t<MODEL>"。fd 3 から読む（3-1 の注と同じ理由）
@@ -961,6 +962,8 @@ commandmatedev send <worktree-id> "設計書の以下の点を修正してくだ
   --instance "$AGENT" --auto-yes --duration 1h
 ```
 
+この send は `launch-worker.mjs` を通さない。動いているワーカーへの 1 往復の指示で、モデルは起動時に固定済み・契約も作り直さないため。
+
 修正指示は**契約を作り直さない**（契約は Issue 単位の宣言であり、1往復の指摘ではない）。
 指示の反映は、3-4 の同じ手順（`wait` → `verify --task "$TASK_ID"`）で裁定する。
 
@@ -1099,7 +1102,7 @@ work item の PR（1-5）は、precheck・publish・merge にも同じ `--item` 
 # 段の順: verify（3-3）→ review（5-2b）→ findings（5-3）→ precheck → PR → CI（残りのゲートと並走）→ merge
 node scripts/orchestrate/precheck.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
   --issue "$issue" --worktree "$WT_DIR"            # 整理の Issue は --kind refactor、計測の Issue は --metrics を足す
-echo "exit=$?"   # 0 → PR を出す / 1 → runs/$DATE/precheck-<issue>[-<item>]-<sha>.log で落ちた段を読み、再指示 / 2 → 作業ツリーが汚れている
+echo "exit=$?"   # 0 → PR を出す / 1 → runs/$DATE/precheck-<issue>[-<item>]-<sha>.log で落ちた段を読み、再指示 / 2 → 作業ツリーが汚れている / 3 → 保留（重い段のロックを取れなかった。時間を置いて同じ引数で再実行する。ワーカーへ再指示しない）
 ```
 
 - precheck の段（何を走らせるか）と、結果を走らせずに再利用する条件は、precheck が落ちたときと、走らずに再利用されたことを確かめるときに docs/orchestrate/ci-merge.md#6-1-1-precheck-の段と再利用 を読む
@@ -1124,7 +1127,7 @@ precheck は作業の HEAD の precheck と同じ引数で走り、同じ HEAD �
 ```bash
 node scripts/orchestrate/merge-pr.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
   --issue "$issue" --worktree "$WT_DIR"            # 最後の 1 本は --last。Issue を閉じないときは --close -
-echo "exit=$?"   # 0 → マージ済み / 1 → 出力の欠けたもの・落ちた段を読む / 2 → 作業ツリーが汚れている / 124 → CI が --ci-timeout（既定 3600 秒）に収まらない
+echo "exit=$?"   # 0 → マージ済み / 1 → 出力の欠けたもの・落ちた段を読む / 2 → 作業ツリーが汚れている / 3 → 保留（取り込み後の precheck がロック待ち。再実行すれば続きから進む） / 124 → CI が --ci-timeout（既定 3600 秒）に収まらない
 ```
 
 衝突で止まったときは、意味を見て解消（機械解決は module-reference などの共有ファイルだけ）してコミットし、同じ引数で再実行する。

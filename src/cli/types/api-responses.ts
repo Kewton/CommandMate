@@ -944,7 +944,7 @@ export interface CurrentOutputResponse {
    * server it dials.
    */
   upstreamFault?: {
-    /** `overloaded` / `retrying` / `limit-reached` / `api-error`. */
+    /** `overloaded` / `retrying` / `context-limit` / `model-capacity` / `limit-reached` / `api-error` (`UPSTREAM_FAULTS`). */
     id: string;
     /** The whole line that matched, trimmed and bounded to 200 UTF-8 bytes. */
     matchedText: string;
@@ -1284,6 +1284,35 @@ export interface PromptMessageResponse {
    */
   requestId?: string;
   archived: boolean;
+}
+
+/**
+ * One entry of `capture --prompts --json`'s `prompts` (Issue #1685), built by
+ * `src/cli/commands/capture.ts` from a {@link PromptMessageResponse}. A field
+ * the row does not carry is `null`.
+ */
+export interface CapturePromptEntry {
+  id: string;
+  timestamp: string;
+  cliToolId: string | null;
+  instanceId: string | null;
+  type: string;
+  question: string;
+  options: unknown[] | null;
+  status: string | null;
+  answer: string | null;
+  answeredAt: string | null;
+  answeredBy: string | null;
+  /** Issue #1699: what the contract's denyPatterns were judged against. */
+  approvalTarget: string | null;
+  /**
+   * Issue #3907: the same audit fields `wait` passes on
+   * ({@link WaitPromptOutput}, #3881), from the stored row.
+   */
+  approvalTargetCompleteness: PromptData['approvalTargetCompleteness'] | null;
+  reading: PromptData['reading'] | null;
+  /** Issue #1725: which structured signal reported an unclassified row. */
+  source: string | null;
 }
 
 // Mirrors: src/app/api/worktrees/[id]/prompt-response/route.ts response shape

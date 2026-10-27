@@ -14,6 +14,7 @@ import {
   sendSpecialKeys,
   clearInputLine,
   clearComposerLine,
+  clearComposerPasteToken,
   capturePane,
   killSession,
   renameSession,
@@ -969,6 +970,40 @@ describe('tmux library', () => {
 
       await expect(clearComposerLine('test-session')).rejects.toThrow(
         'Failed to clear tmux composer line'
+      );
+    });
+  });
+
+  describe('clearComposerPasteToken (Issue #3937)', () => {
+    it('moves to end-of-line, then one BSpace, in one exact-target send-keys', async () => {
+      // A codex paste placeholder survived 12 `C-e`+`C-u` passes; one `BSpace`
+      // removed it. `C-e` first puts the cursor right behind the placeholder.
+      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+        const callback = args[args.length - 1] as (err: Error | null, result: { stdout: string; stderr: string }) => void;
+        callback(null, { stdout: '', stderr: '' });
+        return {} as ReturnType<typeof execFile>;
+      });
+
+      await clearComposerPasteToken('mcbd-codex-wt');
+
+      expect(execFile).toHaveBeenCalledTimes(1);
+      expect(execFile).toHaveBeenCalledWith(
+        'tmux',
+        ['send-keys', '-t', '=mcbd-codex-wt:', 'C-e', 'BSpace'],
+        { timeout: 5000 },
+        expect.any(Function)
+      );
+    });
+
+    it('throws on failure', async () => {
+      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+        const callback = args[args.length - 1] as (err: Error | null, result: { stdout: string; stderr: string }) => void;
+        callback(new Error('session not found'), { stdout: '', stderr: '' });
+        return {} as ReturnType<typeof execFile>;
+      });
+
+      await expect(clearComposerPasteToken('test-session')).rejects.toThrow(
+        'Failed to clear tmux composer paste placeholder'
       );
     });
   });

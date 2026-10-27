@@ -10,7 +10,7 @@
  * auto-yes-poller.ts -> auto-yes-state.ts -> path-validator.ts
  */
 
-import { DEFAULT_AUTO_YES_DURATION, executeRegexWithTimeout, isReleasedByRestart, validateStopPattern, type AutoYesDuration, type AutoYesStopReason } from '@/config/auto-yes-config';
+import { DEFAULT_AUTO_YES_DURATION, executeRegexWithTimeout, isAllowedDuration, isReleasedByRestart, validateStopPattern, type AutoYesDuration, type AutoYesStopReason } from '@/config/auto-yes-config';
 import { isValidWorktreeId } from './security/path-validator';
 import { isCliToolType, type CLIToolType } from './cli-tools/types';
 import { createLogger } from '@/lib/logger';
@@ -250,8 +250,10 @@ export function getAutoYesState(
  * @param worktreeId - Worktree identifier
  * @param cliToolId - CLI tool type
  * @param enabled - Whether to enable or disable auto-yes
- * @param duration - Optional duration in milliseconds (must be an ALLOWED_DURATIONS value).
- *                   Defaults to DEFAULT_AUTO_YES_DURATION (1 hour) when omitted.
+ * @param duration - Optional duration in milliseconds (must be an AUTO_YES_DURATIONS value,
+ *                   1〜24 whole hours). Defaults to DEFAULT_AUTO_YES_DURATION (1 hour) when omitted.
+ *                   Issue #3913: checked at run time too — an enable with any other
+ *                   value throws a RangeError and leaves the state as it was.
  * @param stopPattern - Optional regex pattern for stop condition (Issue #314).
  * @param instanceId - Optional instance identifier (Issue #896; defaults to primary).
  * @param answerMode - Issue #3863: how questions are answered. Omitted, an
@@ -272,6 +274,11 @@ export function setAutoYesEnabled(
 ): AutoYesState {
   const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
   if (enabled) {
+    // Issue #3913: the type is not proof (a cast, or a caller outside the
+    // route's check), so the value is checked before anything is written.
+    if (duration !== undefined && !isAllowedDuration(duration)) {
+      throw new RangeError(`Invalid Auto-Yes duration: ${String(duration)} (must be 1-24 whole hours in ms)`);
+    }
     const current = answerMode === undefined ? getAutoYesState(worktreeId, cliToolId, instanceId) : null;
     const now = Date.now();
     const effectiveDuration = duration ?? DEFAULT_AUTO_YES_DURATION;

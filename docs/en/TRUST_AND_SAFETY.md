@@ -121,16 +121,17 @@ client) or **`tailscale`** — depending on which provider it selects.
 
 - A confirmation dialog is displayed when enabling **Auto Yes mode**
 - Auto Yes mode automatically approves CLI tool confirmation prompts, which carries a risk of unintended operations
-- Duration options: **1 hour** (default) / **3 hours** / **8 hours**
-  - 1 hour: 3,600,000 milliseconds
-  - 3 hours: 10,800,000 milliseconds
-  - 8 hours: 28,800,000 milliseconds
+- Duration options: **1-24 hours** in whole hours (default **1 hour**; Issue #3913)
+  - The millisecond value is hours × 3,600,000 (e.g. 1 hour 3,600,000 / 3 hours 10,800,000 / 8 hours 28,800,000 / 24 hours 86,400,000)
+  - 1 / 3 / 8 hours are buttons; anything else is chosen under "Other". The dialog starts at 1 hour every time it opens
+  - A longer duration also means more permission checks answered automatically (careful mode answers permission checks too)
 - Automatically turns OFF after the selected duration expires
 - **Security implementation**:
   - worktreeId format validation (path traversal prevention)
   - JSON parse error handling
   - duration type validation (confirms number type)
-  - Whitelist validation (only 3 allowed values accepted)
+  - Whitelist validation (only the 24 values of 1-24 hours accepted; fractions, out-of-range and non-number values are rejected)
+  - The state setter applies the same check and leaves the state unchanged on an invalid value
   - Default value fallback (1 hour when unspecified)
   - Invalid values rejected with 400 error
 
@@ -145,7 +146,7 @@ client) or **`tailscale`** — depending on which provider it selects.
 - **Minimum time selection**: Choose the minimum duration needed for your work. When in doubt, the default 1 hour is recommended
 - **Limit CM_ROOT_DIR**: When using Auto-Yes for long periods, limit `CM_ROOT_DIR` to the target worktree directory to restrict the impact scope
 - **Turn OFF when away**: When stepping away for extended periods, manually turn off Auto-Yes regardless of remaining time
-- **8-hour use case**: Intended for long-running batch-like development tasks (large-scale refactoring, comprehensive test execution, etc.) where the user can periodically check progress
+- **8 hours or longer**: Intended for long-running batch-like development tasks (large-scale refactoring, comprehensive test execution, etc.) and overnight work where the user can periodically check progress. For long durations such as 24 hours, narrowing the scope with a stop pattern or the contract's `autoYes` (mode / denyPatterns) is recommended
 
 **Technical Safety**:
 - TypeScript type safety: `AutoYesDuration` literal type eliminates invalid values at compile time

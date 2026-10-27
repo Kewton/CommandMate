@@ -113,7 +113,7 @@ const SESSION: PermissionRequestSession = {
   instanceId: 'copilot',
 };
 
-/** ALLOWED_DURATIONS[0]; the default Auto-Yes window. */
+/** AUTO_YES_DURATIONS[0]; the default Auto-Yes window. */
 const ONE_HOUR_MS = 3_600_000;
 
 function makePolicy(overrides: Partial<AutoYesPolicy> = {}): AutoYesPolicy {

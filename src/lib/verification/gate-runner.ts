@@ -579,9 +579,10 @@ export type CancelVerificationOutcome =
  * stopped something.
  *
  * A run cancelled while it is still queued behind
- * {@link MAX_CONCURRENT_VERIFICATIONS} answers `requested`: the latch is set,
- * so it will start nothing, but it closes its own row only once a slot reaches
- * it. The caller polls, which it is doing anyway.
+ * {@link MAX_CONCURRENT_VERIFICATIONS} leaves the queue at once and closes
+ * `cancelled` (Issue #3909); it used to answer `requested` and close only once
+ * a slot reached it. `requested` is now only a run whose gate is still winding
+ * down when the budget runs out.
  */
 export async function cancelVerification(runId: number): Promise<CancelVerificationOutcome> {
   const cancellation = cancellations.get(runId);
@@ -2116,7 +2117,13 @@ export async function startVerification(
   };
   const slot = new RunSlot();
   const completion = (async (): Promise<VerificationRunTerminalStatus> => {
-    await slot.acquire();
+    // Issue #3909: the run's first wait for a slot is abandonable too, as the
+    // re-take after a mutex wait has been since #3884 N3. A run cancelled here
+    // used to stay queued (and `running`, holding its worktree) until one of
+    // the two executing gates ended, so the cancel endpoint answered
+    // `requested`. An abandoned wait holds no slot; `slot.release()` below is
+    // idempotent, so the `finally` hands nothing back for it.
+    await slot.acquire(false, cancellation);
     let terminalStatus: VerificationRunTerminalStatus = 'error';
     try {
       // Cancelled while queued behind MAX_CONCURRENT_VERIFICATIONS: nothing was

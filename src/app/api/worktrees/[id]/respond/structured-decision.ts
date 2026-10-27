@@ -107,6 +107,11 @@ import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
 import { startPolling } from '@/lib/polling/response-poller';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
 import { createLogger } from '@/lib/logger';
+import { buildCompositeKey } from '@/lib/auto-yes-state';
+import { noteManualAnswerStarted, noteManualSendStarting } from '@/lib/polling/auto-yes-manual-answer';
+import type { DecisionDelivery } from '@/lib/hooks/sources/pending-decisions';
+import { settleManualSendError, settleManualVerdictReceipt } from '../prompt-response/answer-delivery';
+import { screenAtSend } from './screen-at-send';
 
 const logger = createLogger('api/respond/structured-decision');
 
@@ -628,14 +633,18 @@ async function answerPendingApproval({
     );
   }
 
-  const { delivery } = await answerPendingDecisionWithReceipt(source, target, decision, verdict);
+  const session = await sessionOwnershipOf(db, worktreeId, cliToolId, instanceId);
+  const delivery = await deliverManualVerdict({
+    source, target, decision, verdict, worktreeId, cliToolId, instanceId, readScreen: session.paneIsOurs,
+  });
   const delivered = delivery?.delivered === true;
 
-  await settleAnsweredDecision({
+  settleAnsweredDecision({
     db,
     source,
     decision,
     delivered,
+    session,
     worktreeId,
     cliToolId,
     instanceId,
@@ -670,6 +679,90 @@ async function answerPendingApproval({
 }
 
 /**
+ * Deliver a person's verdict as a manual answer Auto-Yes is told about (Issue
+ * #3925), in the order the stored-message branch uses (`route.ts`): the start
+ * is noted once every refusal is behind (so a refused request never touches
+ * Auto-Yes), the screen is read and the send registered at it right before the
+ * call, and how the call ended settles the ticket. Without it a structured
+ * answer — the composer's `PromptPanel` and `commandmate respond` — neither
+ * stopped a tick under way nor held the next ones off the confirmation it was
+ * answering.
+ *
+ * The end is read off the source's receipt: `delivered: true` is `answered`,
+ * `delivered: false` (the source says the verdict did not reach the agent) is
+ * `not-sent`, and no receipt says nothing of the outcome, so the send is only
+ * abandoned. A throw is classified as the stored-message branch classifies its
+ * send errors (`manualOutcomeOfSendError`) and rethrown for the route's 500.
+ */
+async function deliverManualVerdict({
+  source,
+  target,
+  decision,
+  verdict,
+  worktreeId,
+  cliToolId,
+  instanceId,
+  readScreen,
+}: {
+  source: ReturnType<typeof getAgentEventSource>;
+  target: AgentInstanceRef;
+  decision: PendingDecision;
+  verdict: Verdict;
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  instanceId: string;
+  /** False when the pane under the session name is not vouched for as this server's. */
+  readScreen: boolean;
+}): Promise<DecisionDelivery | null> {
+  const manualAnswer = noteManualAnswerStarted(buildCompositeKey(worktreeId, cliToolId, instanceId));
+  let delivery: DecisionDelivery | null;
+  try {
+    // Issue #3925 (review P1): a pane another server owns, or one the worktree
+    // row cannot vouch for, is never captured (#2885) — the capture would land
+    // in this server's capture cache. The send is then registered at an
+    // unidentified screen, as a failed capture is.
+    const promptData = readScreen ? (await screenAtSend(worktreeId, cliToolId, instanceId)).promptData : null;
+    noteManualSendStarting(manualAnswer, promptData);
+    ({ delivery } = await answerPendingDecisionWithReceipt(source, target, decision, verdict));
+  } catch (error: unknown) {
+    // Also covers a throw before the send was registered: nothing is left in flight.
+    settleManualSendError(manualAnswer, error);
+    throw error;
+  }
+  settleManualVerdictReceipt(manualAnswer, delivery === null ? null : delivery.delivered);
+  return delivery;
+}
+
+/** The tmux session under this instance's name, and whether its pane may be read. */
+interface InstanceSession {
+  sessionName: string;
+  /** False for a session another server owns, or one the worktree row cannot vouch for. */
+  paneIsOurs: boolean;
+}
+
+/**
+ * Whose session holds this instance's name (Issue #2885), asked once before the
+ * answer goes out (Issue #3925, review P1) so the screen read right before the
+ * send never reaches another server's pane, and the poller started after it is
+ * decided by the same answer. The delivery itself goes over the agent's API
+ * for a decision in THIS server's store, so it stands whatever tmux holds.
+ * `absent` is this server's to read (the capture fails and the poller handles
+ * a missing session itself).
+ */
+async function sessionOwnershipOf(
+  db: Database.Database,
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string,
+): Promise<InstanceSession> {
+  const sessionName = CLIToolManager.getInstance()
+    .getTool(cliToolId)
+    .getSessionName(worktreeId, instanceId);
+  const ownership = await checkWorktreeSessionOwnership(worktreeId, sessionName, db);
+  return { sessionName, paneIsOurs: ownership !== null && ownership.verdict !== 'foreign' };
+}
+
+/**
  * Everything both branches do once the agent has been told (Issue #2039).
  *
  * Lifted out of the approval path rather than copied into the question one. The
@@ -681,11 +774,12 @@ async function answerPendingApproval({
  * same way (§5.3.1 — the session reads `busy` and no `session.idle` arrives
  * until it is answered), so it has to be released in exactly the same way.
  */
-async function settleAnsweredDecision({
+function settleAnsweredDecision({
   db,
   source,
   decision,
   delivered,
+  session,
   worktreeId,
   cliToolId,
   instanceId,
@@ -694,10 +788,11 @@ async function settleAnsweredDecision({
   source: ReturnType<typeof getAgentEventSource>;
   decision: PendingDecision;
   delivered: boolean;
+  session: InstanceSession;
   worktreeId: string;
   cliToolId: CLIToolType;
   instanceId: string;
-}): Promise<void> {
+}): void {
   if (delivered && source.capabilities.permissionReplyReleasesPrompt) {
     // The release the agent's own `permission.replied` frame would take, taken
     // here as well because that frame may be seconds away and the operator is
@@ -730,17 +825,14 @@ async function settleAnsweredDecision({
   // poller, though, captures the pane and saves it into this worktree's history:
   // a same-named session another server created (#2865) must not be read. A
   // worktree row that is gone cannot vouch for the session either. `absent` is
-  // left to the poller, which handles a missing session itself.
-  const sessionName = CLIToolManager.getInstance()
-    .getTool(cliToolId)
-    .getSessionName(worktreeId, instanceId);
-  const ownership = await checkWorktreeSessionOwnership(worktreeId, sessionName, db);
-  if (ownership === null || ownership.verdict === 'foreign') {
+  // left to the poller, which handles a missing session itself. Issue #3925:
+  // asked before the delivery (`sessionOwnershipOf`), not here.
+  if (!session.paneIsOurs) {
     logger.warn('respond-decision-skip-polling-foreign-session', {
       worktreeId,
       cliToolId,
       instanceId,
-      sessionName,
+      sessionName: session.sessionName,
     });
     return;
   }
@@ -817,14 +909,18 @@ async function answerPendingQuestion({
   }
 
   const verdict = questionAnswerVerdict(resolution.resolved);
-  const { delivery } = await answerPendingDecisionWithReceipt(source, target, decision, verdict);
+  const session = await sessionOwnershipOf(db, worktreeId, cliToolId, instanceId);
+  const delivery = await deliverManualVerdict({
+    source, target, decision, verdict, worktreeId, cliToolId, instanceId, readScreen: session.paneIsOurs,
+  });
   const delivered = delivery?.delivered === true;
 
-  await settleAnsweredDecision({
+  settleAnsweredDecision({
     db,
     source,
     decision,
     delivered,
+    session,
     worktreeId,
     cliToolId,
     instanceId,

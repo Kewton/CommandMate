@@ -9,7 +9,7 @@ import type { AutoYesOptions } from '../types';
 import type { AutoYesContractPolicy, AutoYesSetResult } from '../types/api-responses';
 import { ApiClient, isValidWorktreeId, isValidInstanceId, MAX_STOP_PATTERN_LENGTH } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
-import { parseDurationToMs, ALLOWED_DURATIONS } from '../config/duration-constants';
+import { parseDurationToMs, AUTO_YES_DURATION_FLAG_RANGE, DEFAULT_DURATION_FLAG } from '../config/duration-constants';
 import { isCliToolId, CLI_TOOL_IDS } from '../config/cli-tool-ids';
 import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
 import { resolveInstanceCliTool } from './instances';
@@ -171,7 +171,7 @@ export function createAutoYesCommand(): Command {
     .argument('<worktree-id>', 'Worktree ID')
     .option('--enable', 'Enable auto-yes')
     .option('--disable', 'Disable auto-yes')
-    .option('--duration <duration>', `Duration (${ALLOWED_DURATIONS.join(', ')})`)
+    .option('--duration <duration>', `Duration (${AUTO_YES_DURATION_FLAG_RANGE}, e.g. 1h, 3h, 8h; default ${DEFAULT_DURATION_FLAG})`)
     .option('--stop-pattern <pattern>', 'Stop pattern (regex, max 500 chars). Matched against terminal output; cannot block commands (build logs mentioning the pattern also trigger it). To suppress auto-responses per command, use the task contract\'s autoYes.denyPatterns')
     .option('--answer-mode <mode>', ANSWER_MODE_OPTION_DESCRIPTION)
     .option('--instance <id>', INSTANCE_OPTION_DESCRIPTION)
@@ -228,12 +228,10 @@ export function createAutoYesCommand(): Command {
 
         if (options.enable) {
           // [DR2-02] Convert duration string to ms
-          const durationMs = options.duration
-            ? parseDurationToMs(options.duration)
-            : parseDurationToMs('1h');
+          const durationMs = parseDurationToMs(options.duration ?? DEFAULT_DURATION_FLAG);
 
           if (durationMs === null) {
-            console.error(`Error: Invalid duration. Must be one of: ${ALLOWED_DURATIONS.join(', ')}`);
+            console.error(`Error: Invalid duration. Must be ${AUTO_YES_DURATION_FLAG_RANGE} (e.g. 5h).`);
             process.exit(ExitCode.CONFIG_ERROR);
           }
 
