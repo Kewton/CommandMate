@@ -510,9 +510,16 @@ nothing overlapped). A reply marked this way is not necessarily the answer to yo
 the requests again one at a time if it matters. Two things are detected:
 
 - the instance was already in another turn when the message was sent (the later sender; only for
-  tools whose hooks report turn starts, and a turn that ended before the send does not count)
+  tools whose hooks report turn starts, and a turn that ended before the send does not count; it is
+  caught even when that turn ended before `ask`'s first poll)
 - another request reached the instance between the send and the end of the turn (the earlier
-  sender; read from the `user` rows of the chat history)
+  sender; read from the `user` rows of the chat history. The end is the close time the server
+  recorded, so the next request sent after the `Stop` does not count, and no `user` row since the
+  send is missed even when more than the newest 30 rows came after it)
+
+An `ask` without `--instance` / `--agent` finds the instance its request landed on from the
+history and looks only at that instance's rows. When that cannot be told (the same text on more
+than one instance, for example), the second check is skipped.
 
 ### Progress Output
 

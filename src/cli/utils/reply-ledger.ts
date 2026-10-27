@@ -190,21 +190,127 @@ export function pickLatestReply(
  * @param messages - Rows as the messages route serialized them
  * @param ownContent - The message this `ask` sent
  * @param since - Epoch ms taken before the send
- * @param until - Epoch ms at which the turn was seen to end
+ * A row on another instance is not this turn's: `instanceId` keeps a read that
+ * was not scoped to one instance (no `--instance` / `--agent`) from counting a
+ * message somebody sent to a different session. Without it every row counts,
+ * which is right only for a read the server already scoped.
+ *
+ * @param until - Epoch ms at which the turn ended
+ * @param instanceId - The instance this `ask`'s message went to
  */
 export function hasForeignPromptInWindow(
   messages: PromptMessageResponse[],
   ownContent: string,
   since: number,
   until: number,
+  instanceId?: string,
 ): boolean {
   const own = ownContent.trim();
   return messages.some((m) => {
     if (m.role !== 'user' || typeof m.content !== 'string') return false;
+    if (instanceId !== undefined && m.instanceId !== instanceId) return false;
     const at = Date.parse(m.timestamp);
     if (!(at >= since && at <= until)) return false;
     return m.content.trim() !== own;
   });
+}
+
+/**
+ * The one instance this `ask`'s own `user` row landed on, or null
+ * (Issue #3955).
+ *
+ * An `ask` with no `--instance` / `--agent` leaves the choice to the server,
+ * and `/send` does not say which it picked to this caller. The ledger does: the
+ * row `/send` wrote carries it. Two rows with this text on different instances
+ * (the same request sent to two sessions at once) say nothing certain, so that
+ * is null too.
+ *
+ * @param messages - Rows as the messages route serialized them
+ * @param ownContent - The message this `ask` sent
+ * @param since - Epoch ms taken before the send
+ */
+export function ownPromptInstance(
+  messages: PromptMessageResponse[],
+  ownContent: string,
+  since: number,
+): string | null {
+  const own = ownContent.trim();
+  const instances = new Set<string>();
+  for (const m of messages) {
+    if (m.role !== 'user' || typeof m.content !== 'string') continue;
+    if (!(Date.parse(m.timestamp) >= since)) continue;
+    if (m.content.trim() !== own) continue;
+    if (typeof m.instanceId === 'string') instances.add(m.instanceId);
+  }
+  return instances.size === 1 ? [...instances][0] : null;
+}
+
+/**
+ * User turns read back per page by {@link fetchPromptRowsSince}.
+ *
+ * The route's `unit=pairs` counts user rows, so a turn that wrote many
+ * assistant rows cannot push a user row out of the page the way it can out of
+ * {@link REPLY_LOOKBACK_MESSAGES} rows.
+ */
+export const PROMPT_ROWS_PAGE_TURNS = 20;
+
+/**
+ * Whether a read of {@link REPLY_LOOKBACK_MESSAGES} rows may have cut off rows
+ * stamped at or after `since` (Issue #3955): it came back full and its oldest
+ * row is not older than `since`.
+ */
+export function mayHaveDroppedRowsSince(
+  messages: PromptMessageResponse[],
+  since: number,
+): boolean {
+  if (messages.length < REPLY_LOOKBACK_MESSAGES) return false;
+  const oldest = Math.min(...messages.map((m) => Date.parse(m.timestamp)));
+  return !(oldest < since);
+}
+
+/**
+ * Every `user` row stamped at or after `since`, however many rows came after
+ * it (Issue #3955), or null if the rows cannot be read.
+ *
+ * Pages backwards with the route's existing `unit=pairs` and `before`: a page
+ * holds the newest {@link PROMPT_ROWS_PAGE_TURNS} user rows and every row from
+ * the oldest of them on, so the next page's `before` (that oldest timestamp)
+ * leaves no user row between two pages. Stops at the first page that reaches
+ * back past `since`, or that holds fewer user rows than asked for (nothing
+ * older is left).
+ *
+ * @param client - API client
+ * @param worktreeId - Worktree ID
+ * @param instanceId - Instance to scope to, or undefined for every instance
+ * @param since - Epoch ms taken before the send
+ */
+export async function fetchPromptRowsSince(
+  client: ApiClient,
+  worktreeId: string,
+  instanceId: string | undefined,
+  since: number,
+): Promise<PromptMessageResponse[] | null> {
+  const found: PromptMessageResponse[] = [];
+  let before: number | null = null;
+  try {
+    for (;;) {
+      const query = new URLSearchParams({ limit: String(PROMPT_ROWS_PAGE_TURNS), unit: 'pairs' });
+      if (instanceId) query.set('instance', instanceId);
+      if (before !== null) query.set('before', new Date(before).toISOString());
+      const page = await client.get<PromptMessageResponse[]>(
+        `/api/worktrees/${worktreeId}/messages?${query.toString()}`,
+      );
+      const users = (Array.isArray(page) ? page : []).filter((m) => m.role === 'user');
+      found.push(...users.filter((m) => Date.parse(m.timestamp) >= since));
+      if (users.length < PROMPT_ROWS_PAGE_TURNS) return found;
+      const oldest = Math.min(...users.map((m) => Date.parse(m.timestamp)));
+      // A page that does not move the cursor back would repeat for ever.
+      if (!(oldest >= since) || (before !== null && !(oldest < before))) return found;
+      before = oldest;
+    }
+  } catch {
+    return null;
+  }
 }
 
 /**

@@ -37,8 +37,11 @@ import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import type { PromptMessageResponse } from '../types/api-responses';
 import {
   TRANSCRIPT_READER_TOOLS,
+  fetchPromptRowsSince,
   fetchRecentMessages,
   hasForeignPromptInWindow,
+  mayHaveDroppedRowsSince,
+  ownPromptInstance,
   pickLatestReply,
   replyCandidates,
   sanitizeReply,
@@ -333,12 +336,17 @@ async function readAskReply(
  *
  * Both sides of the overlap, from records `ask` already reads:
  *
- * - the later ask: the turn `wait` adopted opened before `askedAt`. Only a tool
- *   whose hooks report turns publishes one, an idle session's previous turn
- *   is not adopted (see `adoptTurnStart`), and a turn that had closed before
- *   the send does not count, so a plain ask never sees it;
- * - the earlier ask: a `user` row with other text sits between the send and
- *   the moment the turn was seen to end.
+ * - the later ask: a turn that opened before `askedAt` and had not closed by
+ *   it — the turn `wait` adopted, or any turn record a poll saw (`wait` drops a
+ *   closed turn that opened more than one poll interval before it started, so
+ *   a turn that closed before this ask's first poll is only in the record).
+ *   Only a tool whose hooks report turns publishes one, and a turn that had
+ *   closed before the send does not count, so a plain ask never sees it;
+ * - the earlier ask: a `user` row with other text on the same instance sits
+ *   between the send and the end of the turn — the server's close time when it
+ *   published one, else the moment the turn was seen to end, so a message sent
+ *   after the `Stop` (to the next turn) is not counted. With no instance
+ *   resolved for the send there is no "same instance", and this side is off.
  *
  * @returns The first reason that applies, or null
  */
@@ -348,19 +356,55 @@ function detectOverlap(input: {
   turnEndedAt: number;
   turnStartedAt: number | null;
   turnClosedAt: number | null;
+  openAtSend: boolean;
+  recordClosedAt: number | null;
+  instanceId: string | null;
   messages: PromptMessageResponse[] | null;
 }): OverlapReason | null {
   const closedBeforeSend = input.turnClosedAt !== null && input.turnClosedAt < input.askedAt;
   if (input.turnStartedAt !== null && input.turnStartedAt < input.askedAt && !closedBeforeSend) {
     return 'turn-already-open';
   }
+  if (input.openAtSend) return 'turn-already-open';
+  const closedAt = input.turnClosedAt ?? input.recordClosedAt;
+  const until = closedAt !== null && closedAt >= input.askedAt
+    ? Math.min(closedAt, input.turnEndedAt)
+    : input.turnEndedAt;
   if (
     input.messages
-    && hasForeignPromptInWindow(input.messages, input.message, input.askedAt, input.turnEndedAt)
+    && input.instanceId !== null
+    && hasForeignPromptInWindow(input.messages, input.message, input.askedAt, until, input.instanceId)
   ) {
     return 'foreign-message';
   }
   return null;
+}
+
+/**
+ * The ledger rows the overlap check reads, and the instance it is about
+ * (Issue #3955).
+ *
+ * The reply read's rows, plus — when that read came back full of rows newer
+ * than the send, so a `user` row may have been cut off — every `user` row since
+ * the send, paged in its own requests. The reply read itself is left as it is.
+ * The instance is the one the send was resolved to, else the one the ledger
+ * shows this ask's own row on, else null.
+ */
+async function readOverlapLedger(
+  client: ApiClient,
+  worktreeId: string,
+  instanceId: string | undefined,
+  message: string,
+  askedAt: number,
+  messages: PromptMessageResponse[] | null,
+): Promise<{ messages: PromptMessageResponse[] | null; instanceId: string | null }> {
+  let rows = messages;
+  if (rows && mayHaveDroppedRowsSince(rows, askedAt)) {
+    const since = await fetchPromptRowsSince(client, worktreeId, instanceId, askedAt);
+    if (since) rows = [...rows, ...since];
+  }
+  const target = instanceId ?? (rows ? ownPromptInstance(rows, message, askedAt) : null);
+  return { messages: rows, instanceId: target };
 }
 
 /** The one stderr line for an overlap (Issue #3955). */
@@ -527,6 +571,9 @@ a decision about that session's guard rails, not part of asking it a question.
         // rather than blocking until the timeout.
         // Issue #3955: the turn `wait` settled on, for the overlap check.
         const turn: { startedAt: number | null; closedAt: number | null } = { startedAt: null, closedAt: null };
+        // Every turn record a poll saw, adopted or not: whether one was open at
+        // the send, and the close time of the newest.
+        const record: { openAtSend: boolean; closedAt: number | null } = { openAtSend: false, closedAt: null };
         const result = await pollWorktree(client, worktreeId, {
           timeout,
           instance: instanceId,
@@ -539,6 +586,12 @@ a decision about that session's guard rails, not part of asking it a question.
             if (startedAt !== turn.startedAt) turn.closedAt = null;
             turn.startedAt = startedAt;
             if (closedAt !== null && turn.closedAt === null) turn.closedAt = closedAt;
+          },
+          onTurnRecord: (openedAt, closedAt) => {
+            record.closedAt = closedAt;
+            if (openedAt !== null && openedAt < askedAt && (closedAt === null || closedAt >= askedAt)) {
+              record.openAtSend = true;
+            }
           },
         });
 
@@ -554,16 +607,20 @@ a decision about that session's guard rails, not part of asking it a question.
 
         // Reported, not acted on (Issue #3955): the exit code and the reply
         // stay as they are; the line says the reply may not be this ask's.
+        const ledger = await readOverlapLedger(client, worktreeId, instanceId, message, askedAt, messages);
         const overlap = detectOverlap({
           message,
           askedAt,
           turnEndedAt,
           turnStartedAt: turn.startedAt,
           turnClosedAt: turn.closedAt,
-          messages,
+          openAtSend: record.openAtSend,
+          recordClosedAt: record.closedAt,
+          instanceId: ledger.instanceId,
+          messages: ledger.messages,
         });
         if (overlap) {
-          console.error(formatOverlapWarning(overlap, instanceId ?? agent ?? worktreeId));
+          console.error(formatOverlapWarning(overlap, instanceId ?? ledger.instanceId ?? agent ?? worktreeId));
         }
 
         printAskReply(worktreeId, instanceId, agent, source, reply, options, overlap !== null);
