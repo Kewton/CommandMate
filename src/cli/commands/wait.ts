@@ -788,15 +788,19 @@ async function readNewestPromptAt(
   worktreeId: string,
   options: WaitOptions,
   data: CurrentOutputResponse,
+  signal?: AbortSignal,
 ): Promise<PromptLedgerRead> {
   const query = new URLSearchParams({ limit: '1', unit: 'pairs' });
   if (options.instance) query.set('instance', options.instance);
   else if (data.cliToolId) query.set('cliTool', data.cliToolId);
 
   try {
-    const rows = await client.get<PromptMessageResponse[]>(
-      `/api/worktrees/${worktreeId}/messages?${query.toString()}`,
-    );
+    // Issue #3956: `signal` only when a caller bounds the read; the others
+    // call `get` exactly as before.
+    const path = `/api/worktrees/${worktreeId}/messages?${query.toString()}`;
+    const rows = signal
+      ? await client.get<PromptMessageResponse[]>(path, { signal })
+      : await client.get<PromptMessageResponse[]>(path);
     let newest: number | null = null;
     for (const row of rows ?? []) {
       if (row.role !== 'user') continue;
@@ -1460,8 +1464,22 @@ function notRunningStage(
 }
 
 /**
+ * The upstream fault on the frame that `--fail-on-upstream-fault` reports, or
+ * null (Issue #1839). Prints nothing, so a caller can decide which frame the
+ * verdict is on before {@link upstreamFaultStage} reports it (Issue #3956).
+ */
+function reportableUpstreamFault(
+  poll: PollContext,
+  data: CurrentOutputResponse,
+): NonNullable<CurrentOutputResponse['upstreamFault']> | null {
+  if (!poll.options.failOnUpstreamFault) return null;
+  return data.upstreamFault ?? null;
+}
+
+/**
  * Stage of a `ready` frame: an upstream fault on the frame, under
- * `--fail-on-upstream-fault` (Issue #1839). Exit 11.
+ * `--fail-on-upstream-fault` (Issue #1839). Exit 11, with its diagnosis on
+ * stderr.
  */
 function upstreamFaultStage(poll: PollContext, data: CurrentOutputResponse): StageOutcome {
   const { worktreeId, options } = poll;
@@ -1471,8 +1489,8 @@ function upstreamFaultStage(poll: PollContext, data: CurrentOutputResponse): Sta
   // because it is the answer to the question that gate can only ask: the
   // turn did not end, and this is why. Without it the same session runs
   // to --timeout and reports 124, which says nothing about the cause.
-  const fault = data.upstreamFault ?? null;
-  if (options.failOnUpstreamFault && fault) {
+  const fault = reportableUpstreamFault(poll, data);
+  if (fault) {
     console.error(
       `Upstream fault on ${worktreeId}: id=${fault.id} — the agent is back at its ` +
         'composer with an upstream API failure on screen, so this turn did not run. ' +
@@ -1780,7 +1798,8 @@ export function settleCurrentOutputPath(worktreeId: string, instanceId?: string)
  *
  * `--timeout` / `--stall-timeout` bound it too: no interval is slept that the
  * next re-read could not finish within, and each re-read is aborted at the
- * earlier of one interval and those deadlines. A re-read that is aborted or
+ * earliest of one interval, the bound and those deadlines — so the verdict
+ * comes at most {@link HOOK_STOP_SETTLE_MAX_MS} after the `Stop` poll. A re-read that is aborted or
  * fails ends the settle on the frame before it (an `ApiError` that is not an
  * abort still ends the wait, as on any poll). Frames that change count as
  * activity for `--stall-timeout`, as on any poll.
@@ -1805,8 +1824,11 @@ async function settleAfterHookStop<T extends CurrentOutputResponse>(
     await sleep(HOOK_STOP_SETTLE_INTERVAL_MS);
     const readBudgetMs = Math.min(
       HOOK_STOP_SETTLE_INTERVAL_MS,
+      startedAt + HOOK_STOP_SETTLE_MAX_MS - Date.now(),
       msBeforeDeadlines(options, startTime, state.lastActivityTime, Date.now()),
     );
+    // Past the bound already (a late timer): no read is started.
+    if (readBudgetMs < 0) break;
     const controller = new AbortController();
     const abortTimer = setTimeout(() => controller.abort(), readBudgetMs);
     let next: T;
@@ -1861,8 +1883,25 @@ async function faultFrameHasStop(
   data: CurrentOutputResponse,
 ): Promise<boolean> {
   if (state.turnStartedAt !== null) return turnSettled(data, state.turnStartedAt);
+  // No `Stop` on record at all: nothing the ledger says could make one, so it
+  // is not asked and the fault is reported on the spot.
+  if (data.lastStopEventAt == null) return false;
   if (!state.promptLedgerReadable || !reportsTurnBoundaries(data)) return false;
-  const ledger = await readNewestPromptAt(poll.client, poll.worktreeId, poll.options, data);
+  // Bounded like the settle it decides on: a ledger that does not answer must
+  // not hold an exit 11 past --timeout, nor without one past the settle's bound.
+  const budgetMs = Math.min(
+    HOOK_STOP_SETTLE_MAX_MS,
+    msBeforeDeadlines(poll.options, poll.startTime, state.lastActivityTime, Date.now()),
+  );
+  if (budgetMs <= 0) return false;
+  const controller = new AbortController();
+  const abortTimer = setTimeout(() => controller.abort(), budgetMs);
+  let ledger: PromptLedgerRead;
+  try {
+    ledger = await readNewestPromptAt(poll.client, poll.worktreeId, poll.options, data, controller.signal);
+  } finally {
+    clearTimeout(abortTimer);
+  }
   state.promptLedgerReadable = ledger.readable;
   return ledger.readable && ledger.submittedAt !== null && !outstandingPrompt(data, ledger.submittedAt);
 }
@@ -1912,15 +1951,16 @@ async function readyStage(
   // merged. Path A is untouched — a session that went away really is
   // finished, and carries no flag anyway.
   if (data.sessionStatus === 'ready' && data.isUnclassifiedActive !== true) {
-    const faultOutcome = upstreamFaultStage(poll, data);
-    if (faultOutcome.kind !== 'next') {
+    if (reportableUpstreamFault(poll, data) !== null) {
       // Issue #3956: a fault on the frame of a `Stop` poll is on a pane that
       // may still be drawing, as much as a clean one is; it is judged on the
       // settled frame too. Without a `Stop` it is #1839's case, reported now.
+      // Nothing is printed before that is decided: the diagnosis is for the
+      // frame the verdict is on.
       if (!judgingSettledFrame && (await faultFrameHasStop(poll, state, data))) {
         return { kind: 'settled', data: await settleAfterHookStop(poll, state, data) };
       }
-      return faultOutcome;
+      return upstreamFaultStage(poll, data);
     }
 
     const turnOutcome = await unsettledTurnStage(poll, state, data);
