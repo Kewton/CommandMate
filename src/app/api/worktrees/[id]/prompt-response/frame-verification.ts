@@ -22,6 +22,7 @@ import {
   planReviewNotActiveBody,
 } from './plan-review';
 import { logger, logRefused, type PromptResponseContext, type StageResult } from './context';
+import { instanceInputReadMark } from '@/lib/session/instance-input-lock';
 import type { ValidatedPromptResponse } from './request-validation';
 
 /** What the fresh capture gave, before anything was read off it. */
@@ -40,6 +41,8 @@ interface CapturedFrame {
   verificationFailed: boolean;
   /** Issue #3125: Command Code's plan review overlay, when that is the screen. */
   planReviewState: CommandCodePlanReviewState | null;
+  /** Issue #3952: the session's input order, taken right before the capture. */
+  readMark: number;
 }
 
 /** The verified screen the answer is resolved and sent against. */
@@ -53,6 +56,12 @@ export interface VerifiedPrompt {
    */
   isCommandCodeQuestion: boolean;
   verificationFailed: boolean;
+  /**
+   * Issue #3952 review P2-1: the session's input order, taken right before the
+   * capture, for the send — so an answer a message send came between is read
+   * again, as the plan review's is.
+   */
+  readMark: number;
 }
 
 /**
@@ -62,7 +71,12 @@ export interface VerifiedPrompt {
  * be typed at the Claude user input prompt instead of a tool permission prompt.
  */
 async function captureFrame(ctx: PromptResponseContext): Promise<CapturedFrame> {
-  const captured: CapturedFrame = { verifiedFrame: null, verificationFailed: false, planReviewState: null };
+  const captured: CapturedFrame = {
+    verifiedFrame: null,
+    verificationFailed: false,
+    planReviewState: null,
+    readMark: instanceInputReadMark(),
+  };
   try {
     const currentOutput = await captureSessionOutputFresh(ctx.id, ctx.cliToolId, undefined, ctx.instanceId);
     captured.verifiedFrame = currentOutput;
@@ -106,6 +120,9 @@ async function answerPlanReviewIfShown(
       action: planReviewAction,
       answer,
       useDefault: request.useDefault,
+      // Issue #3952: read again, as above, if a send typed after this capture.
+      readMark: captured.readMark,
+      recapture: () => captureSessionOutputFresh(ctx.id, ctx.cliToolId, undefined, ctx.instanceId),
     });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -143,6 +160,7 @@ function assessFrame(
     verifiedFrame: captured.verifiedFrame,
     isCommandCodeQuestion: false,
     verificationFailed: captured.verificationFailed,
+    readMark: captured.readMark,
   };
   if (verified.verificationFailed || verified.verifiedFrame === null) return { value: verified };
 

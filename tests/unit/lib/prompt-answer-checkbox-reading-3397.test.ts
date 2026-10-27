@@ -56,7 +56,7 @@ describe('[#3397] the sender reads [X] / [✔] boxes as a checkbox list', () => 
   ])('%s: Space on the option, then down to Next and Enter', async (_label, labels) => {
     await sendPromptAnswer({ sessionName: 'claude-test', answer: '2', cliToolId: 'claude', promptData: list(labels) });
 
-    expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Down', 'Space', 'Down', 'Down', 'Enter']);
+    expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Down', 'Space', 'Down', 'Down', 'Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
     expect(sendKeys).not.toHaveBeenCalled();
   });
 
@@ -68,6 +68,6 @@ describe('[#3397] the sender reads [X] / [✔] boxes as a checkbox list', () => 
       promptData: list(['Option A', 'Option B', 'Option C']),
     });
 
-    expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Down', 'Enter']);
+    expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Down', 'Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
   });
 });

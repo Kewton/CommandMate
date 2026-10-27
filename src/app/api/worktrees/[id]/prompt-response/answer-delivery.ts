@@ -16,6 +16,7 @@ import {
   FreeTextAnswerRejectedError,
   FreeTextAtChoiceOnlyPromptError,
   MultiSelectAnswerRejectedError,
+  PromptAnswerNotDeliveredError,
 } from '@/lib/prompt-answer-sender';
 import type { PromptData } from '@/types/models';
 import {
@@ -100,6 +101,18 @@ function sendErrorResponse(
       answer: answer ?? '',
     });
   }
+  // Issue #3952: the answer waited for a send holding the session's input and
+  // was not typed after it (the prompt moved, or the wait ran out). Nothing
+  // reached the pane, so it is a refusal like the ones above, not a 500.
+  if (error instanceof PromptAnswerNotDeliveredError) {
+    logRefused(ctx, { reason: error.reason, skip: error.skip });
+    return NextResponse.json({
+      success: false,
+      reason: error.reason,
+      message: error.message,
+      answer: answer ?? '',
+    });
+  }
   const errorMessage = error instanceof Error ? error.message : 'Unknown error';
   return NextResponse.json(
     { error: `Failed to send answer to tmux: ${errorMessage}` },
@@ -174,6 +187,7 @@ export async function sendResolvedAnswer(
   verifiedFrame: string | null,
   manualAnswer: ManualAnswerTicket,
   screenPromptData?: PromptData | null,
+  readMark?: number,
 ): Promise<NextResponse | null> {
   const { resolution, effectivePromptData } = resolved;
   noteManualSendStarting(manualAnswer, screenPromptData ?? effectivePromptData);
@@ -192,6 +206,9 @@ export async function sendResolvedAnswer(
       // Issue #2033: the frame the prompt was re-verified against, raw. Undefined
       // only when that capture failed, where the sender reads the pane itself.
       frame: verifiedFrame ?? undefined,
+      // Issue #3952 review P2-1: taken before that frame's capture, so a send
+      // admitted between the capture and the answer's keys makes it read again.
+      readMark,
     });
   } catch (error: unknown) {
     settleManualSendError(manualAnswer, error);

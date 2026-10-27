@@ -73,7 +73,12 @@ import {
   composerHoldsMessage,
   recordSendAttempt,
 } from '@/lib/session/send-attempt-state';
-import type { SendAttemptReason, SendAttemptState } from '@/lib/session/send-attempt-types';
+import {
+  INPUT_RECHECK_FAILED_CODE,
+  INPUT_RECHECK_PROMPT_WAITING_CODE,
+  type SendAttemptReason,
+  type SendAttemptState,
+} from '@/lib/session/send-attempt-types';
 import { extractComposerText, SUPPORTED_COMPOSER_TOOLS } from '@/lib/detection/composer-text';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
 import { withInstanceInputLock } from '@/lib/session/instance-input-lock';
@@ -346,7 +351,14 @@ export async function sendUserMessage(
       logger.info('copilot-model-command-sent', { model: copilotModel });
     } catch (error) {
       logger.error('failed-to-send-model-command:', { error: getErrorMessage(error) });
-      settle('not-sent', 'model-switch-failed');
+      // Issue #3952: the re-check right before `/model` refused it. Read by
+      // code, not wording: the switch's other errors quote the pane's bottom row.
+      const code = (error as { code?: unknown } | null)?.code;
+      if (code === INPUT_RECHECK_PROMPT_WAITING_CODE) {
+        settle('not-sent', 'prompt-waiting');
+        return { ok: false, stage: 'prompt_waiting', error: promptWaitingMessage(worktreeId) };
+      }
+      settle('not-sent', code === INPUT_RECHECK_FAILED_CODE ? 'recheck-failed' : 'model-switch-failed');
       return { ok: false, stage: 'model', error: getErrorMessage(error) };
     }
 

@@ -8,7 +8,7 @@ import { readJsonObjectBody } from '@/lib/api/read-json-body';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getMessageById, updatePromptData, getWorktreeById } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
+import { PromptAnswerNotDeliveredError, sendPromptAnswer } from '@/lib/prompt-answer-sender';
 import { startPolling } from '@/lib/polling/response-poller';
 import { getAnswerInput } from '@/lib/detection/prompt-detector';
 import { broadcastMessage } from '@/lib/ws-server';
@@ -315,10 +315,17 @@ export async function POST(
         cliToolId,
         promptData: promptData,
         frame: atSend.frame,
+        // Issue #3952 review P2-1: the mark taken before that frame's capture.
+        readMark: atSend.readMark,
       });
       logger.info('prompt-answer-sent');
     } catch (error: unknown) {
       settleManualSendError(manualAnswer, error);
+      // Issue #3952: waited for a send holding the session's input, then not
+      // typed — nothing reached the pane, which a 500 would not say.
+      if (error instanceof PromptAnswerNotDeliveredError) {
+        return NextResponse.json({ error: error.message, reason: error.reason }, { status: 409 });
+      }
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return NextResponse.json(
         { error: `Failed to send answer to tmux: ${errorMessage}` },

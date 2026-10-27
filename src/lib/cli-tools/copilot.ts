@@ -56,6 +56,8 @@ import { missingToolError } from './install-hints';
 import { beginLaunchWindow, endLaunchWindow, recordLaunchDialogPress } from './launch-window';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 import {
+  answerUnderInstanceInputLock,
+  instanceInputReadMark,
   leaveCarriedPasteMark,
   waitOutCarriedPasteMark,
   withInstanceInputLock,
@@ -504,15 +506,30 @@ export class CopilotTool extends BaseCLITool {
    * `waiting`, and the send guard refuses a `waiting` session for as long as
    * that entry lives.
    *
+   * Issue #3952: the digit is typed as the composer's writer. A send that holds
+   * the composer is waited out, and the dialog is read again after it: when it
+   * is gone nothing is typed and false comes back, so the caller looks again on
+   * its next poll. Inside the selection-list branch's lock it joins that lock.
+   *
    * @param sessionName - tmux session name
    * @param output - ANSI-stripped pane capture
+   * @param readMark - {@link instanceInputReadMark} taken before `output` was read
    * @returns True when the dialog was found and answered
    */
-  private async answerFolderTrustDialog(sessionName: string, output: string): Promise<boolean> {
+  private async answerFolderTrustDialog(sessionName: string, output: string, readMark: number): Promise<boolean> {
     if (!isCopilotFolderTrustDialog(output)) {
       return false;
     }
-    await sendKeys(sessionName, COPILOT_FOLDER_TRUST_ANSWER_KEY, false);
+    const outcome = await answerUnderInstanceInputLock(
+      sessionName,
+      readMark,
+      async () => isCopilotFolderTrustDialog(stripAnsi(await capturePane(sessionName, 50))),
+      () => sendKeys(sessionName, COPILOT_FOLDER_TRUST_ANSWER_KEY, false)
+    );
+    if (!outcome.answered) {
+      logger.info('copilot-folder-trust-answer-skipped', { reason: outcome.reason });
+      return false;
+    }
     recordLaunchDialogPress(sessionName);
     invalidateCache(sessionName);
     logger.info('copilot-folder-trust-answered');
@@ -587,6 +604,7 @@ export class CopilotTool extends BaseCLITool {
     let trustDialogHandled = false;
     for (let i = 0; i < COPILOT_INIT_MAX_ATTEMPTS; i++) {
       try {
+        const readMark = instanceInputReadMark();
         const rawOutput = await capturePane(sessionName, 50);
         const output = stripAnsi(rawOutput);
 
@@ -596,7 +614,7 @@ export class CopilotTool extends BaseCLITool {
           return;
         }
 
-        if (!trustDialogHandled && (await this.answerFolderTrustDialog(sessionName, output))) {
+        if (!trustDialogHandled && (await this.answerFolderTrustDialog(sessionName, output, readMark))) {
           trustDialogHandled = true;
         }
       } catch {
@@ -657,6 +675,7 @@ export class CopilotTool extends BaseCLITool {
     let output = '';
     while (Date.now() - startTime < timeoutMs) {
       try {
+        const readMark = instanceInputReadMark();
         const rawOutput = await capturePane(sessionName, 50);
         output = stripAnsi(rawOutput);
         if (this.isReadyFor(until, output)) {
@@ -671,7 +690,7 @@ export class CopilotTool extends BaseCLITool {
         // "Yes, and remember this folder" and writes the operator's
         // machine-global ~/.copilot/config.json. Answer it here for the same
         // reason the launch path does, rather than leaving the worse outcome.
-        if (!trustDialogHandled && (await this.answerFolderTrustDialog(sessionName, output))) {
+        if (!trustDialogHandled && (await this.answerFolderTrustDialog(sessionName, output, readMark))) {
           trustDialogHandled = true;
         }
       } catch {
@@ -888,7 +907,13 @@ export class CopilotTool extends BaseCLITool {
       await withInstanceInputLock(sessionName, (ticket) => this.switchModelUnderInputLock(sessionName, modelName, ticket));
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
-      throw new Error(`Failed to switch Copilot model to ${modelName}: ${errorMessage}`);
+      // Issue #3952: the re-check's `code` is kept, so the caller records a
+      // dialog or an unreadable pane as such rather than as a refused model.
+      const code = (error as { code?: unknown } | null)?.code;
+      throw Object.assign(
+        new Error(`Failed to switch Copilot model to ${modelName}: ${errorMessage}`),
+        typeof code === 'string' ? { code } : {}
+      );
     }
   }
 
@@ -909,6 +934,12 @@ export class CopilotTool extends BaseCLITool {
       );
     }
     const before = readCopilotModelSwitchOutcomes(idle.output, modelName);
+
+    // Issue #3952: "idle, so no dialog" holds for the frame that was read, not
+    // for the moment the keys go out. The pane is read once more right before
+    // them, as every send is: a dialog is `prompt-waiting`, a pane that cannot
+    // be read `recheck-failed`, and nothing is typed in either case.
+    await recheckComposerBeforeInput(sessionName, 'copilot');
 
     // Send /model <modelName> command with Enter. An argument means an
     // in-place switch, never a picker (Issue #1895).

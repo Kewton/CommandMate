@@ -201,7 +201,7 @@ describe('[#2033] the numeric paths that were already correct are unchanged', ()
       frame: CLAUDE_APPROVAL(),
     });
 
-    expect(sendSpecialKeys).toHaveBeenCalledWith('mcbd-claude-wt', ['Down', 'Enter']);
+    expect(sendSpecialKeys).toHaveBeenCalledWith('mcbd-claude-wt', ['Down', 'Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
     expect(sendKeys).not.toHaveBeenCalled();
   });
 
