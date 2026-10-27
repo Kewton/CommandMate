@@ -27,8 +27,9 @@
  * output leaves the rest of the pane blank BELOW the dialog — a naive
  * `lines.slice(-16)` renders sixteen empty rows and the card is blank at exactly
  * the moment the user needs it. `realtimeSnippet` (the server's last-100-rows
- * window) has the same shape for the same reason, which is why the surface is
- * handed `terminal.output` rather than the snippet.
+ * window) had the same shape for the same reason until #2768 anchored it to the
+ * last content row when its tail is blank. The surface was handed
+ * `terminal.output` rather than the snippet for that reason, and still is.
  *
  * So: collapse first (which DROPS the leading and trailing blank runs outright —
  * rule 2 of {@link compactBlankRuns}), then take the tail of what is left.

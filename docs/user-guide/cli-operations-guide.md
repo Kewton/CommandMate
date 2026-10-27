@@ -1745,7 +1745,7 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
 | フィールド | 意味 |
 |---|---|
 | `content` | ポーラーがまだ保存していない分（`buildCurrentOutput`）。**行数がカーソルとして使えるツールでのみ差分**＝ scrollback を持つ codex / gemini / vibe-local / antigravity で、かつ capture window（10000 行）が未飽和のとき。この場合ポーラーが保存済みなら正常時でも空になる。**alternate screen のツール（claude / opencode / copilot）と、window 飽和時は capture 全体**（行数が pane 高さ・window 幅で pin され「読んだ位置」にならないため。Issue #1910 / #1670 / #1268） |
-| `realtimeSnippet` | pane 末尾 100 行（画面そのもの。`src/lib/session/current-output-builder.ts` の `selectRealtimeSnippetRows`） |
+| `realtimeSnippet` | pane 末尾 100 行（画面そのもの）。末尾 100 行が全部空行のとき（codex・Command Code など上から描く画面）は、内容の最後の行で終わる 100 行（#2768）。`src/lib/realtime-snippet.ts` の `selectRealtimeSnippetRows` |
 | `lineCount` | capture 全体の行数（空白行を含む。TUI は 1000 行のペインに描かれるため、空白 pane でも 1001 になりうる） |
 | `isRunning` | tmux セッションが存在して healthy（`src/lib/session/claude-session.ts` の `isClaudeRunning` / `isSessionHealthy`）。**ターン進行中の意味ではない** |
 | `sessionStatus` / `sessionStatusReason` | 状態と、その根拠（`hook_*` なら hooks 由来、それ以外はスクレイパー由来。`HOOK_STATUS_REASON` は `src/lib/session/status-mapping.ts`） |
@@ -2032,8 +2032,14 @@ commandmate capture <worktree-id> --instance worker-7 --json | jq -r '.resolvedB
 
 #### `upstreamFault`: 上流障害の観測（Issue #1839）
 
-`realtimeSnippet`（pane 末尾 100 行）を ANSI 除去したうえで、上流（モデル API）障害の署名に
-一致したものを載せます。一致が無ければ `null` で、**キー自体は常に存在します**。
+`realtimeSnippet` と同じ行（pane 末尾 100 行。末尾が全部空行なら内容の最後の行で終わる 100 行、#2768）を
+ANSI 除去したうえで、上流（モデル API）障害の署名に一致したものを載せます。一致が無ければ `null` で、
+**キー自体は常に存在します**。
+
+codex の分かれた画面（上に transcript、下端に入力欄）では、その窓の上にある transcript の最後の内容行も
+1 行だけ読みます。この行に当てるのは codex のエラー行（列 0 の `■ `）に錨づけた `model-capacity` だけです。
+このとき `matchedText` は `realtimeSnippet` に無い行になります（#3946）。`api-error` は行頭の形
+（claude の `⏺ API Error: …` か、何も付かない行頭）だけに当たり、返答の文中や字下げした行の引用には当たりません（#3946）。
 
 ```json
 "upstreamFault": {
@@ -3759,6 +3765,7 @@ commandmate ls --token your-token
 | 4 | STOP_FAILED | サーバーの停止に失敗（`stop` / `update`）／ Provider を閉じきれない（`remote stop`） |
 | 5 | UPDATE_FAILED | 更新に失敗（`update`: registry照会 / `npm install -g` / バージョン検証、`agents update`: エージェント CLI の更新コマンド） |
 | 10 | PROMPT_DETECTED | wait中にプロンプトを検出 |
+| 11 | UPSTREAM_FAULT | ターン終了時に画面に上流障害があった（`wait --fail-on-upstream-fault`。`ask` は常時）。stderr / `--json` に `id=...`。`id=context-limit` は `instances <wt> kill <instance>` で新しいセッションにして送り直す。`id=model-capacity` は別の instance・別のモデルへ送る（#3936） |
 | 30 | NO_ACTIVE_SESSIONS | interruptの対象となる稼働中セッションが無い |
 | 99 | UNEXPECTED_ERROR | 予期しないエラー / リソース未検出 |
 | 124 | TIMEOUT | waitのタイムアウト |

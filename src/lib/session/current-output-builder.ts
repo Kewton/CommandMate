@@ -16,7 +16,6 @@ import {
   startingStatusResult,
 } from '@/lib/session/session-starting-state';
 import { extractLiveComposerText } from '@/lib/detection/composer-text';
-import { matchUpstreamFault } from '@/lib/detection/upstream-faults';
 import {
   detectOpenCodePaneObstruction,
   type OpenCodePaneObstruction,
@@ -66,7 +65,7 @@ import type { AutoYesDecisionPublished } from '@/types/auto-yes-decision';
 import { getPromptDedupSkips } from '@/lib/polling/prompt-dedup-state';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
 import { CACHE_MAX_CAPTURE_LINES, isCaptureWindowSaturated } from '@/lib/tmux/tmux-capture-cache';
-import { selectRealtimeSnippetRows } from '@/lib/realtime-snippet';
+import { matchPaneUpstreamFault, selectRealtimeSnippetRows } from '@/lib/realtime-snippet';
 import {
   getAgentEventDropCounts,
   getAskUserQuestion,
@@ -729,7 +728,7 @@ interface RunningPayloadInput {
   structuredEvents: StructuredEventsPayload;
   model: ReturnType<typeof getResolvedAgentModelInfo>['model'];
   effort: ReturnType<typeof getResolvedAgentModelInfo>['effort'];
-  upstreamFaultMatch: ReturnType<typeof matchUpstreamFault>;
+  upstreamFaultMatch: ReturnType<typeof matchPaneUpstreamFault>;
   paneObstruction: OpenCodePaneObstruction | null;
   composer: ReturnType<typeof extractLiveComposerText>;
 }
@@ -1266,7 +1265,10 @@ async function buildPayload(
   // Issue #1839: judged on exactly what is published as `realtimeSnippet`, not
   // on `output`. The wider capture keeps a banner from an hour ago in scope, and
   // a fault the operator cannot see in the payload next to it is unverifiable.
-  const upstreamFaultMatch = matchUpstreamFault(realtimeSnippet);
+  // Issue #3946: plus, for codex's split screen only, the transcript's last row
+  // above the window (on the `■ ` error-row rules alone) — the same entry the
+  // push poller calls; the matched row is then in `matchedText`.
+  const upstreamFaultMatch = matchPaneUpstreamFault(lines, cliToolId);
   const autoYesState = getAutoYesState(worktreeId, cliToolId, instanceId);
 
   // Issue #1785 + #1784: ONE resolution for both halves, not two readers.

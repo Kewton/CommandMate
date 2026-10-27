@@ -115,6 +115,8 @@ const CORPUS: ReadonlyArray<readonly [string, string, string]> = [
   ['fixtures/tui-frame-footer-2776/codex-0.155.1-idle-quoted-footers.txt', 'ready/input_prompt', 'ready/input_prompt'],
   // Synthetic (Issue #3936): the 0155 idle frame with its turn-end row replaced by the capacity error row.
   ['fixtures/upstream-faults/codex-model-capacity-3936.txt', 'ready/input_prompt', 'ready/input_prompt'],
+  ['fixtures/upstream-faults/codex-0.160.0-model-capacity-3946.txt', 'ready/input_prompt', 'ready/input_prompt'],
+  ['fixtures/upstream-faults/codex-0.160.0-model-capacity-next-turn-3946.txt', 'ready/input_prompt', 'ready/input_prompt'],
   ['unit/lib/detection/fixtures/codex-live-1628/approval-apply-patch.txt', 'waiting/prompt_detected/prompt', 'waiting/prompt_detected/prompt'],
   ['unit/lib/detection/fixtures/codex-live-1628/approval-run-command.txt', 'waiting/prompt_detected/prompt', 'waiting/prompt_detected/prompt'],
   ['unit/lib/detection/fixtures/codex-live-1628/idle-ready.txt', 'ready/input_prompt', 'ready/input_prompt'],

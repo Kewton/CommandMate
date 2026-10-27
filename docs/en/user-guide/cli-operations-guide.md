@@ -362,6 +362,7 @@ commandmate wait <worktree-id> --require-work        # Run only work-evidence af
 |:----:|---------|-------------|
 | 0 | Completed (and, with `--verify`, verification passed too) | `capture` to get results |
 | 10 | Prompt detected (`--on-prompt agent`) | `respond`, then `wait` again |
+| 11 | Upstream fault (`--fail-on-upstream-fault`; `ask` always, Issue #1839 / #3011). `id=context-limit` is the context limit: `instances <wt> kill <instance>` for a fresh session, then send again. `id=model-capacity` will not be answered by the same model: send to another instance or model (#3936) | **Do not run `verify`**; wait a while and `send` the same request again |
 | 20 | A verification gate failed (`--verify`) | `verify --json` to see the failing gate, then fix it |
 | 21 | No work evidence (neither a commit nor an uncommitted change) | The agent never started. `send` again |
 | 124 | Timeout | `capture` to check status, then `wait` again or give up |
@@ -1154,7 +1155,7 @@ function names (`buildCurrentOutput` / `isClaudeRunning`) is the safer way to fi
 | Field | Meaning |
 |---|---|
 | `content` | Whatever the poller has not saved yet (`buildCurrentOutput`). **It is a delta only for tools whose line count is a usable cursor** — the scrollback tools (codex / gemini / vibe-local / antigravity) while the 10000-line capture window is unsaturated; there it is empty even on a healthy session once the poller has saved it. For the **alternate-screen tools (claude / opencode / copilot), and for any saturated window, it is the WHOLE capture** (the line count is pinned at the pane height / window size and no longer denotes a read position — Issues #1910 / #1670 / #1268) |
-| `realtimeSnippet` | The last 100 rows of the pane — the screen itself (`selectRealtimeSnippetRows` in `src/lib/session/current-output-builder.ts`) |
+| `realtimeSnippet` | The last 100 rows of the pane — the screen itself. When those 100 rows are all blank (a top-anchored pane such as codex, Command Code), the 100 rows ending at the last row with content instead (#2768). `selectRealtimeSnippetRows` in `src/lib/realtime-snippet.ts` |
 | `lineCount` | The row count of the whole capture, blank rows included. A TUI is drawn on a 1000-row pane, so even a blank pane can report 1001 |
 | `isRunning` | The tmux session exists and is healthy (`isClaudeRunning` / `isSessionHealthy` in `src/lib/session/claude-session.ts`). **It does not mean a turn is in progress** |
 | `sessionStatus` / `sessionStatusReason` | The state and what it rests on: a `hook_*` reason came from hooks, anything else from the scraper (`HOOK_STATUS_REASON` in `src/lib/session/status-mapping.ts`) |
@@ -1168,7 +1169,7 @@ function names (`buildCurrentOutput` / `isClaudeRunning`) is the safer way to fi
 | `structuredEvents.source` | The identifier and **declared** values of the tool's structured-event source (Issue #1924). It describes the source, not the session, so it is present even with no hooks and with the session stopped. `kind` / `liveness` / `degradedReason` / `probedActivity` say whether the source is alive right now (Issue #2054) |
 | `structuredEvents.sessionContext` / `sessionDiff` / `session` | Context-window usage (Issue #2042), the files this turn touched with their revert state (Issue #2043), and the conversation the agent says it is in (Issue #2040). `null` for tools that do not publish them |
 | `structuredEvents.pendingDecisions[]` | The dialogs the instance is holding (Issue #1930; `kind` / `questionOptions` from Issue #2040) |
-| `upstreamFault` | `{id, matchedText, at}` when the screen carries an upstream-fault signature, else `null` (Issue #1839). `id` is `overloaded` / `retrying` / `context-limit` (#3011) / `model-capacity` (codex's `■ Selected model is at capacity` row, #3936) / `limit-reached` / `api-error`. **`null` means "no known signature", not "healthy"** |
+| `upstreamFault` | `{id, matchedText, at}` when the screen carries an upstream-fault signature, else `null` (Issue #1839). `id` is `overloaded` / `retrying` / `context-limit` (#3011) / `model-capacity` (codex's `■ Selected model is at capacity` row, #3936) / `limit-reached` / `api-error` (only at a line start: claude's `⏺ API Error: …` or column 0, so a reply that quotes it mid-line or on an indented row does not match, #3946). Judged on the `realtimeSnippet` rows; on codex's split screen (transcript at the top, composer at the bottom) the transcript's last row above them is read too, for `model-capacity` only — `matchedText` then shows a row that is not in `realtimeSnippet` (#3946). **`null` means "no known signature", not "healthy"** |
 | `resolvedBy` / `conflict` | Which stage of the server's precedence chain chose `cliToolId`, and a contradiction between the roster and an explicit `--instance` / `cliTool` (Issue #1884) |
 | `composerText` | Text sitting **unsent** in the agent's input box, or `null` (Issue #1879). Only text a human typed is returned; a dim suggestion or placeholder never is. `composerState` says why a `null` is `null`. claude / codex only |
 | `composerState` | Why `composerText` is what it is (Issue #1879): `content` (real text is there) / `ghost` (only a suggestion or placeholder) / `empty` (the input box is empty) / `unsupported_tool` (this tool's input box has not been measured) / `no_composer` (no input box on the screen — also the answer for a session that is not running) |
@@ -2376,7 +2377,6 @@ Each of these prints a message and exits 0 without changing anything.
 | 3 | START_FAILED | Update succeeded but the restarted server could not be verified (no rollback needed) |
 | 4 | STOP_FAILED | The server could not be stopped; aborted **without changing anything** |
 | 5 | UPDATE_FAILED | Registry query, `npm install -g`, or version verification failed |
-| 11 | UPSTREAM_FAULT | An upstream API fault was on the screen when the turn ended (`wait --fail-on-upstream-fault`; `ask` always). stderr / `--json` carry `id=...`; `id=context-limit` means the conversation is over the model's context limit — kill the instance (`commandmate instances <wt> kill <instance>`) and send again in a fresh session; `id=model-capacity` means the selected model is at capacity and will not answer — send to another instance or model (#3936) |
 | 99 | UNEXPECTED_ERROR | Unexpected error |
 
 ### Caveats
@@ -2724,6 +2724,7 @@ commandmate ls --token your-token
 | 4 | STOP_FAILED | Failed to stop the server (`stop` / `update`) / the provider session could not be closed (`remote stop`) |
 | 5 | UPDATE_FAILED | Update failed (`update`: registry query / `npm install -g` / version verification) |
 | 10 | PROMPT_DETECTED | Prompt detected during wait |
+| 11 | UPSTREAM_FAULT | An upstream API fault was on the screen when the turn ended (`wait --fail-on-upstream-fault`; `ask` always). stderr / `--json` carry `id=...`; `id=context-limit` means the conversation is over the model's context limit — kill the instance (`commandmate instances <wt> kill <instance>`) and send again in a fresh session; `id=model-capacity` means the selected model is at capacity and will not answer — send to another instance or model (#3936) |
 | 99 | UNEXPECTED_ERROR | Unexpected error / resource not found |
 | 124 | TIMEOUT | Wait timeout exceeded |
 

@@ -934,9 +934,12 @@ export interface CurrentOutputResponse {
    * CurrentOutputPayload.upstreamFault
    *
    * **null is not an all-clear.** It means no signature from
-   * `src/lib/detection/upstream-faults.ts` was on the last 100 rows — the pane
-   * may have scrolled, or the failure may have left it blank (measured in
-   * #1834). Only a non-null value is evidence of anything.
+   * `src/lib/detection/upstream-faults.ts` was on the rows `realtimeSnippet`
+   * publishes — the pane may have scrolled, or the failure may have left it
+   * blank (measured in #1834). Only a non-null value is evidence of anything.
+   * Issue #3946: on codex's split screen the transcript's last row above that
+   * window is read too (`model-capacity` only), so `matchedText` may be a row
+   * that is not in `realtimeSnippet`.
    *
    * Optional here although the server always sends it, for the reason
    * {@link CurrentOutputResponse.model} gives: this mirror also has to describe
