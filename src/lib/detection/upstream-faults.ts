@@ -85,8 +85,31 @@ export const UPSTREAM_FAULTS: readonly UpstreamFault[] = [
     selfRetrying: false,
   },
   { id: 'limit-reached', pattern: /\blimit reached\b/i, selfRetrying: false },
-  { id: 'api-error', pattern: /\bAPI Error(?::|\s+\d{3})/i, selfRetrying: false },
+  {
+    // Anchored to a line start (Issue #3946), like `model-capacity`: only the two
+    // shapes measured for the fault itself are accepted — claude's `⏺ API Error: …`
+    // row (Issue #1839) and a bare `API Error: …` at column 0. Unanchored, it
+    // matched a healthy codex reply that quoted `• API Error: 500` on an indented
+    // continuation line, and `ask` exited 11 — twice, because the quoting turn was
+    // still inside the 100-row window when the next turn ended. A codex `• ` row,
+    // an indented continuation and a `› ` input echo are not accepted.
+    //
+    // Known limit: a claude reply that itself begins with `⏺ API Error: …` is
+    // indistinguishable from the fault, because nothing here knows who wrote a row
+    // (reply, echo, tool error) — only its leading shape.
+    id: 'api-error',
+    pattern: /^(?:⏺ )?API Error(?::|\s+\d{3})/im,
+    selfRetrying: false,
+  },
 ];
+
+/**
+ * The faults whose pattern is anchored to codex's own error row (`■ ` at column
+ * 0), and so the only ones safe to apply to a row outside `realtimeSnippet`
+ * (Issue #3946, {@link matchCodexErrorRowFault}). An unanchored pattern on such a
+ * row would read a quote in an old reply as a fault happening now.
+ */
+export const CODEX_ERROR_ROW_FAULT_IDS: readonly string[] = ['model-capacity'];
 
 /**
  * Bound on {@link UpstreamFaultMatch.matchedText}, in UTF-8 **bytes**.
@@ -140,12 +163,28 @@ export interface UpstreamFaultMatch {
  * sequences on a live pane.
  */
 export function matchUpstreamFault(frame: string): UpstreamFaultMatch | null {
+  return matchFaults(frame, UPSTREAM_FAULTS);
+}
+
+/**
+ * {@link matchUpstreamFault} restricted to {@link CODEX_ERROR_ROW_FAULT_IDS}
+ * (Issue #3946): for the one codex transcript row read from outside the window,
+ * where a quote must not count.
+ */
+export function matchCodexErrorRowFault(row: string): UpstreamFaultMatch | null {
+  return matchFaults(
+    row,
+    UPSTREAM_FAULTS.filter((fault) => CODEX_ERROR_ROW_FAULT_IDS.includes(fault.id)),
+  );
+}
+
+function matchFaults(frame: string, faults: readonly UpstreamFault[]): UpstreamFaultMatch | null {
   const clean = stripAnsi(frame);
-  for (const fault of UPSTREAM_FAULTS) {
+  for (const fault of faults) {
     const match = fault.pattern.exec(clean);
-    // The patterns are stateless (no /g; only `model-capacity` is anchored, to a
-    // line start with /m), so `exec` cannot carry a lastIndex between calls —
-    // but reading `index` requires exec regardless.
+    // The patterns are stateless (no /g; `model-capacity` and `api-error` are
+    // anchored to a line start with /m), so `exec` cannot carry a lastIndex
+    // between calls — but reading `index` requires exec regardless.
     if (!match) continue;
     const lineStart = clean.lastIndexOf('\n', match.index) + 1;
     const lineEnd = clean.indexOf('\n', match.index);

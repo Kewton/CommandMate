@@ -30,7 +30,10 @@
  *
  * ## Why the edge alone is not enough: the cooldown
  *
- * The fault is judged on the **last 100 rows** of the pane, so a retry storm
+ * The fault is judged on the rows `realtimeSnippet` publishes
+ * (`matchPaneUpstreamFault` in `lib/realtime-snippet`: the last 100 rows, or the
+ * 100 ending at the last content row when that tail is blank, plus — codex split
+ * screen only — the transcript's last row; Issue #3946), so a retry storm
  * scrolls its own banner out of scope between polls. Measured shape of a 529
  * storm (#1839): `API Error: Repeated 529 Overloaded errors …` followed by
  * `Retrying in 34s · attempt 9/10`. Those match two different signatures

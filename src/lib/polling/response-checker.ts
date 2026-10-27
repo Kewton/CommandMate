@@ -102,8 +102,7 @@ import { notifyPushSubscribers } from '@/lib/push';
 import { isPromptPushSuppressed } from '@/lib/push/prompt-push-gate';
 // Issue #2000: deep path for the same reason as the two imports above.
 import { notifyUpstreamFaultPush } from '@/lib/push/failure-push-notifier';
-import { matchUpstreamFault } from '@/lib/detection/upstream-faults';
-import { buildRealtimeSnippet } from '@/lib/realtime-snippet';
+import { matchPaneUpstreamFault } from '@/lib/realtime-snippet';
 import { fanOutAfterCommit, startWaitingPushNotifier } from '@/lib/push/waiting-push-notifier';
 import {
   captureObservedFrame,
@@ -148,9 +147,10 @@ function observeUpstreamFaultForPush(
   instanceId: string | undefined,
   output: string
 ): void {
-  // The rows `current-output-builder` publishes as `realtimeSnippet` and judges
-  // `upstreamFault` on (#1839), cut by the same function rather than a copy of
-  // its window. The reason is #1839's: the wider capture keeps a banner from an
+  // The rows `current-output-builder` judges `upstreamFault` on (#1839: the rows
+  // it publishes as `realtimeSnippet`; #3946: plus codex's last transcript row
+  // above them on a split screen), read through the same entry
+  // (`matchPaneUpstreamFault`) rather than a copy of its window. The reason is #1839's: the wider capture keeps a banner from an
   // hour ago in scope, and "is this happening now" is the only question worth
   // ringing a phone about. Sharing the cut also means the notification and the
   // `upstreamFault` an operator reads in `capture --json` judge the same rows —
@@ -158,7 +158,9 @@ function observeUpstreamFaultForPush(
   // unverifiable. Issue #3936: the plain last 100 rows (#2000) drifted from the
   // snippet when #2768 anchored it to the last row with content, so an inline
   // codex pane showed `model-capacity` in the capture and never rang.
-  const match = matchUpstreamFault(buildRealtimeSnippet(output));
+  // Issue #3946: one entry with current-output, which also reads codex's last
+  // transcript row above the window on a split screen.
+  const match = matchPaneUpstreamFault(output.split('\n'), cliToolId);
   // Fire-and-forget, like every other push call in this file: the poller must
   // not slow down or break because a notification could not be delivered.
   void notifyUpstreamFaultPush({
