@@ -1799,7 +1799,10 @@ export function settleCurrentOutputPath(worktreeId: string, instanceId?: string)
  * `--timeout` / `--stall-timeout` bound it too: no interval is slept that the
  * next re-read could not finish within, and each re-read is aborted at the
  * earliest of one interval, the bound and those deadlines — so the verdict
- * comes at most {@link HOOK_STOP_SETTLE_MAX_MS} after the `Stop` poll. A re-read that is aborted or
+ * comes at most {@link HOOK_STOP_SETTLE_MAX_MS} after the `Stop` poll. The bound
+ * is `settleDeadline`, set by {@link readyStage} when it reads the `Stop` poll and
+ * shared with the ledger read of {@link faultFrameHasStop}, so time spent there
+ * is not given again here. A re-read that is aborted or
  * fails ends the settle on the frame before it (an `ApiError` that is not an
  * abort still ends the wait, as on any poll). Frames that change count as
  * activity for `--stall-timeout`, as on any poll.
@@ -1808,12 +1811,12 @@ async function settleAfterHookStop<T extends CurrentOutputResponse>(
   poll: PollContext,
   state: PollState,
   data: T,
+  settleDeadline: number,
 ): Promise<T> {
   const { client, worktreeId, options, startTime } = poll;
   const frameOf = (d: CurrentOutputResponse): string => d.fullOutput ?? d.content;
-  const startedAt = Date.now();
   let latest = data;
-  while (Date.now() - startedAt + HOOK_STOP_SETTLE_INTERVAL_MS <= HOOK_STOP_SETTLE_MAX_MS) {
+  while (Date.now() + HOOK_STOP_SETTLE_INTERVAL_MS <= settleDeadline) {
     if (msBeforeDeadlines(options, startTime, state.lastActivityTime, Date.now()) <= HOOK_STOP_SETTLE_INTERVAL_MS) {
       console.error(
         `Note: re-reading ${worktreeId} after its stop would pass --timeout/--stall-timeout; ` +
@@ -1824,7 +1827,7 @@ async function settleAfterHookStop<T extends CurrentOutputResponse>(
     await sleep(HOOK_STOP_SETTLE_INTERVAL_MS);
     const readBudgetMs = Math.min(
       HOOK_STOP_SETTLE_INTERVAL_MS,
-      startedAt + HOOK_STOP_SETTLE_MAX_MS - Date.now(),
+      settleDeadline - Date.now(),
       msBeforeDeadlines(options, startTime, state.lastActivityTime, Date.now()),
     );
     // Past the bound already (a late timer): no read is started.
@@ -1881,6 +1884,7 @@ async function faultFrameHasStop(
   poll: PollContext,
   state: PollState,
   data: CurrentOutputResponse,
+  settleDeadline: number,
 ): Promise<boolean> {
   if (state.turnStartedAt !== null) return turnSettled(data, state.turnStartedAt);
   // No `Stop` on record at all: nothing the ledger says could make one, so it
@@ -1890,7 +1894,7 @@ async function faultFrameHasStop(
   // Bounded like the settle it decides on: a ledger that does not answer must
   // not hold an exit 11 past --timeout, nor without one past the settle's bound.
   const budgetMs = Math.min(
-    HOOK_STOP_SETTLE_MAX_MS,
+    settleDeadline - Date.now(),
     msBeforeDeadlines(poll.options, poll.startTime, state.lastActivityTime, Date.now()),
   );
   if (budgetMs <= 0) return false;
@@ -1951,14 +1955,19 @@ async function readyStage(
   // merged. Path A is untouched — a session that went away really is
   // finished, and carries no flag anyway.
   if (data.sessionStatus === 'ready' && data.isUnclassifiedActive !== true) {
+    // Issue #3956: one bound for everything a `Stop` poll's settle waits on —
+    // the ledger read that confirms the `Stop` and the re-reads — measured
+    // from this poll, so the verdict comes at most HOOK_STOP_SETTLE_MAX_MS
+    // after it (`--timeout` is applied on top, where each wait is bounded).
+    const settleDeadline = Date.now() + HOOK_STOP_SETTLE_MAX_MS;
     if (reportableUpstreamFault(poll, data) !== null) {
       // Issue #3956: a fault on the frame of a `Stop` poll is on a pane that
       // may still be drawing, as much as a clean one is; it is judged on the
       // settled frame too. Without a `Stop` it is #1839's case, reported now.
       // Nothing is printed before that is decided: the diagnosis is for the
       // frame the verdict is on.
-      if (!judgingSettledFrame && (await faultFrameHasStop(poll, state, data))) {
-        return { kind: 'settled', data: await settleAfterHookStop(poll, state, data) };
+      if (!judgingSettledFrame && (await faultFrameHasStop(poll, state, data, settleDeadline))) {
+        return { kind: 'settled', data: await settleAfterHookStop(poll, state, data, settleDeadline) };
       }
       return upstreamFaultStage(poll, data);
     }
@@ -1982,7 +1991,7 @@ async function readyStage(
       poll.options.failOnUpstreamFault &&
       readyCompletionBasis(state, ledgerOutcome.answeredNewestPrompt) === COMPLETION_BASIS.HOOK_STOP
     ) {
-      return { kind: 'settled', data: await settleAfterHookStop(poll, state, data) };
+      return { kind: 'settled', data: await settleAfterHookStop(poll, state, data, settleDeadline) };
     }
 
     return completionStage(poll, state, ledgerOutcome.answeredNewestPrompt, selfResumeSuffix);
