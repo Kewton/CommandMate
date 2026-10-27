@@ -394,8 +394,8 @@
         {
           "path": "scripts/verify-run.sh",
           "policy": "byte-identical",
-          "sha256": "c1c89157ada9c1661d9a6cca872b976ba5c2b74776c5e90f6f62a7b6d087de38",
-          "note": "ランナー本体。#1586 で byte-identical に移植され、#1607 が CommandMate 側だけを直して 4 日間ドリフトした（#1611 で復旧）。この Issue の直接の発端。 Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。 2026-08-03 に Issue #1651 の変更も counterpart（cmate-verify 0.3.0、skills PR #42）へ移植済み。 2026-08-20（Issue #1861）に counterpart PR #225（6faa33f）から逐語コピーした。 2026-08-20（Issue #1864）に counterpart PR #230（9604e8f、skills #228）から逐語コピーした。"
+          "sha256": "ec4dceeb333d91ceb886c3ab4712e2022d2add9c1c500b987f773cd5ca0e0c2f",
+          "note": "ランナー本体。#1586 で byte-identical に移植され、#1607 が CommandMate 側だけを直して 4 日間ドリフトした（#1611 で復旧）。この Issue の直接の発端。 Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。 2026-08-03 に Issue #1651 の変更も counterpart（cmate-verify 0.3.0、skills PR #42）へ移植済み。 2026-08-20（Issue #1861）に counterpart PR #225（6faa33f）から逐語コピーした。 2026-08-20（Issue #1864）に counterpart PR #230（9604e8f、skills #228）から逐語コピーした。 2026-10-27（Issue #3944）に set -m … set +m を { … } 2>>$rga_log.jobctl で囲んだ（demo-video/env-up.sh の #3935 と同じ形）。【未移植 #3944】本リポジトリ側のみ修正済み。counterpart への移植が未了。"
         }
       ]
     },
