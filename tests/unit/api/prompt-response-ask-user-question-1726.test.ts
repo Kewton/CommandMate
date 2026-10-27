@@ -380,7 +380,7 @@ describe('a permission dialog with no text field (Issue #2583)', () => {
     const data = await respond({ answer: '3' });
 
     expect(data.success).toBe(true);
-    expect(sendSpecialKeys).toHaveBeenCalledWith(`claude-${WT}`, ['Down', 'Down', 'Enter']);
+    expect(sendSpecialKeys).toHaveBeenCalledWith(`claude-${WT}`, ['Down', 'Down', 'Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
   });
 
   it('still resolves a semantic `no` against the dialog’s own labels (#1681)', async () => {

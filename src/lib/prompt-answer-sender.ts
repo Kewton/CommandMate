@@ -975,12 +975,13 @@ export class PromptAnswerInputLostError extends Error {
  */
 interface InputWriterKeys {
   /**
-   * The caller's `stillCurrent`, joined with the ticket's: asked between the
-   * keys of one `sendSpecialKeys` call. Undefined when the caller gave none, so
-   * a manual answer's arrow keys go out in the same one call as before (the
-   * ticket is then checked before each call, {@link assertOwned}).
+   * The ticket's check, joined with the caller's `stillCurrent` when it gave
+   * one: asked between the keys of one `sendSpecialKeys` call. Always given
+   * (review P2, fourth contract): a manual answer passes no `stillCurrent`, and
+   * its arrow keys and toggles — each its own tmux call after a 100 ms wait —
+   * must stop as well when the session is replaced part-way.
    */
-  stillCurrent: (() => boolean) | undefined;
+  stillCurrent: () => boolean;
   /**
    * Throw before a key when the ticket is no longer current: with nothing on
    * the pane yet, {@link PromptAnswerNotDeliveredError} (`input-lock-lost`);
@@ -1039,7 +1040,7 @@ async function sendAsInputWriter(
       };
       const callerStillCurrent = params.stillCurrent;
       const keys: InputWriterKeys = {
-        stillCurrent: callerStillCurrent === undefined ? undefined : () => owned() && callerStillCurrent(),
+        stillCurrent: () => owned() && (callerStillCurrent === undefined || callerStillCurrent()),
         assertOwned: (keysSent) => {
           if (owned()) return;
           if (keysSent) throw new PromptAnswerInputLostError(params.sessionName);
@@ -1146,7 +1147,10 @@ function assertStillCurrent(stillCurrent: (() => boolean) | undefined, keysSent:
 /**
  * `sendSpecialKeys`, asking `stillCurrent` between the keys when the caller
  * gave one (Issue #3706). Without it the call is exactly the old two-argument
- * one, so manual answers and every other caller send as before.
+ * one. Issue #3952 (review P2, fourth contract): every answer typed as the
+ * session's input writer gives one — its ticket's check, joined with Auto-Yes's
+ * generation when there is one — so a manual answer's keys stop too when the
+ * session is replaced between them.
  */
 async function sendSpecialKeysWhileCurrent(
   sessionName: string,

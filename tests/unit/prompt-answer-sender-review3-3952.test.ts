@@ -405,3 +405,105 @@ describe('[#3952 review P2] Command Code’s checkbox answer: the second stage n
     expect(delivered.slice(0, 5)).toEqual(['1', 'Down', 'Down', 'Down', 'Enter']);
   });
 });
+
+// ---------------------------------------------------------------------------
+// P2 (fourth contract): a manual answer — no `stillCurrent` from its caller —
+// is held to the ticket between its keys too.
+// ---------------------------------------------------------------------------
+
+describe('[#3952 review P2, manual answers] the ticket is checked between keys without a caller’s stillCurrent', () => {
+  const PICK3: PromptData = {
+    type: 'multiple_choice',
+    question: 'Pick',
+    status: 'pending',
+    options: [
+      { number: 1, label: 'A', isDefault: true },
+      { number: 2, label: 'B' },
+      { number: 3, label: 'C' },
+    ],
+  };
+
+  it('positive: replaced after the first arrow key — the rest are not sent, keysSent: true', async () => {
+    const firstKey = deferred();
+    const gate = deferred();
+    onKey = () => firstKey.resolve();
+    betweenKeys = () => gate.promise;
+    const answering = sendPromptAnswer({
+      sessionName: SESSION,
+      answer: '3',
+      cliToolId: 'claude',
+      promptData: PICK3,
+      frame: '',
+    }).catch((e: unknown) => e);
+    await firstKey.promise;
+    invalidateInstanceInput(SESSION);
+    gate.resolve();
+    const error = await answering;
+    expect(error).toBeInstanceOf(PromptAnswerInputLostError);
+    expect(error).toMatchObject({ keysSent: true });
+    expect(delivered).toEqual(['Down']);
+  });
+
+  it('negative: nothing replaced — every arrow key and the Enter', async () => {
+    await sendPromptAnswer({ sessionName: SESSION, answer: '3', cliToolId: 'claude', promptData: PICK3, frame: '' });
+    expect(delivered).toEqual(['Down', 'Down', 'Enter']);
+  });
+
+  it('positive: Command Code’s toggles — replaced after the first, the second is not sent', async () => {
+    const firstKey = deferred();
+    const gate = deferred();
+    onKey = () => firstKey.resolve();
+    betweenKeys = () => gate.promise;
+    const answering = sendPromptAnswer({
+      sessionName: SESSION,
+      answer: '1,3',
+      cliToolId: 'command-code',
+      promptData: checkboxPayload(checkboxFrame([])),
+    }).catch((e: unknown) => e);
+    await firstKey.promise;
+    invalidateInstanceInput(SESSION);
+    gate.resolve();
+    const error = await answering;
+    expect(error).toBeInstanceOf(PromptAnswerInputLostError);
+    expect(delivered).toEqual(['1']);
+  });
+
+  it('positive: Command Code’s walk to the confirm row — replaced after its first Down, the rest are not sent', async () => {
+    const reading = deferred();
+    vi.mocked(capturePane).mockImplementation(async () => {
+      reading.resolve();
+      return checkboxFrame([1]);
+    });
+    const walking = deferred();
+    const gate = deferred();
+    onKey = (key) => {
+      if (key === 'Down') walking.resolve();
+    };
+    betweenKeys = async () => {
+      if (delivered.includes('Down')) await gate.promise;
+    };
+    const answering = sendPromptAnswer({
+      sessionName: SESSION,
+      answer: '1',
+      cliToolId: 'command-code',
+      promptData: checkboxPayload(checkboxFrame([])),
+    }).catch((e: unknown) => e);
+    await walking.promise;
+    invalidateInstanceInput(SESSION);
+    gate.resolve();
+    const error = await answering;
+    expect(error).toBeInstanceOf(PromptAnswerInputLostError);
+    expect(delivered).toEqual(['1', 'Down']);
+  });
+
+  it('negative: Command Code’s toggles, nothing replaced — both go out', async () => {
+    vi.mocked(capturePane).mockResolvedValue(checkboxFrame([1, 3]));
+    await sendPromptAnswer({
+      sessionName: SESSION,
+      answer: '1,3',
+      cliToolId: 'command-code',
+      promptData: checkboxPayload(checkboxFrame([])),
+    }).catch(() => undefined);
+    expect(delivered.slice(0, 2)).toEqual(['1', '3']);
+  });
+});

@@ -54,7 +54,7 @@ describe('sendPromptAnswer', () => {
         promptData,
       });
 
-      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Down', 'Enter']);
+      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Down', 'Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
       expect(sendKeys).not.toHaveBeenCalled();
     });
   });
@@ -81,7 +81,7 @@ describe('sendPromptAnswer', () => {
       });
 
       // Should use cursor keys because fallbackPromptType is multiple_choice
-      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Down', 'Enter']);
+      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Down', 'Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
       expect(sendKeys).not.toHaveBeenCalled();
     });
   });
@@ -101,7 +101,7 @@ describe('sendPromptAnswer', () => {
       });
 
       // offset = 3 - 1 = 2 -> 2 Down + Enter
-      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Down', 'Down', 'Enter']);
+      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Down', 'Down', 'Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
       expect(sendKeys).not.toHaveBeenCalled();
     });
 
@@ -116,7 +116,7 @@ describe('sendPromptAnswer', () => {
       });
 
       // offset = 3 - 1 (fallback) = 2 -> 2 Down + Enter
-      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Down', 'Down', 'Enter']);
+      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Down', 'Down', 'Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
       expect(sendKeys).not.toHaveBeenCalled();
     });
   });
@@ -204,7 +204,8 @@ describe('sendPromptAnswer', () => {
 
       expect(sendSpecialKeys).toHaveBeenCalledWith(
         'claude-test',
-        ['Down', 'Space', 'Down', 'Down', 'Enter']
+        ['Down', 'Space', 'Down', 'Down', 'Enter'],
+        expect.objectContaining({ shouldContinue: expect.any(Function) })
       );
     });
 
@@ -230,7 +231,8 @@ describe('sendPromptAnswer', () => {
 
       expect(sendSpecialKeys).toHaveBeenCalledWith(
         'claude-test',
-        ['Up', 'Up', 'Space', 'Down', 'Down', 'Down', 'Enter']
+        ['Up', 'Up', 'Space', 'Down', 'Down', 'Down', 'Enter'],
+        expect.objectContaining({ shouldContinue: expect.any(Function) })
       );
     });
 
@@ -255,7 +257,8 @@ describe('sendPromptAnswer', () => {
 
       expect(sendSpecialKeys).toHaveBeenCalledWith(
         'claude-test',
-        ['Space', 'Down', 'Down', 'Enter']
+        ['Space', 'Down', 'Down', 'Enter'],
+        expect.objectContaining({ shouldContinue: expect.any(Function) })
       );
     });
   });
@@ -282,7 +285,7 @@ describe('sendPromptAnswer', () => {
         promptData,
       });
 
-      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Enter']);
+      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
     });
   });
 
@@ -313,7 +316,7 @@ describe('sendPromptAnswer', () => {
       });
 
       // Net-zero Down+Up nudge engages the picker cursor, then Enter confirms.
-      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Down', 'Up', 'Enter']);
+      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Down', 'Up', 'Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
       expect(sendKeys).not.toHaveBeenCalled();
     });
 
@@ -338,7 +341,7 @@ describe('sendPromptAnswer', () => {
       });
 
       // offset = 3 - 1 = 2 -> the navigation itself engages the cursor.
-      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Down', 'Down', 'Enter']);
+      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Down', 'Down', 'Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
     });
 
     it('keeps bare Enter for the default option when isAskUserQuestion is NOT set (legacy unchanged)', async () => {
@@ -360,7 +363,7 @@ describe('sendPromptAnswer', () => {
         promptData,
       });
 
-      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Enter']);
+      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
     });
 
     it('does not apply the nudge to multi-select pickers (checkbox flow takes priority)', async () => {
@@ -383,7 +386,7 @@ describe('sendPromptAnswer', () => {
       });
 
       // Multi-select: Space toggle + navigate to "Next" + Enter (unchanged path).
-      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Space', 'Down', 'Down', 'Enter']);
+      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Space', 'Down', 'Down', 'Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
     });
   });
 
@@ -421,7 +424,7 @@ describe('sendPromptAnswer', () => {
       });
 
       // defaultNum falls back to 1 (no isDefault), targetNum 1 => offset 0 => Enter.
-      expect(sendSpecialKeys).toHaveBeenCalledWith('agy-test', ['Enter']);
+      expect(sendSpecialKeys).toHaveBeenCalledWith('agy-test', ['Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
       // A typed "1" would be ignored by agy's arrow-nav TUI, so no text send.
       expect(sendKeys).not.toHaveBeenCalled();
     });
@@ -442,7 +445,7 @@ describe('sendPromptAnswer', () => {
       });
 
       // offset = 4 - 1 = 3 => three Downs then Enter.
-      expect(sendSpecialKeys).toHaveBeenCalledWith('agy-test', ['Down', 'Down', 'Down', 'Enter']);
+      expect(sendSpecialKeys).toHaveBeenCalledWith('agy-test', ['Down', 'Down', 'Down', 'Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
       expect(sendKeys).not.toHaveBeenCalled();
     });
 
@@ -456,7 +459,7 @@ describe('sendPromptAnswer', () => {
       });
 
       // fallbackDefaultOptionNumber defaults to 1 => offset 0 => Enter.
-      expect(sendSpecialKeys).toHaveBeenCalledWith('agy-test', ['Enter']);
+      expect(sendSpecialKeys).toHaveBeenCalledWith('agy-test', ['Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
       expect(sendKeys).not.toHaveBeenCalled();
     });
   });
@@ -485,7 +488,7 @@ describe('sendPromptAnswer', () => {
       });
 
       // offset = 3 - 1 = 2 -> 2 Down + Enter
-      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Down', 'Down', 'Enter']);
+      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Down', 'Down', 'Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
     });
   });
 
@@ -513,7 +516,7 @@ describe('sendPromptAnswer', () => {
       });
 
       // offset = 1 - 3 = -2 -> 2 Up + Enter
-      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Up', 'Up', 'Enter']);
+      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Up', 'Up', 'Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
     });
   });
 
@@ -761,7 +764,7 @@ describe('sendPromptAnswer', () => {
       });
 
       // Should use promptData's default (2), not fallback's (1): offset = 1 - 2 = -1 -> 1 Up + Enter
-      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Up', 'Enter']);
+      expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Up', 'Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
     });
   });
 });
@@ -1182,6 +1185,7 @@ describe('Issue #2583: free text at a dialog with no text field', () => {
       expect(sendSpecialKeys).toHaveBeenCalledWith(
         sessionName,
         [...Array.from({ length: denyOption - 1 }, () => 'Down'), 'Enter'],
+        expect.objectContaining({ shouldContinue: expect.any(Function) }),
       );
       expect(sendKeys).not.toHaveBeenCalled();
     });
