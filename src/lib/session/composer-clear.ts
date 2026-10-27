@@ -42,6 +42,7 @@ import {
 import { detectSessionStatus } from '@/lib/detection/status-detector';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
+import { INPUT_RECHECK_FAILED_CODE, INPUT_RECHECK_PROMPT_WAITING_CODE } from '@/lib/session/send-attempt-types';
 
 const logger = createLogger('composer-clear');
 
@@ -256,7 +257,8 @@ export async function clearComposer(
  * The scraper's reading only: the structured (hooks) layer is the prompt
  * guard's, consulted before the lock.
  *
- * @throws Error worded for `classifySendFailure` (`prompt-waiting` / `recheck-failed`)
+ * @throws Error worded for `classifySendFailure` (`prompt-waiting` / `recheck-failed`), with
+ *   `code` {@link INPUT_RECHECK_PROMPT_WAITING_CODE} / {@link INPUT_RECHECK_FAILED_CODE} (Issue #3952)
  */
 export async function recheckComposerBeforeInput(sessionName: string, cliToolId: CLIToolType): Promise<string> {
   let frame: string;
@@ -267,15 +269,19 @@ export async function recheckComposerBeforeInput(sessionName: string, cliToolId:
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     logger.error('input-recheck-failed', { sessionName, cliToolId, error: message });
-    throw new Error(
-      `Could not re-read session ${sessionName} before typing (${message}); nothing was typed (Issue #3945).`
+    throw Object.assign(
+      new Error(`Could not re-read session ${sessionName} before typing (${message}); nothing was typed (Issue #3945).`),
+      { code: INPUT_RECHECK_FAILED_CODE }
     );
   }
   if (dialog) {
     logger.warn('input-recheck-prompt-waiting', { sessionName, cliToolId });
-    throw new Error(
-      `A prompt dialog is open in session ${sessionName} ` +
-        '(re-checked under the input lock); nothing was typed (Issue #3945).'
+    throw Object.assign(
+      new Error(
+        `A prompt dialog is open in session ${sessionName} ` +
+          '(re-checked under the input lock); nothing was typed (Issue #3945).'
+      ),
+      { code: INPUT_RECHECK_PROMPT_WAITING_CODE }
     );
   }
   return frame;

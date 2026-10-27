@@ -35,6 +35,15 @@
  *    to the session, not to the send that left it, so the next owner is the one
  *    that handles it, and the stale sender cannot resume.
  *
+ * Issue #3952 adds a second way to hold it. The answers the server types at a
+ * screen it read — prompt answers, Auto-Yes, the strict respond, plan-review
+ * keys, readiness dialogs — are `shared` writers: kept off a send's composer
+ * and a send off theirs, but not ordered against each other
+ * ({@link InstanceInputMode}). {@link answerUnderInstanceInputLock} reads the
+ * screen again when a send came between the answer's read and its keys. A
+ * person's own keys (the terminal, `direct-input`, special keys) and the
+ * interrupt's Escape do not take part, by decision.
+ *
  * In memory and on `globalThis` (`getOrInitGlobal`) for the reason every shared
  * map in this subsystem is: the send route, the terminal route and the clear
  * route are separate bundles under `next dev`, and a lock per bundle would order
@@ -97,9 +106,28 @@ export interface InstanceInputTicket {
   readonly generation: number;
   /** Whether the owner had to queue for the composer (diagnostics and tests). */
   readonly waited: boolean;
+  /**
+   * `exclusive` for a send's body, a clear, copilot's own commands; `shared` for
+   * an answer to a screen (Issue #3952), which excludes sends but not other
+   * answers.
+   */
+  readonly mode: InstanceInputMode;
   /** True while this ticket still owns the session's composer. */
   isCurrent(): boolean;
 }
+
+/**
+ * How a writer holds the composer (Issue #3952).
+ *
+ * - `exclusive`: alone — no other writer of either mode. Every send of a body,
+ *   the clear, copilot's selection-list and `/model` keys (#3945).
+ * - `shared`: with other `shared` writers, never with an `exclusive` one. The
+ *   answers the server types at a screen it read — readiness dialogs, prompt
+ *   answers, Auto-Yes, plan-review keys, the strict respond. They are kept off a
+ *   send's composer and a send off theirs; two answers were never ordered
+ *   against each other and still are not (their own holds, #3880, do that).
+ */
+export type InstanceInputMode = 'exclusive' | 'shared';
 
 /** A body that may still arrive in the composer after its send gave up. */
 export interface CarriedPasteMark {
@@ -112,13 +140,17 @@ export interface CarriedPasteMark {
 }
 
 interface Waiter {
+  mode: InstanceInputMode;
   admit: (ticket: TicketImpl) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
 }
 
 interface LockEntry {
+  /** The `exclusive` owner. */
   owner: TicketImpl | null;
+  /** The `shared` owners (Issue #3952); never non-empty together with `owner`. */
+  shared: Set<TicketImpl>;
   queue: Waiter[];
   mark: CarriedPasteMark | null;
 }
@@ -130,11 +162,14 @@ class TicketImpl implements InstanceInputTicket {
   constructor(
     readonly sessionName: string,
     readonly generation: number,
-    readonly waited: boolean
+    readonly waited: boolean,
+    readonly mode: InstanceInputMode = 'exclusive'
   ) {}
 
   isCurrent(): boolean {
-    return !this.released && !this.revoked && entries.get(this.sessionName)?.owner === this;
+    if (this.released || this.revoked) return false;
+    const entry = entries.get(this.sessionName);
+    return this.mode === 'shared' ? entry?.shared.has(this) === true : entry?.owner === this;
   }
 }
 
@@ -186,7 +221,7 @@ declare global {
   // eslint-disable-next-line no-var
   var __instanceInputLocks: Map<string, LockEntry> | undefined;
   // eslint-disable-next-line no-var
-  var __instanceInputGeneration: { last: number } | undefined;
+  var __instanceInputGeneration: { last: number; lastExclusive?: number } | undefined;
   // eslint-disable-next-line no-var
   var __instanceInputRevoked: WeakSet<InstanceInputTicket> | undefined;
   // eslint-disable-next-line no-var
@@ -194,7 +229,7 @@ declare global {
 }
 
 const entries = getOrInitGlobal('__instanceInputLocks', () => new Map<string, LockEntry>());
-const generationSeq = getOrInitGlobal('__instanceInputGeneration', () => ({ last: 0 }));
+const generationSeq = getOrInitGlobal('__instanceInputGeneration', () => ({ last: 0, lastExclusive: 0 }));
 /**
  * Tickets revoked by a session replacement (review-2 P1). On `globalThis`, not
  * a field read through `instanceof`: under `next dev` a ticket can be issued by
@@ -210,7 +245,7 @@ const ownerScope = getOrInitGlobal(
 function entryOf(sessionName: string): LockEntry {
   let entry = entries.get(sessionName);
   if (entry === undefined) {
-    entry = { owner: null, queue: [], mark: null };
+    entry = { owner: null, shared: new Set(), queue: [], mark: null };
     entries.set(sessionName, entry);
   }
   return entry;
@@ -221,23 +256,54 @@ function pruneEntry(sessionName: string): void {
   const entry = entries.get(sessionName);
   if (entry === undefined) return;
   if (entry.mark !== null && entry.mark.expiresAt <= Date.now()) entry.mark = null;
-  if (entry.owner === null && entry.queue.length === 0 && entry.mark === null) entries.delete(sessionName);
+  if (entry.owner === null && entry.shared.size === 0 && entry.queue.length === 0 && entry.mark === null) {
+    entries.delete(sessionName);
+  }
 }
 
-function issueTicket(sessionName: string, waited: boolean): TicketImpl {
+function issueTicket(sessionName: string, waited: boolean, mode: InstanceInputMode = 'exclusive'): TicketImpl {
   generationSeq.last += 1;
-  return new TicketImpl(sessionName, generationSeq.last, waited);
+  if (mode === 'exclusive') generationSeq.lastExclusive = generationSeq.last;
+  return new TicketImpl(sessionName, generationSeq.last, waited, mode);
 }
 
-function acquire(sessionName: string, waitMs: number): Promise<TicketImpl> {
+/** Whether a writer of `mode` may be admitted now, ahead of nobody. */
+function admissible(entry: LockEntry, mode: InstanceInputMode): boolean {
+  return entry.owner === null && (mode === 'shared' || entry.shared.size === 0);
+}
+
+function grant(entry: LockEntry, ticket: TicketImpl): void {
+  if (ticket.mode === 'shared') entry.shared.add(ticket);
+  else entry.owner = ticket;
+}
+
+/**
+ * Admit waiters from the head of the queue, in arrival order: an `exclusive`
+ * one once the composer is free, a run of `shared` ones together while no
+ * `exclusive` writer owns it. A `shared` waiter behind a queued `exclusive`
+ * one is not let past it.
+ */
+function admitWaiters(sessionName: string, entry: LockEntry): void {
+  while (entry.queue.length > 0 && admissible(entry, entry.queue[0].mode)) {
+    const next = entry.queue.shift()!;
+    clearTimeout(next.timer);
+    const nextTicket = issueTicket(sessionName, true, next.mode);
+    grant(entry, nextTicket);
+    next.admit(nextTicket);
+    if (next.mode === 'exclusive') return;
+  }
+}
+
+function acquire(sessionName: string, waitMs: number, mode: InstanceInputMode = 'exclusive'): Promise<TicketImpl> {
   const entry = entryOf(sessionName);
-  if (entry.owner === null && entry.queue.length === 0) {
-    const ticket = issueTicket(sessionName, false);
-    entry.owner = ticket;
+  if (entry.queue.length === 0 && admissible(entry, mode)) {
+    const ticket = issueTicket(sessionName, false, mode);
+    grant(entry, ticket);
     return Promise.resolve(ticket);
   }
   return new Promise<TicketImpl>((resolve, reject) => {
     const waiter: Waiter = {
+      mode,
       admit: resolve,
       reject,
       timer: setTimeout(() => {
@@ -245,7 +311,10 @@ function acquire(sessionName: string, waitMs: number): Promise<TicketImpl> {
         // never called, so it cannot type after the owner it was waiting on.
         const index = entry.queue.indexOf(waiter);
         if (index >= 0) entry.queue.splice(index, 1);
-        logger.warn('instance-input-lock-timeout', { sessionName, waitedMs: waitMs });
+        logger.warn('instance-input-lock-timeout', { sessionName, waitedMs: waitMs, mode });
+        // An `exclusive` waiter that gave up may have been all that held the
+        // `shared` ones behind it back.
+        admitWaiters(sessionName, entry);
         pruneEntry(sessionName);
         reject(new InstanceInputLockTimeoutError(sessionName, waitMs));
       }, waitMs),
@@ -257,16 +326,14 @@ function acquire(sessionName: string, waitMs: number): Promise<TicketImpl> {
 function release(ticket: TicketImpl): void {
   ticket.released = true;
   const entry = entries.get(ticket.sessionName);
-  if (entry === undefined || entry.owner !== ticket) return;
-  entry.owner = null;
-  const next = entry.queue.shift();
-  if (next !== undefined) {
-    clearTimeout(next.timer);
-    const nextTicket = issueTicket(ticket.sessionName, true);
-    entry.owner = nextTicket;
-    next.admit(nextTicket);
-    return;
+  if (entry === undefined) return;
+  if (ticket.mode === 'shared') {
+    if (!entry.shared.delete(ticket)) return;
+  } else {
+    if (entry.owner !== ticket) return;
+    entry.owner = null;
   }
+  admitWaiters(ticket.sessionName, entry);
   pruneEntry(ticket.sessionName);
 }
 
@@ -294,7 +361,7 @@ export function currentInstanceInputTicket(sessionName: string): InstanceInputTi
 export async function withInstanceInputLock<T>(
   sessionName: string,
   fn: (ticket: InstanceInputTicket) => Promise<T>,
-  options: { waitMs?: number } = {}
+  options: { waitMs?: number; mode?: InstanceInputMode } = {}
 ): Promise<T> {
   const inScope = ownerScope.getStore()?.get(sessionName);
   if (inScope !== undefined) {
@@ -305,13 +372,114 @@ export async function withInstanceInputLock<T>(
     }
   }
 
-  const ticket = await acquire(sessionName, options.waitMs ?? INSTANCE_INPUT_LOCK_WAIT_MS);
+  const ticket = await acquire(sessionName, options.waitMs ?? INSTANCE_INPUT_LOCK_WAIT_MS, options.mode);
   try {
     const scope = new Map(ownerScope.getStore() ?? []);
     scope.set(sessionName, ticket);
     return await ownerScope.run(scope, () => fn(ticket));
   } finally {
     release(ticket);
+  }
+}
+
+/**
+ * Where the order of `exclusive` admissions stands now (Issue #3952). An
+ * answer takes it right before it reads the screen it will answer, and hands it
+ * to {@link answerUnderInstanceInputLock}: a send admitted after it may have
+ * typed between that read and the answer's keys.
+ */
+export function instanceInputReadMark(): number {
+  return generationSeq.lastExclusive ?? 0;
+}
+
+/** Why {@link answerUnderInstanceInputLock} typed nothing (Issue #3952). */
+export type InstanceInputAnswerSkip =
+  /** The screen read again under the lock is not the one the answer was for. */
+  | 'target-changed'
+  /** The screen could not be read again under the lock. */
+  | 'recheck-failed'
+  /** Another writer held the composer past the wait. */
+  | 'input-lock-timeout'
+  /** The session was killed or recreated while the answer waited. */
+  | 'session-replaced'
+  /** The answer's context, or its ticket, no longer owns the composer. */
+  | 'input-lock-lost';
+
+export type InstanceInputAnswerOutcome<T> =
+  | { answered: true; value: T }
+  | { answered: false; reason: InstanceInputAnswerSkip };
+
+function skipOfLockError(error: unknown): InstanceInputAnswerSkip | null {
+  const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+  if (code === INSTANCE_INPUT_LOCK_TIMEOUT_CODE) return 'input-lock-timeout';
+  if (code === INSTANCE_INPUT_SESSION_REPLACED_CODE) return 'session-replaced';
+  if (code === INSTANCE_INPUT_OWNERSHIP_LOST_CODE) return 'input-lock-lost';
+  return null;
+}
+
+/**
+ * Type an answer the server decided on its own reading of the screen — a
+ * readiness dialog, a prompt answer, a plan-review step — as a `shared` writer
+ * (Issue #3952): after any send that holds the composer, and with every send
+ * held off until it is done.
+ *
+ * The screen was read before the lock. When a send was admitted after that
+ * read (`readMark`, from {@link instanceInputReadMark}) or the answer had to
+ * queue, the screen may have moved under it: `stillApplies` reads it again,
+ * and the answer is typed only when it still says yes. A call that joins its
+ * context's own ticket (the readiness wait inside a send that holds the lock)
+ * held the composer since before its read, so nothing is read again.
+ *
+ * Never types after a refusal, and never throws for one: a lock that was not
+ * admitted in time, a session replaced, a ticket lost, a screen that moved or
+ * could not be read all come back as `{ answered: false }`. Errors thrown by
+ * `answer` itself propagate.
+ */
+export async function answerUnderInstanceInputLock<T>(
+  sessionName: string,
+  readMark: number,
+  stillApplies: () => Promise<boolean>,
+  answer: (ticket: InstanceInputTicket) => Promise<T>,
+  options: { waitMs?: number } = {}
+): Promise<InstanceInputAnswerOutcome<T>> {
+  // A context that already owns the composer (a send's own readiness wait)
+  // has held it since before its read: it joins, and nothing is read again.
+  const joined = currentInstanceInputTicket(sessionName) !== null;
+  let admitted = false;
+  try {
+    return await withInstanceInputLock<InstanceInputAnswerOutcome<T>>(
+      sessionName,
+      async (ticket) => {
+        admitted = true;
+        const sendSinceRead = !joined && (ticket.waited || instanceInputReadMark() !== readMark);
+        if (sendSinceRead) {
+          let applies: boolean;
+          try {
+            applies = await stillApplies();
+          } catch (error: unknown) {
+            logger.warn('instance-input-answer-recheck-failed', {
+              sessionName,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            return { answered: false, reason: 'recheck-failed' };
+          }
+          if (!applies) {
+            logger.info('instance-input-answer-target-changed', { sessionName, generation: ticket.generation });
+            return { answered: false, reason: 'target-changed' };
+          }
+        }
+        if (!ticket.isCurrent()) return { answered: false, reason: 'input-lock-lost' };
+        return { answered: true, value: await answer(ticket) };
+      },
+      { ...options, mode: 'shared' }
+    );
+  } catch (error: unknown) {
+    // Only the lock's own refusals, before `fn` ran; anything `answer` threw
+    // after it was admitted may have typed, and is the caller's to judge.
+    const skip = admitted ? null : skipOfLockError(error);
+    if (skip === null) throw error;
+    logger.warn('instance-input-answer-not-admitted', { sessionName, reason: skip });
+    return { answered: false, reason: skip };
   }
 }
 
@@ -399,6 +567,12 @@ export function invalidateInstanceInput(sessionName: string): void {
     entry.owner.revoked = true;
     revokedTickets.add(entry.owner);
     entry.owner = null;
+  }
+  for (const holder of [...entry.shared]) {
+    if (holder === own) continue;
+    holder.revoked = true;
+    revokedTickets.add(holder);
+    entry.shared.delete(holder);
   }
   const waiters = entry.queue.splice(0, entry.queue.length);
   for (const waiter of waiters) {

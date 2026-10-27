@@ -75,3 +75,12 @@ export interface LastSendAttempt {
  * send before any body is typed (Issue #3772). Matched by code, never by wording.
  */
 export const PLAN_REVIEW_SEND_REFUSED_CODE = 'PLAN_REVIEW_SEND_REFUSED';
+
+/**
+ * `code` on the errors the input re-check throws before any key
+ * (`recheckComposerBeforeInput`, Issue #3952): a dialog was open, or the pane
+ * could not be read. Carried by copilot's `/model` switch, whose caller records
+ * the reason by code rather than by the wording around it.
+ */
+export const INPUT_RECHECK_PROMPT_WAITING_CODE = 'INPUT_RECHECK_PROMPT_WAITING';
+export const INPUT_RECHECK_FAILED_CODE = 'INPUT_RECHECK_FAILED';

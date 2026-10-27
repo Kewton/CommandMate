@@ -305,6 +305,20 @@ commandmate send "$WT" "Quick check" --agent codex --instance codex-3 --register
 | `--duration <d>` | Auto-yes duration (`1h`-`24h`, whole hours; e.g. `1h` / `3h` / `8h`). Out of range exits 2 with or without `--auto-yes` | 1h |
 | `--stop-pattern <p>` | Auto-yes stop condition (regex) | - |
 
+### Input that overlaps a send (input lock (#3952))
+
+A message send (`send` / `ask`, chat, timers, relay) types into the composer only while it holds the instance's input lock (Issue #3945), so nothing else is typed in the middle of it (paste → check → Enter, the watch for a late paste, the withdrawal). The other input paths:
+
+| Path | Lock | When it overlaps a send |
+|------|------|-------------------------|
+| `respond` / the answer panel (answers that send Enter), strict `respond`, Auto-Yes answers, Command Code plan review, the automatic answers at launch and before a send (trust / update / hooks / notices) | Takes part (answers do not wait for each other) | Waits for the send to finish, then **reads the screen again and types only if the same confirmation is still up**. When it is gone, changed, unreadable, or the wait passes 60 s, nothing is typed: `respond` reports `answer_not_delivered` (`/respond` answers 409, strict mode exits 40 `session_conflict`), and Auto-Yes decides again on its next tick. A send that starts during an answer waits for the answer's Enter |
+| `answer_only` digit answers (no Enter) | Does not take part | One key and no Enter, typed without waiting |
+| Typing in the terminal (WebSocket), `direct-input`, special keys (including the unsent bar's **Run**) | Does not take part (neither refused nor held) | **Keys typed during a send can be mixed into its body, or removed by its clean-up (the composer clear, the withdrawal).** Wait until the send is over (the reply has started) before typing |
+| `interrupt` (Escape) | Does not take part (does not wait, does not invalidate the send) | So a stop is never queued behind a send. An Escape that arrives while a body is being typed can stop that send part-way (check `lastSend` for the outcome) |
+
+- copilot's `--model` reads the screen once more right before typing `/model`: a dialog is `not-sent` (`prompt-waiting`), an unreadable pane `not-sent` (`recheck-failed`), and nothing is typed.
+- The lock is per server process. Two servers sharing one tmux are not ordered by it.
+
 ### Finding Worktree IDs
 
 ```bash

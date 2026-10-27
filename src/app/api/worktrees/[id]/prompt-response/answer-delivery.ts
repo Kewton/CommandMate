@@ -16,6 +16,7 @@ import {
   FreeTextAnswerRejectedError,
   FreeTextAtChoiceOnlyPromptError,
   MultiSelectAnswerRejectedError,
+  PromptAnswerNotDeliveredError,
 } from '@/lib/prompt-answer-sender';
 import type { PromptData } from '@/types/models';
 import {
@@ -93,6 +94,18 @@ function sendErrorResponse(
         ? { optionNumbers: error.optionNumbers }
         : { optionCount: error.optionCount }),
     });
+    return NextResponse.json({
+      success: false,
+      reason: error.reason,
+      message: error.message,
+      answer: answer ?? '',
+    });
+  }
+  // Issue #3952: the answer waited for a send holding the session's input and
+  // was not typed after it (the prompt moved, or the wait ran out). Nothing
+  // reached the pane, so it is a refusal like the ones above, not a 500.
+  if (error instanceof PromptAnswerNotDeliveredError) {
+    logRefused(ctx, { reason: error.reason, skip: error.skip });
     return NextResponse.json({
       success: false,
       reason: error.reason,

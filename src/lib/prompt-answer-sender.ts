@@ -22,6 +22,12 @@ import {
   TUI_MESSAGE_PROCESSED_WAIT_MS,
   TUI_TEXT_INPUT_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
+import { assessPromptAnswerability } from '@/lib/polling/auto-yes-dialog-gate';
+import {
+  answerUnderInstanceInputLock,
+  instanceInputReadMark,
+  type InstanceInputAnswerSkip,
+} from '@/lib/session/instance-input-lock';
 
 // Issue #3397: the checkbox reading (`hasCheckboxOptions`) lives in
 // `prompt-answer-semantic`, shared with the semantic resolver and Auto-Yes.
@@ -852,6 +858,107 @@ async function sendCommandCodeMultiSelectAnswer(
 }
 
 /**
+ * The reason code of {@link PromptAnswerNotDeliveredError} (Issue #3952).
+ * Crosses the API boundary (`/prompt-response`'s refusal body, `/respond`'s 409).
+ */
+export const ANSWER_NOT_DELIVERED_REASON = 'answer_not_delivered';
+
+const NOT_DELIVERED_WHY: Record<InstanceInputAnswerSkip, string> = {
+  'target-changed': 'the prompt it was for was no longer on screen once the input in progress had finished',
+  'recheck-failed': 'the screen could not be read again once the input in progress had finished',
+  'input-lock-timeout': 'another input held the session past the wait',
+  'session-replaced': 'the session was replaced while the answer waited',
+  'input-lock-lost': "the session's input was handed to another writer",
+};
+
+/**
+ * An answer that waited for a send (or another answer) holding the session's
+ * input, and was then not typed (Issue #3952): the prompt it was for is gone or
+ * changed, the screen could not be read again, the wait ran out, or the session
+ * was replaced. Nothing of it reached the pane (`keysSent: false`), so the
+ * prompt is exactly as the operator left it — or no longer there.
+ */
+export class PromptAnswerNotDeliveredError extends Error {
+  readonly reason = ANSWER_NOT_DELIVERED_REASON;
+  readonly keysSent = false;
+
+  constructor(readonly skip: InstanceInputAnswerSkip, sessionName: string) {
+    super(`The answer was not sent to ${sessionName}: ${NOT_DELIVERED_WHY[skip]} (${skip}). Nothing was typed.`);
+    this.name = 'PromptAnswerNotDeliveredError';
+  }
+}
+
+/** The prompt a frame shows, read as `/prompt-response` verifies one; null when none is answerable. */
+function readAnswerablePrompt(cliToolId: CLIToolType, frame: string): PromptData | null {
+  const { promptCheck, refusal } = assessPromptAnswerability(cliToolId, frame);
+  if (refusal || !promptCheck?.isPrompt) return null;
+  return promptCheck.promptData ?? null;
+}
+
+/** A text as compared: runs of whitespace as one, and no cursor glyphs (`❯ 1. Yes` is `1. Yes`). */
+function comparable(text: string | undefined): string {
+  return (text ?? '').replace(/[❯›▶]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function sameText(a: string | undefined, b: string | undefined): boolean {
+  return comparable(a) === comparable(b);
+}
+
+/**
+ * Whether two readings are the same prompt to answer: its kind, its wording,
+ * its options' labels and — when both readings have one — what it asks approval
+ * for. The cursor (`isDefault`, the `❯` in the approval block) is not compared:
+ * moving it does not make it another prompt.
+ */
+function samePromptTarget(target: PromptData, now: PromptData): boolean {
+  if (target.type !== now.type || !sameText(target.question, now.question)) return false;
+  if (target.approvalTarget !== undefined && now.approvalTarget !== undefined) {
+    if (!sameText(target.approvalTarget, now.approvalTarget)) return false;
+  }
+  if (target.type === 'multiple_choice' && now.type === 'multiple_choice') {
+    if (target.options.length !== now.options.length) return false;
+    return target.options.every((option, i) => sameText(option.label, now.options[i].label));
+  }
+  return true;
+}
+
+/**
+ * The re-check an answer makes once it owns the session's input after another
+ * writer (Issue #3952): the caller still acts (Auto-Yes's `stillCurrent`), and
+ * a fresh capture still shows the prompt the answer was decided for — the one
+ * read off the caller's frame, else the caller's `promptData`, else any
+ * answerable prompt.
+ */
+async function answerTargetStillOnScreen(params: SendPromptAnswerParams): Promise<boolean> {
+  if (params.stillCurrent && !params.stillCurrent()) return false;
+  const now = readAnswerablePrompt(params.cliToolId, await capturePane(params.sessionName, GUARD_CAPTURE_LINES));
+  if (now === null) return false;
+  const target = (params.frame !== undefined ? readAnswerablePrompt(params.cliToolId, params.frame) : null)
+    ?? params.promptData
+    ?? null;
+  return target === null || samePromptTarget(target, now);
+}
+
+/**
+ * Run an answer's keys as the session's input writer (Issue #3952): a send in
+ * progress is waited out, and the prompt is read again after it. Refused, the
+ * answer throws {@link PromptAnswerNotDeliveredError} with nothing typed.
+ */
+async function sendAsInputWriter(
+  params: SendPromptAnswerParams,
+  readMark: number,
+  send: () => Promise<void>,
+): Promise<void> {
+  const outcome = await answerUnderInstanceInputLock(
+    params.sessionName,
+    readMark,
+    () => answerTargetStillOnScreen(params),
+    send,
+  );
+  if (!outcome.answered) throw new PromptAnswerNotDeliveredError(outcome.reason, params.sessionName);
+}
+
+/**
  * The caller's `stillCurrent` said no after one of the send's waits
  * (Issue #3706): the keys not yet sent were not sent. Keys already typed cannot
  * be taken back, so {@link keysSent} says whether the pane was touched; either
@@ -1018,6 +1125,14 @@ export interface SendPromptAnswerParams {
    * nothing about the send changes.
    */
   stillCurrent?: () => boolean;
+  /**
+   * {@link instanceInputReadMark} taken before the screen the answer was decided
+   * on was read (Issue #3952). An answer that sends an Enter types as the
+   * session's input writer; when another writer was admitted after this mark,
+   * the prompt is read again before the first key. Omitted, it is taken when
+   * this function is called.
+   */
+  readMark?: number;
 }
 
 /**
@@ -1032,6 +1147,16 @@ export interface SendPromptAnswerParams {
  * A failure after a key of the answer reached the pane carries `keysSent: true`
  * (Issue #3839), and a transport failure its `answerDelivery` (Issue #3880);
  * see {@link withKeysSent}.
+ *
+ * Issue #3952: every answer that sends an Enter — the cursor arms, the text arm
+ * with its Enter, the checkbox arm — types as the session's input writer
+ * (`instance-input-lock`), from its first key to its last, so a message send
+ * cannot type between the answer's text and its Enter, and an answer waits for
+ * a send in progress and is read again after it. An `answer_only` digit sends
+ * no Enter and is typed as before.
+ *
+ * @throws {PromptAnswerNotDeliveredError} when the answer waited for another
+ *   writer and was then not typed
  */
 export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<void> {
   const touch: PaneTouch = { touched: false };
@@ -1046,6 +1171,7 @@ export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<
 async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneTouch): Promise<void> {
   const { sessionName, answer, cliToolId, promptData, fallbackPromptType, fallbackDefaultOptionNumber, stillCurrent } =
     params;
+  const readMark = params.readMark ?? instanceInputReadMark();
 
   // Issue #2755: Command Code's checkbox question, before every guard below.
   // Its answer is a SET (`"1,3"`), which none of them can read — `/^\d+$/` is
@@ -1056,12 +1182,14 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
   // a two-stage confirm, not a digit and an Enter.
   const multiSelect = readMultiSelectRequest(params);
   if (multiSelect !== null) {
-    await sendCommandCodeMultiSelectAnswer(
-      sessionName,
-      multiSelect.promptData,
-      multiSelect.wanted,
-      stillCurrent,
-      touch,
+    await sendAsInputWriter(params, readMark, () =>
+      sendCommandCodeMultiSelectAnswer(
+        sessionName,
+        multiSelect.promptData,
+        multiSelect.wanted,
+        stillCurrent,
+        touch,
+      ),
     );
     invalidateCache(sessionName);
     return;
@@ -1143,7 +1271,7 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
       keys.push(...buildNavigationKeys(downToNext));
       // 4. Enter to submit
       keys.push('Enter');
-      await sendSpecialKeysWhileCurrent(sessionName, keys, stillCurrent, touch);
+      await sendAsInputWriter(params, readMark, () => sendSpecialKeysWhileCurrent(sessionName, keys, stillCurrent, touch));
     } else {
       // Single-select: navigate and Enter to select
       const navigationKeys = buildNavigationKeys(offset);
@@ -1161,25 +1289,35 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
       const keys: string[] = (isAskUserQuestionPicker && offset === 0)
         ? ['Down', 'Up', 'Enter']
         : [...navigationKeys, 'Enter'];
-      await sendSpecialKeysWhileCurrent(sessionName, keys, stillCurrent, touch);
+      await sendAsInputWriter(params, readMark, () => sendSpecialKeysWhileCurrent(sessionName, keys, stillCurrent, touch));
     }
   } else {
-    // Standard CLI prompt: send text + Enter (y/n, Approve?, etc.)
-    await sendKeys(sessionName, answer, false);
-    // Issue #3839: the text is on the pane; a failed Enter after it says so.
-    if (answer !== '') touch.touched = true;
-
     // Issue #616: Resolve submitMode and determine whether to suppress Enter
     const resolvedSubmitMode = resolveSubmitMode(params, dialog);
+    const typeText = async (): Promise<void> => {
+      // Standard CLI prompt: send text + Enter (y/n, Approve?, etc.)
+      await sendKeys(sessionName, answer, false);
+      // Issue #3839: the text is on the pane; a failed Enter after it says so.
+      if (answer !== '') touch.touched = true;
+    };
 
-    if (!shouldSuppressEnter(params, resolvedSubmitMode, dialog)) {
-      // Wait a moment for the input to be processed
-      await new Promise(resolve => setTimeout(resolve, TUI_TEXT_INPUT_WAIT_MS));
-      // Issue #3706: the text is typed; the Enter that submits it is not.
-      assertStillCurrent(stillCurrent, true);
+    if (shouldSuppressEnter(params, resolvedSubmitMode, dialog)) {
+      // Issue #3952: one digit and no Enter — nothing a send could split, so
+      // not a writer of the session's input.
+      await typeText();
+    } else {
+      // Issue #3952: text, wait and Enter as one writer, so no send's body can
+      // be typed in the wait and submitted by this Enter.
+      await sendAsInputWriter(params, readMark, async () => {
+        await typeText();
+        // Wait a moment for the input to be processed
+        await new Promise(resolve => setTimeout(resolve, TUI_TEXT_INPUT_WAIT_MS));
+        // Issue #3706: the text is typed; the Enter that submits it is not.
+        assertStillCurrent(stillCurrent, true);
 
-      // Send Enter
-      await sendKeys(sessionName, '', true);
+        // Send Enter
+        await sendKeys(sessionName, '', true);
+      });
     }
   }
 
