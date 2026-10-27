@@ -16,7 +16,6 @@ import {
   startingStatusResult,
 } from '@/lib/session/session-starting-state';
 import { extractLiveComposerText } from '@/lib/detection/composer-text';
-import { matchUpstreamFault } from '@/lib/detection/upstream-faults';
 import {
   detectOpenCodePaneObstruction,
   type OpenCodePaneObstruction,
@@ -66,7 +65,7 @@ import type { AutoYesDecisionPublished } from '@/types/auto-yes-decision';
 import { getPromptDedupSkips } from '@/lib/polling/prompt-dedup-state';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
 import { CACHE_MAX_CAPTURE_LINES, isCaptureWindowSaturated } from '@/lib/tmux/tmux-capture-cache';
-import { selectRealtimeSnippetRows } from '@/lib/realtime-snippet';
+import { matchPaneUpstreamFault, selectRealtimeSnippetRows } from '@/lib/realtime-snippet';
 import {
   getAgentEventDropCounts,
   getAskUserQuestion,
@@ -729,7 +728,7 @@ interface RunningPayloadInput {
   structuredEvents: StructuredEventsPayload;
   model: ReturnType<typeof getResolvedAgentModelInfo>['model'];
   effort: ReturnType<typeof getResolvedAgentModelInfo>['effort'];
-  upstreamFaultMatch: ReturnType<typeof matchUpstreamFault>;
+  upstreamFaultMatch: ReturnType<typeof matchPaneUpstreamFault>;
   paneObstruction: OpenCodePaneObstruction | null;
   composer: ReturnType<typeof extractLiveComposerText>;
 }
@@ -844,7 +843,10 @@ function buildRunningPayload({
     promptDedup: getPromptDedupSkips(worktreeId, cliToolId, instanceId),
     // Issue #1839: read from `realtimeSnippet`, the same rows an operator sees
     // in `capture --json`, so what the field claims can be checked against what
-    // is printed next to it.
+    // is printed next to it. Issue #3946: plus, on codex's split screen only, the
+    // transcript's last content row above that window (`matchPaneUpstreamFault`,
+    // `model-capacity` only) — then the row is not in `realtimeSnippet`, and
+    // `matchedText` carries it so the claim can still be checked.
     upstreamFault: upstreamFaultMatch
       ? {
           id: upstreamFaultMatch.fault.id,
@@ -853,7 +855,9 @@ function buildRunningPayload({
         }
       : null,
     // Issue #2095: the same three keys as `upstreamFault`, read from the same
-    // rows, so an operator comparing the two is comparing like with like. The
+    // `realtimeSnippet` rows (upstreamFault alone adds codex's one transcript row
+    // above them, #3946), so an operator comparing the two is comparing like with
+    // like. The
     // detector's `boxRight` / `rows` stay off the wire — they are how the rule
     // decided, not what a caller acts on, and the payload is already a published
     // contract wide enough to be hard to change.
@@ -1147,6 +1151,8 @@ async function buildPayload(
   // once, here, above the first reader. The 100 rows are also what the payload
   // publishes, which is the property both fields rest on: what they claim can be
   // checked against the rows printed next to them in `capture --json`.
+  // (Issue #3946: `upstreamFault` also reads codex's last transcript row above
+  // this window on a split screen; its `matchedText` is then that row.)
   // Issue #2768: still "the 100 rows this payload publishes" — but anchored to
   // the last content row when the plain tail is entirely blank (top-anchored panes).
   const realtimeSnippet = selectRealtimeSnippetRows(lines).join('\n');
@@ -1266,7 +1272,10 @@ async function buildPayload(
   // Issue #1839: judged on exactly what is published as `realtimeSnippet`, not
   // on `output`. The wider capture keeps a banner from an hour ago in scope, and
   // a fault the operator cannot see in the payload next to it is unverifiable.
-  const upstreamFaultMatch = matchUpstreamFault(realtimeSnippet);
+  // Issue #3946: plus, for codex's split screen only, the transcript's last row
+  // above the window (on the `■ ` error-row rules alone) — the same entry the
+  // push poller calls; the matched row is then in `matchedText`.
+  const upstreamFaultMatch = matchPaneUpstreamFault(lines, cliToolId);
   const autoYesState = getAutoYesState(worktreeId, cliToolId, instanceId);
 
   // Issue #1785 + #1784: ONE resolution for both halves, not two readers.

@@ -809,7 +809,9 @@ same CommandMate server, and you can hand work to them.
     10   they are waiting on a confirmation. stdout carries the prompt JSON
     11   the turn never ran: an upstream fault is on their screen (stderr and
          --json carry id=...). id=context-limit means their conversation is over
-         the model's limit: 'instances <id> kill <instance>', then ask again
+         the model's limit: 'instances <id> kill <instance>', then ask again.
+         id=model-capacity means the model is at capacity: ask another instance
+         or another model
     21   nothing was running to ask
     124  timed out
 

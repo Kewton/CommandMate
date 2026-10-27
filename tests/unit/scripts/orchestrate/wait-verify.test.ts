@@ -1551,14 +1551,23 @@ describe('a verification that only waited for a mutex is started again (#3938)',
     });
 
     it('another SKIP, a FAIL, a TIMEOUT, an unread run or an unread reason → false (negative control)', () => {
-      const withGate = (row: ReturnType<typeof gateRow>) => ({ gates: [...mutexRun().gates, row] });
+      // Positive control: a mutex-wait SKIP beside the run's own `error` → true.
+      const withGate = (row: ReturnType<typeof gateRow>) => ({ ...mutexRun(), gates: [...mutexRun().gates, row] });
+      const base = () => gateRow('scope', 'skipped', null, MUTEX_SKIP_TAIL, null);
+      expect(mutexWaitOnly(withGate(base()))).toBe(true);
+      // The run's status only (a cancelled run is not queued again).
+      expect(mutexWaitOnly({ ...withGate(base()), status: 'cancelled' })).toBe(false);
+      // The added gate's status only; the log tail stays a mutex-wait.
+      expect(mutexWaitOnly(withGate(gateRow('lint', 'failed', 1_000, MUTEX_SKIP_TAIL, 1)))).toBe(false);
+      expect(mutexWaitOnly(withGate(gateRow('build', 'timeout', 600_000, MUTEX_SKIP_TAIL, null)))).toBe(false);
+      // The first line of the log tail only; the status stays `skipped`.
       expect(mutexWaitOnly(withGate(gateRow('scope', 'skipped', null, 'reason=cancelled', null)))).toBe(false);
       expect(mutexWaitOnly(withGate(gateRow('scope', 'skipped', null, 'reason=primary-checkout', null)))).toBe(false);
-      expect(mutexWaitOnly(withGate(gateRow('lint', 'failed', 1_000, 'boom', 1)))).toBe(false);
-      expect(mutexWaitOnly(withGate(gateRow('build', 'timeout', 600_000, '…', null)))).toBe(false);
       expect(mutexWaitOnly(withGate(gateRow('unit', 'skipped', null, null, null)))).toBe(false);
       // The reason is read from the first line only, never from the body.
-      expect(mutexWaitOnly({ gates: [gateRow('unit', 'skipped', null, `reason=cancelled\n${MUTEX_SKIP_TAIL}`, null)] })).toBe(false);
+      const bodyOnly = (tail: string) => ({ status: 'error', gates: [gateRow('unit', 'skipped', null, tail, null)] });
+      expect(mutexWaitOnly(bodyOnly(MUTEX_SKIP_TAIL))).toBe(true);
+      expect(mutexWaitOnly(bodyOnly(`reason=cancelled\n${MUTEX_SKIP_TAIL}`))).toBe(false);
       expect(mutexWaitOnly(passRun())).toBe(false);
       expect(mutexWaitOnly(null)).toBe(false);
       expect(mutexWaitOnly({})).toBe(false);

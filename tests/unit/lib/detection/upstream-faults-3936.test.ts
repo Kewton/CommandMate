@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { matchUpstreamFault } from '@/lib/detection/upstream-faults';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
-import { buildRealtimeSnippet } from '@/lib/realtime-snippet';
+import { buildRealtimeSnippet, matchPaneUpstreamFault } from '@/lib/realtime-snippet';
 
 const FIXTURES = join(__dirname, '../../../fixtures');
 const read = (rel: string): string => readFileSync(join(FIXTURES, rel), 'utf8');
@@ -51,14 +51,18 @@ describe('model-capacity upstream fault (Issue #3936)', () => {
     // codex 0.160.0 measured: a short transcript at the top of the 1000-row
     // pane, the composer at the bottom (startup-screen-3293). The same frame
     // with its `■` row carrying the capacity line matches as a whole, but not on
-    // the window current-output judges — so on a short session the fault is not
-    // published. Kept here so a change to the window shows up; not fixed by #3936.
+    // `realtimeSnippet`. Issue #3946 closed the gap without moving the window:
+    // current-output and the push poller (`matchPaneUpstreamFault`) also read the
+    // transcript's last row on codex's split screen, so the fault is published.
     const shortSession = read('startup-screen-3293/codex-0.160.0-first-turn-interrupted.txt').replace(
       '■ Conversation interrupted - use /feedback if something went wrong',
       CAPACITY_LINE,
     );
     expect(matchUpstreamFault(shortSession)?.fault.id).toBe('model-capacity');
     expect(matchUpstreamFault(buildRealtimeSnippet(shortSession))).toBeNull();
+    const published = matchPaneUpstreamFault(shortSession.split('\n'), 'codex');
+    expect(published?.fault.id).toBe('model-capacity');
+    expect(published?.matchedText).toBe(CAPACITY_LINE);
   });
 
   // Review of eaeab6d (P1): the wording alone also sits in healthy replies that

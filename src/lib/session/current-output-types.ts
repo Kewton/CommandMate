@@ -646,9 +646,15 @@ export interface CurrentOutputPayload {
    * a consumer that treats null as an all-clear re-creates exactly the false
    * confidence the field exists to remove.
    *
-   * Judged on `realtimeSnippet` (the last 100 rows), so it clears once the fault
-   * has scrolled out of that window rather than latching for the life of the
-   * session — the question a caller asks of it is "is this happening now".
+   * Judged on the rows `realtimeSnippet` publishes (the last 100, or the 100
+   * ending at the last content row when that tail is blank — #2768), so it
+   * clears once the fault has scrolled out of that window rather than latching
+   * for the life of the session — the question a caller asks of it is "is this
+   * happening now". Issue #3946: on codex's split screen (transcript at the top,
+   * composer at the bottom) the transcript's last row above the window is also
+   * read, on the `■ ` error-row rules only (`model-capacity`); such a match is
+   * outside `realtimeSnippet`, and `matchedText` carries the row so it can still
+   * be checked. `api-error` matches only at a line start (`⏺ ` or column 0).
    *
    * Exposure plus one verdict: `commandmate wait --fail-on-upstream-fault`
    * exits {@link WaitExitCode.UPSTREAM_FAULT} on it. Nothing reads it by
@@ -673,8 +679,9 @@ export interface CurrentOutputPayload {
    * measured from, and a tool other than opencode is not looked at at all.
    *
    * Deliberately shaped like {@link upstreamFault} — `{id, matchedText, at}`,
-   * judged on `realtimeSnippet`, published on every poll and read by nobody by
-   * default. The two answer the same kind of question ("something the detector
+   * judged on `realtimeSnippet` (`upstreamFault` additionally reads codex's last
+   * transcript row above it on a split screen, #3946; this field does not),
+   * published on every poll and read by nobody by default. The two answer the same kind of question ("something the detector
    * cannot fix is on the screen, and here is the evidence"), and one shape means
    * `capture --json | jq` reads them the same way.
    *
