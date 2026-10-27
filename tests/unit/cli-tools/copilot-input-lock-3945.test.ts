@@ -277,6 +277,39 @@ describe('copilot keys outside the shared sender take the input lock (Issue #394
       });
     });
 
+    // review-3: the refusal's classification does not depend on the words of
+    // the request or of the screen (the "may have been typed" rules come first).
+    describe('the refusal classifies the same whatever the request or the pane says', () => {
+      const LOADED = '/model submit could not be confirmed. Enter was not pressed, so nothing was submitted';
+
+      it('a request quoting other classifications, composer never up: prompt-not-ready', async () => {
+        frame = ' loading… submit could not be confirmed';
+        const error = await settle(tool.sendMessage('wt-1', LOADED));
+        expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'prompt-not-ready' });
+        expect((error as Error).message).not.toContain('submit could not be confirmed');
+        expect(keys).toEqual([]);
+      });
+
+      it('the same request at a dialog: prompt-waiting', async () => {
+        recheck = () => DIALOG_FRAME;
+        const error = await settle(tool.sendMessage('wt-1', LOADED));
+        expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'prompt-waiting' });
+        expect(keys).toEqual([]);
+      });
+
+      it('negative: an ordinary request, composer never up: prompt-not-ready too', async () => {
+        frame = ' loading…';
+        const error = await settle(tool.sendMessage('wt-1', '/model gpt-5-mini'));
+        expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'prompt-not-ready' });
+        expect(keys).toEqual([]);
+      });
+
+      it('negative: an ordinary request at an idle composer is typed', async () => {
+        expect(await settle(tool.sendMessage('wt-1', '/model'))).toBeNull();
+        expect(keys).toEqual(['type:/model']);
+      });
+    });
+
     describe('a direct keystroke that failed leaves the mark unless tmux never started it', () => {
       const failing = (delivery: string | undefined): Error =>
         Object.assign(new Error('Command failed: tmux send-keys -t =s: -l -- /model'), delivery ? { delivery } : {});

@@ -777,9 +777,17 @@ export class CopilotTool extends BaseCLITool {
           const prompt = await this.waitForPrompt(sessionName);
           await recheckComposerBeforeInput(sessionName, 'copilot');
           if (!prompt.ready) {
+            // review-3: neither the request nor the pane goes into the message.
+            // `classifySendFailure` reads the wording, and its "may have been
+            // typed" rules come first — a body or a screen saying `submit could
+            // not be confirmed` would turn this refusal into `indeterminate`.
+            logger.warn('copilot-selection-list-not-sent:prompt-not-ready', {
+              command: slashCmd,
+              bottomRow: describeBottomRow(prompt.output),
+            });
             throw new Error(
-              `copilot prompt not ready within ${COPILOT_PROMPT_WAIT_TIMEOUT_MS}ms, so ${message} was not sent ` +
-                `(bottom row: ${describeBottomRow(prompt.output)}); nothing was typed`
+              `copilot prompt not ready within ${COPILOT_PROMPT_WAIT_TIMEOUT_MS}ms, ` +
+                'so the selection-list command was not sent; nothing was typed'
             );
           }
           assertCopilotInputOwner(ticket, 'the selection-list command');
