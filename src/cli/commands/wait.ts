@@ -788,15 +788,19 @@ async function readNewestPromptAt(
   worktreeId: string,
   options: WaitOptions,
   data: CurrentOutputResponse,
+  signal?: AbortSignal,
 ): Promise<PromptLedgerRead> {
   const query = new URLSearchParams({ limit: '1', unit: 'pairs' });
   if (options.instance) query.set('instance', options.instance);
   else if (data.cliToolId) query.set('cliTool', data.cliToolId);
 
   try {
-    const rows = await client.get<PromptMessageResponse[]>(
-      `/api/worktrees/${worktreeId}/messages?${query.toString()}`,
-    );
+    // Issue #3956: `signal` only when a caller bounds the read; the others
+    // call `get` exactly as before.
+    const path = `/api/worktrees/${worktreeId}/messages?${query.toString()}`;
+    const rows = signal
+      ? await client.get<PromptMessageResponse[]>(path, { signal })
+      : await client.get<PromptMessageResponse[]>(path);
     let newest: number | null = null;
     for (const row of rows ?? []) {
       if (row.role !== 'user') continue;
@@ -945,6 +949,24 @@ function nextPollWithinDeadlines(
     return false;
   }
   return true;
+}
+
+/**
+ * Milliseconds left before `--timeout` or `--stall-timeout` would end the wait,
+ * whichever is sooner; `Infinity` when neither is set (Issue #3956).
+ */
+function msBeforeDeadlines(
+  options: WaitOptions,
+  startTime: number,
+  lastActivityTime: number,
+  now: number,
+): number {
+  let remaining = Infinity;
+  if (options.timeout) remaining = Math.min(remaining, startTime + options.timeout * 1000 - now);
+  if (options.stallTimeout) {
+    remaining = Math.min(remaining, lastActivityTime + options.stallTimeout * 1000 - now);
+  }
+  return remaining;
 }
 
 /**
@@ -1466,8 +1488,22 @@ function notRunningStage(
 }
 
 /**
+ * The upstream fault on the frame that `--fail-on-upstream-fault` reports, or
+ * null (Issue #1839). Prints nothing, so a caller can decide which frame the
+ * verdict is on before {@link upstreamFaultStage} reports it (Issue #3956).
+ */
+function reportableUpstreamFault(
+  poll: PollContext,
+  data: CurrentOutputResponse,
+): NonNullable<CurrentOutputResponse['upstreamFault']> | null {
+  if (!poll.options.failOnUpstreamFault) return null;
+  return data.upstreamFault ?? null;
+}
+
+/**
  * Stage of a `ready` frame: an upstream fault on the frame, under
- * `--fail-on-upstream-fault` (Issue #1839). Exit 11.
+ * `--fail-on-upstream-fault` (Issue #1839). Exit 11, with its diagnosis on
+ * stderr.
  */
 function upstreamFaultStage(poll: PollContext, data: CurrentOutputResponse): StageOutcome {
   const { worktreeId, options } = poll;
@@ -1477,8 +1513,8 @@ function upstreamFaultStage(poll: PollContext, data: CurrentOutputResponse): Sta
   // because it is the answer to the question that gate can only ask: the
   // turn did not end, and this is why. Without it the same session runs
   // to --timeout and reports 124, which says nothing about the cause.
-  const fault = data.upstreamFault ?? null;
-  if (options.failOnUpstreamFault && fault) {
+  const fault = reportableUpstreamFault(poll, data);
+  if (fault) {
     console.error(
       `Upstream fault on ${worktreeId}: id=${fault.id} — the agent is back at its ` +
         'composer with an upstream API failure on screen, so this turn did not run. ' +
@@ -1725,6 +1761,179 @@ async function promptLedgerStage(
   return { kind: 'next', answeredNewestPrompt };
 }
 
+/**
+ * Interval between the re-reads of the pane after a `hook_stop`, under
+ * `--fail-on-upstream-fault` (Issue #3956). See {@link settleAfterHookStop}.
+ */
+export const HOOK_STOP_SETTLE_INTERVAL_MS = 500;
+
+/**
+ * Longest `wait` re-reads the pane after a `hook_stop` before judging the last
+ * frame it read (Issue #3956). See {@link settleAfterHookStop}.
+ */
+export const HOOK_STOP_SETTLE_MAX_MS = 5000;
+
+/**
+ * The basis of a completion on a `ready` frame (Issue #1839).
+ *
+ * `hook_stop` on both branches that have one, and they are the same statement
+ * made from two records: the agent reported the end of the turn this wait is
+ * about. `scraper_ready` keeps its documented meaning — "the screen said so and
+ * nothing corroborated it" — which is now exactly the set of cases that reach it.
+ */
+function readyCompletionBasis(
+  state: PollState,
+  answeredNewestPrompt: boolean,
+): (typeof COMPLETION_BASIS)[keyof typeof COMPLETION_BASIS] {
+  return state.turnStartedAt !== null || answeredNewestPrompt
+    ? COMPLETION_BASIS.HOOK_STOP
+    : COMPLETION_BASIS.SCRAPER_READY;
+}
+
+/**
+ * The path {@link settleAfterHookStop} re-reads the pane on (Issue #3956):
+ * `?fresh=1` past the server's capture cache, whose 5 s TTL would otherwise
+ * answer two reads 500 ms apart with the same capture and read a pane still
+ * drawing as settled. A server older than the parameter ignores it and answers
+ * as before, from the cache.
+ */
+export function settleCurrentOutputPath(worktreeId: string, instanceId?: string): string {
+  return `${observedCurrentOutputPath(worktreeId, instanceId)}&fresh=1`;
+}
+
+/**
+ * The frame a `hook_stop` completion is judged on, once the pane has settled
+ * (Issue #3956).
+ *
+ * The agent's `Stop` can land before its reply is drawn. Measured 2026-10-27 on
+ * codex-cli 0.164.0: `ask` returned on `basis=hook_stop` with the pane ending at
+ * row 441–445 of 480, and the last rows were drawn ~3 s later. An upstream fault
+ * printed at the end of the turn is in those rows, so the frame of the `Stop`
+ * poll can carry no `upstreamFault` while the turn did fail.
+ *
+ * So the pane is read again every {@link HOOK_STOP_SETTLE_INTERVAL_MS} until two
+ * reads in a row carry the same frame, and that frame is the one judged — by
+ * every stage of a poll, not by the fault alone: {@link pollWorktree} judges it
+ * as the next poll, so a prompt or a new turn drawn meanwhile is read as one.
+ * The bound is {@link HOOK_STOP_SETTLE_MAX_MS}: no re-read starts after it, and
+ * a pane still drawing then is judged on the last frame read rather than held.
+ * The re-reads ask for a fresh capture ({@link settleCurrentOutputPath}); the
+ * poll that saw the `Stop` does not.
+ *
+ * `--timeout` / `--stall-timeout` bound it too: no interval is slept that the
+ * next re-read could not finish within, and each re-read is aborted at the
+ * earliest of one interval, the bound and those deadlines — so the verdict
+ * comes at most {@link HOOK_STOP_SETTLE_MAX_MS} after the `Stop` poll. The bound
+ * is `settleDeadline`, set by {@link readyStage} when it reads the `Stop` poll and
+ * shared with the ledger read of {@link faultFrameHasStop}, so time spent there
+ * is not given again here. A re-read that is aborted or
+ * fails ends the settle on the frame before it (an `ApiError` that is not an
+ * abort still ends the wait, as on any poll). Frames that change count as
+ * activity for `--stall-timeout`, as on any poll.
+ */
+async function settleAfterHookStop<T extends CurrentOutputResponse>(
+  poll: PollContext,
+  state: PollState,
+  data: T,
+  settleDeadline: number,
+): Promise<T> {
+  const { client, worktreeId, options, startTime } = poll;
+  const frameOf = (d: CurrentOutputResponse): string => d.fullOutput ?? d.content;
+  let latest = data;
+  while (Date.now() + HOOK_STOP_SETTLE_INTERVAL_MS <= settleDeadline) {
+    if (msBeforeDeadlines(options, startTime, state.lastActivityTime, Date.now()) <= HOOK_STOP_SETTLE_INTERVAL_MS) {
+      console.error(
+        `Note: re-reading ${worktreeId} after its stop would pass --timeout/--stall-timeout; ` +
+          'judging the last frame read.',
+      );
+      return latest;
+    }
+    await sleep(HOOK_STOP_SETTLE_INTERVAL_MS);
+    const readBudgetMs = Math.min(
+      HOOK_STOP_SETTLE_INTERVAL_MS,
+      settleDeadline - Date.now(),
+      msBeforeDeadlines(options, startTime, state.lastActivityTime, Date.now()),
+    );
+    // Past the bound already (a late timer): no read is started.
+    if (readBudgetMs < 0) break;
+    const controller = new AbortController();
+    const abortTimer = setTimeout(() => controller.abort(), readBudgetMs);
+    let next: T;
+    try {
+      next = await client.get<T>(settleCurrentOutputPath(worktreeId, options.instance), {
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (controller.signal.aborted) {
+        console.error(
+          `Note: ${worktreeId} did not answer a re-read after its stop within ${readBudgetMs}ms; ` +
+            'judging the last frame read.',
+        );
+        return latest;
+      }
+      if (error instanceof ApiError) throw error;
+      console.error(
+        `Note: could not re-read ${worktreeId} after its stop ` +
+          `(${error instanceof Error ? error.message : String(error)}); judging the last frame read.`,
+      );
+      return latest;
+    } finally {
+      clearTimeout(abortTimer);
+    }
+    if (next.content !== state.lastContent) {
+      state.lastContent = next.content;
+      state.lastActivityTime = Date.now();
+    }
+    const settled = frameOf(next) === frameOf(latest);
+    latest = next;
+    if (settled) return latest;
+  }
+  console.error(
+    `Note: ${worktreeId} was still drawing ${HOOK_STOP_SETTLE_MAX_MS / 1000}s after its stop; ` +
+      'judging the last frame read.',
+  );
+  return latest;
+}
+
+/**
+ * Whether the agent has reported the end of the turn on a frame that carries an
+ * upstream fault, so that frame is judged once settled (Issue #3956).
+ *
+ * The same two records {@link readyCompletionBasis} reads as `hook_stop`: a
+ * `Stop` at or after the adopted turn, or — with no turn adopted — a `Stop`
+ * after the newest prompt in the chat ledger. Neither is #1839's case (back at
+ * the composer with no `Stop`), whose fault is reported on the spot as before.
+ */
+async function faultFrameHasStop(
+  poll: PollContext,
+  state: PollState,
+  data: CurrentOutputResponse,
+  settleDeadline: number,
+): Promise<boolean> {
+  if (state.turnStartedAt !== null) return turnSettled(data, state.turnStartedAt);
+  // No `Stop` on record at all: nothing the ledger says could make one, so it
+  // is not asked and the fault is reported on the spot.
+  if (data.lastStopEventAt == null) return false;
+  if (!state.promptLedgerReadable || !reportsTurnBoundaries(data)) return false;
+  // Bounded like the settle it decides on: a ledger that does not answer must
+  // not hold an exit 11 past --timeout, nor without one past the settle's bound.
+  const budgetMs = Math.min(
+    settleDeadline - Date.now(),
+    msBeforeDeadlines(poll.options, poll.startTime, state.lastActivityTime, Date.now()),
+  );
+  if (budgetMs <= 0) return false;
+  const controller = new AbortController();
+  const abortTimer = setTimeout(() => controller.abort(), budgetMs);
+  let ledger: PromptLedgerRead;
+  try {
+    ledger = await readNewestPromptAt(poll.client, poll.worktreeId, poll.options, data, controller.signal);
+  } finally {
+    clearTimeout(abortTimer);
+  }
+  state.promptLedgerReadable = ledger.readable;
+  return ledger.readable && ledger.submittedAt !== null && !outstandingPrompt(data, ledger.submittedAt);
+}
+
 /** Last stage of a `ready` frame: the completion line with its basis. Exit 0. */
 function completionStage(
   poll: PollContext,
@@ -1733,31 +1942,36 @@ function completionStage(
   selfResumeSuffix: () => string,
 ): StageOutcome {
   const { worktreeId } = poll;
-
-  // `hook_stop` on both branches that have one, and they are the same
-  // statement made from two records: the agent reported the end of the
-  // turn this wait is about. `scraper_ready` keeps its documented meaning
-  // — "the screen said so and nothing corroborated it" — which is now
-  // exactly the set of cases that reach it.
-  const basis =
-    state.turnStartedAt !== null || answeredNewestPrompt
-      ? COMPLETION_BASIS.HOOK_STOP
-      : COMPLETION_BASIS.SCRAPER_READY;
+  const basis = readyCompletionBasis(state, answeredNewestPrompt);
   console.error(`Completed: ${worktreeId} (basis=${basis}${selfResumeSuffix()})`);
   return exitWith({ exitCode: WaitExitCode.SUCCESS });
 }
 
 /**
+ * What {@link readyStage} answers instead of a {@link StageOutcome} when a
+ * `hook_stop` frame was settled (Issue #3956): {@link pollWorktree} judges
+ * `data` as its next poll, with no settle of its own and no sleep before it.
+ */
+interface SettledFrameOutcome {
+  kind: 'settled';
+  data: CurrentOutputObservedResponse;
+}
+
+/**
  * Stage: the agent is back at its composer on a frame that was understood. Asks
  * the stages of a `ready` frame in order; the first that applies decides.
+ *
+ * `judgingSettledFrame` is true when `data` is the frame a settle returned
+ * (Issue #3956): it is judged as it stands and never settled again.
  */
 async function readyStage(
   poll: PollContext,
   state: PollState,
-  data: CurrentOutputResponse,
+  data: CurrentOutputObservedResponse,
   selfResumeStopAt: number | null,
   selfResumeSuffix: () => string,
-): Promise<StageOutcome> {
+  judgingSettledFrame: boolean,
+): Promise<StageOutcome | SettledFrameOutcome> {
   // Issue #1708 narrowed Path B: `ready` is only a completion when the frame
   // was actually understood. A structured `hook_stop` over an unreadable
   // pane is the degraded form of an overlay nobody could parse (see the note
@@ -1765,8 +1979,22 @@ async function readyStage(
   // merged. Path A is untouched — a session that went away really is
   // finished, and carries no flag anyway.
   if (data.sessionStatus === 'ready' && data.isUnclassifiedActive !== true) {
-    const faultOutcome = upstreamFaultStage(poll, data);
-    if (faultOutcome.kind !== 'next') return faultOutcome;
+    // Issue #3956: one bound for everything a `Stop` poll's settle waits on —
+    // the ledger read that confirms the `Stop` and the re-reads — measured
+    // from this poll, so the verdict comes at most HOOK_STOP_SETTLE_MAX_MS
+    // after it (`--timeout` is applied on top, where each wait is bounded).
+    const settleDeadline = Date.now() + HOOK_STOP_SETTLE_MAX_MS;
+    if (reportableUpstreamFault(poll, data) !== null) {
+      // Issue #3956: a fault on the frame of a `Stop` poll is on a pane that
+      // may still be drawing, as much as a clean one is; it is judged on the
+      // settled frame too. Without a `Stop` it is #1839's case, reported now.
+      // Nothing is printed before that is decided: the diagnosis is for the
+      // frame the verdict is on.
+      if (!judgingSettledFrame && (await faultFrameHasStop(poll, state, data, settleDeadline))) {
+        return { kind: 'settled', data: await settleAfterHookStop(poll, state, data, settleDeadline) };
+      }
+      return upstreamFaultStage(poll, data);
+    }
 
     const turnOutcome = await unsettledTurnStage(poll, state, data);
     if (turnOutcome.kind !== 'next') return turnOutcome;
@@ -1776,6 +2004,19 @@ async function readyStage(
 
     const ledgerOutcome = await promptLedgerStage(poll, state, data);
     if (ledgerOutcome.kind !== 'next') return ledgerOutcome;
+
+    // Issue #3956: the `Stop` can land before the end of the reply is on the
+    // pane, so a `hook_stop` completion is judged again on the settled frame —
+    // as a poll of its own, so a prompt or a new turn drawn meanwhile is not
+    // read as this completion. Only under the flag: a plain `wait` reads no
+    // fault and waits no longer.
+    if (
+      !judgingSettledFrame &&
+      poll.options.failOnUpstreamFault &&
+      readyCompletionBasis(state, ledgerOutcome.answeredNewestPrompt) === COMPLETION_BASIS.HOOK_STOP
+    ) {
+      return { kind: 'settled', data: await settleAfterHookStop(poll, state, data, settleDeadline) };
+    }
 
     return completionStage(poll, state, ledgerOutcome.answeredNewestPrompt, selfResumeSuffix);
   }
@@ -1835,17 +2076,30 @@ export async function pollWorktree(
     return `, heldForSelfResume=${Math.round(total / 1000)}s`;
   };
 
+  /**
+   * The frame a settle returned, judged as the next poll (Issue #3956). It was
+   * read inside the deadlines the settle kept to, so that poll does not ask
+   * {@link deadlineStage} again: a turn that completed in time is not a 124.
+   */
+  let settledFrame: CurrentOutputObservedResponse | null = null;
+
   while (true) {
-    const deadlineOutcome = deadlineStage(poll, state);
-    if (deadlineOutcome.kind === 'exit') return deadlineOutcome.result;
+    const judgingSettledFrame = settledFrame !== null;
+    if (!judgingSettledFrame) {
+      const deadlineOutcome = deadlineStage(poll, state);
+      if (deadlineOutcome.kind === 'exit') return deadlineOutcome.result;
+    }
 
     try {
       // Issue #868: scope polling to a specific agent instance when provided.
       // Issue #3755: `observe=1` so an exit 10 carries the observation of the
       // very capture it was decided on (see {@link withObservation}).
-      const data = await client.get<CurrentOutputObservedResponse>(
-        observedCurrentOutputPath(worktreeId, options.instance),
-      );
+      const data =
+        settledFrame ??
+        (await client.get<CurrentOutputObservedResponse>(
+          observedCurrentOutputPath(worktreeId, options.instance),
+        ));
+      settledFrame = null;
 
       // Track content changes for stall detection
       if (data.content !== state.lastContent) {
@@ -1935,8 +2189,19 @@ export async function pollWorktree(
       const notRunningOutcome = notRunningStage(poll, state, data, selfResumeSuffix);
       if (notRunningOutcome.kind === 'exit') return notRunningOutcome.result;
 
-      const readyOutcome = await readyStage(poll, state, data, selfResumeStopAt, selfResumeSuffix);
+      const readyOutcome = await readyStage(
+        poll,
+        state,
+        data,
+        selfResumeStopAt,
+        selfResumeSuffix,
+        judgingSettledFrame,
+      );
       if (readyOutcome.kind === 'exit') return readyOutcome.result;
+      if (readyOutcome.kind === 'settled') {
+        settledFrame = readyOutcome.data;
+        continue;
+      }
       if (readyOutcome.kind === 'wait') {
         await sleep(POLL_INTERVAL_MS);
         continue;

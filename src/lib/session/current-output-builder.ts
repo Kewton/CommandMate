@@ -64,7 +64,7 @@ import { getAntigravityAcceptedReceiptCallId } from '@/lib/polling/antigravity-r
 import type { AutoYesDecisionPublished } from '@/types/auto-yes-decision';
 import { getPromptDedupSkips } from '@/lib/polling/prompt-dedup-state';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
-import { CACHE_MAX_CAPTURE_LINES, isCaptureWindowSaturated } from '@/lib/tmux/tmux-capture-cache';
+import { CACHE_MAX_CAPTURE_LINES, invalidateCache, isCaptureWindowSaturated } from '@/lib/tmux/tmux-capture-cache';
 import { matchPaneUpstreamFault, selectRealtimeSnippetRows } from '@/lib/realtime-snippet';
 import {
   getAgentEventDropCounts,
@@ -162,6 +162,10 @@ const logger = createLogger('current-output-builder');
  * @param instanceId - Optional agent instance ID (defaults to the primary instance)
  * @param resolution - How the caller resolved that pair, when it resolved one
  *   (Issue #1884). Appended to the payload; nothing here reads it.
+ * @param options.freshCapture - Drop the session's capture-cache entry first, so
+ *   the frame is read off the pane rather than a capture up to 5 s old
+ *   (Issue #3956: `/current-output?fresh=1`, the same step as the WS streamer's
+ *   `captureFreshPayload`). Absent, the cache answers as before.
  */
 export async function buildCurrentOutput(
   db: Database.Database,
@@ -169,7 +173,11 @@ export async function buildCurrentOutput(
   cliToolId: CLIToolType,
   instanceId?: string,
   resolution?: SessionTargetResolution,
+  options?: { freshCapture?: boolean },
 ): Promise<CurrentOutputPayload> {
+  if (options?.freshCapture) {
+    invalidateCache(CLIToolManager.getInstance().getTool(cliToolId).getSessionName(worktreeId, instanceId));
+  }
   const payload = await buildPayload(db, worktreeId, cliToolId, instanceId);
   // Issue #3705: the payload's own writers asked after their awaits (see
   // `buildPayload`); the progress frame below is one more write, of the turn
