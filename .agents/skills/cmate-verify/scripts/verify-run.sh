@@ -789,10 +789,23 @@ run_gate_attempt() {
   # disagrees with CommandMate's would put the gate on a port the product run has
   # already claimed. Whatever the caller exported is inherited unchanged; a gate
   # carries its own default (`${CM_WORKTREE_INDEX:-0}`).
+  #
+  # With job control on, bash calls setpgid in the parent AND in the forked
+  # child; when the parent's call lands first the child's can fail with EPERM
+  # and bash writes `child setpgid (N to N): Operation not permitted` to the
+  # stderr the child still has — before the subshell's own redirection takes
+  # effect — so the line lands on this script's stderr (Issue #3944; same shape
+  # as demo-video/env-up.sh, Issue #3935). The group is still right, so only the
+  # message is wrong. The `{ … } 2>>"$rga_log.jobctl"` sends whatever bash
+  # writes to stderr while job control is on to a file beside the gate log
+  # instead: not into $rga_log, because emit_log_tail's "no output captured"
+  # test reads that file's size. The file lives in $WORKDIR and is removed below.
+  {
   set -m
   ( cd "$CWD" && exec /bin/sh -c "$rga_cmd" ) > "$rga_log" 2>&1 &
   rga_pid=$!
   set +m
+  } 2>>"$rga_log.jobctl"
 
   # `kill -TERM -N` signals whatever process group has id N. If job control could
   # not be enabled, the gate stays in this shell's group and N is just a pid —
@@ -843,7 +856,7 @@ run_gate_attempt() {
     RGA_STATUS=fail
     RGA_CODE=$rga_code
   fi
-  rm -f "$rga_mark"
+  rm -f "$rga_mark" "$rga_log.jobctl"
 }
 
 # The `waited=` field of a GATE line, or nothing when the gate declared no mutex.
