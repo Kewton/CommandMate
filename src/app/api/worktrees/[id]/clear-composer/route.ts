@@ -23,7 +23,8 @@
  * while a send is typing, checking or withdrawing its body waits for that send
  * to finish instead of erasing the body under it. A send that holds the
  * composer past the lock's wait gets a 409 `INSTANCE_INPUT_BUSY`, with nothing
- * cleared.
+ * cleared; so does a Clear whose session was replaced mid-way, which stops
+ * before its next pass.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -38,6 +39,7 @@ import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/tmux/sessi
 import { clearComposer } from '@/lib/session/composer-clear';
 import {
   InstanceInputLockTimeoutError,
+  InstanceInputOwnershipLostError,
   InstanceInputSessionReplacedError,
   withInstanceInputLock,
 } from '@/lib/session/instance-input-lock';
@@ -93,11 +95,21 @@ export async function POST(
 
     let result;
     try {
-      // The clear runs whole under the lock; nothing else types into this
-      // composer until it returns, so its passes need no owner check of their own.
-      result = await withInstanceInputLock(sessionName, () => clearComposer(sessionName, cliToolId));
+      // The clear runs whole under the lock, and each pass first asks whether
+      // it still owns the composer (review-1 #3): a session replaced during a
+      // capture or a redraw wait hands the composer to the new process's
+      // writers, whose text is not this Clear's to erase.
+      result = await withInstanceInputLock(sessionName, async (ticket) => {
+        const cleared = await clearComposer(sessionName, cliToolId, { beforePass: () => ticket.isCurrent() });
+        if (!ticket.isCurrent()) throw new InstanceInputOwnershipLostError(sessionName);
+        return cleared;
+      });
     } catch (error) {
-      if (error instanceof InstanceInputLockTimeoutError || error instanceof InstanceInputSessionReplacedError) {
+      if (
+        error instanceof InstanceInputLockTimeoutError ||
+        error instanceof InstanceInputSessionReplacedError ||
+        error instanceof InstanceInputOwnershipLostError
+      ) {
         logger.warn('clear-composer-input-busy', { sessionName, error: error.message });
         return NextResponse.json({ error: error.message, code: INSTANCE_INPUT_BUSY_CODE }, { status: 409 });
       }

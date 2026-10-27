@@ -52,6 +52,7 @@ import { clearComposer } from '@/lib/session/composer-clear';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
 import {
   INSTANCE_INPUT_LOCK_WAIT_MS,
+  invalidateInstanceInput,
   resetInstanceInputLocks,
   withInstanceInputLock,
 } from '@/lib/session/instance-input-lock';
@@ -89,12 +90,14 @@ describe('POST /api/worktrees/[id]/clear-composer (Issue #1879)', () => {
       composerState: 'empty',
       remainingText: '',
     });
-    expect(clearComposer).toHaveBeenCalledWith('mcbd-claude-wt-1', 'claude');
+    // Issue #3945 (review-1 #3): each pass asks whether the Clear still owns the composer.
+    expect(clearComposer).toHaveBeenCalledWith('mcbd-claude-wt-1', 'claude', { beforePass: expect.any(Function) });
   });
 
   it('targets the requested agent instance', async () => {
     await POST(createRequest({ cliToolId: 'claude', instanceId: 'claude-2' }), defaultParams);
-    expect(clearComposer).toHaveBeenCalledWith('mcbd-claude-2-wt-1', 'claude');
+    // Issue #3945 (review-1 #3): each pass asks whether the Clear still owns the composer.
+    expect(clearComposer).toHaveBeenCalledWith('mcbd-claude-2-wt-1', 'claude', { beforePass: expect.any(Function) });
   });
 
   it('pushes a fresh frame so the bar disappears without waiting for the poll', async () => {
@@ -219,6 +222,50 @@ describe('POST /api/worktrees/[id]/clear-composer under the input lock (Issue #3
     expect(clearComposer).toHaveBeenCalledTimes(1);
     release();
     await send;
+  });
+
+  describe('a session replaced during the clear (review-1 #3)', () => {
+    /** A clear that captures, then — like the real loop — asks before its pass. */
+    function clearThatWaitsBeforeItsPass(): { asked: boolean[]; reached: Promise<void>; proceed: () => void } {
+      const asked: boolean[] = [];
+      let proceed!: () => void;
+      let reachedResolve!: () => void;
+      const reached = new Promise<void>((resolve) => (reachedResolve = resolve));
+      vi.mocked(clearComposer).mockImplementation(async (_session, _tool, options) => {
+        reachedResolve();
+        await new Promise<void>((resolve) => (proceed = resolve));
+        const owns = options?.beforePass?.() ?? true;
+        asked.push(owns);
+        return owns
+          ? { cleared: true, passes: 1, state: 'empty', remainingText: '', discardedText: 'old' }
+          : { cleared: false, passes: 0, state: 'content', remainingText: 'new body', discardedText: 'new body' };
+      });
+      return { asked, reached, get proceed() { return proceed; } };
+    }
+
+    it('stops before its pass and answers 409 INSTANCE_INPUT_BUSY', async () => {
+      const clear = clearThatWaitsBeforeItsPass();
+      const response = POST(createRequest({ cliToolId: 'claude' }), defaultParams);
+      await clear.reached;
+      // Replaced from outside the Clear (a relaunch by another request).
+      invalidateInstanceInput('mcbd-claude-wt-1');
+      clear.proceed();
+      const res = await response;
+      expect(clear.asked).toEqual([false]);
+      expect(res.status).toBe(409);
+      await expect(res.json()).resolves.toMatchObject({ code: 'INSTANCE_INPUT_BUSY' });
+    });
+
+    it('negative: with the session left alone the pass goes ahead and the answer is 200', async () => {
+      const clear = clearThatWaitsBeforeItsPass();
+      const response = POST(createRequest({ cliToolId: 'claude' }), defaultParams);
+      await clear.reached;
+      clear.proceed();
+      const res = await response;
+      expect(clear.asked).toEqual([true]);
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toMatchObject({ cleared: true, passes: 1 });
+    });
   });
 
   it('409 INSTANCE_INPUT_BUSY, nothing cleared, when the send holds the composer past the wait', async () => {

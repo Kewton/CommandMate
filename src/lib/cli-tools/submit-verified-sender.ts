@@ -84,7 +84,7 @@
  * send's body included — and a codex placeholder carries only a count, so a
  * late one could not be told from the next send's. A send now runs as the
  * instance's only writer (`lib/session/instance-input-lock`), re-reads the pane
- * once it owns it if it had to queue ({@link recheckComposerBeforeInput}),
+ * once it owns it ({@link recheckComposerBeforeInput}),
  * checks it still owns the composer before every key, watches an `unseen`
  * paste a little longer before giving up, and leaves a mark for a body that
  * may still arrive, which the next send waits out ({@link waitOutCarriedPaste}).
@@ -973,13 +973,33 @@ function runTmux(args: string[], input?: string): Promise<void> {
  * per line for a TUI that did not ask for brackets. `-d` drops the buffer on
  * success; a failure drops it here, so no body is left behind in the server.
  *
- * @throws Error when either tmux command fails
+ * Issue #3945 (review-1 #2): ownership is asked again between the two commands,
+ * right before `paste-buffer` — the session may have been replaced while
+ * `load-buffer` ran. A lost ticket drops the buffer and throws before anything
+ * reaches the pane (`input lock lost, nothing was typed`).
+ *
+ * @throws Error when either tmux command fails, or `ticket` lost the composer
  */
-async function pasteBody(sessionName: string, message: string): Promise<void> {
+async function pasteBody(
+  sessionName: string,
+  message: string,
+  ticket: InstanceInputTicket,
+  cliToolId: CLIToolType
+): Promise<void> {
   pasteBufferSeq.last += 1;
   const bufferName = `cm-send-${process.pid}-${pasteBufferSeq.last}`;
   try {
     await runTmux(['load-buffer', '-b', bufferName, '-'], message);
+  } catch (error: unknown) {
+    await runTmux(['delete-buffer', '-b', bufferName]).catch(() => undefined);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to paste message into tmux session: ${errorMessage}`);
+  }
+  if (!ticket.isCurrent()) {
+    await runTmux(['delete-buffer', '-b', bufferName]).catch(() => undefined);
+    assertInputOwner(ticket, cliToolId, 'paste-buffer', false);
+  }
+  try {
     await runTmux(['paste-buffer', '-p', '-r', '-d', '-b', bufferName, '-t', exactTarget(sessionName)]);
   } catch (error: unknown) {
     await runTmux(['delete-buffer', '-b', bufferName]).catch(() => undefined);
@@ -1078,7 +1098,8 @@ function assertInputOwner(ticket: InstanceInputTicket, cliToolId: CLIToolType, s
  * stage 2).
  *
  * The prompt guard and the tool's readiness wait ran before the lock was taken,
- * and a dialog may have opened while this send queued behind another one. This
+ * and a dialog may have opened since — while this send queued behind another
+ * one, or in a wait that follows readiness. Every send makes it (review-1 #4). This
  * read goes to tmux directly (`capturePane`, never the TTL cache), and its frame
  * is one of three things:
  *
@@ -1109,7 +1130,7 @@ export async function recheckComposerBeforeInput(sessionName: string, cliToolId:
   if (dialog) {
     logger.warn('input-recheck-prompt-waiting', { sessionName, cliToolId });
     throw new Error(
-      `A prompt dialog opened in session ${sessionName} while this send waited for its composer ` +
+      `A prompt dialog is open in session ${sessionName} ` +
         '(re-checked under the input lock); nothing was typed (Issue #3945).'
     );
   }
@@ -1535,8 +1556,8 @@ export async function clearComposerBeforeSend(
  *
  * Issue #3945: the whole of it — clear, body, Enter, read-back, withdrawal —
  * runs as the session's only writer ({@link withInstanceInputLock}); before
- * anything is typed the pane is re-read under the lock
- * ({@link recheckComposerBeforeInput}) and a carried paste mark is waited out
+ * anything is typed the pane is re-read under the lock, on every send
+ * ({@link recheckComposerBeforeInput}), and a carried paste mark is waited out
  * ({@link waitOutCarriedPaste}, then the re-check again).
  *
  * @throws Error when the body does not arrive intact, or submit cannot be
@@ -1565,15 +1586,16 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
   } = params;
   const submitEnterCount = params.submitEnterCount ?? composer.submitEnterCount;
 
-  // -1. Issue #3945: a send that queued for the composer re-reads the pane now
-  //     that it owns it — a dialog may have opened behind the writer ahead of
-  //     it — and so does one that waits out a previous send's carried paste,
-  //     after the wait. A send admitted at once read the pane (prompt guard,
-  //     the tool's readiness wait) just before asking, and costs exactly the
-  //     reads it did before #3945: #1880's promise that an unmeasured tool's
-  //     send is byte-for-byte unchanged holds while nothing contends.
-  let frame: string | undefined;
-  if (ticket.waited) frame = await recheckComposerBeforeInput(sessionName, cliToolId);
+  // -1. Issue #3945 (review-1 #4): every send re-reads the pane once it owns
+  //     the composer, whether or not it queued — the prompt guard and the
+  //     tool's readiness wait ran before the lock, and a dialog can open in the
+  //     waits between them and the first key (claude's settle wait, a queue
+  //     behind another writer). A dialog refuses the send at once, before any
+  //     carried paste is waited out (a refusal leaves the mark as it is); a
+  //     send that did wait one out reads again after the wait. The last read
+  //     is the pre-send clear's first: a claude/codex send with no mark reads
+  //     no more often than before; any other tool gains this one capture.
+  let frame = await recheckComposerBeforeInput(sessionName, cliToolId);
   if (await waitOutCarriedPaste(sessionName, cliToolId, composer, ticket)) {
     frame = await recheckComposerBeforeInput(sessionName, cliToolId);
   }
@@ -1581,10 +1603,7 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
   // 0. Empty the composer first (Issue #1880). The body below is typed at the
   //    TUI's current cursor position, so anything already in the box would be
   //    spliced into it. Throws for a claude composer that could not be emptied.
-  await clearComposerBeforeSend(sessionName, cliToolId, composer, {
-    ...(frame !== undefined ? { initialCapture: frame } : {}),
-    ticket,
-  });
+  await clearComposerBeforeSend(sessionName, cliToolId, composer, { initialCapture: frame, ticket });
 
   if (Buffer.byteLength(message, 'utf8') > LITERAL_SEND_MAX_BYTES) {
     // 1'. A body that would reach the TUI as more than one pty read is pasted
@@ -1593,7 +1612,7 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
     const pastedAt = Date.now();
     assertInputOwner(ticket, cliToolId, 'the paste', false);
     try {
-      await pasteBody(sessionName, message);
+      await pasteBody(sessionName, message, ticket, cliToolId);
     } catch (error: unknown) {
       // Whether tmux put any of it into the pane is unknown.
       leaveCarriedPasteMark(ticket);
@@ -1617,7 +1636,16 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
     //    built in `lib/tmux/key-sequence.ts`, which carries the table.
     const typedAt = Date.now();
     assertInputOwner(ticket, cliToolId, 'the body', false);
-    await sendKeys(sessionName, message, false, { literal: true });
+    try {
+      await sendKeys(sessionName, message, false, { literal: true });
+    } catch (error: unknown) {
+      // Issue #3945 (review-1 #6): a keystroke send that failed may still have
+      // put part of the body into the pane (a timed-out `send-keys`, #3880's
+      // `indeterminate`), to be drawn after this send has let the composer go.
+      // Only a call tmux never started (`TmuxSendError.delivery`) typed nothing.
+      if ((error as { delivery?: unknown } | null)?.delivery !== 'not-started') leaveCarriedPasteMark(ticket);
+      throw error;
+    }
 
     // 2. Let the TUI register the input before pressing Enter. On codex that
     //    means waiting until the body is drawn (Issue #3366): an Enter pressed

@@ -701,6 +701,129 @@ describe('submit-verified-sender under the instance input lock (Issue #3945)', (
     expect(new Set(names).size).toBe(2);
   });
 
+  // -------------------------------------------------------------------------
+  // Consistency review 1 (dev-reports/issue/3945/review-1.md)
+  // -------------------------------------------------------------------------
+  describe('review-1', () => {
+    describe('#1 a sender inside an owner whose session was replaced does not take a new ticket', () => {
+      /** The outer request (sendUserMessage) holds the lock and waits (readiness) before its sender runs. */
+      async function outerThenSend(replace: boolean): Promise<Error | null> {
+        let ready!: () => void;
+        const outer = withInstanceInputLock(S, async () => {
+          await new Promise<void>((resolve) => (ready = resolve));
+          return send({ message: 'old request' });
+        });
+        await vi.advanceTimersByTimeAsync(10);
+        if (replace) invalidateInstanceInput(S); // from another request, outside the outer context
+        ready();
+        await vi.runAllTimersAsync();
+        return outer;
+      }
+
+      it('replaced while the outer request waited: nothing typed, not-sent (input-lock-lost)', async () => {
+        const error = await outerThenSend(true);
+        expect(error?.message).toMatch(/was replaced while this send held its composer/);
+        expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'input-lock-lost' });
+        expect(keyOps()).toEqual([]);
+        // The new session's own first send is not held up by it.
+        const fresh = send({ message: 'new request' });
+        await vi.runAllTimersAsync();
+        expect(await fresh).toBeNull();
+        expect(keyOps()).toEqual(['type:new request', 'enter']);
+      });
+
+      it('negative: not replaced, the sender joins the outer ticket and sends', async () => {
+        expect(await outerThenSend(false)).toBeNull();
+        expect(keyOps()).toEqual(['type:old request', 'enter']);
+      });
+    });
+
+    describe('#2 ownership is asked again right before paste-buffer', () => {
+      const B = body('B', 700);
+      const deletes = (): number =>
+        vi.mocked(execFile).mock.calls.filter((c) => (c[1] as string[])[0] === 'delete-buffer').length;
+
+      it('replaced while load-buffer ran: no paste reaches the pane, the buffer is dropped, not-sent', async () => {
+        loadDelayMs = 100;
+        const b = send({ message: B });
+        await vi.advanceTimersByTimeAsync(50);
+        invalidateInstanceInput(S);
+        await vi.runAllTimersAsync();
+        const error = await b;
+        expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'input-lock-lost' });
+        expect(error?.message).toMatch(/before paste-buffer/);
+        expect(keyOps()).toEqual([]);
+        expect(deletes()).toBe(1);
+        expect(getCarriedPasteMark(S)).toBeNull();
+      });
+
+      it('negative: the same slow load-buffer with the session left alone pastes and submits', async () => {
+        loadDelayMs = 100;
+        const b = send({ message: B });
+        await vi.runAllTimersAsync();
+        expect(await b).toBeNull();
+        expect(keyOps()).toEqual(['paste:700:B ', 'enter']);
+        expect(deletes()).toBe(0);
+      });
+    });
+
+    describe('#4 every send re-checks under the lock, queued or not', () => {
+      it('a dialog on screen for a send admitted at once: nothing typed, not-sent (prompt-waiting)', async () => {
+        frames.set(S, CODEX_DIALOG_FRAME);
+        const b = send({ message: 'B body' });
+        await vi.runAllTimersAsync();
+        expect(classifySendFailure(await b)).toEqual({ state: 'not-sent', reason: 'prompt-waiting' });
+        expect(keyOps()).toEqual([]);
+      });
+
+      it('negative: an idle pane, admitted at once, costs one read before the body (shared with the clear)', async () => {
+        const b = send({ message: 'B body' });
+        await vi.runAllTimersAsync();
+        expect(await b).toBeNull();
+        const ops0 = opsOf();
+        expect(ops0.slice(0, ops0.indexOf('type:B body'))).toEqual(['read']);
+      });
+    });
+
+    describe('#6 a keystroke send that failed part-way leaves the mark', () => {
+      function failTyping(error: Error): void {
+        vi.mocked(sendKeys).mockImplementationOnce((async (session: string, text: string) => {
+          log(session, `type:${text}`);
+          frames.set(session, IDLE); // nothing drawn yet; it may still be
+          throw error;
+        }) as never);
+      }
+      const delivery = (state: string): Error =>
+        Object.assign(new Error('Command failed: tmux send-keys -t =s: -l -- B body'), { delivery: state });
+
+      it.each([
+        ['an indeterminate send-keys (timed out)', delivery('indeterminate')],
+        ['an error of no known shape', new Error('boom')],
+      ])('%s: a mark is left, and the next send waits it out', async (_label, error) => {
+        failTyping(error);
+        const b = send({ message: 'B body', awaitTypedBody: true });
+        await vi.runAllTimersAsync();
+        expect(await b).toBe(error);
+        const mark = getCarriedPasteMark(S);
+        expect(mark).not.toBeNull();
+        ops = [];
+        const c = send({ message: 'C body' });
+        await vi.runAllTimersAsync();
+        expect(await c).toBeNull();
+        expect(ops.find((o) => o.op !== 'read')!.t).toBeGreaterThanOrEqual(mark!.expiresAt);
+      });
+
+      it('negative: a send-keys tmux never started leaves no mark', async () => {
+        const error = delivery('not-started');
+        failTyping(error);
+        const b = send({ message: 'B body', awaitTypedBody: true });
+        await vi.runAllTimersAsync();
+        expect(await b).toBe(error);
+        expect(getCarriedPasteMark(S)).toBeNull();
+      });
+    });
+  });
+
   it('an unexpired mark is left only by the owner (a stale ticket cannot leave one)', async () => {
     let stale: Parameters<typeof leaveCarriedPasteMark>[0] | null = null;
     await withInstanceInputLock(S, async (ticket) => {

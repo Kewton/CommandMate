@@ -23,6 +23,7 @@ import {
   INSTANCE_INPUT_LOCK_WAIT_MS,
   LATE_PASTE_OBSERVE_MS,
   InstanceInputLockTimeoutError,
+  InstanceInputOwnershipLostError,
   InstanceInputSessionReplacedError,
   clearExpiredCarriedPasteMark,
   currentInstanceInputTicket,
@@ -30,6 +31,7 @@ import {
   invalidateInstanceInput,
   leaveCarriedPasteMark,
   resetInstanceInputLocks,
+  waitOutCarriedPasteMark,
   withInstanceInputLock,
   type InstanceInputTicket,
 } from '@/lib/session/instance-input-lock';
@@ -244,6 +246,32 @@ describe('instance input lock (Issue #3945)', () => {
     });
   });
 
+  describe('waitOutCarriedPasteMark (review-1 #5)', () => {
+    it('holds the owner until the mark expires, then takes it down', async () => {
+      vi.useFakeTimers();
+      await withInstanceInputLock(S, async (ticket) => leaveCarriedPasteMark(ticket));
+      const expiresAt = getCarriedPasteMark(S)!.expiresAt;
+      let doneAt = -1;
+      const run = withInstanceInputLock(S, async (ticket) => {
+        expect(await waitOutCarriedPasteMark(ticket)).toBe(true);
+        doneAt = Date.now();
+      });
+      await vi.runAllTimersAsync();
+      await run;
+      expect(doneAt).toBeGreaterThanOrEqual(expiresAt);
+      expect(getCarriedPasteMark(S)).toBeNull();
+    });
+
+    it('negative: no mark, no wait', async () => {
+      vi.useFakeTimers();
+      const t0 = Date.now();
+      await withInstanceInputLock(S, async (ticket) => {
+        expect(await waitOutCarriedPasteMark(ticket)).toBe(false);
+      });
+      expect(Date.now()).toBe(t0);
+    });
+  });
+
   describe('session replaced (kill / recreate)', () => {
     it('expires waiters and the in-flight owner, drops the mark, and leaves the next session free', async () => {
       const events: string[] = [];
@@ -276,6 +304,43 @@ describe('instance input lock (Issue #3945)', () => {
       gateA.resolve();
       await aRun;
       expect(events).toEqual(['C', 'A:stale']);
+    });
+
+    it('a call from inside the replaced owner is refused, not given a fresh ticket (review-1 #1)', async () => {
+      const gate = deferred();
+      const events: string[] = [];
+      const outer = withInstanceInputLock(S, async () => {
+        await gate.promise; // e.g. the tool's readiness wait
+        return withInstanceInputLock(S, async () => {
+          events.push('inner');
+        });
+      }).catch((error: unknown) => error);
+      await flush();
+      invalidateInstanceInput(S);
+      gate.resolve();
+      const error = await outer;
+      expect(error).toBeInstanceOf(InstanceInputOwnershipLostError);
+      expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'input-lock-lost' });
+      expect(events).toEqual([]);
+      // A request of its own (no owner in its context) is admitted as usual.
+      await withInstanceInputLock(S, async () => {
+        events.push('fresh');
+      });
+      expect(events).toEqual(['fresh']);
+    });
+
+    it('negative: work outliving an owner that simply finished acquires a ticket of its own', async () => {
+      const gate = deferred();
+      let detached: Promise<InstanceInputTicket> | null = null;
+      let first: InstanceInputTicket | null = null;
+      await withInstanceInputLock(S, async (ticket) => {
+        first = ticket;
+        detached = gate.promise.then(() => withInstanceInputLock(S, async (t) => t));
+      });
+      gate.resolve();
+      const second = await detached!;
+      expect(second).not.toBe(first);
+      expect(second.generation).toBeGreaterThan(first!.generation);
     });
 
     it('keeps the ticket of a send that relaunches its own pane', async () => {

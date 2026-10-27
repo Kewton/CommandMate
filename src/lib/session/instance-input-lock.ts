@@ -25,7 +25,8 @@
  *    reach the next owner's composer.
  * 3. **Ownership in the async context.** A call made inside an owner's function
  *    (the sender inside `sendUserMessage`'s lock) joins the owner's ticket
- *    instead of queueing behind itself; no lock is ever acquired twice.
+ *    instead of queueing behind itself; no lock is ever acquired twice. A
+ *    context whose ticket was revoked is refused, never given a new one.
  * 4. **The carried paste mark.** A send whose body may still arrive after it
  *    has given up (an `unseen` paste, a read that threw, a clear that could not
  *    be confirmed) leaves a mark. The next owner does not start typing until the
@@ -86,17 +87,15 @@ export const INSTANCE_INPUT_LOCK_TIMEOUT_CODE = 'INSTANCE_INPUT_LOCK_TIMEOUT';
 /** `code` on the error a waiter gets when its session was replaced while it waited. */
 export const INSTANCE_INPUT_SESSION_REPLACED_CODE = 'INSTANCE_INPUT_SESSION_REPLACED';
 
+/** `code` on the error a call from a revoked owner's context gets. */
+export const INSTANCE_INPUT_OWNERSHIP_LOST_CODE = 'INSTANCE_INPUT_OWNERSHIP_LOST';
+
 /** The owner's handle. */
 export interface InstanceInputTicket {
   readonly sessionName: string;
   /** Never reused, across sessions and module reloads. */
   readonly generation: number;
-  /**
-   * Whether the owner had to queue for the composer. A writer that did not was
-   * admitted the moment it asked, so what it read before asking is as fresh as
-   * it was before this module existed; one that queued may be acting on a
-   * screen that changed behind another writer (#3945 stage 2).
-   */
+  /** Whether the owner had to queue for the composer (diagnostics and tests). */
   readonly waited: boolean;
   /** True while this ticket still owns the session's composer. */
   isCurrent(): boolean;
@@ -149,6 +148,24 @@ export class InstanceInputLockTimeoutError extends Error {
         'input lock not acquired, nothing was typed (Issue #3945).'
     );
     this.name = 'InstanceInputLockTimeoutError';
+  }
+}
+
+/**
+ * Thrown, before anything runs, by a call made from a context whose ticket was
+ * revoked (review-1 #1): the session was replaced while the owner was working
+ * (a readiness wait, a relaunch check). Such a call is the old request; it must
+ * not take a fresh ticket and type into the new session.
+ */
+export class InstanceInputOwnershipLostError extends Error {
+  readonly code = INSTANCE_INPUT_OWNERSHIP_LOST_CODE;
+
+  constructor(sessionName: string) {
+    super(
+      `Session ${sessionName} was replaced while this send held its composer; ` +
+        'input lock lost, nothing was typed (Issue #3945).'
+    );
+    this.name = 'InstanceInputOwnershipLostError';
   }
 }
 
@@ -255,7 +272,13 @@ export function currentInstanceInputTicket(sessionName: string): InstanceInputTi
  *
  * A call from inside a function that already owns the session joins that
  * ownership (same ticket, no second acquisition, released by the outer call).
+ * A call from inside an owner whose ticket was revoked (the session was
+ * replaced) is refused instead: it belongs to the old request, and acquiring
+ * afresh would let that request type into the new session (review-1 #1). A
+ * context whose owner simply finished is not an owner any more and acquires as
+ * any other caller does.
  *
+ * @throws InstanceInputOwnershipLostError when the calling context's ticket was revoked; `fn` did not run
  * @throws InstanceInputLockTimeoutError when not admitted within `waitMs`; `fn` did not run
  * @throws InstanceInputSessionReplacedError when the session was replaced while waiting; `fn` did not run
  */
@@ -264,8 +287,14 @@ export async function withInstanceInputLock<T>(
   fn: (ticket: InstanceInputTicket) => Promise<T>,
   options: { waitMs?: number } = {}
 ): Promise<T> {
-  const held = currentInstanceInputTicket(sessionName);
-  if (held !== null) return fn(held);
+  const inScope = ownerScope.getStore()?.get(sessionName);
+  if (inScope !== undefined) {
+    if (inScope.isCurrent()) return fn(inScope);
+    if (inScope instanceof TicketImpl && inScope.revoked) {
+      logger.warn('instance-input-stale-context-refused', { sessionName, generation: inScope.generation });
+      throw new InstanceInputOwnershipLostError(sessionName);
+    }
+  }
 
   const ticket = await acquire(sessionName, options.waitMs ?? INSTANCE_INPUT_LOCK_WAIT_MS);
   try {
@@ -315,6 +344,31 @@ export function clearExpiredCarriedPasteMark(ticket: InstanceInputTicket, now: n
   if (!ticket.isCurrent()) return;
   const entry = entries.get(ticket.sessionName);
   if (entry?.mark && entry.mark.expiresAt <= now) entry.mark = null;
+}
+
+/**
+ * Hold the owner off the composer until the session's carried paste mark
+ * expires, then take it down (review-1 #5). For writers that cannot read the
+ * composer — copilot's own `/model` and selection-list keys; the shared sender
+ * reads and withdraws while it waits (`waitOutCarriedPaste`). Returns early when
+ * the ticket stops being current; the caller's owner check then refuses.
+ *
+ * @returns Whether there was a mark to wait out
+ */
+export async function waitOutCarriedPasteMark(ticket: InstanceInputTicket): Promise<boolean> {
+  const mark = getCarriedPasteMark(ticket.sessionName);
+  if (mark === null) return false;
+  logger.warn('carried-paste-mark-wait', {
+    sessionName: ticket.sessionName,
+    originGeneration: mark.originGeneration,
+    generation: ticket.generation,
+    remainingMs: mark.expiresAt - Date.now(),
+  });
+  while (Date.now() < mark.expiresAt && ticket.isCurrent()) {
+    await new Promise((resolve) => setTimeout(resolve, mark.expiresAt - Date.now()));
+  }
+  clearExpiredCarriedPasteMark(ticket);
+  return true;
 }
 
 /**

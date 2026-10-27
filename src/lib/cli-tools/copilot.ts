@@ -54,7 +54,11 @@ import { createLogger } from '@/lib/logger';
 import { missingToolError } from './install-hints';
 import { beginLaunchWindow, endLaunchWindow, recordLaunchDialogPress } from './launch-window';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
-import { withInstanceInputLock, type InstanceInputTicket } from '@/lib/session/instance-input-lock';
+import {
+  waitOutCarriedPasteMark,
+  withInstanceInputLock,
+  type InstanceInputTicket,
+} from '@/lib/session/instance-input-lock';
 
 const logger = createLogger('cli-tools/copilot');
 
@@ -744,8 +748,10 @@ export class CopilotTool extends BaseCLITool {
         //
         // Issue #3945: this types into the composer without the shared sender,
         // so it takes the instance's input lock itself — from the readiness
-        // read (fresh, under the lock) to the picker that answers it.
+        // read (fresh, under the lock) to the picker that answers it — and
+        // waits out a carried paste mark first, as a normal send does.
         await withInstanceInputLock(sessionName, async (ticket) => {
+          await waitOutCarriedPasteMark(ticket);
           await this.waitForPrompt(sessionName);
           assertCopilotInputOwner(ticket, 'the selection-list command');
           await sendKeys(sessionName, message, true);
@@ -855,6 +861,9 @@ export class CopilotTool extends BaseCLITool {
     modelName: string,
     ticket: InstanceInputTicket
   ): Promise<void> {
+    // A previous send's body may still arrive (review-1 #5): `/model` waits it
+    // out like a normal send, and the idle read below is the one after the wait.
+    await waitOutCarriedPasteMark(ticket);
     const idle = await this.waitForPrompt(sessionName, COPILOT_MODEL_SWITCH_TIMEOUT_MS, 'idle');
     if (!idle.ready) {
       throw new Error(

@@ -51,7 +51,12 @@ vi.mock('@/lib/logger', () => ({
 
 import { CopilotTool } from '@/lib/cli-tools/copilot';
 import { capturePane, sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
-import { resetInstanceInputLocks } from '@/lib/session/instance-input-lock';
+import {
+  getCarriedPasteMark,
+  leaveCarriedPasteMark,
+  resetInstanceInputLocks,
+  withInstanceInputLock,
+} from '@/lib/session/instance-input-lock';
 import { COPILOT_MODEL_SWITCH_2623_FRAMES as FRAMES } from '../../fixtures/copilot-model-switch-2623';
 
 /** copilot 1.0.80's idle composer (Issue #1895's frame). */
@@ -145,5 +150,71 @@ describe('copilot keys outside the shared sender take the input lock (Issue #394
 
     expect(keys[0]).toBe('type:/model gpt-5.6-terra');
     expect(keys.indexOf('type:hello')).toBeGreaterThanOrEqual(switchDoneAt);
+  });
+
+  // Consistency review 1 #5: a previous send's body may still arrive; copilot's
+  // own keys wait the mark out as a normal send does.
+  describe('a carried paste mark (review-1 #5)', () => {
+    let typedAt: Record<string, number>;
+
+    async function leaveMark(): Promise<number> {
+      await withInstanceInputLock(tool.getSessionName('wt-1'), async (ticket) => leaveCarriedPasteMark(ticket));
+      return getCarriedPasteMark(tool.getSessionName('wt-1'))!.expiresAt;
+    }
+
+    function logTyping(onType: (text: string) => void = () => undefined): void {
+      typedAt = {};
+      vi.mocked(sendKeys).mockImplementation((async (_s: string, text: string) => {
+        typedAt[text] = Date.now();
+        keys.push(`type:${text}`);
+        onType(text);
+      }) as never);
+    }
+
+    const pickerAfterModel = (text: string): void => {
+      if (text === '/model') setTimeout(() => (frame = PICKER_FRAME), 100);
+    };
+    const answerSwitch = (text: string): void => {
+      if (text.startsWith('/model ')) setTimeout(() => (frame = FRAMES.SWITCH_AFTER()), 300);
+    };
+
+    it('the selection-list command is typed only after the mark expires, and takes it down', async () => {
+      const expiresAt = await leaveMark();
+      logTyping(pickerAfterModel);
+      const command = tool.sendMessage('wt-1', '/model');
+      await vi.runAllTimersAsync();
+      await command;
+      expect(typedAt['/model']).toBeGreaterThanOrEqual(expiresAt);
+      expect(getCarriedPasteMark(tool.getSessionName('wt-1'))).toBeNull();
+    });
+
+    it('/model <id> is typed only after the mark expires', async () => {
+      frame = FRAMES.SWITCH_BEFORE();
+      const expiresAt = await leaveMark();
+      logTyping(answerSwitch);
+      const switching = tool.sendModelCommand('wt-1', 'gpt-5.6-terra');
+      await vi.runAllTimersAsync();
+      await expect(switching).resolves.toBeUndefined();
+      expect(typedAt['/model gpt-5.6-terra']).toBeGreaterThanOrEqual(expiresAt);
+    });
+
+    it('negative: with no mark, both are typed without that wait', async () => {
+      logTyping((text) => {
+        pickerAfterModel(text);
+        answerSwitch(text);
+      });
+      const t0 = Date.now();
+      const command = tool.sendMessage('wt-1', '/model');
+      await vi.runAllTimersAsync();
+      await command;
+      expect(typedAt['/model'] - t0).toBeLessThan(1_000);
+
+      frame = FRAMES.SWITCH_BEFORE();
+      const t1 = Date.now();
+      const switching = tool.sendModelCommand('wt-1', 'gpt-5.6-terra');
+      await vi.runAllTimersAsync();
+      await expect(switching).resolves.toBeUndefined();
+      expect(typedAt['/model gpt-5.6-terra'] - t1).toBeLessThan(1_000);
+    });
   });
 });
