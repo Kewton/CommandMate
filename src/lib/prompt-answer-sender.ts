@@ -769,6 +769,7 @@ async function sendCommandCodeMultiSelectAnswer(
   wanted: readonly number[],
   stillCurrent?: () => boolean,
   touch?: PaneTouch,
+  assertOwned: (keysSent: boolean) => void = () => {},
 ): Promise<void> {
   const cursor = promptData.options.find((option) => option.isDefault === true);
   if (cursor === undefined) {
@@ -784,6 +785,7 @@ async function sendCommandCodeMultiSelectAnswer(
     ...current.filter((n) => !wanted.includes(n)),
   ].sort((a, b) => a - b);
   if (toggles.length > 0) {
+    assertOwned(false);
     await sendSpecialKeysWhileCurrent(sessionName, toggles.map(String), stillCurrent, touch);
   }
   const keysSent = toggles.length > 0;
@@ -821,6 +823,8 @@ async function sendCommandCodeMultiSelectAnswer(
   if (cursorNow === undefined) {
     throw new MultiSelectAnswerRejectedError('cursor-unknown', keysSent, wanted);
   }
+  // Issue #3952 review P2: the input held since the toggles, across the re-read.
+  assertOwned(keysSent);
   await sendSpecialKeysWhileCurrent(
     sessionName,
     [...downKeys(verified.options.length - cursorNow.number + 1), 'Enter'],
@@ -843,6 +847,7 @@ async function sendCommandCodeMultiSelectAnswer(
     if (review.hasUnansweredWarning) {
       throw new MultiSelectAnswerRejectedError('review-unanswered', true, wanted);
     }
+    assertOwned(true);
     await sendSpecialKeysWhileCurrent(sessionName, ['Enter'], stillCurrent, touch);
     return;
   }
@@ -947,11 +952,58 @@ async function answerTargetStillOnScreen(params: SendPromptAnswerParams): Promis
 }
 
 /**
+ * An answer whose input was taken from it part-way (Issue #3952 review P2):
+ * the session was replaced after some of its keys had gone out, and the rest
+ * were not sent. Unlike {@link PromptAnswerNotDeliveredError} the pane was
+ * touched (`keysSent: true`), so it is a failure, not a refusal.
+ */
+export class PromptAnswerInputLostError extends Error {
+  readonly keysSent = true;
+
+  constructor(sessionName: string) {
+    super(
+      `The answer to ${sessionName} was stopped part-way: the session was replaced while the answer ` +
+        'held its input. Some keys were sent; the rest were not (Issue #3952).'
+    );
+    this.name = 'PromptAnswerInputLostError';
+  }
+}
+
+/**
+ * How an answer's keys stay inside its hold of the session's input (Issue
+ * #3952 review P2), handed to {@link InputWriterSend}.
+ */
+interface InputWriterKeys {
+  /**
+   * The caller's `stillCurrent`, joined with the ticket's: asked between the
+   * keys of one `sendSpecialKeys` call. Undefined when the caller gave none, so
+   * a manual answer's arrow keys go out in the same one call as before (the
+   * ticket is then checked before each call, {@link assertOwned}).
+   */
+  stillCurrent: (() => boolean) | undefined;
+  /**
+   * Throw before a key when the ticket is no longer current: with nothing on
+   * the pane yet, {@link PromptAnswerNotDeliveredError} (`input-lock-lost`);
+   * after a key, {@link PromptAnswerInputLostError}.
+   */
+  assertOwned: (keysSent: boolean) => void;
+}
+
+/**
  * The keys of an answer, typed as the session's input writer. Given the prompt
  * as read again under the lock (null when nothing was read again), it types
  * and returns nothing, or returns why it typed nothing — before any key.
  */
-type InputWriterSend = (reread: PromptData | null) => Promise<'target-changed' | void>;
+type InputWriterSend = (reread: PromptData | null, keys: InputWriterKeys) => Promise<'target-changed' | void>;
+
+/**
+ * The caller's last look before the first key (review P1-2, P1-b): asked right
+ * before it, whether or not anything was read again — a guard's capture or the
+ * lock's admission is an await the contract can change across.
+ */
+function stillAllowedNow(params: SendPromptAnswerParams): boolean {
+  return params.stillAllowedAtSend === undefined || params.stillAllowedAtSend();
+}
 
 /**
  * Run an answer's keys as the session's input writer (Issue #3952): a send in
@@ -974,11 +1026,37 @@ async function sendAsInputWriter(
       reread = await answerTargetStillOnScreen(params);
       return reread !== null;
     },
-    async (): Promise<PromptAnswerNotDeliveredSkip | void> => {
-      // Only after a wait: without one, the caller's own last look came right
-      // before this call and nothing could have changed it since.
-      if (reread !== null && params.stillAllowedAtSend && !params.stillAllowedAtSend()) return 'answer-withheld';
-      return send(reread);
+    async (ticket): Promise<PromptAnswerNotDeliveredSkip | void> => {
+      // Review P1-b: always, wait or no wait — see `stillAllowedNow`.
+      if (!stillAllowedNow(params)) return 'answer-withheld';
+      // Review P2: every key of the answer goes out only while its ticket is
+      // current; a session replaced part-way gets none of the rest.
+      let lost = false;
+      const owned = (): boolean => {
+        if (ticket.isCurrent()) return true;
+        lost = true;
+        return false;
+      };
+      const callerStillCurrent = params.stillCurrent;
+      const keys: InputWriterKeys = {
+        stillCurrent: callerStillCurrent === undefined ? undefined : () => owned() && callerStillCurrent(),
+        assertOwned: (keysSent) => {
+          if (owned()) return;
+          if (keysSent) throw new PromptAnswerInputLostError(params.sessionName);
+          throw new PromptAnswerNotDeliveredError('input-lock-lost', params.sessionName);
+        },
+      };
+      try {
+        return await send(reread, keys);
+      } catch (error: unknown) {
+        // The joined `stillCurrent` said no because of the ticket, not the
+        // caller: say which, as `assertOwned` does.
+        if (lost && error instanceof PromptAnswerAbortedError) {
+          if (error.keysSent) throw new PromptAnswerInputLostError(params.sessionName);
+          throw new PromptAnswerNotDeliveredError('input-lock-lost', params.sessionName);
+        }
+        throw error;
+      }
     },
   );
   if (!outcome.answered) throw new PromptAnswerNotDeliveredError(outcome.reason, params.sessionName);
@@ -1219,12 +1297,19 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
   // a two-stage confirm, not a digit and an Enter.
   const multiSelect = readMultiSelectRequest(params);
   if (multiSelect !== null) {
-    await sendAsInputWriter(params, readMark, async (reread) => {
+    await sendAsInputWriter(params, readMark, async (reread, keys) => {
       // Review P1-1: the toggles come from the ticks on the screen they go
       // to — read again after a wait — not from the reading the request saw.
       const shown = reread === null ? multiSelect.promptData : reread;
       if (shown.type !== 'multiple_choice' || shown.multiSelect !== true) return 'target-changed';
-      await sendCommandCodeMultiSelectAnswer(sessionName, shown, multiSelect.wanted, stillCurrent, touch);
+      await sendCommandCodeMultiSelectAnswer(
+        sessionName,
+        shown,
+        multiSelect.wanted,
+        keys.stillCurrent,
+        touch,
+        keys.assertOwned,
+      );
     });
     invalidateCache(sessionName);
     return;
@@ -1334,12 +1419,13 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
         : [...navigationKeys, 'Enter'];
     };
 
-    await sendAsInputWriter(params, readMark, async (reread) => {
+    await sendAsInputWriter(params, readMark, async (reread, writer) => {
       // A re-read that is not a choice list says nothing about the cursor:
       // the keys cannot be placed, so none are typed.
       if (reread !== null && reread.type !== 'multiple_choice') return 'target-changed';
       const keys = cursorKeys(reread ?? promptData);
-      await sendSpecialKeysWhileCurrent(sessionName, keys, stillCurrent, touch);
+      writer.assertOwned(false);
+      await sendSpecialKeysWhileCurrent(sessionName, keys, writer.stillCurrent, touch);
     });
   } else {
     // Issue #616: Resolve submitMode and determine whether to suppress Enter
@@ -1353,17 +1439,32 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
 
     if (shouldSuppressEnter(params, resolvedSubmitMode, dialog)) {
       // Issue #3952: one digit and no Enter — nothing a send could split, so
-      // not a writer of the session's input.
+      // not a writer of the session's input. Review P1-b: the caller's last
+      // look is still taken right before it (the guard above may have awaited
+      // a capture since the caller's own look).
+      if (!stillAllowedNow(params)) throw new PromptAnswerNotDeliveredError('answer-withheld', sessionName);
       await typeText();
     } else {
       // Issue #3952: text, wait and Enter as one writer, so no send's body can
       // be typed in the wait and submitted by this Enter.
-      await sendAsInputWriter(params, readMark, async () => {
+      await sendAsInputWriter(params, readMark, async (reread, writer) => {
+        // Review P1-a: free text read again after a wait is judged on that
+        // reading — a field still there, and the cursor still on it (#2573 /
+        // #2584) — or the Enter after it confirms whatever row the cursor
+        // moved to. A refusal here types nothing, as the one before the wait.
+        if (reread !== null) {
+          const onScreen: SendPromptAnswerParams = { ...params, promptData: reread };
+          assertFreeTextHasATextField(onScreen);
+          assertFreeTextCursorIsOnTheField(onScreen);
+        }
+        writer.assertOwned(false);
         await typeText();
         // Wait a moment for the input to be processed
         await new Promise(resolve => setTimeout(resolve, TUI_TEXT_INPUT_WAIT_MS));
         // Issue #3706: the text is typed; the Enter that submits it is not.
         assertStillCurrent(stillCurrent, true);
+        // Review P2: nor by a session that replaced this one in the wait.
+        writer.assertOwned(answer !== '');
 
         // Send Enter
         await sendKeys(sessionName, '', true);

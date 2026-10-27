@@ -395,16 +395,22 @@ describe('[#3952 review P1-2] the caller’s last look is taken again right befo
     expect(stillAllowedAtSend).toHaveBeenCalledTimes(1);
   });
 
-  it('negative: no wait — not asked again (the caller looked right before the call)', async () => {
+  // Review P1-b (third contract) reversed this case: the look is taken right
+  // before the first key with or without a wait — a guard's capture is an
+  // await the contract can change across. The round-2 name ("no wait — not
+  // asked again") pinned the hole, and is replaced by the decision.
+  it('no wait — still asked once, right before the first key; false types nothing', async () => {
     const stillAllowedAtSend = vi.fn(() => false);
-    await sendPromptAnswer({
-      sessionName: SESSION,
-      answer: 'y',
-      cliToolId: 'claude',
-      promptData: YES_NO,
-      stillAllowedAtSend,
-    });
-    expect(delivered).toEqual(['y', '<Enter>']);
-    expect(stillAllowedAtSend).not.toHaveBeenCalled();
+    await expect(
+      sendPromptAnswer({
+        sessionName: SESSION,
+        answer: 'y',
+        cliToolId: 'claude',
+        promptData: YES_NO,
+        stillAllowedAtSend,
+      }),
+    ).rejects.toMatchObject({ name: 'PromptAnswerNotDeliveredError', skip: 'answer-withheld', keysSent: false });
+    expect(delivered).toEqual([]);
+    expect(stillAllowedAtSend).toHaveBeenCalledTimes(1);
   });
 });
