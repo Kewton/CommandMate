@@ -22,14 +22,36 @@ export function useClearNotice(targetKey: string) {
   const [state, setState] = useState<{ key: string; notice: ClearComposerNotice } | null>(null);
   const keyRef = useRef(targetKey);
   keyRef.current = targetKey;
+  // Advanced by Run, a dismissal and every new Clear: an answer to an older
+  // Clear is not adopted, even from the same destination.
+  const generationRef = useRef(0);
   useEffect(() => {
+    generationRef.current += 1;
     setState(null);
   }, [targetKey]);
-  const setNotice = useCallback((notice: ClearComposerNotice | null, key: string) => {
-    if (key !== keyRef.current) return;
-    setState(notice ? { key, notice } : null);
-  }, []);
+  /**
+   * `null` removes the notice and starts a new generation (returned, for the
+   * caller's next result); a notice is adopted only for the current destination
+   * and, when `generation` is given, the current generation.
+   */
+  const setNotice = useCallback(
+    (notice: ClearComposerNotice | null, key: string, generation?: number): number => {
+      if (notice === null) {
+        generationRef.current += 1;
+        if (key === keyRef.current) setState(null);
+        return generationRef.current;
+      }
+      if (key === keyRef.current && (generation === undefined || generation === generationRef.current)) {
+        setState({ key, notice });
+      }
+      return generationRef.current;
+    },
+    [],
+  );
   const notice = state && state.key === targetKey ? state.notice : null;
-  const dismiss = useCallback(() => setState(null), []);
+  const dismiss = useCallback(() => {
+    generationRef.current += 1;
+    setState(null);
+  }, []);
   return { notice, setNotice, dismiss };
 }

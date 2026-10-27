@@ -35,7 +35,7 @@
  * the frame back — one `C-u` is not enough, as #1878 §5-1 measured.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { useSpecialKeys } from '@/hooks/useSpecialKeys';
@@ -71,7 +71,11 @@ export interface UnsentComposerBarProps {
    */
   clearNotice?: ClearComposerNotice | null;
   /** `targetKey` is the destination the Clear was aimed at ({@link clearTargetKey}). */
-  onClearNoticeChange?: (notice: ClearComposerNotice | null, targetKey: string) => void;
+  onClearNoticeChange?: (
+    notice: ClearComposerNotice | null,
+    targetKey: string,
+    generation?: number,
+  ) => number;
 }
 
 /** The one-line Clear failure; rendered by the bar and, alone, by a parent whose bar is hidden. */
@@ -146,10 +150,16 @@ export function UnsentComposerBar({
   const controlled = onClearNoticeChange !== undefined;
   const clearError = controlled ? (clearNotice ?? null) : ownNotice;
   const targetKey = clearTargetKey(worktreeId, cliToolId, instanceId);
+  // A Clear's answer is adopted only if nothing (Run, a dismissal, a newer Clear)
+  // has started a new generation since it was sent.
+  const ownGeneration = useRef(0);
   const setClearError = useCallback(
-    (notice: ClearComposerNotice | null) => {
-      if (onClearNoticeChange) onClearNoticeChange(notice, targetKey);
-      else setOwnNotice(notice);
+    (notice: ClearComposerNotice | null, generation?: number): number => {
+      if (onClearNoticeChange) return onClearNoticeChange(notice, targetKey, generation);
+      if (notice === null) ownGeneration.current += 1;
+      else if (generation !== undefined && generation !== ownGeneration.current) return ownGeneration.current;
+      setOwnNotice(notice);
+      return ownGeneration.current;
     },
     [onClearNoticeChange, targetKey],
   );
@@ -164,7 +174,7 @@ export function UnsentComposerBar({
 
   const handleClear = useCallback(() => {
     setClearing(true);
-    setClearError(null);
+    const generation = setClearError(null);
     const body = instanceId && instanceId !== cliToolId
       ? { cliToolId, instanceId }
       : { cliToolId };
@@ -180,19 +190,20 @@ export function UnsentComposerBar({
             body?.code === INSTANCE_INPUT_BUSY_CODE ? 'busy'
               : body?.code === FOREIGN_SESSION_CODE ? 'otherServer'
               : 'failed',
+            generation,
           );
         } else if (!res.ok) {
-          setClearError('failed');
+          setClearError('failed', generation);
         } else {
           // HTTP 200 also carries `cleared: false` when the text is still there.
           const data = await res.json().catch(() => null) as { cleared?: boolean } | null;
-          if (data?.cleared === false) setClearError('notCleared');
+          if (data?.cleared === false) setClearError('notCleared', generation);
         }
         if (onActionSent) setTimeout(onActionSent, NAV_KEY_REFRESH_DELAY_MS);
       })
       .catch((err) => {
         console.error('Failed to clear composer:', err);
-        setClearError('failed');
+        setClearError('failed', generation);
       })
       .finally(() => {
         setClearing(false);

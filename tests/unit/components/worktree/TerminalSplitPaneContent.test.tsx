@@ -1545,6 +1545,18 @@ describe('TerminalSplitPaneContent', () => {
         expect(screen.queryByTestId('unsent-composer-clear-error')).not.toBeInTheDocument();
       });
 
+      it('does not bring the failure back when an older Clear answers after Run', async () => {
+        let resolve!: (r: unknown) => void;
+        impl((_i, init) => (init?.method === 'POST' ? new Promise((r) => { resolve = r; }) : live()));
+        render(pane('claude'));
+        await waitFor(() => expect(screen.getByTestId('unsent-composer-bar')).toBeInTheDocument());
+        fireEvent.click(screen.getByRole('button', { name: 'worktree.unsentComposer.clear' }));
+        fireEvent.click(screen.getByRole('button', { name: 'worktree.unsentComposer.run' }));
+        resolve(failJson);
+        await new Promise((r) => setTimeout(r, 20));
+        expect(screen.queryByTestId('unsent-composer-clear-error')).not.toBeInTheDocument();
+      });
+
       it('Run and the dismiss button remove a stale failure', async () => {
         impl((_i, init) => (init?.method === 'POST' ? Promise.resolve(failJson) : live()));
         render(pane('claude'));

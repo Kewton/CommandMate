@@ -270,6 +270,20 @@ describe('MobileTerminalTab Clear failure is bound to its destination (Issue #39
     await waitFor(() => expect(screen.queryByTestId('unsent-composer-clear-error')).not.toBeInTheDocument());
   });
 
+  it('does not bring the failure back when an older Clear answers after Run (or a dismissal)', async () => {
+    let resolve!: (r: unknown) => void;
+    vi.stubGlobal('fetch', vi.fn((url: string) => (
+      url.includes('clear-composer') ? new Promise((r) => { resolve = r; }) : Promise.resolve(failNotice)
+    )));
+    mockPaneState({ composerText: '/work-plan' });
+    render(tab('claude'));
+    fireEvent.click(clearBtn());
+    fireEvent.click(screen.getByRole('button', { name: 'worktree.unsentComposer.run' }));
+    resolve(failNotice);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByTestId('unsent-composer-clear-error')).not.toBeInTheDocument();
+  });
+
   it('the dismiss button removes it even when the bar is gone', async () => {
     const { rerender } = await failedClear();
     mockPaneState({ composerText: '' });
