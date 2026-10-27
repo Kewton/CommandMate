@@ -227,18 +227,26 @@ export function hasForeignPromptInWindow(
  *
  * @param messages - Rows as the messages route serialized them
  * @param ownContent - The message this `ask` sent
+ * Bounded on both sides, like {@link hasForeignPromptInWindow}: the same text
+ * sent to another instance after this turn ended is somebody else's later
+ * request, and must not make this one's instance undecided.
+ *
  * @param since - Epoch ms taken before the send
+ * @param until - Epoch ms at which the turn ended (`ask` always passes it;
+ *   unbounded when omitted)
  */
 export function ownPromptInstance(
   messages: PromptMessageResponse[],
   ownContent: string,
   since: number,
+  until: number = Number.POSITIVE_INFINITY,
 ): string | null {
   const own = ownContent.trim();
   const instances = new Set<string>();
   for (const m of messages) {
     if (m.role !== 'user' || typeof m.content !== 'string') continue;
-    if (!(Date.parse(m.timestamp) >= since)) continue;
+    const at = Date.parse(m.timestamp);
+    if (!(at >= since && at <= until)) continue;
     if (m.content.trim() !== own) continue;
     if (typeof m.instanceId === 'string') instances.add(m.instanceId);
   }

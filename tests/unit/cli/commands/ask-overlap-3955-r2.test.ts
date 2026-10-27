@@ -480,3 +480,88 @@ describe('reply-ledger helpers for the overlap check (Issue #3955)', () => {
     expect(await fetchPromptRowsSince(client, 'wt1', 'codex', NOW)).toBeNull();
   });
 });
+
+describe('(A) known limit: B\'s own record replaces A\'s before B\'s first poll (Issue #3955, #3957)', () => {
+  it('is NOT detected today — pinned so #3957 (send reports the state at send time) flips it', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    // A's turn opened 10 s before B's send and is still running. B's own
+    // UserPromptSubmit lands at +300 and the server's turn record becomes B's
+    // (agent-event-turn), so B's first poll at +1000 never sees A's record.
+    // The only user row after B's send is B's own, so (b) has nothing either.
+    mockServer({
+      cliToolId: 'codex',
+      onSend: () => vi.setSystemTime(NOW + 1_000),
+      turn: () => ({ openedAt: NOW + 300, closedAt: Date.now() >= DONE_AT ? DONE_AT : null }),
+      done: () => Date.now() >= DONE_AT,
+      rows: () => [
+        userRow('ua', BODY_A, NOW - 10_100),
+        userRow('ub', BODY_B, NOW + 1),
+        ...(Date.now() >= DONE_AT ? [replyRow('ACK-A', DONE_AT)] : []),
+      ],
+    });
+
+    await runAsk(['wt1', BODY_B, '--instance', 'codex', '--json']);
+
+    expect(mockExit).toHaveBeenCalledWith(0);
+    expect(payload()).toMatchObject({ reply: 'ACK-A' });
+    expect(payload()).not.toHaveProperty('overlapped');
+    expect(stderr()).not.toContain('overlapped');
+  });
+});
+
+describe('(B) the instance guess is bounded by the turn\'s end too (Issue #3955)', () => {
+  it('the same text sent to another instance after the turn ended does not hide the overlap', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    // No --instance. A and B shared codex's turn; after it closed (+12 s) and
+    // before ask read the ledger (+15 s), somebody sent A's text to codex-2.
+    mockServer({
+      cliToolId: 'codex',
+      turn: () => ({ openedAt: NOW + 600, closedAt: Date.now() >= DONE_AT ? DONE_AT : null }),
+      done: () => Date.now() >= DONE_AT,
+      rows: () => [
+        userRow('ua', BODY_A, NOW + 1, 'codex'),
+        userRow('ub', BODY_B, NOW + 2_000, 'codex'),
+        ...(Date.now() >= DONE_AT ? [replyRow('ACK-B', DONE_AT, 'codex')] : []),
+        ...(Date.now() >= DONE_AT + 1_000 ? [userRow('ua-later', BODY_A, DONE_AT + 1_000, 'codex-2')] : []),
+      ],
+    });
+
+    await runAsk(['wt1', BODY_A, '--json']);
+
+    expect(mockExit).toHaveBeenCalledWith(0);
+    expect(payload()).toMatchObject({ reply: 'ACK-B', overlapped: true });
+    expect(stderr()).toMatch(/^overlapped: another message reached codex/m);
+  });
+
+  it('a plain ask with the same later copy on another instance is still not warned about', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    mockServer({
+      cliToolId: 'codex',
+      turn: () => ({ openedAt: NOW + 600, closedAt: Date.now() >= DONE_AT ? DONE_AT : null }),
+      done: () => Date.now() >= DONE_AT,
+      rows: () => [
+        userRow('ua', BODY_A, NOW + 1, 'codex'),
+        ...(Date.now() >= DONE_AT ? [replyRow('ACK-A', DONE_AT, 'codex')] : []),
+        ...(Date.now() >= DONE_AT + 1_000 ? [userRow('ua-later', BODY_A, DONE_AT + 1_000, 'codex-2')] : []),
+      ],
+    });
+
+    await runAsk(['wt1', BODY_A, '--json']);
+
+    expect(mockExit).toHaveBeenCalledWith(0);
+    expect(payload()).not.toHaveProperty('overlapped');
+    expect(stderr()).not.toContain('overlapped');
+  });
+
+  it('ownPromptInstance ignores own-text rows after `until`', () => {
+    const rows = [
+      userRow('a', BODY_A, NOW + 1, 'codex'),
+      userRow('a2', BODY_A, NOW + 20, 'codex-2'),
+    ] as unknown as PromptMessageResponse[];
+    expect(ownPromptInstance(rows, BODY_A, NOW, NOW + 10)).toBe('codex');
+    expect(ownPromptInstance(rows, BODY_A, NOW, NOW + 30)).toBeNull();
+  });
+});

@@ -353,11 +353,10 @@ async function readAskReply(
 function detectOverlap(input: {
   message: string;
   askedAt: number;
-  turnEndedAt: number;
+  until: number;
   turnStartedAt: number | null;
   turnClosedAt: number | null;
   openAtSend: boolean;
-  recordClosedAt: number | null;
   instanceId: string | null;
   messages: PromptMessageResponse[] | null;
 }): OverlapReason | null {
@@ -366,18 +365,28 @@ function detectOverlap(input: {
     return 'turn-already-open';
   }
   if (input.openAtSend) return 'turn-already-open';
-  const closedAt = input.turnClosedAt ?? input.recordClosedAt;
-  const until = closedAt !== null && closedAt >= input.askedAt
-    ? Math.min(closedAt, input.turnEndedAt)
-    : input.turnEndedAt;
   if (
     input.messages
     && input.instanceId !== null
-    && hasForeignPromptInWindow(input.messages, input.message, input.askedAt, until, input.instanceId)
+    && hasForeignPromptInWindow(input.messages, input.message, input.askedAt, input.until, input.instanceId)
   ) {
     return 'foreign-message';
   }
   return null;
+}
+
+/**
+ * Where this ask's turn ended, for the overlap window (Issue #3955): the
+ * server's close time when one is known and not before the send, else the
+ * moment the turn was seen to end. A message stamped later went to the next
+ * turn.
+ */
+function overlapWindowEnd(
+  askedAt: number,
+  turnEndedAt: number,
+  closedAt: number | null,
+): number {
+  return closedAt !== null && closedAt >= askedAt ? Math.min(closedAt, turnEndedAt) : turnEndedAt;
 }
 
 /**
@@ -388,7 +397,9 @@ function detectOverlap(input: {
  * than the send, so a `user` row may have been cut off — every `user` row since
  * the send, paged in its own requests. The reply read itself is left as it is.
  * The instance is the one the send was resolved to, else the one the ledger
- * shows this ask's own row on, else null.
+ * shows this ask's own row on inside `[askedAt, until]`, else null — the same
+ * window the overlap is looked for in, so the same text sent to another
+ * instance after this turn ended cannot leave the instance undecided.
  */
 async function readOverlapLedger(
   client: ApiClient,
@@ -396,6 +407,7 @@ async function readOverlapLedger(
   instanceId: string | undefined,
   message: string,
   askedAt: number,
+  until: number,
   messages: PromptMessageResponse[] | null,
 ): Promise<{ messages: PromptMessageResponse[] | null; instanceId: string | null }> {
   let rows = messages;
@@ -403,7 +415,7 @@ async function readOverlapLedger(
     const since = await fetchPromptRowsSince(client, worktreeId, instanceId, askedAt);
     if (since) rows = [...rows, ...since];
   }
-  const target = instanceId ?? (rows ? ownPromptInstance(rows, message, askedAt) : null);
+  const target = instanceId ?? (rows ? ownPromptInstance(rows, message, askedAt, until) : null);
   return { messages: rows, instanceId: target };
 }
 
@@ -607,15 +619,15 @@ a decision about that session's guard rails, not part of asking it a question.
 
         // Reported, not acted on (Issue #3955): the exit code and the reply
         // stay as they are; the line says the reply may not be this ask's.
-        const ledger = await readOverlapLedger(client, worktreeId, instanceId, message, askedAt, messages);
+        const until = overlapWindowEnd(askedAt, turnEndedAt, turn.closedAt ?? record.closedAt);
+        const ledger = await readOverlapLedger(client, worktreeId, instanceId, message, askedAt, until, messages);
         const overlap = detectOverlap({
           message,
           askedAt,
-          turnEndedAt,
+          until,
           turnStartedAt: turn.startedAt,
           turnClosedAt: turn.closedAt,
           openAtSend: record.openAtSend,
-          recordClosedAt: record.closedAt,
           instanceId: ledger.instanceId,
           messages: ledger.messages,
         });
