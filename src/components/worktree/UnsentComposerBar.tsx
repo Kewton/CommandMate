@@ -87,6 +87,7 @@ export function UnsentComposerBar({
 }: UnsentComposerBarProps) {
   const t = useTranslations('worktree');
   const [clearing, setClearing] = useState(false);
+  const [clearError, setClearError] = useState<'busy' | 'notCleared' | 'failed' | null>(null);
   const sendKeys = useSpecialKeys(worktreeId, cliToolId, instanceId, onActionSent);
 
   const handleRun = useCallback(() => {
@@ -96,6 +97,7 @@ export function UnsentComposerBar({
 
   const handleClear = useCallback(() => {
     setClearing(true);
+    setClearError(null);
     const body = instanceId && instanceId !== cliToolId
       ? { cliToolId, instanceId }
       : { cliToolId };
@@ -104,11 +106,21 @@ export function UnsentComposerBar({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
-      .then(() => {
+      .then(async (res) => {
+        if (res.status === 409) {
+          setClearError('busy');
+        } else if (!res.ok) {
+          setClearError('failed');
+        } else {
+          // HTTP 200 also carries `cleared: false` when the text is still there.
+          const data = await res.json().catch(() => null) as { cleared?: boolean } | null;
+          if (data?.cleared === false) setClearError('notCleared');
+        }
         if (onActionSent) setTimeout(onActionSent, NAV_KEY_REFRESH_DELAY_MS);
       })
       .catch((err) => {
         console.error('Failed to clear composer:', err);
+        setClearError('failed');
       })
       .finally(() => {
         setClearing(false);
@@ -158,6 +170,15 @@ export function UnsentComposerBar({
           {t('unsentComposer.clear')}
         </button>
       </div>
+      {clearError && (
+        <p
+          role="alert"
+          data-testid="unsent-composer-clear-error"
+          className="basis-full text-xs text-danger-foreground"
+        >
+          {t(`unsentComposer.clearError.${clearError}`)}
+        </p>
+      )}
     </div>
   );
 }

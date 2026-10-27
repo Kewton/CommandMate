@@ -162,3 +162,40 @@ describe('UnsentComposerBar (Issue #1879)', () => {
     expect(screen.getByText('worktree.unsentComposer.label')).toBeInTheDocument();
   });
 });
+
+describe('UnsentComposerBar clear failures (Issue #3954)', () => {
+  const clearErrorId = 'unsent-composer-clear-error';
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  async function clickClear(response: Response | Error) {
+    const fetchMock = vi.fn(() => (response instanceof Error ? Promise.reject(response) : Promise.resolve(response)));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(<UnsentComposerBar worktreeId="w-1" cliToolId="claude" composerText="/work-plan" />);
+    fireEvent.click(screen.getByRole('button', { name: 'worktree.unsentComposer.clear' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+  }
+
+  const json = (body: unknown, status: number) =>
+    new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+
+  it.each([
+    ['409 INSTANCE_INPUT_BUSY', () => json({ code: 'INSTANCE_INPUT_BUSY' }, 409), 'busy'],
+    ['200 with cleared:false', () => json({ success: true, cleared: false }, 200), 'notCleared'],
+    ['500', () => json({ error: 'x' }, 500), 'failed'],
+    ['a network failure', () => new Error('network down'), 'failed'],
+  ])('shows the failure for %s', async (_name, make, key) => {
+    await clickClear(make());
+    expect(await screen.findByTestId(clearErrorId)).toHaveTextContent(`worktree.unsentComposer.clearError.${key}`);
+  });
+
+  it('shows nothing for 200 with cleared:true (negative control)', async () => {
+    await clickClear(json({ success: true, cleared: true }, 200));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'worktree.unsentComposer.clear' })).not.toBeDisabled());
+    expect(screen.queryByTestId(clearErrorId)).not.toBeInTheDocument();
+  });
+});
