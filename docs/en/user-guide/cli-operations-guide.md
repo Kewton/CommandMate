@@ -370,6 +370,7 @@ commandmate wait <worktree-id> --require-work        # Run only work-evidence af
 | `--instance <id>` | Target instance ID (`<agent>` or `<agent>-<n>`). **This is the only way to name the target** (there is no `--agent`) | the agent's primary instance |
 | `--verify` | After completion is detected, run every verification gate and let the verdict decide the exit code | off |
 | `--require-work` | After completion is detected, run only the work-evidence gate | off |
+| `--fail-on-upstream-fault` | Exit **11** instead of 0 when an upstream fault signature is on the screen as the agent returns to its composer (Issue #1839). When the completion's basis is `hook_stop`, the verdict waits for the pane to settle: it is re-read every 500ms until two reads in a row show the same frame (the re-reads use `current-output?fresh=1`, past the server's capture cache; a server older than `fresh` answers from the cache and may read the pane as settled early), for at most 5 s, and a pane still drawing then is judged on the last frame read (a `still drawing` Note on stderr). The agent's `Stop` can land before its reply is drawn (~3 s measured on codex). The settled frame is judged as the next poll, through every check: a prompt drawn meanwhile exits 10, and a turn the agent has started meanwhile is waited on. A fault on the frame of the `Stop` poll is judged on the settled frame too (a fault with no `Stop`, #1839, still exits 11 at once). The settle never passes `--timeout` / `--stall-timeout`: an interval the next re-read could not finish within is not slept (a `would pass --timeout/--stall-timeout` Note), and each re-read is aborted at the earliest of 500ms, what is left of the 5 s bound and those deadlines (a `did not answer a re-read` Note), judging the last frame read: the verdict comes at most 5 s after the `Stop`. The ledger read that checks a fault frame for a `Stop` is bounded by the 5 s bound and `--timeout` as well, and shares that bound with the re-reads: both are counted from the `Stop` poll, so time the ledger takes is taken off the settle (unanswered: no `Stop`, exit 11 at once), and is not made when no `Stop` is on record. The fault diagnosis on stderr is printed only for the frame the verdict is on. A completion that is not `hook_stop`, and `wait` without the flag, do not wait (Issue #3956). `ask` (flag always on) goes through the same wait | off |
 
 ### Exit Codes
 
@@ -509,6 +510,36 @@ interrupted`; an interrupt was measured to send no `Stop`). A relay reply waits 
 Claude and the other tools, and any source without hooks, are still closed by the screen, as
 before (a Claude interrupt either prints an `Interrupted` row or just puts the prompt back in the
 composer, and neither sends a `Stop`).
+
+#### Do not stack `ask`s on one instance (Issue #3955)
+
+Send the next `ask` (or `send`) to an instance only after the previous `ask` has returned. An agent
+can fold a request that arrives while a turn is running into that turn and answer both with one
+reply (measured on codex 0.164.0, which shows "Messages to be submitted after next tool call").
+The two `ask`s then read the same reply, so **the one sent first can print the answer to the later
+request** (or the other way round). Both exit 0, and both requests did arrive intact (this is not
+a composer problem).
+
+When `ask` sees such an overlap it keeps the reply and the exit code as they are, prints one
+`overlapped: …` line on stderr, and adds `"overlapped": true` to `--json` (the key is absent when
+nothing overlapped). A reply marked this way is not necessarily the answer to your request; send
+the requests again one at a time if it matters. Two things are detected:
+
+- the instance was already in another turn when the message was sent (the later sender; only for
+  tools whose hooks report turn starts, and a turn that ended before the send does not count; it is
+  caught even when that turn ended before `ask`'s first poll. It is not caught when the server's
+  turn record is replaced by this request's own new turn before that first poll: the earlier turn
+  is no longer visible (#3957 will report the state at send time to fix this))
+- another request reached the instance between the send and the end of the turn (the earlier
+  sender; read from the `user` rows of the chat history. The end is the close time the server
+  recorded, so the next request sent after the `Stop` does not count, and no `user` row since the
+  send is missed even when more than the newest 30 rows came after it)
+
+An `ask` without `--instance` / `--agent` finds the instance its request landed on from the
+history and looks only at that instance's rows. Only rows between the send and the end of the turn
+are used for that (the same text sent to another instance later does not count). When that cannot
+be told (the same text reaching more than one instance in that window, for example), the second
+check is skipped.
 
 ### Progress Output
 

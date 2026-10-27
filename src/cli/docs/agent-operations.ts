@@ -826,6 +826,12 @@ same CommandMate server, and you can hand work to them.
   from the chat transcript ("history") or from the pane ("pane"). copilot,
   gemini and vibe-local keep no transcript, so their replies are pane reads.
 
+  Ask one instance one thing at a time (Issue #3955): a request sent while it
+  is mid-turn can be folded into that turn (codex does) and answered with one
+  reply for both. ask then still exits 0 with the reply, but prints
+  'overlapped: ...' on stderr and --json adds "overlapped": true -- the reply
+  may answer the other request.
+
 ## How long a request can be
 
   A request of up to 48 KiB and 240 lines is verified to arrive whole on
