@@ -83,7 +83,7 @@
  * composer).
  */
 
-import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Cpu, StickyNote } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
@@ -93,7 +93,12 @@ import {
   sessionStartingScopeKey,
   useSessionStartingGate,
 } from '@/hooks/useSessionStartingGate';
-import { UnsentComposerBar, hasUnsentComposerText } from '@/components/worktree/UnsentComposerBar';
+import {
+  UnsentComposerBar,
+  UnsentComposerClearNotice,
+  hasUnsentComposerText,
+  type ClearComposerNotice,
+} from '@/components/worktree/UnsentComposerBar';
 import {
   OpencodeSidebarNotice,
   hasOpenCodeSidebarObstruction,
@@ -743,6 +748,8 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   // combined with `showEscapeHatch` — an unclassified overlay and a composer
   // holding unsent text are unrelated conditions.
   const showUnsentComposerBar = hasUnsentComposerText(terminal.composerText);
+  // Issue #3954: the Clear result outlives the bar (a dialog empties composerText).
+  const [clearNotice, setClearNotice] = useState<ClearComposerNotice | null>(null);
 
   // Issue #2095: identical gate to PC, from one shared predicate — the sidebar
   // is a property of the pane, not of the screen it is being watched on.
@@ -902,7 +909,13 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
             instanceId={instanceId}
             composerText={terminal.composerText}
             onActionSent={refresh}
+            clearNotice={clearNotice}
+            onClearNoticeChange={setClearNotice}
           />
+        </div>
+      ) : clearNotice && !directInputOpen ? (
+        <div className="shrink-0 px-2 pt-1">
+          <UnsentComposerClearNotice notice={clearNotice} />
         </div>
       ) : null}
       {showOpencodeSidebarNotice ? (

@@ -190,6 +190,35 @@ describe('MobileTerminalTab unsent-input bar (Issue #1879)', () => {
   });
 });
 
+describe('MobileTerminalTab Clear failure (Issue #3954)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it.each([
+    ['409 INSTANCE_INPUT_BUSY', 409, { code: 'INSTANCE_INPUT_BUSY' }, 'busy'],
+    ["another server's 409", 409, { code: 'session_owned_by_other_server' }, 'otherServer'],
+    ['200 with cleared:false', 200, { success: true, cleared: false }, 'notCleared'],
+  ])('keeps the message after the bar hides (%s)', async (_l, status, body, key) => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(body) })));
+    mockPaneState({ composerText: '/work-plan' });
+    const { rerender } = render(<MobileTerminalTab worktreeId="w-1" cliToolId="claude" instanceId="claude" />);
+    fireEvent.click(screen.getByRole('button', { name: 'worktree.unsentComposer.clear' }));
+    await waitFor(() => expect(screen.getByTestId('unsent-composer-clear-error')).toHaveTextContent(
+      `worktree.unsentComposer.clearError.${key}`,
+    ));
+
+    // The next poll's frame holds no composer text (a dialog): the bar goes.
+    mockPaneState({ composerText: '' });
+    // `disableAutoFollow` only forces a re-render of the memoised tab.
+    rerender(<MobileTerminalTab worktreeId="w-1" cliToolId="claude" instanceId="claude" disableAutoFollow />);
+    expect(screen.queryByTestId('unsent-composer-bar')).not.toBeInTheDocument();
+    expect(screen.getByTestId('unsent-composer-clear-error')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'worktree.unsentComposer.run' })).not.toBeInTheDocument();
+  });
+});
+
 describe('MobileTerminalTab opencode quick keys (Issue #2046, folded by #2106)', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 

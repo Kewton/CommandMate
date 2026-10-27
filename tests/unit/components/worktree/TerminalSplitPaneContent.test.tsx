@@ -1498,6 +1498,38 @@ describe('TerminalSplitPaneContent', () => {
         expect(posted.map(([url]) => url)).toContain('/api/worktrees/w-1/clear-composer');
       });
     });
+
+    it.each([
+      ['409 INSTANCE_INPUT_BUSY', 409, { code: 'INSTANCE_INPUT_BUSY' }, 'busy'],
+      ['another server\'s 409', 409, { code: 'session_owned_by_other_server' }, 'otherServer'],
+      ['200 with cleared:false', 200, { success: true, cleared: false }, 'notCleared'],
+    ])('Issue #3954: keeps the Clear failure on screen after the bar hides (%s)', async (_l, status, body, key) => {
+      // The failed Clear is followed by a frame with no composer text (a dialog).
+      let posted = false;
+      const base = (name: string) => ({
+        isRunning: true, cliToolId: 'claude', fullOutput: frame(name), thinking: false,
+        isSelectionListActive: false, isPagerActive: false, isPromptWaiting: false, isUnclassifiedActive: false,
+      });
+      (mockFetch as unknown as { mockImplementation: (f: (i: string | URL | Request, init?: RequestInit) => unknown) => void })
+        .mockImplementation((_input, init) => {
+          if (init?.method === 'POST') {
+            posted = true;
+            return Promise.resolve({ ok: status < 400, status, json: async () => body });
+          }
+          return okJson(base(posted ? 'composer-ghost-suggestion' : 'composer-residual-slash'));
+        });
+      renderPane();
+
+      await waitFor(() => expect(screen.getByTestId('unsent-composer-bar')).toBeInTheDocument());
+      fireEvent.click(screen.getByRole('button', { name: 'worktree.unsentComposer.clear' }));
+
+      await waitFor(() => expect(screen.getByTestId('unsent-composer-clear-error')).toHaveTextContent(
+        `worktree.unsentComposer.clearError.${key}`,
+      ));
+      await waitFor(() => expect(screen.queryByTestId('unsent-composer-bar')).not.toBeInTheDocument());
+      expect(screen.getByTestId('unsent-composer-clear-error')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'worktree.unsentComposer.run' })).not.toBeInTheDocument();
+    });
   });
   /**
    * Issue #2406: the composer's "Queued (session busy)" toast (#806) fired on

@@ -24,6 +24,7 @@ import {
   UnsentComposerBar,
   COMPOSER_PREVIEW_MAX_CHARS,
   hasUnsentComposerText,
+  FOREIGN_SESSION_CODE,
 } from '@/components/worktree/UnsentComposerBar';
 
 describe('UnsentComposerBar (Issue #1879)', () => {
@@ -185,6 +186,8 @@ describe('UnsentComposerBar clear failures (Issue #3954)', () => {
 
   it.each([
     ['409 INSTANCE_INPUT_BUSY', () => json({ code: 'INSTANCE_INPUT_BUSY' }, 409), 'busy'],
+    ['409 session_owned_by_other_server', () => json({ code: 'session_owned_by_other_server' }, 409), 'otherServer'],
+    ['409 with an unknown code (not "busy")', () => json({ code: 'x' }, 409), 'failed'],
     ['200 with cleared:false', () => json({ success: true, cleared: false }, 200), 'notCleared'],
     ['500', () => json({ error: 'x' }, 500), 'failed'],
     ['a network failure', () => new Error('network down'), 'failed'],
@@ -197,5 +200,14 @@ describe('UnsentComposerBar clear failures (Issue #3954)', () => {
     await clickClear(json({ success: true, cleared: true }, 200));
     await waitFor(() => expect(screen.getByRole('button', { name: 'worktree.unsentComposer.clear' })).not.toBeDisabled());
     expect(screen.queryByTestId(clearErrorId)).not.toBeInTheDocument();
+  });
+});
+
+describe('foreign-session code (Issue #3954)', () => {
+  it('matches the polling hook\'s code', async () => {
+    const { FOREIGN_SESSION_ERROR_CODE } = await vi.importActual<typeof import('@/hooks/useTerminalPanePolling')>(
+      '@/hooks/useTerminalPanePolling',
+    );
+    expect(FOREIGN_SESSION_CODE).toBe(FOREIGN_SESSION_ERROR_CODE);
   });
 });

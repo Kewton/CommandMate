@@ -41,6 +41,19 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import { useSpecialKeys } from '@/hooks/useSpecialKeys';
 import { NAV_KEY_REFRESH_DELAY_MS } from '@/config/ui-feedback-config';
 
+/** Why the last Clear did not empty the composer (Issue #3954). */
+export type ClearComposerNotice = 'busy' | 'otherServer' | 'notCleared' | 'failed';
+
+/**
+ * The 409 `code` for a session another CommandMate server owns; spelled out so the
+ * bar does not import the polling hook, and pinned to `FOREIGN_SESSION_ERROR_CODE`
+ * by UnsentComposerBar.test.tsx.
+ */
+export const FOREIGN_SESSION_CODE = 'session_owned_by_other_server';
+
+/** The clear-composer 409 for a send that holds the instance's input (route.ts). */
+const INSTANCE_INPUT_BUSY_CODE = 'INSTANCE_INPUT_BUSY';
+
 export interface UnsentComposerBarProps {
   worktreeId: string;
   cliToolId: CLIToolType;
@@ -50,6 +63,28 @@ export interface UnsentComposerBarProps {
   composerText: string;
   /** Trigger an immediate terminal refresh once the action has been sent. */
   onActionSent?: () => void;
+  /**
+   * The Clear result, lifted by a parent that must keep showing it after the bar
+   * itself is hidden (a dialog on screen empties `composerText`). Omit both and
+   * the bar keeps its own.
+   */
+  clearNotice?: ClearComposerNotice | null;
+  onClearNoticeChange?: (notice: ClearComposerNotice | null) => void;
+}
+
+/** The one-line Clear failure; rendered by the bar and, alone, by a parent whose bar is hidden. */
+export function UnsentComposerClearNotice({ notice }: { notice: ClearComposerNotice | null }) {
+  const t = useTranslations('worktree');
+  if (!notice) return null;
+  return (
+    <p
+      role="alert"
+      data-testid="unsent-composer-clear-error"
+      className="basis-full text-xs text-danger-foreground"
+    >
+      {t(`unsentComposer.clearError.${notice}`)}
+    </p>
+  );
 }
 
 /**
@@ -84,10 +119,15 @@ export function UnsentComposerBar({
   instanceId,
   composerText,
   onActionSent,
+  clearNotice,
+  onClearNoticeChange,
 }: UnsentComposerBarProps) {
   const t = useTranslations('worktree');
   const [clearing, setClearing] = useState(false);
-  const [clearError, setClearError] = useState<'busy' | 'notCleared' | 'failed' | null>(null);
+  const [ownNotice, setOwnNotice] = useState<ClearComposerNotice | null>(null);
+  const controlled = onClearNoticeChange !== undefined;
+  const clearError = controlled ? (clearNotice ?? null) : ownNotice;
+  const setClearError = controlled ? onClearNoticeChange : setOwnNotice;
   const sendKeys = useSpecialKeys(worktreeId, cliToolId, instanceId, onActionSent);
 
   const handleRun = useCallback(() => {
@@ -108,7 +148,12 @@ export function UnsentComposerBar({
     })
       .then(async (res) => {
         if (res.status === 409) {
-          setClearError('busy');
+          const body = await res.json().catch(() => null) as { code?: unknown } | null;
+          setClearError(
+            body?.code === INSTANCE_INPUT_BUSY_CODE ? 'busy'
+              : body?.code === FOREIGN_SESSION_CODE ? 'otherServer'
+              : 'failed',
+          );
         } else if (!res.ok) {
           setClearError('failed');
         } else {
@@ -125,7 +170,7 @@ export function UnsentComposerBar({
       .finally(() => {
         setClearing(false);
       });
-  }, [worktreeId, cliToolId, instanceId, onActionSent]);
+  }, [worktreeId, cliToolId, instanceId, onActionSent, setClearError]);
 
   // The single display gate, and it reads the text only. Nothing here consults
   // isUnclassifiedActive / isSelectionListActive / isPromptWaiting.
@@ -170,15 +215,7 @@ export function UnsentComposerBar({
           {t('unsentComposer.clear')}
         </button>
       </div>
-      {clearError && (
-        <p
-          role="alert"
-          data-testid="unsent-composer-clear-error"
-          className="basis-full text-xs text-danger-foreground"
-        >
-          {t(`unsentComposer.clearError.${clearError}`)}
-        </p>
-      )}
+      <UnsentComposerClearNotice notice={clearError} />
     </div>
   );
 }

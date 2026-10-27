@@ -21,6 +21,10 @@ const KEYS = [
   'unsentComposer.label',
   'unsentComposer.run',
   'unsentComposer.clear',
+  'unsentComposer.clearError.busy',
+  'unsentComposer.clearError.otherServer',
+  'unsentComposer.clearError.notCleared',
+  'unsentComposer.clearError.failed',
 ] as const;
 
 function load(locale: string): Record<string, unknown> {
