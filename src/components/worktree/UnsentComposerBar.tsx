@@ -39,6 +39,7 @@ import { useCallback, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { useSpecialKeys } from '@/hooks/useSpecialKeys';
+import { clearTargetKey } from '@/components/worktree/clear-notice';
 import { NAV_KEY_REFRESH_DELAY_MS } from '@/config/ui-feedback-config';
 
 /** Why the last Clear did not empty the composer (Issue #3954). */
@@ -69,11 +70,18 @@ export interface UnsentComposerBarProps {
    * the bar keeps its own.
    */
   clearNotice?: ClearComposerNotice | null;
-  onClearNoticeChange?: (notice: ClearComposerNotice | null) => void;
+  /** `targetKey` is the destination the Clear was aimed at ({@link clearTargetKey}). */
+  onClearNoticeChange?: (notice: ClearComposerNotice | null, targetKey: string) => void;
 }
 
 /** The one-line Clear failure; rendered by the bar and, alone, by a parent whose bar is hidden. */
-export function UnsentComposerClearNotice({ notice }: { notice: ClearComposerNotice | null }) {
+export function UnsentComposerClearNotice({
+  notice,
+  onDismiss,
+}: {
+  notice: ClearComposerNotice | null;
+  onDismiss?: () => void;
+}) {
   const t = useTranslations('worktree');
   if (!notice) return null;
   return (
@@ -83,6 +91,16 @@ export function UnsentComposerClearNotice({ notice }: { notice: ClearComposerNot
       className="basis-full text-xs text-danger-foreground"
     >
       {t(`unsentComposer.clearError.${notice}`)}
+      {onDismiss ? (
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label={t('unsentComposer.clearError.dismiss')}
+          className="ml-2 underline"
+        >
+          {t('unsentComposer.clearError.dismiss')}
+        </button>
+      ) : null}
     </p>
   );
 }
@@ -127,13 +145,22 @@ export function UnsentComposerBar({
   const [ownNotice, setOwnNotice] = useState<ClearComposerNotice | null>(null);
   const controlled = onClearNoticeChange !== undefined;
   const clearError = controlled ? (clearNotice ?? null) : ownNotice;
-  const setClearError = controlled ? onClearNoticeChange : setOwnNotice;
+  const targetKey = clearTargetKey(worktreeId, cliToolId, instanceId);
+  const setClearError = useCallback(
+    (notice: ClearComposerNotice | null) => {
+      if (onClearNoticeChange) onClearNoticeChange(notice, targetKey);
+      else setOwnNotice(notice);
+    },
+    [onClearNoticeChange, targetKey],
+  );
   const sendKeys = useSpecialKeys(worktreeId, cliToolId, instanceId, onActionSent);
 
   const handleRun = useCallback(() => {
     // The existing navigation endpoint, with the key it has always accepted.
     sendKeys(['Enter']);
-  }, [sendKeys]);
+    // The composer is about to be emptied by Run: a leftover Clear failure is stale.
+    setClearError(null);
+  }, [sendKeys, setClearError]);
 
   const handleClear = useCallback(() => {
     setClearing(true);
@@ -215,7 +242,7 @@ export function UnsentComposerBar({
           {t('unsentComposer.clear')}
         </button>
       </div>
-      <UnsentComposerClearNotice notice={clearError} />
+      <UnsentComposerClearNotice notice={clearError} onDismiss={() => setClearError(null)} />
     </div>
   );
 }

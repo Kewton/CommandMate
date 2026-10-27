@@ -1499,6 +1499,67 @@ describe('TerminalSplitPaneContent', () => {
       });
     });
 
+    describe('Clear failure is bound to its destination (Issue #3954)', () => {
+      type Impl = (i: string | URL | Request, init?: RequestInit) => unknown;
+      const impl = (f: Impl) =>
+        (mockFetch as unknown as { mockImplementation: (g: Impl) => void }).mockImplementation(f);
+      const failJson = { ok: true, status: 200, json: async () => ({ success: true, cleared: false }) };
+      const pane = (instanceId: string) => (
+        <TerminalSplitPaneContent
+          worktreeId="w-1"
+          splitIndex={0}
+          cliToolId="claude"
+          instanceId={instanceId}
+          availableInstances={[inst('claude'), { ...inst('claude'), id: 'claude-2', order: 1 }]}
+          onInstanceChange={vi.fn()}
+          onFocus={vi.fn()}
+          autoYes={{ onToggle: vi.fn() }}
+        />
+      );
+      const live = () => okJson({
+        isRunning: true, cliToolId: 'claude', fullOutput: frame('composer-residual-slash'), thinking: false,
+        isSelectionListActive: false, isPagerActive: false, isPromptWaiting: false, isUnclassifiedActive: false,
+      });
+
+      it('drops the failure when the split changes instance; a plain re-render keeps it', async () => {
+        impl((_i, init) => (init?.method === 'POST' ? Promise.resolve(failJson) : live()));
+        const { rerender } = render(pane('claude'));
+        await waitFor(() => expect(screen.getByTestId('unsent-composer-bar')).toBeInTheDocument());
+        fireEvent.click(screen.getByRole('button', { name: 'worktree.unsentComposer.clear' }));
+        await screen.findByTestId('unsent-composer-clear-error');
+        rerender(pane('claude'));
+        expect(screen.getByTestId('unsent-composer-clear-error')).toBeInTheDocument();
+        rerender(pane('claude-2'));
+        expect(screen.queryByTestId('unsent-composer-clear-error')).not.toBeInTheDocument();
+      });
+
+      it('discards a late answer aimed at the previous instance', async () => {
+        let resolve!: (r: unknown) => void;
+        impl((_i, init) => (init?.method === 'POST' ? new Promise((r) => { resolve = r; }) : live()));
+        const { rerender } = render(pane('claude'));
+        await waitFor(() => expect(screen.getByTestId('unsent-composer-bar')).toBeInTheDocument());
+        fireEvent.click(screen.getByRole('button', { name: 'worktree.unsentComposer.clear' }));
+        rerender(pane('claude-2'));
+        resolve(failJson);
+        await new Promise((r) => setTimeout(r, 20));
+        expect(screen.queryByTestId('unsent-composer-clear-error')).not.toBeInTheDocument();
+      });
+
+      it('Run and the dismiss button remove a stale failure', async () => {
+        impl((_i, init) => (init?.method === 'POST' ? Promise.resolve(failJson) : live()));
+        render(pane('claude'));
+        await waitFor(() => expect(screen.getByTestId('unsent-composer-bar')).toBeInTheDocument());
+        fireEvent.click(screen.getByRole('button', { name: 'worktree.unsentComposer.clear' }));
+        await screen.findByTestId('unsent-composer-clear-error');
+        fireEvent.click(screen.getByRole('button', { name: 'worktree.unsentComposer.clearError.dismiss' }));
+        expect(screen.queryByTestId('unsent-composer-clear-error')).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'worktree.unsentComposer.clear' }));
+        await screen.findByTestId('unsent-composer-clear-error');
+        fireEvent.click(screen.getByRole('button', { name: 'worktree.unsentComposer.run' }));
+        await waitFor(() => expect(screen.queryByTestId('unsent-composer-clear-error')).not.toBeInTheDocument());
+      });
+    });
+
     it.each([
       ['409 INSTANCE_INPUT_BUSY', 409, { code: 'INSTANCE_INPUT_BUSY' }, 'busy'],
       ['another server\'s 409', 409, { code: 'session_owned_by_other_server' }, 'otherServer'],

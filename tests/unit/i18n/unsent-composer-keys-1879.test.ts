@@ -21,6 +21,7 @@ const KEYS = [
   'unsentComposer.label',
   'unsentComposer.run',
   'unsentComposer.clear',
+  'unsentComposer.clearError.dismiss',
   'unsentComposer.clearError.busy',
   'unsentComposer.clearError.otherServer',
   'unsentComposer.clearError.notCleared',
