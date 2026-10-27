@@ -82,6 +82,12 @@ vi.mock('@/lib/tmux/tmux', () => ({
 
 vi.mock('@/lib/tmux/tmux-capture-cache', () => ({ invalidateCache: vi.fn() }));
 
+// A body over 512 bytes is pasted (`load-buffer` → `paste-buffer`, Issue #2464).
+vi.mock('child_process', async () => {
+  const actual = await vi.importActual<typeof import('child_process')>('child_process');
+  return { ...actual, execFile: vi.fn() };
+});
+
 import { sendUserMessage } from '@/lib/session/send-user-message';
 import { sendMessageWithSubmitVerification } from '@/lib/cli-tools/submit-verified-sender';
 import { resolveSessionName } from '@/lib/cli-tools/session-name';
@@ -96,6 +102,8 @@ import {
   withInstanceInputLock,
 } from '@/lib/session/instance-input-lock';
 import { sendKeys, sendSpecialKeys, capturePane, clearComposerLine } from '@/lib/tmux/tmux';
+import { execFile } from 'child_process';
+import { CLAUDE_POST_PROMPT_DELAY } from '@/lib/session/claude-session';
 import { pollWorktree } from '../../../../src/cli/commands/wait';
 import type { ApiClient } from '../../../../src/cli/utils/api-client';
 import { WaitExitCode } from '../../../../src/cli/types';
@@ -120,6 +128,24 @@ const mockDb = {} as never;
 let frame = IDLE;
 let bodyTypedAt: number | null = null;
 let enteredAt: number | null = null;
+/** ms `load-buffer` takes to report back. */
+let loadDelayMs = 0;
+/** When `paste-buffer` put a pasted body into the pane. */
+let bodyPastedAt: number | null = null;
+
+/** codex's own `sendMessage`, reduced to the shared sender it ends in (after `preDelayMs`). */
+function installTool(cliToolId: 'codex' | 'claude', preDelayMs = 0): void {
+  const sessionName = resolveSessionName(cliToolId, WT, cliToolId);
+  mockGetTool.mockReturnValue({
+    name: cliToolId,
+    getSessionName: vi.fn(() => sessionName),
+    sendMessage: vi.fn(async (_wt: string, message: string) => {
+      if (preDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, preDelayMs));
+      // The pane is codex's either way: what is pinned is the stamp, not the screen.
+      await sendMessageWithSubmitVerification({ sessionName, message, cliToolId: 'codex' });
+    }),
+  });
+}
 
 function installPane(): void {
   vi.mocked(capturePane).mockImplementation((async () => frame) as never);
@@ -136,14 +162,34 @@ function installPane(): void {
   vi.mocked(clearComposerLine).mockImplementation((async () => {
     frame = IDLE;
   }) as never);
-  // codex's own `sendMessage`, reduced to the shared sender it ends in.
-  mockGetTool.mockReturnValue({
-    name: 'Codex',
-    getSessionName: vi.fn(() => S),
-    sendMessage: vi.fn((_wt: string, message: string) =>
-      sendMessageWithSubmitVerification({ sessionName: S, message, cliToolId: 'codex' })
-    ),
-  });
+  const buffers = new Map<string, string>();
+  vi.mocked(execFile).mockImplementation(((
+    _file: string,
+    args: string[],
+    _options: unknown,
+    callback: (error: Error | null) => void
+  ) => {
+    const name = args[args.indexOf('-b') + 1];
+    if (args[0] === 'load-buffer') {
+      return {
+        stdin: {
+          end: (data: string) => {
+            buffers.set(name, data);
+            setTimeout(() => callback(null), loadDelayMs);
+          },
+        },
+      };
+    }
+    if (args[0] === 'paste-buffer') {
+      const text = buffers.get(name) ?? '';
+      buffers.delete(name);
+      if (bodyPastedAt === null) bodyPastedAt = Date.now();
+      frame = composerFrame(`[Pasted Content ${text.length} chars]`);
+    }
+    queueMicrotask(() => callback(null));
+    return { stdin: { end: () => undefined } };
+  }) as never);
+  installTool('codex');
 }
 
 /** Advance the fake clock in small steps until `promise` settles. */
@@ -160,8 +206,11 @@ async function runToSettled<T>(promise: Promise<T>, horizonMs: number): Promise<
   return tracked;
 }
 
-function sendB(): Promise<Awaited<ReturnType<typeof sendUserMessage>>> {
-  return sendUserMessage(mockDb, { worktreeId: WT, content: BODY, cliToolId: 'codex', instanceId: 'codex' });
+function sendB(
+  content = BODY,
+  cliToolId: 'codex' | 'claude' = 'codex'
+): Promise<Awaited<ReturnType<typeof sendUserMessage>>> {
+  return sendUserMessage(mockDb, { worktreeId: WT, content, cliToolId, instanceId: cliToolId });
 }
 
 /** The user row's stamp, in epoch ms. */
@@ -251,6 +300,8 @@ describe('a send is stamped when its body starts going in (Issue #3953)', () => 
     resetInstanceInputLocks();
     frame = IDLE;
     bodyTypedAt = null;
+    bodyPastedAt = null;
+    loadDelayMs = 0;
     enteredAt = null;
     mockSavePendingAssistantResponse.mockResolvedValue(null);
     mockCreateMessage.mockImplementation((_db: unknown, row: Record<string, unknown>) => ({ id: 'created-msg', ...row }));
@@ -362,7 +413,53 @@ describe('a send is stamped when its body starts going in (Issue #3953)', () => 
     });
   });
 
+  describe('A stops while a long B is being loaded for its paste (consistency review P2-1)', () => {
+    const LONG_BODY = 'B '.padEnd(800, 'b');
+    const LOAD_MS = 4_000;
+    const A_STOP_AT = REQUEST_AT + 2_000;
+    const B_STOP_AT = REQUEST_AT + 10_000;
+
+    async function sendLong(): Promise<void> {
+      loadDelayMs = LOAD_MS;
+      const result = await runToSettled(sendB(LONG_BODY), 60_000);
+      expect(result).toMatchObject({ ok: true });
+    }
+
+    it('stamps the user row as the paste reaches the pane, after `load-buffer` and after A stopped', async () => {
+      await sendLong();
+
+      expect(bodyPastedAt).toBeGreaterThanOrEqual(REQUEST_AT + LOAD_MS);
+      expect(userRowAt()).toBe(bodyPastedAt);
+      expect(userRowAt()).toBeGreaterThan(A_STOP_AT);
+      expect(pendingAt()).toBe(REQUEST_AT);
+    });
+
+    it('`wait` holds until B\'s turn stops', async () => {
+      await sendLong();
+
+      const { exitCode, completedAt } = await waitOn(userRowAt(), A_STOP_AT, B_STOP_AT);
+
+      expect(exitCode).toBe(WaitExitCode.SUCCESS);
+      expect(completedAt).toBeGreaterThanOrEqual(B_STOP_AT);
+    });
+  });
+
   describe('negative controls', () => {
+    it('a claude send, whose fixed settle wait moves the clock, is stamped at its first key — not when it arrived', async () => {
+      // consistency review P2-2: claude waits CLAUDE_POST_PROMPT_DELAY before the
+      // shared sender on every send, so with nothing to queue behind the stamp
+      // still lands that much after the request.
+      installTool('claude', CLAUDE_POST_PROMPT_DELAY);
+
+      const result = await runToSettled(sendB(BODY, 'claude'), 60_000);
+
+      expect(result).toMatchObject({ ok: true });
+      expect(bodyTypedAt).toBe(REQUEST_AT + CLAUDE_POST_PROMPT_DELAY);
+      expect(userRowAt()).toBe(bodyTypedAt);
+      expect(pendingAt()).toBe(REQUEST_AT);
+      expect(pendingAt()).toBeLessThan(userRowAt());
+    });
+
     it('a send that neither queues nor waits out a mark is stamped as before: when it arrived', async () => {
       const result = await runToSettled(sendB(), 60_000);
 
