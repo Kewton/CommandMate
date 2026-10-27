@@ -355,6 +355,7 @@ commandmate wait <worktree-id> --require-work        # Run only work-evidence af
 | `--instance <id>` | Target instance ID (`<agent>` or `<agent>-<n>`). **This is the only way to name the target** (there is no `--agent`) | the agent's primary instance |
 | `--verify` | After completion is detected, run every verification gate and let the verdict decide the exit code | off |
 | `--require-work` | After completion is detected, run only the work-evidence gate | off |
+| `--fail-on-upstream-fault` | Exit **11** instead of 0 when an upstream fault signature is on the screen as the agent returns to its composer (Issue #1839). When the completion's basis is `hook_stop`, the verdict waits for the pane to settle: it is re-read every 500ms until two reads in a row show the same frame, for at most 5 s, and a pane still drawing then is judged on the last frame read (a `still drawing` Note on stderr). The agent's `Stop` can land before its reply is drawn (~3 s measured on codex). A completion that is not `hook_stop`, and `wait` without the flag, do not wait (Issue #3956). `ask` (flag always on) goes through the same wait | off |
 
 ### Exit Codes
 

@@ -1701,6 +1701,85 @@ async function promptLedgerStage(
   return { kind: 'next', answeredNewestPrompt };
 }
 
+/**
+ * Interval between the re-reads of the pane after a `hook_stop`, under
+ * `--fail-on-upstream-fault` (Issue #3956). See {@link settleAfterHookStop}.
+ */
+export const HOOK_STOP_SETTLE_INTERVAL_MS = 500;
+
+/**
+ * Longest `wait` re-reads the pane after a `hook_stop` before judging the last
+ * frame it read (Issue #3956). See {@link settleAfterHookStop}.
+ */
+export const HOOK_STOP_SETTLE_MAX_MS = 5000;
+
+/**
+ * The basis of a completion on a `ready` frame (Issue #1839).
+ *
+ * `hook_stop` on both branches that have one, and they are the same statement
+ * made from two records: the agent reported the end of the turn this wait is
+ * about. `scraper_ready` keeps its documented meaning — "the screen said so and
+ * nothing corroborated it" — which is now exactly the set of cases that reach it.
+ */
+function readyCompletionBasis(
+  state: PollState,
+  answeredNewestPrompt: boolean,
+): (typeof COMPLETION_BASIS)[keyof typeof COMPLETION_BASIS] {
+  return state.turnStartedAt !== null || answeredNewestPrompt
+    ? COMPLETION_BASIS.HOOK_STOP
+    : COMPLETION_BASIS.SCRAPER_READY;
+}
+
+/**
+ * The frame a `hook_stop` completion is judged on, once the pane has settled
+ * (Issue #3956).
+ *
+ * The agent's `Stop` can land before its reply is drawn. Measured 2026-10-27 on
+ * codex-cli 0.164.0: `ask` returned on `basis=hook_stop` with the pane ending at
+ * row 441–445 of 480, and the last rows were drawn ~3 s later. An upstream fault
+ * printed at the end of the turn is in those rows, so the frame of the `Stop`
+ * poll can carry no `upstreamFault` while the turn did fail.
+ *
+ * So the pane is read again every {@link HOOK_STOP_SETTLE_INTERVAL_MS} until two
+ * reads in a row carry the same frame, and that frame is the one judged. The
+ * bound is {@link HOOK_STOP_SETTLE_MAX_MS}: a pane still drawing then is judged
+ * on the last frame read rather than held. A read that fails ends the settle on
+ * the frame before it (an `ApiError` still ends the wait, as on any poll).
+ */
+async function settleAfterHookStop(
+  poll: PollContext,
+  data: CurrentOutputResponse,
+): Promise<CurrentOutputResponse> {
+  const { client, worktreeId, options } = poll;
+  const frameOf = (d: CurrentOutputResponse): string => d.fullOutput ?? d.content;
+  const startedAt = Date.now();
+  let latest = data;
+  while (Date.now() - startedAt < HOOK_STOP_SETTLE_MAX_MS) {
+    await sleep(HOOK_STOP_SETTLE_INTERVAL_MS);
+    let next: CurrentOutputResponse;
+    try {
+      next = await client.get<CurrentOutputResponse>(
+        observedCurrentOutputPath(worktreeId, options.instance),
+      );
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      console.error(
+        `Note: could not re-read ${worktreeId} after its stop ` +
+          `(${error instanceof Error ? error.message : String(error)}); judging the last frame read.`,
+      );
+      return latest;
+    }
+    const settled = frameOf(next) === frameOf(latest);
+    latest = next;
+    if (settled) return latest;
+  }
+  console.error(
+    `Note: ${worktreeId} was still drawing ${HOOK_STOP_SETTLE_MAX_MS / 1000}s after its stop; ` +
+      'judging the last frame read.',
+  );
+  return latest;
+}
+
 /** Last stage of a `ready` frame: the completion line with its basis. Exit 0. */
 function completionStage(
   poll: PollContext,
@@ -1709,16 +1788,7 @@ function completionStage(
   selfResumeSuffix: () => string,
 ): StageOutcome {
   const { worktreeId } = poll;
-
-  // `hook_stop` on both branches that have one, and they are the same
-  // statement made from two records: the agent reported the end of the
-  // turn this wait is about. `scraper_ready` keeps its documented meaning
-  // — "the screen said so and nothing corroborated it" — which is now
-  // exactly the set of cases that reach it.
-  const basis =
-    state.turnStartedAt !== null || answeredNewestPrompt
-      ? COMPLETION_BASIS.HOOK_STOP
-      : COMPLETION_BASIS.SCRAPER_READY;
+  const basis = readyCompletionBasis(state, answeredNewestPrompt);
   console.error(`Completed: ${worktreeId} (basis=${basis}${selfResumeSuffix()})`);
   return exitWith({ exitCode: WaitExitCode.SUCCESS });
 }
@@ -1752,6 +1822,18 @@ async function readyStage(
 
     const ledgerOutcome = await promptLedgerStage(poll, state, data);
     if (ledgerOutcome.kind !== 'next') return ledgerOutcome;
+
+    // Issue #3956: the `Stop` can land before the end of the reply is on the
+    // pane, so a `hook_stop` completion is judged again on the settled frame.
+    // Only under the flag: a plain `wait` reads no fault and waits no longer.
+    if (
+      poll.options.failOnUpstreamFault &&
+      readyCompletionBasis(state, ledgerOutcome.answeredNewestPrompt) === COMPLETION_BASIS.HOOK_STOP
+    ) {
+      const settled = await settleAfterHookStop(poll, data);
+      const settledFaultOutcome = upstreamFaultStage(poll, settled);
+      if (settledFaultOutcome.kind !== 'next') return settledFaultOutcome;
+    }
 
     return completionStage(poll, state, ledgerOutcome.answeredNewestPrompt, selfResumeSuffix);
   }
