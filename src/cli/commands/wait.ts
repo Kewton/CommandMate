@@ -883,6 +883,19 @@ export interface PollWorktreeOptions extends WaitOptions {
    * {@link pollWorktree} without the flag.
    */
   autoYesGrace?: number;
+  /**
+   * Told the turn this poll has adopted, every poll (Issue #3955).
+   *
+   * `ask` reads it after a completion to tell whether the turn whose end it
+   * waited on had already opened before its own message was sent — the shape
+   * of a second `ask` folded into a turn another sender started. Absent for
+   * `wait`, which has no send to compare against.
+   *
+   * `closedAt` is the server's close time for that turn when this poll's
+   * published turn is the adopted one, else null: a turn that had already
+   * closed before the send is not one the message could have joined.
+   */
+  onTurnStart?: (turnStartedAt: number | null, closedAt: number | null) => void;
 }
 
 /**
@@ -1849,6 +1862,13 @@ export async function pollWorktree(
       // poll that ends in a prompt — the same turn is still open when the human
       // answers and `--on-prompt human` resumes polling.
       state.turnStartedAt = adoptTurnStart(data, startTime, state.turnStartedAt);
+      if (options.onTurnStart) {
+        const published = data.structuredEvents;
+        const closedAt = published?.openedAt != null && published.openedAt === state.turnStartedAt
+          ? published.closedAt ?? null
+          : null;
+        options.onTurnStart(state.turnStartedAt, closedAt);
+      }
 
       // Issue #2614: a self-resume hold is about one `stop`, and ends the first
       // time that `stop` is no longer the newest word — the agent woke (a

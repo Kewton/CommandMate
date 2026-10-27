@@ -173,6 +173,41 @@ export function pickLatestReply(
 }
 
 /**
+ * Whether another message reached this instance inside `[since, until]`
+ * (Issue #3955).
+ *
+ * codex folds a message typed while a turn is running into that same turn and
+ * answers both with one reply, so an `ask` whose turn also carried somebody
+ * else's message cannot know which of the two the reply answers. The ledger
+ * shows it: `/send` writes a `user` row for every message the instant it is
+ * handed to the pane, so a `user` row in this instance's window whose text is
+ * not this `ask`'s own is a second sender's.
+ *
+ * Text, not id, tells the rows apart: the transcript reader claims the `/send`
+ * row rather than writing a second one (`user-turn-recorder`), so this `ask`'s
+ * own message is one row, or one plus a reader's copy with the same text.
+ *
+ * @param messages - Rows as the messages route serialized them
+ * @param ownContent - The message this `ask` sent
+ * @param since - Epoch ms taken before the send
+ * @param until - Epoch ms at which the turn was seen to end
+ */
+export function hasForeignPromptInWindow(
+  messages: PromptMessageResponse[],
+  ownContent: string,
+  since: number,
+  until: number,
+): boolean {
+  const own = ownContent.trim();
+  return messages.some((m) => {
+    if (m.role !== 'user' || typeof m.content !== 'string') return false;
+    const at = Date.parse(m.timestamp);
+    if (!(at >= since && at <= until)) return false;
+    return m.content.trim() !== own;
+  });
+}
+
+/**
  * The recent chat rows for this instance. Throws what the API client throws.
  *
  * @param client - API client
