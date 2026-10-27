@@ -887,6 +887,30 @@ export interface PollWorktreeOptions extends WaitOptions {
    * {@link pollWorktree} without the flag.
    */
   autoYesGrace?: number;
+  /**
+   * Told the turn this poll has adopted, every poll (Issue #3955).
+   *
+   * `ask` reads it after a completion to tell whether the turn whose end it
+   * waited on had already opened before its own message was sent — the shape
+   * of a second `ask` folded into a turn another sender started. Absent for
+   * `wait`, which has no send to compare against.
+   *
+   * `closedAt` is the server's close time for that turn when this poll's
+   * published turn is the adopted one, else null: a turn that had already
+   * closed before the send is not one the message could have joined.
+   */
+  onTurnStart?: (turnStartedAt: number | null, closedAt: number | null) => void;
+  /**
+   * Told the turn record the server published, every poll, whether or not
+   * this poll adopts it (Issue #3955).
+   *
+   * {@link onTurnStart} only ever names an adopted turn, and adoption drops a
+   * closed turn that opened more than {@link TURN_ADOPTION_GRACE_MS} before the
+   * poll started. A second `ask` that joined such a turn, which then closed
+   * before that ask's first poll, would never hear of it. This is the raw
+   * record, read only: nothing `wait` decides depends on it.
+   */
+  onTurnRecord?: (openedAt: number | null, closedAt: number | null) => void;
 }
 
 /**
@@ -2103,6 +2127,16 @@ export async function pollWorktree(
       // poll that ends in a prompt — the same turn is still open when the human
       // answers and `--on-prompt human` resumes polling.
       state.turnStartedAt = adoptTurnStart(data, startTime, state.turnStartedAt);
+      if (options.onTurnStart) {
+        const published = data.structuredEvents;
+        const closedAt = published?.openedAt != null && published.openedAt === state.turnStartedAt
+          ? published.closedAt ?? null
+          : null;
+        options.onTurnStart(state.turnStartedAt, closedAt);
+      }
+      if (options.onTurnRecord) {
+        options.onTurnRecord(data.structuredEvents?.openedAt ?? null, data.structuredEvents?.closedAt ?? null);
+      }
 
       // Issue #2614: a self-resume hold is about one `stop`, and ends the first
       // time that `stop` is no longer the newest word — the agent woke (a

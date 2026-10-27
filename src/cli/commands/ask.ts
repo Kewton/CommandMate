@@ -34,9 +34,14 @@ import { Command } from 'commander';
 import { ExitCode, WaitExitCode } from '../types';
 import { ApiClient, isValidWorktreeId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
+import type { PromptMessageResponse } from '../types/api-responses';
 import {
   TRANSCRIPT_READER_TOOLS,
+  fetchPromptRowsSince,
   fetchRecentMessages,
+  hasForeignPromptInWindow,
+  mayHaveDroppedRowsSince,
+  ownPromptInstance,
   pickLatestReply,
   replyCandidates,
   sanitizeReply,
@@ -89,6 +94,17 @@ function sleep(ms: number): Promise<void> {
 
 /** Where the printed reply came from. Reported in `--json`. */
 type ReplySource = 'history' | 'pane' | 'none';
+
+/**
+ * Why this ask's turn may have answered somebody else as well (Issue #3955).
+ *
+ * - `turn-already-open`: the turn whose end `ask` waited on had opened before
+ *   the message was sent — the message joined a turn another sender started
+ *   (the later of two overlapping asks).
+ * - `foreign-message`: another message reached the instance between the send
+ *   and the end of the turn (the earlier of two overlapping asks).
+ */
+type OverlapReason = 'turn-already-open' | 'foreign-message';
 
 /** Options for the ask command. */
 interface AskOptions {
@@ -168,7 +184,7 @@ async function readLatestReply(
   instanceId: string | undefined,
   since: number,
   cliToolId: string | undefined,
-): Promise<string | null> {
+): Promise<{ content: string | null; messages: PromptMessageResponse[] | null }> {
   const requireTurnRow = cliToolId !== undefined && TRANSCRIPT_READER_TOOLS.has(cliToolId);
   const deadline = Date.now() + (requireTurnRow ? REPLY_TURN_ROW_GRACE_MS : 0);
 
@@ -177,8 +193,10 @@ async function readLatestReply(
     // The rules are `reply`'s too (Issue #3039). A tool with no transcript
     // takes the newest row after the send, marker or not, with no wait.
     const reply = pickLatestReply(replyCandidates(messages ?? [], since), requireTurnRow);
-    if (reply) return reply.content;
-    if (!requireTurnRow || Date.now() >= deadline) return null;
+    // The rows go back with the answer so the overlap check (Issue #3955)
+    // reads the same ledger the reply came from, with no request of its own.
+    if (reply) return { content: reply.content, messages };
+    if (!requireTurnRow || Date.now() >= deadline) return { content: null, messages };
     await sleep(REPLY_TURN_ROW_POLL_MS);
   }
 }
@@ -290,9 +308,10 @@ async function readAskReply(
   instanceId: string | undefined,
   askedAt: number,
   agent: string | undefined,
-): Promise<{ source: ReplySource; reply: string | null }> {
+): Promise<{ source: ReplySource; reply: string | null; messages: PromptMessageResponse[] | null }> {
   let source: ReplySource = 'history';
-  let reply = await readLatestReply(client, worktreeId, instanceId, askedAt, agent);
+  const latest = await readLatestReply(client, worktreeId, instanceId, askedAt, agent);
+  let reply = latest.content;
   if (reply === null && agent) {
     source = 'pane';
     const pane = await readPaneTail(client, worktreeId, agent, instanceId);
@@ -302,7 +321,110 @@ async function readAskReply(
   if (reply === null) {
     source = 'none';
   }
-  return { source, reply };
+  return { source, reply, messages: latest.messages };
+}
+
+/**
+ * Whether this ask's turn was shared with another message (Issue #3955).
+ *
+ * codex 0.164.0 folds a message typed while a turn is running into that turn
+ * ("Messages to be submitted after next tool call") and answers both with one
+ * reply, so two overlapping asks to one instance both exit 0 and one of them
+ * prints the other's answer (UAT 2026-10-27: 3 runs out of 4). Which reply
+ * belongs to which message is not on the wire, so this does not try to
+ * attribute it; it says the reply may not be this ask's.
+ *
+ * Both sides of the overlap, from records `ask` already reads:
+ *
+ * - the later ask: a turn that opened before `askedAt` and had not closed by
+ *   it — the turn `wait` adopted, or any turn record a poll saw (`wait` drops a
+ *   closed turn that opened more than one poll interval before it started, so
+ *   a turn that closed before this ask's first poll is only in the record).
+ *   Only a tool whose hooks report turns publishes one, and a turn that had
+ *   closed before the send does not count, so a plain ask never sees it;
+ * - the earlier ask: a `user` row with other text on the same instance sits
+ *   between the send and the end of the turn — the server's close time when it
+ *   published one, else the moment the turn was seen to end, so a message sent
+ *   after the `Stop` (to the next turn) is not counted. With no instance
+ *   resolved for the send there is no "same instance", and this side is off.
+ *
+ * @returns The first reason that applies, or null
+ */
+function detectOverlap(input: {
+  message: string;
+  askedAt: number;
+  until: number;
+  turnStartedAt: number | null;
+  turnClosedAt: number | null;
+  openAtSend: boolean;
+  instanceId: string | null;
+  messages: PromptMessageResponse[] | null;
+}): OverlapReason | null {
+  const closedBeforeSend = input.turnClosedAt !== null && input.turnClosedAt < input.askedAt;
+  if (input.turnStartedAt !== null && input.turnStartedAt < input.askedAt && !closedBeforeSend) {
+    return 'turn-already-open';
+  }
+  if (input.openAtSend) return 'turn-already-open';
+  if (
+    input.messages
+    && input.instanceId !== null
+    && hasForeignPromptInWindow(input.messages, input.message, input.askedAt, input.until, input.instanceId)
+  ) {
+    return 'foreign-message';
+  }
+  return null;
+}
+
+/**
+ * Where this ask's turn ended, for the overlap window (Issue #3955): the
+ * server's close time when one is known and not before the send, else the
+ * moment the turn was seen to end. A message stamped later went to the next
+ * turn.
+ */
+function overlapWindowEnd(
+  askedAt: number,
+  turnEndedAt: number,
+  closedAt: number | null,
+): number {
+  return closedAt !== null && closedAt >= askedAt ? Math.min(closedAt, turnEndedAt) : turnEndedAt;
+}
+
+/**
+ * The ledger rows the overlap check reads, and the instance it is about
+ * (Issue #3955).
+ *
+ * The reply read's rows, plus — when that read came back full of rows newer
+ * than the send, so a `user` row may have been cut off — every `user` row since
+ * the send, paged in its own requests. The reply read itself is left as it is.
+ * The instance is the one the send was resolved to, else the one the ledger
+ * shows this ask's own row on inside `[askedAt, until]`, else null — the same
+ * window the overlap is looked for in, so the same text sent to another
+ * instance after this turn ended cannot leave the instance undecided.
+ */
+async function readOverlapLedger(
+  client: ApiClient,
+  worktreeId: string,
+  instanceId: string | undefined,
+  message: string,
+  askedAt: number,
+  until: number,
+  messages: PromptMessageResponse[] | null,
+): Promise<{ messages: PromptMessageResponse[] | null; instanceId: string | null }> {
+  let rows = messages;
+  if (rows && mayHaveDroppedRowsSince(rows, askedAt)) {
+    const since = await fetchPromptRowsSince(client, worktreeId, instanceId, askedAt);
+    if (since) rows = [...rows, ...since];
+  }
+  const target = instanceId ?? (rows ? ownPromptInstance(rows, message, askedAt, until) : null);
+  return { messages: rows, instanceId: target };
+}
+
+/** The one stderr line for an overlap (Issue #3955). */
+function formatOverlapWarning(reason: OverlapReason, target: string): string {
+  const what = reason === 'turn-already-open'
+    ? `${target} was already in a turn when this message was sent, so the reply may be that turn's`
+    : `another message reached ${target} during this turn, so the reply may answer it`;
+  return `overlapped: ${what} rather than this ask's (send one ask at a time per instance)`;
 }
 
 /** Prints the reply (or its JSON, or the no-reply warning). */
@@ -313,14 +435,18 @@ function printAskReply(
   source: ReplySource,
   reply: string | null,
   options: AskOptions,
+  overlapped: boolean,
 ): void {
   if (options.json) {
+    // `overlapped` only when it is true (Issue #3955): an ask that did not
+    // overlap prints exactly the payload it always did.
     console.log(JSON.stringify({
       worktreeId,
       instanceId: instanceId ?? null,
       cliToolId: agent ?? null,
       source,
       reply,
+      ...(overlapped ? { overlapped: true } : {}),
     }, null, 2));
   } else if (reply === null) {
     // Not an error exit: the turn DID end, and saying so on stderr keeps
@@ -377,6 +503,12 @@ Exit codes (wait's, unchanged; --async always exits 0 once the relay exists):
        limit; \`instances <id> kill <instance>\` and ask again in a fresh session
   21   nothing was running to ask
   124  timed out. Look with \`capture <id> --instance <id> --pane --tail 60\`
+
+Send one ask at a time to an instance (Issue #3955). A message sent while the
+instance is mid-turn can be folded into that turn (codex does), and the two
+asks then get one reply between them. When ask sees that, it still exits 0
+with the reply but prints \`overlapped: ...\` on stderr and --json adds
+"overlapped": true — the reply may answer the other message.
 
 There is deliberately no --auto-yes: turning another session's Auto-Yes on is
 a decision about that session's guard rails, not part of asking it a question.
@@ -449,12 +581,30 @@ a decision about that session's guard rails, not part of asking it a question.
         // `wait`'s own poller, with `wait`'s own defaults: --on-prompt is left
         // at `agent`, so a prompt ends this ask with exit 10 and the payload
         // rather than blocking until the timeout.
+        // Issue #3955: the turn `wait` settled on, for the overlap check.
+        const turn: { startedAt: number | null; closedAt: number | null } = { startedAt: null, closedAt: null };
+        // Every turn record a poll saw, adopted or not: whether one was open at
+        // the send, and the close time of the newest.
+        const record: { openAtSend: boolean; closedAt: number | null } = { openAtSend: false, closedAt: null };
         const result = await pollWorktree(client, worktreeId, {
           timeout,
           instance: instanceId,
           token: options.token,
           // Always on (Issue #3011): a turn that never ran must not read as a reply.
           failOnUpstreamFault: true,
+          onTurnStart: (startedAt, closedAt) => {
+            // The close time is kept from the first poll that saw this turn
+            // closed; a later poll publishing a newer turn does not erase it.
+            if (startedAt !== turn.startedAt) turn.closedAt = null;
+            turn.startedAt = startedAt;
+            if (closedAt !== null && turn.closedAt === null) turn.closedAt = closedAt;
+          },
+          onTurnRecord: (openedAt, closedAt) => {
+            record.closedAt = closedAt;
+            if (openedAt !== null && openedAt < askedAt && (closedAt === null || closedAt >= askedAt)) {
+              record.openAtSend = true;
+            }
+          },
         });
 
         if (result.exitCode !== WaitExitCode.SUCCESS) {
@@ -462,9 +612,30 @@ a decision about that session's guard rails, not part of asking it a question.
           return;
         }
 
-        const { source, reply } = await readAskReply(client, worktreeId, instanceId, askedAt, agent);
+        // Taken before the reply grace: a message sent after the turn ended
+        // went to the next turn, and is not an overlap with this one.
+        const turnEndedAt = Date.now();
+        const { source, reply, messages } = await readAskReply(client, worktreeId, instanceId, askedAt, agent);
 
-        printAskReply(worktreeId, instanceId, agent, source, reply, options);
+        // Reported, not acted on (Issue #3955): the exit code and the reply
+        // stay as they are; the line says the reply may not be this ask's.
+        const until = overlapWindowEnd(askedAt, turnEndedAt, turn.closedAt ?? record.closedAt);
+        const ledger = await readOverlapLedger(client, worktreeId, instanceId, message, askedAt, until, messages);
+        const overlap = detectOverlap({
+          message,
+          askedAt,
+          until,
+          turnStartedAt: turn.startedAt,
+          turnClosedAt: turn.closedAt,
+          openAtSend: record.openAtSend,
+          instanceId: ledger.instanceId,
+          messages: ledger.messages,
+        });
+        if (overlap) {
+          console.error(formatOverlapWarning(overlap, instanceId ?? ledger.instanceId ?? agent ?? worktreeId));
+        }
+
+        printAskReply(worktreeId, instanceId, agent, source, reply, options, overlap !== null);
         process.exit(ExitCode.SUCCESS);
       } catch (error) {
         handleCommandError(error);

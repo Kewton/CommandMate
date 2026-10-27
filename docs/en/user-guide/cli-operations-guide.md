@@ -496,6 +496,36 @@ Claude and the other tools, and any source without hooks, are still closed by th
 before (a Claude interrupt either prints an `Interrupted` row or just puts the prompt back in the
 composer, and neither sends a `Stop`).
 
+#### Do not stack `ask`s on one instance (Issue #3955)
+
+Send the next `ask` (or `send`) to an instance only after the previous `ask` has returned. An agent
+can fold a request that arrives while a turn is running into that turn and answer both with one
+reply (measured on codex 0.164.0, which shows "Messages to be submitted after next tool call").
+The two `ask`s then read the same reply, so **the one sent first can print the answer to the later
+request** (or the other way round). Both exit 0, and both requests did arrive intact (this is not
+a composer problem).
+
+When `ask` sees such an overlap it keeps the reply and the exit code as they are, prints one
+`overlapped: …` line on stderr, and adds `"overlapped": true` to `--json` (the key is absent when
+nothing overlapped). A reply marked this way is not necessarily the answer to your request; send
+the requests again one at a time if it matters. Two things are detected:
+
+- the instance was already in another turn when the message was sent (the later sender; only for
+  tools whose hooks report turn starts, and a turn that ended before the send does not count; it is
+  caught even when that turn ended before `ask`'s first poll. It is not caught when the server's
+  turn record is replaced by this request's own new turn before that first poll: the earlier turn
+  is no longer visible (#3957 will report the state at send time to fix this))
+- another request reached the instance between the send and the end of the turn (the earlier
+  sender; read from the `user` rows of the chat history. The end is the close time the server
+  recorded, so the next request sent after the `Stop` does not count, and no `user` row since the
+  send is missed even when more than the newest 30 rows came after it)
+
+An `ask` without `--instance` / `--agent` finds the instance its request landed on from the
+history and looks only at that instance's rows. Only rows between the send and the end of the turn
+are used for that (the same text sent to another instance later does not count). When that cannot
+be told (the same text reaching more than one instance in that window, for example), the second
+check is skipped.
+
 ### Progress Output
 
 Progress is written to stderr. Only the final result (JSON) goes to stdout.
