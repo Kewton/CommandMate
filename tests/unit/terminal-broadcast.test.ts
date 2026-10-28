@@ -46,7 +46,6 @@ vi.mock('@/lib/session/current-output-builder', () => ({
 
 import { broadcast, hasRoomSubscribers } from '@/lib/ws-server';
 import { buildCurrentOutput } from '@/lib/session/current-output-builder';
-import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
 import {
   broadcastTerminalSnapshot,
   broadcastTerminalSnapshotAfterInteraction,
@@ -322,8 +321,15 @@ describe('broadcastTerminalSnapshotAfterInteraction', () => {
     await vi.advanceTimersByTimeAsync(10);
     await pending;
 
-    expect(invalidateCache).toHaveBeenCalledTimes(2);
-    expect(invalidateCache).toHaveBeenCalledWith('mcbd-claude-wt-1-claude-2');
+    expect(buildCurrentOutput).toHaveBeenCalledTimes(2);
+    expect(buildCurrentOutput).toHaveBeenCalledWith(
+      expect.anything(),
+      'wt-1',
+      'claude',
+      'claude-2',
+      undefined,
+      { freshCapture: true },
+    );
     expect(mockBroadcast).toHaveBeenCalledTimes(2);
     expect(mockBroadcast.mock.calls[0][1]).toMatchObject({
       instanceId: 'claude-2',

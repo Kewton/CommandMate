@@ -137,7 +137,6 @@
         "src/lib/pasted-text-helper.ts",
         "src/lib/polling/response-checker.ts",
         "src/lib/prompt-answer-sender.ts",
-        "src/lib/realtime/terminal-broadcast.ts",
         "src/lib/session-cleanup.ts",
         "src/lib/session-key-sender.ts",
         "src/lib/session/claude-session.ts",
