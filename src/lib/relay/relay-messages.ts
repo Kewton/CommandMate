@@ -28,6 +28,7 @@
  */
 
 import type { SupportedLocale } from '@/config/i18n-config';
+import type { RelayOverlap } from '@/lib/relay/types';
 
 /**
  * The literal every relayed body starts with.
@@ -72,12 +73,44 @@ export function buildRelayHeader(sender: RelaySenderLabel): string {
  */
 export function buildRelayReplyMessage(
   sender: RelaySenderLabel,
-  reply: string
+  reply: string,
+  overlapNote: string | null = null
 ): string {
   const body = reply.trim();
+  // Issue #3957: the note goes on its own line between the header and the
+  // reply, so the header stays the first token and the reply stays verbatim.
+  if (overlapNote !== null) {
+    return `${buildRelayHeader(sender)}\n${overlapNote}\n${body === '' ? '(no reply body)' : body}`;
+  }
   return body === ''
     ? `${buildRelayHeader(sender)} (no reply body)`
     : `${buildRelayHeader(sender)} ${body}`;
+}
+
+/**
+ * The literal the overlap note starts with (Issue #3957). Fixed in both
+ * languages, so a reader can find the note without knowing the server's.
+ */
+export const RELAY_NOTE_PREFIX = '[CommandMate relay]';
+
+const OVERLAP_NOTE_TEMPLATES: Record<SupportedLocale, string> = {
+  en: 'Note: this reply may have been processed in the same turn as another request (overlap={overlap}).',
+  ja: '注意: この返答は、別の依頼と同じターンで処理された可能性があります（overlap={overlap}）。',
+};
+
+/**
+ * The one-line note a delivered reply carries when it may share a turn with
+ * another request (Issue #3957), or null for `none` / not judged.
+ *
+ * A statement of fact, never an instruction: the line lands in another agent's
+ * composer, and "re-ask" or "discard" there would be acted on.
+ */
+export function buildRelayOverlapNote(
+  locale: SupportedLocale,
+  overlap: RelayOverlap | null
+): string | null {
+  if (overlap === null || overlap === 'none') return null;
+  return `${RELAY_NOTE_PREFIX} ${OVERLAP_NOTE_TEMPLATES[locale].replace('{overlap}', overlap)}`;
 }
 
 /** One choice of a confirmation, as the notice lists it. */
@@ -187,7 +220,20 @@ export type RelaySystemLineKind = 'requested' | 'replied' | 'waiting' | 'expired
 export function buildRelaySystemLine(
   locale: SupportedLocale,
   kind: RelaySystemLineKind,
-  alias: string
+  alias: string,
+  detail: RelaySystemLineDetail = {}
 ): string {
-  return SYSTEM_TEMPLATES[locale][kind].replace('{alias}', alias);
+  const line = SYSTEM_TEMPLATES[locale][kind].replace('{alias}', alias);
+  // Issue #3957: what the delivery proved, as untranslated tokens a reader
+  // can grep for in either language.
+  const parts: string[] = [];
+  if (detail.overlap) parts.push(`overlap=${detail.overlap}`);
+  if (detail.holdReason) parts.push(`hold=${detail.holdReason}`);
+  return parts.length === 0 ? line : `${line} (${parts.join(', ')})`;
+}
+
+/** What a system line may carry beside its sentence (Issue #3957). */
+export interface RelaySystemLineDetail {
+  overlap?: RelayOverlap | null;
+  holdReason?: string | null;
 }

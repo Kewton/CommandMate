@@ -81,7 +81,12 @@ import {
 } from '@/lib/session/send-attempt-types';
 import { extractComposerText, SUPPORTED_COMPOSER_TOOLS } from '@/lib/detection/composer-text';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
-import { observeInputStart, withInstanceInputLock } from '@/lib/session/instance-input-lock';
+import {
+  isInputBoundaryRefusal,
+  observeInputStart,
+  withInstanceInputLock,
+  type InputBoundaryHooks,
+} from '@/lib/session/instance-input-lock';
 import type { CopilotTool } from '@/lib/cli-tools/copilot';
 import { formatImagePathFallbackMessage } from '@/lib/cli-tools/opencode';
 import type { ChatMessage, MessageType } from '@/types/models';
@@ -138,6 +143,13 @@ export interface SendUserMessageParams {
    * succeeded.
    */
   onInputStart?: (inputStartedAt: Date) => void;
+  /**
+   * Issue #3957: the REQUIRED hook a relay-bound send records its boundary
+   * with, right before the body's first key (or right before an HTTP dispatch
+   * that types none). Unlike `onInputStart` a throw from it stops the send
+   * before anything is typed, and the attempt is `not-sent`.
+   */
+  inputBoundary?: InputBoundaryHooks;
 }
 
 /** Result of {@link sendUserMessage}. */
@@ -473,10 +485,16 @@ export async function sendUserMessage(
     | { sent: true; inputStartedAt: Date | null }
   > {
     try {
-      const { inputStartedAt } = await observeInputStart(sendToTool, params.onInputStart);
+      const { inputStartedAt } = await observeInputStart(sendToTool, params.onInputStart, params.inputBoundary);
       return { sent: true, inputStartedAt };
     } catch (error) {
       logger.error('failed-to-send-message-to:', { error: getErrorMessage(error) });
+      // Issue #3957: the relay's boundary hook refused before the first key.
+      // The attempt vocabulary has no word of its own for it; nothing was typed
+      // because the reservation the body was going in under was gone.
+      if (isInputBoundaryRefusal(error)) {
+        return { error, failure: { state: 'not-sent', reason: 'input-lock-lost' } };
+      }
       // Issue #3759: not-sent only when the error says the body was never typed.
       let failure = classifySendFailure(error);
       if (failure.reason === 'submit-unconfirmed' && (await composerStillHolds(worktreeId, cliToolId, instanceId, content))) {

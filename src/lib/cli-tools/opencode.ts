@@ -130,6 +130,11 @@ import {
 } from '@/lib/hooks/sources/opencode/log-diagnosis';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 import { getErrorMessage } from '@/lib/errors';
+import {
+  isInputBoundaryRefusal,
+  noteDispatchFailed,
+  noteDispatchStart,
+} from '@/lib/session/instance-input-lock';
 
 const logger = createLogger('cli-tools/opencode');
 
@@ -583,6 +588,17 @@ export class OpenCodeTool extends BaseCLITool {
    * and it is logged as `opencode-send-unverified` so it is visible rather than
    * inferred.
    *
+   * ## Issue #3957: the dispatch boundary
+   *
+   * This path types no key, so it reports no input start. Right before the
+   * POST it notes a `dispatch` boundary instead (`noteDispatchStart`), which a
+   * relay-bound send records as its lower bound — and which can refuse, in
+   * which case nothing is posted and the refusal propagates past the catch
+   * below. When the POST does not end delivered, the caller is told whether
+   * nothing exists (`not_sent`: a `404` on the read-back) or it cannot be said
+   * (`unknown`: a refused or timed-out POST, a body that read back different,
+   * an exhausted ladder), BEFORE the keyboard fallback runs.
+   *
    * @param target - The instance
    * @param message - The body, sent verbatim
    * @param imagePath - Absolute path to an attachment, if there is one
@@ -593,10 +609,26 @@ export class OpenCodeTool extends BaseCLITool {
     message: string,
     imagePath?: string
   ): Promise<boolean> {
+    const outcome = await this.dispatchViaServer(target, message, imagePath);
+    if (outcome === 'delivered') return true;
+    if (outcome !== 'skipped') noteDispatchFailed(outcome);
+    return false;
+  }
+
+  /**
+   * {@link trySendViaServer}'s body, telling apart a route that was never tried
+   * (`skipped`) from a dispatch that did not deliver (Issue #3957).
+   */
+  private async dispatchViaServer(
+    target: AgentInstanceRef,
+    message: string,
+    imagePath?: string
+  ): Promise<'delivered' | 'skipped' | 'not_sent' | 'unknown'> {
     const instanceId = target.instanceId ?? target.cliToolId;
+    let dispatched = false;
     try {
       const port = getAssignedOpencodePort(target);
-      if (port === null) return false;
+      if (port === null) return 'skipped';
 
       // The same three preconditions the abort path checks (#2034): a port with
       // a live subscription behind it, and a session this instance owns. The
@@ -610,7 +642,7 @@ export class OpenCodeTool extends BaseCLITool {
           port,
           liveness: liveness.state,
         });
-        return false;
+        return 'skipped';
       }
 
       // Null on a pane that has not run a turn yet — the gate learns the session
@@ -623,7 +655,7 @@ export class OpenCodeTool extends BaseCLITool {
           instanceId,
           port,
         });
-        return false;
+        return 'skipped';
       }
 
       const parts: OpencodePromptPart[] = [{ type: 'text', text: message }];
@@ -647,10 +679,16 @@ export class OpenCodeTool extends BaseCLITool {
       // §20.5). Null when nothing is configured, and the request body is then
       // byte-identical to the pre-#2048 one.
       const selection = opencodePromptSelection(getOpencodeLaunchSettings(target));
-      if (!(await sendOpencodePrompt(port, sessionId, messageId, parts, selection))) return false;
+      // Issue #3957: the boundary, right before the POST. A refusal throws and
+      // nothing is posted.
+      noteDispatchStart();
+      dispatched = true;
+      // A refused POST and a timed-out one answer the same `false`, and the
+      // second may still have created the message — so neither is "not sent".
+      if (!(await sendOpencodePrompt(port, sessionId, messageId, parts, selection))) return 'unknown';
 
       const verified = await this.verifyPostedMessage(port, sessionId, messageId, message);
-      if (!verified) {
+      if (verified !== 'found') {
         logger.warn('opencode-send-unverified', {
           worktreeId: target.worktreeId,
           instanceId,
@@ -659,7 +697,7 @@ export class OpenCodeTool extends BaseCLITool {
           messageId,
           hasImage: imagePath !== undefined,
         });
-        return false;
+        return verified === 'missing' ? 'not_sent' : 'unknown';
       }
 
       logger.info('opencode-send-delivered-via-api', {
@@ -670,8 +708,11 @@ export class OpenCodeTool extends BaseCLITool {
         messageId,
         hasImage: imagePath !== undefined,
       });
-      return true;
+      return 'delivered';
     } catch (error: unknown) {
+      // Issue #3957: the relay refused the boundary — nothing was posted, and
+      // nothing may be typed either.
+      if (isInputBoundaryRefusal(error)) throw error;
       // Nothing above is allowed to take the send down: the keystroke route is
       // still there and is what runs when this answers false.
       logger.warn('opencode-send-api-failed', {
@@ -679,7 +720,7 @@ export class OpenCodeTool extends BaseCLITool {
         instanceId,
         error: getErrorMessage(error),
       });
-      return false;
+      return dispatched ? 'unknown' : 'skipped';
     }
   }
 
@@ -694,24 +735,26 @@ export class OpenCodeTool extends BaseCLITool {
    * — so the check is that the sent body is *among* the text parts, not that it
    * is the only one.
    *
-   * @returns True once the body was found; false on a `404` or after the ladder
+   * @returns `found` once the body was found; `missing` on a `404`; `mismatch`
+   *   when a message exists under the id with other text; `unknown` after the
+   *   ladder (Issue #3957 tells the last three apart)
    */
   private async verifyPostedMessage(
     port: number,
     sessionId: string,
     messageId: string,
     message: string
-  ): Promise<boolean> {
+  ): Promise<'found' | 'missing' | 'mismatch' | 'unknown'> {
     for (const waitMs of OPENCODE_SEND_READBACK_DELAYS_MS) {
       if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
       const readback = await readOpencodeUserMessage(port, sessionId, messageId);
-      if (readback.kind === 'found') return readback.texts.includes(message);
+      if (readback.kind === 'found') return readback.texts.includes(message) ? 'found' : 'mismatch';
       // A `404` is the server saying the message does not exist, which does not
       // become truer by asking again — the measured cause is a part the server
       // could not resolve, and it discards the whole message when that happens.
-      if (readback.kind === 'missing') return false;
+      if (readback.kind === 'missing') return 'missing';
     }
-    return false;
+    return 'unknown';
   }
 
   /**

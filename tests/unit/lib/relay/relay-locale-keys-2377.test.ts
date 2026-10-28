@@ -16,7 +16,7 @@ import { describe, it, expect } from 'vitest';
 import en from '../../../../locales/en/worktree.json';
 import ja from '../../../../locales/ja/worktree.json';
 import { resolveRelayBadges, resolveRelayStrip } from '@/lib/relay/relay-badges';
-import type { SessionRelay } from '@/lib/relay/types';
+import { LEGACY_RELAY_BINDING_FIELDS, type SessionRelay } from '@/lib/relay/types';
 
 function relay(id: string, state: SessionRelay['state'] = 'pending'): SessionRelay {
   return {
@@ -31,6 +31,7 @@ function relay(id: string, state: SessionRelay['state'] = 'pending'): SessionRel
     updatedAt: 0,
     expiresAt: 0,
     deliveredAt: null,
+    ...LEGACY_RELAY_BINDING_FIELDS,
   };
 }
 

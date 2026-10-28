@@ -179,6 +179,11 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   If the target stops on a confirmation you are told, once, and the relay stays
   open -- answer the dialog on that session and the reply still arrives. A relay
   nobody could deliver expires after 24h with a single line of notice.
+  The relay is tied to this send (Issue #3957): only a turn that ends after the
+  message started going in is delivered, and a reply that may share a turn with
+  another request carries one '[CommandMate relay] ... (overlap=...)' line under
+  the header. When the send's outcome is unknown the relay is left open, nothing
+  is resent, and 'commandmate relays --id <relay-id>' shows why it is held.
 
 ### commandmate relays
   List the standing delegations this session is waiting on and owes.
@@ -186,6 +191,7 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     commandmate relays                      # the session running the command
     commandmate relays --worktree <id> --instance codex-2
     commandmate relays --json               # owed / awaiting / open / counts
+    commandmate relays --id <relay-id>      # one relay, closed too: send= overlap= hold=
     commandmate relays cancel <relay-id>    # withdraw one; nothing is delivered
 
   States: pending (the worker has not finished), prompt (it stopped on a
@@ -833,8 +839,12 @@ same CommandMate server, and you can hand work to them.
   reply for both. ask then still exits 0 with the reply, but prints
   'overlapped: ...' on stderr and --json adds "overlapped": true -- the reply
   may answer the other request.
-  Relay delivery (ask --async / send --reply-to) does not detect overlaps;
-  do not stack messages on one instance.
+  Relay delivery (ask --async / send --reply-to) delivers only a turn that
+  ended after the message went in, and notes a proven overlap on the reply's
+  second line ('[CommandMate relay] ... (overlap=later)'; unknown is never
+  shown as none). Until Issue #3957's third PR a request carried into the next
+  turn may still get the earlier turn's reply, so do not stack messages on one
+  instance.
 
 ## How long a request can be
 

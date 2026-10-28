@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { resolveRelayBadges, resolveRelayStrip } from '@/lib/relay/relay-badges';
-import type { SessionRelay } from '@/lib/relay/types';
+import { LEGACY_RELAY_BINDING_FIELDS, type SessionRelay } from '@/lib/relay/types';
 
 const A = { worktreeId: 'wt-a', instanceId: 'claude' };
 const B = { worktreeId: 'wt-b', instanceId: 'codex' };
@@ -24,6 +24,7 @@ function relay(overrides: Partial<SessionRelay> = {}): SessionRelay {
     updatedAt: 0,
     expiresAt: 0,
     deliveredAt: null,
+    ...LEGACY_RELAY_BINDING_FIELDS,
   };
 }
 

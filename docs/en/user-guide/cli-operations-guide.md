@@ -546,7 +546,55 @@ are used for that (the same text sent to another instance later does not count).
 be told (the same text reaching more than one instance in that window, for example), the second
 check is skipped.
 
-Relay delivery (`ask --async` / `send --reply-to`) does not detect overlaps; do not stack messages on one instance.
+#### Relay delivery bound to its send (Issue #3957)
+
+Relay delivery (`ask --async` / `send --reply-to`) now picks the reply by **tying the relay to the send of
+its request** (a new CLI with a new server).
+
+- The CLI opens the relay with `bind: true` on `POST /api/relays`, checks `bindMode: "bound"` in the
+  answer, and puts `relayId` on the send (`POST /api/worktrees/:id/send`). The send API reserves the
+  relay before any side effect such as starting the session (a wrong destination or id is 400; a closed,
+  expired or already reserved relay is 409; neither types anything) and records the "input boundary" —
+  the time, and whether a turn was open then — right before the first key of the body. When it cannot
+  record it, the input does not start
+- Only a turn that ended after the boundary counts. Turns that end before the send is confirmed are held
+  as candidates, and once it is confirmed **the earliest candidate after the boundary** is taken. A reply
+  to another request that ended while the send waited for the input lock, or a reply to a request whose
+  send failed, is never delivered. Confirmation (prompt) notices follow the same rule: only a dialog still
+  open when the send is confirmed is reported. A reply that is ready while a prompt notice is being
+  delivered goes out after the notice
+- The send API answers `sendOutcome` (`sent` / `not_sent` / `unknown`). The CLI withdraws the relay only
+  on `not_sent` (nothing reached the session). A 409 reservation conflict does not withdraw it. When the
+  answer is lost, the CLI asks `GET /api/relays/:id` and **does not resend** the message; when that does
+  not tell either, the relay is left open and stderr names the relay id and
+  `commandmate relays --id <relay-id>`
+- An overlap is noted only when it is proven. The delivered body is the `[from <alias> / <worktree>]`
+  line, one note line
+  (`[CommandMate relay] Note: this reply may have been processed in the same turn as another request (overlap=later).`),
+  then the reply verbatim. `overlap` is `later` (another turn was open at the input), `earlier` (another
+  input arrived between the input and the reply), `both`, `unknown` (could not be told; never shown as
+  "no overlap") or `none` (no note)
+- A held relay publishes its `hold` reason: `send_unknown` (whether it was sent is not known),
+  `dispatch_unknown` (opencode's HTTP send could not be confirmed), `generation_changed` (the session was
+  relaunched during the send or before the reply), `server_restarted` (the server restarted during the
+  send), and so on. A held relay delivers no reply and is replaced by the expiry notice at its deadline
+  (24 hours by default). `commandmate relays --id <relay-id> [--json]` shows `send=` / `overlap=` /
+  `hold=`, closed relays included, and the requester's "reply" history line carries `overlap=`
+- opencode's HTTP send reports no input start, so the moment right before the dispatch is the boundary.
+  When the HTTP send is confirmed not to have arrived and the terminal fallback types the body, the
+  terminal input start replaces the boundary
+- Relays opened by an older CLI, and older servers, behave as before (a new CLI prints one "legacy
+  handling" line on stderr against an older server and does not send `relayId`)
+
+**Limits until PR 3** (matching turns to replies comes in the next change):
+
+- On claude and others, a request sent into a running turn may be carried to the next turn; the reply
+  of the turn that ended first is then delivered with an `overlap=later` note, and the reply to the
+  request's own turn is not delivered
+- Two relays to one instance from different requesters can both receive one reply
+- `earlier` is judged only when proven and can be missed (`unknown` then)
+
+Not overlapping is still the safest: do not stack messages on one instance.
 
 ### Progress Output
 
