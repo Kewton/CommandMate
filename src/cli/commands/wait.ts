@@ -44,7 +44,13 @@ import {
   INSTANCE_ALIAS_HELP_SUFFIX,
   INSTANCE_SELECTOR_ERROR,
 } from './instances';
-import { nextPollWithinDeadlines, POLL_INTERVAL_MS, sleep } from './wait-timing';
+import {
+  DeadlineReached,
+  nextPollWithinDeadlines,
+  POLL_INTERVAL_MS,
+  readWithinDeadlines,
+  sleep,
+} from './wait-timing';
 import {
   activeSuppression,
   decisionWithheldReason,
@@ -741,7 +747,11 @@ async function releaseOrphanTurn(
     return false;
   }
 
-  const ledger = await readNewestPromptAt(client, worktreeId, options, data);
+  // Issue #3974: bounded by --timeout / --stall-timeout; a ledger that does not
+  // answer in time ends the wait (DeadlineReached), it is not "unreadable".
+  const ledger = await readWithinDeadlines(options, poll.startTime, state.lastActivityTime, signal =>
+    readNewestPromptAt(client, worktreeId, options, data, signal),
+  );
   state.promptLedgerReadable = ledger.readable;
   if (!ledger.readable || ledger.submittedAt === null || outstandingPrompt(data, ledger.submittedAt)) {
     state.orphanTurnHold = null;
@@ -881,7 +891,10 @@ async function promptLedgerStage(
   // reaches it.
   let answeredNewestPrompt = false;
   if (state.turnStartedAt === null && state.promptLedgerReadable && reportsTurnBoundaries(data)) {
-    const ledger = await readNewestPromptAt(client, worktreeId, options, data);
+    // Issue #3974: bounded like the poll's own read, see releaseOrphanTurn.
+    const ledger = await readWithinDeadlines(options, startTime, state.lastActivityTime, signal =>
+      readNewestPromptAt(client, worktreeId, options, data, signal),
+    );
     // One notice, then stop asking: a ledger that failed once will fail
     // every poll, and the point of degrading is to stop paying for it.
     state.promptLedgerReadable = ledger.readable;
@@ -1090,9 +1103,14 @@ export async function pollWorktree(
       // very capture it was decided on (see {@link withObservation}).
       const data =
         settledFrame ??
-        (await client.get<CurrentOutputObservedResponse>(
-          observedCurrentOutputPath(worktreeId, options.instance),
-        ));
+        // Issue #3974: bounded by --timeout / --stall-timeout, so a server that
+        // does not answer cannot hold the wait past them.
+        (await readWithinDeadlines(options, startTime, state.lastActivityTime, signal => {
+          const path = observedCurrentOutputPath(worktreeId, options.instance);
+          return signal
+            ? client.get<CurrentOutputObservedResponse>(path, { signal })
+            : client.get<CurrentOutputObservedResponse>(path);
+        }));
       settledFrame = null;
 
       trackPollActivity(state, data);
@@ -1169,6 +1187,9 @@ export async function pollWorktree(
       // Progress indicator on stderr [DR1-05]
       console.error(`Waiting: ${worktreeId} (status=${data.sessionStatus}, running=${data.isRunning}, prompt=${data.isPromptWaiting})`);
     } catch (error) {
+      // Issue #3974: a read ended by --timeout / --stall-timeout. Not a failed
+      // poll: straight back to deadlineStage, which exits 124.
+      if (error instanceof DeadlineReached) continue;
       if (error instanceof ApiError) {
         throw error;
       }
