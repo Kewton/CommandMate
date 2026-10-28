@@ -170,6 +170,8 @@ export class RelaySendBinding {
   private observationInvalid = false;
   private refused = false;
   private dispatch: DispatchState = 'none';
+  /** A later HTTP dispatch noted after one ended `unknown`, not (yet) failed. */
+  private retryDispatchOpen = false;
 
   constructor(
     private readonly db: Database.Database,
@@ -197,8 +199,13 @@ export class RelaySendBinding {
   private beforeInput(at: Date, kind: InputBoundaryKind): void {
     // A dispatch that may already have delivered: the keyboard fallback is the
     // operator's message and is typed as before, but it says nothing new about
-    // the relay, which stays held.
-    if (this.dispatch === 'unknown') return;
+    // the relay, which stays held. A further HTTP dispatch (opencode's image
+    // send falling back to its text send) is remembered: only its delivery may
+    // lift the hold.
+    if (this.dispatch === 'unknown') {
+      if (kind === 'dispatch') this.retryDispatchOpen = true;
+      return;
+    }
 
     const reading = this.target.readTurn();
     const sameGeneration = reading.generation === this.generationBefore;
@@ -235,6 +242,13 @@ export class RelaySendBinding {
   }
 
   private onDispatchFailed(verdict: DispatchFailureVerdict): void {
+    // Issue #3957: once one dispatch of this send may have delivered, a later
+    // attempt that did not deliver proves nothing about the first — `unknown`
+    // stays, and only a delivered send can change it.
+    if (this.dispatch === 'unknown') {
+      this.retryDispatchOpen = false;
+      return;
+    }
     if (verdict === 'not_sent') {
       // The HTTP boundary is discarded: the keyboard's own input start, which
       // comes after the lock wait, replaces it. The HTTP time must not be the
@@ -274,7 +288,21 @@ export class RelaySendBinding {
 
   private settle(result: RelaySendResult): RelaySendOutcome {
     const base = { relayId: this.target.relayId, attemptId: this.attemptId };
-    if (this.dispatch === 'unknown') return 'unknown';
+    if (this.dispatch === 'unknown') {
+      // A later HTTP dispatch that delivered: the message is in, and the first
+      // dispatch's boundary (the earlier one) stays the lower bound.
+      if (result.kind === 'sent' && this.retryDispatchOpen) {
+        settleRelaySendState(this.db, {
+          ...base,
+          from: ['unknown'],
+          to: 'sent',
+          inputMessageId: result.messageId,
+          clearHoldReason: true,
+        });
+        return 'sent';
+      }
+      return 'unknown';
+    }
 
     if (result.kind === 'sent') {
       if (!this.boundaryWritten) {

@@ -796,6 +796,8 @@ export interface SettleRelaySendStateInput {
   inputMessageId?: string | null;
   /** Mark the observation invalid in the same write (a relaunch during the send). */
   invalidateObservation?: boolean;
+  /** Drop the hold reason (a held send that turned out delivered). */
+  clearHoldReason?: boolean;
   now?: number;
 }
 
@@ -810,7 +812,7 @@ export function settleRelaySendState(db: Database.Database, input: SettleRelaySe
     .prepare(`
       UPDATE session_relays
       SET send_state = ?,
-          hold_reason = COALESCE(?, hold_reason),
+          hold_reason = CASE WHEN ? = 1 THEN NULL ELSE COALESCE(?, hold_reason) END,
           input_message_id = COALESCE(?, input_message_id),
           obs_state = CASE WHEN ? = 1 THEN 'invalid' ELSE obs_state END,
           updated_at = ?
@@ -819,6 +821,7 @@ export function settleRelaySendState(db: Database.Database, input: SettleRelaySe
     `)
     .run(
       input.to,
+      input.clearHoldReason ? 1 : 0,
       input.holdReason ?? null,
       input.inputMessageId ?? null,
       input.invalidateObservation ? 1 : 0,
@@ -952,6 +955,40 @@ export function promoteRelayPendingReply(db: Database.Database, id: string, now 
       db.prepare('UPDATE session_relays SET pending_reply = NULL WHERE id = ?').run(id);
       return false;
     }
+    db.prepare(`
+      UPDATE session_relays
+      SET pending_kind = 'reply', pending_body = ?, payload_id = ?, overlap = ?,
+          pending_reply = NULL, updated_at = ?
+      WHERE id = ?
+    `).run(reply.body, reply.payloadId, reply.overlap, now, id);
+    return true;
+  })();
+}
+
+/**
+ * A prompt notice whose delivery did not go out, while a reply waits in the
+ * second slot: the reply takes the first slot in its place (Issue #3957).
+ *
+ * Conditional on the notice's own payload id, in one transaction, so a notice
+ * replaced meanwhile is left alone and the reply is not moved twice.
+ */
+export function replaceRelayPromptWithPendingReply(
+  db: Database.Database,
+  id: string,
+  promptPayloadId: string | null,
+  now = Date.now()
+): boolean {
+  return db.transaction((): boolean => {
+    const row = db
+      .prepare(`
+        SELECT pending_reply FROM session_relays
+        WHERE id = ? AND pending_kind = 'prompt' AND payload_id IS ? AND pending_reply IS NOT NULL
+          AND state IN (${OPEN_STATE_PLACEHOLDERS})
+      `)
+      .get(id, promptPayloadId, ...OPEN_RELAY_STATES) as { pending_reply: string } | undefined;
+    if (!row) return false;
+    const reply = parseJson<RelayPendingReply | null>(row.pending_reply, null);
+    if (!reply) return false;
     db.prepare(`
       UPDATE session_relays
       SET pending_kind = 'reply', pending_body = ?, payload_id = ?, overlap = ?,

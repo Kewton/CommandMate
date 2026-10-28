@@ -75,7 +75,7 @@ function insertWorktree(id: string, cliToolId: string): void {
 let turnSeq = 0;
 
 /** A row the codex transcript reader wrote: a finished turn's answer. */
-function seedReply(content: string, at: number): string {
+function seedReply(content: string, at: number, turnId?: string): string {
   turnSeq += 1;
   return createMessage(db, {
     worktreeId: 'wt-b',
@@ -83,7 +83,7 @@ function seedReply(content: string, at: number): string {
     content,
     messageType: 'normal',
     timestamp: new Date(at),
-    requestId: codexTurnRequestId(`turn-${turnSeq}`),
+    requestId: codexTurnRequestId(turnId ?? `turn-${turnSeq}`),
     cliToolId: 'codex',
     instanceId: 'codex',
   }).id;
@@ -642,5 +642,122 @@ describe('restart recovery (each intermediate state)', () => {
     resetRelayServerBootId();
     await pumpRelayDeliveries();
     expect(getRelayById(db, relay.id)?.state).toBe('cancelled');
+  });
+});
+
+describe('a reader that saves several turns and announces once (review P1)', () => {
+  it('holds every turn of one announcement, and the earliest after the boundary is taken', async () => {
+    const relay = boundRelay();
+    const binding = reserve(relay.id);
+    inputStarts(binding, NOW + 100);
+    const own = seedUserRow('please review', NOW + 100);
+
+    // The codex reader backfills T1 and T2 in one capture; the gate announces once.
+    seedReply('T1 answer', NOW + 1_000);
+    seedReply('T2 answer', NOW + 2_000);
+    await notifyRelayTurnCompleted(CODEX_WORKER, { settled: true });
+    expect(getRelayBinding(db, relay.id)?.heldCandidates.map((c) => c.timestamp)).toEqual([NOW + 1_000, NOW + 2_000]);
+
+    sendConfirmed(binding, own);
+    await settle();
+    expect(deliveredBodies()).toEqual([expect.stringContaining('T1 answer')]);
+    expect(deliveredBodies()[0]).not.toContain('T2 answer');
+  });
+
+  it('after the confirmation too: two turns saved at once deliver the earlier one', async () => {
+    const relay = boundRelay();
+    const binding = reserve(relay.id);
+    inputStarts(binding, NOW + 100);
+    sendConfirmed(binding, seedUserRow('go', NOW + 100));
+    seedReply('first after the boundary', NOW + 1_000);
+    seedReply('second', NOW + 2_000);
+    await notifyRelayTurnCompleted(CODEX_WORKER, { settled: true });
+    await settle();
+    expect(deliveredBodies()).toEqual([expect.stringContaining('first after the boundary')]);
+  });
+
+  it('a turn that wrote two rows is one candidate, delivered by its newest row', async () => {
+    const relay = boundRelay();
+    const binding = reserve(relay.id);
+    inputStarts(binding, NOW + 100);
+    const own = seedUserRow('go', NOW + 100);
+    seedReply('narration', NOW + 1_000, 'turn-x');
+    await notifyRelayTurnCompleted(CODEX_WORKER, { settled: true });
+    seedReply('summary', NOW + 1_500, 'turn-x');
+    seedReply('next turn', NOW + 3_000, 'turn-y');
+    await notifyRelayTurnCompleted(CODEX_WORKER, { settled: true });
+    sendConfirmed(binding, own);
+    await settle();
+    expect(deliveredBodies()).toEqual([expect.stringMatching(/summary$/)]);
+  });
+
+  it('negative control: one turn, one announcement — delivered as before', async () => {
+    const relay = boundRelay();
+    const binding = reserve(relay.id);
+    inputStarts(binding, NOW + 100);
+    const own = seedUserRow('go', NOW + 100);
+    seedReply('only turn', NOW + 1_000);
+    await notifyRelayTurnCompleted(CODEX_WORKER, { settled: true });
+    sendConfirmed(binding, own);
+    await settle();
+    expect(deliveredBodies()).toEqual([expect.stringContaining('only turn')]);
+  });
+});
+
+describe('a prompt notice whose delivery failed while a reply waited (review P2)', () => {
+  async function blockPromptDelivery(): Promise<(value: unknown) => void> {
+    let release: (value: unknown) => void = () => {};
+    sendUserMessage.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    notifyRelayPromptWaiting(CODEX_WORKER);
+    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    expect(sendUserMessage).toHaveBeenCalledTimes(1);
+    return release;
+  }
+
+  it('legacy: the reply replaces the failed notice and goes out; the notice does not', async () => {
+    const relay = legacyRelay();
+    seedPrompt('p1', NOW + 500);
+    const release = await blockPromptDelivery();
+    seedReply('finished', NOW + 3_000);
+    await notifyRelayTurnCompleted(CODEX_WORKER, { settled: true });
+    expect(getRelayBinding(db, relay.id)?.pendingReply).not.toBeNull();
+
+    release({ ok: false, stage: 'send', error: 'composer busy' });
+    await settle();
+
+    const bodies = deliveredBodies();
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toContain('finished');
+    expect(bodies[1]).not.toContain('Allow Bash');
+    expect(getRelayById(db, relay.id)?.state).toBe('delivered');
+  });
+
+  it('bound: the same, after the send was confirmed', async () => {
+    const relay = boundRelay();
+    const binding = reserve(relay.id);
+    inputStarts(binding, NOW + 100);
+    sendConfirmed(binding, seedUserRow('go', NOW + 100));
+    seedPrompt('p1', NOW + 500);
+    const release = await blockPromptDelivery();
+    seedReply('finished', NOW + 3_000);
+    await notifyRelayTurnCompleted(CODEX_WORKER, { settled: true });
+
+    release({ ok: false, stage: 'prompt_waiting', error: 'requester on a dialog' });
+    await settle();
+
+    expect(deliveredBodies()[1]).toContain('finished');
+    expect(getRelayById(db, relay.id)?.state).toBe('delivered');
+  });
+
+  it('negative control: with the second slot empty the notice is retried as before', async () => {
+    const relay = legacyRelay();
+    seedPrompt('p1', NOW + 500);
+    const release = await blockPromptDelivery();
+    release({ ok: false, stage: 'send', error: 'composer busy' });
+    await settle();
+
+    expect(deliveredBodies()).toHaveLength(2);
+    expect(deliveredBodies()[1]).toContain('Allow Bash(rm -rf build)?');
+    expect(getRelayById(db, relay.id)?.state).toBe('prompt');
   });
 });

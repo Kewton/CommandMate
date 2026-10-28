@@ -402,4 +402,52 @@ describe('POST /send with relayId (Issue #3957)', () => {
       expect(body.sendOutcome).toBe('not_sent');
     });
   });
+
+  describe('two HTTP attempts in one send (opencode image → text, review P2)', () => {
+    it('unknown then not_sent: stays unknown, never not_sent', async () => {
+      const relay = boundRelay();
+      sendUserMessage.mockImplementationOnce(async (_db: unknown, params: SendParams) => {
+        params.inputBoundary?.beforeInput(new Date(1_900_000_000_000), 'dispatch');
+        params.inputBoundary?.onDispatchFailed?.('unknown');
+        params.inputBoundary?.beforeInput(new Date(1_900_000_010_000), 'dispatch');
+        params.inputBoundary?.onDispatchFailed?.('not_sent');
+        try {
+          params.inputBoundary?.beforeInput(new Date(1_900_000_020_000), 'input_start');
+        } catch {
+          params.onAttempt?.({ state: 'not-sent', reason: 'input-lock-lost' });
+          return { ok: false, stage: 'send', error: 'refused' };
+        }
+        params.onAttempt?.({ state: 'not-sent', reason: 'prompt-not-ready' });
+        return { ok: false, stage: 'send', error: 'prompt not ready' };
+      });
+      const { body } = await post({ relayId: relay.id });
+      expect(body.sendOutcome).toBe('unknown');
+      expect(getRelayById(db, relay.id)).toMatchObject({ state: 'pending', sendState: 'unknown', holdReason: 'dispatch_unknown' });
+    });
+
+    it('unknown then the second HTTP attempt delivered: sent, boundary from the first', async () => {
+      const relay = boundRelay();
+      sendUserMessage.mockImplementationOnce(async (_db: unknown, params: SendParams) => {
+        params.inputBoundary?.beforeInput(new Date(1_900_000_000_000), 'dispatch');
+        params.inputBoundary?.onDispatchFailed?.('unknown');
+        params.inputBoundary?.beforeInput(new Date(1_900_000_010_000), 'dispatch');
+        return ok(params);
+      });
+      const { body } = await post({ relayId: relay.id });
+      expect(body.sendOutcome).toBe('sent');
+      expect(getRelayById(db, relay.id)).toMatchObject({ sendState: 'sent', holdReason: null, inputBoundaryAt: 1_900_000_000_000 });
+    });
+
+    it('negative control: not_sent alone, fallback refused → not_sent', async () => {
+      const relay = boundRelay();
+      sendUserMessage.mockImplementationOnce(async (_db: unknown, params: SendParams) => {
+        params.inputBoundary?.beforeInput(new Date(), 'dispatch');
+        params.inputBoundary?.onDispatchFailed?.('not_sent');
+        params.onAttempt?.({ state: 'not-sent', reason: 'prompt-not-ready' });
+        return { ok: false, stage: 'send', error: 'prompt not ready' };
+      });
+      const { body } = await post({ relayId: relay.id });
+      expect(body.sendOutcome).toBe('not_sent');
+    });
+  });
 });

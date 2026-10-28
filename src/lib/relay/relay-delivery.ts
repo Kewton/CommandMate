@@ -59,12 +59,14 @@ import {
   markRelayExpired,
   markRelayPromptNotified,
   promoteRelayPendingReply,
+  replaceRelayPromptWithPendingReply,
   replaceRelayPromptWithReply,
   setRelayHold,
   setRelayPendingReply,
   settleRelaySendState,
   stashRelayPayload,
   type RelayBinding,
+  type RelayHeldCandidate,
   type RelayPendingReply,
 } from '@/lib/db/relay-db';
 import {
@@ -449,8 +451,10 @@ function stashForBoundRelay(
   now: number
 ): boolean {
   if (relay.sendState === 'awaiting' || relay.sendState === 'input_started') {
-    const reply = findWorkerReply(db, worker, relay.createdAt);
-    if (reply) {
+    // Every finished turn since the relay opened, oldest first — not only the
+    // newest: a transcript reader that backfills two turns saves both and
+    // announces once, and holding only the newest would lose the earlier one.
+    for (const reply of findWorkerCompletions(db, worker, relay.createdAt)) {
       appendRelayHeldCandidate(
         db,
         relay.id,
@@ -463,9 +467,62 @@ function stashForBoundRelay(
   if (relay.sendState !== 'sent' || relay.inputBoundaryAt === null) return false;
   const binding = getRelayBinding(db, relay.id);
   if (!binding || !observationStillHolds(db, worker, binding)) return false;
-  const reply = findWorkerReply(db, worker, relay.inputBoundaryAt);
+  // The earliest turn that finished after the boundary, for the same reason.
+  const [reply] = findWorkerCompletions(db, worker, relay.inputBoundaryAt);
   if (!reply) return false;
   return stashBoundReply(db, worker, binding, reply, now);
+}
+
+/**
+ * Every finished turn of B at or after `since`, oldest first, as one row per
+ * turn (Issue #3957).
+ *
+ * The same row filter as {@link findWorkerReply}. A transcript tool's turn is
+ * its `-turn:` request id, and a turn that wrote several rows is represented
+ * by its newest one (the summary after the narration) — what
+ * {@link findWorkerReply} would have answered for that turn alone. A row with
+ * no request id (a scrape-only tool) is a turn of its own.
+ */
+function findWorkerCompletions(
+  db: Database.Database,
+  worker: RelayWorkerRef,
+  since: number
+): ChatMessage[] {
+  const messages = getMessages(db, worker.worktreeId, {
+    limit: REPLY_LOOKBACK_MESSAGES,
+    cliToolId: worker.cliToolId,
+    instanceId: worker.instanceId,
+    matchResolvedInstance: true,
+  });
+  const requireTurnRow = requiresTurnRow(worker.cliToolId);
+  const byTurn = new Map<string, ChatMessage>();
+  // Newest-first, so the first row seen for a turn is that turn's newest.
+  for (const message of messages) {
+    if (message.timestamp.getTime() < since) break;
+    if (message.role !== 'assistant') continue;
+    if (message.messageType === 'prompt') continue;
+    if (isSystemRow(message.requestId)) continue;
+    if (requireTurnRow && !isTurnRow(message.requestId)) continue;
+    if (message.content.trim() === '') continue;
+    const key = message.requestId ? `turn:${message.requestId}` : `row:${message.id}`;
+    if (!byTurn.has(key)) byTurn.set(key, message);
+  }
+  return [...byTurn.values()].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+}
+
+/** The newest row of the turn a held candidate pointed at (it may have grown since). */
+function latestRowOfCandidate(
+  db: Database.Database,
+  worker: RelayWorkerRef,
+  candidate: RelayHeldCandidate
+): ChatMessage | null {
+  if (candidate.requestId) {
+    const turn = findWorkerCompletions(db, worker, candidate.timestamp).find(
+      (row) => row.requestId === candidate.requestId
+    );
+    if (turn) return turn;
+  }
+  return getMessageById(db, candidate.messageId);
 }
 
 /** Judge the overlap of one reply and stash it, note and all. */
@@ -529,9 +586,20 @@ export function evaluateRelayAfterSend(relayId: string): void {
       const held = binding.heldCandidates;
       clearRelayHeldCandidates(db, relayId);
       if (!observationStillHolds(db, worker, binding)) return false;
-      for (const candidate of held) {
+      // Earliest by the row's own time; arrival order breaks ties (one
+      // announcement can hold several turns).
+      const ordered = held
+        .map((candidate, index) => ({ candidate, index }))
+        .sort((a, b) => a.candidate.timestamp - b.candidate.timestamp || a.index - b.index)
+        .map(({ candidate }) => candidate);
+      const seenTurns = new Set<string>();
+      for (const candidate of ordered) {
         if (candidate.timestamp < boundary) continue;
-        const row = getMessageById(db, candidate.messageId);
+        if (candidate.requestId) {
+          if (seenTurns.has(candidate.requestId)) continue;
+          seenTurns.add(candidate.requestId);
+        }
+        const row = latestRowOfCandidate(db, worker, candidate);
         if (!row) continue;
         return stashBoundReply(db, worker, binding, row, now);
       }
@@ -954,6 +1022,7 @@ async function deliverOne(
   const requester = resolveRelaySession(db, relay.from);
 
   claimRelayDelivery(relayId);
+  let delivered = false;
   try {
     const result = await sendUserMessage(db, {
       worktreeId: requester.worktreeId,
@@ -1006,8 +1075,17 @@ async function deliverOne(
       globalThis.__relayPumpAgain = true;
     }
     logger.info('relay-delivered', { relayId, kind, to: `${requester.worktreeId}/${requester.instanceId}` });
+    delivered = true;
     return 'delivered';
   } finally {
+    // Issue #3957: a prompt notice that did not go out (refused, failed,
+    // threw) is back to unclaimed — and a reply that finished while it was
+    // being typed waits in the second slot. The reply supersedes the notice
+    // exactly as it would have had it arrived a moment later.
+    if (!delivered && kind === 'prompt' && replaceRelayPromptWithPendingReply(db, relay.id, current.payloadId)) {
+      logger.info('relay-prompt-superseded-after-failed-delivery', { relayId });
+      globalThis.__relayPumpAgain = true;
+    }
     // Delivered: a reply is closed now and a prompt notice leaves the relay
     // open on purpose, so either way a later cancel must be judged by the row.
     // Held or failed: nothing reached A, so the relay can be withdrawn again.
