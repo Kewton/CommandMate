@@ -61,16 +61,20 @@ export interface PostMessageOptions {
   promptWaitingFallback: string;
 }
 
-/** Post the message; on failure cancel the relay and report PROMPT_WAITING. */
+/**
+ * Post the message; on failure cancel the relay and report PROMPT_WAITING.
+ *
+ * @returns The send API's body (Issue #3957: `ask` reads `turnOpenAtSend`)
+ */
 export async function postMessage(
   client: ApiClient,
   worktreeId: string,
   sendBody: Record<string, unknown>,
   options: PostMessageOptions
-): Promise<void> {
+): Promise<ChatMessage> {
   const { relayId } = options;
   try {
-    await client.post<ChatMessage>(`/api/worktrees/${worktreeId}/send`, sendBody);
+    return await client.post<ChatMessage>(`/api/worktrees/${worktreeId}/send`, sendBody);
   } catch (error) {
     if (options.onFailure) {
       await options.onFailure();

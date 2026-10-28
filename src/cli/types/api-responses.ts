@@ -1657,6 +1657,14 @@ export interface ChatMessage {
   content: string;
   cliToolId?: string;
   createdAt?: string;
+  /**
+   * Issue #3957: present (always true) only when the instance was mid-turn by
+   * its own turn record when the message went out (opened, not closed). Absent
+   * for "not mid-turn" and for "not known" — a tool whose hooks do not report a
+   * turn start, a session the send started, a server before #3957.
+   * Mirrors: src/app/api/worktrees/[id]/send/route.ts SendMessageResponse.
+   */
+  turnOpenAtSend?: true;
 }
 
 // =============================================================================

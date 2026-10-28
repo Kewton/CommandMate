@@ -527,9 +527,10 @@ the requests again one at a time if it matters. Two things are detected:
 
 - the instance was already in another turn when the message was sent (the later sender; only for
   tools whose hooks report turn starts, and a turn that ended before the send does not count; it is
-  caught even when that turn ended before `ask`'s first poll. It is not caught when the server's
-  turn record is replaced by this request's own new turn before that first poll: the earlier turn
-  is no longer visible (#3957 will report the state at send time to fix this))
+  caught even when that turn ended before `ask`'s first poll. The send API's response also says
+  whether a turn was open when the message was accepted (`turnOpenAtSend: true`; the key is absent
+  when not, or not known), so it is caught even when the server's turn record is replaced by this
+  request's own new turn before that first poll (#3957))
 - another request reached the instance between the send and the end of the turn (the earlier
   sender; read from the `user` rows of the chat history. The end is the close time the server
   recorded, so the next request sent after the `Stop` does not count, and no `user` row since the
@@ -540,6 +541,8 @@ history and looks only at that instance's rows. Only rows between the send and t
 are used for that (the same text sent to another instance later does not count). When that cannot
 be told (the same text reaching more than one instance in that window, for example), the second
 check is skipped.
+
+Relay delivery (`ask --async` / `send --reply-to`) does not detect overlaps; do not stack messages on one instance.
 
 ### Progress Output
 

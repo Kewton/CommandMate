@@ -336,7 +336,13 @@ async function readAskReply(
  *
  * Both sides of the overlap, from records `ask` already reads:
  *
- * - the later ask: a turn that opened before `askedAt` and had not closed by
+ * - the later ask: the send API said the instance was mid-turn when the
+ *   message went out (`turnOpenAtSend`, Issue #3957) — read on the server just
+ *   before the send, so it does not depend on the record a poll sees (the
+ *   server publishes only the newest one, and a turn opening right after the
+ *   send replaces it before the first poll). Without that mark (a tool whose
+ *   hooks report no turn start, an older server), a turn that opened before
+ *   `askedAt` and had not closed by
  *   it — the turn `wait` adopted, or any turn record a poll saw (`wait` drops a
  *   closed turn that opened more than one poll interval before it started, so
  *   a turn that closed before this ask's first poll is only in the record).
@@ -509,6 +515,7 @@ instance is mid-turn can be folded into that turn (codex does), and the two
 asks then get one reply between them. When ask sees that, it still exits 0
 with the reply but prints \`overlapped: ...\` on stderr and --json adds
 "overlapped": true — the reply may answer the other message.
+--async relays (and send --reply-to) do not detect it (Issue #3957).
 
 There is deliberately no --auto-yes: turning another session's Auto-Yes on is
 a decision about that session's guard rails, not part of asking it a question.
@@ -563,7 +570,7 @@ a decision about that session's guard rails, not part of asking it a question.
         // reaching the agent. Reported as a config error with the server's
         // own sentence: the answer is to look at that session, never to
         // re-send.
-        await postMessage(client, worktreeId, sendBody, {
+        const sent = await postMessage(client, worktreeId, sendBody, {
           relayId,
           promptWaitingFallback: `${worktreeId} is waiting on a prompt; the message was not sent.`,
         });
@@ -627,7 +634,8 @@ a decision about that session's guard rails, not part of asking it a question.
           until,
           turnStartedAt: turn.startedAt,
           turnClosedAt: turn.closedAt,
-          openAtSend: record.openAtSend,
+          // Issue #3957: the server's own reading at the send, when it has one.
+          openAtSend: record.openAtSend || sent?.turnOpenAtSend === true,
           instanceId: ledger.instanceId,
           messages: ledger.messages,
         });

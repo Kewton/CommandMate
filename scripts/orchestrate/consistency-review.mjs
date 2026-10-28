@@ -44,6 +44,9 @@
  *      the reviewer's screen (`Selected model is at capacity` …): the note
  *      says `upstream fault id=<id>` so the person can switch `--instance`
  *      (it is not switched here: the lock and the recorded agent would change, #3936);
+ *      An answer `ask --json` marks `"overlapped": true` (another message shared
+ *      the reviewer's turn, #3955) is kept in the `.md` but is not a verdict:
+ *      `review=fail`, no row, exit 1 — send it again, one ask at a time (#3957);
  *   6. reads the dependency links of the reviewed worktree and of every
  *      worktree of its repository (`git worktree list`) before the ask and
  *      after it: a link under `node_modules` that leads out of its worktree
@@ -56,7 +59,7 @@
  * fill in.
  *
  * Exit code: 0 the answer has a `DONE:` line; 1 the review failed (lock, Codex
- * not ready, ask failed, no `DONE:` line) and was recorded as `fail`; 2 is a
+ * not ready, ask failed, no `DONE:` line, overlapped) and was recorded as `fail`; 2 is a
  * usage error (nothing is sent or recorded).
  *
  * Usage:
@@ -695,8 +698,12 @@ export function main(argv, deps = {}) {
       return 1;
     }
     let reply;
+    let overlapped = false;
     try {
-      reply = JSON.parse(ask.stdout).reply;
+      const parsed = JSON.parse(ask.stdout);
+      reply = parsed.reply;
+      // `ask --json` adds `"overlapped": true` only when it is true (#3955).
+      overlapped = parsed.overlapped === true;
     } catch {
       reply = undefined;
     }
@@ -711,7 +718,16 @@ export function main(argv, deps = {}) {
       record('fail', `${label}: no DONE: line in the answer`);
       return 1;
     }
-    const durationSec = record('ok', `${label}: ${doneLine}`);
+    if (overlapped) {
+      // Not a verdict (#3957): the reply may answer another message folded into the same turn. The
+      // answer is kept in review-<N>.md to read, but no row goes into consistency-review.md.
+      record(
+        'fail',
+        `${label}: overlapped: 別の依頼への返答かもしれない（そのレビューは裁定に使わない）。同じ --instance に重ねず、1 本ずつ送り直す (${doneLine})`
+      );
+      return 1;
+    }
+        const durationSec = record('ok', `${label}: ${doneLine}`);
     const row = appendReviewRow(path.join(o.runDir, 'consistency-review.md'), {
       issue,
       item: o.item,

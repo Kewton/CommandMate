@@ -55,6 +55,8 @@ import {
 } from '@/lib/cmate-cli-tool-parser';
 import { broadcastSessionStatus } from '@/lib/realtime/terminal-broadcast';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import { getPublishedAgentTurn } from '@/lib/session/agent-event-state';
+import type { ChatMessage } from '@/types/models';
 import { checkSessionOwnership, foreignSessionErrorBody, FOREIGN_SESSION_ERROR_CODE } from '@/lib/cli-tools/session-ownership';
 
 const logger = createLogger('api/send');
@@ -80,6 +82,22 @@ interface SendMessageRequest {
    * on screen and answerable.
    */
   ignoreStructuredPromptGuard?: boolean;
+}
+
+/**
+ * Issue #3957: the 201 body. `turnOpenAtSend` is present (and true) only when
+ * the instance's own turn record showed a turn opened and not closed just
+ * before the message went out — the message may be folded into that turn
+ * (codex does), so `ask` reports the reply as overlapped. Absent means "not
+ * open" or "not known": a tool whose hooks do not report a turn start never
+ * publishes `openedAt`, and a session this request started has no turn yet.
+ */
+type SendMessageResponse = ChatMessage & { turnOpenAtSend?: true };
+
+/** Whether the instance's turn record shows an open turn right now (Issue #3957). */
+function isTurnOpen(worktreeId: string, cliToolId: CLIToolType, instanceId: string | undefined): boolean {
+  const turn = getPublishedAgentTurn(worktreeId, cliToolId, instanceId);
+  return turn.openedAt !== null && turn.closedAt === null;
 }
 
 // Issue #588: MODEL_NAME_PATTERN and MAX_MODEL_NAME_LENGTH are now centralized
@@ -439,6 +457,10 @@ export async function POST(
     // sendUserMessage service so manual sends and Timer-fired sends (executeTimer)
     // record identically in chat_messages / Message History.
     const sendStartedAt = Date.now();
+    // Issue #3957: read just before the send, from the same record `wait`'s
+    // polls publish as `structuredEvents.openedAt` / `closedAt`. Only for a
+    // session that was already up: one started above cannot be mid-turn.
+    const turnOpenAtSend = running && isTurnOpen(id, cliToolId, instanceId);
     // Issue #3945: this request's own attempt, as the service recorded it.
     let ownAttempt: { state: SendAttemptState; reason: string } | null = null;
     const result = await sendUserMessage(db, {
@@ -511,7 +533,10 @@ export async function POST(
       );
     }
 
-    return NextResponse.json(result.message, { status: 201 });
+    const sent: SendMessageResponse = turnOpenAtSend
+      ? { ...result.message, turnOpenAtSend: true }
+      : result.message;
+    return NextResponse.json(sent, { status: 201 });
   } catch (error: unknown) {
     logger.error('error-sending-message:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
