@@ -16,7 +16,6 @@ import { buildCurrentOutput } from '@/lib/session/current-output-builder';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
 import { getOrInitGlobal } from '../global-state';
 import { findTerminalSessionRefusal } from './terminal-session-ownership';
 import { RetiredSnapshotError, maySnapshotPublish } from '@/lib/polling/poller-owner';
@@ -162,9 +161,7 @@ async function captureFreshPayload(
   instanceId?: string,
 ): Promise<Awaited<ReturnType<typeof buildCurrentOutput>> | null> {
   if (!(await isPushableSession(worktreeId, cliToolId, instanceId))) return null;
-  const tool = CLIToolManager.getInstance().getTool(cliToolId);
-  invalidateCache(tool.getSessionName(worktreeId, instanceId));
-  return buildCurrentOutput(getDbInstance(), worktreeId, cliToolId, instanceId);
+  return buildCurrentOutput(getDbInstance(), worktreeId, cliToolId, instanceId, undefined, { freshCapture: true });
 }
 
 function emitTerminalSnapshot(

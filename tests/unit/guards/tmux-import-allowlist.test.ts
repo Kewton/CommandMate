@@ -90,7 +90,6 @@ const STAGED_REMOVAL = [
   'src/lib/pasted-text-helper.ts',
   'src/lib/polling/response-checker.ts',
   'src/lib/prompt-answer-sender.ts',
-  'src/lib/realtime/terminal-broadcast.ts',
   'src/lib/session-cleanup.ts',
   'src/lib/session-key-sender.ts',
   'src/lib/session/claude-session.ts',
@@ -479,8 +478,8 @@ describe('lib/tmux import guard: the allowlist', () => {
     // 15 -> 14: Issue #3232 deleted the global session poller, which nothing had
     // started since its only caller went away.
     expect(PERMANENT_EXEMPT).toHaveLength(7);
-    expect(STAGED_REMOVAL).toHaveLength(14);
-    expect(ALLOWLIST).toHaveLength(21);
+    expect(STAGED_REMOVAL).toHaveLength(13);
+    expect(ALLOWLIST).toHaveLength(20);
   });
 
   it('keeps the two groups sorted, deduplicated and disjoint', () => {
