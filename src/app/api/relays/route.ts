@@ -3,7 +3,9 @@
  *
  * `GET` answers the two questions every reader of a relay has: what does this
  * session owe, and what is it waiting for. `POST` opens one, and is where
- * `commandmate send --reply-to` lands.
+ * `commandmate send --reply-to` lands; with `bind: true` (Issue #3957) the
+ * relay is answered only from the send that names it (`relayId` on
+ * `POST /api/worktrees/:id/send`).
  *
  * The loop guard lives behind `POST` rather than in the CLI because its input is
  * `chat_messages` — "was the last thing this session was told a relayed
@@ -39,6 +41,8 @@ interface CreateRelayBody {
   to?: RelayEndpointBody;
   allowRelayChain?: unknown;
   ttlMs?: unknown;
+  /** Issue #3957: `true` from a CLI that will pass the relay id to its send. */
+  bind?: unknown;
 }
 
 /** Validate one endpoint, canonicalising the worktree id the way sends do. */
@@ -136,6 +140,7 @@ export async function POST(request: NextRequest) {
       to,
       allowRelayChain: body.allowRelayChain === true,
       ttlMs,
+      bind: body.bind === true,
     });
 
     if (!result.ok) {
@@ -147,7 +152,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: message, code }, { status });
     }
 
-    return NextResponse.json({ relay: result.relay }, { status: 201 });
+    // Issue #3957: `bindMode` at the top level too, so a CLI can confirm the
+    // server understood `bind` (an older server answers without the key).
+    return NextResponse.json({ relay: result.relay, bindMode: result.relay.bindMode }, { status: 201 });
   } catch (error: unknown) {
     logger.error('error-creating-relay:', {
       error: error instanceof Error ? error.message : String(error),

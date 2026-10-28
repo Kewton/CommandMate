@@ -1673,6 +1673,13 @@ export interface ChatMessage {
    * Mirrors: src/app/api/worktrees/[id]/send/route.ts SendMessageResponse.
    */
   turnOpenAtSend?: boolean;
+  /**
+   * Issue #3957: present when the send named a bound relay (`relayId`). What
+   * the CLI may do with the relay: `not_sent` — nothing reached the worker,
+   * withdraw it; `sent` / `unknown` — leave it (the server holds `unknown`).
+   * Also on the error bodies after the reservation.
+   */
+  sendOutcome?: 'sent' | 'not_sent' | 'unknown';
 }
 
 // =============================================================================
@@ -2517,6 +2524,18 @@ export interface RelayView {
   updatedAt: number;
   expiresAt: number;
   deliveredAt: number | null;
+  /**
+   * Issue #3957. Optional: a server older than the binding sends none of these.
+   * Strings rather than unions, for the reason `state` is one.
+   */
+  bindMode?: string;
+  sendState?: string | null;
+  inputBoundaryAt?: number | null;
+  boundaryKind?: string | null;
+  turnOpenAtSend?: boolean | null;
+  obsState?: string | null;
+  holdReason?: string | null;
+  overlap?: string | null;
 }
 
 /** Mirrors: `RelayCounts` in src/lib/relay/types.ts. */
@@ -2541,6 +2560,13 @@ export interface RelayListResponse {
 
 /** Mirrors: src/app/api/relays/route.ts POST 201 response. */
 export interface RelayCreateResponse {
+  relay: RelayView;
+  /** Issue #3957: `bound` when the server honoured `bind: true`; absent on an older server. */
+  bindMode?: string;
+}
+
+/** Mirrors: src/app/api/relays/[relayId]/route.ts GET 200 response (Issue #3957). */
+export interface RelayGetResponse {
   relay: RelayView;
 }
 

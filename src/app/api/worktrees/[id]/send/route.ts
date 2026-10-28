@@ -11,6 +11,11 @@
  * 6. Send message to CLI tool
  * 7. Create user message in database
  * 8. Start polling for response
+ *
+ * Issue #3957: a body naming `relayId` (a relay opened with `bind: true`)
+ * reserves that relay before step 4, records its input boundary right before
+ * the first key, and answers `sendOutcome` (`sent` / `not_sent` / `unknown`)
+ * on every response after the reservation — see `lib/relay/relay-bind`.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -61,6 +66,8 @@ import { getAgentEventSource } from '@/lib/hooks/sources/registry';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import type { ChatMessage } from '@/types/models';
 import { checkSessionOwnership, foreignSessionErrorBody, FOREIGN_SESSION_ERROR_CODE } from '@/lib/cli-tools/session-ownership';
+import { reserveRelaySend, type RelaySendBinding } from '@/lib/relay/relay-bind';
+import { evaluateRelayAfterSend } from '@/lib/relay/relay-delivery';
 
 const logger = createLogger('api/send');
 
@@ -85,6 +92,24 @@ interface SendMessageRequest {
    * on screen and answerable.
    */
   ignoreStructuredPromptGuard?: boolean;
+  /**
+   * Issue #3957: the bound relay this send asks the question of. Reserved
+   * before any side effect; a wrong id or destination is 400, a closed,
+   * expired or already reserved relay 409, and neither types anything.
+   */
+  relayId?: string;
+}
+
+/**
+ * What the handler learned about a relay-bound send, for {@link POST} to settle
+ * the relay with and answer `sendOutcome` from (Issue #3957).
+ */
+interface RouteRelayState {
+  binding: RelaySendBinding | null;
+  /** The send service's own record of this attempt, once it made one. */
+  attempt: SendAttemptState | null;
+  /** Set when the send service answered ok. */
+  sent: { messageId: string; generationAfter: number | null } | null;
 }
 
 /**
@@ -211,7 +236,34 @@ function validateImagePath(
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> }
+) {
+  const relay: RouteRelayState = { binding: null, attempt: null, sent: null };
+  const response = await handleSend(request, context, relay);
+  const { binding } = relay;
+  if (!binding) return response;
+
+  // Issue #3957: every answer after the reservation settles the relay and says
+  // what the CLI may do with it — withdraw it only on `not_sent`.
+  const sendOutcome = binding.finish(
+    relay.sent
+      ? { kind: 'sent', ...relay.sent }
+      : { kind: 'failed', attempt: relay.attempt }
+  );
+  if (sendOutcome === 'sent') evaluateRelayAfterSend(binding.relayId);
+  let body: Record<string, unknown> = {};
+  try {
+    body = (await response.json()) as Record<string, unknown>;
+  } catch {
+    // Every answer of this route is JSON; an unreadable one keeps its status.
+  }
+  return NextResponse.json({ ...body, relayId: binding.relayId, sendOutcome }, { status: response.status });
+}
+
+async function handleSend(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+  relay: RouteRelayState
 ) {
   try {
     const { id: requestedWorktreeId } = await params;
@@ -332,6 +384,28 @@ export async function POST(
           { status: 400 }
         );
       }
+    }
+
+    // Issue #3957: reserve the bound relay now — after the body and the
+    // destination are validated and resolved, before the first side effect
+    // (the session start below). A refusal sends nothing.
+    if (body.relayId !== undefined) {
+      if (typeof body.relayId !== 'string') {
+        return NextResponse.json({ error: 'relayId must be a string', code: 'RELAY_BIND_INVALID' }, { status: 400 });
+      }
+      const reservation = reserveRelaySend(db, {
+        relayId: body.relayId,
+        worktreeId: id,
+        cliToolId,
+        instanceId: resolution.target.instanceId,
+        hooksReportTurns: reportsTurns(cliToolId),
+        readTurn: () => readTurnAtInput(id, cliToolId, instanceId),
+      });
+      if (!reservation.ok) {
+        const { status, code, message } = reservation.refusal;
+        return NextResponse.json({ error: message, code }, { status });
+      }
+      relay.binding = reservation.binding;
     }
 
     // Get CLI tool instance from manager
@@ -497,6 +571,7 @@ export async function POST(
     // `noteInputStart`). A generation change during the send is "not known".
     const generationKey = buildCompositeKey(id, cliToolId, instanceId);
     const generationBefore = currentGeneration(generationKey);
+    relay.binding?.begin(generationBefore);
     let turnAtInput: TurnAtInput | null = null;
     // Issue #3945: this request's own attempt, as the service recorded it.
     let ownAttempt: { state: SendAttemptState; reason: string } | null = null;
@@ -513,10 +588,13 @@ export async function POST(
       ignoreStructuredPromptGuard: body.ignoreStructuredPromptGuard === true,
       onAttempt: (attempt) => {
         ownAttempt = attempt;
+        relay.attempt = attempt.state;
       },
       onInputStart: () => {
         turnAtInput = readTurnAtInput(id, cliToolId, instanceId);
       },
+      // Issue #3957: the relay's boundary, required — a refusal stops the send.
+      inputBoundary: relay.binding?.hooks(),
     });
 
     if (!result.ok) {
@@ -573,10 +651,12 @@ export async function POST(
       );
     }
 
+    const generationAfter = currentGeneration(generationKey);
+    relay.sent = { messageId: result.message.id, generationAfter };
     const turnOpenAtSend = judgeTurnOpenAtSend(
       turnAtInput,
       generationBefore,
-      currentGeneration(generationKey),
+      generationAfter,
       reportsTurns(cliToolId),
     );
     const sent: SendMessageResponse =

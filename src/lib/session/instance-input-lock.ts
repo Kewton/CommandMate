@@ -649,12 +649,60 @@ export function invalidateInstanceInput(sessionName: string): void {
   pruneEntry(sessionName);
 }
 
+/** Where a send's input boundary was taken (Issue #3957). */
+export type InputBoundaryKind = 'input_start' | 'dispatch';
+
+/** What an HTTP dispatch that did not deliver is known to have done (Issue #3957). */
+export type DispatchFailureVerdict = 'not_sent' | 'unknown';
+
+/**
+ * The boundary hooks a caller may hand {@link observeInputStart} (Issue #3957).
+ *
+ * Unlike `onStart`, {@link InputBoundaryHooks.beforeInput} is REQUIRED to
+ * succeed: it runs right before the body's first key (or right before an HTTP
+ * dispatch that types none), and a throw from it is not logged and swallowed —
+ * it propagates out of {@link noteInputStart} / {@link noteDispatchStart}, so
+ * the sender stops before anything reaches the agent.
+ */
+export interface InputBoundaryHooks {
+  beforeInput: (at: Date, kind: InputBoundaryKind) => void;
+  /** Told when a noted dispatch did not deliver, before any fallback runs. */
+  onDispatchFailed?: (verdict: DispatchFailureVerdict) => void;
+}
+
+/** `code` on the error a refused {@link InputBoundaryHooks.beforeInput} becomes. */
+export const INPUT_BOUNDARY_REFUSED_CODE = 'INPUT_BOUNDARY_REFUSED';
+
+/** The boundary hook refused the input: nothing was typed or dispatched (Issue #3957). */
+export class InputBoundaryRefusedError extends Error {
+  readonly code = INPUT_BOUNDARY_REFUSED_CODE;
+
+  constructor(cause: unknown) {
+    super(
+      `Input boundary could not be recorded (${cause instanceof Error ? cause.message : String(cause)}); ` +
+        'nothing was typed (Issue #3957)'
+    );
+    this.name = 'InputBoundaryRefusedError';
+  }
+}
+
+/** Whether an error (or the message a wrapper copied from it) is a boundary refusal. */
+export function isInputBoundaryRefusal(error: unknown): boolean {
+  if (error instanceof InputBoundaryRefusedError) return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return /Input boundary could not be recorded \(.*\); nothing was typed \(Issue #3957\)/s.test(message);
+}
+
 /** What {@link observeInputStart} hands the sender's context (Issue #3953). */
 interface InputStartObserver {
   /** Set by the first {@link noteInputStart} in the context; later calls keep it. */
   at: Date | null;
   /** Run in the same synchronous step as that first call (Issue #3957). */
   onStart?: (at: Date) => void;
+  /** Issue #3957: the required boundary hooks, when the caller gave any. */
+  boundary?: InputBoundaryHooks;
+  /** Issue #3957: a dispatch was noted in this context and has not been answered. */
+  dispatchOpen: boolean;
 }
 
 const inputStartScope = getOrInitGlobal(
@@ -685,9 +733,10 @@ const inputStartScope = getOrInitGlobal(
  */
 export async function observeInputStart<T>(
   fn: () => Promise<T>,
-  onStart?: (at: Date) => void
+  onStart?: (at: Date) => void,
+  boundary?: InputBoundaryHooks
 ): Promise<{ value: T; inputStartedAt: Date | null }> {
-  const observer: InputStartObserver = { at: null, onStart };
+  const observer: InputStartObserver = { at: null, onStart, boundary, dispatchOpen: false };
   const value = await inputStartScope.run(observer, fn);
   return { value, inputStartedAt: observer.at };
 }
@@ -700,11 +749,53 @@ export async function observeInputStart<T>(
 export function noteInputStart(now: Date = new Date()): void {
   const observer = inputStartScope.getStore();
   if (observer === undefined || observer.at !== null) return;
+  // Issue #3957: the required hook first, and outside the catch below — a
+  // refusal must stop the sender before its first key.
+  runBoundaryHook(observer, now, 'input_start');
   observer.at = now;
   try {
     observer.onStart?.(now);
   } catch (error) {
     logger.warn('input-start-observer-failed', { error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+function runBoundaryHook(observer: InputStartObserver, at: Date, kind: InputBoundaryKind): void {
+  if (!observer.boundary) return;
+  try {
+    observer.boundary.beforeInput(at, kind);
+  } catch (error) {
+    throw error instanceof InputBoundaryRefusedError ? error : new InputBoundaryRefusedError(error);
+  }
+}
+
+/**
+ * Note that a body is about to be DISPATCHED without being typed (Issue #3957):
+ * opencode's HTTP send, which reports no input start. Runs the required
+ * boundary hook with kind `dispatch`; a refusal throws
+ * {@link InputBoundaryRefusedError} and the dispatch must not happen. Does not
+ * fix the input-start stamp — a keyboard fallback still reports its own.
+ */
+export function noteDispatchStart(now: Date = new Date()): void {
+  const observer = inputStartScope.getStore();
+  if (observer === undefined || observer.at !== null) return;
+  runBoundaryHook(observer, now, 'dispatch');
+  observer.dispatchOpen = true;
+}
+
+/**
+ * Say how a dispatch noted by {@link noteDispatchStart} ended when it did not
+ * deliver (Issue #3957): `not_sent` when the receiver confirmed nothing exists,
+ * `unknown` when it could not be told. Called before any fallback. Never throws.
+ */
+export function noteDispatchFailed(verdict: DispatchFailureVerdict): void {
+  const observer = inputStartScope.getStore();
+  if (observer === undefined || !observer.dispatchOpen) return;
+  observer.dispatchOpen = false;
+  try {
+    observer.boundary?.onDispatchFailed?.(verdict);
+  } catch (error) {
+    logger.warn('dispatch-failure-observer-failed', { error: error instanceof Error ? error.message : String(error) });
   }
 }
 

@@ -59,6 +59,7 @@ import { readSqueezedPaneTail } from './capture';
 import {
   ALLOW_RELAY_CHAIN_DESCRIPTION,
   REPLY_TO_OPTION_DESCRIPTION,
+  type RegisteredRelay,
 } from './relays';
 import { postMessage, registerRelayForMessage } from './message-dispatch';
 
@@ -539,7 +540,9 @@ instance is mid-turn can be folded into that turn (codex does), and the two
 asks then get one reply between them. When ask sees that, it still exits 0
 with the reply but prints \`overlapped: ...\` on stderr and --json adds
 "overlapped": true — the reply may answer the other message.
---async relays (and send --reply-to) do not detect it (Issue #3957).
+--async relays (and send --reply-to) take only a turn that ended after the
+message went in, and note a proven overlap on the delivered reply's second line
+(\`[CommandMate relay] ... (overlap=later)\`); see \`relays --id <relay-id>\`.
 
 There is deliberately no --auto-yes: turning another session's Auto-Yes on is
 a decision about that session's guard rails, not part of asking it a question.
@@ -574,9 +577,9 @@ a decision about that session's guard rails, not part of asking it a question.
         // Issue #2377: registered BEFORE the send, so a session that answers
         // immediately cannot finish its turn in the window between the message
         // and the ledger row. A refusal exits 2 having sent nothing.
-        let relayId: string | undefined;
+        let relay: RegisteredRelay | undefined;
         if (options.async) {
-          relayId = await registerRelayForMessage(client, {
+          relay = await registerRelayForMessage(client, {
             worktreeId,
             replyTo: options.replyTo ?? 'self',
             instance: options.instance,
@@ -594,16 +597,17 @@ a decision about that session's guard rails, not part of asking it a question.
         // reaching the agent. Reported as a config error with the server's
         // own sentence: the answer is to look at that session, never to
         // re-send.
+        // Issue #3957: a bound relay's id rides on the send (see `postMessage`).
         const sent = await postMessage(client, worktreeId, sendBody, {
-          relayId,
+          relay,
           promptWaitingFallback: `${worktreeId} is waiting on a prompt; the message was not sent.`,
         });
 
         // Issue #2377: the whole point of `--async`. Nothing is waited on, so
         // the caller's own turn ends here and the answer arrives later, in their
         // composer, as a `relay` row.
-        if (relayId) {
-          printAsyncAck(worktreeId, instanceId, agent, relayId, options);
+        if (relay) {
+          printAsyncAck(worktreeId, instanceId, agent, relay.id, options);
           return;
         }
 

@@ -8,13 +8,15 @@
  */
 
 import { ExitCode } from '../types';
-import type { ChatMessage } from '../types/api-responses';
+import type { ChatMessage, RelayGetResponse } from '../types/api-responses';
 import { ApiClient, ApiError } from '../utils/api-client';
 import {
   cancelRelayQuietly,
+  printRelayUnconfirmedNotice,
   registerRelay,
   resolveEndpointForWorktree,
   resolveRelayEndpoint,
+  type RegisteredRelay,
 } from './relays';
 
 /**
@@ -34,11 +36,11 @@ export interface RegisterRelayForMessageInput {
   allowRelayChain?: boolean;
 }
 
-/** Resolve both endpoints and open the relay; returns the relay id. */
+/** Resolve both endpoints and open the relay; returns its id and whether it is bound. */
 export async function registerRelayForMessage(
   client: ApiClient,
   input: RegisterRelayForMessageInput
-): Promise<string> {
+): Promise<RegisteredRelay> {
   const replyEndpoint = await resolveRelayEndpoint(client, input.replyTo);
   const workerEndpoint = await resolveEndpointForWorktree(
     client,
@@ -54,15 +56,61 @@ export async function registerRelayForMessage(
 }
 
 export interface PostMessageOptions {
-  relayId?: string;
+  /**
+   * The relay this message opened. When it is bound, its id is put on the
+   * send (`relayId`) and it is withdrawn only on a confirmed `not_sent`.
+   */
+  relay?: RegisteredRelay;
   /** Runs first when the post fails, before the relay is cancelled. */
   onFailure?: () => Promise<void>;
   /** Printed (after `Error: `) when PROMPT_WAITING carried no message body. */
   promptWaitingFallback: string;
 }
 
+/** What the send did, as far as a bound relay is concerned (Issue #3957). */
+type BoundSendOutcome = 'sent' | 'not_sent' | 'unknown' | 'conflict';
+
+function isSendOutcome(value: unknown): value is 'sent' | 'not_sent' | 'unknown' {
+  return value === 'sent' || value === 'not_sent' || value === 'unknown';
+}
+
+/**
+ * Work out what a failed send did to a bound relay (Issue #3957).
+ *
+ * The server's own `sendOutcome` when the answer carries one. A 409
+ * `RELAY_BIND_CONFLICT` is another attempt's relay — never withdrawn from
+ * here. A 4xx without one was refused before the relay was reserved: nothing
+ * was sent. No answer at all (a dropped connection, a 5xx from in between) is
+ * asked of `GET /api/relays/:id`; only `sent` and `failed` are taken from it,
+ * because a send still waiting for the input lock reads `awaiting` too.
+ */
+async function resolveBoundSendOutcome(
+  client: ApiClient,
+  relayId: string,
+  error: unknown
+): Promise<BoundSendOutcome> {
+  if (error instanceof ApiError && error.statusCode !== undefined) {
+    if (error.apiCode === 'RELAY_BIND_CONFLICT') return 'conflict';
+    const reported = (error.payload as { sendOutcome?: unknown } | undefined)?.sendOutcome;
+    if (isSendOutcome(reported)) return reported;
+    if (error.statusCode < 500) return 'not_sent';
+  }
+  try {
+    const { relay } = await client.get<RelayGetResponse>(`/api/relays/${relayId}`);
+    if (relay.sendState === 'sent') return 'sent';
+    if (relay.sendState === 'failed') return 'not_sent';
+  } catch {
+    // Not answerable either: the relay is left as it is.
+  }
+  return 'unknown';
+}
+
 /**
  * Post the message; on failure cancel the relay and report PROMPT_WAITING.
+ *
+ * Issue #3957: a bound relay is withdrawn only when nothing reached the worker
+ * (`not_sent`). When that cannot be said the relay is left open, the message
+ * is NOT resent, and stderr names the relay and how to look it up.
  *
  * @returns The send API's body (Issue #3957: `ask` reads `turnOpenAtSend`)
  */
@@ -72,18 +120,29 @@ export async function postMessage(
   sendBody: Record<string, unknown>,
   options: PostMessageOptions
 ): Promise<ChatMessage> {
-  const { relayId } = options;
+  const { relay } = options;
+  const relayId = relay?.id;
+  const body = relay?.bound ? { ...sendBody, relayId: relay.id } : sendBody;
   try {
-    return await client.post<ChatMessage>(`/api/worktrees/${worktreeId}/send`, sendBody);
+    const sent = await client.post<ChatMessage>(`/api/worktrees/${worktreeId}/send`, body);
+    if (relay?.bound && sent?.sendOutcome === 'unknown') printRelayUnconfirmedNotice(relay.id);
+    return sent;
   } catch (error) {
+    const outcome = relay?.bound ? await resolveBoundSendOutcome(client, relay.id, error) : null;
+    // The answer was lost on the way back, and the server says it went out.
+    if (outcome === 'sent') {
+      return { worktreeId, role: 'user', content: '', sendOutcome: 'sent' };
+    }
     if (options.onFailure) {
       await options.onFailure();
     }
     // A relay whose message never arrived can never be answered; leaving
     // it open would have the requester waiting 24h for a turn that was
     // never started.
-    if (relayId) {
+    if (relayId && (outcome === null || outcome === 'not_sent')) {
       await cancelRelayQuietly(client, relayId);
+    } else if (relayId && outcome === 'unknown') {
+      printRelayUnconfirmedNotice(relayId);
     }
     // Issue #1708: the session is sitting on a prompt, so the message
     // would have been typed into the prompt's input line rather than

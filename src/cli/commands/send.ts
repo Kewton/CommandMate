@@ -33,6 +33,7 @@ import {
 import {
   ALLOW_RELAY_CHAIN_DESCRIPTION,
   REPLY_TO_OPTION_DESCRIPTION,
+  type RegisteredRelay,
 } from './relays';
 import { postMessage, registerRelayForMessage } from './message-dispatch';
 
@@ -492,9 +493,9 @@ worktree and send a short message that tells the agent to read that file.
         // between the send and the ledger row — the completion trigger reads the
         // ledger, and a row that does not exist yet is a reply nobody collects.
         // A refusal exits 2 here, having sent nothing.
-        let relayId: string | undefined;
+        let relay: RegisteredRelay | undefined;
         if (options.replyTo) {
-          relayId = await registerRelayForMessage(client, {
+          relay = await registerRelayForMessage(client, {
             worktreeId,
             replyTo: options.replyTo,
             instance: options.instance,
@@ -505,13 +506,15 @@ worktree and send a short message that tells the agent to read that file.
           // (it prints the task id there), and two commands writing two ids to
           // one stream is how a `$(…)` capture ends up with both. `ask --async`
           // is the form that hands the relay id back on stdout.
-          console.error(`Relay registered: ${relayId}`);
+          console.error(`Relay registered: ${relay.id}`);
         }
 
         const sendBody = buildSendBody(content, agent, instanceId, options);
 
+        // Issue #3957: a bound relay's id rides on the send, which reserves it
+        // and records where the body went in.
         await postMessage(client, worktreeId, sendBody, {
-          relayId,
+          relay,
           onFailure: failTask,
           promptWaitingFallback: promptWaitingFallback(worktreeId),
         });
