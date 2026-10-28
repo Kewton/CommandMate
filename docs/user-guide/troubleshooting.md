@@ -101,7 +101,7 @@ commandmate start --daemon
 - **作られる条件:** 未適用の migration があるときだけ。最新の版の DB、新規に作った DB（表がまだ無い）では作りません
 - **置き場所:** DB と同じディレクトリの `db-backups/`（グローバルインストールは `~/.commandmate/data/db-backups/`、`CM_DB_PATH` を設定していればその隣）。ディレクトリは 0700、ファイルは 0600
 - **名前:** `<DB のファイル名>.v<元の版>-to-v<目標の版>.<UTC の時刻>.<短い ID>.sqlite`（例: `cm.db.v61-to-v62.20261029T010203456Z.1a2b3c4d.sqlite`）。作成中のファイルは `.partial` で終わり、完了済みとは見なしません
-- **世代:** 完了済みを 3 つまで残します。古いものは、新しい複製の確認が済んだ後にだけ消します
+- **世代:** 完了済みを 3 つまで残します。古いものは、新しい複製の確認が済んだ後にだけ消します。ただし、今回のアップデートの元の復旧点（目標の版が同じ複製のうち、元の版が最も古いもの）は消さずに 3 つの枠の 1 つとして残します。migration が途中まで進んで失敗し（例: v59 → v60 は成功、v61 で失敗）、再起動のたびに v60 からの複製ができても、古い版の CommandMate で開ける v59 の複製は押し出されません
 - **中身:** SQLite の `VACUUM INTO` で作る、WAL の確定済みの内容も含んだ一時点の複製です。作った後に `integrity_check` と版を確かめます
 - **失敗したとき:** 複製を作れない・確かめられないときは、migration を始めずに起動を止めます。空き容量が足りないなどで複製を省いて起動するときは `CM_DB_SKIP_MIGRATION_BACKUP=1` を設定します（既定は省きません）
 
@@ -116,17 +116,20 @@ commandmate stop
 DB=~/.commandmate/data/cm.db
 ls -l "$(dirname "$DB")/db-backups/"
 
-# 3. 今の DB を念のため退避してから、複製を DB の場所へ戻し、-wal と -shm を消す
-mv "$DB" "$DB.before-restore"
+# 3. 今の DB を SQLite のバックアップ機能で退避する（WAL に残った確定済みの更新も含む）
+sqlite3 "$DB" ".backup '$DB.before-restore'"
+
+# 4. 複製を DB の場所へ戻し、-wal と -shm を消す
 cp "$(dirname "$DB")/db-backups/cm.db.v61-to-v62.<時刻>.<ID>.sqlite" "$DB"
 chmod 600 "$DB"
 rm -f "$DB-wal" "$DB-shm"
 
-# 4. 複製と同じ版の CommandMate に戻してから起動する
+# 5. 複製と同じ版の CommandMate に戻してから起動する
 commandmate start --daemon
 ```
 
 - `-wal`・`-shm` を残したまま戻すと、別の DB の WAL が複製に重なり、壊れる・更新が混ざる原因になります。必ず消してください
+- 退避を `mv` や `cp` で本体だけ取ると、クラッシュの後などに `-wal` に残っている確定済みの更新が抜けます。退避は手順 3 のとおり `.backup` で取ってください
 - 複製は単独で整合したファイルなので、`cp` で戻せます（サーバーが止まっていることが前提です）
 
 ## FAQ

@@ -88,6 +88,40 @@ export function listMigrationBackups(dir: string, dbFileName: string): string[] 
     .map((entry) => path.join(dir, entry.name));
 }
 
+function parseVersions(copyPath: string): { from: number; to: number } | null {
+  const match = /\.v(\d+)-to-v(\d+)\.\d{8}T\d{9}Z\.[0-9a-f]+\.sqlite$/.exec(path.basename(copyPath));
+  return match ? { from: Number(match[1]), to: Number(match[2]) } : null;
+}
+
+/**
+ * Completed copies to delete, given all of them oldest first.
+ *
+ * Keeps the newest {@link MIGRATION_BACKUP_GENERATIONS}, except that the
+ * original restore point of the current upgrade always survives: among the
+ * copies whose target is `toVersion`, the one with the lowest source version
+ * (the newest of those on a tie). A migration that half-succeeds (v59 -> v60
+ * applied, v61 fails) leaves the next attempt starting from v60; retrying it
+ * three times must not push out the v59 copy, which is the only one an older
+ * build can open. That copy then takes one of the slots, so the total stays at
+ * the limit.
+ */
+export function selectBackupsToPrune(completed: string[], toVersion: number): string[] {
+  let original: string | undefined;
+  let originalFrom = Infinity;
+  for (const copy of completed) {
+    const versions = parseVersions(copy);
+    if (versions && versions.to === toVersion && versions.from <= originalFrom) {
+      original = copy;
+      originalFrom = versions.from;
+    }
+  }
+  const newest = completed.slice(-MIGRATION_BACKUP_GENERATIONS);
+  const keep = original === undefined || newest.includes(original)
+    ? newest
+    : [original, ...completed.slice(-(MIGRATION_BACKUP_GENERATIONS - 1))];
+  return completed.filter((copy) => !keep.includes(copy));
+}
+
 function verifyCopy(copyPath: string, expectedVersion: number): void {
   const copy = new Database(copyPath, { readonly: true, fileMustExist: true });
   try {
@@ -164,7 +198,7 @@ export function createPreMigrationBackup(
   // Prune only after the new copy is verified and in place.
   const removed: string[] = [];
   const completed = listMigrationBackups(dir, dbFileName);
-  for (const old of completed.slice(0, Math.max(0, completed.length - MIGRATION_BACKUP_GENERATIONS))) {
+  for (const old of selectBackupsToPrune(completed, toVersion)) {
     try {
       fs.rmSync(old, { force: true });
       removed.push(old);

@@ -186,6 +186,56 @@ describe('pre-migration backup (Issue #3985)', () => {
     expect(fs.readdirSync(backupDir).filter((n) => n.endsWith('.partial'))).toEqual([]);
   });
 
+  it('keeps the original restore point when a half-applied upgrade is retried (review P2-1)', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      db = seedV1();
+      const failingV3: Migration = {
+        version: 3,
+        name: 'always fails',
+        up: () => {
+          throw new Error('boom');
+        },
+      };
+      // v1 -> v2 applies, v3 fails; every restart then starts from v2.
+      for (let attempt = 0; attempt < 4; attempt++) {
+        vi.setSystemTime(new Date(Date.UTC(2026, 9, 29, 0, 0, attempt)));
+        expect(() => runMigrations(db, [m1, m2, failingV3])).toThrow(/Migration 3 \(always fails\) failed/);
+        expect(getCurrentVersion(db)).toBe(2);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const names = listMigrationBackups(backupDir, 'cm.db').map((p) => path.basename(p).split('.').slice(2, 4).join('.'));
+    expect(names).toEqual([
+      'v1-to-v3.20261029T000000000Z',
+      'v2-to-v3.20261029T000002000Z',
+      'v2-to-v3.20261029T000003000Z',
+    ]);
+    const original = listMigrationBackups(backupDir, 'cm.db')[0];
+    expect(readCopy(original)).toEqual({ integrity: 'ok', version: 1, notes: 1 });
+  });
+
+  it('still keeps only the newest three across successive successful upgrades', () => {
+    const m4: Migration = { version: 4, name: 'create t4', up: (conn) => conn.exec('CREATE TABLE t4 (x)') };
+    const m5: Migration = { version: 5, name: 'create t5', up: (conn) => conn.exec('CREATE TABLE t5 (x)') };
+    const all = [m1, m2, m3, m4, m5];
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      db = seedV1();
+      for (let target = 2; target <= 5; target++) {
+        vi.setSystemTime(new Date(Date.UTC(2026, 9, 29, 0, 0, target)));
+        runMigrations(db, all.filter((m) => m.version <= target));
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const names = listMigrationBackups(backupDir, 'cm.db').map((p) => path.basename(p).split('.')[2]);
+    expect(names).toEqual(['v2-to-v3', 'v3-to-v4', 'v4-to-v5']);
+  });
+
   it('creates the directory 0700 and the copy 0600', () => {
     db = seedV1();
     runMigrations(db, [m1, m2]);

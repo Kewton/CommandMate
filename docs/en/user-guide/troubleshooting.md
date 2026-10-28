@@ -101,7 +101,7 @@ When the database still has one or more migrations (schema updates) to apply at 
 - **When it is taken:** only when there is a pending migration. Never for a database that is already at the latest version, or for a brand-new database (no tables yet)
 - **Where:** `db-backups/` in the same directory as the database (global install: `~/.commandmate/data/db-backups/`; next to `CM_DB_PATH` if you set one). The directory is 0700, the files are 0600
 - **Name:** `<database file name>.v<from>-to-v<target>.<UTC time>.<short id>.sqlite` (e.g. `cm.db.v61-to-v62.20261029T010203456Z.1a2b3c4d.sqlite`). A file still being written ends in `.partial` and never counts as a completed copy
-- **Generations:** up to 3 completed copies are kept. Older ones are deleted only after the new copy has been verified
+- **Generations:** up to 3 completed copies are kept. Older ones are deleted only after the new copy has been verified. The original restore point of the current update (among the copies with the same target version, the one with the oldest source version) is never deleted and takes one of the 3 slots. If a migration fails partway (e.g. v59 → v60 succeeds, v61 fails) and every restart takes a new copy from v60, the v59 copy — the one an older CommandMate can open — is not pushed out
 - **Contents:** a single-point-in-time copy made with SQLite's `VACUUM INTO`, including committed updates still in the WAL. After writing it, CommandMate checks `integrity_check` and the schema version
 - **On failure:** if the copy cannot be made or verified, startup stops before any migration runs. To start without the copy (e.g. not enough disk space), set `CM_DB_SKIP_MIGRATION_BACKUP=1` (the default is to take it)
 
@@ -116,17 +116,20 @@ commandmate stop
 DB=~/.commandmate/data/cm.db
 ls -l "$(dirname "$DB")/db-backups/"
 
-# 3. Move the current database aside, put the copy in its place, and delete -wal and -shm
-mv "$DB" "$DB.before-restore"
+# 3. Save the current database with SQLite's backup feature (includes committed updates still in the WAL)
+sqlite3 "$DB" ".backup '$DB.before-restore'"
+
+# 4. Put the copy in its place and delete -wal and -shm
 cp "$(dirname "$DB")/db-backups/cm.db.v61-to-v62.<time>.<id>.sqlite" "$DB"
 chmod 600 "$DB"
 rm -f "$DB-wal" "$DB-shm"
 
-# 4. Go back to the CommandMate version that matches the copy, then start it
+# 5. Go back to the CommandMate version that matches the copy, then start it
 commandmate start --daemon
 ```
 
 - Restoring with `-wal` / `-shm` left in place lays another database's WAL over the copy, which can corrupt it or mix in updates. Always delete them
+- Saving the current database with `mv` or `cp` takes the main file only, and leaves out committed updates still in `-wal` (e.g. after a crash). Save it with `.backup` as in step 3
 - The copy is a self-contained, consistent file, so `cp` is enough to restore it (with the server stopped)
 
 ## FAQ
