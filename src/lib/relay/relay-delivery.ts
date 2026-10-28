@@ -70,6 +70,7 @@ import {
   type RelayPendingReply,
 } from '@/lib/db/relay-db';
 import {
+  ACTIVE_FILTER,
   getLatestOpenPromptMessage,
   getMessageById,
   getMessages,
@@ -474,40 +475,98 @@ function stashForBoundRelay(
 }
 
 /**
+ * How many completion rows one read collects at most (Issue #3957).
+ *
+ * A safety bound, not a window: the rows are read OLDEST first from the lower
+ * bound, so reaching it can only drop the LATEST turns, never the earliest —
+ * and the earliest is the only one ever taken. A newest-first window (the
+ * 40 rows {@link findWorkerReply} reads) is the opposite: a backfill of more
+ * rows than it holds pushes the earliest turn out and the next one is taken.
+ */
+const COMPLETION_SCAN_MAX_ROWS = 500;
+
+interface CompletionRowRef {
+  id: string;
+  request_id: string | null;
+}
+
+/**
  * Every finished turn of B at or after `since`, oldest first, as one row per
  * turn (Issue #3957).
  *
- * The same row filter as {@link findWorkerReply}. A transcript tool's turn is
- * its `-turn:` request id, and a turn that wrote several rows is represented
- * by its newest one (the summary after the narration) — what
- * {@link findWorkerReply} would have answered for that turn alone. A row with
- * no request id (a scrape-only tool) is a turn of its own.
+ * The same row filter as {@link findWorkerReply}, applied in SQL so that user
+ * rows, prompt rows and CommandMate's own rows do not use up the bound, and
+ * ordered by time then insertion (rowid). A transcript tool's turn is its
+ * `-turn:` request id, represented by its NEWEST row (the summary after the
+ * narration, read by the request id without a bound — see
+ * {@link latestRowOfTurn}); a row with no request id (a scrape-only tool) is a
+ * turn of its own.
  */
 function findWorkerCompletions(
   db: Database.Database,
   worker: RelayWorkerRef,
   since: number
 ): ChatMessage[] {
-  const messages = getMessages(db, worker.worktreeId, {
-    limit: REPLY_LOOKBACK_MESSAGES,
-    cliToolId: worker.cliToolId,
-    instanceId: worker.instanceId,
-    matchResolvedInstance: true,
-  });
   const requireTurnRow = requiresTurnRow(worker.cliToolId);
-  const byTurn = new Map<string, ChatMessage>();
-  // Newest-first, so the first row seen for a turn is that turn's newest.
-  for (const message of messages) {
-    if (message.timestamp.getTime() < since) break;
-    if (message.role !== 'assistant') continue;
-    if (message.messageType === 'prompt') continue;
-    if (isSystemRow(message.requestId)) continue;
-    if (requireTurnRow && !isTurnRow(message.requestId)) continue;
-    if (message.content.trim() === '') continue;
-    const key = message.requestId ? `turn:${message.requestId}` : `row:${message.id}`;
-    if (!byTurn.has(key)) byTurn.set(key, message);
+  const systemClauses = SYSTEM_ROW_REQUEST_ID_PREFIXES.map(() => 'request_id NOT LIKE ?').join(' AND ');
+  const rows = db
+    .prepare(`
+      SELECT id, request_id FROM chat_messages
+      WHERE worktree_id = ? ${ACTIVE_FILTER}
+        AND COALESCE(cli_tool_id, 'claude') = ?
+        AND COALESCE(instance_id, cli_tool_id, 'claude') = ?
+        AND role = 'assistant' AND COALESCE(message_type, 'normal') != 'prompt'
+        AND (request_id IS NULL OR (${systemClauses}))
+        ${requireTurnRow ? "AND request_id LIKE '%-turn:%'" : ''}
+        AND TRIM(content, ' ' || char(9, 10, 13)) != ''
+        AND timestamp >= ?
+      ORDER BY timestamp ASC, rowid ASC
+      LIMIT ?
+    `)
+    .all(
+      worker.worktreeId,
+      worker.cliToolId,
+      worker.instanceId,
+      ...SYSTEM_ROW_REQUEST_ID_PREFIXES.map((prefix) => `${prefix}%`),
+      since,
+      COMPLETION_SCAN_MAX_ROWS
+    ) as CompletionRowRef[];
+
+  const turns: ChatMessage[] = [];
+  const seenTurns = new Set<string>();
+  for (const row of rows) {
+    if (row.request_id !== null) {
+      if (seenTurns.has(row.request_id)) continue;
+      seenTurns.add(row.request_id);
+      const latest = latestRowOfTurn(db, worker, row.request_id);
+      if (latest) turns.push(latest);
+      continue;
+    }
+    const message = getMessageById(db, row.id);
+    if (message) turns.push(message);
   }
-  return [...byTurn.values()].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  return turns;
+}
+
+/** The newest row a turn wrote, by its request id — no row bound. */
+function latestRowOfTurn(
+  db: Database.Database,
+  worker: RelayWorkerRef,
+  requestId: string
+): ChatMessage | null {
+  const row = db
+    .prepare(`
+      SELECT id FROM chat_messages
+      WHERE worktree_id = ? ${ACTIVE_FILTER}
+        AND COALESCE(cli_tool_id, 'claude') = ?
+        AND COALESCE(instance_id, cli_tool_id, 'claude') = ?
+        AND role = 'assistant' AND request_id = ?
+        AND TRIM(content, ' ' || char(9, 10, 13)) != ''
+      ORDER BY timestamp DESC, rowid DESC
+      LIMIT 1
+    `)
+    .get(worker.worktreeId, worker.cliToolId, worker.instanceId, requestId) as { id: string } | undefined;
+  return row ? getMessageById(db, row.id) : null;
 }
 
 /** The newest row of the turn a held candidate pointed at (it may have grown since). */
@@ -517,9 +576,7 @@ function latestRowOfCandidate(
   candidate: RelayHeldCandidate
 ): ChatMessage | null {
   if (candidate.requestId) {
-    const turn = findWorkerCompletions(db, worker, candidate.timestamp).find(
-      (row) => row.requestId === candidate.requestId
-    );
+    const turn = latestRowOfTurn(db, worker, candidate.requestId);
     if (turn) return turn;
   }
   return getMessageById(db, candidate.messageId);
@@ -1082,9 +1139,20 @@ async function deliverOne(
     // threw) is back to unclaimed — and a reply that finished while it was
     // being typed waits in the second slot. The reply supersedes the notice
     // exactly as it would have had it arrived a moment later.
-    if (!delivered && kind === 'prompt' && replaceRelayPromptWithPendingReply(db, relay.id, current.payloadId)) {
-      logger.info('relay-prompt-superseded-after-failed-delivery', { relayId });
-      globalThis.__relayPumpAgain = true;
+    // A failure here must not keep the claim below from being released: a
+    // claim left behind refuses every cancel and every expiry of the relay.
+    if (!delivered && kind === 'prompt') {
+      try {
+        if (replaceRelayPromptWithPendingReply(db, relay.id, current.payloadId)) {
+          logger.info('relay-prompt-superseded-after-failed-delivery', { relayId });
+          globalThis.__relayPumpAgain = true;
+        }
+      } catch (error) {
+        logger.warn('relay-prompt-supersede-failed', {
+          relayId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
     // Delivered: a reply is closed now and a prompt notice leaves the relay
     // open on purpose, so either way a later cancel must be judged by the row.

@@ -292,12 +292,17 @@ export class RelaySendBinding {
       // A later HTTP dispatch that delivered: the message is in, and the first
       // dispatch's boundary (the earlier one) stays the lower bound.
       if (result.kind === 'sent' && this.retryDispatchOpen) {
+        // The same generation check as the ordinary `sent` below: a relaunch
+        // keeps the relay held, and says why, rather than reading as cleared.
+        const relaunched = this.observationInvalid || result.generationAfter !== this.generationBefore;
         settleRelaySendState(this.db, {
           ...base,
           from: ['unknown'],
           to: 'sent',
           inputMessageId: result.messageId,
-          clearHoldReason: true,
+          ...(relaunched
+            ? { holdReason: RELAY_HOLD_REASONS.generationChanged, invalidateObservation: true }
+            : { clearHoldReason: true }),
         });
         return 'sent';
       }

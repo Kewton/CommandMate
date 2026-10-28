@@ -76,7 +76,7 @@ vi.mock('@/lib/db/db-instance', () => {
 });
 
 import { POST as sendMessage } from '@/app/api/worktrees/[id]/send/route';
-import { clearAgentStopEvents, recordAgentEvent } from '@/lib/session/agent-event-state';
+import { beginAgentEventGeneration, clearAgentStopEvents, recordAgentEvent } from '@/lib/session/agent-event-state';
 
 const WT = 'wt-3957-bind';
 const OTHER = 'wt-3957-asker';
@@ -436,6 +436,24 @@ describe('POST /send with relayId (Issue #3957)', () => {
       const { body } = await post({ relayId: relay.id });
       expect(body.sendOutcome).toBe('sent');
       expect(getRelayById(db, relay.id)).toMatchObject({ sendState: 'sent', holdReason: null, inputBoundaryAt: 1_900_000_000_000 });
+    });
+
+    it('relaunched before the first dispatch, unknown, then delivered: sent but still held as generation_changed (review 2, P2-3)', async () => {
+      const relay = boundRelay();
+      sendUserMessage.mockImplementationOnce(async (_db: unknown, params: SendParams) => {
+        beginAgentEventGeneration(WT, 'codex', undefined, Date.now());
+        params.inputBoundary?.beforeInput(new Date(1_900_000_000_000), 'dispatch');
+        params.inputBoundary?.onDispatchFailed?.('unknown');
+        params.inputBoundary?.beforeInput(new Date(1_900_000_010_000), 'dispatch');
+        return ok(params);
+      });
+      const { body } = await post({ relayId: relay.id });
+      expect(body.sendOutcome).toBe('sent');
+      expect(getRelayById(db, relay.id)).toMatchObject({
+        sendState: 'sent',
+        obsState: 'invalid',
+        holdReason: 'generation_changed',
+      });
     });
 
     it('negative control: not_sent alone, fallback refused → not_sent', async () => {

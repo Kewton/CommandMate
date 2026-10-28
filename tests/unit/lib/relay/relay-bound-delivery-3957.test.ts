@@ -34,6 +34,8 @@ import {
 import { reserveRelaySend, type RelaySendBinding } from '@/lib/relay/relay-bind';
 import { resetRelayServerBootId } from '@/lib/relay/relay-boot';
 import { beginAgentEventGeneration, clearAgentStopEvents } from '@/lib/session/agent-event-state';
+import { isRelayDeliveryClaimed } from '@/lib/relay/relay-delivery-claims';
+import { withdrawRelay } from '@/lib/relay/relay-service';
 import { clearWaitingEpisodes, observeWaitingEdge } from '@/lib/session/waiting-episode-state';
 
 const NOW = 1_800_000_000_000;
@@ -759,5 +761,93 @@ describe('a prompt notice whose delivery failed while a reply waited (review P2)
     expect(deliveredBodies()).toHaveLength(2);
     expect(deliveredBodies()[1]).toContain('Allow Bash(rm -rf build)?');
     expect(getRelayById(db, relay.id)?.state).toBe('prompt');
+  });
+});
+
+describe('a backfill longer than a newest-first window (review 2, P2-1)', () => {
+  /** T1, then one turn that wrote `rows` rows after it, interleaved with user rows. */
+  function seedLongBackfill(rows: number, from: number): void {
+    seedReply('T1 answer', from, 'turn-1');
+    for (let i = 0; i < rows; i += 1) {
+      seedUserRow(`follow-up ${i}`, from + 10 + i * 10);
+      seedReply(`T2 part ${i}`, from + 15 + i * 10, 'turn-2');
+    }
+  }
+
+  it('held before the confirmation: the first turn is taken though 40+ rows came after it', async () => {
+    const relay = boundRelay();
+    const binding = reserve(relay.id);
+    inputStarts(binding, NOW + 100);
+    const own = seedUserRow('go', NOW + 100);
+    seedLongBackfill(45, NOW + 1_000);
+    await notifyRelayTurnCompleted(CODEX_WORKER, { settled: true });
+    sendConfirmed(binding, own);
+    await settle();
+    expect(deliveredBodies()).toEqual([expect.stringContaining('T1 answer')]);
+  });
+
+  it('after the confirmation: the same', async () => {
+    const relay = boundRelay();
+    const binding = reserve(relay.id);
+    inputStarts(binding, NOW + 100);
+    sendConfirmed(binding, seedUserRow('go', NOW + 100));
+    seedLongBackfill(45, NOW + 1_000);
+    await notifyRelayTurnCompleted(CODEX_WORKER, { settled: true });
+    await settle();
+    expect(deliveredBodies()).toEqual([expect.stringContaining('T1 answer')]);
+  });
+
+  it('negative control: a few rows — the first turn as before, and a turn is read by its newest row', async () => {
+    const relay = boundRelay();
+    const binding = reserve(relay.id);
+    inputStarts(binding, NOW + 100);
+    sendConfirmed(binding, seedUserRow('go', NOW + 100));
+    seedLongBackfill(2, NOW + 1_000);
+    await notifyRelayTurnCompleted(CODEX_WORKER, { settled: true });
+    await settle();
+    expect(deliveredBodies()).toEqual([expect.stringMatching(/T1 answer$/)]);
+  });
+});
+
+describe('the supersede after a failed prompt delivery throws (review 2, P2-2)', () => {
+  it('the claim is released anyway: cancel and expiry still work', async () => {
+    const relay = legacyRelay();
+    seedPrompt('p1', NOW + 500);
+    let release: (value: unknown) => void = () => {};
+    sendUserMessage.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    notifyRelayPromptWaiting(CODEX_WORKER);
+    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    seedReply('finished', NOW + 3_000);
+    await notifyRelayTurnCompleted(CODEX_WORKER, { settled: true });
+    expect(getRelayBinding(db, relay.id)?.pendingReply).not.toBeNull();
+    // Make the supersede itself fail, in the database.
+    db.exec(`CREATE TRIGGER refuse_supersede BEFORE UPDATE ON session_relays
+      WHEN OLD.pending_kind = 'prompt' AND NEW.pending_kind = 'reply'
+      BEGIN SELECT RAISE(ABORT, 'supersede refused'); END`);
+
+    release({ ok: false, stage: 'send', error: 'composer busy' });
+    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve));
+
+    expect(isRelayDeliveryClaimed(relay.id)).toBe(false);
+    expect(sweepExpiredRelays(db, NOW + DAY_MS + 1)).toBe(1);
+  });
+
+  it('the cancel is not refused as delivering', async () => {
+    const relay = legacyRelay();
+    seedPrompt('p1', NOW + 500);
+    let release: (value: unknown) => void = () => {};
+    sendUserMessage.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    notifyRelayPromptWaiting(CODEX_WORKER);
+    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    seedReply('finished', NOW + 3_000);
+    await notifyRelayTurnCompleted(CODEX_WORKER, { settled: true });
+    db.exec(`CREATE TRIGGER refuse_supersede BEFORE UPDATE ON session_relays
+      WHEN OLD.pending_kind = 'prompt' AND NEW.pending_kind = 'reply'
+      BEGIN SELECT RAISE(ABORT, 'supersede refused'); END`);
+
+    release({ ok: false, stage: 'send', error: 'composer busy' });
+    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve));
+
+    expect(withdrawRelay(db, relay.id, NOW + 10)).toMatchObject({ ok: true });
   });
 });
