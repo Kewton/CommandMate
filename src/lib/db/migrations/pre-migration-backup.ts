@@ -106,11 +106,22 @@ function parseVersions(copyPath: string): { from: number; to: number } | null {
  * possibly from another build aiming at v62; retrying it three times must not
  * push out the v59 copy, which is the only one the last working build can open.
  * That copy then takes one of the slots, so the total stays at the limit.
+ *
+ * With no usable record (`null`: never recorded, or older than a restored
+ * database), the copy with the lowest source version (newest on a tie) is the
+ * restore point — an intermediate version left by a half-applied run is never
+ * taken for a completed one.
  */
-export function selectBackupsToPrune(completed: string[], lastCompleteVersion: number): string[] {
+export function selectBackupsToPrune(completed: string[], lastCompleteVersion: number | null): string[] {
   let original: string | undefined;
+  let originalFrom = Infinity;
   for (const copy of completed) {
-    if (parseVersions(copy)?.from === lastCompleteVersion) original = copy;
+    const from = parseVersions(copy)?.from;
+    if (from === undefined) continue;
+    if (lastCompleteVersion === null ? from <= originalFrom : from === lastCompleteVersion) {
+      original = copy;
+      originalFrom = from;
+    }
   }
   const newest = completed.slice(-MIGRATION_BACKUP_GENERATIONS);
   const keep = original === undefined || newest.includes(original)
@@ -159,9 +170,8 @@ function writeLastCompleteVersion(dir: string, dbFileName: string, version: numb
  * Record that every migration up to `version` completed (Issue #3985).
  *
  * Only once a copy directory exists: a database that never needed a copy has no
- * restore point to protect, and the first copy assumes its own source version.
- * A failure is logged and never stops startup; the next copy then falls back to
- * that assumption.
+ * restore point to protect. A failure is logged and never stops startup; the
+ * next copy then protects the copy with the lowest source version instead.
  */
 export function recordLastCompleteVersion(db: Database.Database, version: number): void {
   if (db.memory || typeof db.name !== 'string' || db.name === '' || db.name === ':memory:') return;
@@ -248,18 +258,17 @@ export function createPreMigrationBackup(
 
   // Prune only after the new copy is verified and in place.
   const removed: string[] = [];
-  // Unrecorded (first copy, or a directory from an older build): the version we
-  // start from is taken as the last completed one, and is written down so that a
-  // retry after a half-applied run still knows where the upgrade began.
+  // Unrecorded (first copy, or a directory from an older build) stays unrecorded:
+  // the record is written only when every migration succeeds. A record newer
+  // than the database means an older copy was restored by hand; it is ignored
+  // (not deleted) until the next completed run overwrites it.
   let lastCompleteVersion = readLastCompleteVersion(dir, dbFileName);
-  if (lastCompleteVersion === null) {
-    lastCompleteVersion = fromVersion;
-    try {
-      writeLastCompleteVersion(dir, dbFileName, fromVersion);
-    } catch (error: unknown) {
-      const reason = error instanceof Error ? error.message : String(error);
-      console.warn(`Could not record the last completed schema version in ${dir}: ${reason}`);
-    }
+  if (lastCompleteVersion !== null && lastCompleteVersion > fromVersion) {
+    console.warn(
+      `Ignoring the recorded last completed schema version v${lastCompleteVersion}: ` +
+      `the database is at v${fromVersion} (restored from an older copy?)`
+    );
+    lastCompleteVersion = null;
   }
   const completed = listMigrationBackups(dir, dbFileName);
   for (const old of selectBackupsToPrune(completed, lastCompleteVersion)) {

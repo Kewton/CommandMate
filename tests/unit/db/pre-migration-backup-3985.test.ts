@@ -279,7 +279,8 @@ describe('pre-migration backup (Issue #3985)', () => {
         'v2-to-v4.20261029T000002000Z',
         'v2-to-v4.20261029T000003000Z',
       ]);
-      expect(readLastCompleteVersion(backupDir, 'cm.db')).toBe(1);
+      // Unrecorded: the copy with the lowest source version is the restore point.
+      expect(readLastCompleteVersion(backupDir, 'cm.db')).toBeNull();
       expect(readCopy(listMigrationBackups(backupDir, 'cm.db')[0]).version).toBe(1);
     });
 
@@ -329,11 +330,83 @@ describe('pre-migration backup (Issue #3985)', () => {
       expect(fs.readdirSync(backupDir).filter((n) => n.endsWith('.partial'))).toEqual([]);
     });
 
-    it('writes the assumed version before migrating, so a failed first run still records where it began', () => {
+    it('does not record anything when the first run fails partway (no intermediate version is taken as completed)', () => {
       db = seedV1();
       at(0);
       expect(() => runMigrations(db, [m1, m2, failingV3])).toThrow(/Migration 3/);
-      expect(readLastCompleteVersion(backupDir, 'cm.db')).toBe(1);
+      expect(readLastCompleteVersion(backupDir, 'cm.db')).toBeNull();
+    });
+
+    it('keeps the oldest-source copy when an older build left a half-applied upgrade and no record', () => {
+      // Older build: v1 copy taken, v2 applied, v3 failed — and no record written.
+      db = seedV1();
+      at(0);
+      expect(() => runMigrations(db, [m1, m2, failingV3])).toThrow(/Migration 3/);
+      fs.rmSync(path.join(backupDir, 'cm.db.last-complete-version'), { force: true });
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        at(attempt);
+        expect(() => runMigrations(db, [m1, m2, failingV3, m4])).toThrow(/Migration 3/);
+      }
+      expect(copyNames()).toEqual([
+        'v1-to-v3.20261029T000000000Z',
+        'v2-to-v4.20261029T000002000Z',
+        'v2-to-v4.20261029T000003000Z',
+      ]);
+    });
+
+    it('ignores a record newer than the database (a copy restored by hand) and protects the restored version', () => {
+      db = seedV1();
+      at(0);
+      runMigrations(db, [m1, m2]);
+      at(1);
+      runMigrations(db, [m1, m2, m3]);
+      expect(readLastCompleteVersion(backupDir, 'cm.db')).toBe(3);
+
+      // Restore the v1 copy as the guide says: stop, put the copy back, drop -wal/-shm.
+      db.close();
+      const [v1Copy] = listMigrationBackups(backupDir, 'cm.db');
+      fs.copyFileSync(v1Copy, dbPath);
+      fs.rmSync(`${dbPath}-wal`, { force: true });
+      fs.rmSync(`${dbPath}-shm`, { force: true });
+      db = openWal();
+      expect(getCurrentVersion(db)).toBe(1);
+
+      // The upgrade half-applies again (v2 ok, v3 fails), then is retried three times.
+      for (let attempt = 10; attempt <= 13; attempt++) {
+        at(attempt);
+        expect(() => runMigrations(db, [m1, m2, failingV3])).toThrow(/Migration 3/);
+      }
+      expect(copyNames()).toEqual([
+        'v1-to-v3.20261029T000010000Z',
+        'v2-to-v3.20261029T000012000Z',
+        'v2-to-v3.20261029T000013000Z',
+      ]);
+      expect(console.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Ignoring the recorded last completed schema version v3')
+      );
+      // Not deleted; the next completed run overwrites it.
+      expect(readLastCompleteVersion(backupDir, 'cm.db')).toBe(3);
+    });
+
+    it('follows a record that matches the database as before', () => {
+      db = seedV1();
+      at(0);
+      runMigrations(db, [m1, m2]);
+      expect(readLastCompleteVersion(backupDir, 'cm.db')).toBe(2);
+      // From the recorded v2: half-applied v3 -> v4 upgrade, retried with another target.
+      const failingV4: Migration = { version: 4, name: 'fails at 4', up: () => { throw new Error('boom'); } };
+      at(1);
+      expect(() => runMigrations(db, [m1, m2, m3, failingV4])).toThrow(/Migration 4/);
+      for (let attempt = 2; attempt <= 4; attempt++) {
+        at(attempt);
+        expect(() => runMigrations(db, [m1, m2, m3, failingV4, m5])).toThrow(/Migration 4/);
+      }
+      // v1-to-v2 is pruned; the v2 copy (the recorded version) survives.
+      expect(copyNames()).toEqual([
+        'v2-to-v4.20261029T000001000Z',
+        'v3-to-v5.20261029T000003000Z',
+        'v3-to-v5.20261029T000004000Z',
+      ]);
     });
 
     it('does not stop startup when the record cannot be written', () => {
