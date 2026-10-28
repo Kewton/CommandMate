@@ -35,11 +35,25 @@
  * the frame back — one `C-u` is not enough, as #1878 §5-1 measured.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { useSpecialKeys } from '@/hooks/useSpecialKeys';
+import { clearTargetKey } from '@/components/worktree/clear-notice';
 import { NAV_KEY_REFRESH_DELAY_MS } from '@/config/ui-feedback-config';
+
+/** Why the last Clear did not empty the composer (Issue #3954). */
+export type ClearComposerNotice = 'busy' | 'otherServer' | 'notCleared' | 'failed';
+
+/**
+ * The 409 `code` for a session another CommandMate server owns; spelled out so the
+ * bar does not import the polling hook, and pinned to `FOREIGN_SESSION_ERROR_CODE`
+ * by UnsentComposerBar.test.tsx.
+ */
+export const FOREIGN_SESSION_CODE = 'session_owned_by_other_server';
+
+/** The clear-composer 409 for a send that holds the instance's input (route.ts). */
+const INSTANCE_INPUT_BUSY_CODE = 'INSTANCE_INPUT_BUSY';
 
 export interface UnsentComposerBarProps {
   worktreeId: string;
@@ -50,6 +64,49 @@ export interface UnsentComposerBarProps {
   composerText: string;
   /** Trigger an immediate terminal refresh once the action has been sent. */
   onActionSent?: () => void;
+  /**
+   * The Clear result, lifted by a parent that must keep showing it after the bar
+   * itself is hidden (a dialog on screen empties `composerText`). Omit both and
+   * the bar keeps its own.
+   */
+  clearNotice?: ClearComposerNotice | null;
+  /** `targetKey` is the destination the Clear was aimed at ({@link clearTargetKey}). */
+  onClearNoticeChange?: (
+    notice: ClearComposerNotice | null,
+    targetKey: string,
+    generation?: number,
+  ) => number;
+}
+
+/** The one-line Clear failure; rendered by the bar and, alone, by a parent whose bar is hidden. */
+export function UnsentComposerClearNotice({
+  notice,
+  onDismiss,
+}: {
+  notice: ClearComposerNotice | null;
+  onDismiss?: () => void;
+}) {
+  const t = useTranslations('worktree');
+  if (!notice) return null;
+  return (
+    <p
+      role="alert"
+      data-testid="unsent-composer-clear-error"
+      className="basis-full text-xs text-danger-foreground"
+    >
+      {t(`unsentComposer.clearError.${notice}`)}
+      {onDismiss ? (
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label={t('unsentComposer.clearError.dismiss')}
+          className="ml-2 underline"
+        >
+          {t('unsentComposer.clearError.dismiss')}
+        </button>
+      ) : null}
+    </p>
+  );
 }
 
 /**
@@ -84,18 +141,40 @@ export function UnsentComposerBar({
   instanceId,
   composerText,
   onActionSent,
+  clearNotice,
+  onClearNoticeChange,
 }: UnsentComposerBarProps) {
   const t = useTranslations('worktree');
   const [clearing, setClearing] = useState(false);
+  const [ownNotice, setOwnNotice] = useState<ClearComposerNotice | null>(null);
+  const controlled = onClearNoticeChange !== undefined;
+  const clearError = controlled ? (clearNotice ?? null) : ownNotice;
+  const targetKey = clearTargetKey(worktreeId, cliToolId, instanceId);
+  // A Clear's answer is adopted only if nothing (Run, a dismissal, a newer Clear)
+  // has started a new generation since it was sent.
+  const ownGeneration = useRef(0);
+  const setClearError = useCallback(
+    (notice: ClearComposerNotice | null, generation?: number): number => {
+      if (onClearNoticeChange) return onClearNoticeChange(notice, targetKey, generation);
+      if (notice === null) ownGeneration.current += 1;
+      else if (generation !== undefined && generation !== ownGeneration.current) return ownGeneration.current;
+      setOwnNotice(notice);
+      return ownGeneration.current;
+    },
+    [onClearNoticeChange, targetKey],
+  );
   const sendKeys = useSpecialKeys(worktreeId, cliToolId, instanceId, onActionSent);
 
   const handleRun = useCallback(() => {
     // The existing navigation endpoint, with the key it has always accepted.
     sendKeys(['Enter']);
-  }, [sendKeys]);
+    // The composer is about to be emptied by Run: a leftover Clear failure is stale.
+    setClearError(null);
+  }, [sendKeys, setClearError]);
 
   const handleClear = useCallback(() => {
     setClearing(true);
+    const generation = setClearError(null);
     const body = instanceId && instanceId !== cliToolId
       ? { cliToolId, instanceId }
       : { cliToolId };
@@ -104,16 +183,32 @@ export function UnsentComposerBar({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
-      .then(() => {
+      .then(async (res) => {
+        if (res.status === 409) {
+          const body = await res.json().catch(() => null) as { code?: unknown } | null;
+          setClearError(
+            body?.code === INSTANCE_INPUT_BUSY_CODE ? 'busy'
+              : body?.code === FOREIGN_SESSION_CODE ? 'otherServer'
+              : 'failed',
+            generation,
+          );
+        } else if (!res.ok) {
+          setClearError('failed', generation);
+        } else {
+          // HTTP 200 also carries `cleared: false` when the text is still there.
+          const data = await res.json().catch(() => null) as { cleared?: boolean } | null;
+          if (data?.cleared === false) setClearError('notCleared', generation);
+        }
         if (onActionSent) setTimeout(onActionSent, NAV_KEY_REFRESH_DELAY_MS);
       })
       .catch((err) => {
         console.error('Failed to clear composer:', err);
+        setClearError('failed', generation);
       })
       .finally(() => {
         setClearing(false);
       });
-  }, [worktreeId, cliToolId, instanceId, onActionSent]);
+  }, [worktreeId, cliToolId, instanceId, onActionSent, setClearError]);
 
   // The single display gate, and it reads the text only. Nothing here consults
   // isUnclassifiedActive / isSelectionListActive / isPromptWaiting.
@@ -158,6 +253,7 @@ export function UnsentComposerBar({
           {t('unsentComposer.clear')}
         </button>
       </div>
+      <UnsentComposerClearNotice notice={clearError} onDismiss={() => setClearError(null)} />
     </div>
   );
 }

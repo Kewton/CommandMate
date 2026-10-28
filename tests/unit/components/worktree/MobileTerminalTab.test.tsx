@@ -190,6 +190,110 @@ describe('MobileTerminalTab unsent-input bar (Issue #1879)', () => {
   });
 });
 
+describe('MobileTerminalTab Clear failure (Issue #3954)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it.each([
+    ['409 INSTANCE_INPUT_BUSY', 409, { code: 'INSTANCE_INPUT_BUSY' }, 'busy'],
+    ["another server's 409", 409, { code: 'session_owned_by_other_server' }, 'otherServer'],
+    ['200 with cleared:false', 200, { success: true, cleared: false }, 'notCleared'],
+  ])('keeps the message after the bar hides (%s)', async (_l, status, body, key) => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(body) })));
+    mockPaneState({ composerText: '/work-plan' });
+    const { rerender } = render(<MobileTerminalTab worktreeId="w-1" cliToolId="claude" instanceId="claude" />);
+    fireEvent.click(screen.getByRole('button', { name: 'worktree.unsentComposer.clear' }));
+    await waitFor(() => expect(screen.getByTestId('unsent-composer-clear-error')).toHaveTextContent(
+      `worktree.unsentComposer.clearError.${key}`,
+    ));
+
+    // The next poll's frame holds no composer text (a dialog): the bar goes.
+    mockPaneState({ composerText: '' });
+    // `disableAutoFollow` only forces a re-render of the memoised tab.
+    rerender(<MobileTerminalTab worktreeId="w-1" cliToolId="claude" instanceId="claude" disableAutoFollow />);
+    expect(screen.queryByTestId('unsent-composer-bar')).not.toBeInTheDocument();
+    expect(screen.getByTestId('unsent-composer-clear-error')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'worktree.unsentComposer.run' })).not.toBeInTheDocument();
+  });
+});
+
+describe('MobileTerminalTab Clear failure is bound to its destination (Issue #3954)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  const tab = (instanceId: string, extra: Record<string, unknown> = {}) => (
+    <MobileTerminalTab worktreeId="w-1" cliToolId="claude" instanceId={instanceId} {...extra} />
+  );
+  const clearBtn = () => screen.getByRole('button', { name: 'worktree.unsentComposer.clear' });
+  const failNotice = { ok: true, status: 200, json: () => Promise.resolve({ success: true, cleared: false }) };
+
+  async function failedClear() {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(failNotice)));
+    mockPaneState({ composerText: '/work-plan' });
+    const view = render(tab('claude'));
+    fireEvent.click(clearBtn());
+    await screen.findByTestId('unsent-composer-clear-error');
+    return view;
+  }
+
+  it('drops the failure when the instance changes', async () => {
+    const { rerender } = await failedClear();
+    rerender(tab('claude-2'));
+    expect(screen.queryByTestId('unsent-composer-clear-error')).not.toBeInTheDocument();
+  });
+
+  it('negative: a plain re-render of the same instance keeps it', async () => {
+    const { rerender } = await failedClear();
+    rerender(tab('claude', { disableAutoFollow: true }));
+    expect(screen.getByTestId('unsent-composer-clear-error')).toBeInTheDocument();
+  });
+
+  it('discards a late answer that was aimed at the previous instance', async () => {
+    let resolve!: (r: unknown) => void;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise((r) => { resolve = r; })));
+    mockPaneState({ composerText: '/work-plan' });
+    const { rerender } = render(tab('claude'));
+    fireEvent.click(clearBtn());
+    rerender(tab('claude-2'));
+    resolve(failNotice);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByTestId('unsent-composer-clear-error')).not.toBeInTheDocument();
+  });
+
+  it('Run removes a stale failure', async () => {
+    await failedClear();
+    fireEvent.click(screen.getByRole('button', { name: 'worktree.unsentComposer.run' }));
+    await waitFor(() => expect(screen.queryByTestId('unsent-composer-clear-error')).not.toBeInTheDocument());
+  });
+
+  it('does not bring the failure back when an older Clear answers after Run (or a dismissal)', async () => {
+    let resolve!: (r: unknown) => void;
+    vi.stubGlobal('fetch', vi.fn((url: string) => (
+      url.includes('clear-composer') ? new Promise((r) => { resolve = r; }) : Promise.resolve(failNotice)
+    )));
+    mockPaneState({ composerText: '/work-plan' });
+    render(tab('claude'));
+    fireEvent.click(clearBtn());
+    fireEvent.click(screen.getByRole('button', { name: 'worktree.unsentComposer.run' }));
+    resolve(failNotice);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByTestId('unsent-composer-clear-error')).not.toBeInTheDocument();
+  });
+
+  it('the dismiss button removes it even when the bar is gone', async () => {
+    const { rerender } = await failedClear();
+    mockPaneState({ composerText: '' });
+    rerender(tab('claude', { disableAutoFollow: true }));
+    expect(screen.queryByTestId('unsent-composer-bar')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'worktree.unsentComposer.clearError.dismiss' }));
+    expect(screen.queryByTestId('unsent-composer-clear-error')).not.toBeInTheDocument();
+  });
+});
+
 describe('MobileTerminalTab opencode quick keys (Issue #2046, folded by #2106)', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 

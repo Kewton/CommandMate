@@ -93,7 +93,12 @@ import {
   sessionStartingScopeKey,
   useSessionStartingGate,
 } from '@/hooks/useSessionStartingGate';
-import { UnsentComposerBar, hasUnsentComposerText } from '@/components/worktree/UnsentComposerBar';
+import {
+  UnsentComposerBar,
+  UnsentComposerClearNotice,
+  hasUnsentComposerText,
+} from '@/components/worktree/UnsentComposerBar';
+import { clearTargetKey, useClearNotice } from '@/components/worktree/clear-notice';
 import {
   OpencodeSidebarNotice,
   hasOpenCodeSidebarObstruction,
@@ -743,6 +748,12 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   // combined with `showEscapeHatch` — an unclassified overlay and a composer
   // holding unsent text are unrelated conditions.
   const showUnsentComposerBar = hasUnsentComposerText(terminal.composerText);
+  // Issue #3954: the Clear result outlives the bar (a dialog empties composerText).
+  const {
+    notice: clearNotice,
+    setNotice: setClearNotice,
+    dismiss: dismissClearNotice,
+  } = useClearNotice(clearTargetKey(worktreeId, cliToolId, instanceId));
 
   // Issue #2095: identical gate to PC, from one shared predicate — the sidebar
   // is a property of the pane, not of the screen it is being watched on.
@@ -902,7 +913,13 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
             instanceId={instanceId}
             composerText={terminal.composerText}
             onActionSent={refresh}
+            clearNotice={clearNotice}
+            onClearNoticeChange={setClearNotice}
           />
+        </div>
+      ) : clearNotice && !directInputOpen ? (
+        <div className="shrink-0 px-2 pt-1">
+          <UnsentComposerClearNotice notice={clearNotice} onDismiss={dismissClearNotice} />
         </div>
       ) : null}
       {showOpencodeSidebarNotice ? (
