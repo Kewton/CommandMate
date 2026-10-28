@@ -113,6 +113,7 @@ import {
   clearExpiredCarriedPasteMark,
   getCarriedPasteMark,
   leaveCarriedPasteMark,
+  noteInputStart,
   withInstanceInputLock,
   type InstanceInputTicket,
 } from '@/lib/session/instance-input-lock';
@@ -322,6 +323,9 @@ async function pasteBody(
     await runTmux(['delete-buffer', '-b', bufferName]).catch(() => undefined);
     assertInputOwner(ticket, cliToolId, 'paste-buffer', false);
   }
+  // Issue #3953: the send's stamp, as the typed branch takes it — after
+  // `load-buffer` (up to its timeout), right before the body reaches the pane.
+  noteInputStart();
   try {
     await runTmux(['paste-buffer', '-p', '-r', '-d', '-b', bufferName, '-t', exactTarget(sessionName)]);
   } catch (error: unknown) {
@@ -910,6 +914,10 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
     //    built in `lib/tmux/key-sequence.ts`, which carries the table.
     const typedAt = Date.now();
     assertInputOwner(ticket, cliToolId, 'the body', false);
+    // Issue #3953: the send's stamp is taken here — after the lock, the carried
+    // mark, the re-check and the clear, right before the body's first key — so a
+    // previous turn that ended during any of them is older than this send.
+    noteInputStart();
     try {
       await sendKeys(sessionName, message, false, { literal: true });
     } catch (error: unknown) {
