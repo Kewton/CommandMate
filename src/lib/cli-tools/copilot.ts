@@ -931,9 +931,11 @@ export class CopilotTool extends BaseCLITool {
     await waitOutCarriedPasteMark(ticket);
     const idle = await this.waitForPrompt(sessionName, COPILOT_MODEL_SWITCH_TIMEOUT_MS, 'idle');
     if (!idle.ready) {
+      // The pane's text goes to the log, not the message: the message is read by
+      // `classifySendFailure`, which a screen quoting its keywords would steer (#3954).
+      logger.warn('copilot-model-switch-not-idle', { model: modelName, bottomRow: describeBottomRow(idle.output) });
       throw new Error(
-        `copilot did not become idle within ${COPILOT_MODEL_SWITCH_TIMEOUT_MS}ms, so /model was not sent ` +
-          `(bottom row: ${describeBottomRow(idle.output)})`
+        `copilot did not become idle within ${COPILOT_MODEL_SWITCH_TIMEOUT_MS}ms, so /model was not sent`
       );
     }
     const before = readCopilotModelSwitchOutcomes(idle.output, modelName);
@@ -959,8 +961,8 @@ export class CopilotTool extends BaseCLITool {
     if (verdict.kind === 'pending') {
       logger.warn('copilot-model-switch-unconfirmed', { model: modelName, bottomRow: verdict.bottomRow });
       throw new Error(
-        `copilot printed no answer to /model within ${COPILOT_MODEL_SWITCH_TIMEOUT_MS}ms ` +
-          `(bottom row: ${verdict.bottomRow}); the switch may still take effect, and nothing further was typed`
+        `copilot printed no answer to /model within ${COPILOT_MODEL_SWITCH_TIMEOUT_MS}ms; ` +
+          'the switch may still take effect, and nothing further was typed'
       );
     }
 

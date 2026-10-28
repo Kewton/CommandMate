@@ -695,7 +695,14 @@
     "regionLabel": "Unsent input",
     "label": "Unsent input:",
     "run": "Run",
-    "clear": "Clear"
+    "clear": "Clear",
+    "clearError": {
+      "dismiss": "Dismiss",
+      "otherServer": "Could not clear: this session is owned by another server.",
+      "busy": "Could not clear: a send is in progress. Wait a moment and try again.",
+      "notCleared": "The text is still in the input box; it could not be cleared.",
+      "failed": "Failed to clear. Please try again."
+    }
   },
   "todo": {
     "addPlaceholder": "Add a todo…",

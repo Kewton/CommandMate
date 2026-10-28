@@ -163,4 +163,13 @@ describe('[#3952] the --model switch refused by the input re-check', () => {
     expect(result).toMatchObject({ ok: false, stage: 'model' });
     expect(attempts).toEqual([{ state: 'not-sent', reason: 'model-switch-failed' }]);
   });
+
+  it.each([
+    'copilot did not become idle within 30000ms, so /model was not sent',
+    'copilot printed no answer to /model within 30000ms; the switch may still take effect, and nothing further was typed',
+  ])('Issue #3954: the wording without a quoted screen stays model-switch-failed: %s', async (wording) => {
+    const { result, attempts } = await sendWithModel(failure(`Failed to switch Copilot model to gpt-5: ${wording}`));
+    expect(result).toMatchObject({ ok: false, stage: 'model' });
+    expect(attempts).toEqual([{ state: 'not-sent', reason: 'model-switch-failed' }]);
+  });
 });
