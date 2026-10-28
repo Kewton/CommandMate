@@ -122,7 +122,7 @@
     },
     {
       "files": [
-        // 3) 段階解消 (staged removal, 14 files): the only progress metric.
+        // 3) 段階解消 (staged removal, 13 files): the only progress metric.
         // #1905 removed kill-session/route.ts: it kills through ICLITool.killSession now.
         // #1906 removed terminal/route.ts and send-user-message.ts: both dropped the
         // copilot sendKeys bypass and now send through ICLITool.sendMessage.
@@ -137,7 +137,6 @@
         "src/lib/pasted-text-helper.ts",
         "src/lib/polling/response-checker.ts",
         "src/lib/prompt-answer-sender.ts",
-        "src/lib/realtime/terminal-broadcast.ts",
         "src/lib/session-cleanup.ts",
         "src/lib/session-key-sender.ts",
         "src/lib/session/claude-session.ts",
