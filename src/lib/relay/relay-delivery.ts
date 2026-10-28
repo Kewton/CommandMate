@@ -66,7 +66,6 @@ import {
   settleRelaySendState,
   stashRelayPayload,
   type RelayBinding,
-  type RelayHeldCandidate,
   type RelayPendingReply,
 } from '@/lib/db/relay-db';
 import {
@@ -455,11 +454,14 @@ function stashForBoundRelay(
     // Every finished turn since the relay opened, oldest first — not only the
     // newest: a transcript reader that backfills two turns saves both and
     // announces once, and holding only the newest would lose the earlier one.
-    for (const reply of findWorkerCompletions(db, worker, relay.createdAt)) {
+    // From the boundary once it is written: rows before it are never taken,
+    // and must not use up the scan's bound. `timestamp` is the turn's ORDER
+    // (its first row), the same key the confirmation re-reads by.
+    for (const turn of findWorkerCompletions(db, worker, relay.inputBoundaryAt ?? relay.createdAt)) {
       appendRelayHeldCandidate(
         db,
         relay.id,
-        { messageId: reply.id, timestamp: reply.timestamp.getTime(), requestId: reply.requestId ?? null },
+        { messageId: turn.row.id, timestamp: turn.orderAt, requestId: turn.row.requestId ?? null },
         now
       );
     }
@@ -469,9 +471,9 @@ function stashForBoundRelay(
   const binding = getRelayBinding(db, relay.id);
   if (!binding || !observationStillHolds(db, worker, binding)) return false;
   // The earliest turn that finished after the boundary, for the same reason.
-  const [reply] = findWorkerCompletions(db, worker, relay.inputBoundaryAt);
-  if (!reply) return false;
-  return stashBoundReply(db, worker, binding, reply, now);
+  const [first] = findWorkerCompletions(db, worker, relay.inputBoundaryAt);
+  if (!first) return false;
+  return stashBoundReply(db, worker, binding, first.row, now);
 }
 
 /**
@@ -488,6 +490,15 @@ const COMPLETION_SCAN_MAX_ROWS = 500;
 interface CompletionRowRef {
   id: string;
   request_id: string | null;
+  timestamp: number;
+}
+
+/** One finished turn: the row its body is read from, and where it sits in order. */
+interface WorkerCompletion {
+  /** The turn's newest row (its body). */
+  row: ChatMessage;
+  /** The turn's FIRST row at or after the bound (epoch ms): the order key. */
+  orderAt: number;
 }
 
 /**
@@ -506,12 +517,12 @@ function findWorkerCompletions(
   db: Database.Database,
   worker: RelayWorkerRef,
   since: number
-): ChatMessage[] {
+): WorkerCompletion[] {
   const requireTurnRow = requiresTurnRow(worker.cliToolId);
   const systemClauses = SYSTEM_ROW_REQUEST_ID_PREFIXES.map(() => 'request_id NOT LIKE ?').join(' AND ');
   const rows = db
     .prepare(`
-      SELECT id, request_id FROM chat_messages
+      SELECT id, request_id, timestamp FROM chat_messages
       WHERE worktree_id = ? ${ACTIVE_FILTER}
         AND COALESCE(cli_tool_id, 'claude') = ?
         AND COALESCE(instance_id, cli_tool_id, 'claude') = ?
@@ -532,18 +543,20 @@ function findWorkerCompletions(
       COMPLETION_SCAN_MAX_ROWS
     ) as CompletionRowRef[];
 
-  const turns: ChatMessage[] = [];
+  // Already in turn order: a turn is placed by its first row, and its body is
+  // its newest row — kept apart so the order never follows the body.
+  const turns: WorkerCompletion[] = [];
   const seenTurns = new Set<string>();
   for (const row of rows) {
     if (row.request_id !== null) {
       if (seenTurns.has(row.request_id)) continue;
       seenTurns.add(row.request_id);
       const latest = latestRowOfTurn(db, worker, row.request_id);
-      if (latest) turns.push(latest);
+      if (latest) turns.push({ row: latest, orderAt: row.timestamp });
       continue;
     }
     const message = getMessageById(db, row.id);
-    if (message) turns.push(message);
+    if (message) turns.push({ row: message, orderAt: row.timestamp });
   }
   return turns;
 }
@@ -567,19 +580,6 @@ function latestRowOfTurn(
     `)
     .get(worker.worktreeId, worker.cliToolId, worker.instanceId, requestId) as { id: string } | undefined;
   return row ? getMessageById(db, row.id) : null;
-}
-
-/** The newest row of the turn a held candidate pointed at (it may have grown since). */
-function latestRowOfCandidate(
-  db: Database.Database,
-  worker: RelayWorkerRef,
-  candidate: RelayHeldCandidate
-): ChatMessage | null {
-  if (candidate.requestId) {
-    const turn = latestRowOfTurn(db, worker, candidate.requestId);
-    if (turn) return turn;
-  }
-  return getMessageById(db, candidate.messageId);
 }
 
 /** Judge the overlap of one reply and stash it, note and all. */
@@ -613,10 +613,11 @@ function stashBoundReply(
 /**
  * The bound send was confirmed: judge what was held for it (Issue #3957).
  *
- * The EARLIEST held candidate at or after the boundary is taken — not the
- * newest: when two turns ended before the send was confirmed, the first one
- * after the boundary is the one this request started. Earlier candidates are
- * dropped. The worker's open prompt is judged at the same moment: a dialog
+ * The EARLIEST turn at or after the boundary is taken — not the newest: when
+ * two turns ended before the send was confirmed, the first one after the
+ * boundary is the one this request started. It is re-read from the boundary
+ * (the held candidates are the record of what was seen, ordered by the same
+ * key), and the held list is dropped. The worker's open prompt is judged at the same moment: a dialog
  * that appeared after the boundary and is still open is told now (its opening
  * edge fired while the send was unconfirmed and will not fire again); one
  * already answered is not.
@@ -640,27 +641,14 @@ export function evaluateRelayAfterSend(relayId: string): void {
     const now = Date.now();
 
     const decided = db.transaction((): boolean => {
-      const held = binding.heldCandidates;
       clearRelayHeldCandidates(db, relayId);
       if (!observationStillHolds(db, worker, binding)) return false;
-      // Earliest by the row's own time; arrival order breaks ties (one
-      // announcement can hold several turns).
-      const ordered = held
-        .map((candidate, index) => ({ candidate, index }))
-        .sort((a, b) => a.candidate.timestamp - b.candidate.timestamp || a.index - b.index)
-        .map(({ candidate }) => candidate);
-      const seenTurns = new Set<string>();
-      for (const candidate of ordered) {
-        if (candidate.timestamp < boundary) continue;
-        if (candidate.requestId) {
-          if (seenTurns.has(candidate.requestId)) continue;
-          seenTurns.add(candidate.requestId);
-        }
-        const row = latestRowOfCandidate(db, worker, candidate);
-        if (!row) continue;
-        return stashBoundReply(db, worker, binding, row, now);
-      }
-      return false;
+      // Re-read from the boundary rather than trusting what was held: the
+      // held list was read from `createdAt` (before the boundary existed) and
+      // may have spent the scan's bound on rows before it. The order is the
+      // same key either way — each turn's first row.
+      const [first] = findWorkerCompletions(db, worker, boundary);
+      return first ? stashBoundReply(db, worker, binding, first.row, now) : false;
     })();
 
     const prompted = decided ? false : notifyPromptForRelay(db, worker, relayId);

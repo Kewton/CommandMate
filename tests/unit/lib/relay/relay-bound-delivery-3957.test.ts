@@ -851,3 +851,50 @@ describe('the supersede after a failed prompt delivery throws (review 2, P2-2)',
     expect(withdrawRelay(db, relay.id, NOW + 10)).toMatchObject({ ok: true });
   });
 });
+
+describe('the scan bound and the turn order (review 3)', () => {
+  it('P2-1: 500+ completion rows before the boundary do not hide the reply after it', async () => {
+    const relay = boundRelay();
+    const binding = reserve(relay.id);
+    // A long backfill of somebody else's turns, all before this send's input.
+    for (let i = 0; i < 520; i += 1) seedReply(`old ${i}`, NOW + 1 + i * 0.1);
+    inputStarts(binding, NOW + 200);
+    const own = seedUserRow('go', NOW + 200);
+    seedReply('my answer', NOW + 2_000);
+    await notifyRelayTurnCompleted(CODEX_WORKER, { settled: true });
+    sendConfirmed(binding, own);
+    await settle();
+    expect(deliveredBodies()).toEqual([expect.stringContaining('my answer')]);
+  });
+
+  /** T1 writes at 1000 and 3000, T2 at 2000: T1 comes first by its first row. */
+  function seedInterleavedTurns(): void {
+    seedReply('T1 start', NOW + 1_000, 'turn-1');
+    seedReply('T2 answer', NOW + 2_000, 'turn-2');
+    seedReply('T1 final', NOW + 3_000, 'turn-1');
+  }
+
+  it('P2-2: held before the confirmation — T1 (by its first row), with its newest body', async () => {
+    const relay = boundRelay();
+    const binding = reserve(relay.id);
+    inputStarts(binding, NOW + 100);
+    const own = seedUserRow('go', NOW + 100);
+    seedInterleavedTurns();
+    await notifyRelayTurnCompleted(CODEX_WORKER, { settled: true });
+    expect(getRelayBinding(db, relay.id)?.heldCandidates.map((c) => c.timestamp)).toEqual([NOW + 1_000, NOW + 2_000]);
+    sendConfirmed(binding, own);
+    await settle();
+    expect(deliveredBodies()).toEqual([expect.stringMatching(/T1 final$/)]);
+  });
+
+  it('P2-2: after the confirmation — T1 too', async () => {
+    const relay = boundRelay();
+    const binding = reserve(relay.id);
+    inputStarts(binding, NOW + 100);
+    sendConfirmed(binding, seedUserRow('go', NOW + 100));
+    seedInterleavedTurns();
+    await notifyRelayTurnCompleted(CODEX_WORKER, { settled: true });
+    await settle();
+    expect(deliveredBodies()).toEqual([expect.stringMatching(/T1 final$/)]);
+  });
+});
