@@ -1657,6 +1657,22 @@ export interface ChatMessage {
   content: string;
   cliToolId?: string;
   createdAt?: string;
+  /**
+   * When the row was stamped, on the server's clock: the moment the body
+   * started going in (Issue #3953), or the moment read before the send on a
+   * path that reports no input start / a server before #3953. `ask` bounds the
+   * earlier-ask side of its overlap check with it (Issue #3957).
+   */
+  timestamp?: string;
+  /**
+   * Issue #3957: whether the instance was mid-turn by its own turn record at
+   * the moment the body started going in (opened, not closed by then) — true
+   * or false. Absent for "not known": a tool whose hooks do not report both a
+   * turn start and its `stop`, a sender that reports no input start, a
+   * relaunch during the send, a server before #3957.
+   * Mirrors: src/app/api/worktrees/[id]/send/route.ts SendMessageResponse.
+   */
+  turnOpenAtSend?: boolean;
 }
 
 // =============================================================================

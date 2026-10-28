@@ -653,6 +653,8 @@ export function invalidateInstanceInput(sessionName: string): void {
 interface InputStartObserver {
   /** Set by the first {@link noteInputStart} in the context; later calls keep it. */
   at: Date | null;
+  /** Run in the same synchronous step as that first call (Issue #3957). */
+  onStart?: (at: Date) => void;
 }
 
 const inputStartScope = getOrInitGlobal(
@@ -673,12 +675,19 @@ const inputStartScope = getOrInitGlobal(
  * turn that ended before the body and earlier than the `stop` of the turn it
  * starts.
  *
+ * @param onStart - Called once, synchronously inside the first
+ *   {@link noteInputStart}, so a caller can read state as of the moment the
+ *   body started going in (Issue #3957: the send route's open-turn reading). A
+ *   throw is logged and does not fail the send.
  * @returns `fn`'s value, and the moment input started — null when nothing in
  *   `fn` noted one (a path that never types a body: opencode's HTTP delivery,
  *   or a send refused before its first key). Never set when `fn` throws.
  */
-export async function observeInputStart<T>(fn: () => Promise<T>): Promise<{ value: T; inputStartedAt: Date | null }> {
-  const observer: InputStartObserver = { at: null };
+export async function observeInputStart<T>(
+  fn: () => Promise<T>,
+  onStart?: (at: Date) => void
+): Promise<{ value: T; inputStartedAt: Date | null }> {
+  const observer: InputStartObserver = { at: null, onStart };
   const value = await inputStartScope.run(observer, fn);
   return { value, inputStartedAt: observer.at };
 }
@@ -690,7 +699,13 @@ export async function observeInputStart<T>(fn: () => Promise<T>): Promise<{ valu
  */
 export function noteInputStart(now: Date = new Date()): void {
   const observer = inputStartScope.getStore();
-  if (observer !== undefined && observer.at === null) observer.at = now;
+  if (observer === undefined || observer.at !== null) return;
+  observer.at = now;
+  try {
+    observer.onStart?.(now);
+  } catch (error) {
+    logger.warn('input-start-observer-failed', { error: error instanceof Error ? error.message : String(error) });
+  }
 }
 
 /** Forget every lock, waiter and mark (tests). */

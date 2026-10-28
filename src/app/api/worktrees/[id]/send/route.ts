@@ -55,6 +55,11 @@ import {
 } from '@/lib/cmate-cli-tool-parser';
 import { broadcastSessionStatus } from '@/lib/realtime/terminal-broadcast';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import { getPublishedAgentTurn } from '@/lib/session/agent-event-state';
+import { currentGeneration } from '@/lib/session/agent-event-turn';
+import { getAgentEventSource } from '@/lib/hooks/sources/registry';
+import { buildCompositeKey } from '@/lib/auto-yes-state';
+import type { ChatMessage } from '@/types/models';
 import { checkSessionOwnership, foreignSessionErrorBody, FOREIGN_SESSION_ERROR_CODE } from '@/lib/cli-tools/session-ownership';
 
 const logger = createLogger('api/send');
@@ -80,6 +85,54 @@ interface SendMessageRequest {
    * on screen and answerable.
    */
   ignoreStructuredPromptGuard?: boolean;
+}
+
+/**
+ * Issue #3957: the 201 body. `turnOpenAtSend` says whether the instance's own
+ * turn record showed a turn open (opened, not closed) at the moment the body
+ * started going into the composer — true: the message may be folded into that
+ * turn (codex does), so `ask` reports the reply as overlapped; false: no turn
+ * was open then. Absent means "not known": a tool whose hooks do not report
+ * both a turn start and its `stop`, a sender that reports no input start, a
+ * generation change (relaunch) during the send.
+ */
+type SendMessageResponse = ChatMessage & { turnOpenAtSend?: boolean };
+
+/** Whether this tool's hooks report a turn's start and its end (Issue #3957; #1975's test). */
+function reportsTurns(cliToolId: CLIToolType): boolean {
+  const events: readonly string[] = getAgentEventSource(cliToolId).capabilities.supportedEvents;
+  return events.includes('user_prompt_submit') && events.includes('stop');
+}
+
+/** The turn record read at the input start (Issue #3957). */
+interface TurnAtInput {
+  open: boolean;
+  generation: number | null;
+}
+
+/**
+ * The open-turn reading of the record `wait`'s polls publish as
+ * `structuredEvents.openedAt` / `closedAt`, taken in the same synchronous step
+ * as the sender's `noteInputStart` (Issue #3957).
+ */
+function readTurnAtInput(worktreeId: string, cliToolId: CLIToolType, instanceId: string | undefined): TurnAtInput {
+  const turn = getPublishedAgentTurn(worktreeId, cliToolId, instanceId);
+  return {
+    open: turn.openedAt !== null && turn.closedAt === null,
+    generation: currentGeneration(buildCompositeKey(worktreeId, cliToolId, instanceId)),
+  };
+}
+
+/** The value to publish, or undefined for "not known" (Issue #3957). */
+function judgeTurnOpenAtSend(
+  reading: TurnAtInput | null,
+  generationBefore: number | null,
+  generationAfter: number | null,
+  hooksReportTurns: boolean,
+): boolean | undefined {
+  if (!hooksReportTurns || reading === null) return undefined;
+  if (reading.generation !== generationBefore || generationAfter !== generationBefore) return undefined;
+  return reading.open;
 }
 
 // Issue #588: MODEL_NAME_PATTERN and MAX_MODEL_NAME_LENGTH are now centralized
@@ -439,6 +492,12 @@ export async function POST(
     // sendUserMessage service so manual sends and Timer-fired sends (executeTimer)
     // record identically in chat_messages / Message History.
     const sendStartedAt = Date.now();
+    // Issue #3957: whether a turn was open when the body started going in,
+    // read at that moment (`onInputStart` runs inside the sender's
+    // `noteInputStart`). A generation change during the send is "not known".
+    const generationKey = buildCompositeKey(id, cliToolId, instanceId);
+    const generationBefore = currentGeneration(generationKey);
+    let turnAtInput: TurnAtInput | null = null;
     // Issue #3945: this request's own attempt, as the service recorded it.
     let ownAttempt: { state: SendAttemptState; reason: string } | null = null;
     const result = await sendUserMessage(db, {
@@ -454,6 +513,9 @@ export async function POST(
       ignoreStructuredPromptGuard: body.ignoreStructuredPromptGuard === true,
       onAttempt: (attempt) => {
         ownAttempt = attempt;
+      },
+      onInputStart: () => {
+        turnAtInput = readTurnAtInput(id, cliToolId, instanceId);
       },
     });
 
@@ -511,7 +573,15 @@ export async function POST(
       );
     }
 
-    return NextResponse.json(result.message, { status: 201 });
+    const turnOpenAtSend = judgeTurnOpenAtSend(
+      turnAtInput,
+      generationBefore,
+      currentGeneration(generationKey),
+      reportsTurns(cliToolId),
+    );
+    const sent: SendMessageResponse =
+      turnOpenAtSend !== undefined ? { ...result.message, turnOpenAtSend } : result.message;
+    return NextResponse.json(sent, { status: 201 });
   } catch (error: unknown) {
     logger.error('error-sending-message:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(

@@ -553,3 +553,82 @@ describe('observeInputStart / noteInputStart (Issue #3953)', () => {
     expect((await b).inputStartedAt).toEqual(new Date(REQUEST_AT + 100));
   });
 });
+
+describe('onInputStart runs at the input start, inside noteInputStart (Issue #3957)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers({ now: REQUEST_AT });
+    resetInstanceInputLocks();
+    frame = IDLE;
+    bodyTypedAt = null;
+    bodyPastedAt = null;
+    loadDelayMs = 0;
+    enteredAt = null;
+    mockSavePendingAssistantResponse.mockResolvedValue(null);
+    mockCreateMessage.mockImplementation((_db: unknown, row: Record<string, unknown>) => ({ id: 'created-msg', ...row }));
+    installPane();
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    resetInstanceInputLocks();
+  });
+
+  it('observeInputStart calls onStart once, synchronously with the first note', async () => {
+    const seen: { at: number; noted: number }[] = [];
+    let noted = 0;
+    const observed = observeInputStart(
+      async () => {
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        noteInputStart();
+        noted += 1;
+        noteInputStart();
+        noted += 1;
+      },
+      (at) => seen.push({ at: at.getTime(), noted })
+    );
+    await vi.advanceTimersByTimeAsync(1_000);
+    await observed;
+
+    expect(seen).toEqual([{ at: REQUEST_AT + 1_000, noted: 0 }]);
+  });
+
+  it('a throwing onStart does not fail the send', async () => {
+    const observed = observeInputStart(
+      async () => {
+        noteInputStart();
+        return 'sent';
+      },
+      () => {
+        throw new Error('observer broke');
+      }
+    );
+    await expect(observed).resolves.toEqual({ value: 'sent', inputStartedAt: new Date(REQUEST_AT) });
+  });
+
+  it('sendUserMessage hands onInputStart the moment before the body key, behind the input lock', async () => {
+    let release!: () => void;
+    const held = withInstanceInputLock(S, () => new Promise<void>((resolve) => (release = resolve)));
+    setTimeout(() => release(), 5_000);
+    const calls: { at: number; bodyTypedAt: number | null }[] = [];
+    const result = await runToSettled(
+      sendUserMessage(mockDb, {
+        worktreeId: WT,
+        content: BODY,
+        cliToolId: 'codex',
+        instanceId: 'codex',
+        onInputStart: (at) => calls.push({ at: at.getTime(), bodyTypedAt }),
+      }),
+      60_000
+    );
+    await held;
+
+    expect(result).toMatchObject({ ok: true });
+    expect(calls).toHaveLength(1);
+    // Not yet typed when it ran, and after the lock was released.
+    expect(calls[0].bodyTypedAt).toBeNull();
+    expect(calls[0].at).toBeGreaterThanOrEqual(REQUEST_AT + 5_000);
+    expect(bodyTypedAt).toBeGreaterThanOrEqual(calls[0].at);
+  });
+});

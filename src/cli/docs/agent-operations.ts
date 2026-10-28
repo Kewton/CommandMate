@@ -833,6 +833,8 @@ same CommandMate server, and you can hand work to them.
   reply for both. ask then still exits 0 with the reply, but prints
   'overlapped: ...' on stderr and --json adds "overlapped": true -- the reply
   may answer the other request.
+  Relay delivery (ask --async / send --reply-to) does not detect overlaps;
+  do not stack messages on one instance.
 
 ## How long a request can be
 

@@ -128,6 +128,16 @@ export interface SendUserMessageParams {
    * concurrent sends may be another request's — same text included.
    */
   onAttempt?: (attempt: { state: SendAttemptState; reason: SendAttemptReason }) => void;
+  /**
+   * Called at the moment the body starts going into the composer — inside the
+   * sender's `noteInputStart`, synchronously (Issue #3957; the stamp of
+   * #3953) — and only when the sender reports one. The send route reads
+   * "was the instance mid-turn" here, so neither a turn that ended while this
+   * send queued nor a turn that opens after the body went in is mistaken for
+   * the state at the input. It runs before the send is known to have
+   * succeeded.
+   */
+  onInputStart?: (inputStartedAt: Date) => void;
 }
 
 /** Result of {@link sendUserMessage}. */
@@ -463,7 +473,7 @@ export async function sendUserMessage(
     | { sent: true; inputStartedAt: Date | null }
   > {
     try {
-      const { inputStartedAt } = await observeInputStart(sendToTool);
+      const { inputStartedAt } = await observeInputStart(sendToTool, params.onInputStart);
       return { sent: true, inputStartedAt };
     } catch (error) {
       logger.error('failed-to-send-message-to:', { error: getErrorMessage(error) });
