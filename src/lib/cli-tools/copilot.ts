@@ -59,6 +59,7 @@ import {
   answerUnderInstanceInputLock,
   instanceInputReadMark,
   leaveCarriedPasteMark,
+  noteInputStart,
   waitOutCarriedPasteMark,
   withInstanceInputLock,
   type InstanceInputTicket,
@@ -810,6 +811,8 @@ export class CopilotTool extends BaseCLITool {
             );
           }
           assertCopilotInputOwner(ticket, 'the selection-list command');
+          // Issue #3953: the send's stamp, as the shared sender takes it.
+          noteInputStart();
           await typeLeavingMarkOnFailure(sessionName, message, ticket);
           await this.waitForSelectionList(sessionName);
         });

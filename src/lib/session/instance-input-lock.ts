@@ -226,6 +226,8 @@ declare global {
   var __instanceInputRevoked: WeakSet<InstanceInputTicket> | undefined;
   // eslint-disable-next-line no-var
   var __instanceInputOwnerScope: AsyncLocalStorage<ReadonlyMap<string, InstanceInputTicket>> | undefined;
+  // eslint-disable-next-line no-var
+  var __instanceInputStartScope: AsyncLocalStorage<InputStartObserver> | undefined;
 }
 
 const entries = getOrInitGlobal('__instanceInputLocks', () => new Map<string, LockEntry>());
@@ -604,6 +606,50 @@ export function invalidateInstanceInput(sessionName: string): void {
   }
   if (waiters.length > 0) logger.info('instance-input-waiters-expired', { sessionName, waiters: waiters.length });
   pruneEntry(sessionName);
+}
+
+/** What {@link observeInputStart} hands the sender's context (Issue #3953). */
+interface InputStartObserver {
+  /** Set by the first {@link noteInputStart} in the context; later calls keep it. */
+  at: Date | null;
+}
+
+const inputStartScope = getOrInitGlobal(
+  '__instanceInputStartScope',
+  () => new AsyncLocalStorage<InputStartObserver>()
+);
+
+/**
+ * Run `fn` and report when the body it sends started going into the composer
+ * (Issue #3953).
+ *
+ * A send's stamp is what `wait`'s #1975 gate compares with the agent's last
+ * `stop`. Read before the input lock, it was older than a previous turn that
+ * ended while this send queued for the lock, waited out a carried paste mark,
+ * re-read the pane or cleared the composer — and that turn's `stop` read as the
+ * end of this one. The sender calls {@link noteInputStart} right before the
+ * first key of the body, after all of those, so the stamp is later than any
+ * turn that ended before the body and earlier than the `stop` of the turn it
+ * starts.
+ *
+ * @returns `fn`'s value, and the moment input started — null when nothing in
+ *   `fn` noted one (a path that never types a body: opencode's HTTP delivery,
+ *   or a send refused before its first key). Never set when `fn` throws.
+ */
+export async function observeInputStart<T>(fn: () => Promise<T>): Promise<{ value: T; inputStartedAt: Date | null }> {
+  const observer: InputStartObserver = { at: null };
+  const value = await inputStartScope.run(observer, fn);
+  return { value, inputStartedAt: observer.at };
+}
+
+/**
+ * Note that the body is about to be typed or pasted (Issue #3953): the first
+ * call in an {@link observeInputStart} context fixes the moment; later ones (a
+ * second body, a retry) and calls outside one do nothing.
+ */
+export function noteInputStart(now: Date = new Date()): void {
+  const observer = inputStartScope.getStore();
+  if (observer !== undefined && observer.at === null) observer.at = now;
 }
 
 /** Forget every lock, waiter and mark (tests). */
