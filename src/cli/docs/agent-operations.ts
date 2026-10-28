@@ -390,6 +390,8 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   Exit codes:
     0  - Response sent
     99 - Prompt already dismissed (prompt_no_longer_active)
+    99 - answer_not_delivered: nothing was typed, safe to respond again
+    99 - answer_input_lost: may be partly typed; capture --pane that target before answering again
 
   Strict mode (Issue #3756) -- answer only the screen you observed:
     commandmate prompt <id> --instance antigravity --json      # kind, token, approvalTarget

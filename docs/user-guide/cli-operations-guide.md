@@ -363,7 +363,7 @@ fail-open で、「人間が答えた」を示すイベントが届かない事�
 |------|--------|-------------------|
 | `respond` / 回答欄（Enter を送る回答）・厳格モードの `respond`・Auto-Yes の回答・Command Code の plan review・codex の起動時と送信前の自動回答（hooks / update / trust / 通知）・copilot と Antigravity のフォルダー trust への自動回答 | 参加する（回答どうしは待ち合わない） | 送信が終わるまで待ち、**画面を読み直して同じ確認が出ているときだけ**打ちます。消えた・変わった・読めない・待ちが 60 秒を超えたときは何も打たず、`respond` は `answer_not_delivered`（`/respond` は 409、厳格モードは exit 40 `session_conflict`）、Auto-Yes は次の周期で判定し直します。回答の途中に始まった送信は、回答の Enter まで待ちます |
 | `answer_only` の数字回答（Enter を送らない） | 参加しない | 1 打鍵で Enter が無いため、待たずに打ちます |
-| Claude の trust ダイアログ・Gemini の起動時のダイアログへの自動回答 | 参加しない（未対応） | 送信とは調停されません。起動の途中に別の送信が重なると、自動回答の打鍵が本文に混ざることがあります |
+| Claude と Gemini の起動時の打鍵（起動コマンドの行・trust ダイアログへの自動回答）（#3975） | 参加する（単独の書き手として。回答とも待ち合う） | 打鍵の間だけロックを持ちます（起動の待機はロックの外）。送信や回答が終わるまで待ち、trust への回答は、その間に送信が入ったときは画面を読み直して同じダイアログが出ているときだけ打ちます。起動の Enter の前に画面を読んだ `respond` は、Enter の後に読み直します |
 | ターミナルへの直接入力（WebSocket）・`direct-input`・特殊キー（未送信バーの **Run** を含む） | 参加しない（拒否も待機もしない） | **送信中に打つと、文字が本文に混ざる、または送信の後始末（入力欄の消去・取り下げ）で消えることがあります。** 送信が終わる（応答が始まる）のを待ってから打ってください |
 | `interrupt`（Escape） | 参加しない（待たない・送信を失効させない） | 中断を送信の後ろで待たせないためです。本文の入力中に Escape が届くと、その送信は途中で止まることがあります（結果は `lastSend` で確かめてください） |
 
@@ -1003,7 +1003,16 @@ server.log（`strict-prompt-answered` / `strict-prompt-response-refused`）と�
 | 2 | 引数エラー（`<answer>` と `--default` の同時指定・両方欠落 等）/ 選択肢に無い番号（`answer_out_of_range`）/ 厳格モードでの `--default`・番号なしの画面への番号・`--expect-screen` と `--observation` の片方だけ |
 | 40 | 厳格モード: 照合不成立・照合不能。**何も送っていない**（kind・トークン・フォルダ・label の不一致、capture 失敗、古いサーバ 等）。`commandmate prompt` で観測し直す |
 | 41 | 厳格モード: 送信を始めた後の部分送信・結果不確定。**再送してはいけない**。pane を確かめる。ただし 41 でも `reason` が `operation_in_progress` / `operation_id_conflict` のときは何も送っていない（`keysSent` は 0。`delivery` は `indeterminate` と出るが送信はしていない）。結果の取り直しは別の ID で |
-| 99 | プロンプトが既に消えている（`prompt_no_longer_active`）/ yes・no を選択肢に解決できない（`unresolvable_answer`）/ 保持している decision が 0 件（`decision_not_found`）・2 件以上（`multiple_pending_decisions`、Issue #2040）|
+| 99 | プロンプトが既に消えている（`prompt_no_longer_active`）/ yes・no を選択肢に解決できない（`unresolvable_answer`）/ 保持している decision が 0 件（`decision_not_found`）・2 件以上（`multiple_pending_decisions`、Issue #2040）/ 回答が届かなかった（`answer_not_delivered`）・途中で止まった（`answer_input_lost`、下記）|
+
+#### 届かなかった回答と、途中で止まった回答（Issue #3975）
+
+送信や別の回答が入力ロックを持っている間に待った回答（[入力ロック（#3952）](#送信中に重なった入力入力ロック3952)）は、次の 2 つで終わることがあります。どちらも exit 99 ですが、次の一手が逆です。
+
+| 理由 | 表示 | 意味と次の一手 |
+|------|------|----------------|
+| `answer_not_delivered` | `Error: Answer was not sent. Reason: answer_not_delivered (…). Nothing was typed, so it is safe to run respond again.` | 最初のキーの前に止めました。**1 キーも届いていません**。同じ `respond` をやり直してかまいません |
+| `answer_input_lost` | ``Warning: The answer may have been only partly typed (reason: answer_input_lost): … Check the screen with `commandmate capture <id> --instance <instance> --pane --tail 40` before answering again.`` | キー列の途中でセッションが置き換わり、残りを送らずに止めました。**一部だけ届いたかもしれません**。先にペインを見てから、答え直すかを決めてください。案内のコマンドは回答したペインを読みます（回答で解決した `--instance` か `--agent`。どちらも指定しなければ付きません） |
 
 ---
 

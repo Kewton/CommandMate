@@ -166,6 +166,59 @@ async function answerSolePendingDecision(
 const PROMPT_NO_LONGER_ACTIVE = 'prompt_no_longer_active';
 
 /**
+ * Issue #3975: the answer waited for another input and was then not typed —
+ * nothing reached the pane. Restated from `src/lib/prompt-answer-errors.ts`
+ * (`ANSWER_NOT_DELIVERED_REASON`); a unit test keeps the two equal.
+ */
+export const ANSWER_NOT_DELIVERED = 'answer_not_delivered';
+
+/**
+ * Issue #3975: the answer was stopped part-way — some of its keys may be on
+ * the pane. `/prompt-response` answers it as a 500 whose `error` carries this
+ * code. Restated from `src/lib/prompt-answer-errors.ts` (`ANSWER_INPUT_LOST_REASON`).
+ */
+export const ANSWER_INPUT_LOST = 'answer_input_lost';
+
+/** Whether a failed `/prompt-response` request is the answer stopped part-way (Issue #3975). */
+function isAnswerInputLost(error: unknown): boolean {
+  if (!(error instanceof ApiError) || (error.statusCode ?? 0) < 500) return false;
+  const payload = error.payload as { reason?: unknown; error?: unknown } | undefined;
+  if (payload?.reason === ANSWER_INPUT_LOST) return true;
+  return typeof payload?.error === 'string' && payload.error.includes(ANSWER_INPUT_LOST);
+}
+
+/**
+ * The `capture` that reads the pane the answer was typed at (Issue #3975
+ * review P2-2): the target the answer resolved to, never the worktree default,
+ * and `--pane`, since the stored reply is not what was partly typed.
+ */
+function answeredPaneCaptureCommand(
+  worktreeId: string,
+  target: { agent: string | undefined; instanceId: string | undefined },
+): string {
+  const selector = target.instanceId
+    ? ` --instance ${target.instanceId}`
+    : target.agent
+      ? ` --agent ${target.agent}`
+      : '';
+  return `commandmate capture ${worktreeId}${selector} --pane --tail 40`;
+}
+
+/** Reports an answer stopped part-way (Issue #3975) and sets the exit code. */
+function reportAnswerInputLost(
+  worktreeId: string,
+  target: { agent: string | undefined; instanceId: string | undefined },
+): void {
+  console.error(
+    `Warning: The answer may have been only partly typed (reason: ${ANSWER_INPUT_LOST}): the session was ` +
+      'replaced part-way, so some of its keys may have reached the agent and the rest did not. ' +
+      `Check the screen with \`${answeredPaneCaptureCommand(worktreeId, target)}\` before answering again.`,
+  );
+  // The exit code `decision_not_delivered` uses (Issue #3975: no new code).
+  process.exit(ExitCode.UNEXPECTED_ERROR);
+}
+
+/**
  * Issue #3125: what `--plan-review` takes. Restated rather than imported from
  * `src/lib` (the CLI build does not reach it); the server validates the same set.
  */
@@ -307,6 +360,17 @@ function reportFailedResponse(
         'The dialog is still open; answer it in the terminal.',
     );
     process.exit(ExitCode.UNEXPECTED_ERROR);
+  }
+  // Issue #3975: the answer waited for another input on the session and was
+  // then not typed. Nothing reached the pane, so — unlike the "may not have
+  // been applied" reasons below — trying again is safe.
+  if (reason === ANSWER_NOT_DELIVERED) {
+    console.error(
+      `Error: Answer was not sent. Reason: ${reason}${result.message ? ` (${result.message})` : ''}. ` +
+        'Nothing was typed, so it is safe to run respond again.',
+    );
+    process.exit(ExitCode.UNEXPECTED_ERROR);
+    return;
   }
   if (refusedBeforeSending) {
     console.error(`Error: Answer was not sent. Reason: ${reason}${result.message ? ` (${result.message})` : ''}`);
@@ -538,10 +602,18 @@ Strict respond (--expect-screen <kind> --observation <token> <label>):
           if (outcome !== 'fallback') result = outcome;
         }
         if (result === null) {
-          result = await client.post<PromptResponseResult>(
-            `/api/worktrees/${worktreeId}/prompt-response`,
-            body
-          );
+          try {
+            result = await client.post<PromptResponseResult>(
+              `/api/worktrees/${worktreeId}/prompt-response`,
+              body
+            );
+          } catch (error) {
+            // Issue #3975: stopped part-way is not "the server failed" — some
+            // keys may be on the pane, and the operator has to look first.
+            if (!isAnswerInputLost(error)) throw error;
+            reportAnswerInputLost(worktreeId, { agent, instanceId });
+            return;
+          }
         }
 
         if (result && !result.success) {
