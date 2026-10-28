@@ -356,6 +356,135 @@ describe('the frame a settle returned is judged even after the deadline (Issue #
   });
 });
 
+/**
+ * The frame a settle re-read: a turn opened after the poll's `Stop` (no `Stop`
+ * for it yet), already closed by the screen — `releaseOrphanTurn` reads the
+ * ledger for it on the re-judge.
+ */
+const turnOpenedDuringSettle = (now: number) => {
+  const base = orphanFrame(now);
+  return {
+    ...base,
+    content: 'drawn during the settle',
+    fullOutput: 'drawn during the settle',
+    realtimeSnippet: 'drawn during the settle',
+    lastStopEventAt: now - 1_000,
+    structuredEvents: {
+      ...base.structuredEvents,
+      lastEventAt: now + 200,
+      turnId: `turn-${now + 200}-1`,
+      openedAt: now + 200,
+      closedAt: now + 400,
+    },
+  };
+};
+
+describe('a settled frame that does not complete asks the deadline before sleeping (Issue #3974, review 2 P2)', () => {
+  it('its ledger cut by --timeout: 124 at the deadline, not one interval later', async () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    const prompt = [{ role: 'user', timestamp: new Date(now - 5_000).toISOString() }];
+    // 0 s: Stop poll, ledger answers (hook_stop), settle starts. 0.5 s: the
+    // re-read shows a new turn; the settle stops there (no time for another).
+    // The re-judge reads the ledger for that turn, which hangs until 1 s.
+    mockRoutes([ledgerFrame(now - 1_000), turnOpenedDuringSettle(now)], [prompt, 'hang']);
+
+    const { state, pending } = startWait(await importWait(), ['--timeout', '1', '--fail-on-upstream-fault']);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(state.done).toBe(true);
+    await pending;
+
+    expect(reads('fresh=1')).toBe(1);
+    expect(reads('/messages')).toBe(2);
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.TIMEOUT);
+    expect(stderrText()).toContain('Timeout: wt1 exceeded 1s');
+    expect(stderrText()).not.toContain('Completed: wt1');
+  });
+
+  it('with time left, the next poll comes one interval later, as before', async () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    const prompt = [{ role: 'user', timestamp: new Date(now - 5_000).toISOString() }];
+    // Same frames; the ledger answers (prompt answered), so the orphan hold
+    // starts and the re-judge waits.
+    mockRoutes([ledgerFrame(now - 1_000), turnOpenedDuringSettle(now)], [prompt]);
+
+    const { state, pending } = startWait(await importWait(), ['--timeout', '30', '--fail-on-upstream-fault']);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(state.done).toBe(false);
+    const plainPolls = () => reads('/current-output') - reads('fresh=1');
+    expect(plainPolls()).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(state.done).toBe(false);
+    expect(plainPolls()).toBe(2);
+    expect(mockExit).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await pending;
+  });
+});
+
+describe('the ledger note on an aborted read (Issue #3974, review 2 P3)', () => {
+  it('a ledger cut by --timeout on an ordinary poll prints no "judged from the frame alone" note', async () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    mockRoutes([ledgerFrame(now - 1_000)], ['hang']);
+
+    const { state, pending } = startWait(await importWait(), ['--timeout', '2']);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(state.done).toBe(true);
+    await pending;
+
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.TIMEOUT);
+    expect(stderrText()).not.toContain('could not read the message ledger');
+  });
+
+  it('on the settled frame, only the settled-frame note is printed', async () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    const prompt = [{ role: 'user', timestamp: new Date(now - 5_000).toISOString() }];
+    mockRoutes([ledgerFrame(now - 1_000), turnOpenedDuringSettle(now)], [prompt, 'hang']);
+
+    const { state, pending } = startWait(await importWait(), ['--timeout', '1', '--fail-on-upstream-fault']);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(state.done).toBe(true);
+    await pending;
+
+    expect(stderrText()).toContain('judging the settled frame alone');
+    expect(stderrText()).not.toContain('could not read the message ledger');
+  });
+
+  it('readNewestPromptAt: quiet only when asked and aborted; other failures print the note', async () => {
+    const { readNewestPromptAt } = await import('../../../../src/cli/commands/wait-turn-boundary');
+    const { ApiClient } = await import('../../../../src/cli/utils/api-client');
+    const client = new ApiClient({ baseUrl: 'http://localhost:3999' });
+    const data = ledgerFrame(Date.now()) as unknown as Parameters<typeof readNewestPromptAt>[3];
+
+    mockRoutes([], ['hang']);
+    const aborted = new AbortController();
+    const quiet = readNewestPromptAt(client, 'wt1', {}, data, aborted.signal, true);
+    aborted.abort();
+    await expect(quiet).resolves.toEqual({ readable: false });
+    expect(stderrText()).not.toContain('could not read the message ledger');
+
+    // Not asked (as faultFrameHasStop calls it): the note, as before.
+    mockRoutes([], ['hang']);
+    const loud = new AbortController();
+    const asBefore = readNewestPromptAt(client, 'wt1', {}, data, loud.signal);
+    loud.abort();
+    await expect(asBefore).resolves.toEqual({ readable: false });
+    expect(stderrText()).toContain('could not read the message ledger');
+
+    // Asked, but a failure that is not the abort: the note.
+    mockConsoleError.mockClear();
+    mockRoutes([], [{ reject: new TypeError('fetch failed') }]);
+    const failed = readNewestPromptAt(client, 'wt1', {}, data, new AbortController().signal, true);
+    await expect(failed).resolves.toEqual({ readable: false });
+    expect(stderrText()).toContain('could not read the message ledger');
+  });
+});
+
 describe('readWithinDeadlines (Issue #3974)', () => {
   it('with neither deadline set, the read gets no signal', async () => {
     const read = vi.fn((signal?: AbortSignal) => Promise.resolve(signal));

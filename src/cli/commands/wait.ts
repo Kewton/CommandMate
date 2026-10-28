@@ -713,8 +713,10 @@ async function readLedgerWithinDeadlines(
 ): Promise<PromptLedgerRead> {
   const { client, worktreeId, options, startTime } = poll;
   try {
+    // Quiet when aborted: what the deadline leads to is said here (settled
+    // frame) or by deadlineStage (124), not "judged from the frame alone".
     return await readWithinDeadlines(options, startTime, state.lastActivityTime, signal =>
-      readNewestPromptAt(client, worktreeId, options, data, signal),
+      readNewestPromptAt(client, worktreeId, options, data, signal, true),
     );
   } catch (error) {
     if (!judgingSettledFrame || !(error instanceof DeadlineReached)) throw error;
@@ -1211,6 +1213,13 @@ export async function pollWorktree(
         continue;
       }
       if (readyOutcome.kind === 'wait') {
+        // Issue #3974: the settled frame skipped deadlineStage, and its ledger
+        // read may have been cut by the deadline; ask it now rather than one
+        // interval late. With time left, the next poll comes as before.
+        if (judgingSettledFrame) {
+          const deadlineOutcome = deadlineStage(poll, state);
+          if (deadlineOutcome.kind === 'exit') return deadlineOutcome.result;
+        }
         await sleep(POLL_INTERVAL_MS);
         continue;
       }
