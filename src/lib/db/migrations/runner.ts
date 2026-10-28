@@ -2,6 +2,12 @@
 
 import Database from 'better-sqlite3';
 import path from 'path';
+import {
+  createPreMigrationBackup,
+  isMigrationBackupSkipped,
+  needsPreMigrationBackup,
+  SKIP_MIGRATION_BACKUP_ENV,
+} from './pre-migration-backup';
 
 /**
  * Migration definition
@@ -96,13 +102,38 @@ export function runMigrations(db: Database.Database, migrations: Migration[]): v
 
   console.log(`Found ${pendingMigrations.length} pending migration(s)`);
 
+  // Issue #3985: a restore point before the first migration. An older build
+  // refuses the migrated schema (#1353 above), so rolling back the executable
+  // needs this copy. Failing to take it stops startup before any migration.
+  const targetVersion = pendingMigrations[pendingMigrations.length - 1].version;
+  if (needsPreMigrationBackup(db, currentVersion)) {
+    if (isMigrationBackupSkipped()) {
+      console.warn(`${SKIP_MIGRATION_BACKUP_ENV}=1: migrating without a pre-migration backup`);
+    } else {
+      const backup = createPreMigrationBackup(db, currentVersion, targetVersion);
+      console.log(`Pre-migration backup: ${backup.path}`);
+    }
+  }
+
   // Run each pending migration in a transaction
+  let isFirstMigration = true;
   for (const migration of pendingMigrations) {
     console.log(`Applying migration ${migration.version}: ${migration.name}...`);
 
     try {
       // Run migration in transaction
-      db.transaction(() => {
+      const apply = db.transaction(() => {
+        // Issue #3985: VACUUM INTO cannot run inside a transaction, so the copy
+        // and the first migration cannot share one lock. Take the write lock
+        // (IMMEDIATE) for the first migration and confirm nobody migrated
+        // since the version read the copy was checked against (#1360).
+        if (isFirstMigration && getCurrentVersion(db) !== currentVersion) {
+          throw new Error(
+            `schema version changed from v${currentVersion} to v${getCurrentVersion(db)} ` +
+            `while starting migrations (another process migrated this database)`
+          );
+        }
+
         // Execute migration
         migration.up(db);
 
@@ -111,7 +142,13 @@ export function runMigrations(db: Database.Database, migrations: Migration[]): v
           INSERT INTO schema_version (version, name, applied_at)
           VALUES (?, ?, ?)
         `).run(migration.version, migration.name, Date.now());
-      })();
+      });
+      if (isFirstMigration) {
+        apply.immediate();
+      } else {
+        apply();
+      }
+      isFirstMigration = false;
 
       console.log(`Migration ${migration.version} applied successfully`);
     } catch (error: unknown) {

@@ -94,6 +94,41 @@ commandmate start --daemon
 - 起動画面の文字はあるが条件に合わない行は「left」として id と理由（`keyed-row`・`holds-echo`・`has-body`・`no-path-match`）だけを出し、消しません。必要なら中身を見て判断してください
 - 元に戻すときは、サーバーを止めてから、バックアップを本体へ戻します: `sqlite3 "$DB" ".restore '$DB.bak-3335'"`
 
+## アップデート後に DB を migration の前へ戻したい？
+
+起動時に DB の migration（スキーマの更新）が 1 本以上残っていると、CommandMate は**最初の migration の前に** DB の複製を作ります（Issue #3985）。新しい版の DB は古い版の CommandMate では開けないため、アップデートを戻すときは、実行ファイルと一緒にこの複製を戻します。
+
+- **作られる条件:** 未適用の migration があるときだけ。最新の版の DB、新規に作った DB（表がまだ無い）では作りません
+- **置き場所:** DB と同じディレクトリの `db-backups/`（グローバルインストールは `~/.commandmate/data/db-backups/`、`CM_DB_PATH` を設定していればその隣）。ディレクトリは 0700、ファイルは 0600
+- **名前:** `<DB のファイル名>.v<元の版>-to-v<目標の版>.<UTC の時刻>.<短い ID>.sqlite`（例: `cm.db.v61-to-v62.20261029T010203456Z.1a2b3c4d.sqlite`）。作成中のファイルは `.partial` で終わり、完了済みとは見なしません
+- **世代:** 完了済みを 3 つまで残します。古いものは、新しい複製の確認が済んだ後にだけ消します
+- **中身:** SQLite の `VACUUM INTO` で作る、WAL の確定済みの内容も含んだ一時点の複製です。作った後に `integrity_check` と版を確かめます
+- **失敗したとき:** 複製を作れない・確かめられないときは、migration を始めずに起動を止めます。空き容量が足りないなどで複製を省いて起動するときは `CM_DB_SKIP_MIGRATION_BACKUP=1` を設定します（既定は省きません）
+
+**戻すと、複製を取った後の更新（会話の履歴・設定の変更など）は失われます。** 戻す手順:
+
+```bash
+# 1. サーバーを止める
+commandmate stop
+
+# 2. 戻す複製を選ぶ（DB の場所: グローバルインストールは ~/.commandmate/data/cm.db、
+#    CM_DB_PATH を設定していればその値）
+DB=~/.commandmate/data/cm.db
+ls -l "$(dirname "$DB")/db-backups/"
+
+# 3. 今の DB を念のため退避してから、複製を DB の場所へ戻し、-wal と -shm を消す
+mv "$DB" "$DB.before-restore"
+cp "$(dirname "$DB")/db-backups/cm.db.v61-to-v62.<時刻>.<ID>.sqlite" "$DB"
+chmod 600 "$DB"
+rm -f "$DB-wal" "$DB-shm"
+
+# 4. 複製と同じ版の CommandMate に戻してから起動する
+commandmate start --daemon
+```
+
+- `-wal`・`-shm` を残したまま戻すと、別の DB の WAL が複製に重なり、壊れる・更新が混ざる原因になります。必ず消してください
+- 複製は単独で整合したファイルなので、`cp` で戻せます（サーバーが止まっていることが前提です）
+
 ## FAQ
 
 **Q: スマホからどうやって使う？**
