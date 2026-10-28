@@ -54,7 +54,6 @@ import {
   formatSuppressionNotice,
 } from './wait-notices';
 import {
-  adoptTurnStart,
   COMPLETION_BASIS,
   describeTurnClose,
   outstandingPrompt,
@@ -75,6 +74,12 @@ import {
 } from './wait-hook-stop-settle';
 import { mergeExitCode, resolveWaitedTaskId, shouldVerify, verifyAfterWait, verifyRequested } from './wait-verify';
 import { resolveWaitInstance } from './wait-instance';
+import {
+  adoptAndPublishTurn,
+  noteAutoYesPromptCleared,
+  releaseMovedSelfResumeHold,
+  trackPollActivity,
+} from './wait-poll-bookkeeping';
 
 // Issue #3964: the split-out modules' exports, re-exported so every import of
 // `./wait` keeps working.
@@ -1090,15 +1095,7 @@ export async function pollWorktree(
         ));
       settledFrame = null;
 
-      // Track content changes for stall detection
-      if (data.content !== state.lastContent) {
-        state.lastContent = data.content;
-        state.lastActivityTime = Date.now();
-      }
-
-      if (data.isRunning) {
-        state.everRunning = true;
-      }
+      trackPollActivity(state, data);
 
       // Issue #3179: the agent is still launching. Work in progress, so keep
       // polling: no prompt or selection list is read off the launch's frame,
@@ -1112,20 +1109,7 @@ export async function pollWorktree(
         continue;
       }
 
-      // Issue #1839: done before any exit path so the turn is adopted even on a
-      // poll that ends in a prompt — the same turn is still open when the human
-      // answers and `--on-prompt human` resumes polling.
-      state.turnStartedAt = adoptTurnStart(data, startTime, state.turnStartedAt);
-      if (options.onTurnStart) {
-        const published = data.structuredEvents;
-        const closedAt = published?.openedAt != null && published.openedAt === state.turnStartedAt
-          ? published.closedAt ?? null
-          : null;
-        options.onTurnStart(state.turnStartedAt, closedAt);
-      }
-      if (options.onTurnRecord) {
-        options.onTurnRecord(data.structuredEvents?.openedAt ?? null, data.structuredEvents?.closedAt ?? null);
-      }
+      adoptAndPublishTurn(state, data, startTime, options);
 
       // Issue #2614: a self-resume hold is about one `stop`, and ends the first
       // time that `stop` is no longer the newest word — the agent woke (a
@@ -1133,15 +1117,7 @@ export async function pollWorktree(
       // every exit, because the wake usually lands on a `running` frame that
       // never reaches the hold itself.
       const selfResumeStopAt = pendingSelfResumeStop(data);
-      if (state.selfResumeHold !== null && state.selfResumeHold.stopAt !== selfResumeStopAt) {
-        const heldMs = Date.now() - state.selfResumeHold.since;
-        state.selfResumeHeldMs += heldMs;
-        state.selfResumeHold = null;
-        console.error(
-          `Note: ${worktreeId} has moved past the stop it said it would resume from ` +
-            `(held ${Math.round(heldMs / 1000)}s); judging its current state.`,
-        );
-      }
+      releaseMovedSelfResumeHold(worktreeId, state, selfResumeStopAt);
 
       const promptOutcome = promptStage(poll, state, data);
       if (promptOutcome.kind === 'exit') return withObservation(promptOutcome.result, data);
@@ -1153,13 +1129,7 @@ export async function pollWorktree(
       // Issue #2463: the prompt the hold was waiting on has gone. Who answered it
       // is not on the wire — Auto-Yes, or a human at the pane — so the line says
       // only that it cleared; what the agent does next is for the checks below.
-      if (state.autoYesAnsweringSince !== null) {
-        console.error(
-          `Prompt on ${worktreeId} cleared after ` +
-            `${Math.round((Date.now() - state.autoYesAnsweringSince) / 1000)}s; judging completion as usual.`,
-        );
-        state.autoYesAnsweringSince = null;
-      }
+      noteAutoYesPromptCleared(worktreeId, state);
 
       const selectionListOutcome = selectionListStage(poll, data);
       if (selectionListOutcome.kind === 'exit') return withObservation(selectionListOutcome.result, data);
