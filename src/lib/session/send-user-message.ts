@@ -128,6 +128,14 @@ export interface SendUserMessageParams {
    * concurrent sends may be another request's — same text included.
    */
   onAttempt?: (attempt: { state: SendAttemptState; reason: SendAttemptReason }) => void;
+  /**
+   * Told the moment the body started going into the composer, when the send
+   * succeeded and the sender reported one (Issue #3957; the stamp of #3953).
+   * The send route judges "was the instance mid-turn" at this moment rather
+   * than before the input lock, so a turn that ended while this send queued
+   * does not count.
+   */
+  onInputStart?: (inputStartedAt: Date) => void;
 }
 
 /** Result of {@link sendUserMessage}. */
@@ -545,6 +553,7 @@ export async function sendUserMessage(
   // ASSISTANT_TIMESTAMP_OFFSET_MS. A path that does not report input (opencode's
   // HTTP delivery) keeps the stamp read before step 2, as before.
   const inputStartedAt = delivery.inputStartedAt;
+  if (inputStartedAt !== null) params.onInputStart?.(inputStartedAt);
   const userMessageTimestamp =
     inputStartedAt !== null && inputStartedAt.getTime() > pendingResponseTimestamp.getTime()
       ? inputStartedAt

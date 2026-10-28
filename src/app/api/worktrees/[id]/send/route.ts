@@ -56,6 +56,8 @@ import {
 import { broadcastSessionStatus } from '@/lib/realtime/terminal-broadcast';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { getPublishedAgentTurn } from '@/lib/session/agent-event-state';
+import { currentGeneration, reopenedTurns } from '@/lib/session/agent-event-turn';
+import { buildCompositeKey } from '@/lib/auto-yes-state';
 import type { ChatMessage } from '@/types/models';
 import { checkSessionOwnership, foreignSessionErrorBody, FOREIGN_SESSION_ERROR_CODE } from '@/lib/cli-tools/session-ownership';
 
@@ -86,18 +88,50 @@ interface SendMessageRequest {
 
 /**
  * Issue #3957: the 201 body. `turnOpenAtSend` is present (and true) only when
- * the instance's own turn record showed a turn opened and not closed just
- * before the message went out — the message may be folded into that turn
+ * the instance's own turn record showed a turn open at the moment the body
+ * started going into the composer — the message may be folded into that turn
  * (codex does), so `ask` reports the reply as overlapped. Absent means "not
  * open" or "not known": a tool whose hooks do not report a turn start never
- * publishes `openedAt`, and a session this request started has no turn yet.
+ * publishes `openedAt`, a session this request started has no turn yet, a
+ * sender that reports no input start or a relaunch inside the send leaves it
+ * unknown.
  */
 type SendMessageResponse = ChatMessage & { turnOpenAtSend?: true };
 
-/** Whether the instance's turn record shows an open turn right now (Issue #3957). */
-function isTurnOpen(worktreeId: string, cliToolId: CLIToolType, instanceId: string | undefined): boolean {
+/** The open turn read before the send, to be judged at the input start (Issue #3957). */
+interface TurnBeforeSend {
+  key: string;
+  turnId: string;
+  generation: number | null;
+}
+
+/** The instance's open turn right now, or null when none is open (Issue #3957). */
+function readOpenTurn(worktreeId: string, cliToolId: CLIToolType, instanceId: string | undefined): TurnBeforeSend | null {
   const turn = getPublishedAgentTurn(worktreeId, cliToolId, instanceId);
-  return turn.openedAt !== null && turn.closedAt === null;
+  if (turn.turnId === null || turn.openedAt === null || turn.closedAt !== null) return null;
+  const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
+  return { key, turnId: turn.turnId, generation: currentGeneration(key) };
+}
+
+/**
+ * Whether the turn open before the send was still open when the body started
+ * going in (Issue #3957). Read after the send, from the same record: the turn
+ * itself (closed at or after the input start, or not closed), or the turn that
+ * replaced it while it was still open (#3330's re-open, which is a fold).
+ * A changed generation (the send relaunched the session) is "not known".
+ */
+function wasOpenAtInputStart(
+  before: TurnBeforeSend,
+  worktreeId: string,
+  cliToolId: CLIToolType,
+  instanceId: string | undefined,
+  inputStartedAt: number,
+): boolean {
+  if (currentGeneration(before.key) !== before.generation) return false;
+  const turn = getPublishedAgentTurn(worktreeId, cliToolId, instanceId);
+  if (turn.turnId === before.turnId) return turn.closedAt === null || turn.closedAt >= inputStartedAt;
+  const reopened = reopenedTurns.get(before.key);
+  return reopened !== undefined && reopened.turnId === turn.turnId && reopened.replaced.turnId === before.turnId;
 }
 
 // Issue #588: MODEL_NAME_PATTERN and MAX_MODEL_NAME_LENGTH are now centralized
@@ -457,10 +491,12 @@ export async function POST(
     // sendUserMessage service so manual sends and Timer-fired sends (executeTimer)
     // record identically in chat_messages / Message History.
     const sendStartedAt = Date.now();
-    // Issue #3957: read just before the send, from the same record `wait`'s
-    // polls publish as `structuredEvents.openedAt` / `closedAt`. Only for a
-    // session that was already up: one started above cannot be mid-turn.
-    const turnOpenAtSend = running && isTurnOpen(id, cliToolId, instanceId);
+    // Issue #3957: the open turn, from the same record `wait`'s polls publish
+    // as `structuredEvents.openedAt` / `closedAt`, read before the send and
+    // judged at the moment the body started going in (`onInputStart`). Only for
+    // a session that was already up: one started above cannot be mid-turn.
+    const turnBeforeSend = running ? readOpenTurn(id, cliToolId, instanceId) : null;
+    let inputStartedAt: number | null = null;
     // Issue #3945: this request's own attempt, as the service recorded it.
     let ownAttempt: { state: SendAttemptState; reason: string } | null = null;
     const result = await sendUserMessage(db, {
@@ -476,6 +512,9 @@ export async function POST(
       ignoreStructuredPromptGuard: body.ignoreStructuredPromptGuard === true,
       onAttempt: (attempt) => {
         ownAttempt = attempt;
+      },
+      onInputStart: (at) => {
+        inputStartedAt = at.getTime();
       },
     });
 
@@ -533,6 +572,10 @@ export async function POST(
       );
     }
 
+    const turnOpenAtSend =
+      turnBeforeSend !== null &&
+      inputStartedAt !== null &&
+      wasOpenAtInputStart(turnBeforeSend, id, cliToolId, instanceId, inputStartedAt);
     const sent: SendMessageResponse = turnOpenAtSend
       ? { ...result.message, turnOpenAtSend: true }
       : result.message;

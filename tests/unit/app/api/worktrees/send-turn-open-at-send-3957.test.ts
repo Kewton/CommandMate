@@ -4,6 +4,11 @@
  * instance's turn record shows a turn opened and not closed just before the
  * send, and no key otherwise ("not open" or "not known").
  *
+ * The turn is judged at the moment the body started going in (the send
+ * service's `onInputStart`, #3953's stamp), not when the route read it: a
+ * turn that ended while the send queued, a relaunch inside the send and a
+ * sender that reports no input start are all "no key".
+ *
  * Positive: an open turn → the key. Negative: a closed turn, no record at all
  * (a tool whose hooks report no turn start), another instance's open turn →
  * no key.
@@ -82,7 +87,7 @@ vi.mock('@/lib/db/db-instance', () => {
 });
 
 import { POST as sendMessage } from '@/app/api/worktrees/[id]/send/route';
-import { clearAgentStopEvents, recordAgentEvent } from '@/lib/session/agent-event-state';
+import { beginAgentEventGeneration, clearAgentStopEvents, recordAgentEvent } from '@/lib/session/agent-event-state';
 import type { AgentEventRecord } from '@/lib/session/agent-event-record';
 
 const WORKTREE_ID = 'wt-3957-send';
@@ -102,6 +107,27 @@ function event(name: AgentEventRecord['event'], at: number): AgentEventRecord {
   return { event: name, at, detail: null, sessionId: 's-3957' };
 }
 
+interface SendParams {
+  content: string;
+  onInputStart?: (at: Date) => void;
+}
+
+/**
+ * A send service that runs `beforeInput` (what happens while the send queues
+ * for the lock, waits out a mark or relaunches), then reports the input start
+ * the way the real one does and succeeds.
+ */
+function sendsAfter(beforeInput: () => void, reportsInputStart = true): void {
+  sendUserMessage.mockImplementation(async (_db: unknown, params: SendParams) => {
+    beforeInput();
+    if (reportsInputStart) params.onInputStart?.(new Date());
+    return {
+      ok: true,
+      message: { id: 'm-1', worktreeId: WORKTREE_ID, role: 'user', content: params.content, cliToolId: 'codex', instanceId: 'codex' },
+    };
+  });
+}
+
 describe('POST /send: turnOpenAtSend (Issue #3957)', () => {
   let db: Database.Database;
 
@@ -113,10 +139,7 @@ describe('POST /send: turnOpenAtSend (Issue #3957)', () => {
     vi.clearAllMocks();
     clearAgentStopEvents();
     isRunning.mockResolvedValue(true);
-    sendUserMessage.mockImplementation(async (_db: unknown, params: { content: string }) => ({
-      ok: true,
-      message: { id: 'm-1', worktreeId: WORKTREE_ID, role: 'user', content: params.content, cliToolId: 'codex', instanceId: 'codex' },
-    }));
+    sendsAfter(() => {});
     upsertWorktree(db, {
       id: WORKTREE_ID,
       name: 'Turn',
@@ -168,6 +191,78 @@ describe('POST /send: turnOpenAtSend (Issue #3957)', () => {
     recordAgentEvent(WORKTREE_ID, 'codex', 'codex-2', event('user_prompt_submit', Date.now() - 2_000));
 
     const response = await post({ instanceId: 'codex' });
+    const body = (await response.json()) as Record<string, unknown>;
+
+    expect(response.status).toBe(201);
+    expect(body).not.toHaveProperty('turnOpenAtSend');
+  });
+
+  it('(a) open when read, but closed before the input started → no key', async () => {
+    recordAgentEvent(WORKTREE_ID, 'codex', undefined, event('user_prompt_submit', Date.now() - 2_000));
+    // The previous turn ends while this send waits for the input lock.
+    sendsAfter(() => {
+      recordAgentEvent(WORKTREE_ID, 'codex', undefined, event('stop', Date.now() - 1));
+    });
+
+    const response = await post();
+    const body = (await response.json()) as Record<string, unknown>;
+
+    expect(response.status).toBe(201);
+    expect(body).not.toHaveProperty('turnOpenAtSend');
+  });
+
+  it('(b) still open at the input start, closing after it → turnOpenAtSend: true', async () => {
+    recordAgentEvent(WORKTREE_ID, 'codex', undefined, event('user_prompt_submit', Date.now() - 2_000));
+    sendUserMessage.mockImplementation(async (_db: unknown, params: SendParams) => {
+      const inputAt = new Date();
+      params.onInputStart?.(inputAt);
+      // The folded turn ends after the body went in.
+      recordAgentEvent(WORKTREE_ID, 'codex', undefined, event('stop', inputAt.getTime() + 5));
+      return { ok: true, message: { id: 'm-1', worktreeId: WORKTREE_ID, role: 'user', content: params.content } };
+    });
+
+    const response = await post();
+    const body = (await response.json()) as Record<string, unknown>;
+
+    expect(response.status).toBe(201);
+    expect(body).toMatchObject({ turnOpenAtSend: true });
+  });
+
+  it('the open turn replaced after the input start by the prompt of this message (a fold) → turnOpenAtSend: true', async () => {
+    recordAgentEvent(WORKTREE_ID, 'codex', undefined, event('user_prompt_submit', Date.now() - 2_000));
+    sendUserMessage.mockImplementation(async (_db: unknown, params: SendParams) => {
+      const inputAt = new Date();
+      params.onInputStart?.(inputAt);
+      // Issue #3330's re-open: an unmarked prompt of the same session replaces the running turn.
+      recordAgentEvent(WORKTREE_ID, 'codex', undefined, event('user_prompt_submit', inputAt.getTime() + 5));
+      return { ok: true, message: { id: 'm-1', worktreeId: WORKTREE_ID, role: 'user', content: params.content } };
+    });
+
+    const response = await post();
+    const body = (await response.json()) as Record<string, unknown>;
+
+    expect(response.status).toBe(201);
+    expect(body).toMatchObject({ turnOpenAtSend: true });
+  });
+
+  it('(c) the send relaunched the session (a new generation) → no key', async () => {
+    recordAgentEvent(WORKTREE_ID, 'codex', undefined, event('user_prompt_submit', Date.now() - 2_000));
+    sendsAfter(() => {
+      beginAgentEventGeneration(WORKTREE_ID, 'codex', undefined, Date.now());
+    });
+
+    const response = await post();
+    const body = (await response.json()) as Record<string, unknown>;
+
+    expect(response.status).toBe(201);
+    expect(body).not.toHaveProperty('turnOpenAtSend');
+  });
+
+  it('a sender that reports no input start leaves it unknown → no key', async () => {
+    recordAgentEvent(WORKTREE_ID, 'codex', undefined, event('user_prompt_submit', Date.now() - 2_000));
+    sendsAfter(() => {}, false);
+
+    const response = await post();
     const body = (await response.json()) as Record<string, unknown>;
 
     expect(response.status).toBe(201);

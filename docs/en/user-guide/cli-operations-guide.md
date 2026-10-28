@@ -528,8 +528,8 @@ the requests again one at a time if it matters. Two things are detected:
 - the instance was already in another turn when the message was sent (the later sender; only for
   tools whose hooks report turn starts, and a turn that ended before the send does not count; it is
   caught even when that turn ended before `ask`'s first poll. The send API's response also says
-  whether a turn was open when the message was accepted (`turnOpenAtSend: true`; the key is absent
-  when not, or not known), so it is caught even when the server's turn record is replaced by this
+  whether a turn was open when the body started going in (`turnOpenAtSend: true`; the key is
+  absent when not, or not known, a relaunch inside the send included), so it is caught even when the server's turn record is replaced by this
   request's own new turn before that first poll (#3957))
 - another request reached the instance between the send and the end of the turn (the earlier
   sender; read from the `user` rows of the chat history. The end is the close time the server
