@@ -15,6 +15,15 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mockFetchResponse, restoreFetch } from '../../../helpers/mock-api';
+
+// `--instance` resolves through the server; here it resolves as the roster would.
+vi.mock('../../../../src/cli/commands/instances', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../../src/cli/commands/instances')>();
+  return {
+    ...actual,
+    resolveInstanceTarget: vi.fn(async () => ({ cliToolId: 'claude', instanceId: 'claude-2' })),
+  };
+});
 import {
   ANSWER_INPUT_LOST_REASON,
   ANSWER_NOT_DELIVERED_REASON,
@@ -76,7 +85,8 @@ describe('[#3975] respond: answer_not_delivered vs answer_input_lost', () => {
     await respond(['wt1', '1', '--agent', 'claude']);
 
     expect(printed()).toContain('may have been only partly typed (reason: answer_input_lost)');
-    expect(printed()).toContain('`commandmate capture wt1`');
+    // The pane the answer went to (review P2-2), not the worktree default's reply.
+    expect(printed()).toContain('`commandmate capture wt1 --agent claude --pane --tail 40`');
     expect(printed()).not.toContain('safe to run respond again');
     expect(printed()).not.toContain('Response sent.');
     expect(mockExit).toHaveBeenCalledWith(99);
@@ -87,6 +97,25 @@ describe('[#3975] respond: answer_not_delivered vs answer_input_lost', () => {
     await respond(['wt1', '1', '--agent', 'claude']);
 
     expect(printed()).toContain('reason: answer_input_lost');
+    expect(mockExit).toHaveBeenCalledWith(99);
+  });
+
+  it('answer_input_lost after `--instance`: the capture names the resolved instance and reads its pane', async () => {
+    const lost = new PromptAnswerInputLostError('mcbd-claude-2-wt1');
+    mockFetchResponse({ error: `Failed to send answer to tmux: ${lost.message}` }, 500);
+    await respond(['wt1', '1', '--instance', 'Claude 2']);
+
+    expect(printed()).toContain('`commandmate capture wt1 --instance claude-2 --pane --tail 40`');
+    expect(printed()).not.toContain('--agent');
+    expect(mockExit).toHaveBeenCalledWith(99);
+  });
+
+  it('answer_input_lost with no target named: the capture adds no selector but still reads the pane', async () => {
+    const lost = new PromptAnswerInputLostError('mcbd-claude-wt1');
+    mockFetchResponse({ error: `Failed to send answer to tmux: ${lost.message}` }, 500);
+    await respond(['wt1', '1']);
+
+    expect(printed()).toContain('`commandmate capture wt1 --pane --tail 40`');
     expect(mockExit).toHaveBeenCalledWith(99);
   });
 

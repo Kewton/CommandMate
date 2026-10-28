@@ -187,13 +187,32 @@ function isAnswerInputLost(error: unknown): boolean {
   return typeof payload?.error === 'string' && payload.error.includes(ANSWER_INPUT_LOST);
 }
 
+/**
+ * The `capture` that reads the pane the answer was typed at (Issue #3975
+ * review P2-2): the target the answer resolved to, never the worktree default,
+ * and `--pane`, since the stored reply is not what was partly typed.
+ */
+function answeredPaneCaptureCommand(
+  worktreeId: string,
+  target: { agent: string | undefined; instanceId: string | undefined },
+): string {
+  const selector = target.instanceId
+    ? ` --instance ${target.instanceId}`
+    : target.agent
+      ? ` --agent ${target.agent}`
+      : '';
+  return `commandmate capture ${worktreeId}${selector} --pane --tail 40`;
+}
+
 /** Reports an answer stopped part-way (Issue #3975) and sets the exit code. */
-function reportAnswerInputLost(worktreeId: string, options: RespondOptions): void {
-  const target = instanceFlag(options.instance);
+function reportAnswerInputLost(
+  worktreeId: string,
+  target: { agent: string | undefined; instanceId: string | undefined },
+): void {
   console.error(
     `Warning: The answer may have been only partly typed (reason: ${ANSWER_INPUT_LOST}): the session was ` +
       'replaced part-way, so some of its keys may have reached the agent and the rest did not. ' +
-      `Check the screen with \`commandmate capture ${worktreeId}${target}\` before answering again.`,
+      `Check the screen with \`${answeredPaneCaptureCommand(worktreeId, target)}\` before answering again.`,
   );
   // The exit code `decision_not_delivered` uses (Issue #3975: no new code).
   process.exit(ExitCode.UNEXPECTED_ERROR);
@@ -592,7 +611,7 @@ Strict respond (--expect-screen <kind> --observation <token> <label>):
             // Issue #3975: stopped part-way is not "the server failed" — some
             // keys may be on the pane, and the operator has to look first.
             if (!isAnswerInputLost(error)) throw error;
-            reportAnswerInputLost(worktreeId, options);
+            reportAnswerInputLost(worktreeId, { agent, instanceId });
             return;
           }
         }

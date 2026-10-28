@@ -68,6 +68,7 @@ import { GeminiTool } from '@/lib/cli-tools/gemini';
 import { startClaudeSession, CLAUDE_INIT_POLL_INTERVAL, CLAUDE_POST_PROMPT_DELAY } from '@/lib/session/claude-session';
 import {
   answerUnderInstanceInputLock,
+  instanceInputLaunchReadMark,
   instanceInputReadMark,
   resetInstanceInputLocks,
   withInstanceInputLock,
@@ -233,7 +234,7 @@ describe('[#3975] an answer read before a launch key reads the screen again', ()
   it('positive: a `respond` that read the dialog before the launch\'s Enter is not typed after it', async () => {
     const readMark = instanceInputReadMark();
     // The launch's Enter, as an exclusive writer, between the answer's read and its keys.
-    await answerUnderInstanceInputLock('s', instanceInputReadMark(), async () => true, async () => {
+    await answerUnderInstanceInputLock('s', instanceInputLaunchReadMark(), async () => true, async () => {
       events.list.push('launch-enter');
     }, { mode: 'exclusive' });
     const stillApplies = vi.fn(async () => false);
@@ -248,11 +249,76 @@ describe('[#3975] an answer read before a launch key reads the screen again', ()
 
   it('negative: an exclusive key with nothing since its read is typed without a second read', async () => {
     const stillApplies = vi.fn(async () => true);
-    const outcome = await answerUnderInstanceInputLock('s', instanceInputReadMark(), stillApplies, async () => {
+    const outcome = await answerUnderInstanceInputLock('s', instanceInputLaunchReadMark(), stillApplies, async () => {
       events.list.push('launch-enter');
     }, { mode: 'exclusive' });
 
     expect(outcome).toEqual({ answered: true, value: undefined });
     expect(stillApplies).not.toHaveBeenCalled();
+  });
+});
+
+describe('[#3975 review P2-1] a launch key reads again after a shared answer finished since its read', () => {
+  it('positive: launch reads → a `respond` (shared) starts and finishes → launch enters: read again, key not sent', async () => {
+    const launchMark = instanceInputLaunchReadMark();
+    // A `respond` to the same dialog, typed and done before the launch asks for the lock.
+    const respond = await answerUnderInstanceInputLock('s', instanceInputReadMark(), async () => true, async () => {
+      events.list.push('respond');
+    });
+    expect(respond).toEqual({ answered: true, value: undefined });
+
+    // The dialog the launch read is gone: before the fix it was not read again.
+    const stillApplies = vi.fn(async () => false);
+    const outcome = await answerUnderInstanceInputLock('s', launchMark, stillApplies, async () => {
+      events.list.push('launch-enter');
+    }, { mode: 'exclusive' });
+
+    expect(stillApplies).toHaveBeenCalledTimes(1);
+    expect(outcome).toEqual({ answered: false, reason: 'target-changed' });
+    expect(events.list).toEqual(['respond']);
+  });
+
+  it('positive: the launch key still goes out when the screen read again still calls for it', async () => {
+    const launchMark = instanceInputLaunchReadMark();
+    await answerUnderInstanceInputLock('s', instanceInputReadMark(), async () => true, async () => {
+      events.list.push('respond');
+    });
+    const stillApplies = vi.fn(async () => true);
+    const outcome = await answerUnderInstanceInputLock('s', launchMark, stillApplies, async () => {
+      events.list.push('launch-enter');
+    }, { mode: 'exclusive' });
+
+    expect(stillApplies).toHaveBeenCalledTimes(1);
+    expect(outcome).toEqual({ answered: true, value: undefined });
+    expect(events.list).toEqual(['respond', 'launch-enter']);
+  });
+
+  it('negative: with nothing between the launch\'s read and its entry, nothing is read again', async () => {
+    // A shared answer that finished before the launch's read does not count.
+    await answerUnderInstanceInputLock('s', instanceInputReadMark(), async () => true, async () => {
+      events.list.push('respond');
+    });
+    const launchMark = instanceInputLaunchReadMark();
+    const stillApplies = vi.fn(async () => true);
+    const outcome = await answerUnderInstanceInputLock('s', launchMark, stillApplies, async () => {
+      events.list.push('launch-enter');
+    }, { mode: 'exclusive' });
+
+    expect(stillApplies).not.toHaveBeenCalled();
+    expect(outcome).toEqual({ answered: true, value: undefined });
+  });
+
+  it('negative: shared answers keep their #3952 behaviour — one finished since a shared read is not a re-read', async () => {
+    const readMark = instanceInputReadMark();
+    await answerUnderInstanceInputLock('s', instanceInputReadMark(), async () => true, async () => {
+      events.list.push('respond-1');
+    });
+    const stillApplies = vi.fn(async () => true);
+    const outcome = await answerUnderInstanceInputLock('s', readMark, stillApplies, async () => {
+      events.list.push('respond-2');
+    });
+
+    expect(stillApplies).not.toHaveBeenCalled();
+    expect(outcome).toEqual({ answered: true, value: undefined });
   });
 });

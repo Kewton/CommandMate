@@ -221,7 +221,9 @@ declare global {
   // eslint-disable-next-line no-var
   var __instanceInputLocks: Map<string, LockEntry> | undefined;
   // eslint-disable-next-line no-var
-  var __instanceInputGeneration: { last: number; lastExclusive?: number; exclusiveEvents?: number } | undefined;
+  var __instanceInputGeneration:
+    | { last: number; lastExclusive?: number; exclusiveEvents?: number; sharedReleases?: number }
+    | undefined;
   // eslint-disable-next-line no-var
   var __instanceInputRevoked: WeakSet<InstanceInputTicket> | undefined;
   // eslint-disable-next-line no-var
@@ -235,6 +237,7 @@ const generationSeq = getOrInitGlobal('__instanceInputGeneration', () => ({
   last: 0,
   lastExclusive: 0,
   exclusiveEvents: 0,
+  sharedReleases: 0,
 }));
 
 /**
@@ -244,6 +247,16 @@ const generationSeq = getOrInitGlobal('__instanceInputGeneration', () => ({
  */
 function noteExclusiveEvent(): void {
   generationSeq.exclusiveEvents = (generationSeq.exclusiveEvents ?? 0) + 1;
+}
+
+/**
+ * Count a `shared` writer letting go (Issue #3975 review P2-1). Only the
+ * launch's mark ({@link instanceInputLaunchReadMark}) reads it: an answer that
+ * finished between a launch's read and its key may have closed the dialog,
+ * while `shared` answers keep their #3952 behaviour toward one another.
+ */
+function noteSharedRelease(): void {
+  generationSeq.sharedReleases = (generationSeq.sharedReleases ?? 0) + 1;
 }
 /**
  * Tickets revoked by a session replacement (review-2 P1). On `globalThis`, not
@@ -347,6 +360,7 @@ function release(ticket: TicketImpl): void {
   if (entry === undefined) return;
   if (ticket.mode === 'shared') {
     if (!entry.shared.delete(ticket)) return;
+    noteSharedRelease();
   } else {
     if (entry.owner !== ticket) return;
     entry.owner = null;
@@ -416,6 +430,19 @@ export function instanceInputReadMark(): number {
   return generationSeq.exclusiveEvents ?? 0;
 }
 
+/**
+ * The read mark a launch's own key (`mode: 'exclusive'` in
+ * {@link answerUnderInstanceInputLock}) is decided on (Issue #3975 review
+ * P2-1). It moves as {@link instanceInputReadMark} does and also when a
+ * `shared` answer lets go: a `respond` that started and finished between the
+ * launch's read and its key never makes the launch wait, yet may have answered
+ * the dialog the key was for. Both counts only grow, so their sum moves
+ * whenever either does.
+ */
+export function instanceInputLaunchReadMark(): number {
+  return (generationSeq.exclusiveEvents ?? 0) + (generationSeq.sharedReleases ?? 0);
+}
+
 /** Why {@link answerUnderInstanceInputLock} typed nothing (Issue #3952). */
 export type InstanceInputAnswerSkip =
   /** The screen read again under the lock is not the one the answer was for. */
@@ -463,7 +490,9 @@ function skipOfLockError(error: unknown): InstanceInputAnswerSkip | null {
  * line and trust Enter, Claude's trust keys): kept off a send's composer as an
  * answer is, and also ordered against the answers — a `respond` to the same
  * dialog then reads the screen again after the launch's key. The mark is
- * compared before admission there, since the launch's own admission moves it.
+ * compared before admission there, since the launch's own admission moves it,
+ * and `readMark` is {@link instanceInputLaunchReadMark}, so a `shared` answer
+ * that finished after the launch's read also makes it read again (review P2-1).
  */
 export async function answerUnderInstanceInputLock<T>(
   sessionName: string,
@@ -476,7 +505,8 @@ export async function answerUnderInstanceInputLock<T>(
   // has held it since before its read: it joins, and nothing is read again.
   const joined = currentInstanceInputTicket(sessionName) !== null;
   const mode = options.mode ?? 'shared';
-  const movedBeforeAdmission = instanceInputReadMark() !== readMark;
+  const movedBeforeAdmission =
+    (mode === 'exclusive' ? instanceInputLaunchReadMark() : instanceInputReadMark()) !== readMark;
   let admitted = false;
   try {
     return await withInstanceInputLock<InstanceInputAnswerOutcome<T>>(
@@ -608,6 +638,7 @@ export function invalidateInstanceInput(sessionName: string): void {
     holder.revoked = true;
     revokedTickets.add(holder);
     entry.shared.delete(holder);
+    noteSharedRelease();
   }
   const waiters = entry.queue.splice(0, entry.queue.length);
   for (const waiter of waiters) {

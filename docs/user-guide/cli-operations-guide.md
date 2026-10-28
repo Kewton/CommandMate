@@ -1012,7 +1012,7 @@ server.log（`strict-prompt-answered` / `strict-prompt-response-refused`）と�
 | 理由 | 表示 | 意味と次の一手 |
 |------|------|----------------|
 | `answer_not_delivered` | `Error: Answer was not sent. Reason: answer_not_delivered (…). Nothing was typed, so it is safe to run respond again.` | 最初のキーの前に止めました。**1 キーも届いていません**。同じ `respond` をやり直してかまいません |
-| `answer_input_lost` | ``Warning: The answer may have been only partly typed (reason: answer_input_lost): … Check the screen with `commandmate capture <id>` before answering again.`` | キー列の途中でセッションが置き換わり、残りを送らずに止めました。**一部だけ届いたかもしれません**。先に `commandmate capture` で画面を見てから、答え直すかを決めてください |
+| `answer_input_lost` | ``Warning: The answer may have been only partly typed (reason: answer_input_lost): … Check the screen with `commandmate capture <id> --instance <instance> --pane --tail 40` before answering again.`` | キー列の途中でセッションが置き換わり、残りを送らずに止めました。**一部だけ届いたかもしれません**。先にペインを見てから、答え直すかを決めてください。案内のコマンドは回答したペインを読みます（回答で解決した `--instance` か `--agent`。どちらも指定しなければ付きません） |
 
 ---
 

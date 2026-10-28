@@ -52,7 +52,7 @@ import {
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 import {
   answerUnderInstanceInputLock,
-  instanceInputReadMark,
+  instanceInputLaunchReadMark,
   withInstanceInputLock,
 } from '@/lib/session/instance-input-lock';
 
@@ -231,14 +231,14 @@ interface TrustDialogState {
  * @param sessionName - tmux session name
  * @param dialogScreen - ANSI-stripped pane output when the dialog is open, else null
  * @param state - Mutated in place
- * @param readMark - {@link instanceInputReadMark} taken before `dialogScreen` was captured
+ * @param readMark - {@link instanceInputLaunchReadMark} taken before `dialogScreen` was captured
  * @throws {SessionStartFailedError} When the move budget is spent
  */
 async function answerTrustDialog(
   sessionName: string,
   dialogScreen: string | null,
   state: TrustDialogState,
-  readMark: number = instanceInputReadMark()
+  readMark: number = instanceInputLaunchReadMark()
 ): Promise<void> {
   if (state.pollsSinceAnswer !== null) state.pollsSinceAnswer++;
   if (state.pollsSinceMove !== null) state.pollsSinceMove++;
@@ -847,7 +847,7 @@ export async function startClaudeSession(
       // SF-001: Use getCleanPaneOutput helper (DRY)
       let cleanOutput: string | null = null;
       // Issue #3975: before the read the trust keys are decided on.
-      const readMark = instanceInputReadMark();
+      const readMark = instanceInputLaunchReadMark();
       try {
         cleanOutput = await getCleanPaneOutput(sessionName);
       } catch {

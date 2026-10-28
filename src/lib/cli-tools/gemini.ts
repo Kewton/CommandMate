@@ -35,7 +35,7 @@ import { decideLaunchDialog, GEMINI_TRUST_LAUNCH_DIALOG, launchDialogWarning } f
 import { beginLaunchWindow, endLaunchWindow, recordLaunchDialogPress } from './launch-window';
 import {
   answerUnderInstanceInputLock,
-  instanceInputReadMark,
+  instanceInputLaunchReadMark,
   withInstanceInputLock,
 } from '@/lib/session/instance-input-lock';
 
@@ -182,7 +182,7 @@ export class GeminiTool extends BaseCLITool {
     for (let i = 0; i < GEMINI_INIT_MAX_ATTEMPTS; i++) {
       try {
         // Issue #3975: taken before the read the trust Enter is decided on.
-        const readMark = instanceInputReadMark();
+        const readMark = instanceInputLaunchReadMark();
         const rawOutput = await capturePane(sessionName, GEMINI_PANE_HEIGHT);
         // Strip ANSI escape codes before pattern matching
         // (Gemini TUI uses 24-bit color codes that break regex matching)
