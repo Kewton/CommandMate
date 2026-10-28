@@ -364,6 +364,10 @@ export type PromptLedgerRead =
  * Never throws. An unreadable ledger is not evidence that nothing was sent, so
  * it is reported as such rather than as "nothing was sent" — the call site
  * degrades to the pre-#1975 behaviour instead of holding on a guess.
+ *
+ * `quietWhenAborted` (Issue #3974): a read aborted by `signal` prints no note,
+ * for a caller that says what an aborted read leads to itself; other failures
+ * print it as before.
  */
 export async function readNewestPromptAt(
   client: ApiClient,
@@ -371,6 +375,7 @@ export async function readNewestPromptAt(
   options: WaitOptions,
   data: CurrentOutputResponse,
   signal?: AbortSignal,
+  quietWhenAborted = false,
 ): Promise<PromptLedgerRead> {
   const query = new URLSearchParams({ limit: '1', unit: 'pairs' });
   if (options.instance) query.set('instance', options.instance);
@@ -395,6 +400,7 @@ export async function readNewestPromptAt(
     }
     return { readable: true, submittedAt: newest };
   } catch (error) {
+    if (quietWhenAborted && signal?.aborted) return { readable: false };
     console.error(
       `Note: could not read the message ledger for ${worktreeId} ` +
         `(${error instanceof Error ? error.message : String(error)}); ` +

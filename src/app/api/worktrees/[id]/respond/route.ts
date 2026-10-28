@@ -8,11 +8,16 @@ import { readJsonObjectBody } from '@/lib/api/read-json-body';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getMessageById, updatePromptData, getWorktreeById } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import { PromptAnswerNotDeliveredError, sendPromptAnswer } from '@/lib/prompt-answer-sender';
+import {
+  PromptAnswerInputLostError,
+  PromptAnswerNotDeliveredError,
+  sendPromptAnswer,
+} from '@/lib/prompt-answer-sender';
 import { startPolling } from '@/lib/polling/response-poller';
 import { getAnswerInput } from '@/lib/detection/prompt-detector';
 import { broadcastMessage } from '@/lib/ws-server';
 import { createLogger } from '@/lib/logger';
+import { getOrInitGlobal } from '@/lib/global-state';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
@@ -29,6 +34,17 @@ import { respondByDecisionId, respondToSolePendingDecision } from './structured-
 import { screenAtSend } from './screen-at-send';
 
 const logger = createLogger('api/respond');
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __respondAnswersInFlight: Set<string> | undefined;
+}
+
+/**
+ * Stored prompt rows whose answer is being sent (Issue #3975). On `globalThis`
+ * (`getOrInitGlobal`) so a hot reload keeps it.
+ */
+const answersInFlight = getOrInitGlobal('__respondAnswersInFlight', () => new Set<string>());
 
 /**
  * POST /api/worktrees/[id]/respond
@@ -261,113 +277,135 @@ export async function POST(
     // Get session name for the CLI tool
     const sessionName = cliTool.getSessionName(id, instanceId);
 
-    // Issue #2865: a same-named session another CommandMate server created is
-    // not this prompt's pane. Refused before the prompt is marked answered.
-    const ownership = await checkSessionOwnership(sessionName, worktree.path);
-    if (ownership.verdict === 'foreign') {
-      return NextResponse.json(foreignSessionErrorBody(sessionName, ownership.sessionPath), { status: 409 });
-    }
-
-    // Issue #3907: a person is answering at the pane, as on `/prompt-response`
-    // (#3821 / #3880): before the first key a poller tick under way sends no
-    // further key and the next ticks leave the screen to the person, and how
-    // this answer ENDS decides what becomes of an answer Auto-Yes holds at the
-    // confirmation (`settleManualAnswer` below). Without it a send here that
-    // timed out with its keys on the pane left the confirmation free for
-    // Auto-Yes to type at again, and one that went through left Auto-Yes's own
-    // unknown send held.
-    const manualAnswer = noteManualAnswerStarted(buildCompositeKey(id, cliToolId, instanceId));
-
-    // Update prompt data.
-    //
-    // Issue #3881: the row's `reading` (what the screen was read as when it was
-    // saved) travels through the spread untouched. A row saved before #3881
-    // has none, and none is made here: a reading is read off the frame, and
-    // this route holds only the stored strings — reading those again is the
-    // very re-derivation #3881 removed (a 16-column confirm page would come
-    // back `unknown` and draw as a tool approval). So an old row stays an old
-    // row, and the chat surface reads it with its compatibility rules
-    // (`lib/chat/chat-tool-approvals`), exactly as before it was answered.
-    const updatedPromptData = {
-      ...promptData,
-      status: 'answered' as const,
-      answer,
-      answeredAt: new Date().toISOString(),
-      // Issue #1685: audit attribution — this route is only reached from an
-      // explicit human reply (chat prompt buttons).
-      answeredBy: 'human' as const,
-    };
-
-    updatePromptData(db, messageId, updatedPromptData);
-
-
-    // Send answer to tmux via shared sendPromptAnswer() (Issue #616)
-    // Issue #3907 (review P2): registered at the screen read right before the
-    // first key, as `/prompt-response` does — not at the stored row's — and
-    // that same frame is what the sender judges the answer against, so the
-    // screen registered is the screen the keys go to.
-    const atSend = await screenAtSend(id, cliToolId, instanceId);
-    noteManualSendStarting(manualAnswer, atSend.promptData);
-    try {
-      await sendPromptAnswer({
-        sessionName,
-        answer: input,
-        cliToolId,
-        promptData: promptData,
-        frame: atSend.frame,
-        // Issue #3952 review P2-1: the mark taken before that frame's capture.
-        readMark: atSend.readMark,
-      });
-      logger.info('prompt-answer-sent');
-    } catch (error: unknown) {
-      settleManualSendError(manualAnswer, error);
-      // Issue #3952: waited for a send holding the session's input, then not
-      // typed — nothing reached the pane, which a 500 would not say.
-      if (error instanceof PromptAnswerNotDeliveredError) {
-        return NextResponse.json({ error: error.message, reason: error.reason }, { status: 409 });
-      }
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    // Issue #3975: the row is recorded as answered only after the send, so the
+    // `answered` check above no longer covers the send itself. Claimed here —
+    // synchronously after that check, before the first await — so a second
+    // request for the same row while this one is typing is refused rather than
+    // typing its answer at whatever screen follows.
+    if (answersInFlight.has(messageId)) {
       return NextResponse.json(
-        { error: `Failed to send answer to tmux: ${errorMessage}` },
-        { status: 500 }
+        { error: 'Prompt is already being answered' },
+        { status: 409 }
       );
     }
-    settleManualAnswer(manualAnswer, 'answered');
+    answersInFlight.add(messageId);
+    try {
+      // Issue #2865: a same-named session another CommandMate server created is
+      // not this prompt's pane. Refused before anything is typed or recorded.
+      const ownership = await checkSessionOwnership(sessionName, worktree.path);
+      if (ownership.verdict === 'foreign') {
+        return NextResponse.json(foreignSessionErrorBody(sessionName, ownership.sessionPath), { status: 409 });
+      }
 
-    // Issue #1548: a person answered. This branch needs a stored messageId, so
-    // unlike /prompt-response it has no automated caller to be confused with.
-    // Issue #2200 retired the legacy chat prompt buttons that were its only
-    // caller: the composer's `PromptPanel` reaches this route on the
-    // `decisionId` shape and `commandmate respond` on the id-less one, and
-    // neither comes through here.
-    // Issue #3907: kept rather than retired — it is the public body shape the
-    // route's suites and integration tests post — and so it reports its end to
-    // Auto-Yes (`settleManualAnswer` above) like `/prompt-response` does.
-    applyEventToActiveTask(db, id, cliToolId, instanceId, 'prompt_answered_human', {
-      promptType: promptData.type,
-    });
+      // Issue #3907: a person is answering at the pane, as on `/prompt-response`
+      // (#3821 / #3880): before the first key a poller tick under way sends no
+      // further key and the next ticks leave the screen to the person, and how
+      // this answer ENDS decides what becomes of an answer Auto-Yes holds at the
+      // confirmation (`settleManualAnswer` below). Without it a send here that
+      // timed out with its keys on the pane left the confirmation free for
+      // Auto-Yes to type at again, and one that went through left Auto-Yes's own
+      // unknown send held.
+      const manualAnswer = noteManualAnswerStarted(buildCompositeKey(id, cliToolId, instanceId));
 
-    // Broadcast updated message
-    const updatedMessage = {
-      ...message,
-      promptData: updatedPromptData,
-    };
+      // Send answer to tmux via shared sendPromptAnswer() (Issue #616)
+      // Issue #3907 (review P2): registered at the screen read right before the
+      // first key, as `/prompt-response` does — not at the stored row's — and
+      // that same frame is what the sender judges the answer against, so the
+      // screen registered is the screen the keys go to.
+      const atSend = await screenAtSend(id, cliToolId, instanceId);
+      noteManualSendStarting(manualAnswer, atSend.promptData);
+      try {
+        await sendPromptAnswer({
+          sessionName,
+          answer: input,
+          cliToolId,
+          promptData: promptData,
+          frame: atSend.frame,
+          // Issue #3952 review P2-1: the mark taken before that frame's capture.
+          readMark: atSend.readMark,
+        });
+        logger.info('prompt-answer-sent');
+      } catch (error: unknown) {
+        settleManualSendError(manualAnswer, error);
+        // Issue #3952: waited for a send holding the session's input, then not
+        // typed — nothing reached the pane, which a 500 would not say.
+        if (error instanceof PromptAnswerNotDeliveredError) {
+          return NextResponse.json({ error: error.message, reason: error.reason }, { status: 409 });
+        }
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        // Issue #3975: stopped part-way — some keys are on the pane. Still a
+        // 500, with the reason, so a caller can say "look before answering again".
+        return NextResponse.json(
+          {
+            error: `Failed to send answer to tmux: ${errorMessage}`,
+            ...(error instanceof PromptAnswerInputLostError ? { reason: error.reason } : {}),
+          },
+          { status: 500 }
+        );
+      }
+      settleManualAnswer(manualAnswer, 'answered');
 
-    broadcastMessage('message_updated', {
-      worktreeId: id,
-      message: updatedMessage,
-    });
+      // Update prompt data — only now that every key of the answer went out
+      // (Issue #3975), as `/prompt-response` records its answer after the send. A
+      // send refused (409) or failed (500) leaves the row pending, so the chat
+      // still offers the prompt and it can be answered again.
+      //
+      // Issue #3881: the row's `reading` (what the screen was read as when it was
+      // saved) travels through the spread untouched. A row saved before #3881
+      // has none, and none is made here: a reading is read off the frame, and
+      // this route holds only the stored strings — reading those again is the
+      // very re-derivation #3881 removed (a 16-column confirm page would come
+      // back `unknown` and draw as a tool approval). So an old row stays an old
+      // row, and the chat surface reads it with its compatibility rules
+      // (`lib/chat/chat-tool-approvals`), exactly as before it was answered.
+      const updatedPromptData = {
+        ...promptData,
+        status: 'answered' as const,
+        answer,
+        answeredAt: new Date().toISOString(),
+        // Issue #1685: audit attribution — this route is only reached from an
+        // explicit human reply (chat prompt buttons).
+        answeredBy: 'human' as const,
+      };
+      updatePromptData(db, messageId, updatedPromptData);
 
-    // Resume polling for CLI tool's next response
-    startPolling(id, cliToolId, instanceId);
-    void broadcastTerminalSnapshotAfterInteraction(id, cliToolId, instanceId);
+      // Issue #1548: a person answered. This branch needs a stored messageId, so
+      // unlike /prompt-response it has no automated caller to be confused with.
+      // Issue #2200 retired the legacy chat prompt buttons that were its only
+      // caller: the composer's `PromptPanel` reaches this route on the
+      // `decisionId` shape and `commandmate respond` on the id-less one, and
+      // neither comes through here.
+      // Issue #3907: kept rather than retired — it is the public body shape the
+      // route's suites and integration tests post — and so it reports its end to
+      // Auto-Yes (`settleManualAnswer` above) like `/prompt-response` does.
+      applyEventToActiveTask(db, id, cliToolId, instanceId, 'prompt_answered_human', {
+        promptType: promptData.type,
+      });
 
-    logger.info('polling-resumed-after-answer');
+      // Broadcast updated message
+      const updatedMessage = {
+        ...message,
+        promptData: updatedPromptData,
+      };
 
-    return NextResponse.json({
-      success: true,
-      message: updatedMessage,
-    });
+      broadcastMessage('message_updated', {
+        worktreeId: id,
+        message: updatedMessage,
+      });
+
+      // Resume polling for CLI tool's next response
+      startPolling(id, cliToolId, instanceId);
+      void broadcastTerminalSnapshotAfterInteraction(id, cliToolId, instanceId);
+
+      logger.info('polling-resumed-after-answer');
+
+      return NextResponse.json({
+        success: true,
+        message: updatedMessage,
+      });
+    } finally {
+      answersInFlight.delete(messageId);
+    }
   } catch (error: unknown) {
     logger.error('failed-to-respond-to-prompt:', { error: error instanceof Error ? error.message : String(error) });
     const errorMessage = error instanceof Error ? error.message : 'Internal server error';

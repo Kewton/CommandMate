@@ -137,17 +137,19 @@ describe('[#3952 review P2-4] the guide names only the automatic answers that ta
     expect(en).not.toContain(', the automatic answers at launch');
   });
 
-  it('positive: Claude’s trust and Gemini’s launch dialog are listed as not taking part', () => {
-    const ja = rowOf('docs/user-guide/cli-operations-guide.md', 'Claude の trust ダイアログ');
-    const en = rowOf('docs/en/user-guide/cli-operations-guide.md', "Claude's trust dialog");
-    expect(ja).toContain('Gemini');
-    expect(ja).toContain('参加しない');
-    expect(en).toContain('Gemini');
-    expect(en).toContain('Does not take part');
+  // Issue #3975 decided the open question these two pinned: Claude's and
+  // Gemini's launch keys now take part (`launch-keys-input-lock-3975.test.ts`).
+  it('positive: Claude’s trust and Gemini’s launch dialog are listed as taking part (#3975)', () => {
+    const ja = rowOf('docs/user-guide/cli-operations-guide.md', 'Claude と Gemini の起動時の打鍵');
+    const en = rowOf('docs/en/user-guide/cli-operations-guide.md', "The keys Claude's and Gemini's launch types itself");
+    expect(ja).toContain('| 参加する');
+    expect(ja).not.toContain('参加しない');
+    expect(en).toContain('| Takes part');
+    expect(en).not.toContain('Does not take part');
   });
 
-  it('negative: the implementation is unchanged — Claude’s and Gemini’s launch answers use no input lock', () => {
-    expect(read('src/lib/session/claude-session.ts')).not.toMatch(/instance-input-lock/);
-    expect(read('src/lib/cli-tools/gemini.ts')).not.toMatch(/instance-input-lock/);
+  it('positive: Claude’s and Gemini’s launch keys use the input lock (#3975)', () => {
+    expect(read('src/lib/session/claude-session.ts')).toMatch(/instance-input-lock/);
+    expect(read('src/lib/cli-tools/gemini.ts')).toMatch(/instance-input-lock/);
   });
 });

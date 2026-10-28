@@ -313,7 +313,7 @@ A message send (`send` / `ask`, chat, timers, relay) types into the composer onl
 |------|------|-------------------------|
 | `respond` / the answer panel (answers that send Enter), strict `respond`, Auto-Yes answers, Command Code plan review, codex's automatic answers at launch and before a send (hooks / update / trust / notices), copilot's and Antigravity's automatic folder-trust answers | Takes part (answers do not wait for each other) | Waits for the send to finish, then **reads the screen again and types only if the same confirmation is still up**. When it is gone, changed, unreadable, or the wait passes 60 s, nothing is typed: `respond` reports `answer_not_delivered` (`/respond` answers 409, strict mode exits 40 `session_conflict`), and Auto-Yes decides again on its next tick. A send that starts during an answer waits for the answer's Enter |
 | `answer_only` digit answers (no Enter) | Does not take part | One key and no Enter, typed without waiting |
-| Claude's trust dialog and Gemini's launch dialog, answered automatically | Does not take part (not covered) | Not ordered against a send. When another send overlaps the launch, that answer's keys can be mixed into its body |
+| The keys Claude's and Gemini's launch types itself (the launch line, the automatic folder-trust answer) (#3975) | Takes part (as a sole writer; also waits for answers) | Holds the lock only while typing (the launch's waits are outside it). Waits for a send or an answer to finish; the trust answer, when a send came in meanwhile, reads the screen again and types only if the same dialog is still up. A `respond` that read the screen before the launch's Enter reads it again after it |
 | Typing in the terminal (WebSocket), `direct-input`, special keys (including the unsent bar's **Run**) | Does not take part (neither refused nor held) | **Keys typed during a send can be mixed into its body, or removed by its clean-up (the composer clear, the withdrawal).** Wait until the send is over (the reply has started) before typing |
 | `interrupt` (Escape) | Does not take part (does not wait, does not invalidate the send) | So a stop is never queued behind a send. An Escape that arrives while a body is being typed can stop that send part-way (check `lastSend` for the outcome) |
 
@@ -364,9 +364,9 @@ commandmate wait <worktree-id> --require-work        # Run only work-evidence af
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--timeout <sec>` | Maximum time to wait (seconds) | unlimited |
+| `--timeout <sec>` | Maximum time to wait (seconds). Each poll's reads (`current-output` and the messages ledger) are cut at what is left of it, so a server that does not answer still ends in exit 124 at the deadline (Issue #3974) | unlimited |
 | `--on-prompt <mode>` | What to do when a prompt is detected (agent / human) | agent |
-| `--stall-timeout <sec>` | Timeout on "no output change" (seconds) | - |
+| `--stall-timeout <sec>` | Timeout on "no output change" (seconds). Like `--timeout`, it also cuts a read that does not answer (exit 124) | - |
 | `--instance <id>` | Target instance ID (`<agent>` or `<agent>-<n>`). **This is the only way to name the target** (there is no `--agent`) | the agent's primary instance |
 | `--verify` | After completion is detected, run every verification gate and let the verdict decide the exit code | off |
 | `--require-work` | After completion is detected, run only the work-evidence gate | off |
@@ -738,7 +738,16 @@ the same appearance (`screen.token` of [`commandmate prompt`](#commandmate-promp
 | 2 | Argument errors; in strict mode also `--default`, a number on an unnumbered screen, or only one of `--expect-screen` / `--observation` |
 | 40 | Strict mode: the screen did not match or could not be checked. **Nothing was sent** (kind, token, folder or label mismatch, capture failure, an older server, …). Observe again with `commandmate prompt` |
 | 41 | Strict mode: keys were sent (or may have been) and the result is not confirmed. **Do not send again**; look at the pane. Even at 41, when `reason` is `operation_in_progress` / `operation_id_conflict` nothing was sent (`keysSent` is 0; `delivery` reads `indeterminate` but nothing was sent); fetch the result again under a different ID |
-| 99 | Prompt already dismissed (`prompt_no_longer_active`) |
+| 99 | Prompt already dismissed (`prompt_no_longer_active`) / the answer was not sent (`answer_not_delivered`) or stopped part-way (`answer_input_lost`, see below) |
+
+#### An answer not delivered, and one stopped part-way (Issue #3975)
+
+An answer that waited while a send or another answer held the input lock ([input lock (#3952)](#input-that-overlaps-a-send-input-lock-3952)) can end in one of two ways. Both exit 99, but the next step is the opposite:
+
+| Reason | Printed | Meaning and next step |
+|--------|---------|-----------------------|
+| `answer_not_delivered` | `Error: Answer was not sent. Reason: answer_not_delivered (…). Nothing was typed, so it is safe to run respond again.` | Stopped before the first key. **Not one key reached the pane**; running the same `respond` again is safe |
+| `answer_input_lost` | ``Warning: The answer may have been only partly typed (reason: answer_input_lost): … Check the screen with `commandmate capture <id> --instance <instance> --pane --tail 40` before answering again.`` | The session was replaced part-way through the keys and the rest were not sent. **Some of it may have reached the agent**; look at the pane first, then decide whether to answer again. The suggested command reads the pane the answer went to (the `--instance` or `--agent` the answer resolved to; neither when you named neither) |
 
 ---
 

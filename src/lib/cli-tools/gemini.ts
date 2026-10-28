@@ -33,6 +33,11 @@ import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 import { getErrorMessage } from '@/lib/errors';
 import { decideLaunchDialog, GEMINI_TRUST_LAUNCH_DIALOG, launchDialogWarning } from './launch-dialog';
 import { beginLaunchWindow, endLaunchWindow, recordLaunchDialogPress } from './launch-window';
+import {
+  answerUnderInstanceInputLock,
+  instanceInputLaunchReadMark,
+  withInstanceInputLock,
+} from '@/lib/session/instance-input-lock';
 
 const logger = createLogger('cli-tools/gemini');
 
@@ -135,7 +140,13 @@ export class GeminiTool extends BaseCLITool {
       // trust dialog is this launch's to answer; the Auto-Yes poller leaves it.
       beginLaunchWindow(sessionName);
       try {
-        await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
+        // Issue #3975: the launch line is one writer's turn, so a send's body
+        // already in the pane is not run as part of it. Only the keys: the
+        // waits below stay outside the lock, where a send waiting for the
+        // prompt cannot be held behind them.
+        await withInstanceInputLock(sessionName, () =>
+          sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true)
+        );
 
         // Wait for Gemini to initialize (minimum wait for banner/auth)
         await new Promise((resolve) => setTimeout(resolve, GEMINI_INIT_WAIT_MS));
@@ -170,6 +181,8 @@ export class GeminiTool extends BaseCLITool {
     const loggedDecisions = new Set<string>();
     for (let i = 0; i < GEMINI_INIT_MAX_ATTEMPTS; i++) {
       try {
+        // Issue #3975: taken before the read the trust Enter is decided on.
+        const readMark = instanceInputLaunchReadMark();
         const rawOutput = await capturePane(sessionName, GEMINI_PANE_HEIGHT);
         // Strip ANSI escape codes before pattern matching
         // (Gemini TUI uses 24-bit color codes that break regex matching)
@@ -185,14 +198,34 @@ export class GeminiTool extends BaseCLITool {
         if (!trustDialogHandled) {
           const decision = decideLaunchDialog(GEMINI_TRUST_LAUNCH_DIALOG, output);
           if (decision.action === 'press') {
-            await sendSpecialKey(sessionName, decision.key);
-            trustDialogHandled = true;
-            trustPressedAt = Date.now();
-            // Issue #3790: the poller leaves the answered dialog alone even if
-            // the window closes before gemini redraws it.
-            recordLaunchDialogPress(sessionName, trustPressedAt);
-            logger.info('auto-trusted-folder-for-gemini');
-            // Continue polling for prompt after trust dialog
+            // Issue #3975: the Enter as an `exclusive` writer, so it never lands
+            // inside a send's body, paste or Enter; a send that came between
+            // the read and the lock makes the dialog be read again first.
+            const pressed = await answerUnderInstanceInputLock(
+              sessionName,
+              readMark,
+              async () => {
+                const again = decideLaunchDialog(
+                  GEMINI_TRUST_LAUNCH_DIALOG,
+                  stripAnsi(await capturePane(sessionName, GEMINI_PANE_HEIGHT))
+                );
+                return again.action === 'press' && again.key === decision.key;
+              },
+              () => sendSpecialKey(sessionName, decision.key),
+              { mode: 'exclusive' }
+            );
+            if (pressed.answered) {
+              trustDialogHandled = true;
+              trustPressedAt = Date.now();
+              // Issue #3790: the poller leaves the answered dialog alone even if
+              // the window closes before gemini redraws it.
+              recordLaunchDialogPress(sessionName, trustPressedAt);
+              logger.info('auto-trusted-folder-for-gemini');
+              // Continue polling for prompt after trust dialog
+            } else {
+              // Not answered this poll; the next one reads the screen again.
+              logger.info('gemini-trust-answer-skipped', { sessionName, reason: pressed.reason });
+            }
           } else {
             const warning = launchDialogWarning(GEMINI_TRUST_LAUNCH_DIALOG, decision);
             if (warning && decision.action !== 'absent' && !loggedDecisions.has(decision.reason)) {
