@@ -17,6 +17,7 @@ import {
   listMigrationBackups,
   MIGRATION_BACKUP_DIR_NAME,
   MIGRATION_BACKUP_GENERATIONS,
+  readLastCompleteVersion,
 } from '@/lib/db/migrations/pre-migration-backup';
 
 const m1: Migration = {
@@ -234,6 +235,118 @@ describe('pre-migration backup (Issue #3985)', () => {
 
     const names = listMigrationBackups(backupDir, 'cm.db').map((p) => path.basename(p).split('.')[2]);
     expect(names).toEqual(['v2-to-v3', 'v3-to-v4', 'v4-to-v5']);
+  });
+
+  describe('original restore point follows the last completed version (review P2, 2nd round)', () => {
+    const failingV3: Migration = {
+      version: 3,
+      name: 'always fails',
+      up: () => {
+        throw new Error('boom');
+      },
+    };
+    const m4: Migration = { version: 4, name: 'create t4', up: (conn) => conn.exec('CREATE TABLE t4 (x)') };
+    const m5: Migration = { version: 5, name: 'create t5', up: (conn) => conn.exec('CREATE TABLE t5 (x)') };
+
+    function at(second: number): void {
+      vi.setSystemTime(new Date(Date.UTC(2026, 9, 29, 0, 0, second)));
+    }
+    function copyNames(): string[] {
+      return listMigrationBackups(backupDir, 'cm.db').map((p) => path.basename(p).split('.').slice(2, 4).join('.'));
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('keeps the v1 copy when a later build retries the half-applied upgrade with another target', () => {
+      db = seedV1();
+      at(0);
+      // Build A aims at v3: v2 applies, v3 fails.
+      expect(() => runMigrations(db, [m1, m2, failingV3])).toThrow(/Migration 3/);
+      expect(getCurrentVersion(db)).toBe(2);
+      // Build B aims at v4 and keeps failing on v3.
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        at(attempt);
+        expect(() => runMigrations(db, [m1, m2, failingV3, m4])).toThrow(/Migration 3/);
+      }
+
+      expect(copyNames()).toEqual([
+        'v1-to-v3.20261029T000000000Z',
+        'v2-to-v4.20261029T000002000Z',
+        'v2-to-v4.20261029T000003000Z',
+      ]);
+      expect(readLastCompleteVersion(backupDir, 'cm.db')).toBe(1);
+      expect(readCopy(listMigrationBackups(backupDir, 'cm.db')[0]).version).toBe(1);
+    });
+
+    it('advances the record on a completed run, so later upgrades prune the old restore point', () => {
+      db = seedV1();
+      at(0);
+      expect(() => runMigrations(db, [m1, m2, failingV3])).toThrow(/Migration 3/);
+      at(1);
+      runMigrations(db, [m1, m2, m3]);
+      expect(readLastCompleteVersion(backupDir, 'cm.db')).toBe(3);
+      at(2);
+      runMigrations(db, [m1, m2, m3, m4]);
+      at(3);
+      runMigrations(db, [m1, m2, m3, m4, m5]);
+
+      expect(copyNames()).toEqual([
+        'v2-to-v3.20261029T000001000Z',
+        'v3-to-v4.20261029T000002000Z',
+        'v4-to-v5.20261029T000003000Z',
+      ]);
+      expect(readLastCompleteVersion(backupDir, 'cm.db')).toBe(5);
+    });
+
+    it('assumes the starting version when nothing is recorded (first copy, or a directory from an older build)', () => {
+      db = seedV1();
+      // Copies left by an older build, without a record.
+      fs.mkdirSync(backupDir, { mode: 0o700 });
+      for (const name of [
+        'cm.db.v0-to-v1.20261028T000000000Z.0000000a.sqlite',
+        'cm.db.v0-to-v1.20261028T000001000Z.0000000b.sqlite',
+        'cm.db.v0-to-v1.20261028T000002000Z.0000000c.sqlite',
+      ]) {
+        fs.writeFileSync(path.join(backupDir, name), '', { mode: 0o600 });
+      }
+      at(0);
+      runMigrations(db, [m1, m2]);
+
+      const recordPath = path.join(backupDir, 'cm.db.last-complete-version');
+      // The run completed, so the assumed v1 has been replaced by v2.
+      expect(readLastCompleteVersion(backupDir, 'cm.db')).toBe(2);
+      expect(fs.statSync(recordPath).mode & 0o777).toBe(0o600);
+      expect(copyNames()).toEqual([
+        'v0-to-v1.20261028T000001000Z',
+        'v0-to-v1.20261028T000002000Z',
+        'v1-to-v2.20261029T000000000Z',
+      ]);
+      expect(fs.readdirSync(backupDir).filter((n) => n.endsWith('.partial'))).toEqual([]);
+    });
+
+    it('writes the assumed version before migrating, so a failed first run still records where it began', () => {
+      db = seedV1();
+      at(0);
+      expect(() => runMigrations(db, [m1, m2, failingV3])).toThrow(/Migration 3/);
+      expect(readLastCompleteVersion(backupDir, 'cm.db')).toBe(1);
+    });
+
+    it('does not stop startup when the record cannot be written', () => {
+      db = seedV1();
+      fs.mkdirSync(path.join(backupDir, 'cm.db.last-complete-version', 'blocker'), { recursive: true });
+      at(0);
+      runMigrations(db, [m1, m2]);
+
+      expect(getCurrentVersion(db)).toBe(2);
+      expect(readLastCompleteVersion(backupDir, 'cm.db')).toBeNull();
+      expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Could not record the last completed schema version'));
+      expect(fs.readdirSync(backupDir).filter((n) => n.endsWith('.partial'))).toEqual([]);
+    });
   });
 
   it('creates the directory 0700 and the copy 0600', () => {

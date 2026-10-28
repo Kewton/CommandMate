@@ -6,6 +6,7 @@ import {
   createPreMigrationBackup,
   isMigrationBackupSkipped,
   needsPreMigrationBackup,
+  recordLastCompleteVersion,
   SKIP_MIGRATION_BACKUP_ENV,
 } from './pre-migration-backup';
 
@@ -160,7 +161,10 @@ export function runMigrations(db: Database.Database, migrations: Migration[]): v
     }
   }
 
-  console.log(`All migrations completed. Current version: ${getCurrentVersion(db)}`);
+  const completedVersion = getCurrentVersion(db);
+  // Issue #3985: the next upgrade's original restore point is a copy taken from here.
+  recordLastCompleteVersion(db, completedVersion);
+  console.log(`All migrations completed. Current version: ${completedVersion}`);
 }
 
 /**

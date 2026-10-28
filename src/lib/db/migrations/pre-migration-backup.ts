@@ -31,6 +31,9 @@ export const SKIP_MIGRATION_BACKUP_ENV = 'CM_DB_SKIP_MIGRATION_BACKUP';
 
 const TEMP_SUFFIX = '.partial';
 
+/** `<db file name><suffix>` in the copy directory holds the last fully migrated version. */
+const LAST_COMPLETE_VERSION_SUFFIX = '.last-complete-version';
+
 export interface PreMigrationBackupResult {
   /** Path of the verified copy */
   path: string;
@@ -97,29 +100,79 @@ function parseVersions(copyPath: string): { from: number; to: number } | null {
  * Completed copies to delete, given all of them oldest first.
  *
  * Keeps the newest {@link MIGRATION_BACKUP_GENERATIONS}, except that the
- * original restore point of the current upgrade always survives: among the
- * copies whose target is `toVersion`, the one with the lowest source version
- * (the newest of those on a tie). A migration that half-succeeds (v59 -> v60
- * applied, v61 fails) leaves the next attempt starting from v60; retrying it
- * three times must not push out the v59 copy, which is the only one an older
- * build can open. That copy then takes one of the slots, so the total stays at
- * the limit.
+ * original restore point always survives: the newest copy whose source version
+ * is `lastCompleteVersion`, whatever its target. A migration that half-succeeds
+ * (v59 -> v60 applied, v61 fails) leaves the next attempt starting from v60,
+ * possibly from another build aiming at v62; retrying it three times must not
+ * push out the v59 copy, which is the only one the last working build can open.
+ * That copy then takes one of the slots, so the total stays at the limit.
  */
-export function selectBackupsToPrune(completed: string[], toVersion: number): string[] {
+export function selectBackupsToPrune(completed: string[], lastCompleteVersion: number): string[] {
   let original: string | undefined;
-  let originalFrom = Infinity;
   for (const copy of completed) {
-    const versions = parseVersions(copy);
-    if (versions && versions.to === toVersion && versions.from <= originalFrom) {
-      original = copy;
-      originalFrom = versions.from;
-    }
+    if (parseVersions(copy)?.from === lastCompleteVersion) original = copy;
   }
   const newest = completed.slice(-MIGRATION_BACKUP_GENERATIONS);
   const keep = original === undefined || newest.includes(original)
     ? newest
     : [original, ...completed.slice(-(MIGRATION_BACKUP_GENERATIONS - 1))];
   return completed.filter((copy) => !keep.includes(copy));
+}
+
+function backupDirFor(dbName: string): { dir: string; dbFileName: string } {
+  const dbPath = path.resolve(dbName);
+  return { dir: path.join(path.dirname(dbPath), MIGRATION_BACKUP_DIR_NAME), dbFileName: path.basename(dbPath) };
+}
+
+function lastCompleteVersionPath(dir: string, dbFileName: string): string {
+  return path.join(dir, `${dbFileName}${LAST_COMPLETE_VERSION_SUFFIX}`);
+}
+
+/** The schema version the last fully successful migration run ended at, or null when unrecorded. */
+export function readLastCompleteVersion(dir: string, dbFileName: string): number | null {
+  try {
+    const text = fs.readFileSync(lastCompleteVersionPath(dir, dbFileName), 'utf8').trim();
+    return /^\d+$/.test(text) ? Number(text) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeLastCompleteVersion(dir: string, dbFileName: string, version: number): void {
+  const target = lastCompleteVersionPath(dir, dbFileName);
+  const temp = `${target}.${crypto.randomBytes(4).toString('hex')}${TEMP_SUFFIX}`;
+  try {
+    fs.writeFileSync(temp, `${version}\n`, { mode: 0o600, flag: 'wx' });
+    fs.chmodSync(temp, 0o600);
+    fs.renameSync(temp, target);
+  } catch (error) {
+    try {
+      fs.rmSync(temp, { force: true });
+    } catch {
+      // best effort
+    }
+    throw error;
+  }
+}
+
+/**
+ * Record that every migration up to `version` completed (Issue #3985).
+ *
+ * Only once a copy directory exists: a database that never needed a copy has no
+ * restore point to protect, and the first copy assumes its own source version.
+ * A failure is logged and never stops startup; the next copy then falls back to
+ * that assumption.
+ */
+export function recordLastCompleteVersion(db: Database.Database, version: number): void {
+  if (db.memory || typeof db.name !== 'string' || db.name === '' || db.name === ':memory:') return;
+  const { dir, dbFileName } = backupDirFor(db.name);
+  if (!fs.existsSync(dir)) return;
+  try {
+    writeLastCompleteVersion(dir, dbFileName, version);
+  } catch (error: unknown) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn(`Could not record the last completed schema version in ${dir}: ${reason}`);
+  }
 }
 
 function verifyCopy(copyPath: string, expectedVersion: number): void {
@@ -160,9 +213,7 @@ export function createPreMigrationBackup(
   toVersion: number,
   now: Date = new Date()
 ): PreMigrationBackupResult {
-  const dbPath = path.resolve(db.name);
-  const dir = path.join(path.dirname(dbPath), MIGRATION_BACKUP_DIR_NAME);
-  const dbFileName = path.basename(dbPath);
+  const { dir, dbFileName } = backupDirFor(db.name);
   const id = crypto.randomBytes(4).toString('hex');
   const finalPath = path.join(
     dir,
@@ -197,8 +248,21 @@ export function createPreMigrationBackup(
 
   // Prune only after the new copy is verified and in place.
   const removed: string[] = [];
+  // Unrecorded (first copy, or a directory from an older build): the version we
+  // start from is taken as the last completed one, and is written down so that a
+  // retry after a half-applied run still knows where the upgrade began.
+  let lastCompleteVersion = readLastCompleteVersion(dir, dbFileName);
+  if (lastCompleteVersion === null) {
+    lastCompleteVersion = fromVersion;
+    try {
+      writeLastCompleteVersion(dir, dbFileName, fromVersion);
+    } catch (error: unknown) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`Could not record the last completed schema version in ${dir}: ${reason}`);
+    }
+  }
   const completed = listMigrationBackups(dir, dbFileName);
-  for (const old of selectBackupsToPrune(completed, toVersion)) {
+  for (const old of selectBackupsToPrune(completed, lastCompleteVersion)) {
     try {
       fs.rmSync(old, { force: true });
       removed.push(old);
