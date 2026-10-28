@@ -50,6 +50,11 @@ import {
   isSafeSessionStartError,
 } from '@/lib/session/session-start-error';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
+import {
+  answerUnderInstanceInputLock,
+  instanceInputReadMark,
+  withInstanceInputLock,
+} from '@/lib/session/instance-input-lock';
 
 const logger = createLogger('claude-session');
 
@@ -218,15 +223,22 @@ interface TrustDialogState {
  * dialog that outlives it, and a cursor that has not reached Yes after
  * TRUST_DIALOG_MAX_MOVES moves fails the start without Enter.
  *
+ * Issue #3975: each key goes out as an `exclusive` writer of the instance's
+ * input lock ({@link sendTrustDialogKey}), so it never lands inside a send's
+ * body or Enter, and a `respond` to the same dialog reads the screen again
+ * after it. Only the key: the polls and their sleeps stay outside the lock.
+ *
  * @param sessionName - tmux session name
  * @param dialogScreen - ANSI-stripped pane output when the dialog is open, else null
  * @param state - Mutated in place
+ * @param readMark - {@link instanceInputReadMark} taken before `dialogScreen` was captured
  * @throws {SessionStartFailedError} When the move budget is spent
  */
 async function answerTrustDialog(
   sessionName: string,
   dialogScreen: string | null,
-  state: TrustDialogState
+  state: TrustDialogState,
+  readMark: number = instanceInputReadMark()
 ): Promise<void> {
   if (state.pollsSinceAnswer !== null) state.pollsSinceAnswer++;
   if (state.pollsSinceMove !== null) state.pollsSinceMove++;
@@ -246,7 +258,7 @@ async function answerTrustDialog(
       (state.pollsSinceAnswer >= TRUST_DIALOG_REANSWER_POLLS && state.answers < TRUST_DIALOG_MAX_ANSWERS);
     if (!due) return;
     try {
-      await sendKeys(sessionName, '', true);
+      if (!(await sendTrustDialogKey(sessionName, readMark, 'Enter'))) return;
       state.pollsSinceAnswer = 0;
       state.answers++;
       logger.info('trust-dialog-detected', { keys: 'Enter', attempt: state.answers });
@@ -262,13 +274,43 @@ async function answerTrustDialog(
     throw new SessionStartFailedError('Claude Code', sessionName, CLAUDE_TRUST_DIALOG_CURSOR_STUCK);
   }
   try {
-    await sendSpecialKeys(sessionName, [keys[0]]);
+    if (!(await sendTrustDialogKey(sessionName, readMark, keys[0]))) return;
     state.pollsSinceMove = 0;
     state.moves++;
     logger.info('trust-dialog-cursor-move', { key: keys[0], attempt: state.moves });
   } catch {
     // Left unhandled so a later poll moves the cursor again
   }
+}
+
+/**
+ * Send one trust-dialog key (Enter, or a cursor move) under the instance's
+ * input lock as an `exclusive` writer (Issue #3975). When a send came between
+ * the read the key was decided on (`readMark`) and the lock, the dialog is read
+ * again and the key goes out only if that screen still calls for it.
+ *
+ * @returns Whether the key was sent; false when it was not (the next poll decides again)
+ */
+async function sendTrustDialogKey(
+  sessionName: string,
+  readMark: number,
+  key: string
+): Promise<boolean> {
+  const outcome = await answerUnderInstanceInputLock(
+    sessionName,
+    readMark,
+    async () => {
+      const screen = await getCleanPaneOutput(sessionName);
+      if (!isClaudeTrustDialogOpen(screen)) return false;
+      const keys = resolveClaudeTrustDialogKeys(screen);
+      if (keys === null) return false;
+      return key === 'Enter' ? keys.length === 1 : keys.length > 1 && keys[0] === key;
+    },
+    () => (key === 'Enter' ? sendKeys(sessionName, '', true) : sendSpecialKeys(sessionName, [key])),
+    { mode: 'exclusive' }
+  );
+  if (!outcome.answered) logger.info('trust-dialog-key-skipped', { key, reason: outcome.reason });
+  return outcome.answered;
 }
 
 /**
@@ -783,8 +825,12 @@ export async function startClaudeSession(
     // SF-S2-003: Sanitize environment after createSession, before launching Claude CLI
     await sanitizeSessionEnvironment(sessionName);
 
-    // Start Claude CLI in interactive mode using dynamically resolved path
-    await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
+    // Start Claude CLI in interactive mode using dynamically resolved path.
+    // Issue #3975: one writer's turn, as gemini's launch line; the init polls
+    // below stay outside the lock.
+    await withInstanceInputLock(sessionName, () =>
+      sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true)
+    );
 
     // Wait for Claude to initialize with dynamic detection (OCP-001)
     // Use constants instead of hardcoded values
@@ -800,6 +846,8 @@ export async function startClaudeSession(
 
       // SF-001: Use getCleanPaneOutput helper (DRY)
       let cleanOutput: string | null = null;
+      // Issue #3975: before the read the trust keys are decided on.
+      const readMark = instanceInputReadMark();
       try {
         cleanOutput = await getCleanPaneOutput(sessionName);
       } catch {
@@ -813,7 +861,7 @@ export async function startClaudeSession(
       // BEFORE the prompt: the dialog's cursor row (`❯ No, exit`) wears the
       // prompt glyph, so an open dialog is never read as a ready prompt.
       const trustDialogOpen = isClaudeTrustDialogOpen(cleanOutput);
-      await answerTrustDialog(sessionName, trustDialogOpen ? cleanOutput : null, trust);
+      await answerTrustDialog(sessionName, trustDialogOpen ? cleanOutput : null, trust, readMark);
 
       // Claude is ready when we see the prompt (DRY-001)
       // Use CLAUDE_PROMPT_PATTERN from cli-patterns.ts for consistency

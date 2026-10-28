@@ -329,18 +329,27 @@ export class PromptAnswerNotDeliveredError extends Error {
 }
 
 /**
+ * The reason code of {@link PromptAnswerInputLostError} (Issue #3975). Carried
+ * in its message too: `/prompt-response` answers it as a 500 whose body is the
+ * message, and `respond` tells it from {@link ANSWER_NOT_DELIVERED_REASON} by
+ * this code (some keys may be on the pane — look before answering again).
+ */
+export const ANSWER_INPUT_LOST_REASON = 'answer_input_lost';
+
+/**
  * An answer whose input was taken from it part-way (Issue #3952 review P2):
  * the session was replaced after some of its keys had gone out, and the rest
  * were not sent. Unlike {@link PromptAnswerNotDeliveredError} the pane was
  * touched (`keysSent: true`), so it is a failure, not a refusal.
  */
 export class PromptAnswerInputLostError extends Error {
+  readonly reason = ANSWER_INPUT_LOST_REASON;
   readonly keysSent = true;
 
   constructor(sessionName: string) {
     super(
       `The answer to ${sessionName} was stopped part-way: the session was replaced while the answer ` +
-        'held its input. Some keys were sent; the rest were not (Issue #3952).'
+        `held its input. Some keys were sent; the rest were not (${ANSWER_INPUT_LOST_REASON}, Issue #3952).`
     );
     this.name = 'PromptAnswerInputLostError';
   }

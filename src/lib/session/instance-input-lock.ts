@@ -458,24 +458,34 @@ function skipOfLockError(error: unknown): InstanceInputAnswerSkip | null {
  * admitted in time, a session replaced, a ticket lost, a screen that moved or
  * could not be read all come back as `{ answered: false }`. Errors thrown by
  * `answer` itself propagate.
+ *
+ * Issue #3975: `mode: 'exclusive'` is for a launch's own keys (gemini's launch
+ * line and trust Enter, Claude's trust keys): kept off a send's composer as an
+ * answer is, and also ordered against the answers — a `respond` to the same
+ * dialog then reads the screen again after the launch's key. The mark is
+ * compared before admission there, since the launch's own admission moves it.
  */
 export async function answerUnderInstanceInputLock<T>(
   sessionName: string,
   readMark: number,
   stillApplies: () => Promise<boolean>,
   answer: (ticket: InstanceInputTicket) => Promise<T>,
-  options: { waitMs?: number } = {}
+  options: { waitMs?: number; mode?: InstanceInputMode } = {}
 ): Promise<InstanceInputAnswerOutcome<T>> {
   // A context that already owns the composer (a send's own readiness wait)
   // has held it since before its read: it joins, and nothing is read again.
   const joined = currentInstanceInputTicket(sessionName) !== null;
+  const mode = options.mode ?? 'shared';
+  const movedBeforeAdmission = instanceInputReadMark() !== readMark;
   let admitted = false;
   try {
     return await withInstanceInputLock<InstanceInputAnswerOutcome<T>>(
       sessionName,
       async (ticket) => {
         admitted = true;
-        const sendSinceRead = !joined && (ticket.waited || instanceInputReadMark() !== readMark);
+        const sendSinceRead =
+          !joined &&
+          (ticket.waited || movedBeforeAdmission || (mode === 'shared' && instanceInputReadMark() !== readMark));
         if (sendSinceRead) {
           let applies: boolean;
           try {
@@ -495,7 +505,7 @@ export async function answerUnderInstanceInputLock<T>(
         if (!ticket.isCurrent()) return { answered: false, reason: 'input-lock-lost' };
         return { answered: true, value: await answer(ticket) };
       },
-      { ...options, mode: 'shared' }
+      { waitMs: options.waitMs, mode }
     );
   } catch (error: unknown) {
     // Only the lock's own refusals, before `fn` ran; anything `answer` threw
