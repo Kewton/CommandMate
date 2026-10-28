@@ -351,3 +351,82 @@ describe('the send API says the instance was mid-turn at the send (Issue #3957)'
     expect(stderr()).toMatch(/^overlapped: another message reached codex/m);
   });
 });
+
+/**
+ * The earlier-ask side counts from this ask's own input, not from `askedAt`
+ * (Issue #3957): B's `askedAt` → A's body → A's `Stop` → B's body → B done.
+ * A went in and was answered while B waited, so A's row lies inside
+ * `[askedAt, until]` but before B's own row.
+ */
+describe('the earlier-ask side counts from the stamp of the row the send returned (Issue #3957)', () => {
+  const B_INPUT = NOW + 800;
+
+  function answeredWhileWaiting(sent: Record<string, unknown>, foreignAt = NOW + 200): Scenario {
+    return {
+      cliToolId: 'codex',
+      sent,
+      onSend: () => vi.setSystemTime(NOW + 1_000),
+      turn: () => ({ openedAt: B_INPUT, closedAt: Date.now() >= DONE_AT ? DONE_AT : null }),
+      done: () => Date.now() >= DONE_AT,
+      rows: () => [
+        userRow('ua', BODY_A, foreignAt),
+        ...(foreignAt < B_INPUT ? [replyRow('ACK-A', NOW + 600, 'codex', 'codex-turn:00')] : []),
+        userRow('ub', BODY_B, B_INPUT),
+        ...(Date.now() >= DONE_AT ? [replyRow('ACK-B', DONE_AT)] : []),
+      ],
+    };
+  }
+
+  it('positive: a request that went in and ended before this ask\'s input is not an overlap', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    mockServer(answeredWhileWaiting({
+      ...SENT, turnOpenAtSend: false, timestamp: new Date(B_INPUT).toISOString(),
+    }));
+
+    await runAsk(['wt1', BODY_B, '--instance', 'codex', '--json']);
+
+    expect(mockExit).toHaveBeenCalledWith(0);
+    expect(payload()).toEqual({
+      worktreeId: 'wt1', instanceId: 'codex', cliToolId: 'codex', source: 'history', reply: 'ACK-B',
+    });
+    expect(stderr()).not.toContain('overlapped');
+  });
+
+  it('negative: another message after this ask\'s input is still an overlap (foreign-message)', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    mockServer(answeredWhileWaiting({
+      ...SENT, turnOpenAtSend: false, timestamp: new Date(B_INPUT).toISOString(),
+    }, NOW + 2_000));
+
+    await runAsk(['wt1', BODY_B, '--instance', 'codex', '--json']);
+
+    expect(mockExit).toHaveBeenCalledWith(0);
+    expect(payload()).toMatchObject({ overlapped: true });
+    expect(stderr()).toMatch(/^overlapped: another message reached codex/m);
+  });
+
+  it('no stamp on the send body (an older server) keeps askedAt as the lower bound', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    mockServer(answeredWhileWaiting({ ...SENT, turnOpenAtSend: false }));
+
+    await runAsk(['wt1', BODY_B, '--instance', 'codex', '--json']);
+
+    expect(mockExit).toHaveBeenCalledWith(0);
+    expect(payload()).toMatchObject({ overlapped: true });
+    expect(stderr()).toMatch(/^overlapped: another message reached codex/m);
+  });
+
+  it('an unparsable stamp is treated as not known (askedAt)', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    mockServer(answeredWhileWaiting({ ...SENT, turnOpenAtSend: false, timestamp: 'not-a-date' }));
+
+    await runAsk(['wt1', BODY_B, '--instance', 'codex', '--json']);
+
+    expect(mockExit).toHaveBeenCalledWith(0);
+    expect(payload()).toMatchObject({ overlapped: true });
+  });
+});

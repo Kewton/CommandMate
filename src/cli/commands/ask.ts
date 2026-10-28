@@ -34,7 +34,7 @@ import { Command } from 'commander';
 import { ExitCode, WaitExitCode } from '../types';
 import { ApiClient, isValidWorktreeId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
-import type { PromptMessageResponse } from '../types/api-responses';
+import type { ChatMessage, PromptMessageResponse } from '../types/api-responses';
 import {
   TRANSCRIPT_READER_TOOLS,
   fetchPromptRowsSince,
@@ -351,7 +351,11 @@ async function readAskReply(
  *   Only a tool whose hooks report turns publishes one, and a turn that had
  *   closed before the send does not count, so a plain ask never sees it;
  * - the earlier ask: a `user` row with other text on the same instance sits
- *   between the send and the end of the turn — the server's close time when it
+ *   between this ask's own input and the end of the turn. The lower bound is
+ *   the row the send API returned (`foreignSince`, the server's stamp of the
+ *   input start), so a request that went in and was answered while this one
+ *   waited for the input lock is not counted (Issue #3957); `askedAt` when the
+ *   send did not say. The upper bound is the server's close time when it
  *   published one, else the moment the turn was seen to end, so a message sent
  *   after the `Stop` (to the next turn) is not counted. With no instance
  *   resolved for the send there is no "same instance", and this side is off.
@@ -367,6 +371,8 @@ function detectOverlap(input: {
   openAtSend: boolean;
   /** The send API's reading at the input start (Issue #3957); undefined when not known. */
   turnOpenAtSend: boolean | undefined;
+  /** Lower bound of the earlier-ask side: this ask's own row stamp, else `askedAt` (Issue #3957). */
+  foreignSince: number;
   instanceId: string | null;
   messages: PromptMessageResponse[] | null;
 }): OverlapReason | null {
@@ -382,11 +388,21 @@ function detectOverlap(input: {
   if (
     input.messages
     && input.instanceId !== null
-    && hasForeignPromptInWindow(input.messages, input.message, input.askedAt, input.until, input.instanceId)
+    && hasForeignPromptInWindow(input.messages, input.message, input.foreignSince, input.until, input.instanceId)
   ) {
     return 'foreign-message';
   }
   return null;
+}
+
+/**
+ * The stamp of the row the send API wrote for this ask, in epoch ms, or null
+ * when the body carried none (an older server, a mocked send) (Issue #3957).
+ */
+function sentRowStamp(sent: ChatMessage | undefined): number | null {
+  if (typeof sent?.timestamp !== 'string') return null;
+  const at = Date.parse(sent.timestamp);
+  return Number.isFinite(at) ? at : null;
 }
 
 /**
@@ -645,6 +661,7 @@ a decision about that session's guard rails, not part of asking it a question.
           openAtSend: record.openAtSend,
           // Issue #3957: the server's own reading at the input start, when it has one.
           turnOpenAtSend: typeof sent?.turnOpenAtSend === 'boolean' ? sent.turnOpenAtSend : undefined,
+          foreignSince: sentRowStamp(sent) ?? askedAt,
           instanceId: ledger.instanceId,
           messages: ledger.messages,
         });
