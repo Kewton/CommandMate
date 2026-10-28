@@ -336,13 +336,15 @@ async function readAskReply(
  *
  * Both sides of the overlap, from records `ask` already reads:
  *
- * - the later ask: the send API said the instance was mid-turn when the
- *   message went out (`turnOpenAtSend`, Issue #3957) — read on the server just
- *   before the send, so it does not depend on the record a poll sees (the
- *   server publishes only the newest one, and a turn opening right after the
- *   send replaces it before the first poll). Without that mark (a tool whose
- *   hooks report no turn start, an older server), a turn that opened before
- *   `askedAt` and had not closed by
+ * - the later ask: the send API's `turnOpenAtSend` (Issue #3957) — whether a
+ *   turn was open at the moment the body started going in, read on the server
+ *   at that moment. When the key is there its value alone decides this side:
+ *   it does not depend on the record a poll sees (the server publishes only
+ *   the newest one, and a turn opening right after the send replaces it before
+ *   the first poll), and `askedAt` is earlier than the input, so a turn that
+ *   closed in between is not this message's. Without the key ("not known": a
+ *   tool whose hooks report no turn start, an older server), a turn that
+ *   opened before `askedAt` and had not closed by
  *   it — the turn `wait` adopted, or any turn record a poll saw (`wait` drops a
  *   closed turn that opened more than one poll interval before it started, so
  *   a turn that closed before this ask's first poll is only in the record).
@@ -363,14 +365,20 @@ function detectOverlap(input: {
   turnStartedAt: number | null;
   turnClosedAt: number | null;
   openAtSend: boolean;
+  /** The send API's reading at the input start (Issue #3957); undefined when not known. */
+  turnOpenAtSend: boolean | undefined;
   instanceId: string | null;
   messages: PromptMessageResponse[] | null;
 }): OverlapReason | null {
-  const closedBeforeSend = input.turnClosedAt !== null && input.turnClosedAt < input.askedAt;
-  if (input.turnStartedAt !== null && input.turnStartedAt < input.askedAt && !closedBeforeSend) {
-    return 'turn-already-open';
+  if (input.turnOpenAtSend !== undefined) {
+    if (input.turnOpenAtSend) return 'turn-already-open';
+  } else {
+    const closedBeforeSend = input.turnClosedAt !== null && input.turnClosedAt < input.askedAt;
+    if (input.turnStartedAt !== null && input.turnStartedAt < input.askedAt && !closedBeforeSend) {
+      return 'turn-already-open';
+    }
+    if (input.openAtSend) return 'turn-already-open';
   }
-  if (input.openAtSend) return 'turn-already-open';
   if (
     input.messages
     && input.instanceId !== null
@@ -634,8 +642,9 @@ a decision about that session's guard rails, not part of asking it a question.
           until,
           turnStartedAt: turn.startedAt,
           turnClosedAt: turn.closedAt,
-          // Issue #3957: the server's own reading at the send, when it has one.
-          openAtSend: record.openAtSend || sent?.turnOpenAtSend === true,
+          openAtSend: record.openAtSend,
+          // Issue #3957: the server's own reading at the input start, when it has one.
+          turnOpenAtSend: typeof sent?.turnOpenAtSend === 'boolean' ? sent.turnOpenAtSend : undefined,
           instanceId: ledger.instanceId,
           messages: ledger.messages,
         });

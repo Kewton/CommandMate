@@ -129,11 +129,13 @@ export interface SendUserMessageParams {
    */
   onAttempt?: (attempt: { state: SendAttemptState; reason: SendAttemptReason }) => void;
   /**
-   * Told the moment the body started going into the composer, when the send
-   * succeeded and the sender reported one (Issue #3957; the stamp of #3953).
-   * The send route judges "was the instance mid-turn" at this moment rather
-   * than before the input lock, so a turn that ended while this send queued
-   * does not count.
+   * Called at the moment the body starts going into the composer — inside the
+   * sender's `noteInputStart`, synchronously (Issue #3957; the stamp of
+   * #3953) — and only when the sender reports one. The send route reads
+   * "was the instance mid-turn" here, so neither a turn that ended while this
+   * send queued nor a turn that opens after the body went in is mistaken for
+   * the state at the input. It runs before the send is known to have
+   * succeeded.
    */
   onInputStart?: (inputStartedAt: Date) => void;
 }
@@ -471,7 +473,7 @@ export async function sendUserMessage(
     | { sent: true; inputStartedAt: Date | null }
   > {
     try {
-      const { inputStartedAt } = await observeInputStart(sendToTool);
+      const { inputStartedAt } = await observeInputStart(sendToTool, params.onInputStart);
       return { sent: true, inputStartedAt };
     } catch (error) {
       logger.error('failed-to-send-message-to:', { error: getErrorMessage(error) });
@@ -553,7 +555,6 @@ export async function sendUserMessage(
   // ASSISTANT_TIMESTAMP_OFFSET_MS. A path that does not report input (opencode's
   // HTTP delivery) keeps the stamp read before step 2, as before.
   const inputStartedAt = delivery.inputStartedAt;
-  if (inputStartedAt !== null) params.onInputStart?.(inputStartedAt);
   const userMessageTimestamp =
     inputStartedAt !== null && inputStartedAt.getTime() > pendingResponseTimestamp.getTime()
       ? inputStartedAt

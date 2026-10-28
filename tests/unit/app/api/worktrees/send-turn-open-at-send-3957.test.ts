@@ -1,17 +1,16 @@
 /**
  * The send route says whether the instance was mid-turn when the message went
- * out (Issue #3957): `turnOpenAtSend: true` on the 201 body when the
- * instance's turn record shows a turn opened and not closed just before the
- * send, and no key otherwise ("not open" or "not known").
+ * in (Issue #3957): `turnOpenAtSend: true | false` on the 201 body, read from
+ * the instance's turn record at the moment the body started going into the
+ * composer (the send service's `onInputStart`, called inside the sender's
+ * `noteInputStart`), and no key when that is not known.
  *
- * The turn is judged at the moment the body started going in (the send
- * service's `onInputStart`, #3953's stamp), not when the route read it: a
- * turn that ended while the send queued, a relaunch inside the send and a
- * sender that reports no input start are all "no key".
- *
- * Positive: an open turn → the key. Negative: a closed turn, no record at all
- * (a tool whose hooks report no turn start), another instance's open turn →
- * no key.
+ * True: a turn open at the input — however the record changes after it (A's
+ * `stop`, this message's own new turn, a re-open). False: no turn open at the
+ * input — one that closed while the send queued, a re-open that stopped before
+ * it, none at all, another instance's. Not known (no key): a relaunch during
+ * the send, a sender that reports no input start, a tool whose hooks do not
+ * report turns.
  *
  * @vitest-environment node
  */
@@ -89,6 +88,8 @@ vi.mock('@/lib/db/db-instance', () => {
 import { POST as sendMessage } from '@/app/api/worktrees/[id]/send/route';
 import { beginAgentEventGeneration, clearAgentStopEvents, recordAgentEvent } from '@/lib/session/agent-event-state';
 import type { AgentEventRecord } from '@/lib/session/agent-event-record';
+import { registerAgentEventSource, unregisterAgentEventSource } from '@/lib/hooks/sources/registry';
+import { codexAgentEventSource } from '@/lib/hooks/sources/codex/source';
 
 const WORKTREE_ID = 'wt-3957-send';
 
@@ -112,20 +113,36 @@ interface SendParams {
   onInputStart?: (at: Date) => void;
 }
 
+const OPENED = () => Date.now() - 2_000;
+
 /**
  * A send service that runs `beforeInput` (what happens while the send queues
- * for the lock, waits out a mark or relaunches), then reports the input start
- * the way the real one does and succeeds.
+ * for the lock, waits out a mark or relaunches), reports the input start the
+ * way the real one does (inside `noteInputStart`), runs `afterInput` (what
+ * happens once the body is in) and succeeds.
  */
-function sendsAfter(beforeInput: () => void, reportsInputStart = true): void {
+function sends(beforeInput: () => void, afterInput: () => void = () => {}, reportsInputStart = true): void {
   sendUserMessage.mockImplementation(async (_db: unknown, params: SendParams) => {
     beforeInput();
     if (reportsInputStart) params.onInputStart?.(new Date());
+    afterInput();
     return {
       ok: true,
       message: { id: 'm-1', worktreeId: WORKTREE_ID, role: 'user', content: params.content, cliToolId: 'codex', instanceId: 'codex' },
     };
   });
+}
+const sendsAfter = (beforeInput: () => void, reportsInputStart = true): void =>
+  sends(beforeInput, () => {}, reportsInputStart);
+
+const codex = (name: AgentEventRecord['event'], at: number, instanceId?: string): void => {
+  recordAgentEvent(WORKTREE_ID, 'codex', instanceId, event(name, at));
+};
+
+async function body(extra: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+  const response = await post(extra);
+  expect(response.status).toBe(201);
+  return (await response.json()) as Record<string, unknown>;
 }
 
 describe('POST /send: turnOpenAtSend (Issue #3957)', () => {
@@ -158,114 +175,88 @@ describe('POST /send: turnOpenAtSend (Issue #3957)', () => {
   });
 
   it('positive: a turn opened and not closed before the send → turnOpenAtSend: true', async () => {
-    recordAgentEvent(WORKTREE_ID, 'codex', undefined, event('user_prompt_submit', Date.now() - 2_000));
-
-    const response = await post();
-    const body = (await response.json()) as Record<string, unknown>;
-
-    expect(response.status).toBe(201);
-    expect(body).toMatchObject({ id: 'm-1', content: 'hello', turnOpenAtSend: true });
+    codex('user_prompt_submit', OPENED());
+    expect(await body()).toMatchObject({ id: 'm-1', content: 'hello', turnOpenAtSend: true });
   });
 
-  it('negative: a turn that closed before the send → no key', async () => {
-    recordAgentEvent(WORKTREE_ID, 'codex', undefined, event('user_prompt_submit', Date.now() - 2_000));
-    recordAgentEvent(WORKTREE_ID, 'codex', undefined, event('stop', Date.now() - 1_000));
-
-    const response = await post();
-    const body = (await response.json()) as Record<string, unknown>;
-
-    expect(response.status).toBe(201);
-    expect(body).not.toHaveProperty('turnOpenAtSend');
-    expect(body).toMatchObject({ id: 'm-1', content: 'hello' });
+  it('a turn that closed before the send → turnOpenAtSend: false', async () => {
+    codex('user_prompt_submit', OPENED());
+    codex('stop', Date.now() - 1_000);
+    expect(await body()).toMatchObject({ id: 'm-1', content: 'hello', turnOpenAtSend: false });
   });
 
-  it('negative: no turn record (no turn-start hooks) → no key', async () => {
-    const response = await post();
-    const body = (await response.json()) as Record<string, unknown>;
-
-    expect(response.status).toBe(201);
-    expect(body).not.toHaveProperty('turnOpenAtSend');
+  it('no turn record on a tool whose hooks report turns → turnOpenAtSend: false', async () => {
+    expect(await body()).toMatchObject({ turnOpenAtSend: false });
   });
 
-  it('negative: another instance being mid-turn does not mark this send', async () => {
-    recordAgentEvent(WORKTREE_ID, 'codex', 'codex-2', event('user_prompt_submit', Date.now() - 2_000));
-
-    const response = await post({ instanceId: 'codex' });
-    const body = (await response.json()) as Record<string, unknown>;
-
-    expect(response.status).toBe(201);
-    expect(body).not.toHaveProperty('turnOpenAtSend');
+  it('another instance being mid-turn does not mark this send (false)', async () => {
+    codex('user_prompt_submit', OPENED(), 'codex-2');
+    expect(await body({ instanceId: 'codex' })).toMatchObject({ turnOpenAtSend: false });
   });
 
-  it('(a) open when read, but closed before the input started → no key', async () => {
-    recordAgentEvent(WORKTREE_ID, 'codex', undefined, event('user_prompt_submit', Date.now() - 2_000));
+  it('(a) open when the route was entered, but closed before the input started → false', async () => {
+    codex('user_prompt_submit', OPENED());
     // The previous turn ends while this send waits for the input lock.
-    sendsAfter(() => {
-      recordAgentEvent(WORKTREE_ID, 'codex', undefined, event('stop', Date.now() - 1));
-    });
-
-    const response = await post();
-    const body = (await response.json()) as Record<string, unknown>;
-
-    expect(response.status).toBe(201);
-    expect(body).not.toHaveProperty('turnOpenAtSend');
+    sendsAfter(() => codex('stop', Date.now() - 1));
+    expect(await body()).toMatchObject({ turnOpenAtSend: false });
   });
 
-  it('(b) still open at the input start, closing after it → turnOpenAtSend: true', async () => {
-    recordAgentEvent(WORKTREE_ID, 'codex', undefined, event('user_prompt_submit', Date.now() - 2_000));
-    sendUserMessage.mockImplementation(async (_db: unknown, params: SendParams) => {
-      const inputAt = new Date();
-      params.onInputStart?.(inputAt);
-      // The folded turn ends after the body went in.
-      recordAgentEvent(WORKTREE_ID, 'codex', undefined, event('stop', inputAt.getTime() + 5));
-      return { ok: true, message: { id: 'm-1', worktreeId: WORKTREE_ID, role: 'user', content: params.content } };
+  it('(b) still open at the input start, closing after it → true', async () => {
+    codex('user_prompt_submit', OPENED());
+    sends(() => {}, () => codex('stop', Date.now() + 5));
+    expect(await body()).toMatchObject({ turnOpenAtSend: true });
+  });
+
+  it('input → A stops → this message opens its own turn → true (read at the input, not after)', async () => {
+    codex('user_prompt_submit', OPENED());
+    sends(() => {}, () => {
+      codex('stop', Date.now() + 5);
+      codex('user_prompt_submit', Date.now() + 10);
     });
-
-    const response = await post();
-    const body = (await response.json()) as Record<string, unknown>;
-
-    expect(response.status).toBe(201);
-    expect(body).toMatchObject({ turnOpenAtSend: true });
+    expect(await body()).toMatchObject({ turnOpenAtSend: true });
   });
 
   it('the open turn replaced after the input start by the prompt of this message (a fold) → turnOpenAtSend: true', async () => {
-    recordAgentEvent(WORKTREE_ID, 'codex', undefined, event('user_prompt_submit', Date.now() - 2_000));
-    sendUserMessage.mockImplementation(async (_db: unknown, params: SendParams) => {
-      const inputAt = new Date();
-      params.onInputStart?.(inputAt);
-      // Issue #3330's re-open: an unmarked prompt of the same session replaces the running turn.
-      recordAgentEvent(WORKTREE_ID, 'codex', undefined, event('user_prompt_submit', inputAt.getTime() + 5));
-      return { ok: true, message: { id: 'm-1', worktreeId: WORKTREE_ID, role: 'user', content: params.content } };
+    codex('user_prompt_submit', OPENED());
+    // Issue #3330's re-open: an unmarked prompt of the same session replaces the running turn.
+    sends(() => {}, () => codex('user_prompt_submit', Date.now() + 5));
+    expect(await body()).toMatchObject({ turnOpenAtSend: true });
+  });
+
+  it('A re-opens → stops → input → false', async () => {
+    codex('user_prompt_submit', OPENED());
+    sendsAfter(() => {
+      codex('user_prompt_submit', Date.now() - 500);
+      codex('stop', Date.now() - 100);
     });
-
-    const response = await post();
-    const body = (await response.json()) as Record<string, unknown>;
-
-    expect(response.status).toBe(201);
-    expect(body).toMatchObject({ turnOpenAtSend: true });
+    expect(await body()).toMatchObject({ turnOpenAtSend: false });
   });
 
   it('(c) the send relaunched the session (a new generation) → no key', async () => {
-    recordAgentEvent(WORKTREE_ID, 'codex', undefined, event('user_prompt_submit', Date.now() - 2_000));
-    sendsAfter(() => {
-      beginAgentEventGeneration(WORKTREE_ID, 'codex', undefined, Date.now());
-    });
+    codex('user_prompt_submit', OPENED());
+    sendsAfter(() => beginAgentEventGeneration(WORKTREE_ID, 'codex', undefined, Date.now()));
+    expect(await body()).not.toHaveProperty('turnOpenAtSend');
+  });
 
-    const response = await post();
-    const body = (await response.json()) as Record<string, unknown>;
-
-    expect(response.status).toBe(201);
-    expect(body).not.toHaveProperty('turnOpenAtSend');
+  it('a relaunch after the input start (a retyped body) is not known either → no key', async () => {
+    codex('user_prompt_submit', OPENED());
+    sends(() => {}, () => beginAgentEventGeneration(WORKTREE_ID, 'codex', undefined, Date.now() + 5));
+    expect(await body()).not.toHaveProperty('turnOpenAtSend');
   });
 
   it('a sender that reports no input start leaves it unknown → no key', async () => {
-    recordAgentEvent(WORKTREE_ID, 'codex', undefined, event('user_prompt_submit', Date.now() - 2_000));
+    codex('user_prompt_submit', OPENED());
     sendsAfter(() => {}, false);
+    expect(await body()).not.toHaveProperty('turnOpenAtSend');
+  });
 
-    const response = await post();
-    const body = (await response.json()) as Record<string, unknown>;
-
-    expect(response.status).toBe(201);
-    expect(body).not.toHaveProperty('turnOpenAtSend');
+  it('a tool whose hooks do not report turns is not known → no key', async () => {
+    codex('user_prompt_submit', OPENED());
+    unregisterAgentEventSource('codex');
+    try {
+      expect(await body()).not.toHaveProperty('turnOpenAtSend');
+    } finally {
+      registerAgentEventSource(codexAgentEventSource);
+    }
   });
 });

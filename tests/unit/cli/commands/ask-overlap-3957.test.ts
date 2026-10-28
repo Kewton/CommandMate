@@ -5,10 +5,17 @@
  * record a poll sees — the server publishes only the newest one, and a turn
  * that opens right after the send replaces it before the first poll.
  *
+ * When the key is there its value alone decides the later-ask side (it is
+ * read at the input start, which is after `askedAt`); without it `ask` falls
+ * back to the turn record. The earlier-ask side (another message reaching the
+ * instance during this turn) is not something the send can see and is kept.
+ *
  * Positive: the old record is replaced before the first poll and the send
  * said the turn was open → overlapped (fails before #3957). Negative: the same
  * replaced record with no mark → no `overlapped` key (the detection #3955 had);
- * the mark absent and the record showing the open turn → still overlapped.
+ * the mark absent and the record showing the open turn → still overlapped;
+ * `false` with a poll that saw a turn open at `askedAt` (it ended before the
+ * input) → not overlapped.
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -264,5 +271,83 @@ describe('the send API says the instance was mid-turn at the send (Issue #3957)'
 
     expect(mockExit).toHaveBeenCalledWith(0);
     expect(payload()).toMatchObject({ reply: 'ACK-A', overlapped: true });
+  });
+
+  it('askedAt → the old turn ends → input: turnOpenAtSend false is not an overlap, though a poll saw that turn open at askedAt', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const A_OPENED = NOW - 10_000;
+    mockServer({
+      cliToolId: 'codex',
+      // A's turn closed after askedAt (+300) but before the body went in.
+      sent: { ...SENT, turnOpenAtSend: false },
+      onSend: () => vi.setSystemTime(NOW + 1_000),
+      turn: () => (Date.now() < NOW + 3_000
+        ? { openedAt: A_OPENED, closedAt: NOW + 300 }
+        : { openedAt: NOW + 600, closedAt: Date.now() >= DONE_AT ? DONE_AT : null }),
+      done: () => Date.now() >= DONE_AT,
+      rows: () => [
+        userRow('ua', BODY_A, A_OPENED - 100),
+        replyRow('ACK-A', NOW + 300, 'codex', 'codex-turn:00'),
+        userRow('ub', BODY_B, NOW + 500),
+        ...(Date.now() >= DONE_AT ? [replyRow('ACK-B', DONE_AT)] : []),
+      ],
+    });
+
+    await runAsk(['wt1', BODY_B, '--instance', 'codex', '--json']);
+
+    expect(mockExit).toHaveBeenCalledWith(0);
+    expect(payload()).toEqual({
+      worktreeId: 'wt1', instanceId: 'codex', cliToolId: 'codex', source: 'history', reply: 'ACK-B',
+    });
+    expect(stderr()).not.toContain('overlapped');
+  });
+
+  it('the same timeline with no key falls back to the turn record (overlapped)', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const A_OPENED = NOW - 10_000;
+    mockServer({
+      cliToolId: 'codex',
+      sent: SENT,
+      onSend: () => vi.setSystemTime(NOW + 1_000),
+      turn: () => (Date.now() < NOW + 3_000
+        ? { openedAt: A_OPENED, closedAt: NOW + 300 }
+        : { openedAt: NOW + 600, closedAt: Date.now() >= DONE_AT ? DONE_AT : null }),
+      done: () => Date.now() >= DONE_AT,
+      rows: () => [
+        userRow('ua', BODY_A, A_OPENED - 100),
+        replyRow('ACK-A', NOW + 300, 'codex', 'codex-turn:00'),
+        userRow('ub', BODY_B, NOW + 500),
+        ...(Date.now() >= DONE_AT ? [replyRow('ACK-B', DONE_AT)] : []),
+      ],
+    });
+
+    await runAsk(['wt1', BODY_B, '--instance', 'codex', '--json']);
+
+    expect(mockExit).toHaveBeenCalledWith(0);
+    expect(payload()).toMatchObject({ overlapped: true });
+  });
+
+  it('turnOpenAtSend false does not hide the other side: a message folded into this turn is still an overlap', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    mockServer({
+      cliToolId: 'codex',
+      sent: { ...SENT, turnOpenAtSend: false },
+      turn: () => ({ openedAt: NOW + 600, closedAt: Date.now() >= DONE_AT ? DONE_AT : null }),
+      done: () => Date.now() >= DONE_AT,
+      rows: () => [
+        userRow('ub', BODY_B, NOW + 1),
+        userRow('ua', BODY_A, NOW + 2_000),
+        ...(Date.now() >= DONE_AT ? [replyRow('ACK-A', DONE_AT)] : []),
+      ],
+    });
+
+    await runAsk(['wt1', BODY_B, '--instance', 'codex', '--json']);
+
+    expect(mockExit).toHaveBeenCalledWith(0);
+    expect(payload()).toMatchObject({ reply: 'ACK-A', overlapped: true });
+    expect(stderr()).toMatch(/^overlapped: another message reached codex/m);
   });
 });

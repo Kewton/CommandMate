@@ -527,10 +527,14 @@ the requests again one at a time if it matters. Two things are detected:
 
 - the instance was already in another turn when the message was sent (the later sender; only for
   tools whose hooks report turn starts, and a turn that ended before the send does not count; it is
-  caught even when that turn ended before `ask`'s first poll. The send API's response also says
-  whether a turn was open when the body started going in (`turnOpenAtSend: true`; the key is
-  absent when not, or not known, a relaunch inside the send included), so it is caught even when the server's turn record is replaced by this
-  request's own new turn before that first poll (#3957))
+  caught even when that turn ended before `ask`'s first poll. The server reads whether a turn was
+  open at the moment the body started going in and returns it in the send API's response as
+  `turnOpenAtSend: true` / `false` (the key is absent when that is not known: a tool whose hooks do
+  not report both a turn's start and its end, a send path that reports no input start, a relaunch
+  inside the send). When the key is there, `ask` decides this side from its value alone, so it is
+  caught even when the server's turn record is replaced by this request's own new turn before that
+  first poll, and a turn that ended between the send and the input does not count. Without the key
+  the earlier check applies (#3957))
 - another request reached the instance between the send and the end of the turn (the earlier
   sender; read from the `user` rows of the chat history. The end is the close time the server
   recorded, so the next request sent after the `Stop` does not count, and no `user` row since the
