@@ -72,7 +72,12 @@ import { SelectionListKeys } from '@/components/worktree/SelectionListKeys';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
 import { OpencodeQuickKeys } from '@/components/worktree/OpencodeQuickKeys';
 import { AgentModeControl } from '@/components/worktree/AgentModeControl';
-import { UnsentComposerBar, hasUnsentComposerText } from '@/components/worktree/UnsentComposerBar';
+import {
+  UnsentComposerBar,
+  UnsentComposerClearNotice,
+  hasUnsentComposerText,
+} from '@/components/worktree/UnsentComposerBar';
+import { clearTargetKey, useClearNotice } from '@/components/worktree/clear-notice';
 import { DirectInputBar } from '@/components/worktree/DirectInputBar';
 import {
   OpencodeSidebarNotice,
@@ -765,6 +770,12 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // codex's since #1890 — which `extractComposerText` has already dropped) means
   // no bar, so the "no Enter affordance when the box is empty" property holds.
   const showUnsentComposerBar = hasUnsentComposerText(terminal.composerText);
+  // Issue #3954: the Clear result outlives the bar (a dialog empties composerText).
+  const {
+    notice: clearNotice,
+    setNotice: setClearNotice,
+    dismiss: dismissClearNotice,
+  } = useClearNotice(clearTargetKey(worktreeId, cliToolId, resolvedInstanceId));
 
   // Issue #2095: opencode's sidebar sharing rows with the transcript. Its own
   // gate, on the frame's GEOMETRY and the tool, and deliberately not folded into
@@ -1088,7 +1099,11 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             instanceId={resolvedInstanceId}
             composerText={terminal.composerText}
             onActionSent={refresh}
+            clearNotice={clearNotice}
+            onClearNoticeChange={setClearNotice}
           />
+        ) : clearNotice ? (
+          <UnsentComposerClearNotice notice={clearNotice} onDismiss={dismissClearNotice} />
         ) : null}
         {showOpencodeSidebarNotice ? (
           <OpencodeSidebarNotice
@@ -1345,6 +1360,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       showPrompt,
       showEscapeHatch,
       showUnsentComposerBar,
+      clearNotice,
+      setClearNotice,
+      dismissClearNotice,
       // Issue #2095: the notice's gate, and the frame it re-reads to render.
       // Issue #3305: `terminal.output` is also the frame the selection-list
       // controls are decided from.
