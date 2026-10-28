@@ -66,6 +66,7 @@ import {
   PENDING_PROMPT_HOLD_MS,
   pendingSelfResumeStop,
   publishesTurnRecord,
+  type PromptLedgerRead,
   readNewestPromptAt,
   reportsTurnBoundaries,
   SELF_RESUME_HOLD_MS,
@@ -694,6 +695,38 @@ function upstreamFaultStage(poll: PollContext, data: CurrentOutputResponse): Sta
 }
 
 /**
+ * The chat-ledger read of a poll, bounded by `--timeout` / `--stall-timeout`
+ * (Issue #3974).
+ *
+ * On an ordinary poll, a ledger that does not answer in time ends the wait
+ * ({@link DeadlineReached} back to {@link deadlineStage}, exit 124), not
+ * "unreadable". On the frame a settle returned (`judgingSettledFrame`) it does
+ * not: that frame was read inside the deadlines and is judged even after them
+ * (#3956), so the ledger is reported unreadable and the frame decides alone —
+ * as {@link faultFrameHasStop} treats a ledger cut by the same deadlines.
+ */
+async function readLedgerWithinDeadlines(
+  poll: PollContext,
+  state: PollState,
+  data: CurrentOutputResponse,
+  judgingSettledFrame: boolean,
+): Promise<PromptLedgerRead> {
+  const { client, worktreeId, options, startTime } = poll;
+  try {
+    return await readWithinDeadlines(options, startTime, state.lastActivityTime, signal =>
+      readNewestPromptAt(client, worktreeId, options, data, signal),
+    );
+  } catch (error) {
+    if (!judgingSettledFrame || !(error instanceof DeadlineReached)) throw error;
+    console.error(
+      `Note: the message ledger for ${worktreeId} could not be read within --timeout/--stall-timeout; ` +
+        'judging the settled frame alone.',
+    );
+    return { readable: false };
+  }
+}
+
+/**
  * How long `wait` holds an orphan turn — see {@link releaseOrphanTurn} — before
  * completing on the `Stop` that answered the newest prompt (Issue #3429).
  *
@@ -729,8 +762,9 @@ async function releaseOrphanTurn(
   poll: PollContext,
   state: PollState,
   data: CurrentOutputResponse,
+  judgingSettledFrame: boolean,
 ): Promise<boolean> {
-  const { client, worktreeId, options } = poll;
+  const { worktreeId } = poll;
   const events = data.structuredEvents;
   const closedByScreen = events?.closedBy === 'scraper_evidence' || events?.closedBy === 'stale';
   if (
@@ -747,11 +781,8 @@ async function releaseOrphanTurn(
     return false;
   }
 
-  // Issue #3974: bounded by --timeout / --stall-timeout; a ledger that does not
-  // answer in time ends the wait (DeadlineReached), it is not "unreadable".
-  const ledger = await readWithinDeadlines(options, poll.startTime, state.lastActivityTime, signal =>
-    readNewestPromptAt(client, worktreeId, options, data, signal),
-  );
+  // Issue #3974: bounded by --timeout / --stall-timeout.
+  const ledger = await readLedgerWithinDeadlines(poll, state, data, judgingSettledFrame);
   state.promptLedgerReadable = ledger.readable;
   if (!ledger.readable || ledger.submittedAt === null || outstandingPrompt(data, ledger.submittedAt)) {
     state.orphanTurnHold = null;
@@ -783,6 +814,7 @@ async function unsettledTurnStage(
   poll: PollContext,
   state: PollState,
   data: CurrentOutputResponse,
+  judgingSettledFrame: boolean,
 ): Promise<StageOutcome> {
   const { worktreeId } = poll;
 
@@ -794,7 +826,7 @@ async function unsettledTurnStage(
   // non-null — that missing `Stop` is the difference between "finished"
   // and "never ran", and it is the only signal that carries it.
   if (!turnSettled(data, state.turnStartedAt)) {
-    if (await releaseOrphanTurn(poll, state, data)) return { kind: 'next' };
+    if (await releaseOrphanTurn(poll, state, data, judgingSettledFrame)) return { kind: 'next' };
     console.error(
       `Waiting: ${worktreeId} is back at its composer, but its agent has not reported ` +
         `the end of this turn (turnStartedAt=${state.turnStartedAt}, ` +
@@ -870,8 +902,9 @@ async function promptLedgerStage(
   poll: PollContext,
   state: PollState,
   data: CurrentOutputResponse,
+  judgingSettledFrame: boolean,
 ): Promise<{ kind: 'wait' } | { kind: 'next'; answeredNewestPrompt: boolean }> {
-  const { client, worktreeId, options, startTime } = poll;
+  const { worktreeId, startTime } = poll;
 
   // Issue #1975: the same frame, one question further back. #1839's gate
   // above can only fire once a turn has been ADOPTED, and `send` leaves a
@@ -891,10 +924,8 @@ async function promptLedgerStage(
   // reaches it.
   let answeredNewestPrompt = false;
   if (state.turnStartedAt === null && state.promptLedgerReadable && reportsTurnBoundaries(data)) {
-    // Issue #3974: bounded like the poll's own read, see releaseOrphanTurn.
-    const ledger = await readWithinDeadlines(options, startTime, state.lastActivityTime, signal =>
-      readNewestPromptAt(client, worktreeId, options, data, signal),
-    );
+    // Issue #3974: bounded by --timeout / --stall-timeout.
+    const ledger = await readLedgerWithinDeadlines(poll, state, data, judgingSettledFrame);
     // One notice, then stop asking: a ledger that failed once will fail
     // every poll, and the point of degrading is to stop paying for it.
     state.promptLedgerReadable = ledger.readable;
@@ -1003,13 +1034,13 @@ async function readyStage(
       return upstreamFaultStage(poll, data);
     }
 
-    const turnOutcome = await unsettledTurnStage(poll, state, data);
+    const turnOutcome = await unsettledTurnStage(poll, state, data, judgingSettledFrame);
     if (turnOutcome.kind !== 'next') return turnOutcome;
 
     const holdOutcome = selfResumeHoldStage(poll, state, data, selfResumeStopAt);
     if (holdOutcome.kind !== 'next') return holdOutcome;
 
-    const ledgerOutcome = await promptLedgerStage(poll, state, data);
+    const ledgerOutcome = await promptLedgerStage(poll, state, data, judgingSettledFrame);
     if (ledgerOutcome.kind !== 'next') return ledgerOutcome;
 
     // Issue #3956: the `Stop` can land before the end of the reply is on the

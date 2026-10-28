@@ -317,6 +317,45 @@ describe('reads that answer, and failures that are not the deadline, are as befo
   });
 });
 
+describe('the frame a settle returned is judged even after the deadline (Issue #3974, review P2)', () => {
+  it('a ledger read with no time left on the settled frame does not turn its completion into 124', async () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    const prompt = [{ role: 'user', timestamp: new Date(now - 5_000).toISOString() }];
+    // Poll at 0 s: the ledger answers at once (hook_stop) and the settle starts;
+    // its fresh re-read at 0.5 s hangs and is cut at 1 s, leaving the 0 s frame.
+    mockRoutes([ledgerFrame(now - 1_000), 'hang'], [prompt]);
+
+    const { state, pending } = startWait(await importWait(), ['--timeout', '1', '--fail-on-upstream-fault']);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(state.done).toBe(true);
+    await pending;
+
+    expect(reads('fresh=1')).toBe(1);
+    // The settled frame's own ledger read is not started: no time is left.
+    expect(reads('/messages')).toBe(1);
+    expect(stderrText()).toContain('judging the settled frame alone');
+    expect(stderrText()).not.toContain('Timeout: wt1');
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.SUCCESS);
+    expect(stderrText()).toContain('Completed: wt1 (basis=scraper_ready)');
+  });
+
+  it('on an ordinary poll, a ledger that does not answer still ends at --timeout (124)', async () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    mockRoutes([ledgerFrame(now - 1_000)], ['hang']);
+
+    const { state, pending } = startWait(await importWait(), ['--timeout', '1', '--fail-on-upstream-fault']);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(state.done).toBe(true);
+    await pending;
+
+    expect(mockExit).toHaveBeenCalledWith(WaitExitCode.TIMEOUT);
+    expect(stderrText()).not.toContain('judging the settled frame alone');
+    expect(reads('fresh=1')).toBe(0);
+  });
+});
+
 describe('readWithinDeadlines (Issue #3974)', () => {
   it('with neither deadline set, the read gets no signal', async () => {
     const read = vi.fn((signal?: AbortSignal) => Promise.resolve(signal));
