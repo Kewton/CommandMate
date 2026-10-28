@@ -364,9 +364,9 @@ commandmate wait <worktree-id> --require-work        # Run only work-evidence af
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--timeout <sec>` | Maximum time to wait (seconds) | unlimited |
+| `--timeout <sec>` | Maximum time to wait (seconds). Each poll's reads (`current-output` and the messages ledger) are cut at what is left of it, so a server that does not answer still ends in exit 124 at the deadline (Issue #3974) | unlimited |
 | `--on-prompt <mode>` | What to do when a prompt is detected (agent / human) | agent |
-| `--stall-timeout <sec>` | Timeout on "no output change" (seconds) | - |
+| `--stall-timeout <sec>` | Timeout on "no output change" (seconds). Like `--timeout`, it also cuts a read that does not answer (exit 124) | - |
 | `--instance <id>` | Target instance ID (`<agent>` or `<agent>-<n>`). **This is the only way to name the target** (there is no `--agent`) | the agent's primary instance |
 | `--verify` | After completion is detected, run every verification gate and let the verdict decide the exit code | off |
 | `--require-work` | After completion is detected, run only the work-evidence gate | off |

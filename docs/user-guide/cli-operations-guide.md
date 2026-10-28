@@ -450,9 +450,9 @@ commandmate wait <worktree-id> --fail-on-upstream-fault  # 上流障害で compo
 
 | オプション | 説明 | デフォルト |
 |-----------|------|-----------|
-| `--timeout <sec>` | 最大待機時間（秒） | 無制限 |
+| `--timeout <sec>` | 最大待機時間（秒）。ポールごとの取得（`current-output` と台帳 messages）もこの残り時間で打ち切るので、サーバーが応答しなくても期限で exit 124 になる（Issue #3974） | 無制限 |
 | `--on-prompt <mode>` | プロンプト検出時の動作（agent / human） | agent |
-| `--stall-timeout <sec>` | 出力変化なしのタイムアウト（秒） | - |
+| `--stall-timeout <sec>` | 出力変化なしのタイムアウト（秒）。`--timeout` と同じく、応答しない取得もこの期限で打ち切る（exit 124） | - |
 | `--instance <id>` | 対象インスタンスID（`<agent>` または `<agent>-<n>`）。**送り先指定はこのフラグのみ**（`--agent` は無い） | エージェントのプライマリインスタンス |
 | `--verify` | 完了検知後に検証ゲートを全件実行し、その判定で終了コードを決める | 無効 |
 | `--require-work` | 完了検知後に work-evidence ゲートのみ実行する | 無効 |
