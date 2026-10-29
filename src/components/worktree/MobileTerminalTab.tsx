@@ -99,6 +99,7 @@ import {
   hasUnsentComposerText,
 } from '@/components/worktree/UnsentComposerBar';
 import { clearTargetKey, useClearNotice } from '@/components/worktree/clear-notice';
+import { resolveMobileUnsentComposerSlot } from '@/components/worktree/MobileTerminalTabHelpers';
 import {
   OpencodeSidebarNotice,
   hasOpenCodeSidebarObstruction,
@@ -754,6 +755,11 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
     setNotice: setClearNotice,
     dismiss: dismissClearNotice,
   } = useClearNotice(clearTargetKey(worktreeId, cliToolId, instanceId));
+  const unsentComposerSlot = resolveMobileUnsentComposerSlot(
+    showUnsentComposerBar,
+    Boolean(clearNotice),
+    directInputOpen,
+  );
 
   // Issue #2095: identical gate to PC, from one shared predicate — the sidebar
   // is a property of the pane, not of the screen it is being watched on.
@@ -905,7 +911,7 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
       {/* Issue #2799: the three pads below stand down while the direct-input
           keyboard is open — it stands in for them, and the terminal needs
           their rows (the keyboard's height comes out of this column). */}
-      {showUnsentComposerBar && !directInputOpen ? (
+      {unsentComposerSlot === 'bar' ? (
         <div className="shrink-0 px-2 pt-1">
           <UnsentComposerBar
             worktreeId={worktreeId}
@@ -917,7 +923,7 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
             onClearNoticeChange={setClearNotice}
           />
         </div>
-      ) : clearNotice && !directInputOpen ? (
+      ) : unsentComposerSlot === 'clearNotice' ? (
         <div className="shrink-0 px-2 pt-1">
           <UnsentComposerClearNotice notice={clearNotice} onDismiss={dismissClearNotice} />
         </div>
