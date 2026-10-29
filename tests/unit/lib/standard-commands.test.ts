@@ -8,8 +8,9 @@
  */
 
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import {
   STANDARD_COMMANDS,
   FREQUENTLY_USED,
@@ -600,6 +601,68 @@ describe('STANDARD_COMMANDS', () => {
       texts.forEach((text) => expect(text).toBeTruthy());
       expect(new Set(texts).size).toBe(entries.length);
     }
+  });
+
+  // Issue #3998: claude 2.1.288 added /restart ("resume this session, which
+  // applies an installed update"), a name copilot already shipped with a flat
+  // key. `--write` points the new claude entry at that same flat key, so the
+  // palette would show copilot's sentence for claude. Both tools must carry
+  // their own leaf and resolve to different text.
+  describe('/restart (Copilot) and /restart (Claude) (Issue #3998)', () => {
+    type CliTool = NonNullable<SlashCommand['cliTools']>[number];
+    const RESTART_TOOLS: readonly CliTool[] = ['copilot', 'claude'];
+
+    /** The resolved /restart text per tool, read through each entry's own key. */
+    function restartTexts(
+      commands: readonly SlashCommand[],
+      descriptions: Record<string, string>
+    ): Array<string | undefined> {
+      return RESTART_TOOLS.map((tool) => {
+        const cmd = commands.find((c) => c.name === 'restart' && c.cliTools?.includes(tool));
+        const key = cmd?.descriptionKey?.slice(DESCRIPTION_KEY_PREFIX.length) ?? '';
+        return descriptions[key];
+      });
+    }
+
+    let tmpDir: string | undefined;
+    afterEach(() => {
+      if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
+      tmpDir = undefined;
+    });
+
+    it('gives each tool its own key and a distinct sentence', () => {
+      const keys = RESTART_TOOLS.map(
+        (tool) => STANDARD_COMMANDS.find((c) => c.name === 'restart' && c.cliTools?.includes(tool))?.descriptionKey
+      );
+      expect(keys).toEqual(RESTART_TOOLS.map((tool) => toolDescriptionKeyFor('restart', tool)));
+      for (const locale of LOCALES) {
+        const texts = restartTexts(STANDARD_COMMANDS, loadDescriptions(locale));
+        texts.forEach((text) => expect(text).toBeTruthy());
+        expect(new Set(texts).size).toBe(RESTART_TOOLS.length);
+      }
+    });
+
+    it('control: the shape --write leaves (both entries on the flat key) collapses to one sentence', () => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'restart-3998-'));
+      const file = path.join(tmpDir, 'worktree.json');
+      fs.writeFileSync(
+        file,
+        JSON.stringify({ slashCommands: { descriptions: { restart: 'Restart the CLI, preserving the current session' } } })
+      );
+      const flat: SlashCommand[] = RESTART_TOOLS.map((tool) => ({
+        name: 'restart',
+        description: '',
+        descriptionKey: descriptionKeyFor('restart'),
+        category: 'standard-util',
+        cliTools: [tool],
+        isStandard: true,
+        source: 'standard',
+        filePath: '',
+      }));
+      const dict = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const texts = restartTexts(flat, Object.fromEntries(flattenStrings(dict.slashCommands.descriptions)));
+      expect(new Set(texts).size).toBe(1);
+    });
   });
 
   // Issue #689: Security - allowlist validation (DR4-002)
