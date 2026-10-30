@@ -231,6 +231,11 @@ const ALLOWED_CATCHES: readonly { file: string; fn: string; why: string }[] = [
   },
   {
     file: 'src/cli/utils/server-capabilities.ts',
+    fn: 'serverReportsPromptAnswerReason',
+    why: 'Issue #3982: only `respond` calls it, after a failed answer, with its plain client (respond has no --timeout), so no deadline can reach it; false keeps the pre-#3982 reading.',
+  },
+  {
+    file: 'src/cli/utils/server-capabilities.ts',
     fn: 'isRealNotFoundBody',
     why: 'JSON.parse of a body already read; no request, so no deadline can reach it.',
   },
