@@ -91,6 +91,28 @@ const FRAME_READERS: readonly { file: string; why: string }[] = [
       + 'フレームを持つターミナルのタブが無い。`isSelectionListActive` を受け取ったのと同じ'
       + '応答のフレームをここで読み、読み取りだけを state に持つ（フレームは持たない、#736）。',
   },
+  // Issue #3999: 次の 3 つは「何を出すか」を決めない。部品と同じフレームを読み、
+  // Plan review かどうか（`offersPlanReviewControls` / `isPlanReviewUp`、判定は
+  // selection-list-ops の 1 か所）だけを、高さの配分と入力欄のガードに使う。
+  {
+    file: 'src/components/worktree/ChatSurface.tsx',
+    why:
+      'チャット面のカードの高さの規則（#3999 の A / A\'）。カードの `SelectionListKeys` に渡すのと'
+      + '同じ `frame` を読み、Plan review なら #2326 の 35vh から外し、操作を固定する配置にする。',
+  },
+  {
+    file: 'src/components/worktree/TerminalSplitPaneContent.tsx',
+    why:
+      'PC の分割ペインの入力欄のガード（#3999 の D）。フッタの `SelectionListKeys` と同じ'
+      + '`terminal.output` を読み、このペイン自身の Plan review への送信を止める'
+      + '（親の controller の poll は primary を見ていて、分割の alias と一致しない）。',
+  },
+  {
+    file: 'src/components/sessions/SessionTile.tsx',
+    why:
+      '`/sessions` のタイルの入力欄のガードと、Plan review の行の高さ（#3999）。'
+      + 'タイルの `SelectionListKeys` / カードと同じ `terminal.output` を読む。',
+  },
 ] as const;
 
 /** その下の `readSelectionListShape` を直接呼んでよいファイルと、その理由。 */

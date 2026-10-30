@@ -1151,8 +1151,11 @@
     "commentPlaceholder": "What should change? (Add comment → Submit review)",
     "comment": "Add comment",
     "submit": "Submit review (Ctrl+R)",
+    "submitCompact": "Submit review",
     "approve": "Approve (Ctrl+A)",
+    "approveCompact": "Approve",
     "cancel": "Cancel (Esc)",
+    "cancelCompact": "Cancel",
     "approveConfirmLabel": "Confirm plan approval",
     "approveConfirmText": "Approving runs the plan. Approve it?",
     "approveConfirmYes": "Approve and run",
@@ -1164,7 +1167,9 @@
       "invalidRequest": "That action does not fit this screen. Nothing was sent.",
       "notActive": "Nothing was sent: no plan review is on screen.",
       "generic": "Could not send."
-    }
+    },
+    "composerNotice": "The plan is waiting for your review — approve, cancel or comment.",
+    "composerGoto": "Go to the controls"
   },
   "selectionKeys": {
     "numbersToolbarLabel": "Option number keys",

@@ -33,6 +33,7 @@ import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import type { ShowToast } from '@/types/markdown-editor';
 import { SelectionListKeys } from '@/components/worktree/SelectionListKeys';
+import { isPlanReviewUp } from '@/lib/session/selection-list-ops';
 import { Button } from '@/components/ui/Button';
 import { FileViewer } from '@/components/worktree/FileViewer';
 import {
@@ -210,6 +211,7 @@ const MobileComposer = memo(function MobileComposer({
   onInsertConsumed,
   autoYesSlot,
   agentModeSlot,
+  planReviewActive,
 }: {
   worktreeId: string;
   cliToolId: CLIToolType;
@@ -231,6 +233,8 @@ const MobileComposer = memo(function MobileComposer({
   autoYesSlot?: React.ReactNode;
   /** Issue #2592: the permission-mode control, in the composer's action row. */
   agentModeSlot?: React.ReactNode;
+  /** Issue #3999: the active instance is in Command Code's plan review. */
+  planReviewActive?: boolean;
 }) {
   const optimisticSend = useChatOptimisticSend({ cliToolId, instanceId });
   return (
@@ -248,6 +252,7 @@ const MobileComposer = memo(function MobileComposer({
       onOptimisticSend={optimisticSend}
       autoYesSlot={autoYesSlot}
       agentModeSlot={agentModeSlot}
+      planReviewActive={planReviewActive}
     />
   );
 });
@@ -533,6 +538,22 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   const activeSessionStarting =
     typeof startingSince === 'number'
     || typeof worktree?.sessionStatusByInstance?.[activeInstanceId]?.startingSince === 'number';
+
+  // Issue #3999: the active instance's current frame is a plan review — read
+  // off the controller's poll of THAT instance (the phone polls the instance
+  // it targets), the same reading the docked pad and the chat card draw the
+  // controls from. The composer stops a send into it.
+  const activePlanReview = useMemo(
+    () =>
+      !activeSessionStarting &&
+      isPlanReviewUp({
+        isSelectionListActive,
+        isPagerActive,
+        reading: selectionListReading,
+        cliToolId: activeCliTab,
+      }),
+    [activeSessionStarting, isSelectionListActive, isPagerActive, selectionListReading, activeCliTab],
+  );
 
   // --------------------------------------------------------------------------
   // Issue #2799: the phone's direct-input keyboard
@@ -1112,7 +1133,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 />
               ) : null}
               {isSelectionListActive && !isMobileChatSurface && !showDirectInputKeyboard && !activeSessionStarting && (
-                <div className="px-2 pt-1 border-b border-border">
+                <div className="px-2 pt-1 border-b border-border" data-testid="mobile-selection-dock">
                   {/* Issue #3305: the part the chat surface's card mounts —
                       number keys, claude's "this session only" / "set as
                       default", no `Enter` on a plan review (#2793 / #2809).
@@ -1131,6 +1152,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                     trustConfirmation={isTrustConfirmationActive}
                     surface="terminal"
                     showPagerKeys={isPagerActive}
+                    // Issue #3999: a phone — the plan review's one-row form.
+                    compact
                   />
                 </div>
               )}
@@ -1205,6 +1228,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                       answerMode={autoYesAnswerMode}
                     />
                   }
+                  // Issue #3999: no send into the active instance's plan review.
+                  planReviewActive={activePlanReview}
                 />
               </div>
             </div>

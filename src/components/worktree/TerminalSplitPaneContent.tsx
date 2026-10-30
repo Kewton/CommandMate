@@ -69,6 +69,7 @@ import type { AgentSessionSnapshot } from '@/types/agent-session';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { getTerminalDisplayCompaction } from '@/config/terminal-display-compaction';
 import { SelectionListKeys } from '@/components/worktree/SelectionListKeys';
+import { isPlanReviewUp, readSelectionListFrame } from '@/lib/session/selection-list-ops';
 import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
 import { OpencodeQuickKeys } from '@/components/worktree/OpencodeQuickKeys';
 import { AgentModeControl } from '@/components/worktree/AgentModeControl';
@@ -721,6 +722,20 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   const isSelectionListFrame = terminal.isSelectionListActive;
   // Issue #3179: see `shouldShowNav`.
   const showNav = shouldShowNav({ isSelectionListFrame, isChatSurface, isStarting });
+  // Issue #3999: this split's OWN frame is a plan review — the one its
+  // `SelectionListKeys` / chat card draws the controls for. The composer reads
+  // it to stop a send the server would refuse. Not the controller's poll: that
+  // one follows the primary instance, not this split's alias.
+  const planReviewActive = useMemo(
+    () =>
+      isPlanReviewUp({
+        isSelectionListActive: terminal.isSelectionListActive,
+        isPagerActive: terminal.isPagerActive,
+        reading: readSelectionListFrame(terminal.isSelectionListActive ? terminal.output : null),
+        cliToolId,
+      }),
+    [terminal.isSelectionListActive, terminal.isPagerActive, terminal.output, cliToolId],
+  );
   // Issue #2406: "this pane's agent is generating right now". The merged status
   // verdict is the only field that answers that question -- `terminal.isRunning`
   // has meant "a tmux session exists and is healthy" since Issue #2238, so it is
@@ -1082,6 +1097,10 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             frame={terminal.output}
             surface="terminal"
             showPagerKeys={terminal.isPagerActive}
+            // Issue #3999: the footer is `flex-shrink-0` — every pixel here
+            // comes out of the terminal — so a plan review gets the one-row
+            // comment form.
+            compact
           />
         ) : null}
         {showEscapeHatch ? (
@@ -1218,6 +1237,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             onInsertConsumed={onInsertConsumed}
             splitIndex={splitIndex}
             onFocus={onFocus}
+            // Issue #3999: no send into this split's plan review.
+            planReviewActive={planReviewActive}
             // Issue #2598: this split's stored textarea height, bounded so the
             // body above keeps COMPOSER_PANE_BODY_MIN_HEIGHT_PX. The bound follows
             // the pane (window, #2421 grid rows, maximize, split count) and only
@@ -1415,6 +1436,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       onInsertConsumed,
       splitIndex,
       onFocus,
+      // Issue #3999: the composer's send guard.
+      planReviewActive,
       autoYesEnabled,
       autoYesExpiresAt,
       autoYesBlockedByContract,

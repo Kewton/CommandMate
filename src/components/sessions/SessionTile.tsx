@@ -105,6 +105,7 @@ import { HistoryPane } from '@/components/worktree/HistoryPane';
 import { TerminalDisplay } from '@/components/worktree/TerminalDisplay';
 import { SessionStartingNotice } from '@/components/worktree/SessionStartingNotice';
 import { SelectionListKeys } from '@/components/worktree/SelectionListKeys';
+import { isPlanReviewUp, readSelectionListFrame } from '@/lib/session/selection-list-ops';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
 import { StatusDot } from '@/components/ui';
@@ -230,6 +231,28 @@ export const SESSION_TILE_SELECTION_KEYS_ROW_CLASS = 'min-h-[3rem] max-h-[8rem]'
  * the composer gives the row its height rather than History losing it.
  */
 export const SESSION_TILE_BODY_FLOOR_WITH_SELECTION_KEYS_CLASS = 'min-h-[18rem]';
+
+/**
+ * The selection-list row while it carries Command Code's plan review
+ * (Issue #3999).
+ *
+ * The 8rem cap above scrolled the arrow pad and the plan review's controls
+ * together, so Approve sat below the fold of a 128px box. On a plan review the
+ * row is not capped: it is a flex column whose buttons keep their height and
+ * whose comment editor / refusal yield (`PlanReviewControls` bounds both), and
+ * it is the terminal and History rows that give way — they drop their #2510
+ * floors for as long as the review is up
+ * ({@link SESSION_TILE_TERMINAL_ROW_YIELDING_CLASS}).
+ * The body's 18rem floor and the composer's bound are unchanged.
+ */
+export const SESSION_TILE_PLAN_REVIEW_ROW_CLASS = 'flex min-h-0 flex-col overflow-y-auto';
+
+/**
+ * {@link SESSION_TILE_TERMINAL_ROW_CLASS} / {@link SESSION_TILE_HISTORY_ROW_CLASS}
+ * while a plan review is up: the same 3 : 2 shares, no floor.
+ */
+export const SESSION_TILE_TERMINAL_ROW_YIELDING_CLASS = 'flex-[3_3_0%] min-h-0';
+export const SESSION_TILE_HISTORY_ROW_YIELDING_CLASS = 'flex-[2_2_0%] min-h-0';
 
 /** {@link SESSION_TILE_BODY_FLOOR_WITH_SELECTION_KEYS_CLASS} in px (18rem at 16px). */
 export const SESSION_TILE_BODY_FLOOR_WITH_SELECTION_KEYS_PX = 288;
@@ -536,6 +559,29 @@ function SessionTileCard({
   const showSelectionKeys =
     enabled && isTerminalSurface && terminal.isSelectionListActive && !startingGate.starting;
   const bodyFloor = sessionTileBodyFloor(showSelectionKeys);
+  // Issue #3999: the tile's own frame is a plan review — the frame its
+  // selection-list row / chat card draws the controls from. The composer reads
+  // it to stop a send the server would refuse, on either surface.
+  const planReviewActive = useMemo(
+    () =>
+      enabled &&
+      !startingGate.starting &&
+      isPlanReviewUp({
+        isSelectionListActive: terminal.isSelectionListActive,
+        isPagerActive: terminal.isPagerActive,
+        reading: readSelectionListFrame(terminal.isSelectionListActive ? terminal.output : null),
+        cliToolId,
+      }),
+    [
+      enabled,
+      startingGate.starting,
+      terminal.isSelectionListActive,
+      terminal.isPagerActive,
+      terminal.output,
+      cliToolId,
+    ],
+  );
+  const planReviewRow = showSelectionKeys && planReviewActive;
   const composerMaxHeight = useComposerMaxHeight(bodyEl, composerEl, bodyFloor.px);
 
   // Issue #2510: ChatSurface's banner offers a way out to the terminal. Phase 1
@@ -693,7 +739,11 @@ function SessionTileCard({
           >
             <div
               className={`relative min-w-0 overflow-hidden ${
-                showStackedHistory ? SESSION_TILE_TERMINAL_ROW_CLASS : 'min-h-0 flex-1'
+                showStackedHistory
+                  ? planReviewRow
+                    ? SESSION_TILE_TERMINAL_ROW_YIELDING_CLASS
+                    : SESSION_TILE_TERMINAL_ROW_CLASS
+                  : 'min-h-0 flex-1'
               }`}
               data-testid={`session-tile-terminal-${worktree.id}`}
             >
@@ -730,7 +780,11 @@ function SessionTileCard({
                 floor while it is drawn (sessionTileBodyFloor). */}
             {showSelectionKeys ? (
               <div
-                className={`min-w-0 shrink overflow-y-auto border-t border-border p-2 ${SESSION_TILE_SELECTION_KEYS_ROW_CLASS}`}
+                className={`min-w-0 border-t border-border p-2 ${
+                  planReviewRow
+                    ? SESSION_TILE_PLAN_REVIEW_ROW_CLASS
+                    : `shrink overflow-y-auto ${SESSION_TILE_SELECTION_KEYS_ROW_CLASS}`
+                }`}
                 data-testid={`session-tile-selection-keys-${worktree.id}`}
               >
                 <SelectionListKeys
@@ -741,13 +795,16 @@ function SessionTileCard({
                   frame={terminal.output}
                   surface="terminal"
                   showPagerKeys={terminal.isPagerActive}
+                  compact
                 />
               </div>
             ) : null}
             {showStackedHistory && (
               <div
                 id={historyRegionId}
-                className={`min-w-0 overflow-hidden border-t border-border ${SESSION_TILE_HISTORY_ROW_CLASS}`}
+                className={`min-w-0 overflow-hidden border-t border-border ${
+                  planReviewRow ? SESSION_TILE_HISTORY_ROW_YIELDING_CLASS : SESSION_TILE_HISTORY_ROW_CLASS
+                }`}
                 data-testid={`session-tile-history-${worktree.id}`}
               >
                 {/* No `onCollapse`: its arrow points at a column to the left,
@@ -816,6 +873,8 @@ function SessionTileCard({
             // draft it shares: the tile's body is a fixed card's, not a pane's.
             heightScope={SESSION_TILE_COMPOSER_HEIGHT_SCOPE}
             maxHeight={composerMaxHeight}
+            // Issue #3999: no send into this tile's plan review.
+            planReviewActive={planReviewActive}
             autoYesSlot={
               <AutoYesToggle
                 enabled={autoYes.enabled}

@@ -27,6 +27,25 @@
  * delivered as an ordinary prompt answer on any screen that is not the plan
  * review, which is exactly the misdelivery this route's re-verification exists
  * to prevent.
+ *
+ * ## The height rule (Issue #3999)
+ *
+ * On a 412x892 phone the chat card laid `Approve` out at 738px, under the
+ * 698px bottom of an `overflow-hidden` surface with nothing to scroll — in the
+ * DOM, out of reach. Lowering one cap would not have held: the comment box
+ * resizes, the buttons wrap, the confirmation and a refusal each add rows.
+ * So the group is split by what may give way:
+ *
+ *  - **pinned** (`shrink-0`): the button row and the approve confirmation —
+ *    the things a reviewer must always be able to press;
+ *  - **yielding** (`min-h-0`, scrolls inside itself): the comment editor and
+ *    a refusal. Each is also capped, so the group's height is bounded on its
+ *    own wherever it is mounted, and in a flex column that is short of room
+ *    they shrink first — down to nothing — before a button is clipped.
+ *
+ * `compact` is the narrow mounts' form (the phone, a `/sessions` tile and
+ * every terminal surface): a one-row comment box whose label is read by
+ * assistive technology only. The comment stays offered everywhere.
  */
 
 import { useCallback, useState } from 'react';
@@ -42,6 +61,16 @@ export interface PlanReviewControlsProps {
   instanceId?: string;
   /** Refresh the pane once an action was delivered. */
   onKeysSent?: () => void;
+  /** Issue #3999: the narrow form — see "The height rule" above. */
+  compact?: boolean;
+}
+
+/**
+ * The group's DOM marker, for the composer's "go to the controls" link
+ * (Issue #3999): `data-plan-review-target="<worktreeId>:<instanceId>"`.
+ */
+export function planReviewTargetKey(worktreeId: string, instanceId: string): string {
+  return `${worktreeId}:${instanceId}`;
 }
 
 /** The `plan_review_*` refusals this build has a localized sentence for. */
@@ -89,6 +118,7 @@ export function PlanReviewControls({
   cliToolId,
   instanceId,
   onKeysSent,
+  compact = false,
 }: PlanReviewControlsProps) {
   const t = useTranslations('worktree');
   const [comment, setComment] = useState('');
@@ -137,72 +167,113 @@ export function PlanReviewControls({
 
   const buttonClass =
     'min-h-[44px] rounded-md border px-3 py-2 text-sm font-medium transition-colors touch-manipulation focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50';
+  const plainButtonClass = `${buttonClass} border-border bg-surface text-foreground hover:bg-muted dark:bg-surface-2`;
+
+  // Issue #3999: the compact form names the actions without their key hints
+  // ("Approve", not "Approve (Ctrl+A)") so Submit / Approve / Cancel fit one
+  // row at 360px; the full label stays the accessible name's tooltip.
+  const label = (key: 'submit' | 'approve' | 'cancel'): string =>
+    t(compact ? `planReview.${key}Compact` : `planReview.${key}`);
+
+  const commentButton = (
+    <button
+      type="button"
+      data-testid="plan-review-comment"
+      disabled={busy || !hasComment}
+      onClick={() => void post('comment')}
+      className={`${plainButtonClass}${compact ? ' shrink-0' : ''}`}
+    >
+      {t('planReview.comment')}
+    </button>
+  );
 
   return (
     <div
       data-testid="plan-review-controls"
+      data-plan-review-target={planReviewTargetKey(worktreeId, instanceId ?? cliToolId)}
       role="group"
       aria-label={t('planReview.groupLabel')}
-      className="space-y-2 rounded-lg bg-muted px-2 py-1.5"
+      // Issue #3999: focusable, so the composer's link can move focus here.
+      tabIndex={-1}
+      className="flex min-h-0 flex-col gap-2 rounded-lg bg-muted px-2 py-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
-      <label className="block text-xs text-muted-foreground" htmlFor={`plan-review-comment-${worktreeId}`}>
-        {t('planReview.commentLabel')}
-      </label>
-      <textarea
-        id={`plan-review-comment-${worktreeId}`}
-        data-testid="plan-review-comment-input"
-        value={comment}
-        onChange={(event) => setComment(event.target.value)}
-        placeholder={t('planReview.commentPlaceholder')}
-        rows={2}
-        className="w-full resize-y rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring dark:bg-surface-2"
-      />
-      <div className="flex flex-wrap items-center gap-1.5">
-        <button
-          type="button"
-          data-testid="plan-review-comment"
-          disabled={busy || !hasComment}
-          onClick={() => void post('comment')}
-          className={`${buttonClass} border-border bg-surface text-foreground hover:bg-muted dark:bg-surface-2`}
+      {/* Yielding: the comment editor (see "The height rule"). `p-0.5` keeps
+          the textarea's focus ring inside the scroller. Compact puts "Add
+          comment" beside a one-row box, so the pinned row below holds only
+          the three actions. */}
+      <div
+        data-testid="plan-review-comment-area"
+        className={`min-h-0 overflow-y-auto p-0.5 ${
+          compact ? 'flex max-h-24 items-start gap-1.5' : 'max-h-40'
+        }`}
+      >
+        <label
+          className={compact ? 'sr-only' : 'mb-1 block text-xs text-muted-foreground'}
+          htmlFor={`plan-review-comment-${worktreeId}`}
         >
-          {t('planReview.comment')}
-        </button>
+          {t('planReview.commentLabel')}
+        </label>
+        <textarea
+          id={`plan-review-comment-${worktreeId}`}
+          data-testid="plan-review-comment-input"
+          value={comment}
+          onChange={(event) => setComment(event.target.value)}
+          placeholder={t('planReview.commentPlaceholder')}
+          rows={compact ? 1 : 2}
+          className={`block resize-y rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring dark:bg-surface-2 ${
+            compact ? 'min-h-[44px] min-w-0 flex-1' : 'w-full'
+          }`}
+        />
+        {compact ? commentButton : null}
+      </div>
+      {/* Pinned: the actions. */}
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+        {compact ? null : commentButton}
         <button
           type="button"
           data-testid="plan-review-submit"
           disabled={busy}
           onClick={() => void post('submit')}
-          className={`${buttonClass} border-border bg-surface text-foreground hover:bg-muted dark:bg-surface-2`}
+          title={compact ? t('planReview.submit') : undefined}
+          className={plainButtonClass}
         >
-          {t('planReview.submit')}
+          {label('submit')}
         </button>
         <button
           type="button"
           data-testid="plan-review-approve"
           disabled={busy || confirmingApprove}
           onClick={() => setConfirmingApprove(true)}
+          title={compact ? t('planReview.approve') : undefined}
           className={`${buttonClass} border-accent-500 bg-surface text-accent-600 hover:bg-muted dark:bg-surface-2 dark:text-accent-400`}
         >
-          {t('planReview.approve')}
+          {label('approve')}
         </button>
         <button
           type="button"
           data-testid="plan-review-cancel"
           disabled={busy}
           onClick={() => void post('cancel')}
-          className={`${buttonClass} border-border bg-surface text-foreground hover:bg-muted dark:bg-surface-2`}
+          title={compact ? t('planReview.cancel') : undefined}
+          className={plainButtonClass}
         >
-          {t('planReview.cancel')}
+          {label('cancel')}
         </button>
       </div>
       {confirmingApprove ? (
+        // Pinned too. Compact keeps the question and its answers on one
+        // wrapping row rather than two stacked blocks.
         <div
           data-testid="plan-review-approve-confirm"
           role="alertdialog"
           aria-label={t('planReview.approveConfirmLabel')}
-          className="space-y-1.5 rounded-md border border-warning-border bg-warning-subtle px-2 py-1.5"
+          className={`shrink-0 rounded-md border border-warning-border bg-warning-subtle px-2 py-1.5 ${
+            compact ? 'flex flex-wrap items-center gap-1.5' : 'space-y-1.5'
+          }`}
         >
-          <p className="text-xs text-foreground">{t('planReview.approveConfirmText')}</p>
+          <p className={`text-xs text-foreground${compact ? ' min-w-0 flex-1 basis-40' : ''}`}>
+            {t('planReview.approveConfirmText')}
+          </p>
           <div className="flex flex-wrap gap-1.5">
             <button
               type="button"
@@ -220,7 +291,7 @@ export function PlanReviewControls({
               type="button"
               data-testid="plan-review-approve-confirm-no"
               onClick={() => setConfirmingApprove(false)}
-              className={`${buttonClass} border-border bg-surface text-foreground hover:bg-muted dark:bg-surface-2`}
+              className={plainButtonClass}
             >
               {t('planReview.approveConfirmNo')}
             </button>
@@ -228,7 +299,12 @@ export function PlanReviewControls({
         </div>
       ) : null}
       {error ? (
-        <div data-testid="plan-review-error" role="alert" className="space-y-0.5 text-xs text-danger-foreground">
+        // Yielding: a refusal can be long (`message` is the server's text).
+        <div
+          data-testid="plan-review-error"
+          role="alert"
+          className="max-h-16 min-h-0 space-y-0.5 overflow-y-auto text-xs text-danger-foreground"
+        >
           <p>{refusalKey ? t(refusalKey) : t('planReview.refusal.generic')}</p>
           {error.message ? <p data-testid="plan-review-error-detail">{error.message}</p> : null}
         </div>
