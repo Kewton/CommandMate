@@ -324,6 +324,23 @@ describe('verify --timeout bounds the start and the run reads (Issue #3983)', ()
     },
   );
 
+  // Re-review P3-A: 5 001 ms left after the first read is more than one interval,
+  // so the sleep is not cut short and the next read starts 1 ms before the
+  // deadline; it must not be cut there.
+  it('positive: a read that starts just before the deadline still brings the verdict (`--timeout 6`, POST 997 ms, GET 2 ms)', async () => {
+    let runReads = 0;
+    mockServer({
+      'POST /verify': { delayMs: 997, status: 202, data: { runId: 7 } },
+      '/verify/runs/7': { delayMs: 2, data: () => verifyRun(++runReads < 2 ? 'running' : 'passed') },
+    });
+    const run = await start('verify', ['wt1', '--timeout', '6']);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await run.pending;
+
+    expect(runReads).toBe(2);
+    expect(firstExit()).toBe(VerifyExitCode.SUCCESS);
+  });
+
   it('positive: a run still running is 124 right after the read taken at the deadline', async () => {
     let runReads = 0;
     mockServer({

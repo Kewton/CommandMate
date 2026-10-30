@@ -481,7 +481,12 @@ export async function runVerification(
   while (true) {
     let body: VerifyRunResponse;
     try {
-      body = await (finalRead ? finalReader : bounded).get<VerifyRunResponse>(runPath);
+      // A read that starts within the grace of the deadline is read like the
+      // last one: started a few ms before it (a non-final sleep ending there),
+      // it would otherwise be cut before it could answer.
+      const nearDeadline =
+        deadlineAt !== undefined && Date.now() > deadlineAt - VERIFY_FINAL_READ_GRACE_MS;
+      body = await (finalRead || nearDeadline ? finalReader : bounded).get<VerifyRunResponse>(runPath);
     } catch (error) {
       if (isDeadlineExceeded(error)) return timedOut(stillRunning);
       throw error;

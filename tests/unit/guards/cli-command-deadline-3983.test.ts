@@ -241,9 +241,29 @@ const ALLOWED_CATCHES: readonly { file: string; fn: string; why: string }[] = [
  * handleCommandError, or rethrows the caught error itself. Throwing a NEW error
  * does not pass: that is how a deadline turns into "server unreachable".
  */
-function passes(bodyText: string, caught: string | undefined): boolean {
-  if (/\brethrowIfDeadlineExceeded\s*\(|\bisDeadlineExceeded\s*\(|\bhandleCommandError\s*\(/.test(bodyText)) return true;
-  return caught !== undefined && new RegExp(`\\bthrow\\s+${caught}\\s*;`).test(bodyText);
+function passes(body: ts.Node, source: ts.SourceFile, caught: string | undefined): boolean {
+  const bodyText = body.getText(source);
+  if (/\brethrowIfDeadlineExceeded\s*\(|\bhandleCommandError\s*\(/.test(bodyText)) return true;
+  if (caught !== undefined && new RegExp(`\\bthrow\\s+${caught}\\s*;`).test(bodyText)) return true;
+  return handlesDeadlineBranch(body, source);
+}
+
+/**
+ * `if (isDeadlineExceeded(…))` whose branch leaves the catch (return / throw).
+ * An empty or falling-through branch is the swallowing the guard is for.
+ */
+function handlesDeadlineBranch(body: ts.Node, source: ts.SourceFile): boolean {
+  let found = false;
+  let allLeave = true;
+  const visit = (node: ts.Node): void => {
+    if (ts.isIfStatement(node) && /\bisDeadlineExceeded\s*\(/.test(node.expression.getText(source))) {
+      found = true;
+      if (!/\b(return|throw)\b/.test(node.thenStatement.getText(source))) allLeave = false;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(body);
+  return found && allLeave;
 }
 
 /** CLI modules the three commands import at runtime (type-only imports left out). */
@@ -300,7 +320,7 @@ function swallowingCatches(file: string, text: string): { fn: string; line: numb
       const param = (ts.isArrowFunction(handler) || ts.isFunctionExpression(handler)) ? handler.parameters[0]?.name : undefined;
       caught = param && ts.isIdentifier(param) ? param.text : undefined;
     }
-    if (body && !passes(body.getText(source), caught)) {
+    if (body && !passes(body, source, caught)) {
       found.push({ fn: enclosingFunction(node), line: source.getLineAndCharacterOfPosition(node.getStart()).line + 1 });
     }
     ts.forEachChild(node, visit);
@@ -363,6 +383,15 @@ describe('[#3983] (b) no catch reachable from wait / ask / verify swallows a dea
       const after = swallowingCatches(file, mutated).filter(c => !isAllowed(file, c.fn)).length;
       expect(after, `${file} rethrow #${index + 1}`).toBe(before + 1);
     }
+  });
+
+  it('positive: an `if (isDeadlineExceeded(…))` branch that does not leave the catch is an offender', () => {
+    const swallow = `async function f(c) {
+  try { await c.get('/x'); } catch (error) { if (isDeadlineExceeded(error)) {} return null; }
+}`;
+    const leave = swallow.replace('{} return null;', '{ return 124; } return null;');
+    expect(swallowingCatches('mutant.ts', swallow)).toEqual([{ fn: 'f', line: 2 }]);
+    expect(swallowingCatches('mutant.ts', leave)).toEqual([]);
   });
 
   it('the scanned files are tracked sources', () => {

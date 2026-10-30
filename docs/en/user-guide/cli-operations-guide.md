@@ -826,7 +826,7 @@ commandmate verify show <run-id>                       # Show one run (read-only
 |--------|-------------|---------|
 | `--gates <id1,id2>` | Gate IDs to run (comma separated) | work-evidence + every declared gate |
 | `--instance <id>` | Agent instance ID to attach the run to | none (a worktree-level run) |
-| `--timeout <sec>` | Seconds before polling is abandoned, counted from before the start POST. The start POST and the run reads are included: one that does not answer is cut at the deadline, exit 124 (Issue #3983). So that a run finishing just before the deadline still reports its verdict, the last read is taken at the deadline itself (that read alone gets a 2 s grace) | unlimited |
+| `--timeout <sec>` | Seconds before polling is abandoned, counted from before the start POST. The start POST and the run reads are included: one that does not answer is cut at the deadline, exit 124 (Issue #3983). So that a run finishing just before the deadline still reports its verdict, the last read is taken at the deadline itself (a read that starts within 2 s of the deadline may run until 2 s past it) | unlimited |
 | `--json` | Print the run and gate results to stdout as JSON | off |
 
 ### Exit Codes
