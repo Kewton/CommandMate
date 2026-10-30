@@ -517,6 +517,18 @@ export function promptSelectionBody(
 }
 
 /**
+ * How a {@link sendOpencodePrompt} POST ended (Issue #3992).
+ *
+ *  - `accepted`: the server answered `204` (accepted, not yet delivered — read
+ *    it back);
+ *  - `rejected`: the server answered, with anything but `204` — it did not take
+ *    the message, so nothing was sent;
+ *  - `unknown`: no answer (a timeout, a broken connection) — the server may
+ *    still have created the message.
+ */
+export type OpencodePromptDispatch = 'accepted' | 'rejected' | 'unknown';
+
+/**
  * Post one prompt to a session without waiting for the reply (Issue #2035).
  *
  * `POST /session/:id/prompt_async`. This is the route the send path takes when
@@ -546,7 +558,7 @@ export function promptSelectionBody(
  * @param sessionId - `ses_…`, the session the message belongs to
  * @param messageId - `msg_…`, from {@link newOpencodeMessageId}
  * @param parts - The message body; at least one part
- * @returns Whether the server answered `204`
+ * @returns How the POST ended ({@link OpencodePromptDispatch})
  */
 export async function sendOpencodePrompt(
   port: number,
@@ -554,7 +566,7 @@ export async function sendOpencodePrompt(
   messageId: string,
   parts: readonly OpencodePromptPart[],
   selection?: OpencodePromptSelection | null
-): Promise<boolean> {
+): Promise<OpencodePromptDispatch> {
   const url = `${opencodeBaseUrl(port)}/session/${encodeURIComponent(sessionId)}/prompt_async`;
   try {
     const response = await loopbackFetch(url, {
@@ -569,15 +581,15 @@ export async function sendOpencodePrompt(
     });
     if (response.status !== 204) {
       logger.warn('opencode-prompt-rejected', { port, sessionId, status: response.status });
-      return false;
+      return 'rejected';
     }
-    return true;
+    return 'accepted';
   } catch (error) {
     logger.debug('opencode-request-failed', {
       url,
       error: error instanceof Error ? error.message : String(error),
     });
-    return false;
+    return 'unknown';
   }
 }
 

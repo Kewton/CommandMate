@@ -261,6 +261,38 @@ describe('what a failed send does to a bound relay', () => {
   });
 });
 
+describe('what the failed send tells the sender about resending (Issue #3992)', () => {
+  const NOT_SENT_NOTE = 'it is safe to send it again';
+  const UNKNOWN_NOTE = 'commandmate capture wt-b --pane';
+
+  it.each([
+    ['send', () => runSend(['wt-b', 'x', '--reply-to', 'wt-a@claude'])],
+    ['ask', () => runAsk(['wt-b', 'x', '--async', '--reply-to', 'wt-a@claude'])],
+  ])('%s: sendOutcome not_sent — "not sent, send it again", never "check first"', async (_label, run) => {
+    mockRoutes([RELAY_BOUND, sendRoute({ status: 500, data: { error: 'refused', sendOutcome: 'not_sent' } }), CANCEL]);
+    await runUntilExit(run);
+    expect(stderr()).toContain(NOT_SENT_NOTE);
+    expect(stderr()).not.toContain(UNKNOWN_NOTE);
+  });
+
+  it.each([
+    ['send', () => runSend(['wt-b', 'x', '--reply-to', 'wt-a@claude'])],
+    ['ask', () => runAsk(['wt-b', 'x', '--async', '--reply-to', 'wt-a@claude'])],
+  ])('%s: sendOutcome unknown — "check the pane before resending", never "send it again"', async (_label, run) => {
+    mockRoutes([RELAY_BOUND, sendRoute({ status: 500, data: { error: 'tmux went away', sendOutcome: 'unknown' } }), CANCEL]);
+    await runUntilExit(run);
+    expect(stderr()).toContain(UNKNOWN_NOTE);
+    expect(stderr()).not.toContain(NOT_SENT_NOTE);
+  });
+
+  it('negative control: an error with no sendOutcome (no bound relay) adds neither note', async () => {
+    mockRoutes([RELAY_LEGACY_SERVER, sendRoute({ status: 500, data: { error: 'boom' } }), CANCEL]);
+    await runUntilExit(() => runSend(['wt-b', 'x', '--reply-to', 'wt-a@claude']));
+    expect(stderr()).not.toContain(NOT_SENT_NOTE);
+    expect(stderr()).not.toContain(UNKNOWN_NOTE);
+  });
+});
+
 describe('relays --id (Issue #3957)', () => {
   it('prints one closed relay with its send state, overlap and hold reason', async () => {
     mockRoutes([

@@ -10,12 +10,15 @@
  * @vitest-environment node
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, expectTypeOf, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree } from '@/lib/db';
 import { cancelRelay, createRelay, getRelayBinding, getRelayById } from '@/lib/db/relay-db';
 import type { InputBoundaryHooks } from '@/lib/session/instance-input-lock';
+import type { RelaySendOutcome } from '@/lib/relay/relay-bind';
+import { ApiError, type ApiErrorPayload } from '@/cli/utils/api-client';
+import { describeFailedSendOutcome } from '@/cli/commands/message-dispatch';
 import type { Worktree } from '@/types/models';
 import type { NextRequest } from 'next/server';
 
@@ -284,6 +287,42 @@ describe('POST /send with relayId (Issue #3957)', () => {
     expect(status).toBe(500);
     expect(body.sendOutcome).toBe('unknown');
     expect(getRelayById(db, relay.id)).toMatchObject({ sendState: 'unknown', holdReason: 'send_unknown' });
+  });
+
+  // Issue #3992: the CLI reads the route's own error body, not a hand-made one.
+  it('the CLI types sendOutcome as the route answers it, and tells not_sent from unknown on the real bodies', async () => {
+    expectTypeOf<NonNullable<ApiErrorPayload['sendOutcome']>>().toEqualTypeOf<RelaySendOutcome>();
+
+    const refused = boundRelay();
+    sendUserMessage.mockImplementationOnce(async (_db: unknown, params: SendParams) => {
+      cancelRelay(db, refused.id);
+      try {
+        params.inputBoundary?.beforeInput(new Date(), 'input_start');
+      } catch (error) {
+        params.onAttempt?.({ state: 'not-sent', reason: 'relay-reservation-lost' });
+        return { ok: false, stage: 'send', error: String(error) };
+      }
+      throw new Error('the body was typed although the relay was gone');
+    });
+    const notSent = await post({ relayId: refused.id });
+
+    const broken = boundRelay();
+    sendUserMessage.mockImplementationOnce(async (_db: unknown, params: SendParams) => {
+      params.inputBoundary?.beforeInput(new Date(), 'input_start');
+      params.onAttempt?.({ state: 'indeterminate', reason: 'send-error' });
+      return { ok: false, stage: 'send', error: 'tmux went away' };
+    });
+    const unknown = await post({ relayId: broken.id });
+
+    const asCliError = (answer: { status: number; body: Record<string, unknown> }) =>
+      new ApiError('send failed', 1, answer.status, answer.body as ApiErrorPayload);
+    expect(asCliError(notSent).payload?.sendOutcome).toBe('not_sent');
+    expect(asCliError(unknown).payload?.sendOutcome).toBe('unknown');
+    const notSentNote = describeFailedSendOutcome(asCliError(notSent), WT);
+    const unknownNote = describeFailedSendOutcome(asCliError(unknown), WT);
+    expect(notSentNote).toContain('safe to send it again');
+    expect(unknownNote).toContain(`commandmate capture ${WT} --pane`);
+    expect(notSentNote).not.toBe(unknownNote);
   });
 
   it('the transport sent but the history write threw: unknown / send_unknown', async () => {

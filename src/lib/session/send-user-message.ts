@@ -489,11 +489,11 @@ export async function sendUserMessage(
       return { sent: true, inputStartedAt };
     } catch (error) {
       logger.error('failed-to-send-message-to:', { error: getErrorMessage(error) });
-      // Issue #3957: the relay's boundary hook refused before the first key.
-      // The attempt vocabulary has no word of its own for it; nothing was typed
-      // because the reservation the body was going in under was gone.
+      // Issue #3957: the relay's boundary hook refused before the first key —
+      // nothing was typed because the reservation the body was going in under
+      // was gone. Issue #3992: its own reason, not `input-lock-lost`.
       if (isInputBoundaryRefusal(error)) {
-        return { error, failure: { state: 'not-sent', reason: 'input-lock-lost' } };
+        return { error, failure: { state: 'not-sent', reason: 'relay-reservation-lost' } };
       }
       // Issue #3759: not-sent only when the error says the body was never typed.
       let failure = classifySendFailure(error);
