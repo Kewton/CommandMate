@@ -203,8 +203,9 @@ export function compactBlankRuns(
  * #1172 does for claude/codex, but keep background-painted panel rows.
  *
  * Wired in through `TerminalDisplay`'s `preservePaintedPanelRows` prop, which
- * `src/config/terminal-display-compaction.ts` turns on for `opencode` only, so
- * claude / codex / copilot render byte-for-byte as before.
+ * `src/config/terminal-display-compaction.ts` turns on for `opencode` and, since
+ * Issue #4000, `command-code` (its logo banner's painted bands), so claude /
+ * codex / copilot render byte-for-byte as before.
  */
 export function normalizeOpencodeTerminalOutputForDisplay(output: string): string {
   return compactBlankRuns(output, { isStructuralRow: isPaintedPanelRow });

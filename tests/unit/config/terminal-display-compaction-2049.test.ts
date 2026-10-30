@@ -28,14 +28,19 @@ describe('Issue #2049: getTerminalDisplayCompaction', () => {
   it('preserves painted panel rows for opencode only', () => {
     for (const tool of CLI_TOOL_IDS) {
       expect(getTerminalDisplayCompaction(tool).preservePaintedPanelRows, tool).toBe(
-        tool === 'opencode',
+        tool === 'opencode' || tool === 'command-code',
       );
     }
   });
 
   it('leaves every other tool uncompacted, copilot included', () => {
     const untouched = CLI_TOOL_IDS.filter(
-      (t) => t !== 'claude' && t !== 'codex' && t !== 'opencode' && t !== 'antigravity',
+      (t) =>
+        t !== 'claude' &&
+        t !== 'codex' &&
+        t !== 'opencode' &&
+        t !== 'antigravity' &&
+        t !== 'command-code',
     );
     expect(untouched).toContain('copilot');
     for (const tool of untouched) {

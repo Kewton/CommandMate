@@ -112,7 +112,7 @@ describe('他の画面を plan review と読まない (Issue #3125)', () => {
     const matched = files.filter((file) => readCommandCodePlanReviewState(readFileSync(file, 'utf8')) !== null);
     expect(matched.length).toBeGreaterThan(0);
     for (const file of matched) {
-      expect(path.relative(FIXTURES, file)).toMatch(/^command-code-plan-review-(2761|2763|3125)\//);
+      expect(path.relative(FIXTURES, file)).toMatch(/^command-code-plan-review-(2761|2763|3125|4000)\//);
     }
     const askUserQuestion = files.filter((file) => /command-code-askuserquestion/.test(file));
     expect(askUserQuestion.length).toBeGreaterThan(0);
