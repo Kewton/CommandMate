@@ -48,6 +48,8 @@ import { isCliToolId, CLI_TOOL_IDS, DEFAULT_CLI_TOOL_ID } from '../config/cli-to
 import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
 import { resolveSessionTarget, describeSessionTargetConflict } from '../utils/session-target';
 import { fetchAgentInstances } from '../utils/agent-instances';
+import { followUpCommand } from '../utils/follow-up-command';
+import { commandTargetOf, type CommandTarget } from './command-target';
 import { resolveLegacySessionName } from '../../lib/cli-tools/session-name';
 import { validateSessionName } from '../../lib/cli-tools/validation';
 import type { CLIToolType } from '../../lib/cli-tools/types';
@@ -81,7 +83,7 @@ async function resolveTarget(
   client: ApiClient,
   worktreeId: string,
   options: AttachOptions
-): Promise<{ cliToolId: string; instanceId: string | undefined }> {
+): Promise<{ cliToolId: string; instanceId: string | undefined; commandTarget: CommandTarget }> {
   const target = await resolveSessionTarget(client, worktreeId, {
     instanceId: options.instance,
     requestedCliTool: options.agent,
@@ -90,9 +92,14 @@ async function resolveTarget(
     console.error(`Error: ${describeSessionTargetConflict(target.conflict)}`);
     process.exit(ExitCode.CONFIG_ERROR);
   }
+  const cliToolId = target.cliToolId ?? options.agent ?? DEFAULT_CLI_TOOL_ID;
+  const instanceId = target.instanceId ?? options.instance;
   return {
-    cliToolId: target.cliToolId ?? options.agent ?? DEFAULT_CLI_TOOL_ID,
-    instanceId: target.instanceId ?? options.instance,
+    cliToolId,
+    instanceId,
+    // Issue #3982: what the hints name — the instance only when one was asked
+    // for (the server echoes the default instance otherwise), as `resolveCommandTarget`.
+    commandTarget: commandTargetOf(options.instance ? { cliToolId, instanceId } : null, options.agent),
   };
 }
 
@@ -298,14 +305,19 @@ export function planGuardedAttach(
  * @param cliToolId - Resolved CLI tool
  * @param worktreeId - Worktree id, so the hint's commands are copy-pasteable
  * @param sessionName - Resolved tmux session name
- * @param options - The flags as given
+ * @param options - The flags as given; `target` is the resolved target the
+ *   `capture` hints name (Issue #3982), none when absent
  */
 export function buildAttachHints(
   cliToolId: string,
   worktreeId: string,
   sessionName: string,
-  options: { readOnly?: boolean; live?: boolean }
+  options: { readOnly?: boolean; live?: boolean; target?: CommandTarget }
 ): string[] {
+  const capture = (flags: string): string =>
+    options.target
+      ? followUpCommand('capture', worktreeId, options.target, undefined, flags)
+      : `commandmate capture ${worktreeId} ${flags}`;
   const hints = [`Attaching to ${sessionName} (${cliToolId}). Detach with Ctrl+b then d.`];
 
   if (usesAltScreen(cliToolId) && !options.live) {
@@ -314,8 +326,8 @@ export function buildAttachHints(
       'bottom, and tmux follows the cursor — so this attach shows the composer and blank rows,',
       'not the conversation. To read it:',
       `  prefix + g                                     popup, in this terminal`,
-      `  commandmate capture ${worktreeId} --pane --tail 60   without attaching`,
-      `  commandmate capture ${worktreeId} --pane --follow    live, without attaching`,
+      `  ${capture('--pane --tail 60')}   without attaching`,
+      `  ${capture('--pane --follow')}    live, without attaching`,
     );
     if (isLiveAttachSupported(cliToolId)) {
       hints.push(
@@ -327,7 +339,7 @@ export function buildAttachHints(
   if (options.readOnly) {
     hints.push(
       'Read-only attach: tmux delivers no keys but the detach one, so prefix + g does NOT open',
-      'the popup here. Read with `commandmate capture <id> --pane --follow` in another terminal.',
+      `the popup here. Read with \`${capture('--pane --follow')}\` in another terminal.`,
     );
   }
 
@@ -418,13 +430,13 @@ export function createAttachCommand(): Command {
         }
 
         const client = new ApiClient({ token: options.token });
-        const { cliToolId, instanceId } = await resolveTarget(client, worktreeId, options);
+        const { cliToolId, instanceId, commandTarget } = await resolveTarget(client, worktreeId, options);
 
         if (options.live && !isLiveAttachSupported(cliToolId)) {
           console.error(
             `Error: --live is not supported for ${cliToolId}. It is claude-only until each other `
             + "agent's detection rules are re-measured at a terminal-sized pane (Issue #2317). "
-            + `Attach without it, or read with: commandmate capture ${worktreeId} --pane --follow`
+            + `Attach without it, or read with: ${followUpCommand('capture', worktreeId, commandTarget, undefined, '--pane --follow')}`
           );
           process.exit(ExitCode.CONFIG_ERROR);
         }
@@ -460,6 +472,7 @@ export function createAttachCommand(): Command {
         for (const line of buildAttachHints(cliToolId, worktreeId, sessionName, {
           readOnly,
           live: options.live,
+          target: commandTarget,
         })) {
           console.error(line);
         }

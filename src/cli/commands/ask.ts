@@ -600,12 +600,13 @@ a decision about that session's guard rails, not part of asking it a question.
         const selector = options.instance ?? options.agent;
         //
         // Issue #3983: bounded by `--timeout`; running out is exit 124, nothing sent.
-        const { agent, instanceId } = await resolveCommandTarget(
+        const commandTarget = await resolveCommandTarget(
           client.withDeadline(deadlineAt),
           worktreeId,
           selector,
           options.agent,
         );
+        const { agent, instanceId } = commandTarget;
 
         // Taken BEFORE the send so a reply written by the previous turn cannot
         // be read as this one's. Milliseconds, compared against the row's own
@@ -643,6 +644,7 @@ a decision about that session's guard rails, not part of asking it a question.
         const sent = await postMessage(client, worktreeId, sendBody, {
           relay,
           promptWaitingFallback: `${worktreeId} is waiting on a prompt; the message was not sent.`,
+          target: commandTarget,
         });
 
         // Issue #2377: the whole point of `--async`. Nothing is waited on, so

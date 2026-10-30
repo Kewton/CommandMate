@@ -23,7 +23,8 @@ import {
   INSTANCE_ALIAS_HELP_SUFFIX,
   INSTANCE_SELECTOR_ERROR,
 } from './instances';
-import { resolveCommandTarget } from './command-target';
+import { resolveCommandTarget, type CommandTarget } from './command-target';
+import { followUpCommand } from '../utils/follow-up-command';
 import {
   ANSWER_MODE_OPTION_DESCRIPTION,
   describeAnswerMode,
@@ -53,10 +54,11 @@ const SEND_VERIFIED_MAX_LINES = 240;
  * older daemon, or a truncated body. The code is the contract; the sentence is
  * a courtesy, and the CLI must still say what to do without it.
  */
-function promptWaitingFallback(worktreeId: string): string {
+function promptWaitingFallback(worktreeId: string, target: CommandTarget): string {
   return (
     `${worktreeId} is waiting on a prompt; the message was not sent. ` +
-    `Answer it first: \`commandmate respond ${worktreeId} <answer>\`.`
+    // Issue #3982: the prompt is the resolved target's, not the worktree default's.
+    `Answer it first: \`${followUpCommand('respond', worktreeId, target, '<answer>')}\`.`
   );
 }
 
@@ -433,7 +435,8 @@ worktree and send a short message that tells the agent to read that file.
         // the roster is the only place that pairs the two. Resolve it once, up
         // front, so the task row, the send and auto-yes all name the same tool
         // as the session that actually starts.
-        const { agent, instanceId } = await resolveCommandTarget(client, worktreeId, options.instance, options.agent);
+        const commandTarget = await resolveCommandTarget(client, worktreeId, options.instance, options.agent);
+        const { agent, instanceId } = commandTarget;
         // Issue #2376: the RESOLVED id, never the string the user typed.
         // `--instance "Codex 2"` has to reach /send as `codex-2`; no route but
         // /resolve-target knows how to read an alias.
@@ -516,7 +519,8 @@ worktree and send a short message that tells the agent to read that file.
         await postMessage(client, worktreeId, sendBody, {
           relay,
           onFailure: failTask,
-          promptWaitingFallback: promptWaitingFallback(worktreeId),
+          promptWaitingFallback: promptWaitingFallback(worktreeId, commandTarget),
+          target: commandTarget,
         });
         console.error('Message sent.');
 

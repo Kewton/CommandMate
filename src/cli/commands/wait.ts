@@ -80,7 +80,8 @@ import {
   settleAfterHookStop,
 } from './wait-hook-stop-settle';
 import { mergeExitCode, resolveWaitedTaskId, shouldVerify, verifyAfterWait, verifyRequested } from './wait-verify';
-import { resolveWaitInstance } from './wait-instance';
+import { resolveWaitInstance, waitCommandTarget } from './wait-instance';
+import { dialogCaptureCommand, followUpCommand } from '../utils/follow-up-command';
 import {
   adoptAndPublishTurn,
   noteAutoYesPromptCleared,
@@ -287,13 +288,15 @@ function describeUnclassifiedFrame(
   worktreeId: string,
   data: CurrentOutputResponse,
   dwellMs: number,
+  options: Pick<WaitOptions, 'instance'>,
 ): string {
   const dwellSeconds = Math.round(dwellMs / 1000);
   return (
     `Unclassified interactive frame on ${worktreeId} for ${dwellSeconds}s ` +
     `(status=${data.sessionStatus ?? 'unknown'}/${data.sessionStatusReason ?? 'unknown'}). ` +
     `The detection layer could not parse it; inspect the raw pane with ` +
-    `\`commandmate capture ${worktreeId} --pane\`.` +
+    // Issue #3982: the instance waited on, and enough of its pane for a dialog.
+    `\`${dialogCaptureCommand(worktreeId, waitCommandTarget(options))}\`.` +
     // Issue #2095: the sidebar is exactly this frame's reason, and the
     // one recovery is a keystroke in the pane. Riding the message keeps
     // the exit-code table (10, `type: unclassified`) unchanged for every
@@ -583,7 +586,7 @@ function unclassifiedStage(poll: PollContext, state: PollState, data: CurrentOut
     if (state.unclassifiedSince === null) state.unclassifiedSince = Date.now();
     const dwellMs = Date.now() - state.unclassifiedSince;
     if (dwellMs >= UNCLASSIFIED_DWELL_MS) {
-      const question = describeUnclassifiedFrame(worktreeId, data, dwellMs);
+      const question = describeUnclassifiedFrame(worktreeId, data, dwellMs, poll.options);
 
       // Issue #3730: why Auto-Yes is not there to answer it, if a restart is why.
       const restartNotice = formatRestartReleaseNotice(worktreeId, data, poll.options.instance);
@@ -834,7 +837,7 @@ async function unsettledTurnStage(
         `the end of this turn (turnStartedAt=${state.turnStartedAt}, ` +
         `lastStopEventAt=${data.lastStopEventAt ?? 'none'}, ${describeTurnClose(data)}). ` +
         'Not reporting completion; inspect with ' +
-        `\`commandmate capture ${worktreeId} --json\`.`,
+        `\`${followUpCommand('capture', worktreeId, waitCommandTarget(poll.options), undefined, '--json')}\`.`,
     );
     return { kind: 'wait' };
   }

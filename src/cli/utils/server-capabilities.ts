@@ -185,3 +185,30 @@ export async function serverResolvesSessionTargets(client: ApiClient): Promise<b
   return probe.kind === 'supported'
     && probe.capabilities.includes(RESOLVE_SESSION_TARGET_CAPABILITY);
 }
+
+/**
+ * Capability token of a server whose answer errors all carry `reason` and
+ * `keysSent` (Issue #3982). Mirrors SERVER_CAPABILITIES in the route.
+ */
+export const PROMPT_ANSWER_REASON_CAPABILITY = 'prompt-answer-reason';
+
+/**
+ * Whether this server puts `reason` on every answer error (Issue #3982).
+ *
+ * Reads the memo `resolveCommandTarget` already filled for this client, so a
+ * command that resolved `--instance` asks nothing more. A command that named
+ * no instance probes here, once, and only when it is called — on a failed
+ * answer, never on the way to sending one.
+ *
+ * Fail-safe to the old reading: a probe that cannot be completed (auth, a
+ * proxy, the network) answers false, which keeps the pre-#3982 behaviour of
+ * reading the reason code out of the 500's text.
+ */
+export async function serverReportsPromptAnswerReason(client: ApiClient): Promise<boolean> {
+  try {
+    const probe = await probeServerCapabilities(client);
+    return probe.kind === 'supported' && probe.capabilities.includes(PROMPT_ANSWER_REASON_CAPABILITY);
+  } catch {
+    return false;
+  }
+}
