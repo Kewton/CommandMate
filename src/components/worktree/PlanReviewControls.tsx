@@ -125,6 +125,11 @@ export function PlanReviewControls({
   const [confirmingApprove, setConfirmingApprove] = useState(false);
   const [pending, setPending] = useState<PlanReviewControlAction | null>(null);
   const [error, setError] = useState<PlanReviewError | null>(null);
+  // Issue #3999: the controls also sit in terminal footers, so two panes of
+  // one worktree (2x2) can show them at once. Key the textarea by instance
+  // too, or the second label points at the first box.
+  const targetKey = planReviewTargetKey(worktreeId, instanceId ?? cliToolId);
+  const commentInputId = `plan-review-comment-${targetKey}`;
 
   const post = useCallback(
     async (action: PlanReviewControlAction) => {
@@ -190,7 +195,7 @@ export function PlanReviewControls({
   return (
     <div
       data-testid="plan-review-controls"
-      data-plan-review-target={planReviewTargetKey(worktreeId, instanceId ?? cliToolId)}
+      data-plan-review-target={targetKey}
       role="group"
       aria-label={t('planReview.groupLabel')}
       // Issue #3999: focusable, so the composer's link can move focus here.
@@ -209,12 +214,12 @@ export function PlanReviewControls({
       >
         <label
           className={compact ? 'sr-only' : 'mb-1 block text-xs text-muted-foreground'}
-          htmlFor={`plan-review-comment-${worktreeId}`}
+          htmlFor={commentInputId}
         >
           {t('planReview.commentLabel')}
         </label>
         <textarea
-          id={`plan-review-comment-${worktreeId}`}
+          id={commentInputId}
           data-testid="plan-review-comment-input"
           value={comment}
           onChange={(event) => setComment(event.target.value)}
