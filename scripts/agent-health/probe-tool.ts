@@ -19,10 +19,7 @@ import { detectSessionStatus } from '@/lib/detection/status-detector';
 import { shellQuote } from '@/lib/hooks/hook-settings-generator';
 import { getAgentEventSource, renderAgentLaunchCommand } from '@/lib/hooks/sources';
 import { selectionKeys } from '@/lib/agent-health/dialog-select';
-import {
-  evaluateHookCorrelation,
-  expectedHookEvents,
-} from '@/lib/agent-health/hook-correlation';
+import { expectedHookEvents } from '@/lib/agent-health/hook-correlation';
 import { skipCheck } from '@/lib/agent-health/coverage';
 import {
   laterScreenModel,
@@ -35,7 +32,13 @@ import {
 } from '@/lib/agent-health/launched-model';
 import { firstVersionLine, paneEvidence } from '@/lib/agent-health/report';
 import { archiveCheckFrames, type FrameArchive, type JudgedFrame } from '@/lib/agent-health/frame-archive';
-import { judgeServerEvents, judgeTurnScreen, turnEndedUnauthorized } from '@/lib/agent-health/model-auth';
+import {
+  judgeHookCorrelation,
+  judgeServerEvents,
+  judgeTurnCheck,
+  judgeTurnScreen,
+  turnEndedUnauthorized,
+} from '@/lib/agent-health/model-auth';
 import { evaluateOpencodeV2LaunchLine, evaluateServerLeftovers } from '@/lib/agent-health/server-events';
 import { findUsageLimit, judgeUsageLimit } from '@/lib/agent-health/usage-limit';
 import { sendUntilPickerOpens } from '@/lib/agent-health/picker-open';
@@ -211,10 +214,12 @@ class ToolSession {
   lastFrame = '';
   /** From the running request's Enter to the end of that turn. */
   runningWindow: { from: number; to: number } | null = null;
-  /** The running turn ended in the provider's `Error: Unauthorized` (Issue #3420). */
+  /** The running turn ended in the provider's refusal row (`Error: Unauthorized`, Issues #3420 / #3994). */
   runningTurnUnauthorized = false;
   /** Any turn did. */
   anyTurnUnauthorized = false;
+  /** The frame that ended the first such turn (Issue #3994: the hooks check's evidence). */
+  unauthorizedFrame: string | null = null;
   /** The model the frames looked at so far show (Issue #3438). */
   screenModel: ScreenModelReading | null = null;
   /** The first frame looked at that showed the tool's usage limit (Issue #3729). */
@@ -290,17 +295,28 @@ class ToolSession {
 
   /**
    * {@link recordScreen} for a frame of a turn: a fail on a turn the model
-   * provider refused (`Error: Unauthorized`, new since `before`) becomes a
-   * `signed-out` skip (Issue #3420).
+   * provider refused (the spec's `modelAuthFailureRows`, new since `before`)
+   * becomes a `signed-out` skip (Issues #3420 / #3994).
    */
-  recordTurnScreen(checkId: ScreenCheckId, verdict: ScreenVerdict, frame: string, before: string): void {
-    this.recordJudged(judgeTurnScreen(checkId, verdict, frame, before), [{ frame }]);
+  recordTurnScreen(checkId: ScreenCheckId, verdict: ScreenVerdict, frame: string, before: string, note?: string): void {
+    this.recordJudged(
+      judgeTurnScreen(checkId, verdict, frame, before, { note, rows: this.authFailureRows }),
+      [{ frame }]
+    );
+  }
+
+  /** The spec's refusal rows; a tool without them is never excused (Issue #3994). */
+  get authFailureRows() {
+    return this.spec.modelAuthFailureRows ?? [];
   }
 
   /** Remember whether the turn that started at `before` ended in the provider's refusal. */
   private noteTurnEnd(before: string): boolean {
-    const unauthorized = turnEndedUnauthorized(before, this.lastFrame);
-    if (unauthorized) this.anyTurnUnauthorized = true;
+    const unauthorized = turnEndedUnauthorized(before, this.lastFrame, this.authFailureRows);
+    if (unauthorized) {
+      this.anyTurnUnauthorized = true;
+      this.unauthorizedFrame ??= this.lastFrame;
+    }
     return unauthorized;
   }
 
@@ -521,7 +537,8 @@ class ToolSession {
   /** Raise the approval dialog with `prompt`, judge it, refuse it. */
   async approvalTurn(prompt: string): Promise<void> {
     const dialog = this.spec.approval.dialog;
-    const baseline = countMatches(stripAnsi(this.lastFrame), dialog);
+    const before = this.lastFrame;
+    const baseline = countMatches(stripAnsi(before), dialog);
     const sentAt = await this.submit(prompt);
     const limit = Date.now() + this.bounded(DIALOG_APPEAR_MS);
     let seen: { frame: string; verdict: ScreenVerdict } | null = null;
@@ -535,20 +552,27 @@ class ToolSession {
       }
     }
     if (seen) {
-      this.recordScreen('screen-approval', seen.verdict, seen.frame, '承認ダイアログは画面に出ていた');
+      this.recordTurnScreen('screen-approval', seen.verdict, seen.frame, before, '承認ダイアログは画面に出ていた');
       await this.refuse();
     } else {
+      // Issue #3994: a turn the provider refused never asks.
       this.recordJudged(
-        {
-          checkId: 'screen-approval',
-          status: 'fail',
-          summary: `期待: 「${prompt}」で承認ダイアログ（${dialog.source}）が出る。実際: ${DIALOG_APPEAR_MS / 1000} 秒以内に出なかった`,
-          evidence: paneEvidence(this.lastFrame),
-        },
+        judgeTurnCheck(
+          {
+            checkId: 'screen-approval',
+            status: 'fail',
+            summary: `期待: 「${prompt}」で承認ダイアログ（${dialog.source}）が出る。実際: ${DIALOG_APPEAR_MS / 1000} 秒以内に出なかった`,
+            evidence: paneEvidence(this.lastFrame),
+          },
+          this.lastFrame,
+          before,
+          this.authFailureRows
+        ),
         [{ frame: this.lastFrame }],
       );
     }
     await this.waitForTurnEnd(sentAt, async () => this.refuse());
+    this.noteTurnEnd(before);
   }
 
   /** `sleep 20`: judge the running screen; where it asks first, judge that dialog too. */
@@ -578,10 +602,11 @@ class ToolSession {
       async (atDialog) => {
       if (this.spec.approval.via === 'running-turn' && !approvalJudged) {
         approvalJudged = true;
-        this.recordScreen(
+        this.recordTurnScreen(
           'screen-approval',
           atDialog.verdict,
           atDialog.frame,
+          before,
           `「${this.spec.prompts.running}」で出た承認ダイアログ`
         );
       }
@@ -807,13 +832,18 @@ export async function probeTool(ctx: ProbeContext): Promise<ProbeOutcome> {
   ctx.log(`${spec.tool}: model ${launchedModelLabel(launchedModel)}`);
 
   if (wantHooks) {
-    const verdict = evaluateHookCorrelation(ctx.listener.forTool(spec.tool), {
-      tool: spec.tool,
-      worktreeId: PROBE_WORKTREE_ID,
-      instanceId,
-      expectedEvents: expectedHookEvents(source.capabilities.supportedEvents),
-    });
-    session.record(judgeUsageLimit({ checkId: 'hook-correlation', ...verdict }, usageLimitFrames));
+    // Issue #3994: a turn the provider refused never ends, so its `stop` never comes.
+    const check = judgeHookCorrelation(
+      ctx.listener.forTool(spec.tool),
+      {
+        tool: spec.tool,
+        worktreeId: PROBE_WORKTREE_ID,
+        instanceId,
+        expectedEvents: expectedHookEvents(source.capabilities.supportedEvents),
+      },
+      { unauthorizedFrame: session.unauthorizedFrame, rows: session.authFailureRows }
+    );
+    session.record(judgeUsageLimit(check, usageLimitFrames));
   }
 
   return { version, checks: [...checks, ...session.checks.values()], launchedModel };
