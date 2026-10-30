@@ -460,8 +460,9 @@ export class CopilotTool extends BaseCLITool {
       // leaves it (`cli-tools/launch-window`).
       beginLaunchWindow(sessionName);
       try {
-        // Start Copilot CLI in interactive mode
-        await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
+        // Start Copilot CLI in interactive mode. Issue #3981: in one writer's
+        // turn of the input lock; the readiness wait below stays outside it.
+        await this.typeLaunchLines(sessionName, [withLaunchScreenCleared(launchCommand)]);
 
         // Issue #1907: no blind sleep before this. The 4-second one that used to
         // sit here was a guess at how long copilot takes to paint (measured on

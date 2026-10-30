@@ -314,10 +314,16 @@ A message send (`send` / `ask`, chat, timers, relay) types into the composer onl
 | `respond` / the answer panel (answers that send Enter), strict `respond`, Auto-Yes answers, Command Code plan review, codex's automatic answers at launch and before a send (hooks / update / trust / notices), copilot's and Antigravity's automatic folder-trust answers | Takes part (answers do not wait for each other) | Waits for the send to finish, then **reads the screen again and types only if the same confirmation is still up**. When it is gone, changed, unreadable, or the wait passes 60 s, nothing is typed: `respond` reports `answer_not_delivered` (`/respond` answers 409, strict mode exits 40 `session_conflict`), and Auto-Yes decides again on its next tick. A send that starts during an answer waits for the answer's Enter |
 | `answer_only` digit answers (no Enter) | Does not take part | One key and no Enter, typed without waiting |
 | The keys Claude's and Gemini's launch types itself (the launch line, the automatic folder-trust answer) (#3975) | Takes part (as a sole writer; also waits for answers) | Holds the lock only while typing (the launch's waits are outside it). Waits for a send or an answer to finish; the trust answer, when a send came in meanwhile, reads the screen again and types only if the same dialog is still up. A `respond` that read the screen before the launch's Enter reads it again after it |
+| Every tool's launch line (codex, copilot, Antigravity, OpenCode, OpenCode V2, Command Code, Vibe Local, Gemini and Claude; for Claude also the `unset CLAUDECODE` before it) (#3981) | Takes part (as a sole writer; one launch's lines in one hold) | Waits for a send or an answer to finish before typing (the launch's waits are outside the lock). A relaunch from inside a send (codex after its update, for example) types under that send's lock |
+| Every tool's exit keys on stop (`kill-session`, worktree deletion, Stop): Ctrl-C, Ctrl-D, `/quit`, `/exit` and the like (#3981) | Does not take part (by decision) | So a stop is never queued behind a send. Stopping during a send makes that send fail part-way (check `lastSend` for the outcome) |
 | Typing in the terminal (WebSocket), `direct-input`, special keys (including the unsent bar's **Run**) | Does not take part (neither refused nor held) | **Keys typed during a send can be mixed into its body, or removed by its clean-up (the composer clear, the withdrawal).** Wait until the send is over (the reply has started) before typing |
 | `interrupt` (Escape) | Does not take part (does not wait, does not invalidate the send) | So a stop is never queued behind a send. An Escape that arrives while a body is being typed can stop that send part-way (check `lastSend` for the outcome) |
 
 - copilot's `--model` reads the screen once more right before typing `/model`: a dialog is `not-sent` (`prompt-waiting`), an unreadable pane `not-sent` (`recheck-failed`), and nothing is typed.
+- A session is started by one launch at a time (Issue #3981). A send or a start request that arrives during a launch waits for that launch to finish and then goes on (no second launch). A send that holds the input lock when it meets another request's launch (Claude's and codex's sends) does not wait: it returns `not-sent` (`session-starting`, HTTP 503 `SESSION_STARTING`) with nothing typed — retry it in a few seconds. The order is fixed as "the one-launch rule outside, the input lock inside": a lock holder waiting for a launch whose keys wait for the lock would stall both.
+  - The wait lasts until the launching tool's start deadline (counted from when the launch began: 65 s for Claude, 35 s for the others). A launch still not finished by then gets the send back as `not-sent` (`session-starting`, HTTP 503 `SESSION_STARTING`) with nothing typed.
+  - A send with `--model` that meets a launch starting another model (or no model) does not join it: it returns HTTP 400 with nothing typed, as `--model` to a running session does.
+- Gemini returns `not-sent` (`prompt-not-ready`) with nothing typed when its prompt does not appear within 15 s before a send (Issue #3981; it used to give up waiting and type anyway).
 - The lock is per server process. Two servers sharing one tmux are not ordered by it.
 
 ### Finding Worktree IDs
@@ -364,7 +370,7 @@ commandmate wait <worktree-id> --require-work        # Run only work-evidence af
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--timeout <sec>` | Maximum time to wait (seconds). Each poll's reads (`current-output` and the messages ledger) are cut at what is left of it, so a server that does not answer still ends in exit 124 at the deadline (Issue #3974) | unlimited |
+| `--timeout <sec>` | Maximum time to wait (seconds). One deadline counted from the command's start: it cuts the reads before the poll (`--instance` resolution and the capabilities probe, the task list of `--verify` / `--require-work`) and each poll's reads (`current-output` and the messages ledger), up to the end of the body. A server that does not answer still ends in exit 124 at the deadline, with no poll or verification after it (Issue #3974 / #3983). Verification after a detected completion (`--verify` / `--require-work`) is not part of it and is not cut. `ask --timeout` is the same deadline, except that the send POST (and, with `--async`, the relay POST) is not cut: if it returns past the deadline, ask exits 124 saying the message was sent (`--async` exits 0 once the relay exists). Resolving the two ends of an `--async` relay is inside the deadline. Reading the reply after completion (ledger, pane) is not part of it either: each read is cut at the reply grace (15 s) and falls back to the pane | unlimited |
 | `--on-prompt <mode>` | What to do when a prompt is detected (agent / human) | agent |
 | `--stall-timeout <sec>` | Timeout on "no output change" (seconds). Like `--timeout`, it also cuts a read that does not answer (exit 124) | - |
 | `--instance <id>` | Target instance ID (`<agent>` or `<agent>-<n>`). **This is the only way to name the target** (there is no `--agent`) | the agent's primary instance |
@@ -797,6 +803,10 @@ An answer that waited while a send or another answer held the input lock ([input
 | `answer_not_delivered` | `Error: Answer was not sent. Reason: answer_not_delivered (…). Nothing was typed, so it is safe to run respond again.` | Stopped before the first key. **Not one key reached the pane**; running the same `respond` again is safe |
 | `answer_input_lost` | ``Warning: The answer may have been only partly typed (reason: answer_input_lost): … Check the screen with `commandmate capture <id> --instance <instance> --pane --tail 40` before answering again.`` | The session was replaced part-way through the keys and the rest were not sent. **Some of it may have reached the agent**; look at the pane first, then decide whether to answer again. The suggested command reads the pane the answer went to (the `--instance` or `--agent` the answer resolved to; neither when you named neither) |
 
+`answer_input_lost` comes back from both `/prompt-response` and `/respond` as a 500 with `reason: "answer_input_lost"` and `keysSent: true` (Issue #3982; the other answer errors carry `reason` and `keysSent` on both routes too). On a server whose `GET /api/capabilities` lists `prompt-answer-reason`, the CLI decides by `reason` alone and never searches the 500's `error` text, which can quote the answer. On an older server without that token it reads the `error` text as before.
+
+The other hints `respond` prints (`send` after `prompt_no_longer_active`, the plan review Next / Note, `send` when the chosen row asks for text, and the option-number hint after `unresolvable_answer`), `send`'s `PROMPT_WAITING` fallback (when the server sent no sentence) and its "check the pane before resending" `capture`, and the `capture` hints of `wait` and `attach` all name the same resolved target: an `--instance` alias as the id it resolved to, `--agent` alone as given, nothing when neither was named. A `capture` that is there to read a dialog is `--pane --tail 40`.
+
 ---
 
 ## commandmate verify
@@ -826,7 +836,7 @@ commandmate verify show <run-id>                       # Show one run (read-only
 |--------|-------------|---------|
 | `--gates <id1,id2>` | Gate IDs to run (comma separated) | work-evidence + every declared gate |
 | `--instance <id>` | Agent instance ID to attach the run to | none (a worktree-level run) |
-| `--timeout <sec>` | Seconds before polling is abandoned | unlimited |
+| `--timeout <sec>` | Seconds before polling is abandoned, counted from before the start POST. The start POST and the run reads are included: one that does not answer is cut at the deadline, exit 124 (Issue #3983). So that a run finishing just before the deadline still reports its verdict, the last read is taken at the deadline itself (a read that starts within 2 s of the deadline may run until 2 s past it) | unlimited |
 | `--json` | Print the run and gate results to stdout as JSON | off |
 
 ### Exit Codes

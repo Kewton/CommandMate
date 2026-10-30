@@ -18,7 +18,7 @@
  */
 
 import { ExitCode } from '../types';
-import { ApiError, handleApiError, type ApiClient } from './api-client';
+import { ApiError, handleApiError, rethrowIfDeadlineExceeded, type ApiClient } from './api-client';
 
 /** Path of the capability endpoint (`src/app/api/capabilities/route.ts`). */
 export const CAPABILITIES_PATH = '/api/capabilities';
@@ -110,6 +110,8 @@ async function runProbe(client: ApiClient): Promise<ServerCapabilityProbe> {
   try {
     response = await client.rawGet(CAPABILITIES_PATH, { headers: { Accept: 'application/json' } });
   } catch (error) {
+    // Issue #3983: a command deadline is not "unreachable" — it stays exit 124.
+    rethrowIfDeadlineExceeded(error);
     const result = handleApiError(error);
     throw new ApiError(result.message, result.exitCode);
   }
@@ -130,7 +132,10 @@ async function runProbe(client: ApiClient): Promise<ServerCapabilityProbe> {
   }
 
   if (response.status === 404) {
-    const text = await response.text().catch(() => '');
+    const text = await response.text().catch((error: unknown) => {
+      rethrowIfDeadlineExceeded(error);
+      return '';
+    });
     if (isRealNotFoundBody(text)) return { kind: 'legacy' };
     throw undetermined(response.status);
   }
@@ -148,7 +153,8 @@ async function runProbe(client: ApiClient): Promise<ServerCapabilityProbe> {
   let parsed: unknown;
   try {
     parsed = await response.json();
-  } catch {
+  } catch (error) {
+    rethrowIfDeadlineExceeded(error);
     throw undetermined(response.status);
   }
 
@@ -178,4 +184,31 @@ export async function serverResolvesSessionTargets(client: ApiClient): Promise<b
   const probe = await probeServerCapabilities(client);
   return probe.kind === 'supported'
     && probe.capabilities.includes(RESOLVE_SESSION_TARGET_CAPABILITY);
+}
+
+/**
+ * Capability token of a server whose answer errors all carry `reason` and
+ * `keysSent` (Issue #3982). Mirrors SERVER_CAPABILITIES in the route.
+ */
+export const PROMPT_ANSWER_REASON_CAPABILITY = 'prompt-answer-reason';
+
+/**
+ * Whether this server puts `reason` on every answer error (Issue #3982).
+ *
+ * Reads the memo `resolveCommandTarget` already filled for this client, so a
+ * command that resolved `--instance` asks nothing more. A command that named
+ * no instance probes here, once, and only when it is called — on a failed
+ * answer, never on the way to sending one.
+ *
+ * Fail-safe to the old reading: a probe that cannot be completed (auth, a
+ * proxy, the network) answers false, which keeps the pre-#3982 behaviour of
+ * reading the reason code out of the 500's text.
+ */
+export async function serverReportsPromptAnswerReason(client: ApiClient): Promise<boolean> {
+  try {
+    const probe = await probeServerCapabilities(client);
+    return probe.kind === 'supported' && probe.capabilities.includes(PROMPT_ANSWER_REASON_CAPABILITY);
+  } catch {
+    return false;
+  }
 }

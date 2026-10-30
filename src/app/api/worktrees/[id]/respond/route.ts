@@ -8,11 +8,8 @@ import { readJsonObjectBody } from '@/lib/api/read-json-body';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getMessageById, updatePromptData, getWorktreeById } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import {
-  PromptAnswerInputLostError,
-  PromptAnswerNotDeliveredError,
-  sendPromptAnswer,
-} from '@/lib/prompt-answer-sender';
+import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
+import { promptAnswerErrorResponse } from '@/lib/prompt-answer-errors';
 import { startPolling } from '@/lib/polling/response-poller';
 import { getAnswerInput } from '@/lib/detection/prompt-detector';
 import { broadcastMessage } from '@/lib/ws-server';
@@ -327,19 +324,19 @@ export async function POST(
         logger.info('prompt-answer-sent');
       } catch (error: unknown) {
         settleManualSendError(manualAnswer, error);
+        // Issue #3982: the table `/prompt-response` answers by too, so both
+        // routes give every answer error the same `reason` and `keysSent`.
         // Issue #3952: waited for a send holding the session's input, then not
-        // typed — nothing reached the pane, which a 500 would not say.
-        if (error instanceof PromptAnswerNotDeliveredError) {
-          return NextResponse.json({ error: error.message, reason: error.reason }, { status: 409 });
-        }
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        // typed — nothing reached the pane, which a 500 would not say (409).
         // Issue #3975: stopped part-way — some keys are on the pane. Still a
         // 500, with the reason, so a caller can say "look before answering again".
+        const mapped = promptAnswerErrorResponse(error, 'respond');
+        if (mapped !== null) {
+          return NextResponse.json(mapped.body, { status: mapped.status });
+        }
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         return NextResponse.json(
-          {
-            error: `Failed to send answer to tmux: ${errorMessage}`,
-            ...(error instanceof PromptAnswerInputLostError ? { reason: error.reason } : {}),
-          },
+          { error: `Failed to send answer to tmux: ${errorMessage}` },
           { status: 500 }
         );
       }

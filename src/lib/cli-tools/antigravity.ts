@@ -15,7 +15,6 @@
 import { BaseCLITool } from './base';
 import type { CLIToolType } from './types';
 import {
-  sendKeys,
   sendSpecialKey,
   capturePane,
 } from '../tmux/tmux';
@@ -311,7 +310,9 @@ export class AntigravityTool extends BaseCLITool {
       // screen is this window's to confirm; the poller records nothing for it.
       beginStartupWindow(sessionName);
       try {
-        await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
+        // Issue #3981: in one writer's turn of the input lock; the waits below
+        // stay outside it.
+        await this.typeLaunchLines(sessionName, [withLaunchScreenCleared(launchCommand)]);
 
         // Wait for agy to initialize
         await new Promise((resolve) => setTimeout(resolve, ANTIGRAVITY_INIT_WAIT_MS));

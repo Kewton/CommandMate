@@ -38,29 +38,31 @@
  *      `.prompt.txt` is created exclusively, so two reviews of one Issue never
  *      take the same name; `--item` names the work item of the review (one PR
  *      of an Issue with several, execution-key.mjs) and goes to the record (#3883);
- *   5. on an answer with a `DONE:` line appends one row to
- *      `consistency-review.md` and records `review=ok`; anything else records
- *      `review=fail` (run-log.mjs). An `ask` exit 11 is an upstream fault on
+ *   5. records the `review` stage (run-log.mjs) and, only when the review is a
+ *      verdict, appends one row to `consistency-review.md`. Which way a review
+ *      ends — the record, the row, the exit code and the `review-<N>…` files
+ *      left — is OUTCOMES (below); its one copy for the orchestrator is
+ *      docs/orchestrate/trials.md#5-2b-終了コードと記録の条件表 (#3984). A `DONE:` line
+ *      alone does not make a verdict. An `ask` exit 11 is an upstream fault on
  *      the reviewer's screen (`Selected model is at capacity` …): the note
  *      says `upstream fault id=<id>` so the person can switch `--instance`
- *      (it is not switched here: the lock and the recorded agent would change, #3936);
+ *      (it is not switched here: the lock and the recorded agent would change, #3936).
  *      An answer `ask --json` marks `"overlapped": true` (another message shared
- *      the reviewer's turn, #3955) is kept in the `.md` but is not a verdict:
- *      `review=fail`, no row, exit 1 — send it again, one ask at a time (#3957);
+ *      the reviewer's turn, #3955) may answer that other message: send it again,
+ *      one ask at a time (#3957);
  *   6. reads the dependency links of the reviewed worktree and of every
  *      worktree of its repository (`git worktree list`) before the ask and
  *      after it: a link under `node_modules` that leads out of its worktree
  *      and appeared during the review (dependency-links.mjs) means the
- *      reviewer wrote into a dependency tree. The answer is kept but is not a
- *      verdict: `review=fail` with the links, exit 1 (#3883 P6).
+ *      reviewer wrote into a dependency tree, and the answer is not a verdict
+ *      (OUTCOMES `dependency-links`; the failure note lists the links, #3883 P6).
  *
  * The columns a person judges (unique findings, kind, new/existing,
  * re-judgement, action, pre-review) are written as `未` for the orchestrator to
  * fill in.
  *
- * Exit code: 0 the answer has a `DONE:` line; 1 the review failed (lock, Codex
- * not ready, ask failed, no `DONE:` line, overlapped) and was recorded as `fail`; 2 is a
- * usage error (nothing is sent or recorded).
+ * Exit code: 0 only for the OUTCOMES row `ok` (`review=ok`); the other codes
+ * and the conditions behind them are the rows of OUTCOMES.
  *
  * Usage:
  *   node scripts/orchestrate/consistency-review.mjs --run-dir <dir> --issues <range> --issue <N>
@@ -116,6 +118,47 @@ export const LOCK_NOTICE_SEC = 60;
 export const LOCK_OWNER_FILE = 'owner.json';
 /** Upper bound of the instance lookup; past it the review is not sent. */
 export const RESOLVE_TIMEOUT_MS = 30_000;
+
+/** Where the orchestrator reads OUTCOMES: its only copy, compared with it by a test (#3984). */
+export const OUTCOMES_TABLE_REF = 'docs/orchestrate/trials.md#5-2b-終了コードと記録の条件表';
+
+/** The files of the starting message (#3936): kept by every outcome after it was sent. */
+export const START_FILES = Object.freeze(['.start.out', '.start.err']);
+
+const ASKED_FILES = ['.prompt.txt', '.json', '.err'];
+
+/**
+ * Every way a review ends, in the order `main` checks them (#3984): the run
+ * record's `review` result (`null`: nothing recorded), whether a row goes into
+ * `consistency-review.md`, the exit code, and the `review-<N>…` files left in
+ * the run directory (plus START_FILES when the starting message was sent).
+ * Each return of `main` names its row; OUTCOMES_TABLE_REF is the copy.
+ * An exception the rows do not name (a failed write) ends like `exception`,
+ * leaving the files written until then.
+ */
+export const OUTCOMES = Object.freeze(
+  [
+    { id: 'usage', when: 'bad arguments, or --instance not resolved; nothing sent', record: null, row: false, exit: 2, files: [] },
+    { id: 'head-mismatch', when: 'the worktree is not at --head, or git failed (before the label)', record: 'fail', row: false, exit: 1, files: [] },
+    { id: 'exception', when: 'the lock still held after LOCK_MAX_WAIT_SEC, or another exception after the label', record: 'fail', row: false, exit: 1, files: ['.prompt.txt'] },
+    { id: 'start-failed', when: 'the reviewer was not running and the starting send failed', record: 'fail', row: false, exit: 1, files: ['.prompt.txt', ...START_FILES] },
+    { id: 'not-ready', when: `not ready ${READY_STREAK} times in a row`, record: 'fail', row: false, exit: 1, files: ['.prompt.txt'] },
+    { id: 'dependency-links', when: 'a dependency link out of its worktree appeared during the ask', record: 'fail', row: false, exit: 1, files: ASKED_FILES },
+    { id: 'upstream-fault', when: `ask exit ${ASK_UPSTREAM_FAULT_EXIT}`, record: 'fail', row: false, exit: 1, files: ASKED_FILES },
+    { id: 'ask-failed', when: 'another non-zero ask exit', record: 'fail', row: false, exit: 1, files: ASKED_FILES },
+    { id: 'no-reply', when: 'ask --json gave no reply string', record: 'fail', row: false, exit: 1, files: ASKED_FILES },
+    { id: 'no-done', when: 'no DONE: line in the answer', record: 'fail', row: false, exit: 1, files: [...ASKED_FILES, '.md'] },
+    { id: 'overlapped', when: 'ask --json says "overlapped": true (#3957)', record: 'fail', row: false, exit: 1, files: [...ASKED_FILES, '.md'] },
+    { id: 'ok', when: 'none of the above: a verdict', record: 'ok', row: true, exit: 0, files: [...ASKED_FILES, '.md'] },
+  ].map((o) => Object.freeze({ ...o, files: Object.freeze([...o.files]) }))
+);
+
+/** The OUTCOMES row `id`; a name that is not a row is a mistake in this file. */
+export function outcome(id) {
+  const found = OUTCOMES.find((o) => o.id === id);
+  if (!found) throw new Error(`no OUTCOMES row ${id}`);
+  return found;
+}
 
 /** The header of `consistency-review.md` (docs/orchestrate/trials.md#5-2b-整合性レビューの進め方と記録). */
 export const TABLE_HEADER = [
@@ -585,14 +628,14 @@ export function main(argv, deps = {}) {
   const parsed = parseArgs(argv);
   if (parsed.error) {
     error(`${parsed.error}\n${USAGE}`);
-    return 2;
+    return outcome('usage').exit;
   }
   const o = parsed.options;
   if (o.instanceGiven) {
     const resolved = resolveInstance(run, o, cwd);
     if (resolved.error) {
       error(`${resolved.error}\n${USAGE}`);
-      return 2;
+      return outcome('usage').exit;
     }
     o.instance = resolved.id;
   }
@@ -616,6 +659,12 @@ export function main(argv, deps = {}) {
     log(`review #${issue} ${head.slice(0, 7)} ${result}: ${note}`);
     log(`recorded -> ${file}`);
     return durationSec;
+  };
+  /** Record the OUTCOMES row `id` and return its exit code. */
+  const end = (id, note) => {
+    const { record: result, exit } = outcome(id);
+    record(result, note);
+    return exit;
   };
 
   let lockOwner = null;
@@ -652,13 +701,11 @@ export function main(argv, deps = {}) {
     };
     const waited = waitReady({ run, sleep, cli: o.cli, wt: o.wt, cwd, instance: o.instance, start });
     if (waited.started && waited.started.status !== 0) {
-      record('fail', `${label}: ${o.instance} was not running and starting it failed (send exit=${waited.started.status}, see ${label}.start.err); not sent`);
-      return 1;
+      return end('start-failed', `${label}: ${o.instance} was not running and starting it failed (send exit=${waited.started.status}, see ${label}.start.err); not sent`);
     }
     if (!waited.ready) {
       const after = waited.started ? ' after starting it' : '';
-      record('fail', `${label}: ${o.instance} not ready ${READY_STREAK} times in a row within ${waited.maxPolls} polls${after}; not sent`);
-      return 1;
+      return end('not-ready', `${label}: ${o.instance} not ready ${READY_STREAK} times in a row within ${waited.maxPolls} polls${after}; not sent`);
     }
     // The dependency trees the review must not write into (#3883 P6): this worktree's and its siblings'.
     const listed = run('git', ['-C', worktree, 'worktree', 'list', '--porcelain'], { cwd });
@@ -678,11 +725,10 @@ export function main(argv, deps = {}) {
     if (appeared.length > 0) {
       const listing = appeared.map(({ link, target }) => `${link} -> ${target}`);
       for (const line of listing) error(`dependency link outside its worktree appeared during the review: ${line}`);
-      record(
-        'fail',
+      return end(
+        'dependency-links',
         `${label}: not a verdict — ${appeared.length} dependency link(s) outside their worktree appeared during the review: ${listing.slice(0, 3).join('; ')}${appeared.length > 3 ? '; …' : ''}`
       );
-      return 1;
     }
     if (ask.status === ASK_UPSTREAM_FAULT_EXIT) {
       // Not a review that failed: the reviewer's model did not answer (#3936). The person decides on another --instance.
@@ -690,12 +736,10 @@ export function main(argv, deps = {}) {
       const what = fault ? `id=${fault.id}${fault.matchedText ? ` (${JSON.stringify(fault.matchedText)})` : ''}` : 'id unknown';
       // Only model-capacity is "this model will not answer"; overloaded / retrying retry on their own (selfRetrying).
       const next = fault?.id === 'model-capacity' ? 'switch --instance' : 'retry later or switch --instance, by the id';
-      record('fail', `${label}: upstream fault ${what} on ${o.instance}; ask exit=${ask.status}, not a verdict — ${next} (see ${label}.err)`);
-      return 1;
+      return end('upstream-fault', `${label}: upstream fault ${what} on ${o.instance}; ask exit=${ask.status}, not a verdict — ${next} (see ${label}.err)`);
     }
     if (ask.status !== 0) {
-      record('fail', `${label}: ask exit=${ask.status} (see ${label}.err)`);
-      return 1;
+      return end('ask-failed', `${label}: ask exit=${ask.status} (see ${label}.err)`);
     }
     let reply;
     let overlapped = false;
@@ -708,26 +752,24 @@ export function main(argv, deps = {}) {
       reply = undefined;
     }
     if (typeof reply !== 'string') {
-      record('fail', `${label}: ask --json gave no reply string`);
-      return 1;
+      return end('no-reply', `${label}: ask --json gave no reply string`);
     }
     const body = extractReplyBody(reply);
     fs.writeFileSync(file('.md'), `${body}\n`);
     const doneLine = findDoneLine(body);
     if (!doneLine) {
-      record('fail', `${label}: no DONE: line in the answer`);
-      return 1;
+      return end('no-done', `${label}: no DONE: line in the answer`);
     }
     if (overlapped) {
       // Not a verdict (#3957): the reply may answer another message folded into the same turn. The
       // answer is kept in review-<N>.md to read, but no row goes into consistency-review.md.
-      record(
-        'fail',
+      return end(
+        'overlapped',
         `${label}: overlapped: 別の依頼への返答かもしれない（そのレビューは裁定に使わない）。同じ --instance に重ねず、1 本ずつ送り直す (${doneLine})`
       );
-      return 1;
     }
-        const durationSec = record('ok', `${label}: ${doneLine}`);
+    const verdict = outcome('ok');
+    const durationSec = record(verdict.record, `${label}: ${doneLine}`);
     const row = appendReviewRow(path.join(o.runDir, 'consistency-review.md'), {
       issue,
       item: o.item,
@@ -737,16 +779,18 @@ export function main(argv, deps = {}) {
       doneLine,
     });
     log(`consistency-review.md += ${row}`);
-    return 0;
+    return verdict.exit;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     error(message);
+    // Before the label (HEAD check, git) nothing was written; after it, the files written until the throw are left.
+    const failed = outcome(label ? 'exception' : 'head-mismatch');
     try {
-      record('fail', `${label ?? `review-${workItemName(issue, o.item)}`}: ${message}`);
+      record(failed.record, `${label ?? `review-${workItemName(issue, o.item)}`}: ${message}`);
     } catch (recordErr) {
       error(recordErr instanceof Error ? recordErr.message : String(recordErr));
     }
-    return 1;
+    return failed.exit;
   } finally {
     if (lockOwner) {
       try {

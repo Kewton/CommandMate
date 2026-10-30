@@ -364,10 +364,16 @@ fail-open で、「人間が答えた」を示すイベントが届かない事�
 | `respond` / 回答欄（Enter を送る回答）・厳格モードの `respond`・Auto-Yes の回答・Command Code の plan review・codex の起動時と送信前の自動回答（hooks / update / trust / 通知）・copilot と Antigravity のフォルダー trust への自動回答 | 参加する（回答どうしは待ち合わない） | 送信が終わるまで待ち、**画面を読み直して同じ確認が出ているときだけ**打ちます。消えた・変わった・読めない・待ちが 60 秒を超えたときは何も打たず、`respond` は `answer_not_delivered`（`/respond` は 409、厳格モードは exit 40 `session_conflict`）、Auto-Yes は次の周期で判定し直します。回答の途中に始まった送信は、回答の Enter まで待ちます |
 | `answer_only` の数字回答（Enter を送らない） | 参加しない | 1 打鍵で Enter が無いため、待たずに打ちます |
 | Claude と Gemini の起動時の打鍵（起動コマンドの行・trust ダイアログへの自動回答）（#3975） | 参加する（単独の書き手として。回答とも待ち合う） | 打鍵の間だけロックを持ちます（起動の待機はロックの外）。送信や回答が終わるまで待ち、trust への回答は、その間に送信が入ったときは画面を読み直して同じダイアログが出ているときだけ打ちます。起動の Enter の前に画面を読んだ `respond` は、Enter の後に読み直します |
+| 全ツールの起動コマンドの行（codex・copilot・Antigravity・OpenCode・OpenCode V2・Command Code・Vibe Local・Gemini・Claude。Claude は直前の `unset CLAUDECODE` も）（#3981） | 参加する（単独の書き手として。1 回の起動の行を 1 回の保持でまとめて打つ） | 送信や回答が終わるまで待ってから打ちます（起動の待機はロックの外）。送信の中から起動し直すとき（codex の update の後など）は、その送信のロックのまま打ちます |
+| 全ツールの停止（`kill-session`・worktree の削除・Stop）の終了キー（Ctrl-C・Ctrl-D・`/quit`・`/exit` など）（#3981） | 参加しない（決定） | 停止を送信の後ろで待たせないためです。送信の途中で停止すると、その送信は途中で失敗します（結果は `lastSend` で確かめてください） |
 | ターミナルへの直接入力（WebSocket）・`direct-input`・特殊キー（未送信バーの **Run** を含む） | 参加しない（拒否も待機もしない） | **送信中に打つと、文字が本文に混ざる、または送信の後始末（入力欄の消去・取り下げ）で消えることがあります。** 送信が終わる（応答が始まる）のを待ってから打ってください |
 | `interrupt`（Escape） | 参加しない（待たない・送信を失効させない） | 中断を送信の後ろで待たせないためです。本文の入力中に Escape が届くと、その送信は途中で止まることがあります（結果は `lastSend` で確かめてください） |
 
 - copilot の `--model` は、`/model` を打つ直前にもう一度画面を読みます。ダイアログが出ていれば `not-sent`（`prompt-waiting`）、読めなければ `not-sent`（`recheck-failed`）で、何も打ちません。
+- 同じセッションの起動は 1 本だけです（Issue #3981）。起動の途中に届いた送信や起動の要求は、その起動が終わるのを待ってから進みます（2 本目の起動はしません）。ただし、入力ロックを持ったまま別の要求の起動に行き当たった送信（Claude と codex の送信）は待たずに、1 キーも打たず `not-sent`（`session-starting`、HTTP 503 `SESSION_STARTING`）で返ります。少し待って送り直してください。順序は「起動の 1 本化が外、入力ロックが内」で固定しています（ロックを持つ側が起動を待つと、起動の打鍵がロックを待つので互いに止まるため）。
+  - 待つのは、その起動のツールの起動の期限（起動が始まってから、Claude は 65 秒、他は 35 秒）までです。過ぎても起動が終わらなければ、何も打たずに `not-sent`（`session-starting`、HTTP 503 `SESSION_STARTING`）で返ります。
+  - `--model` 付きの送信が、別のモデル（またはモデル指定なし）で進んでいる起動に行き当たったときは、合流せずに HTTP 400 で返ります（何も打ちません）。稼働中のセッションへの `--model` と同じ扱いです。
+- Gemini は送信前に入力欄が 15 秒出なければ、何も打たずに `not-sent`（`prompt-not-ready`）で返ります（Issue #3981。以前は待ちを諦めて打っていました）。
 - ロックは 1 つのサーバープロセスの中だけのものです。同じ tmux を 2 つのサーバーが使う場合は調停されません。
 
 ### worktree ID の調べ方
@@ -450,7 +456,7 @@ commandmate wait <worktree-id> --fail-on-upstream-fault  # 上流障害で compo
 
 | オプション | 説明 | デフォルト |
 |-----------|------|-----------|
-| `--timeout <sec>` | 最大待機時間（秒）。ポールごとの取得（`current-output` と台帳 messages）もこの残り時間で打ち切るので、サーバーが応答しなくても期限で exit 124 になる（Issue #3974） | 無制限 |
+| `--timeout <sec>` | 最大待機時間（秒）。コマンド開始から数える 1 つの期限で、ポールの前の取得（`--instance` の解決・capabilities、`--verify` / `--require-work` の task 一覧）とポールごとの取得（`current-output` と台帳 messages）を、本文を読み終えるまで含めて打ち切る。サーバーが応答しなくても期限で exit 124 になり、その後のポールや検証は行わない（Issue #3974 / #3983）。完了を検知した後の検証（`--verify` / `--require-work`）は含まない（検証は期限で中断されない）。`ask --timeout` も同じ期限だが、送信の POST（`--async` では relay 登録の POST も）は中断せず、返ってきた時点で期限を過ぎていれば「送信は済んでいる」と書いて exit 124（`--async` は relay ができていれば exit 0）。`--async` の relay の両端の解決は期限に含む。完了後の返答の読み（台帳・画面）も含まず、各取得は返答の猶予（15 秒）で打ち切って画面の読みへ進む | 無制限 |
 | `--on-prompt <mode>` | プロンプト検出時の動作（agent / human） | agent |
 | `--stall-timeout <sec>` | 出力変化なしのタイムアウト（秒）。`--timeout` と同じく、応答しない取得もこの期限で打ち切る（exit 124） | - |
 | `--instance <id>` | 対象インスタンスID（`<agent>` または `<agent>-<n>`）。**送り先指定はこのフラグのみ**（`--agent` は無い） | エージェントのプライマリインスタンス |
@@ -921,7 +927,8 @@ commandmate respond <worktree-id> "yes" --instance codex-2        # 追加イン
 - 肯定候補が複数ある場合（例: `1. Yes` / `2. Yes, allow all edits...`）は**最も番号の小さい選択肢**
   （= 最小権限）を選びます
 - 解決できない場合（yes/no 系ラベルが無い・チェックボックス型・選択肢を読めない）は**何も送信せず**
-  exit 99（`unresolvable_answer`）で失敗します。番号で応答してください
+  exit 99（`unresolvable_answer`）で失敗します。番号で応答してください。案内の `respond` と
+  `capture --pane --tail 40` には、解決済みの宛先（`--instance` の別名は解決した ID、`--agent` だけならその値）が付きます（Issue #3982）
 - 解決結果は監査のため stdout に出力されます: `Resolved "no" to option 3: No, and tell Claude ...`
 - `--default` は default 選択肢（❯ ハイライト位置）を明示的に選びます（`<answer>` と排他）
 
@@ -1058,6 +1065,10 @@ server.log（`strict-prompt-answered` / `strict-prompt-response-refused`）と�
 | `answer_not_delivered` | `Error: Answer was not sent. Reason: answer_not_delivered (…). Nothing was typed, so it is safe to run respond again.` | 最初のキーの前に止めました。**1 キーも届いていません**。同じ `respond` をやり直してかまいません |
 | `answer_input_lost` | ``Warning: The answer may have been only partly typed (reason: answer_input_lost): … Check the screen with `commandmate capture <id> --instance <instance> --pane --tail 40` before answering again.`` | キー列の途中でセッションが置き換わり、残りを送らずに止めました。**一部だけ届いたかもしれません**。先にペインを見てから、答え直すかを決めてください。案内のコマンドは回答したペインを読みます（回答で解決した `--instance` か `--agent`。どちらも指定しなければ付きません） |
 
+`answer_input_lost` は、`/prompt-response` と `/respond` のどちらでも 500・`reason: "answer_input_lost"`・`keysSent: true` で返ります（Issue #3982。ほかの回答エラーも両ルートで `reason` と `keysSent` を返します）。`GET /api/capabilities` に `prompt-answer-reason` があるサーバーでは、CLI は `reason` だけで判定し、500 の `error` の文字列（回答を引用することがある）は見ません。この語の無い古いサーバーでは、従来どおり `error` の文字列で判定します。
+
+`respond` のほかの案内（`prompt_no_longer_active` の `send`、plan review の Next・Note、選んだ行が文字入力を求めるときの `send`）と、`send` の `PROMPT_WAITING`（サーバーが文を返さなかったとき）・送信結果不明時の `capture`、`wait` と `attach` の `capture` も、同じ解決済みの宛先を付けます。ダイアログを読ませる `capture` は `--pane --tail 40` です。
+
 ---
 
 ### commandmate interrupt
@@ -1180,7 +1191,7 @@ commandmate verify init --cwd <path> --json            # 対象リポジトリ�
 |-----------|------|-----------|
 | `--gates <id1,id2>` | 実行するゲートID（カンマ区切り） | work-evidence + 宣言された全ゲート |
 | `--instance <id>` | run を紐づけるエージェントインスタンスID | なし（worktree 単位の run） |
-| `--timeout <sec>` | ポーリングを打ち切るまでの秒数 | 無制限 |
+| `--timeout <sec>` | ポーリングを打ち切るまでの秒数。開始の POST の前から数え、開始の POST と run の取得も含め、応答しない取得は期限で打ち切って exit 124（Issue #3983）。期限の直前に終わった run も判定を返すよう、最後の 1 回は期限の時刻に読む（期限の 2 秒前より後に始まる読みは期限の 2 秒後まで待つ） | 無制限 |
 | `--json` | run と gate results を stdout に JSON 出力 | 無効 |
 
 ### 終了コード

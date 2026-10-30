@@ -24,7 +24,6 @@ import { findFatalPattern } from '@/lib/detection/tool-liveness';
 import { resolveLivenessSpec } from '@/lib/cli-tools/liveness-spec';
 import { probeSessionLiveness } from '@/lib/cli-tools/session-liveness';
 import {
-  sanitizeSessionEnvironment,
   waitForPrompt as waitForPromptInternal,
   sendMessageToSession,
   stopSession,
@@ -53,8 +52,9 @@ import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 import {
   answerUnderInstanceInputLock,
   instanceInputLaunchReadMark,
-  withInstanceInputLock,
 } from '@/lib/session/instance-input-lock';
+import { settleSessionLaunch } from '@/lib/session/session-launch-flight';
+import { typeLaunchLines } from '@/lib/cli-tools/launch-keys';
 
 const logger = createLogger('claude-session');
 
@@ -822,15 +822,21 @@ export async function startClaudeSession(
       workingDirectory: worktreePath,
     });
 
-    // SF-S2-003: Sanitize environment after createSession, before launching Claude CLI
-    await sanitizeSessionEnvironment(sessionName);
-
-    // Start Claude CLI in interactive mode using dynamically resolved path.
-    // Issue #3975: one writer's turn, as gemini's launch line; the init polls
-    // below stay outside the lock.
-    await withInstanceInputLock(sessionName, () =>
-      sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true)
-    );
+    // SF-S2-003: Sanitize environment after createSession, before launching
+    // Claude CLI (what `sanitizeSessionEnvironment` did): drop CLAUDECODE from
+    // tmux's global environment (MF-S3-002), then `unset` it in the pane's
+    // shell, then start Claude in interactive mode using the dynamically
+    // resolved path.
+    //
+    // Issue #3981: the two lines are typed in ONE writer's turn of the input
+    // lock (#3975 locked only the launch line; the `unset` went out before it
+    // with no lock), so neither lands inside a send's body. The sanitize's
+    // 100 ms pause between them is gone: both lines queue in the same shell's
+    // input in order, so the `unset` runs first without it, and a pause inside
+    // the turn would only hold sends off longer. The init polls below stay
+    // outside the lock.
+    await execAsync('tmux set-environment -g -u CLAUDECODE 2>/dev/null || true');
+    await typeLaunchLines(sessionName, ['unset CLAUDECODE', withLaunchScreenCleared(launchCommand)]);
 
     // Wait for Claude to initialize with dynamic detection (OCP-001)
     // Use constants instead of hardcoded values
@@ -950,6 +956,10 @@ export async function sendMessageToClaude(
   instanceId?: string
 ): Promise<void> {
   const sessionName = getSessionName(worktreeId, instanceId);
+  // Issue #3981: a session another request is still launching shows a shell
+  // (`❯ ` can pass for Claude's prompt) — wait for that launch, or, holding the
+  // input lock as the send service does, refuse with nothing typed (R1).
+  await settleSessionLaunch(sessionName, 'Claude Code');
   await sendMessageToSession(
     sessionName,
     message,

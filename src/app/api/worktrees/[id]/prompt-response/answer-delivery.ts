@@ -18,6 +18,7 @@ import {
   MultiSelectAnswerRejectedError,
   PromptAnswerNotDeliveredError,
 } from '@/lib/prompt-answer-sender';
+import { promptAnswerErrorResponse } from '@/lib/prompt-answer-errors';
 import type { PromptData } from '@/types/models';
 import {
   abandonManualSend,
@@ -36,6 +37,32 @@ import { logger, logRefused, type PromptResponseContext } from './context';
 import type { ValidatedPromptResponse } from './request-validation';
 import type { ResolvedAnswer } from './answer-resolution';
 
+/** The refusal's own evidence, for the log line (Issue #2033, #2573, #2583, #2755, #3952). */
+function logSendRefusal(ctx: PromptResponseContext, error: unknown): void {
+  if (error instanceof PromptAnswerRejectedError) {
+    logRefused(ctx, {
+      reason: error.reason,
+      dialogKind: error.dialogKind,
+      answerMode: error.answerMode,
+    });
+  } else if (error instanceof MultiSelectAnswerRejectedError) {
+    logRefused(ctx, {
+      reason: error.reason,
+      stage: error.stage,
+      keysSent: error.keysSent,
+    });
+  } else if (error instanceof FreeTextAnswerRejectedError || error instanceof FreeTextAtChoiceOnlyPromptError) {
+    logRefused(ctx, {
+      reason: error.reason,
+      ...(error instanceof FreeTextAnswerRejectedError
+        ? { optionNumbers: error.optionNumbers }
+        : { optionCount: error.optionCount }),
+    });
+  } else if (error instanceof PromptAnswerNotDeliveredError) {
+    logRefused(ctx, { reason: error.reason, skip: error.skip });
+  }
+}
+
 /** The response for an error `sendPromptAnswer` threw. */
 function sendErrorResponse(
   ctx: PromptResponseContext,
@@ -43,75 +70,29 @@ function sendErrorResponse(
   answer: string | undefined,
   resolution: AnswerResolution,
 ): NextResponse {
+  // Issue #3982: one table (`promptAnswerErrorResponse`) for this route and
+  // `/respond`, so every error `prompt-answer-errors` defines carries `reason`
+  // and `keysSent` on both.
+  //
   // Issue #2033: a refusal is not a transport failure. Nothing was typed and
   // the dialog is untouched, so it is reported the same way this route's
   // other pre-send refusals are — `success: false` with a reason code — and
   // not as a 500 that would leave the operator unsure whether a key landed.
-  if (error instanceof PromptAnswerRejectedError) {
-    logRefused(ctx, {
-      reason: error.reason,
-      dialogKind: error.dialogKind,
-      answerMode: error.answerMode,
-    });
-    return NextResponse.json({
-      success: false,
-      reason: error.reason,
-      message: error.message,
-      answer: answer ?? '',
-    });
-  }
-  // Issue #2573: the same guarantee for text aimed at a menu row — the
-  // "No, tell … what to do differently" row PromptPanel used to send the
-  // reason at. Issue #2583 extends it to the dialog with no such row at all
-  // (claude's and agy's Bash approvals), where a refusal typed as free text
-  // used to answer `success: true` and run the command. Both are refused
-  // before a key, so the dialog is still up and the operator can answer it
-  // with the option number. They share a reason code on purpose; what
-  // differs is only the evidence each can log.
-  // Issue #2755: the checkbox arm gave up. Unlike the three above it does
-  // not always promise an untouched pane — ticking boxes is the first half
-  // of this answer — so `keysSent` is logged and the message says which of
-  // the two the operator is looking at. What it does promise is that the
-  // question was never submitted, which is why this is a refusal and not a
-  // 500.
-  if (error instanceof MultiSelectAnswerRejectedError) {
-    logRefused(ctx, {
-      reason: error.reason,
-      stage: error.stage,
-      keysSent: error.keysSent,
-    });
-    return NextResponse.json({
-      success: false,
-      reason: error.reason,
-      message: error.message,
-      answer: resolution.input,
-    });
-  }
-  if (error instanceof FreeTextAnswerRejectedError || error instanceof FreeTextAtChoiceOnlyPromptError) {
-    logRefused(ctx, {
-      reason: error.reason,
-      ...(error instanceof FreeTextAnswerRejectedError
-        ? { optionNumbers: error.optionNumbers }
-        : { optionCount: error.optionCount }),
-    });
-    return NextResponse.json({
-      success: false,
-      reason: error.reason,
-      message: error.message,
-      answer: answer ?? '',
-    });
-  }
-  // Issue #3952: the answer waited for a send holding the session's input and
-  // was not typed after it (the prompt moved, or the wait ran out). Nothing
-  // reached the pane, so it is a refusal like the ones above, not a 500.
-  if (error instanceof PromptAnswerNotDeliveredError) {
-    logRefused(ctx, { reason: error.reason, skip: error.skip });
-    return NextResponse.json({
-      success: false,
-      reason: error.reason,
-      message: error.message,
-      answer: answer ?? '',
-    });
+  // Issue #2573 / #2583: the same guarantee for free text aimed at a menu row
+  // or at a dialog with no text field. Issue #2755: the checkbox arm gave up —
+  // some boxes may be ticked (`keysSent`), but the question was never
+  // submitted, which is why it is a refusal and not a 500. Issue #3952: the
+  // answer waited for a send holding the session's input and was not typed
+  // after it. Issue #3975 / #3982: the answer stopped part-way — keys are on
+  // the pane — is a 500 with `reason: answer_input_lost` and `keysSent: true`.
+  const mapped = promptAnswerErrorResponse(error, 'prompt-response');
+  if (mapped !== null) {
+    if (mapped.status === 200) {
+      logSendRefusal(ctx, error);
+      // The checkbox arm reports the resolved selection; the others the answer as sent.
+      mapped.body.answer = error instanceof MultiSelectAnswerRejectedError ? resolution.input : (answer ?? '');
+    }
+    return NextResponse.json(mapped.body, { status: mapped.status });
   }
   const errorMessage = error instanceof Error ? error.message : 'Unknown error';
   return NextResponse.json(

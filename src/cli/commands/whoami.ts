@@ -39,7 +39,7 @@
 import { spawnSync } from 'child_process';
 import { Command } from 'commander';
 import type { AgentInstance, WorktreeItem, WorktreeListResponse } from '../types/api-responses';
-import { ApiClient } from '../utils/api-client';
+import { ApiClient, rethrowIfDeadlineExceeded } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { isCliToolId } from '../config/cli-tool-ids';
 import { fetchAgentInstances } from '../utils/agent-instances';
@@ -146,7 +146,9 @@ async function readWorktreeIds(client: ApiClient): Promise<Set<string> | null> {
   try {
     const response = await client.get<WorktreeListResponse>('/api/worktrees');
     return new Set((response.worktrees ?? []).map((wt: WorktreeItem) => wt.id));
-  } catch {
+  } catch (error) {
+    // Issue #3983: a command deadline is not "no list" — it stays exit 124.
+    rethrowIfDeadlineExceeded(error);
     return null;
   }
 }
