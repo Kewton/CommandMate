@@ -20,9 +20,12 @@ import type { RelaySendOutcome } from '@/lib/relay/relay-bind';
 import { ApiError, type ApiErrorPayload } from '@/cli/utils/api-client';
 import { describeFailedSendOutcome } from '@/cli/commands/message-dispatch';
 import type { Worktree } from '@/types/models';
+import type { ChatMessage as CliChatMessage } from '@/cli/types/api-responses';
+import { SessionStartTimeoutError } from '@/lib/session/session-start-error';
 import type { NextRequest } from 'next/server';
 
 const isRunning = vi.fn(async () => true);
+const startSession = vi.fn(async (..._args: unknown[]) => {});
 
 vi.mock('@/lib/cli-tools/codex', () => ({
   CodexTool: class {
@@ -31,7 +34,7 @@ vi.mock('@/lib/cli-tools/codex', () => ({
     command = 'codex';
     async isInstalled() { return true; }
     async isRunning() { return isRunning(); }
-    async startSession() {}
+    async startSession(...args: unknown[]) { return startSession(...args); }
     async sendMessage() {}
     async killSession() {}
     getSessionName(id: string) { return `mcbd-codex-${id}`; }
@@ -549,6 +552,7 @@ describe('POST /send without relayId: sendOutcome on the failure (Issue #4011)',
 
   it('the CLI types sendOutcome as the plain route answers it, and tells not_sent from unknown on the real bodies', async () => {
     expectTypeOf<NonNullable<ApiErrorPayload['sendOutcome']>>().toEqualTypeOf<RelaySendOutcome>();
+    expectTypeOf<NonNullable<CliChatMessage['sendOutcome']>>().toEqualTypeOf<RelaySendOutcome>();
 
     failsAs('not-sent', 'prompt-not-ready');
     const notSent = await post({});
@@ -581,6 +585,34 @@ describe('POST /send without relayId: sendOutcome on the failure (Issue #4011)',
     const { status, body } = await post({});
     expect(status).toBe(500);
     expect(body.sendOutcome).toBe('unknown');
+  });
+
+  // Review P2-1: the route's own refusals before the send service record a
+  // not-sent attempt, so they answer not_sent with no relay as with one.
+  it('a start still coming up (503 SESSION_STARTING): not_sent, and the CLI says it may be sent again', async () => {
+    isRunning.mockResolvedValueOnce(false);
+    startSession.mockRejectedValueOnce(new SessionStartTimeoutError('Codex CLI', `mcbd-codex-${WT}`, 60000));
+    const answer = await post({});
+    expect(answer.status).toBe(503);
+    expect(answer.body).toMatchObject({ code: 'SESSION_STARTING', sendOutcome: 'not_sent' });
+    expect(sendUserMessage).not.toHaveBeenCalled();
+    const error = new ApiError('send failed', 1, answer.status, answer.body as ApiErrorPayload);
+    expect(describeFailedSendOutcome(error, WT)).toContain('safe to send it again');
+  });
+
+  it('a start that failed (500): not_sent', async () => {
+    isRunning.mockResolvedValueOnce(false);
+    startSession.mockRejectedValueOnce(new Error('tmux refused'));
+    const { status, body } = await post({});
+    expect(status).toBe(500);
+    expect(body.sendOutcome).toBe('not_sent');
+  });
+
+  it('another server\'s session (409): not_sent', async () => {
+    checkSessionOwnership.mockResolvedValueOnce({ verdict: 'foreign', sessionPath: '/elsewhere' } as never);
+    const { status, body } = await post({});
+    expect(status).toBe(409);
+    expect(body.sendOutcome).toBe('not_sent');
   });
 
   it('negative control: a failure the send service never placed carries no sendOutcome', async () => {

@@ -479,8 +479,8 @@ export interface ApiErrorPayload {
    * Issue #3957/#3992: sent with the send route's errors after a bound relay
    * was reserved — `not_sent`: nothing reached the session, it may be sent
    * again; `unknown`: it may have, look before resending. Issue #4011: also
-   * on a failure of a send with no bound relay, once the send service placed
-   * it (`not-sent` → `not_sent`, otherwise `unknown`). Mirrors
+   * on a failure of a send with no bound relay that was recorded as its
+   * attempt (`not-sent` → `not_sent`, otherwise `unknown`; no 400). Mirrors
    * src/lib/relay/relay-bind.ts RelaySendOutcome (and ChatMessage.sendOutcome).
    */
   sendOutcome?: 'sent' | 'not_sent' | 'unknown';

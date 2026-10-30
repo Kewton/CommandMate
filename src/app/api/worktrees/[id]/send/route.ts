@@ -18,9 +18,10 @@
  * on every response after the reservation — see `lib/relay/relay-bind`.
  *
  * Issue #4011: a send with no bound relay answers `sendOutcome` too, on a
- * failure the send service recorded (`not-sent` → `not_sent`, anything else →
- * `unknown`), so the CLI can say whether it may be sent again. Its 201 stays
- * as it was.
+ * failure recorded as this request's attempt — by the send service, or by this
+ * route before it (another server's session, a start still coming up or
+ * failed: `not_sent`) — so the CLI can say whether it may be sent again. A 400
+ * (the body, `--model`) records none and is answered as before; so is its 201.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -36,7 +37,7 @@ import { probeRunningSessionHookUrl } from '@/lib/cli-tools/base';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType, type ICLITool } from '@/lib/cli-tools/types';
 import { sendUserMessage } from '@/lib/session/send-user-message';
 import { PROMPT_WAITING_CODE } from '@/lib/session/prompt-waiting-guard';
-import type { SendAttemptState } from '@/lib/session/send-attempt-types';
+import type { SendAttemptReason, SendAttemptState } from '@/lib/session/send-attempt-types';
 import {
   describeSendAttemptState,
   getLastSendAttempt,
@@ -253,8 +254,8 @@ export async function POST(
   const { binding } = relay;
   if (!binding) {
     // Issue #4011: whether it may be sent again does not depend on a relay.
-    // Only a failure the send service placed says it; one it never reached
-    // (validation, start) is answered as before.
+    // Only a failure recorded as this request's attempt says it; a 400 that
+    // records none (validation, `--model`) is answered as before.
     if (relay.sent || relay.attempt === null) return response;
     return withBody(response, { sendOutcome: unboundSendOutcome(relay.attempt) });
   }
@@ -272,7 +273,7 @@ export async function POST(
 
 /**
  * Issue #4011: what a failed send with no bound relay says about resending —
- * `not_sent` only when the service recorded that nothing was typed; a submit
+ * `not_sent` only when the attempt was recorded as nothing typed; a submit
  * it confirmed whose answer then failed is `unknown`, as for a bound send.
  */
 function unboundSendOutcome(attempt: SendAttemptState): RelaySendOutcome {
@@ -467,8 +468,14 @@ async function handleSend(
     // Issue #3759: the attempts this route refuses before the send service are
     // recorded too, so `lastSend` names the latest one.
     const sendAttemptInstance = { worktreeId: id, cliToolId, instanceId: instanceId ?? cliToolId };
+    // Issue #4011: the same record is this request's attempt, so `sendOutcome`
+    // answers `not_sent` for it whether or not a relay is bound.
+    const recordNotSent = (reason: SendAttemptReason): void => {
+      recordSendAttempt(sendAttemptInstance, { state: 'not-sent', reason, content: trimmedContent });
+      relay.attempt = 'not-sent';
+    };
     if (ownership.verdict === 'foreign') {
-      recordSendAttempt(sendAttemptInstance, { state: 'not-sent', reason: 'foreign-session', content: trimmedContent });
+      recordNotSent('foreign-session');
       return NextResponse.json(foreignSessionErrorBody(sessionName, ownership.sessionPath), { status: 409 });
     }
 
@@ -493,7 +500,7 @@ async function handleSend(
       }
     } catch (error: unknown) {
       if (!isSessionStartTimeoutError(error)) throw error;
-      recordSendAttempt(sendAttemptInstance, { state: 'not-sent', reason: 'session-starting', content: trimmedContent });
+      recordNotSent('session-starting');
       return answerSessionStartTimeout(error.message, cliTool, id, instanceId);
     }
 
@@ -557,11 +564,7 @@ async function handleSend(
           return NextResponse.json({ error: error.message }, { status: 400 });
         }
         logger.error('failed-to-start-session:', { error: error instanceof Error ? error.message : String(error) });
-        recordSendAttempt(sendAttemptInstance, {
-          state: 'not-sent',
-          reason: isSessionStartTimeoutError(error) ? 'session-starting' : 'session-start-failed',
-          content: trimmedContent,
-        });
+        recordNotSent(isSessionStartTimeoutError(error) ? 'session-starting' : 'session-start-failed');
         // Issue #1637: a session that is still initializing is not a server
         // fault. The tmux session and the CLI process exist and are coming up,
         // so the honest answer is "temporarily unavailable, retry" — 503 with a
