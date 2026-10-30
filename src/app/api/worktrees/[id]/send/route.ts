@@ -16,6 +16,11 @@
  * reserves that relay before step 4, records its input boundary right before
  * the first key, and answers `sendOutcome` (`sent` / `not_sent` / `unknown`)
  * on every response after the reservation — see `lib/relay/relay-bind`.
+ *
+ * Issue #4011: a send with no bound relay answers `sendOutcome` too, on a
+ * failure the send service recorded (`not-sent` → `not_sent`, anything else →
+ * `unknown`), so the CLI can say whether it may be sent again. Its 201 stays
+ * as it was.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -71,7 +76,7 @@ import { getAgentEventSource } from '@/lib/hooks/sources/registry';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import type { ChatMessage } from '@/types/models';
 import { checkSessionOwnership, foreignSessionErrorBody, FOREIGN_SESSION_ERROR_CODE } from '@/lib/cli-tools/session-ownership';
-import { reserveRelaySend, type RelaySendBinding } from '@/lib/relay/relay-bind';
+import { reserveRelaySend, type RelaySendBinding, type RelaySendOutcome } from '@/lib/relay/relay-bind';
 import { evaluateRelayAfterSend } from '@/lib/relay/relay-delivery';
 
 const logger = createLogger('api/send');
@@ -246,7 +251,13 @@ export async function POST(
   const relay: RouteRelayState = { binding: null, attempt: null, sent: null };
   const response = await handleSend(request, context, relay);
   const { binding } = relay;
-  if (!binding) return response;
+  if (!binding) {
+    // Issue #4011: whether it may be sent again does not depend on a relay.
+    // Only a failure the send service placed says it; one it never reached
+    // (validation, start) is answered as before.
+    if (relay.sent || relay.attempt === null) return response;
+    return withBody(response, { sendOutcome: unboundSendOutcome(relay.attempt) });
+  }
 
   // Issue #3957: every answer after the reservation settles the relay and says
   // what the CLI may do with it — withdraw it only on `not_sent`.
@@ -256,13 +267,27 @@ export async function POST(
       : { kind: 'failed', attempt: relay.attempt }
   );
   if (sendOutcome === 'sent') evaluateRelayAfterSend(binding.relayId);
+  return withBody(response, { relayId: binding.relayId, sendOutcome });
+}
+
+/**
+ * Issue #4011: what a failed send with no bound relay says about resending —
+ * `not_sent` only when the service recorded that nothing was typed; a submit
+ * it confirmed whose answer then failed is `unknown`, as for a bound send.
+ */
+function unboundSendOutcome(attempt: SendAttemptState): RelaySendOutcome {
+  return attempt === 'not-sent' ? 'not_sent' : 'unknown';
+}
+
+/** The route's answer with `extra` added to its JSON body, status kept. */
+async function withBody(response: Response, extra: Record<string, unknown>): Promise<NextResponse> {
   let body: Record<string, unknown> = {};
   try {
     body = (await response.json()) as Record<string, unknown>;
   } catch {
     // Every answer of this route is JSON; an unreadable one keeps its status.
   }
-  return NextResponse.json({ ...body, relayId: binding.relayId, sendOutcome }, { status: response.status });
+  return NextResponse.json({ ...body, ...extra }, { status: response.status });
 }
 
 async function handleSend(
