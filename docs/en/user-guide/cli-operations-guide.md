@@ -797,6 +797,10 @@ An answer that waited while a send or another answer held the input lock ([input
 | `answer_not_delivered` | `Error: Answer was not sent. Reason: answer_not_delivered (…). Nothing was typed, so it is safe to run respond again.` | Stopped before the first key. **Not one key reached the pane**; running the same `respond` again is safe |
 | `answer_input_lost` | ``Warning: The answer may have been only partly typed (reason: answer_input_lost): … Check the screen with `commandmate capture <id> --instance <instance> --pane --tail 40` before answering again.`` | The session was replaced part-way through the keys and the rest were not sent. **Some of it may have reached the agent**; look at the pane first, then decide whether to answer again. The suggested command reads the pane the answer went to (the `--instance` or `--agent` the answer resolved to; neither when you named neither) |
 
+`answer_input_lost` comes back from both `/prompt-response` and `/respond` as a 500 with `reason: "answer_input_lost"` and `keysSent: true` (Issue #3982; the other answer errors carry `reason` and `keysSent` on both routes too). On a server whose `GET /api/capabilities` lists `prompt-answer-reason`, the CLI decides by `reason` alone and never searches the 500's `error` text, which can quote the answer. On an older server without that token it reads the `error` text as before.
+
+The other hints `respond` prints (`send` after `prompt_no_longer_active`, the plan review Next / Note, `send` when the chosen row asks for text, and the option-number hint after `unresolvable_answer`), `send`'s `PROMPT_WAITING` fallback (when the server sent no sentence) and its "check the pane before resending" `capture`, and the `capture` hints of `wait` and `attach` all name the same resolved target: an `--instance` alias as the id it resolved to, `--agent` alone as given, nothing when neither was named. A `capture` that is there to read a dialog is `--pane --tail 40`.
+
 ---
 
 ## commandmate verify
