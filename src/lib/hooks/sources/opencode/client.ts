@@ -517,6 +517,20 @@ export function promptSelectionBody(
 }
 
 /**
+ * How a {@link sendOpencodePrompt} POST ended (Issue #3992).
+ *
+ *  - `accepted`: the server answered `204` (accepted, not yet delivered — read
+ *    it back);
+ *  - `rejected`: the server refused it — a non-2xx status, or the `200
+ *    text/html` SPA shell of a route it does not know (#1931) — so nothing was
+ *    sent;
+ *  - `unknown`: no answer (a timeout, a broken connection), or a 2xx other than
+ *    `204` that is not that shell — the server may still have created the
+ *    message.
+ */
+export type OpencodePromptDispatch = 'accepted' | 'rejected' | 'unknown';
+
+/**
  * Post one prompt to a session without waiting for the reply (Issue #2035).
  *
  * `POST /session/:id/prompt_async`. This is the route the send path takes when
@@ -546,7 +560,7 @@ export function promptSelectionBody(
  * @param sessionId - `ses_…`, the session the message belongs to
  * @param messageId - `msg_…`, from {@link newOpencodeMessageId}
  * @param parts - The message body; at least one part
- * @returns Whether the server answered `204`
+ * @returns How the POST ended ({@link OpencodePromptDispatch})
  */
 export async function sendOpencodePrompt(
   port: number,
@@ -554,7 +568,7 @@ export async function sendOpencodePrompt(
   messageId: string,
   parts: readonly OpencodePromptPart[],
   selection?: OpencodePromptSelection | null
-): Promise<boolean> {
+): Promise<OpencodePromptDispatch> {
   const url = `${opencodeBaseUrl(port)}/session/${encodeURIComponent(sessionId)}/prompt_async`;
   try {
     const response = await loopbackFetch(url, {
@@ -567,17 +581,22 @@ export async function sendOpencodePrompt(
       }),
       signal: AbortSignal.timeout(OPENCODE_REQUEST_TIMEOUT_MS),
     });
-    if (response.status !== 204) {
-      logger.warn('opencode-prompt-rejected', { port, sessionId, status: response.status });
-      return false;
+    if (response.status === 204) return 'accepted';
+    // Issue #3992: another 2xx may still have created the message (a JSON 200 /
+    // 201), so it stays unknown — except the web UI's SPA shell an unknown route
+    // answers (`200 text/html`, #1931), which never took the message.
+    if (response.status >= 200 && response.status < 300 && !hasContentType(response, 'text/html')) {
+      logger.warn('opencode-prompt-unexpected-success', { port, sessionId, status: response.status });
+      return 'unknown';
     }
-    return true;
+    logger.warn('opencode-prompt-rejected', { port, sessionId, status: response.status });
+    return 'rejected';
   } catch (error) {
     logger.debug('opencode-request-failed', {
       url,
       error: error instanceof Error ? error.message : String(error),
     });
-    return false;
+    return 'unknown';
   }
 }
 

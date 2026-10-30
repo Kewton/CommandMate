@@ -91,7 +91,7 @@ async function resolveBoundSendOutcome(
 ): Promise<BoundSendOutcome> {
   if (error instanceof ApiError && error.statusCode !== undefined) {
     if (error.apiCode === 'RELAY_BIND_CONFLICT') return 'conflict';
-    const reported = (error.payload as { sendOutcome?: unknown } | undefined)?.sendOutcome;
+    const reported: unknown = error.payload?.sendOutcome;
     if (isSendOutcome(reported)) return reported;
     if (error.statusCode < 500) return 'not_sent';
   }
@@ -103,6 +103,27 @@ async function resolveBoundSendOutcome(
     // Not answerable either: the relay is left as it is.
   }
   return 'unknown';
+}
+
+/**
+ * What to tell the sender about resending a failed send, from the server's
+ * `sendOutcome` on the error (Issue #3992). Null when the error carries none
+ * (a send that named no bound relay, an older server) or says `sent`.
+ */
+export function describeFailedSendOutcome(error: unknown, worktreeId: string): string | null {
+  if (!(error instanceof ApiError)) return null;
+  const outcome: unknown = error.payload?.sendOutcome;
+  if (outcome === 'not_sent') {
+    return 'Note: the message was not sent (sendOutcome=not_sent); it is safe to send it again.';
+  }
+  if (outcome === 'unknown') {
+    return (
+      'Note: whether the message was sent is not known (sendOutcome=unknown); '
+      + `check the pane first (\`commandmate capture ${worktreeId} --pane\`) and do not resend before that, `
+      + 'or it may arrive twice.'
+    );
+  }
+  return null;
 }
 
 /**
@@ -142,13 +163,22 @@ export async function postMessage(
     if (relayId && (outcome === null || outcome === 'not_sent')) {
       await cancelRelayQuietly(client, relayId);
     } else if (relayId && outcome === 'unknown') {
-      printRelayUnconfirmedNotice(relayId);
+      // Issue #3992: the relay notice carries the "look before resending" hint.
+      printRelayUnconfirmedNotice(relayId, worktreeId);
+    }
+    const promptWaiting = error instanceof ApiError && error.apiCode === PROMPT_WAITING_CODE;
+    // Issue #3992: whether it may be sent again, as the server said — not on
+    // PROMPT_WAITING, whose own line says to answer the prompt first, and not
+    // when the relay notice above already said it.
+    if (!promptWaiting && !(relayId && outcome === 'unknown')) {
+      const resendNote = describeFailedSendOutcome(error, worktreeId);
+      if (resendNote !== null) console.error(resendNote);
     }
     // Issue #1708: the session is sitting on a prompt, so the message
     // would have been typed into the prompt's input line rather than
     // reaching the agent. Reported on its own so an unattended runner sees
     // "answer the prompt", not a generic HTTP failure.
-    if (error instanceof ApiError && error.apiCode === PROMPT_WAITING_CODE) {
+    if (promptWaiting && error instanceof ApiError) {
       // The server's own sentence, not error.message: handleApiError maps a
       // bare 409 to "Unexpected HTTP status: 409", which says nothing about
       // what to do next.

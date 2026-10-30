@@ -112,6 +112,7 @@ import {
   LATE_PASTE_OBSERVE_MS,
   clearExpiredCarriedPasteMark,
   getCarriedPasteMark,
+  isInputBoundaryRefusal,
   leaveCarriedPasteMark,
   noteInputStart,
   withInstanceInputLock,
@@ -325,7 +326,14 @@ async function pasteBody(
   }
   // Issue #3953: the send's stamp, as the typed branch takes it — after
   // `load-buffer` (up to its timeout), right before the body reaches the pane.
-  noteInputStart();
+  // Issue #3992: a refused input boundary (#3957) stops the send here, with the
+  // body loaded but not pasted — the buffer is dropped before the refusal goes up.
+  try {
+    noteInputStart();
+  } catch (error: unknown) {
+    await runTmux(['delete-buffer', '-b', bufferName]).catch(() => undefined);
+    throw error;
+  }
   try {
     await runTmux(['paste-buffer', '-p', '-r', '-d', '-b', bufferName, '-t', exactTarget(sessionName)]);
   } catch (error: unknown) {
@@ -892,8 +900,10 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
     try {
       await pasteBody(sessionName, message, ticket, cliToolId);
     } catch (error: unknown) {
-      // Whether tmux put any of it into the pane is unknown.
-      leaveCarriedPasteMark(ticket);
+      // Whether tmux put any of it into the pane is unknown — except after a
+      // refused input boundary (Issue #3992), which stops before `paste-buffer`:
+      // a mark then would only hold the next send off for nothing.
+      if (!isInputBoundaryRefusal(error)) leaveCarriedPasteMark(ticket);
       throw error;
     }
     await confirmPasteLanded({ sessionName, message, cliToolId, composer, attempts: pasteLandedAttempts, ticket });

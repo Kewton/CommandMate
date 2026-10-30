@@ -475,6 +475,13 @@ export interface ApiErrorPayload {
   /** Issue #2865: sent with the foreign-session 409 (`session_owned_by_other_server`). */
   sessionName?: string;
   sessionPath?: string | null;
+  /**
+   * Issue #3957/#3992: sent with the send route's errors after a bound relay
+   * was reserved — `not_sent`: nothing reached the session, it may be sent
+   * again; `unknown`: it may have, look before resending. Mirrors
+   * src/lib/relay/relay-bind.ts RelaySendOutcome (and ChatMessage.sendOutcome).
+   */
+  sendOutcome?: 'sent' | 'not_sent' | 'unknown';
 }
 
 /**

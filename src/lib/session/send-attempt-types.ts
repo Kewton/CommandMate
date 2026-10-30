@@ -48,6 +48,12 @@ export type SendAttemptReason =
   | 'session-replaced'
   /** `not-sent`: the composer was handed to another writer before the body was typed (#3945). */
   | 'input-lock-lost'
+  /**
+   * `not-sent`: the bound relay the send was going in under was no longer its
+   * own right before the first key (cancelled, expired or taken), so the
+   * input-boundary hook refused it and nothing was typed or dispatched (#3957/#3992).
+   */
+  | 'relay-reservation-lost'
   /** `not-sent`: the pane could not be re-read under the input lock, so nothing was typed (#3945). */
   | 'recheck-failed'
   /** `indeterminate`: the body was typed, did not land intact, and was taken back out best-effort (#2464/#3366). */
