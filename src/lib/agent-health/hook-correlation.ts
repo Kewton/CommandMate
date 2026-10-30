@@ -65,22 +65,35 @@ function describe(delivery: HookDelivery): string {
   });
 }
 
-export function evaluateHookCorrelation(
+/**
+ * The tool's own deliveries, split by the correlation keys: those with other
+ * keys, the expected events that never arrived with both keys, and the
+ * expected events that did.
+ */
+export function correlateHookDeliveries(
   deliveries: readonly HookDelivery[],
   expectation: HookCorrelationExpectation
-): HookCorrelationVerdict {
+): { own: HookDelivery[]; mismatched: HookDelivery[]; missing: string[]; received: string[] } {
   const own = deliveries.filter((delivery) => delivery.tool === expectation.tool);
   const matches = (delivery: HookDelivery) =>
     delivery.worktreeId === expectation.worktreeId &&
     delivery.instanceId === expectation.instanceId;
+  const arrived = (event: string) =>
+    own.some((delivery) => delivery.kind === 'agent-event' && delivery.event === event && matches(delivery));
 
-  const mismatched = own.filter((delivery) => !matches(delivery));
-  const missing = expectation.expectedEvents.filter(
-    (event) =>
-      !own.some(
-        (delivery) => delivery.kind === 'agent-event' && delivery.event === event && matches(delivery)
-      )
-  );
+  return {
+    own,
+    mismatched: own.filter((delivery) => !matches(delivery)),
+    missing: expectation.expectedEvents.filter((event) => !arrived(event)),
+    received: expectation.expectedEvents.filter(arrived),
+  };
+}
+
+export function evaluateHookCorrelation(
+  deliveries: readonly HookDelivery[],
+  expectation: HookCorrelationExpectation
+): HookCorrelationVerdict {
+  const { own, mismatched, missing } = correlateHookDeliveries(deliveries, expectation);
 
   const expected = `${expectation.expectedEvents.join(' / ')} が worktreeId=${expectation.worktreeId}・instanceId=${expectation.instanceId} で届く`;
   const received = own.map(describe).join('\n');

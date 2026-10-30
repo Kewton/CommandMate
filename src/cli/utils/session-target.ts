@@ -23,7 +23,7 @@
 
 import { getErrorMessage } from '../types';
 import { isCliToolId } from '../config/cli-tool-ids';
-import type { ApiClient } from './api-client';
+import { rethrowIfDeadlineExceeded, type ApiClient } from './api-client';
 import { fetchAgentInstances } from './agent-instances';
 import { serverResolvesSessionTargets } from './server-capabilities';
 import type { AgentInstance } from '../types/api-responses';
@@ -186,6 +186,8 @@ async function resolveLocally(
     const instances = await fetchAgentInstances(client, worktreeId);
     registered = instances.find((inst) => inst.id === instanceId);
   } catch (error) {
+    // Issue #3983: `--timeout` ran out — not a roster to degrade around.
+    rethrowIfDeadlineExceeded(error);
     console.error(
       `Warning: could not read the agent-instance roster (${getErrorMessage(error)}); using --agent as given.`
     );

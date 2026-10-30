@@ -26,6 +26,14 @@ export const SERVER_CAPABILITIES = [
    * configured. `tests/unit/api/capabilities.test.ts` pins that, key for key.
    */
   'default-selected-agents',
+  /**
+   * Every answer error `/prompt-response` and `/respond` return carries
+   * `reason` and `keysSent` (Issue #3982), so a caller reads `reason` and
+   * never searches `error` for a reason code: that text can quote the answer.
+   * A server without this token put the reason of a part-typed answer
+   * (`answer_input_lost`) only in the 500's `error` text.
+   */
+  'prompt-answer-reason',
 ] as const;
 
 /** Exact response shape of GET /api/capabilities. Pinned key-for-key by tests. */

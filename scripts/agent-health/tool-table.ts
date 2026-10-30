@@ -23,6 +23,11 @@ import { getAntigravityHooksConfigPath } from '@/lib/hooks/sources/antigravity/h
 import { getCodexHome, getCodexHooksPath } from '@/lib/hooks/sources/codex/hooks-config';
 import { getCodexRelayInstallPath } from '@/lib/hooks/sources/codex/relay-install';
 import { sameTomlWithoutMarker, type TrustStateComparator } from '@/lib/agent-health/config-guard';
+import {
+  COMMAND_CODE_MODEL_AUTH_FAILURE_ROWS,
+  OPENCODE_MODEL_AUTH_FAILURE_ROWS,
+  type ModelAuthFailureRows,
+} from '@/lib/agent-health/model-auth';
 import type { PickerSettingsFormat } from '@/lib/agent-health/picker-settings';
 import type {
   AgentHealthLimitedTool,
@@ -136,6 +141,12 @@ export interface ToolProbeSpec {
   server?: 'opencode-v2';
   /** `screen-picker`; a tool without it skips that check (Issue #3053). */
   picker?: PickerSpec;
+  /**
+   * The rows the tool prints when its model provider refused the credentials
+   * (Issues #3420 / #3994). A fail on a turn that newly shows one is a
+   * `signed-out` skip; a tool without them is never excused that way.
+   */
+  modelAuthFailureRows?: ModelAuthFailureRows;
 }
 
 /** `$XDG_STATE_HOME`, or its XDG default `~/.local/state`. */
@@ -392,6 +403,7 @@ export const TOOL_PROBE_SPECS: Record<AgentHealthTool, ToolProbeSpec> = {
     // pick is copied; the prompt history stays out.
     seedFiles: opencodeModelSeed,
     guardedFiles: () => ({ hookConfig: [], trustState: [] }),
+    modelAuthFailureRows: OPENCODE_MODEL_AUTH_FAILURE_ROWS,
   },
 
   'command-code': {
@@ -425,6 +437,7 @@ export const TOOL_PROBE_SPECS: Record<AgentHealthTool, ToolProbeSpec> = {
       hookConfig: [],
       trustState: [path.join(os.homedir(), '.commandcode', 'trusted-hooks.json')],
     }),
+    modelAuthFailureRows: COMMAND_CODE_MODEL_AUTH_FAILURE_ROWS,
   },
   'opencode-v2': {
     tool: 'opencode-v2',
@@ -467,6 +480,7 @@ export const TOOL_PROBE_SPECS: Record<AgentHealthTool, ToolProbeSpec> = {
     // the probe does not redirect.
     seedFiles: opencodeModelSeed,
     guardedFiles: () => ({ hookConfig: [], trustState: [] }),
+    modelAuthFailureRows: OPENCODE_MODEL_AUTH_FAILURE_ROWS,
     server: 'opencode-v2',
   },
 };

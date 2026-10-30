@@ -22,7 +22,9 @@ import {
   INSTANCE_ALIAS_HELP_SUFFIX,
   INSTANCE_SELECTOR_ERROR,
 } from './instances';
-import { resolveCommandTarget } from './command-target';
+import { resolveCommandTarget, type CommandTarget } from './command-target';
+import { dialogCaptureCommand, followUpCommand } from '../utils/follow-up-command';
+import { serverReportsPromptAnswerReason } from '../utils/server-capabilities';
 import { isStrictRespond, runStrictRespond } from './respond-strict';
 import { STRICT_RESPOND_KINDS } from '../../lib/prompt-observation/kinds';
 
@@ -174,45 +176,41 @@ export const ANSWER_NOT_DELIVERED = 'answer_not_delivered';
 
 /**
  * Issue #3975: the answer was stopped part-way — some of its keys may be on
- * the pane. `/prompt-response` answers it as a 500 whose `error` carries this
- * code. Restated from `src/lib/prompt-answer-errors.ts` (`ANSWER_INPUT_LOST_REASON`).
+ * the pane. Both routes answer it as a 500 with this `reason` (Issue #3982).
+ * Restated from `src/lib/prompt-answer-errors.ts` (`ANSWER_INPUT_LOST_REASON`).
  */
 export const ANSWER_INPUT_LOST = 'answer_input_lost';
 
-/** Whether a failed `/prompt-response` request is the answer stopped part-way (Issue #3975). */
-function isAnswerInputLost(error: unknown): boolean {
+/**
+ * Whether a failed `/prompt-response` request is the answer stopped part-way
+ * (Issue #3975).
+ *
+ * Issue #3982: by `reason` alone on a server that declares
+ * `prompt-answer-reason`. The 500's `error` text can quote the answer (a tmux
+ * failure does), so a reason code found there is not evidence of anything. Only
+ * a server without the token — which put this reason nowhere but that text —
+ * is still read the old way. The probe is the memo `resolveCommandTarget`
+ * filled for this client; nothing is asked unless the request already failed.
+ */
+async function isAnswerInputLost(error: unknown, client: ApiClient): Promise<boolean> {
   if (!(error instanceof ApiError) || (error.statusCode ?? 0) < 500) return false;
   const payload = error.payload as { reason?: unknown; error?: unknown } | undefined;
   if (payload?.reason === ANSWER_INPUT_LOST) return true;
-  return typeof payload?.error === 'string' && payload.error.includes(ANSWER_INPUT_LOST);
+  if (typeof payload?.error !== 'string' || !payload.error.includes(ANSWER_INPUT_LOST)) return false;
+  return !(await serverReportsPromptAnswerReason(client));
 }
 
 /**
- * The `capture` that reads the pane the answer was typed at (Issue #3975
- * review P2-2): the target the answer resolved to, never the worktree default,
- * and `--pane`, since the stored reply is not what was partly typed.
+ * Reports an answer stopped part-way (Issue #3975) and sets the exit code. The
+ * `capture` reads the pane the answer was typed at (review P2-2): the target
+ * the answer resolved to, never the worktree default, and `--pane`, since the
+ * stored reply is not what was partly typed.
  */
-function answeredPaneCaptureCommand(
-  worktreeId: string,
-  target: { agent: string | undefined; instanceId: string | undefined },
-): string {
-  const selector = target.instanceId
-    ? ` --instance ${target.instanceId}`
-    : target.agent
-      ? ` --agent ${target.agent}`
-      : '';
-  return `commandmate capture ${worktreeId}${selector} --pane --tail 40`;
-}
-
-/** Reports an answer stopped part-way (Issue #3975) and sets the exit code. */
-function reportAnswerInputLost(
-  worktreeId: string,
-  target: { agent: string | undefined; instanceId: string | undefined },
-): void {
+function reportAnswerInputLost(worktreeId: string, target: CommandTarget): void {
   console.error(
     `Warning: The answer may have been only partly typed (reason: ${ANSWER_INPUT_LOST}): the session was ` +
       'replaced part-way, so some of its keys may have reached the agent and the rest did not. ' +
-      `Check the screen with \`${answeredPaneCaptureCommand(worktreeId, target)}\` before answering again.`,
+      `Check the screen with \`${dialogCaptureCommand(worktreeId, target)}\` before answering again.`,
   );
   // The exit code `decision_not_delivered` uses (Issue #3975: no new code).
   process.exit(ExitCode.UNEXPECTED_ERROR);
@@ -227,11 +225,6 @@ const PLAN_REVIEW_ACTIONS = ['comment', 'submit', 'approve', 'cancel'] as const;
 /** Reasons the server gives for a plan review answer it refused before any key. */
 function isPlanReviewRefusal(reason: string): boolean {
   return reason.startsWith('plan_review_');
-}
-
-/** ` --instance <id>` as the caller spelled it, or nothing. */
-function instanceFlag(instance: string | undefined): string {
-  return instance ? ` --instance ${instance}` : '';
 }
 
 /**
@@ -334,7 +327,7 @@ function reportFailedResponse(
   worktreeId: string,
   answer: string | undefined,
   useDefault: boolean,
-  options: RespondOptions,
+  target: CommandTarget,
 ): void {
   // [DR2-06] Check reason for failure
   const reason = result.reason || 'unknown';
@@ -384,10 +377,10 @@ function reportFailedResponse(
     // be mapped onto a choice", and only when the answer was not already
     // a number (where the number itself is what was wrong).
     if (reason === 'unresolvable_answer' && answer !== undefined && !/^\d+$/.test(answer.trim())) {
-      const target = options.instance ? ` --instance ${options.instance}` : '';
+      // Issue #3982: the resolved target, and the pane — where the numbers are.
       console.error(
-        `Hint: answer with the option number — \`commandmate respond ${worktreeId} <number>${target}\` ` +
-          `(\`commandmate capture ${worktreeId}${target}\` prints the dialog and its numbers).`,
+        `Hint: answer with the option number — \`${followUpCommand('respond', worktreeId, target, '<number>')}\` ` +
+          `(\`${dialogCaptureCommand(worktreeId, target)}\` prints the dialog and its numbers).`,
       );
     }
   } else {
@@ -400,7 +393,7 @@ function reportFailedResponse(
       console.error(
         'Hint: no dialog is open, so this text was not delivered. If you just chose an option that asks ' +
           'for text (e.g. "No, tell … what to do differently"), the agent is waiting for it in its input box — ' +
-          `send it with \`commandmate send ${worktreeId} "<text>"${instanceFlag(options.instance)}\`.`,
+          `send it with \`${followUpCommand('send', worktreeId, target, '"<text>"')}\`.`,
       );
     }
   }
@@ -416,15 +409,14 @@ function reportFailedResponse(
  * What was done on Command Code's plan review (Issue #3125), and the next step:
  * a pinned comment is not delivered to the agent until the review is submitted.
  */
-function printPlanReviewOutcome(result: PromptResponseResult, worktreeId: string, options: RespondOptions): void {
+function printPlanReviewOutcome(result: PromptResponseResult, worktreeId: string, target: CommandTarget): void {
   const planReview = result.planReview;
   if (!planReview) return;
-  const target = instanceFlag(options.instance);
   switch (planReview.action) {
     case 'comment':
       console.log(`Plan review: pinned comment "${planReview.comment ?? ''}".`);
       console.error(
-        `Next: send the review with \`commandmate respond ${worktreeId} --plan-review submit${target}\` ` +
+        `Next: send the review with \`${followUpCommand('respond', worktreeId, target, '--plan-review submit')}\` ` +
           `(ctrl+r), or approve with \`--plan-review approve\` (comments go along as notes).`,
       );
       break;
@@ -445,7 +437,7 @@ function printPlanReviewOutcome(result: PromptResponseResult, worktreeId: string
         if (planReview.pendingCommentsBefore > 0) {
           console.error(
             'Note: with pending comments Command Code may ask how to approve — confirm with ' +
-              `\`commandmate respond ${worktreeId} --plan-review approve${target}\` again, or go back with \`--plan-review cancel\`.`,
+              `\`${followUpCommand('respond', worktreeId, target, '--plan-review approve')}\` again, or go back with \`--plan-review cancel\`.`,
           );
         }
       }
@@ -568,8 +560,10 @@ Strict respond (--expect-screen <kind> --observation <token> <label>):
         // and falls back to the worktree default, so `--instance codex` alone
         // answered into a session that was never started. Resolve the tool the
         // instance is registered under first.
-        const { agent, instanceId } = await resolveCommandTarget(client, worktreeId, options.instance, options.agent);
+        const commandTarget = await resolveCommandTarget(client, worktreeId, options.instance, options.agent);
+        const { agent, instanceId } = commandTarget;
         // Issue #2376: the resolved id. /prompt-response reads instance ids.
+        // Issue #3982: every hint below names `commandTarget`, never `options.instance`.
 
         const body = buildPromptResponseBody(useDefault, answer, agent, instanceId, options.planReview);
 
@@ -610,18 +604,18 @@ Strict respond (--expect-screen <kind> --observation <token> <label>):
           } catch (error) {
             // Issue #3975: stopped part-way is not "the server failed" — some
             // keys may be on the pane, and the operator has to look first.
-            if (!isAnswerInputLost(error)) throw error;
-            reportAnswerInputLost(worktreeId, { agent, instanceId });
+            if (!(await isAnswerInputLost(error, client))) throw error;
+            reportAnswerInputLost(worktreeId, commandTarget);
             return;
           }
         }
 
         if (result && !result.success) {
-          reportFailedResponse(result, worktreeId, answer, useDefault, options);
+          reportFailedResponse(result, worktreeId, answer, useDefault, commandTarget);
         }
 
         printResolvedAudit(result, answer);
-        if (result && 'planReview' in result) printPlanReviewOutcome(result, worktreeId, options);
+        if (result && 'planReview' in result) printPlanReviewOutcome(result, worktreeId, commandTarget);
 
         console.error('Response sent.');
 
@@ -632,7 +626,7 @@ Strict respond (--expect-screen <kind> --observation <token> <label>):
           console.error(
             `Next: option ${followUp.optionNumber} ("${followUp.optionLabel}") asks for your text, and the dialog ` +
               'is closed now, so `respond` cannot deliver it — send it with ' +
-              `\`commandmate send ${worktreeId} "<text>"${instanceFlag(options.instance)}\`.`,
+              `\`${followUpCommand('send', worktreeId, commandTarget, '"<text>"')}\`.`,
           );
         }
       } catch (error) {

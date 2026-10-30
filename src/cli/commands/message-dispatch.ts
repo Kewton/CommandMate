@@ -10,6 +10,8 @@
 import { ExitCode } from '../types';
 import type { ChatMessage, RelayGetResponse } from '../types/api-responses';
 import { ApiClient, ApiError } from '../utils/api-client';
+import { paneCaptureCommand } from '../utils/follow-up-command';
+import type { CommandTarget } from './command-target';
 import {
   cancelRelayQuietly,
   printRelayUnconfirmedNotice,
@@ -34,6 +36,13 @@ export interface RegisterRelayForMessageInput {
   instance?: string;
   agent?: string;
   allowRelayChain?: boolean;
+  /**
+   * Issue #3983: the client the two endpoints are resolved with (`ask` passes
+   * its `--timeout`-bounded one). Defaults to `client`. The relay POST itself
+   * always goes through `client`: it creates state, and cutting it would leave
+   * "was the relay opened?" unanswered — the same reason `/send` is not cut.
+   */
+  resolveClient?: ApiClient;
 }
 
 /** Resolve both endpoints and open the relay; returns its id and whether it is bound. */
@@ -41,9 +50,10 @@ export async function registerRelayForMessage(
   client: ApiClient,
   input: RegisterRelayForMessageInput
 ): Promise<RegisteredRelay> {
-  const replyEndpoint = await resolveRelayEndpoint(client, input.replyTo);
+  const resolveClient = input.resolveClient ?? client;
+  const replyEndpoint = await resolveRelayEndpoint(resolveClient, input.replyTo);
   const workerEndpoint = await resolveEndpointForWorktree(
-    client,
+    resolveClient,
     input.worktreeId,
     input.instance,
     input.agent
@@ -65,6 +75,8 @@ export interface PostMessageOptions {
   onFailure?: () => Promise<void>;
   /** Printed (after `Error: `) when PROMPT_WAITING carried no message body. */
   promptWaitingFallback: string;
+  /** The resolved target the send addressed; the hints name it (Issue #3982). */
+  target: CommandTarget;
 }
 
 /** What the send did, as far as a bound relay is concerned (Issue #3957). */
@@ -109,8 +121,11 @@ async function resolveBoundSendOutcome(
  * What to tell the sender about resending a failed send, from the server's
  * `sendOutcome` on the error (Issue #3992). Null when the error carries none
  * (a send that named no bound relay, an older server) or says `sent`.
+ *
+ * @param target - The resolved target, so the `capture` reads the pane the
+ *   message went to (Issue #3982); omitted, the hint names no target
  */
-export function describeFailedSendOutcome(error: unknown, worktreeId: string): string | null {
+export function describeFailedSendOutcome(error: unknown, worktreeId: string, target?: CommandTarget): string | null {
   if (!(error instanceof ApiError)) return null;
   const outcome: unknown = error.payload?.sendOutcome;
   if (outcome === 'not_sent') {
@@ -119,7 +134,7 @@ export function describeFailedSendOutcome(error: unknown, worktreeId: string): s
   if (outcome === 'unknown') {
     return (
       'Note: whether the message was sent is not known (sendOutcome=unknown); '
-      + `check the pane first (\`commandmate capture ${worktreeId} --pane\`) and do not resend before that, `
+      + `check the pane first (\`${paneCaptureCommand(worktreeId, target)}\`) and do not resend before that, `
       + 'or it may arrive twice.'
     );
   }
@@ -164,14 +179,14 @@ export async function postMessage(
       await cancelRelayQuietly(client, relayId);
     } else if (relayId && outcome === 'unknown') {
       // Issue #3992: the relay notice carries the "look before resending" hint.
-      printRelayUnconfirmedNotice(relayId, worktreeId);
+      printRelayUnconfirmedNotice(relayId, worktreeId, options.target);
     }
     const promptWaiting = error instanceof ApiError && error.apiCode === PROMPT_WAITING_CODE;
     // Issue #3992: whether it may be sent again, as the server said — not on
     // PROMPT_WAITING, whose own line says to answer the prompt first, and not
     // when the relay notice above already said it.
     if (!promptWaiting && !(relayId && outcome === 'unknown')) {
-      const resendNote = describeFailedSendOutcome(error, worktreeId);
+      const resendNote = describeFailedSendOutcome(error, worktreeId, options.target);
       if (resendNote !== null) console.error(resendNote);
     }
     // Issue #1708: the session is sitting on a prompt, so the message

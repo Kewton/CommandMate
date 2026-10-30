@@ -39,10 +39,16 @@ const SESSION_NAME_PREFIX = 'mcbd-';
 /** Shape of a session-name namespace: 8 lowercase hex digits (Issue #2866). */
 export const SESSION_NAMESPACE_PATTERN = /^[0-9a-f]{8}$/;
 
-/** CLI tool ids, longest first, so a longer id is never read as a shorter one. */
-const CLI_TOOL_IDS_LONGEST_FIRST: readonly CLIToolType[] = [...CLI_TOOL_IDS].sort(
-  (a, b) => b.length - a.length
-);
+/**
+ * CLI tool ids, longest first, so a longer id is never read as a shorter one.
+ *
+ * Read when called, not when this module loads (Issue #3981): modules loaded
+ * early (`session-starting-state`) import this one, and a module-load read of
+ * `CLI_TOOL_IDS` reaches a test's getter mock before it can answer.
+ */
+function cliToolIdsLongestFirst(): readonly CLIToolType[] {
+  return [...CLI_TOOL_IDS].sort((a, b) => b.length - a.length);
+}
 
 declare global {
   // eslint-disable-next-line no-var
@@ -186,7 +192,7 @@ export function parseSessionName(name: string): ParsedSessionName | null {
     body = body.slice(dash + 1);
   }
 
-  const cliToolId = CLI_TOOL_IDS_LONGEST_FIRST.find((id) => body.startsWith(`${id}-`));
+  const cliToolId = cliToolIdsLongestFirst().find((id) => body.startsWith(`${id}-`));
   if (!cliToolId) return null;
   const rest = body.slice(cliToolId.length + 1);
   if (rest === '') return null;
