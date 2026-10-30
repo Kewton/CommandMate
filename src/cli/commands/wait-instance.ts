@@ -7,6 +7,7 @@ import { getErrorMessage } from '../types';
 import type { WaitOptions } from '../types';
 import type { ApiClient } from '../utils/api-client';
 import { resolveInstanceTarget } from './instances';
+import { commandTargetOf, type CommandTarget } from './command-target';
 
 /**
  * `options` with `--instance` resolved from a selector to an instance ID
@@ -43,4 +44,17 @@ export async function resolveWaitInstance<T extends WaitOptions>(
     );
     return options;
   }
+}
+
+/**
+ * The target `wait`'s hints name (Issue #3982): the `--instance` that
+ * {@link resolveWaitInstance} resolved, or none. `wait` has no `--agent`.
+ *
+ * @param options - Options already passed through {@link resolveWaitInstance}
+ */
+export function waitCommandTarget(options: Pick<WaitOptions, 'instance'>): CommandTarget {
+  return commandTargetOf(
+    options.instance ? { cliToolId: undefined, instanceId: options.instance } : null,
+    undefined,
+  );
 }
