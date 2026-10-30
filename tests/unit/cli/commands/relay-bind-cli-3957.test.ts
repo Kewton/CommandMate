@@ -285,6 +285,27 @@ describe('what the failed send tells the sender about resending (Issue #3992)', 
     expect(stderr()).not.toContain(NOT_SENT_NOTE);
   });
 
+  it('PROMPT_WAITING with not_sent: no "send it again" — only the answer-the-prompt error', async () => {
+    mockRoutes([
+      RELAY_BOUND,
+      sendRoute({ status: 409, data: { error: 'answer the prompt first', code: 'PROMPT_WAITING', sendOutcome: 'not_sent' } }),
+      CANCEL,
+    ]);
+    const code = await runUntilExit(() => runSend(['wt-b', 'x', '--reply-to', 'wt-a@claude']));
+    expect(code).toBe(2);
+    expect(stderr()).not.toContain(NOT_SENT_NOTE);
+    expect(stderr()).toContain('Error: answer the prompt first');
+  });
+
+  it('unknown with a bound relay: one notice carries both the relay lookup and the pane check', async () => {
+    mockRoutes([RELAY_BOUND, sendRoute({ status: 500, data: { error: 'tmux went away', sendOutcome: 'unknown' } }), CANCEL]);
+    await runUntilExit(() => runSend(['wt-b', 'x', '--reply-to', 'wt-a@claude']));
+    const notices = mockConsoleError.mock.calls.map((c) => String(c[0])).filter((line) => line.includes(UNKNOWN_NOTE));
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toContain(`commandmate relays --id ${RELAY_ID}`);
+    expect(stderr()).not.toContain('Note: whether the message was sent is not known');
+  });
+
   it('negative control: an error with no sendOutcome (no bound relay) adds neither note', async () => {
     mockRoutes([RELAY_LEGACY_SERVER, sendRoute({ status: 500, data: { error: 'boom' } }), CANCEL]);
     await runUntilExit(() => runSend(['wt-b', 'x', '--reply-to', 'wt-a@claude']));

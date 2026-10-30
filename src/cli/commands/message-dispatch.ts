@@ -163,16 +163,22 @@ export async function postMessage(
     if (relayId && (outcome === null || outcome === 'not_sent')) {
       await cancelRelayQuietly(client, relayId);
     } else if (relayId && outcome === 'unknown') {
-      printRelayUnconfirmedNotice(relayId);
+      // Issue #3992: the relay notice carries the "look before resending" hint.
+      printRelayUnconfirmedNotice(relayId, worktreeId);
     }
-    // Issue #3992: whether it may be sent again, as the server said.
-    const resendNote = describeFailedSendOutcome(error, worktreeId);
-    if (resendNote !== null) console.error(resendNote);
+    const promptWaiting = error instanceof ApiError && error.apiCode === PROMPT_WAITING_CODE;
+    // Issue #3992: whether it may be sent again, as the server said — not on
+    // PROMPT_WAITING, whose own line says to answer the prompt first, and not
+    // when the relay notice above already said it.
+    if (!promptWaiting && !(relayId && outcome === 'unknown')) {
+      const resendNote = describeFailedSendOutcome(error, worktreeId);
+      if (resendNote !== null) console.error(resendNote);
+    }
     // Issue #1708: the session is sitting on a prompt, so the message
     // would have been typed into the prompt's input line rather than
     // reaching the agent. Reported on its own so an unattended runner sees
     // "answer the prompt", not a generic HTTP failure.
-    if (error instanceof ApiError && error.apiCode === PROMPT_WAITING_CODE) {
+    if (promptWaiting && error instanceof ApiError) {
       // The server's own sentence, not error.message: handleApiError maps a
       // bare 409 to "Unexpected HTTP status: 409", which says nothing about
       // what to do next.

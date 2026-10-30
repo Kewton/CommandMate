@@ -521,10 +521,12 @@ export function promptSelectionBody(
  *
  *  - `accepted`: the server answered `204` (accepted, not yet delivered — read
  *    it back);
- *  - `rejected`: the server answered, with anything but `204` — it did not take
- *    the message, so nothing was sent;
- *  - `unknown`: no answer (a timeout, a broken connection) — the server may
- *    still have created the message.
+ *  - `rejected`: the server refused it — a non-2xx status, or the `200
+ *    text/html` SPA shell of a route it does not know (#1931) — so nothing was
+ *    sent;
+ *  - `unknown`: no answer (a timeout, a broken connection), or a 2xx other than
+ *    `204` that is not that shell — the server may still have created the
+ *    message.
  */
 export type OpencodePromptDispatch = 'accepted' | 'rejected' | 'unknown';
 
@@ -579,11 +581,16 @@ export async function sendOpencodePrompt(
       }),
       signal: AbortSignal.timeout(OPENCODE_REQUEST_TIMEOUT_MS),
     });
-    if (response.status !== 204) {
-      logger.warn('opencode-prompt-rejected', { port, sessionId, status: response.status });
-      return 'rejected';
+    if (response.status === 204) return 'accepted';
+    // Issue #3992: another 2xx may still have created the message (a JSON 200 /
+    // 201), so it stays unknown — except the web UI's SPA shell an unknown route
+    // answers (`200 text/html`, #1931), which never took the message.
+    if (response.status >= 200 && response.status < 300 && !hasContentType(response, 'text/html')) {
+      logger.warn('opencode-prompt-unexpected-success', { port, sessionId, status: response.status });
+      return 'unknown';
     }
-    return 'accepted';
+    logger.warn('opencode-prompt-rejected', { port, sessionId, status: response.status });
+    return 'rejected';
   } catch (error) {
     logger.debug('opencode-request-failed', {
       url,

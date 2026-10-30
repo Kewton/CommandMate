@@ -595,10 +595,10 @@ export class OpenCodeTool extends BaseCLITool {
    * relay-bound send records as its lower bound — and which can refuse, in
    * which case nothing is posted and the refusal propagates past the catch
    * below. When the POST does not end delivered, the caller is told whether
-   * nothing exists (`not_sent`: a POST answered with anything but `204` —
-   * Issue #3992 — or a `404` on the read-back) or it cannot be said
-   * (`unknown`: a POST that got no answer, a body that read back different,
-   * an exhausted ladder), BEFORE the keyboard fallback runs.
+   * nothing exists (`not_sent`: a POST the server refused — Issue #3992 — or a
+   * `404` on the read-back) or it cannot be said (`unknown`: a POST that got no
+   * answer or an unexpected 2xx, a body that read back different, an exhausted
+   * ladder), BEFORE the keyboard fallback runs.
    *
    * @param target - The instance
    * @param message - The body, sent verbatim
@@ -684,9 +684,9 @@ export class OpenCodeTool extends BaseCLITool {
       // nothing is posted.
       noteDispatchStart();
       dispatched = true;
-      // Issue #3992: a POST the server answered with anything but `204` was
-      // refused — nothing was sent. One that got no answer (a timeout, a broken
-      // connection) may still have created the message, so it stays unknown.
+      // Issue #3992: a POST the server refused (a non-2xx, an unknown route's
+      // `200 text/html`) sent nothing. One that got no answer, or an unexpected
+      // 2xx, may still have created the message, so it stays unknown.
       const dispatch = await sendOpencodePrompt(port, sessionId, messageId, parts, selection);
       if (dispatch === 'rejected') return 'not_sent';
       if (dispatch === 'unknown') return 'unknown';

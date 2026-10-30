@@ -439,6 +439,27 @@ describe('Issue #2035: sending over the opencode server', () => {
       expect(await verdictsOf(SLASH_BODY)).toEqual(['unknown']);
     });
 
+    it.each([
+      ['200 application/json', 200],
+      ['201 application/json', 201],
+    ])('a 2xx other than 204 (%s) may have created the message: unknown, not not_sent', async (_label, status) => {
+      connected();
+      globalThis.fetch = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+        if (init?.method === 'POST') {
+          return {
+            ok: true,
+            status,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: async () => ({ id: 'msg_x' }),
+          };
+        }
+        return readbackMissing();
+      }) as unknown as typeof fetch;
+
+      await expect(sendOpencodePrompt(PORT, SESSION, 'msg_x', [{ type: 'text', text: 'x' }])).resolves.toBe('unknown');
+      expect(await verdictsOf(SLASH_BODY)).toEqual(['unknown']);
+    });
+
     it('control: a 204 is accepted and, once read back, no verdict is given', async () => {
       connected();
       stubHappyPath(SLASH_BODY);
