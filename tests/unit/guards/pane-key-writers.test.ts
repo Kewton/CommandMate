@@ -24,6 +24,14 @@
  * - `decided-outside` / `kill` / `dead` are the un-ordered rows. They may only
  *   go down ({@link UNMEDIATED_BASELINE}); every `decided-outside` row names a
  *   test of the decision.
+ * - A row whose lock its caller holds (`held: 'caller'`), or that is marked
+ *   `callersOnLedger`, has its callers on a ledger of their own
+ *   ({@link CALLER_LEDGER}, review P2-1): its `sendKeys` reference does not
+ *   move when someone calls the function from a new place outside the lock,
+ *   so the callers are read off the source and checked the same way. A caller
+ *   is `lexical` (it sits in a function passed to the lock) or `listed` (the
+ *   reason says how it holds the lock); `listed` callers may only go down
+ *   ({@link LISTED_CALLER_BASELINE}).
  *
  * Stage 2 (another Issue): once the un-ordered rows are 0, narrow `sendKeys`
  * to a ticket-taking API in the type system.
@@ -35,7 +43,16 @@ import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { REPO_ROOT } from './route-tmux-reach';
-import { candidateFiles, scanKeyWriters, scanRepository, srcFiles, type KeySite } from './pane-key-writers-scan';
+import {
+  callerFiles,
+  candidateFiles,
+  scanCallers,
+  scanKeyWriters,
+  scanReferences,
+  scanRepository,
+  srcFiles,
+  type KeySite,
+} from './pane-key-writers-scan';
 
 type Kind = 'lock' | 'decided-outside' | 'kill' | 'dead';
 
@@ -52,6 +69,8 @@ interface LedgerRow {
   reason: string;
   /** Required for `lock` and `decided-outside`. */
   evidence?: string;
+  /** Its callers are checked against {@link CALLER_LEDGER} (implied by `held: 'caller'`). */
+  callersOnLedger?: true;
 }
 
 const LAUNCH_EVIDENCE = 'tests/unit/cli-tools/launch-lines-input-lock-3981.test.ts';
@@ -151,6 +170,7 @@ export const LEDGER: readonly LedgerRow[] = [
     kind: 'decided-outside',
     reason: 'An answer’s text. Under the writer’s lock when an Enter follows; an `answer_only` digit with no Enter is typed without waiting, by #3952’s decision.',
     evidence: PROMPT_ANSWER_EVIDENCE,
+    callersOnLedger: true,
   },
   {
     file: 'src/lib/tmux/control-mode-tmux-transport.ts',
@@ -195,6 +215,109 @@ export const LEDGER: readonly LedgerRow[] = [
  * may hold. May only go DOWN: lower it when a row moves to `lock` or goes away.
  */
 export const UNMEDIATED_BASELINE = 11;
+
+interface CallerRow {
+  file: string;
+  /** Innermost named function holding the call (as for {@link LedgerRow.site}). */
+  site: string;
+  /** The ledger row's function being called. */
+  callee: string;
+  /** `lexical`: the call sits in a function passed to the lock (checked). `listed`: the reason says how. */
+  held: 'lexical' | 'listed';
+  /** References this row covers; 1 when omitted. */
+  count?: number;
+  reason: string;
+}
+
+/**
+ * Every caller of a ledger row whose lock is held by its caller (review P2-1).
+ * A new caller — from a function that does not hold the lock — fails until it
+ * is put here, and as `listed` only if {@link LISTED_CALLER_BASELINE} allows.
+ */
+export const CALLER_LEDGER: readonly CallerRow[] = [
+  {
+    file: 'src/lib/cli-tools/codex.ts',
+    site: 'CodexTool.answerCodexHooksScreen',
+    callee: 'sendCodexHooksScreenKey',
+    held: 'lexical',
+    reason: 'The hooks-screen key is the answer callback of `answerUnderInstanceInputLock` (#3952).',
+  },
+  {
+    file: 'src/app/api/worktrees/[id]/prompt-response/plan-review.ts',
+    site: 'answerCommandCodePlanReview',
+    callee: 'sendCommandCodePlanReviewKeys',
+    held: 'lexical',
+    reason: 'The plan-review keys are the answer callback of `answerUnderInstanceInputLock`, each step while the ticket is current (#3952).',
+  },
+  {
+    file: 'src/lib/prompt-answer-sender.ts',
+    site: 'sendPromptAnswer',
+    callee: 'sendPromptAnswerKeys',
+    held: 'listed',
+    reason: '`sendPromptAnswer` only adds `keysSent`; the keys’ Enter goes out inside `sendAsInputWriter`’s callback, which runs under `answerUnderInstanceInputLock` (#3952).',
+  },
+  {
+    file: 'src/lib/prompt-answer-sender.ts',
+    site: 'sendPromptAnswerKeys',
+    callee: 'typeText',
+    held: 'listed',
+    count: 2,
+    reason: 'Text with an Enter: inside `sendAsInputWriter`’s callback (the lock). An `answer_only` digit with no Enter: outside, by #3952’s decision.',
+  },
+];
+
+/** How many `listed` callers {@link CALLER_LEDGER} may hold. May only go DOWN. */
+export const LISTED_CALLER_BASELINE = 2;
+
+/** The ledger rows whose callers {@link CALLER_LEDGER} covers. */
+const callerGuarded = (ledger: readonly LedgerRow[]): LedgerRow[] =>
+  ledger.filter((r) => (r.kind === 'lock' && r.held === 'caller') || r.callersOnLedger === true);
+
+const functionName = (site: string): string => site.split('.').pop() as string;
+
+/** Every caller of the guarded rows' functions in `src` today. */
+function scanGuardedCallers(ledger: readonly LedgerRow[] = LEDGER): KeySite[] {
+  return callerGuarded(ledger).flatMap((r) => scanCallers(r.file, functionName(r.site)));
+}
+
+/** What is wrong between the callers found and the caller ledger. Empty when they agree. */
+export function reconcileCallers(
+  callers: readonly KeySite[],
+  ledger: readonly CallerRow[],
+  guarded: readonly LedgerRow[] = callerGuarded(LEDGER),
+  baseline = LISTED_CALLER_BASELINE
+): string[] {
+  const problems: string[] = [];
+  const byKey = new Map<string, KeySite[]>();
+  for (const site of callers) byKey.set(keyOf(site), [...(byKey.get(keyOf(site)) ?? []), site]);
+  const rows = new Map(ledger.map((r) => [keyOf(r), r]));
+  for (const [key, found] of byKey) {
+    const row = rows.get(key);
+    if (row === undefined) {
+      problems.push(`caller not on the ledger: ${key} (lines ${found.map((s) => s.line).join(', ')})`);
+      continue;
+    }
+    if (found.length !== (row.count ?? 1)) {
+      problems.push(`caller count changed: ${key} has ${found.length}, the ledger says ${row.count ?? 1}`);
+    }
+    if (row.held === 'lexical') {
+      for (const site of found.filter((s) => !s.lexicallyLocked)) {
+        problems.push(`caller no longer under the lock in the source: ${key} (line ${site.line})`);
+      }
+    }
+  }
+  for (const key of rows.keys()) {
+    if (!byKey.has(key)) problems.push(`caller row with no call behind it: ${key}`);
+  }
+  for (const row of guarded) {
+    if (!ledger.some((c) => c.callee === functionName(row.site))) {
+      problems.push(`no caller on the ledger for: ${keyOf(row)}`);
+    }
+  }
+  const listed = ledger.filter((r) => r.held === 'listed').length;
+  if (listed > baseline) problems.push(`listed callers went up: ${listed} > ${baseline}`);
+  return problems;
+}
 
 /**
  * Out of this ledger's reach but on the same invariant, tracked for a later
@@ -286,6 +409,119 @@ describe('[#3981] every pane key writer in src is on the ledger', () => {
     for (const { file, what } of READINESS_FOLLOW_UPS) {
       expect(existsSync(join(REPO_ROOT, file)), what).toBe(true);
     }
+  });
+});
+
+describe('[#3981 review P2-1] every caller of a caller-held row is on the caller ledger', () => {
+  it('negative control: today’s callers agree with the caller ledger', () => {
+    expect(reconcileCallers(scanGuardedCallers(), CALLER_LEDGER)).toEqual([]);
+  });
+
+  it('the guarded rows are the four whose lock is the caller’s', () => {
+    expect(callerGuarded(LEDGER).map((r) => functionName(r.site)).sort()).toEqual([
+      'sendCodexHooksScreenKey',
+      'sendCommandCodePlanReviewKeys',
+      'sendPromptAnswerKeys',
+      'typeText',
+    ]);
+  });
+
+  it('every caller row states a reason, and its file can call the function', () => {
+    const guarded = callerGuarded(LEDGER);
+    for (const row of CALLER_LEDGER) {
+      expect(row.reason.length, keyOf(row)).toBeGreaterThan(40);
+      const defining = guarded.find((r) => functionName(r.site) === row.callee);
+      expect(defining, keyOf(row)).toBeDefined();
+      expect(callerFiles((defining as LedgerRow).file), keyOf(row)).toContain(row.file);
+    }
+  });
+
+  /** Today's callers, with `file`'s replaced by a scan of `text`. */
+  const withFile = (file: string, text: string, callee: string): KeySite[] =>
+    scanGuardedCallers().filter((s) => s.file !== file).concat(
+      scanGuardedCallers().filter((s) => s.file === file && s.callee !== callee),
+      scanReferences(file, text, [callee])
+    );
+
+  const ROGUE =
+    "import { sendCommandCodePlanReviewKeys } from '@/lib/cli-tools/command-code-plan-review';\nexport async function rogue(s: string) { await sendCommandCodePlanReviewKeys(s, []); }\n";
+
+  const mutations: Array<{ callee: string; file: string; edit: (src: string) => string }> = [
+    {
+      callee: 'sendPromptAnswerKeys',
+      file: 'src/lib/prompt-answer-sender.ts',
+      edit: (src) =>
+        `${src}\nexport async function answerWithoutLock(p: SendPromptAnswerParams): Promise<void> {\n  await sendPromptAnswerKeys(p, { touched: false });\n}\n`,
+    },
+    {
+      callee: 'typeText',
+      file: 'src/lib/prompt-answer-sender.ts',
+      edit: (src) => src.replace('      await typeText();\n', '      await typeText();\n      await typeText();\n'),
+    },
+    {
+      callee: 'sendCodexHooksScreenKey',
+      file: 'src/lib/cli-tools/codex.ts',
+      edit: (src) =>
+        src.replace(
+          '  private async sendCodexHooksScreenKey(',
+          "  private async answerHooksDirectly(s: string): Promise<void> {\n    await this.sendCodexHooksScreenKey(s, 'review' as never, 1, false);\n  }\n\n  private async sendCodexHooksScreenKey("
+        ),
+    },
+    {
+      callee: 'sendCommandCodePlanReviewKeys',
+      file: 'src/app/api/worktrees/[id]/prompt-response/plan-review.ts',
+      edit: (src) =>
+        `${src}\nexport async function sendPlanDirectly(s: string): Promise<void> {\n  await sendCommandCodePlanReviewKeys(s, []);\n}\n`,
+    },
+  ];
+
+  for (const { callee, file, edit } of mutations) {
+    it(`positive: one more caller of \`${callee}\` outside the lock fails`, () => {
+      const original = read(file);
+      const mutated = edit(original);
+      expect(mutated).not.toBe(original);
+      const problems = reconcileCallers(withFile(file, mutated, callee), CALLER_LEDGER);
+      expect(problems.length, problems.join('\n')).toBeGreaterThan(0);
+      expect(problems.every((p) => p.includes(callee)), problems.join('\n')).toBe(true);
+    });
+  }
+
+  it('positive: a caller from another module that imports the function is found too', () => {
+    const found = scanReferences('src/lib/rogue.ts', ROGUE, ['sendCommandCodePlanReviewKeys']);
+    expect(found.map((s) => s.site)).toEqual(['rogue']);
+    expect(reconcileCallers([...scanGuardedCallers(), ...found], CALLER_LEDGER)).toEqual([
+      expect.stringContaining('caller not on the ledger: src/lib/rogue.ts :: rogue :: sendCommandCodePlanReviewKeys'),
+    ]);
+  });
+
+  it('positive: taking the lock off a `lexical` caller fails (codex’s `answerUnderInstanceInputLock` renamed away)', () => {
+    const file = 'src/lib/cli-tools/codex.ts';
+    const mutated = read(file).replace(/answerUnderInstanceInputLock\(/g, 'notALock(');
+    expect(reconcileCallers(withFile(file, mutated, 'sendCodexHooksScreenKey'), CALLER_LEDGER)).toEqual([
+      expect.stringContaining('caller no longer under the lock in the source: src/lib/cli-tools/codex.ts :: CodexTool.answerCodexHooksScreen'),
+    ]);
+  });
+
+  it('positive: putting the new caller on the ledger as `listed` fails the baseline', () => {
+    const found = scanReferences('src/lib/rogue.ts', ROGUE, ['sendCommandCodePlanReviewKeys']);
+    const row: CallerRow = { file: 'src/lib/rogue.ts', site: 'rogue', callee: 'sendCommandCodePlanReviewKeys', held: 'listed', reason: 'fixture' };
+    expect(reconcileCallers([...scanGuardedCallers(), ...found], [...CALLER_LEDGER, row])).toEqual([
+      expect.stringContaining('listed callers went up'),
+    ]);
+  });
+
+  it('negative: a new caller under the lock, put on the ledger as `lexical`, passes', () => {
+    const text =
+      "import { sendCommandCodePlanReviewKeys } from '@/lib/cli-tools/command-code-plan-review';\nimport { withInstanceInputLock } from '@/lib/session/instance-input-lock';\nexport async function locked(s: string) { await withInstanceInputLock(s, () => sendCommandCodePlanReviewKeys(s, [])); }\n";
+    const found = scanReferences('src/lib/locked.ts', text, ['sendCommandCodePlanReviewKeys']);
+    const row: CallerRow = { file: 'src/lib/locked.ts', site: 'locked', callee: 'sendCommandCodePlanReviewKeys', held: 'lexical', reason: 'fixture' };
+    expect(reconcileCallers([...scanGuardedCallers(), ...found], [...CALLER_LEDGER, row])).toEqual([]);
+  });
+
+  it('negative: declarations, imports, another object’s property and prose are not callers', () => {
+    const text =
+      "import { typeText } from './x';\n/** typeText() */\nconst o = { typeText: 1 };\nother.typeText();\nfunction typeText2() {}\nclass C { typeText() {} }\n";
+    expect(scanReferences('src/lib/x.ts', text, ['typeText'])).toEqual([]);
   });
 });
 

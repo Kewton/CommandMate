@@ -291,7 +291,8 @@ export abstract class BaseCLITool implements ICLITool {
     // reuse branch would kill the first one's half-launched pane — and a caller
     // that holds the input lock is refused rather than made to wait (R1). A
     // name that does not validate is left to `launchSession` to refuse, and
-    // reported as before.
+    // reported as before. A start that asks for a model the launch in
+    // progress is not starting with is refused instead of joining it (#2771).
     let sessionName: string | null = null;
     try {
       sessionName = this.getSessionName(worktreeId, instanceId);
@@ -300,7 +301,7 @@ export abstract class BaseCLITool implements ICLITool {
     }
     const launch = (): Promise<void> => this.startSessionOnce(worktreeId, worktreePath, instanceId, model);
     if (sessionName === null) return launch();
-    return runSessionLaunch(sessionName, this.name, launch);
+    return runSessionLaunch(sessionName, this.name, launch, { cliToolId: this.id, model });
   }
 
   /** {@link startSession}'s body: one launch, its failure reported once. */

@@ -321,6 +321,8 @@ A message send (`send` / `ask`, chat, timers, relay) types into the composer onl
 
 - copilot's `--model` reads the screen once more right before typing `/model`: a dialog is `not-sent` (`prompt-waiting`), an unreadable pane `not-sent` (`recheck-failed`), and nothing is typed.
 - A session is started by one launch at a time (Issue #3981). A send or a start request that arrives during a launch waits for that launch to finish and then goes on (no second launch). A send that holds the input lock when it meets another request's launch (Claude's and codex's sends) does not wait: it returns `not-sent` (`session-starting`, HTTP 503 `SESSION_STARTING`) with nothing typed — retry it in a few seconds. The order is fixed as "the one-launch rule outside, the input lock inside": a lock holder waiting for a launch whose keys wait for the lock would stall both.
+  - The wait lasts until the launching tool's start deadline (counted from when the launch began: 65 s for Claude, 35 s for the others). A launch still not finished by then gets the send back as `not-sent` (`session-starting`, HTTP 503 `SESSION_STARTING`) with nothing typed.
+  - A send with `--model` that meets a launch starting another model (or no model) does not join it: it returns HTTP 400 with nothing typed, as `--model` to a running session does.
 - Gemini returns `not-sent` (`prompt-not-ready`) with nothing typed when its prompt does not appear within 15 s before a send (Issue #3981; it used to give up waiting and type anyway).
 - The lock is per server process. Two servers sharing one tmux are not ordered by it.
 

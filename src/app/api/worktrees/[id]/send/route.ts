@@ -46,7 +46,11 @@ import {
   SESSION_START_FAILED_CODE,
   SESSION_START_UNAVAILABLE_CODE,
 } from '@/lib/session/session-start-error';
-import { isSessionLaunchInFlight, settleSessionLaunch } from '@/lib/session/session-launch-flight';
+import {
+  isSessionLaunchInFlight,
+  isSessionLaunchModelMismatchError,
+  settleSessionLaunch,
+} from '@/lib/session/session-launch-flight';
 import { isPaneBackAtShell } from './pane-shell';
 import { getGitStatus } from '@/lib/git/git-utils';
 import { isPathSafe, resolveAndValidateRealPath } from '@/lib/security/path-validator';
@@ -452,11 +456,20 @@ async function handleSend(
     // fails the health check, "not running" (this send would start it again and
     // kill the first launch's pane). A launch that began while `isRunning` was
     // being read is waited out and the answer read again. This route never holds
-    // the input lock, so the wait is never refused.
-    await settleSessionLaunch(sessionName, cliTool.name);
-    let running = await cliTool.isRunning(id, instanceId);
-    if (running && (await settleSessionLaunch(sessionName, cliTool.name))) {
+    // the input lock, so the wait is never refused — but it is bounded by the
+    // launch's start budget, and a launch that outlives it is answered as the
+    // slow start it is: not-sent, 503 SESSION_STARTING (review P3-1).
+    let running: boolean;
+    try {
+      await settleSessionLaunch(sessionName, cliTool.name);
       running = await cliTool.isRunning(id, instanceId);
+      if (running && (await settleSessionLaunch(sessionName, cliTool.name))) {
+        running = await cliTool.isRunning(id, instanceId);
+      }
+    } catch (error: unknown) {
+      if (!isSessionStartTimeoutError(error)) throw error;
+      recordSendAttempt(sendAttemptInstance, { state: 'not-sent', reason: 'session-starting', content: trimmedContent });
+      return answerSessionStartTimeout(error.message, cliTool, id, instanceId);
     }
 
     // Issue #989: Antigravity has no in-session model-switch command (unlike
@@ -512,6 +525,12 @@ async function handleSend(
           }
         }
       } catch (error: unknown) {
+        // Review P3-2: this start asked for a model, and joined a launch of the
+        // session that is starting with another. Nothing was typed; answered as
+        // a `--model` to a running session is (#989 / #2771).
+        if (isSessionLaunchModelMismatchError(error)) {
+          return NextResponse.json({ error: error.message }, { status: 400 });
+        }
         logger.error('failed-to-start-session:', { error: error instanceof Error ? error.message : String(error) });
         recordSendAttempt(sendAttemptInstance, {
           state: 'not-sent',

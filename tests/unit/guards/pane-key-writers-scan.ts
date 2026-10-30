@@ -222,6 +222,60 @@ export function scanKeyWriters(file: string, text: string, writers: readonly str
   return sites;
 }
 
+/**
+ * Every reference to a function named one of `names` in one file — the callers
+ * of a ledger row whose lock its caller holds (`held: 'caller'`, review P2-1).
+ *
+ * By name, as written: a bare identifier (a call, or the function handed on),
+ * or `this.name` (a method). Declarations, import and export specifiers, and
+ * `other.name` / `{ name: … }` (another object's property) are not references.
+ * `callee` is the name referenced; `site` and `lexicallyLocked` read as for a
+ * key-writer site.
+ */
+export function scanReferences(file: string, text: string, names: readonly string[]): KeySite[] {
+  if (!names.some((n) => text.includes(n))) return [];
+  const source = ts.createSourceFile(
+    file,
+    text,
+    ts.ScriptTarget.Latest,
+    true,
+    file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS
+  );
+  const sites: KeySite[] = [];
+  const isDeclarationName = (node: ts.Identifier): boolean => {
+    const parent = node.parent;
+    return (
+      ((ts.isFunctionDeclaration(parent) ||
+        ts.isMethodDeclaration(parent) ||
+        ts.isVariableDeclaration(parent) ||
+        ts.isParameter(parent) ||
+        ts.isPropertyDeclaration(parent) ||
+        ts.isBindingElement(parent)) &&
+        parent.name === node) ||
+      (ts.isPropertyAssignment(parent) && parent.name === node)
+    );
+  };
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) return;
+    if (ts.isIdentifier(node) && names.includes(node.text) && !isDeclarationName(node)) {
+      const parent = node.parent;
+      const isMember = ts.isPropertyAccessExpression(parent) && parent.name === node;
+      if (!isMember || parent.expression.kind === ts.SyntaxKind.ThisKeyword) {
+        sites.push({
+          file,
+          site: siteName(node),
+          callee: node.text,
+          line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
+          lexicallyLocked: isLexicallyLocked(node, source),
+        });
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return sites;
+}
+
 /** Every `.ts` / `.tsx` file under `dir`, absolute. On disk, not `git ls-files`: a new file counts before it is added. */
 function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -255,6 +309,34 @@ let repositorySites: KeySite[] | null = null;
 export function scanRepository(): KeySite[] {
   repositorySites ??= candidateFiles().flatMap((f) => scanKeyWriters(f, readFileSync(join(REPO_ROOT, f), 'utf-8')));
   return [...repositorySites];
+}
+
+/**
+ * The files that can call `name` as defined in `definingFile`: that file, and
+ * every `src` file whose imports reach it directly (the same graph as
+ * {@link candidateFiles}), repo-relative and sorted.
+ */
+let callerGraph: ReturnType<typeof createModuleGraph> | null = null;
+export function callerFiles(definingFile: string): string[] {
+  callerGraph ??= createModuleGraph();
+  const graph = callerGraph;
+  const target = join(REPO_ROOT, definingFile);
+  return sourceFiles(join(REPO_ROOT, 'src'))
+    .filter((f) => f === target || graph.imports(f).includes(target))
+    .map(repoRelative)
+    .sort();
+}
+
+const callerScans = new Map<string, KeySite[]>();
+/** Every reference to `name` (defined in `definingFile`) in the files that can call it (read once per run). */
+export function scanCallers(definingFile: string, name: string): KeySite[] {
+  const key = `${definingFile} :: ${name}`;
+  let found = callerScans.get(key);
+  if (found === undefined) {
+    found = callerFiles(definingFile).flatMap((f) => scanReferences(f, readFileSync(join(REPO_ROOT, f), 'utf-8'), [name]));
+    callerScans.set(key, found);
+  }
+  return [...found];
 }
 
 export { repoRelative };

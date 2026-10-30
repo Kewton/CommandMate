@@ -178,15 +178,19 @@ export function clearSessionStarting(
 ): void {
   try {
     const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
-    if (token === undefined) {
-      // Issue #3981: a killed launch is no longer the session's one launch
-      // (`session-launch-flight`); the next start is a launch of its own.
-      forgetSessionLaunch(resolveSessionName(cliToolId, worktreeId, instanceId));
-    }
-    if (token !== undefined && records.get(key)?.token !== token) return;
-    records.delete(key);
+    if (token === undefined || records.get(key)?.token === token) records.delete(key);
   } catch {
     // Nothing was recorded under an id that does not compose into a key.
+  }
+  if (token !== undefined) return;
+  // Issue #3981: a killed launch is no longer the session's one launch
+  // (`session-launch-flight`); the next start is a launch of its own. Apart
+  // from the record above, so a name that does not resolve cannot leave the
+  // "starting" display behind (review P3-4).
+  try {
+    forgetSessionLaunch(resolveSessionName(cliToolId, worktreeId, instanceId));
+  } catch {
+    // No launch was registered under a name that does not resolve.
   }
 }
 
