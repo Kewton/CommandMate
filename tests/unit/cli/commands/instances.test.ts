@@ -3,8 +3,23 @@
  * Issue #1000
  */
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, afterAll } from 'vitest';
+import { mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { mockFetchResponse, mockFetchSequence, mockFetchError, restoreFetch } from '../../../helpers/mock-api';
+
+// Issue #3993: a successful kill is recorded in the session-kill ledger, which
+// defaults to ~/.commandmate/session-kills. Keep this file's kills out of $HOME.
+const LEDGER_ROOT_ENV = 'CM_SESSION_KILL_LEDGER_ROOT';
+const previousLedgerRoot = process.env[LEDGER_ROOT_ENV];
+const ledgerRoot = mkdtempSync(join(tmpdir(), 'cm-instances-kill-ledger-'));
+process.env[LEDGER_ROOT_ENV] = ledgerRoot;
+afterAll(() => {
+  if (previousLedgerRoot === undefined) delete process.env[LEDGER_ROOT_ENV];
+  else process.env[LEDGER_ROOT_ENV] = previousLedgerRoot;
+  rmSync(ledgerRoot, { recursive: true, force: true });
+});
 
 const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
 const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});

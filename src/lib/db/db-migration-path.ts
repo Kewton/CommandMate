@@ -8,6 +8,8 @@
  * @module db-migration-path
  */
 
+import Database from 'better-sqlite3';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { homedir } from 'os';
@@ -106,6 +108,60 @@ export function getLegacyDbPaths(): string[] {
 }
 
 /**
+ * Whether committed updates of `dbPath` may still live only in its `-wal` file.
+ *
+ * An empty or absent `-wal` means the main file is the whole database.
+ */
+function hasPendingWal(dbPath: string): boolean {
+  try {
+    return fs.statSync(`${dbPath}-wal`).size > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Write a self-contained copy of the database at `sourcePath` to `destPath`
+ * (Issue #3993).
+ *
+ * Same tool as the pre-migration backup (`migrations/pre-migration-backup.ts`,
+ * Issue #3985): `VACUUM INTO` reads inside one read transaction, so updates
+ * still in `-wal` are included, and the result is a rollback-journal file that
+ * needs no sidecar. Copying the main file alone dropped them. The source is
+ * opened read-only; the copy is written to a temporary name and renamed into
+ * place, because `VACUUM INTO` refuses a non-empty destination.
+ */
+function snapshotDatabase(sourcePath: string, destPath: string): void {
+  const tempPath = `${destPath}.${crypto.randomBytes(4).toString('hex')}.partial`;
+  try {
+    // VACUUM INTO accepts an empty existing file; creating it first fixes the mode.
+    fs.closeSync(fs.openSync(tempPath, 'wx', 0o600));
+    const source = new Database(sourcePath, { readonly: true, fileMustExist: true });
+    try {
+      source.prepare('VACUUM INTO ?').run(tempPath);
+    } finally {
+      source.close();
+    }
+    fs.renameSync(tempPath, destPath);
+  } catch (error) {
+    fs.rmSync(tempPath, { force: true });
+    throw error;
+  }
+}
+
+/**
+ * Copy a legacy database: a consistent snapshot when it has a non-empty `-wal`,
+ * the file itself otherwise (unchanged from before Issue #3993).
+ */
+function copyLegacyDatabase(sourcePath: string, destPath: string): void {
+  if (hasPendingWal(sourcePath)) {
+    snapshotDatabase(sourcePath, destPath);
+  } else {
+    fs.copyFileSync(sourcePath, destPath);
+  }
+}
+
+/**
  * Migrate database to new path if legacy DB exists
  *
  * This function:
@@ -113,6 +169,10 @@ export function getLegacyDbPaths(): string[] {
  * 2. Searches for legacy database locations
  * 3. Creates a backup of the legacy database
  * 4. Copies the database to the new location
+ *
+ * A legacy database with a non-empty `-wal` is copied as a `VACUUM INTO`
+ * snapshot (both the backup and the new location), so updates not yet written
+ * back to the main file are kept (Issue #3993).
  *
  * Security features:
  * - SEC-002: Symlink resolution via realpathSync
@@ -152,7 +212,7 @@ export function migrateDbIfNeeded(targetPath: string): MigrationResult {
 
     // Create backup (SEC-006)
     const backupPath = `${resolvedLegacyPath}.bak`;
-    fs.copyFileSync(resolvedLegacyPath, backupPath);
+    copyLegacyDatabase(resolvedLegacyPath, backupPath);
     fs.chmodSync(backupPath, 0o600);
 
     // Create target directory if needed (SEC-003)
@@ -162,7 +222,7 @@ export function migrateDbIfNeeded(targetPath: string): MigrationResult {
     }
 
     // Copy database to new location
-    fs.copyFileSync(resolvedLegacyPath, resolvedTargetPath);
+    copyLegacyDatabase(resolvedLegacyPath, resolvedTargetPath);
 
     logger.info(
       `[Migration] Database migrated from ${resolvedLegacyPath} to ${resolvedTargetPath}`

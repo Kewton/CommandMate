@@ -1695,6 +1695,13 @@ commandmate verify <worktree-id> --json | jq '.gates[] | select(.gateId=="env-cl
 失敗ログは消えたものを `- tcp/3000` / `- mcbd-claude-<id>`、増えたものを `+ …` の形で挙げます。
 **減ったものは誰のものであれ違反**、増えたものは他ワーカーに帰属できるときだけ免除されます
 （並列委任は互いの計測窓の中で正当に自分のセッションを起こすため）。
+ただし別の worktree のセッションが `commandmate instances <wt> kill`（`remove --kill` を含む）で
+止められ、それを頼んだのがこのワーカーでない（呼び出し元の cwd も tmux セッションも
+タスクの worktree ではない）ときは、`· - mcbd-… [external] (not counted: …)` と区別して表示し、
+不合格に数えません（Issue #3993。オーケストレーターの worktree 片付け）。記録は
+`~/.commandmate/session-kills/` に CLI が書きます。ワーカー自身が同じコマンドで隣を止めた場合、
+呼び出し元が分からない場合、`tmux kill-session` など CommandMate を通らずに止めた場合は
+今までどおり違反です（#1624）。
 詳細は [docs/design/task-contract.md](../design/task-contract.md) §2.6。
 
 ### 一覧・詳細
@@ -2842,6 +2849,10 @@ commandmate instances <worktree-id> kill <instance-id>                 # 該当�
 ```
 
 `kill` は止めたインスタンスの Auto-Yes も無効にします（止めていない別インスタンスの Auto-Yes は残ります）。
+`kill`（`remove --kill` も）が成功すると、どの worktree・インスタンスを、どこ（cwd と tmux セッション）から
+止めたかを `~/.commandmate/session-kills/<UTC 日付>.jsonl` に 1 行記録します（30 日で削除）。
+検証の env-clean はこの記録で、オーケストレーターが止めた隣の worktree のセッションを `external` として
+不合格から外します（Issue #3993）。
 
 ### 出力例（一覧）
 

@@ -2029,6 +2029,11 @@ commandmate instances <worktree-id> kill <instance-id>                 # Stop ju
 ```
 
 `kill` also disables Auto-Yes for the instances it stops (Auto-Yes of instances it did not stop is kept).
+A successful `kill` (and `remove --kill`) appends one line to `~/.commandmate/session-kills/<UTC date>.jsonl`
+(kept 30 days): the worktree and instance it stopped, and where it was asked from (cwd and tmux session).
+The env-clean verification gate uses it to set a sibling worktree's session the orchestrator stopped apart as
+`external` instead of failing on it; a worker stopping its neighbour itself, an unknown caller, or a kill that
+bypassed CommandMate (`tmux kill-session`) still fails (Issue #3993).
 
 ### Output Example (list)
 

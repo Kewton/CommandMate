@@ -29,7 +29,13 @@ import { resolveSessionTarget, describeSessionTargetConflict } from '../utils/se
 // Issue #2404: "the worktree is not on this server" is a different failure from
 // "the worktree id is wrong", and only the session's own identity can tell them
 // apart.
-import { describeServerMismatch, formatServerMismatchHint } from './whoami';
+import { describeServerMismatch, formatServerMismatchHint, readTmuxSessionName } from './whoami';
+// Issue #3993: each kill is recorded so the env-clean gate can tell a sibling
+// session the orchestrator stopped from one a worker killed.
+import {
+  appendSessionKillRecord,
+  SESSION_KILL_LEDGER_VERSION,
+} from '../../lib/verification/session-kill-ledger';
 import type {
   AutoYesStatesResponse,
   CurrentOutputResponse,
@@ -579,6 +585,29 @@ async function addInstance(
 }
 
 /**
+ * Record a successful kill in the session-kill ledger (Issue #3993): which
+ * worktree and instance, and who asked — this process's cwd and tmux session.
+ * Best effort: the ledger never fails the command, the kill already happened.
+ */
+function recordSessionKill(worktreeId: string, instanceId: string): void {
+  let callerCwd: string | null;
+  try {
+    callerCwd = process.cwd();
+  } catch {
+    callerCwd = null;
+  }
+  appendSessionKillRecord({
+    version: SESSION_KILL_LEDGER_VERSION,
+    at: Date.now(),
+    api: 'kill-session',
+    worktreeId,
+    instanceId,
+    callerCwd,
+    callerSession: readTmuxSessionName(),
+  });
+}
+
+/**
  * Remove action: drop an instance from the roster. Kills the session first
  * (when --kill) so the server can still resolve its CLI tool from the roster.
  */
@@ -607,6 +636,7 @@ async function removeInstance(
   if (options.kill) {
     try {
       await client.post(`/api/worktrees/${worktreeId}/kill-session?instance=${encodeURIComponent(instanceId)}`);
+      recordSessionKill(worktreeId, instanceId);
       console.error(`Session killed: ${instanceId}`);
     } catch (killError) {
       console.error(`Warning: could not kill session for ${instanceId}: ${getErrorMessage(killError)}`);
@@ -664,6 +694,7 @@ async function killInstance(
   }
 
   await client.post(`/api/worktrees/${worktreeId}/kill-session?instance=${encodeURIComponent(instanceId)}`);
+  recordSessionKill(worktreeId, instanceId);
   console.error(`Session killed: ${instanceId}`);
 }
 
