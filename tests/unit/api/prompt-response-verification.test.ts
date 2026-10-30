@@ -910,7 +910,7 @@ describe('POST /api/worktrees/:id/prompt-response - Semantic yes/no resolution (
       optionLabel: 'No, and tell Claude what to do differently (esc)',
     });
     // offset = 3 - 1 = 2 -> cursor navigation to the "No" option, not a bare Enter
-    expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test-wt', ['Down', 'Down', 'Enter']);
+    expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test-wt', ['Down', 'Down', 'Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
     expect(sendKeys).not.toHaveBeenCalled();
   });
 
@@ -962,7 +962,7 @@ describe('POST /api/worktrees/:id/prompt-response - Semantic yes/no resolution (
     expect(data.success).toBe(true);
     expect(data.answer).toBe('1');
     expect(data.resolved?.optionNumber).toBe(1);
-    expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test-wt', ['Enter']);
+    expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test-wt', ['Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
   });
 
   it('refuses unresolvable yes/no and sends NOTHING', async () => {
@@ -1044,7 +1044,7 @@ describe('POST /api/worktrees/:id/prompt-response - Semantic yes/no resolution (
     expect(data.success).toBe(true);
     expect(data.answer).toBe('1');
     expect(data.resolved).toEqual({ via: 'default', optionNumber: 1, optionLabel: 'Yes' });
-    expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test-wt', ['Enter']);
+    expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test-wt', ['Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
   });
 
   it('refuses useDefault when no prompt was detected (capture failed)', async () => {
@@ -1173,7 +1173,7 @@ describe('POST /api/worktrees/:id/prompt-response - Free text aimed at a menu ro
     expect(data.success).toBe(true);
     expect(data.answer).toBe('3');
     // offset = 3 - 1 = 2: the cursor walks to the "No" row, it does not Enter on "Yes".
-    expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test-wt', ['Down', 'Down', 'Enter']);
+    expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test-wt', ['Down', 'Down', 'Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
     expect(sendKeys).not.toHaveBeenCalled();
   });
 

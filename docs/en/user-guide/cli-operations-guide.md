@@ -305,6 +305,21 @@ commandmate send "$WT" "Quick check" --agent codex --instance codex-3 --register
 | `--duration <d>` | Auto-yes duration (`1h`-`24h`, whole hours; e.g. `1h` / `3h` / `8h`). Out of range exits 2 with or without `--auto-yes` | 1h |
 | `--stop-pattern <p>` | Auto-yes stop condition (regex) | - |
 
+### Input that overlaps a send (input lock (#3952))
+
+A message send (`send` / `ask`, chat, timers, relay) types into the composer only while it holds the instance's input lock (Issue #3945), so nothing else is typed in the middle of it (paste → check → Enter, the watch for a late paste, the withdrawal). The other input paths:
+
+| Path | Lock | When it overlaps a send |
+|------|------|-------------------------|
+| `respond` / the answer panel (answers that send Enter), strict `respond`, Auto-Yes answers, Command Code plan review, codex's automatic answers at launch and before a send (hooks / update / trust / notices), copilot's and Antigravity's automatic folder-trust answers | Takes part (answers do not wait for each other) | Waits for the send to finish, then **reads the screen again and types only if the same confirmation is still up**. When it is gone, changed, unreadable, or the wait passes 60 s, nothing is typed: `respond` reports `answer_not_delivered` (`/respond` answers 409, strict mode exits 40 `session_conflict`), and Auto-Yes decides again on its next tick. A send that starts during an answer waits for the answer's Enter |
+| `answer_only` digit answers (no Enter) | Does not take part | One key and no Enter, typed without waiting |
+| The keys Claude's and Gemini's launch types itself (the launch line, the automatic folder-trust answer) (#3975) | Takes part (as a sole writer; also waits for answers) | Holds the lock only while typing (the launch's waits are outside it). Waits for a send or an answer to finish; the trust answer, when a send came in meanwhile, reads the screen again and types only if the same dialog is still up. A `respond` that read the screen before the launch's Enter reads it again after it |
+| Typing in the terminal (WebSocket), `direct-input`, special keys (including the unsent bar's **Run**) | Does not take part (neither refused nor held) | **Keys typed during a send can be mixed into its body, or removed by its clean-up (the composer clear, the withdrawal).** Wait until the send is over (the reply has started) before typing |
+| `interrupt` (Escape) | Does not take part (does not wait, does not invalidate the send) | So a stop is never queued behind a send. An Escape that arrives while a body is being typed can stop that send part-way (check `lastSend` for the outcome) |
+
+- copilot's `--model` reads the screen once more right before typing `/model`: a dialog is `not-sent` (`prompt-waiting`), an unreadable pane `not-sent` (`recheck-failed`), and nothing is typed.
+- The lock is per server process. Two servers sharing one tmux are not ordered by it.
+
 ### Finding Worktree IDs
 
 ```bash
@@ -349,12 +364,13 @@ commandmate wait <worktree-id> --require-work        # Run only work-evidence af
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--timeout <sec>` | Maximum time to wait (seconds) | unlimited |
+| `--timeout <sec>` | Maximum time to wait (seconds). Each poll's reads (`current-output` and the messages ledger) are cut at what is left of it, so a server that does not answer still ends in exit 124 at the deadline (Issue #3974) | unlimited |
 | `--on-prompt <mode>` | What to do when a prompt is detected (agent / human) | agent |
-| `--stall-timeout <sec>` | Timeout on "no output change" (seconds) | - |
+| `--stall-timeout <sec>` | Timeout on "no output change" (seconds). Like `--timeout`, it also cuts a read that does not answer (exit 124) | - |
 | `--instance <id>` | Target instance ID (`<agent>` or `<agent>-<n>`). **This is the only way to name the target** (there is no `--agent`) | the agent's primary instance |
 | `--verify` | After completion is detected, run every verification gate and let the verdict decide the exit code | off |
 | `--require-work` | After completion is detected, run only the work-evidence gate | off |
+| `--fail-on-upstream-fault` | Exit **11** instead of 0 when an upstream fault signature is on the screen as the agent returns to its composer (Issue #1839). When the completion's basis is `hook_stop`, the verdict waits for the pane to settle: it is re-read every 500ms until two reads in a row show the same frame (the re-reads use `current-output?fresh=1`, past the server's capture cache; a server older than `fresh` answers from the cache and may read the pane as settled early), for at most 5 s, and a pane still drawing then is judged on the last frame read (a `still drawing` Note on stderr). The agent's `Stop` can land before its reply is drawn (~3 s measured on codex). The settled frame is judged as the next poll, through every check: a prompt drawn meanwhile exits 10, and a turn the agent has started meanwhile is waited on. A fault on the frame of the `Stop` poll is judged on the settled frame too (a fault with no `Stop`, #1839, still exits 11 at once). The settle never passes `--timeout` / `--stall-timeout`: an interval the next re-read could not finish within is not slept (a `would pass --timeout/--stall-timeout` Note), and each re-read is aborted at the earliest of 500ms, what is left of the 5 s bound and those deadlines (a `did not answer a re-read` Note), judging the last frame read: the verdict comes at most 5 s after the `Stop`. The ledger read that checks a fault frame for a `Stop` is bounded by the 5 s bound and `--timeout` as well, and shares that bound with the re-reads: both are counted from the `Stop` poll, so time the ledger takes is taken off the settle (unanswered: no `Stop`, exit 11 at once), and is not made when no `Stop` is on record. The fault diagnosis on stderr is printed only for the frame the verdict is on. A completion that is not `hook_stop`, and `wait` without the flag, do not wait (Issue #3956). `ask` (flag always on) goes through the same wait | off |
 
 ### Exit Codes
 
@@ -362,6 +378,7 @@ commandmate wait <worktree-id> --require-work        # Run only work-evidence af
 |:----:|---------|-------------|
 | 0 | Completed (and, with `--verify`, verification passed too) | `capture` to get results |
 | 10 | Prompt detected (`--on-prompt agent`) | `respond`, then `wait` again |
+| 11 | Upstream fault (`--fail-on-upstream-fault`; `ask` always, Issue #1839 / #3011). `id=context-limit` is the context limit: `instances <wt> kill <instance>` for a fresh session, then send again. `id=model-capacity` will not be answered by the same model: send to another instance or model (#3936) | **Do not run `verify`**; wait a while and `send` the same request again |
 | 20 | A verification gate failed (`--verify`) | `verify --json` to see the failing gate, then fix it |
 | 21 | No work evidence (neither a commit nor an uncommitted change) | The agent never started. `send` again |
 | 124 | Timeout | `capture` to check status, then `wait` again or give up |
@@ -494,6 +511,91 @@ Claude and the other tools, and any source without hooks, are still closed by th
 before (a Claude interrupt either prints an `Interrupted` row or just puts the prompt back in the
 composer, and neither sends a `Stop`).
 
+#### Do not stack `ask`s on one instance (Issue #3955)
+
+Send the next `ask` (or `send`) to an instance only after the previous `ask` has returned. An agent
+can fold a request that arrives while a turn is running into that turn and answer both with one
+reply (measured on codex 0.164.0, which shows "Messages to be submitted after next tool call").
+The two `ask`s then read the same reply, so **the one sent first can print the answer to the later
+request** (or the other way round). Both exit 0, and both requests did arrive intact (this is not
+a composer problem).
+
+When `ask` sees such an overlap it keeps the reply and the exit code as they are, prints one
+`overlapped: …` line on stderr, and adds `"overlapped": true` to `--json` (the key is absent when
+nothing overlapped). A reply marked this way is not necessarily the answer to your request; send
+the requests again one at a time if it matters. Two things are detected:
+
+- the instance was already in another turn when the message was sent (the later sender; only for
+  tools whose hooks report turn starts, and a turn that ended before the send does not count; it is
+  caught even when that turn ended before `ask`'s first poll. The server reads whether a turn was
+  open at the moment the body started going in and returns it in the send API's response as
+  `turnOpenAtSend: true` / `false` (the key is absent when that is not known: a tool whose hooks do
+  not report both a turn's start and its end, a send path that reports no input start, a relaunch
+  inside the send). When the key is there, `ask` decides this side from its value alone, so it is
+  caught even when the server's turn record is replaced by this request's own new turn before that
+  first poll, and a turn that ended between the send and the input does not count. Without the key
+  the earlier check applies (#3957))
+- another request reached the instance between the send and the end of the turn (the earlier
+  sender; read from the `user` rows of the chat history. The end is the close time the server
+  recorded, so the next request sent after the `Stop` does not count, and no `user` row since the
+  send is missed even when more than the newest 30 rows came after it)
+
+An `ask` without `--instance` / `--agent` finds the instance its request landed on from the
+history and looks only at that instance's rows. Only rows between the send and the end of the turn
+are used for that (the same text sent to another instance later does not count). When that cannot
+be told (the same text reaching more than one instance in that window, for example), the second
+check is skipped.
+
+#### Relay delivery bound to its send (Issue #3957)
+
+Relay delivery (`ask --async` / `send --reply-to`) now picks the reply by **tying the relay to the send of
+its request** (a new CLI with a new server).
+
+- The CLI opens the relay with `bind: true` on `POST /api/relays`, checks `bindMode: "bound"` in the
+  answer, and puts `relayId` on the send (`POST /api/worktrees/:id/send`). The send API reserves the
+  relay before any side effect such as starting the session (a wrong destination or id is 400; a closed,
+  expired or already reserved relay is 409; neither types anything) and records the "input boundary" —
+  the time, and whether a turn was open then — right before the first key of the body. When it cannot
+  record it, the input does not start
+- Only a turn that ended after the boundary counts. Turns that end before the send is confirmed are held
+  as candidates, and once it is confirmed **the earliest candidate after the boundary** is taken. A reply
+  to another request that ended while the send waited for the input lock, or a reply to a request whose
+  send failed, is never delivered. Confirmation (prompt) notices follow the same rule: only a dialog still
+  open when the send is confirmed is reported. A reply that is ready while a prompt notice is being
+  delivered goes out after the notice
+- The send API answers `sendOutcome` (`sent` / `not_sent` / `unknown`). The CLI withdraws the relay only
+  on `not_sent` (nothing reached the session). A 409 reservation conflict does not withdraw it. When the
+  answer is lost, the CLI asks `GET /api/relays/:id` and **does not resend** the message; when that does
+  not tell either, the relay is left open and stderr names the relay id and
+  `commandmate relays --id <relay-id>`
+- An overlap is noted only when it is proven. The delivered body is the `[from <alias> / <worktree>]`
+  line, one note line
+  (`[CommandMate relay] Note: this reply may have been processed in the same turn as another request (overlap=later).`),
+  then the reply verbatim. `overlap` is `later` (another turn was open at the input), `earlier` (another
+  input arrived between the input and the reply), `both`, `unknown` (could not be told; never shown as
+  "no overlap") or `none` (no note)
+- A held relay publishes its `hold` reason: `send_unknown` (whether it was sent is not known),
+  `dispatch_unknown` (opencode's HTTP send could not be confirmed), `generation_changed` (the session was
+  relaunched during the send or before the reply), `server_restarted` (the server restarted during the
+  send), and so on. A held relay delivers no reply and is replaced by the expiry notice at its deadline
+  (24 hours by default). `commandmate relays --id <relay-id> [--json]` shows `send=` / `overlap=` /
+  `hold=`, closed relays included, and the requester's "reply" history line carries `overlap=`
+- opencode's HTTP send reports no input start, so the moment right before the dispatch is the boundary.
+  When the HTTP send is confirmed not to have arrived and the terminal fallback types the body, the
+  terminal input start replaces the boundary
+- Relays opened by an older CLI, and older servers, behave as before (a new CLI prints one "legacy
+  handling" line on stderr against an older server and does not send `relayId`)
+
+**Limits until PR 3** (matching turns to replies comes in the next change):
+
+- On claude and others, a request sent into a running turn may be carried to the next turn; the reply
+  of the turn that ended first is then delivered with an `overlap=later` note, and the reply to the
+  request's own turn is not delivered
+- Two relays to one instance from different requesters can both receive one reply
+- `earlier` is judged only when proven and can be missed (`unknown` then)
+
+Not overlapping is still the safest: do not stack messages on one instance.
+
 ### Progress Output
 
 Progress is written to stderr. Only the final result (JSON) goes to stdout.
@@ -553,7 +655,7 @@ To answer a screen only while it is still the one observed, pass its kind and to
 | `autoYes.enabled` / `pollerActive` | Whether Auto-Yes is on / whether the server's poller runs |
 | `autoYes.pollerRecord` | What the poller (or the permission hook) last recorded as withheld. `screenCorrelation` relates it to this screen; the record names no screen, so it is `unknown` / `type-mismatch` / `no-prompt-on-screen` |
 | `autoYes.contractEvaluation` | The contract's policy applied to this screen **now** (`policy-withholds` + reason / `base-withholds` + reason / `policy-permits` / `no-base-answer` / `not-evaluated`). `base-withholds` (Issue #3822) means the base rules withheld the answer before the contract was read, with or without a contract (today only `allow-once-unidentified`; changing the contract does not bring the answer back). Reasons use the `AutoYesSuppressionReason` words ([reason table](#autoyeslastsuppression-observing-a-policy-suppression-issue-1684)) |
-| `lastSend` | How the last send to this instance ended (Issue #3759): `{ at, state, reason }`. `state` is `not-sent` (it failed before any key of the body was typed, e.g. `prompt-not-ready`) / `sent` (the submit was confirmed) / `indeterminate` (it failed after part of it may have been typed, or the outcome could not be read back; `reason: composer-residue` when the body is still in the composer). Null when this server has no record since it started; absent from an older server |
+| `lastSend` | How the last send to this instance ended (Issue #3759): `{ at, state, reason }`. `state` is `not-sent` (it failed before any key of the body was typed, e.g. `prompt-not-ready`) / `sent` (the submit was confirmed) / `indeterminate` (it failed after part of it may have been typed, or the outcome could not be read back; `reason: composer-residue` when the body is still in the composer). Null when this server has no record since it started; absent from an older server . The `not-sent` reasons include, besides `prompt-not-ready`, those from the input lock (Issue #3945): `input-lock-timeout` (the wait limit passed) / `session-replaced` (the session was recreated while waiting) / `input-lock-lost` (the lock's ownership was lost mid-input), `recheck-failed` (the re-read just before typing failed), and `relay-reservation-lost` (Issue #3992: the reservation of the bound relay a `--reply-to` / `ask --async` send went in under was lost — cancelled, expired or taken by another send — right before the body); none of them typed any key of the body. The unsent bar's Clear (`POST /api/worktrees/:id/clear-composer`) returns 409 `INSTANCE_INPUT_BUSY` when it cannot get the same input lock or the session was recreated (wait a moment and retry), and returns HTTP 200 with `cleared: false` when the text could not be cleared |
 
 **Whatever `lastSend` says, CommandMate never resends.** The sender — you or the supervising agent — does. Resend a `not-sent` message yourself once the input prompt is back. **Do not resend an `indeterminate` one** before checking the pane with `commandmate capture <worktree-id> --pane` (is the body still in the composer, or was it already submitted?); resending blind can deliver it twice. A `send` that fails with `prompt not ready` and the like carries the same state in its error (`[send state: not-sent (prompt-not-ready): …]`).
 
@@ -684,7 +786,16 @@ the same appearance (`screen.token` of [`commandmate prompt`](#commandmate-promp
 | 2 | Argument errors; in strict mode also `--default`, a number on an unnumbered screen, or only one of `--expect-screen` / `--observation` |
 | 40 | Strict mode: the screen did not match or could not be checked. **Nothing was sent** (kind, token, folder or label mismatch, capture failure, an older server, …). Observe again with `commandmate prompt` |
 | 41 | Strict mode: keys were sent (or may have been) and the result is not confirmed. **Do not send again**; look at the pane. Even at 41, when `reason` is `operation_in_progress` / `operation_id_conflict` nothing was sent (`keysSent` is 0; `delivery` reads `indeterminate` but nothing was sent); fetch the result again under a different ID |
-| 99 | Prompt already dismissed (`prompt_no_longer_active`) |
+| 99 | Prompt already dismissed (`prompt_no_longer_active`) / the answer was not sent (`answer_not_delivered`) or stopped part-way (`answer_input_lost`, see below) |
+
+#### An answer not delivered, and one stopped part-way (Issue #3975)
+
+An answer that waited while a send or another answer held the input lock ([input lock (#3952)](#input-that-overlaps-a-send-input-lock-3952)) can end in one of two ways. Both exit 99, but the next step is the opposite:
+
+| Reason | Printed | Meaning and next step |
+|--------|---------|-----------------------|
+| `answer_not_delivered` | `Error: Answer was not sent. Reason: answer_not_delivered (…). Nothing was typed, so it is safe to run respond again.` | Stopped before the first key. **Not one key reached the pane**; running the same `respond` again is safe |
+| `answer_input_lost` | ``Warning: The answer may have been only partly typed (reason: answer_input_lost): … Check the screen with `commandmate capture <id> --instance <instance> --pane --tail 40` before answering again.`` | The session was replaced part-way through the keys and the rest were not sent. **Some of it may have reached the agent**; look at the pane first, then decide whether to answer again. The suggested command reads the pane the answer went to (the `--instance` or `--agent` the answer resolved to; neither when you named neither) |
 
 ---
 
@@ -1154,7 +1265,7 @@ function names (`buildCurrentOutput` / `isClaudeRunning`) is the safer way to fi
 | Field | Meaning |
 |---|---|
 | `content` | Whatever the poller has not saved yet (`buildCurrentOutput`). **It is a delta only for tools whose line count is a usable cursor** — the scrollback tools (codex / gemini / vibe-local / antigravity) while the 10000-line capture window is unsaturated; there it is empty even on a healthy session once the poller has saved it. For the **alternate-screen tools (claude / opencode / copilot), and for any saturated window, it is the WHOLE capture** (the line count is pinned at the pane height / window size and no longer denotes a read position — Issues #1910 / #1670 / #1268) |
-| `realtimeSnippet` | The last 100 rows of the pane — the screen itself (`selectRealtimeSnippetRows` in `src/lib/session/current-output-builder.ts`) |
+| `realtimeSnippet` | The last 100 rows of the pane — the screen itself. When those 100 rows are all blank (a top-anchored pane such as codex, Command Code), the 100 rows ending at the last row with content instead (#2768). `selectRealtimeSnippetRows` in `src/lib/realtime-snippet.ts` |
 | `lineCount` | The row count of the whole capture, blank rows included. A TUI is drawn on a 1000-row pane, so even a blank pane can report 1001 |
 | `isRunning` | The tmux session exists and is healthy (`isClaudeRunning` / `isSessionHealthy` in `src/lib/session/claude-session.ts`). **It does not mean a turn is in progress** |
 | `sessionStatus` / `sessionStatusReason` | The state and what it rests on: a `hook_*` reason came from hooks, anything else from the scraper (`HOOK_STATUS_REASON` in `src/lib/session/status-mapping.ts`) |
@@ -1168,7 +1279,7 @@ function names (`buildCurrentOutput` / `isClaudeRunning`) is the safer way to fi
 | `structuredEvents.source` | The identifier and **declared** values of the tool's structured-event source (Issue #1924). It describes the source, not the session, so it is present even with no hooks and with the session stopped. `kind` / `liveness` / `degradedReason` / `probedActivity` say whether the source is alive right now (Issue #2054) |
 | `structuredEvents.sessionContext` / `sessionDiff` / `session` | Context-window usage (Issue #2042), the files this turn touched with their revert state (Issue #2043), and the conversation the agent says it is in (Issue #2040). `null` for tools that do not publish them |
 | `structuredEvents.pendingDecisions[]` | The dialogs the instance is holding (Issue #1930; `kind` / `questionOptions` from Issue #2040) |
-| `upstreamFault` | `{id, matchedText, at}` when the screen carries an upstream-fault signature, else `null` (Issue #1839). `id` is `overloaded` / `retrying` / `context-limit` (#3011) / `model-capacity` (codex's `■ Selected model is at capacity` row, #3936) / `limit-reached` / `api-error`. **`null` means "no known signature", not "healthy"** |
+| `upstreamFault` | `{id, matchedText, at}` when the screen carries an upstream-fault signature, else `null` (Issue #1839). `id` is `overloaded` / `retrying` / `context-limit` (#3011) / `model-capacity` (codex's `■ Selected model is at capacity` row, #3936) / `limit-reached` / `api-error` (only at a line start: claude's `⏺ API Error: …` or column 0, so a reply that quotes it mid-line or on an indented row does not match, #3946). Judged on the `realtimeSnippet` rows; on codex's split screen (transcript at the top, composer at the bottom) the transcript's last row above them is read too, for `model-capacity` only — `matchedText` then shows a row that is not in `realtimeSnippet` (#3946). **`null` means "no known signature", not "healthy"** |
 | `resolvedBy` / `conflict` | Which stage of the server's precedence chain chose `cliToolId`, and a contradiction between the roster and an explicit `--instance` / `cliTool` (Issue #1884) |
 | `composerText` | Text sitting **unsent** in the agent's input box, or `null` (Issue #1879). Only text a human typed is returned; a dim suggestion or placeholder never is. `composerState` says why a `null` is `null`. claude / codex only |
 | `composerState` | Why `composerText` is what it is (Issue #1879): `content` (real text is there) / `ghost` (only a suggestion or placeholder) / `empty` (the input box is empty) / `unsupported_tool` (this tool's input box has not been measured) / `no_composer` (no input box on the screen — also the answer for a session that is not running) |
@@ -2376,7 +2487,6 @@ Each of these prints a message and exits 0 without changing anything.
 | 3 | START_FAILED | Update succeeded but the restarted server could not be verified (no rollback needed) |
 | 4 | STOP_FAILED | The server could not be stopped; aborted **without changing anything** |
 | 5 | UPDATE_FAILED | Registry query, `npm install -g`, or version verification failed |
-| 11 | UPSTREAM_FAULT | An upstream API fault was on the screen when the turn ended (`wait --fail-on-upstream-fault`; `ask` always). stderr / `--json` carry `id=...`; `id=context-limit` means the conversation is over the model's context limit — kill the instance (`commandmate instances <wt> kill <instance>`) and send again in a fresh session; `id=model-capacity` means the selected model is at capacity and will not answer — send to another instance or model (#3936) |
 | 99 | UNEXPECTED_ERROR | Unexpected error |
 
 ### Caveats
@@ -2724,6 +2834,7 @@ commandmate ls --token your-token
 | 4 | STOP_FAILED | Failed to stop the server (`stop` / `update`) / the provider session could not be closed (`remote stop`) |
 | 5 | UPDATE_FAILED | Update failed (`update`: registry query / `npm install -g` / version verification) |
 | 10 | PROMPT_DETECTED | Prompt detected during wait |
+| 11 | UPSTREAM_FAULT | An upstream API fault was on the screen when the turn ended (`wait --fail-on-upstream-fault`; `ask` always). stderr / `--json` carry `id=...`; `id=context-limit` means the conversation is over the model's context limit — kill the instance (`commandmate instances <wt> kill <instance>`) and send again in a fresh session; `id=model-capacity` means the selected model is at capacity and will not answer — send to another instance or model (#3936) |
 | 99 | UNEXPECTED_ERROR | Unexpected error / resource not found |
 | 124 | TIMEOUT | Wait timeout exceeded |
 

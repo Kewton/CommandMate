@@ -334,7 +334,10 @@
       "remote": "GitHub の Web・モバイルからのリモート操作を切り替え",
       "research": "ディープリサーチ調査を実行",
       "reset-allowed-tools": "許可済みツールの一覧をリセット",
-      "restart": "現在のセッションを保ったまま CLI を再起動",
+      "restart": {
+        "copilot": "現在のセッションを保ったまま CLI を再起動",
+        "claude": "Claude Code を再起動してこのセッションを再開し、インストール済みの更新を適用"
+      },
       "rubber-duck": "現在の作業への独立した批評を取得",
       "search": "会話タイムラインを検索",
       "session": "セッションを表示・管理",
@@ -695,7 +698,14 @@
     "regionLabel": "未送信の入力",
     "label": "未送信の入力:",
     "run": "実行",
-    "clear": "クリア"
+    "clear": "クリア",
+    "clearError": {
+      "dismiss": "閉じる",
+      "otherServer": "別のサーバーが管理しているセッションのため、クリアできませんでした。",
+      "busy": "送信中のため、クリアできませんでした。少し待ってからもう一度お試しください。",
+      "notCleared": "入力欄に文字が残っています。クリアできませんでした。",
+      "failed": "クリアに失敗しました。もう一度お試しください。"
+    }
   },
   "todo": {
     "addPlaceholder": "ToDoを追加…",
@@ -1144,8 +1154,11 @@
     "commentPlaceholder": "直してほしい点を書く（コメントを追加 → レビューを送信）",
     "comment": "コメントを追加",
     "submit": "レビューを送信 (Ctrl+R)",
+    "submitCompact": "レビューを送信",
     "approve": "承認 (Ctrl+A)",
+    "approveCompact": "承認",
     "cancel": "取り消し (Esc)",
+    "cancelCompact": "取り消し",
     "approveConfirmLabel": "プランの承認の確認",
     "approveConfirmText": "承認するとプランが実行されます。承認しますか？",
     "approveConfirmYes": "承認して実行",
@@ -1157,7 +1170,9 @@
       "invalidRequest": "この画面では送れない操作です。何も送っていません。",
       "notActive": "計画のレビュー画面が表示されていないため、何も送っていません。",
       "generic": "送信できませんでした。"
-    }
+    },
+    "composerNotice": "計画の確認待ちです。承認・取り消し・コメントを選んでください",
+    "composerGoto": "操作へ"
   },
   "selectionKeys": {
     "numbersToolbarLabel": "選択肢の番号キー",

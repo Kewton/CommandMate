@@ -30,7 +30,15 @@
  *
  * Every attempt that reaches the ownership check also records how it ended —
  * not-sent / sent / indeterminate — for `prompt --json`'s `lastSend` (Issue
- * #3759, `./send-attempt-state`). Nothing is resent on any outcome.
+ * #3759, `./send-attempt-state`). Nothing is resent on any outcome. The
+ * caller can also be handed its own attempt (`onAttempt`, Issue #3945), so it
+ * describes this send rather than whichever send to the instance recorded last.
+ *
+ * Issue #3945: for the tools whose composer is read after a failure (claude,
+ * codex), step 4 runs under the instance's input lock, the failure read
+ * included — a read made after the lock was released could be reading the next
+ * send's body. The tool's own sender joins that lock rather than queueing
+ * behind it (`instance-input-lock`).
  *
  * Out of scope (kept in the HTTP layer / caller): request/body validation,
  * content trimming/size limits, imagePath validation, CLI-tool availability
@@ -65,9 +73,20 @@ import {
   composerHoldsMessage,
   recordSendAttempt,
 } from '@/lib/session/send-attempt-state';
-import type { SendAttemptReason, SendAttemptState } from '@/lib/session/send-attempt-types';
+import {
+  INPUT_RECHECK_FAILED_CODE,
+  INPUT_RECHECK_PROMPT_WAITING_CODE,
+  type SendAttemptReason,
+  type SendAttemptState,
+} from '@/lib/session/send-attempt-types';
 import { extractComposerText, SUPPORTED_COMPOSER_TOOLS } from '@/lib/detection/composer-text';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
+import {
+  isInputBoundaryRefusal,
+  observeInputStart,
+  withInstanceInputLock,
+  type InputBoundaryHooks,
+} from '@/lib/session/instance-input-lock';
 import type { CopilotTool } from '@/lib/cli-tools/copilot';
 import { formatImagePathFallbackMessage } from '@/lib/cli-tools/opencode';
 import type { ChatMessage, MessageType } from '@/types/models';
@@ -108,6 +127,29 @@ export interface SendUserMessageParams {
    * ever released; a prompt the scraper can see is still refused.
    */
   ignoreStructuredPromptGuard?: boolean;
+  /**
+   * Told how THIS attempt ended, as it is recorded for `lastSend` (Issue
+   * #3945). The shared record holds the instance's last attempt, which with
+   * concurrent sends may be another request's — same text included.
+   */
+  onAttempt?: (attempt: { state: SendAttemptState; reason: SendAttemptReason }) => void;
+  /**
+   * Called at the moment the body starts going into the composer — inside the
+   * sender's `noteInputStart`, synchronously (Issue #3957; the stamp of
+   * #3953) — and only when the sender reports one. The send route reads
+   * "was the instance mid-turn" here, so neither a turn that ended while this
+   * send queued nor a turn that opens after the body went in is mistaken for
+   * the state at the input. It runs before the send is known to have
+   * succeeded.
+   */
+  onInputStart?: (inputStartedAt: Date) => void;
+  /**
+   * Issue #3957: the REQUIRED hook a relay-bound send records its boundary
+   * with, right before the body's first key (or right before an HTTP dispatch
+   * that types none). Unlike `onInputStart` a throw from it stops the send
+   * before anything is typed, and the attempt is `not-sent`.
+   */
+  inputBoundary?: InputBoundaryHooks;
 }
 
 /** Result of {@link sendUserMessage}. */
@@ -242,6 +284,7 @@ export async function sendUserMessage(
   // unchanged; recording never throws.
   const settle = (state: SendAttemptState, reason: SendAttemptReason): void => {
     recordSendAttempt({ worktreeId, cliToolId, instanceId: resolvedInstanceId }, { state, reason, content });
+    params.onAttempt?.({ state, reason });
   };
 
   // Issue #2865: the send route checks ownership itself, but the timer manager
@@ -330,7 +373,14 @@ export async function sendUserMessage(
       logger.info('copilot-model-command-sent', { model: copilotModel });
     } catch (error) {
       logger.error('failed-to-send-model-command:', { error: getErrorMessage(error) });
-      settle('not-sent', 'model-switch-failed');
+      // Issue #3952: the re-check right before `/model` refused it. Read by
+      // code, not wording: the switch's other errors quote the pane's bottom row.
+      const code = (error as { code?: unknown } | null)?.code;
+      if (code === INPUT_RECHECK_PROMPT_WAITING_CODE) {
+        settle('not-sent', 'prompt-waiting');
+        return { ok: false, stage: 'prompt_waiting', error: promptWaitingMessage(worktreeId) };
+      }
+      settle('not-sent', code === INPUT_RECHECK_FAILED_CODE ? 'recheck-failed' : 'model-switch-failed');
       return { ok: false, stage: 'model', error: getErrorMessage(error) };
     }
 
@@ -369,11 +419,17 @@ export async function sendUserMessage(
   // behind a dialog (refused by the prompt guard above), and returns at once
   // while a turn is running. A send without `--model` skips step 1, so its stamp
   // is read at the same point as before.
-  const userMessageTimestamp = new Date();
+  //
+  // Issue #3953: this is now the pending row's stamp, and the user row's only
+  // when the sender did not report when input started (see step 4). The waits
+  // between here and the first key — the input lock, a carried paste mark, the
+  // re-read and the clear — can last a minute, and a previous turn that ended
+  // inside them is not this send's.
+  const pendingResponseTimestamp = new Date();
 
   // 2. Save any pending assistant response before sending the new user message.
   try {
-    await savePendingAssistantResponse(db, worktreeId, cliToolId, userMessageTimestamp, instanceId);
+    await savePendingAssistantResponse(db, worktreeId, cliToolId, pendingResponseTimestamp, instanceId);
   } catch (error) {
     // Log but don't fail - user message should still be saved
     logger.error('failed-to-save-pending-assistant-response:', { error: getErrorMessage(error) });
@@ -421,8 +477,34 @@ export async function sendUserMessage(
     logger.error('failed-to-detect-orphaned-messages:', { error: getErrorMessage(error) });
   }
 
-  // 4. Send message to CLI tool.
-  try {
+  // 4. Send message to CLI tool (run below). Returns the failure, or when sent
+  // the moment the sender started typing the body (Issue #3953; null for a
+  // path that does not report it).
+  async function deliver(): Promise<
+    | { error: unknown; failure: { state: SendAttemptState; reason: SendAttemptReason } }
+    | { sent: true; inputStartedAt: Date | null }
+  > {
+    try {
+      const { inputStartedAt } = await observeInputStart(sendToTool, params.onInputStart, params.inputBoundary);
+      return { sent: true, inputStartedAt };
+    } catch (error) {
+      logger.error('failed-to-send-message-to:', { error: getErrorMessage(error) });
+      // Issue #3957: the relay's boundary hook refused before the first key —
+      // nothing was typed because the reservation the body was going in under
+      // was gone. Issue #3992: its own reason, not `input-lock-lost`.
+      if (isInputBoundaryRefusal(error)) {
+        return { error, failure: { state: 'not-sent', reason: 'relay-reservation-lost' } };
+      }
+      // Issue #3759: not-sent only when the error says the body was never typed.
+      let failure = classifySendFailure(error);
+      if (failure.reason === 'submit-unconfirmed' && (await composerStillHolds(worktreeId, cliToolId, instanceId, content))) {
+        failure = { state: 'indeterminate', reason: 'composer-residue' };
+      }
+      return { error, failure };
+    }
+  }
+
+  async function sendToTool(): Promise<void> {
     // Issue #474: Image-aware sending
     if (absoluteImagePath) {
       if (isImageCapableCLITool(cliTool)) {
@@ -455,20 +537,46 @@ export async function sendUserMessage(
       // the flattening is not needed to make Enter submit and is now gone.
       await cliTool.sendMessage(worktreeId, content, instanceId);
     }
-  } catch (error) {
-    logger.error('failed-to-send-message-to:', { error: getErrorMessage(error) });
-    // Issue #3759: not-sent only when the error says the body was never typed.
-    let failure = classifySendFailure(error);
-    if (failure.reason === 'submit-unconfirmed' && (await composerStillHolds(worktreeId, cliToolId, instanceId, content))) {
-      failure = { state: 'indeterminate', reason: 'composer-residue' };
-    }
+  }
+
+  // Issue #3945: under the input lock for the tools whose composer is read
+  // after a failure, so that read is of this send's composer. Not for the
+  // others — opencode's HTTP delivery never touches the composer, and holding
+  // the lock across it would stall a concurrent tmux send for nothing; their
+  // tmux path takes the lock inside the shared sender.
+  const delivery = SUPPORTED_COMPOSER_TOOLS.has(cliToolId)
+    ? await withInstanceInputLock(sessionName, () => deliver()).catch((error: unknown) => ({
+        error,
+        failure: classifySendFailure(error),
+      }))
+    : await deliver();
+  if (!('sent' in delivery)) {
+    const { error, failure } = delivery;
     settle(failure.state, failure.reason);
+    // Issue #3945: a dialog found by the re-check under the lock is the prompt
+    // guard's refusal, found late — answered as that refusal (relay holds it).
+    if (failure.reason === 'prompt-waiting') {
+      return { ok: false, stage: 'prompt_waiting', error: promptWaitingMessage(worktreeId) };
+    }
     if (isSessionStartTimeoutError(error)) {
       return { ok: false, stage: 'send', error: error.message, code: SESSION_STARTING_CODE };
     }
     return { ok: false, stage: 'send', error: getErrorMessage(error) };
   }
   settle('sent', 'submitted');
+
+  // Issue #3953: the user row, `updateLastUserMessage` and so `wait`'s #1975
+  // gate take the moment the body started going in — later than any turn that
+  // ended before it, earlier than the `stop` of the turn it starts (a stamp
+  // taken after the send could be later than a turn that ends at once). Never
+  // earlier than the pending row's stamp, which stays before it by
+  // ASSISTANT_TIMESTAMP_OFFSET_MS. A path that does not report input (opencode's
+  // HTTP delivery) keeps the stamp read before step 2, as before.
+  const inputStartedAt = delivery.inputStartedAt;
+  const userMessageTimestamp =
+    inputStartedAt !== null && inputStartedAt.getTime() > pendingResponseTimestamp.getTime()
+      ? inputStartedAt
+      : pendingResponseTimestamp;
 
   // 5. Create user message in database (History source: chat_messages).
   const message = createMessage(db, {

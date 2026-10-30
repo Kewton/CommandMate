@@ -934,9 +934,12 @@ export interface CurrentOutputResponse {
    * CurrentOutputPayload.upstreamFault
    *
    * **null is not an all-clear.** It means no signature from
-   * `src/lib/detection/upstream-faults.ts` was on the last 100 rows — the pane
-   * may have scrolled, or the failure may have left it blank (measured in
-   * #1834). Only a non-null value is evidence of anything.
+   * `src/lib/detection/upstream-faults.ts` was on the rows `realtimeSnippet`
+   * publishes — the pane may have scrolled, or the failure may have left it
+   * blank (measured in #1834). Only a non-null value is evidence of anything.
+   * Issue #3946: on codex's split screen the transcript's last row above that
+   * window is read too (`model-capacity` only), so `matchedText` may be a row
+   * that is not in `realtimeSnippet`.
    *
    * Optional here although the server always sends it, for the reason
    * {@link CurrentOutputResponse.model} gives: this mirror also has to describe
@@ -1654,6 +1657,29 @@ export interface ChatMessage {
   content: string;
   cliToolId?: string;
   createdAt?: string;
+  /**
+   * When the row was stamped, on the server's clock: the moment the body
+   * started going in (Issue #3953), or the moment read before the send on a
+   * path that reports no input start / a server before #3953. `ask` bounds the
+   * earlier-ask side of its overlap check with it (Issue #3957).
+   */
+  timestamp?: string;
+  /**
+   * Issue #3957: whether the instance was mid-turn by its own turn record at
+   * the moment the body started going in (opened, not closed by then) — true
+   * or false. Absent for "not known": a tool whose hooks do not report both a
+   * turn start and its `stop`, a sender that reports no input start, a
+   * relaunch during the send, a server before #3957.
+   * Mirrors: src/app/api/worktrees/[id]/send/route.ts SendMessageResponse.
+   */
+  turnOpenAtSend?: boolean;
+  /**
+   * Issue #3957: present when the send named a bound relay (`relayId`). What
+   * the CLI may do with the relay: `not_sent` — nothing reached the worker,
+   * withdraw it; `sent` / `unknown` — leave it (the server holds `unknown`).
+   * Also on the error bodies after the reservation.
+   */
+  sendOutcome?: 'sent' | 'not_sent' | 'unknown';
 }
 
 // =============================================================================
@@ -2498,6 +2524,18 @@ export interface RelayView {
   updatedAt: number;
   expiresAt: number;
   deliveredAt: number | null;
+  /**
+   * Issue #3957. Optional: a server older than the binding sends none of these.
+   * Strings rather than unions, for the reason `state` is one.
+   */
+  bindMode?: string;
+  sendState?: string | null;
+  inputBoundaryAt?: number | null;
+  boundaryKind?: string | null;
+  turnOpenAtSend?: boolean | null;
+  obsState?: string | null;
+  holdReason?: string | null;
+  overlap?: string | null;
 }
 
 /** Mirrors: `RelayCounts` in src/lib/relay/types.ts. */
@@ -2522,6 +2560,13 @@ export interface RelayListResponse {
 
 /** Mirrors: src/app/api/relays/route.ts POST 201 response. */
 export interface RelayCreateResponse {
+  relay: RelayView;
+  /** Issue #3957: `bound` when the server honoured `bind: true`; absent on an older server. */
+  bindMode?: string;
+}
+
+/** Mirrors: src/app/api/relays/[relayId]/route.ts GET 200 response (Issue #3957). */
+export interface RelayGetResponse {
   relay: RelayView;
 }
 

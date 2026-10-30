@@ -1,0 +1,1000 @@
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Plan review: Add `clamp(v, lo, hi)` to sample.js · ~/.commandcode/plans/add-clamp-to-sample.md · v1
+Review the plan like a PR — type on any line to comment, enter pins it under the line.
+
+   1   ## Step 1
+   2   Edit `sample.js` only — keep the existing named-export style (step 1).
+   3   - `clamp(1, 0, 10)` returns the value inside the inclusive range.
+   4   - No new dependencies; the change stays in one file.
+   5   Verify with `node --test` against the sample cases for step 1.
+   6
+   7   ## Step 2
+   8   Edit `sample.js` only — keep the existing named-export style (step 2).
+   9   - `clamp(2, 0, 10)` returns the value inside the inclusive range.
+  10   - No new dependencies; the change stays in one file.
+  11   Verify with `node --test` against the sample cases for step 2.
+  12
+  13   ## Step 3
+  14   Edit `sample.js` only — keep the existing named-export style (step 3).
+  15   - `clamp(3, 0, 10)` returns the value inside the inclusive range.
+  16   - No new dependencies; the change stays in one file.
+  17   Verify with `node --test` against the sample cases for step 3.
+  18
+  19   ## Step 4
+  20   Edit `sample.js` only — keep the existing named-export style (step 4).
+  21   - `clamp(4, 0, 10)` returns the value inside the inclusive range.
+  22   - No new dependencies; the change stays in one file.
+  23   Verify with `node --test` against the sample cases for step 4.
+  24
+  25   ## Step 5
+  26   Edit `sample.js` only — keep the existing named-export style (step 5).
+  27   - `clamp(5, 0, 10)` returns the value inside the inclusive range.
+  28   - No new dependencies; the change stays in one file.
+  29   Verify with `node --test` against the sample cases for step 5.
+  30
+  31   ## Step 6
+  32   Edit `sample.js` only — keep the existing named-export style (step 6).
+  33   - `clamp(6, 0, 10)` returns the value inside the inclusive range.
+  34   - No new dependencies; the change stays in one file.
+  35   Verify with `node --test` against the sample cases for step 6.
+  36
+  37   ## Step 7
+  38   Edit `sample.js` only — keep the existing named-export style (step 7).
+  39   - `clamp(7, 0, 10)` returns the value inside the inclusive range.
+  40   - No new dependencies; the change stays in one file.
+  41   Verify with `node --test` against the sample cases for step 7.
+  42
+  43   ## Step 8
+  44   Edit `sample.js` only — keep the existing named-export style (step 8).
+  45   - `clamp(8, 0, 10)` returns the value inside the inclusive range.
+  46   - No new dependencies; the change stays in one file.
+  47   Verify with `node --test` against the sample cases for step 8.
+  48
+  49   ## Step 9
+  50   Edit `sample.js` only — keep the existing named-export style (step 9).
+  51   - `clamp(9, 0, 10)` returns the value inside the inclusive range.
+  52   - No new dependencies; the change stays in one file.
+  53   Verify with `node --test` against the sample cases for step 9.
+  54
+  55   ## Step 10
+  56   Edit `sample.js` only — keep the existing named-export style (step 10).
+  57   - `clamp(10, 0, 10)` returns the value inside the inclusive range.
+  58   - No new dependencies; the change stays in one file.
+  59   Verify with `node --test` against the sample cases for step 10.
+  60
+  61   ## Step 11
+  62   Edit `sample.js` only — keep the existing named-export style (step 11).
+  63   - `clamp(11, 0, 10)` returns the value inside the inclusive range.
+  64   - No new dependencies; the change stays in one file.
+  65   Verify with `node --test` against the sample cases for step 11.
+  66
+  67   ## Step 12
+  68   Edit `sample.js` only — keep the existing named-export style (step 12).
+  69   - `clamp(12, 0, 10)` returns the value inside the inclusive range.
+  70   - No new dependencies; the change stays in one file.
+  71   Verify with `node --test` against the sample cases for step 12.
+  72
+  73   ## Step 13
+  74   Edit `sample.js` only — keep the existing named-export style (step 13).
+  75   - `clamp(13, 0, 10)` returns the value inside the inclusive range.
+  76   - No new dependencies; the change stays in one file.
+  77   Verify with `node --test` against the sample cases for step 13.
+  78
+  79   ## Step 14
+  80   Edit `sample.js` only — keep the existing named-export style (step 14).
+  81   - `clamp(14, 0, 10)` returns the value inside the inclusive range.
+  82   - No new dependencies; the change stays in one file.
+  83   Verify with `node --test` against the sample cases for step 14.
+  84
+  85   ## Step 15
+  86   Edit `sample.js` only — keep the existing named-export style (step 15).
+  87   - `clamp(15, 0, 10)` returns the value inside the inclusive range.
+  88   - No new dependencies; the change stays in one file.
+  89   Verify with `node --test` against the sample cases for step 15.
+  90
+  91   ## Step 16
+  92   Edit `sample.js` only — keep the existing named-export style (step 16).
+  93   - `clamp(16, 0, 10)` returns the value inside the inclusive range.
+  94   - No new dependencies; the change stays in one file.
+  95   Verify with `node --test` against the sample cases for step 16.
+  96
+  97   ## Step 17
+  98   Edit `sample.js` only — keep the existing named-export style (step 17).
+  99   - `clamp(17, 0, 10)` returns the value inside the inclusive range.
+ 100   - No new dependencies; the change stays in one file.
+ 101   Verify with `node --test` against the sample cases for step 17.
+ 102
+ 103   ## Step 18
+ 104   Edit `sample.js` only — keep the existing named-export style (step 18).
+ 105   - `clamp(18, 0, 10)` returns the value inside the inclusive range.
+ 106   - No new dependencies; the change stays in one file.
+ 107   Verify with `node --test` against the sample cases for step 18.
+ 108
+ 109   ## Step 19
+ 110   Edit `sample.js` only — keep the existing named-export style (step 19).
+ 111   - `clamp(19, 0, 10)` returns the value inside the inclusive range.
+ 112   - No new dependencies; the change stays in one file.
+ 113   Verify with `node --test` against the sample cases for step 19.
+ 114
+ 115   ## Step 20
+ 116   Edit `sample.js` only — keep the existing named-export style (step 20).
+ 117   - `clamp(20, 0, 10)` returns the value inside the inclusive range.
+ 118   - No new dependencies; the change stays in one file.
+ 119   Verify with `node --test` against the sample cases for step 20.
+ 120
+ 121   ## Step 21
+ 122   Edit `sample.js` only — keep the existing named-export style (step 21).
+ 123   - `clamp(21, 0, 10)` returns the value inside the inclusive range.
+ 124   - No new dependencies; the change stays in one file.
+ 125   Verify with `node --test` against the sample cases for step 21.
+ 126
+ 127   ## Step 22
+ 128   Edit `sample.js` only — keep the existing named-export style (step 22).
+ 129   - `clamp(22, 0, 10)` returns the value inside the inclusive range.
+ 130   - No new dependencies; the change stays in one file.
+ 131   Verify with `node --test` against the sample cases for step 22.
+ 132
+ 133   ## Step 23
+ 134   Edit `sample.js` only — keep the existing named-export style (step 23).
+ 135   - `clamp(23, 0, 10)` returns the value inside the inclusive range.
+ 136   - No new dependencies; the change stays in one file.
+ 137   Verify with `node --test` against the sample cases for step 23.
+ 138
+ 139   ## Step 24
+ 140   Edit `sample.js` only — keep the existing named-export style (step 24).
+ 141   - `clamp(24, 0, 10)` returns the value inside the inclusive range.
+ 142   - No new dependencies; the change stays in one file.
+ 143   Verify with `node --test` against the sample cases for step 24.
+ 144
+ 145   ## Step 25
+ 146   Edit `sample.js` only — keep the existing named-export style (step 25).
+ 147   - `clamp(25, 0, 10)` returns the value inside the inclusive range.
+ 148   - No new dependencies; the change stays in one file.
+ 149   Verify with `node --test` against the sample cases for step 25.
+ 150
+ 151   ## Step 26
+ 152   Edit `sample.js` only — keep the existing named-export style (step 26).
+ 153   - `clamp(26, 0, 10)` returns the value inside the inclusive range.
+ 154   - No new dependencies; the change stays in one file.
+ 155   Verify with `node --test` against the sample cases for step 26.
+ 156
+ 157   ## Step 27
+ 158   Edit `sample.js` only — keep the existing named-export style (step 27).
+ 159   - `clamp(27, 0, 10)` returns the value inside the inclusive range.
+ 160   - No new dependencies; the change stays in one file.
+ 161   Verify with `node --test` against the sample cases for step 27.
+ 162
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+ REVIEW
+Approve ctrl+a   executes the plan
+Cancel esc
+
+type + enter to comment · quick: ? why  x cut  ! risky · ctrl+g $EDITOR
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -59,6 +59,11 @@ export interface OpenRelayInput {
   ttlMs?: number;
   /** Epoch ms; injectable so a suite does not race the wall clock. */
   now?: number;
+  /**
+   * Issue #3957: the caller will pass the relay id to the send that asks the
+   * question (`bind: true`), and the relay is answered from that send only.
+   */
+  bind?: boolean;
 }
 
 /** A refusal that names which endpoint was not found. */
@@ -222,6 +227,7 @@ export function openRelay(db: Database.Database, input: OpenRelayInput): OpenRel
     hops: verdict.hops,
     expiresAt: now + resolveRelayTtlMs(input.ttlMs),
     now,
+    bindMode: input.bind === true ? 'bound' : 'legacy',
   });
 
   logger.info('relay-opened', {
@@ -229,6 +235,7 @@ export function openRelay(db: Database.Database, input: OpenRelayInput): OpenRel
     from: `${relay.from.worktreeId}/${relay.from.instanceId}`,
     to: `${relay.to.worktreeId}/${relay.to.instanceId}`,
     hops: relay.hops,
+    bindMode: relay.bindMode,
   });
 
   writeRelaySystemLine(

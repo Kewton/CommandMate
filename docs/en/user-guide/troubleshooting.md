@@ -94,6 +94,45 @@ commandmate start --daemon
 - Rows with the startup-screen text that do not meet those conditions are printed as "left", with the id and the reason (`keyed-row`, `holds-echo`, `has-body`, `no-path-match`), and never deleted. Look at them yourself if needed
 - To undo, stop the server and restore the backup into the database: `sqlite3 "$DB" ".restore '$DB.bak-3335'"`
 
+## Roll the database back to before a migration after an update?
+
+When the database still has one or more migrations (schema updates) to apply at startup, CommandMate takes a copy of it **before the first migration** (Issue #3985). An older CommandMate cannot open a database at a newer schema version, so to roll back an update, restore this copy together with the older executable.
+
+- **When it is taken:** only when there is a pending migration. Never for a database that is already at the latest version, or for a brand-new database (no tables yet)
+- **Where:** `db-backups/` in the same directory as the database (global install: `~/.commandmate/data/db-backups/`; next to `CM_DB_PATH` if you set one). The directory is 0700, the files are 0600
+- **Name:** `<database file name>.v<from>-to-v<target>.<UTC time>.<short id>.sqlite` (e.g. `cm.db.v61-to-v62.20261029T010203456Z.1a2b3c4d.sqlite`). A file still being written ends in `.partial` and never counts as a completed copy
+- **Generations:** up to 3 completed copies are kept. Older ones are deleted only after the new copy has been verified. The original restore point (the newest copy whose source version is the "last completed version", whatever its target) is never deleted and takes one of the 3 slots. The last completed version is recorded in `db-backups/<database file name>.last-complete-version` (0600) whenever every migration succeeds. When nothing is recorded (the first copy, or a `db-backups/` made by an older version), the copy with the oldest source version (the newest of those on a tie) is kept as the original restore point. When the recorded version is newer than the database's current version (after restoring an older copy by hand), the record is ignored, the same rule applies, and one line is logged. So if a migration fails partway (e.g. v59 → v60 succeeds, v61 fails) and every restart — or another version aiming at, say, v62 — takes a new copy from v60, the v59 copy, the one the last working CommandMate can open, is not pushed out. Once a migration run completes, the record moves forward and older copies are pruned as usual from the next update on. Failing to write the record never stops startup (it is logged, and the next run follows the no-record rule)
+- **Contents:** a single-point-in-time copy made with SQLite's `VACUUM INTO`, including committed updates still in the WAL. After writing it, CommandMate checks `integrity_check` and the schema version
+- **On failure:** if the copy cannot be made or verified, startup stops before any migration runs. To start without the copy (e.g. not enough disk space), set `CM_DB_SKIP_MIGRATION_BACKUP=1` (the default is to take it)
+
+**Restoring loses every update made after the copy was taken (conversation history, settings changes, and so on).** To restore:
+
+```bash
+# 1. Stop the server
+commandmate stop
+
+# 2. Pick the copy to restore (global install: ~/.commandmate/data/cm.db,
+#    or the value of CM_DB_PATH if you set one)
+DB=~/.commandmate/data/cm.db
+ls -l "$(dirname "$DB")/db-backups/"
+
+# 3. Save the current database with SQLite's backup feature (includes committed updates still in the WAL)
+sqlite3 "$DB" ".backup '$DB.before-restore'"
+
+# 4. Put the copy in its place and delete -wal and -shm
+cp "$(dirname "$DB")/db-backups/cm.db.v61-to-v62.<time>.<id>.sqlite" "$DB"
+chmod 600 "$DB"
+rm -f "$DB-wal" "$DB-shm"
+
+# 5. Go back to the CommandMate version that matches the copy, then start it
+commandmate start --daemon
+```
+
+- Restoring with `-wal` / `-shm` left in place lays another database's WAL over the copy, which can corrupt it or mix in updates. Always delete them
+- Saving the current database with `mv` or `cp` takes the main file only, and leaves out committed updates still in `-wal` (e.g. after a crash). Save it with `.backup` as in step 3
+- The copy is a self-contained, consistent file, so `cp` is enough to restore it (with the server stopped)
+- After restoring, the "last completed version" record in `db-backups/` is newer than the database; it is ignored at startup (no need to delete it) and overwritten the next time every migration succeeds
+
 ## FAQ
 
 **Q: How do I use CommandMate from my phone?**

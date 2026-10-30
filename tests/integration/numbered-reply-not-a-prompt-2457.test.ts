@@ -200,7 +200,7 @@ describe('[#2457] a numbered reply in the chat surface', () => {
     });
 
     expect((await response.json()).success).toBe(true);
-    expect(stubs.sendSpecialKeys).toHaveBeenCalledWith(`claude-${WT}`, ['Enter']);
+    expect(stubs.sendSpecialKeys).toHaveBeenCalledWith(`claude-${WT}`, ['Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
     expect(storedMessages().map(r => r.message_type)).toEqual(['prompt']);
   });
 });

@@ -180,6 +180,8 @@ describe('send --reply-to', () => {
       from: { worktreeId: 'wt-a', instanceId: 'claude' },
       to: { worktreeId: 'wt-b', instanceId: 'codex' },
       allowRelayChain: false,
+      // Issue #3957: the CLI asks for a relay bound to its send.
+      bind: true,
     });
   });
 

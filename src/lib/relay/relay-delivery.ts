@@ -41,35 +41,39 @@
 import type Database from 'better-sqlite3';
 import { getDbInstance } from '@/lib/db/db-instance';
 import {
+  clearRelayHeldCandidates,
   clearRelayPending,
+  clearRelayPendingReply,
+  getRelayBinding,
   getRelayById,
-  getRelayPromptSignature,
+  getRelayPendingPayload,
   listExpiredOpenRelays,
   listOpenRelaysTo,
   listRelaysWithPendingPayload,
   markRelayDelivered,
   markRelayExpired,
-  markRelayPromptNotified,
+  promoteRelayPendingReply,
+  replaceRelayPromptWithPendingReply,
   stashRelayPayload,
 } from '@/lib/db/relay-db';
-import {
-  getLatestOpenPromptMessage,
-  getMessages,
-  MODEL_CHANGE_REQUEST_ID_PREFIX,
-  relayRequestId,
-  RELAY_SYSTEM_REQUEST_ID_PREFIX,
-} from '@/lib/db/chat-db';
-import { isAnswerablePromptData, type ChatMessage } from '@/types/models';
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import { getLatestOpenPromptMessage, relayRequestId } from '@/lib/db/chat-db';
 import { resolveReadersLocale } from '@/lib/push/model-change-push-notifier';
 import { sendUserMessage } from '@/lib/session/send-user-message';
+import { buildRelayExpiredMessage } from '@/lib/relay/relay-messages';
+import { relayServerBootId } from '@/lib/relay/relay-boot';
 import {
-  buildRelayExpiredMessage,
-  buildRelayPromptMessage,
-  buildRelayReplyMessage,
-  type RelayPromptOption,
-  type RelaySenderLabel,
-} from '@/lib/relay/relay-messages';
+  findWorkerCompletions,
+  findWorkerReply,
+  notifyPromptForRelay,
+  observationStillHolds,
+  recoverBoundRelays,
+  requiresTurnRow,
+  senderLabel,
+  stashBoundReply,
+  stashPromptNotice,
+  stashReplyForOpenRelays,
+  type RelayWorkerRef,
+} from '@/lib/relay/relay-bound-reply';
 import { RELAY_SCRAPE_QUIET_MS } from '@/lib/relay/relay-policy';
 import { findRelayHoldReason } from '@/lib/relay/relay-readiness';
 import { resolveRelaySession } from '@/lib/relay/relay-session-ref';
@@ -80,91 +84,20 @@ import {
   releaseRelayDelivery,
   resetRelayDeliveryClaims,
 } from '@/lib/relay/relay-delivery-claims';
-import { isOpenRelayState, type RelayPendingKind, type SessionRelay } from '@/lib/relay/types';
+import { isOpenRelayState } from '@/lib/relay/types';
 import { createLogger } from '@/lib/logger';
 import { getOrInitGlobal } from '../global-state';
 
+// Issue #3996: the reply/notice decisions moved; their public names stay here.
+export { findWorkerReply, recoverBoundRelays, type RelayWorkerRef };
+
 const logger = createLogger('relay-delivery');
 
-/**
- * How many assistant rows back the reply is looked for.
- *
- * A turn can write several rows (a narration then a summary), and the relay
- * wants the last one that is actually the agent talking. Bounded because an
- * unbounded read of a long-lived worktree's history is a large query for one
- * line of answer.
- */
-const REPLY_LOOKBACK_MESSAGES = 40;
+/** How many passes one pump makes when a pass promoted a reply (Issue #3957). */
+const PUMP_PASSES_MAX = 3;
 
 /** How many times the scrape path re-reads before it gives up on stability. */
 const SCRAPE_STABILITY_ATTEMPTS = 3;
-
-/**
- * The `request_id` shape a transcript reader mints for a finished turn.
- *
- * `claude-turn:<uuid>`, `codex-turn:<turn_id>`, `antigravity-turn:<id>`,
- * `command-code-turn:<id>` and opencode's `oc-turn:<message id>`. Matched as a
- * SHAPE rather than as a list of five literals for the reason `ask`'s copy of
- * this line gives (Issue #2386): the sixth reader lands INSIDE the filter
- * instead of silently outside it. A `:` cannot appear in any of the ids
- * themselves, so this cannot match a row that merely contains the text.
- *
- * Copied rather than imported, deliberately. `src/cli/commands/ask.ts` has the
- * same regexp, and importing it here would invert the dependency (lib reaching
- * into the CLI bundle); `AGENT_MARKDOWN_REQUEST_ID_PREFIXES` in
- * `src/types/agent-transcript.ts` is the LIST form this shape is chosen not to
- * be. One regexp in each layer is cheaper than either edge.
- */
-const TURN_REQUEST_ID_PATTERN = /-turn:/;
-
-/**
- * Request-id namespaces CommandMate writes ABOUT a session, not for it.
- *
- * `chat_messages` has no `system` role, so "reply from X" (Issue #2377) and
- * "the model changed" (Issue #2357) are both stored as assistant rows and told
- * apart by their request id. Neither is a word the worker said, and handing the
- * relay's own notice back to the session it came from is the smallest possible
- * loop. `ask` steps over exactly these two for the same reason.
- */
-const SYSTEM_ROW_REQUEST_ID_PREFIXES = [
-  RELAY_SYSTEM_REQUEST_ID_PREFIX,
-  MODEL_CHANGE_REQUEST_ID_PREFIX,
-] as const;
-
-/**
- * Whether this tool's reply is read out of a transcript rather than off a screen.
- *
- * For the six that answer `true` the ledger is authoritative: a row with no
- * turn marker was written by the SCRAPER, and for these tools a scraped row is
- * never the answer — it is a footer line, a half-drawn frame or the ANSI dump
- * the send path flushes (Issues #2398 / #2400). The relay may therefore hold
- * out for a marked row. For copilot, gemini and vibe-local the scraper's row is
- * the only record there will ever be, and demanding a marker would deliver
- * nothing, ever.
- *
- * A record and not a `Set`, so a ninth entry in `CLI_TOOL_IDS` fails `tsc` here
- * instead of quietly defaulting to "screen-scraped" — the idiom
- * `cli-tools/install-hints` uses for the same reason.
- *
- * Deliberately NOT `isPullTranscriptHistory`: that asks who does the READING,
- * so opencode (whose own server pushes) answers `false` even though its rows
- * carry `oc-turn:` like the other four. It also lives in `lib/polling`, whose
- * module graph reaches this file's triggers — importing it would close a cycle
- * the relay was built to avoid.
- */
-const TRANSCRIPT_READER_TOOLS: Readonly<Record<CLIToolType, boolean>> = {
-  claude: true,
-  codex: true,
-  antigravity: true,
-  'command-code': true,
-  opencode: true,
-  copilot: false,
-  gemini: false,
-  'vibe-local': false,
-  // Issue #2940: OpenCode V2's replies are written from its server
-  // (`GET /api/session/{id}/message`) under `oc-turn:`, like opencode's.
-  'opencode-v2': true,
-};
 
 /**
  * How long the scrape path holds out for the transcript row.
@@ -200,6 +133,10 @@ declare global {
   var __relayDeliveryInFlight: Set<string> | undefined;
   // eslint-disable-next-line no-var
   var __relayPumpRunning: boolean | undefined;
+  // eslint-disable-next-line no-var
+  var __relayRecoveredBootId: string | undefined;
+  // eslint-disable-next-line no-var
+  var __relayPumpAgain: boolean | undefined;
 }
 
 const inFlight = getOrInitGlobal('__relayDeliveryInFlight', () => new Set<string>());
@@ -209,125 +146,73 @@ export function resetRelayDeliveryState(): void {
   inFlight.clear();
   resetRelayDeliveryClaims();
   globalThis.__relayPumpRunning = false;
-}
-
-/** The session that finished a turn, as the triggers describe it. */
-export interface RelayWorkerRef {
-  worktreeId: string;
-  cliToolId: CLIToolType;
-  /** Already resolved; the primary instance's id IS its tool id (#868). */
-  instanceId: string;
-}
-
-function senderLabel(db: Database.Database, relay: SessionRelay): RelaySenderLabel {
-  const worker = resolveRelaySession(db, relay.to);
-  return { alias: worker.alias, worktreeId: worker.worktreeId };
-}
-
-/** Whether a row's `request_id` says a transcript reader wrote it. */
-function isTurnRow(requestId: string | null | undefined): boolean {
-  return typeof requestId === 'string' && TURN_REQUEST_ID_PATTERN.test(requestId);
-}
-
-/** Whether a row is CommandMate's own furniture rather than the worker's words. */
-function isSystemRow(requestId: string | null | undefined): boolean {
-  return typeof requestId === 'string'
-    && SYSTEM_ROW_REQUEST_ID_PREFIXES.some((prefix) => requestId.startsWith(prefix));
-}
-
-/** Whether this worker's answer is only ever a transcript row. */
-function requiresTurnRow(cliToolId: CLIToolType): boolean {
-  return TRANSCRIPT_READER_TOOLS[cliToolId] === true;
+  globalThis.__relayRecoveredBootId = undefined;
 }
 
 /**
- * The newest thing B actually said, at or after `since`.
+ * The bound send was confirmed: judge what was held for it (Issue #3957).
  *
- * Four kinds of row are stepped over, and each exclusion is load-bearing:
- * prompt rows (a question is not an answer, and the confirmation notice is a
- * separate delivery), CommandMate's own system rows (delivering "Reply from X"
- * back to X is the smallest possible loop), empty bodies — and, for a tool that
- * keeps a transcript, every row the SCRAPER wrote.
+ * The EARLIEST turn at or after the boundary is taken — not the newest: when
+ * two turns ended before the send was confirmed, the first one after the
+ * boundary is the one this request started. It is re-read from the boundary
+ * (the held candidates are the record of what was seen, ordered by the same
+ * key), and the held list is dropped. The worker's open prompt is judged at the same moment: a dialog
+ * that appeared after the boundary and is still open is told now (its opening
+ * edge fired while the send was unconfirmed and will not fire again); one
+ * already answered is not.
  *
- * That last one is Issue #2401. Until it was added the filter looked only at
- * shape, never at provenance, so the newest row won whatever had written it:
- * a codex footer line, a partial scrape, or the raw ANSI the send path flushes
- * lands in the ledger with `request_id IS NULL` and, being newest, WAS the
- * reply — forwarded to the requesting agent as the worker's own answer, which
- * it then summarises. #2386 fixed the identical hole in `ask` by demanding the
- * turn marker; the relay looked exempt only because its 15-second pump usually
- * gave the transcript time to land, and a race the timing usually wins is still
- * a race.
+ * Never throws; called by the send route right after it settled the send.
  */
-export function findWorkerReply(
-  db: Database.Database,
-  worker: RelayWorkerRef,
-  since: number
-): ChatMessage | null {
-  const messages = getMessages(db, worker.worktreeId, {
-    limit: REPLY_LOOKBACK_MESSAGES,
-    cliToolId: worker.cliToolId,
-    instanceId: worker.instanceId,
-    matchResolvedInstance: true,
-  });
-  const requireTurnRow = requiresTurnRow(worker.cliToolId);
+export function evaluateRelayAfterSend(relayId: string): void {
+  try {
+    const db = getDbInstance();
+    const binding = getRelayBinding(db, relayId);
+    if (!binding) return;
+    const { relay } = binding;
+    if (relay.sendState !== 'sent' || !isOpenRelayState(relay.state) || relay.inputBoundaryAt === null) return;
+    const session = resolveRelaySession(db, relay.to);
+    const worker: RelayWorkerRef = {
+      worktreeId: session.worktreeId,
+      cliToolId: session.cliToolId,
+      instanceId: session.instanceId,
+    };
+    const boundary = relay.inputBoundaryAt;
+    const now = Date.now();
 
-  // `getMessages` answers newest-first, so the first candidate IS the newest.
-  for (const message of messages) {
-    if (message.role !== 'assistant') continue;
-    if (message.messageType === 'prompt') continue;
-    if (isSystemRow(message.requestId)) continue;
-    if (requireTurnRow && !isTurnRow(message.requestId)) continue;
-    if (message.content.trim() === '') continue;
-    return message.timestamp.getTime() < since ? null : message;
+    const decided = db.transaction((): boolean => {
+      clearRelayHeldCandidates(db, relayId);
+      if (!observationStillHolds(db, worker, binding)) return false;
+      // Re-read from the boundary rather than trusting what was held: the
+      // held list was read from `createdAt` (before the boundary existed) and
+      // may have spent the scan's bound on rows before it. The order is the
+      // same key either way — each turn's first row.
+      const [first] = findWorkerCompletions(db, worker, boundary);
+      return first ? stashBoundReply(db, worker, binding, first.row, now) : false;
+    })();
+
+    const prompted = decided ? false : notifyPromptForRelay(db, worker, relayId);
+    if (decided || prompted) void pumpRelayDeliveries();
+  } catch (error) {
+    logger.warn('relay-after-send-failed', {
+      relayId,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
-  return null;
 }
 
-/** The options of B's open dialog, in the shape the notice lists them. */
-function promptOptionsOf(message: ChatMessage): RelayPromptOption[] {
-  const data = message.promptData;
-  // #3184: type narrowing only — the stored row's screen `options` are listed;
-  // a stored degraded record never carries a decision id, so it has none.
-  if (!isAnswerablePromptData(data)) return [];
-  if (data.type === 'yes_no') {
-    return data.options.map((label) => ({ key: label, label }));
+
+/** {@link recoverBoundRelays}, once per boot. */
+function ensureRelayRecovery(db: Database.Database): void {
+  const boot = relayServerBootId();
+  if (globalThis.__relayRecoveredBootId === boot) return;
+  globalThis.__relayRecoveredBootId = boot;
+  try {
+    recoverBoundRelays(db);
+  } catch (error) {
+    logger.warn('relay-recovery-failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
-  return data.options.map((option) => ({
-    key: String(option.number),
-    label: option.label,
-  }));
-}
-
-/**
- * Stash B's finished reply against every relay that is waiting for it.
- *
- * @returns How many relays took a payload from this call
- */
-function stashReplyForOpenRelays(
-  db: Database.Database,
-  worker: RelayWorkerRef,
-  now: number
-): number {
-  const relays = listOpenRelaysTo(db, {
-    worktreeId: worker.worktreeId,
-    instanceId: worker.instanceId,
-  });
-  if (relays.length === 0) return 0;
-
-  let stashed = 0;
-  for (const relay of relays) {
-    // `createdAt` and not "the last time we looked": a reply written BEFORE the
-    // relay existed answered somebody else's question, and delivering it would
-    // hand session A the previous turn — the exact failure a bare `capture`
-    // after a `wait` has always had.
-    const reply = findWorkerReply(db, worker, relay.createdAt);
-    if (!reply) continue;
-
-    const body = buildRelayReplyMessage(senderLabel(db, relay), reply.content);
-    if (stashRelayPayload(db, relay.id, 'reply', body, now)) stashed += 1;
-  }
-  return stashed;
 }
 
 /** Sleep, so the scrape path can wait out its quiet window. */
@@ -464,31 +349,10 @@ export function notifyRelayPromptWaiting(worker: RelayWorkerRef): void {
     );
     if (!prompt) return;
 
-    const locale = resolveReadersLocale(db);
-    const options = promptOptionsOf(prompt);
-    // #3184: type narrowing only, to read `question` off the closed union.
-    const question = isAnswerablePromptData(prompt.promptData)
-      ? prompt.promptData.question
-      : (prompt.promptData?.question ?? prompt.content);
-
     let stashed = 0;
     for (const relay of relays) {
-      // The dialog's own row id is the signature: a wait that lasts twenty
-      // minutes is ONE row, so A is told once however many polls observe it.
-      if (getRelayPromptSignature(db, relay.id) === prompt.id) continue;
-      const body = buildRelayPromptMessage(locale, senderLabel(db, relay), {
-        question,
-        options,
-      });
-      if (stashRelayPayload(db, relay.id, 'prompt', body)) {
-        // The signature is recorded HERE, before the delivery, and not after it:
-        // it is what stops every later poll of the same twenty-minute dialog
-        // from stashing the same notice again while A is still busy. The state
-        // moving to `prompt` is an OPEN state, so the reply that follows once
-        // the dialog is answered can still be stashed and delivered.
-        markRelayPromptNotified(db, relay.id, prompt.id);
-        stashed += 1;
-      }
+      // Issue #3957: a bound relay is told only about a dialog of its own send.
+      if (stashPromptNotice(db, worker, relay, prompt)) stashed += 1;
     }
     if (stashed > 0) void pumpRelayDeliveries();
   } catch (error) {
@@ -520,8 +384,9 @@ export function sweepExpiredRelays(db: Database.Database, now = Date.now()): num
       const locale = resolveReadersLocale(db);
       // A payload that never went out is superseded by the expiry notice: A
       // asked for an answer, and what they are getting is the news that there
-      // will not be one.
+      // will not be one. Both slots (Issue #3957).
       clearRelayPending(db, relay.id, now);
+      clearRelayPendingReply(db, relay.id, now);
       const body = buildRelayExpiredMessage(
         locale,
         senderLabel(db, relay),
@@ -595,7 +460,7 @@ async function deliverOne(
   }
 
   // Synchronous from here to the send: re-read, then claim.
-  const current = findCurrentPayload(db, relayId);
+  const current = getRelayPendingPayload(db, relayId);
   if (!current || current.kind !== kind || current.body !== body) {
     logger.info('relay-delivery-superseded', { relayId, kind });
     return 'skipped';
@@ -610,6 +475,7 @@ async function deliverOne(
   const requester = resolveRelaySession(db, relay.from);
 
   claimRelayDelivery(relayId);
+  let delivered = false;
   try {
     const result = await sendUserMessage(db, {
       worktreeId: requester.worktreeId,
@@ -641,7 +507,8 @@ async function deliverOne(
         'replied',
         requester,
         resolveRelaySession(db, relay.to),
-        now
+        now,
+        { overlap: relay.overlap, holdReason: relay.holdReason }
       );
     } else if (kind === 'prompt') {
       writeRelaySystemLine(
@@ -653,10 +520,36 @@ async function deliverOne(
         now
       );
     }
-    clearRelayPending(db, relay.id, now);
+    // Issue #3957: only the payload that was sent. A reply that replaced it
+    // or waits in the second slot survives, and the second slot is promoted
+    // now that the notice is out.
+    clearRelayPending(db, relay.id, now, current.payloadId);
+    if (kind === 'prompt' && promoteRelayPendingReply(db, relay.id, now)) {
+      globalThis.__relayPumpAgain = true;
+    }
     logger.info('relay-delivered', { relayId, kind, to: `${requester.worktreeId}/${requester.instanceId}` });
+    delivered = true;
     return 'delivered';
   } finally {
+    // Issue #3957: a prompt notice that did not go out (refused, failed,
+    // threw) is back to unclaimed — and a reply that finished while it was
+    // being typed waits in the second slot. The reply supersedes the notice
+    // exactly as it would have had it arrived a moment later.
+    // A failure here must not keep the claim below from being released: a
+    // claim left behind refuses every cancel and every expiry of the relay.
+    if (!delivered && kind === 'prompt') {
+      try {
+        if (replaceRelayPromptWithPendingReply(db, relay.id, current.payloadId)) {
+          logger.info('relay-prompt-superseded-after-failed-delivery', { relayId });
+          globalThis.__relayPumpAgain = true;
+        }
+      } catch (error) {
+        logger.warn('relay-prompt-supersede-failed', {
+          relayId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
     // Delivered: a reply is closed now and a prompt notice leaves the relay
     // open on purpose, so either way a later cancel must be judged by the row.
     // Held or failed: nothing reached A, so the relay can be withdrawn again.
@@ -664,13 +557,6 @@ async function deliverOne(
   }
 }
 
-/** The payload this relay carries right now, read straight from the ledger. */
-function findCurrentPayload(
-  db: Database.Database,
-  relayId: string
-): { relay: SessionRelay; kind: RelayPendingKind; body: string } | null {
-  return listRelaysWithPendingPayload(db).find((item) => item.relay.id === relayId) ?? null;
-}
 
 /**
  * Deliver every stashed payload that can be delivered now.
@@ -684,19 +570,26 @@ export async function pumpRelayDeliveries(): Promise<void> {
   globalThis.__relayPumpRunning = true;
   try {
     const db = getDbInstance();
-    for (const item of listRelaysWithPendingPayload(db)) {
-      if (inFlight.has(item.relay.id)) continue;
-      inFlight.add(item.relay.id);
-      try {
-        await deliverOne(db, item.relay.id, item.kind, item.body);
-      } catch (error) {
-        logger.warn('relay-delivery-failed', {
-          relayId: item.relay.id,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      } finally {
-        inFlight.delete(item.relay.id);
+    ensureRelayRecovery(db);
+    // Issue #3957: a reply promoted out of the second slot during a pass is
+    // delivered by one more pass rather than waiting for the next tick.
+    for (let pass = 0; pass < PUMP_PASSES_MAX; pass += 1) {
+      globalThis.__relayPumpAgain = false;
+      for (const item of listRelaysWithPendingPayload(db)) {
+        if (inFlight.has(item.relay.id)) continue;
+        inFlight.add(item.relay.id);
+        try {
+          await deliverOne(db, item.relay.id, item.kind, item.body);
+        } catch (error) {
+          logger.warn('relay-delivery-failed', {
+            relayId: item.relay.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        } finally {
+          inFlight.delete(item.relay.id);
+        }
       }
+      if (!globalThis.__relayPumpAgain) break;
     }
   } catch (error) {
     logger.warn('relay-pump-failed', {
@@ -710,6 +603,7 @@ export async function pumpRelayDeliveries(): Promise<void> {
 /** One tick of the background loop: sweep the deadlines, then deliver. */
 export async function runRelayMaintenanceTick(): Promise<void> {
   try {
+    ensureRelayRecovery(getDbInstance());
     sweepExpiredRelays(getDbInstance());
   } catch (error) {
     logger.warn('relay-sweep-failed', {

@@ -190,18 +190,43 @@ export function planCommandCodePlanReviewKeys(
 export const PLAN_REVIEW_STEP_DELAY_MS = 300;
 
 /**
+ * The plan review's keys stopped part-way (Issue #3952 review P2-3): the
+ * session's input was taken from the answer — the session was replaced — after
+ * `stepsSent` of its steps had gone out. The rest were not sent.
+ */
+export class PlanReviewInputLostError extends Error {
+  constructor(
+    sessionName: string,
+    readonly stepsSent: number,
+  ) {
+    super(
+      `Session ${sessionName} was replaced while the plan review answer held its input; ` +
+        `${stepsSent} step(s) had been sent, the rest were not (Issue #3952).`,
+    );
+    this.name = 'PlanReviewInputLostError';
+  }
+}
+
+/**
  * Send the planned steps, one tmux invocation each.
  *
  * Key steps (including `C-r`) go through `sendSpecialKeys`; the comment text
  * goes through `-l` so it is never resolved as a key name.
+ *
+ * Issue #3952 review P2-3: given `isCurrent` (the input ticket the answer holds),
+ * it is asked before every step — after each wait — and a ticket that is no
+ * longer current stops the steps there ({@link PlanReviewInputLostError}), as
+ * the strict respond's keys stop.
  */
 export async function sendCommandCodePlanReviewKeys(
   sessionName: string,
   steps: readonly PlanReviewKeyStep[],
   sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  isCurrent?: () => boolean,
 ): Promise<void> {
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
+    if (isCurrent !== undefined && !isCurrent()) throw new PlanReviewInputLostError(sessionName, i);
     if (step.kind === 'text') {
       await sendKeys(sessionName, step.text, false, { literal: true });
     } else {

@@ -436,7 +436,8 @@ describe('CopilotTool', () => {
       expect(run.error).toContain(
         `copilot did not become idle within ${COPILOT_MODEL_SWITCH_TIMEOUT_MS}ms, so /model was not sent`
       );
-      expect(run.error).toContain(shown);
+      // Issue #3954: the screen goes to the log, not the message.
+      expect(run.error).not.toContain(shown);
       expect(tmux.sendKeys).not.toHaveBeenCalled();
     });
 

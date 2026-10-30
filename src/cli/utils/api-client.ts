@@ -374,12 +374,18 @@ export class ApiClient {
   /**
    * HTTP GET request
    * [DR1-05] Generic type parameter specified at call site
+   *
+   * Issue #3956: `init.signal` bounds the request; an aborted one throws an
+   * `ApiError` like any other network failure, so a caller that set a deadline
+   * reads `signal.aborted` to tell the two apart. Omitted, the request is as
+   * before (no `signal` key on the fetch init).
    */
-  async get<T>(path: string): Promise<T> {
+  async get<T>(path: string, init?: { signal?: AbortSignal }): Promise<T> {
     try {
       const response = await fetch(`${this.baseUrl}${path}`, {
         method: 'GET',
         headers: this.getHeaders(),
+        ...(init?.signal ? { signal: init.signal } : {}),
       });
 
       if (!response.ok) {
@@ -469,6 +475,13 @@ export interface ApiErrorPayload {
   /** Issue #2865: sent with the foreign-session 409 (`session_owned_by_other_server`). */
   sessionName?: string;
   sessionPath?: string | null;
+  /**
+   * Issue #3957/#3992: sent with the send route's errors after a bound relay
+   * was reserved — `not_sent`: nothing reached the session, it may be sent
+   * again; `unknown`: it may have, look before resending. Mirrors
+   * src/lib/relay/relay-bind.ts RelaySendOutcome (and ChatMessage.sendOutcome).
+   */
+  sendOutcome?: 'sent' | 'not_sent' | 'unknown';
 }
 
 /**

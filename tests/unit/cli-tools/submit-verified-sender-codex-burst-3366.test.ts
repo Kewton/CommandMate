@@ -228,7 +228,8 @@ describe('submit-verified-sender: codex paste burst (Issue #3366)', () => {
       await send('hello', 'gemini', { awaitTypedBody: true });
 
       expect(enterCount()).toBe(1);
-      expect(capturePane).toHaveBeenCalledTimes(1);
+      // Issue #3945: the re-check under the input lock, then the one read-back.
+      expect(capturePane).toHaveBeenCalledTimes(2);
     });
   });
 });

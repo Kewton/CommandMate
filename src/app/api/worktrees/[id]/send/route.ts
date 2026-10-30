@@ -11,6 +11,11 @@
  * 6. Send message to CLI tool
  * 7. Create user message in database
  * 8. Start polling for response
+ *
+ * Issue #3957: a body naming `relayId` (a relay opened with `bind: true`)
+ * reserves that relay before step 4, records its input boundary right before
+ * the first key, and answers `sendOutcome` (`sent` / `not_sent` / `unknown`)
+ * on every response after the reservation — see `lib/relay/relay-bind`.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -26,6 +31,7 @@ import { probeRunningSessionHookUrl } from '@/lib/cli-tools/base';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType, type ICLITool } from '@/lib/cli-tools/types';
 import { sendUserMessage } from '@/lib/session/send-user-message';
 import { PROMPT_WAITING_CODE } from '@/lib/session/prompt-waiting-guard';
+import type { SendAttemptState } from '@/lib/session/send-attempt-types';
 import {
   describeSendAttemptState,
   getLastSendAttempt,
@@ -54,7 +60,14 @@ import {
 } from '@/lib/cmate-cli-tool-parser';
 import { broadcastSessionStatus } from '@/lib/realtime/terminal-broadcast';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import { getPublishedAgentTurn } from '@/lib/session/agent-event-state';
+import { currentGeneration } from '@/lib/session/agent-event-turn';
+import { getAgentEventSource } from '@/lib/hooks/sources/registry';
+import { buildCompositeKey } from '@/lib/auto-yes-state';
+import type { ChatMessage } from '@/types/models';
 import { checkSessionOwnership, foreignSessionErrorBody, FOREIGN_SESSION_ERROR_CODE } from '@/lib/cli-tools/session-ownership';
+import { reserveRelaySend, type RelaySendBinding } from '@/lib/relay/relay-bind';
+import { evaluateRelayAfterSend } from '@/lib/relay/relay-delivery';
 
 const logger = createLogger('api/send');
 
@@ -79,6 +92,72 @@ interface SendMessageRequest {
    * on screen and answerable.
    */
   ignoreStructuredPromptGuard?: boolean;
+  /**
+   * Issue #3957: the bound relay this send asks the question of. Reserved
+   * before any side effect; a wrong id or destination is 400, a closed,
+   * expired or already reserved relay 409, and neither types anything.
+   */
+  relayId?: string;
+}
+
+/**
+ * What the handler learned about a relay-bound send, for {@link POST} to settle
+ * the relay with and answer `sendOutcome` from (Issue #3957).
+ */
+interface RouteRelayState {
+  binding: RelaySendBinding | null;
+  /** The send service's own record of this attempt, once it made one. */
+  attempt: SendAttemptState | null;
+  /** Set when the send service answered ok. */
+  sent: { messageId: string; generationAfter: number | null } | null;
+}
+
+/**
+ * Issue #3957: the 201 body. `turnOpenAtSend` says whether the instance's own
+ * turn record showed a turn open (opened, not closed) at the moment the body
+ * started going into the composer — true: the message may be folded into that
+ * turn (codex does), so `ask` reports the reply as overlapped; false: no turn
+ * was open then. Absent means "not known": a tool whose hooks do not report
+ * both a turn start and its `stop`, a sender that reports no input start, a
+ * generation change (relaunch) during the send.
+ */
+type SendMessageResponse = ChatMessage & { turnOpenAtSend?: boolean };
+
+/** Whether this tool's hooks report a turn's start and its end (Issue #3957; #1975's test). */
+function reportsTurns(cliToolId: CLIToolType): boolean {
+  const events: readonly string[] = getAgentEventSource(cliToolId).capabilities.supportedEvents;
+  return events.includes('user_prompt_submit') && events.includes('stop');
+}
+
+/** The turn record read at the input start (Issue #3957). */
+interface TurnAtInput {
+  open: boolean;
+  generation: number | null;
+}
+
+/**
+ * The open-turn reading of the record `wait`'s polls publish as
+ * `structuredEvents.openedAt` / `closedAt`, taken in the same synchronous step
+ * as the sender's `noteInputStart` (Issue #3957).
+ */
+function readTurnAtInput(worktreeId: string, cliToolId: CLIToolType, instanceId: string | undefined): TurnAtInput {
+  const turn = getPublishedAgentTurn(worktreeId, cliToolId, instanceId);
+  return {
+    open: turn.openedAt !== null && turn.closedAt === null,
+    generation: currentGeneration(buildCompositeKey(worktreeId, cliToolId, instanceId)),
+  };
+}
+
+/** The value to publish, or undefined for "not known" (Issue #3957). */
+function judgeTurnOpenAtSend(
+  reading: TurnAtInput | null,
+  generationBefore: number | null,
+  generationAfter: number | null,
+  hooksReportTurns: boolean,
+): boolean | undefined {
+  if (!hooksReportTurns || reading === null) return undefined;
+  if (reading.generation !== generationBefore || generationAfter !== generationBefore) return undefined;
+  return reading.open;
 }
 
 // Issue #588: MODEL_NAME_PATTERN and MAX_MODEL_NAME_LENGTH are now centralized
@@ -157,7 +236,34 @@ function validateImagePath(
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> }
+) {
+  const relay: RouteRelayState = { binding: null, attempt: null, sent: null };
+  const response = await handleSend(request, context, relay);
+  const { binding } = relay;
+  if (!binding) return response;
+
+  // Issue #3957: every answer after the reservation settles the relay and says
+  // what the CLI may do with it — withdraw it only on `not_sent`.
+  const sendOutcome = binding.finish(
+    relay.sent
+      ? { kind: 'sent', ...relay.sent }
+      : { kind: 'failed', attempt: relay.attempt }
+  );
+  if (sendOutcome === 'sent') evaluateRelayAfterSend(binding.relayId);
+  let body: Record<string, unknown> = {};
+  try {
+    body = (await response.json()) as Record<string, unknown>;
+  } catch {
+    // Every answer of this route is JSON; an unreadable one keeps its status.
+  }
+  return NextResponse.json({ ...body, relayId: binding.relayId, sendOutcome }, { status: response.status });
+}
+
+async function handleSend(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+  relay: RouteRelayState
 ) {
   try {
     const { id: requestedWorktreeId } = await params;
@@ -278,6 +384,28 @@ export async function POST(
           { status: 400 }
         );
       }
+    }
+
+    // Issue #3957: reserve the bound relay now — after the body and the
+    // destination are validated and resolved, before the first side effect
+    // (the session start below). A refusal sends nothing.
+    if (body.relayId !== undefined) {
+      if (typeof body.relayId !== 'string') {
+        return NextResponse.json({ error: 'relayId must be a string', code: 'RELAY_BIND_INVALID' }, { status: 400 });
+      }
+      const reservation = reserveRelaySend(db, {
+        relayId: body.relayId,
+        worktreeId: id,
+        cliToolId,
+        instanceId: resolution.target.instanceId,
+        hooksReportTurns: reportsTurns(cliToolId),
+        readTurn: () => readTurnAtInput(id, cliToolId, instanceId),
+      });
+      if (!reservation.ok) {
+        const { status, code, message } = reservation.refusal;
+        return NextResponse.json({ error: message, code }, { status });
+      }
+      relay.binding = reservation.binding;
     }
 
     // Get CLI tool instance from manager
@@ -438,6 +566,15 @@ export async function POST(
     // sendUserMessage service so manual sends and Timer-fired sends (executeTimer)
     // record identically in chat_messages / Message History.
     const sendStartedAt = Date.now();
+    // Issue #3957: whether a turn was open when the body started going in,
+    // read at that moment (`onInputStart` runs inside the sender's
+    // `noteInputStart`). A generation change during the send is "not known".
+    const generationKey = buildCompositeKey(id, cliToolId, instanceId);
+    const generationBefore = currentGeneration(generationKey);
+    relay.binding?.begin(generationBefore);
+    let turnAtInput: TurnAtInput | null = null;
+    // Issue #3945: this request's own attempt, as the service recorded it.
+    let ownAttempt: { state: SendAttemptState; reason: string } | null = null;
     const result = await sendUserMessage(db, {
       worktreeId: id,
       content: trimmedContent,
@@ -449,6 +586,15 @@ export async function POST(
       copilotModel: cliToolId === 'copilot' ? body.model : undefined,
       // Issue #1737: `commandmate send --ignore-structured-prompt`.
       ignoreStructuredPromptGuard: body.ignoreStructuredPromptGuard === true,
+      onAttempt: (attempt) => {
+        ownAttempt = attempt;
+        relay.attempt = attempt.state;
+      },
+      onInputStart: () => {
+        turnAtInput = readTurnAtInput(id, cliToolId, instanceId);
+      },
+      // Issue #3957: the relay's boundary, required — a refusal stops the send.
+      inputBoundary: relay.binding?.hooks(),
     });
 
     if (!result.ok) {
@@ -486,19 +632,36 @@ export async function POST(
       }
       // Issue #3759: say whether the message can be resent (`not-sent`) or must
       // not be before the pane is checked (`indeterminate`). Nothing resends it.
-      // The record must be this request's: same message, made after it began.
-      const attempt = getLastSendAttempt(sendAttemptInstance);
-      const sendState =
-        attempt !== null && attempt.at >= Math.floor(sendStartedAt) && attempt.messageDigest === sendMessageDigest(trimmedContent)
-          ? ` ${describeSendAttemptState(attempt)}`
-          : '';
+      // The record must be this request's. Issue #3945: the service hands this
+      // request its own attempt; the shared record (same message, made after
+      // the request began) is only the fallback for a service that did not —
+      // with two concurrent sends of one text it cannot say whose it is.
+      const recorded = getLastSendAttempt(sendAttemptInstance);
+      const attempt: { state: SendAttemptState; reason: string } | null =
+        ownAttempt ??
+        (recorded !== null &&
+        recorded.at >= Math.floor(sendStartedAt) &&
+        recorded.messageDigest === sendMessageDigest(trimmedContent)
+          ? recorded
+          : null);
+      const sendState = attempt !== null ? ` ${describeSendAttemptState(attempt)}` : '';
       return NextResponse.json(
         { error: `Failed to send message to ${cliTool.name}: ${result.error}${sendState}` },
         { status: 500 }
       );
     }
 
-    return NextResponse.json(result.message, { status: 201 });
+    const generationAfter = currentGeneration(generationKey);
+    relay.sent = { messageId: result.message.id, generationAfter };
+    const turnOpenAtSend = judgeTurnOpenAtSend(
+      turnAtInput,
+      generationBefore,
+      generationAfter,
+      reportsTurns(cliToolId),
+    );
+    const sent: SendMessageResponse =
+      turnOpenAtSend !== undefined ? { ...result.message, turnOpenAtSend } : result.message;
+    return NextResponse.json(sent, { status: 201 });
   } catch (error: unknown) {
     logger.error('error-sending-message:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(

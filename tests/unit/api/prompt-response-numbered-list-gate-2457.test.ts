@@ -233,7 +233,7 @@ describe('[#2457] POST /prompt-response on a Claude pane', () => {
 
     expect(data.success).toBe(true);
     // claude's menus are cursor-navigated, so option 2 is one Down then Enter.
-    expect(sendSpecialKeys).toHaveBeenCalledWith(`claude-${WT}`, ['Down', 'Enter']);
+    expect(sendSpecialKeys).toHaveBeenCalledWith(`claude-${WT}`, ['Down', 'Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
   });
 
   it('still answers the AskUserQuestion confirmation screen, which has no footer', async () => {

@@ -355,6 +355,21 @@ fail-open で、「人間が答えた」を示すイベントが届かない事�
 - 5 分の上限が効くのは **`send` の拒否だけ**です。`/current-output` の `isPromptWaiting` や
   `wait` の exit 10 は従来どおり報告され続けます（誤って「完了」と読ませないため）
 
+### 送信中に重なった入力（入力ロック（#3952））
+
+本文の送信（`send` / `ask`・チャット・タイマー・リレー）は、インスタンスごとの入力ロックを持ってから入力欄へ打ちます（Issue #3945）。送信の途中（貼り付け → 確認 → Enter、遅れて現れる貼り付けの観察、取り下げ）に別の打鍵が混ざらないようにするためです。ほかの入力経路の扱いは次のとおりです。
+
+| 経路 | ロック | 送信と重なったとき |
+|------|--------|-------------------|
+| `respond` / 回答欄（Enter を送る回答）・厳格モードの `respond`・Auto-Yes の回答・Command Code の plan review・codex の起動時と送信前の自動回答（hooks / update / trust / 通知）・copilot と Antigravity のフォルダー trust への自動回答 | 参加する（回答どうしは待ち合わない） | 送信が終わるまで待ち、**画面を読み直して同じ確認が出ているときだけ**打ちます。消えた・変わった・読めない・待ちが 60 秒を超えたときは何も打たず、`respond` は `answer_not_delivered`（`/respond` は 409、厳格モードは exit 40 `session_conflict`）、Auto-Yes は次の周期で判定し直します。回答の途中に始まった送信は、回答の Enter まで待ちます |
+| `answer_only` の数字回答（Enter を送らない） | 参加しない | 1 打鍵で Enter が無いため、待たずに打ちます |
+| Claude と Gemini の起動時の打鍵（起動コマンドの行・trust ダイアログへの自動回答）（#3975） | 参加する（単独の書き手として。回答とも待ち合う） | 打鍵の間だけロックを持ちます（起動の待機はロックの外）。送信や回答が終わるまで待ち、trust への回答は、その間に送信が入ったときは画面を読み直して同じダイアログが出ているときだけ打ちます。起動の Enter の前に画面を読んだ `respond` は、Enter の後に読み直します |
+| ターミナルへの直接入力（WebSocket）・`direct-input`・特殊キー（未送信バーの **Run** を含む） | 参加しない（拒否も待機もしない） | **送信中に打つと、文字が本文に混ざる、または送信の後始末（入力欄の消去・取り下げ）で消えることがあります。** 送信が終わる（応答が始まる）のを待ってから打ってください |
+| `interrupt`（Escape） | 参加しない（待たない・送信を失効させない） | 中断を送信の後ろで待たせないためです。本文の入力中に Escape が届くと、その送信は途中で止まることがあります（結果は `lastSend` で確かめてください） |
+
+- copilot の `--model` は、`/model` を打つ直前にもう一度画面を読みます。ダイアログが出ていれば `not-sent`（`prompt-waiting`）、読めなければ `not-sent`（`recheck-failed`）で、何も打ちません。
+- ロックは 1 つのサーバープロセスの中だけのものです。同じ tmux を 2 つのサーバーが使う場合は調停されません。
+
 ### worktree ID の調べ方
 
 ```bash
@@ -435,13 +450,13 @@ commandmate wait <worktree-id> --fail-on-upstream-fault  # 上流障害で compo
 
 | オプション | 説明 | デフォルト |
 |-----------|------|-----------|
-| `--timeout <sec>` | 最大待機時間（秒） | 無制限 |
+| `--timeout <sec>` | 最大待機時間（秒）。ポールごとの取得（`current-output` と台帳 messages）もこの残り時間で打ち切るので、サーバーが応答しなくても期限で exit 124 になる（Issue #3974） | 無制限 |
 | `--on-prompt <mode>` | プロンプト検出時の動作（agent / human） | agent |
-| `--stall-timeout <sec>` | 出力変化なしのタイムアウト（秒） | - |
+| `--stall-timeout <sec>` | 出力変化なしのタイムアウト（秒）。`--timeout` と同じく、応答しない取得もこの期限で打ち切る（exit 124） | - |
 | `--instance <id>` | 対象インスタンスID（`<agent>` または `<agent>-<n>`）。**送り先指定はこのフラグのみ**（`--agent` は無い） | エージェントのプライマリインスタンス |
 | `--verify` | 完了検知後に検証ゲートを全件実行し、その判定で終了コードを決める | 無効 |
 | `--require-work` | 完了検知後に work-evidence ゲートのみ実行する | 無効 |
-| `--fail-on-upstream-fault` | composer に戻った時点で上流障害の署名が画面にあれば exit 0 ではなく **11** を返す（Issue #1839） | 無効 |
+| `--fail-on-upstream-fault` | composer に戻った時点で上流障害の署名が画面にあれば exit 0 ではなく **11** を返す（Issue #1839）。完了の根拠が `hook_stop` のときは、画面が落ち着くまで（500ms 間隔で 2 回続けて同じ画面、上限 5 秒、`--timeout` を超えない）待ってから判定する。障害の行がある画面でも `Stop` が来ていれば同じく待つ（Issue #3956） | 無効 |
 
 ### 終了コード
 
@@ -633,6 +648,76 @@ exit 0 です。
 従来どおり画面でターンを閉じます（Claude の中断は、`Interrupted` の行が出る形と、送った文が
 入力欄に戻るだけの形があり、どちらも `Stop` が来ないため）。
 
+#### 同じインスタンスへ重ねて `ask` しない（Issue #3955）
+
+同じインスタンスへの `ask`（または `send`）は、前の `ask` が返ってから送ってください。ターンの
+実行中に届いた 2 本目の依頼を、エージェントがそのターンに入れて返答を 1 つにまとめることがあります
+（codex 0.164.0 の実測。画面に「Messages to be submitted after next tool call」）。すると 2 本の `ask`
+が同じ返答を読み、**先に送った側に後の依頼への返答が返る**（またはその逆）ことになります。どちらも
+exit 0 で、本文は両方とも届いています（入力欄の問題ではありません）。
+
+`ask` はこの重なりを見つけると、返答と終了コードはそのままに、標準エラーへ `overlapped: …` を 1 行
+出し、`--json` に `"overlapped": true` を足します（重ならなかったときはキーごと出しません）。
+この印が付いた返答は、自分の依頼への返答とは限りません。必要なら 1 本ずつ送り直してください。
+見つけるのは次の 2 つです。
+
+- 送った時点で、そのインスタンスが別のターンの途中だった（後から送った側。ターンの開始を hooks で
+  報告するツールだけ。送る前に終わっていたターンは数えません。そのターンが最初の確認より前に終わって
+  いても見つけます。サーバーは本文の入力を始めた瞬間にターンが開いていたかを読み、send API の応答に
+  `turnOpenAtSend: true` / `false` で返します（不明のとき＝hooks がターンの開始と終了を報告しない
+  ツール、入力開始を報告しない送信経路、送信の中での再起動のときはキーを付けません）。キーがあれば
+  `ask` はその値だけでこちら側を決めるので、最初の確認より前に自分の依頼の新しいターン記録へ置き換わって
+  も見つけ、送ってから入力までの間に終わったターンは数えません。キーが無いときは従来の判定です（#3957）
+- 送ってからターンが終わるまでに、別の依頼がそのインスタンスに届いていた（先に送った側。チャット
+  履歴の `user` 行で見ます。ターンの終わりはサーバーが記録した終了時刻で、`Stop` の後に届いた次の
+  依頼は数えません。履歴が直近 30 行を超えても送信以降の `user` 行は取りこぼしません）
+
+`--instance` / `--agent` を省いた `ask` では、自分の依頼が入ったインスタンスを履歴から特定し、その
+インスタンスの行だけを見ます。特定には送信からターンの終わりまでの行だけを使い（後から別のインスタンス
+へ送られた同じ本文は数えません）、特定できないとき（同じ本文がその間に複数のインスタンスへ届いたなど）は
+2 つ目の検出をしません。
+
+#### relay 配送と送信の結合（Issue #3957）
+
+relay 配送（`ask --async` / `send --reply-to`）は、relay を**その依頼の送信に結び付けて**返答を選びます
+（新しい CLI と新しいサーバーの組み合わせ）。
+
+- CLI は `POST /api/relays` に `bind: true` を付けて relay を開き、応答の `bindMode: "bound"` を確かめてから、
+  送信（`POST /api/worktrees/:id/send`）に `relayId` を付けます。送信 API はセッションの起動など副作用の前に
+  relay を予約し（宛先違い・不正な ID は 400、閉じた・期限切れ・予約済みは 409。どれも何も入力しません）、
+  本文の最初のキーの直前に「入力の境界」（時刻と、そのときターンが開いていたか）を記録します。記録できなければ
+  入力を始めません
+- 返答は、境界より後に終わったターンのものだけを使います。送信が成立する前に終わったターンは候補として
+  保留し、成立した時点で**境界以降の最も早い候補**を採ります。入力ロックの待ち中に終わった別の依頼の返答や、
+  送信に失敗した依頼に返答が届くことはありません。確認待ち（prompt）の通知も同じ条件で、送信の成立時に
+  まだ開いている確認だけを伝えます。確認の通知を送っている最中に返答ができたら、通知の後に届けます
+- 送信 API は応答に `sendOutcome`（`sent` / `not_sent` / `unknown`）を返します。CLI が relay を取り消すのは
+  `not_sent`（何も届いていない）のときだけです。409 の予約競合では取り消しません。応答が途絶えたときは
+  `GET /api/relays/:id` で状態を照会し、本文は**自動で再送しません**。分からないときは relay を開いたまま、
+  標準エラーに relay の ID と `commandmate relays --id <relay-id>` を出します
+- 重なりは証明できたものだけを注記します。返答の本文は `[from <alias> / <worktree>]` の行、注記の 1 行
+  （`[CommandMate relay] 注意: この返答は、別の依頼と同じターンで処理された可能性があります（overlap=later）。`）、
+  返答の原文の順です。`overlap` は `later`（入力の時点で別のターンが開いていた）・`earlier`（入力から返答までに
+  別の入力が届いた）・`both`・`unknown`（判定できない。「重なりなし」とは表示しません）・`none`（注記なし）です
+- 保留中の relay は `hold`（理由）を公開します。`send_unknown`（送れたか分からない）、`dispatch_unknown`
+  （opencode の HTTP 送信の成否が不明）、`generation_changed`（送信中・返答前にセッションが再起動した）、
+  `server_restarted`（送信中にサーバーが再起動した）など。保留中は返答を配送せず、期限（既定 24 時間）で
+  期限切れの通知に置き換わります。`commandmate relays --id <relay-id> [--json]` で、閉じた relay も含めて
+  `send=` / `overlap=` / `hold=` を確かめられます。依頼側の履歴の「返信」行にも `overlap=` が付きます
+- opencode の HTTP 送信は入力開始を報告しないので、送る直前の時刻を境界にします。HTTP で届かなかったと
+  確定して端末入力へ切り替えたときは、端末入力の開始で境界を書き直します
+- 古い CLI が開いた relay・古いサーバーは従来どおりです（新しい CLI は古いサーバーに対して「従来の扱い」の
+  1 行を標準エラーに出し、`relayId` を付けません）
+
+**PR 3 までの制約**（ターンと返答の対応付けは次の変更で入ります）:
+
+- claude などで、実行中のターンに送った依頼が次のターンに回る場合、先に終わった別のターンの返答に
+  `overlap=later` の注記を付けて届け、自分の依頼のターンの返答は届きません（取りこぼし）
+- 同じインスタンスに別々の依頼者から relay が 2 本あると、1 つの返答が両方に届くことがあります
+- `earlier` は証明できるときだけ判定し、取りこぼすことがあります（そのときは `unknown`）
+
+重ならないのが一番確実です。同じインスタンスへ重ねて送らないでください。
+
 ### ターン成立の判定（Issue #1839）
 
 `wait` はこれまで「エージェントが composer に戻ったか」しか見ておらず、**そのターンが
@@ -711,6 +796,22 @@ esac
 - **既定では有効になりません**。`wait` の終了コードは skills 側 dispatch が分岐に使う公開契約で、
   途中で 529 を踏んで自力復帰したセッションは従来どおり exit 0 である必要があります
 - 判定は**署名一致のみ**です。`upstreamFault` が null であることは「上流が健全」を意味しません
+- 完了の根拠が `hook_stop`（エージェントのターン終了の報告）のときは、その時点の画面ではなく**落ち着いた画面**で判定します（Issue #3956）。
+  エージェントの報告が返答の描画より先に届くことがあるためです（codex で約 3 秒の遅れを実測）。画面を 500ms 間隔で読み直し、
+  2 回続けて同じ画面になった時点で判定します（読み直しはサーバーのキャプチャのキャッシュを通さない `current-output?fresh=1`。
+  `fresh` を知らない古いサーバーではキャッシュから答えるので、早く落ち着いたと読むことがあります）。上限は 5 秒で、それでも描画が続くときは最後に読んだ画面で判定します
+  （stderr に `still drawing` の Note）。`hook_stop` でない完了（画面だけによる完了）と、フラグなしの `wait` は待ちません。
+  `ask`（フラグ常時）も同じ待ちを通ります
+- 落ち着いた画面は次のポールとして**通常の判定をすべて通します**。読み直しの間に承認プロンプトが出れば exit 10、
+  エージェントが次のターンを始めていればそのターンの終わりを待ちます。`Stop` の時点の画面に障害の行があっても、
+  落ち着いた画面に無ければ exit 11 にはしません（`Stop` が来ていない障害（#1839）は従来どおりその場で exit 11）
+- 読み直しは `--timeout` / `--stall-timeout` を超えません。次の読み直しの間隔が残り時間に収まらなければ、その時点の画面で判定します
+  （stderr に `would pass --timeout/--stall-timeout` の Note）。1 回の読み直しは 500ms・上限 5 秒までの残り・`--timeout` の残りの
+  最も短いもので打ち切り、答えなければ直前の画面で判定します（`did not answer a re-read` の Note）。判定まで最大 5 秒です
+- 障害の行がある画面で `Stop` を確かめるための台帳（messages）の読みも、上限 5 秒と `--timeout` の残りの短い方で打ち切ります。
+  上限 5 秒は `Stop` を見たポールから数え、台帳の読みと読み直しで共有します（台帳が遅く答えた分、読み直しの時間が減ります）
+  （答えなければ `Stop` 無しとしてその場で exit 11）。`Stop` が一度も記録されていなければ台帳は読みません。
+  障害の診断（stderr）は判定に使う画面についてだけ出します
 
 ### 進捗表示
 
@@ -778,7 +879,7 @@ kind は `promptData.type` や `sessionStatusReason`（`antigravity_selection_li
 | `autoYes.enabled` / `pollerActive` | Auto-Yes の有効状態 / サーバの poller が動いているか |
 | `autoYes.pollerRecord` | poller（または permission hook）が最後に「答えなかった」と記録したもの。`screenCorrelation` はこの画面との対応で、記録は画面を名指ししないため `unknown` / `type-mismatch` / `no-prompt-on-screen` のどれか |
 | `autoYes.contractEvaluation` | 契約の方針を**いま**この画面に当てた結果（`policy-withholds` + 理由 / `base-withholds` + 理由 / `policy-permits` / `no-base-answer` / `not-evaluated`）。`base-withholds`（Issue #3822）は契約より前の基本の判定で見送ったことを表し、契約の有無によらない（今は `allow-once-unidentified` だけ。契約を見直しても答えは戻らない）。理由の語は `AutoYesSuppressionReason` と同じ（[理由語の表](#autoyeslastsuppression-ポリシー抑止の観測issue-1684)） |
-| `lastSend` | このインスタンスへの直近の send の結末（Issue #3759）。`{ at, state, reason }`。`state` は `not-sent`（本文のキーを 1 つも打つ前に失敗。例: `prompt-not-ready`）/ `sent`（送信を確かめた）/ `indeterminate`（一部を打った後に失敗、または結果を確かめられない。composer に本文が残っていれば `reason: composer-residue`）。サーバ起動後に記録が無ければ null、古いサーバでは項目自体が無い |
+| `lastSend` | このインスタンスへの直近の send の結末（Issue #3759）。`{ at, state, reason }`。`state` は `not-sent`（本文のキーを 1 つも打つ前に失敗。例: `prompt-not-ready`）/ `sent`（送信を確かめた）/ `indeterminate`（一部を打った後に失敗、または結果を確かめられない。composer に本文が残っていれば `reason: composer-residue`）。サーバ起動後に記録が無ければ null、古いサーバでは項目自体が無い 。`not-sent` の理由には、`prompt-not-ready` のほか、入力ロック（Issue #3945）に由来する `input-lock-timeout`（待ちの上限を超えた）/ `session-replaced`（待つ間にセッションが作り直された）/ `input-lock-lost`（入力の途中でロックの権利を失った）と、直前の再読込に失敗した `recheck-failed`、`--reply-to` / `ask --async` の結び付いた relay の予約が本文の直前に失われた（取り消し・期限切れ・別の送信に取られた）`relay-reservation-lost`（Issue #3992）がある（いずれも本文のキーは 1 つも打っていない）。未送信バーの Clear（`POST /api/worktrees/:id/clear-composer`）は、同じ入力ロックを待ち切れない・セッションが作り直された場合に 409 `INSTANCE_INPUT_BUSY` を返す（少し待って再試行）。クリアできなかったときは HTTP 200 のまま `cleared: false` を返す |
 
 **`lastSend` が何であっても、CommandMate は自動で再送しません。** 再送するのは利用者か監督のエージェントです。`not-sent` は自分で送り直してください（入力欄が戻ってから）。**`indeterminate` のときは再送しないでください。** 先に `commandmate capture <worktree-id> --pane` で画面を見て、本文が入力欄に残っていないか・既に送られていないかを確かめます（確かめずに送ると二重に届くことがあります）。`send` が `prompt not ready` などで失敗したときのエラーにも、同じ状態（`[send state: not-sent (prompt-not-ready): …]`）が書かれます。
 
@@ -946,7 +1047,16 @@ server.log（`strict-prompt-answered` / `strict-prompt-response-refused`）と�
 | 2 | 引数エラー（`<answer>` と `--default` の同時指定・両方欠落 等）/ 選択肢に無い番号（`answer_out_of_range`）/ 厳格モードでの `--default`・番号なしの画面への番号・`--expect-screen` と `--observation` の片方だけ |
 | 40 | 厳格モード: 照合不成立・照合不能。**何も送っていない**（kind・トークン・フォルダ・label の不一致、capture 失敗、古いサーバ 等）。`commandmate prompt` で観測し直す |
 | 41 | 厳格モード: 送信を始めた後の部分送信・結果不確定。**再送してはいけない**。pane を確かめる。ただし 41 でも `reason` が `operation_in_progress` / `operation_id_conflict` のときは何も送っていない（`keysSent` は 0。`delivery` は `indeterminate` と出るが送信はしていない）。結果の取り直しは別の ID で |
-| 99 | プロンプトが既に消えている（`prompt_no_longer_active`）/ yes・no を選択肢に解決できない（`unresolvable_answer`）/ 保持している decision が 0 件（`decision_not_found`）・2 件以上（`multiple_pending_decisions`、Issue #2040）|
+| 99 | プロンプトが既に消えている（`prompt_no_longer_active`）/ yes・no を選択肢に解決できない（`unresolvable_answer`）/ 保持している decision が 0 件（`decision_not_found`）・2 件以上（`multiple_pending_decisions`、Issue #2040）/ 回答が届かなかった（`answer_not_delivered`）・途中で止まった（`answer_input_lost`、下記）|
+
+#### 届かなかった回答と、途中で止まった回答（Issue #3975）
+
+送信や別の回答が入力ロックを持っている間に待った回答（[入力ロック（#3952）](#送信中に重なった入力入力ロック3952)）は、次の 2 つで終わることがあります。どちらも exit 99 ですが、次の一手が逆です。
+
+| 理由 | 表示 | 意味と次の一手 |
+|------|------|----------------|
+| `answer_not_delivered` | `Error: Answer was not sent. Reason: answer_not_delivered (…). Nothing was typed, so it is safe to run respond again.` | 最初のキーの前に止めました。**1 キーも届いていません**。同じ `respond` をやり直してかまいません |
+| `answer_input_lost` | ``Warning: The answer may have been only partly typed (reason: answer_input_lost): … Check the screen with `commandmate capture <id> --instance <instance> --pane --tail 40` before answering again.`` | キー列の途中でセッションが置き換わり、残りを送らずに止めました。**一部だけ届いたかもしれません**。先にペインを見てから、答え直すかを決めてください。案内のコマンドは回答したペインを読みます（回答で解決した `--instance` か `--agent`。どちらも指定しなければ付きません） |
 
 ---
 
@@ -1745,7 +1855,7 @@ commandmate capture <worktree-id> --instance codex-2 # 追加インスタンス�
 | フィールド | 意味 |
 |---|---|
 | `content` | ポーラーがまだ保存していない分（`buildCurrentOutput`）。**行数がカーソルとして使えるツールでのみ差分**＝ scrollback を持つ codex / gemini / vibe-local / antigravity で、かつ capture window（10000 行）が未飽和のとき。この場合ポーラーが保存済みなら正常時でも空になる。**alternate screen のツール（claude / opencode / copilot）と、window 飽和時は capture 全体**（行数が pane 高さ・window 幅で pin され「読んだ位置」にならないため。Issue #1910 / #1670 / #1268） |
-| `realtimeSnippet` | pane 末尾 100 行（画面そのもの。`src/lib/session/current-output-builder.ts` の `selectRealtimeSnippetRows`） |
+| `realtimeSnippet` | pane 末尾 100 行（画面そのもの）。末尾 100 行が全部空行のとき（codex・Command Code など上から描く画面）は、内容の最後の行で終わる 100 行（#2768）。`src/lib/realtime-snippet.ts` の `selectRealtimeSnippetRows` |
 | `lineCount` | capture 全体の行数（空白行を含む。TUI は 1000 行のペインに描かれるため、空白 pane でも 1001 になりうる） |
 | `isRunning` | tmux セッションが存在して healthy（`src/lib/session/claude-session.ts` の `isClaudeRunning` / `isSessionHealthy`）。**ターン進行中の意味ではない** |
 | `sessionStatus` / `sessionStatusReason` | 状態と、その根拠（`hook_*` なら hooks 由来、それ以外はスクレイパー由来。`HOOK_STATUS_REASON` は `src/lib/session/status-mapping.ts`） |
@@ -2032,8 +2142,14 @@ commandmate capture <worktree-id> --instance worker-7 --json | jq -r '.resolvedB
 
 #### `upstreamFault`: 上流障害の観測（Issue #1839）
 
-`realtimeSnippet`（pane 末尾 100 行）を ANSI 除去したうえで、上流（モデル API）障害の署名に
-一致したものを載せます。一致が無ければ `null` で、**キー自体は常に存在します**。
+`realtimeSnippet` と同じ行（pane 末尾 100 行。末尾が全部空行なら内容の最後の行で終わる 100 行、#2768）を
+ANSI 除去したうえで、上流（モデル API）障害の署名に一致したものを載せます。一致が無ければ `null` で、
+**キー自体は常に存在します**。
+
+codex の分かれた画面（上に transcript、下端に入力欄）では、その窓の上にある transcript の最後の内容行も
+1 行だけ読みます。この行に当てるのは codex のエラー行（列 0 の `■ `）に錨づけた `model-capacity` だけです。
+このとき `matchedText` は `realtimeSnippet` に無い行になります（#3946）。`api-error` は行頭の形
+（claude の `⏺ API Error: …` か、何も付かない行頭）だけに当たり、返答の文中や字下げした行の引用には当たりません（#3946）。
 
 ```json
 "upstreamFault": {
@@ -3759,6 +3875,7 @@ commandmate ls --token your-token
 | 4 | STOP_FAILED | サーバーの停止に失敗（`stop` / `update`）／ Provider を閉じきれない（`remote stop`） |
 | 5 | UPDATE_FAILED | 更新に失敗（`update`: registry照会 / `npm install -g` / バージョン検証、`agents update`: エージェント CLI の更新コマンド） |
 | 10 | PROMPT_DETECTED | wait中にプロンプトを検出 |
+| 11 | UPSTREAM_FAULT | ターン終了時に画面に上流障害があった（`wait --fail-on-upstream-fault`。`ask` は常時）。stderr / `--json` に `id=...`。`id=context-limit` は `instances <wt> kill <instance>` で新しいセッションにして送り直す。`id=model-capacity` は別の instance・別のモデルへ送る（#3936） |
 | 30 | NO_ACTIVE_SESSIONS | interruptの対象となる稼働中セッションが無い |
 | 99 | UNEXPECTED_ERROR | 予期しないエラー / リソース未検出 |
 | 124 | TIMEOUT | waitのタイムアウト |

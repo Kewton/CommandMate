@@ -25,7 +25,11 @@ import {
 } from '@/lib/db/chat-db';
 import { resolveReadersLocale } from '@/lib/push/model-change-push-notifier';
 import { broadcastMessage } from '@/lib/ws-server';
-import { buildRelaySystemLine, type RelaySystemLineKind } from '@/lib/relay/relay-messages';
+import {
+  buildRelaySystemLine,
+  type RelaySystemLineDetail,
+  type RelaySystemLineKind,
+} from '@/lib/relay/relay-messages';
 import type { ResolvedRelaySession } from '@/lib/relay/relay-session-ref';
 import { createLogger } from '@/lib/logger';
 
@@ -40,6 +44,7 @@ const logger = createLogger('relay-system-line');
  * @param target - Whose transcript the line goes in (always the requester, A)
  * @param subject - Whose name the sentence carries (always the worker, B)
  * @param at - Epoch ms
+ * @param detail - Issue #3957: the overlap and hold reason a `replied` line names
  * @returns Whether a row was written by this call
  */
 export function writeRelaySystemLine(
@@ -48,7 +53,8 @@ export function writeRelaySystemLine(
   kind: RelaySystemLineKind,
   target: ResolvedRelaySession,
   subject: ResolvedRelaySession,
-  at: number = Date.now()
+  at: number = Date.now(),
+  detail: RelaySystemLineDetail = {}
 ): boolean {
   const requestId = `${RELAY_SYSTEM_REQUEST_ID_PREFIX}${relayId}:${kind}`;
   try {
@@ -59,7 +65,7 @@ export function writeRelaySystemLine(
       worktreeId: target.worktreeId,
       cliToolId: target.cliToolId,
       instanceId: target.instanceId,
-      content: buildRelaySystemLine(locale, kind, subject.alias),
+      content: buildRelaySystemLine(locale, kind, subject.alias, detail),
       relayId,
       kind,
       at,

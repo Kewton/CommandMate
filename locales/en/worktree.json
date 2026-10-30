@@ -334,7 +334,10 @@
       "remote": "Toggle remote control from GitHub web and mobile",
       "research": "Run a deep research investigation",
       "reset-allowed-tools": "Reset the list of allowed tools",
-      "restart": "Restart the CLI, preserving the current session",
+      "restart": {
+        "copilot": "Restart the CLI, preserving the current session",
+        "claude": "Restart Claude Code and resume this session, which applies an installed update"
+      },
       "rubber-duck": "Get an independent critique of the current work",
       "search": "Search the conversation timeline",
       "session": "View and manage sessions",
@@ -695,7 +698,14 @@
     "regionLabel": "Unsent input",
     "label": "Unsent input:",
     "run": "Run",
-    "clear": "Clear"
+    "clear": "Clear",
+    "clearError": {
+      "dismiss": "Dismiss",
+      "otherServer": "Could not clear: this session is owned by another server.",
+      "busy": "Could not clear: a send is in progress. Wait a moment and try again.",
+      "notCleared": "The text is still in the input box; it could not be cleared.",
+      "failed": "Failed to clear. Please try again."
+    }
   },
   "todo": {
     "addPlaceholder": "Add a todo…",
@@ -1144,8 +1154,11 @@
     "commentPlaceholder": "What should change? (Add comment → Submit review)",
     "comment": "Add comment",
     "submit": "Submit review (Ctrl+R)",
+    "submitCompact": "Submit review",
     "approve": "Approve (Ctrl+A)",
+    "approveCompact": "Approve",
     "cancel": "Cancel (Esc)",
+    "cancelCompact": "Cancel",
     "approveConfirmLabel": "Confirm plan approval",
     "approveConfirmText": "Approving runs the plan. Approve it?",
     "approveConfirmYes": "Approve and run",
@@ -1157,7 +1170,9 @@
       "invalidRequest": "That action does not fit this screen. Nothing was sent.",
       "notActive": "Nothing was sent: no plan review is on screen.",
       "generic": "Could not send."
-    }
+    },
+    "composerNotice": "The plan is waiting for your review — approve, cancel or comment.",
+    "composerGoto": "Go to the controls"
   },
   "selectionKeys": {
     "numbersToolbarLabel": "Option number keys",

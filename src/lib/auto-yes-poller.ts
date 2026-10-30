@@ -42,7 +42,8 @@ import { applyEventToActiveTask } from './tasks/task-transition-service';
 import { getDbInstance } from './db/db-instance';
 import { recordAnsweredPrompt, type RecordAnsweredPromptResult } from './db/chat-db';
 import { checkWorktreeSessionOwnership } from './cli-tools/worktree-session-ownership';
-import { sendPromptAnswer } from './prompt-answer-sender';
+import { sendPromptAnswer, type SendPromptAnswerParams } from './prompt-answer-sender';
+import { instanceInputReadMark } from '@/lib/session/instance-input-lock';
 import { onTmuxSessionCreated } from './tmux/session-created-signal';
 import { CLIToolManager } from './cli-tools/manager';
 import { detectThinking } from './detection/cli-patterns';
@@ -537,6 +538,22 @@ function settleFailedTick(
     logger.info('poller:auto-yes-answer-abandoned', { worktreeId, cliToolId, instanceId, keysSent, delivery });
     return 'no_answer';
   }
+  // Issue #3952: the answer waited for a send holding the session's input and
+  // was then not typed — the prompt moved, or the wait ran out. Nothing is on
+  // the pane and the poller did nothing wrong: the next tick reads the screen
+  // afresh and decides again, without counting an error. By name, as the
+  // transport's errors are read: test doubles of the sender need not export it.
+  if (error instanceof Error && error.name === 'PromptAnswerNotDeliveredError') {
+    if (attempt !== null) settleSendAttempt(attempt, false);
+    if (sendInFlight) noteAnswerSent(cliToolId, worktreeId, instanceId, true, receiptEpisode);
+    logger.info('poller:auto-yes-answer-not-delivered', {
+      worktreeId,
+      cliToolId,
+      instanceId,
+      skip: (error as { skip?: unknown }).skip,
+    });
+    return 'no_answer';
+  }
   // Issue #3839: a failure with keys already on the pane is held the same way —
   // the next tick must not type the answer again over them (step 2.5); the
   // screen leaving or changing forgets it (`forgetPartialAnswer`). Issue #3880:
@@ -580,6 +597,8 @@ function settleFailedTick(
  *   dropped rows from the top of what tmux returned, as the capture layer said
  *   ({@link capturePollerFrame}'s `headCut`). At a window of the pane's height
  *   the row count cannot tell. Omitted, judged from the row count as before.
+ * @param inputReadMark - Issue #3952: `instanceInputReadMark()` taken before the
+ *   tick's capture. Omitted, it is taken when this function is called.
  * @returns 'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'
  */
 export async function detectAndRespondToPrompt(
@@ -594,8 +613,11 @@ export async function detectAndRespondToPrompt(
   observation?: TickObservation,
   captureWindowLines?: number,
   captureHeadCut?: boolean,
+  inputReadMark?: number,
 ): Promise<'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'> {
   const compositeKey = buildCompositeKey(worktreeId, cliToolId, instanceId);
+  // Issue #3952: where the session's input order stood when the frame was read.
+  const readMark = inputReadMark ?? instanceInputReadMark();
   const captureExtent: CaptureExtent | undefined =
     captureWindowLines === undefined ? undefined : { windowLines: captureWindowLines, headCut: captureHeadCut };
   const tickObservation: TickObservation = observation ?? {
@@ -869,15 +891,28 @@ export async function detectAndRespondToPrompt(
     // Issue #3798: the wait this answer goes to, fixed as the send begins.
     const answerTarget = fixAnswerTarget(worktreeId, cliToolId, instanceId);
     sendInFlight = true;
+    const answerParams: SendPromptAnswerParams = {
+      sessionName,
+      answer,
+      cliToolId,
+      promptData: promptDetection.promptData,
+      // Issue #3706: asked after each wait inside the send.
+      ...(generation !== undefined ? { stillCurrent: () => isTickCurrent(generation) } : {}),
+      // Issue #3952: an answer that had to wait for a send is read again.
+      readMark,
+    };
+    // Issue #3952 review P1-2: and step 5.5's last look is taken again after
+    // that wait, right before the first key — the contract or the grant may
+    // have changed while the answer waited for the input. Not enumerable: the
+    // params stay the plain record of what was answered (as the ledger's
+    // fault-injection test compares them across runs); the sender reads it as
+    // the field it is.
+    Object.defineProperty(answerParams, 'stillAllowedAtSend', {
+      value: () => !withheldAtSend(judged, generation !== undefined),
+      enumerable: false,
+    });
     try {
-      await sendPromptAnswer({
-        sessionName,
-        answer,
-        cliToolId,
-        promptData: promptDetection.promptData,
-        // Issue #3706: asked after each wait inside the send.
-        ...(generation !== undefined ? { stillCurrent: () => isTickCurrent(generation) } : {}),
-      });
+      await sendPromptAnswer(answerParams);
     } finally {
       invalidateCache(sessionName);
     }
@@ -970,6 +1005,9 @@ async function pollAutoYes(
   const observationStart = startWaitingObservation(worktreeId, cliToolId, instanceId);
 
   try {
+    // Issue #3952: taken before the capture, so a send admitted after it makes
+    // an answer from this frame read the screen again.
+    const inputReadMark = instanceInputReadMark();
     // 2. Capture and clean output
     const captureLines = grant.stopPattern
       ? FULL_CAPTURE_LINES
@@ -1012,6 +1050,7 @@ async function pollAutoYes(
       // and (third review N4) whether it cut the pane's top.
       captureLines,
       headCut,
+      inputReadMark,
     );
     if (!isTickCurrent(generation)) {
       endStaleTick(generation);

@@ -179,6 +179,11 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   If the target stops on a confirmation you are told, once, and the relay stays
   open -- answer the dialog on that session and the reply still arrives. A relay
   nobody could deliver expires after 24h with a single line of notice.
+  The relay is tied to this send (Issue #3957): only a turn that ends after the
+  message started going in is delivered, and a reply that may share a turn with
+  another request carries one '[CommandMate relay] ... (overlap=...)' line under
+  the header. When the send's outcome is unknown the relay is left open, nothing
+  is resent, and 'commandmate relays --id <relay-id>' shows why it is held.
 
 ### commandmate relays
   List the standing delegations this session is waiting on and owes.
@@ -186,6 +191,7 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     commandmate relays                      # the session running the command
     commandmate relays --worktree <id> --instance codex-2
     commandmate relays --json               # owed / awaiting / open / counts
+    commandmate relays --id <relay-id>      # one relay, closed too: send= overlap= hold=
     commandmate relays cancel <relay-id>    # withdraw one; nothing is delivered
 
   States: pending (the worker has not finished), prompt (it stopped on a
@@ -390,6 +396,8 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   Exit codes:
     0  - Response sent
     99 - Prompt already dismissed (prompt_no_longer_active)
+    99 - answer_not_delivered: nothing was typed, safe to respond again
+    99 - answer_input_lost: may be partly typed; capture --pane that target before answering again
 
   Strict mode (Issue #3756) -- answer only the screen you observed:
     commandmate prompt <id> --instance antigravity --json      # kind, token, approvalTarget
@@ -809,7 +817,9 @@ same CommandMate server, and you can hand work to them.
     10   they are waiting on a confirmation. stdout carries the prompt JSON
     11   the turn never ran: an upstream fault is on their screen (stderr and
          --json carry id=...). id=context-limit means their conversation is over
-         the model's limit: 'instances <id> kill <instance>', then ask again
+         the model's limit: 'instances <id> kill <instance>', then ask again.
+         id=model-capacity means the model is at capacity: ask another instance
+         or another model
     21   nothing was running to ask
     124  timed out
 
@@ -823,6 +833,18 @@ same CommandMate server, and you can hand work to them.
   --json adds the target and a 'source' field saying whether the reply came
   from the chat transcript ("history") or from the pane ("pane"). copilot,
   gemini and vibe-local keep no transcript, so their replies are pane reads.
+
+  Ask one instance one thing at a time (Issue #3955): a request sent while it
+  is mid-turn can be folded into that turn (codex does) and answered with one
+  reply for both. ask then still exits 0 with the reply, but prints
+  'overlapped: ...' on stderr and --json adds "overlapped": true -- the reply
+  may answer the other request.
+  Relay delivery (ask --async / send --reply-to) delivers only a turn that
+  ended after the message went in, and notes a proven overlap on the reply's
+  second line ('[CommandMate relay] ... (overlap=later)'; unknown is never
+  shown as none). Until Issue #3957's third PR a request carried into the next
+  turn may still get the earlier turn's reply, so do not stack messages on one
+  instance.
 
 ## How long a request can be
 

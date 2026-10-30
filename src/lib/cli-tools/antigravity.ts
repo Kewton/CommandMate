@@ -57,6 +57,7 @@ import { createLogger } from '@/lib/logger';
 import { TUI_EXIT_WAIT_MS } from '@/config/cli-tool-timing-config';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 import { getErrorMessage } from '@/lib/errors';
+import { answerUnderInstanceInputLock, instanceInputReadMark } from '@/lib/session/instance-input-lock';
 
 const logger = createLogger('cli-tools/antigravity');
 
@@ -354,6 +355,7 @@ export class AntigravityTool extends BaseCLITool {
     let lastCaptureError: string | undefined;
     for (let i = 0; i < ANTIGRAVITY_INIT_MAX_ATTEMPTS; i++) {
       try {
+        const readMark = instanceInputReadMark();
         const rawOutput = await capturePane(sessionName, 50);
         const output = stripAnsi(rawOutput);
         lastOutput = rawOutput;
@@ -371,11 +373,22 @@ export class AntigravityTool extends BaseCLITool {
         if (!trustDialogHandled) {
           const decision = decideLaunchDialog(ANTIGRAVITY_TRUST_LAUNCH_DIALOG, output);
           if (decision.action === 'press' && !isStartupTrustHeld(sessionName)) {
-            await sendSpecialKey(sessionName, decision.key);
-            trustDialogHandled = true;
-            logger.info('auto-trusted-folder-for-antigravity');
-            await new Promise((resolve) => setTimeout(resolve, ANTIGRAVITY_DIALOG_SETTLE_MS));
-            continue;
+            // Issue #3952: typed as the composer's writer, and only while the
+            // screen still asks for this key once a send holding it is over.
+            const key = decision.key;
+            const outcome = await answerUnderInstanceInputLock(
+              sessionName,
+              readMark,
+              () => this.isTrustPressStill(sessionName, key),
+              () => sendSpecialKey(sessionName, key)
+            );
+            if (outcome.answered) {
+              trustDialogHandled = true;
+              logger.info('auto-trusted-folder-for-antigravity');
+              await new Promise((resolve) => setTimeout(resolve, ANTIGRAVITY_DIALOG_SETTLE_MS));
+              continue;
+            }
+            logger.info('antigravity-trust-answer-skipped', { sessionName, reason: outcome.reason });
           }
           logTrustDecisionOnce(sessionName, decision, loggedTrustDecisions);
         }
@@ -399,6 +412,17 @@ export class AntigravityTool extends BaseCLITool {
       captureErrors,
       ...(lastCaptureError !== undefined ? { lastCaptureError } : {}),
     });
+  }
+
+  /**
+   * Whether a fresh read still shows the trust screen with `key` as its answer
+   * — the re-check an automatic trust answer makes once it owns the composer
+   * after another writer (Issue #3952).
+   */
+  private async isTrustPressStill(sessionName: string, key: string): Promise<boolean> {
+    const output = stripAnsi(await capturePane(sessionName, 50));
+    const decision = decideLaunchDialog(ANTIGRAVITY_TRUST_LAUNCH_DIALOG, output);
+    return decision.action === 'press' && decision.key === key;
   }
 
   /**
@@ -427,6 +451,7 @@ export class AntigravityTool extends BaseCLITool {
     let lastCaptureError: string | undefined;
     while (Date.now() < deadline) {
       try {
+        const readMark = instanceInputReadMark();
         const rawOutput = await capturePane(sessionName, 50);
         const output = stripAnsi(rawOutput);
         lastOutput = rawOutput;
@@ -442,8 +467,26 @@ export class AntigravityTool extends BaseCLITool {
         if (trustDecision !== null && trustDecision.action !== 'press' && isStartupTrustPending(sessionName)) {
           logTrustDecisionOnce(sessionName, trustDecision, loggedTrustDecisions);
         }
-        if (trustDecision?.action === 'press' && claimStartupTrust(sessionName)) {
-          await sendSpecialKey(sessionName, trustDecision.key);
+        // Issue #3952: claimed and typed as the composer's writer. The claim is
+        // made only once the screen has been read again after a send holding
+        // the composer, so a screen that moved meanwhile keeps the Enter owed.
+        const pressKey = trustDecision?.action === 'press' ? trustDecision.key : null;
+        const claimed = pressKey !== null && isStartupTrustPending(sessionName)
+          ? await answerUnderInstanceInputLock(
+            sessionName,
+            readMark,
+            () => this.isTrustPressStill(sessionName, pressKey),
+            async () => {
+              if (!claimStartupTrust(sessionName)) return false;
+              await sendSpecialKey(sessionName, pressKey);
+              return true;
+            }
+          )
+          : null;
+        if (claimed !== null && !claimed.answered) {
+          logger.info('antigravity-trust-answer-skipped', { sessionName, reason: claimed.reason, afterLaunchWindow: true });
+        }
+        if (claimed?.answered === true && claimed.value) {
           logger.info('auto-trusted-folder-for-antigravity', { sessionName, afterLaunchWindow: true });
           // A full ordinary window for agy to draw its prompt after the Enter.
           deadline = Math.max(deadline, Date.now() + ANTIGRAVITY_PROMPT_WAIT_TIMEOUT_MS);

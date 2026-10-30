@@ -153,6 +153,20 @@ export interface MessageInputProps {
    * when the bound rises. `null` / omitted: not measured yet, no bound.
    */
   maxHeight?: number | null;
+  /**
+   * Issue #3999: the target instance's CURRENT frame is Command Code's plan
+   * review — the caller's `isPlanReviewUp()` over the same pane state its
+   * plan-review controls are drawn from (never another instance's poll).
+   *
+   * While it is set nothing is sent: the server would refuse the message
+   * (`not-sent / plan-review`), and on the optimistic path the draft would
+   * already be gone with only a failed pending row to show for it. So the send
+   * stops at {@link submitMessage}'s door — the button and a PC's Enter both
+   * go through it — keeping the draft and creating no pending row, and the
+   * composer says why and links to the controls. Cleared, the same draft
+   * sends as usual.
+   */
+  planReviewActive?: boolean;
 }
 
 /**
@@ -174,6 +188,23 @@ const DRAFT_STORAGE_KEY_PREFIX = 'commandmate:draft-message:';
  */
 const QUEUED_BUSY_TOAST_MESSAGE =
   'Queued (session busy) — your message will run after the current task finishes.';
+
+/**
+ * Issue #3999: bring the plan-review controls of this instance into view and
+ * give them focus. Found by the marker `PlanReviewControls` publishes
+ * (`data-plan-review-target`); the first one that is laid out wins, because a
+ * hidden tab may keep a second mount in the DOM.
+ */
+function revealPlanReviewControls(target: string): void {
+  if (typeof document === 'undefined') return;
+  const candidates = Array.from(
+    document.querySelectorAll<HTMLElement>('[data-plan-review-target]'),
+  ).filter((el) => el.dataset.planReviewTarget === target);
+  const el = candidates.find((candidate) => candidate.getClientRects().length > 0) ?? candidates[0];
+  if (!el) return;
+  el.scrollIntoView?.({ block: 'nearest' });
+  el.focus({ preventScroll: true });
+}
 
 /** `useLayoutEffect` warns on the server; see `useIsMobile` for the same pattern. */
 const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
@@ -219,7 +250,7 @@ function migrateLegacyDraftKey(worktreeId: string): void {
   }
 }
 
-export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, isSessionStarting = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus, isProcessing = false, showToast, autoYesSlot, agentModeSlot, directInputSlot, onOptimisticSend, heightScope, maxHeight }: MessageInputProps) {
+export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, isSessionStarting = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus, isProcessing = false, showToast, autoYesSlot, agentModeSlot, directInputSlot, onOptimisticSend, heightScope, maxHeight, planReviewActive = false }: MessageInputProps) {
   const t = useTranslations('worktree');
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
@@ -227,6 +258,12 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   const [isComposing, setIsComposing] = useState(false);
   const [showCommandSelector, setShowCommandSelector] = useState(false);
   const [isFreeInputMode, setIsFreeInputMode] = useState(false);
+  // Issue #3999: a send was stopped by the plan review; the notice says so
+  // louder (`role="alert"`) until the review is over.
+  const [planReviewStopped, setPlanReviewStopped] = useState(false);
+  useEffect(() => {
+    if (!planReviewActive) setPlanReviewStopped(false);
+  }, [planReviewActive]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const compositionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const justFinishedComposingRef = useRef(false);
@@ -358,6 +395,13 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     if (isComposing || (!message.trim() && !attachedImage) || sending) {
       return;
     }
+    // Issue #3999: the door both the button and a PC's Enter come through.
+    // Before the optimistic hand-off, so no pending row is made and the draft
+    // (state and localStorage) is left exactly as typed.
+    if (planReviewActive) {
+      setPlanReviewStopped(true);
+      return;
+    }
 
     const trimmed = message.trim();
     const effectiveCliTool: CLIToolType = cliToolId || 'claude';
@@ -412,7 +456,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     } finally {
       setSending(false);
     }
-  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, splitIndex, isProcessing, showToast, onOptimisticSend]);
+  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, splitIndex, isProcessing, showToast, onOptimisticSend, planReviewActive]);
 
   const handleSubmit = useCallback(async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -632,6 +676,28 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       {(error || imageError) && (
         <div className="p-2 bg-danger-subtle border border-danger-border rounded text-sm text-danger-foreground">
           {error || imageError}
+        </div>
+      )}
+
+      {/* Issue #3999: why nothing is sent while the plan review is up, and
+          the way to the controls that do answer it. */}
+      {planReviewActive && (
+        <div
+          data-testid="composer-plan-review-notice"
+          role={planReviewStopped ? 'alert' : 'status'}
+          // One short line where it fits: every pixel here comes out of the
+          // surface above, which is where the controls themselves are drawn.
+          className="rounded border border-warning-border bg-warning-subtle px-2 py-1 text-xs leading-5 text-foreground"
+        >
+          {t('planReview.composerNotice')}{' '}
+          <button
+            type="button"
+            data-testid="composer-plan-review-goto"
+            onClick={() => revealPlanReviewControls(`${worktreeId}:${instanceId ?? cliToolId ?? 'claude'}`)}
+            className="inline rounded-sm font-medium text-warning-foreground underline underline-offset-2 hover:no-underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring touch-manipulation"
+          >
+            {t('planReview.composerGoto')}
+          </button>
         </div>
       )}
 

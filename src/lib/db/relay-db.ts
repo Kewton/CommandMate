@@ -19,65 +19,56 @@
 import { randomUUID } from 'crypto';
 import Database from 'better-sqlite3';
 import type {
+  RelayBindMode,
   RelayCounts,
   RelayEndpoint,
-  RelayPendingKind,
-  RelayState,
+  RelaySendState,
   SessionRelay,
   SessionRelaySummary,
 } from '@/lib/relay/types';
 import { emptyRelayCounts, OPEN_RELAY_STATES } from '@/lib/relay/types';
 import { createLogger } from '@/lib/logger';
+import {
+  mapRelay,
+  OPEN_STATE_PLACEHOLDERS,
+  RELAY_COLUMNS,
+  type SessionRelayRow,
+} from '@/lib/db/relay-bind-db';
+
+// Issue #3995: the send binding and the pending slots live in `relay-bind-db`;
+// re-exported so every caller (and every `vi.mock`) keeps this module's surface.
+export {
+  appendRelayHeldCandidate,
+  clearRelayHeldCandidates,
+  clearRelayPending,
+  clearRelayPendingReply,
+  explainRelayBindRefusal,
+  failOrphanedRelayBind,
+  getRelayBinding,
+  getRelayPendingPayload,
+  listOpenBoundRelays,
+  listRelaysWithPendingPayload,
+  promoteRelayPendingReply,
+  recordRelayInputBoundary,
+  replaceRelayPromptWithPendingReply,
+  replaceRelayPromptWithReply,
+  reserveRelayBind,
+  setRelayHold,
+  setRelayPendingReply,
+  settleRelaySendState,
+  stashRelayPayload,
+  type RecordRelayInputBoundaryInput,
+  type RelayBinding,
+  type RelayBindRefusal,
+  type RelayHeldCandidate,
+  type RelayPendingReply,
+  type RelayWithPendingPayload,
+  type ReserveRelayBindInput,
+  type SettleRelaySendStateInput,
+  type StashRelayPayloadOptions,
+} from '@/lib/db/relay-bind-db';
 
 const logger = createLogger('relay-db');
-
-/** Every column, in one place, so the readers cannot drift from each other. */
-const RELAY_COLUMNS = `
-  id, from_worktree_id, from_instance_id, to_worktree_id, to_instance_id,
-  state, hops, sent_request_id, pending_kind, pending_body, prompt_signature,
-  created_at, updated_at, expires_at, delivered_at
-`;
-
-interface SessionRelayRow {
-  id: string;
-  from_worktree_id: string;
-  from_instance_id: string;
-  to_worktree_id: string;
-  to_instance_id: string;
-  state: string;
-  hops: number;
-  sent_request_id: string | null;
-  pending_kind: string | null;
-  pending_body: string | null;
-  prompt_signature: string | null;
-  created_at: number;
-  updated_at: number;
-  expires_at: number;
-  delivered_at: number | null;
-}
-
-function mapRelay(row: SessionRelayRow): SessionRelay {
-  return {
-    id: row.id,
-    from: { worktreeId: row.from_worktree_id, instanceId: row.from_instance_id },
-    to: { worktreeId: row.to_worktree_id, instanceId: row.to_instance_id },
-    state: row.state as RelayState,
-    hops: row.hops,
-    sentRequestId: row.sent_request_id,
-    pendingKind: (row.pending_kind as RelayPendingKind | null) ?? null,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    expiresAt: row.expires_at,
-    deliveredAt: row.delivered_at,
-  };
-}
-
-/** A relay row plus the body waiting to be delivered. Pump-only. */
-export interface RelayWithPendingPayload {
-  relay: SessionRelay;
-  kind: RelayPendingKind;
-  body: string;
-}
 
 /** What {@link createRelay} needs. Everything else is derived here. */
 export interface CreateRelayInput {
@@ -89,19 +80,24 @@ export interface CreateRelayInput {
   expiresAt: number;
   /** Epoch ms; injectable so a suite does not race the wall clock. */
   now?: number;
+  /** Issue #3957: `bound` when the caller will pass the relay id to the send. */
+  bindMode?: RelayBindMode;
 }
 
 /** Insert a new `pending` relay and hand it back. */
 export function createRelay(db: Database.Database, input: CreateRelayInput): SessionRelay {
   const id = randomUUID();
   const now = input.now ?? Date.now();
+  const bindMode: RelayBindMode = input.bindMode ?? 'legacy';
+  // A legacy row carries no send state at all: NULL, never a pretended `sent`.
+  const sendState: RelaySendState | null = bindMode === 'bound' ? 'awaiting' : null;
 
   db.prepare(`
     INSERT INTO session_relays
       (id, from_worktree_id, from_instance_id, to_worktree_id, to_instance_id,
        state, hops, sent_request_id, pending_kind, pending_body, prompt_signature,
-       created_at, updated_at, expires_at, delivered_at)
-    VALUES (?, ?, ?, ?, ?, 'pending', ?, NULL, NULL, NULL, NULL, ?, ?, ?, NULL)
+       created_at, updated_at, expires_at, delivered_at, bind_mode, send_state)
+    VALUES (?, ?, ?, ?, ?, 'pending', ?, NULL, NULL, NULL, NULL, ?, ?, ?, NULL, ?, ?)
   `).run(
     id,
     input.from.worktreeId,
@@ -111,7 +107,9 @@ export function createRelay(db: Database.Database, input: CreateRelayInput): Ses
     input.hops,
     now,
     now,
-    input.expiresAt
+    input.expiresAt,
+    bindMode,
+    sendState
   );
 
   return {
@@ -126,6 +124,14 @@ export function createRelay(db: Database.Database, input: CreateRelayInput): Ses
     updatedAt: now,
     expiresAt: input.expiresAt,
     deliveredAt: null,
+    bindMode,
+    sendState,
+    inputBoundaryAt: null,
+    boundaryKind: null,
+    turnOpenAtSend: null,
+    obsState: null,
+    holdReason: null,
+    overlap: null,
   };
 }
 
@@ -136,9 +142,6 @@ export function getRelayById(db: Database.Database, id: string): SessionRelay | 
     .get(id) as SessionRelayRow | undefined;
   return row ? mapRelay(row) : null;
 }
-
-/** Placeholders for an `IN (…)` over the open states. */
-const OPEN_STATE_PLACEHOLDERS = OPEN_RELAY_STATES.map(() => '?').join(', ');
 
 /** Every still-open relay this session must answer (it is the `to` end). */
 export function listOpenRelaysTo(
@@ -229,68 +232,6 @@ export function countOpenRelaysBetween(
 }
 
 /**
- * Record a payload that has been decided and not yet delivered.
- *
- * Guarded on `pending_kind IS NULL`, which is what makes two producers finding
- * the same finished turn cost ONE delivery: the second one loses the race and
- * returns false rather than queueing a duplicate. The guard is released by
- * {@link clearRelayPending} once the payload has actually gone out, so the same
- * relay can carry a prompt notice now and a reply later.
- *
- * @returns Whether this call is the one that stashed it
- */
-export function stashRelayPayload(
-  db: Database.Database,
-  id: string,
-  kind: RelayPendingKind,
-  body: string,
-  now = Date.now()
-): boolean {
-  const result = db
-    .prepare(`
-      UPDATE session_relays
-      SET pending_kind = ?, pending_body = ?, updated_at = ?
-      WHERE id = ? AND pending_kind IS NULL
-        AND state IN (${OPEN_STATE_PLACEHOLDERS})
-    `)
-    .run(kind, body, now, id, ...OPEN_RELAY_STATES);
-  return result.changes === 1;
-}
-
-/** Every relay carrying an undelivered payload, oldest first. */
-export function listRelaysWithPendingPayload(
-  db: Database.Database
-): RelayWithPendingPayload[] {
-  const rows = db
-    .prepare(`
-      SELECT ${RELAY_COLUMNS} FROM session_relays
-      WHERE pending_kind IS NOT NULL
-      ORDER BY updated_at ASC
-    `)
-    .all() as SessionRelayRow[];
-  return rows
-    .filter((row) => row.pending_body !== null && row.pending_kind !== null)
-    .map((row) => ({
-      relay: mapRelay(row),
-      kind: row.pending_kind as RelayPendingKind,
-      body: row.pending_body as string,
-    }));
-}
-
-/** Drop an undelivered payload (it went out, or it was superseded). */
-export function clearRelayPending(
-  db: Database.Database,
-  id: string,
-  now = Date.now()
-): void {
-  db.prepare(`
-    UPDATE session_relays
-    SET pending_kind = NULL, pending_body = NULL, updated_at = ?
-    WHERE id = ?
-  `).run(now, id);
-}
-
-/**
  * Close the relay as delivered, exactly once.
  *
  * Two clauses, and they guard different things — worth separating, because a
@@ -319,7 +260,7 @@ export function markRelayDelivered(
       .prepare(`
         UPDATE session_relays
         SET state = 'delivered', sent_request_id = ?, delivered_at = ?,
-            pending_kind = NULL, pending_body = NULL, updated_at = ?
+            pending_kind = NULL, pending_body = NULL, payload_id = NULL, updated_at = ?
         WHERE id = ? AND sent_request_id IS NULL
           AND state IN (${OPEN_STATE_PLACEHOLDERS})
       `)
@@ -416,7 +357,8 @@ export function cancelRelay(
   const result = db
     .prepare(`
       UPDATE session_relays
-      SET state = 'cancelled', pending_kind = NULL, pending_body = NULL, updated_at = ?
+      SET state = 'cancelled', pending_kind = NULL, pending_body = NULL, payload_id = NULL,
+          pending_reply = NULL, updated_at = ?
       WHERE id = ? AND state IN (${OPEN_STATE_PLACEHOLDERS})
     `)
     .run(now, id, ...OPEN_RELAY_STATES);

@@ -258,6 +258,14 @@ export interface ChatDialogCardProps {
   actions?: React.ReactNode;
   /** Why the card is up. Published as `data-reason` for the unit suite. */
   reason?: string;
+  /**
+   * Issue #3999: lay the card's parts out as items of the CALLER's flex
+   * column (`display: contents` on the card and its actions wrapper), so the
+   * caller can rank everything it holds by who gives way first. The chat
+   * surface does this for a plan review, where the buttons must stay and the
+   * banner, the frame, the arrow pad and the comment box are what can yield.
+   */
+  flattenIntoParent?: boolean;
   className?: string;
 }
 
@@ -268,6 +276,7 @@ export function ChatDialogCard({
   actions,
   reason,
   className = '',
+  flattenIntoParent = false,
 }: ChatDialogCardProps) {
   const t = useTranslations('worktree');
 
@@ -347,7 +356,11 @@ export function ChatDialogCard({
       data-reason={reason}
       role="group"
       aria-label={t('chatSurface.dialogCardLabel')}
-      className={['flex min-w-0 flex-col gap-2', className].filter(Boolean).join(' ')}
+      // Issue #3999: `min-h-0` so a live region short of room can squeeze the
+      // card — see the frame's and the actions' classes for who gives way.
+      className={[flattenIntoParent ? 'contents' : 'flex min-h-0 min-w-0 flex-col gap-2', className]
+        .filter(Boolean)
+        .join(' ')}
     >
       {/* The dark island. `overflow-auto` in both axes: rows are captured at
           `TUI_PANE_WIDTH` (200 columns) and re-wrapping a box-drawn dialog at a
@@ -356,24 +369,45 @@ export function ChatDialogCard({
 
           Issue #2309: for a selection list this is real, scrollable content —
           `maxHeightClassName` is raised by the caller and this box no longer
-          shows the whole thing at once, on purpose. */}
+          shows the whole thing at once, on purpose.
+
+          Issue #3999: and it is what gives way. Flex shrinks in proportion
+          to `flex-shrink` x basis, so a weight of 100000 against the
+          controls' 1 hands the frame (and, on a plan review, the banner and
+          the arrow pad, which carry the same weight) the whole of any
+          shortfall — the controls' share stays far below a layout unit until
+          those three are gone. The frame scrolls in what is left, and once
+          its own padding is all that is left the slot clips it to nothing. On a 360x640 phone the frame may close
+          entirely and leave only the controls — the documented floor: the
+          rows are still one tap away ("open the terminal"), the Approve
+          button was not. */}
       <div
-        ref={frameRef}
-        data-testid="chat-dialog-card-frame"
-        // `role="log"` would claim this is a live region; it is a still frame the
-        // reader is being shown, and the surface already owns one live region.
-        className={`overflow-auto rounded-lg border border-border bg-terminal-surface p-2 font-mono text-[11px] leading-snug text-terminal-foreground ${maxHeightClassName}`}
+        data-testid="chat-dialog-card-frame-slot"
+        className="flex min-h-0 shrink-[100000] flex-col overflow-hidden"
       >
         <div
-          className="whitespace-pre w-max"
-          // Same converter, same DOMPurify allow-list (`span` / `br` + `style`)
-          // as the terminal surface — see the docblock for why this is the piece
-          // of `TerminalDisplay` that is reused and the rest is not.
-          dangerouslySetInnerHTML={{ __html: html }}
-        />
+          ref={frameRef}
+          data-testid="chat-dialog-card-frame"
+          // `role="log"` would claim this is a live region; it is a still frame the
+          // reader is being shown, and the surface already owns one live region.
+          className={`min-h-0 overflow-auto rounded-lg border border-border bg-terminal-surface p-2 font-mono text-[11px] leading-snug text-terminal-foreground ${maxHeightClassName}`}
+        >
+          <div
+            className="whitespace-pre w-max"
+            // Same converter, same DOMPurify allow-list (`span` / `br` + `style`)
+            // as the terminal surface — see the docblock for why this is the piece
+            // of `TerminalDisplay` that is reused and the rest is not.
+            dangerouslySetInnerHTML={{ __html: html }}
+          />
+        </div>
       </div>
       {actions ? (
-        <div data-testid="chat-dialog-card-actions" className="min-w-0">
+        // Issue #3999: a flex column, so a plan review's yielding parts
+        // (`PlanReviewControls`) can shrink once the frame is closed.
+        <div
+          data-testid="chat-dialog-card-actions"
+          className={flattenIntoParent ? 'contents' : 'flex min-h-0 min-w-0 flex-col'}
+        >
           {actions}
         </div>
       ) : null}

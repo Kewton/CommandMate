@@ -2,6 +2,7 @@
  * relays Command - the standing delegations this machine is holding (#2377)
  *
  *   commandmate relays [--worktree <id>] [--instance <id|alias>] [--json]
+ *   commandmate relays --id <relay-id> [--json]   (Issue #3957: one relay, open or closed)
  *   commandmate relays cancel <relay-id>
  *
  * ## Why a command and not a flag on `ls`
@@ -30,6 +31,7 @@ import { ExitCode } from '../types';
 import type {
   RelayCancelResponse,
   RelayCreateResponse,
+  RelayGetResponse,
   RelayListResponse,
   RelayView,
 } from '../types/api-responses';
@@ -175,6 +177,21 @@ export interface RegisterRelayInput {
   allowRelayChain?: boolean;
 }
 
+/** A relay {@link registerRelay} opened (Issue #3957). */
+export interface RegisteredRelay {
+  id: string;
+  /**
+   * The server confirmed `bindMode: 'bound'`: the relay id goes on the send,
+   * and only that send's reply is delivered. False on an older server.
+   */
+  bound: boolean;
+}
+
+/** The one line an older server's relay gets on stderr (Issue #3957). */
+export const LEGACY_RELAY_NOTICE =
+  'Note: this server does not tie a relay to its send (legacy handling); '
+  + 'the reply is taken from the first turn that ends after the relay was opened.';
+
 /**
  * Open a relay, printing the server's own refusal and exiting 2 on one.
  *
@@ -182,19 +199,26 @@ export interface RegisterRelayInput {
  * change (drop the flag, cancel the other relay, stop forwarding), which is what
  * `CONFIG_ERROR` means everywhere else in this CLI.
  *
- * @returns The relay id
+ * Issue #3957: asks for `bind: true` and believes it only when the answer says
+ * `bindMode: 'bound'`. A server that does not know the flag answers without
+ * the key; the relay is then the legacy kind and its id is not sent along.
+ *
+ * @returns The relay id, and whether it is bound
  */
 export async function registerRelay(
   client: ApiClient,
   input: RegisterRelayInput
-): Promise<string> {
+): Promise<RegisteredRelay> {
   try {
     const response = await client.post<RelayCreateResponse>('/api/relays', {
       from: input.from,
       to: input.to,
       allowRelayChain: input.allowRelayChain === true,
+      bind: true,
     });
-    return response.relay.id;
+    const bound = (response.bindMode ?? response.relay.bindMode) === 'bound';
+    if (!bound) console.error(LEGACY_RELAY_NOTICE);
+    return { id: response.relay.id, bound };
   } catch (error) {
     if (error instanceof ApiError && error.apiCode && RELAY_REFUSAL_CODES.has(error.apiCode)) {
       console.error(`Error: ${error.payload?.error ?? error.apiCode}`);
@@ -219,27 +243,61 @@ export async function cancelRelayQuietly(client: ApiClient, relayId: string): Pr
   }
 }
 
+/**
+ * Print where a relay whose send could not be confirmed stands (Issue #3957).
+ *
+ * The relay is left open — withdrawing it would drop a reply that may well be
+ * on its way — and the message is not resent, which could make it arrive twice.
+ */
+export function printRelayUnconfirmedNotice(relayId: string, worktreeId?: string): void {
+  // Issue #3992: a failed send names the pane to look at before any resend, in
+  // the same line rather than a second notice.
+  const resend = worktreeId === undefined
+    ? ''
+    : ` Do not resend before checking the pane (\`commandmate capture ${worktreeId} --pane\`), or it may arrive twice.`;
+  console.error(
+    `Warning: whether the message reached the session is not known; relay ${relayId} was left open `
+    + 'and the message was not resent. '
+    + `Check it with \`commandmate relays --id ${relayId}\`.${resend}`
+  );
+}
+
 function endpointLabel(endpoint: { worktreeId: string; instanceId: string }): string {
   return `${endpoint.worktreeId}/${endpoint.instanceId}`;
 }
 
 function printRelayLine(relay: RelayView): void {
-  console.log(
-    [
-      relay.id,
-      relay.state,
-      `${endpointLabel(relay.from)} <- ${endpointLabel(relay.to)}`,
-      `hops=${relay.hops}`,
-      `expires=${new Date(relay.expiresAt).toISOString()}`,
-    ].join('\t')
-  );
+  const fields = [
+    relay.id,
+    relay.state,
+    `${endpointLabel(relay.from)} <- ${endpointLabel(relay.to)}`,
+    `hops=${relay.hops}`,
+    `expires=${new Date(relay.expiresAt).toISOString()}`,
+  ];
+  // Issue #3957: a bound relay's send state, overlap and hold reason, when it
+  // has them. Absent on a legacy relay and on an older server.
+  if (relay.sendState) fields.push(`send=${relay.sendState}`);
+  if (relay.overlap) fields.push(`overlap=${relay.overlap}`);
+  if (relay.holdReason) fields.push(`hold=${relay.holdReason}`);
+  console.log(fields.join('\t'));
 }
 
 interface RelaysOptions {
   worktree?: string;
   instance?: string;
+  id?: string;
   json?: boolean;
   token?: string;
+}
+
+/** `relays --id <id>`: one relay, whatever its state (Issue #3957). */
+async function showOneRelay(client: ApiClient, relayId: string, json: boolean): Promise<void> {
+  const response = await client.get<RelayGetResponse>(`/api/relays/${relayId}`);
+  if (json) {
+    console.log(JSON.stringify(response, null, 2));
+    return;
+  }
+  printRelayLine(response.relay);
 }
 
 export function createRelaysCommand(): Command {
@@ -248,18 +306,35 @@ export function createRelaysCommand(): Command {
     .description('List the open relays this session is waiting on and owes')
     .option('--worktree <id>', 'Worktree to list (defaults to the session running this command)')
     .option('--instance <id>', 'Agent instance inside --worktree (id or roster alias)')
+    .option('--id <relay-id>', 'Show one relay, open or closed (its send state, overlap and hold reason)')
     .option('--json', 'JSON output')
     .option('--token <token>', TOKEN_WARNING)
     .addHelpText('after', `
 Columns: <relay-id>  <state>  <requester> <- <worker>  hops=<n>  expires=<iso>
+         [send=<state>]  [overlap=<none|later|earlier|both|unknown>]  [hold=<reason>]
 
 States: pending (the worker has not finished), prompt (it stopped on a
 confirmation and the requester was told), delivered / expired / cancelled.
+
+send= / overlap= / hold= appear on a relay tied to its send (Issue #3957):
+send= is awaiting / input_started / sent / failed / unknown; hold= says why a
+relay is not being answered (send_unknown, dispatch_unknown, generation_changed,
+server_restarted, ...); overlap= says the reply may share a turn with another
+request (unknown is not "none"). \`--id <relay-id>\` shows one relay even after
+it closed.
 
 Withdraw one with \`commandmate relays cancel <relay-id>\`.
 `)
     .action(async (options: RelaysOptions) => {
       try {
+        if (options.id !== undefined) {
+          if (!RELAY_ID_PATTERN.test(options.id)) {
+            console.error('Error: Invalid relay ID format.');
+            process.exit(ExitCode.CONFIG_ERROR);
+          }
+          await showOneRelay(new ApiClient({ token: options.token }), options.id, options.json === true);
+          return;
+        }
         if (options.worktree && !isValidWorktreeId(options.worktree)) {
           console.error('Error: Invalid worktree ID format.');
           process.exit(ExitCode.CONFIG_ERROR);

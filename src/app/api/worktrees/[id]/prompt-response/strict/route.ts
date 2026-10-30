@@ -32,7 +32,12 @@ import { resolveSessionTargetStrict } from '@/lib/session/resolve-session-target
 import { createLogger } from '@/lib/logger';
 import { isPromptObservationKind, type PromptObservationKind } from '@/lib/prompt-observation/kinds';
 import { respondStrictly } from '@/lib/prompt-observation/strict-respond';
-import { createStrictRespondDeps, describeError, recordStrictAnswer } from '@/lib/session/strict-prompt-answer-io';
+import {
+  answerStrictlyAsInputWriter,
+  createStrictRespondDeps,
+  describeError,
+  recordStrictAnswer,
+} from '@/lib/session/strict-prompt-answer-io';
 import { startPolling } from '@/lib/polling/response-poller';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
 
@@ -154,18 +159,24 @@ export async function POST(
     }
 
     const target = { worktreeId: id, cliToolId, instanceId, sessionName, resolvedBy };
-    const result = await respondStrictly(
-      {
-        worktreeId: id,
-        sessionName,
-        expectScreen: request.expectScreen,
-        observationToken: request.observation,
-        answer: request.answer,
-        expectTarget: request.expectTarget,
-        operationId: request.operationId,
-      },
-      createStrictRespondDeps(db, target)
+    // Issue #3952: as the session's input writer, so a send cannot type between
+    // the answer's read and its keys. Not admitted: a 409 with nothing sent,
+    // which the CLI reads as exit 40 (`session_conflict`).
+    const result = await answerStrictlyAsInputWriter(sessionName, ticket =>
+      respondStrictly(
+        {
+          worktreeId: id,
+          sessionName,
+          expectScreen: request.expectScreen,
+          observationToken: request.observation,
+          answer: request.answer,
+          expectTarget: request.expectTarget,
+          operationId: request.operationId,
+        },
+        createStrictRespondDeps(db, target, ticket)
+      )
     );
+    if ('refused' in result) return refuse(409, result.refused, result.message);
     recordStrictAnswer(db, target, result, request.answeredBy);
     if (result.keysSent > 0 && !result.replayed) {
       startPolling(id, cliToolId, instanceId);

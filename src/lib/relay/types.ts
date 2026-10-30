@@ -46,6 +46,49 @@ export interface RelayEndpoint {
  */
 export type RelayPendingKind = 'reply' | 'prompt' | 'expired';
 
+/**
+ * How a relay is tied to the send that asked for it (Issue #3957).
+ *
+ *  - `legacy` — opened by an older CLI or a bare `POST /api/relays`: delivered
+ *               from the first reply after `createdAt`, as before.
+ *  - `bound`  — opened with `bind: true`; the send API reserves it and records
+ *               where the send's input began, and only that send can settle it.
+ */
+export type RelayBindMode = 'legacy' | 'bound';
+
+/**
+ * Where a bound relay's send stands (Issue #3957). Null for a legacy relay.
+ *
+ *  - `awaiting`      — the relay exists; no key has been typed for it.
+ *  - `input_started` — the boundary was recorded; the body is going in.
+ *  - `sent`          — the send was confirmed. Only now can a reply be taken.
+ *  - `failed`        — the send did not happen; nothing will be delivered.
+ *  - `unknown`       — whether it happened cannot be said; held, with a reason.
+ */
+export type RelaySendState = 'awaiting' | 'input_started' | 'sent' | 'failed' | 'unknown';
+
+/** Where the boundary was taken: right before the first key, or right before an HTTP dispatch. */
+export type RelayBoundaryKind = 'input_start' | 'dispatch';
+
+/**
+ * Whether the observation made at the boundary still describes the session.
+ *
+ *  - `valid`        — the boundary and the turn reading both hold.
+ *  - `invalid`      — the session (or the server) changed underneath; held.
+ *  - `turn_unknown` — the boundary holds, the turn state was never known.
+ */
+export type RelayObsState = 'valid' | 'invalid' | 'turn_unknown';
+
+/**
+ * What the delivery could prove about sharing a turn with another request.
+ *
+ * A direction is named only when it was DETECTED: `later` = a turn was already
+ * open when this request's input began; `earlier` = another input arrived after
+ * this one and before the reply; `both`; `none` = neither (and `later` was
+ * ruled out); `unknown` = could not be told. Unknown is never shown as none.
+ */
+export type RelayOverlap = 'none' | 'later' | 'earlier' | 'both' | 'unknown';
+
 /** A relay ledger row, as every reader sees it. */
 export interface SessionRelay {
   id: string;
@@ -65,7 +108,43 @@ export interface SessionRelay {
   updatedAt: number;
   expiresAt: number;
   deliveredAt: number | null;
+  /** Issue #3957: `legacy` for every row an older CLI opened. */
+  bindMode: RelayBindMode;
+  /** Issue #3957: null for a legacy relay. */
+  sendState: RelaySendState | null;
+  /** Issue #3957: the delivery's lower bound (epoch ms), once recorded. */
+  inputBoundaryAt: number | null;
+  boundaryKind: RelayBoundaryKind | null;
+  /** Issue #3957: whether a turn was open at the boundary; null = not known. */
+  turnOpenAtSend: boolean | null;
+  obsState: RelayObsState | null;
+  /** Issue #3957: why the relay is held (`send_unknown`, `generation_changed`, …). */
+  holdReason: string | null;
+  /** Issue #3957: the decided reply's overlap, once one was decided. */
+  overlap: RelayOverlap | null;
 }
+
+/** The v62 fields of a row with no binding, as a legacy relay reads (Issue #3957). */
+export const LEGACY_RELAY_BINDING_FIELDS: Pick<
+  SessionRelay,
+  | 'bindMode'
+  | 'sendState'
+  | 'inputBoundaryAt'
+  | 'boundaryKind'
+  | 'turnOpenAtSend'
+  | 'obsState'
+  | 'holdReason'
+  | 'overlap'
+> = {
+  bindMode: 'legacy',
+  sendState: null,
+  inputBoundaryAt: null,
+  boundaryKind: null,
+  turnOpenAtSend: null,
+  obsState: null,
+  holdReason: null,
+  overlap: null,
+};
 
 /**
  * The relays that concern one session, as the badges read them.

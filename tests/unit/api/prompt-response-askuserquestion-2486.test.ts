@@ -149,7 +149,7 @@ describe('[#2486] POST /prompt-response on an AskUserQuestion picker', () => {
     expect(status).toBe(200);
     expect(data).toMatchObject({ success: true, answer });
     expect(sendSpecialKeys).toHaveBeenCalledTimes(1);
-    expect(sendSpecialKeys).toHaveBeenCalledWith(SESSION, [...keys]);
+    expect(sendSpecialKeys).toHaveBeenCalledWith(SESSION, [...keys], expect.objectContaining({ shouldContinue: expect.any(Function) }));
     // Never the digit as text: the picker is cursor-driven.
     expect(sendKeys).not.toHaveBeenCalled();
   });

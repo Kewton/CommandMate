@@ -238,9 +238,10 @@ describe('新しいパターンは Plan review の capture にしか当たらな
       return COMMAND_CODE_PLAN_REVIEW_FOOTER.test(tail) || isCommandCodePlanApproveChoice(tail);
     });
     // Issue #3125 adds the two 1.74.0 frames (`command-code-plan-review-3125/`).
-    expect(matched.length).toBe(20);
+    // Issue #4000 adds the top-anchored 200x1000 frame (`command-code-plan-review-4000/`).
+    expect(matched.length).toBe(21);
     for (const file of matched) {
-      expect(path.relative(FIXTURES, file)).toMatch(/^command-code-plan-review-(2761|2763|3125)\//);
+      expect(path.relative(FIXTURES, file)).toMatch(/^command-code-plan-review-(2761|2763|3125|4000)\//);
     }
   });
 });

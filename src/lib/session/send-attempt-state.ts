@@ -159,9 +159,25 @@ export function classifySendFailure(error: unknown): { state: SendAttemptState; 
   // literal send IS the body (`Command failed: tmux send-keys -t =s: -l -- <body>`).
   // Whether any of the body reached the pane is unknown, and the body's own words
   // (`Explain prompt not ready.`) must not be read as a readiness refusal below.
+  // #3945: the re-read under the input lock failed before any key; it quotes the
+  // capture's own error (`Command failed: tmux capture-pane …`, no body), so it
+  // is matched before the transport wordings below.
+  if (/Could not re-read session \S+ before typing \(.*\); nothing was typed \(Issue #3945\)/s.test(message)) {
+    return { state: 'not-sent', reason: 'recheck-failed' };
+  }
   if (TMUX_TRANSPORT_FAILURE.test(message)) return { state: 'indeterminate', reason: 'send-error' };
   // The readiness waits of every tool throw before typing anything.
   if (/prompt not ready/i.test(message)) return { state: 'not-sent', reason: 'prompt-not-ready' };
+  // #3945: refused under (or before getting) the instance input lock, before any key.
+  if (/input lock not acquired, nothing was typed/.test(message)) {
+    return /was replaced while this send waited/.test(message)
+      ? { state: 'not-sent', reason: 'session-replaced' }
+      : { state: 'not-sent', reason: 'input-lock-timeout' };
+  }
+  if (/\(re-checked under the input lock\); nothing was typed/.test(message)) {
+    return { state: 'not-sent', reason: 'prompt-waiting' };
+  }
+  if (/input lock lost, nothing was typed/.test(message)) return { state: 'not-sent', reason: 'input-lock-lost' };
   // #1880: refused before the body, after only the clear keys (C-e / C-u, or C-e / BSpace
   // for a codex composer holding only a paste placeholder, #3937).
   if (/still holds unsent text after \d+ clear passes/.test(message)) {

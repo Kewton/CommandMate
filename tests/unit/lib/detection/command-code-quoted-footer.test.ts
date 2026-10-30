@@ -347,6 +347,9 @@ const PRE_FIX_VERDICTS: Record<string, string> = {
   'command-code-plan-review-3125/plan-review-1-74-0-initial.txt': 'waiting command_code_plan_review',
   'command-code-plan-review-3125/plan-review-1-74-0-one-comment.txt': 'waiting command_code_plan_review',
 
+  // command-code-plan-review-4000 (neutral top-anchored 200x1000 frame, Issue #4000; see its README)
+  'command-code-plan-review-4000/plan-review-top-anchored-200x1000.txt': 'waiting command_code_plan_review',
+
   // long-body-2464
   'long-body-2464/command-code-idle.capture': 'ready input_prompt',
   'long-body-2464/command-code-pasted-60L.capture': 'ready input_prompt',

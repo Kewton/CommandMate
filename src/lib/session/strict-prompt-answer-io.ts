@@ -28,6 +28,13 @@ import {
 } from '@/lib/cli-tools/antigravity-startup-trust';
 import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
 import { getAutoYesState } from '@/lib/auto-yes-state';
+import {
+  INSTANCE_INPUT_LOCK_TIMEOUT_CODE,
+  INSTANCE_INPUT_OWNERSHIP_LOST_CODE,
+  INSTANCE_INPUT_SESSION_REPLACED_CODE,
+  withInstanceInputLock,
+  type InstanceInputTicket,
+} from '@/lib/session/instance-input-lock';
 
 const logger = createLogger('api/prompt-response-strict');
 
@@ -57,7 +64,16 @@ export function describeError(error: unknown): string {
   return `${name}${code}: ${message.slice(0, LOGGED_MESSAGE_CHARS)}`;
 }
 
-export function createStrictRespondDeps(db: Database.Database, target: StrictAnswerTarget): StrictRespondDeps {
+/**
+ * @param ticket - The session's input ticket the answer runs under
+ *   ({@link answerStrictlyAsInputWriter}, Issue #3952). Given, a key is sent
+ *   only while it is current: a session replaced mid-answer gets none.
+ */
+export function createStrictRespondDeps(
+  db: Database.Database,
+  target: StrictAnswerTarget,
+  ticket?: InstanceInputTicket
+): StrictRespondDeps {
   const { worktreeId, cliToolId, instanceId, sessionName } = target;
   return {
     async read(): Promise<StrictScreenRead> {
@@ -81,7 +97,12 @@ export function createStrictRespondDeps(db: Database.Database, target: StrictAns
         return { ok: false, stage: 'observation', error: describeError(error) };
       }
     },
-    sendKey: key => sendSessionAnswerKey(worktreeId, cliToolId, key, instanceId),
+    sendKey: async key => {
+      if (ticket !== undefined && !ticket.isCurrent()) {
+        throw new Error(`Session ${sessionName} was replaced while the strict answer held its input (Issue #3952)`);
+      }
+      await sendSessionAnswerKey(worktreeId, cliToolId, key, instanceId);
+    },
     sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
     now: () => Date.now(),
     autoYesActive: () => getAutoYesState(worktreeId, cliToolId, instanceId)?.enabled === true,
@@ -148,5 +169,48 @@ export function recordStrictAnswer(
     });
   } catch (error) {
     logger.warn('strict-prompt-answer-record-failed', { error: describeError(error) });
+  }
+}
+
+/** Why the session's input lock did not admit a strict answer (Issue #3952). */
+export interface StrictInputLockRefusal {
+  refused: 'input_lock_timeout' | 'session_replaced' | 'input_lock_lost';
+  message: string;
+}
+
+/**
+ * Run a strict answer as a `shared` writer of the session's input (Issue
+ * #3952): from its first read to its last key no message send or clear types
+ * into the pane (other answers are ordered by the strict lock and the startup
+ * hold, as before). The answer's own first read is taken after admission, so a
+ * screen that moved while it waited for a send is refused by its checks, as any
+ * moved screen is. A lock that did not admit it is a refusal with nothing
+ * sent, never thrown.
+ */
+export async function answerStrictlyAsInputWriter(
+  sessionName: string,
+  answer: (ticket: InstanceInputTicket) => Promise<StrictRespondResult>
+): Promise<StrictRespondResult | StrictInputLockRefusal> {
+  let admitted = false;
+  try {
+    return await withInstanceInputLock(
+      sessionName,
+      ticket => {
+        admitted = true;
+        return answer(ticket);
+      },
+      { mode: 'shared' }
+    );
+  } catch (error) {
+    const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+    const refused =
+      admitted ? null
+        : code === INSTANCE_INPUT_LOCK_TIMEOUT_CODE ? 'input_lock_timeout'
+          : code === INSTANCE_INPUT_SESSION_REPLACED_CODE ? 'session_replaced'
+            : code === INSTANCE_INPUT_OWNERSHIP_LOST_CODE ? 'input_lock_lost'
+              : null;
+    if (refused === null) throw error;
+    logger.info('strict-prompt-response-input-lock-refused', { sessionName, refused });
+    return { refused, message: `Nothing was sent: ${error instanceof Error ? error.message : String(error)}` };
   }
 }

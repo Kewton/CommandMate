@@ -44,6 +44,7 @@ import {
 } from '@/config/cli-tool-timing-config';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 import { getErrorMessage } from '@/lib/errors';
+import { answerUnderInstanceInputLock, instanceInputReadMark } from '@/lib/session/instance-input-lock';
 
 const logger = createLogger('cli-tools/codex');
 
@@ -394,6 +395,7 @@ export class CodexTool extends BaseCLITool {
     try {
       for (let i = 0; i < maxAttempts; i++) {
       try {
+        const readMark = instanceInputReadMark();
         const rawOutput = await capturePane(sessionName, 50);
         const output = stripAnsi(rawOutput);
 
@@ -417,7 +419,8 @@ export class CodexTool extends BaseCLITool {
             sessionName,
             lifecycleScreen,
             hooksScreenState,
-            trustHooks
+            trustHooks,
+            readMark
           );
           if (sent) {
             await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
@@ -584,7 +587,25 @@ export class CodexTool extends BaseCLITool {
             // stray keypress -- an empty submit on the main prompt, or worst case the
             // default "1. Update now" confirm if the key was dropped during a re-render.
             // Send the digit alone and let the next poll observe the result.
-            await sendKeys(sessionName, keyToSend, false);
+            //
+            // Issue #3952: as the composer's writer, and only while the update
+            // dialog is still the active one once a send holding it is over.
+            const digit = keyToSend;
+            const updateOutcome = await answerUnderInstanceInputLock(
+              sessionName,
+              readMark,
+              () => this.isActiveDialogStill(sessionName, 'update'),
+              () => sendKeys(sessionName, digit, false)
+            );
+            if (!updateOutcome.answered) {
+              // Nothing typed: the install this lock covers never started.
+              if (updateLockHeld) {
+                updateLockHeld = false;
+                releaseAgentUpdateLock(CODEX_UPDATE_LOCK_TOOL);
+              }
+              logger.info('codex-update-dialog-answer-skipped', { sessionName, reason: updateOutcome.reason });
+              continue;
+            }
             updateDialogHandled = true;
             if (keyToSend === CODEX_UPDATE_DIALOG_KEYS.update) {
               // codex is about to become `npm install`. The prompt this method
@@ -605,7 +626,16 @@ export class CodexTool extends BaseCLITool {
         // Numbered selection dialogs are dismissed by the number key above, so this
         // branch is reached only when no number selection is pending.
         if (activeDialog === 'press-enter') {
-          await sendSpecialKey(sessionName, 'Enter');
+          const enterOutcome = await answerUnderInstanceInputLock(
+            sessionName,
+            readMark,
+            () => this.isActiveDialogStill(sessionName, 'press-enter'),
+            () => sendSpecialKey(sessionName, 'Enter')
+          );
+          if (!enterOutcome.answered) {
+            logger.info('codex-notification-answer-skipped', { sessionName, reason: enterOutcome.reason });
+            continue;
+          }
           logger.info('dismissed-codex-notification');
           await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
           continue;
@@ -615,7 +645,16 @@ export class CodexTool extends BaseCLITool {
         // Options: › 1. Yes, continue / 2. No, quit
         if (activeDialog === 'trust' && !trustDialogHandled) {
           // Issue #890: number-key selection confirms instantly; no trailing Enter.
-          await sendKeys(sessionName, '1', false);
+          const trustOutcome = await answerUnderInstanceInputLock(
+            sessionName,
+            readMark,
+            () => this.isActiveDialogStill(sessionName, 'trust'),
+            () => sendKeys(sessionName, '1', false)
+          );
+          if (!trustOutcome.answered) {
+            logger.info('codex-trust-dialog-answer-skipped', { sessionName, reason: trustOutcome.reason });
+            continue;
+          }
           trustDialogHandled = true;
           logger.info('auto-trusted-folder-for-codex');
           await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
@@ -641,6 +680,18 @@ export class CodexTool extends BaseCLITool {
         logger.warn('codex-update-lock-released-unfinished', { sessionName });
       }
     }
+  }
+
+  /**
+   * Whether `dialog` is still codex's active dialog on a fresh read — the
+   * re-check an automatic launch answer makes once it owns the composer after
+   * another writer (Issue #3952).
+   */
+  private async isActiveDialogStill(
+    sessionName: string,
+    dialog: NonNullable<ReturnType<typeof getCodexActiveDialog>>
+  ): Promise<boolean> {
+    return getCodexActiveDialog(stripAnsi(await capturePane(sessionName, 50))) === dialog;
   }
 
   /**
@@ -677,13 +728,17 @@ export class CodexTool extends BaseCLITool {
    * @param screen - The bottom-most active hooks screen, from `getCodexLifecycleDialog`
    * @param state - Per-screen budget, carried across polls by the caller
    * @param trust - Whether trust may be granted, from {@link shouldTrustCodexHooks}
-   * @returns True when a key was sent, false when this screen's budget is spent
+   * @param readMark - {@link instanceInputReadMark} taken before the frame that showed `screen` was read
+   * @returns True when a key was sent, or none was because the composer's writer
+   *   found the screen gone (Issue #3952) — either way the caller polls again;
+   *   false when this screen's budget is spent
    */
   private async answerCodexHooksScreen(
     sessionName: string,
     screen: CodexHooksScreen,
     state: CodexHooksScreenState,
-    trust: boolean
+    trust: boolean,
+    readMark: number
   ): Promise<boolean> {
     if (state.screen !== screen) {
       // Progress. The pane moved, so the previous screen's spent attempts say
@@ -695,8 +750,34 @@ export class CodexTool extends BaseCLITool {
       logger.warn('codex-hooks-screen-unresponsive', { sessionName, screen, trust });
       return false;
     }
-    const attempt = ++state.attempts;
+    const attempt = state.attempts + 1;
 
+    // Issue #3952: the key goes to the composer's tmux pane, so it waits for a
+    // send that holds it — and is not typed if the hooks screen it was chosen
+    // for is gone once that send is over. Inside `sendMessage` under
+    // `sendUserMessage`'s lock it joins that lock instead.
+    const outcome = await answerUnderInstanceInputLock(
+      sessionName,
+      readMark,
+      async () => getCodexLifecycleDialog(stripAnsi(await capturePane(sessionName, 50))) === screen,
+      () => this.sendCodexHooksScreenKey(sessionName, screen, attempt, trust)
+    );
+    if (!outcome.answered) {
+      // Nothing was typed, so this screen's budget is not spent; poll again.
+      logger.info('codex-hooks-screen-answer-skipped', { sessionName, screen, reason: outcome.reason });
+      return true;
+    }
+    state.attempts = attempt;
+    return true;
+  }
+
+  /** The key {@link answerCodexHooksScreen} chose, typed as the composer's writer. */
+  private async sendCodexHooksScreenKey(
+    sessionName: string,
+    screen: CodexHooksScreen,
+    attempt: number,
+    trust: boolean
+  ): Promise<void> {
     if (screen === 'hooks-review') {
       const key =
         attempt === 1
@@ -708,7 +789,7 @@ export class CodexTool extends BaseCLITool {
       // on the screen this key just opened.
       await sendKeys(sessionName, key, false);
       logger.info('codex-hooks-review-answered', { sessionName, key, attempt, trust });
-      return true;
+      return;
     }
 
     if (trust) {
@@ -716,12 +797,11 @@ export class CodexTool extends BaseCLITool {
       // tmux sends the character rather than resolving it as a key name.
       await sendKeys(sessionName, CODEX_HOOKS_TRUST_KEY, false, { literal: true });
       logger.info('codex-hooks-screen-trusted', { sessionName, screen, attempt });
-      return true;
+      return;
     }
 
     await sendSpecialKey(sessionName, 'Escape');
     logger.info('codex-hooks-screen-escaped', { sessionName, screen, attempt });
-    return true;
   }
 
   /**
@@ -751,6 +831,7 @@ export class CodexTool extends BaseCLITool {
 
     while (Date.now() - startTime < CODEX_PROMPT_WAIT_TIMEOUT_MS) {
       try {
+        const readMark = instanceInputReadMark();
         const rawOutput = await capturePane(sessionName, 50);
         const output = stripAnsi(rawOutput);
 
@@ -766,7 +847,7 @@ export class CodexTool extends BaseCLITool {
             const worktreePath = await getSessionWorkingDirectory(sessionName);
             trustHooks = worktreePath !== null && shouldTrustCodexHooks(worktreePath);
           }
-          await this.answerCodexHooksScreen(sessionName, screen, hooksScreenState, trustHooks);
+          await this.answerCodexHooksScreen(sessionName, screen, hooksScreenState, trustHooks, readMark);
         } else if (isCodexPromptReady(output)) {
           // Issue #890/#892: position-based guard so a residual update/trust dialog
           // ("› 1. ...") is never mistaken for a ready prompt -- yet a genuine "› "

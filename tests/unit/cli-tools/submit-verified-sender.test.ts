@@ -64,6 +64,7 @@ import { sendKeys, sendSpecialKeys, capturePane, clearInputLine, clearComposerLi
 import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
 import { execFile } from 'child_process';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { classifySendFailure } from '@/lib/session/send-attempt-state';
 
 /**
  * Every tmux execFile succeeds (Issue #2464: `load-buffer` / `paste-buffer`);
@@ -811,11 +812,16 @@ describe('submit-verified-sender', () => {
             message: 'hello',
             cliToolId: 'codex',
           });
+          const settled = p.catch((error: unknown) => error);
           await vi.runAllTimersAsync();
-          await expect(p).resolves.toBeUndefined();
 
+          // Issue #3945 overturns "still sends the body": the frame the pre-send
+          // clear reads first is the re-check under the input lock, and a
+          // dialog there refuses the send (prompt-waiting) — no clear keys, and
+          // no body either.
+          expect(classifySendFailure(await settled)).toEqual({ state: 'not-sent', reason: 'prompt-waiting' });
           expect(clearComposerLine).not.toHaveBeenCalled();
-          expect(sendKeys).toHaveBeenCalledWith(SESSION, 'hello', false, { literal: true });
+          expect(sendKeys).not.toHaveBeenCalled();
         } finally {
           vi.useRealTimers();
         }
@@ -875,9 +881,14 @@ describe('submit-verified-sender', () => {
 
             expect(clearComposerLine).not.toHaveBeenCalled();
             expect(sendKeys).toHaveBeenCalledWith(SESSION, 'hello', false, { literal: true });
-            // No pre-send read either: the first capture is the post-Enter
-            // verification, so the send costs exactly what it cost before.
-            expect(callOrder(vi.mocked(sendKeys))).toBeLessThan(callOrder(vi.mocked(capturePane)));
+            // Issue #3945 overturns "no pre-send read": every send re-reads the
+            // pane once under the input lock (a dialog check, never a clear).
+            // That one read is all that comes before the body.
+            const bodyAt = callOrder(vi.mocked(sendKeys));
+            const readsBefore = vi
+              .mocked(capturePane)
+              .mock.invocationCallOrder.filter((order) => order < bodyAt);
+            expect(readsBefore).toHaveLength(1);
           } finally {
             vi.useRealTimers();
           }

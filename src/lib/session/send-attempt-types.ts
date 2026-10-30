@@ -32,7 +32,7 @@ export type SendAttemptReason =
   | 'session-starting'
   /** `not-sent`: the session could not be started. */
   | 'session-start-failed'
-  /** `not-sent`: a prompt dialog was open (#1708). */
+  /** `not-sent`: a prompt dialog was open (#1708), or opened while the send waited for the composer (#3945). */
   | 'prompt-waiting'
   /** `not-sent`: the tmux session belongs to another server (#2865). */
   | 'foreign-session'
@@ -42,6 +42,20 @@ export type SendAttemptReason =
   | 'composer-not-empty'
   /** `not-sent`: a Command Code plan review overlay refused the send before the body (#3125/#3772). */
   | 'plan-review'
+  /** `not-sent`: another send held the instance's composer past the input lock's wait (#3945). */
+  | 'input-lock-timeout'
+  /** `not-sent`: the session was killed or recreated while the send waited for its composer (#3945). */
+  | 'session-replaced'
+  /** `not-sent`: the composer was handed to another writer before the body was typed (#3945). */
+  | 'input-lock-lost'
+  /**
+   * `not-sent`: the bound relay the send was going in under was no longer its
+   * own right before the first key (cancelled, expired or taken), so the
+   * input-boundary hook refused it and nothing was typed or dispatched (#3957/#3992).
+   */
+  | 'relay-reservation-lost'
+  /** `not-sent`: the pane could not be re-read under the input lock, so nothing was typed (#3945). */
+  | 'recheck-failed'
   /** `indeterminate`: the body was typed, did not land intact, and was taken back out best-effort (#2464/#3366). */
   | 'body-not-landed'
   /** `indeterminate`: an autocompletion replaced the body; the line was cleared best-effort (#1501). */
@@ -67,3 +81,12 @@ export interface LastSendAttempt {
  * send before any body is typed (Issue #3772). Matched by code, never by wording.
  */
 export const PLAN_REVIEW_SEND_REFUSED_CODE = 'PLAN_REVIEW_SEND_REFUSED';
+
+/**
+ * `code` on the errors the input re-check throws before any key
+ * (`recheckComposerBeforeInput`, Issue #3952): a dialog was open, or the pane
+ * could not be read. Carried by copilot's `/model` switch, whose caller records
+ * the reason by code rather than by the wording around it.
+ */
+export const INPUT_RECHECK_PROMPT_WAITING_CODE = 'INPUT_RECHECK_PROMPT_WAITING';
+export const INPUT_RECHECK_FAILED_CODE = 'INPUT_RECHECK_FAILED';
