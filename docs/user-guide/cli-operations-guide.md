@@ -1696,13 +1696,19 @@ commandmate verify <worktree-id> --json | jq '.gates[] | select(.gateId=="env-cl
 **減ったものは誰のものであれ違反**、増えたものは他ワーカーに帰属できるときだけ免除されます
 （並列委任は互いの計測窓の中で正当に自分のセッションを起こすため）。
 ただし別の worktree のセッションが `commandmate instances <wt> kill`（`remove --kill` を含む）で
-止められ、それを頼んだのがこのワーカーでない（呼び出し元の cwd も tmux セッションも
-タスクの worktree ではない）とき、画面（UI）の停止ボタンで止められたとき、サーバーの片付け
-（sync・リポジトリ削除で消えた worktree）で止められたときは、`· - mcbd-… [external] (not counted: …)`
-と区別して表示し、不合格に数えません（Issue #3993。オーケストレーターの worktree 片付けなど）。記録は
-`~/.commandmate/session-kills/` に CLI と サーバー（kill-session API・片付け）が書きます。
-ワーカー自身が同じコマンドで隣を止めた場合、呼び出し元が分からない場合（curl などで API を直接呼んだ）、`tmux kill-session` など CommandMate を通らずに止めた場合は
-今までどおり違反です（#1624）。
+止められ、記録された止めたセッション名が消えたセッション名と完全に一致し、頼んだのがこのワーカー
+でないと分かる（呼び出し元の cwd がタスクの worktree の兄弟ディレクトリ＝主チェックアウトか別の worktree、
+または tmux セッションが別の worktree のもので、どちらもタスクのものではない）ときは、
+`· - mcbd-… [external] (not counted: …)` と区別して表示し、不合格に数えません
+（Issue #3993。オーケストレーターの worktree 片付け）。記録は `~/.commandmate/session-kills/` に
+CLI とサーバー（kill-session API・片付け）が書きます。
+次は今までどおり違反です（#1624）: ワーカー自身が同じコマンドで隣を止めた場合、呼び出し元が
+`/tmp`・`$HOME` などどの worktree でもない場所で tmux の外だった場合、画面（UI）の停止ボタン・
+サーバーの片付け（`commandmate sync`・リポジトリ削除）・curl などで API を直接呼んだ停止（どれも
+ワーカーが起こせるので、`· mcbd-…: kill recorded but counted (…)` と記録があることだけ示します）、
+同じ worktree の別インスタンスなど記録のセッション名と一致しない消失、`tmux kill-session` など
+CommandMate を通らずに止めた場合。隣の worktree へ `cd` して tmux の外から止めた場合は
+記録だけでは区別できず免除されます。
 詳細は [docs/design/task-contract.md](../design/task-contract.md) §2.6。
 
 ### 一覧・詳細
@@ -2850,11 +2856,13 @@ commandmate instances <worktree-id> kill <instance-id>                 # 該当�
 ```
 
 `kill` は止めたインスタンスの Auto-Yes も無効にします（止めていない別インスタンスの Auto-Yes は残ります）。
-`kill`（`remove --kill` も）が成功すると、どの worktree・インスタンスを、どこ（cwd と tmux セッション）から
-止めたかを `~/.commandmate/session-kills/<UTC 日付>.jsonl` に 1 行記録します（30 日で削除）。
+`kill`（`remove --kill` も）が成功すると、どの worktree・インスタンスの、どの tmux セッション（サーバーの
+応答の `killedSessions`）を、どこ（cwd と tmux セッション）から止めたかを
+`~/.commandmate/session-kills/<UTC 日付>.jsonl` に 1 行記録します（30 日で削除）。
 検証の env-clean はこの記録で、オーケストレーターが止めた隣の worktree のセッションを `external` として
-不合格から外します（Issue #3993）。サーバー側も kill-session API と片付けの停止を同じ場所に記録します
-（CLI からの kill はサーバーの行と合わせて 2 行になりますが、判定は CLI の行で決まります）。
+不合格から外します（Issue #3993。条件は「検証の env-clean」の節）。サーバー側も kill-session API と
+片付けの停止を同じ場所に記録しますが、こちらは記録があることを示すだけで免除しません
+（CLI からの kill はサーバーの行と合わせて 2 行になり、判定は CLI の行で決まります）。
 
 ### 出力例（一覧）
 

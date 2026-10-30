@@ -60,11 +60,21 @@ export interface CleanupResult {
 type KillSessionFn = (worktreeId: string, cliToolId: CLIToolType) => Promise<boolean>;
 
 /**
- * Record a session the server's cleanup stopped (Issue #3993), so env-clean
- * sets the vanished session of a sibling worktree apart as `external` instead
- * of counting it as a worker's kill. Best effort: never throws.
+ * Record a session the server's cleanup stopped (Issue #3993). env-clean never
+ * excuses a removal on this line — the cleanup runs after a `commandmate sync` a
+ * worker can issue — but names it next to the violation. The session name is
+ * the primary instance's, which is what {@link killWorktreeSession} stops; when
+ * it cannot be resolved the line names none. Best effort: never throws.
  */
-function recordCleanupKill(worktreeId: string, cliToolId: CLIToolType): void {
+function recordCleanupKill(worktreeId: string, cliToolId: CLIToolType, sessionName?: string): void {
+  let name = sessionName;
+  if (name === undefined) {
+    try {
+      name = CLIToolManager.getInstance().getTool(cliToolId).getSessionName(worktreeId);
+    } catch {
+      name = undefined;
+    }
+  }
   appendSessionKillRecord({
     version: SESSION_KILL_LEDGER_VERSION,
     at: Date.now(),
@@ -72,6 +82,7 @@ function recordCleanupKill(worktreeId: string, cliToolId: CLIToolType): void {
     origin: 'server',
     worktreeId,
     instanceId: cliToolId,
+    sessionNames: name ? [name] : [],
     callerCwd: null,
     callerSession: null,
   });
@@ -304,7 +315,7 @@ export async function cleanupGlobalSessions(): Promise<number> {
         if (killed) {
           sessionsKilled++;
           logger.info('global-session:killed', { cliToolId, sessionName });
-          recordCleanupKill(GLOBAL_SESSION_WORKTREE_ID, cliToolId);
+          recordCleanupKill(GLOBAL_SESSION_WORKTREE_ID, cliToolId, sessionName);
         }
       }
     } catch (error) {

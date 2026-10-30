@@ -586,16 +586,20 @@ async function addInstance(
 
 /**
  * Record a successful kill in the session-kill ledger (Issue #3993): which
- * worktree and instance, and who asked — this process's cwd and tmux session.
+ * worktree and instance, the tmux sessions the server says it stopped
+ * (`killedSessions` of the kill-session response), and who asked — this
+ * process's cwd and tmux session. A response without `killedSessions` (an
+ * older server) records no session, which excuses nothing.
  * Best effort: the ledger never fails the command, the kill already happened.
  */
-function recordSessionKill(worktreeId: string, instanceId: string): void {
+function recordSessionKill(worktreeId: string, instanceId: string, response: unknown): void {
   let callerCwd: string | null;
   try {
     callerCwd = process.cwd();
   } catch {
     callerCwd = null;
   }
+  const killed = (response as { killedSessions?: unknown } | null)?.killedSessions;
   appendSessionKillRecord({
     version: SESSION_KILL_LEDGER_VERSION,
     at: Date.now(),
@@ -603,6 +607,9 @@ function recordSessionKill(worktreeId: string, instanceId: string): void {
     origin: 'cli',
     worktreeId,
     instanceId,
+    sessionNames: Array.isArray(killed)
+      ? killed.filter((name): name is string => typeof name === 'string')
+      : [],
     callerCwd,
     callerSession: readTmuxSessionName(),
   });
@@ -636,8 +643,8 @@ async function removeInstance(
 
   if (options.kill) {
     try {
-      await client.post(`/api/worktrees/${worktreeId}/kill-session?instance=${encodeURIComponent(instanceId)}`);
-      recordSessionKill(worktreeId, instanceId);
+      const killResponse = await client.post<unknown>(`/api/worktrees/${worktreeId}/kill-session?instance=${encodeURIComponent(instanceId)}`);
+      recordSessionKill(worktreeId, instanceId, killResponse);
       console.error(`Session killed: ${instanceId}`);
     } catch (killError) {
       console.error(`Warning: could not kill session for ${instanceId}: ${getErrorMessage(killError)}`);
@@ -694,8 +701,8 @@ async function killInstance(
     process.exit(ExitCode.CONFIG_ERROR);
   }
 
-  await client.post(`/api/worktrees/${worktreeId}/kill-session?instance=${encodeURIComponent(instanceId)}`);
-  recordSessionKill(worktreeId, instanceId);
+  const killResponse = await client.post<unknown>(`/api/worktrees/${worktreeId}/kill-session?instance=${encodeURIComponent(instanceId)}`);
+  recordSessionKill(worktreeId, instanceId, killResponse);
   console.error(`Session killed: ${instanceId}`);
 }
 

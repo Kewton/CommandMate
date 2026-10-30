@@ -11,20 +11,23 @@
  * for a cleanup nobody in the worker's transcript had run.
  *
  * This ledger is the missing fact: one line per kill, naming the API, the
- * worktree it was for and who asked (the caller's working directory and tmux
- * session). The gate then sets a vanished sibling session apart as `external`
- * only when a kill of that worktree was recorded inside the task's window *and*
- * the caller was not this task's worker — a CLI caller outside the task, the
- * UI, or the server's own cleanup. A worker's own kill (its cwd or its
- * tmux session is the task's worktree), a kill with no caller recorded (a bare
- * HTTP request), and a
- * kill that bypassed CommandMate (`tmux kill-session`, `kill-server`) stay
- * violations, exactly as before.
+ * tmux sessions it actually stopped, the worktree it was for and who asked
+ * (the caller's working directory and tmux session). The gate excuses as little
+ * as it can prove is not the worker's (`env-clean-gate.ts`, `findExternalKill`):
+ * a vanished sibling session is `external` only when a line inside the task's
+ * window names that exact session, was written by the CLI, and its caller is
+ * known to be someone else — a cwd in a sibling directory of the task's
+ * worktree (the primary checkout, another worktree) or a tmux session of
+ * another worktree. Everything else stays a violation, exactly as before:
+ * a worker's own kill, a caller that is nowhere in particular (`/tmp`, `$HOME`),
+ * the route's and the server's lines (a worker can reach the UI and trigger
+ * sync too), and any kill that bypassed CommandMate (`tmux kill-session`), which
+ * records nothing. Those lines are still shown next to the violation.
  *
  * Written by the CLI (with its caller), by the kill-session route and by
  * `session-cleanup.ts`. A CLI kill is therefore recorded twice — the CLI's line
- * and the route's `http` line — which changes no verdict: the route's line
- * names no caller and so never excuses anything (see `env-clean-gate.ts`).
+ * and the route's `http` line — which changes no verdict: only the CLI's line
+ * can excuse anything.
  *
  * Machine-wide, like the gate mutex (`machine-lock.ts`): the CLI and the server
  * write it and the server's gate reads it, so the path is derived from `$HOME` alone —
@@ -71,6 +74,11 @@ export type SessionKillApi = 'kill-session' | 'session-cleanup';
  * - `http` — the kill-session route, for any other request (the CLI's own POST,
  *   curl). The caller is unknown, so callerCwd / callerSession are null.
  * - `server` — the server's cleanup; no request is behind it.
+ *
+ * Only `cli` lines can excuse a removal. `browser` is judged from
+ * `Sec-Fetch-Site` alone, which a header names and a UI-driving worker sends;
+ * `server` cleanup runs after a `commandmate sync` a worker can issue. Both are
+ * kept so the report can say a kill was recorded, not to excuse it.
  */
 export type SessionKillOrigin = 'cli' | 'browser' | 'http' | 'server';
 
@@ -87,6 +95,13 @@ export interface SessionKillRecord {
   worktreeId: string;
   /** Instance the kill was scoped to; null for a whole-worktree kill. */
   instanceId: string | null;
+  /**
+   * tmux session names the kill actually stopped — the route's `killedSessions`.
+   * The gate matches a vanished session against these exactly, never by the
+   * worktree id (whose prefix another worktree's id can share). Empty when the
+   * writer could not tell, which excuses nothing.
+   */
+  sessionNames: string[];
   /** Working directory of the process that asked; null when unreadable. */
   callerCwd: string | null;
   /** tmux session the caller ran inside; null outside tmux. */
@@ -169,6 +184,8 @@ export function isSessionKillRecord(value: unknown): value is SessionKillRecord 
     typeof record.worktreeId === 'string' &&
     record.worktreeId !== '' &&
     isNullableString(record.instanceId) &&
+    Array.isArray(record.sessionNames) &&
+    record.sessionNames.every((name) => typeof name === 'string') &&
     isNullableString(record.callerCwd) &&
     isNullableString(record.callerSession)
   );

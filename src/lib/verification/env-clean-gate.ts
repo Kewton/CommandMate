@@ -688,30 +688,38 @@ export function readDeadDemoVitestEntries(baseline: EnvSnapshot): ReadonlySet<st
 // =============================================================================
 
 /**
- * Whether a recorded kill was asked for by this task's worker.
+ * Whether a CLI kill was asked for by someone known not to be this task's worker.
  *
- * The worker is whoever ran inside the task's worktree or inside one of its
- * sessions. A caller with no recorded cwd is unknown, and unknown counts as the
- * worker — the strict answer, because only a kill *not* the worker's excuses.
+ * Known means one of two facts the record carries:
+ *   - the caller's cwd is a sibling directory of the task's worktree — the
+ *     primary checkout the orchestrator runs from, or another worktree;
+ *   - the caller ran inside the tmux session of another worktree.
+ * Either is enough unless the other says "this task": a cwd inside the task's
+ * worktree, or the task's own session (or one of its worktree's), is the worker
+ * whatever else was recorded. A cwd that is nowhere in particular (`/tmp`,
+ * `$HOME`, `/`) with no session says nothing and is the worker — the strict
+ * answer, because only a kill *not* the worker's excuses.
  *
- * Two origins are never the worker: the UI (`browser`, a same-origin browser
- * request — a worker drives a terminal, not this server's page) and the
- * server's own cleanup after sync or a repository removal (`server`). The
- * route's `http` line has no caller and so stays the worker's; a CLI kill is
- * judged on the CLI's own line instead.
+ * Only `cli` lines name a caller. The route's `browser` (judged from
+ * `Sec-Fetch-Site` alone, which a UI-driving worker sends and a header can
+ * forge) and `http` lines and the server's `server` cleanup (run after a
+ * `commandmate sync` a worker can issue) never excuse.
  */
-function isKillByTask(
+function isKillByAnotherWorker(
   record: SessionKillRecord,
   context: EnvAttributionContext,
   taskSession: string | null | undefined
 ): boolean {
-  if (record.origin === 'browser' || record.origin === 'server') return false;
-  if (record.callerSession !== null) {
-    if (taskSession && record.callerSession === taskSession) return true;
-    if (attributeSessionName(record.callerSession, context.worktreeId) === 'self') return true;
-  }
-  if (record.callerCwd === null) return true;
-  return attributeAnchor(record.callerCwd, context.worktreePath) === 'self';
+  if (record.origin !== 'cli') return false;
+  const sessionOwner =
+    record.callerSession === null
+      ? 'unattributed'
+      : taskSession && record.callerSession === taskSession
+        ? 'self'
+        : attributeSessionName(record.callerSession, context.worktreeId);
+  const cwdOwner = attributeAnchor(record.callerCwd, context.worktreePath);
+  if (sessionOwner === 'self' || cwdOwner === 'self') return false;
+  return sessionOwner === 'other' || cwdOwner === 'other';
 }
 
 /**
@@ -725,20 +733,18 @@ function isKillByTask(
  *     including the orchestrator's own cleanup (`instances <wt> kill`, the
  *     first step of removing a worktree), which failed every parallel
  *     verification on 2026-10-29.
- *   - The session-kill ledger records each kill made through `instances … kill`,
- *     the kill-session route and the server's session cleanup, with the
- *     worktree it was for and who asked. A removal is `external` only when such
- *     a kill of the session's worktree falls inside the task window and its
- *     caller was neither inside the task's worktree nor inside one of its
- *     sessions (the UI and the server's cleanup never are).
- *   - Everything else stays a violation: a worker's own kill through the same
- *     command, a kill with no caller recorded, and any kill that went around
- *     CommandMate (`tmux kill-session`, `kill-server`), which records nothing.
- *
- * Matched by worktree, not by instance: the kill of one instance and the
- * removal of another of the same worktree are both the orchestrator working on
- * that worktree, and the instance-to-name mapping (namespace, adopted legacy
- * names) is not something a record written by the CLI can reproduce.
+ *   - The session-kill ledger records each kill with the tmux sessions it
+ *     stopped and who asked. A removal is `external` only when a line inside
+ *     the task window names exactly that session and {@link isKillByAnotherWorker}
+ *     holds for it.
+ *   - Matched by the exact session name, never by worktree id: a worktree-wide
+ *     match let one cleanup line excuse a worker's unrecorded kill of another
+ *     instance of the same worktree hours earlier, and an id prefix
+ *     (`commandmate-skills` / `commandmate-skills-3944`) reached into another
+ *     worktree.
+ *   - Everything else stays a violation: a worker's own kill, a caller that is
+ *     nowhere in particular, the UI's and the server's kills, and any kill that
+ *     went around CommandMate (`tmux kill-session`), which records nothing.
  */
 function findExternalKill(
   sessionName: string,
@@ -748,10 +754,16 @@ function findExternalKill(
 ): SessionKillRecord | undefined {
   return kills.find(
     (record) =>
-      record.worktreeId !== context.worktreeId &&
-      attributeSessionName(sessionName, record.worktreeId) === 'self' &&
-      !isKillByTask(record, context, taskSession)
+      record.sessionNames.includes(sessionName) && isKillByAnotherWorker(record, context, taskSession)
   );
+}
+
+/** A recorded kill of exactly this session that does not excuse it, for the report. */
+function findRecordedKill(
+  sessionName: string,
+  kills: readonly SessionKillRecord[]
+): SessionKillRecord | undefined {
+  return kills.find((record) => record.sessionNames.includes(sessionName));
 }
 
 // =============================================================================
@@ -807,6 +819,13 @@ export interface EnvProbeDiff {
    * as `external`, never dropped; empty when the tmux server itself looks killed.
    */
   removedExternal: ExternalRemoval[];
+  /**
+   * `tmux-sessions` removals counted in `removed` although a kill of exactly
+   * that session was recorded — by the UI, the server's cleanup, a bare HTTP
+   * request, or a caller not known to be someone else (#3993). Reported next to
+   * the violation so the record is visible; never excused.
+   */
+  removedKillNotExcused: ExternalRemoval[];
   /**
    * `home-entries` removals of a `.commandmate-demo-vitest-<pid>` directory whose
    * pid the baseline recorded as already dead (#3043). Listed, never dropped.
@@ -897,6 +916,7 @@ export function diffEnvSnapshots(
         removedByOtherServer: [],
         removedByOtherRepository: [],
         removedExternal: [],
+        removedKillNotExcused: [],
         removedStaleDemoVitest: [],
         ignoredByConfig: [],
         ignoredBuiltIn: [],
@@ -914,6 +934,7 @@ export function diffEnvSnapshots(
         removedByOtherServer: [],
         removedByOtherRepository: [],
         removedExternal: [],
+        removedKillNotExcused: [],
         removedStaleDemoVitest: [],
         ignoredByConfig: [],
         ignoredBuiltIn: [],
@@ -969,6 +990,7 @@ export function diffEnvSnapshots(
     const removedByOtherServer: EnvChange[] = [];
     const removedByOtherRepository: EnvChange[] = [];
     const removedExternal: ExternalRemoval[] = [];
+    const removedKillNotExcused: ExternalRemoval[] = [];
     const removedStaleDemoVitest: EnvChange[] = [];
     for (const entry of before.entries) {
       if (afterKeys.has(entry.key)) continue;
@@ -991,8 +1013,13 @@ export function diffEnvSnapshots(
         removedByOtherRepository.push(change);
       } else if (probeId === 'tmux-sessions' && tmuxServerSurvived && change.owner === 'other') {
         const killedBy = findExternalKill(entry.key, sessionKills, context, taskSession);
-        if (killedBy) removedExternal.push({ ...change, killedBy });
-        else removed.push(change);
+        if (killedBy) {
+          removedExternal.push({ ...change, killedBy });
+        } else {
+          removed.push(change);
+          const recorded = findRecordedKill(entry.key, sessionKills);
+          if (recorded) removedKillNotExcused.push({ ...change, killedBy: recorded });
+        }
       } else if (probeId === 'home-entries' && deadDemoVitestEntries.has(entry.key)) {
         removedStaleDemoVitest.push(change);
       } else {
@@ -1011,6 +1038,7 @@ export function diffEnvSnapshots(
       removedByOtherServer,
       removedByOtherRepository,
       removedExternal,
+      removedKillNotExcused,
       removedStaleDemoVitest,
       ignoredByConfig,
       ignoredBuiltIn,
@@ -1096,22 +1124,37 @@ function formatRemovedByOtherRepository(changes: EnvChange[]): string[] {
 
 /** Sibling sessions stopped by someone else's recorded kill (#3993), one line each. */
 function formatRemovedExternal(changes: ExternalRemoval[]): string[] {
-  return changes.map(({ key, killedBy }) => {
-    const target = killedBy.instanceId
-      ? `${killedBy.worktreeId} instance ${killedBy.instanceId}`
-      : killedBy.worktreeId;
-    const caller =
-      killedBy.origin === 'browser'
-        ? 'the UI'
-        : killedBy.origin === 'server'
-          ? 'the server'
+  return changes.map(({ key, killedBy }) =>
+    `    · - ${key} [external] (not counted: ${describeKill(killedBy)}, not this task)`
+  );
+}
+
+/** `<api> for <worktree>[ instance <id>] at <ISO> from <caller>` of one recorded kill. */
+function describeKill(killedBy: SessionKillRecord): string {
+  const target = killedBy.instanceId
+    ? `${killedBy.worktreeId} instance ${killedBy.instanceId}`
+    : killedBy.worktreeId;
+  const caller =
+    killedBy.origin === 'browser'
+      ? 'the UI'
+      : killedBy.origin === 'server'
+        ? 'the server'
+        : killedBy.origin === 'http'
+          ? 'an HTTP request with no caller'
           : killedBy.callerSession
-            ? `${killedBy.callerCwd} in ${killedBy.callerSession}`
-            : killedBy.callerCwd;
-    return (
-      `    · - ${key} [external] (not counted: ${killedBy.api} for ${target} ` +
-      `at ${new Date(killedBy.at).toISOString()} from ${caller}, not this task)`
-    );
+            ? `${killedBy.callerCwd ?? 'an unknown cwd'} in ${killedBy.callerSession}`
+            : (killedBy.callerCwd ?? 'an unknown cwd');
+  return `${killedBy.api} for ${target} at ${new Date(killedBy.at).toISOString()} from ${caller}`;
+}
+
+/** Counted removals whose kill was recorded but does not excuse them (#3993), one line each. */
+function formatRemovedKillNotExcused(changes: ExternalRemoval[]): string[] {
+  return changes.map(({ key, killedBy }) => {
+    const why =
+      killedBy.origin === 'browser' || killedBy.origin === 'server'
+        ? `a ${killedBy.origin} kill a worker can also cause`
+        : 'the caller is not known to be someone else';
+    return `    · ${key}: kill recorded but counted (${describeKill(killedBy)}; not excused: ${why})`;
   });
 }
 
@@ -1183,6 +1226,7 @@ export function formatEnvCleanReport(diff: EnvCleanDiff): string {
     );
     lines.push(...formatChanges('+', probe.added));
     lines.push(...formatChanges('-', probe.removed));
+    lines.push(...formatRemovedKillNotExcused(probe.removedKillNotExcused));
     lines.push(...formatTaskSessionChanges(probe.taskSessionAdded));
     lines.push(...formatRemovedByOtherServer(probe.removedByOtherServer));
     lines.push(...formatRemovedByOtherRepository(probe.removedByOtherRepository));

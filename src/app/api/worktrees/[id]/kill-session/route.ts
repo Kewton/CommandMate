@@ -235,10 +235,11 @@ export async function POST(
       );
     }
 
-    // Issue #3993: tell env-clean who stopped this worktree's sessions. A
-    // same-origin browser request is the UI; anything else (the CLI's POST,
-    // curl) names no caller and so never excuses a removal — the CLI writes its
-    // own line with its cwd and tmux session. Best effort: never throws.
+    // Issue #3993: record exactly which sessions this request stopped. A
+    // same-origin browser request is marked as the UI, anything else (the CLI's
+    // POST, curl) as `http`. Neither names a caller, so env-clean never excuses
+    // a removal on this line — it only shows that a kill was recorded; the CLI
+    // writes its own line with its cwd and tmux session. Best effort: never throws.
     appendSessionKillRecord({
       version: SESSION_KILL_LEDGER_VERSION,
       at: Date.now(),
@@ -246,6 +247,7 @@ export async function POST(
       origin: request.headers.get('sec-fetch-site') === 'same-origin' ? 'browser' : 'http',
       worktreeId: id,
       instanceId: instanceParam || null,
+      sessionNames: [...killedSessions],
       callerCwd: null,
       callerSession: null,
     });

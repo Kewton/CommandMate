@@ -77,14 +77,17 @@ function baselineOf(names: string[]): EnvSnapshot {
   );
 }
 
+/** By default the record names the claude session of the worktree it was for, as the route reports it. */
 function kill(overrides: Partial<SessionKillRecord> = {}): SessionKillRecord {
+  const worktreeId = overrides.worktreeId ?? SIBLING_ID;
   return {
     version: 1,
     at: STARTED + 10 * 60 * 1000,
     api: 'kill-session',
     origin: 'cli',
-    worktreeId: SIBLING_ID,
+    worktreeId,
     instanceId: 'claude',
+    sessionNames: [`mcbd-${NS}-claude-${worktreeId}`],
     callerCwd: ORCHESTRATOR_CWD,
     callerSession: ORCHESTRATOR_SESSION,
     ...overrides,
@@ -120,13 +123,31 @@ describe('diffEnvSnapshots: removals explained by a recorded kill (#3993)', () =
     );
   });
 
-  it('covers every session of the worktree the kill was for (cleanup kills each instance)', () => {
+  // Third contract (P2-4): matched by the exact session name, not by worktree.
+  it('excuses only the session the kill names; another instance of the same worktree stays counted', () => {
     const { diff, tmux: probe } = tmuxDiff(
       [kill({ instanceId: 'claude' })],
       [TASK_SESSION, SIBLING_SESSION, SIBLING_CODEX]
     );
+    expect(diff.status).toBe('violated');
+    expect(probe.removedExternal.map((c) => c.key)).toEqual([SIBLING_SESSION]);
+    expect(probe.removed.map((c) => c.key)).toEqual([SIBLING_CODEX]);
+  });
+
+  it('excuses every session a whole-worktree kill names', () => {
+    const { diff, tmux: probe } = tmuxDiff(
+      [kill({ instanceId: null, sessionNames: [SIBLING_SESSION, SIBLING_CODEX] })],
+      [TASK_SESSION, SIBLING_SESSION, SIBLING_CODEX]
+    );
     expect(diff.status).toBe('clean');
     expect(probe.removedExternal.map((c) => c.key)).toEqual([SIBLING_SESSION, SIBLING_CODEX]);
+  });
+
+  it('accepts a caller in another worktree’s tmux session whatever its cwd (/tmp)', () => {
+    expect(tmuxDiff([kill({ callerCwd: '/tmp' })]).diff.status).toBe('clean');
+    expect(
+      tmuxDiff([kill({ callerCwd: null, callerSession: `mcbd-${NS}-claude-${SIBLING_ID}` })]).diff.status
+    ).toBe('clean');
   });
 
   it('accepts a caller outside tmux (a plain shell in the primary checkout)', () => {
@@ -173,6 +194,48 @@ describe('diffEnvSnapshots: removals explained by a recorded kill (#3993)', () =
       expect(tmuxDiff([kill({ at: VERIFIED + 1 })]).diff.status).toBe('violated');
     });
 
+    it('the caller ran nowhere in particular (/tmp, $HOME, the parent directory) outside tmux (P2-1)', () => {
+      for (const callerCwd of ['/tmp', '/Users/dev', '/Users/dev/work', '/']) {
+        const { diff, tmux: probe } = tmuxDiff([kill({ callerCwd, callerSession: null })]);
+        expect(diff.status, callerCwd).toBe('violated');
+        expect(probe.removedExternal).toEqual([]);
+      }
+    });
+
+    it('the caller’s tmux session is not a CommandMate session and its cwd is nowhere (P2-1)', () => {
+      expect(tmuxDiff([kill({ callerCwd: '/tmp', callerSession: 'main' })]).diff.status).toBe('violated');
+    });
+
+    it('the caller’s cwd is a sibling but it ran in the task’s session (self wins)', () => {
+      expect(tmuxDiff([kill({ callerSession: TASK_SESSION })]).diff.status).toBe('violated');
+    });
+
+    it('a worker’s unrecorded kill of another instance is not excused by a cleanup line in the window (P2-4)', () => {
+      // 10:00 the worker kills codex-2 of the sibling with `tmux kill-session` (nothing recorded);
+      // 11:00 the orchestrator cleans the sibling's claude session up (recorded).
+      const { diff, tmux: probe } = tmuxDiff(
+        [kill({ at: STARTED + 30 * 60 * 1000 })],
+        [TASK_SESSION, SIBLING_SESSION, SIBLING_CODEX]
+      );
+      expect(diff.status).toBe('violated');
+      expect(probe.removed.map((c) => c.key)).toEqual([SIBLING_CODEX]);
+    });
+
+    it('a kill of a worktree whose id is a prefix of the vanished session’s worktree (P2-4)', () => {
+      const child = `mcbd-${NS}-claude-commandmate-skills-3944`;
+      const { diff, tmux: probe } = tmuxDiff(
+        [kill({ worktreeId: 'commandmate-skills' })],
+        [TASK_SESSION, child],
+        [TASK_SESSION]
+      );
+      expect(diff.status).toBe('violated');
+      expect(probe.removed.map((c) => c.key)).toEqual([child]);
+    });
+
+    it('a record that names no session excuses nothing', () => {
+      expect(tmuxDiff([kill({ sessionNames: [] })]).diff.status).toBe('violated');
+    });
+
     it('the tmux server looks killed: every removal counts', () => {
       const { diff, tmux: probe } = tmuxDiff([kill()], [TASK_SESSION, SIBLING_SESSION], []);
       expect(diff.status).toBe('violated');
@@ -195,26 +258,29 @@ describe('diffEnvSnapshots: kills the server recorded (#3993, second contract)',
   const serverKill = (overrides: Partial<SessionKillRecord>) =>
     kill({ callerCwd: null, callerSession: null, instanceId: null, ...overrides });
 
-  it('sets a sibling stopped from the UI apart as external (positive)', () => {
+  // Third contract (P2-2, P2-3): a worker can drive the UI and trigger sync, so
+  // these lines are shown next to the violation and never excuse it.
+  it('a sibling stopped from the UI is counted, with the recorded kill shown (P2-3)', () => {
     const { diff, tmux: probe } = tmuxDiff([serverKill({ origin: 'browser' })]);
-    expect(diff.status).toBe('clean');
-    expect(probe.removedExternal.map((c) => c.key)).toEqual([SIBLING_SESSION]);
+    expect(diff.status).toBe('violated');
+    expect(probe.removed.map((c) => c.key)).toEqual([SIBLING_SESSION]);
+    expect(probe.removedExternal).toEqual([]);
+    expect(probe.removedKillNotExcused.map((c) => c.key)).toEqual([SIBLING_SESSION]);
     expect(formatEnvCleanReport(diff)).toContain(
-      `· - ${SIBLING_SESSION} [external] (not counted: kill-session for ${SIBLING_ID} ` +
-        `at ${new Date(kill().at).toISOString()} from the UI, not this task)`
+      `· ${SIBLING_SESSION}: kill recorded but counted (kill-session for ${SIBLING_ID} ` +
+        `at ${new Date(kill().at).toISOString()} from the UI; not excused: a browser kill a worker can also cause)`
     );
   });
 
-  it('sets a sibling stopped by the server’s cleanup (sync / repository removal) apart as external (positive)', () => {
-    const { diff, tmux: probe } = tmuxDiff(
-      [serverKill({ origin: 'server', api: 'session-cleanup', instanceId: 'claude' })],
-      [TASK_SESSION, SIBLING_SESSION, SIBLING_CODEX]
-    );
-    expect(diff.status).toBe('clean');
-    expect(probe.removedExternal.map((c) => c.key)).toEqual([SIBLING_SESSION, SIBLING_CODEX]);
+  it('a sibling stopped by the server’s cleanup (sync / repository removal) is counted, with the kill shown (P2-2)', () => {
+    const { diff, tmux: probe } = tmuxDiff([
+      serverKill({ origin: 'server', api: 'session-cleanup', instanceId: 'claude' }),
+    ]);
+    expect(diff.status).toBe('violated');
+    expect(probe.removedExternal).toEqual([]);
     expect(formatEnvCleanReport(diff)).toContain(
-      `[external] (not counted: session-cleanup for ${SIBLING_ID} instance claude at ` +
-        `${new Date(kill().at).toISOString()} from the server, not this task)`
+      `· ${SIBLING_SESSION}: kill recorded but counted (session-cleanup for ${SIBLING_ID} instance claude at ` +
+        `${new Date(kill().at).toISOString()} from the server; not excused: a server kill a worker can also cause)`
     );
   });
 
@@ -223,6 +289,9 @@ describe('diffEnvSnapshots: kills the server recorded (#3993, second contract)',
     expect(diff.status).toBe('violated');
     expect(probe.removed.map((c) => c.key)).toEqual([SIBLING_SESSION]);
     expect(probe.removedExternal).toEqual([]);
+    expect(formatEnvCleanReport(diff)).toContain(
+      'from an HTTP request with no caller; not excused: the caller is not known to be someone else)'
+    );
   });
 
   it('a worker’s CLI kill recorded twice (CLI line + route line) is still a violation (#1624)', () => {
@@ -242,6 +311,12 @@ describe('diffEnvSnapshots: kills the server recorded (#3993, second contract)',
     expect(
       tmuxDiff([serverKill({ origin: 'server', worktreeId: 'commandmate-issue-4000' })]).diff.status
     ).toBe('violated');
+  });
+
+  it('a removal with no recorded kill shows no recorded-kill line', () => {
+    const { diff, tmux: probe } = tmuxDiff([]);
+    expect(probe.removedKillNotExcused).toEqual([]);
+    expect(formatEnvCleanReport(diff)).not.toContain('kill recorded but counted');
   });
 });
 

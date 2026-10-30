@@ -2030,13 +2030,21 @@ commandmate instances <worktree-id> kill <instance-id>                 # Stop ju
 
 `kill` also disables Auto-Yes for the instances it stops (Auto-Yes of instances it did not stop is kept).
 A successful `kill` (and `remove --kill`) appends one line to `~/.commandmate/session-kills/<UTC date>.jsonl`
-(kept 30 days): the worktree and instance it stopped, and where it was asked from (cwd and tmux session).
-The server records its own kills there too — the kill-session API (the UI's stop button) and the cleanup of
-worktrees that sync or a repository removal dropped. The env-clean verification gate uses these lines to set a
-sibling worktree's session stopped by the orchestrator, the UI or the server's cleanup apart as `external`
-instead of failing on it; a worker stopping its neighbour itself, an unknown caller (a bare API call such as
-curl), or a kill that bypassed CommandMate (`tmux kill-session`) still fails (Issue #3993). A CLI kill is written
-twice (the CLI's line and the server's), and the CLI's line decides.
+(kept 30 days): the worktree and instance, the tmux sessions the server says it stopped (`killedSessions`),
+and where it was asked from (cwd and tmux session). The server records its own kills there too — the
+kill-session API (the UI's stop button) and the cleanup of worktrees that sync or a repository removal dropped.
+
+The env-clean verification gate sets a vanished sibling session apart as `external` instead of failing on it
+only when a CLI line names exactly that session and its caller is known not to be the worker: its cwd is a
+sibling directory of the task's worktree (the primary checkout or another worktree), or it ran inside another
+worktree's tmux session, and neither is the task's. Still a failure (Issue #3993, #1624): a worker stopping its
+neighbour itself; a caller outside tmux in a directory that is no worktree (`/tmp`, `$HOME`); the UI's stop
+button, the server's cleanup (`commandmate sync`, repository removal) and bare API calls such as curl — a
+worker can cause each of these, so the report only notes `· mcbd-…: kill recorded but counted (…)`; another
+instance of the same worktree the line does not name; and any kill that bypassed CommandMate
+(`tmux kill-session`). A worker that `cd`s into the neighbour and stops it from outside tmux cannot be told
+apart by the record and is excused. A CLI kill is written twice (the CLI's line and the server's), and only the
+CLI's line can excuse.
 
 ### Output Example (list)
 

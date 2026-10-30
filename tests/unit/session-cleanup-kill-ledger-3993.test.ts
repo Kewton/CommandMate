@@ -75,6 +75,12 @@ describe('session cleanup — session-kill ledger (Issue #3993)', () => {
     }
   });
 
+  it('names the primary session of each tool it stopped', async () => {
+    await cleanupWorktreeSessions('wt-gone', vi.fn(async (_wt: string, tool: CLIToolType) => tool === 'codex'));
+
+    expect(recorded().map((r) => r.sessionNames)).toEqual([['mcbd-codex-wt-gone']]);
+  });
+
   it('records nothing for sessions it did not stop, or failed to (negative)', async () => {
     const killSessionFn = vi.fn(async (_wt: string, tool: CLIToolType) => {
       if (tool === 'claude') throw new Error('tmux gone');
@@ -95,5 +101,6 @@ describe('session cleanup — session-kill ledger (Issue #3993)', () => {
     expect(recorded().map((r) => [r.api, r.origin, r.worktreeId, r.instanceId])).toEqual([
       ['session-cleanup', 'server', GLOBAL_SESSION_WORKTREE_ID, 'claude'],
     ]);
+    expect(recorded()[0].sessionNames).toEqual([`mcbd-claude-${GLOBAL_SESSION_WORKTREE_ID}`]);
   });
 });

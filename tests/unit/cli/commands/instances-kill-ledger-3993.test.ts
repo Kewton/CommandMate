@@ -69,6 +69,17 @@ describe('instances kill: session-kill ledger (Issue #3993)', () => {
     expect(recorded().map((r) => r.origin)).toEqual(['cli']);
   });
 
+  it('records the session names the server reports it stopped, and none from an older server', async () => {
+    mockFetchResponse({ success: true, killedSessions: ['mcbd-ns-claude-wt1-claude-2'] });
+    const { createInstancesCommand } = await import('../../../../src/cli/commands/instances');
+    await createInstancesCommand().parseAsync(['node', 'instances', 'wt1', 'kill', 'claude-2']);
+    restoreFetch();
+    mockFetchResponse({ success: true });
+    await createInstancesCommand().parseAsync(['node', 'instances', 'wt1', 'kill', 'claude-2']);
+
+    expect(recorded().map((r) => r.sessionNames)).toEqual([['mcbd-ns-claude-wt1-claude-2'], []]);
+  });
+
   it('records the kill of `remove --kill` too', async () => {
     mockFetchSequence([
       { data: { id: 'wt1', name: 'main', agentInstances: [

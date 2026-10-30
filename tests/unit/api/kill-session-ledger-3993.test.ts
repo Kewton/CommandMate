@@ -132,6 +132,15 @@ describe('POST /api/worktrees/:id/kill-session — session-kill ledger (Issue #3
     ]);
   });
 
+  it('records the exact tmux session names it stopped (its `killedSessions`)', async () => {
+    setRunning(true);
+    const response = await call('?instance=claude');
+    const body = await response.json();
+
+    expect(body.killedSessions.length).toBeGreaterThan(0);
+    expect(recorded().map((r) => r.sessionNames)).toEqual([body.killedSessions]);
+  });
+
   it('records nothing when no session was running (negative)', async () => {
     setRunning(false);
     const response = await call('?instance=claude', { 'sec-fetch-site': 'same-origin' });
