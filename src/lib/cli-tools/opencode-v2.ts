@@ -292,13 +292,10 @@ export class OpenCodeV2Tool extends BaseCLITool {
         logger.warn('opencode-v2-launch-without-server', { worktreeId, instanceId });
       }
 
-      await sendKeys(
-        sessionName,
-        withLaunchScreenCleared(
-          buildAgentLaunchCommandLine({ target, executablePath: executable.path, worktreePath })
-        ),
-        true
-      );
+      // Issue #3981: in one writer's turn of the input lock; the readiness
+      // wait below stays outside it.
+      const launchCommand = buildAgentLaunchCommandLine({ target, executablePath: executable.path, worktreePath });
+      await this.typeLaunchLines(sessionName, [withLaunchScreenCleared(launchCommand)]);
 
       await this.waitForReady(sessionName);
       await attachOpencodeV2EventStream(target);
