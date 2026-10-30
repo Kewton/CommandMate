@@ -921,7 +921,8 @@ commandmate respond <worktree-id> "yes" --instance codex-2        # 追加イン
 - 肯定候補が複数ある場合（例: `1. Yes` / `2. Yes, allow all edits...`）は**最も番号の小さい選択肢**
   （= 最小権限）を選びます
 - 解決できない場合（yes/no 系ラベルが無い・チェックボックス型・選択肢を読めない）は**何も送信せず**
-  exit 99（`unresolvable_answer`）で失敗します。番号で応答してください
+  exit 99（`unresolvable_answer`）で失敗します。番号で応答してください。案内の `respond` と
+  `capture --pane --tail 40` には、解決済みの宛先（`--instance` の別名は解決した ID、`--agent` だけならその値）が付きます（Issue #3982）
 - 解決結果は監査のため stdout に出力されます: `Resolved "no" to option 3: No, and tell Claude ...`
 - `--default` は default 選択肢（❯ ハイライト位置）を明示的に選びます（`<answer>` と排他）
 
@@ -1057,6 +1058,10 @@ server.log（`strict-prompt-answered` / `strict-prompt-response-refused`）と�
 |------|------|----------------|
 | `answer_not_delivered` | `Error: Answer was not sent. Reason: answer_not_delivered (…). Nothing was typed, so it is safe to run respond again.` | 最初のキーの前に止めました。**1 キーも届いていません**。同じ `respond` をやり直してかまいません |
 | `answer_input_lost` | ``Warning: The answer may have been only partly typed (reason: answer_input_lost): … Check the screen with `commandmate capture <id> --instance <instance> --pane --tail 40` before answering again.`` | キー列の途中でセッションが置き換わり、残りを送らずに止めました。**一部だけ届いたかもしれません**。先にペインを見てから、答え直すかを決めてください。案内のコマンドは回答したペインを読みます（回答で解決した `--instance` か `--agent`。どちらも指定しなければ付きません） |
+
+`answer_input_lost` は、`/prompt-response` と `/respond` のどちらでも 500・`reason: "answer_input_lost"`・`keysSent: true` で返ります（Issue #3982。ほかの回答エラーも両ルートで `reason` と `keysSent` を返します）。`GET /api/capabilities` に `prompt-answer-reason` があるサーバーでは、CLI は `reason` だけで判定し、500 の `error` の文字列（回答を引用することがある）は見ません。この語の無い古いサーバーでは、従来どおり `error` の文字列で判定します。
+
+`respond` のほかの案内（`prompt_no_longer_active` の `send`、plan review の Next・Note、選んだ行が文字入力を求めるときの `send`）と、`send` の `PROMPT_WAITING`（サーバーが文を返さなかったとき）・送信結果不明時の `capture`、`wait` と `attach` の `capture` も、同じ解決済みの宛先を付けます。ダイアログを読ませる `capture` は `--pane --tail 40` です。
 
 ---
 
