@@ -55,8 +55,8 @@ node scripts/orchestrate/consistency-review.mjs --run-dir "workspace/orchestrati
   出力を `review-<N>.start.out` / `.start.err` に残してから、短い上限（30 回）で ready を待つ。起動の send が失敗したら依頼は送らず `review=fail`（note に send の exit code）。
   動いている instance（`running` など）と、`startingSince` がある起動中の instance（pane を作る前の起動中も `isRunning: false` を返す）は今までどおり待つだけで、起動の文は送らない。#3936）→ `ask <wt> <依頼文> --instance codex --timeout 2400 --json` → 返答の本文（行頭の `> **Thinking (` より前。
   本文が `> **Thinking**` を引用していても切れない）を `review-<N>.md` に保存（2 回目からは `review-<N>b.md`・`c`…。依頼文・JSON・stderr も同じ名前で残す）→
-  `DONE:` 行があれば下の表に 1 行を足し、run の記録に `review=ok`、無ければ・依頼が失敗したら `review=fail`。exit は 0（`DONE:` あり）／1（失敗。記録済み）／2（引数の誤り。何も送らない）。
-  **ask の exit 11（上流のエラー）は他の失敗と分けて記録する**（#3936）: 相手の画面に上流のエラー（codex の `Selected model is at capacity`＝`id=model-capacity` など、
+  どう終わったら run の記録・記録の様式の表への 1 行・残るファイル・exit がどうなるかは、下の「5-2b 終了コードと記録の条件表」が正（#3984）。`review=ok`・表に 1 行・exit 0 は `ok` の行だけで、**`DONE:` 行があっても exit 1 になる行がある**（`overlapped`。`dependency-links`・`upstream-fault` は `.md` も残らない）。
+  **ask の exit 11（上流のエラー）は他の失敗と分けて記録する**（条件表の `upstream-fault`。#3936）: 相手の画面に上流のエラー（codex の `Selected model is at capacity`＝`id=model-capacity` など、
   `src/lib/detection/upstream-faults.ts` の一覧）が出て、ターンが答えないまま終わった。note は `upstream fault id=<id> (…) on <instance>; ask exit=11, not a verdict — …`（`model-capacity` は `switch --instance`、ほかは `retry later or switch --instance, by the id`）。
   **`id=model-capacity` は同じモデルでは答えない**ので、この note を見たら下の `--instance codex-2` へ切り替えて依頼し直す（スクリプトは自動では切り替えない。ロックと記録の agent が変わるため人が決める）。
   ほかの id は一覧の `selfRetrying` で読む: `overloaded`／`retrying` は `selfRetrying: true`（相手が自分で再試行し、待てば答える）なので、時間をおいて同じ instance へ依頼し直してよい。`context-limit` は同じセッションでは通らない（新しいセッションか別 instance へ）。
@@ -66,9 +66,11 @@ node scripts/orchestrate/consistency-review.mjs --run-dir "workspace/orchestrati
   表の「独自の発見」から「事前レビューの有無」までの列は `未` で入るので、返答を読んで埋める
   **依存への書き込みを裁定に使わない**（#3883 P6）: ask の前後で、対象の worktree と `git worktree list` の全 worktree の `node_modules` 直下（`@scope/` の下も）の
   リンクを読む（`scripts/orchestrate/dependency-links.mjs`）。実体のパスが自分の worktree（と自分の `node_modules` の実体）の外を指すリンクが増えた・向き先が変わったら、
-  返答は `review-<N>.json` に残すが表には足さず、`review=fail`（`not a verdict — … dependency link(s) outside their worktree appeared during the review`）・exit 1。
+  条件表の `dependency-links` の行で終わる（返答は `review-<N>.json` の中だけ。note は `not a verdict — … dependency link(s) outside their worktree appeared during the review`）。
   stderr に増えたリンクを 1 行ずつ出すので、人が確かめてから外す（スクリプトは消さない）。前から在ったリンクは数えない。雛形も、依存に書かない・
   実験は `mktemp -d` の隔離コピーの中だけで行い他の worktree の `node_modules` にリンクを作らない、と依頼する
+  **overlapped は裁定に使わない**（#3957）: `ask --json` が `"overlapped": true` を返した返答（相手のターンに別の依頼が入った。#3955）は、別の依頼への返答かもしれないので、`DONE:` 行があっても条件表の `overlapped` の行で終わる。
+  同じ `--instance` に重ねず、1 本ずつ送り直す（ほかの依頼が終わってから、同じ呼び出しをもう一度。`review-<N>.md` は読むために残る）
 - **数え方（期限の集計で使う）:** 延べではなく、重複・既報（ワーカーが報告済み・5-3 で処置できた）を除いた「レビューの独自の発見」を、**動作／説明／テスト** と **新規／既存** の 2 軸で数える。指摘の正しさは、一部を別の判定者（Codex と Claude の相互）で再判定する。費用は 1 本あたり、待ち時間・再指示・修正を含めた総時間で測る。後の段（CI・ガード・実機・UAT）で見つかった漏れも記録する
 
 **記録の様式。** 置き場所は `workspace/orchestration/runs/<date>/consistency-review.md`。1 レビュー 1 行の表にする。
@@ -82,3 +84,25 @@ node scripts/orchestrate/consistency-review.mjs --run-dir "workspace/orchestrati
 
 **再レビューでは、前回の指摘が解消したかを先に確かめる。** 新しい指摘を探す前に、前回の指摘を 1 件ずつ「解消／一部未対応／未対応」に判定して記録する。
 続けて、**前回の指摘への修正で変わった共通の規則（共有状態・関数・定数・型）の全読者**を、一覧と呼び出しの連鎖の両方で再確認させる（雛形 `consistency-review-rereview.md` の (0b)。#3884）。再レビューの上限（自動は 3 回まで）は変えない。
+
+### 5-2b 終了コードと記録の条件表
+
+`scripts/orchestrate/consistency-review.mjs` の `OUTCOMES` の写し（#3984）。写しはここ 1 か所だけで、テストが行・列ごとに `OUTCOMES` と照合する（script のヘッダ・orchestrate.md 5-2b・module-reference はここを指す）。
+上から順に判定し、最初に当てはまった行で終わる。「記録」は run の記録の `review` 段、「表に行」は `consistency-review.md`（上の記録の様式）への追記、「残るファイル」は run のディレクトリの `review-<N>…`
+（`.prompt.txt` 依頼文・`.json` ask の stdout（返答の全文）・`.err` ask の stderr・`.md` 返答の本文）。起動の文を送ったとき（#3936）は、その後のどの行でも `.start.out`・`.start.err` が加わる。
+表に無い例外（書き込みの失敗など）は `exception` と同じく `fail`・行なし・exit 1 で、ファイルはその時点までに書いたもの。
+
+| 条件 | id | 記録（`review`） | 表に行 | exit | 残るファイル |
+|---|---|---|---|---|---|
+| 引数の誤り（`--instance` を解決できないときも）。何も送らない | `usage` | なし | なし | 2 | なし |
+| worktree の HEAD が `--head` と違う・git が失敗（ラベルを取る前） | `head-mismatch` | fail | なし | 1 | なし |
+| ロックを待ち切った（ラベルを取った後の例外） | `exception` | fail | なし | 1 | `.prompt.txt` |
+| 止まっていた相手の起動の send が失敗（依頼は送らない） | `start-failed` | fail | なし | 1 | `.prompt.txt` `.start.out` `.start.err` |
+| ready を 3 回続けて読めない（依頼は送らない） | `not-ready` | fail | なし | 1 | `.prompt.txt` |
+| ask の間に worktree の外を指す依存のリンクが増えた | `dependency-links` | fail | なし | 1 | `.prompt.txt` `.json` `.err` |
+| ask の exit 11（上流のエラー） | `upstream-fault` | fail | なし | 1 | `.prompt.txt` `.json` `.err` |
+| ask のその他の非 0 | `ask-failed` | fail | なし | 1 | `.prompt.txt` `.json` `.err` |
+| `ask --json` に `reply` の文字列が無い | `no-reply` | fail | なし | 1 | `.prompt.txt` `.json` `.err` |
+| 返答の本文に `DONE:` 行が無い | `no-done` | fail | なし | 1 | `.prompt.txt` `.json` `.err` `.md` |
+| `"overlapped": true`（`DONE:` 行があっても。1 本ずつ送り直す） | `overlapped` | fail | なし | 1 | `.prompt.txt` `.json` `.err` `.md` |
+| 上のどれでもない（裁定） | `ok` | ok | 1 行 | 0 | `.prompt.txt` `.json` `.err` `.md` |
