@@ -326,7 +326,7 @@ describe('session-kill ledger (#3993)', () => {
     delete withoutOrigin.origin;
     writeFileSync(
       file,
-      `${readFileSync(file, 'utf8')}${JSON.stringify({ ...kill(), api: 'kill-server' })}\n` +
+      `${readFileSync(file, 'utf8')}${JSON.stringify({ ...kill(), api: 'tmux-direct' })}\n` +
         `${JSON.stringify({ ...kill(), origin: 'ui' })}\n${JSON.stringify(withoutOrigin)}\n`
     );
     expect(readSessionKillRecords(STARTED, VERIFIED, root)).toEqual([
