@@ -51,10 +51,10 @@
   "attestations": [
     {
       "tool": "claude",
-      "version": "2.1.288",
-      "source": "https://code.claude.com/docs/en/commands.md — the built-in slash command table, active canonical rows only (rows whose note says the command was removed, and \"Alias for /x\" rows, are not commands the CLI ships). Read 2026-09-28 against claude 2.1.283: 114 data rows = 109 active + 3 removed (/pr-comments \"Removed in v2.1.91\", /vim \"Removed in v2.1.92\", /ultraplan bare \"Removed.\") + 2 alias (/cost, /stats -> /usage). /ultraplan is counted here anyway (110) because its row carries no version, so the provider reads it as active and would otherwise report it as drift every run; the phantom exclusion (#1503) is what keeps it off the palette. Change since the 2026-09-06 read (#2348): /output-style and /update-config (a [Skill] row, counted like the other skill rows) added. Taken as the Phase 1.5 leftover of release v0.42.0 (#2914).",
-      "observedAt": "2026-10-03",
-      "issue": 3151,
+      "version": "2.1.312",
+      "source": "https://code.claude.com/docs/en/commands.md — the built-in slash command table, active canonical rows only (rows whose note says the command was removed, and \"Alias for /x\" rows, are not commands the CLI ships). Read 2026-10-30 against claude 2.1.312 (#3998): 121 data rows over 120 distinct names (/design has a second \"/design consent, /design revoke\" sub-form row) = 115 active + 3 removed (/pr-comments \"Removed in v2.1.91\", /vim \"Removed in v2.1.92\", /ultraplan bare \"Removed.\") + 2 alias (/cost, /stats -> /usage). /ultraplan is counted here anyway (116) because its row carries no version, so the provider reads it as active and would otherwise report it as drift every run; the phantom exclusion (#1503) is what keeps it off the palette. Change since the 2026-10-03 read (#3151): /restart added (\"Restart Claude Code and resume this session, which applies an installed update ... Requires Claude Code v2.1.288 or later. Alias: `/update`\"; the alias lives inside that row, not as a row of its own, so /update is not counted).",
+      "observedAt": "2026-10-30",
+      "issue": 3998,
       "commands": [
         "add-dir",
         "advisor",
@@ -134,6 +134,7 @@
         "remote-control",
         "remote-env",
         "rename",
+        "restart",
         "resume",
         "review",
         "rewind",
@@ -175,10 +176,10 @@
     },
     {
       "tool": "codex",
-      "version": "0.164.0",
-      "source": "openai/codex, codex-rs/tui/src/slash_command.rs at tag rust-v0.164.0 — every `enum SlashCommand` variant except the two whose description() is the internal \"DO NOT USE\" marker (MemoryDrop / MemoryUpdate). 65 variants, 63 active. Names are not the identifiers: the enum carries #[strum(serialize_all = \"kebab-case\")] with per-variant overrides, so AutoReview reads as \"approve\", MultiAgents as \"subagents\" and ElevateSandbox as \"setup-default-sandbox\" (Pwd / Pets / Stop keep their to_string spelling). Read 2026-09-28 (#2914): diffing the enum against rust-v0.154.0 (the #2497 read) adds Voice, Tui, Daemon and Warnings and removes SandboxReadRoot (\"sandbox-add-read-dir\") and Personality, so the set moves 58 -> 60. Read 2026-10-08 (#3423): rust-v0.161.0 adds Daybreak (\"daybreak\"), 60 -> 61. Read 2026-10-17 (#3722): rust-v0.163.0 adds Config (\"config\", description \"configure Codex preferences\") after Compact; Archive only moves to another match arm, so the set is unchanged apart from Config, 61 -> 62. Read 2026-10-24 (#3869): rust-v0.164.0 adds Presets (\"presets\", description \"run or save reusable prompts and slash commands\") right after Model; the other hunks only widen supports_inline_args (Model / Permissions / Title / Statusline) and a match arm, so the set is unchanged apart from Presets, 62 -> 63.",
-      "observedAt": "2026-10-24",
-      "issue": 3869,
+      "version": "0.166.0",
+      "source": "openai/codex, codex-rs/tui/src/slash_command.rs at tag rust-v0.166.0 — every `enum SlashCommand` variant except the two whose description() is the internal \"DO NOT USE\" marker (MemoryDrop / MemoryUpdate). 65 variants, 63 active. Names are not the identifiers: the enum carries #[strum(serialize_all = \"kebab-case\")] with per-variant overrides, so AutoReview reads as \"approve\", MultiAgents as \"subagents\" and ElevateSandbox as \"setup-default-sandbox\" (Pwd / Pets / Stop keep their to_string spelling). Read 2026-09-28 (#2914): diffing the enum against rust-v0.154.0 (the #2497 read) adds Voice, Tui, Daemon and Warnings and removes SandboxReadRoot (\"sandbox-add-read-dir\") and Personality, so the set moves 58 -> 60. Read 2026-10-08 (#3423): rust-v0.161.0 adds Daybreak (\"daybreak\"), 60 -> 61. Read 2026-10-17 (#3722): rust-v0.163.0 adds Config (\"config\", description \"configure Codex preferences\") after Compact; Archive only moves to another match arm, so the set is unchanged apart from Config, 61 -> 62. Read 2026-10-24 (#3869): rust-v0.164.0 adds Presets (\"presets\", description \"run or save reusable prompts and slash commands\") right after Model; the other hunks only widen supports_inline_args (Model / Permissions / Title / Statusline) and a match arm, so the set is unchanged apart from Presets, 62 -> 63. Read 2026-10-30 (#3998): codex-rs/tui/src/slash_command.rs at rust-v0.166.0 is byte-identical to rust-v0.164.0 (cmp), so the set is unchanged at 63; only the version moves.",
+      "observedAt": "2026-10-30",
+      "issue": 3998,
       "commands": [
         "agents",
         "app",

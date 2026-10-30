@@ -218,6 +218,12 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
     // /quit ("Exit Codex CLI"), /reload (Command Code restarts to apply an
     // update; v2 reloads configuration) and /settings (copilot also shows and
     // sets a single value). The existing claimant keeps its wording on its leaf.
+    // Issue #3998: claude 2.1.312 added /restart, a name copilot already held
+    // under the flat key. claude's restarts Claude Code, resumes the session and
+    // applies an installed update; copilot's restarts the CLI keeping the
+    // session — so `--check` reported a description-conflict and the flat key
+    // was split by hand into `restart.copilot` (the shipped wording, unchanged)
+    // and `restart.claude`.
     expect(overridden.map((e) => e.descriptionKey).sort()).toEqual([
       'slashCommands.descriptions.agent.copilot',
       'slashCommands.descriptions.agents.antigravity',
@@ -284,6 +290,8 @@ describe('the bundled catalog carries descriptionKey through verbatim', () => {
       'slashCommands.descriptions.reload.opencode-v2',
       'slashCommands.descriptions.remote-control.antigravity',
       'slashCommands.descriptions.remote-control.claude',
+      'slashCommands.descriptions.restart.claude',
+      'slashCommands.descriptions.restart.copilot',
       'slashCommands.descriptions.settings.copilot',
       'slashCommands.descriptions.settings.opencode-v2',
       'slashCommands.descriptions.skills.antigravity',

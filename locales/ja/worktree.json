@@ -334,7 +334,10 @@
       "remote": "GitHub の Web・モバイルからのリモート操作を切り替え",
       "research": "ディープリサーチ調査を実行",
       "reset-allowed-tools": "許可済みツールの一覧をリセット",
-      "restart": "現在のセッションを保ったまま CLI を再起動",
+      "restart": {
+        "copilot": "現在のセッションを保ったまま CLI を再起動",
+        "claude": "Claude Code を再起動してこのセッションを再開し、インストール済みの更新を適用"
+      },
       "rubber-duck": "現在の作業への独立した批評を取得",
       "search": "会話タイムラインを検索",
       "session": "セッションを表示・管理",
