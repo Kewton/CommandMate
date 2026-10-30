@@ -61,6 +61,14 @@ describe('instances kill: session-kill ledger (Issue #3993)', () => {
     expect(mockConsoleError).toHaveBeenCalledWith('Session killed: claude-2');
   });
 
+  it('marks its line as the CLI’s (`origin: cli`), the one that names the caller', async () => {
+    mockFetchResponse({ success: true });
+    const { createInstancesCommand } = await import('../../../../src/cli/commands/instances');
+    await createInstancesCommand().parseAsync(['node', 'instances', 'wt1', 'kill', 'claude-2']);
+
+    expect(recorded().map((r) => r.origin)).toEqual(['cli']);
+  });
+
   it('records the kill of `remove --kill` too', async () => {
     mockFetchSequence([
       { data: { id: 'wt1', name: 'main', agentInstances: [

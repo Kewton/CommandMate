@@ -22,6 +22,7 @@ import { killSession, hasSession } from './tmux/tmux';
 import { syncWorktreesToDB, type SyncResult } from './git/worktrees';
 import { getAllWorktreePathIds } from './db/worktree-db';
 import { checkSessionOwnership } from './cli-tools/session-ownership';
+import { appendSessionKillRecord, SESSION_KILL_LEDGER_VERSION } from './verification/session-kill-ledger';
 import type { Worktree } from '@/types/models';
 import type Database from 'better-sqlite3';
 
@@ -57,6 +58,24 @@ export interface CleanupResult {
  * Type for the kill session function
  */
 type KillSessionFn = (worktreeId: string, cliToolId: CLIToolType) => Promise<boolean>;
+
+/**
+ * Record a session the server's cleanup stopped (Issue #3993), so env-clean
+ * sets the vanished session of a sibling worktree apart as `external` instead
+ * of counting it as a worker's kill. Best effort: never throws.
+ */
+function recordCleanupKill(worktreeId: string, cliToolId: CLIToolType): void {
+  appendSessionKillRecord({
+    version: SESSION_KILL_LEDGER_VERSION,
+    at: Date.now(),
+    api: 'session-cleanup',
+    origin: 'server',
+    worktreeId,
+    instanceId: cliToolId,
+    callerCwd: null,
+    callerSession: null,
+  });
+}
 
 /**
  * Clean up all CLI tool sessions and pollers for a single worktree
@@ -98,6 +117,7 @@ export async function cleanupWorktreeSessions(
       if (killed) {
         result.sessionsKilled.push(cliToolId);
         logger.info('session:killed', { worktreeId, cliToolId });
+        recordCleanupKill(worktreeId, cliToolId);
       }
     } catch (error) {
       const errorMsg = `${cliToolId}: ${getErrorMessage(error)}`;
@@ -284,6 +304,7 @@ export async function cleanupGlobalSessions(): Promise<number> {
         if (killed) {
           sessionsKilled++;
           logger.info('global-session:killed', { cliToolId, sessionName });
+          recordCleanupKill(GLOBAL_SESSION_WORKTREE_ID, cliToolId);
         }
       }
     } catch (error) {

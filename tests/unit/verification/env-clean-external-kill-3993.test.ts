@@ -82,6 +82,7 @@ function kill(overrides: Partial<SessionKillRecord> = {}): SessionKillRecord {
     version: 1,
     at: STARTED + 10 * 60 * 1000,
     api: 'kill-session',
+    origin: 'cli',
     worktreeId: SIBLING_ID,
     instanceId: 'claude',
     callerCwd: ORCHESTRATOR_CWD,
@@ -190,6 +191,60 @@ describe('diffEnvSnapshots: removals explained by a recorded kill (#3993)', () =
   });
 });
 
+describe('diffEnvSnapshots: kills the server recorded (#3993, second contract)', () => {
+  const serverKill = (overrides: Partial<SessionKillRecord>) =>
+    kill({ callerCwd: null, callerSession: null, instanceId: null, ...overrides });
+
+  it('sets a sibling stopped from the UI apart as external (positive)', () => {
+    const { diff, tmux: probe } = tmuxDiff([serverKill({ origin: 'browser' })]);
+    expect(diff.status).toBe('clean');
+    expect(probe.removedExternal.map((c) => c.key)).toEqual([SIBLING_SESSION]);
+    expect(formatEnvCleanReport(diff)).toContain(
+      `· - ${SIBLING_SESSION} [external] (not counted: kill-session for ${SIBLING_ID} ` +
+        `at ${new Date(kill().at).toISOString()} from the UI, not this task)`
+    );
+  });
+
+  it('sets a sibling stopped by the server’s cleanup (sync / repository removal) apart as external (positive)', () => {
+    const { diff, tmux: probe } = tmuxDiff(
+      [serverKill({ origin: 'server', api: 'session-cleanup', instanceId: 'claude' })],
+      [TASK_SESSION, SIBLING_SESSION, SIBLING_CODEX]
+    );
+    expect(diff.status).toBe('clean');
+    expect(probe.removedExternal.map((c) => c.key)).toEqual([SIBLING_SESSION, SIBLING_CODEX]);
+    expect(formatEnvCleanReport(diff)).toContain(
+      `[external] (not counted: session-cleanup for ${SIBLING_ID} instance claude at ` +
+        `${new Date(kill().at).toISOString()} from the server, not this task)`
+    );
+  });
+
+  it('a bare HTTP kill names no caller and stays a violation (negative: a worker’s curl)', () => {
+    const { diff, tmux: probe } = tmuxDiff([serverKill({ origin: 'http' })]);
+    expect(diff.status).toBe('violated');
+    expect(probe.removed.map((c) => c.key)).toEqual([SIBLING_SESSION]);
+    expect(probe.removedExternal).toEqual([]);
+  });
+
+  it('a worker’s CLI kill recorded twice (CLI line + route line) is still a violation (#1624)', () => {
+    const { diff } = tmuxDiff([
+      kill({ callerCwd: WORKTREE_PATH, callerSession: TASK_SESSION }),
+      serverKill({ origin: 'http', instanceId: 'claude' }),
+    ]);
+    expect(diff.status).toBe('violated');
+  });
+
+  it('the orchestrator’s CLI kill recorded twice is still external (the duplicate changes nothing)', () => {
+    const { diff } = tmuxDiff([kill(), serverKill({ origin: 'http', instanceId: 'claude' })]);
+    expect(diff.status).toBe('clean');
+  });
+
+  it('a server record for another worktree excuses nothing', () => {
+    expect(
+      tmuxDiff([serverKill({ origin: 'server', worktreeId: 'commandmate-issue-4000' })]).diff.status
+    ).toBe('violated');
+  });
+});
+
 describe('evaluateEnvClean reads the ledger for the task window (#3993)', () => {
   const base = { ...CONTEXT, taskId: 'task-3993', sources: [REQUIRE_ENV_CLEAN_SOURCE_CONFIG] };
 
@@ -261,6 +316,22 @@ describe('session-kill ledger (#3993)', () => {
         `${JSON.stringify({ ...kill(), callerCwd: 42 })}\n`
     );
     expect(readSessionKillRecords(STARTED, VERIFIED, root)).toEqual([kill()]);
+  });
+
+  it('skips lines with an unknown api or origin, or none (#3993, second contract)', () => {
+    const root = makeRoot();
+    appendSessionKillRecord(kill({ origin: 'server', api: 'session-cleanup' }), root);
+    const file = join(root, `${new Date(kill().at).toISOString().slice(0, 10)}.jsonl`);
+    const withoutOrigin: Record<string, unknown> = { ...kill() };
+    delete withoutOrigin.origin;
+    writeFileSync(
+      file,
+      `${readFileSync(file, 'utf8')}${JSON.stringify({ ...kill(), api: 'kill-server' })}\n` +
+        `${JSON.stringify({ ...kill(), origin: 'ui' })}\n${JSON.stringify(withoutOrigin)}\n`
+    );
+    expect(readSessionKillRecords(STARTED, VERIFIED, root)).toEqual([
+      kill({ origin: 'server', api: 'session-cleanup' }),
+    ]);
   });
 
   it('prunes day files past the retention when it writes', () => {

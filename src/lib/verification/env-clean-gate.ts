@@ -693,12 +693,19 @@ export function readDeadDemoVitestEntries(baseline: EnvSnapshot): ReadonlySet<st
  * The worker is whoever ran inside the task's worktree or inside one of its
  * sessions. A caller with no recorded cwd is unknown, and unknown counts as the
  * worker — the strict answer, because only a kill *not* the worker's excuses.
+ *
+ * Two origins are never the worker: the UI (`browser`, a same-origin browser
+ * request — a worker drives a terminal, not this server's page) and the
+ * server's own cleanup after sync or a repository removal (`server`). The
+ * route's `http` line has no caller and so stays the worker's; a CLI kill is
+ * judged on the CLI's own line instead.
  */
 function isKillByTask(
   record: SessionKillRecord,
   context: EnvAttributionContext,
   taskSession: string | null | undefined
 ): boolean {
+  if (record.origin === 'browser' || record.origin === 'server') return false;
   if (record.callerSession !== null) {
     if (taskSession && record.callerSession === taskSession) return true;
     if (attributeSessionName(record.callerSession, context.worktreeId) === 'self') return true;
@@ -718,11 +725,12 @@ function isKillByTask(
  *     including the orchestrator's own cleanup (`instances <wt> kill`, the
  *     first step of removing a worktree), which failed every parallel
  *     verification on 2026-10-29.
- *   - The session-kill ledger records each kill made through `instances … kill`
- *     with the worktree it was for and who asked. A removal is `external` only
- *     when such a kill of the session's worktree falls inside the task window
- *     and its caller was neither inside the task's worktree nor inside one of
- *     its sessions.
+ *   - The session-kill ledger records each kill made through `instances … kill`,
+ *     the kill-session route and the server's session cleanup, with the
+ *     worktree it was for and who asked. A removal is `external` only when such
+ *     a kill of the session's worktree falls inside the task window and its
+ *     caller was neither inside the task's worktree nor inside one of its
+ *     sessions (the UI and the server's cleanup never are).
  *   - Everything else stays a violation: a worker's own kill through the same
  *     command, a kill with no caller recorded, and any kill that went around
  *     CommandMate (`tmux kill-session`, `kill-server`), which records nothing.
@@ -1092,9 +1100,14 @@ function formatRemovedExternal(changes: ExternalRemoval[]): string[] {
     const target = killedBy.instanceId
       ? `${killedBy.worktreeId} instance ${killedBy.instanceId}`
       : killedBy.worktreeId;
-    const caller = killedBy.callerSession
-      ? `${killedBy.callerCwd} in ${killedBy.callerSession}`
-      : killedBy.callerCwd;
+    const caller =
+      killedBy.origin === 'browser'
+        ? 'the UI'
+        : killedBy.origin === 'server'
+          ? 'the server'
+          : killedBy.callerSession
+            ? `${killedBy.callerCwd} in ${killedBy.callerSession}`
+            : killedBy.callerCwd;
     return (
       `    · - ${key} [external] (not counted: ${killedBy.api} for ${target} ` +
       `at ${new Date(killedBy.at).toISOString()} from ${caller}, not this task)`

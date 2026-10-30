@@ -600,6 +600,7 @@ function recordSessionKill(worktreeId: string, instanceId: string): void {
     version: SESSION_KILL_LEDGER_VERSION,
     at: Date.now(),
     api: 'kill-session',
+    origin: 'cli',
     worktreeId,
     instanceId,
     callerCwd,

@@ -4,7 +4,8 @@
  * The `env-clean` gate counts every vanished session of a sibling worktree as a
  * violation, because a worker killing its neighbour is the #1624 failure. The
  * orchestrator stops sibling sessions too — `commandmate instances <wt> kill`
- * when it cleans a worktree up (worktree-cleanup Phase 3) — and the two
+ * when it cleans a worktree up (worktree-cleanup Phase 3), the UI's kill
+ * button, the server's cleanup after sync or a repository removal — and the two
  * snapshots cannot tell that apart from a worker's kill: on 2026-10-29 four
  * verification runs of #3957 failed on `- mcbd-…-<another worktree> [other]`
  * for a cleanup nobody in the worker's transcript had run.
@@ -13,13 +14,20 @@
  * worktree it was for and who asked (the caller's working directory and tmux
  * session). The gate then sets a vanished sibling session apart as `external`
  * only when a kill of that worktree was recorded inside the task's window *and*
- * the caller was not this task's worker. A worker's own kill (its cwd or its
- * tmux session is the task's worktree), a kill with no caller recorded, and a
+ * the caller was not this task's worker — a CLI caller outside the task, the
+ * UI, or the server's own cleanup. A worker's own kill (its cwd or its
+ * tmux session is the task's worktree), a kill with no caller recorded (a bare
+ * HTTP request), and a
  * kill that bypassed CommandMate (`tmux kill-session`, `kill-server`) stay
  * violations, exactly as before.
  *
- * Machine-wide, like the gate mutex (`machine-lock.ts`): the CLI writes it and
- * the server's gate reads it, so the path is derived from `$HOME` alone —
+ * Written by the CLI (with its caller), by the kill-session route and by
+ * `session-cleanup.ts`. A CLI kill is therefore recorded twice — the CLI's line
+ * and the route's `http` line — which changes no verdict: the route's line
+ * names no caller and so never excuses anything (see `env-clean-gate.ts`).
+ *
+ * Machine-wide, like the gate mutex (`machine-lock.ts`): the CLI and the server
+ * write it and the server's gate reads it, so the path is derived from `$HOME` alone —
  * `~/.commandmate/session-kills/<UTC date>.jsonl` — with an override for tests.
  * The `commandmate-entries` probe ignores the directory, like `locks`.
  *
@@ -48,14 +56,33 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 const DAY_FILE_PATTERN = /^(\d{4}-\d{2}-\d{2})\.jsonl$/;
 
-/** The API the kill went through; the only one recorded today. */
-export type SessionKillApi = 'kill-session';
+/**
+ * What stopped the session: the kill-session API (`POST /api/worktrees/:id/kill-session`,
+ * also behind `instances <wt> kill`), or the server's own cleanup of worktrees
+ * that sync or a repository removal dropped (`lib/session-cleanup.ts`).
+ */
+export type SessionKillApi = 'kill-session' | 'session-cleanup';
+
+/**
+ * Who wrote the record, which decides how much it says about the caller:
+ *
+ * - `cli` — `commandmate instances … kill`; callerCwd / callerSession are the CLI's own.
+ * - `browser` — the kill-session route, for a same-origin browser request (the UI).
+ * - `http` — the kill-session route, for any other request (the CLI's own POST,
+ *   curl). The caller is unknown, so callerCwd / callerSession are null.
+ * - `server` — the server's cleanup; no request is behind it.
+ */
+export type SessionKillOrigin = 'cli' | 'browser' | 'http' | 'server';
+
+const SESSION_KILL_APIS: readonly string[] = ['kill-session', 'session-cleanup'];
+const SESSION_KILL_ORIGINS: readonly string[] = ['cli', 'browser', 'http', 'server'];
 
 export interface SessionKillRecord {
   version: number;
   /** Epoch ms of the successful kill. */
   at: number;
   api: SessionKillApi;
+  origin: SessionKillOrigin;
   /** Worktree whose session(s) were stopped. */
   worktreeId: string;
   /** Instance the kill was scoped to; null for a whole-worktree kill. */
@@ -135,7 +162,10 @@ export function isSessionKillRecord(value: unknown): value is SessionKillRecord 
   return (
     record.version === SESSION_KILL_LEDGER_VERSION &&
     typeof record.at === 'number' &&
-    record.api === 'kill-session' &&
+    typeof record.api === 'string' &&
+    SESSION_KILL_APIS.includes(record.api) &&
+    typeof record.origin === 'string' &&
+    SESSION_KILL_ORIGINS.includes(record.origin) &&
     typeof record.worktreeId === 'string' &&
     record.worktreeId !== '' &&
     isNullableString(record.instanceId) &&
