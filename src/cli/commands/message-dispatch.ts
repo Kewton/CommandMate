@@ -36,6 +36,13 @@ export interface RegisterRelayForMessageInput {
   instance?: string;
   agent?: string;
   allowRelayChain?: boolean;
+  /**
+   * Issue #3983: the client the two endpoints are resolved with (`ask` passes
+   * its `--timeout`-bounded one). Defaults to `client`. The relay POST itself
+   * always goes through `client`: it creates state, and cutting it would leave
+   * "was the relay opened?" unanswered — the same reason `/send` is not cut.
+   */
+  resolveClient?: ApiClient;
 }
 
 /** Resolve both endpoints and open the relay; returns its id and whether it is bound. */
@@ -43,9 +50,10 @@ export async function registerRelayForMessage(
   client: ApiClient,
   input: RegisterRelayForMessageInput
 ): Promise<RegisteredRelay> {
-  const replyEndpoint = await resolveRelayEndpoint(client, input.replyTo);
+  const resolveClient = input.resolveClient ?? client;
+  const replyEndpoint = await resolveRelayEndpoint(resolveClient, input.replyTo);
   const workerEndpoint = await resolveEndpointForWorktree(
-    client,
+    resolveClient,
     input.worktreeId,
     input.instance,
     input.agent

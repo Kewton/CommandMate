@@ -5,7 +5,7 @@
 
 import { getErrorMessage } from '../types';
 import type { WaitOptions } from '../types';
-import type { ApiClient } from '../utils/api-client';
+import { rethrowIfDeadlineExceeded, type ApiClient } from '../utils/api-client';
 import { resolveInstanceTarget } from './instances';
 import { commandTargetOf, type CommandTarget } from './command-target';
 
@@ -32,6 +32,9 @@ export async function resolveWaitInstance<T extends WaitOptions>(
     const target = await resolveInstanceTarget(client, worktreeId, options.instance, undefined);
     return { ...options, instance: target.instanceId ?? options.instance };
   } catch (error) {
+    // Issue #3983: `--timeout` ran out while resolving. Exit 124 rather than
+    // degrade: carrying on with the selector would wait past the deadline.
+    rethrowIfDeadlineExceeded(error);
     // Degrade to the pre-#2376 behaviour rather than failing the wait. An
     // instance ID needs no resolution to reach `/current-output?instance=` —
     // resolution exists here so that an ALIAS can — so a resolver that cannot

@@ -41,6 +41,14 @@ export interface PollWorktreeOptions extends WaitOptions {
    * record, read only: nothing `wait` decides depends on it.
    */
   onTurnRecord?: (openedAt: number | null, closedAt: number | null) => void;
+  /**
+   * Epoch ms the command started, from which `--timeout` counts (Issue #3983).
+   *
+   * `--timeout` is the deadline of the whole command, so the reads before the
+   * poll (`--instance` resolution, the task ledger, `ask`'s send) are inside it
+   * rather than in front of it. Absent means the poll's own start, as before.
+   */
+  timeoutStartedAt?: number;
 }
 
 /**
@@ -109,7 +117,17 @@ export interface PollContext {
   client: ApiClient;
   worktreeId: string;
   options: PollWorktreeOptions;
+  /**
+   * Where `--timeout` counts from: {@link PollWorktreeOptions.timeoutStartedAt}
+   * when given, else {@link pollStartedAt} (Issue #3983).
+   */
   startTime: number;
+  /**
+   * When this poll began. The turn window (turn adoption, #1975's pending-prompt
+   * hold) is about the poll, not about the command, and stays here so that a
+   * slow send before an `ask`'s poll does not shift it (Issue #3983).
+   */
+  pollStartedAt: number;
   autoYesGraceSeconds: number;
   autoYesGraceMs: number;
 }
