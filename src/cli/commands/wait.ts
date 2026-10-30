@@ -906,7 +906,7 @@ async function promptLedgerStage(
   data: CurrentOutputResponse,
   judgingSettledFrame: boolean,
 ): Promise<{ kind: 'wait' } | { kind: 'next'; answeredNewestPrompt: boolean }> {
-  const { worktreeId, startTime } = poll;
+  const { worktreeId, pollStartedAt } = poll;
 
   // Issue #1975: the same frame, one question further back. #1839's gate
   // above can only fire once a turn has been ADOPTED, and `send` leaves a
@@ -933,7 +933,7 @@ async function promptLedgerStage(
     state.promptLedgerReadable = ledger.readable;
     if (ledger.readable && ledger.submittedAt !== null) {
       if (outstandingPrompt(data, ledger.submittedAt)) {
-        const heldMs = Date.now() - startTime;
+        const heldMs = Date.now() - pollStartedAt;
         if (heldMs < PENDING_PROMPT_HOLD_MS) {
           console.error(
             `Waiting: ${worktreeId} is at its composer, but the newest prompt sent to it ` +
@@ -1088,7 +1088,10 @@ export async function pollWorktree(
   /** Set with exit 11: which upstream fault was on the frame (Issue #3011). */
   upstreamFault?: { id: string; matchedText: string };
 }> {
-  const startTime = Date.now();
+  const pollStartedAt = Date.now();
+  // Issue #3983: `--timeout` counts from the command's start when the caller
+  // passed it, so the reads before this poll are inside the deadline.
+  const startTime = options.timeoutStartedAt ?? pollStartedAt;
   const state: PollState = {
     lastActivityTime: Date.now(),
     lastContent: '',
@@ -1104,7 +1107,15 @@ export async function pollWorktree(
   };
   const autoYesGraceSeconds = options.autoYesGrace ?? AUTO_YES_GRACE_DEFAULT_SECONDS;
   const autoYesGraceMs = autoYesGraceSeconds * 1000;
-  const poll: PollContext = { client, worktreeId, options, startTime, autoYesGraceSeconds, autoYesGraceMs };
+  const poll: PollContext = {
+    client,
+    worktreeId,
+    options,
+    startTime,
+    pollStartedAt,
+    autoYesGraceSeconds,
+    autoYesGraceMs,
+  };
   /**
    * What the completion line adds when this wait held for a self-resume, or ''
    * (Issue #2614). `basis=` keeps its word: the verdict is still the agent's own
@@ -1160,7 +1171,7 @@ export async function pollWorktree(
         continue;
       }
 
-      adoptAndPublishTurn(state, data, startTime, options);
+      adoptAndPublishTurn(state, data, pollStartedAt, options);
 
       // Issue #2614: a self-resume hold is about one `stop`, and ends the first
       // time that `stop` is no longer the newest word — the agent woke (a
@@ -1337,6 +1348,9 @@ The observation on exit 10 (Issue #3755):
   a missing record does not mean Auto-Yes can answer.
 `)
     .action(async (worktreeIds: string[], options: PollWorktreeOptions) => {
+      // Issue #3983: `--timeout` is the deadline of the whole command, counted
+      // from here — the reads before the poll included.
+      const commandStartedAt = Date.now();
       try {
         // [SEC4-04] Validate all worktree IDs
         for (const id of worktreeIds) {
@@ -1362,25 +1376,36 @@ The observation on exit 10 (Issue #3755):
         }
 
         const client = new ApiClient({ token: options.token });
+        // Issue #3983: the reads before the poll go through a client bounded by
+        // `--timeout`; one that runs out ends the command with 124 before any
+        // poll or verification. The poll bounds its own reads by the same
+        // clock (`timeoutStartedAt`), and verification — after the wait, and
+        // not part of it — keeps the unbounded `client`.
+        const timeoutStartedAt = options.timeout ? commandStartedAt : undefined;
+        const preflightClient = client.withDeadline(
+          options.timeout ? commandStartedAt + options.timeout * 1000 : undefined,
+        );
+        const pollOptions = (resolved: PollWorktreeOptions): PollWorktreeOptions =>
+          timeoutStartedAt === undefined ? resolved : { ...resolved, timeoutStartedAt };
 
         // Issue #2376: resolve the selector PER worktree. `wait a b --instance
         // "Codex 2"` is one alias against two rosters, and the id behind it can
         // legitimately differ — resolving once and reusing the answer would poll
         // the wrong session on the second worktree.
         const perWorktreeOptions = await Promise.all(
-          worktreeIds.map(id => resolveWaitInstance(client, id, options))
+          worktreeIds.map(id => resolveWaitInstance(preflightClient, id, options))
         );
 
         // Issue #1620: resolved before any polling starts. Once the agent stops
         // there is no reliable way left to tell which contract this wait was
         // about — the agent's own verification may have closed it by then.
         const boundTaskIds = verifyRequested(options)
-          ? await Promise.all(worktreeIds.map(id => resolveWaitedTaskId(client, id)))
+          ? await Promise.all(worktreeIds.map(id => resolveWaitedTaskId(preflightClient, id)))
           : worktreeIds.map(() => undefined);
 
         if (worktreeIds.length === 1) {
           // Single worktree
-          const result = await pollWorktree(client, worktreeIds[0], perWorktreeOptions[0]);
+          const result = await pollWorktree(client, worktreeIds[0], pollOptions(perWorktreeOptions[0]));
           if (result.output) {
             // stdout for result (JSON output)
             console.log(JSON.stringify(result.output));
@@ -1399,7 +1424,7 @@ The observation on exit 10 (Issue #3755):
 
         // [DR1-07] Multiple worktrees: Promise.allSettled for error isolation
         const results = await Promise.allSettled(
-          worktreeIds.map((id, index) => pollWorktree(client, id, perWorktreeOptions[index]))
+          worktreeIds.map((id, index) => pollWorktree(client, id, pollOptions(perWorktreeOptions[index])))
         );
 
         // Collect results

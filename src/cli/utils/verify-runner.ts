@@ -21,7 +21,7 @@ import type {
   VerifyRunResponse,
   VerifyStartResponse,
 } from '../types/api-responses';
-import { ApiClient, ApiError, assertResponseShape } from './api-client';
+import { ApiClient, ApiError, assertResponseShape, isDeadlineExceeded } from './api-client';
 
 /** Matches the wait command's cadence; runs are minutes long, not seconds. */
 export const VERIFY_POLL_INTERVAL_MS = 5000;
@@ -429,10 +429,20 @@ export async function runVerification(
   request: VerificationRequest
 ): Promise<VerificationOutcome> {
   const { worktreeId } = request;
+  // Issue #3983: `timeoutSec` bounds the whole command — the start POST and
+  // every run read, each cut at the deadline — not only the gaps between polls.
+  const startedAt = Date.now();
+  const deadlineAt = request.timeoutSec ? startedAt + request.timeoutSec * 1000 : undefined;
+  const bounded = deadlineAt === undefined ? client : client.withDeadline(deadlineAt);
+  const timedOut = (detail: string): VerificationOutcome => {
+    console.error(`Timeout: verification of ${worktreeId} exceeded ${request.timeoutSec}s (${detail})`);
+    return { exitCode: VerifyExitCode.TIMEOUT, run: lastRun };
+  };
+  let lastRun: VerificationRunView | undefined;
 
   let runId: number;
   try {
-    const started = await client.post<VerifyStartResponse>(`/api/worktrees/${worktreeId}/verify`, {
+    const started = await bounded.post<VerifyStartResponse>(`/api/worktrees/${worktreeId}/verify`, {
       trigger: request.trigger,
       instanceId: request.instanceId,
       gateIds: request.gateIds,
@@ -444,18 +454,30 @@ export async function runVerification(
       `POST /api/worktrees/${worktreeId}/verify`
     ).runId;
   } catch (error) {
+    if (isDeadlineExceeded(error)) {
+      return timedOut('the server did not answer the start request; a run may have started server-side');
+    }
     throw withConflictMessage(error, worktreeId);
   }
 
   console.error(`Verifying: ${worktreeId} (run ${runId})`);
 
-  const startedAt = Date.now();
   const reported = new Set<number>();
   const runPath = `/api/worktrees/${worktreeId}/verify/runs/${runId}`;
-  let lastRun: VerificationRunView | undefined;
+  const stillRunning = `run ${runId} is still running server-side`;
 
   while (true) {
-    const body = await client.get<VerifyRunResponse>(runPath);
+    // Issue #3983: asked before the read as well, so a poll is not started
+    // past the deadline. Strictly past: a read at the deadline itself may still
+    // bring the verdict (see the check below).
+    if (deadlineAt !== undefined && Date.now() > deadlineAt) return timedOut(stillRunning);
+    let body: VerifyRunResponse;
+    try {
+      body = await bounded.get<VerifyRunResponse>(runPath);
+    } catch (error) {
+      if (isDeadlineExceeded(error)) return timedOut(stillRunning);
+      throw error;
+    }
     const run = assertResponseShape<VerifyRunResponse>(body, ['run'], `GET ${runPath}`).run;
     lastRun = run;
     reportGates(run.gates ?? [], reported);
@@ -473,13 +495,7 @@ export async function runVerification(
     // the deadline still reports its verdict instead of a timeout.
     if (request.timeoutSec) {
       const elapsed = (Date.now() - startedAt) / 1000;
-      if (elapsed >= request.timeoutSec) {
-        console.error(
-          `Timeout: verification of ${worktreeId} exceeded ${request.timeoutSec}s ` +
-            `(run ${runId} is still running server-side)`
-        );
-        return { exitCode: VerifyExitCode.TIMEOUT, run: lastRun };
-      }
+      if (elapsed >= request.timeoutSec) return timedOut(stillRunning);
     }
 
     await sleep(VERIFY_POLL_INTERVAL_MS);

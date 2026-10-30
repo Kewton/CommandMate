@@ -450,7 +450,7 @@ commandmate wait <worktree-id> --fail-on-upstream-fault  # 上流障害で compo
 
 | オプション | 説明 | デフォルト |
 |-----------|------|-----------|
-| `--timeout <sec>` | 最大待機時間（秒）。ポールごとの取得（`current-output` と台帳 messages）もこの残り時間で打ち切るので、サーバーが応答しなくても期限で exit 124 になる（Issue #3974） | 無制限 |
+| `--timeout <sec>` | 最大待機時間（秒）。コマンド開始から数える 1 つの期限で、ポールの前の取得（`--instance` の解決・capabilities、`--verify` / `--require-work` の task 一覧）とポールごとの取得（`current-output` と台帳 messages）を、本文を読み終えるまで含めて打ち切る。サーバーが応答しなくても期限で exit 124 になり、その後のポールや検証は行わない（Issue #3974 / #3983）。完了を検知した後の検証（`--verify` / `--require-work`）は含まない（検証は期限で中断されない）。`ask --timeout` も同じ期限だが、送信の POST は中断せず、返ってきた時点で期限を過ぎていれば「送信は済んでいる」と書いて exit 124。完了後の返答の読み（台帳・画面）も含まず、各取得は返答の猶予（15 秒）で打ち切って画面の読みへ進む | 無制限 |
 | `--on-prompt <mode>` | プロンプト検出時の動作（agent / human） | agent |
 | `--stall-timeout <sec>` | 出力変化なしのタイムアウト（秒）。`--timeout` と同じく、応答しない取得もこの期限で打ち切る（exit 124） | - |
 | `--instance <id>` | 対象インスタンスID（`<agent>` または `<agent>-<n>`）。**送り先指定はこのフラグのみ**（`--agent` は無い） | エージェントのプライマリインスタンス |
@@ -1180,7 +1180,7 @@ commandmate verify init --cwd <path> --json            # 対象リポジトリ�
 |-----------|------|-----------|
 | `--gates <id1,id2>` | 実行するゲートID（カンマ区切り） | work-evidence + 宣言された全ゲート |
 | `--instance <id>` | run を紐づけるエージェントインスタンスID | なし（worktree 単位の run） |
-| `--timeout <sec>` | ポーリングを打ち切るまでの秒数 | 無制限 |
+| `--timeout <sec>` | ポーリングを打ち切るまでの秒数。開始の POST と run の取得も含め、応答しない取得は期限で打ち切って exit 124（Issue #3983） | 無制限 |
 | `--json` | run と gate results を stdout に JSON 出力 | 無効 |
 
 ### 終了コード

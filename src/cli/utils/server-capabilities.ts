@@ -18,7 +18,7 @@
  */
 
 import { ExitCode } from '../types';
-import { ApiError, handleApiError, type ApiClient } from './api-client';
+import { ApiError, handleApiError, rethrowIfDeadlineExceeded, type ApiClient } from './api-client';
 
 /** Path of the capability endpoint (`src/app/api/capabilities/route.ts`). */
 export const CAPABILITIES_PATH = '/api/capabilities';
@@ -110,6 +110,8 @@ async function runProbe(client: ApiClient): Promise<ServerCapabilityProbe> {
   try {
     response = await client.rawGet(CAPABILITIES_PATH, { headers: { Accept: 'application/json' } });
   } catch (error) {
+    // Issue #3983: a command deadline is not "unreachable" — it stays exit 124.
+    rethrowIfDeadlineExceeded(error);
     const result = handleApiError(error);
     throw new ApiError(result.message, result.exitCode);
   }
@@ -130,7 +132,10 @@ async function runProbe(client: ApiClient): Promise<ServerCapabilityProbe> {
   }
 
   if (response.status === 404) {
-    const text = await response.text().catch(() => '');
+    const text = await response.text().catch((error: unknown) => {
+      rethrowIfDeadlineExceeded(error);
+      return '';
+    });
     if (isRealNotFoundBody(text)) return { kind: 'legacy' };
     throw undetermined(response.status);
   }
@@ -148,7 +153,8 @@ async function runProbe(client: ApiClient): Promise<ServerCapabilityProbe> {
   let parsed: unknown;
   try {
     parsed = await response.json();
-  } catch {
+  } catch (error) {
+    rethrowIfDeadlineExceeded(error);
     throw undetermined(response.status);
   }
 

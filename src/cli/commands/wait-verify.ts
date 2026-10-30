@@ -6,7 +6,7 @@
 import { ExitCode, VerifyExitCode, WAIT_EXIT_CODE_PRIORITY, WaitExitCode } from '../types';
 import type { WaitOptions } from '../types';
 import type { TaskListResponse, TaskStatus } from '../types/api-responses';
-import { ApiClient, ApiError } from '../utils/api-client';
+import { ApiClient, ApiError, rethrowIfDeadlineExceeded } from '../utils/api-client';
 import { runVerification, WORK_EVIDENCE_GATE_ID } from '../utils/verify-runner';
 
 /** True when the caller asked for a verdict rather than "the agent stopped". */
@@ -54,7 +54,8 @@ const IN_FLIGHT_TASK_STATUSES: ReadonlySet<TaskStatus> = new Set<TaskStatus>([
  * run that follows is judged against the contract it was supposed to judge.
  *
  * Never throws: an unreadable ledger costs the attribution, and refusing to
- * verify over it would cost every gate.
+ * verify over it would cost every gate. The one exception is a client deadline
+ * (`--timeout`, Issue #3983), which is rethrown as the exit 124 it is.
  *
  * @returns the task id, or undefined to leave resolution to the server
  */
@@ -70,6 +71,9 @@ export async function resolveWaitedTaskId(
     if (!task || !IN_FLIGHT_TASK_STATUSES.has(task.status)) return undefined;
     return task.id;
   } catch (error) {
+    // Issue #3983: `--timeout` ran out before the poll began — exit 124, and
+    // nothing after it (no poll, no verification) runs.
+    rethrowIfDeadlineExceeded(error);
     console.error(
       `Note: could not read the task ledger for ${worktreeId} ` +
         `(${error instanceof Error ? error.message : String(error)}); ` +

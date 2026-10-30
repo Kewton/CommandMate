@@ -364,7 +364,7 @@ commandmate wait <worktree-id> --require-work        # Run only work-evidence af
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--timeout <sec>` | Maximum time to wait (seconds). Each poll's reads (`current-output` and the messages ledger) are cut at what is left of it, so a server that does not answer still ends in exit 124 at the deadline (Issue #3974) | unlimited |
+| `--timeout <sec>` | Maximum time to wait (seconds). One deadline counted from the command's start: it cuts the reads before the poll (`--instance` resolution and the capabilities probe, the task list of `--verify` / `--require-work`) and each poll's reads (`current-output` and the messages ledger), up to the end of the body. A server that does not answer still ends in exit 124 at the deadline, with no poll or verification after it (Issue #3974 / #3983). Verification after a detected completion (`--verify` / `--require-work`) is not part of it and is not cut. `ask --timeout` is the same deadline, except that the send POST is not cut: if it returns past the deadline, ask exits 124 saying the message was sent. Reading the reply after completion (ledger, pane) is not part of it either: each read is cut at the reply grace (15 s) and falls back to the pane | unlimited |
 | `--on-prompt <mode>` | What to do when a prompt is detected (agent / human) | agent |
 | `--stall-timeout <sec>` | Timeout on "no output change" (seconds). Like `--timeout`, it also cuts a read that does not answer (exit 124) | - |
 | `--instance <id>` | Target instance ID (`<agent>` or `<agent>-<n>`). **This is the only way to name the target** (there is no `--agent`) | the agent's primary instance |
@@ -826,7 +826,7 @@ commandmate verify show <run-id>                       # Show one run (read-only
 |--------|-------------|---------|
 | `--gates <id1,id2>` | Gate IDs to run (comma separated) | work-evidence + every declared gate |
 | `--instance <id>` | Agent instance ID to attach the run to | none (a worktree-level run) |
-| `--timeout <sec>` | Seconds before polling is abandoned | unlimited |
+| `--timeout <sec>` | Seconds before polling is abandoned. The start POST and the run reads are included: one that does not answer is cut at the deadline, exit 124 (Issue #3983) | unlimited |
 | `--json` | Print the run and gate results to stdout as JSON | off |
 
 ### Exit Codes
