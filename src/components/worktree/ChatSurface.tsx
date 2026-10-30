@@ -150,6 +150,7 @@ import { SelectionListKeys } from '@/components/worktree/SelectionListKeys';
 import { hasDismissablePanelFooter, isTrustConfirmationFrame } from '@/lib/detection/selection-shape';
 import type { ChatMessage, LivePromptData } from '@/types/models';
 import { derivePromptView } from '@/lib/session/prompt-view';
+import { offersPlanReviewControls, readSelectionListFrame } from '@/lib/session/selection-list-ops';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { SurfaceMode } from '@/types/ui-state';
 import type { ShowToast } from '@/types/markdown-editor';
@@ -990,6 +991,18 @@ export const ChatSurface = memo(function ChatSurface({
     [blockedReason, frame],
   );
 
+  // Issue #3999: a plan review is not a long picker. Its rows are the PLAN —
+  // 77 of them on the observed screen — read, not walked with arrows, and the
+  // controls under it are what the reviewer must reach. #2326's concession is
+  // withdrawn for it; the frame keeps the default caps and scrolls, and the
+  // live region's height rule (below) does the rest.
+  const isPlanReviewCard = useMemo(
+    () =>
+      blockedReason === 'selectionList' &&
+      offersPlanReviewControls(readSelectionListFrame(frame), cliToolId),
+    [blockedReason, frame, cliToolId],
+  );
+
   // --------------------------------------------------------------------
   // The dialog card's controls (Issue #2254)
   // --------------------------------------------------------------------
@@ -1023,7 +1036,7 @@ export const ChatSurface = memo(function ChatSurface({
       // read too. Nothing is chosen here: a control added for a selection list
       // belongs in `SelectionListKeys`, where both surfaces get it.
       case 'selectionList':
-        return <SelectionListKeys {...keyProps} frame={frame} surface="chat" />;
+        return <SelectionListKeys {...keyProps} frame={frame} surface="chat" compact={compact} />;
       // Issue #2369. The footer named the one key that leaves, so that is the
       // whole control. Not `TerminalEscapeHatch` with its arrows hidden and not
       // `PromptAnswerKeys` alongside it: on a read-only panel every other key is
@@ -1071,6 +1084,7 @@ export const ChatSurface = memo(function ChatSurface({
     instanceId,
     handleDialogKeysSent,
     frame,
+    compact,
     t,
   ]);
 
@@ -1219,20 +1233,41 @@ export const ChatSurface = memo(function ChatSurface({
           />
         </div>
       ) : null}
+      {/* Issue #3999: the live region's height rule for a plan review. The
+          region is `shrink-0` under an `overflow-hidden` surface, so a card
+          taller than the surface is simply cut off at the bottom — the plan
+          review's Approve with it (412x892: 653px of live region in a 556px
+          surface). On a plan review it may shrink instead (`min-h-0`): the
+          transcript above goes first (it is `flex-1` from a zero basis), then
+          the frame, the banner and the arrow pad (`ChatDialogCard`'s frame
+          slot documents the weights), then the comment editor; the buttons
+          keep their height. `overflow-y-auto` is the floor for a surface too
+          short even for those — the region scrolls rather than clipping. The
+          surface keeps its `overflow-hidden`: it is what stops the region
+          painting over its neighbours. Every other reason keeps the
+          `shrink-0` region #2194 / #2233 pinned. */}
       {blockedReason !== null && (
         <div
           data-testid="chat-surface-live"
           role="group"
           aria-label={t('chatSurface.liveRegionLabel')}
-          className="flex shrink-0 flex-col gap-2 border-t border-border bg-surface px-3 py-2"
+          className={`flex flex-col border-t border-border bg-surface px-3 py-2 ${
+            isPlanReviewCard ? 'min-h-0 gap-1.5 overflow-y-auto' : 'shrink-0 gap-2'
+          }`}
         >
+          {/* Issue #3999: on a plan review the banner yields with the frame
+              and the arrow pad (`shrink-[100000]`, see `ChatDialogCard`'s
+              frame slot) — before the comment box and the buttons. Everywhere
+              else it keeps its height. */}
           <div
             data-testid="chat-surface-terminal-banner"
             data-reason={blockedReason}
             data-trust-confirmation={isTrustConfirmation ? 'true' : undefined}
             role="status"
             aria-label={t('chatSurface.bannerLabel')}
-            className="flex flex-wrap items-center gap-2 rounded-lg border border-warning-border bg-warning-subtle px-2 py-1.5"
+            className={`flex flex-wrap items-center gap-2 rounded-lg border border-warning-border bg-warning-subtle px-2 py-1.5${
+              isPlanReviewCard ? ' min-h-0 shrink-[100000] overflow-y-auto' : ''
+            }`}
           >
             <span className="min-w-0 flex-1 text-xs text-foreground">
               {t(isTrustConfirmation ? TRUST_CONFIRMATION_REASON_KEY : BLOCKED_REASON_KEY[blockedReason])}
@@ -1285,14 +1320,18 @@ export const ChatSurface = memo(function ChatSurface({
               // Gated on `dialogRowCount` rather than on the reason, so the
               // budget is conceded only where it buys something — see that
               // memo. Everything else keeps the caps #2106 and #2254 set.
+              //
+              // Issue #3999: never for a plan review — see `isPlanReviewCard`.
               maxHeightClassName={
-                dialogRowCount > SELECTION_LIST_TALL_CARD_MIN_ROWS
+                dialogRowCount > SELECTION_LIST_TALL_CARD_MIN_ROWS && !isPlanReviewCard
                   ? 'max-h-[35vh]'
                   : compact
                     ? 'max-h-32'
                     : 'max-h-64'
               }
               actions={dialogActions}
+              // Issue #3999: rank the card's parts with the banner (above).
+              flattenIntoParent={isPlanReviewCard}
             />
           ) : null}
         </div>

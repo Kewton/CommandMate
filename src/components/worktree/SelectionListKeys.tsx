@@ -20,7 +20,7 @@
  * What is drawn is decided by `lib/session/selection-list-ops` and nowhere
  * else. This file adds no rule of its own — it is the arrow pad, then whatever
  * `resolveSelectionListOps()` returned, in the order the card has always drawn
- * them. The three places the surfaces still differ are listed in that module's
+ * them. The places the surfaces still differ are listed in that module's
  * header.
  *
  * ## `frame` or `reading`
@@ -76,6 +76,12 @@ export interface SelectionListKeysProps extends SelectionKeysProps {
    * `reading`; a mount with a frame leaves it out and this reads `frame`.
    */
   trustConfirmation?: boolean;
+  /**
+   * Issue #3999: the mount is narrow (a phone, a `/sessions` tile, a terminal
+   * footer). Passed to the plan-review controls, which then draw their
+   * one-row comment form. Nothing else reads it.
+   */
+  compact?: boolean;
 }
 
 export function SelectionListKeys({
@@ -88,6 +94,7 @@ export function SelectionListKeys({
   surface,
   showPagerKeys = false,
   trustConfirmation,
+  compact = false,
 }: SelectionListKeysProps) {
   const t = useTranslations('worktree');
   const read = useMemo(() => reading ?? readSelectionListFrame(frame), [reading, frame]);
@@ -104,7 +111,19 @@ export function SelectionListKeys({
     (trustConfirmation ?? isTrustConfirmationFrame(frame, cliToolId));
 
   return (
-    <div className="space-y-2">
+    // Issue #3999: on a plan review the pad is a flex column the mount can
+    // bound — the arrow pad and the plan review's buttons keep their height
+    // and only the comment editor / a refusal yield (`PlanReviewControls`).
+    // Every other list keeps the block it always was, so no other band moves.
+    //
+    // On the chat card the column IS the surface's live region (`contents`):
+    // the card ranks its banner, frame, this pad and the controls together.
+    <div
+      data-testid="selection-list-keys"
+      className={
+        ops.planReview ? (surface === 'chat' ? 'contents' : 'flex min-h-0 flex-col gap-2') : 'space-y-2'
+      }
+    >
       {showTrustNotice ? (
         <p
           data-testid="selection-trust-notice"
@@ -116,7 +135,17 @@ export function SelectionListKeys({
       ) : null}
       {/* The arrow pad stays FIRST and unconditional — it is the one control
           every measured selection list answers to. */}
-      <NavigationButtons {...keyProps} showPagerKeys={showPagerKeys} hideEnterKey={!ops.padEnter} />
+      {ops.planReview ? (
+        // Issue #3999: on a plan review the arrows move the plan's cursor —
+        // useful, not the way out — so the pad yields before the comment box
+        // and the buttons do (`shrink-[100000]`, the weight `ChatDialogCard`'s
+        // frame slot documents), scrolling in what it keeps.
+        <div data-testid="selection-list-pad-slot" className="min-h-0 shrink-[100000] overflow-y-auto">
+          <NavigationButtons {...keyProps} showPagerKeys={showPagerKeys} hideEnterKey={!ops.padEnter} />
+        </div>
+      ) : (
+        <NavigationButtons {...keyProps} showPagerKeys={showPagerKeys} hideEnterKey={!ops.padEnter} />
+      )}
       {ops.numberKeyCount > 0 ? (
         <SelectionNumberKeys {...keyProps} optionCount={ops.numberKeyCount} />
       ) : null}
@@ -128,7 +157,7 @@ export function SelectionListKeys({
       ) : null}
       {/* Issue #3139: comment / Submit review / Approve (confirmed) / Cancel
           through `/prompt-response`'s `planReviewAction`. */}
-      {ops.planReview ? <PlanReviewControls {...keyProps} /> : null}
+      {ops.planReview ? <PlanReviewControls {...keyProps} compact={compact} /> : null}
       {/* opencode has no numbered `/model` at all — switching models is
           `ctrl+t` or a `ctrl+x` chord. Rendered for opencode, and for OpenCode
           V2 while the frame shows one of its dialogs (#2983); the component

@@ -1154,8 +1154,11 @@
     "commentPlaceholder": "直してほしい点を書く（コメントを追加 → レビューを送信）",
     "comment": "コメントを追加",
     "submit": "レビューを送信 (Ctrl+R)",
+    "submitCompact": "レビューを送信",
     "approve": "承認 (Ctrl+A)",
+    "approveCompact": "承認",
     "cancel": "取り消し (Esc)",
+    "cancelCompact": "取り消し",
     "approveConfirmLabel": "プランの承認の確認",
     "approveConfirmText": "承認するとプランが実行されます。承認しますか？",
     "approveConfirmYes": "承認して実行",
@@ -1167,7 +1170,9 @@
       "invalidRequest": "この画面では送れない操作です。何も送っていません。",
       "notActive": "計画のレビュー画面が表示されていないため、何も送っていません。",
       "generic": "送信できませんでした。"
-    }
+    },
+    "composerNotice": "計画の確認待ちです。承認・取り消し・コメントを選んでください",
+    "composerGoto": "操作へ"
   },
   "selectionKeys": {
     "numbersToolbarLabel": "選択肢の番号キー",

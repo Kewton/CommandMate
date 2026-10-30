@@ -213,7 +213,9 @@ describe('[#3305] 違い 1: ターミナル面は、「既定に設定」が出�
   });
 });
 
-describe('[#3305] 違い 2・3: Plan review の操作と opencode のモデルのキーは、チャット面だけ', () => {
+// Issue #3999 が違い 2 を取り下げた（契約の決定 B: `surface === 'chat'` を外す）。
+// Plan review の操作は両面に出し、opencode のモデルのキーだけがチャット面に残る。
+describe('[#3305] 違い 2・3: Plan review の操作（#3999 で両面）と opencode のモデルのキー（チャット面だけ）', () => {
   it('チャット面: command-code の Plan review には操作を出す', () => {
     expect(ops(PLAN_REVIEW, 'command-code', 'chat').planReview).toBe(true);
   });
@@ -222,8 +224,9 @@ describe('[#3305] 違い 2・3: Plan review の操作と opencode のモデル�
     expect(ops(PLAN_REVIEW, 'claude', 'chat').planReview).toBe(false);
   });
 
-  it('ターミナル面: Plan review の操作は出さない（Enter を外すだけ。#2809 のまま）', () => {
-    expect(ops(PLAN_REVIEW, 'command-code', 'terminal').planReview).toBe(false);
+  it('ターミナル面: Plan review の操作も出す（#3999。Enter は #2809 のまま外す）', () => {
+    expect(ops(PLAN_REVIEW, 'command-code', 'terminal').planReview).toBe(true);
+    expect(ops(PLAN_REVIEW, 'command-code', 'terminal').padEnter).toBe(false);
   });
 
   it('opencode のモデルのキーを載せるのはチャット面だけ（ターミナル面には OpencodeQuickKeys がある）', () => {

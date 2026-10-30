@@ -26,10 +26,12 @@
  *     thing this Issue removes. The chat card keeps both, because #2297's own
  *     suite pins `↵` under claude's `/model` and this Issue's contract leaves
  *     the card's display alone.
- *  2. **Command Code's plan-review controls** (comment / submit / approve /
- *     cancel, Issue #3139) are drawn on the chat card only. The terminal
- *     surface has had the `Enter` removal since #2809 and nothing else; giving
- *     it the controls is a separate change.
+ *  2. *(withdrawn by Issue #3999)* Command Code's plan-review controls
+ *     (comment / submit / approve / cancel, Issue #3139) used to be drawn on
+ *     the chat card only, so the terminal surface offered ◀▲▼▶ and Esc on a
+ *     screen whose only way to approve is `ctrl+a` — a session sat in REVIEW
+ *     for five hours. Both surfaces draw them now; what still differs is only
+ *     how much height each gives them, which is the mount's business.
  *  3. **opencode's model chords** are drawn on the chat card only. The
  *     terminal surface already carries them in `OpencodeQuickKeys`, on the same
  *     footer this pad sits in. That footer stays under the chat surface too, so
@@ -162,6 +164,55 @@ function countDialogOptions(frame: string): number {
   return readSelectionListShape(extractDialogFrameTail(frame, { selectionList: true })).optionCount;
 }
 
+/**
+ * Does this reading earn Command Code's plan-review controls on this tool?
+ * (Issue #3999)
+ *
+ * The one rule both the controls (`resolveSelectionListOps().planReview`) and
+ * the composer's send guard read, so the composer can never refuse a send
+ * while no Approve is drawn, nor send while one is. Gated on the tool
+ * DECLARING `ctrl+a` (Issue #2762), exactly as before.
+ *
+ * Callers that hold a pane state pass the reading of the frame their own
+ * `isSelectionListActive` was raised for — {@link isPlanReviewUp}.
+ */
+export function offersPlanReviewControls(
+  reading: SelectionListReading,
+  cliToolId: string | null | undefined,
+): boolean {
+  return (
+    reading.offersPlanApprove &&
+    !!cliToolId &&
+    (PLAN_APPROVE_KEY_TOOL_IDS as readonly string[]).includes(cliToolId)
+  );
+}
+
+/**
+ * Is a plan review on THIS instance's current frame? (Issue #3999)
+ *
+ * The question the composer asks before it sends. Answered from the same
+ * pane state the instance's controls are drawn from — the split's / tile's
+ * own poll (`terminal.output`), or the phone controller's reading of the
+ * active instance — never from another instance's poll: the PC controller
+ * polls the primary instance, which is not every split's alias.
+ *
+ * A pager is not a plan review (`resolveSelectionListOps` draws it the bare
+ * pad), and a frame no selection list was raised for is not one either.
+ */
+export function isPlanReviewUp({
+  isSelectionListActive,
+  isPagerActive = false,
+  reading,
+  cliToolId,
+}: {
+  isSelectionListActive: boolean;
+  isPagerActive?: boolean;
+  reading: SelectionListReading;
+  cliToolId: string | null | undefined;
+}): boolean {
+  return isSelectionListActive && !isPagerActive && offersPlanReviewControls(reading, cliToolId);
+}
+
 /** Whether two readings say the same thing. */
 export function isSameSelectionListReading(
   a: SelectionListReading,
@@ -260,13 +311,11 @@ export function resolveSelectionListOps({
     padEnter: !enterIsUnsafe && !(surface === 'terminal' && commitKeys !== null),
     numberKeyCount: reading.numberKeyCount,
     commitKeys,
-    // Difference 2. Issue #2762 / #3139: the footer names `ctrl+a` as the ONLY
-    // way to approve and the arrow pad cannot send it. Gated on the tool
-    // declaring the key, exactly as `commitKeys` is.
-    planReview:
-      surface === 'chat' &&
-      reading.offersPlanApprove &&
-      (PLAN_APPROVE_KEY_TOOL_IDS as readonly string[]).includes(cliToolId),
+    // Issue #2762 / #3139: the footer names `ctrl+a` as the ONLY way to
+    // approve and the arrow pad cannot send it. Gated on the tool declaring
+    // the key, exactly as `commitKeys` is. Issue #3999: on both surfaces (see
+    // the header's withdrawn difference 2).
+    planReview: offersPlanReviewControls(reading, cliToolId),
     // Difference 3. `OpencodeModelKeys` itself decides which tool and which
     // frame it renders for; this only says which surface mounts it.
     opencodeModelKeys: surface === 'chat',
