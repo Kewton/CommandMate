@@ -92,6 +92,7 @@ import { sendMessageWithSubmitVerification } from '@/lib/cli-tools/submit-verifi
 import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import {
   InputBoundaryRefusedError,
+  getCarriedPasteMark,
   isInputBoundaryRefusal,
   noteDispatchFailed,
   noteDispatchStart,
@@ -261,7 +262,8 @@ describe('the required input-boundary hook (Issue #3957)', () => {
     expect(bodyTypedAt).toBeNull();
     expect(enteredAt).toBeNull();
     expect(vi.mocked(sendKeys).mock.calls.some((call) => call[1] === BODY)).toBe(false);
-    expect(attempts).toEqual([{ state: 'not-sent', reason: 'input-lock-lost' }]);
+    // Issue #3992: its own reason (was `input-lock-lost`).
+    expect(attempts).toEqual([{ state: 'not-sent', reason: 'relay-reservation-lost' }]);
     expect(mockCreateMessage).not.toHaveBeenCalled();
   });
 
@@ -271,6 +273,32 @@ describe('the required input-boundary hook (Issue #3957)', () => {
     expect(result).toMatchObject({ ok: false });
     expect(bodyPastedAt).toBeNull();
     expect(enteredAt).toBeNull();
+  });
+
+  // Issue #3992: the refusal comes after `load-buffer`, so it must not leave the
+  // named buffer in the tmux server, nor a carried mark that holds the next send off.
+  const tmuxSubcommands = (): Array<{ sub: string; buffer: string }> =>
+    vi.mocked(execFile).mock.calls.map((call) => {
+      const args = call[1] as string[];
+      return { sub: args[0], buffer: args[args.indexOf('-b') + 1] };
+    });
+
+  it('a refused PASTED body drops its loaded buffer and leaves no carried mark (Issue #3992)', async () => {
+    const long = `${'x'.repeat(600)} ${BODY}`;
+    const result = await runToSettled(sendWith(() => { throw new Error('reservation gone'); }, long), 30_000);
+    expect(result).toMatchObject({ ok: false });
+    const calls = tmuxSubcommands();
+    expect(calls.map((c) => c.sub)).toEqual(['load-buffer', 'delete-buffer']);
+    expect(calls[1].buffer).toBe(calls[0].buffer);
+    expect(getCarriedPasteMark(S)).toBeNull();
+  });
+
+  it('negative control: a PASTED body that passes the boundary makes no extra tmux call (Issue #3992)', async () => {
+    const long = `${'x'.repeat(600)} ${BODY}`;
+    const result = await runToSettled(sendWith(() => undefined, long), 30_000);
+    expect(bodyPastedAt).not.toBeNull();
+    expect(result).toBeDefined();
+    expect(tmuxSubcommands().map((c) => c.sub)).toEqual(['load-buffer', 'paste-buffer']);
   });
 
   it('runs after the input-lock wait: a turn that ended while the send queued is before the boundary', async () => {

@@ -93,6 +93,7 @@ import {
   resolveActiveWorktreeId,
   SIDEBAR_NAV_ORDER,
 } from '@/lib/sidebar-utils';
+import { buildWorktreeOpenHref } from '@/lib/waiting-instance-pick';
 import { useWorktreeList } from '@/hooks/useWorktreeList';
 import type { BranchGroup, SessionRow, SidebarNavId } from '@/lib/sidebar-utils';
 
@@ -506,10 +507,22 @@ export const Sidebar = memo(function Sidebar() {
   // effect, so window.location.pathname does not update synchronously with router.push().
   // A fallback timer that checks window.location.pathname would fire before the URL
   // updates and trigger a spurious full-page reload on every navigation.
+  //
+  // Issue #4001: every branch click (Needs attention, flat, grouped, "Other")
+  // ends here with just the id, so the waiting instance is picked here, from
+  // the LIVE list — the rendered rows may be a hover-frozen snapshot. A waiting
+  // instance opens with `?instance=`; otherwise the URL is the bare one and the
+  // saved selection is restored as before. Read through a ref so this callback
+  // keeps its identity across polls (the rows are memoized on it).
+  const worktreesRef = useRef(worktrees);
+  useEffect(() => {
+    worktreesRef.current = worktrees;
+  }, [worktrees]);
   const handleBranchClick = useCallback((branchId: string) => {
     saveBranchListScroll();
     selectWorktree(branchId);
-    router.push(`/worktrees/${branchId}`);
+    const worktree = worktreesRef.current.find((wt) => wt.id === branchId);
+    router.push(worktree ? buildWorktreeOpenHref(worktree) : `/worktrees/${branchId}`);
     closeMobileDrawer();
   }, [saveBranchListScroll, selectWorktree, router, closeMobileDrawer]);
 

@@ -334,7 +334,10 @@
       "remote": "Toggle remote control from GitHub web and mobile",
       "research": "Run a deep research investigation",
       "reset-allowed-tools": "Reset the list of allowed tools",
-      "restart": "Restart the CLI, preserving the current session",
+      "restart": {
+        "copilot": "Restart the CLI, preserving the current session",
+        "claude": "Restart Claude Code and resume this session, which applies an installed update"
+      },
       "rubber-duck": "Get an independent critique of the current work",
       "search": "Search the conversation timeline",
       "session": "View and manage sessions",

@@ -249,11 +249,16 @@ export async function cancelRelayQuietly(client: ApiClient, relayId: string): Pr
  * The relay is left open — withdrawing it would drop a reply that may well be
  * on its way — and the message is not resent, which could make it arrive twice.
  */
-export function printRelayUnconfirmedNotice(relayId: string): void {
+export function printRelayUnconfirmedNotice(relayId: string, worktreeId?: string): void {
+  // Issue #3992: a failed send names the pane to look at before any resend, in
+  // the same line rather than a second notice.
+  const resend = worktreeId === undefined
+    ? ''
+    : ` Do not resend before checking the pane (\`commandmate capture ${worktreeId} --pane\`), or it may arrive twice.`;
   console.error(
     `Warning: whether the message reached the session is not known; relay ${relayId} was left open `
     + 'and the message was not resent. '
-    + `Check it with \`commandmate relays --id ${relayId}\`.`
+    + `Check it with \`commandmate relays --id ${relayId}\`.${resend}`
   );
 }
 

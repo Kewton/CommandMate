@@ -109,6 +109,11 @@ export interface TerminalDisplayCompaction {
  *   200x1000 pane (`tests/fixtures/prompt-observation-3797`: ~33 content rows,
  *   ~970 blank). With auto-follow on, the pane scrolled to the blank tail and
  *   showed no glyphs.
+ * - `command-code` (Issue #4000): the same top-anchored shape in the 200x1000
+ *   pane — observed on a plan review with `history_size=0`, `cursor_y=175`, so
+ *   ~175 content rows over ~825 blank ones
+ *   (`tests/fixtures/command-code-plan-review-4000`). It also paints blank rows,
+ *   so it is in {@link PAINTED_PANEL_TOOLS} too.
  *
  * `copilot` is deliberately absent: #2049's acceptance condition is that
  * claude/codex/copilot render unchanged, and no copilot padding measurement
@@ -119,20 +124,30 @@ const LAYOUT_PADDING_COMPACTED_TOOLS: ReadonlySet<CLIToolType> = new Set([
   'codex',
   'opencode',
   'antigravity',
+  'command-code',
 ]);
 
 /**
  * Tools that draw overlays as background-painted panels whose body rows carry no
  * glyphs.
  *
- * `opencode` only. Its `ctrl+p` command palette and model picker paint ~70
- * columns under `ESC[48;2;20;20;20m` with nothing printable on them; without
- * this flag the #1172 rule folds those bands into the surrounding blank run and
- * the panel loses its top edge and section separators. claude and codex draw
- * their overlays with box-drawing glyphs, so they have no such row and adding
- * them here would be a no-op that only widens the blast radius.
+ * - `opencode`: its `ctrl+p` command palette and model picker paint ~70
+ *   columns under `ESC[48;2;20;20;20m` with nothing printable on them; without
+ *   this flag the #1172 rule folds those bands into the surrounding blank run
+ *   and the panel loses its top edge and section separators.
+ * - `command-code` (Issue #4000): its logo banner opens and closes with a band
+ *   of 70 spaces under `ESC[48;5;60m` (`tests/fixtures/command-code-live-2250`).
+ *   Those are the only painted blank rows in the boot, `/model` picker,
+ *   question and dialog captures (the plan review clears the banner and paints
+ *   none), and the top band is often the frame's first row — which the #1172
+ *   rule trims as leading padding. It is the same predicate the chat dialog
+ *   card already applies to Command Code frames (`src/lib/chat/dialog-frame.ts`).
+ *
+ * claude and codex draw their overlays with box-drawing glyphs, so they have no
+ * such row and adding them here would be a no-op that only widens the blast
+ * radius.
  */
-const PAINTED_PANEL_TOOLS: ReadonlySet<CLIToolType> = new Set(['opencode']);
+const PAINTED_PANEL_TOOLS: ReadonlySet<CLIToolType> = new Set(['opencode', 'command-code']);
 
 /**
  * Tools whose mobile pane keeps the frame's own column count instead of

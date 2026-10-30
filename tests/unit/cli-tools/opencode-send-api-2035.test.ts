@@ -76,6 +76,8 @@ vi.mock('@/lib/hooks/sources/opencode/subscription', async (importOriginal) => {
 });
 
 import { OpenCodeTool, formatImagePathFallbackMessage } from '@/lib/cli-tools/opencode';
+import { sendOpencodePrompt } from '@/lib/hooks/sources/opencode/client';
+import { observeInputStart } from '@/lib/session/instance-input-lock';
 import { getAssignedOpencodePort } from '@/lib/hooks/sources/opencode/ports';
 import {
   getOpencodeLiveness,
@@ -391,6 +393,79 @@ describe('Issue #2035: sending over the opencode server', () => {
       await expect(tool.sendMessage(WORKTREE, SLASH_BODY)).rejects.toThrow(
         /does not exist/
       );
+      expect(submitMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a refused POST is not-sent, a POST with no answer is unknown (Issue #3992)', () => {
+    /** The dispatch verdicts a relay-bound send is told, in order. */
+    async function verdictsOf(message: string): Promise<string[]> {
+      const verdicts: string[] = [];
+      await observeInputStart(() => tool.sendMessage(WORKTREE, message), undefined, {
+        beforeInput: () => undefined,
+        onDispatchFailed: (verdict) => verdicts.push(verdict),
+      });
+      return verdicts;
+    }
+
+    it.each([
+      ['404 (session not found)', 404, 'application/json'],
+      ['500', 500, 'application/json'],
+      ['200 text/html (an unknown route)', 200, 'text/html'],
+    ])('the server answered %s: sendOpencodePrompt says rejected, the send is not_sent', async (_label, status, type) => {
+      connected();
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: status < 300,
+        status,
+        headers: new Headers({ 'content-type': type }),
+        json: async () => ({}),
+      });
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      await expect(sendOpencodePrompt(PORT, SESSION, 'msg_x', [{ type: 'text', text: 'x' }])).resolves.toBe('rejected');
+      expect(await verdictsOf(SLASH_BODY)).toEqual(['not_sent']);
+      // Still typed over the keyboard, as before.
+      expect(submitMock).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ['a timeout', () => Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' })],
+      ['a broken connection', () => new TypeError('fetch failed')],
+    ])('the POST got no answer (%s): sendOpencodePrompt says unknown, the send stays unknown', async (_label, makeError) => {
+      connected();
+      globalThis.fetch = vi.fn().mockRejectedValue(makeError()) as unknown as typeof fetch;
+
+      await expect(sendOpencodePrompt(PORT, SESSION, 'msg_x', [{ type: 'text', text: 'x' }])).resolves.toBe('unknown');
+      expect(await verdictsOf(SLASH_BODY)).toEqual(['unknown']);
+    });
+
+    it.each([
+      ['200 application/json', 200],
+      ['201 application/json', 201],
+    ])('a 2xx other than 204 (%s) may have created the message: unknown, not not_sent', async (_label, status) => {
+      connected();
+      globalThis.fetch = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+        if (init?.method === 'POST') {
+          return {
+            ok: true,
+            status,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: async () => ({ id: 'msg_x' }),
+          };
+        }
+        return readbackMissing();
+      }) as unknown as typeof fetch;
+
+      await expect(sendOpencodePrompt(PORT, SESSION, 'msg_x', [{ type: 'text', text: 'x' }])).resolves.toBe('unknown');
+      expect(await verdictsOf(SLASH_BODY)).toEqual(['unknown']);
+    });
+
+    it('control: a 204 is accepted and, once read back, no verdict is given', async () => {
+      connected();
+      stubHappyPath(SLASH_BODY);
+
+      await expect(sendOpencodePrompt(PORT, SESSION, 'msg_x', [{ type: 'text', text: 'x' }])).resolves.toBe('accepted');
+      expect(await verdictsOf(SLASH_BODY)).toEqual([]);
       expect(submitMock).not.toHaveBeenCalled();
     });
   });
