@@ -138,9 +138,10 @@ async function exerciseControls(page: Page, root: string, mock: PlanReviewMock):
 }
 
 async function openPhone(page: Page, pane: 'terminal' | 'history'): Promise<void> {
-  // `?instance=` rather than the stored active instance: the phone corrects a
-  // stored id against the roster before the worktree has loaded, and the
-  // query is applied once the roster is there (useWorktreeDetailController).
+  // `?instance=` rather than the stored active instance, so the test does not
+  // depend on what an earlier run left in storage. The query is applied once
+  // the roster is there (useWorktreeDetailController). Before Issue #4013 the
+  // phone also corrected a stored id against the default seed and lost it.
   await page.goto(`/worktrees/${ID}?pane=terminal&instance=${PLAN_REVIEW_TOOL}`);
   await page.getByTestId('mobile-composer-wrapper').waitFor({ state: 'visible', timeout: 30_000 });
   // The tab is chosen by tapping it: the query is consumed with the instance.

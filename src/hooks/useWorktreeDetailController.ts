@@ -1172,12 +1172,16 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // mirrors the instance's CLI tool into activeCliTab, so cliTool-keyed concerns
   // (auto-yes, status, kill, message/output fetch) follow the active instance on
   // both PC and mobile.
+  // Issue #4013: waits for THIS worktree's roster (`rosterReady`). Before that
+  // the roster is the default seed, so a saved non-first instance (claude-cc)
+  // would look gone and the fallback would overwrite the saved value too.
   useEffect(() => {
+    if (!rosterReady) return;
     if (displayedInstances.length === 0) return;
     if (!displayedInstances.some(inst => inst.id === activeInstanceId)) {
       setActiveInstanceId(displayedInstances[0].id);
     }
-  }, [displayedInstances, activeInstanceId, setActiveInstanceId]);
+  }, [rosterReady, displayedInstances, activeInstanceId, setActiveInstanceId]);
 
   // Idempotent mirror: keep activeCliTab in sync with the active instance's CLI
   // tool even when activeInstanceId itself is unchanged (e.g. localStorage
