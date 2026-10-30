@@ -70,6 +70,8 @@ import {
   getSessionStartingMaxMs,
 } from '@/config/session-starting-config';
 import { getOrInitGlobal } from '../global-state';
+import { resolveSessionName } from '@/lib/cli-tools/session-name';
+import { forgetSessionLaunch } from '@/lib/session/session-launch-flight';
 
 /** One launch in progress. */
 interface SessionStartingRecord {
@@ -160,7 +162,8 @@ export function markSessionStarting(
  *
  * With a token, only that launch's record is dropped — a launch that was
  * killed and replaced must not end its successor's display (Issue #3195).
- * Without one (kill-session), the record is dropped whoever wrote it.
+ * Without one (kill-session), the record is dropped whoever wrote it, and the
+ * session's launch in progress stops being one a new start joins (Issue #3981).
  *
  * @param worktreeId - Worktree ID
  * @param cliToolId - Tool that was launched
@@ -175,6 +178,11 @@ export function clearSessionStarting(
 ): void {
   try {
     const key = buildCompositeKey(worktreeId, cliToolId, instanceId);
+    if (token === undefined) {
+      // Issue #3981: a killed launch is no longer the session's one launch
+      // (`session-launch-flight`); the next start is a launch of its own.
+      forgetSessionLaunch(resolveSessionName(cliToolId, worktreeId, instanceId));
+    }
     if (token !== undefined && records.get(key)?.token !== token) return;
     records.delete(key);
   } catch {

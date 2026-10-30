@@ -437,7 +437,9 @@ export class OpenCodeTool extends BaseCLITool {
       }
 
       const launchedAt = Date.now();
-      await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
+      // Issue #3981: in one writer's turn of the input lock; the readiness
+      // wait below stays outside it.
+      await this.typeLaunchLines(sessionName, [withLaunchScreenCleared(launchCommand)]);
 
       // Issue #1908: poll for opencode's own composer instead of sleeping 15 s.
       await this.waitForReady(sessionName);

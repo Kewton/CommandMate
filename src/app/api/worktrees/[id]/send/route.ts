@@ -46,6 +46,7 @@ import {
   SESSION_START_FAILED_CODE,
   SESSION_START_UNAVAILABLE_CODE,
 } from '@/lib/session/session-start-error';
+import { isSessionLaunchInFlight, settleSessionLaunch } from '@/lib/session/session-launch-flight';
 import { isPaneBackAtShell } from './pane-shell';
 import { getGitStatus } from '@/lib/git/git-utils';
 import { isPathSafe, resolveAndValidateRealPath } from '@/lib/security/path-validator';
@@ -442,8 +443,21 @@ async function handleSend(
       return NextResponse.json(foreignSessionErrorBody(sessionName, ownership.sessionPath), { status: 409 });
     }
 
-    // Check if CLI tool session is running
-    const running = await cliTool.isRunning(id, instanceId);
+    // Check if CLI tool session is running.
+    //
+    // Issue #3981 (R4): a launch of this session another request has in
+    // progress is waited out first. Its pane exists before its launch line is
+    // typed, so `isRunning` read in that window says "running" for seven tools
+    // (this send would then type into the shell) and, for claude on a pane that
+    // fails the health check, "not running" (this send would start it again and
+    // kill the first launch's pane). A launch that began while `isRunning` was
+    // being read is waited out and the answer read again. This route never holds
+    // the input lock, so the wait is never refused.
+    await settleSessionLaunch(sessionName, cliTool.name);
+    let running = await cliTool.isRunning(id, instanceId);
+    if (running && (await settleSessionLaunch(sessionName, cliTool.name))) {
+      running = await cliTool.isRunning(id, instanceId);
+    }
 
     // Issue #989: Antigravity has no in-session model-switch command (unlike
     // Copilot's /model), so --model can only be honored when starting a new
@@ -687,7 +701,12 @@ async function answerSessionStartTimeout(
   worktreeId: string,
   instanceId: string | undefined
 ): Promise<NextResponse> {
-  if (await isPaneBackAtShell(cliTool, worktreeId, instanceId)) {
+  // Issue #3981: while another request's launch of this session is still in
+  // progress (a send that held the input lock is refused rather than made to
+  // wait for it), the pane sits at the shell because the launch line has not
+  // gone in yet — that is a start in progress, not an agent that exited.
+  const launching = isSessionLaunchInFlight(cliTool.getSessionName(worktreeId, instanceId));
+  if (!launching && (await isPaneBackAtShell(cliTool, worktreeId, instanceId))) {
     return NextResponse.json(
       {
         error: buildSessionExitedToShellMessage(cliTool.name, cliTool.getSessionName(worktreeId, instanceId)),

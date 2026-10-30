@@ -279,17 +279,14 @@ export class CommandCodeTool extends BaseCLITool {
         await this.createLaunchPane(sessionName, worktreePath);
       }
 
-      await sendKeys(
-        sessionName,
-        withLaunchScreenCleared(
-          buildCommandCodeLaunchCommand({
-            target: { worktreeId, cliToolId: COMMAND_CODE_CLI_TOOL_ID, instanceId },
-            executablePath: this.command,
-            worktreePath,
-          })
-        ),
-        true
-      );
+      // Issue #3981: in one writer's turn of the input lock; the readiness
+      // wait below stays outside it.
+      const launchCommand = buildCommandCodeLaunchCommand({
+        target: { worktreeId, cliToolId: COMMAND_CODE_CLI_TOOL_ID, instanceId },
+        executablePath: this.command,
+        worktreePath,
+      });
+      await this.typeLaunchLines(sessionName, [withLaunchScreenCleared(launchCommand)]);
 
       await new Promise((resolve) => setTimeout(resolve, COMMAND_CODE_INIT_WAIT_MS));
 

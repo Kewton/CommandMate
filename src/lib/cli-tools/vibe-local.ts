@@ -11,7 +11,6 @@
 import { BaseCLITool } from './base';
 import { OLLAMA_MODEL_PATTERN, isValidVibeLocalContextWindow, type CLIToolType } from './types';
 import {
-  sendKeys,
   sendSpecialKey,
 } from '../tmux/tmux';
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
@@ -104,7 +103,8 @@ export class VibeLocalTool extends BaseCLITool {
 
       // Start vibe-local in interactive mode with auto-approve (-y)
       // -y flag skips the permission confirmation prompt
-      await sendKeys(sessionName, withLaunchScreenCleared(vibeLocalCommand), true);
+      // Issue #3981: in one writer's turn of the input lock.
+      await this.typeLaunchLines(sessionName, [withLaunchScreenCleared(vibeLocalCommand)]);
 
       // Wait for vibe-local to initialize (banner + model loading)
       await new Promise((resolve) => setTimeout(resolve, VIBE_LOCAL_INIT_WAIT_MS));
