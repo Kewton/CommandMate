@@ -26,6 +26,14 @@ import { ApiClient, ApiError, assertResponseShape, isDeadlineExceeded } from './
 /** Matches the wait command's cadence; runs are minutes long, not seconds. */
 export const VERIFY_POLL_INTERVAL_MS = 5000;
 
+/**
+ * Issue #3983: how far past `--timeout` the read taken AT the deadline may run.
+ * The poll sleeps only up to the deadline and reads once more there, so a run
+ * that finished in the last interval still reports its verdict (#1544); this
+ * bounds that one read rather than skipping it.
+ */
+export const VERIFY_FINAL_READ_GRACE_MS = 2000;
+
 /** Built-in gate id; mirrors WORK_EVIDENCE_GATE_ID in lib/verification/gate-runner.ts. */
 export const WORK_EVIDENCE_GATE_ID = 'work-evidence';
 
@@ -431,9 +439,12 @@ export async function runVerification(
   const { worktreeId } = request;
   // Issue #3983: `timeoutSec` bounds the whole command — the start POST and
   // every run read, each cut at the deadline — not only the gaps between polls.
+  // The one read taken at the deadline gets VERIFY_FINAL_READ_GRACE_MS on top.
   const startedAt = Date.now();
   const deadlineAt = request.timeoutSec ? startedAt + request.timeoutSec * 1000 : undefined;
   const bounded = deadlineAt === undefined ? client : client.withDeadline(deadlineAt);
+  const finalReader =
+    deadlineAt === undefined ? client : client.withDeadline(deadlineAt + VERIFY_FINAL_READ_GRACE_MS);
   const timedOut = (detail: string): VerificationOutcome => {
     console.error(`Timeout: verification of ${worktreeId} exceeded ${request.timeoutSec}s (${detail})`);
     return { exitCode: VerifyExitCode.TIMEOUT, run: lastRun };
@@ -466,14 +477,11 @@ export async function runVerification(
   const runPath = `/api/worktrees/${worktreeId}/verify/runs/${runId}`;
   const stillRunning = `run ${runId} is still running server-side`;
 
+  let finalRead = false;
   while (true) {
-    // Issue #3983: asked before the read as well, so a poll is not started
-    // past the deadline. Strictly past: a read at the deadline itself may still
-    // bring the verdict (see the check below).
-    if (deadlineAt !== undefined && Date.now() > deadlineAt) return timedOut(stillRunning);
     let body: VerifyRunResponse;
     try {
-      body = await bounded.get<VerifyRunResponse>(runPath);
+      body = await (finalRead ? finalReader : bounded).get<VerifyRunResponse>(runPath);
     } catch (error) {
       if (isDeadlineExceeded(error)) return timedOut(stillRunning);
       throw error;
@@ -491,13 +499,17 @@ export async function runVerification(
       return { exitCode: exitCodeForRunStatus(run.status), run };
     }
 
-    // Checked after the terminal-status branch so a run that finishes exactly on
-    // the deadline still reports its verdict instead of a timeout.
-    if (request.timeoutSec) {
-      const elapsed = (Date.now() - startedAt) / 1000;
-      if (elapsed >= request.timeoutSec) return timedOut(stillRunning);
+    if (deadlineAt === undefined) {
+      await sleep(VERIFY_POLL_INTERVAL_MS);
+      continue;
     }
-
-    await sleep(VERIFY_POLL_INTERVAL_MS);
+    // Checked after the terminal-status branch so a run that finishes by the
+    // deadline still reports its verdict instead of a timeout.
+    const remaining = deadlineAt - Date.now();
+    if (finalRead || remaining <= 0) return timedOut(stillRunning);
+    // Issue #3983: never sleep past the deadline. Sleeping the full interval put
+    // the last read a few ms after it in real time, and that read was skipped.
+    finalRead = remaining <= VERIFY_POLL_INTERVAL_MS;
+    await sleep(Math.min(VERIFY_POLL_INTERVAL_MS, remaining));
   }
 }

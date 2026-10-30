@@ -20,6 +20,16 @@ import {
   DeadlineExceededError,
   isDeadlineExceeded,
 } from '../../../../src/cli/utils/api-client';
+import { fetchPromptRowsSince } from '../../../../src/cli/utils/reply-ledger';
+import {
+  CAPABILITIES,
+  RELAY_CREATED,
+  calls,
+  frame,
+  mockServer,
+  start,
+  verifyRun,
+} from './command-deadline-server';
 
 const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
 const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -40,147 +50,8 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-/**
- * `'hang'`, `'stall-body'`, a function of the request returning the body,
- * `{ status, data }`, `{ reject }`, `{ delayMs, data }`, or any other object as
- * the body of a 200.
- */
-type Route = 'hang' | 'stall-body' | ((url: URL, init: RequestInit | undefined) => unknown) | object;
-
-function json(data: unknown, status = 200): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    redirected: false,
-    headers: new Headers({ 'content-type': 'application/json' }),
-    json: () => Promise.resolve(data),
-    text: () => Promise.resolve(JSON.stringify(data)),
-  } as unknown as Response;
-}
-
-/** Headers at once, then a body that never ends (and ignores the signal). */
-function stalledBody(): Response {
-  const never = () => new Promise<never>(() => {});
-  return {
-    ok: true,
-    status: 200,
-    redirected: false,
-    headers: new Headers({ 'content-type': 'application/json' }),
-    json: never,
-    text: never,
-  } as unknown as Response;
-}
-
-function hang(init: RequestInit | undefined): Promise<Response> {
-  return new Promise((_resolve, reject) => {
-    init?.signal?.addEventListener('abort', () => {
-      const error = new Error('This operation was aborted');
-      error.name = 'AbortError';
-      reject(error);
-    });
-  });
-}
-
-const CAPABILITIES = { serverVersion: '0.0.0-test', capabilities: ['resolve-session-target'] };
-
-/**
- * fetch routed by the first key the URL contains (`METHOD path-part`, or a bare
- * path part for any method). Capabilities and resolve-target answer by default.
- */
-function mockServer(routes: Record<string, Route>): void {
-  const table: Record<string, Route> = {
-    '/api/capabilities': { status: 200, data: CAPABILITIES },
-    '/resolve-target': (url) => ({
-      cliToolId: 'claude',
-      instanceId: url.searchParams.get('instance') ?? 'claude',
-      resolvedBy: 'roster',
-      conflict: null,
-    }),
-    ...routes,
-  };
-  // Own routes first, so a test can override the defaults above.
-  const keys = [...Object.keys(routes), ...Object.keys(table).filter(k => !(k in routes))];
-  global.fetch = vi.fn((input: unknown, init?: RequestInit) => {
-    const url = new URL(String(input));
-    const method = init?.method ?? 'GET';
-    const key = keys.find(k => {
-      const [m, part] = k.includes(' ') ? k.split(' ') : [undefined, k];
-      return (m === undefined || m === method) && url.pathname.concat(url.search).includes(part);
-    });
-    if (key === undefined) return Promise.resolve(json({ error: 'no route' }, 404));
-    const route = table[key];
-    if (route === 'hang') return hang(init);
-    if (route === 'stall-body') return Promise.resolve(stalledBody());
-    if (typeof route === 'function') return Promise.resolve(json(route(url, init)));
-    const spec = route as { reject?: Error; delayMs?: number; status?: number; data?: unknown };
-    if (spec.reject) return Promise.reject(spec.reject);
-    if (typeof spec.delayMs === 'number') {
-      return new Promise(resolve => setTimeout(() => resolve(json(spec.data)), spec.delayMs));
-    }
-    if (typeof spec.status === 'number') return Promise.resolve(json(spec.data, spec.status));
-    // Anything else is the body of a 200.
-    return Promise.resolve(json(route));
-  }) as unknown as typeof fetch;
-}
-
-const calls = (method: string, part: string): number =>
-  vi.mocked(global.fetch).mock.calls.filter(([input, init]) =>
-    ((init as RequestInit | undefined)?.method ?? 'GET') === method && String(input).includes(part),
-  ).length;
-
 const stderrText = (): string => mockConsoleError.mock.calls.map(c => String(c[0])).join('\n');
 const firstExit = (): unknown => mockExit.mock.calls[0]?.[0];
-
-const frame = {
-  isRunning: true,
-  isPromptWaiting: false,
-  content: 'frame',
-  fullOutput: 'frame',
-  realtimeSnippet: 'frame',
-  lineCount: 1,
-  lastCapturedLine: 1,
-  promptData: null,
-  autoYes: { enabled: false, expiresAt: null },
-  thinking: false,
-  cliToolId: 'claude',
-  isSelectionListActive: false,
-  lastServerResponseTimestamp: null,
-  serverPollerActive: false,
-  sessionStatus: 'ready' as const,
-  sessionStatusReason: 'input_prompt',
-};
-
-const verifyRun = (status: string) => ({
-  run: {
-    id: 7,
-    worktreeId: 'wt1',
-    instanceId: null,
-    taskId: null,
-    trigger: 'wait',
-    status,
-    startedAt: '2026-10-30T00:00:00.000Z',
-    finishedAt: status === 'running' ? null : '2026-10-30T00:00:01.000Z',
-    gates: [],
-  },
-});
-
-/** Runs a command and reports whether it has returned yet. */
-async function start(
-  name: 'wait' | 'ask' | 'verify',
-  args: string[],
-): Promise<{ state: { done: boolean }; pending: Promise<void> }> {
-  const mod =
-    name === 'wait'
-      ? (await import('../../../../src/cli/commands/wait')).createWaitCommand()
-      : name === 'ask'
-        ? (await import('../../../../src/cli/commands/ask')).createAskCommand()
-        : (await import('../../../../src/cli/commands/verify')).createVerifyCommand();
-  const state = { done: false };
-  const pending = mod.parseAsync(['node', name, ...args]).then(() => {
-    state.done = true;
-  });
-  return { state, pending };
-}
 
 /** Advance to just short of `ms`, check it is still running, then to `ms`. */
 async function expectEndsAt(run: { state: { done: boolean }; pending: Promise<void> }, ms: number) {
@@ -371,6 +242,53 @@ describe('wait: the reads before the poll are inside --timeout (Issue #3983)', (
   });
 });
 
+describe('the degrading catches on the way rethrow a deadline, through the command (Issue #3983)', () => {
+  it('positive: a roster read that does not answer on a server without resolve-target (session-target) is 124, not "using --agent as given"', async () => {
+    mockServer({
+      '/api/capabilities': { status: 200, data: { ...CAPABILITIES, capabilities: [] } },
+      'GET /api/worktrees/wt1$': 'hang',
+      '/current-output': frame,
+    });
+    await expectEndsAt(await start('wait', ['wt1', '--instance', 'codex-2', '--timeout', '2']), 2_000);
+
+    expect(firstExit()).toBe(WaitExitCode.TIMEOUT);
+    expect(stderrText()).not.toContain('could not read the agent-instance roster');
+    expect(calls('GET', '/current-output')).toBe(0);
+  });
+
+  it('negative: the same roster read refused is still the Warning, and the wait goes on', async () => {
+    mockServer({
+      '/api/capabilities': { status: 200, data: { ...CAPABILITIES, capabilities: [] } },
+      'GET /api/worktrees/wt1$': { reject: new TypeError('fetch failed') },
+      '/current-output': frame,
+    });
+    const run = await start('wait', ['wt1', '--instance', 'codex-2', '--timeout', '2']);
+    await vi.advanceTimersByTimeAsync(100);
+    await run.pending;
+
+    expect(stderrText()).toContain('could not read the agent-instance roster');
+    expect(firstExit()).toBe(WaitExitCode.SUCCESS);
+  });
+
+  // `ask` is fetchPromptRowsSince's one caller, and it reads a deadline there
+  // as "no extra rows" — the same thing the swallowing catch returned — so the
+  // rethrow has no exit code or line of its own to show through the command.
+  // It is pinned at the helper instead, with the client `ask` hands it.
+  it('positive: fetchPromptRowsSince (reply-ledger) rejects with the deadline instead of answering null', async () => {
+    mockServer({ '/messages': 'hang' });
+    const client = new ApiClient({ baseUrl: 'http://localhost:3999' }).withDeadline(Date.now() + 1_000);
+    const pending = fetchPromptRowsSince(client, 'wt1', 'claude', 0).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await pending).toBeInstanceOf(DeadlineExceededError);
+  });
+
+  it('negative: fetchPromptRowsSince still answers null for a 500', async () => {
+    mockServer({ '/messages': { status: 500, data: { error: 'boom' } } });
+    const client = new ApiClient({ baseUrl: 'http://localhost:3999' }).withDeadline(Date.now() + 1_000);
+    expect(await fetchPromptRowsSince(client, 'wt1', 'claude', 0)).toBeNull();
+  });
+});
+
 describe('verify --timeout bounds the start and the run reads (Issue #3983)', () => {
   it('positive: a run GET that does not answer ends `verify --timeout 2` at 2 s with 124', async () => {
     mockServer({ 'POST /verify': { status: 202, data: { runId: 7 } }, '/verify/runs/7': 'hang' });
@@ -385,6 +303,39 @@ describe('verify --timeout bounds the start and the run reads (Issue #3983)', ()
     await expectEndsAt(await start('verify', ['wt1', '--timeout', '2']), 2_000);
 
     expect(firstExit()).toBe(VerifyExitCode.TIMEOUT);
+  });
+
+  // Review P1: real reads take time, so a poll that slept the full interval
+  // read a few ms past the deadline — and that read used to be skipped.
+  it.each([7, 10])(
+    'positive: with 1 ms per request, a run that passes in the last interval reports its verdict (`--timeout %i`)',
+    async (timeoutSec) => {
+      let runReads = 0;
+      mockServer({
+        'POST /verify': { delayMs: 1, status: 202, data: { runId: 7 } },
+        '/verify/runs/7': { delayMs: 1, data: () => verifyRun(++runReads < 3 ? 'running' : 'passed') },
+      });
+      const run = await start('verify', ['wt1', '--timeout', String(timeoutSec)]);
+      await vi.advanceTimersByTimeAsync(timeoutSec * 1_000 + 5_000);
+      await run.pending;
+
+      expect(runReads).toBe(3);
+      expect(firstExit()).toBe(VerifyExitCode.SUCCESS);
+    },
+  );
+
+  it('positive: a run still running is 124 right after the read taken at the deadline', async () => {
+    let runReads = 0;
+    mockServer({
+      'POST /verify': { delayMs: 1, status: 202, data: { runId: 7 } },
+      '/verify/runs/7': { delayMs: 1, data: () => (runReads++, verifyRun('running')) },
+    });
+    // POST ends at 1 ms; reads at 1, 5 002 and 7 000 ms (the sleep stops at the deadline).
+    await expectEndsAt(await start('verify', ['wt1', '--timeout', '7']), 7_001);
+
+    expect(runReads).toBe(3);
+    expect(firstExit()).toBe(VerifyExitCode.TIMEOUT);
+    expect(stderrText()).toContain('exceeded 7s');
   });
 
   it('negative: without --timeout a slow run read is waited for', async () => {
@@ -418,7 +369,7 @@ describe('ask: --timeout covers the round trip, not the reading of the reply (Is
     expect(mockConsoleLog.mock.calls.map(c => String(c[0])).join('\n')).toContain('the pane reply');
   });
 
-  it('negative: a /send that returns past the deadline is 124 that says the message was sent, with no poll and no relay cancel', async () => {
+  it('negative: a /send that returns past the deadline is 124 that says the message was sent, with no poll', async () => {
     mockServer({
       'POST /send': { delayMs: 3_000, data: { id: 'm1', timestamp: new Date().toISOString() } },
       '/current-output': frame,
@@ -433,7 +384,42 @@ describe('ask: --timeout covers the round trip, not the reading of the reply (Is
     expect(firstExit()).toBe(WaitExitCode.TIMEOUT);
     expect(stderrText()).toContain('The message was sent');
     expect(calls('GET', '/current-output')).toBe(0);
+  });
+
+  it('negative: with --async, a /send that returns past the deadline keeps its relay (exit 0, no cancel)', async () => {
+    mockServer({
+      'POST /api/relays': RELAY_CREATED,
+      'POST /send': { delayMs: 3_000, data: { id: 'm1', timestamp: new Date().toISOString() } },
+      '/current-output': frame,
+    });
+    const run = await start('ask', [
+      'wt1', 'hello', '--instance', 'claude', '--async', '--reply-to', 'wt0@claude', '--timeout', '2',
+    ]);
+    // Neither the relay POST nor the send is cut at 2 s.
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(run.state.done).toBe(false);
+    await vi.advanceTimersByTimeAsync(500);
+    await run.pending;
+
+    expect(firstExit()).toBe(ExitCode.SUCCESS);
+    expect(calls('POST', '/api/relays')).toBe(1);
+    expect(calls('POST', '/send')).toBe(1);
+    expect(calls('POST', '/cancel')).toBe(0);
+    expect(calls('GET', '/current-output')).toBe(0);
+  });
+
+  it('positive: with --async, a --reply-to resolution that does not answer is 124 at 2 s, no relay and nothing sent', async () => {
+    mockServer({ 'wt0/resolve-target': 'hang', 'POST /api/relays': RELAY_CREATED });
+    await expectEndsAt(
+      await start('ask', [
+        'wt1', 'hello', '--instance', 'claude', '--async', '--reply-to', 'wt0@claude', '--timeout', '2',
+      ]),
+      2_000,
+    );
+
+    expect(firstExit()).toBe(WaitExitCode.TIMEOUT);
     expect(calls('POST', '/api/relays')).toBe(0);
+    expect(calls('POST', '/send')).toBe(0);
   });
 
   it('positive: a resolve-target that does not answer ends `ask --timeout 2` at 2 s with 124, nothing sent', async () => {

@@ -558,7 +558,9 @@ Exit codes (wait's, unchanged; --async always exits 0 once the relay exists):
        name it (id=...). id=context-limit: the conversation is over the model's
        limit; \`instances <id> kill <instance>\` and ask again in a fresh session
   21   nothing was running to ask
-  124  timed out. Look with \`capture <id> --instance <id> --pane --tail 60\`
+  124  timed out. Look with \`capture <id> --instance <id> --pane --tail 60\`.
+       When the send itself returned past the deadline, the message WAS sent
+       (stderr says so); do not send it again
 
 Send one ask at a time to an instance (Issue #3955). A message sent while the
 instance is mid-turn can be folded into that turn (codex does), and the two
@@ -613,6 +615,9 @@ a decision about that session's guard rails, not part of asking it a question.
         // Issue #2377: registered BEFORE the send, so a session that answers
         // immediately cannot finish its turn in the window between the message
         // and the ledger row. A refusal exits 2 having sent nothing.
+        //
+        // Issue #3983: the endpoint resolution is bounded by `--timeout` (exit
+        // 124, nothing registered or sent); the relay POST is not cut, like `/send`.
         let relay: RegisteredRelay | undefined;
         if (options.async) {
           relay = await registerRelayForMessage(client, {
@@ -621,6 +626,7 @@ a decision about that session's guard rails, not part of asking it a question.
             instance: options.instance,
             agent: options.agent,
             allowRelayChain: options.allowRelayChain,
+            resolveClient: client.withDeadline(deadlineAt),
           });
         }
 
