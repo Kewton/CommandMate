@@ -55,8 +55,8 @@ describe('GET /api/capabilities', () => {
       // /api/settings/default-agents and GET /api/worktrees, both behind the
       // same auth as everything else, so this body stays a fixed compile-time
       // list. The 'does not reflect the runtime environment' case below is what
-      // keeps that true.
-      capabilities: ['resolve-session-target', 'default-selected-agents'],
+      // keeps that true. Issue #3982 added the third (a wire contract only).
+      capabilities: ['resolve-session-target', 'default-selected-agents', 'prompt-answer-reason'],
     });
   });
 
@@ -74,6 +74,7 @@ describe('GET /api/capabilities', () => {
   it('still declares every token it has ever shipped', () => {
     expect(SERVER_CAPABILITIES).toContain('resolve-session-target');
     expect(SERVER_CAPABILITIES).toContain('default-selected-agents');
+    expect(SERVER_CAPABILITIES).toContain('prompt-answer-reason');
   });
 
   it('declares only strings, so the CLI can compare without unwrapping', async () => {
