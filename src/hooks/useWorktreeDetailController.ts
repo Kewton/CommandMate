@@ -518,6 +518,15 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // never evicts persisted aliases against that incomplete roster.
   const [rosterWorktreeId, setRosterWorktreeId] = useState<string | null>(null);
   const rosterReady = rosterWorktreeId === worktreeId;
+  // Issue #4034: the worktree whose detail request has failed
+  // STALE_BANNER_FAILURE_THRESHOLD times in a row. While its roster is still
+  // missing, the seed is all there is to show, so the active instance reads as
+  // the seed's first (see the reconcile effect) instead of staying on an id the
+  // screen does not display.
+  const [rosterFailedWorktreeId, setRosterFailedWorktreeId] = useState<string | null>(null);
+  const rosterFetchFailing = rosterFailedWorktreeId === worktreeId;
+  // True while `activeInstanceId` is that fallback and not the saved value.
+  const rosterFallbackActiveRef = useRef(false);
   // Issue #368: Vibe-local Ollama model state (initialized from API)
   const [vibeLocalModel, setVibeLocalModel] = useState<string | null>(null);
   // Issue #374: Vibe-local context window state (initialized from API)
@@ -825,6 +834,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       const message = err instanceof Error ? err.message : 'Unknown error';
       const status = err instanceof ApiError ? err.status : 0;
       detailFailureCountRef.current += 1;
+      if (detailFailureCountRef.current >= STALE_BANNER_FAILURE_THRESHOLD) {
+        setRosterFailedWorktreeId(worktreeId);
+      }
 
       // Issue #2498: session expiry is a re-login, not a retryable error.
       // Branch first so the raw parse message never reaches the screen.
@@ -1175,13 +1187,37 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // Issue #4013: waits for THIS worktree's roster (`rosterReady`). Before that
   // the roster is the default seed, so a saved non-first instance (claude-cc)
   // would look gone and the fallback would overwrite the saved value too.
+  // Issue #4034: when the detail request keeps failing, the roster never lands
+  // and the seed is what is displayed. A saved id that the seed does not show
+  // then falls back to the seed's first — in state only (`setActiveInstanceIdRaw`),
+  // so the saved value survives, and the roster's arrival puts it back.
   useEffect(() => {
-    if (!rosterReady) return;
     if (displayedInstances.length === 0) return;
+    if (!rosterReady) {
+      if (
+        rosterFetchFailing &&
+        !displayedInstances.some(inst => inst.id === activeInstanceId)
+      ) {
+        rosterFallbackActiveRef.current = true;
+        setActiveInstanceIdRaw(displayedInstances[0].id);
+      }
+      return;
+    }
+    if (rosterFallbackActiveRef.current) {
+      rosterFallbackActiveRef.current = false;
+      let saved: string | null = null;
+      try {
+        saved = window.localStorage.getItem(ACTIVE_INSTANCE_STORAGE_KEY_PREFIX + worktreeId);
+      } catch { /* localStorage unavailable */ }
+      if (saved && displayedInstances.some(inst => inst.id === saved)) {
+        setActiveInstanceId(saved);
+        return;
+      }
+    }
     if (!displayedInstances.some(inst => inst.id === activeInstanceId)) {
       setActiveInstanceId(displayedInstances[0].id);
     }
-  }, [rosterReady, displayedInstances, activeInstanceId, setActiveInstanceId]);
+  }, [rosterReady, rosterFetchFailing, displayedInstances, activeInstanceId, setActiveInstanceId, worktreeId]);
 
   // Idempotent mirror: keep activeCliTab in sync with the active instance's CLI
   // tool even when activeInstanceId itself is unchanged (e.g. localStorage
