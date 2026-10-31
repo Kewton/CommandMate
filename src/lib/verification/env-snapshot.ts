@@ -28,6 +28,7 @@ import { basename, dirname, join } from 'path';
 import { getEnv } from '@/lib/env';
 import { createLogger } from '@/lib/logger';
 import { MACHINE_LOCK_DIR_NAME } from './machine-lock';
+import { SESSION_KILL_LEDGER_DIR_NAME } from './session-kill-ledger';
 import { WORKTREE_INDEX_DIR_NAME } from './worktree-index';
 
 const logger = createLogger('lib/verification/env-snapshot');
@@ -406,6 +407,8 @@ export const MCBD_SESSION_PREFIX = 'mcbd-';
  * is none of a delegation's business, so watching them would only manufacture
  * violations. Sessions of *other* worktrees stay in the set on purpose — killing
  * a sibling worker's session is the #1624 failure this probe is here to catch.
+ * A sibling session stopped by someone else through `instances <wt> kill` is set
+ * apart at diff time from the session-kill ledger (Issue #3993), not here.
  *
  * "No server running" is an answer (zero sessions), which is why it is not
  * treated as a probe failure. `tmux` being absent, or hanging, is not.
@@ -453,14 +456,20 @@ export const ENV_SNAPSHOT_DIR_NAME = 'env-snapshots';
  * `~/.commandmate` (Issue #1771): the gate mutex locks and the worktree index
  * registry. Neither is a side effect of the delegation — the first mutexed gate
  * on a machine creates them — so counting them would report the runner's own
- * bookkeeping as pollution the agent left behind.
+ * bookkeeping as pollution the agent left behind. The session-kill ledger
+ * (Issue #3993) is the same kind of bookkeeping: the first recorded
+ * `instances <wt> kill` on a machine creates it.
  *
  * Scoped to the `~/.commandmate` probe rather than added to
  * {@link isIgnoredEntry}: a `~/locks` directory in `$HOME` is not ours, and
  * blanket-ignoring the name would put a hole in the probe that exists to catch
  * exactly that.
  */
-const COMMANDMATE_RUNTIME_ENTRY_NAMES = [MACHINE_LOCK_DIR_NAME, WORKTREE_INDEX_DIR_NAME];
+const COMMANDMATE_RUNTIME_ENTRY_NAMES = [
+  MACHINE_LOCK_DIR_NAME,
+  WORKTREE_INDEX_DIR_NAME,
+  SESSION_KILL_LEDGER_DIR_NAME,
+];
 
 function isIgnoredEntry(name: string): boolean {
   if (name === ENV_SNAPSHOT_DIR_NAME) return true;
