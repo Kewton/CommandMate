@@ -168,7 +168,7 @@ describe('[#3975] gemini: the trust Enter waits for a send holding the composer'
 });
 
 describe('[#3975] Claude: the launch line and the trust Enter wait for a send holding the composer', () => {
-  it('positive: neither the launch line nor the trust Enter goes out inside a send', async () => {
+  it('positive: neither the launch line nor the trust Enter goes out inside a send (the trust Enter through `sendTrustDialogKey`)', async () => {
     let trusted = false;
     vi.mocked(capturePane).mockImplementation(async () => (trusted ? CLAUDE_READY : CLAUDE_TRUST));
     vi.mocked(sendKeys).mockImplementation(async (_s, keys, enter) => {

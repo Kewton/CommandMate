@@ -129,13 +129,18 @@
         // Issue #2655 removed the Assistant Chat conversation poller with the feature.
         // Issue #3232 removed the global session poller: nothing had started it since 2026-04.
         // Issue #4032 removed pasted-text-helper.ts: nothing in src called it.
+        // Issue #4050: a `<base>-*.ts` glob is the pieces split off the file above it
+        // (same directory, `<base>-` prefix; tests/unit/guards/split-family.ts), not a
+        // new exemption — the guard folds it into that file and counts 12 still.
         "src/app/api/worktrees/\\[id\\]/capture/route.ts",
         "src/app/api/worktrees/\\[id\\]/clear-composer/route.ts",
         "src/app/api/worktrees/\\[id\\]/special-keys/route.ts",
         "src/app/worktrees/\\[id\\]/terminal/page.tsx",
         "src/components/Terminal.tsx",
         "src/lib/auto-yes-poller.ts",
+        "src/lib/auto-yes-poller-*.ts",
         "src/lib/polling/response-checker.ts",
+        "src/lib/polling/response-checker-*.ts",
         "src/lib/prompt-answer-sender.ts",
         "src/lib/session-cleanup.ts",
         "src/lib/session-key-sender.ts",

@@ -109,7 +109,7 @@ describe('copilot keys outside the shared sender take the input lock (Issue #394
     resetInstanceInputLocks();
   });
 
-  it('a normal send started during a selection-list command types only after the picker is up and the command is done', async () => {
+  it('a normal send started during a selection-list command types only after the picker is up and the command is done (the command through `typeLeavingMarkOnFailure`)', async () => {
     let releaseCommand!: () => void;
     vi.mocked(sendKeys).mockImplementation((async (_s: string, text: string) => {
       keys.push(`type:${text}`);
@@ -139,7 +139,7 @@ describe('copilot keys outside the shared sender take the input lock (Issue #394
     expect(keys).toEqual(['type:/model', 'type:hello', 'Enter']);
   });
 
-  it('a normal send started during a --model switch types only after copilot has answered it', async () => {
+  it('a normal send started during a --model switch types only after copilot has answered it (`/model <id>` through `typeLeavingMarkOnFailure`)', async () => {
     frame = FRAMES.SWITCH_BEFORE();
     vi.mocked(sendKeys).mockImplementation((async (_s: string, text: string) => {
       keys.push(`type:${text}`);
