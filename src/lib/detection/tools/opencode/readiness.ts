@@ -24,30 +24,44 @@
  * A turn being generated keeps the empty box on screen (`turn-running.txt`),
  * so it is ready by the same rule; no generation exception is needed.
  *
- * Text right of a run of four or more spaces is not read as the row's own:
- * the sidebar (#2047/#2095) shares rows with the input box.
+ * Text right of the box is not read as the row's own: the sidebar
+ * (#2047/#2095) shares rows with the input box, beyond the right end of the
+ * box's bottom border (`╹▀…▀`, measured in `opencode-live-2047/w200/`: border
+ * to column 156, sidebar from 160). Text inside the box is the buffer however
+ * far it is indented (`┃    old` is not empty), as `submit-composer-read`'s
+ * `opencode-box` reader reads it.
  *
  * @module lib/detection/tools/opencode/readiness
  */
 
 import { stripAnsi } from '../../ansi';
 import { detectSessionStatus } from '../../status-detector';
-import { OPENCODE_SELECTION_LIST_PATTERN, findOpenCodeComposerRows } from './patterns';
-
-/** The input box's gutter at the start of a row. */
-const GUTTER = /^[^\S\n]*[│┃]/;
+import {
+  OPENCODE_COMPOSER_BOTTOM_BORDER,
+  OPENCODE_SELECTION_LIST_PATTERN,
+  findOpenCodeComposerRows,
+  stripOpenCodeGutter,
+} from './patterns';
 
 /** The placeholder opencode paints in an empty buffer, with its quoted suggestion. */
 const PLACEHOLDER = /^Ask anything(?:\.\.\.|…)(?:[^\S\n]+"[^"\n]*")?$/;
 
-/** The row's own text: after the gutter, up to the first run of 4+ spaces (the sidebar's column). */
-function ownText(row: string): string {
-  const rest = row.replace(GUTTER, '');
-  const leading = rest.match(/^[^\S\n]*/)?.[0].length ?? 0;
-  // Content starts two columns after the gutter; a long run before any text is
-  // an empty buffer row with the sidebar beside it.
-  if (leading >= 4) return '';
-  return rest.trim().split(/[^\S\n]{4,}/)[0] ?? '';
+/**
+ * The column just right of the input box: the end of its bottom border
+ * (`╹▀…▀`), the newest one on the pane. `null` when there is none.
+ */
+function boxRightEdge(lines: string[]): number | null {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!OPENCODE_COMPOSER_BOTTOM_BORDER.test(lines[i])) continue;
+    const border = /╹▀+/.exec(lines[i]);
+    return border ? border.index + border[0].length : null;
+  }
+  return null;
+}
+
+/** The row's own text: inside the box (left of `rightEdge`), gutter removed. */
+function ownText(row: string, rightEdge: number): string {
+  return stripOpenCodeGutter(row.slice(0, rightEdge));
 }
 
 /**
@@ -60,10 +74,12 @@ export function isOpenCodeComposerReady(output: string): boolean {
   const status = detectSessionStatus(output, 'opencode');
   if (status.hasActivePrompt || status.status === 'waiting') return false;
 
-  const rows = findOpenCodeComposerRows(text.split('\n'));
-  if (rows === null || rows.length === 0) return false;
+  const lines = text.split('\n');
+  const rows = findOpenCodeComposerRows(lines);
+  const rightEdge = boxRightEdge(lines);
+  if (rows === null || rows.length === 0 || rightEdge === null) return false;
   return rows.every((row) => {
-    const own = ownText(row);
+    const own = ownText(row, rightEdge);
     return own === '' || PLACEHOLDER.test(own);
   });
 }

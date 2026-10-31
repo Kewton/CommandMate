@@ -26,6 +26,7 @@ import {
 } from '../tmux/tmux';
 import { sendMessageWithSubmitVerification, type InputReadiness } from './submit-verified-sender';
 import { recheckComposerBeforeInput } from '@/lib/session/composer-clear';
+import { INPUT_RECHECK_PROMPT_WAITING_CODE } from '@/lib/session/send-attempt-types';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import {
   COPILOT_PROMPT_PATTERN,
@@ -335,6 +336,19 @@ function describeBottomRow(output: string): string {
  *              text shows `@ files · # issues` instead).
  */
 type CopilotPromptReadiness = 'composer' | 'idle';
+
+/**
+ * Re-read the pane and throw `recheckComposerBeforeInput`'s `prompt-waiting`
+ * refusal when a dialog is open (Issue #4040). Any other outcome — no dialog,
+ * or a re-read that failed — returns, so the caller's own refusal stands.
+ */
+async function rethrowIfDialogOpen(sessionName: string): Promise<void> {
+  try {
+    await recheckComposerBeforeInput(sessionName, 'copilot');
+  } catch (error: unknown) {
+    if ((error as { code?: unknown }).code === INPUT_RECHECK_PROMPT_WAITING_CODE) throw error;
+  }
+}
 
 /**
  * Copilot CLI tool implementation
@@ -840,6 +854,11 @@ export class CopilotTool extends BaseCLITool {
       // goes into the message, which `classifySendFailure` reads).
       const prompt = await this.waitForPrompt(sessionName);
       if (!prompt.ready) {
+        // A dialog that opened during the wait and is still up is refused as
+        // the shared sender's re-check refuses it — `prompt-waiting` (409
+        // PROMPT_WAITING), not `prompt-not-ready`. A re-read that fails is
+        // left to the refusal below.
+        await rethrowIfDialogOpen(sessionName);
         logger.warn('copilot-message-not-sent:prompt-not-ready', { bottomRow: describeBottomRow(prompt.output) });
         throw new Error(
           `copilot prompt not ready within ${COPILOT_PROMPT_WAIT_TIMEOUT_MS}ms, ` +

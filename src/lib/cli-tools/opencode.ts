@@ -837,7 +837,15 @@ export class OpenCodeTool extends BaseCLITool {
     // typing the message into a shell prompt. The relaunch reserves a port and
     // re-attaches, so the server path is available again by the time it is
     // tried. `sendMessageWithImage` reaches this through its own fallback.
-    await this.requireSession('OpenCode', worktreeId, instanceId, { relaunch: true });
+    //
+    // Issue #4040: when that fallback follows an `unknown` image dispatch, a
+    // refusal here (`SESSION_STARTING`, a pane that is gone) typed nothing but
+    // does not make the send as a whole safe to resend either.
+    try {
+      await this.requireSession('OpenCode', worktreeId, instanceId, { relaunch: true });
+    } catch (error: unknown) {
+      throw this.keepUnknownDispatch(error, trace, sessionName) ?? error;
+    }
 
     if (await this.trySendViaServer(opencodeTarget(worktreeId, instanceId), message, undefined, trace)) {
       // Issue #405: the transcript grew, so the cached capture is stale — the
@@ -873,18 +881,31 @@ export class OpenCodeTool extends BaseCLITool {
       // other refusal before the first key: a dialog, the lock), but the server
       // dispatch before it may have delivered the message, so the send as a
       // whole stays unknown rather than "safe to resend".
-      const refusal = classifySendFailure(error);
-      if (trace.unknown && refusal.state === 'not-sent') {
-        logger.warn('opencode-send-not-typed-after-unknown-dispatch', { sessionName, reason: refusal.reason });
-        throw new Error(
-          `Failed to send message to OpenCode: the keyboard fallback typed nothing (${refusal.reason}), ` +
-            'but an earlier server dispatch may have delivered the message (Issue #4040)',
-          { cause: error }
-        );
-      }
+      const kept = this.keepUnknownDispatch(error, trace, sessionName);
+      if (kept) throw kept;
       // Issue #4031: the cause keeps a failed `load-buffer`'s code (`classifySendFailure`).
       throw new Error(`Failed to send message to OpenCode: ${errorMessage}`, { cause: error });
     }
+  }
+
+  /**
+   * The error a refusal with nothing typed becomes after a server dispatch of
+   * the same send ended `unknown` (Issue #4040): the message may already be
+   * there, so `classifySendFailure` must read the send as indeterminate.
+   *
+   * @returns the wrapped error, or `null` when the dispatch was not `unknown`
+   *   or the refusal is not a `not-sent` one (the caller throws its own)
+   */
+  private keepUnknownDispatch(error: unknown, trace: DispatchTrace, sessionName: string): Error | null {
+    if (!trace.unknown) return null;
+    const refusal = classifySendFailure(error);
+    if (refusal.state !== 'not-sent') return null;
+    logger.warn('opencode-send-not-typed-after-unknown-dispatch', { sessionName, reason: refusal.reason });
+    return new Error(
+      `Failed to send message to OpenCode: the keyboard fallback typed nothing (${refusal.reason}), ` +
+        'but an earlier server dispatch may have delivered the message (Issue #4040)',
+      { cause: error }
+    );
   }
 
   /**

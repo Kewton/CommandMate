@@ -307,10 +307,12 @@ export interface SubmitVerifiedSendParams {
    * it opened may still be up), the session was relaunched, or the pane went
    * back to loading. When given, the newest frame read under the lock — after
    * the carried paste wait — must pass it before any key. A frame that does not
-   * is read again for at most {@link INPUT_READINESS_UNDER_LOCK_WAIT_MS}, each
-   * read through {@link recheckComposerBeforeInput}, so a dialog that opens is
-   * refused at once (`prompt-waiting`) and the lock let go rather than held for
-   * a person. Past that the send THROWS with a `prompt not ready` wording
+   * is read again for at most {@link INPUT_READINESS_UNDER_LOCK_WAIT_MS} — the
+   * captures included: one still running at the deadline is not waited for,
+   * and a frame read after it is not taken — each read through
+   * {@link recheckComposerBeforeInput}, so a dialog that opens is refused at
+   * once (`prompt-waiting`) and the lock let go rather than held for a person.
+   * Past that the send THROWS with a `prompt not ready` wording
    * (`not-sent` / `prompt-not-ready`). Omitted, nothing changes.
    */
   readiness?: InputReadiness;
@@ -326,14 +328,38 @@ export interface InputReadiness {
 
 /**
  * How long a send that owns the input lock keeps re-reading a pane whose input
- * prompt is not up (Issue #4040). Short on purpose: the tool's own wait (15 s)
- * ran before the lock, and every writer behind this one waits as long. It
- * covers a picker or a redraw finishing just as the lock changed hands.
+ * prompt is not up (Issue #4040), the sleeps and the captures together: a
+ * `capture-pane` may take up to its own 5 s timeout (`tmux.ts`), so a read
+ * still running at the deadline is abandoned rather than awaited. Short on
+ * purpose: the tool's own wait (15 s) ran before the lock, and every writer
+ * behind this one waits as long. It covers a picker or a redraw finishing just
+ * as the lock changed hands.
  */
 export const INPUT_READINESS_UNDER_LOCK_WAIT_MS = 2000;
 
 /** How often that wait reads the pane. */
 const INPUT_READINESS_UNDER_LOCK_POLL_MS = 200;
+
+/** What {@link beforeDeadline} answers when the deadline came first. */
+const DEADLINE_PASSED = Symbol('deadline-passed');
+
+/**
+ * `read`'s value, or {@link DEADLINE_PASSED} when `deadline` (epoch ms) comes
+ * first. A rejection that arrives in time is thrown; one that arrives later is
+ * dropped with the read (Issue #4040).
+ */
+async function beforeDeadline<T>(read: Promise<T>, deadline: number): Promise<T | typeof DEADLINE_PASSED> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<typeof DEADLINE_PASSED>((resolve) => {
+    timer = setTimeout(() => resolve(DEADLINE_PASSED), Math.max(0, deadline - Date.now()));
+  });
+  try {
+    return await Promise.race([read, expired]);
+  } finally {
+    clearTimeout(timer);
+    read.catch(() => undefined);
+  }
+}
 
 function isReadyFrame(readiness: InputReadiness, frame: string): boolean {
   try {
@@ -362,11 +388,15 @@ async function awaitReadyUnderLock(
   if (readiness === undefined || isReadyFrame(readiness, frame)) return frame;
   const { sessionName, cliToolId, ticket } = params;
   const deadline = Date.now() + INPUT_READINESS_UNDER_LOCK_WAIT_MS;
-  let current = frame;
-  while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, INPUT_READINESS_UNDER_LOCK_POLL_MS));
+  for (;;) {
+    const beforeSleep = deadline - Date.now();
+    if (beforeSleep <= 0) break;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(INPUT_READINESS_UNDER_LOCK_POLL_MS, beforeSleep)));
+    if (Date.now() >= deadline) break;
     assertInputOwner(ticket, cliToolId, 'the readiness re-read', false);
-    current = await recheckComposerBeforeInput(sessionName, cliToolId);
+    const current = await beforeDeadline(recheckComposerBeforeInput(sessionName, cliToolId), deadline);
+    // A frame read after the deadline is not taken: the wait is over.
+    if (current === DEADLINE_PASSED || Date.now() > deadline) break;
     if (isReadyFrame(readiness, current)) return current;
   }
   logger.warn('input-readiness-not-ready-under-lock', { sessionName, cliToolId });

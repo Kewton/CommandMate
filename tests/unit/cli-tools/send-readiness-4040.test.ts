@@ -75,6 +75,8 @@ import { isOpenCodeComposerReady } from '@/lib/detection/tools/opencode/readines
 import { VIBE_LOCAL_PROMPT_PATTERN } from '@/lib/detection/tools/vibe-local/patterns';
 import { OPENCODE_IDLE_COMPOSER_PATTERN } from '@/lib/detection/tools/opencode/patterns';
 import { classifySendFailure } from '@/lib/session/send-attempt-state';
+import { SESSION_STARTING_CODE } from '@/lib/session/session-start-error';
+import { stripAnsi } from '@/lib/detection/ansi';
 import { resetInstanceInputLocks } from '@/lib/session/instance-input-lock';
 import { capturePane, sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
 import { COPILOT_MODEL_SWITCH_2623_FRAMES as COPILOT } from '@tests/fixtures/copilot-model-switch-2623';
@@ -108,8 +110,18 @@ const VL_COMPOSER_HOLDS_TEXT = VL.bootReady.replace(/^ctx:4% ❯$/m, 'ctx:4% ❯
 
 const OC = {
   w80: (name: string) => readFixture(`opencode-live-2047/w80/${name}.txt`),
+  w200: (name: string) => readFixture(`opencode-live-2047/w200/${name}.txt`),
   twoTurnIdle: readFixture('opencode-live-2049/two-turn-idle-11822.txt'),
 };
+
+/**
+ * review-2: a previous body left in the box, indented inside it (`┃      old`).
+ * The box is the live `composer-residual` capture; only the indent is added.
+ */
+const OC_INDENTED_RESIDUAL = stripAnsi(readFixture('opencode-live-2047/w80/composer-residual.txt')).replace(
+  '┃  echo PREFILLED',
+  '┃      echo PREFILLED'
+);
 
 const COPILOT_DIALOG = readFileSync(
   path.resolve(__dirname, '../lib/detection/fixtures/copilot-live-1885/permission-dialog.txt'),
@@ -190,6 +202,9 @@ describe('isOpenCodeComposerReady (Issue #4040)', () => {
     ['a finished turn: empty box, no placeholder', OC.w80('turn-complete')],
     ['two finished turns', OC.twoTurnIdle],
     ['a turn being generated: the empty box stays', OC.w80('turn-running')],
+    // review-2: the sidebar (#2047/#2095) shares the box's rows right of its border.
+    ['a finished turn at 200 columns: the sidebar beside an empty box', OC.w200('turn-complete')],
+    ['a turn being generated at 200 columns, the sidebar beside it', OC.w200('turn-running')],
   ])('positive: %s', (_name, frame) => {
     expect(isOpenCodeComposerReady(frame)).toBe(true);
   });
@@ -198,12 +213,18 @@ describe('isOpenCodeComposerReady (Issue #4040)', () => {
     ['the `Connect a provider` overlay', buildOpencodeConnectProviderFrame()],
     ['typed text in the box', buildOpencodeTypedComposerFrame()],
     ['a previous body left in the box (live)', OC.w80('composer-residual')],
+    ['a previous body left in the box, indented (review-2)', OC_INDENTED_RESIDUAL],
     ['the permission dialog', OC.w80('permission-bash')],
     ['the command palette over the box', OC.w80('command-palette')],
     ['the shell before opencode drew', buildOpencodeShellEchoFrame()],
     ['the cleared screen before the first paint', buildOpencodeClearedFrame()],
   ])('negative: %s', (_name, frame) => {
     expect(isOpenCodeComposerReady(frame)).toBe(false);
+  });
+
+  it('control (review-2): the indented residual is a box with text in it, the sidebar frame has text beside it', () => {
+    expect(OC_INDENTED_RESIDUAL).toMatch(/┃ {6}echo PREFILLED/);
+    expect(stripAnsi(OC.w200('turn-complete'))).toMatch(/┃ {20,}\S/);
   });
 
   it('control: the placeholder pattern alone never sees a post-turn composer', () => {
@@ -256,6 +277,41 @@ describe('copilot: the normal send (Issue #4040)', () => {
     expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'prompt-waiting' });
     // One read before the lock, one under it: no readiness re-reads behind a dialog.
     expect(vi.mocked(capturePane)).toHaveBeenCalledTimes(2);
+  });
+
+  it('review-3: a permission dialog opens during the wait and stays — prompt-waiting, not prompt-not-ready', async () => {
+    framesInTurn(COPILOT.BOOT_LOADING(), COPILOT_DIALOG);
+    const error = await settle(tool.sendMessage('wt-1', 'hello'));
+    expect(keys).toEqual([]);
+    expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'prompt-waiting' });
+  });
+
+  it('review-3 control: still loading after the wait (no dialog) — prompt-not-ready', async () => {
+    framesInTurn(COPILOT.BOOT_LOADING());
+    const error = await settle(tool.sendMessage('wt-1', 'hello'));
+    expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'prompt-not-ready' });
+  });
+
+  it('review-4: a re-read under the lock that outlasts the 2 s window is not waited for, nor its frame taken', async () => {
+    let call = 0;
+    vi.mocked(capturePane).mockImplementation((async () => {
+      call++;
+      if (call === 1) return COPILOT.BOOT_IDLE();
+      if (call === 2) return COPILOT.BOOT_LOADING();
+      // A capture as slow as tmux.ts allows (5 s), answering a ready frame.
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+      return COPILOT.BOOT_IDLE();
+    }) as never);
+    const startedAt = Date.now();
+    let settledAt = 0;
+    const send = tool.sendMessage('wt-1', 'hello').finally(() => {
+      settledAt = Date.now();
+    });
+    const error = await settle(send);
+    expect(keys).toEqual([]);
+    expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'prompt-not-ready' });
+    expect(error!.message).toContain(`no input prompt within ${INPUT_READINESS_UNDER_LOCK_WAIT_MS}ms`);
+    expect(settledAt - startedAt).toBeLessThanOrEqual(INPUT_READINESS_UNDER_LOCK_WAIT_MS);
   });
 
   it.each([
@@ -367,6 +423,27 @@ describe('opencode v1: the keyboard fallback (Issue #4040)', () => {
     expect(dispatch).toHaveBeenCalledTimes(2);
     expect(keys).toEqual([]);
     expect(classifySendFailure(error).state).toBe('indeterminate');
+  });
+
+  it('review-1: an image dispatch unknown, then SESSION_STARTING at the fallback — indeterminate', async () => {
+    dispatch.mockResolvedValue('unknown');
+    const starting = Object.assign(new Error('OpenCode session is still starting'), { code: SESSION_STARTING_CODE });
+    const requireSession = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(starting);
+    (tool as unknown as Record<string, unknown>).requireSession = requireSession;
+    const error = await settle(tool.sendMessageWithImage('wt-1', 'look', '/tmp/x.png'));
+    expect(requireSession).toHaveBeenCalledTimes(2);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(keys).toEqual([]);
+    expect(classifySendFailure(starting)).toEqual({ state: 'not-sent', reason: 'session-starting' });
+    expect(classifySendFailure(error)).toEqual({ state: 'indeterminate', reason: 'send-error' });
+  });
+
+  it('review-1 control: no unknown dispatch, SESSION_STARTING at the start — still session-starting', async () => {
+    const starting = Object.assign(new Error('OpenCode session is still starting'), { code: SESSION_STARTING_CODE });
+    (tool as unknown as Record<string, unknown>).requireSession = vi.fn().mockRejectedValue(starting);
+    const error = await settle(tool.sendMessage('wt-1', 'hello'));
+    expect(error).toBe(starting);
+    expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'session-starting' });
   });
 
   it('control (not unknown): an image dispatch refused, the path fallback refused — not-sent', async () => {
