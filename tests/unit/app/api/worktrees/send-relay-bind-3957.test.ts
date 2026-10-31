@@ -20,9 +20,12 @@ import type { RelaySendOutcome } from '@/lib/relay/relay-bind';
 import { ApiError, type ApiErrorPayload } from '@/cli/utils/api-client';
 import { describeFailedSendOutcome } from '@/cli/commands/message-dispatch';
 import type { Worktree } from '@/types/models';
+import type { ChatMessage as CliChatMessage } from '@/cli/types/api-responses';
+import { SessionStartTimeoutError } from '@/lib/session/session-start-error';
 import type { NextRequest } from 'next/server';
 
 const isRunning = vi.fn(async () => true);
+const startSession = vi.fn(async (..._args: unknown[]) => {});
 
 vi.mock('@/lib/cli-tools/codex', () => ({
   CodexTool: class {
@@ -31,7 +34,7 @@ vi.mock('@/lib/cli-tools/codex', () => ({
     command = 'codex';
     async isInstalled() { return true; }
     async isRunning() { return isRunning(); }
-    async startSession() {}
+    async startSession(...args: unknown[]) { return startSession(...args); }
     async sendMessage() {}
     async killSession() {}
     getSessionName(id: string) { return `mcbd-codex-${id}`; }
@@ -506,5 +509,129 @@ describe('POST /send with relayId (Issue #3957)', () => {
       const { body } = await post({ relayId: relay.id });
       expect(body.sendOutcome).toBe('not_sent');
     });
+  });
+});
+
+// Issue #4011: whether a failed send may be sent again does not depend on a
+// relay — a plain send answers `sendOutcome` on the failures the send service
+// placed, and the CLI reads the route's own body, not a hand-made one.
+describe('POST /send without relayId: sendOutcome on the failure (Issue #4011)', () => {
+  let db: Database.Database;
+
+  beforeEach(async () => {
+    db = new Database(':memory:');
+    runMigrations(db);
+    const { setMockDb } = await import('@/lib/db/db-instance');
+    setMockDb(db);
+    vi.clearAllMocks();
+    clearAgentStopEvents();
+    typesBody();
+    upsertWorktree(db, {
+      id: WT,
+      name: WT,
+      path: `/path/to/${WT}`,
+      repositoryPath: '/path/to/repo',
+      repositoryName: 'repo',
+      cliToolId: 'codex',
+    } as Worktree);
+  });
+
+  afterEach(async () => {
+    const { closeDbInstance } = await import('@/lib/db/db-instance');
+    closeDbInstance();
+    db.close();
+    clearAgentStopEvents();
+  });
+
+  function failsAs(state: string, reason: string, stage = 'send'): void {
+    sendUserMessage.mockImplementationOnce(async (_db: unknown, params: SendParams) => {
+      params.onAttempt?.({ state, reason });
+      return { ok: false, stage, error: `failed (${reason})` };
+    });
+  }
+
+  it('the CLI types sendOutcome as the plain route answers it, and tells not_sent from unknown on the real bodies', async () => {
+    expectTypeOf<NonNullable<ApiErrorPayload['sendOutcome']>>().toEqualTypeOf<RelaySendOutcome>();
+    expectTypeOf<NonNullable<CliChatMessage['sendOutcome']>>().toEqualTypeOf<RelaySendOutcome>();
+
+    failsAs('not-sent', 'prompt-not-ready');
+    const notSent = await post({});
+    failsAs('indeterminate', 'send-error');
+    const unknown = await post({});
+
+    expect(notSent.status).toBe(500);
+    expect(unknown.status).toBe(500);
+    expect(notSent.body).not.toHaveProperty('relayId');
+    const asCliError = (answer: { status: number; body: Record<string, unknown> }) =>
+      new ApiError('send failed', 1, answer.status, answer.body as ApiErrorPayload);
+    expect(asCliError(notSent).payload?.sendOutcome).toBe('not_sent');
+    expect(asCliError(unknown).payload?.sendOutcome).toBe('unknown');
+    expect(describeFailedSendOutcome(asCliError(notSent), WT)).toContain('safe to send it again');
+    expect(describeFailedSendOutcome(asCliError(unknown), WT)).toContain(`commandmate capture ${WT} --pane`);
+  });
+
+  it('a prompt dialog (409): not_sent, the code kept', async () => {
+    failsAs('not-sent', 'prompt-waiting', 'prompt_waiting');
+    const { status, body } = await post({});
+    expect(status).toBe(409);
+    expect(body).toMatchObject({ code: 'PROMPT_WAITING', sendOutcome: 'not_sent' });
+  });
+
+  it('the transport sent but the history write threw: unknown, never not_sent', async () => {
+    sendUserMessage.mockImplementationOnce(async (_db: unknown, params: SendParams) => {
+      params.onAttempt?.({ state: 'sent', reason: 'submitted' });
+      throw new Error('SQLITE_FULL');
+    });
+    const { status, body } = await post({});
+    expect(status).toBe(500);
+    expect(body.sendOutcome).toBe('unknown');
+  });
+
+  // Review P2-1: the route's own refusals before the send service record a
+  // not-sent attempt, so they answer not_sent with no relay as with one.
+  it('a start still coming up (503 SESSION_STARTING): not_sent, and the CLI says it may be sent again', async () => {
+    isRunning.mockResolvedValueOnce(false);
+    startSession.mockRejectedValueOnce(new SessionStartTimeoutError('Codex CLI', `mcbd-codex-${WT}`, 60000));
+    const answer = await post({});
+    expect(answer.status).toBe(503);
+    expect(answer.body).toMatchObject({ code: 'SESSION_STARTING', sendOutcome: 'not_sent' });
+    expect(sendUserMessage).not.toHaveBeenCalled();
+    const error = new ApiError('send failed', 1, answer.status, answer.body as ApiErrorPayload);
+    expect(describeFailedSendOutcome(error, WT)).toContain('safe to send it again');
+  });
+
+  it('a start that failed (500): not_sent', async () => {
+    isRunning.mockResolvedValueOnce(false);
+    startSession.mockRejectedValueOnce(new Error('tmux refused'));
+    const { status, body } = await post({});
+    expect(status).toBe(500);
+    expect(body.sendOutcome).toBe('not_sent');
+  });
+
+  it('another server\'s session (409): not_sent', async () => {
+    checkSessionOwnership.mockResolvedValueOnce({ verdict: 'foreign', sessionPath: '/elsewhere' } as never);
+    const { status, body } = await post({});
+    expect(status).toBe(409);
+    expect(body.sendOutcome).toBe('not_sent');
+  });
+
+  it('negative control: a failure the send service never placed carries no sendOutcome', async () => {
+    sendUserMessage.mockImplementationOnce(async () => ({ ok: false, stage: 'send', error: 'no record' }));
+    const { status, body } = await post({});
+    expect(status).toBe(500);
+    expect(body).not.toHaveProperty('sendOutcome');
+  });
+
+  it('negative control: a 400 before the send service carries no sendOutcome', async () => {
+    const { status, body } = await post({ content: '' });
+    expect(status).toBe(400);
+    expect(body).not.toHaveProperty('sendOutcome');
+    expect(sendUserMessage).not.toHaveBeenCalled();
+  });
+
+  it('negative control: the 201 of a plain send is unchanged', async () => {
+    const { status, body } = await post({});
+    expect(status).toBe(201);
+    expect(body).not.toHaveProperty('sendOutcome');
   });
 });

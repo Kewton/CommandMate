@@ -190,6 +190,11 @@ const ALLOWED_CATCHES: readonly { file: string; fn: string; why: string }[] = [
     why: '`instances remove` only: killing the session is best effort before the roster row goes. Not reached from wait / ask / verify.',
   },
   {
+    file: 'src/cli/commands/instances.ts',
+    fn: 'recordSessionKill',
+    why: 'Issue #3993: the catch wraps process.cwd() only, after the kill response is already in hand; no request, so no deadline can reach it. Only `instances kill` / `remove --kill` call it.',
+  },
+  {
     file: 'src/cli/commands/whoami.ts',
     fn: 'describeServerMismatch',
     why: 'A hint for the `instances` 404 message, with that command\'s plain client. Not reached from wait / ask / verify.',
