@@ -249,13 +249,18 @@ export const PROMPT_UNREPORTED_RESEND_NOTE =
 
 /**
  * {@link PROMPT_UNREPORTED_RESEND_NOTE} aimed at the pane the body went to
- * (Issue #4048): with an explicit target its worktree and, for a named
- * instance, ` --instance <id>` — the same command the CLI's own hint
- * (`paneCaptureCommand`) gives. Without a target the note names none.
+ * (Issue #4048): with an explicit target its worktree and ` --instance <id>`
+ * for a named instance, else ` --agent <tool>` for the tool's primary (the
+ * worktree's default agent may be another tool) — the same flags the CLI's
+ * own hint (`paneCaptureCommand`) gives. Without a target the note names none.
  */
-export function promptUnreportedResendNote(target?: PromptSubmitExpected): string {
+export function promptUnreportedResendNote(target?: PromptSubmitExpected, cliToolId?: CLIToolType): string {
   if (target === undefined) return PROMPT_UNREPORTED_RESEND_NOTE;
-  const instance = target.instanceId ? ` --instance ${target.instanceId}` : '';
+  const instance = target.instanceId
+    ? ` --instance ${target.instanceId}`
+    : cliToolId !== undefined
+      ? ` --agent ${cliToolId}`
+      : '';
   return (
     'The body may already have been submitted; check the pane ' +
     `(\`commandmate capture ${target.worktreeId}${instance} --pane\`) before resending it.`
@@ -1281,7 +1286,7 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
         throw new Error(
           `Message submit could not be confirmed for session ${sessionName}: the composer did not show the body ` +
             `(rule ${watched.rule}) but the agent did not report the prompt within ${PROMPT_REPORT_WAIT_MS}ms ` +
-            `(Issue #4035). ${promptUnreportedResendNote(target)}`
+            `(Issue #4035). ${promptUnreportedResendNote(target, cliToolId)}`
         );
       }
       if (watched.verdict === 'received') {

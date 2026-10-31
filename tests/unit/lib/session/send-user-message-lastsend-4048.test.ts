@@ -64,6 +64,7 @@ vi.mock('@/lib/detection/composer-text', async (importOriginal) => ({
 }));
 
 import { sendUserMessage } from '@/lib/session/send-user-message';
+import { isPromptWaiting } from '@/lib/session/prompt-waiting-guard';
 import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import { invalidateInstanceInput } from '@/lib/session/instance-input-lock';
 import {
@@ -167,6 +168,72 @@ describe('[#4048 review P2] a replaced session\'s late failure does not overwrit
     await sendUserMessage(mockDb, { worktreeId: WT, content: 'second', cliToolId: 'claude' });
 
     expect(getLastSendAttempt(INSTANCE)).toMatchObject({ state: 'sent', messageDigest: sendMessageDigest('second') });
+  });
+});
+
+describe('[#4048 re-review P2] a request refused before the lock is ordered by when it began', () => {
+  type Guard = Awaited<ReturnType<typeof isPromptWaiting>>;
+
+  function heldGuard(): { promise: Promise<Guard>; resolve: (guard: Guard) => void } {
+    let resolve!: (guard: Guard) => void;
+    const promise = new Promise<Guard>((res) => {
+      resolve = res;
+    });
+    return { promise, resolve };
+  }
+
+  const WAITING = { waiting: true, reason: 'dialog', blockedBy: null } as unknown as Guard;
+  const FREE = { waiting: false } as unknown as Guard;
+
+  it('positive: the old request\'s guard read waits, the new one sends, then the old guard refuses — lastSend stays the new sent', async () => {
+    const oldGuard = heldGuard();
+    vi.mocked(isPromptWaiting).mockReturnValueOnce(oldGuard.promise).mockResolvedValueOnce(FREE);
+    const sendMessage = vi.fn().mockResolvedValue(undefined);
+    mockGetTool.mockReturnValue({ name: 'Claude', sendMessage, sendMessageWithImage: vi.fn() });
+    const oldAttempt = vi.fn();
+
+    const oldSend = sendUserMessage(mockDb, { worktreeId: WT, content: 'old body', cliToolId: 'claude', onAttempt: oldAttempt });
+    await until(() => vi.mocked(isPromptWaiting).mock.calls.length === 1);
+    expect((await sendUserMessage(mockDb, { worktreeId: WT, content: 'new body', cliToolId: 'claude' })).ok).toBe(true);
+    oldGuard.resolve(WAITING);
+    const oldResult = await oldSend;
+
+    expect(oldResult).toMatchObject({ ok: false, stage: 'prompt_waiting' });
+    expect(oldAttempt).toHaveBeenCalledWith({ state: 'not-sent', reason: 'prompt-waiting' });
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const record = getLastSendAttempt(INSTANCE);
+    expect(record).toMatchObject({ state: 'sent', reason: 'submitted', messageDigest: sendMessageDigest('new body') });
+    // The newer record keeps its generation.
+    expect(record?.inputGeneration).toEqual(expect.any(Number));
+  });
+
+  it('negative: the reverse order — the old request sent, then a later request is refused — the refusal is recorded', async () => {
+    vi.mocked(isPromptWaiting).mockResolvedValueOnce(FREE).mockResolvedValueOnce(WAITING);
+    mockGetTool.mockReturnValue({ name: 'Claude', sendMessage: vi.fn().mockResolvedValue(undefined), sendMessageWithImage: vi.fn() });
+
+    expect((await sendUserMessage(mockDb, { worktreeId: WT, content: 'old body', cliToolId: 'claude' })).ok).toBe(true);
+    await sendUserMessage(mockDb, { worktreeId: WT, content: 'new body', cliToolId: 'claude' });
+
+    expect(getLastSendAttempt(INSTANCE)).toMatchObject({
+      state: 'not-sent',
+      reason: 'prompt-waiting',
+      messageDigest: sendMessageDigest('new body'),
+    });
+  });
+
+  it('negative: a request that began first but reached the lock after a later request\'s refusal is still recorded', async () => {
+    const oldGuard = heldGuard();
+    vi.mocked(isPromptWaiting).mockReturnValueOnce(oldGuard.promise).mockResolvedValueOnce(WAITING);
+    mockGetTool.mockReturnValue({ name: 'Claude', sendMessage: vi.fn().mockResolvedValue(undefined), sendMessageWithImage: vi.fn() });
+
+    const oldSend = sendUserMessage(mockDb, { worktreeId: WT, content: 'old body', cliToolId: 'claude' });
+    await until(() => vi.mocked(isPromptWaiting).mock.calls.length === 1);
+    await sendUserMessage(mockDb, { worktreeId: WT, content: 'new body', cliToolId: 'claude' });
+    oldGuard.resolve(FREE);
+    expect((await oldSend).ok).toBe(true);
+
+    // Its body went in after that refusal: the last thing that happened.
+    expect(getLastSendAttempt(INSTANCE)).toMatchObject({ state: 'sent', messageDigest: sendMessageDigest('old body') });
   });
 });
 

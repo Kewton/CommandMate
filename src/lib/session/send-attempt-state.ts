@@ -54,6 +54,12 @@ export interface SendAttemptRecord extends LastSendAttempt {
    * by an older one's late outcome.
    */
   inputGeneration?: number;
+  /**
+   * Issue #4048: the order in which the attempt's request began
+   * ({@link beginSendRequest}). Compares a request refused before the input
+   * lock (no generation) with the record it would replace.
+   */
+  requestSeq?: number;
 }
 
 /** The instance an attempt belongs to. */
@@ -71,6 +77,22 @@ declare global {
 
 const records = getOrInitGlobal('__sendAttemptRecords', () => new Map<string, SendAttemptRecord>());
 
+declare global {
+  // eslint-disable-next-line no-var
+  var __sendRequestSeq: { last: number } | undefined;
+}
+
+const requestSeq = getOrInitGlobal('__sendRequestSeq', () => ({ last: 0 }));
+
+/**
+ * A number for a send request, taken when it begins (Issue #4048): strictly
+ * increasing in this process, so of two requests the later one has the larger.
+ */
+export function beginSendRequest(): number {
+  requestSeq.last += 1;
+  return requestSeq.last;
+}
+
 function keyOf(instance: SendAttemptInstance): string {
   return JSON.stringify([instance.worktreeId, instance.cliToolId, instance.instanceId]);
 }
@@ -86,9 +108,8 @@ export function sendMessageDigest(content: string): string {
  *
  * Issue #4048: `typedContent` is the body the sender actually typed when it
  * differs from `content`; `inputGeneration` is the input lock generation the
- * attempt ran under. An attempt of an older generation than the held record's
- * is not recorded — the session was replaced and a newer send already said
- * how it went.
+ * attempt ran under; `requestSeq` is its request's {@link beginSendRequest}.
+ * An attempt is not recorded over a newer one ({@link isOlderThanHeld}).
  */
 export function recordSendAttempt(
   instance: SendAttemptInstance,
@@ -98,20 +119,19 @@ export function recordSendAttempt(
     content: string;
     typedContent?: string;
     inputGeneration?: number;
+    requestSeq?: number;
   },
   now: number = Date.now()
 ): void {
   try {
     const key = keyOf(instance);
     const held = records.get(key);
-    if (
-      attempt.inputGeneration !== undefined &&
-      held?.inputGeneration !== undefined &&
-      held.inputGeneration > attempt.inputGeneration
-    ) {
-      logger.info('send-attempt-record-skipped-stale-generation', {
+    if (held !== undefined && isOlderThanHeld(attempt, held)) {
+      logger.info('send-attempt-record-skipped-stale', {
         generation: attempt.inputGeneration,
         heldGeneration: held.inputGeneration,
+        requestSeq: attempt.requestSeq,
+        heldRequestSeq: held.requestSeq,
       });
       return;
     }
@@ -127,6 +147,7 @@ export function recordSendAttempt(
       messageDigest,
       ...(typedDigest !== undefined && typedDigest !== messageDigest ? { typedDigest } : {}),
       ...(attempt.inputGeneration !== undefined ? { inputGeneration: attempt.inputGeneration } : {}),
+      ...(attempt.requestSeq !== undefined ? { requestSeq: attempt.requestSeq } : {}),
     });
     while (records.size > MAX_TRACKED_INSTANCES) {
       const oldest = records.keys().next().value;
@@ -136,6 +157,30 @@ export function recordSendAttempt(
   } catch (error) {
     logger.warn('send-attempt-record-failed', { error: error instanceof Error ? error.message : String(error) });
   }
+}
+
+/**
+ * Whether `attempt` is older than the `held` record, and so must not replace it
+ * (Issue #4048):
+ *
+ * - both ran under the input lock: the older generation is older — the lock's
+ *   order is the order the bodies went in, whichever request began first;
+ * - `attempt` did not reach the lock (refused by ownership, the prompt guard,
+ *   or the lock itself): the request that began first is older;
+ * - `attempt` reached the lock and `held` did not: `attempt` is not older —
+ *   its keys went in after `held`'s refusal was made, or it would have been
+ *   recorded first.
+ *
+ * A record or attempt without the numbers (an older writer) is never older.
+ */
+function isOlderThanHeld(
+  attempt: { inputGeneration?: number; requestSeq?: number },
+  held: SendAttemptRecord
+): boolean {
+  if (attempt.inputGeneration !== undefined) {
+    return held.inputGeneration !== undefined && held.inputGeneration > attempt.inputGeneration;
+  }
+  return attempt.requestSeq !== undefined && held.requestSeq !== undefined && held.requestSeq > attempt.requestSeq;
 }
 
 /** The instance's last recorded attempt, or null when none is held. */

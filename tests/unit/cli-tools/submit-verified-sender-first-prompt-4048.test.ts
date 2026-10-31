@@ -547,7 +547,23 @@ describe('[#4048 review P2] the resend note names the pane the body went to', ()
   });
 
   it('negative: a target without an instance names the worktree only; no target keeps the placeholder', () => {
+    // Without the tool there is nothing to name; the sender always passes it.
     expect(promptUnreportedResendNote({ worktreeId: 'wt' })).toContain('`commandmate capture wt --pane`');
     expect(promptUnreportedResendNote()).toBe(PROMPT_UNREPORTED_RESEND_NOTE);
+  });
+
+  it('positive: the primary sent to without an instance — the capture names the tool (`--agent`), not the worktree default', async () => {
+    startSession();
+    script(PLACEHOLDER, [[PLACEHOLDER]]);
+
+    const error = await run(INIT_MESSAGE, { worktreeId: 'p4048' });
+
+    expect(classifySendFailure(error)).toEqual({ state: 'indeterminate', reason: 'prompt-unreported' });
+    expect(error?.message).toContain('`commandmate capture p4048 --agent claude --pane`');
+    expect(promptUnreportedResendNote({ worktreeId: 'wt' }, 'claude')).toContain('`commandmate capture wt --agent claude --pane`');
+    // A named instance still wins, as in the CLI's own hint.
+    expect(promptUnreportedResendNote({ worktreeId: 'wt', instanceId: 'claude-2' }, 'claude')).toContain(
+      '`commandmate capture wt --instance claude-2 --pane`'
+    );
   });
 });
