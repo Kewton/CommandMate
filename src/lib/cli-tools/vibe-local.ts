@@ -11,9 +11,12 @@
 import { BaseCLITool } from './base';
 import { OLLAMA_MODEL_PATTERN, isValidVibeLocalContextWindow, type CLIToolType } from './types';
 import {
+  capturePane,
   sendSpecialKey,
 } from '../tmux/tmux';
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
+import { isVibeLocalComposerReady } from '../detection/tools/vibe-local/readiness';
+import { detectSessionStatus } from '../detection/status-detector';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { getDbInstance } from '../db/db-instance';
 import { getWorktreeById } from '../db';
@@ -34,6 +37,23 @@ const logger = createLogger('cli-tools/vibe-local');
  * vibe-local shows a permission check prompt, banner, and model loading.
  */
 const VIBE_LOCAL_INIT_WAIT_MS = 5000;
+
+/**
+ * How long a send waits for vibe-local's input prompt (Issue #4040).
+ *
+ * Measured on vibe-local 1.3.3 (`vibe-local -y`, isolated `HOME`, private tmux
+ * socket, model `qwen3-coder:30b` not loaded in Ollama before each run): the
+ * empty `ctx:N% ❯` row was up 1.15 s, 0.62 s and 0.60 s after the launch
+ * keystroke — vibe-local loads the model on the first message, not at launch.
+ * gemini's and codex's 15 s therefore covers it with room to spare.
+ */
+const VIBE_LOCAL_PROMPT_WAIT_TIMEOUT_MS = 15000;
+
+/** Interval between the send's readiness polls (Issue #4040). */
+const VIBE_LOCAL_PROMPT_POLL_INTERVAL_MS = 500;
+
+/** Scrollback rows plus the visible pane in a readiness capture (`-S -200 -E -`). */
+const VIBE_LOCAL_PROMPT_CAPTURE_LINES = 200;
 
 /**
  * Vibe Local CLI tool implementation
@@ -133,6 +153,11 @@ export class VibeLocalTool extends BaseCLITool {
     await this.requireSession('Vibe Local', worktreeId, instanceId, { relaunch: true });
 
     try {
+      // Issue #4040: nothing is typed (the two Enters included) until the
+      // newest prompt row is up and empty — a relaunch or a fresh launch is
+      // still drawing its banner when the first send arrives.
+      await this.waitForPrompt(sessionName);
+
       // Issue #1471: Body/Enter separation + read-back submit verification via the
       // shared helper. vibe-local's IME mode needs TWO Enter presses (first Enter
       // inserts a newline, the second submits), preserved via submitEnterCount: 2
@@ -146,6 +171,8 @@ export class VibeLocalTool extends BaseCLITool {
         // the one call site that knew about it.
         composer: this.describeComposer(),
         interEnterWaitMs: VIBE_LOCAL_DOUBLE_ENTER_WAIT_MS,
+        // Issue #4040: the same test, of the newest frame read under the input lock.
+        readiness: { label: 'Vibe Local', isReady: isVibeLocalComposerReady },
       });
 
       // Issue #405: Invalidate cache after sending message
@@ -157,6 +184,35 @@ export class VibeLocalTool extends BaseCLITool {
       // Issue #4031: the cause keeps a failed `load-buffer`'s code (`classifySendFailure`).
       throw new Error(`Failed to send message to Vibe Local: ${errorMessage}`, { cause: error });
     }
+  }
+
+  /**
+   * Wait for vibe-local's input prompt before a send (Issue #4040).
+   *
+   * {@link isVibeLocalComposerReady} is the test — the newest `ctx:N% ❯` row
+   * empty with only the footer below it (or a turn being generated under it),
+   * never "the row is somewhere on the pane": the scrollback keeps every old
+   * one. A dialog ends the wait at once without throwing; the shared sender's
+   * re-read under the input lock then refuses it as `prompt-waiting`.
+   *
+   * @throws Error (`Vibe Local prompt not ready`) when the prompt did not come
+   *   up within {@link VIBE_LOCAL_PROMPT_WAIT_TIMEOUT_MS}; nothing was typed
+   */
+  private async waitForPrompt(sessionName: string): Promise<void> {
+    const startTime = Date.now();
+    while (Date.now() - startTime < VIBE_LOCAL_PROMPT_WAIT_TIMEOUT_MS) {
+      try {
+        const output = await capturePane(sessionName, VIBE_LOCAL_PROMPT_CAPTURE_LINES);
+        if (isVibeLocalComposerReady(output)) return;
+        if (detectSessionStatus(output, 'vibe-local').hasActivePrompt) return;
+      } catch (error: unknown) {
+        // Capture may fail - continue polling
+        logger.debug('vibe-local-prompt-capture-failed', { sessionName, error: getErrorMessage(error) });
+      }
+      await new Promise((resolve) => setTimeout(resolve, VIBE_LOCAL_PROMPT_POLL_INTERVAL_MS));
+    }
+    logger.info('vibe-local-prompt-not-detected');
+    throw new Error('Vibe Local prompt not ready: timed out waiting for the input prompt before sending');
   }
 
   /**

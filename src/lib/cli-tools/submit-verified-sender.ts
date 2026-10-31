@@ -298,6 +298,82 @@ export interface SubmitVerifiedSendParams {
    * at the poll interval).
    */
   typedBodyAttempts?: number;
+  /**
+   * The tool's own "the input prompt is up" test, asked again under the input
+   * lock (Issue #4040).
+   *
+   * A tool's readiness wait runs before the lock, so its "ready" may be stale
+   * by the time this send owns the composer: another send went first (a picker
+   * it opened may still be up), the session was relaunched, or the pane went
+   * back to loading. When given, the newest frame read under the lock — after
+   * the carried paste wait — must pass it before any key. A frame that does not
+   * is read again for at most {@link INPUT_READINESS_UNDER_LOCK_WAIT_MS}, each
+   * read through {@link recheckComposerBeforeInput}, so a dialog that opens is
+   * refused at once (`prompt-waiting`) and the lock let go rather than held for
+   * a person. Past that the send THROWS with a `prompt not ready` wording
+   * (`not-sent` / `prompt-not-ready`). Omitted, nothing changes.
+   */
+  readiness?: InputReadiness;
+}
+
+/** A tool's readiness test for the frames read under the input lock (Issue #4040). */
+export interface InputReadiness {
+  /** The tool's name as the refusal message spells it (`copilot`, `Vibe Local`, `OpenCode`). */
+  label: string;
+  /** Whether `frame` (raw `capture-pane -e` output) shows the input prompt ready for a body. */
+  isReady(frame: string): boolean;
+}
+
+/**
+ * How long a send that owns the input lock keeps re-reading a pane whose input
+ * prompt is not up (Issue #4040). Short on purpose: the tool's own wait (15 s)
+ * ran before the lock, and every writer behind this one waits as long. It
+ * covers a picker or a redraw finishing just as the lock changed hands.
+ */
+export const INPUT_READINESS_UNDER_LOCK_WAIT_MS = 2000;
+
+/** How often that wait reads the pane. */
+const INPUT_READINESS_UNDER_LOCK_POLL_MS = 200;
+
+function isReadyFrame(readiness: InputReadiness, frame: string): boolean {
+  try {
+    return readiness.isReady(frame);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The newest frame under the lock that passes the tool's readiness test
+ * (Issue #4040), or a refusal before any key.
+ *
+ * The refusal does not quote the frame: `classifySendFailure` reads this
+ * wording, and a screen saying `submit could not be confirmed` would turn it
+ * into `indeterminate`.
+ *
+ * @throws Error `<label> prompt not ready …` (`not-sent` / `prompt-not-ready`);
+ *   the re-check's own refusals (dialog, unreadable pane); a lost lock
+ */
+async function awaitReadyUnderLock(
+  readiness: InputReadiness | undefined,
+  frame: string,
+  params: { sessionName: string; cliToolId: CLIToolType; ticket: InstanceInputTicket }
+): Promise<string> {
+  if (readiness === undefined || isReadyFrame(readiness, frame)) return frame;
+  const { sessionName, cliToolId, ticket } = params;
+  const deadline = Date.now() + INPUT_READINESS_UNDER_LOCK_WAIT_MS;
+  let current = frame;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, INPUT_READINESS_UNDER_LOCK_POLL_MS));
+    assertInputOwner(ticket, cliToolId, 'the readiness re-read', false);
+    current = await recheckComposerBeforeInput(sessionName, cliToolId);
+    if (isReadyFrame(readiness, current)) return current;
+  }
+  logger.warn('input-readiness-not-ready-under-lock', { sessionName, cliToolId });
+  throw new Error(
+    `${readiness.label} prompt not ready under the input lock: ` +
+      `no input prompt within ${INPUT_READINESS_UNDER_LOCK_WAIT_MS}ms, so nothing was typed (Issue #4040)`
+  );
 }
 
 /** Run one tmux command, optionally feeding it `input` on stdin. */
@@ -1002,6 +1078,11 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
   if (await waitOutCarriedPaste(sessionName, cliToolId, composer, ticket)) {
     frame = await recheckComposerBeforeInput(sessionName, cliToolId);
   }
+  // Issue #4040: the tool's readiness, asked again of that same newest frame.
+  // A dialog was refused just above (and is, at once, on every re-read); this
+  // refuses a pane that went back to loading, or still shows the picker of the
+  // send before, after the tool's own wait said "ready".
+  frame = await awaitReadyUnderLock(params.readiness, frame, { sessionName, cliToolId, ticket });
 
   // 0. Empty the composer first (Issue #1880). The body below is typed at the
   //    TUI's current cursor position, so anything already in the box would be
