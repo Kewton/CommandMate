@@ -142,6 +142,20 @@ import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
 // are hoisted above every import, so the mocks above still apply.
 import { cleanupWorktreeSessions } from '@/lib/session-cleanup';
 import { capturePane, sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
+import { buildOpencodeComposerFrame } from '@tests/fixtures/opencode-launch-boot-11821';
+
+/**
+ * Issue #4040: vibe-local 1.3.3's input prompt, ready — the empty newest
+ * `ctx:N% ❯` row with only the footer below it
+ * (`tests/fixtures/vibe-local-readiness-4040/boot-ready.txt`).
+ */
+const VIBE_LOCAL_READY_FRAME = [
+  'ctx:4% ❯',
+  '─'.repeat(80),
+  ' ✦ Ready │ ctx:4% │ qwen3-coder:30b',
+  ' ESC: stop',
+  '',
+].join('\n');
 
 describe('tmux capture cache invalidation (Issue #405)', () => {
   beforeEach(() => {
@@ -216,9 +230,16 @@ describe('tmux capture cache invalidation (Issue #405)', () => {
 
   describe('opencode.ts', () => {
     it('should invalidate cache after sendMessage', async () => {
-      const opencode = new OpenCodeTool();
-      await opencode.sendMessage('test-wt', 'hello');
-      expect(invalidateCacheSpy).toHaveBeenCalledWith('mcbd-opencode-test-wt');
+      // Issue #4040: the send types nothing until the input box is on screen
+      // and empty, so the pane shows opencode's empty composer.
+      vi.mocked(capturePane).mockResolvedValue(buildOpencodeComposerFrame());
+      try {
+        const opencode = new OpenCodeTool();
+        await opencode.sendMessage('test-wt', 'hello');
+        expect(invalidateCacheSpy).toHaveBeenCalledWith('mcbd-opencode-test-wt');
+      } finally {
+        vi.mocked(capturePane).mockResolvedValue('❯ \n› ');
+      }
     });
 
     it('should invalidate cache after killSession', async () => {
@@ -234,9 +255,16 @@ describe('tmux capture cache invalidation (Issue #405)', () => {
 
   describe('vibe-local.ts', () => {
     it('should invalidate cache after sendMessage', async () => {
-      const vibeLocal = new VibeLocalTool();
-      await vibeLocal.sendMessage('test-wt', 'hello');
-      expect(invalidateCacheSpy).toHaveBeenCalledWith('mcbd-vibe-local-test-wt');
+      // Issue #4040: the send types nothing until the newest `ctx:N% ❯` row is
+      // empty with only vibe-local 1.3.3's footer below it.
+      vi.mocked(capturePane).mockResolvedValue(VIBE_LOCAL_READY_FRAME);
+      try {
+        const vibeLocal = new VibeLocalTool();
+        await vibeLocal.sendMessage('test-wt', 'hello');
+        expect(invalidateCacheSpy).toHaveBeenCalledWith('mcbd-vibe-local-test-wt');
+      } finally {
+        vi.mocked(capturePane).mockResolvedValue('❯ \n› ');
+      }
     });
   });
 
