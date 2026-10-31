@@ -52,6 +52,8 @@ const ROSTER = [
 ];
 
 let detailOk = false;
+/** A detail answer that carries no roster (older server / partial body). */
+let detailWithoutRoster = false;
 
 function jsonResponse(body: unknown): Response {
   return {
@@ -70,7 +72,7 @@ function installFetch(): void {
     if (!detailOk) throw new TypeError('Failed to fetch');
     return jsonResponse({
       id: WORKTREE_ID, name: 'feature/4034', path: '/repo/4034', repositoryPath: '/repo', repositoryName: 'Repo',
-      selectedAgents: ['claude', 'codex'], agentInstances: ROSTER,
+      selectedAgents: ['claude', 'codex'], ...(detailWithoutRoster ? {} : { agentInstances: ROSTER }),
     });
   }));
 }
@@ -89,6 +91,7 @@ beforeEach(() => {
   window.localStorage.clear();
   nav.search = new URLSearchParams();
   detailOk = false;
+  detailWithoutRoster = false;
   installFetch();
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
@@ -141,5 +144,66 @@ describe('useWorktreeDetailController — roster fetch keeps failing (Issue #403
     expect(result.current.rosterReady).toBe(true);
     expect(result.current.activeInstanceId).toBe('claude');
     expect(window.localStorage.getItem(STORAGE_KEY)).toBe('claude');
+  });
+
+  it('positive: a saved id the roster lacks is corrected in storage too once the roster lands (after the fallback)', async () => {
+    window.localStorage.setItem(STORAGE_KEY, 'claude-gone');
+    const { result } = renderHook(() => useWorktreeDetailController({ worktreeId: WORKTREE_ID }));
+
+    await advance(LADDER_MS);
+    expect(result.current.activeInstanceId).toBe('claude');
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBe('claude-gone');
+
+    detailOk = true;
+    await advance(10_000);
+    expect(result.current.rosterReady).toBe(true);
+    expect(result.current.activeInstanceId).toBe('claude');
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBe('claude');
+  });
+
+  it('positive: the fallback does not overwrite the saved activeCliTab', async () => {
+    window.localStorage.setItem(STORAGE_KEY, 'claude-cc');
+    window.localStorage.setItem(`activeCliTab-${WORKTREE_ID}`, 'codex');
+    const { result } = renderHook(() => useWorktreeDetailController({ worktreeId: WORKTREE_ID }));
+
+    await advance(LADDER_MS);
+    expect(result.current.activeInstanceId).toBe('claude');
+    expect(result.current.activeCliTab).toBe('claude');
+    expect(window.localStorage.getItem(`activeCliTab-${WORKTREE_ID}`)).toBe('codex');
+  });
+
+  it('positive: switching worktrees drops the failure verdict, so a stand-in is not forced on the way back', async () => {
+    window.localStorage.setItem(STORAGE_KEY, 'claude-cc');
+    const { result, rerender } = renderHook(
+      ({ id }) => useWorktreeDetailController({ worktreeId: id }),
+      { initialProps: { id: WORKTREE_ID } },
+    );
+    await advance(LADDER_MS);
+    expect(result.current.activeInstanceId).toBe('claude');
+
+    rerender({ id: 'wt-other' });
+    await advance(0);
+    rerender({ id: WORKTREE_ID });
+    await advance(0);
+    // One fresh failure only: a leftover verdict would push this back to the seed's first.
+    act(() => result.current.setActiveInstanceId('claude-cc'));
+    await advance(0);
+    expect(result.current.activeInstanceId).toBe('claude-cc');
+  });
+
+  it('positive: a successful detail fetch clears the verdict even when it carries no roster', async () => {
+    window.localStorage.setItem(STORAGE_KEY, 'claude-cc');
+    const { result } = renderHook(() => useWorktreeDetailController({ worktreeId: WORKTREE_ID }));
+    await advance(LADDER_MS);
+    expect(result.current.activeInstanceId).toBe('claude');
+
+    detailOk = true;
+    detailWithoutRoster = true;
+    await advance(10_000);
+    // No roster arrived, but the fetch works again: the seed is no longer a failure fallback.
+    expect(result.current.rosterReady).toBe(false);
+    act(() => result.current.setActiveInstanceId('claude-cc'));
+    await advance(0);
+    expect(result.current.activeInstanceId).toBe('claude-cc');
   });
 });

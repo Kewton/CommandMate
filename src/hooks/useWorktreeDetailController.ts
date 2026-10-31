@@ -737,6 +737,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       detailRetryAttemptRef.current = 0;
       cancelDetailRetry();
       setIsReconnecting(false);
+      setRosterFailedWorktreeId(null);
       // Update ref for next comparison
       prevWorktreeIdRef.current = worktreeId;
     }
@@ -825,6 +826,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       // value) on the overwhelmingly common already-healthy tick.
       detailFailureCountRef.current = 0;
       detailRetryAttemptRef.current = 0;
+      setRosterFailedWorktreeId(null);
       cancelDetailRetry();
       setIsReconnecting(false);
       setIsAuthExpired(false);
@@ -1213,6 +1215,13 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         setActiveInstanceId(saved);
         return;
       }
+      // The saved id is not in the roster either: correct it as #4013 does,
+      // saved value included (the fallback id is displayed, so the check
+      // below would leave the stale one in storage).
+      if (saved) {
+        setActiveInstanceId(displayedInstances[0].id);
+        return;
+      }
     }
     if (!displayedInstances.some(inst => inst.id === activeInstanceId)) {
       setActiveInstanceId(displayedInstances[0].id);
@@ -1226,7 +1235,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   useEffect(() => {
     const inst = displayedInstances.find(i => i.id === activeInstanceId);
     if (inst && inst.cliTool !== activeCliTab) {
-      setActiveCliTab(inst.cliTool);
+      // Issue #4034: during the roster-failure fallback the instance is a
+      // stand-in, so its tool is shown without overwriting the saved tab.
+      if (rosterFallbackActiveRef.current) setActiveCliTabRaw(inst.cliTool);
+      else setActiveCliTab(inst.cliTool);
     }
   }, [displayedInstances, activeInstanceId, activeCliTab, setActiveCliTab]);
 

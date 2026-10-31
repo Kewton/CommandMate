@@ -440,15 +440,11 @@ export async function fetchApiResponse(
   for (let attempt = 0; ; attempt++) {
     assertOnline();
     try {
-      const attemptStartedAt = Date.now();
       const response = await fetchOnce(url, init, effectiveTimeout);
       noteReachability(true);
       if (isRetryableStatus(response.status) && canRetry(attempt)) {
         await delay(computeRetryDelayMs(attempt));
         continue;
-      }
-      if (effectiveTimeout > 0) {
-        bodyDeadlines.set(response, { deadlineAt: attemptStartedAt + effectiveTimeout, timeoutMs: effectiveTimeout });
       }
       return response;
     } catch (error) {
@@ -461,44 +457,6 @@ export async function fetchApiResponse(
       await delay(computeRetryDelayMs(attempt));
     }
   }
-}
-
-/**
- * When the attempt that produced a response runs out of time (Issue #4034).
- * `fetchOnce` stops its clock at the headers, so a caller that goes on to read
- * the body needs the instant to cut that read at. Absent for a request with no
- * timeout.
- */
-const bodyDeadlines = new WeakMap<Response, { deadlineAt: number; timeoutMs: number }>();
-
-/**
- * Cut a body read at the instant its request's deadline passes (Issue #4034).
- *
- * `fetchOnce` clears its timer when the headers arrive, so a body that stalls
- * afterwards is bounded by nothing. The read keeps running in the background
- * (the abort controller is gone); what the caller gets is the same
- * `timeout` {@link ApiError} a stalled request produces.
- */
-function boundBodyRead<T>(read: Promise<T>, response: Response): Promise<T> {
-  const deadline = bodyDeadlines.get(response);
-  if (!deadline) return read;
-  const { deadlineAt, timeoutMs } = deadline;
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new ApiError(`Request timed out after ${timeoutMs}ms`, 0, undefined, 'timeout')),
-      Math.max(0, deadlineAt - Date.now())
-    );
-    read.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (error: unknown) => {
-        clearTimeout(timer);
-        reject(error);
-      }
-    );
-  });
 }
 
 /**
@@ -519,9 +477,6 @@ async function fetchApi<T>(url: string, options?: ApiRequestOptions): Promise<T>
       ...options,
       headers,
     });
-    // Issue #4034: the request's deadline covers the body too — a server that
-    // sends the headers and then stops must not leave the caller waiting.
-    const withinDeadline = <T>(read: Promise<T>): Promise<T> => boundBodyRead(read, response);
 
     // Detect auth redirect: fetch follows 307 to /login, returning HTML with 200.
     // Check content-type to avoid parsing HTML as JSON.
@@ -531,8 +486,8 @@ async function fetchApi<T>(url: string, options?: ApiRequestOptions): Promise<T>
     }
 
     if (!response.ok) {
-      const errorBody = await withinDeadline(
-        safeParseJson<{ error?: string }>(response, {}, 'error-body')
+      const errorBody = await safeParseJson<{ error?: string }>(
+        response, {}, 'error-body'
       );
       throw new ApiError(
         errorBody.error || `HTTP error ${response.status}`,
@@ -546,7 +501,7 @@ async function fetchApi<T>(url: string, options?: ApiRequestOptions): Promise<T>
       throw formatError;
     }
 
-    return await withinDeadline<T>(response.json());
+    return response.json();
   } catch (error) {
     if (error instanceof ApiError) {
       throw error;
