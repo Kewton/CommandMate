@@ -211,6 +211,53 @@ describe('[#4035] a first prompt the agent never reported is not `sent` (positiv
   });
 });
 
+describe('[#4035] review: the resent Enter and the length of the wait', () => {
+  it('does not resend Enter when the hook reports the prompt as the late body is read', async () => {
+    startSession();
+    // The first Enter was only late: claude draws the body, then takes the Enter
+    // and reports the prompt before the resend would go out.
+    const sent = script(PLACEHOLDER, [[PLACEHOLDER, LATE_BODY]], (_enters, read) => {
+      if (read === 1) reportPrompt();
+    });
+
+    expect(await run(INIT_MESSAGE)).toBeNull();
+    expect(sent.enters()).toBe(1);
+    expect(loggerSpies.warn).not.toHaveBeenCalledWith('submit-not-confirmed:resending-enter', expect.anything());
+    expect(loggerSpies.info).toHaveBeenCalledWith(
+      'submit-confirmed-by-prompt-hook',
+      expect.objectContaining({ sessionName: SESSION, rule: 'D' })
+    );
+  });
+
+  it('waits for the report once per send, not once per read', async () => {
+    startSession();
+    // The body shows up 3 s into the wait; the resent Enter is lost again.
+    const late = Math.floor((PROMPT_REPORT_WAIT_MS * 0.6) / 100);
+    const sent = script(PLACEHOLDER, [[...Array<string>(late).fill(PLACEHOLDER), LATE_BODY], [PLACEHOLDER]]);
+    const startedAt = Date.now();
+    let settledAt = 0;
+    const sending = sendMessageWithSubmitVerification({
+      sessionName: SESSION,
+      message: INIT_MESSAGE,
+      cliToolId: 'claude',
+      textInputWaitMs: 1,
+      verifyDelayMs: 200,
+    }).then(
+      () => null,
+      (error: unknown) => {
+        settledAt = Date.now();
+        return error;
+      }
+    );
+    await vi.advanceTimersByTimeAsync(PROMPT_REPORT_WAIT_MS * 8);
+    const error = await sending;
+
+    expect(classifySendFailure(error)).toEqual({ state: 'indeterminate', reason: 'prompt-unreported' });
+    expect(sent.enters()).toBe(2);
+    expect(settledAt - startedAt).toBeLessThan(PROMPT_REPORT_WAIT_MS + 1000);
+  });
+});
+
 describe('[#4035] ordinary sends are unchanged (negative)', () => {
   it('is sent at once when the hook already arrived by the read-back', async () => {
     startSession();
@@ -343,6 +390,37 @@ describe('[#4035] the next send finds the body the previous one called sent', ()
     );
     expect(getLastSendAttempt(INSTANCE)).toMatchObject({ state: 'indeterminate', reason: 'found-in-composer' });
   });
+
+  it.each([
+    ['by the read-back', (_enters: number, _read: number) => reportPrompt()],
+    ['during the wait', (_enters: number, read: number) => (read === 3 ? reportPrompt() : undefined)],
+  ])(
+    'stays quiet when the body of a send the hook reported %s comes back to the composer (Esc, ↑, typed again)',
+    async (_label, onRead) => {
+      startSession();
+      script(PLACEHOLDER, [[IDLE]], onRead);
+      expect(await run(INIT_MESSAGE)).toBeNull();
+      recordSendAttempt(INSTANCE, { state: 'sent', reason: 'submitted', content: INIT_MESSAGE });
+      vi.clearAllMocks();
+      let cleared = false;
+      vi.mocked(clearComposerLine).mockImplementation(async () => {
+        cleared = true;
+      });
+      vi.mocked(capturePane).mockImplementation(async () => (cleared ? PLACEHOLDER : LATE_BODY));
+      const sending = sendMessageWithSubmitVerification({
+        sessionName: SESSION,
+        message: CONTRACT,
+        cliToolId: 'claude',
+        textInputWaitMs: 1,
+        verifyDelayMs: 1,
+      });
+      await vi.advanceTimersByTimeAsync(5000);
+      await sending;
+
+      expect(loggerSpies.warn).not.toHaveBeenCalledWith('pre-send-found-submitted-body', expect.anything());
+      expect(getLastSendAttempt(INSTANCE)).toMatchObject({ state: 'sent', reason: 'submitted' });
+    }
+  );
 
   it('stays quiet about other text in the composer', async () => {
     await sendWronglyReportedSent();

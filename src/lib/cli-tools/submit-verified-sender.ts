@@ -780,7 +780,9 @@ function needsPromptReport(state: SubmitState, rule: SubmitRule, message: string
  * Watch a session's first prompt until the agent reports it (Issue #4035).
  *
  * Reads the hook record and the composer every {@link PROMPT_REPORT_POLL_MS}
- * for {@link PROMPT_REPORT_WAIT_MS}, without pressing anything:
+ * until `deadline`, without pressing anything. The deadline is the send's, not
+ * the call's: a send that waits again after a resent Enter gets only what is
+ * left of its {@link PROMPT_REPORT_WAIT_MS} (it holds the input lock meanwhile).
  *
  *   - the agent reported the prompt — `received`;
  *   - the screen changes its verdict — generating (A), or the body drawn into
@@ -795,14 +797,14 @@ async function awaitPromptReport(params: {
   composer: ComposerSpec;
   enteredAt: number;
   rule: SubmitRule;
+  deadline: number;
 }): Promise<
   | { verdict: 'received' }
   | { verdict: 'screen'; state: SubmitState; rule: SubmitRule; output: string }
   | { verdict: 'unreported'; rule: SubmitRule }
 > {
-  const { sessionName, message, cliToolId, composer, enteredAt } = params;
+  const { sessionName, message, cliToolId, composer, enteredAt, deadline } = params;
   let rule = params.rule;
-  const deadline = Date.now() + PROMPT_REPORT_WAIT_MS;
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, PROMPT_REPORT_POLL_MS));
     if (readPromptSubmitReceipt(sessionName, cliToolId, enteredAt) === 'received') return { verdict: 'received' };
@@ -1082,6 +1084,8 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
   //    was reported "could not be confirmed" — a sent message as exit 99. The
   //    last read sends nothing: no Enter goes out that is not read back.
   const attempts = Math.max(1, verifyAttempts);
+  // Issue #4035: one wait for the agent's report per send, however many reads.
+  let promptReportDeadline: number | null = null;
   for (let attempt = 0; attempt <= attempts; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, verifyDelayMs));
 
@@ -1098,7 +1102,16 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
       // Issue #4035: the screen says only that the body is not in the composer,
       // on a session that has not reported a prompt yet. Watch, without Enter,
       // until the agent reports it or the composer shows the body after all.
-      const watched = await awaitPromptReport({ sessionName, message, cliToolId, composer, enteredAt, rule });
+      promptReportDeadline ??= Date.now() + PROMPT_REPORT_WAIT_MS;
+      const watched = await awaitPromptReport({
+        sessionName,
+        message,
+        cliToolId,
+        composer,
+        enteredAt,
+        rule,
+        deadline: promptReportDeadline,
+      });
       if (watched.verdict === 'unreported') {
         invalidateCache(sessionName);
         logger.error('submit-not-confirmed:prompt-unreported', {
@@ -1124,7 +1137,13 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
     }
 
     if (state === 'submitted') {
-      noteSubmittedBody(sessionName, message);
+      // Issue #4035: only a body the screen alone called submitted is remembered
+      // for the next send's clear. One the agent reported did leave, and the same
+      // text back in the composer is claude restoring it (Esc), the history (↑),
+      // or a person typing it — not a send that never arrived.
+      if (readPromptSubmitReceipt(sessionName, cliToolId, enteredAt) !== 'received') {
+        noteSubmittedBody(sessionName, message);
+      }
       invalidateCache(sessionName);
       return;
     }
@@ -1173,6 +1192,15 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
     if (composerShowsForeignPasteToken(output, cliToolId, message, composer)) {
       logger.warn('submit-not-confirmed:foreign-paste-token', { sessionName, cliToolId, attempt });
       continue;
+    }
+
+    // Issue #4035: the Enter thought lost may only have been late — the agent
+    // reporting the prompt now means it went, and another Enter would land on an
+    // empty composer, or on a dialog that the prompt just opened.
+    if (readPromptSubmitReceipt(sessionName, cliToolId, enteredAt) === 'received') {
+      logger.info('submit-confirmed-by-prompt-hook', { sessionName, cliToolId, attempt, rule });
+      invalidateCache(sessionName);
+      return;
     }
 
     // state === 'pending' — still typed-but-unsent, resend a single Enter and re-check.

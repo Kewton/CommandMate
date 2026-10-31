@@ -157,7 +157,10 @@ function digest(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 16);
 }
 
-/** The sender reported this body submitted on this session. */
+/**
+ * The sender reported this body submitted on this session from the screen
+ * alone — not for one the agent's hook reported, which did leave.
+ */
 export function noteSubmittedBody(sessionName: string, message: string): void {
   const entry = sessions.get(sessionName);
   if (entry === undefined) return;
