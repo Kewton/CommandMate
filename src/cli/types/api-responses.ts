@@ -1677,7 +1677,9 @@ export interface ChatMessage {
    * Issue #3957: present when the send named a bound relay (`relayId`). What
    * the CLI may do with the relay: `not_sent` — nothing reached the worker,
    * withdraw it; `sent` / `unknown` — leave it (the server holds `unknown`).
-   * Also on the error bodies after the reservation.
+   * Also on the error bodies after the reservation. Issue #4011: a send with
+   * no bound relay carries it on its error bodies only (`not_sent` / `unknown`,
+   * once the failure was recorded as its attempt; no 400), never on its 201.
    */
   sendOutcome?: 'sent' | 'not_sent' | 'unknown';
 }
