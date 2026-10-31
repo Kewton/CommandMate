@@ -1,0 +1,49 @@
+{
+  "version": "0.49.2",
+  "date": "2026-10-31",
+  "highlight": {
+    "ja": "起動したばかりの Claude への最初のメッセージが、届いていないのに「送信済み」と表示される問題を直しました。送信や回答が失敗したときも、キーが届いたか・送り直してよいかを正しく伝えるようにしました。",
+    "en": "Fixed the first message to a just-started Claude being reported as sent when it never arrived. When a send or an answer fails, you are now told whether the keys reached the agent and whether it is safe to send again."
+  },
+  "added": [],
+  "improved": [
+    {
+      "ja": "Review の承認一覧やリポジトリの帯・パンくずから開いたときも、応答を待っているエージェントが選ばれた状態で開くようになりました。",
+      "en": "Opening a worktree from the Review approval list, the repository strip or the breadcrumb now also selects the agent that is waiting for you."
+    },
+    {
+      "ja": "CLI の wait・ask・verify の --timeout が、サーバーが応答しないときも含めてコマンド全体の期限として効くようになりました。",
+      "en": "The --timeout of wait, ask and verify in the CLI now limits the whole command, including when the server does not respond."
+    },
+    {
+      "ja": "CLI の respond などが出す次の操作の案内に、対象のエージェントの指定が含まれるようになりました。",
+      "en": "The follow-up hints printed by respond and other CLI commands now include the agent they refer to."
+    }
+  ],
+  "fixed": [
+    {
+      "ja": "起動したばかりの Claude への最初のメッセージが届かず、次の送信が失敗することがある問題を直しました。",
+      "en": "Fixed the first message to a just-started Claude sometimes not arriving and making the next send fail."
+    },
+    {
+      "ja": "同じエージェントを同時に起動しようとしたとき、起動が重なって入力が混ざることがある問題を直しました。",
+      "en": "Fixed overlapping launches of the same agent sometimes mixing up typed input."
+    },
+    {
+      "ja": "回答の途中で止まったとき、一部のキーが届いた可能性があることを知らせるようにしました（スマホと PC の両方）。",
+      "en": "When an answer stops partway, you are now told that some keys may have reached the agent, on both phone and desktop."
+    },
+    {
+      "ja": "スマホで開き直すと、選んでいたエージェントが先頭のエージェントに戻ってしまう問題を直しました。",
+      "en": "Fixed the selected agent switching back to the first one when a worktree was reopened on the phone."
+    },
+    {
+      "ja": "送信が失敗したとき、送り直してよいかが CLI に伝わらないことがある問題を直しました。",
+      "en": "Fixed the CLI sometimes not being told whether a failed send is safe to retry."
+    },
+    {
+      "ja": "古い場所のデータベースを移すとき、書き込み途中の更新が失われることがある問題を直しました。",
+      "en": "Fixed recent changes sometimes being lost when a database was moved from its old location."
+    }
+  ]
+}
