@@ -56,6 +56,12 @@ export type SendAttemptReason =
   | 'relay-reservation-lost'
   /** `not-sent`: the pane could not be re-read under the input lock, so nothing was typed (#3945). */
   | 'recheck-failed'
+  /**
+   * `not-sent`: a body sent as one paste could not be loaded into the tmux
+   * buffer (`load-buffer` failed), so `paste-buffer` never ran and nothing of
+   * the body reached the pane (#4011/#4031).
+   */
+  | 'paste-not-started'
   /** `indeterminate`: the body was typed, did not land intact, and was taken back out best-effort (#2464/#3366). */
   | 'body-not-landed'
   /** `indeterminate`: an autocompletion replaced the body; the line was cleared best-effort (#1501). */
@@ -91,6 +97,16 @@ export interface LastSendAttempt {
  * send before any body is typed (Issue #3772). Matched by code, never by wording.
  */
 export const PLAN_REVIEW_SEND_REFUSED_CODE = 'PLAN_REVIEW_SEND_REFUSED';
+
+/**
+ * `code` on the error a long body's paste throws when `load-buffer` failed
+ * (Issue #4031): `paste-buffer` never ran, so none of the body reached the
+ * pane. The tools wrap the error (`Failed to send message to <tool>: …`) with
+ * it as `cause`, and the send's outcome is read off that chain by code — the
+ * wording is shared with nothing, but a `paste-buffer` failure's is
+ * (`Failed to paste message into tmux session`) and that one is not known safe.
+ */
+export const PASTE_NOT_STARTED_CODE = 'PASTE_NOT_STARTED';
 
 /**
  * `code` on the errors the input re-check throws before any key

@@ -362,7 +362,11 @@ const SOURCE_LABEL: Record<StructuredPromptSource, string> = {
 export function buildStructuredPromptQuestion(
   worktreeId: string,
   facts: StructuredPromptFacts,
+  instanceId?: string,
 ): string {
+  // Issue #4031: the `respond` this names goes to the instance whose prompt it
+  // is. Without an instance (the primary) the sentence is as before.
+  const target = instanceId ? ` --instance ${instanceId}` : '';
   const parts = [
     `A dialog is open in ${worktreeId}: the agent reported it via ${SOURCE_LABEL[facts.source]}` +
       `${facts.toolName ? ` for ${facts.toolName}` : ''}, but the detection layer published no ` +
@@ -373,17 +377,17 @@ export function buildStructuredPromptQuestion(
     // agent is holding, not a line on a screen — so the guidance says which one
     // to send instead of warning that none of them can be trusted.
     parts.push(
-      `Answer it with \`commandmate respond ${worktreeId} <number>\`: ` +
+      `Answer it with \`commandmate respond ${worktreeId} <number>${target}\`: ` +
         facts.decisionOptions
           .map((option) => `${option.number} = ${option.label} (${option.reply})`)
           .join(', ') +
         `. The reply goes to the agent's own API, so no keys are sent to the terminal ` +
-        `and the label works too (\`respond ${worktreeId} "Allow once"\`).`,
+        `and the label works too (\`respond ${worktreeId} "Allow once"${target}\`).`,
     );
   } else {
     parts.push(
       `Answer it in the terminal, or send the option NUMBER with ` +
-        `\`commandmate respond ${worktreeId} <number>\` — yes/no is not resolved on a numbered ` +
+        `\`commandmate respond ${worktreeId} <number>${target}\` — yes/no is not resolved on a numbered ` +
         `dialog (Issue #1681).`,
     );
   }
@@ -412,7 +416,7 @@ export function buildStructuredPromptQuestion(
       `The agent asked${questionCount > 1 ? ` ${questionCount} questions, the first being` : ''}: ` +
         `"${question}" — offering: ${labels.join(' / ')}. ` +
         (answerable
-          ? `Answer it with \`commandmate respond ${worktreeId} <number>\`: ` +
+          ? `Answer it with \`commandmate respond ${worktreeId} <number>${target}\`: ` +
             labels.map((label, index) => `${index + 1} = ${label}`).join(', ') +
             `. The number is this list's own position and the reply goes to the agent's own ` +
             `API, so no keys are sent to the terminal (the label works too).`
@@ -427,11 +431,12 @@ export function buildStructuredPromptQuestion(
 export function buildStructuredPromptData(
   worktreeId: string,
   facts: StructuredPromptFacts,
+  instanceId?: string,
 ): StructuredPromptWaitingData {
   return {
     type: UNCLASSIFIED_PROMPT_TYPE,
     status: 'pending',
-    question: buildStructuredPromptQuestion(worktreeId, facts),
+    question: buildStructuredPromptQuestion(worktreeId, facts, instanceId),
     options: [],
     source: facts.source,
     ...(facts.message ? { message: facts.message } : {}),
@@ -457,11 +462,12 @@ export function buildStructuredPromptData(
 export function buildStructuredPromptHistoryRecord(
   worktreeId: string,
   facts: StructuredPromptFacts,
+  instanceId?: string,
 ): StructuredPromptHistoryRecord {
   return {
     type: UNCLASSIFIED_PROMPT_TYPE,
     status: 'unclassified',
-    question: buildStructuredPromptQuestion(worktreeId, facts),
+    question: buildStructuredPromptQuestion(worktreeId, facts, instanceId),
     options: [],
     source: facts.source,
     ...(facts.message ? { message: facts.message } : {}),

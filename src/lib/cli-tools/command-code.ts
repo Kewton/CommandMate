@@ -420,7 +420,8 @@ export class CommandCodeTool extends BaseCLITool {
     } catch (error: unknown) {
       // Issue #3006: passed through unwrapped so its `code` reaches the route.
       if (isSessionStartTimeoutError(error)) throw error;
-      const wrapped = new Error(`Failed to send message to Command Code: ${getErrorMessage(error)}`);
+      // Issue #4031: the cause keeps a failed `load-buffer`'s code (`classifySendFailure`).
+      const wrapped = new Error(`Failed to send message to Command Code: ${getErrorMessage(error)}`, { cause: error });
       // Issue #3772: the plan review refusal comes before the body; keep its code.
       if ((error as { code?: unknown } | null)?.code === PLAN_REVIEW_SEND_REFUSED_CODE) {
         throw Object.assign(wrapped, { code: PLAN_REVIEW_SEND_REFUSED_CODE });

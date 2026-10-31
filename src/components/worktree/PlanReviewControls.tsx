@@ -80,6 +80,8 @@ const KNOWN_REFUSAL_KEYS: Record<string, string> = {
   plan_review_nothing_to_submit: 'planReview.refusal.nothingToSubmit',
   plan_review_invalid_request: 'planReview.refusal.invalidRequest',
   plan_review_not_active: 'planReview.refusal.notActive',
+  // Issue #4031: the keys stopped part-way (500, `keysSent: true`) — look first.
+  answer_input_lost: 'planReview.refusal.inputLost',
 };
 
 interface PlanReviewError {

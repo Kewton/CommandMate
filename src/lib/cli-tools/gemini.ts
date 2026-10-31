@@ -313,7 +313,8 @@ export class GeminiTool extends BaseCLITool {
       logger.info('sent-message-to-gemini-session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
-      throw new Error(`Failed to send message to Gemini: ${errorMessage}`);
+      // Issue #4031: the cause keeps a failed `load-buffer`'s code (`classifySendFailure`).
+      throw new Error(`Failed to send message to Gemini: ${errorMessage}`, { cause: error });
     }
   }
 

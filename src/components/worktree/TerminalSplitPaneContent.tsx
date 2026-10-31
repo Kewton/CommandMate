@@ -112,8 +112,8 @@ import {
 import { buildComposerTarget } from '@/components/worktree/terminal-split-pane-content/composer-target';
 import { buildDecisionRespondBody, buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import {
-  PROMPT_RESPONSE_NOTICES,
-  readPromptResponseOutcome,
+  promptResponseNotice,
+  readPromptResponseReply,
   type PromptResponseOutcome,
 } from '@/lib/prompt-response-outcome';
 import { withToolDecisionLabels } from '@/components/worktree/prompt-decision-id';
@@ -634,6 +634,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       markPromptSubmitted();
       setPromptAnswering(true);
       let outcome: PromptResponseOutcome;
+      // Issue #4031: a failure stopped part-way (keys may be on the pane).
+      let partial = false;
       try {
         // Issue #1932: an approval the agent named by id goes to `/respond`,
         // which delivers the verdict over the agent's own API. It cannot go to
@@ -670,7 +672,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             body: JSON.stringify(requestBody),
           },
         );
-        outcome = await readPromptResponseOutcome(response);
+        ({ outcome, partial } = await readPromptResponseReply(response));
       } catch (err) {
         // The request got no reply at all.
         console.error('[TerminalSplitPaneContent] prompt response error:', err);
@@ -688,7 +690,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
         if (outcome === 'answered') {
           clearPrompt();
         } else {
-          const notice = PROMPT_RESPONSE_NOTICES[outcome];
+          const notice = promptResponseNotice(outcome, partial);
           showToast?.(t(notice.messageKey), notice.type);
         }
         await refresh();

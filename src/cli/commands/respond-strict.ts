@@ -25,7 +25,8 @@ import {
   UNNUMBERED_STRICT_RESPOND_KINDS,
 } from '../../lib/prompt-observation/kinds';
 import type { StrictRespondResult } from '../../lib/prompt-observation/types';
-import { resolveCommandTarget } from './command-target';
+import { resolveCommandTarget, type CommandTarget } from './command-target';
+import { paneCaptureCommand, targetFlags } from '../utils/follow-up-command';
 
 /** Mirrors the server's check. */
 const OPERATION_ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
@@ -179,7 +180,31 @@ function verdictOfApiError(error: ApiError, options: RespondOptions, operationId
   );
 }
 
-function printResult(result: StrictRespondResult, options: RespondOptions): void {
+/**
+ * The commands the strict respond's failure hints name (Issue #4031), aimed at
+ * the target the request resolved to (#3982's `followUpCommand`). A request
+ * that named no target keeps the hints as they were.
+ */
+function strictRespondHints(
+  worktreeId: string,
+  target: CommandTarget,
+): { prompt: string; look: string } {
+  if (targetFlags(target) === '') {
+    return { prompt: '`commandmate prompt`', look: '`commandmate prompt` / `capture --pane`' };
+  }
+  // `prompt` takes `--instance` only; `capture` takes either flag.
+  const prompt = target.instanceId
+    ? `\`commandmate prompt ${worktreeId} --instance ${target.instanceId}\``
+    : `\`commandmate prompt ${worktreeId}\``;
+  return { prompt, look: `${prompt} / \`${paneCaptureCommand(worktreeId, target)}\`` };
+}
+
+function printResult(
+  result: StrictRespondResult,
+  options: RespondOptions,
+  worktreeId: string,
+  commandTarget: CommandTarget,
+): void {
   if (options.json) {
     console.log(JSON.stringify(result));
     return;
@@ -195,13 +220,13 @@ function printResult(result: StrictRespondResult, options: RespondOptions): void
   const target = result.observedTarget === null ? '' : ` Observed target: ${result.observedTarget}.`;
   if (result.code === StrictRespondExitCode.NOT_SENT) {
     console.error(`Error: Answer was not sent. Reason: ${result.reason} — ${result.message}${observed}${target}`);
-    console.error('Observe the screen again with `commandmate prompt` before answering.');
+    console.error(`Observe the screen again with ${strictRespondHints(worktreeId, commandTarget).prompt} before answering.`);
   } else {
     console.error(
       `Error: Keys were sent (${result.keysSent}, delivery ${result.delivery}) and the answer is not confirmed. ` +
         `Reason: ${result.reason} — ${result.message}${observed}`,
     );
-    console.error('Do not send it again: look at the pane (`commandmate prompt` / `capture --pane`) first.');
+    console.error(`Do not send it again: look at the pane (${strictRespondHints(worktreeId, commandTarget).look}) first.`);
   }
 }
 
@@ -219,7 +244,8 @@ export async function runStrictRespond(
   }
   const operationId = options.operationId ?? randomUUID();
   const client = new ApiClient({ token: options.token });
-  const { agent, instanceId } = await resolveCommandTarget(client, worktreeId, options.instance, options.agent);
+  const commandTarget = await resolveCommandTarget(client, worktreeId, options.instance, options.agent);
+  const { agent, instanceId } = commandTarget;
 
   const body: Record<string, unknown> = {
     expectScreen: options.expectScreen,
@@ -249,6 +275,6 @@ export async function runStrictRespond(
     // Not this endpoint's answer: whatever served it, nothing says what happened.
     result = localResult(options, operationId, 41, 'response_unknown', 'The server answered with something that is not a strict respond result.');
   }
-  printResult(result, options);
+  printResult(result, options, worktreeId, commandTarget);
   if (result.code !== StrictRespondExitCode.SUCCESS) process.exit(result.code);
 }
