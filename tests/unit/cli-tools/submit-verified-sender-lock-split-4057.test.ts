@@ -4,24 +4,45 @@
  * `complexity` alone, `@typescript-eslint/parser`, the repo's config unused).
  *
  * Positive control: `sendUnderInputLock` is under 25 (it was 31 before the
- * split). Negative control: the same measurement still reports a function of
- * the file that is at 25 (`confirmPasteLanded`, untouched here), so a meter
- * that reads nothing cannot pass the positive control; and the functions the
- * split moved code into are each under 25.
+ * split), and so is each function the split moved code into. Each is looked up
+ * by name in `submit-verified-sender.ts` and the pieces split off it
+ * (`submit-verified-sender-*.ts`, `tests/unit/guards/split-family.ts`), so a
+ * later split of the file (#4056) does not break this test; a name found
+ * nowhere fails.
  *
- * The source is read, never written; nothing is created on disk.
+ * Negative control: a fixture of complexity 25 written in this test is
+ * reported at 25 or more by the same measurement, so a meter that reads
+ * nothing cannot pass the positive control.
+ *
+ * The sources are read, never written; nothing is created on disk.
  *
  * @vitest-environment node
  */
 
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Linter } from 'eslint';
 import * as tsParser from '@typescript-eslint/parser';
+import { inFamily } from '../guards/split-family';
 
-const TARGET = join(process.cwd(), 'src/lib/cli-tools/submit-verified-sender.ts');
+const ORIGIN = 'src/lib/cli-tools/submit-verified-sender.ts';
 const LIMIT = 25;
+
+/** `ORIGIN` and every piece split off it, repo-relative. */
+function familyFiles(): string[] {
+  const dir = 'src/lib/cli-tools';
+  return readdirSync(join(process.cwd(), dir))
+    .map((name) => `${dir}/${name}`)
+    .filter((file) => inFamily(file, ORIGIN));
+}
+
+/** A function of complexity 25 (1 + 24 `if`s), for the negative control. */
+const FIXTURE_NAME = 'fixtureAtTwentyFive';
+const FIXTURE = `export function ${FIXTURE_NAME}(n: number): number {\n${Array.from(
+  { length: LIMIT - 1 },
+  (_, i) => `  if (n === ${i}) return ${i};\n`
+).join('')}  return -1;\n}\n`;
 
 /** Every function's complexity in `source`, by name (ESLint 8 `complexity` messages). */
 function complexities(source: string): Map<string, number> {
@@ -41,19 +62,17 @@ function complexities(source: string): Map<string, number> {
 }
 
 describe('[#4057] sendUnderInputLock split within submit-verified-sender.ts', () => {
-  const measured = complexities(readFileSync(TARGET, 'utf8'));
+  /** Each function's complexity, by name, with the file it was found in. */
+  const measured = new Map<string, { file: string; value: number }>();
+  for (const file of familyFiles()) {
+    for (const [name, value] of complexities(readFileSync(join(process.cwd(), file), 'utf8'))) {
+      measured.set(name, { file, value });
+    }
+  }
 
-  it('positive control: sendUnderInputLock is under 25', () => {
-    expect(measured.get('sendUnderInputLock')).toBeDefined();
-    expect(measured.get('sendUnderInputLock')).toBeLessThan(LIMIT);
-  });
-
-  it('negative control: the meter still reports confirmPasteLanded at 25', () => {
-    expect(measured.get('confirmPasteLanded')).toBeGreaterThanOrEqual(LIMIT);
-  });
-
-  it('negative control: the functions split out are each under 25', () => {
+  it('positive control: sendUnderInputLock and the functions split out are each under 25', () => {
     for (const name of [
+      'sendUnderInputLock',
       'resolveSubmitEnterCount',
       'pasteFailureMayHaveTyped',
       'shouldAwaitTypedBody',
@@ -63,8 +82,13 @@ describe('[#4057] sendUnderInputLock split within submit-verified-sender.ts', ()
       'logClearInputFailed',
       'holdsResendEnter',
     ]) {
-      expect(measured.get(name), name).toBeDefined();
-      expect(measured.get(name), name).toBeLessThan(LIMIT);
+      const found = measured.get(name);
+      expect(found, `${name} not found in ${ORIGIN} or its split pieces`).toBeDefined();
+      expect(found?.value, `${name} (${found?.file})`).toBeLessThan(LIMIT);
     }
+  });
+
+  it('negative control: the same measurement reports a fixture of complexity 25 at 25 or more', () => {
+    expect(complexities(FIXTURE).get(FIXTURE_NAME)).toBeGreaterThanOrEqual(LIMIT);
   });
 });
