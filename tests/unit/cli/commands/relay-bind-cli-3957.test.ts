@@ -314,6 +314,35 @@ describe('what the failed send tells the sender about resending (Issue #3992)', 
   });
 });
 
+// Issue #4011: a plain send (no relay at all) gets the same note from the
+// route's sendOutcome, and opens no relay to cancel.
+describe('a plain send tells the sender about resending too (Issue #4011)', () => {
+  const NOT_SENT_NOTE = 'it is safe to send it again';
+  const UNKNOWN_NOTE = 'commandmate capture wt-b --pane';
+
+  it('sendOutcome not_sent: "send it again", no relay request', async () => {
+    const calls = mockRoutes([sendRoute({ status: 500, data: { error: 'prompt not ready', sendOutcome: 'not_sent' } })]);
+    await runUntilExit(() => runSend(['wt-b', 'x']));
+    expect(stderr()).toContain(NOT_SENT_NOTE);
+    expect(stderr()).not.toContain(UNKNOWN_NOTE);
+    expect(calls.some((c) => c.url.includes('/api/relays'))).toBe(false);
+  });
+
+  it('sendOutcome unknown: "check the pane before resending"', async () => {
+    mockRoutes([sendRoute({ status: 500, data: { error: 'tmux went away', sendOutcome: 'unknown' } })]);
+    await runUntilExit(() => runSend(['wt-b', 'x']));
+    expect(stderr()).toContain(UNKNOWN_NOTE);
+    expect(stderr()).not.toContain(NOT_SENT_NOTE);
+  });
+
+  it('negative control: no sendOutcome (an older server) adds neither note', async () => {
+    mockRoutes([sendRoute({ status: 500, data: { error: 'boom' } })]);
+    await runUntilExit(() => runSend(['wt-b', 'x']));
+    expect(stderr()).not.toContain(NOT_SENT_NOTE);
+    expect(stderr()).not.toContain(UNKNOWN_NOTE);
+  });
+});
+
 describe('relays --id (Issue #3957)', () => {
   it('prints one closed relay with its send state, overlap and hold reason', async () => {
     mockRoutes([

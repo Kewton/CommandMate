@@ -119,8 +119,9 @@ async function resolveBoundSendOutcome(
 
 /**
  * What to tell the sender about resending a failed send, from the server's
- * `sendOutcome` on the error (Issue #3992). Null when the error carries none
- * (a send that named no bound relay, an older server) or says `sent`.
+ * `sendOutcome` on the error (Issue #3992). Issue #4011: the route puts it on
+ * every failure recorded as the send's attempt, bound relay or not. Null when
+ * the error carries none (a 400, an older server) or says `sent`.
  *
  * @param target - The resolved target, so the `capture` reads the pane the
  *   message went to (Issue #3982); omitted, the hint names no target

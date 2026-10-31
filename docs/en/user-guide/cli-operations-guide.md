@@ -663,7 +663,7 @@ To answer a screen only while it is still the one observed, pass its kind and to
 | `autoYes.contractEvaluation` | The contract's policy applied to this screen **now** (`policy-withholds` + reason / `base-withholds` + reason / `policy-permits` / `no-base-answer` / `not-evaluated`). `base-withholds` (Issue #3822) means the base rules withheld the answer before the contract was read, with or without a contract (today only `allow-once-unidentified`; changing the contract does not bring the answer back). Reasons use the `AutoYesSuppressionReason` words ([reason table](#autoyeslastsuppression-observing-a-policy-suppression-issue-1684)) |
 | `lastSend` | How the last send to this instance ended (Issue #3759): `{ at, state, reason }`. `state` is `not-sent` (it failed before any key of the body was typed, e.g. `prompt-not-ready`) / `sent` (the submit was confirmed) / `indeterminate` (it failed after part of it may have been typed, or the outcome could not be read back; `reason: composer-residue` when the body is still in the composer). Null when this server has no record since it started; absent from an older server . The `not-sent` reasons include, besides `prompt-not-ready`, those from the input lock (Issue #3945): `input-lock-timeout` (the wait limit passed) / `session-replaced` (the session was recreated while waiting) / `input-lock-lost` (the lock's ownership was lost mid-input), `recheck-failed` (the re-read just before typing failed), and `relay-reservation-lost` (Issue #3992: the reservation of the bound relay a `--reply-to` / `ask --async` send went in under was lost — cancelled, expired or taken by another send — right before the body); none of them typed any key of the body. The unsent bar's Clear (`POST /api/worktrees/:id/clear-composer`) returns 409 `INSTANCE_INPUT_BUSY` when it cannot get the same input lock or the session was recreated (wait a moment and retry), and returns HTTP 200 with `cleared: false` when the text could not be cleared |
 
-**Whatever `lastSend` says, CommandMate never resends.** The sender — you or the supervising agent — does. Resend a `not-sent` message yourself once the input prompt is back. **Do not resend an `indeterminate` one** before checking the pane with `commandmate capture <worktree-id> --pane` (is the body still in the composer, or was it already submitted?); resending blind can deliver it twice. A `send` that fails with `prompt not ready` and the like carries the same state in its error (`[send state: not-sent (prompt-not-ready): …]`).
+**Whatever `lastSend` says, CommandMate never resends.** The sender — you or the supervising agent — does. Resend a `not-sent` message yourself once the input prompt is back. **Do not resend an `indeterminate` one** before checking the pane with `commandmate capture <worktree-id> --pane` (is the body still in the composer, or was it already submitted?); resending blind can deliver it twice. A `send` that fails with `prompt not ready` and the like carries the same state in its error (`[send state: not-sent (prompt-not-ready): …]`). The send API's failure answer carries `sendOutcome` even when the send is not tied to a relay, whenever the failure was recorded as its `lastSend` (`not_sent` for `not-sent`, `unknown` otherwise; another server's session (409), a session still starting (503 `SESSION_STARTING`) and a failed start are `not_sent`; a 400 refusal, which records nothing, carries none), and the CLI prints one stderr line saying either that it is safe to send again or to check with `commandmate capture <worktree-id> --pane` first (Issue #4011).
 
 **A missing record (`pollerRecord: null`) does not mean Auto-Yes can answer.** A poller that never reached the screen records nothing either (Issue #3746).
 `policy-permits` says only that the contract would not stop it; the poller's other gates (the tool-specific dialog reader, …) are not part of it.
@@ -2039,6 +2039,22 @@ commandmate instances <worktree-id> kill <instance-id>                 # Stop ju
 ```
 
 `kill` also disables Auto-Yes for the instances it stops (Auto-Yes of instances it did not stop is kept).
+A successful `kill` (and `remove --kill`) appends one line to `~/.commandmate/session-kills/<UTC date>.jsonl`
+(kept 30 days): the worktree and instance, the tmux sessions the server says it stopped (`killedSessions`),
+and where it was asked from (cwd and tmux session). The server records its own kills there too — the
+kill-session API (the UI's stop button) and the cleanup of worktrees that sync or a repository removal dropped.
+
+The env-clean verification gate sets a vanished sibling session apart as `external` instead of failing on it
+only when a CLI line names exactly that session and its caller is known not to be the worker: its cwd is a
+sibling directory of the task's worktree (the primary checkout or another worktree), or it ran inside another
+worktree's tmux session, and neither is the task's. Still a failure (Issue #3993, #1624): a worker stopping its
+neighbour itself; a caller outside tmux in a directory that is no worktree (`/tmp`, `$HOME`); the UI's stop
+button, the server's cleanup (`commandmate sync`, repository removal) and bare API calls such as curl — a
+worker can cause each of these, so the report only notes `· mcbd-…: kill recorded but counted (…)`; another
+instance of the same worktree the line does not name; and any kill that bypassed CommandMate
+(`tmux kill-session`). A worker that `cd`s into the neighbour and stops it from outside tmux cannot be told
+apart by the record and is excused. A CLI kill is written twice (the CLI's line and the server's), and only the
+CLI's line can excuse.
 
 ### Output Example (list)
 
