@@ -22,6 +22,7 @@ import { killSession, hasSession } from './tmux/tmux';
 import { syncWorktreesToDB, type SyncResult } from './git/worktrees';
 import { getAllWorktreePathIds } from './db/worktree-db';
 import { checkSessionOwnership } from './cli-tools/session-ownership';
+import { appendSessionKillRecord, SESSION_KILL_LEDGER_VERSION } from './verification/session-kill-ledger';
 import type { Worktree } from '@/types/models';
 import type Database from 'better-sqlite3';
 
@@ -57,6 +58,35 @@ export interface CleanupResult {
  * Type for the kill session function
  */
 type KillSessionFn = (worktreeId: string, cliToolId: CLIToolType) => Promise<boolean>;
+
+/**
+ * Record a session the server's cleanup stopped (Issue #3993). env-clean never
+ * excuses a removal on this line — the cleanup runs after a `commandmate sync` a
+ * worker can issue — but names it next to the violation. The session name is
+ * the primary instance's, which is what {@link killWorktreeSession} stops; when
+ * it cannot be resolved the line names none. Best effort: never throws.
+ */
+function recordCleanupKill(worktreeId: string, cliToolId: CLIToolType, sessionName?: string): void {
+  let name = sessionName;
+  if (name === undefined) {
+    try {
+      name = CLIToolManager.getInstance().getTool(cliToolId).getSessionName(worktreeId);
+    } catch {
+      name = undefined;
+    }
+  }
+  appendSessionKillRecord({
+    version: SESSION_KILL_LEDGER_VERSION,
+    at: Date.now(),
+    api: 'session-cleanup',
+    origin: 'server',
+    worktreeId,
+    instanceId: cliToolId,
+    sessionNames: name ? [name] : [],
+    callerCwd: null,
+    callerSession: null,
+  });
+}
 
 /**
  * Clean up all CLI tool sessions and pollers for a single worktree
@@ -98,6 +128,7 @@ export async function cleanupWorktreeSessions(
       if (killed) {
         result.sessionsKilled.push(cliToolId);
         logger.info('session:killed', { worktreeId, cliToolId });
+        recordCleanupKill(worktreeId, cliToolId);
       }
     } catch (error) {
       const errorMsg = `${cliToolId}: ${getErrorMessage(error)}`;
@@ -284,6 +315,7 @@ export async function cleanupGlobalSessions(): Promise<number> {
         if (killed) {
           sessionsKilled++;
           logger.info('global-session:killed', { cliToolId, sessionName });
+          recordCleanupKill(GLOBAL_SESSION_WORKTREE_ID, cliToolId, sessionName);
         }
       }
     } catch (error) {

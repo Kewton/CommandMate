@@ -16,6 +16,12 @@
  * reserves that relay before step 4, records its input boundary right before
  * the first key, and answers `sendOutcome` (`sent` / `not_sent` / `unknown`)
  * on every response after the reservation — see `lib/relay/relay-bind`.
+ *
+ * Issue #4011: a send with no bound relay answers `sendOutcome` too, on a
+ * failure recorded as this request's attempt — by the send service, or by this
+ * route before it (another server's session, a start still coming up or
+ * failed: `not_sent`) — so the CLI can say whether it may be sent again. A 400
+ * (the body, `--model`) records none and is answered as before; so is its 201.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -31,7 +37,7 @@ import { probeRunningSessionHookUrl } from '@/lib/cli-tools/base';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType, type ICLITool } from '@/lib/cli-tools/types';
 import { sendUserMessage } from '@/lib/session/send-user-message';
 import { PROMPT_WAITING_CODE } from '@/lib/session/prompt-waiting-guard';
-import type { SendAttemptState } from '@/lib/session/send-attempt-types';
+import type { SendAttemptReason, SendAttemptState } from '@/lib/session/send-attempt-types';
 import {
   describeSendAttemptState,
   getLastSendAttempt,
@@ -71,7 +77,7 @@ import { getAgentEventSource } from '@/lib/hooks/sources/registry';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import type { ChatMessage } from '@/types/models';
 import { checkSessionOwnership, foreignSessionErrorBody, FOREIGN_SESSION_ERROR_CODE } from '@/lib/cli-tools/session-ownership';
-import { reserveRelaySend, type RelaySendBinding } from '@/lib/relay/relay-bind';
+import { reserveRelaySend, type RelaySendBinding, type RelaySendOutcome } from '@/lib/relay/relay-bind';
 import { evaluateRelayAfterSend } from '@/lib/relay/relay-delivery';
 
 const logger = createLogger('api/send');
@@ -246,7 +252,13 @@ export async function POST(
   const relay: RouteRelayState = { binding: null, attempt: null, sent: null };
   const response = await handleSend(request, context, relay);
   const { binding } = relay;
-  if (!binding) return response;
+  if (!binding) {
+    // Issue #4011: whether it may be sent again does not depend on a relay.
+    // Only a failure recorded as this request's attempt says it; a 400 that
+    // records none (validation, `--model`) is answered as before.
+    if (relay.sent || relay.attempt === null) return response;
+    return withBody(response, { sendOutcome: unboundSendOutcome(relay.attempt) });
+  }
 
   // Issue #3957: every answer after the reservation settles the relay and says
   // what the CLI may do with it — withdraw it only on `not_sent`.
@@ -256,13 +268,27 @@ export async function POST(
       : { kind: 'failed', attempt: relay.attempt }
   );
   if (sendOutcome === 'sent') evaluateRelayAfterSend(binding.relayId);
+  return withBody(response, { relayId: binding.relayId, sendOutcome });
+}
+
+/**
+ * Issue #4011: what a failed send with no bound relay says about resending —
+ * `not_sent` only when the attempt was recorded as nothing typed; a submit
+ * it confirmed whose answer then failed is `unknown`, as for a bound send.
+ */
+function unboundSendOutcome(attempt: SendAttemptState): RelaySendOutcome {
+  return attempt === 'not-sent' ? 'not_sent' : 'unknown';
+}
+
+/** The route's answer with `extra` added to its JSON body, status kept. */
+async function withBody(response: Response, extra: Record<string, unknown>): Promise<NextResponse> {
   let body: Record<string, unknown> = {};
   try {
     body = (await response.json()) as Record<string, unknown>;
   } catch {
     // Every answer of this route is JSON; an unreadable one keeps its status.
   }
-  return NextResponse.json({ ...body, relayId: binding.relayId, sendOutcome }, { status: response.status });
+  return NextResponse.json({ ...body, ...extra }, { status: response.status });
 }
 
 async function handleSend(
@@ -442,8 +468,14 @@ async function handleSend(
     // Issue #3759: the attempts this route refuses before the send service are
     // recorded too, so `lastSend` names the latest one.
     const sendAttemptInstance = { worktreeId: id, cliToolId, instanceId: instanceId ?? cliToolId };
+    // Issue #4011: the same record is this request's attempt, so `sendOutcome`
+    // answers `not_sent` for it whether or not a relay is bound.
+    const recordNotSent = (reason: SendAttemptReason): void => {
+      recordSendAttempt(sendAttemptInstance, { state: 'not-sent', reason, content: trimmedContent });
+      relay.attempt = 'not-sent';
+    };
     if (ownership.verdict === 'foreign') {
-      recordSendAttempt(sendAttemptInstance, { state: 'not-sent', reason: 'foreign-session', content: trimmedContent });
+      recordNotSent('foreign-session');
       return NextResponse.json(foreignSessionErrorBody(sessionName, ownership.sessionPath), { status: 409 });
     }
 
@@ -468,7 +500,7 @@ async function handleSend(
       }
     } catch (error: unknown) {
       if (!isSessionStartTimeoutError(error)) throw error;
-      recordSendAttempt(sendAttemptInstance, { state: 'not-sent', reason: 'session-starting', content: trimmedContent });
+      recordNotSent('session-starting');
       return answerSessionStartTimeout(error.message, cliTool, id, instanceId);
     }
 
@@ -532,11 +564,7 @@ async function handleSend(
           return NextResponse.json({ error: error.message }, { status: 400 });
         }
         logger.error('failed-to-start-session:', { error: error instanceof Error ? error.message : String(error) });
-        recordSendAttempt(sendAttemptInstance, {
-          state: 'not-sent',
-          reason: isSessionStartTimeoutError(error) ? 'session-starting' : 'session-start-failed',
-          content: trimmedContent,
-        });
+        recordNotSent(isSessionStartTimeoutError(error) ? 'session-starting' : 'session-start-failed');
         // Issue #1637: a session that is still initializing is not a server
         // fault. The tmux session and the CLI process exist and are coming up,
         // so the honest answer is "temporarily unavailable, retry" — 503 with a

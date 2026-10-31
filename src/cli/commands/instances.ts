@@ -29,7 +29,13 @@ import { resolveSessionTarget, describeSessionTargetConflict } from '../utils/se
 // Issue #2404: "the worktree is not on this server" is a different failure from
 // "the worktree id is wrong", and only the session's own identity can tell them
 // apart.
-import { describeServerMismatch, formatServerMismatchHint } from './whoami';
+import { describeServerMismatch, formatServerMismatchHint, readTmuxSessionName } from './whoami';
+// Issue #3993: each kill is recorded so the env-clean gate can tell a sibling
+// session the orchestrator stopped from one a worker killed.
+import {
+  appendSessionKillRecord,
+  SESSION_KILL_LEDGER_VERSION,
+} from '../../lib/verification/session-kill-ledger';
 import type {
   AutoYesStatesResponse,
   CurrentOutputResponse,
@@ -579,6 +585,37 @@ async function addInstance(
 }
 
 /**
+ * Record a successful kill in the session-kill ledger (Issue #3993): which
+ * worktree and instance, the tmux sessions the server says it stopped
+ * (`killedSessions` of the kill-session response), and who asked — this
+ * process's cwd and tmux session. A response without `killedSessions` (an
+ * older server) records no session, which excuses nothing.
+ * Best effort: the ledger never fails the command, the kill already happened.
+ */
+function recordSessionKill(worktreeId: string, instanceId: string, response: unknown): void {
+  let callerCwd: string | null;
+  try {
+    callerCwd = process.cwd();
+  } catch {
+    callerCwd = null;
+  }
+  const killed = (response as { killedSessions?: unknown } | null)?.killedSessions;
+  appendSessionKillRecord({
+    version: SESSION_KILL_LEDGER_VERSION,
+    at: Date.now(),
+    api: 'kill-session',
+    origin: 'cli',
+    worktreeId,
+    instanceId,
+    sessionNames: Array.isArray(killed)
+      ? killed.filter((name): name is string => typeof name === 'string')
+      : [],
+    callerCwd,
+    callerSession: readTmuxSessionName(),
+  });
+}
+
+/**
  * Remove action: drop an instance from the roster. Kills the session first
  * (when --kill) so the server can still resolve its CLI tool from the roster.
  */
@@ -606,7 +643,8 @@ async function removeInstance(
 
   if (options.kill) {
     try {
-      await client.post(`/api/worktrees/${worktreeId}/kill-session?instance=${encodeURIComponent(instanceId)}`);
+      const killResponse = await client.post<unknown>(`/api/worktrees/${worktreeId}/kill-session?instance=${encodeURIComponent(instanceId)}`);
+      recordSessionKill(worktreeId, instanceId, killResponse);
       console.error(`Session killed: ${instanceId}`);
     } catch (killError) {
       console.error(`Warning: could not kill session for ${instanceId}: ${getErrorMessage(killError)}`);
@@ -663,7 +701,8 @@ async function killInstance(
     process.exit(ExitCode.CONFIG_ERROR);
   }
 
-  await client.post(`/api/worktrees/${worktreeId}/kill-session?instance=${encodeURIComponent(instanceId)}`);
+  const killResponse = await client.post<unknown>(`/api/worktrees/${worktreeId}/kill-session?instance=${encodeURIComponent(instanceId)}`);
+  recordSessionKill(worktreeId, instanceId, killResponse);
   console.error(`Session killed: ${instanceId}`);
 }
 

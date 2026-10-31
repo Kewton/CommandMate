@@ -59,6 +59,14 @@ const E2E_STATE_DIR = path.join(os.homedir(), '.commandmate-e2e');
 const E2E_DB_PATH = path.join(E2E_STATE_DIR, 'cm-e2e.db');
 const E2E_ROOT_DIR = path.join(E2E_STATE_DIR, 'worktrees');
 
+/**
+ * Session-kill ledger of the E2E server (Issue #3993). Its kills and its sync
+ * cleanup would otherwise land in the developer's `~/.commandmate/session-kills/`,
+ * which real env-clean verifications read. Unlike the DB, the ledger has no
+ * system-directory check, so it lives under os.tmpdir().
+ */
+const E2E_SESSION_KILL_LEDGER_ROOT = path.join(os.tmpdir(), 'commandmate-e2e-session-kills');
+
 /** Stops `git worktree list` from discovering a repo above the scratch root. */
 const GIT_CEILING_DIRECTORIES = E2E_STATE_DIR;
 
@@ -164,6 +172,7 @@ export default defineConfig({
       CM_DB_PATH: E2E_DB_PATH,
       CM_ROOT_DIR: E2E_ROOT_DIR,
       GIT_CEILING_DIRECTORIES,
+      CM_SESSION_KILL_LEDGER_ROOT: E2E_SESSION_KILL_LEDGER_ROOT,
       CM_LOG_LEVEL: 'warn',
     },
   },
