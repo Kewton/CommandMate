@@ -35,6 +35,19 @@
  * key back from its successor. `clearSessionStarting` without a token — the
  * kill-session route — drops the record whoever wrote it.
  *
+ * ## The stops that do not forget (Issue #4032)
+ *
+ * Only the kill-session route clears without a token. The other stops of a
+ * session — `session-cleanup`'s `killWorktreeSession` (sync, repository delete)
+ * and `cleanupGlobalSessions` — kill the tmux session directly and call
+ * neither this nor `forgetSessionLaunch`, so a launch they cut short stays the
+ * session's launch: a start that comes in meanwhile joins it and gets its
+ * outcome, and the "starting" record keeps answering. Both last only until the
+ * launch's own bound (`getSessionStartingMaxMs`, which #3981 put on a join's
+ * wait too), and a server shutdown drops both maps. Recorded rather than
+ * changed: `session-cleanup` was outside #4032's scope. A stop that should
+ * forget calls `clearSessionStarting` without a token after its kill.
+ *
  * ## The escape hatches
  *
  * A starting display that never ends would hide a stuck launch, which is worse

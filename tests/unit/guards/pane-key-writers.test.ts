@@ -33,25 +33,45 @@
  *   reason says how it holds the lock); `listed` callers may only go down
  *   ({@link LISTED_CALLER_BASELINE}).
  *
- * Stage 2 (another Issue): once the un-ordered rows are 0, narrow `sendKeys`
- * to a ticket-taking API in the type system.
+ * ## Stage 2 (Issue #4032)
+ *
+ * - Every other key writer of the tmux module (`sendSpecialKey(s)`,
+ *   `clearInputLine`, …, read off the module by `tmuxKeyWriterExports`) is on
+ *   {@link STAGE_2_LEDGER}, by the same rules, with callers of its own
+ *   ({@link STAGE_2_CALLER_LEDGER}). {@link LEDGER} stays the `sendKeys` ledger:
+ *   each ledger is reconciled against the sites of its own writers.
+ * - `send-keys` / `paste-buffer` composed outside the tmux module are on
+ *   {@link RAW_KEY_WRITES}, each with its reason.
+ * - A caller is found through a renamed or namespace import too, and a
+ *   re-export of a caller-held function fails (`<re-export>`).
+ * - A `lock` row's evidence test names the site's function.
+ *
+ * Later (another Issue): once the un-ordered rows are 0, narrow the writers to
+ * a ticket-taking API in the type system.
  *
  * @vitest-environment node
  */
 
-import { describe, expect, it } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { afterEach, describe, expect, it } from 'vitest';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { REPO_ROOT } from './route-tmux-reach';
+import { REPO_ROOT, resolveRepoSpecifier } from './route-tmux-reach';
 import {
   callerFiles,
   candidateFiles,
+  KEY_WRITERS,
   scanCallers,
   scanKeyWriters,
+  scanRawKeyWrites,
   scanReferences,
   scanRepository,
+  scanRepositoryRawWrites,
   srcFiles,
+  TMUX_MODULE,
+  tmuxKeyWriterExports,
   type KeySite,
+  type RawKeyWrite,
 } from './pane-key-writers-scan';
 
 type Kind = 'lock' | 'decided-outside' | 'kill' | 'dead';
@@ -195,26 +215,227 @@ export const LEDGER: readonly LedgerRow[] = [
   { file: 'src/lib/cli-tools/opencode-v2.ts', site: 'OpenCodeV2Tool.killSession', callee: 'sendKeys', kind: 'kill', reason: KILL_REASON },
   { file: 'src/lib/session-key-sender.ts', site: 'stopSession', callee: 'sendKeys', kind: 'kill', reason: KILL_REASON },
   {
-    file: 'src/lib/session-key-sender.ts',
-    site: 'sanitizeSessionEnvironment',
-    callee: 'sendKeys',
-    kind: 'dead',
-    reason: 'No longer called (#3981): `startClaudeSession` types `unset CLAUDECODE` itself, in the launch line’s lock turn. Left in place (outside this Issue’s scope); removing it removes the row.',
-  },
-  {
     file: 'src/lib/pasted-text-helper.ts',
     site: 'detectAndResendIfPastedText',
     callee: 'sendKeys',
     kind: 'dead',
-    reason: 'No module in `src` calls this helper (checked below); recorded rather than deleted, outside this Issue’s scope.',
+    reason: 'No module in `src` calls this helper (checked below). #4032 removed `sanitizeSessionEnvironment`, but not this file: deleting it takes its entry off `.eslintrc.json`’s tmux allowlist too, which was outside #4032’s scope.',
   },
 ];
+
+/** The tmux writers {@link LEDGER} is reconciled against. */
+const SEND_KEYS_WRITERS: readonly string[] = ['sendKeys'];
 
 /**
  * How many un-ordered rows (`decided-outside` + `kill` + `dead`) the ledger
  * may hold. May only go DOWN: lower it when a row moves to `lock` or goes away.
+ * 11 -> 10: #4032 removed `sanitizeSessionEnvironment`.
  */
-export const UNMEDIATED_BASELINE = 11;
+export const UNMEDIATED_BASELINE = 10;
+
+const SPECIAL_KEY_KILL_REASON = `${KILL_REASON} The exit keys here are \`sendSpecialKey(s)\` (#4032).`;
+const STRICT_ANSWER_EVIDENCE = 'tests/unit/lib/session/strict-prompt-answer-input-lock-3952.test.ts';
+const SENDER_EVIDENCE = 'tests/unit/cli-tools/submit-verified-sender-input-lock-3945.test.ts';
+
+/**
+ * Every other key writer of the tmux module (Issue #4032): the keys, the
+ * clearing keys, a person's direct input. The same rules as {@link LEDGER}.
+ */
+export const STAGE_2_LEDGER: readonly LedgerRow[] = [
+  {
+    file: 'src/lib/cli-tools/antigravity.ts',
+    site: 'AntigravityTool.waitForReady',
+    callee: 'sendSpecialKey',
+    kind: 'lock',
+    held: 'lexical',
+    reason: 'agy’s folder-trust Enter in the launch window, as an answer under the lock (#3952).',
+    evidence: 'tests/unit/cli-tools/antigravity-trust-input-lock-3952.test.ts',
+  },
+  {
+    file: 'src/lib/cli-tools/antigravity.ts',
+    site: 'AntigravityTool.waitForPrompt',
+    callee: 'sendSpecialKey',
+    kind: 'lock',
+    held: 'lexical',
+    reason: 'agy’s owed trust Enter after the launch window, claimed and typed under the lock (#3952).',
+    evidence: 'tests/unit/cli-tools/antigravity-trust-input-lock-3952.test.ts',
+  },
+  {
+    file: 'src/lib/cli-tools/codex.ts',
+    site: 'CodexTool.waitForReady',
+    callee: 'sendSpecialKey',
+    kind: 'lock',
+    held: 'lexical',
+    reason: 'codex’s launch-time “Press enter to continue”, as an answer under the lock (#3952).',
+    evidence: 'tests/unit/cli-tools/codex-launch-dialog-ticket-3981.test.ts',
+  },
+  {
+    file: 'src/lib/cli-tools/gemini.ts',
+    site: 'GeminiTool.waitForReady',
+    callee: 'sendSpecialKey',
+    kind: 'lock',
+    held: 'lexical',
+    reason: 'gemini’s folder-trust key at launch, as an exclusive answer under the lock (#3975).',
+    evidence: 'tests/unit/session/launch-keys-input-lock-3975.test.ts',
+  },
+  {
+    file: 'src/lib/session/claude-session.ts',
+    site: 'sendTrustDialogKey',
+    callee: 'sendSpecialKeys',
+    kind: 'lock',
+    held: 'lexical',
+    reason: 'claude’s folder-trust keys at launch, as an exclusive answer (#3975).',
+    evidence: 'tests/unit/session/launch-keys-input-lock-3975.test.ts',
+  },
+  {
+    file: 'src/lib/cli-tools/submit-verified-sender.ts',
+    site: 'sendUnderInputLock',
+    callee: 'sendSpecialKeys',
+    kind: 'lock',
+    held: 'lexical',
+    count: 2,
+    reason: 'The shared sender’s submit keys, after ownership is asserted under the ticket (#3945).',
+    evidence: SENDER_EVIDENCE,
+  },
+  {
+    file: 'src/lib/cli-tools/submit-verified-sender.ts',
+    site: 'sendUnderInputLock',
+    callee: 'clearInputLine',
+    kind: 'lock',
+    held: 'lexical',
+    reason: 'The shared sender clearing its own line under the ticket, before it types (#3945).',
+    evidence: SENDER_EVIDENCE,
+  },
+  {
+    file: 'src/lib/cli-tools/submit-verified-sender.ts',
+    site: 'withdrawUnsentBody',
+    callee: 'clearInputLine',
+    kind: 'lock',
+    held: 'lexical',
+    reason: 'Taking back a body that was not submitted, only while the ticket is the owner’s (#3945).',
+    evidence: SENDER_EVIDENCE,
+  },
+  {
+    file: 'src/lib/cli-tools/codex.ts',
+    site: 'CodexTool.sendCodexHooksScreenKey',
+    callee: 'sendSpecialKey',
+    kind: 'lock',
+    held: 'caller',
+    reason: 'codex’s hooks-screen Escape; only called from `answerCodexHooksScreen`’s `answerUnderInstanceInputLock` (#3952).',
+    evidence: 'tests/unit/cli-tools/codex-hooks-input-lock-3952.test.ts',
+  },
+  {
+    file: 'src/lib/cli-tools/command-code-plan-review.ts',
+    site: 'sendCommandCodePlanReviewKeys',
+    callee: 'sendSpecialKeys',
+    kind: 'lock',
+    held: 'caller',
+    reason: 'Command Code plan-review keys; sent by the plan-review answer under the lock, ticket asked before each step (#3952).',
+    evidence: 'tests/unit/api/plan-review-input-lock-3952.test.ts',
+  },
+  {
+    file: 'src/lib/prompt-answer-sender.ts',
+    site: 'sendSpecialKeysWhileCurrent',
+    callee: 'sendSpecialKeys',
+    kind: 'lock',
+    held: 'caller',
+    count: 2,
+    reason: 'A prompt answer’s cursor and toggle keys; typed inside `sendAsInputWriter`’s callback, which runs under `answerUnderInstanceInputLock` (#3952).',
+    evidence: PROMPT_ANSWER_EVIDENCE,
+  },
+  {
+    file: 'src/lib/session/cli-session.ts',
+    site: 'sendSessionAnswerKey',
+    callee: 'sendSpecialKeys',
+    kind: 'lock',
+    held: 'caller',
+    reason: 'The strict `respond`’s one answer key; its caller holds the strict answer’s ticket (#3952).',
+    evidence: STRICT_ANSWER_EVIDENCE,
+  },
+  {
+    file: 'src/lib/session/composer-clear.ts',
+    site: 'clearComposer',
+    callee: 'clearComposerLine',
+    kind: 'lock',
+    held: 'caller',
+    reason: 'Clearing the composer; every caller runs it under a ticket and asks it before each pass (`beforePass`, #3945).',
+    evidence: SENDER_EVIDENCE,
+  },
+  {
+    file: 'src/lib/session/composer-clear.ts',
+    site: 'clearComposer',
+    callee: 'clearComposerPasteToken',
+    kind: 'lock',
+    held: 'caller',
+    reason: 'Deleting a paste token from the composer, in the same passes as the line clear (#3945).',
+    evidence: SENDER_EVIDENCE,
+  },
+  {
+    file: 'src/lib/cli-tools/base.ts',
+    site: 'BaseCLITool.interrupt',
+    callee: 'sendSpecialKey',
+    kind: 'decided-outside',
+    reason: 'interrupt’s Escape: never waits for, joins or ends a send in progress, by #3952’s decision (cli-operations-guide).',
+    evidence: NON_PARTICIPANTS_EVIDENCE,
+  },
+  {
+    file: 'src/lib/cli-tools/opencode.ts',
+    site: 'OpenCodeTool.interrupt',
+    callee: 'sendSpecialKey',
+    kind: 'decided-outside',
+    count: 2,
+    reason: 'opencode’s interrupt keys when the server abort did not apply: the same interrupt decision as every tool’s (#3952).',
+    evidence: NON_PARTICIPANTS_EVIDENCE,
+  },
+  {
+    file: 'src/lib/cli-tools/direct-input.ts',
+    site: 'sendDirectInput',
+    callee: 'sendDirectInputAndInvalidate',
+    kind: 'decided-outside',
+    reason: 'A person’s `direct-input`: neither refused nor held, by #3952’s decision (cli-operations-guide).',
+    evidence: NON_PARTICIPANTS_EVIDENCE,
+  },
+  {
+    file: 'src/app/api/worktrees/[id]/special-keys/route.ts',
+    site: 'POST',
+    callee: 'sendSpecialKeysAndInvalidate',
+    kind: 'decided-outside',
+    reason: 'A person’s `special-keys` (the unsent bar’s Run among them): neither refused nor held, by #3952’s decision.',
+    evidence: NON_PARTICIPANTS_EVIDENCE,
+  },
+  {
+    file: 'src/lib/tmux/control-mode-tmux-transport.ts',
+    site: 'ControlModeTmuxTransport.sendSpecialKey',
+    callee: 'sendSpecialKey',
+    kind: 'decided-outside',
+    reason: 'The terminal transport’s special key, beside its `sendInput`: a person’s terminal input, by #3952’s decision (no caller in src today).',
+    evidence: NON_PARTICIPANTS_EVIDENCE,
+  },
+  {
+    file: 'src/lib/tmux/polling-tmux-transport.ts',
+    site: 'PollingTmuxTransport.sendSpecialKey',
+    callee: 'sendSpecialKey',
+    kind: 'decided-outside',
+    reason: 'The same special key on the polling transport: a person’s terminal input, by #3952’s decision (no caller in src today).',
+    evidence: NON_PARTICIPANTS_EVIDENCE,
+  },
+  { file: 'src/lib/cli-tools/antigravity.ts', site: 'AntigravityTool.killSession', callee: 'sendSpecialKey', kind: 'kill', reason: SPECIAL_KEY_KILL_REASON },
+  { file: 'src/lib/cli-tools/codex.ts', site: 'CodexTool.killSession', callee: 'sendSpecialKey', kind: 'kill', reason: SPECIAL_KEY_KILL_REASON },
+  { file: 'src/lib/cli-tools/copilot.ts', site: 'CopilotTool.killSession', callee: 'sendSpecialKey', kind: 'kill', reason: SPECIAL_KEY_KILL_REASON },
+  { file: 'src/lib/cli-tools/gemini.ts', site: 'GeminiTool.killSession', callee: 'sendSpecialKey', kind: 'kill', reason: SPECIAL_KEY_KILL_REASON },
+  { file: 'src/lib/cli-tools/vibe-local.ts', site: 'VibeLocalTool.killSession', callee: 'sendSpecialKey', kind: 'kill', count: 2, reason: SPECIAL_KEY_KILL_REASON },
+  { file: 'src/lib/session-key-sender.ts', site: 'stopSession', callee: 'sendSpecialKey', kind: 'kill', reason: SPECIAL_KEY_KILL_REASON },
+  { file: 'src/lib/cli-tools/command-code.ts', site: 'CommandCodeTool.killSession', callee: 'sendSpecialKeys', kind: 'kill', reason: SPECIAL_KEY_KILL_REASON },
+  { file: 'src/lib/cli-tools/copilot.ts', site: 'CopilotTool.killSession', callee: 'sendSpecialKeys', kind: 'kill', reason: SPECIAL_KEY_KILL_REASON },
+  { file: 'src/lib/cli-tools/opencode.ts', site: 'OpenCodeTool.killSession', callee: 'sendSpecialKeys', kind: 'kill', reason: SPECIAL_KEY_KILL_REASON },
+  { file: 'src/lib/cli-tools/opencode-v2.ts', site: 'OpenCodeV2Tool.killSession', callee: 'sendSpecialKeys', kind: 'kill', reason: SPECIAL_KEY_KILL_REASON },
+];
+
+/** The tmux writers {@link STAGE_2_LEDGER} is reconciled against: every one but `sendKeys`. */
+const STAGE_2_WRITERS: readonly string[] = KEY_WRITERS.filter((w) => !SEND_KEYS_WRITERS.includes(w));
+
+/** {@link UNMEDIATED_BASELINE} of {@link STAGE_2_LEDGER}. May only go DOWN. */
+export const STAGE_2_UNMEDIATED_BASELINE = 16;
 
 interface CallerRow {
   file: string;
@@ -269,11 +490,145 @@ export const CALLER_LEDGER: readonly CallerRow[] = [
 /** How many `listed` callers {@link CALLER_LEDGER} may hold. May only go DOWN. */
 export const LISTED_CALLER_BASELINE = 2;
 
-/** The ledger rows whose callers {@link CALLER_LEDGER} covers. */
-const callerGuarded = (ledger: readonly LedgerRow[]): LedgerRow[] =>
-  ledger.filter((r) => (r.kind === 'lock' && r.held === 'caller') || r.callersOnLedger === true);
+/** {@link CALLER_LEDGER} of {@link STAGE_2_LEDGER} (Issue #4032). */
+export const STAGE_2_CALLER_LEDGER: readonly CallerRow[] = [
+  {
+    file: 'src/lib/cli-tools/codex.ts',
+    site: 'CodexTool.answerCodexHooksScreen',
+    callee: 'sendCodexHooksScreenKey',
+    held: 'lexical',
+    reason: 'The hooks-screen key is the answer callback of `answerUnderInstanceInputLock` (#3952).',
+  },
+  {
+    file: 'src/app/api/worktrees/[id]/prompt-response/plan-review.ts',
+    site: 'answerCommandCodePlanReview',
+    callee: 'sendCommandCodePlanReviewKeys',
+    held: 'lexical',
+    reason: 'The plan-review keys are the answer callback of `answerUnderInstanceInputLock`, each step while the ticket is current (#3952).',
+  },
+  {
+    file: 'src/lib/prompt-answer-sender.ts',
+    site: 'sendCommandCodeMultiSelectAnswer',
+    callee: 'sendSpecialKeysWhileCurrent',
+    held: 'listed',
+    count: 3,
+    reason: 'Command Code’s multi-select toggles, walk and confirm; the function is only called inside `sendAsInputWriter`’s callback in `sendPromptAnswerKeys` (the lock), with its `assertOwned` before each key (#3952).',
+  },
+  {
+    file: 'src/lib/prompt-answer-sender.ts',
+    site: 'sendPromptAnswerKeys',
+    callee: 'sendSpecialKeysWhileCurrent',
+    held: 'listed',
+    reason: 'A choice’s cursor keys, inside `sendAsInputWriter`’s callback, which runs under `answerUnderInstanceInputLock` (#3952).',
+  },
+  {
+    file: 'src/lib/session/strict-prompt-answer-io.ts',
+    site: 'createStrictRespondDeps',
+    callee: 'sendSessionAnswerKey',
+    held: 'lexical',
+    reason: 'The strict respond’s key, in the deps built for its ticket; refused once the ticket is not current (#3952).',
+  },
+  {
+    file: 'src/app/api/worktrees/[id]/clear-composer/route.ts',
+    site: 'POST',
+    callee: 'clearComposer',
+    held: 'lexical',
+    reason: 'The [Clear] button’s clear, in the route’s `withInstanceInputLock` callback, asking the ticket before each pass (#3945).',
+  },
+  {
+    file: 'src/lib/cli-tools/submit-verified-sender.ts',
+    site: 'withdrawUnsentBody',
+    callee: 'clearComposer',
+    held: 'lexical',
+    reason: 'The withdrawal’s clear, in a function that takes the send’s ticket (#3945).',
+  },
+  {
+    file: 'src/lib/cli-tools/submit-verified-sender.ts',
+    site: 'waitOutCarriedPaste',
+    callee: 'clearComposer',
+    held: 'lexical',
+    reason: 'The clear after a carried paste, in a function that takes the send’s ticket (#3945).',
+  },
+  {
+    file: 'src/lib/cli-tools/submit-verified-sender.ts',
+    site: 'clearComposerBeforeSend',
+    callee: 'clearComposer',
+    held: 'lexical',
+    reason: 'The clear before a send types, in a function that takes the send’s ticket (#3945).',
+  },
+];
+
+/** {@link LISTED_CALLER_BASELINE} of {@link STAGE_2_CALLER_LEDGER}. May only go DOWN. */
+export const STAGE_2_LISTED_CALLER_BASELINE = 2;
+
+interface RawWriteRow {
+  file: string;
+  site: string;
+  command: string;
+  count?: number;
+  reason: string;
+}
+
+/**
+ * `send-keys` / `paste-buffer` composed outside the tmux module (Issue #4032):
+ * not key-writer references, so not on the ledgers above, but each with its
+ * reason. A new one fails until it is put here.
+ */
+export const RAW_KEY_WRITES: readonly RawWriteRow[] = [
+  {
+    file: 'src/lib/cli-tools/submit-verified-sender.ts',
+    site: 'pasteBody',
+    command: 'paste-buffer',
+    reason: 'The shared sender’s paste of a body, after `assertInputOwner` under the send’s ticket (#3945); the `sendUnderInputLock` row’s evidence covers it.',
+  },
+  {
+    file: 'src/lib/tmux/key-sequence.ts',
+    site: 'keySequenceArgs',
+    command: 'send-keys',
+    count: 2,
+    reason: 'The argv builder `sendKeys` types its literal text through; not a writer of its own (`runKeySequence` has no caller in src).',
+  },
+  {
+    file: 'src/lib/tmux/tmux-control-client.ts',
+    site: 'TmuxControlClient.sendInput',
+    command: 'send-keys',
+    reason: 'The control-mode client’s `send-keys -H` for a person’s terminal input (#2767), reached from the control-mode transport’s `sendInput` row: decided outside the lock (#3952).',
+  },
+];
+
+const rawKeyOf = (r: { file: string; site: string; command: string }): string => `${r.file} :: ${r.site} :: ${r.command}`;
+
+/** What is wrong between the raw writes found and {@link RAW_KEY_WRITES}. Empty when they agree. */
+export function reconcileRaw(found: readonly RawKeyWrite[], ledger: readonly RawWriteRow[]): string[] {
+  const problems: string[] = [];
+  const byKey = new Map<string, RawKeyWrite[]>();
+  for (const w of found) byKey.set(rawKeyOf(w), [...(byKey.get(rawKeyOf(w)) ?? []), w]);
+  const rows = new Map(ledger.map((r) => [rawKeyOf(r), r]));
+  for (const [key, writes] of byKey) {
+    const row = rows.get(key);
+    if (row === undefined) problems.push(`raw key write not on the ledger: ${key} (lines ${writes.map((w) => w.line).join(', ')})`);
+    else if (writes.length !== (row.count ?? 1)) problems.push(`raw write count changed: ${key} has ${writes.length}, the ledger says ${row.count ?? 1}`);
+  }
+  for (const key of rows.keys()) if (!byKey.has(key)) problems.push(`raw row with no write behind it: ${key}`);
+  return problems;
+}
 
 const functionName = (site: string): string => site.split('.').pop() as string;
+
+/**
+ * The ledger rows whose callers {@link CALLER_LEDGER} covers — one per
+ * function, since one function may type through several writers (#4032).
+ */
+const callerGuarded = (ledger: readonly LedgerRow[]): LedgerRow[] => {
+  const seen = new Set<string>();
+  return ledger.filter((r) => {
+    if (!((r.kind === 'lock' && r.held === 'caller') || r.callersOnLedger === true)) return false;
+    const key = `${r.file} :: ${functionName(r.site)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
 
 /** Every caller of the guarded rows' functions in `src` today. */
 function scanGuardedCallers(ledger: readonly LedgerRow[] = LEDGER): KeySite[] {
@@ -323,22 +678,48 @@ export function reconcileCallers(
  * Out of this ledger's reach but on the same invariant, tracked for a later
  * Issue (#3981 横展開): they type through the shared sender, so they are not
  * `sendKeys` sites, but their readiness is not decided before the keys.
+ *
+ * Issue #4032 recorded them, by its contract's decision, without changing them:
+ * each changes when a send is typed, which that refactor was not to change.
  */
-const READINESS_FOLLOW_UPS: readonly { file: string; what: string }[] = [
-  { file: 'src/lib/cli-tools/copilot.ts', what: 'the normal send drops `ready: false` from its prompt wait' },
-  { file: 'src/lib/cli-tools/vibe-local.ts', what: 'no readiness wait before a send' },
-  { file: 'src/lib/cli-tools/opencode.ts', what: 'the tmux fallback when no server can be attached' },
+const READINESS_FOLLOW_UP_REASON =
+  'Recorded, not fixed, by #4032’s decision: deciding readiness before the keys changes when a send is typed (a behaviour change), so it is left to a follow-up Issue of its own.';
+const READINESS_FOLLOW_UPS: readonly { file: string; what: string; reason: string }[] = [
+  { file: 'src/lib/cli-tools/copilot.ts', what: 'the normal send drops `ready: false` from its prompt wait', reason: READINESS_FOLLOW_UP_REASON },
+  { file: 'src/lib/cli-tools/vibe-local.ts', what: 'no readiness wait before a send', reason: READINESS_FOLLOW_UP_REASON },
+  { file: 'src/lib/cli-tools/opencode.ts', what: 'the tmux fallback when no server can be attached', reason: READINESS_FOLLOW_UP_REASON },
 ];
 
 const LOCK_EVIDENCE = /currentInstanceInputTicket|withInstanceInputLock|answerUnderInstanceInputLock/;
 
+/**
+ * What is wrong with a `lock` row's evidence test, given its text: it must run
+ * the lock, and name the site's function (Issue #4032, review-3981 P3-6) — a
+ * test of the lock that never mentions the site says nothing about the site.
+ */
+export function lockEvidenceProblems(row: LedgerRow, text: string): string[] {
+  if (row.kind !== 'lock' || row.evidence === undefined) return [];
+  const problems: string[] = [];
+  if (!LOCK_EVIDENCE.test(text)) problems.push(`lock evidence does not run the lock: ${keyOf(row)} (${row.evidence})`);
+  const name = functionName(row.site);
+  if (!new RegExp(`\\b${name}\\b`).test(text)) {
+    problems.push(`lock evidence never names its site \`${name}\`: ${keyOf(row)} (${row.evidence})`);
+  }
+  return problems;
+}
+
 const keyOf = (r: { file: string; site: string; callee: string }): string => `${r.file} :: ${r.site} :: ${r.callee}`;
 
 /** What is wrong between the sites found and a ledger. Empty when they agree. */
-export function reconcile(sites: readonly KeySite[], ledger: readonly LedgerRow[], baseline = UNMEDIATED_BASELINE): string[] {
+export function reconcile(
+  sites: readonly KeySite[],
+  ledger: readonly LedgerRow[],
+  baseline = UNMEDIATED_BASELINE,
+  writers: readonly string[] = SEND_KEYS_WRITERS
+): string[] {
   const problems: string[] = [];
   const byKey = new Map<string, KeySite[]>();
-  for (const site of sites) byKey.set(keyOf(site), [...(byKey.get(keyOf(site)) ?? []), site]);
+  for (const site of sites.filter((s) => writers.includes(s.callee))) byKey.set(keyOf(site), [...(byKey.get(keyOf(site)) ?? []), site]);
   const rows = new Map(ledger.map((r) => [keyOf(r), r]));
 
   for (const [key, found] of byKey) {
@@ -360,6 +741,7 @@ export function reconcile(sites: readonly KeySite[], ledger: readonly LedgerRow[
     if (!byKey.has(key)) problems.push(`ledger row with no site behind it: ${key}`);
   }
   for (const row of ledger) {
+    if (!writers.includes(row.callee)) problems.push(`row for a writer this ledger does not cover: ${keyOf(row)}`);
     if (row.kind === 'lock' && row.held === undefined) problems.push(`lock row without \`held\`: ${keyOf(row)}`);
     if ((row.kind === 'lock' || row.kind === 'decided-outside') && row.evidence === undefined) {
       problems.push(`${row.kind} row without an evidence test: ${keyOf(row)}`);
@@ -594,5 +976,299 @@ describe('[#3981] the scanner and the rules are not vacuous', () => {
   it('the walk reached every ledger file', () => {
     const files = candidateFiles();
     for (const row of LEDGER) expect(files, row.file).toContain(row.file);
+  });
+});
+
+describe('[#4032] every other tmux key writer is on the stage-2 ledger', () => {
+  const reconcileStage2 = (sites: readonly KeySite[], ledger: readonly LedgerRow[] = STAGE_2_LEDGER): string[] =>
+    reconcile(sites, ledger, STAGE_2_UNMEDIATED_BASELINE, STAGE_2_WRITERS);
+
+  it('the writers are the tmux module’s, read off it; the two ledgers split them', () => {
+    expect([...KEY_WRITERS].sort()).toEqual(tmuxKeyWriterExports(read(TMUX_MODULE)));
+    expect([...SEND_KEYS_WRITERS, ...STAGE_2_WRITERS].sort()).toEqual([...KEY_WRITERS].sort());
+    expect(SEND_KEYS_WRITERS.filter((w) => STAGE_2_WRITERS.includes(w))).toEqual([]);
+  });
+
+  it('positive: a new exported writer of the tmux module — or a wrapper of one — is read off it', () => {
+    const text =
+      "import { execFile } from 'child_process';\n" +
+      "export async function capturePane(s: string) { return execFile('tmux', ['capture-pane', '-t', s]); }\n" +
+      "export async function sendKeys(s: string, k: string) { await execFile('tmux', ['send-keys', '-t', s, k]); }\n" +
+      "async function typeTab(s: string) { await sendKeys(s, 'Tab'); }\n" +
+      "export async function sendTab(s: string) { await typeTab(s); }\n" +
+      "export async function pasteIt(s: string) { await execFile('tmux', ['paste-buffer', '-t', s]); }\n";
+    expect(tmuxKeyWriterExports(text)).toEqual(['pasteIt', 'sendKeys', 'sendTab']);
+  });
+
+  it('negative control: the scan of src agrees with the stage-2 ledger', () => {
+    expect(reconcileStage2(scanRepository())).toEqual([]);
+  });
+
+  it('the stage-2 un-ordered rows are at their baseline (lower it when one goes)', () => {
+    expect(STAGE_2_LEDGER.filter((r) => r.kind !== 'lock')).toHaveLength(STAGE_2_UNMEDIATED_BASELINE);
+  });
+
+  it('every stage-2 row states a reason, and its file was reached by the walk', () => {
+    const files = candidateFiles();
+    for (const row of STAGE_2_LEDGER) {
+      expect(row.reason.length, keyOf(row)).toBeGreaterThan(40);
+      expect(files, row.file).toContain(row.file);
+      if (row.kind === 'lock' || row.kind === 'decided-outside') {
+        expect(row.evidence !== undefined && existsSync(join(REPO_ROOT, row.evidence)), keyOf(row)).toBe(true);
+      }
+    }
+  });
+
+  it('no ledger holds a `dead` row of the stage-2 writers', () => {
+    expect(STAGE_2_LEDGER.filter((r) => r.kind === 'dead')).toEqual([]);
+  });
+
+  it('positive: a new `sendSpecialKey(` outside the lock fails', () => {
+    const text = "import { sendSpecialKey } from '../tmux/tmux';\nexport async function pressEnter(s: string) { await sendSpecialKey(s, 'Enter'); }\n";
+    expect(reconcileStage2([...scanRepository(), ...scanKeyWriters('src/lib/x.ts', text)])).toEqual([
+      expect.stringContaining('not on the ledger: src/lib/x.ts :: pressEnter :: sendSpecialKey'),
+    ]);
+  });
+
+  it('positive: one more `sendSpecialKey(` in a function already on the ledger fails its count', () => {
+    const file = 'src/lib/cli-tools/base.ts';
+    const original = read(file);
+    const mutated = original.replace("    await sendSpecialKey(sessionName, 'Escape');\n", "    await sendSpecialKey(sessionName, 'Escape');\n    await sendSpecialKey(sessionName, 'Enter');\n");
+    expect(mutated).not.toBe(original);
+    const sites = scanRepository().filter((s) => s.file !== file).concat(scanKeyWriters(file, mutated));
+    expect(reconcileStage2(sites)).toEqual([expect.stringContaining('count changed: src/lib/cli-tools/base.ts :: BaseCLITool.interrupt :: sendSpecialKey')]);
+  });
+
+  it('positive: a renamed or namespaced `sendSpecialKey` is a site too', () => {
+    for (const text of [
+      "import { sendSpecialKey as press } from '@/lib/tmux/tmux';\nexport const go = (s: string) => press(s, 'Enter');\n",
+      "import * as tmux from '../tmux/tmux';\nexport async function go(s: string) { await tmux.sendSpecialKey(s, 'Enter'); }\n",
+    ]) {
+      expect(reconcileStage2([...scanRepository(), ...scanKeyWriters('src/lib/x.ts', text)]), text).toEqual([
+        expect.stringContaining('not on the ledger: src/lib/x.ts :: go :: sendSpecialKey'),
+      ]);
+    }
+  });
+
+  it('negative: a method named like a writer is not a site (a transport’s `sendSpecialKey`)', () => {
+    const text = "import { capturePane } from '../tmux/tmux';\nclass T { async sendSpecialKey(s: string) { return s; } }\n";
+    expect(scanKeyWriters('src/lib/x.ts', text)).toEqual([]);
+  });
+
+  it('positive: taking the lock off agy’s trust Enter fails both of its rows', () => {
+    const file = 'src/lib/cli-tools/antigravity.ts';
+    const mutated = read(file).replace(/answerUnderInstanceInputLock\(/g, 'notALock(');
+    const sites = scanRepository().filter((s) => s.file !== file).concat(scanKeyWriters(file, mutated));
+    expect(reconcileStage2(sites)).toEqual([
+      expect.stringContaining('no longer under the lock in the source: src/lib/cli-tools/antigravity.ts :: AntigravityTool.waitForReady'),
+      expect.stringContaining('no longer under the lock in the source: src/lib/cli-tools/antigravity.ts :: AntigravityTool.waitForPrompt'),
+    ]);
+  });
+
+  it('positive: one more un-ordered stage-2 row fails, even with its site behind it', () => {
+    const text = "import { sendSpecialKey } from '../tmux/tmux';\nexport async function h(s: string) { await sendSpecialKey(s, 'C-c'); }\n";
+    const row: LedgerRow = { file: 'src/lib/z.ts', site: 'h', callee: 'sendSpecialKey', kind: 'kill', reason: 'fixture' };
+    expect(reconcileStage2([...scanRepository(), ...scanKeyWriters('src/lib/z.ts', text)], [...STAGE_2_LEDGER, row])).toEqual([
+      expect.stringContaining('un-ordered rows went up'),
+    ]);
+  });
+
+  it('positive: a `sendKeys` row put on the stage-2 ledger fails (each ledger keeps its writers)', () => {
+    const row = LEDGER[0];
+    expect(reconcileStage2(scanRepository(), [...STAGE_2_LEDGER, row])).toEqual([
+      expect.stringContaining(`ledger row with no site behind it: ${keyOf(row)}`),
+      expect.stringContaining(`row for a writer this ledger does not cover: ${keyOf(row)}`),
+    ]);
+  });
+});
+
+describe('[#4032] the stage-2 caller-held rows have their callers on a ledger', () => {
+  const guarded = callerGuarded(STAGE_2_LEDGER);
+  const reconcileStage2Callers = (callers: readonly KeySite[], ledger: readonly CallerRow[] = STAGE_2_CALLER_LEDGER): string[] =>
+    reconcileCallers(callers, ledger, guarded, STAGE_2_LISTED_CALLER_BASELINE);
+
+  it('negative control: today’s callers agree with the stage-2 caller ledger', () => {
+    expect(reconcileStage2Callers(scanGuardedCallers(STAGE_2_LEDGER))).toEqual([]);
+  });
+
+  it('one guarded function per function, however many writers it types through', () => {
+    expect(guarded.map((r) => functionName(r.site)).sort()).toEqual([
+      'clearComposer',
+      'sendCodexHooksScreenKey',
+      'sendCommandCodePlanReviewKeys',
+      'sendSessionAnswerKey',
+      'sendSpecialKeysWhileCurrent',
+    ]);
+  });
+
+  it('every caller row states a reason, and its file can call the function', () => {
+    for (const row of STAGE_2_CALLER_LEDGER) {
+      expect(row.reason.length, keyOf(row)).toBeGreaterThan(40);
+      const defining = guarded.find((r) => functionName(r.site) === row.callee);
+      expect(defining, keyOf(row)).toBeDefined();
+      expect(callerFiles((defining as LedgerRow).file), keyOf(row)).toContain(row.file);
+    }
+  });
+
+  it('positive: a new caller of `sendSessionAnswerKey` outside the lock fails', () => {
+    const text = "import { sendSessionAnswerKey } from '@/lib/session/cli-session';\nexport async function pressDown(w: string) { await sendSessionAnswerKey(w, 'claude', 'Down'); }\n";
+    const found = scanReferences('src/lib/rogue.ts', text, ['sendSessionAnswerKey']);
+    expect(reconcileStage2Callers([...scanGuardedCallers(STAGE_2_LEDGER), ...found])).toEqual([
+      expect.stringContaining('caller not on the ledger: src/lib/rogue.ts :: pressDown :: sendSessionAnswerKey'),
+    ]);
+  });
+});
+
+describe('[#4032] a caller-held function reached by another name, or re-exported, is a caller', () => {
+  const DEFINING = 'src/lib/cli-tools/command-code-plan-review.ts';
+  const NAME = 'sendCommandCodePlanReviewKeys';
+  /** A caller written in `file`, read the way `scanCallers` reads the real ones. */
+  const scanAs = (file: string, text: string): KeySite[] =>
+    scanReferences(file, text, [NAME], {
+      fromDefiningModule: (specifier) => resolveRepoSpecifier(specifier, join(REPO_ROOT, file)) === join(REPO_ROOT, DEFINING),
+    });
+  const withCallers = (found: readonly KeySite[]): string[] => reconcileCallers([...scanGuardedCallers(), ...found], CALLER_LEDGER);
+
+  const positives: Array<[string, string, string]> = [
+    [
+      'a renamed import',
+      `import { ${NAME} as typeKeys } from '@/lib/cli-tools/command-code-plan-review';\nexport async function rogue(s: string) { await typeKeys(s, []); }\n`,
+      `caller not on the ledger: src/lib/rogue.ts :: rogue :: ${NAME}`,
+    ],
+    [
+      'a namespace import',
+      `import * as ccpr from '../lib/cli-tools/command-code-plan-review';\nexport async function rogue(s: string) { await ccpr.${NAME}(s, []); }\n`,
+      `caller not on the ledger: src/lib/rogue.ts :: rogue :: ${NAME}`,
+    ],
+    [
+      'a re-export',
+      `export { ${NAME} as sendPlanKeys } from './cli-tools/command-code-plan-review';\n`,
+      `caller not on the ledger: src/lib/rogue.ts :: <re-export> :: ${NAME}`,
+    ],
+    [
+      'a re-export of everything',
+      "export * from '@/lib/cli-tools/command-code-plan-review';\n",
+      `caller not on the ledger: src/lib/rogue.ts :: <re-export> :: ${NAME}`,
+    ],
+    [
+      'the imported binding exported again',
+      `import { ${NAME} as k } from '@/lib/cli-tools/command-code-plan-review';\nexport { k };\n`,
+      `caller not on the ledger: src/lib/rogue.ts :: <re-export> :: ${NAME}`,
+    ],
+    [
+      'a renamed destructured dynamic import',
+      `export async function rogue(s: string) { const { ${NAME}: k } = await import('@/lib/cli-tools/command-code-plan-review'); await k(s, []); }\n`,
+      `caller not on the ledger: src/lib/rogue.ts :: rogue :: ${NAME}`,
+    ],
+  ];
+
+  for (const [what, text, problem] of positives) {
+    it(`positive: ${what}, outside the lock, fails`, () => {
+      const found = scanAs('src/lib/rogue.ts', text);
+      expect(found.length, text).toBeGreaterThan(0);
+      expect(withCallers(found)).toEqual([expect.stringContaining(problem)]);
+    });
+  }
+
+  it('the re-export is where it fails: the module calling through it does not import the definition', () => {
+    const third = `import { sendPlanKeys } from './rogue';\nexport async function far(s: string) { await sendPlanKeys(s, []); }\n`;
+    expect(scanAs('src/lib/far.ts', third)).toEqual([]);
+  });
+
+  it('negative: a renamed import used under the lock, put on the ledger as `lexical`, passes', () => {
+    const text = `import { ${NAME} as typeKeys } from '@/lib/cli-tools/command-code-plan-review';\nimport { withInstanceInputLock } from '@/lib/session/instance-input-lock';\nexport async function locked(s: string) { await withInstanceInputLock(s, () => typeKeys(s, [])); }\n`;
+    const row: CallerRow = { file: 'src/lib/locked.ts', site: 'locked', callee: NAME, held: 'lexical', reason: 'fixture' };
+    expect(reconcileCallers([...scanGuardedCallers(), ...scanAs('src/lib/locked.ts', text)], [...CALLER_LEDGER, row])).toEqual([]);
+  });
+
+  it('negative: the same names from another module, and another object’s property, are not callers', () => {
+    const text =
+      `import { ${NAME} as typeKeys } from '@/lib/other';\nimport * as ccpr from '@/lib/other';\n` +
+      `export async function f(s: string) { await typeKeys(s); await ccpr.${NAME}(s); await other.${NAME}(s); }\n`;
+    expect(scanAs('src/lib/x.ts', text)).toEqual([]);
+  });
+
+  describe('the defining module is told apart by resolving the specifier', () => {
+    let dir: string | null = null;
+    afterEach(() => {
+      if (dir !== null) rmSync(dir, { recursive: true, force: true });
+      dir = null;
+    });
+
+    it('positive: a relative import of the defining file is followed; negative: one of another file is not', () => {
+      dir = mkdtempSync(join(tmpdir(), 'pane-key-writers-4032-'));
+      const defining = join(dir, 'defining.ts');
+      const other = join(dir, 'other.ts');
+      const caller = join(dir, 'caller.ts');
+      writeFileSync(defining, `export async function ${NAME}() {}\n`);
+      writeFileSync(other, `export async function ${NAME}() {}\n`);
+      writeFileSync(caller, '');
+      const fromDefining = (specifier: string): boolean => resolveRepoSpecifier(specifier, caller) === defining;
+      const viaDefining = `import { ${NAME} as k } from './defining';\nexport async function a() { await k(); }\n`;
+      const viaOther = `import { ${NAME} as k } from './other';\nexport async function b() { await k(); }\n`;
+      expect(scanReferences(caller, viaDefining, [NAME], { fromDefiningModule: fromDefining }).map((s) => s.site)).toEqual(['a']);
+      expect(scanReferences(caller, viaOther, [NAME], { fromDefiningModule: fromDefining })).toEqual([]);
+    });
+  });
+});
+
+describe('[#4032 review-3981 P3-6] a lock row’s evidence test names its site', () => {
+  const lockRows = [...LEDGER, ...STAGE_2_LEDGER].filter((r) => r.kind === 'lock');
+
+  it('negative control: every lock row’s evidence runs the lock and names the site', () => {
+    for (const row of lockRows) expect(lockEvidenceProblems(row, read(row.evidence as string)), keyOf(row)).toEqual([]);
+  });
+
+  it('positive: the site’s function taken out of the evidence fails, for every lock row', () => {
+    for (const row of lockRows) {
+      const name = functionName(row.site);
+      const text = read(row.evidence as string).replace(new RegExp(`\\b${name}\\b`, 'g'), 'someOtherFunction');
+      expect(lockEvidenceProblems(row, text), keyOf(row)).toEqual([
+        expect.stringContaining(`lock evidence never names its site \`${name}\``),
+      ]);
+    }
+  });
+
+  it('positive: evidence that never runs the lock fails', () => {
+    const row = LEDGER[0];
+    expect(lockEvidenceProblems(row, `it('types', () => ${functionName(row.site)}());`)).toEqual([
+      expect.stringContaining('lock evidence does not run the lock'),
+    ]);
+  });
+});
+
+describe('[#4032] raw `send-keys` / `paste-buffer` outside the tmux module are on their ledger', () => {
+  it('negative control: today’s raw writes agree with the ledger', () => {
+    expect(reconcileRaw(scanRepositoryRawWrites(), RAW_KEY_WRITES)).toEqual([]);
+  });
+
+  it('every raw row states a reason', () => {
+    for (const row of RAW_KEY_WRITES) expect(row.reason.length, rawKeyOf(row)).toBeGreaterThan(40);
+  });
+
+  it('positive: an argv or a control-mode line that writes keys fails until it is listed', () => {
+    for (const [text, site, command] of [
+      ["export async function typeRaw(s: string) { await execFile('tmux', ['send-keys', '-t', s, 'x']); }\n", 'typeRaw', 'send-keys'],
+      ["export const paste = (s: string) => run(['paste-buffer', '-t', s]);\n", 'paste', 'paste-buffer'],
+      ['class C { write(s: string) { this.stdin.write(`send-keys -t ${s} -H 61\\n`); } }\n', 'C.write', 'send-keys'],
+    ] as const) {
+      const found = scanRawKeyWrites('src/lib/x.ts', text);
+      expect(found.map((w) => [w.site, w.command]), text).toEqual([[site, command]]);
+      expect(reconcileRaw([...scanRepositoryRawWrites(), ...found], RAW_KEY_WRITES)).toEqual([
+        expect.stringContaining(`raw key write not on the ledger: src/lib/x.ts :: ${site} :: ${command}`),
+      ]);
+    }
+  });
+
+  it('negative: a label, a comment and another command are not raw writes', () => {
+    const text =
+      "// tmux send-keys -t x\nassertInputOwner(t, 'claude', 'paste-buffer', false);\nrun(['load-buffer', '-b', 'b', '-']);\nconst m = 'send-keys failed';\n";
+    expect(scanRawKeyWrites('src/lib/x.ts', text)).toEqual([]);
+  });
+});
+
+describe('[#4032] the readiness follow-ups say why they are not fixed here', () => {
+  it('every follow-up states a reason', () => {
+    for (const { file, reason } of READINESS_FOLLOW_UPS) expect(reason.length, file).toBeGreaterThan(40);
   });
 });

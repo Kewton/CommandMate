@@ -15,6 +15,9 @@
  *
  * The tmux module is stubbed; the screen reading is the real one.
  *
+ * Sites on the pane-key-writers ledger this runs (#4032): `sendPromptAnswerKeys`
+ * (the text's Enter) and `sendSpecialKeysWhileCurrent` (a choice's cursor keys).
+ *
  * @vitest-environment node
  */
 

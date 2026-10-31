@@ -170,6 +170,14 @@ function specifierBase(specifier: string, fromFile: string): string {
   return resolve(dirname(fromFile), specifier);
 }
 
+/**
+ * The repo module a specifier written in `fromFile` loads (absolute), or null
+ * for a package or a miss — the resolution {@link createModuleGraph} applies.
+ */
+export function resolveRepoSpecifier(specifier: string, fromFile: string): string | null {
+  return isRepoSpecifier(specifier) ? resolveModulePath(specifierBase(specifier, fromFile)) : null;
+}
+
 export interface ModuleGraph {
   /** Facts for a module, read once. */
   facts(file: string): ModuleFacts;

@@ -11,6 +11,9 @@
  * The send is stood in for by an owner of the lock (as in the other #3952
  * suites); tmux is mocked.
  *
+ * Sites on the pane-key-writers ledger this runs (#4032): `sendTrustDialogKey`
+ * (Claude's trust keys) and `GeminiTool.waitForReady` (gemini's trust Enter).
+ *
  * @vitest-environment node
  */
 
@@ -169,8 +172,8 @@ describe('[#3975] Claude: the launch line and the trust Enter wait for a send ho
     let trusted = false;
     vi.mocked(capturePane).mockImplementation(async () => (trusted ? CLAUDE_READY : CLAUDE_TRUST));
     vi.mocked(sendKeys).mockImplementation(async (_s, keys, enter) => {
-      // `sanitizeSessionEnvironment`'s `unset CLAUDECODE` (session-key-sender,
-      // not this Issue's to move) is left out of the order.
+      // The `unset CLAUDECODE` typed in the launch line's own lock turn (#3981)
+      // is left out of the order: this asserts the launch line and the Enter.
       if (keys === 'unset CLAUDECODE') return;
       if (keys === '' && enter === true) {
         events.list.push('enter');
@@ -211,8 +214,8 @@ describe('[#3975] Claude: the launch line and the trust Enter wait for a send ho
     let trusted = false;
     vi.mocked(capturePane).mockImplementation(async () => (trusted ? CLAUDE_READY : CLAUDE_TRUST));
     vi.mocked(sendKeys).mockImplementation(async (_s, keys, enter) => {
-      // `sanitizeSessionEnvironment`'s `unset CLAUDECODE` (session-key-sender,
-      // not this Issue's to move) is left out of the order.
+      // The `unset CLAUDECODE` typed in the launch line's own lock turn (#3981)
+      // is left out of the order: this asserts the launch line and the Enter.
       if (keys === 'unset CLAUDECODE') return;
       if (keys === '' && enter === true) {
         events.list.push('enter');
