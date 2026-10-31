@@ -17,6 +17,8 @@
 PR を出す前に `npx vitest run tests/unit/docs/design-doc-identifier-audit.test.ts` を実行する。
 実測: N-5 は、消した未使用の関数 `readCopilotSettings` を設計文書が名指ししていて、同じテストで落ちた。その関数は元に戻した。
 
+**書き手を固定するガードがあるファイルを分割する手順**: 分割先は元ファイルと同じディレクトリの `<元の名前>-*.ts` にする。`tests/unit/guards/waiting-episode-binding-import-3798.test.ts` と `prompt-reading-sites-3881.test.ts` は、その名前の分割先を元ファイルと同じ扱いにする（`tests/unit/guards/split-family.ts`）。別のディレクトリや別の名前へ移すと落ちるので、ガードの一覧は広げずに名前を合わせる（#3903）。
+
 **コメント**: 書き換えずに移す。整理の結果、説明が合わなくなったコメントは、その PR では直さない。
 オーケストレーターが一覧に残し、最後にコメントだけの PR で直す。
 

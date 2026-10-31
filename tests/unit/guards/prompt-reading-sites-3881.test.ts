@@ -24,6 +24,11 @@
  * file checks that test exists and uses it. That is the condition #3881's
  * recurrence plan (G2-6) attaches to widening.
  *
+ * A listed file covers the pieces split off it (`<dir>/<base>-*.ts`, Issue
+ * #3903, `split-family.ts`): a split may move `auditPromptData` out of the
+ * Auto-Yes poller without widening the list. A file outside every family fails
+ * as before.
+ *
  * @vitest-environment node
  */
 
@@ -31,6 +36,7 @@ import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { originsOf } from './split-family';
 
 const REPO_ROOT = process.cwd();
 const FIXTURE = 'tab-row-wrapped-16x1000.txt';
@@ -107,27 +113,38 @@ export function namesIdentifier(source: string, identifier: string): boolean {
   return new RegExp(`(^|[^\\w.])${identifier}\\b`, 'm').test(codeOf(source));
 }
 
-function sitesMatching(predicate: (source: string) => boolean): string[] {
-  return trackedSources()
-    .filter((f) => predicate(readFileSync(join(REPO_ROOT, f), 'utf-8')))
-    .sort();
+/** The files of `sources` (path → code) that match `predicate`, as the listed files they belong to (#3903). */
+export function sitesIn(
+  sources: ReadonlyMap<string, string>,
+  predicate: (source: string) => boolean,
+  listed: readonly string[],
+): string[] {
+  const hits = [...sources].filter(([, code]) => predicate(code)).map(([file]) => file);
+  return originsOf(hits, listed);
+}
+
+function sitesMatching(predicate: (source: string) => boolean, listed: readonly string[]): string[] {
+  const sources = new Map(trackedSources().map((f) => [f, readFileSync(join(REPO_ROOT, f), 'utf-8')] as const));
+  return sitesIn(sources, predicate, listed);
 }
 
 describe('[#3881] the screen is read as a kind of dialog in a fixed set of places', () => {
   it('writers: exactly the allowlist', () => {
-    expect(sitesMatching((s) => callsAny(s, ['readPromptScreen', 'promptDataForStorage']))).toEqual(
-      WRITERS.map((s) => s.file).sort(),
+    const listed = WRITERS.map((s) => s.file);
+    expect(sitesMatching((s) => callsAny(s, ['readPromptScreen', 'promptDataForStorage']), listed)).toEqual(
+      [...listed].sort(),
     );
   });
 
   it('readers: exactly the allowlist', () => {
-    expect(sitesMatching((s) => callsAny(s, ['readStoredPromptReading']))).toEqual(
-      READERS.map((s) => s.file).sort(),
-    );
+    const listed = READERS.map((s) => s.file);
+    expect(sitesMatching((s) => callsAny(s, ['readStoredPromptReading']), listed)).toEqual([...listed].sort());
   });
 
   it('the reading’s version is named only where a reading is defined, built or validated', () => {
-    expect(sitesMatching((s) => namesIdentifier(s, 'PROMPT_READING_VERSION'))).toEqual([...VERSION_SITES].sort());
+    expect(sitesMatching((s) => namesIdentifier(s, 'PROMPT_READING_VERSION'), VERSION_SITES)).toEqual(
+      [...VERSION_SITES].sort(),
+    );
   });
 
   it.each([...WRITERS, ...READERS])('$file states a reason and a proof that runs the live fixture', ({ file, why, proof }) => {
@@ -155,5 +172,42 @@ describe('[#3881] the scanner is not vacuous', () => {
   it('the walk reached the listed files', () => {
     const tracked = trackedSources();
     for (const { file } of [...WRITERS, ...READERS]) expect(tracked).toContain(file);
+  });
+});
+
+describe('[#3903] a split may move a writer, and only within a listed file', () => {
+  const WRITER_FILES = WRITERS.map((s) => s.file);
+  const writes = (s: string): boolean => callsAny(s, ['readPromptScreen', 'promptDataForStorage']);
+  /** The listed writers as they are before a split. */
+  const before = (): Map<string, string> =>
+    new Map(WRITER_FILES.map((f) => [f, 'const r = promptDataForStorage(tool, frame, d);\n']));
+
+  it('positive: auditPromptData moved to auto-yes-poller-*.ts counts as the Auto-Yes poller', () => {
+    // Before #3903 the list compared paths, so this piece was an unlisted fifth writer.
+    const sources = before();
+    sources.set('src/lib/auto-yes-poller.ts', "import { auditPromptData } from './auto-yes-poller-audit';\n");
+    sources.set(
+      'src/lib/auto-yes-poller-audit.ts',
+      'export function auditPromptData() { return promptDataForStorage(tool, frame, d); }\n',
+    );
+    expect(sitesIn(sources, writes, WRITER_FILES)).toEqual([...WRITER_FILES].sort());
+  });
+
+  it('negative: a caller outside every listed file still fails, also one only named like a piece', () => {
+    const sources = before();
+    sources.set('src/lib/other.ts', 'readPromptScreen(tool, frame, d);\n');
+    sources.set('src/lib/auto-yes-poller2.ts', 'readPromptScreen(tool, frame, d);\n');
+    sources.set('src/lib/polling/auto-yes-poller-audit.ts', 'readPromptScreen(tool, frame, d);\n');
+    const got = sitesIn(sources, writes, WRITER_FILES);
+    expect(got).not.toEqual([...WRITER_FILES].sort());
+    expect(got).toEqual(
+      expect.arrayContaining(['src/lib/other.ts', 'src/lib/auto-yes-poller2.ts', 'src/lib/polling/auto-yes-poller-audit.ts']),
+    );
+  });
+
+  it('negative: a listed writer whose family stopped calling is missing', () => {
+    const sources = before();
+    sources.set('src/lib/auto-yes-poller.ts', 'export {};\n');
+    expect(sitesIn(sources, writes, WRITER_FILES)).not.toContain('src/lib/auto-yes-poller.ts');
   });
 });

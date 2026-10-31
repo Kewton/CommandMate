@@ -678,18 +678,22 @@ probe は `ok` / `unavailable` のどちらかを必ず名乗り、`unavailable`
 （`EnvBaseline`、`src/lib/verification/env-clean-gate.ts`）。保存は JSON の往復で、
 `isEnvSnapshot` は知らないキーを無視するため、キー付きのファイルも従来のローダでそのまま読める。
 
-#### 削除側の除外（Issue #2627 / #3043）
+#### 削除側の除外（Issue #2627 / #3043 / #3993）
 
-消えたものは原則違反だが、次の 3 つは違反に数えず、レポートに `· - <名前> (ignored: …)` の行で
+消えたものは原則違反だが、次の 4 つは違反に数えず、レポートに `· - <名前> (ignored: …)`
+（#3993 の行は `· - <名前> [external] (not counted: …)`）の行で
 **除外した項目として列挙する**（`+N -M` の件数と status からは除く。黙って消さない）。
-いずれも**ベースライン採取時（task 作成時）に記録した一覧**でだけ判定する — 検証時には持ち主の
+上の 3 つは**ベースライン採取時（task 作成時）に記録した一覧**でだけ判定する — 検証時には持ち主の
 行も pid も消えていて区別できないため。一覧を持たない古いベースラインは何も除外しない。
+4 つ目は計測窓（ベースラインの `capturedAt` から検証時の `capturedAt` まで）に書かれた
+session-kill ledger の行で判定する。
 
 | 除外 | 記録する一覧（`EnvBaseline`） | 線を引いた理由 |
 |---|---|---|
 | **別サーバー**の名前空間の tmux セッション（#2627） | `otherServerSessions` | そのサーバー自身のライフサイクルで閉じる。名前空間（#2866）が「どのサーバーか」の設計上の目印 |
 | **同じサーバー**の、**別リポジトリ**の worktree の tmux セッション（#3043） | `otherRepositorySessions` | 同じサーバーで並行する別リポジトリの orchestrate が自分のワーカーを片付けただけで落ちていた（2026-09-29 / 09-30）。#1624 の事故は**同じリポジトリの兄弟**だったので、線をリポジトリに引く。同じリポジトリの兄弟の消失は従来どおり違反 |
 | `.commandmate-demo-vitest-<pid>` のうち、**採取時点で pid が既に死んでいた**もの（#3043） | `deadDemoVitestEntries` | #3479 より古いチェックアウトの `env-scripts.test.ts` が、死んだ pid の残骸を（$HOME で）設計どおり掃除する（#3025）。並行するどの worktree の unit ゲートでも走る。#3479 からは作業場所も掃除も OS の一時ディレクトリで、$HOME には作らず掃除もしない。採取時点で pid が生きていたものの消失は従来どおり違反（ワーカーが並行テストの作業場所を消した可能性） |
+| 同じリポジトリの兄弟の tmux セッションのうち、**ワーカー以外と分かる呼び出し元が CommandMate の CLI で止めた**もの（#3993） | （ベースラインではなく ledger: `~/.commandmate/session-kills/<UTC 日付>.jsonl`、`EnvProbeDiff.removedExternal`） | オーケストレーターが別 worktree を `instances <wt> kill` で片付けると、並行するすべての検証が `[other]` の消失で落ちていた（2026-10-29、run 2401〜2404）。免除は「ワーカーでないと言える」最小に絞る（下の条件）
 
 リポジトリの判定: セッション名 `mcbd-<ns>-<cli>-<rest>` の `<ns>` がこのサーバーのもので、
 `<rest>` のハイフン区切りの各接頭辞（worktree id とインスタンス接尾辞は名前だけでは分けられない）を
@@ -699,13 +703,36 @@ worktree が引けない・名前空間が無い、はいずれも記録しな�
 理由は「別サーバーは別 DB で、同じ worktree id が両方に在りうる」ことであり、名前空間が一致する
 ＝このサーバーのセッションについては、このサーバーの DB が正本である。
 
-tmux-sessions の 2 つの除外は、ベースラインから何も残らずタスク自身のセッションも消えたとき
-（`kill-server` の形、#1624）には適用しない。
+tmux-sessions の 3 つの除外（別サーバー・別リポジトリ・#3993）は、ベースラインから何も残らず
+タスク自身のセッションも消えたとき（`tmuxServerSurvived` が偽＝`kill-server` の形、#1624）には適用しない。
+
+**#3993 の免除の条件**（`findExternalKill`、`src/lib/verification/env-clean-gate.ts`）。
+kill の記録は `src/lib/verification/session-kill-ledger.ts` が 1 kill 1 行で書く
+（`api` / `origin` / `worktreeId` / `instanceId` / `sessionNames` / `callerCwd` / `callerSession` / `at`）。
+書き手は CLI の `instances … kill` と `remove --kill`（`origin: cli`。呼び出し元の cwd と tmux セッション付き）、
+kill-session API（`origin: browser` か `http`）、`session-cleanup.ts` の片付け（`origin: server`）。
+消えた兄弟のセッションは、次の**すべて**を満たす行があるときだけ `external` にする。
+
+| 条件 | 理由 |
+|---|---|
+| 行が計測窓の中にある | 窓の外の kill はこのタスクの検証と関係が無い |
+| 行の `sessionNames`（route が実際に止めたセッション名）が、消えたセッション名と**完全一致** | worktree 単位で当てると、片付けの 1 行が同じ worktree の別インスタンスへのワーカーの記録なしの kill まで免除した。worktree id の接頭辞で当てると `commandmate-skills` の記録が `commandmate-skills-3944` に届いた |
+| `origin: cli` | `browser` は `Sec-Fetch-Site` だけで判定しており、UI を操作するワーカー（UAT 系）も送り、ヘッダは手で付けられる。`server` の片付けはワーカーが `commandmate sync` で起こせる。`http` は呼び出し元を名乗らない。どれも記録は残し、違反の行の下に `· <名前>: kill recorded but counted (…; not excused: …)` と出すが免除しない |
+| 呼び出し元がワーカー以外と**分かる**: cwd がタスクの worktree の兄弟ディレクトリ（`attributeAnchor` が `other`＝主チェックアウトか別の worktree）か、tmux セッションが別の worktree のもの（`attributeSessionName` が `other`） | オーケストレーターの正規の形（主チェックアウトから、または別 worktree のセッションの中から）は免除のまま。`/tmp`・`$HOME`・親ディレクトリなど、どの worktree でもない cwd は何も言っていないので免除しない |
+| 呼び出し元の cwd も tmux セッションもタスクのものではない | どちらかがタスク（cwd がタスクの worktree の中、タスクのセッションかその worktree のセッション）なら、もう一方が何であってもワーカー |
+
+CLI の kill は CLI の行と route の `http` 行の 2 行になるが、免除できるのは CLI の行だけなので判定は変わらない。
+残る緩み: ワーカーが隣の worktree へ `cd` し、tmux の外から `instances <隣> kill` を実行した場合は
+記録だけでは区別できず免除される。ledger は `$HOME` 配下でワーカーも書けるため、意図的な偽装は防がない
+（防ぐのは事故の形）。`tmux kill-session` など CommandMate を通らない停止は何も記録しないので違反のまま。
 
 退けた案: `[other]` の削除をすべて除外（#1624 を丸ごと見逃す）／件数・時刻・ワーカーのコマンドログ
-（#2627 の設計ノートと同じ理由）／kill-session API の要求記録（サーバー側の変更が要り、プロセス自身の
-終了と外部からの kill の区別も別途要る）／「要確認」の別 exit（同じリポジトリの兄弟こそ #1624 で
+（#2627 の設計ノートと同じ理由）／kill の記録を worktree 単位・worktree id の接頭辞で当てる（上の表のとおり、
+1 行が無関係の消失まで免除する）／UI（`Sec-Fetch-Site`）とサーバーの片付けの記録で免除する
+（どちらもワーカーが起こせる）／「要確認」の別 exit（同じリポジトリの兄弟こそ #1624 で
 硬い不合格が要る形であり、別リポジトリの形は判定材料が揃っているので除外で閉じる）。
+#3993 で採った kill の記録は、かつて「サーバー側の変更が要る」として退けた案だが、プロセス自身の終了と
+外部からの kill の区別は「CommandMate を通って止めた行があるか」で足り、行の無い消失は従来どおり違反に残す。
 
 実装: `recordOtherRepositorySessions` / `recordDeadDemoVitestEntries`（`src/lib/verification/env-clean-gate.ts`）。
 `recordTaskSession` が #2472 のタスクセッション名と一緒に書く。
