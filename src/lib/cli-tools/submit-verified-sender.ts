@@ -1122,31 +1122,24 @@ function promptReceiptFor(input: {
     : 'not-required';
 }
 
+/** What {@link awaitPromptReport} resolved to (Issue #4057). */
+type PromptReportOutcome = Awaited<ReturnType<typeof awaitPromptReport>>;
+
 /**
- * The read-back after an `awaited` receipt (Issue #4057: split out of
- * {@link sendUnderInputLock}). THROWS when the agent never reported the prompt.
+ * The read-back after an `awaited` receipt, from what {@link awaitPromptReport}
+ * resolved to (Issue #4057: split out of {@link sendUnderInputLock}). Synchronous:
+ * the wait itself stays in the caller, so the continuation after it is the
+ * original one. THROWS when the agent never reported the prompt.
  */
-async function settleAwaitedPromptReport(input: {
+function settleAwaitedPromptReport(input: {
+  watched: PromptReportOutcome;
   sessionName: string;
-  message: string;
   cliToolId: CLIToolType;
-  composer: ComposerSpec;
-  enteredAt: number;
-  rule: SubmitRule;
-  deadline: number;
   attempt: number;
+  rule: SubmitRule;
   output: string;
-}): Promise<SubmitReadBack> {
-  const { sessionName, message, cliToolId, composer, enteredAt, rule, deadline, attempt, output } = input;
-  const watched = await awaitPromptReport({
-    sessionName,
-    message,
-    cliToolId,
-    composer,
-    enteredAt,
-    rule,
-    deadline,
-  });
+}): SubmitReadBack {
+  const { watched, sessionName, cliToolId, attempt, rule, output } = input;
   if (watched.verdict === 'unreported') {
     invalidateCache(sessionName);
     logger.error('submit-not-confirmed:prompt-unreported', {
@@ -1365,7 +1358,7 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
       // on a session that has not reported a prompt yet. Watch, without Enter,
       // until the agent reports it or the composer shows the body after all.
       promptReportDeadline ??= Date.now() + PROMPT_REPORT_WAIT_MS;
-      ({ state, rule, output } = await settleAwaitedPromptReport({
+      const watched = await awaitPromptReport({
         sessionName,
         message,
         cliToolId,
@@ -1373,9 +1366,8 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
         enteredAt,
         rule,
         deadline: promptReportDeadline,
-        attempt,
-        output,
-      }));
+      });
+      ({ state, rule, output } = settleAwaitedPromptReport({ watched, sessionName, cliToolId, attempt, rule, output }));
     }
 
     if (state === 'submitted') {
