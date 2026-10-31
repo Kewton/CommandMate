@@ -112,10 +112,12 @@ import { createLogger } from '@/lib/logger';
 import { getOrInitGlobal } from '@/lib/global-state';
 import { clearComposer, readClearComposer, recheckComposerBeforeInput } from '@/lib/session/composer-clear';
 import {
+  findSubmittedBody,
   getPromptSubmitTarget,
-  matchesSubmittedBody,
   noteSubmittedBody,
   readPromptSubmitReceipt,
+  reportsPrompts,
+  type PromptSubmitExpected,
 } from '@/lib/session/prompt-submit-receipt';
 import { markLastSendDiscarded } from '@/lib/session/send-attempt-state';
 import { PASTE_NOT_STARTED_CODE } from '@/lib/session/send-attempt-types';
@@ -234,7 +236,16 @@ const DEFAULT_VERIFY_ATTEMPTS = 4;
 export const PROMPT_REPORT_WAIT_MS = 5000;
 
 /** How often the report and the composer are looked at during that wait. */
-const PROMPT_REPORT_POLL_MS = 100;
+export const PROMPT_REPORT_POLL_MS = 100;
+
+/**
+ * What the `prompt-unreported` failure says about the body (Issue #4048): the
+ * agent's report never came, but that is no proof the body did not go — an
+ * environment where only the http `UserPromptSubmit` hook fails still submits
+ * it. Kept after the `(Issue #4035)` wording `classifySendFailure` matches.
+ */
+export const PROMPT_UNREPORTED_RESEND_NOTE =
+  'The body may already have been submitted; check the pane (`commandmate capture <worktree-id> --pane`) before resending it.';
 
 export interface SubmitVerifiedSendParams {
   /** tmux session name (already validated by the caller chain). */
@@ -298,6 +309,14 @@ export interface SubmitVerifiedSendParams {
    * at the poll interval).
    */
   typedBodyAttempts?: number;
+  /**
+   * The instance this send is for (Issue #4048), as the caller knows it. The
+   * agent's prompt report and the remembered body are looked up by
+   * {@link sessionName}; with a target they are taken only from the entry that
+   * both name — a target and a name that disagree prove nothing. Never
+   * registers or resets an entry. Omitted, the name alone decides, as before.
+   */
+  target?: PromptSubmitExpected;
 }
 
 /** Run one tmux command, optionally feeding it `input` on stdin. */
@@ -796,6 +815,16 @@ function needsPromptReport(state: SubmitState, rule: SubmitRule, message: string
  *     the composer after all (C/D, `pending`: the caller resends Enter, as for
  *     any typed-but-unsent body), or a completion (E) — `screen`, with the frame;
  *   - neither, to the end — `unreported`: nothing says the message left.
+ *
+ * Issue #4048: the wait asks whether `ticket` still owns the session before
+ * every read of the report, after every capture, and so before any verdict it
+ * returns. The body and its Enter are already in, so a session replaced
+ * meanwhile THROWS as indeterminate ({@link assertStillOwnedAfterEnter}) — the
+ * old process may have taken the prompt — and the new session's screen and
+ * hooks are never read as this send's.
+ *
+ * The deadline is followed by one last read of the screen
+ * ({@link rereadBeforeUnreported}) before `unreported`.
  */
 async function awaitPromptReport(params: {
   sessionName: string;
@@ -805,23 +834,97 @@ async function awaitPromptReport(params: {
   enteredAt: number;
   rule: SubmitRule;
   deadline: number;
+  ticket: InstanceInputTicket;
+  target?: PromptSubmitExpected;
 }): Promise<
   | { verdict: 'received' }
   | { verdict: 'screen'; state: SubmitState; rule: SubmitRule; output: string }
   | { verdict: 'unreported'; rule: SubmitRule }
 > {
-  const { sessionName, message, cliToolId, composer, enteredAt, deadline } = params;
+  const { sessionName, message, cliToolId, composer, enteredAt, deadline, ticket, target } = params;
+  const reported = (): boolean => {
+    assertStillOwnedAfterEnter(ticket, cliToolId, 'the prompt report wait');
+    return readPromptSubmitReceipt(sessionName, cliToolId, enteredAt, target) === 'received';
+  };
   let rule = params.rule;
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, PROMPT_REPORT_POLL_MS));
-    if (readPromptSubmitReceipt(sessionName, cliToolId, enteredAt) === 'received') return { verdict: 'received' };
+    if (reported()) return { verdict: 'received' };
     const output = await capturePane(sessionName, { startLine: -composer.verifyCaptureLines });
+    assertStillOwnedAfterEnter(ticket, cliToolId, 'the prompt report wait');
     const verdict = classifySubmitWithRule(output, cliToolId, message, composer);
     if (verdict.state !== 'submitted' || verdict.rule === 'A') return { verdict: 'screen', ...verdict, output };
     rule = verdict.rule;
   }
-  if (readPromptSubmitReceipt(sessionName, cliToolId, enteredAt) === 'received') return { verdict: 'received' };
+  if (reported()) return { verdict: 'received' };
+  const last = await rereadBeforeUnreported({ sessionName, message, cliToolId, composer, ticket });
+  if (last !== null) return { verdict: 'screen', state: 'submitted', rule: 'A', output: last };
+  // The hook may have come while the screen was read.
+  if (reported()) return { verdict: 'received' };
   return { verdict: 'unreported', rule };
+}
+
+/**
+ * The last look at the screen before a first prompt is called `unreported`
+ * (Issue #4048 item 1). Only A — the tool generating — saves the send: it is
+ * what a `SessionStart`-only environment (the http `UserPromptSubmit` hook not
+ * arriving) shows for a body that did go, right at the deadline. Anything else
+ * — B, F, the body still in the composer, a capture that fails — leaves the
+ * send unconfirmed, and no Enter is pressed for it. Ownership is asked before
+ * and after the capture.
+ *
+ * A says only that something is being generated, not that it is this body
+ * (a person's key, or a generation that started otherwise); that limit is
+ * accepted, as for every A verdict.
+ *
+ * @returns The frame when it shows A, else null
+ */
+async function rereadBeforeUnreported(params: {
+  sessionName: string;
+  message: string;
+  cliToolId: CLIToolType;
+  composer: ComposerSpec;
+  ticket: InstanceInputTicket;
+}): Promise<string | null> {
+  const { sessionName, message, cliToolId, composer, ticket } = params;
+  assertStillOwnedAfterEnter(ticket, cliToolId, 'the last read before prompt-unreported');
+  let output: string;
+  try {
+    output = await capturePane(sessionName, { startLine: -composer.verifyCaptureLines });
+  } catch (error: unknown) {
+    logger.warn('prompt-unreported-reread-failed', {
+      sessionName,
+      cliToolId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    assertStillOwnedAfterEnter(ticket, cliToolId, 'the last read before prompt-unreported');
+    return null;
+  }
+  assertStillOwnedAfterEnter(ticket, cliToolId, 'the last read before prompt-unreported');
+  const verdict = classifySubmitWithRule(output, cliToolId, message, composer);
+  logger.info('prompt-unreported-reread', { sessionName, cliToolId, state: verdict.state, rule: verdict.rule });
+  return verdict.state === 'submitted' && verdict.rule === 'A' ? output : null;
+}
+
+/**
+ * Throw unless `ticket` still owns the session, after the body and an Enter
+ * went in (Issue #4048 item 2). Unlike a loss before the body
+ * ({@link assertInputOwner} with `typed: false`), this is no proof the message
+ * was not sent — the replaced process may have taken the prompt — so the error
+ * classifies `indeterminate`, never `not-sent` / `session-replaced`.
+ */
+function assertStillOwnedAfterEnter(ticket: InstanceInputTicket, cliToolId: CLIToolType, step: string): void {
+  if (ticket.isCurrent()) return;
+  logger.error('input-lock-lost-after-enter', {
+    sessionName: ticket.sessionName,
+    cliToolId,
+    step,
+    generation: ticket.generation,
+  });
+  throw new Error(
+    `Session ${ticket.sessionName} was replaced during ${step}, after the message and Enter were sent; ` +
+      'the previous process may have submitted it (Issue #4048).'
+  );
 }
 
 /**
@@ -829,21 +932,38 @@ async function awaitPromptReport(params: {
  * submitted (Issue #4035): that body never reached the agent, and the send that
  * said `sent` for it was wrong. The instance's `lastSend` is turned
  * `indeterminate` (the send now running records its own outcome after it).
+ *
+ * Issue #4048: only for claude, whose first prompt is hook-checked — on any
+ * other tool the warning is all (its `lastSend` is not rewritten) — and only the
+ * record of the attempt whose body was found (matched by its digest), so a later
+ * send, or one the agent reported, is never demoted. With an explicit `target`,
+ * the body is looked up only in the entry both the name and the target name.
  */
 function reportSubmittedBodyInComposer(
   sessionName: string,
   cliToolId: CLIToolType,
   composerText: string,
-  cleared: boolean
+  cleared: boolean,
+  target?: PromptSubmitExpected
 ): void {
-  if (composerText === '' || !matchesSubmittedBody(sessionName, composerText)) return;
-  const target = getPromptSubmitTarget(sessionName);
-  if (target !== null) markLastSendDiscarded({ ...target, instanceId: target.instanceId ?? target.cliToolId });
+  if (composerText === '') return;
+  const expected = target === undefined ? undefined : { ...target, cliToolId };
+  const found = findSubmittedBody(sessionName, composerText, expected);
+  if (found === null) return;
+  const owner = reportsPrompts(cliToolId) ? getPromptSubmitTarget(sessionName, expected) : null;
+  if (owner !== null) {
+    markLastSendDiscarded(
+      { ...owner, instanceId: owner.instanceId ?? owner.cliToolId },
+      Date.now(),
+      found.messageDigest
+    );
+  }
   logger.warn('pre-send-found-submitted-body', {
     sessionName,
     cliToolId,
     cleared,
     length: composerText.length,
+    lastSendDemoted: owner !== null,
   });
 }
 
@@ -898,7 +1018,7 @@ export async function clearComposerBeforeSend(
   sessionName: string,
   cliToolId: CLIToolType,
   composerSpec: ComposerSpec = resolveComposerSpec(cliToolId),
-  options: { initialCapture?: string; ticket?: InstanceInputTicket } = {}
+  options: { initialCapture?: string; ticket?: InstanceInputTicket; target?: PromptSubmitExpected } = {}
 ): Promise<void> {
   if (!composerSpec.clearBeforeSend) return;
 
@@ -911,7 +1031,7 @@ export async function clearComposerBeforeSend(
   });
   if (ticket !== undefined) assertInputOwner(ticket, cliToolId, 'the pre-send clear', false);
 
-  reportSubmittedBodyInComposer(sessionName, cliToolId, result.discardedText, result.state !== 'content');
+  reportSubmittedBodyInComposer(sessionName, cliToolId, result.discardedText, result.state !== 'content', options.target);
 
   if (result.state === 'content') {
     logger.error('pre-send-composer-clear-failed', {
@@ -986,7 +1106,9 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
     pasteLandedAttempts = DEFAULT_PASTE_LANDED_ATTEMPTS,
     awaitTypedBody = false,
     typedBodyAttempts = DEFAULT_TYPED_BODY_ATTEMPTS,
+    target,
   } = params;
+  const expected = target === undefined ? undefined : { ...target, cliToolId };
   const submitEnterCount = params.submitEnterCount ?? composer.submitEnterCount;
 
   // -1. Issue #3945 (review-1 #4): every send re-reads the pane once it owns
@@ -1006,7 +1128,11 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
   // 0. Empty the composer first (Issue #1880). The body below is typed at the
   //    TUI's current cursor position, so anything already in the box would be
   //    spliced into it. Throws for a claude composer that could not be emptied.
-  await clearComposerBeforeSend(sessionName, cliToolId, composer, { initialCapture: frame, ticket });
+  await clearComposerBeforeSend(sessionName, cliToolId, composer, {
+    initialCapture: frame,
+    ticket,
+    ...(target !== undefined ? { target } : {}),
+  });
 
   if (Buffer.byteLength(message, 'utf8') > LITERAL_SEND_MAX_BYTES) {
     // 1'. A body that would reach the TUI as more than one pty read is pasted
@@ -1097,9 +1223,13 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
     await new Promise((resolve) => setTimeout(resolve, verifyDelayMs));
 
     let output = await capturePane(sessionName, { startLine: -composer.verifyCaptureLines });
+    // Issue #4048: a frame read after the session was replaced is the new
+    // process's, and so would be its hooks — neither says anything about this
+    // send, whose Enter went to the old one (indeterminate, not `not-sent`).
+    assertStillOwnedAfterEnter(ticket, cliToolId, 'the read-back');
     let { state, rule } = classifySubmitWithRule(output, cliToolId, message, composer);
     const receipt = needsPromptReport(state, rule, message)
-      ? readPromptSubmitReceipt(sessionName, cliToolId, enteredAt)
+      ? readPromptSubmitReceipt(sessionName, cliToolId, enteredAt, target)
       : 'not-required';
     // Issue #4035: every verdict names the rule that gave it, so a send reported
     // `sent` can be traced to what the screen showed.
@@ -1118,8 +1248,13 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
         enteredAt,
         rule,
         deadline: promptReportDeadline,
+        ticket,
+        ...(target !== undefined ? { target } : {}),
       });
       if (watched.verdict === 'unreported') {
+        // Issue #4048: no extra Enter — the last read did not show the body
+        // generating, and the body may have gone all the same (only the http
+        // hook missing), so the failure says to look before resending.
         invalidateCache(sessionName);
         logger.error('submit-not-confirmed:prompt-unreported', {
           sessionName,
@@ -1131,7 +1266,7 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
         throw new Error(
           `Message submit could not be confirmed for session ${sessionName}: the composer did not show the body ` +
             `(rule ${watched.rule}) but the agent did not report the prompt within ${PROMPT_REPORT_WAIT_MS}ms ` +
-            '(Issue #4035).'
+            `(Issue #4035). ${PROMPT_UNREPORTED_RESEND_NOTE}`
         );
       }
       if (watched.verdict === 'received') {
@@ -1148,8 +1283,12 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
       // for the next send's clear. One the agent reported did leave, and the same
       // text back in the composer is claude restoring it (Esc), the history (↑),
       // or a person typing it — not a send that never arrived.
-      if (readPromptSubmitReceipt(sessionName, cliToolId, enteredAt) !== 'received') {
-        noteSubmittedBody(sessionName, message);
+      // Issue #4048: noted only while this send still owns the session (the
+      // entry under its name is otherwise a newer generation's), and, with an
+      // explicit target, only in the entry the target names.
+      assertStillOwnedAfterEnter(ticket, cliToolId, 'the submit record');
+      if (readPromptSubmitReceipt(sessionName, cliToolId, enteredAt, target) !== 'received') {
+        noteSubmittedBody(sessionName, message, expected);
       }
       invalidateCache(sessionName);
       return;
@@ -1204,7 +1343,7 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
     // Issue #4035: the Enter thought lost may only have been late — the agent
     // reporting the prompt now means it went, and another Enter would land on an
     // empty composer, or on a dialog that the prompt just opened.
-    if (readPromptSubmitReceipt(sessionName, cliToolId, enteredAt) === 'received') {
+    if (readPromptSubmitReceipt(sessionName, cliToolId, enteredAt, target) === 'received') {
       logger.info('submit-confirmed-by-prompt-hook', { sessionName, cliToolId, attempt, rule });
       invalidateCache(sessionName);
       return;

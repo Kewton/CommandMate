@@ -105,12 +105,21 @@ export function getLastSendAttempt(instance: SendAttemptInstance): SendAttemptRe
  * Turn the instance's last `sent` record `indeterminate` (Issue #4035): the
  * next send found that body still in the composer, so it never reached the
  * agent. Any other record is left as it is. Never throws.
+ *
+ * `messageDigest` (Issue #4048) is the digest of the body that was found: a
+ * record of another attempt — a later send, or one whose body differs — is
+ * left as it is. Omitted, the last `sent` record is demoted as before.
  */
-export function markLastSendDiscarded(instance: SendAttemptInstance, now: number = Date.now()): void {
+export function markLastSendDiscarded(
+  instance: SendAttemptInstance,
+  now: number = Date.now(),
+  messageDigest?: string
+): void {
   try {
     const key = keyOf(instance);
     const record = records.get(key);
     if (record === undefined || record.state !== 'sent') return;
+    if (messageDigest !== undefined && record.messageDigest !== messageDigest) return;
     records.set(key, { ...record, at: Math.floor(now), state: 'indeterminate', reason: 'found-in-composer' });
   } catch (error) {
     logger.warn('send-attempt-record-failed', { error: error instanceof Error ? error.message : String(error) });

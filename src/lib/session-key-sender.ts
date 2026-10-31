@@ -88,6 +88,10 @@ export async function waitForPrompt(
  * @param message - Message content to send
  * @param postPromptDelay - Stability delay after prompt detection (ms)
  * @param promptWaitTimeout - Timeout for waiting for prompt state (ms)
+ * @param target - The instance the session runs (Issue #4048). The first
+ *   prompt's hook check and the remembered body are then taken only from the
+ *   entry both this and `sessionName` name; omitted, the name alone decides.
+ *   Never registers or resets anything.
  * @throws {Error} If session doesn't exist
  */
 export async function sendMessageToSession(
@@ -95,6 +99,7 @@ export async function sendMessageToSession(
   message: string,
   postPromptDelay: number,
   promptWaitTimeout: number,
+  target?: { worktreeId: string; instanceId?: string },
 ): Promise<void> {
   // Check if session exists
   const exists = await hasSession(sessionName);
@@ -122,6 +127,7 @@ export async function sendMessageToSession(
     sessionName,
     message,
     cliToolId: 'claude',
+    ...(target !== undefined ? { target } : {}),
   });
 
   // Issue #405: Invalidate cache after sending message
