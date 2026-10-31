@@ -53,6 +53,7 @@ import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { inFamily } from './split-family';
 
 const REPO_ROOT = process.cwd();
 
@@ -124,11 +125,21 @@ const ALLOWED: readonly { file: string; why: string }[] = [
  * Asserted by name as well as by the set equality below, so a failure names the
  * regression instead of only printing a diff of paths.
  */
+/**
+ * A listed file stands for the pieces split off it too (`<dir>/<base>-*.ts`,
+ * `split-family.ts`, Issue #4034): `auto-yes-poller-tick.ts` calling the
+ * detector is `auto-yes-poller.ts` back on it, and the failure names the piece.
+ */
 const MUST_NOT_CALL_DIRECTLY: readonly string[] = [
   'src/lib/auto-yes-poller.ts',
   'src/lib/detection/status-detector.ts',
   'src/lib/session/current-output-builder.ts',
 ];
+
+/** The callers in `actual` that are `origin` or a piece split off it (Issue #4034). */
+export function directCallersInFamily(actual: readonly string[], origin: string): string[] {
+  return actual.filter((file) => inFamily(file, origin));
+}
 
 /** Tracked `src/` sources. `git ls-files` keeps `.next`, `dist` and friends out. */
 function trackedSources(): string[] {
@@ -172,7 +183,7 @@ describe('[#2368] `detectPrompt` has a fixed set of direct callers', () => {
     // The #2368 regression itself: `auto-yes-poller.ts` back on the generic
     // detector reads agy's wrapped Bash approval as `isPrompt: false` and
     // answers nothing, while `/current-output` publishes it as waiting.
-    expect(actual).not.toContain(file);
+    expect(directCallersInFamily(actual, file)).toEqual([]);
   });
 
   it('has no stale allowlist entry', () => {
@@ -234,5 +245,39 @@ describe('[#2368] the scanner is not vacuous', () => {
     // still shrink it silently.
     expect(trackedSources()).toContain(SHARED_ENTRY);
     expect(trackedSources().length).toBeGreaterThan(200);
+  });
+});
+
+describe('[#4034] MUST_NOT_CALL_DIRECTLY names a split-off piece too', () => {
+  const POLLER = 'src/lib/auto-yes-poller.ts';
+
+  it('positive: a piece in the same directory is the poller back on the detector', () => {
+    expect(
+      directCallersInFamily(['src/lib/auto-yes-poller-tick.ts', 'src/lib/detection/status-detector.ts'], POLLER),
+    ).toEqual(['src/lib/auto-yes-poller-tick.ts']);
+    expect(directCallersInFamily([POLLER], POLLER)).toEqual([POLLER]);
+  });
+
+  it('negative: an unrelated file, a lookalike name and the same name elsewhere do not count', () => {
+    expect(
+      directCallersInFamily(
+        [
+          'src/lib/other.ts',
+          'src/lib/auto-yes-poller2.ts',
+          'src/lib/polling/auto-yes-poller-tick.ts',
+          'src/lib/auto-yes-poller-tick.md',
+        ],
+        POLLER,
+      ),
+    ).toEqual([]);
+  });
+
+  it('every listed consumer is named by family in the real tree: none of its pieces calls the detector', () => {
+    const callers = trackedSources().filter((f) =>
+      callsDetectPromptDirectly(readFileSync(join(REPO_ROOT, f), 'utf-8')),
+    );
+    for (const file of MUST_NOT_CALL_DIRECTLY) {
+      expect(directCallersInFamily(callers, file), file).toEqual([]);
+    }
   });
 });
