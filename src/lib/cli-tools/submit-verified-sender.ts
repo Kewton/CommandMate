@@ -88,6 +88,13 @@
  * checks it still owns the composer before every key, watches an `unseen`
  * paste a little longer before giving up, and leaves a mark for a body that
  * may still arrive, which the next send waits out ({@link waitOutCarriedPaste}).
+ *
+ * Issue #4035 is a claude session's first prompt reported sent when it was
+ * not. Keys typed right after the prompt appeared were drawn ~1 s later and
+ * their Enter was lost, while the read-back still showed the dim placeholder
+ * (rule F). On that first prompt a B or F verdict now waits for claude's own
+ * `UserPromptSubmit` ({@link awaitPromptReport}), and a later send that clears
+ * a body this one called sent says so ({@link reportSubmittedBodyInComposer}).
  */
 
 import * as childProcess from 'child_process';
@@ -104,6 +111,13 @@ import {
 import { createLogger } from '@/lib/logger';
 import { getOrInitGlobal } from '@/lib/global-state';
 import { clearComposer, readClearComposer, recheckComposerBeforeInput } from '@/lib/session/composer-clear';
+import {
+  getPromptSubmitTarget,
+  matchesSubmittedBody,
+  noteSubmittedBody,
+  readPromptSubmitReceipt,
+} from '@/lib/session/prompt-submit-receipt';
+import { markLastSendDiscarded } from '@/lib/session/send-attempt-state';
 
 // Issue #3945 (review-2): moved next to the clear it feeds, so copilot's own
 // keys can take it without the shared sender. Re-exported for its callers here.
@@ -122,18 +136,20 @@ import { extractComposerText, SUPPORTED_COMPOSER_TOOLS } from '@/lib/detection/c
 import {
   VERIFY_WINDOW_LINES,
   classifyPasteLanded,
-  classifySubmit,
+  classifySubmitWithRule,
   compactText,
   findPasteTokens,
   readSubmitComposer,
   withoutTrailingBlankRows,
   type PasteLandedState,
+  type SubmitRule,
+  type SubmitState,
 } from './submit-composer-read';
 
 // Issue #3963: the composer reads moved to `submit-composer-read`; re-exported
 // so every caller and test keeps importing them from here.
-export { classifyPasteLanded, classifySubmit, isSubmitted } from './submit-composer-read';
-export type { PasteLandedState, SubmitState } from './submit-composer-read';
+export { classifyPasteLanded, classifySubmit, classifySubmitWithRule, isSubmitted } from './submit-composer-read';
+export type { PasteLandedState, SubmitRule, SubmitState, SubmitVerdict } from './submit-composer-read';
 
 const logger = createLogger('cli-tools/submit-verified-sender');
 
@@ -207,6 +223,17 @@ const CARRIED_MARK_POLL_MS = 200;
 
 /** Default bounded recovery Enters (each read back) before giving up (throwing). */
 const DEFAULT_VERIFY_ATTEMPTS = 4;
+
+/**
+ * How long a B/F verdict on a session's first prompt waits for the agent's own
+ * report of it (Issue #4035). Claude 2.1.314 reported the first prompt 0.66–0.74 s
+ * after the send began in all 29 submitted first sends measured; an unsent body
+ * was drawn into the composer 0.9–1.7 s after its Enter.
+ */
+export const PROMPT_REPORT_WAIT_MS = 5000;
+
+/** How often the report and the composer are looked at during that wait. */
+const PROMPT_REPORT_POLL_MS = 100;
 
 export interface SubmitVerifiedSendParams {
   /** tmux session name (already validated by the caller chain). */
@@ -739,6 +766,81 @@ async function confirmTypedBodyLanded(params: {
 }
 
 /**
+ * Whether a verdict is one the agent's own report must back (Issue #4035):
+ * `submitted` from B or F — the screen saying only that the body is not in the
+ * composer. A (generating) stands on its own. A body starting with `/` or `!`
+ * is run by the TUI itself, which is not measured to report it as a prompt.
+ */
+function needsPromptReport(state: SubmitState, rule: SubmitRule, message: string): boolean {
+  if (state !== 'submitted' || rule === 'A') return false;
+  return !/^\s*[/!]/.test(message);
+}
+
+/**
+ * Watch a session's first prompt until the agent reports it (Issue #4035).
+ *
+ * Reads the hook record and the composer every {@link PROMPT_REPORT_POLL_MS}
+ * until `deadline`, without pressing anything. The deadline is the send's, not
+ * the call's: a send that waits again after a resent Enter gets only what is
+ * left of its {@link PROMPT_REPORT_WAIT_MS} (it holds the input lock meanwhile).
+ *
+ *   - the agent reported the prompt — `received`;
+ *   - the screen changes its verdict — generating (A), or the body drawn into
+ *     the composer after all (C/D, `pending`: the caller resends Enter, as for
+ *     any typed-but-unsent body), or a completion (E) — `screen`, with the frame;
+ *   - neither, to the end — `unreported`: nothing says the message left.
+ */
+async function awaitPromptReport(params: {
+  sessionName: string;
+  message: string;
+  cliToolId: CLIToolType;
+  composer: ComposerSpec;
+  enteredAt: number;
+  rule: SubmitRule;
+  deadline: number;
+}): Promise<
+  | { verdict: 'received' }
+  | { verdict: 'screen'; state: SubmitState; rule: SubmitRule; output: string }
+  | { verdict: 'unreported'; rule: SubmitRule }
+> {
+  const { sessionName, message, cliToolId, composer, enteredAt, deadline } = params;
+  let rule = params.rule;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, PROMPT_REPORT_POLL_MS));
+    if (readPromptSubmitReceipt(sessionName, cliToolId, enteredAt) === 'received') return { verdict: 'received' };
+    const output = await capturePane(sessionName, { startLine: -composer.verifyCaptureLines });
+    const verdict = classifySubmitWithRule(output, cliToolId, message, composer);
+    if (verdict.state !== 'submitted' || verdict.rule === 'A') return { verdict: 'screen', ...verdict, output };
+    rule = verdict.rule;
+  }
+  if (readPromptSubmitReceipt(sessionName, cliToolId, enteredAt) === 'received') return { verdict: 'received' };
+  return { verdict: 'unreported', rule };
+}
+
+/**
+ * Say so when the pre-send clear finds the body this session last reported
+ * submitted (Issue #4035): that body never reached the agent, and the send that
+ * said `sent` for it was wrong. The instance's `lastSend` is turned
+ * `indeterminate` (the send now running records its own outcome after it).
+ */
+function reportSubmittedBodyInComposer(
+  sessionName: string,
+  cliToolId: CLIToolType,
+  composerText: string,
+  cleared: boolean
+): void {
+  if (composerText === '' || !matchesSubmittedBody(sessionName, composerText)) return;
+  const target = getPromptSubmitTarget(sessionName);
+  if (target !== null) markLastSendDiscarded({ ...target, instanceId: target.instanceId ?? target.cliToolId });
+  logger.warn('pre-send-found-submitted-body', {
+    sessionName,
+    cliToolId,
+    cleared,
+    length: composerText.length,
+  });
+}
+
+/**
  * Empty the composer before the body is typed into it (Issue #1880).
  *
  * Delegates the how to {@link clearComposer} (#1879), which already sends
@@ -801,6 +903,8 @@ export async function clearComposerBeforeSend(
     ...(ticket !== undefined ? { beforePass: () => ticket.isCurrent() } : {}),
   });
   if (ticket !== undefined) assertInputOwner(ticket, cliToolId, 'the pre-send clear', false);
+
+  reportSubmittedBodyInComposer(sessionName, cliToolId, result.discardedText, result.state !== 'content');
 
   if (result.state === 'content') {
     logger.error('pre-send-composer-clear-failed', {
@@ -961,6 +1065,8 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
   }
 
   // 3. Submit as a separate command (double Enter for vibe-local's IME mode).
+  //    Issue #4035: the agent's own report of the prompt counts from here.
+  const enteredAt = Date.now();
   for (let i = 0; i < Math.max(1, submitEnterCount); i++) {
     assertInputOwner(ticket, cliToolId, 'Enter', true);
     await sendSpecialKeys(sessionName, ['Enter']);
@@ -978,13 +1084,66 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
   //    was reported "could not be confirmed" — a sent message as exit 99. The
   //    last read sends nothing: no Enter goes out that is not read back.
   const attempts = Math.max(1, verifyAttempts);
+  // Issue #4035: one wait for the agent's report per send, however many reads.
+  let promptReportDeadline: number | null = null;
   for (let attempt = 0; attempt <= attempts; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, verifyDelayMs));
 
-    const output = await capturePane(sessionName, { startLine: -composer.verifyCaptureLines });
-    const state = classifySubmit(output, cliToolId, message, composer);
+    let output = await capturePane(sessionName, { startLine: -composer.verifyCaptureLines });
+    let { state, rule } = classifySubmitWithRule(output, cliToolId, message, composer);
+    const receipt = needsPromptReport(state, rule, message)
+      ? readPromptSubmitReceipt(sessionName, cliToolId, enteredAt)
+      : 'not-required';
+    // Issue #4035: every verdict names the rule that gave it, so a send reported
+    // `sent` can be traced to what the screen showed.
+    logger.info('submit-classified', { sessionName, cliToolId, attempt, state, rule, receipt });
+
+    if (receipt === 'awaited') {
+      // Issue #4035: the screen says only that the body is not in the composer,
+      // on a session that has not reported a prompt yet. Watch, without Enter,
+      // until the agent reports it or the composer shows the body after all.
+      promptReportDeadline ??= Date.now() + PROMPT_REPORT_WAIT_MS;
+      const watched = await awaitPromptReport({
+        sessionName,
+        message,
+        cliToolId,
+        composer,
+        enteredAt,
+        rule,
+        deadline: promptReportDeadline,
+      });
+      if (watched.verdict === 'unreported') {
+        invalidateCache(sessionName);
+        logger.error('submit-not-confirmed:prompt-unreported', {
+          sessionName,
+          cliToolId,
+          attempt,
+          rule: watched.rule,
+          waitedMs: PROMPT_REPORT_WAIT_MS,
+        });
+        throw new Error(
+          `Message submit could not be confirmed for session ${sessionName}: the composer did not show the body ` +
+            `(rule ${watched.rule}) but the agent did not report the prompt within ${PROMPT_REPORT_WAIT_MS}ms ` +
+            '(Issue #4035).'
+        );
+      }
+      if (watched.verdict === 'received') {
+        logger.info('submit-confirmed-by-prompt-hook', { sessionName, cliToolId, attempt, rule });
+        state = 'submitted';
+      } else {
+        ({ state, rule, output } = watched);
+        logger.info('submit-classified', { sessionName, cliToolId, attempt, state, rule, receipt: 'awaited' });
+      }
+    }
 
     if (state === 'submitted') {
+      // Issue #4035: only a body the screen alone called submitted is remembered
+      // for the next send's clear. One the agent reported did leave, and the same
+      // text back in the composer is claude restoring it (Esc), the history (↑),
+      // or a person typing it — not a send that never arrived.
+      if (readPromptSubmitReceipt(sessionName, cliToolId, enteredAt) !== 'received') {
+        noteSubmittedBody(sessionName, message);
+      }
       invalidateCache(sessionName);
       return;
     }
@@ -1033,6 +1192,15 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
     if (composerShowsForeignPasteToken(output, cliToolId, message, composer)) {
       logger.warn('submit-not-confirmed:foreign-paste-token', { sessionName, cliToolId, attempt });
       continue;
+    }
+
+    // Issue #4035: the Enter thought lost may only have been late — the agent
+    // reporting the prompt now means it went, and another Enter would land on an
+    // empty composer, or on a dialog that the prompt just opened.
+    if (readPromptSubmitReceipt(sessionName, cliToolId, enteredAt) === 'received') {
+      logger.info('submit-confirmed-by-prompt-hook', { sessionName, cliToolId, attempt, rule });
+      invalidateCache(sessionName);
+      return;
     }
 
     // state === 'pending' — still typed-but-unsent, resend a single Enter and re-check.
