@@ -823,7 +823,8 @@ export async function startClaudeSession(
     });
 
     // SF-S2-003: Sanitize environment after createSession, before launching
-    // Claude CLI (what `sanitizeSessionEnvironment` did): drop CLAUDECODE from
+    // Claude CLI (what session-key-sender's `sanitizeSessionEnvironment` did
+    // until #4032 removed it): drop CLAUDECODE from
     // tmux's global environment (MF-S3-002), then `unset` it in the pane's
     // shell, then start Claude in interactive mode using the dynamically
     // resolved path.

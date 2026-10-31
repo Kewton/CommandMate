@@ -61,11 +61,6 @@ vi.mock('@/config/cli-tool-timing-config', async (importOriginal) => {
   );
 });
 
-// Mock pasted-text-helper
-vi.mock('@/lib/pasted-text-helper', () => ({
-  detectAndResendIfPastedText: vi.fn().mockResolvedValue(undefined),
-}));
-
 // Mock fs/promises for claude-session
 vi.mock('fs/promises', () => ({
   access: vi.fn().mockResolvedValue(undefined),

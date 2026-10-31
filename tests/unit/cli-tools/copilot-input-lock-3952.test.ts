@@ -13,6 +13,9 @@
  *
  * tmux is mocked and every key is logged in order.
  *
+ * Site on the pane-key-writers ledger this runs (#4032): `answerFolderTrustDialog`,
+ * the folder-trust answer of the readiness wait.
+ *
  * @vitest-environment node
  */
 

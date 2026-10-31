@@ -994,9 +994,8 @@ export function writeCopilotHookSettings(options: CopilotHookSettingsOptions = {
  *
  * Applied to the launched process rather than through `tmux set-environment`:
  * the pane is created before the agent starts and the assignment then travels
- * with the one process that matters, out of reach of
- * `sanitizeSessionEnvironment` and of anything else that edits the session's
- * environment later.
+ * with the one process that matters, out of reach of anything that edits
+ * the session's environment later (claude's `unset CLAUDECODE` among them).
  *
  * Returned as a map since Issue #1846. It used to be a pre-quoted
  * `NAME=value NAME=value` string that the caller concatenated in front of the

@@ -11,6 +11,11 @@
  * Gaps that cannot be closed from the screen are pinned under their names
  * (`ACCEPTED GAP: …`), so a change that moves them is a visible test change.
  *
+ * Sites on the pane-key-writers ledger this runs (#4032): `sendUnderInputLock`
+ * (the body, its submit keys and its clean-up), `withdrawUnsentBody` (taking
+ * back a body that was not submitted) and `clearComposer` (the composer cleared
+ * under the send's ticket).
+ *
  * @vitest-environment node
  */
 

@@ -7,6 +7,9 @@
  * The normal send goes through the real `sendMessageWithSubmitVerification`;
  * tmux is mocked and every key is logged in order.
  *
+ * Site on the pane-key-writers ledger this runs (#4032): `typeLeavingMarkOnFailure`,
+ * which types both commands with the owner's ticket.
+ *
  * @vitest-environment node
  */
 

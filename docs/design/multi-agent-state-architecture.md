@@ -843,7 +843,7 @@ SSE permission.asked(per_2) ＋ Auto-Yes OFF
 - `CM_AUTH_TOKEN` は hook 側が**プロセス環境の継承**から読む。**本書で新しい secret は増えない**（Stage 4 実測、§15.7）。
 - **`AgentLaunchPlan.env` に秘密を載せてはならない（DR4-017・決定）**: `renderAgentLaunchCommand` は `plan.env` を `NAME='value' command` の 1 行として描画し、それを `sendKeys` で pane に打ち込む。**この行は pane の scrollback に残り `capture --json` にも載る**。現状 `plan.env` に入るのは `CM_AGENT_WORKTREE_ID` / `CM_AGENT_INSTANCE_ID` だけで `CM_AUTH_TOKEN` は入っていない（＝ pane には出ない）。#1904 で `plan.env` の中身が増えるときも、**秘密はプロセス環境の継承でのみ渡す**（現行 copilot の作法）。
 - **Bearer トークンの宛先を広げない**: `curlArgumentPreamble()` は `CM_AUTH_TOKEN` があれば **宛先と無関係に** `Authorization: Bearer …` を付ける。したがって**宛先が定数のまま**であることがトークン漏洩の防波堤になっている（§10.8）。宛先を可変にする変更は、必ず「Authorization を付けるのは `127.0.0.1` 宛のときだけ」という shell 側条件とセットにする。
-- **`CM_HOOK_*` は CommandMate が launch line で必ず上書きする変数**として一覧化し、`tests/unit` で launch line に含まれることを pin する。併せて **`CM_HOOK_*` を、エージェントの子プロセス環境から除去する対象**（`sanitizeSessionEnvironment` / `SENSITIVE_ENV_KEYS` 相当の一覧。現行 `sanitizeSessionEnvironment` が unset するのは `CLAUDECODE` の 1 本だけで、`SENSITIVE_ENV_KEYS` に `CM_HOOK_*` は無い）に加え、**CommandMate が設定しない経路で外から持ち込まれた `CM_HOOK_*` が効かない**ようにする。
+- **`CM_HOOK_*` は CommandMate が launch line で必ず上書きする変数**として一覧化し、`tests/unit` で launch line に含まれることを pin する。併せて **`CM_HOOK_*` を、エージェントの子プロセス環境から除去する対象**（`sanitizeSessionEnvironment` / `SENSITIVE_ENV_KEYS` 相当の一覧。当時の `sanitizeSessionEnvironment` が unset するのは `CLAUDECODE` の 1 本だけで、`SENSITIVE_ENV_KEYS` に `CM_HOOK_*` は無い。`sanitizeSessionEnvironment` は #3981 以降呼ばれておらず #4032 で削除した。`unset CLAUDECODE` は今は `startClaudeSession` が起動の行と同じロックの番で打つ）に加え、**CommandMate が設定しない経路で外から持ち込まれた `CM_HOOK_*` が効かない**ようにする。
 
 ### 10.8 #1904 の env 経由 hook 設定（DR4-002・初版の評価を撤回）
 
@@ -1010,7 +1010,7 @@ SSE permission.asked(per_2) ＋ Auto-Yes OFF
 | S6 | **decision スコープ**: **別 instance / 別 worktree の `decisionId` を送ると 404 `decision_not_found`** になり、`answerPendingDecisionWithReceipt`（`src/lib/hooks/sources/pending-decisions.ts`）が呼ばれないことを pin。横断検索実装は赤 | `prompt-response/route.ts` | 1〜2 | DR4-003 |
 | S6b | **所属照合**: Phase 4 で `respond/route.ts` の `messageId` 経路に `message.worktreeId === :id` の照合が入ることを pin | `respond/route.ts` | 4 | DR4-003 |
 | S7 | **shell スニペットの port 検証**: 生成される hook コマンドに `case "$CM_HOOK_PORT" in ''\|*[!0-9]*) exit 0;; esac` 相当の数値検証が**含まれる**こと、および **scheme / host / relay 絶対パスが env 由来でない**ことを生成物の文字列比較で pin。**`${…:-` の既定値つき綴りが現れたら赤** | `hook-settings.ts` の生成テスト | 2（#1904） | DR4-002 |
-| S8 | **env の一覧**: `CM_HOOK_*` が launch line に必ず含まれること、および**子プロセス環境から除去される対象の一覧**（`sanitizeSessionEnvironment` / `SENSITIVE_ENV_KEYS` 相当）に入っていることを pin | launch / env sanitizer | 2 | DR4-002 |
+| S8 | **env の一覧**: `CM_HOOK_*` が launch line に必ず含まれること、および**子プロセス環境から除去される対象の一覧**（`sanitizeSessionEnvironment`（#4032 で削除）/ `SENSITIVE_ENV_KEYS` 相当）に入っていることを pin | launch / env sanitizer | 2 | DR4-002 |
 | S9 | **key と literal の型分離**: `KeySequence` が `{kind:'literal'}` / `{kind:'key'}` の判別可能 union であり、**literal が必ず `send-keys -l` を経由する**ことを pin。本文が `Escape` / `C-c` / `Enter` のときに**キーとして着弾しない**ことを実 tmux（または transport スタブ）で確認 | `tmux.ts` / `*Tool` | 2 | DR4-011 |
 | S10 | **graceful exit の後置条件**: `/exit` 後に **`hasSession` が false** かつ **割当 port の `/global/health` が無応答**になるまで port を forget しないこと、満たせない場合に `graceful_exit_timeout` / `port_orphaned` を出して force kill することを pin | `OpenCodeTool.killSession` | 2 | DR4-012 / DR4-004 |
 | S11 | **capabilities の開示範囲**: `GET /api/capabilities` が `AUTH_EXCLUDED_PATHS` に**入らない**ことと、応答が **`serverVersion` ＋ 固定トークン配列だけ**（キーの完全一致・`Cache-Control: no-store`）であることを pin。キーが増えたら赤 | `tests/unit/api/capabilities.test.ts` | 1 | DR4-008 |
@@ -1303,7 +1303,7 @@ Stage 4 が develop `90b67eb9` に対して実測し、**追加の対処を要�
 | 15 | `src/components/worktree/NavigationButtons.tsx` | **型のみ** `NavigationKey` | `@/lib/tmux/**` | client（型のみ） | 段階解消 | `NavigationKey` を型モジュールへ移設（`allowTypeImports` は採らない、DR3-001） |
 | 16 | `src/components/worktree/TerminalEscapeHatch.tsx` | **型のみ** `NavigationKey` | `@/lib/tmux/**` | client（型のみ） | 段階解消 | 同 15 |
 | 17 | `src/lib/auto-yes-poller.ts` | `invalidateCache` | **`./tmux/**`** | pollers | 段階解消 | `session` ファサード（`invalidateSessionCache()`） |
-| 18 | `src/lib/pasted-text-helper.ts` | `capturePane` / `sendKeys` | **`./tmux/**`** | ws / broadcast | 段階解消 | `ICLITool.sendMessage` ＋ `captureSessionOutput` |
+| 18 | `src/lib/pasted-text-helper.ts` | `capturePane` / `sendKeys` | **`./tmux/**`** | ws / broadcast | 段階解消 | `ICLITool.sendMessage` ＋ `captureSessionOutput`（src から呼ばれていなかったため #4032 で削除。段階解消 13 → 12） |
 | 19 | `src/lib/polling/assistant-conversation-poller.ts` | `hasSession` | `@/lib/tmux/**` | pollers | 段階解消 | `ICLITool.isRunning`（Issue #2655 で削除済み） |
 | 20 | `src/lib/polling/global-session-poller.ts` | `hasSession` | `@/lib/tmux/**` | pollers | 段階解消 | `ICLITool.isRunning`（Issue #3232 で削除済み） |
 | 21 | `src/lib/polling/response-checker.ts` | `CACHE_MAX_CAPTURE_LINES` / `isCaptureWindowSaturated` | `@/lib/tmux/**` | pollers | 段階解消 | `captureSpec()` ＋ `session` ファサード（capture 上限） |

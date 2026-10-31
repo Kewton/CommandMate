@@ -69,7 +69,7 @@ CM_AGENT_WORKTREE_ID='wt-1' CM_AGENT_INSTANCE_ID='copilot-2' gh copilot
 
 - 起動コマンドの**環境変数プレフィックス**として与える（`tmux set-environment` ではない）。
   pane はエージェント起動前に作られるので、割り当てを唯一意味のあるプロセスに直接載せるほうが、
-  後からセッション環境を編集するもの（`sanitizeSessionEnvironment` を含む）の影響を受けない。
+  後からセッション環境を編集するもの（当時の `sanitizeSessionEnvironment` を含む。同関数は #4032 で削除）の影響を受けない。
 - hook 側は fire 時に読む。`--instance-id "${CM_AGENT_INSTANCE_ID:-copilot}"` と既定を持たせてあるので、
   未設定でも primary instance に落ちる。
 
