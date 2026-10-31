@@ -50,8 +50,8 @@ import { useAutoYes } from '@/hooks/useAutoYes';
 import type { AutoYesDecisionPublished } from '@/types/auto-yes-decision';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import {
-  PROMPT_RESPONSE_NOTICES,
-  readPromptResponseOutcome,
+  promptResponseNotice,
+  readPromptResponseReply,
   type PromptResponseOutcome,
 } from '@/lib/prompt-response-outcome';
 import { isTrustConfirmationFrame, readSelectionListShape } from '@/lib/detection/selection-shape';
@@ -1457,6 +1457,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     async (answer: string): Promise<void> => {
       actions.setPromptAnswering(true);
       let outcome: PromptResponseOutcome;
+      // Issue #4031: a failure stopped part-way (keys may be on the pane).
+      let partial = false;
       try {
         // Issue #287: Use shared builder to include promptType and defaultOptionNumber
         // so the API can use cursor-key navigation even when promptCheck re-verification fails.
@@ -1483,7 +1485,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(requestBody),
         });
-        outcome = await readPromptResponseOutcome(response);
+        ({ outcome, partial } = await readPromptResponseReply(response));
       } catch (err) {
         // The request got no reply at all.
         console.error('[WorktreeDetailRefactored] Error sending prompt response:', err);
@@ -1497,7 +1499,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         if (outcome === 'answered') {
           actions.clearPrompt();
         } else {
-          const notice = PROMPT_RESPONSE_NOTICES[outcome];
+          const notice = promptResponseNotice(outcome, partial);
           showToast(tWorktree(notice.messageKey), notice.type);
         }
         // Immediately fetch current output to update terminal without waiting for polling
