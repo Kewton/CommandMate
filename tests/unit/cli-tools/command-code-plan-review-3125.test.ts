@@ -32,7 +32,7 @@ vi.mock('@/lib/logger', () => ({
 
 import {
   CommandCodeTool,
-  COMMAND_CODE_PLAN_REVIEW_SEND_MESSAGE,
+  commandCodePlanReviewSendMessage,
 } from '@/lib/cli-tools/command-code';
 import {
   planCommandCodePlanReviewKeys,
@@ -173,8 +173,9 @@ describe('send at the plan review (Issue #3125)', () => {
     vi.mocked(capturePane).mockResolvedValue(read(rel));
     const tool = new CommandCodeTool();
     const started = Date.now();
+    // Issue #4049: the constant became a function of the worktree and instance.
     await expect(tool.sendMessage('test-wt', 'hello')).rejects.toThrow(
-      COMMAND_CODE_PLAN_REVIEW_SEND_MESSAGE,
+      commandCodePlanReviewSendMessage('test-wt'),
     );
     expect(Date.now() - started).toBeLessThan(5000);
     expect(sendMessageWithSubmitVerification).not.toHaveBeenCalled();

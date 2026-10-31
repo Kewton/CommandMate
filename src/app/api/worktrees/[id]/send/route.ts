@@ -32,6 +32,7 @@ import {
   resolveSessionTargetStrict,
 } from '@/lib/session/resolve-session-target';
 import { sessionTargetConflictResponse } from '@/lib/session/session-target-conflict-response';
+import { respondAgentFor } from '@/lib/session/respond-target';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { probeRunningSessionHookUrl } from '@/lib/cli-tools/base';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType, type ICLITool } from '@/lib/cli-tools/types';
@@ -636,11 +637,22 @@ async function handleSend(
     let turnAtInput: TurnAtInput | null = null;
     // Issue #3945: this request's own attempt, as the service recorded it.
     let ownAttempt: { state: SendAttemptState; reason: string } | null = null;
+    // Issue #4049: a refusal's `respond` must reach the tool this request named.
+    // A bare `respond` resolves as a request naming nothing does, so the tool is
+    // named only when the request named one (and no instance) and it is not that.
+    const unqualified = requestedCliToolId && !instanceId ? resolveSessionTargetStrict(db, id, {}) : null;
+    const respondAgent = respondAgentFor(
+      requestedCliToolId,
+      instanceId,
+      unqualified?.ok ? unqualified.target.cliToolId : undefined,
+    );
+
     const result = await sendUserMessage(db, {
       worktreeId: id,
       content: trimmedContent,
       cliToolId,
       instanceId,
+      respondAgent,
       absoluteImagePath,
       // Issue #576: copilot /model switch (antigravity model is applied at
       // session start above, not mid-session).
