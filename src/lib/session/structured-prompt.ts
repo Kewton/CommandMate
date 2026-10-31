@@ -35,6 +35,7 @@
 
 import { UNCLASSIFIED_PROMPT_TYPE } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { respondTargetFlags } from '@/lib/session/respond-target';
 import { OPENCODE_V2_DECISION_LABELS } from '@/lib/hooks/sources/opencode-v2/decision-labels';
 
 /**
@@ -363,10 +364,12 @@ export function buildStructuredPromptQuestion(
   worktreeId: string,
   facts: StructuredPromptFacts,
   instanceId?: string,
+  agent?: CLIToolType,
 ): string {
   // Issue #4031: the `respond` this names goes to the instance whose prompt it
   // is. Without an instance (the primary) the sentence is as before.
-  const target = instanceId ? ` --instance ${instanceId}` : '';
+  // Issue #4049: or to the tool, when the caller names one (`respondAgentFor`).
+  const target = respondTargetFlags(instanceId, agent);
   const parts = [
     `A dialog is open in ${worktreeId}: the agent reported it via ${SOURCE_LABEL[facts.source]}` +
       `${facts.toolName ? ` for ${facts.toolName}` : ''}, but the detection layer published no ` +
@@ -432,11 +435,12 @@ export function buildStructuredPromptData(
   worktreeId: string,
   facts: StructuredPromptFacts,
   instanceId?: string,
+  agent?: CLIToolType,
 ): StructuredPromptWaitingData {
   return {
     type: UNCLASSIFIED_PROMPT_TYPE,
     status: 'pending',
-    question: buildStructuredPromptQuestion(worktreeId, facts, instanceId),
+    question: buildStructuredPromptQuestion(worktreeId, facts, instanceId, agent),
     options: [],
     source: facts.source,
     ...(facts.message ? { message: facts.message } : {}),
@@ -463,11 +467,12 @@ export function buildStructuredPromptHistoryRecord(
   worktreeId: string,
   facts: StructuredPromptFacts,
   instanceId?: string,
+  agent?: CLIToolType,
 ): StructuredPromptHistoryRecord {
   return {
     type: UNCLASSIFIED_PROMPT_TYPE,
     status: 'unclassified',
-    question: buildStructuredPromptQuestion(worktreeId, facts, instanceId),
+    question: buildStructuredPromptQuestion(worktreeId, facts, instanceId, agent),
     options: [],
     source: facts.source,
     ...(facts.message ? { message: facts.message } : {}),
