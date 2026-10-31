@@ -34,6 +34,7 @@ import {
 } from '@/components/sidebar/BranchStatusIndicator';
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
 import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
+import { buildWorktreeOpenHref } from '@/lib/waiting-instance-pick';
 import type { Worktree } from '@/types/models';
 import type { BranchStatus } from '@/types/sidebar';
 
@@ -275,7 +276,7 @@ export default function ReviewTab() {
               return (
                 <Link
                   key={wt.id}
-                  href={`/worktrees/${wt.id}`}
+                  href={buildWorktreeOpenHref(wt)}
                   className="block"
                   data-testid={`review-item-${wt.id}`}
                 >

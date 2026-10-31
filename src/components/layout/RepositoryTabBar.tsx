@@ -75,6 +75,7 @@ import { useTranslations } from 'next-intl';
 import { MoreHorizontal } from 'lucide-react';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { useWorktreeSelection } from '@/contexts/WorktreeSelectionContext';
+import { buildWorktreeOpenHref } from '@/lib/waiting-instance-pick';
 import { usePcDisplaySizeContext } from '@/contexts/PcDisplaySizeContext';
 import { useViewTransitionRouter } from '@/components/providers/ViewTransitionsProvider';
 import { BranchListItem } from '@/components/sidebar/BranchListItem';
@@ -306,15 +307,17 @@ export function useExclusiveBranchList(isOpen: boolean, close: () => void): void
  * Shared by the strip and the worktree breadcrumb so the two cannot drift.
  */
 export function useOpenWorktreeFromBranchList(): (worktreeId: string) => void {
-  const { selectWorktree } = useWorktreeSelection();
+  const { selectWorktree, worktrees } = useWorktreeSelection();
   const router = useViewTransitionRouter();
   return useCallback(
     (worktreeId: string) => {
       announceBranchListOpen(null);
       void selectWorktree(worktreeId);
-      router.push(`/worktrees/${worktreeId}`);
+      // Same landing as the sidebar rows (Issue #4014): the waiting instance, else the bare URL.
+      const worktree = worktrees?.find((w) => w.id === worktreeId);
+      router.push(worktree ? buildWorktreeOpenHref(worktree) : `/worktrees/${worktreeId}`);
     },
-    [selectWorktree, router]
+    [selectWorktree, worktrees, router]
   );
 }
 
