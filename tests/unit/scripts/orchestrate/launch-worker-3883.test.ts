@@ -174,6 +174,7 @@ describe('classifyModel', () => {
 function fakeCli({
   models = [] as (string | null)[],
   sendExit = 0,
+  initExit = 0,
   running = true,
   ignored = true,
   killExit = 0,
@@ -216,6 +217,7 @@ function fakeCli({
       if (sendExit !== 0) return { status: sendExit, stdout: '', stderr: 'prompt not ready' };
       alive = true;
       if (args.includes('--auto-yes')) grant = true;
+      if (!args.includes('--contract') && initExit !== 0) return { status: initExit, stdout: '', stderr: 'initialization timeout' };
       if (!args.includes('--contract')) {
         armedAtInit.push(grant);
         inits += 1;
@@ -331,9 +333,35 @@ describe('send: model pinned, sent, checked (P3)', () => {
   it('a send that fails keeps its exit code and is not checked (3-1 cold start)', () => {
     const fake = fakeCli({ sendExit: 99 });
     const r = go(fake, sendArgv('--model', 'opus'));
-    expect(r.code).toBe(99);
+    // #3904: 99 is now followed by a read of the screen; nothing readable means the usual restart, then 41.
+    expect(r.code).toBe(EXIT_MODEL_UNKNOWN);
     expect(r.out).toEqual([]);
+    expect(contractSends(fake)).toEqual([]);
+  });
+
+  it('a send that fails with another exit code keeps it and is not checked', () => {
+    const fake = fakeCli({ sendExit: 7 });
+    const r = go(fake, sendArgv('--model', 'opus'));
+    expect(r.code).toBe(7);
     expect(fake.calls.some((c) => c[1] === 'capture')).toBe(false);
+  });
+
+  it('#3904: exit 99 on the starting message but the model reads: the contract is sent once and the .err says so', () => {
+    const fake = fakeCli({ models: ['claude-sonnet-5-5'], initExit: 99 });
+    const r = go(fake, sendArgv('--model', 'sonnet'));
+    expect(r.code).toBe(0);
+    expect(r.out).toEqual(['task-1']);
+    expect(contractSends(fake)).toHaveLength(1);
+    expect(fake.calls.filter((c) => c[1] === 'send' && !c.includes('--contract'))).toHaveLength(1);
+    expect(fs.readFileSync(path.join(runDir, 'send-init-3883.err'), 'utf8')).toContain('prompt was reached');
+  });
+
+  it('#3904: exit 99 and the model never reads: restarted once, then 41, no contract', () => {
+    const fake = fakeCli({ models: [null], initExit: 99 });
+    const r = go(fake, sendArgv('--model', 'sonnet'));
+    expect(r.code).toBe(EXIT_MODEL_UNKNOWN);
+    expect(fake.calls.filter((c) => c[1] === 'send' && !c.includes('--contract'))).toHaveLength(2);
+    expect(contractSends(fake)).toEqual([]);
   });
 });
 

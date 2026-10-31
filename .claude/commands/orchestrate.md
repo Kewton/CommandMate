@@ -762,6 +762,7 @@ stdin で読む形に戻さないこと。ループを使わずに 1 件ずつ�
 **モデルの確認結果の扱い**（launch-worker.mjs が stderr に出す。手順は docs/orchestrate/workers.md#3-1-claude-のモデルを契約に固定する）:
 
 - `model ok`: そのまま 3-2 へ
+- 起動のメッセージが exit 99 でも、launch-worker.mjs は画面の model を読み、読めれば契約へ進む（`send-init-*.err` に記録）。読めなければ下の UNKNOWN と同じ扱い
 - `model UNKNOWN` / `model MISMATCH`（1 回目）: launch-worker.mjs が自分で 1 回だけ起動し直す（契約はまだ送っていない）
 - exit 40（2 回目も `model MISMATCH`）/ 41（2 回目も `model UNKNOWN`）: **セッションは止まっている。契約は送られていない。その Issue は進めない**（そのモデルのまま続けない）。
   8-3 に書き、`.claude/settings.local.json` と CommandMate の版を確かめてから、人の判断で送り直す。利用者の `~/.claude/settings.json` は変えない

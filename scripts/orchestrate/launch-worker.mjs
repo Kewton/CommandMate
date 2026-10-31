@@ -68,6 +68,8 @@ export const MODEL_READS = 3;
 export const MODEL_READ_INTERVAL_SEC = 20;
 /** Sessions started per send: the first and one restart. */
 export const LAUNCH_ATTEMPTS = 2;
+/** `send`'s exit code for a message that was not delivered (3-1's cold start). */
+export const EXIT_NOT_DELIVERED = 99;
 export const EXIT_MODEL_MISMATCH = 40;
 export const EXIT_MODEL_UNKNOWN = 41;
 export const EXIT_STOP_UNCONFIRMED = 42;
@@ -375,8 +377,15 @@ export function main(argv, deps = {}) {
       log(`model ${value} -> ${path.join(o.worktree, SETTINGS_FILE)}`);
       const init = sendTo('send-init', [INIT_MESSAGE, '--instance', o.instance]);
       log(`start exit=${init.status} issue=${workItem} (${init.name}, no contract, no Auto-Yes)`);
-      if (init.status !== 0) return init.status;
+      // 99 = the message was not delivered (initialization timeout / prompt not ready / composer-not-empty), but the
+      // session may be up: the starting message asks for no work, so a model read off the screen is as good (#3904).
+      if (init.status !== 0 && init.status !== EXIT_NOT_DELIVERED) return init.status;
       const { verdict, got } = checkModel({ ...ctx, want: o.model });
+      if (init.status !== 0 && got) {
+        const note = `start exit=${init.status} but the prompt was reached (model read: ${got}); continuing\n`;
+        fs.appendFileSync(path.join(o.runDir, `${init.name.replace(/\.out$/, '')}.err`), note);
+        log(`start exit=${init.status} issue=${workItem}: ${note.trim()}`);
+      }
       log(`model ${verdict === 'ok' ? 'ok' : verdict.toUpperCase()} issue=${workItem} want=${o.model} got=${got || '-'} attempt=${attempt}`);
       if (verdict !== 'ok') {
         // Not the contract's model (or not known to be): the contract does not go to this session.
