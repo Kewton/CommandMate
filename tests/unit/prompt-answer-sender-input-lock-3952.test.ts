@@ -111,7 +111,7 @@ afterEach(() => {
 });
 
 describe('[#3952] an Enter-sending answer and a message send do not interleave', () => {
-  it('positive: a send that starts after the answer’s text waits for its Enter', async () => {
+  it('positive: a send that starts after the answer’s text waits for its Enter (the Enter through `sendPromptAnswerKeys`)', async () => {
     const typed = deferred();
     onKey = (key) => {
       if (key === 'y') typed.resolve();
@@ -307,7 +307,7 @@ const choicePrompt = (cursorOn: 1 | 2): PromptData => ({
 });
 
 describe('[#3952 review P1-1] cursor keys come from the screen read after the wait', () => {
-  it('positive: the cursor moved from 2 to 1 while the answer "2" waited — Down, Enter (not a bare Enter on 1)', async () => {
+  it('positive: the cursor moved from 2 to 1 while the answer "2" waited — Down, Enter (not a bare Enter on 1; the keys through `sendSpecialKeysWhileCurrent`)', async () => {
     const held = holdSend();
     const answer = sendPromptAnswer({
       sessionName: SESSION,

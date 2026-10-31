@@ -58,6 +58,28 @@ export const KEY_WRITERS: readonly string[] = [
 /** The tmux commands that put keys or text into a pane. */
 export const RAW_KEY_COMMANDS: readonly string[] = ['send-keys', 'paste-buffer'];
 
+/**
+ * tmux's own aliases of {@link RAW_KEY_COMMANDS} (`tmux list-commands`), Issue
+ * #4050. Counted only where the word goes to tmux — an argv handed to a tmux
+ * invocation, or a shell line after `tmux` — because `send` is also a CLI
+ * command name (`new Command('send')`, `commandmate send`).
+ */
+export const RAW_KEY_COMMAND_ALIASES: Readonly<Record<string, string>> = { send: 'send-keys', pasteb: 'paste-buffer' };
+
+/** A set of tmux commands to look for, by their full names and tmux's aliases. */
+export interface TmuxCommandSet {
+  commands: readonly string[];
+  aliases: Readonly<Record<string, string>>;
+  /**
+   * Also count an array that merely starts with a full name, wherever it goes
+   * (#4032's rule for the key commands: an argv built before it is handed to
+   * tmux). Off for a name that is also a label (`'kill-session'` names an API).
+   */
+  anyArgvHead?: boolean;
+}
+
+export const RAW_KEY_COMMAND_SET: TmuxCommandSet = { commands: RAW_KEY_COMMANDS, aliases: RAW_KEY_COMMAND_ALIASES, anyArgvHead: true };
+
 /** The functions that run their callback as a holder of the instance input lock. */
 export const LOCK_WRAPPERS: readonly string[] = ['withInstanceInputLock', 'answerUnderInstanceInputLock'];
 
@@ -157,6 +179,45 @@ function dynamicImportSpecifier(expression: ts.Expression | undefined): string |
   return null;
 }
 
+function unwrap(expression: ts.Expression): ts.Expression {
+  let node = expression;
+  while (ts.isParenthesizedExpression(node)) node = node.expression;
+  return node;
+}
+
+/**
+ * The specifier of a dynamic import used without a binding (Issue #4050):
+ * `(await import('m')).name` — `expression` is the object the member is read
+ * off, parentheses and `await` included.
+ */
+function unboundDynamicImportSpecifier(expression: ts.Expression): string | null {
+  const node = unwrap(expression);
+  return ts.isAwaitExpression(node) ? dynamicImportSpecifier(unwrap(node.expression)) : null;
+}
+
+/**
+ * `import('m').then((m) => …)` / `.then(({ name }) => …)` (Issue #4050): the
+ * specifier and the callback's first parameter, which binds the module.
+ */
+function thenOfDynamicImport(node: ts.Node): { specifier: string; parameter: ts.ParameterDeclaration } | null {
+  if (!ts.isCallExpression(node) || !ts.isPropertyAccessExpression(node.expression) || node.expression.name.text !== 'then') return null;
+  const specifier = dynamicImportSpecifier(unwrap(node.expression.expression));
+  const callback = node.arguments[0];
+  if (specifier === null || callback === undefined) return null;
+  const fn = unwrap(callback);
+  if (!(ts.isArrowFunction(fn) || ts.isFunctionExpression(fn)) || fn.parameters.length === 0) return null;
+  return { specifier, parameter: fn.parameters[0] };
+}
+
+/** The name a member access reads, for `x.name` and `x['name']`; null for a computed key. */
+function memberName(node: ts.Node): { object: ts.Expression; name: string } | null {
+  if (ts.isPropertyAccessExpression(node)) return { object: node.expression, name: node.name.text };
+  if (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)) {
+    return { object: node.expression, name: node.argumentExpression.text };
+  }
+  return null;
+}
+
 /**
  * Read one file's key-writer sites off its text. Pure, so the scanner itself is
  * held to fixtures (a scanner that reads nothing makes every check pass).
@@ -212,20 +273,25 @@ export function scanKeyWriters(file: string, text: string, writers: readonly str
         }
       }
     }
-    if (ts.isVariableDeclaration(node)) {
-      const specifier = dynamicImportSpecifier(node.initializer);
-      if (specifier !== null && isTmuxSpecifier(specifier)) {
-        if (ts.isIdentifier(node.name)) namespaces.add(node.name.text);
-        else if (ts.isObjectBindingPattern(node.name)) {
-          for (const element of node.name.elements) {
-            const imported = element.propertyName && ts.isIdentifier(element.propertyName)
-              ? element.propertyName.text
-              : ts.isIdentifier(element.name) ? element.name.text : null;
-            if (imported !== null && writers.includes(imported) && ts.isIdentifier(element.name)) {
-              aliases.set(element.name.text, imported);
-              declarations.add(element.name);
-              if (element.propertyName) declarations.add(element.propertyName);
-            }
+    // `const m = await import(…)` / `const { w } = await import(…)`, and (Issue
+    // #4050) the parameter of `import(…).then((m) => …)` / `.then(({ w }) => …)`.
+    const bound = ts.isVariableDeclaration(node)
+      ? { specifier: dynamicImportSpecifier(node.initializer), name: node.name }
+      : (() => {
+          const then = thenOfDynamicImport(node);
+          return then === null ? null : { specifier: then.specifier, name: then.parameter.name };
+        })();
+    if (bound !== null && bound.specifier !== null && isTmuxSpecifier(bound.specifier)) {
+      if (ts.isIdentifier(bound.name)) namespaces.add(bound.name.text);
+      else if (ts.isObjectBindingPattern(bound.name)) {
+        for (const element of bound.name.elements) {
+          const imported = element.propertyName && ts.isIdentifier(element.propertyName)
+            ? element.propertyName.text
+            : ts.isIdentifier(element.name) ? element.name.text : null;
+          if (imported !== null && writers.includes(imported) && ts.isIdentifier(element.name)) {
+            aliases.set(element.name.text, imported);
+            declarations.add(element.name);
+            if (element.propertyName) declarations.add(element.propertyName);
           }
         }
       }
@@ -246,13 +312,15 @@ export function scanKeyWriters(file: string, text: string, writers: readonly str
         isMemberDeclarationName(node);
       if (!isPropertyName) add(node, aliases.get(node.text) as string);
     }
-    if (
-      ts.isPropertyAccessExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      namespaces.has(node.expression.text) &&
-      writers.includes(node.name.text)
-    ) {
-      add(node, node.name.text);
+    // `ns.w` / `ns['w']` (Issue #4050) on a namespace, and `(await import(…)).w`
+    // with no binding at all (Issue #4050).
+    const member = memberName(node);
+    if (member !== null && writers.includes(member.name)) {
+      const object = unwrap(member.object);
+      const specifier = unboundDynamicImportSpecifier(member.object);
+      if ((ts.isIdentifier(object) && namespaces.has(object.text)) || (specifier !== null && isTmuxSpecifier(specifier))) {
+        add(node, member.name);
+      }
     }
     ts.forEachChild(node, visit);
   };
@@ -346,17 +414,21 @@ export function scanReferences(
         }
       }
     }
-    if (ts.isVariableDeclaration(node)) {
-      const specifier = dynamicImportSpecifier(node.initializer);
-      if (specifier !== null && fromDefining(specifier)) {
-        if (ts.isIdentifier(node.name)) namespaces.add(node.name.text);
-        else if (ts.isObjectBindingPattern(node.name)) {
-          for (const element of node.name.elements) {
-            const name = element.propertyName && ts.isIdentifier(element.propertyName)
-              ? element.propertyName.text
-              : ts.isIdentifier(element.name) ? element.name.text : null;
-            if (name !== null && names.includes(name) && ts.isIdentifier(element.name)) bind(element.name.text, name);
-          }
+    // As in scanKeyWriters: a declaration, or (Issue #4050) `import(…).then((m) => …)`.
+    const bound = ts.isVariableDeclaration(node)
+      ? { specifier: dynamicImportSpecifier(node.initializer), name: node.name }
+      : (() => {
+          const then = thenOfDynamicImport(node);
+          return then === null ? null : { specifier: then.specifier, name: then.parameter.name };
+        })();
+    if (bound !== null && bound.specifier !== null && fromDefining(bound.specifier)) {
+      if (ts.isIdentifier(bound.name)) namespaces.add(bound.name.text);
+      else if (ts.isObjectBindingPattern(bound.name)) {
+        for (const element of bound.name.elements) {
+          const name = element.propertyName && ts.isIdentifier(element.propertyName)
+            ? element.propertyName.text
+            : ts.isIdentifier(element.name) ? element.name.text : null;
+          if (name !== null && names.includes(name) && ts.isIdentifier(element.name)) bind(element.name.text, name);
         }
       }
     }
@@ -396,6 +468,14 @@ export function scanReferences(
       } else if (aliases.has(node.text) && !isMember && !isMemberDeclarationName(node)) {
         add(node, aliases.get(node.text) as string);
       }
+    }
+    // Issue #4050: `ns['name']`, and `(await import(…)).name` / `['name']` with no binding.
+    const member = memberName(node);
+    if (member !== null && names.includes(member.name)) {
+      const object = unwrap(member.object);
+      const specifier = unboundDynamicImportSpecifier(member.object);
+      const viaNamespace = ts.isElementAccessExpression(node) && ts.isIdentifier(object) && namespaces.has(object.text);
+      if (viaNamespace || (specifier !== null && fromDefining(specifier))) add(node, member.name);
     }
     ts.forEachChild(node, visit);
   };
@@ -481,26 +561,127 @@ export interface RawKeyWrite {
   line: number;
 }
 
-/** The command a literal starts a tmux invocation with, or null. */
-function rawCommandOf(node: ts.Node): string | null {
-  // `['send-keys', …]` — an argv for `execFile('tmux', …)`.
-  if (ts.isStringLiteralLike(node) && RAW_KEY_COMMANDS.includes(node.text)) {
-    const parent = node.parent;
-    return ts.isArrayLiteralExpression(parent) && parent.elements[0] === node ? node.text : null;
-  }
-  // `` `send-keys -t ${target} …` `` — a line for a control-mode client's stdin.
-  const head = ts.isTemplateExpression(node) ? node.head.text : ts.isNoSubstitutionTemplateLiteral(node) ? node.text : null;
-  if (head === null) return null;
-  return RAW_KEY_COMMANDS.find((command) => head.startsWith(`${command} `)) ?? null;
+/** Global flags of tmux that take an argument: `tmux -L <socket> send-keys …` (Issue #4050). */
+const TMUX_FLAGS_WITH_ARGUMENT: ReadonlySet<string> = new Set(['-L', '-S', '-f', '-c', '-T']);
+
+const isTmuxProgram = (text: string): boolean => text === 'tmux' || text.endsWith('/tmux');
+
+/** The full name of `word` in `set` — itself, or what its alias stands for — or null. */
+function commandNamed(word: string, set: TmuxCommandSet, withAliases: boolean): string | null {
+  if (set.commands.includes(word)) return word;
+  return withAliases ? (set.aliases[word] ?? null) : null;
 }
 
 /**
- * Every `send-keys` / `paste-buffer` command composed in one file: the first
- * element of an argv array, or a command line in a template. A label that
- * merely names one (`'paste-buffer'` handed to a log) is not a command.
+ * Is `call` a tmux invocation an argv is handed to (Issue #4050)? Its first
+ * argument names the program (`execFile('tmux', …)`, `spawn('/usr/bin/tmux', …)`),
+ * or the callee says tmux (`runTmux(…)`, `tmuxExec(…)`).
  */
-export function scanRawKeyWrites(file: string, text: string): RawKeyWrite[] {
-  if (!RAW_KEY_COMMANDS.some((c) => text.includes(c))) return [];
+function isTmuxInvocation(call: ts.CallExpression): boolean {
+  const first = call.arguments[0];
+  if (first !== undefined && ts.isStringLiteralLike(first) && isTmuxProgram(first.text)) return true;
+  const name = calleeName(call.expression);
+  return name !== null && /tmux/i.test(name);
+}
+
+/**
+ * The commands of a tmux argv (Issue #4050): the word at each command position
+ * — the first one after the global flags (and their arguments), and the first
+ * one after each `;` that chains another command. A spread may hold flags, so
+ * it leaves the position open; any other expression there is a command nobody
+ * can read, and closes it.
+ */
+function argvCommands(array: ts.ArrayLiteralExpression, set: TmuxCommandSet): Array<{ node: ts.Node; command: string }> {
+  const found: Array<{ node: ts.Node; command: string }> = [];
+  let elements = [...array.elements];
+  const head = elements[0];
+  if (head !== undefined && ts.isStringLiteralLike(head) && isTmuxProgram(head.text)) elements = elements.slice(1);
+  let expectCommand = true;
+  for (let i = 0; i < elements.length; i += 1) {
+    const element = elements[i];
+    const literal = ts.isStringLiteralLike(element) ? element.text : null;
+    if (!expectCommand) {
+      if (literal === ';' || literal === '\\;') expectCommand = true;
+      continue;
+    }
+    if (ts.isSpreadElement(element)) continue;
+    if (literal === null) {
+      expectCommand = false;
+      continue;
+    }
+    if (TMUX_FLAGS_WITH_ARGUMENT.has(literal)) {
+      i += 1;
+      continue;
+    }
+    if (literal.startsWith('-')) continue;
+    const command = commandNamed(literal, set, true);
+    if (command !== null) found.push({ node: element, command });
+    expectCommand = false;
+  }
+  return found;
+}
+
+/** The text of a string or template, its substitutions written as one word each. */
+function literalText(node: ts.Node): string | null {
+  if (ts.isStringLiteralLike(node)) return node.text;
+  if (ts.isTemplateExpression(node)) return node.head.text + node.templateSpans.map((span) => `\u0000${span.literal.text}`).join('');
+  return null;
+}
+
+/**
+ * Where a shell line runs one of the commands through tmux (Issue #4050):
+ * `tmux [flags] <command>` with the command a word of its own, e.g.
+ * `` exec(`tmux -L ${sock} send-keys -t ${s} Enter`) ``. A permission pattern
+ * (`Bash(tmux kill-session:*)`) is not a word followed by a space, so it is not one.
+ */
+function shellCommands(text: string, set: TmuxCommandSet): string[] {
+  const words = [...set.commands, ...Object.keys(set.aliases)].map((w) => w.replace(/[-]/g, '\\-')).join('|');
+  const line = new RegExp(`(?:^|[\\s;&|(\`'"])tmux(?:\\s+-[A-Za-z0-9]+(?:\\s+(?!-)[^\\s;]+)?)*\\s+(${words})(?=[\\s;'"\`]|$)`, 'g');
+  return [...text.matchAll(line)].map((m) => commandNamed(m[1], set, true) as string);
+}
+
+/**
+ * The commands `node` composes for tmux: an argv array (Issue #4032: one that
+ * starts with a full command name; Issue #4050: any argv handed to a tmux
+ * invocation, or starting with the program, read past its global flags and
+ * aliases), a control-mode line starting with a full command name, or a shell
+ * line that runs tmux (Issue #4050).
+ */
+function rawCommandsAt(node: ts.Node, set: TmuxCommandSet = RAW_KEY_COMMAND_SET): Array<{ node: ts.Node; command: string }> {
+  if (ts.isArrayLiteralExpression(node)) {
+    const parent = node.parent;
+    const head = node.elements[0];
+    const toTmux =
+      (ts.isCallExpression(parent) && parent.arguments.includes(node) && isTmuxInvocation(parent)) ||
+      (head !== undefined && ts.isStringLiteralLike(head) && isTmuxProgram(head.text));
+    if (toTmux) return argvCommands(node, set);
+    // `['send-keys', …]` — an argv for `execFile('tmux', …)` built elsewhere.
+    if (set.anyArgvHead === true && head !== undefined && ts.isStringLiteralLike(head)) {
+      const command = commandNamed(head.text, set, false);
+      if (command !== null) return [{ node: head, command }];
+    }
+    return [];
+  }
+  const text = literalText(node);
+  if (text === null) return [];
+  const found = shellCommands(text, set).map((command) => ({ node, command }));
+  // `` `send-keys -t ${target} …` `` — a line for a control-mode client's stdin.
+  if (found.length === 0 && (ts.isTemplateExpression(node) || ts.isNoSubstitutionTemplateLiteral(node))) {
+    const command = set.commands.find((c) => text.startsWith(`${c} `));
+    if (command !== undefined) found.push({ node, command });
+  }
+  return found;
+}
+
+/**
+ * Every tmux command of `set` composed in one file — argv arrays, control-mode
+ * lines and shell lines (see {@link rawCommandsAt}). A label that merely names
+ * one (`'paste-buffer'` handed to a log), a CLI command name (`'send'` outside a
+ * tmux argv) and a comment are not commands.
+ */
+export function scanRawTmuxCommands(file: string, text: string, set: TmuxCommandSet): RawKeyWrite[] {
+  const mayHaveAlias = /tmux/i.test(text) && Object.keys(set.aliases).some((a) => text.includes(a));
+  if (!set.commands.some((c) => text.includes(c)) && !mayHaveAlias) return [];
   const source = ts.createSourceFile(
     file,
     text,
@@ -510,14 +691,61 @@ export function scanRawKeyWrites(file: string, text: string): RawKeyWrite[] {
   );
   const found: RawKeyWrite[] = [];
   const visit = (node: ts.Node): void => {
-    const command = rawCommandOf(node);
-    if (command !== null) {
+    for (const { node: at, command } of rawCommandsAt(node, set)) {
       found.push({
         file,
-        site: siteName(node),
+        site: siteName(at),
         command,
-        line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
+        line: source.getLineAndCharacterOfPosition(at.getStart(source)).line + 1,
       });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
+}
+
+/** Every `send-keys` / `paste-buffer` command composed in one file ({@link scanRawTmuxCommands}). */
+export function scanRawKeyWrites(file: string, text: string): RawKeyWrite[] {
+  return scanRawTmuxCommands(file, text, RAW_KEY_COMMAND_SET);
+}
+
+/** A call of a method by its name, on whatever object (Issue #4050). */
+export interface MemberCall {
+  file: string;
+  /** Innermost named function holding it (as for {@link KeySite.site}). */
+  site: string;
+  /** The object the method is read off, as written (`cliTool`, `manager.getTool(id)`, `this`). */
+  receiver: string;
+  line: number;
+}
+
+/**
+ * Every call of a method named `name` in one file — `x.name(…)` or
+ * `x['name'](…)` — whatever the object is called (Issue #4050). Not the
+ * declarations of such a method, and not a call of a bare function `name(…)`.
+ */
+export function scanMemberCalls(file: string, text: string, name: string): MemberCall[] {
+  if (!text.includes(name)) return [];
+  const source = ts.createSourceFile(
+    file,
+    text,
+    ts.ScriptTarget.Latest,
+    true,
+    file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS
+  );
+  const found: MemberCall[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node)) {
+      const member = memberName(unwrap(node.expression));
+      if (member !== null && member.name === name) {
+        found.push({
+          file,
+          site: siteName(node),
+          receiver: member.object.getText(source),
+          line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
+        });
+      }
     }
     ts.forEachChild(node, visit);
   };
@@ -553,7 +781,7 @@ export function tmuxKeyWriterExports(text: string, file: string = TMUX_MODULE): 
     let hit = false;
     const visit = (n: ts.Node): void => {
       if (hit) return;
-      if (rawCommandOf(n) !== null) hit = true;
+      if (rawCommandsAt(n).length > 0) hit = true;
       else if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && names.has(n.expression.text)) hit = true;
       else ts.forEachChild(n, visit);
     };
