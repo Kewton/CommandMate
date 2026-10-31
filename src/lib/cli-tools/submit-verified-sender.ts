@@ -247,6 +247,21 @@ export const PROMPT_REPORT_POLL_MS = 100;
 export const PROMPT_UNREPORTED_RESEND_NOTE =
   'The body may already have been submitted; check the pane (`commandmate capture <worktree-id> --pane`) before resending it.';
 
+/**
+ * {@link PROMPT_UNREPORTED_RESEND_NOTE} aimed at the pane the body went to
+ * (Issue #4048): with an explicit target its worktree and, for a named
+ * instance, ` --instance <id>` — the same command the CLI's own hint
+ * (`paneCaptureCommand`) gives. Without a target the note names none.
+ */
+export function promptUnreportedResendNote(target?: PromptSubmitExpected): string {
+  if (target === undefined) return PROMPT_UNREPORTED_RESEND_NOTE;
+  const instance = target.instanceId ? ` --instance ${target.instanceId}` : '';
+  return (
+    'The body may already have been submitted; check the pane ' +
+    `(\`commandmate capture ${target.worktreeId}${instance} --pane\`) before resending it.`
+  );
+}
+
 export interface SubmitVerifiedSendParams {
   /** tmux session name (already validated by the caller chain). */
   sessionName: string;
@@ -1266,7 +1281,7 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
         throw new Error(
           `Message submit could not be confirmed for session ${sessionName}: the composer did not show the body ` +
             `(rule ${watched.rule}) but the agent did not report the prompt within ${PROMPT_REPORT_WAIT_MS}ms ` +
-            `(Issue #4035). ${PROMPT_UNREPORTED_RESEND_NOTE}`
+            `(Issue #4035). ${promptUnreportedResendNote(target)}`
         );
       }
       if (watched.verdict === 'received') {
@@ -1343,7 +1358,11 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
     // Issue #4035: the Enter thought lost may only have been late — the agent
     // reporting the prompt now means it went, and another Enter would land on an
     // empty composer, or on a dialog that the prompt just opened.
+    // Issue #4048: a report read after the session was replaced (during the
+    // wait above, say) may be the new generation's own prompt — this send is
+    // then indeterminate, never confirmed by it.
     if (readPromptSubmitReceipt(sessionName, cliToolId, enteredAt, target) === 'received') {
+      assertStillOwnedAfterEnter(ticket, cliToolId, 'the prompt report check');
       logger.info('submit-confirmed-by-prompt-hook', { sessionName, cliToolId, attempt, rule });
       invalidateCache(sessionName);
       return;

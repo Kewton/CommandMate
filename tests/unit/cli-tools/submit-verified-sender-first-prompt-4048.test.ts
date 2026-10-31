@@ -53,6 +53,7 @@ import {
   PROMPT_REPORT_WAIT_MS,
   PROMPT_UNREPORTED_RESEND_NOTE,
   clearComposerBeforeSend,
+  promptUnreportedResendNote,
   sendMessageWithSubmitVerification,
 } from '@/lib/cli-tools/submit-verified-sender';
 import { capturePane, sendKeys, sendSpecialKeys, clearComposerLine } from '@/lib/tmux/tmux';
@@ -469,5 +470,84 @@ describe('[#4048 5] an explicit target', () => {
 
     expect(await run(CONTRACT, { worktreeId: 'p4048' })).toBeNull();
     expect(readPromptSubmitReceipt(SESSION, 'claude', Date.now() + 1, { worktreeId: 'p4048' })).toBe('not-required');
+  });
+});
+
+describe('[#4048 review P1] the hook check after the wait returned C/D confirms nothing for a replaced session', () => {
+  /**
+   * The wait sees the body back in the composer (D) and returns it; before the
+   * caller's own hook check the session is recreated and the new process
+   * reports its prompt. The replacement is made to land in that gap through
+   * the `submit-classified` log the caller writes for the wait's verdict,
+   * outside the send's own context (whose ticket a relaunch would keep).
+   */
+  function replaceOnWaitVerdict(): void {
+    let classified = 0;
+    loggerSpies.info.mockImplementation((event: string) => {
+      if (event !== 'submit-classified') return;
+      classified++;
+      if (classified !== 2) return;
+      const scope = (globalThis as { __instanceInputOwnerScope?: { exit(fn: () => void): void } })
+        .__instanceInputOwnerScope;
+      if (scope === undefined) throw new Error('the input lock\'s owner scope is not on globalThis');
+      scope.exit(() => invalidateInstanceInput(SESSION));
+      notePromptSubmitSession(SESSION, TARGET, Date.now());
+      notePromptSubmitHook(TARGET, 'session_start', Date.now());
+      reportPrompt();
+    });
+  }
+
+  afterEach(() => {
+    loggerSpies.info.mockReset();
+  });
+
+  it('positive: replaced after the wait, the new process reporting a prompt — indeterminate, not sent, no further Enter', async () => {
+    startSession();
+    replaceOnWaitVerdict();
+    const sent = script(PLACEHOLDER, [[PLACEHOLDER, LATE_BODY, LATE_BODY]]);
+
+    const error = await run(INIT_MESSAGE);
+
+    expect(error?.message).toMatch(/was replaced during the prompt report check, after the message and Enter were sent/);
+    expect(classifySendFailure(error).state).toBe('indeterminate');
+    expect(sent.enters()).toBe(1);
+    expect(loggerSpies.info).not.toHaveBeenCalledWith('submit-confirmed-by-prompt-hook', expect.anything());
+  });
+
+  it('negative: not replaced, the late hook arriving there still confirms it (as #4035)', async () => {
+    startSession();
+    let classified = 0;
+    loggerSpies.info.mockImplementation((event: string) => {
+      if (event === 'submit-classified' && ++classified === 2) reportPrompt();
+    });
+    const sent = script(PLACEHOLDER, [[PLACEHOLDER, LATE_BODY, LATE_BODY]]);
+
+    expect(await run(INIT_MESSAGE)).toBeNull();
+    expect(sent.enters()).toBe(1);
+    expect(loggerSpies.info).toHaveBeenCalledWith('submit-confirmed-by-prompt-hook', expect.anything());
+  });
+});
+
+describe('[#4048 review P2] the resend note names the pane the body went to', () => {
+  it('positive: an explicit instance — the capture names it, as the CLI\'s own hint does', async () => {
+    startSession();
+    script(PLACEHOLDER, [[PLACEHOLDER]]);
+
+    const error = await run(INIT_MESSAGE, { worktreeId: 'p4048', instanceId: 'claude' });
+
+    expect(classifySendFailure(error)).toEqual({ state: 'indeterminate', reason: 'prompt-unreported' });
+    expect(error?.message).toContain('`commandmate capture p4048 --instance claude --pane`');
+    expect(error?.message).not.toContain('<worktree-id>');
+  });
+
+  it('positive: another instance is named by its own id', () => {
+    expect(promptUnreportedResendNote({ worktreeId: 'wt', instanceId: 'claude-2' })).toContain(
+      '`commandmate capture wt --instance claude-2 --pane`'
+    );
+  });
+
+  it('negative: a target without an instance names the worktree only; no target keeps the placeholder', () => {
+    expect(promptUnreportedResendNote({ worktreeId: 'wt' })).toContain('`commandmate capture wt --pane`');
+    expect(promptUnreportedResendNote()).toBe(PROMPT_UNREPORTED_RESEND_NOTE);
   });
 });

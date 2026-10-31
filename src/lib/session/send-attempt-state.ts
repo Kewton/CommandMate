@@ -41,6 +41,19 @@ export interface SendAttemptRecord extends LastSendAttempt {
   reason: SendAttemptReason;
   /** SHA-256 (hex, first 16 chars) of the message body; the body itself is not kept. */
   messageDigest: string;
+  /**
+   * Issue #4048: the digest of the body actually typed, when the sender typed
+   * something other than the message (an image reference appended). The
+   * composer and the first-prompt receipt only know that body; the attempt is
+   * matched by either digest. Absent when they are the same.
+   */
+  typedDigest?: string;
+  /**
+   * Issue #4048: the instance input generation the attempt ran under, when it
+   * ran under the input lock. A record of a newer generation is never replaced
+   * by an older one's late outcome.
+   */
+  inputGeneration?: number;
 }
 
 /** The instance an attempt belongs to. */
@@ -70,21 +83,50 @@ export function sendMessageDigest(content: string): string {
 /**
  * Record how a send attempt ended. Never throws: a record that cannot be made
  * leaves the send exactly as it was.
+ *
+ * Issue #4048: `typedContent` is the body the sender actually typed when it
+ * differs from `content`; `inputGeneration` is the input lock generation the
+ * attempt ran under. An attempt of an older generation than the held record's
+ * is not recorded — the session was replaced and a newer send already said
+ * how it went.
  */
 export function recordSendAttempt(
   instance: SendAttemptInstance,
-  attempt: { state: SendAttemptState; reason: SendAttemptReason; content: string },
+  attempt: {
+    state: SendAttemptState;
+    reason: SendAttemptReason;
+    content: string;
+    typedContent?: string;
+    inputGeneration?: number;
+  },
   now: number = Date.now()
 ): void {
   try {
     const key = keyOf(instance);
+    const held = records.get(key);
+    if (
+      attempt.inputGeneration !== undefined &&
+      held?.inputGeneration !== undefined &&
+      held.inputGeneration > attempt.inputGeneration
+    ) {
+      logger.info('send-attempt-record-skipped-stale-generation', {
+        generation: attempt.inputGeneration,
+        heldGeneration: held.inputGeneration,
+      });
+      return;
+    }
+    const messageDigest = sendMessageDigest(attempt.content);
+    const typedDigest =
+      attempt.typedContent === undefined ? undefined : sendMessageDigest(attempt.typedContent);
     // Re-inserted, so the map's order is least recently sent to first.
     records.delete(key);
     records.set(key, {
       at: Math.floor(now),
       state: attempt.state,
       reason: attempt.reason,
-      messageDigest: sendMessageDigest(attempt.content),
+      messageDigest,
+      ...(typedDigest !== undefined && typedDigest !== messageDigest ? { typedDigest } : {}),
+      ...(attempt.inputGeneration !== undefined ? { inputGeneration: attempt.inputGeneration } : {}),
     });
     while (records.size > MAX_TRACKED_INSTANCES) {
       const oldest = records.keys().next().value;
@@ -106,7 +148,8 @@ export function getLastSendAttempt(instance: SendAttemptInstance): SendAttemptRe
  * next send found that body still in the composer, so it never reached the
  * agent. Any other record is left as it is. Never throws.
  *
- * `messageDigest` (Issue #4048) is the digest of the body that was found: a
+ * `messageDigest` (Issue #4048) is the digest of the body that was found (the
+ * body typed, so it is matched against the record's `typedDigest` too): a
  * record of another attempt — a later send, or one whose body differs — is
  * left as it is. Omitted, the last `sent` record is demoted as before.
  */
@@ -119,7 +162,13 @@ export function markLastSendDiscarded(
     const key = keyOf(instance);
     const record = records.get(key);
     if (record === undefined || record.state !== 'sent') return;
-    if (messageDigest !== undefined && record.messageDigest !== messageDigest) return;
+    if (
+      messageDigest !== undefined &&
+      record.messageDigest !== messageDigest &&
+      record.typedDigest !== messageDigest
+    ) {
+      return;
+    }
     records.set(key, { ...record, at: Math.floor(now), state: 'indeterminate', reason: 'found-in-composer' });
   } catch (error) {
     logger.warn('send-attempt-record-failed', { error: error instanceof Error ? error.message : String(error) });

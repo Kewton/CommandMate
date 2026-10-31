@@ -54,7 +54,7 @@ import {
   deleteMessageById,
 } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import { isImageCapableCLITool, type CLIToolType } from '@/lib/cli-tools/types';
+import { isImageCapableCLITool, type CLIToolType, type ICLITool } from '@/lib/cli-tools/types';
 import { startPolling, getActivePollers } from '@/lib/polling/response-poller';
 import { savePendingAssistantResponse } from '@/lib/assistant-response-saver';
 import { broadcastMessage } from '@/lib/ws-server';
@@ -256,6 +256,17 @@ async function composerStillHolds(
 }
 
 /**
+ * The body the tool will actually type for `content` (Issue #4048): with an
+ * image, the image-capable tool's own body (`imageMessageBody`) or the path
+ * fallback; otherwise `content` itself. Must match what `sendToTool` sends.
+ */
+function typedBodyFor(cliTool: ICLITool, content: string, absoluteImagePath: string | undefined): string {
+  if (!absoluteImagePath) return content;
+  if (isImageCapableCLITool(cliTool)) return cliTool.imageMessageBody?.(content, absoluteImagePath) ?? content;
+  return formatImagePathFallbackMessage(content, absoluteImagePath);
+}
+
+/**
  * Send a validated user message to the CLI tool and record it in history.
  *
  * On CLI send failure (or copilot /model failure) it returns an `ok: false`
@@ -282,8 +293,25 @@ export async function sendUserMessage(
   // Issue #3759: how this attempt left the message, kept for `lastSend` (and
   // read back by the send route for its error). The result's shape is
   // unchanged; recording never throws.
+  //
+  // Issue #4048: the record also carries the body actually typed (an image
+  // reference appended), which is what the composer and the first-prompt
+  // receipt know the attempt by, and the input lock generation the delivery
+  // ran under, so the late outcome of a send whose session was replaced does
+  // not overwrite the newer generation's record.
+  const typedContent = typedBodyFor(cliTool, content, absoluteImagePath);
+  let inputGeneration: number | undefined;
   const settle = (state: SendAttemptState, reason: SendAttemptReason): void => {
-    recordSendAttempt({ worktreeId, cliToolId, instanceId: resolvedInstanceId }, { state, reason, content });
+    recordSendAttempt(
+      { worktreeId, cliToolId, instanceId: resolvedInstanceId },
+      {
+        state,
+        reason,
+        content,
+        ...(typedContent !== content ? { typedContent } : {}),
+        ...(inputGeneration !== undefined ? { inputGeneration } : {}),
+      }
+    );
     params.onAttempt?.({ state, reason });
   };
 
@@ -548,7 +576,10 @@ export async function sendUserMessage(
   // the lock across it would stall a concurrent tmux send for nothing; their
   // tmux path takes the lock inside the shared sender.
   const delivery = SUPPORTED_COMPOSER_TOOLS.has(cliToolId)
-    ? await withInstanceInputLock(sessionName, () => deliver()).catch((error: unknown) => ({
+    ? await withInstanceInputLock(sessionName, (ticket) => {
+        inputGeneration = ticket.generation;
+        return deliver();
+      }).catch((error: unknown) => ({
         error,
         failure: classifySendFailure(error),
       }))

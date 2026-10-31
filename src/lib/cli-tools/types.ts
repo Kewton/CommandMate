@@ -549,6 +549,12 @@ export interface IImageCapableCLITool extends ICLITool {
    * @param instanceId - Agent instance ID (Issue #868). Defaults to the primary instance.
    */
   sendMessageWithImage(worktreeId: string, message: string, imagePath: string, instanceId?: string): Promise<void>;
+  /**
+   * The body {@link sendMessageWithImage} types for `message` and `imagePath`
+   * (Issue #4048), so the send's record names the attempt by what reached the
+   * composer. Omitted when it types `message` unchanged.
+   */
+  imageMessageBody?(message: string, imagePath: string): string;
 }
 
 /**
