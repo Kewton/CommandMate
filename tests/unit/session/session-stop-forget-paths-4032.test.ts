@@ -8,9 +8,9 @@
  * pane-key-writers scanner), with what each one does about the launch.
  *
  * Decided (#4032): `session-cleanup`'s two kills do not forget — recorded in
- * `session-starting-state.ts` and module-reference, not changed, because
- * `session-cleanup.ts` was outside #4032's scope. A start that comes in after
- * them joins the killed launch until the launch's own bound (#3981 P3-1).
+ * `session-starting-state.ts` and module-reference, not changed. A start that
+ * comes in after them joins the killed launch until that launch settles, at
+ * most the launch's own bound (#3981 P3-1).
  *
  * Positive controls: a new `killSession(` anywhere in src fails the table; a
  * forget added to `session-cleanup` fails the pin (and the doc then has to

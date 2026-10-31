@@ -87,7 +87,6 @@ const STAGED_REMOVAL = [
   'src/app/worktrees/[id]/terminal/page.tsx',
   'src/components/Terminal.tsx',
   'src/lib/auto-yes-poller.ts',
-  'src/lib/pasted-text-helper.ts',
   'src/lib/polling/response-checker.ts',
   'src/lib/prompt-answer-sender.ts',
   'src/lib/session-cleanup.ts',
@@ -477,9 +476,10 @@ describe('lib/tmux import guard: the allowlist', () => {
     // routes and its conversation poller.
     // 15 -> 14: Issue #3232 deleted the global session poller, which nothing had
     // started since its only caller went away.
+    // 13 -> 12: Issue #4032 deleted `pasted-text-helper.ts`, which nothing in src called.
     expect(PERMANENT_EXEMPT).toHaveLength(7);
-    expect(STAGED_REMOVAL).toHaveLength(13);
-    expect(ALLOWLIST).toHaveLength(20);
+    expect(STAGED_REMOVAL).toHaveLength(12);
+    expect(ALLOWLIST).toHaveLength(19);
   });
 
   it('keeps the two groups sorted, deduplicated and disjoint', () => {

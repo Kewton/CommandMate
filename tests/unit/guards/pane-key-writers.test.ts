@@ -214,13 +214,6 @@ export const LEDGER: readonly LedgerRow[] = [
   { file: 'src/lib/cli-tools/opencode.ts', site: 'OpenCodeTool.killSession', callee: 'sendKeys', kind: 'kill', reason: KILL_REASON },
   { file: 'src/lib/cli-tools/opencode-v2.ts', site: 'OpenCodeV2Tool.killSession', callee: 'sendKeys', kind: 'kill', reason: KILL_REASON },
   { file: 'src/lib/session-key-sender.ts', site: 'stopSession', callee: 'sendKeys', kind: 'kill', reason: KILL_REASON },
-  {
-    file: 'src/lib/pasted-text-helper.ts',
-    site: 'detectAndResendIfPastedText',
-    callee: 'sendKeys',
-    kind: 'dead',
-    reason: 'No module in `src` calls this helper (checked below). #4032 removed `sanitizeSessionEnvironment`, but not this file: deleting it takes its entry off `.eslintrc.json`’s tmux allowlist too, which was outside #4032’s scope.',
-  },
 ];
 
 /** The tmux writers {@link LEDGER} is reconciled against. */
@@ -229,9 +222,9 @@ const SEND_KEYS_WRITERS: readonly string[] = ['sendKeys'];
 /**
  * How many un-ordered rows (`decided-outside` + `kill` + `dead`) the ledger
  * may hold. May only go DOWN: lower it when a row moves to `lock` or goes away.
- * 11 -> 10: #4032 removed `sanitizeSessionEnvironment`.
+ * 11 -> 9: #4032 removed `sanitizeSessionEnvironment` and `pasted-text-helper.ts`.
  */
-export const UNMEDIATED_BASELINE = 10;
+export const UNMEDIATED_BASELINE = 9;
 
 const SPECIAL_KEY_KILL_REASON = `${KILL_REASON} The exit keys here are \`sendSpecialKey(s)\` (#4032).`;
 const STRICT_ANSWER_EVIDENCE = 'tests/unit/lib/session/strict-prompt-answer-input-lock-3952.test.ts';
@@ -586,7 +579,7 @@ export const RAW_KEY_WRITES: readonly RawWriteRow[] = [
     site: 'keySequenceArgs',
     command: 'send-keys',
     count: 2,
-    reason: 'The argv builder `sendKeys` types its literal text through; not a writer of its own (`runKeySequence` has no caller in src).',
+    reason: 'The argv builder `sendKeys` types its literal text through; not a writer of its own while its callers are the ones on KEY_SEQUENCE_CALLERS.',
   },
   {
     file: 'src/lib/tmux/tmux-control-client.ts',
@@ -597,6 +590,39 @@ export const RAW_KEY_WRITES: readonly RawWriteRow[] = [
 ];
 
 const rawKeyOf = (r: { file: string; site: string; command: string }): string => `${r.file} :: ${r.site} :: ${r.command}`;
+
+const KEY_SEQUENCE_MODULE = 'src/lib/tmux/key-sequence.ts';
+
+/**
+ * Every caller of `key-sequence.ts`'s `send-keys` builders (review-4032 P3-2):
+ * the raw row above holds only while `keySequenceArgs` is reached from
+ * `sendKeys` (a writer on {@link LEDGER}) and the module's own
+ * `runKeySequence`, which nothing in src calls. A new caller of either is a
+ * key writer nobody ledgered, and fails.
+ */
+export const KEY_SEQUENCE_CALLERS: readonly { file: string; site: string; callee: string; count?: number }[] = [
+  { file: 'src/lib/tmux/tmux.ts', site: 'sendKeys', callee: 'keySequenceArgs' },
+  { file: KEY_SEQUENCE_MODULE, site: 'runKeySequence', callee: 'keySequenceArgs' },
+];
+
+const KEY_SEQUENCE_BUILDERS: readonly string[] = ['keySequenceArgs', 'runKeySequence'];
+
+/** What is wrong between the callers of the key-sequence builders and {@link KEY_SEQUENCE_CALLERS}. */
+export function reconcileKeySequenceCallers(found: readonly KeySite[], ledger = KEY_SEQUENCE_CALLERS): string[] {
+  const problems: string[] = [];
+  const byKey = new Map<string, number>();
+  for (const s of found) byKey.set(keyOf(s), (byKey.get(keyOf(s)) ?? 0) + 1);
+  const rows = new Map(ledger.map((r) => [keyOf(r), r]));
+  for (const [key, n] of byKey) {
+    const row = rows.get(key);
+    if (row === undefined) problems.push(`key-sequence caller not on the ledger: ${key}`);
+    else if (n !== (row.count ?? 1)) problems.push(`key-sequence caller count changed: ${key} has ${n}, the ledger says ${row.count ?? 1}`);
+  }
+  for (const key of rows.keys()) if (!byKey.has(key)) problems.push(`key-sequence caller row with no call behind it: ${key}`);
+  return problems;
+}
+
+const scanKeySequenceCallers = (): KeySite[] => KEY_SEQUENCE_BUILDERS.flatMap((name) => scanCallers(KEY_SEQUENCE_MODULE, name));
 
 /** What is wrong between the raw writes found and {@link RAW_KEY_WRITES}. Empty when they agree. */
 export function reconcileRaw(found: readonly RawKeyWrite[], ledger: readonly RawWriteRow[]): string[] {
@@ -683,7 +709,7 @@ export function reconcileCallers(
  * each changes when a send is typed, which that refactor was not to change.
  */
 const READINESS_FOLLOW_UP_REASON =
-  'Recorded, not fixed, by #4032’s decision: deciding readiness before the keys changes when a send is typed (a behaviour change), so it is left to a follow-up Issue of its own.';
+  'Recorded, not fixed, by #4032’s decision: deciding readiness before the keys changes when a send is typed (a behaviour change). 追跡: #4040.';
 const READINESS_FOLLOW_UPS: readonly { file: string; what: string; reason: string }[] = [
   { file: 'src/lib/cli-tools/copilot.ts', what: 'the normal send drops `ready: false` from its prompt wait', reason: READINESS_FOLLOW_UP_REASON },
   { file: 'src/lib/cli-tools/vibe-local.ts', what: 'no readiness wait before a send', reason: READINESS_FOLLOW_UP_REASON },
@@ -1023,6 +1049,10 @@ describe('[#4032] every other tmux key writer is on the stage-2 ledger', () => {
     expect(STAGE_2_LEDGER.filter((r) => r.kind === 'dead')).toEqual([]);
   });
 
+  it('no ledger holds a `dead` row at all (#4032 removed the last two)', () => {
+    expect([...LEDGER, ...STAGE_2_LEDGER].filter((r) => r.kind === 'dead')).toEqual([]);
+  });
+
   it('positive: a new `sendSpecialKey(` outside the lock fails', () => {
     const text = "import { sendSpecialKey } from '../tmux/tmux';\nexport async function pressEnter(s: string) { await sendSpecialKey(s, 'Enter'); }\n";
     expect(reconcileStage2([...scanRepository(), ...scanKeyWriters('src/lib/x.ts', text)])).toEqual([
@@ -1270,5 +1300,23 @@ describe('[#4032] raw `send-keys` / `paste-buffer` outside the tmux module are o
 describe('[#4032] the readiness follow-ups say why they are not fixed here', () => {
   it('every follow-up states a reason', () => {
     for (const { file, reason } of READINESS_FOLLOW_UPS) expect(reason.length, file).toBeGreaterThan(40);
+  });
+});
+
+describe('[#4032 review P3-2] the key-sequence builders are called from where the raw row says', () => {
+  it('negative control: today’s callers agree with the ledger', () => {
+    expect(reconcileKeySequenceCallers(scanKeySequenceCallers())).toEqual([]);
+  });
+
+  it('positive: a new caller of `runKeySequence` or `keySequenceArgs` fails', () => {
+    for (const [name, text] of [
+      ['runKeySequence', "import { runKeySequence } from '../tmux/key-sequence';\nexport async function typeSteps(t: string) { await runKeySequence(t, [], { run: async () => {} }); }\n"],
+      ['keySequenceArgs', "import { keySequenceArgs as args } from '@/lib/tmux/key-sequence';\nexport const typeSteps = (t: string) => args(t, { kind: 'literal', text: 'x' });\n"],
+    ] as const) {
+      const found = scanReferences('src/lib/cli-tools/x.ts', text, [name]);
+      expect(reconcileKeySequenceCallers([...scanKeySequenceCallers(), ...found]), text).toEqual([
+        `key-sequence caller not on the ledger: src/lib/cli-tools/x.ts :: typeSteps :: ${name}`,
+      ]);
+    }
   });
 });

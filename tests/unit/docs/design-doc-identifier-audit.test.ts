@@ -209,7 +209,7 @@ const DECLARED: readonly Declared[] = [
   {
     text: 'sanitizeSessionEnvironment',
     category: 'history',
-    why: 'Issue #4032 が削除した session-key-sender の関数（#3981 以降 src から呼ばれていなかった。`unset CLAUDECODE` は `startClaudeSession` が launch line と同じロックの番で打つ）。§S8 と env の一覧が当時の除去経路として引いている。設計書の注記は #4032 の scope 外',
+    why: 'Issue #4032 が削除した session-key-sender の関数（#3981 以降 src から呼ばれていなかった。`unset CLAUDECODE` は `startClaudeSession` が launch line と同じロックの番で打つ）。§S8 と env の一覧が当時の除去経路として引いており、同じ箇所に削除済みと注記した',
   },
   {
     text: 'src/app/api/assistant/{conversation,current-output,session,start,terminal}/route.ts',
@@ -240,6 +240,11 @@ const DECLARED: readonly Declared[] = [
     text: 'src/app/api/assistant/terminal/route.ts',
     category: 'history',
     why: 'Issue #2655 が削除した route。付録 A の #5 行（Phase 1 の初期リスト）が実測記録として引いており、同じ行に削除済みと注記した',
+  },
+  {
+    text: 'src/lib/pasted-text-helper.ts',
+    category: 'history',
+    why: 'Issue #4032 が削除した Pasted text 再送の共通ヘルパー（src から呼ばれていなかった）。DR3-001 の tmux importer の実測（当時）と付録 A の 18 行目が引いており、付録 A に削除済みと注記した',
   },
   {
     text: 'src/lib/polling/assistant-conversation-poller.ts',
@@ -376,8 +381,9 @@ describe('DECLARED is reviewable', () => {
       // Issue #3232 deleted the global session poller, which nothing started (13 -> 14),
       // and the `src/lib/tmux` barrel, which nothing imported (14 -> 15).
       // Issue #3315 deleted the `src/lib/session` barrel, which nothing imported (15 -> 16).
-      // Issue #4032 deleted `sanitizeSessionEnvironment`, which nothing called (16 -> 17).
-      history: 17,
+      // Issue #4032 deleted `sanitizeSessionEnvironment` and `pasted-text-helper.ts`,
+      // which nothing called (16 -> 18).
+      history: 18,
       external: 5,
       prose: 1,
       'test-only': 1,
