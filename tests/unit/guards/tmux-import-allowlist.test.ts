@@ -45,10 +45,12 @@
 
 import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync, statSync, existsSync } from 'fs';
-import { join, relative, sep } from 'path';
+import { join, relative, sep, posix } from 'path';
 import { createRequire } from 'module';
 import { ESLint, type Linter } from 'eslint';
+import { inFamily, originsOf } from './split-family';
 
+const posixDirname = posix.dirname;
 const REPO_ROOT = process.cwd();
 const ESLINTRC = join(REPO_ROOT, '.eslintrc.json');
 const require_ = createRequire(import.meta.url);
@@ -96,6 +98,34 @@ const STAGED_REMOVAL = [
 ] as const;
 
 const ALLOWLIST = [...PERMANENT_EXEMPT, ...STAGED_REMOVAL].slice().sort();
+
+/**
+ * A STAGED_REMOVAL file stands for the pieces split off it (`<dir>/<base>-*.ts`,
+ * `split-family.ts`, Issue #4034). Moving tmux-using code of `auto-yes-poller.ts`
+ * into `auto-yes-poller-tick.ts` is a split, not a new exemption: the pieces
+ * fold into the file they came from, so the list keeps its length and its
+ * "may only shrink" meaning. Only STAGED_REMOVAL is read this way — a piece of
+ * a PERMANENT file, a file in another directory, or `<base>2.ts` is a stranger
+ * and fails the pin as before. Each piece still needs its own `.eslintrc.json`
+ * entry; `reports nothing today` below fails without one.
+ */
+export function foldIntoStaged(files: readonly string[]): string[] {
+  return originsOf(files, STAGED_REMOVAL);
+}
+
+/** The on-disk files of `origin`'s family, `origin` included when it exists. */
+function familyOnDisk(origin: string): string[] {
+  const dir = posixDirname(origin);
+  return readdirSync(join(REPO_ROOT, dir))
+    .map((name) => `${dir}/${name}`)
+    .filter((rel) => inFamily(rel, origin) && statSync(join(REPO_ROOT, rel)).isFile());
+}
+
+/** The allowlist with each STAGED_REMOVAL file's on-disk pieces added. */
+function allowlistWithPieces(): string[] {
+  const pieces = STAGED_REMOVAL.flatMap((origin) => familyOnDisk(origin));
+  return [...new Set([...ALLOWLIST, ...pieces])].sort();
+}
 
 /**
  * The `scripts/` column of the same allowlist, opened by Issue #2732 when
@@ -494,7 +524,10 @@ describe('lib/tmux import guard: the allowlist', () => {
 
   it('matches .eslintrc.json entry for entry, in order', () => {
     const groups = srcOverrides.map((o) => o.files.map(unescapeGlob));
-    expect(groups).toEqual([[...GATEWAY_GLOBS], [...PERMANENT_EXEMPT], [...STAGED_REMOVAL]]);
+    // The staged group is read through its families (Issue #4034); the other two stay literal.
+    const staged = groups[2] ? foldIntoStaged(groups[2]) : [];
+    expect([groups[0], groups[1], staged]).toEqual([[...GATEWAY_GLOBS], [...PERMANENT_EXEMPT], [...STAGED_REMOVAL]]);
+    expect(groups).toHaveLength(3);
     for (const override of srcOverrides) {
       expect(override.rules?.['no-restricted-imports']).toBe('off');
     }
@@ -518,7 +551,12 @@ describe('lib/tmux import guard: the allowlist', () => {
     for (const rel of ALLOWLIST) {
       const abs = join(REPO_ROOT, rel);
       expect(existsSync(abs), `${rel} is on the allowlist but not on disk`).toBe(true);
-      expect(readFileSync(abs, 'utf-8').includes('tmux'), `${rel} no longer mentions tmux`).toBe(true);
+      // A staged file may have handed its tmux code to a piece (Issue #4034).
+      const members = (STAGED_REMOVAL as readonly string[]).includes(rel) ? familyOnDisk(rel) : [rel];
+      expect(
+        members.some((member) => readFileSync(join(REPO_ROOT, member), 'utf-8').includes('tmux')),
+        `${rel} no longer mentions tmux`,
+      ).toBe(true);
     }
   });
 });
@@ -592,7 +630,7 @@ describe('lib/tmux import guard: the whole of src', () => {
     for (const file of candidateSources()) {
       if ((await lintOne(eslint, join(REPO_ROOT, file.rel), file.text)).length > 0) offenders.push(file.rel);
     }
-    expect(offenders.sort()).toEqual(ALLOWLIST);
+    expect(foldIntoStaged(offenders)).toEqual(ALLOWLIST);
   }, 120_000);
 });
 
@@ -608,7 +646,7 @@ describe('lib/tmux import guard: re-export leaks', () => {
   it('finds no allowlisted module re-exporting a tmux symbol', () => {
     // An allowlisted module has the import rule switched off, so anything it
     // re-exports is reachable from anywhere with a specifier the rule cannot see.
-    for (const rel of ALLOWLIST) {
+    for (const rel of allowlistWithPieces()) {
       expect(tmuxReexports(readFileSync(join(REPO_ROOT, rel), 'utf-8')), rel).toEqual([]);
     }
   });
@@ -758,4 +796,37 @@ describe('lib/tmux import guard: the dynamic-import() exemption (Issue #2738)', 
     }
     expect(offenders.sort()).toEqual([...DYNAMIC_TMUX_IMPORT_EXEMPT]);
   }, 120_000);
+});
+
+describe('lib/tmux import guard: a split-off piece of a staged file (Issue #4034)', () => {
+  const POLLER = 'src/lib/auto-yes-poller.ts';
+  const CHECKER = 'src/lib/polling/response-checker.ts';
+
+  it('positive: pieces fold into the staged file they came from, so the pin keeps its length', () => {
+    expect(foldIntoStaged([POLLER, 'src/lib/auto-yes-poller-tick.ts', 'src/lib/polling/response-checker-dialog-gate.ts']))
+      .toEqual([POLLER, CHECKER].sort());
+    expect(foldIntoStaged(['src/lib/auto-yes-poller-tick.ts'])).toEqual([POLLER]);
+  });
+
+  it('positive: the real tree\'s pieces are found on disk', () => {
+    expect(familyOnDisk(POLLER)).toEqual(expect.arrayContaining([POLLER, 'src/lib/auto-yes-poller-tick.ts']));
+    expect(familyOnDisk(CHECKER)).toEqual(expect.arrayContaining([CHECKER]));
+  });
+
+  it('negative: a stranger stays itself — another directory, a lookalike name, an unrelated file', () => {
+    const strangers = [
+      'src/lib/polling/auto-yes-poller-tick.ts',
+      'src/lib/auto-yes-poller2.ts',
+      'src/lib/other.ts',
+      'src/lib/auto-yes-poller-tick.md',
+    ];
+    expect(foldIntoStaged(strangers)).toEqual([...strangers].sort());
+  });
+
+  it('negative: a piece of a PERMANENT file is not folded in', () => {
+    expect(foldIntoStaged(['src/lib/ws-server-extra.ts', 'src/lib/session/cli-session-extra.ts'])).toEqual([
+      'src/lib/session/cli-session-extra.ts',
+      'src/lib/ws-server-extra.ts',
+    ]);
+  });
 });
