@@ -32,7 +32,7 @@
 
 import { Command } from 'commander';
 import { ExitCode, WaitExitCode } from '../types';
-import { ApiClient, isValidWorktreeId } from '../utils/api-client';
+import { ApiClient, isDeadlineExceeded, isValidWorktreeId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import type { ChatMessage, PromptMessageResponse } from '../types/api-responses';
 import {
@@ -82,6 +82,11 @@ const PANE_FALLBACK_TAIL = 80;
  * marked yet — a session that already answered returns on the first read. When
  * it does elapse the existing pane fallback takes over, so the cost of guessing
  * this too low is a screen scrape, never a lost turn.
+ *
+ * Issue #3983: also the bound of each read after the turn ended (the ledger,
+ * the overlap pages, the pane). Those are outside `--timeout` — the turn has
+ * already completed in time — so a read that does not answer within the grace
+ * moves on to the next fallback rather than ending the ask with 124.
  */
 const REPLY_TURN_ROW_GRACE_MS = 15_000;
 
@@ -188,9 +193,18 @@ async function readLatestReply(
 ): Promise<{ content: string | null; messages: PromptMessageResponse[] | null }> {
   const requireTurnRow = cliToolId !== undefined && TRANSCRIPT_READER_TOOLS.has(cliToolId);
   const deadline = Date.now() + (requireTurnRow ? REPLY_TURN_ROW_GRACE_MS : 0);
+  // Issue #3983: every read is bounded by the grace, with or without a turn row
+  // to wait for; one that runs out falls back to the pane like an empty ledger.
+  const graceClient = client.withDeadline(Date.now() + REPLY_TURN_ROW_GRACE_MS);
 
   for (;;) {
-    const messages = await fetchRecentMessages(client, worktreeId, instanceId);
+    let messages: PromptMessageResponse[] | null;
+    try {
+      messages = await fetchRecentMessages(graceClient, worktreeId, instanceId);
+    } catch (error) {
+      if (!isDeadlineExceeded(error)) throw error;
+      return { content: null, messages: null };
+    }
     // The rules are `reply`'s too (Issue #3039). A tool with no transcript
     // takes the newest row after the send, marker or not, with no wait.
     const reply = pickLatestReply(replyCandidates(messages ?? [], since), requireTurnRow);
@@ -221,7 +235,10 @@ async function readPaneTail(
   cliToolId: string,
   instanceId: string | undefined,
 ): Promise<string | null> {
-  return readSqueezedPaneTail(client, worktreeId, cliToolId, instanceId, PANE_FALLBACK_TAIL);
+  // Issue #3983: bounded like the ledger reads; a pane that does not answer is
+  // "no readable pane" (readSqueezedPaneTail never throws).
+  const graceClient = client.withDeadline(Date.now() + REPLY_TURN_ROW_GRACE_MS);
+  return readSqueezedPaneTail(graceClient, worktreeId, cliToolId, instanceId, PANE_FALLBACK_TAIL);
 }
 
 /** Argument checks. A mocked `process.exit` returns, so nothing here stops early. */
@@ -443,7 +460,15 @@ async function readOverlapLedger(
 ): Promise<{ messages: PromptMessageResponse[] | null; instanceId: string | null }> {
   let rows = messages;
   if (rows && mayHaveDroppedRowsSince(rows, askedAt)) {
-    const since = await fetchPromptRowsSince(client, worktreeId, instanceId, askedAt);
+    // Issue #3983: bounded by the reply grace; a page that does not answer in
+    // it is read like one that failed — the rows already read stand.
+    const graceClient = client.withDeadline(Date.now() + REPLY_TURN_ROW_GRACE_MS);
+    const since = await fetchPromptRowsSince(graceClient, worktreeId, instanceId, askedAt).catch(
+      (error: unknown) => {
+        if (isDeadlineExceeded(error)) return null;
+        throw error;
+      },
+    );
     if (since) rows = [...rows, ...since];
   }
   const target = instanceId ?? (rows ? ownPromptInstance(rows, message, askedAt, until) : null);
@@ -533,7 +558,9 @@ Exit codes (wait's, unchanged; --async always exits 0 once the relay exists):
        name it (id=...). id=context-limit: the conversation is over the model's
        limit; \`instances <id> kill <instance>\` and ask again in a fresh session
   21   nothing was running to ask
-  124  timed out. Look with \`capture <id> --instance <id> --pane --tail 60\`
+  124  timed out. Look with \`capture <id> --instance <id> --pane --tail 60\`.
+       When the send itself returned past the deadline, the message WAS sent
+       (stderr says so); do not send it again
 
 Send one ask at a time to an instance (Issue #3955). A message sent while the
 instance is mid-turn can be folded into that turn (codex does), and the two
@@ -548,11 +575,15 @@ There is deliberately no --auto-yes: turning another session's Auto-Yes on is
 a decision about that session's guard rails, not part of asking it a question.
 `)
     .action(async (worktreeId: string, message: string, options: AskOptions) => {
+      // Issue #3983: `--timeout` counts from here, the resolution and the send
+      // included.
+      const commandStartedAt = Date.now();
       try {
         validateAskArgs(worktreeId, message, options);
 
         const timeout = parseTimeout(options.timeout);
         const client = new ApiClient({ token: options.token });
+        const deadlineAt = commandStartedAt + timeout * 1000;
 
         // Resolved once, before the send, and reused for the wait and both
         // reads: the alias-to-id mapping and the roster's tool are the same
@@ -567,7 +598,14 @@ a decision about that session's guard rails, not part of asking it a question.
         // worktree default: exit 21 while the default was not running, and the
         // default's turn instead of <tool>'s while it was.
         const selector = options.instance ?? options.agent;
-        const commandTarget = await resolveCommandTarget(client, worktreeId, selector, options.agent);
+        //
+        // Issue #3983: bounded by `--timeout`; running out is exit 124, nothing sent.
+        const commandTarget = await resolveCommandTarget(
+          client.withDeadline(deadlineAt),
+          worktreeId,
+          selector,
+          options.agent,
+        );
         const { agent, instanceId } = commandTarget;
 
         // Taken BEFORE the send so a reply written by the previous turn cannot
@@ -578,6 +616,9 @@ a decision about that session's guard rails, not part of asking it a question.
         // Issue #2377: registered BEFORE the send, so a session that answers
         // immediately cannot finish its turn in the window between the message
         // and the ledger row. A refusal exits 2 having sent nothing.
+        //
+        // Issue #3983: the endpoint resolution is bounded by `--timeout` (exit
+        // 124, nothing registered or sent); the relay POST is not cut, like `/send`.
         let relay: RegisteredRelay | undefined;
         if (options.async) {
           relay = await registerRelayForMessage(client, {
@@ -586,6 +627,7 @@ a decision about that session's guard rails, not part of asking it a question.
             instance: options.instance,
             agent: options.agent,
             allowRelayChain: options.allowRelayChain,
+            resolveClient: client.withDeadline(deadlineAt),
           });
         }
 
@@ -613,6 +655,19 @@ a decision about that session's guard rails, not part of asking it a question.
           return;
         }
 
+        // Issue #3983: the send itself is not cut by `--timeout` — aborting it
+        // would leave "was it sent?" unanswered — but its time counts. Past the
+        // deadline once it returns, the ask ends here, saying the message went in.
+        if (Date.now() >= deadlineAt) {
+          console.error(
+            `Timeout: ${worktreeId} exceeded ${timeout}s while the message was being sent. `
+            + 'The message was sent; not waiting for the reply. '
+            + `Look with \`capture ${worktreeId}${instanceId ? ` --instance ${instanceId}` : ''} --pane --tail 60\`.`
+          );
+          process.exit(WaitExitCode.TIMEOUT);
+          return;
+        }
+
         console.error('Message sent. Waiting for the reply...');
 
         // `wait`'s own poller, with `wait`'s own defaults: --on-prompt is left
@@ -625,6 +680,7 @@ a decision about that session's guard rails, not part of asking it a question.
         const record: { openAtSend: boolean; closedAt: number | null } = { openAtSend: false, closedAt: null };
         const result = await pollWorktree(client, worktreeId, {
           timeout,
+          timeoutStartedAt: commandStartedAt,
           instance: instanceId,
           token: options.token,
           // Always on (Issue #3011): a turn that never ran must not read as a reply.

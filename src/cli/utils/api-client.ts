@@ -8,7 +8,7 @@
  * - ApiClient: HTTP get/post with base URL and auth headers
  */
 
-import { ExitCode } from '../types';
+import { ExitCode, WaitExitCode } from '../types';
 import { readPackageVersion } from './package-info';
 import { isUatIsolationEnabled, UAT_ISOLATION_ENV_VAR } from '../../config/uat-isolation';
 import { loadClientEnv, resolveServerEndpoint } from './server-url';
@@ -295,6 +295,8 @@ function isLocalhost(url: string): boolean {
 export class ApiClient {
   private baseUrl: string;
   private token?: string;
+  /** Epoch ms after which every request of this client fails (Issue #3983). */
+  private deadlineAt?: number;
 
   constructor(options?: { baseUrl?: string; token?: string }) {
     // Issue #1743: resolve through loadClientEnv() rather than `process.env.CM_PORT || '3000'`.
@@ -338,6 +340,52 @@ export class ApiClient {
     return this.baseUrl;
   }
 
+  /**
+   * This client with every request bounded by `deadlineAt` (Issue #3983).
+   *
+   * `wait` / `ask` / `verify` take `--timeout` as the deadline of the whole
+   * command, but only the poll's own reads were bounded by it: a task-ledger
+   * read, an `--instance` resolution or a capability probe before the poll had
+   * no deadline at all, so a server that stopped answering held the command for
+   * as long as undici's own timeouts (minutes) and then, swallowed into a
+   * degraded path, kept it going. The derived client carries one deadline for
+   * every method (`get` / `post` / `patch` / `rawGet`), and a request it ends
+   * fails with {@link DeadlineExceededError} — exit 124 — which the
+   * degrade-on-failure catches rethrow ({@link isDeadlineExceeded}).
+   *
+   * One request lasts until its body has been read (`json()` / `text()`), the
+   * body of a {@link rawGet} response included: a server that sends headers and
+   * then stalls the body is not an answer.
+   *
+   * @param deadlineAt - Epoch ms; undefined returns this client unchanged
+   * @returns A client sharing this one's server and token
+   */
+  withDeadline(deadlineAt: number | undefined): ApiClient {
+    if (deadlineAt === undefined || !Number.isFinite(deadlineAt)) return this;
+    // Not `new ApiClient(...)`: the constructor re-resolves the endpoint and
+    // re-prints the --token warning, and the derived client must dial the very
+    // server this one does.
+    const derived = Object.create(Object.getPrototypeOf(this) as object) as ApiClient;
+    derived.baseUrl = this.baseUrl;
+    derived.token = this.token;
+    derived.deadlineAt = deadlineAt;
+    return derived;
+  }
+
+  /** The deadline this client carries, if any (Issue #3983). */
+  get deadline(): number | undefined {
+    return this.deadlineAt;
+  }
+
+  /**
+   * The bound of one request: a signal that fires at the deadline (combined
+   * with the caller's own, when it gave one), or null without a deadline.
+   */
+  private startDeadline(callerSignal?: AbortSignal): RequestDeadline | null {
+    if (this.deadlineAt === undefined) return null;
+    return startRequestDeadline(this.deadlineAt, this.baseUrl, callerSignal);
+  }
+
   private getHeaders(): Record<string, string> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -364,11 +412,27 @@ export class ApiClient {
    * @returns The raw Response, whatever its status
    */
   async rawGet(path: string, init?: { headers?: Record<string, string> }): Promise<Response> {
-    return fetch(`${this.baseUrl}${path}`, {
-      method: 'GET',
-      headers: { ...this.getHeaders(), ...(init?.headers ?? {}) },
-      redirect: 'manual',
-    });
+    const deadline = this.startDeadline();
+    if (!deadline) {
+      return fetch(`${this.baseUrl}${path}`, {
+        method: 'GET',
+        headers: { ...this.getHeaders(), ...(init?.headers ?? {}) },
+        redirect: 'manual',
+      });
+    }
+    // Issue #3983: the caller reads the body, so the deadline is not released
+    // here — it stays armed (unref'd) for the body read, which it also bounds.
+    try {
+      const response = await deadline.run(fetch(`${this.baseUrl}${path}`, {
+        method: 'GET',
+        headers: { ...this.getHeaders(), ...(init?.headers ?? {}) },
+        redirect: 'manual',
+        signal: deadline.signal,
+      }));
+      return boundBodyReads(response, deadline);
+    } catch (error) {
+      throw deadline.classify(error);
+    }
   }
 
   /**
@@ -381,26 +445,35 @@ export class ApiClient {
    * before (no `signal` key on the fetch init).
    */
   async get<T>(path: string, init?: { signal?: AbortSignal }): Promise<T> {
+    // Issue #3983: a client with a deadline bounds the request and its body.
+    const deadline = this.startDeadline(init?.signal);
+    const signal = deadline ? deadline.signal : init?.signal;
     try {
-      const response = await fetch(`${this.baseUrl}${path}`, {
+      const response = await bounded(deadline, fetch(`${this.baseUrl}${path}`, {
         method: 'GET',
         headers: this.getHeaders(),
-        ...(init?.signal ? { signal: init.signal } : {}),
-      });
+        ...(signal ? { signal } : {}),
+      }));
 
       if (!response.ok) {
         // Issue #1637: read the body first — handleApiError needs it to surface
         // the server's reason for a 5xx instead of "check the logs".
-        const payload = await readErrorPayload(response);
+        const payload = await bounded(deadline, readErrorPayload(response));
         const errResult = handleApiError(null, response.status, payload, { serverUrl: this.baseUrl });
         throw new ApiError(errResult.message, errResult.exitCode, response.status, payload);
       }
 
-      return (await response.json()) as T;
+      return (await bounded(deadline, response.json())) as T;
     } catch (error) {
+      if (deadline) {
+        const classified = deadline.classify(error);
+        if (classified instanceof DeadlineExceededError) throw classified;
+      }
       if (error instanceof ApiError) throw error;
       const errResult = handleApiError(error);
       throw new ApiError(errResult.message, errResult.exitCode);
+    } finally {
+      deadline?.release();
     }
   }
 
@@ -409,7 +482,7 @@ export class ApiClient {
    * [DR1-05] Generic type parameter specified at call site
    */
   async post<T>(path: string, body?: unknown): Promise<T> {
-    return sendWithBody<T>(this.baseUrl, 'POST', this.getHeaders(), path, body);
+    return sendWithBody<T>(this.baseUrl, 'POST', this.getHeaders(), path, body, this.startDeadline());
   }
 
   /**
@@ -418,7 +491,7 @@ export class ApiClient {
    * [DR1-05] Generic type parameter specified at call site
    */
   async patch<T>(path: string, body?: unknown): Promise<T> {
-    return sendWithBody<T>(this.baseUrl, 'PATCH', this.getHeaders(), path, body);
+    return sendWithBody<T>(this.baseUrl, 'PATCH', this.getHeaders(), path, body, this.startDeadline());
   }
 }
 
@@ -428,31 +501,39 @@ async function sendWithBody<T>(
   method: 'POST' | 'PATCH',
   headers: Record<string, string>,
   path: string,
-  body?: unknown
+  body?: unknown,
+  deadline?: RequestDeadline | null
 ): Promise<T> {
   try {
-    const response = await fetch(`${baseUrl}${path}`, {
+    const response = await bounded(deadline, fetch(`${baseUrl}${path}`, {
       method,
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
+      ...(deadline ? { signal: deadline.signal } : {}),
+    }));
 
     if (!response.ok) {
       // Issue #1637: read the body first — handleApiError needs it to surface
       // the server's reason for a 5xx instead of "check the logs".
-      const payload = await readErrorPayload(response);
+      const payload = await bounded(deadline, readErrorPayload(response));
       const errResult = handleApiError(null, response.status, payload, { serverUrl: baseUrl });
       throw new ApiError(errResult.message, errResult.exitCode, response.status, payload);
     }
 
     // Handle 204 No Content
-    const text = await response.text();
+    const text = await bounded(deadline, response.text());
     if (!text) return undefined as T;
     return JSON.parse(text) as T;
   } catch (error) {
+    if (deadline) {
+      const classified = deadline.classify(error);
+      if (classified instanceof DeadlineExceededError) throw classified;
+    }
     if (error instanceof ApiError) throw error;
     const errResult = handleApiError(error);
     throw new ApiError(errResult.message, errResult.exitCode, undefined, undefined, error);
+  } finally {
+    deadline?.release();
   }
 }
 
@@ -535,6 +616,147 @@ export class ApiError extends Error {
   get apiCode(): string | undefined {
     return this.payload?.code;
   }
+}
+
+// =============================================================================
+// Command deadline (Issue #3983)
+// =============================================================================
+
+/** The longest delay `setTimeout` honours (2^31-1 ms, ~24.8 days). */
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
+/**
+ * A request ended by the deadline of a client from {@link ApiClient.withDeadline}
+ * (Issue #3983).
+ *
+ * An `ApiError` with exit 124 so that the commands' own error handling reports
+ * it as the timeout it is, and a class of its own so that a catch which turns
+ * failures into a degraded result ("verification resolves its own task", "use
+ * the selector as an instance id") can tell it apart and rethrow it — see
+ * {@link isDeadlineExceeded}. Wrapped into another `ApiError`, it travels as
+ * that error's `transportError`.
+ */
+export class DeadlineExceededError extends ApiError {
+  constructor(serverUrl?: string) {
+    super(
+      withServerUrl('--timeout reached before the server answered', { serverUrl }),
+      WaitExitCode.TIMEOUT,
+    );
+    this.name = 'DeadlineExceededError';
+  }
+}
+
+/**
+ * Whether `error` is — or wraps — a request ended by a command deadline
+ * (Issue #3983). The catches that degrade on failure ask this first and
+ * rethrow: a deadline is the command's answer, not a reason to carry on.
+ */
+export function isDeadlineExceeded(error: unknown): error is ApiError {
+  if (error instanceof DeadlineExceededError) return true;
+  if (error instanceof ApiError && error.transportError instanceof DeadlineExceededError) return true;
+  return error instanceof Error && error.cause instanceof DeadlineExceededError;
+}
+
+/** Rethrow `error` when it is a command deadline; otherwise return (Issue #3983). */
+export function rethrowIfDeadlineExceeded(error: unknown): void {
+  if (isDeadlineExceeded(error)) throw error;
+}
+
+/** One request's share of a client deadline. */
+interface RequestDeadline {
+  readonly signal: AbortSignal;
+  /** Settle `promise`, or reject with the deadline once it fires. */
+  run<T>(promise: Promise<T>): Promise<T>;
+  /** The deadline error when the deadline has fired, else `error` unchanged. */
+  classify(error: unknown): unknown;
+  /** Disarm the timer (the request and its body are done). */
+  release(): void;
+}
+
+/**
+ * Arm the deadline of one request. Its signal goes to `fetch` (which then also
+ * aborts the body stream), and every await of the request is raced against it
+ * as well — so a stalled body or a transport that ignores the signal still ends
+ * on time. Past the deadline the signal is already aborted and no request is
+ * sent; started exactly at it, the request gets the current tick (a read at the
+ * deadline may still bring the answer `verify` reports, Issue #1544). Beyond
+ * what a timer can hold the request is left unbounded.
+ */
+function startRequestDeadline(
+  deadlineAt: number,
+  serverUrl: string,
+  callerSignal?: AbortSignal,
+): RequestDeadline {
+  const controller = new AbortController();
+  const fire = (): void => {
+    if (!controller.signal.aborted) controller.abort(new DeadlineExceededError(serverUrl));
+  };
+  const remaining = deadlineAt - Date.now();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  if (remaining < 0) {
+    fire();
+  } else if (remaining <= MAX_TIMER_MS) {
+    timer = setTimeout(fire, remaining);
+    // A command that is done must not stay alive for a deadline it no longer needs.
+    timer.unref?.();
+  }
+  const signal = callerSignal ? AbortSignal.any([controller.signal, callerSignal]) : controller.signal;
+  const deadlineError = (): DeadlineExceededError =>
+    controller.signal.reason instanceof DeadlineExceededError
+      ? controller.signal.reason
+      : new DeadlineExceededError(serverUrl);
+
+  return {
+    signal,
+    run<T>(promise: Promise<T>): Promise<T> {
+      if (controller.signal.aborted) {
+        promise.catch(() => {});
+        return Promise.reject(deadlineError());
+      }
+      return new Promise<T>((resolve, reject) => {
+        const onAbort = (): void => reject(deadlineError());
+        controller.signal.addEventListener('abort', onAbort, { once: true });
+        promise.then(
+          (value) => {
+            controller.signal.removeEventListener('abort', onAbort);
+            resolve(value);
+          },
+          (error: unknown) => {
+            controller.signal.removeEventListener('abort', onAbort);
+            reject(error);
+          },
+        );
+      });
+    },
+    classify(error: unknown): unknown {
+      return controller.signal.aborted ? deadlineError() : error;
+    },
+    release(): void {
+      if (timer !== undefined) clearTimeout(timer);
+    },
+  };
+}
+
+/** `promise` raced against `deadline`, or `promise` itself without one. */
+function bounded<T>(deadline: RequestDeadline | null | undefined, promise: Promise<T>): Promise<T> {
+  return deadline ? deadline.run(promise) : promise;
+}
+
+/**
+ * A {@link ApiClient.rawGet} response whose body reads are raced against the
+ * request's deadline (Issue #3983). The caller reads the body, so the bound has
+ * to travel with the response.
+ */
+function boundBodyReads(response: Response, deadline: RequestDeadline): Response {
+  const read = <T>(method: () => Promise<T>) => (): Promise<T> =>
+    deadline.run(method()).catch((error: unknown) => {
+      throw deadline.classify(error);
+    });
+  const json = response.json.bind(response);
+  const text = response.text.bind(response);
+  Object.defineProperty(response, 'json', { value: read(json), configurable: true });
+  Object.defineProperty(response, 'text', { value: read(text), configurable: true });
+  return response;
 }
 
 // =============================================================================

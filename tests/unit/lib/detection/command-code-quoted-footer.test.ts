@@ -243,6 +243,10 @@ const PRE_FIX_VERDICTS: Record<string, string> = {
   'chat-dialog-card-2254/command-code-model-1-49-0-switch-kimi-low.txt': 'ready input_prompt',
   'chat-dialog-card-2254/command-code-model-1-49-0-switch-pro-high.txt': 'ready input_prompt',
 
+  // command-code-agent-health-3994 (report paneEvidence of turns refused with an auth error, Issue #3994; see its README)
+  'command-code-agent-health-3994/auth-failed-approval-turn.txt': 'ready input_prompt',
+  'command-code-agent-health-3994/auth-failed-running-turn.txt': 'ready input_prompt',
+
   // command-code-askuserquestion-2521
   'command-code-askuserquestion-2521/askuserquestion-wrapped-1530-200x1000.txt': 'waiting prompt_detected',
   'command-code-askuserquestion-2521/askuserquestion-wrapped-minimal.txt': 'waiting prompt_detected',
