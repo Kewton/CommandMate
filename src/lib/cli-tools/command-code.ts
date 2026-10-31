@@ -180,11 +180,23 @@ export function isCommandCodeReady(rawOutput: string): boolean {
  * The overlay replaces the composer until a human decides, so waiting for the
  * composer only ran out the clock (`prompt not ready` after the full timeout).
  * Its comments, Submit review, approval and cancel go through `respond`.
+ *
+ * Issue #4049: a function, not a constant. The constant named a
+ * `<worktree-id>` placeholder and no instance, so on `command-code-2` the
+ * `respond` it showed went to the primary instance. The primary instance
+ * (no id, or the tool's own id — #868) gets no `--instance`.
+ *
+ * @param worktreeId - The worktree whose session is showing the review
+ * @param instanceId - The instance the send was for, if any
  */
-export const COMMAND_CODE_PLAN_REVIEW_SEND_MESSAGE =
-  'Command Code is showing a plan review (REVIEW), which takes review comments, not messages. ' +
-  'Comment with `commandmate respond <worktree-id> "<text>"`, then `--plan-review submit` (ctrl+r), ' +
-  '`--plan-review approve` (ctrl+a) or `--plan-review cancel` (esc).';
+export function commandCodePlanReviewSendMessage(worktreeId: string, instanceId?: string): string {
+  const target = instanceId && instanceId !== 'command-code' ? ` --instance ${instanceId}` : '';
+  return (
+    'Command Code is showing a plan review (REVIEW), which takes review comments, not messages. ' +
+    `Comment with \`commandmate respond ${worktreeId} "<text>"${target}\`, then \`--plan-review submit\` (ctrl+r), ` +
+    '`--plan-review approve` (ctrl+a) or `--plan-review cancel` (esc).'
+  );
+}
 
 /**
  * Command Code CLI tool implementation.
@@ -339,11 +351,11 @@ export class CommandCodeTool extends BaseCLITool {
    *
    * @throws SessionStartTimeoutError when a just-launched session's composer
    *   has still not appeared
-   * @throws Error ({@link COMMAND_CODE_PLAN_REVIEW_SEND_MESSAGE}) at once when
+   * @throws Error ({@link commandCodePlanReviewSendMessage}) at once when
    *   the plan review overlay is on screen (Issue #3125)
    * @throws Error when the composer is not detected within the timeout
    */
-  private async waitForPrompt(sessionName: string): Promise<void> {
+  private async waitForPrompt(sessionName: string, worktreeId: string, instanceId?: string): Promise<void> {
     const startTime = Date.now();
     const pollInterval = 500;
     let planReviewPolls = 0;
@@ -366,7 +378,7 @@ export class CommandCodeTool extends BaseCLITool {
       planReviewPolls = planReviewUp ? planReviewPolls + 1 : 0;
       if (planReviewPolls >= 2) {
         logger.info('command-code-plan-review-blocks-send', { sessionName });
-        throw Object.assign(new Error(COMMAND_CODE_PLAN_REVIEW_SEND_MESSAGE), {
+        throw Object.assign(new Error(commandCodePlanReviewSendMessage(worktreeId, instanceId)), {
           code: PLAN_REVIEW_SEND_REFUSED_CODE,
         });
       }
@@ -403,7 +415,7 @@ export class CommandCodeTool extends BaseCLITool {
     await this.requireSession('Command Code', worktreeId, instanceId, { relaunch: true });
 
     try {
-      await this.waitForPrompt(sessionName);
+      await this.waitForPrompt(sessionName, worktreeId, instanceId);
 
       // Issue #1471: body/Enter separation + read-back submit verification.
       await sendMessageWithSubmitVerification({

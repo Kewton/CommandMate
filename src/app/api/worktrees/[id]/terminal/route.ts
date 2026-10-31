@@ -41,11 +41,12 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { readJsonObjectBody } from '@/lib/api/read-json-body';
-import { isCliToolType, isValidInstanceId } from '@/lib/cli-tools/types';
+import { isCliToolType, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import {
   resolveSessionTargetStrict,
 } from '@/lib/session/resolve-session-target';
 import { sessionTargetConflictResponse } from '@/lib/session/session-target-conflict-response';
+import { respondAgentFor } from '@/lib/session/respond-target';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { getWorktreeById } from '@/lib/db';
 import { getDbInstance } from '@/lib/db/db-instance';
@@ -133,6 +134,16 @@ export async function POST(
     }
     const target = resolution.target;
 
+    // Issue #4049: the refusals' `respond` must reach the tool this request
+    // named. A bare `respond` resolves as a request naming nothing does, so the
+    // tool is named only when no instance was and it is not that one. Asked
+    // only when a refusal is written.
+    const respondAgent = (): CLIToolType | undefined => {
+      if (instanceId) return undefined;
+      const unqualified = resolveSessionTargetStrict(db, id, {});
+      return respondAgentFor(cliToolId, instanceId, unqualified.ok ? unqualified.target.cliToolId : undefined);
+    };
+
     const manager = CLIToolManager.getInstance();
     const cliTool = manager.getTool(target.cliToolId);
 
@@ -170,7 +181,7 @@ export async function POST(
         blockedBy: promptGuard.blockedBy,
       });
       return NextResponse.json(
-        { error: promptWaitingMessage(id, promptGuard.blockedBy, instanceId), code: PROMPT_WAITING_CODE },
+        { error: promptWaitingMessage(id, promptGuard.blockedBy, instanceId, respondAgent()), code: PROMPT_WAITING_CODE },
         { status: 409 }
       );
     }
@@ -201,7 +212,7 @@ export async function POST(
       if (classifySendFailure(error).reason === 'prompt-waiting') {
         logger.info('terminal-send-refused-prompt-waiting-under-lock', { worktreeId: id, cliToolId: target.cliToolId });
         return NextResponse.json(
-          { error: promptWaitingMessage(id, undefined, instanceId), code: PROMPT_WAITING_CODE },
+          { error: promptWaitingMessage(id, undefined, instanceId, respondAgent()), code: PROMPT_WAITING_CODE },
           { status: 409 }
         );
       }

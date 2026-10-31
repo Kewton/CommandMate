@@ -700,22 +700,6 @@ export function reconcileCallers(
   return problems;
 }
 
-/**
- * Out of this ledger's reach but on the same invariant, tracked for a later
- * Issue (#3981 横展開): they type through the shared sender, so they are not
- * `sendKeys` sites, but their readiness is not decided before the keys.
- *
- * Issue #4032 recorded them, by its contract's decision, without changing them:
- * each changes when a send is typed, which that refactor was not to change.
- */
-const READINESS_FOLLOW_UP_REASON =
-  'Recorded, not fixed, by #4032’s decision: deciding readiness before the keys changes when a send is typed (a behaviour change). 追跡: #4040.';
-const READINESS_FOLLOW_UPS: readonly { file: string; what: string; reason: string }[] = [
-  { file: 'src/lib/cli-tools/copilot.ts', what: 'the normal send drops `ready: false` from its prompt wait', reason: READINESS_FOLLOW_UP_REASON },
-  { file: 'src/lib/cli-tools/vibe-local.ts', what: 'no readiness wait before a send', reason: READINESS_FOLLOW_UP_REASON },
-  { file: 'src/lib/cli-tools/opencode.ts', what: 'the tmux fallback when no server can be attached', reason: READINESS_FOLLOW_UP_REASON },
-];
-
 /** The source with its comments taken out, so prose naming a function is not a use. */
 const codeOf = (source: string): string =>
   source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
@@ -813,12 +797,6 @@ describe('[#3981] every pane key writer in src is on the ledger', () => {
       const name = row.site.split('.').pop() as string;
       const callers = srcFiles().filter((f) => f !== row.file && new RegExp(`\\b${name}\\b`).test(codeOf(read(f))));
       expect(callers, keyOf(row)).toEqual([]);
-    }
-  });
-
-  it('the readiness follow-ups still name files that exist', () => {
-    for (const { file, what } of READINESS_FOLLOW_UPS) {
-      expect(existsSync(join(REPO_ROOT, file)), what).toBe(true);
     }
   });
 });
@@ -1316,12 +1294,6 @@ describe('[#4032] raw `send-keys` / `paste-buffer` outside the tmux module are o
     const text =
       "// tmux send-keys -t x\nassertInputOwner(t, 'claude', 'paste-buffer', false);\nrun(['load-buffer', '-b', 'b', '-']);\nconst m = 'send-keys failed';\n";
     expect(scanRawKeyWrites('src/lib/x.ts', text)).toEqual([]);
-  });
-});
-
-describe('[#4032] the readiness follow-ups say why they are not fixed here', () => {
-  it('every follow-up states a reason', () => {
-    for (const { file, reason } of READINESS_FOLLOW_UPS) expect(reason.length, file).toBeGreaterThan(40);
   });
 });
 

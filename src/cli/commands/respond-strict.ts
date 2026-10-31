@@ -184,6 +184,12 @@ function verdictOfApiError(error: ApiError, options: RespondOptions, operationId
  * The commands the strict respond's failure hints name (Issue #4031), aimed at
  * the target the request resolved to (#3982's `followUpCommand`). A request
  * that named no target keeps the hints as they were.
+ *
+ * Issue #4049: `prompt` takes no `--agent`, so an `--agent`-only request names
+ * the tool's primary instance, whose id is the tool id (#868). The server
+ * resolves `--instance <tool>` to the same session as `--agent <tool>` alone
+ * (`resolveSessionTarget`: 'primary' without a roster row, the row's own tool
+ * with one).
  */
 function strictRespondHints(
   worktreeId: string,
@@ -193,8 +199,9 @@ function strictRespondHints(
     return { prompt: '`commandmate prompt`', look: '`commandmate prompt` / `capture --pane`' };
   }
   // `prompt` takes `--instance` only; `capture` takes either flag.
-  const prompt = target.instanceId
-    ? `\`commandmate prompt ${worktreeId} --instance ${target.instanceId}\``
+  const promptInstance = target.instanceId ?? target.agent;
+  const prompt = promptInstance
+    ? `\`commandmate prompt ${worktreeId} --instance ${promptInstance}\``
     : `\`commandmate prompt ${worktreeId}\``;
   return { prompt, look: `${prompt} / \`${paneCaptureCommand(worktreeId, target)}\`` };
 }
