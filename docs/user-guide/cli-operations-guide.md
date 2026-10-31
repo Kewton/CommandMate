@@ -1708,7 +1708,7 @@ commandmate verify <worktree-id> --json | jq '.gates[] | select(.gateId=="env-cl
 （並列委任は互いの計測窓の中で正当に自分のセッションを起こすため）。
 ただし別の worktree のセッションが `commandmate instances <wt> kill`（`remove --kill` を含む）で
 止められ、記録された止めたセッション名が消えたセッション名と完全に一致し、頼んだのがこのワーカー
-でないと分かる（呼び出し元の cwd がタスクの worktree の兄弟ディレクトリ＝主チェックアウトか別の worktree、
+でないと分かる（呼び出し元の cwd がタスクの worktree の兄弟ディレクトリ（worktree に限らない。主チェックアウト・別の worktree など）、
 または tmux セッションが別の worktree のもので、どちらもタスクのものではない）ときは、
 `· - mcbd-… [external] (not counted: …)` と区別して表示し、不合格に数えません
 （Issue #3993。オーケストレーターの worktree 片付け）。記録は `~/.commandmate/session-kills/` に
@@ -1718,7 +1718,7 @@ CLI とサーバー（kill-session API・片付け）が書きます。
 サーバーの片付け（`commandmate sync`・リポジトリ削除）・curl などで API を直接呼んだ停止（どれも
 ワーカーが起こせるので、`· mcbd-…: kill recorded but counted (…)` と記録があることだけ示します）、
 同じ worktree の別インスタンスなど記録のセッション名と一致しない消失、`tmux kill-session` など
-CommandMate を通らずに止めた場合。隣の worktree へ `cd` して tmux の外から止めた場合は
+CommandMate を通らずに止めた場合。隣のディレクトリ（worktree に限らない）へ `cd` して tmux の外から止めた場合は
 記録だけでは区別できず免除されます。
 詳細は [docs/design/task-contract.md](../design/task-contract.md) §2.6。
 
