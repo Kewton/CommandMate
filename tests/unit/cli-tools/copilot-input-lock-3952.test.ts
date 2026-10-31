@@ -155,7 +155,7 @@ describe('copilot automatic keys and the input lock (Issue #3952)', () => {
   describe('the folder-trust answer in the readiness wait', () => {
     const SESSION = 'mcbd-copilot-wt-1';
 
-    it('not inherited (a plain readiness wait): waits for a send in progress, then answers the dialog still up', async () => {
+    it('not inherited (a plain readiness wait): waits for a send in progress, then answers the dialog still up (through `answerFolderTrustDialog`)', async () => {
       frame = TRUST_FRAME;
       let release!: () => void;
       const send = withInstanceInputLock(SESSION, async () => {

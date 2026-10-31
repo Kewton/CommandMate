@@ -74,7 +74,9 @@ import {
   leaveCarriedPasteMark,
   resetInstanceInputLocks,
   withInstanceInputLock,
+  type InstanceInputTicket,
 } from '@/lib/session/instance-input-lock';
+import { clearComposer } from '@/lib/session/composer-clear';
 
 const S = 'mcbd-codex-wt-3945';
 const FIXTURES = path.resolve(__dirname, '../../fixtures');
@@ -238,7 +240,7 @@ describe('submit-verified-sender under the instance input lock (Issue #3945)', (
   // Stage 1: one writer at a time
   // -------------------------------------------------------------------------
   describe('stage 1: one writer at a time', () => {
-    it('a second send sends nothing until the first has finished its check and withdrawal', async () => {
+    it('a second send sends nothing until the first has finished its check and withdrawal (the body through `sendUnderInputLock`)', async () => {
       const A = body('A', 600);
       const B = 'hello from B';
       // A's paste is never drawn: unseen, late watch, withdrawal, failure.
@@ -352,7 +354,7 @@ describe('submit-verified-sender under the instance input lock (Issue #3945)', (
   // Stage 3: only the owner's keys reach the pane
   // -------------------------------------------------------------------------
   describe('stage 3: ownership before every key', () => {
-    it('a withdrawal whose session was replaced sends no keys and says so', async () => {
+    it('a withdrawal whose session was replaced sends no keys and says so (`withdrawUnsentBody` asks the ticket)', async () => {
       const A = body('A', 600);
       onPaste = () => undefined; // never drawn
       const a = send({ message: A });
@@ -377,6 +379,34 @@ describe('submit-verified-sender under the instance input lock (Issue #3945)', (
       await vi.runAllTimersAsync();
       expect((await a)?.message).toMatch(/handed to another writer before Enter/);
       expect(enters()).toBe(0);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Issue #4050: `clearComposer` itself, the ledger site the sender clears with
+  // -------------------------------------------------------------------------
+  describe('[#4050] `clearComposer` asks the send’s ticket before each pass', () => {
+    const noDelay = async (): Promise<void> => undefined;
+
+    it('positive: a ticket that is no longer the owner’s stops it before any key', async () => {
+      let stale!: InstanceInputTicket;
+      await withInstanceInputLock(S, async (ticket) => {
+        stale = ticket;
+      });
+      frames.set(S, composerFrame('left over by another writer'));
+      const result = await clearComposer(S, 'codex', { beforePass: () => stale.isCurrent(), delay: noDelay });
+      expect(result.cleared).toBe(false);
+      expect(result.passes).toBe(0);
+      expect(keyOps()).toEqual([]);
+    });
+
+    it('negative: under the owner’s current ticket the composer is cleared', async () => {
+      frames.set(S, composerFrame('left over by this send'));
+      const result = await withInstanceInputLock(S, (ticket) =>
+        clearComposer(S, 'codex', { beforePass: () => ticket.isCurrent(), delay: noDelay })
+      );
+      expect(result.passes).toBeGreaterThan(0);
+      expect(keyOps()).toEqual(['c-e+c-u']);
     });
   });
 

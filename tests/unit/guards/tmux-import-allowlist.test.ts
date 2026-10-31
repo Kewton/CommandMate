@@ -106,11 +106,34 @@ const ALLOWLIST = [...PERMANENT_EXEMPT, ...STAGED_REMOVAL].slice().sort();
  * fold into the file they came from, so the list keeps its length and its
  * "may only shrink" meaning. Only STAGED_REMOVAL is read this way — a piece of
  * a PERMANENT file, a file in another directory, or `<base>2.ts` is a stranger
- * and fails the pin as before. Each piece still needs its own `.eslintrc.json`
- * entry; `reports nothing today` below fails without one.
+ * and fails the pin as before. In `.eslintrc.json` the pieces are one glob
+ * beside their file, `<dir>/<base>-*.ts` ({@link familyGlob}, Issue #4050), so
+ * a split needs no new line there; a file of STAGED_REMOVAL with no glob yet
+ * gets that one line, in the same shape, with the split
+ * (docs/orchestrate/refactor.md).
  */
 export function foldIntoStaged(files: readonly string[]): string[] {
   return originsOf(files, STAGED_REMOVAL);
+}
+
+/**
+ * The `.eslintrc.json` glob for the pieces split off `origin` (Issue #4050):
+ * `<dir>/<base>-*.ts`. minimatch's `*` stops at `/` and needs the `-`, so it
+ * covers what {@link inFamily} covers in the same directory and nothing else —
+ * not another directory, not `<base>2.ts`.
+ */
+export function familyGlob(origin: string): string {
+  return `${posixDirname(origin)}/${posix.basename(origin).replace(/\.tsx?$/, '')}-*.ts`;
+}
+
+/**
+ * The STAGED group of `.eslintrc.json` read as STAGED_REMOVAL (Issue #4050): a
+ * file's {@link familyGlob} folds into the file, a listed piece folds in as
+ * before, and anything else — a glob of any other shape included — stays
+ * itself and fails the equality.
+ */
+export function foldStagedEntries(entries: readonly string[]): string[] {
+  return foldIntoStaged(entries.map((e) => STAGED_REMOVAL.find((origin) => familyGlob(origin) === e) ?? e));
 }
 
 /** The on-disk files of `origin`'s family, `origin` included when it exists. */
@@ -524,8 +547,8 @@ describe('lib/tmux import guard: the allowlist', () => {
 
   it('matches .eslintrc.json entry for entry, in order', () => {
     const groups = srcOverrides.map((o) => o.files.map(unescapeGlob));
-    // The staged group is read through its families (Issue #4034); the other two stay literal.
-    const staged = groups[2] ? foldIntoStaged(groups[2]) : [];
+    // The staged group is read through its families (Issue #4034, its globs #4050); the other two stay literal.
+    const staged = groups[2] ? foldStagedEntries(groups[2]) : [];
     expect([groups[0], groups[1], staged]).toEqual([[...GATEWAY_GLOBS], [...PERMANENT_EXEMPT], [...STAGED_REMOVAL]]);
     expect(groups).toHaveLength(3);
     for (const override of srcOverrides) {
@@ -828,5 +851,49 @@ describe('lib/tmux import guard: a split-off piece of a staged file (Issue #4034
       'src/lib/session/cli-session-extra.ts',
       'src/lib/ws-server-extra.ts',
     ]);
+  });
+});
+
+describe('lib/tmux import guard: the family globs of the staged group (Issue #4050)', () => {
+  const eslint = makeEslint({ withAllowlist: true });
+  const POLLER = 'src/lib/auto-yes-poller.ts';
+  const CHECKER = 'src/lib/polling/response-checker.ts';
+  const IMPORT = "import { sendKeys } from '@/lib/tmux/tmux';";
+
+  it('the two split files carry their glob in .eslintrc.json', () => {
+    const staged = srcOverrides[2].files.map(unescapeGlob);
+    expect(staged).toEqual(expect.arrayContaining([familyGlob(POLLER), familyGlob(CHECKER)]));
+    expect([familyGlob(POLLER), familyGlob(CHECKER)]).toEqual(['src/lib/auto-yes-poller-*.ts', 'src/lib/polling/response-checker-*.ts']);
+  });
+
+  it('positive: a piece of either file may import tmux with no line of its own', async () => {
+    for (const piece of ['src/lib/auto-yes-poller-new-piece.ts', 'src/lib/polling/response-checker-new-piece.ts']) {
+      expect(await lintOne(eslint, join(REPO_ROOT, piece), IMPORT), piece).toEqual([]);
+    }
+  });
+
+  it('negative: outside the family — another directory, `<base>2.ts`, a sub-directory, `.tsx` — it is still an error', async () => {
+    for (const stranger of [
+      'src/lib/polling/auto-yes-poller-tick.ts',
+      'src/lib/response-checker-dialog-gate.ts',
+      'src/lib/auto-yes-poller2.ts',
+      'src/lib/auto-yes-pollerx.ts',
+      'src/lib/auto-yes-poller-x/inner.ts',
+      'src/lib/auto-yes-poller-x.tsx',
+    ]) {
+      expect(await lintOne(eslint, join(REPO_ROOT, stranger), IMPORT), stranger).toEqual(['error:no-restricted-imports']);
+    }
+  });
+
+  it('positive: a family glob folds into its file; negative: a glob of another shape stays itself', () => {
+    expect(foldStagedEntries([POLLER, familyGlob(POLLER), CHECKER, familyGlob(CHECKER)])).toEqual([POLLER, CHECKER]);
+    for (const wider of ['src/lib/auto-yes-poller*.ts', 'src/lib/**/auto-yes-poller-*.ts', 'src/lib/auto-yes-poller-*']) {
+      expect(foldStagedEntries([POLLER, wider]), wider).toEqual([POLLER, wider].sort());
+    }
+  });
+
+  it('negative: a glob for a PERMANENT file is not folded in', () => {
+    const permanent = 'src/lib/ws-server.ts';
+    expect(foldStagedEntries([familyGlob(permanent)])).toEqual(['src/lib/ws-server-*.ts']);
   });
 });

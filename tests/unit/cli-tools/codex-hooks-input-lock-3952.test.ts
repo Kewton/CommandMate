@@ -79,7 +79,7 @@ function holdSend(): { release: () => void; done: Promise<void> } {
 }
 
 describe('codex hooks-screen answer and the input lock (Issue #3952)', () => {
-  it('not inherited: waits for a send in progress, then answers the screen still up', async () => {
+  it('not inherited: waits for a send in progress, then answers the screen still up (through `sendCodexHooksScreenKey`)', async () => {
     const held = holdSend();
     const waiting = waitForPrompt(new CodexTool());
     await vi.advanceTimersByTimeAsync(3_000);
