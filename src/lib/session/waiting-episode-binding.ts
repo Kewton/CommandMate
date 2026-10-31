@@ -6,7 +6,8 @@
  * it is bound to; the turn model (`agent-event-turn`) knows how each delivery
  * moved the instance's turn. This module joins the two:
  *
- *  - {@link resolveEpisodeBinding} decides what a new episode is bound to, from
+ *  - {@link resolveEpisodeBinding} (defined in `waiting-episode-binding-resolve.ts`,
+ *    imported here) decides what a new episode is bound to, from
  *    the turn model as it stands (design §2.4 規則 1). It is registered with the
  *    store, so an episode `observeWaitingEdge` opens is bound like any other.
  *  - {@link applyTurnOutcomesToEpisode} is the T table (design §2.4): what a
@@ -18,7 +19,8 @@
  *  - {@link captureLegacyStopTarget} / {@link settleLegacyStop} are the one
  *    closer that cannot be synchronous: `/api/hooks/claude-done` names no
  *    session and awaits a capture and a log before it is done (design 規則 6).
- *  - {@link planWaitingObservation} / {@link commitWaitingObservation} are the
+ *  - {@link planWaitingObservation} (defined in `waiting-episode-binding-observation.ts`,
+ *    imported here) / {@link commitWaitingObservation} are the
  *    tables O-1 and O-2 (design §2.4 規則 3・4・5): what one observer's reading
  *    of a frame does to the open episode. The three observers — the status
  *    probe, the response poller and the Auto-Yes poller — fix an

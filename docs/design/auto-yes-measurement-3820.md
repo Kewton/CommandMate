@@ -150,14 +150,14 @@ Issue 本文の 3 点は、実コードと合っていた（行番号は 1 か�
 
 | 経路 | 場所 | `answeredBy` | 問題 |
 |---|---|---|---|
-| サーバーの poller が画面に答えた | `src/lib/auto-yes-poller.ts:607-614`（`finishAnsweredPrompt()` 542 行から。`recordAnsweredPrompt()` は `src/lib/db/chat-db.ts:972`） | `auto` | キーを送った後に 1 行書くだけ。判断（根拠の段）・送信の結果（部分送信）・解消を区別しない。再試行（同じ確認に 10 秒後にもう一度答える、`DUPLICATE_RETRY_EXPIRY_MS` = `src/lib/auto-yes-state.ts:922`）は同じ pending 行を上書きするか新しい行を作るかが行の有無で変わる |
+| サーバーの poller が画面に答えた | `src/lib/auto-yes-poller.ts` の `finishAnsweredPrompt()`（`recordAnsweredPrompt()` は `src/lib/db/chat-db.ts:972`） | `auto` | キーを送った後に 1 行書くだけ。判断（根拠の段）・送信の結果（部分送信）・解消を区別しない。再試行（同じ確認に 10 秒後にもう一度答える、`DUPLICATE_RETRY_EXPIRY_MS` = `src/lib/auto-yes-state.ts:922`）は同じ pending 行を上書きするか新しい行を作るかが行の有無で変わる |
 | `/prompt-response`（人の UI と**ブラウザの自動回答**） | `src/app/api/worktrees/[id]/prompt-response/answer-delivery.ts:153-161`（159 行が `answeredBy: 'human'`） | `human` | `src/hooks/useAutoYes.ts:190` のブラウザの自動回答も同じ API を叩くので `human` になる（186-189 行の注記がこれを認めている）。タスクのイベントも `prompt_answered_human`（190 行） |
 | `respond` API | `src/app/api/worktrees/[id]/respond/route.ts:271` | `human` | — |
 | strict respond（CLI） | `src/app/api/worktrees/[id]/prompt-response/strict/route.ts:115` | 申告どおり（既定 `cli`） | `PromptAnsweredBy` の外の文字列も入る |
 | 誰も記録しないまま確認が消えた | `markPendingPromptsAsAnswered()`（`src/lib/db/chat-db.ts:852`、902 行） | `terminal` | 「エージェントが先へ進んだ」ことしか分からない |
 | hook の allow | `src/lib/hooks/permission-decision-service.ts:247-292`（281 行が `answeredBy: 'auto'`） | `auto` | 下の 1.3 |
 
-`answeredBy='auto'` だけを数えると、ブラウザの自動回答を落とし、Enter の補い（`poller:auto-yes-enter-fallback-sent`、`src/lib/auto-yes-poller.ts:513`。行は書かない）も落とす。配送の失敗は行を書かない（send が throw すると `finishAnsweredPrompt` に来ない）ので「失敗を回答済みにする」誤りは今は無いが、**部分送信**（#3706、`partial-answer`）は止めた記録の上書きにしか残らない。
+`answeredBy='auto'` だけを数えると、ブラウザの自動回答を落とし、Enter の補い（`poller:auto-yes-enter-fallback-sent`、`src/lib/auto-yes-poller.ts` の `detectAndRespondToPrompt()` 内。行は書かない）も落とす。配送の失敗は行を書かない（send が throw すると `finishAnsweredPrompt` に来ない）ので「失敗を回答済みにする」誤りは今は無いが、**部分送信**（#3706、`partial-answer`）は止めた記録の上書きにしか残らない。
 
 ### 1.3 hook の allow の監査記録
 
@@ -175,11 +175,11 @@ Issue 本文の 3 点は、実コードと合っていた（行番号は 1 か�
 | hook の判定のログ `permission-request-decided` / `permission-request-slow` | `src/app/api/hooks/permission-request/route.ts:273-289` | 判定 1 回につき 1 行。`behavior`・`reason`・`suppressedBy`・`elapsedMs` はあるが確認の識別は `promptId`（claude の `prompt_id` はターンの id で、呼び出しの id ではない） |
 | hook の棄権の理由 | `PermissionDecisionReason`（`permission-decision-service.ts:80-92`。`ask-user-question`・`auto-yes-disabled`・`policy-suppressed` ほか） | 棄権した要求を理由別に数える語彙（§2.3） |
 | opencode の判定の最後の 1 件 | `src/lib/hooks/permission-decision-state.ts:99`（`lastDecisions.set`）、書き手 `src/lib/hooks/permission-adjudication.ts:136` | `delivered` / `releasedPrompt` を持つ。これも上書き |
-| poller の送信ログ `poller:response-sent` | `src/lib/auto-yes-poller.ts:575-583` | 送った答えと質問（500 文字まで）。判断の根拠は無い |
-| poller の送信の試行 | `AutoYesSendAttempt`・`beginSendAttempt()`・`settleSendAttempt()`（`src/lib/polling/auto-yes-poller-state.ts:286-360`、#3713）。失敗の分岐は `settleFailedTick()`（`src/lib/auto-yes-poller.ts:852-893`） | await の前に登録したオブジェクトを tick が持ち、戻ったら `keysSent` で部分送信を記録する。止まった世代の送信は `poller:auto-yes-answer-abandoned`（`keysSent` つき）。世代が生きている失敗（`poller:detect-respond-error`）でも、#3839 から `keysSent === true` なら途中で止まった答えとして記録する（`settleSendAttempt(attempt, keysSent === true)`。次の tick は打ち直さない）。`keysSent` が分からない throw だけが §2.5 の `failed` |
+| poller の送信ログ `poller:response-sent` | `src/lib/auto-yes-poller.ts` の `finishAnsweredPrompt()` | 送った答えと質問（500 文字まで）。判断の根拠は無い |
+| poller の送信の試行 | `AutoYesSendAttempt`・`beginSendAttempt()`・`settleSendAttempt()`（`src/lib/polling/auto-yes-poller-state.ts:286-360`、#3713）。失敗の分岐は `settleFailedTick()`（`src/lib/auto-yes-poller.ts`） | await の前に登録したオブジェクトを tick が持ち、戻ったら `keysSent` で部分送信を記録する。止まった世代の送信は `poller:auto-yes-answer-abandoned`（`keysSent` つき）。世代が生きている失敗（`poller:detect-respond-error`）でも、#3839 から `keysSent === true` なら途中で止まった答えとして記録する（`settleSendAttempt(attempt, keysSent === true)`。次の tick は打ち直さない）。`keysSent` が分からない throw だけが §2.5 の `failed` |
 | agy の受信記録 | `src/lib/polling/antigravity-permission-receipts.ts:72-76`（`{ toolName, at }` だけ）、書き手 `route.ts:213-221` | 8 秒の受信窓。`toolCall.args`・`stepIdx`・`conversationId` は捨てている |
 | agy の受信のエピソード | `src/lib/polling/antigravity-receipt-episodes.ts`（`beginAntigravityFrameRead` 195 行・`endAntigravityFrameRead` 221 行・`markAntigravityAnswerSent` 256 行） | 「ダイアログを最初に見た時刻」と「どの受信で受理したか」を既に持っている。agy の確認の識別の土台になる |
-| agy の受信窓の外の確認 | `src/lib/auto-yes-poller.ts:739-743`（`isPrompt` が false のとき `logIfWithheldForWantOfReceipt()` が `detectPromptOnCleanFrame()` で門を通さずに読み直す） | **受信窓の外では、確認が画面に残っていても `isPrompt: false` になる**。存在の判断はこの読み直しの結果で行う（§2.2） |
+| agy の受信窓の外の確認 | `src/lib/auto-yes-poller-tick.ts` の `noteNoPromptOnScreen()`（`isPrompt` が false のとき `logIfWithheldForWantOfReceipt()` が `detectPromptOnCleanFrame()` で門を通さずに読み直す） | **受信窓の外では、確認が画面に残っていても `isPrompt: false` になる**。存在の判断はこの読み直しの結果で行う（§2.2） |
 | CLI 自身の許可のモード | `PermissionRequestPayload.permissionMode`（`src/lib/hooks/permission-request-payload.ts:56,109`）。使っているのは `NON_BLOCKING_PERMISSION_MODES`（`permission-decision-service.ts:361,425`）だけ | claude の `PermissionRequest` にしか無い。中継（`scripts/hooks/cmate-agent-event.sh`）は `permission_mode` を送らない。claude の `PreToolUse` / `PostToolUse` の登録は `AskUserQuestion` だけ（`src/lib/hooks/hook-settings-generator.ts:485-491`） |
 | 既存の日次の読み込み | `addLogLine()`（`src/lib/agent-health/metrics-perf.ts:147-160`） | 窓（直近 24 時間）の外の行は `oldest` を動かすだけで捨てる。前日以前の行から状態を引き継げない（§4.3 の checkpoint はこのため） |
 | 日次の結果の置き場所 | `~/.commandmate/agent-health/metrics/<date>.json`（`docs/user-guide/agent-health.md:674`）と `metrics-state.json`（同 454 行、前回値） | 長期の推移は前者（§3.2） |
@@ -209,7 +209,7 @@ Issue 本文の 3 点は、実コードと合っていた（行番号は 1 か�
 
 ### 2.2 存在と回答可否の 2 軸（必須 1）
 
-第 1 版は「確認の無い tick（`noteNoPromptOnScreen()`）＝解消」としていたが、agy は受信窓（8 秒）の外では確認が画面に残っていても `isPrompt: false` で返る（`auto-yes-poller.ts:739-743`）。これを解消と読むと、同じ確認・同じ停止を tick ごとに閉じては開き直す。そこで記録の状態を 2 つの軸に分ける。
+第 1 版は「確認の無い tick（`noteNoPromptOnScreen()`）＝解消」としていたが、agy は受信窓（8 秒）の外では確認が画面に残っていても `isPrompt: false` で返る（`src/lib/auto-yes-poller-tick.ts` の `noteNoPromptOnScreen()`）。これを解消と読むと、同じ確認・同じ停止を tick ごとに閉じては開き直す。そこで記録の状態を 2 つの軸に分ける。
 
 | 軸 | 値 | 何で決めるか |
 |---|---|---|
@@ -221,7 +221,7 @@ Issue 本文の 3 点は、実コードと合っていた（行番号は 1 か�
 
 - 確認を閉じるのは**存在が `gone` になったときだけ**（と §4.2 の放棄）。回答可否が `answerable`↔`withheld` を行き来しても確認は閉じない
 - agy の受信窓: 窓の中（`isPrompt: true`、`answerable`）→ 窓の外（`isPrompt: false` だが専用リーダーが確認を見る: `present`・`withheld(no-hook-receipt)`）→ 次の受信で窓の中、と続いても **1 件の確認**。停止の区間は `withheld` の間だけで、同じ理由が続く限り 1 区間（受入基準、§7 PR 1）
-- 門を通さない読み取りが無いツール・経路では、今の `noteNoPromptOnScreen()` の判断（`isPrompt: false`）を `gone` とする（今の挙動と同じ）
+- 門を通さない読み取りが無いツール・経路では、今の `noteNoPromptOnScreen()`（`src/lib/auto-yes-poller-tick.ts`）の判断（`isPrompt: false`）を `gone` とする（今の挙動と同じ）
 - 記録の入口は、`isPrompt: false` の分岐でも存在の判断を受け取れるように、`logIfWithheldForWantOfReceipt()` の読み直しの結果（確認を見たか・画面キー）を返り値で受ける（§7 PR 1。答え方は変えない）
 
 ### 2.3 hook の要求と確認の待ちを分ける（必須 2）
@@ -508,7 +508,7 @@ C の欠点への手当て:
 
 - 変更ファイル:
   - 新規 `src/lib/polling/auto-yes-confirmation-ledger.ts`（`globalThis` の状態＋ログの出力。入口はすべて例外を外へ出さない）と `src/lib/polling/auto-yes-confirmation-ledger-types.ts`（§3.3 の**全経路の語彙をこの PR で型として固定**し、hook・API の行は PR 2・3 が同じ記録のモジュールで出す）
-  - `src/lib/auto-yes-poller.ts`（`detectAndRespondToPrompt` の開く・判断・試行・解消、`noteNoPromptOnScreen` の存在の判断、`settleFailedTick` の試行の結果、`stopAutoYesPolling` の `unobservable` / 放棄、再試行）
+  - `src/lib/auto-yes-poller.ts`（`detectAndRespondToPrompt` の開く・判断・試行・解消、`auto-yes-poller-tick.ts` の `noteNoPromptOnScreen` の存在の判断、`settleFailedTick` の試行の結果、`stopAutoYesPolling` の `unobservable` / 放棄、再試行）
   - `src/lib/polling/auto-yes-poller-state.ts`（`AutoYesSendAttempt` に `confirmationId`・`attemptId`）
   - `src/lib/polling/auto-yes-prompt-suppression.ts`（`suppressAndWarnOnce` から停止を記録。`suppressIfNotOursToAnswer` の `ours` に門の判定を載せて根拠の段を決める）
   - `src/lib/polling/auto-yes-poller-steps.ts`（`resolveAnswerUnderPolicy`・`withheldForEarlierSend`）
