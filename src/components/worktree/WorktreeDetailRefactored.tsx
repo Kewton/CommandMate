@@ -274,8 +274,8 @@ import { withToolDecisionLabels } from '@/components/worktree/prompt-decision-id
 import { readDecisionId } from '@/lib/session/prompt-view';
 import { buildDecisionRespondBody } from '@/lib/prompt-response-body-builder';
 import {
-  PROMPT_RESPONSE_NOTICES,
-  readPromptResponseOutcome,
+  promptResponseNotice,
+  readPromptResponseReply,
   type PromptResponseOutcome,
 } from '@/lib/prompt-response-outcome';
 import { showsPromptUnderAutoYes } from '@/components/worktree/prompt-answer';
@@ -654,6 +654,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       // delivers it over the agent's own API. `/prompt-response` would
       // re-capture the pane and refuse a dialog nobody parsed.
       let outcome: PromptResponseOutcome;
+      // Issue #4031: a failure stopped part-way (keys may be on the pane).
+      let partial = false;
       try {
         const response = await fetch(`/api/worktrees/${worktreeId}/respond`, {
           method: 'POST',
@@ -662,7 +664,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             buildDecisionRespondBody(mobilePromptDecisionId, answer, activeCliTab, activeInstanceId),
           ),
         });
-        outcome = await readPromptResponseOutcome(response);
+        ({ outcome, partial } = await readPromptResponseReply(response));
       } catch (err) {
         // The request got no reply at all.
         console.error('[WorktreeDetailRefactored] Error answering a decision:', err);
@@ -673,7 +675,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       if (outcome === 'answered') {
         handlePromptDismiss();
       } else {
-        const notice = PROMPT_RESPONSE_NOTICES[outcome];
+        const notice = promptResponseNotice(outcome, partial);
         showToast(tWorktree(notice.messageKey), notice.type);
       }
       await fetchCurrentOutput();

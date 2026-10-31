@@ -558,7 +558,8 @@ export class AntigravityTool extends BaseCLITool {
       logger.info('sent-message-to-antigravity-session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
-      throw new Error(`Failed to send message to Antigravity: ${errorMessage}`);
+      // Issue #4031: the cause keeps a failed `load-buffer`'s code (`classifySendFailure`).
+      throw new Error(`Failed to send message to Antigravity: ${errorMessage}`, { cause: error });
     }
   }
 

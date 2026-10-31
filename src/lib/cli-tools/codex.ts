@@ -909,7 +909,8 @@ export class CodexTool extends BaseCLITool {
       logger.info('sent-message-to-codex-session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
-      throw new Error(`Failed to send message to Codex: ${errorMessage}`);
+      // Issue #4031: the cause keeps a failed `load-buffer`'s code (`classifySendFailure`).
+      throw new Error(`Failed to send message to Codex: ${errorMessage}`, { cause: error });
     }
   }
 

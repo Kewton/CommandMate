@@ -19,8 +19,10 @@ import {
 } from '@/lib/detection/tools/command-code/plan-review-state';
 import {
   answerCommandCodePlanReview,
+  planReviewAnswerError,
   planReviewNotActiveBody,
 } from './plan-review';
+import { promptAnswerErrorResponse } from '@/lib/prompt-answer-errors';
 import { logger, logRefused, type PromptResponseContext, type StageResult } from './context';
 import { instanceInputReadMark } from '@/lib/session/instance-input-lock';
 import type { ValidatedPromptResponse } from './request-validation';
@@ -125,6 +127,19 @@ async function answerPlanReviewIfShown(
       recapture: () => captureSessionOutputFresh(ctx.id, ctx.cliToolId, undefined, ctx.instanceId),
     });
   } catch (error: unknown) {
+    // Issue #4031: through the same table as every other answer error, so a
+    // review stopped part-way says `answer_input_lost` / `keysSent` (the
+    // CLI's InputLost warning), and one stopped before its first step says
+    // `answer_not_delivered` — not a bare 500.
+    const answerError = planReviewAnswerError(error, sessionName);
+    const mapped = promptAnswerErrorResponse(answerError, 'prompt-response');
+    if (mapped !== null) {
+      if (mapped.status === 200) {
+        logRefused(ctx, { reason: mapped.body.reason, phase: planReviewState.phase });
+        mapped.body.answer = answer ?? '';
+      }
+      return NextResponse.json(mapped.body, { status: mapped.status });
+    }
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
       { error: `Failed to send answer to tmux: ${errorMessage}` },

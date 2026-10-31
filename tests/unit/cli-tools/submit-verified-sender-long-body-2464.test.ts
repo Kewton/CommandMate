@@ -69,6 +69,8 @@ import {
 } from '@/lib/cli-tools/submit-verified-sender';
 import { sendKeys, sendSpecialKeys, capturePane, clearComposerLine, clearInputLine } from '@/lib/tmux/tmux';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { classifySendFailure } from '@/lib/session/send-attempt-state';
+import { PASTE_NOT_STARTED_CODE } from '@/lib/session/send-attempt-types';
 
 const SESSION = 'mcbd-claude-long-body';
 const FIXTURES = path.resolve(__dirname, '../../fixtures/long-body-2464');
@@ -281,11 +283,33 @@ describe('submit-verified-sender: long bodies (Issue #2464)', () => {
       stubExecFile('load-buffer');
       scriptPane({ clearReads: [CLAUDE_IDLE], beforeEnter: [CLAUDE_IDLE], afterEnter: CLAUDE_IDLE });
 
-      await expect(send(BRIEF_60, 'claude')).rejects.toThrow(/Failed to paste message into tmux session/);
+      // Issue #4031: worded apart from a failed `paste-buffer`.
+      await expect(send(BRIEF_60, 'claude')).rejects.toThrow(/Failed to load message into tmux buffer/);
 
       expect(tmuxCalls.map((c) => c.args[0])).toEqual(['load-buffer', 'delete-buffer']);
       expect(enterCount()).toBe(0);
       expect(verifyReads()).toBe(0);
+    });
+
+    it('[#4031] a failed load-buffer carries PASTE_NOT_STARTED_CODE and is recorded not-sent', async () => {
+      stubExecFile('load-buffer');
+      scriptPane({ clearReads: [CLAUDE_IDLE], beforeEnter: [CLAUDE_IDLE], afterEnter: CLAUDE_IDLE });
+
+      const error = await send(BRIEF_60, 'claude').then(() => null, (e: unknown) => e as Error);
+      expect(error).toMatchObject({ code: PASTE_NOT_STARTED_CODE, delivery: 'not-started' });
+      // A tool's wrap keeps it as `cause` (every tool but claude wraps).
+      const wrapped = new Error(`Failed to send message to Codex: ${error?.message}`, { cause: error });
+      expect(classifySendFailure(wrapped)).toEqual({ state: 'not-sent', reason: 'paste-not-started' });
+    });
+
+    it('[#4031] negative: a failed paste-buffer carries no such code and stays indeterminate', async () => {
+      stubExecFile('paste-buffer');
+      scriptPane({ clearReads: [CLAUDE_IDLE], beforeEnter: [CLAUDE_IDLE], afterEnter: CLAUDE_IDLE });
+
+      const error = await send(BRIEF_60, 'claude').then(() => null, (e: unknown) => e as Error);
+      expect(error?.message).toMatch(/Failed to paste message into tmux session/);
+      expect((error as { code?: unknown } | null)?.code).not.toBe(PASTE_NOT_STARTED_CODE);
+      expect(classifySendFailure(error)).toEqual({ state: 'indeterminate', reason: 'send-error' });
     });
   });
 

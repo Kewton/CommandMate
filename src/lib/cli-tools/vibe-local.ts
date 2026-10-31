@@ -154,7 +154,8 @@ export class VibeLocalTool extends BaseCLITool {
       logger.info('sent-message-to-vibe-local-session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
-      throw new Error(`Failed to send message to Vibe Local: ${errorMessage}`);
+      // Issue #4031: the cause keeps a failed `load-buffer`'s code (`classifySendFailure`).
+      throw new Error(`Failed to send message to Vibe Local: ${errorMessage}`, { cause: error });
     }
   }
 

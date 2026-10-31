@@ -354,6 +354,8 @@ function readAgentEvents(
 interface PromptCompositionInput {
   worktreeId: string;
   cliToolId: CLIToolType;
+  /** The instance the payload was asked for; undefined for the primary (Issue #4031). */
+  instanceId: string | undefined;
   output: string;
   /** The window `output` was captured with (Issue #3881 second review N3). */
   captureWindowLines: number;
@@ -380,6 +382,7 @@ interface PromptComposition {
 function composePromptData({
   worktreeId,
   cliToolId,
+  instanceId,
   output,
   captureWindowLines,
   statusResult,
@@ -499,9 +502,9 @@ function composePromptData({
     : scraperPromptWaiting
     ? correctedPromptData ??
       scraperPromptData ??
-      (structuredFacts ? buildStructuredPromptData(worktreeId, structuredFacts) : null)
+      (structuredFacts ? buildStructuredPromptData(worktreeId, structuredFacts, instanceId) : null)
     : structuredFacts
-      ? buildStructuredPromptData(worktreeId, structuredFacts)
+      ? buildStructuredPromptData(worktreeId, structuredFacts, instanceId)
       : null;
 
   // Issue #2870: whether `/prompt-response` would answer the prompt published
@@ -1144,6 +1147,7 @@ async function buildPayload(
   const { structuredFacts, promptData, promptAnswerable } = composePromptData({
     worktreeId,
     cliToolId,
+    instanceId,
     output,
     captureWindowLines,
     statusResult,
@@ -1266,6 +1270,7 @@ async function buildPayload(
       worktreeId,
       cliToolId,
       instanceId: resolvedInstanceId,
+      respondInstanceId: instanceId,
       state: promptWaiting,
       facts: structuredFacts,
     });

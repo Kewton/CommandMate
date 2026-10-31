@@ -118,6 +118,7 @@ import {
   readPromptSubmitReceipt,
 } from '@/lib/session/prompt-submit-receipt';
 import { markLastSendDiscarded } from '@/lib/session/send-attempt-state';
+import { PASTE_NOT_STARTED_CODE } from '@/lib/session/send-attempt-types';
 
 // Issue #3945 (review-2): moved next to the clear it feeds, so copilot's own
 // keys can take it without the shared sender. Re-exported for its callers here.
@@ -333,6 +334,8 @@ function runTmux(args: string[], input?: string): Promise<void> {
  * Issue #4011: a failed `load-buffer` throws with `delivery: 'not-started'`
  * (the field `TmuxSendError` carries) — it runs before `paste-buffer`, so none
  * of the body reached the pane, however it failed (an exit status or a timeout).
+ * Issue #4031: worded `Failed to load message into tmux buffer` and coded
+ * `PASTE_NOT_STARTED_CODE`, so `classifySendFailure` records it `not-sent`.
  *
  * @throws Error when either tmux command fails, or `ticket` lost the composer
  */
@@ -349,8 +352,12 @@ async function pasteBody(
   } catch (error: unknown) {
     await runTmux(['delete-buffer', '-b', bufferName]).catch(() => undefined);
     const errorMessage = error instanceof Error ? error.message : String(error);
-    throw Object.assign(new Error(`Failed to paste message into tmux session: ${errorMessage}`), {
+    // Issue #4031: its own wording and code, apart from `paste-buffer`'s
+    // failure below (whose body may be on the pane), so the send is recorded
+    // `not-sent` with or without a bound relay.
+    throw Object.assign(new Error(`Failed to load message into tmux buffer: ${errorMessage}`), {
       delivery: 'not-started' as const,
+      code: PASTE_NOT_STARTED_CODE,
     });
   }
   if (!ticket.isCurrent()) {

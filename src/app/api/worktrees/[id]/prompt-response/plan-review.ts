@@ -11,6 +11,7 @@
  */
 
 import {
+  PlanReviewInputLostError,
   planCommandCodePlanReviewKeys,
   sendCommandCodePlanReviewKeys,
   type PlanReviewAction,
@@ -22,6 +23,7 @@ import {
 } from '@/lib/detection/tools/command-code/plan-review-state';
 import { answerUnderInstanceInputLock, instanceInputReadMark } from '@/lib/session/instance-input-lock';
 import { ANSWER_NOT_DELIVERED_REASON } from '@/lib/prompt-answer-sender';
+import { PromptAnswerInputLostError, PromptAnswerNotDeliveredError } from '@/lib/prompt-answer-errors';
 
 /** The reason for a plan review action asked of a screen that is not one. */
 export const PLAN_REVIEW_NOT_ACTIVE_REASON = 'plan_review_not_active';
@@ -111,6 +113,27 @@ export async function answerCommandCodePlanReview(args: {
       },
     },
   };
+}
+
+/**
+ * The answer error a plan review's keys stopped with (Issue #4031), for the
+ * route to answer through `promptAnswerErrorResponse` like every other answer.
+ *
+ * {@link PlanReviewInputLostError} stays where the keys are sent
+ * (`lib/cli-tools`); it is turned into the answer errors here. With at least
+ * one step sent, keys are on the pane: {@link PromptAnswerInputLostError}
+ * (500, `answer_input_lost`, `keysSent: true`). With none sent, nothing was
+ * typed: {@link PromptAnswerNotDeliveredError} (`session-replaced`,
+ * `keysSent: false`). The original error is kept as `cause`. Any other error
+ * is returned as it is (the route keeps its own 500).
+ */
+export function planReviewAnswerError(error: unknown, sessionName: string): unknown {
+  if (!(error instanceof PlanReviewInputLostError)) return error;
+  const wrapped =
+    error.stepsSent > 0
+      ? new PromptAnswerInputLostError(sessionName)
+      : new PromptAnswerNotDeliveredError('session-replaced', sessionName);
+  return Object.assign(wrapped, { cause: error });
 }
 
 /** The refusal for `planReviewAction` on a screen with no plan review. */

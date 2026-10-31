@@ -170,7 +170,7 @@ export async function POST(
         blockedBy: promptGuard.blockedBy,
       });
       return NextResponse.json(
-        { error: promptWaitingMessage(id, promptGuard.blockedBy), code: PROMPT_WAITING_CODE },
+        { error: promptWaitingMessage(id, promptGuard.blockedBy, instanceId), code: PROMPT_WAITING_CODE },
         { status: 409 }
       );
     }
@@ -201,7 +201,7 @@ export async function POST(
       if (classifySendFailure(error).reason === 'prompt-waiting') {
         logger.info('terminal-send-refused-prompt-waiting-under-lock', { worktreeId: id, cliToolId: target.cliToolId });
         return NextResponse.json(
-          { error: promptWaitingMessage(id), code: PROMPT_WAITING_CODE },
+          { error: promptWaitingMessage(id, undefined, instanceId), code: PROMPT_WAITING_CODE },
           { status: 409 }
         );
       }

@@ -375,7 +375,8 @@ export class OpenCodeV2Tool extends BaseCLITool {
       invalidateCache(sessionName);
       logger.info('sent-message-to-opencode-v2-session');
     } catch (error: unknown) {
-      throw new Error(`Failed to send message to OpenCode V2: ${getErrorMessage(error)}`);
+      // Issue #4031: the cause keeps a failed `load-buffer`'s code (`classifySendFailure`).
+      throw new Error(`Failed to send message to OpenCode V2: ${getErrorMessage(error)}`, { cause: error });
     }
   }
 

@@ -855,7 +855,8 @@ describe('submit-verified-sender under the instance input lock (Issue #3945)', (
       const b = send({ message: B });
       await vi.runAllTimersAsync();
       const error = await b;
-      expect(error?.message).toMatch(/Failed to paste message into tmux session/);
+      // Issue #4031: worded apart from a failed `paste-buffer` (below).
+      expect(error?.message).toMatch(/Failed to load message into tmux buffer/);
       expect(keyOps()).toEqual([]);
       expect(getCarriedPasteMark(S)).toBeNull();
 

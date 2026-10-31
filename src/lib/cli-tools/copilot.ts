@@ -844,7 +844,8 @@ export class CopilotTool extends BaseCLITool {
       logger.info('sent-message-to-copilot-session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
-      throw new Error(`Failed to send message to Copilot: ${errorMessage}`);
+      // Issue #4031: the cause keeps a failed `load-buffer`'s code (`classifySendFailure`).
+      throw new Error(`Failed to send message to Copilot: ${errorMessage}`, { cause: error });
     }
   }
 
