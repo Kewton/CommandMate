@@ -101,6 +101,22 @@ export function getLastSendAttempt(instance: SendAttemptInstance): SendAttemptRe
   return records.get(keyOf(instance)) ?? null;
 }
 
+/**
+ * Turn the instance's last `sent` record `indeterminate` (Issue #4035): the
+ * next send found that body still in the composer, so it never reached the
+ * agent. Any other record is left as it is. Never throws.
+ */
+export function markLastSendDiscarded(instance: SendAttemptInstance, now: number = Date.now()): void {
+  try {
+    const key = keyOf(instance);
+    const record = records.get(key);
+    if (record === undefined || record.state !== 'sent') return;
+    records.set(key, { ...record, at: Math.floor(now), state: 'indeterminate', reason: 'found-in-composer' });
+  } catch (error) {
+    logger.warn('send-attempt-record-failed', { error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
 /** Forget every record (tests). */
 export function clearSendAttempts(): void {
   records.clear();
@@ -150,6 +166,11 @@ export function classifySendFailure(error: unknown): { state: SendAttemptState; 
   // #1501: the input line was cleared best-effort.
   if (/replaced by a TUI autocompletion/.test(message)) {
     return { state: 'indeterminate', reason: 'replaced-by-completion' };
+  }
+  // #4035: Enter sent, the composer did not show the body, and the agent did
+  // not report the session's first prompt.
+  if (/did not report the prompt within \d+ms \(Issue #4035\)/.test(message)) {
+    return { state: 'indeterminate', reason: 'prompt-unreported' };
   }
   // #1471: typed, Enter sent (more than once), never confirmed.
   if (/submit could not be confirmed/i.test(message)) {

@@ -99,6 +99,7 @@ import {
   askUserQuestion,
 } from '@/lib/session/agent-event-ask-user-question';
 import { getOrInitGlobal } from '../global-state';
+import { notePromptSubmitHook } from '@/lib/session/prompt-submit-receipt';
 
 export type { AgentEventRecord } from '@/lib/session/agent-event-record';
 export {
@@ -374,6 +375,9 @@ export function recordAgentEvent(
   }
 
   lastAgentEvent.set(key, record);
+  // Issue #4035: what the sender asks before trusting an empty-looking composer
+  // on a session's first prompt.
+  notePromptSubmitHook({ worktreeId, cliToolId, instanceId }, record.event, record.at);
   const outcomes: TurnTransitionOutcome[] = [];
   if (record.event === 'session_start') {
     // Issue #2357: a new agent process, whatever model it names first is its

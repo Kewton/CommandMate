@@ -497,7 +497,10 @@ export async function sendUserMessage(
       }
       // Issue #3759: not-sent only when the error says the body was never typed.
       let failure = classifySendFailure(error);
-      if (failure.reason === 'submit-unconfirmed' && (await composerStillHolds(worktreeId, cliToolId, instanceId, content))) {
+      if (
+        (failure.reason === 'submit-unconfirmed' || failure.reason === 'prompt-unreported') &&
+        (await composerStillHolds(worktreeId, cliToolId, instanceId, content))
+      ) {
         failure = { state: 'indeterminate', reason: 'composer-residue' };
       }
       return { error, failure };

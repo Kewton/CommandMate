@@ -64,6 +64,16 @@ export type SendAttemptReason =
   | 'submit-unconfirmed'
   /** `indeterminate`: a read of the composer after the failure still shows the body. */
   | 'composer-residue'
+  /**
+   * `indeterminate`: the composer did not show the body after Enter, but the
+   * agent did not report the session's first prompt either (#4035).
+   */
+  | 'prompt-unreported'
+  /**
+   * `indeterminate`: a send reported `sent`, and the next send found that body
+   * still in the composer before typing its own (#4035).
+   */
+  | 'found-in-composer'
   /** `indeterminate`: any other failure; where it stopped is not known. */
   | 'send-error';
 

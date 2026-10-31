@@ -561,6 +561,35 @@ export function classifySubmit(
   message: string,
   composerSpec: ComposerSpec = resolveComposerSpec(cliToolId)
 ): SubmitState {
+  return classifySubmitWithRule(output, cliToolId, message, composerSpec).state;
+}
+
+/**
+ * Which of {@link classifySubmit}'s rules decided a frame (Issue #4035). B is
+ * split into its two readings — no composer on screen (`B-absent`) and an empty
+ * one (`B-empty`) — and F into the window's (`F`) and the codex composer above
+ * it (`F-outside`), because the sender trusts them differently.
+ */
+export type SubmitRule = 'A' | 'B-absent' | 'B-empty' | 'C' | 'D' | 'E' | 'F' | 'F-outside';
+
+/** {@link classifySubmit}'s verdict and the rule that gave it (Issue #4035). */
+export interface SubmitVerdict {
+  state: SubmitState;
+  rule: SubmitRule;
+}
+
+/**
+ * {@link classifySubmit} with the rule that decided the frame (Issue #4035).
+ * The sender logs the rule with every verdict, and treats a `submitted` from B
+ * or F — the screen saying only "the body is not in the composer" — as weaker
+ * evidence than A on a tool whose own hook reports the prompt.
+ */
+export function classifySubmitWithRule(
+  output: string,
+  cliToolId: CLIToolType,
+  message: string,
+  composerSpec: ComposerSpec = resolveComposerSpec(cliToolId)
+): SubmitVerdict {
   const clean = stripAnsi(output);
   const lines = withoutTrailingBlankRows(clean.split('\n'));
   const windowLines = lines.slice(-VERIFY_WINDOW_LINES);
@@ -571,7 +600,7 @@ export function classifySubmit(
   //    pinned to the bottom of the pane, and widening it to opencode's whole
   //    frame would match `esc interrupt` printed inside a reply.
   if (detectThinking(cliToolId, windowStr)) {
-    return 'submitted';
+    return { state: 'submitted', rule: 'A' };
   }
 
   const composer = readSubmitComposer(output, cliToolId, composerSpec.reader, lines, windowLines, message);
@@ -579,24 +608,24 @@ export function classifySubmit(
   // B. No composer visible (scrolled off / dialog / still starting), or the
   //    composer is empty => the message left the box => submitted.
   if (composer.kind !== 'text') {
-    return 'submitted';
+    return { state: 'submitted', rule: composer.kind === 'absent' ? 'B-absent' : 'B-empty' };
   }
 
   // C. A paste placeholder is still folded into the composer => body is there.
   if (composer.rows.some((row) => PASTE_PLACEHOLDER_PATTERN.test(row) || findPasteTokens(row).tokens.length > 0)) {
-    return 'pending';
+    return { state: 'pending', rule: 'C' };
   }
 
   // D. The typed body is still sitting in the composer => resend Enter.
   if (inputMatchesBody(composer.text, message)) {
-    return 'pending';
+    return { state: 'pending', rule: 'D' };
   }
 
   // E. A different slash command is in the composer => a completion popup
   //    replaced what we typed. (Scoped to `/…` so idle-prompt placeholders that
   //    some TUIs paint on an empty composer are never mistaken for this.)
   if (REPLACEMENT_COMMAND_PATTERN.test(composer.text)) {
-    return 'replaced';
+    return { state: 'replaced', rule: 'E' };
   }
 
   // F. Non-empty, non-command steady-state text (idle placeholder / hint) =>
@@ -604,7 +633,7 @@ export function classifySubmit(
   //    composer above the window (Issue #3906): before #3906 that frame was
   //    read as no composer at all; text there that is not the body says
   //    neither that the message left nor that Enter would send it.
-  return composer.outsideWindow ? 'indeterminate' : 'submitted';
+  return composer.outsideWindow ? { state: 'indeterminate', rule: 'F-outside' } : { state: 'submitted', rule: 'F' };
 }
 
 /**
