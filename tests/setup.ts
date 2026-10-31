@@ -131,6 +131,28 @@ if ((process.env.CM_VERIFY_WORKTREE_INDEX_ROOT ?? '').trim() === '') {
   process.env.CM_VERIFY_WORKTREE_INDEX_ROOT = join(tmpdir(), 'commandmate-test-worktree-index');
 }
 
+// Issue #3993: keep session-kill records out of the developer's home.
+//
+// A successful kill — `instances … kill`, the kill-session route, the session
+// cleanup after sync or a repository removal — appends a line to
+// `~/.commandmate/session-kills/` unless `CM_SESSION_KILL_LEDGER_ROOT` says
+// otherwise, and the env-clean gate of a real verification reads that same
+// directory back to excuse vanished sibling sessions. A test's fake kill of
+// some `wt-*` fixture left there is both litter in $HOME and a record a real
+// gate would read. Same guard as CM_VERIFY_WORKTREE_INDEX_ROOT above (blank
+// counts as absent, an explicit root or `vi.stubEnv` still wins).
+//
+// Scoped by worker pid, unlike the worktree index: `evaluateEnvClean` reads
+// this directory by default, so a kill another suite recorded at the same
+// moment could otherwise excuse a removal in an unrelated test.
+if ((process.env.CM_SESSION_KILL_LEDGER_ROOT ?? '').trim() === '') {
+  process.env.CM_SESSION_KILL_LEDGER_ROOT = join(
+    tmpdir(),
+    'commandmate-test-session-kills',
+    String(process.pid)
+  );
+}
+
 // Issue #2490: keep opencode's port ledger out of the developer's home.
 //
 // `getOpencodePortFilePath()` answers `~/.commandmate/opencode-ports.json`

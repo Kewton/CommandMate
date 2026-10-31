@@ -303,6 +303,10 @@ function runTmux(args: string[], input?: string): Promise<void> {
  * `load-buffer` ran. A lost ticket drops the buffer and throws before anything
  * reaches the pane (`input lock lost, nothing was typed`).
  *
+ * Issue #4011: a failed `load-buffer` throws with `delivery: 'not-started'`
+ * (the field `TmuxSendError` carries) — it runs before `paste-buffer`, so none
+ * of the body reached the pane, however it failed (an exit status or a timeout).
+ *
  * @throws Error when either tmux command fails, or `ticket` lost the composer
  */
 async function pasteBody(
@@ -318,7 +322,9 @@ async function pasteBody(
   } catch (error: unknown) {
     await runTmux(['delete-buffer', '-b', bufferName]).catch(() => undefined);
     const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to paste message into tmux session: ${errorMessage}`);
+    throw Object.assign(new Error(`Failed to paste message into tmux session: ${errorMessage}`), {
+      delivery: 'not-started' as const,
+    });
   }
   if (!ticket.isCurrent()) {
     await runTmux(['delete-buffer', '-b', bufferName]).catch(() => undefined);
@@ -901,9 +907,11 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
       await pasteBody(sessionName, message, ticket, cliToolId);
     } catch (error: unknown) {
       // Whether tmux put any of it into the pane is unknown — except after a
-      // refused input boundary (Issue #3992), which stops before `paste-buffer`:
-      // a mark then would only hold the next send off for nothing.
-      if (!isInputBoundaryRefusal(error)) leaveCarriedPasteMark(ticket);
+      // refused input boundary (Issue #3992) or a failed `load-buffer` (Issue
+      // #4011, `not-started`), both before `paste-buffer`: a mark then would
+      // only hold the next send off for nothing.
+      const notStarted = (error as { delivery?: unknown } | null)?.delivery === 'not-started';
+      if (!isInputBoundaryRefusal(error) && !notStarted) leaveCarriedPasteMark(ticket);
       throw error;
     }
     await confirmPasteLanded({ sessionName, message, cliToolId, composer, attempts: pasteLandedAttempts, ticket });

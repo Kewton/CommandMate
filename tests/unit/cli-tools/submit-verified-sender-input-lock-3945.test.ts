@@ -119,6 +119,8 @@ let afterRead: (session: string, frame: string) => void;
 let readFailure: ((session: string) => Error | null) | null;
 /** ms before `load-buffer` reports back (0: next microtask). */
 let loadDelayMs = 0;
+/** Issue #4011: the error a tmux subcommand (`load-buffer`, `paste-buffer`) fails with, if any. */
+let execFailure: ((sub: string) => Error | null) | null = null;
 
 const frameOf = (session: string): string => frames.get(session) ?? IDLE;
 const log = (session: string, op: string): void => {
@@ -163,10 +165,15 @@ function installPane(): void {
     callback: (error: Error | null) => void
   ) => {
     const name = args[args.indexOf('-b') + 1];
+    const failure = execFailure?.(args[0]) ?? null;
     if (args[0] === 'load-buffer') {
       return {
         stdin: {
           end: (data: string) => {
+            if (failure !== null) {
+              queueMicrotask(() => callback(failure));
+              return;
+            }
             buffers.set(name, data);
             if (loadDelayMs > 0) setTimeout(() => callback(null), loadDelayMs);
             else queueMicrotask(() => callback(null));
@@ -180,6 +187,10 @@ function installPane(): void {
       buffers.delete(name);
       log(session, `paste:${text.length}:${text.slice(0, 2)}`);
       onPaste(session, text);
+      if (failure !== null) {
+        queueMicrotask(() => callback(failure));
+        return { stdin: { end: () => undefined } };
+      }
     }
     queueMicrotask(() => callback(null));
     return { stdin: { end: () => undefined } };
@@ -206,6 +217,7 @@ describe('submit-verified-sender under the instance input lock (Issue #3945)', (
     buffers.clear();
     readFailure = null;
     loadDelayMs = 0;
+    execFailure = null;
     afterRead = () => undefined;
     onPaste = (session, text) => frames.set(session, tokenFrame(text.length));
     onEnter = (session) => frames.set(session, IDLE);
@@ -821,6 +833,53 @@ describe('submit-verified-sender under the instance input lock (Issue #3945)', (
         expect(await b).toBe(error);
         expect(getCarriedPasteMark(S)).toBeNull();
       });
+    });
+  });
+
+  // Issue #4011: `load-buffer` runs before `paste-buffer`, so when it fails
+  // nothing of the body has reached the pane — no mark, and the next send is
+  // not held off. A failed `paste-buffer` may have put some of it there.
+  describe('#4011 a failed load-buffer leaves no carried mark', () => {
+    const B = body('B', 700);
+    const C = body('C', 700);
+    const tmuxFailure = (): Error =>
+      Object.assign(new Error('Command failed: tmux load-buffer -b cm-send-1-1 -'), { code: 1 });
+
+    it('load-buffer fails: nothing pasted, no mark, and the next send goes in without waiting', async () => {
+      execFailure = (sub) => (sub === 'load-buffer' ? tmuxFailure() : null);
+      const b = send({ message: B });
+      await vi.runAllTimersAsync();
+      const error = await b;
+      expect(error?.message).toMatch(/Failed to paste message into tmux session/);
+      expect(keyOps()).toEqual([]);
+      expect(getCarriedPasteMark(S)).toBeNull();
+
+      execFailure = null;
+      ops = [];
+      const startedAt = Date.now();
+      const c = send({ message: C });
+      await vi.runAllTimersAsync();
+      expect(await c).toBeNull();
+      expect(keyOps()).toEqual(['paste:700:C ', 'enter']);
+      expect(ops.find((o) => o.op !== 'read')!.t - startedAt).toBeLessThan(CARRIED_PASTE_MARK_TTL_MS);
+    });
+
+    it('negative: paste-buffer fails after the body went in: the mark is left and the next send waits it out', async () => {
+      execFailure = (sub) => (sub === 'paste-buffer' ? tmuxFailure() : null);
+      onPaste = () => undefined; // nothing drawn yet; it may still be
+      const b = send({ message: B });
+      await vi.runAllTimersAsync();
+      expect((await b)?.message).toMatch(/Failed to paste message into tmux session/);
+      const mark = getCarriedPasteMark(S);
+      expect(mark).not.toBeNull();
+
+      execFailure = null;
+      onPaste = (session, text) => frames.set(session, tokenFrame(text.length));
+      ops = [];
+      const c = send({ message: C });
+      await vi.runAllTimersAsync();
+      expect(await c).toBeNull();
+      expect(ops.find((o) => o.op !== 'read')!.t).toBeGreaterThanOrEqual(mark!.expiresAt);
     });
   });
 

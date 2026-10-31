@@ -57,6 +57,7 @@ import {
   type EnvSnapshot,
 } from './env-snapshot';
 import { ENV_CLEAN_GATE_ID, VERIFY_CONFIG_RELATIVE_PATH, type VerifyConfig } from './verify-config';
+import { readSessionKillRecords, type SessionKillRecord } from './session-kill-ledger';
 
 /** Matches `GateOutcome` in gate-runner; kept structural to avoid a cycle. */
 export interface EnvCleanOutcome {
@@ -683,6 +684,89 @@ export function readDeadDemoVitestEntries(baseline: EnvSnapshot): ReadonlySet<st
 }
 
 // =============================================================================
+// Sibling sessions stopped by someone else (Issue #3993)
+// =============================================================================
+
+/**
+ * Whether a CLI kill was asked for by someone known not to be this task's worker.
+ *
+ * Known means one of two facts the record carries:
+ *   - the caller's cwd is a sibling directory of the task's worktree — the
+ *     primary checkout the orchestrator runs from, or another worktree;
+ *   - the caller ran inside the tmux session of another worktree.
+ * Either is enough unless the other says "this task": a cwd inside the task's
+ * worktree, or the task's own session (or one of its worktree's), is the worker
+ * whatever else was recorded. A cwd that is nowhere in particular (`/tmp`,
+ * `$HOME`, `/`) with no session says nothing and is the worker — the strict
+ * answer, because only a kill *not* the worker's excuses.
+ *
+ * Only `cli` lines name a caller. The route's `browser` (judged from
+ * `Sec-Fetch-Site` alone, which a UI-driving worker sends and a header can
+ * forge) and `http` lines and the server's `server` cleanup (run after a
+ * `commandmate sync` a worker can issue) never excuse.
+ */
+function isKillByAnotherWorker(
+  record: SessionKillRecord,
+  context: EnvAttributionContext,
+  taskSession: string | null | undefined
+): boolean {
+  if (record.origin !== 'cli') return false;
+  const sessionOwner =
+    record.callerSession === null
+      ? 'unattributed'
+      : taskSession && record.callerSession === taskSession
+        ? 'self'
+        : attributeSessionName(record.callerSession, context.worktreeId);
+  const cwdOwner = attributeAnchor(record.callerCwd, context.worktreePath);
+  if (sessionOwner === 'self' || cwdOwner === 'self') return false;
+  return sessionOwner === 'other' || cwdOwner === 'other';
+}
+
+/**
+ * The recorded kill that explains a vanished `other` session, or undefined.
+ *
+ * Why this is the third line removals are excused on — the design note for
+ * #3993, which keeps #1624's rule rather than loosening it:
+ *
+ *   - #1624 is a worker killing a sibling's session. The two snapshots cannot
+ *     say who removed a session, so every same-repository removal was counted —
+ *     including the orchestrator's own cleanup (`instances <wt> kill`, the
+ *     first step of removing a worktree), which failed every parallel
+ *     verification on 2026-10-29.
+ *   - The session-kill ledger records each kill with the tmux sessions it
+ *     stopped and who asked. A removal is `external` only when a line inside
+ *     the task window names exactly that session and {@link isKillByAnotherWorker}
+ *     holds for it.
+ *   - Matched by the exact session name, never by worktree id: a worktree-wide
+ *     match let one cleanup line excuse a worker's unrecorded kill of another
+ *     instance of the same worktree hours earlier, and an id prefix
+ *     (`commandmate-skills` / `commandmate-skills-3944`) reached into another
+ *     worktree.
+ *   - Everything else stays a violation: a worker's own kill, a caller that is
+ *     nowhere in particular, the UI's and the server's kills, and any kill that
+ *     went around CommandMate (`tmux kill-session`), which records nothing.
+ */
+function findExternalKill(
+  sessionName: string,
+  kills: readonly SessionKillRecord[],
+  context: EnvAttributionContext,
+  taskSession: string | null | undefined
+): SessionKillRecord | undefined {
+  return kills.find(
+    (record) =>
+      record.sessionNames.includes(sessionName) && isKillByAnotherWorker(record, context, taskSession)
+  );
+}
+
+/** A recorded kill of exactly this session that does not excuse it, for the report. */
+function findRecordedKill(
+  sessionName: string,
+  kills: readonly SessionKillRecord[]
+): SessionKillRecord | undefined {
+  return kills.find((record) => record.sessionNames.includes(sessionName));
+}
+
+// =============================================================================
 // Diff
 // =============================================================================
 
@@ -692,6 +776,11 @@ export interface EnvChange {
   key: string;
   detail: string | null;
   owner: EnvEntryOwner;
+}
+
+/** A removal set apart as `external`, with the kill that explains it (#3993). */
+export interface ExternalRemoval extends EnvChange {
+  killedBy: SessionKillRecord;
 }
 
 export interface EnvProbeDiff {
@@ -725,6 +814,19 @@ export interface EnvProbeDiff {
    */
   removedByOtherRepository: EnvChange[];
   /**
+   * `tmux-sessions` removals of a sibling worktree's session that a recorded
+   * kill made by someone other than this task's worker explains (#3993). Listed
+   * as `external`, never dropped; empty when the tmux server itself looks killed.
+   */
+  removedExternal: ExternalRemoval[];
+  /**
+   * `tmux-sessions` removals counted in `removed` although a kill of exactly
+   * that session was recorded — by the UI, the server's cleanup, a bare HTTP
+   * request, or a caller not known to be someone else (#3993). Reported next to
+   * the violation so the record is visible; never excused.
+   */
+  removedKillNotExcused: ExternalRemoval[];
+  /**
    * `home-entries` removals of a `.commandmate-demo-vitest-<pid>` directory whose
    * pid the baseline recorded as already dead (#3043). Listed, never dropped.
    */
@@ -756,6 +858,12 @@ export interface EnvDiffOptions {
    * Injected by tests; defaults to {@link readLivePidCwd}.
    */
   resolvePidCwd?: PidCwdResolver;
+  /**
+   * Kills recorded in the session-kill ledger (#3993). Only those between the
+   * two snapshots' `capturedAt` are considered; omitted means none, which
+   * excuses nothing.
+   */
+  sessionKills?: readonly SessionKillRecord[];
 }
 
 export interface EnvCleanDiff {
@@ -789,6 +897,9 @@ export function diffEnvSnapshots(
   const deadDemoVitestEntries = readDeadDemoVitestEntries(baseline);
   const ignoredHomeEntries = new Set(options.ignoreHomeEntries ?? []);
   const resolvePidCwd = options.resolvePidCwd ?? readLivePidCwd;
+  const sessionKills = (options.sessionKills ?? []).filter(
+    (record) => record.at >= baseline.capturedAt && record.at <= final.capturedAt
+  );
   const probes: EnvProbeDiff[] = ENV_PROBE_IDS.map((probeId) => {
     const before = baseline.probes[probeId];
     const after = final.probes[probeId];
@@ -804,6 +915,8 @@ export function diffEnvSnapshots(
         removed: [],
         removedByOtherServer: [],
         removedByOtherRepository: [],
+        removedExternal: [],
+        removedKillNotExcused: [],
         removedStaleDemoVitest: [],
         ignoredByConfig: [],
         ignoredBuiltIn: [],
@@ -820,6 +933,8 @@ export function diffEnvSnapshots(
         removed: [],
         removedByOtherServer: [],
         removedByOtherRepository: [],
+        removedExternal: [],
+        removedKillNotExcused: [],
         removedStaleDemoVitest: [],
         ignoredByConfig: [],
         ignoredBuiltIn: [],
@@ -874,6 +989,8 @@ export function diffEnvSnapshots(
     const removed: EnvChange[] = [];
     const removedByOtherServer: EnvChange[] = [];
     const removedByOtherRepository: EnvChange[] = [];
+    const removedExternal: ExternalRemoval[] = [];
+    const removedKillNotExcused: ExternalRemoval[] = [];
     const removedStaleDemoVitest: EnvChange[] = [];
     for (const entry of before.entries) {
       if (afterKeys.has(entry.key)) continue;
@@ -894,6 +1011,15 @@ export function diffEnvSnapshots(
         otherRepositorySessions.has(entry.key)
       ) {
         removedByOtherRepository.push(change);
+      } else if (probeId === 'tmux-sessions' && tmuxServerSurvived && change.owner === 'other') {
+        const killedBy = findExternalKill(entry.key, sessionKills, context, taskSession);
+        if (killedBy) {
+          removedExternal.push({ ...change, killedBy });
+        } else {
+          removed.push(change);
+          const recorded = findRecordedKill(entry.key, sessionKills);
+          if (recorded) removedKillNotExcused.push({ ...change, killedBy: recorded });
+        }
       } else if (probeId === 'home-entries' && deadDemoVitestEntries.has(entry.key)) {
         removedStaleDemoVitest.push(change);
       } else {
@@ -911,6 +1037,8 @@ export function diffEnvSnapshots(
       removed,
       removedByOtherServer,
       removedByOtherRepository,
+      removedExternal,
+      removedKillNotExcused,
       removedStaleDemoVitest,
       ignoredByConfig,
       ignoredBuiltIn,
@@ -994,6 +1122,42 @@ function formatRemovedByOtherRepository(changes: EnvChange[]): string[] {
   );
 }
 
+/** Sibling sessions stopped by someone else's recorded kill (#3993), one line each. */
+function formatRemovedExternal(changes: ExternalRemoval[]): string[] {
+  return changes.map(({ key, killedBy }) =>
+    `    · - ${key} [external] (not counted: ${describeKill(killedBy)}, not this task)`
+  );
+}
+
+/** `<api> for <worktree>[ instance <id>] at <ISO> from <caller>` of one recorded kill. */
+function describeKill(killedBy: SessionKillRecord): string {
+  const target = killedBy.instanceId
+    ? `${killedBy.worktreeId} instance ${killedBy.instanceId}`
+    : killedBy.worktreeId;
+  const caller =
+    killedBy.origin === 'browser'
+      ? 'the UI'
+      : killedBy.origin === 'server'
+        ? 'the server'
+        : killedBy.origin === 'http'
+          ? 'an HTTP request with no caller'
+          : killedBy.callerSession
+            ? `${killedBy.callerCwd ?? 'an unknown cwd'} in ${killedBy.callerSession}`
+            : (killedBy.callerCwd ?? 'an unknown cwd');
+  return `${killedBy.api} for ${target} at ${new Date(killedBy.at).toISOString()} from ${caller}`;
+}
+
+/** Counted removals whose kill was recorded but does not excuse them (#3993), one line each. */
+function formatRemovedKillNotExcused(changes: ExternalRemoval[]): string[] {
+  return changes.map(({ key, killedBy }) => {
+    const why =
+      killedBy.origin === 'browser' || killedBy.origin === 'server'
+        ? `a ${killedBy.origin} kill a worker can also cause`
+        : 'the caller is not known to be someone else';
+    return `    · ${key}: kill recorded but counted (${describeKill(killedBy)}; not excused: ${why})`;
+  });
+}
+
 /** Removals excused as leftover demo-vitest directories (#3043), one line each. */
 function formatRemovedStaleDemoVitest(changes: EnvChange[]): string[] {
   return changes.map(
@@ -1050,6 +1214,7 @@ export function formatEnvCleanReport(diff: EnvCleanDiff): string {
       lines.push(...formatTaskSessionChanges(probe.taskSessionAdded));
       lines.push(...formatRemovedByOtherServer(probe.removedByOtherServer));
       lines.push(...formatRemovedByOtherRepository(probe.removedByOtherRepository));
+      lines.push(...formatRemovedExternal(probe.removedExternal));
       lines.push(...formatRemovedStaleDemoVitest(probe.removedStaleDemoVitest));
       lines.push(...formatIgnoredByConfig(probe.ignoredByConfig));
       lines.push(...formatIgnoredBuiltIn(probe.ignoredBuiltIn));
@@ -1061,9 +1226,11 @@ export function formatEnvCleanReport(diff: EnvCleanDiff): string {
     );
     lines.push(...formatChanges('+', probe.added));
     lines.push(...formatChanges('-', probe.removed));
+    lines.push(...formatRemovedKillNotExcused(probe.removedKillNotExcused));
     lines.push(...formatTaskSessionChanges(probe.taskSessionAdded));
     lines.push(...formatRemovedByOtherServer(probe.removedByOtherServer));
     lines.push(...formatRemovedByOtherRepository(probe.removedByOtherRepository));
+    lines.push(...formatRemovedExternal(probe.removedExternal));
     lines.push(...formatRemovedStaleDemoVitest(probe.removedStaleDemoVitest));
     lines.push(...formatIgnoredByConfig(probe.ignoredByConfig));
     lines.push(...formatIgnoredBuiltIn(probe.ignoredBuiltIn));
@@ -1116,6 +1283,11 @@ export interface EvaluateEnvCleanInput extends EnvAttributionContext {
   ignoreHomeEntries?: readonly string[];
   /** Injected by tests; defaults to {@link readLivePidCwd} (#2954). */
   resolvePidCwd?: PidCwdResolver;
+  /**
+   * Reads the session-kill ledger for `[since, until]` (#3993). Injected by
+   * tests; defaults to {@link readSessionKillRecords} on the machine-wide ledger.
+   */
+  readSessionKills?: (since: number, until: number) => SessionKillRecord[];
   /** Injected by tests; defaults to probing the real machine. */
   capture?: () => Promise<EnvSnapshot>;
 }
@@ -1162,9 +1334,18 @@ export async function evaluateEnvClean(input: EvaluateEnvCleanInput): Promise<En
     );
   }
 
+  const readSessionKills = input.readSessionKills ?? ((since, until) => readSessionKillRecords(since, until));
+  let sessionKills: SessionKillRecord[];
+  try {
+    sessionKills = readSessionKills(input.baseline.capturedAt, final.capturedAt);
+  } catch {
+    // An unreadable ledger excuses nothing; it is not a reason to withhold a verdict.
+    sessionKills = [];
+  }
   const diff = diffEnvSnapshots(input.baseline, final, input, {
     ignoreHomeEntries: input.ignoreHomeEntries,
     resolvePidCwd: input.resolvePidCwd,
+    sessionKills,
   });
   const header =
     `${ENV_CLEAN_GATE_ID}: baseline=${new Date(input.baseline.capturedAt).toISOString()} ` +
