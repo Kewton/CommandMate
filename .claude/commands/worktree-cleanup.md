@@ -119,13 +119,29 @@ for INST in $(commandmate instances "$WT_ID" --json 2>/dev/null | jq -r '.[].ins
   commandmate instances "$WT_ID" kill "$INST" || true
 done
 
-# 第二手段: tmuxを直接見て取りこぼしを回収する。完全一致の指定でkillする
+# 第二手段: tmuxを直接見て取りこぼしを探す。残っていれば、まず記録される経路
+# （instances <wt> kill）でインスタンス単位に止め直す。セッション名から cliTool と
+# インスタンスを逆算できる形（mcbd-<ns>-<cli>-<wt>[-<instance>]）だけが対象
 PATTERN="^mcbd-([0-9a-f]{8}-)?[a-z][a-z-]*-commandmate-issue-${ISSUE_NO}(-[0-9A-Za-z]+)?$"
 tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -E "$PATTERN" | while read -r SESSION; do
-  echo "Killing tmux session: $SESSION"
+  INST=$(echo "$SESSION" | sed -E "s/^mcbd-([0-9a-f]{8}-)?([a-z][a-z-]*)-commandmate-issue-${ISSUE_NO}(-([0-9A-Za-z]+))?$/\\4/")
+  CLI=$(echo "$SESSION" | sed -E "s/^mcbd-([0-9a-f]{8}-)?([a-z][a-z-]*)-commandmate-issue-${ISSUE_NO}(-([0-9A-Za-z]+))?$/\\2/")
+  echo "Killing tmux session via CommandMate: $SESSION"
+  commandmate instances "$WT_ID" kill "${INST:-$CLI}" < /dev/null || true
+done
+
+# 第三手段（最後の砦）: サーバー未起動・worktree未登録で、上でも止まらなかったものだけ
+# tmux を直接叩く。この停止は session-kill ledger に記録されない
+tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -E "$PATTERN" | while read -r SESSION; do
+  echo "Killing tmux session directly (not recorded): $SESSION"
   tmux kill-session -t "=${SESSION}"
 done
 ```
+
+**第三手段の注意**: `tmux kill-session` はCommandMateを通らないため、kill の記録（ledger、Issue #3993）に
+行が残らない。並行して走っている他タスクの検証（env-clean）は、消えたセッションを `[other]` の違反として
+数えて不合格になる。第三手段で止めたときは、オーケストレーターへ止めたセッション名を報告し、
+そのとき不合格になった並行検証は外部要因（片付け）として扱って再検証する。可能な限り第一手段・第二手段で止めること。
 
 ### Phase 4: Worktree削除
 

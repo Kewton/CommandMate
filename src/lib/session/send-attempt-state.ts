@@ -28,7 +28,7 @@ import { createHash } from 'crypto';
 import { getOrInitGlobal } from '@/lib/global-state';
 import { createLogger } from '@/lib/logger';
 import { SESSION_STARTING_CODE } from '@/lib/session/session-start-error';
-import { PLAN_REVIEW_SEND_REFUSED_CODE } from './send-attempt-types';
+import { PASTE_NOT_STARTED_CODE, PLAN_REVIEW_SEND_REFUSED_CODE } from './send-attempt-types';
 import type { LastSendAttempt, SendAttemptReason, SendAttemptState } from './send-attempt-types';
 
 const logger = createLogger('session/send-attempt-state');
@@ -101,6 +101,22 @@ export function getLastSendAttempt(instance: SendAttemptInstance): SendAttemptRe
   return records.get(keyOf(instance)) ?? null;
 }
 
+/**
+ * Turn the instance's last `sent` record `indeterminate` (Issue #4035): the
+ * next send found that body still in the composer, so it never reached the
+ * agent. Any other record is left as it is. Never throws.
+ */
+export function markLastSendDiscarded(instance: SendAttemptInstance, now: number = Date.now()): void {
+  try {
+    const key = keyOf(instance);
+    const record = records.get(key);
+    if (record === undefined || record.state !== 'sent') return;
+    records.set(key, { ...record, at: Math.floor(now), state: 'indeterminate', reason: 'found-in-composer' });
+  } catch (error) {
+    logger.warn('send-attempt-record-failed', { error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
 /** Forget every record (tests). */
 export function clearSendAttempts(): void {
   records.clear();
@@ -113,6 +129,25 @@ export function clearSendAttempts(): void {
  */
 const TMUX_TRANSPORT_FAILURE =
   /Command failed: tmux |Failed to send (?:special )?keys? to tmux session|Failed to send special key:|Failed to paste message into tmux session/;
+
+/** How many `cause` links {@link carriesCode} follows: a tool's wrap is one. */
+const MAX_CAUSE_DEPTH = 4;
+
+/**
+ * Whether `error`, or an error it wraps (`cause`), carries `code`
+ * (Issue #4031). The tools wrap the sender's error as
+ * `Failed to send message to <tool>: …` with it as `cause`, so a code set
+ * before the wrap is read here, not lost.
+ */
+function carriesCode(error: unknown, code: string): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth <= MAX_CAUSE_DEPTH; depth++) {
+    if (typeof current !== 'object' || current === null) return false;
+    if ((current as { code?: unknown }).code === code) return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
 
 /**
  * Where a failed `ICLITool.sendMessage` stopped, read from its error.
@@ -138,6 +173,12 @@ export function classifySendFailure(error: unknown): { state: SendAttemptState; 
   ) {
     return { state: 'not-sent', reason: 'plan-review' };
   }
+  // Issue #4031: `load-buffer` failed, so `paste-buffer` never ran — read by
+  // code through the tool's wrap, never by wording (a `paste-buffer` failure,
+  // whose body may be on the pane, shares the transport wording below).
+  if (carriesCode(error, PASTE_NOT_STARTED_CODE)) {
+    return { state: 'not-sent', reason: 'paste-not-started' };
+  }
   const message = error instanceof Error ? error.message : String(error);
   // Issue #3880: the "after the body was typed" wordings are matched FIRST. A
   // body-not-landed error quotes what the composer shows — the user's own text —
@@ -150,6 +191,11 @@ export function classifySendFailure(error: unknown): { state: SendAttemptState; 
   // #1501: the input line was cleared best-effort.
   if (/replaced by a TUI autocompletion/.test(message)) {
     return { state: 'indeterminate', reason: 'replaced-by-completion' };
+  }
+  // #4035: Enter sent, the composer did not show the body, and the agent did
+  // not report the session's first prompt.
+  if (/did not report the prompt within \d+ms \(Issue #4035\)/.test(message)) {
+    return { state: 'indeterminate', reason: 'prompt-unreported' };
   }
   // #1471: typed, Enter sent (more than once), never confirmed.
   if (/submit could not be confirmed/i.test(message)) {

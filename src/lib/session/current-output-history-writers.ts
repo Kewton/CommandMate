@@ -221,11 +221,16 @@ export function recordStructuredPrompt(
     worktreeId: string;
     cliToolId: CLIToolType;
     instanceId: string;
+    /**
+     * The instance the `respond` in the row's text names (Issue #4031): the
+     * one the payload was asked for, undefined for the primary.
+     */
+    respondInstanceId?: string;
     state: StructuredPromptWaitingState;
     facts: StructuredPromptFacts;
   },
 ): void {
-  const record = buildStructuredPromptHistoryRecord(params.worktreeId, params.facts);
+  const record = buildStructuredPromptHistoryRecord(params.worktreeId, params.facts, params.respondInstanceId);
 
   try {
     const message = createMessage(db, {

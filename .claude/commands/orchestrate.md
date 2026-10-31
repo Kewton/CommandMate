@@ -762,6 +762,7 @@ stdin で読む形に戻さないこと。ループを使わずに 1 件ずつ�
 **モデルの確認結果の扱い**（launch-worker.mjs が stderr に出す。手順は docs/orchestrate/workers.md#3-1-claude-のモデルを契約に固定する）:
 
 - `model ok`: そのまま 3-2 へ
+- 起動のメッセージが exit 99 でも、launch-worker.mjs は画面の model を読み、読めれば契約へ進む（`send-init-*.err` に記録）。読めなければ下の UNKNOWN と同じ扱い
 - `model UNKNOWN` / `model MISMATCH`（1 回目）: launch-worker.mjs が自分で 1 回だけ起動し直す（契約はまだ送っていない）
 - exit 40（2 回目も `model MISMATCH`）/ 41（2 回目も `model UNKNOWN`）: **セッションは止まっている。契約は送られていない。その Issue は進めない**（そのモデルのまま続けない）。
   8-3 に書き、`.claude/settings.local.json` と CommandMate の版を確かめてから、人の判断で送り直す。利用者の `~/.claude/settings.json` は変えない
@@ -1022,7 +1023,7 @@ orchestrate の道具の置き場所は #3477 で `scripts/orchestrate/`（`lint
 - **担当:** Codex（暫定。優位が実証されたとは扱わない）。Claude を足すのは、重大な変更・ワーカーが「未確認」と書いた所・判断が割れた所（隔離・所有・security に限らない）
 - **再レビュー:** 自動は 3 回まで。3 回目の後に重大な指摘が残ったら、**止めて人の判断へ**（別の Issue に送ってマージしない）
 - **進め方と記録:** 対象の PR でレビューするときは docs/orchestrate/trials.md#5-2b-整合性レビューの進め方と記録 を読み、その手順（Codex のセッション・数え方・記録の様式・再指示の書き方・前回の指摘の確かめ方）で行う
-- **呼び出し:** `node scripts/orchestrate/consistency-review.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" --issue <N> --head <sha> --brief <file>`（再レビューは `--rereview --previous <前回の review-<N>.md>` を足す。状態ファイルがある run は `--routes`、docs/orchestrate/plan-check.md#2-4-4-事前レビューと-5-2b-に渡す一覧）。ロック・ready 待ち・送信・`review-<N>.*` の保存・記録の `review` 段までを 1 回で行う。終了コード: 0=`DONE:` 行あり（`review=ok`）/ 1=失敗（`review=fail`）/ 2=引数の誤り（何も送らず記録もしない）
+- **呼び出し:** `node scripts/orchestrate/consistency-review.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" --issue <N> --head <sha> --brief <file>`（再レビューは `--rereview --previous <前回の review-<N>.md>` を足す。状態ファイルがある run は `--routes`、docs/orchestrate/plan-check.md#2-4-4-事前レビューと-5-2b-に渡す一覧）。ロック・ready 待ち・送信・`review-<N>.*` の保存・記録の `review` 段までを 1 回で行う。終了コードは、0 は `review=ok` のときだけ。`DONE:` 行があっても 1 になる条件と残るファイルは docs/orchestrate/trials.md#5-2b-終了コードと記録の条件表 の表
 
 **2026-10-20 の集計の手順。** 期限の日に docs/orchestrate/trials.md#5-2b-2026-10-20-の集計の手順 を読む。
 

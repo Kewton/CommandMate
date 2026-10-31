@@ -18,7 +18,7 @@
  */
 
 import type { PromptMessageResponse } from '../types/api-responses';
-import type { ApiClient } from './api-client';
+import { rethrowIfDeadlineExceeded, type ApiClient } from './api-client';
 
 /**
  * Chat rows read back per request.
@@ -316,7 +316,9 @@ export async function fetchPromptRowsSince(
       if (!(oldest >= since) || (before !== null && !(oldest < before))) return found;
       before = oldest;
     }
-  } catch {
+  } catch (error) {
+    // Issue #3983: a deadline is the caller's to handle, not "unreadable".
+    rethrowIfDeadlineExceeded(error);
     return null;
   }
 }
@@ -357,7 +359,9 @@ export async function fetchRecentMessages(
 ): Promise<PromptMessageResponse[] | null> {
   try {
     return await requestRecentMessages(client, worktreeId, instanceId);
-  } catch {
+  } catch (error) {
+    // Issue #3983: a deadline is the caller's to handle, not "unreadable".
+    rethrowIfDeadlineExceeded(error);
     return null;
   }
 }

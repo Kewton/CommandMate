@@ -48,10 +48,6 @@ vi.mock('@/lib/tmux/tmux', () => ({
   reconcileSessionGeometry: vi.fn().mockResolvedValue(false),
 }));
 
-vi.mock('@/lib/pasted-text-helper', () => ({
-  detectAndResendIfPastedText: vi.fn().mockResolvedValue(undefined),
-}));
-
 vi.mock('@/lib/tmux/tmux-capture-cache', () => ({
   invalidateCache: vi.fn(),
 }));

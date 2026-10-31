@@ -168,13 +168,6 @@ export const OPENCODE_V2_EXIT_WAIT_MS = 3000;
 export const OPENCODE_V2_COMPOSER_WAIT_MS = 15000;
 
 /**
- * Wait (ms) for the `unset CLAUDECODE` command to reach the shell while
- * sanitizing the session environment (empirically determined).
- * Site: session-key-sender sanitizeSessionEnvironment().
- */
-export const CLAUDE_ENV_SANITIZE_WAIT_MS = 100;
-
-/**
  * Wait (ms) between the two liveness readings that must agree before a reuse
  * path re-sends a launch command (Issue #2070).
  *

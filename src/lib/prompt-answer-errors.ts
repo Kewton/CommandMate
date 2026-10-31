@@ -1,7 +1,11 @@
 /**
  * The refusals and failures `prompt-answer-sender` throws, with the reason
  * codes they carry (Issue #3965: moved out of `prompt-answer-sender`, which
- * re-exports every name here, so callers keep importing from it).
+ * re-exports every error and reason code here, so callers keep importing from it).
+ *
+ * Issue #3982: also how each of them is answered over HTTP
+ * ({@link promptAnswerErrorResponse}), in one table both answering routes read.
+ * That mapping is imported from this module directly.
  *
  * Type-only imports: this module must not import the sender back.
  */
@@ -356,6 +360,13 @@ export class PromptAnswerInputLostError extends Error {
 }
 
 /**
+ * The reason code of {@link PromptAnswerAbortedError} on the wire (Issue #3982).
+ * Neither answering route passes a `stillCurrent`, so neither is expected to
+ * see one; it has a code so that the mapping below has no hole.
+ */
+export const ANSWER_ABORTED_REASON = 'answer_aborted';
+
+/**
  * The caller's `stillCurrent` said no after one of the send's waits
  * (Issue #3706): the keys not yet sent were not sent. Keys already typed cannot
  * be taken back, so {@link keysSent} says whether the pane was touched; either
@@ -369,4 +380,98 @@ export class PromptAnswerAbortedError extends Error {
     super(`Prompt answer stopped by its caller (${keysSent ? 'some keys were sent' : 'no key was sent'})`);
     this.name = 'PromptAnswerAbortedError';
   }
+}
+
+/** The two routes that type a person's answer at the pane (Issue #3982). */
+export type PromptAnswerRoute = 'prompt-response' | 'respond';
+
+/** What a thrown answer error says about itself on the wire (Issue #3982). */
+export interface PromptAnswerErrorFacts {
+  reason: string;
+  /** Whether any key of the answer reached the pane before the error. */
+  keysSent: boolean;
+}
+
+/** One row of {@link PROMPT_ANSWER_ERROR_RESPONSES}. */
+export interface PromptAnswerErrorMapping {
+  facts: (error: Error) => PromptAnswerErrorFacts;
+  /**
+   * The HTTP status per route. `/prompt-response` answers a refusal as 200
+   * `success: false` (#2033); `/respond` answered the same errors as 500 or 409
+   * before the table existed, and those stay as they were.
+   */
+  status: Readonly<Record<PromptAnswerRoute, number>>;
+}
+
+type ErrorClass<E extends Error> = new (...args: never[]) => E;
+
+function row<E extends Error>(
+  errorClass: ErrorClass<E>,
+  facts: (error: E) => PromptAnswerErrorFacts,
+  status: Record<PromptAnswerRoute, number>,
+): readonly [ErrorClass<Error>, PromptAnswerErrorMapping] {
+  return [errorClass, { facts: facts as (error: Error) => PromptAnswerErrorFacts, status }];
+}
+
+/**
+ * Every error class this module exports, and how each route answers it
+ * (Issue #3982).
+ *
+ * Before this table each route had its own `instanceof` chain, and an error
+ * added to one was missing from the other: `/prompt-response` answered
+ * {@link PromptAnswerInputLostError} as a bare 500 with neither `reason` nor
+ * `keysSent`, so a caller could only find the reason by reading the message —
+ * which is also where a quoted answer lands. A unit test enumerates this
+ * module's exported classes and fails when one has no row here.
+ *
+ * `keysSent` is stated here for the refusals that never touch the pane rather
+ * than put on those errors: Auto-Yes reads `keysSent` off a thrown error to
+ * count its attempt, and that count is not this table's to change.
+ */
+export const PROMPT_ANSWER_ERROR_RESPONSES: ReadonlyMap<ErrorClass<Error>, PromptAnswerErrorMapping> = new Map([
+  row(PromptAnswerRejectedError, (e) => ({ reason: e.reason, keysSent: false }), { 'prompt-response': 200, respond: 500 }),
+  row(FreeTextAnswerRejectedError, (e) => ({ reason: e.reason, keysSent: false }), { 'prompt-response': 200, respond: 500 }),
+  row(FreeTextAtChoiceOnlyPromptError, (e) => ({ reason: e.reason, keysSent: false }), { 'prompt-response': 200, respond: 500 }),
+  row(MultiSelectAnswerRejectedError, (e) => ({ reason: e.reason, keysSent: e.keysSent }), { 'prompt-response': 200, respond: 500 }),
+  row(PromptAnswerNotDeliveredError, (e) => ({ reason: e.reason, keysSent: e.keysSent }), { 'prompt-response': 200, respond: 409 }),
+  // Keys reached the pane: a failure, not a refusal, on both routes (#3952 review P2).
+  row(PromptAnswerInputLostError, (e) => ({ reason: e.reason, keysSent: e.keysSent }), { 'prompt-response': 500, respond: 500 }),
+  row(PromptAnswerAbortedError, (e) => ({ reason: ANSWER_ABORTED_REASON, keysSent: e.keysSent }), { 'prompt-response': 500, respond: 500 }),
+]);
+
+/** The mapping row for an error, or null when it is not one of this module's. */
+function mappingOf(error: unknown): PromptAnswerErrorMapping | null {
+  if (!(error instanceof Error)) return null;
+  for (const [errorClass, mapping] of PROMPT_ANSWER_ERROR_RESPONSES) {
+    if (error instanceof errorClass) return mapping;
+  }
+  return null;
+}
+
+/**
+ * How `route` answers an error `sendPromptAnswer` threw (Issue #3982), or null
+ * for an error this module does not define (the route keeps its own 500).
+ *
+ * The body always carries `reason` and `keysSent`. Its other keys are the ones
+ * each status already had: `success: false` + `message` for a 200 refusal (the
+ * route adds `answer`), `error` for a 409, and `error` prefixed
+ * `Failed to send answer to tmux:` for a 500. That 500's `error` still quotes
+ * the message, so a CLI older than this table reads it as before.
+ */
+export function promptAnswerErrorResponse(
+  error: unknown,
+  route: PromptAnswerRoute,
+): { status: number; body: Record<string, unknown> } | null {
+  const mapping = mappingOf(error);
+  if (mapping === null) return null;
+  const err = error as Error;
+  const { reason, keysSent } = mapping.facts(err);
+  const status = mapping.status[route];
+  if (status === 200) {
+    return { status, body: { success: false, reason, message: err.message, keysSent } };
+  }
+  if (status >= 500) {
+    return { status, body: { error: `Failed to send answer to tmux: ${err.message}`, reason, keysSent } };
+  }
+  return { status, body: { error: err.message, reason, keysSent } };
 }

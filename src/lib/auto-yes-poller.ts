@@ -9,7 +9,11 @@
  * Dependencies: auto-yes-state.ts (composite keys / state), polling/* (prompt
  * detection, resolver, policy, dialog gate, session epoch, poller state,
  * decision record), cli-tools/*, session/cli-session.ts, tmux/*, detection/*,
- * db/*, tasks/*.
+ * db/*, tasks/*. Split out of this file (Issue #3893): auto-yes-poller-tick.ts
+ * (tick reading / no-prompt bookkeeping / decision recorder),
+ * auto-yes-poller-answer-target.ts (answer target), auto-yes-poller-session-presence.ts
+ * (whether a failed capture's session is gone) and auto-yes-poller-keys.ts
+ * (which composite keys have a poller entry).
  *
  * Issue #3821: this poller (with the hook / API adjudication) is what answers
  * automatically. The browser no longer answers, and the Enter sent to a choice

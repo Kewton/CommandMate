@@ -1005,7 +1005,9 @@ describe('claude-session - Issue #265 improvements', () => {
   });
 
   // ----- Bug 3: CLAUDECODE environment variable removal -----
-  describe('Bug 3: sanitizeSessionEnvironment() (CLAUDECODE removal)', () => {
+  // `sanitizeSessionEnvironment` was removed by #4032: `startClaudeSession`
+  // drops CLAUDECODE itself (since #3981), which is what these pin.
+  describe('Bug 3: startClaudeSession drops CLAUDECODE before the launch', () => {
     beforeEach(() => {
       vi.mocked(hasSession).mockResolvedValue(false);
       vi.mocked(createSession).mockResolvedValue();

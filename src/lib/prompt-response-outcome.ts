@@ -34,11 +34,20 @@ export type PromptResponseOutcome = 'answered' | 'refused' | 'failed';
  */
 const DECISION_NOT_FOUND = 'decision_not_found';
 
+/**
+ * The `reason` of an answer stopped part-way (Issue #3975 / #3982): both
+ * routes answer it as a 500 with `keysSent: true`. Restated from
+ * `prompt-answer-errors` (`ANSWER_INPUT_LOST_REASON`), which this client
+ * module does not import; a unit test keeps the two equal.
+ */
+export const ANSWER_INPUT_LOST_REASON = 'answer_input_lost';
+
 /** The fields of a reply body this module reads. */
 interface PromptResponseReplyBody {
   success?: unknown;
   code?: unknown;
   reason?: unknown;
+  keysSent?: unknown;
 }
 
 /**
@@ -49,6 +58,14 @@ interface PromptResponseReplyBody {
 export interface PromptResponseReply {
   outcome: PromptResponseOutcome;
   body: Record<string, unknown>;
+  /**
+   * Issue #4031: a `failed` answer that was stopped part-way — the reply says
+   * `reason: answer_input_lost` and `keysSent: true` — so some of its keys may
+   * be on the pane. Answering again blindly could type them twice; the user is
+   * told to look first ({@link PROMPT_RESPONSE_PARTIAL_NOTICE}). False for
+   * every other reply.
+   */
+  partial: boolean;
 }
 
 /**
@@ -67,10 +84,12 @@ export async function readPromptResponseReply(response: Response): Promise<Promp
   const fields: PromptResponseReplyBody = body;
 
   if (response.ok) {
-    return { outcome: fields.success === false ? 'refused' : 'answered', body };
+    return { outcome: fields.success === false ? 'refused' : 'answered', body, partial: false };
   }
   const names = fields.code === DECISION_NOT_FOUND || fields.reason === DECISION_NOT_FOUND;
-  return { outcome: response.status === 404 && names ? 'refused' : 'failed', body };
+  if (response.status === 404 && names) return { outcome: 'refused', body, partial: false };
+  const partial = fields.reason === ANSWER_INPUT_LOST_REASON && fields.keysSent === true;
+  return { outcome: 'failed', body, partial };
 }
 
 /** Read a prompt-response / respond reply and say what became of the answer. */
@@ -89,3 +108,25 @@ export const PROMPT_RESPONSE_NOTICES = {
   Exclude<PromptResponseOutcome, 'answered'>,
   { messageKey: string; type: ToastType }
 >;
+
+/**
+ * What to tell the user about an answer stopped part-way (Issue #4031): some
+ * keys may have reached the pane, so look at the screen before answering
+ * again. A `failed` reply that is not {@link PromptResponseReply.partial}
+ * keeps {@link PROMPT_RESPONSE_NOTICES}' `failed`.
+ */
+export const PROMPT_RESPONSE_PARTIAL_NOTICE = {
+  messageKey: 'promptResponse.partial',
+  type: 'warning',
+} as const satisfies { messageKey: string; type: ToastType };
+
+/**
+ * The notice for an answer that was not taken (Issue #4031): the partial one
+ * for a `failed` reply stopped part-way, else the outcome's own.
+ */
+export function promptResponseNotice(
+  outcome: Exclude<PromptResponseOutcome, 'answered'>,
+  partial: boolean,
+): { messageKey: string; type: ToastType } {
+  return outcome === 'failed' && partial ? PROMPT_RESPONSE_PARTIAL_NOTICE : PROMPT_RESPONSE_NOTICES[outcome];
+}

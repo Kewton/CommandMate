@@ -871,7 +871,7 @@ export function detectMultipleChoicePrompt(
   // keeps the wide window; deny patterns are judged against this one.
   const approvalBlock = extractApprovalTarget(lines, questionEndIndex, effectiveEnd, pickerTop);
 
-  // Issue #616: Determine submitMode from confirmation footer (detected in single-pass above)
+  // Issue #616: Determine submitMode from confirmation footer (detected in single-pass by findConfirmationFooter())
   const submitMode: SubmitMode | undefined = hasConfirmationFooter
     ? (hasNumberFooter ? 'answer_only' : 'answer_then_enter')
     : undefined;
@@ -946,7 +946,7 @@ function hasModelOverlayFooter(scanWindow: string[]): boolean {
   // [Issue #1495] Claude `/model` local-settings overlay guard.
   // The `/model` overlay renders a ❯-marked numbered model list ("1. Default …
   // 5. Haiku") under a "Select model" header, which the option-collection logic
-  // below would otherwise return as a genuine multiple_choice prompt. Auto-Yes
+  // (collectOptions()) would otherwise return as a genuine multiple_choice prompt. Auto-Yes
   // (detectAndRespondToPrompt) calls detectPrompt() directly and would resolve +
   // Enter-confirm the default option — silently changing the user's default model.
   // The overlay-unique "Enter to set as default …" footer never appears in real
@@ -1121,10 +1121,11 @@ function isMetadataRow(state: OptionScanState, rawLine: string, line: string, pa
   // would then poison isValidPrecedingOption() and cause every real option
   // above (1./2./3.) to be rejected — resulting in collectedOptions.length<2
   // and a spurious no_prompt verdict. Treat the summary line as metadata
-  // (same continuation handling as COLLAPSED_OUTPUT_PATTERN above) so the
+  // (same continuation handling as the COLLAPSED_OUTPUT_PATTERN check earlier
+  // in isMetadataRow()) so the
   // reverse scan continues into the actual option block.
   //
-  // Defense-in-depth: works alongside the S2 effectiveEnd trim above. Either
+  // Defense-in-depth: works alongside the S2 effectiveEnd trim in findScanWindow(). Either
   // S1 or S2 alone is sufficient to fix Issue #704; keeping both protects
   // against future Claude renderings where the footer line text changes
   // (S1 still catches) or the summary line wording changes (S2 still

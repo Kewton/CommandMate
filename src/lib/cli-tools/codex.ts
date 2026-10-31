@@ -301,12 +301,14 @@ export class CodexTool extends BaseCLITool {
       // as the new one's.
       const relaunchIntoSamePane = async (): Promise<void> => {
         beginAgentSession({ worktreeId, cliToolId: CODEX_CLI_TOOL_ID, instanceId });
-        await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
+        // Issue #3981: one writer's turn, as the first launch line below.
+        await this.typeLaunchLines(sessionName, [withLaunchScreenCleared(launchCommand)]);
         await new Promise((resolve) => setTimeout(resolve, CODEX_INIT_WAIT_MS));
       };
 
-      // Start Codex CLI in interactive mode
-      await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
+      // Start Codex CLI in interactive mode. Issue #3981: in one writer's turn
+      // of the input lock (joined when this launch runs inside a send's).
+      await this.typeLaunchLines(sessionName, [withLaunchScreenCleared(launchCommand)]);
 
       // Wait for Codex to initialize
       await new Promise((resolve) => setTimeout(resolve, CODEX_INIT_WAIT_MS));
@@ -907,7 +909,8 @@ export class CodexTool extends BaseCLITool {
       logger.info('sent-message-to-codex-session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
-      throw new Error(`Failed to send message to Codex: ${errorMessage}`);
+      // Issue #4031: the cause keeps a failed `load-buffer`'s code (`classifySendFailure`).
+      throw new Error(`Failed to send message to Codex: ${errorMessage}`, { cause: error });
     }
   }
 

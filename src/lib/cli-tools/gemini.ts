@@ -36,7 +36,6 @@ import { beginLaunchWindow, endLaunchWindow, recordLaunchDialogPress } from './l
 import {
   answerUnderInstanceInputLock,
   instanceInputLaunchReadMark,
-  withInstanceInputLock,
 } from '@/lib/session/instance-input-lock';
 
 const logger = createLogger('cli-tools/gemini');
@@ -144,9 +143,8 @@ export class GeminiTool extends BaseCLITool {
         // already in the pane is not run as part of it. Only the keys: the
         // waits below stay outside the lock, where a send waiting for the
         // prompt cannot be held behind them.
-        await withInstanceInputLock(sessionName, () =>
-          sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true)
-        );
+        // Issue #3981: through the one launch-key writer every tool shares.
+        await this.typeLaunchLines(sessionName, [withLaunchScreenCleared(launchCommand)]);
 
         // Wait for Gemini to initialize (minimum wait for banner/auth)
         await new Promise((resolve) => setTimeout(resolve, GEMINI_INIT_WAIT_MS));
@@ -252,6 +250,9 @@ export class GeminiTool extends BaseCLITool {
   /**
    * Wait for Gemini prompt before sending a message.
    * Used by sendMessage to ensure Gemini is ready to accept input.
+   *
+   * @throws Error (`Gemini prompt not ready`) when the prompt did not appear
+   *   within {@link GEMINI_PROMPT_WAIT_TIMEOUT_MS}; nothing was typed
    */
   private async waitForPrompt(sessionName: string): Promise<void> {
     const startTime = Date.now();
@@ -269,7 +270,12 @@ export class GeminiTool extends BaseCLITool {
       }
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
     }
+    // Issue #3981: give up without typing, as codex does. Sending anyway put the
+    // body into whatever held the pane (a dialog, a slow start, a shell).
     logger.info('gemini-prompt-not-detected');
+    throw new Error(
+      'Gemini prompt not ready: timed out waiting for the input prompt before sending'
+    );
   }
 
   /**
@@ -307,7 +313,8 @@ export class GeminiTool extends BaseCLITool {
       logger.info('sent-message-to-gemini-session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
-      throw new Error(`Failed to send message to Gemini: ${errorMessage}`);
+      // Issue #4031: the cause keeps a failed `load-buffer`'s code (`classifySendFailure`).
+      throw new Error(`Failed to send message to Gemini: ${errorMessage}`, { cause: error });
     }
   }
 

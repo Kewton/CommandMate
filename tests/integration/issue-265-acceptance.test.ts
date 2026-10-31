@@ -23,11 +23,6 @@ vi.mock('@/lib/tmux/tmux', () => ({
   reconcileSessionGeometry: vi.fn().mockResolvedValue(false),
 }));
 
-// Mock pasted-text-helper
-vi.mock('@/lib/pasted-text-helper', () => ({
-  detectAndResendIfPastedText: vi.fn().mockResolvedValue(undefined),
-}));
-
 // Mock fs/promises.
 // `constants` is required: getClaudePath() reads `constants.X_OK`, and without it
 // the read throws inside the try block that guards the CLAUDE_PATH branch. The
@@ -334,31 +329,31 @@ describe('Issue #265 Acceptance Test: CLI path cache invalidation and broken ses
   // 既存のセッション開始フローに大きな遅延を加えない
   // ============================================================
   describe('AC-4: Performance - no significant delay added to session creation', () => {
-    it('should add only ~100ms overhead for sanitizeSessionEnvironment', async () => {
-      // The sanitizeSessionEnvironment function:
-      // 1. tmux set-environment -g -u CLAUDECODE (async, near-instant)
-      // 2. sendKeys 'unset CLAUDECODE' (async, near-instant)
-      // 3. 100ms wait for shell to process
-      // Total overhead: ~100ms, well under the 250ms budget
-
+    it('adds no pause between `unset CLAUDECODE` and the launch line (the old 100 ms sanitize wait is gone)', async () => {
+      // Issue #4032: `sanitizeSessionEnvironment` and its 100 ms wait were
+      // removed; since #3981 `startClaudeSession` types `unset CLAUDECODE` and
+      // the launch line in one turn of the input lock, back to back.
       vi.mocked(hasSession).mockResolvedValue(false);
       vi.mocked(createSession).mockResolvedValue();
-      vi.mocked(sendKeys).mockResolvedValue();
+      const typedAt: Array<[string, number]> = [];
+      vi.mocked(sendKeys).mockImplementation(async (_session, keys) => {
+        typedAt.push([String(keys), Date.now()]);
+      });
+      vi.mocked(capturePane).mockResolvedValue('> '); // Prompt available immediately
 
-      vi.mocked(capturePane).mockImplementation(async () => {
-        return '> '; // Prompt available immediately
+      let settled = false;
+      const promise = startClaudeSession(TEST_SESSION_OPTIONS).then(() => {
+        settled = true;
       });
 
-      const promise = startClaudeSession(TEST_SESSION_OPTIONS);
-
-      // Advance exactly: 100ms (sanitize) + 1 poll interval + stability delay
-      await vi.advanceTimersByTimeAsync(100 + CLAUDE_INIT_POLL_INTERVAL + CLAUDE_POST_PROMPT_DELAY);
+      // One poll interval and the stability delay, as before #265: no extra wait.
+      await vi.advanceTimersByTimeAsync(CLAUDE_INIT_POLL_INTERVAL + CLAUDE_POST_PROMPT_DELAY);
+      expect(settled).toBe(true);
       await promise;
 
-      // The 100ms is the only additional delay from Issue #265
-      // CLAUDE_INIT_POLL_INTERVAL and CLAUDE_POST_PROMPT_DELAY were pre-existing
-      // Total additional overhead: 100ms (sanitize wait) << 250ms budget
-      expect(true).toBe(true); // Test passes = overhead is within budget
+      const unset = typedAt.findIndex(([keys]) => keys === 'unset CLAUDECODE');
+      expect(unset).toBeGreaterThanOrEqual(0);
+      expect(typedAt[unset + 1]?.[1]).toBe(typedAt[unset][1]);
     });
 
     it('should reuse a healthy session after non-blocking geometry reconciliation', async () => {
@@ -367,7 +362,7 @@ describe('Issue #265 Acceptance Test: CLI path cache invalidation and broken ses
 
       await startClaudeSession(TEST_SESSION_OPTIONS);
 
-      // No createSession, no sanitizeSessionEnvironment
+      // No createSession, no `unset CLAUDECODE`
       expect(createSession).not.toHaveBeenCalled();
       expect(sendKeys).not.toHaveBeenCalled();
       expect(reconcileSessionGeometry).toHaveBeenCalledWith(TEST_SESSION_NAME);

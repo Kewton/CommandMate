@@ -10,6 +10,7 @@
  * Issue #3182: disables Auto-Yes for the killed instances
  * Issue #3179: clears the "starting" record of the killed instances
  * Issue #1905: kills through `ICLITool.killSession`, not `lib/tmux` directly
+ * Issue #3993: records each successful kill in the session-kill ledger
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -28,6 +29,10 @@ import { clearSessionStarting } from '@/lib/session/session-starting-state';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
+import {
+  appendSessionKillRecord,
+  SESSION_KILL_LEDGER_VERSION,
+} from '@/lib/verification/session-kill-ledger';
 
 const logger = createLogger('api/kill-session');
 
@@ -229,6 +234,23 @@ export async function POST(
         { status: 500 }
       );
     }
+
+    // Issue #3993: record exactly which sessions this request stopped. A
+    // same-origin browser request is marked as the UI, anything else (the CLI's
+    // POST, curl) as `http`. Neither names a caller, so env-clean never excuses
+    // a removal on this line — it only shows that a kill was recorded; the CLI
+    // writes its own line with its cwd and tmux session. Best effort: never throws.
+    appendSessionKillRecord({
+      version: SESSION_KILL_LEDGER_VERSION,
+      at: Date.now(),
+      api: 'kill-session',
+      origin: request.headers.get('sec-fetch-site') === 'same-origin' ? 'browser' : 'http',
+      worktreeId: id,
+      instanceId: instanceParam || null,
+      sessionNames: [...killedSessions],
+      callerCwd: null,
+      callerSession: null,
+    });
 
     // Archive messages based on scope (Issue #168: logical archive, archived=1).
     if (instanceParam) {

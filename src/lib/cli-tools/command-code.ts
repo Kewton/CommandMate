@@ -279,17 +279,14 @@ export class CommandCodeTool extends BaseCLITool {
         await this.createLaunchPane(sessionName, worktreePath);
       }
 
-      await sendKeys(
-        sessionName,
-        withLaunchScreenCleared(
-          buildCommandCodeLaunchCommand({
-            target: { worktreeId, cliToolId: COMMAND_CODE_CLI_TOOL_ID, instanceId },
-            executablePath: this.command,
-            worktreePath,
-          })
-        ),
-        true
-      );
+      // Issue #3981: in one writer's turn of the input lock; the readiness
+      // wait below stays outside it.
+      const launchCommand = buildCommandCodeLaunchCommand({
+        target: { worktreeId, cliToolId: COMMAND_CODE_CLI_TOOL_ID, instanceId },
+        executablePath: this.command,
+        worktreePath,
+      });
+      await this.typeLaunchLines(sessionName, [withLaunchScreenCleared(launchCommand)]);
 
       await new Promise((resolve) => setTimeout(resolve, COMMAND_CODE_INIT_WAIT_MS));
 
@@ -423,7 +420,8 @@ export class CommandCodeTool extends BaseCLITool {
     } catch (error: unknown) {
       // Issue #3006: passed through unwrapped so its `code` reaches the route.
       if (isSessionStartTimeoutError(error)) throw error;
-      const wrapped = new Error(`Failed to send message to Command Code: ${getErrorMessage(error)}`);
+      // Issue #4031: the cause keeps a failed `load-buffer`'s code (`classifySendFailure`).
+      const wrapped = new Error(`Failed to send message to Command Code: ${getErrorMessage(error)}`, { cause: error });
       // Issue #3772: the plan review refusal comes before the body; keep its code.
       if ((error as { code?: unknown } | null)?.code === PLAN_REVIEW_SEND_REFUSED_CODE) {
         throw Object.assign(wrapped, { code: PLAN_REVIEW_SEND_REFUSED_CODE });

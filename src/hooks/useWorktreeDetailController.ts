@@ -50,8 +50,8 @@ import { useAutoYes } from '@/hooks/useAutoYes';
 import type { AutoYesDecisionPublished } from '@/types/auto-yes-decision';
 import { buildPromptResponseBody } from '@/lib/prompt-response-body-builder';
 import {
-  PROMPT_RESPONSE_NOTICES,
-  readPromptResponseOutcome,
+  promptResponseNotice,
+  readPromptResponseReply,
   type PromptResponseOutcome,
 } from '@/lib/prompt-response-outcome';
 import { isTrustConfirmationFrame, readSelectionListShape } from '@/lib/detection/selection-shape';
@@ -518,6 +518,15 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // never evicts persisted aliases against that incomplete roster.
   const [rosterWorktreeId, setRosterWorktreeId] = useState<string | null>(null);
   const rosterReady = rosterWorktreeId === worktreeId;
+  // Issue #4034: the worktree whose detail request has failed
+  // STALE_BANNER_FAILURE_THRESHOLD times in a row. While its roster is still
+  // missing, the seed is all there is to show, so the active instance reads as
+  // the seed's first (see the reconcile effect) instead of staying on an id the
+  // screen does not display.
+  const [rosterFailedWorktreeId, setRosterFailedWorktreeId] = useState<string | null>(null);
+  const rosterFetchFailing = rosterFailedWorktreeId === worktreeId;
+  // True while `activeInstanceId` is that fallback and not the saved value.
+  const rosterFallbackActiveRef = useRef(false);
   // Issue #368: Vibe-local Ollama model state (initialized from API)
   const [vibeLocalModel, setVibeLocalModel] = useState<string | null>(null);
   // Issue #374: Vibe-local context window state (initialized from API)
@@ -728,6 +737,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       detailRetryAttemptRef.current = 0;
       cancelDetailRetry();
       setIsReconnecting(false);
+      setRosterFailedWorktreeId(null);
       // Update ref for next comparison
       prevWorktreeIdRef.current = worktreeId;
     }
@@ -816,6 +826,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       // value) on the overwhelmingly common already-healthy tick.
       detailFailureCountRef.current = 0;
       detailRetryAttemptRef.current = 0;
+      setRosterFailedWorktreeId(null);
       cancelDetailRetry();
       setIsReconnecting(false);
       setIsAuthExpired(false);
@@ -825,6 +836,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       const message = err instanceof Error ? err.message : 'Unknown error';
       const status = err instanceof ApiError ? err.status : 0;
       detailFailureCountRef.current += 1;
+      if (detailFailureCountRef.current >= STALE_BANNER_FAILURE_THRESHOLD) {
+        setRosterFailedWorktreeId(worktreeId);
+      }
 
       // Issue #2498: session expiry is a re-login, not a retryable error.
       // Branch first so the raw parse message never reaches the screen.
@@ -1172,12 +1186,47 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // mirrors the instance's CLI tool into activeCliTab, so cliTool-keyed concerns
   // (auto-yes, status, kill, message/output fetch) follow the active instance on
   // both PC and mobile.
+  // Issue #4013: waits for THIS worktree's roster (`rosterReady`). Before that
+  // the roster is the default seed, so a saved non-first instance (claude-cc)
+  // would look gone and the fallback would overwrite the saved value too.
+  // Issue #4034: when the detail request keeps failing, the roster never lands
+  // and the seed is what is displayed. A saved id that the seed does not show
+  // then falls back to the seed's first — in state only (`setActiveInstanceIdRaw`),
+  // so the saved value survives, and the roster's arrival puts it back.
   useEffect(() => {
     if (displayedInstances.length === 0) return;
+    if (!rosterReady) {
+      if (
+        rosterFetchFailing &&
+        !displayedInstances.some(inst => inst.id === activeInstanceId)
+      ) {
+        rosterFallbackActiveRef.current = true;
+        setActiveInstanceIdRaw(displayedInstances[0].id);
+      }
+      return;
+    }
+    if (rosterFallbackActiveRef.current) {
+      rosterFallbackActiveRef.current = false;
+      let saved: string | null = null;
+      try {
+        saved = window.localStorage.getItem(ACTIVE_INSTANCE_STORAGE_KEY_PREFIX + worktreeId);
+      } catch { /* localStorage unavailable */ }
+      if (saved && displayedInstances.some(inst => inst.id === saved)) {
+        setActiveInstanceId(saved);
+        return;
+      }
+      // The saved id is not in the roster either: correct it as #4013 does,
+      // saved value included (the fallback id is displayed, so the check
+      // below would leave the stale one in storage).
+      if (saved) {
+        setActiveInstanceId(displayedInstances[0].id);
+        return;
+      }
+    }
     if (!displayedInstances.some(inst => inst.id === activeInstanceId)) {
       setActiveInstanceId(displayedInstances[0].id);
     }
-  }, [displayedInstances, activeInstanceId, setActiveInstanceId]);
+  }, [rosterReady, rosterFetchFailing, displayedInstances, activeInstanceId, setActiveInstanceId, worktreeId]);
 
   // Idempotent mirror: keep activeCliTab in sync with the active instance's CLI
   // tool even when activeInstanceId itself is unchanged (e.g. localStorage
@@ -1186,7 +1235,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   useEffect(() => {
     const inst = displayedInstances.find(i => i.id === activeInstanceId);
     if (inst && inst.cliTool !== activeCliTab) {
-      setActiveCliTab(inst.cliTool);
+      // Issue #4034: during the roster-failure fallback the instance is a
+      // stand-in, so its tool is shown without overwriting the saved tab.
+      if (rosterFallbackActiveRef.current) setActiveCliTabRaw(inst.cliTool);
+      else setActiveCliTab(inst.cliTool);
     }
   }, [displayedInstances, activeInstanceId, activeCliTab, setActiveCliTab]);
 
@@ -1453,6 +1505,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     async (answer: string): Promise<void> => {
       actions.setPromptAnswering(true);
       let outcome: PromptResponseOutcome;
+      // Issue #4031: a failure stopped part-way (keys may be on the pane).
+      let partial = false;
       try {
         // Issue #287: Use shared builder to include promptType and defaultOptionNumber
         // so the API can use cursor-key navigation even when promptCheck re-verification fails.
@@ -1479,7 +1533,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(requestBody),
         });
-        outcome = await readPromptResponseOutcome(response);
+        ({ outcome, partial } = await readPromptResponseReply(response));
       } catch (err) {
         // The request got no reply at all.
         console.error('[WorktreeDetailRefactored] Error sending prompt response:', err);
@@ -1493,7 +1547,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         if (outcome === 'answered') {
           actions.clearPrompt();
         } else {
-          const notice = PROMPT_RESPONSE_NOTICES[outcome];
+          const notice = promptResponseNotice(outcome, partial);
           showToast(tWorktree(notice.messageKey), notice.type);
         }
         // Immediately fetch current output to update terminal without waiting for polling

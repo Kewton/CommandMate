@@ -437,7 +437,9 @@ export class OpenCodeTool extends BaseCLITool {
       }
 
       const launchedAt = Date.now();
-      await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
+      // Issue #3981: in one writer's turn of the input lock; the readiness
+      // wait below stays outside it.
+      await this.typeLaunchLines(sessionName, [withLaunchScreenCleared(launchCommand)]);
 
       // Issue #1908: poll for opencode's own composer instead of sleeping 15 s.
       await this.waitForReady(sessionName);
@@ -816,7 +818,8 @@ export class OpenCodeTool extends BaseCLITool {
       logger.info('sent-message-to-opencode-session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
-      throw new Error(`Failed to send message to OpenCode: ${errorMessage}`);
+      // Issue #4031: the cause keeps a failed `load-buffer`'s code (`classifySendFailure`).
+      throw new Error(`Failed to send message to OpenCode: ${errorMessage}`, { cause: error });
     }
   }
 

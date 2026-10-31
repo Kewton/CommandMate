@@ -22,14 +22,10 @@ import {
 import { sendMessageWithSubmitVerification } from './cli-tools/submit-verified-sender';
 import { invalidateCache } from './tmux/tmux-capture-cache';
 import { getErrorMessage } from './errors';
-import { CLAUDE_ENV_SANITIZE_WAIT_MS, TUI_EXIT_WAIT_MS } from '@/config/cli-tool-timing-config';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { TUI_EXIT_WAIT_MS } from '@/config/cli-tool-timing-config';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('session-key-sender');
-
-const execAsync = promisify(exec);
 
 /**
  * Capture tmux pane output and strip ANSI escape sequences
@@ -51,32 +47,6 @@ async function getCleanPaneOutput(sessionName: string, lines: number = 50): Prom
  * Prompt wait polling interval (milliseconds)
  */
 const PROMPT_POLL_INTERVAL = 200;
-
-// =============================================================================
-// Environment Sanitization
-// =============================================================================
-
-/**
- * Remove CLAUDECODE environment variable from tmux session environment
- * Prevents Claude Code from detecting nested session and refusing to start
- * (SF-002: SRP - environment sanitization separated from session creation)
- *
- * MF-S3-002: tmux set-environment -g -u operates on the global tmux environment.
- *
- * SEC-SF-001: sessionName is validated by the caller chain:
- * ClaudeTool.startSession() -> BaseCLITool.getSessionName() -> validateSessionName()
- *
- * @param sessionName - tmux session name
- */
-export async function sanitizeSessionEnvironment(sessionName: string): Promise<void> {
-  // 3-1: Remove from tmux global environment
-  await execAsync('tmux set-environment -g -u CLAUDECODE 2>/dev/null || true');
-
-  // 3-2: Unset inside the session shell (safety net)
-  // 100ms wait: empirically determined time for sendKeys command to reach the shell
-  await sendKeys(sessionName, 'unset CLAUDECODE', true);
-  await new Promise(resolve => setTimeout(resolve, CLAUDE_ENV_SANITIZE_WAIT_MS));
-}
 
 // =============================================================================
 // Prompt Wait

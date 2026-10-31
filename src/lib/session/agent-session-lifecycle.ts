@@ -46,6 +46,7 @@ import { archiveSupersededSessionMessages } from '@/lib/session/session-generati
 import { markSessionStarting } from '@/lib/session/session-starting-state';
 import { beginEnterFallbackSession } from '@/lib/polling/auto-yes-enter-fallback-state';
 import { invalidateInstanceInput } from '@/lib/session/instance-input-lock';
+import { notePromptSubmitSession } from '@/lib/session/prompt-submit-receipt';
 import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import { createLogger } from '@/lib/logger';
 
@@ -103,7 +104,11 @@ export function beginAgentSession(target: AgentInstanceRef, at: number = Date.no
   // `invalidateInstanceInput`). In memory only; a name that does not resolve
   // has no lock to expire.
   try {
-    invalidateInstanceInput(resolveSessionName(target.cliToolId, target.worktreeId, target.instanceId));
+    const sessionName = resolveSessionName(target.cliToolId, target.worktreeId, target.instanceId);
+    invalidateInstanceInput(sessionName);
+    // Issue #4035: the new process's first prompt is confirmed by its own
+    // `UserPromptSubmit`, which is looked up by this session name.
+    notePromptSubmitSession(sessionName, target, at);
   } catch (error) {
     logger.warn('instance-input-invalidate-failed', {
       worktreeId: target.worktreeId,

@@ -1138,6 +1138,7 @@
   "promptResponse": {
     "refused": "Your answer was not sent because the dialog has changed. Please check the screen.",
     "failed": "Could not send the answer. Please try again.",
+    "partial": "The answer stopped part-way: some of its keys may have reached the agent. Check the screen before answering again.",
     "stuckHint": "If sending does not work, operate the terminal in direct input mode.",
     "stuckHintLink": "Switch to direct input",
     "unanswerable": "CommandMate cannot operate this screen. Use direct input mode instead.",
@@ -1169,6 +1170,7 @@
       "nothingToSubmit": "There is no comment to submit. Add a comment first.",
       "invalidRequest": "That action does not fit this screen. Nothing was sent.",
       "notActive": "Nothing was sent: no plan review is on screen.",
+      "inputLost": "Stopped part-way: some keys may have reached the agent. Check the screen before trying again.",
       "generic": "Could not send."
     },
     "composerNotice": "The plan is waiting for your review — approve, cancel or comment.",

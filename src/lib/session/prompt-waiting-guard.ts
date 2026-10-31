@@ -172,17 +172,25 @@ export async function isPromptWaiting(
  * That is precisely the state where a guard turns into an outage, so the message
  * has to name the way past it and how long it lasts if they do nothing.
  *
+ * Issue #4031: the commands it names carry ` --instance <id>` when the refused
+ * request named an instance, so the answer goes to the instance that is
+ * waiting. A request for the primary instance (no `instanceId`) gets the
+ * sentence as before.
+ *
  * @param blockedBy - Which layer refused; omitted callers get the plain message
+ * @param instanceId - The instance the refused request named, if any
  */
 export function promptWaitingMessage(
   worktreeId: string,
   blockedBy?: PromptWaitingLayer,
+  instanceId?: string,
 ): string {
+  const target = instanceId ? ` --instance ${instanceId}` : '';
   const base =
     `${worktreeId} is waiting on a prompt. Sending now would type into the ` +
     `prompt's input line instead of reaching the agent, and would leave that ` +
     `text in place for the next answer. Answer the prompt first: ` +
-    `\`commandmate respond ${worktreeId} <answer>\`.`;
+    `\`commandmate respond ${worktreeId} <answer>${target}\`.`;
 
   if (blockedBy !== 'structured') return base;
 
@@ -192,7 +200,7 @@ export function promptWaitingMessage(
     `visible to the terminal scraper, so if the pane looks idle the record has ` +
     `outlived its dialog: it stops blocking sends ${ttlMinutes} minutes after ` +
     `it was reported, or immediately with ` +
-    `\`commandmate send ${worktreeId} <message> --ignore-structured-prompt\` ` +
+    `\`commandmate send ${worktreeId} <message>${target} --ignore-structured-prompt\` ` +
     `(server-wide: ${STRUCTURED_SEND_GUARD_ENV}=off).`
   );
 }

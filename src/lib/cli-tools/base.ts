@@ -50,6 +50,8 @@ import {
   issueSessionStartingToken,
   runWithSessionStartingToken,
 } from '../session/session-starting-state';
+import { runSessionLaunch, settleSessionLaunch } from '../session/session-launch-flight';
+import { typeLaunchLines, type LaunchKeyStep } from './launch-keys';
 
 const execAsync = promisify(exec);
 
@@ -279,6 +281,31 @@ export abstract class BaseCLITool implements ICLITool {
    * @throws Whatever {@link launchSession} threw — unchanged, after reporting
    */
   async startSession(
+    worktreeId: string,
+    worktreePath: string,
+    instanceId?: string,
+    model?: string
+  ): Promise<void> {
+    // Issue #3981: one launch per session (`session-launch-flight`). A second
+    // request joins the launch in progress instead of starting its own — whose
+    // reuse branch would kill the first one's half-launched pane — and a caller
+    // that holds the input lock is refused rather than made to wait (R1). A
+    // name that does not validate is left to `launchSession` to refuse, and
+    // reported as before. A start that asks for a model the launch in
+    // progress is not starting with is refused instead of joining it (#2771).
+    let sessionName: string | null = null;
+    try {
+      sessionName = this.getSessionName(worktreeId, instanceId);
+    } catch {
+      // fall through: launchSession throws on it, inside the reporting below
+    }
+    const launch = (): Promise<void> => this.startSessionOnce(worktreeId, worktreePath, instanceId, model);
+    if (sessionName === null) return launch();
+    return runSessionLaunch(sessionName, this.name, launch, { cliToolId: this.id, model });
+  }
+
+  /** {@link startSession}'s body: one launch, its failure reported once. */
+  private async startSessionOnce(
     worktreeId: string,
     worktreePath: string,
     instanceId?: string,
@@ -707,6 +734,11 @@ export abstract class BaseCLITool implements ICLITool {
     options: { relaunch: boolean }
   ): Promise<void> {
     const sessionName = this.getSessionName(worktreeId, instanceId);
+    // Issue #3981: a pane another request is still launching reads as
+    // "exists, tool not live" and would be relaunched or typed into. Wait for
+    // that launch first — or, holding the input lock (claude and codex send
+    // under it), refuse with nothing typed (R1).
+    await settleSessionLaunch(sessionName, this.name);
     const exists = await hasSession(sessionName);
     if (!exists) {
       throw new Error(
@@ -785,6 +817,18 @@ export abstract class BaseCLITool implements ICLITool {
       log.logger.warn(log.relaunchAction, { sessionName });
     }
     return { sessionName, exists, live: false };
+  }
+
+  /**
+   * Type a launch's keys — its launch line, and anything that has to go in
+   * before it — in one `exclusive` turn of the instance input lock (Issue
+   * #3981, `./launch-keys`). The waits after the keys stay outside the lock.
+   *
+   * @param sessionName - tmux session name
+   * @param steps - Lines typed with Enter, or steps that type their own keys
+   */
+  protected async typeLaunchLines(sessionName: string, steps: readonly LaunchKeyStep[]): Promise<void> {
+    await typeLaunchLines(sessionName, steps);
   }
 
   /**

@@ -9,6 +9,9 @@
  * - Inherited — `sendMessage` under `sendUserMessage`'s lock — it joins that
  *   lock: no wait, no second read.
  *
+ * Site on the pane-key-writers ledger this runs (#4032): `sendCodexHooksScreenKey`,
+ * the keys `answerCodexHooksScreen` types under the lock.
+ *
  * @vitest-environment node
  */
 

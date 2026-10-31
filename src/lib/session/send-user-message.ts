@@ -345,7 +345,7 @@ export async function sendUserMessage(
     return {
       ok: false,
       stage: 'prompt_waiting',
-      error: promptWaitingMessage(worktreeId, promptGuard.blockedBy),
+      error: promptWaitingMessage(worktreeId, promptGuard.blockedBy, instanceId),
     };
   }
 
@@ -378,7 +378,7 @@ export async function sendUserMessage(
       const code = (error as { code?: unknown } | null)?.code;
       if (code === INPUT_RECHECK_PROMPT_WAITING_CODE) {
         settle('not-sent', 'prompt-waiting');
-        return { ok: false, stage: 'prompt_waiting', error: promptWaitingMessage(worktreeId) };
+        return { ok: false, stage: 'prompt_waiting', error: promptWaitingMessage(worktreeId, undefined, instanceId) };
       }
       settle('not-sent', code === INPUT_RECHECK_FAILED_CODE ? 'recheck-failed' : 'model-switch-failed');
       return { ok: false, stage: 'model', error: getErrorMessage(error) };
@@ -497,7 +497,10 @@ export async function sendUserMessage(
       }
       // Issue #3759: not-sent only when the error says the body was never typed.
       let failure = classifySendFailure(error);
-      if (failure.reason === 'submit-unconfirmed' && (await composerStillHolds(worktreeId, cliToolId, instanceId, content))) {
+      if (
+        (failure.reason === 'submit-unconfirmed' || failure.reason === 'prompt-unreported') &&
+        (await composerStillHolds(worktreeId, cliToolId, instanceId, content))
+      ) {
         failure = { state: 'indeterminate', reason: 'composer-residue' };
       }
       return { error, failure };
@@ -556,7 +559,7 @@ export async function sendUserMessage(
     // Issue #3945: a dialog found by the re-check under the lock is the prompt
     // guard's refusal, found late — answered as that refusal (relay holds it).
     if (failure.reason === 'prompt-waiting') {
-      return { ok: false, stage: 'prompt_waiting', error: promptWaitingMessage(worktreeId) };
+      return { ok: false, stage: 'prompt_waiting', error: promptWaitingMessage(worktreeId, undefined, instanceId) };
     }
     if (isSessionStartTimeoutError(error)) {
       return { ok: false, stage: 'send', error: error.message, code: SESSION_STARTING_CODE };

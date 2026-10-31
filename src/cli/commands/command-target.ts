@@ -35,6 +35,19 @@ export async function resolveCommandTarget(
       ? await resolveInstanceTarget(client, worktreeId, selector, requestedAgent)
       : await resolveInstanceTarget(client, worktreeId, selector, requestedAgent, mode)
     : null;
+  return commandTargetOf(target, requestedAgent);
+}
+
+/**
+ * The {@link CommandTarget} for a target resolved some other way (Issue #3982:
+ * `attach` and `wait` resolve their own), by the same rule as above.
+ *
+ * @param target - The resolved instance, or null when no selector was given
+ */
+export function commandTargetOf(
+  target: ResolvedInstanceTarget | null,
+  requestedAgent: string | undefined
+): CommandTarget {
   const agent = target ? target.cliToolId : requestedAgent;
   const instanceId = target?.instanceId;
   return { target, agent, instanceId };

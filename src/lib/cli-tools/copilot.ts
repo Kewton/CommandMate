@@ -460,8 +460,9 @@ export class CopilotTool extends BaseCLITool {
       // leaves it (`cli-tools/launch-window`).
       beginLaunchWindow(sessionName);
       try {
-        // Start Copilot CLI in interactive mode
-        await sendKeys(sessionName, withLaunchScreenCleared(launchCommand), true);
+        // Start Copilot CLI in interactive mode. Issue #3981: in one writer's
+        // turn of the input lock; the readiness wait below stays outside it.
+        await this.typeLaunchLines(sessionName, [withLaunchScreenCleared(launchCommand)]);
 
         // Issue #1907: no blind sleep before this. The 4-second one that used to
         // sit here was a guess at how long copilot takes to paint (measured on
@@ -843,7 +844,8 @@ export class CopilotTool extends BaseCLITool {
       logger.info('sent-message-to-copilot-session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
-      throw new Error(`Failed to send message to Copilot: ${errorMessage}`);
+      // Issue #4031: the cause keeps a failed `load-buffer`'s code (`classifySendFailure`).
+      throw new Error(`Failed to send message to Copilot: ${errorMessage}`, { cause: error });
     }
   }
 

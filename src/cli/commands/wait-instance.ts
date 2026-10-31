@@ -5,8 +5,9 @@
 
 import { getErrorMessage } from '../types';
 import type { WaitOptions } from '../types';
-import type { ApiClient } from '../utils/api-client';
+import { rethrowIfDeadlineExceeded, type ApiClient } from '../utils/api-client';
 import { resolveInstanceTarget } from './instances';
+import { commandTargetOf, type CommandTarget } from './command-target';
 
 /**
  * `options` with `--instance` resolved from a selector to an instance ID
@@ -31,6 +32,9 @@ export async function resolveWaitInstance<T extends WaitOptions>(
     const target = await resolveInstanceTarget(client, worktreeId, options.instance, undefined);
     return { ...options, instance: target.instanceId ?? options.instance };
   } catch (error) {
+    // Issue #3983: `--timeout` ran out while resolving. Exit 124 rather than
+    // degrade: carrying on with the selector would wait past the deadline.
+    rethrowIfDeadlineExceeded(error);
     // Degrade to the pre-#2376 behaviour rather than failing the wait. An
     // instance ID needs no resolution to reach `/current-output?instance=` —
     // resolution exists here so that an ALIAS can — so a resolver that cannot
@@ -43,4 +47,17 @@ export async function resolveWaitInstance<T extends WaitOptions>(
     );
     return options;
   }
+}
+
+/**
+ * The target `wait`'s hints name (Issue #3982): the `--instance` that
+ * {@link resolveWaitInstance} resolved, or none. `wait` has no `--agent`.
+ *
+ * @param options - Options already passed through {@link resolveWaitInstance}
+ */
+export function waitCommandTarget(options: Pick<WaitOptions, 'instance'>): CommandTarget {
+  return commandTargetOf(
+    options.instance ? { cliToolId: undefined, instanceId: options.instance } : null,
+    undefined,
+  );
 }

@@ -36,7 +36,7 @@ hook のインスタンス取り違え）。`scripts/agent-health/run.ts` は、
 |---|---|---|
 | `no-definition` | 検査の定義が無い | 選択画面の定義が無いツールの `screen-picker`。opencode の `hook-correlation`（イベントは hook ではなく自前の HTTP から読み、その経路の検査が無い） |
 | `not-shown` | このツールは、その画面を出さない | 承認ダイアログを出さないツール（opencode・opencode-v2）の `screen-approval` |
-| `signed-out` | サインインできない | gemini（下記）。起動したツールのモデル（provider）が `Error: Unauthorized` を返し、ターンが応答なしで終わったときの `screen-running`・`screen-quoted-dialog`・`hook-correlation`（下記「モデルの認可エラー」） |
+| `signed-out` | サインインできない | gemini（下記）。起動したツールのモデル（provider）が認可エラー（ツールごとの行。下記「モデルの認可エラー」の表）を返し、ターンが応答なしで終わったときの `screen-running`・`screen-quoted-dialog`・`screen-approval`・`hook-correlation` |
 | `unsupported` | ツールが未対応 | vibe-local・copilot の `version` 以外（下記） |
 | `timeout` | 時間切れ | 全体の時間上限に達して実行しなかったツール |
 | `usage-limit` | 利用上限に達している | 起動したツールの画面に利用上限の表示が出ていたときの `screen-*`・`hook-correlation`（下記「ツールの利用上限」） |
@@ -44,20 +44,34 @@ hook のインスタンス取り違え）。`scripts/agent-health/run.ts` は、
 | `not-selected` | 今回の実行の対象外 | 表だけ。`--tools` / `--only` で外したもの |
 | `not-recorded` | 結果が記録されなかった | 表だけ。選んだのに結果が無いもの（スクリプトの異常） |
 
-### モデルの認可エラー（Issue #3420）
+### モデルの認可エラー（Issue #3420・#3994）
 
-モデル（provider）が資格情報を拒んでターンが応答なしで終わると、実行中の画面も返答も `session.execution.succeeded` も無く、
-検出の不具合と見分けがつかない（2026-10-08、opencode-v2 の `Mistral Large 4`・Ollama Cloud）。資格情報は利用者のもので、
+モデル（provider）が資格情報を拒んでターンが応答なしで終わると、実行中の画面も返答も `session.execution.succeeded`・`stop` も無く、
+検出の不具合と見分けがつかない（2026-10-08、opencode-v2 の `Mistral Large 4`・Ollama Cloud。2026-10-29、command-code 1.84.0）。資格情報は利用者のもので、
 コードでは直らない。そこで次の条件をすべて満たすときだけ、fail を `signed-out` の skip にする
 （`src/lib/agent-health/model-auth.ts`。判定していればの summary は `skipReason` に、画面の末尾は `evidence` に残す）。
 
+認可エラーの行はツールごとの定義（`scripts/agent-health/tool-table.ts` の `modelAuthFailureRows`）で、各行は 1 行まるごとに一致させる
+（依頼の `┃` / `❯` の枠の中に引用された文字は数えない）。
+
+| ツール | 認可エラーの行 |
+|---|---|
+| opencode・opencode-v2 | `Error: Unauthorized` だけの行 |
+| command-code | `⚠ Error: Authentication failed. …` の行、および `⚠ … 401 … Invalid 'Authorization' …`（taste learning の呼び出し）の行の 2 行 |
+
+定義の無いツール（claude・codex・antigravity など）は対象外で、認可エラーを理由に `signed-out` にはしない（以前は全ツールに opencode の行を当てていた）。
+それらの fail はそのまま fail になる。
+
 - 期待どおりなら pass のまま（skip にするのは fail になる判定だけ）
-- 判定した画面に、依頼を送る前の画面より多く `Error: Unauthorized` だけの行がある（依頼の `┃` 枠の中の文字は数えない）
-- `hook-correlation`（SSE）は、さらに未着が `session.execution.succeeded` だけで、`session.execution.failed` が届いている
+- 判定した画面に、依頼を送る前の画面より多くそのツールの認可エラーの行がある
+- `screen-running`・`screen-quoted-dialog` に加えて、`screen-approval`（承認ダイアログが出なかったとき）も対象。承認ダイアログを出すツールだけが fail にし得る
+- hooks のツールの `hook-correlation` は、さらに未着が `stop` だけで、`session_start` は届き、キーの食い違いが無い
+  （`session_start` が無いときは hook 自体の不具合かもしれないので fail のまま。画面の条件は認可エラーが出たターンのものを使う）
+- opencode-v2 の `hook-correlation`（SSE）は、さらに未着が `session.execution.succeeded` だけで、`session.execution.failed` が届いている
   （running のターンを送ったときはそのターンの間に。画面の条件もそのターンで見る）
 
 #3021 の「No models loaded」は probe 自身の状態の隔離が原因で、probe 側で直したため、従来どおり fail にする。
-skip が続くときは、利用者がそのツールのモデルの資格情報（2026-10-08 の opencode-v2 は Ollama Cloud）を直す。
+skip が続くときは、利用者がそのツールのモデルの資格情報（2026-10-08 の opencode-v2 は Ollama Cloud、2026-10-29 の command-code は API キー）を直す。
 
 ### ツールの利用上限（Issue #3729）
 
