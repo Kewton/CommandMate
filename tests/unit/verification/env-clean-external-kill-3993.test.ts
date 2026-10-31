@@ -426,3 +426,63 @@ describe('session-kill ledger (#3993)', () => {
     expect(result.entries.map((e) => e.key)).toEqual(['something-new']);
   });
 });
+
+describe('ledger line validation and origin gate (#4033)', () => {
+  const roots: string[] = [];
+  afterEach(() => {
+    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  });
+
+  function writeLines(lines: unknown[]): string {
+    const base = mkdtempSync(join(tmpdir(), 'cm-session-kill-ledger-4033-'));
+    roots.push(base);
+    const root = join(base, SESSION_KILL_LEDGER_DIR_NAME);
+    appendSessionKillRecord(kill(), root);
+    const file = join(root, `${new Date(kill().at).toISOString().slice(0, 10)}.jsonl`);
+    writeFileSync(file, `${readFileSync(file, 'utf8')}${lines.map((l) => JSON.stringify(l)).join('\n')}\n`);
+    return root;
+  }
+
+  it('skips lines whose sessionNames is missing or not an array of strings (positive)', () => {
+    const withoutNames: Record<string, unknown> = { ...kill() };
+    delete withoutNames.sessionNames;
+    const root = writeLines([
+      withoutNames,
+      { ...kill(), sessionNames: 'x' },
+      { ...kill(), sessionNames: [1] },
+      { ...kill(), sessionNames: null },
+    ]);
+    expect(readSessionKillRecords(STARTED, VERIFIED, root)).toEqual([kill()]);
+  });
+
+  it('still reads a line with an empty or multi-name sessionNames (negative)', () => {
+    const empty = kill({ sessionNames: [] });
+    const many = kill({ sessionNames: [SIBLING_SESSION, SIBLING_CODEX] });
+    const root = writeLines([empty, many]);
+    expect(readSessionKillRecords(STARTED, VERIFIED, root)).toEqual([kill(), empty, many]);
+  });
+
+  // A route line never names a caller today; the gate must not depend on that.
+  it.each(['browser', 'server', 'http'] as const)(
+    'a %s line that names a sibling caller still does not excuse the removal (positive)',
+    (origin) => {
+      const { diff, tmux: probe } = tmuxDiff([
+        kill({ origin, callerCwd: ORCHESTRATOR_CWD, callerSession: null }),
+      ]);
+      expect(diff.status).toBe('violated');
+      expect(probe.removedExternal).toEqual([]);
+      expect(probe.removed.map((c) => c.key)).toEqual([SIBLING_SESSION]);
+    }
+  );
+
+  it('the same caller on a cli line is excused (negative)', () => {
+    const { diff, tmux: probe } = tmuxDiff([kill({ origin: 'cli', callerCwd: ORCHESTRATOR_CWD, callerSession: null })]);
+    expect(diff.status).toBe('clean');
+    expect(probe.removedExternal.map((c) => c.key)).toEqual([SIBLING_SESSION]);
+  });
+
+  it('a cwd that is a sibling directory but no worktree is excused, as the docs now say', () => {
+    const { diff } = tmuxDiff([kill({ callerCwd: '/Users/dev/work/scratch-xyz', callerSession: null })]);
+    expect(diff.status).toBe('clean');
+  });
+});

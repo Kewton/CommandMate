@@ -2046,9 +2046,9 @@ kill-session API (the UI's stop button) and the cleanup of worktrees that sync o
 
 The env-clean verification gate sets a vanished sibling session apart as `external` instead of failing on it
 only when a CLI line names exactly that session and its caller is known not to be the worker: its cwd is a
-sibling directory of the task's worktree (the primary checkout or another worktree), or it ran inside another
+sibling directory of the task's worktree (the primary checkout, another worktree or any other directory next to it; it need not be a worktree), or it ran inside another
 worktree's tmux session, and neither is the task's. Still a failure (Issue #3993, #1624): a worker stopping its
-neighbour itself; a caller outside tmux in a directory that is no worktree (`/tmp`, `$HOME`); the UI's stop
+neighbour itself; a caller outside tmux in a directory that is not next to the worktree (`/tmp`, `$HOME`); the UI's stop
 button, the server's cleanup (`commandmate sync`, repository removal) and bare API calls such as curl — a
 worker can cause each of these, so the report only notes `· mcbd-…: kill recorded but counted (…)`; another
 instance of the same worktree the line does not name; and any kill that bypassed CommandMate

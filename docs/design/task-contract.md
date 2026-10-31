@@ -693,7 +693,7 @@ session-kill ledger の行で判定する。
 | **別サーバー**の名前空間の tmux セッション（#2627） | `otherServerSessions` | そのサーバー自身のライフサイクルで閉じる。名前空間（#2866）が「どのサーバーか」の設計上の目印 |
 | **同じサーバー**の、**別リポジトリ**の worktree の tmux セッション（#3043） | `otherRepositorySessions` | 同じサーバーで並行する別リポジトリの orchestrate が自分のワーカーを片付けただけで落ちていた（2026-09-29 / 09-30）。#1624 の事故は**同じリポジトリの兄弟**だったので、線をリポジトリに引く。同じリポジトリの兄弟の消失は従来どおり違反 |
 | `.commandmate-demo-vitest-<pid>` のうち、**採取時点で pid が既に死んでいた**もの（#3043） | `deadDemoVitestEntries` | #3479 より古いチェックアウトの `env-scripts.test.ts` が、死んだ pid の残骸を（$HOME で）設計どおり掃除する（#3025）。並行するどの worktree の unit ゲートでも走る。#3479 からは作業場所も掃除も OS の一時ディレクトリで、$HOME には作らず掃除もしない。採取時点で pid が生きていたものの消失は従来どおり違反（ワーカーが並行テストの作業場所を消した可能性） |
-| 同じリポジトリの兄弟の tmux セッションのうち、**ワーカー以外と分かる呼び出し元が CommandMate の CLI で止めた**もの（#3993） | （ベースラインではなく ledger: `~/.commandmate/session-kills/<UTC 日付>.jsonl`、`EnvProbeDiff.removedExternal`） | オーケストレーターが別 worktree を `instances <wt> kill` で片付けると、並行するすべての検証が `[other]` の消失で落ちていた（2026-10-29、run 2401〜2404）。免除は「ワーカーでないと言える」最小に絞る（下の条件）
+| 同じリポジトリの兄弟の tmux セッションのうち、**ワーカー以外と分かる呼び出し元が CommandMate の CLI で止めた**もの（#3993） | （ベースラインではなく ledger: `~/.commandmate/session-kills/<UTC 日付>.jsonl`、`EnvProbeDiff.removedExternal`） | オーケストレーターが別 worktree を `instances <wt> kill` で片付けると、並行するすべての検証が `[other]` の消失で落ちていた（2026-10-29、run 2401〜2404）。免除は「ワーカーでないと言える」最小に絞る（下の条件） |
 
 リポジトリの判定: セッション名 `mcbd-<ns>-<cli>-<rest>` の `<ns>` がこのサーバーのもので、
 `<rest>` のハイフン区切りの各接頭辞（worktree id とインスタンス接尾辞は名前だけでは分けられない）を
@@ -718,11 +718,11 @@ kill-session API（`origin: browser` か `http`）、`session-cleanup.ts` の片
 | 行が計測窓の中にある | 窓の外の kill はこのタスクの検証と関係が無い |
 | 行の `sessionNames`（route が実際に止めたセッション名）が、消えたセッション名と**完全一致** | worktree 単位で当てると、片付けの 1 行が同じ worktree の別インスタンスへのワーカーの記録なしの kill まで免除した。worktree id の接頭辞で当てると `commandmate-skills` の記録が `commandmate-skills-3944` に届いた |
 | `origin: cli` | `browser` は `Sec-Fetch-Site` だけで判定しており、UI を操作するワーカー（UAT 系）も送り、ヘッダは手で付けられる。`server` の片付けはワーカーが `commandmate sync` で起こせる。`http` は呼び出し元を名乗らない。どれも記録は残し、違反の行の下に `· <名前>: kill recorded but counted (…; not excused: …)` と出すが免除しない |
-| 呼び出し元がワーカー以外と**分かる**: cwd がタスクの worktree の兄弟ディレクトリ（`attributeAnchor` が `other`＝主チェックアウトか別の worktree）か、tmux セッションが別の worktree のもの（`attributeSessionName` が `other`） | オーケストレーターの正規の形（主チェックアウトから、または別 worktree のセッションの中から）は免除のまま。`/tmp`・`$HOME`・親ディレクトリなど、どの worktree でもない cwd は何も言っていないので免除しない |
+| 呼び出し元がワーカー以外と**分かる**: cwd がタスクの worktree の兄弟ディレクトリ（`attributeAnchor` が `other`＝主チェックアウト・別の worktree など、worktree に限らない兄弟ディレクトリ）か、tmux セッションが別の worktree のもの（`attributeSessionName` が `other`） | オーケストレーターの正規の形（主チェックアウトから、または別 worktree のセッションの中から）は免除のまま。`/tmp`・`$HOME`・親ディレクトリなど、タスクの worktree の兄弟でもない cwd は何も言っていないので免除しない |
 | 呼び出し元の cwd も tmux セッションもタスクのものではない | どちらかがタスク（cwd がタスクの worktree の中、タスクのセッションかその worktree のセッション）なら、もう一方が何であってもワーカー |
 
 CLI の kill は CLI の行と route の `http` 行の 2 行になるが、免除できるのは CLI の行だけなので判定は変わらない。
-残る緩み: ワーカーが隣の worktree へ `cd` し、tmux の外から `instances <隣> kill` を実行した場合は
+残る緩み: ワーカーが隣のディレクトリ（worktree に限らない）へ `cd` し、tmux の外から `instances <隣> kill` を実行した場合は
 記録だけでは区別できず免除される。ledger は `$HOME` 配下でワーカーも書けるため、意図的な偽装は防がない
 （防ぐのは事故の形）。`tmux kill-session` など CommandMate を通らない停止は何も記録しないので違反のまま。
 
