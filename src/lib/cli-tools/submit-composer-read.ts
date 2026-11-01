@@ -555,9 +555,11 @@ export function readSubmitComposer(
  *      pre-#1501 permissive default, so normal sends never spuriously fail) —
  *      except in a codex composer above the read window -> indeterminate
  *      (Issue #3906).
- *   B and F do not hold for opencode's box with an overlay drawn over it (its
- *   bottom border cut in two) -> indeterminate (`B-obscured` / `F-obscured`,
- *   review of #4067): what the box holds under the overlay is not seen.
+ *   None of B–F holds for opencode's box with an overlay drawn over it (its
+ *   bottom border cut in two) -> indeterminate (`B-obscured` when nothing is
+ *   seen, `F-obscured` for any text — the body, a token or a `/…` included;
+ *   review of #4067): what the box holds under the overlay is not seen, and an
+ *   Enter or a clear would go to the overlay.
  *
  * C–F are scoped to the composer only, so the user-message echo that a TUI
  * prints into its history above the prompt never causes a false verdict.
@@ -647,6 +649,13 @@ export function classifySubmitWithRule(
     return { state: 'submitted', rule: composer.kind === 'absent' ? 'B-absent' : 'B-empty' };
   }
 
+  //    Text in opencode's box under an overlay (review of #4067): the reading
+  //    runs to the border's far end, the overlay's text included, so none of
+  //    C–F is read from it. C/D would resend Enter and E clear the line — keys
+  //    that would go to the palette or picker on top, not to the box ->
+  //    indeterminate (no Enter, no clear; read again).
+  if (composer.obscured) return { state: 'indeterminate', rule: 'F-obscured' };
+
   // C. A paste placeholder is still folded into the composer => body is there.
   if (composer.rows.some((row) => PASTE_PLACEHOLDER_PATTERN.test(row) || findPasteTokens(row).tokens.length > 0)) {
     return { state: 'pending', rule: 'C' };
@@ -669,9 +678,6 @@ export function classifySubmitWithRule(
   //    composer above the window (Issue #3906): before #3906 that frame was
   //    read as no composer at all; text there that is not the body says
   //    neither that the message left nor that Enter would send it.
-  //    Nor for opencode's box under an overlay (review of #4067): the text may be
-  //    the overlay's, drawn over whatever the box holds.
-  if (composer.obscured) return { state: 'indeterminate', rule: 'F-obscured' };
   return composer.outsideWindow ? { state: 'indeterminate', rule: 'F-outside' } : { state: 'submitted', rule: 'F' };
 }
 

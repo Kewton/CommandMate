@@ -44,7 +44,7 @@ import {
   withoutTrailingBlankRows,
 } from '@/lib/cli-tools/submit-composer-read';
 import { sendMessageWithSubmitVerification } from '@/lib/cli-tools/submit-verified-sender';
-import { capturePane, clearInputLine, sendSpecialKeys } from '@/lib/tmux/tmux';
+import { capturePane, clearComposerLine, clearInputLine, sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
 import { resetInstanceInputLocks } from '@/lib/session/instance-input-lock';
 import { stripAnsi } from '@/lib/detection/ansi';
 import { isOpenCodeComposerReady } from '@/lib/detection/tools/opencode/readiness';
@@ -349,7 +349,9 @@ describe('opencode: the send beside the sidebar (Issue #4067)', () => {
  * first run's end is where the overlay starts, not the box's right edge. Read
  * there, text right of the cut was outside the box, and a blank overlay made the
  * box `empty` (rule B, `submitted`). Such a box is now read to the border's far
- * end and marked `obscured`: B and F do not stand on it (`indeterminate`).
+ * end and marked `obscured`, and none of B–F stands on it (`indeterminate`):
+ * the reading includes the overlay's text, and C/D's resent Enter or E's clear
+ * would go to the overlay (second review of #4067).
  *
  * The synthetic frames edit the real palette capture's box rows only
  * (`opencode-live-2049/command-palette-11822.txt`), its cut border kept.
@@ -401,11 +403,32 @@ describe('opencode: an overlay over the box is not an empty box (review of #4067
     expect(readOpenCodeComposerOwnRows(lines)!.every((row) => row === '')).toBe(true);
   });
 
-  it('positive: residue right of the cut is read — the body is rule D (pending)', () => {
+  it('positive: residue right of the cut is read — the body is indeterminate (F-obscured), not D (pending)', () => {
     const frame = underOverlay('echo PREFILLED');
     const composer = composerOf(frame);
     expect(composer).toMatchObject({ kind: 'text', text: 'echo PREFILLED', obscured: true });
-    expect(classifySubmitWithRule(frame, 'opencode', 'echo PREFILLED')).toEqual({ state: 'pending', rule: 'D' });
+    expect(classifySubmitWithRule(frame, 'opencode', 'echo PREFILLED')).toEqual({
+      state: 'indeterminate',
+      rule: 'F-obscured',
+    });
+  });
+
+  it('positive: another slash command right of the cut — indeterminate (F-obscured), not E (replaced)', () => {
+    expect(classifySubmitWithRule(underOverlay('/statusline'), 'opencode', '/status')).toEqual({
+      state: 'indeterminate',
+      rule: 'F-obscured',
+    });
+  });
+
+  it('control: the same body and slash command in a whole box — D and E, as before', () => {
+    expect(classifySubmitWithRule(withBodyInBox(TURN_COMPLETE_W200, 'echo PREFILLED'), 'opencode', 'echo PREFILLED')).toEqual({
+      state: 'pending',
+      rule: 'D',
+    });
+    expect(classifySubmitWithRule(withBodyInBox(TURN_COMPLETE_W200, '/statusline'), 'opencode', '/status')).toEqual({
+      state: 'replaced',
+      rule: 'E',
+    });
   });
 
   it('positive: other residue right of the cut — indeterminate (F-obscured), not submitted', () => {
@@ -415,10 +438,10 @@ describe('opencode: an overlay over the box is not an empty box (review of #4067
     });
   });
 
-  it('positive: a paste token right of the cut — rule C (pending)', () => {
+  it('positive: a paste token right of the cut — indeterminate (F-obscured), not C (pending)', () => {
     expect(classifySubmitWithRule(underOverlay('[Pasted text #1 +3 lines]'), 'opencode', 'hello world')).toEqual({
-      state: 'pending',
-      rule: 'C',
+      state: 'indeterminate',
+      rule: 'F-obscured',
     });
   });
 
@@ -477,23 +500,41 @@ describe('opencode: the send when an overlay covers the box after Enter (review 
     resetInstanceInputLocks();
   });
 
-  /** The ready frame until the first Enter, `after` on every read from then on. */
-  async function sendWithFrameAfterEnter(after: string): Promise<{ error: Error | undefined; enters: number }> {
+  /**
+   * The ready frame until the first Enter, `after` on every read from then on.
+   * `keysAfterEnter` is every key, paste and clear sent to the pane after that
+   * first Enter.
+   */
+  async function sendWithFrameAfterEnter(
+    after: string,
+    message = 'hello world'
+  ): Promise<{ error: Error | undefined; enters: number; keysAfterEnter: string[] }> {
     let enters = 0;
+    const keysAfterEnter: string[] = [];
     vi.mocked(sendSpecialKeys).mockImplementation((async (_s: string, k: string[]) => {
+      if (enters > 0) keysAfterEnter.push(k.join('+'));
       if (k.includes('Enter')) enters++;
+    }) as never);
+    vi.mocked(sendKeys).mockImplementation((async (_s: string, text: string) => {
+      if (enters > 0) keysAfterEnter.push(`type:${text}`);
+    }) as never);
+    vi.mocked(clearInputLine).mockImplementation((async () => {
+      if (enters > 0) keysAfterEnter.push('clearInputLine');
+    }) as never);
+    vi.mocked(clearComposerLine).mockImplementation((async () => {
+      if (enters > 0) keysAfterEnter.push('clearComposerLine');
     }) as never);
     vi.mocked(capturePane).mockImplementation((async () => (enters > 0 ? after : TURN_COMPLETE_W200)) as never);
     const settled = sendMessageWithSubmitVerification({
       sessionName: 'mcbd-opencode-wt',
-      message: 'hello world',
+      message,
       cliToolId: 'opencode',
     }).then(
       () => undefined,
       (error: Error) => error
     );
     await vi.runAllTimersAsync();
-    return { error: await settled, enters };
+    return { error: await settled, enters, keysAfterEnter };
   }
 
   it('positive: a blank overlay stays over the box — not confirmed, and no second Enter', async () => {
@@ -501,6 +542,28 @@ describe('opencode: the send when an overlay covers the box after Enter (review 
     expect(error?.message).toMatch(/could not be confirmed/);
     expect(enters).toBe(1);
     expect(clearInputLine).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['the body', 'hello world', 'hello world'],
+    ['another slash command', '/statusline', '/status'],
+    ['a paste token', '[Pasted text #1 +3 lines]', 'hello world'],
+  ])('positive: %s left in the box under an overlay — not confirmed, and no key after the first Enter', async (_name, residue, message) => {
+    const { error, enters, keysAfterEnter } = await sendWithFrameAfterEnter(underOverlay(residue), message);
+    expect(error?.message).toMatch(/could not be confirmed/);
+    expect(enters).toBe(1);
+    expect(keysAfterEnter).toEqual([]);
+  });
+
+  it('control: the body left in a whole box — the Enter is resent (the double sees the keys)', async () => {
+    const { keysAfterEnter } = await sendWithFrameAfterEnter(withBodyInBox(TURN_COMPLETE_W200, 'hello world'));
+    expect(keysAfterEnter).toContain('Enter');
+  });
+
+  it('control: another slash command left in a whole box — the line is cleared (the double sees the clear)', async () => {
+    const { error, keysAfterEnter } = await sendWithFrameAfterEnter(withBodyInBox(TURN_COMPLETE_W200, '/statusline'), '/status');
+    expect(error?.message).toMatch(/replaced by a TUI autocompletion/);
+    expect(keysAfterEnter).toContain('clearInputLine');
   });
 
   it('negative: the box comes back whole and empty after Enter — confirmed', async () => {
