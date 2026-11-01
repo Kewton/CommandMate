@@ -6,13 +6,8 @@
 
 import { resolveComposerSpec } from './composer-spec';
 import type { ComposerSpec } from '../../types/cli-tool-contracts';
-import {
-  stripAnsi,
-  detectThinking,
-  findOpenCodeComposerRows,
-  stripOpenCodeGutter,
-  OPENCODE_IDLE_COMPOSER_PATTERN,
-} from '../detection/cli-patterns';
+import { stripAnsi, detectThinking } from '../detection/cli-patterns';
+import { readOpenCodeComposerOwnRows } from '../detection/tools/opencode/composer-own-text';
 import type { CLIToolType } from './types';
 import {
   codexDialogBelow,
@@ -45,6 +40,14 @@ const PASTE_PLACEHOLDER_PATTERN = /\[Pasted text[\s#]/;
  * substitution, so a genuinely-submitted message never fails spuriously.
  */
 const REPLACEMENT_COMMAND_PATTERN = /^\/[A-Za-z]/;
+
+/**
+ * opencode's empty-buffer placeholder on a box row's own text (Issue #4067):
+ * `OPENCODE_IDLE_COMPOSER_PATTERN` with the gutter already removed by
+ * `readOpenCodeComposerOwnRows`. Start-anchored like that pattern, so the
+ * phrase quoted inside a typed body is not taken for it.
+ */
+const OPENCODE_OWN_PLACEHOLDER = /^Ask anything(?:\.\.\.|\u2026)/;
 
 /**
  * Prompt input-line markers across the marker-drawing TUIs.
@@ -82,7 +85,8 @@ export const VERIFY_WINDOW_LINES = 12;
  *            it, or the session is still starting. Never a failure verdict.
  *   empty  - the composer is on screen and holds nothing.
  *   text   - the composer holds something; `text` is its first non-blank row and
- *            `rows` every raw row it occupies.
+ *            `rows` every raw row it occupies (for opencode's box, every buffer
+ *            row's own text — inside the box, without the sidebar; #4067).
  */
 type ComposerRead =
   | { kind: 'absent' }
@@ -143,12 +147,16 @@ function readComposer(
   windowLines: string[]
 ): ComposerRead {
   if (reader === 'opencode-box') {
-    const rows = findOpenCodeComposerRows(lines);
+    // Each buffer row's own text: gutter removed and cut at the box's right
+    // edge (Issue #4067), so the sidebar drawn on the same rows (#2047/#2095 —
+    // its working directory starts with `/`) is never read as the body. The
+    // same cut as the send readiness (`isOpenCodeComposerReady`).
+    const rows = readOpenCodeComposerOwnRows(lines);
     if (rows === null) return { kind: 'absent' };
     // The placeholder is painted only while the buffer is empty, and only
-    // inside the box — hence matched on the raw, still-guttered row (#1883).
-    if (rows.some((row) => OPENCODE_IDLE_COMPOSER_PATTERN.test(row))) return { kind: 'empty' };
-    const first = rows.map(stripOpenCodeGutter).find((row) => row.length > 0);
+    // inside the box (#1883) — read on the row's own text, which is inside it.
+    if (rows.some((row) => OPENCODE_OWN_PLACEHOLDER.test(row))) return { kind: 'empty' };
+    const first = rows.find((row) => row.length > 0);
     if (first === undefined) return { kind: 'empty' };
     return { kind: 'text', text: first, rows };
   }

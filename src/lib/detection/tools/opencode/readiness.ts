@@ -29,40 +29,18 @@
  * box's bottom border (`╹▀…▀`, measured in `opencode-live-2047/w200/`: border
  * to column 156, sidebar from 160). Text inside the box is the buffer however
  * far it is indented (`┃    old` is not empty), as `submit-composer-read`'s
- * `opencode-box` reader reads it.
+ * `opencode-box` reader reads it — both through `composer-own-text` (#4067).
  *
  * @module lib/detection/tools/opencode/readiness
  */
 
 import { stripAnsi } from '../../ansi';
 import { detectSessionStatus } from '../../status-detector';
-import {
-  OPENCODE_COMPOSER_BOTTOM_BORDER,
-  OPENCODE_SELECTION_LIST_PATTERN,
-  findOpenCodeComposerRows,
-  stripOpenCodeGutter,
-} from './patterns';
+import { OPENCODE_SELECTION_LIST_PATTERN } from './patterns';
+import { readOpenCodeComposerOwnRows } from './composer-own-text';
 
 /** The placeholder opencode paints in an empty buffer, with its quoted suggestion. */
 const PLACEHOLDER = /^Ask anything(?:\.\.\.|…)(?:[^\S\n]+"[^"\n]*")?$/;
-
-/**
- * The column just right of the input box: the end of its bottom border
- * (`╹▀…▀`), the newest one on the pane. `null` when there is none.
- */
-function boxRightEdge(lines: string[]): number | null {
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (!OPENCODE_COMPOSER_BOTTOM_BORDER.test(lines[i])) continue;
-    const border = /╹▀+/.exec(lines[i]);
-    return border ? border.index + border[0].length : null;
-  }
-  return null;
-}
-
-/** The row's own text: inside the box (left of `rightEdge`), gutter removed. */
-function ownText(row: string, rightEdge: number): string {
-  return stripOpenCodeGutter(row.slice(0, rightEdge));
-}
 
 /**
  * @param output - Raw `capture-pane` output of the whole pane (ANSI allowed)
@@ -74,12 +52,9 @@ export function isOpenCodeComposerReady(output: string): boolean {
   const status = detectSessionStatus(output, 'opencode');
   if (status.hasActivePrompt || status.status === 'waiting') return false;
 
-  const lines = text.split('\n');
-  const rows = findOpenCodeComposerRows(lines);
-  const rightEdge = boxRightEdge(lines);
-  if (rows === null || rows.length === 0 || rightEdge === null) return false;
-  return rows.every((row) => {
-    const own = ownText(row, rightEdge);
-    return own === '' || PLACEHOLDER.test(own);
-  });
+  // Each row's own text, cut at the box's right edge (Issue #4067: the same
+  // cut the submit read-back uses — `composer-own-text`).
+  const rows = readOpenCodeComposerOwnRows(text.split('\n'));
+  if (rows === null || rows.length === 0) return false;
+  return rows.every((own) => own === '' || PLACEHOLDER.test(own));
 }
