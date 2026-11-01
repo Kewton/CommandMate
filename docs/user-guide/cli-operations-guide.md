@@ -781,6 +781,30 @@ API は `POST /api/relays/:id/resolve`（本文 `{ "payloadId", "attemptId", "ac
 - 片付けは送信の結び付き（`send=`・`hold=`）を変えません。サーバーの再起動は今までどおりで、`--retry` の後・送る前に
   止まったものは配送の列のまま、送り始めてから止まったものは新しい `attempt` の保留になります。片付けた保留は戻りません
 
+#### 保留の知らせ・表示・件数（Issue #4082）
+
+- **依頼元の履歴**: 配送が保留（`uncertain`）になると、依頼元 A の履歴に system 行を 1 本残します（`relay=<relay-id>`・
+  `payload=<種類>:<payloadId>`・`attempt=<attemptId>`・`reason=<理由>` 付き）。同じ試行には 1 本だけで、別の payload や
+  `--retry` の後の新しい `attempt` が保留になればそれも 1 本ずつ残ります。知らせは best-effort です（書けなかった・
+  書く前にサーバーが止まったときは残らず、書き直しもしません）。保留そのものは知らせの成否で変わりません。
+  この行は返答の抽出（`relays`・`wait`・relay の配送）には混ざりません
+- **画面**: PC・スマホの名簿とチャット面は、保留を依頼元 A の行に「配送が未確認」（警告色）として、返信待ち・確認待ちより
+  先に出します。保留中の relay は返信待ち・返信予定には数えません（配送中の `attempting` は今までどおり返信待ちです）。
+  閉じた relay の保留も出します。名簿から消えたインスタンス宛ての保留は、名簿の下の「名簿に無いセッションへの配送未確認」
+  に出ます。表示は 20 秒ごとの読み直しと操作後の読み直しで追従します
+- **件数**: `GET /api/relays` の `heldCount` は、いまの保留（`uncertain` だけ・閉じた relay も含む・1 つの payload を 1 回）
+  の数です。状態別の `counts` とは別の軸で、合計にも足さず、`days` で絞りません。`commandmate relays` は `held=<n>`、
+  `commandmate task show` は `RELAYS:` 行の `, <n> held`、`commandmate report metrics` は `Relays:` 行の `, <n> held now`
+  に出します。`commandmate relays` の一覧は、片付ける保留（`uncertain`。見出し `# delivery not confirmed, not resent (N)` の
+  N は `held=` と同じ）と、いま配送中のもの（`attempting`。見出し `# delivery in progress (N)`）を分けて出します。
+  JSON では `task show --json` が `relays`（状態別）と `relaysHeld`、`report metrics --json` が `relays` と
+  `relaysHeld` を持ちます。`heldCount` を返さない古いサーバーでは、件数を出さず（0 とは書きません）、JSON は `null` です
+- **保留中の期限切れ**: 期限切れの掃除は、保留中の relay の確認の通知の後ろで待っている返答を消さずに残します。その後、
+  閉じた relay の確認の通知（期限を過ぎてまだ掃除されていない、開いたままの relay のものも同じ。このときは片付けと
+  同時に `expired` で閉じ、「期限切れ」の system 行を残します）を `--confirm`・`--discard` で片付けると、待っていた返答も破棄し（閉じた relay からは配送しません）、
+  その旨を依頼元の履歴に system 行で残します（API の応答は `replyDiscarded: true`）。期限切れは既存の「期限切れ」の
+  system 行と保留の表示で伝わり、片付けた後に期限切れの通知を新たに入力欄へ送ることはしません
+
 ### ターン成立の判定（Issue #1839）
 
 `wait` はこれまで「エージェントが composer に戻ったか」しか見ておらず、**そのターンが

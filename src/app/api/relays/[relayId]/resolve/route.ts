@@ -8,9 +8,10 @@
  * operation read off an older screen (the payload was retried since) and a
  * second operation on the same hold are refused.
  *
- *  - 200 `{ relay, action, requeued, promoted }` — settled. For `retry` this
- *    means "queued for delivery again", not "delivered": the pump sends it
- *    when the requester can take it.
+ *  - 200 `{ relay, action, requeued, promoted, replyDiscarded }` — settled. For
+ *    `retry` this means "queued for delivery again", not "delivered": the pump
+ *    sends it when the requester can take it. `replyDiscarded` (Issue #4082):
+ *    a closed relay's reply that waited behind the settled notice was dropped.
  *  - 400 — malformed id or body.
  *  - 404 — no such relay.
  *  - 409 — stale payload/attempt, a delivery in progress (`attempting`), no
@@ -104,7 +105,14 @@ export async function POST(
     if (result.requeued || result.promoted) requestRelayPump();
 
     return NextResponse.json(
-      { relay: result.relay, action, requeued: result.requeued, promoted: result.promoted },
+      {
+        relay: result.relay,
+        action,
+        requeued: result.requeued,
+        promoted: result.promoted,
+        // Issue #4082: a closed relay's reply waiting behind the notice was dropped.
+        replyDiscarded: result.discardedReply !== null,
+      },
       { status: 200 }
     );
   } catch (error: unknown) {

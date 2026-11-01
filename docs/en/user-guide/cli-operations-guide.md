@@ -669,6 +669,36 @@ The API is `POST /api/relays/:id/resolve` (body `{ "payloadId", "attemptId", "ac
   but not yet taken stays queued, one whose send had started is held under its new `attempt`. A settled hold
   does not come back
 
+#### Telling, showing and counting holds (Issue #4082)
+
+- **The requester's history**: when a delivery is held (`uncertain`), one system line is left in the history
+  of the requester A (with `relay=<relay-id>`, `payload=<kind>:<payloadId>`, `attempt=<attemptId>` and
+  `reason=<reason>`). One line per attempt: another payload, or a new `attempt` after `--retry`, that is held
+  again gets its own line. The line is best-effort (when it cannot be written, or the server stops before it
+  is, there is none and it is not written later). The hold itself does not depend on it. The line is never
+  read as a reply (`relays`, `wait`, the relay delivery)
+- **The screens**: the PC and phone rosters and the chat surface show a hold on the requester A's row as
+  "delivery unconfirmed" (warning colour), ahead of waiting and prompt. A held relay is not also counted as
+  waiting or owed (a delivery in progress, `attempting`, stays waiting as before). Holds of closed relays are
+  shown too. A hold whose requester instance is no longer in the roster is listed under the roster as
+  "Unconfirmed deliveries to sessions not in the roster". The screens follow the 20-second re-read and the
+  re-read after an action
+- **The count**: `heldCount` in `GET /api/relays` is the number of holds now (`uncertain` only, closed relays
+  included, once per payload). It is an axis of its own, apart from the per-state `counts`, never added to
+  them, and not narrowed by `days`. `commandmate relays` prints `held=<n>`, `commandmate task show` adds
+  `, <n> held` to its `RELAYS:` line and `commandmate report metrics` adds `, <n> held now` to its `Relays:`
+  line. The `commandmate relays` listing shows the holds to settle (`uncertain`; the N of
+  `# delivery not confirmed, not resent (N)` is the same as `held=`) apart from deliveries being typed right now
+  (`attempting`; `# delivery in progress (N)`). In JSON, `task show --json` carries `relays` (per state) and `relaysHeld`, and `report metrics --json`
+  carries `relays` and `relaysHeld`. An older server that does not answer `heldCount` gets no count printed
+  (never 0), and `null` in JSON
+- **Expiry while held**: the expiry sweep keeps the reply waiting behind a held prompt notice. When that closed
+  relay's prompt notice (or that of a relay still open past its deadline and not yet swept: the settle itself then
+  closes it as `expired`, with the usual "expired" system line) is then settled with `--confirm` or `--discard`, the waiting reply is discarded too
+  (a closed relay delivers nothing more) and a system line in the requester's history says so (the API answers
+  `replyDiscarded: true`). The expiry itself is told by the existing "expired" system line and the hold on the
+  screens; no expiry notice is sent to the composer after the hold is settled
+
 ### Progress Output
 
 Progress is written to stderr. Only the final result (JSON) goes to stdout.

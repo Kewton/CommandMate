@@ -739,6 +739,58 @@ export function clearRelayPendingReply(db: Database.Database, id: string, now = 
   db.prepare('UPDATE session_relays SET pending_reply = NULL, updated_at = ? WHERE id = ?').run(now, id);
 }
 
+/**
+ * Empty the second slot unless the first is under a delivery hold (Issue #4082).
+ *
+ * For the expiry sweep: a reply waiting behind a held notice is kept, so that
+ * settling the hold later decides what happens to it (a closed relay's waiting
+ * reply is then discarded explicitly, with a line in the requester's history).
+ * A cancel still empties it unconditionally ({@link clearRelayPendingReply}).
+ *
+ * @returns Whether the slot was emptied (false also when it was already empty)
+ */
+export function clearRelayPendingReplyUnlessHeld(
+  db: Database.Database,
+  id: string,
+  now = Date.now()
+): boolean {
+  const result = db
+    .prepare(`
+      UPDATE session_relays SET pending_reply = NULL, updated_at = ?
+      WHERE id = ? AND pending_reply IS NOT NULL AND delivery_state IS NULL
+    `)
+    .run(now, id);
+  return result.changes === 1;
+}
+
+/**
+ * How many payloads are held as `uncertain` (Issue #4082): the held axis of
+ * the relay counts, apart from the per-state counts. Open relays and closed
+ * ones alike, one per row (a row holds at most one payload), `attempting`
+ * not included (it is still pending), and never narrowed by a period — a hold
+ * is something to settle now, however old its relay.
+ */
+export function countHeldRelays(
+  db: Database.Database,
+  scope: { worktreeId?: string; instanceId?: string } = {}
+): number {
+  const clauses = ["delivery_state = 'uncertain'"];
+  const params: string[] = [];
+  if (scope.worktreeId && scope.instanceId) {
+    clauses.push(
+      '((from_worktree_id = ? AND from_instance_id = ?) OR (to_worktree_id = ? AND to_instance_id = ?))'
+    );
+    params.push(scope.worktreeId, scope.instanceId, scope.worktreeId, scope.instanceId);
+  } else if (scope.worktreeId) {
+    clauses.push('(from_worktree_id = ? OR to_worktree_id = ?)');
+    params.push(scope.worktreeId, scope.worktreeId);
+  }
+  const row = db
+    .prepare(`SELECT COUNT(*) AS n FROM session_relays WHERE ${clauses.join(' AND ')}`)
+    .get(...params) as { n: number };
+  return row.n;
+}
+
 /** Cancel a relay as part of the restart recovery, recording why. */
 export function failOrphanedRelayBind(
   db: Database.Database,
@@ -976,14 +1028,49 @@ export function recoverInterruptedRelayDeliveries(
   boot: string,
   now = Date.now()
 ): number {
-  const result = db
-    .prepare(`
+  return recoverInterruptedRelayDeliveryRefs(db, boot, now).length;
+}
+
+/**
+ * {@link recoverInterruptedRelayDeliveries}, answering WHICH attempts this call
+ * moved to `uncertain` (Issue #4082): the relay, payload and attempt of each
+ * row whose guarded write took, so the requester can be told about exactly
+ * those — not a row another boot held first, not one already `uncertain`, not
+ * this boot's own `attempting`.
+ *
+ * One transaction: the rows are read and each is moved under its own attempt
+ * id, so a row resolved or retried between the read and the write is not
+ * reported.
+ */
+export function recoverInterruptedRelayDeliveryRefs(
+  db: Database.Database,
+  boot: string,
+  now = Date.now()
+): RelayPayloadAttemptRef[] {
+  return db.transaction((): RelayPayloadAttemptRef[] => {
+    const rows = db
+      .prepare(`
+        SELECT id, payload_id, delivery_attempt_id FROM session_relays
+        WHERE delivery_state = 'attempting' AND (delivery_owner IS NULL OR delivery_owner <> ?)
+      `)
+      .all(boot) as Array<{ id: string; payload_id: string | null; delivery_attempt_id: string | null }>;
+    const held: RelayPayloadAttemptRef[] = [];
+    const hold = db.prepare(`
       UPDATE session_relays
       SET delivery_state = 'uncertain', delivery_reason = ?, delivery_at = ?, updated_at = ?
-      WHERE delivery_state = 'attempting' AND (delivery_owner IS NULL OR delivery_owner <> ?)
-    `)
-    .run(RELAY_DELIVERY_SERVER_RESTARTED, now, now, boot);
-  return result.changes;
+      WHERE id = ? AND delivery_attempt_id IS ? AND delivery_state = 'attempting'
+        AND (delivery_owner IS NULL OR delivery_owner <> ?)
+    `);
+    for (const row of rows) {
+      const result = hold.run(RELAY_DELIVERY_SERVER_RESTARTED, now, now, row.id, row.delivery_attempt_id, boot);
+      if (result.changes !== 1) continue;
+      // A row without the ids is held all the same, and simply not reported:
+      // a line could not name what to resolve.
+      if (row.payload_id === null || row.delivery_attempt_id === null) continue;
+      held.push({ relayId: row.id, payloadId: row.payload_id, attemptId: row.delivery_attempt_id, now });
+    }
+    return held;
+  })();
 }
 
 /**

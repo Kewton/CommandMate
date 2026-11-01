@@ -193,6 +193,8 @@ export const MobileAgentInstancesPane = memo(function MobileAgentInstancesPane({
             const relayBadges = resolveRelayBadges({
               owed: relays.owedBy(inst.id),
               awaiting: relays.awaitedBy(inst.id),
+              // Issue #4082: same as the PC roster row.
+              held: relays.heldFor(inst.id),
               aliasOf,
             });
             return (

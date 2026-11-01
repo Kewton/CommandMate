@@ -17,7 +17,12 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { countRelays, listOpenRelaysForWorktree, listRelaysWithDeliveryHold } from '@/lib/db/relay-db';
+import {
+  countHeldRelays,
+  countRelays,
+  listOpenRelaysForWorktree,
+  listRelaysWithDeliveryHold,
+} from '@/lib/db/relay-db';
 import { openRelay, readSessionRelays } from '@/lib/relay/relay-service';
 import { resolveRelayTtlMs } from '@/lib/relay/relay-policy';
 import { isValidInstanceId } from '@/lib/cli-tools/types';
@@ -114,6 +119,13 @@ export async function GET(request: NextRequest) {
           worktreeId: worktreeId ?? undefined,
           instanceId: worktreeId && instanceId ? instanceId : undefined,
           since,
+        }),
+        // Issue #4082: the held axis — every payload held as `uncertain` now,
+        // open relays or closed, once each. Apart from `counts` (not one of
+        // its states, never added to them) and not narrowed by `days`.
+        heldCount: countHeldRelays(db, {
+          worktreeId: worktreeId ?? undefined,
+          instanceId: worktreeId && instanceId ? instanceId : undefined,
         }),
       },
       { status: 200 }

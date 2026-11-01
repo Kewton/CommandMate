@@ -190,26 +190,39 @@ export function buildRelayExpiredMessage(
   return `${buildRelayHeader(sender)} ${EXPIRED_TEMPLATES[locale].replace('{hours}', String(hours))}`;
 }
 
-const SYSTEM_TEMPLATES: Record<
-  SupportedLocale,
-  { requested: string; replied: string; waiting: string; expired: string }
-> = {
+const SYSTEM_TEMPLATES: Record<SupportedLocale, Record<RelaySystemLineKind, string>> = {
   en: {
     requested: 'Delegated to {alias}; waiting for the reply.',
     replied: 'Reply from {alias}.',
     waiting: '{alias} is waiting for a confirmation.',
     expired: 'The delegation to {alias} expired without a reply.',
+    held: 'Could not confirm that the relay from {alias} reached this session; it will not be resent automatically. Check this pane, then settle it with commandmate relays resolve.',
+    'reply-discarded': 'The reply from {alias} that waited behind the settled confirmation notice was discarded: the delegation had already closed, so it is not delivered.',
   },
   ja: {
     requested: '{alias} へ委任、返信待ち',
     replied: '{alias} から返信',
     waiting: '{alias} が確認待ち',
     expired: '{alias} への委任が返信のないまま期限切れ',
+    held: '{alias} からの relay がこのセッションへ届いたか確認できません（自動では再送しません）。この画面を確かめてから commandmate relays resolve で片付けてください',
+    'reply-discarded': '片付けた確認の通知の後ろで待っていた {alias} の返信は、委任が既に閉じていたため破棄しました（配送しません）',
   },
 };
 
-/** Which system line to write into the requester's transcript. */
-export type RelaySystemLineKind = 'requested' | 'replied' | 'waiting' | 'expired';
+/**
+ * Which system line to write into the requester's transcript.
+ *
+ * Issue #4082: `held` — a payload's delivery became `uncertain` (one line per
+ * attempt); `reply-discarded` — a closed relay's waiting reply was dropped when
+ * the held confirmation notice in front of it was settled.
+ */
+export type RelaySystemLineKind =
+  | 'requested'
+  | 'replied'
+  | 'waiting'
+  | 'expired'
+  | 'held'
+  | 'reply-discarded';
 
 /**
  * The one-line system row the chat surface and History both show.
@@ -229,6 +242,11 @@ export function buildRelaySystemLine(
   const parts: string[] = [];
   if (detail.overlap) parts.push(`overlap=${detail.overlap}`);
   if (detail.holdReason) parts.push(`hold=${detail.holdReason}`);
+  // Issue #4082: what `commandmate relays resolve` names, as the CLI prints it.
+  if (detail.relayId) parts.push(`relay=${detail.relayId}`);
+  if (detail.payload) parts.push(`payload=${detail.payload}`);
+  if (detail.attemptId) parts.push(`attempt=${detail.attemptId}`);
+  if (detail.deliveryReason) parts.push(`reason=${detail.deliveryReason}`);
   return parts.length === 0 ? line : `${line} (${parts.join(', ')})`;
 }
 
@@ -236,4 +254,12 @@ export function buildRelaySystemLine(
 export interface RelaySystemLineDetail {
   overlap?: RelayOverlap | null;
   holdReason?: string | null;
+  /** Issue #4082: the relay a `held` / `reply-discarded` line is about. */
+  relayId?: string | null;
+  /** Issue #4082: `<kind>:<payloadId>`, as `relays --id` prints `payload=`. */
+  payload?: string | null;
+  /** Issue #4082: the held attempt, as `relays --id` prints `attempt=`. */
+  attemptId?: string | null;
+  /** Issue #4082: why the delivery is held (`send-error`, `server-restarted`, …). */
+  deliveryReason?: string | null;
 }

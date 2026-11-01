@@ -17,8 +17,11 @@
 
 import type { SessionRelay } from '@/lib/relay/types';
 
-/** Which of the three things a row can be saying. */
-export type RelayBadgeTone = 'owed' | 'awaiting' | 'prompt';
+/**
+ * Which of the things a row can be saying. Issue #4082: `held` — a payload
+ * going to this row (the requester) whose delivery is not known.
+ */
+export type RelayBadgeTone = 'held' | 'owed' | 'awaiting' | 'prompt';
 
 /** One badge, ready for `t(key, params)`. */
 export interface RelayBadge {
@@ -43,6 +46,11 @@ export interface RelayBadgeInput {
   owed: SessionRelay[];
   /** Open relays this row is waiting on (it is the `from` end). */
   awaiting: SessionRelay[];
+  /**
+   * Issue #4082: relays (open or closed) whose payload to this row is held as
+   * `uncertain`. Absent = none. The caller keeps them out of `owed` / `awaiting`.
+   */
+  held?: SessionRelay[];
   /** Names the other end; defaults to the instance id. */
   aliasOf: RelayAliasResolver;
 }
@@ -52,6 +60,9 @@ export interface RelayBadgeInput {
  *
  * Precedence, and the reason for it:
  *
+ *  0. **`held`** (Issue #4082) — a payload to this row whose delivery is not
+ *     known. Nothing will happen to it until somebody looks at this pane and
+ *     settles it (`commandmate relays resolve`), so it outranks the rest.
  *  1. **`prompt`** — a relay whose worker stopped on a confirmation. It is the
  *     only one of the three that means somebody has to DO something, and it is
  *     drawn as a warning for that reason.
@@ -66,6 +77,25 @@ export interface RelayBadgeInput {
  */
 export function resolveRelayBadges(input: RelayBadgeInput): RelayBadge[] {
   const badges: RelayBadge[] = [];
+
+  const held = input.held ?? [];
+  if (held.length === 1) {
+    badges.push({
+      tone: 'held',
+      key: 'badgeHeld',
+      params: { alias: input.aliasOf(held[0].to) },
+      titleKey: 'heldTitle',
+      count: 1,
+    });
+  } else if (held.length > 1) {
+    badges.push({
+      tone: 'held',
+      key: 'badgeHeldMany',
+      params: { count: held.length },
+      titleKey: 'heldTitle',
+      count: held.length,
+    });
+  }
 
   const promptWaits = input.awaiting.filter((relay) => relay.state === 'prompt');
   if (promptWaits.length > 0) {
@@ -130,7 +160,11 @@ export function resolveRelayStrip(badges: RelayBadge[]): RelayBadge | null {
   if (badges.length === 0) return null;
   const [first] = badges;
   const stripKey =
-    first.tone === 'prompt'
+    first.tone === 'held'
+      ? first.count > 1
+        ? 'stripHeldMany'
+        : 'stripHeld'
+      : first.tone === 'prompt'
       ? 'stripPrompt'
       : first.tone === 'owed'
         ? 'stripOwed'
