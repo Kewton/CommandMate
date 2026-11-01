@@ -25,6 +25,7 @@ M の `verify` が `fail` なら、下の W の古い `ok` では通らない。
 precheck の行は、その HEAD の作業の HEAD を毎回書き直す（`workHead` の無い precheck の行は、同じ HEAD の前の行の `workHead` を消して HEAD 自身とする）。
 同じ HEAD の `ok` を再利用するのは、記録の `workHead` が今の規則の答えと同じときだけ（前の版が判定できないマージに `workHead=W` を書いた行は再利用せず、precheck をやり直して書き直す）。
 `merge-pr.mjs` は 6-2 の refresh の後に作業の HEAD を決め直し、`verify` / `review` / `findings` をその HEAD で照合し直す（判定できない refresh は自身の記録が要り、push せず止まる）。
+そのとき `merge=fail` を refresh の HEAD（M）で記録し、計算した作業の HEAD も書く（M 自身なら書かない。衝突しない refresh なら W のまま）ので、`status` の `next` は M の `verify` を指す（#4085）。
 Unit Tests を待つかも、照合した作業の HEAD の `verify` で決める。
 `--head` / `--work-head` は **`git rev-parse HEAD` の 40 桁の SHA だけ**を受け付ける（短い SHA は exit 2 で拒否。`publish-pr.mjs` が 40 桁で記録を探すため、短い SHA で書くと「記録が無い」と読まれる、#3664）。すでに記録された 7 桁の行は `status` が読める。
 この規則は `publish-pr.mjs` / `merge-pr.mjs` の止まる条件と同じ関数（`unmetStage`）なので、再開先と公開側の判定はずれない。
