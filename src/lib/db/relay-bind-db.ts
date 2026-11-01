@@ -14,6 +14,9 @@ import Database from 'better-sqlite3';
 import type {
   RelayBindMode,
   RelayBoundaryKind,
+  RelayDeliveryHold,
+  RelayDeliveryState,
+  RelayEndpoint,
   RelayObsState,
   RelayOverlap,
   RelayPendingKind,
@@ -21,7 +24,7 @@ import type {
   RelayState,
   SessionRelay,
 } from '@/lib/relay/types';
-import { OPEN_RELAY_STATES } from '@/lib/relay/types';
+import { OPEN_RELAY_STATES, relayRequesterPaneCommand } from '@/lib/relay/types';
 
 /** Every column, in one place, so the readers cannot drift from each other. */
 export const RELAY_COLUMNS = `
@@ -29,7 +32,9 @@ export const RELAY_COLUMNS = `
   state, hops, sent_request_id, pending_kind, pending_body, prompt_signature,
   created_at, updated_at, expires_at, delivered_at,
   bind_mode, send_state, input_boundary_at, boundary_kind, turn_open_at_send,
-  obs_state, hold_reason, overlap
+  obs_state, hold_reason, overlap,
+  delivery_state, delivery_reason, delivery_at,
+  CASE WHEN delivery_state IS NULL THEN NULL ELSE payload_id END AS delivery_payload_id
 `;
 
 /**
@@ -66,6 +71,12 @@ export interface SessionRelayRow {
   obs_state: string | null;
   hold_reason: string | null;
   overlap: string | null;
+  /** Issue #4064 (v63). */
+  delivery_state: string | null;
+  delivery_reason: string | null;
+  delivery_at: number | null;
+  /** `payload_id`, only while a delivery hold names it. */
+  delivery_payload_id: string | null;
 }
 
 interface SessionRelayBindingRow extends SessionRelayRow {
@@ -99,8 +110,38 @@ export function mapRelay(row: SessionRelayRow): SessionRelay {
     obsState: (row.obs_state as RelayObsState | null) ?? null,
     holdReason: row.hold_reason,
     overlap: (row.overlap as RelayOverlap | null) ?? null,
+    deliveryHold: mapDeliveryHold(row),
   };
 }
+
+/** The delivery hold a row carries, or null (Issue #4064). */
+function mapDeliveryHold(row: SessionRelayRow): RelayDeliveryHold | null {
+  if (row.delivery_state === null || row.delivery_state === undefined) return null;
+  return {
+    state: row.delivery_state as RelayDeliveryState,
+    payloadId: row.delivery_payload_id ?? null,
+    kind: (row.pending_kind as RelayPendingKind | null) ?? null,
+    reason: row.delivery_reason ?? null,
+    at: row.delivery_at ?? null,
+    checkCommand: relayRequesterPaneCommand({
+      worktreeId: row.from_worktree_id,
+      instanceId: row.from_instance_id,
+    }),
+  };
+}
+
+/**
+ * `SET` assignments that empty the pending slot unless its payload is under a
+ * delivery hold (Issue #4064). For the writers that close a relay (cancel, the
+ * restart recovery's cancel): they stop later deliveries, and a held payload's
+ * body, id and reason stay readable — closing a relay does not prove that what
+ * may already be in A's composer is not.
+ */
+export const KEEP_HELD_PAYLOAD_SET = `
+  pending_kind = CASE WHEN delivery_state IS NULL THEN NULL ELSE pending_kind END,
+  pending_body = CASE WHEN delivery_state IS NULL THEN NULL ELSE pending_body END,
+  payload_id = CASE WHEN delivery_state IS NULL THEN NULL ELSE payload_id END
+`;
 
 /** Placeholders for an `IN (…)` over the open states. */
 export const OPEN_STATE_PLACEHOLDERS = OPEN_RELAY_STATES.map(() => '?').join(', ');
@@ -154,24 +195,43 @@ export interface StashRelayPayloadOptions {
   overlap?: RelayOverlap;
 }
 
-/** Every relay carrying an undelivered payload, oldest first. */
-export function listRelaysWithPendingPayload(
+/**
+ * Every relay carrying an undelivered payload the pump may send, oldest first,
+ * with the payload's id (Issue #4064).
+ *
+ * A payload under a delivery hold (`delivery_state` set — being sent, or its
+ * outcome not known) is not listed: it is never sent again automatically.
+ */
+export function listDeliverableRelayPayloads(
   db: Database.Database
-): RelayWithPendingPayload[] {
+): Array<RelayWithPendingPayload & { payloadId: string | null }> {
   const rows = db
     .prepare(`
-      SELECT ${RELAY_COLUMNS} FROM session_relays
-      WHERE pending_kind IS NOT NULL
+      SELECT ${RELAY_COLUMNS}, payload_id FROM session_relays
+      WHERE pending_kind IS NOT NULL AND delivery_state IS NULL
       ORDER BY updated_at ASC
     `)
-    .all() as SessionRelayRow[];
+    .all() as Array<SessionRelayRow & { payload_id: string | null }>;
   return rows
     .filter((row) => row.pending_body !== null && row.pending_kind !== null)
     .map((row) => ({
       relay: mapRelay(row),
       kind: row.pending_kind as RelayPendingKind,
       body: row.pending_body as string,
+      payloadId: row.payload_id,
     }));
+}
+
+/**
+ * Every relay carrying an undelivered payload, oldest first.
+ *
+ * Issue #4064: a payload under a delivery hold is not "undelivered" in the
+ * sense the pump acts on, and is left out (see {@link listDeliverableRelayPayloads}).
+ */
+export function listRelaysWithPendingPayload(
+  db: Database.Database
+): RelayWithPendingPayload[] {
+  return listDeliverableRelayPayloads(db).map(({ relay, kind, body }) => ({ relay, kind, body }));
 }
 
 /**
@@ -180,6 +240,10 @@ export function listRelaysWithPendingPayload(
  * Issue #3957: with `payloadId` the clear only takes the payload it names. The
  * delivery passes the id it sent, so a reply stashed over a prompt notice while
  * that notice was being typed survives the notice's cleanup.
+ *
+ * Issue #4064: never a payload under a delivery hold — its delivery may have
+ * reached A, and its body, id and reason stay readable. The delivery records
+ * its own end with {@link completeRelayPayloadDelivery}.
  *
  * @returns Whether a payload was cleared
  */
@@ -195,14 +259,14 @@ export function clearRelayPending(
           .prepare(`
             UPDATE session_relays
             SET pending_kind = NULL, pending_body = NULL, payload_id = NULL, updated_at = ?
-            WHERE id = ?
+            WHERE id = ? AND delivery_state IS NULL
           `)
           .run(now, id)
       : db
           .prepare(`
             UPDATE session_relays
             SET pending_kind = NULL, pending_body = NULL, payload_id = NULL, updated_at = ?
-            WHERE id = ? AND payload_id IS ?
+            WHERE id = ? AND payload_id IS ? AND delivery_state IS NULL
           `)
           .run(now, id, payloadId);
   return result.changes === 1;
@@ -552,7 +616,9 @@ export function setRelayPendingReply(
  * Replace an unclaimed prompt notice with the reply that made it moot.
  *
  * Conditional on the notice's own payload id, so a notice that was replaced or
- * delivered meanwhile is not overwritten.
+ * delivered meanwhile is not overwritten — and (Issue #4064) on the notice not
+ * being under a delivery hold: one whose delivery may have reached A is kept,
+ * and the reply waits in the second slot behind it.
  */
 export function replaceRelayPromptWithReply(
   db: Database.Database,
@@ -565,7 +631,7 @@ export function replaceRelayPromptWithReply(
     .prepare(`
       UPDATE session_relays
       SET pending_kind = 'reply', pending_body = ?, payload_id = ?, overlap = ?, updated_at = ?
-      WHERE id = ? AND pending_kind = 'prompt' AND payload_id IS ?
+      WHERE id = ? AND pending_kind = 'prompt' AND payload_id IS ? AND delivery_state IS NULL
         AND state IN (${OPEN_STATE_PLACEHOLDERS})
     `)
     .run(reply.body, reply.payloadId, reply.overlap, now, id, promptPayloadId, ...OPEN_RELAY_STATES);
@@ -608,7 +674,8 @@ export function promoteRelayPendingReply(db: Database.Database, id: string, now 
  * second slot: the reply takes the first slot in its place (Issue #3957).
  *
  * Conditional on the notice's own payload id, in one transaction, so a notice
- * replaced meanwhile is left alone and the reply is not moved twice.
+ * replaced meanwhile is left alone and the reply is not moved twice. Issue
+ * #4064: never a notice under a delivery hold.
  */
 export function replaceRelayPromptWithPendingReply(
   db: Database.Database,
@@ -621,6 +688,7 @@ export function replaceRelayPromptWithPendingReply(
       .prepare(`
         SELECT pending_reply FROM session_relays
         WHERE id = ? AND pending_kind = 'prompt' AND payload_id IS ? AND pending_reply IS NOT NULL
+          AND delivery_state IS NULL
           AND state IN (${OPEN_STATE_PLACEHOLDERS})
       `)
       .get(id, promptPayloadId, ...OPEN_RELAY_STATES) as { pending_reply: string } | undefined;
@@ -654,11 +722,210 @@ export function failOrphanedRelayBind(
     .prepare(`
       UPDATE session_relays
       SET send_state = 'failed', state = 'cancelled', hold_reason = ?,
-          pending_kind = NULL, pending_body = NULL, payload_id = NULL, pending_reply = NULL,
+          ${KEEP_HELD_PAYLOAD_SET}, pending_reply = NULL,
           updated_at = ?
       WHERE id = ? AND bind_attempt_id = ? AND send_state = 'awaiting'
         AND state IN (${OPEN_STATE_PLACEHOLDERS})
     `)
     .run(reason, now, id, attemptId, ...OPEN_RELAY_STATES);
   return result.changes === 1;
+}
+
+// ---------------------------------------------------------------------------
+// Issue #4064: the delivery's own attempt (v63)
+// ---------------------------------------------------------------------------
+
+
+/** What {@link claimRelayPayloadDelivery} takes. */
+export interface ClaimRelayPayloadDeliveryInput {
+  relayId: string;
+  /** The payload the caller read; NULL for a row stashed before v62. */
+  payloadId: string | null;
+  kind: RelayPendingKind;
+  body: string;
+  /** Fresh per delivery attempt; the only key its result is written under. */
+  attemptId: string;
+  /** The server boot that takes it. */
+  owner: string;
+  /** Given to a payload that has no id yet, so the hold can name it. */
+  mintPayloadId: string;
+  now?: number;
+}
+
+/**
+ * Take one payload for delivery, durably, before its first key (Issue #4064).
+ *
+ * One conditional UPDATE on the payload the caller read — its id, kind and
+ * body — and on it not being taken already. Only the caller this answers for
+ * may send it; a payload replaced, delivered, held or taken meanwhile answers
+ * null and nothing is written. A throw (the database refused the write) means
+ * the same: do not send.
+ *
+ * @returns The payload's id (minted for a row that had none), or null
+ */
+export function claimRelayPayloadDelivery(
+  db: Database.Database,
+  input: ClaimRelayPayloadDeliveryInput
+): string | null {
+  const now = input.now ?? Date.now();
+  const payloadId = input.payloadId ?? input.mintPayloadId;
+  const result = db
+    .prepare(`
+      UPDATE session_relays
+      SET delivery_state = 'attempting', delivery_attempt_id = ?, delivery_owner = ?,
+          delivery_reason = NULL, delivery_at = ?, payload_id = ?
+      WHERE id = ? AND pending_kind = ? AND pending_body = ? AND payload_id IS ?
+        AND delivery_state IS NULL
+    `)
+    .run(
+      input.attemptId,
+      input.owner,
+      now,
+      payloadId,
+      input.relayId,
+      input.kind,
+      input.body,
+      input.payloadId
+    );
+  return result.changes === 1 ? payloadId : null;
+}
+
+/** Which attempt a delivery result is written under (Issue #4064). */
+export interface RelayPayloadAttemptRef {
+  relayId: string;
+  payloadId: string;
+  attemptId: string;
+  now?: number;
+}
+
+/**
+ * The attempt delivered its payload: empty the slot (if it still holds that
+ * payload) and drop the attempt, in one transaction (Issue #4064).
+ *
+ * @returns Whether the attempt was still the one on the row
+ */
+export function completeRelayPayloadDelivery(
+  db: Database.Database,
+  ref: RelayPayloadAttemptRef
+): boolean {
+  const now = ref.now ?? Date.now();
+  return db.transaction((): boolean => {
+    db.prepare(`
+      UPDATE session_relays
+      SET pending_kind = NULL, pending_body = NULL, payload_id = NULL, updated_at = ?
+      WHERE id = ? AND payload_id = ? AND delivery_attempt_id = ?
+    `).run(now, ref.relayId, ref.payloadId, ref.attemptId);
+    const result = db
+      .prepare(`
+        UPDATE session_relays
+        SET delivery_state = NULL, delivery_attempt_id = NULL, delivery_owner = NULL,
+            delivery_reason = NULL, delivery_at = NULL, updated_at = ?
+        WHERE id = ? AND delivery_attempt_id = ?
+      `)
+      .run(now, ref.relayId, ref.attemptId);
+    return result.changes === 1;
+  })();
+}
+
+/**
+ * The attempt is known not to have sent (`not-sent`, `prompt_waiting`): the
+ * payload is queued again (Issue #4064).
+ *
+ * @returns Whether the attempt was still the one on the row
+ */
+export function releaseRelayPayloadDelivery(
+  db: Database.Database,
+  ref: RelayPayloadAttemptRef
+): boolean {
+  const result = db
+    .prepare(`
+      UPDATE session_relays
+      SET delivery_state = NULL, delivery_attempt_id = NULL, delivery_owner = NULL,
+          delivery_reason = NULL, delivery_at = NULL, updated_at = ?
+      WHERE id = ? AND payload_id = ? AND delivery_attempt_id = ? AND delivery_state = 'attempting'
+    `)
+    .run(ref.now ?? Date.now(), ref.relayId, ref.payloadId, ref.attemptId);
+  return result.changes === 1;
+}
+
+/**
+ * Whether the attempt reached A is not known: hold the payload as `uncertain`,
+ * with the reason (Issue #4064). It stays in the slot — readable, and blocking
+ * the relay's later deliveries — and is never sent again automatically.
+ *
+ * @returns Whether the attempt was still the one on the row
+ */
+export function holdRelayPayloadDelivery(
+  db: Database.Database,
+  ref: RelayPayloadAttemptRef & { reason: string }
+): boolean {
+  const now = ref.now ?? Date.now();
+  const result = db
+    .prepare(`
+      UPDATE session_relays
+      SET delivery_state = 'uncertain', delivery_reason = ?, delivery_at = ?, updated_at = ?
+      WHERE id = ? AND payload_id = ? AND delivery_attempt_id = ? AND delivery_state = 'attempting'
+    `)
+    .run(ref.reason, now, now, ref.relayId, ref.payloadId, ref.attemptId);
+  return result.changes === 1;
+}
+
+/** {@link recoverInterruptedRelayDeliveries}' reason. */
+export const RELAY_DELIVERY_SERVER_RESTARTED = 'server-restarted';
+
+/**
+ * An attempt another boot left `attempting` stopped somewhere between its
+ * claim and its result: hold it as `uncertain` (Issue #4064). Every relay —
+ * legacy or bound, open or closed — and every kind. A payload that was in fact
+ * never typed (the server stopped right after the claim) is held too; that is
+ * the price of never typing one twice.
+ *
+ * Safe to run again: this boot's own attempts are not touched.
+ *
+ * @returns How many were held
+ */
+export function recoverInterruptedRelayDeliveries(
+  db: Database.Database,
+  boot: string,
+  now = Date.now()
+): number {
+  const result = db
+    .prepare(`
+      UPDATE session_relays
+      SET delivery_state = 'uncertain', delivery_reason = ?, delivery_at = ?, updated_at = ?
+      WHERE delivery_state = 'attempting' AND (delivery_owner IS NULL OR delivery_owner <> ?)
+    `)
+    .run(RELAY_DELIVERY_SERVER_RESTARTED, now, now, boot);
+  return result.changes;
+}
+
+/**
+ * Every relay, open or closed, whose payload is under a delivery hold
+ * (Issue #4064), oldest first. With an endpoint, those with it at either end;
+ * with a worktree only, those with that worktree at either end.
+ */
+export function listRelaysWithDeliveryHold(
+  db: Database.Database,
+  scope: { worktreeId?: string; endpoint?: RelayEndpoint } = {}
+): SessionRelay[] {
+  const clauses = ['delivery_state IS NOT NULL'];
+  const params: string[] = [];
+  if (scope.endpoint) {
+    clauses.push(
+      '((from_worktree_id = ? AND from_instance_id = ?) OR (to_worktree_id = ? AND to_instance_id = ?))'
+    );
+    const { worktreeId, instanceId } = scope.endpoint;
+    params.push(worktreeId, instanceId, worktreeId, instanceId);
+  } else if (scope.worktreeId) {
+    clauses.push('(from_worktree_id = ? OR to_worktree_id = ?)');
+    params.push(scope.worktreeId, scope.worktreeId);
+  }
+  const rows = db
+    .prepare(`
+      SELECT ${RELAY_COLUMNS} FROM session_relays
+      WHERE ${clauses.join(' AND ')}
+      ORDER BY created_at ASC
+    `)
+    .all(...params) as SessionRelayRow[];
+  return rows.map(mapRelay);
 }
