@@ -788,7 +788,7 @@ export function main(argv, deps = {}) {
     const durationSec = Math.round((now().getTime() - started.getTime()) / 1000);
     // The work HEAD under this one: a precheck of a refreshed HEAD stands for the
     // published HEAD, not for the worker's checks (run-log.mjs WORK_STAGES).
-    const workHead = workHeadOf(run, o.worktree, head);
+    const workHead = workHeadOf(run, o.worktree, head, { records, issue, item });
     const { file } = appendRecord(
       o.runDir,
       o.issues,

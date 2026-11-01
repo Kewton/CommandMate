@@ -8,8 +8,16 @@
 ファイルは上書きしない。`verify` / `review` / `findings` / `precheck` / `ci` / `merge` は HEAD つきでしか記録できない（その HEAD にだけ効く）。
 `status` の `next` は、**最新の HEAD について満たしていない最初の段**: 後の段が通った後で前の段が `fail` になればそこへ戻り、
 HEAD が変われば検証・確認をやり直す（`skip` は通ったと数える。対象外の段も `skip` を記録する。ただし `verify` / `findings` / `precheck` は `ok` だけ）。
-`verify` / `review` / `findings` は**作業の HEAD**（ワーカーの最後のコミット）で、ほかの段は**公開する HEAD** で見る。develop の取り込みや
+`verify` / `review` / `findings` は**作業の HEAD**で、ほかの段は**公開する HEAD** で見る。develop の取り込みや
 module-reference の一本化を重ねた HEAD の記録には、`--work-head <作業の HEAD>` で作業の HEAD も書く（公開のスクリプトと precheck は自分で書く）。
+**作業の HEAD** は、公開する HEAD から first-parent を下って最初に当たる次のコミット（`pr-common.mjs` `workHeads`、#4076）:
+module-reference だけを変えたコミット（6-4 の一本化）は飛ばす。マージコミットは、**そのマージ自身に `verify` の記録（`head` が一致。同じ work item。
+`fail` も含む）があるか、マージ自身が `src` などを変えている（親 2 つの自動マージ `git merge-tree` と木が違う。module-reference だけの違いは数えない）**ときは
+作業の HEAD、それ以外（6-2 の衝突しない refresh）は飛ばす。それ以外のコミットは作業の HEAD（ワーカーの最後のコミット）。
+したがって、ワーカーが develop との衝突を解いたマージ M で検証し直したときは、**M 自身の `verify` / `review` / `findings` が要る**（下の W の記録は使わない）。
+M の後にワーカーが `src` を変えたコミット（通常のコミット、または `src` を書き換えたマージ）を重ねれば、それが作業の HEAD になり、M の記録は流用しない。
+M の `verify` が `fail` なら、下の W の古い `ok` では通らない。記録の `head=M` を W に書き換えない（`precheck` の検証の再利用と環境の照合は記録の `head`・`key`・`env=` のまま行う）。
+`status` は git を見ないので、precheck / `publish-pr.mjs` がこの規則で書いた `workHead`（M のときは `head` と同じなので書かない）を読み返して同じ結論に至る。
 `--head` / `--work-head` は **`git rev-parse HEAD` の 40 桁の SHA だけ**を受け付ける（短い SHA は exit 2 で拒否。`publish-pr.mjs` が 40 桁で記録を探すため、短い SHA で書くと「記録が無い」と読まれる、#3664）。すでに記録された 7 桁の行は `status` が読める。
 この規則は `publish-pr.mjs` / `merge-pr.mjs` の止まる条件と同じ関数（`unmetStage`）なので、再開先と公開側の判定はずれない。
 `verify` は `scripts/orchestrate/wait-verify.mjs`（3-3）、`precheck` は `scripts/orchestrate/precheck.mjs`（6-1-1）が自分で書く。

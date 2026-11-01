@@ -294,8 +294,9 @@ export function main(argv, deps = {}) {
 
     // 3. The records of the work, and the fragments. The precheck of the HEAD
     //    to merge is step 4's: that HEAD may not exist yet.
-    const workHead = workHeadOf(run, o.worktree, head);
     let { records } = readRecords(o.runDir, o.issues);
+    // pr-common.mjs workHeadOf, the rule publish-pr and precheck use: a merge the worker was verified on is the work HEAD (#4076).
+    let workHead = workHeadOf(run, o.worktree, head, { records, issue, item });
     const envWhere = { runDir: o.runDir, worktree: o.worktree, home: deps.home ?? os.homedir() };
     // A verify of an earlier HEAD that differs only in the dependencies waits for step 4's precheck (#3883 N10).
     const deferred = [];
@@ -325,6 +326,8 @@ export function main(argv, deps = {}) {
       }
       refreshed = true;
       head = git(run, o.worktree, ['rev-parse', 'HEAD']).trim();
+      // The refresh is a clean merge with no verify of its own: the work HEAD under it is the one step 3 judged.
+      workHead = workHeadOf(run, o.worktree, head, { records, issue, item });
     }
     const markers = markerFiles(run, o.worktree);
     if (markers.length > 0) {
@@ -391,6 +394,7 @@ export function main(argv, deps = {}) {
     // 5. The checks of this HEAD.
     records = readRecords(o.runDir, o.issues).records;
     const needBuild = !builtLikeCi(findLatest(records, { issue, item, stage: 'precheck', head }));
+    // The verify step 3 judged (the latest one, at the work HEAD): whether it ran the full unit suite.
     const verify = latestByStage(records, issue, item).verify ?? null;
     const need = { needBuild, needUnit: o.unitRelated || !ranFullUnit(verify), last: o.last };
     const rerunDone = records.some(

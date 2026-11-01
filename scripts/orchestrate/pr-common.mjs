@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
-import { itemOf, latestByStage, unmetStage } from './run-log.mjs';
+import { findLatest, itemOf, latestByStage, unmetStage } from './run-log.mjs';
 import { IGNORED_DIRTY, dirtyPaths } from './dirty-tree.mjs';
 import { itemProblem, workItemName } from './execution-key.mjs';
 import { FOLLOWS_HEAD, verifyEnvState } from './env-manifest.mjs';
@@ -211,18 +211,71 @@ export function prsOfBranch(run, repo, branch) {
 }
 
 /**
- * The commits whose records still describe HEAD: HEAD itself, then down the
- * first parent while the commit is a merge (6-2's refresh) or touches only
- * ORCHESTRATOR_FILES (6-4's fold), and the first commit that is neither — the
- * worker's last commit, which verify / review / findings / precheck saw.
+ * The files a merge changed itself (#4076): what its tree has that the
+ * automatic merge of its two parents (`git merge-tree --write-tree`) does not —
+ * a conflict resolved by hand, or an edit made in the merge — outside
+ * ORCHESTRATOR_FILES. A clean refresh (6-2) has none. `null` when it cannot be
+ * told (more than two parents, or a git without `merge-tree --write-tree`):
+ * the merge is then read as before (no edits of its own).
  */
-export function workHeads(run, worktree, head) {
+export function mergeOwnFiles(run, worktree, sha, parents) {
+  if (parents.length !== 2) return null;
+  let out;
+  try {
+    out = run('git', ['-C', worktree, 'merge-tree', '--write-tree', '--no-messages', parents[0], parents[1]]);
+  } catch {
+    return null;
+  }
+  // exit 1 is "conflicts": the tree is still written, with the conflicted files as git left them.
+  if (out.status !== 0 && out.status !== 1) return null;
+  const tree = String(out.stdout ?? '').split('\n')[0].trim();
+  if (!/^[0-9a-f]{40,64}$/.test(tree)) return null;
+  const files = lines(git(run, worktree, ['diff-tree', '-r', '--name-only', '--no-renames', tree, sha]));
+  return files.filter((file) => !ORCHESTRATOR_FILES.includes(file));
+}
+
+/**
+ * Whether the run record has a verify of `sha` itself for the work item (any
+ * result, run-log.mjs findLatest / inItem): the mark that makes a merge the
+ * work HEAD (#4076). A failed one counts too, so a later failure is never
+ * covered by an earlier pass under it.
+ */
+export function verifiedAt(records, issue, item, sha) {
+  return findLatest(records ?? [], { issue, item, stage: 'verify', head: sha }) !== null;
+}
+
+/**
+ * The commits from HEAD down to the work HEAD — the commit whose verify /
+ * review / findings stand for what is published. HEAD itself, then down the
+ * first parent:
+ *   - a commit that touches only ORCHESTRATOR_FILES (6-4's fold) is passed over;
+ *   - a merge (6-2's refresh) is passed over, unless it has a verify of its own
+ *     in the run record (verifiedAt) or changed files itself (mergeOwnFiles):
+ *     a worker that resolved a develop conflict in a merge and was verified
+ *     there has that merge as the work HEAD, and its own verify / review /
+ *     findings are needed (#4076); a merge that rewrote files without them is
+ *     the work HEAD with nothing recorded, so an earlier pass under it is not
+ *     taken for it;
+ *   - any other commit is the work HEAD (the worker's last commit).
+ * The last element is the work HEAD. The one rule publish-pr, merge-pr and
+ * precheck read (workHeadOf); precheck and publish-pr write the result as
+ * `workHead`, which is what run-log.mjs `status` (headsOf) reads back.
+ *
+ * @param {{ records?: any[], issue?: number, item?: string | null }} [context]
+ *   the run record and the work item whose verify marks a merge; without it no merge is marked.
+ */
+export function workHeads(run, worktree, head, context = {}) {
+  const { records = [], issue, item } = context;
   const heads = [];
   const log = lines(git(run, worktree, ['log', '--first-parent', '--format=%H %P', '-n', '50', head]));
   for (const line of log) {
     const [sha, ...parents] = line.split(' ');
     heads.push(sha);
-    if (parents.length > 1) continue;
+    if (parents.length > 1) {
+      if (issue !== undefined && verifiedAt(records, issue, item, sha)) break;
+      if ((mergeOwnFiles(run, worktree, sha, parents)?.length ?? 0) > 0) break;
+      continue;
+    }
     const files = lines(git(run, worktree, ['diff-tree', '--no-commit-id', '--name-only', '-r', sha]));
     if (files.length > 0 && files.every((file) => ORCHESTRATOR_FILES.includes(file))) continue;
     break;
@@ -230,9 +283,13 @@ export function workHeads(run, worktree, head) {
   return heads;
 }
 
-/** The worker's last commit under `head` (the last of workHeads). */
-export function workHeadOf(run, worktree, head) {
-  const heads = workHeads(run, worktree, head);
+/**
+ * The work HEAD under `head` (the last of workHeads).
+ *
+ * @param {{ records?: any[], issue?: number, item?: string | null }} [context]
+ */
+export function workHeadOf(run, worktree, head, context) {
+  const heads = workHeads(run, worktree, head, context);
   return heads[heads.length - 1] ?? head;
 }
 

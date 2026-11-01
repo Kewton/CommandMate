@@ -8,6 +8,8 @@ export const HEAD_A = 'a'.repeat(40);
 export const HEAD_B = 'b'.repeat(40);
 export const HEAD_M = 'c'.repeat(40);
 export const DEVELOP = 'd'.repeat(40);
+/** The tree `git merge-tree --write-tree` answers (#4076). */
+export const MERGE_TREE = '9'.repeat(40);
 
 export type Pr = { number: number; state: 'OPEN' | 'MERGED' | 'CLOSED'; headRefOid: string; url: string; title: string; headRefName: string; baseRefName: string };
 export type Check = { name: string; bucket: string; link?: string };
@@ -19,7 +21,10 @@ export interface FakeState {
   status: string;
   /** `git log --first-parent --format=%H %P` from HEAD. */
   firstParent: string[];
-  /** Files a single-parent commit touches (`git diff-tree`). */
+  /**
+   * Files a single-parent commit touches (`git diff-tree <sha>`). For a merge, the files it
+   * changed itself: what `git diff-tree <merge-tree> <sha>` answers (#4076); none when absent.
+   */
   commitFiles: Record<string, string[]>;
   changelogStatus: string;
   changed: string[];
@@ -37,6 +42,8 @@ export interface FakeState {
   pushFails: boolean;
   /** `%s` of a commit by sha; others get the default subject. */
   subjects: Record<string, string>;
+  /** `gh api repos/<repo>/issues/<N> --jq .title` (#4076 B); null answers like an Issue gh could not read. */
+  issueTitle: string | null;
   /** `gh run view <id> --json status` by run id; `completed` when absent. `gh run rerun` sets `queued`. */
   runStatus: Record<string, string>;
   /** `gh run view <id> --json attempt` by run id; 1 when absent. `gh run rerun` adds 1. */
@@ -63,6 +70,7 @@ export function fakeGit(overrides: Partial<FakeState> = {}) {
     createdNumber: 9001,
     pushFails: false,
     subjects: {},
+    issueTitle: 'feat(orchestrate): publish and merge',
     runStatus: {},
     runAttempt: {},
     ...overrides,
@@ -81,6 +89,8 @@ export function fakeGit(overrides: Partial<FakeState> = {}) {
       if (verb === 'status') return ok(state.status);
       if (verb === 'log' && sub.includes('--first-parent')) return ok(state.firstParent.join('\n'));
       if (verb === 'log') return ok(sub.includes('--format=%s') ? `${state.subjects[sub[sub.length - 1]] ?? 'feat(orchestrate): publish and merge (#3477)'}\n` : 'body line\n');
+      // The automatic merge of a merge's parents (#4076): diff-tree of it against the merge answers commitFiles[merge].
+      if (verb === 'merge-tree') return ok(`${MERGE_TREE}\n`);
       if (verb === 'diff-tree') return ok((state.commitFiles[sub[sub.length - 1]] ?? []).join('\n'));
       if (verb === 'diff' && sub.includes('--name-status')) return ok(state.changelogStatus);
       if (verb === 'diff' && sub.includes('--diff-filter=U')) return ok(state.mergeConflict.join('\n'));
@@ -151,6 +161,9 @@ export function fakeGit(overrides: Partial<FakeState> = {}) {
         const pr = state.prs.find((p) => String(p.number) === args[2]);
         if (pr) pr.state = 'MERGED';
         return ok();
+      }
+      if (args[0] === 'api' && /^repos\/[^/]+\/[^/]+\/issues\/\d+$/.test(args[1] ?? '') && args.includes('.title')) {
+        return state.issueTitle === null ? failed('gh: Not Found (HTTP 404)') : ok(`${state.issueTitle}\n`);
       }
       if (key === 'issue view') return ok(JSON.stringify({ state: state.issueState }));
       if (key === 'issue close') {
