@@ -209,7 +209,8 @@ lastSend says how the last send to the instance ended: not-sent (no key of the
 message was typed, e.g. prompt not ready), sent, or indeterminate (part of it
 may have been typed). Nothing is resent automatically: resend a not-sent
 message yourself, and do not resend an indeterminate one before checking
-\`capture --pane\`.
+\`capture --pane\`. With overlapping sends it follows the input lock's grant
+order, so it may be another request's outcome, not yours (Issue #4065).
 
 To answer the screen only if it is still this one (Issue #3756):
   commandmate respond <worktree-id> --instance <id> --expect-screen <kind> \\

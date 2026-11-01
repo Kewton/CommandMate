@@ -34,6 +34,7 @@ import { sendUserMessage } from '@/lib/session/send-user-message';
 import { PROMPT_WAITING_CODE } from '@/lib/session/prompt-waiting-guard';
 import type { SendAttemptReason, SendAttemptState } from '@/lib/session/send-attempt-types';
 import { recordSendAttempt } from '@/lib/session/send-attempt-state';
+import { instanceInputGenerationMark } from '@/lib/session/instance-input-lock';
 import { isSessionStartTimeoutError } from '@/lib/session/session-start-error';
 import { settleSessionLaunch } from '@/lib/session/session-launch-flight';
 import { createLogger } from '@/lib/logger';
@@ -119,6 +120,11 @@ async function handleSend(
   { params }: { params: Promise<{ id: string }> },
   relay: RouteRelayState
 ) {
+  // Issue #4065: the input generation counter at the request's outermost
+  // entry, before the body is read and before every wait below. A refusal of
+  // this request — here or in the send service — carries it, so it does not
+  // replace the record of a send granted while this one waited.
+  const observedInputGeneration = instanceInputGenerationMark();
   try {
     const { id: requestedWorktreeId } = await params;
     const id = canonicalWorktreeId(requestedWorktreeId);
@@ -184,7 +190,12 @@ async function handleSend(
     // Issue #4011: the same record is this request's attempt, so `sendOutcome`
     // answers `not_sent` for it whether or not a relay is bound.
     const recordNotSent = (reason: SendAttemptReason): void => {
-      recordSendAttempt(sendAttemptInstance, { state: 'not-sent', reason, content: trimmedContent });
+      recordSendAttempt(sendAttemptInstance, {
+        state: 'not-sent',
+        reason,
+        content: trimmedContent,
+        observedGeneration: observedInputGeneration,
+      });
       relay.attempt = 'not-sent';
     };
     if (ownership.verdict === 'foreign') {
@@ -283,6 +294,7 @@ async function handleSend(
       copilotModel: cliToolId === 'copilot' ? body.model : undefined,
       // Issue #1737: `commandmate send --ignore-structured-prompt`.
       ignoreStructuredPromptGuard: body.ignoreStructuredPromptGuard === true,
+      observedInputGeneration,
       onAttempt: (attempt) => {
         ownAttempt = attempt;
         relay.attempt = attempt.state;

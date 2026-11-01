@@ -92,6 +92,7 @@ import { migrateResponsePollerWorktreeIds } from '@/lib/polling/response-poller'
 import { movePartialAnswers, type PartialAnswerMove } from '@/lib/polling/auto-yes-poller-state';
 import { getEnterFallbackSessionEpoch } from '@/lib/polling/auto-yes-enter-fallback';
 import { migrateWorktreeRooms } from '@/lib/ws-server';
+import { forgetSendAttemptsForWorktree } from './send-attempt-state';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('worktree-session-reconcile');
@@ -757,6 +758,16 @@ function migrateRuntimeState(
     result.movedRooms = migrateWorktreeRooms(renames);
   } catch (error) {
     result.errors.push(`websocket rooms: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  // --- lastSend (Issue #4065) -------------------------------------------------
+  // Dropped, not moved: a record and its order (maxG) describe the sends made
+  // under the ID they were made under, and an old request that finishes late
+  // records under its own (old) ID. Both sides of every pair start with none.
+  // Never throws.
+  for (const rename of renames) {
+    forgetSendAttemptsForWorktree(rename.oldId);
+    forgetSendAttemptsForWorktree(rename.newId);
   }
 }
 

@@ -82,6 +82,7 @@ import {
 import { extractComposerText, SUPPORTED_COMPOSER_TOOLS } from '@/lib/detection/composer-text';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
 import {
+  instanceInputGenerationMark,
   isInputBoundaryRefusal,
   observeInputStart,
   withInstanceInputLock,
@@ -157,6 +158,15 @@ export interface SendUserMessageParams {
    * before anything is typed, and the attempt is `not-sent`.
    */
   inputBoundary?: InputBoundaryHooks;
+  /**
+   * Issue #4065: the input generation counter (`instanceInputGenerationMark`)
+   * as the request's outermost entry read it — the send route, before it read
+   * the body. A `not-sent` refusal this send records before any lock was
+   * granted to it carries it, so it does not replace the record of a send
+   * granted after the request began. Omitted (the timer, relay delivery), it
+   * is read on entry here.
+   */
+  observedInputGeneration?: number;
 }
 
 /** Result of {@link sendUserMessage}. */
@@ -285,6 +295,10 @@ export async function sendUserMessage(
   params: SendUserMessageParams
 ): Promise<SendUserMessageResult> {
   const { worktreeId, content, cliToolId, instanceId, absoluteImagePath, copilotModel, respondAgent } = params;
+  // Issue #4065: read once, before the first await — a send granted while this
+  // request waits (ownership, the prompt guard, `/model`, the lock) is newer
+  // than this request's refusal.
+  const observedGeneration = params.observedInputGeneration ?? instanceInputGenerationMark();
   const messageType: MessageType = params.messageType ?? 'normal';
   /**
    * The instance this send belongs to, resolved the way `createMessage` and
@@ -306,9 +320,33 @@ export async function sendUserMessage(
   // receipt know the attempt by, and the input lock generation the delivery
   // ran under, so the late outcome of a send whose session was replaced does
   // not overwrite the newer generation's record.
+  //
+  // Issue #4065: which record is the instance's last is decided by the lock's
+  // grant order (`send-attempt-state`). This send's record is one of:
+  // - granted: the body's lock was granted to it (`inputGeneration`) — the
+  //   outer lock below for claude / codex, the shared sender's own lock for the
+  //   others, told through `observeInputStart` as it is granted, so a send that
+  //   throws after it keeps it. Refused after the grant, before any key, too.
+  // - refused: `not-sent` with no lock granted (ownership, the prompt guard,
+  //   `/model`, the lock not admitted, a readiness wait before the sender's
+  //   lock) — carries `observedGeneration`.
+  // - excluded: typed or dispatched outside the shared sender's lock —
+  //   copilot's selection-list keys (input noted, no ticket), opencode's HTTP
+  //   delivery and its keyboard fallback (a dispatch noted) — or anything else
+  //   that reports neither; kept in the order attempts finish.
   const typedContent = typedBodyFor(cliTool, content, absoluteImagePath);
   let inputGeneration: number | undefined;
+  let inputNotedWithoutTicket = false;
+  let dispatched = false;
   const settle = (state: SendAttemptState, reason: SendAttemptReason): void => {
+    const excluded = dispatched || (inputGeneration === undefined && inputNotedWithoutTicket);
+    const order = excluded
+      ? {}
+      : inputGeneration !== undefined
+        ? { inputGeneration }
+        : state === 'not-sent'
+          ? { observedGeneration }
+          : {};
     recordSendAttempt(
       { worktreeId, cliToolId, instanceId: resolvedInstanceId },
       {
@@ -316,9 +354,10 @@ export async function sendUserMessage(
         reason,
         content,
         ...(typedContent !== content ? { typedContent } : {}),
-        ...(inputGeneration !== undefined ? { inputGeneration } : {}),
+        ...order,
       }
     );
+    // Told whether or not the shared record took it: this is the request's own.
     params.onAttempt?.({ state, reason });
   };
 
@@ -520,7 +559,24 @@ export async function sendUserMessage(
     | { sent: true; inputStartedAt: Date | null }
   > {
     try {
-      const { inputStartedAt } = await observeInputStart(sendToTool, params.onInputStart, params.inputBoundary);
+      const { inputStartedAt } = await observeInputStart(
+        sendToTool,
+        (at) => {
+          // Issue #4065: input noted before any body lock was told — copilot's
+          // selection-list keys, under its own lock.
+          if (inputGeneration === undefined) inputNotedWithoutTicket = true;
+          params.onInputStart?.(at);
+        },
+        params.inputBoundary,
+        {
+          onTicket: (generation) => {
+            inputGeneration = inputGeneration === undefined ? generation : Math.max(inputGeneration, generation);
+          },
+          onDispatch: () => {
+            dispatched = true;
+          },
+        }
+      );
       return { sent: true, inputStartedAt };
     } catch (error) {
       logger.error('failed-to-send-message-to:', { error: getErrorMessage(error) });

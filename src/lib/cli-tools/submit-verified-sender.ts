@@ -121,6 +121,7 @@ import {
   getCarriedPasteMark,
   leaveCarriedPasteMark,
   noteInputStart,
+  noteInputTicket,
   withInstanceInputLock,
   type InstanceInputTicket,
 } from '@/lib/session/instance-input-lock';
@@ -687,7 +688,14 @@ export async function clearComposerBeforeSend(
 export async function sendMessageWithSubmitVerification(
   params: SubmitVerifiedSendParams
 ): Promise<void> {
-  await withInstanceInputLock(params.sessionName, (ticket) => sendUnderInputLock(params, ticket));
+  await withInstanceInputLock(params.sessionName, (ticket) => {
+    // Issue #4065: the body's generation, told to the request before any key
+    // (and kept by it if the send throws). The same ticket when this joins the
+    // send service's outer lock (claude / codex), so it is told once more,
+    // with the same number.
+    noteInputTicket(ticket);
+    return sendUnderInputLock(params, ticket);
+  });
 }
 
 async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: InstanceInputTicket): Promise<void> {
