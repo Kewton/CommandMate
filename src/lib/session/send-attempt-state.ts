@@ -216,6 +216,17 @@ function carriesCode(error: unknown, code: string): boolean {
  * (`Failed to send message to <tool>: …`), so they are matched anywhere in it.
  */
 export function classifySendFailure(error: unknown): { state: SendAttemptState; reason: SendAttemptReason } {
+  // #4040: opencode's keyboard fallback refused before any key (its cause says
+  // why — a code like `paste-not-started` included), but the server dispatch
+  // before it ended `unknown`: the message may already be there, so the attempt
+  // as a whole stays unknown, never "safe to resend". Read FIRST, before any
+  // code the cause carries.
+  if (
+    error instanceof Error &&
+    /an earlier server dispatch may have delivered the message \(Issue #4040\)/.test(error.message)
+  ) {
+    return { state: 'indeterminate', reason: 'send-error' };
+  }
   if (
     typeof error === 'object' &&
     error !== null &&

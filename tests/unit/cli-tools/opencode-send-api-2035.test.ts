@@ -85,7 +85,8 @@ import {
 } from '@/lib/hooks/sources/opencode/subscription';
 import { sendMessageWithSubmitVerification } from '@/lib/cli-tools/submit-verified-sender';
 import { isImageCapableCLITool } from '@/lib/cli-tools/types';
-import { hasSession } from '@/lib/tmux/tmux';
+import { capturePane, hasSession } from '@/lib/tmux/tmux';
+import { buildOpencodeComposerFrame } from '@tests/fixtures/opencode-launch-boot-11821';
 import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
 
 /** The port this Issue's live capture used. */
@@ -170,6 +171,8 @@ describe('Issue #2035: sending over the opencode server', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     hasSessionMock.mockResolvedValue(true);
+    // Issue #4040: the keyboard fallback waits for an empty input box first.
+    vi.mocked(capturePane).mockResolvedValue(buildOpencodeComposerFrame());
     submitMock.mockResolvedValue(undefined);
     getPortMock.mockReturnValue(null);
     livenessMock.mockReturnValue({ state: 'unknown' });

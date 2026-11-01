@@ -700,21 +700,9 @@ export function reconcileCallers(
   return problems;
 }
 
-/**
- * Out of this ledger's reach but on the same invariant, tracked for a later
- * Issue (#3981 横展開): they type through the shared sender, so they are not
- * `sendKeys` sites, but their readiness is not decided before the keys.
- *
- * Issue #4032 recorded them, by its contract's decision, without changing them:
- * each changes when a send is typed, which that refactor was not to change.
- */
-const READINESS_FOLLOW_UP_REASON =
-  'Recorded, not fixed, by #4032’s decision: deciding readiness before the keys changes when a send is typed (a behaviour change). 追跡: #4040.';
-const READINESS_FOLLOW_UPS: readonly { file: string; what: string; reason: string }[] = [
-  { file: 'src/lib/cli-tools/copilot.ts', what: 'the normal send drops `ready: false` from its prompt wait', reason: READINESS_FOLLOW_UP_REASON },
-  { file: 'src/lib/cli-tools/vibe-local.ts', what: 'no readiness wait before a send', reason: READINESS_FOLLOW_UP_REASON },
-  { file: 'src/lib/cli-tools/opencode.ts', what: 'the tmux fallback when no server can be attached', reason: READINESS_FOLLOW_UP_REASON },
-];
+/** The source with its comments taken out, so prose naming a function is not a use. */
+const codeOf = (source: string): string =>
+  source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
 
 const LOCK_EVIDENCE = /currentInstanceInputTicket|withInstanceInputLock|answerUnderInstanceInputLock/;
 
@@ -726,9 +714,12 @@ const LOCK_EVIDENCE = /currentInstanceInputTicket|withInstanceInputLock|answerUn
 export function lockEvidenceProblems(row: LedgerRow, text: string): string[] {
   if (row.kind !== 'lock' || row.evidence === undefined) return [];
   const problems: string[] = [];
-  if (!LOCK_EVIDENCE.test(text)) problems.push(`lock evidence does not run the lock: ${keyOf(row)} (${row.evidence})`);
+  // Read without its comments (Issue #4032 review P3-3): a site named only in
+  // prose is not a site the test drives.
+  const code = codeOf(text);
+  if (!LOCK_EVIDENCE.test(code)) problems.push(`lock evidence does not run the lock: ${keyOf(row)} (${row.evidence})`);
   const name = functionName(row.site);
-  if (!new RegExp(`\\b${name}\\b`).test(text)) {
+  if (!new RegExp(`\\b${name}\\b`).test(code)) {
     problems.push(`lock evidence never names its site \`${name}\`: ${keyOf(row)} (${row.evidence})`);
   }
   return problems;
@@ -780,10 +771,6 @@ export function reconcile(
 
 const read = (file: string): string => readFileSync(join(REPO_ROOT, file), 'utf-8');
 
-/** The source with its comments taken out, so prose naming a function is not a use. */
-const codeOf = (source: string): string =>
-  source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
-
 describe('[#3981] every pane key writer in src is on the ledger', () => {
   it('the scan of src agrees with the ledger (negative control: today’s tree passes)', () => {
     expect(reconcile(scanRepository(), LEDGER)).toEqual([]);
@@ -810,12 +797,6 @@ describe('[#3981] every pane key writer in src is on the ledger', () => {
       const name = row.site.split('.').pop() as string;
       const callers = srcFiles().filter((f) => f !== row.file && new RegExp(`\\b${name}\\b`).test(codeOf(read(f))));
       expect(callers, keyOf(row)).toEqual([]);
-    }
-  });
-
-  it('the readiness follow-ups still name files that exist', () => {
-    for (const { file, what } of READINESS_FOLLOW_UPS) {
-      expect(existsSync(join(REPO_ROOT, file)), what).toBe(true);
     }
   });
 });
@@ -1259,6 +1240,25 @@ describe('[#4032 review-3981 P3-6] a lock row’s evidence test names its site',
     }
   });
 
+  it('positive (#4050): the site named only in a comment of the evidence fails, for every lock row', () => {
+    for (const row of lockRows) {
+      const name = functionName(row.site);
+      const code = read(row.evidence as string).replace(new RegExp(`\\b${name}\\b`, 'g'), 'someOtherFunction');
+      const text = `${code}\n// Drives ${name}.\n/** ${name} under the lock */\n`;
+      expect(lockEvidenceProblems(row, text), keyOf(row)).toEqual([
+        expect.stringContaining(`lock evidence never names its site \`${name}\``),
+      ]);
+    }
+  });
+
+  it('positive (#4050): a lock run only in a comment is not a run of the lock', () => {
+    const row = LEDGER[0];
+    const name = functionName(row.site);
+    expect(lockEvidenceProblems(row, `// withInstanceInputLock\nit('types', () => ${name}());`)).toEqual([
+      expect.stringContaining('lock evidence does not run the lock'),
+    ]);
+  });
+
   it('positive: evidence that never runs the lock fails', () => {
     const row = LEDGER[0];
     expect(lockEvidenceProblems(row, `it('types', () => ${functionName(row.site)}());`)).toEqual([
@@ -1297,12 +1297,6 @@ describe('[#4032] raw `send-keys` / `paste-buffer` outside the tmux module are o
   });
 });
 
-describe('[#4032] the readiness follow-ups say why they are not fixed here', () => {
-  it('every follow-up states a reason', () => {
-    for (const { file, reason } of READINESS_FOLLOW_UPS) expect(reason.length, file).toBeGreaterThan(40);
-  });
-});
-
 describe('[#4032 review P3-2] the key-sequence builders are called from where the raw row says', () => {
   it('negative control: today’s callers agree with the ledger', () => {
     expect(reconcileKeySequenceCallers(scanKeySequenceCallers())).toEqual([]);
@@ -1318,5 +1312,94 @@ describe('[#4032 review P3-2] the key-sequence builders are called from where th
         `key-sequence caller not on the ledger: src/lib/cli-tools/x.ts :: typeSteps :: ${name}`,
       ]);
     }
+  });
+});
+
+describe('[#4050] raw tmux key commands in the shapes #4032’s scan did not read', () => {
+  // A file on the tmux allowlist: no other guard stops a raw write there.
+  const FILE = 'src/lib/cli-tools/x.ts';
+  const positives: Array<[string, string, string, string]> = [
+    ['a shell line', 'export async function typeShell(s: string) { await exec(`tmux send-keys -t ${s} Enter`); }\n', 'typeShell', 'send-keys'],
+    ['a shell line with a global flag', "export const pasteShell = () => execAsync('tmux -L cm pasteb -t x');\n", 'pasteShell', 'paste-buffer'],
+    ['an argv with a global flag first', "export async function typeSock(s: string, sock: string) { await execFile('tmux', ['-L', sock, 'send-keys', '-t', s, 'x']); }\n", 'typeSock', 'send-keys'],
+    ['an argv with the program first', "export const typeArgv = (s: string) => spawn(['tmux', '-u', 'send-keys', '-t', s]);\n", 'typeArgv', 'send-keys'],
+    ['the alias `send`', "export async function typeAlias(s: string) { await execFile('tmux', ['send', '-t', s, 'x']); }\n", 'typeAlias', 'send-keys'],
+    ['the alias `pasteb` through runTmux', "export const pasteAlias = (s: string) => runTmux(['pasteb', '-t', s]);\n", 'pasteAlias', 'paste-buffer'],
+    ['a command chained after `;`', "export const chained = (s: string) => execFile('tmux', ['select-pane', '-t', s, ';', 'send-keys', 'x']);\n", 'chained', 'send-keys'],
+  ];
+
+  for (const [what, text, site, command] of positives) {
+    it(`positive: ${what} fails until it is listed`, () => {
+      const found = scanRawKeyWrites(FILE, text);
+      expect(found.map((w) => [w.site, w.command]), text).toEqual([[site, command]]);
+      expect(reconcileRaw([...scanRepositoryRawWrites(), ...found], RAW_KEY_WRITES)).toEqual([
+        expect.stringContaining(`raw key write not on the ledger: ${FILE} :: ${site} :: ${command}`),
+      ]);
+    });
+  }
+
+  it('negative: CLI command names, labels, permission patterns and arguments are not raw writes', () => {
+    const text =
+      "const cmd = new Command('send');\n" +
+      "export const argv = (m: string) => ['send', 'wt', m, '--instance', 'claude'];\n" +
+      "execFile('commandmate', ['send', 'wt', 'hi']);\n" +
+      "followUpCommand('send', 'wt', 't', 'x');\n" +
+      "const allow = ['Bash(tmux kill-session:*)', 'Bash(tmux send-keys:*)'];\n" +
+      "execFile('tmux', ['display-message', '-p', 'send']);\n" +
+      "assertInputOwner(t, 'claude', 'paste-buffer', false);\n" +
+      "// exec(`tmux send-keys -t x Enter`)\n";
+    expect(scanRawKeyWrites(FILE, text)).toEqual([]);
+  });
+
+  it('negative: an argv whose literal text is a command word counts once, for its command', () => {
+    const text = "export const once = (s: string) => execFile('tmux', ['send-keys', '-t', s, 'send']);\n";
+    expect(scanRawKeyWrites(FILE, text).map((w) => w.command)).toEqual(['send-keys']);
+  });
+});
+
+describe('[#4050] key-writer references in the shapes #4032’s scan did not read', () => {
+  const FILE = 'src/lib/cli-tools/x.ts';
+  const cases: Array<[string, string, string, string]> = [
+    ['a namespace read by element access', "import * as ns from '../tmux/tmux';\nexport async function keyed(s: string) { await ns['sendSpecialKey'](s, 'Enter'); }\n", 'keyed', 'sendSpecialKey'],
+    ['an unbound dynamic import', "export async function late(s: string) { await (await import('@/lib/tmux/tmux')).sendSpecialKey(s, 'Enter'); }\n", 'late', 'sendSpecialKey'],
+    ['an unbound dynamic import read by element access', "export async function lateKeyed(s: string) { await (await import('@/lib/tmux/tmux'))['sendKeys'](s, 'x', true); }\n", 'lateKeyed', 'sendKeys'],
+    ['a dynamic import’s `.then`', "export function later(s: string) { return import('@/lib/tmux/tmux').then((m) => m.sendSpecialKey(s, 'Enter')); }\n", 'later', 'sendSpecialKey'],
+    ['a dynamic import’s `.then`, destructured', "export function laterKeys(s: string) { return import('../tmux/tmux').then(({ sendKeys }) => sendKeys(s, 'x', true)); }\n", 'laterKeys', 'sendKeys'],
+  ];
+
+  for (const [what, text, site, callee] of cases) {
+    it(`positive: ${what} is a site, off every ledger`, () => {
+      const found = scanKeyWriters(FILE, text);
+      expect(found.map((s) => [s.site, s.callee]), text).toEqual([[site, callee]]);
+      const ledger = SEND_KEYS_WRITERS.includes(callee) ? LEDGER : STAGE_2_LEDGER;
+      const [baseline, writers] = SEND_KEYS_WRITERS.includes(callee)
+        ? [UNMEDIATED_BASELINE, SEND_KEYS_WRITERS]
+        : [STAGE_2_UNMEDIATED_BASELINE, STAGE_2_WRITERS];
+      expect(reconcile([...scanRepository(), ...found], ledger, baseline, writers)).toEqual([
+        expect.stringContaining(`not on the ledger: ${FILE} :: ${site} :: ${callee}`),
+      ]);
+    });
+  }
+
+  it('negative: the same shapes on another module, or a computed key, are not sites', () => {
+    const text =
+      "import * as ns from '../tmux/tmux';\n" +
+      "export async function f(s: string, k: string) {\n" +
+      "  await (await import('@/lib/other')).sendSpecialKey(s, 'Enter');\n" +
+      "  await import('@/lib/other').then((m) => m.sendKeys(s));\n" +
+      "  await ns[k](s);\n" +
+      "  await ns['capturePane'](s);\n" +
+      "}\n";
+    expect(scanKeyWriters(FILE, text)).toEqual([]);
+  });
+
+  it('positive: a caller-held function read the same ways is a caller', () => {
+    const name = 'sendCommandCodePlanReviewKeys';
+    const text =
+      `import * as ccpr from '@/lib/cli-tools/command-code-plan-review';\n` +
+      `export async function a(s: string) { await ccpr['${name}'](s, []); }\n` +
+      `export async function b(s: string) { await (await import('@/lib/cli-tools/command-code-plan-review')).${name}(s, []); }\n` +
+      `export function c(s: string) { return import('@/lib/cli-tools/command-code-plan-review').then((m) => m.${name}(s, [])); }\n`;
+    expect(scanReferences('src/lib/rogue.ts', text, [name]).map((r) => r.site)).toEqual(['a', 'b', 'c']);
   });
 });

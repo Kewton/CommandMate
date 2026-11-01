@@ -103,6 +103,13 @@ export interface SendUserMessageParams {
   cliToolId: CLIToolType;
   /** Agent instance ID; defaults to the primary instance (=== cliToolId). */
   instanceId?: string;
+  /**
+   * The tool the PROMPT_WAITING refusal's `respond` names when no instance was
+   * named (Issue #4049). Set by the send route from `respondAgentFor` — only
+   * when the request named a tool other than the worktree default; omitted, the
+   * sentence is as before.
+   */
+  respondAgent?: CLIToolType;
   /** chat_messages message_type. Defaults to 'normal'. */
   messageType?: MessageType;
   /**
@@ -277,7 +284,7 @@ export async function sendUserMessage(
   db: Database.Database,
   params: SendUserMessageParams
 ): Promise<SendUserMessageResult> {
-  const { worktreeId, content, cliToolId, instanceId, absoluteImagePath, copilotModel } = params;
+  const { worktreeId, content, cliToolId, instanceId, absoluteImagePath, copilotModel, respondAgent } = params;
   const messageType: MessageType = params.messageType ?? 'normal';
   /**
    * The instance this send belongs to, resolved the way `createMessage` and
@@ -373,7 +380,7 @@ export async function sendUserMessage(
     return {
       ok: false,
       stage: 'prompt_waiting',
-      error: promptWaitingMessage(worktreeId, promptGuard.blockedBy, instanceId),
+      error: promptWaitingMessage(worktreeId, promptGuard.blockedBy, instanceId, respondAgent),
     };
   }
 
@@ -406,7 +413,7 @@ export async function sendUserMessage(
       const code = (error as { code?: unknown } | null)?.code;
       if (code === INPUT_RECHECK_PROMPT_WAITING_CODE) {
         settle('not-sent', 'prompt-waiting');
-        return { ok: false, stage: 'prompt_waiting', error: promptWaitingMessage(worktreeId, undefined, instanceId) };
+        return { ok: false, stage: 'prompt_waiting', error: promptWaitingMessage(worktreeId, undefined, instanceId, respondAgent) };
       }
       settle('not-sent', code === INPUT_RECHECK_FAILED_CODE ? 'recheck-failed' : 'model-switch-failed');
       return { ok: false, stage: 'model', error: getErrorMessage(error) };
@@ -590,7 +597,7 @@ export async function sendUserMessage(
     // Issue #3945: a dialog found by the re-check under the lock is the prompt
     // guard's refusal, found late — answered as that refusal (relay holds it).
     if (failure.reason === 'prompt-waiting') {
-      return { ok: false, stage: 'prompt_waiting', error: promptWaitingMessage(worktreeId, undefined, instanceId) };
+      return { ok: false, stage: 'prompt_waiting', error: promptWaitingMessage(worktreeId, undefined, instanceId, respondAgent) };
     }
     if (isSessionStartTimeoutError(error)) {
       return { ok: false, stage: 'send', error: error.message, code: SESSION_STARTING_CODE };

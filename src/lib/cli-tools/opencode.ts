@@ -66,6 +66,9 @@ import {
   stripAnsi,
 } from '../detection/cli-patterns';
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
+import { isOpenCodeComposerReady } from '../detection/tools/opencode/readiness';
+import { detectSessionStatus } from '../detection/status-detector';
+import { classifySendFailure } from '@/lib/session/send-attempt-state';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { ensureOpencodeConfig } from './opencode-config';
 import {
@@ -190,6 +193,23 @@ export const OPENCODE_READY_MAX_ATTEMPTS = 60;
  * in the frame regardless of this number. Matches copilot's 50.
  */
 const OPENCODE_READY_CAPTURE_LINES = 50;
+
+/**
+ * How long a send that has to fall back to the keyboard waits for the input
+ * box (Issue #4040) — the same 15 s as gemini's and codex's send waits. The
+ * launch window (`OPENCODE_READY_*`, 30 s) is the launch's; a send arrives
+ * after it, and a pane still not up 15 s later is refused as `not-sent`
+ * rather than typed into.
+ */
+const OPENCODE_PROMPT_WAIT_TIMEOUT_MS = 15000;
+
+/** Interval between the send's readiness polls (Issue #4040). */
+const OPENCODE_PROMPT_POLL_INTERVAL_MS = 500;
+
+/** Whether this send's server dispatch ended `unknown` (Issue #4040). */
+interface DispatchTrace {
+  unknown: boolean;
+}
 
 /**
  * Waits before each read-back of a message just posted to the server (#2035).
@@ -610,11 +630,15 @@ export class OpenCodeTool extends BaseCLITool {
   private async trySendViaServer(
     target: AgentInstanceRef,
     message: string,
-    imagePath?: string
+    imagePath?: string,
+    trace?: DispatchTrace
   ): Promise<boolean> {
     const outcome = await this.dispatchViaServer(target, message, imagePath);
     if (outcome === 'delivered') return true;
     if (outcome !== 'skipped') noteDispatchFailed(outcome);
+    // Issue #4040: an `unknown` dispatch may have delivered the message, so a
+    // keyboard fallback that then refuses must not report the send `not-sent`.
+    if (outcome === 'unknown' && trace !== undefined) trace.unknown = true;
     return false;
   }
 
@@ -776,10 +800,30 @@ export class OpenCodeTool extends BaseCLITool {
    * `CM_AGENT_HOOKS_INJECT=0`, or on an opencode too old for `--port`, must not
    * become a pane that cannot be sent to.
    *
+   * Issue #4040: that keyboard path now waits for an empty input box first
+   * (`waitForPrompt`, and again under the input lock) and refuses as
+   * `not-sent` / `prompt-not-ready` when none comes up — unless the server
+   * dispatch before it ended `unknown`, in which case the refusal stays
+   * `indeterminate`. A `delivered` send neither waits nor types.
+   *
    * @param worktreeId - Worktree ID
    * @param message - Message to send
    */
   async sendMessage(worktreeId: string, message: string, instanceId?: string): Promise<void> {
+    await this.sendMessageAfterDispatch(worktreeId, message, instanceId, { unknown: false });
+  }
+
+  /**
+   * {@link sendMessage}'s body, carrying whether a server dispatch earlier in
+   * the same send ended `unknown` (Issue #4040): {@link sendMessageWithImage}'s
+   * image dispatch is one, and its path fallback comes back through here.
+   */
+  private async sendMessageAfterDispatch(
+    worktreeId: string,
+    message: string,
+    instanceId: string | undefined,
+    trace: DispatchTrace
+  ): Promise<void> {
     const sessionName = this.getSessionName(worktreeId, instanceId);
 
     // Issue #2070: the pane exists, but does the AGENT? An agent that quit,
@@ -793,9 +837,17 @@ export class OpenCodeTool extends BaseCLITool {
     // typing the message into a shell prompt. The relaunch reserves a port and
     // re-attaches, so the server path is available again by the time it is
     // tried. `sendMessageWithImage` reaches this through its own fallback.
-    await this.requireSession('OpenCode', worktreeId, instanceId, { relaunch: true });
+    //
+    // Issue #4040: when that fallback follows an `unknown` image dispatch, a
+    // refusal here (`SESSION_STARTING`, a pane that is gone) typed nothing but
+    // does not make the send as a whole safe to resend either.
+    try {
+      await this.requireSession('OpenCode', worktreeId, instanceId, { relaunch: true });
+    } catch (error: unknown) {
+      throw this.keepUnknownDispatch(error, trace, sessionName) ?? error;
+    }
 
-    if (await this.trySendViaServer(opencodeTarget(worktreeId, instanceId), message)) {
+    if (await this.trySendViaServer(opencodeTarget(worktreeId, instanceId), message, undefined, trace)) {
       // Issue #405: the transcript grew, so the cached capture is stale — the
       // same reason the keystroke path invalidates below.
       invalidateCache(sessionName);
@@ -803,6 +855,11 @@ export class OpenCodeTool extends BaseCLITool {
     }
 
     try {
+      // Issue #4040: the keyboard fallback types only into an input box that is
+      // up and empty — the first send to a new pane always lands here (no
+      // session id yet), as does every send of a pane with no live server.
+      await this.waitForPrompt(sessionName);
+
       // Issue #1471: Body/Enter separation + read-back submit verification via the
       // shared helper (replaces the old type -> C-m -> `\n`-gated paste recovery).
       await sendMessageWithSubmitVerification({
@@ -810,6 +867,8 @@ export class OpenCodeTool extends BaseCLITool {
         message,
         cliToolId: 'opencode',
         composer: this.describeComposer(),
+        // Issue #4040: the same test, of the newest frame read under the input lock.
+        readiness: { label: 'OpenCode', isReady: isOpenCodeComposerReady },
       });
 
       // Issue #405: Invalidate cache after sending message
@@ -818,9 +877,70 @@ export class OpenCodeTool extends BaseCLITool {
       logger.info('sent-message-to-opencode-session');
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error);
+      // Issue #4040: the keyboard typed nothing (no ready input box — or any
+      // other refusal before the first key: a dialog, the lock), but the server
+      // dispatch before it may have delivered the message, so the send as a
+      // whole stays unknown rather than "safe to resend".
+      const kept = this.keepUnknownDispatch(error, trace, sessionName);
+      if (kept) throw kept;
       // Issue #4031: the cause keeps a failed `load-buffer`'s code (`classifySendFailure`).
       throw new Error(`Failed to send message to OpenCode: ${errorMessage}`, { cause: error });
     }
+  }
+
+  /**
+   * The error a refusal with nothing typed becomes after a server dispatch of
+   * the same send ended `unknown` (Issue #4040): the message may already be
+   * there, so `classifySendFailure` must read the send as indeterminate.
+   *
+   * @returns the wrapped error, or `null` when the dispatch was not `unknown`
+   *   or the refusal is not a `not-sent` one (the caller throws its own)
+   */
+  private keepUnknownDispatch(error: unknown, trace: DispatchTrace, sessionName: string): Error | null {
+    if (!trace.unknown) return null;
+    const refusal = classifySendFailure(error);
+    if (refusal.state !== 'not-sent') return null;
+    logger.warn('opencode-send-not-typed-after-unknown-dispatch', { sessionName, reason: refusal.reason });
+    return new Error(
+      `Failed to send message to OpenCode: the keyboard fallback typed nothing (${refusal.reason}), ` +
+        'but an earlier server dispatch may have delivered the message (Issue #4040)',
+      { cause: error }
+    );
+  }
+
+  /**
+   * Wait for an empty input box before the keyboard fallback types (Issue #4040).
+   *
+   * {@link isOpenCodeComposerReady} is the test: the box on screen, empty, and
+   * no dialog or overlay over it (the `Connect a provider` overlay included —
+   * every option on it writes credentials, so it is never typed into). A dialog
+   * or overlay (`waiting`) ends the wait at once without throwing, so a send
+   * does not sit here for the whole window behind a choice only a person can
+   * make: the shared sender then refuses it under the input lock — as
+   * `prompt-waiting` when the detector reports an active prompt, otherwise as
+   * `prompt-not-ready` after its short re-read.
+   *
+   * @throws Error (`OpenCode prompt not ready`) when the box did not come up
+   *   within {@link OPENCODE_PROMPT_WAIT_TIMEOUT_MS}; nothing was typed
+   */
+  private async waitForPrompt(sessionName: string): Promise<void> {
+    const startTime = Date.now();
+    while (Date.now() - startTime < OPENCODE_PROMPT_WAIT_TIMEOUT_MS) {
+      try {
+        const output = await capturePane(sessionName, OPENCODE_READY_CAPTURE_LINES);
+        if (isOpenCodeComposerReady(output)) return;
+        // opencode's dialogs (permission strip, pickers, palette) read as
+        // `waiting` without `hasActivePrompt` (their answers are keys, #1896).
+        const status = detectSessionStatus(output, 'opencode');
+        if (status.hasActivePrompt || status.status === 'waiting') return;
+      } catch (error: unknown) {
+        // Capture may fail - continue polling
+        logger.debug('opencode-prompt-capture-failed', { sessionName, error: getErrorMessage(error) });
+      }
+      await new Promise((resolve) => setTimeout(resolve, OPENCODE_PROMPT_POLL_INTERVAL_MS));
+    }
+    logger.info('opencode-prompt-not-detected');
+    throw new Error('OpenCode prompt not ready: timed out waiting for the input prompt before sending');
   }
 
   /**
@@ -851,7 +971,9 @@ export class OpenCodeTool extends BaseCLITool {
    *
    * The fallback is that same degraded body, reached whenever the server route
    * does not apply, and it is deliberately routed back through
-   * {@link sendMessage} rather than `sendMessageWithSubmitVerification`: the
+   * {@link sendMessage}'s body (`sendMessageAfterDispatch`, carrying whether
+   * the image dispatch ended `unknown` — Issue #4040) rather than
+   * `sendMessageWithSubmitVerification`: the
    * reason the image could not be attached is usually "no session yet", and by
    * the time the text is sent that can already have changed. Going through
    * `sendMessage` gives the text one honest attempt at the API before the
@@ -873,16 +995,20 @@ export class OpenCodeTool extends BaseCLITool {
     await this.requireSession('OpenCode', worktreeId, instanceId, { relaunch: false });
 
     const target = opencodeTarget(worktreeId, instanceId);
-    if (await this.trySendViaServer(target, message, imagePath)) {
+    // Issue #4040: one trace for the whole send, so an `unknown` image dispatch
+    // is not forgotten when the path fallback's own dispatch is refused.
+    const trace: DispatchTrace = { unknown: false };
+    if (await this.trySendViaServer(target, message, imagePath, trace)) {
       invalidateCache(sessionName);
       return;
     }
 
     logger.info('opencode-image-degraded-to-path', { worktreeId, instanceId: instanceId ?? this.id });
-    await this.sendMessage(
+    await this.sendMessageAfterDispatch(
       worktreeId,
       formatImagePathFallbackMessage(message, imagePath),
-      instanceId
+      instanceId,
+      trace
     );
   }
 

@@ -21,6 +21,7 @@
 
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { respondTargetFlags } from '@/lib/session/respond-target';
 import { captureSessionOutput } from '@/lib/session/cli-session';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
@@ -177,15 +178,21 @@ export async function isPromptWaiting(
  * waiting. A request for the primary instance (no `instanceId`) gets the
  * sentence as before.
  *
+ * Issue #4049: a request that named only a tool other than the worktree
+ * default gets ` --agent <tool>` instead (the caller decides, through
+ * `respondAgentFor`), since a bare `respond` goes to the default tool.
+ *
  * @param blockedBy - Which layer refused; omitted callers get the plain message
  * @param instanceId - The instance the refused request named, if any
+ * @param agent - The tool to name when no instance was named (`respondAgentFor`)
  */
 export function promptWaitingMessage(
   worktreeId: string,
   blockedBy?: PromptWaitingLayer,
   instanceId?: string,
+  agent?: CLIToolType,
 ): string {
-  const target = instanceId ? ` --instance ${instanceId}` : '';
+  const target = respondTargetFlags(instanceId, agent);
   const base =
     `${worktreeId} is waiting on a prompt. Sending now would type into the ` +
     `prompt's input line instead of reaching the agent, and would leave that ` +

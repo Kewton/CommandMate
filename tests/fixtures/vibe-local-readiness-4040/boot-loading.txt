@@ -1,0 +1,9 @@
+
+dev@host work % vibe-local -y
+
+============================================
+ 🤖 vibe-local (vibe-coder)
+ Model: qwen3-coder:30b
+ Ollama: http://localhost:11434
+ Engine: vibe-coder.py (direct, no proxy)
+============================================
