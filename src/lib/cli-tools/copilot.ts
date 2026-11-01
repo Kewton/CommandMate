@@ -366,14 +366,17 @@ async function rethrowIfDialogOpen(sessionName: string): Promise<void> {
 
 /**
  * Refuse as `prompt-waiting` after {@link CopilotTool.waitForPrompt} saw a
- * dialog stay up for {@link COPILOT_DIALOG_CONFIRM_MS} (Issue #4067). The pane
- * is read once more first, so a dialog still up is refused in the re-check's
- * own words; one that closed in that instant (or a re-read that failed) is
- * refused all the same, with the same `code` and the wording
- * `classifySendFailure` reads as `prompt-waiting`. Nothing has been typed.
+ * dialog stay up for {@link COPILOT_DIALOG_CONFIRM_MS} (Issue #4067), with the
+ * re-check's `code` and the wording `classifySendFailure` reads as
+ * `prompt-waiting`. Nothing has been typed.
+ *
+ * Refused on the wait's own reads, without reading the pane once more: those
+ * reads already confirmed the dialog, and another capture (tmux's own time-out
+ * is 5 s) would keep the picker and `/model` holding the instance's input lock
+ * past the confirmation time (review of #4067).
  */
-async function refuseConfirmedDialog(sessionName: string): Promise<never> {
-  await rethrowIfDialogOpen(sessionName);
+function refuseConfirmedDialog(sessionName: string): never {
+  logger.warn('input-recheck-prompt-waiting', { sessionName, cliToolId: 'copilot', confirmedMs: COPILOT_DIALOG_CONFIRM_MS });
   throw Object.assign(
     new Error(
       `A prompt dialog stayed open in session ${sessionName} for ${COPILOT_DIALOG_CONFIRM_MS}ms ` +
@@ -900,7 +903,7 @@ export class CopilotTool extends BaseCLITool {
           const prompt = await this.waitForPrompt(sessionName);
           // Issue #4067: a dialog that stayed up is refused at once — the lock
           // is not held for the rest of the window behind it.
-          if (prompt.dialog) await refuseConfirmedDialog(sessionName);
+          if (prompt.dialog) refuseConfirmedDialog(sessionName);
           await recheckComposerBeforeInput(sessionName, 'copilot');
           if (!prompt.ready) {
             // review-3: neither the request nor the pane goes into the message.
@@ -935,7 +938,7 @@ export class CopilotTool extends BaseCLITool {
       if (!prompt.ready) {
         // Issue #4067: the wait gave up on a dialog after its confirmation time
         // rather than the whole 15 s window.
-        if (prompt.dialog) await refuseConfirmedDialog(sessionName);
+        if (prompt.dialog) refuseConfirmedDialog(sessionName);
         // A dialog that opened during the wait and is still up is refused as
         // the shared sender's re-check refuses it — `prompt-waiting` (409
         // PROMPT_WAITING), not `prompt-not-ready`. A re-read that fails is
@@ -1060,7 +1063,7 @@ export class CopilotTool extends BaseCLITool {
     if (!idle.ready) {
       // Issue #4067: a dialog is refused after its confirmation time, not after
       // the 30 s window under the lock.
-      if (idle.dialog) await refuseConfirmedDialog(sessionName);
+      if (idle.dialog) refuseConfirmedDialog(sessionName);
       // The pane's text goes to the log, not the message: the message is read by
       // `classifySendFailure`, which a screen quoting its keywords would steer (#3954).
       logger.warn('copilot-model-switch-not-idle', { model: modelName, bottomRow: describeBottomRow(idle.output) });
