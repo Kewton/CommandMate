@@ -315,6 +315,14 @@ async function handleSend(
         ownAttempt,
         sendStartedAt,
         trimmedContent,
+        // Issue #4063: only Command Code shows a plan review. Its primary —
+        // no instance, or the tool's own id (#868) — is reached by a bare
+        // `respond` only when it is the worktree default; otherwise the
+        // sentence names `--agent command-code`, by `respondAgentFor`'s rule.
+        planReviewRespondAgent:
+          cliToolId === 'command-code'
+            ? resolveRespondAgent(db, id, cliToolId, instanceId === cliToolId ? undefined : instanceId)
+            : undefined,
       });
     }
 
