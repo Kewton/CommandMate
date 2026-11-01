@@ -672,6 +672,9 @@ export function main(argv, deps = {}) {
     const where = { runDir: o.runDir, worktree: o.worktree, home };
     const acquireHeavyLock =
       deps.acquireHeavyLock ?? ((timeoutMs) => acquireMachineLockSync(HEAVY_MUTEX, { root: machineLockRoot(home), timeoutMs }));
+    // The work HEAD under this one: a precheck of a refreshed HEAD stands for the
+    // published HEAD, not for the worker's checks (run-log.mjs WORK_STAGES).
+    const workHead = workHeadOf(run, o.worktree, head, { records, issue, item });
     if (!o.force) {
       const previous = findLatest(records, { issue, item, stage: 'precheck', head });
       if (previous && previous.result === 'ok') {
@@ -680,12 +683,22 @@ export function main(argv, deps = {}) {
         const sameOptions = (previous.note ?? '').split(/\s+/).includes(opts);
         // The result holds for the environment it was taken in (#3883 N9); one from before env= is reused with a warning.
         const env = verifyEnvState(previous, where);
-        if (missing.length === 0 && sameOptions && env.state !== 'changed' && env.state !== 'missing') {
+        // And for the work HEAD it named: one an earlier rule chose (#4076: W under a merge whose
+        // own change could not be judged) is written again, or `status` keeps reading it.
+        const recordedWorkHead = previous.workHead ?? previous.head;
+        const sameWorkHead = recordedWorkHead === workHead;
+        if (missing.length === 0 && sameOptions && sameWorkHead && env.state !== 'changed' && env.state !== 'missing') {
           if (env.state === 'unrecorded') log(`  warning: precheck at ${short}: ${env.detail}`);
           log(`precheck ${name} reused: ok at ${short} (${previous.at}) — pass --force to run again`);
           return 0;
         }
-        const why = !sameOptions ? 'was taken with other options' : missing.length > 0 ? `did not run ${missing.join(', ')}` : `was taken in another environment (${env.state} — ${env.detail})`;
+        const why = !sameOptions
+          ? 'was taken with other options'
+          : missing.length > 0
+            ? `did not run ${missing.join(', ')}`
+            : !sameWorkHead
+              ? `named the work HEAD ${recordedWorkHead.slice(0, 7)}, now ${workHead.slice(0, 7)}`
+              : `was taken in another environment (${env.state} — ${env.detail})`;
         log(`precheck ${name}: the ok record at ${short} ${why} — running`);
       }
     }
@@ -786,9 +799,6 @@ export function main(argv, deps = {}) {
     const envNote = `key=${key} env=${manifestHash(envEnd)}${envMoved.length > 0 ? ` env-changed-during-precheck=${envMoved.join(',')}` : ''}`;
     const note = `${steps.map((step) => `${step}=${results[step]}`).join(' ')} ${opts} ${envNote}`;
     const durationSec = Math.round((now().getTime() - started.getTime()) / 1000);
-    // The work HEAD under this one: a precheck of a refreshed HEAD stands for the
-    // published HEAD, not for the worker's checks (run-log.mjs WORK_STAGES).
-    const workHead = workHeadOf(run, o.worktree, head, { records, issue, item });
     const { file } = appendRecord(
       o.runDir,
       o.issues,

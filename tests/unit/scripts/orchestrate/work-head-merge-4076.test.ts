@@ -25,7 +25,7 @@ import { mergeOwnFiles, missingRecords, workHeadOf, workHeads } from '../../../.
 import { main as precheck } from '../../../../scripts/orchestrate/precheck.mjs';
 import { main as publish, prTitle, withIssueNumber } from '../../../../scripts/orchestrate/publish-pr.mjs';
 import { main as merge } from '../../../../scripts/orchestrate/merge-pr.mjs';
-import { DEVELOP, HEAD_A, HEAD_B, MERGE_TREE, fakeGit, openPr } from './pr-fake';
+import { DEVELOP, HEAD_A, HEAD_B, HEAD_M, MERGE_TREE, fakeGit, openPr } from './pr-fake';
 
 const W = HEAD_A;
 const X = HEAD_B;
@@ -559,6 +559,118 @@ describe('merge-pr over the worker’s merge (#4076)', () => {
       expect(r.out).toMatch(/verify: environment missing — env=/);
       expect(fake.ghCalls('pr merge')).toHaveLength(0);
     });
+  });
+});
+
+describe('merge-pr: a refresh whose own change cannot be told (review #4076b P2)', () => {
+  const PASS = (name: string) => ({ name, bucket: 'pass' });
+  const REFRESHED = HEAD_M; // what the fake's `git merge` makes: HEAD_M on W and develop
+  /** W published and verified with the full suite; develop moved, so step 4 refreshes W into HEAD_M. */
+  function behindW(extra: Parameters<typeof fakeGit>[0] = {}) {
+    recordWork(W, { note: FULL_UNIT });
+    recordPrecheck(W);
+    return fakeGit({
+      head: W,
+      behind: true,
+      firstParent: [`${W} ${DEVELOP}`],
+      commitFiles: { [W]: ['src/a.ts'] },
+      changed: ['src/a.ts'],
+      prs: [openPr({ headRefOid: W })],
+      checks: [[PASS('Lint'), PASS('Build')]],
+      ...extra,
+    });
+  }
+  const mergeTreeFails = (fake: ReturnType<typeof fakeGit>) => ({
+    ...fake,
+    run: (command: string, args: string[], opts?: { cwd?: string; env?: Record<string, string> }) =>
+      command === 'git' && args[2] === 'merge-tree' ? { status: 129, stdout: '', stderr: 'unknown option' } : fake.run(command, args, opts),
+  });
+
+  it('W passed step 3; the refresh cannot be told → it is the work HEAD, its records are asked for, nothing is pushed or merged', () => {
+    const fake = behindW();
+    const r = runMerge(mergeTreeFails(fake));
+    expect(r.code, r.out).toBe(1);
+    expect(r.out).toContain(`the refresh is the work HEAD ${REFRESHED.slice(0, 7)}`);
+    expect(r.out).toContain(`verify: no result for ${REFRESHED.slice(0, 7)}`);
+    expect(fake.gitCalls('push')).toHaveLength(0);
+    expect(fake.ghCalls('pr merge')).toHaveLength(0);
+    // status and the publishing side read the same: the refresh is not covered by W's records.
+    expect(missingRecords(records(), ISSUE, { head: REFRESHED, workHead: REFRESHED }, null)[0]).toMatch(/^verify: no result for c{7}/);
+  });
+
+  it('negative control: a refresh that is told clean keeps W, and W’s full-suite verify spares the wait for Unit Tests', () => {
+    const fake = behindW();
+    const r = runMerge(fake);
+    expect(r.code, r.out).toBe(0);
+    expect(fake.gitCalls('push')).toHaveLength(1);
+    expect(fake.ghCalls('pr merge')).toHaveLength(1);
+    expect(records().find((x) => x.stage === 'merge')).toMatchObject({ result: 'ok', head: REFRESHED, workHead: W });
+  });
+});
+
+describe('precheck.mjs: a record an earlier rule wrote for the same HEAD (review #4076b P2)', () => {
+  beforeEach(() => {
+    for (const stage of ['contract', 'send']) appendRecord(runDir, '3477', { issue: ISSUE, stage, result: 'ok' });
+  });
+  /** precheck of M without --force; `told` is whether M's own change can be judged (and is none). */
+  function runPrecheckOf({ told }: { told: boolean }) {
+    const out: string[] = [];
+    const fake = workerMerge({ commitFiles: { [W]: ['src/a.ts'] } });
+    const deps = {
+      run: (command: string, args: string[]) => {
+        if (command !== 'git') return { status: 0, stdout: '', stderr: '' };
+        const sub = args.slice(2);
+        if (sub[0] === 'merge-tree' && !told) return { status: 129, stdout: '', stderr: 'unknown option' };
+        if (sub[0] === 'rev-parse' || sub[0] === 'log' || sub[0] === 'merge-tree' || sub[0] === 'diff-tree') return fake.run(command, args);
+        if (sub.includes('--diff-filter=ACMR')) return { status: 0, stdout: 'src/a.ts\n', stderr: '' };
+        return { status: 0, stdout: '', stderr: '' };
+      },
+      findTestsNaming: () => [],
+      now: () => new Date(Date.UTC(2026, 10, 1, 2, 0)),
+      home,
+      log: (line: string) => out.push(line),
+      error: (line: string) => out.push(line),
+    };
+    const code = precheck(argv(), deps);
+    return { code, out: out.join('\n') };
+  }
+  const prechecksOfM = () => records().filter((x) => x.stage === 'precheck' && x.head === MERGE);
+
+  it('the earlier rule named W for M; M cannot be told now → not reused, written again, and status agrees with publish (M)', () => {
+    recordWork(W);
+    // What the earlier version wrote: M passed over down to W.
+    const before = runPrecheckOf({ told: true });
+    expect(before.code, before.out).toBe(0);
+    expect(prechecksOfM()).toHaveLength(1);
+    expect(prechecksOfM()[0]).toMatchObject({ workHead: W });
+    expect(headsOf(records(), ISSUE, null)).toEqual({ head: MERGE, workHead: W });
+
+    const r = runPrecheckOf({ told: false });
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toMatch(/named the work HEAD aaaaaaa, now 5555555 — running/);
+    expect(r.out).not.toMatch(/reused/);
+    expect(prechecksOfM()).toHaveLength(2);
+    expect(prechecksOfM()[1]).not.toHaveProperty('workHead');
+    expect(headsOf(records(), ISSUE, null)).toEqual({ head: MERGE, workHead: MERGE });
+    expect(summarize(records())[0]).toMatchObject({ head: MERGE, workHead: MERGE, next: 'verify', reason: 'verify: no result for 5555555' });
+    const fake = workerMerge({ commitFiles: { [W]: ['src/a.ts'] } });
+    const run = (command: string, args: string[]) =>
+      command === 'git' && args[2] === 'merge-tree' ? { status: 129, stdout: '', stderr: 'unknown option' } : fake.run(command, args);
+    const err: string[] = [];
+    const code = publish(argv(), { run, home, log: () => {}, error: (l: string) => err.push(l) } as Parameters<typeof publish>[1]);
+    expect(code).toBe(1);
+    expect(err.join('\n')).toContain('verify: no result for 5555555');
+    expect(fake.gitCalls('push')).toHaveLength(0);
+  });
+
+  it('negative control: the same work HEAD by the rule now → reused as before, and status keeps W', () => {
+    recordWork(W);
+    expect(runPrecheckOf({ told: true }).code).toBe(0);
+    const r = runPrecheckOf({ told: true });
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toMatch(/reused: ok at 5555555/);
+    expect(prechecksOfM()).toHaveLength(1);
+    expect(headsOf(records(), ISSUE, null)).toEqual({ head: MERGE, workHead: W });
   });
 });
 

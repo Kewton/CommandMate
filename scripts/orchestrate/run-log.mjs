@@ -268,7 +268,8 @@ export function unmetStage(stage, record, { head, workHead }) {
  * a precheck of a clean merge writes `workHead=W`, and a verify of that merge
  * recorded after it makes the merge the work HEAD for workHeads as well (a
  * record never carries `workHead` equal to `head`, so the later records alone
- * could not say it).
+ * could not say it). A precheck of the HEAD names its work HEAD afresh: a
+ * precheck without `workHead` sets it back to the HEAD itself.
  */
 export function headsOf(records, issue, item) {
   let head = null;
@@ -277,7 +278,10 @@ export function headsOf(records, issue, item) {
     if (record.issue !== issue || !inItem(record, item) || !record.head) continue;
     if (record.head !== head) workHead = null;
     head = record.head;
-    if (record.workHead) workHead = record.workHead;
+    // A precheck always writes the work HEAD it found (none: the HEAD itself), so it replaces
+    // what an earlier record of this HEAD said (precheck.mjs writes it again when it changed).
+    if (record.stage === 'precheck') workHead = record.workHead ?? null;
+    else if (record.workHead) workHead = record.workHead;
   }
   if (head !== null && verifiedAt(records, issue, item, head)) workHead = head;
   return { head, workHead: workHead ?? head };

@@ -326,8 +326,22 @@ export function main(argv, deps = {}) {
       }
       refreshed = true;
       head = git(run, o.worktree, ['rev-parse', 'HEAD']).trim();
-      // The refresh is a clean merge with no verify of its own: the work HEAD under it is the one step 3 judged.
+      // The work HEAD under the refresh, by the same rule: a refresh whose own change cannot be
+      // judged (merge-tree failed) is its own work HEAD, not the one step 3 judged (#4076).
       workHead = workHeadOf(run, o.worktree, head, { records, issue, item });
+      // So the worker's stages are judged again at the HEADs now in hand, as publish-pr and
+      // `status` would judge them; the deferred verify is the one of this work HEAD.
+      deferred.length = 0;
+      const again = missingRecords(records, issue, { head, workHead }, item, {
+        ...envWhere, warn: log, defer: (reason) => deferred.push(reason),
+      }).filter((reason) => !reason.startsWith('precheck:'));
+      if (again.length > 0) {
+        error(
+          `merge #${issue} ${head.slice(0, 7)}: not merged — the refresh is the work HEAD ${workHead.slice(0, 7)} and the run record lacks:\n  ${again.join('\n  ')}\n` +
+            `  (not pushed; the refresh is left committed in ${o.worktree})`
+        );
+        return 1;
+      }
     }
     const markers = markerFiles(run, o.worktree);
     if (markers.length > 0) {
@@ -394,8 +408,10 @@ export function main(argv, deps = {}) {
     // 5. The checks of this HEAD.
     records = readRecords(o.runDir, o.issues).records;
     const needBuild = !builtLikeCi(findLatest(records, { issue, item, stage: 'precheck', head }));
-    // The verify step 3 judged (the latest one, at the work HEAD): whether it ran the full unit suite.
-    const verify = latestByStage(records, issue, item).verify ?? null;
+    // The verify judged at the work HEAD (step 3, or again after the refresh): whether it ran the
+    // full unit suite. A latest verify of another HEAD is not that one, and does not spare the wait (#4076).
+    const latestVerify = latestByStage(records, issue, item).verify ?? null;
+    const verify = latestVerify && unmetStage('verify', latestVerify, { head, workHead }) === null ? latestVerify : null;
     const need = { needBuild, needUnit: o.unitRelated || !ranFullUnit(verify), last: o.last };
     const rerunDone = records.some(
       (r) => r.issue === issue && inItem(r, item) && r.stage === 'ci' && r.head === head && /(^| )rerun=/.test(r.note ?? '')
