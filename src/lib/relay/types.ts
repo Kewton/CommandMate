@@ -89,6 +89,44 @@ export type RelayObsState = 'valid' | 'invalid' | 'turn_unknown';
  */
 export type RelayOverlap = 'none' | 'later' | 'earlier' | 'both' | 'unknown';
 
+/**
+ * Where the delivery of the payload in the pending slot stands (Issue #4064).
+ * Absent (no hold) while it is queued.
+ *
+ *  - `attempting` — a delivery took it and is typing it into A's composer. Left
+ *                   behind by a server that stopped mid-send, it becomes
+ *                   `uncertain` at the next boot.
+ *  - `uncertain`  — whether it reached A is not known (`indeterminate`, a throw
+ *                   after `sent`, a throw before any state, or a restart
+ *                   mid-send). Never sent again automatically: look at A's
+ *                   pane first. The relay's later deliveries wait behind it.
+ */
+export type RelayDeliveryState = 'attempting' | 'uncertain';
+
+/**
+ * The `capture` that shows the requester's pane — where a held relay payload
+ * went (Issue #4064). The exact instance, so an alias or a worktree default
+ * cannot point at another pane.
+ */
+export function relayRequesterPaneCommand(requester: RelayEndpoint): string {
+  return `commandmate capture ${requester.worktreeId} --instance ${requester.instanceId} --pane`;
+}
+
+/** A payload whose delivery was taken and has not been recorded as done (Issue #4064). */
+export interface RelayDeliveryHold {
+  state: RelayDeliveryState;
+  /** The held payload's id. */
+  payloadId: string | null;
+  /** What the held payload is; null if the slot was emptied meanwhile. */
+  kind: RelayPendingKind | null;
+  /** Why it is held (a send-attempt reason, `send-threw`, `server-restarted`, …). */
+  reason: string | null;
+  /** Epoch ms of the last change. */
+  at: number | null;
+  /** The requester's exact pane to look at before doing anything else. */
+  checkCommand: string;
+}
+
 /** A relay ledger row, as every reader sees it. */
 export interface SessionRelay {
   id: string;
@@ -122,9 +160,11 @@ export interface SessionRelay {
   holdReason: string | null;
   /** Issue #3957: the decided reply's overlap, once one was decided. */
   overlap: RelayOverlap | null;
+  /** Issue #4064: the payload whose delivery is under way or not known; null when none. */
+  deliveryHold: RelayDeliveryHold | null;
 }
 
-/** The v62 fields of a row with no binding, as a legacy relay reads (Issue #3957). */
+/** The v62 fields of a row with no binding, as a legacy relay reads (Issue #3957), and no delivery hold (#4064). */
 export const LEGACY_RELAY_BINDING_FIELDS: Pick<
   SessionRelay,
   | 'bindMode'
@@ -135,6 +175,7 @@ export const LEGACY_RELAY_BINDING_FIELDS: Pick<
   | 'obsState'
   | 'holdReason'
   | 'overlap'
+  | 'deliveryHold'
 > = {
   bindMode: 'legacy',
   sendState: null,
@@ -144,6 +185,7 @@ export const LEGACY_RELAY_BINDING_FIELDS: Pick<
   obsState: null,
   holdReason: null,
   overlap: null,
+  deliveryHold: null,
 };
 
 /**

@@ -17,7 +17,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { countRelays, listOpenRelaysForWorktree } from '@/lib/db/relay-db';
+import { countRelays, listOpenRelaysForWorktree, listRelaysWithDeliveryHold } from '@/lib/db/relay-db';
 import { openRelay, readSessionRelays } from '@/lib/relay/relay-service';
 import { resolveRelayTtlMs } from '@/lib/relay/relay-policy';
 import { isValidInstanceId } from '@/lib/cli-tools/types';
@@ -95,12 +95,21 @@ export async function GET(request: NextRequest) {
         ? readSessionRelays(db, { worktreeId, instanceId })
         : { owed: [], awaiting: [] };
     const open = worktreeId ? listOpenRelaysForWorktree(db, worktreeId) : [];
+    // Issue #4064: payloads whose delivery may have reached the requester,
+    // open relays or closed — a cancel or an expiry does not make them moot.
+    const held = listRelaysWithDeliveryHold(
+      db,
+      worktreeId && instanceId
+        ? { endpoint: { worktreeId, instanceId } }
+        : { worktreeId: worktreeId ?? undefined }
+    );
 
     return NextResponse.json(
       {
         owed: sided.owed,
         awaiting: sided.awaiting,
         open,
+        held,
         counts: countRelays(db, {
           worktreeId: worktreeId ?? undefined,
           instanceId: worktreeId && instanceId ? instanceId : undefined,

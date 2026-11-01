@@ -29,6 +29,7 @@ import type {
 import { emptyRelayCounts, OPEN_RELAY_STATES } from '@/lib/relay/types';
 import { createLogger } from '@/lib/logger';
 import {
+  KEEP_HELD_PAYLOAD_SET,
   mapRelay,
   OPEN_STATE_PLACEHOLDERS,
   RELAY_COLUMNS,
@@ -39,17 +40,25 @@ import {
 // re-exported so every caller (and every `vi.mock`) keeps this module's surface.
 export {
   appendRelayHeldCandidate,
+  claimRelayPayloadDelivery,
   clearRelayHeldCandidates,
   clearRelayPending,
   clearRelayPendingReply,
+  completeRelayPayloadDelivery,
   explainRelayBindRefusal,
   failOrphanedRelayBind,
   getRelayBinding,
   getRelayPendingPayload,
+  holdRelayPayloadDelivery,
+  listDeliverableRelayPayloads,
   listOpenBoundRelays,
+  listRelaysWithDeliveryHold,
   listRelaysWithPendingPayload,
   promoteRelayPendingReply,
   recordRelayInputBoundary,
+  recoverInterruptedRelayDeliveries,
+  releaseRelayPayloadDelivery,
+  RELAY_DELIVERY_SERVER_RESTARTED,
   replaceRelayPromptWithPendingReply,
   replaceRelayPromptWithReply,
   reserveRelayBind,
@@ -57,10 +66,12 @@ export {
   setRelayPendingReply,
   settleRelaySendState,
   stashRelayPayload,
+  type ClaimRelayPayloadDeliveryInput,
   type RecordRelayInputBoundaryInput,
   type RelayBinding,
   type RelayBindRefusal,
   type RelayHeldCandidate,
+  type RelayPayloadAttemptRef,
   type RelayPendingReply,
   type RelayWithPendingPayload,
   type ReserveRelayBindInput,
@@ -132,6 +143,7 @@ export function createRelay(db: Database.Database, input: CreateRelayInput): Ses
     obsState: null,
     holdReason: null,
     overlap: null,
+    deliveryHold: null,
   };
 }
 
@@ -348,7 +360,12 @@ export function listExpiredOpenRelays(
   return rows.map(mapRelay);
 }
 
-/** Withdraw a relay. Returns false when it was already closed or absent. */
+/**
+ * Withdraw a relay. Returns false when it was already closed or absent.
+ *
+ * Issue #4064: stops later deliveries only. A payload under a delivery hold
+ * (it may already be in A's composer) keeps its body, id and reason.
+ */
 export function cancelRelay(
   db: Database.Database,
   id: string,
@@ -357,7 +374,7 @@ export function cancelRelay(
   const result = db
     .prepare(`
       UPDATE session_relays
-      SET state = 'cancelled', pending_kind = NULL, pending_body = NULL, payload_id = NULL,
+      SET state = 'cancelled', ${KEEP_HELD_PAYLOAD_SET},
           pending_reply = NULL, updated_at = ?
       WHERE id = ? AND state IN (${OPEN_STATE_PLACEHOLDERS})
     `)

@@ -603,6 +603,32 @@ its request** (a new CLI with a new server).
 
 Not overlapping is still the safest: do not stack messages on one instance.
 
+#### An uncertain delivery is never resent automatically (Issue #4064)
+
+When delivering a relay reply, a confirmation (prompt) notice or an expiry notice to the requester's
+composer ends with an **uncertain** outcome, CommandMate does **not resend that payload automatically**, so
+that it cannot arrive twice.
+
+- A delivery first records "attempting" in the ledger, before its first key, and only the delivery whose
+  write succeeded sends (when the write fails, nothing is sent)
+- Only a `not-sent` outcome (no key of the body was typed: `prompt-not-ready`, `session-starting`, ...) is
+  retried automatically. A requester waiting on a dialog (`prompt_waiting`) is waited for and retried as before
+- Everything else — `indeterminate` (`prompt-unreported`, `submit-unconfirmed`, `send-error`,
+  `composer-residue`, ...), a failure after the send was confirmed (`threw-after-sent`), a failure before any
+  outcome was known (`send-threw`), a server restart during the send (`server-restarted`) — is **held**
+  (`uncertain`). A server that stopped right before the send, having typed nothing, also leaves the attempt
+  behind and it is held after the restart (it cannot be told apart, so the safe side is taken)
+- While a payload is held, the relay's later deliveries (a reply that finished after a prompt notice
+  included) wait behind it. Other relays go on
+- A hold is read with `commandmate relays` (`# delivery not confirmed, not resent`), `commandmate relays
+  --id <relay-id>`, `GET /api/relays` (`held`) and `GET /api/relays/:id` (`deliveryHold`). The line carries
+  `delivery=uncertain`, `payload=<kind>:<payloadId>`, `reason=<reason>` and `check=<where to look>`, which is
+  the requester's exact instance: `commandmate capture <worktree-id> --instance <instance> --pane`. If it did
+  not arrive, resend it yourself
+- An expiry or a cancel (`commandmate relays cancel`) only stops later deliveries. The held payload's body,
+  payloadId and reason stay readable (what already reached the composer cannot be taken back). A relay that
+  expires while a payload is held gets no expiry notice delivered
+
 ### Progress Output
 
 Progress is written to stderr. Only the final result (JSON) goes to stdout.
