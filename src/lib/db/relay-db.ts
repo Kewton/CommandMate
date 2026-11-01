@@ -553,6 +553,162 @@ const HELD_GUARD = `
   id = ? AND payload_id = ? AND delivery_attempt_id = ? AND delivery_state = 'uncertain' AND state = ?
 `;
 
+type HeldKind = 'reply' | 'prompt' | 'expired';
+
+type HoldDecided =
+  | { ok: true; requeued: boolean; promoted: boolean; discardedReply?: { payloadId: string | null } | null; expired?: boolean }
+  | HoldRefused;
+
+type HoldRefused = { ok: false; refusal: RelayHoldRefusal; message: string };
+
+/** What the per-action steps of {@link resolveRelayDeliveryHold} work on. */
+interface HoldContext {
+  db: Database.Database;
+  input: ResolveRelayDeliveryHoldInput;
+  now: number;
+  row: HeldRow;
+  kind: HeldKind;
+  open: boolean;
+  guarded: (setClause: string, ...setParams: (string | number)[]) => void;
+}
+
+const EMPTY_SLOT_SET = `pending_kind = NULL, pending_body = NULL, payload_id = NULL, ${DROP_HOLD_SET}`;
+
+function refuseHold(refusal: RelayHoldRefusal, message: string): HoldRefused {
+  return { ok: false, refusal, message };
+}
+
+/** Read the held row and refuse it unless it is an `uncertain` hold the caller named. */
+function readResolvableHold(
+  db: Database.Database,
+  input: ResolveRelayDeliveryHoldInput
+): { ok: true; row: HeldRow; kind: HeldKind } | HoldRefused {
+  const refuse = refuseHold;
+  const row = db
+    .prepare(`
+        SELECT state, expires_at, pending_kind, payload_id, pending_reply, delivery_state, delivery_attempt_id
+        FROM session_relays WHERE id = ?
+      `)
+    .get(input.relayId) as HeldRow | undefined;
+  if (!row) return refuse('not_found', `Relay '${input.relayId}' not found`);
+  if (row.delivery_state === null) return refuse('no_hold', 'The relay has no delivery hold (resolved, delivered or queued)');
+  if (row.delivery_state === 'attempting') {
+    return refuse('attempting', 'The payload is being delivered right now; only that delivery settles it');
+  }
+  if (row.delivery_state !== 'uncertain') return refuse('not_allowed', `Unknown delivery state '${row.delivery_state}'`);
+  if (row.delivery_attempt_id === null || row.payload_id === null || input.attemptId === null) {
+    return refuse('not_allowed', 'The hold carries no attempt id and cannot be resolved');
+  }
+  if (row.payload_id !== input.payloadId || row.delivery_attempt_id !== input.attemptId) {
+    return refuse('stale', 'The hold names another payload or attempt (read the relay again)');
+  }
+  const kind = row.pending_kind;
+  if (kind !== 'reply' && kind !== 'prompt' && kind !== 'expired') {
+    return refuse('not_allowed', 'The held slot carries no payload');
+  }
+  return { ok: true, row, kind };
+}
+
+/** `retry`: queue the held payload again (not sent here). */
+function retryHold({ row, kind, open, now, guarded }: HoldContext): HoldDecided {
+  if (kind !== 'expired') {
+    if (!open) return refuseHold('not_allowed', `Relay is already ${row.state}; a closed relay's ${kind} is not sent again`);
+    if (row.expires_at <= now) return refuseHold('not_allowed', 'Relay has passed its deadline; its payload is not sent again');
+  }
+  guarded(DROP_HOLD_SET);
+  return { ok: true, requeued: true, promoted: false };
+}
+
+/** `confirm` / `discard`: empty the held slot (and close or promote as the table says). */
+function settleHold(ctx: HoldContext): HoldDecided {
+  const { db, input, now, row, kind, open, guarded } = ctx;
+  const emptySlot = EMPTY_SLOT_SET;
+
+  if (kind === 'reply' && open) return settleOpenReply(ctx);
+
+  if (kind === 'prompt' && open && row.expires_at <= now) {
+    // Issue #4082: the deadline passed and the sweep has not run yet. The
+    // relay ends here exactly as if the sweep had found the notice held:
+    // closed as `expired`, no expiry notice queued for the composer, and a
+    // waiting reply dropped explicitly (the requester is told) rather than
+    // promoted — promoting it would only have let the sweep erase it
+    // silently and queue a fresh expiry notice after the settle.
+    guarded(`state = 'expired', ${emptySlot}, pending_reply = NULL`);
+    const dropped = row.pending_reply === null ? null : readPendingReply(row.pending_reply);
+    return {
+      ok: true,
+      requeued: false,
+      promoted: false,
+      expired: true,
+      discardedReply: row.pending_reply === null ? null : { payloadId: dropped?.payloadId ?? null },
+    };
+  }
+  if (!open && row.pending_reply !== null) {
+    // Issue #4082: a closed relay delivers nothing more. The reply the
+    // expiry sweep kept behind the held notice is dropped here, with the
+    // slot, in this transaction — explicitly, so the requester is told.
+    guarded(`${emptySlot}, pending_reply = NULL`);
+    const dropped = readPendingReply(row.pending_reply);
+    return { ok: true, requeued: false, promoted: false, discardedReply: { payloadId: dropped?.payloadId ?? null } };
+  }
+  guarded(emptySlot);
+  if (kind !== 'prompt' || !open || row.pending_reply === null) {
+    return { ok: true, requeued: false, promoted: false };
+  }
+  return promotePendingReplyAfterSettle(db, input, now, row, row.pending_reply);
+}
+
+/** `confirm` closes an open relay's held reply `delivered`; `discard` closes it `cancelled`. */
+function settleOpenReply({ input, now, guarded }: HoldContext): HoldDecided {
+  const emptySlot = EMPTY_SLOT_SET;
+  if (input.action === 'confirm') {
+    guarded(
+      `state = 'delivered', sent_request_id = COALESCE(sent_request_id, ?), delivered_at = ?,
+           ${emptySlot}, pending_reply = NULL`,
+      input.sentRequestId,
+      now
+    );
+  } else {
+    guarded(`state = 'cancelled', ${emptySlot}, pending_reply = NULL`);
+  }
+  return { ok: true, requeued: false, promoted: false };
+}
+
+function promotePendingReplyAfterSettle(
+  db: Database.Database,
+  input: ResolveRelayDeliveryHoldInput,
+  now: number,
+  row: HeldRow,
+  pendingReply: string
+): HoldDecided {
+  // The reply that finished while the notice was held takes the slot now,
+  // in this same transaction: nothing can stash in between.
+  const reply = readPendingReply(pendingReply);
+  if (!reply) {
+    // Unreadable: dropped, exactly as `promoteRelayPendingReply` drops it.
+    logger.warn('relay-hold-resolve-unreadable-pending-reply', { relayId: input.relayId });
+    db.prepare('UPDATE session_relays SET pending_reply = NULL WHERE id = ?').run(input.relayId);
+    return { ok: true, requeued: false, promoted: false };
+  }
+  const promoted = db
+    .prepare(`
+        UPDATE session_relays
+        SET pending_kind = 'reply', pending_body = ?, payload_id = ?, overlap = ?,
+            pending_reply = NULL, updated_at = ?
+        WHERE id = ? AND pending_kind IS NULL AND delivery_state IS NULL AND state = ?
+      `)
+    .run(
+      reply.body,
+      reply.payloadId,
+      reply.overlap,
+      now,
+      input.relayId,
+      row.state
+    );
+  if (promoted.changes !== 1) throw new RelayHoldConflict('pending reply could not be promoted');
+  return { ok: true, requeued: false, promoted: true };
+}
+
 /**
  * Settle an `uncertain` delivery hold, once (Issue #4082).
  *
@@ -588,36 +744,14 @@ export function resolveRelayDeliveryHold(
   input: ResolveRelayDeliveryHoldInput
 ): ResolveRelayDeliveryHoldResult {
   const now = input.now ?? Date.now();
-  type Discarded = { payloadId: string | null } | null;
-  type Decided =
-    | { ok: true; requeued: boolean; promoted: boolean; discardedReply?: Discarded; expired?: boolean }
-    | { ok: false; refusal: RelayHoldRefusal; message: string };
+  type Decided = HoldDecided;
 
   const refuse = (refusal: RelayHoldRefusal, message: string): Decided => ({ ok: false, refusal, message });
 
   const decide = (): Decided => {
-    const row = db
-      .prepare(`
-        SELECT state, expires_at, pending_kind, payload_id, pending_reply, delivery_state, delivery_attempt_id
-        FROM session_relays WHERE id = ?
-      `)
-      .get(input.relayId) as HeldRow | undefined;
-    if (!row) return refuse('not_found', `Relay '${input.relayId}' not found`);
-    if (row.delivery_state === null) return refuse('no_hold', 'The relay has no delivery hold (resolved, delivered or queued)');
-    if (row.delivery_state === 'attempting') {
-      return refuse('attempting', 'The payload is being delivered right now; only that delivery settles it');
-    }
-    if (row.delivery_state !== 'uncertain') return refuse('not_allowed', `Unknown delivery state '${row.delivery_state}'`);
-    if (row.delivery_attempt_id === null || row.payload_id === null || input.attemptId === null) {
-      return refuse('not_allowed', 'The hold carries no attempt id and cannot be resolved');
-    }
-    if (row.payload_id !== input.payloadId || row.delivery_attempt_id !== input.attemptId) {
-      return refuse('stale', 'The hold names another payload or attempt (read the relay again)');
-    }
-    const kind = row.pending_kind;
-    if (kind !== 'reply' && kind !== 'prompt' && kind !== 'expired') {
-      return refuse('not_allowed', 'The held slot carries no payload');
-    }
+    const checked = readResolvableHold(db, input);
+    if (!checked.ok) return checked;
+    const { row, kind } = checked;
     const open = isOpenRelayState(row.state as SessionRelay['state']);
 
     // A guarded write that does not take exactly one row rolls the whole
@@ -628,86 +762,10 @@ export function resolveRelayDeliveryHold(
         .run(...setParams, now, input.relayId, input.payloadId, input.attemptId as string, row.state);
       if (result.changes !== 1) throw new RelayHoldConflict('hold changed underneath the resolve');
     };
-    const emptySlot = `pending_kind = NULL, pending_body = NULL, payload_id = NULL, ${DROP_HOLD_SET}`;
+    const ctx: HoldContext = { db, input, now, row, kind, open, guarded };
 
-    if (input.action === 'retry') {
-      if (kind !== 'expired') {
-        if (!open) return refuse('not_allowed', `Relay is already ${row.state}; a closed relay's ${kind} is not sent again`);
-        if (row.expires_at <= now) return refuse('not_allowed', 'Relay has passed its deadline; its payload is not sent again');
-      }
-      guarded(DROP_HOLD_SET);
-      return { ok: true, requeued: true, promoted: false };
-    }
-
-    if (kind === 'reply' && open) {
-      if (input.action === 'confirm') {
-        guarded(
-          `state = 'delivered', sent_request_id = COALESCE(sent_request_id, ?), delivered_at = ?,
-           ${emptySlot}, pending_reply = NULL`,
-          input.sentRequestId,
-          now
-        );
-      } else {
-        guarded(`state = 'cancelled', ${emptySlot}, pending_reply = NULL`);
-      }
-      return { ok: true, requeued: false, promoted: false };
-    }
-
-    if (kind === 'prompt' && open && row.expires_at <= now) {
-      // Issue #4082: the deadline passed and the sweep has not run yet. The
-      // relay ends here exactly as if the sweep had found the notice held:
-      // closed as `expired`, no expiry notice queued for the composer, and a
-      // waiting reply dropped explicitly (the requester is told) rather than
-      // promoted — promoting it would only have let the sweep erase it
-      // silently and queue a fresh expiry notice after the settle.
-      guarded(`state = 'expired', ${emptySlot}, pending_reply = NULL`);
-      const dropped = row.pending_reply === null ? null : readPendingReply(row.pending_reply);
-      return {
-        ok: true,
-        requeued: false,
-        promoted: false,
-        expired: true,
-        discardedReply: row.pending_reply === null ? null : { payloadId: dropped?.payloadId ?? null },
-      };
-    }
-    if (!open && row.pending_reply !== null) {
-      // Issue #4082: a closed relay delivers nothing more. The reply the
-      // expiry sweep kept behind the held notice is dropped here, with the
-      // slot, in this transaction — explicitly, so the requester is told.
-      guarded(`${emptySlot}, pending_reply = NULL`);
-      const dropped = readPendingReply(row.pending_reply);
-      return { ok: true, requeued: false, promoted: false, discardedReply: { payloadId: dropped?.payloadId ?? null } };
-    }
-    guarded(emptySlot);
-    if (kind !== 'prompt' || !open || row.pending_reply === null) {
-      return { ok: true, requeued: false, promoted: false };
-    }
-    // The reply that finished while the notice was held takes the slot now,
-    // in this same transaction: nothing can stash in between.
-    const reply = readPendingReply(row.pending_reply);
-    if (!reply) {
-      // Unreadable: dropped, exactly as `promoteRelayPendingReply` drops it.
-      logger.warn('relay-hold-resolve-unreadable-pending-reply', { relayId: input.relayId });
-      db.prepare('UPDATE session_relays SET pending_reply = NULL WHERE id = ?').run(input.relayId);
-      return { ok: true, requeued: false, promoted: false };
-    }
-    const promoted = db
-      .prepare(`
-        UPDATE session_relays
-        SET pending_kind = 'reply', pending_body = ?, payload_id = ?, overlap = ?,
-            pending_reply = NULL, updated_at = ?
-        WHERE id = ? AND pending_kind IS NULL AND delivery_state IS NULL AND state = ?
-      `)
-      .run(
-        reply.body,
-        reply.payloadId,
-        reply.overlap,
-        now,
-        input.relayId,
-        row.state
-      );
-    if (promoted.changes !== 1) throw new RelayHoldConflict('pending reply could not be promoted');
-    return { ok: true, requeued: false, promoted: true };
+    if (input.action === 'retry') return retryHold(ctx);
+    return settleHold(ctx);
   };
 
   // The relay the answer carries is read INSIDE the transaction, before it
