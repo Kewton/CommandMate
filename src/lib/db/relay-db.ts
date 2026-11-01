@@ -506,6 +506,12 @@ export type ResolveRelayDeliveryHoldResult =
        * nothing was dropped.
        */
       discardedReply: { payloadId: string | null } | null;
+      /**
+       * Issue #4082: an open relay past its deadline (not swept yet) was
+       * closed as `expired` by settling its held prompt notice — no expiry
+       * notice is queued; the caller writes the usual `expired` history line.
+       */
+      expired: boolean;
     }
   | { ok: false; refusal: RelayHoldRefusal; message: string; relay: SessionRelay | null };
 
@@ -568,6 +574,10 @@ const HELD_GUARD = `
  * Issue #4082: a closed relay's reply waiting in the second slot (the expiry
  * sweep keeps it while the notice in front of it is held) is dropped by the
  * confirm / discard that empties the slot, and reported as `discardedReply`.
+ * A prompt notice on an OPEN relay whose deadline has passed (the sweep has
+ * not run yet) is settled the same way, and the relay is closed `expired`
+ * in the same write (`expired: true`) with no expiry notice queued — so
+ * resolve-then-sweep ends where sweep-then-resolve does.
  *
  * `prompt_signature` is kept, so the same dialog is not told again; the send
  * binding's `send_state` / `hold_reason` / observation are not touched.
@@ -580,7 +590,7 @@ export function resolveRelayDeliveryHold(
   const now = input.now ?? Date.now();
   type Discarded = { payloadId: string | null } | null;
   type Decided =
-    | { ok: true; requeued: boolean; promoted: boolean; discardedReply?: Discarded }
+    | { ok: true; requeued: boolean; promoted: boolean; discardedReply?: Discarded; expired?: boolean }
     | { ok: false; refusal: RelayHoldRefusal; message: string };
 
   const refuse = (refusal: RelayHoldRefusal, message: string): Decided => ({ ok: false, refusal, message });
@@ -643,6 +653,23 @@ export function resolveRelayDeliveryHold(
       return { ok: true, requeued: false, promoted: false };
     }
 
+    if (kind === 'prompt' && open && row.expires_at <= now) {
+      // Issue #4082: the deadline passed and the sweep has not run yet. The
+      // relay ends here exactly as if the sweep had found the notice held:
+      // closed as `expired`, no expiry notice queued for the composer, and a
+      // waiting reply dropped explicitly (the requester is told) rather than
+      // promoted — promoting it would only have let the sweep erase it
+      // silently and queue a fresh expiry notice after the settle.
+      guarded(`state = 'expired', ${emptySlot}, pending_reply = NULL`);
+      const dropped = row.pending_reply === null ? null : readPendingReply(row.pending_reply);
+      return {
+        ok: true,
+        requeued: false,
+        promoted: false,
+        expired: true,
+        discardedReply: row.pending_reply === null ? null : { payloadId: dropped?.payloadId ?? null },
+      };
+    }
     if (!open && row.pending_reply !== null) {
       // Issue #4082: a closed relay delivers nothing more. The reply the
       // expiry sweep kept behind the held notice is dropped here, with the
@@ -714,6 +741,7 @@ export function resolveRelayDeliveryHold(
     requeued: decided.requeued,
     promoted: decided.promoted,
     discardedReply: decided.discardedReply ?? null,
+    expired: decided.expired === true,
   };
 }
 

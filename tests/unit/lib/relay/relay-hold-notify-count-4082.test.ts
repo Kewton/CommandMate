@@ -394,15 +394,58 @@ describe('expiry while held: the waiting reply is kept, then discarded on settle
     expect(sendUserMessage).toHaveBeenCalledTimes(2);
   });
 
-  it('deadline passed but not yet swept: confirm promotes on the still-open relay, then the sweep supersedes it', async () => {
-    const held = await heldPromptWithWaitingReply(NOW + 10);
+  /** What either order leaves behind: closed, both slots empty, one expired line, no new notice. */
+  async function expectSettledAsExpired(relayId: string, discardedLines: number): Promise<void> {
+    await pumpRepeatedly();
+    expect(getRelayById(db, relayId)).toMatchObject({ state: 'expired', deliveryHold: null });
+    expect(getRelayPendingPayload(db, relayId)).toBeNull();
+    expect(getRelayBinding(db, relayId)?.pendingReply).toBeNull();
+    // Only the first (held) notice was ever typed: no expiry notice after the settle.
+    expect(sendUserMessage).toHaveBeenCalledTimes(1);
+    expect(systemRows().filter((row) => row.request_id.endsWith(':expired'))).toHaveLength(1);
+    expect(systemRows().filter((row) => row.request_id.includes(':reply-discarded'))).toHaveLength(discardedLines);
+  }
 
-    expect(resolve(held, 'confirm', NOW + 30)).toMatchObject({ ok: true, promoted: true, discardedReply: null });
-    expect(sweepExpiredRelays(db, NOW + 40)).toBe(1);
+  for (const action of ['confirm', 'discard'] as const) {
+    it(`deadline passed but not yet swept: ${action} closes it as expired and drops the waiting reply, as sweep-then-${action} does`, async () => {
+      const held = await heldPromptWithWaitingReply(NOW + 10);
 
-    expect(getRelayById(db, held.relayId)?.state).toBe('expired');
-    expect(getRelayPendingPayload(db, held.relayId)?.kind).toBe('expired');
-    expect(systemRows().filter((row) => row.request_id.includes(':reply-discarded'))).toEqual([]);
+      expect(resolve(held, action, NOW + 30)).toMatchObject({
+        ok: true,
+        promoted: false,
+        expired: true,
+        discardedReply: { payloadId: 'reply-p2' },
+      });
+      // The sweep that runs afterwards finds nothing open to expire.
+      expect(sweepExpiredRelays(db, NOW + 40)).toBe(0);
+
+      await expectSettledAsExpired(held.relayId, 1);
+    });
+
+    it(`sweep-then-${action} ends in the same place (order control)`, async () => {
+      const held = await heldPromptWithWaitingReply(NOW + 10);
+      expect(sweepExpiredRelays(db, NOW + 20)).toBe(1);
+
+      expect(resolve(held, action, NOW + 30)).toMatchObject({ ok: true, expired: false, discardedReply: { payloadId: 'reply-p2' } });
+
+      await expectSettledAsExpired(held.relayId, 1);
+    });
+  }
+
+  it('deadline passed but not yet swept, nothing waiting: closed as expired, no expiry notice queued', async () => {
+    const held = await heldRelay('prompt', NOW + 10);
+
+    expect(resolve(held, 'confirm', NOW + 30)).toMatchObject({ ok: true, expired: true, discardedReply: null });
+    expect(sweepExpiredRelays(db, NOW + 40)).toBe(0);
+
+    await expectSettledAsExpired(held.relayId, 0);
+  });
+
+  it('negative control: a held reply past its deadline is still closed by confirm as delivered (not expired)', async () => {
+    const held = await heldRelay('reply', NOW + 10);
+
+    expect(resolve(held, 'confirm', NOW + 30)).toMatchObject({ ok: true, expired: false });
+    expect(getRelayById(db, held.relayId)?.state).toBe('delivered');
   });
 
   it('negative control: without a hold, the sweep still supersedes the waiting reply', () => {

@@ -335,10 +335,24 @@ export function resolveRelayHold(
       requeued: result.requeued,
       promoted: result.promoted,
       replyDiscarded: result.discardedReply !== null,
+      expired: result.expired,
     });
     // Issue #4082: a closed relay's waiting reply was dropped with the notice
     // in front of it. Told in the requester's history once (best-effort: the
     // settle is committed, and a failed line never undoes it).
+    // Issue #4082: closed here because its deadline had passed — the same
+    // `expired` line the sweep writes (same key, so never twice).
+    if (result.expired) {
+      const relay = result.relay;
+      writeRelaySystemLine(
+        db,
+        relay.id,
+        'expired',
+        resolveRelaySession(db, relay.from),
+        resolveRelaySession(db, relay.to),
+        input.now ?? Date.now()
+      );
+    }
     if (result.discardedReply) {
       const relay = result.relay;
       const replyPayloadId = result.discardedReply.payloadId;

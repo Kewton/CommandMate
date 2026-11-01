@@ -687,11 +687,14 @@ The API is `POST /api/relays/:id/resolve` (body `{ "payloadId", "attemptId", "ac
   included, once per payload). It is an axis of its own, apart from the per-state `counts`, never added to
   them, and not narrowed by `days`. `commandmate relays` prints `held=<n>`, `commandmate task show` adds
   `, <n> held` to its `RELAYS:` line and `commandmate report metrics` adds `, <n> held now` to its `Relays:`
-  line. In JSON, `task show --json` carries `relays` (per state) and `relaysHeld`, and `report metrics --json`
+  line. The `commandmate relays` listing shows the holds to settle (`uncertain`; the N of
+  `# delivery not confirmed, not resent (N)` is the same as `held=`) apart from deliveries being typed right now
+  (`attempting`; `# delivery in progress (N)`). In JSON, `task show --json` carries `relays` (per state) and `relaysHeld`, and `report metrics --json`
   carries `relays` and `relaysHeld`. An older server that does not answer `heldCount` gets no count printed
   (never 0), and `null` in JSON
 - **Expiry while held**: the expiry sweep keeps the reply waiting behind a held prompt notice. When that closed
-  relay's prompt notice is then settled with `--confirm` or `--discard`, the waiting reply is discarded too
+  relay's prompt notice (or that of a relay still open past its deadline and not yet swept: the settle itself then
+  closes it as `expired`, with the usual "expired" system line) is then settled with `--confirm` or `--discard`, the waiting reply is discarded too
   (a closed relay delivers nothing more) and a system line in the requester's history says so (the API answers
   `replyDiscarded: true`). The expiry itself is told by the existing "expired" system line and the hold on the
   screens; no expiry notice is sent to the composer after the hold is settled

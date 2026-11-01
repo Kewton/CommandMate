@@ -477,10 +477,19 @@ Withdraw one with \`commandmate relays cancel <relay-id>\`.
 
         // Issue #4064: listed even when no relay is open — a held payload's
         // relay may have expired or been cancelled since.
+        // Issue #4082: the API's `held` also carries deliveries being typed
+        // right now (`attempting`). Only `uncertain` ones are the holds to
+        // settle — the same set `held=` counts — so the two are listed apart.
         const heldRelays = response.held ?? [];
-        if (heldRelays.length > 0) {
-          console.error(`# delivery not confirmed, not resent (${heldRelays.length})`);
-          heldRelays.forEach(printRelayLine);
+        const uncertain = heldRelays.filter((relay) => relay.deliveryHold?.state === 'uncertain');
+        const inProgress = heldRelays.filter((relay) => relay.deliveryHold?.state !== 'uncertain');
+        if (uncertain.length > 0) {
+          console.error(`# delivery not confirmed, not resent (${uncertain.length})`);
+          uncertain.forEach(printRelayLine);
+        }
+        if (inProgress.length > 0) {
+          console.error(`# delivery in progress (${inProgress.length})`);
+          inProgress.forEach(printRelayLine);
         }
         if (response.awaiting.length === 0 && response.owed.length === 0) {
           console.error('No open relays.');

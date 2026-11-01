@@ -34,6 +34,7 @@ describe('telling, showing and counting holds in the CLI operations guide (Issue
         '`replyDiscarded: true`',
         '`attempting`',
         '`days`',
+        '# delivery in progress (N)',
       ]) {
         expect(section, `${lang} lacks ${token}`).toContain(token);
       }
@@ -42,6 +43,7 @@ describe('telling, showing and counting holds in the CLI operations guide (Issue
 
   it('the code prints what the guides say', () => {
     expect(read('src/cli/commands/relays.ts')).toContain('held=${response.heldCount}');
+    expect(read('src/cli/commands/relays.ts')).toContain('# delivery in progress (');
     expect(read('src/cli/commands/task.ts')).toContain('held} held');
     expect(read('src/cli/commands/task.ts')).toContain('relaysHeld');
     expect(read('src/cli/commands/report.ts')).toContain('held now');

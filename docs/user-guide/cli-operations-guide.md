@@ -795,10 +795,13 @@ API は `POST /api/relays/:id/resolve`（本文 `{ "payloadId", "attemptId", "ac
 - **件数**: `GET /api/relays` の `heldCount` は、いまの保留（`uncertain` だけ・閉じた relay も含む・1 つの payload を 1 回）
   の数です。状態別の `counts` とは別の軸で、合計にも足さず、`days` で絞りません。`commandmate relays` は `held=<n>`、
   `commandmate task show` は `RELAYS:` 行の `, <n> held`、`commandmate report metrics` は `Relays:` 行の `, <n> held now`
-  に出します。JSON では `task show --json` が `relays`（状態別）と `relaysHeld`、`report metrics --json` が `relays` と
+  に出します。`commandmate relays` の一覧は、片付ける保留（`uncertain`。見出し `# delivery not confirmed, not resent (N)` の
+  N は `held=` と同じ）と、いま配送中のもの（`attempting`。見出し `# delivery in progress (N)`）を分けて出します。
+  JSON では `task show --json` が `relays`（状態別）と `relaysHeld`、`report metrics --json` が `relays` と
   `relaysHeld` を持ちます。`heldCount` を返さない古いサーバーでは、件数を出さず（0 とは書きません）、JSON は `null` です
 - **保留中の期限切れ**: 期限切れの掃除は、保留中の relay の確認の通知の後ろで待っている返答を消さずに残します。その後、
-  閉じた relay の確認の通知を `--confirm`・`--discard` で片付けると、待っていた返答も破棄し（閉じた relay からは配送しません）、
+  閉じた relay の確認の通知（期限を過ぎてまだ掃除されていない、開いたままの relay のものも同じ。このときは片付けと
+  同時に `expired` で閉じ、「期限切れ」の system 行を残します）を `--confirm`・`--discard` で片付けると、待っていた返答も破棄し（閉じた relay からは配送しません）、
   その旨を依頼元の履歴に system 行で残します（API の応答は `replyDiscarded: true`）。期限切れは既存の「期限切れ」の
   system 行と保留の表示で伝わり、片付けた後に期限切れの通知を新たに入力欄へ送ることはしません
 

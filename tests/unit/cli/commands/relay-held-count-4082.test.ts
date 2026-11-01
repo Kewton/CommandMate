@@ -175,6 +175,51 @@ describe('relays (Issue #4082)', () => {
     expect(errored()).not.toContain('held=');
   });
 
+  function heldRelay(id: string, state: 'uncertain' | 'attempting') {
+    return {
+      id,
+      state: 'pending',
+      from: { worktreeId: 'wt-a', instanceId: 'claude' },
+      to: { worktreeId: 'wt-b', instanceId: 'codex' },
+      hops: 1,
+      expiresAt: 1_800_000_000_000,
+      deliveryHold: {
+        state,
+        payloadId: `p-${id}`,
+        attemptId: `t-${id}`,
+        kind: 'reply',
+        reason: state === 'uncertain' ? 'send-error' : null,
+        at: 1,
+        checkCommand: 'commandmate capture wt-a --instance claude --pane',
+      },
+    };
+  }
+
+  it('lists uncertain holds and deliveries in progress apart; the heading count matches held=', async () => {
+    serve({
+      ...WITH_HELD,
+      heldCount: 1,
+      held: [heldRelay('u1', 'uncertain'), heldRelay('a1', 'attempting')],
+    });
+    await relays(['--worktree', 'wt-a', '--instance', 'claude']);
+
+    expect(errored()).toContain('held=1');
+    expect(errored()).toContain('# delivery not confirmed, not resent (1)');
+    expect(errored()).toContain('# delivery in progress (1)');
+    const lines = mockConsoleLog.mock.calls.map((call) => String(call[0]));
+    expect(lines.filter((line) => line.startsWith('u1'))).toHaveLength(1);
+    expect(lines.filter((line) => line.startsWith('a1'))).toHaveLength(1);
+  });
+
+  it('a delivery in progress alone is not listed as unconfirmed (held=0)', async () => {
+    serve({ ...WITH_HELD, heldCount: 0, held: [heldRelay('a1', 'attempting')] });
+    await relays(['--worktree', 'wt-a', '--instance', 'claude']);
+
+    expect(errored()).toContain('held=0');
+    expect(errored()).not.toContain('# delivery not confirmed');
+    expect(errored()).toContain('# delivery in progress (1)');
+  });
+
   it('--json passes heldCount through', async () => {
     serve(WITH_HELD);
     await relays(['--worktree', 'wt-a', '--instance', 'claude', '--json']);
