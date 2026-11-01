@@ -1286,6 +1286,13 @@
     "stripAwaitingMany": "返信待ち {count} 件",
     "stripPrompt": "{alias} が確認待ち",
     "stripOwed": "{alias} へ返信予定: ターン完了時に届きます",
+    "badgeHeld": "{alias} からの配送が未確認",
+    "badgeHeldMany": "配送未確認 {count} 件",
+    "heldTitle": "このセッションへの relay の配送（返信・確認待ちの通知・期限切れの通知）が届いたか分かりません。自動では再送しません。この画面を確かめてから commandmate relays resolve で片付けてください。",
+    "stripHeld": "{alias} からの配送が未確認: 画面を確かめて relays resolve で片付けてください",
+    "stripHeldMany": "配送未確認 {count} 件: 画面を確かめて relays resolve で片付けてください",
+    "unplacedHeldHeading": "名簿に無いセッションへの配送未確認",
+    "unplacedHeldLine": "{requester} ← {alias}（relay {relayId}）",
     "historyBadge": "relay",
     "historyBadgeTitle": "別のエージェントセッションから届いたメッセージです（Issue #2377 relay）。",
     "historyCount": "表示範囲に relay メッセージが {count} 件"

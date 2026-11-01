@@ -466,17 +466,21 @@ Withdraw one with \`commandmate relays cancel <relay-id>\`.
           );
         }
         const { counts } = response;
+        // Issue #4082: `held=` is its own axis (uncertain now, open or closed),
+        // not one of the states. Left out — never printed as 0 — when an older
+        // server did not answer it.
+        const held = typeof response.heldCount === 'number' ? ` held=${response.heldCount}` : '';
         console.error(
           `relays: pending=${counts.pending} prompt=${counts.prompt} `
-          + `delivered=${counts.delivered} expired=${counts.expired} cancelled=${counts.cancelled}`
+          + `delivered=${counts.delivered} expired=${counts.expired} cancelled=${counts.cancelled}${held}`
         );
 
         // Issue #4064: listed even when no relay is open — a held payload's
         // relay may have expired or been cancelled since.
-        const held = response.held ?? [];
-        if (held.length > 0) {
-          console.error(`# delivery not confirmed, not resent (${held.length})`);
-          held.forEach(printRelayLine);
+        const heldRelays = response.held ?? [];
+        if (heldRelays.length > 0) {
+          console.error(`# delivery not confirmed, not resent (${heldRelays.length})`);
+          heldRelays.forEach(printRelayLine);
         }
         if (response.awaiting.length === 0 && response.owed.length === 0) {
           console.error('No open relays.');
@@ -578,6 +582,12 @@ Withdraw one with \`commandmate relays cancel <relay-id>\`.
             console.error(RESOLVED_MESSAGES[action](relayId, response));
             if (response.promoted) {
               console.error('  The reply that waited behind it is queued for delivery.');
+            }
+            // Issue #4082: a closed relay delivers nothing more.
+            if (response.replyDiscarded) {
+              console.error(
+                '  The reply that waited behind it was discarded: the relay is closed, so it is not delivered.'
+              );
             }
           }
         } catch (error) {

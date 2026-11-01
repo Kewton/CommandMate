@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import { useSessionRelays } from '@/lib/relay/use-session-relays';
 import { resolveRelayBadges, type RelayBadge } from '@/lib/relay/relay-badges';
+import { RelayUnplacedHeldList } from '@/components/worktree/RelayUnplacedHeldList';
 import {
   CLI_TOOL_IDS,
   getCliToolDisplayName,
@@ -260,14 +261,15 @@ function useAgentSourceByInstance(
 /**
  * Token classes for a relay badge (Issue #2377).
  *
- * `prompt` is the only one drawn as a warning, because it is the only one that
- * means somebody has to act; the other two are statements of fact about work
+ * `prompt` and (Issue #4082) `held` are drawn as a warning, because they are
+ * the ones that mean somebody has to act; the other two are statements of fact about work
  * that is proceeding, and are drawn in the same muted grey as the model and
  * event-source lines above them. Semantic tokens only — see
  * `scripts/check-token-discipline.mjs`.
  */
 export function relayBadgeClassName(badge: RelayBadge): string {
-  return badge.tone === 'prompt' ? 'text-warning' : 'text-muted-foreground';
+  // Issue #4082: `held` needs somebody to act too (look, then resolve).
+  return badge.tone === 'prompt' || badge.tone === 'held' ? 'text-warning' : 'text-muted-foreground';
 }
 
 // ============================================================================
@@ -379,6 +381,12 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
         ?? endpoint.instanceId;
     },
     [instances, worktreeId],
+  );
+
+  // Issue #4082: a held delivery to an instance the roster no longer has.
+  const unplacedHeld = useMemo(
+    () => relays.heldUnplaced(instances.map((inst) => inst.id)),
+    [relays, instances],
   );
 
   const atMax = instances.length >= MAX_AGENT_INSTANCES;
@@ -606,6 +614,8 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
           const relayBadges = resolveRelayBadges({
             owed: relays.owedBy(inst.id),
             awaiting: relays.awaitedBy(inst.id),
+            // Issue #4082: payloads to this session whose delivery is not known.
+            held: relays.heldFor(inst.id),
             aliasOf,
           });
           // Issue #2395: this row IS the composer's target, so "delegate to it"
@@ -815,6 +825,13 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
           );
         })}
       </div>
+
+      {/* Issue #4082: held deliveries whose requester has no row here. */}
+      <RelayUnplacedHeldList
+        relays={unplacedHeld}
+        aliasOf={aliasOf}
+        className="mt-2"
+      />
 
       {/* Add instance */}
       <div className="mt-4 flex items-center gap-2">

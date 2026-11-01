@@ -1286,6 +1286,13 @@
     "stripAwaitingMany": "Waiting for {count} delegated replies.",
     "stripPrompt": "{alias} is waiting for a confirmation.",
     "stripOwed": "Owed to {alias}: this session's reply is delivered when the turn ends.",
+    "badgeHeld": "Delivery from {alias} unconfirmed",
+    "badgeHeldMany": "Unconfirmed deliveries ({count})",
+    "heldTitle": "Whether a relay delivery to this session (a reply, a confirmation notice or an expiry notice) arrived is not known. It is not resent automatically. Check this pane, then settle it with commandmate relays resolve.",
+    "stripHeld": "Delivery from {alias} unconfirmed: check this pane, then settle it with relays resolve.",
+    "stripHeldMany": "{count} unconfirmed deliveries: check this pane, then settle them with relays resolve.",
+    "unplacedHeldHeading": "Unconfirmed deliveries to sessions not in the roster",
+    "unplacedHeldLine": "{requester} ← {alias} (relay {relayId})",
     "historyBadge": "relay",
     "historyBadgeTitle": "Delivered by another agent session (Issue #2377 relay).",
     "historyCount": "{count} relayed message(s) in view"

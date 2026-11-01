@@ -2589,6 +2589,13 @@ export interface RelayListResponse {
    */
   held?: RelayView[];
   counts: RelayCountsResponse;
+  /**
+   * Issue #4082: how many payloads in scope are held as `uncertain` now —
+   * open relays or closed, once each, not narrowed by `days`, and not one of
+   * the per-state `counts` (never added to them). Absent on an older server:
+   * print nothing for it rather than 0.
+   */
+  heldCount?: number;
 }
 
 /** Mirrors: src/app/api/relays/route.ts POST 201 response. */
@@ -2617,4 +2624,9 @@ export interface RelayResolveResponse {
   requeued: boolean;
   /** A reply waiting behind the resolved prompt notice was queued in its place. */
   promoted: boolean;
+  /**
+   * Issue #4082: the relay was closed, and a reply that waited behind the
+   * settled notice was discarded (never delivered). Absent on an older server.
+   */
+  replyDiscarded?: boolean;
 }

@@ -334,7 +334,25 @@ export function resolveRelayHold(
       state: result.relay.state,
       requeued: result.requeued,
       promoted: result.promoted,
+      replyDiscarded: result.discardedReply !== null,
     });
+    // Issue #4082: a closed relay's waiting reply was dropped with the notice
+    // in front of it. Told in the requester's history once (best-effort: the
+    // settle is committed, and a failed line never undoes it).
+    if (result.discardedReply) {
+      const relay = result.relay;
+      const replyPayloadId = result.discardedReply.payloadId;
+      writeRelaySystemLine(
+        db,
+        relay.id,
+        'reply-discarded',
+        resolveRelaySession(db, relay.from),
+        resolveRelaySession(db, relay.to),
+        input.now ?? Date.now(),
+        { relayId: relay.id, payload: `reply:${replyPayloadId ?? '-'}` },
+        replyPayloadId ?? input.payloadId
+      );
+    }
   } else {
     logger.info('relay-hold-resolve-refused', {
       relayId: input.relayId,

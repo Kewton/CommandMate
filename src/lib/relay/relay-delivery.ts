@@ -45,7 +45,7 @@ import {
   claimRelayPayloadDelivery,
   clearRelayHeldCandidates,
   clearRelayPending,
-  clearRelayPendingReply,
+  clearRelayPendingReplyUnlessHeld,
   completeRelayPayloadDelivery,
   completeRelayPromptDelivery,
   completeRelayReplyDelivery,
@@ -57,7 +57,8 @@ import {
   listExpiredOpenRelays,
   listOpenRelaysTo,
   markRelayExpired,
-  recoverInterruptedRelayDeliveries,
+  RELAY_DELIVERY_SERVER_RESTARTED,
+  recoverInterruptedRelayDeliveryRefs,
   releaseRelayPayloadDelivery,
   replaceRelayPromptWithPendingReply,
   stashRelayPayload,
@@ -84,7 +85,7 @@ import {
 } from '@/lib/relay/relay-bound-reply';
 import { RELAY_SCRAPE_QUIET_MS } from '@/lib/relay/relay-policy';
 import { findRelayHoldReason } from '@/lib/relay/relay-readiness';
-import { resolveRelaySession } from '@/lib/relay/relay-session-ref';
+import { resolveRelaySession, type ResolvedRelaySession } from '@/lib/relay/relay-session-ref';
 import { writeRelaySystemLine } from '@/lib/relay/relay-system-line';
 import {
   claimRelayDelivery,
@@ -92,7 +93,7 @@ import {
   releaseRelayDelivery,
   resetRelayDeliveryClaims,
 } from '@/lib/relay/relay-delivery-claims';
-import { isOpenRelayState } from '@/lib/relay/types';
+import { isOpenRelayState, type RelayPendingKind, type SessionRelay } from '@/lib/relay/types';
 import { createLogger } from '@/lib/logger';
 import { getOrInitGlobal } from '../global-state';
 
@@ -225,9 +226,16 @@ function ensureRelayRecovery(db: Database.Database): void {
   const boot = relayServerBootId();
   if (globalThis.__relayAttemptsRecoveredBootId !== boot) {
     try {
-      const held = recoverInterruptedRelayDeliveries(db, boot);
+      const held = recoverInterruptedRelayDeliveryRefs(db, boot);
       globalThis.__relayAttemptsRecoveredBootId = boot;
-      if (held > 0) logger.info('relay-interrupted-deliveries-held', { held });
+      if (held.length > 0) logger.info('relay-interrupted-deliveries-held', { held: held.length });
+      // Issue #4082: each attempt this recovery moved to `uncertain` — and
+      // only those — is told to its requester, once.
+      for (const ref of held) {
+        const relay = getRelayById(db, ref.relayId);
+        if (!relay) continue;
+        noteRelayHeld(db, relay, resolveRelaySession(db, relay.from), ref, relay.deliveryHold?.kind ?? null, RELAY_DELIVERY_SERVER_RESTARTED);
+      }
     } catch (error) {
       logger.warn('relay-delivery-recovery-failed', {
         error: error instanceof Error ? error.message : String(error),
@@ -419,7 +427,10 @@ export function sweepExpiredRelays(db: Database.Database, now = Date.now()): num
       // (`clearRelayPending` refuses it), the expiry notice then finds the
       // slot taken and is not queued, and the relay is closed all the same.
       clearRelayPending(db, relay.id, now);
-      clearRelayPendingReply(db, relay.id, now);
+      // Issue #4082: a reply waiting behind a HELD payload is kept: settling
+      // the hold decides it (on a closed relay, it is then discarded and the
+      // requester told). Without a hold it is superseded, as before.
+      clearRelayPendingReplyUnlessHeld(db, relay.id, now);
       const body = buildRelayExpiredMessage(
         locale,
         senderLabel(db, relay),
@@ -600,7 +611,7 @@ async function deliverOne(
         reason,
         error: error instanceof Error ? error.message : String(error),
       });
-      holdUncertain(db, ref, reason);
+      if (holdUncertain(db, ref, reason)) noteRelayHeld(db, relay, requester, ref, kind, reason);
       return 'uncertain';
     }
 
@@ -616,7 +627,7 @@ async function deliverOne(
           stage: result.stage,
           reason: observed.reason,
         });
-        holdUncertain(db, ref, observed.reason);
+        if (holdUncertain(db, ref, observed.reason)) noteRelayHeld(db, relay, requester, ref, kind, observed.reason);
         return 'uncertain';
       }
       logger.info('relay-delivery-refused', { relayId, kind, stage: result.stage });
@@ -740,13 +751,62 @@ function requeue(db: Database.Database, ref: RelayPayloadAttemptRef): boolean {
   }
 }
 
-/** Hold a payload whose delivery may have reached A (Issue #4064). */
-function holdUncertain(db: Database.Database, ref: RelayPayloadAttemptRef, reason: string): void {
+/**
+ * Hold a payload whose delivery may have reached A (Issue #4064).
+ *
+ * @returns Whether THIS call moved the attempt to `uncertain` (Issue #4082):
+ *   false for a stale attempt (resolved, retried, held by a recovery) and for
+ *   a write that failed — neither may be announced
+ */
+function holdUncertain(db: Database.Database, ref: RelayPayloadAttemptRef, reason: string): boolean {
   try {
-    holdRelayPayloadDelivery(db, { ...ref, reason });
+    return holdRelayPayloadDelivery(db, { ...ref, reason });
   } catch (error) {
     // Left `attempting`, which is a hold already; the next boot labels it.
     logger.warn('relay-delivery-hold-failed', {
+      relayId: ref.relayId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
+/**
+ * Tell the requester, in its history, that one delivery attempt was held as
+ * `uncertain` (Issue #4082). Called only for an attempt this process just
+ * moved there. Keyed on the relay, payload AND attempt, so the same attempt is
+ * told once and a retry's new attempt (or another payload) is told again.
+ *
+ * Best-effort and at most one line: a failed write (or a stop before it) is
+ * not retried and never touches the hold; the socket frame goes out only after
+ * the row is committed.
+ */
+function noteRelayHeld(
+  db: Database.Database,
+  relay: SessionRelay,
+  requester: ResolvedRelaySession,
+  ref: RelayPayloadAttemptRef,
+  kind: RelayPendingKind | null,
+  reason: string
+): void {
+  try {
+    writeRelaySystemLine(
+      db,
+      relay.id,
+      'held',
+      requester,
+      resolveRelaySession(db, relay.to),
+      ref.now ?? Date.now(),
+      {
+        relayId: relay.id,
+        payload: `${kind ?? '-'}:${ref.payloadId}`,
+        attemptId: ref.attemptId,
+        deliveryReason: reason,
+      },
+      `${ref.payloadId}:${ref.attemptId}`
+    );
+  } catch (error) {
+    logger.warn('relay-held-line-failed', {
       relayId: ref.relayId,
       error: error instanceof Error ? error.message : String(error),
     });

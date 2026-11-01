@@ -39,18 +39,42 @@ function formatTimestamp(value: string | null): string {
  * Best effort: a daemon with no relay ledger is one that answers 404 here, which
  * must not fail `task show`.
  */
+/**
+ * What {@link readTaskRelayCounts} answers (Issue #4082): the per-state counts
+ * and, apart from them, the payloads held as `uncertain` now. `held` is null
+ * when the server did not say (older than #4082) — never 0 then.
+ */
+export interface TaskRelaySummary {
+  counts: RelayCountsResponse;
+  held: number | null;
+}
+
 async function readTaskRelayCounts(
   client: ApiClient,
   task: TaskView
-): Promise<RelayCountsResponse | null> {
+): Promise<TaskRelaySummary | null> {
   const query = new URLSearchParams({ worktree: task.worktreeId });
   if (task.instanceId) query.set('instance', task.instanceId);
   try {
     const response = await client.get<RelayListResponse>(`/api/relays?${query.toString()}`);
-    return response.counts ?? null;
+    if (!response.counts) return null;
+    return {
+      counts: response.counts,
+      held: typeof response.heldCount === 'number' ? response.heldCount : null,
+    };
   } catch {
     return null;
   }
+}
+
+/** The `RELAYS:` line of `task show` (Issue #2377; held count Issue #4082). */
+export function formatTaskRelayLine(summary: TaskRelaySummary): string {
+  const { counts, held } = summary;
+  const heldPart = held === null ? '' : `, ${held} held`;
+  return (
+    `RELAYS:    ${counts.delivered} delivered / ${counts.prompt} prompt / `
+    + `${counts.expired} expired  (${counts.pending} open${heldPart})`
+  );
 }
 
 function printTaskLine(task: TaskView): void {
@@ -144,12 +168,23 @@ export function createTaskCommand(): Command {
           'GET /api/tasks/:taskId'
         );
 
+        const { task, lastVerificationRun } = detail;
+        // Issue #2377 / #4082: read before either output, so the JSON carries
+        // the same relay counts (and held count) the text prints. `null` when
+        // the daemon has no ledger; `relaysHeld: null` when it did not say.
+        const relays = await readTaskRelayCounts(client, task);
+
         if (options.json) {
-          console.log(JSON.stringify(detail));
+          console.log(
+            JSON.stringify({
+              ...detail,
+              relays: relays?.counts ?? null,
+              relaysHeld: relays?.held ?? null,
+            })
+          );
           return;
         }
 
-        const { task, lastVerificationRun } = detail;
         console.log(`ID:        ${task.id}`);
         console.log(`STATUS:    ${task.status}`);
         console.log(`WORKTREE:  ${task.worktreeId}`);
@@ -178,13 +213,7 @@ export function createTaskCommand(): Command {
         // Issue #2377: what this session delegated, and what came back. Printed
         // before the verification block because it is about the same session,
         // whereas the run below is about one judgement of it.
-        const relays = await readTaskRelayCounts(client, task);
-        if (relays) {
-          console.log(
-            `RELAYS:    ${relays.delivered} delivered / ${relays.prompt} prompt / `
-            + `${relays.expired} expired  (${relays.pending} open)`
-          );
-        }
+        if (relays) console.log(formatTaskRelayLine(relays));
 
         if (!lastVerificationRun) {
           console.log('VERIFY:    (no verification run yet)');

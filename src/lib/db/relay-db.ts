@@ -48,7 +48,9 @@ export {
   clearRelayHeldCandidates,
   clearRelayPending,
   clearRelayPendingReply,
+  clearRelayPendingReplyUnlessHeld,
   completeRelayPayloadDelivery,
+  countHeldRelays,
   completeRelayPromptDelivery,
   explainRelayBindRefusal,
   failOrphanedRelayBind,
@@ -63,6 +65,7 @@ export {
   promoteRelayPendingReply,
   recordRelayInputBoundary,
   recoverInterruptedRelayDeliveries,
+  recoverInterruptedRelayDeliveryRefs,
   releaseRelayPayloadDelivery,
   RELAY_DELIVERY_SERVER_RESTARTED,
   replaceRelayPromptWithPendingReply,
@@ -495,6 +498,14 @@ export type ResolveRelayDeliveryHoldResult =
       requeued: boolean;
       /** A reply waiting behind a prompt notice took the first slot. */
       promoted: boolean;
+      /**
+       * Issue #4082: a reply that waited behind the settled notice of a CLOSED
+       * relay (the expiry sweep keeps it while the notice is held) was dropped
+       * in the same transaction — it is never delivered from a closed relay.
+       * Its payload id, or null when the slot could not be read. Null when
+       * nothing was dropped.
+       */
+      discardedReply: { payloadId: string | null } | null;
     }
   | { ok: false; refusal: RelayHoldRefusal; message: string; relay: SessionRelay | null };
 
@@ -554,6 +565,10 @@ const HELD_GUARD = `
  * | expired | (closed) | slot emptied | queued again | slot emptied |
  * | reply / prompt | closed | slot emptied, state kept | refused | slot emptied, state kept |
  *
+ * Issue #4082: a closed relay's reply waiting in the second slot (the expiry
+ * sweep keeps it while the notice in front of it is held) is dropped by the
+ * confirm / discard that empties the slot, and reported as `discardedReply`.
+ *
  * `prompt_signature` is kept, so the same dialog is not told again; the send
  * binding's `send_state` / `hold_reason` / observation are not touched.
  * Nothing here types: a retried payload goes out through the pump.
@@ -563,7 +578,10 @@ export function resolveRelayDeliveryHold(
   input: ResolveRelayDeliveryHoldInput
 ): ResolveRelayDeliveryHoldResult {
   const now = input.now ?? Date.now();
-  type Decided = { ok: true; requeued: boolean; promoted: boolean } | { ok: false; refusal: RelayHoldRefusal; message: string };
+  type Discarded = { payloadId: string | null } | null;
+  type Decided =
+    | { ok: true; requeued: boolean; promoted: boolean; discardedReply?: Discarded }
+    | { ok: false; refusal: RelayHoldRefusal; message: string };
 
   const refuse = (refusal: RelayHoldRefusal, message: string): Decided => ({ ok: false, refusal, message });
 
@@ -625,6 +643,14 @@ export function resolveRelayDeliveryHold(
       return { ok: true, requeued: false, promoted: false };
     }
 
+    if (!open && row.pending_reply !== null) {
+      // Issue #4082: a closed relay delivers nothing more. The reply the
+      // expiry sweep kept behind the held notice is dropped here, with the
+      // slot, in this transaction — explicitly, so the requester is told.
+      guarded(`${emptySlot}, pending_reply = NULL`);
+      const dropped = readPendingReply(row.pending_reply);
+      return { ok: true, requeued: false, promoted: false, discardedReply: { payloadId: dropped?.payloadId ?? null } };
+    }
     guarded(emptySlot);
     if (kind !== 'prompt' || !open || row.pending_reply === null) {
       return { ok: true, requeued: false, promoted: false };
@@ -682,7 +708,13 @@ export function resolveRelayDeliveryHold(
   }
   const { decided, relay } = settled;
   if (!decided.ok) return { ...decided, relay };
-  return { ok: true, relay: relay as SessionRelay, requeued: decided.requeued, promoted: decided.promoted };
+  return {
+    ok: true,
+    relay: relay as SessionRelay,
+    requeued: decided.requeued,
+    promoted: decided.promoted,
+    discardedReply: decided.discardedReply ?? null,
+  };
 }
 
 /** Which relays {@link countRelays} should count. All fields are optional. */
