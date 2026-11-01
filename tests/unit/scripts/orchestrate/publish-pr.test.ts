@@ -145,7 +145,8 @@ describe('main: PR title over a fold', () => {
     appendRecord(runDir, '3477', { issue: 3477, stage: 'precheck', result: 'ok', head: HEAD_M, workHead: HEAD_A });
     const fake = folded();
     expect(runMain(fake).code).toBe(0);
-    expect(titleOf(fake)).toBe('fix(orchestrate): worker subject (#3477)');
+    // #4076 B: the PR is named after the Issue (pr-fake's title), not after a commit — the fold's subject is still not it.
+    expect(titleOf(fake)).toBe('feat(orchestrate): publish and merge (#3477)');
   });
 
   it('keeps --title first', () => {

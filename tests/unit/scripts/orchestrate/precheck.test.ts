@@ -379,6 +379,9 @@ describe('#3477 review of PR 3: precheck of another HEAD', () => {
       run: (command: string, args: string[]) => {
         const sub = args.slice(2);
         if (command === 'git' && sub[0] === 'log') return { status: 0, stdout: `${HEAD_A} ${HEAD_B} ${'d'.repeat(40)}\n${HEAD_B} ${'d'.repeat(40)}\n`, stderr: '' };
+        // A clean refresh (#4076): the automatic merge of its parents is its own tree, so it changed nothing itself.
+        if (command === 'git' && sub[0] === 'merge-tree') return { status: 0, stdout: `${'9'.repeat(40)}\n`, stderr: '' };
+        if (command === 'git' && sub[0] === 'diff-tree' && sub.includes('9'.repeat(40))) return { status: 0, stdout: '', stderr: '' };
         return h.deps.run(command, args);
       },
     };
