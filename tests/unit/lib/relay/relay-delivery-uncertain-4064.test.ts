@@ -302,6 +302,36 @@ describe('path 2: a send that throws is held, not re-sent (Issue #4064)', () => 
     expect(getRelayPendingPayload(db, relayId)).toMatchObject({ kind: 'reply', body: before?.body });
   });
 
+  it('a reply sent but whose relay close the database refused keeps its hold, and a later completion does not capture it again', async () => {
+    const relay = legacyRelay();
+    seedReply('done', NOW + 1_000);
+    db.exec(`CREATE TRIGGER refuse_relay_close BEFORE UPDATE ON session_relays
+      WHEN NEW.state = 'delivered'
+      BEGIN SELECT RAISE(ABORT, 'relay close refused'); END`);
+
+    await notifyRelayTurnCompleted(CODEX_WORKER, { settled: true });
+    await flush();
+    await pumpRepeatedly();
+
+    expect(sendUserMessage).toHaveBeenCalledTimes(1);
+    const held = getRelayById(db, relay.id);
+    expect(held?.state).not.toBe('delivered');
+    expect(held?.deliveryHold).toMatchObject({ state: 'attempting', kind: 'reply' });
+    const payloadId = held?.deliveryHold?.payloadId;
+    expect(payloadId).toBeTruthy();
+    expect(getRelayPendingPayload(db, relay.id)).toMatchObject({ kind: 'reply', body: expect.stringContaining('done') });
+
+    // The next completion of B finds the slot still held: nothing new is captured or sent.
+    seedReply('done again', NOW + 2_000);
+    await notifyRelayTurnCompleted(CODEX_WORKER, { settled: true });
+    await flush();
+    await pumpRepeatedly();
+
+    expect(sendUserMessage).toHaveBeenCalledTimes(1);
+    expect(getRelayById(db, relay.id)?.deliveryHold).toMatchObject({ state: 'attempting', kind: 'reply', payloadId });
+    expect(getRelayPendingPayload(db, relay.id)?.body).not.toContain('done again');
+  });
+
   it('negative control: a reply whose attempt closes is delivered once and leaves nothing held', async () => {
     const relayId = relayWith('reply');
 
