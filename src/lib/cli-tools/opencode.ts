@@ -67,7 +67,13 @@ import {
 } from '../detection/cli-patterns';
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
 import { isOpenCodeComposerReady } from '../detection/tools/opencode/readiness';
-import { detectSessionStatus } from '../detection/status-detector';
+import { detectSessionStatus, isGeneratingStatus, type StatusDetectionResult } from '../detection/status-detector';
+import {
+  PROMPT_WAIT_DIALOG_CONFIRM_MS,
+  confirmedDialogRefusal,
+  createDialogConfirmation,
+  readBeforeDeadline,
+} from './prompt-wait-dialog';
 import { classifySendFailure } from '@/lib/session/send-attempt-state';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { ensureOpencodeConfig } from './opencode-config';
@@ -205,6 +211,18 @@ const OPENCODE_PROMPT_WAIT_TIMEOUT_MS = 15000;
 
 /** Interval between the send's readiness polls (Issue #4040). */
 const OPENCODE_PROMPT_POLL_INTERVAL_MS = 500;
+
+/**
+ * Whether {@link OpenCodeTool}'s keyboard-fallback wait counts this frame
+ * towards giving up on a dialog (Issue #4084): an active prompt, or opencode's
+ * `waiting` without one (its permission strip, pickers, palette and overlays
+ * answer with keys, #1896) — and never a turn being generated. There is no
+ * folder-trust dialog here to leave out: this wait answers none.
+ */
+function isOpenCodeWaitDialog(status: Pick<StatusDetectionResult, 'status' | 'reason' | 'hasActivePrompt'>): boolean {
+  if (isGeneratingStatus(status)) return false;
+  return status.hasActivePrompt || status.status === 'waiting';
+}
 
 /** Whether this send's server dispatch ended `unknown` (Issue #4040). */
 interface DispatchTrace {
@@ -913,31 +931,59 @@ export class OpenCodeTool extends BaseCLITool {
    *
    * {@link isOpenCodeComposerReady} is the test: the box on screen, empty, and
    * no dialog or overlay over it (the `Connect a provider` overlay included —
-   * every option on it writes credentials, so it is never typed into). A dialog
-   * or overlay (`waiting`) ends the wait at once without throwing, so a send
-   * does not sit here for the whole window behind a choice only a person can
-   * make: the shared sender then refuses it under the input lock — as
-   * `prompt-waiting` when the detector reports an active prompt, otherwise as
-   * `prompt-not-ready` after its short re-read.
+   * every option on it writes credentials, so it is never typed into).
+   *
+   * A dialog or overlay ({@link isOpenCodeWaitDialog}) does not keep the send
+   * here for the whole window behind a choice only a person can make — but
+   * since Issue #4084 it ends the wait only once confirmed: seen on 2 reads in a
+   * row spanning {@link PROMPT_WAIT_DIALOG_CONFIRM_MS}, the count copilot's wait
+   * uses (#4067). It used to end the wait on one read, so a frame mid-paint
+   * could cut the wait short. A confirmed dialog is refused at once on the
+   * wait's own reads, as the shared sender's re-check under the lock would have
+   * refused it: `prompt-waiting` when the detector reports an active prompt,
+   * otherwise `prompt-not-ready` (opencode's permission strip, pickers and
+   * palette read as `waiting` without `hasActivePrompt`, #1896). A dialog that
+   * opens after the wait is still refused under the input lock on one read. No
+   * capture is waited for past the window: one still running at the deadline
+   * is not used.
    *
    * @throws Error (`OpenCode prompt not ready`) when the box did not come up
-   *   within {@link OPENCODE_PROMPT_WAIT_TIMEOUT_MS}; nothing was typed
+   *   within {@link OPENCODE_PROMPT_WAIT_TIMEOUT_MS}, or a dialog without an
+   *   active prompt was confirmed; nothing was typed
+   * @throws Error coded `prompt-waiting` ({@link confirmedDialogRefusal}) for a
+   *   confirmed dialog the detector reads as an active prompt; nothing was typed
    */
   private async waitForPrompt(sessionName: string): Promise<void> {
-    const startTime = Date.now();
-    while (Date.now() - startTime < OPENCODE_PROMPT_WAIT_TIMEOUT_MS) {
+    const deadline = Date.now() + OPENCODE_PROMPT_WAIT_TIMEOUT_MS;
+    const dialog = createDialogConfirmation();
+    while (Date.now() < deadline) {
+      let refusal: Error | null = null;
       try {
-        const output = await capturePane(sessionName, OPENCODE_READY_CAPTURE_LINES);
+        const output = await readBeforeDeadline(
+          () => capturePane(sessionName, OPENCODE_READY_CAPTURE_LINES),
+          deadline
+        );
+        if (output === null) break;
         if (isOpenCodeComposerReady(output)) return;
-        // opencode's dialogs (permission strip, pickers, palette) read as
-        // `waiting` without `hasActivePrompt` (their answers are keys, #1896).
         const status = detectSessionStatus(output, 'opencode');
-        if (status.hasActivePrompt || status.status === 'waiting') return;
+        if (dialog.observe(isOpenCodeWaitDialog(status))) {
+          logger.warn('opencode-prompt-wait-dialog', { sessionName, reads: dialog.reads, reason: status.reason });
+          refusal = status.hasActivePrompt
+            ? confirmedDialogRefusal(sessionName, 'OpenCode')
+            : new Error(
+                `OpenCode prompt not ready: a dialog or overlay (${status.reason}) stayed up for ` +
+                  `${PROMPT_WAIT_DIALOG_CONFIRM_MS}ms before sending; nothing was typed (Issue #4084)`
+              );
+        }
       } catch (error: unknown) {
-        // Capture may fail - continue polling
+        // Capture may fail - continue polling. Not a dialog read: the run restarts.
+        dialog.reset();
         logger.debug('opencode-prompt-capture-failed', { sessionName, error: getErrorMessage(error) });
       }
-      await new Promise((resolve) => setTimeout(resolve, OPENCODE_PROMPT_POLL_INTERVAL_MS));
+      if (refusal) throw refusal;
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(OPENCODE_PROMPT_POLL_INTERVAL_MS, remaining)));
     }
     logger.info('opencode-prompt-not-detected');
     throw new Error('OpenCode prompt not ready: timed out waiting for the input prompt before sending');

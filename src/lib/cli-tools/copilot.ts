@@ -27,6 +27,7 @@ import {
 import { sendMessageWithSubmitVerification, type InputReadiness } from './submit-verified-sender';
 import { recheckComposerBeforeInput } from '@/lib/session/composer-clear';
 import { INPUT_RECHECK_PROMPT_WAITING_CODE } from '@/lib/session/send-attempt-types';
+import { PROMPT_WAIT_DIALOG_CONFIRM_MS, createDialogConfirmation, readBeforeDeadline } from './prompt-wait-dialog';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { detectSessionStatus } from '../detection/status-detector';
 import {
@@ -80,16 +81,17 @@ const COPILOT_PROMPT_WAIT_TIMEOUT_MS = 15000;
 
 /**
  * How long a dialog has to stay up in {@link CopilotTool.waitForPrompt} before
- * the wait gives up on it (Issue #4067), and on how many reads in a row.
+ * the wait gives up on it (Issue #4067), on {@link PROMPT_WAIT_DIALOG_CONFIRM_READS}
+ * reads in a row.
  *
  * A dialog waits for a person, so waiting out the 15 s (or `/model`'s 30 s)
  * window behind it only delays the refusal — and the picker and `/model` wait
  * holding the instance's input lock, so Auto-Yes and other writers wait too.
  * Both thresholds must hold, so a frame caught mid-paint that reads as a
- * dialog once does not refuse a send.
+ * dialog once does not refuse a send. The count is shared with opencode's and
+ * vibe-local's waits (Issue #4084, {@link createDialogConfirmation}).
  */
-export const COPILOT_DIALOG_CONFIRM_MS = 2000;
-const COPILOT_DIALOG_CONFIRM_READS = 2;
+export const COPILOT_DIALOG_CONFIRM_MS = PROMPT_WAIT_DIALOG_CONFIRM_MS;
 
 /**
  * Copilot CLI slash commands that open a picker.
@@ -715,12 +717,15 @@ export class CopilotTool extends BaseCLITool {
    *
    * Issue #4067: a dialog does not wait out the window. A frame the shared
    * sender's re-check would refuse (`detectSessionStatus().hasActivePrompt`,
-   * {@link recheckComposerBeforeInput}) on {@link COPILOT_DIALOG_CONFIRM_READS}
+   * {@link recheckComposerBeforeInput}) on {@link PROMPT_WAIT_DIALOG_CONFIRM_READS}
    * reads in a row spanning {@link COPILOT_DIALOG_CONFIRM_MS} returns
    * `ready: false, dialog: true`, and every caller refuses it as
    * `prompt-waiting`. Not counted: the folder-trust dialog (answered above,
    * #1886), and a frame with the composer drawn — `idle` waits through a
    * Working turn, which keeps `❯` on screen, and that is not a dialog.
+   *
+   * Issue #4084: no capture is waited for past `timeoutMs` ({@link readBeforeDeadline}):
+   * one still running then, or one that answers after it, is not used.
    *
    * @param sessionName - tmux session name
    * @param timeoutMs - Optional timeout in ms (default: COPILOT_PROMPT_WAIT_TIMEOUT_MS)
@@ -733,17 +738,20 @@ export class CopilotTool extends BaseCLITool {
     timeoutMs: number = COPILOT_PROMPT_WAIT_TIMEOUT_MS,
     until: CopilotPromptReadiness = 'composer'
   ): Promise<{ ready: boolean; output: string; dialog?: true }> {
-    const startTime = Date.now();
+    // Issue #4084: one deadline for the whole wait — a capture still running at
+    // it is not waited for, and a frame it returns past it is not used.
+    const deadline = Date.now() + timeoutMs;
     const pollInterval = 500;
     let trustDialogHandled = false;
     let output = '';
-    // Issue #4067: the current run of reads that showed a dialog.
-    let dialogSince: number | null = null;
-    let dialogReads = 0;
-    while (Date.now() - startTime < timeoutMs) {
+    // Issue #4067: the current run of reads that showed a dialog (counted by
+    // the helper opencode and vibe-local share, Issue #4084).
+    const dialog = createDialogConfirmation();
+    while (Date.now() < deadline) {
       try {
         const readMark = instanceInputReadMark();
-        const rawOutput = await capturePane(sessionName, 50);
+        const rawOutput = await readBeforeDeadline(() => capturePane(sessionName, 50), deadline);
+        if (rawOutput === null) break;
         output = stripAnsi(rawOutput);
         if (this.isReadyFor(until, output)) {
           return { ready: true, output };
@@ -760,24 +768,17 @@ export class CopilotTool extends BaseCLITool {
         if (!trustDialogHandled && (await this.answerFolderTrustDialog(sessionName, output, readMark))) {
           trustDialogHandled = true;
         }
-        if (this.isRefusableDialog(rawOutput, output)) {
-          const now = Date.now();
-          dialogSince ??= now;
-          dialogReads++;
-          if (dialogReads >= COPILOT_DIALOG_CONFIRM_READS && now - dialogSince >= COPILOT_DIALOG_CONFIRM_MS) {
-            logger.info('copilot-prompt-wait-dialog', { until, reads: dialogReads, bottomRow: describeBottomRow(output) });
-            return { ready: false, output, dialog: true };
-          }
-        } else {
-          dialogSince = null;
-          dialogReads = 0;
+        if (dialog.observe(this.isRefusableDialog(rawOutput, output))) {
+          logger.info('copilot-prompt-wait-dialog', { until, reads: dialog.reads, bottomRow: describeBottomRow(output) });
+          return { ready: false, output, dialog: true };
         }
       } catch {
         // Capture may fail - continue polling. Not a dialog read: the run restarts.
-        dialogSince = null;
-        dialogReads = 0;
+        dialog.reset();
       }
-      await new Promise((resolve) => setTimeout(resolve, pollInterval));
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(pollInterval, remaining)));
     }
     logger.info('copilot-prompt-not-detected', { until, bottomRow: describeBottomRow(output) });
     return { ready: false, output };
