@@ -4,7 +4,8 @@
  */
 
 import { NextResponse } from 'next/server';
-import type { ICLITool } from '@/lib/cli-tools/types';
+import type { CLIToolType, ICLITool } from '@/lib/cli-tools/types';
+import { commandCodePlanReviewSendMessage } from '@/lib/session/respond-target';
 import type { SendAttemptState } from '@/lib/session/send-attempt-types';
 import {
   describeSendAttemptState,
@@ -40,6 +41,12 @@ export interface SendFailureInput {
   ownAttempt: { state: SendAttemptState; reason: string } | null;
   sendStartedAt: number;
   trimmedContent: string;
+  /**
+   * The tool Command Code's plan review refusal names in its `respond` when
+   * the primary was sent to (Issue #4063, `resolveRespondAgent` for
+   * `command-code`); undefined when a bare `respond` already reaches it.
+   */
+  planReviewRespondAgent?: CLIToolType;
 }
 
 /**
@@ -89,7 +96,27 @@ export function answerSendFailure(
       : null);
   const sendState = attempt !== null ? ` ${describeSendAttemptState(attempt)}` : '';
   return NextResponse.json(
-    { error: `Failed to send message to ${cliTool.name}: ${result.error}${sendState}` },
+    { error: `Failed to send message to ${cliTool.name}: ${aimPlanReviewRefusal(result.error, attempt, input)}${sendState}` },
     { status: 500 }
+  );
+}
+
+/**
+ * The plan review refusal with the `respond` aimed at the waiting session
+ * (Issue #4063). Command Code's own throw cannot know the request, so a
+ * `send --agent command-code` on a worktree whose default is another tool got
+ * a bare `respond` — which the CLI resolves to that default. Rebuilt here with
+ * the tool `resolveRespondAgent` chose; every other failure, and a refusal
+ * that needs no tool, keeps its text.
+ */
+function aimPlanReviewRefusal(
+  error: string,
+  attempt: { reason: string } | null,
+  input: SendFailureInput,
+): string {
+  if (attempt?.reason !== 'plan-review' || input.planReviewRespondAgent === undefined) return error;
+  return error.replace(
+    commandCodePlanReviewSendMessage(input.worktreeId, input.instanceId),
+    commandCodePlanReviewSendMessage(input.worktreeId, input.instanceId, input.planReviewRespondAgent),
   );
 }

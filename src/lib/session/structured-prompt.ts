@@ -367,7 +367,10 @@ export function buildStructuredPromptQuestion(
   agent?: CLIToolType,
 ): string {
   // Issue #4031: the `respond` this names goes to the instance whose prompt it
-  // is. Without an instance (the primary) the sentence is as before.
+  // is. Issue #4063: `buildCurrentOutput` always passes one — the primary's is
+  // the tool's own id (`--instance <tool>`, `resolveSessionTarget`'s rule), on
+  // every path (HTTP, WS push, poller, history). Without one (a caller outside
+  // that builder) the sentence names no target.
   // Issue #4049: or to the tool, when the caller names one (`respondAgentFor`).
   const target = respondTargetFlags(instanceId, agent);
   const parts = [
