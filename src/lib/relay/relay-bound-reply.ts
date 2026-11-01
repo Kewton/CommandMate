@@ -264,12 +264,19 @@ export function stashReplyForOpenRelays(
     if (!reply) continue;
 
     const body = buildRelayReplyMessage(senderLabel(db, relay), reply.content);
-    if (stashReply(db, relay.id, { candidateId: reply.id, body, overlap: null, basis: 'legacy' }, now)) {
+    if (stashReply(db, relay.id, { candidateId: reply.id, body, overlap: null, basis: 'legacy' }, now) !== null) {
       stashed += 1;
     }
   }
   return stashed;
 }
+
+/**
+ * What {@link stashReply} did with a decided reply: it took a slot
+ * (`stashed`), a reply that finished earlier took the slot in its place
+ * (`earlier-reply`, Issue #4082), or nothing changed (null).
+ */
+type StashOutcome = 'stashed' | 'earlier-reply' | null;
 
 /**
  * Stash a decided reply, minding the prompt notice that may hold the slot
@@ -281,13 +288,18 @@ export function stashReplyForOpenRelays(
  * requester for nothing. The notice is being typed: the reply waits in the
  * second slot and is promoted once the notice is out. A reply already holds
  * it: nothing (two producers, one delivery).
+ *
+ * Issue #4082: when a reply already waits in the second slot (it finished
+ * while the notice was held, and the hold was retried), the replacement puts
+ * THAT reply first and drops this later one — the first reply to finish is
+ * the one kept, as the second slot always kept it.
  */
 function stashReply(
   db: Database.Database,
   relayId: string,
   reply: Omit<RelayPendingReply, 'payloadId'>,
   now: number
-): boolean {
+): StashOutcome {
   const decided: RelayPendingReply = { ...reply, payloadId: randomUUID() };
   if (
     stashRelayPayload(db, relayId, 'reply', decided.body, now, {
@@ -295,14 +307,19 @@ function stashReply(
       overlap: decided.overlap ?? undefined,
     })
   ) {
-    return true;
+    return 'stashed';
   }
   const current = getRelayPendingPayload(db, relayId);
-  if (!current || current.kind !== 'prompt') return false;
+  if (!current || current.kind !== 'prompt') return null;
   if (!isRelayDeliveryClaimed(relayId)) {
-    if (replaceRelayPromptWithReply(db, relayId, current.payloadId, decided, now)) return true;
+    const replaced = replaceRelayPromptWithReply(db, relayId, current.payloadId, decided, now);
+    if (replaced === 'reply') return 'stashed';
+    if (replaced === 'waiting-reply') {
+      logger.info('relay-earlier-reply-kept', { relayId, laterCandidateId: reply.candidateId });
+      return 'earlier-reply';
+    }
   }
-  return setRelayPendingReply(db, relayId, decided, now);
+  return setRelayPendingReply(db, relayId, decided, now) ? 'stashed' : null;
 }
 
 /**
@@ -489,13 +506,13 @@ export function stashBoundReply(
   const verdict = judgeRelayOverlap(db, binding, worker, reply);
   const note = buildRelayOverlapNote(resolveReadersLocale(db), verdict.overlap);
   const body = buildRelayReplyMessage(senderLabel(db, binding.relay), reply.content, note);
-  const stashed = stashReply(
+  const outcome = stashReply(
     db,
     binding.relay.id,
     { candidateId: reply.id, body, overlap: verdict.overlap, basis: verdict.basis },
     now
   );
-  if (stashed) {
+  if (outcome === 'stashed') {
     logger.info('relay-reply-decided', {
       relayId: binding.relay.id,
       candidateId: reply.id,
@@ -503,7 +520,8 @@ export function stashBoundReply(
       basis: verdict.basis,
     });
   }
-  return stashed;
+  // An earlier reply taking the slot is still a payload for the pump.
+  return outcome !== null;
 }
 
 /**

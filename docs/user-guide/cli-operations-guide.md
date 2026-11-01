@@ -740,11 +740,46 @@ CommandMate はその payload を**自動で再送しません**。二重に届�
 - 保留中は、その relay の後の配送（確認の通知の後にできた返答も）を止めます。ほかの relay は進みます
 - 保留は `commandmate relays`（`# delivery not confirmed, not resent`）・`commandmate relays --id <relay-id>`・
   `GET /api/relays`（`held`）・`GET /api/relays/:id`（`deliveryHold`）で読めます。行には `delivery=uncertain`・
-  `payload=<種類>:<payloadId>`・`reason=<理由>`・`check=<確かめ先>` が付きます。確かめ先は依頼元の正確なインスタンスの
-  `commandmate capture <worktree-id> --instance <instance> --pane` です。届いていなければ自分で送り直してください
+  `payload=<種類>:<payloadId>`・`attempt=<attemptId>`・`reason=<理由>`・`check=<確かめ先>` が付きます。確かめ先は依頼元の正確なインスタンスの
+  `commandmate capture <worktree-id> --instance <instance> --pane` です。確かめた後は、自分で送り直さずに
+  下の `commandmate relays resolve` で片付けてください（自分で送り直すと、後で `--retry` したときに二重に届きます）
 - 期限切れ・取り消し（`commandmate relays cancel`）は、以後の配送を止めるだけです。保留の本文・payloadId・理由は
   消えず、読めるまま残ります（既に入力欄に届いたものを取り消すことはできません）。保留中に期限が来た relay には、
   期限切れの通知を配送しません
+
+#### 保留を解決する（Issue #4082）
+
+`uncertain` の保留は、依頼元の画面を確かめてから次の 1 つで片付けます。`--payload` と `--attempt` は
+`commandmate relays --id <relay-id>` の `payload=<種類>:<payloadId>` と `attempt=<attemptId>`
+（JSON・API では `deliveryHold.payloadId` と `deliveryHold.attemptId`）をそのまま渡します。
+
+```bash
+commandmate relays resolve <relay-id> --payload <payloadId> --attempt <attemptId> --confirm   # 届いていた
+commandmate relays resolve <relay-id> --payload <payloadId> --attempt <attemptId> --retry     # 届いていない: もう一度送る
+commandmate relays resolve <relay-id> --payload <payloadId> --attempt <attemptId> --discard   # 送らずに捨てる
+```
+
+API は `POST /api/relays/:id/resolve`（本文 `{ "payloadId", "attemptId", "action": "confirm" | "retry" | "discard" }`）です。
+
+| 保留の種類 | relay | `--confirm` | `--retry` | `--discard` |
+|---|---|---|---|---|
+| 返答（reply） | 開いている | `delivered` で閉じる | 同じ本文を配送の列に戻す | `cancelled` で閉じる（後続も消す） |
+| 確認の通知（prompt） | 開いている | 保留を消し、待っていた返答を配送の列へ繰り上げる（relay は開いたまま） | 配送の列に戻す | `--confirm` と同じ |
+| 期限切れの通知（expired） | 閉じている | 保留を消す | 閉じたまま配送の列に戻す | 保留を消す |
+| 返答・確認の通知 | 取消・期限切れで閉じている | 保留を消す（閉じた理由は変えない） | 拒否（409） | 保留を消す（閉じた理由は変えない） |
+
+- `--confirm`・`--discard` は何も入力しません。確認の通知を片付けたときに繰り上がる返答は、別の payload として
+  ふつうの配送で届きます。同じダイアログの通知は二度と出ませんが、新しいダイアログと最後の返答は今までどおり届きます
+- `--retry` の成功は「配送の列に戻した」という意味で、届いたという意味ではありません。依頼元が受け取れる状態になったとき、
+  次の配送が 1 回だけ送ります（入力欄の準備・入力ロックは通常の配送と同じ）。その送信が `not-sent` なら今までどおり
+  自動で送り直し、また不確定になれば新しい `attempt` の保留になります。列に戻した確認の通知は、送る前にその relay の
+  返答ができれば、今までどおり返答に置き換わります。期限を過ぎた relay（開いたままでも）の返答・確認の通知は `--retry` できません
+- 次の操作は 409 で拒否し、何も変えません: 古い `attempt`（`--retry` の後に新しい試行ができた）・同じ保留への 2 回目の操作・
+  配送中（`delivery=attempting`）・保留が無い・`attempt` の無い保留（古いサーバーが書いたもの）・上の表で拒否のもの。
+  存在しない relay は 404、不正な ID・本文は 400、データベースの失敗は 500（何も確定しません）です。拒否されたら
+  `commandmate relays --id <relay-id>` で読み直してください
+- 片付けは送信の結び付き（`send=`・`hold=`）を変えません。サーバーの再起動は今までどおりで、`--retry` の後・送る前に
+  止まったものは配送の列のまま、送り始めてから止まったものは新しい `attempt` の保留になります。片付けた保留は戻りません
 
 ### ターン成立の判定（Issue #1839）
 

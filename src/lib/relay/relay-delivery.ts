@@ -47,6 +47,7 @@ import {
   clearRelayPending,
   clearRelayPendingReply,
   completeRelayPayloadDelivery,
+  completeRelayPromptDelivery,
   completeRelayReplyDelivery,
   getRelayBinding,
   getRelayById,
@@ -56,7 +57,6 @@ import {
   listExpiredOpenRelays,
   listOpenRelaysTo,
   markRelayExpired,
-  promoteRelayPendingReply,
   recoverInterruptedRelayDeliveries,
   releaseRelayPayloadDelivery,
   replaceRelayPromptWithPendingReply,
@@ -625,22 +625,44 @@ async function deliverOne(
     }
 
     const now = Date.now();
+    // Issue #4082: the attempt's result is recorded FIRST, and only while it
+    // is still the attempt in progress. A stale one (held by another boot's
+    // recovery, resolved, or replaced by a retry's new attempt) writes
+    // nothing — no close, no emptied payload, no promotion, no system line —
+    // so the newer attempt and the relay's later reply are left as they are.
+    let completed: boolean;
+    let promoted = false;
     if (kind === 'reply') {
       // Issue #4064: closing the relay (which empties the payload) and ending
       // the attempt commit together. A throw rolls both back: the row stays
       // `attempting` with its body and payload id — held, never re-sent — and
       // the next boot labels it.
-      const { closed } = completeRelayReplyDelivery(db, {
+      const result = completeRelayReplyDelivery(db, {
         ...ref,
         sentRequestId: relayRequestId(relay.id),
         now,
       });
-      if (!closed) {
+      completed = result.completed;
+      if (completed && !result.closed) {
         // Somebody closed it underneath us. The message is already in A's
         // composer, which is the outcome that mattered.
         logger.info('relay-already-closed-on-deliver', { relayId });
       }
+    } else if (kind === 'prompt') {
+      // Issue #3957: only the payload that was sent. A reply that waits in the
+      // second slot survives, and is promoted now that the notice is out —
+      // Issue #4082: in the same transaction as the attempt's end.
+      // A throw here leaves the row `attempting` — held, never re-sent — and
+      // the next boot labels it.
+      ({ completed, promoted } = completeRelayPromptDelivery(db, { ...ref, now }));
+    } else {
+      completed = completeRelayPayloadDelivery(db, { ...ref, now });
     }
+    if (!completed) {
+      logger.warn('relay-delivery-result-stale', { relayId, kind, attemptId });
+      return 'skipped';
+    }
+    if (promoted) globalThis.__relayPumpAgain = true;
     try {
       if (kind === 'reply') {
         writeRelaySystemLine(
@@ -664,22 +686,12 @@ async function deliverOne(
       }
     } catch (error) {
       // Issue #4064: the send went out; a ledger write after it failing must
-      // not turn into a second send. The attempt is closed regardless (a
-      // reply's above, any other kind's below).
+      // not turn into a second send. The attempt is closed already (above).
       logger.warn('relay-delivery-record-failed', {
         relayId,
         kind,
         error: error instanceof Error ? error.message : String(error),
       });
-    }
-    // Issue #3957: only the payload that was sent. A reply that waits in the
-    // second slot survives, and is promoted now that the notice is out.
-    // Issue #4064: under the attempt's id (a reply's was ended above, with the
-    // relay's close). A throw here leaves the row `attempting` — held, never
-    // re-sent — and the next boot labels it.
-    if (kind !== 'reply') completeRelayPayloadDelivery(db, { ...ref, now });
-    if (kind === 'prompt' && promoteRelayPendingReply(db, relay.id, now)) {
-      globalThis.__relayPumpAgain = true;
     }
     logger.info('relay-delivered', { relayId, kind, to: `${requester.worktreeId}/${requester.instanceId}` });
     return 'delivered';
@@ -784,6 +796,18 @@ export async function pumpRelayDeliveries(): Promise<void> {
   } finally {
     globalThis.__relayPumpRunning = false;
   }
+}
+
+/**
+ * Ask for a delivery pass without waiting for it (Issue #4082): a resolved hold
+ * queued a payload again or promoted a reply. A pump already running makes one
+ * more pass for it; otherwise one starts. Never sends by itself — the payload
+ * goes through {@link deliverOne}'s readiness, claim and input lock like any
+ * other — and never throws.
+ */
+export function requestRelayPump(): void {
+  globalThis.__relayPumpAgain = true;
+  void pumpRelayDeliveries();
 }
 
 /** One tick of the background loop: sweep the deadlines, then deliver. */
