@@ -21,15 +21,17 @@ import Database from 'better-sqlite3';
 import type {
   RelayBindMode,
   RelayCounts,
+  RelayHoldAction,
   RelayEndpoint,
   RelaySendState,
   SessionRelay,
   SessionRelaySummary,
 } from '@/lib/relay/types';
-import { emptyRelayCounts, OPEN_RELAY_STATES } from '@/lib/relay/types';
+import { emptyRelayCounts, isOpenRelayState, OPEN_RELAY_STATES } from '@/lib/relay/types';
 import { createLogger } from '@/lib/logger';
 import {
-  completeRelayPayloadDelivery,
+  endRelayPayloadAttempt,
+  isCurrentRelayPayloadAttempt,
   KEEP_HELD_PAYLOAD_SET,
   mapRelay,
   OPEN_STATE_PLACEHOLDERS,
@@ -47,11 +49,13 @@ export {
   clearRelayPending,
   clearRelayPendingReply,
   completeRelayPayloadDelivery,
+  completeRelayPromptDelivery,
   explainRelayBindRefusal,
   failOrphanedRelayBind,
   getRelayBinding,
   getRelayPendingPayload,
   holdRelayPayloadDelivery,
+  isCurrentRelayPayloadAttempt,
   listDeliverableRelayPayloads,
   listOpenBoundRelays,
   listRelaysWithDeliveryHold,
@@ -312,9 +316,9 @@ export interface RelayReplyDeliveryInput extends RelayPayloadAttemptRef {
 
 /** What {@link completeRelayReplyDelivery} did. */
 export interface RelayReplyDeliveryResult {
-  /** This call closed the relay as delivered; false = it was already closed. */
+  /** This call closed the relay as delivered; false = it was already closed, or the attempt is stale. */
   closed: boolean;
-  /** The attempt was still the one on the row and is ended now. */
+  /** The attempt was still the one on the row and is ended now; false = stale, nothing written. */
   completed: boolean;
 }
 
@@ -338,12 +342,18 @@ export function completeRelayReplyDelivery(
 ): RelayReplyDeliveryResult {
   const now = input.now ?? Date.now();
   return db.transaction((): RelayReplyDeliveryResult => {
+    // Issue #4082: the attempt is checked FIRST. A stale one — held meanwhile,
+    // resolved, or replaced by a retry's new attempt — must not close the
+    // relay or empty its payload: the close below is keyed on the relay only.
+    if (!isCurrentRelayPayloadAttempt(db, input)) return { closed: false, completed: false };
     // Not `markRelayDelivered`: its catch turns a refused write into `false`,
     // and ending the attempt after that would commit an open relay with its
     // payload and hold gone — the next completion could capture the same reply
     // again. A refused close throws here, and nothing is committed.
     const closed = closeRelayDelivered(db, input.relayId, input.sentRequestId, now);
-    const completed = completeRelayPayloadDelivery(db, {
+    // The attempt was checked above; the close emptied `payload_id`, so the
+    // check is not asked again here.
+    const completed = endRelayPayloadAttempt(db, {
       relayId: input.relayId,
       payloadId: input.payloadId,
       attemptId: input.attemptId,
@@ -444,6 +454,235 @@ export function cancelRelay(
     `)
     .run(now, id, ...OPEN_RELAY_STATES);
   return result.changes === 1;
+}
+
+// ---------------------------------------------------------------------------
+// Issue #4082: resolving an `uncertain` delivery hold
+// ---------------------------------------------------------------------------
+
+/** What {@link resolveRelayDeliveryHold} is asked to do, and to which hold. */
+export interface ResolveRelayDeliveryHoldInput {
+  relayId: string;
+  /** The held payload's id, as the caller read it (`deliveryHold.payloadId`). */
+  payloadId: string;
+  /** The held attempt's id, as the caller read it (`deliveryHold.attemptId`); null never matches. */
+  attemptId: string | null;
+  action: RelayHoldAction;
+  /** The delivery id a confirmed reply closes under (`relay:<id>`, what its send carried). */
+  sentRequestId: string;
+  now?: number;
+}
+
+/** Why {@link resolveRelayDeliveryHold} refused. Every refusal writes nothing. */
+export type RelayHoldRefusal =
+  /** No such relay. */
+  | 'not_found'
+  /** No hold at all (queued, delivered, or resolved already). */
+  | 'no_hold'
+  /** A delivery is typing it right now; only its own result settles it. */
+  | 'attempting'
+  /** The hold names another payload or attempt than the caller's (an older screen, a second operation). */
+  | 'stale'
+  /** The hold is not one this action may settle (closed relay retried, deadline passed, no attempt id). */
+  | 'not_allowed';
+
+/** What {@link resolveRelayDeliveryHold} answers. */
+export type ResolveRelayDeliveryHoldResult =
+  | {
+      ok: true;
+      relay: SessionRelay;
+      /** `retry`: the payload is queued again (not sent yet). */
+      requeued: boolean;
+      /** A reply waiting behind a prompt notice took the first slot. */
+      promoted: boolean;
+    }
+  | { ok: false; refusal: RelayHoldRefusal; message: string; relay: SessionRelay | null };
+
+interface HeldRow {
+  state: string;
+  expires_at: number;
+  pending_kind: string | null;
+  payload_id: string | null;
+  pending_reply: string | null;
+  delivery_state: string | null;
+  delivery_attempt_id: string | null;
+}
+
+/** The second slot's reply, or null when it cannot be read. */
+function readPendingReply(text: string): { body: string; payloadId: string; overlap: string | null } | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null;
+  const { body, payloadId, overlap } = parsed as { body?: unknown; payloadId?: unknown; overlap?: unknown };
+  if (typeof body !== 'string' || typeof payloadId !== 'string') return null;
+  return { body, payloadId, overlap: typeof overlap === 'string' ? overlap : null };
+}
+
+/** Thrown inside the transaction when a guarded write lost; rolls everything back. */
+class RelayHoldConflict extends Error {}
+
+/** `SET` assignments that drop the delivery hold. */
+const DROP_HOLD_SET = `
+  delivery_state = NULL, delivery_attempt_id = NULL, delivery_owner = NULL,
+  delivery_reason = NULL, delivery_at = NULL
+`;
+
+/** The guard every resolve write carries: the hold the caller named, unchanged. */
+const HELD_GUARD = `
+  id = ? AND payload_id = ? AND delivery_attempt_id = ? AND delivery_state = 'uncertain' AND state = ?
+`;
+
+/**
+ * Settle an `uncertain` delivery hold, once (Issue #4082).
+ *
+ * Keyed on the relay, the payload AND the attempt the caller read, and on the
+ * hold still being `uncertain`: an operation from an older screen (the payload
+ * was retried since, and a new attempt took it), a second operation on the
+ * same hold, and a hold whose delivery is typing (`attempting`) are refused,
+ * and nothing is written. Every write — the close, the emptied slots, the
+ * promoted reply — commits in ONE transaction; a database error rolls all of
+ * it back and is thrown (the caller answers 500).
+ *
+ * | payload | relay | confirm | retry | discard |
+ * |---|---|---|---|---|
+ * | reply | open | close `delivered`, slots emptied | queued again (deadline not passed) | close `cancelled`, both slots emptied |
+ * | prompt | open | slot emptied, the waiting reply promoted | queued again (deadline not passed) | as confirm |
+ * | expired | (closed) | slot emptied | queued again | slot emptied |
+ * | reply / prompt | closed | slot emptied, state kept | refused | slot emptied, state kept |
+ *
+ * `prompt_signature` is kept, so the same dialog is not told again; the send
+ * binding's `send_state` / `hold_reason` / observation are not touched.
+ * Nothing here types: a retried payload goes out through the pump.
+ */
+export function resolveRelayDeliveryHold(
+  db: Database.Database,
+  input: ResolveRelayDeliveryHoldInput
+): ResolveRelayDeliveryHoldResult {
+  const now = input.now ?? Date.now();
+  type Decided = { ok: true; requeued: boolean; promoted: boolean } | { ok: false; refusal: RelayHoldRefusal; message: string };
+
+  const refuse = (refusal: RelayHoldRefusal, message: string): Decided => ({ ok: false, refusal, message });
+
+  const decide = (): Decided => {
+    const row = db
+      .prepare(`
+        SELECT state, expires_at, pending_kind, payload_id, pending_reply, delivery_state, delivery_attempt_id
+        FROM session_relays WHERE id = ?
+      `)
+      .get(input.relayId) as HeldRow | undefined;
+    if (!row) return refuse('not_found', `Relay '${input.relayId}' not found`);
+    if (row.delivery_state === null) return refuse('no_hold', 'The relay has no delivery hold (resolved, delivered or queued)');
+    if (row.delivery_state === 'attempting') {
+      return refuse('attempting', 'The payload is being delivered right now; only that delivery settles it');
+    }
+    if (row.delivery_state !== 'uncertain') return refuse('not_allowed', `Unknown delivery state '${row.delivery_state}'`);
+    if (row.delivery_attempt_id === null || row.payload_id === null || input.attemptId === null) {
+      return refuse('not_allowed', 'The hold carries no attempt id and cannot be resolved');
+    }
+    if (row.payload_id !== input.payloadId || row.delivery_attempt_id !== input.attemptId) {
+      return refuse('stale', 'The hold names another payload or attempt (read the relay again)');
+    }
+    const kind = row.pending_kind;
+    if (kind !== 'reply' && kind !== 'prompt' && kind !== 'expired') {
+      return refuse('not_allowed', 'The held slot carries no payload');
+    }
+    const open = isOpenRelayState(row.state as SessionRelay['state']);
+
+    // A guarded write that does not take exactly one row rolls the whole
+    // transaction back; `false` is never read as success.
+    const guarded = (setClause: string, ...setParams: (string | number)[]): void => {
+      const result = db
+        .prepare(`UPDATE session_relays SET ${setClause}, updated_at = ? WHERE ${HELD_GUARD}`)
+        .run(...setParams, now, input.relayId, input.payloadId, input.attemptId as string, row.state);
+      if (result.changes !== 1) throw new RelayHoldConflict('hold changed underneath the resolve');
+    };
+    const emptySlot = `pending_kind = NULL, pending_body = NULL, payload_id = NULL, ${DROP_HOLD_SET}`;
+
+    if (input.action === 'retry') {
+      if (kind !== 'expired') {
+        if (!open) return refuse('not_allowed', `Relay is already ${row.state}; a closed relay's ${kind} is not sent again`);
+        if (row.expires_at <= now) return refuse('not_allowed', 'Relay has passed its deadline; its payload is not sent again');
+      }
+      guarded(DROP_HOLD_SET);
+      return { ok: true, requeued: true, promoted: false };
+    }
+
+    if (kind === 'reply' && open) {
+      if (input.action === 'confirm') {
+        guarded(
+          `state = 'delivered', sent_request_id = COALESCE(sent_request_id, ?), delivered_at = ?,
+           ${emptySlot}, pending_reply = NULL`,
+          input.sentRequestId,
+          now
+        );
+      } else {
+        guarded(`state = 'cancelled', ${emptySlot}, pending_reply = NULL`);
+      }
+      return { ok: true, requeued: false, promoted: false };
+    }
+
+    guarded(emptySlot);
+    if (kind !== 'prompt' || !open || row.pending_reply === null) {
+      return { ok: true, requeued: false, promoted: false };
+    }
+    // The reply that finished while the notice was held takes the slot now,
+    // in this same transaction: nothing can stash in between.
+    const reply = readPendingReply(row.pending_reply);
+    if (!reply) {
+      // Unreadable: dropped, exactly as `promoteRelayPendingReply` drops it.
+      logger.warn('relay-hold-resolve-unreadable-pending-reply', { relayId: input.relayId });
+      db.prepare('UPDATE session_relays SET pending_reply = NULL WHERE id = ?').run(input.relayId);
+      return { ok: true, requeued: false, promoted: false };
+    }
+    const promoted = db
+      .prepare(`
+        UPDATE session_relays
+        SET pending_kind = 'reply', pending_body = ?, payload_id = ?, overlap = ?,
+            pending_reply = NULL, updated_at = ?
+        WHERE id = ? AND pending_kind IS NULL AND delivery_state IS NULL AND state = ?
+      `)
+      .run(
+        reply.body,
+        reply.payloadId,
+        reply.overlap,
+        now,
+        input.relayId,
+        row.state
+      );
+    if (promoted.changes !== 1) throw new RelayHoldConflict('pending reply could not be promoted');
+    return { ok: true, requeued: false, promoted: true };
+  };
+
+  // The relay the answer carries is read INSIDE the transaction, before it
+  // commits: a read that fails after the commit would answer 500 for a hold
+  // already settled (and, for a retry, before the pump was asked to send it).
+  // Failing here rolls the settle back with it, so a 500 still means
+  // "nothing was committed".
+  const decideAndRead = (): { decided: Decided; relay: SessionRelay | null } => {
+    const decided = decide();
+    const relay = getRelayById(db, input.relayId);
+    if (decided.ok && !relay) throw new Error(`Relay '${input.relayId}' vanished while its hold was resolved`);
+    return { decided, relay };
+  };
+
+  let settled: { decided: Decided; relay: SessionRelay | null };
+  try {
+    settled = db.transaction(decideAndRead).immediate();
+  } catch (error) {
+    if (!(error instanceof RelayHoldConflict)) throw error;
+    // Rolled back: nothing was written, so a failing read here commits nothing either.
+    settled = {
+      decided: refuse('stale', 'The hold changed while it was being resolved (read the relay again)'),
+      relay: getRelayById(db, input.relayId),
+    };
+  }
+  const { decided, relay } = settled;
+  if (!decided.ok) return { ...decided, relay };
+  return { ok: true, relay: relay as SessionRelay, requeued: decided.requeued, promoted: decided.promoted };
 }
 
 /** Which relays {@link countRelays} should count. All fields are optional. */

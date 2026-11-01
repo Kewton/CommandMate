@@ -34,7 +34,8 @@ export const RELAY_COLUMNS = `
   bind_mode, send_state, input_boundary_at, boundary_kind, turn_open_at_send,
   obs_state, hold_reason, overlap,
   delivery_state, delivery_reason, delivery_at,
-  CASE WHEN delivery_state IS NULL THEN NULL ELSE payload_id END AS delivery_payload_id
+  CASE WHEN delivery_state IS NULL THEN NULL ELSE payload_id END AS delivery_payload_id,
+  CASE WHEN delivery_state IS NULL THEN NULL ELSE delivery_attempt_id END AS delivery_hold_attempt_id
 `;
 
 /**
@@ -77,6 +78,8 @@ export interface SessionRelayRow {
   delivery_at: number | null;
   /** `payload_id`, only while a delivery hold names it. */
   delivery_payload_id: string | null;
+  /** `delivery_attempt_id`, only while a delivery hold names it (Issue #4082). */
+  delivery_hold_attempt_id: string | null;
 }
 
 interface SessionRelayBindingRow extends SessionRelayRow {
@@ -120,6 +123,7 @@ function mapDeliveryHold(row: SessionRelayRow): RelayDeliveryHold | null {
   return {
     state: row.delivery_state as RelayDeliveryState,
     payloadId: row.delivery_payload_id ?? null,
+    attemptId: row.delivery_hold_attempt_id ?? null,
     kind: (row.pending_kind as RelayPendingKind | null) ?? null,
     reason: row.delivery_reason ?? null,
     at: row.delivery_at ?? null,
@@ -613,12 +617,27 @@ export function setRelayPendingReply(
 }
 
 /**
+ * What {@link replaceRelayPromptWithReply} put in the first slot: the reply it
+ * was given, or (Issue #4082) the reply already waiting in the second slot.
+ */
+export type RelayPromptReplacement = 'reply' | 'waiting-reply';
+
+/**
  * Replace an unclaimed prompt notice with the reply that made it moot.
  *
  * Conditional on the notice's own payload id, so a notice that was replaced or
  * delivered meanwhile is not overwritten — and (Issue #4064) on the notice not
  * being under a delivery hold: one whose delivery may have reached A is kept,
  * and the reply waits in the second slot behind it.
+ *
+ * Issue #4082: a reply already waiting in the second slot (it finished while
+ * the notice was held, and the hold was then retried) goes first — the first
+ * reply to finish is the one kept, as {@link setRelayPendingReply} keeps it —
+ * and the given one is dropped. Either way the second slot is emptied in the
+ * same write, so no older reply is left behind a closed relay. An unreadable
+ * waiting reply is dropped and the given one takes the slot.
+ *
+ * @returns Which reply took the first slot, or null when nothing was replaced
  */
 export function replaceRelayPromptWithReply(
   db: Database.Database,
@@ -626,16 +645,26 @@ export function replaceRelayPromptWithReply(
   promptPayloadId: string | null,
   reply: RelayPendingReply,
   now = Date.now()
-): boolean {
-  const result = db
-    .prepare(`
+): RelayPromptReplacement | null {
+  return db.transaction((): RelayPromptReplacement | null => {
+    const row = db
+      .prepare(`
+        SELECT pending_reply FROM session_relays
+        WHERE id = ? AND pending_kind = 'prompt' AND payload_id IS ? AND delivery_state IS NULL
+          AND state IN (${OPEN_STATE_PLACEHOLDERS})
+      `)
+      .get(id, promptPayloadId, ...OPEN_RELAY_STATES) as { pending_reply: string | null } | undefined;
+    if (!row) return null;
+    const waiting = row.pending_reply === null ? null : parseJson<RelayPendingReply | null>(row.pending_reply, null);
+    const taken = waiting ?? reply;
+    db.prepare(`
       UPDATE session_relays
-      SET pending_kind = 'reply', pending_body = ?, payload_id = ?, overlap = ?, updated_at = ?
-      WHERE id = ? AND pending_kind = 'prompt' AND payload_id IS ? AND delivery_state IS NULL
-        AND state IN (${OPEN_STATE_PLACEHOLDERS})
-    `)
-    .run(reply.body, reply.payloadId, reply.overlap, now, id, promptPayloadId, ...OPEN_RELAY_STATES);
-  return result.changes === 1;
+      SET pending_kind = 'reply', pending_body = ?, payload_id = ?, overlap = ?,
+          pending_reply = NULL, updated_at = ?
+      WHERE id = ?
+    `).run(taken.body, taken.payloadId, taken.overlap, now, id);
+    return waiting ? 'waiting-reply' : 'reply';
+  })();
 }
 
 /**
@@ -799,8 +828,33 @@ export interface RelayPayloadAttemptRef {
 }
 
 /**
+ * Whether `ref` is still the attempt in progress on the row: the same payload,
+ * the same attempt id, and still `attempting` (Issue #4082).
+ *
+ * Every result writer asks this BEFORE its first side effect. An attempt held
+ * as `uncertain` meanwhile (another boot's recovery), resolved, or replaced by
+ * a retry's new attempt is stale: its late success or failure must not close
+ * the relay, empty a payload, promote a reply or end the newer attempt.
+ */
+export function isCurrentRelayPayloadAttempt(
+  db: Database.Database,
+  ref: RelayPayloadAttemptRef
+): boolean {
+  const row = db
+    .prepare(`
+      SELECT 1 AS hit FROM session_relays
+      WHERE id = ? AND payload_id = ? AND delivery_attempt_id = ? AND delivery_state = 'attempting'
+    `)
+    .get(ref.relayId, ref.payloadId, ref.attemptId) as { hit: number } | undefined;
+  return row !== undefined;
+}
+
+/**
  * The attempt delivered its payload: empty the slot (if it still holds that
  * payload) and drop the attempt, in one transaction (Issue #4064).
+ *
+ * Issue #4082: only while the attempt is still the one in progress
+ * ({@link isCurrentRelayPayloadAttempt}); a stale attempt writes nothing.
  *
  * @returns Whether the attempt was still the one on the row
  */
@@ -810,20 +864,53 @@ export function completeRelayPayloadDelivery(
 ): boolean {
   const now = ref.now ?? Date.now();
   return db.transaction((): boolean => {
-    db.prepare(`
+    if (!isCurrentRelayPayloadAttempt(db, ref)) return false;
+    return endRelayPayloadAttempt(db, { ...ref, now });
+  })();
+}
+
+/**
+ * The writes behind {@link completeRelayPayloadDelivery}, without its check:
+ * empty the slot if it still holds the payload, and end the attempt. For a
+ * caller that checked the attempt itself, in its own transaction, before a
+ * write that empties the payload (the reply's close).
+ *
+ * @returns Whether the attempt was ended
+ */
+export function endRelayPayloadAttempt(db: Database.Database, ref: RelayPayloadAttemptRef): boolean {
+  const now = ref.now ?? Date.now();
+  db.prepare(`
+    UPDATE session_relays
+    SET pending_kind = NULL, pending_body = NULL, payload_id = NULL, updated_at = ?
+    WHERE id = ? AND payload_id = ? AND delivery_attempt_id = ? AND delivery_state = 'attempting'
+  `).run(now, ref.relayId, ref.payloadId, ref.attemptId);
+  const result = db
+    .prepare(`
       UPDATE session_relays
-      SET pending_kind = NULL, pending_body = NULL, payload_id = NULL, updated_at = ?
-      WHERE id = ? AND payload_id = ? AND delivery_attempt_id = ?
-    `).run(now, ref.relayId, ref.payloadId, ref.attemptId);
-    const result = db
-      .prepare(`
-        UPDATE session_relays
-        SET delivery_state = NULL, delivery_attempt_id = NULL, delivery_owner = NULL,
-            delivery_reason = NULL, delivery_at = NULL, updated_at = ?
-        WHERE id = ? AND delivery_attempt_id = ?
-      `)
-      .run(now, ref.relayId, ref.attemptId);
-    return result.changes === 1;
+      SET delivery_state = NULL, delivery_attempt_id = NULL, delivery_owner = NULL,
+          delivery_reason = NULL, delivery_at = NULL, updated_at = ?
+      WHERE id = ? AND delivery_attempt_id = ? AND delivery_state = 'attempting'
+    `)
+    .run(now, ref.relayId, ref.attemptId);
+  return result.changes === 1;
+}
+
+/**
+ * A prompt notice went out: end its attempt and, in the same transaction,
+ * move a reply waiting in the second slot into the first (Issue #4082).
+ *
+ * A stale attempt ({@link isCurrentRelayPayloadAttempt} false) does neither.
+ *
+ * @returns Whether the attempt was ended, and whether a reply was promoted
+ */
+export function completeRelayPromptDelivery(
+  db: Database.Database,
+  ref: RelayPayloadAttemptRef
+): { completed: boolean; promoted: boolean } {
+  const now = ref.now ?? Date.now();
+  return db.transaction((): { completed: boolean; promoted: boolean } => {
+    if (!completeRelayPayloadDelivery(db, { ...ref, now })) return { completed: false, promoted: false };
+    return { completed: true, promoted: promoteRelayPendingReply(db, ref.relayId, now) };
   })();
 }
 
