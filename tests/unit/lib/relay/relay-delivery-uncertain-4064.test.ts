@@ -266,6 +266,53 @@ describe('path 2: a send that throws is held, not re-sent (Issue #4064)', () => 
     expect(sendUserMessage).toHaveBeenCalledTimes(1);
     expect(getRelayById(db, relayId)?.deliveryHold?.state).toBe('attempting');
   });
+
+  it('a reply sent but whose attempt could not be closed keeps its body and payload id across a restart', async () => {
+    const relayId = relayWith('reply');
+    const before = getRelayPendingPayload(db, relayId);
+    db.exec(`CREATE TRIGGER refuse_attempt_close BEFORE UPDATE ON session_relays
+      WHEN OLD.delivery_state = 'attempting' AND NEW.delivery_state IS NULL
+      BEGIN SELECT RAISE(ABORT, 'attempt close refused'); END`);
+
+    await pumpRepeatedly();
+
+    expect(sendUserMessage).toHaveBeenCalledTimes(1);
+    // The relay's close rolled back with the attempt's end: still open, payload kept.
+    const held = getRelayById(db, relayId);
+    expect(held?.state).not.toBe('delivered');
+    expect(held?.deliveryHold).toMatchObject({ state: 'attempting', kind: 'reply' });
+    expect(held?.deliveryHold?.payloadId).toBeTruthy();
+    const payloadId = held?.deliveryHold?.payloadId;
+
+    // Restart: the interrupted attempt is labelled, still identifiable, not re-sent.
+    db.exec('DROP TRIGGER refuse_attempt_close');
+    db.close();
+    resetRelayDeliveryState();
+    resetRelayServerBootId();
+    db = openDb();
+    await pumpRepeatedly();
+
+    expect(sendUserMessage).toHaveBeenCalledTimes(1);
+    expect(getRelayById(db, relayId)?.deliveryHold).toMatchObject({
+      state: 'uncertain',
+      kind: 'reply',
+      payloadId,
+      reason: 'server-restarted',
+    });
+    expect(getRelayPendingPayload(db, relayId)).toMatchObject({ kind: 'reply', body: before?.body });
+  });
+
+  it('negative control: a reply whose attempt closes is delivered once and leaves nothing held', async () => {
+    const relayId = relayWith('reply');
+
+    await pumpRepeatedly();
+
+    expect(sendUserMessage).toHaveBeenCalledTimes(1);
+    const relay = getRelayById(db, relayId);
+    expect(relay?.state).toBe('delivered');
+    expect(relay?.deliveryHold).toBeNull();
+    expect(getRelayPendingPayload(db, relayId)).toBeNull();
+  });
 });
 
 describe('negative controls: what is retried and what is held stay as before', () => {

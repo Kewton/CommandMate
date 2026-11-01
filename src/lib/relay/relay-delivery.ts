@@ -47,6 +47,7 @@ import {
   clearRelayPending,
   clearRelayPendingReply,
   completeRelayPayloadDelivery,
+  completeRelayReplyDelivery,
   getRelayBinding,
   getRelayById,
   getRelayPendingPayload,
@@ -54,7 +55,6 @@ import {
   listDeliverableRelayPayloads,
   listExpiredOpenRelays,
   listOpenRelaysTo,
-  markRelayDelivered,
   markRelayExpired,
   promoteRelayPendingReply,
   recoverInterruptedRelayDeliveries,
@@ -625,13 +625,24 @@ async function deliverOne(
     }
 
     const now = Date.now();
+    if (kind === 'reply') {
+      // Issue #4064: closing the relay (which empties the payload) and ending
+      // the attempt commit together. A throw rolls both back: the row stays
+      // `attempting` with its body and payload id — held, never re-sent — and
+      // the next boot labels it.
+      const { closed } = completeRelayReplyDelivery(db, {
+        ...ref,
+        sentRequestId: relayRequestId(relay.id),
+        now,
+      });
+      if (!closed) {
+        // Somebody closed it underneath us. The message is already in A's
+        // composer, which is the outcome that mattered.
+        logger.info('relay-already-closed-on-deliver', { relayId });
+      }
+    }
     try {
       if (kind === 'reply') {
-        if (!markRelayDelivered(db, relay.id, relayRequestId(relay.id), now)) {
-          // Somebody closed it underneath us. The message is already in A's
-          // composer, which is the outcome that mattered.
-          logger.info('relay-already-closed-on-deliver', { relayId });
-        }
         writeRelaySystemLine(
           db,
           relay.id,
@@ -653,7 +664,8 @@ async function deliverOne(
       }
     } catch (error) {
       // Issue #4064: the send went out; a ledger write after it failing must
-      // not turn into a second send. The attempt is still closed below.
+      // not turn into a second send. The attempt is closed regardless (a
+      // reply's above, any other kind's below).
       logger.warn('relay-delivery-record-failed', {
         relayId,
         kind,
@@ -662,9 +674,10 @@ async function deliverOne(
     }
     // Issue #3957: only the payload that was sent. A reply that waits in the
     // second slot survives, and is promoted now that the notice is out.
-    // Issue #4064: under the attempt's id. A throw here leaves the row
-    // `attempting` — held, never re-sent — and the next boot labels it.
-    completeRelayPayloadDelivery(db, { ...ref, now });
+    // Issue #4064: under the attempt's id (a reply's was ended above, with the
+    // relay's close). A throw here leaves the row `attempting` — held, never
+    // re-sent — and the next boot labels it.
+    if (kind !== 'reply') completeRelayPayloadDelivery(db, { ...ref, now });
     if (kind === 'prompt' && promoteRelayPendingReply(db, relay.id, now)) {
       globalThis.__relayPumpAgain = true;
     }

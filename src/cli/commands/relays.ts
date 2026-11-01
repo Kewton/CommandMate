@@ -432,7 +432,7 @@ Withdraw one with \`commandmate relays cancel <relay-id>\`.
 
   cmd
     .command('cancel')
-    .description('Withdraw an open relay so its reply is never delivered')
+    .description('Withdraw an open relay and stop its later deliveries (a delivery already held as uncertain may have reached you)')
     .argument('<relay-id>', 'Relay ID')
     .option('--json', 'JSON output')
     .option('--token <token>', TOKEN_WARNING)

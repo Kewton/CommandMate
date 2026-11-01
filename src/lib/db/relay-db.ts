@@ -29,10 +29,12 @@ import type {
 import { emptyRelayCounts, OPEN_RELAY_STATES } from '@/lib/relay/types';
 import { createLogger } from '@/lib/logger';
 import {
+  completeRelayPayloadDelivery,
   KEEP_HELD_PAYLOAD_SET,
   mapRelay,
   OPEN_STATE_PLACEHOLDERS,
   RELAY_COLUMNS,
+  type RelayPayloadAttemptRef,
   type SessionRelayRow,
 } from '@/lib/db/relay-bind-db';
 
@@ -287,6 +289,50 @@ export function markRelayDelivered(
     });
     return false;
   }
+}
+
+/** Which attempt delivered the reply, and the delivery id it closes under (Issue #4064). */
+export interface RelayReplyDeliveryInput extends RelayPayloadAttemptRef {
+  sentRequestId: string;
+}
+
+/** What {@link completeRelayReplyDelivery} did. */
+export interface RelayReplyDeliveryResult {
+  /** This call closed the relay as delivered ({@link markRelayDelivered}). */
+  closed: boolean;
+  /** The attempt was still the one on the row and is ended now. */
+  completed: boolean;
+}
+
+/**
+ * A reply's send went out: close the relay as delivered AND end the delivery
+ * attempt, in one transaction (Issue #4064).
+ *
+ * `markRelayDelivered` empties the payload (body, kind, payload id). Committed
+ * on its own, a failure or a stop before the attempt is ended left an
+ * `attempting` row with no payload, which the next boot held as an
+ * `uncertain` delivery nobody can identify. Here either both writes land or
+ * neither does: a throw rolls the payload back with the attempt, so the row
+ * stays `attempting` with its body and payload id — held, never re-sent, and
+ * labelled by the next boot.
+ *
+ * @throws When the database refuses a write; nothing is committed then
+ */
+export function completeRelayReplyDelivery(
+  db: Database.Database,
+  input: RelayReplyDeliveryInput
+): RelayReplyDeliveryResult {
+  const now = input.now ?? Date.now();
+  return db.transaction((): RelayReplyDeliveryResult => {
+    const closed = markRelayDelivered(db, input.relayId, input.sentRequestId, now);
+    const completed = completeRelayPayloadDelivery(db, {
+      relayId: input.relayId,
+      payloadId: input.payloadId,
+      attemptId: input.attemptId,
+      now,
+    });
+    return { closed, completed };
+  })();
 }
 
 /**
