@@ -173,7 +173,7 @@ RUN_ISSUES="{issue_numbers をカンマ区切り}"
 
 ### 4-1. 修正結果の記録（verify・review・findings）
 
-各 Issue で、ワーカーの最後のコミット（作業の HEAD）について記録する。
+各 Issue で、作業の HEAD（定義は `docs/orchestrate/run-log.md` 1-5。衝突を解いたマージもなりうる）について記録する。
 
 ```bash
 for issue in {issue_numbers}; do
