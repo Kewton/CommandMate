@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
-import { findLatest, itemOf, latestByStage, unmetStage } from './run-log.mjs';
+import { itemOf, latestByStage, unmetStage, verifiedAt } from './run-log.mjs';
 import { IGNORED_DIRTY, dirtyPaths } from './dirty-tree.mjs';
 import { itemProblem, workItemName } from './execution-key.mjs';
 import { FOLLOWS_HEAD, verifyEnvState } from './env-manifest.mjs';
@@ -215,54 +215,49 @@ export function prsOfBranch(run, repo, branch) {
  * automatic merge of its two parents (`git merge-tree --write-tree`) does not —
  * a conflict resolved by hand, or an edit made in the merge — outside
  * ORCHESTRATOR_FILES. A clean refresh (6-2) has none. `null` when it cannot be
- * told (more than two parents, or a git without `merge-tree --write-tree`):
- * the merge is then read as before (no edits of its own).
+ * told (more than two parents, a git without `merge-tree --write-tree`, or a
+ * git call that failed): workHeads then takes the merge for the work HEAD, so
+ * an edit it could not see is never covered by a pass under it.
  */
 export function mergeOwnFiles(run, worktree, sha, parents) {
   if (parents.length !== 2) return null;
-  let out;
   try {
-    out = run('git', ['-C', worktree, 'merge-tree', '--write-tree', '--no-messages', parents[0], parents[1]]);
+    const out = run('git', ['-C', worktree, 'merge-tree', '--write-tree', '--no-messages', parents[0], parents[1]]);
+    // exit 1 is "conflicts": the tree is still written, with the conflicted files as git left them.
+    if (out.status !== 0 && out.status !== 1) return null;
+    const tree = String(out.stdout ?? '').split('\n')[0].trim();
+    if (!/^[0-9a-f]{40,64}$/.test(tree)) return null;
+    const files = lines(git(run, worktree, ['diff-tree', '-r', '--name-only', '--no-renames', tree, sha]));
+    return files.filter((file) => !ORCHESTRATOR_FILES.includes(file));
   } catch {
     return null;
   }
-  // exit 1 is "conflicts": the tree is still written, with the conflicted files as git left them.
-  if (out.status !== 0 && out.status !== 1) return null;
-  const tree = String(out.stdout ?? '').split('\n')[0].trim();
-  if (!/^[0-9a-f]{40,64}$/.test(tree)) return null;
-  const files = lines(git(run, worktree, ['diff-tree', '-r', '--name-only', '--no-renames', tree, sha]));
-  return files.filter((file) => !ORCHESTRATOR_FILES.includes(file));
 }
 
-/**
- * Whether the run record has a verify of `sha` itself for the work item (any
- * result, run-log.mjs findLatest / inItem): the mark that makes a merge the
- * work HEAD (#4076). A failed one counts too, so a later failure is never
- * covered by an earlier pass under it.
- */
-export function verifiedAt(records, issue, item, sha) {
-  return findLatest(records ?? [], { issue, item, stage: 'verify', head: sha }) !== null;
-}
+export { verifiedAt };
 
 /**
  * The commits from HEAD down to the work HEAD — the commit whose verify /
  * review / findings stand for what is published. HEAD itself, then down the
  * first parent:
+ *   - a commit with a verify of its own in the run record (run-log.mjs
+ *     verifiedAt: same work item, any result) is the work HEAD, whatever it
+ *     is (#4076) — the rule run-log.mjs headsOf applies to the records too, so
+ *     `status` and the publishing scripts agree in every order the records are
+ *     written in;
  *   - a commit that touches only ORCHESTRATOR_FILES (6-4's fold) is passed over;
- *   - a merge (6-2's refresh) is passed over, unless it has a verify of its own
- *     in the run record (verifiedAt) or changed files itself (mergeOwnFiles):
- *     a worker that resolved a develop conflict in a merge and was verified
- *     there has that merge as the work HEAD, and its own verify / review /
- *     findings are needed (#4076); a merge that rewrote files without them is
- *     the work HEAD with nothing recorded, so an earlier pass under it is not
- *     taken for it;
+ *   - a merge (6-2's refresh) is passed over only when it is known to have
+ *     changed nothing itself (mergeOwnFiles is `[]`). A merge that rewrote
+ *     files, or whose own edits cannot be told, is the work HEAD: its own
+ *     verify / review / findings are needed, and an earlier pass under it is
+ *     not taken for it;
  *   - any other commit is the work HEAD (the worker's last commit).
  * The last element is the work HEAD. The one rule publish-pr, merge-pr and
  * precheck read (workHeadOf); precheck and publish-pr write the result as
  * `workHead`, which is what run-log.mjs `status` (headsOf) reads back.
  *
  * @param {{ records?: any[], issue?: number, item?: string | null }} [context]
- *   the run record and the work item whose verify marks a merge; without it no merge is marked.
+ *   the run record and the work item whose verify marks a commit; without it none is marked.
  */
 export function workHeads(run, worktree, head, context = {}) {
   const { records = [], issue, item } = context;
@@ -271,9 +266,10 @@ export function workHeads(run, worktree, head, context = {}) {
   for (const line of log) {
     const [sha, ...parents] = line.split(' ');
     heads.push(sha);
+    if (issue !== undefined && verifiedAt(records, issue, item, sha)) break;
     if (parents.length > 1) {
-      if (issue !== undefined && verifiedAt(records, issue, item, sha)) break;
-      if ((mergeOwnFiles(run, worktree, sha, parents)?.length ?? 0) > 0) break;
+      const own = mergeOwnFiles(run, worktree, sha, parents);
+      if (own === null || own.length > 0) break;
       continue;
     }
     const files = lines(git(run, worktree, ['diff-tree', '--no-commit-id', '--name-only', '-r', sha]));

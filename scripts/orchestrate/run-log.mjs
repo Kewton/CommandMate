@@ -18,11 +18,12 @@
  * work HEAD under it (`workHead`). `unmetStage` judges the worker's checks on
  * the work HEAD and the rest on the published HEAD; `status` and the publishing
  * scripts (pr-common.mjs) both use it. Which commit is the work HEAD is
- * pr-common.mjs `workHeads` (#4076): a merge is passed over unless it has a
- * verify of its own or changed files itself — a develop conflict the worker
- * resolved and was verified on makes that merge the work HEAD, so its own
- * verify / review / findings are what count. precheck and publish-pr write
- * that answer as `workHead`, and `status` reads it back (headsOf).
+ * pr-common.mjs `workHeads` (#4076): a commit with a verify of its own is the
+ * work HEAD; a merge is passed over only when it is known to have changed
+ * nothing itself — a develop conflict the worker resolved makes that merge the
+ * work HEAD, so its own verify / review / findings are what count. precheck
+ * and publish-pr write that answer as `workHead`, and `status` reads it back
+ * (headsOf, which applies the same verify mark, verifiedAt).
  *
  * One Issue can carry several PRs. A record names its work item with `item`
  * (`--item d1`, execution-key.mjs) and the attempt it came from with `key`;
@@ -231,6 +232,18 @@ export function latestByStage(records, issue, item) {
 }
 
 /**
+ * Whether the run record has a verify of `sha` itself for the work item (any
+ * result; `item` as inItem reads it): the mark that makes that commit its own
+ * work HEAD (#4076). pr-common.mjs workHeads (git) and headsOf (`status`)
+ * both read it, so a verify added after a record that named another work
+ * HEAD moves both. A failed one counts too, so a later failure is never
+ * covered by an earlier pass under it.
+ */
+export function verifiedAt(records, issue, item, sha) {
+  return findLatest(records ?? [], { issue, item, stage: 'verify', head: sha }) !== null;
+}
+
+/**
  * Why `stage` is not satisfied at `{ head, workHead }`, or null. The one rule
  * both `status` and the publishing scripts (pr-common.mjs) judge by: the
  * latest record of the stage passes, and — for a HEAD-bound stage — was taken
@@ -250,7 +263,12 @@ export function unmetStage(stage, record, { head, workHead }) {
  * and the work HEAD that HEAD was built on (its `workHead`, else itself).
  * It does not read git: the `workHead` it finds is the one precheck / publish-pr
  * wrote by pr-common.mjs workHeads, so a merge the worker was verified on reads
- * as its own work HEAD here too (its records carry no other `workHead`, #4076).
+ * as its own work HEAD here too (#4076). A HEAD with a verify of its own
+ * (verifiedAt) is its own work HEAD whatever an earlier record of it said —
+ * a precheck of a clean merge writes `workHead=W`, and a verify of that merge
+ * recorded after it makes the merge the work HEAD for workHeads as well (a
+ * record never carries `workHead` equal to `head`, so the later records alone
+ * could not say it).
  */
 export function headsOf(records, issue, item) {
   let head = null;
@@ -261,6 +279,7 @@ export function headsOf(records, issue, item) {
     head = record.head;
     if (record.workHead) workHead = record.workHead;
   }
+  if (head !== null && verifiedAt(records, issue, item, head)) workHead = head;
   return { head, workHead: workHead ?? head };
 }
 

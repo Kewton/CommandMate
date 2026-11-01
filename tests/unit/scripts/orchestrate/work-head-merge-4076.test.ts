@@ -19,13 +19,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { appendRecord, readRecords, summarize } from '../../../../scripts/orchestrate/run-log.mjs';
+import { appendRecord, headsOf, readRecords, summarize } from '../../../../scripts/orchestrate/run-log.mjs';
 import { manifestHash, takeManifest } from '../../../../scripts/orchestrate/env-manifest.mjs';
 import { mergeOwnFiles, missingRecords, workHeadOf, workHeads } from '../../../../scripts/orchestrate/pr-common.mjs';
 import { main as precheck } from '../../../../scripts/orchestrate/precheck.mjs';
 import { main as publish, prTitle, withIssueNumber } from '../../../../scripts/orchestrate/publish-pr.mjs';
 import { main as merge } from '../../../../scripts/orchestrate/merge-pr.mjs';
-import { DEVELOP, HEAD_A, HEAD_B, fakeGit, openPr } from './pr-fake';
+import { DEVELOP, HEAD_A, HEAD_B, MERGE_TREE, fakeGit, openPr } from './pr-fake';
 
 const W = HEAD_A;
 const X = HEAD_B;
@@ -154,12 +154,54 @@ describe('workHeads: which merge is the work HEAD (#4076)', () => {
     expect(workHeadOf(fake.run, worktree, MERGE, { records: records(), issue: ISSUE, item: 'd2' })).toBe(MERGE);
   });
 
-  it('a git that cannot answer merge-tree reads the merge as before (no edits of its own)', () => {
+  it('a merge whose own edits cannot be told is the work HEAD: W’s pass is not taken for it (review #4076 P2)', () => {
+    recordWork(W);
     const fake = workerMerge();
+    const noMergeTree = (command: string, args: string[]) =>
+      command === 'git' && args[2] === 'merge-tree' ? { status: 129, stdout: '', stderr: 'unknown option' } : fake.run(command, args);
+    const mergeTreeThrows = (command: string, args: string[]) => {
+      if (command === 'git' && args[2] === 'merge-tree') throw new Error('spawn git ENOENT');
+      return fake.run(command, args);
+    };
+    const diffTreeFails = (command: string, args: string[]) =>
+      command === 'git' && args[2] === 'diff-tree' && args.includes(MERGE_TREE) ? { status: 128, stdout: '', stderr: 'bad tree' } : fake.run(command, args);
+    for (const run of [noMergeTree, mergeTreeThrows, diffTreeFails]) {
+      expect(mergeOwnFiles(run, worktree, MERGE, [W, DEVELOP])).toBeNull();
+      expect(workHeads(run, worktree, MERGE, { records: records(), issue: ISSUE, item: null })).toEqual([MERGE]);
+    }
+  });
+
+  it('a merge of three parents (octopus) cannot be told either: it is the work HEAD', () => {
+    recordWork(W);
+    const fake = fakeGit({ head: MERGE, firstParent: [`${MERGE} ${W} ${DEVELOP} ${DEVELOP2}`, `${W} ${DEVELOP}`], commitFiles: { [W]: ['src/a.ts'] } });
+    expect(mergeOwnFiles(fake.run, worktree, MERGE, [W, DEVELOP, DEVELOP2])).toBeNull();
+    expect(workHeadOf(fake.run, worktree, MERGE, { records: records(), issue: ISSUE, item: null })).toBe(MERGE);
+    expect(fake.gitCalls('merge-tree')).toHaveLength(0);
+  });
+
+  it('publish: W passed, M’s own edits cannot be told and M has only its precheck → missing, nothing pushed', () => {
+    recordWork(W);
+    recordPrecheck(W);
+    recordPrecheck(MERGE);
+    const fake = workerMerge({ commitFiles: { [W]: ['src/a.ts'] } });
     const run = (command: string, args: string[]) =>
       command === 'git' && args[2] === 'merge-tree' ? { status: 129, stdout: '', stderr: 'unknown option' } : fake.run(command, args);
-    expect(mergeOwnFiles(run, worktree, MERGE, [W, DEVELOP])).toBeNull();
-    expect(workHeads(run, worktree, MERGE, { records: [], issue: ISSUE, item: null })).toEqual([MERGE, W]);
+    const err: string[] = [];
+    const code = publish(argv(), { run, home, log: () => {}, error: (l: string) => err.push(l) } as Parameters<typeof publish>[1]);
+    expect(code).toBe(1);
+    expect(err.join('\n')).toContain('verify: no result for 5555555');
+    expect(fake.gitCalls('push')).toHaveLength(0);
+    expect(fake.ghCalls('pr create')).toHaveLength(0);
+  });
+
+  it('a fold with a verify of its own is the work HEAD too (the same mark status reads)', () => {
+    recordWork(FOLD);
+    const fake = fakeGit({
+      head: FOLD,
+      firstParent: [`${FOLD} ${W}`, `${W} ${DEVELOP}`],
+      commitFiles: { [FOLD]: ['docs/module-reference.md'], [W]: ['src/a.ts'] },
+    });
+    expect(workHeadOf(fake.run, worktree, FOLD, { records: records(), issue: ISSUE, item: null })).toBe(FOLD);
   });
 });
 
@@ -321,6 +363,72 @@ describe('run-log status agrees with publish-pr on the same records (#4076)', ()
     expect(workHead).toBe(MERGE);
     expect(missing).toEqual([]);
     expect(status).toMatchObject({ head: REFRESH, workHead: MERGE, next: 'pr' });
+  });
+});
+
+describe('a verify of the same HEAD added after its precheck named W (review #4076 P2)', () => {
+  beforeEach(() => {
+    for (const stage of ['contract', 'send']) appendRecord(runDir, '3477', { issue: ISSUE, stage, result: 'ok' });
+  });
+  /** M is a clean merge on W (no edits of its own): before its own verify, W is the work HEAD. */
+  const cleanMerge = () => workerMerge({ commitFiles: { [W]: ['src/a.ts'] } });
+  const workHeadNow = (fake: ReturnType<typeof fakeGit>) => workHeadOf(fake.run, worktree, MERGE, { records: records(), issue: ISSUE, item: null });
+
+  it('precheck of M writes workHead=W, then M’s verify / review / findings: status and publish both move to M', () => {
+    recordWork(W, { verify: 'fail' });
+    const fake = cleanMerge();
+    recordPrecheck(MERGE, workHeadNow(fake));
+    expect(records().find((x) => x.stage === 'precheck' && x.head === MERGE)).toMatchObject({ workHead: W });
+    expect(headsOf(records(), ISSUE, null)).toEqual({ head: MERGE, workHead: W });
+
+    recordWork(MERGE);
+    const workHead = workHeadNow(fake);
+    expect(workHead).toBe(MERGE);
+    expect(headsOf(records(), ISSUE, null)).toEqual({ head: MERGE, workHead: MERGE });
+    expect(missingRecords(records(), ISSUE, { head: MERGE, workHead }, null)).toEqual([]);
+    expect(summarize(records())[0]).toMatchObject({ head: MERGE, workHead: MERGE, next: 'pr' });
+    const r = runPublish(fake);
+    expect(r.err).toBe('');
+    expect(r.code).toBe(0);
+  });
+
+  it('the same order with M’s verify failed: both stop at verify on M (not W’s, not passed)', () => {
+    recordWork(W);
+    const fake = cleanMerge();
+    recordPrecheck(MERGE, workHeadNow(fake));
+    recordWork(MERGE, { verify: 'fail' });
+    const workHead = workHeadNow(fake);
+    expect(workHead).toBe(MERGE);
+    expect(summarize(records())[0]).toMatchObject({ workHead: MERGE, next: 'verify', reason: 'verify: fail at 5555555' });
+    expect(missingRecords(records(), ISSUE, { head: MERGE, workHead }, null)[0]).toMatch(/^verify: fail at 5555555/);
+  });
+
+  it('only M’s verify so far: both ask for M’s review (W’s does not stand for it)', () => {
+    recordWork(W);
+    const fake = cleanMerge();
+    recordPrecheck(MERGE, workHeadNow(fake));
+    appendRecord(runDir, '3477', { issue: ISSUE, stage: 'verify', result: 'ok', head: MERGE, note: FULL_UNIT });
+    const workHead = workHeadNow(fake);
+    expect(summarize(records())[0]).toMatchObject({ workHead: MERGE, next: 'review', reason: 'review: no result for 5555555' });
+    expect(missingRecords(records(), ISSUE, { head: MERGE, workHead }, null)[0]).toMatch(/^review: no result for 5555555/);
+  });
+
+  it('negative control: no verify of M — both keep W, as before', () => {
+    recordWork(W);
+    const fake = cleanMerge();
+    recordPrecheck(MERGE, workHeadNow(fake));
+    expect(workHeadNow(fake)).toBe(W);
+    expect(summarize(records())[0]).toMatchObject({ head: MERGE, workHead: W, next: 'pr' });
+    expect(missingRecords(records(), ISSUE, { head: MERGE, workHead: W }, null)).toEqual([]);
+  });
+
+  it('another work item’s verify of M moves neither', () => {
+    recordWork(W);
+    const fake = cleanMerge();
+    recordPrecheck(MERGE, workHeadNow(fake));
+    recordWork(MERGE, { item: 'd2' });
+    expect(workHeadNow(fake)).toBe(W);
+    expect(headsOf(records(), ISSUE, null)).toEqual({ head: MERGE, workHead: W });
   });
 });
 
