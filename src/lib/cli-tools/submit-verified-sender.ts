@@ -116,6 +116,7 @@ import {
   matchesSubmittedBody,
   noteSubmittedBody,
   readPromptSubmitReceipt,
+  type PromptSubmitReceipt,
 } from '@/lib/session/prompt-submit-receipt';
 import { markLastSendDiscarded } from '@/lib/session/send-attempt-state';
 import { PASTE_NOT_STARTED_CODE } from '@/lib/session/send-attempt-types';
@@ -1079,6 +1080,149 @@ export async function sendMessageWithSubmitVerification(
   await withInstanceInputLock(params.sessionName, (ticket) => sendUnderInputLock(params, ticket));
 }
 
+/** The read-back's state, rule and frame, as {@link sendUnderInputLock}'s loop holds them (Issue #4057). */
+interface SubmitReadBack {
+  state: SubmitState;
+  rule: SubmitRule;
+  output: string;
+}
+
+/** `params.submitEnterCount`, else the composer's (Issue #4057: split out of {@link sendUnderInputLock}). */
+function resolveSubmitEnterCount(params: SubmitVerifiedSendParams, composer: ComposerSpec): number {
+  return params.submitEnterCount ?? composer.submitEnterCount;
+}
+
+/** Whether a failed paste must leave a carried mark (Issue #4057: split out of {@link sendUnderInputLock}). */
+function pasteFailureMayHaveTyped(error: unknown): boolean {
+  // Whether tmux put any of it into the pane is unknown — except after a
+  // refused input boundary (Issue #3992) or a failed `load-buffer` (Issue
+  // #4011, `not-started`), both before `paste-buffer`: a mark then would
+  // only hold the next send off for nothing.
+  const notStarted = (error as { delivery?: unknown } | null)?.delivery === 'not-started';
+  return !isInputBoundaryRefusal(error) && !notStarted;
+}
+
+/** Whether the typed body is waited for before Enter (Issue #4057: split out of {@link sendUnderInputLock}). */
+function shouldAwaitTypedBody(awaitTypedBody: boolean, cliToolId: CLIToolType): boolean {
+  return awaitTypedBody && SUPPORTED_COMPOSER_TOOLS.has(cliToolId);
+}
+
+/** The receipt a read-back's verdict asks for (Issue #4057: split out of {@link sendUnderInputLock}). */
+function promptReceiptFor(input: {
+  state: SubmitState;
+  rule: SubmitRule;
+  message: string;
+  sessionName: string;
+  cliToolId: CLIToolType;
+  enteredAt: number;
+}): PromptSubmitReceipt {
+  const { state, rule, message, sessionName, cliToolId, enteredAt } = input;
+  return needsPromptReport(state, rule, message)
+    ? readPromptSubmitReceipt(sessionName, cliToolId, enteredAt)
+    : 'not-required';
+}
+
+/** What {@link awaitPromptReport} resolved to (Issue #4057). */
+type PromptReportOutcome = Awaited<ReturnType<typeof awaitPromptReport>>;
+
+/**
+ * The read-back after an `awaited` receipt, from what {@link awaitPromptReport}
+ * resolved to (Issue #4057: split out of {@link sendUnderInputLock}). Synchronous:
+ * the wait itself stays in the caller, so the continuation after it is the
+ * original one. THROWS when the agent never reported the prompt.
+ */
+function settleAwaitedPromptReport(input: {
+  watched: PromptReportOutcome;
+  sessionName: string;
+  cliToolId: CLIToolType;
+  attempt: number;
+  rule: SubmitRule;
+  output: string;
+}): SubmitReadBack {
+  const { watched, sessionName, cliToolId, attempt, rule, output } = input;
+  if (watched.verdict === 'unreported') {
+    invalidateCache(sessionName);
+    logger.error('submit-not-confirmed:prompt-unreported', {
+      sessionName,
+      cliToolId,
+      attempt,
+      rule: watched.rule,
+      waitedMs: PROMPT_REPORT_WAIT_MS,
+    });
+    throw new Error(
+      `Message submit could not be confirmed for session ${sessionName}: the composer did not show the body ` +
+        `(rule ${watched.rule}) but the agent did not report the prompt within ${PROMPT_REPORT_WAIT_MS}ms ` +
+        '(Issue #4035).'
+    );
+  }
+  if (watched.verdict === 'received') {
+    logger.info('submit-confirmed-by-prompt-hook', { sessionName, cliToolId, attempt, rule });
+    return { state: 'submitted', rule, output };
+  }
+  const { state, rule: screenRule, output: screenOutput } = watched;
+  logger.info('submit-classified', { sessionName, cliToolId, attempt, state, rule: screenRule, receipt: 'awaited' });
+  return { state, rule: screenRule, output: screenOutput };
+}
+
+/** Remember a body only the screen called submitted (Issue #4057: split out of {@link sendUnderInputLock}). */
+function rememberScreenOnlySubmit(input: {
+  sessionName: string;
+  cliToolId: CLIToolType;
+  enteredAt: number;
+  message: string;
+}): void {
+  const { sessionName, cliToolId, enteredAt, message } = input;
+  // Issue #4035: only a body the screen alone called submitted is remembered
+  // for the next send's clear. One the agent reported did leave, and the same
+  // text back in the composer is claude restoring it (Esc), the history (↑),
+  // or a person typing it — not a send that never arrived.
+  if (readPromptSubmitReceipt(sessionName, cliToolId, enteredAt) !== 'received') {
+    noteSubmittedBody(sessionName, message);
+  }
+}
+
+/** Log a failed clear of a replaced input line (Issue #4057: split out of {@link sendUnderInputLock}). */
+function logClearInputFailed(sessionName: string, cliToolId: CLIToolType, clearError: unknown): void {
+  logger.error('submit-clear-input-failed', {
+    sessionName,
+    cliToolId,
+    error: clearError instanceof Error ? clearError.message : String(clearError),
+  });
+}
+
+/**
+ * Whether a read-back that is not the last one sends no Enter (Issue #4057:
+ * split out of {@link sendUnderInputLock}; the caller goes on to the next read).
+ */
+function holdsResendEnter(input: {
+  state: SubmitState;
+  output: string;
+  sessionName: string;
+  cliToolId: CLIToolType;
+  message: string;
+  composer: ComposerSpec;
+  attempt: number;
+}): boolean {
+  const { state, output, sessionName, cliToolId, message, composer, attempt } = input;
+  // state === 'indeterminate' (Issue #3906) — no Enter: the composer does not
+  // show the body, so another Enter could submit whatever it does show.
+  if (state === 'indeterminate') {
+    logger.warn('submit-not-confirmed:composer-unreadable', { sessionName, cliToolId, attempt });
+    return true;
+  }
+
+  // Issue #3945 (review #1): a paste placeholder that does not count this
+  // body is not this body. It can only be a paste that arrived after the
+  // initial Enter (a carried send's, past its mark), and another Enter would
+  // submit it. One that counts exactly this body cannot be told apart: that
+  // Enter is the accepted gap (LATE_TOKEN_AFTER_ENTER_SAME_COUNT in the tests).
+  if (composerShowsForeignPasteToken(output, cliToolId, message, composer)) {
+    logger.warn('submit-not-confirmed:foreign-paste-token', { sessionName, cliToolId, attempt });
+    return true;
+  }
+  return false;
+}
+
 async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: InstanceInputTicket): Promise<void> {
   const {
     sessionName,
@@ -1093,7 +1237,7 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
     awaitTypedBody = false,
     typedBodyAttempts = DEFAULT_TYPED_BODY_ATTEMPTS,
   } = params;
-  const submitEnterCount = params.submitEnterCount ?? composer.submitEnterCount;
+  const submitEnterCount = resolveSubmitEnterCount(params, composer);
 
   // -1. Issue #3945 (review-1 #4): every send re-reads the pane once it owns
   //     the composer, whether or not it queued — the prompt guard and the
@@ -1128,12 +1272,7 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
     try {
       await pasteBody(sessionName, message, ticket, cliToolId);
     } catch (error: unknown) {
-      // Whether tmux put any of it into the pane is unknown — except after a
-      // refused input boundary (Issue #3992) or a failed `load-buffer` (Issue
-      // #4011, `not-started`), both before `paste-buffer`: a mark then would
-      // only hold the next send off for nothing.
-      const notStarted = (error as { delivery?: unknown } | null)?.delivery === 'not-started';
-      if (!isInputBoundaryRefusal(error) && !notStarted) leaveCarriedPasteMark(ticket);
+      if (pasteFailureMayHaveTyped(error)) leaveCarriedPasteMark(ticket);
       throw error;
     }
     await confirmPasteLanded({ sessionName, message, cliToolId, composer, attempts: pasteLandedAttempts, ticket });
@@ -1173,7 +1312,7 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
     //    means waiting until the body is drawn (Issue #3366): an Enter pressed
     //    while codex still holds the keystrokes as a paste burst becomes a
     //    newline, and the body stays unsent. The fixed wait stays as a floor.
-    if (awaitTypedBody && SUPPORTED_COMPOSER_TOOLS.has(cliToolId)) {
+    if (shouldAwaitTypedBody(awaitTypedBody, cliToolId)) {
       await confirmTypedBodyLanded({ sessionName, message, cliToolId, composer, attempts: typedBodyAttempts, ticket });
     }
     const remaining = textInputWaitMs - (Date.now() - typedAt);
@@ -1209,9 +1348,7 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
 
     let output = await capturePane(sessionName, { startLine: -composer.verifyCaptureLines });
     let { state, rule } = classifySubmitWithRule(output, cliToolId, message, composer);
-    const receipt = needsPromptReport(state, rule, message)
-      ? readPromptSubmitReceipt(sessionName, cliToolId, enteredAt)
-      : 'not-required';
+    const receipt = promptReceiptFor({ state, rule, message, sessionName, cliToolId, enteredAt });
     // Issue #4035: every verdict names the rule that gave it, so a send reported
     // `sent` can be traced to what the screen showed.
     logger.info('submit-classified', { sessionName, cliToolId, attempt, state, rule, receipt });
@@ -1230,38 +1367,11 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
         rule,
         deadline: promptReportDeadline,
       });
-      if (watched.verdict === 'unreported') {
-        invalidateCache(sessionName);
-        logger.error('submit-not-confirmed:prompt-unreported', {
-          sessionName,
-          cliToolId,
-          attempt,
-          rule: watched.rule,
-          waitedMs: PROMPT_REPORT_WAIT_MS,
-        });
-        throw new Error(
-          `Message submit could not be confirmed for session ${sessionName}: the composer did not show the body ` +
-            `(rule ${watched.rule}) but the agent did not report the prompt within ${PROMPT_REPORT_WAIT_MS}ms ` +
-            '(Issue #4035).'
-        );
-      }
-      if (watched.verdict === 'received') {
-        logger.info('submit-confirmed-by-prompt-hook', { sessionName, cliToolId, attempt, rule });
-        state = 'submitted';
-      } else {
-        ({ state, rule, output } = watched);
-        logger.info('submit-classified', { sessionName, cliToolId, attempt, state, rule, receipt: 'awaited' });
-      }
+      ({ state, rule, output } = settleAwaitedPromptReport({ watched, sessionName, cliToolId, attempt, rule, output }));
     }
 
     if (state === 'submitted') {
-      // Issue #4035: only a body the screen alone called submitted is remembered
-      // for the next send's clear. One the agent reported did leave, and the same
-      // text back in the composer is claude restoring it (Esc), the history (↑),
-      // or a person typing it — not a send that never arrived.
-      if (readPromptSubmitReceipt(sessionName, cliToolId, enteredAt) !== 'received') {
-        noteSubmittedBody(sessionName, message);
-      }
+      rememberScreenOnlySubmit({ sessionName, cliToolId, enteredAt, message });
       invalidateCache(sessionName);
       return;
     }
@@ -1279,11 +1389,7 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
           logger.error('submit-clear-input-skipped-not-owner', { sessionName, cliToolId, generation: ticket.generation });
         }
       } catch (clearError: unknown) {
-        logger.error('submit-clear-input-failed', {
-          sessionName,
-          cliToolId,
-          error: clearError instanceof Error ? clearError.message : String(clearError),
-        });
+        logClearInputFailed(sessionName, cliToolId, clearError);
       }
       invalidateCache(sessionName);
       logger.error('submit-replaced-by-tui-completion', { sessionName, cliToolId, attempt });
@@ -1295,22 +1401,7 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
     // state === 'pending' / 'indeterminate' after the final read-back: give up below.
     if (attempt === attempts) break;
 
-    // state === 'indeterminate' (Issue #3906) — no Enter: the composer does not
-    // show the body, so another Enter could submit whatever it does show.
-    if (state === 'indeterminate') {
-      logger.warn('submit-not-confirmed:composer-unreadable', { sessionName, cliToolId, attempt });
-      continue;
-    }
-
-    // Issue #3945 (review #1): a paste placeholder that does not count this
-    // body is not this body. It can only be a paste that arrived after the
-    // initial Enter (a carried send's, past its mark), and another Enter would
-    // submit it. One that counts exactly this body cannot be told apart: that
-    // Enter is the accepted gap (LATE_TOKEN_AFTER_ENTER_SAME_COUNT in the tests).
-    if (composerShowsForeignPasteToken(output, cliToolId, message, composer)) {
-      logger.warn('submit-not-confirmed:foreign-paste-token', { sessionName, cliToolId, attempt });
-      continue;
-    }
+    if (holdsResendEnter({ state, output, sessionName, cliToolId, message, composer, attempt })) continue;
 
     // Issue #4035: the Enter thought lost may only have been late — the agent
     // reporting the prompt now means it went, and another Enter would land on an
