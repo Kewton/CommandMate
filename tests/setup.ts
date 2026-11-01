@@ -8,6 +8,11 @@ import {
   REAL_SHELL_TEST_TIMEOUT_MS,
   startsRealSubprocess,
 } from './helpers/real-shell-budget';
+import {
+  closeOpenTestDatabases,
+  isolateTestDatabaseEnv,
+  removeTestDatabaseDir,
+} from './helpers/test-db-isolation';
 
 // Issue #1950: give tests that start a real subprocess a budget that matches
 // what they actually do.
@@ -227,6 +232,25 @@ if ((process.env.CM_AUTO_YES_SHUTDOWN_RECORD_PATH ?? '').trim() === '') {
   );
 }
 
+// Issue #4086: keep the suite off the database the calling shell names.
+//
+// A worker's tmux session, and every verification the server runs, inherit the
+// server's `CM_DB_PATH=<production db>`. A test that reached the real
+// `getDbInstance()` opened that file, set WAL and ran this checkout's
+// migrations on it — on 2026-11-01 the production database went to v63 under a
+// v62 server. So, UNLIKE the defaults above, this is applied even when the
+// environment already has a value (the inherited value is the hazard), and the
+// deprecated aliases MCBD_DB_PATH / DATABASE_PATH are removed. With CM_DB_PATH
+// always set, the install default (`~/.commandmate/data/cm.db` or
+// `<cwd>/data/cm.db`) is never reached either. Scoped by worker pid like
+// CM_OPENCODE_PORT_FILE, and by VITEST_POOL_ID because `--pool=threads` runs
+// every worker in one pid: two workers migrating — or one deleting — one file
+// is the collision.
+// A test that stubs CM_DB_PATH or mocks getEnv still wins (it runs later), and
+// getDbInstance() refuses any non-temp path under Vitest as a backstop.
+// Covers only the Vitest suite, not the other steps of `commandmate verify`.
+const testDatabase = isolateTestDatabaseEnv(process.env);
+
 // Mock next-intl for all component tests
 vi.mock('next-intl', () => ({
   useTranslations: (namespace?: string) => {
@@ -341,4 +365,11 @@ afterEach(() => {
 
 afterAll(() => {
   // すべてのテスト終了後のクリーンアップ
+
+  // Issue #4086: close what this file left open on the temp database and
+  // remove it, so the next file in this worker starts from a fresh schema and
+  // nothing is left under the temp dir. Runs after the file's own afterAll
+  // hooks (stack order), so a file that closes its connection itself is fine.
+  closeOpenTestDatabases();
+  removeTestDatabaseDir(testDatabase.dir);
 });
