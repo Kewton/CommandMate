@@ -6,13 +6,8 @@
 
 import { resolveComposerSpec } from './composer-spec';
 import type { ComposerSpec } from '../../types/cli-tool-contracts';
-import {
-  stripAnsi,
-  detectThinking,
-  findOpenCodeComposerRows,
-  stripOpenCodeGutter,
-  OPENCODE_IDLE_COMPOSER_PATTERN,
-} from '../detection/cli-patterns';
+import { stripAnsi, detectThinking } from '../detection/cli-patterns';
+import { readOpenCodeComposerBox } from '../detection/tools/opencode/composer-own-text';
 import type { CLIToolType } from './types';
 import {
   codexDialogBelow,
@@ -45,6 +40,14 @@ const PASTE_PLACEHOLDER_PATTERN = /\[Pasted text[\s#]/;
  * substitution, so a genuinely-submitted message never fails spuriously.
  */
 const REPLACEMENT_COMMAND_PATTERN = /^\/[A-Za-z]/;
+
+/**
+ * opencode's empty-buffer placeholder on a box row's own text (Issue #4067):
+ * `OPENCODE_IDLE_COMPOSER_PATTERN` with the gutter already removed by
+ * `readOpenCodeComposerOwnRows`. Start-anchored like that pattern, so the
+ * phrase quoted inside a typed body is not taken for it.
+ */
+const OPENCODE_OWN_PLACEHOLDER = /^Ask anything(?:\.\.\.|\u2026)/;
 
 /**
  * Prompt input-line markers across the marker-drawing TUIs.
@@ -82,15 +85,22 @@ export const VERIFY_WINDOW_LINES = 12;
  *            it, or the session is still starting. Never a failure verdict.
  *   empty  - the composer is on screen and holds nothing.
  *   text   - the composer holds something; `text` is its first non-blank row and
- *            `rows` every raw row it occupies.
+ *            `rows` every raw row it occupies (for opencode's box, every buffer
+ *            row's own text — inside the box, without the sidebar; #4067).
+ *
+ * `obscured` (opencode's box only, review of #4067): an overlay is drawn over the
+ * box, so `empty` says only that nothing was seen, and `text` may be the
+ * overlay's. {@link classifySubmit} takes neither for the message having left.
  */
 type ComposerRead =
   | { kind: 'absent' }
-  | { kind: 'empty' }
+  | { kind: 'empty'; obscured?: true }
   | {
       kind: 'text';
       text: string;
       rows: string[];
+      /** An overlay is drawn over opencode's box (review of #4067). */
+      obscured?: true;
       /**
        * Every row from the composer's `›` row down to the footer, ANSI and glyph
        * stripped — for every codex composer holding text ({@link readSubmitComposer},
@@ -143,14 +153,23 @@ function readComposer(
   windowLines: string[]
 ): ComposerRead {
   if (reader === 'opencode-box') {
-    const rows = findOpenCodeComposerRows(lines);
-    if (rows === null) return { kind: 'absent' };
+    // Each buffer row's own text: gutter removed and cut at the box's right
+    // edge (Issue #4067), so the sidebar drawn on the same rows (#2047/#2095 —
+    // its working directory starts with `/`) is never read as the body. The
+    // same cut as the send readiness (`isOpenCodeComposerReady`).
+    const box = readOpenCodeComposerBox(lines);
+    if (box === null) return { kind: 'absent' };
+    const { rows } = box;
+    // An overlay over the box (its bottom border cut in two): its rows are read
+    // to the border's far end, and the reading is marked so B and F do not
+    // stand on it (review of #4067).
+    const obscured = box.obscured ? { obscured: true as const } : {};
     // The placeholder is painted only while the buffer is empty, and only
-    // inside the box — hence matched on the raw, still-guttered row (#1883).
-    if (rows.some((row) => OPENCODE_IDLE_COMPOSER_PATTERN.test(row))) return { kind: 'empty' };
-    const first = rows.map(stripOpenCodeGutter).find((row) => row.length > 0);
-    if (first === undefined) return { kind: 'empty' };
-    return { kind: 'text', text: first, rows };
+    // inside the box (#1883) — read on the row's own text, which is inside it.
+    if (rows.some((row) => OPENCODE_OWN_PLACEHOLDER.test(row))) return { kind: 'empty', ...obscured };
+    const first = rows.find((row) => row.length > 0);
+    if (first === undefined) return { kind: 'empty', ...obscured };
+    return { kind: 'text', text: first, rows, ...obscured };
   }
 
   if (reader !== 'input-line-marker') return { kind: 'absent' };
@@ -190,7 +209,8 @@ export function withoutTrailingBlankRows(lines: string[]): string[] {
  *                   autocompleted/replaced the command) -> clear the line and throw,
  *                   never resend Enter.
  *   indeterminate - a codex composer above the read window holds text that is
- *                   neither the body nor a command (Issue #3906): not evidence
+ *                   neither the body nor a command (Issue #3906), or an overlay
+ *                   is drawn over opencode's box (review of #4067): not evidence
  *                   that the message left, nor that Enter would send it. Read
  *                   again without Enter; throw if it never resolves.
  */
@@ -535,6 +555,11 @@ export function readSubmitComposer(
  *      pre-#1501 permissive default, so normal sends never spuriously fail) —
  *      except in a codex composer above the read window -> indeterminate
  *      (Issue #3906).
+ *   None of B–F holds for opencode's box with an overlay drawn over it (its
+ *   bottom border cut in two) -> indeterminate (`B-obscured` when nothing is
+ *   seen, `F-obscured` for any text — the body, a token or a `/…` included;
+ *   review of #4067): what the box holds under the overlay is not seen, and an
+ *   Enter or a clear would go to the overlay.
  *
  * C–F are scoped to the composer only, so the user-message echo that a TUI
  * prints into its history above the prompt never causes a false verdict.
@@ -570,7 +595,17 @@ export function classifySubmit(
  * one (`B-empty`) — and F into the window's (`F`) and the codex composer above
  * it (`F-outside`), because the sender trusts them differently.
  */
-export type SubmitRule = 'A' | 'B-absent' | 'B-empty' | 'C' | 'D' | 'E' | 'F' | 'F-outside';
+export type SubmitRule =
+  | 'A'
+  | 'B-absent'
+  | 'B-empty'
+  | 'B-obscured'
+  | 'C'
+  | 'D'
+  | 'E'
+  | 'F'
+  | 'F-outside'
+  | 'F-obscured';
 
 /** {@link classifySubmit}'s verdict and the rule that gave it (Issue #4035). */
 export interface SubmitVerdict {
@@ -607,9 +642,19 @@ export function classifySubmitWithRule(
 
   // B. No composer visible (scrolled off / dialog / still starting), or the
   //    composer is empty => the message left the box => submitted.
+  //    Not on opencode's box with an overlay drawn over it (review of #4067):
+  //    nothing seen there is not the box being empty -> indeterminate.
   if (composer.kind !== 'text') {
+    if (composer.kind === 'empty' && composer.obscured) return { state: 'indeterminate', rule: 'B-obscured' };
     return { state: 'submitted', rule: composer.kind === 'absent' ? 'B-absent' : 'B-empty' };
   }
+
+  //    Text in opencode's box under an overlay (review of #4067): the reading
+  //    runs to the border's far end, the overlay's text included, so none of
+  //    C–F is read from it. C/D would resend Enter and E clear the line — keys
+  //    that would go to the palette or picker on top, not to the box ->
+  //    indeterminate (no Enter, no clear; read again).
+  if (composer.obscured) return { state: 'indeterminate', rule: 'F-obscured' };
 
   // C. A paste placeholder is still folded into the composer => body is there.
   if (composer.rows.some((row) => PASTE_PLACEHOLDER_PATTERN.test(row) || findPasteTokens(row).tokens.length > 0)) {

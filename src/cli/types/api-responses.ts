@@ -2538,6 +2538,26 @@ export interface RelayView {
   obsState?: string | null;
   holdReason?: string | null;
   overlap?: string | null;
+  /**
+   * Issue #4064. Optional: an older server sends none. Null while the payload
+   * is queued or there is none.
+   */
+  deliveryHold?: RelayDeliveryHoldResponse | null;
+}
+
+/**
+ * Mirrors: `RelayDeliveryHold` in src/lib/relay/types.ts (Issue #4064).
+ * Strings rather than unions, for the reason `RelayView.state` is one.
+ */
+export interface RelayDeliveryHoldResponse {
+  /** `attempting` | `uncertain`. */
+  state: string;
+  payloadId: string | null;
+  kind: string | null;
+  reason: string | null;
+  at: number | null;
+  /** The requester's pane to look at before anything else. */
+  checkCommand: string;
 }
 
 /** Mirrors: `RelayCounts` in src/lib/relay/types.ts. */
@@ -2557,6 +2577,11 @@ export interface RelayListResponse {
   awaiting: RelayView[];
   /** Every open relay in scope, whichever end it belongs to. */
   open: RelayView[];
+  /**
+   * Issue #4064: relays in scope, open or closed, whose payload is under a
+   * delivery hold. Absent on an older server.
+   */
+  held?: RelayView[];
   counts: RelayCountsResponse;
 }
 

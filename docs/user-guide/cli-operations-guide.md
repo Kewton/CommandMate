@@ -725,6 +725,27 @@ relay 配送（`ask --async` / `send --reply-to`）は、relay を**その依頼
 
 重ならないのが一番確実です。同じインスタンスへ重ねて送らないでください。
 
+#### 不確定な配送は自動で再送しない（Issue #4064）
+
+relay の返答・確認（prompt）の通知・期限切れの通知を依頼元の入力欄へ配送した結果が**不確定**のとき、
+CommandMate はその payload を**自動で再送しません**。二重に届くのを防ぐためです。
+
+- 配送は、最初のキーより前に台帳へ「試行中」を書き、それに成功した処理だけが送ります（書けなければ送りません）
+- 自動で再送するのは、送信の結末が `not-sent`（本文のキーを 1 つも打っていない。`prompt-not-ready`・
+  `session-starting` など）のときだけです。依頼元が確認待ち（`prompt_waiting`）のときも今までどおり待って再送します
+- それ以外 — `indeterminate`（`prompt-unreported`・`submit-unconfirmed`・`send-error`・`composer-residue` など）、
+  送信を確かめた後の例外（`threw-after-sent`）、結末が分かる前の例外（`send-threw`）、送信中のサーバー再起動
+  （`server-restarted`）— は**保留**（`uncertain`）にします。サーバーが送信の直前に止まり実際は何も打っていなかった
+  場合も、試行中のまま残るので再起動後は保留になります（確かめられないため、安全側に倒します）
+- 保留中は、その relay の後の配送（確認の通知の後にできた返答も）を止めます。ほかの relay は進みます
+- 保留は `commandmate relays`（`# delivery not confirmed, not resent`）・`commandmate relays --id <relay-id>`・
+  `GET /api/relays`（`held`）・`GET /api/relays/:id`（`deliveryHold`）で読めます。行には `delivery=uncertain`・
+  `payload=<種類>:<payloadId>`・`reason=<理由>`・`check=<確かめ先>` が付きます。確かめ先は依頼元の正確なインスタンスの
+  `commandmate capture <worktree-id> --instance <instance> --pane` です。届いていなければ自分で送り直してください
+- 期限切れ・取り消し（`commandmate relays cancel`）は、以後の配送を止めるだけです。保留の本文・payloadId・理由は
+  消えず、読めるまま残ります（既に入力欄に届いたものを取り消すことはできません）。保留中に期限が来た relay には、
+  期限切れの通知を配送しません
+
 ### ターン成立の判定（Issue #1839）
 
 `wait` はこれまで「エージェントが composer に戻ったか」しか見ておらず、**そのターンが

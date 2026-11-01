@@ -281,6 +281,15 @@ function printRelayLine(relay: RelayView): void {
   if (relay.sendState) fields.push(`send=${relay.sendState}`);
   if (relay.overlap) fields.push(`overlap=${relay.overlap}`);
   if (relay.holdReason) fields.push(`hold=${relay.holdReason}`);
+  // Issue #4064: a payload whose delivery may have reached the requester. It
+  // is never resent automatically; the pane named is where to look.
+  const delivery = relay.deliveryHold;
+  if (delivery) {
+    fields.push(`delivery=${delivery.state}`);
+    if (delivery.kind) fields.push(`payload=${delivery.kind}:${delivery.payloadId ?? '-'}`);
+    if (delivery.reason) fields.push(`reason=${delivery.reason}`);
+    fields.push(`check=${delivery.checkCommand}`);
+  }
   console.log(fields.join('\t'));
 }
 
@@ -314,6 +323,7 @@ export function createRelaysCommand(): Command {
     .addHelpText('after', `
 Columns: <relay-id>  <state>  <requester> <- <worker>  hops=<n>  expires=<iso>
          [send=<state>]  [overlap=<none|later|earlier|both|unknown>]  [hold=<reason>]
+         [delivery=<attempting|uncertain>  payload=<kind>:<id>  reason=<r>  check=<cmd>]
 
 States: pending (the worker has not finished), prompt (it stopped on a
 confirmation and the requester was told), delivered / expired / cancelled.
@@ -324,6 +334,13 @@ relay is not being answered (send_unknown, dispatch_unknown, generation_changed,
 server_restarted, ...); overlap= says the reply may share a turn with another
 request (unknown is not "none"). \`--id <relay-id>\` shows one relay even after
 it closed.
+
+delivery= (Issue #4064) marks a payload whose delivery to the requester may
+have happened (uncertain: indeterminate, failed after it was sent, or the
+server restarted mid-send). It is NOT resent automatically and the relay's
+later payloads wait behind it. Look at the pane check= names first. Cancelling
+the relay stops later deliveries; it cannot take back what may already be in
+the requester's composer.
 
 Withdraw one with \`commandmate relays cancel <relay-id>\`.
 `)
@@ -389,6 +406,13 @@ Withdraw one with \`commandmate relays cancel <relay-id>\`.
           + `delivered=${counts.delivered} expired=${counts.expired} cancelled=${counts.cancelled}`
         );
 
+        // Issue #4064: listed even when no relay is open — a held payload's
+        // relay may have expired or been cancelled since.
+        const held = response.held ?? [];
+        if (held.length > 0) {
+          console.error(`# delivery not confirmed, not resent (${held.length})`);
+          held.forEach(printRelayLine);
+        }
         if (response.awaiting.length === 0 && response.owed.length === 0) {
           console.error('No open relays.');
           return;
@@ -408,7 +432,7 @@ Withdraw one with \`commandmate relays cancel <relay-id>\`.
 
   cmd
     .command('cancel')
-    .description('Withdraw an open relay so its reply is never delivered')
+    .description('Withdraw an open relay and stop its later deliveries (a delivery already held as uncertain may have reached you)')
     .argument('<relay-id>', 'Relay ID')
     .option('--json', 'JSON output')
     .option('--token <token>', TOKEN_WARNING)

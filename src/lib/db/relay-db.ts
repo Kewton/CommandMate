@@ -29,9 +29,12 @@ import type {
 import { emptyRelayCounts, OPEN_RELAY_STATES } from '@/lib/relay/types';
 import { createLogger } from '@/lib/logger';
 import {
+  completeRelayPayloadDelivery,
+  KEEP_HELD_PAYLOAD_SET,
   mapRelay,
   OPEN_STATE_PLACEHOLDERS,
   RELAY_COLUMNS,
+  type RelayPayloadAttemptRef,
   type SessionRelayRow,
 } from '@/lib/db/relay-bind-db';
 
@@ -39,17 +42,25 @@ import {
 // re-exported so every caller (and every `vi.mock`) keeps this module's surface.
 export {
   appendRelayHeldCandidate,
+  claimRelayPayloadDelivery,
   clearRelayHeldCandidates,
   clearRelayPending,
   clearRelayPendingReply,
+  completeRelayPayloadDelivery,
   explainRelayBindRefusal,
   failOrphanedRelayBind,
   getRelayBinding,
   getRelayPendingPayload,
+  holdRelayPayloadDelivery,
+  listDeliverableRelayPayloads,
   listOpenBoundRelays,
+  listRelaysWithDeliveryHold,
   listRelaysWithPendingPayload,
   promoteRelayPendingReply,
   recordRelayInputBoundary,
+  recoverInterruptedRelayDeliveries,
+  releaseRelayPayloadDelivery,
+  RELAY_DELIVERY_SERVER_RESTARTED,
   replaceRelayPromptWithPendingReply,
   replaceRelayPromptWithReply,
   reserveRelayBind,
@@ -57,10 +68,12 @@ export {
   setRelayPendingReply,
   settleRelaySendState,
   stashRelayPayload,
+  type ClaimRelayPayloadDeliveryInput,
   type RecordRelayInputBoundaryInput,
   type RelayBinding,
   type RelayBindRefusal,
   type RelayHeldCandidate,
+  type RelayPayloadAttemptRef,
   type RelayPendingReply,
   type RelayWithPendingPayload,
   type ReserveRelayBindInput,
@@ -132,6 +145,7 @@ export function createRelay(db: Database.Database, input: CreateRelayInput): Ses
     obsState: null,
     holdReason: null,
     overlap: null,
+    deliveryHold: null,
   };
 }
 
@@ -232,6 +246,29 @@ export function countOpenRelaysBetween(
 }
 
 /**
+ * The UPDATE behind {@link markRelayDelivered}, without its catch: a write the
+ * database refuses (the UNIQUE index included) throws. `false` means only that
+ * the relay was no longer open, or already carried a delivery id.
+ */
+function closeRelayDelivered(
+  db: Database.Database,
+  id: string,
+  sentRequestId: string,
+  now: number
+): boolean {
+  const result = db
+    .prepare(`
+      UPDATE session_relays
+      SET state = 'delivered', sent_request_id = ?, delivered_at = ?,
+          pending_kind = NULL, pending_body = NULL, payload_id = NULL, updated_at = ?
+      WHERE id = ? AND sent_request_id IS NULL
+        AND state IN (${OPEN_STATE_PLACEHOLDERS})
+    `)
+    .run(sentRequestId, now, now, id, ...OPEN_RELAY_STATES);
+  return result.changes === 1;
+}
+
+/**
  * Close the relay as delivered, exactly once.
  *
  * Two clauses, and they guard different things — worth separating, because a
@@ -256,16 +293,7 @@ export function markRelayDelivered(
   now = Date.now()
 ): boolean {
   try {
-    const result = db
-      .prepare(`
-        UPDATE session_relays
-        SET state = 'delivered', sent_request_id = ?, delivered_at = ?,
-            pending_kind = NULL, pending_body = NULL, payload_id = NULL, updated_at = ?
-        WHERE id = ? AND sent_request_id IS NULL
-          AND state IN (${OPEN_STATE_PLACEHOLDERS})
-      `)
-      .run(sentRequestId, now, now, id, ...OPEN_RELAY_STATES);
-    return result.changes === 1;
+    return closeRelayDelivered(db, id, sentRequestId, now);
   } catch (error) {
     // The UNIQUE index refusing the write IS the answer "somebody else got
     // there first", and it must not become an exception in a delivery path.
@@ -275,6 +303,54 @@ export function markRelayDelivered(
     });
     return false;
   }
+}
+
+/** Which attempt delivered the reply, and the delivery id it closes under (Issue #4064). */
+export interface RelayReplyDeliveryInput extends RelayPayloadAttemptRef {
+  sentRequestId: string;
+}
+
+/** What {@link completeRelayReplyDelivery} did. */
+export interface RelayReplyDeliveryResult {
+  /** This call closed the relay as delivered; false = it was already closed. */
+  closed: boolean;
+  /** The attempt was still the one on the row and is ended now. */
+  completed: boolean;
+}
+
+/**
+ * A reply's send went out: close the relay as delivered AND end the delivery
+ * attempt, in one transaction (Issue #4064).
+ *
+ * Closing the relay empties the payload (body, kind, payload id). Committed
+ * on its own, a failure or a stop before the attempt is ended left an
+ * `attempting` row with no payload, which the next boot held as an
+ * `uncertain` delivery nobody can identify. Here either both writes land or
+ * neither does: a throw rolls the payload back with the attempt, so the row
+ * stays `attempting` with its body and payload id — held, never re-sent, and
+ * labelled by the next boot.
+ *
+ * @throws When the database refuses a write; nothing is committed then
+ */
+export function completeRelayReplyDelivery(
+  db: Database.Database,
+  input: RelayReplyDeliveryInput
+): RelayReplyDeliveryResult {
+  const now = input.now ?? Date.now();
+  return db.transaction((): RelayReplyDeliveryResult => {
+    // Not `markRelayDelivered`: its catch turns a refused write into `false`,
+    // and ending the attempt after that would commit an open relay with its
+    // payload and hold gone — the next completion could capture the same reply
+    // again. A refused close throws here, and nothing is committed.
+    const closed = closeRelayDelivered(db, input.relayId, input.sentRequestId, now);
+    const completed = completeRelayPayloadDelivery(db, {
+      relayId: input.relayId,
+      payloadId: input.payloadId,
+      attemptId: input.attemptId,
+      now,
+    });
+    return { closed, completed };
+  })();
 }
 
 /**
@@ -348,7 +424,12 @@ export function listExpiredOpenRelays(
   return rows.map(mapRelay);
 }
 
-/** Withdraw a relay. Returns false when it was already closed or absent. */
+/**
+ * Withdraw a relay. Returns false when it was already closed or absent.
+ *
+ * Issue #4064: stops later deliveries only. A payload under a delivery hold
+ * (it may already be in A's composer) keeps its body, id and reason.
+ */
 export function cancelRelay(
   db: Database.Database,
   id: string,
@@ -357,7 +438,7 @@ export function cancelRelay(
   const result = db
     .prepare(`
       UPDATE session_relays
-      SET state = 'cancelled', pending_kind = NULL, pending_body = NULL, payload_id = NULL,
+      SET state = 'cancelled', ${KEEP_HELD_PAYLOAD_SET},
           pending_reply = NULL, updated_at = ?
       WHERE id = ? AND state IN (${OPEN_STATE_PLACEHOLDERS})
     `)
