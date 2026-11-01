@@ -112,11 +112,33 @@ export function relayRequesterPaneCommand(requester: RelayEndpoint): string {
   return `commandmate capture ${requester.worktreeId} --instance ${requester.instanceId} --pane`;
 }
 
+/**
+ * What `POST /api/relays/:id/resolve` does to an `uncertain` hold (Issue #4082).
+ *
+ *  - `confirm` — the payload reached the requester: recorded as delivered.
+ *  - `retry`   — it did not: queued again, sent once by the next delivery that
+ *                takes it (readiness, ownership and the input lock as usual).
+ *  - `discard` — drop it without sending.
+ *
+ * `confirm` and `discard` type nothing.
+ */
+export type RelayHoldAction = 'confirm' | 'retry' | 'discard';
+
+/** Every {@link RelayHoldAction}, for validation. */
+export const RELAY_HOLD_ACTIONS: readonly RelayHoldAction[] = ['confirm', 'retry', 'discard'];
+
 /** A payload whose delivery was taken and has not been recorded as done (Issue #4064). */
 export interface RelayDeliveryHold {
   state: RelayDeliveryState;
   /** The held payload's id. */
   payloadId: string | null;
+  /**
+   * The delivery attempt that took it (Issue #4082): what a resolve names, so
+   * an operation read off an older screen — before a retry made a new attempt
+   * — is refused. Not the send binding's `bind_attempt_id`. Null only on a row
+   * that never recorded one; such a hold cannot be resolved.
+   */
+  attemptId: string | null;
   /** What the held payload is; null if the slot was emptied meanwhile. */
   kind: RelayPendingKind | null;
   /** Why it is held (a send-attempt reason, `send-threw`, `server-restarted`, …). */

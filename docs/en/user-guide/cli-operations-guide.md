@@ -622,12 +622,52 @@ that it cannot arrive twice.
   included) wait behind it. Other relays go on
 - A hold is read with `commandmate relays` (`# delivery not confirmed, not resent`), `commandmate relays
   --id <relay-id>`, `GET /api/relays` (`held`) and `GET /api/relays/:id` (`deliveryHold`). The line carries
-  `delivery=uncertain`, `payload=<kind>:<payloadId>`, `reason=<reason>` and `check=<where to look>`, which is
-  the requester's exact instance: `commandmate capture <worktree-id> --instance <instance> --pane`. If it did
-  not arrive, resend it yourself
+  `delivery=uncertain`, `payload=<kind>:<payloadId>`, `attempt=<attemptId>`, `reason=<reason>` and
+  `check=<where to look>`, which is the requester's exact instance:
+  `commandmate capture <worktree-id> --instance <instance> --pane`. Once you have looked, settle it with
+  `commandmate relays resolve` below rather than resending it yourself (a resend of your own followed by a
+  later `--retry` arrives twice)
 - An expiry or a cancel (`commandmate relays cancel`) only stops later deliveries. The held payload's body,
   payloadId and reason stay readable (what already reached the composer cannot be taken back). A relay that
   expires while a payload is held gets no expiry notice delivered
+
+#### Resolving a hold (Issue #4082)
+
+An `uncertain` hold is settled, after looking at the requester's pane, with exactly one of the following.
+`--payload` and `--attempt` are `payload=<kind>:<payloadId>` and `attempt=<attemptId>` from
+`commandmate relays --id <relay-id>` (`deliveryHold.payloadId` and `deliveryHold.attemptId` in JSON and the API).
+
+```bash
+commandmate relays resolve <relay-id> --payload <payloadId> --attempt <attemptId> --confirm   # it arrived
+commandmate relays resolve <relay-id> --payload <payloadId> --attempt <attemptId> --retry     # it did not: send it again
+commandmate relays resolve <relay-id> --payload <payloadId> --attempt <attemptId> --discard   # drop it, send nothing
+```
+
+The API is `POST /api/relays/:id/resolve` (body `{ "payloadId", "attemptId", "action": "confirm" | "retry" | "discard" }`).
+
+| Held payload | Relay | `--confirm` | `--retry` | `--discard` |
+|---|---|---|---|---|
+| reply | open | closed as `delivered` | the same body queued again | closed as `cancelled` (later payload dropped too) |
+| prompt notice | open | hold dropped; the reply waiting behind it is queued in its place (relay stays open) | queued again | same as `--confirm` |
+| expiry notice | closed | hold dropped | queued again, relay stays closed | hold dropped |
+| reply / prompt notice | closed by a cancel or an expiry | hold dropped (closing reason kept) | refused (409) | hold dropped (closing reason kept) |
+
+- `--confirm` and `--discard` type nothing. The reply queued after a prompt notice is settled is another
+  payload and arrives by the ordinary delivery. The same dialog is not told again; a new dialog and the final
+  reply arrive as before
+- A successful `--retry` means "queued for delivery again", not "delivered". The next delivery sends it once,
+  when the requester can take it (composer readiness and the input lock as for any delivery). If that send is
+  `not-sent` it is retried automatically as before; if it is uncertain again it is held under a new `attempt`.
+  A prompt notice queued again is still replaced by the relay's reply if one is decided before it is sent, as
+  before. A reply or prompt notice of a relay past its deadline (even one still open) cannot be retried
+- These are refused with 409 and change nothing: an old `attempt` (a retry made a new attempt since), a second
+  operation on the same hold, a delivery in progress (`delivery=attempting`), no hold, a hold without an
+  `attempt` (written by an older server), and the refusals in the table. A relay that does not exist is 404, a
+  malformed id or body is 400, a database failure is 500 (nothing is committed). After a refusal, read it again
+  with `commandmate relays --id <relay-id>`
+- Resolving does not change the send binding (`send=`, `hold=`). Restarts behave as before: a payload retried
+  but not yet taken stays queued, one whose send had started is held under its new `attempt`. A settled hold
+  does not come back
 
 ### Progress Output
 
