@@ -223,7 +223,8 @@ export function recordStructuredPrompt(
     instanceId: string;
     /**
      * The instance the `respond` in the row's text names (Issue #4031): the
-     * one the payload was asked for, undefined for the primary.
+     * one the payload was asked for — for the primary, its own id (Issue
+     * #4063, the same instance the live payload's question names).
      */
     respondInstanceId?: string;
     state: StructuredPromptWaitingState;

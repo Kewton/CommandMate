@@ -46,7 +46,6 @@ import {
   resolveSessionTargetStrict,
 } from '@/lib/session/resolve-session-target';
 import { sessionTargetConflictResponse } from '@/lib/session/session-target-conflict-response';
-import { respondAgentFor } from '@/lib/session/respond-target';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { getWorktreeById } from '@/lib/db';
 import { getDbInstance } from '@/lib/db/db-instance';
@@ -57,6 +56,8 @@ import {
 } from '@/lib/session/prompt-waiting-guard';
 import { createLogger } from '@/lib/logger';
 import { classifySendFailure } from '@/lib/session/send-attempt-state';
+import { PLAN_REVIEW_SEND_REFUSED_CODE } from '@/lib/session/send-attempt-types';
+import { commandCodePlanReviewSendMessage, respondAgentFor } from '@/lib/session/respond-target';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
 
@@ -144,6 +145,15 @@ export async function POST(
       return respondAgentFor(cliToolId, instanceId, unqualified.ok ? unqualified.target.cliToolId : undefined);
     };
 
+    // Issue #4063: the plan review refusal's tool. Only Command Code shows
+    // one, and its primary — no instance, or the tool's own id (#868) — is
+    // reached by a bare `respond` only when it is the worktree default.
+    const planReviewRespondAgent = (): CLIToolType | undefined => {
+      if (instanceId && instanceId !== target.cliToolId) return undefined;
+      const unqualified = resolveSessionTargetStrict(db, id, {});
+      return respondAgentFor(target.cliToolId, undefined, unqualified.ok ? unqualified.target.cliToolId : undefined);
+    };
+
     const manager = CLIToolManager.getInstance();
     const cliTool = manager.getTool(target.cliToolId);
 
@@ -213,6 +223,22 @@ export async function POST(
         logger.info('terminal-send-refused-prompt-waiting-under-lock', { worktreeId: id, cliToolId: target.cliToolId });
         return NextResponse.json(
           { error: promptWaitingMessage(id, undefined, instanceId, respondAgent()), code: PROMPT_WAITING_CODE },
+          { status: 409 }
+        );
+      }
+      // Issue #4063: Command Code's plan review refused before any key, and
+      // its guidance (`respond … "<text>"`, then `--plan-review …`) is the one
+      // way out — the fixed 500 below threw it away. 409 like PROMPT_WAITING:
+      // a state of the session, not a server fault. The sentence is rebuilt
+      // here (still no internal detail passed through, D1-007) with the
+      // `respond` aimed by the same rule as the refusal above.
+      if (classifySendFailure(error).reason === 'plan-review') {
+        logger.info('terminal-send-refused-plan-review', { worktreeId: id, cliToolId: target.cliToolId });
+        return NextResponse.json(
+          {
+            error: commandCodePlanReviewSendMessage(id, instanceId, planReviewRespondAgent()),
+            code: PLAN_REVIEW_SEND_REFUSED_CODE,
+          },
           { status: 409 }
         );
       }

@@ -54,6 +54,7 @@ import {
 import { getErrorMessage } from '@/lib/errors';
 import { createLogger } from '@/lib/logger';
 import { PLAN_REVIEW_SEND_REFUSED_CODE } from '@/lib/session/send-attempt-types';
+import { commandCodePlanReviewSendMessage } from '@/lib/session/respond-target';
 import type { AgentLaunchContext } from '@/lib/hooks/sources';
 import { COMMAND_CODE_CLI_TOOL_ID } from '@/lib/hooks/sources/command-code/tool-id';
 import {
@@ -175,28 +176,11 @@ export function isCommandCodeReady(rawOutput: string): boolean {
 }
 
 /**
- * Why `send` stops at the plan review overlay (Issue #3125).
- *
- * The overlay replaces the composer until a human decides, so waiting for the
- * composer only ran out the clock (`prompt not ready` after the full timeout).
- * Its comments, Submit review, approval and cancel go through `respond`.
- *
- * Issue #4049: a function, not a constant. The constant named a
- * `<worktree-id>` placeholder and no instance, so on `command-code-2` the
- * `respond` it showed went to the primary instance. The primary instance
- * (no id, or the tool's own id — #868) gets no `--instance`.
- *
- * @param worktreeId - The worktree whose session is showing the review
- * @param instanceId - The instance the send was for, if any
+ * Why `send` stops at the plan review overlay (Issue #3125). Issue #4063: the
+ * sentence lives in `respond-target` (string building only) so the routes that
+ * rebuild it with the request's tool do not import this module's tmux graph.
  */
-export function commandCodePlanReviewSendMessage(worktreeId: string, instanceId?: string): string {
-  const target = instanceId && instanceId !== 'command-code' ? ` --instance ${instanceId}` : '';
-  return (
-    'Command Code is showing a plan review (REVIEW), which takes review comments, not messages. ' +
-    `Comment with \`commandmate respond ${worktreeId} "<text>"${target}\`, then \`--plan-review submit\` (ctrl+r), ` +
-    '`--plan-review approve` (ctrl+a) or `--plan-review cancel` (esc).'
-  );
-}
+export { commandCodePlanReviewSendMessage };
 
 /**
  * Command Code CLI tool implementation.
