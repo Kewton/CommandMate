@@ -46,6 +46,7 @@ import {
   getDbInstance,
   closeDbInstance,
   assertTestDatabasePathIsolated,
+  isInsideVitestWorker,
 } from '@/lib/db/db-instance';
 import { getDefaultDbPath } from '@/lib/db/db-path-resolver';
 import { CURRENT_SCHEMA_VERSION } from '@/lib/db/migrations/runner';
@@ -227,41 +228,97 @@ describe('[#4086] getDbInstance refuses a non-temp path under Vitest', () => {
     ).toThrow(/outside the temp directory/);
   });
 
-  it('is active only under Vitest or NODE_ENV=test, never for a production server', () => {
+  it('outside Vitest: active only with NODE_ENV=test; VITEST alone does not count', () => {
     const prod = path.join(REPO_ROOT, 'data', 'db.sqlite');
-    expect(() => assertTestDatabasePathIsolated(prod, { NODE_ENV: 'production' })).not.toThrow();
-    expect(() => assertTestDatabasePathIsolated(prod, { NODE_ENV: 'development' })).not.toThrow();
-    expect(() => assertTestDatabasePathIsolated(prod, { NODE_ENV: 'test' })).toThrow();
-    expect(() => assertTestDatabasePathIsolated(prod, { VITEST: 'true' })).toThrow();
+    const outside = (env: Record<string, string>) =>
+      () => assertTestDatabasePathIsolated(prod, env, os.tmpdir(), false);
+    expect(outside({ NODE_ENV: 'production' })).not.toThrow();
+    expect(outside({ NODE_ENV: 'development' })).not.toThrow();
+    expect(outside({ VITEST: 'true' })).not.toThrow();
+    expect(outside({ VITEST: 'true', NODE_ENV: 'production' })).not.toThrow();
+    expect(outside({ NODE_ENV: 'test' })).toThrow(/outside the temp directory/);
   });
 
-  it('a production start that inherited VITEST is not a test run (daemon spreads process.env)', () => {
+  it('inside the Vitest worker the marker is present and decides, not the environment', () => {
+    expect(isInsideVitestWorker()).toBe(true);
     const prod = path.join(REPO_ROOT, 'data', 'db.sqlite');
-    const root = path.join(REPO_ROOT, 'data', 'test-db');
-    for (const nodeEnv of ['production', 'development']) {
-      expect(() =>
-        assertTestDatabasePathIsolated(prod, { VITEST: 'true', NODE_ENV: nodeEnv, [TEST_DB_ROOT_ENV]: root })
-      ).not.toThrow();
+    for (const env of [{ NODE_ENV: 'production' }, { NODE_ENV: 'development' }, {}]) {
+      expect(() => assertTestDatabasePathIsolated(prod, env)).toThrow(/outside the temp directory/);
     }
-    // Control: the same inherited VITEST with NODE_ENV=test (Vitest itself) stays guarded.
-    expect(() =>
-      assertTestDatabasePathIsolated(prod, { VITEST: 'true', NODE_ENV: 'test', [TEST_DB_ROOT_ENV]: root })
-    ).toThrow(/outside the temp directory/);
   });
 
-  it('getDbInstance with NODE_ENV=production and an inherited VITEST reaches the open of its real path', () => {
+  it('a test that swaps NODE_ENV to production (and drops VITEST) is still guarded', () => {
     openSpy.throwOnOpen = true;
     const outside = path.join(REPO_ROOT, 'cm-4086-production-probe.db');
-    vi.stubEnv('VITEST', 'true');
     vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('VITEST', undefined);
     vi.stubEnv('CM_DB_PATH', outside);
 
-    // The probe stands in for the open: the guard let the path through.
-    expect(() => getDbInstance()).toThrow(/\[4086 probe\] would have opened/);
-    expect(openSpy.calls).toEqual([outside]);
+    expect(() => getDbInstance()).toThrow(/outside the temp directory/);
+    expect(openSpy.calls).toEqual([]);
     expect(fs.existsSync(outside)).toBe(false);
   });
+
+  it('a connection opened while NODE_ENV is swapped to production is still handed to the closer', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('CM_DB_PATH', path.join(sandbox, 'swapped', 'cm.db'));
+    closeOpenTestDatabases();
+
+    const db = getDbInstance();
+    expect(globalThis.__commandmateTestDbClosers?.size).toBe(1);
+    closeOpenTestDatabases();
+
+    expect(db.open).toBe(false);
+  });
+
+  it('a production child process outside Vitest that inherited VITEST opens its real path; NODE_ENV=test is refused', async () => {
+    // Not under the temp dir nor CM_TEST_DB_ROOT, so only the on-switch decides.
+    const probeDir = path.join(REPO_ROOT, 'data', `prod-probe-4086-${path.basename(sandbox)}`);
+    const dbPath = path.join(probeDir, 'db.sqlite');
+    const script = path.join(sandbox, 'prod-child.ts');
+    fs.writeFileSync(
+      script,
+      [
+        `import { getDbInstance, closeDbInstance, isInsideVitestWorker } from ${JSON.stringify(path.join(REPO_ROOT, 'src/lib/db/db-instance.ts'))};`,
+        'let opened = false; let error = "";',
+        'try { getDbInstance(); opened = true; closeDbInstance(); } catch (e) { error = String(e); }',
+        'console.log(`REPORT ${JSON.stringify({ marker: isInsideVitestWorker(), opened, error })}`);',
+        '',
+      ].join('\n')
+    );
+    const home = path.join(sandbox, 'home');
+    fs.mkdirSync(home, { recursive: true });
+    const env = (nodeEnv: 'production' | 'test'): NodeJS.ProcessEnv => ({
+      PATH: process.env.PATH,
+      HOME: home,
+      TMPDIR: sandbox,
+      VITEST: 'true',
+      VITEST_POOL_ID: '1',
+      NODE_ENV: nodeEnv,
+      CM_DB_PATH: dbPath,
+    });
+    try {
+      const prod = (await runChild(script, env('production'))) as unknown as ProdChildReport;
+      expect(prod).toEqual({ marker: false, opened: true, error: '' });
+      expect(fs.existsSync(dbPath)).toBe(true);
+      fs.rmSync(probeDir, { recursive: true, force: true });
+
+      const test = (await runChild(script, env('test'))) as unknown as ProdChildReport;
+      expect(test.marker).toBe(false);
+      expect(test.opened).toBe(false);
+      expect(test.error).toMatch(/outside the temp directory/);
+      expect(fs.existsSync(dbPath)).toBe(false);
+    } finally {
+      fs.rmSync(probeDir, { recursive: true, force: true });
+    }
+  }, 120_000);
 });
+
+interface ProdChildReport {
+  marker: boolean;
+  opened: boolean;
+  error: string;
+}
 
 describe('[#4086] connections are closed and temp files removed at the end', () => {
   it('closeOpenTestDatabases closes what getDbInstance opened; the dir can then be removed', () => {

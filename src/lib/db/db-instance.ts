@@ -42,20 +42,34 @@ function nodeTmpdir(): string {
 type EnvLike = Readonly<Record<string, string | undefined>>;
 
 /**
- * Issue #4086: is this process a test run (the guard's on-switch)?
+ * Issue #4086: is this code running inside a Vitest worker?
  *
- * An explicit NODE_ENV other than `test` always wins: `VITEST` is an ordinary
- * environment variable that a child inherits (the daemon spreads `process.env`
- * into the server it starts, src/cli/utils/daemon.ts buildChildEnv), so a
- * server started with `NODE_ENV=production` from a shell where `VITEST` was
- * left behind must still open its real database. Vitest itself always runs
- * with `NODE_ENV=test` (vitest.config.ts forces it), so the guard loses no
- * coverage there; `VITEST` only counts when NODE_ENV is unset.
+ * Read off the worker state Vitest itself installs on `globalThis` (its
+ * `getWorkerState()` reads the same `__vitest_worker__` global, in the forks
+ * and threads pools alike), not off environment variables: the environment is
+ * both inherited and editable. A test may swap `NODE_ENV` to `production`
+ * mid-run (tests/unit/pwa/ServiceWorkerRegistrar.test.tsx does) and must stay
+ * guarded, while a child process started outside Vitest inherits `VITEST` and
+ * must not be taken for a test run.
  */
-function isUnderTest(env: EnvLike): boolean {
-  const nodeEnv = (env.NODE_ENV ?? '').trim();
-  if (nodeEnv !== '') return nodeEnv === 'test';
-  return Boolean(env.VITEST);
+export function isInsideVitestWorker(): boolean {
+  const state = (globalThis as { __vitest_worker__?: unknown }).__vitest_worker__;
+  return typeof state === 'object' && state !== null;
+}
+
+/**
+ * Issue #4086: is this a test run (the guard's on-switch)?
+ *
+ * Inside a Vitest worker: always, whatever `NODE_ENV` says right now.
+ * Outside one: only with `NODE_ENV=test` (a test's own child process, which
+ * also inherits the per-process CM_DB_PATH). `VITEST` alone never counts —
+ * the daemon spreads `process.env` into the server it starts
+ * (src/cli/utils/daemon.ts buildChildEnv), so a `NODE_ENV=production` server
+ * started from a shell where `VITEST` was left behind opens its real database.
+ */
+function isUnderTest(env: EnvLike, inVitestWorker: boolean): boolean {
+  if (inVitestWorker) return true;
+  return (env.NODE_ENV ?? '').trim() === 'test';
 }
 
 /** realpath of the nearest existing ancestor, with the missing tail re-joined. */
@@ -94,17 +108,22 @@ export const TEST_DB_ROOT_ENV = 'CM_TEST_DB_ROOT';
  * databases tests/setup.ts hands out — not under the temp dir, because
  * `validateDbPath` rejects /tmp and /var, where every OS temp dir lives). Not
  * only the one setup path, so tests that name their own database keep working.
- * A no-op outside Vitest / `NODE_ENV=test`, so a real server is never affected
- * — including one that inherited `VITEST` but runs with `NODE_ENV=production`.
+ * Active inside a Vitest worker (even while a test has swapped `NODE_ENV`) and
+ * in a process with `NODE_ENV=test`; a no-op otherwise, so a real server is
+ * never affected — including one that inherited `VITEST` but runs with
+ * `NODE_ENV=production`.
  *
+ * @param inVitestWorker - defaults to {@link isInsideVitestWorker}; a test
+ *   passes `false` to ask how a process outside Vitest would be judged
  * @throws Error when under test and `dbPath` is in neither directory
  */
 export function assertTestDatabasePathIsolated(
   dbPath: string,
   env: EnvLike = process.env,
-  tmpRoot: string = nodeTmpdir()
+  tmpRoot: string = nodeTmpdir(),
+  inVitestWorker: boolean = isInsideVitestWorker()
 ): void {
-  if (!isUnderTest(env)) return;
+  if (!isUnderTest(env, inVitestWorker)) return;
   const resolved = path.resolve(dbPath);
   const roots = [tmpRoot, env[TEST_DB_ROOT_ENV]]
     .filter((root): root is string => typeof root === 'string' && root.trim() !== '');
@@ -178,7 +197,7 @@ export function getDbInstance(): Database.Database {
       throw error;
     }
     dbInstance = db;
-    if (isUnderTest(process.env)) {
+    if (isUnderTest(process.env, isInsideVitestWorker())) {
       (globalThis.__commandmateTestDbClosers ??= new Set()).add(closeDbInstance);
     }
 
