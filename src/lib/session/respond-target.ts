@@ -51,3 +51,39 @@ export function respondAgentFor(
   if (instanceId || !requestedCliTool) return undefined;
   return requestedCliTool === unqualifiedCliTool ? undefined : requestedCliTool;
 }
+
+/**
+ * Why `send` stops at the plan review overlay (Issue #3125).
+ *
+ * The overlay replaces the composer until a human decides, so waiting for the
+ * composer only ran out the clock (`prompt not ready` after the full timeout).
+ * Its comments, Submit review, approval and cancel go through `respond`.
+ *
+ * Issue #4049: a function, not a constant. The constant named a
+ * `<worktree-id>` placeholder and no instance, so on `command-code-2` the
+ * `respond` it showed went to the primary instance. The primary instance
+ * (no id, or the tool's own id — #868) gets no `--instance`.
+ *
+ * Issue #4063: and the tool, by {@link respondTargetFlags}' rule, when the
+ * request named Command Code on a worktree whose default is another tool
+ * ({@link respondAgentFor}). `CommandCodeTool.sendMessage` does not know the
+ * request, so the routes (send, terminal) rebuild the sentence with the `agent`
+ * they resolved; the tool's own throw leaves it out. Kept here, with no import
+ * beyond types, so those routes do not load the tool module.
+ *
+ * @param worktreeId - The worktree whose session is showing the review
+ * @param instanceId - The instance the send was for, if any
+ * @param agent - The tool the `respond` must name when no instance is (see `respondAgentFor`)
+ */
+export function commandCodePlanReviewSendMessage(
+  worktreeId: string,
+  instanceId?: string,
+  agent?: CLIToolType,
+): string {
+  const target = respondTargetFlags(instanceId && instanceId !== 'command-code' ? instanceId : undefined, agent);
+  return (
+    'Command Code is showing a plan review (REVIEW), which takes review comments, not messages. ' +
+    `Comment with \`commandmate respond ${worktreeId} "<text>"${target}\`, then \`--plan-review submit\` (ctrl+r), ` +
+    '`--plan-review approve` (ctrl+a) or `--plan-review cancel` (esc).'
+  );
+}
