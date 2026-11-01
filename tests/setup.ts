@@ -243,7 +243,9 @@ if ((process.env.CM_AUTO_YES_SHUTDOWN_RECORD_PATH ?? '').trim() === '') {
 // deprecated aliases MCBD_DB_PATH / DATABASE_PATH are removed. With CM_DB_PATH
 // always set, the install default (`~/.commandmate/data/cm.db` or
 // `<cwd>/data/cm.db`) is never reached either. Scoped by worker pid like
-// CM_OPENCODE_PORT_FILE: two processes migrating one file is the collision.
+// CM_OPENCODE_PORT_FILE, and by VITEST_POOL_ID because `--pool=threads` runs
+// every worker in one pid: two workers migrating — or one deleting — one file
+// is the collision.
 // A test that stubs CM_DB_PATH or mocks getEnv still wins (it runs later), and
 // getDbInstance() refuses any non-temp path under Vitest as a backstop.
 // Covers only the Vitest suite, not the other steps of `commandmate verify`.

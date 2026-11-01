@@ -41,8 +41,21 @@ function nodeTmpdir(): string {
 
 type EnvLike = Readonly<Record<string, string | undefined>>;
 
+/**
+ * Issue #4086: is this process a test run (the guard's on-switch)?
+ *
+ * An explicit NODE_ENV other than `test` always wins: `VITEST` is an ordinary
+ * environment variable that a child inherits (the daemon spreads `process.env`
+ * into the server it starts, src/cli/utils/daemon.ts buildChildEnv), so a
+ * server started with `NODE_ENV=production` from a shell where `VITEST` was
+ * left behind must still open its real database. Vitest itself always runs
+ * with `NODE_ENV=test` (vitest.config.ts forces it), so the guard loses no
+ * coverage there; `VITEST` only counts when NODE_ENV is unset.
+ */
 function isUnderTest(env: EnvLike): boolean {
-  return Boolean(env.VITEST) || env.NODE_ENV === 'test';
+  const nodeEnv = (env.NODE_ENV ?? '').trim();
+  if (nodeEnv !== '') return nodeEnv === 'test';
+  return Boolean(env.VITEST);
 }
 
 /** realpath of the nearest existing ancestor, with the missing tail re-joined. */
@@ -81,7 +94,8 @@ export const TEST_DB_ROOT_ENV = 'CM_TEST_DB_ROOT';
  * databases tests/setup.ts hands out — not under the temp dir, because
  * `validateDbPath` rejects /tmp and /var, where every OS temp dir lives). Not
  * only the one setup path, so tests that name their own database keep working.
- * A no-op outside Vitest / `NODE_ENV=test`, so a real server is never affected.
+ * A no-op outside Vitest / `NODE_ENV=test`, so a real server is never affected
+ * — including one that inherited `VITEST` but runs with `NODE_ENV=production`.
  *
  * @throws Error when under test and `dbPath` is in neither directory
  */

@@ -19,7 +19,7 @@
  * default of `getDefaultDbPath()` (`~/.commandmate/data/cm.db` or
  * `<cwd>/data/cm.db`) is never consulted either.
  *
- * Where: `<repo>/data/test-db/<pid>/cm.db`, not `os.tmpdir()`. The real
+ * Where: `<repo>/data/test-db/<pid>-w<VITEST_POOL_ID>/cm.db`, not `os.tmpdir()`. The real
  * `getEnv()` runs every path through `validateDbPath`, which rejects `/tmp` and
  * `/var` (and their `/private` forms) as system directories — and every OS
  * temp dir lives in one of them (macOS: `/var/folders/…`). A temp-dir
@@ -65,14 +65,29 @@ export interface TestDatabaseLocation {
  * Scoped by pid for the same reason as `CM_OPENCODE_PORT_FILE`: Vitest's fork
  * workers, and several checkouts running the suite at once, must not share one
  * file — two processes migrating the same file is the collision this exists to
- * prevent.
+ * prevent. And by Vitest worker slot: under `--pool=threads` every worker is a
+ * thread of ONE process, so the pid alone would hand concurrent files the same
+ * database, and the first file's afterAll would delete it (and its -wal) from
+ * under the others. `VITEST_POOL_ID` is unique among concurrently running
+ * workers; `VITEST_WORKER_ID` is the fallback.
  */
 export function testDatabaseLocationFor(
   pid: number = process.pid,
-  root: string = DEFAULT_TEST_DB_ROOT
+  root: string = DEFAULT_TEST_DB_ROOT,
+  workerId: string | null = currentVitestWorkerId()
 ): TestDatabaseLocation {
-  const dir = join(root, String(pid));
+  const dir = join(root, workerId === null ? String(pid) : `${pid}-w${workerId}`);
   return { dir, dbPath: join(dir, TEST_DB_FILE_NAME) };
+}
+
+/** The Vitest worker slot of this thread/process, or null outside a Vitest worker. */
+export function currentVitestWorkerId(env: NodeJS.ProcessEnv = process.env): string | null {
+  for (const key of ['VITEST_POOL_ID', 'VITEST_WORKER_ID'] as const) {
+    const value = (env[key] ?? '').trim();
+    // Only a plain id goes into a path segment.
+    if (/^[0-9A-Za-z_-]+$/.test(value)) return value;
+  }
+  return null;
 }
 
 /**
@@ -83,10 +98,11 @@ export function testDatabaseLocationFor(
  */
 export function isolateTestDatabaseEnv(
   env: NodeJS.ProcessEnv = process.env,
-  options: { pid?: number; root?: string } = {}
+  options: { pid?: number; root?: string; workerId?: string | null } = {}
 ): TestDatabaseLocation {
   const root = options.root ?? DEFAULT_TEST_DB_ROOT;
-  const location = testDatabaseLocationFor(options.pid, root);
+  const workerId = options.workerId !== undefined ? options.workerId : currentVitestWorkerId(env);
+  const location = testDatabaseLocationFor(options.pid, root, workerId);
   env[TEST_DB_ROOT_ENV] = root;
   env.CM_DB_PATH = location.dbPath;
   delete env.MCBD_DB_PATH;

@@ -100,7 +100,7 @@ describe('[#4086] tests/setup.ts points this process at its own temp database', 
   it('CM_DB_PATH is the per-pid test path and the deprecated aliases are gone', () => {
     expect(process.env.CM_DB_PATH).toBe(testDatabaseLocationFor(process.pid).dbPath);
     expect(process.env.CM_DB_PATH).toBe(
-      path.join(REPO_ROOT, 'data', 'test-db', String(process.pid), 'cm.db')
+      path.join(REPO_ROOT, 'data', 'test-db', `${process.pid}-w${process.env.VITEST_POOL_ID}`, 'cm.db')
     );
     expect(process.env[TEST_DB_ROOT_ENV]).toBe(DEFAULT_TEST_DB_ROOT);
     expect(process.env.MCBD_DB_PATH).toBeUndefined();
@@ -234,6 +234,33 @@ describe('[#4086] getDbInstance refuses a non-temp path under Vitest', () => {
     expect(() => assertTestDatabasePathIsolated(prod, { NODE_ENV: 'test' })).toThrow();
     expect(() => assertTestDatabasePathIsolated(prod, { VITEST: 'true' })).toThrow();
   });
+
+  it('a production start that inherited VITEST is not a test run (daemon spreads process.env)', () => {
+    const prod = path.join(REPO_ROOT, 'data', 'db.sqlite');
+    const root = path.join(REPO_ROOT, 'data', 'test-db');
+    for (const nodeEnv of ['production', 'development']) {
+      expect(() =>
+        assertTestDatabasePathIsolated(prod, { VITEST: 'true', NODE_ENV: nodeEnv, [TEST_DB_ROOT_ENV]: root })
+      ).not.toThrow();
+    }
+    // Control: the same inherited VITEST with NODE_ENV=test (Vitest itself) stays guarded.
+    expect(() =>
+      assertTestDatabasePathIsolated(prod, { VITEST: 'true', NODE_ENV: 'test', [TEST_DB_ROOT_ENV]: root })
+    ).toThrow(/outside the temp directory/);
+  });
+
+  it('getDbInstance with NODE_ENV=production and an inherited VITEST reaches the open of its real path', () => {
+    openSpy.throwOnOpen = true;
+    const outside = path.join(REPO_ROOT, 'cm-4086-production-probe.db');
+    vi.stubEnv('VITEST', 'true');
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('CM_DB_PATH', outside);
+
+    // The probe stands in for the open: the guard let the path through.
+    expect(() => getDbInstance()).toThrow(/\[4086 probe\] would have opened/);
+    expect(openSpy.calls).toEqual([outside]);
+    expect(fs.existsSync(outside)).toBe(false);
+  });
 });
 
 describe('[#4086] connections are closed and temp files removed at the end', () => {
@@ -324,12 +351,145 @@ describe('[#4086] two test processes in parallel', () => {
     expect(a.pid).not.toBe(b.pid);
     expect(a.dbPath).not.toBe(b.dbPath);
     for (const report of [a, b]) {
-      expect(report.dbPath).toBe(testDatabaseLocationFor(report.pid).dbPath);
+      // The children are not Vitest workers (no VITEST_POOL_ID): pid only.
+      expect(report.dbPath).toBe(testDatabaseLocationFor(report.pid, DEFAULT_TEST_DB_ROOT, null).dbPath);
       expect(report.version).toBe(CURRENT_SCHEMA_VERSION);
       expect(report.openAfterClose).toBe(false);
       expect(report.dirExistsAfterCleanup).toBe(false);
     }
     expect(hashFile(protectedPath)).toBe(hash);
     expect(fs.existsSync(`${protectedPath}-wal`)).toBe(false);
+  }, 120_000);
+});
+
+interface ThreadReport {
+  mode: 'distinct' | 'same';
+  aPath: string;
+  bPath: string;
+  bFileExistsAfterACleanup: boolean;
+  bRowsAfterACleanup: number | string;
+  pids: number[];
+}
+
+/**
+ * `--pool=threads`: every worker is a thread of one process, so the pid is the
+ * same. Two worker threads (one process) each run what tests/setup.ts runs —
+ * isolate, getDbInstance, and at the end close + remove — with worker A
+ * finishing while worker B still holds its connection.
+ */
+function runThreads(sandboxDir: string, mode: 'distinct' | 'same'): Promise<ThreadReport> {
+  const workerTs = path.join(sandboxDir, `thread-worker-${mode}.ts`);
+  const bootCjs = path.join(sandboxDir, `thread-boot-${mode}.cjs`);
+  const mainCjs = path.join(sandboxDir, `thread-main-${mode}.cjs`);
+  fs.writeFileSync(
+    workerTs,
+    [
+      "import fs from 'node:fs';",
+      "import { parentPort } from 'node:worker_threads';",
+      `import { isolateTestDatabaseEnv, closeOpenTestDatabases, removeTestDatabaseDir } from ${JSON.stringify(path.join(REPO_ROOT, 'tests/helpers/test-db-isolation.ts'))};`,
+      `import { getDbInstance } from ${JSON.stringify(path.join(REPO_ROOT, 'src/lib/db/db-instance.ts'))};`,
+      'const location = isolateTestDatabaseEnv();',
+      'const db = getDbInstance();',
+      "db.exec('CREATE TABLE IF NOT EXISTS t4086 (v TEXT)');",
+      "parentPort!.on('message', (m: string) => {",
+      "  if (m === 'check') {",
+      '    let rows: number | string;',
+      "    try { db.prepare('INSERT INTO t4086 VALUES (?)').run('b'); rows = (db.prepare('SELECT COUNT(*) AS n FROM t4086').get() as { n: number }).n; } catch (e) { rows = String(e); }",
+      "    parentPort!.postMessage({ type: 'checked', exists: fs.existsSync(location.dbPath), rows });",
+      "  } else if (m === 'finish') {",
+      '    closeOpenTestDatabases();',
+      '    removeTestDatabaseDir(location.dir);',
+      "    parentPort!.postMessage({ type: 'finished' });",
+      '  }',
+      '});',
+      "parentPort!.postMessage({ type: 'opened', dbPath: location.dbPath, pid: process.pid });",
+      '',
+    ].join('\n')
+  );
+  fs.writeFileSync(
+    bootCjs,
+    "const { workerData } = require('node:worker_threads');\nrequire(workerData.tsxApi).require(workerData.file, __filename);\n"
+  );
+  fs.writeFileSync(
+    mainCjs,
+    `
+const { Worker } = require('node:worker_threads');
+const [boot, file, tsxApi, mode] = process.argv.slice(2);
+const ids = mode === 'same' ? ['1', '1'] : ['1', '2'];
+const spawnWorker = (id) => new Worker(boot, { workerData: { tsxApi, file }, env: { ...process.env, VITEST_POOL_ID: id } });
+const next = (w, type) => new Promise((resolve, reject) => {
+  const onMsg = (m) => { if (m.type === type) { w.off('message', onMsg); resolve(m); } };
+  w.on('message', onMsg); w.once('error', reject);
+});
+(async () => {
+  // Opened one after the other (two first-time migrations of one file would
+  // just race into SQLITE_BUSY), then alive at the same time.
+  const a = spawnWorker(ids[0]);
+  const oa = await next(a, 'opened');
+  const b = spawnWorker(ids[1]);
+  const ob = await next(b, 'opened');
+  const workers = [a, b];
+  a.postMessage('finish'); await next(a, 'finished');
+  b.postMessage('check'); const checked = await next(b, 'checked');
+  b.postMessage('finish'); await next(b, 'finished');
+  for (const w of workers) await w.terminate();
+  console.log('REPORT ' + JSON.stringify({ mode, aPath: oa.dbPath, bPath: ob.dbPath, bFileExistsAfterACleanup: checked.exists, bRowsAfterACleanup: checked.rows, pids: [oa.pid, ob.pid] }));
+})().catch((e) => { console.error(e); process.exit(1); });
+`
+  );
+  const tsxApi = require.resolve('tsx/cjs/api', { paths: [REPO_ROOT] });
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [mainCjs, bootCjs, workerTs, tsxApi, mode], {
+      cwd: REPO_ROOT,
+      env: {
+        PATH: process.env.PATH,
+        HOME: path.join(sandboxDir, 'home'),
+        TMPDIR: sandboxDir,
+        NODE_ENV: 'test',
+        VITEST: 'true',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    let err = '';
+    child.stdout.on('data', (chunk) => { out += String(chunk); });
+    child.stderr.on('data', (chunk) => { err += String(chunk); });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      // A crashed child cannot run its own cleanup; its directories carry its pid.
+      for (const entry of fs.existsSync(DEFAULT_TEST_DB_ROOT) ? fs.readdirSync(DEFAULT_TEST_DB_ROOT) : []) {
+        if (entry.startsWith(`${child.pid}-w`)) removeTestDatabaseDir(path.join(DEFAULT_TEST_DB_ROOT, entry));
+      }
+      const line = out.split('\n').find((l) => l.startsWith('REPORT '));
+      if (code !== 0 || !line) {
+        reject(new Error(`threads child exited ${code}\nstdout:\n${out}\nstderr:\n${err}`));
+        return;
+      }
+      resolve(JSON.parse(line.slice('REPORT '.length)) as ThreadReport);
+    });
+  });
+}
+
+describe('[#4086] two worker threads in one process (--pool=threads: same pid)', () => {
+  it('control: with the same worker id they would share one database, and A removes it under B', async () => {
+    fs.mkdirSync(path.join(sandbox, 'home'), { recursive: true });
+    const report = await runThreads(sandbox, 'same');
+
+    expect(report.pids[0]).toBe(report.pids[1]);
+    expect(report.aPath).toBe(report.bPath);
+    expect(report.bFileExistsAfterACleanup).toBe(false);
+  }, 120_000);
+
+  it('with distinct VITEST_POOL_ID each thread keeps its own database until its own end', async () => {
+    fs.mkdirSync(path.join(sandbox, 'home'), { recursive: true });
+    const report = await runThreads(sandbox, 'distinct');
+
+    expect(report.pids[0]).toBe(report.pids[1]);
+    expect(report.aPath).not.toBe(report.bPath);
+    expect(report.aPath).toBe(testDatabaseLocationFor(report.pids[0], DEFAULT_TEST_DB_ROOT, '1').dbPath);
+    expect(report.bPath).toBe(testDatabaseLocationFor(report.pids[1], DEFAULT_TEST_DB_ROOT, '2').dbPath);
+    expect(report.bFileExistsAfterACleanup).toBe(true);
+    expect(report.bRowsAfterACleanup).toBe(1);
+    expect(fs.existsSync(path.dirname(report.bPath))).toBe(false);
   }, 120_000);
 });
