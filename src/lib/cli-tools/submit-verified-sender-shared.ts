@@ -8,6 +8,7 @@
 import type { ComposerSpec } from '../../types/cli-tool-contracts';
 import type { CLIToolType } from './types';
 import { createLogger } from '@/lib/logger';
+import type { PromptSubmitExpected } from '@/lib/session/prompt-submit-receipt';
 
 export const logger = createLogger('cli-tools/submit-verified-sender');
 
@@ -79,6 +80,35 @@ export const PROMPT_REPORT_WAIT_MS = 5000;
 /** How often the report and the composer are looked at during that wait. */
 export const PROMPT_REPORT_POLL_MS = 100;
 
+/**
+ * What the `prompt-unreported` failure says about the body (Issue #4048): the
+ * agent's report never came, but that is no proof the body did not go — an
+ * environment where only the http `UserPromptSubmit` hook fails still submits
+ * it. Kept after the `(Issue #4035)` wording `classifySendFailure` matches.
+ */
+export const PROMPT_UNREPORTED_RESEND_NOTE =
+  'The body may already have been submitted; check the pane (`commandmate capture <worktree-id> --pane`) before resending it.';
+
+/**
+ * {@link PROMPT_UNREPORTED_RESEND_NOTE} aimed at the pane the body went to
+ * (Issue #4048): with an explicit target its worktree and ` --instance <id>`
+ * for a named instance, else ` --agent <tool>` for the tool's primary (the
+ * worktree's default agent may be another tool) — the same flags the CLI's
+ * own hint (`paneCaptureCommand`) gives. Without a target the note names none.
+ */
+export function promptUnreportedResendNote(target?: PromptSubmitExpected, cliToolId?: CLIToolType): string {
+  if (target === undefined) return PROMPT_UNREPORTED_RESEND_NOTE;
+  const instance = target.instanceId
+    ? ` --instance ${target.instanceId}`
+    : cliToolId !== undefined
+      ? ` --agent ${cliToolId}`
+      : '';
+  return (
+    'The body may already have been submitted; check the pane ' +
+    `(\`commandmate capture ${target.worktreeId}${instance} --pane\`) before resending it.`
+  );
+}
+
 export interface SubmitVerifiedSendParams {
   /** tmux session name (already validated by the caller chain). */
   sessionName: string;
@@ -141,6 +171,14 @@ export interface SubmitVerifiedSendParams {
    * at the poll interval).
    */
   typedBodyAttempts?: number;
+  /**
+   * The instance this send is for (Issue #4048), as the caller knows it. The
+   * agent's prompt report and the remembered body are looked up by
+   * {@link sessionName}; with a target they are taken only from the entry that
+   * both name — a target and a name that disagree prove nothing. Never
+   * registers or resets an entry. Omitted, the name alone decides, as before.
+   */
+  target?: PromptSubmitExpected;
   /**
    * The tool's own "the input prompt is up" test, asked again under the input
    * lock (Issue #4040).

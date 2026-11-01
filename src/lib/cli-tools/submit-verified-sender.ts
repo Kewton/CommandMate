@@ -109,7 +109,7 @@ import {
 } from '@/config/cli-tool-timing-config';
 import { getOrInitGlobal } from '@/lib/global-state';
 import { clearComposer, readClearComposer, recheckComposerBeforeInput } from '@/lib/session/composer-clear';
-import { readPromptSubmitReceipt } from '@/lib/session/prompt-submit-receipt';
+import { readPromptSubmitReceipt, type PromptSubmitExpected } from '@/lib/session/prompt-submit-receipt';
 import { PASTE_NOT_STARTED_CODE } from '@/lib/session/send-attempt-types';
 
 // Issue #3945 (review-2): moved next to the clear it feeds, so copilot's own
@@ -145,7 +145,7 @@ import {
   logger,
   type SubmitVerifiedSendParams,
 } from './submit-verified-sender-shared';
-import { assertInputOwner, awaitReadyUnderLock } from './submit-verified-sender-lock';
+import { assertInputOwner, assertStillOwnedAfterEnter, awaitReadyUnderLock } from './submit-verified-sender-lock';
 import {
   codexComposerShowsWholeBody,
   composerHoldsText,
@@ -175,7 +175,10 @@ export type { PasteLandedState, SubmitRule, SubmitState, SubmitVerdict } from '.
 export {
   INPUT_READINESS_UNDER_LOCK_WAIT_MS,
   LITERAL_SEND_MAX_BYTES,
+  PROMPT_REPORT_POLL_MS,
   PROMPT_REPORT_WAIT_MS,
+  PROMPT_UNREPORTED_RESEND_NOTE,
+  promptUnreportedResendNote,
 } from './submit-verified-sender-shared';
 export type { InputReadiness, SubmitVerifiedSendParams } from './submit-verified-sender-shared';
 
@@ -612,7 +615,7 @@ export async function clearComposerBeforeSend(
   sessionName: string,
   cliToolId: CLIToolType,
   composerSpec: ComposerSpec = resolveComposerSpec(cliToolId),
-  options: { initialCapture?: string; ticket?: InstanceInputTicket } = {}
+  options: { initialCapture?: string; ticket?: InstanceInputTicket; target?: PromptSubmitExpected } = {}
 ): Promise<void> {
   if (!composerSpec.clearBeforeSend) return;
 
@@ -625,7 +628,7 @@ export async function clearComposerBeforeSend(
   });
   if (ticket !== undefined) assertInputOwner(ticket, cliToolId, 'the pre-send clear', false);
 
-  reportSubmittedBodyInComposer(sessionName, cliToolId, result.discardedText, result.state !== 'content');
+  reportSubmittedBodyInComposer(sessionName, cliToolId, result.discardedText, result.state !== 'content', options.target);
 
   if (result.state === 'content') {
     logger.error('pre-send-composer-clear-failed', {
@@ -700,6 +703,7 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
     pasteLandedAttempts = DEFAULT_PASTE_LANDED_ATTEMPTS,
     awaitTypedBody = false,
     typedBodyAttempts = DEFAULT_TYPED_BODY_ATTEMPTS,
+    target,
   } = params;
   const submitEnterCount = resolveSubmitEnterCount(params, composer);
 
@@ -725,7 +729,11 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
   // 0. Empty the composer first (Issue #1880). The body below is typed at the
   //    TUI's current cursor position, so anything already in the box would be
   //    spliced into it. Throws for a claude composer that could not be emptied.
-  await clearComposerBeforeSend(sessionName, cliToolId, composer, { initialCapture: frame, ticket });
+  await clearComposerBeforeSend(sessionName, cliToolId, composer, {
+    initialCapture: frame,
+    ticket,
+    ...(target !== undefined ? { target } : {}),
+  });
 
   if (Buffer.byteLength(message, 'utf8') > LITERAL_SEND_MAX_BYTES) {
     // 1'. A body that would reach the TUI as more than one pty read is pasted
@@ -811,8 +819,12 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
     await new Promise((resolve) => setTimeout(resolve, verifyDelayMs));
 
     let output = await capturePane(sessionName, { startLine: -composer.verifyCaptureLines });
+    // Issue #4048: a frame read after the session was replaced is the new
+    // process's, and so would be its hooks — neither says anything about this
+    // send, whose Enter went to the old one (indeterminate, not `not-sent`).
+    assertStillOwnedAfterEnter(ticket, cliToolId, 'the read-back');
     let { state, rule } = classifySubmitWithRule(output, cliToolId, message, composer);
-    const receipt = promptReceiptFor({ state, rule, message, sessionName, cliToolId, enteredAt });
+    const receipt = promptReceiptFor({ state, rule, message, sessionName, cliToolId, enteredAt, target });
     // Issue #4035: every verdict names the rule that gave it, so a send reported
     // `sent` can be traced to what the screen showed.
     logger.info('submit-classified', { sessionName, cliToolId, attempt, state, rule, receipt });
@@ -830,12 +842,14 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
         enteredAt,
         rule,
         deadline: promptReportDeadline,
+        ticket,
+        ...(target !== undefined ? { target } : {}),
       });
-      ({ state, rule, output } = settleAwaitedPromptReport({ watched, sessionName, cliToolId, attempt, rule, output }));
+      ({ state, rule, output } = settleAwaitedPromptReport({ watched, sessionName, cliToolId, attempt, rule, output, target }));
     }
 
     if (state === 'submitted') {
-      rememberScreenOnlySubmit({ sessionName, cliToolId, enteredAt, message });
+      rememberScreenOnlySubmit({ sessionName, cliToolId, enteredAt, message, ticket, target });
       invalidateCache(sessionName);
       return;
     }
@@ -870,7 +884,11 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
     // Issue #4035: the Enter thought lost may only have been late — the agent
     // reporting the prompt now means it went, and another Enter would land on an
     // empty composer, or on a dialog that the prompt just opened.
-    if (readPromptSubmitReceipt(sessionName, cliToolId, enteredAt) === 'received') {
+    // Issue #4048: a report read after the session was replaced (during the
+    // wait above, say) may be the new generation's own prompt — this send is
+    // then indeterminate, never confirmed by it.
+    if (readPromptSubmitReceipt(sessionName, cliToolId, enteredAt, target) === 'received') {
+      assertStillOwnedAfterEnter(ticket, cliToolId, 'the prompt report check');
       logger.info('submit-confirmed-by-prompt-hook', { sessionName, cliToolId, attempt, rule });
       invalidateCache(sessionName);
       return;

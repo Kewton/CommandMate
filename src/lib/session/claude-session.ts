@@ -966,6 +966,9 @@ export async function sendMessageToClaude(
     message,
     CLAUDE_POST_PROMPT_DELAY,
     CLAUDE_SEND_PROMPT_WAIT_TIMEOUT,
+    // Issue #4048: the instance this send is for, so the first prompt's hook
+    // check reads that instance's entry — the same one the name resolves to.
+    { worktreeId, instanceId },
   );
 }
 

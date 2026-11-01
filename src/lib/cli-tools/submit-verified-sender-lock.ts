@@ -102,3 +102,24 @@ export function assertInputOwner(ticket: InstanceInputTicket, cliToolId: CLITool
     `Session ${ticket.sessionName} was handed to another writer before ${step}; part of the message may be in its composer (Issue #3945).`
   );
 }
+
+/**
+ * Throw unless `ticket` still owns the session, after the body and an Enter
+ * went in (Issue #4048 item 2). Unlike a loss before the body
+ * ({@link assertInputOwner} with `typed: false`), this is no proof the message
+ * was not sent — the replaced process may have taken the prompt — so the error
+ * classifies `indeterminate`, never `not-sent` / `session-replaced`.
+ */
+export function assertStillOwnedAfterEnter(ticket: InstanceInputTicket, cliToolId: CLIToolType, step: string): void {
+  if (ticket.isCurrent()) return;
+  logger.error('input-lock-lost-after-enter', {
+    sessionName: ticket.sessionName,
+    cliToolId,
+    step,
+    generation: ticket.generation,
+  });
+  throw new Error(
+    `Session ${ticket.sessionName} was replaced during ${step}, after the message and Enter were sent; ` +
+      'the previous process may have submitted it (Issue #4048).'
+  );
+}

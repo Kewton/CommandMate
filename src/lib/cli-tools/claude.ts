@@ -113,9 +113,16 @@ export class ClaudeTool extends BaseCLITool implements IImageCapableCLITool {
    * @param instanceId - Optional agent instance ID (defaults to primary)
    */
   async sendMessageWithImage(worktreeId: string, message: string, imagePath: string, instanceId?: string): Promise<void> {
+    await this.sendMessage(worktreeId, this.imageMessageBody(message, imagePath), instanceId);
+  }
+
+  /**
+   * The body {@link sendMessageWithImage} types: the message with the image's
+   * markdown reference appended (Issue #4048: the send's record digests it).
+   */
+  imageMessageBody(message: string, imagePath: string): string {
     const imageMarkdown = `\n![](${imagePath})`;
-    const fullMessage = message ? `${message}${imageMarkdown}` : imageMarkdown;
-    await this.sendMessage(worktreeId, fullMessage, instanceId);
+    return message ? `${message}${imageMarkdown}` : imageMarkdown;
   }
 
   /**
