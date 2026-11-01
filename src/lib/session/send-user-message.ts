@@ -69,7 +69,6 @@ import {
 } from '@/lib/session/session-start-error';
 import { captureSessionOutputFresh } from '@/lib/session/cli-session';
 import {
-  beginSendRequest,
   classifySendFailure,
   composerHoldsMessage,
   recordSendAttempt,
@@ -300,11 +299,7 @@ export async function sendUserMessage(
   // receipt know the attempt by, and the input lock generation the delivery
   // ran under, so the late outcome of a send whose session was replaced does
   // not overwrite the newer generation's record.
-  // The request's own number orders it against others refused before the
-  // lock (ownership, the prompt guard, the lock itself), which have no
-  // generation.
   const typedContent = typedBodyFor(cliTool, content, absoluteImagePath);
-  const requestSeq = beginSendRequest();
   let inputGeneration: number | undefined;
   const settle = (state: SendAttemptState, reason: SendAttemptReason): void => {
     recordSendAttempt(
@@ -315,7 +310,6 @@ export async function sendUserMessage(
         content,
         ...(typedContent !== content ? { typedContent } : {}),
         ...(inputGeneration !== undefined ? { inputGeneration } : {}),
-        requestSeq,
       }
     );
     params.onAttempt?.({ state, reason });
