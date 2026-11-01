@@ -76,6 +76,11 @@ export function createDialogConfirmation(): DialogConfirmation {
  * a capture that is still running then (tmux's own time-out is 5 s) does not
  * stretch the wait past its window, and the frame it returns late is not used.
  *
+ * The clock is checked again once the race has answered, as the wait under the
+ * input lock does (`awaitReadyUnderLock`): when the capture's completion is
+ * handled before the deadline's timer, the race answers with a frame read past
+ * the deadline, and that frame is not used either (nor a failure that late).
+ *
  * @returns what `read` returned, or `null` when the deadline came first
  * @throws what `read` threw, when it threw before the deadline
  */
@@ -86,16 +91,23 @@ export async function readBeforeDeadline<T>(read: () => Promise<T>, deadline: nu
   const reading = read();
   // A late failure is nobody's to handle once the deadline has answered.
   reading.catch(() => undefined);
+  let result: T | null;
   try {
-    return await Promise.race([
+    result = await Promise.race([
       reading,
       new Promise<null>((resolve) => {
         timer = setTimeout(() => resolve(null), remaining);
       }),
     ]);
+  } catch (error: unknown) {
+    if (Date.now() > deadline) return null;
+    throw error;
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
+  // Answered past the deadline, whichever settled first: the wait is over.
+  if (Date.now() > deadline) return null;
+  return result;
 }
 
 /**

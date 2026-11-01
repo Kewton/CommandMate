@@ -20,6 +20,11 @@
  *   a dialog run cut by a normal frame or a failed capture is never confirmed
  *   (`prompt-not-ready` at the window, where the old wait ended on its first
  *   dialog read);
+ * - positive (Codex review, P2): a frame that answers past the deadline is not
+ *   used even when the deadline's timer has not run yet (the clock moved past
+ *   it while the capture's completion was handled first) — opencode,
+ *   vibe-local and copilot alike; copilot's wait does not wait for a capture
+ *   still running at its deadline either (it typed the late prompt in before);
  * - negative (unchanged): a Working or loading screen is not counted; a dialog
  *   under the lock is refused on one read; an earlier `unknown` HTTP dispatch
  *   keeps the send `indeterminate`.
@@ -33,6 +38,10 @@ vi.mock('child_process', async () => {
   const actual = await vi.importActual<typeof import('child_process')>('child_process');
   return { ...actual, execFile: vi.fn() };
 });
+
+vi.mock('@/lib/cli-tools/copilot-executable', () => ({
+  resolveCopilotExecutable: vi.fn(),
+}));
 
 vi.mock('@/lib/tmux/tmux', () => ({
   hasSession: vi.fn().mockResolvedValue(true),
@@ -66,7 +75,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { VibeLocalTool } from '@/lib/cli-tools/vibe-local';
 import { OpenCodeTool } from '@/lib/cli-tools/opencode';
-import { COPILOT_DIALOG_CONFIRM_MS } from '@/lib/cli-tools/copilot';
+import { COPILOT_DIALOG_CONFIRM_MS, CopilotTool } from '@/lib/cli-tools/copilot';
 import {
   PROMPT_WAIT_DIALOG_CONFIRM_MS,
   PROMPT_WAIT_DIALOG_CONFIRM_READS,
@@ -81,6 +90,7 @@ import { isVibeLocalComposerReady } from '@/lib/detection/tools/vibe-local/readi
 import { isOpenCodeComposerReady } from '@/lib/detection/tools/opencode/readiness';
 import { capturePane, sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
 import { buildOpencodeClearedFrame, buildOpencodeComposerFrame } from '@tests/fixtures/opencode-launch-boot-11821';
+import { COPILOT_MODEL_SWITCH_2623_FRAMES as COPILOT } from '@tests/fixtures/copilot-model-switch-2623';
 
 const FIXTURES = path.resolve(__dirname, '../../fixtures');
 const readFixture = (rel: string): string => readFileSync(path.join(FIXTURES, rel), 'utf8');
@@ -277,7 +287,45 @@ describe('readBeforeDeadline (Issue #4084)', () => {
     await vi.runAllTimersAsync();
     expect(await late).toBeNull();
   });
+
+  it('positive: a read that answers past the deadline before its timer has run is not used (Codex review, P2)', async () => {
+    // The capture's completion is handled first; the clock is already past the
+    // deadline, but the deadline's timer has not fired (setSystemTime runs no timer).
+    const late = readBeforeDeadline(async () => {
+      vi.setSystemTime(Date.now() + 1_500);
+      return 'late frame';
+    }, Date.now() + 1000);
+    expect(await late).toBeNull();
+    const lateFailure = readBeforeDeadline(async () => {
+      vi.setSystemTime(Date.now() + 1_500);
+      throw new Error('late boom');
+    }, Date.now() + 1000);
+    expect(await lateFailure).toBeNull();
+  });
+
+  it('control: a read that answers by the deadline is still used', async () => {
+    const onTime = readBeforeDeadline(async () => {
+      vi.setSystemTime(Date.now() + 1000);
+      return 'frame';
+    }, Date.now() + 1000);
+    expect(await onTime).toBe('frame');
+  });
 });
+
+/**
+ * A capture that, from `fromMs` on, moves the clock `jumpMs` while it answers
+ * `late` at once — so its completion is handled before any timer due in that
+ * jump, the deadline's among them. Earlier captures answer `before`.
+ */
+function clockJumpsDuringCapture(before: string, late: string, fromMs: number, jumpMs: number): void {
+  const startedAt = Date.now();
+  vi.mocked(capturePane).mockImplementation((async () => {
+    captures++;
+    if (Date.now() - startedAt < fromMs) return before;
+    vi.setSystemTime(Date.now() + jumpMs);
+    return late;
+  }) as never);
+}
 
 /**
  * The cases both tools answer alike. `dialog` is a frame the tool counts,
@@ -438,6 +486,20 @@ describe.each(CASES)('$name: the prompt wait confirms a dialog (Issue #4084)', (
     expect(call).toBe(30);
   });
 
+  it('positive: a ready frame that answers past the deadline before its timer runs is not typed into (Codex review, P2)', async () => {
+    clockJumpsDuringCapture(c.loading, c.ready, 14_500, 1_000);
+    const { error } = await settle(c.make().sendMessage('wt-1', 'hello'));
+    expect(keys).toEqual([]);
+    expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'prompt-not-ready' });
+  });
+
+  it('control: the same ready frame answering by the deadline is typed into', async () => {
+    clockJumpsDuringCapture(c.loading, c.ready, 14_500, 500);
+    const { error } = await settle(c.make().sendMessage('wt-1', 'hello'));
+    expect(error).toBeUndefined();
+    expect(keys).toEqual(c.typed);
+  });
+
   it('negative (out of scope, unchanged): ready before the lock, a dialog under it — refused on one read', async () => {
     framesInTurn(c.ready, c.dialogs.find((d) => d.refusal === 'prompt-waiting')!.frame);
     const { error, elapsed } = await settle(c.make().sendMessage('wt-1', 'hello'));
@@ -477,5 +539,46 @@ describe('opencode: an earlier unknown dispatch (Issue #4084)', () => {
     const { error } = await settle(tool.sendMessageWithImage('wt-1', 'look', '/tmp/x.png'));
     expect(keys).toEqual([]);
     expect(classifySendFailure(error).state).toBe('indeterminate');
+  });
+});
+
+describe('copilot: the prompt wait\'s deadline (Issue #4084, Codex review)', () => {
+  let tool: CopilotTool;
+
+  beforeEach(() => {
+    tool = new CopilotTool();
+    stubSession(tool);
+  });
+
+  it('positive: a capture still running at the deadline is not waited for, and its late prompt is not typed into', async () => {
+    const startedAt = Date.now();
+    let slowRead = false;
+    vi.mocked(capturePane).mockImplementation((async () => {
+      captures++;
+      // Loading until 14.5 s; the read started then takes 4.5 s and answers the
+      // composer. Reads after it (the refusal's own re-read for a dialog) answer at once.
+      if (Date.now() < startedAt + 14_500 || slowRead) return COPILOT.BOOT_LOADING();
+      slowRead = true;
+      await new Promise((resolve) => setTimeout(resolve, 4_500));
+      return COPILOT.BOOT_IDLE();
+    }) as never);
+    const { error, elapsed } = await settle(tool.sendMessage('wt-1', 'hello'));
+    expect(keys).toEqual([]);
+    expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'prompt-not-ready' });
+    expect(elapsed).toBe(WINDOW_MS);
+  });
+
+  it('positive: a composer frame that answers past the deadline before its timer runs is not typed into', async () => {
+    clockJumpsDuringCapture(COPILOT.BOOT_LOADING(), COPILOT.BOOT_IDLE(), 14_500, 1_000);
+    const { error } = await settle(tool.sendMessage('wt-1', 'hello'));
+    expect(keys).toEqual([]);
+    expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'prompt-not-ready' });
+  });
+
+  it('control: the same composer frame answering by the deadline is typed into', async () => {
+    clockJumpsDuringCapture(COPILOT.BOOT_LOADING(), COPILOT.BOOT_IDLE(), 14_500, 500);
+    const { error } = await settle(tool.sendMessage('wt-1', 'hello'));
+    expect(error).toBeUndefined();
+    expect(keys).toEqual(['type:hello', 'Enter']);
   });
 });
