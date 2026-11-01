@@ -354,8 +354,15 @@ function readAgentEvents(
 interface PromptCompositionInput {
   worktreeId: string;
   cliToolId: CLIToolType;
-  /** The instance the payload was asked for; undefined for the primary (Issue #4031). */
-  instanceId: string | undefined;
+  /**
+   * The instance a structured question's `respond` names (Issue #4063): the
+   * one asked for, else the primary's own id — `resolveSessionTarget`'s rule,
+   * which the HTTP route already passed. The WS push, the poller, the fresh
+   * push after Auto-Yes and the history row ask with no instance for the
+   * primary, and wrote a bare `respond` that the CLI sends to the worktree
+   * default.
+   */
+  respondInstanceId: string;
   output: string;
   /** The window `output` was captured with (Issue #3881 second review N3). */
   captureWindowLines: number;
@@ -382,7 +389,7 @@ interface PromptComposition {
 function composePromptData({
   worktreeId,
   cliToolId,
-  instanceId,
+  respondInstanceId,
   output,
   captureWindowLines,
   statusResult,
@@ -502,9 +509,9 @@ function composePromptData({
     : scraperPromptWaiting
     ? correctedPromptData ??
       scraperPromptData ??
-      (structuredFacts ? buildStructuredPromptData(worktreeId, structuredFacts, instanceId) : null)
+      (structuredFacts ? buildStructuredPromptData(worktreeId, structuredFacts, respondInstanceId) : null)
     : structuredFacts
-      ? buildStructuredPromptData(worktreeId, structuredFacts, instanceId)
+      ? buildStructuredPromptData(worktreeId, structuredFacts, respondInstanceId)
       : null;
 
   // Issue #2870: whether `/prompt-response` would answer the prompt published
@@ -1147,7 +1154,7 @@ async function buildPayload(
   const { structuredFacts, promptData, promptAnswerable } = composePromptData({
     worktreeId,
     cliToolId,
-    instanceId,
+    respondInstanceId: resolvedInstanceId,
     output,
     captureWindowLines,
     statusResult,
@@ -1270,7 +1277,9 @@ async function buildPayload(
       worktreeId,
       cliToolId,
       instanceId: resolvedInstanceId,
-      respondInstanceId: instanceId,
+      // Issue #4063: the instance the live payload's question names, so the
+      // row says the same `respond` whichever caller wrote it.
+      respondInstanceId: resolvedInstanceId,
       state: promptWaiting,
       facts: structuredFacts,
     });
