@@ -19,6 +19,10 @@
  *      another branch that refers to the Issue (`(#<N>)` in the title, `Closes
  *      #<N>` and the like in the body as /create-pr writes it, or the number in
  *      the branch) stops the run (two PRs for one Issue), unless `--allow-other-pr`.
+ *      A new PR is titled `--title`, else the Issue's title with ` (#<N>)`
+ *      (prTitle, read before the push; unreadable → exit 1, nothing pushed).
+ *   The work HEAD is pr-common.mjs workHeadOf: a merge the worker was verified
+ *   on (a develop conflict it resolved) is the work HEAD itself (#4076).
  * The result goes to the `pr` stage of `run-log.mjs` with the PR number, the
  * pushed HEAD and the work HEAD under it.
  *
@@ -117,6 +121,32 @@ export function defaultBody(commitBody, issue) {
   return `${commitBody.trim()}\n\nRefs #${issue}\n`.replace(/^\n+/, '');
 }
 
+/** `title` with ` (#<issue>)` at the end, unless it already names the Issue that way (#4076 B). */
+export function withIssueNumber(title, issue) {
+  const text = String(title).trim();
+  return text.includes(`(#${issue})`) ? text : `${text} (#${issue})`;
+}
+
+/**
+ * The title of a new PR (#4076 B): `--title` as given, else the Issue's own
+ * title (`gh api repos/<repo>/issues/<N> --jq .title`) with ` (#<N>)` — for a work item's PR
+ * (`--item`) too. The last commit's subject is not used: after a reinstruction
+ * it names the last partial fix, not the work. When the title cannot be read,
+ * `{ error }`: the caller stops before the push instead of guessing one.
+ *
+ * @returns {{ title: string } | { error: string }}
+ */
+export function prTitle(run, o, issue) {
+  if (o.title) return { title: o.title };
+  // `gh api` (a read, asked again on a 5xx) rather than `gh issue view`: the same title, and the
+  // `gh issue` calls stay merge-pr's own (whether the Issue is closed).
+  const read = run('gh', ['api', `repos/${o.repo}/issues/${issue}`, '--jq', '.title']);
+  if (read.status !== 0) return { error: `could not read the title of #${issue}: ${(read.stderr || read.stdout).trim()}` };
+  const title = String(read.stdout ?? '').trim();
+  if (!title) return { error: `#${issue} has no title to name the PR by` };
+  return { title: withIssueNumber(title, issue) };
+}
+
 /**
  * @param {string[]} argv
  * @param {{ run?: typeof defaultRun, sleep?: (ms: number) => void, now?: () => Date, log?: (line: string) => void, error?: (line: string) => void }} [deps]
@@ -157,7 +187,9 @@ export function main(argv, deps = {}) {
       error(`publish #${issue}: ${o.worktree} is on ${branch}, not an Issue branch — pass --branch`);
       return 2;
     }
-    const workHead = workHeadOf(run, o.worktree, head);
+    const { records } = readRecords(o.runDir, o.issues);
+    // A merge verified on its own (a develop conflict the worker resolved) is the work HEAD (#4076).
+    const workHead = workHeadOf(run, o.worktree, head, { records, issue, item });
     const record = (prNumber, note) => {
       const { file } = appendRecord(
         o.runDir,
@@ -174,7 +206,6 @@ export function main(argv, deps = {}) {
       return 0;
     }
 
-    const { records } = readRecords(o.runDir, o.issues);
     const markers = markerFiles(run, o.worktree);
     const problems = [
       ...missingRecords(records, issue, { head, workHead }, item, { runDir: o.runDir, worktree: o.worktree, home: deps.home ?? os.homedir(), warn: log }),
@@ -197,6 +228,17 @@ export function main(argv, deps = {}) {
       return 1;
     }
 
+    // The title of a new PR is settled before anything is pushed (#4076 B): one that cannot be named stops here.
+    let title = null;
+    if (!open) {
+      const named = prTitle(run, o, issue);
+      if ('error' in named) {
+        error(`publish #${issue}: ${named.error} — pass --title; not pushed`);
+        return 1;
+      }
+      title = named.title;
+    }
+
     // dev-reports/ goes with the worktree; 6-4 folds this copy into the body later.
     const fragment = moduleReferenceFragment(o.worktree, issue);
     if (fs.existsSync(fragment)) {
@@ -217,8 +259,6 @@ export function main(argv, deps = {}) {
       return 0;
     }
 
-    // The worker's commit names the work; a fold on top (6-4) must not name the PR.
-    const title = o.title ?? git(run, o.worktree, ['log', '-1', '--format=%s', workHead]).trim();
     let bodyFile = o.bodyFile;
     let tmpDir = null;
     if (!bodyFile) {
