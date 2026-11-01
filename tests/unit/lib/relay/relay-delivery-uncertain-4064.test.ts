@@ -199,6 +199,8 @@ describe('path 1: an indeterminate send is held, not re-sent (Issue #4064)', () 
         expect(getRelayById(db, relayId)?.deliveryHold).toEqual({
           state: 'uncertain',
           payloadId: before?.payloadId,
+          // Issue #4082: the attempt a resolve names (added field; the rest unchanged).
+          attemptId: expect.any(String),
           kind,
           reason,
           at: expect.any(Number),

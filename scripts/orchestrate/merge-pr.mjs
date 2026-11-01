@@ -336,6 +336,11 @@ export function main(argv, deps = {}) {
         ...envWhere, warn: log, defer: (reason) => deferred.push(reason),
       }).filter((reason) => !reason.startsWith('precheck:'));
       if (again.length > 0) {
+        // The stop is recorded at the HEADs computed here (#4085): without it `status` (headsOf,
+        // which reads only the record) keeps W and points past M's own verify. The work HEAD is
+        // workHeadOf's answer, never `head` by default — a clean refresh stays on W. The stage is
+        // the existing merge failure, not a precheck that did not run.
+        record('merge', 'fail', head, `refresh=merged record=missing ${again.map((reason) => reason.split(':')[0]).join(',')}`, workHead);
         error(
           `merge #${issue} ${head.slice(0, 7)}: not merged — the refresh is the work HEAD ${workHead.slice(0, 7)} and the run record lacks:\n  ${again.join('\n  ')}\n` +
             `  (not pushed; the refresh is left committed in ${o.worktree})`

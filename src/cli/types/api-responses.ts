@@ -2553,6 +2553,12 @@ export interface RelayDeliveryHoldResponse {
   /** `attempting` | `uncertain`. */
   state: string;
   payloadId: string | null;
+  /**
+   * Issue #4082: the delivery attempt that holds it — what `relays resolve
+   * --attempt` names. Absent on a server older than #4082; not the send
+   * binding's attempt.
+   */
+  attemptId?: string | null;
   kind: string | null;
   reason: string | null;
   at: number | null;
@@ -2600,4 +2606,15 @@ export interface RelayGetResponse {
 /** Mirrors: src/app/api/relays/[relayId]/cancel/route.ts POST 200 response. */
 export interface RelayCancelResponse {
   relay: RelayView;
+}
+
+/** Mirrors: src/app/api/relays/[relayId]/resolve/route.ts POST 200 response (Issue #4082). */
+export interface RelayResolveResponse {
+  relay: RelayView;
+  /** `confirm` | `retry` | `discard`. */
+  action: string;
+  /** `retry`: queued for delivery again — not delivered yet. */
+  requeued: boolean;
+  /** A reply waiting behind the resolved prompt notice was queued in its place. */
+  promoted: boolean;
 }

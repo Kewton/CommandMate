@@ -1058,7 +1058,7 @@ PR の作成とマージは、次の 2 本のスクリプトを呼ぶ（#3477）
 - `scripts/orchestrate/merge-pr.mjs`（6-2・6-3）: develop が進んでいれば試しのマージ・CI の待ち（落ちたジョブは HEAD ごとに 1 回だけ再実行）・
   squash でマージ・Issue のクローズ（`--close -` なら閉じない。1 本の Issue を複数の PR に分けたときの途中の PR など）。記録の `ci`・`merge` 段
 
-**止まる条件。** どちらも、run の記録に、**作業の HEAD**（ワーカーの最後のコミット）の `verify=ok`（3-3・5-1）・`review=ok`（5-2b）・`findings=ok`（5-3）と、
+**止まる条件。** どちらも、run の記録に、**作業の HEAD**（ワーカーの最後のコミット。衝突を解いたマージもなりうる。定義は run-log.md 1-5）の `verify=ok`（3-3・5-1）・`review=ok`（5-2b）・`findings=ok`（5-3）と、
 **公開する HEAD**（push する・マージする HEAD）の `precheck=ok`（6-1-1）が無ければ、何も公開せずに止まり、欠けたものを出す（exit 1）。
 **5-2b の対象でない Issue は `review` 段に `skip` を記録しておく**（忘れたレビューと、対象でないレビューを区別するため）。
 公開する HEAD は、作業の HEAD そのものか、その上に develop の取り込み（6-2）と module-reference の一本化だけのコミット（6-4）を重ねたもの。
