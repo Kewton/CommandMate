@@ -21,6 +21,40 @@
  * Recording must never change a send's outcome: {@link recordSendAttempt}
  * swallows its own failures.
  *
+ * Issue #4065: which attempt is "the last" is decided by the input lock's
+ * grant order, not by which attempt finished last. Three kinds of record:
+ *
+ * - **granted** — the attempt held the body's input lock (`inputGeneration`,
+ *   the ticket's generation g). Includes one refused after the grant before
+ *   any key (g does not mean "typed"). Kept when g ≥ the instance's highest
+ *   granted generation so far (maxG), dropped when g < maxG: a send granted
+ *   later has already said how it went.
+ * - **refused** — `not-sent` before any lock was granted to it
+ *   (`observedGeneration`, the generation counter o read once at the request's
+ *   outermost entry). Kept when maxG ≤ o, dropped when maxG > o: a send granted
+ *   after this request began has already said how it went. o is only ever
+ *   compared with maxG — never with another o, nor with another instance's
+ *   grants; o = 0 is a value like any other.
+ * - **excluded / unknown** — neither (copilot's selection-list commands and
+ *   `/model`, opencode's HTTP delivery including its keyboard fallback after an
+ *   `unknown` dispatch, a tool path that reports nothing). Kept in the order
+ *   they finish, as before #4065, and they never move maxG.
+ *
+ * maxG is held beside the published record and only ever grows: a refused or
+ * excluded record, or a demotion ({@link markLastSendDiscarded}), never lowers
+ * it, so an older grant's late outcome cannot come back after them. Within one
+ * process the generation never goes back (a recreated session keeps counting);
+ * a restart forgets the records and maxG together. A worktree ID migration
+ * does not move them (the old ID's records are dropped). When more than
+ * {@link MAX_TRACKED_INSTANCES} instances are tracked the least recently sent
+ * to loses its record and its maxG together — a late outcome for it is then
+ * recorded as if it were the first.
+ *
+ * The published `lastSend` is still the three fields `at` / `state` /
+ * `reason`; neither g nor o is published, and `at` is not an order. It is the
+ * instance's last attempt by the rules above — not necessarily the reading
+ * request's own (that is `onAttempt` / `sendOutcome`).
+ *
  * @module lib/session/send-attempt-state
  */
 
@@ -41,6 +75,20 @@ export interface SendAttemptRecord extends LastSendAttempt {
   reason: SendAttemptReason;
   /** SHA-256 (hex, first 16 chars) of the message body; the body itself is not kept. */
   messageDigest: string;
+  /**
+   * Issue #4048: the digest of the body actually typed, when the sender typed
+   * something other than the message (an image reference appended). The
+   * composer and the first-prompt receipt only know that body; the attempt is
+   * matched by either digest. Absent when they are the same.
+   */
+  typedDigest?: string;
+  /**
+   * Issue #4048: the instance input generation the attempt ran under, when it
+   * ran under the input lock. A record of a newer generation is never replaced
+   * by an older one's late outcome. Kept by a demotion
+   * ({@link markLastSendDiscarded}, Issue #4065).
+   */
+  inputGeneration?: number;
 }
 
 /** The instance an attempt belongs to. */
@@ -54,9 +102,18 @@ export interface SendAttemptInstance {
 declare global {
   // eslint-disable-next-line no-var
   var __sendAttemptRecords: Map<string, SendAttemptRecord> | undefined;
+  // eslint-disable-next-line no-var
+  var __sendAttemptMaxGeneration: Map<string, number> | undefined;
 }
 
 const records = getOrInitGlobal('__sendAttemptRecords', () => new Map<string, SendAttemptRecord>());
+/**
+ * Issue #4065: per instance, the highest input generation a granted record
+ * carried (maxG). Kept apart from the published record so that a refused or
+ * excluded record — or a demotion — that replaces it does not forget it.
+ * Evicted with the instance's record.
+ */
+const maxGenerations = getOrInitGlobal('__sendAttemptMaxGeneration', () => new Map<string, number>());
 
 function keyOf(instance: SendAttemptInstance): string {
   return JSON.stringify([instance.worktreeId, instance.cliToolId, instance.instanceId]);
@@ -70,29 +127,99 @@ export function sendMessageDigest(content: string): string {
 /**
  * Record how a send attempt ended. Never throws: a record that cannot be made
  * leaves the send exactly as it was.
+ *
+ * Issue #4048: `typedContent` is the body the sender actually typed when it
+ * differs from `content`; `inputGeneration` is the input lock generation the
+ * attempt ran under.
+ *
+ * Issue #4065: `observedGeneration` is the generation counter the request read
+ * at its outermost entry (`instanceInputGenerationMark` in `instance-input-lock`), given for a
+ * `not-sent` refusal made before any lock was granted to it. Which record is
+ * kept is decided against the instance's maxG (see the module comment):
+ * granted g ≥ maxG is kept (and raises maxG), g < maxG dropped; a refusal is
+ * kept when maxG ≤ o; a record with neither is kept, in the order recorded.
+ * `inputGeneration` wins when both are given.
+ *
+ * @returns Whether the attempt became the instance's record. The request's own
+ *   outcome is the caller's to report whatever this says (`onAttempt`).
  */
 export function recordSendAttempt(
   instance: SendAttemptInstance,
-  attempt: { state: SendAttemptState; reason: SendAttemptReason; content: string },
+  attempt: {
+    state: SendAttemptState;
+    reason: SendAttemptReason;
+    content: string;
+    typedContent?: string;
+    inputGeneration?: number;
+    observedGeneration?: number;
+  },
   now: number = Date.now()
-): void {
+): boolean {
   try {
     const key = keyOf(instance);
+    const maxGeneration = maxGenerations.get(key);
+    if (attempt.inputGeneration !== undefined) {
+      if (maxGeneration !== undefined && maxGeneration > attempt.inputGeneration) {
+        logger.info('send-attempt-record-skipped-stale-generation', {
+          generation: attempt.inputGeneration,
+          heldGeneration: maxGeneration,
+        });
+        return false;
+      }
+    } else if (attempt.observedGeneration !== undefined) {
+      if (maxGeneration !== undefined && maxGeneration > attempt.observedGeneration) {
+        logger.info('send-attempt-record-skipped-refusal-before-newer-grant', {
+          observedGeneration: attempt.observedGeneration,
+          heldGeneration: maxGeneration,
+        });
+        return false;
+      }
+    }
+    const messageDigest = sendMessageDigest(attempt.content);
+    const typedDigest =
+      attempt.typedContent === undefined ? undefined : sendMessageDigest(attempt.typedContent);
     // Re-inserted, so the map's order is least recently sent to first.
     records.delete(key);
     records.set(key, {
       at: Math.floor(now),
       state: attempt.state,
       reason: attempt.reason,
-      messageDigest: sendMessageDigest(attempt.content),
+      messageDigest,
+      ...(typedDigest !== undefined && typedDigest !== messageDigest ? { typedDigest } : {}),
+      ...(attempt.inputGeneration !== undefined ? { inputGeneration: attempt.inputGeneration } : {}),
     });
+    if (attempt.inputGeneration !== undefined) {
+      maxGenerations.set(key, Math.max(maxGeneration ?? attempt.inputGeneration, attempt.inputGeneration));
+    }
     while (records.size > MAX_TRACKED_INSTANCES) {
       const oldest = records.keys().next().value;
       if (oldest === undefined) break;
       records.delete(oldest);
+      maxGenerations.delete(oldest);
     }
+    return true;
   } catch (error) {
     logger.warn('send-attempt-record-failed', { error: error instanceof Error ? error.message : String(error) });
+    return false;
+  }
+}
+
+/**
+ * Forget the records — and their maxG — of every instance of `worktreeId`
+ * (Issue #4065): a worktree ID migration drops them rather than moving them,
+ * so the new ID starts with no record. Never throws.
+ */
+export function forgetSendAttemptsForWorktree(worktreeId: string): void {
+  try {
+    for (const key of [...records.keys(), ...maxGenerations.keys()]) {
+      const parsed = JSON.parse(key) as unknown;
+      if (Array.isArray(parsed) && parsed[0] === worktreeId) {
+        records.delete(key);
+        maxGenerations.delete(key);
+      }
+    }
+  } catch (error) {
+    logger.warn('send-attempt-forget-failed', { error: error instanceof Error ? error.message : String(error) });
   }
 }
 
@@ -105,21 +232,40 @@ export function getLastSendAttempt(instance: SendAttemptInstance): SendAttemptRe
  * Turn the instance's last `sent` record `indeterminate` (Issue #4035): the
  * next send found that body still in the composer, so it never reached the
  * agent. Any other record is left as it is. Never throws.
+ *
+ * `messageDigest` (Issue #4048) is the digest of the body that was found (the
+ * body typed, so it is matched against the record's `typedDigest` too): a
+ * record of another attempt — a later send, or one whose body differs — is
+ * left as it is. Omitted, the last `sent` record is demoted as before.
  */
-export function markLastSendDiscarded(instance: SendAttemptInstance, now: number = Date.now()): void {
+export function markLastSendDiscarded(
+  instance: SendAttemptInstance,
+  now: number = Date.now(),
+  messageDigest?: string
+): void {
   try {
     const key = keyOf(instance);
     const record = records.get(key);
     if (record === undefined || record.state !== 'sent') return;
+    if (
+      messageDigest !== undefined &&
+      record.messageDigest !== messageDigest &&
+      record.typedDigest !== messageDigest
+    ) {
+      return;
+    }
+    // Issue #4065: the spread keeps the record's generation, and maxG is not
+    // touched — a demotion is not a newer attempt.
     records.set(key, { ...record, at: Math.floor(now), state: 'indeterminate', reason: 'found-in-composer' });
   } catch (error) {
     logger.warn('send-attempt-record-failed', { error: error instanceof Error ? error.message : String(error) });
   }
 }
 
-/** Forget every record (tests). */
+/** Forget every record and every maxG (tests). */
 export function clearSendAttempts(): void {
   records.clear();
+  maxGenerations.clear();
 }
 
 /**
@@ -158,6 +304,17 @@ function carriesCode(error: unknown, code: string): boolean {
  * (`Failed to send message to <tool>: …`), so they are matched anywhere in it.
  */
 export function classifySendFailure(error: unknown): { state: SendAttemptState; reason: SendAttemptReason } {
+  // #4040: opencode's keyboard fallback refused before any key (its cause says
+  // why — a code like `paste-not-started` included), but the server dispatch
+  // before it ended `unknown`: the message may already be there, so the attempt
+  // as a whole stays unknown, never "safe to resend". Read FIRST, before any
+  // code the cause carries.
+  if (
+    error instanceof Error &&
+    /an earlier server dispatch may have delivered the message \(Issue #4040\)/.test(error.message)
+  ) {
+    return { state: 'indeterminate', reason: 'send-error' };
+  }
   if (
     typeof error === 'object' &&
     error !== null &&

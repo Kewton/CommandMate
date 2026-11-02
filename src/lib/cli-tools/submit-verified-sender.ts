@@ -102,22 +102,14 @@ import { sendKeys, sendSpecialKeys, capturePane, clearInputLine, exactTarget } f
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { resolveComposerSpec } from './composer-spec';
 import type { ComposerSpec } from '../../types/cli-tool-contracts';
-import { stripAnsi } from '../detection/cli-patterns';
 import type { CLIToolType } from './types';
 import {
   TUI_TEXT_INPUT_WAIT_MS,
   TUI_MESSAGE_PROCESSED_WAIT_MS,
 } from '@/config/cli-tool-timing-config';
-import { createLogger } from '@/lib/logger';
 import { getOrInitGlobal } from '@/lib/global-state';
 import { clearComposer, readClearComposer, recheckComposerBeforeInput } from '@/lib/session/composer-clear';
-import {
-  getPromptSubmitTarget,
-  matchesSubmittedBody,
-  noteSubmittedBody,
-  readPromptSubmitReceipt,
-} from '@/lib/session/prompt-submit-receipt';
-import { markLastSendDiscarded } from '@/lib/session/send-attempt-state';
+import { readPromptSubmitReceipt, type PromptSubmitExpected } from '@/lib/session/prompt-submit-receipt';
 import { PASTE_NOT_STARTED_CODE } from '@/lib/session/send-attempt-types';
 
 // Issue #3945 (review-2): moved next to the clear it feeds, so copilot's own
@@ -127,76 +119,69 @@ import {
   LATE_PASTE_OBSERVE_MS,
   clearExpiredCarriedPasteMark,
   getCarriedPasteMark,
-  isInputBoundaryRefusal,
   leaveCarriedPasteMark,
   noteInputStart,
+  noteInputTicket,
   withInstanceInputLock,
   type InstanceInputTicket,
 } from '@/lib/session/instance-input-lock';
-import { extractComposerText, SUPPORTED_COMPOSER_TOOLS } from '@/lib/detection/composer-text';
+import { extractComposerText } from '@/lib/detection/composer-text';
 import {
-  VERIFY_WINDOW_LINES,
   classifyPasteLanded,
   classifySubmitWithRule,
   compactText,
-  findPasteTokens,
-  readSubmitComposer,
-  withoutTrailingBlankRows,
   type PasteLandedState,
-  type SubmitRule,
-  type SubmitState,
 } from './submit-composer-read';
+import {
+  CARRIED_MARK_POLL_MS,
+  DEFAULT_PASTE_LANDED_ATTEMPTS,
+  DEFAULT_TYPED_BODY_ATTEMPTS,
+  DEFAULT_VERIFY_ATTEMPTS,
+  LITERAL_SEND_MAX_BYTES,
+  PASTE_COMMAND_TIMEOUT_MS,
+  PASTE_LANDED_POLL_MS,
+  PROMPT_REPORT_WAIT_MS,
+  RECHECK_CAPTURE_LINES,
+  TYPED_BODY_POLL_MS,
+  logger,
+  type SubmitVerifiedSendParams,
+} from './submit-verified-sender-shared';
+import { assertInputOwner, assertStillOwnedAfterEnter, awaitReadyUnderLock } from './submit-verified-sender-lock';
+import {
+  codexComposerShowsWholeBody,
+  composerHoldsText,
+  describeComposer,
+  visibleTypedBody,
+} from './submit-verified-sender-composer';
+import {
+  awaitPromptReport,
+  holdsResendEnter,
+  logClearInputFailed,
+  pasteFailureMayHaveTyped,
+  promptReceiptFor,
+  rememberScreenOnlySubmit,
+  reportSubmittedBodyInComposer,
+  resolveSubmitEnterCount,
+  settleAwaitedPromptReport,
+  shouldAwaitTypedBody,
+} from './submit-verified-sender-report';
 
 // Issue #3963: the composer reads moved to `submit-composer-read`; re-exported
 // so every caller and test keeps importing them from here.
 export { classifyPasteLanded, classifySubmit, classifySubmitWithRule, isSubmitted } from './submit-composer-read';
 export type { PasteLandedState, SubmitRule, SubmitState, SubmitVerdict } from './submit-composer-read';
 
-const logger = createLogger('cli-tools/submit-verified-sender');
-
-/**
- * Largest body typed as keystrokes (`send-keys -l`); anything longer is pasted
- * (Issue #2464).
- *
- * The limit is the pty's, not tmux's. tmux hands the pane the whole argv —
- * 16,320 bytes arrived intact on tmux 3.5a, and past ~16.3 KB `send-keys`
- * refuses with `command too long`, loudly — but the TUI reads it back in
- * pty-sized pieces, 1,022 bytes each on macOS. Claude Code keeps only the last
- * piece of unbracketed input (`12288 mod 1022` = the 24 bytes that arrived of a
- * 12 KB brief), so a body is only safe as keystrokes while it fits in a single
- * read. Half the smallest read measured leaves room for multi-byte text and for
- * a platform whose reads are shorter.
- */
-export const LITERAL_SEND_MAX_BYTES = 512;
-
-/**
- * How often the composer is read while a pasted body is expected to appear in
- * it. Claude, codex, Command Code and agy all drew the pasted body within
- * 60 ms of `paste-buffer` on a 12 KB brief.
- */
-const PASTE_LANDED_POLL_MS = 100;
-
-/** Composer reads before a paste that has not fully appeared is abandoned (2 s). */
-const DEFAULT_PASTE_LANDED_ATTEMPTS = 20;
-
-/**
- * How often the composer is read while a TYPED body is expected to appear in it
- * (Issue #3366). codex draws a burst of keystrokes all at once when the burst
- * ends, so the poll only decides how late after that moment Enter goes in.
- */
-const TYPED_BODY_POLL_MS = 50;
-
-/**
- * Composer reads before a typed body that has not appeared is abandoned (5 s).
- *
- * codex 0.160.0 drew a 539-character body ~2.2 s after `send-keys` — about 4 ms
- * per character — and a typed body is at most {@link LITERAL_SEND_MAX_BYTES},
- * so this is roughly twice the slowest draw measured, for a loaded machine.
- */
-const DEFAULT_TYPED_BODY_ATTEMPTS = 100;
-
-/** Per-command timeout for `load-buffer` / `paste-buffer`, as for every other tmux call. */
-const PASTE_COMMAND_TIMEOUT_MS = 5000;
+// Issue #4056: the constants, option types and helpers moved to
+// `submit-verified-sender-*.ts`; the public ones are re-exported from here.
+export {
+  INPUT_READINESS_UNDER_LOCK_WAIT_MS,
+  LITERAL_SEND_MAX_BYTES,
+  PROMPT_REPORT_POLL_MS,
+  PROMPT_REPORT_WAIT_MS,
+  PROMPT_UNREPORTED_RESEND_NOTE,
+  promptUnreportedResendNote,
+} from './submit-verified-sender-shared';
+export type { InputReadiness, SubmitVerifiedSendParams } from './submit-verified-sender-shared';
 
 declare global {
   // eslint-disable-next-line no-var
@@ -211,94 +196,6 @@ declare global {
  * `load-buffer` overwriting the first before its `paste-buffer`).
  */
 const pasteBufferSeq = getOrInitGlobal('__submitPasteBufferSeq', () => ({ last: 0 }));
-
-/**
- * Rows read for the re-check under the input lock (Issue #3945). The same
- * capture `clearComposer` takes for its first read, so on a tool that clears
- * before sending that read is the re-check's frame and no extra read is made.
- */
-const RECHECK_CAPTURE_LINES = 200;
-
-/** How often a send waiting out a carried paste mark reads the composer (Issue #3945). */
-const CARRIED_MARK_POLL_MS = 200;
-
-/** Default bounded recovery Enters (each read back) before giving up (throwing). */
-const DEFAULT_VERIFY_ATTEMPTS = 4;
-
-/**
- * How long a B/F verdict on a session's first prompt waits for the agent's own
- * report of it (Issue #4035). Claude 2.1.314 reported the first prompt 0.66–0.74 s
- * after the send began in all 29 submitted first sends measured; an unsent body
- * was drawn into the composer 0.9–1.7 s after its Enter.
- */
-export const PROMPT_REPORT_WAIT_MS = 5000;
-
-/** How often the report and the composer are looked at during that wait. */
-const PROMPT_REPORT_POLL_MS = 100;
-
-export interface SubmitVerifiedSendParams {
-  /** tmux session name (already validated by the caller chain). */
-  sessionName: string;
-  /** Message body to type (sent verbatim, without a trailing newline). */
-  message: string;
-  /** CLI tool id — selects the tool-specific "generating" detector. */
-  cliToolId: CLIToolType;
-  /**
-   * ms to wait after typing the body before pressing Enter, so the TUI
-   * registers the input first. Default: TUI_TEXT_INPUT_WAIT_MS (100). A pasted
-   * body waits at least this long too, counted from the paste.
-   */
-  textInputWaitMs?: number;
-  /**
-   * The tool's composer description (Issue #1933). Defaults to the tool's own
-   * (`resolveComposerSpec`), so every existing call site is unchanged; a tool
-   * passes `this.describeComposer()` when it wants its override honoured.
-   */
-  composer?: ComposerSpec;
-  /**
-   * Number of Enter presses for the INITIAL submit. Defaults to the composer
-   * spec's `submitEnterCount` (1 for every tool but vibe-local, whose IME mode
-   * makes the first Enter insert a newline) — see VIBE_LOCAL_DOUBLE_ENTER_WAIT_MS.
-   */
-  submitEnterCount?: number;
-  /** ms between the initial Enter presses when submitEnterCount > 1. */
-  interEnterWaitMs?: number;
-  /**
-   * Bounded recovery Enters while the message is still pending. Default
-   * DEFAULT_VERIFY_ATTEMPTS (4). Each is read back, so the pane is read up to
-   * one more time than this (Issue #3880).
-   */
-  verifyAttempts?: number;
-  /**
-   * ms to wait before each read-back capture. Default
-   * TUI_MESSAGE_PROCESSED_WAIT_MS (200). Callers that must stay snappy
-   * (terminal route) can lower the attempts/delay to keep the total bounded.
-   */
-  verifyDelayMs?: number;
-  /**
-   * Composer reads while waiting for a pasted body (longer than
-   * {@link LITERAL_SEND_MAX_BYTES}) to appear in full before Enter.
-   * Default DEFAULT_PASTE_LANDED_ATTEMPTS (20, i.e. 2 s at the poll interval).
-   */
-  pasteLandedAttempts?: number;
-  /**
-   * Before Enter, wait until the composer shows the TYPED body (Issue #3366).
-   *
-   * For a TUI that draws fast keystrokes only once they stop arriving (codex's
-   * paste burst) and turns an Enter that arrives earlier into a newline. Only a
-   * tool whose composer `extractComposerText` can read (claude, codex) takes
-   * part; for any other the flag is ignored. A body that does not appear within
-   * {@link typedBodyAttempts} reads THROWS before Enter, with nothing submitted.
-   * Default false: the fixed {@link textInputWaitMs} alone, as before.
-   */
-  awaitTypedBody?: boolean;
-  /**
-   * Composer reads while waiting for a typed body (only with
-   * {@link awaitTypedBody}). Default DEFAULT_TYPED_BODY_ATTEMPTS (100, i.e. 5 s
-   * at the poll interval).
-   */
-  typedBodyAttempts?: number;
-}
 
 /** Run one tmux command, optionally feeding it `input` on stdin. */
 function runTmux(args: string[], input?: string): Promise<void> {
@@ -384,26 +281,6 @@ async function pasteBody(
 }
 
 /** The composer's first row, for an error message a person has to act on. */
-function describeComposer(
-  output: string,
-  cliToolId: CLIToolType,
-  composerSpec: ComposerSpec,
-  message: string
-): string {
-  const lines = withoutTrailingBlankRows(stripAnsi(output).split('\n'));
-  const composer = readSubmitComposer(
-    output,
-    cliToolId,
-    composerSpec.reader,
-    lines,
-    lines.slice(-VERIFY_WINDOW_LINES),
-    message
-  );
-  if (composer.kind === 'absent') return 'no composer on screen';
-  if (composer.kind === 'empty') return 'an empty composer';
-  const text = composer.text.length > 80 ? `${composer.text.slice(0, 80)}…` : composer.text;
-  return JSON.stringify(text);
-}
 
 /**
  * Take a body that did not arrive intact back out of the composer, best effort.
@@ -445,27 +322,6 @@ async function withdrawUnsentBody(
     });
     return false;
   }
-}
-
-/**
- * Throw unless `ticket` still owns the composer (Issue #3945 stage 3). Called
- * right before every key a send sends — body, paste, each Enter — so work still
- * in flight after its ownership ended cannot reach the next owner's composer.
- *
- * @param typed - Whether any of the body may already be in the composer, which
- *   decides how the failure classifies (`not-sent` before the body only).
- */
-function assertInputOwner(ticket: InstanceInputTicket, cliToolId: CLIToolType, step: string, typed: boolean): void {
-  if (ticket.isCurrent()) return;
-  logger.error('input-lock-lost', { sessionName: ticket.sessionName, cliToolId, step, generation: ticket.generation });
-  if (!typed) {
-    throw new Error(
-      `Session ${ticket.sessionName} was handed to another writer before ${step}; input lock lost, nothing was typed (Issue #3945).`
-    );
-  }
-  throw new Error(
-    `Session ${ticket.sessionName} was handed to another writer before ${step}; part of the message may be in its composer (Issue #3945).`
-  );
 }
 
 /**
@@ -522,15 +378,6 @@ async function waitOutCarriedPaste(
   }
   clearExpiredCarriedPasteMark(ticket);
   return true;
-}
-
-/** Whether the composer in `output` holds any text at all, read as the sender reads it. */
-function composerHoldsText(output: string, cliToolId: CLIToolType, composerSpec: ComposerSpec, message: string): boolean {
-  const lines = withoutTrailingBlankRows(stripAnsi(output).split('\n'));
-  return (
-    readSubmitComposer(output, cliToolId, composerSpec.reader, lines, lines.slice(-VERIFY_WINDOW_LINES), message)
-      .kind === 'text'
-  );
 }
 
 /**
@@ -645,60 +492,6 @@ async function confirmPasteLanded(params: {
 }
 
 /**
- * Whether the composer shows a paste placeholder whose count is not this body's
- * (Issue #3945): one counting fewer or more, or more than one placeholder.
- */
-function composerShowsForeignPasteToken(
-  output: string,
-  cliToolId: CLIToolType,
-  message: string,
-  composerSpec: ComposerSpec
-): boolean {
-  const lines = withoutTrailingBlankRows(stripAnsi(output).split('\n'));
-  const composer = readSubmitComposer(
-    output,
-    cliToolId,
-    composerSpec.reader,
-    lines,
-    lines.slice(-VERIFY_WINDOW_LINES),
-    message
-  );
-  if (composer.kind !== 'text') return false;
-  if (!composer.rows.some((row) => findPasteTokens(row).tokens.length > 0)) return false;
-  return classifyPasteLanded(output, cliToolId, message, composerSpec) !== 'landed';
-}
-
-/**
- * The part of a typed body the composer reader can see (Issue #3366).
- *
- * The codex reader takes the composer as one run of non-blank rows, so a blank
- * line inside the body ends what it returns: what it can show is the body up to
- * its first blank line after the first non-blank one. Leading blank lines are
- * kept — they are drawn as composer rows of their own and compact to nothing.
- */
-function visibleTypedBody(message: string): string {
-  const lines = message.split('\n');
-  const first = lines.findIndex((line) => line.trim() !== '');
-  if (first < 0) return '';
-  const blank = lines.findIndex((line, index) => index > first && line.trim() === '');
-  return lines.slice(0, blank < 0 ? lines.length : blank).join('\n');
-}
-
-/** Whether the whole codex composer, read past the bounded readers (Issue #3906), is exactly `message`. */
-function codexComposerShowsWholeBody(output: string, message: string, composerSpec: ComposerSpec): boolean {
-  const lines = withoutTrailingBlankRows(stripAnsi(output).split('\n'));
-  const composer = readSubmitComposer(
-    output,
-    'codex',
-    composerSpec.reader,
-    lines,
-    lines.slice(-VERIFY_WINDOW_LINES),
-    message
-  );
-  return composer.kind === 'text' && composer.region !== undefined && compactText(composer.region) === compactText(message);
-}
-
-/**
  * Wait until the composer shows the typed body; only then may Enter be pressed
  * (Issue #3366).
  *
@@ -773,81 +566,6 @@ async function confirmTypedBodyLanded(params: {
 }
 
 /**
- * Whether a verdict is one the agent's own report must back (Issue #4035):
- * `submitted` from B or F — the screen saying only that the body is not in the
- * composer. A (generating) stands on its own. A body starting with `/` or `!`
- * is run by the TUI itself, which is not measured to report it as a prompt.
- */
-function needsPromptReport(state: SubmitState, rule: SubmitRule, message: string): boolean {
-  if (state !== 'submitted' || rule === 'A') return false;
-  return !/^\s*[/!]/.test(message);
-}
-
-/**
- * Watch a session's first prompt until the agent reports it (Issue #4035).
- *
- * Reads the hook record and the composer every {@link PROMPT_REPORT_POLL_MS}
- * until `deadline`, without pressing anything. The deadline is the send's, not
- * the call's: a send that waits again after a resent Enter gets only what is
- * left of its {@link PROMPT_REPORT_WAIT_MS} (it holds the input lock meanwhile).
- *
- *   - the agent reported the prompt — `received`;
- *   - the screen changes its verdict — generating (A), or the body drawn into
- *     the composer after all (C/D, `pending`: the caller resends Enter, as for
- *     any typed-but-unsent body), or a completion (E) — `screen`, with the frame;
- *   - neither, to the end — `unreported`: nothing says the message left.
- */
-async function awaitPromptReport(params: {
-  sessionName: string;
-  message: string;
-  cliToolId: CLIToolType;
-  composer: ComposerSpec;
-  enteredAt: number;
-  rule: SubmitRule;
-  deadline: number;
-}): Promise<
-  | { verdict: 'received' }
-  | { verdict: 'screen'; state: SubmitState; rule: SubmitRule; output: string }
-  | { verdict: 'unreported'; rule: SubmitRule }
-> {
-  const { sessionName, message, cliToolId, composer, enteredAt, deadline } = params;
-  let rule = params.rule;
-  while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, PROMPT_REPORT_POLL_MS));
-    if (readPromptSubmitReceipt(sessionName, cliToolId, enteredAt) === 'received') return { verdict: 'received' };
-    const output = await capturePane(sessionName, { startLine: -composer.verifyCaptureLines });
-    const verdict = classifySubmitWithRule(output, cliToolId, message, composer);
-    if (verdict.state !== 'submitted' || verdict.rule === 'A') return { verdict: 'screen', ...verdict, output };
-    rule = verdict.rule;
-  }
-  if (readPromptSubmitReceipt(sessionName, cliToolId, enteredAt) === 'received') return { verdict: 'received' };
-  return { verdict: 'unreported', rule };
-}
-
-/**
- * Say so when the pre-send clear finds the body this session last reported
- * submitted (Issue #4035): that body never reached the agent, and the send that
- * said `sent` for it was wrong. The instance's `lastSend` is turned
- * `indeterminate` (the send now running records its own outcome after it).
- */
-function reportSubmittedBodyInComposer(
-  sessionName: string,
-  cliToolId: CLIToolType,
-  composerText: string,
-  cleared: boolean
-): void {
-  if (composerText === '' || !matchesSubmittedBody(sessionName, composerText)) return;
-  const target = getPromptSubmitTarget(sessionName);
-  if (target !== null) markLastSendDiscarded({ ...target, instanceId: target.instanceId ?? target.cliToolId });
-  logger.warn('pre-send-found-submitted-body', {
-    sessionName,
-    cliToolId,
-    cleared,
-    length: composerText.length,
-  });
-}
-
-/**
  * Empty the composer before the body is typed into it (Issue #1880).
  *
  * Delegates the how to {@link clearComposer} (#1879), which already sends
@@ -898,7 +616,7 @@ export async function clearComposerBeforeSend(
   sessionName: string,
   cliToolId: CLIToolType,
   composerSpec: ComposerSpec = resolveComposerSpec(cliToolId),
-  options: { initialCapture?: string; ticket?: InstanceInputTicket } = {}
+  options: { initialCapture?: string; ticket?: InstanceInputTicket; target?: PromptSubmitExpected } = {}
 ): Promise<void> {
   if (!composerSpec.clearBeforeSend) return;
 
@@ -911,7 +629,7 @@ export async function clearComposerBeforeSend(
   });
   if (ticket !== undefined) assertInputOwner(ticket, cliToolId, 'the pre-send clear', false);
 
-  reportSubmittedBodyInComposer(sessionName, cliToolId, result.discardedText, result.state !== 'content');
+  reportSubmittedBodyInComposer(sessionName, cliToolId, result.discardedText, result.state !== 'content', options.target);
 
   if (result.state === 'content') {
     logger.error('pre-send-composer-clear-failed', {
@@ -970,7 +688,14 @@ export async function clearComposerBeforeSend(
 export async function sendMessageWithSubmitVerification(
   params: SubmitVerifiedSendParams
 ): Promise<void> {
-  await withInstanceInputLock(params.sessionName, (ticket) => sendUnderInputLock(params, ticket));
+  await withInstanceInputLock(params.sessionName, (ticket) => {
+    // Issue #4065: the body's generation, told to the request before any key
+    // (and kept by it if the send throws). The same ticket when this joins the
+    // send service's outer lock (claude / codex), so it is told once more,
+    // with the same number.
+    noteInputTicket(ticket);
+    return sendUnderInputLock(params, ticket);
+  });
 }
 
 async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: InstanceInputTicket): Promise<void> {
@@ -986,8 +711,9 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
     pasteLandedAttempts = DEFAULT_PASTE_LANDED_ATTEMPTS,
     awaitTypedBody = false,
     typedBodyAttempts = DEFAULT_TYPED_BODY_ATTEMPTS,
+    target,
   } = params;
-  const submitEnterCount = params.submitEnterCount ?? composer.submitEnterCount;
+  const submitEnterCount = resolveSubmitEnterCount(params, composer);
 
   // -1. Issue #3945 (review-1 #4): every send re-reads the pane once it owns
   //     the composer, whether or not it queued — the prompt guard and the
@@ -1002,11 +728,20 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
   if (await waitOutCarriedPaste(sessionName, cliToolId, composer, ticket)) {
     frame = await recheckComposerBeforeInput(sessionName, cliToolId);
   }
+  // Issue #4040: the tool's readiness, asked again of that same newest frame.
+  // A dialog was refused just above (and is, at once, on every re-read); this
+  // refuses a pane that went back to loading, or still shows the picker of the
+  // send before, after the tool's own wait said "ready".
+  frame = await awaitReadyUnderLock(params.readiness, frame, { sessionName, cliToolId, ticket });
 
   // 0. Empty the composer first (Issue #1880). The body below is typed at the
   //    TUI's current cursor position, so anything already in the box would be
   //    spliced into it. Throws for a claude composer that could not be emptied.
-  await clearComposerBeforeSend(sessionName, cliToolId, composer, { initialCapture: frame, ticket });
+  await clearComposerBeforeSend(sessionName, cliToolId, composer, {
+    initialCapture: frame,
+    ticket,
+    ...(target !== undefined ? { target } : {}),
+  });
 
   if (Buffer.byteLength(message, 'utf8') > LITERAL_SEND_MAX_BYTES) {
     // 1'. A body that would reach the TUI as more than one pty read is pasted
@@ -1017,12 +752,7 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
     try {
       await pasteBody(sessionName, message, ticket, cliToolId);
     } catch (error: unknown) {
-      // Whether tmux put any of it into the pane is unknown — except after a
-      // refused input boundary (Issue #3992) or a failed `load-buffer` (Issue
-      // #4011, `not-started`), both before `paste-buffer`: a mark then would
-      // only hold the next send off for nothing.
-      const notStarted = (error as { delivery?: unknown } | null)?.delivery === 'not-started';
-      if (!isInputBoundaryRefusal(error) && !notStarted) leaveCarriedPasteMark(ticket);
+      if (pasteFailureMayHaveTyped(error)) leaveCarriedPasteMark(ticket);
       throw error;
     }
     await confirmPasteLanded({ sessionName, message, cliToolId, composer, attempts: pasteLandedAttempts, ticket });
@@ -1062,7 +792,7 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
     //    means waiting until the body is drawn (Issue #3366): an Enter pressed
     //    while codex still holds the keystrokes as a paste burst becomes a
     //    newline, and the body stays unsent. The fixed wait stays as a floor.
-    if (awaitTypedBody && SUPPORTED_COMPOSER_TOOLS.has(cliToolId)) {
+    if (shouldAwaitTypedBody(awaitTypedBody, cliToolId)) {
       await confirmTypedBodyLanded({ sessionName, message, cliToolId, composer, attempts: typedBodyAttempts, ticket });
     }
     const remaining = textInputWaitMs - (Date.now() - typedAt);
@@ -1097,10 +827,12 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
     await new Promise((resolve) => setTimeout(resolve, verifyDelayMs));
 
     let output = await capturePane(sessionName, { startLine: -composer.verifyCaptureLines });
+    // Issue #4048: a frame read after the session was replaced is the new
+    // process's, and so would be its hooks — neither says anything about this
+    // send, whose Enter went to the old one (indeterminate, not `not-sent`).
+    assertStillOwnedAfterEnter(ticket, cliToolId, 'the read-back');
     let { state, rule } = classifySubmitWithRule(output, cliToolId, message, composer);
-    const receipt = needsPromptReport(state, rule, message)
-      ? readPromptSubmitReceipt(sessionName, cliToolId, enteredAt)
-      : 'not-required';
+    const receipt = promptReceiptFor({ state, rule, message, sessionName, cliToolId, enteredAt, target });
     // Issue #4035: every verdict names the rule that gave it, so a send reported
     // `sent` can be traced to what the screen showed.
     logger.info('submit-classified', { sessionName, cliToolId, attempt, state, rule, receipt });
@@ -1118,39 +850,14 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
         enteredAt,
         rule,
         deadline: promptReportDeadline,
+        ticket,
+        ...(target !== undefined ? { target } : {}),
       });
-      if (watched.verdict === 'unreported') {
-        invalidateCache(sessionName);
-        logger.error('submit-not-confirmed:prompt-unreported', {
-          sessionName,
-          cliToolId,
-          attempt,
-          rule: watched.rule,
-          waitedMs: PROMPT_REPORT_WAIT_MS,
-        });
-        throw new Error(
-          `Message submit could not be confirmed for session ${sessionName}: the composer did not show the body ` +
-            `(rule ${watched.rule}) but the agent did not report the prompt within ${PROMPT_REPORT_WAIT_MS}ms ` +
-            '(Issue #4035).'
-        );
-      }
-      if (watched.verdict === 'received') {
-        logger.info('submit-confirmed-by-prompt-hook', { sessionName, cliToolId, attempt, rule });
-        state = 'submitted';
-      } else {
-        ({ state, rule, output } = watched);
-        logger.info('submit-classified', { sessionName, cliToolId, attempt, state, rule, receipt: 'awaited' });
-      }
+      ({ state, rule, output } = settleAwaitedPromptReport({ watched, sessionName, cliToolId, attempt, rule, output, target }));
     }
 
     if (state === 'submitted') {
-      // Issue #4035: only a body the screen alone called submitted is remembered
-      // for the next send's clear. One the agent reported did leave, and the same
-      // text back in the composer is claude restoring it (Esc), the history (↑),
-      // or a person typing it — not a send that never arrived.
-      if (readPromptSubmitReceipt(sessionName, cliToolId, enteredAt) !== 'received') {
-        noteSubmittedBody(sessionName, message);
-      }
+      rememberScreenOnlySubmit({ sessionName, cliToolId, enteredAt, message, ticket, target });
       invalidateCache(sessionName);
       return;
     }
@@ -1168,11 +875,7 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
           logger.error('submit-clear-input-skipped-not-owner', { sessionName, cliToolId, generation: ticket.generation });
         }
       } catch (clearError: unknown) {
-        logger.error('submit-clear-input-failed', {
-          sessionName,
-          cliToolId,
-          error: clearError instanceof Error ? clearError.message : String(clearError),
-        });
+        logClearInputFailed(sessionName, cliToolId, clearError);
       }
       invalidateCache(sessionName);
       logger.error('submit-replaced-by-tui-completion', { sessionName, cliToolId, attempt });
@@ -1184,27 +887,16 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
     // state === 'pending' / 'indeterminate' after the final read-back: give up below.
     if (attempt === attempts) break;
 
-    // state === 'indeterminate' (Issue #3906) — no Enter: the composer does not
-    // show the body, so another Enter could submit whatever it does show.
-    if (state === 'indeterminate') {
-      logger.warn('submit-not-confirmed:composer-unreadable', { sessionName, cliToolId, attempt });
-      continue;
-    }
-
-    // Issue #3945 (review #1): a paste placeholder that does not count this
-    // body is not this body. It can only be a paste that arrived after the
-    // initial Enter (a carried send's, past its mark), and another Enter would
-    // submit it. One that counts exactly this body cannot be told apart: that
-    // Enter is the accepted gap (LATE_TOKEN_AFTER_ENTER_SAME_COUNT in the tests).
-    if (composerShowsForeignPasteToken(output, cliToolId, message, composer)) {
-      logger.warn('submit-not-confirmed:foreign-paste-token', { sessionName, cliToolId, attempt });
-      continue;
-    }
+    if (holdsResendEnter({ state, output, sessionName, cliToolId, message, composer, attempt })) continue;
 
     // Issue #4035: the Enter thought lost may only have been late — the agent
     // reporting the prompt now means it went, and another Enter would land on an
     // empty composer, or on a dialog that the prompt just opened.
-    if (readPromptSubmitReceipt(sessionName, cliToolId, enteredAt) === 'received') {
+    // Issue #4048: a report read after the session was replaced (during the
+    // wait above, say) may be the new generation's own prompt — this send is
+    // then indeterminate, never confirmed by it.
+    if (readPromptSubmitReceipt(sessionName, cliToolId, enteredAt, target) === 'received') {
+      assertStillOwnedAfterEnter(ticket, cliToolId, 'the prompt report check');
       logger.info('submit-confirmed-by-prompt-hook', { sessionName, cliToolId, attempt, rule });
       invalidateCache(sessionName);
       return;

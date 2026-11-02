@@ -41,7 +41,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { readJsonObjectBody } from '@/lib/api/read-json-body';
-import { isCliToolType, isValidInstanceId } from '@/lib/cli-tools/types';
+import { isCliToolType, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import {
   resolveSessionTargetStrict,
 } from '@/lib/session/resolve-session-target';
@@ -56,6 +56,8 @@ import {
 } from '@/lib/session/prompt-waiting-guard';
 import { createLogger } from '@/lib/logger';
 import { classifySendFailure } from '@/lib/session/send-attempt-state';
+import { PLAN_REVIEW_SEND_REFUSED_CODE } from '@/lib/session/send-attempt-types';
+import { commandCodePlanReviewSendMessage, respondAgentFor } from '@/lib/session/respond-target';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
 
@@ -133,6 +135,25 @@ export async function POST(
     }
     const target = resolution.target;
 
+    // Issue #4049: the refusals' `respond` must reach the tool this request
+    // named. A bare `respond` resolves as a request naming nothing does, so the
+    // tool is named only when no instance was and it is not that one. Asked
+    // only when a refusal is written.
+    const respondAgent = (): CLIToolType | undefined => {
+      if (instanceId) return undefined;
+      const unqualified = resolveSessionTargetStrict(db, id, {});
+      return respondAgentFor(cliToolId, instanceId, unqualified.ok ? unqualified.target.cliToolId : undefined);
+    };
+
+    // Issue #4063: the plan review refusal's tool. Only Command Code shows
+    // one, and its primary — no instance, or the tool's own id (#868) — is
+    // reached by a bare `respond` only when it is the worktree default.
+    const planReviewRespondAgent = (): CLIToolType | undefined => {
+      if (instanceId && instanceId !== target.cliToolId) return undefined;
+      const unqualified = resolveSessionTargetStrict(db, id, {});
+      return respondAgentFor(target.cliToolId, undefined, unqualified.ok ? unqualified.target.cliToolId : undefined);
+    };
+
     const manager = CLIToolManager.getInstance();
     const cliTool = manager.getTool(target.cliToolId);
 
@@ -170,7 +191,7 @@ export async function POST(
         blockedBy: promptGuard.blockedBy,
       });
       return NextResponse.json(
-        { error: promptWaitingMessage(id, promptGuard.blockedBy, instanceId), code: PROMPT_WAITING_CODE },
+        { error: promptWaitingMessage(id, promptGuard.blockedBy, instanceId, respondAgent()), code: PROMPT_WAITING_CODE },
         { status: 409 }
       );
     }
@@ -201,7 +222,23 @@ export async function POST(
       if (classifySendFailure(error).reason === 'prompt-waiting') {
         logger.info('terminal-send-refused-prompt-waiting-under-lock', { worktreeId: id, cliToolId: target.cliToolId });
         return NextResponse.json(
-          { error: promptWaitingMessage(id, undefined, instanceId), code: PROMPT_WAITING_CODE },
+          { error: promptWaitingMessage(id, undefined, instanceId, respondAgent()), code: PROMPT_WAITING_CODE },
+          { status: 409 }
+        );
+      }
+      // Issue #4063: Command Code's plan review refused before any key, and
+      // its guidance (`respond … "<text>"`, then `--plan-review …`) is the one
+      // way out — the fixed 500 below threw it away. 409 like PROMPT_WAITING:
+      // a state of the session, not a server fault. The sentence is rebuilt
+      // here (still no internal detail passed through, D1-007) with the
+      // `respond` aimed by the same rule as the refusal above.
+      if (classifySendFailure(error).reason === 'plan-review') {
+        logger.info('terminal-send-refused-plan-review', { worktreeId: id, cliToolId: target.cliToolId });
+        return NextResponse.json(
+          {
+            error: commandCodePlanReviewSendMessage(id, instanceId, planReviewRespondAgent()),
+            code: PLAN_REVIEW_SEND_REFUSED_CODE,
+          },
           { status: 409 }
         );
       }

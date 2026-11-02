@@ -294,8 +294,9 @@ export function main(argv, deps = {}) {
 
     // 3. The records of the work, and the fragments. The precheck of the HEAD
     //    to merge is step 4's: that HEAD may not exist yet.
-    const workHead = workHeadOf(run, o.worktree, head);
     let { records } = readRecords(o.runDir, o.issues);
+    // pr-common.mjs workHeadOf, the rule publish-pr and precheck use: a merge the worker was verified on is the work HEAD (#4076).
+    let workHead = workHeadOf(run, o.worktree, head, { records, issue, item });
     const envWhere = { runDir: o.runDir, worktree: o.worktree, home: deps.home ?? os.homedir() };
     // A verify of an earlier HEAD that differs only in the dependencies waits for step 4's precheck (#3883 N10).
     const deferred = [];
@@ -325,6 +326,27 @@ export function main(argv, deps = {}) {
       }
       refreshed = true;
       head = git(run, o.worktree, ['rev-parse', 'HEAD']).trim();
+      // The work HEAD under the refresh, by the same rule: a refresh whose own change cannot be
+      // judged (merge-tree failed) is its own work HEAD, not the one step 3 judged (#4076).
+      workHead = workHeadOf(run, o.worktree, head, { records, issue, item });
+      // So the worker's stages are judged again at the HEADs now in hand, as publish-pr and
+      // `status` would judge them; the deferred verify is the one of this work HEAD.
+      deferred.length = 0;
+      const again = missingRecords(records, issue, { head, workHead }, item, {
+        ...envWhere, warn: log, defer: (reason) => deferred.push(reason),
+      }).filter((reason) => !reason.startsWith('precheck:'));
+      if (again.length > 0) {
+        // The stop is recorded at the HEADs computed here (#4085): without it `status` (headsOf,
+        // which reads only the record) keeps W and points past M's own verify. The work HEAD is
+        // workHeadOf's answer, never `head` by default — a clean refresh stays on W. The stage is
+        // the existing merge failure, not a precheck that did not run.
+        record('merge', 'fail', head, `refresh=merged record=missing ${again.map((reason) => reason.split(':')[0]).join(',')}`, workHead);
+        error(
+          `merge #${issue} ${head.slice(0, 7)}: not merged — the refresh is the work HEAD ${workHead.slice(0, 7)} and the run record lacks:\n  ${again.join('\n  ')}\n` +
+            `  (not pushed; the refresh is left committed in ${o.worktree})`
+        );
+        return 1;
+      }
     }
     const markers = markerFiles(run, o.worktree);
     if (markers.length > 0) {
@@ -391,7 +413,10 @@ export function main(argv, deps = {}) {
     // 5. The checks of this HEAD.
     records = readRecords(o.runDir, o.issues).records;
     const needBuild = !builtLikeCi(findLatest(records, { issue, item, stage: 'precheck', head }));
-    const verify = latestByStage(records, issue, item).verify ?? null;
+    // The verify judged at the work HEAD (step 3, or again after the refresh): whether it ran the
+    // full unit suite. A latest verify of another HEAD is not that one, and does not spare the wait (#4076).
+    const latestVerify = latestByStage(records, issue, item).verify ?? null;
+    const verify = latestVerify && unmetStage('verify', latestVerify, { head, workHead }) === null ? latestVerify : null;
     const need = { needBuild, needUnit: o.unitRelated || !ranFullUnit(verify), last: o.last };
     const rerunDone = records.some(
       (r) => r.issue === issue && inItem(r, item) && r.stage === 'ci' && r.head === head && /(^| )rerun=/.test(r.note ?? '')

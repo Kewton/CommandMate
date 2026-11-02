@@ -30,7 +30,7 @@ vi.mock('@/lib/logger', () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
-import { CommandCodeTool, COMMAND_CODE_PLAN_REVIEW_SEND_MESSAGE } from '@/lib/cli-tools/command-code';
+import { CommandCodeTool, commandCodePlanReviewSendMessage } from '@/lib/cli-tools/command-code';
 import { classifySendFailure } from '@/lib/session/send-attempt-state';
 import { capturePane } from '@/lib/tmux/tmux';
 
@@ -51,12 +51,12 @@ describe('[#3772] send refused by the plan review is not-sent', () => {
       (e: unknown) => e,
     );
     expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain(COMMAND_CODE_PLAN_REVIEW_SEND_MESSAGE);
+    expect((error as Error).message).toContain(commandCodePlanReviewSendMessage('test-wt'));
     expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'plan-review' });
   });
 
   it('negative: the same wording without the code stays indeterminate', () => {
-    expect(classifySendFailure(new Error(COMMAND_CODE_PLAN_REVIEW_SEND_MESSAGE))).toEqual({
+    expect(classifySendFailure(new Error(commandCodePlanReviewSendMessage('test-wt')))).toEqual({
       state: 'indeterminate',
       reason: 'send-error',
     });

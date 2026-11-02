@@ -24,9 +24,12 @@ import {
   sendSpecialKeys,
   capturePane,
 } from '../tmux/tmux';
-import { sendMessageWithSubmitVerification } from './submit-verified-sender';
+import { sendMessageWithSubmitVerification, type InputReadiness } from './submit-verified-sender';
 import { recheckComposerBeforeInput } from '@/lib/session/composer-clear';
+import { INPUT_RECHECK_PROMPT_WAITING_CODE } from '@/lib/session/send-attempt-types';
+import { PROMPT_WAIT_DIALOG_CONFIRM_MS, createDialogConfirmation, readBeforeDeadline } from './prompt-wait-dialog';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
+import { detectSessionStatus } from '../detection/status-detector';
 import {
   COPILOT_PROMPT_PATTERN,
   isCopilotSelectionFrame,
@@ -75,6 +78,20 @@ const COPILOT_INIT_MAX_ATTEMPTS = 30;
 
 /** Timeout for waiting for prompt before sending a message */
 const COPILOT_PROMPT_WAIT_TIMEOUT_MS = 15000;
+
+/**
+ * How long a dialog has to stay up in {@link CopilotTool.waitForPrompt} before
+ * the wait gives up on it (Issue #4067), on {@link PROMPT_WAIT_DIALOG_CONFIRM_READS}
+ * reads in a row.
+ *
+ * A dialog waits for a person, so waiting out the 15 s (or `/model`'s 30 s)
+ * window behind it only delays the refusal — and the picker and `/model` wait
+ * holding the instance's input lock, so Auto-Yes and other writers wait too.
+ * Both thresholds must hold, so a frame caught mid-paint that reads as a
+ * dialog once does not refuse a send. The count is shared with opencode's and
+ * vibe-local's waits (Issue #4084, {@link createDialogConfirmation}).
+ */
+export const COPILOT_DIALOG_CONFIRM_MS = PROMPT_WAIT_DIALOG_CONFIRM_MS;
 
 /**
  * Copilot CLI slash commands that open a picker.
@@ -335,6 +352,41 @@ function describeBottomRow(output: string): string {
  *              text shows `@ files · # issues` instead).
  */
 type CopilotPromptReadiness = 'composer' | 'idle';
+
+/**
+ * Re-read the pane and throw `recheckComposerBeforeInput`'s `prompt-waiting`
+ * refusal when a dialog is open (Issue #4040). Any other outcome — no dialog,
+ * or a re-read that failed — returns, so the caller's own refusal stands.
+ */
+async function rethrowIfDialogOpen(sessionName: string): Promise<void> {
+  try {
+    await recheckComposerBeforeInput(sessionName, 'copilot');
+  } catch (error: unknown) {
+    if ((error as { code?: unknown }).code === INPUT_RECHECK_PROMPT_WAITING_CODE) throw error;
+  }
+}
+
+/**
+ * Refuse as `prompt-waiting` after {@link CopilotTool.waitForPrompt} saw a
+ * dialog stay up for {@link COPILOT_DIALOG_CONFIRM_MS} (Issue #4067), with the
+ * re-check's `code` and the wording `classifySendFailure` reads as
+ * `prompt-waiting`. Nothing has been typed.
+ *
+ * Refused on the wait's own reads, without reading the pane once more: those
+ * reads already confirmed the dialog, and another capture (tmux's own time-out
+ * is 5 s) would keep the picker and `/model` holding the instance's input lock
+ * past the confirmation time (review of #4067).
+ */
+function refuseConfirmedDialog(sessionName: string): never {
+  logger.warn('input-recheck-prompt-waiting', { sessionName, cliToolId: 'copilot', confirmedMs: COPILOT_DIALOG_CONFIRM_MS });
+  throw Object.assign(
+    new Error(
+      `A prompt dialog stayed open in session ${sessionName} for ${COPILOT_DIALOG_CONFIRM_MS}ms ` +
+        'while the copilot composer was awaited (re-checked under the input lock); nothing was typed (Issue #4067).'
+    ),
+    { code: INPUT_RECHECK_PROMPT_WAITING_CODE }
+  );
+}
 
 /**
  * Copilot CLI tool implementation
@@ -639,17 +691,18 @@ export class CopilotTool extends BaseCLITool {
    *   `❯` at column 0 while it is Working, the loop captures BEFORE its first
    *   sleep, and `COPILOT_PROMPT_PATTERN` matches immediately. A whole
    *   `sendMessage` measured 338 ms end to end, verification included.
-   * - **Composer gone — a dialog is up: the full 15 s, then it sends anyway.**
-   *   Measured against a session parked on copilot's own `Asked user …` question:
-   *   the window expired and the body was typed into the QUESTION's input line,
-   *   which is single-line, so a four-line message arrived as
-   *   `ping oneping twoping three…`.
+   * - **Composer gone — a dialog is up: the full 15 s.** Measured against a
+   *   session parked on copilot's own `Asked user …` question: until Issue #4040
+   *   the send then went ahead, and the body was typed into the QUESTION's input
+   *   line, which is single-line, so a four-line message arrived as
+   *   `ping oneping twoping three…`. Now the window expiring refuses the send.
    *
    * That second case is #559's objection, and it is real — but it is not a
    * reason to skip this method, because skipping it is what produced the same
-   * outcome in 0 ms instead of 15 s. What keeps it out of production is the layer
-   * above: `sendUserMessage` and the terminal route both consult
-   * `isPromptWaiting` (#1708/#1737) and refuse before reaching here.
+   * outcome in 0 ms instead of 15 s. The layer above refuses most dialogs
+   * first: `sendUserMessage` and the terminal route both consult
+   * `isPromptWaiting` (#1708/#1737), and the shared sender re-reads the pane
+   * under the input lock (#3945).
    *
    * Issue #2623 adds a third case, measured on 1.0.85: **composer on screen,
    * copilot still starting — until loading ends (3–4.5 s).** The composer is drawn
@@ -658,27 +711,47 @@ export class CopilotTool extends BaseCLITool {
    * used to end this wait in 0 ms right there, which is how `send --model` on a
    * session it had just started typed a body that never ran.
    *
-   * Timing out still only logs and lets the send proceed, as before; the caller
-   * that must not proceed ({@link sendModelCommand}) reads the result.
+   * Timing out logs and returns `ready: false`; every caller reads it and types
+   * nothing then — the normal send since Issue #4040 (it used to drop the result
+   * and send anyway), the selection-list branch and {@link sendModelCommand}.
+   *
+   * Issue #4067: a dialog does not wait out the window. A frame the shared
+   * sender's re-check would refuse (`detectSessionStatus().hasActivePrompt`,
+   * {@link recheckComposerBeforeInput}) on {@link PROMPT_WAIT_DIALOG_CONFIRM_READS}
+   * reads in a row spanning {@link COPILOT_DIALOG_CONFIRM_MS} returns
+   * `ready: false, dialog: true`, and every caller refuses it as
+   * `prompt-waiting`. Not counted: the folder-trust dialog (answered above,
+   * #1886), and a frame with the composer drawn — `idle` waits through a
+   * Working turn, which keeps `❯` on screen, and that is not a dialog.
+   *
+   * Issue #4084: no capture is waited for past `timeoutMs` ({@link readBeforeDeadline}):
+   * one still running then, or one that answers after it, is not used.
    *
    * @param sessionName - tmux session name
    * @param timeoutMs - Optional timeout in ms (default: COPILOT_PROMPT_WAIT_TIMEOUT_MS)
    * @param until - What counts as ready (Issue #2623, default `composer`)
-   * @returns Whether the pane got there, and the last frame read (ANSI stripped)
+   * @returns Whether the pane got there, the last frame read (ANSI stripped),
+   *   and whether it gave up on a dialog (Issue #4067)
    */
   private async waitForPrompt(
     sessionName: string,
     timeoutMs: number = COPILOT_PROMPT_WAIT_TIMEOUT_MS,
     until: CopilotPromptReadiness = 'composer'
-  ): Promise<{ ready: boolean; output: string }> {
-    const startTime = Date.now();
+  ): Promise<{ ready: boolean; output: string; dialog?: true }> {
+    // Issue #4084: one deadline for the whole wait — a capture still running at
+    // it is not waited for, and a frame it returns past it is not used.
+    const deadline = Date.now() + timeoutMs;
     const pollInterval = 500;
     let trustDialogHandled = false;
     let output = '';
-    while (Date.now() - startTime < timeoutMs) {
+    // Issue #4067: the current run of reads that showed a dialog (counted by
+    // the helper opencode and vibe-local share, Issue #4084).
+    const dialog = createDialogConfirmation();
+    while (Date.now() < deadline) {
       try {
         const readMark = instanceInputReadMark();
-        const rawOutput = await capturePane(sessionName, 50);
+        const rawOutput = await readBeforeDeadline(() => capturePane(sessionName, 50), deadline);
+        if (rawOutput === null) break;
         output = stripAnsi(rawOutput);
         if (this.isReadyFor(until, output)) {
           return { ready: true, output };
@@ -686,19 +759,26 @@ export class CopilotTool extends BaseCLITool {
         // Issue #1886: `startSession` returns early for a session that already
         // exists, so a pane adopted from outside CommandMate -- or one whose
         // trust dialog nobody answered -- arrives here still sitting on it.
-        // Unlike codex's, this method only logs on timeout and lets the send
-        // proceed, which types the message body INTO the dialog; the body's
-        // digits are option selections there, so a message containing `2` picks
-        // "Yes, and remember this folder" and writes the operator's
-        // machine-global ~/.copilot/config.json. Answer it here for the same
-        // reason the launch path does, rather than leaving the worse outcome.
+        // Until Issue #4040 the normal send went ahead on a timeout, which
+        // typed the message body INTO the dialog; the body's digits are option
+        // selections there, so a message containing `2` picks "Yes, and
+        // remember this folder" and writes the operator's machine-global
+        // ~/.copilot/config.json. The send now refuses instead, but answering
+        // it here (as the launch path does) is what lets that send go through.
         if (!trustDialogHandled && (await this.answerFolderTrustDialog(sessionName, output, readMark))) {
           trustDialogHandled = true;
         }
+        if (dialog.observe(this.isRefusableDialog(rawOutput, output))) {
+          logger.info('copilot-prompt-wait-dialog', { until, reads: dialog.reads, bottomRow: describeBottomRow(output) });
+          return { ready: false, output, dialog: true };
+        }
       } catch {
-        // Capture may fail - continue polling
+        // Capture may fail - continue polling. Not a dialog read: the run restarts.
+        dialog.reset();
       }
-      await new Promise((resolve) => setTimeout(resolve, pollInterval));
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(pollInterval, remaining)));
     }
     logger.info('copilot-prompt-not-detected', { until, bottomRow: describeBottomRow(output) });
     return { ready: false, output };
@@ -715,6 +795,32 @@ export class CopilotTool extends BaseCLITool {
    * @param until - What counts as ready
    * @param output - ANSI-stripped pane capture
    */
+  /**
+   * {@link isReadyFor}`('composer')` for the shared sender's read under the
+   * input lock (Issue #4040). Not `idle`: copilot draws `❯` while Working and
+   * takes a body then, as it always has.
+   */
+  private readonly inputReadiness: InputReadiness = {
+    label: 'copilot',
+    isReady: (frame: string) => this.isReadyFor('composer', stripAnsi(frame)),
+  };
+
+  /**
+   * Whether {@link waitForPrompt} counts this frame towards giving up on a
+   * dialog (Issue #4067): the shared sender's re-check would refuse it
+   * (`hasActivePrompt`), it is not the folder-trust dialog `waitForPrompt`
+   * answers itself (#1886), and no composer is drawn — a Working turn keeps
+   * `❯` up and is waited through, not refused.
+   *
+   * @param rawOutput - The capture as read (ANSI allowed), for the detector
+   * @param output - The same capture, ANSI stripped
+   */
+  private isRefusableDialog(rawOutput: string, output: string): boolean {
+    if (isCopilotFolderTrustDialog(output)) return false;
+    if (this.isReadyFor('composer', output)) return false;
+    return detectSessionStatus(rawOutput, 'copilot').hasActivePrompt;
+  }
+
   private isReadyFor(until: CopilotPromptReadiness, output: string): boolean {
     if (!COPILOT_PROMPT_PATTERN.test(output)) return false;
     const lines = output.split('\n');
@@ -796,6 +902,9 @@ export class CopilotTool extends BaseCLITool {
           // then refuses on the same terms right before the keys: a dialog is
           // `prompt-waiting`, a pane that cannot be read `recheck-failed`.
           const prompt = await this.waitForPrompt(sessionName);
+          // Issue #4067: a dialog that stayed up is refused at once — the lock
+          // is not held for the rest of the window behind it.
+          if (prompt.dialog) refuseConfirmedDialog(sessionName);
           await recheckComposerBeforeInput(sessionName, 'copilot');
           if (!prompt.ready) {
             // review-3: neither the request nor the pane goes into the message.
@@ -822,8 +931,26 @@ export class CopilotTool extends BaseCLITool {
         return;
       }
 
-      // Verify Copilot is at prompt state before sending
-      await this.waitForPrompt(sessionName);
+      // Verify Copilot is at prompt state before sending. Issue #4040: a
+      // composer that never came up is not typed into — refused as the
+      // selection-list branch refuses (review-3: neither the body nor the pane
+      // goes into the message, which `classifySendFailure` reads).
+      const prompt = await this.waitForPrompt(sessionName);
+      if (!prompt.ready) {
+        // Issue #4067: the wait gave up on a dialog after its confirmation time
+        // rather than the whole 15 s window.
+        if (prompt.dialog) refuseConfirmedDialog(sessionName);
+        // A dialog that opened during the wait and is still up is refused as
+        // the shared sender's re-check refuses it — `prompt-waiting` (409
+        // PROMPT_WAITING), not `prompt-not-ready`. A re-read that fails is
+        // left to the refusal below.
+        await rethrowIfDialogOpen(sessionName);
+        logger.warn('copilot-message-not-sent:prompt-not-ready', { bottomRow: describeBottomRow(prompt.output) });
+        throw new Error(
+          `copilot prompt not ready within ${COPILOT_PROMPT_WAIT_TIMEOUT_MS}ms, ` +
+            'so the message was not sent; nothing was typed'
+        );
+      }
 
       // Issue #1471: Body/Enter separation + read-back submit verification via the
       // shared helper (replaces the old type -> C-m -> `\n`-gated paste recovery).
@@ -836,6 +963,8 @@ export class CopilotTool extends BaseCLITool {
         composer: this.describeComposer(),
         textInputWaitMs: COPILOT_TEXT_INPUT_DELAY_MS,
         verifyDelayMs: COPILOT_SEND_ENTER_DELAY_MS,
+        // Issue #4040: the same test, of the newest frame read under the lock.
+        readiness: this.inputReadiness,
       });
 
       // Invalidate cache after sending message
@@ -933,6 +1062,9 @@ export class CopilotTool extends BaseCLITool {
     await waitOutCarriedPasteMark(ticket);
     const idle = await this.waitForPrompt(sessionName, COPILOT_MODEL_SWITCH_TIMEOUT_MS, 'idle');
     if (!idle.ready) {
+      // Issue #4067: a dialog is refused after its confirmation time, not after
+      // the 30 s window under the lock.
+      if (idle.dialog) refuseConfirmedDialog(sessionName);
       // The pane's text goes to the log, not the message: the message is read by
       // `classifySendFailure`, which a screen quoting its keywords would steer (#3954).
       logger.warn('copilot-model-switch-not-idle', { model: modelName, bottomRow: describeBottomRow(idle.output) });

@@ -603,6 +603,102 @@ its request** (a new CLI with a new server).
 
 Not overlapping is still the safest: do not stack messages on one instance.
 
+#### An uncertain delivery is never resent automatically (Issue #4064)
+
+When delivering a relay reply, a confirmation (prompt) notice or an expiry notice to the requester's
+composer ends with an **uncertain** outcome, CommandMate does **not resend that payload automatically**, so
+that it cannot arrive twice.
+
+- A delivery first records "attempting" in the ledger, before its first key, and only the delivery whose
+  write succeeded sends (when the write fails, nothing is sent)
+- Only a `not-sent` outcome (no key of the body was typed: `prompt-not-ready`, `session-starting`, ...) is
+  retried automatically. A requester waiting on a dialog (`prompt_waiting`) is waited for and retried as before
+- Everything else — `indeterminate` (`prompt-unreported`, `submit-unconfirmed`, `send-error`,
+  `composer-residue`, ...), a failure after the send was confirmed (`threw-after-sent`), a failure before any
+  outcome was known (`send-threw`), a server restart during the send (`server-restarted`) — is **held**
+  (`uncertain`). A server that stopped right before the send, having typed nothing, also leaves the attempt
+  behind and it is held after the restart (it cannot be told apart, so the safe side is taken)
+- While a payload is held, the relay's later deliveries (a reply that finished after a prompt notice
+  included) wait behind it. Other relays go on
+- A hold is read with `commandmate relays` (`# delivery not confirmed, not resent`), `commandmate relays
+  --id <relay-id>`, `GET /api/relays` (`held`) and `GET /api/relays/:id` (`deliveryHold`). The line carries
+  `delivery=uncertain`, `payload=<kind>:<payloadId>`, `attempt=<attemptId>`, `reason=<reason>` and
+  `check=<where to look>`, which is the requester's exact instance:
+  `commandmate capture <worktree-id> --instance <instance> --pane`. Once you have looked, settle it with
+  `commandmate relays resolve` below rather than resending it yourself (a resend of your own followed by a
+  later `--retry` arrives twice)
+- An expiry or a cancel (`commandmate relays cancel`) only stops later deliveries. The held payload's body,
+  payloadId and reason stay readable (what already reached the composer cannot be taken back). A relay that
+  expires while a payload is held gets no expiry notice delivered
+
+#### Resolving a hold (Issue #4082)
+
+An `uncertain` hold is settled, after looking at the requester's pane, with exactly one of the following.
+`--payload` and `--attempt` are `payload=<kind>:<payloadId>` and `attempt=<attemptId>` from
+`commandmate relays --id <relay-id>` (`deliveryHold.payloadId` and `deliveryHold.attemptId` in JSON and the API).
+
+```bash
+commandmate relays resolve <relay-id> --payload <payloadId> --attempt <attemptId> --confirm   # it arrived
+commandmate relays resolve <relay-id> --payload <payloadId> --attempt <attemptId> --retry     # it did not: send it again
+commandmate relays resolve <relay-id> --payload <payloadId> --attempt <attemptId> --discard   # drop it, send nothing
+```
+
+The API is `POST /api/relays/:id/resolve` (body `{ "payloadId", "attemptId", "action": "confirm" | "retry" | "discard" }`).
+
+| Held payload | Relay | `--confirm` | `--retry` | `--discard` |
+|---|---|---|---|---|
+| reply | open | closed as `delivered` | the same body queued again | closed as `cancelled` (later payload dropped too) |
+| prompt notice | open | hold dropped; the reply waiting behind it is queued in its place (relay stays open) | queued again | same as `--confirm` |
+| expiry notice | closed | hold dropped | queued again, relay stays closed | hold dropped |
+| reply / prompt notice | closed by a cancel or an expiry | hold dropped (closing reason kept) | refused (409) | hold dropped (closing reason kept) |
+
+- `--confirm` and `--discard` type nothing. The reply queued after a prompt notice is settled is another
+  payload and arrives by the ordinary delivery. The same dialog is not told again; a new dialog and the final
+  reply arrive as before
+- A successful `--retry` means "queued for delivery again", not "delivered". The next delivery sends it once,
+  when the requester can take it (composer readiness and the input lock as for any delivery). If that send is
+  `not-sent` it is retried automatically as before; if it is uncertain again it is held under a new `attempt`.
+  A prompt notice queued again is still replaced by the relay's reply if one is decided before it is sent, as
+  before. A reply or prompt notice of a relay past its deadline (even one still open) cannot be retried
+- These are refused with 409 and change nothing: an old `attempt` (a retry made a new attempt since), a second
+  operation on the same hold, a delivery in progress (`delivery=attempting`), no hold, a hold without an
+  `attempt` (written by an older server), and the refusals in the table. A relay that does not exist is 404, a
+  malformed id or body is 400, a database failure is 500 (nothing is committed). After a refusal, read it again
+  with `commandmate relays --id <relay-id>`
+- Resolving does not change the send binding (`send=`, `hold=`). Restarts behave as before: a payload retried
+  but not yet taken stays queued, one whose send had started is held under its new `attempt`. A settled hold
+  does not come back
+
+#### Telling, showing and counting holds (Issue #4082)
+
+- **The requester's history**: when a delivery is held (`uncertain`), one system line is left in the history
+  of the requester A (with `relay=<relay-id>`, `payload=<kind>:<payloadId>`, `attempt=<attemptId>` and
+  `reason=<reason>`). One line per attempt: another payload, or a new `attempt` after `--retry`, that is held
+  again gets its own line. The line is best-effort (when it cannot be written, or the server stops before it
+  is, there is none and it is not written later). The hold itself does not depend on it. The line is never
+  read as a reply (`relays`, `wait`, the relay delivery)
+- **The screens**: the PC and phone rosters and the chat surface show a hold on the requester A's row as
+  "delivery unconfirmed" (warning colour), ahead of waiting and prompt. A held relay is not also counted as
+  waiting or owed (a delivery in progress, `attempting`, stays waiting as before). Holds of closed relays are
+  shown too. A hold whose requester instance is no longer in the roster is listed under the roster as
+  "Unconfirmed deliveries to sessions not in the roster". The screens follow the 20-second re-read and the
+  re-read after an action
+- **The count**: `heldCount` in `GET /api/relays` is the number of holds now (`uncertain` only, closed relays
+  included, once per payload). It is an axis of its own, apart from the per-state `counts`, never added to
+  them, and not narrowed by `days`. `commandmate relays` prints `held=<n>`, `commandmate task show` adds
+  `, <n> held` to its `RELAYS:` line and `commandmate report metrics` adds `, <n> held now` to its `Relays:`
+  line. The `commandmate relays` listing shows the holds to settle (`uncertain`; the N of
+  `# delivery not confirmed, not resent (N)` is the same as `held=`) apart from deliveries being typed right now
+  (`attempting`; `# delivery in progress (N)`). In JSON, `task show --json` carries `relays` (per state) and `relaysHeld`, and `report metrics --json`
+  carries `relays` and `relaysHeld`. An older server that does not answer `heldCount` gets no count printed
+  (never 0), and `null` in JSON
+- **Expiry while held**: the expiry sweep keeps the reply waiting behind a held prompt notice. When that closed
+  relay's prompt notice (or that of a relay still open past its deadline and not yet swept: the settle itself then
+  closes it as `expired`, with the usual "expired" system line) is then settled with `--confirm` or `--discard`, the waiting reply is discarded too
+  (a closed relay delivers nothing more) and a system line in the requester's history says so (the API answers
+  `replyDiscarded: true`). The expiry itself is told by the existing "expired" system line and the hold on the
+  screens; no expiry notice is sent to the composer after the hold is settled
+
 ### Progress Output
 
 Progress is written to stderr. Only the final result (JSON) goes to stdout.
@@ -662,7 +758,14 @@ To answer a screen only while it is still the one observed, pass its kind and to
 | `autoYes.enabled` / `pollerActive` | Whether Auto-Yes is on / whether the server's poller runs |
 | `autoYes.pollerRecord` | What the poller (or the permission hook) last recorded as withheld. `screenCorrelation` relates it to this screen; the record names no screen, so it is `unknown` / `type-mismatch` / `no-prompt-on-screen` |
 | `autoYes.contractEvaluation` | The contract's policy applied to this screen **now** (`policy-withholds` + reason / `base-withholds` + reason / `policy-permits` / `no-base-answer` / `not-evaluated`). `base-withholds` (Issue #3822) means the base rules withheld the answer before the contract was read, with or without a contract (today only `allow-once-unidentified`; changing the contract does not bring the answer back). Reasons use the `AutoYesSuppressionReason` words ([reason table](#autoyeslastsuppression-observing-a-policy-suppression-issue-1684)) |
-| `lastSend` | How the last send to this instance ended (Issue #3759): `{ at, state, reason }`. `state` is `not-sent` (it failed before any key of the body was typed, e.g. `prompt-not-ready`) / `sent` (the submit was confirmed) / `indeterminate` (it failed after part of it may have been typed, or the outcome could not be read back; `reason: composer-residue` when the body is still in the composer; `prompt-unreported` when, on a new claude session's first send, the composer no longer showed the body after Enter but claude never reported the prompt with `UserPromptSubmit` (Issue #4035); a `sent` record turns `found-in-composer` when the next send finds that body still in the composer — only while that send runs; the lasting record is the warn log `pre-send-found-submitted-body`). Null when this server has no record since it started; absent from an older server . The `not-sent` reasons include, besides `prompt-not-ready`, those from the input lock (Issue #3945): `input-lock-timeout` (the wait limit passed) / `session-replaced` (the session was recreated while waiting) / `input-lock-lost` (the lock's ownership was lost mid-input), `recheck-failed` (the re-read just before typing failed), `relay-reservation-lost` (Issue #3992: the reservation of the bound relay a `--reply-to` / `ask --async` send went in under was lost — cancelled, expired or taken by another send — right before the body), and `paste-not-started` (Issue #4031: a long body sent as one paste could not be loaded into the tmux buffer — `load-buffer` failed, so `paste-buffer` never ran; `not-sent` with or without a relay, and the send API's `sendOutcome` is `not_sent`; a failed `paste-buffer` stays `indeterminate` (`send-error`) / `unknown`); none of them typed any key of the body. The unsent bar's Clear (`POST /api/worktrees/:id/clear-composer`) returns 409 `INSTANCE_INPUT_BUSY` when it cannot get the same input lock or the session was recreated (wait a moment and retry), and returns HTTP 200 with `cleared: false` when the text could not be cleared |
+| `lastSend` | How the last send to this instance ended (Issue #3759): `{ at, state, reason }`. `state` is `not-sent` (it failed before any key of the body was typed, e.g. `prompt-not-ready`) / `sent` (the submit was confirmed) / `indeterminate` (it failed after part of it may have been typed, or the outcome could not be read back; `reason: composer-residue` when the body is still in the composer; `prompt-unreported` when, on a new claude session's first send, the composer no longer showed the body after Enter but claude never reported the prompt with `UserPromptSubmit` (Issue #4035) — the body may still have been submitted (for example where only `SessionStart` arrives and the http `UserPromptSubmit` hook does not), so check with `commandmate capture <worktree-id> --pane` before resending; the screen is read once more right before failing and a generating screen makes it `sent` (Issue #4048); a session recreated while the send waits after its Enter is `indeterminate`, not `not-sent` (`session-replaced`), since the old process may have taken it (Issue #4048); a `sent` record turns `found-in-composer` when the next send finds that body still in the composer (claude only, and only the record of the send whose body it is; other tools only log the warning and keep `lastSend`, Issue #4048) — only while that send runs; the lasting record is the warn log `pre-send-found-submitted-body`). Null when this server has no record since it started; absent from an older server . The `not-sent` reasons include, besides `prompt-not-ready`, those from the input lock (Issue #3945): `input-lock-timeout` (the wait limit passed) / `session-replaced` (the session was recreated while waiting) / `input-lock-lost` (the lock's ownership was lost mid-input), `recheck-failed` (the re-read just before typing failed), `relay-reservation-lost` (Issue #3992: the reservation of the bound relay a `--reply-to` / `ask --async` send went in under was lost — cancelled, expired or taken by another send — right before the body), and `paste-not-started` (Issue #4031: a long body sent as one paste could not be loaded into the tmux buffer — `load-buffer` failed, so `paste-buffer` never ran; `not-sent` with or without a relay, and the send API's `sendOutcome` is `not_sent`; a failed `paste-buffer` stays `indeterminate` (`send-error`) / `unknown`); none of them typed any key of the body. The unsent bar's Clear (`POST /api/worktrees/:id/clear-composer`) returns 409 `INSTANCE_INPUT_BUSY` when it cannot get the same input lock or the session was recreated (wait a moment and retry), and returns HTTP 200 with `cleared: false` when the text could not be cleared |
+
+**`lastSend` is not "the send that finished last" (Issue #4065).** When sends overlap, it follows the order in which the input lock was granted (its generation). It is not necessarily the reading request's own outcome (a request's own outcome is in the `send` error and the send API's `sendOutcome`).
+- The record of a send that was granted the lock (including a `not-sent` refused after the grant, before the body) is not kept when a send granted the lock later already has a record for the same instance.
+- A `not-sent` refused before any lock was granted to it (another server's session, a session still starting, a failed start, the prompt guard, a failed copilot `/model`, a lock wait that ran out, and the like) is not kept when a send granted the lock after that request began already has a record. A refusal on its own is recorded as before.
+- When an old send fails late, after its Enter, its outcome is kept unless a send granted the lock after it already has a record (also after the session was recreated).
+- **Paths kept in the order they finish**: copilot's selection-list commands and `/model`, and opencode's HTTP delivery (including its switch to keyboard input after an `unknown` dispatch) have no lock order, so they are recorded in the order they finish (and do not move the lock order either).
+- The order lives only in the server process and is forgotten with the records on a restart. A worktree ID migration drops them rather than moving them. At most 1024 instances are tracked; an instance pushed out loses its record and its order together. The published fields stay `{ at, state, reason }`, and `at` is not an order.
 
 **Whatever `lastSend` says, CommandMate never resends.** The sender — you or the supervising agent — does. Resend a `not-sent` message yourself once the input prompt is back. **Do not resend an `indeterminate` one** before checking the pane with `commandmate capture <worktree-id> --pane` (is the body still in the composer, or was it already submitted?); resending blind can deliver it twice. A `send` that fails with `prompt not ready` and the like carries the same state in its error (`[send state: not-sent (prompt-not-ready): …]`). The send API's failure answer carries `sendOutcome` even when the send is not tied to a relay, whenever the failure was recorded as its `lastSend` (`not_sent` for `not-sent`, `unknown` otherwise; another server's session (409), a session still starting (503 `SESSION_STARTING`) and a failed start are `not_sent`; a 400 refusal, which records nothing, carries none), and the CLI prints one stderr line saying either that it is safe to send again or to check with `commandmate capture <worktree-id> --pane` first (Issue #4011).
 
@@ -808,7 +911,7 @@ An answer that waited while a send or another answer held the input lock ([input
 
 The other hints `respond` prints (`send` after `prompt_no_longer_active`, the plan review Next / Note, `send` when the chosen row asks for text, and the option-number hint after `unresolvable_answer`), `send`'s `PROMPT_WAITING` fallback (when the server sent no sentence) and its "check the pane before resending" `capture`, and the `capture` hints of `wait` and `attach` all name the same resolved target: an `--instance` alias as the id it resolved to, `--agent` alone as given, nothing when neither was named. A `capture` that is there to read a dialog is `--pane --tail 40`.
 
-The server's own `PROMPT_WAITING` sentence (`send` and the terminal send) and the structured prompt's guidance (the `respond <number>` for a dialog only the hooks saw) also name the target when the request named an `--instance` (Issue #4031, e.g. `` `commandmate respond <id> <answer> --instance codex-2` ``); a request that named none (the primary) gets the sentence as before. The strict respond's (`--expect-screen`) failure hints name the resolved target too (exit 40: `` `commandmate prompt <id> --instance <instance>` ``; exit 41: that plus `` `commandmate capture <id> --instance <instance> --pane` ``); with no target named they stay `` `commandmate prompt` `` / `` `capture --pane` ``.
+The server's own `PROMPT_WAITING` sentence returned when a send is refused (`send` and the terminal send, e.g. their 409) names the target when the request named an `--instance` (Issue #4031, e.g. `` `commandmate respond <id> <answer> --instance codex-2` ``); a request that named only a tool other than the worktree default with `--agent` gets ` --agent <tool>` (Issue #4049, e.g. `` `commandmate respond <id> <answer> --agent codex` ``, since a `respond` with no target goes to the default tool). A request that named none, or named the default tool, gets the sentence as before. The structured prompt's guidance (the `respond <number>` for a dialog only the hooks saw, e.g. the structured prompt of `/current-output`) is outside this `--agent` rule: `/current-output` passes the instance the server resolved, so whether it is read with `--agent` or for the primary, the guidance carries that resolved instance as `--instance <id>` (e.g. `` `commandmate respond <id> <number> --instance codex` ``), as it has since Issue #4031. The WebSocket push, the push after an Auto-Yes answer and the prompt history row carry the same sentence (Issue #4063; the primary's id is the tool name). The strict respond's (`--expect-screen`) failure hints name the resolved target too (exit 40: `` `commandmate prompt <id> --instance <instance>` ``; exit 41: that plus `` `commandmate capture <id> --instance <instance> --pane` ``). `prompt` takes no `--agent`, so after an `--agent`-only request they name that tool's primary instance, whose id is the tool name (Issue #4049, e.g. `` `commandmate prompt <id> --instance codex` `` / `` `commandmate capture <id> --agent codex --pane` ``); with no target named they stay `` `commandmate prompt` `` / `` `capture --pane` ``. The sentence with which `send` is refused while Command Code shows a plan review (REVIEW) names the real worktree id and, for an instance other than the primary, ` --instance <id>` (Issue #4049, e.g. `` `commandmate respond <id> "<text>" --instance command-code-2` ``). For the primary on a worktree whose default is not Command Code it names ` --agent command-code` (Issue #4063; on a Command Code worktree it names no target, as before). The terminal send (`POST /api/worktrees/:id/terminal`) answers this refusal with the same sentence as a 409 with `code: "PLAN_REVIEW_SEND_REFUSED"`, not the fixed 500.
 
 ---
 

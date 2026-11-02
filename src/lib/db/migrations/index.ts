@@ -45,6 +45,7 @@ import { v59_migrations } from './v59-opencode-instance-settings';
 import { v60_migrations } from './v60-session-relays';
 import { v61_migrations } from './v61-session-notes';
 import { v62_migrations } from './v62-session-relays-bind';
+import { v63_migrations } from './v63-session-relays-delivery-attempt';
 
 /**
  * Complete ordered list of all migrations.
@@ -95,4 +96,5 @@ export const migrations: Migration[] = [
   ...v60_migrations,
   ...v61_migrations,
   ...v62_migrations,
+  ...v63_migrations,
 ];

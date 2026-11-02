@@ -38,27 +38,36 @@
  * @module lib/relay/relay-delivery
  */
 
+import { randomUUID } from 'crypto';
 import type Database from 'better-sqlite3';
 import { getDbInstance } from '@/lib/db/db-instance';
 import {
+  claimRelayPayloadDelivery,
   clearRelayHeldCandidates,
   clearRelayPending,
-  clearRelayPendingReply,
+  clearRelayPendingReplyUnlessHeld,
+  completeRelayPayloadDelivery,
+  completeRelayPromptDelivery,
+  completeRelayReplyDelivery,
   getRelayBinding,
   getRelayById,
   getRelayPendingPayload,
+  holdRelayPayloadDelivery,
+  listDeliverableRelayPayloads,
   listExpiredOpenRelays,
   listOpenRelaysTo,
-  listRelaysWithPendingPayload,
-  markRelayDelivered,
   markRelayExpired,
-  promoteRelayPendingReply,
+  RELAY_DELIVERY_SERVER_RESTARTED,
+  recoverInterruptedRelayDeliveryRefs,
+  releaseRelayPayloadDelivery,
   replaceRelayPromptWithPendingReply,
   stashRelayPayload,
+  type RelayPayloadAttemptRef,
 } from '@/lib/db/relay-db';
 import { getLatestOpenPromptMessage, relayRequestId } from '@/lib/db/chat-db';
 import { resolveReadersLocale } from '@/lib/push/model-change-push-notifier';
 import { sendUserMessage } from '@/lib/session/send-user-message';
+import type { SendAttemptReason, SendAttemptState } from '@/lib/session/send-attempt-types';
 import { buildRelayExpiredMessage } from '@/lib/relay/relay-messages';
 import { relayServerBootId } from '@/lib/relay/relay-boot';
 import {
@@ -76,7 +85,7 @@ import {
 } from '@/lib/relay/relay-bound-reply';
 import { RELAY_SCRAPE_QUIET_MS } from '@/lib/relay/relay-policy';
 import { findRelayHoldReason } from '@/lib/relay/relay-readiness';
-import { resolveRelaySession } from '@/lib/relay/relay-session-ref';
+import { resolveRelaySession, type ResolvedRelaySession } from '@/lib/relay/relay-session-ref';
 import { writeRelaySystemLine } from '@/lib/relay/relay-system-line';
 import {
   claimRelayDelivery,
@@ -84,7 +93,7 @@ import {
   releaseRelayDelivery,
   resetRelayDeliveryClaims,
 } from '@/lib/relay/relay-delivery-claims';
-import { isOpenRelayState } from '@/lib/relay/types';
+import { isOpenRelayState, type RelayPendingKind, type SessionRelay } from '@/lib/relay/types';
 import { createLogger } from '@/lib/logger';
 import { getOrInitGlobal } from '../global-state';
 
@@ -137,6 +146,8 @@ declare global {
   var __relayRecoveredBootId: string | undefined;
   // eslint-disable-next-line no-var
   var __relayPumpAgain: boolean | undefined;
+  // eslint-disable-next-line no-var
+  var __relayAttemptsRecoveredBootId: string | undefined;
 }
 
 const inFlight = getOrInitGlobal('__relayDeliveryInFlight', () => new Set<string>());
@@ -147,6 +158,7 @@ export function resetRelayDeliveryState(): void {
   resetRelayDeliveryClaims();
   globalThis.__relayPumpRunning = false;
   globalThis.__relayRecoveredBootId = undefined;
+  globalThis.__relayAttemptsRecoveredBootId = undefined;
 }
 
 /**
@@ -201,9 +213,35 @@ export function evaluateRelayAfterSend(relayId: string): void {
 }
 
 
-/** {@link recoverBoundRelays}, once per boot. */
+/**
+ * {@link recoverBoundRelays}, once per boot; and the delivery attempts the
+ * previous boot left `attempting` are held as `uncertain` (Issue #4064).
+ *
+ * The second step is marked done only once it succeeded, and is safe to run
+ * again (it never touches this boot's own attempts). Until it has run, the
+ * rows it would hold are not listed for delivery anyway — `attempting` is
+ * already a hold — so a failure here costs a label, never a second send.
+ */
 function ensureRelayRecovery(db: Database.Database): void {
   const boot = relayServerBootId();
+  if (globalThis.__relayAttemptsRecoveredBootId !== boot) {
+    try {
+      const held = recoverInterruptedRelayDeliveryRefs(db, boot);
+      globalThis.__relayAttemptsRecoveredBootId = boot;
+      if (held.length > 0) logger.info('relay-interrupted-deliveries-held', { held: held.length });
+      // Issue #4082: each attempt this recovery moved to `uncertain` — and
+      // only those — is told to its requester, once.
+      for (const ref of held) {
+        const relay = getRelayById(db, ref.relayId);
+        if (!relay) continue;
+        noteRelayHeld(db, relay, resolveRelaySession(db, relay.from), ref, relay.deliveryHold?.kind ?? null, RELAY_DELIVERY_SERVER_RESTARTED);
+      }
+    } catch (error) {
+      logger.warn('relay-delivery-recovery-failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
   if (globalThis.__relayRecoveredBootId === boot) return;
   globalThis.__relayRecoveredBootId = boot;
   try {
@@ -384,9 +422,15 @@ export function sweepExpiredRelays(db: Database.Database, now = Date.now()): num
       const locale = resolveReadersLocale(db);
       // A payload that never went out is superseded by the expiry notice: A
       // asked for an answer, and what they are getting is the news that there
-      // will not be one. Both slots (Issue #3957).
+      // will not be one. Both slots (Issue #3957). Issue #4064: not a payload
+      // under a delivery hold — it may have reached A, so it stays readable
+      // (`clearRelayPending` refuses it), the expiry notice then finds the
+      // slot taken and is not queued, and the relay is closed all the same.
       clearRelayPending(db, relay.id, now);
-      clearRelayPendingReply(db, relay.id, now);
+      // Issue #4082: a reply waiting behind a HELD payload is kept: settling
+      // the hold decides it (on a closed relay, it is then discarded and the
+      // requester told). Without a hold it is superseded, as before.
+      clearRelayPendingReplyUnlessHeld(db, relay.id, now);
       const body = buildRelayExpiredMessage(
         locale,
         senderLabel(db, relay),
@@ -416,33 +460,64 @@ export function sweepExpiredRelays(db: Database.Database, now = Date.now()): num
   return expired;
 }
 
-/** What one delivery attempt did. Exported for the suite. */
-export type RelayDeliveryOutcome = 'delivered' | 'held' | 'skipped' | 'failed';
+/**
+ * What one delivery attempt did. Exported for the suite.
+ *
+ * `uncertain` (Issue #4064): whether it reached A is not known, and the
+ * payload is held — never sent again automatically.
+ */
+export type RelayDeliveryOutcome = 'delivered' | 'held' | 'skipped' | 'failed' | 'uncertain';
+
+/** How a send's own attempt ended, as `onAttempt` reported it (Issue #4064). */
+type ObservedAttempt = { state: SendAttemptState; reason: SendAttemptReason } | null;
+
+/** The hold reason of a send that threw: what it last reported, if anything. */
+function reasonForThrow(attempt: ObservedAttempt): string {
+  if (attempt === null) return 'send-threw';
+  return attempt.state === 'sent' ? 'threw-after-sent' : attempt.reason;
+}
 
 /**
  * Try to put one stashed payload into A's composer.
  *
- * The order — readiness, then send, then ledger — is deliberate. Marking first
- * would lose the answer whenever the send failed, and the send path has real
- * refusals in it (`prompt_waiting`, a session that went away mid-attempt). A
- * repeat delivery is prevented by the in-flight set within a process and by
- * `markRelayDelivered`'s guarded update across one, which is the idempotency the
- * Issue asks for by name.
+ * The order — readiness, then claim, then send, then ledger — is deliberate.
+ * Marking delivered first would lose the answer whenever the send failed, and
+ * the send path has real refusals in it (`prompt_waiting`, a session that went
+ * away mid-attempt).
  *
- * `kind` and `body` are what the pump's listing saw, and that listing is stale
- * by the time the readiness check returns (#3732): an earlier relay's send, or
- * this one's own capture, may have let a cancel or an expiry sweep run. So the
- * row is read again AFTER the last await before the send, and the send goes
- * ahead only when it still carries the same payload — and, for anything but an
- * expiry notice, is still open. The claim is taken in that same synchronous
- * stretch, so no cancel can slip in between the check and the send; from then
- * on `withdrawRelay` answers `delivering`.
+ * Issue #4064: the payload is taken DURABLY before the send
+ * ({@link claimRelayPayloadDelivery}: `attempting`, under a fresh attempt id),
+ * and only the caller whose write took it sends. How the send ended decides
+ * what happens to it, read from the send's OWN attempt (`onAttempt`, not the
+ * instance's shared `lastSend`):
+ *
+ *  - delivered → the slot is emptied (under the attempt id);
+ *  - `prompt_waiting`, or `not-sent` → queued again, retried by the next pump;
+ *  - anything else — `indeterminate` (`composer-residue` included), a throw
+ *    after `sent`, a throw before any state — → held as `uncertain` with the
+ *    reason. It is not listed again, it is not replaced, and the relay's later
+ *    payloads (the second slot's reply too) wait behind it.
+ *
+ * A server that stops anywhere in between leaves `attempting`, which is a hold
+ * too, and the next boot labels it `uncertain`. The in-flight set and the
+ * in-process claim stay — they are what `withdrawRelay` and the expiry sweep
+ * read — but they are no longer what prevents a second send.
+ *
+ * `kind`, `body` and `payloadId` are what the pump's listing saw, and that
+ * listing is stale by the time the readiness check returns (#3732): an earlier
+ * relay's send, or this one's own capture, may have let a cancel or an expiry
+ * sweep run. So the row is read again AFTER the last await before the send,
+ * and the send goes ahead only when it still carries the same payload — and,
+ * for anything but an expiry notice, is still open. The claims are taken in
+ * that same synchronous stretch, so no cancel can slip in between the check
+ * and the send; from then on `withdrawRelay` answers `delivering`.
  */
 async function deliverOne(
   db: Database.Database,
   relayId: string,
   kind: 'reply' | 'prompt' | 'expired',
-  body: string
+  body: string,
+  listedPayloadId: string | null
 ): Promise<RelayDeliveryOutcome> {
   const listed = getRelayById(db, relayId);
   if (!listed) return 'skipped';
@@ -460,47 +535,233 @@ async function deliverOne(
   }
 
   // Synchronous from here to the send: re-read, then claim.
-  const current = getRelayPendingPayload(db, relayId);
-  if (!current || current.kind !== kind || current.body !== body) {
-    logger.info('relay-delivery-superseded', { relayId, kind });
+  const current = rereadDeliverablePayload(db, relayId, kind, body, listedPayloadId);
+  if (!current) return 'skipped';
+  const relay = current.relay;
+  const requester = resolveRelaySession(db, relay.from);
+
+  // Issue #4064: take the payload in the ledger before the first key. A write
+  // that fails or finds the payload taken means no send.
+  const attemptId = randomUUID();
+  let payloadId: string | null;
+  try {
+    payloadId = claimRelayPayloadDelivery(db, {
+      relayId,
+      payloadId: current.payloadId,
+      kind,
+      body,
+      attemptId,
+      owner: relayServerBootId(),
+      mintPayloadId: randomUUID(),
+    });
+  } catch (error) {
+    logger.warn('relay-delivery-claim-failed', {
+      relayId,
+      kind,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return 'failed';
+  }
+  if (payloadId === null) {
+    logger.info('relay-delivery-taken', { relayId, kind });
     return 'skipped';
+  }
+  const ref: RelayPayloadAttemptRef = { relayId, payloadId, attemptId };
+
+  claimRelayDelivery(relayId);
+  let requeued = false;
+  try {
+    let attempt: ObservedAttempt = null;
+    let result: Awaited<ReturnType<typeof sendUserMessage>>;
+    try {
+      result = await sendUserMessage(db, {
+        worktreeId: requester.worktreeId,
+        content: body,
+        cliToolId: requester.cliToolId,
+        instanceId: requester.instanceId,
+        messageType: 'relay',
+        // The pointer back at the ledger. Also `session_relays.sent_request_id` for
+        // a reply, which carries a UNIQUE index — so a second delivery of the same
+        // relay cannot be recorded even if one were somehow attempted.
+        requestId: kind === 'reply' ? relayRequestId(relay.id) : undefined,
+        // Issue #4064: this send's own outcome, not the instance's last one.
+        onAttempt: (observed) => {
+          attempt = observed;
+        },
+      });
+    } catch (error) {
+      const reason = reasonForThrow(attempt);
+      logger.warn('relay-delivery-uncertain', {
+        relayId,
+        kind,
+        reason,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      if (holdUncertain(db, ref, reason)) noteRelayHeld(db, relay, requester, ref, kind, reason);
+      return 'uncertain';
+    }
+
+    if (!result.ok) {
+      const settled = settleUnsentResult(
+        db,
+        ref,
+        relay,
+        requester,
+        kind,
+        result.stage,
+        attempt as ObservedAttempt
+      );
+      requeued = settled.requeued;
+      return settled.outcome;
+    }
+
+    const now = Date.now();
+    const { completed, promoted } = recordDeliveryCompletion(db, ref, relay, kind, now);
+    if (!completed) {
+      logger.warn('relay-delivery-result-stale', { relayId, kind, attemptId });
+      return 'skipped';
+    }
+    if (promoted) globalThis.__relayPumpAgain = true;
+    writeDeliveredSystemLine(db, relay, requester, kind, now);
+    logger.info('relay-delivered', { relayId, kind, to: `${requester.worktreeId}/${requester.instanceId}` });
+    return 'delivered';
+  } finally {
+    // Issue #3957: a prompt notice that did not go out (refused, failed) is
+    // back to unclaimed — and a reply that finished while it was being typed
+    // waits in the second slot. The reply supersedes the notice exactly as it
+    // would have had it arrived a moment later. Issue #4064: only a notice
+    // known not to have gone out (queued again); one held as uncertain is
+    // kept, and the reply waits behind it (the replacement refuses a held
+    // notice in its own condition, too).
+    // A failure here must not keep the claim below from being released: a
+    // claim left behind refuses every cancel and every expiry of the relay.
+    if (requeued && kind === 'prompt') supersedeRequeuedPrompt(db, relay, payloadId);
+    // Delivered: a reply is closed now and a prompt notice leaves the relay
+    // open on purpose, so either way a later cancel must be judged by the row.
+    // Held, failed or uncertain: the relay can be withdrawn again (a cancel
+    // stops later deliveries; it never takes back what may be in A's composer).
+    releaseRelayDelivery(relayId);
+  }
+}
+
+/**
+ * The pump's listing re-read after the last await before the send (#3732),
+ * or `null` (logged) when the send must not go ahead. Synchronous on purpose:
+ * the caller claims in the same stretch.
+ */
+function rereadDeliverablePayload(
+  db: Database.Database,
+  relayId: string,
+  kind: 'reply' | 'prompt' | 'expired',
+  body: string,
+  listedPayloadId: string | null
+): ReturnType<typeof getRelayPendingPayload> {
+  const current = getRelayPendingPayload(db, relayId);
+  if (
+    !current ||
+    current.kind !== kind ||
+    current.body !== body ||
+    current.payloadId !== listedPayloadId
+  ) {
+    logger.info('relay-delivery-superseded', { relayId, kind });
+    return null;
   }
   // An expiry notice is delivered from a CLOSED relay by design; everything
   // else is only owed while the relay is open.
   if (kind !== 'expired' && !isOpenRelayState(current.relay.state)) {
     logger.info('relay-delivery-closed', { relayId, kind, state: current.relay.state });
-    return 'skipped';
+    return null;
   }
-  const relay = current.relay;
-  const requester = resolveRelaySession(db, relay.from);
+  return current;
+}
 
-  claimRelayDelivery(relayId);
-  let delivered = false;
-  try {
-    const result = await sendUserMessage(db, {
-      worktreeId: requester.worktreeId,
-      content: body,
-      cliToolId: requester.cliToolId,
-      instanceId: requester.instanceId,
-      messageType: 'relay',
-      // The pointer back at the ledger. Also `session_relays.sent_request_id` for
-      // a reply, which carries a UNIQUE index — so a second delivery of the same
-      // relay cannot be recorded even if one were somehow attempted.
-      requestId: kind === 'reply' ? relayRequestId(relay.id) : undefined,
+/**
+ * A send that returned `ok: false`: held as `uncertain`, or queued again when
+ * it is known not to have gone out (Issue #4064).
+ */
+function settleUnsentResult(
+  db: Database.Database,
+  ref: RelayPayloadAttemptRef,
+  relay: SessionRelay,
+  requester: ResolvedRelaySession,
+  kind: 'reply' | 'prompt' | 'expired',
+  stage: string | undefined,
+  observed: ObservedAttempt
+): { outcome: RelayDeliveryOutcome; requeued: boolean } {
+  const relayId = ref.relayId;
+  // Every failure `sendUserMessage` returns reports its attempt first; one
+  // without (a caller's stub) is read as before (#4064 keeps that).
+  const notSent = observed === null || observed.state === 'not-sent';
+  if (!notSent) {
+    logger.info('relay-delivery-uncertain', {
+      relayId,
+      kind,
+      stage,
+      reason: observed.reason,
     });
+    if (holdUncertain(db, ref, observed.reason)) noteRelayHeld(db, relay, requester, ref, kind, observed.reason);
+    return { outcome: 'uncertain', requeued: false };
+  }
+  logger.info('relay-delivery-refused', { relayId, kind, stage });
+  const requeued = requeue(db, ref);
+  return { outcome: stage === 'prompt_waiting' ? 'held' : 'failed', requeued };
+}
 
-    if (!result.ok) {
-      logger.info('relay-delivery-refused', { relayId, kind, stage: result.stage });
-      return result.stage === 'prompt_waiting' ? 'held' : 'failed';
+/** Record a delivered attempt's result, by kind (Issue #4082). */
+function recordDeliveryCompletion(
+  db: Database.Database,
+  ref: RelayPayloadAttemptRef,
+  relay: SessionRelay,
+  kind: 'reply' | 'prompt' | 'expired',
+  now: number
+): { completed: boolean; promoted: boolean } {
+  // Issue #4082: the attempt's result is recorded FIRST, and only while it
+  // is still the attempt in progress. A stale one (held by another boot's
+  // recovery, resolved, or replaced by a retry's new attempt) writes
+  // nothing — no close, no emptied payload, no promotion, no system line —
+  // so the newer attempt and the relay's later reply are left as they are.
+  let completed: boolean;
+  let promoted = false;
+  if (kind === 'reply') {
+    // Issue #4064: closing the relay (which empties the payload) and ending
+    // the attempt commit together. A throw rolls both back: the row stays
+    // `attempting` with its body and payload id — held, never re-sent — and
+    // the next boot labels it.
+    const result = completeRelayReplyDelivery(db, {
+      ...ref,
+      sentRequestId: relayRequestId(relay.id),
+      now,
+    });
+    completed = result.completed;
+    if (completed && !result.closed) {
+      // Somebody closed it underneath us. The message is already in A's
+      // composer, which is the outcome that mattered.
+      logger.info('relay-already-closed-on-deliver', { relayId: ref.relayId });
     }
+  } else if (kind === 'prompt') {
+    // Issue #3957: only the payload that was sent. A reply that waits in the
+    // second slot survives, and is promoted now that the notice is out —
+    // Issue #4082: in the same transaction as the attempt's end.
+    // A throw here leaves the row `attempting` — held, never re-sent — and
+    // the next boot labels it.
+    ({ completed, promoted } = completeRelayPromptDelivery(db, { ...ref, now }));
+  } else {
+    completed = completeRelayPayloadDelivery(db, { ...ref, now });
+  }
+  return { completed, promoted };
+}
 
-    const now = Date.now();
+/** The requester's system line for a delivered payload (best-effort). */
+function writeDeliveredSystemLine(
+  db: Database.Database,
+  relay: SessionRelay,
+  requester: ResolvedRelaySession,
+  kind: 'reply' | 'prompt' | 'expired',
+  now: number
+): void {
+  const relayId = relay.id;
+  try {
     if (kind === 'reply') {
-      if (!markRelayDelivered(db, relay.id, relayRequestId(relay.id), now)) {
-        // Somebody closed it underneath us. The message is already in A's
-        // composer, which is the outcome that mattered.
-        logger.info('relay-already-closed-on-deliver', { relayId });
-      }
       writeRelaySystemLine(
         db,
         relay.id,
@@ -520,40 +781,113 @@ async function deliverOne(
         now
       );
     }
-    // Issue #3957: only the payload that was sent. A reply that replaced it
-    // or waits in the second slot survives, and the second slot is promoted
-    // now that the notice is out.
-    clearRelayPending(db, relay.id, now, current.payloadId);
-    if (kind === 'prompt' && promoteRelayPendingReply(db, relay.id, now)) {
+  } catch (error) {
+    // Issue #4064: the send went out; a ledger write after it failing must
+    // not turn into a second send. The attempt is closed already (above).
+    logger.warn('relay-delivery-record-failed', {
+      relayId,
+      kind,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * Issue #3957: a requeued prompt notice gives way to a reply waiting in the
+ * second slot. A failure is logged, never thrown (the claim must be released).
+ */
+function supersedeRequeuedPrompt(
+  db: Database.Database,
+  relay: SessionRelay,
+  payloadId: string
+): void {
+  const relayId = relay.id;
+  try {
+    if (replaceRelayPromptWithPendingReply(db, relay.id, payloadId)) {
+      logger.info('relay-prompt-superseded-after-failed-delivery', { relayId });
       globalThis.__relayPumpAgain = true;
     }
-    logger.info('relay-delivered', { relayId, kind, to: `${requester.worktreeId}/${requester.instanceId}` });
-    delivered = true;
-    return 'delivered';
-  } finally {
-    // Issue #3957: a prompt notice that did not go out (refused, failed,
-    // threw) is back to unclaimed — and a reply that finished while it was
-    // being typed waits in the second slot. The reply supersedes the notice
-    // exactly as it would have had it arrived a moment later.
-    // A failure here must not keep the claim below from being released: a
-    // claim left behind refuses every cancel and every expiry of the relay.
-    if (!delivered && kind === 'prompt') {
-      try {
-        if (replaceRelayPromptWithPendingReply(db, relay.id, current.payloadId)) {
-          logger.info('relay-prompt-superseded-after-failed-delivery', { relayId });
-          globalThis.__relayPumpAgain = true;
-        }
-      } catch (error) {
-        logger.warn('relay-prompt-supersede-failed', {
-          relayId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-    // Delivered: a reply is closed now and a prompt notice leaves the relay
-    // open on purpose, so either way a later cancel must be judged by the row.
-    // Held or failed: nothing reached A, so the relay can be withdrawn again.
-    releaseRelayDelivery(relayId);
+  } catch (error) {
+    logger.warn('relay-prompt-supersede-failed', {
+      relayId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/** Queue a payload again after a send known not to have happened (Issue #4064). */
+function requeue(db: Database.Database, ref: RelayPayloadAttemptRef): boolean {
+  try {
+    return releaseRelayPayloadDelivery(db, ref);
+  } catch (error) {
+    // Left `attempting`: held, not re-sent. Safe, if not what was wanted.
+    logger.warn('relay-delivery-release-failed', {
+      relayId: ref.relayId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
+/**
+ * Hold a payload whose delivery may have reached A (Issue #4064).
+ *
+ * @returns Whether THIS call moved the attempt to `uncertain` (Issue #4082):
+ *   false for a stale attempt (resolved, retried, held by a recovery) and for
+ *   a write that failed — neither may be announced
+ */
+function holdUncertain(db: Database.Database, ref: RelayPayloadAttemptRef, reason: string): boolean {
+  try {
+    return holdRelayPayloadDelivery(db, { ...ref, reason });
+  } catch (error) {
+    // Left `attempting`, which is a hold already; the next boot labels it.
+    logger.warn('relay-delivery-hold-failed', {
+      relayId: ref.relayId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
+/**
+ * Tell the requester, in its history, that one delivery attempt was held as
+ * `uncertain` (Issue #4082). Called only for an attempt this process just
+ * moved there. Keyed on the relay, payload AND attempt, so the same attempt is
+ * told once and a retry's new attempt (or another payload) is told again.
+ *
+ * Best-effort and at most one line: a failed write (or a stop before it) is
+ * not retried and never touches the hold; the socket frame goes out only after
+ * the row is committed.
+ */
+function noteRelayHeld(
+  db: Database.Database,
+  relay: SessionRelay,
+  requester: ResolvedRelaySession,
+  ref: RelayPayloadAttemptRef,
+  kind: RelayPendingKind | null,
+  reason: string
+): void {
+  try {
+    writeRelaySystemLine(
+      db,
+      relay.id,
+      'held',
+      requester,
+      resolveRelaySession(db, relay.to),
+      ref.now ?? Date.now(),
+      {
+        relayId: relay.id,
+        payload: `${kind ?? '-'}:${ref.payloadId}`,
+        attemptId: ref.attemptId,
+        deliveryReason: reason,
+      },
+      `${ref.payloadId}:${ref.attemptId}`
+    );
+  } catch (error) {
+    logger.warn('relay-held-line-failed', {
+      relayId: ref.relayId,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 
@@ -575,11 +909,13 @@ export async function pumpRelayDeliveries(): Promise<void> {
     // delivered by one more pass rather than waiting for the next tick.
     for (let pass = 0; pass < PUMP_PASSES_MAX; pass += 1) {
       globalThis.__relayPumpAgain = false;
-      for (const item of listRelaysWithPendingPayload(db)) {
+      // Issue #4064: a payload under a delivery hold is not listed, so a pass
+      // (or the next pump) never types it again; other relays go on.
+      for (const item of listDeliverableRelayPayloads(db)) {
         if (inFlight.has(item.relay.id)) continue;
         inFlight.add(item.relay.id);
         try {
-          await deliverOne(db, item.relay.id, item.kind, item.body);
+          await deliverOne(db, item.relay.id, item.kind, item.body, item.payloadId);
         } catch (error) {
           logger.warn('relay-delivery-failed', {
             relayId: item.relay.id,
@@ -598,6 +934,18 @@ export async function pumpRelayDeliveries(): Promise<void> {
   } finally {
     globalThis.__relayPumpRunning = false;
   }
+}
+
+/**
+ * Ask for a delivery pass without waiting for it (Issue #4082): a resolved hold
+ * queued a payload again or promoted a reply. A pump already running makes one
+ * more pass for it; otherwise one starts. Never sends by itself — the payload
+ * goes through {@link deliverOne}'s readiness, claim and input lock like any
+ * other — and never throws.
+ */
+export function requestRelayPump(): void {
+  globalThis.__relayPumpAgain = true;
+  void pumpRelayDeliveries();
 }
 
 /** One tick of the background loop: sweep the deadlines, then deliver. */

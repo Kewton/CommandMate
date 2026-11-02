@@ -88,22 +88,34 @@ function formatRate(value: number | null): string {
 async function readRelayCounts(
   client: ApiClient,
   days: number
-): Promise<RelayCountsResponse | null> {
+): Promise<{ counts: RelayCountsResponse; held: number | null } | null> {
   try {
     const response = await client.get<RelayListResponse>(
       `/api/relays?days=${encodeURIComponent(String(days))}`
     );
-    return response.counts ?? null;
+    if (!response.counts) return null;
+    // Issue #4082: the held count is "now", not the window's; null (never 0)
+    // when the server did not answer it.
+    return {
+      counts: response.counts,
+      held: typeof response.heldCount === 'number' ? response.heldCount : null,
+    };
   } catch {
     return null;
   }
 }
 
-/** The relay line, in the same shape as the four above it. */
-export function formatRelayCounts(counts: RelayCountsResponse): string {
+/**
+ * The relay line, in the same shape as the four above it.
+ *
+ * @param held - Issue #4082: payloads held as `uncertain` NOW (not narrowed by
+ *   the window, not one of the states); omitted from the line when null/absent
+ */
+export function formatRelayCounts(counts: RelayCountsResponse, held: number | null = null): string {
+  const heldPart = held === null ? '' : `, ${held} held now`;
   return (
     `Relays:       ${counts.delivered} delivered / ${counts.prompt} waiting on a prompt `
-    + `/ ${counts.expired} expired  (${counts.pending} still open, ${counts.cancelled} cancelled)`
+    + `/ ${counts.expired} expired  (${counts.pending} still open, ${counts.cancelled} cancelled${heldPart})`
   );
 }
 
@@ -290,10 +302,16 @@ export function createReportCommand(): Command {
         const relays = await readRelayCounts(client, days);
 
         if (options.json) {
-          console.log(JSON.stringify({ ...data.metrics, relays }, null, 2));
+          console.log(
+            JSON.stringify(
+              { ...data.metrics, relays: relays?.counts ?? null, relaysHeld: relays?.held ?? null },
+              null,
+              2
+            )
+          );
         } else {
           console.log(formatVibeMetrics(data.metrics));
-          if (relays) console.log(formatRelayCounts(relays));
+          if (relays) console.log(formatRelayCounts(relays.counts, relays.held));
         }
       } catch (error) {
         handleCommandError(error);

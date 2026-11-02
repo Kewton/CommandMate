@@ -24,13 +24,16 @@ import {
   cancelRelay as cancelRelayRow,
   getRelayById,
   getSessionRelaySummary,
+  resolveRelayDeliveryHold,
+  type ResolveRelayDeliveryHoldResult,
 } from '@/lib/db/relay-db';
-import { getMessages, parseRelayRequestId } from '@/lib/db/chat-db';
+import { getMessages, parseRelayRequestId, relayRequestId } from '@/lib/db/chat-db';
 import { normalizeUserTurnContent } from '@/lib/history/user-turn-recorder';
 import type { ChatMessage } from '@/types/models';
 import {
   isOpenRelayState,
   type RelayEndpoint,
+  type RelayHoldAction,
   type SessionRelay,
   type SessionRelaySummary,
 } from '@/lib/relay/types';
@@ -287,6 +290,91 @@ export function withdrawRelay(
   }
   logger.info('relay-cancelled', { relayId });
   return { ok: true, relay: getRelayById(db, relayId) ?? existing };
+}
+
+/** What {@link resolveRelayHold} is asked (Issue #4082). */
+export interface ResolveRelayHoldInput {
+  relayId: string;
+  payloadId: string;
+  /** `deliveryHold.attemptId` as read; null never matches a hold. */
+  attemptId: string | null;
+  action: RelayHoldAction;
+  now?: number;
+}
+
+/**
+ * Settle an `uncertain` delivery hold: confirm it reached the requester, queue
+ * it again, or discard it (Issue #4082). See `resolveRelayDeliveryHold` for the
+ * state table and the refusals.
+ *
+ * Writes only. A retried payload or a promoted reply is sent by the pump — the
+ * route asks for one — so the requester's readiness and input lock still
+ * decide when, and only the delivery that takes it types it.
+ *
+ * @throws When the database refuses a write; nothing is committed then
+ */
+export function resolveRelayHold(
+  db: Database.Database,
+  input: ResolveRelayHoldInput
+): ResolveRelayDeliveryHoldResult {
+  const result = resolveRelayDeliveryHold(db, {
+    relayId: input.relayId,
+    payloadId: input.payloadId,
+    attemptId: input.attemptId,
+    action: input.action,
+    sentRequestId: relayRequestId(input.relayId),
+    now: input.now,
+  });
+  if (result.ok) {
+    logger.info('relay-hold-resolved', {
+      relayId: input.relayId,
+      payloadId: input.payloadId,
+      attemptId: input.attemptId,
+      action: input.action,
+      state: result.relay.state,
+      requeued: result.requeued,
+      promoted: result.promoted,
+      replyDiscarded: result.discardedReply !== null,
+      expired: result.expired,
+    });
+    // Issue #4082: a closed relay's waiting reply was dropped with the notice
+    // in front of it. Told in the requester's history once (best-effort: the
+    // settle is committed, and a failed line never undoes it).
+    // Issue #4082: closed here because its deadline had passed — the same
+    // `expired` line the sweep writes (same key, so never twice).
+    if (result.expired) {
+      const relay = result.relay;
+      writeRelaySystemLine(
+        db,
+        relay.id,
+        'expired',
+        resolveRelaySession(db, relay.from),
+        resolveRelaySession(db, relay.to),
+        input.now ?? Date.now()
+      );
+    }
+    if (result.discardedReply) {
+      const relay = result.relay;
+      const replyPayloadId = result.discardedReply.payloadId;
+      writeRelaySystemLine(
+        db,
+        relay.id,
+        'reply-discarded',
+        resolveRelaySession(db, relay.from),
+        resolveRelaySession(db, relay.to),
+        input.now ?? Date.now(),
+        { relayId: relay.id, payload: `reply:${replyPayloadId ?? '-'}` },
+        replyPayloadId ?? input.payloadId
+      );
+    }
+  } else {
+    logger.info('relay-hold-resolve-refused', {
+      relayId: input.relayId,
+      action: input.action,
+      refusal: result.refusal,
+    });
+  }
+  return result;
 }
 
 /** The open relays at both ends of one session. */

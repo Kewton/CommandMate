@@ -1107,6 +1107,8 @@ export const ChatSurface = memo(function ChatSurface({
       resolveRelayBadges({
         owed: relays.owedBy(relayInstanceId),
         awaiting: relays.awaitedBy(relayInstanceId),
+        // Issue #4082: a held delivery to this session outranks the rest.
+        held: relays.heldFor(relayInstanceId),
         // The other end is normally another worktree, whose roster this surface
         // has never read, so the id qualified by its worktree is the honest
         // name — the same rule the relay header itself follows.
@@ -1139,7 +1141,7 @@ export const ChatSurface = memo(function ChatSurface({
           data-relay-tone={relayStrip.tone}
           role="status"
           className={`flex shrink-0 items-center gap-1.5 border-b border-border px-3 py-1 text-xs ${
-            relayStrip.tone === 'prompt'
+            relayStrip.tone === 'prompt' || relayStrip.tone === 'held'
               ? 'bg-warning-subtle text-warning-foreground'
               : 'bg-surface-2 text-muted-foreground'
           }`}

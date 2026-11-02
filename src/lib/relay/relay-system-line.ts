@@ -7,8 +7,9 @@
  * chat surface, the History tab and any transcript that happens to be open,
  * without a fourth history surface being invented for four sentences.
  *
- * Idempotent: the request id is `relay-sys:<relayId>:<kind>` and each row is
- * probed for before it is written, so a delivery that is retried — which the
+ * Idempotent: the request id is `relay-sys:<relayId>:<kind>` (Issue #4082:
+ * `…:<kind>:<scope>` for a line written once per payload attempt) and each row
+ * is probed for before it is written, in the same transaction, so a delivery that is retried — which the
  * pump does by design — does not stack four "waiting for the reply" lines.
  *
  * Never throws. A transcript line is the least important of a relay's three
@@ -21,7 +22,7 @@ import type Database from 'better-sqlite3';
 import {
   createRelaySystemMessage,
   findMessageByRequestId,
-  RELAY_SYSTEM_REQUEST_ID_PREFIX,
+  relaySystemRequestId,
 } from '@/lib/db/chat-db';
 import { resolveReadersLocale } from '@/lib/push/model-change-push-notifier';
 import { broadcastMessage } from '@/lib/ws-server';
@@ -45,6 +46,8 @@ const logger = createLogger('relay-system-line');
  * @param subject - Whose name the sentence carries (always the worker, B)
  * @param at - Epoch ms
  * @param detail - Issue #3957: the overlap and hold reason a `replied` line names
+ * @param scope - Issue #4082: what makes this line one of several of its kind on
+ *   the relay (`<payloadId>:<attemptId>` for `held`); null for the once-per-relay lines
  * @returns Whether a row was written by this call
  */
 export function writeRelaySystemLine(
@@ -54,22 +57,31 @@ export function writeRelaySystemLine(
   target: ResolvedRelaySession,
   subject: ResolvedRelaySession,
   at: number = Date.now(),
-  detail: RelaySystemLineDetail = {}
+  detail: RelaySystemLineDetail = {},
+  scope: string | null = null
 ): boolean {
-  const requestId = `${RELAY_SYSTEM_REQUEST_ID_PREFIX}${relayId}:${kind}`;
+  // Issue #4082: the probe and the write key the line through the same builder.
+  const requestId = relaySystemRequestId(relayId, kind, scope);
   try {
-    if (findMessageByRequestId(db, target.worktreeId, requestId)) return false;
-
-    const locale = resolveReadersLocale(db);
-    const message = createRelaySystemMessage(db, {
-      worktreeId: target.worktreeId,
-      cliToolId: target.cliToolId,
-      instanceId: target.instanceId,
-      content: buildRelaySystemLine(locale, kind, subject.alias, detail),
-      relayId,
-      kind,
-      at,
-    });
+    // Probe and write in one IMMEDIATE transaction: a second connection (or a
+    // second server on the same file) cannot slip its own copy in between.
+    const message = db
+      .transaction(() => {
+        if (findMessageByRequestId(db, target.worktreeId, requestId)) return null;
+        const locale = resolveReadersLocale(db);
+        return createRelaySystemMessage(db, {
+          worktreeId: target.worktreeId,
+          cliToolId: target.cliToolId,
+          instanceId: target.instanceId,
+          content: buildRelaySystemLine(locale, kind, subject.alias, detail),
+          relayId,
+          kind,
+          scope,
+          at,
+        });
+      })
+      .immediate();
+    if (message === null) return false;
 
     try {
       broadcastMessage('message', {

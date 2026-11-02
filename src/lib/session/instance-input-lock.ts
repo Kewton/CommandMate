@@ -443,6 +443,19 @@ export function instanceInputLaunchReadMark(): number {
   return (generationSeq.exclusiveEvents ?? 0) + (generationSeq.sharedReleases ?? 0);
 }
 
+/**
+ * The generation counter as it stands now (Issue #4065): every ticket granted
+ * from here on carries a larger generation. A send request reads it once, at
+ * its outermost entry (the send route before it reads the body; the send
+ * service for the timer and relay), and a refusal it records before any lock
+ * was granted to it carries the value — so it is not taken over the record of
+ * a send granted after the request began. Process-wide, like the generations
+ * themselves; 0 before any grant.
+ */
+export function instanceInputGenerationMark(): number {
+  return generationSeq.last;
+}
+
 /** Why {@link answerUnderInstanceInputLock} typed nothing (Issue #3952). */
 export type InstanceInputAnswerSkip =
   /** The screen read again under the lock is not the one the answer was for. */
@@ -693,6 +706,22 @@ export function isInputBoundaryRefusal(error: unknown): boolean {
   return /Input boundary could not be recorded \(.*\); nothing was typed \(Issue #3957\)/s.test(message);
 }
 
+/**
+ * What a send request is told about its own delivery, beside the input start
+ * (Issue #4065). Both calls are synchronous and never throw into the sender: a
+ * throw is logged and dropped, so recording the order never changes the send.
+ */
+export interface InputRequestObserver {
+  /**
+   * The body's input lock was granted (or joined) under this ticket's
+   * generation — right after the grant, before any key; told again with the
+   * same generation when an inner sender joins the outer ticket.
+   */
+  onTicket?: (generation: number) => void;
+  /** A dispatch that types nothing (opencode's HTTP send) is about to go out. */
+  onDispatch?: () => void;
+}
+
 /** What {@link observeInputStart} hands the sender's context (Issue #3953). */
 interface InputStartObserver {
   /** Set by the first {@link noteInputStart} in the context; later calls keep it. */
@@ -703,6 +732,8 @@ interface InputStartObserver {
   boundary?: InputBoundaryHooks;
   /** Issue #3957: a dispatch was noted in this context and has not been answered. */
   dispatchOpen: boolean;
+  /** Issue #4065: told the body lock's generation and a dispatch. */
+  request?: InputRequestObserver;
 }
 
 const inputStartScope = getOrInitGlobal(
@@ -727,6 +758,10 @@ const inputStartScope = getOrInitGlobal(
  *   {@link noteInputStart}, so a caller can read state as of the moment the
  *   body started going in (Issue #3957: the send route's open-turn reading). A
  *   throw is logged and does not fail the send.
+ * @param request - Issue #4065: told, synchronously and as it happens, the
+ *   generation of the body's input lock ({@link noteInputTicket}) and a
+ *   dispatch ({@link noteDispatchStart}) — so a send that throws afterwards
+ *   still leaves them with the caller.
  * @returns `fn`'s value, and the moment input started — null when nothing in
  *   `fn` noted one (a path that never types a body: opencode's HTTP delivery,
  *   or a send refused before its first key). Never set when `fn` throws.
@@ -734,9 +769,10 @@ const inputStartScope = getOrInitGlobal(
 export async function observeInputStart<T>(
   fn: () => Promise<T>,
   onStart?: (at: Date) => void,
-  boundary?: InputBoundaryHooks
+  boundary?: InputBoundaryHooks,
+  request?: InputRequestObserver
 ): Promise<{ value: T; inputStartedAt: Date | null }> {
-  const observer: InputStartObserver = { at: null, onStart, boundary, dispatchOpen: false };
+  const observer: InputStartObserver = { at: null, onStart, boundary, dispatchOpen: false, request };
   const value = await inputStartScope.run(observer, fn);
   return { value, inputStartedAt: observer.at };
 }
@@ -770,6 +806,24 @@ function runBoundaryHook(observer: InputStartObserver, at: Date, kind: InputBoun
 }
 
 /**
+ * Tell the request observing this context the generation its body's input
+ * lock was granted under (Issue #4065). Called by the shared sender right
+ * after its lock is granted or joined — never for a launch key, an answer, a
+ * trust dialog or copilot's `/model` and selection-list keys, whose tickets
+ * are not the body's. Synchronous, never throws; outside an
+ * {@link observeInputStart} context it does nothing.
+ */
+export function noteInputTicket(ticket: InstanceInputTicket): void {
+  const observer = inputStartScope.getStore();
+  if (observer?.request?.onTicket === undefined) return;
+  try {
+    observer.request.onTicket(ticket.generation);
+  } catch (error) {
+    logger.warn('input-ticket-observer-failed', { error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+/**
  * Note that a body is about to be DISPATCHED without being typed (Issue #3957):
  * opencode's HTTP send, which reports no input start. Runs the required
  * boundary hook with kind `dispatch`; a refusal throws
@@ -781,6 +835,13 @@ export function noteDispatchStart(now: Date = new Date()): void {
   if (observer === undefined || observer.at !== null) return;
   runBoundaryHook(observer, now, 'dispatch');
   observer.dispatchOpen = true;
+  // Issue #4065: after the required hook, so a refused dispatch — nothing went
+  // out — is not reported as one.
+  try {
+    observer.request?.onDispatch?.();
+  } catch (error) {
+    logger.warn('dispatch-start-observer-failed', { error: error instanceof Error ? error.message : String(error) });
+  }
 }
 
 /**

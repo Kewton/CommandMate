@@ -1121,6 +1121,19 @@ export const RELAY_REQUEST_ID_PREFIX = 'relay:';
 /** The `request_id` prefix a relay SYSTEM row carries (`relay-sys:<relayId>:<kind>`). */
 export const RELAY_SYSTEM_REQUEST_ID_PREFIX = 'relay-sys:';
 
+/**
+ * The request id of a relay SYSTEM row (Issue #4082): `relay-sys:<relayId>:<kind>`,
+ * or `relay-sys:<relayId>:<kind>:<scope>` for a line written once per payload
+ * attempt (`held`: `<payloadId>:<attemptId>`). The probe that keeps a line from
+ * being written twice and the write itself both build it here, so the two
+ * cannot key the same line differently. The `relay-sys:` prefix is what the
+ * reply readers step over.
+ */
+export function relaySystemRequestId(relayId: string, kind: string, scope: string | null = null): string {
+  const base = `${RELAY_SYSTEM_REQUEST_ID_PREFIX}${relayId}:${kind}`;
+  return scope === null ? base : `${base}:${scope}`;
+}
+
 /** Build the relay message's request id from the ledger id. */
 export function relayRequestId(relayId: string): string {
   return `${RELAY_REQUEST_ID_PREFIX}${relayId}`;
@@ -1213,6 +1226,11 @@ export interface CreateRelaySystemMessageParams {
   relayId: string;
   /** Which line it is; part of the request id so the four cannot collide. */
   kind: string;
+  /**
+   * Issue #4082: what makes this line one of several of the same kind on one
+   * relay (`<payloadId>:<attemptId>` for `held`). See {@link relaySystemRequestId}.
+   */
+  scope?: string | null;
   /** Epoch ms. */
   at: number;
 }
@@ -1243,7 +1261,7 @@ export function createRelaySystemMessage(
     content: params.content,
     messageType: 'normal',
     timestamp: new Date(params.at),
-    requestId: `${RELAY_SYSTEM_REQUEST_ID_PREFIX}${params.relayId}:${params.kind}`,
+    requestId: relaySystemRequestId(params.relayId, params.kind, params.scope ?? null),
     cliToolId: params.cliToolId,
     instanceId: params.instanceId ?? params.cliToolId,
   });

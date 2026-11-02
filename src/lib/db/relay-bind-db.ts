@@ -12,25 +12,58 @@
 import { randomUUID } from 'crypto';
 import Database from 'better-sqlite3';
 import type {
-  RelayBindMode,
   RelayBoundaryKind,
   RelayObsState,
   RelayOverlap,
   RelayPendingKind,
   RelaySendState,
-  RelayState,
   SessionRelay,
 } from '@/lib/relay/types';
 import { OPEN_RELAY_STATES } from '@/lib/relay/types';
+import {
+  KEEP_HELD_PAYLOAD_SET,
+  OPEN_STATE_PLACEHOLDERS,
+  RELAY_COLUMNS,
+  mapRelay,
+  parseJson,
+  type RelayPendingReply,
+  type SessionRelayRow,
+} from './relay-bind-db-base';
+import { promoteRelayPendingReply } from './relay-bind-db-pending';
+import { completeRelayPayloadDelivery, type RelayPayloadAttemptRef } from './relay-bind-db-delivery';
 
-/** Every column, in one place, so the readers cannot drift from each other. */
-export const RELAY_COLUMNS = `
-  id, from_worktree_id, from_instance_id, to_worktree_id, to_instance_id,
-  state, hops, sent_request_id, pending_kind, pending_body, prompt_signature,
-  created_at, updated_at, expires_at, delivered_at,
-  bind_mode, send_state, input_boundary_at, boundary_kind, turn_open_at_send,
-  obs_state, hold_reason, overlap
-`;
+// Issue #4095: the shared row shape, the second slot and the delivery attempts
+// live in their own modules; every public name stays importable from here.
+export {
+  KEEP_HELD_PAYLOAD_SET,
+  OPEN_STATE_PLACEHOLDERS,
+  RELAY_COLUMNS,
+  mapRelay,
+} from './relay-bind-db-base';
+export type { RelayPendingReply, SessionRelayRow } from './relay-bind-db-base';
+export {
+  clearRelayPendingReply,
+  clearRelayPendingReplyUnlessHeld,
+  countHeldRelays,
+  promoteRelayPendingReply,
+  replaceRelayPromptWithPendingReply,
+  replaceRelayPromptWithReply,
+  setRelayPendingReply,
+} from './relay-bind-db-pending';
+export type { RelayPromptReplacement } from './relay-bind-db-pending';
+export {
+  RELAY_DELIVERY_SERVER_RESTARTED,
+  claimRelayPayloadDelivery,
+  completeRelayPayloadDelivery,
+  endRelayPayloadAttempt,
+  holdRelayPayloadDelivery,
+  isCurrentRelayPayloadAttempt,
+  listRelaysWithDeliveryHold,
+  recoverInterruptedRelayDeliveries,
+  recoverInterruptedRelayDeliveryRefs,
+  releaseRelayPayloadDelivery,
+} from './relay-bind-db-delivery';
+export type { ClaimRelayPayloadDeliveryInput, RelayPayloadAttemptRef } from './relay-bind-db-delivery';
 
 /**
  * The v62 columns no public reader sees (Issue #3957): the reservation token
@@ -42,32 +75,6 @@ const RELAY_BINDING_COLUMNS = `
   held_candidates, pending_reply, payload_id
 `;
 
-export interface SessionRelayRow {
-  id: string;
-  from_worktree_id: string;
-  from_instance_id: string;
-  to_worktree_id: string;
-  to_instance_id: string;
-  state: string;
-  hops: number;
-  sent_request_id: string | null;
-  pending_kind: string | null;
-  pending_body: string | null;
-  prompt_signature: string | null;
-  created_at: number;
-  updated_at: number;
-  expires_at: number;
-  delivered_at: number | null;
-  bind_mode: string;
-  send_state: string | null;
-  input_boundary_at: number | null;
-  boundary_kind: string | null;
-  turn_open_at_send: number | null;
-  obs_state: string | null;
-  hold_reason: string | null;
-  overlap: string | null;
-}
-
 interface SessionRelayBindingRow extends SessionRelayRow {
   bind_attempt_id: string | null;
   bind_owner: string | null;
@@ -77,33 +84,6 @@ interface SessionRelayBindingRow extends SessionRelayRow {
   pending_reply: string | null;
   payload_id: string | null;
 }
-
-export function mapRelay(row: SessionRelayRow): SessionRelay {
-  return {
-    id: row.id,
-    from: { worktreeId: row.from_worktree_id, instanceId: row.from_instance_id },
-    to: { worktreeId: row.to_worktree_id, instanceId: row.to_instance_id },
-    state: row.state as RelayState,
-    hops: row.hops,
-    sentRequestId: row.sent_request_id,
-    pendingKind: (row.pending_kind as RelayPendingKind | null) ?? null,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    expiresAt: row.expires_at,
-    deliveredAt: row.delivered_at,
-    bindMode: (row.bind_mode as RelayBindMode | null) ?? 'legacy',
-    sendState: (row.send_state as RelaySendState | null) ?? null,
-    inputBoundaryAt: row.input_boundary_at,
-    boundaryKind: (row.boundary_kind as RelayBoundaryKind | null) ?? null,
-    turnOpenAtSend: row.turn_open_at_send === null ? null : row.turn_open_at_send === 1,
-    obsState: (row.obs_state as RelayObsState | null) ?? null,
-    holdReason: row.hold_reason,
-    overlap: (row.overlap as RelayOverlap | null) ?? null,
-  };
-}
-
-/** Placeholders for an `IN (…)` over the open states. */
-export const OPEN_STATE_PLACEHOLDERS = OPEN_RELAY_STATES.map(() => '?').join(', ');
 
 /** A relay row plus the body waiting to be delivered. Pump-only. */
 export interface RelayWithPendingPayload {
@@ -154,24 +134,43 @@ export interface StashRelayPayloadOptions {
   overlap?: RelayOverlap;
 }
 
-/** Every relay carrying an undelivered payload, oldest first. */
-export function listRelaysWithPendingPayload(
+/**
+ * Every relay carrying an undelivered payload the pump may send, oldest first,
+ * with the payload's id (Issue #4064).
+ *
+ * A payload under a delivery hold (`delivery_state` set — being sent, or its
+ * outcome not known) is not listed: it is never sent again automatically.
+ */
+export function listDeliverableRelayPayloads(
   db: Database.Database
-): RelayWithPendingPayload[] {
+): Array<RelayWithPendingPayload & { payloadId: string | null }> {
   const rows = db
     .prepare(`
-      SELECT ${RELAY_COLUMNS} FROM session_relays
-      WHERE pending_kind IS NOT NULL
+      SELECT ${RELAY_COLUMNS}, payload_id FROM session_relays
+      WHERE pending_kind IS NOT NULL AND delivery_state IS NULL
       ORDER BY updated_at ASC
     `)
-    .all() as SessionRelayRow[];
+    .all() as Array<SessionRelayRow & { payload_id: string | null }>;
   return rows
     .filter((row) => row.pending_body !== null && row.pending_kind !== null)
     .map((row) => ({
       relay: mapRelay(row),
       kind: row.pending_kind as RelayPendingKind,
       body: row.pending_body as string,
+      payloadId: row.payload_id,
     }));
+}
+
+/**
+ * Every relay carrying an undelivered payload, oldest first.
+ *
+ * Issue #4064: a payload under a delivery hold is not "undelivered" in the
+ * sense the pump acts on, and is left out (see {@link listDeliverableRelayPayloads}).
+ */
+export function listRelaysWithPendingPayload(
+  db: Database.Database
+): RelayWithPendingPayload[] {
+  return listDeliverableRelayPayloads(db).map(({ relay, kind, body }) => ({ relay, kind, body }));
 }
 
 /**
@@ -180,6 +179,10 @@ export function listRelaysWithPendingPayload(
  * Issue #3957: with `payloadId` the clear only takes the payload it names. The
  * delivery passes the id it sent, so a reply stashed over a prompt notice while
  * that notice was being typed survives the notice's cleanup.
+ *
+ * Issue #4064: never a payload under a delivery hold — its delivery may have
+ * reached A, and its body, id and reason stay readable. The delivery records
+ * its own end with {@link completeRelayPayloadDelivery}.
  *
  * @returns Whether a payload was cleared
  */
@@ -195,14 +198,14 @@ export function clearRelayPending(
           .prepare(`
             UPDATE session_relays
             SET pending_kind = NULL, pending_body = NULL, payload_id = NULL, updated_at = ?
-            WHERE id = ?
+            WHERE id = ? AND delivery_state IS NULL
           `)
           .run(now, id)
       : db
           .prepare(`
             UPDATE session_relays
             SET pending_kind = NULL, pending_body = NULL, payload_id = NULL, updated_at = ?
-            WHERE id = ? AND payload_id IS ?
+            WHERE id = ? AND payload_id IS ? AND delivery_state IS NULL
           `)
           .run(now, id, payloadId);
   return result.changes === 1;
@@ -237,17 +240,6 @@ export interface RelayHeldCandidate {
   requestId: string | null;
 }
 
-/** A reply finished while a prompt notice held the pending slot (the second slot). */
-export interface RelayPendingReply {
-  /** The reply row the body was built from. */
-  candidateId: string;
-  body: string;
-  /** Null for a legacy relay, whose reply is not judged. */
-  overlap: RelayOverlap | null;
-  /** Why the overlap reads as it does; kept for the log and the system line. */
-  basis: string;
-  payloadId: string;
-}
 
 /** A relay row with the v62 columns no public reader sees. */
 export interface RelayBinding {
@@ -260,15 +252,6 @@ export interface RelayBinding {
   pendingReply: RelayPendingReply | null;
   payloadId: string | null;
   pendingKind: RelayPendingKind | null;
-}
-
-function parseJson<T>(text: string | null, fallback: T): T {
-  if (text === null) return fallback;
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    return fallback;
-  }
 }
 
 function mapBinding(row: SessionRelayBindingRow): RelayBinding {
@@ -527,121 +510,6 @@ export function clearRelayHeldCandidates(db: Database.Database, id: string): voi
   db.prepare('UPDATE session_relays SET held_candidates = NULL WHERE id = ?').run(id);
 }
 
-/**
- * Put a reply in the second slot while a prompt notice holds the first.
- *
- * Only one: the first reply to finish is the one kept.
- */
-export function setRelayPendingReply(
-  db: Database.Database,
-  id: string,
-  reply: RelayPendingReply,
-  now = Date.now()
-): boolean {
-  const result = db
-    .prepare(`
-      UPDATE session_relays SET pending_reply = ?, updated_at = ?
-      WHERE id = ? AND pending_kind = 'prompt' AND pending_reply IS NULL
-        AND state IN (${OPEN_STATE_PLACEHOLDERS})
-    `)
-    .run(JSON.stringify(reply), now, id, ...OPEN_RELAY_STATES);
-  return result.changes === 1;
-}
-
-/**
- * Replace an unclaimed prompt notice with the reply that made it moot.
- *
- * Conditional on the notice's own payload id, so a notice that was replaced or
- * delivered meanwhile is not overwritten.
- */
-export function replaceRelayPromptWithReply(
-  db: Database.Database,
-  id: string,
-  promptPayloadId: string | null,
-  reply: RelayPendingReply,
-  now = Date.now()
-): boolean {
-  const result = db
-    .prepare(`
-      UPDATE session_relays
-      SET pending_kind = 'reply', pending_body = ?, payload_id = ?, overlap = ?, updated_at = ?
-      WHERE id = ? AND pending_kind = 'prompt' AND payload_id IS ?
-        AND state IN (${OPEN_STATE_PLACEHOLDERS})
-    `)
-    .run(reply.body, reply.payloadId, reply.overlap, now, id, promptPayloadId, ...OPEN_RELAY_STATES);
-  return result.changes === 1;
-}
-
-/**
- * Move the second slot into the first once the prompt notice is gone.
- *
- * Atomic: the reply becomes the pending payload and leaves `pending_reply` in
- * one write, so the pump finds it and nothing finds it twice.
- */
-export function promoteRelayPendingReply(db: Database.Database, id: string, now = Date.now()): boolean {
-  return db.transaction((): boolean => {
-    const row = db
-      .prepare(`
-        SELECT pending_reply FROM session_relays
-        WHERE id = ? AND pending_kind IS NULL AND pending_reply IS NOT NULL
-          AND state IN (${OPEN_STATE_PLACEHOLDERS})
-      `)
-      .get(id, ...OPEN_RELAY_STATES) as { pending_reply: string } | undefined;
-    if (!row) return false;
-    const reply = parseJson<RelayPendingReply | null>(row.pending_reply, null);
-    if (!reply) {
-      db.prepare('UPDATE session_relays SET pending_reply = NULL WHERE id = ?').run(id);
-      return false;
-    }
-    db.prepare(`
-      UPDATE session_relays
-      SET pending_kind = 'reply', pending_body = ?, payload_id = ?, overlap = ?,
-          pending_reply = NULL, updated_at = ?
-      WHERE id = ?
-    `).run(reply.body, reply.payloadId, reply.overlap, now, id);
-    return true;
-  })();
-}
-
-/**
- * A prompt notice whose delivery did not go out, while a reply waits in the
- * second slot: the reply takes the first slot in its place (Issue #3957).
- *
- * Conditional on the notice's own payload id, in one transaction, so a notice
- * replaced meanwhile is left alone and the reply is not moved twice.
- */
-export function replaceRelayPromptWithPendingReply(
-  db: Database.Database,
-  id: string,
-  promptPayloadId: string | null,
-  now = Date.now()
-): boolean {
-  return db.transaction((): boolean => {
-    const row = db
-      .prepare(`
-        SELECT pending_reply FROM session_relays
-        WHERE id = ? AND pending_kind = 'prompt' AND payload_id IS ? AND pending_reply IS NOT NULL
-          AND state IN (${OPEN_STATE_PLACEHOLDERS})
-      `)
-      .get(id, promptPayloadId, ...OPEN_RELAY_STATES) as { pending_reply: string } | undefined;
-    if (!row) return false;
-    const reply = parseJson<RelayPendingReply | null>(row.pending_reply, null);
-    if (!reply) return false;
-    db.prepare(`
-      UPDATE session_relays
-      SET pending_kind = 'reply', pending_body = ?, payload_id = ?, overlap = ?,
-          pending_reply = NULL, updated_at = ?
-      WHERE id = ?
-    `).run(reply.body, reply.payloadId, reply.overlap, now, id);
-    return true;
-  })();
-}
-
-/** Empty the second slot (an expiry or a cancel supersedes it). */
-export function clearRelayPendingReply(db: Database.Database, id: string, now = Date.now()): void {
-  db.prepare('UPDATE session_relays SET pending_reply = NULL, updated_at = ? WHERE id = ?').run(now, id);
-}
-
 /** Cancel a relay as part of the restart recovery, recording why. */
 export function failOrphanedRelayBind(
   db: Database.Database,
@@ -654,11 +522,30 @@ export function failOrphanedRelayBind(
     .prepare(`
       UPDATE session_relays
       SET send_state = 'failed', state = 'cancelled', hold_reason = ?,
-          pending_kind = NULL, pending_body = NULL, payload_id = NULL, pending_reply = NULL,
+          ${KEEP_HELD_PAYLOAD_SET}, pending_reply = NULL,
           updated_at = ?
       WHERE id = ? AND bind_attempt_id = ? AND send_state = 'awaiting'
         AND state IN (${OPEN_STATE_PLACEHOLDERS})
     `)
     .run(reason, now, id, attemptId, ...OPEN_RELAY_STATES);
   return result.changes === 1;
+}
+
+/**
+ * A prompt notice went out: end its attempt and, in the same transaction,
+ * move a reply waiting in the second slot into the first (Issue #4082).
+ *
+ * A stale attempt ({@link isCurrentRelayPayloadAttempt} false) does neither.
+ *
+ * @returns Whether the attempt was ended, and whether a reply was promoted
+ */
+export function completeRelayPromptDelivery(
+  db: Database.Database,
+  ref: RelayPayloadAttemptRef
+): { completed: boolean; promoted: boolean } {
+  const now = ref.now ?? Date.now();
+  return db.transaction((): { completed: boolean; promoted: boolean } => {
+    if (!completeRelayPayloadDelivery(db, { ...ref, now })) return { completed: false, promoted: false };
+    return { completed: true, promoted: promoteRelayPendingReply(db, ref.relayId, now) };
+  })();
 }

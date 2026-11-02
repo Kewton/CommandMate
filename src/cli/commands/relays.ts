@@ -4,6 +4,8 @@
  *   commandmate relays [--worktree <id>] [--instance <id|alias>] [--json]
  *   commandmate relays --id <relay-id> [--json]   (Issue #3957: one relay, open or closed)
  *   commandmate relays cancel <relay-id>
+ *   commandmate relays resolve <relay-id> --payload <id> --attempt <id> --confirm|--retry|--discard
+ *     (Issue #4082: settle a delivery held as uncertain)
  *
  * ## Why a command and not a flag on `ls`
  *
@@ -33,6 +35,7 @@ import type {
   RelayCreateResponse,
   RelayGetResponse,
   RelayListResponse,
+  RelayResolveResponse,
   RelayView,
 } from '../types/api-responses';
 import { ApiClient, ApiError, isValidWorktreeId } from '../utils/api-client';
@@ -281,6 +284,17 @@ function printRelayLine(relay: RelayView): void {
   if (relay.sendState) fields.push(`send=${relay.sendState}`);
   if (relay.overlap) fields.push(`overlap=${relay.overlap}`);
   if (relay.holdReason) fields.push(`hold=${relay.holdReason}`);
+  // Issue #4064: a payload whose delivery may have reached the requester. It
+  // is never resent automatically; the pane named is where to look.
+  const delivery = relay.deliveryHold;
+  if (delivery) {
+    fields.push(`delivery=${delivery.state}`);
+    if (delivery.kind) fields.push(`payload=${delivery.kind}:${delivery.payloadId ?? '-'}`);
+    // Issue #4082: what `relays resolve --attempt` names. Absent on an older server.
+    if (delivery.attemptId) fields.push(`attempt=${delivery.attemptId}`);
+    if (delivery.reason) fields.push(`reason=${delivery.reason}`);
+    fields.push(`check=${delivery.checkCommand}`);
+  }
   console.log(fields.join('\t'));
 }
 
@@ -293,6 +307,23 @@ interface RelaysOptions {
 }
 
 /** `relays --id <id>`: one relay, whatever its state (Issue #3957). */
+/**
+ * `--json` / `--token` of a `relays` subcommand, the parent's included.
+ *
+ * The parent `relays` declares both options too, and commander gives an
+ * option the parent knows to the parent — `relays --token T resolve …`, and
+ * `relays resolve … --json` likewise — so the subcommand's own `options` never
+ * see it and a token would fall back to `CM_AUTH_TOKEN`. The subcommand's own
+ * value wins when both are given.
+ */
+function subcommandGlobals(
+  options: { json?: boolean; token?: string },
+  command: Command
+): { json: boolean; token: string | undefined } {
+  const all = command.optsWithGlobals<{ json?: boolean; token?: string }>();
+  return { json: options.json === true || all.json === true, token: options.token ?? all.token };
+}
+
 async function showOneRelay(client: ApiClient, relayId: string, json: boolean): Promise<void> {
   const response = await client.get<RelayGetResponse>(`/api/relays/${relayId}`);
   if (json) {
@@ -301,6 +332,44 @@ async function showOneRelay(client: ApiClient, relayId: string, json: boolean): 
   }
   printRelayLine(response.relay);
 }
+
+/** `relays resolve`'s options (Issue #4082). */
+interface RelayResolveOptions {
+  payload: string;
+  attempt: string;
+  confirm?: boolean;
+  retry?: boolean;
+  discard?: boolean;
+  json?: boolean;
+  token?: string;
+}
+
+type RelayHoldActionArg = 'confirm' | 'retry' | 'discard';
+
+/** The codes `POST /api/relays/:id/resolve` refuses with (409). Mirrors the route. */
+const RELAY_HOLD_REFUSAL_CODES = new Set([
+  'RELAY_HOLD_NOT_FOUND',
+  'RELAY_HOLD_ATTEMPTING',
+  'RELAY_HOLD_STALE',
+  'RELAY_HOLD_NOT_ALLOWED',
+]);
+
+/** The one action given, or null when none or more than one was. */
+function resolveAction(options: RelayResolveOptions): RelayHoldActionArg | null {
+  const given = (['confirm', 'retry', 'discard'] as const).filter((action) => options[action] === true);
+  return given.length === 1 ? given[0] : null;
+}
+
+/** What each action prints. `retry` says queued, never delivered. */
+const RESOLVED_MESSAGES: Record<RelayHoldActionArg, (relayId: string, response: RelayResolveResponse) => string> = {
+  confirm: (relayId, response) =>
+    `Relay ${relayId}: the held payload is recorded as delivered (relay is ${response.relay.state}).`,
+  retry: (relayId) =>
+    `Relay ${relayId}: the held payload is queued for delivery again (not delivered yet). `
+    + `Follow it with \`commandmate relays --id ${relayId}\`.`,
+  discard: (relayId, response) =>
+    `Relay ${relayId}: the held payload was discarded without sending (relay is ${response.relay.state}).`,
+};
 
 export function createRelaysCommand(): Command {
   const cmd = new Command('relays');
@@ -314,6 +383,7 @@ export function createRelaysCommand(): Command {
     .addHelpText('after', `
 Columns: <relay-id>  <state>  <requester> <- <worker>  hops=<n>  expires=<iso>
          [send=<state>]  [overlap=<none|later|earlier|both|unknown>]  [hold=<reason>]
+         [delivery=<attempting|uncertain>  payload=<kind>:<id>  attempt=<id>  reason=<r>  check=<cmd>]
 
 States: pending (the worker has not finished), prompt (it stopped on a
 confirmation and the requester was told), delivered / expired / cancelled.
@@ -324,6 +394,18 @@ relay is not being answered (send_unknown, dispatch_unknown, generation_changed,
 server_restarted, ...); overlap= says the reply may share a turn with another
 request (unknown is not "none"). \`--id <relay-id>\` shows one relay even after
 it closed.
+
+delivery= (Issue #4064) marks a payload whose delivery to the requester may
+have happened (uncertain: indeterminate, failed after it was sent, or the
+server restarted mid-send). It is NOT resent automatically and the relay's
+later payloads wait behind it. Look at the pane check= names first. Cancelling
+the relay stops later deliveries; it cannot take back what may already be in
+the requester's composer.
+
+Settle an uncertain hold (Issue #4082) after looking at that pane:
+  commandmate relays resolve <relay-id> --payload <id> --attempt <id> --confirm
+  (it arrived), --retry (it did not: queue it again, sent once when the
+  requester can take it), or --discard (drop it, send nothing).
 
 Withdraw one with \`commandmate relays cancel <relay-id>\`.
 `)
@@ -384,11 +466,31 @@ Withdraw one with \`commandmate relays cancel <relay-id>\`.
           );
         }
         const { counts } = response;
+        // Issue #4082: `held=` is its own axis (uncertain now, open or closed),
+        // not one of the states. Left out — never printed as 0 — when an older
+        // server did not answer it.
+        const held = typeof response.heldCount === 'number' ? ` held=${response.heldCount}` : '';
         console.error(
           `relays: pending=${counts.pending} prompt=${counts.prompt} `
-          + `delivered=${counts.delivered} expired=${counts.expired} cancelled=${counts.cancelled}`
+          + `delivered=${counts.delivered} expired=${counts.expired} cancelled=${counts.cancelled}${held}`
         );
 
+        // Issue #4064: listed even when no relay is open — a held payload's
+        // relay may have expired or been cancelled since.
+        // Issue #4082: the API's `held` also carries deliveries being typed
+        // right now (`attempting`). Only `uncertain` ones are the holds to
+        // settle — the same set `held=` counts — so the two are listed apart.
+        const heldRelays = response.held ?? [];
+        const uncertain = heldRelays.filter((relay) => relay.deliveryHold?.state === 'uncertain');
+        const inProgress = heldRelays.filter((relay) => relay.deliveryHold?.state !== 'uncertain');
+        if (uncertain.length > 0) {
+          console.error(`# delivery not confirmed, not resent (${uncertain.length})`);
+          uncertain.forEach(printRelayLine);
+        }
+        if (inProgress.length > 0) {
+          console.error(`# delivery in progress (${inProgress.length})`);
+          inProgress.forEach(printRelayLine);
+        }
         if (response.awaiting.length === 0 && response.owed.length === 0) {
           console.error('No open relays.');
           return;
@@ -408,23 +510,24 @@ Withdraw one with \`commandmate relays cancel <relay-id>\`.
 
   cmd
     .command('cancel')
-    .description('Withdraw an open relay so its reply is never delivered')
+    .description('Withdraw an open relay and stop its later deliveries (a delivery already held as uncertain may have reached you)')
     .argument('<relay-id>', 'Relay ID')
     .option('--json', 'JSON output')
     .option('--token <token>', TOKEN_WARNING)
-    .action(async (relayId: string, options: { json?: boolean; token?: string }) => {
+    .action(async (relayId: string, options: { json?: boolean; token?: string }, command: Command) => {
       try {
+        const { json, token } = subcommandGlobals(options, command);
         if (!RELAY_ID_PATTERN.test(relayId)) {
           console.error('Error: Invalid relay ID format.');
           process.exit(ExitCode.CONFIG_ERROR);
         }
 
-        const client = new ApiClient({ token: options.token });
+        const client = new ApiClient({ token });
         try {
           const response = await client.post<RelayCancelResponse>(
             `/api/relays/${relayId}/cancel`
           );
-          if (options.json) {
+          if (json) {
             console.log(JSON.stringify(response, null, 2));
           } else {
             console.error(`Relay ${relayId} cancelled.`);
@@ -443,6 +546,65 @@ Withdraw one with \`commandmate relays cancel <relay-id>\`.
             console.error(
               `Error: ${error.payload?.error ?? 'Relay is being delivered and can no longer be cancelled.'}`
             );
+            process.exit(ExitCode.CONFIG_ERROR);
+          }
+          throw error;
+        }
+      } catch (error) {
+        handleCommandError(error);
+      }
+    });
+
+  cmd
+    .command('resolve')
+    .description('Settle a delivery held as uncertain (look at the requester\'s pane first): confirm, retry or discard it')
+    .argument('<relay-id>', 'Relay ID')
+    .requiredOption('--payload <id>', 'The held payload id (payload=<kind>:<id> in `relays --id`)')
+    .requiredOption('--attempt <id>', 'The held attempt id (attempt=<id> in `relays --id`)')
+    .option('--confirm', 'It reached the requester: record it as delivered (types nothing)')
+    .option('--retry', 'It did not: queue it again; sent once when the requester can take it')
+    .option('--discard', 'Drop it without sending (types nothing)')
+    .option('--json', 'JSON output')
+    .option('--token <token>', TOKEN_WARNING)
+    .action(async (relayId: string, options: RelayResolveOptions, command: Command) => {
+      try {
+        const { json, token } = subcommandGlobals(options, command);
+        if (!RELAY_ID_PATTERN.test(relayId)) {
+          console.error('Error: Invalid relay ID format.');
+          process.exit(ExitCode.CONFIG_ERROR);
+        }
+        const action = resolveAction(options);
+        if (action === null) {
+          console.error('Error: give exactly one of --confirm, --retry or --discard.');
+          process.exit(ExitCode.CONFIG_ERROR);
+        }
+
+        const client = new ApiClient({ token });
+        try {
+          const response = await client.post<RelayResolveResponse>(
+            `/api/relays/${relayId}/resolve`,
+            { payloadId: options.payload, attemptId: options.attempt, action }
+          );
+          if (json) {
+            console.log(JSON.stringify(response, null, 2));
+          } else {
+            console.error(RESOLVED_MESSAGES[action](relayId, response));
+            if (response.promoted) {
+              console.error('  The reply that waited behind it is queued for delivery.');
+            }
+            // Issue #4082: a closed relay delivers nothing more.
+            if (response.replyDiscarded) {
+              console.error(
+                '  The reply that waited behind it was discarded: the relay is closed, so it is not delivered.'
+              );
+            }
+          }
+        } catch (error) {
+          // A stale, in-progress or not-allowed hold: nothing was changed, and
+          // re-reading the relay is what the operator does next.
+          if (error instanceof ApiError && error.apiCode && RELAY_HOLD_REFUSAL_CODES.has(error.apiCode)) {
+            console.error(`Error: ${error.payload?.error ?? error.apiCode}`);
+            console.error(`  Nothing was changed. Read it again with \`commandmate relays --id ${relayId}\`.`);
             process.exit(ExitCode.CONFIG_ERROR);
           }
           throw error;

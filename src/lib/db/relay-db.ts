@@ -20,15 +20,14 @@ import { randomUUID } from 'crypto';
 import Database from 'better-sqlite3';
 import type {
   RelayBindMode,
-  RelayCounts,
   RelayEndpoint,
   RelaySendState,
   SessionRelay,
   SessionRelaySummary,
 } from '@/lib/relay/types';
-import { emptyRelayCounts, OPEN_RELAY_STATES } from '@/lib/relay/types';
-import { createLogger } from '@/lib/logger';
+import { OPEN_RELAY_STATES } from '@/lib/relay/types';
 import {
+  KEEP_HELD_PAYLOAD_SET,
   mapRelay,
   OPEN_STATE_PLACEHOLDERS,
   RELAY_COLUMNS,
@@ -39,17 +38,30 @@ import {
 // re-exported so every caller (and every `vi.mock`) keeps this module's surface.
 export {
   appendRelayHeldCandidate,
+  claimRelayPayloadDelivery,
   clearRelayHeldCandidates,
   clearRelayPending,
   clearRelayPendingReply,
+  clearRelayPendingReplyUnlessHeld,
+  completeRelayPayloadDelivery,
+  countHeldRelays,
+  completeRelayPromptDelivery,
   explainRelayBindRefusal,
   failOrphanedRelayBind,
   getRelayBinding,
   getRelayPendingPayload,
+  holdRelayPayloadDelivery,
+  isCurrentRelayPayloadAttempt,
+  listDeliverableRelayPayloads,
   listOpenBoundRelays,
+  listRelaysWithDeliveryHold,
   listRelaysWithPendingPayload,
   promoteRelayPendingReply,
   recordRelayInputBoundary,
+  recoverInterruptedRelayDeliveries,
+  recoverInterruptedRelayDeliveryRefs,
+  releaseRelayPayloadDelivery,
+  RELAY_DELIVERY_SERVER_RESTARTED,
   replaceRelayPromptWithPendingReply,
   replaceRelayPromptWithReply,
   reserveRelayBind,
@@ -57,10 +69,12 @@ export {
   setRelayPendingReply,
   settleRelaySendState,
   stashRelayPayload,
+  type ClaimRelayPayloadDeliveryInput,
   type RecordRelayInputBoundaryInput,
   type RelayBinding,
   type RelayBindRefusal,
   type RelayHeldCandidate,
+  type RelayPayloadAttemptRef,
   type RelayPendingReply,
   type RelayWithPendingPayload,
   type ReserveRelayBindInput,
@@ -68,7 +82,22 @@ export {
   type StashRelayPayloadOptions,
 } from '@/lib/db/relay-bind-db';
 
-const logger = createLogger('relay-db');
+// Issue #4096: split out of this file; re-exported so every caller (and every
+// `vi.mock`) keeps this module's surface.
+export { getRelayById } from '@/lib/db/relay-db-base';
+export {
+  completeRelayReplyDelivery,
+  markRelayDelivered,
+  type RelayReplyDeliveryInput,
+  type RelayReplyDeliveryResult,
+} from '@/lib/db/relay-db-delivery';
+export {
+  resolveRelayDeliveryHold,
+  type RelayHoldRefusal,
+  type ResolveRelayDeliveryHoldInput,
+  type ResolveRelayDeliveryHoldResult,
+} from '@/lib/db/relay-db-hold';
+export { countRelays, type RelayCountFilter } from '@/lib/db/relay-db-count';
 
 /** What {@link createRelay} needs. Everything else is derived here. */
 export interface CreateRelayInput {
@@ -132,15 +161,8 @@ export function createRelay(db: Database.Database, input: CreateRelayInput): Ses
     obsState: null,
     holdReason: null,
     overlap: null,
+    deliveryHold: null,
   };
-}
-
-/** One relay by id, or null. */
-export function getRelayById(db: Database.Database, id: string): SessionRelay | null {
-  const row = db
-    .prepare(`SELECT ${RELAY_COLUMNS} FROM session_relays WHERE id = ?`)
-    .get(id) as SessionRelayRow | undefined;
-  return row ? mapRelay(row) : null;
 }
 
 /** Every still-open relay this session must answer (it is the `to` end). */
@@ -232,52 +254,6 @@ export function countOpenRelaysBetween(
 }
 
 /**
- * Close the relay as delivered, exactly once.
- *
- * Two clauses, and they guard different things — worth separating, because a
- * later reader who notices that the second is redundant *for one relay id* will
- * otherwise delete the one that is not.
- *
- *  - `state IN (open)` is what makes a SECOND call for the same relay answer
- *    false: the first call left it `delivered`, which is not an open state.
- *  - `sent_request_id IS NULL`, together with the column's UNIQUE index, is what
- *    makes the delivery id itself unrepeatable ACROSS relays and across
- *    processes. It is the idempotency key the Issue names, and it is why this
- *    function catches: the index refusing a write is the answer "somebody else
- *    got there first", and that answer must not arrive as an exception inside a
- *    delivery path.
- *
- * @returns Whether this call is the one that closed it
- */
-export function markRelayDelivered(
-  db: Database.Database,
-  id: string,
-  sentRequestId: string,
-  now = Date.now()
-): boolean {
-  try {
-    const result = db
-      .prepare(`
-        UPDATE session_relays
-        SET state = 'delivered', sent_request_id = ?, delivered_at = ?,
-            pending_kind = NULL, pending_body = NULL, payload_id = NULL, updated_at = ?
-        WHERE id = ? AND sent_request_id IS NULL
-          AND state IN (${OPEN_STATE_PLACEHOLDERS})
-      `)
-      .run(sentRequestId, now, now, id, ...OPEN_RELAY_STATES);
-    return result.changes === 1;
-  } catch (error) {
-    // The UNIQUE index refusing the write IS the answer "somebody else got
-    // there first", and it must not become an exception in a delivery path.
-    logger.warn('relay-deliver-conflict', {
-      relayId: id,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return false;
-  }
-}
-
-/**
  * Note that A is being told B is waiting on a confirmation.
  *
  * Leaves the relay OPEN — `prompt` is an open state, so answering the dialog
@@ -348,7 +324,12 @@ export function listExpiredOpenRelays(
   return rows.map(mapRelay);
 }
 
-/** Withdraw a relay. Returns false when it was already closed or absent. */
+/**
+ * Withdraw a relay. Returns false when it was already closed or absent.
+ *
+ * Issue #4064: stops later deliveries only. A payload under a delivery hold
+ * (it may already be in A's composer) keeps its body, id and reason.
+ */
 export function cancelRelay(
   db: Database.Database,
   id: string,
@@ -357,64 +338,10 @@ export function cancelRelay(
   const result = db
     .prepare(`
       UPDATE session_relays
-      SET state = 'cancelled', pending_kind = NULL, pending_body = NULL, payload_id = NULL,
+      SET state = 'cancelled', ${KEEP_HELD_PAYLOAD_SET},
           pending_reply = NULL, updated_at = ?
       WHERE id = ? AND state IN (${OPEN_STATE_PLACEHOLDERS})
     `)
     .run(now, id, ...OPEN_RELAY_STATES);
   return result.changes === 1;
-}
-
-/** Which relays {@link countRelays} should count. All fields are optional. */
-export interface RelayCountFilter {
-  /** Only relays with this worktree at either end. */
-  worktreeId?: string;
-  /** Narrows {@link RelayCountFilter.worktreeId} to one instance. */
-  instanceId?: string;
-  /** Only relays created at or after this epoch ms. */
-  since?: number;
-}
-
-/**
- * Count relays per state.
- *
- * The shape `commandmate task show` and `report metrics` print. Counting in SQL
- * rather than reading rows because a long-lived server accumulates thousands
- * and both callers want five integers.
- */
-export function countRelays(
-  db: Database.Database,
-  filter: RelayCountFilter = {}
-): RelayCounts {
-  const clauses: string[] = [];
-  const params: (string | number)[] = [];
-
-  if (filter.worktreeId) {
-    if (filter.instanceId) {
-      clauses.push(
-        '((from_worktree_id = ? AND from_instance_id = ?) OR (to_worktree_id = ? AND to_instance_id = ?))'
-      );
-      params.push(filter.worktreeId, filter.instanceId, filter.worktreeId, filter.instanceId);
-    } else {
-      clauses.push('(from_worktree_id = ? OR to_worktree_id = ?)');
-      params.push(filter.worktreeId, filter.worktreeId);
-    }
-  }
-  if (filter.since !== undefined) {
-    clauses.push('created_at >= ?');
-    params.push(filter.since);
-  }
-
-  const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
-  const rows = db
-    .prepare(`SELECT state, COUNT(*) AS n FROM session_relays ${where} GROUP BY state`)
-    .all(...params) as Array<{ state: string; n: number }>;
-
-  const counts = emptyRelayCounts();
-  for (const row of rows) {
-    if (row.state in counts) {
-      counts[row.state as keyof RelayCounts] = row.n;
-    }
-  }
-  return counts;
 }

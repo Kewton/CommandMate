@@ -125,6 +125,7 @@ vi.mock('child_process', async (importOriginal) => {
 });
 
 import { BaseCLITool } from '@/lib/cli-tools/base';
+import { typeLaunchLines } from '@/lib/cli-tools/launch-keys';
 import { CodexTool } from '@/lib/cli-tools/codex';
 import { CopilotTool } from '@/lib/cli-tools/copilot';
 import { AntigravityTool } from '@/lib/cli-tools/antigravity';
@@ -218,5 +219,29 @@ describe('[#3981] launch keys wait for a send holding the composer, per tool', (
     await started;
 
     expect(events.list).toEqual(keys);
+  });
+});
+
+describe('[#4050] `typeLaunchLines`, the ledger site every launch types through', () => {
+  it('positive: a line waits for a send holding the composer and is typed with a ticket after', async () => {
+    const session = 'mcbd-codex-wt4050';
+    const held = holdSend(session);
+    const typed = typeLaunchLines(session, ['LAUNCH-LINE']);
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(events.list).toEqual(['<send>']);
+
+    held.release();
+    await held.done;
+    await vi.advanceTimersByTimeAsync(1_000);
+    await typed;
+    expect(events.list).toEqual(['<send>', '</send>', 'launch-line']);
+    expect(events.ticketAtKey).toEqual([true]);
+  });
+
+  it('negative: with no send in the way, the lines and self-typing steps go out in order', async () => {
+    const typed = typeLaunchLines('mcbd-codex-wt4050', ['LAUNCH-LINE', async () => void events.list.push('step')]);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await typed;
+    expect(events.list).toEqual(['launch-line', 'step']);
   });
 });

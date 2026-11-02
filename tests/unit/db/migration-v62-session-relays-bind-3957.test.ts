@@ -89,7 +89,7 @@ describe('migration v62: session_relays binding columns (Issue #3957)', () => {
     runMigrations(db);
 
     expect(getCurrentVersion(db)).toBe(CURRENT_SCHEMA_VERSION);
-    expect(CURRENT_SCHEMA_VERSION).toBe(62);
+    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(62);
     for (const column of V62_SESSION_RELAY_COLUMNS) expect(columns('session_relays')).toContain(column);
 
     const relay = getRelayById(db, 'r-old');
@@ -159,7 +159,7 @@ describe('migration v62: session_relays binding columns (Issue #3957)', () => {
     runMigrations(db);
     rollbackMigrations(db, 61);
     runMigrations(db);
-    expect(getCurrentVersion(db)).toBe(62);
+    expect(getCurrentVersion(db)).toBe(CURRENT_SCHEMA_VERSION);
     for (const column of V62_SESSION_RELAY_COLUMNS) expect(columns('session_relays')).toContain(column);
   });
 });

@@ -54,7 +54,7 @@ import {
   deleteMessageById,
 } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import { isImageCapableCLITool, type CLIToolType } from '@/lib/cli-tools/types';
+import { isImageCapableCLITool, type CLIToolType, type ICLITool } from '@/lib/cli-tools/types';
 import { startPolling, getActivePollers } from '@/lib/polling/response-poller';
 import { savePendingAssistantResponse } from '@/lib/assistant-response-saver';
 import { broadcastMessage } from '@/lib/ws-server';
@@ -82,6 +82,7 @@ import {
 import { extractComposerText, SUPPORTED_COMPOSER_TOOLS } from '@/lib/detection/composer-text';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
 import {
+  instanceInputGenerationMark,
   isInputBoundaryRefusal,
   observeInputStart,
   withInstanceInputLock,
@@ -103,6 +104,13 @@ export interface SendUserMessageParams {
   cliToolId: CLIToolType;
   /** Agent instance ID; defaults to the primary instance (=== cliToolId). */
   instanceId?: string;
+  /**
+   * The tool the PROMPT_WAITING refusal's `respond` names when no instance was
+   * named (Issue #4049). Set by the send route from `respondAgentFor` — only
+   * when the request named a tool other than the worktree default; omitted, the
+   * sentence is as before.
+   */
+  respondAgent?: CLIToolType;
   /** chat_messages message_type. Defaults to 'normal'. */
   messageType?: MessageType;
   /**
@@ -150,6 +158,15 @@ export interface SendUserMessageParams {
    * before anything is typed, and the attempt is `not-sent`.
    */
   inputBoundary?: InputBoundaryHooks;
+  /**
+   * Issue #4065: the input generation counter (`instanceInputGenerationMark`)
+   * as the request's outermost entry read it — the send route, before it read
+   * the body. A `not-sent` refusal this send records before any lock was
+   * granted to it carries it, so it does not replace the record of a send
+   * granted after the request began. Omitted (the timer, relay delivery), it
+   * is read on entry here.
+   */
+  observedInputGeneration?: number;
 }
 
 /** Result of {@link sendUserMessage}. */
@@ -256,6 +273,17 @@ async function composerStillHolds(
 }
 
 /**
+ * The body the tool will actually type for `content` (Issue #4048): with an
+ * image, the image-capable tool's own body (`imageMessageBody`) or the path
+ * fallback; otherwise `content` itself. Must match what `sendToTool` sends.
+ */
+function typedBodyFor(cliTool: ICLITool, content: string, absoluteImagePath: string | undefined): string {
+  if (!absoluteImagePath) return content;
+  if (isImageCapableCLITool(cliTool)) return cliTool.imageMessageBody?.(content, absoluteImagePath) ?? content;
+  return formatImagePathFallbackMessage(content, absoluteImagePath);
+}
+
+/**
  * Send a validated user message to the CLI tool and record it in history.
  *
  * On CLI send failure (or copilot /model failure) it returns an `ok: false`
@@ -266,7 +294,11 @@ export async function sendUserMessage(
   db: Database.Database,
   params: SendUserMessageParams
 ): Promise<SendUserMessageResult> {
-  const { worktreeId, content, cliToolId, instanceId, absoluteImagePath, copilotModel } = params;
+  const { worktreeId, content, cliToolId, instanceId, absoluteImagePath, copilotModel, respondAgent } = params;
+  // Issue #4065: read once, before the first await — a send granted while this
+  // request waits (ownership, the prompt guard, `/model`, the lock) is newer
+  // than this request's refusal.
+  const observedGeneration = params.observedInputGeneration ?? instanceInputGenerationMark();
   const messageType: MessageType = params.messageType ?? 'normal';
   /**
    * The instance this send belongs to, resolved the way `createMessage` and
@@ -282,8 +314,50 @@ export async function sendUserMessage(
   // Issue #3759: how this attempt left the message, kept for `lastSend` (and
   // read back by the send route for its error). The result's shape is
   // unchanged; recording never throws.
+  //
+  // Issue #4048: the record also carries the body actually typed (an image
+  // reference appended), which is what the composer and the first-prompt
+  // receipt know the attempt by, and the input lock generation the delivery
+  // ran under, so the late outcome of a send whose session was replaced does
+  // not overwrite the newer generation's record.
+  //
+  // Issue #4065: which record is the instance's last is decided by the lock's
+  // grant order (`send-attempt-state`). This send's record is one of:
+  // - granted: the body's lock was granted to it (`inputGeneration`) — the
+  //   outer lock below for claude / codex, the shared sender's own lock for the
+  //   others, told through `observeInputStart` as it is granted, so a send that
+  //   throws after it keeps it. Refused after the grant, before any key, too.
+  // - refused: `not-sent` with no lock granted (ownership, the prompt guard,
+  //   `/model`, the lock not admitted, a readiness wait before the sender's
+  //   lock) — carries `observedGeneration`.
+  // - excluded: typed or dispatched outside the shared sender's lock —
+  //   copilot's selection-list keys (input noted, no ticket), opencode's HTTP
+  //   delivery and its keyboard fallback (a dispatch noted) — or anything else
+  //   that reports neither; kept in the order attempts finish.
+  const typedContent = typedBodyFor(cliTool, content, absoluteImagePath);
+  let inputGeneration: number | undefined;
+  let inputNotedWithoutTicket = false;
+  let dispatched = false;
   const settle = (state: SendAttemptState, reason: SendAttemptReason): void => {
-    recordSendAttempt({ worktreeId, cliToolId, instanceId: resolvedInstanceId }, { state, reason, content });
+    const excluded = dispatched || (inputGeneration === undefined && inputNotedWithoutTicket);
+    const order = excluded
+      ? {}
+      : inputGeneration !== undefined
+        ? { inputGeneration }
+        : state === 'not-sent'
+          ? { observedGeneration }
+          : {};
+    recordSendAttempt(
+      { worktreeId, cliToolId, instanceId: resolvedInstanceId },
+      {
+        state,
+        reason,
+        content,
+        ...(typedContent !== content ? { typedContent } : {}),
+        ...order,
+      }
+    );
+    // Told whether or not the shared record took it: this is the request's own.
     params.onAttempt?.({ state, reason });
   };
 
@@ -345,7 +419,7 @@ export async function sendUserMessage(
     return {
       ok: false,
       stage: 'prompt_waiting',
-      error: promptWaitingMessage(worktreeId, promptGuard.blockedBy, instanceId),
+      error: promptWaitingMessage(worktreeId, promptGuard.blockedBy, instanceId, respondAgent),
     };
   }
 
@@ -378,7 +452,7 @@ export async function sendUserMessage(
       const code = (error as { code?: unknown } | null)?.code;
       if (code === INPUT_RECHECK_PROMPT_WAITING_CODE) {
         settle('not-sent', 'prompt-waiting');
-        return { ok: false, stage: 'prompt_waiting', error: promptWaitingMessage(worktreeId, undefined, instanceId) };
+        return { ok: false, stage: 'prompt_waiting', error: promptWaitingMessage(worktreeId, undefined, instanceId, respondAgent) };
       }
       settle('not-sent', code === INPUT_RECHECK_FAILED_CODE ? 'recheck-failed' : 'model-switch-failed');
       return { ok: false, stage: 'model', error: getErrorMessage(error) };
@@ -485,7 +559,24 @@ export async function sendUserMessage(
     | { sent: true; inputStartedAt: Date | null }
   > {
     try {
-      const { inputStartedAt } = await observeInputStart(sendToTool, params.onInputStart, params.inputBoundary);
+      const { inputStartedAt } = await observeInputStart(
+        sendToTool,
+        (at) => {
+          // Issue #4065: input noted before any body lock was told — copilot's
+          // selection-list keys, under its own lock.
+          if (inputGeneration === undefined) inputNotedWithoutTicket = true;
+          params.onInputStart?.(at);
+        },
+        params.inputBoundary,
+        {
+          onTicket: (generation) => {
+            inputGeneration = inputGeneration === undefined ? generation : Math.max(inputGeneration, generation);
+          },
+          onDispatch: () => {
+            dispatched = true;
+          },
+        }
+      );
       return { sent: true, inputStartedAt };
     } catch (error) {
       logger.error('failed-to-send-message-to:', { error: getErrorMessage(error) });
@@ -548,7 +639,10 @@ export async function sendUserMessage(
   // the lock across it would stall a concurrent tmux send for nothing; their
   // tmux path takes the lock inside the shared sender.
   const delivery = SUPPORTED_COMPOSER_TOOLS.has(cliToolId)
-    ? await withInstanceInputLock(sessionName, () => deliver()).catch((error: unknown) => ({
+    ? await withInstanceInputLock(sessionName, (ticket) => {
+        inputGeneration = ticket.generation;
+        return deliver();
+      }).catch((error: unknown) => ({
         error,
         failure: classifySendFailure(error),
       }))
@@ -559,7 +653,7 @@ export async function sendUserMessage(
     // Issue #3945: a dialog found by the re-check under the lock is the prompt
     // guard's refusal, found late — answered as that refusal (relay holds it).
     if (failure.reason === 'prompt-waiting') {
-      return { ok: false, stage: 'prompt_waiting', error: promptWaitingMessage(worktreeId, undefined, instanceId) };
+      return { ok: false, stage: 'prompt_waiting', error: promptWaitingMessage(worktreeId, undefined, instanceId, respondAgent) };
     }
     if (isSessionStartTimeoutError(error)) {
       return { ok: false, stage: 'send', error: error.message, code: SESSION_STARTING_CODE };

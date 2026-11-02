@@ -2538,6 +2538,32 @@ export interface RelayView {
   obsState?: string | null;
   holdReason?: string | null;
   overlap?: string | null;
+  /**
+   * Issue #4064. Optional: an older server sends none. Null while the payload
+   * is queued or there is none.
+   */
+  deliveryHold?: RelayDeliveryHoldResponse | null;
+}
+
+/**
+ * Mirrors: `RelayDeliveryHold` in src/lib/relay/types.ts (Issue #4064).
+ * Strings rather than unions, for the reason `RelayView.state` is one.
+ */
+export interface RelayDeliveryHoldResponse {
+  /** `attempting` | `uncertain`. */
+  state: string;
+  payloadId: string | null;
+  /**
+   * Issue #4082: the delivery attempt that holds it — what `relays resolve
+   * --attempt` names. Absent on a server older than #4082; not the send
+   * binding's attempt.
+   */
+  attemptId?: string | null;
+  kind: string | null;
+  reason: string | null;
+  at: number | null;
+  /** The requester's pane to look at before anything else. */
+  checkCommand: string;
 }
 
 /** Mirrors: `RelayCounts` in src/lib/relay/types.ts. */
@@ -2557,7 +2583,19 @@ export interface RelayListResponse {
   awaiting: RelayView[];
   /** Every open relay in scope, whichever end it belongs to. */
   open: RelayView[];
+  /**
+   * Issue #4064: relays in scope, open or closed, whose payload is under a
+   * delivery hold. Absent on an older server.
+   */
+  held?: RelayView[];
   counts: RelayCountsResponse;
+  /**
+   * Issue #4082: how many payloads in scope are held as `uncertain` now —
+   * open relays or closed, once each, not narrowed by `days`, and not one of
+   * the per-state `counts` (never added to them). Absent on an older server:
+   * print nothing for it rather than 0.
+   */
+  heldCount?: number;
 }
 
 /** Mirrors: src/app/api/relays/route.ts POST 201 response. */
@@ -2575,4 +2613,20 @@ export interface RelayGetResponse {
 /** Mirrors: src/app/api/relays/[relayId]/cancel/route.ts POST 200 response. */
 export interface RelayCancelResponse {
   relay: RelayView;
+}
+
+/** Mirrors: src/app/api/relays/[relayId]/resolve/route.ts POST 200 response (Issue #4082). */
+export interface RelayResolveResponse {
+  relay: RelayView;
+  /** `confirm` | `retry` | `discard`. */
+  action: string;
+  /** `retry`: queued for delivery again — not delivered yet. */
+  requeued: boolean;
+  /** A reply waiting behind the resolved prompt notice was queued in its place. */
+  promoted: boolean;
+  /**
+   * Issue #4082: the relay was closed, and a reply that waited behind the
+   * settled notice was discarded (never delivered). Absent on an older server.
+   */
+  replyDiscarded?: boolean;
 }

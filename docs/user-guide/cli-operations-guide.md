@@ -725,6 +725,86 @@ relay 配送（`ask --async` / `send --reply-to`）は、relay を**その依頼
 
 重ならないのが一番確実です。同じインスタンスへ重ねて送らないでください。
 
+#### 不確定な配送は自動で再送しない（Issue #4064）
+
+relay の返答・確認（prompt）の通知・期限切れの通知を依頼元の入力欄へ配送した結果が**不確定**のとき、
+CommandMate はその payload を**自動で再送しません**。二重に届くのを防ぐためです。
+
+- 配送は、最初のキーより前に台帳へ「試行中」を書き、それに成功した処理だけが送ります（書けなければ送りません）
+- 自動で再送するのは、送信の結末が `not-sent`（本文のキーを 1 つも打っていない。`prompt-not-ready`・
+  `session-starting` など）のときだけです。依頼元が確認待ち（`prompt_waiting`）のときも今までどおり待って再送します
+- それ以外 — `indeterminate`（`prompt-unreported`・`submit-unconfirmed`・`send-error`・`composer-residue` など）、
+  送信を確かめた後の例外（`threw-after-sent`）、結末が分かる前の例外（`send-threw`）、送信中のサーバー再起動
+  （`server-restarted`）— は**保留**（`uncertain`）にします。サーバーが送信の直前に止まり実際は何も打っていなかった
+  場合も、試行中のまま残るので再起動後は保留になります（確かめられないため、安全側に倒します）
+- 保留中は、その relay の後の配送（確認の通知の後にできた返答も）を止めます。ほかの relay は進みます
+- 保留は `commandmate relays`（`# delivery not confirmed, not resent`）・`commandmate relays --id <relay-id>`・
+  `GET /api/relays`（`held`）・`GET /api/relays/:id`（`deliveryHold`）で読めます。行には `delivery=uncertain`・
+  `payload=<種類>:<payloadId>`・`attempt=<attemptId>`・`reason=<理由>`・`check=<確かめ先>` が付きます。確かめ先は依頼元の正確なインスタンスの
+  `commandmate capture <worktree-id> --instance <instance> --pane` です。確かめた後は、自分で送り直さずに
+  下の `commandmate relays resolve` で片付けてください（自分で送り直すと、後で `--retry` したときに二重に届きます）
+- 期限切れ・取り消し（`commandmate relays cancel`）は、以後の配送を止めるだけです。保留の本文・payloadId・理由は
+  消えず、読めるまま残ります（既に入力欄に届いたものを取り消すことはできません）。保留中に期限が来た relay には、
+  期限切れの通知を配送しません
+
+#### 保留を解決する（Issue #4082）
+
+`uncertain` の保留は、依頼元の画面を確かめてから次の 1 つで片付けます。`--payload` と `--attempt` は
+`commandmate relays --id <relay-id>` の `payload=<種類>:<payloadId>` と `attempt=<attemptId>`
+（JSON・API では `deliveryHold.payloadId` と `deliveryHold.attemptId`）をそのまま渡します。
+
+```bash
+commandmate relays resolve <relay-id> --payload <payloadId> --attempt <attemptId> --confirm   # 届いていた
+commandmate relays resolve <relay-id> --payload <payloadId> --attempt <attemptId> --retry     # 届いていない: もう一度送る
+commandmate relays resolve <relay-id> --payload <payloadId> --attempt <attemptId> --discard   # 送らずに捨てる
+```
+
+API は `POST /api/relays/:id/resolve`（本文 `{ "payloadId", "attemptId", "action": "confirm" | "retry" | "discard" }`）です。
+
+| 保留の種類 | relay | `--confirm` | `--retry` | `--discard` |
+|---|---|---|---|---|
+| 返答（reply） | 開いている | `delivered` で閉じる | 同じ本文を配送の列に戻す | `cancelled` で閉じる（後続も消す） |
+| 確認の通知（prompt） | 開いている | 保留を消し、待っていた返答を配送の列へ繰り上げる（relay は開いたまま） | 配送の列に戻す | `--confirm` と同じ |
+| 期限切れの通知（expired） | 閉じている | 保留を消す | 閉じたまま配送の列に戻す | 保留を消す |
+| 返答・確認の通知 | 取消・期限切れで閉じている | 保留を消す（閉じた理由は変えない） | 拒否（409） | 保留を消す（閉じた理由は変えない） |
+
+- `--confirm`・`--discard` は何も入力しません。確認の通知を片付けたときに繰り上がる返答は、別の payload として
+  ふつうの配送で届きます。同じダイアログの通知は二度と出ませんが、新しいダイアログと最後の返答は今までどおり届きます
+- `--retry` の成功は「配送の列に戻した」という意味で、届いたという意味ではありません。依頼元が受け取れる状態になったとき、
+  次の配送が 1 回だけ送ります（入力欄の準備・入力ロックは通常の配送と同じ）。その送信が `not-sent` なら今までどおり
+  自動で送り直し、また不確定になれば新しい `attempt` の保留になります。列に戻した確認の通知は、送る前にその relay の
+  返答ができれば、今までどおり返答に置き換わります。期限を過ぎた relay（開いたままでも）の返答・確認の通知は `--retry` できません
+- 次の操作は 409 で拒否し、何も変えません: 古い `attempt`（`--retry` の後に新しい試行ができた）・同じ保留への 2 回目の操作・
+  配送中（`delivery=attempting`）・保留が無い・`attempt` の無い保留（古いサーバーが書いたもの）・上の表で拒否のもの。
+  存在しない relay は 404、不正な ID・本文は 400、データベースの失敗は 500（何も確定しません）です。拒否されたら
+  `commandmate relays --id <relay-id>` で読み直してください
+- 片付けは送信の結び付き（`send=`・`hold=`）を変えません。サーバーの再起動は今までどおりで、`--retry` の後・送る前に
+  止まったものは配送の列のまま、送り始めてから止まったものは新しい `attempt` の保留になります。片付けた保留は戻りません
+
+#### 保留の知らせ・表示・件数（Issue #4082）
+
+- **依頼元の履歴**: 配送が保留（`uncertain`）になると、依頼元 A の履歴に system 行を 1 本残します（`relay=<relay-id>`・
+  `payload=<種類>:<payloadId>`・`attempt=<attemptId>`・`reason=<理由>` 付き）。同じ試行には 1 本だけで、別の payload や
+  `--retry` の後の新しい `attempt` が保留になればそれも 1 本ずつ残ります。知らせは best-effort です（書けなかった・
+  書く前にサーバーが止まったときは残らず、書き直しもしません）。保留そのものは知らせの成否で変わりません。
+  この行は返答の抽出（`relays`・`wait`・relay の配送）には混ざりません
+- **画面**: PC・スマホの名簿とチャット面は、保留を依頼元 A の行に「配送が未確認」（警告色）として、返信待ち・確認待ちより
+  先に出します。保留中の relay は返信待ち・返信予定には数えません（配送中の `attempting` は今までどおり返信待ちです）。
+  閉じた relay の保留も出します。名簿から消えたインスタンス宛ての保留は、名簿の下の「名簿に無いセッションへの配送未確認」
+  に出ます。表示は 20 秒ごとの読み直しと操作後の読み直しで追従します
+- **件数**: `GET /api/relays` の `heldCount` は、いまの保留（`uncertain` だけ・閉じた relay も含む・1 つの payload を 1 回）
+  の数です。状態別の `counts` とは別の軸で、合計にも足さず、`days` で絞りません。`commandmate relays` は `held=<n>`、
+  `commandmate task show` は `RELAYS:` 行の `, <n> held`、`commandmate report metrics` は `Relays:` 行の `, <n> held now`
+  に出します。`commandmate relays` の一覧は、片付ける保留（`uncertain`。見出し `# delivery not confirmed, not resent (N)` の
+  N は `held=` と同じ）と、いま配送中のもの（`attempting`。見出し `# delivery in progress (N)`）を分けて出します。
+  JSON では `task show --json` が `relays`（状態別）と `relaysHeld`、`report metrics --json` が `relays` と
+  `relaysHeld` を持ちます。`heldCount` を返さない古いサーバーでは、件数を出さず（0 とは書きません）、JSON は `null` です
+- **保留中の期限切れ**: 期限切れの掃除は、保留中の relay の確認の通知の後ろで待っている返答を消さずに残します。その後、
+  閉じた relay の確認の通知（期限を過ぎてまだ掃除されていない、開いたままの relay のものも同じ。このときは片付けと
+  同時に `expired` で閉じ、「期限切れ」の system 行を残します）を `--confirm`・`--discard` で片付けると、待っていた返答も破棄し（閉じた relay からは配送しません）、
+  その旨を依頼元の履歴に system 行で残します（API の応答は `replyDiscarded: true`）。期限切れは既存の「期限切れ」の
+  system 行と保留の表示で伝わり、片付けた後に期限切れの通知を新たに入力欄へ送ることはしません
+
 ### ターン成立の判定（Issue #1839）
 
 `wait` はこれまで「エージェントが composer に戻ったか」しか見ておらず、**そのターンが
@@ -886,7 +966,14 @@ kind は `promptData.type` や `sessionStatusReason`（`antigravity_selection_li
 | `autoYes.enabled` / `pollerActive` | Auto-Yes の有効状態 / サーバの poller が動いているか |
 | `autoYes.pollerRecord` | poller（または permission hook）が最後に「答えなかった」と記録したもの。`screenCorrelation` はこの画面との対応で、記録は画面を名指ししないため `unknown` / `type-mismatch` / `no-prompt-on-screen` のどれか |
 | `autoYes.contractEvaluation` | 契約の方針を**いま**この画面に当てた結果（`policy-withholds` + 理由 / `base-withholds` + 理由 / `policy-permits` / `no-base-answer` / `not-evaluated`）。`base-withholds`（Issue #3822）は契約より前の基本の判定で見送ったことを表し、契約の有無によらない（今は `allow-once-unidentified` だけ。契約を見直しても答えは戻らない）。理由の語は `AutoYesSuppressionReason` と同じ（[理由語の表](#autoyeslastsuppression-ポリシー抑止の観測issue-1684)） |
-| `lastSend` | このインスタンスへの直近の send の結末（Issue #3759）。`{ at, state, reason }`。`state` は `not-sent`（本文のキーを 1 つも打つ前に失敗。例: `prompt-not-ready`）/ `sent`（送信を確かめた）/ `indeterminate`（一部を打った後に失敗、または結果を確かめられない。composer に本文が残っていれば `reason: composer-residue`。新しい claude セッションの最初の送信で、Enter の後の入力欄に本文が見えないのに claude が `UserPromptSubmit` を報告しなかったときは `prompt-unreported`（Issue #4035）。`sent` と答えた本文を次の send が入力欄で見つけたときは、その記録が `found-in-composer` に変わる。変わるのはその送信の間だけで、恒久の記録は warn のログ `pre-send-found-submitted-body`）。サーバ起動後に記録が無ければ null、古いサーバでは項目自体が無い 。`not-sent` の理由には、`prompt-not-ready` のほか、入力ロック（Issue #3945）に由来する `input-lock-timeout`（待ちの上限を超えた）/ `session-replaced`（待つ間にセッションが作り直された）/ `input-lock-lost`（入力の途中でロックの権利を失った）と、直前の再読込に失敗した `recheck-failed`、`--reply-to` / `ask --async` の結び付いた relay の予約が本文の直前に失われた（取り消し・期限切れ・別の送信に取られた）`relay-reservation-lost`（Issue #3992）、長い本文を 1 回の貼り付けで送るときに tmux のバッファへ読み込めなかった（`load-buffer` の失敗。貼り付けの `paste-buffer` は走っていない）`paste-not-started`（Issue #4031。relay の有無によらず `not-sent`、送信 API の `sendOutcome` も `not_sent`。`paste-buffer` の失敗は従来どおり `indeterminate`（`send-error`）・`unknown`）がある（いずれも本文のキーは 1 つも打っていない）。未送信バーの Clear（`POST /api/worktrees/:id/clear-composer`）は、同じ入力ロックを待ち切れない・セッションが作り直された場合に 409 `INSTANCE_INPUT_BUSY` を返す（少し待って再試行）。クリアできなかったときは HTTP 200 のまま `cleared: false` を返す |
+| `lastSend` | このインスタンスへの直近の send の結末（Issue #3759）。`{ at, state, reason }`。`state` は `not-sent`（本文のキーを 1 つも打つ前に失敗。例: `prompt-not-ready`）/ `sent`（送信を確かめた）/ `indeterminate`（一部を打った後に失敗、または結果を確かめられない。composer に本文が残っていれば `reason: composer-residue`。新しい claude セッションの最初の送信で、Enter の後の入力欄に本文が見えないのに claude が `UserPromptSubmit` を報告しなかったときは `prompt-unreported`（Issue #4035）。`prompt-unreported` の本文は提出済みのことがある（`SessionStart` だけ届き http の `UserPromptSubmit` が届かない環境など）ので、再送の前に `commandmate capture <worktree-id> --pane` で確かめる。投げる直前に画面を 1 回読み直し、生成中なら `sent` にする（Issue #4048）。Enter の後に待つ間にセッションが作り直されたときは `not-sent`（`session-replaced`）ではなく `indeterminate`（旧プロセスが受け取った可能性がある。Issue #4048）。`sent` と答えた本文を次の send が入力欄で見つけたときは、その記録が `found-in-composer` に変わる（claude だけ・その本文の送信の記録だけ。claude 以外は warn のログだけで `lastSend` は変えない。Issue #4048）。変わるのはその送信の間だけで、恒久の記録は warn のログ `pre-send-found-submitted-body`）。サーバ起動後に記録が無ければ null、古いサーバでは項目自体が無い 。`not-sent` の理由には、`prompt-not-ready` のほか、入力ロック（Issue #3945）に由来する `input-lock-timeout`（待ちの上限を超えた）/ `session-replaced`（待つ間にセッションが作り直された）/ `input-lock-lost`（入力の途中でロックの権利を失った）と、直前の再読込に失敗した `recheck-failed`、`--reply-to` / `ask --async` の結び付いた relay の予約が本文の直前に失われた（取り消し・期限切れ・別の送信に取られた）`relay-reservation-lost`（Issue #3992）、長い本文を 1 回の貼り付けで送るときに tmux のバッファへ読み込めなかった（`load-buffer` の失敗。貼り付けの `paste-buffer` は走っていない）`paste-not-started`（Issue #4031。relay の有無によらず `not-sent`、送信 API の `sendOutcome` も `not_sent`。`paste-buffer` の失敗は従来どおり `indeterminate`（`send-error`）・`unknown`）がある（いずれも本文のキーは 1 つも打っていない）。未送信バーの Clear（`POST /api/worktrees/:id/clear-composer`）は、同じ入力ロックを待ち切れない・セッションが作り直された場合に 409 `INSTANCE_INPUT_BUSY` を返す（少し待って再試行）。クリアできなかったときは HTTP 200 のまま `cleared: false` を返す |
+
+**`lastSend` は「最後に終わった送信」ではありません（Issue #4065）。** 送信が並んだときは、入力ロックを渡された順（世代）で決めます。読む側の要求自身の結末とは限りません（自分の結末は `send` のエラーと送信 API の `sendOutcome` で見ます）。
+- ロックを渡された送信の記録（ロックの後・本文の前に断られた `not-sent` も含む）は、同じインスタンスで後からロックを渡された送信の記録が既にあれば残しません。
+- ロックを渡される前に断られた `not-sent`（別サーバーのセッション・起動待ち・起動の失敗・prompt guard・copilot の `/model` の失敗・ロックの待ち切れなど）は、その要求が始まった後にロックを渡された送信の記録が既にあれば残しません。単独の拒否は今までどおり記録されます。
+- 旧い送信が Enter の後に遅れて失敗したときは、それより後にロックを渡された送信の記録が無ければ旧い送信の結末を残します（セッションの作り直しの後でも同じ）。
+- **終わった順のままの経路**: copilot の選択リストのコマンドと `/model`、opencode の HTTP 配送（`unknown` の後のキー入力への切り替えを含む）はロックの順を持たないので、終わった順で記録します（ロックの順も進めません）。
+- 順序の情報はサーバーのプロセスの中だけにあり、再起動で記録と一緒に消えます。worktree の ID が移ったときは移さずに捨てます。追跡は 1024 インスタンスまでで、追い出されたインスタンスは記録と順序を一緒に失います。公開する項目は `{ at, state, reason }` のままで、`at` は順序には使いません。
 
 **`lastSend` が何であっても、CommandMate は自動で再送しません。** 再送するのは利用者か監督のエージェントです。`not-sent` は自分で送り直してください（入力欄が戻ってから）。**`indeterminate` のときは再送しないでください。** 先に `commandmate capture <worktree-id> --pane` で画面を見て、本文が入力欄に残っていないか・既に送られていないかを確かめます（確かめずに送ると二重に届くことがあります）。`send` が `prompt not ready` などで失敗したときのエラーにも、同じ状態（`[send state: not-sent (prompt-not-ready): …]`）が書かれます。送信 API の失敗の応答には、relay と結び付かない送信でも、その送信の結末が `lastSend` に記録された失敗なら `sendOutcome`（`not-sent` なら `not_sent`、それ以外は `unknown`）が付き（別サーバーのセッションの 409、起動中の 503 `SESSION_STARTING`、起動の失敗も `not_sent`。記録の残らない 400 の拒否には付きません）、CLI は標準エラーに「送り直してよい」か「先に `commandmate capture <worktree-id> --pane` で確かめる」かを 1 行出します（Issue #4011）。
 
@@ -1070,7 +1157,7 @@ server.log（`strict-prompt-answered` / `strict-prompt-response-refused`）と�
 
 `respond` のほかの案内（`prompt_no_longer_active` の `send`、plan review の Next・Note、選んだ行が文字入力を求めるときの `send`）と、`send` の `PROMPT_WAITING`（サーバーが文を返さなかったとき）・送信結果不明時の `capture`、`wait` と `attach` の `capture` も、同じ解決済みの宛先を付けます。ダイアログを読ませる `capture` は `--pane --tail 40` です。
 
-サーバーが返す `PROMPT_WAITING` の文（`send` / ターミナル送信）と、構造化プロンプトの案内（hook だけが見たダイアログの `respond <number>`）も、要求が `--instance` を指定していればその宛先を付けます（Issue #4031。例: `` `commandmate respond <id> <answer> --instance codex-2` ``）。宛先を指定しない（primary への）要求では従来と同じ文です。厳格モード（`--expect-screen`）の失敗時の案内も、解決済みの宛先を付けます（exit 40: `` `commandmate prompt <id> --instance <instance>` ``、exit 41: それに加えて `` `commandmate capture <id> --instance <instance> --pane` ``）。宛先を指定しなければ従来どおり `` `commandmate prompt` `` / `` `capture --pane` `` です。
+送信を断ったときにサーバーが返す `PROMPT_WAITING` の文（`send` / ターミナル送信の 409 など）は、要求が `--instance` を指定していればその宛先を付けます（Issue #4031。例: `` `commandmate respond <id> <answer> --instance codex-2` ``）。`--instance` を付けず `--agent` だけで worktree の既定と違うツールを指定した要求には ` --agent <tool>` を付けます（Issue #4049。例: `` `commandmate respond <id> <answer> --agent codex` ``。宛先の無い `respond` は既定のツールへ行くため）。宛先を指定しない要求と、既定のツールを指定した要求では従来と同じ文です。構造化プロンプトの案内（hook だけが見たダイアログの `respond <number>`。`/current-output` の structured prompt など）は、この `--agent` の規則の対象外です。`/current-output` はサーバーが解決した instance を渡すので、`--agent` で読んだときも primary を読んだときも、解決済みの instance の `--instance <id>`（例: `` `commandmate respond <id> <number> --instance codex` ``）が付きます（Issue #4031 からの出し分け）。WebSocket の push・Auto-Yes の応答後の push・prompt 履歴の行も同じ文です（Issue #4063。primary の id はツール名）。厳格モード（`--expect-screen`）の失敗時の案内も、解決済みの宛先を付けます（exit 40: `` `commandmate prompt <id> --instance <instance>` ``、exit 41: それに加えて `` `commandmate capture <id> --instance <instance> --pane` ``）。`prompt` は `--agent` を取らないので、`--agent` だけの要求ではそのツールの primary インスタンス（id はツール名）を指します（Issue #4049。例: `` `commandmate prompt <id> --instance codex` `` / `` `commandmate capture <id> --agent codex --pane` ``）。宛先を指定しなければ従来どおり `` `commandmate prompt` `` / `` `capture --pane` `` です。Command Code が plan review（REVIEW）を表示中に `send` を断る文も、実際の worktree id と、primary 以外では ` --instance <id>` を付けます（Issue #4049。例: `` `commandmate respond <id> "<text>" --instance command-code-2` ``）。worktree の既定が Command Code 以外のときの primary には ` --agent command-code` を付けます（Issue #4063。既定が Command Code なら従来どおり宛先なし）。ターミナル送信（`POST /api/worktrees/:id/terminal`）も、この拒否を 500 の固定文ではなく 409・`code: "PLAN_REVIEW_SEND_REFUSED"` で、同じ宛先の文を返します。
 
 ---
 

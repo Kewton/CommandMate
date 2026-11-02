@@ -1,0 +1,55 @@
+
+dev@host work % vibe-local -y
+
+============================================
+ 🤖 vibe-local (vibe-coder)
+ Model: qwen3-coder:30b
+ Ollama: http://localhost:11434
+ Engine: vibe-coder.py (direct, no proxy)
+============================================
+
+
+  ██╗   ██╗██╗██████╗ ███████╗     ██╗      ██████╗  ██████╗ █████╗ ██╗
+  ██║   ██║██║██╔══██╗██╔════╝     ██║     ██╔═══██╗██╔════╝██╔══██╗██║
+  ██║   ██║██║██████╔╝█████╗  ████ ██║     ██║   ██║██║     ███████║██║
+  ╚██╗ ██╔╝██║██╔══██╗██╔══╝       ██║     ██║   ██║██║     ██╔══██║██║
+   ╚████╔╝ ██║██████╔╝███████╗     ███████╗╚██████╔╝╚██████╗██║  ██║███████╗
+    ╚═══╝  ╚═╝╚═════╝ ╚══════╝     ╚══════╝ ╚═════╝  ╚═════╝╚═╝  ╚═╝╚══════╝
+
+  🌴 O F F L I N E  A I  C O D I N G  A G E N T 🌴
+  v1.3.3  // No login • No cloud • Fully OSS • Powered by Ollama
+  ────────────────────────────────────────────────
+  🧠 Model  qwen3-coder:30b [Tier C]
+  🔄 Sidecar qwen3:8b [Tier A]
+  🔒 Mode   ✓ AUTO-APPROVE
+  🦙 Engine Ollama (http://localhost:11434)
+  💾 RAM    256GB (ctx: 32768 tokens)
+  📁 CWD    /Users/dev/work/vibe-probe
+  ────────────────────────────────────────────────
+  /help コマンド一覧 • ESC/Ctrl+C 中断 (2回で終了) • """で複数行
+  IME対応: 空行Enterで送信 • 実行中の入力はtype-ahead
+
+  First time? Try typing: "create a hello world in Python"
+  Type /help for commands, or just ask anything in natural language.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+····························································
+ctx:4% ❯ Reply with exactly: OK-4040
+  (IME mode: press Enter on empty line to send, """ for multiline)
+...
+  ◜ Thinking — ESC: stop...
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ✦ Ready │ ctx:4% │ qwen3-coder:30b
+ ESC: stop

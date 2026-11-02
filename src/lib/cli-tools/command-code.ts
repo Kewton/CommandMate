@@ -54,6 +54,7 @@ import {
 import { getErrorMessage } from '@/lib/errors';
 import { createLogger } from '@/lib/logger';
 import { PLAN_REVIEW_SEND_REFUSED_CODE } from '@/lib/session/send-attempt-types';
+import { commandCodePlanReviewSendMessage } from '@/lib/session/respond-target';
 import type { AgentLaunchContext } from '@/lib/hooks/sources';
 import { COMMAND_CODE_CLI_TOOL_ID } from '@/lib/hooks/sources/command-code/tool-id';
 import {
@@ -175,16 +176,11 @@ export function isCommandCodeReady(rawOutput: string): boolean {
 }
 
 /**
- * Why `send` stops at the plan review overlay (Issue #3125).
- *
- * The overlay replaces the composer until a human decides, so waiting for the
- * composer only ran out the clock (`prompt not ready` after the full timeout).
- * Its comments, Submit review, approval and cancel go through `respond`.
+ * Why `send` stops at the plan review overlay (Issue #3125). Issue #4063: the
+ * sentence lives in `respond-target` (string building only) so the routes that
+ * rebuild it with the request's tool do not import this module's tmux graph.
  */
-export const COMMAND_CODE_PLAN_REVIEW_SEND_MESSAGE =
-  'Command Code is showing a plan review (REVIEW), which takes review comments, not messages. ' +
-  'Comment with `commandmate respond <worktree-id> "<text>"`, then `--plan-review submit` (ctrl+r), ' +
-  '`--plan-review approve` (ctrl+a) or `--plan-review cancel` (esc).';
+export { commandCodePlanReviewSendMessage };
 
 /**
  * Command Code CLI tool implementation.
@@ -339,11 +335,11 @@ export class CommandCodeTool extends BaseCLITool {
    *
    * @throws SessionStartTimeoutError when a just-launched session's composer
    *   has still not appeared
-   * @throws Error ({@link COMMAND_CODE_PLAN_REVIEW_SEND_MESSAGE}) at once when
+   * @throws Error ({@link commandCodePlanReviewSendMessage}) at once when
    *   the plan review overlay is on screen (Issue #3125)
    * @throws Error when the composer is not detected within the timeout
    */
-  private async waitForPrompt(sessionName: string): Promise<void> {
+  private async waitForPrompt(sessionName: string, worktreeId: string, instanceId?: string): Promise<void> {
     const startTime = Date.now();
     const pollInterval = 500;
     let planReviewPolls = 0;
@@ -366,7 +362,7 @@ export class CommandCodeTool extends BaseCLITool {
       planReviewPolls = planReviewUp ? planReviewPolls + 1 : 0;
       if (planReviewPolls >= 2) {
         logger.info('command-code-plan-review-blocks-send', { sessionName });
-        throw Object.assign(new Error(COMMAND_CODE_PLAN_REVIEW_SEND_MESSAGE), {
+        throw Object.assign(new Error(commandCodePlanReviewSendMessage(worktreeId, instanceId)), {
           code: PLAN_REVIEW_SEND_REFUSED_CODE,
         });
       }
@@ -403,7 +399,7 @@ export class CommandCodeTool extends BaseCLITool {
     await this.requireSession('Command Code', worktreeId, instanceId, { relaunch: true });
 
     try {
-      await this.waitForPrompt(sessionName);
+      await this.waitForPrompt(sessionName, worktreeId, instanceId);
 
       // Issue #1471: body/Enter separation + read-back submit verification.
       await sendMessageWithSubmitVerification({

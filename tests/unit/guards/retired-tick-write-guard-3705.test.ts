@@ -35,13 +35,21 @@
  * below include a judgement that is separated from its write by a second
  * `await`, which such a search would pass.
  *
+ * A target's `file` names the module's family (Issue #4050,
+ * `split-family.ts`): the function is looked for in the file and in the pieces
+ * split off it (`<dir>/<base>-*.ts`), so moving it into one is not a failure,
+ * while moving it anywhere else is ("not found"), and the same name in two of
+ * them is ambiguous and fails too.
+ *
  * @vitest-environment node
  */
 
-import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { dirname, join, posix } from 'path';
 import ts from 'typescript';
+import { inFamily } from './split-family';
 
 const JUDGEMENTS = new Set([
   'mayActForPollerKey',
@@ -373,6 +381,30 @@ function scan(code: string, fn: string, writes: string[], scope: Target['scope']
   return { checked, violations, found: true };
 }
 
+/** Where a target's function was looked for (Issue #4050). */
+interface FamilyScan {
+  /** The scan of the one file defining the function; `found: false` when none or several do. */
+  result: Scan;
+  /** The family's files that define the function. */
+  definedIn: string[];
+}
+
+/**
+ * Apply the rule to `fn` wherever it is defined in `origin`'s family under
+ * `root` — the file and its pieces on disk (Issue #4050).
+ */
+function scanFamily(root: string, origin: string, fn: string, writes: string[], scope?: Target['scope']): FamilyScan {
+  const dir = posix.dirname(origin);
+  const members = readdirSync(join(root, dir))
+    .map((name) => `${dir}/${name}`)
+    .filter((rel) => inFamily(rel, origin) && statSync(join(root, rel)).isFile())
+    .sort();
+  const scans = members.map((file) => ({ file, result: scan(readFileSync(join(root, file), 'utf8'), fn, writes, scope) }));
+  const defining = scans.filter((s) => s.result.found);
+  const result = defining.length === 1 ? defining[0].result : { checked: [], violations: [], found: false };
+  return { result, definedIn: defining.map((s) => s.file) };
+}
+
 // ---------------------------------------------------------------------------
 // the detector on its own cases
 // ---------------------------------------------------------------------------
@@ -502,9 +534,10 @@ describe('[#3705] the detector', () => {
 describe('[#3705] every listed write after an await is judged', () => {
   for (const target of TARGETS) {
     it(`${target.file} ${target.fn}`, () => {
-      const code = readFileSync(join(process.cwd(), target.file), 'utf8');
-      const result = scan(code, target.fn, target.writes, target.scope);
+      // Issue #4050: in the file or a piece split off it, exactly once.
+      const { result, definedIn } = scanFamily(process.cwd(), target.file, target.fn, target.writes, target.scope);
 
+      expect(definedIn, `${target.fn} in the family of ${target.file}`).toHaveLength(1);
       expect(result.found).toBe(true);
       // Every listed write is still there to check: a renamed callee would make
       // this guard pass by checking nothing.
@@ -515,5 +548,72 @@ describe('[#3705] every listed write after an await is judged', () => {
 
   it('covers the number of functions the Issue lists', () => {
     expect(TARGETS).toHaveLength(21);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// a target's file is its family (Issue #4050)
+// ---------------------------------------------------------------------------
+
+describe('[#4050] a target is looked for in its file and the pieces split off it', () => {
+  const ORIGIN = 'src/lib/polling/response-checker.ts';
+  const FN = 'cleanCompletedResponse';
+  const WRITES = ['clearTuiAccumulator'];
+  const judged = `export function ${FN}(owns: boolean) { if (owns) clearTuiAccumulator(); }\n`;
+  const unjudged = `export function ${FN}(owns: boolean) { clearTuiAccumulator(); }\n`;
+  let root: string | null = null;
+
+  /** A scratch tree of `files` (repo-relative path -> text). */
+  const tree = (files: Record<string, string>): string => {
+    root = mkdtempSync(join(tmpdir(), 'retired-tick-4050-'));
+    for (const [rel, text] of Object.entries(files)) {
+      mkdirSync(join(root, dirname(rel)), { recursive: true });
+      writeFileSync(join(root, rel), text);
+    }
+    return root;
+  };
+
+  afterEach(() => {
+    if (root !== null) rmSync(root, { recursive: true, force: true });
+    root = null;
+  });
+
+  it('negative control: in the file itself, judged as before', () => {
+    const { result, definedIn } = scanFamily(tree({ [ORIGIN]: judged }), ORIGIN, FN, WRITES, 'all');
+    expect(definedIn).toEqual([ORIGIN]);
+    expect(result.checked).toHaveLength(1);
+    expect(result.violations).toEqual([]);
+  });
+
+  it('positive: moved into a piece, the same write is found and judged the same way', () => {
+    const piece = 'src/lib/polling/response-checker-clean.ts';
+    const judgedThere = scanFamily(tree({ [ORIGIN]: '// moved\n', [piece]: judged }), ORIGIN, FN, WRITES, 'all');
+    expect(judgedThere.definedIn).toEqual([piece]);
+    expect(judgedThere.result.violations).toEqual([]);
+    rmSync(root as string, { recursive: true, force: true });
+    const unjudgedThere = scanFamily(tree({ [ORIGIN]: '// moved\n', [piece]: unjudged }), ORIGIN, FN, WRITES, 'all');
+    expect(unjudgedThere.result.violations.map((v) => v.write)).toEqual(['clearTuiAccumulator']);
+  });
+
+  it('negative: moved out of the family — another directory, `<base>2.ts` — it is not found', () => {
+    for (const stranger of ['src/lib/response-checker-clean.ts', 'src/lib/polling/response-checker2.ts']) {
+      const { result, definedIn } = scanFamily(tree({ [ORIGIN]: '// moved\n', [stranger]: judged }), ORIGIN, FN, WRITES, 'all');
+      expect(definedIn, stranger).toEqual([]);
+      expect(result.found, stranger).toBe(false);
+      rmSync(root as string, { recursive: true, force: true });
+      root = null;
+    }
+  });
+
+  it('negative: the same function in two files of the family is ambiguous — not found', () => {
+    const { result, definedIn } = scanFamily(
+      tree({ [ORIGIN]: judged, 'src/lib/polling/response-checker-copy.ts': unjudged }),
+      ORIGIN,
+      FN,
+      WRITES,
+      'all'
+    );
+    expect([...definedIn].sort()).toEqual([ORIGIN, 'src/lib/polling/response-checker-copy.ts'].sort());
+    expect(result.found).toBe(false);
   });
 });
