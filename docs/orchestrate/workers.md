@@ -63,7 +63,7 @@ done
 - **送信の出力**: `runs/<date>/send-<issue>[-<item>][.a<n>].out` / `.err` を呼び出しごとに排他的に取る（`execution-key.mjs`。同じ Issue の送信を並行しても、
   起動し直しても混ざらない）。起動のメッセージの出力は `send-init-<issue>[-<item>][.a<n>].out` / `.err`。stdout は task id だけ。
   起動のメッセージが exit 99（initialization timeout / prompt not ready / composer-not-empty）なら、`MODEL_READS` × `MODEL_READ_INTERVAL_SEC` の範囲で `capture --json` の model を読み、読めれば `.err` に「プロンプト到達を確認して続行」と残して契約へ進む（読めなければ従来どおり 1 回起動し直し、なお読めなければ exit 41）。99 以外の失敗はその exit code を返し、モデルは確かめない。契約の send の失敗は従来どおり
-- **単独で使うとき**: `launch-worker.mjs set-model --worktree <path> --model <opus|sonnet>`（本体の `set_claude_model` はこれを呼ぶ）、
+- **単独で使うとき**: `launch-worker.mjs set-model --worktree <path> --model <opus|sonnet>`、
   `launch-worker.mjs check-model --wt <WT> --model <opus|sonnet>`（0 / 40 / 41）
 
 ## 3-2 monitor の起動と読み方
