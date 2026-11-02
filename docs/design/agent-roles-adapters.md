@@ -3,7 +3,7 @@
 - 親: Epic #4112（決定 D1〜D5 はそちらが正）。この文書を読む後続: #4114（DB・生成物）、#4115（起動処理と Schedule）
 - 状態: **調査と契約の確定のみ。`src/` と `tests/` は変えていない**
 - 基準: develop `d5c581231`、CommandMate 0.49 系、schema v63。検証日 2026-11-03
-- 改訂: 整合性レビューの指摘を受けて追試し、§1・§2・§3・§4・§5・§6.7・§7・§8・§9 を直し §14 を足した。追試の記録は `evidence/round2.json`。再レビューを受けて fingerprint を §5 で定義し、局所モデルを全文の判定で測り直した（`evidence/round3.json`）
+- 改訂: 整合性レビューの指摘を受けて追試し、§1・§2・§3・§4・§5・§6.7・§7・§8・§9 を直し §14 を足した。追試の記録は `evidence/round2.json`。再レビューを受けて fingerprint を §5 で定義し、局所モデルを全文の判定で測り直した（`evidence/round3.json`）。3 回目の再レビューを受けて、修正の課題の判定基準を `sh verify.sh` の出力から `calc.sh` の出力へ変えた（§9。新しい計測はしていない）
 - 生の記録: [`agent-roles-adapters/evidence/`](./agent-roles-adapters/evidence/)、再現用の harness: [`agent-roles-adapters/harness/`](./agent-roles-adapters/harness/)（§10）
 
 ## 1. 結論
@@ -258,7 +258,7 @@ Welcome to the Antigravity CLI. You are currently not signed in.
 
 **未確認（理由: 認証の複製が要る）:** 注入、指示の保持、開発能力、send、ライフサイクル、hook の相関、approval の検出、形式。
 
-**実行する手順（判断 2 の後）:** `agent-roles-adapters/harness/` の Q1・Q2 と同じ問いを、`--agent cm-role-x` あり／なしで流し、`AGENTS.md` と本文の両方が守られるか、`calc.sh` の実際の変更、`sh verify.sh` の exit を比べる。応答は `~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript_full.jsonl` でも確かめる。
+**実行する手順（判断 2 の後）:** `agent-roles-adapters/harness/` の Q1・Q2 と同じ問いを、`--agent cm-role-x` あり／なしで流し、`AGENTS.md` と本文の両方が守られるか、修正後の `sh calc.sh` の出力が `2` か、元の verify.sh（`git show HEAD:verify.sh`）の exit を比べる。応答は `~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript_full.jsonl` でも確かめる。
 
 **成立しない場合の代替:** 定義が既定を置換すると判明したら、V2 と同じく「共通指示 + ロール」にする。`--agent` が TUI で効かないなら、Antigravity を対象から外すことを判断してもらう（D3 の変更）。`~/.gemini/config` の既存ファイルは書き換えない。
 
@@ -345,16 +345,16 @@ Welcome to the Antigravity CLI. You are currently not signed in.
 - `Prefer dedicated tools over shell commands…`
 - `Treat unfamiliar files or changes as potential user work…` など
 
-**計測（qwen3-coder:30b、「2+2」を 5 回。§9 と同じ条件。`round3.json`）。** 衝突しない指示で、最終回答の全文の先頭の語が `ROLESTAMP`、末尾の語が `REPOSTAMP` かを数えた。修正の課題は 1 回で、作業ツリーを戻してから出した。
+**計測（qwen3-coder:30b、「2+2」を 5 回。§9 と同じ条件。`round3.json`）。** 衝突しない指示で、最終回答の全文の先頭の語が `ROLESTAMP`、末尾の語が `REPOSTAMP` かを数えた。修正の課題は 1 回で、作業ツリーを戻してから出した。修正の判定は §9 のとおり、記録された `calc.sh` の出力が元の条件の `2` か。
 
-| 本文（`agents.build.system`） | 先頭 = ロール | 末尾 = `AGENTS.md` | 両方 | 修正後 `sh verify.sh` |
+| 本文（`agents.build.system`） | 先頭 = ロール | 末尾 = `AGENTS.md` | 両方 | 修正後の `calc.sh` の出力 |
 |---|---|---|---|---|
-| ロールのみ | 5/5 | 5/5 | **5/5** | OK |
-| 共通指示 + ロール | 5/5 | 5/5 | **5/5** | OK |
-| なし（対照 1 回目） | 0/5 | 4/5 | 0/5 | OK |
-| なし（対照 2 回目） | 0/5 | 4/5 | 0/5 | **不合格** |
+| ロールのみ | 5/5 | 5/5 | **5/5** | `2`（成功） |
+| 共通指示 + ロール | 5/5 | 5/5 | **5/5** | `2`（成功） |
+| なし（対照 1 回目） | 0/5 | 4/5 | 0/5 | `2`（成功） |
+| なし（対照 2 回目） | 0/5 | 4/5 | 0/5 | `100`（**失敗**） |
 
-対照は同じ構成を 2 度測ったもので、2 回目は 1 回が exit 1 で、修正の課題ではモデルが `calc.sh` と検証の文字列を別の形に書き換えた。同じ構成でもこの程度は揺れる。
+対照は同じ構成を 2 度測ったもので、2 回目は「2+2」の 1 回が exit 1 で、修正の課題は失敗した（`calc.sh` は `echo "100"`、`sh verify.sh` の出力は元の verify.sh に無い `VERIFY_FAIL`。verify.sh も書き換えられたと推定する。§9）。同じ構成でもこの程度は揺れる。
 
 **結論。** 共通指示の有無で差は無かった。**基礎プロンプトの置換で指示の保持が落ちる証拠も、共通指示で良くなる証拠も無い。**
 
@@ -414,28 +414,37 @@ Welcome to the Antigravity CLI. You are currently not signed in.
 
 - CLI が実際に送った要求（system / developer / user の各層）を確定モデルで記録し、ロールと `AGENTS.md` の層、ツール一覧、ロールなしの対照との行単位の残存率を比べた
 - 確定モデルがシェルツール呼び出しを返し、CLI が実行した結果と、`calc.sh` の実際の変化を見た
-- 実モデルの代わりに手元の Ollama（課金なし、認証なし）で、応答の文字列・ファイルの変化・`sh verify.sh` の exit を見た（`round3.json`）
+- 実モデルの代わりに手元の Ollama（課金なし、認証なし）で、応答の文字列と、修正後の `calc.sh` の出力を見た（`round3.json`）
 
-**局所モデル（qwen3-coder:30b）。** ロールは「最初の語を `ROLESTAMP` にする」、`AGENTS.md` は「最後の語を `REPOSTAMP` にする」で、両立する。「2+2」を 5 回。**判定は最終回答の全文を英数字の語に分けた先頭と末尾**で、途中に出ても数えない。表示用の切り詰めは判定の後に別に行う（`answersForDisplay`）。最終回答は、V1 / V2 が最後の text part、Copilot が `--output-format json` の最後の `assistant.message`、Command Code が `finalText`、Claude / Codex が標準出力の全文。反復ごとに作業ツリーを戻し、修正の課題も戻した状態から 1 回出して、`sh verify.sh` を harness が実行した。「2+2」の exit は、V2 の対照 2 回目の 1 回（exit 1）を除いて 0。
+**局所モデル（qwen3-coder:30b）。** ロールは「最初の語を `ROLESTAMP` にする」、`AGENTS.md` は「最後の語を `REPOSTAMP` にする」で、両立する。「2+2」を 5 回。**判定は最終回答の全文を英数字の語に分けた先頭と末尾**で、途中に出ても数えない。表示用の切り詰めは判定の後に別に行う（`answersForDisplay`）。最終回答は、V1 / V2 が最後の text part、Copilot が `--output-format json` の最後の `assistant.message`、Command Code が `finalText`、Claude / Codex が標準出力の全文。反復ごとに作業ツリーを戻し、修正の課題も戻した状態から 1 回出した。「2+2」の exit は、V2 の対照 2 回目の 1 回（exit 1）を除いて 0。
 
 **測り直しの理由。** 前回の判定は JSON でない出力（Copilot）の末尾 200 文字を見ており、先頭を見ていなかった。全ツールを測り直した。また前回は「2+2」の反復の間に作業ツリーを戻しておらず、問いの途中でモデルが `calc.sh` を直すと修正の課題の結果が汚れた（Copilot のロールなしは今回も 5 回中 2 回、Command Code のロールなしは 1 回、問いの最中にリポジトリを変えた。`q1ChangedRepo`）。
 
-| ツール | ロールあり: 先頭 / 末尾 / 両方 | なし: 先頭 / 末尾 | 修正後の verify（あり／なし） |
+| ツール | ロールあり: 先頭 / 末尾 / 両方 | なし: 先頭 / 末尾 | 修正の成否（あり／なし） |
 |---|---|---|---|
-| OpenCode V1 | 0 / 4 / **0** | 0 / 5 | OK / OK |
-| OpenCode V2（ロールのみ） | 5 / 5 / **5** | 0 / 4 | OK / OK |
-| OpenCode V2（共通指示 + ロール） | 5 / 5 / **5** | 0 / 4 | OK / **不合格** |
-| Copilot | 0 / 5 / **0** | 0 / 5 | OK / OK |
-| Codex | 2 / 5 / **2** | 0 / 5 | OK / OK |
-| Command Code | 0 / 5 / **0** | 0 / 5 | OK / OK |
-| Claude Code | 0 / 5 / **0** | 0 / 5 | OK / OK |
+| OpenCode V1 | 0 / 4 / **0** | 0 / 5 | 成功 / 成功 |
+| OpenCode V2（ロールのみ） | 5 / 5 / **5** | 0 / 4 | 成功 / 成功 |
+| OpenCode V2（共通指示 + ロール） | 5 / 5 / **5** | 0 / 4 | 成功 / **失敗**（`100`） |
+| Copilot | 0 / 5 / **0** | 0 / 5 | 成功 / **失敗**（`3`） |
+| Codex | 2 / 5 / **2** | 0 / 5 | 成功 / 成功 |
+| Command Code | 0 / 5 / **0** | 0 / 5 | 成功 / 成功 |
+| Claude Code | 0 / 5 / **0** | 0 / 5 | 成功 / 成功 |
+
+**修正の判定基準（今回変えた）。** `round3.json` の `calc`（課題の後の `calc.sh` の中身）を `sh` で実行し、出力が元の条件（`harness/lib.mjs.txt` の `repoSeed` の verify.sh が求める `2`）なら成功とする。14 件を判定し直した。新しい計測はしていない。
+
+**前の基準の誤り。** 前の版の表は harness が実行した `sh verify.sh` の出力（`verifyAfter`）で判定していたが、モデルは verify.sh も書き換えられるので、修正の証拠にならない。
+
+- Copilot のロールなし: `calc.sh` は `echo 3` のままなのに `VERIFY_OK` で、前の版は OK と書いていた。
+- V2 の対照 2 回目: `calc.sh` は `echo "100"`、出力は元の verify.sh に無い `VERIFY_FAIL`。exit も 0。
+
+どちらも verify.sh が書き換えられたというのは **`calc` と出力からの推定**で、課題の後の verify.sh の中身は記録に無い。出力が `2` の 12 件も、verify.sh が書き換えられていないとは確かめていない。`calc.sh` の出力だけを見ている。また `verifyAfter` はこの限界があるので、今後の計測では元の verify.sh を `git show HEAD:verify.sh` で取り直して実行する（`realmodel.mjs` は未変更）。
 
 **前回との差。** Claude のロールありの先頭が 1 → 0、V2 のロールなしの末尾が 5 → 4（2 回とも）。Claude と V2 の回答はどちらの回も短く切り詰めの影響を受けないので、反復の揺れと読む。切り詰めの影響を受けていた Copilot は、全文で測っても 0 / 5 / 0 と 0 / 5 で数字は変わらなかった。結論は変わらない。
 
 - **同時遵守を確かめられたのは V2 だけ。** Claude、Command Code、Copilot、V1 は 0/5、Codex は 2/5 で、確定モデルでは本文が要求に届いているのに、この局所モデルはロールにほとんど従わなかった。`AGENTS.md` はロールありの全構成で 4/5 以上（V1 が 4/5、他は 5/5）。
 - **これは CLI の渡し方の失敗とは言えない。** 1 モデル、5 回、短い問いの結果で、追加型の長い system prompt の中の 1 行が弱い可能性はあるが、切り分けていない。**本物のモデルで従うかは未確認**（§12）で、追加型の 5 adapter は判断の材料が足りない。#4115 の手動の受入で確かめる。
 - 切り分けの試み: Claude の要求の system（6,445 文字の部分）とロールを Ollama へ直接渡すと、文脈長の指定によらず 6/6 従った（`claudeDiag`）。ただしツール定義と会話の前置きを含まないので、CLI 経由の結果の原因は説明できていない。
-- 修正の課題は、ロールありの全構成で verify が通った。ロールなしの不合格 1 回はロールと無関係に起きた揺れで、1 回ずつの結果から能力が同等とまでは言えない。
+- 修正の課題は、ロールありの 7 構成がすべて成功し、ロールなしは 7 回中 2 回失敗した（Copilot、V2 の対照 2 回目）。ロールがあると修正が良くなるとは読まない。各 1 回で、失敗した 2 回は課題の最中に検証の側まで変えたと推定され、モデルの揺れと区別できない。ロールが修正の能力を落とした例はこの範囲に無いが、能力が同等とまでは言えない。
 - 最初の表（`real-model-local.json`）は両立しない指示と `includes` の判定で、「両方」の列は同時遵守を示さない。取り下げる。`round2.json` の `realNonConflicting` は末尾 200 文字の判定を含むので、`round3.json` に置き換える。
 
 ## 10. 検証の方法と隔離
