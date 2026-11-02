@@ -66,6 +66,7 @@ import {
   stripAnsi,
 } from '../detection/cli-patterns';
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
+import { detectOpenCodeModalOverlay } from '../detection/opencode-modal-overlay';
 import { isOpenCodeComposerReady } from '../detection/tools/opencode/readiness';
 import { detectSessionStatus, isGeneratingStatus, type StatusDetectionResult } from '../detection/status-detector';
 import {
@@ -547,6 +548,16 @@ export class OpenCodeTool extends BaseCLITool {
    * operator's config, which is the same line codex's launch draws at its
    * hooks-review dialog (#1760).
    *
+   * A modal overlay is the third (Issue #4104): the palette hides `Ask anything`
+   * too when it opens before the wait has seen the box, and its heading is not
+   * on that allowlist. Measured on 1.18.35: 30 s here for a send that was then
+   * refused in 2 s. The overlay is opencode's own painting, and the TUI is a
+   * client of its server, so the stream attach below still finds the server up
+   * (#1908). It ends the wait only once confirmed, as the send's own wait does
+   * ({@link waitForPrompt}), so a palette closed sooner still ends on the box. A
+   * wrong reading costs nothing typed: the send's wait reads the pane itself.
+   * The rectangle needs the SGR, so the raw capture is what is read.
+   *
    * ## On failure
    *
    * Returns false and lets the launch continue, exactly as the sleep did: a
@@ -557,9 +568,11 @@ export class OpenCodeTool extends BaseCLITool {
    * @returns Whether readiness evidence was seen inside the window
    */
   private async waitForReady(sessionName: string): Promise<boolean> {
+    const overlay = createDialogConfirmation();
     for (let attempt = 0; attempt < OPENCODE_READY_MAX_ATTEMPTS; attempt++) {
       try {
-        const output = stripAnsi(await capturePane(sessionName, OPENCODE_READY_CAPTURE_LINES));
+        const frame = await capturePane(sessionName, OPENCODE_READY_CAPTURE_LINES);
+        const output = stripAnsi(frame);
 
         // Do NOT stripBoxDrawing() this frame: the gutter is the anchor.
         if (OPENCODE_IDLE_COMPOSER_PATTERN.test(output)) {
@@ -571,8 +584,15 @@ export class OpenCodeTool extends BaseCLITool {
           logger.info('opencode-overlay-detected', { attempt });
           return true;
         }
+
+        if (overlay.observe(detectOpenCodeModalOverlay(frame) !== null)) {
+          logger.info('opencode-launch-dialog-confirmed', { attempt, reads: overlay.reads });
+          return true;
+        }
       } catch {
-        // Capture may fail while the pane is still coming up - keep polling
+        // Capture may fail while the pane is still coming up - keep polling.
+        // Not an overlay read: the run restarts.
+        overlay.reset();
       }
       await new Promise((resolve) => setTimeout(resolve, OPENCODE_READY_POLL_INTERVAL_MS));
     }
