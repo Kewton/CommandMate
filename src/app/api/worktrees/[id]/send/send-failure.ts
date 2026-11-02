@@ -17,6 +17,9 @@ import { SESSION_STARTING_CODE } from '@/lib/session/session-start-error';
 import { FOREIGN_SESSION_ERROR_CODE } from '@/lib/cli-tools/session-ownership';
 import { answerSessionStartTimeout } from './send-session-start';
 
+/** How the error of a failed send starts, whoever wrote it. */
+const SEND_FAILURE_PREFIX = 'Failed to send message to ';
+
 /**
  * The fields of a failed `sendUserMessage` result this answer reads. Written
  * out rather than imported: `send-user-message` and `prompt-waiting-guard`
@@ -96,9 +99,19 @@ export function answerSendFailure(
       : null);
   const sendState = attempt !== null ? ` ${describeSendAttemptState(attempt)}` : '';
   return NextResponse.json(
-    { error: `Failed to send message to ${cliTool.name}: ${aimPlanReviewRefusal(result.error, attempt, input)}${sendState}` },
+    { error: `${withSendFailurePrefix(aimPlanReviewRefusal(result.error, attempt, input), cliTool.name)}${sendState}` },
     { status: 500 }
   );
+}
+
+/**
+ * The failure with the sentence that opens it, once (Issue #4104). Eight tools
+ * wrap their own failure in it, and a name comparison would miss four of them:
+ * the wrap says `Codex`, `cliTool.name` says `Codex CLI`. Only the start counts,
+ * so a failure that merely quotes the sentence still names the tool.
+ */
+function withSendFailurePrefix(error: string, toolName: string): string {
+  return error.startsWith(SEND_FAILURE_PREFIX) ? error : `${SEND_FAILURE_PREFIX}${toolName}: ${error}`;
 }
 
 /**
