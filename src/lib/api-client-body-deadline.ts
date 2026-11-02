@@ -216,11 +216,16 @@ function createBodyFeed(source: ReadableStream<Uint8Array>, options: BodyDeadlin
  * `TypeError` carrying only its message. That would lose the `kind` and `status`
  * of the `ApiError` on exactly the phones this exists for.
  */
-function responseOverBranch(source: Response, feed: BodyFeed, branch: BodyBranch): Response {
+function responseOverBranch(
+  source: Response,
+  feed: BodyFeed,
+  branch: BodyBranch,
+  headers: Headers,
+): Response {
   const target = new Response(branch.stream, {
     status: source.status,
     statusText: source.statusText,
-    headers: source.headers,
+    headers,
   });
   Object.defineProperties(target, {
     url: { value: source.url },
@@ -231,7 +236,8 @@ function responseOverBranch(source: Response, feed: BodyFeed, branch: BodyBranch
         if (target.bodyUsed || branch.stream.locked) {
           throw new TypeError('Failed to clone: the response body is already used');
         }
-        return responseOverBranch(source, feed, feed.openBranch(branch.queue));
+        // The headers as they are now, as a native clone copies them.
+        return responseOverBranch(source, feed, feed.openBranch(branch.queue), target.headers);
       },
     },
   });
@@ -254,7 +260,7 @@ function responseOverBranch(source: Response, feed: BodyFeed, branch: BodyBranch
  */
 export function withBodyDeadline(response: Response, options: BodyDeadlineOptions): Response {
   const feed = createBodyFeed(response.body as ReadableStream<Uint8Array>, options);
-  return responseOverBranch(response, feed, feed.openBranch([]));
+  return responseOverBranch(response, feed, feed.openBranch([]), response.headers);
 }
 
 /** Let go of a response nobody will read, so its connection does not stay open. */

@@ -270,6 +270,21 @@ describe('[#4034] the edges of a clone', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('copies the headers as they are at the moment of the clone', async () => {
+    const received = await fetched(feedableResponse());
+    received.headers.set('x-mark', 'changed');
+
+    const copy = received.clone();
+    expect(copy.headers.get('x-mark')).toBe('changed');
+
+    copy.headers.set('x-mark', 'on-the-copy');
+    expect(copy.clone().headers.get('x-mark')).toBe('on-the-copy');
+    // A copy, not a shared object: neither side reaches the other.
+    expect(received.headers.get('x-mark')).toBe('changed');
+    received.headers.set('x-later', 'original-only');
+    expect(copy.headers.get('x-later')).toBeNull();
+  });
+
   it('keeps the status and headers on the copy', async () => {
     const copy = (await fetched(feedableResponse())).clone();
 
