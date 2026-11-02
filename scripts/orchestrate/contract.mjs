@@ -103,6 +103,33 @@ const ROUTE_TOKEN = /^[a-z0-9][a-z0-9-]{0,31}$/;
 /** A test a cell is tied to: a test file under tests/, optionally `<file> > <test name>`. */
 const ROUTE_TEST = /^tests\/[^\s]+\.(?:test|spec)\.[cm]?[jt]sx?(?: > .+)?$/;
 
+/**
+ * Files a scope pattern drags in (#4015). A test pins a list that the change
+ * itself moves, so a worker who stayed inside the scope still fails the gate.
+ * `when` sees the scope the config wrote; the fragment is added separately.
+ */
+const SCOPE_COMPANIONS = [
+  {
+    // tests/unit/lib/slash-command-description-override.test.ts pins the leaves a split description produces (#3998).
+    file: 'tests/unit/lib/slash-command-description-override.test.ts',
+    when: (scope) => scope.includes('src/config/slash-commands-catalog.json'),
+  },
+  {
+    // tests/unit/skills/sync-map.test.ts pins the sha256 of every file of a mapped package (#4106).
+    file: '.claude/skills/sync-map.json',
+    when: (scope) => scope.some((pattern) => pattern === '.claude/skills' || pattern.startsWith('.claude/skills/')),
+  },
+];
+
+/** Whether the scope reaches `tests/fixtures/` (the scanning tests have to be told about a new fixture, #4000). */
+export function touchesFixtures(scope) {
+  return scope.some((pattern) => pattern === 'tests/fixtures' || pattern.startsWith('tests/fixtures/'));
+}
+
+const FIXTURE_RULE =
+  '- `tests/fixtures/` の下に足すので、fixture を走査するテスト（件数・許可リスト・判定表を持つもの。`grep -rl "tests/fixtures" tests/unit` で探す）の表・許可リストへの登録も受入基準に入れる。' +
+  '走査するテストは scope に入れておく。scope の外にあるなら変えず、「本文に無い指摘」として報告する。';
+
 const KINDS = {
   feature: { label: '機能追加', section: 'Added', type: 'feat' },
   bug: { label: '不具合修正', section: 'Fixed', type: 'fix' },
@@ -231,6 +258,10 @@ export function normalizeConfig(raw, options = {}) {
   if (scope.length === 0) problems.push('scope: at least one path is required');
   for (const shared of SHARED_FILES) {
     if (scope.includes(shared)) problems.push(`scope: ${shared} is shared — the worker writes a fragment instead (2-4-1)`);
+  }
+  const asWritten = [...scope];
+  for (const companion of SCOPE_COMPANIONS) {
+    if (companion.when(asWritten) && !scope.includes(companion.file)) scope.push(companion.file);
   }
   if (!scope.includes(fragment)) scope.push(fragment);
   if (scope.length > MAX_SCOPE_PATTERNS) problems.push(`scope: at most ${MAX_SCOPE_PATTERNS} patterns (got ${scope.length})`);
@@ -536,6 +567,7 @@ export function renderGoal(config) {
     TIER_RULE: config.model === 'sonnet' ? `- ${SONNET_RULE}` : '',
     PROCESS_RULE: processRule(config),
     REFACTOR_RULES: refactorRules,
+    FIXTURE_RULE: touchesFixtures(config.scope) ? FIXTURE_RULE : '',
     FRAGMENT_RULES: fragmentRules,
     CHANGELOG_SECTION: sectionLines.join('\n'),
     COMMIT_PREFIX: prefix,
