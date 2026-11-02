@@ -109,6 +109,24 @@ describe('[#4034] a clone nobody reads', () => {
   });
 });
 
+describe('[#4034] a clone on the real clock', () => {
+  it('is still readable after waiting past a short deadline, as an unread original is', async () => {
+    vi.useRealTimers();
+    const fixture = feedableResponse();
+    mockFetch.mockResolvedValue(fixture.response);
+    const received = await fetchApiResponse(URL_UNDER_TEST, { timeoutMs: 30, retries: 0 });
+    const copy = received.clone();
+
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(connectionSignal().aborted).toBe(false);
+
+    const reading = Promise.all([received.text(), copy.text()]);
+    fixture.send('whole');
+    fixture.end();
+    await expect(reading).resolves.toEqual(['whole', 'whole']);
+  });
+});
+
 describe('[#4034] reading both sides of a clone', () => {
   it('turns a stall into a timeout on both, at the deadline, and aborts once', async () => {
     const fixture = feedableResponse();
