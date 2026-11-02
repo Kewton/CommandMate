@@ -1,0 +1,52 @@
+{
+  "version": "0.49.3",
+  "date": "2026-11-02",
+  "highlight": {
+    "ja": "エージェント間の依頼の返答が届いたか分からないとき、自動で再送せず保留として知らせるようになりました。画面を確かめてから、CLI で確認・再試行・破棄を選べます。",
+    "en": "When it is unknown whether a reply between agents arrived, it is now held and reported instead of being resent. After checking the screen, you can confirm, retry or discard it from the CLI."
+  },
+  "added": [],
+  "improved": [],
+  "fixed": [
+    {
+      "ja": "届いたか分からない依頼の返答を、自動で再送して二重に届けることがある問題を直しました。",
+      "en": "Fixed replies between agents sometimes arriving twice when it was unknown whether the first one had arrived."
+    },
+    {
+      "ja": "保留になった配送を、commandmate relays resolve で確認・再試行・破棄できるようにしました。",
+      "en": "Held deliveries can now be confirmed, retried or discarded with commandmate relays resolve."
+    },
+    {
+      "ja": "保留になった配送が、PC とスマホの画面、依頼元の履歴、CLI の集計に出るようにしました。",
+      "en": "Held deliveries now appear on the PC and phone screens, in the requester's history and in the CLI counts."
+    },
+    {
+      "ja": "Copilot・Vibe Local・OpenCode で、入力欄の準備ができる前に文字を打つことがある問題を直しました。",
+      "en": "Fixed Copilot, Vibe Local and OpenCode sometimes receiving typed text before their input box was ready."
+    },
+    {
+      "ja": "OpenCode と Vibe Local で、一瞬のダイアログの表示を理由に送信を断ることがある問題を直しました。",
+      "en": "Fixed OpenCode and Vibe Local sometimes refusing a send because of a dialog that appeared only for a moment."
+    },
+    {
+      "ja": "OpenCode でサイドバーを開いていると、届いた送信が失敗と報告されることがある問題を直しました。",
+      "en": "Fixed a delivered OpenCode message sometimes being reported as failed while the sidebar was open."
+    },
+    {
+      "ja": "Copilot でダイアログが出ているときに、待ち時間の上限まで待ってから送信を断っていた問題を直しました。",
+      "en": "Fixed Copilot waiting out the whole time limit before refusing a send while a dialog was open."
+    },
+    {
+      "ja": "起動した直後の Claude への最初の送信で、届いているのに失敗と報告されることがある問題を直しました。",
+      "en": "Fixed the first message to a just-started Claude sometimes being reported as failed after it had arrived."
+    },
+    {
+      "ja": "prompt --json の直近の送信の結果が、古い送信の結果で上書きされることがある問題を直しました。",
+      "en": "Fixed the latest send result in prompt --json sometimes being overwritten by an older send."
+    },
+    {
+      "ja": "ダイアログへの回答の案内が、待っているセッションへ確実に届く宛先を示すようにしました。",
+      "en": "The hints for answering a dialog now always name the session that is actually waiting."
+    }
+  ]
+}
