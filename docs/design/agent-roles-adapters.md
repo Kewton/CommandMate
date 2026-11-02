@@ -3,7 +3,7 @@
 - 親: Epic #4112（決定 D1〜D5 はそちらが正）。この文書を読む後続: #4114（DB・生成物）、#4115（起動処理と Schedule）
 - 状態: **調査と契約の確定のみ。`src/` と `tests/` は変えていない**
 - 基準: develop `d5c581231`、CommandMate 0.49 系、schema v63。検証日 2026-11-03
-- 改訂: 整合性レビューの指摘を受けて追試し、§1・§2・§3・§4・§5・§6.7・§7・§8・§9 を直し §14 を足した。追試の記録は `evidence/round2.json`
+- 改訂: 整合性レビューの指摘を受けて追試し、§1・§2・§3・§4・§5・§6.7・§7・§8・§9 を直し §14 を足した。追試の記録は `evidence/round2.json`。再レビューを受けて fingerprint を §5 で定義し、局所モデルを全文の判定で測り直した（`evidence/round3.json`）
 - 生の記録: [`agent-roles-adapters/evidence/`](./agent-roles-adapters/evidence/)、再現用の harness: [`agent-roles-adapters/harness/`](./agent-roles-adapters/harness/)（§10）
 
 ## 1. 結論
@@ -30,7 +30,7 @@
 
 ## 2. 判断を仰ぐこと
 
-**判断 1（OpenCode V2）。** provider の基礎プロンプトが置換され、開発の一般指針 13 行が要求から消える（§7.2）。ツール一覧は同じで、確定モデルでは修正から検証まで動いた。局所モデルの計測では、ロールだけでも共通指示つきでも、ロールと `AGENTS.md` の両方を 5/5 守った。**差は出ていないので、置換の害も共通指示の効果も確かめられていない**（1 モデル、短い問い）。推奨は、消える指針を補う保険として「CommandMate の短い共通指示 + ロール」を本文にし、UI と文書で「既定の指示の置き換え」と明示して出荷すること。効果の根拠があっての推奨ではない。代替は V2 を初回の対象から外すこと（D3 の変更）。公式文書の `instructions`（追加）は 2.0.18 では効かなかったので、版が上がって効くようになれば切り替える。
+**判断 1（OpenCode V2）。** provider の基礎プロンプトが置換され、開発の一般指針 13 行が要求から消える（§7.2）。ツール一覧は同じで、確定モデルでは修正から検証まで動いた。局所モデルの計測では、全文の判定で測り直しても、ロールだけでも共通指示つきでもロールと `AGENTS.md` の両方を 5/5 守った。**差は出ていないので、置換の害も共通指示の効果も確かめられていない**（1 モデル、短い問い）。推奨は、消える指針を補う保険として「CommandMate の短い共通指示 + ロール」を本文にし、UI と文書で「既定の指示の置き換え」と明示して出荷すること。効果の根拠があっての推奨ではない。代替は V2 を初回の対象から外すこと（D3 の変更）。公式文書の `instructions`（追加）は 2.0.18 では効かなかったので、版が上がって効くようになれば切り替える。
 
 **判断 2（Antigravity）。** 本物のモデルへ届く確認には、ログイン済みのホームが要る。一時ホームは「not signed in」で止まり、認証の複製は禁止なので、一覧と失敗応答しか確かめていない。推奨は #4115 で Antigravity の adapter を**無効のまま実装**し、次のどちらかの後に有効化すること。
 
@@ -103,13 +103,28 @@
 
 ## 5. 共通の契約（#4114・#4115 向け）
 
-**生成物。** 不変で、版ごとに別の名前。親 0700、ファイル 0600。新規排他作成か一時ファイルからの rename で公開し、同名が同内容なら再利用、違えば拒否する。symlink を辿らない。worktree に置かない。ホーム解決は既存の resolver を使う（`CODEX_HOME`、`COPILOT_HOME`）。削除しない（#4112）。
+**fingerprint は 3 種類に分ける。** 比べる相手が違うので混ぜない。いずれも SHA-256。
+
+| 名前 | 入力 | 計算する所 | 持つ所 | 比べる相手 | 用途 |
+|---|---|---|---|---|---|
+| **本文 fingerprint** | ロールの本文の UTF-8 バイト列だけ | #4114 の解決関数 | `ResolvedRole`、起動の記録 | 起動の記録の本文 fingerprint | 「本文が変わった」の表示と、注入 fingerprint の入力。**起動前の検査と再起動待ちの判定には直接使わない** |
+| **注入 fingerprint** | adapter の ID と版、wrapper の版、本文 fingerprint、合成の入力（Codex の既存の `developer_instructions`、V2 の実効 agent、明示 `agent`）。ロール名、role ID、継承元、パス、利用者の env の他のキーは入れない | #4115 の純粋な変換処理 | effectiveNext、`requested`、`launched` | effectiveNext と `launched` の差、同時起動どうし、実入力の直前の確認 | 再起動待ち、起動の合流の可否、`send --role` の条件。生成物の名前のハッシュ |
+| **生成物 fingerprint** | 生成するファイルの全バイト（Codex の TOML、Command Code の mod、Copilot / Antigravity の frontmatter つき定義、V1 / V2 の本文ファイル） | #4114 の書き込み処理が、書く前のバイト列で | 起動の記録 | 同名の既存ファイル、起動直前に読み直したファイル | 再利用か拒否か、起動前の検査 1 |
+
+- **生成物の名前は注入 fingerprint から作る**（`cm-role-<namespace>-<role ID>-<注入 fingerprint の先頭>`）。生成物 fingerprint を名前に使うと、名前を含む frontmatter との間で循環する。
+- 本文が同じでも、合成の入力や adapter・wrapper の版が変われば、注入 fingerprint も生成物も変わる。これは正しい動きで、起動は拒否しない。
+- role ID は生成物の名前と frontmatter に入るが注入 fingerprint には入らないので、本文が同じ別のロールへ替えても再起動待ちにならない。
+- 合成の入力を読めず注入 fingerprint を計算できないときは、再起動待ちを「不明」にする。起動なら未送信のエラーにする。
+- 合成後の `OPENCODE_CONFIG_CONTENT` のファイル（§7.1）は秘密を含みうる起動ごとのファイルで、生成物に数えず、ハッシュも記録しない。
+- **ここまでは設計で、実装が無いので未実測。**
+
+**生成物。** 不変で、注入 fingerprint ごとに別の名前。親 0700、ファイル 0600。新規排他作成か一時ファイルからの rename で公開する。同名の既存ファイルは、生成物 fingerprint が同じなら再利用し、違えば拒否する。symlink を辿らない。worktree に置かない。ホーム解決は既存の resolver を使う（`CODEX_HOME`、`COPILOT_HOME`）。削除しない（#4112）。
 
 **本文を起動行に出さない。** 起動行はパスと ID だけ。Antigravity を除く 6 adapter で実際にこの形で動かした（`{file:}` は V2 2.0.18 で動いた）。Antigravity は `--agent` だけの形で、モデルまでは未確認。利用者の `OPENCODE_CONFIG_CONTENT` と合成するときは §7.1 の注意を守る。
 
 **起動前の検査（必須）。** 次を確かめ、失敗したら本文を送らず起動失敗にする。CLI に任せない（§8）。
 
-1. 生成物が在り、読め、内容のハッシュが `ResolvedRole` と一致する
+1. 生成物が在り、読め、読み直したバイト列のハッシュが、書き込み処理の返した**生成物 fingerprint** と一致する。本文 fingerprint とは比べない（合成があるので一致しない）
 2. 形式の検査（Codex は TOML を読み直す。Command Code は構文の確認。Copilot / Antigravity は frontmatter を読み直す。V1 / V2 は JSON を読み直す）
 3. 本文が空なら「ロールなし」扱いにせず拒否する（Claude は空ファイルで素のまま動いた）
 
@@ -330,13 +345,16 @@ Welcome to the Antigravity CLI. You are currently not signed in.
 - `Prefer dedicated tools over shell commands…`
 - `Treat unfamiliar files or changes as potential user work…` など
 
-**計測（qwen3-coder:30b、「2+2」を 5 回。§9 と同じ条件）。** 衝突しない指示で、最終回答の先頭の語が `ROLESTAMP`、末尾の語が `REPOSTAMP` かを数えた。修正の課題は 1 回。
+**計測（qwen3-coder:30b、「2+2」を 5 回。§9 と同じ条件。`round3.json`）。** 衝突しない指示で、最終回答の全文の先頭の語が `ROLESTAMP`、末尾の語が `REPOSTAMP` かを数えた。修正の課題は 1 回で、作業ツリーを戻してから出した。
 
 | 本文（`agents.build.system`） | 先頭 = ロール | 末尾 = `AGENTS.md` | 両方 | 修正後 `sh verify.sh` |
 |---|---|---|---|---|
-| なし | 0/5 | 5/5 | 0/5 | OK |
 | ロールのみ | 5/5 | 5/5 | **5/5** | OK |
 | 共通指示 + ロール | 5/5 | 5/5 | **5/5** | OK |
+| なし（対照 1 回目） | 0/5 | 4/5 | 0/5 | OK |
+| なし（対照 2 回目） | 0/5 | 4/5 | 0/5 | **不合格** |
+
+対照は同じ構成を 2 度測ったもので、2 回目は 1 回が exit 1 で、修正の課題ではモデルが `calc.sh` と検証の文字列を別の形に書き換えた。同じ構成でもこの程度は揺れる。
 
 **結論。** 共通指示の有無で差は無かった。**基礎プロンプトの置換で指示の保持が落ちる証拠も、共通指示で良くなる証拠も無い。**
 
@@ -396,25 +414,29 @@ Welcome to the Antigravity CLI. You are currently not signed in.
 
 - CLI が実際に送った要求（system / developer / user の各層）を確定モデルで記録し、ロールと `AGENTS.md` の層、ツール一覧、ロールなしの対照との行単位の残存率を比べた
 - 確定モデルがシェルツール呼び出しを返し、CLI が実行した結果と、`calc.sh` の実際の変化を見た
-- 実モデルの代わりに手元の Ollama（課金なし、認証なし）で、応答の文字列・ファイルの変化・`sh verify.sh` の exit を見た（`round2.json` の `realNonConflicting`）
+- 実モデルの代わりに手元の Ollama（課金なし、認証なし）で、応答の文字列・ファイルの変化・`sh verify.sh` の exit を見た（`round3.json`）
 
-**局所モデル（qwen3-coder:30b）。** ロールは「最初の語を `ROLESTAMP` にする」、`AGENTS.md` は「最後の語を `REPOSTAMP` にする」で、両立する。「2+2」を 5 回。**判定は最終回答の英数字の語の先頭と末尾**で、途中に出ても数えない。修正の課題は 1 回で、`sh verify.sh` を harness が実行した。すべて exit 0。
+**局所モデル（qwen3-coder:30b）。** ロールは「最初の語を `ROLESTAMP` にする」、`AGENTS.md` は「最後の語を `REPOSTAMP` にする」で、両立する。「2+2」を 5 回。**判定は最終回答の全文を英数字の語に分けた先頭と末尾**で、途中に出ても数えない。表示用の切り詰めは判定の後に別に行う（`answersForDisplay`）。最終回答は、V1 / V2 が最後の text part、Copilot が `--output-format json` の最後の `assistant.message`、Command Code が `finalText`、Claude / Codex が標準出力の全文。反復ごとに作業ツリーを戻し、修正の課題も戻した状態から 1 回出して、`sh verify.sh` を harness が実行した。「2+2」の exit は、V2 の対照 2 回目の 1 回（exit 1）を除いて 0。
+
+**測り直しの理由。** 前回の判定は JSON でない出力（Copilot）の末尾 200 文字を見ており、先頭を見ていなかった。全ツールを測り直した。また前回は「2+2」の反復の間に作業ツリーを戻しておらず、問いの途中でモデルが `calc.sh` を直すと修正の課題の結果が汚れた（Copilot のロールなしは今回も 5 回中 2 回、Command Code のロールなしは 1 回、問いの最中にリポジトリを変えた。`q1ChangedRepo`）。
 
 | ツール | ロールあり: 先頭 / 末尾 / 両方 | なし: 先頭 / 末尾 | 修正後の verify（あり／なし） |
 |---|---|---|---|
 | OpenCode V1 | 0 / 4 / **0** | 0 / 5 | OK / OK |
-| OpenCode V2（ロールのみ） | 5 / 5 / **5** | 0 / 5 | OK / OK |
-| OpenCode V2（共通指示 + ロール） | 5 / 5 / **5** | 0 / 5 | OK / OK |
+| OpenCode V2（ロールのみ） | 5 / 5 / **5** | 0 / 4 | OK / OK |
+| OpenCode V2（共通指示 + ロール） | 5 / 5 / **5** | 0 / 4 | OK / **不合格** |
 | Copilot | 0 / 5 / **0** | 0 / 5 | OK / OK |
 | Codex | 2 / 5 / **2** | 0 / 5 | OK / OK |
 | Command Code | 0 / 5 / **0** | 0 / 5 | OK / OK |
-| Claude Code | 1 / 5 / **1** | 0 / 5 | OK / OK |
+| Claude Code | 0 / 5 / **0** | 0 / 5 | OK / OK |
 
-- **同時遵守を確かめられたのは V2 だけ。** Claude、Codex、Command Code、Copilot、V1 は、確定モデルでは本文が要求に届いているのに、この局所モデルはロールにほとんど従わなかった。`AGENTS.md` は全ツールで従った（V1 のみ 4/5）。
+**前回との差。** Claude のロールありの先頭が 1 → 0、V2 のロールなしの末尾が 5 → 4（2 回とも）。Claude と V2 の回答はどちらの回も短く切り詰めの影響を受けないので、反復の揺れと読む。切り詰めの影響を受けていた Copilot は、全文で測っても 0 / 5 / 0 と 0 / 5 で数字は変わらなかった。結論は変わらない。
+
+- **同時遵守を確かめられたのは V2 だけ。** Claude、Command Code、Copilot、V1 は 0/5、Codex は 2/5 で、確定モデルでは本文が要求に届いているのに、この局所モデルはロールにほとんど従わなかった。`AGENTS.md` はロールありの全構成で 4/5 以上（V1 が 4/5、他は 5/5）。
 - **これは CLI の渡し方の失敗とは言えない。** 1 モデル、5 回、短い問いの結果で、追加型の長い system prompt の中の 1 行が弱い可能性はあるが、切り分けていない。**本物のモデルで従うかは未確認**（§12）で、追加型の 5 adapter は判断の材料が足りない。#4115 の手動の受入で確かめる。
 - 切り分けの試み: Claude の要求の system（6,445 文字の部分）とロールを Ollama へ直接渡すと、文脈長の指定によらず 6/6 従った（`claudeDiag`）。ただしツール定義と会話の前置きを含まないので、CLI 経由の結果の原因は説明できていない。
-- 修正の課題は、ロールの有無で verify に差が出なかった。1 回ずつなので、能力が同等とまでは言えない。
-- 前回の表（`real-model-local.json`）は両立しない指示と `includes` の判定で、「両方」の列は同時遵守を示さない。取り下げる。
+- 修正の課題は、ロールありの全構成で verify が通った。ロールなしの不合格 1 回はロールと無関係に起きた揺れで、1 回ずつの結果から能力が同等とまでは言えない。
+- 最初の表（`real-model-local.json`）は両立しない指示と `includes` の判定で、「両方」の列は同時遵守を示さない。取り下げる。`round2.json` の `realNonConflicting` は末尾 200 文字の判定を含むので、`round3.json` に置き換える。
 
 ## 10. 検証の方法と隔離
 
@@ -481,10 +503,10 @@ Welcome to the Antigravity CLI. You are currently not signed in.
 |---|---|---|
 | 生成物の「ルートは差し替えられる。既定はデータディレクトリの下」 | Codex は `$CODEX_HOME/<name>.config.toml`、Copilot は `$COPILOT_HOME/agents/`、Antigravity は `~/.gemini/config/agents/<dir>/` でないと発見されない（§6）。データディレクトリに置けるのは Claude、Command Code、V1、V2 の 4 つ | adapter ごとの置き場所の表を足し、ルートの差し替えはホームの差し替えと分ける |
 | 「CLI のホームは既存の解決関数を再利用する（codex、copilot）」 | Antigravity の agents ディレクトリの解決関数は無い（`getAntigravityHooksConfigPath` は `hooks.json` のパスだけ） | Antigravity の解決関数を新設すると書く |
-| 名前は「server namespace、role ID、ハッシュから」 | 方向は一致。名前は Codex の `-p`、Copilot の `--agent`、Antigravity の `name` になる。実測は `cm-role-x` などの短い名前だけで、長さと文字種は未確認。V2 / V1 / Claude / Command Code の名前は CLI に見えない | 英数字とハイフンに限り、長さの上限を置き、実機で確かめる受入条件を足す |
-| 「同じ内容・同じ所有なら再利用」 | 一致。ただし**生成物の内容はロールの本文だけで決まらない**（Codex は既存の `developer_instructions`、V2 は共通指示、Copilot と Antigravity は frontmatter） | ハッシュの入力を「合成後の生成物の全バイト」にする |
-| `ResolvedRole` が「注入内容の fingerprint」を持つ | 注入内容は起動の時点の利用者の設定（Codex の `config.toml`、V2 の実効 agent）に依存し、解決関数からは決まらない | `ResolvedRole` は本文の fingerprint だけにし、注入内容の fingerprint は #4115 の変換処理が返す形に分ける |
-| 起動の記録の項目（生成物、adapter と wrapper の版など） | V2 の実効 agent と、Codex の合成の元が足りない | 記録の項目に足す。本文や秘密を入れない |
+| 名前は「server namespace、role ID、ハッシュから」 | 方向は一致。ハッシュは**注入 fingerprint** の先頭とする（§5）。名前は Codex の `-p`、Copilot の `--agent`、Antigravity の `name` になる。実測は `cm-role-x` などの短い名前だけで、長さと文字種は未確認。V2 / V1 / Claude / Command Code の名前は CLI に見えない | 英数字とハイフンに限り、長さの上限を置き、実機で確かめる受入条件を足す |
+| 「同じ内容・同じ所有なら再利用」 | 一致。ただし**生成物の内容はロールの本文だけで決まらない**（Codex は既存の `developer_instructions`、V2 は共通指示、Copilot と Antigravity は frontmatter） | 同じ内容の判定を**生成物 fingerprint**（書く全バイト）で行うと書く（§5） |
+| `ResolvedRole` が「注入内容の fingerprint」を持つ | 注入内容は起動の時点の利用者の設定（Codex の `config.toml`、V2 の実効 agent）に依存し、解決関数からは決まらない | `ResolvedRole` が持つのは**本文 fingerprint** だけにする。**注入 fingerprint** は #4115 の変換処理が返し、**生成物 fingerprint** は書き込み処理が返す（§5 の表を写す） |
+| 起動の記録の項目（本文の版とハッシュ、生成物、adapter と wrapper の版など） | 「ハッシュ」が 1 種類では足りない。V2 の実効 agent と、Codex の合成の元の fingerprint も足りない | **本文 fingerprint、注入 fingerprint、生成物 fingerprint** を別の欄で持つ。合成の元は値でなく fingerprint で持つ。本文や秘密を入れない |
 | 本文は「UTF-8 で 16KB まで」 | 16,384 バイトまで 6 adapter で確認。CLI の上限ではなく CommandMate の上限（§5） | 「16,384 バイト。本文に掛け、合成後の生成物には掛けない」と書く |
 | 本文の検証は上限のみ | Claude は空ファイルで素のまま動く（§6.1） | 空や空白だけの本文を API で拒否する |
 | 生成物の検査は「symlink、権限、同一内容」 | 書いた後の読み直しの検査も要る（§5） | Codex の TOML、Copilot / Antigravity の frontmatter、Command Code の構文を読み直して検査する、を足す |
@@ -498,14 +520,16 @@ Welcome to the Antigravity CLI. You are currently not signed in.
 | 「#4113 の文書に従い、7 adapter を実装する」 | Antigravity は無効のまま実装し、V2 は判断 1 に従う（§2） | 「Antigravity は既定で無効」を足す |
 | 「Copilot の生成定義は `infer: false`。Antigravity は #4113 の結論に従う」 | Copilot は `infer: false` で別セッションの要求から名前が消えた（実測）。Antigravity は `subagent: false` を付ける（changelog の記載で、効果は未確認）。`hidden: true` は一覧から消えない | Antigravity の `subagent: false` と、効果が未確認であることを書く |
 | OpenCode V2 の渡し方（#4112 の設計案: `OPENCODE_CONFIG_DIR` + `default_agent`） | **`OPENCODE_CONFIG_DIR` は採らない。** `OPENCODE_CONFIG_CONTENT` で実効 agent の `system` を上書きする（§7）。`hidden` を付けない | 変換の節に V2 の形を書き、実効 agent の解決（§7.1 の順序）をスコープに足す |
-| V2 の共通 wrapper の扱いに区別なし | V2 の本文は共通指示 + ロール（判断 1） | V2 の共通指示の版を wrapper の版として記録する |
+| V2 の共通 wrapper の扱いに区別なし | V2 の本文は共通指示 + ロール（判断 1） | V2 の共通指示の版を wrapper の版として記録し、注入 fingerprint の入力にする |
 | 「ロール本文を、個別の依頼と実行契約を尊重する旨の共通 wrapper で包む」 | 局所モデルでは効果が確かめられず（§7.2）、V2 以外で wrapper をかけた実測が無い | 全 adapter の実機確認（到達と形式）を受入条件に足す |
 | 「注入する env は、利用者の同名 env を無断で上書きしない」 | 合成の手順を決めた。不正なら未送信のエラー。V2 は不正な値を無言で無視する。合成後の値を起動行に書かない（§7.1） | §7.1 の手順と、env の読み先（tmux、sanitized env）の確認をスコープに足す |
 | Schedule の明示 `agent`「規則は #4113 の結論に従う」 | V1 と Claude は併用。V2 は `agents.<明示 agent>.system` を上書きし、その agent に利用者の本文があれば未送信のエラー。Copilot は `gh copilot --agent <id>`（`buildCliArgs` に明示 `agent` は無い）（§4、§7.1） | 規則を本文へ写す |
 | `buildCliArgs` に足す位置の指定なし | Codex の `-p` は `exec` の前。Copilot は `gh copilot` の後（`['copilot', '--agent', <id>, …]`）。V2 の明示 agent は env の内容に影響する | 引数の順序をテストの受入条件に足す |
 | 「起動を確認したあとで `launched` を確定する」（手段の指定なし） | 手段は adapter ごとに違う（下の表）。証拠が無ければ `launched` は「不明」のまま | 下の表を本文へ写す |
 | 「ロールの準備失敗は本文を送らず起動失敗」 | 一致。準備だけでは足りず、CLI が読まなかった場合も検出が要る。起動前の検査の項目は §5 | §5 の検査をスコープに足す |
-| 再起動待ちは fingerprint の差 | Claude と Codex は再開すると旧本文を保持し、Copilot は `--agent` なしの再開で保持する（§3）。現在は再開しないので問題にならない | 「再開を足すときは §3 を確かめる」を逸脱時の扱いに足す |
+| 「再起動待ちは、effectiveNext と launched の fingerprint の差」 | 比べるのは**注入 fingerprint**。本文、adapter・wrapper の版に加え、Codex の既存の `developer_instructions` や V2 の実効 agent が変わっても待ちになる。ロール名、継承元、本文が同じ別のロールでは待ちにならない。計算できなければ「不明」（§5） | 「fingerprint」を「注入 fingerprint」に直し、合成の入力の変更でも待ちになる場合を受入基準に足す |
+| 「実入力の直前に世代と fingerprint で確かめる」「`runSessionLaunch` はロールも比較する」 | どちらも**注入 fingerprint** で比べる（§5） | 用語を直す |
+| 再開の扱いに言及なし（Claude / Codex / Copilot） | Claude と Codex は再開すると旧本文を保持し、Copilot は `--agent` なしの再開で保持する（§3）。現在は再開しないので問題にならない | 「再開を足すときは §3 を確かめる」を逸脱時の扱いに足す |
 | OpenCode V1 の再開の扱いに言及なし | 既定は「続ける」。ロールが変わるなら伝え、新しい会話を選べる。会話 ID だけを捨て、履歴は消さない（§6.4） | V1 の再開の仕様をスコープに足す |
 | 手動の基準「各ツールを実機で起動し、小さな修正から検証まで」 | 確定モデルでは Antigravity を除いて確認した。本物のモデルは認証のある環境でだけできる | 手動の基準のままとし、Antigravity を判断 2 に結びつける |
 | V1 の契約付きの依頼 | V1 の `wait` は今もロールの有無によらず完了しなかった（§11 の 1） | 実モデルで再現を確かめる。再現すれば別 Issue |
@@ -518,6 +542,6 @@ Welcome to the Antigravity CLI. You are currently not signed in.
 | Codex | 起動失敗は exit。未知のプロファイルは検出できないので起動前の検査だけ | exit のみ |
 | Command Code | mod の factory が受領ファイルを書く | 未実測。hook の例外は無言なので factory で書く |
 | OpenCode V1 | サーバーの設定 API | 未実測 |
-| OpenCode V2 | `GET /api/config?directory=…` に解決後の本文が含まれる（`/api/agent` には含まれない）。本文そのものを返すので、ハッシュを比べてログに出さない | 実測（serve のみ） |
+| OpenCode V2 | `GET /api/config?directory=…` に解決後の本文が含まれる（`/api/agent` には含まれない）。本文そのものを返すので、**生成物 fingerprint** と比べてログに出さない。実測は本文の語が含まれることまでで、バイト一致とハッシュの比較は未実測 | 一部実測（serve のみ） |
 | Copilot | 画面の `✗ Custom agent` / `✗ Failed to select agent` が無いこと（否定の証拠）。`-p` は exit 1 | 実測 |
 | Antigravity | 未確認 | 未確認 |
