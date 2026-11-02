@@ -120,6 +120,7 @@ export function applyRole(tool, d, h, repo, variant, body = ROLE_TEXT, label = '
       if (variant === 'instructions-content') { art(rf, body); out.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({ instructions: [rf] }); }
       else if (variant === 'instructions-dir') { art(rf, body); const dir = `${h}/.cmrole/cfg-${label}`; art(`${dir}/opencode.jsonc`, JSON.stringify({ instructions: [rf] })); out.env.OPENCODE_CONFIG_DIR = dir; }
       else if (variant === 'agent-md' ) { const dir = `${h}/.cmrole/cfg-${label}`; art(`${dir}/agents/cm-role-${label}.md`, `---\ndescription: CommandMate role\nmode: primary\nhidden: true\n---\n${body}\n`); art(`${dir}/opencode.jsonc`, JSON.stringify({ default_agent: `cm-role-${label}` })); out.env.OPENCODE_CONFIG_DIR = dir; }
+      else if (variant === 'overlay') { art(rf, body); out.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({ agents: { build: { system: `{file:${rf}}` } } }); }
       else if (variant === 'agent-inline') { out.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({ default_agent: `cm-role-${label}`, agents: { [`cm-role-${label}`]: { description: 'role', mode: 'primary', system: body } } }); }
       else throw new Error(variant);
       break;
@@ -127,7 +128,7 @@ export function applyRole(tool, d, h, repo, variant, body = ROLE_TEXT, label = '
   }
   return out;
 }
-export const READY = { claude: /❯/, codex: /Ask Codex|› /, 'command-code': /Ask your question|❯/, opencode: /Ask anything/, 'opencode-v2': /Ask anything|Build|build/i, copilot: /❯/ };
+export const READY = { claude: /❯/, codex: /Ask Codex|› /, 'command-code': /Ask your question|❯/, opencode: /Ask anything/, 'opencode-v2': /Ask anything/, copilot: /❯/ };
 const norm = (s, base) => s.split(base).join('<D>').replace(/\d{4}-\d{2}-\d{2}/g, '<DATE>').replace(/[0-9a-f]{8}-[0-9a-f-]{27}/g, '<UUID>');
 export function metrics(body, base) {
   const l = layers(body);

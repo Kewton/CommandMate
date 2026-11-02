@@ -1,0 +1,9 @@
+// claudediag.mjs — Claude の局所モデルでロールが守られない原因を切り分ける。要求の system を Ollama の文脈長を変えて直接渡す。
+import fs from 'node:fs';
+const log=process.argv[2];const ROLE='Role: begin every answer with the exact word ROLESTAMP, as the very first word.';
+const rec=fs.readFileSync(log,'utf8').split('\n').filter(Boolean).map(JSON.parse).filter(r=>r.url.startsWith('/v1/messages')&&JSON.stringify(r.body).includes('CASE=claude-role-x first'));
+const b=rec[rec.length-1].body;const sys=(typeof b.system==='string'?b.system:b.system.map(x=>x.text).join('\n')).replace(/ROLE_MARKER_K3[^\n]*/,ROLE);
+const out=[];const toks=t=>t.replace(/[^A-Za-z0-9_]+/g,' ').trim().split(' ');
+for(const num_ctx of [null,32768])for(let i=0;i<3;i++){const r=await fetch('http://127.0.0.1:11434/api/chat',{method:'POST',body:JSON.stringify({model:'qwen3-coder:30b',stream:false,messages:[{role:'system',content:sys},{role:'user',content:'What is 2+2? Answer in one short sentence.'}],...(num_ctx?{options:{num_ctx}}:{})})});const j=await r.json();const t=j.message?.content??'';out.push({num_ctx,promptEvalCount:j.prompt_eval_count,firstIsRole:toks(t)[0]==='ROLESTAMP',answer:t.slice(0,80)});console.log(JSON.stringify(out.at(-1)));}
+console.log(JSON.stringify({systemChars:sys.length,rolePosition:sys.indexOf(ROLE)}));
+fs.writeFileSync(process.argv[3],JSON.stringify({systemChars:sys.length,rolePosition:sys.indexOf(ROLE),runs:out},null,1));process.exit(0);

@@ -9,6 +9,7 @@ const sleep=(ms)=>new Promise((r)=>setTimeout(r,ms));
 const BASEPATH=`${SHIM}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`;
 const w=(p,s,m)=>{fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,s,m?{mode:m}:{});};
 const tmux=(...a)=>execFileSync('tmux',['-L',SOCK,...a],{encoding:'utf8',env:{PATH:BASEPATH,HOME,TERM:'xterm-256color',LANG:'en_US.UTF-8'},stdio:['ignore','pipe','pipe']});
+const V2COMMON=['You are an AI agent running in OpenCode, a coding agent harness. Help the user accomplish their goals using the tools you have available.','Follow every project instruction (AGENTS.md and the like) in addition to the role below. When they conflict, the current request and the project instructions win over the role.','Prefer dedicated tools over shell commands; fall back to the shell when a tool cannot do what you need.','Keep changes consistent with the structure, naming, style, and patterns of the surrounding code.','Treat unfamiliar files or changes as potential user work and investigate before deleting or overwriting them.'].join('\n');
 const ROLE='ROLE_MARKER_K3: You are a test role. End every answer with ROLESTAMP.';
 export function setup(){
   fs.mkdirSync(HOME,{recursive:true});fs.mkdirSync(SHIM,{recursive:true});fs.mkdirSync(REPOS,{recursive:true});
@@ -19,24 +20,27 @@ export function setup(){
     w(r+'/AGENTS.md','# Repo rules\nREPO_MARKER_7Q: Always end every answer with the word REPOSTAMP.\n');w(r+'/calc.sh','#!/bin/sh\necho $((1+2))\n');w(r+'/verify.sh','#!/bin/sh\n[ "$(sh calc.sh)" = "2" ] && echo VERIFY_OK || { echo VERIFY_NG; exit 3; }\n');w(r+'/.commandmate/verify.yaml',verify);
     execFileSync('sh',['-c','git init -q -b main . && git add -A && git -c user.name=p -c user.email=p@example.invalid commit -qm init'],{cwd:r});}
   const KEY='mock-key-0000000000000000000000000000';
-  w(`${HOME}/.claude.json`,JSON.stringify({hasCompletedOnboarding:true,lastOnboardingVersion:'2.1.316',customApiKeyResponses:{approved:[KEY.slice(-20)],rejected:[]},projects:Object.fromEntries(repoNames.map((n)=>[`${rp}/${n}`,{hasTrustDialogAccepted:true,hasCompletedProjectOnboarding:true}]))}));
+  w(`${HOME}/.claude.json`,JSON.stringify({hasCompletedOnboarding:true,hasSeenAutoDefaultNudge:true,lastOnboardingVersion:'2.1.316',customApiKeyResponses:{approved:[KEY.slice(-20)],rejected:[]},projects:Object.fromEntries(repoNames.map((n)=>[`${rp}/${n}`,{hasTrustDialogAccepted:true,hasCompletedProjectOnboarding:true}]))}));
   w(`${HOME}/.claude/settings.json`,JSON.stringify({theme:'dark',permissions:{defaultMode:'default'}}));
   w(`${HOME}/.codex/config.toml`,`model = "mock-model"\nmodel_provider = "mock"\ncheck_for_update_on_startup = false\n[model_providers.mock]\nname = "mock"\nbase_url = "${MOCK}/v1"\nwire_api = "responses"\nrequires_openai_auth = false\n${repoNames.map((n)=>`[projects."${rp}/${n}"]\ntrust_level = "trusted"\n`).join('')}`);
   w(`${HOME}/.codex/cm-role-x.config.toml`,`developer_instructions = ${JSON.stringify(ROLE)}\n`);
   w(`${HOME}/.commandcode/providers.json`,JSON.stringify({provider:{mock:{api:'openai-completions',baseURL:`${MOCK}/v1`,apiKey:false,models:{'mock-model':{contextWindow:200000}}}}}));
   w(`${HOME}/.cmrole/cm-role-x.ts`,`export default function(cmd){cmd.hooks({appendSystemPrompt:()=>${JSON.stringify(ROLE)}});}\n`);
   w(`${HOME}/.cmrole/role.md`,ROLE);
-  w(`${HOME}/.config/opencode/opencode.json`,JSON.stringify({autoupdate:false,share:'disabled',permission:{bash:'ask'},model:'mock/mock-model',small_model:'mock/mock-model',provider:{mock:{npm:'@ai-sdk/openai-compatible',name:'mock',options:{baseURL:`${MOCK}/v1`,apiKey:'x'},models:{'mock-model':{name:'mock-model',tool_call:true}}}}}));
-  w(`${HOME}/.config/opencode/opencode.jsonc`,JSON.stringify({permissions:[{action:'*',resource:'*',effect:'ask'}],model:'mock/mock-model',providers:{mock:{name:'mock',package:'@opencode/ai/providers/openai-compatible',settings:{baseURL:`${MOCK}/v1`,apiKey:'x'},models:{'mock-model':{name:'mock-model'}}}}}));
+  w(`${HOME}/.config/opencode/opencode.json`,JSON.stringify({autoupdate:false,share:'disabled',model:'mock/mock-model',small_model:'mock/mock-model',provider:{mock:{npm:'@ai-sdk/openai-compatible',name:'mock',options:{baseURL:`${MOCK}/v1`,apiKey:'x'},models:{'mock-model':{name:'mock-model',tool_call:true}}}}}));
+  w(`${HOME}/.config/opencode/opencode.jsonc`,JSON.stringify({model:'mock/mock-model',providers:{mock:{name:'mock',package:'@opencode/ai/providers/openai-compatible',settings:{baseURL:`${MOCK}/v1`,apiKey:'x'},models:{'mock-model':{name:'mock-model'}}}}}));
   w(`${HOME}/.copilot/config.json`,JSON.stringify({trusted_folders:repoNames.map((n)=>`${rp}/${n}`),banner:'never'}));
   w(`${HOME}/.copilot/agents/cm-role-x.agent.md`,`---\nname: cm-role-x\ndescription: CommandMate role\ninfer: false\n---\n${ROLE}\n`);
   const common=`#!/bin/bash\ncase "$*" in *--version*|-v) exec "$REAL" "$@";; esac\nROLE=0; case "$(basename "$PWD")" in *-role) ROLE=1;; esac\nprintf '%s\\t%s\\t%s\\n' "$(basename "$PWD")" "$ROLEV" "$*" >> ${ARGV}\n`;
   const sh=(name,body)=>{const f=`${SHIM}/${name}`;fs.writeFileSync(f,common.replace('"$REAL"',REAL[name]).replace('$ROLEV','$ROLE')+body+'\n',{mode:0o755});};
-  sh('claude',`export ANTHROPIC_BASE_URL=${MOCK} ANTHROPIC_API_KEY=${KEY} DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_TELEMETRY=1\nA=(--permission-mode default); [ $ROLE = 1 ] && A+=(--append-system-prompt-file ${HOME}/.cmrole/role.md)\nexec ${REAL.claude} "$\{A[@]}" "$@"`.replace('$\\{','${'));
+  sh('claude',`export ANTHROPIC_BASE_URL=${MOCK} ANTHROPIC_API_KEY=${KEY} DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_TELEMETRY=1\nA=(); case " $* " in *' -p '*) ;; *) A+=(--permission-mode default);; esac; [ $ROLE = 1 ] && A+=(--append-system-prompt-file ${HOME}/.cmrole/role.md)\nexec ${REAL.claude} "$\{A[@]}" "$@"`.replace('$\\{','${'));
   sh('codex',`A=(); [ $ROLE = 1 ] && A+=(-p cm-role-x)\nexec ${REAL.codex} "$\{A[@]}" "$@"`.replace('$\\{','${'));
   sh('commandcode',`export CMD_LOCAL_ONLY=1 CMD_DISABLE_REMOTE_MODEL_CATALOG=1 COMMAND_CODE_API_KEY=mock-not-a-real-key\nA=(--local-only -m mock-model); [ $ROLE = 1 ] && A+=(--mod ${HOME}/.cmrole/cm-role-x.ts)\nexec ${REAL.commandcode} "$\{A[@]}" "$@"`.replace('$\\{','${'));
   sh('opencode',`export OPENCODE_DISABLE_AUTOUPDATE=1; [ $ROLE = 1 ] && export OPENCODE_CONFIG_CONTENT='{"instructions":["${HOME}/.cmrole/role.md"]}'\nexec ${REAL.opencode} "$@"`);
-  sh('opencode2',`[ $ROLE = 1 ] && export OPENCODE_CONFIG_CONTENT='{"default_agent":"cm-role-x","agents":{"cm-role-x":{"description":"CommandMate role","mode":"primary","system":"{file:${HOME}/.cmrole/role.md}"}}}'\nexec ${REAL.opencode2} "$@"`);
+  w(`${HOME}/.cmrole/role-v2.md`,V2COMMON+'\n\n'+ROLE);
+  sh('opencode2',`AG=build; prev=; for a in "$@"; do [ "$prev" = "--agent" ] && AG="$a"; prev="$a"; done
+[ $ROLE = 1 ] && export OPENCODE_CONFIG_CONTENT="{\\"agents\\":{\\"$AG\\":{\\"system\\":\\"{file:${HOME}/.cmrole/role-v2.md}\\"}}}"
+exec ${REAL.opencode2} "$@"`);
   sh('copilot',`export COPILOT_OFFLINE=true COPILOT_PROVIDER_BASE_URL=${MOCK}/v1 COPILOT_PROVIDER_API_KEY=x COPILOT_MODEL=mock-model COPILOT_AUTO_UPDATE=false COPILOT_PROVIDER_MAX_PROMPT_TOKENS=200000 COPILOT_PROVIDER_MAX_OUTPUT_TOKENS=8000\nA=(); [ $ROLE = 1 ] && A+=(--agent cm-role-x)\nexec ${REAL.copilot} "$\{A[@]}" "$@"`.replace('$\\{','${'));
   return repoNames;
 }

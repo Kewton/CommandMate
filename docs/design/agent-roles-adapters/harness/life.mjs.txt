@@ -18,7 +18,7 @@ const out={tool,steps:{}};
 const base=path.join(L.ROOT,'c','life-'+tool);fs.rmSync(base,{recursive:true,force:true});const home=base+'/home',repo=base+'/repo';L.repoSeed(repo);fs.mkdirSync(home,{recursive:true});
 L.ensureMock();await L.sleep(200);
 const d=L.toolDef(tool,home,repo,{launchSh:`${WT}/scripts/opencode-v2/launch.sh`,port});
-const roleRun=(v,variant='role')=>{ if(v==='none') return {env:{...d.env},cmd:[...d.cmd],artifacts:[]}; if(tool==='opencode-v2') return L.applyRole(tool,d,home,repo,'agent-inline',body(v),v); return L.applyRole(tool,d,home,repo,variant,body(v),v);};
+const roleRun=(v,variant='role')=>{ if(v==='none') return {env:{...d.env},cmd:[...d.cmd],artifacts:[]}; if(tool==='opencode-v2') return L.applyRole(tool,d,home,repo,'overlay',body(v),v); return L.applyRole(tool,d,home,repo,variant,body(v),v);};
 const resume=(run,sid)=>{ const c=[...run.cmd];
  switch(tool){case 'claude':c.push('--continue');break;case 'codex':c.push('resume','--last');break;case 'command-code':c.push('-c');break;case 'opencode':c.push('-s',sid);break;case 'copilot':c.push('--continue');break;}
  return {...run,cmd:c};};
@@ -32,7 +32,7 @@ if [ -n "$4" ]; then /opt/homebrew/bin/opencode2 --server "http://127.0.0.1:$1" 
 const wrap=(run,sid)=>tool==='opencode-v2'?v2run(run,sid):run;
 let sid=null;
 const getSid=()=>{ if(!tool.startsWith('opencode'))return null; try{const a=['-s','-m','3']; if(tool==='opencode-v2')a.push('-u','opencode:probe-password'); const u=`http://127.0.0.1:${port}/${tool==='opencode'?'session?directory='+encodeURIComponent(fs.realpathSync(repo)):'api/session?directory='+encodeURIComponent(fs.realpathSync(repo))}`; const j=execFileSync('curl',[...a,u],{encoding:'utf8'}); const o=JSON.parse(j); const arr=Array.isArray(o)?o:(o.items??o.data??o.sessions??[]); return (arr[0]?.id)??null;}catch(e){return 'ERR '+e.message;}};
-const seq=[['new-role-v1','V1',false],['resume-same-v1','V1',true],['resume-edited-v2','V2',true],['resume-none','none',true],['new-none','none',false],['new-role-v2','V2',false]];
+const seq=[['new-none-first','none',false],['resume-none-to-v1','V1',true],['new-role-v1','V1',false],['resume-same-v1','V1',true],['resume-edited-v2','V2',true],['resume-none','none',true],['new-none','none',false],['new-role-v2','V2',false]];
 for(const [step,v,isRes] of seq){
   const id=`lf-${tool}-${step}`.replace(/[^a-z0-9-]/gi,''); const since=Date.now(); const msg=`lifeturn-${seq.findIndex((s)=>s[0]===step)+1}${tool==='x'?'':''} from ${step}`;
   let run=roleRun(v); run=isRes?(tool==='opencode-v2'?v2run(run,sid):resume(run,sid)):wrap(run,null);
