@@ -33,6 +33,7 @@ vi.mock('@/hooks/useRealtimeConnection', () => ({
 import { ServiceWorkerRegistrar } from '@/components/pwa/ServiceWorkerRegistrar';
 import { VersionMismatchBanner } from '@/components/layout/VersionMismatchBanner';
 import { PWA_UPDATE_PROMPT_Z_INDEX, Z_INDEX } from '@/config/z-index';
+import { OPEN_MODAL_SELECTOR } from '@/lib/new-task/modal-open';
 
 describe('ServiceWorkerRegistrar', () => {
   const register = vi.fn(() => Promise.resolve({}));
@@ -154,7 +155,15 @@ describe('ServiceWorkerRegistrar', () => {
       render(<ServiceWorkerRegistrar />);
       const toast = await screen.findByTestId('pwa-update-toast');
       // jsdom applies no Tailwind, so the behaviour itself is in the e2e spec.
-      expect(toast.className).toContain("[body:has(main_[aria-modal='true'])_&]:hidden");
+      expect(toast.className).toContain("[role='dialog'][aria-modal='true']");
+      // What `lib/new-task/modal-open.ts` does not count as a modal either. This
+      // selector cannot import that one (Tailwind needs the literal class).
+      expect(OPEN_MODAL_SELECTOR).toContain(':not([data-testid="prompt-panel"])');
+      expect(OPEN_MODAL_SELECTOR).toContain(':not([data-state="closed"])');
+      expect(toast.className).toContain(":not([data-testid='prompt-panel'])");
+      expect(toast.className).toContain(":not([data-state='closed'])");
+      expect(toast.className).toContain(":not([data-hidden='true']_*)");
+      expect(toast.className).toContain(":not([hidden]_*)");
     });
 
     it('can be put away, and offers a different waiting worker again', async () => {

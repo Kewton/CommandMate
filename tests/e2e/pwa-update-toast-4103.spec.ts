@@ -22,6 +22,7 @@
 import { test, expect, type Locator, type Page, type Route } from '@playwright/test';
 import { EXIT_ANIMATION_DURATION_MS } from '@/config/ui-feedback-config';
 import { Z_INDEX } from '@/config/z-index';
+import { getTerminalSplitsStorageKey } from '@/config/terminal-split-config';
 
 const WORKTREE_ID = 'e2e-pwa-update-toast-4103';
 const PC_VIEWPORT = { width: 1280, height: 800 } as const;
@@ -51,7 +52,10 @@ const WORKTREE = {
   ],
   cliToolId: 'claude',
   status: 'ready',
-  sessionStatusByCli: { claude: { isRunning: true, isWaitingForResponse: false, isProcessing: false } },
+  sessionStatusByCli: {
+    claude: { isRunning: true, isWaitingForResponse: false, isProcessing: false },
+    codex: { isRunning: true, isWaitingForResponse: false, isProcessing: false },
+  },
   gitStatus: {
     currentBranch: 'main',
     initialBranch: 'main',
@@ -93,7 +97,7 @@ const TALL_PROMPT = {
 interface MockOptions {
   relays?: unknown;
   /** Read on every poll, so a test can take the prompt away. */
-  prompt?: { current: unknown };
+  prompt?: { current: unknown; cliTool?: string };
   /** How many rows the worktree list serves (default 1). */
   rows?: number;
 }
@@ -102,7 +106,7 @@ async function mockApi(page: Page, { relays = { open: [], held: [] }, prompt, ro
   await page.route(
     url => url.pathname.startsWith('/api/'),
     async route => {
-      const { pathname } = new URL(route.request().url());
+      const { pathname, searchParams } = new URL(route.request().url());
       if (pathname === '/api/app/release-notes') return fulfillJson(route, RELEASE_NOTES);
       if (pathname === '/api/relays') return fulfillJson(route, relays);
       if (pathname === '/api/worktrees') {
@@ -127,13 +131,15 @@ async function mockApi(page: Page, { relays = { open: [], held: [] }, prompt, ro
         if (sub === '') return fulfillJson(route, WORKTREE);
         if (sub.startsWith('/auto-yes')) return fulfillJson(route, { enabled: false, expiresAt: null });
         if (sub.startsWith('/current-output')) {
+          const askedTool = searchParams.get('cliTool');
+          const promptNow = prompt && (!prompt.cliTool || prompt.cliTool === askedTool) ? prompt.current : null;
           return fulfillJson(route, {
             isRunning: true,
-            cliToolId: 'claude',
+            cliToolId: askedTool ?? 'claude',
             sessionStatus: 'ready',
             isGenerating: false,
-            isPromptWaiting: Boolean(prompt?.current),
-            ...(prompt?.current ? { promptData: prompt.current, promptAnswerable: true } : {}),
+            isPromptWaiting: Boolean(promptNow),
+            ...(promptNow ? { promptData: promptNow, promptAnswerable: true } : {}),
             content: '> ',
             fullOutput: '> ',
             realtimeSnippet: '> ',
@@ -493,6 +499,81 @@ test.describe('[#4103] the prompt on the phone screens other than the worktree',
 
     await page.reload();
     await expect(page.getByTestId('pwa-update-toast-card')).toBeVisible({ timeout: 30_000 });
+  });
+});
+
+test.describe('[#4103] what counts as a dialog the prompt steps aside for', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize(PC_VIEWPORT);
+  });
+
+  test('negative: the inline PromptPanel blocks nothing, so Reload and × stay', async ({ page }) => {
+    await mockApi(page, { prompt: { current: TALL_PROMPT } });
+    const rewritten = await armUpdatePrompt(page);
+    await page.goto(`/worktrees/${WORKTREE_ID}`);
+    await expect(page.getByTestId('prompt-panel').first()).toBeVisible({ timeout: 30_000 });
+    expect(await page.getByTestId('prompt-panel').first().getAttribute('aria-modal')).toBe('true');
+    await expectPromptShown(page, rewritten);
+    await expect(page.getByTestId('pwa-update-toast-dismiss')).toBeVisible();
+  });
+
+  test('negative: a question in a split hidden behind a maximized one does not hide it', async ({ page }) => {
+    await page.addInitScript(
+      ([key, value]) => localStorage.setItem(key, value),
+      [
+        getTerminalSplitsStorageKey(WORKTREE_ID),
+        JSON.stringify({
+          splits: [
+            { cliToolId: 'claude', instanceId: 'claude' },
+            { cliToolId: 'codex', instanceId: 'codex' },
+          ],
+          widths: [50, 50],
+        }),
+      ],
+    );
+    await mockApi(page, { prompt: { current: TALL_PROMPT, cliTool: 'codex' } });
+    const rewritten = await armUpdatePrompt(page);
+    await page.goto(`/worktrees/${WORKTREE_ID}`);
+    await expect(page.getByTestId('prompt-panel').first()).toBeVisible({ timeout: 30_000 });
+
+    await page.getByTestId('split-wrapper-0').click({ position: { x: 40, y: 40 } });
+    await page.getByTestId('toggle-maximize-split').click();
+    await expect(page.getByTestId('split-wrapper-1')).toHaveAttribute('data-hidden', 'true');
+    await expect(page.getByTestId('prompt-panel').first()).toBeAttached();
+    await expect(page.getByTestId('prompt-panel').first()).toBeHidden();
+
+    await expectPromptShown(page, rewritten);
+  });
+
+  // The selector's own table, in a browser because jsdom has no Tailwind. Each row
+  // is put in `main` as those dialogs really are; `modal-open.ts` is the same list.
+  test('the conditions, one by one', async ({ page }) => {
+    await mockApi(page);
+    const rewritten = await armUpdatePrompt(page);
+    await page.goto('/sessions');
+    await expectPromptShown(page, rewritten);
+    const card = page.getByTestId('pwa-update-toast-card');
+
+    const rows: Array<[string, string, boolean]> = [
+      ['a real modal, as GitBranchPanel draws one', '<div role="dialog" aria-modal="true"></div>', true],
+      ['the inline PromptPanel', '<div role="dialog" aria-modal="true" data-testid="prompt-panel"></div>', false],
+      ['a dialog on its way out', '<div role="dialog" aria-modal="true" data-state="closed"></div>', false],
+      ['inside a split behind a maximized one', '<div data-hidden="true"><div role="dialog" aria-modal="true"></div></div>', false],
+      ['inside a hidden element', '<div hidden><div role="dialog" aria-modal="true"></div></div>', false],
+      ['aria-modal without the dialog role', '<div aria-modal="true"></div>', false],
+    ];
+    for (const [label, html, hides] of rows) {
+      const added = await page.evaluateHandle(markup => {
+        const holder = document.createElement('div');
+        holder.innerHTML = markup;
+        document.querySelector('main')?.appendChild(holder);
+        return holder;
+      }, html);
+      if (hides) await expect(card, label).toBeHidden();
+      else await expect(card, label).toBeVisible();
+      await added.evaluate(el => el.remove());
+      await expect(card, `${label}: back after it goes`).toBeVisible();
+    }
   });
 });
 

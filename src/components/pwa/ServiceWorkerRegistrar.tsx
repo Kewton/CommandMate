@@ -57,6 +57,11 @@ import { useVersionMismatchBannerVisible } from '@/components/layout/VersionMism
  *    One CSS condition covers them all, without a store for each sheet to report
  *    to and without moving the sheets out of `main`. Portalled dialogs are not
  *    matched and do not need to be: they draw above this layer.
+ *    It counts what `lib/new-task/modal-open.ts` counts as a modal, in a selector:
+ *    not one on its way out, not the inline `PromptPanel` (it carries the same
+ *    attributes and blocks nothing), and not one in a split hidden behind a
+ *    maximized one (`data-hidden`) or under `[hidden]`. Not limited to phones: the
+ *    PC's git dialogs and file screen are inline in `main` and lose in the same way.
  */
 export function ServiceWorkerRegistrar() {
   const t = useTranslations('pwa');
@@ -123,7 +128,7 @@ export function ServiceWorkerRegistrar() {
       data-testid="pwa-update-toast"
       role="status"
       aria-live="polite"
-      className="pointer-events-none fixed bottom-0 right-0 flex max-w-full justify-end pl-4 pr-[4.25rem] pb-safe max-md:bottom-auto max-md:top-[50%] max-md:-translate-y-1/2 max-md:pb-0 max-md:pr-4 [body:has(main_[aria-modal='true'])_&]:hidden"
+      className="pointer-events-none fixed bottom-0 right-0 flex max-w-full justify-end pl-4 pr-[4.25rem] pb-safe max-md:bottom-auto max-md:top-[50%] max-md:-translate-y-1/2 max-md:pb-0 max-md:pr-4 [body:has(main_[role='dialog'][aria-modal='true']:not([data-state='closed']):not([data-testid='prompt-panel']):not([data-hidden='true']_*):not([hidden]_*))_&]:hidden"
       style={{ zIndex: PWA_UPDATE_PROMPT_Z_INDEX }}
     >
       <div
