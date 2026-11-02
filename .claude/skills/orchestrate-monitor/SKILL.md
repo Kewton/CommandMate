@@ -139,7 +139,7 @@ verdict だけでなく根拠つきで読める。集計はそのまま awk / so
 
 ```bash
 # 状態分類の分布
-grep -oE 'poll [0-9]+ -> [A-Z_]+' monitor.log | awk '{print $4}' | sort | uniq -c
+grep -oE 'poll [0-9]+ -> [A-Z_]+' monitor.log | cut -d' ' -f4 | sort | uniq -c
 # 総ポーリング数（worker 別）
 grep -cE '^monitor\[w1\]: poll ' monitor.log
 # タスク状態の分布（台帳が答えた poll だけが数えられる）
@@ -339,7 +339,7 @@ MONITOR_HOOKS_BASE=origin/develop \
 | G2 の要求 | ログからの取り出し方 |
 |---|---|
 | 総ポーリング数 | `grep -cE '^monitor\[<wid>\]: poll ' monitor.log` |
-| 状態分類の分布 | `grep -oE 'poll [0-9]+ -> [A-Z_]+' monitor.log \| awk '{print $4}' \| sort \| uniq -c` |
+| 状態分類の分布 | `grep -oE 'poll [0-9]+ -> [A-Z_]+' monitor.log \| cut -d' ' -f4 \| sort \| uniq -c` |
 | 介入全件 | `grep -E "sent 'a'\|resent to\|resend budget spent" monitor.log`（承認 Enter はサイレント。総数は COMPLETE 行の `approvals=` に出る。**未配信は `grep 'NOT delivered'`** で別に数える） |
 | 完了判定の根拠 | poll 行の `started= / streak= / commits= / uncommitted= / verdict= / task=`。COMPLETE した poll 行がその worker の判定根拠そのもの |
 | 判定が一次ソース由来かフォールバック由来か | 終局判定の poll 行に `task=` があるか／`FALLBACK MODE` 行が出ているか |

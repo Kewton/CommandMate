@@ -418,8 +418,8 @@
         {
           "path": "SKILL.md",
           "policy": "port-required",
-          "sha256": "4cab1bb82deb64feb7c92d82a2af1e65680ec6e3410644861fb4a55315694528",
-          "note": "counterpart は独立に書き起こされた文書で、共有行は 17 行しかない（2026-08-01 実測、CommandMate 423 行 / skills 380 行）。コピーではなく「同じ scripts を説明した別の文書」なので、移植するのは prose ではなく挙動の記述（フラグ・exit code・判定順序・警告文言）である。 #1728 で両側に反映済み（skills 0.7.0 / commandmate-skills#110、2026-08-07）。hooks-git.sh: worktree id の突合に `slug(basename(path))`（deriveWorktreeId / #1621）を第1候補として追加（ブランチ由来の旧2規則は残置）、診断行に ERROR/WARN のレベル語を付与。monitor.sh: シグナル報告 trap・正常終端以外の EXIT 報告・`--heartbeat`（既定10）を追加。SKILL.md: 上記の挙動記述（突合順の表・レベル語・生存報告）を追記。 #2119 でマーカー置き場（`MONITOR_HOOKS_STATE_DIR` / `STATE_DIR` / standalone の `mktemp -d`）とその掃除規則の記述を追加した。 2026-09-27（Issue #2904）に commandmate-skills PR #77（skills #59）の `--no-auto-approve` と、promptData による PROMPT の承認/保留判定を 1 節（「PROMPT は承認と保留を判定する」）で追記した。"
+          "sha256": "b442fcfd9c69298677605072ae316d29d2b6a84d257684bb4d1efef0c43b3113",
+          "note": "counterpart は独立に書き起こされた文書で、共有行は 17 行しかない（2026-08-01 実測、CommandMate 423 行 / skills 380 行）。コピーではなく「同じ scripts を説明した別の文書」なので、移植するのは prose ではなく挙動の記述（フラグ・exit code・判定順序・警告文言）である。 #1728 で両側に反映済み（skills 0.7.0 / commandmate-skills#110、2026-08-07）。hooks-git.sh: worktree id の突合に `slug(basename(path))`（deriveWorktreeId / #1621）を第1候補として追加（ブランチ由来の旧2規則は残置）、診断行に ERROR/WARN のレベル語を付与。monitor.sh: シグナル報告 trap・正常終端以外の EXIT 報告・`--heartbeat`（既定10）を追加。SKILL.md: 上記の挙動記述（突合順の表・レベル語・生存報告）を追記。 #2119 でマーカー置き場（`MONITOR_HOOKS_STATE_DIR` / `STATE_DIR` / standalone の `mktemp -d`）とその掃除規則の記述を追加した。 2026-09-27（Issue #2904）に commandmate-skills PR #77（skills #59）の `--no-auto-approve` と、promptData による PROMPT の承認/保留判定を 1 節（「PROMPT は承認と保留を判定する」）で追記した。 2026-11-02 に Issue #4106 で SKILL.md の 2 行の awk の列指定を cut -d' ' -f4 に書き換えた（スラッシュコマンド/スキル本文の位置引数の置き換えを避けるため）。挙動は同じなので counterpart へは移植しない。"
         },
         {
           "path": "scripts/classify-state.sh",
