@@ -35,6 +35,7 @@ import type Database from 'better-sqlite3';
 import { getAgentSessionTelemetry } from '@/lib/hooks/agent-session-telemetry';
 import { isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
+import { isUnderTest } from '@/lib/test-run-detection';
 import { recordAgentSessionCost } from './agent-session-cost-db';
 
 const logger = createLogger('agent-session-cost-sampler');
@@ -174,7 +175,7 @@ declare global {
  * needing to know which kind of process it is in.
  *
  * The timer is `unref()`d so it never keeps Node alive, and skipped outright
- * under Vitest: a suite that opens a database should not acquire a background
+ * in a test run ({@link isUnderTest}): a suite that opens a database should not acquire a background
  * writer to a file it is about to delete.
  *
  * @param db - Database instance to write into
@@ -182,7 +183,7 @@ declare global {
  */
 export function startAgentSessionCostSampler(db: Database.Database): boolean {
   if (globalThis.__agentSessionCostSampler) return false;
-  if (process.env.VITEST || process.env.NODE_ENV === 'test') return false;
+  if (isUnderTest()) return false;
 
   const timer = setInterval(() => {
     try {
