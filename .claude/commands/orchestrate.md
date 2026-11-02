@@ -409,6 +409,7 @@ node scripts/orchestrate/contract.mjs generate \
 - 生成が失敗したとき・止まったときは docs/orchestrate/contract.md#2-4-生成器が止まる条件 を読む（検査する制約・goal の上限・scope に書けないファイル・再実行と `--force`）
 - 2-4-2 の差し替え（テスト全体）は雛形に入っていない。生成した契約に手で足す
 - `kind: refactor` では 2-4-3 の整理の決まりが goal に入り、gates の既定が `[lint, typecheck]` になる。`tests/` の下の glob を scope に書くと生成が失敗する
+- scope が `tests/fixtures/` の下・`src/config/slash-commands-catalog.json`・`.claude/skills/` に当たると、生成器が受入基準の文・対のテスト・`sync-map.json` を自動で足す。契約の決定が既存のテストの期待を反転するときは、plan に「removed-tests を許可する（理由）」を先に書き、precheck に `--allow-removed-tests` を付ける（docs/orchestrate/contract.md#2-4-契約が先回りする対のファイルと期待の反転）
 - 共有状態を書く item は、設定に `routes`（経路表と割込み表）を書く。書き方は docs/orchestrate/plan-check.md#2-4-経路表と割込み表の書き方 を読む（省略時の goal は変わらない）
 
 - **`requireCommit: true` を外さない**（#3430）。外すと未コミットの変更も作業証跡に数え、ワーカーがコミット前に
@@ -566,8 +567,9 @@ success:
 `scripts/orchestrate/contract.mjs`（2-4）が、設定の `kind: refactor` のときに `<N>` を Issue 番号に置き換えて goal に入れるので、手で転記しない。
 設定には `refactor: { mergesCopies: true }`（写しをまとめる手順）か `false`（長い関数を分ける手順）を必ず書く。
 決まりの見出し（本文は雛形）: 振る舞いを変えない／`tests/` の下のファイルは変えない／写しは新しいモジュールに置く／循環を作らない／
-コメントは書き換えずに移す／`await` を足さない／見つけた食い違いや不具合は直さない／テストを変えずには通らないなら `IMPL_BLOCKED`／
+コメントは書き換えずに移す／`await` を足さない（async への切り出しも足すことに当たる）／見つけた食い違いや不具合は直さない／テストを変えずには通らないなら `IMPL_BLOCKED`／
 `git diff --shortstat` で行が減らないなら採用しない（`mergesCopies: true` のときだけ）／
+計測の陰性対照に無関係な関数の実測値を固定しない（元のファイルと分割先の両方を探す）／
 数え方を変えない（計測のコード・除外の一覧・抑止のコメントを足して数字を下げない）／
 どう届いたかを書く（言い換え・書き方の変更だけで数が変わった箇所は、そう書く）。
 
@@ -1115,6 +1117,8 @@ echo "exit=$?"   # 0 → PR を出す / 1 → runs/$DATE/precheck-<issue>[-<item
 組み合わせがコンパイルできる証拠ではない。**
 
 根拠: docs/orchestrate/ci-merge.md#6-2-統合破壊の実測
+
+明示の許可がある run でも、マージが auto mode の分類器に拒否されたら別の経路で再試行せず、CI の合格を確かめて「マージ可能」を報告して止まる（根拠: docs/orchestrate/ci-merge.md#6-2-分類器にマージを拒否されたとき）。
 
 マージの条件の 1 つとして、**未処置の指摘（5-3）が残っている PR はマージしない**。
 

@@ -218,6 +218,8 @@ describe('what is sent', () => {
     const terms = buildTerms('2026-10-01', issues);
     expect(terms).toContain('本 run では PR の develop へのマージを進めてよい（利用者の明示的な許可）');
     expect(terms).toContain('対象は 2 件（#3050 bug、#3051 metrics）');
+    expect(terms).toContain('マージが auto mode の分類器に拒否されたら、別の経路（merge-pr.mjs と gh pr merge の言い換えなど）で再試行しない');
+    expect(terms).toContain('「マージ可能」を報告し、残りの PR もマージせずに止まる');
     expect(terms).toContain('plan-3050-3051.md・summary-3050-3051.md・tasks-3050-3051.tsv');
     expect(terms).toContain('npx tsx scripts/agent-health/release-report.ts --date 2026-10-01');
     expect(terms).toContain('workspace/agent-health/2026-10-01/release-readiness.html');

@@ -155,6 +155,15 @@ unit ゲートで同型を弾くが、契約側にも明示すること。
 - `scope` に `CHANGELOG.md` / `docs/module-reference.md` を書くと生成が失敗する（2-4-1）。`requireCommit: true` は常に入る
 - 同じ設定で再実行しても契約は変わらない（`unchanged`）。中身の違う契約が既にあると止まる。送信前に直すときだけ `--force`
 
+## 2-4 契約が先回りする対のファイルと期待の反転
+
+（#4015。2026-10-30 の run と 2026-11-02 の #4106 で、ワーカーが範囲を守った結果、検証が exit 20 になった。）
+
+- `tests/fixtures/` の下を scope に書くと、goal に「fixture を走査するテストの表・許可リストへの登録も受入基準に入れる」が入る（#4000: 検出テスト 3 本が件数・許可リストで数えていた）。走査するテストは契約の起案者が scope に足す
+- `src/config/slash-commands-catalog.json` を scope に書くと、`tests/unit/lib/slash-command-description-override.test.ts` が scope に入る（#3998: 説明の衝突を解くとキーが分かれ、leaf の一覧を固定するこのテストが変わる）
+- `.claude/skills/` の下を scope に書くと、`.claude/skills/sync-map.json` が scope に入る（#4106: `mapped` パッケージの全ファイルの sha256 を固定するので、`SKILL.md` に限らず pin の打ち直しが要る）。どれも `changelog.d/<N>.md` と同じく、書いてあっても重複しない。足した分も `MAX_SCOPE_PATTERNS` に数える
+- **期待を反転する契約**（#3999: 「ターミナル面に Plan review の操作を出さない」を反転して describe/it 名が変わり、precheck の removed-tests が落ちた）: 契約の決定が既存の振る舞いを反転するときは、plan に「removed-tests を許可する（理由）」を先に書き、その run の precheck に `--allow-removed-tests` を付ける。理由が plan に無いまま付けない
+
 ## 2-4-2 スラッシュコマンドが起動しなかった実測
 
 （2026-09-17 #2598 で実測。ワーカーは skill を呼ばずに
