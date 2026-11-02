@@ -1,0 +1,1737 @@
+[
+ {
+  "tool": "claude",
+  "label": "missing-file",
+  "argv": [
+   "claude",
+   "--permission-mode",
+   "default",
+   "--append-system-prompt-file",
+   "<D>/home/nope.md"
+  ],
+  "env": {},
+  "earlyExit": 1,
+  "pane": "Error: Append system prompt file not found: <SP>/run2/c/k-claude-mis\nsing-file/home/nope.md\n__EXIT=1\n"
+ },
+ {
+  "tool": "claude",
+  "label": "empty-file",
+  "argv": [
+   "claude",
+   "--permission-mode",
+   "default",
+   "--append-system-prompt-file",
+   "<D>/home/e.md"
+  ],
+  "env": {},
+  "startPane": "───\n Make auto mode your default permission mode?\n   Auto mode lets Claude handle permission prompts automatically. Claude checks each tool call for risky actions and prompt injection before executing, runs the ones it assesses as lower-risk, and\n   blocks the rest.\n   ❯ Yes, set auto mode as my default permission mode\n     No, keep manual mode\n",
+  "req": true,
+  "model": "claude-opus-5-5",
+  "tools": 13,
+  "markers": {
+   "ROLE_MARKER_K3": [],
+   "REPO_MARKER_7Q": [
+    "user"
+   ]
+  },
+  "pane": "───\n❯ \n───\n  ⏸ manual mode on · ? for shortcuts\n"
+ },
+ {
+  "tool": "claude",
+  "label": "unreadable",
+  "argv": [
+   "claude",
+   "--permission-mode",
+   "default",
+   "--append-system-prompt-file",
+   "<D>/home/u.md"
+  ],
+  "env": {},
+  "earlyExit": 1,
+  "pane": "Error reading append system prompt file: EACCES: permission denied, open '/private/tmp/claude-501/<proj>/8b7b57b4-6886-4920-8ffa-36de861959e1/\nscratchpad/run2/c/k-claude-unreadable/home/u.md'\n__EXIT=1\n"
+ },
+ {
+  "tool": "codex",
+  "label": "missing-profile",
+  "argv": [
+   "codex",
+   "-c",
+   "features.daemon_auto_start=false",
+   "-p",
+   "cm-role-nope"
+  ],
+  "env": {},
+  "startPane": " \n       \n     ⢿\n     \n› Ask Codex to do anything\n  mock-model default · <D>/repo\n  ? for shortcuts\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 13,
+  "markers": {
+   "ROLE_MARKER_K3": [],
+   "REPO_MARKER_7Q": [
+    "user"
+   ]
+  },
+  "pane": "hello\n• MOCK_OK\n  Worked for <1s • 04:19\n› Ask Codex to do anything\n  mock-model default · <D>/repo\n  ? for shortcuts     ⚠ 1 warning · f2 to view\n"
+ },
+ {
+  "tool": "codex",
+  "label": "bad-toml",
+  "argv": [
+   "codex",
+   "-c",
+   "features.daemon_auto_start=false",
+   "-p",
+   "cm-role-bad"
+  ],
+  "env": {},
+  "earlyExit": 1,
+  "pane": "Error: loading config.toml:\n<D>/home/.codex/cm-role-bad.config.toml:1:4\n2: invalid multi-line basic string, expected `\"`\n  |\n1 | developer_instructions = \"\"\"unterminated\n  |     ^\n__EXIT=1\n"
+ },
+ {
+  "tool": "codex",
+  "label": "unreadable-profile",
+  "argv": [
+   "codex",
+   "-c",
+   "features.daemon_auto_start=false",
+   "-p",
+   "cm-role-u"
+  ],
+  "env": {},
+  "earlyExit": 1,
+  "pane": "Error: Failed to read config file <SP>/run2/c/k-codex-unreadable-pro\nfile/home/.codex/cm-role-u.config.toml: Permission denied (os error 13)\n__EXIT=1\n"
+ },
+ {
+  "tool": "command-code",
+  "label": "missing-mod",
+  "argv": [
+   "cmd",
+   "--trust",
+   "--skip-onboarding",
+   "--no-auto-update",
+   "--local-only",
+   "-m",
+   "mock-model",
+   "--mod",
+   "<D>/home/nope.ts"
+  ],
+  "env": {},
+  "startPane": "───\n❯ Ask your question...\n───\n  ? for shortcuts · taste off (byok)\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 13,
+  "markers": {
+   "ROLE_MARKER_K3": [],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "pane": "───\n❯ Ask your question...\n───\n  ? for shortcuts · taste off (byok)\n"
+ },
+ {
+  "tool": "command-code",
+  "label": "bad-mod",
+  "argv": [
+   "cmd",
+   "--trust",
+   "--skip-onboarding",
+   "--no-auto-update",
+   "--local-only",
+   "-m",
+   "mock-model",
+   "--mod",
+   "<D>/home/b.ts"
+  ],
+  "env": {},
+  "startPane": "───\n❯ Ask your question...\n───\n  ? for shortcuts · taste off (byok)\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 13,
+  "markers": {
+   "ROLE_MARKER_K3": [],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "pane": "───\n❯ Ask your question...\n───\n  ? for shortcuts · taste off (byok)\n"
+ },
+ {
+  "tool": "command-code",
+  "label": "throw-mod",
+  "argv": [
+   "cmd",
+   "--trust",
+   "--skip-onboarding",
+   "--no-auto-update",
+   "--local-only",
+   "-m",
+   "mock-model",
+   "--mod",
+   "<D>/home/t.ts"
+  ],
+  "env": {},
+  "startPane": "───\n❯ Ask your question...\n───\n  ? for shortcuts · taste off (byok)\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 13,
+  "markers": {
+   "ROLE_MARKER_K3": [],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "pane": "───\n❯ Ask your question...\n───\n  ? for shortcuts · taste off (byok)\n"
+ },
+ {
+  "tool": "command-code",
+  "label": "safe-noop",
+  "argv": [
+   "cmd",
+   "--trust",
+   "--skip-onboarding",
+   "--no-auto-update",
+   "--local-only",
+   "-m",
+   "mock-model",
+   "--mod",
+   "<D>/home/t.ts"
+  ],
+  "env": {},
+  "startPane": "───\n❯ Ask your question...\n───\n  ? for shortcuts · taste off (byok)\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 13,
+  "markers": {
+   "ROLE_MARKER_K3": [],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "pane": "───\n❯ Ask your question...\n───\n  ? for shortcuts · taste off (byok)\n"
+ },
+ {
+  "tool": "opencode",
+  "label": "missing-instr",
+  "argv": [
+   "opencode",
+   "--port",
+   "18231",
+   "--hostname",
+   "127.0.0.1"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"instructions\":[\"<D>/home/nope.md\"]}"
+  },
+  "startPane": "     ┃\n     ┃  Build · mock-model mock\n     ╹───\n     tab agents  ctrl+p commands\n  <D>/repo:main     1.18.35\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 11,
+  "markers": {
+   "ROLE_MARKER_K3": [],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "pane": "<proj>/8b7b57b4-6886-4920-8ffa-36de861959e1/     15 ctrl+p\n   scratchpad/run2/c/k-opencode-missing-instr/repo     commands     • OpenCode 1.18.35\n"
+ },
+ {
+  "tool": "opencode",
+  "label": "bad-json",
+  "argv": [
+   "opencode",
+   "--port",
+   "18231",
+   "--hostname",
+   "127.0.0.1"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{bad"
+  },
+  "earlyExit": 1,
+  "pane": "Config file at OPENCODE_CONFIG_CONTENT is not valid JSON(C):\n--- JSONC Input ---\n{bad\n--- Errors ---\nInvalidSymbol at line 1, column 2\n   Line 1: {bad\n     ^\nCloseBraceExpected at line 1, column 5\n   Line 1: {bad\n     ^\n--- End ---\n__EXIT=1\n"
+ },
+ {
+  "tool": "opencode",
+  "label": "unreadable",
+  "argv": [
+   "opencode",
+   "--port",
+   "18231",
+   "--hostname",
+   "127.0.0.1"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"instructions\":[\"<D>/home/u.md\"]}"
+  },
+  "startPane": "     ┃\n     ┃  Build · mock-model mock\n     ╹───\n     tab agents  ctrl+p commands\n  <D>/repo:main     1.18.35\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 11,
+  "markers": {
+   "ROLE_MARKER_K3": [],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "pane": "<proj>/8b7b57b4-6886-4920-8ffa-36de861959e1/     15 ctrl+p\n   scratchpad/run2/c/k-opencode-unreadable/repo     commands     • OpenCode 1.18.35\n"
+ },
+ {
+  "tool": "opencode-v2",
+  "label": "bad-json",
+  "argv": [
+   "bash",
+   "/Users/<user>/share/work/github_kewton/commandmate-issue-4113/scripts/opencode-v2/launch.sh",
+   "--port",
+   "18231",
+   "--password-file",
+   "<D>/home/pw",
+   "--directory",
+   "<D>/repo",
+   "--executable",
+   "/opt/homebrew/bin/opencode2"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{bad"
+  },
+  "startPane": "\n",
+  "req": false,
+  "pane": "     /…/r…/c/k-opencode-v2-bad-json/repo:main  shift+tab agents  ctrl+p commands\n     2.0.18\n"
+ },
+ {
+  "tool": "opencode-v2",
+  "label": "missing-file-ref",
+  "argv": [
+   "bash",
+   "/Users/<user>/share/work/github_kewton/commandmate-issue-4113/scripts/opencode-v2/launch.sh",
+   "--port",
+   "18231",
+   "--password-file",
+   "<D>/home/pw",
+   "--directory",
+   "<D>/repo",
+   "--executable",
+   "/opt/homebrew/bin/opencode2"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"default_agent\":\"cm-role-x\",\"agents\":{\"cm-role-x\":{\"description\":\"r\",\"mode\":\"primary\",\"system\":\"{file:<D>/home/nope.md}\"}}}"
+  },
+  "earlyExit": 1,
+  "pane": "  at ~effect/Utils/internal (/$bunfs/root/chunk-y2jzm7ef.js:8:1540)\n    at s (/$bunfs/root/chunk-y2jzm7ef.js:24:5696)\n    at processTicksAndRejections (native:7:39)\n    at Tui.run (/$bunfs/root/chunk-xnz7tq1d.js:98:310)\n    at Tui.run (definition) (/$bunfs/root/chunk-xnz7tq1d.js:93:17264) {\n  [cause]: ClientError: UnexpectedStatus: 500\n     at <anonymous> (/$bunfs/root/chunk-k11cxzmy.js:2:1119)\n     at processTicksAndRejections (native:7:39) {\n    [cause]: Error: {\"status\":500}\n  }\n}\n__EXIT=1\n"
+ },
+ {
+  "tool": "opencode-v2",
+  "label": "unknown-default",
+  "argv": [
+   "bash",
+   "/Users/<user>/share/work/github_kewton/commandmate-issue-4113/scripts/opencode-v2/launch.sh",
+   "--port",
+   "18231",
+   "--password-file",
+   "<D>/home/pw",
+   "--directory",
+   "<D>/repo",
+   "--executable",
+   "/opt/homebrew/bin/opencode2"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"default_agent\":\"cm-role-nope\"}"
+  },
+  "startPane": "\n",
+  "req": false,
+  "pane": "     /…/k-opencode-v2-unknown-defa…/repo:main  shift+tab agents  ctrl+p commands\n     2.0.18\n"
+ },
+ {
+  "tool": "opencode-v2",
+  "label": "hidden-fallback",
+  "argv": [
+   "bash",
+   "/Users/<user>/share/work/github_kewton/commandmate-issue-4113/scripts/opencode-v2/launch.sh",
+   "--port",
+   "18231",
+   "--password-file",
+   "<D>/home/pw",
+   "--directory",
+   "<D>/repo",
+   "--executable",
+   "/opt/homebrew/bin/opencode2"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"default_agent\":\"cm-role-x\",\"agents\":{\"cm-role-x\":{\"description\":\"r\",\"mode\":\"primary\",\"hidden\":true,\"system\":\"ROLE_MARKER_K3: You are a test role. End every answer with ROLESTAMP.\"}}}"
+  },
+  "startPane": "\n",
+  "req": false,
+  "pane": "     /…/k-opencode-v2-hidden-fallb…/repo:main  shift+tab agents  ctrl+p commands\n     2.0.18\n"
+ },
+ {
+  "tool": "copilot",
+  "label": "missing-agent",
+  "argv": [
+   "copilot",
+   "--agent",
+   "cm-role-nope"
+  ],
+  "env": {},
+  "startPane": "───\n❯\n───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     mock-model\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 20,
+  "markers": {
+   "ROLE_MARKER_K3": [],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "pane": "───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     mock-model\n"
+ },
+ {
+  "tool": "copilot",
+  "label": "bad-frontmatter",
+  "argv": [
+   "copilot",
+   "--agent",
+   "cm-role-b"
+  ],
+  "env": {},
+  "startPane": "───\n❯\n───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     mock-model\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 20,
+  "markers": {
+   "ROLE_MARKER_K3": [],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "pane": "───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     mock-model\n"
+ },
+ {
+  "tool": "copilot",
+  "label": "no-frontmatter",
+  "argv": [
+   "copilot",
+   "--agent",
+   "cm-role-n"
+  ],
+  "env": {},
+  "startPane": "───\n❯\n───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     mock-model\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 20,
+  "markers": {
+   "ROLE_MARKER_K3": [],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "pane": "───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     mock-model\n"
+ },
+ {
+  "tool": "copilot",
+  "label": "unwritable-home",
+  "argv": [
+   "copilot",
+   "--agent",
+   "cm-role-w"
+  ],
+  "env": {},
+  "startPane": "───\n❯\n───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     cm-role-w · mock-model\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 21,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "system"
+   ],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "pane": "───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     cm-role-w · mock-model\n"
+ },
+ {
+  "tool": "opencode-v2",
+  "label": "bad-json",
+  "argv": [
+   "bash",
+   "/Users/<user>/share/work/github_kewton/commandmate-issue-4113/scripts/opencode-v2/launch.sh",
+   "--port",
+   "18231",
+   "--password-file",
+   "<D>/home/pw",
+   "--directory",
+   "<D>/repo",
+   "--executable",
+   "/opt/homebrew/bin/opencode2"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{bad"
+  },
+  "startPane": "\n",
+  "req": false,
+  "pane": "     /…/r…/c/k-opencode-v2-bad-json/repo:main  shift+tab agents  ctrl+p commands\n     2.0.18\n"
+ },
+ {
+  "tool": "opencode-v2",
+  "label": "missing-file-ref",
+  "argv": [
+   "bash",
+   "/Users/<user>/share/work/github_kewton/commandmate-issue-4113/scripts/opencode-v2/launch.sh",
+   "--port",
+   "18231",
+   "--password-file",
+   "<D>/home/pw",
+   "--directory",
+   "<D>/repo",
+   "--executable",
+   "/opt/homebrew/bin/opencode2"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"default_agent\":\"cm-role-x\",\"agents\":{\"cm-role-x\":{\"description\":\"r\",\"mode\":\"primary\",\"system\":\"{file:<D>/home/nope.md}\"}}}"
+  },
+  "earlyExit": 1,
+  "pane": "  at ~effect/Utils/internal (/$bunfs/root/chunk-y2jzm7ef.js:8:1540)\n    at s (/$bunfs/root/chunk-y2jzm7ef.js:24:5696)\n    at processTicksAndRejections (native:7:39)\n    at Tui.run (/$bunfs/root/chunk-xnz7tq1d.js:98:310)\n    at Tui.run (definition) (/$bunfs/root/chunk-xnz7tq1d.js:93:17264) {\n  [cause]: ClientError: UnexpectedStatus: 500\n     at <anonymous> (/$bunfs/root/chunk-k11cxzmy.js:2:1119)\n     at processTicksAndRejections (native:7:39) {\n    [cause]: Error: {\"status\":500}\n  }\n}\n__EXIT=1\n"
+ },
+ {
+  "tool": "opencode-v2",
+  "label": "unknown-default",
+  "argv": [
+   "bash",
+   "/Users/<user>/share/work/github_kewton/commandmate-issue-4113/scripts/opencode-v2/launch.sh",
+   "--port",
+   "18231",
+   "--password-file",
+   "<D>/home/pw",
+   "--directory",
+   "<D>/repo",
+   "--executable",
+   "/opt/homebrew/bin/opencode2"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"default_agent\":\"cm-role-nope\"}"
+  },
+  "startPane": "     ╹───\n     /…/k-opencode-v2-unknown-defa…/repo:main  shift+tab agents  ctrl+p commands\n     2.0.18\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 12,
+  "markers": {
+   "ROLE_MARKER_K3": [],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "pane": "───\n  /…/-Users-<user>-share-work-g…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/k-opencode-v2-unknown-default/repo:main  15 (0%)  ctrl+p commands    /…/k-opencode-v2-unknown-de…/repo:main\n"
+ },
+ {
+  "tool": "opencode-v2",
+  "label": "hidden-fallback",
+  "argv": [
+   "bash",
+   "/Users/<user>/share/work/github_kewton/commandmate-issue-4113/scripts/opencode-v2/launch.sh",
+   "--port",
+   "18231",
+   "--password-file",
+   "<D>/home/pw",
+   "--directory",
+   "<D>/repo",
+   "--executable",
+   "/opt/homebrew/bin/opencode2"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"default_agent\":\"cm-role-x\",\"agents\":{\"cm-role-x\":{\"description\":\"r\",\"mode\":\"primary\",\"hidden\":true,\"system\":\"ROLE_MARKER_K3: You are a test role. End every answer with ROLESTAMP.\"}}}"
+  },
+  "startPane": "     ╹───\n     /…/k-opencode-v2-hidden-fallb…/repo:main  shift+tab agents  ctrl+p commands\n     2.0.18\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 12,
+  "markers": {
+   "ROLE_MARKER_K3": [],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "pane": "───\n  /…/-Users-<user>-share-work-g…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/k-opencode-v2-hidden-fallback/repo:main  15 (0%)  ctrl+p commands    /…/k-opencode-v2-hidden-fal…/repo:main\n"
+ },
+ {
+  "tool": "opencode-v2",
+  "label": "subagent-mode",
+  "argv": [
+   "bash",
+   "/Users/<user>/share/work/github_kewton/commandmate-issue-4113/scripts/opencode-v2/launch.sh",
+   "--port",
+   "18231",
+   "--password-file",
+   "<D>/home/pw",
+   "--directory",
+   "<D>/repo",
+   "--executable",
+   "/opt/homebrew/bin/opencode2"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"default_agent\":\"cm-role-x\",\"agents\":{\"cm-role-x\":{\"description\":\"r\",\"mode\":\"subagent\",\"system\":\"ROLE_MARKER_K3: You are a test role. End every answer with ROLESTAMP.\"}}}"
+  },
+  "startPane": "     ╹───\n     /…/k-opencode-v2-subagent-mode/repo:main  shift+tab agents  ctrl+p commands\n     2.0.18\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 12,
+  "markers": {
+   "ROLE_MARKER_K3": [],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "pane": "───\n  /…/-Users-<user>-share-work-git…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/k-opencode-v2-subagent-mode/repo:main  15 (0%)  ctrl+p commands    /…/k-opencode-v2-subagent-m…/repo:main\n"
+ },
+ {
+  "tool": "claude",
+  "label": "fmt-special",
+  "argv": [
+   "claude",
+   "--permission-mode",
+   "default",
+   "--append-system-prompt-file",
+   "<D>/home/.cmrole/role-x.md"
+  ],
+  "env": {},
+  "startPane": "───\n Make auto mode your default permission mode?\n   Auto mode lets Claude handle permission prompts automatically. Claude checks each tool call for risky actions and prompt injection before executing, runs the ones it assesses as lower-risk, and\n   blocks the rest.\n   ❯ Yes, set auto mode as my default permission mode\n     No, keep manual mode\n",
+  "req": true,
+  "model": "claude-opus-5-5",
+  "tools": 13,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "system"
+   ],
+   "FORMAT_TAIL_Z9": [
+    "system"
+   ],
+   "REPO_MARKER_7Q": [
+    "user"
+   ]
+  },
+  "exact": true,
+  "pane": "───\n❯ \n───\n  ⏸ manual mode on · ? for shortcuts\n"
+ },
+ {
+  "tool": "claude",
+  "label": "fmt-big",
+  "argv": [
+   "claude",
+   "--permission-mode",
+   "default",
+   "--append-system-prompt-file",
+   "<D>/home/.cmrole/role-x.md"
+  ],
+  "env": {},
+  "startPane": "───\n Make auto mode your default permission mode?\n   Auto mode lets Claude handle permission prompts automatically. Claude checks each tool call for risky actions and prompt injection before executing, runs the ones it assesses as lower-risk, and\n   blocks the rest.\n   ❯ Yes, set auto mode as my default permission mode\n     No, keep manual mode\n",
+  "req": true,
+  "model": "claude-opus-5-5",
+  "tools": 13,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "system"
+   ],
+   "FORMAT_TAIL_Z9": [
+    "system"
+   ],
+   "REPO_MARKER_7Q": [
+    "user"
+   ]
+  },
+  "exact": true,
+  "pane": "───\n❯ \n───\n  ⏸ manual mode on · ? for shortcuts\n"
+ },
+ {
+  "tool": "codex",
+  "label": "fmt-special",
+  "argv": [
+   "codex",
+   "-c",
+   "features.daemon_auto_start=false",
+   "-p",
+   "cm-role-x"
+  ],
+  "env": {},
+  "startPane": " \n       \n     ⢿\n     \n› Ask Codex to do anything\n  mock-model default · <D>/repo\n  ? for shortcuts\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 13,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "developer"
+   ],
+   "FORMAT_TAIL_Z9": [
+    "developer"
+   ],
+   "REPO_MARKER_7Q": [
+    "user"
+   ]
+  },
+  "exact": true,
+  "pane": "hello\n• MOCK_OK\n  Worked for <1s • 04:26\n› Ask Codex to do anything\n  mock-model default · <D>/repo\n  ? for shortcuts     ⚠ 1 warning · f2 to view\n"
+ },
+ {
+  "tool": "codex",
+  "label": "fmt-big",
+  "argv": [
+   "codex",
+   "-c",
+   "features.daemon_auto_start=false",
+   "-p",
+   "cm-role-x"
+  ],
+  "env": {},
+  "startPane": " \n       \n     ⢿\n     \n› Ask Codex to do anything\n  mock-model default · <D>/repo\n  ? for shortcuts\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 13,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "developer"
+   ],
+   "FORMAT_TAIL_Z9": [
+    "developer"
+   ],
+   "REPO_MARKER_7Q": [
+    "user"
+   ]
+  },
+  "exact": true,
+  "pane": "hello\n• MOCK_OK\n  Worked for <1s • 04:26\n› Ask Codex to do anything\n  mock-model default · <D>/repo\n  ? for shortcuts     ⚠ 1 warning · f2 to view\n"
+ },
+ {
+  "tool": "command-code",
+  "label": "fmt-special",
+  "argv": [
+   "cmd",
+   "--trust",
+   "--skip-onboarding",
+   "--no-auto-update",
+   "--local-only",
+   "-m",
+   "mock-model",
+   "--mod",
+   "<D>/home/.cmrole/cm-role-x.ts"
+  ],
+  "env": {},
+  "startPane": "───\n❯ Ask your question...\n───\n  ? for shortcuts · taste off (byok)\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 13,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "system"
+   ],
+   "FORMAT_TAIL_Z9": [
+    "system"
+   ],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "exact": true,
+  "pane": "───\n❯ Ask your question...\n───\n  ? for shortcuts · taste off (byok)\n"
+ },
+ {
+  "tool": "command-code",
+  "label": "fmt-big",
+  "argv": [
+   "cmd",
+   "--trust",
+   "--skip-onboarding",
+   "--no-auto-update",
+   "--local-only",
+   "-m",
+   "mock-model",
+   "--mod",
+   "<D>/home/.cmrole/cm-role-x.ts"
+  ],
+  "env": {},
+  "startPane": "───\n❯ Ask your question...\n───\n  ? for shortcuts · taste off (byok)\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 13,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "system"
+   ],
+   "FORMAT_TAIL_Z9": [
+    "system"
+   ],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "exact": true,
+  "pane": "───\n❯ Ask your question...\n───\n  ? for shortcuts · taste off (byok)\n"
+ },
+ {
+  "tool": "opencode",
+  "label": "fmt-special",
+  "argv": [
+   "opencode",
+   "--port",
+   "18231",
+   "--hostname",
+   "127.0.0.1"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"instructions\":[\"<D>/home/.cmrole/role-x.md\"]}"
+  },
+  "startPane": "     ┃\n     ┃  Build · mock-model mock\n     ╹───\n     tab agents  ctrl+p commands\n  <D>/repo:main     1.18.35\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 11,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "system"
+   ],
+   "FORMAT_TAIL_Z9": [
+    "system"
+   ],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "exact": true,
+  "pane": "<proj>/8b7b57b4-6886-4920-8ffa-36de861959e1/     15 ctrl+p\n   scratchpad/run2/c/k-opencode-fmt-special/repo     commands     • OpenCode 1.18.35\n"
+ },
+ {
+  "tool": "opencode",
+  "label": "fmt-big",
+  "argv": [
+   "opencode",
+   "--port",
+   "18231",
+   "--hostname",
+   "127.0.0.1"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"instructions\":[\"<D>/home/.cmrole/role-x.md\"]}"
+  },
+  "startPane": "     ┃\n     ┃  Build · mock-model mock\n     ╹───\n     tab agents  ctrl+p commands\n  <D>/repo:main     1.18.35\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 11,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "system"
+   ],
+   "FORMAT_TAIL_Z9": [
+    "system"
+   ],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "exact": true,
+  "pane": "<proj>/8b7b57b4-6886-4920-8ffa-36de861959e1/     15 ctrl+p\n   scratchpad/run2/c/k-opencode-fmt-big/repo     commands     • OpenCode 1.18.35\n"
+ },
+ {
+  "tool": "copilot",
+  "label": "fmt-special",
+  "argv": [
+   "copilot",
+   "--agent",
+   "cm-role-x"
+  ],
+  "env": {},
+  "startPane": "───\n❯\n───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     cm-role-x · mock-model\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 21,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "system"
+   ],
+   "FORMAT_TAIL_Z9": [
+    "system"
+   ],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "exact": true,
+  "pane": "───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     cm-role-x · mock-model\n"
+ },
+ {
+  "tool": "copilot",
+  "label": "fmt-big",
+  "argv": [
+   "copilot",
+   "--agent",
+   "cm-role-x"
+  ],
+  "env": {},
+  "startPane": "───\n❯\n───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     cm-role-x · mock-model\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 21,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "system"
+   ],
+   "FORMAT_TAIL_Z9": [
+    "system"
+   ],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "exact": true,
+  "pane": "───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     cm-role-x · mock-model\n"
+ },
+ {
+  "tool": "opencode-v2",
+  "label": "fmt-special",
+  "argv": [
+   "bash",
+   "/Users/<user>/share/work/github_kewton/commandmate-issue-4113/scripts/opencode-v2/launch.sh",
+   "--port",
+   "18231",
+   "--password-file",
+   "<D>/home/pw",
+   "--directory",
+   "<D>/repo",
+   "--executable",
+   "/opt/homebrew/bin/opencode2"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"default_agent\":\"cm-role-x\",\"agents\":{\"cm-role-x\":{\"description\":\"r\",\"mode\":\"primary\",\"system\":\"{file:<D>/home/r.md}\"}}}"
+  },
+  "startPane": "     ╹───\n     /…/c/k-opencode-v2-fmt-special/repo:main  shift+tab agents  ctrl+p commands\n     2.0.18\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 12,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "system"
+   ],
+   "FORMAT_TAIL_Z9": [
+    "system"
+   ],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "exact": true,
+  "pane": "───\n  /…/-Users-<user>-share-work-githu…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/k-opencode-v2-fmt-special/repo:main  15 (0%)  ctrl+p commands    /…/k-opencode-v2-fmt-special/repo:main\n"
+ },
+ {
+  "tool": "opencode-v2",
+  "label": "fmt-big",
+  "argv": [
+   "bash",
+   "/Users/<user>/share/work/github_kewton/commandmate-issue-4113/scripts/opencode-v2/launch.sh",
+   "--port",
+   "18231",
+   "--password-file",
+   "<D>/home/pw",
+   "--directory",
+   "<D>/repo",
+   "--executable",
+   "/opt/homebrew/bin/opencode2"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"default_agent\":\"cm-role-x\",\"agents\":{\"cm-role-x\":{\"description\":\"r\",\"mode\":\"primary\",\"system\":\"{file:<D>/home/r.md}\"}}}"
+  },
+  "startPane": "     ╹───\n     /…/ru…/c/k-opencode-v2-fmt-big/repo:main  shift+tab agents  ctrl+p commands\n     2.0.18\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 12,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "system"
+   ],
+   "FORMAT_TAIL_Z9": [
+    "system"
+   ],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "exact": true,
+  "pane": "───\n  /…/-Users-<user>-share-work-github-ke…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/k-opencode-v2-fmt-big/repo:main  15 (0%)  ctrl+p commands    /…/c/k-opencode-v2-fmt-big/repo:main\n"
+ },
+ {
+  "tool": "claude",
+  "label": "space",
+  "argv": [
+   "claude",
+   "--permission-mode",
+   "default",
+   "--append-system-prompt-file",
+   "<D>/home/ dir with space/r.md"
+  ],
+  "env": {},
+  "startPane": "───\n Make auto mode your default permission mode?\n   Auto mode lets Claude handle permission prompts automatically. Claude checks each tool call for risky actions and prompt injection before executing, runs the ones it assesses as lower-risk, and\n   blocks the rest.\n   ❯ Yes, set auto mode as my default permission mode\n     No, keep manual mode\n",
+  "req": true,
+  "model": "claude-opus-5-5",
+  "tools": 13,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "system"
+   ],
+   "REPO_MARKER_7Q": [
+    "user"
+   ]
+  },
+  "pane": "───\n❯ \n───\n  ⏸ manual mode on · ? for shortcuts\n"
+ },
+ {
+  "tool": "command-code",
+  "label": "space",
+  "argv": [
+   "cmd",
+   "--trust",
+   "--skip-onboarding",
+   "--no-auto-update",
+   "--local-only",
+   "-m",
+   "mock-model",
+   "--mod",
+   "<D>/home/ dir with space/r.ts"
+  ],
+  "env": {},
+  "startPane": "───\n❯ Ask your question...\n───\n  ? for shortcuts · taste off (byok)\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 13,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "system"
+   ],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "pane": "───\n❯ Ask your question...\n───\n  ? for shortcuts · taste off (byok)\n"
+ },
+ {
+  "tool": "opencode",
+  "label": "space",
+  "argv": [
+   "opencode",
+   "--port",
+   "18231",
+   "--hostname",
+   "127.0.0.1"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"instructions\":[\"<D>/home/ dir with space/r.md\"]}"
+  },
+  "startPane": "     ┃\n     ┃  Build · mock-model mock\n     ╹───\n     tab agents  ctrl+p commands\n  <D>/repo:main     1.18.35\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 11,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "system"
+   ],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "pane": "<proj>/8b7b57b4-6886-4920-8ffa-36de861959e1/     15 ctrl+p\n   scratchpad/run2/c/k-opencode-space/repo     commands     • OpenCode 1.18.35\n"
+ },
+ {
+  "tool": "opencode-v2",
+  "label": "space",
+  "argv": [
+   "bash",
+   "/Users/<user>/share/work/github_kewton/commandmate-issue-4113/scripts/opencode-v2/launch.sh",
+   "--port",
+   "18231",
+   "--password-file",
+   "<D>/home/pw",
+   "--directory",
+   "<D>/repo",
+   "--executable",
+   "/opt/homebrew/bin/opencode2"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"default_agent\":\"cm-role-x\",\"agents\":{\"cm-role-x\":{\"description\":\"r\",\"mode\":\"primary\",\"system\":\"{file:<D>/home/ dir with space/r.md}\"}}}"
+  },
+  "startPane": "     ╹───\n     /…/run2/c/k-opencode-v2-space/repo:main   shift+tab agents  ctrl+p commands\n     2.0.18\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 12,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "system"
+   ],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "pane": "───\n  /…/-Users-<user>-share-work-github-kewt…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/k-opencode-v2-space/repo:main  15 (0%)  ctrl+p commands    /…/ru…/c/k-opencode-v2-space/repo:main\n"
+ },
+ {
+  "tool": "codex",
+  "label": "space-home",
+  "argv": [
+   "codex",
+   "-c",
+   "features.daemon_auto_start=false",
+   "-p",
+   "cm-role-x"
+  ],
+  "env": {},
+  "startPane": " \n       \n     ⢿\n     \n› Ask Codex to do anything\n  mock-model default · <D>/repo\n  ? for shortcuts\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 13,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "developer"
+   ],
+   "REPO_MARKER_7Q": [
+    "user"
+   ]
+  },
+  "pane": "hello\n• MOCK_OK\n  Worked for <1s • 04:29\n› Ask Codex to do anything\n  mock-model default · <D>/repo\n  ? for shortcuts     ⚠ 1 warning · f2 to view\n"
+ },
+ {
+  "tool": "copilot",
+  "label": "space-home",
+  "argv": [
+   "copilot",
+   "--agent",
+   "cm-role-x"
+  ],
+  "env": {},
+  "startPane": "───\n❯\n───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     cm-role-x · mock-model\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 21,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "system"
+   ],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "pane": "───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     cm-role-x · mock-model\n"
+ },
+ {
+  "tool": "codex",
+  "label": "base-dev+role",
+  "argv": [
+   "codex",
+   "-c",
+   "features.daemon_auto_start=false",
+   "-p",
+   "cm-role-x"
+  ],
+  "env": {},
+  "startPane": " \n       \n     ⢿\n     \n› Ask Codex to do anything\n  mock-model default · <D>/repo\n  ? for shortcuts\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 13,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "developer"
+   ],
+   "USERDEV_MARKER_U1": [],
+   "PROFILE_MARKER_P2": [],
+   "REPO_MARKER_7Q": [
+    "user"
+   ]
+  },
+  "pane": "hello\n• MOCK_OK\n  Worked for <1s • 04:29\n› Ask Codex to do anything\n  mock-model default · <D>/repo\n  ? for shortcuts     ⚠ 1 warning · f2 to view\n"
+ },
+ {
+  "tool": "codex",
+  "label": "base-dev-only",
+  "argv": [
+   "codex",
+   "-c",
+   "features.daemon_auto_start=false"
+  ],
+  "env": {},
+  "startPane": " \n       \n     ⢿\n     \n› Ask Codex to do anything\n  mock-model default · <D>/repo\n  ? for shortcuts\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 13,
+  "markers": {
+   "ROLE_MARKER_K3": [],
+   "USERDEV_MARKER_U1": [
+    "developer"
+   ],
+   "PROFILE_MARKER_P2": [],
+   "REPO_MARKER_7Q": [
+    "user"
+   ]
+  },
+  "pane": "hello\n• MOCK_OK\n  Worked for <1s • 04:30\n› Ask Codex to do anything\n  mock-model default · <D>/repo\n  ? for shortcuts     ⚠ 1 warning · f2 to view\n"
+ },
+ {
+  "tool": "codex",
+  "label": "profile-only",
+  "argv": [
+   "codex",
+   "-c",
+   "features.daemon_auto_start=false",
+   "-p",
+   "mine"
+  ],
+  "env": {},
+  "startPane": "⠁ \n       \n     ⢿\n     \n› Ask Codex to do anything\n  mock-model-prof default · <D>/repo\n  ? for shortcuts\n",
+  "req": true,
+  "model": "mock-model-prof",
+  "tools": 13,
+  "markers": {
+   "ROLE_MARKER_K3": [],
+   "USERDEV_MARKER_U1": [],
+   "PROFILE_MARKER_P2": [
+    "developer"
+   ],
+   "REPO_MARKER_7Q": [
+    "user"
+   ]
+  },
+  "pane": "\n• MOCK_OK\n  Worked for <1s • 04:30\n› Ask Codex to do anything\n  mock-model-prof default · <D>/repo\n  ? for shortcuts     ⚠ 1 warning · f2 to view\n"
+ },
+ {
+  "tool": "codex",
+  "label": "two-profiles",
+  "argv": [
+   "codex",
+   "-c",
+   "features.daemon_auto_start=false",
+   "-p",
+   "mine",
+   "-p",
+   "cm-role-x"
+  ],
+  "env": {},
+  "earlyExit": 2,
+  "pane": "error: the argument '--profile <CONFIG_PROFILE_V2>' cannot be used multiple times\nUsage: codex [OPTIONS] [PROMPT]\n     codex [OPTIONS] <COMMAND> [ARGS]\nFor more information, try '--help'.\n__EXIT=2\n"
+ },
+ {
+  "tool": "codex",
+  "label": "profile+dashc-model-instructions",
+  "argv": [
+   "codex",
+   "-c",
+   "features.daemon_auto_start=false",
+   "-p",
+   "mine",
+   "-c",
+   "developer_instructions=\"PROFILE_MARKER_P2\\\\nROLE_MARKER_K3: You are a test role. End every answer with ROLESTAMP.\""
+  ],
+  "env": {},
+  "startPane": "     ⢿\n     \n› Ask Codex to do anything\n  mock-model-prof default · <SP>/run2/c/k-codex-profiledashc-model-…\n  ? for shortcuts\n",
+  "req": true,
+  "model": "mock-model-prof",
+  "tools": 13,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "developer"
+   ],
+   "USERDEV_MARKER_U1": [],
+   "PROFILE_MARKER_P2": [
+    "developer"
+   ],
+   "REPO_MARKER_7Q": [
+    "user"
+   ]
+  },
+  "pane": "mate-issue-4113/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/k-codex-profiledashc-model-…\n  ? for shortcuts     ⚠ 1 warning · f2 to view\n"
+ },
+ {
+  "tool": "codex",
+  "label": "merged-generated-profile",
+  "argv": [
+   "codex",
+   "-c",
+   "features.daemon_auto_start=false",
+   "-p",
+   "cm-role-mine-x"
+  ],
+  "env": {},
+  "startPane": "     ⢿\n     \n› Ask Codex to do anything\n  mock-model-prof default · <SP>/run2/c/k-codex-merged-generated-pr…\n  ? for shortcuts\n",
+  "req": true,
+  "model": "mock-model-prof",
+  "tools": 13,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "developer"
+   ],
+   "USERDEV_MARKER_U1": [],
+   "PROFILE_MARKER_P2": [
+    "developer"
+   ],
+   "REPO_MARKER_7Q": [
+    "user"
+   ]
+  },
+  "pane": "mate-issue-4113/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/k-codex-merged-generated-pr…\n  ? for shortcuts     ⚠ 1 warning · f2 to view\n"
+ },
+ {
+  "tool": "codex",
+  "label": "role-with-daemon-flag",
+  "argv": [
+   "codex",
+   "-c",
+   "features.daemon_auto_start=false",
+   "-p",
+   "cm-role-x"
+  ],
+  "env": {},
+  "startPane": " \n       \n     ⢿\n     \n› Ask Codex to do anything\n  mock-model default · <D>/re…\n  ? for shortcuts\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 13,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "developer"
+   ],
+   "USERDEV_MARKER_U1": [],
+   "PROFILE_MARKER_P2": [],
+   "REPO_MARKER_7Q": [
+    "user"
+   ]
+  },
+  "pane": " hello\n• MOCK_OK\n  Worked for <1s • 04:30\n› Ask Codex to do anything\n  mock-model default · <D>/re…\n  ? for shortcuts     ⚠ 1 warning · f2 to view\n"
+ },
+ {
+  "tool": "opencode",
+  "label": "base-instr+role",
+  "argv": [
+   "opencode",
+   "--port",
+   "18231",
+   "--hostname",
+   "127.0.0.1"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"instructions\":[\"<D>/home/.cmrole/role-x.md\"]}"
+  },
+  "startPane": "     ┃\n     ┃  Build · mock-model mock\n     ╹───\n     tab agents  ctrl+p commands\n  <D>/repo:main     1.18.35\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 11,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "system"
+   ],
+   "USERDEV_MARKER_U1": [
+    "system"
+   ],
+   "PROFILE_MARKER_P2": [],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "pane": "<proj>/8b7b57b4-6886-4920-8ffa-36de861959e1/     15 ctrl+p\n   scratchpad/run2/c/k-opencode-base-instrrole/repo     commands     • OpenCode 1.18.35\n"
+ },
+ {
+  "tool": "opencode",
+  "label": "persona-plan+role",
+  "argv": [
+   "opencode",
+   "--port",
+   "18231",
+   "--hostname",
+   "127.0.0.1",
+   "--agent",
+   "plan"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"instructions\":[\"<D>/home/r.md\"]}"
+  },
+  "startPane": "     ┃\n     ┃  Plan · mock-model mock\n     ╹───\n     tab agents  ctrl+p commands\n  <D>/repo:main     1.18.35\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 11,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "system"
+   ],
+   "USERDEV_MARKER_U1": [],
+   "PROFILE_MARKER_P2": [],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "extra": {
+   "planReminder": true,
+   "editTool": true
+  },
+  "pane": "<proj>/8b7b57b4-6886-4920-8ffa-36de861959e1/     15 ctrl+p\n   scratchpad/run2/c/k-opencode-persona-planrole/repo     commands     • OpenCode 1.18.35\n"
+ },
+ {
+  "tool": "opencode",
+  "label": "persona-plan-only",
+  "argv": [
+   "opencode",
+   "--port",
+   "18231",
+   "--hostname",
+   "127.0.0.1",
+   "--agent",
+   "plan"
+  ],
+  "env": {},
+  "startPane": "     ┃\n     ┃  Plan · mock-model mock\n     ╹───\n     tab agents  ctrl+p commands\n  <D>/repo:main     1.18.35\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 11,
+  "markers": {
+   "ROLE_MARKER_K3": [],
+   "USERDEV_MARKER_U1": [],
+   "PROFILE_MARKER_P2": [],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "extra": {
+   "planReminder": true,
+   "editTool": true
+  },
+  "pane": "<proj>/8b7b57b4-6886-4920-8ffa-36de861959e1/     15 ctrl+p\n   scratchpad/run2/c/k-opencode-persona-plan-only/repo     commands     • OpenCode 1.18.35\n"
+ },
+ {
+  "tool": "opencode",
+  "label": "model-in-config+role",
+  "argv": [
+   "opencode",
+   "--port",
+   "18231",
+   "--hostname",
+   "127.0.0.1"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"instructions\":[\"<D>/home/.cmrole/role-x.md\"]}"
+  },
+  "startPane": "     ┃\n     ┃  Build · b mock\n     ╹───\n     tab agents  ctrl+p commands\n  <D>/repo:main     1.18.35\n",
+  "req": true,
+  "model": "model-b",
+  "tools": 11,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "system"
+   ],
+   "USERDEV_MARKER_U1": [],
+   "PROFILE_MARKER_P2": [],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "pane": "<proj>/8b7b57b4-6886-4920-8ffa-36de861959e1/     15 ctrl+p\n   scratchpad/run2/c/k-opencode-model-in-configrole/repo     commands     • OpenCode 1.18.35\n"
+ },
+ {
+  "tool": "opencode",
+  "label": "user-env-content+role",
+  "argv": [
+   "opencode",
+   "--port",
+   "18231",
+   "--hostname",
+   "127.0.0.1"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"instructions\":[\"<D>/home/ui.md\",\"<D>/home/r.md\"]}"
+  },
+  "startPane": "     ┃\n     ┃  Build · mock-model mock\n     ╹───\n     tab agents  ctrl+p commands\n  <D>/repo:main    1.18.35\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 11,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "system"
+   ],
+   "USERDEV_MARKER_U1": [
+    "system"
+   ],
+   "PROFILE_MARKER_P2": [],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "pane": "<proj>/8b7b57b4-6886-4920-8ffa-36de861959e1/     15 ctrl+p\n   scratchpad/run2/c/k-opencode-user-env-contentrole/repo     commands     • OpenCode 1.18.35\n"
+ },
+ {
+  "tool": "opencode-v2",
+  "label": "role-with-user-default",
+  "argv": [
+   "bash",
+   "/Users/<user>/share/work/github_kewton/commandmate-issue-4113/scripts/opencode-v2/launch.sh",
+   "--port",
+   "18231",
+   "--password-file",
+   "<D>/home/pw",
+   "--directory",
+   "<D>/repo",
+   "--executable",
+   "/opt/homebrew/bin/opencode2"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"default_agent\":\"cm-role-x\",\"agents\":{\"cm-role-x\":{\"description\":\"r\",\"mode\":\"primary\",\"system\":\"{file:<D>/home/r.md}\"}}}"
+  },
+  "startPane": "     ╹───\n     /…/k-opencode-v2-role-with-us…/repo:main  shift+tab agents  ctrl+p commands\n     2.0.18\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 12,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "system"
+   ],
+   "USERDEV_MARKER_U1": [],
+   "PROFILE_MARKER_P2": [],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "pane": "───\n  /…/-Users-<user>-share…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/k-opencode-v2-role-with-user-default/repo:main  15 (0%)  ctrl+p commands    /…/k-opencode-v2-role-with-…/repo:main\n"
+ },
+ {
+  "tool": "opencode-v2",
+  "label": "user-model+role",
+  "argv": [
+   "bash",
+   "/Users/<user>/share/work/github_kewton/commandmate-issue-4113/scripts/opencode-v2/launch.sh",
+   "--port",
+   "18231",
+   "--password-file",
+   "<D>/home/pw",
+   "--directory",
+   "<D>/repo",
+   "--executable",
+   "/opt/homebrew/bin/opencode2"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"default_agent\":\"cm-role-x\",\"agents\":{\"cm-role-x\":{\"description\":\"r\",\"mode\":\"primary\",\"system\":\"{file:<D>/home/r.md}\"}}}"
+  },
+  "startPane": "     ╹───\n     /…/k-opencode-v2-user-modelro…/repo:main  shift+tab agents  ctrl+p commands\n     2.0.18\n",
+  "req": true,
+  "model": "model-b",
+  "tools": 12,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "system"
+   ],
+   "USERDEV_MARKER_U1": [],
+   "PROFILE_MARKER_P2": [],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "pane": "───\n  /…/-Users-<user>-share-work-gi…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/k-opencode-v2-user-modelrole/repo:main  15 (0%)  ctrl+p commands    /…/k-opencode-v2-user-model…/repo:main\n"
+ },
+ {
+  "tool": "opencode-v2",
+  "label": "user-dir-lost",
+  "argv": [
+   "bash",
+   "/Users/<user>/share/work/github_kewton/commandmate-issue-4113/scripts/opencode-v2/launch.sh",
+   "--port",
+   "18231",
+   "--password-file",
+   "<D>/home/pw",
+   "--directory",
+   "<D>/repo",
+   "--executable",
+   "/opt/homebrew/bin/opencode2"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_DIR": "<D>/home/gen"
+  },
+  "startPane": "     ╹───\n     /…/k-opencode-v2-user-dir-lost/repo:main  shift+tab agents  ctrl+p commands\n     2.0.18\n",
+  "req": false,
+  "pane": "───\n  /…/-Users-<user>-share…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/k-opencode-v2-user-dir-lost/repo:main  shift+tab agents  ctrl+p commands    /…/k-opencode-v2-user-dir-l…/repo:main\n"
+ },
+ {
+  "tool": "copilot",
+  "label": "visible-infer-false",
+  "argv": [
+   "copilot"
+  ],
+  "env": {},
+  "startPane": "───\n❯\n───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     mock-model\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 20,
+  "markers": {
+   "ROLE_MARKER_K3": [],
+   "USERDEV_MARKER_U1": [],
+   "PROFILE_MARKER_P2": [],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "extra": {
+   "nameInRequest": false,
+   "roleBodyInRequest": false
+  },
+  "pane": "───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     mock-model\n"
+ },
+ {
+  "tool": "copilot",
+  "label": "visible-infer-true",
+  "argv": [
+   "copilot"
+  ],
+  "env": {},
+  "startPane": "───\n❯\n───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     mock-model\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 20,
+  "markers": {
+   "ROLE_MARKER_K3": [],
+   "USERDEV_MARKER_U1": [],
+   "PROFILE_MARKER_P2": [],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "extra": {
+   "nameInRequest": true,
+   "roleBodyInRequest": false
+  },
+  "pane": "───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     mock-model\n"
+ },
+ {
+  "tool": "copilot",
+  "label": "visible-infer-default",
+  "argv": [
+   "copilot"
+  ],
+  "env": {},
+  "startPane": "───\n❯\n───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     mock-model\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 20,
+  "markers": {
+   "ROLE_MARKER_K3": [],
+   "USERDEV_MARKER_U1": [],
+   "PROFILE_MARKER_P2": [],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "extra": {
+   "nameInRequest": true,
+   "roleBodyInRequest": false
+  },
+  "pane": "───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     mock-model\n"
+ },
+ {
+  "tool": "copilot",
+  "label": "user-instr+role",
+  "argv": [
+   "copilot",
+   "--agent",
+   "cm-role-x"
+  ],
+  "env": {},
+  "startPane": "───\n❯\n───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     cm-role-x · mock-model\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 21,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "system"
+   ],
+   "USERDEV_MARKER_U1": [
+    "system"
+   ],
+   "PROFILE_MARKER_P2": [],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "pane": "───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     cm-role-x · mock-model\n"
+ },
+ {
+  "tool": "claude",
+  "label": "claudemd+role",
+  "argv": [
+   "claude",
+   "--permission-mode",
+   "default",
+   "--append-system-prompt-file",
+   "<D>/home/r.md"
+  ],
+  "env": {},
+  "startPane": "───\n Make auto mode your default permission mode?\n   Auto mode lets Claude handle permission prompts automatically. Claude checks each tool call for risky actions and prompt injection before executing, runs the ones it assesses as lower-risk, and\n   blocks the rest.\n   ❯ Yes, set auto mode as my default permission mode\n     No, keep manual mode\n",
+  "req": true,
+  "model": "claude-opus-5-5",
+  "tools": 13,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "system"
+   ],
+   "USERDEV_MARKER_U1": [
+    "user"
+   ],
+   "PROFILE_MARKER_P2": [],
+   "REPO_MARKER_7Q": []
+  },
+  "pane": "───\n❯ \n───\n  ⏸ manual mode on · ? for shortcuts\n"
+ },
+ {
+  "tool": "claude",
+  "label": "agent+role",
+  "argv": [
+   "claude",
+   "--permission-mode",
+   "default",
+   "--agent",
+   "mine",
+   "--append-system-prompt-file",
+   "<D>/home/r.md"
+  ],
+  "env": {},
+  "startPane": "───\n Make auto mode your default permission mode?\n   Auto mode lets Claude handle permission prompts automatically. Claude checks each tool call for risky actions and prompt injection before executing, runs the ones it assesses as lower-risk, and\n   blocks the rest.\n   ❯ Yes, set auto mode as my default permission mode\n     No, keep manual mode\n",
+  "req": true,
+  "model": "claude-opus-5-5",
+  "tools": 13,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "system"
+   ],
+   "USERDEV_MARKER_U1": [],
+   "PROFILE_MARKER_P2": [
+    "system"
+   ],
+   "REPO_MARKER_7Q": [
+    "user"
+   ]
+  },
+  "pane": "─── mine ─\n❯ \n───\n  ⏸ manual mode on · ? for shortcuts\n"
+ },
+ {
+  "tool": "command-code",
+  "label": "user-mod+role",
+  "argv": [
+   "cmd",
+   "--trust",
+   "--skip-onboarding",
+   "--no-auto-update",
+   "--local-only",
+   "-m",
+   "mock-model",
+   "--mod",
+   "<D>/home/r.ts"
+  ],
+  "env": {},
+  "startPane": "───\n❯ Ask your question...\n───\n  ? for shortcuts · taste off (byok)\n",
+  "req": true,
+  "model": "mock-model",
+  "tools": 13,
+  "markers": {
+   "ROLE_MARKER_K3": [
+    "system"
+   ],
+   "USERDEV_MARKER_U1": [
+    "system"
+   ],
+   "PROFILE_MARKER_P2": [],
+   "REPO_MARKER_7Q": [
+    "system"
+   ]
+  },
+  "pane": "───\n❯ Ask your question...\n───\n  ? for shortcuts · taste off (byok)\n"
+ }
+]

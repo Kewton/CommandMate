@@ -1,0 +1,539 @@
+{
+ "model": "qwen3-coder:30b (local Ollama, 課金なし)",
+ "runs": [
+  {
+   "tool": "opencode",
+   "role": true,
+   "model": "qwen3-coder:30b",
+   "argvQ1": [
+    "opencode",
+    "run",
+    "--format",
+    "json",
+    "<Q>"
+   ],
+   "q1": "What is 2+2? Answer in one short sentence.",
+   "exit1": 0,
+   "sig1": null,
+   "sec1": 9,
+   "n": 3,
+   "exits": [
+    0,
+    0,
+    0
+   ],
+   "roleHits": 2,
+   "repoHits": 2,
+   "bothHits": 2,
+   "answers": [
+    "4",
+    "REPOSTAMP.ROLESTAMP",
+    "I've reviewed the repository contents and the OpenCode documentation. The repository contains basic files including AGEN"
+   ],
+   "q2": "calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.",
+   "exit2": 0,
+   "sig2": null,
+   "sec2": 19,
+   "verifyAfter": {
+    "exit": 0,
+    "out": "VERIFY_OK"
+   },
+   "calc": "#!/bin/sh\necho 2\n",
+   "err": ""
+  },
+  {
+   "tool": "opencode",
+   "role": false,
+   "model": "qwen3-coder:30b",
+   "argvQ1": [
+    "opencode",
+    "run",
+    "--format",
+    "json",
+    "<Q>"
+   ],
+   "q1": "What is 2+2? Answer in one short sentence.",
+   "exit1": 0,
+   "sig1": null,
+   "sec1": 2,
+   "n": 3,
+   "exits": [
+    0,
+    0,
+    0
+   ],
+   "roleHits": 0,
+   "repoHits": 2,
+   "bothHits": 0,
+   "answers": [
+    "4\nREPOSTAMP",
+    "4<tool_call>",
+    "4\nREPOSTAMP."
+   ],
+   "q2": "calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.",
+   "exit2": 0,
+   "sig2": null,
+   "sec2": 11,
+   "verifyAfter": {
+    "exit": 0,
+    "out": "VERIFY_OK"
+   },
+   "calc": "#!/bin/sh\necho $((2+0))\n",
+   "err": ""
+  },
+  {
+   "tool": "opencode-v2",
+   "role": true,
+   "model": "qwen3-coder:30b",
+   "argvQ1": [
+    "opencode2",
+    "run",
+    "--standalone",
+    "--format",
+    "json",
+    "--auto",
+    "--",
+    "<Q>"
+   ],
+   "q1": "What is 2+2? Answer in one short sentence.",
+   "exit1": 0,
+   "sig1": null,
+   "sec1": 19,
+   "n": 3,
+   "exits": [
+    0,
+    0,
+    0
+   ],
+   "roleHits": 3,
+   "repoHits": 0,
+   "bothHits": 0,
+   "answers": [
+    "2+2 equals 4.\n\nROLESTAMP",
+    "2+2 equals 4.\n\nROLESTAMP",
+    "2+2 equals 4.\n\nROLESTAMP"
+   ],
+   "q2": "calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.",
+   "exit2": 0,
+   "sig2": null,
+   "sec2": 17,
+   "verifyAfter": {
+    "exit": 0,
+    "out": "VERIFY_OK"
+   },
+   "calc": "#!/bin/sh\necho 2\n",
+   "err": ""
+  },
+  {
+   "tool": "opencode-v2",
+   "role": false,
+   "model": "qwen3-coder:30b",
+   "argvQ1": [
+    "opencode2",
+    "run",
+    "--standalone",
+    "--format",
+    "json",
+    "--auto",
+    "--",
+    "<Q>"
+   ],
+   "q1": "What is 2+2? Answer in one short sentence.",
+   "exit1": 0,
+   "sig1": null,
+   "sec1": 15,
+   "n": 3,
+   "exits": [
+    0,
+    0,
+    0
+   ],
+   "roleHits": 0,
+   "repoHits": 3,
+   "bothHits": 0,
+   "answers": [
+    "2 + 2 equals 4. REPOSTAMP.",
+    "2+2 equals 4. REPOSTAMP.",
+    "2 + 2 equals 4. REPOSTAMP."
+   ],
+   "q2": "calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.",
+   "exit2": 0,
+   "sig2": null,
+   "sec2": 20,
+   "verifyAfter": {
+    "exit": 0,
+    "out": "VERIFY_OK"
+   },
+   "calc": "#!/bin/sh\necho 2\n",
+   "err": ""
+  },
+  {
+   "tool": "codex",
+   "role": true,
+   "model": "qwen3-coder:30b",
+   "argvQ1": [
+    "codex",
+    "-p",
+    "cm-role-x",
+    "exec",
+    "<Q>",
+    "--sandbox",
+    "danger-full-access"
+   ],
+   "q1": "What is 2+2? Answer in one short sentence.",
+   "exit1": 0,
+   "sig1": null,
+   "sec1": 6,
+   "n": 3,
+   "exits": [
+    0,
+    0,
+    0
+   ],
+   "roleHits": 1,
+   "repoHits": 3,
+   "bothHits": 1,
+   "answers": [
+    "2+2 equals 4.\n\nROLESTAMP\nREPOSTAMP",
+    "2+2 equals 4. REPOSTAMP",
+    "2+2 equals 4. REPOSTAMP"
+   ],
+   "q2": "calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.",
+   "exit2": 0,
+   "sig2": null,
+   "sec2": 15,
+   "verifyAfter": {
+    "exit": 0,
+    "out": "VERIFY_OK"
+   },
+   "calc": "#!/bin/sh\necho $((2+0))\n",
+   "err": "nging the calculation from 1+2 to 2+0\n4. I verified the fix by running `sh verify.sh`, which now correctly outputs \"VERIFY_OK\"\n\nThe task is complete - `sh verify.sh` now prints VERIFY_OK as required.\n\nROLESTAMP.REPOSTAMP.\ntokens used\n1,056\n"
+  },
+  {
+   "tool": "codex",
+   "role": false,
+   "model": "qwen3-coder:30b",
+   "argvQ1": [
+    "codex",
+    "exec",
+    "<Q>",
+    "--sandbox",
+    "danger-full-access"
+   ],
+   "q1": "What is 2+2? Answer in one short sentence.",
+   "exit1": 0,
+   "sig1": null,
+   "sec1": 6,
+   "n": 3,
+   "exits": [
+    0,
+    0,
+    0
+   ],
+   "roleHits": 0,
+   "repoHits": 3,
+   "bothHits": 0,
+   "answers": [
+    "2+2 equals 4. REPOSTAMP",
+    "2+2 equals 4. REPOSTAMP",
+    "2+2 equals 4. REPOSTAMP"
+   ],
+   "q2": "calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.",
+   "exit2": 0,
+   "sig2": null,
+   "sec2": 12,
+   "verifyAfter": {
+    "exit": 0,
+    "out": "VERIFY_OK"
+   },
+   "calc": "#!/bin/sh\necho 2\n",
+   "err": "lculation.\n\nThe fix:\n- Changed `calc.sh` from `echo $((1+2))` to `echo 2`\n- This makes `sh verify.sh` output \"VERIFY_OK\" as required\n\nThe verification shows that `sh verify.sh` now correctly prints `VERIFY_OK`.\n\nREPOSTAMP\ntokens used\n1,185\n"
+  },
+  {
+   "tool": "command-code",
+   "role": true,
+   "model": "qwen3-coder:30b",
+   "argvQ1": [
+    "cmd",
+    "--local-only",
+    "-m",
+    "qwen3-coder:30b",
+    "-p",
+    "<Q>",
+    "--output-format",
+    "json",
+    "--yolo",
+    "--no-auto-update",
+    "--mod",
+    "<D>/home/.cmrole/x.ts"
+   ],
+   "q1": "What is 2+2? Answer in one short sentence.",
+   "exit1": 0,
+   "sig1": null,
+   "sec1": 10,
+   "n": 3,
+   "exits": [
+    0,
+    0,
+    0
+   ],
+   "roleHits": 2,
+   "repoHits": 3,
+   "bothHits": 2,
+   "answers": [
+    "4\n\nREPOSTAMP.\nROLESTAMP.",
+    "This repository contains a simple calculation test setup with two shell scripts: calc.sh that outputs 1+2=3, and verify.",
+    "4\n\nREPOSTAMP."
+   ],
+   "q2": "calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.",
+   "exit2": 0,
+   "sig2": null,
+   "sec2": 19,
+   "verifyAfter": {
+    "exit": 0,
+    "out": "VERIFY_OK"
+   },
+   "calc": "#!/bin/sh\necho $((2+0))\n",
+   "err": ""
+  },
+  {
+   "tool": "command-code",
+   "role": false,
+   "model": "qwen3-coder:30b",
+   "argvQ1": [
+    "cmd",
+    "--local-only",
+    "-m",
+    "qwen3-coder:30b",
+    "-p",
+    "<Q>",
+    "--output-format",
+    "json",
+    "--yolo",
+    "--no-auto-update"
+   ],
+   "q1": "What is 2+2? Answer in one short sentence.",
+   "exit1": 0,
+   "sig1": null,
+   "sec1": 18,
+   "n": 3,
+   "exits": [
+    0,
+    0,
+    0
+   ],
+   "roleHits": 0,
+   "repoHits": 3,
+   "bothHits": 0,
+   "answers": [
+    "REPOSTAMP",
+    "REPOSTAMP.",
+    "I've examined the repository files and confirmed that 2+2 equals 4. The calc.sh script correctly calculates this result,"
+   ],
+   "q2": "calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.",
+   "exit2": 0,
+   "sig2": null,
+   "sec2": 39,
+   "verifyAfter": {
+    "exit": 0,
+    "out": "VERIFY_OK"
+   },
+   "calc": "#!/bin/sh\necho 4\n",
+   "err": ""
+  },
+  {
+   "tool": "claude",
+   "role": true,
+   "model": "qwen3-coder:30b",
+   "argvQ1": [
+    "claude",
+    "-p",
+    "<Q>",
+    "--model",
+    "qwen3-coder:30b",
+    "--output-format",
+    "text",
+    "--permission-mode",
+    "bypassPermissions",
+    "--append-system-prompt-file",
+    "<D>/home/.cmrole/r.md"
+   ],
+   "q1": "What is 2+2? Answer in one short sentence.",
+   "exit1": 0,
+   "sig1": null,
+   "sec1": 5,
+   "n": 3,
+   "exits": [
+    0,
+    0,
+    0
+   ],
+   "roleHits": 0,
+   "repoHits": 3,
+   "bothHits": 0,
+   "answers": [
+    "2 + 2 equals 4.\n\nREPOSTAMP",
+    "2 + 2 equals 4.\n\nREPOSTAMP",
+    "2 + 2 equals 4.\n\nREPOSTAMP"
+   ],
+   "q2": "calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.",
+   "exit2": 0,
+   "sig2": null,
+   "sec2": 22,
+   "verifyAfter": {
+    "exit": 0,
+    "out": "VERIFY_OK"
+   },
+   "calc": "#!/bin/sh\necho $((2+0))\n",
+   "err": "f 200k tokens. Update Claude Code, or see https://code.claude.com/docs/en/model-config#correct-the-window-for-a-gateway-or-custom-model-id to set the window.\n[claude-code:unrecognized_model] {\"model\":\"qwen3-coder:30b\",\"query_source\":\"sdk\"}\n"
+  },
+  {
+   "tool": "claude",
+   "role": false,
+   "model": "qwen3-coder:30b",
+   "argvQ1": [
+    "claude",
+    "-p",
+    "<Q>",
+    "--model",
+    "qwen3-coder:30b",
+    "--output-format",
+    "text",
+    "--permission-mode",
+    "bypassPermissions"
+   ],
+   "q1": "What is 2+2? Answer in one short sentence.",
+   "exit1": 0,
+   "sig1": null,
+   "sec1": 6,
+   "n": 3,
+   "exits": [
+    0,
+    0,
+    0
+   ],
+   "roleHits": 0,
+   "repoHits": 3,
+   "bothHits": 0,
+   "answers": [
+    "2 + 2 equals 4. REPOSTAMP",
+    "2 + 2 equals 4.\n\nREPOSTAMP",
+    "2 + 2 equals 4.\n\nREPOSTAMP"
+   ],
+   "q2": "calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.",
+   "exit2": 0,
+   "sig2": null,
+   "sec2": 19,
+   "verifyAfter": {
+    "exit": 0,
+    "out": "VERIFY_OK"
+   },
+   "calc": "#!/bin/sh\necho $((2+0))\n",
+   "err": "f 200k tokens. Update Claude Code, or see https://code.claude.com/docs/en/model-config#correct-the-window-for-a-gateway-or-custom-model-id to set the window.\n[claude-code:unrecognized_model] {\"model\":\"qwen3-coder:30b\",\"query_source\":\"sdk\"}\n"
+  },
+  {
+   "tool": "copilot",
+   "role": true,
+   "model": "qwen3-coder:30b",
+   "argvQ1": [
+    "copilot",
+    "-p",
+    "<Q>",
+    "--allow-all-tools",
+    "--agent",
+    "cm-role-x"
+   ],
+   "q1": "What is 2+2? Answer in one short sentence.",
+   "exit1": 0,
+   "sig1": null,
+   "sec1": 10,
+   "n": 3,
+   "exits": [
+    0,
+    0,
+    0
+   ],
+   "roleHits": 2,
+   "repoHits": 2,
+   "bothHits": 2,
+   "answers": [
+    "2+2 equals 4. REPOSTAMP. ROLESTAMP.",
+    "2+2 equals 4. REPOSTAMP. ROLESTAMP.",
+    "2+2 equals 4."
+   ],
+   "q2": "calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.",
+   "exit2": 0,
+   "sig2": null,
+   "sec2": 24,
+   "verifyAfter": {
+    "exit": 0,
+    "out": "VERIFY_OK"
+   },
+   "calc": "#!/bin/sh\necho $((2+0))\n",
+   "err": "    ↑ 13.5k (4.6k cached) • ↓ 8\nResume     copilot --resume=cb07e99c-7e85-4cce-86e3-a4aa68788321\n\n\nChanges    +1 -1\nDuration   23s\nTokens     ↑ 112.0k (102.6k cached) • ↓ 954\nResume     copilot --resume=d2cd2b23-a8ba-4dbe-b447-68eb27dfe289\n"
+  },
+  {
+   "tool": "copilot",
+   "role": false,
+   "model": "qwen3-coder:30b",
+   "argvQ1": [
+    "copilot",
+    "-p",
+    "<Q>",
+    "--allow-all-tools"
+   ],
+   "q1": "What is 2+2? Answer in one short sentence.",
+   "exit1": 0,
+   "sig1": null,
+   "sec1": 9,
+   "n": 3,
+   "exits": [
+    0,
+    0,
+    0
+   ],
+   "roleHits": 0,
+   "repoHits": 0,
+   "bothHits": 0,
+   "answers": [
+    "2+2 equals 4.",
+    "2+2 equals 4.",
+    "2+2 equals 4."
+   ],
+   "q2": "calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.",
+   "exit2": 0,
+   "sig2": null,
+   "sec2": 114,
+   "verifyAfter": {
+    "exit": 3,
+    "out": "VERIFY_NG"
+   },
+   "calc": "#!/bin/sh\necho $((1+2))\n",
+   "err": "↑ 13.2k (4.6k cached) • ↓ 8\nResume     copilot --resume=fd3f236b-9532-42d9-af0e-2042ce4c2d5e\n\n\nChanges    +8 -8\nDuration   1m 53s\nTokens     ↑ 268.5k (199.4k cached) • ↓ 2.7k\nResume     copilot --resume=c095d870-f414-4997-87be-2608748be06d\n"
+  }
+ ],
+ "v2Wrapper": {
+  "model": "qwen3-coder:30b",
+  "common": "You are an AI agent running in OpenCode, a coding agent harness. Help the user accomplish their goals using the tools you have available.\nFollow every project instruction (AGENTS.md and the like) in addition to the role below. When they conflict, the current request and the project instructions win over the role.\nPrefer dedicated tools over shell commands; fall back to the shell when a tool cannot do what you need.\nKeep changes consistent with the structure, naming, style, and patterns of the surrounding code.\nTreat unfamiliar files or changes as potential user work and investigate before deleting or overwriting them.",
+  "rs": [
+   {
+    "exit": 0,
+    "a": "2+2 equals 4. ROLESTAMP\nREPOSTAMP"
+   },
+   {
+    "exit": 0,
+    "a": "2+2 equals 4.\n\nROLESTAMP\nREPOSTAMP"
+   },
+   {
+    "exit": 0,
+    "a": "2+2 equals 4.\nROLESTAMP\nREPOSTAMP"
+   }
+  ],
+  "roleHits": 3,
+  "repoHits": 3,
+  "both": 3,
+  "exit2": 0,
+  "verify": "VERIFY_OK",
+  "verifyExit": 0
+ }
+}

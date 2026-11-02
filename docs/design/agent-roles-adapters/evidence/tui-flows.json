@@ -1,0 +1,1544 @@
+[
+ {
+  "tool": "claude",
+  "variant": "none",
+  "label": "x",
+  "id": "claude-none-x",
+  "argv": [
+   "claude",
+   "--permission-mode",
+   "default"
+  ],
+  "env": {
+   "HOME": "<D>/home",
+   "XDG_CONFIG_HOME": "<D>/home/.config",
+   "XDG_DATA_HOME": "<D>/home/.local/share",
+   "XDG_STATE_HOME": "<D>/home/.local/state",
+   "XDG_CACHE_HOME": "<D>/home/.cache",
+   "ANTHROPIC_BASE_URL": "http://127.0.0.1:18113",
+   "DISABLE_AUTOUPDATER": "1",
+   "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+   "DISABLE_TELEMETRY": "1"
+  },
+  "artifacts": [],
+  "ready": true,
+  "paneAtReady": "     ◐ medium · /effort\n───\n❯ \n───\n  ⏸ manual mode on · ? for shortcuts · ← for agents\n",
+  "q1": "CASE=claude-none-x first turn. Say hello.",
+  "turn1": {
+   "url": "/v1/messages?beta=true",
+   "model": "claude-opus-5-5",
+   "tools": [
+    "Agent",
+    "AskUserQuestion",
+    "Bash",
+    "DeferredToolPlaceholder",
+    "Edit",
+    "ListAgents",
+    "Read",
+    "ReportFindings",
+    "ScheduleWakeup",
+    "Skill",
+    "ToolSearch",
+    "Workflow",
+    "Write"
+   ],
+   "toolsHash": "e7875d832565",
+   "systemLen": 16617,
+   "developerLen": 0,
+   "systemHash": "ca9a6440462f",
+   "roleIn": [],
+   "repoIn": [
+    "user"
+   ],
+   "baseLinesKeptRatio": 1.0,
+   "baseLinesLost": [],
+   "sysLineCount": 61
+  },
+  "paneTurn1": "     ◐ medium · /effort\n───\n❯ \n───\n  ⏸ manual mode on · ? for shortcuts\n",
+  "q2": "CASE=claude-none-x second turn. CMRUN<<sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?>>",
+  "approvalPane": "───\n sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?\n───\n A variable in this command can't be checked before it runs\n Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and switch to auto mode · auto mode handles these prompts for you\n   3. No\n Esc to cancel · Tab to amend\n",
+  "toolResultSeen": true,
+  "verify": "VERIFY_OK",
+  "rc": "0",
+  "turn2": {
+   "url": null,
+   "model": "claude-opus-5-5",
+   "tools": [
+    "Agent",
+    "AskUserQuestion",
+    "Bash",
+    "DeferredToolPlaceholder",
+    "Edit",
+    "ListAgents",
+    "Read",
+    "ReportFindings",
+    "ScheduleWakeup",
+    "Skill",
+    "ToolSearch",
+    "Workflow",
+    "Write"
+   ],
+   "toolsHash": "e7875d832565",
+   "systemLen": 16617,
+   "developerLen": 0,
+   "systemHash": "ca9a6440462f",
+   "roleIn": [],
+   "repoIn": [
+    "user"
+   ],
+   "baseLinesKeptRatio": 1.0,
+   "baseLinesLost": [],
+   "sysLineCount": 61
+  },
+  "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+  "paneEnd": "     ◐ medium · /effort\n───\n❯ \n───\n  ⏸ manual mode on · ? for shortcuts\n",
+  "answerShown": true,
+  "requests": [
+   "/v1/messages?beta=true tools=13",
+   "/v1/messages?beta=true tools=13",
+   "/v1/messages?beta=true tools=13"
+  ],
+  "exitCode": "0"
+ },
+ {
+  "tool": "claude",
+  "variant": "role",
+  "label": "x",
+  "id": "claude-role-x",
+  "argv": [
+   "claude",
+   "--permission-mode",
+   "default",
+   "--append-system-prompt-file",
+   "<D>/home/.cmrole/role-x.md"
+  ],
+  "env": {
+   "HOME": "<D>/home",
+   "XDG_CONFIG_HOME": "<D>/home/.config",
+   "XDG_DATA_HOME": "<D>/home/.local/share",
+   "XDG_STATE_HOME": "<D>/home/.local/state",
+   "XDG_CACHE_HOME": "<D>/home/.cache",
+   "ANTHROPIC_BASE_URL": "http://127.0.0.1:18113",
+   "DISABLE_AUTOUPDATER": "1",
+   "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+   "DISABLE_TELEMETRY": "1"
+  },
+  "artifacts": [
+   {
+    "path": "$HOME/.cmrole/role-x.md",
+    "content": "ROLE_MARKER_K3: You are a test role. End every answer with ROLESTAMP."
+   }
+  ],
+  "ready": true,
+  "paneAtReady": "     ◐ medium · /effort\n───\n❯ \n───\n  ⏸ manual mode on · ? for shortcuts · ← for agents\n",
+  "q1": "CASE=claude-role-x first turn. Say hello.",
+  "turn1": {
+   "url": "/v1/messages?beta=true",
+   "model": "claude-opus-5-5",
+   "tools": [
+    "Agent",
+    "AskUserQuestion",
+    "Bash",
+    "DeferredToolPlaceholder",
+    "Edit",
+    "ListAgents",
+    "Read",
+    "ReportFindings",
+    "ScheduleWakeup",
+    "Skill",
+    "ToolSearch",
+    "Workflow",
+    "Write"
+   ],
+   "toolsHash": "e7875d832565",
+   "systemLen": 16688,
+   "developerLen": 0,
+   "systemHash": "18fafbc528e4",
+   "roleIn": [
+    "system"
+   ],
+   "repoIn": [
+    "user"
+   ],
+   "baseLinesKeptRatio": 0.984,
+   "baseLinesLost": [],
+   "sysLineCount": 62
+  },
+  "paneTurn1": "     ◐ medium · /effort\n───\n❯ \n───\n  ⏸ manual mode on · ? for shortcuts\n",
+  "q2": "CASE=claude-role-x second turn. CMRUN<<sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?>>",
+  "approvalPane": "───\n sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?\n───\n A variable in this command can't be checked before it runs\n Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and switch to auto mode · auto mode handles these prompts for you\n   3. No\n Esc to cancel · Tab to amend\n",
+  "toolResultSeen": true,
+  "verify": "VERIFY_OK",
+  "rc": "0",
+  "turn2": {
+   "url": null,
+   "model": "claude-opus-5-5",
+   "tools": [
+    "Agent",
+    "AskUserQuestion",
+    "Bash",
+    "DeferredToolPlaceholder",
+    "Edit",
+    "ListAgents",
+    "Read",
+    "ReportFindings",
+    "ScheduleWakeup",
+    "Skill",
+    "ToolSearch",
+    "Workflow",
+    "Write"
+   ],
+   "toolsHash": "e7875d832565",
+   "systemLen": 16688,
+   "developerLen": 0,
+   "systemHash": "18fafbc528e4",
+   "roleIn": [
+    "system"
+   ],
+   "repoIn": [
+    "user"
+   ],
+   "baseLinesKeptRatio": 0.984,
+   "baseLinesLost": [],
+   "sysLineCount": 62
+  },
+  "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+  "paneEnd": "     ◐ medium · /effort\n───\n❯ \n───\n  ⏸ manual mode on · ? for shortcuts\n",
+  "answerShown": true,
+  "requests": [
+   "/v1/messages?beta=true tools=13",
+   "/v1/messages?beta=true tools=13",
+   "/v1/messages?beta=true tools=13"
+  ],
+  "exitCode": "0"
+ },
+ {
+  "tool": "codex",
+  "variant": "none",
+  "label": "x",
+  "id": "codex-none-x",
+  "argv": [
+   "codex",
+   "-c",
+   "features.daemon_auto_start=false"
+  ],
+  "env": {
+   "HOME": "<D>/home",
+   "XDG_CONFIG_HOME": "<D>/home/.config",
+   "XDG_DATA_HOME": "<D>/home/.local/share",
+   "XDG_STATE_HOME": "<D>/home/.local/state",
+   "XDG_CACHE_HOME": "<D>/home/.cache",
+   "CODEX_HOME": "<D>/home/.codex"
+  },
+  "artifacts": [],
+  "ready": true,
+  "paneAtReady": "       ⢀ \n       \n     ⢿\n     \n› Ask Codex to do anything\n  mock-model default · <D>/repo\n  ? for shortcuts\n",
+  "q1": "CASE=codex-none-x first turn. Say hello.",
+  "turn1": {
+   "url": "/v1/responses",
+   "model": "mock-model",
+   "tools": [
+    "create_goal",
+    "exec_command",
+    "get_goal",
+    "list_mcp_resource_templates",
+    "list_mcp_resources",
+    "mcp__codex_worktrees",
+    "multi_agent_v1",
+    "read_mcp_resource",
+    "request_user_input",
+    "update_goal",
+    "view_image",
+    "web_search",
+    "write_stdin"
+   ],
+   "toolsHash": "c626d307ec5f",
+   "systemLen": 0,
+   "developerLen": 24609,
+   "systemHash": "cb2b3c37acba",
+   "roleIn": [],
+   "repoIn": [
+    "user"
+   ],
+   "baseLinesKeptRatio": 1.0,
+   "baseLinesLost": [],
+   "sysLineCount": 172
+  },
+  "paneTurn1": "\n  >_ OpenAI Codex (v0.166.0)\n     <D>/repo\n› CASE=codex-none-x first turn. Say hello.\n• MOCK_OK\n  Worked for <1s • 03:22\n› Ask Codex to do anything\n  mock-model default · <D>/repo\n  ? for shortcuts     ⚠ 1 warning · f2 to view\n",
+  "q2": "CASE=codex-none-x second turn. CMRUN<<sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?>>",
+  "approvalPane": "ho RC=$?>>\n• Running sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?\n  Would you like to run the following command?\n  Environment: local\n  $ sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?\n› 1. Yes, proceed (y)\n  2. Yes, and don't ask again for commands that start with `sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?` (p)\n  3. No, and tell Codex what to do differently (esc)\n  Press enter to confirm or esc to cancel\n",
+  "toolResultSeen": true,
+  "verify": "VERIFY_OK",
+  "rc": "0",
+  "turn2": {
+   "url": null,
+   "model": "mock-model",
+   "tools": [
+    "create_goal",
+    "exec_command",
+    "get_goal",
+    "list_mcp_resource_templates",
+    "list_mcp_resources",
+    "mcp__codex_worktrees",
+    "multi_agent_v1",
+    "read_mcp_resource",
+    "request_user_input",
+    "update_goal",
+    "view_image",
+    "web_search",
+    "write_stdin"
+   ],
+   "toolsHash": "c626d307ec5f",
+   "systemLen": 0,
+   "developerLen": 24609,
+   "systemHash": "cb2b3c37acba",
+   "roleIn": [],
+   "repoIn": [
+    "user"
+   ],
+   "baseLinesKeptRatio": 1.0,
+   "baseLinesLost": [],
+   "sysLineCount": 172
+  },
+  "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+  "paneEnd": " s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?\n  └ VERIFY_OK\n    RC=0\n• MOCK_DONE Chunk ID: 7a5b46 Wall time: 0.0000 seconds Process exited with code 0 Original token count: 4 Output: VERIFY_OK RC=0\n  Worked for 3s • 03:22\n› Ask Codex to do anything\n  mock-model default · <D>/repo\n  ? for shortcuts     ⚠ 1 warning · f2 to view\n",
+  "answerShown": true,
+  "requests": [
+   "/v1/responses tools=13",
+   "/v1/responses tools=0",
+   "/v1/responses tools=13",
+   "/v1/responses tools=0",
+   "/v1/responses tools=13"
+  ],
+  "exitCode": "0"
+ },
+ {
+  "tool": "codex",
+  "variant": "role",
+  "label": "x",
+  "id": "codex-role-x",
+  "argv": [
+   "codex",
+   "-c",
+   "features.daemon_auto_start=false",
+   "-p",
+   "cm-role-x"
+  ],
+  "env": {
+   "HOME": "<D>/home",
+   "XDG_CONFIG_HOME": "<D>/home/.config",
+   "XDG_DATA_HOME": "<D>/home/.local/share",
+   "XDG_STATE_HOME": "<D>/home/.local/state",
+   "XDG_CACHE_HOME": "<D>/home/.cache",
+   "CODEX_HOME": "<D>/home/.codex"
+  },
+  "artifacts": [
+   {
+    "path": "$HOME/.codex/cm-role-x.config.toml",
+    "content": "developer_instructions = \"ROLE_MARKER_K3: You are a test role. End every answer with ROLESTAMP.\"\n"
+   }
+  ],
+  "ready": true,
+  "paneAtReady": "       ⢀ \n       \n     ⢿\n     \n› Ask Codex to do anything\n  mock-model default · <D>/repo\n  ? for shortcuts\n",
+  "q1": "CASE=codex-role-x first turn. Say hello.",
+  "turn1": {
+   "url": "/v1/responses",
+   "model": "mock-model",
+   "tools": [
+    "create_goal",
+    "exec_command",
+    "get_goal",
+    "list_mcp_resource_templates",
+    "list_mcp_resources",
+    "mcp__codex_worktrees",
+    "multi_agent_v1",
+    "read_mcp_resource",
+    "request_user_input",
+    "update_goal",
+    "view_image",
+    "web_search",
+    "write_stdin"
+   ],
+   "toolsHash": "c626d307ec5f",
+   "systemLen": 0,
+   "developerLen": 24679,
+   "systemHash": "53a5629f6a2d",
+   "roleIn": [
+    "developer"
+   ],
+   "repoIn": [
+    "user"
+   ],
+   "baseLinesKeptRatio": 1.0,
+   "baseLinesLost": [],
+   "sysLineCount": 173
+  },
+  "paneTurn1": "\n  >_ OpenAI Codex (v0.166.0)\n     <D>/repo\n› CASE=codex-role-x first turn. Say hello.\n• MOCK_OK\n  Worked for <1s • 03:29\n› Ask Codex to do anything\n  mock-model default · <D>/repo\n  ? for shortcuts     ⚠ 1 warning · f2 to view\n",
+  "q2": "CASE=codex-role-x second turn. CMRUN<<sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?>>",
+  "approvalPane": "ho RC=$?>>\n• Running sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?\n  Would you like to run the following command?\n  Environment: local\n  $ sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?\n› 1. Yes, proceed (y)\n  2. Yes, and don't ask again for commands that start with `sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?` (p)\n  3. No, and tell Codex what to do differently (esc)\n  Press enter to confirm or esc to cancel\n",
+  "toolResultSeen": true,
+  "verify": "VERIFY_OK",
+  "rc": "0",
+  "turn2": {
+   "url": null,
+   "model": "mock-model",
+   "tools": [
+    "create_goal",
+    "exec_command",
+    "get_goal",
+    "list_mcp_resource_templates",
+    "list_mcp_resources",
+    "mcp__codex_worktrees",
+    "multi_agent_v1",
+    "read_mcp_resource",
+    "request_user_input",
+    "update_goal",
+    "view_image",
+    "web_search",
+    "write_stdin"
+   ],
+   "toolsHash": "c626d307ec5f",
+   "systemLen": 0,
+   "developerLen": 24679,
+   "systemHash": "53a5629f6a2d",
+   "roleIn": [
+    "developer"
+   ],
+   "repoIn": [
+    "user"
+   ],
+   "baseLinesKeptRatio": 1.0,
+   "baseLinesLost": [],
+   "sysLineCount": 173
+  },
+  "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+  "paneEnd": " s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?\n  └ VERIFY_OK\n    RC=0\n• MOCK_DONE Chunk ID: 8d9f75 Wall time: 0.0000 seconds Process exited with code 0 Original token count: 4 Output: VERIFY_OK RC=0\n  Worked for 3s • 03:30\n› Ask Codex to do anything\n  mock-model default · <D>/repo\n  ? for shortcuts     ⚠ 1 warning · f2 to view\n",
+  "answerShown": true,
+  "requests": [
+   "/v1/responses tools=13",
+   "/v1/responses tools=0",
+   "/v1/responses tools=13",
+   "/v1/responses tools=0",
+   "/v1/responses tools=13"
+  ],
+  "exitCode": "0"
+ },
+ {
+  "tool": "command-code",
+  "variant": "none",
+  "label": "x",
+  "id": "command-code-none-x",
+  "argv": [
+   "cmd",
+   "--trust",
+   "--skip-onboarding",
+   "--no-auto-update",
+   "--local-only",
+   "-m",
+   "mock-model"
+  ],
+  "env": {
+   "HOME": "<D>/home",
+   "XDG_CONFIG_HOME": "<D>/home/.config",
+   "XDG_DATA_HOME": "<D>/home/.local/share",
+   "XDG_STATE_HOME": "<D>/home/.local/state",
+   "XDG_CACHE_HOME": "<D>/home/.cache",
+   "CMD_LOCAL_ONLY": "1",
+   "CMD_DISABLE_REMOTE_MODEL_CATALOG": "1"
+  },
+  "artifacts": [],
+  "ready": true,
+  "paneAtReady": "k/mock-model · mock (byok)\n# <D>/repo\n───\n❯ Ask your question...\n───\n  ? for shortcuts · taste off (byok)\n",
+  "q1": "CASE=command-code-none-x first turn. Say hello.",
+  "turn1": {
+   "url": "/v1/chat/completions",
+   "model": "mock-model",
+   "tools": [
+    "activate_skill",
+    "agent",
+    "agent_output",
+    "ask_user_question",
+    "edit_file",
+    "glob",
+    "grep",
+    "read_directory",
+    "read_file",
+    "schedule_wakeup",
+    "search_tools",
+    "shell_command",
+    "write_file"
+   ],
+   "toolsHash": "8e12314b2972",
+   "systemLen": 40420,
+   "developerLen": 0,
+   "systemHash": "468c8757d15f",
+   "roleIn": [],
+   "repoIn": [
+    "system"
+   ],
+   "baseLinesKeptRatio": 1.0,
+   "baseLinesLost": [],
+   "sysLineCount": 375
+  },
+  "paneTurn1": "ne-x first turn. Say hello.\n⠶ MOCK_OK\n───\n❯ Ask your question...\n───\n  ? for shortcuts · taste off (byok)\n",
+  "q2": "CASE=command-code-none-x second turn. CMRUN<<sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?>>",
+  "approvalPane": "───\nExecute Shell Command\nCommand Code needs to execute sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?.\nPress [ctrl+e] to explain this command\n❯ 1. Yes\n  2. Yes, don't ask again for these commands in this project\n  3. No, tell Command Code what to do differently\n↑/↓ navigate · enter select · ctrl+e explain · Run cmd --yolo to bypass all permissions (Docs ↗)\n",
+  "toolResultSeen": true,
+  "verify": "VERIFY_OK",
+  "rc": "0",
+  "turn2": {
+   "url": null,
+   "model": "mock-model",
+   "tools": [
+    "activate_skill",
+    "agent",
+    "agent_output",
+    "ask_user_question",
+    "edit_file",
+    "glob",
+    "grep",
+    "read_directory",
+    "read_file",
+    "schedule_wakeup",
+    "search_tools",
+    "shell_command",
+    "write_file"
+   ],
+   "toolsHash": "8e12314b2972",
+   "systemLen": 40420,
+   "developerLen": 0,
+   "systemHash": "468c8757d15f",
+   "roleIn": [],
+   "repoIn": [
+    "system"
+   ],
+   "baseLinesKeptRatio": 1.0,
+   "baseLinesLost": [],
+   "sysLineCount": 375
+  },
+  "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+  "paneEnd": "OK\n └ RC=0\n⠶ MOCK_DONE VERIFY_OK RC=0\n───\n❯ Ask your question...\n───\n  ? for shortcuts · taste off (byok)\n",
+  "answerShown": true,
+  "requests": [
+   "/v1/chat/completions tools=13",
+   "/v1/chat/completions tools=0",
+   "/v1/chat/completions tools=13",
+   "/v1/chat/completions tools=13"
+  ],
+  "exitCode": "0"
+ },
+ {
+  "tool": "command-code",
+  "variant": "role",
+  "label": "x",
+  "id": "command-code-role-x",
+  "argv": [
+   "cmd",
+   "--trust",
+   "--skip-onboarding",
+   "--no-auto-update",
+   "--local-only",
+   "-m",
+   "mock-model",
+   "--mod",
+   "<D>/home/.cmrole/cm-role-x.ts"
+  ],
+  "env": {
+   "HOME": "<D>/home",
+   "XDG_CONFIG_HOME": "<D>/home/.config",
+   "XDG_DATA_HOME": "<D>/home/.local/share",
+   "XDG_STATE_HOME": "<D>/home/.local/state",
+   "XDG_CACHE_HOME": "<D>/home/.cache",
+   "CMD_LOCAL_ONLY": "1",
+   "CMD_DISABLE_REMOTE_MODEL_CATALOG": "1"
+  },
+  "artifacts": [
+   {
+    "path": "$HOME/.cmrole/cm-role-x.ts",
+    "content": "export default function (cmd) {\n  cmd.hooks({ appendSystemPrompt: () => \"ROLE_MARKER_K3: You are a test role. End every answer with ROLESTAMP.\" });\n}\n"
+   }
+  ],
+  "ready": true,
+  "paneAtReady": "k/mock-model · mock (byok)\n# <D>/repo\n───\n❯ Ask your question...\n───\n  ? for shortcuts · taste off (byok)\n",
+  "q1": "CASE=command-code-role-x first turn. Say hello.",
+  "turn1": {
+   "url": "/v1/chat/completions",
+   "model": "mock-model",
+   "tools": [
+    "activate_skill",
+    "agent",
+    "agent_output",
+    "ask_user_question",
+    "edit_file",
+    "glob",
+    "grep",
+    "read_directory",
+    "read_file",
+    "schedule_wakeup",
+    "search_tools",
+    "shell_command",
+    "write_file"
+   ],
+   "toolsHash": "8e12314b2972",
+   "systemLen": 40491,
+   "developerLen": 0,
+   "systemHash": "fc76c1a6354b",
+   "roleIn": [
+    "system"
+   ],
+   "repoIn": [
+    "system"
+   ],
+   "baseLinesKeptRatio": 0.997,
+   "baseLinesLost": [],
+   "sysLineCount": 376
+  },
+  "paneTurn1": "le-x first turn. Say hello.\n⠶ MOCK_OK\n───\n❯ Ask your question...\n───\n  ? for shortcuts · taste off (byok)\n",
+  "q2": "CASE=command-code-role-x second turn. CMRUN<<sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?>>",
+  "approvalPane": "───\nExecute Shell Command\nCommand Code needs to execute sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?.\nPress [ctrl+e] to explain this command\n❯ 1. Yes\n  2. Yes, don't ask again for these commands in this project\n  3. No, tell Command Code what to do differently\n↑/↓ navigate · enter select · ctrl+e explain · Run cmd --yolo to bypass all permissions (Docs ↗)\n",
+  "toolResultSeen": true,
+  "verify": "VERIFY_OK",
+  "rc": "0",
+  "turn2": {
+   "url": null,
+   "model": "mock-model",
+   "tools": [
+    "activate_skill",
+    "agent",
+    "agent_output",
+    "ask_user_question",
+    "edit_file",
+    "glob",
+    "grep",
+    "read_directory",
+    "read_file",
+    "schedule_wakeup",
+    "search_tools",
+    "shell_command",
+    "write_file"
+   ],
+   "toolsHash": "8e12314b2972",
+   "systemLen": 40491,
+   "developerLen": 0,
+   "systemHash": "fc76c1a6354b",
+   "roleIn": [
+    "system"
+   ],
+   "repoIn": [
+    "system"
+   ],
+   "baseLinesKeptRatio": 0.997,
+   "baseLinesLost": [],
+   "sysLineCount": 376
+  },
+  "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+  "paneEnd": "OK\n └ RC=0\n⠶ MOCK_DONE VERIFY_OK RC=0\n───\n❯ Ask your question...\n───\n  ? for shortcuts · taste off (byok)\n",
+  "answerShown": true,
+  "requests": [
+   "/v1/chat/completions tools=13",
+   "/v1/chat/completions tools=0",
+   "/v1/chat/completions tools=13",
+   "/v1/chat/completions tools=13"
+  ],
+  "exitCode": "0"
+ },
+ {
+  "tool": "copilot",
+  "variant": "none",
+  "label": "x",
+  "id": "copilot-none-x",
+  "argv": [
+   "copilot"
+  ],
+  "env": {
+   "HOME": "<D>/home",
+   "XDG_CONFIG_HOME": "<D>/home/.config",
+   "XDG_DATA_HOME": "<D>/home/.local/share",
+   "XDG_STATE_HOME": "<D>/home/.local/state",
+   "XDG_CACHE_HOME": "<D>/home/.cache",
+   "COPILOT_HOME": "<D>/home/.copilot",
+   "COPILOT_OFFLINE": "true",
+   "COPILOT_PROVIDER_BASE_URL": "http://127.0.0.1:18113/v1",
+   "COPILOT_MODEL": "mock-model",
+   "COPILOT_AUTO_UPDATE": "false"
+  },
+  "artifacts": [],
+  "ready": true,
+  "paneAtReady": "───\n❯\n───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     mock-model\n",
+  "q1": "CASE=copilot-none-x first turn. Say hello.",
+  "turn1": {
+   "url": "/v1/chat/completions",
+   "model": "mock-model",
+   "tools": [
+    "ask_user",
+    "bash",
+    "create",
+    "dynamic_workflows_manage",
+    "edit",
+    "fetch_copilot_cli_documentation",
+    "glob",
+    "grep",
+    "list_agents",
+    "list_bash",
+    "read_agent",
+    "read_bash",
+    "run_dynamic_workflow",
+    "session_store_sql",
+    "skill",
+    "sql",
+    "stop_bash",
+    "task",
+    "view",
+    "write_agent"
+   ],
+   "toolsHash": "0caffb88cd5c",
+   "systemLen": 25460,
+   "developerLen": 0,
+   "systemHash": "9a94a83ed915",
+   "roleIn": [],
+   "repoIn": [
+    "system"
+   ],
+   "baseLinesKeptRatio": 1.0,
+   "baseLinesLost": [],
+   "sysLineCount": 224
+  },
+  "paneTurn1": "───\n❯\n───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     mock-model\n",
+  "q2": "CASE=copilot-none-x second turn. CMRUN<<sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?>>",
+  "approvalPane": "     │\n│ ↑/↓ to navigate · enter to select · esc to cancel     │\n╰───╯\n",
+  "toolResultSeen": true,
+  "verify": "VERIFY_OK",
+  "rc": "0",
+  "turn2": {
+   "url": null,
+   "model": "mock-model",
+   "tools": [
+    "ask_user",
+    "bash",
+    "create",
+    "dynamic_workflows_manage",
+    "edit",
+    "fetch_copilot_cli_documentation",
+    "glob",
+    "grep",
+    "list_agents",
+    "list_bash",
+    "read_agent",
+    "read_bash",
+    "run_dynamic_workflow",
+    "session_store_sql",
+    "skill",
+    "sql",
+    "stop_bash",
+    "task",
+    "view",
+    "write_agent"
+   ],
+   "toolsHash": "0caffb88cd5c",
+   "systemLen": 25460,
+   "developerLen": 0,
+   "systemHash": "9a94a83ed915",
+   "roleIn": [],
+   "repoIn": [
+    "system"
+   ],
+   "baseLinesKeptRatio": 1.0,
+   "baseLinesLost": [],
+   "sysLineCount": 224
+  },
+  "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+  "paneEnd": "───\n❯\n───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     mock-model\n",
+  "answerShown": true,
+  "requests": [
+   "/v1/chat/completions tools=20",
+   "/v1/chat/completions tools=20",
+   "/v1/chat/completions tools=20"
+  ],
+  "exitCode": "0"
+ },
+ {
+  "tool": "copilot",
+  "variant": "role",
+  "label": "x",
+  "id": "copilot-role-x",
+  "argv": [
+   "copilot",
+   "--agent",
+   "cm-role-x"
+  ],
+  "env": {
+   "HOME": "<D>/home",
+   "XDG_CONFIG_HOME": "<D>/home/.config",
+   "XDG_DATA_HOME": "<D>/home/.local/share",
+   "XDG_STATE_HOME": "<D>/home/.local/state",
+   "XDG_CACHE_HOME": "<D>/home/.cache",
+   "COPILOT_HOME": "<D>/home/.copilot",
+   "COPILOT_OFFLINE": "true",
+   "COPILOT_PROVIDER_BASE_URL": "http://127.0.0.1:18113/v1",
+   "COPILOT_MODEL": "mock-model",
+   "COPILOT_AUTO_UPDATE": "false"
+  },
+  "artifacts": [
+   {
+    "path": "$HOME/.copilot/agents/cm-role-x.agent.md",
+    "content": "---\nname: cm-role-x\ndescription: CommandMate role\ninfer: false\n---\nROLE_MARKER_K3: You are a test role. End every answer with ROLESTAMP.\n"
+   }
+  ],
+  "ready": true,
+  "paneAtReady": "───\n❯\n───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     cm-role-x · mock-model\n",
+  "q1": "CASE=copilot-role-x first turn. Say hello.",
+  "turn1": {
+   "url": "/v1/chat/completions",
+   "model": "mock-model",
+   "tools": [
+    "ask_user",
+    "bash",
+    "create",
+    "dynamic_workflows_manage",
+    "edit",
+    "fetch_copilot_cli_documentation",
+    "glob",
+    "grep",
+    "list_agents",
+    "list_bash",
+    "read_agent",
+    "read_bash",
+    "run_dynamic_workflow",
+    "session_store_sql",
+    "skill",
+    "sql",
+    "stop_bash",
+    "task",
+    "update_todo",
+    "view",
+    "write_agent"
+   ],
+   "toolsHash": "3144d4767c75",
+   "systemLen": 25784,
+   "developerLen": 0,
+   "systemHash": "eb248e1f4e25",
+   "roleIn": [
+    "system"
+   ],
+   "repoIn": [
+    "system"
+   ],
+   "baseLinesKeptRatio": 1.0,
+   "baseLinesLost": [],
+   "sysLineCount": 227
+  },
+  "paneTurn1": "───\n❯\n───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     cm-role-x · mock-model\n",
+  "q2": "CASE=copilot-role-x second turn. CMRUN<<sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?>>",
+  "approvalPane": "     │\n│ ↑/↓ to navigate · enter to select · esc to cancel     │\n╰───╯\n",
+  "toolResultSeen": true,
+  "verify": "VERIFY_OK",
+  "rc": "0",
+  "turn2": {
+   "url": null,
+   "model": "mock-model",
+   "tools": [
+    "ask_user",
+    "bash",
+    "create",
+    "dynamic_workflows_manage",
+    "edit",
+    "fetch_copilot_cli_documentation",
+    "glob",
+    "grep",
+    "list_agents",
+    "list_bash",
+    "read_agent",
+    "read_bash",
+    "run_dynamic_workflow",
+    "session_store_sql",
+    "skill",
+    "sql",
+    "stop_bash",
+    "task",
+    "update_todo",
+    "view",
+    "write_agent"
+   ],
+   "toolsHash": "3144d4767c75",
+   "systemLen": 25784,
+   "developerLen": 0,
+   "systemHash": "eb248e1f4e25",
+   "roleIn": [
+    "system"
+   ],
+   "repoIn": [
+    "system"
+   ],
+   "baseLinesKeptRatio": 1.0,
+   "baseLinesLost": [],
+   "sysLineCount": 227
+  },
+  "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+  "paneEnd": "───\n❯\n───\n ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     cm-role-x · mock-model\n",
+  "answerShown": true,
+  "requests": [
+   "/v1/chat/completions tools=21",
+   "/v1/chat/completions tools=21",
+   "/v1/chat/completions tools=21"
+  ],
+  "exitCode": "0"
+ },
+ {
+  "tool": "opencode",
+  "variant": "none",
+  "label": "x",
+  "id": "opencode-none-x",
+  "argv": [
+   "opencode",
+   "--port",
+   "18201",
+   "--hostname",
+   "127.0.0.1"
+  ],
+  "env": {
+   "HOME": "<D>/home",
+   "XDG_CONFIG_HOME": "<D>/home/.config",
+   "XDG_DATA_HOME": "<D>/home/.local/share",
+   "XDG_STATE_HOME": "<D>/home/.local/state",
+   "XDG_CACHE_HOME": "<D>/home/.cache",
+   "OPENCODE_DISABLE_AUTOUPDATE": "1"
+  },
+  "artifacts": [],
+  "ready": true,
+  "paneAtReady": "stack of this project?\"\n     ┃\n     ┃  Build · mock-model mock\n     ╹───\n     tab agents  ctrl+p commands\n  <D>/repo:main     1.18.35\n",
+  "q1": "CASE=opencode-none-x first turn. Say hello.",
+  "turn1": {
+   "url": "/v1/chat/completions",
+   "model": "mock-model",
+   "tools": [
+    "bash",
+    "edit",
+    "glob",
+    "grep",
+    "question",
+    "read",
+    "skill",
+    "task",
+    "todowrite",
+    "webfetch",
+    "write"
+   ],
+   "toolsHash": "8dcba482e3b5",
+   "systemLen": 10134,
+   "developerLen": 0,
+   "systemHash": "c1151c58cdd6",
+   "roleIn": [],
+   "repoIn": [
+    "system"
+   ],
+   "baseLinesKeptRatio": 1.0,
+   "baseLinesLost": [],
+   "sysLineCount": 62
+  },
+  "paneTurn1": "───    run2/c/opencode-none-x/repo:main\n   <SP>/5 ctrl+p\n   run2/c/opencode-none-x/repo     commands     • OpenCode 1.18.35\n",
+  "q2": "CASE=opencode-none-x second turn. CMRUN<<sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?>>",
+  "approvalPane": null,
+  "toolResultSeen": true,
+  "verify": "VERIFY_OK",
+  "rc": "0",
+  "turn2": {
+   "url": null,
+   "model": "mock-model",
+   "tools": [
+    "bash",
+    "edit",
+    "glob",
+    "grep",
+    "question",
+    "read",
+    "skill",
+    "task",
+    "todowrite",
+    "webfetch",
+    "write"
+   ],
+   "toolsHash": "8dcba482e3b5",
+   "systemLen": 10134,
+   "developerLen": 0,
+   "systemHash": "c1151c58cdd6",
+   "roleIn": [],
+   "repoIn": [
+    "system"
+   ],
+   "baseLinesKeptRatio": 1.0,
+   "baseLinesLost": [],
+   "sysLineCount": 62
+  },
+  "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+  "paneEnd": "───    run2/c/opencode-none-x/repo:main\n   <SP>/5 ctrl+p\n   run2/c/opencode-none-x/repo     commands     • OpenCode 1.18.35\n",
+  "answerShown": true,
+  "requests": [
+   "/v1/chat/completions tools=0",
+   "/v1/chat/completions tools=11",
+   "/v1/chat/completions tools=11",
+   "/v1/chat/completions tools=11"
+  ],
+  "exitCode": "0"
+ },
+ {
+  "tool": "opencode",
+  "variant": "role",
+  "label": "x",
+  "id": "opencode-role-x",
+  "argv": [
+   "opencode",
+   "--port",
+   "18201",
+   "--hostname",
+   "127.0.0.1"
+  ],
+  "env": {
+   "HOME": "<D>/home",
+   "XDG_CONFIG_HOME": "<D>/home/.config",
+   "XDG_DATA_HOME": "<D>/home/.local/share",
+   "XDG_STATE_HOME": "<D>/home/.local/state",
+   "XDG_CACHE_HOME": "<D>/home/.cache",
+   "OPENCODE_DISABLE_AUTOUPDATE": "1",
+   "OPENCODE_CONFIG_CONTENT": "{\"instructions\":[\"<D>/home/.cmrole/role-x.md\"]}"
+  },
+  "artifacts": [
+   {
+    "path": "$HOME/.cmrole/role-x.md",
+    "content": "ROLE_MARKER_K3: You are a test role. End every answer with ROLESTAMP."
+   }
+  ],
+  "ready": true,
+  "paneAtReady": "stack of this project?\"\n     ┃\n     ┃  Build · mock-model mock\n     ╹───\n     tab agents  ctrl+p commands\n  <D>/repo:main     1.18.35\n",
+  "q1": "CASE=opencode-role-x first turn. Say hello.",
+  "turn1": {
+   "url": "/v1/chat/completions",
+   "model": "mock-model",
+   "tools": [
+    "bash",
+    "edit",
+    "glob",
+    "grep",
+    "question",
+    "read",
+    "skill",
+    "task",
+    "todowrite",
+    "webfetch",
+    "write"
+   ],
+   "toolsHash": "8dcba482e3b5",
+   "systemLen": 10406,
+   "developerLen": 0,
+   "systemHash": "d0796f329a9e",
+   "roleIn": [
+    "system"
+   ],
+   "repoIn": [
+    "system"
+   ],
+   "baseLinesKeptRatio": 1.0,
+   "baseLinesLost": [],
+   "sysLineCount": 64
+  },
+  "paneTurn1": "───    run2/c/opencode-role-x/repo:main\n   <SP>/5 ctrl+p\n   run2/c/opencode-role-x/repo     commands     • OpenCode 1.18.35\n",
+  "q2": "CASE=opencode-role-x second turn. CMRUN<<sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?>>",
+  "approvalPane": null,
+  "toolResultSeen": true,
+  "verify": "VERIFY_OK",
+  "rc": "0",
+  "turn2": {
+   "url": null,
+   "model": "mock-model",
+   "tools": [
+    "bash",
+    "edit",
+    "glob",
+    "grep",
+    "question",
+    "read",
+    "skill",
+    "task",
+    "todowrite",
+    "webfetch",
+    "write"
+   ],
+   "toolsHash": "8dcba482e3b5",
+   "systemLen": 10406,
+   "developerLen": 0,
+   "systemHash": "d0796f329a9e",
+   "roleIn": [
+    "system"
+   ],
+   "repoIn": [
+    "system"
+   ],
+   "baseLinesKeptRatio": 1.0,
+   "baseLinesLost": [],
+   "sysLineCount": 64
+  },
+  "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+  "paneEnd": "───    run2/c/opencode-role-x/repo:main\n   <SP>/5 ctrl+p\n   run2/c/opencode-role-x/repo     commands     • OpenCode 1.18.35\n",
+  "answerShown": true,
+  "requests": [
+   "/v1/chat/completions tools=0",
+   "/v1/chat/completions tools=11",
+   "/v1/chat/completions tools=11",
+   "/v1/chat/completions tools=11"
+  ],
+  "exitCode": "0"
+ },
+ {
+  "tool": "opencode-v2",
+  "variant": "agent-inline",
+  "label": "x",
+  "id": "opencode-v2-agent-inline-x",
+  "argv": [
+   "bash",
+   "/Users/<user>/share/work/github_kewton/commandmate-issue-4113/scripts/opencode-v2/launch.sh",
+   "--port",
+   "18211",
+   "--password-file",
+   "<D>/home/pw",
+   "--directory",
+   "<D>/repo",
+   "--executable",
+   "/opt/homebrew/bin/opencode2"
+  ],
+  "env": {
+   "HOME": "<D>/home",
+   "XDG_CONFIG_HOME": "<D>/home/.config",
+   "XDG_DATA_HOME": "<D>/home/.local/share",
+   "XDG_STATE_HOME": "<D>/home/.local/state",
+   "XDG_CACHE_HOME": "<D>/home/.cache",
+   "OPENCODE_CONFIG_CONTENT": "{\"default_agent\":\"cm-role-x\",\"agents\":{\"cm-role-x\":{\"description\":\"role\",\"mode\":\"primary\",\"system\":\"ROLE_MARKER_K3: You are a test role. End every answer with ROLESTAMP.\"}}}"
+  },
+  "artifacts": [],
+  "ready": true,
+  "paneAtReady": "le-X · mock-model mock\n     ╹───\n     /…/opencode-v2-agent-inline-x/repo:main   shift+tab agents  ctrl+p commands\n     2.0.18\n",
+  "q1": "CASE=opencode-v2-agent-inline-x first turn. Say hello.",
+  "turn1": {
+   "url": "/v1/chat/completions",
+   "model": "mock-model",
+   "tools": [
+    "edit",
+    "execute",
+    "glob",
+    "grep",
+    "question",
+    "read",
+    "shell",
+    "skill",
+    "subagent",
+    "webfetch",
+    "websearch",
+    "write"
+   ],
+   "toolsHash": "402838d7ad52",
+   "systemLen": 11361,
+   "developerLen": 0,
+   "systemHash": "98a6a90c493c",
+   "roleIn": [
+    "system"
+   ],
+   "repoIn": [
+    "system"
+   ],
+   "baseLinesKeptRatio": 0.843,
+   "baseLinesLost": [
+    "You are an AI agent running in OpenCode, a coding agent harness. Help the user accomplish their goals using th",
+    "- Responses are rendered as GitHub-flavored Markdown.",
+    "- `<system-reminder>` blocks are harness instructions, not user-authored content. Read and follow them.",
+    "- Prefer parallelizing independent tool calls.",
+    "- Prefer dedicated tools over shell commands; fall back to the shell when a tool cannot do what you need.",
+    "- Do not chain shell commands with separators like `echo \"====\";` or `printf '---'`; the output becomes noisy ",
+    "- Use the write tool to create files or completely replace their content. Prefer using the edit tool for targe",
+    "- Use the edit tool for targeted changes to existing text files. It replaces the exact text in `oldString` wit",
+    "- Use clear file paths when referring to files.",
+    "- Keep responses clear and concise, and avoid unnecessary technical jargon.",
+    "# Working in codebases",
+    "- Keep changes consistent with the structure, naming, style, and patterns of the surrounding code.",
+    "- Treat unfamiliar files or changes as potential user work and investigate before deleting or overwriting them"
+   ],
+   "sysLineCount": 77
+  },
+  "paneTurn1": "     Connect provider     /connect\n  ┃  Cm-Role-X · mock-model mock\n  ╹───\n  /…/-Users-<user>-share-work-gith…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/opencode-v2-agent-inline-x/repo:main  15 (0%)  ctrl+p commands    /…/opencode-v2-agent-inline…/repo:main\n",
+  "q2": "CASE=opencode-v2-agent-inline-x second turn. CMRUN<<sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?>>",
+  "approvalPane": null,
+  "toolResultSeen": true,
+  "verify": "VERIFY_OK",
+  "rc": "0",
+  "turn2": {
+   "url": null,
+   "model": "mock-model",
+   "tools": [
+    "edit",
+    "execute",
+    "glob",
+    "grep",
+    "question",
+    "read",
+    "shell",
+    "skill",
+    "subagent",
+    "webfetch",
+    "websearch",
+    "write"
+   ],
+   "toolsHash": "402838d7ad52",
+   "systemLen": 11361,
+   "developerLen": 0,
+   "systemHash": "98a6a90c493c",
+   "roleIn": [
+    "system"
+   ],
+   "repoIn": [
+    "system"
+   ],
+   "baseLinesKeptRatio": 0.843,
+   "baseLinesLost": [
+    "You are an AI agent running in OpenCode, a coding agent harness. Help the user accomplish their goals using th",
+    "- Responses are rendered as GitHub-flavored Markdown.",
+    "- `<system-reminder>` blocks are harness instructions, not user-authored content. Read and follow them.",
+    "- Prefer parallelizing independent tool calls.",
+    "- Prefer dedicated tools over shell commands; fall back to the shell when a tool cannot do what you need.",
+    "- Do not chain shell commands with separators like `echo \"====\";` or `printf '---'`; the output becomes noisy ",
+    "- Use the write tool to create files or completely replace their content. Prefer using the edit tool for targe",
+    "- Use the edit tool for targeted changes to existing text files. It replaces the exact text in `oldString` wit",
+    "- Use clear file paths when referring to files.",
+    "- Keep responses clear and concise, and avoid unnecessary technical jargon.",
+    "# Working in codebases",
+    "- Keep changes consistent with the structure, naming, style, and patterns of the surrounding code.",
+    "- Treat unfamiliar files or changes as potential user work and investigate before deleting or overwriting them"
+   ],
+   "sysLineCount": 77
+  },
+  "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+  "paneEnd": "     Connect provider     /connect\n  ┃  Cm-Role-X · mock-model mock\n  ╹───\n  /…/-Users-<user>-share-work-gith…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/opencode-v2-agent-inline-x/repo:main  15 (0%)  ctrl+p commands    /…/opencode-v2-agent-inline…/repo:main\n",
+  "answerShown": true,
+  "requests": [
+   "/v1/chat/completions tools=0",
+   "/v1/chat/completions tools=12",
+   "/v1/chat/completions tools=12",
+   "/v1/chat/completions tools=12"
+  ],
+  "exitCode": "0"
+ },
+ {
+  "tool": "opencode-v2",
+  "variant": "agent-md",
+  "label": "x",
+  "id": "opencode-v2-agent-md-x",
+  "argv": [
+   "bash",
+   "/Users/<user>/share/work/github_kewton/commandmate-issue-4113/scripts/opencode-v2/launch.sh",
+   "--port",
+   "18211",
+   "--password-file",
+   "<D>/home/pw",
+   "--directory",
+   "<D>/repo",
+   "--executable",
+   "/opt/homebrew/bin/opencode2"
+  ],
+  "env": {
+   "HOME": "<D>/home",
+   "XDG_CONFIG_HOME": "<D>/home/.config",
+   "XDG_DATA_HOME": "<D>/home/.local/share",
+   "XDG_STATE_HOME": "<D>/home/.local/state",
+   "XDG_CACHE_HOME": "<D>/home/.cache",
+   "OPENCODE_CONFIG_DIR": "<D>/home/.cmrole/cfg-x"
+  },
+  "artifacts": [
+   {
+    "path": "$HOME/.cmrole/cfg-x/agents/cm-role-x.md",
+    "content": "---\ndescription: CommandMate role\nmode: primary\nhidden: true\n---\nROLE_MARKER_K3: You are a test role. End every answer with ROLESTAMP.\n"
+   },
+   {
+    "path": "$HOME/.cmrole/cfg-x/opencode.jsonc",
+    "content": "{\"default_agent\":\"cm-role-x\"}"
+   }
+  ],
+  "ready": true,
+  "paneAtReady": "lint 40B Free OpenCode\n     ╹───\n     /…/r…/c/opencode-v2-agent-md-x/repo:main  shift+tab agents  ctrl+p commands\n     2.0.18\n",
+  "q1": "CASE=opencode-v2-agent-md-x first turn. Say hello.",
+  "turn1": null,
+  "paneTurn1": "     Connect provider     /connect\n  ┃  Build · Flint 40B Free OpenCode\n  ╹───\n  /…/-Users-<user>-share-work…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/opencode-v2-agent-md-x/repo:main  shift+tab agents  ctrl+p commands    /…/c/opencode-v2-agent-md-x/repo:main\n",
+  "q2": "CASE=opencode-v2-agent-md-x second turn. CMRUN<<sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?>>",
+  "approvalPane": null,
+  "toolResultSeen": false,
+  "verify": null,
+  "rc": null,
+  "turn2": null,
+  "fileAfter": "#!/bin/sh\necho $((1+2))\n",
+  "paneEnd": "     Connect provider     /connect\n  ┃  Build · Flint 40B Free OpenCode\n  ╹───\n  /…/-Users-<user>-share-work…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/opencode-v2-agent-md-x/repo:main  shift+tab agents  ctrl+p commands    /…/c/opencode-v2-agent-md-x/repo:main\n",
+  "answerShown": false,
+  "requests": [],
+  "exitCode": "0",
+  "note": "OPENCODE_CONFIG_DIR が大域設定を置換し mock プロバイダが消えた回。要求は OpenCode の既定モデル（外部）へ出ている。agent-md は hidden:true も併用"
+ },
+ {
+  "tool": "opencode-v2",
+  "variant": "instructions-content",
+  "label": "x",
+  "id": "opencode-v2-instructions-content-x",
+  "argv": [
+   "bash",
+   "/Users/<user>/share/work/github_kewton/commandmate-issue-4113/scripts/opencode-v2/launch.sh",
+   "--port",
+   "18211",
+   "--password-file",
+   "<D>/home/pw",
+   "--directory",
+   "<D>/repo",
+   "--executable",
+   "/opt/homebrew/bin/opencode2"
+  ],
+  "env": {
+   "HOME": "<D>/home",
+   "XDG_CONFIG_HOME": "<D>/home/.config",
+   "XDG_DATA_HOME": "<D>/home/.local/share",
+   "XDG_STATE_HOME": "<D>/home/.local/state",
+   "XDG_CACHE_HOME": "<D>/home/.cache",
+   "OPENCODE_CONFIG_CONTENT": "{\"instructions\":[\"<D>/home/.cmrole/role-x.md\"]}"
+  },
+  "artifacts": [
+   {
+    "path": "$HOME/.cmrole/role-x.md",
+    "content": "ROLE_MARKER_K3: You are a test role. End every answer with ROLESTAMP."
+   }
+  ],
+  "ready": true,
+  "paneAtReady": "uild · mock-model mock\n     ╹───\n     /…/opencode-v2-instructions-c…/repo:main  shift+tab agents  ctrl+p commands\n     2.0.18\n",
+  "q1": "CASE=opencode-v2-instructions-content-x first turn. Say hello.",
+  "turn1": {
+   "url": "/v1/chat/completions",
+   "model": "mock-model",
+   "tools": [
+    "edit",
+    "execute",
+    "glob",
+    "grep",
+    "question",
+    "read",
+    "shell",
+    "skill",
+    "subagent",
+    "webfetch",
+    "websearch",
+    "write"
+   ],
+   "toolsHash": "402838d7ad52",
+   "systemLen": 12787,
+   "developerLen": 0,
+   "systemHash": "af039c8ea18b",
+   "roleIn": [],
+   "repoIn": [
+    "system"
+   ],
+   "baseLinesKeptRatio": 0.989,
+   "baseLinesLost": [],
+   "sysLineCount": 89
+  },
+  "paneTurn1": "     Connect provider     /connect\n  ┃  Build · mock-model mock\n  ╹───\n  /…/-Users-<user>-share-w…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/opencode-v2-instructions-content-x/repo:main  15 (0%)  ctrl+p commands    /…/opencode-v2-instructions…/repo:main\n",
+  "q2": "CASE=opencode-v2-instructions-content-x second turn. CMRUN<<sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?>>",
+  "approvalPane": null,
+  "toolResultSeen": true,
+  "verify": "VERIFY_OK",
+  "rc": "0",
+  "turn2": {
+   "url": null,
+   "model": "mock-model",
+   "tools": [
+    "edit",
+    "execute",
+    "glob",
+    "grep",
+    "question",
+    "read",
+    "shell",
+    "skill",
+    "subagent",
+    "webfetch",
+    "websearch",
+    "write"
+   ],
+   "toolsHash": "402838d7ad52",
+   "systemLen": 12787,
+   "developerLen": 0,
+   "systemHash": "af039c8ea18b",
+   "roleIn": [],
+   "repoIn": [
+    "system"
+   ],
+   "baseLinesKeptRatio": 0.989,
+   "baseLinesLost": [],
+   "sysLineCount": 89
+  },
+  "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+  "paneEnd": "     Connect provider     /connect\n  ┃  Build · mock-model mock\n  ╹───\n  /…/-Users-<user>-share-w…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/opencode-v2-instructions-content-x/repo:main  15 (0%)  ctrl+p commands    /…/opencode-v2-instructions…/repo:main\n",
+  "answerShown": true,
+  "requests": [
+   "/v1/chat/completions tools=0",
+   "/v1/chat/completions tools=12",
+   "/v1/chat/completions tools=12",
+   "/v1/chat/completions tools=12"
+  ],
+  "exitCode": "0"
+ },
+ {
+  "tool": "opencode-v2",
+  "variant": "instructions-dir",
+  "label": "x",
+  "id": "opencode-v2-instructions-dir-x",
+  "argv": [
+   "bash",
+   "/Users/<user>/share/work/github_kewton/commandmate-issue-4113/scripts/opencode-v2/launch.sh",
+   "--port",
+   "18211",
+   "--password-file",
+   "<D>/home/pw",
+   "--directory",
+   "<D>/repo",
+   "--executable",
+   "/opt/homebrew/bin/opencode2"
+  ],
+  "env": {
+   "HOME": "<D>/home",
+   "XDG_CONFIG_HOME": "<D>/home/.config",
+   "XDG_DATA_HOME": "<D>/home/.local/share",
+   "XDG_STATE_HOME": "<D>/home/.local/state",
+   "XDG_CACHE_HOME": "<D>/home/.cache",
+   "OPENCODE_CONFIG_DIR": "<D>/home/.cmrole/cfg-x"
+  },
+  "artifacts": [
+   {
+    "path": "$HOME/.cmrole/role-x.md",
+    "content": "ROLE_MARKER_K3: You are a test role. End every answer with ROLESTAMP."
+   },
+   {
+    "path": "$HOME/.cmrole/cfg-x/opencode.jsonc",
+    "content": "{\"instructions\":[\"<SP>/run2/c/opencode-v2-instructions-dir-x/home/.cmrole/role-x.md\"]}"
+   }
+  ],
+  "ready": true,
+  "paneAtReady": "lint 40B Free OpenCode\n     ╹───\n     /…/opencode-v2-instructions-d…/repo:main  shift+tab agents  ctrl+p commands\n     2.0.18\n",
+  "q1": "CASE=opencode-v2-instructions-dir-x first turn. Say hello.",
+  "turn1": null,
+  "paneTurn1": "     Connect provider     /connect\n  ┃  Build · Flint 40B Free OpenCode\n  ╹───\n  /…/-Users-<user>-sh…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/opencode-v2-instructions-dir-x/repo:main  shift+tab agents  ctrl+p commands    /…/opencode-v2-instructions…/repo:main\n",
+  "q2": "CASE=opencode-v2-instructions-dir-x second turn. CMRUN<<sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?>>",
+  "approvalPane": null,
+  "toolResultSeen": false,
+  "verify": null,
+  "rc": null,
+  "turn2": null,
+  "fileAfter": "#!/bin/sh\necho $((1+2))\n",
+  "paneEnd": "     Connect provider     /connect\n  ┃  Build · Flint 40B Free OpenCode\n  ╹───\n  /…/-Users-<user>-sh…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/opencode-v2-instructions-dir-x/repo:main  shift+tab agents  ctrl+p commands    /…/opencode-v2-instructions…/repo:main\n",
+  "answerShown": false,
+  "requests": [],
+  "exitCode": "0",
+  "note": "OPENCODE_CONFIG_DIR が大域設定を置換し mock プロバイダが消えた回。要求は OpenCode の既定モデル（外部）へ出ている。agent-md は hidden:true も併用"
+ },
+ {
+  "tool": "opencode-v2",
+  "variant": "none",
+  "label": "x",
+  "id": "opencode-v2-none-x",
+  "argv": [
+   "bash",
+   "/Users/<user>/share/work/github_kewton/commandmate-issue-4113/scripts/opencode-v2/launch.sh",
+   "--port",
+   "18211",
+   "--password-file",
+   "<D>/home/pw",
+   "--directory",
+   "<D>/repo",
+   "--executable",
+   "/opt/homebrew/bin/opencode2"
+  ],
+  "env": {
+   "HOME": "<D>/home",
+   "XDG_CONFIG_HOME": "<D>/home/.config",
+   "XDG_DATA_HOME": "<D>/home/.local/share",
+   "XDG_STATE_HOME": "<D>/home/.local/state",
+   "XDG_CACHE_HOME": "<D>/home/.cache"
+  },
+  "artifacts": [],
+  "ready": true,
+  "paneAtReady": "uild · mock-model mock\n     ╹───\n     /…/run2/c/opencode-v2-none-x/repo:main    shift+tab agents  ctrl+p commands\n     2.0.18\n",
+  "q1": "CASE=opencode-v2-none-x first turn. Say hello.",
+  "turn1": {
+   "url": "/v1/chat/completions",
+   "model": "mock-model",
+   "tools": [
+    "edit",
+    "execute",
+    "glob",
+    "grep",
+    "question",
+    "read",
+    "shell",
+    "skill",
+    "subagent",
+    "webfetch",
+    "websearch",
+    "write"
+   ],
+   "toolsHash": "402838d7ad52",
+   "systemLen": 12739,
+   "developerLen": 0,
+   "systemHash": "6564cd713bdd",
+   "roleIn": [],
+   "repoIn": [
+    "system"
+   ],
+   "baseLinesKeptRatio": 1.0,
+   "baseLinesLost": [],
+   "sysLineCount": 89
+  },
+  "paneTurn1": "     Connect provider     /connect\n  ┃  Build · mock-model mock\n  ╹───\n  /…/-Users-<user>-share-work-github-kewto…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/opencode-v2-none-x/repo:main  15 (0%)  ctrl+p commands    /…/run2/c/opencode-v2-none-x/repo:main\n",
+  "q2": "CASE=opencode-v2-none-x second turn. CMRUN<<sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?>>",
+  "approvalPane": null,
+  "toolResultSeen": true,
+  "verify": "VERIFY_OK",
+  "rc": "0",
+  "turn2": {
+   "url": null,
+   "model": "mock-model",
+   "tools": [
+    "edit",
+    "execute",
+    "glob",
+    "grep",
+    "question",
+    "read",
+    "shell",
+    "skill",
+    "subagent",
+    "webfetch",
+    "websearch",
+    "write"
+   ],
+   "toolsHash": "402838d7ad52",
+   "systemLen": 12739,
+   "developerLen": 0,
+   "systemHash": "6564cd713bdd",
+   "roleIn": [],
+   "repoIn": [
+    "system"
+   ],
+   "baseLinesKeptRatio": 1.0,
+   "baseLinesLost": [],
+   "sysLineCount": 89
+  },
+  "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+  "paneEnd": "     Connect provider     /connect\n  ┃  Build · mock-model mock\n  ╹───\n  /…/-Users-<user>-share-work-github-kewto…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/opencode-v2-none-x/repo:main  15 (0%)  ctrl+p commands    /…/run2/c/opencode-v2-none-x/repo:main\n",
+  "answerShown": true,
+  "requests": [
+   "/v1/chat/completions tools=0",
+   "/v1/chat/completions tools=12",
+   "/v1/chat/completions tools=12",
+   "/v1/chat/completions tools=12"
+  ],
+  "exitCode": "0"
+ }
+]

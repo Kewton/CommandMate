@@ -1,0 +1,54 @@
+// cm.mjs — 隔離 CommandMate の send 経路へ実 CLI を流す。ロールは PATH シムが起動行へ足す（コードは未変更なので #4115 の起動行をシムで模す）。
+import { execFileSync, spawn, spawnSync } from 'node:child_process'; import fs from 'node:fs'; import path from 'node:path';
+const WT='<WORKTREE>';
+export const ROOT=process.env.CM_ROOT_T; const HOME=ROOT+'/home', SHIM=ROOT+'/shim', REPOS=ROOT+'/repos', LOG=ROOT+'/mock.jsonl', ARGV=ROOT+'/argv.log';
+const SOCK='cmrole4113cm', MOCKP=18114, CMP=18300, MOCK=`http://127.0.0.1:${MOCKP}`, DB=`${WT}/data/role-probe-4113.db`;
+const REAL={claude:'<HOME>/.local/bin/claude',codex:'/opt/homebrew/bin/codex',commandcode:'/opt/homebrew/bin/commandcode',opencode:'<HOME>/.opencode/bin/opencode',opencode2:'/opt/homebrew/bin/opencode2',copilot:'/opt/homebrew/bin/copilot'};
+export const TOOLS=(process.env.CM_TOOLS??'claude,codex,command-code,opencode,opencode-v2,copilot').split(',');
+const sleep=(ms)=>new Promise((r)=>setTimeout(r,ms));
+const BASEPATH=`${SHIM}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`;
+const w=(p,s,m)=>{fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,s,m?{mode:m}:{});};
+const tmux=(...a)=>execFileSync('tmux',['-L',SOCK,...a],{encoding:'utf8',env:{PATH:BASEPATH,HOME,TERM:'xterm-256color',LANG:'en_US.UTF-8'},stdio:['ignore','pipe','pipe']});
+const ROLE='ROLE_MARKER_K3: You are a test role. End every answer with ROLESTAMP.';
+export function setup(){
+  fs.mkdirSync(HOME,{recursive:true});fs.mkdirSync(SHIM,{recursive:true});fs.mkdirSync(REPOS,{recursive:true});
+  const repoNames=TOOLS.flatMap((t)=>[`${t}-role`,`${t}-none`]);
+  const rp=fs.realpathSync(REPOS);
+  const verify=`version: 1\noptions:\n  baseRef: main\ngates:\n  - id: check\n    command: "sh verify.sh"\n`;
+  for(const n of repoNames){const r=`${REPOS}/${n}`;if(fs.existsSync(r))continue;fs.mkdirSync(r,{recursive:true});
+    w(r+'/AGENTS.md','# Repo rules\nREPO_MARKER_7Q: Always end every answer with the word REPOSTAMP.\n');w(r+'/calc.sh','#!/bin/sh\necho $((1+2))\n');w(r+'/verify.sh','#!/bin/sh\n[ "$(sh calc.sh)" = "2" ] && echo VERIFY_OK || { echo VERIFY_NG; exit 3; }\n');w(r+'/.commandmate/verify.yaml',verify);
+    execFileSync('sh',['-c','git init -q -b main . && git add -A && git -c user.name=p -c user.email=p@example.invalid commit -qm init'],{cwd:r});}
+  const KEY='mock-key-0000000000000000000000000000';
+  w(`${HOME}/.claude.json`,JSON.stringify({hasCompletedOnboarding:true,lastOnboardingVersion:'2.1.316',customApiKeyResponses:{approved:[KEY.slice(-20)],rejected:[]},projects:Object.fromEntries(repoNames.map((n)=>[`${rp}/${n}`,{hasTrustDialogAccepted:true,hasCompletedProjectOnboarding:true}]))}));
+  w(`${HOME}/.claude/settings.json`,JSON.stringify({theme:'dark',permissions:{defaultMode:'default'}}));
+  w(`${HOME}/.codex/config.toml`,`model = "mock-model"\nmodel_provider = "mock"\ncheck_for_update_on_startup = false\n[model_providers.mock]\nname = "mock"\nbase_url = "${MOCK}/v1"\nwire_api = "responses"\nrequires_openai_auth = false\n${repoNames.map((n)=>`[projects."${rp}/${n}"]\ntrust_level = "trusted"\n`).join('')}`);
+  w(`${HOME}/.codex/cm-role-x.config.toml`,`developer_instructions = ${JSON.stringify(ROLE)}\n`);
+  w(`${HOME}/.commandcode/providers.json`,JSON.stringify({provider:{mock:{api:'openai-completions',baseURL:`${MOCK}/v1`,apiKey:false,models:{'mock-model':{contextWindow:200000}}}}}));
+  w(`${HOME}/.cmrole/cm-role-x.ts`,`export default function(cmd){cmd.hooks({appendSystemPrompt:()=>${JSON.stringify(ROLE)}});}\n`);
+  w(`${HOME}/.cmrole/role.md`,ROLE);
+  w(`${HOME}/.config/opencode/opencode.json`,JSON.stringify({autoupdate:false,share:'disabled',permission:{bash:'ask'},model:'mock/mock-model',small_model:'mock/mock-model',provider:{mock:{npm:'@ai-sdk/openai-compatible',name:'mock',options:{baseURL:`${MOCK}/v1`,apiKey:'x'},models:{'mock-model':{name:'mock-model',tool_call:true}}}}}));
+  w(`${HOME}/.config/opencode/opencode.jsonc`,JSON.stringify({permissions:[{action:'*',resource:'*',effect:'ask'}],model:'mock/mock-model',providers:{mock:{name:'mock',package:'@opencode/ai/providers/openai-compatible',settings:{baseURL:`${MOCK}/v1`,apiKey:'x'},models:{'mock-model':{name:'mock-model'}}}}}));
+  w(`${HOME}/.copilot/config.json`,JSON.stringify({trusted_folders:repoNames.map((n)=>`${rp}/${n}`),banner:'never'}));
+  w(`${HOME}/.copilot/agents/cm-role-x.agent.md`,`---\nname: cm-role-x\ndescription: CommandMate role\ninfer: false\n---\n${ROLE}\n`);
+  const common=`#!/bin/bash\ncase "$*" in *--version*|-v) exec "$REAL" "$@";; esac\nROLE=0; case "$(basename "$PWD")" in *-role) ROLE=1;; esac\nprintf '%s\\t%s\\t%s\\n' "$(basename "$PWD")" "$ROLEV" "$*" >> ${ARGV}\n`;
+  const sh=(name,body)=>{const f=`${SHIM}/${name}`;fs.writeFileSync(f,common.replace('"$REAL"',REAL[name]).replace('$ROLEV','$ROLE')+body+'\n',{mode:0o755});};
+  sh('claude',`export ANTHROPIC_BASE_URL=${MOCK} ANTHROPIC_API_KEY=${KEY} DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_TELEMETRY=1\nA=(--permission-mode default); [ $ROLE = 1 ] && A+=(--append-system-prompt-file ${HOME}/.cmrole/role.md)\nexec ${REAL.claude} "$\{A[@]}" "$@"`.replace('$\\{','${'));
+  sh('codex',`A=(); [ $ROLE = 1 ] && A+=(-p cm-role-x)\nexec ${REAL.codex} "$\{A[@]}" "$@"`.replace('$\\{','${'));
+  sh('commandcode',`export CMD_LOCAL_ONLY=1 CMD_DISABLE_REMOTE_MODEL_CATALOG=1 COMMAND_CODE_API_KEY=mock-not-a-real-key\nA=(--local-only -m mock-model); [ $ROLE = 1 ] && A+=(--mod ${HOME}/.cmrole/cm-role-x.ts)\nexec ${REAL.commandcode} "$\{A[@]}" "$@"`.replace('$\\{','${'));
+  sh('opencode',`export OPENCODE_DISABLE_AUTOUPDATE=1; [ $ROLE = 1 ] && export OPENCODE_CONFIG_CONTENT='{"instructions":["${HOME}/.cmrole/role.md"]}'\nexec ${REAL.opencode} "$@"`);
+  sh('opencode2',`[ $ROLE = 1 ] && export OPENCODE_CONFIG_CONTENT='{"default_agent":"cm-role-x","agents":{"cm-role-x":{"description":"CommandMate role","mode":"primary","system":"{file:${HOME}/.cmrole/role.md}"}}}'\nexec ${REAL.opencode2} "$@"`);
+  sh('copilot',`export COPILOT_OFFLINE=true COPILOT_PROVIDER_BASE_URL=${MOCK}/v1 COPILOT_PROVIDER_API_KEY=x COPILOT_MODEL=mock-model COPILOT_AUTO_UPDATE=false COPILOT_PROVIDER_MAX_PROMPT_TOKENS=200000 COPILOT_PROVIDER_MAX_OUTPUT_TOKENS=8000\nA=(); [ $ROLE = 1 ] && A+=(--agent cm-role-x)\nexec ${REAL.copilot} "$\{A[@]}" "$@"`.replace('$\\{','${'));
+  return repoNames;
+}
+export function mockUp(){const p=spawn('node',[new URL('./mock-model.mjs',import.meta.url).pathname,String(MOCKP),LOG],{detached:true,stdio:'ignore'});p.unref();fs.writeFileSync(ROOT+'/mock.pid',String(p.pid));}
+export function tmuxUp(){try{tmux('has-session','-t','=keepalive');}catch{tmux('new-session','-d','-s','keepalive');}return tmux('display-message','-p','#{socket_path},#{pid},0').trim();}
+export const serverEnv=(tm)=>({HOME,PATH:BASEPATH+':'+path.dirname(process.execPath),USER:'probe',LOGNAME:'probe',LANG:'en_US.UTF-8',TERM:'xterm-256color',TMPDIR:'/private/tmp/cmr4113',NODE_ENV:'development',CM_PORT:String(CMP),CM_BIND:'127.0.0.1',CM_DB_PATH:DB,CM_ROOT_DIR:fs.realpathSync(REPOS),WORKTREE_REPOS:fs.readdirSync(REPOS).map((n)=>fs.realpathSync(`${REPOS}/${n}`)).join(','),CM_LOG_LEVEL:'info',TMUX:tm,CM_CODEX_HOOK_TRUST:'bypass',XDG_CONFIG_HOME:HOME+'/.config',XDG_DATA_HOME:HOME+'/.local/share',XDG_STATE_HOME:HOME+'/.local/state',XDG_CACHE_HOME:HOME+'/.cache',CODEX_HOME:HOME+'/.codex',COPILOT_HOME:HOME+'/.copilot',CM_OPENCODE_V2_DIR:HOME+'/.commandmate/opencode-v2'});
+export function serverUp(tm){fs.mkdirSync('/private/tmp/cmr4113',{recursive:true});const out=fs.openSync(ROOT+'/server.log','a');const p=spawn(`${WT}/node_modules/.bin/tsx`,['server.ts'],{cwd:WT,env:serverEnv(tm),detached:true,stdio:['ignore',out,out]});p.unref();fs.writeFileSync(ROOT+'/server.pid',String(p.pid));return p.pid;}
+export function cli(tm,...args){const r=spawnSync(`${WT}/node_modules/.bin/tsx`,[`${WT}/src/cli/index.ts`,...args],{cwd:WT,env:{...serverEnv(tm),NODE_ENV:'production'},encoding:'utf8',timeout:200000});return{code:r.status,out:(r.stdout??'').slice(-1800),err:(r.stderr??'').slice(-800)};}
+export const api=(p,o={})=>fetch(`http://127.0.0.1:${CMP}${p}`,o).then((r)=>r.json());
+export const reads=(since=0)=>fs.existsSync(LOG)?fs.readFileSync(LOG,'utf8').split('\n').filter(Boolean).map((l)=>JSON.parse(l)).filter((r)=>r.t>=since):[];
+const layers=(b)=>{const o={system:'',developer:'',user:''};const t=(c)=>typeof c==='string'?c:Array.isArray(c)?c.map((p)=>p.text??p.input_text??'').join('\n'):'';if(b.system)o.system+=t(b.system);if(b.instructions)o.system+=t(b.instructions);for(const m of [...(b.messages??[]),...(Array.isArray(b.input)?b.input:[])]){if(m.role==='system')o.system+='\n'+t(m.content);else if(m.role==='developer')o.developer+='\n'+t(m.content);else if(m.role==='user')o.user+='\n'+t(m.content);}return o;};
+export const where=(b,m)=>{const l=layers(b);return['system','developer','user'].filter((k)=>l[k].includes(m));};
+export const pane=(sess)=>tmux('capture-pane','-p','-t',`=${sess}:`,'-S','-100');
+export const sessions=()=>{try{return tmux('list-sessions','-F','#S').split('\n').filter(Boolean);}catch{return[];}};
+export { tmux, sleep, HOME, REPOS, DB, CMP, MOCKP, SOCK };

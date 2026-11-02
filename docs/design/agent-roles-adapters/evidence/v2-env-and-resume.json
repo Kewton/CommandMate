@@ -1,0 +1,110 @@
+{
+ "serveTuiEnvAndResume": [
+  {
+   "label": "serve-only",
+   "serveEnv": true,
+   "tuiEnv": false,
+   "footerAgent": "Cm-Role-X",
+   "req": true,
+   "roleIn": [
+    "system"
+   ]
+  },
+  {
+   "label": "tui-only",
+   "serveEnv": false,
+   "tuiEnv": true,
+   "footerAgent": "Build",
+   "req": true,
+   "roleIn": []
+  },
+  {
+   "label": "both",
+   "serveEnv": true,
+   "tuiEnv": true,
+   "footerAgent": "Cm-Role-X",
+   "req": true,
+   "roleIn": [
+    "system"
+   ]
+  },
+  {
+   "label": "none-to-role-resume-opencode-v2",
+   "sid": "ses_e61f",
+   "footerAgent": "Build",
+   "req": true,
+   "roleIn": [],
+   "history": true
+  },
+  {
+   "label": "none-to-role-resume-opencode",
+   "sid": "ses_e61f",
+   "footerAgent": "Build",
+   "req": true,
+   "roleIn": [
+    "system"
+   ],
+   "history": true
+  }
+ ],
+ "overlayEffectiveAgent": [
+  {
+   "label": "overlay-build-new",
+   "footer": "Build",
+   "role": [
+    "system"
+   ],
+   "repo": [
+    "system"
+   ],
+   "baseKept": false,
+   "tools": 12,
+   "history": false
+  },
+  {
+   "label": "none-first",
+   "footer": "Build",
+   "role": [],
+   "repo": [
+    "system"
+   ],
+   "baseKept": true,
+   "tools": 12,
+   "history": true
+  },
+  {
+   "label": "overlay-build-resume-of-none",
+   "sid": "ses_e61e",
+   "footer": "Build",
+   "role": [
+    "system"
+   ],
+   "repo": [
+    "system"
+   ],
+   "baseKept": false,
+   "tools": 12,
+   "history": true
+  },
+  {
+   "label": "overlay-user-default-plan",
+   "footer": "Plan",
+   "role": [
+    "system"
+   ],
+   "repo": [
+    "system"
+   ],
+   "baseKept": false,
+   "tools": 12,
+   "history": false
+  },
+  {
+   "label": "overlay-over-user-system",
+   "role": [
+    "system"
+   ],
+   "userSystem": []
+  }
+ ]
+}

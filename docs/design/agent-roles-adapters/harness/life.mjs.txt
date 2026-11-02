@@ -1,0 +1,43 @@
+import * as L from './lib.mjs'; import fs from 'node:fs'; import path from 'node:path'; import { execFileSync } from 'node:child_process';
+import { clearDialogs } from './flow.mjs';
+const WT='<WORKTREE>';
+const tool=process.argv[2]; const port= tool==='opencode'?18221:18222;
+const body=(v)=>`ROLE_MARKER_K3 EDIT${v}: End every answer with ROLESTAMP.`;
+async function sess(id,base,repo,run,msg,since){ // 1 プロセス分
+  L.startPane(id,repo,run.env,run.cmd);
+  await L.until(()=>L.READY[tool].test(L.cap(id)),40000); await L.sleep(tool.startsWith('opencode')?6000:5000); await clearDialogs(id);
+  const paneBefore=L.cap(id).split(base).join('<D>').replace(/\n\s*\n+/g,'\n').slice(-260);
+  await L.sendText(id,msg);
+  const got=await L.until(()=>L.lastMain(msg.split(' ')[0],since),30000); await L.sleep(2500);
+  const r=got? {V1:L.whereIs(got.body,'EDITV1'),V2:L.whereIs(got.body,'EDITV2'),users:(got.body.messages??got.body.input??[]).filter((m)=>m.role==='user').length, history:L.flat(got.body).includes('lifeturn-1'),tools:L.toolNames(got.body).length,model:got.body.model}:{req:false,pane:L.cap(id).split(base).join('<D>').replace(/\n\s*\n+/g,'\n').slice(-500)};
+  r.argv=run.cmd.map((x)=>String(x).split(base).join('<D>')); r.paneTail=L.cap(id).split(base).join('<D>').replace(/\n\s*\n+/g,'\n').slice(-200);
+  return r;
+}
+const stopTui=async(id)=>{L.keys(id,'Escape');await L.sleep(200);await L.sendText(id,'/exit');const ex=await L.until(()=>(/__EXIT=(\d+)/.exec(L.cap(id))??[])[1],12000);L.stop(id);await L.sleep(1000);return ex;};
+const out={tool,steps:{}};
+const base=path.join(L.ROOT,'c','life-'+tool);fs.rmSync(base,{recursive:true,force:true});const home=base+'/home',repo=base+'/repo';L.repoSeed(repo);fs.mkdirSync(home,{recursive:true});
+L.ensureMock();await L.sleep(200);
+const d=L.toolDef(tool,home,repo,{launchSh:`${WT}/scripts/opencode-v2/launch.sh`,port});
+const roleRun=(v,variant='role')=>{ if(v==='none') return {env:{...d.env},cmd:[...d.cmd],artifacts:[]}; if(tool==='opencode-v2') return L.applyRole(tool,d,home,repo,'agent-inline',body(v),v); return L.applyRole(tool,d,home,repo,variant,body(v),v);};
+const resume=(run,sid)=>{ const c=[...run.cmd];
+ switch(tool){case 'claude':c.push('--continue');break;case 'codex':c.push('resume','--last');break;case 'command-code':c.push('-c');break;case 'opencode':c.push('-s',sid);break;case 'copilot':c.push('--continue');break;}
+ return {...run,cmd:c};};
+const v2run=(run,sid)=>({...run,cmd:['bash',`${L.ROOT}/v2-resume.sh`,String(port),home+'/pw',fs.realpathSync(repo),sid??'']});
+fs.writeFileSync(`${L.ROOT}/v2-resume.sh`,`#!/bin/bash
+export OPENCODE_SERVER_PASSWORD=$(cat "$2"); export OPENCODE_DISABLE_AUTOUPDATE=1
+/opt/homebrew/bin/opencode2 serve --hostname 127.0.0.1 --port "$1" </dev/null >/dev/null 2>&1 &
+sp=$!; trap 'kill $sp' EXIT; sleep 3
+if [ -n "$4" ]; then /opt/homebrew/bin/opencode2 --server "http://127.0.0.1:$1" -s "$4" "$3"; else /opt/homebrew/bin/opencode2 --server "http://127.0.0.1:$1" "$3"; fi
+`);
+const wrap=(run,sid)=>tool==='opencode-v2'?v2run(run,sid):run;
+let sid=null;
+const getSid=()=>{ if(!tool.startsWith('opencode'))return null; try{const a=['-s','-m','3']; if(tool==='opencode-v2')a.push('-u','opencode:probe-password'); const u=`http://127.0.0.1:${port}/${tool==='opencode'?'session?directory='+encodeURIComponent(fs.realpathSync(repo)):'api/session?directory='+encodeURIComponent(fs.realpathSync(repo))}`; const j=execFileSync('curl',[...a,u],{encoding:'utf8'}); const o=JSON.parse(j); const arr=Array.isArray(o)?o:(o.items??o.data??o.sessions??[]); return (arr[0]?.id)??null;}catch(e){return 'ERR '+e.message;}};
+const seq=[['new-role-v1','V1',false],['resume-same-v1','V1',true],['resume-edited-v2','V2',true],['resume-none','none',true],['new-none','none',false],['new-role-v2','V2',false]];
+for(const [step,v,isRes] of seq){
+  const id=`lf-${tool}-${step}`.replace(/[^a-z0-9-]/gi,''); const since=Date.now(); const msg=`lifeturn-${seq.findIndex((s)=>s[0]===step)+1}${tool==='x'?'':''} from ${step}`;
+  let run=roleRun(v); run=isRes?(tool==='opencode-v2'?v2run(run,sid):resume(run,sid)):wrap(run,null);
+  const r=await sess(id,base,repo,run,msg,since);
+  const s=getSid(); if(s&&!isRes)sid=s; r.sid=s;
+  r.exit=await stopTui(id); out.steps[step]=r; console.log(step,JSON.stringify({...r,paneTail:undefined}).slice(0,420));
+}
+fs.mkdirSync(L.ROOT+'/rec-life',{recursive:true});fs.writeFileSync(`${L.ROOT}/rec-life/${tool}.json`,JSON.stringify(out,null,1));

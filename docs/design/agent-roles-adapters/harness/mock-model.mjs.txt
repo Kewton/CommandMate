@@ -1,0 +1,99 @@
+#!/usr/bin/env node
+// mock-model.mjs — 課金なしの確定モデル。CLI が実際に送る要求を記録し、CMRUN<<cmd>> を見たらシェルツール呼び出しを返す。
+// Usage: mock-model.mjs <port> <log.jsonl>
+import http from 'node:http';
+import fs from 'node:fs';
+const [port, logPath] = [Number(process.argv[2]), process.argv[3]];
+const SHELL = /^(bash|shell|exec_command|shell_command|run_shell_command|powershell|shell_exec|execute|run_terminal_cmd|bash_tool|exec)$/i;
+const text = (c) => typeof c === 'string' ? c : Array.isArray(c) ? c.map((p) => p.text ?? p.input_text ?? p.output_text ?? (typeof p.content === 'string' ? p.content : '')).join('\n') : '';
+function lastInfo(body) {
+  const msgs = body.messages ?? (Array.isArray(body.input) ? body.input : body.input ? [{ role: 'user', content: body.input }] : []);
+  const last = msgs[msgs.length - 1] ?? {};
+  const isToolResult = last.role === 'tool' || /_output$/.test(last.type ?? '') || (Array.isArray(last.content) && last.content.some((p) => p.type === 'tool_result'));
+  let toolOut = '';
+  if (isToolResult) toolOut = last.output ? (typeof last.output === 'string' ? last.output : JSON.stringify(last.output)) : Array.isArray(last.content) ? JSON.stringify(last.content) : String(last.content ?? '');
+  const users = msgs.filter((m) => m.role === 'user');
+  return { isToolResult, toolOut, lastUser: text(users[users.length - 1]?.content), userCount: users.length };
+}
+function shellCall(body, cmd) {
+  const tools = body.tools ?? [];
+  const norm = tools.map((t) => ({ name: t.name ?? t.function?.name, schema: t.input_schema ?? t.parameters ?? t.function?.parameters ?? {} }));
+  const t = norm.find((x) => x.name && SHELL.test(x.name));
+  if (!t) return null;
+  const props = t.schema.properties ?? {};
+  const args = {};
+  if (props.command) args.command = props.command.type === 'array' ? ['bash', '-lc', cmd] : cmd;
+  else if (props.cmd) args.cmd = cmd;
+  else if (props.script) args.script = cmd;
+  else args.command = cmd;
+  for (const r of t.schema.required ?? []) if (!(r in args)) { const p = props[r] ?? {}; args[r] = p.type === 'boolean' ? false : p.type === 'number' || p.type === 'integer' ? 30000 : 'probe'; }
+  if (props.description && !args.description) args.description = 'probe';
+  return { name: t.name, args: JSON.stringify(args) };
+}
+function decide(body) {
+  const i = lastInfo(body);
+  if (i.isToolResult) return { text: 'MOCK_DONE ' + i.toolOut.replace(/\s+/g, ' ').slice(0, 160) };
+  const m = /CMRUN<<([\s\S]*?)>>/.exec(i.lastUser);
+  if (m) { const c = shellCall(body, m[1]); if (c) return { call: c }; return { text: 'MOCK_NO_SHELL_TOOL tools=' + (body.tools ?? []).map((t) => t.name ?? t.function?.name).join(',') }; }
+  return { text: 'MOCK_OK' };
+}
+let seq = 0;
+const sse = (res, ev, d) => res.write((ev ? `event: ${ev}\n` : '') + `data: ${JSON.stringify(d)}\n\n`);
+function anthropic(res, body, d) {
+  const id = 'msg_' + ++seq; const usage = { input_tokens: 10, output_tokens: 5 };
+  const blocks = d.call ? { type: 'tool_use', id: 'toolu_' + seq, name: d.call.name, input: JSON.parse(d.call.args) } : { type: 'text', text: d.text };
+  if (!body.stream) { res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify({ id, type: 'message', role: 'assistant', model: body.model, content: [blocks], stop_reason: d.call ? 'tool_use' : 'end_turn', stop_sequence: null, usage })); }
+  res.setHeader('content-type', 'text/event-stream');
+  sse(res, 'message_start', { type: 'message_start', message: { id, type: 'message', role: 'assistant', model: body.model, content: [], stop_reason: null, stop_sequence: null, usage } });
+  if (d.call) {
+    sse(res, 'content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: blocks.id, name: blocks.name, input: {} } });
+    sse(res, 'content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: d.call.args } });
+  } else {
+    sse(res, 'content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } });
+    sse(res, 'content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: d.text } });
+  }
+  sse(res, 'content_block_stop', { type: 'content_block_stop', index: 0 });
+  sse(res, 'message_delta', { type: 'message_delta', delta: { stop_reason: d.call ? 'tool_use' : 'end_turn', stop_sequence: null }, usage: { output_tokens: 5 } });
+  sse(res, 'message_stop', { type: 'message_stop' }); res.end();
+}
+function chat(res, body, d) {
+  const id = 'chatcmpl-' + ++seq; const base = { id, object: 'chat.completion.chunk', created: 1, model: body.model };
+  const usage = { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 };
+  const tc = d.call && [{ index: 0, id: 'call_' + seq, type: 'function', function: { name: d.call.name, arguments: d.call.args } }];
+  if (!body.stream) { res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify({ id, object: 'chat.completion', created: 1, model: body.model, choices: [{ index: 0, finish_reason: d.call ? 'tool_calls' : 'stop', message: { role: 'assistant', content: d.call ? null : d.text, ...(tc ? { tool_calls: tc } : {}) } }], usage })); }
+  res.setHeader('content-type', 'text/event-stream');
+  res.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { role: 'assistant', ...(d.call ? { content: null, tool_calls: tc } : { content: d.text }) }, finish_reason: null }] })}\n\n`);
+  res.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: d.call ? 'tool_calls' : 'stop' }], usage })}\n\n`);
+  res.write('data: [DONE]\n\n'); res.end();
+}
+function responses(res, body, d) {
+  const id = 'resp_' + ++seq; const n = seq;
+  const item = d.call ? { type: 'function_call', id: 'fc_' + n, call_id: 'call_' + n, name: d.call.name, arguments: d.call.args, status: 'completed' }
+    : { type: 'message', id: 'msg_' + n, role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: d.text, annotations: [] }] };
+  const usage = { input_tokens: 10, input_tokens_details: { cached_tokens: 0 }, output_tokens: 5, output_tokens_details: { reasoning_tokens: 0 }, total_tokens: 15 };
+  const resp = { id, object: 'response', status: 'completed', model: body.model, output: [item], usage };
+  if (!body.stream) { res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify(resp)); }
+  res.setHeader('content-type', 'text/event-stream');
+  sse(res, 'response.created', { type: 'response.created', response: { ...resp, status: 'in_progress', output: [] } });
+  sse(res, 'response.output_item.added', { type: 'response.output_item.added', output_index: 0, item: { ...item, ...(d.call ? { arguments: '' } : { content: [] }), status: 'in_progress' } });
+  if (!d.call) sse(res, 'response.output_text.delta', { type: 'response.output_text.delta', output_index: 0, content_index: 0, item_id: item.id, delta: d.text });
+  sse(res, 'response.output_item.done', { type: 'response.output_item.done', output_index: 0, item });
+  sse(res, 'response.completed', { type: 'response.completed', response: resp }); res.end();
+}
+http.createServer((req, res) => {
+  const chunks = [];
+  req.on('data', (c) => chunks.push(c));
+  req.on('end', () => {
+    const raw = Buffer.concat(chunks).toString('utf8');
+    let body = {}; try { body = JSON.parse(raw); } catch {}
+    const hdr = {}; for (const k of ['user-agent', 'x-api-key', 'content-type']) if (req.headers[k]) hdr[k] = k === 'x-api-key' ? 'REDACTED' : req.headers[k];
+    fs.appendFileSync(logPath, JSON.stringify({ t: Date.now(), method: req.method, url: req.url, hdr, body }) + '\n');
+    const u = req.url.split('?')[0];
+    if (req.method === 'GET' && /\/models$/.test(u)) { res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify({ object: 'list', data: [{ id: 'mock-model', object: 'model', created: 1, owned_by: 'mock', type: 'model', display_name: 'mock-model' }], models: [{ id: 'mock-model', slug: 'mock-model' }] })); }
+    if (/count_tokens$/.test(u)) { res.setHeader('content-type', 'application/json'); return res.end('{"input_tokens":10}'); }
+    if (req.method === 'POST' && /\/messages$/.test(u)) return anthropic(res, body, decide(body));
+    if (req.method === 'POST' && /\/chat\/completions$/.test(u)) return chat(res, body, decide(body));
+    if (req.method === 'POST' && /\/responses$/.test(u)) return responses(res, body, decide(body));
+    res.statusCode = 404; res.end('{"error":"not found"}');
+  });
+}).listen(port, '127.0.0.1');
