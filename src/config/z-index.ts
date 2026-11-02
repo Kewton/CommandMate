@@ -20,6 +20,9 @@
  * 7. Radix overlay popovers - Select/DropdownMenu/Tooltip (65)
  * 8. Context menus (70)
  *
+ * Between 3 and 4 sits {@link PWA_UPDATE_PROMPT_Z_INDEX} (45). It is not a member
+ * of `Z_INDEX` because it is one component's layer, not a kind of layer.
+ *
  * [Issue #2294] These numbers only order elements that share a stacking
  * context. `main[role="main"]` in AppShell carries `view-transition-name:
  * cm-content` (globals.css, Issue #1122), and any value other than `none`
@@ -66,6 +69,18 @@ export const Z_INDEX = {
   /** Context menus (right-click menus) */
   CONTEXT_MENU: 70,
 } as const;
+
+/**
+ * The PWA "an update is ready" prompt (Issue #4103).
+ *
+ * Deliberately below `Z_INDEX.MODAL` (50), unlike every other toast. The others
+ * report something and go away; this one stays until it is acted on, so at
+ * `Z_INDEX.TOAST` it sat on top of a dialog's own buttons (What's new → Close)
+ * for as long as the update was pending. Under the dialog it loses nothing:
+ * closing the dialog brings Reload back. Above the phone's tab bar and header
+ * (z-40), which it must not slip behind where it does overlap them.
+ */
+export const PWA_UPDATE_PROMPT_Z_INDEX = 45;
 
 /**
  * Type for Z_INDEX values

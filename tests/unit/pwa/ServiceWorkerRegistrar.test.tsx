@@ -32,6 +32,7 @@ vi.mock('@/hooks/useRealtimeConnection', () => ({
 
 import { ServiceWorkerRegistrar } from '@/components/pwa/ServiceWorkerRegistrar';
 import { VersionMismatchBanner } from '@/components/layout/VersionMismatchBanner';
+import { PWA_UPDATE_PROMPT_Z_INDEX, Z_INDEX } from '@/config/z-index';
 
 describe('ServiceWorkerRegistrar', () => {
   const register = vi.fn(() => Promise.resolve({}));
@@ -129,6 +130,24 @@ describe('ServiceWorkerRegistrar', () => {
       expect(toast.className).toContain('right-0');
       // `inset-x-0` is what made it span the whole footer.
       expect(toast.className).not.toContain('inset-x-0');
+    });
+
+    // Issue #4103. Where these end up on screen is measured in a real browser
+    // (tests/e2e/pwa-update-toast-4103.spec.ts); this pins the two choices behind
+    // it, so a later edit cannot undo them without a red test in the unit run.
+    it('draws under dialogs, not at the toast layer', async () => {
+      render(<ServiceWorkerRegistrar />);
+      const toast = await screen.findByTestId('pwa-update-toast');
+      expect(Number(toast.style.zIndex)).toBe(PWA_UPDATE_PROMPT_Z_INDEX);
+      expect(Number(toast.style.zIndex)).toBeLessThan(Z_INDEX.MODAL);
+    });
+
+    it('leaves the bottom of a phone screen and the PC send button alone', async () => {
+      render(<ServiceWorkerRegistrar />);
+      const toast = await screen.findByTestId('pwa-update-toast');
+      expect(toast.className).toContain('max-md:bottom-auto');
+      expect(toast.className).toContain('max-md:top-[');
+      expect(toast.className).toContain('pr-[4.25rem]');
     });
 
     it('stands down while the version-mismatch banner is showing', async () => {
