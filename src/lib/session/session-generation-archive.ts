@@ -54,6 +54,7 @@ import { deleteMessagesByInstance, recomputeLastUserMessage } from '@/lib/db/cha
 import { MESSAGES_INVALIDATED_EVENT_TYPE } from '@/lib/realtime/types';
 import type { AgentInstanceRef } from '@/lib/hooks/sources';
 import { createLogger } from '@/lib/logger';
+import { isUnderTest } from '@/lib/test-run-detection';
 
 const logger = createLogger('lib/session/session-generation-archive');
 
@@ -70,16 +71,14 @@ const logger = createLogger('lib/session/session-generation-archive');
  * fabricate `<cwd>/data/cm.db` or — when the suite runs in a checkout that has
  * one — hand those fixtures the developer's real chat history to write into.
  *
- * So under Vitest the answer is "no database" unless a test hands one in
- * explicitly (see {@link archiveSupersededSessionMessages}'s `db` parameter) or
- * mocks `@/lib/db/db-instance` **and** clears `VITEST`, which is how the
- * integration test drives the production branch. Only `VITEST` is consulted,
- * never `NODE_ENV`: `vitest.config.ts` `define`s `process.env.NODE_ENV` to the
- * literal `'test'` at transform time, so a `NODE_ENV` check here would fold to
- * a constant and no test could ever reach the other branch.
+ * So in a test run ({@link isUnderTest}) the answer is "no database" unless a
+ * test hands one in explicitly (see {@link archiveSupersededSessionMessages}'s
+ * `db` parameter) or mocks both `@/lib/db/db-instance` and `isUnderTest`, which
+ * is how the integration test drives the production branch. `VITEST` is not
+ * consulted: a production server can inherit it (Issue #4097).
  */
 export function resolveSessionArchiveDatabase(): Database.Database | null {
-  if (process.env.VITEST) return null;
+  if (isUnderTest()) return null;
   return getDbInstance();
 }
 
