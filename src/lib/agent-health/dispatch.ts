@@ -253,6 +253,7 @@ export function buildTerms(date: string, issues: readonly DispatchIssue[]): stri
   return [
     `（agent-health の自動依頼 ${date}。以下は利用者が事前に決めた、この run の条件）`,
     '- 本 run では PR の develop へのマージを進めてよい（利用者の明示的な許可）。main へはマージしない',
+    '- マージが auto mode の分類器に拒否されたら、別の経路（merge-pr.mjs と gh pr merge の言い換えなど）で再試行しない。CI の合格を確かめて「マージ可能」を報告し、残りの PR もマージせずに止まる',
     numbers.length === 1
       ? '- 対象は 1 件だが、そのまま 1 件で実行する（1 件で動くことは確認済み）'
       : `- 対象は ${numbers.length} 件（${issues.map((issue) => `#${issue.number} ${issue.kind}`).join('、')}）`,

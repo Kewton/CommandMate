@@ -1118,6 +1118,8 @@ echo "exit=$?"   # 0 → PR を出す / 1 → runs/$DATE/precheck-<issue>[-<item
 
 根拠: docs/orchestrate/ci-merge.md#6-2-統合破壊の実測
 
+明示の許可がある run でも、マージが auto mode の分類器に拒否されたら別の経路で再試行せず、CI の合格を確かめて「マージ可能」を報告して止まる（根拠: docs/orchestrate/ci-merge.md#6-2-分類器にマージを拒否されたとき）。
+
 マージの条件の 1 つとして、**未処置の指摘（5-3）が残っている PR はマージしない**。
 
 1 本マージするたびに、残りの各 PR で `merge-pr.mjs` を呼ぶ。develop が進んでいれば `git fetch` と `git merge origin/develop`（衝突したら

@@ -597,7 +597,7 @@ npx tsx scripts/agent-health/dispatch.ts --dry-run   # 選定と状態確認だ�
   （複数行の送信は Claude Code に貼り付けとして扱われ、スラッシュコマンドとして実行されないため）。`--full` は付けない
   （UAT を main の作業ディレクトリで走らせないため）。条件は送る前に `workspace/agent-health/<日付>/dispatch-terms-<番号を - でつないだもの>.md`
   へ書く（`--dry-run` では書かない。書けなければ送らずに `skipped-busy` と `reason`）。条件の中身は
-  「本 run では PR の develop へのマージを進めてよい（利用者の明示的な許可）」・run のファイル名を
+  「本 run では PR の develop へのマージを進めてよい（利用者の明示的な許可）」・マージが auto mode の分類器に拒否されたら別の経路（`merge-pr.mjs` と `gh pr merge` の言い換えなど）で再試行せず、CI の合格を確かめて「マージ可能」を報告し、残りの PR もマージせずに止まること（拒否は毎回ではない。15 run 中 3 run。次の run の観察は合否にしない。#4016）・run のファイル名を
   `plan-<番号を - でつないだもの>.md`・`summary-<同>.md`・`tasks-<同>.tsv` にすること（同じ日の別の run と上書きし合わないため）・
   完了後に `release-report.ts --date <日付>` で `workspace/agent-health/<日付>/release-readiness.html` を書くこと・
   失敗した Issue を当日中に再依頼しないこと。**対象が 1 件の日もそのまま 1 件で送る**（`/orchestrate` は 1 件でも動く。2026-10-01 に確認）
