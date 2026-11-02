@@ -23,6 +23,7 @@ import {
 // plain module function rather than through the hook because this file is not a
 // React tree — see the "External reachability reports" section there.
 import { reportServerReachability } from '@/hooks/useConnectivity';
+import { discardBody, hasWatchableBody, withBodyDeadline } from '@/lib/api-client-body-deadline';
 
 /**
  * Repository summary from API
@@ -347,6 +348,13 @@ function normalizeTransportError(error: unknown): ApiError {
  *
  * `useConnectivity.runProbe` builds its probe timeout the same way, so the two
  * are consistent.
+ *
+ * Issue #4034: the deadline ends with the headers, so the returned body carries
+ * its own, of the same length but counted from the last chunk received rather
+ * than from the start of the attempt. `timeoutMs` is reused instead of a second
+ * number: it already says how long this kind of request may sit silent. A send
+ * keeps its long budget here too, so `sendNewTask`'s own deadline (same length,
+ * started earlier) stays the one that fires. See `api-client-body-deadline`.
  */
 async function fetchOnce(
   url: string,
@@ -371,7 +379,16 @@ async function fetchOnce(
   external?.addEventListener('abort', forwardAbort);
 
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    if (!hasWatchableBody(response)) return response;
+    return withBodyDeadline(response, {
+      stallMs: timeoutMs,
+      callerSignal: external,
+      abortConnection: () => controller.abort(),
+      stallError: () => new ApiError(`Request timed out after ${timeoutMs}ms`, 0, undefined, 'timeout'),
+      abortedError: () => new ApiError('Request aborted', 0, undefined, 'aborted'),
+      transportError: normalizeTransportError,
+    });
   } catch (error) {
     // Order matters: a caller who aborts at the same instant the deadline fires
     // is still a caller who aborted, but a deadline that fired while no caller
@@ -415,7 +432,9 @@ function delay(ms: number): Promise<void> {
  *
  * @throws {ApiError} always, and only — never a raw `TypeError` or `AbortError`.
  *   A non-ok *response* is returned, not thrown; only a request that produced no
- *   response at all rejects.
+ *   response at all rejects. Reading the returned body rejects the same way when
+ *   it goes silent past the request's timeout (Issue #4034). That is not retried,
+ *   and not reported to the connection verdict: the server has already answered.
  */
 export async function fetchApiResponse(
   url: string,
@@ -443,6 +462,7 @@ export async function fetchApiResponse(
       const response = await fetchOnce(url, init, effectiveTimeout);
       noteReachability(true);
       if (isRetryableStatus(response.status) && canRetry(attempt)) {
+        discardBody(response);
         await delay(computeRetryDelayMs(attempt));
         continue;
       }
