@@ -182,9 +182,9 @@ describe('/orchestrate 3-1: the model is set before the first send, and checked 
   // #3883: the model is written by launch-worker.mjs, explicitly for both tiers, into the
   // worktree-local file only if git ignores it. The runbook's set_claude_model calls it.
   it('writes the model into the worktree-local settings file, only if git ignores it', () => {
-    expect(body).toContain('set_claude_model()');
+    expect(body).not.toContain('set_claude_model');
     expect(body).toContain('.claude/settings.local.json');
-    expect(body).toContain('launch-worker.mjs set-model --worktree "$1" --model "$2"');
+    expect(body).toContain('launch-worker.mjs set-model --worktree <worktree-path> --model <opus|sonnet>');
     expect(launcher).toContain(`'check-ignore', '-q', SETTINGS_FILE`);
     expect(launcher).toContain(`path.join('.claude', 'settings.local.json')`);
     // Both tiers are written; opus is no longer deleted to inherit the global default.
@@ -234,8 +234,8 @@ describe('/orchestrate 3-1: the model is set before the first send, and checked 
 
   it('is a shell block that parses (the orchestrator runs it verbatim)', () => {
     const blocks = [...body.matchAll(/```bash\n([\s\S]*?)```/g)].map((match) => match[1]);
-    const dispatch = blocks.find((block) => block.includes('set_claude_model()'));
-    expect(dispatch, '3-1 has no bash block defining set_claude_model()').toBeDefined();
+    const dispatch = blocks.find((block) => block.includes('launch-worker.mjs set-model'));
+    expect(dispatch, '3-1 has no bash block mentioning launch-worker.mjs set-model').toBeDefined();
     const result = spawnSync('bash', ['-n'], { input: dispatch, encoding: 'utf-8' });
     expect(result.stderr).toBe('');
     expect(result.status).toBe(0);

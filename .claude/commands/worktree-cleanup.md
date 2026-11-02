@@ -47,7 +47,7 @@ Phase 7（Worktree同期）は全Issue完了後にまとめて1回実行しま�
 ```bash
 # 共通バリデーション関数を読み込み
 # Synced with: src/cli/utils/input-validators.ts MAX_ISSUE_NO
-source "$(dirname "$0")/../lib/validators.sh"
+source "$(git rev-parse --show-toplevel)/.claude/lib/validators.sh"
 
 # Issue番号の検証
 if ! validate_issue_no "$ISSUE_NO"; then
@@ -64,7 +64,7 @@ fi
 
 ```bash
 # プロセス管理ユーティリティを読み込み
-source "$(dirname "$0")/../lib/process-utils.sh"
+source "$(git rev-parse --show-toplevel)/.claude/lib/process-utils.sh"
 
 # Worktreeの絶対パスを取得
 WORKTREE_DIR="../commandmate-issue-${ISSUE_NO}"

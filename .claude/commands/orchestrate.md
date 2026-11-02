@@ -720,9 +720,8 @@ gh issue edit "$bug_issue" --repo Kewton/CommandMate --body "${CURRENT_BODY}${AN
 # Claude のモデルは「セッションの起動時」に、worktree の .claude/settings.local.json から決まる。書くのも送るのも
 # scripts/orchestrate/launch-worker.mjs（#3883）。opus も sonnet も毎回明示して書く（opus は opus[1m]）。消して ~/.claude/settings.json
 # の既定を継がせることはしない（既定は利用者が変える。opus 指定が fable で動いた）。git に無視されていないファイルには書かない。
-set_claude_model() {  # <worktree-path> <opus|sonnet>（手で書くとき。下の send は自分で書く）
-  node scripts/orchestrate/launch-worker.mjs set-model --worktree "$1" --model "$2"
-}
+# 手で書くときは: node scripts/orchestrate/launch-worker.mjs set-model --worktree <worktree-path> --model <opus|sonnet>
+# （下の send は自分で書く）
 
 # assign.tsv は 1-2b の結果（1 行 = "<issue>\t<claude|antigravity>\t<opus|sonnet|->"）。3 列目は Claude のモデル
 # assign.tsv は fd 3 から読む（stdin にすると、ループの中の commandmatedev が残りの行を読み尽くす。下の注を参照）
@@ -1209,7 +1208,7 @@ cat "workspace/orchestration/runs/$DATE/module-reference-<N>-<item>.md"   # work
 
 ```bash
 # module-reference: 同じ行キーが 2 本になっていない
-awk -F'|' '/^\| `/{print $2}' docs/module-reference.md | sort | uniq -d
+grep '^| `' docs/module-reference.md | cut -d'|' -f2 | sort | uniq -d
 ```
 
 `changelog.d/<N>.md` がこの PR のコミットにあることと断片の書式、消えた `it` / `describe` の数は、`publish-pr.mjs`・`merge-pr.mjs` と precheck（6-1-1）が確かめる。手で確かめるときは docs/orchestrate/ci-merge.md#6-4-断片と消えたテストを手で確かめる を読む。

@@ -17,11 +17,11 @@
  * which is where the two claims that matter live: a relaunch into the same pane
  * archives, and a reuse of the live process does not.
  *
- * `VITEST` is cleared per test because `resolveSessionArchiveDatabase` refuses
- * to open a database under Vitest — see its docblock; the point of the guard is
- * that a suite which never asked for a database cannot be handed the
- * developer's real one. Clearing it plus a mocked `getDbInstance` is how a suite
- * that *did* ask drives the production branch.
+ * `isUnderTest` is mocked to `false` because `resolveSessionArchiveDatabase`
+ * refuses to open a database under Vitest — see its docblock; the point of the
+ * guard is that a suite which never asked for a database cannot be handed the
+ * developer's real one. That mock plus a mocked `getDbInstance` is how a suite
+ * that *did* ask drives the production branch (Issue #4097).
  *
  * @vitest-environment node
  */
@@ -38,6 +38,12 @@ vi.mock('@/lib/db/db-instance', () => ({
   getDbInstance: vi.fn(() => dbHolder.db),
 }));
 vi.mock('@/lib/ws-server', () => ({ broadcastMessage }));
+// See the module docblock: this is what puts `resolveSessionArchiveDatabase` on
+// its production branch.
+vi.mock('@/lib/test-run-detection', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/test-run-detection')>()),
+  isUnderTest: () => false,
+}));
 
 vi.mock('@/lib/tmux/tmux', () => ({
   hasSession: vi.fn(),
@@ -117,13 +123,9 @@ beforeEach(() => {
   upsertWorktree(db, worktree);
   globalThis.__agentEventGenerationStartedAt?.clear();
   globalThis.__agentEventLast?.clear();
-  // See the module docblock: this is what puts `resolveSessionArchiveDatabase`
-  // on its production branch.
-  vi.stubEnv('VITEST', '');
 });
 
 afterEach(() => {
-  vi.unstubAllEnvs();
   db.close();
 });
 
