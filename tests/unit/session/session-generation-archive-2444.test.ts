@@ -45,6 +45,18 @@ vi.mock('@/lib/ws-server', () => ({ broadcastMessage }));
 const getDbInstance = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/db/db-instance', () => ({ getDbInstance }));
 
+// Issue #4097: a pass-through until a test sets `detection.underTest`, which is
+// how a test reaches the production branch.
+const detection = vi.hoisted(() => ({ underTest: undefined as boolean | undefined }));
+vi.mock('@/lib/test-run-detection', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/test-run-detection')>();
+  return {
+    ...actual,
+    isUnderTest: (...args: Parameters<typeof actual.isUnderTest>) =>
+      detection.underTest ?? actual.isUnderTest(...args),
+  };
+});
+
 const WT = 'wt-2444';
 const OTHER_WT = 'wt-2444-other';
 
@@ -102,6 +114,7 @@ beforeEach(() => {
 afterEach(() => {
   db.close();
   vi.unstubAllEnvs();
+  detection.underTest = undefined;
 });
 
 describe('archiveSupersededSessionMessages', () => {
@@ -254,9 +267,24 @@ describe('resolveSessionArchiveDatabase', () => {
 
   it('resolves the shared singleton outside Vitest', () => {
     getDbInstance.mockReturnValue(db);
-    vi.stubEnv('VITEST', '');
+    detection.underTest = false;
 
     expect(resolveSessionArchiveDatabase()).toBe(db);
     expect(getDbInstance).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps refusing in a real worker with NODE_ENV swapped and VITEST gone (Issue #4097)', () => {
+    getDbInstance.mockReturnValue(db);
+    seed({ role: 'user', content: 'must stay active', instanceId: 'codex' });
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('VITEST', undefined);
+
+    expect(resolveSessionArchiveDatabase()).toBeNull();
+    expect(archiveSupersededSessionMessages({ worktreeId: WT, cliToolId: 'codex', instanceId: 'codex' })).toEqual({
+      archived: 0,
+      instanceId: 'codex',
+    });
+    expect(getDbInstance).not.toHaveBeenCalled();
+    expect(activeContents(WT, 'codex')).toEqual(['must stay active']);
   });
 });
