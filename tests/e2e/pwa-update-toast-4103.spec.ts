@@ -75,7 +75,30 @@ const RELEASE_NOTES = {
   ],
 };
 
-async function mockApi(page: Page, relays: unknown = { open: [], held: [] }): Promise<void> {
+/**
+ * A prompt tall enough to reach the card's height. Not taller: past about 10
+ * options the sheet's own top goes off the screen (it has no max-height).
+ */
+const TALL_PROMPT = {
+  type: 'multiple_choice',
+  question: 'Which of these should the agent do next, given everything above?',
+  options: Array.from({ length: 10 }, (_, i) => ({
+    number: i + 1,
+    label: `Option ${i + 1}`,
+    isDefault: i === 0,
+  })),
+  status: 'pending',
+};
+
+interface MockOptions {
+  relays?: unknown;
+  /** Read on every poll, so a test can take the prompt away. */
+  prompt?: { current: unknown };
+  /** How many rows the worktree list serves (default 1). */
+  rows?: number;
+}
+
+async function mockApi(page: Page, { relays = { open: [], held: [] }, prompt, rows = 1 }: MockOptions = {}): Promise<void> {
   await page.route(
     url => url.pathname.startsWith('/api/'),
     async route => {
@@ -84,7 +107,9 @@ async function mockApi(page: Page, relays: unknown = { open: [], held: [] }): Pr
       if (pathname === '/api/relays') return fulfillJson(route, relays);
       if (pathname === '/api/worktrees') {
         return fulfillJson(route, {
-          worktrees: [WORKTREE],
+          worktrees: Array.from({ length: rows }, (_, i) =>
+            i === 0 ? WORKTREE : { ...WORKTREE, id: `${WORKTREE_ID}-${i}`, name: `E2E row ${i}` }
+          ),
           repositories: [
             {
               path: WORKTREE.repositoryPath,
@@ -107,7 +132,8 @@ async function mockApi(page: Page, relays: unknown = { open: [], held: [] }): Pr
             cliToolId: 'claude',
             sessionStatus: 'ready',
             isGenerating: false,
-            isPromptWaiting: false,
+            isPromptWaiting: Boolean(prompt?.current),
+            ...(prompt?.current ? { promptData: prompt.current, promptAnswerable: true } : {}),
             content: '> ',
             fullOutput: '> ',
             realtimeSnippet: '> ',
@@ -249,7 +275,7 @@ test.describe('[#4103] the update prompt covers nothing that has to be pressed',
     await expect(page.locator('[role="dialog"]')).toHaveCount(0);
 
     // Below the dialog is not gone: once it closes, the prompt works.
-    const reload = page.getByTestId('pwa-update-toast-card').getByRole('button');
+    const reload = page.getByTestId('pwa-update-toast-card').getByRole('button').first();
     expect(await receivesClickAtCentre(reload), 'Reload is not reachable after the dialog closed').toBe(true);
     await clickAtCentre(page, reload);
     await expect
@@ -368,6 +394,108 @@ function heldRelay(id: string, instanceId: string, toInstance: string): Record<s
   };
 }
 
+test.describe('[#4103] the prompt on the phone screens other than the worktree', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize(PHONE_VIEWPORT);
+  });
+
+  test('Sessions: the filter and both sort controls take the click', async ({ page }) => {
+    await mockApi(page, { rows: 12 });
+    const rewritten = await armUpdatePrompt(page);
+    await page.goto('/sessions');
+    await expectPromptShown(page, rewritten);
+
+    for (const id of ['sessions-filter', 'sessions-sort-select', 'sessions-sort-direction']) {
+      const target = page.getByTestId(id);
+      await expect(target).toBeVisible({ timeout: 30_000 });
+      expect(await receivesClickAtCentre(target), `the prompt covers ${id}`).toBe(true);
+    }
+    await clickAtCentre(page, page.getByTestId('sessions-sort-direction'));
+  });
+
+  // The position must not rest on any one screen's layout: every control on every
+  // screen the prompt can appear over, rows included, with a long list.
+  for (const path of ['/sessions', '/repositories', '/review', '/more', '/skills']) {
+    test(`${path}: no control has its centre under the prompt`, async ({ page }) => {
+      await mockApi(page, { rows: 12 });
+      const rewritten = await armUpdatePrompt(page);
+      await page.goto(path);
+      await expectPromptShown(page, rewritten);
+      await page.waitForLoadState('networkidle').catch(() => undefined);
+
+      const covered = await page.evaluate(() => {
+        const card = document.querySelector('[data-testid="pwa-update-toast-card"]');
+        const controls = document.querySelectorAll<HTMLElement>('a, button, input, select, textarea, [role="button"]');
+        return Array.from(controls)
+          .filter(el => !card?.contains(el))
+          .filter(el => {
+            const r = el.getBoundingClientRect();
+            const x = r.left + r.width / 2;
+            const y = r.top + r.height / 2;
+            if (r.width === 0 || y < 0 || y > innerHeight) return false;
+            const hit = document.elementFromPoint(x, y);
+            return hit !== null && card?.contains(hit) === true;
+          })
+          .map(el => el.getAttribute('data-testid') ?? el.getAttribute('aria-label') ?? el.textContent?.slice(0, 40));
+      });
+      expect(covered).toEqual([]);
+    });
+  }
+
+  test('a confirmation sheet: the prompt steps aside, and comes back after it', async ({ page }) => {
+    const prompt = { current: TALL_PROMPT as unknown };
+    await mockApi(page, { prompt });
+    const rewritten = await armUpdatePrompt(page);
+    await page.goto(`/worktrees/${WORKTREE_ID}?pane=terminal`);
+
+    const sheet = page.getByTestId('mobile-prompt-sheet');
+    await expect(sheet).toBeVisible({ timeout: 30_000 });
+    expect(rewritten()).toBeGreaterThan(0);
+    await page.waitForTimeout(1_000);
+
+    // Positive control, and the reproduction of the defect: with the step-aside
+    // switched off the card IS drawn over the sheet, though the sheet says z-50.
+    // `main` opens a stacking context, so that z-50 never meets the card's 45.
+    const unhide = await page.addStyleTag({
+      content: '[data-testid="pwa-update-toast"] { display: flex !important; }',
+    });
+    const card = page.getByTestId('pwa-update-toast-card');
+    await expect(card).toBeVisible();
+    const sheetBox = await sheet.boundingBox();
+    const cardBox = await card.boundingBox();
+    expect(boxesOverlap(sheetBox!, cardBox!), 'the scenario no longer reaches the card').toBe(true);
+    expect(await receivesClickAtCentre(card), 'control: the card should be on top of the sheet').toBe(true);
+    await unhide.evaluate(el => (el as HTMLElement).remove());
+
+    await expect(card).toBeHidden();
+    // Everything in the sheet, not just what happens to be near the prompt.
+    const controls = sheet.locator('button, input, h3');
+    const count = await controls.count();
+    expect(count).toBeGreaterThan(5);
+    for (let i = 0; i < count; i += 1) {
+      expect(await receivesClickAtCentre(controls.nth(i)), `the prompt covers sheet item ${i}`).toBe(true);
+    }
+
+    // Negative control: this is the sheet stepping it aside, not a prompt that never came.
+    prompt.current = null;
+    await expect(sheet).toHaveCount(0, { timeout: 30_000 });
+    await expect(page.getByTestId('pwa-update-toast-card')).toBeVisible();
+  });
+
+  test('it can be put away for now, and the update is offered again on the next load', async ({ page }) => {
+    await mockApi(page);
+    const rewritten = await armUpdatePrompt(page);
+    await page.goto(`/worktrees/${WORKTREE_ID}?pane=terminal`);
+    await expectPromptShown(page, rewritten);
+
+    await page.getByTestId('pwa-update-toast-dismiss').click();
+    await expect(page.getByTestId('pwa-update-toast-card')).toHaveCount(0);
+
+    await page.reload();
+    await expect(page.getByTestId('pwa-update-toast-card')).toBeVisible({ timeout: 30_000 });
+  });
+});
+
 test.describe('[#4103] the PC roster at 1280 wide', () => {
   const HELD = [
     heldRelay('r1', 'claude', 'a'),
@@ -387,7 +515,7 @@ test.describe('[#4103] the PC roster at 1280 wide', () => {
       await page.addInitScript(id => {
         localStorage.setItem(`commandmate.worktree.activeActivity-${id}`, 'agent');
       }, WORKTREE_ID);
-      await mockApi(page, { open: HELD, held: HELD, owed: [], awaiting: [] });
+      await mockApi(page, { relays: { open: HELD, held: HELD, owed: [], awaiting: [] } });
       await page.goto(`/worktrees/${WORKTREE_ID}`);
 
       const many = page.getByTestId('agent-instance-relay-held-claude');

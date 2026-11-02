@@ -150,6 +150,23 @@ describe('ServiceWorkerRegistrar', () => {
       expect(toast.className).toContain('pr-[4.25rem]');
     });
 
+    it('steps aside only for a dialog inside main, which it would otherwise cover', async () => {
+      render(<ServiceWorkerRegistrar />);
+      const toast = await screen.findByTestId('pwa-update-toast');
+      // jsdom applies no Tailwind, so the behaviour itself is in the e2e spec.
+      expect(toast.className).toContain("[body:has(main_[aria-modal='true'])_&]:hidden");
+    });
+
+    it('can be put away, and offers a different waiting worker again', async () => {
+      render(<ServiceWorkerRegistrar />);
+      await screen.findByTestId('pwa-update-toast');
+      act(() => {
+        screen.getByTestId('pwa-update-toast-dismiss').click();
+      });
+      expect(screen.queryByTestId('pwa-update-toast')).toBeNull();
+      expect(waitingWorker.postMessage).not.toHaveBeenCalled();
+    });
+
     it('stands down while the version-mismatch banner is showing', async () => {
       render(
         <>
