@@ -468,12 +468,13 @@ describe('refactor rules (2-4-3, moved to templates/refactor-rules.md)', () => {
       '- **テストを変えずには通らないと分かったら、無理に通さない。**',
       SHORTSTAT,
       '- **数え方を変えない。**',
+      '- **計測の陰性対照に、無関係な関数の実測値を固定しない。**',
       '- **どう届いたかを書く。**',
     ];
     expect(text.split('\n').filter((line) => line.startsWith('- **'))).toEqual(
       leads.map((lead) => expect.stringContaining(lead))
     );
-    expect(text.trimEnd().split('\n')).toHaveLength(17);
+    expect(text.trimEnd().split('\n')).toHaveLength(19);
   });
 
   it('the orchestrate.md section points at the template instead of carrying the block', () => {
