@@ -21,6 +21,11 @@
  * The policy functions below are pure and exported for the same reason: "is
  * this method safe to repeat" is a *decision*, and a decision that can be
  * tested without a network is a decision that can be trusted.
+ *
+ * Issue #4034: each timeout below bounds two waits of the same length, the one for
+ * the headers and, separately, each silence while the body arrives
+ * (`lib/api-client-body-deadline.ts`). No separate number for the body: a stall is
+ * the same failure as a hang, and a poll's budget has to hold for its body too.
  */
 
 import { getSessionStartingMaxMsAcrossTools } from '@/config/session-starting-config';

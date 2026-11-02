@@ -101,8 +101,11 @@ export function useFileContentPolling({
         if (response.status === 304) return; // No changes
         if (!response.ok) return; // Ignore errors in polling
 
-        lastModifiedRef.current = response.headers.get('Last-Modified');
+        // Issue #4034: after the body, not before. A body that stalls fails this
+        // tick, and remembering its date first would make the next tick answer
+        // 304 for content this screen never received.
         const data: FileContent = await response.json();
+        lastModifiedRef.current = response.headers.get('Last-Modified');
         onLoadContentRef.current(tabPathRef.current, data);
       } catch {
         // Silently ignore network errors during polling
