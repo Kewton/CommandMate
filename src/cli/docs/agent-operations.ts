@@ -511,7 +511,65 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   commandmate instances <id> alias <instance-id> "New Name"
   commandmate instances <id> kill <instance-id>         # Kill only that instance's session
 
-  See "Multi-Session" below for the ID convention and roster semantics.
+  commandmate instances <id> add --agent codex --role reviewer   # Add it with a role (--no-role: none)
+  commandmate instances <id> set-role <instance-id> --role reviewer  # For its next start (or --none / --inherit)
+
+  See "Multi-Session" below for the ID convention and roster semantics, and
+  "commandmate roles" below for what a role is and how it reaches a session.
+  --json rows carry role: { stored, effectiveNext, launched, requested, restartPending },
+  each with its source. launched null means not known, which is not "no role".
+  set-role --json: { success, instanceId, cliToolId, adapterEnabled, stored, effectiveNext,
+  launched, requested, restartPending, applyPending, rosterRevision }. applyPending is true
+  only when the running process differs from the next start.
+
+### commandmate roles
+  Define roles and set which one a new session gets, without the screen. Never interactive.
+
+  commandmate roles list [--json]
+  commandmate roles show <role> [--json]
+  commandmate roles add <name> (--file <path> | --stdin) [--json]
+  commandmate roles edit <role> [--name <name>] [--file <path> | --stdin] [--if-version <n>] [--json]
+  commandmate roles rm <role> [--force] [--json]
+  commandmate roles default <tool> (--role <role> | --none) [--json]
+  commandmate roles default <tool> --repo <repository> (--role <role> | --none | --inherit) [--json]
+  commandmate roles defaults [--repo <repository>] [--tool <tool>] [--json]
+
+  Define a reviewer and make it this repository's Codex default:
+    commandmate roles add reviewer --file ./reviewer.md
+    commandmate roles default codex --repo . --role reviewer
+
+  Three different things:
+    roles edit       the role's text. Everything pointing at it follows, from its next start.
+    roles default    what a new start of a tool resolves to: one repository (--repo), or all
+                     that do not say otherwise. Schedules follow too.
+    set-role / send --role   one instance.
+  A role is fixed when the process starts. None of these touches a running session: stop it
+  (instances <wt> kill <id>) and send again.
+
+  <role> is an ID or a name; two candidates is exit 2 with both listed. Nothing is reserved:
+  --none, --no-role and --inherit are flags, so a role can be called none.
+  --repo is an ID, then a path (a value with "/" or starting with "."; a worktree of a
+  repository means that repository, so --repo . works inside one), then a name. See what is
+  registered with: commandmate roles defaults. Errors: unknown_repository,
+  repository_not_registered (a directory with no row), ambiguous_repository. A repository
+  with no setting for a tool reads stored: inherit, and effective says what it gets.
+  Tools: claude, codex, command-code, opencode, opencode-v2, copilot, antigravity.
+
+  send --role <role> / --no-role is a condition, not a switch: saved first, then a running
+  session gets the message only if it started with exactly that. Another role, or no record of
+  its start, is exit 32 with nothing typed, and the setting stays saved. An ad-hoc id needs
+  --register too: --register --role creates the instance and its role BEFORE sending, so the
+  first start has it, and repeating it replaces the setting and is a condition as above.
+  --expect-role-generation <g> with --expect-role-fingerprint <f> | --expect-no-role pin a send
+  to what capture --json's roleLaunch said, saving nothing: a process replaced before the
+  first key gets nothing (exit 32). A send with a role or a pin that types nothing withdraws the
+  --auto-yes it armed, and leaves a grant already on as it was.
+
+  Exit codes: 0 done; 1 server not running; 2 bad arguments, unknown or ambiguous role or
+  repository, a tool outside the feature; 31 a conflict, nothing changed (name_conflict,
+  version_conflict, role_in_use, instance_exists, roster_changed); 32 nothing typed (send);
+  99 anything else. --json failures: { success: false, error, message, candidates?, references? }.
+  Full --json shapes: commandmate roles --help
 
 ### commandmate skill <subcommand>
   Manage official Agent Skills. Every subcommand is a thin client over the same
@@ -604,6 +662,8 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   20  VERIFY_FAILED    - A verification gate failed (verify, wait --verify)
   21  NOT_STARTED      - Nothing to verify: no commits, no uncommitted changes
   30  NO_ACTIVE_SESSIONS - interrupt found no running session to interrupt
+  31  ROLE CONFLICT    - A role conflict; nothing changed or sent (roles, instances, send)
+  32  ROLE NOT_SENT    - The role condition does not hold or its start was refused; nothing typed (send, ask)
   99  UNEXPECTED_ERROR - Unexpected error / resource not found / no verdict
   124 TIMEOUT          - Wait or verification timeout exceeded
 

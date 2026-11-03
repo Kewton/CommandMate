@@ -18,6 +18,10 @@
  * half of the same feature — what a delegation left standing — and `send`'s and
  * `ask`'s `--reply-to` are declared on their own commands inside
  * `buildProgram()` because those commands already exist there.
+ *
+ * Issue #4116 attaches `roles` here for the first reason: it leaves `buildProgram()`
+ * what its tests characterise. `send --role` and `instances set-role` are declared on
+ * their own commands, as `--reply-to` is.
  */
 
 import { buildProgram } from './program';
@@ -25,6 +29,7 @@ import { createAskCommand } from './commands/ask';
 import { createWhoamiCommand } from './commands/whoami';
 import { createPeersCommand } from './commands/peers';
 import { createRelaysCommand } from './commands/relays';
+import { createRolesCommand } from './commands/roles';
 
 const program = buildProgram();
 
@@ -34,6 +39,7 @@ program.addCommand(createWhoamiCommand());
 program.addCommand(createPeersCommand());
 // Issue #2377: and the ledger the delegation leaves behind.
 program.addCommand(createRelaysCommand());
+program.addCommand(createRolesCommand());
 
 // Parse and execute
 program.parse();

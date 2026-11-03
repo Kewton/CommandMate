@@ -238,6 +238,7 @@ npm run db:reset      # DBリセット
 - **verify**: `commandmate verify <worktree-id> [--gates lint,unit] [--json]`。合格 0 / 不合格 20 / 作業証跡ゼロ 21（`.commandmate/verify.yaml`）
 - **auto-yes**: `commandmate auto-yes <worktree-id> --enable --duration 3h`。duration は 1h〜24h（1 時間刻み。既定 1h）。`--disable` で無効化
 - **instances**: roster の追加は `commandmate instances <worktree-id> add --agent codex`。roster 外 ID のアドホック起動は `commandmate send <worktree-id> "メッセージ" --agent codex --instance codex-3 --register`（`--agent` 必須）
+- **roles**: ロールは起動時に固定。`roles edit` / `roles default` / `set-role` は稼働中に効かない（止めて送り直す）。`send --role` は条件で、不一致・不明は未送信 exit 32（設定は保存済み）
 - **update**: 非対話環境で `--yes` が無いと exit 2（`commandmate update --yes`）。`--check` は変更しない
 - **remote**: `--provider cloudflare` は公開 Tunnel のため `--yes` が必須（非対話環境も）。`--provider tailscale` は承認不要
 
