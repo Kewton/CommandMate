@@ -9,12 +9,15 @@ import type { AgentRoleCliTool } from '@/types/agent-roles';
 import {
   buildRoleLaunchArguments,
   computeRoleInjection,
-  OPENCODE_CONFIG_CONTENT_ENV_VAR,
   renderRoleFlags,
+  renderSecretEnvAssignment,
+  splitRoleEnv,
 } from './adapters';
 import {
   buildArtifactName,
   inspectRoleArtifact,
+  removeLaunchEnvFile,
+  writeLaunchEnvFile,
   writeRoleArtifact,
   type ArtifactOptions,
 } from './artifacts';
@@ -43,6 +46,11 @@ export interface ExplicitRoleLaunch {
   /** Goes after it. Empty, or flags starting with a space. */
   lineSuffix: string;
   condition: ExplicitRoleCondition;
+  /**
+   * Remove the private file holding a composed env, once the line has run. The
+   * caller's to call whichever way the launch ends. Safe to call twice.
+   */
+  release: () => void;
 }
 
 /**
@@ -71,10 +79,15 @@ export async function prepareExplicitRoleLaunch(
     { adapter, name, path: artifact.path, expectedFingerprint: artifact.artifactFingerprint },
     context.artifacts
   );
-  const { args, env } = buildRoleLaunchArguments(injection, artifact, composition);
-  const content = env[OPENCODE_CONFIG_CONTENT_ENV_VAR];
+  const prepared = buildRoleLaunchArguments(injection, artifact, composition);
+  const { plain, secret } = splitRoleEnv(prepared);
+  const { args } = prepared;
+  // As a launch does: a line gets logged and a pane shows it, and the user's values
+  // may be secrets, so those go through a private file for the length of the launch.
+  const envFile = secret === null ? null : writeLaunchEnvFile(adapter, secret, context.artifacts);
+  const assignments = Object.entries(plain).map(([name, value]) => `${name}=${shellQuote(value)} `);
   return {
-    linePrefix: content === undefined ? '' : `${OPENCODE_CONFIG_CONTENT_ENV_VAR}=${shellQuote(content)} `,
+    linePrefix: `${envFile === null ? '' : renderSecretEnvAssignment(envFile)}${assignments.join('')}`,
     lineSuffix: args.length > 0 ? ` ${renderRoleFlags(args)}` : '',
     condition: {
       roleId: role.id,
@@ -82,6 +95,9 @@ export async function prepareExplicitRoleLaunch(
       injectionFingerprint: injection.injectionFingerprint,
       artifactFingerprint: artifact.artifactFingerprint,
       adapter,
+    },
+    release: () => {
+      if (envFile !== null) removeLaunchEnvFile(envFile);
     },
   };
 }

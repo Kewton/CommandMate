@@ -185,14 +185,9 @@ const DOCUMENTING_FILES = [
  * (#4113, `docs/design/agent-roles-adapters.md` §6–§7): it adds `instructions` (V1)
  * or `agents.<effective>.system` (V2) and nothing that decides permissions, and it
  * is applied outside every source's `prepareLaunch`. So this narrows the ruling to
- * those four files and leaves it whole everywhere else, `hooks/sources/**` included.
+ * those files and leaves it whole everywhere else, `hooks/sources/**` included.
  */
-const ROLE_ADAPTER_FILES = [
-  'lib/agent-roles/adapters.ts',
-  'lib/agent-roles/composition.ts',
-  'lib/agent-roles/explicit-launch.ts',
-  'lib/session/role-launch.ts',
-] as const;
+const ROLE_ADAPTER_FILES = ['lib/agent-roles/adapters.ts', 'lib/agent-roles/composition.ts'] as const;
 
 function normalized(file: string): string {
   return file.split(/[\\/]/).join('/');
@@ -271,7 +266,7 @@ describe('[#2053] `OPENCODE_CONFIG_CONTENT` is documented in src/, never used', 
     ).toEqual([]);
   });
 
-  it('the role adapter is exactly these four files', () => {
+  it('the role adapter is exactly these files', () => {
     const files = new Set(occurrences.filter((o) => !isCommentLine(o.text)).map((o) => normalized(o.file)));
     expect([...files].sort()).toEqual([...ROLE_ADAPTER_FILES].sort());
   });

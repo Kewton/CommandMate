@@ -30,13 +30,18 @@ import {
 } from '@/lib/session/agent-session-lifecycle';
 import { renderAgentLaunchCommand } from '@/lib/hooks/sources';
 import {
+  forgetLaunchRoleEvidence,
   getLaunchRoleEvidence,
   moveLaunchRoleEvidence,
+  noteLaunchResumedConversation,
   resetLaunchRoleStateForTest,
   resolveLaunchRole,
   runningRoleProblem,
   setLaunchRoleDatabaseForTest,
+  takeResumedAcrossRoleNotice,
+  wasResumedAcrossRole,
 } from '@/lib/session/role-launch';
+import { clearSessionStarting } from '@/lib/session/session-starting-state';
 import { resetSessionLaunchFlightsForTest, isSessionLaunchRoleMismatchError } from '@/lib/session/session-launch-flight';
 import { fixedEnvReader } from '@/lib/agent-roles/composition';
 import { readRoleLaunchRefusal, RoleLaunchRefusedError } from '@/lib/agent-roles/launch-errors';
@@ -744,6 +749,175 @@ describe('the automatic relaunch and concurrent starts', () => {
     } finally {
       otherDb.close();
     }
+  });
+});
+
+describe('the home a profile is looked for in', () => {
+  it.each([
+    ['codex', 'CODEX_HOME', 'codex'],
+    ['copilot', 'COPILOT_HOME', 'copilot'],
+  ] as const)('%s with hooks off: the line names the home the file was written to', async (cliTool, name, sub) => {
+    setSystemRoleDefault(db, cliTool, roleId);
+    const instance = tool(cliTool);
+    await instance.startSession(WT, worktreePath);
+    expect(instance.lines[0]).toContain(`${name}='${path.join(dir, sub)}'`);
+    expect(records(cliTool).requested?.artifactPath?.startsWith(path.join(dir, sub))).toBe(true);
+  });
+
+  it.each(['codex', 'copilot'] as const)('%s with no role: the line stays what it was', async (cliTool) => {
+    setSystemRoleDefault(db, 'gemini', roleId);
+    const instance = tool(cliTool);
+    await instance.startSession(WT, worktreePath);
+    expect(instance.lines[0]).not.toMatch(/CODEX_HOME|COPILOT_HOME/);
+  });
+});
+
+describe('a launch killed midway, and the one started after it', () => {
+  /** What the kill route does for a session. */
+  function kill(cliTool: CLIToolType): void {
+    forgetLaunchRoleEvidence({ worktreeId: WT, cliToolId: cliTool });
+    clearSessionStarting(WT, cliTool);
+    pane.exists = false;
+  }
+
+  it('its wait ending on the successor\'s screen writes nothing about the successor', async () => {
+    setSystemRoleDefault(db, 'claude', roleId);
+    const old = tool('claude');
+    let release!: () => void;
+    old.gate = new Promise((resolve) => (release = resolve));
+    const oldStart = old.startSession(WT, worktreePath);
+    await vi.waitFor(() => expect(records('claude').requested).not.toBeNull());
+    const oldGeneration = records('claude').requested?.sessionGeneration;
+
+    kill('claude');
+    await tool('claude').startSession(WT, worktreePath);
+    const successor = getLaunchRoleEvidence({ worktreeId: WT, cliToolId: 'claude' });
+    expect(successor?.sessionGeneration).not.toBe(oldGeneration);
+    const launched = records('claude').launched;
+    expect(launched?.sessionGeneration).toBe(successor?.sessionGeneration);
+
+    release();
+    await oldStart;
+    expect(records('claude').launched?.id).toBe(launched?.id);
+    expect(getLaunchRoleEvidence({ worktreeId: WT, cliToolId: 'claude' })).toEqual(successor);
+    const rows = db.prepare(`SELECT COUNT(*) AS n FROM agent_role_launch_records WHERE phase = 'launched'`).get() as { n: number };
+    expect(rows.n).toBe(1);
+  });
+
+  it('killed while its evidence was being read: the answer is not taken', async () => {
+    setSystemRoleDefault(db, 'opencode', roleId);
+    const old = tool('opencode');
+    let answer!: (config: unknown) => void;
+    old['readServerConfig'] = () => new Promise((resolve) => (answer = resolve));
+    const oldStart = old.startSession(WT, worktreePath);
+    await vi.waitFor(() => expect(answer).toBeDefined());
+    const file = records('opencode').requested?.artifactPath;
+
+    kill('opencode');
+    answer({ instructions: [file] });
+    await oldStart;
+    expect(records('opencode').launched).toBeNull();
+    expect(getLaunchRoleEvidence({ worktreeId: WT, cliToolId: 'opencode' })).toBeNull();
+  });
+
+  it('killed before its line was built: it opens nothing over the successor', async () => {
+    setSystemRoleDefault(db, 'claude', roleId);
+    const old = tool('claude');
+    let proceed!: () => void;
+    const before = new Promise<void>((resolve) => (proceed = resolve));
+    const original = old['launchSession'].bind(old);
+    old['launchSession'] = async (...args: Parameters<typeof original>) => {
+      await before;
+      pane.exists = false;
+      await original(...args);
+    };
+    const oldStart = old.startSession(WT, worktreePath);
+    await vi.waitFor(() => expect(old.launches).toBe(0));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    kill('claude');
+    await tool('claude').startSession(WT, worktreePath);
+    const successor = getLaunchRoleEvidence({ worktreeId: WT, cliToolId: 'claude' });
+    const count = () => (db.prepare('SELECT COUNT(*) AS n FROM agent_role_launch_records').get() as { n: number }).n;
+    const rowsBefore = count();
+
+    proceed();
+    await oldStart;
+    expect(getLaunchRoleEvidence({ worktreeId: WT, cliToolId: 'claude' })).toEqual(successor);
+    expect(count()).toBe(rowsBefore);
+  });
+
+  it('Copilot: an old launch reading `✗` does not stop the successor', async () => {
+    setSystemRoleDefault(db, 'copilot', roleId);
+    const old = tool('copilot');
+    let release!: () => void;
+    old.gate = new Promise((resolve) => (release = resolve));
+    const oldStart = old.startSession(WT, worktreePath);
+    await vi.waitFor(() => expect(records('copilot').requested).not.toBeNull());
+
+    kill('copilot');
+    await tool('copilot').startSession(WT, worktreePath);
+    pane.screen = '✗ Custom agent "cm-role-x" not found';
+    release();
+    await expect(oldStart).resolves.toBeUndefined();
+    expect(old.killed).toBe(0);
+    expect(getLaunchRoleEvidence({ worktreeId: WT, cliToolId: 'copilot' })).not.toBeNull();
+  });
+});
+
+describe('OpenCode V1 continuing a conversation under another role', () => {
+  /** What the driver does when it passes `-s`. */
+  class ResumingTool extends TestTool {
+    protected async launchSession(worktreeId: string, worktreePath_: string, instanceId?: string): Promise<void> {
+      await super.launchSession(worktreeId, worktreePath_, instanceId);
+      noteLaunchResumedConversation({ worktreeId, cliToolId: this.id, instanceId });
+    }
+  }
+  const target = { worktreeId: WT, cliToolId: 'opencode' as const };
+  const start = () => new ResumingTool('opencode', worktreePath).startSession(WT, worktreePath);
+
+  it('the same role resuming: nothing to say', async () => {
+    setSystemRoleDefault(db, 'opencode', roleId);
+    await start();
+    pane.exists = false;
+    await start();
+    expect(wasResumedAcrossRole(target)).toBe(false);
+    expect(takeResumedAcrossRoleNotice(target)).toBe(false);
+  });
+
+  it('the default moved from A to B: said once to a send, and stays readable', async () => {
+    setSystemRoleDefault(db, 'opencode', roleId);
+    await start();
+    setSystemRoleDefault(db, 'opencode', createAgentRole(db, { name: 'Other', body: 'OTHER' }).id);
+    pane.exists = false;
+    await start();
+    expect(wasResumedAcrossRole(target)).toBe(true);
+    expect(takeResumedAcrossRoleNotice(target)).toBe(true);
+    expect(takeResumedAcrossRoleNotice(target)).toBe(false);
+    expect(wasResumedAcrossRole(target)).toBe(true);
+  });
+
+  it('a driver relaunching on its own goes through it too', async () => {
+    setSystemRoleDefault(db, 'opencode', roleId);
+    const instance = new ResumingTool('opencode', worktreePath);
+    await instance.startSession(WT, worktreePath);
+    setSystemRoleDefault(db, 'opencode', null);
+    pane.alive = false;
+    await instance.relaunch(WT);
+    expect(wasResumedAcrossRole(target)).toBe(true);
+  });
+
+  it('no record of any role before, and none now: nothing to say', async () => {
+    setSystemRoleDefault(db, 'gemini', roleId);
+    await start();
+    expect(wasResumedAcrossRole(target)).toBe(false);
+  });
+
+  it('the real driver says so at the line that passes `-s`', () => {
+    const source = fs.readFileSync('src/lib/cli-tools/opencode.ts', 'utf8');
+    const note = source.indexOf('noteLaunchResumedConversation(target)');
+    expect(note).toBeGreaterThan(source.indexOf('recoverOpencodeSessionId(target, worktreePath)'));
+    expect(note).toBeGreaterThan(source.indexOf('if (resumeSessionId !== null) {'));
   });
 });
 

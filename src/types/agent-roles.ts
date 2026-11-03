@@ -223,6 +223,12 @@ export interface RoleApplicationState {
   restartPending: 'yes' | 'no' | 'unknown';
   /** Whether this tool's role replaces its default instructions. See {@link agentRoleReplacesDefaultInstructions}. */
   replacesDefaultInstructions?: boolean;
+  /**
+   * OpenCode V1: the process continued a remembered conversation that had another
+   * role, whose replies are still in its history (§6.4). A new conversation is the
+   * `newConversation` of `POST /send`, at the next start.
+   */
+  resumedAcrossRole?: boolean;
 }
 
 // ---------------------------------------------------------------------------

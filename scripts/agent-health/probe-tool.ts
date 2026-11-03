@@ -742,6 +742,7 @@ export async function probeTool(ctx: ProbeContext): Promise<ProbeOutcome> {
     if (!line.ok || serverPort === null) {
       const reason = line.ok ? 'ポートを確保できなかった' : line.reason;
       ctx.log(`${spec.tool}: ${reason}`);
+      explicitRole?.release();
       await releaseProbeServer(target);
       const failed = (['hook-correlation', ...screens] as const).filter(ctx.selected);
       for (const checkId of failed) {
@@ -823,6 +824,7 @@ export async function probeTool(ctx: ProbeContext): Promise<ProbeOutcome> {
   } finally {
     // Closed first, so the server going away with the session is not taken
     // for a broken stream.
+    explicitRole?.release();
     await recorder?.stop();
     await ctx.tmux.killSession(session.name);
     await sleep(HOOK_GRACE_MS);

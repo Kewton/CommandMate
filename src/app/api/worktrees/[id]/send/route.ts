@@ -62,12 +62,12 @@ import {
 import { resolveSendImagePath } from './send-image-path';
 import { answerSendFailure } from './send-failure';
 import {
-  applyOpencodeResumeChoice,
   checkRunningRole,
+  chooseNewOpencodeConversation,
   prepareSendRole,
   roleConditionBoundary,
   roleSendNotices,
-  type OpencodeResumeNotice,
+  takeOpencodeResumeNotice,
 } from './send-role';
 import { getLaunchRoleEvidence } from '@/lib/session/role-launch';
 
@@ -253,17 +253,10 @@ async function handleSend(
     if (modelRefusal) return modelRefusal;
 
     // Start CLI tool session if not running
-    let opencodeResume: OpencodeResumeNotice | null = null;
     if (!running) {
-      // Issue #4115 (§6.4): only OpenCode V1 resumes, and it goes on by default.
-      if (cliToolId === 'opencode' && (roleGate !== null || body.newConversation === true)) {
-        opencodeResume = applyOpencodeResumeChoice(db, {
-          worktreeId: id,
-          instanceId,
-          rosterInstanceId: target.instanceId,
-          newConversation: body.newConversation === true,
-          nextFingerprint: roleGate?.snapshot?.injectionFingerprint ?? null,
-        });
+      // Issue #4115 (§6.4): only OpenCode V1 resumes, and it goes on unless told otherwise.
+      if (cliToolId === 'opencode' && body.newConversation === true) {
+        chooseNewOpencodeConversation({ worktreeId: id, instanceId });
       }
       const started = await startSessionForSend({
         db,
@@ -388,7 +381,13 @@ async function handleSend(
     return NextResponse.json(
       {
         ...sent,
-        ...roleSendNotices({ cliToolId, gate: roleGate, evidence: getLaunchRoleEvidence(roleTarget), opencodeResume }),
+        ...roleSendNotices({
+          cliToolId,
+          gate: roleGate,
+          evidence: getLaunchRoleEvidence(roleTarget),
+          // Here and not at the start: a driver may have relaunched inside the send.
+          opencodeResume: cliToolId === 'opencode' ? takeOpencodeResumeNotice({ worktreeId: id, instanceId }) : null,
+        }),
       },
       { status: 201 },
     );

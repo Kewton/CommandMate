@@ -97,15 +97,19 @@ export function computeRosterRevision(roster: readonly AgentInstance[]): string 
 /** What only a running server can say about a launch, on top of the settings. */
 export interface RoleApplicationDeps extends RoleResolverDeps {
   /**
-   * The user's settings per tool. A rejection leaves that tool's fingerprint not
-   * computable. Omitted: nothing is computed, and `restartPending` is `unknown`.
+   * The user's settings as one instance's pane sees them: a session can have its own
+   * env, so this is per instance and not per tool. A rejection leaves that instance's
+   * fingerprint not computable. Omitted: nothing is computed, and `restartPending` is
+   * `unknown`.
    */
-  loadComposition?: (cliToolId: CLIToolType, worktreePath: string) => Promise<RoleComposition>;
+  loadComposition?: (cliToolId: CLIToolType, instanceId: string, worktreePath: string) => Promise<RoleComposition>;
   /**
    * The generation of the process this server started for the instance. A record of
    * any other generation is about a process it cannot vouch for. Omitted: none.
    */
   currentGeneration?: (cliToolId: CLIToolType, instanceId: string) => string | null;
+  /** OpenCode V1: the process continued a conversation that had another role (§6.4). */
+  resumedAcrossRole?: (cliToolId: CLIToolType, instanceId: string) => boolean;
 }
 
 /**
@@ -151,14 +155,15 @@ export async function buildInstanceRoleSettings(
   deps: RoleApplicationDeps = {}
 ): Promise<InstanceRoleSettingsResponse> {
   // Read first and outside: these wait, and no database answer may cross an await.
-  const compositions = new Map<CLIToolType, RoleComposition | null>();
+  const compositions = new Map<string, RoleComposition | null>();
   if (deps.loadComposition) {
     const row = getWorktreeById(db, worktreeId);
     if (row) {
-      const tools = new Set(currentRoster(db, row).map((instance) => instance.cliTool).filter(isAgentRoleCliTool));
+      const instances = currentRoster(db, row).filter((instance) => isAgentRoleCliTool(instance.cliTool));
       await Promise.all(
-        [...tools].map(async (tool) => {
-          compositions.set(tool, await deps.loadComposition?.(tool, row.path).catch(() => null) ?? null);
+        instances.map(async (instance) => {
+          const composition = await deps.loadComposition?.(instance.cliTool, instance.id, row.path).catch(() => null);
+          compositions.set(instance.id, composition ?? null);
         })
       );
     }
@@ -173,7 +178,7 @@ export async function buildInstanceRoleSettings(
       const stored = getInstanceRoleState(db, worktree.id, instance.id);
       const records = getLatestRoleLaunchRecords(db, worktree.id, instance.id);
       const resolution = resolveDefaultsForTool(db, instance.cliTool, membership, stored);
-      const next = injectionOf(resolution, compositions.get(instance.cliTool) ?? null);
+      const next = injectionOf(resolution, compositions.get(instance.id) ?? null);
       const generation = deps.currentGeneration?.(instance.cliTool, instance.id) ?? null;
       const launched =
         records.launched !== null && records.launched.sessionGeneration === generation ? records.launched : null;
@@ -194,6 +199,7 @@ export async function buildInstanceRoleSettings(
           launched,
           restartPending: computeRestartPending(next, launched),
           ...(agentRoleReplacesDefaultInstructions(instance.cliTool) ? { replacesDefaultInstructions: true } : {}),
+          ...(deps.resumedAcrossRole?.(instance.cliTool, instance.id) ? { resumedAcrossRole: true } : {}),
         },
       };
     });

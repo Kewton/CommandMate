@@ -101,6 +101,7 @@ import {
   resumeOpencodeEventStream,
 } from '@/lib/hooks/sources/opencode/runtime';
 import { getAssignedOpencodePort } from '@/lib/hooks/sources/opencode/ports';
+import { noteLaunchResumedConversation } from '@/lib/session/role-launch';
 import {
   getOpencodeLaunchSettings,
   opencodePromptSelection,
@@ -469,6 +470,8 @@ export class OpenCodeTool extends BaseCLITool {
           ? plannedCommand
           : withOpencodeResumedSession(plannedCommand, resumeSessionId);
       if (resumeSessionId !== null) {
+        // Issue #4115 (§6.4): a role that changed goes on in this conversation; it is told.
+        noteLaunchResumedConversation(target);
         logger.info('opencode-session-resumed', {
           worktreeId,
           instanceId: instanceId ?? this.id,

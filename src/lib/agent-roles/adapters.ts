@@ -16,6 +16,7 @@
  *
  * @module lib/agent-roles/adapters
  */
+import { dirname } from 'path';
 import { shellQuote } from '@/lib/hooks/hook-settings-generator';
 import type { AgentRoleCliTool, ResolvedRole } from '@/types/agent-roles';
 import { computeBodyFingerprint, computeFingerprint } from './fingerprint';
@@ -133,16 +134,19 @@ export interface RoleLaunchArguments {
    * Copilot's `--agent` must follow `gh copilot` and precede `-p` (§14).
    */
   headlessPosition: 'leading' | 'trailing';
-  /** The environment to start with. Empty for the adapters that take a flag. */
+  /** The environment to start with: a config value (OpenCode), or the home to look in (Codex, Copilot). */
   env: Record<string, string>;
   /**
-   * Whether {@link env} contains values the user set. They may be secrets, so they
-   * must not be spelled on a line a pane will show (§7.1).
+   * Whether the OpenCode config in {@link env} contains values the user set. They may
+   * be secrets, so it must not be spelled on a line a pane will show (§7.1). See
+   * {@link splitRoleEnv}.
    */
   envCarriesUserValues: boolean;
 }
 
 export const OPENCODE_CONFIG_CONTENT_ENV_VAR = 'OPENCODE_CONFIG_CONTENT';
+const CODEX_HOME_ENV_VAR = 'CODEX_HOME';
+const COPILOT_HOME_ENV_VAR = 'COPILOT_HOME';
 
 /** V1: appended to `instructions`, and nothing else touched (#2053's lesson). */
 function composeOpencodeV1Content(
@@ -174,10 +178,14 @@ export function buildRoleLaunchArguments(
   artifact: { name: string; path: string },
   composition: RoleComposition
 ): RoleLaunchArguments {
-  const flag = (args: string[], headlessPosition: 'leading' | 'trailing'): RoleLaunchArguments => ({
+  const flag = (
+    args: string[],
+    headlessPosition: 'leading' | 'trailing',
+    env: Record<string, string> = {}
+  ): RoleLaunchArguments => ({
     args,
     headlessPosition,
-    env: {},
+    env,
     envCarriesUserValues: false,
   });
   const content = (value: Record<string, unknown>): RoleLaunchArguments => ({
@@ -191,11 +199,15 @@ export function buildRoleLaunchArguments(
     case 'claude':
       return flag(['--append-system-prompt-file', artifact.path], 'trailing');
     case 'codex':
-      return flag(['-p', artifact.name], 'leading');
+      // Codex finds a profile by name in its home, and a pane has the tmux server's
+      // environment, not this process's. The home is stated so that the file just
+      // inspected is the one it finds, with hooks on or off.
+      return flag(['-p', artifact.name], 'leading', { [CODEX_HOME_ENV_VAR]: dirname(artifact.path) });
     case 'command-code':
       return flag(['--mod', artifact.path], 'trailing');
     case 'copilot':
-      return flag(['--agent', artifact.name], 'leading');
+      // The same for Copilot, whose definitions are in `<home>/agents/`.
+      return flag(['--agent', artifact.name], 'leading', { [COPILOT_HOME_ENV_VAR]: dirname(dirname(artifact.path)) });
     case 'antigravity':
       return flag(['--agent', artifact.name], 'trailing');
     case 'opencode':
@@ -205,6 +217,27 @@ export function buildRoleLaunchArguments(
         composeOpencodeV2Content(composition.opencodeUserContent, injection.effectiveAgent ?? 'build', artifact.path)
       );
   }
+}
+
+/**
+ * Which part of a role's environment may be written on a line.
+ *
+ * @returns `plain`, safe to spell (paths and names); `secret`, the value of the one
+ *   variable that has to go through a private file, when it holds the user's values
+ */
+export function splitRoleEnv(role: Pick<RoleLaunchArguments, 'env' | 'envCarriesUserValues'>): {
+  plain: Record<string, string>;
+  secret: string | null;
+} {
+  const { [OPENCODE_CONFIG_CONTENT_ENV_VAR]: content, ...others } = role.env;
+  if (content === undefined) return { plain: others, secret: null };
+  if (role.envCarriesUserValues) return { plain: others, secret: content };
+  return { plain: { ...others, [OPENCODE_CONFIG_CONTENT_ENV_VAR]: content }, secret: null };
+}
+
+/** The assignment that reads a composed config from its private file. */
+export function renderSecretEnvAssignment(file: string): string {
+  return `${OPENCODE_CONFIG_CONTENT_ENV_VAR}="$(cat ${shellQuote(file)})" `;
 }
 
 /** The arguments as they go on a shell line. */

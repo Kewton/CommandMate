@@ -23,7 +23,7 @@ import {
 } from '@/lib/agent-roles/management';
 import { respondToRoleError, roleErrorResponse } from '@/lib/agent-roles/route-errors';
 import { parseRoleAssignmentInput } from '@/lib/agent-roles/validation';
-import { getLaunchRoleEvidence } from '@/lib/session/role-launch';
+import { getLaunchRoleEvidence, wasResumedAcrossRole } from '@/lib/session/role-launch';
 import { loadPaneComposition } from '@/lib/agent-roles/pane-env';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
@@ -40,10 +40,12 @@ type Params = { params: Promise<{ id: string }> };
 /** What only this server knows: the user's settings, and the process it started. */
 function applicationDeps(worktreeId: string): RoleApplicationDeps {
   return {
-    loadComposition: (cliToolId: CLIToolType, worktreePath: string) =>
-      loadPaneComposition(worktreeId, cliToolId, worktreePath),
+    loadComposition: (cliToolId: CLIToolType, instanceId: string, worktreePath: string) =>
+      loadPaneComposition(worktreeId, cliToolId, instanceId, worktreePath),
     currentGeneration: (cliToolId: CLIToolType, instanceId: string) =>
       getLaunchRoleEvidence({ worktreeId, cliToolId, instanceId })?.sessionGeneration ?? null,
+    resumedAcrossRole: (cliToolId: CLIToolType, instanceId: string) =>
+      wasResumedAcrossRole({ worktreeId, cliToolId, instanceId }),
   };
 }
 

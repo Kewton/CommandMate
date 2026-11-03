@@ -41,16 +41,16 @@ import { buildCompositeKey, COMPOSITE_KEY_SEPARATOR } from '@/lib/auto-yes-state
 import { getOrInitGlobal } from '@/lib/global-state';
 import { createLogger } from '@/lib/logger';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { getInstanceRoleState, hasAnyRoleSetting, recordRoleLaunch } from '@/lib/db/agent-roles-db';
-import { shellQuote } from '@/lib/hooks/hook-settings-generator';
+import { getInstanceRoleState, getLatestRoleLaunchRecords, hasAnyRoleSetting, recordRoleLaunch } from '@/lib/db/agent-roles-db';
 import { renderAgentLaunchCommand } from '@/lib/hooks/sources/launch-command';
 import type { AgentLaunchContext, AgentLaunchPlan } from '@/lib/hooks/sources/types';
 import { computeFingerprint } from '@/lib/agent-roles/fingerprint';
 import {
   buildRoleLaunchArguments,
   computeRoleInjection,
-  OPENCODE_CONFIG_CONTENT_ENV_VAR,
   renderRoleFlags,
+  renderSecretEnvAssignment,
+  splitRoleEnv,
   type RoleComposition,
   type RoleInjection,
   type RoleLaunchArguments,
@@ -125,6 +125,10 @@ export interface LaunchRoleEvidence {
 /** With what the launch composed from, which may hold the user's values and stays in here. */
 interface StoredLaunchRoleEvidence extends LaunchRoleEvidence {
   composition: RoleComposition | null;
+  /** OpenCode V1: this process continued a conversation that had another role (§6.4). */
+  resumedAcrossRole: boolean;
+  /** Whether a send's answer has said so already. */
+  resumeNoticeTaken: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -136,6 +140,8 @@ declare global {
   var __launchRoleEvidence: Map<string, StoredLaunchRoleEvidence> | undefined;
   // eslint-disable-next-line no-var
   var __launchRoleScope: AsyncLocalStorage<LaunchRoleStore> | undefined;
+  // eslint-disable-next-line no-var
+  var __launchRoleEpochs: Map<string, number> | undefined;
   // eslint-disable-next-line no-var
   var __launchRoleTestDb: Database.Database | null | undefined;
 }
@@ -389,6 +395,10 @@ interface LaunchRoleStore {
   envFile: string | null;
   /** Set once a launch line was really built. Still null at the end means a reused process. */
   generation: string | null;
+  /** The session's kill count when this launch began. See {@link isStale}. */
+  epoch: number;
+  /** What the launch before this one injected, read before this one's record. OpenCode V1's notice. */
+  previousFingerprint: string | null;
 }
 
 function scope(): AsyncLocalStorage<LaunchRoleStore> {
@@ -403,9 +413,35 @@ function evidenceKey(target: LaunchRoleTarget): string {
   return buildCompositeKey(target.worktreeId, target.cliToolId, target.instanceId);
 }
 
+function epochMap(): Map<string, number> {
+  return getOrInitGlobal('__launchRoleEpochs', () => new Map<string, number>());
+}
+
+/**
+ * Whether this launch no longer speaks for the session. A launch killed midway keeps
+ * running until its readiness wait ends, and that wait can be satisfied by the screen
+ * of the launch started after it (`forgetSessionLaunch`, #3195). Such a launch writes
+ * nothing, stops nothing and moves nothing: the session is its successor's.
+ *
+ * A kill moves the epoch, which catches a launch that has not opened a generation yet.
+ * A generation that is no longer the current one catches the rest.
+ */
+function isStale(store: LaunchRoleStore): boolean {
+  const key = evidenceKey(store.snapshot.target);
+  if ((epochMap().get(key) ?? 0) !== store.epoch) return true;
+  return store.generation !== null && evidenceMap().get(key)?.sessionGeneration !== store.generation;
+}
+
 /** Run one launch with its snapshot, removing the composed env file however it ends. */
 export async function runWithLaunchRole<T>(snapshot: LaunchRoleSnapshot, fn: () => Promise<T>): Promise<T> {
-  const store: LaunchRoleStore = { snapshot, prepared: null, envFile: null, generation: null };
+  const store: LaunchRoleStore = {
+    snapshot,
+    prepared: null,
+    envFile: null,
+    generation: null,
+    epoch: epochMap().get(evidenceKey(snapshot.target)) ?? 0,
+    previousFingerprint: null,
+  };
   try {
     return await scope().run(store, fn);
   } finally {
@@ -439,7 +475,9 @@ function sameTarget(a: LaunchRoleTarget, b: LaunchRoleTarget): boolean {
 function recordPhase(store: LaunchRoleStore, phase: RoleLaunchPhase): void {
   const { snapshot, prepared, generation } = store;
   const { resolution, injection, target, db } = snapshot;
-  if (generation === null || resolution === null || resolution.kind === 'ambiguous') return;
+  // Every await between a piece of evidence and this write ends here: `launched` is
+  // only ever written for the generation that is current in the same step.
+  if (generation === null || resolution === null || resolution.kind === 'ambiguous' || isStale(store)) return;
   const role = resolution.kind === 'role' ? resolution.role : null;
   try {
     recordRoleLaunch(db, {
@@ -471,11 +509,23 @@ function recordPhase(store: LaunchRoleStore, phase: RoleLaunchPhase): void {
 }
 
 function openGeneration(store: LaunchRoleStore): void {
+  if (isStale(store)) {
+    // The line is still built for whatever the driver does with it; nothing says it is the session's.
+    store.generation ??= randomUUID();
+    return;
+  }
+  const { target, db } = store.snapshot;
+  if (store.generation === null && target.cliToolId === 'opencode') {
+    const instanceId = target.instanceId ?? target.cliToolId;
+    store.previousFingerprint = getLatestRoleLaunchRecords(db, target.worktreeId, instanceId).requested?.injectionFingerprint ?? null;
+  }
   store.generation = randomUUID();
   evidenceMap().set(evidenceKey(store.snapshot.target), {
     sessionGeneration: store.generation,
     injectionFingerprint: store.snapshot.injectionFingerprint,
     composition: store.snapshot.composition,
+    resumedAcrossRole: false,
+    resumeNoticeTaken: false,
   });
   recordPhase(store, 'requested');
 }
@@ -488,6 +538,21 @@ function openGeneration(store: LaunchRoleStore): void {
 export function noteLaunchProcessReplaced(target: LaunchRoleTarget): void {
   const store = scope().getStore();
   if (store && store.generation !== null && sameTarget(store.snapshot.target, target)) openGeneration(store);
+}
+
+/**
+ * This launch is about to continue a remembered conversation (OpenCode V1, §6.4). If
+ * the role is not the one that conversation last ran under, the role changes for all
+ * of it with the old role's replies still in its history, and someone has to be told.
+ * Here, in the launch, so that a change by inheritance and a driver's own relaunch
+ * are told as well as a send that named a role.
+ */
+export function noteLaunchResumedConversation(target: LaunchRoleTarget): void {
+  const store = scope().getStore();
+  if (!store || store.generation === null || !sameTarget(store.snapshot.target, target) || isStale(store)) return;
+  if (store.previousFingerprint === store.snapshot.injectionFingerprint) return;
+  const stored = evidenceMap().get(evidenceKey(target));
+  if (stored) stored.resumedAcrossRole = true;
 }
 
 /**
@@ -508,24 +573,22 @@ export function renderLaunchCommandWithRole(context: AgentLaunchContext, plan: A
   if (prepared === null) {
     line = renderAgentLaunchCommand(plan);
   } else {
-    const { env, envCarriesUserValues, args } = prepared.args;
-    const content = env[OPENCODE_CONFIG_CONTENT_ENV_VAR];
+    const { args } = prepared.args;
+    const { plain, secret } = splitRoleEnv(prepared.args);
     let prefix = '';
-    let finalPlan = plan;
-    if (content !== undefined && envCarriesUserValues) {
+    if (secret !== null) {
       // The user's values may be secrets and a pane shows what is typed into it,
       // so they go through a private file for the length of this launch (§7.1).
       if (store.envFile === null) {
         try {
-          store.envFile = writeLaunchEnvFile(prepared.artifact.adapter, content);
+          store.envFile = writeLaunchEnvFile(prepared.artifact.adapter, secret);
         } catch (error) {
           throw new RoleLaunchRefusedError('artifact-failed', `The composed environment could not be written: ${(error as Error).message}`);
         }
       }
-      prefix = `${OPENCODE_CONFIG_CONTENT_ENV_VAR}="$(cat ${shellQuote(store.envFile)})" `;
-    } else if (content !== undefined) {
-      finalPlan = { ...plan, env: { ...plan.env, [OPENCODE_CONFIG_CONTENT_ENV_VAR]: content } };
+      prefix = renderSecretEnvAssignment(store.envFile);
     }
+    const finalPlan = { ...plan, env: { ...plan.env, ...plain } };
     const flags = args.length > 0 ? ` ${renderRoleFlags(args)}` : '';
     line = `${prefix}${renderAgentLaunchCommand(finalPlan)}${flags}`;
   }
@@ -578,7 +641,7 @@ function serverConfigConfirms(store: LaunchRoleStore, config: unknown): boolean 
  */
 export async function settleLaunchRole(checks: LaunchRoleChecks): Promise<void> {
   const store = scope().getStore();
-  if (!store || store.generation === null) return;
+  if (!store || store.generation === null || isStale(store)) return;
   const { injection } = store.snapshot;
   const alive = async (): Promise<boolean> => checks.isAlive().catch(() => false);
 
@@ -595,6 +658,8 @@ export async function settleLaunchRole(checks: LaunchRoleChecks): Promise<void> 
       return;
     case 'copilot': {
       const screen = await checks.capture().catch(() => null);
+      // What it read may be the screen of a launch started after this one was killed.
+      if (isStale(store)) return;
       if (screen !== null && COPILOT_ROLE_NOT_TAKEN.test(screen)) {
         forgetLaunchRoleEvidence(store.snapshot.target);
         await checks.kill().catch((error: unknown) => {
@@ -657,7 +722,22 @@ export async function runningRoleProblem(
 
 /** The session is gone, or its id is. What was known about it no longer applies. */
 export function forgetLaunchRoleEvidence(target: LaunchRoleTarget): void {
-  evidenceMap().delete(evidenceKey(target));
+  const key = evidenceKey(target);
+  evidenceMap().delete(key);
+  epochMap().set(key, (epochMap().get(key) ?? 0) + 1);
+}
+
+/** Whether this process continued a conversation that had another role (§6.4). */
+export function wasResumedAcrossRole(target: LaunchRoleTarget): boolean {
+  return evidenceMap().get(evidenceKey(target))?.resumedAcrossRole === true;
+}
+
+/** The same, once per process, for the answer of a send. */
+export function takeResumedAcrossRoleNotice(target: LaunchRoleTarget): boolean {
+  const stored = evidenceMap().get(evidenceKey(target));
+  if (!stored?.resumedAcrossRole || stored.resumeNoticeTaken) return false;
+  stored.resumeNoticeTaken = true;
+  return true;
 }
 
 /**
@@ -674,6 +754,13 @@ export function moveLaunchRoleEvidence(renames: ReadonlyArray<{ oldId: string; n
     moved.set(`${rename.newId}${key.slice(rename.oldId.length)}`, evidence);
   }
   for (const [key, evidence] of moved) map.set(key, evidence);
+  const epochs = epochMap();
+  for (const [key, epoch] of [...epochs]) {
+    const rename = renames.find(({ oldId }) => key.startsWith(`${oldId}${COMPOSITE_KEY_SEPARATOR}`));
+    if (!rename) continue;
+    epochs.delete(key);
+    epochs.set(`${rename.newId}${key.slice(rename.oldId.length)}`, epoch);
+  }
 }
 
 /** A Schedule's role, or why it may not run. */
@@ -736,6 +823,7 @@ export async function resolveScheduleRole(
 /** Forget everything in memory. Test-only. */
 export function resetLaunchRoleStateForTest(): void {
   evidenceMap().clear();
+  epochMap().clear();
   globalThis.__launchRoleTestDb = null;
 }
 

@@ -20,11 +20,12 @@
  */
 import { NextResponse } from 'next/server';
 import type Database from 'better-sqlite3';
-import { forgetOpencodeSession, getRememberedOpencodeSession } from '@/lib/session/opencode-session-store';
+import { forgetOpencodeSession } from '@/lib/session/opencode-session-store';
 import {
   getLaunchRoleEvidence,
   recomputeInjectionFingerprint,
   resolveLaunchRole,
+  takeResumedAcrossRoleNotice,
   type LaunchRoleSnapshot,
 } from '@/lib/session/role-launch';
 import { roleEnvReaderForPane } from '@/lib/agent-roles/pane-env';
@@ -35,7 +36,7 @@ import {
   ROLE_LAUNCH_REFUSED_CODE,
   RoleConditionUnmetError,
 } from '@/lib/agent-roles/launch-errors';
-import { AgentRoleNotFoundError, getInstanceRoleState, getLatestRoleLaunchRecords } from '@/lib/db/agent-roles-db';
+import { AgentRoleNotFoundError, getInstanceRoleState } from '@/lib/db/agent-roles-db';
 import type { InputBoundaryHooks } from '@/lib/session/instance-input-lock';
 import type { SendAttemptReason } from '@/lib/session/send-attempt-types';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -279,34 +280,32 @@ export function roleSendNotices(input: {
 export interface OpencodeResumeNotice {
   continued: true;
   message: string;
-  /** Send this field as true to start a new conversation instead. */
+  /** Send this field as true, with the session stopped, to start a new conversation instead. */
   newConversationField: 'newConversation';
 }
 
 /**
- * OpenCode V1 continues its remembered conversation (§6.4), and the role changes for
- * the whole of it, with the old role's replies still in its history. The default is
- * to continue and say so; `newConversation` drops only the remembered id, and the
- * history stays where it is.
+ * The choice of a new conversation (§6.4): drops only the remembered id, and the
+ * history stays where it is. Without it the driver continues, and says so through
+ * {@link takeOpencodeResumeNotice}.
  */
-export function applyOpencodeResumeChoice(
-  db: Database.Database,
-  input: { worktreeId: string; instanceId: string | undefined; rosterInstanceId: string; newConversation: boolean; nextFingerprint: string | null }
-): OpencodeResumeNotice | null {
-  const target = { worktreeId: input.worktreeId, cliToolId: 'opencode' as const, instanceId: input.instanceId };
-  if (getRememberedOpencodeSession(target) === null) return null;
-  if (input.newConversation) {
-    forgetOpencodeSession(target);
+export function chooseNewOpencodeConversation(target: { worktreeId: string; instanceId: string | undefined }): void {
+  forgetOpencodeSession({ worktreeId: target.worktreeId, cliToolId: 'opencode', instanceId: target.instanceId });
+}
+
+/**
+ * What the launch noticed, whoever started it: this request, or the driver relaunching
+ * inside the send. Once per process.
+ */
+export function takeOpencodeResumeNotice(target: { worktreeId: string; instanceId: string | undefined }): OpencodeResumeNotice | null {
+  if (!takeResumedAcrossRoleNotice({ worktreeId: target.worktreeId, cliToolId: 'opencode', instanceId: target.instanceId })) {
     return null;
   }
-  const { requested } = getLatestRoleLaunchRecords(db, input.worktreeId, input.rosterInstanceId);
-  if (requested !== null && requested.injectionFingerprint === input.nextFingerprint) return null;
-  if (requested === null && input.nextFingerprint === null) return null;
   return {
     continued: true,
     message:
       'This conversation continues under a different role, and what the earlier role said stays in its history. ' +
-      'Send with newConversation to start a new conversation instead.',
+      'To start a new conversation instead, stop the session and send with newConversation.',
     newConversationField: 'newConversation',
   };
 }

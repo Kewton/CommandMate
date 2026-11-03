@@ -15,11 +15,12 @@ import { createRepository } from '@/lib/db/db-repository';
 import { createAgentRole, getInstanceRoleState, setSystemRoleDefault, updateAgentRole } from '@/lib/db/agent-roles-db';
 import { getWorktreeById } from '@/lib/db';
 import {
-  applyOpencodeResumeChoice,
   checkRunningRole,
+  chooseNewOpencodeConversation,
   prepareSendRole,
   roleConditionBoundary,
   roleSendNotices,
+  takeOpencodeResumeNotice,
   type SendRoleGate,
 } from '@/app/api/worktrees/[id]/send/send-role';
 import { answerSessionStartFailure } from '@/app/api/worktrees/[id]/send/send-session-start';
@@ -363,29 +364,16 @@ describe('the answers', () => {
   });
 });
 
-describe('OpenCode V1 continuing a conversation', () => {
+describe('OpenCode V1: choosing a new conversation', () => {
   const opencode = { worktreeId: WT, cliToolId: 'opencode' as const };
-  const choice = (newConversation: boolean, nextFingerprint: string | null) =>
-    applyOpencodeResumeChoice(db, { worktreeId: WT, instanceId: undefined, rosterInstanceId: 'opencode', newConversation, nextFingerprint });
 
-  it('nothing remembered: nothing to say', () => {
-    expect(choice(false, 'f')).toBeNull();
-  });
-
-  it('continues by default and says the old role stays in the history, keeping the id', () => {
+  it('drops only the remembered id', () => {
     rememberOpencodeSession(opencode, { sessionId: SESSION_ID, worktreePath });
-    expect(choice(false, 'f')).toMatchObject({ continued: true, newConversationField: 'newConversation' });
-    expect(getRememberedOpencodeSession(opencode)?.sessionId ?? null).toBe(SESSION_ID);
-  });
-
-  it('a new conversation drops only the remembered id', () => {
-    rememberOpencodeSession(opencode, { sessionId: SESSION_ID, worktreePath });
-    expect(choice(true, 'f')).toBeNull();
+    chooseNewOpencodeConversation({ worktreeId: WT, instanceId: undefined });
     expect(getRememberedOpencodeSession(opencode)).toBeNull();
   });
 
-  it('no role before and none now: nothing to say', () => {
-    rememberOpencodeSession(opencode, { sessionId: SESSION_ID, worktreePath });
-    expect(choice(false, null)).toBeNull();
+  it('with nothing noted there is nothing to say', () => {
+    expect(takeOpencodeResumeNotice({ worktreeId: WT, instanceId: undefined })).toBeNull();
   });
 });

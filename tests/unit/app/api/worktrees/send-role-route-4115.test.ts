@@ -17,12 +17,18 @@ import { resetSessionLaunchFlightsForTest } from '@/lib/session/session-launch-f
 import {
   getLaunchRoleEvidence,
   resetLaunchRoleStateForTest,
+  noteLaunchResumedConversation,
   resolveLaunchRole,
   runWithLaunchRole,
   setLaunchRoleDatabaseForTest,
 } from '@/lib/session/role-launch';
 import { beginAgentSession, buildAgentLaunchCommandLine } from '@/lib/session/agent-session-lifecycle';
 import { fixedEnvReader } from '@/lib/agent-roles/composition';
+import {
+  getRememberedOpencodeSession,
+  rememberOpencodeSession,
+  resetOpencodeSessionMemories,
+} from '@/lib/session/opencode-session-store';
 import { RoleLaunchRefusedError } from '@/lib/agent-roles/launch-errors';
 import type { Worktree } from '@/types/models';
 
@@ -40,6 +46,22 @@ vi.mock('@/lib/cli-tools/codex', () => ({
     async sendMessage() {}
     async killSession() {}
     getSessionName(id: string) { return `mcbd-codex-${id}`; }
+  },
+}));
+const opencodeStart = vi.fn();
+const opencodeRunning = vi.fn(async () => false);
+vi.mock('@/lib/cli-tools/opencode', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/cli-tools/opencode')>()),
+  OpenCodeTool: class {
+    id = 'opencode';
+    name = 'OpenCode';
+    command = 'opencode';
+    async isInstalled() { return true; }
+    async isRunning() { return opencodeRunning(); }
+    async startSession(...args: unknown[]) { return opencodeStart(...args); }
+    async sendMessage() {}
+    async killSession() {}
+    getSessionName(id: string) { return `mcbd-opencode-${id}`; }
   },
 }));
 vi.mock('@/lib/cli-tools/session-ownership', async (importOriginal) => ({
@@ -144,6 +166,8 @@ beforeEach(async () => {
   vi.clearAllMocks();
   resetSessionLaunchFlightsForTest();
   isRunning.mockResolvedValue(false);
+  opencodeRunning.mockResolvedValue(false);
+  opencodeStart.mockReset();
   startSession.mockReset();
   startSession.mockImplementation(async () => launchProcess());
   sendUserMessage.mockReset();
@@ -151,12 +175,14 @@ beforeEach(async () => {
   vi.stubEnv('CM_AGENT_HOOKS_INJECT', '0');
   vi.stubEnv('CM_AGENT_ROLE_ARTIFACTS_DIR', path.join(dir, 'data'));
   vi.stubEnv('CODEX_HOME', path.join(dir, 'codex'));
+  vi.stubEnv('CM_OPENCODE_SESSION_FILE', path.join(dir, 'opencode-sessions.json'));
   fs.mkdirSync(path.join(dir, 'codex'));
 });
 
 afterEach(async () => {
   resetLaunchRoleStateForTest();
   resetSessionLaunchFlightsForTest();
+  resetOpencodeSessionMemories();
   vi.unstubAllEnvs();
   const { setMockDb } = (await import('@/lib/db/db-instance')) as unknown as { setMockDb: (db: Database.Database | null) => void };
   setMockDb(null);
@@ -239,6 +265,68 @@ describe('POST /send', () => {
     expect(await response.json()).toMatchObject({ sendOutcome: 'not_sent', roleSettings: { saved: false } });
     expect(startSession).not.toHaveBeenCalled();
     expect(listAgentRoles(db)).toHaveLength(2);
+  });
+});
+
+describe('POST /send to OpenCode V1, continuing a conversation', () => {
+  const opencode = { worktreeId: WT, cliToolId: 'opencode' as const };
+  const sendV1 = (extra: Record<string, unknown> = {}) => post(sendMessage, 'send', { content: 'hello', cliToolId: 'opencode', ...extra });
+
+  it('a default moved by inheritance, with nothing named: the answer says the conversation goes on', async () => {
+    const launchV1 = async (): Promise<void> => {
+      const snapshot = await resolveLaunchRole(db, { ...opencode, worktreePath, readEnv: fixedEnvReader({}) });
+      await runWithLaunchRole(snapshot, async () => {
+        beginAgentSession(opencode);
+        buildAgentLaunchCommandLine({ target: opencode, executablePath: 'opencode', worktreePath });
+        noteLaunchResumedConversation(opencode);
+      });
+    };
+    setSystemRoleDefault(db, 'opencode', role);
+    await launchV1();
+    setSystemRoleDefault(db, 'opencode', other);
+    opencodeStart.mockImplementation(launchV1);
+
+    const first = await (await sendV1()).json();
+    expect(first.roleResume).toMatchObject({ continued: true, newConversationField: 'newConversation' });
+    expect(first.roleLaunch).toBeUndefined();
+
+    // Once per process.
+    expect((await (await sendV1()).json()).roleResume).toBeUndefined();
+  });
+
+  it('a relaunch inside the send is told as well, in that send\'s answer', async () => {
+    setSystemRoleDefault(db, 'opencode', role);
+    const launchV1 = async (): Promise<void> => {
+      const snapshot = await resolveLaunchRole(db, { ...opencode, worktreePath, readEnv: fixedEnvReader({}) });
+      await runWithLaunchRole(snapshot, async () => {
+        beginAgentSession(opencode);
+        buildAgentLaunchCommandLine({ target: opencode, executablePath: 'opencode', worktreePath });
+        noteLaunchResumedConversation(opencode);
+      });
+    };
+    await launchV1();
+    setSystemRoleDefault(db, 'opencode', other);
+    opencodeRunning.mockResolvedValue(true);
+    sendUserMessage.mockImplementation(async () => {
+      await launchV1();
+      return { ok: true, message: { id: 'm2', content: 'hello' } };
+    });
+    expect((await (await sendV1()).json()).roleResume?.continued).toBe(true);
+  });
+
+  it('`newConversation` drops the remembered id before the start', async () => {
+    rememberOpencodeSession(opencode, { sessionId: 'ses_0123456789abcdefghijklmnop', worktreePath });
+    expect((await sendV1({ newConversation: true })).status).toBe(201);
+    expect(getRememberedOpencodeSession(opencode)).toBeNull();
+  });
+
+  it('without it the id stays, and to a running process the choice does nothing', async () => {
+    rememberOpencodeSession(opencode, { sessionId: 'ses_0123456789abcdefghijklmnop', worktreePath });
+    await sendV1();
+    expect(getRememberedOpencodeSession(opencode)).not.toBeNull();
+    opencodeRunning.mockResolvedValue(true);
+    await sendV1({ newConversation: true });
+    expect(getRememberedOpencodeSession(opencode)).not.toBeNull();
   });
 });
 

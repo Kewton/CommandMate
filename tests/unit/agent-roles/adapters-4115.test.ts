@@ -30,6 +30,7 @@ import { prepareExplicitRoleLaunch } from '@/lib/agent-roles/explicit-launch';
 import { buildInstanceRoleSettings, computeRestartPending } from '@/lib/agent-roles/management';
 import { runMigrations } from '@/lib/db/db-migrations';
 import { createRepository } from '@/lib/db/db-repository';
+import { setAgentInstances } from '@/lib/db/agent-instances-db';
 import {
   createAgentRole,
   recordRoleLaunch,
@@ -91,6 +92,16 @@ describe('how a file reaches each CLI', () => {
       headlessPosition: 'leading',
     });
     expect(buildRoleLaunchArguments({ adapter: 'claude', effectiveAgent: null }, artifact, {}).headlessPosition).toBe('trailing');
+  });
+
+  it('Codex and Copilot are told the home the file is in; the others are handed a path', () => {
+    const codex = { name: 'cm-role-x', path: '/homes/codex/cm-role-x.config.toml' };
+    const copilot = { name: 'cm-role-x', path: '/homes/copilot/agents/cm-role-x.agent.md' };
+    expect(buildRoleLaunchArguments({ adapter: 'codex', effectiveAgent: null }, codex, {}).env).toEqual({ CODEX_HOME: '/homes/codex' });
+    expect(buildRoleLaunchArguments({ adapter: 'copilot', effectiveAgent: null }, copilot, {}).env).toEqual({ COPILOT_HOME: '/homes/copilot' });
+    for (const adapter of ['claude', 'command-code', 'antigravity'] as const) {
+      expect(buildRoleLaunchArguments({ adapter, effectiveAgent: null }, artifact, {}).env).toEqual({});
+    }
   });
 
   it('a path with a space is quoted on a line', () => {
@@ -237,7 +248,7 @@ describe('reading the user\'s settings', () => {
       artifacts,
     });
     expect(launch.lineSuffix).toMatch(/^ -p cm-role-probe-probe-role-/);
-    expect(launch.linePrefix).toBe('');
+    expect(launch.linePrefix).toBe(`CODEX_HOME='${artifacts.codexHome}' `);
     expect(launch.condition).toMatchObject({ roleId: 'probe-role', adapter: 'codex', bodyFingerprint: computeBodyFingerprint('BODY') });
     expect(JSON.stringify(launch)).not.toContain('BODY');
     const v1 = await prepareExplicitRoleLaunch('opencode', { id: 'probe-role', body: 'BODY' }, {
@@ -248,6 +259,38 @@ describe('reading the user\'s settings', () => {
     });
     expect(v1.linePrefix).toContain('OPENCODE_CONFIG_CONTENT=');
     expect(v1.lineSuffix).toBe('');
+  });
+
+  it.each(['opencode', 'opencode-v2'] as const)(
+    'a probe with the user\'s env on %s keeps their values off the line, in a private file it removes',
+    async (adapter) => {
+      const worktree = path.join(dir, 'wt');
+      fs.mkdirSync(worktree);
+      const launch = await prepareExplicitRoleLaunch(adapter, { id: 'probe-role', body: 'BODY' }, {
+        worktreePath: worktree,
+        env: {
+          OPENCODE_CONFIG_CONTENT: JSON.stringify({ providers: { p: { settings: { apiKey: 'SECRET_KEY_4115' } } } }),
+          XDG_CONFIG_HOME: path.join(dir, 'xdg'),
+        },
+        namespace: 'probe',
+        artifacts: { dataRoot: path.join(dir, 'data') },
+      });
+      expect(`${launch.linePrefix}${launch.lineSuffix}`).not.toContain('SECRET_KEY_4115');
+      const file = /="\$\(cat '([^']+)'\)" /.exec(launch.linePrefix)?.[1] as string;
+      expect(fs.statSync(file).mode & 0o077).toBe(0);
+      expect(fs.readFileSync(file, 'utf8')).toContain('SECRET_KEY_4115');
+      launch.release();
+      expect(fs.existsSync(file)).toBe(false);
+      expect(launch.release).not.toThrow();
+    }
+  );
+
+  it('a probe with no env of the user\'s writes no file: it is only a path', async () => {
+    const worktree = path.join(dir, 'wt');
+    fs.mkdirSync(worktree);
+    const artifacts = { dataRoot: path.join(dir, 'data') };
+    await prepareExplicitRoleLaunch('opencode', { id: 'probe-role', body: 'BODY' }, { worktreePath: worktree, env: {}, namespace: 'probe', artifacts });
+    expect(fs.existsSync(path.join(dir, 'data', 'launch-env'))).toBe(false);
   });
 
   it('Antigravity is on only when someone says so', () => {
@@ -278,14 +321,14 @@ describe('restart pending', () => {
     return settings.instances.find((entry) => entry.instanceId === 'claude')?.application;
   }
 
-  function launchedWith(fingerprint: string | null, generation = 'g1'): void {
-    recordRoleLaunch(db, {
+  function launchInput(fingerprint: string | null, generation = 'g1') {
+    return {
       worktreeId: WT,
       instanceId: 'claude',
       cliToolId: 'claude',
-      phase: 'launched',
+      phase: 'launched' as const,
       sessionGeneration: generation,
-      source: 'system',
+      source: 'system' as const,
       repositoryId: null,
       roleId: null,
       roleName: null,
@@ -299,8 +342,12 @@ describe('restart pending', () => {
       artifactPath: null,
       effectiveAgent: null,
       compositionSourceFingerprint: null,
-      noRoleReason: fingerprint === null ? 'no-default' : null,
-    });
+      noRoleReason: fingerprint === null ? ('no-default' as const) : null,
+    };
+  }
+
+  function launchedWith(fingerprint: string | null, generation = 'g1'): void {
+    recordRoleLaunch(db, launchInput(fingerprint, generation));
   }
 
   beforeEach(() => {
@@ -399,6 +446,37 @@ describe('restart pending', () => {
     const settings = await buildInstanceRoleSettings(db, WT, { resolveCommonDir: deps.resolveCommonDir, pathExists: deps.pathExists });
     expect(settings.instances[0].application.effectiveNext.injectionFingerprint).toBeNull();
     expect(settings.instances[0].application.restartPending).toBe('unknown');
+  });
+
+  it('computes each instance from its own pane: its own env does not read as a pending restart', async () => {
+    db.prepare('UPDATE worktrees SET selected_agents = ? WHERE id = ?').run(JSON.stringify(['opencode-v2']), WT);
+    const roster = [
+      { id: 'opencode-v2', cliTool: 'opencode-v2', alias: 'primary', order: 0 },
+      { id: 'opencode-v2-2', cliTool: 'opencode-v2', alias: 'second', order: 1 },
+    ];
+    setAgentInstances(db, WT, roster as never);
+    setSystemRoleDefault(db, 'opencode-v2', a);
+    const asked: string[] = [];
+    const paneOf = async (_tool: unknown, instanceId: string): Promise<RoleComposition> => {
+      asked.push(instanceId);
+      return { opencodeV2EffectiveAgent: instanceId === 'opencode-v2-2' ? 'plan' : 'build' };
+    };
+    const read = () => buildInstanceRoleSettings(db, WT, { ...deps, loadComposition: paneOf });
+    const first = await read();
+    const [primary, second] = first.instances;
+    expect(asked.sort()).toEqual(['opencode-v2', 'opencode-v2-2']);
+    expect(second.application.effectiveNext.injectionFingerprint).not.toBe(primary.application.effectiveNext.injectionFingerprint);
+
+    // Each was started under what its own pane says.
+    for (const entry of [primary, second]) {
+      recordRoleLaunch(db, {
+        ...launchInput(entry.application.effectiveNext.injectionFingerprint),
+        instanceId: entry.instanceId,
+        cliToolId: 'opencode-v2',
+      });
+    }
+    const again = await read();
+    expect(again.instances.map((entry) => entry.application.restartPending)).toEqual(['no', 'no']);
   });
 
   it('the pure comparison', () => {

@@ -57,14 +57,15 @@ export function roleEnvReaderForPane(target: {
   return tmuxPaneEnvReader(resolveSessionName(target.cliToolId, target.worktreeId, target.instanceId));
 }
 
-/** The user's settings for a tool, as a pane of this worktree would see them. */
+/** The user's settings, as this instance's pane sees them: its session can have its own env. */
 export function loadPaneComposition(
   worktreeId: string,
   cliToolId: CLIToolType,
+  instanceId: string,
   worktreePath: string
 ): Promise<RoleComposition> {
   return loadRoleComposition(cliToolId as AgentRoleCliTool, {
     worktreePath,
-    readEnv: roleEnvReaderForPane({ worktreeId, cliToolId }),
+    readEnv: roleEnvReaderForPane({ worktreeId, cliToolId, instanceId }),
   });
 }
