@@ -551,19 +551,45 @@ describe('launched: only on the evidence the adapter has', () => {
     }
   });
 
+  // The shape 2.0.18 really answers: its sources, weakest first (measured, #4115).
+  const v2Sources = (system: string) => [
+    { type: 'document', path: '/h/.config/opencode/opencode.jsonc', info: { model: 'm', providers: {} } },
+    { type: 'directory', path: '/h/.config/opencode' },
+    { type: 'document', info: { agents: { build: { system } } } },
+  ];
+
   it('V2: its server answering with exactly the file confirms; anything else stays unknown', async () => {
     setSystemRoleDefault(db, 'opencode-v2', roleId);
     const mismatch = tool('opencode-v2');
-    mismatch.serverConfig = { agents: { build: { system: 'other text' } } };
+    mismatch.serverConfig = v2Sources('other text');
     await mismatch.startSession(WT, worktreePath);
     expect(records('opencode-v2').launched).toBeNull();
 
     const file = records('opencode-v2').requested?.artifactPath as string;
     pane.exists = false;
     const match = tool('opencode-v2');
-    match.serverConfig = { agents: { build: { system: fs.readFileSync(file, 'utf8') } } };
+    match.serverConfig = v2Sources(fs.readFileSync(file, 'utf8'));
     await match.startSession(WT, worktreePath);
     expect(records('opencode-v2').launched?.artifactPath).toBe(file);
+  });
+
+  it('V2: the strongest source decides, and another agent\'s text does not confirm', async () => {
+    setSystemRoleDefault(db, 'opencode-v2', roleId);
+    await tool('opencode-v2').startSession(WT, worktreePath);
+    const file = records('opencode-v2').requested?.artifactPath as string;
+    const text = fs.readFileSync(file, 'utf8');
+
+    pane.exists = false;
+    const overridden = tool('opencode-v2');
+    overridden.serverConfig = [...v2Sources(text), { type: 'document', info: { agents: { build: { system: 'stronger' } } } }];
+    await overridden.startSession(WT, worktreePath);
+    expect(records('opencode-v2').launched).toBeNull();
+
+    pane.exists = false;
+    const otherAgent = tool('opencode-v2');
+    otherAgent.serverConfig = [{ type: 'document', info: { agents: { plan: { system: text } } } }];
+    await otherAgent.startSession(WT, worktreePath);
+    expect(records('opencode-v2').launched).toBeNull();
   });
 
   it('V1: its server listing the path confirms', async () => {

@@ -22,6 +22,7 @@ describe('parseAgentHealthArgs', () => {
         statePath: null,
         serverLog: null,
         syncedFrom: null,
+        roleFile: null,
       },
     });
   });

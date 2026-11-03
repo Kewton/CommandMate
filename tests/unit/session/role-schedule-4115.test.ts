@@ -138,6 +138,12 @@ describe('resolveScheduleRole', () => {
     expect(refused).toMatchObject({ kind: 'refused', refusal: { reason: 'composition-failed' } });
   });
 
+  it.each(['opencode', 'opencode-v2'])('%s: a broken env of the user\'s refuses, so the run never gets it', async (cliToolId) => {
+    setSystemRoleDefault(db, cliToolId, a);
+    const refused = await resolve(cliToolId, undefined, { OPENCODE_CONFIG_CONTENT: '{broken' });
+    expect(refused).toMatchObject({ kind: 'refused', refusal: { reason: 'composition-failed' } });
+  });
+
   it('the env it composes with is the one the child gets, kept whole', async () => {
     setSystemRoleDefault(db, 'opencode-v2', a);
     const composed = await resolve('opencode-v2', undefined, {

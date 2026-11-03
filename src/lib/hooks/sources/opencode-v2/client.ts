@@ -94,9 +94,10 @@ export async function probeOpencodeV2Server(
 }
 
 /**
- * The resolved config, for the role's evidence (Issue #4115, §14). Holds the role's
- * text and possibly secrets, so the caller compares it and keeps none of it. Null
- * when the server did not answer.
+ * The config sources, for the role's evidence (Issue #4115, §14): on 2.0.18 an array
+ * in order of strength, not one merged object. Holds the role's text and possibly
+ * secrets, so the caller compares it and keeps none of it. Null when the server did
+ * not answer.
  */
 export async function fetchOpencodeV2Config(port: number, password: string, directory: string): Promise<unknown> {
   try {

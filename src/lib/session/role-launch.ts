@@ -556,10 +556,15 @@ function serverConfigConfirms(store: LaunchRoleStore, config: unknown): boolean 
     const { instructions } = config as { instructions?: unknown };
     return Array.isArray(instructions) && instructions.includes(prepared.artifact.path);
   }
-  const agents = ((config as { agents?: unknown; agent?: unknown }).agents ?? (config as { agent?: unknown }).agent) as
-    | Record<string, { system?: unknown } | undefined>
-    | undefined;
-  const system = agents?.[injection.effectiveAgent ?? 'build']?.system;
+  // OpenCode V2 2.0.18 answers its config sources, weakest first, and not one merged
+  // object: `[{ type, path, info }, { type, path }, { type, info }]`, with the env's last
+  // (measured, #4115). So the answer is the last source that says anything for this agent.
+  if (!Array.isArray(config)) return false;
+  const agent = injection.effectiveAgent ?? 'build';
+  const systems = config
+    .map((source: { info?: { agents?: Record<string, { system?: unknown } | undefined> } } | null) => source?.info?.agents?.[agent]?.system)
+    .filter((system) => system !== undefined);
+  const system = systems[systems.length - 1];
   // Compared by hash so nothing here holds on to the body.
   return typeof system === 'string' && computeFingerprint(Buffer.from(system, 'utf8')) === prepared.artifact.artifactFingerprint;
 }

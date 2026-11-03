@@ -128,6 +128,25 @@ vi.mock('../../../src/lib/db/db-instance', () => {
           UNIQUE(worktree_id, name),
           FOREIGN KEY (worktree_id) REFERENCES worktrees(id) ON DELETE CASCADE
         );
+        CREATE TABLE IF NOT EXISTS agent_instance_roles (
+          worktree_id TEXT NOT NULL,
+          instance_id TEXT NOT NULL,
+          role_id TEXT,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (worktree_id, instance_id)
+        );
+        CREATE TABLE IF NOT EXISTS agent_role_repository_defaults (
+          repository_id TEXT NOT NULL,
+          cli_tool_id TEXT NOT NULL,
+          role_id TEXT,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (repository_id, cli_tool_id)
+        );
+        CREATE TABLE IF NOT EXISTS agent_role_system_defaults (
+          cli_tool_id TEXT PRIMARY KEY,
+          role_id TEXT NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS execution_logs (
           id TEXT PRIMARY KEY,
           schedule_id TEXT NOT NULL,
