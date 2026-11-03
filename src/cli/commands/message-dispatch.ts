@@ -11,6 +11,7 @@ import { ExitCode } from '../types';
 import type { ChatMessage, RelayGetResponse } from '../types/api-responses';
 import { ApiClient, ApiError } from '../utils/api-client';
 import { paneCaptureCommand } from '../utils/follow-up-command';
+import { roleFailureFromApi } from '../utils/role-failure';
 import type { CommandTarget } from './command-target';
 import {
   cancelRelayQuietly,
@@ -201,6 +202,11 @@ export async function postMessage(
       console.error(`Error: ${error.payload?.error ?? options.promptWaitingFallback}`);
       process.exit(ExitCode.CONFIG_ERROR);
     }
+    // Issue #4116: a refusal because of the role, whether or not this send named
+    // one (a default can refuse a start), with the server's sentence and its own
+    // exit code rather than "Unexpected HTTP status: 409".
+    const roleFailure = roleFailureFromApi(error);
+    if (roleFailure) throw roleFailure;
     throw error;
   }
 }

@@ -94,6 +94,15 @@ export function computeRosterRevision(roster: readonly AgentInstance[]): string 
   return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
 }
 
+/**
+ * The revision of a worktree's roster now, or null when the worktree is gone. Read
+ * where a request settles who it is talking to, and read again before acting on it.
+ */
+export function readRosterRevision(db: Database.Database, worktreeId: string): string | null {
+  const worktree = getWorktreeById(db, worktreeId);
+  return worktree ? computeRosterRevision(currentRoster(db, worktree)) : null;
+}
+
 /** What only a running server can say about a launch, on top of the settings. */
 export interface RoleApplicationDeps extends RoleResolverDeps {
   /**

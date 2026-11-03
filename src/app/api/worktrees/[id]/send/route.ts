@@ -65,6 +65,9 @@ import {
   checkRunningRole,
   chooseNewOpencodeConversation,
   prepareSendRole,
+  readRoleRosterMark,
+  refuseGonePinnedProcess,
+  rereadWorktreeForRole,
   roleConditionBoundary,
   roleSendNotices,
   takeOpencodeResumeNotice,
@@ -157,6 +160,8 @@ async function handleSend(
     if (!validated.ok) return validated.response;
     const { trimmedContent, requestedCliToolId, instanceId, target } = validated.value;
     const cliToolId = target.cliToolId;
+    // Issue #4116: in the same step as the resolution, before anything waits.
+    const roleRosterMark = readRoleRosterMark(db, id, body);
 
     const reserved = reserveRelayForSend(db, body.relayId, {
       worktreeId: id,
@@ -214,11 +219,19 @@ async function handleSend(
 
     // Issue #4115: a role this send names is validated and saved here, before the
     // start and outside it, so the launch below resolves what was just saved.
+    // Issue #4116: what the waits above may have moved is read again first.
     const roleTarget = { worktreeId: id, cliToolId, instanceId };
+    const roleWorktree = rereadWorktreeForRole(
+      db,
+      body,
+      { worktree, cliToolId, rosterInstanceId: target.instanceId, rosterMark: roleRosterMark },
+      recordNotSent,
+    );
+    if (!roleWorktree.ok) return roleWorktree.response;
     const preparedRole = await prepareSendRole(
       db,
       body,
-      { worktree, cliToolId, rosterInstanceId: target.instanceId, instanceId },
+      { worktree: roleWorktree.value, cliToolId, rosterInstanceId: target.instanceId, instanceId },
       recordNotSent,
     );
     if (!preparedRole.ok) return preparedRole.response;
@@ -254,6 +267,9 @@ async function handleSend(
 
     // Start CLI tool session if not running
     if (!running) {
+      // Issue #4116: starting one would only make a process this send then refuses.
+      const gone = refuseGonePinnedProcess(roleGate, recordNotSent);
+      if (gone) return gone;
       // Issue #4115 (§6.4): only OpenCode V1 resumes, and it goes on unless told otherwise.
       if (cliToolId === 'opencode' && body.newConversation === true) {
         chooseNewOpencodeConversation({ worktreeId: id, instanceId });

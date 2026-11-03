@@ -78,6 +78,7 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | [`commandmate attach`](#commandmate-attach) | エージェントの tmux セッションにこの端末を attach |
 | [`commandmate auto-yes`](#commandmate-auto-yes) | Auto-Yesの制御 |
 | [`commandmate instances`](#commandmate-instances) | エージェントインスタンス（roster）の一覧・追加・削除・alias変更 |
+| [`commandmate roles`](#commandmate-roles) | ロールの定義と、ツール・リポジトリごとの既定の設定 |
 | [`commandmate agents`](#commandmate-agents) | エージェント CLI の版表示と更新（pane の外で `codex update` を実行） |
 | [`commandmate report`](#commandmate-report) | 日次レポートの生成・表示・一覧、Eval メトリクス集計 |
 | [`commandmate skill`](#commandmate-skill) | 公式Skillのカタログ参照・Install/Update Plan・install・update・uninstall・status |
@@ -271,6 +272,8 @@ commandmate send <worktree-id> "<message>"
 commandmate send <worktree-id> "<message>" --instance codex    # codex のプライマリインスタンス宛て
 commandmate send <worktree-id> "<message>" --instance codex-2  # 追加インスタンス宛て（roster登録済み）
 commandmate send <worktree-id> "<message>" --agent codex --instance codex-3 --register  # 未登録IDをrosterへ登録
+commandmate send <worktree-id> "<message>" --instance codex --role reviewer  # ロールを保存し、そのロールで動くプロセスにだけ送る（commandmate roles の節）
+commandmate send <worktree-id> "<message>" --agent codex --instance codex-3 --register --role reviewer  # 登録とロールを先に作ってから送る
 commandmate send <worktree-id> "<message>" --auto-yes          # Auto-Yes有効化
 commandmate send <worktree-id> "<message>" --auto-yes --duration 3h
 commandmate send <worktree-id> "<message>" --auto-yes --stop-pattern "FAILED"
@@ -2954,6 +2957,9 @@ commandmate instances <worktree-id> remove <instance-id> --kill        # 削除�
 commandmate instances <worktree-id> alias <instance-id> "新しい名前"    # alias変更
 
 commandmate instances <worktree-id> kill <instance-id>                 # 該当インスタンスのセッションのみ停止
+
+commandmate instances <worktree-id> add --agent codex --role reviewer  # 追加とロールの指定を同時に（--no-role で「ロールなし」）
+commandmate instances <worktree-id> set-role <instance-id> --role reviewer  # 次回の起動のロールを保存（--none / --inherit も）
 ```
 
 `kill` は止めたインスタンスの Auto-Yes も無効にします（止めていない別インスタンスの Auto-Yes は残ります）。
@@ -3228,6 +3234,117 @@ commandmate send "$WT" "軽くチェックして" --agent codex --instance codex
 # 不要になったら削除（セッションも停止）
 commandmate instances "$WT" remove codex-2 --kill
 ```
+
+---
+
+## commandmate roles
+
+ロールの定義と既定を、画面を使わずに管理します（Issue #4116）。本文は `--file` か標準入力で渡し、対話はありません。
+
+### 3 つの操作の違い
+
+| 操作 | 変わるもの | 稼働中のセッション |
+|------|-----------|-------------------|
+| `roles edit` | ロールの本文。指しているすべての設定が次回の起動から従う | 変わらない |
+| `roles default` | ツールごとの既定（`--repo` でそのリポジトリ、無ければシステム全体）。Schedule も従う | 変わらない |
+| `instances <wt> set-role` / `send --role` | そのインスタンスの指定 | 変わらない。ロールは起動時に固定される。適用するには止めて（`instances <wt> kill <id>`）送り直す |
+
+### 使用方法
+
+```bash
+commandmate roles list [--json]
+commandmate roles show <role> [--json]
+commandmate roles add <name> (--file <path> | --stdin) [--json]
+commandmate roles edit <role> [--name <name>] [--file <path> | --stdin] [--if-version <n>] [--json]
+commandmate roles rm <role> [--force] [--json]
+commandmate roles default <tool> (--role <role> | --none) [--json]
+commandmate roles default <tool> --repo <repository> (--role <role> | --none | --inherit) [--json]
+commandmate roles defaults [--repo <repository>] [--tool <tool>] [--json]
+commandmate instances <worktree-id> set-role <instance-id> (--role <role> | --none | --inherit) [--json]
+commandmate instances <worktree-id> add --agent <tool> [--role <role> | --no-role]
+commandmate send <worktree-id> "..." --instance <id> [--role <role> | --no-role]
+```
+
+例: レビュー担当のロールを定義し、このリポジトリの Codex の既定にする。
+
+```bash
+commandmate roles add reviewer --file ./reviewer.md
+commandmate roles default codex --repo . --role reviewer
+```
+
+### 名前の指定
+
+- `<role>` は ID か名前です。完全一致を優先し、無ければ大文字小文字と Unicode の正規形を無視して照合します。候補が 2 つあれば候補を示して exit 2 です（自動では選びません）
+- 予約語はありません。「ロールなし」と「既定に従う」は `--none` / `--no-role` / `--inherit` のフラグなので、`none` という名前のロールも作れます
+- 対象のツールは claude、codex、command-code、opencode、opencode-v2、copilot、antigravity です。それ以外は exit 2（`tool_not_supported`）。Antigravity は設定を保存できますが、有効になるまでそのロールでの起動は拒否され、警告が出ます
+
+### `--repo` の形式と優先順位
+
+1. リポジトリの ID
+2. パス（`/` を含むか `.` で始まる値）。登録済みのリポジトリのほか、登録済みの worktree のパスはそのリポジトリを指します（worktree の中で `--repo .` が使えます）
+3. 名前（`/` を含まない値は、パスとしては読みません）
+
+登録済みのリポジトリは `commandmate roles defaults` で確認できます。エラーは `unknown_repository`（該当なし）、`repository_not_registered`（ディレクトリはあるが行が無い）、`ambiguous_repository`（複数該当。候補を表示）で区別します。リポジトリにそのツールの設定の行が無いことはエラーではなく、`stored: { state: "inherit" }` と表示され、`effective` が実際に使われるものを示します。
+
+### `send --role` と `--register`
+
+`send --role` は切り替えではなく条件です。
+
+- 設定を先に保存します。未起動ならそのロールで起動します
+- 稼働中なら、起動時の fingerprint が一致するときだけ送ります。別のロール、または起動時の記録が無い場合（サーバー再起動後など）は、本文を入力せず exit 32 です。設定は保存されたままなので、止めてから `--role` なしで送り直せます
+- ロールを持てるのは roster にあるインスタンスだけです。roster 外の ID には `--register` も付けます
+- `--register --role` は、インスタンスとロールを送信の**前に**作るので、最初の起動からそのロールで動きます。繰り返しても作成はされず、`--role` の値で既存の指定を置き換えたうえで、上の条件が適用されます。読み取りの後に roster が変わると exit 31 で未送信です
+- `--role` なしの `--register` は従来どおり（送信の後に登録）で、既存のロールには触れません
+- `--expect-role-generation <g>` と `--expect-role-fingerprint <f>` / `--expect-no-role` は、呼び出し側が読んだ値（`capture --json` の `roleLaunch`）に送信を固定します。何も保存しません。サーバーが最初のキーの直前に読み直すので、その間にプロセスが入れ替われば（同じロールでも）未送信 exit 32 です。`--contract` や `--role` と併用できます
+
+### `set-role` と `instances --json`
+
+`set-role` は稼働中でも次回用として保存し、稼働中のプロセスには触れません。起動時と次回の比較を返し、差があるときだけ `applyPending: true`（表示では `Pending:`）になります。`restartPending` は `yes` / `no` / `unknown`（プロセスについて何もわからない）です。
+
+`instances --json` の各行には、サーバーがロールを持つとき `role` が付きます。
+
+```json
+{
+  "role": {
+    "stored": { "state": "role", "roleId": "...", "roleName": "reviewer" },
+    "effectiveNext": { "kind": "role", "source": "instance", "role": { "id": "...", "name": "reviewer" }, "injectionFingerprint": "..." },
+    "launched": { "roleName": "writer", "source": "system", "sessionGeneration": "...", "injectionFingerprint": "..." },
+    "requested": { "roleName": "writer", "source": "system" },
+    "restartPending": "yes"
+  }
+}
+```
+
+`launched` が null なのは「わからない」であり、「ロールなし」ではありません。表形式では `ROLE_AT_START`、`ROLE_NEXT`、`RESTART_PENDING` の列を末尾に追加します。
+
+### `--json` の形
+
+失敗も含めて stdout に出力します（同じ文を stderr にも出します）。
+
+| コマンド | 形 |
+|---------|----|
+| `list` | `{ success, roles: [{ id, name, bodyVersion, bodyFingerprint, bodyBytes, createdAt, updatedAt }] }` |
+| `show` | `{ success, role: { ..., body }, references: { instances, repositories, system } }` |
+| `add` | `{ success, role }` |
+| `edit` | `{ success, before, after, bodyVersion, affected, impact: { schedules, runningSessions, message } }` |
+| `rm` | `{ success, deleted: { id, name }, affected }` |
+| `default` | `{ success, level: "system" \| "repository", cliToolId, repository?, before, after, impact: { repositories, schedules, runningSessions, message } }`。`before` / `after` は `{ stored, effective }` |
+| `defaults` | `{ success, system: [{ cliToolId, adapterEnabled, stored, effective }], repositories }`。`--repo` では `{ success, repository, defaults: [{ cliToolId, adapterEnabled, stored, effective }] }` |
+| `set-role`, `add --role` | `{ success, instanceId, cliToolId, adapterEnabled, stored, effectiveNext, launched, requested, restartPending, applyPending, rosterRevision }` |
+| 失敗 | `{ success: false, error: <code>, message, candidates? \| references? \| currentBodyVersion? }` |
+
+`stored.state` は `role` / `none` / `inherit`（行なし）/ `unset`（システムで行なし）、`effective.kind` は `role` / `none` / `ambiguous`、`effective.source` は `repository` / `system` / `fallback` です。
+
+### 終了コード
+
+| コード | 意味 |
+|:------:|------|
+| 0 | 成功 |
+| 1 | サーバー未起動 |
+| 2 | 引数の誤り、保存できない本文、未知または曖昧なロール・リポジトリ、roster に無いインスタンス、対象外のツール |
+| 31 | 競合（何も変更・送信していない）: `name_conflict`、`version_conflict`（`--if-version`）、`role_in_use`（`--force` なしの `rm`）、`instance_exists`、`roster_changed` |
+| 32 | 本文を入力していない: ロールの条件を満たさない（`ROLE_CONDITION_UNMET`）、ロールのために起動を拒否（`ROLE_LAUNCH_REFUSED`、`SESSION_LAUNCH_ROLE_MISMATCH`）。`send` / `ask` |
+| 99 | 予期しないエラー |
 
 ---
 
@@ -3999,6 +4116,8 @@ commandmate ls --token your-token
 | 10 | PROMPT_DETECTED | wait中にプロンプトを検出 |
 | 11 | UPSTREAM_FAULT | ターン終了時に画面に上流障害があった（`wait --fail-on-upstream-fault`。`ask` は常時）。stderr / `--json` に `id=...`。`id=context-limit` は `instances <wt> kill <instance>` で新しいセッションにして送り直す。`id=model-capacity` は別の instance・別のモデルへ送る（#3936） |
 | 30 | NO_ACTIVE_SESSIONS | interruptの対象となる稼働中セッションが無い |
+| 31 | ROLE CONFLICT | ロールの競合（`name_conflict` / `version_conflict` / `role_in_use` / `instance_exists` / `roster_changed`）。何も変更・送信していない |
+| 32 | ROLE NOT_SENT | ロールの条件を満たさない、またはロールのために起動を拒否。本文は入力していない（`send` / `ask`） |
 | 99 | UNEXPECTED_ERROR | 予期しないエラー / リソース未検出 |
 | 124 | TIMEOUT | waitのタイムアウト |
 

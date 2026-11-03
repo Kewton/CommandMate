@@ -38,6 +38,10 @@
  * while the process stays the same is the server's to refuse (`POST /tasks`, exit
  * of the `send`), since only the server can resolve them.
  *
+ * What was read goes with the contract (Issue #4116), and the server reads it again
+ * right before the first key: a process replaced after that last read, even with
+ * the same role, gets nothing (`send` exit 32). That too is stopped and is 44.
+ *
  * Exit code (send): 0 sent (and for Claude the model matched before the
  * contract went out); 40 the model did not match after one restart; 41 the
  * model could not be read after one restart (the session is stopped and the
@@ -83,6 +87,8 @@ export const EXIT_MODEL_UNKNOWN = 41;
 export const EXIT_STOP_UNCONFIRMED = 42;
 export const EXIT_AUTO_YES_UNCONFIRMED = 43;
 export const EXIT_ROLE_CHANGED = 44;
+/** `send`'s exit code for a role condition that does not hold: nothing typed (`RoleExitCode.NOT_SENT`). */
+export const EXIT_ROLE_NOT_SENT = 32;
 /** `auto-yes --disable` + read-back attempts before the start, and the pause between them. */
 export const DISARM_ATTEMPTS = 3;
 export const DISARM_INTERVAL_SEC = 2;
@@ -157,6 +163,23 @@ export function rolePinHolds(pin, now) {
     pin.sessionGeneration === now.sessionGeneration &&
     pin.injectionFingerprint === now.injectionFingerprint
   );
+}
+
+/**
+ * The `send` flags that pin a contract to the process {@link rolePinOf} read
+ * (Issue #4116). None without a pin: such a server has no generation to compare.
+ *
+ * @returns {string[]}
+ */
+export function rolePinArgs(pin) {
+  if (pin === null) return [];
+  return [
+    '--expect-role-generation',
+    pin.sessionGeneration,
+    ...(typeof pin.injectionFingerprint === 'string'
+      ? ['--expect-role-fingerprint', pin.injectionFingerprint]
+      : ['--expect-no-role']),
+  ];
 }
 
 /** `ok` when the reported model is the contract's family, `unknown` when nothing is reported, else `mismatch`. */
@@ -445,9 +468,16 @@ export function main(argv, deps = {}) {
         log(`role changed: ${o.instance} of ${o.wt} is not the process the starting message started; contract not sent`);
         return stopped('role changed after the starting message') ? EXIT_ROLE_CHANGED : EXIT_STOP_UNCONFIRMED;
       }
-      const sent = sendTo('send', contractArgs);
+      const sent = sendTo('send', [...contractArgs, ...rolePinArgs(roleNow)]);
       log(`send exit=${sent.status} issue=${workItem} task=${sent.taskId || '-'} (${sent.name})`);
       if (sent.taskId) out(sent.taskId);
+      if (sent.status === EXIT_ROLE_NOT_SENT && roleNow !== null) {
+        // The contract armed Auto-Yes before it was refused, and nothing is working here.
+        log(`role changed: ${o.instance} of ${o.wt} is not the process the contract was pinned to; contract not sent`);
+        const disarmed = disarmAutoYes(ctx);
+        if (!disarmed.ok) log(`auto-yes UNCONFIRMED ${o.instance} of ${o.wt}: ${disarmed.detail} — turn it off by hand`);
+        return stopped('the contract was pinned to another process') ? EXIT_ROLE_CHANGED : EXIT_STOP_UNCONFIRMED;
+      }
       return sent.status;
     }
     return 1;

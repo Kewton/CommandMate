@@ -37,6 +37,18 @@ import {
   type RegisteredRelay,
 } from './relays';
 import { postMessage, registerRelayForMessage } from './message-dispatch';
+import {
+  assertRoleTool,
+  roleAssignmentFromFlag,
+  roleFailureFromApi,
+  usageError,
+  watchRoleFlagConflict,
+} from '../utils/agent-roles';
+import type {
+  InstanceRoleCreateResponse,
+  InstanceRoleSettingsResponse,
+  RoleAssignmentInput,
+} from '../../types/agent-roles';
 
 /**
  * The message length `send` is verified to deliver whole (Issue #2464): the
@@ -168,6 +180,42 @@ async function registerInstance(
 }
 
 /**
+ * `--register` with a role: the instance and its role are created together, before
+ * anything goes out, so the first start already has it (Issue #4116). Without a role
+ * the order stays as it was: sent, then {@link registerInstance}.
+ *
+ * Repeating the command creates nothing. The role on the send replaces what the
+ * instance holds, and is then a condition like any `--role`.
+ *
+ * @throws The roster changed since it was read (exit 31), or the server refused
+ */
+async function registerInstanceWithRole(
+  client: ApiClient,
+  worktreeId: string,
+  instanceId: string,
+  cliTool: string,
+  role: RoleAssignmentInput
+): Promise<void> {
+  const url = `/api/worktrees/${worktreeId}/instances/roles`;
+  const { instances, rosterRevision } = await client.get<InstanceRoleSettingsResponse>(url);
+  if (instances.some((instance) => instance.instanceId === instanceId)) return;
+  try {
+    await client.post<InstanceRoleCreateResponse>(url, {
+      instance: { id: instanceId, cliTool, alias: defaultAlias(cliTool, instanceId) },
+      role,
+      expectedRosterRevision: rosterRevision,
+    });
+  } catch (error) {
+    // Another send got there first; what remains is the same as a repeat.
+    if (error instanceof ApiError && error.payload?.error === 'instance_exists') return;
+    const roleFailure = roleFailureFromApi(error);
+    if (roleFailure) throw roleFailure;
+    throw error;
+  }
+  console.error(`Instance registered in roster: ${instanceId}`);
+}
+
+/**
  * The `autoYes` block of a just-created task in the shape `describeContractPolicy`
  * reads (Issue #3723), or null when the response carries none. Read defensively:
  * `contract_json` is replayed verbatim, never re-validated.
@@ -229,6 +277,9 @@ async function createContractTask(
       }
       process.exit(ExitCode.CONFIG_ERROR);
     }
+    // Issue #4115/#4116: the role settings moved since this process started.
+    const roleFailure = roleFailureFromApi(error);
+    if (roleFailure) throw roleFailure;
     throw error;
   }
 }
@@ -354,12 +405,29 @@ function validateSendModel(options: SendOptions, agent: string | undefined): voi
   }
 }
 
+/**
+ * The `--expect-*` flags as the `/send` field that carries them to the last check
+ * before the first key, or undefined when none was given (Issue #4116).
+ */
+function expectedRoleOf(options: SendOptions): Record<string, unknown> | undefined {
+  const { expectRoleGeneration, expectRoleFingerprint, expectNoRole } = options;
+  if (expectRoleGeneration === undefined && expectRoleFingerprint === undefined && !expectNoRole) return undefined;
+  if ((expectRoleFingerprint === undefined) === !expectNoRole) {
+    throw usageError('Give the pinned role with one of --expect-role-fingerprint <fingerprint> or --expect-no-role.');
+  }
+  return {
+    injectionFingerprint: expectRoleFingerprint ?? null,
+    ...(expectRoleGeneration !== undefined ? { sessionGeneration: expectRoleGeneration } : {}),
+  };
+}
+
 /** The `/send` request body. */
 function buildSendBody(
   content: string | undefined,
   agent: string | undefined,
   instanceId: string | undefined,
-  options: SendOptions
+  options: SendOptions,
+  role: { assignment: RoleAssignmentInput | undefined; expected: Record<string, unknown> | undefined }
 ): Record<string, unknown> {
   // [DR2-05] Send API uses "content" not "message"
   const sendBody: Record<string, unknown> = { content };
@@ -380,11 +448,19 @@ function buildSendBody(
   if (options.ignoreStructuredPrompt) {
     sendBody.ignoreStructuredPromptGuard = true;
   }
+  // Issue #4115/#4116: sent only when asked for, so a plain send stays the body it was.
+  if (role.assignment !== undefined) {
+    sendBody.role = role.assignment;
+  }
+  if (role.expected !== undefined) {
+    sendBody.expectedRole = role.expected;
+  }
   return sendBody;
 }
 
 export function createSendCommand(): Command {
   const cmd = new Command('send');
+  const bothRoleFlags = watchRoleFlagConflict(cmd);
   cmd
     .description('Send a message to a worktree agent')
     .argument('<worktree-id>', 'Worktree ID')
@@ -392,6 +468,11 @@ export function createSendCommand(): Command {
     .option('--instance <id>', `${INSTANCE_OPTION_DESCRIPTION} ${INSTANCE_ALIAS_HELP_SUFFIX}`)
     .option('--agent <agent>', AGENT_OPTION_DESCRIPTION)
     .option('--register', 'Register the --instance session into the agent-instance roster (needs --agent unless the instance id is itself a CLI tool id)')
+    .option('--role <role>', 'Role ID or name this instance must hold: saved for it, and a condition of this send (see below)')
+    .option('--no-role', 'Like --role, for explicitly no role')
+    .option('--expect-role-generation <generation>', 'Only send to this process, as read from `capture --json` roleLaunch.sessionGeneration')
+    .option('--expect-role-fingerprint <fingerprint>', 'Only send to a process started with this injection fingerprint (roleLaunch.injectionFingerprint)')
+    .option('--expect-no-role', 'Only send to a process started with no role')
     .option(
       '--model <model>',
       'Specify AI model for a Copilot, Antigravity or Claude agent. For Antigravity and Claude it is a launch'
@@ -424,10 +505,36 @@ waits until the composer shows all of it. If it never does, nothing is
 submitted and send exits 99 with "Message body did not arrive intact" -- it
 does not print "Message sent.". For a longer brief, write it to a file in the
 worktree and send a short message that tells the agent to read that file.
+
+--role / --no-role (Issue #4116): a role is fixed when the process starts, so this is
+a condition, not a switch. The setting is saved for the instance first. A session that
+is not running starts with it; a running one gets the message only if it was started
+with exactly what that setting injects. A different role, or a process whose start
+this server has no record of (after a server restart), is exit 32 with nothing typed,
+and the setting stays saved: stop the session (\`instances <wt> kill <id>\`) and send
+again, with no --role needed. A role names an instance on the roster: an ad-hoc id
+needs --register as well.
+
+--register --role creates the instance and its role together BEFORE sending, so the
+first start has it. Repeating that command creates nothing: --role replaces what the
+instance holds and is a condition as above. A changed roster is exit 31, nothing sent.
+--register without a role keeps its old order (sent, then registered) and never
+touches a role already there.
+
+--expect-* pin this send to what the caller read earlier, saving nothing; the server
+reads them again right before the first key, so a process replaced in between gets
+nothing (exit 32). \`launch-worker\` passes what its starting message fixed. With
+--contract too, the contract is recorded as a failed task.
+
+Exit codes: 2 usage, or an unknown or ambiguous role, or a tool roles do not apply to
+(nothing sent); 31 a roster conflict (nothing sent); 32 the role condition does not
+hold or the start was refused because of its role (nothing typed).
 `)
     .action(async (worktreeId: string, message: string | undefined, options: SendOptions) => {
       try {
         const autoYesDurationMs = validateSendArgs(worktreeId, message, options);
+        if (bothRoleFlags()) throw usageError('Give --role or --no-role, not both.');
+        const expectedRole = expectedRoleOf(options);
 
         const client = new ApiClient({ token: options.token });
 
@@ -442,6 +549,14 @@ worktree and send a short message that tells the agent to read that file.
         // /resolve-target knows how to read an alias.
 
         validateSendModel(options, agent);
+
+        // Issue #4116: named before anything with a side effect, so a role that does
+        // not exist leaves no task row and no armed Auto-Yes behind.
+        if (options.role !== undefined && agent !== undefined) assertRoleTool(agent);
+        const roleAssignment = await roleAssignmentFromFlag(client, options.role);
+        if (roleAssignment !== undefined && options.register && instanceId) {
+          await registerInstanceWithRole(client, worktreeId, instanceId, options.agent ?? instanceId, roleAssignment);
+        }
 
         // Issue #1545: resolve the contract before anything with a side effect,
         // so an invalid contract cannot leave auto-yes enabled for a message
@@ -512,17 +627,26 @@ worktree and send a short message that tells the agent to read that file.
           console.error(`Relay registered: ${relay.id}`);
         }
 
-        const sendBody = buildSendBody(content, agent, instanceId, options);
+        const sendBody = buildSendBody(content, agent, instanceId, options, {
+          assignment: roleAssignment,
+          expected: expectedRole,
+        });
 
         // Issue #3957: a bound relay's id rides on the send, which reserves it
         // and records where the body went in.
-        await postMessage(client, worktreeId, sendBody, {
+        const sent = await postMessage(client, worktreeId, sendBody, {
           relay,
           onFailure: failTask,
           promptWaitingFallback: promptWaitingFallback(worktreeId, commandTarget),
           target: commandTarget,
         });
         console.error('Message sent.');
+        if (sent?.replacesDefaultInstructions) {
+          console.error(`Note: on ${agent ?? 'this tool'}, the role replaces the tool's default instructions rather than adding to them.`);
+        }
+        if (sent?.roleResume?.message) {
+          console.error(`Note: ${sent.roleResume.message}`);
+        }
 
         if (taskId) {
           await reportTaskStatus(client, taskId, 'running');
@@ -530,7 +654,8 @@ worktree and send a short message that tells the agent to read that file.
 
         // Issue #1000: register the ad-hoc instance into the roster after the
         // session has started, so a follow-up `commandmate instances` lists it.
-        if (options.register && instanceId) {
+        // Issue #4116: with a role it was registered before the send.
+        if (options.register && instanceId && roleAssignment === undefined) {
           await registerInstance(client, worktreeId, instanceId, options.agent ?? instanceId);
         }
 

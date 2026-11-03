@@ -7,13 +7,14 @@
  *   commandmate instances <worktree-id> remove <instance-id> [--kill]
  *   commandmate instances <worktree-id> alias <instance-id> <new-alias>
  *   commandmate instances <worktree-id> kill <instance-id>
+ *   commandmate instances <worktree-id> set-role <instance-id> (--role <role> | --none | --inherit)
  */
 
 import { Command } from 'commander';
-import { ExitCode, getErrorMessage } from '../types';
+import { ExitCode, getErrorMessage, RoleExitCode } from '../types';
 import type { InstancesOptions } from '../types';
 import type { AgentInstance } from '../types/api-responses';
-import { ApiClient, ApiError, isValidWorktreeId, isValidInstanceId } from '../utils/api-client';
+import { ApiClient, ApiError, isValidWorktreeId, isValidInstanceId, rethrowIfDeadlineExceeded } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { isCliToolId, CLI_TOOL_IDS } from '../config/cli-tool-ids';
 import {
@@ -46,6 +47,33 @@ import type {
 import { resolveSessionName } from '../../lib/cli-tools/session-name';
 import { validateSessionName } from '../../lib/cli-tools/validation';
 import type { CLIToolType } from '../../lib/cli-tools/types';
+import {
+  assertRoleTool,
+  reportRoleFailure,
+  resolveRole,
+  roleAssignmentFromFlag,
+  roleFailureFromApi,
+  RoleCliError,
+  usageError,
+  watchRoleFlagConflict,
+} from '../utils/agent-roles';
+import type {
+  InstanceRoleCreateResponse,
+  InstanceRoleEntry,
+  InstanceRoleSettingsResponse,
+  RoleApplicationState,
+  RoleAssignmentInput,
+  StoredRoleState,
+} from '../../types/agent-roles';
+
+/**
+ * What an instance holds, what the next start would use and what the process was
+ * started with (Issue #4116). The server's words verbatim: `launched` / `requested`
+ * are launch records with their `source`, `effectiveNext` is the next start with its
+ * `source`. A null `launched` is "not known" (not started, or a server restart),
+ * which is not "no role".
+ */
+type InstanceRoleView = { stored: StoredRoleState } & RoleApplicationState;
 
 type InstanceRow = {
   instanceId: string;
@@ -110,6 +138,8 @@ type InstanceRow = {
    * name to give rather than a wrong one.
    */
   tmuxSession: string | null;
+  /** Issue #4116: absent when the server has no role layer, so that row prints the JSON it did. */
+  role?: InstanceRoleView;
 };
 
 /**
@@ -138,6 +168,18 @@ function deriveInstanceSession(worktreeId: string, inst: AgentInstance): string 
  */
 const MAX_SESSION_TITLE_COLUMN = 40;
 
+function describeNextRole(next: RoleApplicationState['effectiveNext']): string {
+  if (next.kind === 'role') return `${next.role.name}(${next.source})`;
+  return next.kind === 'none' ? `none(${next.source})` : 'ambiguous';
+}
+
+/** The three role columns of one row. `unknown` for a startup role is what the server knows. */
+function roleColumns(role: InstanceRoleView | undefined): string[] {
+  if (!role) return ['', '', ''];
+  const atStart = role.launched === null ? 'unknown' : role.launched.roleName ?? 'none';
+  return [atStart, describeNextRole(role.effectiveNext), role.restartPending];
+}
+
 /**
  * Format instance rows as a table for terminal display.
  * [DR1-08 consistency] Mirrors ls.ts's formatTable().
@@ -148,11 +190,14 @@ const MAX_SESSION_TITLE_COLUMN = 40;
 function formatInstancesTable(rows: InstanceRow[]): string {
   if (rows.length === 0) return 'No agent instances found.';
 
+  // Issue #4116: appended, as #1785 and #2038 did, and only by a server that knows.
+  const showRoles = rows.some((r) => r.role !== undefined);
   const headers = [
     'INSTANCE_ID', 'ALIAS', 'CLI_TOOL', 'RUNNING', 'AUTO_YES', 'MODEL', 'EFFORT',
     // Issue #2038 appends, exactly as #1785 did, so anything reading this table
     // by column position keeps working. Issue #2317 appends for the same reason.
     'SESSION_ID', 'SESSION_TITLE', 'TMUX_SESSION',
+    ...(showRoles ? ['ROLE_AT_START', 'ROLE_NEXT', 'RESTART_PENDING'] : []),
   ];
   const dataRows = rows.map(r => [
     r.instanceId,
@@ -170,6 +215,7 @@ function formatInstancesTable(rows: InstanceRow[]): string {
     r.sessionId ?? '',
     (r.sessionTitle ?? '').slice(0, MAX_SESSION_TITLE_COLUMN),
     r.tmuxSession ?? '',
+    ...(showRoles ? roleColumns(r.role) : []),
   ]);
 
   const colWidths = headers.map((h, i) =>
@@ -446,6 +492,21 @@ async function fetchArmedAutoYes(
 }
 
 /**
+ * Each instance's role, keyed by instance id, or null when the server does not say.
+ * Like the two reads above: a listing is never failed by a column.
+ */
+async function fetchInstanceRoles(client: ApiClient, worktreeId: string): Promise<Map<string, InstanceRoleView> | null> {
+  try {
+    const { instances } = await client.get<InstanceRoleSettingsResponse>(`/api/worktrees/${worktreeId}/instances/roles`);
+    if (!Array.isArray(instances)) return null;
+    return new Map(instances.map(({ instanceId, stored, application }) => [instanceId, { stored, ...application }]));
+  } catch (error) {
+    rethrowIfDeadlineExceeded(error);
+    return null;
+  }
+}
+
+/**
  * List action: roster + live running/auto-yes status per instance.
  * Probes GET .../current-output?cliTool=&instance= per instance (same
  * endpoint capture.ts uses) since the roster itself carries no session state.
@@ -507,7 +568,7 @@ async function listInstances(
   // size, and none for an empty one. Asked after the probes above, so the
   // column is the latest of the readings this listing takes.
   const armed = instances.length > 0 ? await fetchArmedAutoYes(client, worktreeId) : null;
-  const rows: InstanceRow[] = armed === null
+  const armedRows: InstanceRow[] = armed === null
     ? sessionRows
     : sessionRows.map(({ autoYesAnswerMode: _sessionMode, ...row }) => {
       const entry = armed.get(row.instanceId);
@@ -523,11 +584,109 @@ async function listInstances(
       };
     });
 
+  // Issue #4116: after the others, and additive.
+  const roles = instances.length > 0 ? await fetchInstanceRoles(client, worktreeId) : null;
+  const rows: InstanceRow[] = armedRows.map((row) => {
+    const role = roles?.get(row.instanceId);
+    return role ? { ...row, role } : row;
+  });
+
   if (options.json) {
     console.log(JSON.stringify(rows, null, 2));
     return;
   }
   console.log(formatInstancesTable(rows));
+}
+
+/** One instance's entry in a settings answer, or the failure for a server that left it out. */
+function roleEntryOf(settings: InstanceRoleSettingsResponse, instanceId: string): InstanceRoleEntry {
+  const entry = settings.instances.find((instance) => instance.instanceId === instanceId);
+  if (!entry) throw new RoleCliError('roster_changed', `Instance '${instanceId}' is no longer in the roster.`, RoleExitCode.CONFLICT);
+  return entry;
+}
+
+/** The setting beside the process: what `set-role` and `add --role` answer with. */
+function roleChangeResult(settings: InstanceRoleSettingsResponse, entry: InstanceRoleEntry): Record<string, unknown> {
+  return {
+    success: true,
+    instanceId: entry.instanceId,
+    cliToolId: entry.cliToolId,
+    adapterEnabled: entry.adapterEnabled,
+    stored: entry.stored,
+    effectiveNext: entry.application.effectiveNext,
+    launched: entry.application.launched,
+    requested: entry.application.requested,
+    restartPending: entry.application.restartPending,
+    // Only a difference is pending: `unknown` is not known to be one.
+    applyPending: entry.application.restartPending === 'yes',
+    ...(entry.application.replacesDefaultInstructions ? { replacesDefaultInstructions: true } : {}),
+    rosterRevision: settings.rosterRevision,
+  };
+}
+
+function printRoleChange(worktreeId: string, entry: InstanceRoleEntry): void {
+  const { effectiveNext, launched, restartPending } = entry.application;
+  console.error(`Next start: ${describeNextRole(effectiveNext)}`);
+  console.error(`Running process started with: ${launched === null ? 'not known' : launched.roleName ?? 'no role'}`);
+  if (restartPending === 'yes') {
+    console.error(
+      `Pending: the running process keeps its role until it is stopped (commandmate instances ${worktreeId} kill ${entry.instanceId}).`
+    );
+  } else if (restartPending === 'unknown') {
+    console.error('Whether a restart is needed is not known: nothing is known about a running process, if there is one.');
+  }
+  if (!entry.adapterEnabled && effectiveNext.kind === 'role') {
+    console.error(`Warning: roles are not enabled for ${entry.cliToolId} yet: a start that resolves to one is refused.`);
+  }
+}
+
+/**
+ * set-role action: save an instance's role for its next start. A running session is
+ * not touched, and the answer compares the two.
+ */
+async function setInstanceRole(
+  client: ApiClient,
+  worktreeId: string,
+  instanceId: string,
+  options: InstancesOptions
+): Promise<void> {
+  if (!isValidInstanceId(instanceId)) {
+    throw usageError('Invalid instance id. Must be an alphanumeric/underscore/hyphen identifier (max 64 chars).');
+  }
+  if (options.role === false) throw usageError('set-role says "no role" with --none.');
+  const given = [options.role !== undefined, options.none === true, options.inherit === true].filter(Boolean).length;
+  if (given !== 1) throw usageError('set-role needs one of --role <role>, --none or --inherit.');
+  const role: RoleAssignmentInput = options.none
+    ? { state: 'none' }
+    : options.inherit
+      ? { state: 'inherit' }
+      : { state: 'role', roleId: (await resolveRole(client, options.role as string)).id };
+
+  const settings = await client.put<InstanceRoleSettingsResponse>(`/api/worktrees/${worktreeId}/instances/roles`, {
+    instanceId,
+    role,
+  });
+  const entry = roleEntryOf(settings, instanceId);
+  if (options.json) {
+    console.log(JSON.stringify(roleChangeResult(settings, entry), null, 2));
+    return;
+  }
+  const stored = entry.stored;
+  console.log(`Role saved for ${instanceId}: ${stored.state === 'role' ? stored.roleName : stored.state}`);
+  printRoleChange(worktreeId, entry);
+}
+
+/** The refusals a `--role` flag on another action gets. */
+function assertNoRoleFlags(action: string, options: InstancesOptions): void {
+  const allowed: Record<string, Array<keyof InstancesOptions>> = {
+    add: ['role'],
+    'set-role': ['role', 'none', 'inherit'],
+  };
+  for (const flag of ['role', 'none', 'inherit'] as const) {
+    if (options[flag] !== undefined && !(allowed[action] ?? []).includes(flag)) {
+      throw usageError(`--${flag} does not apply to '${action}'.`);
+    }
+  }
 }
 
 /**
@@ -555,7 +714,21 @@ async function addInstance(
     process.exit(ExitCode.CONFIG_ERROR);
   }
 
-  const existing = await fetchAgentInstances(client, worktreeId);
+  // Issue #4116: a role goes in with the instance, through the route that creates both
+  // in one transaction and refuses a roster changed since this read.
+  if (options.role !== undefined) assertRoleTool(options.agent);
+  const roleAssignment = await roleAssignmentFromFlag(client, options.role);
+  const roleSettings = roleAssignment === undefined
+    ? null
+    : await client.get<InstanceRoleSettingsResponse>(`/api/worktrees/${worktreeId}/instances/roles`);
+  const existing: Array<AgentInstance> = roleSettings === null
+    ? await fetchAgentInstances(client, worktreeId)
+    : roleSettings.instances.map((instance, order) => ({
+        id: instance.instanceId,
+        cliTool: instance.cliToolId,
+        alias: instance.alias,
+        order,
+      }));
 
   if (existing.length >= MAX_AGENT_INSTANCES) {
     console.error(`Error: worktree already has the maximum of ${MAX_AGENT_INSTANCES} agent instances.`);
@@ -564,6 +737,9 @@ async function addInstance(
 
   const id = options.id ?? nextInstanceId(options.agent, existing);
   if (existing.some(inst => inst.id === id)) {
+    if (roleSettings !== null) {
+      throw new RoleCliError('instance_exists', `Instance '${id}' already exists. Set its role with: set-role ${id}`, RoleExitCode.CONFLICT);
+    }
     console.error(`Error: instance '${id}' already exists.`);
     process.exit(ExitCode.CONFIG_ERROR);
   }
@@ -575,6 +751,21 @@ async function addInstance(
   }
 
   const alias = options.alias ?? defaultAlias(options.agent, id);
+  if (roleAssignment !== undefined && roleSettings !== null) {
+    const created = await client.post<InstanceRoleCreateResponse>(`/api/worktrees/${worktreeId}/instances/roles`, {
+      instance: { id, cliTool: options.agent, alias },
+      role: roleAssignment,
+      expectedRosterRevision: roleSettings.rosterRevision,
+    });
+    const entry = roleEntryOf(created, created.created.instanceId);
+    console.error(`Instance added: ${id} (${options.agent})`);
+    if (options.json) {
+      console.log(JSON.stringify({ ...roleChangeResult(created, entry), created: created.created }, null, 2));
+    } else {
+      printRoleChange(worktreeId, entry);
+    }
+    return;
+  }
   const next: AgentInstance[] = [...existing, { id, cliTool: options.agent, alias, order: existing.length }];
   await saveAgentInstances(client, worktreeId, next);
 
@@ -726,17 +917,44 @@ async function warnIfDifferentServer(client: ApiClient, error: unknown): Promise
 
 export function createInstancesCommand(): Command {
   const cmd = new Command('instances');
+  const bothRoleFlags = watchRoleFlagConflict(cmd);
   cmd
     .description('Discover and manage agent instances (roster) for a worktree')
     .argument('<worktree-id>', 'Worktree ID')
-    .argument('[action]', 'list (default), add, remove, alias, or kill')
+    .argument('[action]', 'list (default), add, remove, alias, kill, or set-role')
     .argument('[rest...]', 'Action-specific arguments (instance-id, new alias)')
-    .option('--json', 'JSON output (list/add)')
+    .option('--json', 'JSON output (list/add/set-role)')
     .option('--agent <tool>', 'CLI tool for the add action (claude, codex, gemini, vibe-local, opencode, copilot, antigravity)')
     .option('--alias <name>', 'Display alias for the add action')
     .option('--id <instance-id>', 'Explicit instance ID for the add action (format: <agent> or <agent>-<n>, e.g. claude-2)')
     .option('--kill', 'Also kill the running session when removing an instance')
+    .option('--role <role>', 'add / set-role: role ID or name for this instance')
+    .option('--no-role', 'add: explicitly no role')
+    .option('--none', 'set-role: explicitly no role')
+    .option('--inherit', 'set-role: drop the setting, and follow the defaults')
     .option('--token <token>', TOKEN_WARNING)
+    .addHelpText('after', `
+set-role saves what this instance's NEXT start uses, running or not. A role is fixed
+when the process starts, so a running session is not touched. The answer compares the
+two: applyPending (--json) / "Pending:" only when they differ. restartPending: yes, no,
+or unknown (nothing known about the process: not started, or the server restarted).
+To change what a whole repository or tool gets instead: commandmate roles default.
+To change the role's text: commandmate roles edit. See: commandmate roles --help
+
+add --role / --no-role creates the instance and its role together, refused (exit 31)
+if the roster changed meanwhile. Without them the instance follows the defaults.
+
+--json, list: every row carries role when the server has roles:
+  role: { stored, effectiveNext: { kind, source, role?, injectionFingerprint }, launched,
+          requested, restartPending }
+  launched / requested are launch records, with roleId, roleName, source and
+  injectionFingerprint. launched null means not known, which is not "no role".
+--json, set-role and add --role: { success, instanceId, cliToolId, adapterEnabled, stored,
+  effectiveNext, launched, requested, restartPending, applyPending, rosterRevision }
+
+Exit codes for the role forms: 0 done; 2 usage, unknown or ambiguous role, instance not
+on the roster, or a tool roles do not apply to; 31 instance_exists or roster_changed.
+`)
     .action(async (worktreeId: string, action: string | undefined, rest: string[], options: InstancesOptions) => {
       // One client for the whole invocation (Issue #2404): every action built
       // its own identical one, and the failure path below has to report the URL
@@ -747,6 +965,9 @@ export function createInstancesCommand(): Command {
           console.error('Error: Invalid worktree ID format.');
           process.exit(ExitCode.CONFIG_ERROR);
         }
+
+        if (bothRoleFlags()) throw usageError('Give --role or --no-role, not both.');
+        assertNoRoleFlags(action ?? 'list', options);
 
         switch (action ?? 'list') {
           case 'list':
@@ -788,8 +1009,15 @@ export function createInstancesCommand(): Command {
             break;
           }
 
+          case 'set-role': {
+            const [instanceId] = rest;
+            if (!instanceId) throw usageError('set-role requires an <instance-id> argument.');
+            await setInstanceRole(client, worktreeId, instanceId, options);
+            break;
+          }
+
           default:
-            console.error(`Error: unknown action '${action}'. Valid actions: list, add, remove, alias, kill.`);
+            console.error(`Error: unknown action '${action}'. Valid actions: list, add, remove, alias, kill, set-role.`);
             process.exit(ExitCode.CONFIG_ERROR);
         }
       } catch (error) {
@@ -800,6 +1028,11 @@ export function createInstancesCommand(): Command {
         // handleCommandError() exits, so nobody re-checks a correct id and then
         // delegates to whatever this server does have.
         await warnIfDifferentServer(client, error);
+        // Issue #4116: a role refusal has its own sentence, code and `--json` answer.
+        if (error instanceof RoleCliError || roleFailureFromApi(error) !== null) {
+          reportRoleFailure(error, options.json);
+          return;
+        }
         handleCommandError(error);
       }
     });

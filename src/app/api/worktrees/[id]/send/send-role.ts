@@ -29,7 +29,7 @@ import {
   type LaunchRoleSnapshot,
 } from '@/lib/session/role-launch';
 import { roleEnvReaderForPane } from '@/lib/agent-roles/pane-env';
-import { InstanceRoleRequestError, setManagedInstanceRole } from '@/lib/agent-roles/management';
+import { InstanceRoleRequestError, readRosterRevision, setManagedInstanceRole } from '@/lib/agent-roles/management';
 import { parseRoleAssignmentInput } from '@/lib/agent-roles/validation';
 import {
   ROLE_CONDITION_UNMET_CODE,
@@ -37,6 +37,8 @@ import {
   RoleConditionUnmetError,
 } from '@/lib/agent-roles/launch-errors';
 import { AgentRoleNotFoundError, getInstanceRoleState } from '@/lib/db/agent-roles-db';
+import { getWorktreeById } from '@/lib/db';
+import { resolveSessionTargetStrict } from '@/lib/session/resolve-session-target';
 import type { InputBoundaryHooks } from '@/lib/session/instance-input-lock';
 import type { SendAttemptReason } from '@/lib/session/send-attempt-types';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -110,6 +112,53 @@ function parseExpectedRole(value: unknown): RoleCondition | null {
   return { injectionFingerprint, sessionGeneration: sessionGeneration ?? null };
 }
 
+/** Whether this send says anything about a role. */
+function asksForRole(body: SendRoleRequest): boolean {
+  return body.role !== undefined || body.expectedRole !== undefined;
+}
+
+/** Where a request settled who it is talking to: read again before a setting is saved. */
+export function readRoleRosterMark(db: Database.Database, worktreeId: string, body: SendRoleRequest): string | null {
+  return asksForRole(body) ? readRosterRevision(db, worktreeId) : null;
+}
+
+/**
+ * The worktree row to save a role under, read now (Issue #4116). The row and the
+ * target were read before this request's awaits: the roster may have moved since,
+ * and an id may even name another tool. Anything different, and nothing is saved or
+ * sent. Run with no await before {@link prepareSendRole}, whose save comes before its
+ * first await, so what is checked here is what is saved.
+ */
+export function rereadWorktreeForRole(
+  db: Database.Database,
+  body: SendRoleRequest & { cliToolId?: CLIToolType; instanceId?: string },
+  target: { worktree: Worktree; cliToolId: CLIToolType; rosterInstanceId: string; rosterMark: string | null },
+  recordNotSent: (reason: SendAttemptReason) => void
+): SendStep<Worktree> {
+  const { worktree, cliToolId, rosterInstanceId, rosterMark } = target;
+  if (!asksForRole(body)) return { ok: true, value: worktree };
+  const row = getWorktreeById(db, worktree.id);
+  const resolved = row
+    ? resolveSessionTargetStrict(db, worktree.id, { instanceId: body.instanceId, requestedCliTool: body.cliToolId || undefined })
+    : null;
+  if (
+    !row ||
+    !resolved?.ok ||
+    resolved.target.cliToolId !== cliToolId ||
+    resolved.target.instanceId !== rosterInstanceId ||
+    readRosterRevision(db, worktree.id) !== rosterMark
+  ) {
+    return refuse(
+      'The roster changed while this send was waiting; nothing was saved or typed. Send it again.',
+      'roster_changed',
+      { saved: false, stored: getInstanceRoleState(db, worktree.id, rosterInstanceId) },
+      recordNotSent,
+      'role-condition-failed'
+    );
+  }
+  return { ok: true, value: row };
+}
+
 /**
  * Validate and save the role this send asks for, and work out what it must inject.
  *
@@ -181,6 +230,24 @@ export async function prepareSendRole(
     );
   }
   return { ok: true, value: { condition, snapshot, saved, stored } };
+}
+
+/**
+ * A send pinned to a generation, and no process running: the one it was pinned to is
+ * gone. Refused before a start, which could only make a process it would then refuse.
+ */
+export function refuseGonePinnedProcess(
+  gate: SendRoleGate | null,
+  recordNotSent: (reason: SendAttemptReason) => void
+): NextResponse | null {
+  if (!gate || (gate.condition?.sessionGeneration ?? null) === null) return null;
+  return refuse(
+    'The process this send was pinned to is no longer running; nothing was typed.',
+    ROLE_CONDITION_UNMET_CODE,
+    gate,
+    recordNotSent,
+    'role-condition-failed'
+  ).response;
 }
 
 /**
