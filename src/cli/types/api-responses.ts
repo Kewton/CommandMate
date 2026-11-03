@@ -1655,6 +1655,12 @@ export interface ChatMessage {
   worktreeId: string;
   role: string;
   content: string;
+  /** Issue #4115/#4116: the process a send with a role condition reached. */
+  roleLaunch?: { sessionGeneration: string; injectionFingerprint: string | null; saved: boolean; stored: unknown };
+  /** Issue #4115/#4116: this tool's role replaces its default instructions. */
+  replacesDefaultInstructions?: boolean;
+  /** Issue #4115/#4116: OpenCode V1 continued a conversation that had another role. */
+  roleResume?: { continued: boolean; message: string };
   cliToolId?: string;
   createdAt?: string;
   /**

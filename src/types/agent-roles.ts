@@ -9,7 +9,7 @@
  *
  * @module types/agent-roles
  */
-import type { CLIToolType } from '@/lib/cli-tools/types';
+import type { CLIToolType } from '../lib/cli-tools/types';
 
 /** Largest body, in UTF-8 bytes. Applied to the body, never to a composed artifact (§5). */
 export const MAX_ROLE_BODY_BYTES = 16384;

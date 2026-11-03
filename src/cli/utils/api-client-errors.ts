@@ -242,6 +242,20 @@ export interface ApiErrorPayload {
    * src/lib/relay/relay-bind.ts RelaySendOutcome (and ChatMessage.sendOutcome).
    */
   sendOutcome?: 'sent' | 'not_sent' | 'unknown';
+  /**
+   * Issue #4116: the role routes answer `{ success: false, error: <code>, message }`,
+   * so there `error` is the stable code and `message` the sentence.
+   */
+  success?: boolean;
+  message?: string;
+  /** `role_in_use`: what points at the role. */
+  references?: unknown;
+  /** `version_conflict`: the version the role is at now. */
+  currentBodyVersion?: number;
+  /** Issue #4115: a send refused because of its role says whether the setting stayed saved. */
+  roleSettings?: { saved?: boolean; stored?: unknown };
+  /** Issue #4115: why a launch was refused because of its role. */
+  roleRefusal?: string;
 }
 
 /**
