@@ -232,6 +232,27 @@ if ((process.env.CM_AUTO_YES_SHUTDOWN_RECORD_PATH ?? '').trim() === '') {
   );
 }
 
+// Issue #4114: generated role files. The data root defaults to
+// `~/.commandmate/agent-roles`, and Antigravity's agents directory to
+// `~/.gemini/config/agents`, neither of which CODEX_HOME / COPILOT_HOME above
+// cover. Same default and per-pid scoping as CM_OPENCODE_V2_DIR: a test that
+// writes a role artifact without naming a directory lands here, and an explicit
+// option or `vi.stubEnv` still wins.
+if ((process.env.CM_AGENT_ROLE_ARTIFACTS_DIR ?? '').trim() === '') {
+  process.env.CM_AGENT_ROLE_ARTIFACTS_DIR = join(
+    tmpdir(),
+    'commandmate-test-agent-roles',
+    String(process.pid)
+  );
+}
+if ((process.env.CM_AGENT_ROLE_ANTIGRAVITY_AGENTS_DIR ?? '').trim() === '') {
+  process.env.CM_AGENT_ROLE_ANTIGRAVITY_AGENTS_DIR = join(
+    tmpdir(),
+    'commandmate-test-agent-roles-antigravity',
+    String(process.pid)
+  );
+}
+
 // Issue #4086: keep the suite off the database the calling shell names.
 //
 // A worker's tmux session, and every verification the server runs, inherit the
