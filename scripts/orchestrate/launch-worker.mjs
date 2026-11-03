@@ -41,6 +41,10 @@
  * What was read goes with the contract (Issue #4116), and the server reads it again
  * right before the first key: a process replaced after that last read, even with
  * the same role, gets nothing (`send` exit 32). That too is stopped and is 44.
+ * A roster that moved under it is the `send`'s own 31: no contract, Auto-Yes off, and
+ * the session left for the next launch to stop. No role read off a server that does
+ * have roles (it restarted, and knows nothing of this process) is not "nothing to
+ * pin": stopped and 44, unlike an older server or a tool roles do not apply to.
  *
  * Exit code (send): 0 sent (and for Claude the model matched before the
  * contract went out); 40 the model did not match after one restart; 41 the
@@ -89,6 +93,8 @@ export const EXIT_AUTO_YES_UNCONFIRMED = 43;
 export const EXIT_ROLE_CHANGED = 44;
 /** `send`'s exit code for a role condition that does not hold: nothing typed (`RoleExitCode.NOT_SENT`). */
 export const EXIT_ROLE_NOT_SENT = 32;
+/** `send`'s exit code for a role conflict such as a moved roster: nothing sent (`RoleExitCode.CONFLICT`). */
+export const EXIT_ROLE_CONFLICT = 31;
 /** `auto-yes --disable` + read-back attempts before the start, and the pause between them. */
 export const DISARM_ATTEMPTS = 3;
 export const DISARM_INTERVAL_SEC = 2;
@@ -148,7 +154,10 @@ export function setModel(run, worktree, model) {
  */
 export function rolePinOf(answer) {
   const roleLaunch = answer?.roleLaunch;
-  return typeof roleLaunch?.sessionGeneration === 'string' ? roleLaunch : null;
+  if (typeof roleLaunch?.sessionGeneration !== 'string') return null;
+  // A fingerprint that is neither is not "no role".
+  const { injectionFingerprint } = roleLaunch;
+  return typeof injectionFingerprint === 'string' || injectionFingerprint === null ? roleLaunch : null;
 }
 
 /**
@@ -234,13 +243,28 @@ function readRunning(run, cli, wt, instance) {
 }
 
 /**
+ * Whether a process that reports no role has to (Issue #4116), from its `instances
+ * --json` row, which every start reads anyway. `capture --json` leaves `roleLaunch` out
+ * for two opposite reasons: nothing here has roles, or this server has them and does
+ * not know the process. A row with `role` is a server with roles, and only a tool
+ * outside them needs no pin. A row without it is an older server or CLI, neither of
+ * which can pin. (Also a roles read that failed just then; the `send` of a contract is
+ * still checked by `POST /tasks`.)
+ *
+ * @returns {boolean}
+ */
+export function roleEvidenceRequired(row) {
+  return Boolean(row?.role) && row.role.effectiveNext?.source !== 'unsupported';
+}
+
+/**
  * Turn the instance's Auto-Yes off and read it back off (#3883 N7). The grant
  * belongs to the worktree × instance, not to a session: a session that is not
  * running does not mean it is off, and the poller keeps it for the next
  * session. `instances --json` reads `autoYes` from the state store, with or
  * without a session; only a readable row with `autoYes` not true is "off".
  *
- * @returns {{ ok: boolean, detail: string }}
+ * @returns {{ ok: boolean, detail: string, row?: object }} `row` is what read it back off
  */
 export function disarmAutoYes({ run, sleep, cli, wt, instance }) {
   let detail = '';
@@ -250,7 +274,7 @@ export function disarmAutoYes({ run, sleep, cli, wt, instance }) {
       detail = `auto-yes --disable exit=${off.status} ${String(off.stderr ?? '').trim().split('\n').pop() ?? ''}`.trim();
     } else {
       const row = readRow(run, cli, wt, instance);
-      if (row && row.autoYes !== true) return { ok: true, detail: 'off' };
+      if (row && row.autoYes !== true) return { ok: true, detail: 'off', row };
       detail = row === null ? 'instance list unreadable after --disable' : row === undefined ? `${instance} not in the instance list` : 'still on after --disable';
     }
     if (attempt < DISARM_ATTEMPTS) sleep(DISARM_INTERVAL_SEC * 1000);
@@ -468,14 +492,23 @@ export function main(argv, deps = {}) {
         log(`role changed: ${o.instance} of ${o.wt} is not the process the starting message started; contract not sent`);
         return stopped('role changed after the starting message') ? EXIT_ROLE_CHANGED : EXIT_STOP_UNCONFIRMED;
       }
+      if (roleNow === null && roleEvidenceRequired(disarm.row)) {
+        log(`role unknown: the server has no record of what ${o.instance} of ${o.wt} was started with; contract not sent`);
+        return stopped('no record of the role it started with') ? EXIT_ROLE_CHANGED : EXIT_STOP_UNCONFIRMED;
+      }
       const sent = sendTo('send', [...contractArgs, ...rolePinArgs(roleNow)]);
       log(`send exit=${sent.status} issue=${workItem} task=${sent.taskId || '-'} (${sent.name})`);
       if (sent.taskId) out(sent.taskId);
-      if (sent.status === EXIT_ROLE_NOT_SENT && roleNow !== null) {
-        // The contract armed Auto-Yes before it was refused, and nothing is working here.
-        log(`role changed: ${o.instance} of ${o.wt} is not the process the contract was pinned to; contract not sent`);
+      if ((sent.status === EXIT_ROLE_NOT_SENT || sent.status === EXIT_ROLE_CONFLICT) && roleNow !== null) {
+        // Refused with nothing typed. This start began with Auto-Yes off (disarmed above),
+        // so the `send` withdraws what it armed; read back here, as a stop's is.
         const disarmed = disarmAutoYes(ctx);
         if (!disarmed.ok) log(`auto-yes UNCONFIRMED ${o.instance} of ${o.wt}: ${disarmed.detail} — turn it off by hand`);
+        if (sent.status === EXIT_ROLE_CONFLICT) {
+          log(`roster changed: ${o.instance} of ${o.wt}; contract not sent`);
+          return sent.status;
+        }
+        log(`role changed: ${o.instance} of ${o.wt} is not the process the contract was pinned to; contract not sent`);
         return stopped('the contract was pinned to another process') ? EXIT_ROLE_CHANGED : EXIT_STOP_UNCONFIRMED;
       }
       return sent.status;

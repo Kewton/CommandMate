@@ -697,21 +697,25 @@ async function addInstance(
   worktreeId: string,
   options: InstancesOptions
 ): Promise<void> {
-  if (!options.agent) {
-    console.error('Error: add requires --agent <tool>.');
+  // Issue #4116: with a role flag this is a role form, whose `--json` answers every
+  // failure on stdout. The exit code is the same either way.
+  const refuse = (message: string): void => {
+    if (options.role !== undefined) throw usageError(message);
+    console.error(`Error: ${message}`);
     process.exit(ExitCode.CONFIG_ERROR);
+  };
+  if (!options.agent) {
+    refuse('add requires --agent <tool>.');
+    return;
   }
   if (!isCliToolId(options.agent)) {
-    console.error(`Error: Invalid --agent. Must be one of: ${CLI_TOOL_IDS.join(', ')}`);
-    process.exit(ExitCode.CONFIG_ERROR);
+    refuse(`Invalid --agent. Must be one of: ${CLI_TOOL_IDS.join(', ')}`);
   }
   if (options.id && !isValidInstanceId(options.id)) {
-    console.error('Error: Invalid --id. Must be an alphanumeric/underscore/hyphen identifier (max 64 chars).');
-    process.exit(ExitCode.CONFIG_ERROR);
+    refuse('Invalid --id. Must be an alphanumeric/underscore/hyphen identifier (max 64 chars).');
   }
   if (options.alias && options.alias.length > MAX_AGENT_ALIAS_LENGTH) {
-    console.error(`Error: --alias exceeds ${MAX_AGENT_ALIAS_LENGTH} characters.`);
-    process.exit(ExitCode.CONFIG_ERROR);
+    refuse(`--alias exceeds ${MAX_AGENT_ALIAS_LENGTH} characters.`);
   }
 
   // Issue #4116: a role goes in with the instance, through the route that creates both
@@ -731,8 +735,7 @@ async function addInstance(
       }));
 
   if (existing.length >= MAX_AGENT_INSTANCES) {
-    console.error(`Error: worktree already has the maximum of ${MAX_AGENT_INSTANCES} agent instances.`);
-    process.exit(ExitCode.CONFIG_ERROR);
+    refuse(`worktree already has the maximum of ${MAX_AGENT_INSTANCES} agent instances.`);
   }
 
   const id = options.id ?? nextInstanceId(options.agent, existing);
@@ -746,8 +749,7 @@ async function addInstance(
   // Primary-anchor consistency (mirrors validateAgentInstancesInput on the
   // server): an id equal to a CLI tool id must back that exact tool.
   if (isCliToolId(id) && id !== options.agent) {
-    console.error(`Error: instance id '${id}' conflicts with --agent '${options.agent}'.`);
-    process.exit(ExitCode.CONFIG_ERROR);
+    refuse(`instance id '${id}' conflicts with --agent '${options.agent}'.`);
   }
 
   const alias = options.alias ?? defaultAlias(options.agent, id);
@@ -951,6 +953,7 @@ if the roster changed meanwhile. Without them the instance follows the defaults.
   injectionFingerprint. launched null means not known, which is not "no role".
 --json, set-role and add --role: { success, instanceId, cliToolId, adapterEnabled, stored,
   effectiveNext, launched, requested, restartPending, applyPending, rosterRevision }
+--json failure of those two: { success: false, error, message } on stdout, whatever failed.
 
 Exit codes for the role forms: 0 done; 2 usage, unknown or ambiguous role, instance not
 on the roster, or a tool roles do not apply to; 31 instance_exists or roster_changed.
@@ -960,8 +963,11 @@ on the roster, or a tool roles do not apply to; 31 instance_exists or roster_cha
       // its own identical one, and the failure path below has to report the URL
       // the request actually went to — a second construction is a second answer.
       const client = new ApiClient({ token: options.token });
+      // Issue #4116: the forms whose `--json` promises an answer for every failure.
+      const roleForm = action === 'set-role' || (action === 'add' && options.role !== undefined);
       try {
         if (!isValidWorktreeId(worktreeId)) {
+          if (roleForm) throw usageError('Invalid worktree ID format.');
           console.error('Error: Invalid worktree ID format.');
           process.exit(ExitCode.CONFIG_ERROR);
         }
@@ -1028,8 +1034,9 @@ on the roster, or a tool roles do not apply to; 31 instance_exists or roster_cha
         // handleCommandError() exits, so nobody re-checks a correct id and then
         // delegates to whatever this server does have.
         await warnIfDifferentServer(client, error);
-        // Issue #4116: a role refusal has its own sentence, code and `--json` answer.
-        if (error instanceof RoleCliError || roleFailureFromApi(error) !== null) {
+        // Issue #4116: a role refusal has its own sentence, code and `--json` answer,
+        // and so has any failure of a role form.
+        if (roleForm || error instanceof RoleCliError || roleFailureFromApi(error) !== null) {
           reportRoleFailure(error, options.json);
           return;
         }

@@ -562,7 +562,8 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   first start has it, and repeating it replaces the setting and is a condition as above.
   --expect-role-generation <g> with --expect-role-fingerprint <f> | --expect-no-role pin a send
   to what capture --json's roleLaunch said, saving nothing: a process replaced before the
-  first key gets nothing (exit 32).
+  first key gets nothing (exit 32). A send with a role or a pin that types nothing withdraws the
+  --auto-yes it armed, and leaves a grant already on as it was.
 
   Exit codes: 0 done; 1 server not running; 2 bad arguments, unknown or ambiguous role or
   repository, a tool outside the feature; 31 a conflict, nothing changed (name_conflict,

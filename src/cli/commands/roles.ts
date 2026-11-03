@@ -87,7 +87,10 @@ Exit codes:
               stored.state: role | none | inherit (no row) | unset (system, no row)
               effective.kind: role | none | ambiguous; effective.source: repository | system | fallback
   failure   { success: false, error: <code>, message, candidates? | references? | currentBodyVersion? }
-            The same sentence goes to stderr.
+            The same sentence goes to stderr. Failures with no role code of their own say
+            internal_error, request_failed, no_response (no server), role_api_unavailable
+            (a server older than roles) or unexpected_error, with the exit code above.
+            A missing argument or unknown option is commander's: stderr only, exit 1.
 
 Example: define a reviewer and make it this repository's Codex default
   commandmate roles add reviewer --file ./reviewer.md

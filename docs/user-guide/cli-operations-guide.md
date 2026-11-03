@@ -3295,6 +3295,8 @@ commandmate roles default codex --repo . --role reviewer
 - ロールを持てるのは roster にあるインスタンスだけです。roster 外の ID には `--register` も付けます
 - `--register --role` は、インスタンスとロールを送信の**前に**作るので、最初の起動からそのロールで動きます。繰り返しても作成はされず、`--role` の値で既存の指定を置き換えたうえで、上の条件が適用されます。読み取りの後に roster が変わると exit 31 で未送信です
 - `--role` なしの `--register` は従来どおり（送信の後に登録）で、既存のロールには触れません
+- `--contract --role` も同じ結果になります。契約側の検査が古い設定で拒否するときは、ロールを保存して検査し直します。契約そのものが不正なら何も保存しません
+- ロールか固定を付けた送信が未入力で終わると、その送信が有効にした `--auto-yes` は取り消します。もともと有効だった Auto-Yes は、本文が入るまでそのままです。未入力と確定できないときは残し、止めるコマンドを表示します
 - `--expect-role-generation <g>` と `--expect-role-fingerprint <f>` / `--expect-no-role` は、呼び出し側が読んだ値（`capture --json` の `roleLaunch`）に送信を固定します。何も保存しません。サーバーが最初のキーの直前に読み直すので、その間にプロセスが入れ替われば（同じロールでも）未送信 exit 32 です。`--contract` や `--role` と併用できます
 
 ### `set-role` と `instances --json`
@@ -3319,7 +3321,7 @@ commandmate roles default codex --repo . --role reviewer
 
 ### `--json` の形
 
-失敗も含めて stdout に出力します（同じ文を stderr にも出します）。
+失敗も含めて stdout に出力します（同じ文を stderr にも出します）。ロールの分類が無い失敗の `error` は `internal_error`、`request_failed`、`no_response`（サーバーに届かない）、`role_api_unavailable`（ロールより古いサーバー）、`unexpected_error` で、終了コードは下の表のとおりです。引数の不足や不明なオプションは commander の出力（stderr のみ、exit 1）です。`send` に `--json` はありません。
 
 | コマンド | 形 |
 |---------|----|

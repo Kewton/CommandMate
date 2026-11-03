@@ -38,28 +38,42 @@ import {
 export { RoleCliError, roleFailureFromApi, usageError };
 export { readRoleBodyOption } from './role-input';
 
+/** The `--json` code of a failure no role route classified. Its exit code stays its own. */
+function unclassifiedFailureCode(error: unknown): string {
+  if (!(error instanceof ApiError)) return 'unexpected_error';
+  const { payload } = error;
+  if (payload?.success === false && typeof payload.error === 'string') return payload.error;
+  if (typeof payload?.code === 'string') return payload.code;
+  return error.statusCode === undefined ? 'no_response' : 'request_failed';
+}
+
+function printJsonFailure(code: string, message: string, details: Record<string, unknown> = {}): void {
+  console.log(JSON.stringify({ success: false, error: code, message, ...details }, null, 2));
+}
+
 /**
  * End a role command on `error`: the sentence on stderr, and with `--json` the same
- * thing as an object on stdout, so a caller parsing stdout gets an answer either way.
+ * thing as an object on stdout, whatever the failure was, so a caller parsing stdout
+ * gets an answer either way. A failure no route classified (a 500, no connection)
+ * keeps the sentence and exit code `handleCommandError` gives it.
  */
 export function reportRoleFailure(error: unknown, json: boolean | undefined): void {
   const failure = error instanceof RoleCliError ? error : roleFailureFromApi(error);
-  if (!failure) {
-    if (error instanceof ApiError && error.statusCode === 404 && !error.payload) {
-      console.error(
-        'Error: the server has no such route. It may be older than this CLI: commandmate stop && commandmate start'
-      );
-      process.exit(ExitCode.UNEXPECTED_ERROR);
-      return;
-    }
-    handleCommandError(error);
+  if (failure) {
+    if (json) printJsonFailure(failure.code, failure.message, failure.details);
+    console.error(`Error: ${failure.message}`);
+    process.exit(failure.exitCode);
     return;
   }
-  if (json) {
-    console.log(JSON.stringify({ success: false, error: failure.code, message: failure.message, ...failure.details }, null, 2));
+  if (error instanceof ApiError && error.statusCode === 404 && !error.payload) {
+    const message = 'the server has no such route. It may be older than this CLI: commandmate stop && commandmate start';
+    if (json) printJsonFailure('role_api_unavailable', message);
+    console.error(`Error: ${message}`);
+    process.exit(ExitCode.UNEXPECTED_ERROR);
+    return;
   }
-  console.error(`Error: ${failure.message}`);
-  process.exit(failure.exitCode);
+  if (json) printJsonFailure(unclassifiedFailureCode(error), error instanceof Error ? error.message : String(error));
+  handleCommandError(error);
 }
 
 /** The role's ID and name, the way a candidate is listed. */

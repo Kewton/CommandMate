@@ -2425,6 +2425,8 @@ See what is registered with `commandmate roles defaults`. Errors say which: `unk
 - Only an instance on the roster can hold a role. An ad-hoc id needs `--register` as well
 - `--register --role` creates the instance and its role **before** sending, so the first start has it. Repeating it creates nothing: `--role` replaces what the instance holds and is a condition as above. A roster changed after it was read is exit 31, nothing sent
 - `--register` without `--role` keeps its old order (sent, then registered) and leaves any role alone
+- `--contract --role` ends the same way. If the contract's own check would refuse for the old setting, the role is saved and the check runs again. A broken contract saves nothing
+- When a send with a role or a pin types nothing, the `--auto-yes` it armed is withdrawn. A grant already on stays as it was until the message is in. If it cannot be said that nothing was typed, it stays on, and the command to stop it is printed
 - `--expect-role-generation <g>` with `--expect-role-fingerprint <f>` / `--expect-no-role` pin the send to what the caller read (`capture --json`'s `roleLaunch`), saving nothing. The server reads them again right before the first key, so a process replaced in between, even with the same role, gets nothing: exit 32. They combine with `--contract` and `--role`
 
 ### `set-role` and `instances --json`
@@ -2449,7 +2451,7 @@ A null `launched` means not known, which is not "no role". The table appends `RO
 
 ### `--json` shapes
 
-Failures included, on stdout (the same sentence goes to stderr).
+Failures included, on stdout (the same sentence goes to stderr). A failure with no role code of its own says `internal_error`, `request_failed`, `no_response` (no server), `role_api_unavailable` (a server older than roles) or `unexpected_error`, with the exit codes below. A missing argument or unknown option is commander's: stderr only, exit 1. `send` has no `--json`.
 
 | Command | Shape |
 |---------|-------|

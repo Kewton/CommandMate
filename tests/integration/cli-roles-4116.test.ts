@@ -149,6 +149,8 @@ let db: Database.Database;
 let reviewer: string;
 let writer: string;
 let taskStatuses: string[];
+/** The Auto-Yes route's state and what it was told, per `<tool>:<instance>`. */
+let autoYes: { on: boolean; posts: Array<Record<string, unknown>> };
 
 type RouteHandler = (request: NextRequest, context: { params: Promise<Record<string, string>> }) => Promise<Response>;
 
@@ -194,6 +196,15 @@ async function dispatch(input: unknown, init?: RequestInit): Promise<Response> {
   if (url.pathname.startsWith('/api/tasks/')) {
     taskStatuses.push(JSON.parse(String(init?.body)).status);
     return Response.json({ ok: true });
+  }
+  if (url.pathname === `/api/worktrees/${WT}/auto-yes`) {
+    if (method === 'POST') {
+      const body = JSON.parse(String(init?.body));
+      autoYes.posts.push(body);
+      autoYes.on = body.enabled;
+      return Response.json({ enabled: body.enabled });
+    }
+    return Response.json(url.searchParams.has('cliToolId') ? { enabled: autoYes.on } : { instances: {} });
   }
   const route = routed(url.pathname);
   if (route) {
@@ -300,6 +311,7 @@ beforeEach(async () => {
   fakeTool.onStart = (instanceId) => launch(instanceId);
   ownership.hook = null;
   taskStatuses = [];
+  autoYes = { on: false, posts: [] };
   vi.stubEnv('CM_AGENT_HOOKS_INJECT', '0');
   vi.stubEnv('CM_AGENT_ROLE_ARTIFACTS_DIR', path.join(dir, 'data'));
   vi.stubEnv('CODEX_HOME', path.join(dir, 'codex'));
@@ -1049,5 +1061,285 @@ describe('POST /send: the roster moves while it waits', () => {
     expect(result.code).toBe(31);
     expect(result.stderr).toContain('roster changed');
     expect(fakeTool.typed).toEqual([]);
+  });
+});
+
+describe('a send with a role that types nothing leaves Auto-Yes as it found it', () => {
+  async function runningWith(role: string): Promise<void> {
+    setInstanceRoleState(db, WT, 'codex', { state: 'role', roleId: role });
+    await launch();
+    fakeTool.running = true;
+  }
+  const armAndSend = (...args: string[]) => send('hello', '--instance', 'codex', '--auto-yes', ...args);
+
+  it('it was off: armed, refused, withdrawn', async () => {
+    await runningWith(writer);
+    const result = await armAndSend('--role', 'reviewer');
+    expect(result.code).toBe(32);
+    expect(autoYes.posts.map(({ enabled }) => enabled)).toEqual([true, false]);
+    expect(autoYes.posts[1]).toMatchObject({ cliToolId: 'codex', instanceId: 'codex' });
+    expect(autoYes.on).toBe(false);
+    expect(result.stderr).toContain('withdrawn');
+  });
+
+  it('it was on: never turned off, and its terms untouched by a refusal', async () => {
+    await runningWith(writer);
+    autoYes.on = true;
+    expect((await armAndSend('--role', 'reviewer')).code).toBe(32);
+    expect(autoYes.posts).toEqual([]);
+    expect(autoYes.on).toBe(true);
+  });
+
+  it('it was on, and the message goes in: this send\'s terms apply then', async () => {
+    await runningWith(reviewer);
+    autoYes.on = true;
+    expect((await armAndSend('--role', 'reviewer', '--duration', '3h')).code).toBe(0);
+    expect(fakeTool.typed).toEqual(['hello']);
+    expect(autoYes.posts).toEqual([expect.objectContaining({ enabled: true, duration: 3 * 3600 * 1000 })]);
+  });
+
+  it('a pin replaced at the first key: withdrawn too', async () => {
+    await launch();
+    fakeTool.running = true;
+    const evidence = getLaunchRoleEvidence(target);
+    fakeTool.beforeFirstKey = () => launch();
+    const result = await armAndSend('--expect-role-generation', evidence?.sessionGeneration as string, '--expect-no-role');
+    expect(result.code).toBe(32);
+    expect(autoYes.on).toBe(false);
+  });
+
+  it('a roster moved under it: exit 31, withdrawn', async () => {
+    setAgentInstances(db, WT, [{ id: 'codex', cliTool: 'codex', alias: 'A', order: 0 }]);
+    ownership.hook = () => {
+      ownership.hook = null;
+      setAgentInstances(db, WT, [{ id: 'codex', cliTool: 'codex', alias: 'Renamed', order: 0 }]);
+    };
+    expect((await armAndSend('--role', 'reviewer')).code).toBe(31);
+    expect(autoYes.on).toBe(false);
+  });
+
+  it('the state could not be read: left on, with how to stop it, not guessed off', async () => {
+    await runningWith(writer);
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      const url = String(input);
+      if ((init?.method ?? 'GET') === 'GET' && url.includes('/auto-yes')) return Response.json({ error: 'x' }, { status: 500 });
+      return dispatch(input, init);
+    });
+    const result = await armAndSend('--role', 'reviewer');
+    expect(result.code).toBe(32);
+    expect(autoYes.on).toBe(true);
+    expect(result.stderr).toContain(`auto-yes ${WT} --disable --instance codex`);
+  });
+
+  it('no word on whether it was sent: left on, with how to stop it', async () => {
+    await runningWith(reviewer);
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      if (String(input).endsWith('/send')) throw new TypeError('fetch failed');
+      return dispatch(input, init);
+    });
+    const result = await armAndSend('--role', 'reviewer');
+    expect(result.code).toBe(1);
+    expect(autoYes.on).toBe(true);
+    expect(result.stderr).toContain('--disable');
+  });
+
+  it('a refused relay ends the command before anything is armed', async () => {
+    await runningWith(writer);
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      if (String(input).endsWith('/api/relays')) {
+        return Response.json({ error: 'chain too long', code: 'RELAY_CHAIN_LIMIT' }, { status: 409 });
+      }
+      if (String(input).includes('/resolve-target')) return dispatch(input, init);
+      return dispatch(input, init);
+    });
+    const result = await armAndSend('--role', 'reviewer', '--reply-to', `${WT}/codex`);
+    expect(result.code).not.toBe(0);
+    expect(autoYes.posts).toEqual([]);
+    expect(fakeTool.typed).toEqual([]);
+  });
+
+  it('a send saying nothing about a role reads nothing, and is as it was (negative control)', async () => {
+    fakeTool.running = true;
+    const reads: string[] = [];
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'GET' && String(input).includes('/auto-yes')) reads.push(String(input));
+      if (String(input).endsWith('/send')) return Response.json({ error: 'x', code: 'SOMETHING', sendOutcome: 'not_sent' }, { status: 409 });
+      return dispatch(input, init);
+    });
+    expect((await armAndSend()).code).not.toBe(0);
+    expect(reads).toEqual([]);
+    expect(autoYes.posts.map(({ enabled }) => enabled)).toEqual([true]);
+    expect(autoYes.on).toBe(true);
+  });
+});
+
+describe('--contract --role: the setting first, as send --role has it', () => {
+  const contract = (...args: string[]) => send('--contract', '.commandmate/tasks/x.yaml', '--instance', 'codex', ...args);
+
+  /** The process runs `running`, and the setting says `next`. */
+  async function processAndSetting(running: string, next: string): Promise<void> {
+    setInstanceRoleState(db, WT, 'codex', { state: 'role', roleId: running });
+    await launch();
+    fakeTool.running = true;
+    setInstanceRoleState(db, WT, 'codex', { state: 'role', roleId: next });
+  }
+
+  it('process A, setting B, --role A: goes, as send --role A does', async () => {
+    await processAndSetting(reviewer, writer);
+    const result = await contract('--role', 'reviewer');
+    expect(result.code).toBe(0);
+    expect(fakeTool.typed).toHaveLength(1);
+    expect(taskStatuses).toEqual(['running']);
+    expect(getInstanceRoleState(db, WT, 'codex')).toMatchObject({ roleId: reviewer });
+  });
+
+  it('send --role A in the same state ends the same way (control)', async () => {
+    await processAndSetting(reviewer, writer);
+    expect((await send('hello', '--instance', 'codex', '--role', 'reviewer')).code).toBe(0);
+  });
+
+  it('process A, --role B: 32, nothing typed, no task, and the setting saved and said so', async () => {
+    await processAndSetting(reviewer, reviewer);
+    const result = await contract('--role', 'writer');
+    expect(result.code).toBe(32);
+    expect(fakeTool.typed).toEqual([]);
+    expect(getInstanceRoleState(db, WT, 'codex')).toMatchObject({ roleId: writer });
+    expect(result.stderr).toContain('stayed saved');
+  });
+
+  it('process A, setting B, --role C: 32 after saving C, saying so', async () => {
+    const third = createAgentRole(db, { name: 'third', body: 'THIRD' }).id;
+    await processAndSetting(reviewer, writer);
+    const result = await contract('--role', 'third');
+    expect(result.code).toBe(32);
+    expect(result.stderr).toContain('stayed saved');
+    expect(getInstanceRoleState(db, WT, 'codex')).toMatchObject({ roleId: third });
+    expect(fakeTool.typed).toEqual([]);
+  });
+
+  it('a broken contract saves nothing', async () => {
+    await processAndSetting(reviewer, writer);
+    fs.writeFileSync(path.join(worktreePath, '.commandmate', 'tasks', 'bad.yaml'), 'version: 1\n');
+    const result = await send('--contract', '.commandmate/tasks/bad.yaml', '--instance', 'codex', '--role', 'reviewer');
+    expect(result.code).toBe(2);
+    expect(getInstanceRoleState(db, WT, 'codex')).toMatchObject({ roleId: writer });
+  });
+
+  it('no --role: refused on the settings, and nothing saved (negative control)', async () => {
+    await processAndSetting(reviewer, writer);
+    expect((await contract()).code).toBe(32);
+    expect(getInstanceRoleState(db, WT, 'codex')).toMatchObject({ roleId: writer });
+    expect(fakeTool.typed).toEqual([]);
+  });
+
+  it('naming neither instance nor tool: the default instance is the one saved', async () => {
+    await processAndSetting(reviewer, writer);
+    const result = await send('--contract', '.commandmate/tasks/x.yaml', '--role', 'reviewer');
+    expect(result.code).toBe(0);
+    expect(getInstanceRoleState(db, WT, 'codex')).toMatchObject({ roleId: reviewer });
+  });
+});
+
+describe('--json answers every failure of a role command', () => {
+  const unreachable = async () => {
+    throw new TypeError('fetch failed');
+  };
+  const internal = async (input: unknown, init?: RequestInit) => {
+    if (String(input).includes('/api/capabilities')) return dispatch(input, init);
+    return Response.json({ success: false, error: 'internal_error', message: 'Internal error' }, { status: 500 });
+  };
+  const noRoute = async (input: unknown, init?: RequestInit) => {
+    if (String(input).includes('/api/capabilities')) return dispatch(input, init);
+    return new Response('<html>not here</html>', { status: 404 });
+  };
+  const COMMANDS: Array<[string, () => Promise<CliResult>]> = [
+    ['roles list', () => roles('list', '--json')],
+    ['roles show', () => roles('show', 'reviewer', '--json')],
+    ['roles rm', () => roles('rm', 'reviewer', '--json')],
+    ['roles default', () => roles('default', 'codex', '--none', '--json')],
+    ['roles defaults', () => roles('defaults', '--json')],
+    ['set-role', () => instances('set-role', 'codex', '--none', '--json')],
+    ['add --no-role', () => instances('add', '--agent', 'codex', '--no-role', '--json')],
+  ];
+
+  it.each(COMMANDS)('%s: no server is exit 1 with JSON on stdout', async (_name, run) => {
+    vi.stubGlobal('fetch', unreachable);
+    const result = await run();
+    expect(result.code).toBe(1);
+    expect(result.json()).toMatchObject({ success: false, error: 'no_response' });
+    expect(result.stderr).toContain('Server is not running');
+  });
+
+  it.each(COMMANDS)('%s: internal_error is exit 99 with JSON on stdout', async (_name, run) => {
+    vi.stubGlobal('fetch', internal);
+    const result = await run();
+    expect(result.code).toBe(99);
+    expect(result.json()).toMatchObject({ success: false, error: 'internal_error' });
+  });
+
+  it.each(COMMANDS)('%s: an older server is exit 99 with JSON on stdout', async (_name, run) => {
+    vi.stubGlobal('fetch', noRoute);
+    const result = await run();
+    expect(result.code).toBe(99);
+    expect(result.json()).toMatchObject({ success: false, error: 'role_api_unavailable' });
+  });
+
+  it('without --json: stderr only, the same exit code (negative control)', async () => {
+    vi.stubGlobal('fetch', unreachable);
+    const result = await roles('list');
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('Server is not running');
+  });
+
+  it('add --role: its own usage failures are JSON too', async () => {
+    for (const args of [
+      ['add', '--no-role', '--json'],
+      ['add', '--agent', 'nope', '--no-role', '--json'],
+      ['add', '--agent', 'codex', '--id', 'bad id', '--no-role', '--json'],
+      ['add', '--agent', 'claude', '--id', 'copilot', '--no-role', '--json'],
+    ]) {
+      const result = await instances(...args);
+      expect(result.code, args.join(' ')).toBe(2);
+      expect(result.json().success, args.join(' ')).toBe(false);
+    }
+  });
+
+  it('an invalid worktree id: JSON on the role forms, as before on the others', async () => {
+    const roleForm = await runCli(createInstancesCommand, ['bad id!', 'set-role', 'codex', '--none', '--json']);
+    expect(roleForm.code).toBe(2);
+    expect(roleForm.json().success).toBe(false);
+    const plain = await runCli(createInstancesCommand, ['bad id!', '--json']);
+    expect(plain.code).toBe(2);
+    expect(plain.stdout).toBe('');
+  });
+
+  it('a plain add --json keeps stderr only (negative control)', async () => {
+    const result = await instances('add', '--agent', 'nope', '--json');
+    expect(result.code).toBe(2);
+    expect(result.stdout).toBe('');
+  });
+
+  it('send has no --json to keep a promise about', () => {
+    expect(createSendCommand().options.map((option) => option.long)).not.toContain('--json');
+  });
+});
+
+describe('an OpenCode V1 conversation continuing', () => {
+  it('names no flag the CLI lacks, and says what it cannot do; the API\'s sentence is unchanged', async () => {
+    const realFetch = dispatch;
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      const response = await realFetch(input, init);
+      if (!String(input).endsWith('/send')) return response;
+      return Response.json(
+        { ...(await response.json()), roleResume: { continued: true, message: 'send with newConversation', newConversationField: 'newConversation' } },
+        { status: response.status }
+      );
+    });
+    const result = await send('hello', '--instance', 'codex');
+    expect(result.code).toBe(0);
+    expect(result.stderr).toContain('continues under a different role');
+    expect(result.stderr).toContain('The CLI cannot start a new conversation');
+    expect(result.stderr).not.toContain('newConversation');
   });
 });

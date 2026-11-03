@@ -72,8 +72,11 @@ export interface PostMessageOptions {
    * send (`relayId`) and it is withdrawn only on a confirmed `not_sent`.
    */
   relay?: RegisteredRelay;
-  /** Runs first when the post fails, before the relay is cancelled. */
-  onFailure?: () => Promise<void>;
+  /**
+   * Runs first when the post fails, before the relay is cancelled and before any
+   * exit. Issue #4116: told the failure, and a bound relay's outcome (null unbound).
+   */
+  onFailure?: (error: unknown, outcome: FailedSendOutcome | null) => Promise<void>;
   /** Printed (after `Error: `) when PROMPT_WAITING carried no message body. */
   promptWaitingFallback: string;
   /** The resolved target the send addressed; the hints name it (Issue #3982). */
@@ -82,6 +85,9 @@ export interface PostMessageOptions {
 
 /** What the send did, as far as a bound relay is concerned (Issue #3957). */
 type BoundSendOutcome = 'sent' | 'not_sent' | 'unknown' | 'conflict';
+
+/** A bound relay's outcome once the send is known to have failed. */
+export type FailedSendOutcome = Exclude<BoundSendOutcome, 'sent'>;
 
 function isSendOutcome(value: unknown): value is 'sent' | 'not_sent' | 'unknown' {
   return value === 'sent' || value === 'not_sent' || value === 'unknown';
@@ -172,7 +178,7 @@ export async function postMessage(
       return { worktreeId, role: 'user', content: '', sendOutcome: 'sent' };
     }
     if (options.onFailure) {
-      await options.onFailure();
+      await options.onFailure(error, outcome);
     }
     // A relay whose message never arrived can never be answered; leaving
     // it open would have the requester waiting 24h for a turn that was
