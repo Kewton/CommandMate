@@ -165,6 +165,7 @@
 
 ### 6.2 Codex
 
+- **起動行（#4115）:** ロールがある起動だけ、先頭に `CODEX_HOME=<生成物のホーム>` を付ける。未知のプロファイルは素のまま動くので、CLI が生成物と別のホームを読まないようにするため。ロールなしの起動行は変わらない。下の表は #4113 の実測時のもの。
 - **渡し方:** `-p cm-role-<id>`。サブコマンドより前に置く（`codex -c features.daemon_auto_start=false [--no-daemon] -p <id>`、`codex -p <id> exec …`）。生成物は TOML で、本文は基本文字列（JSON の文字列表現で可。`"""` を含んでも一致した）。
 - **合成（実測）:**
   - `model` など他のキーは `config.toml` から継ぐ。
@@ -264,6 +265,7 @@ Welcome to the Antigravity CLI. You are currently not signed in.
 
 ### 6.7 Copilot CLI
 
+- **起動行（#4115）:** ロールがある起動だけ、先頭に `COPILOT_HOME=<生成物のホーム>` を付ける。ロールなしの起動行は変わらない。下の表は #4113 の実測時のもの。
 - **渡し方:** `$COPILOT_HOME/agents/cm-role-<id>.agent.md` + `--agent cm-role-<id>`。frontmatter は `name`、`description`、`infer: false`。**ホーム配置は実測で動いた**（Issue の未確認を解消）。
 - **合成:** `.github/copilot-instructions.md`・`AGENTS.md` と同時に載る。base は 100% 残存。ツールは `update_todo` が 1 つ増える（対照 20 → 21）。
 - **他のセッションへの影響:** `infer: false` なら `--agent` なしの別セッションの要求に名前も本文も出ない。`infer: true` と省略は名前が出る（本文は出ない）。**`infer: false` は必須。**
@@ -466,19 +468,23 @@ Welcome to the Antigravity CLI. You are currently not signed in.
 
 ## 12. 未確認の一覧
 
+#4114〜#4117 の実装の時点で更新した。
+
 | 項目 | 理由 |
 |---|---|
 | Antigravity の注入以降の全部（§6.6） | 認証の複製が要る |
 | Claude / Codex / Copilot / Command Code の**本物のモデル**がロールと `AGENTS.md` を同時に守るか | 認証の複製が要る。代わりに局所モデルで計測（§9）。要求への到達は確定モデルで確認済み。OpenCode V1・V2 も局所モデルだけ |
 | Claude の `--system-prompt-snapshot off` での再開 | CommandMate が再開しないので省いた |
 | OpenCode V2 の approval ダイアログの検出 | 確定モデルの課題で確認が出なかった |
-| Command Code の mod による受領ファイル、V1 の設定 API による適用確認 | #4115 で実装時に確かめる |
+| Command Code の mod による受領ファイル | 確認の手段が無く、適用状態は「不明」のまま（#4115）。V1 の設定 API は確定モデルで確認した（§14） |
 | V1 の `wait --verify`、契約タスク、承認からの実行 | `wait` が完了せず、`respond --default` も通らない（§4、§11）。ロールなしでも同じ |
-| `OPENCODE_CONFIG_CONTENT="$(cat <file>)"` の形、ペインと Schedule の env の読み取り | 実装が無い。§7.1 |
+| Schedule の env の読み取りの実機確認 | テストだけ。`OPENCODE_CONFIG_CONTENT="$(cat <file>)"` の形とペインの env の読み取り（`tmux show-environment`）は #4115 で実機で確認した（確定モデル、私設 tmux） |
+| 実際のドライバを通した起動（待ちとダイアログの処理）、`gh copilot` の形、hooks 有効の起動行 | #4115 の実機確認は同じ関数を確認用の手順でつないだもの。Copilot は `copilot` の直接起動、起動行は hooks 無効で確かめた |
 | V2 の `continueSession`、Schedule の `-c` | 入口を通していない。再開の挙動は TUI で確認（§3） |
-| 生成物の書き込み不可 | 生成処理が無い |
-| 2 サーバーの同時生成、起動中の既定変更 | 実装が無い。#4114・#4115 の受入条件 |
-| リポジトリ既定とシステム既定の継承 | 解決関数が無い。#4115 の受入条件 |
+| 生成物の書き込み不可の実機確認 | テストだけ（#4114・#4115） |
+| 2 サーバーの同時生成の実機確認 | 2 プロセスを同時に動かしては確かめていない。同名・同内容の生成物を再利用する規則はテストで固定（#4114） |
+| 起動中の既定変更の実機確認 | テストだけ（#4115） |
+| リポジトリ既定とシステム既定の継承の実機確認 | テストだけ（#4114・#4115） |
 
 ## 13. Issue 本文の表との差分
 
@@ -550,7 +556,7 @@ Welcome to the Antigravity CLI. You are currently not signed in.
 | Claude | 起動失敗は exit。読めたことの積極的な証拠は無い | exit のみ |
 | Codex | 起動失敗は exit。未知のプロファイルは検出できないので起動前の検査だけ | exit のみ |
 | Command Code | mod の factory が受領ファイルを書く | 未実測。hook の例外は無言なので factory で書く |
-| OpenCode V1 | サーバーの設定 API | 未実測 |
-| OpenCode V2 | `GET /api/config?directory=…` に解決後の本文が含まれる（`/api/agent` には含まれない）。本文そのものを返すので、**生成物 fingerprint** と比べてログに出さない。実測は本文の語が含まれることまでで、バイト一致とハッシュの比較は未実測 | 一部実測（serve のみ） |
+| OpenCode V1 | サーバーの `GET /config` の `instructions` が生成物のパスを含む | 実測（#4115、確定モデル） |
+| OpenCode V2 | `GET /api/config?directory=…` は 1 つの統合オブジェクトではなく設定元の配列（`[{type,path,info},…]`）を返し、env の分が最後に来る。その `info.agents.<実効 agent>.system` のハッシュを**生成物 fingerprint** と比べ、本文はログに出さない。`/api/agent` には本文が含まれない | 実測（#4115、バイト一致を確認。serve のみ） |
 | Copilot | 画面の `✗ Custom agent` / `✗ Failed to select agent` が無いこと（否定の証拠）。`-p` は exit 1 | 実測 |
 | Antigravity | 未確認 | 未確認 |
