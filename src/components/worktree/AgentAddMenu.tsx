@@ -22,6 +22,10 @@
  * press again: another press would add a second instance. The form stays with that
  * said and the submit off, and the instance is placed by nothing until a reload.
  *
+ * Only an instance on the confirmed roster is handed to `onAdded`. One removed elsewhere
+ * before that roster was read has nothing to place, and a placement request left waiting
+ * for its id would land on whichever later row takes that id.
+ *
  * What the default is comes from the same GET's `toolDefaults`; nothing is resolved
  * here. It does NOT start a session: a split showing an instance with no session is
  * the ordinary state of every freshly added roster row, and the session starts
@@ -179,6 +183,7 @@ export const AgentAddMenu = memo(function AgentAddMenu({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedUnverified, setSavedUnverified] = useState(false);
+  const [removedElsewhere, setRemovedElsewhere] = useState(false);
   // Null: not read yet, or could not be read.
   const [roleSettings, setRoleSettings] = useState<InstanceRoleSettingsResponse | null>(null);
   const [roles, setRoles] = useState<AgentRoleSummary[]>([]);
@@ -241,6 +246,7 @@ export const AgentAddMenu = memo(function AgentAddMenu({
     setName('');
     setError(null);
     setSavedUnverified(false);
+    setRemovedElsewhere(false);
     setPlacement(resolveDefaultAgentPlacement(splitCount));
     setRoleChoice(ROLE_CHOICE_INHERIT);
     setOpen(true);
@@ -275,6 +281,7 @@ export const AgentAddMenu = memo(function AgentAddMenu({
       };
       setSaving(true);
       setError(null);
+      setRemovedElsewhere(false);
       try {
         let result: RosterWriteResult;
         if (roleSettings) {
@@ -311,7 +318,12 @@ export const AgentAddMenu = memo(function AgentAddMenu({
           return;
         }
         const saved = result.roster.find((inst) => inst.id === (added as AgentInstance).id);
-        onAdded?.(saved ?? added, chosenPlacement);
+        if (!saved) {
+          // Not a failure, and adding again is fair: nothing of it is left.
+          setRemovedElsewhere(true);
+          return;
+        }
+        onAdded?.(saved, chosenPlacement);
         setOpen(false);
       } finally {
         setSaving(false);
@@ -488,6 +500,11 @@ export const AgentAddMenu = memo(function AgentAddMenu({
             </p>
           )}
 
+          {removedElsewhere && (
+            <p role="status" data-testid="agent-add-removed-elsewhere" className="text-xs text-warning">
+              {t('agentAdd.removedElsewhere')}
+            </p>
+          )}
           {savedUnverified && (
             <p role="status" data-testid="agent-add-saved-unverified" className="text-xs text-warning">
               {t('agentAdd.savedUnverified')}

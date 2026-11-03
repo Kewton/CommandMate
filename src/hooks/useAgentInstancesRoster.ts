@@ -175,13 +175,14 @@ export function enqueueRosterWrite(
       }
       if (response.status === 409) return { status: 'conflict' };
       if (!response.ok) return { status: 'failed' };
+      // After the body, not before: reading it waits, and a newer answer can be taken meanwhile.
+      const answer = await readPatchAnswer(response);
       if (crossed()) {
         const settings = await refreshAfterWrite(worktreeId);
         return settings
           ? { status: 'saved', roster: rosterFromRoleEntries(settings.instances) }
           : { status: 'saved_unverified' };
       }
-      const answer = await readPatchAnswer(response);
       const saved = answer.roster ?? roster;
       recordRosterSaved(worktreeId, saved, answer.revision);
       return { status: 'saved', roster: saved };

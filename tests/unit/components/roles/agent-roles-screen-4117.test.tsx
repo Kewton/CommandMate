@@ -494,6 +494,138 @@ describe('[#4117] an answer the store refused goes to nobody', () => {
     expect(screen.getByTestId('roster').textContent).toBe('claude:Claude,codex:Codex');
   });
 
+  /** Answers a write at once and holds only the reading of its body. */
+  function holdBodyOf(method: string): () => void {
+    let release: () => void = () => {};
+    let armed = true;
+    const real = server.fetch;
+    global.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      const answer = await real(url, init);
+      if (!armed || init?.method !== method) return answer;
+      armed = false;
+      const body = answer.json.bind(answer);
+      return {
+        ...answer,
+        ok: answer.ok,
+        status: answer.status,
+        json: async () => {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          return body();
+        },
+      } as Response;
+    }) as unknown as typeof fetch;
+    return () => release();
+  }
+
+  /** Added elsewhere and read here, by the focus read, while a save's body is still being read. */
+  async function addElsewhereAndRead(): Promise<void> {
+    const reads = () => server.calls.filter((c) => c.method === 'GET' && c.url.endsWith('/instances/roles')).length;
+    const before = reads();
+    server.changeRosterElsewhere([...server.roster, COPILOT]);
+    await focus();
+    await waitFor(() => expect(reads()).toBeGreaterThan(before));
+    await act(async () => {});
+  }
+
+  it('a pane save whose body is read after a newer read: neither the parent nor the next save get the old roster', async () => {
+    render(<Desktop />);
+    await waitFor(() => expect(server.calls.some((c) => c.url.endsWith('/instances/roles'))).toBe(true));
+    await act(async () => {});
+    const releaseBody = holdBodyOf('PATCH');
+    const alias = screen.getByTestId('agent-instance-alias-codex');
+    fireEvent.change(alias, { target: { value: 'Lead' } });
+    fireEvent.blur(alias);
+    await waitFor(() => expect(server.writes('PATCH')).toHaveLength(1));
+    await act(async () => {});
+    await addElsewhereAndRead();
+    await act(async () => releaseBody());
+
+    await waitFor(() => expect(screen.getByTestId('roster').textContent).toBe('claude:Claude,codex:Lead,copilot:Copilot'));
+    await act(async () => {});
+
+    // The revision held is the one read last: the next save is not refused.
+    const claude = screen.getByTestId('agent-instance-alias-claude');
+    fireEvent.change(claude, { target: { value: 'Main' } });
+    fireEvent.blur(claude);
+    await waitFor(() => expect(server.writes('PATCH')).toHaveLength(2));
+    expect(server.writes('PATCH')[1].expectedRosterRevision).toBe(server.revision.replace(/\d+$/, (n) => String(Number(n) - 1)));
+    expect(server.roster.map((i) => i.id)).toEqual(['claude', 'codex', 'copilot']);
+  });
+
+  it('a create whose body is read after a newer read: there is no such window, the order is checked after it', async () => {
+    const onAdded = vi.fn();
+    render(<Desktop onAdded={onAdded} />);
+    await openAdd();
+    const releaseBody = holdBodyOf('POST');
+    fireEvent.click(screen.getByTestId('agent-add-submit'));
+    await waitFor(() => expect(server.writes('POST', '/instances/roles')).toHaveLength(1));
+    await act(async () => {});
+    await addElsewhereAndRead();
+    await act(async () => releaseBody());
+
+    await waitFor(() => expect(onAdded).toHaveBeenCalled());
+    expect(screen.getByTestId('roster').textContent).toContain('copilot:Copilot');
+  });
+
+  describe('an instance removed elsewhere before the roster was confirmed', () => {
+    it('a create: nothing is handed on to place, and it says so', async () => {
+      const onAdded = vi.fn();
+      render(<Desktop onAdded={onAdded} />);
+      await openAdd();
+      server.holdRosterAnswers = true;
+      fireEvent.click(screen.getByTestId('agent-add-submit'));
+      await waitFor(() => expect(server.heldCount).toBe(1));
+      server.holdRosterAnswers = false;
+      await focus();
+      await act(async () => {});
+      server.changeRosterElsewhere(server.roster.filter((inst) => inst.id !== 'claude-2'));
+      await act(async () => server.release());
+
+      await waitFor(() => expect(screen.getByTestId('agent-add-removed-elsewhere').textContent).toContain('削除'));
+      expect(onAdded).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('agent-add-error')).toBeNull();
+      expect(screen.getByTestId('agent-add-submit')).not.toBeDisabled();
+      expect(screen.getByTestId('roster').textContent).toBe('claude:Claude,codex:Codex');
+
+      // Pressing again starts over: what is shown is about that press.
+      server.refuseNextCreate = { status: 404, error: 'not_found' };
+      fireEvent.click(screen.getByTestId('agent-add-submit'));
+      await screen.findByTestId('agent-add-error');
+      expect(screen.queryByTestId('agent-add-removed-elsewhere')).toBeNull();
+    });
+
+    it('the PATCH the "+" falls back to: the same', async () => {
+      server.refuseSettingsRead = true;
+      const onAdded = vi.fn();
+      render(<Desktop onAdded={onAdded} />);
+      await openAdd();
+      server.holdRosterAnswers = true;
+      fireEvent.click(screen.getByTestId('agent-add-submit'));
+      await waitFor(() => expect(server.heldCount).toBe(1));
+      server.holdRosterAnswers = false;
+      server.refuseSettingsRead = false;
+      await focus();
+      await act(async () => {});
+      server.changeRosterElsewhere(server.roster.filter((inst) => inst.id !== 'claude-2'));
+      await act(async () => server.release());
+
+      await waitFor(() => expect(screen.getByTestId('agent-add-removed-elsewhere')).toBeInTheDocument());
+      expect(onAdded).not.toHaveBeenCalled();
+    });
+
+    it('negative control: an instance still there is handed on, with what the roster says', async () => {
+      const onAdded = vi.fn();
+      render(<Desktop onAdded={onAdded} />);
+      await openAdd();
+      fireEvent.click(screen.getByTestId('agent-add-submit'));
+      await waitFor(() => expect(onAdded).toHaveBeenCalled());
+      expect(onAdded.mock.calls[0][0]).toMatchObject({ id: 'claude-2', order: 2 });
+      expect(screen.queryByTestId('agent-add-removed-elsewhere')).toBeNull();
+    });
+  });
+
   async function crossTwoRoleSaves(): Promise<void> {
     render(<Desktop />);
     fireEvent.click(screen.getByTestId('instance-roles-toggle'));

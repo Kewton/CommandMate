@@ -61,8 +61,10 @@ export function RepositoryRoleDefaults({ repositoryId }: { repositoryId: string 
       const request = requestRef.current;
       const result = await roleApi.setRepositoryDefault(repositoryId, cliToolId, roleInputOf(choice));
       if (result.ok) {
-        if (request === requestRef.current) setDefaults(result.data.defaults);
-        else if (!(await load())) setSavedStale(true);
+        if (request === requestRef.current) {
+          setDefaults(result.data.defaults);
+          setSavedStale(false);
+        } else if (!(await load())) setSavedStale(true);
         refreshAllShownInstanceRoleSettings();
       } else {
         setSaveError(true);

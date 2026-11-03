@@ -380,6 +380,23 @@ describe('[#4117] a change in the settings reaches what is open elsewhere', () =
     await act(async () => releasePut());
     await waitFor(() => expect(screen.getByTestId('repository-roles-stale-repo-1').textContent).toContain('再読み込み'));
     expect(screen.queryByTestId('repository-roles-save-error-repo-1')).toBeNull();
+
+    // A refused save says nothing new about what is shown, so the warning stays.
+    refuse = false;
+    global.fetch = vi.fn((url: string, init?: RequestInit) =>
+      String(url).endsWith('/role-defaults') && init?.method === 'PUT'
+        ? Promise.resolve({ ok: false, status: 500, json: async () => ({ success: false, error: 'internal_error' }) })
+        : real(url, init),
+    ) as unknown as typeof fetch;
+    fireEvent.change(select(), { target: { value: REVIEWER.id } });
+    await screen.findByTestId('repository-roles-save-error-repo-1');
+    expect(screen.getByTestId('repository-roles-stale-repo-1')).toBeInTheDocument();
+
+    // A save whose answer is taken is the current state: the warning goes.
+    global.fetch = real as unknown as typeof fetch;
+    fireEvent.change(select(), { target: { value: REVIEWER.id } });
+    await waitFor(() => expect(source()).toBe('指定中: レビュー担当［リポジトリ］'));
+    expect(screen.queryByTestId('repository-roles-stale-repo-1')).toBeNull();
   });
 
   it('a read that left before a repository save does not put the old value back', async () => {
