@@ -22,7 +22,7 @@
  */
 
 import { ExitCode } from '../types';
-import { ApiError, type ApiClient } from './api-client';
+import { ApiError, rethrowIfDeadlineExceeded, type ApiClient } from './api-client';
 import { handleCommandError } from './command-helpers';
 import { RoleCliError, roleFailureFromApi, usageError } from './role-failure';
 import { canonicalPath, isDirectory } from './role-input';
@@ -49,6 +49,36 @@ function unclassifiedFailureCode(error: unknown): string {
 
 function printJsonFailure(code: string, message: string, details: Record<string, unknown> = {}): void {
   console.log(JSON.stringify({ success: false, error: code, message, ...details }, null, 2));
+}
+
+/**
+ * Run a request that changes a role setting (Issue #4116). The routes write, then build
+ * their answer, so a 500 or a lost answer can follow a write that stayed. Only a 4xx is
+ * known to have changed nothing; anything else says that is not known, how to look, and
+ * with `--json` the same as `saved: "unknown"` and `check`. The code and exit code stay
+ * what the failure itself has.
+ *
+ * @param check - The command that shows what the setting is now
+ * @throws A 4xx as its role failure, or as it came when it is none
+ */
+export async function roleWrite<T>(check: string, write: () => Promise<T>): Promise<T> {
+  try {
+    return await write();
+  } catch (error) {
+    rethrowIfDeadlineExceeded(error);
+    if (error instanceof ApiError && error.statusCode !== undefined && error.statusCode < 500) {
+      throw roleFailureFromApi(error) ?? error;
+    }
+    const known = error instanceof ApiError ? error : undefined;
+    throw new RoleCliError(
+      unclassifiedFailureCode(error),
+      `${error instanceof Error ? error.message : String(error)} Whether the change was saved is not known. Check it with: ${check}`,
+      known?.exitCode ?? ExitCode.UNEXPECTED_ERROR,
+      { saved: 'unknown', check },
+      known?.statusCode,
+      known?.payload
+    );
+  }
 }
 
 /**

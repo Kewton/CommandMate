@@ -2426,7 +2426,7 @@ See what is registered with `commandmate roles defaults`. Errors say which: `unk
 - `--register --role` creates the instance and its role **before** sending, so the first start has it. Repeating it creates nothing: `--role` replaces what the instance holds and is a condition as above. A roster changed after it was read is exit 31, nothing sent
 - `--register` without `--role` keeps its old order (sent, then registered) and leaves any role alone
 - `--contract --role` ends the same way. If the contract's own check would refuse for the old setting, the role is saved and the check runs again. A broken contract saves nothing
-- When a send with a role or a pin types nothing, the `--auto-yes` it armed is withdrawn, naming the tool and instance, and only if it reads back as that grant. A grant already on stays as it was until the message is in. A grant updated since, or a send that cannot be said to have typed nothing, leaves it on, and the command to stop it is printed
+- When a send with a role or a pin types nothing, the `--auto-yes` it armed is withdrawn, naming the tool and instance, and only if it reads back as that grant. A grant already on stays as it was until the message is in. A grant updated since, or a send that cannot be said to have typed nothing, leaves it on, and the command to stop it is printed. With no target named, the default it read is named in every later request, so a default changed meanwhile neither overwrites nor withdraws another target's Auto-Yes (a server answering for another target than the one read gets no withdrawal, only the command to stop it)
 - A refusal that can be checked before the save (`--model` on a running session, a bad image path) leaves no setting. A refusal after the save says the setting stayed saved, whatever refused it
 - `--expect-role-generation <g>` with `--expect-role-fingerprint <f>` / `--expect-no-role` pin the send to what the caller read (`capture --json`'s `roleLaunch`), saving nothing. The server reads them again right before the first key, so a process replaced in between, even with the same role, gets nothing: exit 32. They combine with `--contract` and `--role`
 
@@ -2452,7 +2452,7 @@ With `--require-roles` a role that cannot be read fails the command instead of b
 
 ### `--json` shapes
 
-Failures included, on stdout (the same sentence goes to stderr). A failure with no role code of its own says `internal_error`, `request_failed`, `no_response` (no server), `role_api_unavailable` (a server older than roles) or `unexpected_error`, with the exit codes below. A missing argument or unknown option is commander's: stderr only, exit 1. `send` has no `--json`.
+Failures included, on stdout (the same sentence goes to stderr). A failure with no role code of its own says `internal_error`, `request_failed`, `no_response` (no server), `role_api_unavailable` (a server older than roles) or `unexpected_error`, with the exit codes below. A missing argument or unknown option is commander's: stderr only, exit 1. A request changing a role setting (`roles add` / `edit` / `rm` / `default`, `set-role`, `add --role`) that ends in a 5xx or no answer may have saved, so it says that is not known and how to check (`--json`: `saved: "unknown"` and `check`). A 4xx saved nothing. `send` has no `--json`; `send --register --role` and `--contract --role` print the same sentence on stderr.
 
 | Command | Shape |
 |---------|-------|
@@ -2464,7 +2464,7 @@ Failures included, on stdout (the same sentence goes to stderr). A failure with 
 | `default` | `{ success, level: "system" \| "repository", cliToolId, repository?, before, after, impact: { repositories, schedules, runningSessions, message } }`; `before` / `after` are `{ stored, effective }` |
 | `defaults` | `{ success, system: [{ cliToolId, adapterEnabled, stored, effective }], repositories }`; with `--repo`, `{ success, repository, defaults: [{ cliToolId, adapterEnabled, stored, effective }] }` |
 | `set-role`, `add --role` | `{ success, instanceId, cliToolId, adapterEnabled, stored, effectiveNext, launched, requested, restartPending, applyPending, rosterRevision }` |
-| Failure | `{ success: false, error: <code>, message, candidates? \| references? \| currentBodyVersion? }` |
+| Failure | `{ success: false, error: <code>, message, candidates? \| references? \| currentBodyVersion? \| saved?: "unknown", check? }` |
 
 `stored.state` is `role`, `none`, `inherit` (no row) or `unset` (system, no row). `effective.kind` is `role`, `none` or `ambiguous`. `effective.source` is `repository`, `system` or `fallback`.
 

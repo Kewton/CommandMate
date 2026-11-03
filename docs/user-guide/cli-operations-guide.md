@@ -3296,7 +3296,7 @@ commandmate roles default codex --repo . --role reviewer
 - `--register --role` は、インスタンスとロールを送信の**前に**作るので、最初の起動からそのロールで動きます。繰り返しても作成はされず、`--role` の値で既存の指定を置き換えたうえで、上の条件が適用されます。読み取りの後に roster が変わると exit 31 で未送信です
 - `--role` なしの `--register` は従来どおり（送信の後に登録）で、既存のロールには触れません
 - `--contract --role` も同じ結果になります。契約側の検査が古い設定で拒否するときは、ロールを保存して検査し直します。契約そのものが不正なら何も保存しません
-- ロールか固定を付けた送信が未入力で終わると、その送信が有効にした `--auto-yes` は取り消します（対象のツールとインスタンスを明示し、直前に読み直して一致するときだけ）。もともと有効だった Auto-Yes は、本文が入るまでそのままです。後から更新された grant や、未入力と確定できないときは残し、止めるコマンドを表示します
+- ロールか固定を付けた送信が未入力で終わると、その送信が有効にした `--auto-yes` は取り消します（対象のツールとインスタンスを明示し、直前に読み直して一致するときだけ）。もともと有効だった Auto-Yes は、本文が入るまでそのままです。後から更新された grant や、未入力と確定できないときは残し、止めるコマンドを表示します。宛先を省いても、読んだ既定を以後の全要求に名指しするので、途中で既定が変わっても別の対象の Auto-Yes を上書きも取り消しもしません（サーバーが答えた対象が読んだ対象と違えば、取り消さず止めるコマンドを表示します）
 - 保存の前に確かめられる拒否（稼働中への `--model`、不正な画像パス）は設定を残しません。保存の後の拒否は、理由を問わず設定が保存されたことを伝えます
 - `--expect-role-generation <g>` と `--expect-role-fingerprint <f>` / `--expect-no-role` は、呼び出し側が読んだ値（`capture --json` の `roleLaunch`）に送信を固定します。何も保存しません。サーバーが最初のキーの直前に読み直すので、その間にプロセスが入れ替われば（同じロールでも）未送信 exit 32 です。`--contract` や `--role` と併用できます
 
@@ -3322,7 +3322,7 @@ commandmate roles default codex --repo . --role reviewer
 
 ### `--json` の形
 
-失敗も含めて stdout に出力します（同じ文を stderr にも出します）。ロールの分類が無い失敗の `error` は `internal_error`、`request_failed`、`no_response`（サーバーに届かない）、`role_api_unavailable`（ロールより古いサーバー）、`unexpected_error` で、終了コードは下の表のとおりです。引数の不足や不明なオプションは commander の出力（stderr のみ、exit 1）です。`send` に `--json` はありません。
+失敗も含めて stdout に出力します（同じ文を stderr にも出します）。ロールの分類が無い失敗の `error` は `internal_error`、`request_failed`、`no_response`（サーバーに届かない）、`role_api_unavailable`（ロールより古いサーバー）、`unexpected_error` で、終了コードは下の表のとおりです。引数の不足や不明なオプションは commander の出力（stderr のみ、exit 1）です。ロールを変える要求（`roles add` / `edit` / `rm` / `default`、`set-role`、`add --role`）が 5xx か応答なしで終わると、保存された可能性があるので、保存の有無が不明であることと確かめるコマンドを伝えます（`--json` は `saved: "unknown"` と `check`）。4xx は保存していません。`send` に `--json` はありませんが、`send --register --role` と `--contract --role` も同じ文を stderr に出します。
 
 | コマンド | 形 |
 |---------|----|
@@ -3334,7 +3334,7 @@ commandmate roles default codex --repo . --role reviewer
 | `default` | `{ success, level: "system" \| "repository", cliToolId, repository?, before, after, impact: { repositories, schedules, runningSessions, message } }`。`before` / `after` は `{ stored, effective }` |
 | `defaults` | `{ success, system: [{ cliToolId, adapterEnabled, stored, effective }], repositories }`。`--repo` では `{ success, repository, defaults: [{ cliToolId, adapterEnabled, stored, effective }] }` |
 | `set-role`, `add --role` | `{ success, instanceId, cliToolId, adapterEnabled, stored, effectiveNext, launched, requested, restartPending, applyPending, rosterRevision }` |
-| 失敗 | `{ success: false, error: <code>, message, candidates? \| references? \| currentBodyVersion? }` |
+| 失敗 | `{ success: false, error: <code>, message, candidates? \| references? \| currentBodyVersion? \| saved?: "unknown", check? }` |
 
 `stored.state` は `role` / `none` / `inherit`（行なし）/ `unset`（システムで行なし）、`effective.kind` は `role` / `none` / `ambiguous`、`effective.source` は `repository` / `system` / `fallback` です。
 

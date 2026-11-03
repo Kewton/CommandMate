@@ -16,6 +16,7 @@ import {
   listRepositories,
   readRoleBodyOption,
   reportRoleFailure,
+  roleWrite,
   resolveRepository,
   resolveRole,
   usageError,
@@ -90,6 +91,8 @@ Exit codes:
             The same sentence goes to stderr. Failures with no role code of their own say
             internal_error, request_failed, no_response (no server), role_api_unavailable
             (a server older than roles) or unexpected_error, with the exit code above.
+            A change that got a 5xx or no answer also has saved: "unknown" and check, the
+            command that shows what it is now. A 4xx changed nothing.
             A missing argument or unknown option is commander's: stderr only, exit 1.
 
 Example: define a reviewer and make it this repository's Codex default
@@ -189,7 +192,9 @@ interface BodyOptions extends RolesOptions {
 async function addRole(client: ApiClient, name: string, options: BodyOptions): Promise<void> {
   const body = await readRoleBodyOption(options);
   if (body === undefined) throw usageError('Give the body with --file <path> or --stdin.');
-  const response = await client.post<{ success: true; role: AgentRoleDetail }>('/api/roles', { name, body });
+  const response = await roleWrite('commandmate roles list', () =>
+    client.post<{ success: true; role: AgentRoleDetail }>('/api/roles', { name, body })
+  );
   print(options, response, `Role added: ${response.role.name} (${response.role.id})`);
 }
 
@@ -213,11 +218,13 @@ async function editRole(
     throw usageError('Nothing to change: give --name, --file or --stdin.');
   }
   const { id } = await resolveRole(client, selector);
-  const response = await client.put<AgentRoleEditResponse>(`/api/roles/${encodeURIComponent(id)}`, {
-    ...(options.name !== undefined ? { name: options.name } : {}),
-    ...(body !== undefined ? { body } : {}),
-    ...(expectedBodyVersion !== undefined ? { expectedBodyVersion } : {}),
-  });
+  const response = await roleWrite(`commandmate roles show ${id}`, () =>
+    client.put<AgentRoleEditResponse>(`/api/roles/${encodeURIComponent(id)}`, {
+      ...(options.name !== undefined ? { name: options.name } : {}),
+      ...(body !== undefined ? { body } : {}),
+      ...(expectedBodyVersion !== undefined ? { expectedBodyVersion } : {}),
+    })
+  );
   const { before, after, affected } = response;
   const used = describeReferences(affected);
   print(
@@ -237,8 +244,8 @@ async function removeRole(client: ApiClient, selector: string, options: RolesOpt
   const { id } = await resolveRole(client, selector);
   let response: AgentRoleDeleteResponse;
   try {
-    response = await client.delete<AgentRoleDeleteResponse>(
-      `/api/roles/${encodeURIComponent(id)}${options.force ? '?force=true' : ''}`
+    response = await roleWrite('commandmate roles list', () =>
+      client.delete<AgentRoleDeleteResponse>(`/api/roles/${encodeURIComponent(id)}${options.force ? '?force=true' : ''}`)
     );
   } catch (error) {
     // The sentence alone does not say what is in the way.
@@ -345,10 +352,9 @@ async function setSystemDefault(client: ApiClient, tool: string, options: Defaul
     (await client.get<SystemRoleDefaultsResponse>('/api/settings/agent-role-defaults')).defaults,
     tool
   );
-  const { defaults } = await client.put<SystemRoleDefaultsResponse>('/api/settings/agent-role-defaults', {
-    cliToolId: tool,
-    roleId,
-  });
+  const { defaults } = await roleWrite('commandmate roles defaults', () =>
+    client.put<SystemRoleDefaultsResponse>('/api/settings/agent-role-defaults', { cliToolId: tool, roleId })
+  );
   const after = systemEntryOf(defaults, tool);
   warnAdapterDisabled(tool, after.adapterEnabled);
   const repositories = await repositoriesInheriting(client, tool);
@@ -384,7 +390,9 @@ async function setRepositoryDefault(client: ApiClient, tool: string, repo: strin
       : { state: 'role', roleId: (await resolveRole(client, options.role as string)).id };
   const url = `/api/repositories/${encodeURIComponent(repository.id)}/role-defaults`;
   const before = repositoryEntryOf((await client.get<RepositoryRoleDefaultsResponse>(url)).defaults, tool);
-  const response = await client.put<RepositoryRoleDefaultsResponse>(url, { cliToolId: tool, role });
+  const response = await roleWrite(`commandmate roles defaults --repo ${repository.id}`, () =>
+    client.put<RepositoryRoleDefaultsResponse>(url, { cliToolId: tool, role })
+  );
   const after = repositoryEntryOf(response.defaults, tool);
   warnAdapterDisabled(tool, after.adapterEnabled);
   if (after.effective.kind === 'ambiguous') {

@@ -30,6 +30,7 @@ import {
   getAgentRole,
   getInstanceRoleState,
   getLatestRoleLaunchRecords,
+  getSystemRoleDefaults,
   listAgentRoles,
   recordRoleLaunch,
   setInstanceRoleState,
@@ -1245,6 +1246,297 @@ describe('a send with a role that types nothing leaves Auto-Yes as it found it',
     const result = await armAndSend('--role', 'reviewer');
     expect(codexAutoYes()).toBe(true);
     expect(result.stderr).toContain('could not be read back');
+  });
+});
+
+describe('a default that moves does not take another target\'s Auto-Yes with it', () => {
+  const moveDefaultToClaude = () => db.prepare('UPDATE worktrees SET cli_tool_id = ? WHERE id = ?').run('claude', WT);
+  const claudeGrant = () => getAutoYesState(WT, 'claude', 'claude');
+
+  /** The process on the default runs writer, and claude has a grant of its own. */
+  async function refusalAhead(): Promise<number | undefined> {
+    setInstanceRoleState(db, WT, 'codex', { state: 'role', roleId: writer });
+    await launch();
+    fakeTool.running = true;
+    setAutoYesEnabled(WT, 'claude', true, 28800000, undefined, 'claude');
+    return claudeGrant()?.expiresAt;
+  }
+  /** Runs `change` as the first request matching `at` is answered, and records /send bodies. */
+  function afterFirst(at: (url: string, method: string) => boolean, change: () => void): Array<Record<string, unknown>> {
+    const sends: Array<Record<string, unknown>> = [];
+    let done = false;
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      if (url.endsWith('/send')) sends.push(JSON.parse(String(init?.body)));
+      const response = await dispatch(input, init);
+      if (!done && at(url, method)) {
+        done = true;
+        change();
+      }
+      return response;
+    });
+    return sends;
+  }
+  const readOfAutoYes = (url: string, method: string) => method === 'GET' && url.includes('/auto-yes');
+
+  it('moved after the read: the grant, the send and the withdrawal stay on what was read', async () => {
+    const before = await refusalAhead();
+    const sends = afterFirst(readOfAutoYes, moveDefaultToClaude);
+    const result = await send('hello', '--auto-yes', '--role', 'reviewer');
+    expect(result.code).toBe(32);
+    expect(autoYesPosts).toEqual([
+      expect.objectContaining({ enabled: true, cliToolId: 'codex', instanceId: 'codex' }),
+      { enabled: false, cliToolId: 'codex', instanceId: 'codex' },
+    ]);
+    expect(sends[0]).toMatchObject({ cliToolId: 'codex', instanceId: 'codex' });
+    expect(codexAutoYes()).toBe(false);
+    expect(claudeGrant()?.enabled).toBe(true);
+    expect(claudeGrant()?.expiresAt).toBe(before);
+  });
+
+  it('moved after resolving, before the read: the same', async () => {
+    const before = await refusalAhead();
+    afterFirst((url) => url.includes('/resolve-target'), moveDefaultToClaude);
+    expect((await send('hello', '--auto-yes', '--role', 'reviewer')).code).toBe(32);
+    expect(claudeGrant()?.expiresAt).toBe(before);
+    expect(codexAutoYes()).toBe(false);
+  });
+
+  it('positive control: a grant naming nobody lands on the moved default, over the one there', async () => {
+    const before = await refusalAhead();
+    moveDefaultToClaude();
+    await dispatch(`http://localhost:4116/api/worktrees/${WT}/auto-yes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: true, duration: 3600000 }),
+    });
+    expect(claudeGrant()?.expiresAt).not.toBe(before);
+  });
+
+  it('the server answers for another target anyway: not withdrawn, and the command for that one', async () => {
+    await refusalAhead();
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      const body = init?.body ? JSON.parse(String(init.body)) : {};
+      if (String(input).endsWith('/auto-yes') && init?.method === 'POST' && body.enabled) {
+        autoYesPosts.push(body);
+        return Response.json({ enabled: true, expiresAt: 123, cliToolId: 'claude', instanceId: 'helper' });
+      }
+      return dispatch(input, init);
+    });
+    const result = await send('hello', '--auto-yes', '--role', 'reviewer');
+    expect(result.code).toBe(32);
+    expect(autoYesPosts.map(({ enabled }) => enabled)).toEqual([true]);
+    expect(claudeGrant()?.enabled).toBe(true);
+    expect(result.stderr).toContain('the server armed claude/helper, not the codex/codex this send read');
+    expect(result.stderr).toContain(`commandmate auto-yes ${WT} --disable --instance helper --agent claude`);
+  });
+
+  it('a default that cannot be read: nothing armed, nothing sent', async () => {
+    await refusalAhead();
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      if (String(input).includes('/resolve-target')) return Response.json({ error: 'x' }, { status: 500 });
+      return dispatch(input, init);
+    });
+    expect((await send('hello', '--auto-yes', '--role', 'reviewer')).code).not.toBe(0);
+    expect(autoYesPosts).toEqual([]);
+    expect(fakeTool.typed).toEqual([]);
+    expect(getInstanceRoleState(db, WT, 'codex')).toMatchObject({ roleId: writer });
+  });
+
+  it('--contract --role: the task, the save and the send stay on what was read', async () => {
+    setInstanceRoleState(db, WT, 'codex', { state: 'role', roleId: reviewer });
+    await launch();
+    fakeTool.running = true;
+    setInstanceRoleState(db, WT, 'codex', { state: 'role', roleId: writer });
+    const sends = afterFirst((url, method) => method === 'POST' && url.endsWith('/tasks'), moveDefaultToClaude);
+    const result = await send('--contract', '.commandmate/tasks/x.yaml', '--role', 'reviewer');
+    expect(result.code).toBe(0);
+    expect(sends[0]).toMatchObject({ cliToolId: 'codex', instanceId: 'codex' });
+    expect(fakeTool.typed).toHaveLength(1);
+    expect(getInstanceRoleState(db, WT, 'codex')).toMatchObject({ roleId: reviewer });
+    expect(getInstanceRoleState(db, WT, 'claude')).toEqual({ state: 'inherit' });
+  });
+
+  it('--role --reply-to: the relay and the send stay on what was read', async () => {
+    const relays: string[] = [];
+    let moved = false;
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      if (String(input).endsWith('/api/relays')) {
+        relays.push(String(init?.body));
+        return Response.json({ error: 'chain too long', code: 'RELAY_CHAIN_LIMIT' }, { status: 409 });
+      }
+      const response = await dispatch(input, init);
+      if (!moved && String(input).includes('/resolve-target')) {
+        moved = true;
+        moveDefaultToClaude();
+      }
+      return response;
+    });
+    await send('hello', '--role', 'reviewer', '--reply-to', `${WT}@codex`);
+    expect(JSON.parse(relays[0]).to).toMatchObject({ instanceId: 'codex' });
+  });
+
+  it.each([
+    ['--auto-yes alone', ['hello', '--auto-yes']],
+    ['--contract alone', ['--contract', '.commandmate/tasks/x.yaml']],
+  ])('%s, naming nobody: asks nothing and names nobody (negative control)', async (_name, args) => {
+    fakeTool.running = true;
+    const urls: string[] = [];
+    const sends: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      urls.push(String(input));
+      if (String(input).endsWith('/send')) sends.push(JSON.parse(String(init?.body)));
+      return dispatch(input, init);
+    });
+    expect((await send(...args)).code).toBe(0);
+    expect(urls.filter((url) => url.includes('/resolve-target'))).toEqual([]);
+    expect(sends[0]).not.toHaveProperty('cliToolId');
+    expect(sends[0]).not.toHaveProperty('instanceId');
+    for (const post of autoYesPosts) {
+      expect(post).not.toHaveProperty('cliToolId');
+      expect(post).not.toHaveProperty('instanceId');
+    }
+  });
+
+  it('--role alone is one request, and keeps the server\'s reading (negative control)', async () => {
+    const sends = afterFirst(() => false, () => undefined);
+    await send('hello', '--role', 'reviewer');
+    expect(sends[0]).not.toHaveProperty('instanceId');
+  });
+});
+
+describe('a change answered by a 5xx or not at all may have been saved', () => {
+  const internal = () => Response.json({ success: false, error: 'internal_error', message: 'Internal error' }, { status: 500 });
+  /** The request is carried out, then its answer is what `answer` says. */
+  function answeredBy(at: (url: string, method: string) => boolean, answer: 'a 500' | 'nothing'): void {
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      const response = await dispatch(input, init);
+      if (!at(String(input), init?.method ?? 'GET')) return response;
+      if (answer === 'nothing') throw new TypeError('fetch failed');
+      return internal();
+    });
+  }
+  const instanceRoles = (method: string) => (url: string, seen: string) => seen === method && url.endsWith('/instances/roles');
+
+  describe('--contract --role', () => {
+    const contract = () => send('--contract', '.commandmate/tasks/x.yaml', '--instance', 'codex', '--role', 'reviewer');
+    /** A process with reviewer and the setting writer, so the check refuses and the PUT follows. */
+    async function refusedByTheCheck(): Promise<void> {
+      setInstanceRoleState(db, WT, 'codex', { state: 'role', roleId: reviewer });
+      await launch();
+      fakeTool.running = true;
+      setInstanceRoleState(db, WT, 'codex', { state: 'role', roleId: writer });
+    }
+
+    it.each([
+      ['a 500', 99],
+      ['nothing', 1],
+    ] as const)('the PUT saves and is answered by %s: not known, with the command, and nothing typed', async (answer, code) => {
+      await refusedByTheCheck();
+      answeredBy(instanceRoles('PUT'), answer);
+      const result = await contract();
+      expect(result.code).toBe(code);
+      expect(getInstanceRoleState(db, WT, 'codex')).toMatchObject({ roleId: reviewer });
+      expect(result.stderr).toContain(`Whether the change was saved is not known. Check it with: commandmate instances ${WT}`);
+      expect(fakeTool.typed).toEqual([]);
+    });
+
+    it('an answer saying nothing of the instances: not known either', async () => {
+      await refusedByTheCheck();
+      vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+        const response = await dispatch(input, init);
+        return init?.method === 'PUT' ? Response.json({}) : response;
+      });
+      const result = await contract();
+      expect(result.code).toBe(99);
+      expect(result.stderr).toContain('is not known');
+    });
+
+    it('a 4xx saved nothing, and does not say otherwise', async () => {
+      await refusedByTheCheck();
+      vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+        if (init?.method === 'PUT') return Response.json({ success: false, error: 'not_found', message: 'no such role' }, { status: 404 });
+        return dispatch(input, init);
+      });
+      const result = await contract();
+      expect(result.code).toBe(2);
+      expect(result.stderr).not.toContain('not known');
+      expect(getInstanceRoleState(db, WT, 'codex')).toMatchObject({ roleId: writer });
+    });
+  });
+
+  it('send --register --role: the POST creates and is answered by nothing', async () => {
+    answeredBy(instanceRoles('POST'), 'nothing');
+    const result = await send('hello', '--instance', 'codex-9', '--agent', 'codex', '--register', '--role', 'reviewer');
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain(`is not known. Check it with: commandmate instances ${WT}`);
+    expect(getAgentInstances(db, WT).map(({ id }) => id)).toContain('codex-9');
+    expect(fakeTool.typed).toEqual([]);
+  });
+
+  it('send --role: a 5xx with a body saying nothing of the setting gets the note', async () => {
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      if (String(input).endsWith('/send')) return Response.json({ error: 'bad gateway' }, { status: 502 });
+      return dispatch(input, init);
+    });
+    const result = await send('hello', '--role', 'reviewer');
+    expect(result.stderr).toContain(`whether the role setting was saved is not known. Check it with: commandmate instances ${WT}`);
+  });
+
+  const WRITES: Array<[string, (url: string, method: string) => boolean, () => Promise<CliResult>, () => boolean, string]> = [
+    ['set-role', instanceRoles('PUT'), () => instances('set-role', 'codex', '--role', 'reviewer', '--json'),
+      () => JSON.stringify(getInstanceRoleState(db, WT, 'codex')).includes(reviewer), `commandmate instances ${WT}`],
+    ['add --role', instanceRoles('POST'), () => instances('add', '--agent', 'codex', '--id', 'codex-9', '--role', 'reviewer', '--json'),
+      () => getAgentInstances(db, WT).some(({ id }) => id === 'codex-9'), `commandmate instances ${WT}`],
+    ['roles add', (url, method) => method === 'POST' && url.endsWith('/api/roles'), () => {
+      fs.writeFileSync(path.join(dir, 'body.md'), 'NEW');
+      return roles('add', 'fresh', '--file', path.join(dir, 'body.md'), '--json');
+    }, () => listAgentRoles(db).some(({ name }) => name === 'fresh'), 'commandmate roles list'],
+    ['roles edit', (url, method) => method === 'PUT' && url.includes('/api/roles/'), () => roles('edit', 'reviewer', '--name', 'renamed', '--json'),
+      () => getAgentRole(db, reviewer)?.name === 'renamed', 'commandmate roles show'],
+    ['roles rm', (url, method) => method === 'DELETE' && url.includes('/api/roles/'), () => roles('rm', 'reviewer', '--json'),
+      () => getAgentRole(db, reviewer) === null, 'commandmate roles list'],
+    ['roles default', (url, method) => method === 'PUT' && url.includes('/agent-role-defaults'), () => roles('default', 'codex', '--role', 'reviewer', '--json'),
+      () => getSystemRoleDefaults(db).codex?.roleId === reviewer, 'commandmate roles defaults'],
+  ];
+
+  describe.each(['a 500', 'nothing'] as const)('answered by %s', (answer) => {
+    it.each(WRITES)('%s: --json says it, and it was in fact saved', async (_name, at, run, stayed, check) => {
+      answeredBy(at, answer);
+      const result = await run();
+      expect(result.code).toBe(answer === 'nothing' ? 1 : 99);
+      const failure = result.json();
+      expect(failure).toMatchObject({
+        success: false,
+        error: answer === 'nothing' ? 'no_response' : 'internal_error',
+        saved: 'unknown',
+      });
+      expect(failure.check).toContain(check);
+      expect(failure.message).toContain('is not known');
+      expect(result.stderr).toContain(failure.check);
+      expect(stayed()).toBe(true);
+    });
+  });
+
+  it('roles default --repo: names that repository', async () => {
+    answeredBy((url, method) => method === 'PUT' && url.includes('/role-defaults'), 'nothing');
+    const result = await roles('default', 'codex', '--repo', 'repo', '--role', 'reviewer', '--json');
+    expect(result.json().check).toMatch(/^commandmate roles defaults --repo \S+$/);
+  });
+
+  it('a 4xx: no saved key (negative control)', async () => {
+    const result = await instances('set-role', 'ghost', '--none', '--json');
+    expect(result.code).not.toBe(0);
+    expect(result.json().success).toBe(false);
+    expect(result.json()).not.toHaveProperty('saved');
+  });
+
+  it('a read that fails ahead of the change: no saved key (negative control)', async () => {
+    vi.stubGlobal('fetch', async () => internal());
+    const result = await roles('rm', 'reviewer', '--json');
+    expect(result.code).toBe(99);
+    expect(result.json()).not.toHaveProperty('saved');
   });
 });
 

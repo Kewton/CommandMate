@@ -50,6 +50,7 @@ import type { CLIToolType } from '../../lib/cli-tools/types';
 import {
   assertRoleTool,
   reportRoleFailure,
+  roleWrite,
   resolveRole,
   roleAssignmentFromFlag,
   roleFailureFromApi,
@@ -680,10 +681,9 @@ async function setInstanceRole(
       ? { state: 'inherit' }
       : { state: 'role', roleId: (await resolveRole(client, options.role as string)).id };
 
-  const settings = await client.put<InstanceRoleSettingsResponse>(`/api/worktrees/${worktreeId}/instances/roles`, {
-    instanceId,
-    role,
-  });
+  const settings = await roleWrite(`commandmate instances ${worktreeId}`, () =>
+    client.put<InstanceRoleSettingsResponse>(`/api/worktrees/${worktreeId}/instances/roles`, { instanceId, role })
+  );
   const entry = roleEntryOf(settings, instanceId);
   if (options.json) {
     console.log(JSON.stringify(roleChangeResult(settings, entry), null, 2));
@@ -772,11 +772,14 @@ async function addInstance(
 
   const alias = options.alias ?? defaultAlias(options.agent, id);
   if (roleAssignment !== undefined && roleSettings !== null) {
-    const created = await client.post<InstanceRoleCreateResponse>(`/api/worktrees/${worktreeId}/instances/roles`, {
-      instance: { id, cliTool: options.agent, alias },
-      role: roleAssignment,
-      expectedRosterRevision: roleSettings.rosterRevision,
-    });
+    const agent = options.agent;
+    const created = await roleWrite(`commandmate instances ${worktreeId}`, () =>
+      client.post<InstanceRoleCreateResponse>(`/api/worktrees/${worktreeId}/instances/roles`, {
+        instance: { id, cliTool: agent, alias },
+        role: roleAssignment,
+        expectedRosterRevision: roleSettings.rosterRevision,
+      })
+    );
     const entry = roleEntryOf(created, created.created.instanceId);
     console.error(`Instance added: ${id} (${options.agent})`);
     if (options.json) {
@@ -973,6 +976,7 @@ if the roster changed meanwhile. Without them the instance follows the defaults.
 --json, set-role and add --role: { success, instanceId, cliToolId, adapterEnabled, stored,
   effectiveNext, launched, requested, restartPending, applyPending, rosterRevision }
 --json failure of those two: { success: false, error, message } on stdout, whatever failed.
+  A 5xx or no answer may still have saved: it adds saved: "unknown" and check. A 4xx saved nothing.
 --require-roles makes list --json fail rather than leave role out, so a script can tell
 "could not be read" from a server older than roles (error: role_api_unavailable).
 
