@@ -1,0 +1,117 @@
+// cases.mjs <group> — 失敗応答・合成・形式を実 TUI で確かめる。1 ケース = 起動 → 1 通 → 記録。
+import * as L from './lib.mjs'; import fs from 'node:fs'; import path from 'node:path';
+import { clearDialogs } from './flow.mjs';
+const WT='<WORKTREE>';
+const SPECIAL = ['# 役割 ROLE_MARKER_K3 日本語の見出し', '---', 'title: "not frontmatter"', '---', 'single \' double " back `tick` triple """ tq \'\'\' end', 'dollar $HOME ${HOME} $(echo x) %s \\n backslash \\ end', 'braces {file:/etc/hosts} {env:HOME} <tag> & [x](y)', 'tail line FORMAT_TAIL_Z9'].join('\n');
+const BIG = (n) => { let s = 'ROLE_MARKER_K3 BIGSTART\n'; const line = 'あいうえお padding line for size check 0123456789\n'; while (Buffer.byteLength(s + line) < n - 30) s += line; return s + 'FORMAT_TAIL_Z9\n'; };
+const w=(p,s,m=0o600)=>{fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,s,{mode:m});};
+async function run(tool,label,fn,{send=true,wait=8000,exitOnly=false}={}){
+  L.ensureMock(); await L.sleep(150);
+  const id=`k-${tool}-${label}`.replace(/[^a-z0-9-]/gi,'').slice(0,60);
+  const base=path.join(L.ROOT,'c',id); fs.rmSync(base,{recursive:true,force:true});
+  const home=base+'/home',repo=base+'/repo'; L.repoSeed(repo); fs.mkdirSync(home,{recursive:true});
+  const ctx={home,repo,base,tool};
+  const pre=fn.pre?.(ctx)??{};
+  const d=L.toolDef(tool,home,repo,{launchSh:`${WT}/scripts/opencode-v2/launch.sh`,port:18231,...pre});
+  const r=fn.role(ctx,d);
+  const since=Date.now();
+  L.startPane(id,fn.cwd?.(ctx)??repo,r.env,r.cmd);
+  await L.sleep(wait);
+  const paneStart=L.cap(id);
+  const early=(/__EXIT=(\d+)/.exec(paneStart)??[])[1];
+  const rec={tool,label,argv:r.cmd.map((x)=>String(x).split(base).join('<D>')),env:Object.fromEntries(Object.entries(r.env).filter(([k])=>/OPENCODE_CONFIG|CODEX_PROFILE/.test(k)).map(([k,v])=>[k,String(v).split(base).join('<D>').slice(0,300)])),artifacts:(fn.showArtifacts?.(ctx))};
+  if(early!==undefined){rec.earlyExit=+early;rec.pane=paneStart.split(base).join('<D>').replace(/\n\s*\n+/g,'\n').slice(-500);L.stop(id);console.log(JSON.stringify(rec).slice(0,800));save(rec);return rec;}
+  await clearDialogs(id);
+  rec.startPane=paneStart.split(base).join('<D>').replace(/\n\s*\n+/g,'\n').slice(-420);
+  if(send){await L.sendText(id,`CASE=${id} hello`);
+    const got=await L.until(()=>L.lastMain(id,since),20000);await L.sleep(1200);
+    rec.req=!!got;
+    if(got){rec.model=got.body.model;rec.tools=L.toolNames(got.body).length;rec.markers={};for(const m of fn.markers??['ROLE_MARKER_K3','REPO_MARKER_7Q'])rec.markers[m]=L.whereIs(got.body,m);
+      if(fn.exact){const l=L.layers(got.body);rec.exact=(l.system+l.developer).includes(fn.exact(ctx).trim());}
+      rec.baseKept=fn.base?L.flat(got.body).includes(fn.base):undefined;rec.extra=fn.extra?.(got.body);}
+    rec.pane=L.cap(id).split(base).join('<D>').replace(/\n\s*\n+/g,'\n').slice(-300);
+    const ex=(/__EXIT=(\d+)/.exec(L.cap(id))??[])[1]; if(ex!==undefined)rec.exitAfter=+ex;}
+  L.stop(id);await L.sleep(800);
+  console.log(JSON.stringify({...rec,startPane:undefined,pane:rec.req?undefined:rec.pane}).slice(0,700));save(rec);return rec;
+}
+const save=(rec)=>{const f=path.join(L.ROOT,'rec-cases.jsonl');fs.appendFileSync(f,JSON.stringify(rec)+'\n');};
+const std=(variant,body,label='x')=>({role:(c,d)=>L.applyRole(c.tool,d,c.home,c.repo,variant,body,label)});
+const custom=(mut)=>({role:(c,d)=>{const r={env:{...d.env},cmd:[...d.cmd]};mut(c,r);return r;}});
+const groups={
+ fail:async()=>{
+  await run('claude','missing-file',custom((c,r)=>r.cmd.push('--append-system-prompt-file',c.home+'/nope.md')));
+  await run('claude','empty-file',custom((c,r)=>{w(c.home+'/e.md','');r.cmd.push('--append-system-prompt-file',c.home+'/e.md');}));
+  await run('claude','unreadable',custom((c,r)=>{w(c.home+'/u.md',L.ROLE_TEXT,0o000);r.cmd.push('--append-system-prompt-file',c.home+'/u.md');}));
+  await run('codex','missing-profile',custom((c,r)=>r.cmd.push('-p','cm-role-nope')));
+  await run('codex','bad-toml',custom((c,r)=>{w(c.home+'/.codex/cm-role-bad.config.toml','developer_instructions = """unterminated\n');r.cmd.push('-p','cm-role-bad');}));
+  await run('codex','unreadable-profile',custom((c,r)=>{w(c.home+'/.codex/cm-role-u.config.toml','developer_instructions = "ROLE_MARKER_K3"\n',0o000);r.cmd.push('-p','cm-role-u');}));
+  await run('command-code','missing-mod',custom((c,r)=>r.cmd.push('--mod',c.home+'/nope.ts')));
+  await run('command-code','bad-mod',custom((c,r)=>{w(c.home+'/b.ts','export default function (cmd {');r.cmd.push('--mod',c.home+'/b.ts');}));
+  await run('command-code','throw-mod',custom((c,r)=>{w(c.home+'/t.ts','export default function(cmd){ throw new Error("boom"); }');r.cmd.push('--mod',c.home+'/t.ts');}));
+  await run('command-code','safe-noop',custom((c,r)=>{w(c.home+'/t.ts','export default function(cmd){ cmd.hooks({appendSystemPrompt:()=>{throw new Error("boom2")}}); }');r.cmd.push('--mod',c.home+'/t.ts');}));
+  await run('opencode','missing-instr',custom((c,r)=>{r.env.OPENCODE_CONFIG_CONTENT=JSON.stringify({instructions:[c.home+'/nope.md']});}));
+  await run('opencode','bad-json',custom((c,r)=>{r.env.OPENCODE_CONFIG_CONTENT='{bad';}));
+  await run('opencode','unreadable',custom((c,r)=>{w(c.home+'/u.md',L.ROLE_TEXT,0o000);r.env.OPENCODE_CONFIG_CONTENT=JSON.stringify({instructions:[c.home+'/u.md']});}));
+  await run('opencode-v2','bad-json',custom((c,r)=>{r.env.OPENCODE_CONFIG_CONTENT='{bad';}));
+  await run('opencode-v2','missing-file-ref',custom((c,r)=>{r.env.OPENCODE_CONFIG_CONTENT=JSON.stringify({default_agent:'cm-role-x',agents:{'cm-role-x':{description:'r',mode:'primary',system:`{file:${c.home}/nope.md}`}}});}));
+  await run('opencode-v2','unknown-default',custom((c,r)=>{r.env.OPENCODE_CONFIG_CONTENT=JSON.stringify({default_agent:'cm-role-nope'});}));
+  await run('opencode-v2','hidden-fallback',custom((c,r)=>{r.env.OPENCODE_CONFIG_CONTENT=JSON.stringify({default_agent:'cm-role-x',agents:{'cm-role-x':{description:'r',mode:'primary',hidden:true,system:L.ROLE_TEXT}}});}));
+  await run('copilot','missing-agent',custom((c,r)=>r.cmd.push('--agent','cm-role-nope')));
+  await run('copilot','bad-frontmatter',custom((c,r)=>{w(c.home+'/.copilot/agents/cm-role-b.agent.md','---\nname: [unterminated\n---\nROLE_MARKER_K3\n');r.cmd.push('--agent','cm-role-b');}));
+  await run('copilot','no-frontmatter',custom((c,r)=>{w(c.home+'/.copilot/agents/cm-role-n.agent.md','ROLE_MARKER_K3 plain\n');r.cmd.push('--agent','cm-role-n');}));
+  await run('copilot','unwritable-home',custom((c,r)=>{w(c.home+'/.copilot/agents/cm-role-w.agent.md','---\nname: cm-role-w\ndescription: r\ninfer: false\n---\nROLE_MARKER_K3\n');fs.chmodSync(c.home+'/.copilot/agents',0o500);r.cmd.push('--agent','cm-role-w');}));
+ },
+ format:async()=>{
+  const bodies={special:SPECIAL,big:BIG(16384)};
+  for(const tool of ['claude','codex','command-code','opencode','copilot']) for(const [k,b] of Object.entries(bodies)) await run(tool,'fmt-'+k,{...std('role',b),markers:['ROLE_MARKER_K3','FORMAT_TAIL_Z9','REPO_MARKER_7Q'],exact:()=>b});
+  for(const [k,b] of Object.entries(bodies)) await run('opencode-v2','fmt-'+k,{...custom((c,r)=>{w(c.home+'/r.md',b);r.env.OPENCODE_CONFIG_CONTENT=JSON.stringify({default_agent:'cm-role-x',agents:{'cm-role-x':{description:'r',mode:'primary',system:`{file:${c.home}/r.md}`}}});}),markers:['ROLE_MARKER_K3','FORMAT_TAIL_Z9','REPO_MARKER_7Q'],exact:()=>b},{wait:14000});
+  // 空白入りのパス
+  const sp=' dir with space';
+  await run('claude','space',custom((c,r)=>{const f=`${c.home}/${sp}/r.md`;w(f,L.ROLE_TEXT);r.cmd.push('--append-system-prompt-file',f);}));
+  await run('command-code','space',custom((c,r)=>{const f=`${c.home}/${sp}/r.ts`;w(f,`export default function(cmd){cmd.hooks({appendSystemPrompt:()=>${JSON.stringify(L.ROLE_TEXT)}});}`);r.cmd.push('--mod',f);}));
+  await run('opencode','space',custom((c,r)=>{const f=`${c.home}/${sp}/r.md`;w(f,L.ROLE_TEXT);r.env.OPENCODE_CONFIG_CONTENT=JSON.stringify({instructions:[f]});}));
+  await run('opencode-v2','space',custom((c,r)=>{const f=`${c.home}/${sp}/r.md`;w(f,L.ROLE_TEXT);r.env.OPENCODE_CONFIG_CONTENT=JSON.stringify({default_agent:'cm-role-x',agents:{'cm-role-x':{description:'r',mode:'primary',system:`{file:${f}}`}}});}),{wait:14000});
+  await run('codex','space-home',{pre:()=>({}),...custom((c,r)=>{const ch=`${c.home}/${sp}/codex`;fs.mkdirSync(ch,{recursive:true});fs.copyFileSync(c.home+'/.codex/config.toml',ch+'/config.toml');w(ch+'/cm-role-x.config.toml',`developer_instructions = ${JSON.stringify(L.ROLE_TEXT)}\n`);r.env.CODEX_HOME=ch;r.cmd.push('-p','cm-role-x');})});
+  await run('copilot','space-home',custom((c,r)=>{const ch=`${c.home}/${sp}/copilot`;fs.mkdirSync(ch+'/agents',{recursive:true});fs.copyFileSync(c.home+'/.copilot/config.json',ch+'/config.json');w(ch+'/agents/cm-role-x.agent.md',`---\nname: cm-role-x\ndescription: r\ninfer: false\n---\n${L.ROLE_TEXT}\n`);r.env.COPILOT_HOME=ch;r.cmd.push('--agent','cm-role-x');}));
+ },
+ compose:async()=>{
+  const m3=['ROLE_MARKER_K3','USERDEV_MARKER_U1','PROFILE_MARKER_P2','REPO_MARKER_7Q'];
+  const toml=(s)=>JSON.stringify(s);
+  // Codex: 既存 developer_instructions とロールの profile
+  await run('codex','base-dev+role',{pre:()=>({baseToml:`developer_instructions = "USERDEV_MARKER_U1"`}),...custom((c,r)=>{w(c.home+'/.codex/cm-role-x.config.toml',`developer_instructions = ${toml(L.ROLE_TEXT)}\n`);r.cmd.push('-p','cm-role-x');}),markers:m3});
+  await run('codex','base-dev-only',{pre:()=>({baseToml:`developer_instructions = "USERDEV_MARKER_U1"`}),...custom(()=>{}),markers:m3});
+  await run('codex','profile-only',{...custom((c,r)=>{w(c.home+'/.codex/mine.config.toml',`developer_instructions = "PROFILE_MARKER_P2"\nmodel = "mock-model-prof"\n`);r.cmd.push('-p','mine');}),markers:m3});
+  await run('codex','two-profiles',{...custom((c,r)=>{w(c.home+'/.codex/mine.config.toml',`developer_instructions = "PROFILE_MARKER_P2"\nmodel = "mock-model-prof"\n`);w(c.home+'/.codex/cm-role-x.config.toml',`developer_instructions = ${toml(L.ROLE_TEXT)}\n`);r.cmd.push('-p','mine','-p','cm-role-x');}),markers:m3});
+  await run('codex','profile+dashc-model-instructions',{...custom((c,r)=>{w(c.home+'/.codex/mine.config.toml',`developer_instructions = "PROFILE_MARKER_P2"\nmodel = "mock-model-prof"\n`);w(c.home+'/role inst.md',L.ROLE_TEXT);r.cmd.push('-p','mine','-c',`developer_instructions=${toml('PROFILE_MARKER_P2\\n'+L.ROLE_TEXT)}`);}),markers:m3});
+  await run('codex','merged-generated-profile',{...custom((c,r)=>{w(c.home+'/.codex/mine.config.toml',`developer_instructions = "PROFILE_MARKER_P2"\nmodel = "mock-model-prof"\n`);w(c.home+'/.codex/cm-role-mine-x.config.toml',`model = "mock-model-prof"\ndeveloper_instructions = ${toml('PROFILE_MARKER_P2\n\n'+L.ROLE_TEXT)}\n`);r.cmd.push('-p','cm-role-mine-x');}),markers:m3});
+  await run('codex','role-with-daemon-flag',{...custom((c,r)=>{w(c.home+'/.codex/cm-role-x.config.toml',`features.daemon_auto_start = true\ndeveloper_instructions = ${toml(L.ROLE_TEXT)}\n`);r.cmd.push('-p','cm-role-x');}),markers:m3});
+  // OpenCode V1: 既存 instructions / persona / model
+  await run('opencode','base-instr+role',{pre:(c)=>{w(c.home+'/ui.md','USERDEV_MARKER_U1');return{baseCfg:{instructions:[c.home+'/ui.md']}};},...std('role',L.ROLE_TEXT),markers:m3});
+  await run('opencode','persona-plan+role',{...custom((c,r)=>{w(c.home+'/r.md',L.ROLE_TEXT);r.env.OPENCODE_CONFIG_CONTENT=JSON.stringify({instructions:[c.home+'/r.md']});r.cmd.push('--agent','plan');}),markers:m3,extra:(b)=>({planReminder:/plan mode|Plan mode|PLAN/.test(L.flat(b).slice(0,60000)),editTool:L.toolNames(b).includes('edit')})});
+  await run('opencode','persona-plan-only',{...custom((c,r)=>r.cmd.push('--agent','plan')),markers:m3,extra:(b)=>({planReminder:/plan mode|Plan mode|PLAN/.test(L.flat(b).slice(0,60000)),editTool:L.toolNames(b).includes('edit')})});
+  await run('opencode','model-in-config+role',{pre:()=>({baseCfg:{provider:{mock:{npm:'@ai-sdk/openai-compatible',name:'mock',options:{baseURL:`${L.MOCK_URL}/v1`,apiKey:'x'},models:{'mock-model':{name:'mock-model',tool_call:true},'model-b':{name:'b',tool_call:true}}}},model:'mock/model-b'}}),...std('role',L.ROLE_TEXT),markers:m3});
+  await run('opencode','user-env-content+role',{...custom((c,r)=>{w(c.home+'/r.md',L.ROLE_TEXT);w(c.home+'/ui.md','USERDEV_MARKER_U1');r.env.OPENCODE_CONFIG_CONTENT=JSON.stringify({instructions:[c.home+'/ui.md',c.home+'/r.md'],});}),markers:m3});
+  // OpenCode V2
+  const agent=(c,extra={})=>{w(c.home+'/r.md',L.ROLE_TEXT);return{default_agent:'cm-role-x',agents:{'cm-role-x':{description:'r',mode:'primary',system:`{file:${c.home}/r.md}`},...extra}};};
+  await run('opencode-v2','role-with-user-default',{pre:()=>({baseCfg:{default_agent:'plan'}}),...custom((c,r)=>{r.env.OPENCODE_CONFIG_CONTENT=JSON.stringify(agent(c));}),markers:m3},{wait:14000});
+  await run('opencode-v2','user-model+role',{pre:()=>({baseCfg:{model:'mock/model-b',providers:{mock:{name:'mock',package:'@opencode/ai/providers/openai-compatible',settings:{baseURL:`${L.MOCK_URL}/v1`,apiKey:'x'},models:{'mock-model':{name:'m'},'model-b':{name:'b'}}}}}}),...custom((c,r)=>{r.env.OPENCODE_CONFIG_CONTENT=JSON.stringify(agent(c));}),markers:m3},{wait:14000});
+  await run('opencode-v2','user-dir-lost',{pre:(c)=>{w(c.home+'/.config/opencode/agents/mine.md','---\ndescription: m\nmode: primary\n---\nUSERDEV_MARKER_U1\n');return{};},...custom((c,r)=>{w(c.home+'/gen/agents/x.md','---\ndescription: r\nmode: primary\n---\nROLE_MARKER_K3\n');w(c.home+'/gen/opencode.jsonc',JSON.stringify({default_agent:'x'}));r.env.OPENCODE_CONFIG_DIR=c.home+'/gen';}),markers:m3},{wait:14000});
+  // Copilot: 生成定義の見え方
+  const mk=(c,infer)=>w(c.home+'/.copilot/agents/cm-role-x.agent.md',`---\nname: cm-role-x\ndescription: CommandMate role\n${infer===null?'':`infer: ${infer}\n`}---\n${L.ROLE_TEXT}\n`);
+  for(const [lb,i] of [['visible-infer-false',false],['visible-infer-true',true],['visible-infer-default',null]])
+    await run('copilot',lb,{...custom((c,r)=>mk(c,i)),markers:m3,extra:(b)=>({nameInRequest:L.flat(b).includes('cm-role-x'),roleBodyInRequest:L.flat(b).includes('ROLE_MARKER_K3')})});
+  await run('copilot','user-instr+role',{pre:(c)=>({}),...custom((c,r)=>{mk(c,false);w(c.repo+'/.github/copilot-instructions.md','USERDEV_MARKER_U1');r.cmd.push('--agent','cm-role-x');}),markers:m3});
+  // Claude: 既存の CLAUDE.md / --agent
+  await run('claude','claudemd+role',{...custom((c,r)=>{w(c.repo+'/CLAUDE.md','USERDEV_MARKER_U1');w(c.home+'/r.md',L.ROLE_TEXT);r.cmd.push('--append-system-prompt-file',c.home+'/r.md');}),markers:m3});
+  await run('claude','agent+role',{...custom((c,r)=>{w(c.home+'/.claude/agents/mine.md','---\nname: mine\ndescription: m\n---\nPROFILE_MARKER_P2\n');w(c.home+'/r.md',L.ROLE_TEXT);r.cmd.push('--agent','mine','--append-system-prompt-file',c.home+'/r.md');}),markers:m3});
+  await run('command-code','user-mod+role',{...custom((c,r)=>{w(c.home+'/.commandcode/mods/u.ts',`export default function(cmd){cmd.hooks({appendSystemPrompt:()=>"USERDEV_MARKER_U1"});}`);w(c.home+'/r.ts',`export default function(cmd){cmd.hooks({appendSystemPrompt:()=>${JSON.stringify(L.ROLE_TEXT)}});}`);r.cmd.push('--mod',c.home+'/r.ts');}),markers:m3});
+ },
+};
+groups.failv2=async()=>{const o={wait:16000};
+  await run('opencode-v2','bad-json',custom((c,r)=>{r.env.OPENCODE_CONFIG_CONTENT='{bad';}),o);
+  await run('opencode-v2','missing-file-ref',custom((c,r)=>{r.env.OPENCODE_CONFIG_CONTENT=JSON.stringify({default_agent:'cm-role-x',agents:{'cm-role-x':{description:'r',mode:'primary',system:`{file:${c.home}/nope.md}`}}});}),o);
+  await run('opencode-v2','unknown-default',custom((c,r)=>{r.env.OPENCODE_CONFIG_CONTENT=JSON.stringify({default_agent:'cm-role-nope'});}),o);
+  await run('opencode-v2','hidden-fallback',custom((c,r)=>{r.env.OPENCODE_CONFIG_CONTENT=JSON.stringify({default_agent:'cm-role-x',agents:{'cm-role-x':{description:'r',mode:'primary',hidden:true,system:L.ROLE_TEXT}}});}),o);
+  await run('opencode-v2','subagent-mode',custom((c,r)=>{r.env.OPENCODE_CONFIG_CONTENT=JSON.stringify({default_agent:'cm-role-x',agents:{'cm-role-x':{description:'r',mode:'subagent',system:L.ROLE_TEXT}}});}),o);
+};
+await groups[process.argv[2]]();

@@ -1,0 +1,42 @@
+// sched.mjs — Schedule の実 argv（buildCliArgs の出力）を確定モデルに向けて実行。stdout/exit と役割の到達を記録。
+import * as L from './lib.mjs'; import fs from 'node:fs'; import path from 'node:path'; import { spawnSync } from 'node:child_process';
+const WT='<WORKTREE>';
+L.ensureMock();await L.sleep(200);
+const out=[];
+const w=(p,s)=>{fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,s);};
+async function run(tool,label,role,argvFn,envFn){
+  const id=`sc-${tool}-${label}`;const base=path.join(L.ROOT,'c',id);fs.rmSync(base,{recursive:true,force:true});const home=base+'/home',repo=base+'/repo';L.repoSeed(repo);fs.mkdirSync(home,{recursive:true});
+  const d=L.toolDef(tool,home,repo,{launchSh:`${WT}/scripts/opencode-v2/launch.sh`});
+  const msg=`CASE=${id} CMRUN<<sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?>>`;
+  const rf=home+'/.cmrole/r.md';w(rf,L.ROLE_TEXT);
+  const env={PATH:L.PATHV,LANG:'en_US.UTF-8',TERM:'dumb',...d.env,...(envFn?.({home,repo,rf,role})??{})};
+  const argv=argvFn({msg,home,repo,rf,role});
+  const since=Date.now();
+  const r=spawnSync(argv[0],argv.slice(1),{cwd:repo,env,encoding:'utf8',timeout:90000,input:''});
+  await L.sleep(300);
+  const reqs=L.reads(since).filter((x)=>x.method==='POST'&&L.flat(x.body).includes(id)&&(x.body.tools??[]).length>0);const last=reqs.pop();
+  const j=last?L.flat(last.body):'';
+  const rec={tool,label,argv:argv.map((x)=>x.split(base).join('<D>').replace(msg,'<MSG>')),env:Object.fromEntries(Object.entries(env).filter(([k])=>/OPENCODE_CONFIG|COPILOT_HOME|CODEX_HOME/.test(k)).map(([k,v])=>[k,String(v).split(base).join('<D>')])),exit:r.status,signal:r.signal,stdout:(r.stdout??'').split(base).join('<D>').slice(-300),stderr:(r.stderr??'').split(base).join('<D>').slice(-300),roleIn:last?L.whereIs(last.body,'ROLE_MARKER_K3'):null,repoIn:last?L.whereIs(last.body,'REPO_MARKER_7Q'):null,tools:last?L.toolNames(last.body).length:null,toolResult:/VERIFY_OK/.test(j)?'VERIFY_OK':null,file:fs.readFileSync(repo+'/calc.sh','utf8').includes('1+1'),sys:last?L.layers(last.body).system.length:null,planMark:last?/plan/i.test(L.layers(last.body).system):null};
+  out.push(rec);console.log(JSON.stringify({...rec,argv:rec.argv.join(' ').slice(0,150),stdout:rec.stdout.slice(-80),stderr:rec.stderr.slice(-120)}));
+}
+const v1c=({rf,role})=>role?{OPENCODE_CONFIG_CONTENT:JSON.stringify({instructions:[rf]})}:{};
+const v2c=({rf,role})=>role?{OPENCODE_CONFIG_CONTENT:JSON.stringify({default_agent:'cm-role-x',agents:{'cm-role-x':{description:'r',mode:'primary',system:`{file:${rf}}`}}})}:{};
+for(const role of [false,true]){const lb=role?'role':'none';
+ await run('claude',lb,role,({msg,rf})=>['claude','-p',msg,'--output-format','text','--permission-mode','bypassPermissions',...(role?['--append-system-prompt-file',rf]:[])]);
+ await run('codex',lb,role,({msg,home,rf})=>{if(role)w(home+'/.codex/cm-role-x.config.toml',`developer_instructions = ${JSON.stringify(L.ROLE_TEXT)}\n`);return['codex',...(role?['-p','cm-role-x']:[]),'exec',msg,'--sandbox','workspace-write'];});
+ await run('command-code',lb,role,({msg,home})=>{if(role)w(home+'/.cmrole/x.ts',`export default function(cmd){cmd.hooks({appendSystemPrompt:()=>${JSON.stringify(L.ROLE_TEXT)}});}`);return['cmd','--local-only','-m','mock-model','-p',msg,'--output-format','json','--yolo','--no-auto-update',...(role?['--mod',home+'/.cmrole/x.ts']:[])];});
+ await run('opencode',lb,role,({msg})=>['opencode','run','--format','json',msg],v1c);
+ await run('opencode',lb+'-agent-plan',role,({msg})=>['opencode','run','--format','json','--agent','plan',msg],v1c);
+ await run('opencode-v2',lb,role,({msg})=>['opencode2','run','--standalone','--format','json','--auto','--',msg],v2c);
+ await run('opencode-v2',lb+'-agent-plan',role,({msg})=>['opencode2','run','--standalone','--format','json','--auto','--agent','plan','--',msg],v2c);
+ await run('copilot',lb,role,({msg,home})=>{if(role)w(home+'/.copilot/agents/cm-role-x.agent.md',`---\nname: cm-role-x\ndescription: r\ninfer: false\n---\n${L.ROLE_TEXT}\n`);return['copilot','-p',msg,'--allow-all-tools',...(role?['--agent','cm-role-x']:[])];});
+}
+// V2: 明示 agent を保つ合成（plan を同名上書きして system を差す）
+await run('opencode-v2','plan-override',true,({msg})=>['opencode2','run','--standalone','--format','json','--auto','--agent','plan','--',msg],({rf})=>({OPENCODE_CONFIG_CONTENT:JSON.stringify({agents:{plan:{system:`{file:${rf}}`}}})}));
+// V2: 未知 agent
+await run('opencode-v2','unknown-agent',true,({msg})=>['opencode2','run','--standalone','--format','json','--agent','cm-role-nope','--',msg]);
+await run('copilot','unknown-agent',true,({msg})=>['copilot','-p',msg,'--allow-all-tools','--agent','cm-role-nope']);
+await run('codex','unknown-profile',true,({msg})=>['codex','-p','cm-role-nope','exec',msg,'--sandbox','workspace-write']);
+await run('command-code','missing-mod',true,({msg,home})=>['cmd','--local-only','-m','mock-model','-p',msg,'--output-format','json','--yolo','--no-auto-update','--mod',home+'/nope.ts']);
+await run('opencode','missing-instr',true,({msg})=>['opencode','run','--format','json',msg],({home})=>({OPENCODE_CONFIG_CONTENT:JSON.stringify({instructions:[home+'/nope.md']})}));
+fs.writeFileSync(L.ROOT+'/rec-sched.json',JSON.stringify(out,null,1));

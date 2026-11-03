@@ -1,0 +1,2360 @@
+{
+ "note": "Codex 整合性レビューを受けた追試（2026-11-03）。mock は確定モデル、real は手元の Ollama。",
+ "compose": [
+  {
+   "tool": "opencode-v2",
+   "label": "env-only-provider-model",
+   "userEnv": {
+    "model": "mock/model-b",
+    "providers": {
+     "mock": {
+     "name": "mock",
+     "package": "@opencode/ai/providers/openai-compatible",
+     "settings": {
+     "baseURL": "http://127.0.0.1:18113/v1",
+     "apiKey": "x"
+     },
+     "models": {
+     "mock-model": {
+     "name": "m"
+     },
+     "model-b": {
+     "name": "b"
+     }
+     }
+     }
+    }
+   },
+   "merged": "{\"model\":\"mock/model-b\",\"providers\":{\"mock\":{\"name\":\"mock\",\"package\":\"@opencode/ai/providers/openai-compatible\",\"settings\":{\"baseURL\":\"http://127.0.0.1:18113/v1\",\"apiKey\":\"x\"},\"models\":{\"mock-model\":{\"name\":\"m\"},\"model-b\":{\"name\":\"b\"}}}},\"agents\":{\"build\":{\"system\":\"{file:<D>/home/r.md}\"}}}",
+   "footer": "Build · b mock",
+   "req": true,
+   "model": "model-b",
+   "role": [
+    "system"
+   ],
+   "user": [],
+   "baseKept": false,
+   "planText": false
+  },
+  {
+   "tool": "opencode-v2",
+   "label": "env-default-agent-plan",
+   "userEnv": {
+    "default_agent": "plan"
+   },
+   "merged": "{\"default_agent\":\"plan\",\"agents\":{\"plan\":{\"system\":\"{file:<D>/home/r.md}\"}}}",
+   "footer": "Plan · mock-model mock",
+   "req": true,
+   "model": "mock-model",
+   "role": [
+    "system"
+   ],
+   "user": [],
+   "baseKept": false,
+   "planText": false
+  },
+  {
+   "tool": "opencode-v2",
+   "label": "env-default-custom-agent",
+   "userEnv": {
+    "default_agent": "mine",
+    "agents": {
+     "mine": {
+     "description": "m",
+     "mode": "primary"
+     }
+    }
+   },
+   "merged": "{\"default_agent\":\"mine\",\"agents\":{\"mine\":{\"description\":\"m\",\"mode\":\"primary\",\"system\":\"{file:<D>/home/r.md}\"}}}",
+   "footer": "Mine · mock-model mock",
+   "req": true,
+   "model": "mock-model",
+   "role": [
+    "system"
+   ],
+   "user": [],
+   "baseKept": false,
+   "planText": false
+  },
+  {
+   "tool": "opencode-v2",
+   "label": "env-user-system-overwritten",
+   "userEnv": {
+    "agents": {
+     "build": {
+     "system": "USER_MARKER_U1"
+     }
+    }
+   },
+   "merged": "{\"agents\":{\"build\":{\"system\":\"{file:<D>/home/r.md}\"}}}",
+   "footer": "Build · mock-model mock",
+   "req": true,
+   "model": "mock-model",
+   "role": [
+    "system"
+   ],
+   "user": [],
+   "baseKept": false,
+   "planText": false
+  },
+  {
+   "tool": "opencode-v2",
+   "label": "env-replaces-not-merged",
+   "userEnv": {
+    "model": "mock/model-b"
+   },
+   "merged": "{\"agents\":{\"build\":{\"system\":\"{file:<D>/home/r.md}\"}}}",
+   "footer": "Build · m mock",
+   "req": true,
+   "model": "mock-model",
+   "role": [
+    "system"
+   ],
+   "user": [],
+   "baseKept": false,
+   "planText": false
+  },
+  {
+   "tool": "opencode-v2",
+   "label": "env-jsonc-comment",
+   "merged": "{/*c*/ \"agents\":{\"build\":{\"system\":\"{file:<D>/home/r.md}\"}}}",
+   "footer": "Build · mock-model mock",
+   "req": true,
+   "model": "mock-model",
+   "role": [
+    "system"
+   ],
+   "user": [],
+   "baseKept": false,
+   "planText": false
+  },
+  {
+   "tool": "opencode-v2",
+   "label": "invalid-user-env-unmerged",
+   "merged": "{bad",
+   "footer": "Build · mock-model mock",
+   "req": true,
+   "model": "mock-model",
+   "role": [],
+   "user": [],
+   "baseKept": true,
+   "planText": false
+  },
+  {
+   "tool": "opencode-v2",
+   "label": "order-global-only",
+   "footer": "Ga · m mock",
+   "req": true,
+   "model": "mock-model",
+   "role": [],
+   "user": [],
+   "baseKept": true,
+   "planText": false
+  },
+  {
+   "tool": "opencode-v2",
+   "label": "order-global+project",
+   "footer": "Pa · m mock",
+   "req": true,
+   "model": "mock-model",
+   "role": [],
+   "user": [],
+   "baseKept": true,
+   "planText": false
+  },
+  {
+   "tool": "opencode-v2",
+   "label": "order-global+project+env",
+   "merged": "{\"default_agent\":\"ea\"}",
+   "footer": "Ea · m mock",
+   "req": true,
+   "model": "mock-model",
+   "role": [],
+   "user": [],
+   "baseKept": true,
+   "planText": false
+  },
+  {
+   "tool": "opencode-v2",
+   "label": "order-dotopencode",
+   "footer": "Pa · m mock",
+   "req": true,
+   "model": "mock-model",
+   "role": [],
+   "user": [],
+   "baseKept": true,
+   "planText": false
+  },
+  {
+   "tool": "opencode-v2",
+   "label": "overlay-on-user-markdown",
+   "merged": "{\"default_agent\":\"mine\",\"agents\":{\"mine\":{\"system\":\"{file:<D>/home/r.md}\"}}}",
+   "footer": "Mine · mock-model mock",
+   "req": true,
+   "model": "mock-model",
+   "role": [
+    "system"
+   ],
+   "user": [],
+   "baseKept": false,
+   "planText": false
+  },
+  {
+   "tool": "opencode-v2",
+   "label": "overlay-keeps-other-keys",
+   "merged": "{\"agents\":{\"build\":{\"system\":\"{file:<D>/home/r.md}\"}}}",
+   "footer": "Build · b mock",
+   "req": true,
+   "model": "model-b",
+   "role": [
+    "system"
+   ],
+   "user": [],
+   "baseKept": false,
+   "planText": false
+  },
+  {
+   "tool": "opencode",
+   "label": "env-only-provider-model",
+   "userEnv": {
+    "model": "mock/model-b",
+    "provider": {
+     "mock": {
+     "npm": "@ai-sdk/openai-compatible",
+     "name": "mock",
+     "options": {
+     "baseURL": "http://127.0.0.1:18113/v1",
+     "apiKey": "x"
+     },
+     "models": {
+     "mock-model": {
+     "name": "m",
+     "tool_call": true
+     },
+     "model-b": {
+     "name": "b",
+     "tool_call": true
+     }
+     }
+     }
+    }
+   },
+   "merged": "{\"model\":\"mock/model-b\",\"provider\":{\"mock\":{\"npm\":\"@ai-sdk/openai-compatible\",\"name\":\"mock\",\"options\":{\"baseURL\":\"http://127.0.0.1:18113/v1\",\"apiKey\":\"x\"},\"models\":{\"mock-model\":{\"name\":\"m\",\"tool_call\":true},\"model-b\":{\"name\":\"b\",\"tool_call\":true}}}},\"instructions\":[\"<D>/home/r.md\"]}",
+   "footer": "Build · b mock",
+   "req": true,
+   "model": "model-b",
+   "role": [
+    "system"
+   ],
+   "user": [],
+   "planText": false
+  },
+  {
+   "tool": "opencode",
+   "label": "env-default-agent-plan",
+   "userEnv": {
+    "default_agent": "plan"
+   },
+   "merged": "{\"default_agent\":\"plan\",\"instructions\":[\"<D>/home/r.md\"]}",
+   "footer": "Plan · mock-model mock",
+   "req": true,
+   "model": "mock-model",
+   "role": [
+    "system"
+   ],
+   "user": [],
+   "planText": false
+  },
+  {
+   "tool": "opencode",
+   "label": "env-instructions-appended",
+   "merged": "{\"instructions\":[\"<D>/home/u.md\",\"<D>/home/r.md\"]}",
+   "footer": "Build · mock-model mock",
+   "req": true,
+   "model": "mock-model",
+   "role": [
+    "system"
+   ],
+   "user": [
+    "system"
+   ],
+   "planText": false
+  }
+ ],
+ "format": [
+  {
+   "tool": "claude",
+   "body": "16384-no-nl",
+   "bytes": 16384,
+   "req": true,
+   "layer": [
+    "system"
+   ],
+   "exactUntrimmed": true,
+   "exactTrimmed": true,
+   "tailPresent": true
+  },
+  {
+   "tool": "claude",
+   "body": "16384-nl",
+   "bytes": 16384,
+   "req": true,
+   "layer": [
+    "system"
+   ],
+   "exactUntrimmed": true,
+   "exactTrimmed": true,
+   "tailPresent": true
+  },
+  {
+   "tool": "claude",
+   "body": "16385-no-nl",
+   "bytes": 16385,
+   "req": true,
+   "layer": [
+    "system"
+   ],
+   "exactUntrimmed": true,
+   "exactTrimmed": true,
+   "tailPresent": true
+  },
+  {
+   "tool": "codex",
+   "body": "16384-no-nl",
+   "bytes": 16384,
+   "req": true,
+   "layer": [
+    "developer"
+   ],
+   "exactUntrimmed": true,
+   "exactTrimmed": true,
+   "tailPresent": true
+  },
+  {
+   "tool": "codex",
+   "body": "16384-nl",
+   "bytes": 16384,
+   "req": true,
+   "layer": [
+    "developer"
+   ],
+   "exactUntrimmed": true,
+   "exactTrimmed": true,
+   "tailPresent": true
+  },
+  {
+   "tool": "codex",
+   "body": "16385-no-nl",
+   "bytes": 16385,
+   "req": true,
+   "layer": [
+    "developer"
+   ],
+   "exactUntrimmed": true,
+   "exactTrimmed": true,
+   "tailPresent": true
+  },
+  {
+   "tool": "command-code",
+   "body": "16384-no-nl",
+   "bytes": 16384,
+   "req": true,
+   "layer": [
+    "system"
+   ],
+   "exactUntrimmed": true,
+   "exactTrimmed": true,
+   "tailPresent": true
+  },
+  {
+   "tool": "command-code",
+   "body": "16384-nl",
+   "bytes": 16384,
+   "req": true,
+   "layer": [
+    "system"
+   ],
+   "exactUntrimmed": true,
+   "exactTrimmed": true,
+   "tailPresent": true
+  },
+  {
+   "tool": "command-code",
+   "body": "16385-no-nl",
+   "bytes": 16385,
+   "req": true,
+   "layer": [
+    "system"
+   ],
+   "exactUntrimmed": true,
+   "exactTrimmed": true,
+   "tailPresent": true
+  },
+  {
+   "tool": "opencode",
+   "body": "16384-no-nl",
+   "bytes": 16384,
+   "req": true,
+   "layer": [
+    "system"
+   ],
+   "exactUntrimmed": true,
+   "exactTrimmed": true,
+   "tailPresent": true
+  },
+  {
+   "tool": "opencode",
+   "body": "16384-nl",
+   "bytes": 16384,
+   "req": true,
+   "layer": [
+    "system"
+   ],
+   "exactUntrimmed": true,
+   "exactTrimmed": true,
+   "tailPresent": true
+  },
+  {
+   "tool": "opencode",
+   "body": "16385-no-nl",
+   "bytes": 16385,
+   "req": true,
+   "layer": [
+    "system"
+   ],
+   "exactUntrimmed": true,
+   "exactTrimmed": true,
+   "tailPresent": true
+  },
+  {
+   "tool": "opencode-v2",
+   "body": "16384-no-nl",
+   "bytes": 16384,
+   "req": true,
+   "layer": [
+    "system"
+   ],
+   "exactUntrimmed": true,
+   "exactTrimmed": true,
+   "tailPresent": true
+  },
+  {
+   "tool": "opencode-v2",
+   "body": "16384-nl",
+   "bytes": 16384,
+   "req": true,
+   "layer": [
+    "system"
+   ],
+   "exactUntrimmed": true,
+   "exactTrimmed": true,
+   "tailPresent": true
+  },
+  {
+   "tool": "opencode-v2",
+   "body": "16385-no-nl",
+   "bytes": 16385,
+   "req": true,
+   "layer": [
+    "system"
+   ],
+   "exactUntrimmed": true,
+   "exactTrimmed": true,
+   "tailPresent": true
+  },
+  {
+   "tool": "copilot",
+   "body": "16384-no-nl",
+   "bytes": 16384,
+   "req": true,
+   "layer": [
+    "system"
+   ],
+   "exactUntrimmed": true,
+   "exactTrimmed": true,
+   "tailPresent": true
+  },
+  {
+   "tool": "copilot",
+   "body": "16384-nl",
+   "bytes": 16384,
+   "req": true,
+   "layer": [
+    "system"
+   ],
+   "exactUntrimmed": true,
+   "exactTrimmed": true,
+   "tailPresent": true
+  },
+  {
+   "tool": "copilot",
+   "body": "16385-no-nl",
+   "bytes": 16385,
+   "req": true,
+   "layer": [
+    "system"
+   ],
+   "exactUntrimmed": true,
+   "exactTrimmed": true,
+   "tailPresent": true
+  }
+ ],
+ "silent": [
+  {
+   "tool": "codex",
+   "label": "missing-profile",
+   "linesOnlyInFailureRun": [
+    "mock-model default · <D>/re…"
+   ],
+   "keywordLines": [
+    "? for shortcuts     ⚠ # warning · f# to view"
+   ],
+   "logFiles": []
+  },
+  {
+   "tool": "command-code",
+   "label": "missing-mod",
+   "linesOnlyInFailureRun": [],
+   "keywordLines": [],
+   "logFiles": []
+  },
+  {
+   "tool": "command-code",
+   "label": "bad-mod",
+   "linesOnlyInFailureRun": [],
+   "keywordLines": [],
+   "logFiles": []
+  },
+  {
+   "tool": "command-code",
+   "label": "throw-mod",
+   "linesOnlyInFailureRun": [],
+   "keywordLines": [],
+   "logFiles": []
+  },
+  {
+   "tool": "opencode",
+   "label": "missing-instr",
+   "linesOnlyInFailureRun": [
+    "┃",
+    "┃  Ask anything… \"Fix broken tests\"",
+    "┃  Build · mock-model mock",
+    "╹───",
+    "tab agents  ctrl+p commands",
+    "<D>/repo:main     #.##.##",
+    "┃     MOCK_OK",
+    "┃     Context",
+    "## tokens",
+    "MOCK_OK     #% used",
+    "$#.## spent",
+    "▣  Build · mock-model · ###ms",
+    "LSP",
+    "LSPs are disabled"
+   ],
+   "keywordLines": [
+    "tab agents  ctrl+p commands"
+   ],
+   "logFiles": []
+  },
+  {
+   "tool": "opencode-v2",
+   "label": "unknown-default",
+   "linesOnlyInFailureRun": [],
+   "keywordLines": [
+    "/…/s#-opencode-v#-unknown-def…/repo:main  shift+tab agents  ctrl+p commands"
+   ],
+   "logFiles": []
+  },
+  {
+   "tool": "copilot",
+   "label": "missing-agent",
+   "linesOnlyInFailureRun": [
+    "✗ Custom agent \"cm-role-nope\" not found. Available agents: none"
+   ],
+   "keywordLines": [
+    "✗ Custom agent \"cm-role-nope\" not found. Available agents: none"
+   ],
+   "logFiles": []
+  },
+  {
+   "tool": "copilot",
+   "label": "bad-frontmatter",
+   "linesOnlyInFailureRun": [
+    "✗ Failed to select agent: CustomAgentLoadFailedError: Custom agent 'cm-role-b' failed to load: agents/cm-role-b.agent.md: custom agent markdown frontmatter is malformed: failed to parse YAML",
+    "frontmatter: did not find expected ',' or ']' at line # column #, while parsing a flow sequence at line # column #"
+   ],
+   "keywordLines": [
+    "✗ Failed to select agent: CustomAgentLoadFailedError: Custom agent 'cm-role-b' failed to load: agents/cm-role-b.agent.md: custom agent markdown frontmatter is malformed: failed to parse YAML",
+    "✗ Failed to select agent: CustomAgentLoadFailedError: Custom agent 'cm-role-b' failed to load: agents/cm-role-b.agent.md: custom agent markdown frontmatter is malformed: failed to parse YAML"
+   ],
+   "logFiles": [
+    {
+     "file": "<D>/home/.copilot/logs/process-1793656894201-94740.log",
+     "hit": [
+     "2026-11-02T22:01:34.221Z [ERROR] agents/cm-role-b.agent.md: custom agent markdown frontmatter is malformed: failed to parse YAML frontmatter: did not find e******pected ',' or ']' at line 2 column 1, while parsing a flow"
+     ]
+    }
+   ]
+  }
+ ],
+ "scheduleEntry": [
+  {
+   "tool": "claude",
+   "kind": "role",
+   "variant": "",
+   "command": "claude",
+   "args": [
+    "-p",
+    "<MSG>",
+    "--output-format",
+    "text",
+    "--permission-mode",
+    "bypassPermissions"
+   ],
+   "status": "completed",
+   "exitCode": 0,
+   "error": "",
+   "output": "MOCK_DONE [{\"tool_use_id\":\"toolu_1\",\"type\":\"tool_result\",\"content\":\"VERIFY_OK\\nRC=0\",\"is_error\":false,\"cache_control\":{\"type\":\"ephemeral\"}}]\n",
+   "requests": 2,
+   "roleInInstructions": true,
+   "toolResultVerifyOk": true,
+   "fileFixed": true
+  },
+  {
+   "tool": "claude",
+   "kind": "role",
+   "variant": "-default",
+   "command": "claude",
+   "args": [
+    "-p",
+    "<MSG>",
+    "--output-format",
+    "text",
+    "--permission-mode",
+    "acceptEdits"
+   ],
+   "status": "completed",
+   "exitCode": 0,
+   "error": "",
+   "output": "{\"type\":\"tool_result\",\"content\":\"A variable in this command can't be checked before it runs\",\"is_error\":true,\"tool_use_id\":\"toolu_3\",\"cache_control\":{\"type\":\"e\n",
+   "requests": 2,
+   "roleInInstructions": true,
+   "toolResultVerifyOk": false,
+   "fileFixed": false
+  },
+  {
+   "tool": "codex",
+   "kind": "role",
+   "variant": "",
+   "command": "codex",
+   "args": [
+    "exec",
+    "<MSG>",
+    "--sandbox",
+    "workspace-write"
+   ],
+   "status": "completed",
+   "exitCode": 0,
+   "error": "",
+   "output": "xec_command failed: CreateProcess { message: \"Rejected(\\\"`/bin/zsh -lc 'sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?'` rejected: \n",
+   "requests": 2,
+   "roleInInstructions": true,
+   "toolResultVerifyOk": false,
+   "fileFixed": false
+  },
+  {
+   "tool": "command-code",
+   "kind": "role",
+   "variant": "",
+   "command": "commandcode",
+   "args": [
+    "-p",
+    "<MSG>",
+    "--output-format",
+    "json",
+    "--yolo",
+    "--no-auto-update"
+   ],
+   "status": "completed",
+   "exitCode": 0,
+   "error": "",
+   "output": "MOCK_DONE VERIFY_OK RC=0 ",
+   "requests": 2,
+   "roleInInstructions": true,
+   "toolResultVerifyOk": true,
+   "fileFixed": true
+  },
+  {
+   "tool": "opencode",
+   "kind": "role",
+   "variant": "",
+   "command": "opencode",
+   "args": [
+    "run",
+    "--format",
+    "json",
+    "<MSG>"
+   ],
+   "status": "completed",
+   "exitCode": 0,
+   "error": "",
+   "output": "MOCK_DONE VERIFY_OK RC=0 ",
+   "requests": 2,
+   "roleInInstructions": true,
+   "toolResultVerifyOk": true,
+   "fileFixed": true
+  },
+  {
+   "tool": "opencode",
+   "kind": "role",
+   "variant": "-plan",
+   "command": "opencode",
+   "args": [
+    "run",
+    "--format",
+    "json",
+    "--agent",
+    "plan",
+    "<MSG>"
+   ],
+   "status": "completed",
+   "exitCode": 0,
+   "error": "",
+   "output": "MOCK_DONE VERIFY_OK RC=0 ",
+   "requests": 2,
+   "roleInInstructions": true,
+   "toolResultVerifyOk": true,
+   "fileFixed": true
+  },
+  {
+   "tool": "opencode-v2",
+   "kind": "role",
+   "variant": "",
+   "command": "opencode2",
+   "args": [
+    "run",
+    "--standalone",
+    "--format",
+    "json",
+    "--",
+    "<MSG>"
+   ],
+   "status": "completed",
+   "exitCode": 0,
+   "error": "",
+   "output": "MOCK_DONE VERIFY_OK RC=0 ",
+   "requests": 2,
+   "roleInInstructions": true,
+   "toolResultVerifyOk": true,
+   "fileFixed": true
+  },
+  {
+   "tool": "opencode-v2",
+   "kind": "role",
+   "variant": "-plan",
+   "command": "opencode2",
+   "args": [
+    "run",
+    "--standalone",
+    "--format",
+    "json",
+    "--agent",
+    "plan",
+    "--",
+    "<MSG>"
+   ],
+   "status": "completed",
+   "exitCode": 0,
+   "error": "",
+   "output": "MOCK_DONE VERIFY_OK RC=0 ",
+   "requests": 2,
+   "roleInInstructions": true,
+   "toolResultVerifyOk": true,
+   "fileFixed": true
+  },
+  {
+   "tool": "copilot",
+   "kind": "role",
+   "variant": "",
+   "command": "gh",
+   "args": [
+    "copilot",
+    "-p",
+    "<MSG>",
+    "--allow-all-tools"
+   ],
+   "status": "completed",
+   "exitCode": 0,
+   "error": "",
+   "output": "\n  │ sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?\n  └ 2 lines…\n\nMOCK_DONE VERIFY_OK RC=0 <shellId: 0 completed with exit code 0>\n\n",
+   "requests": 2,
+   "roleInInstructions": true,
+   "toolResultVerifyOk": true,
+   "fileFixed": true
+  },
+  {
+   "tool": "claude",
+   "kind": "none",
+   "variant": "",
+   "command": "claude",
+   "args": [
+    "-p",
+    "<MSG>",
+    "--output-format",
+    "text",
+    "--permission-mode",
+    "bypassPermissions"
+   ],
+   "status": "completed",
+   "exitCode": 0,
+   "error": "",
+   "output": "MOCK_DONE [{\"tool_use_id\":\"toolu_23\",\"type\":\"tool_result\",\"content\":\"VERIFY_OK\\nRC=0\",\"is_error\":false,\"cache_control\":{\"type\":\"ephemeral\"}}]\n",
+   "requests": 2,
+   "roleInInstructions": false,
+   "toolResultVerifyOk": true,
+   "fileFixed": true
+  },
+  {
+   "tool": "claude",
+   "kind": "none",
+   "variant": "-default",
+   "command": "claude",
+   "args": [
+    "-p",
+    "<MSG>",
+    "--output-format",
+    "text",
+    "--permission-mode",
+    "acceptEdits"
+   ],
+   "status": "completed",
+   "exitCode": 0,
+   "error": "",
+   "output": "{\"type\":\"tool_result\",\"content\":\"A variable in this command can't be checked before it runs\",\"is_error\":true,\"tool_use_id\":\"toolu_25\",\"cache_control\":{\"type\":\"\n",
+   "requests": 2,
+   "roleInInstructions": false,
+   "toolResultVerifyOk": false,
+   "fileFixed": false
+  },
+  {
+   "tool": "codex",
+   "kind": "none",
+   "variant": "",
+   "command": "codex",
+   "args": [
+    "exec",
+    "<MSG>",
+    "--sandbox",
+    "workspace-write"
+   ],
+   "status": "completed",
+   "exitCode": 0,
+   "error": "",
+   "output": "xec_command failed: CreateProcess { message: \"Rejected(\\\"`/bin/zsh -lc 'sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?'` rejected: \n",
+   "requests": 2,
+   "roleInInstructions": false,
+   "toolResultVerifyOk": false,
+   "fileFixed": false
+  },
+  {
+   "tool": "command-code",
+   "kind": "none",
+   "variant": "",
+   "command": "commandcode",
+   "args": [
+    "-p",
+    "<MSG>",
+    "--output-format",
+    "json",
+    "--yolo",
+    "--no-auto-update"
+   ],
+   "status": "completed",
+   "exitCode": 0,
+   "error": "",
+   "output": "MOCK_DONE VERIFY_OK RC=0 ",
+   "requests": 2,
+   "roleInInstructions": false,
+   "toolResultVerifyOk": true,
+   "fileFixed": true
+  },
+  {
+   "tool": "opencode",
+   "kind": "none",
+   "variant": "",
+   "command": "opencode",
+   "args": [
+    "run",
+    "--format",
+    "json",
+    "<MSG>"
+   ],
+   "status": "completed",
+   "exitCode": 0,
+   "error": "",
+   "output": "MOCK_DONE VERIFY_OK RC=0 ",
+   "requests": 2,
+   "roleInInstructions": false,
+   "toolResultVerifyOk": true,
+   "fileFixed": true
+  },
+  {
+   "tool": "opencode",
+   "kind": "none",
+   "variant": "-plan",
+   "command": "opencode",
+   "args": [
+    "run",
+    "--format",
+    "json",
+    "--agent",
+    "plan",
+    "<MSG>"
+   ],
+   "status": "completed",
+   "exitCode": 0,
+   "error": "",
+   "output": "MOCK_DONE VERIFY_OK RC=0 ",
+   "requests": 2,
+   "roleInInstructions": false,
+   "toolResultVerifyOk": true,
+   "fileFixed": true
+  },
+  {
+   "tool": "opencode-v2",
+   "kind": "none",
+   "variant": "",
+   "command": "opencode2",
+   "args": [
+    "run",
+    "--standalone",
+    "--format",
+    "json",
+    "--",
+    "<MSG>"
+   ],
+   "status": "completed",
+   "exitCode": 0,
+   "error": "",
+   "output": "MOCK_DONE VERIFY_OK RC=0 ",
+   "requests": 2,
+   "roleInInstructions": false,
+   "toolResultVerifyOk": true,
+   "fileFixed": true
+  },
+  {
+   "tool": "opencode-v2",
+   "kind": "none",
+   "variant": "-plan",
+   "command": "opencode2",
+   "args": [
+    "run",
+    "--standalone",
+    "--format",
+    "json",
+    "--agent",
+    "plan",
+    "--",
+    "<MSG>"
+   ],
+   "status": "completed",
+   "exitCode": 0,
+   "error": "",
+   "output": "MOCK_DONE VERIFY_OK RC=0 ",
+   "requests": 2,
+   "roleInInstructions": false,
+   "toolResultVerifyOk": true,
+   "fileFixed": true
+  },
+  {
+   "tool": "copilot",
+   "kind": "none",
+   "variant": "",
+   "command": "gh",
+   "args": [
+    "copilot",
+    "-p",
+    "<MSG>",
+    "--allow-all-tools"
+   ],
+   "status": "completed",
+   "exitCode": 0,
+   "error": "",
+   "output": "\n  │ sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?\n  └ 2 lines…\n\nMOCK_DONE VERIFY_OK RC=0 <shellId: 0 completed with exit code 0>\n\n",
+   "requests": 2,
+   "roleInInstructions": false,
+   "toolResultVerifyOk": true,
+   "fileFixed": true
+  }
+ ],
+ "ghCopilotDirect": {
+  "version": "gh 2.86.0 + copilot 1.0.105",
+  "cases": [
+   {
+    "argv": "gh copilot --agent cm-role-x -p \"CASE=ghagent hello\" --allow-all-tools",
+    "exit": 0,
+    "roleInRequest": true,
+    "repoInRequest": true
+   },
+   {
+    "argv": "gh copilot --agent cm-role-nope -p x --allow-all-tools",
+    "exit": 1,
+    "stderr": "No such agent: cm-role-nope, available: cm-role-x"
+   },
+   {
+    "argv": "gh copilot --version (PATH に copilot なし)",
+    "exit": 1,
+    "stderr": "! Copilot CLI not installed"
+   }
+  ]
+ },
+ "sendPathV2Overlay": {
+  "env": "OPENCODE_CONFIG_CONTENT={\"agents\":{\"build\":{\"system\":\"{file:<SHORT>/v/home/.cmrole/role-v2.md}\"}}}（ps eww の serve で確認）",
+  "footer": "Build · mock-model mock",
+  "db": "<WT>/data/role-probe-4113.db（lsof で確認）",
+  "records": {
+   "role": {
+    "steps": {
+     "send1": {
+     "code": 0,
+     "out": "",
+     "err": "Message sent.\n"
+     },
+     "wait1": {
+     "code": 0,
+     "out": "",
+     "err": "Completed: opencode-v2-role (basis=hook_stop)\n"
+     },
+     "mock1": {
+     "requests": 1,
+     "role": [
+     "system"
+     ],
+     "repo": [
+     "system"
+     ],
+     "tools": 12,
+     "toolResult": null
+     },
+     "send2": {
+     "code": 0,
+     "err": "Message sent.\n"
+     },
+     "approval": [
+     {
+     "code": 0,
+     "out": "",
+     "err": "ope: no contract is attached to this run, so no scope is declared to check.)\nscope: no contract is attached to this run, so no scope is declared to check.\nGATE check PASS (exit=0, 0.0s)\nRESULT passed\n"
+     }
+     ],
+     "mock2": {
+     "requests": 2,
+     "role": [
+     "system"
+     ],
+     "repo": [
+     "system"
+     ],
+     "tools": 12,
+     "toolResult": "VERIFY_OK"
+     },
+     "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+     "send3": {
+     "code": 0,
+     "err": "Message sent.\n"
+     },
+     "wait3": {
+     "code": 0,
+     "out": ""
+     },
+     "mock3": {
+     "requests": 1,
+     "role": [
+     "system"
+     ],
+     "repo": [
+     "system"
+     ],
+     "tools": 12,
+     "toolResult": "VERIFY_OK"
+     },
+     "sendC": {
+     "code": 0,
+     "out": "2095e2ab-ba2f-4580-b105-ce83d6eb1845\n",
+     "err": "Task created: 2095e2ab-ba2f-4580-b105-ce83d6eb1845\nMessage sent.\n"
+     },
+     "approvalC": [
+     {
+     "code": 0,
+     "out": "",
+     "err": ": opencode-v2-role (basis=hook_stop)\nVerifying: opencode-v2-role (run 3)\nGATE work-evidence PASS (commits=0, uncommitted=2)\nGATE scope PASS (exit=0, 0.1s)\nGATE check PASS (exit=0, 0.0s)\nRESULT passed\n"
+     }
+     ],
+     "mockC": {
+     "requests": 2,
+     "role": [
+     "system"
+     ],
+     "repo": [
+     "system"
+     ],
+     "tools": 12,
+     "toolResult": "VERIFY_OK"
+     }
+    },
+    "tool": "opencode-v2",
+    "kind": "role",
+    "worktree": "opencode-v2-role"
+   },
+   "none": {
+    "steps": {
+     "send1": {
+     "code": 0,
+     "out": "",
+     "err": "Message sent.\n"
+     },
+     "wait1": {
+     "code": 0,
+     "out": "",
+     "err": "Completed: opencode-v2-none (basis=hook_stop)\n"
+     },
+     "mock1": {
+     "requests": 1,
+     "role": [],
+     "repo": [
+     "system"
+     ],
+     "tools": 12,
+     "toolResult": null
+     },
+     "send2": {
+     "code": 0,
+     "err": "Message sent.\n"
+     },
+     "approval": [
+     {
+     "code": 0,
+     "out": "",
+     "err": "ope: no contract is attached to this run, so no scope is declared to check.)\nscope: no contract is attached to this run, so no scope is declared to check.\nGATE check PASS (exit=0, 0.0s)\nRESULT passed\n"
+     }
+     ],
+     "mock2": {
+     "requests": 2,
+     "role": [],
+     "repo": [
+     "system"
+     ],
+     "tools": 12,
+     "toolResult": "VERIFY_OK"
+     },
+     "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+     "send3": {
+     "code": 0,
+     "err": "Message sent.\n"
+     },
+     "wait3": {
+     "code": 0,
+     "out": ""
+     },
+     "mock3": {
+     "requests": 1,
+     "role": [],
+     "repo": [
+     "system"
+     ],
+     "tools": 12,
+     "toolResult": "VERIFY_OK"
+     },
+     "sendC": {
+     "code": 0,
+     "out": "0af70747-5f5f-4ce3-86b6-f66d6a1cf8e3\n",
+     "err": "Task created: 0af70747-5f5f-4ce3-86b6-f66d6a1cf8e3\nMessage sent.\n"
+     },
+     "approvalC": [
+     {
+     "code": 0,
+     "out": "",
+     "err": ": opencode-v2-none (basis=hook_stop)\nVerifying: opencode-v2-none (run 4)\nGATE work-evidence PASS (commits=0, uncommitted=2)\nGATE scope PASS (exit=0, 0.0s)\nGATE check PASS (exit=0, 0.0s)\nRESULT passed\n"
+     }
+     ],
+     "mockC": {
+     "requests": 2,
+     "role": [],
+     "repo": [
+     "system"
+     ],
+     "tools": 12,
+     "toolResult": "VERIFY_OK"
+     }
+    },
+    "tool": "opencode-v2",
+    "kind": "none",
+    "worktree": "opencode-v2-none"
+   }
+  }
+ },
+ "lifecycleV2Overlay": {
+  "tool": "opencode-v2",
+  "steps": {
+   "new-none-first": {
+    "V1": [],
+    "V2": [],
+    "users": 1,
+    "history": true,
+    "tools": 12,
+    "model": "mock-model",
+    "argv": [
+     "bash",
+     "<SP>/run3/v2-resume.sh",
+     "18222",
+     "<D>/home/pw",
+     "<D>/repo",
+     ""
+    ],
+    "paneTail": "▀▀\n  /…/-Users-<user>-share-work-github-kewton-…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run3/c/life-opencode-v2/repo:main  15 (0%)  ctrl+p commands    /…/run3/c/life-opencode-v2/repo:main\n",
+    "sid": "ses_e61aec61affejC7z0C1nW8er41",
+    "exit": "0"
+   },
+   "resume-none-to-v1": {
+    "V1": [
+     "system"
+    ],
+    "V2": [],
+    "users": 2,
+    "history": true,
+    "tools": 12,
+    "model": "mock-model",
+    "argv": [
+     "bash",
+     "<SP>/run3/v2-resume.sh",
+     "18222",
+     "<D>/home/pw",
+     "<D>/repo",
+     "ses_e61aec61affejC7z0C1nW8er41"
+    ],
+    "paneTail": "▀▀\n  /…/-Users-<user>-share-work-github-kewton-…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run3/c/life-opencode-v2/repo:main  15 (0%)  ctrl+p commands    /…/run3/c/life-opencode-v2/repo:main\n",
+    "sid": "ses_e61aec61affejC7z0C1nW8er41",
+    "exit": "0"
+   },
+   "new-role-v1": {
+    "V1": [
+     "system"
+    ],
+    "V2": [],
+    "users": 1,
+    "history": false,
+    "tools": 12,
+    "model": "mock-model",
+    "argv": [
+     "bash",
+     "<SP>/run3/v2-resume.sh",
+     "18222",
+     "<D>/home/pw",
+     "<D>/repo",
+     ""
+    ],
+    "paneTail": "▀▀\n  /…/-Users-<user>-share-work-github-kewton-…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run3/c/life-opencode-v2/repo:main  15 (0%)  ctrl+p commands    /…/run3/c/life-opencode-v2/repo:main\n",
+    "sid": "ses_e61ad46f3ffeBX2KTu1yWG0vYR",
+    "exit": "0"
+   },
+   "resume-same-v1": {
+    "V1": [
+     "system"
+    ],
+    "V2": [],
+    "users": 2,
+    "history": false,
+    "tools": 12,
+    "model": "mock-model",
+    "argv": [
+     "bash",
+     "<SP>/run3/v2-resume.sh",
+     "18222",
+     "<D>/home/pw",
+     "<D>/repo",
+     "ses_e61ad46f3ffeBX2KTu1yWG0vYR"
+    ],
+    "paneTail": "▀▀\n  /…/-Users-<user>-share-work-github-kewton-…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run3/c/life-opencode-v2/repo:main  15 (0%)  ctrl+p commands    /…/run3/c/life-opencode-v2/repo:main\n",
+    "sid": "ses_e61ad46f3ffeBX2KTu1yWG0vYR",
+    "exit": "0"
+   },
+   "resume-edited-v2": {
+    "V1": [],
+    "V2": [
+     "system"
+    ],
+    "users": 3,
+    "history": false,
+    "tools": 12,
+    "model": "mock-model",
+    "argv": [
+     "bash",
+     "<SP>/run3/v2-resume.sh",
+     "18222",
+     "<D>/home/pw",
+     "<D>/repo",
+     "ses_e61ad46f3ffeBX2KTu1yWG0vYR"
+    ],
+    "paneTail": "▀▀\n  /…/-Users-<user>-share-work-github-kewton-…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run3/c/life-opencode-v2/repo:main  15 (0%)  ctrl+p commands    /…/run3/c/life-opencode-v2/repo:main\n",
+    "sid": "ses_e61ad46f3ffeBX2KTu1yWG0vYR",
+    "exit": "0"
+   },
+   "resume-none": {
+    "V1": [],
+    "V2": [],
+    "users": 4,
+    "history": false,
+    "tools": 12,
+    "model": "mock-model",
+    "argv": [
+     "bash",
+     "<SP>/run3/v2-resume.sh",
+     "18222",
+     "<D>/home/pw",
+     "<D>/repo",
+     "ses_e61ad46f3ffeBX2KTu1yWG0vYR"
+    ],
+    "paneTail": "▀▀\n  /…/-Users-<user>-share-work-github-kewton-…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run3/c/life-opencode-v2/repo:main  15 (0%)  ctrl+p commands    /…/run3/c/life-opencode-v2/repo:main\n",
+    "sid": "ses_e61ad46f3ffeBX2KTu1yWG0vYR",
+    "exit": "0"
+   },
+   "new-none": {
+    "V1": [],
+    "V2": [],
+    "users": 1,
+    "history": false,
+    "tools": 12,
+    "model": "mock-model",
+    "argv": [
+     "bash",
+     "<SP>/run3/v2-resume.sh",
+     "18222",
+     "<D>/home/pw",
+     "<D>/repo",
+     ""
+    ],
+    "paneTail": "▀▀\n  /…/-Users-<user>-share-work-github-kewton-…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run3/c/life-opencode-v2/repo:main  15 (0%)  ctrl+p commands    /…/run3/c/life-opencode-v2/repo:main\n",
+    "sid": "ses_e61aa4051ffeqZ60tBiv5IeZXp",
+    "exit": "0"
+   },
+   "new-role-v2": {
+    "V1": [],
+    "V2": [
+     "system"
+    ],
+    "users": 1,
+    "history": false,
+    "tools": 12,
+    "model": "mock-model",
+    "argv": [
+     "bash",
+     "<SP>/run3/v2-resume.sh",
+     "18222",
+     "<D>/home/pw",
+     "<D>/repo",
+     ""
+    ],
+    "paneTail": "▀▀\n  /…/-Users-<user>-share-work-github-kewton-…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run3/c/life-opencode-v2/repo:main  15 (0%)  ctrl+p commands    /…/run3/c/life-opencode-v2/repo:main\n",
+    "sid": "ses_e61a9bc38ffeY62p5TD3BZOeD6",
+    "exit": "0"
+   }
+  }
+ },
+ "flowsV2Overlay": [
+  {
+   "tool": "opencode-v2",
+   "variant": "overlay",
+   "label": "x",
+   "id": "opencode-v2-overlay-x",
+   "argv": [
+    "bash",
+    "<WT>/scripts/opencode-v2/launch.sh",
+    "--port",
+    "18211",
+    "--password-file",
+    "<D>/home/pw",
+    "--directory",
+    "<D>/repo",
+    "--executable",
+    "/opt/homebrew/bin/opencode2"
+   ],
+   "env": {
+    "HOME": "<D>/home",
+    "XDG_CONFIG_HOME": "<D>/home/.config",
+    "XDG_DATA_HOME": "<D>/home/.local/share",
+    "XDG_STATE_HOME": "<D>/home/.local/state",
+    "XDG_CACHE_HOME": "<D>/home/.cache",
+    "OPENCODE_CONFIG_CONTENT": "{\"agents\":{\"build\":{\"system\":\"{file:<D>/home/.cmrole/role-x.md}\"}}}"
+   },
+   "artifacts": [
+    {
+     "path": "$HOME/.cmrole/role-x.md",
+     "content": "ROLE_MARKER_K3: You are a test role. End every answer with ROLESTAMP."
+    }
+   ],
+   "ready": true,
+   "paneAtReady": "     ▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀\n     ┃\n     ┃  Ask anything… \"Fix broken tests\"\n     ┃\n     ┃  Build · mock-model mock\n     ╹───\n     /…/ru…/c/opencode-v2-overlay-x/repo:main  shift+tab agents  ctrl+p commands\n     2.0.18\n",
+   "q1": "CASE=opencode-v2-overlay-x first turn. Say hello.",
+   "turn1": {
+    "url": "/v1/chat/completions",
+    "model": "mock-model",
+    "tools": [
+     "edit",
+     "execute",
+     "glob",
+     "grep",
+     "question",
+     "read",
+     "shell",
+     "skill",
+     "subagent",
+     "webfetch",
+     "websearch",
+     "write"
+    ],
+    "toolsHash": "402838d7ad52",
+    "systemLen": 11346,
+    "developerLen": 0,
+    "systemHash": "9023575a60ac",
+    "roleIn": [
+     "system"
+    ],
+    "repoIn": [
+     "system"
+    ],
+    "baseLinesKeptRatio": 0.843,
+    "baseLinesLost": [
+     "You are an AI agent running in OpenCode, a coding agent harness. Help the user accomplish their goals using th",
+     "- Responses are rendered as GitHub-flavored Markdown.",
+     "- `<system-reminder>` blocks are harness instructions, not user-authored content. Read and follow them.",
+     "- Prefer parallelizing independent tool calls.",
+     "- Prefer dedicated tools over shell commands; fall back to the shell when a tool cannot do what you need.",
+     "- Do not chain shell commands with separators like `echo \"====\";` or `printf '---'`; the output becomes noisy ",
+     "- Use the write tool to create files or completely replace their content. Prefer using the edit tool for targe",
+     "- Use the edit tool for targeted changes to existing text files. It replaces the exact text in `oldString` wit",
+     "- Use clear file paths when referring to files.",
+     "- Keep responses clear and concise, and avoid unnecessary technical jargon.",
+     "# Working in codebases",
+     "- Keep changes consistent with the structure, naming, style, and patterns of the surrounding code.",
+     "- Treat unfamiliar files or changes as potential user work and investigate before deleting or overwriting them"
+    ],
+    "sysLineCount": 77
+   },
+   "paneTurn1": "     Claude, GPT, Gemini etc\n  ┃\n  ┃     Connect provider     /connect\n  ┃  Build · mock-model mock\n  ╹───\n  /…/-Users-<user>-share-work-github-ke…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run3/c/opencode-v2-overlay-x/repo:main  15 (0%)  ctrl+p commands    /…/c/opencode-v2-overlay-x/repo:main\n",
+   "q2": "CASE=opencode-v2-overlay-x second turn. CMRUN<<sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?>>",
+   "approvalPane": null,
+   "toolResultSeen": true,
+   "verify": "VERIFY_OK",
+   "rc": "0",
+   "turn2": {
+    "url": null,
+    "model": "mock-model",
+    "tools": [
+     "edit",
+     "execute",
+     "glob",
+     "grep",
+     "question",
+     "read",
+     "shell",
+     "skill",
+     "subagent",
+     "webfetch",
+     "websearch",
+     "write"
+    ],
+    "toolsHash": "402838d7ad52",
+    "systemLen": 11346,
+    "developerLen": 0,
+    "systemHash": "9023575a60ac",
+    "roleIn": [
+     "system"
+    ],
+    "repoIn": [
+     "system"
+    ],
+    "baseLinesKeptRatio": 0.843,
+    "baseLinesLost": [
+     "You are an AI agent running in OpenCode, a coding agent harness. Help the user accomplish their goals using th",
+     "- Responses are rendered as GitHub-flavored Markdown.",
+     "- `<system-reminder>` blocks are harness instructions, not user-authored content. Read and follow them.",
+     "- Prefer parallelizing independent tool calls.",
+     "- Prefer dedicated tools over shell commands; fall back to the shell when a tool cannot do what you need.",
+     "- Do not chain shell commands with separators like `echo \"====\";` or `printf '---'`; the output becomes noisy ",
+     "- Use the write tool to create files or completely replace their content. Prefer using the edit tool for targe",
+     "- Use the edit tool for targeted changes to existing text files. It replaces the exact text in `oldString` wit",
+     "- Use clear file paths when referring to files.",
+     "- Keep responses clear and concise, and avoid unnecessary technical jargon.",
+     "# Working in codebases",
+     "- Keep changes consistent with the structure, naming, style, and patterns of the surrounding code.",
+     "- Treat unfamiliar files or changes as potential user work and investigate before deleting or overwriting them"
+    ],
+    "sysLineCount": 77
+   },
+   "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+   "paneEnd": "     use other models, including\n  ┃     Claude, GPT, Gemini etc\n  ┃\n  ┃     Connect provider     /connect\n  ┃  Build · mock-model mock\n  ╹───\n  /…/-Users-<user>-share-work-github-ke…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run3/c/opencode-v2-overlay-x/repo:main  15 (0%)  ctrl+p commands    /…/c/opencode-v2-overlay-x/repo:main\n",
+   "answerShown": true,
+   "requests": [
+    "/v1/chat/completions tools=0",
+    "/v1/chat/completions tools=12",
+    "/v1/chat/completions tools=12",
+    "/v1/chat/completions tools=12"
+   ],
+   "exitCode": "0"
+  },
+  {
+   "tool": "opencode-v2",
+   "variant": "none",
+   "label": "x",
+   "id": "opencode-v2-none-x",
+   "argv": [
+    "bash",
+    "<WT>/scripts/opencode-v2/launch.sh",
+    "--port",
+    "18211",
+    "--password-file",
+    "<D>/home/pw",
+    "--directory",
+    "<D>/repo",
+    "--executable",
+    "/opt/homebrew/bin/opencode2"
+   ],
+   "env": {
+    "HOME": "<D>/home",
+    "XDG_CONFIG_HOME": "<D>/home/.config",
+    "XDG_DATA_HOME": "<D>/home/.local/share",
+    "XDG_STATE_HOME": "<D>/home/.local/state",
+    "XDG_CACHE_HOME": "<D>/home/.cache"
+   },
+   "artifacts": [],
+   "ready": true,
+   "paneAtReady": "     ▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀\n     ┃\n     ┃  Ask anything… \"What is the tech stack of this project?\"\n     ┃\n     ┃  Build · mock-model mock\n     ╹───\n     /…/run3/c/opencode-v2-none-x/repo:main    shift+tab agents  ctrl+p commands\n     2.0.18\n",
+   "q1": "CASE=opencode-v2-none-x first turn. Say hello.",
+   "turn1": {
+    "url": "/v1/chat/completions",
+    "model": "mock-model",
+    "tools": [
+     "edit",
+     "execute",
+     "glob",
+     "grep",
+     "question",
+     "read",
+     "shell",
+     "skill",
+     "subagent",
+     "webfetch",
+     "websearch",
+     "write"
+    ],
+    "toolsHash": "402838d7ad52",
+    "systemLen": 12739,
+    "developerLen": 0,
+    "systemHash": "84fa62565aa8",
+    "roleIn": [],
+    "repoIn": [
+     "system"
+    ],
+    "baseLinesKeptRatio": 1.0,
+    "baseLinesLost": [],
+    "sysLineCount": 89
+   },
+   "paneTurn1": "     Claude, GPT, Gemini etc\n  ┃\n  ┃     Connect provider     /connect\n  ┃  Build · mock-model mock\n  ╹───\n  /…/-Users-<user>-share-work-github-kewto…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run3/c/opencode-v2-none-x/repo:main  15 (0%)  ctrl+p commands    /…/run3/c/opencode-v2-none-x/repo:main\n",
+   "q2": "CASE=opencode-v2-none-x second turn. CMRUN<<sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?>>",
+   "approvalPane": null,
+   "toolResultSeen": true,
+   "verify": "VERIFY_OK",
+   "rc": "0",
+   "turn2": {
+    "url": null,
+    "model": "mock-model",
+    "tools": [
+     "edit",
+     "execute",
+     "glob",
+     "grep",
+     "question",
+     "read",
+     "shell",
+     "skill",
+     "subagent",
+     "webfetch",
+     "websearch",
+     "write"
+    ],
+    "toolsHash": "402838d7ad52",
+    "systemLen": 12739,
+    "developerLen": 0,
+    "systemHash": "84fa62565aa8",
+    "roleIn": [],
+    "repoIn": [
+     "system"
+    ],
+    "baseLinesKeptRatio": 1.0,
+    "baseLinesLost": [],
+    "sysLineCount": 89
+   },
+   "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+   "paneEnd": "     use other models, including\n  ┃     Claude, GPT, Gemini etc\n  ┃\n  ┃     Connect provider     /connect\n  ┃  Build · mock-model mock\n  ╹───\n  /…/-Users-<user>-share-work-github-kewto…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run3/c/opencode-v2-none-x/repo:main  15 (0%)  ctrl+p commands    /…/run3/c/opencode-v2-none-x/repo:main\n",
+   "answerShown": true,
+   "requests": [
+    "/v1/chat/completions tools=0",
+    "/v1/chat/completions tools=12",
+    "/v1/chat/completions tools=12",
+    "/v1/chat/completions tools=12"
+   ],
+   "exitCode": "0"
+  }
+ ],
+ "v2Api": {
+  "paths": [
+   "/api/agent",
+   "/api/agent/{agentID}",
+   "/api/session/{sessionID}/agent",
+   "/api/config",
+   "/api/config/shell",
+   "/api/experimental/config"
+  ],
+  "GET /api/agent": {
+   "status": 200,
+   "hasRoleBody": false
+  },
+  "GET /api/config": {
+   "status": 200,
+   "hasRoleBody": true
+  },
+  "GET /api/experimental/config": {
+   "status": 404
+  }
+ },
+ "realNonConflicting": {
+  "model": "qwen3-coder:30b (local Ollama)",
+  "role": "begin every answer with the exact word ROLESTAMP",
+  "agentsMd": "End every answer with the exact word REPOSTAMP",
+  "judge": "最終回答の英数字トークンの先頭が ROLESTAMP、末尾が REPOSTAMP",
+  "runs": [
+   {
+    "tool": "opencode",
+    "role": true,
+    "model": "qwen3-coder:30b",
+    "argvQ1": [
+     "opencode",
+     "run",
+     "--format",
+     "json",
+     "<Q>"
+    ],
+    "q1": "What is 2+2? Answer in one short sentence.",
+    "exit1": 0,
+    "sig1": null,
+    "sec1": 2,
+    "n": 5,
+    "exits": [
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "firstIsRole": 0,
+    "lastIsRepo": 4,
+    "bothStrict": 0,
+    "roleAnywhere": 1,
+    "repoAnywhere": 5,
+    "answers": [
+     "4\nREPOSTAMP\nROLESTAMP",
+     "4\nREPOSTAMP",
+     "4\nREPOSTAMP",
+     "4\nREPOSTAMP",
+     "4\nREPOSTAMP"
+    ],
+    "q2": "calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.",
+    "exit2": 0,
+    "sig2": null,
+    "sec2": 11,
+    "verifyAfter": {
+     "exit": 0,
+     "out": "VERIFY_OK"
+    },
+    "calc": "#!/bin/sh\necho 2\n",
+    "err": ""
+   },
+   {
+    "tool": "opencode",
+    "role": false,
+    "model": "qwen3-coder:30b",
+    "argvQ1": [
+     "opencode",
+     "run",
+     "--format",
+     "json",
+     "<Q>"
+    ],
+    "q1": "What is 2+2? Answer in one short sentence.",
+    "exit1": 0,
+    "sig1": null,
+    "sec1": 4,
+    "n": 5,
+    "exits": [
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "firstIsRole": 0,
+    "lastIsRepo": 5,
+    "bothStrict": 0,
+    "roleAnywhere": 0,
+    "repoAnywhere": 5,
+    "answers": [
+     "The user's task was already completed. I answered \"4\" in a single sentence as requested, a",
+     "The user asked for a simple math question answer, which I provided in the previous respons",
+     "REPOSTAMP",
+     "4\nREPOSTAMP",
+     "The user's query was answered directly with \"4\" which satisfies the requirement of a one s"
+    ],
+    "q2": "calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.",
+    "exit2": 0,
+    "sig2": null,
+    "sec2": 13,
+    "verifyAfter": {
+     "exit": 0,
+     "out": "VERIFY_OK"
+    },
+    "calc": "#!/bin/sh\necho $((2+0))\n",
+    "err": ""
+   },
+   {
+    "tool": "opencode-v2",
+    "role": true,
+    "model": "qwen3-coder:30b",
+    "argvQ1": [
+     "opencode2",
+     "run",
+     "--standalone",
+     "--format",
+     "json",
+     "--auto",
+     "--",
+     "<Q>"
+    ],
+    "q1": "What is 2+2? Answer in one short sentence.",
+    "exit1": 0,
+    "sig1": null,
+    "sec1": 38,
+    "n": 5,
+    "exits": [
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "firstIsRole": 5,
+    "lastIsRepo": 5,
+    "bothStrict": 5,
+    "roleAnywhere": 5,
+    "repoAnywhere": 5,
+    "answers": [
+     "ROLESTAMP\n2 + 2 equals 4.\nREPOSTAMP",
+     "ROLESTAMP\n2 + 2 equals 4.\nREPOSTAMP",
+     "ROLESTAMP\n2 + 2 equals 4.\nREPOSTAMP",
+     "ROLESTAMP\n2 + 2 equals 4.\nREPOSTAMP",
+     "ROLESTAMP\n2+2 equals 4.\nREPOSTAMP"
+    ],
+    "q2": "calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.",
+    "exit2": 0,
+    "sig2": null,
+    "sec2": 36,
+    "verifyAfter": {
+     "exit": 0,
+     "out": "VERIFY_OK"
+    },
+    "calc": "#!/bin/sh\necho $((2+0))\n",
+    "err": ""
+   },
+   {
+    "tool": "opencode-v2",
+    "role": false,
+    "model": "qwen3-coder:30b",
+    "argvQ1": [
+     "opencode2",
+     "run",
+     "--standalone",
+     "--format",
+     "json",
+     "--auto",
+     "--",
+     "<Q>"
+    ],
+    "q1": "What is 2+2? Answer in one short sentence.",
+    "exit1": 0,
+    "sig1": null,
+    "sec1": 16,
+    "n": 5,
+    "exits": [
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "firstIsRole": 0,
+    "lastIsRepo": 5,
+    "bothStrict": 0,
+    "roleAnywhere": 0,
+    "repoAnywhere": 5,
+    "answers": [
+     "The calculation 2 + 2 equals 4.\n\nREPOSTAMP",
+     "2 + 2 equals 4. REPOSTAMP",
+     "2 + 2 equals 4. REPOSTAMP",
+     "2 + 2 equals 4. REPOSTAMP",
+     "2 + 2 equals 4. REPOSTAMP"
+    ],
+    "q2": "calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.",
+    "exit2": 0,
+    "sig2": null,
+    "sec2": 17,
+    "verifyAfter": {
+     "exit": 0,
+     "out": "VERIFY_OK"
+    },
+    "calc": "#!/bin/sh\necho $((3-1))\n",
+    "err": ""
+   },
+   {
+    "tool": "opencode-v2-common",
+    "role": true,
+    "model": "qwen3-coder:30b",
+    "argvQ1": [
+     "opencode2",
+     "run",
+     "--standalone",
+     "--format",
+     "json",
+     "--auto",
+     "--",
+     "<Q>"
+    ],
+    "q1": "What is 2+2? Answer in one short sentence.",
+    "exit1": 0,
+    "sig1": null,
+    "sec1": 12,
+    "n": 5,
+    "exits": [
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "firstIsRole": 5,
+    "lastIsRepo": 5,
+    "bothStrict": 5,
+    "roleAnywhere": 5,
+    "repoAnywhere": 5,
+    "answers": [
+     "ROLESTAMP\n2 + 2 equals 4.\nREPOSTAMP",
+     "ROLESTAMP\n2 + 2 equals 4.\nREPOSTAMP",
+     "ROLESTAMP\n2 + 2 equals 4.\nREPOSTAMP",
+     "ROLESTAMP\n2 + 2 equals 4.\nREPOSTAMP",
+     "ROLESTAMP\n2+2 equals 4.\nREPOSTAMP"
+    ],
+    "q2": "calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.",
+    "exit2": 0,
+    "sig2": null,
+    "sec2": 24,
+    "verifyAfter": {
+     "exit": 0,
+     "out": "VERIFY_OK"
+    },
+    "calc": "#!/bin/sh\necho $((3-1))\n",
+    "err": ""
+   },
+   {
+    "tool": "opencode-v2-common",
+    "role": false,
+    "model": "qwen3-coder:30b",
+    "argvQ1": [
+     "opencode2",
+     "run",
+     "--standalone",
+     "--format",
+     "json",
+     "--auto",
+     "--",
+     "<Q>"
+    ],
+    "q1": "What is 2+2? Answer in one short sentence.",
+    "exit1": 0,
+    "sig1": null,
+    "sec1": 14,
+    "n": 5,
+    "exits": [
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "firstIsRole": 0,
+    "lastIsRepo": 5,
+    "bothStrict": 0,
+    "roleAnywhere": 0,
+    "repoAnywhere": 5,
+    "answers": [
+     "2 + 2 equals 4. REPOSTAMP",
+     "Let me create a proper solution for the issue. Based on my analysis, I see there are scrip",
+     "2 + 2 equals 4. REPOSTAMP",
+     "2 + 2 equals 4. REPOSTAMP",
+     "2+2 equals 4. REPOSTAMP"
+    ],
+    "q2": "calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.",
+    "exit2": 0,
+    "sig2": null,
+    "sec2": 32,
+    "verifyAfter": {
+     "exit": 0,
+     "out": "VERIFY_OK"
+    },
+    "calc": "#!/bin/sh\necho $(( 2 + 0 ))\n",
+    "err": ""
+   },
+   {
+    "tool": "copilot",
+    "role": true,
+    "model": "qwen3-coder:30b",
+    "argvQ1": [
+     "copilot",
+     "-p",
+     "<Q>",
+     "--allow-all-tools",
+     "--agent",
+     "cm-role-x"
+    ],
+    "q1": "What is 2+2? Answer in one short sentence.",
+    "exit1": 0,
+    "sig1": null,
+    "sec1": 9,
+    "n": 5,
+    "exits": [
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "firstIsRole": 0,
+    "lastIsRepo": 5,
+    "bothStrict": 0,
+    "roleAnywhere": 0,
+    "repoAnywhere": 5,
+    "answers": [
+     "2+2 equals 4.\n\nREPOSTAMP",
+     "`verify.sh` correctly validates that `calc.sh` produces the expected result \"3\"\n\nThis comp",
+     "2+2 equals 4.\n\nREPOSTAMP",
+     "2+2 equals 4.\n\nREPOSTAMP",
+     "2+2 equals 4.\n\nREPOSTAMP"
+    ],
+    "q2": "calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.",
+    "exit2": 0,
+    "sig2": null,
+    "sec2": 59,
+    "verifyAfter": {
+     "exit": 0,
+     "out": "VERIFY_OK"
+    },
+    "calc": "#!/bin/sh\necho $((1+2))\n",
+    "err": "  ↑ 13.5k (4.6k cached) • ↓ 11\nResume     copilot --resume=b7554c7f-9766-43f9-815f-481706dda7b3\n\n\nChanges    +2 -2\nDuration   58s\nTokens     ↑ 191.4k (166.6k cached) • ↓ 2.1k\nResume     copilot --resume=6ff745a8-54f2-47b1-9b2f-86abee94df0d\n"
+   },
+   {
+    "tool": "copilot",
+    "role": false,
+    "model": "qwen3-coder:30b",
+    "argvQ1": [
+     "copilot",
+     "-p",
+     "<Q>",
+     "--allow-all-tools"
+    ],
+    "q1": "What is 2+2? Answer in one short sentence.",
+    "exit1": 0,
+    "sig1": null,
+    "sec1": 120,
+    "n": 5,
+    "exits": [
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "firstIsRole": 0,
+    "lastIsRepo": 5,
+    "bothStrict": 0,
+    "roleAnywhere": 0,
+    "repoAnywhere": 5,
+    "answers": [
+     "nstration environment, as indicated by the presence of a calculator script (calc.sh) and v",
+     "./verify.sh which now returns \"VERIFY_OK\"\n\nThe calculation in calc.sh has been fixed to ma",
+     "nal, with calc.sh providing basic arithmetic calculation and verify.sh ensuring it works c",
+     "ectly outputs \"2\" (result of 1+1)\n- Both scripts have executable permissions\n- Documentati",
+     "n and verification system.\n\nThe issue has been resolved and all scripts are working as int"
+    ],
+    "q2": "calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.",
+    "exit2": 0,
+    "sig2": null,
+    "sec2": 58,
+    "verifyAfter": {
+     "exit": 0,
+     "out": "VERIFY_OK"
+    },
+    "calc": "#!/bin/sh\nresult=$((1+1))\necho \"$result\"\n",
+    "err": "76.0k (419.3k cached) • ↓ 4.3k\nResume     copilot --resume=780074a3-c689-4e51-81d3-9725f3996cdd\n\n\nChanges    +2 -1\nDuration   57s\nTokens     ↑ 253.6k (243.8k cached) • ↓ 2.8k\nResume     copilot --resume=b6637861-9223-48d9-b401-feee51b03fce\n"
+   },
+   {
+    "tool": "codex",
+    "role": true,
+    "model": "qwen3-coder:30b",
+    "argvQ1": [
+     "codex",
+     "-p",
+     "cm-role-x",
+     "exec",
+     "<Q>",
+     "--sandbox",
+     "danger-full-access"
+    ],
+    "q1": "What is 2+2? Answer in one short sentence.",
+    "exit1": 0,
+    "sig1": null,
+    "sec1": 2,
+    "n": 5,
+    "exits": [
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "firstIsRole": 2,
+    "lastIsRepo": 5,
+    "bothStrict": 2,
+    "roleAnywhere": 2,
+    "repoAnywhere": 5,
+    "answers": [
+     "2+2 equals 4.\n\nREPOSTAMP",
+     "ROLESTAMP 2+2 equals 4.\n\nREPOSTAMP",
+     "2+2 equals 4.\n\nREPOSTAMP",
+     "ROLESTAMP 2+2 equals 4. REPOSTAMP",
+     "2+2 equals 4.\n\nREPOSTAMP"
+    ],
+    "q2": "calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.",
+    "exit2": 0,
+    "sig2": null,
+    "sec2": 11,
+    "verifyAfter": {
+     "exit": 0,
+     "out": "VERIFY_OK"
+    },
+    "calc": "#!/bin/sh\necho $((2+0))\n",
+    "err": "ges made:**\n- Modified calc.sh to output \"2\" instead of \"3\" by changing the arithmetic expression from $((1+2)) to $((2+0))\n\nThis resolves the issue and makes `sh verify.sh` print VERIFY_OK as required.\n\nROLESTAMP\nREPOSTAMP\ntokens used\n925\n"
+   },
+   {
+    "tool": "codex",
+    "role": false,
+    "model": "qwen3-coder:30b",
+    "argvQ1": [
+     "codex",
+     "exec",
+     "<Q>",
+     "--sandbox",
+     "danger-full-access"
+    ],
+    "q1": "What is 2+2? Answer in one short sentence.",
+    "exit1": 0,
+    "sig1": null,
+    "sec1": 1,
+    "n": 5,
+    "exits": [
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "firstIsRole": 0,
+    "lastIsRepo": 5,
+    "bothStrict": 0,
+    "roleAnywhere": 0,
+    "repoAnywhere": 5,
+    "answers": [
+     "2+2 equals 4.\n\nREPOSTAMP",
+     "2+2 equals 4.\n\nREPOSTAMP",
+     "2+2 equals 4.\n\nREPOSTAMP",
+     "2+2 equals 4.\n\nREPOSTAMP",
+     "2+2 equals 4.\n\nREPOSTAMP"
+    ],
+    "q2": "calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.",
+    "exit2": 0,
+    "sig2": null,
+    "sec2": 10,
+    "verifyAfter": {
+     "exit": 0,
+     "out": "VERIFY_OK"
+    },
+    "calc": "#!/bin/sh\necho $((3-1))\n",
+    "err": "hanged calc.sh to calculate 3-1=2 instead, which satisfies the verification script's expectation.\n\nBoth scripts now work correctly:\n- calc.sh outputs \"2\" \n- verify.sh confirms this output and prints \"VERIFY_OK\"\n\nREPOSTAMP\ntokens used\n1,274\n"
+   },
+   {
+    "tool": "command-code",
+    "role": true,
+    "model": "qwen3-coder:30b",
+    "argvQ1": [
+     "cmd",
+     "--local-only",
+     "-m",
+     "qwen3-coder:30b",
+     "-p",
+     "<Q>",
+     "--output-format",
+     "json",
+     "--yolo",
+     "--no-auto-update",
+     "--mod",
+     "<D>/home/.cmrole/x.ts"
+    ],
+    "q1": "What is 2+2? Answer in one short sentence.",
+    "exit1": 0,
+    "sig1": null,
+    "sec1": 10,
+    "n": 5,
+    "exits": [
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "firstIsRole": 0,
+    "lastIsRepo": 5,
+    "bothStrict": 0,
+    "roleAnywhere": 0,
+    "repoAnywhere": 5,
+    "answers": [
+     "4\n\nREPOSTAMP",
+     "4\n\nREPOSTAMP",
+     "4\n\nREPOSTAMP",
+     "4\n\nREPOSTAMP",
+     "4\n\n(REPOSTAMP)"
+    ],
+    "q2": "calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.",
+    "exit2": 0,
+    "sig2": null,
+    "sec2": 20,
+    "verifyAfter": {
+     "exit": 0,
+     "out": "VERIFY_OK"
+    },
+    "calc": "#!/bin/sh\necho 2\n",
+    "err": ""
+   },
+   {
+    "tool": "command-code",
+    "role": false,
+    "model": "qwen3-coder:30b",
+    "argvQ1": [
+     "cmd",
+     "--local-only",
+     "-m",
+     "qwen3-coder:30b",
+     "-p",
+     "<Q>",
+     "--output-format",
+     "json",
+     "--yolo",
+     "--no-auto-update"
+    ],
+    "q1": "What is 2+2? Answer in one short sentence.",
+    "exit1": 0,
+    "sig1": null,
+    "sec1": 10,
+    "n": 5,
+    "exits": [
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "firstIsRole": 0,
+    "lastIsRepo": 5,
+    "bothStrict": 0,
+    "roleAnywhere": 0,
+    "repoAnywhere": 5,
+    "answers": [
+     "4\n\nREPOSTAMP",
+     "4\n\nREPOSTAMP",
+     "4\n\nREPOSTAMP",
+     "2+2 equals 4. I've verified this by creating and running a shell script that performs the ",
+     "4\n\nREPOSTAMP"
+    ],
+    "q2": "calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.",
+    "exit2": 0,
+    "sig2": null,
+    "sec2": 22,
+    "verifyAfter": {
+     "exit": 0,
+     "out": "VERIFY_OK"
+    },
+    "calc": "#!/bin/sh\necho 2",
+    "err": ""
+   },
+   {
+    "tool": "claude",
+    "role": true,
+    "model": "qwen3-coder:30b",
+    "argvQ1": [
+     "claude",
+     "-p",
+     "<Q>",
+     "--model",
+     "qwen3-coder:30b",
+     "--output-format",
+     "text",
+     "--permission-mode",
+     "bypassPermissions",
+     "--append-system-prompt-file",
+     "<D>/home/.cmrole/r.md"
+    ],
+    "q1": "What is 2+2? Answer in one short sentence.",
+    "exit1": 0,
+    "sig1": null,
+    "sec1": 2,
+    "n": 5,
+    "exits": [
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "firstIsRole": 1,
+    "lastIsRepo": 5,
+    "bothStrict": 1,
+    "roleAnywhere": 1,
+    "repoAnywhere": 5,
+    "answers": [
+     "ROLESTAMP\n2 + 2 equals 4.\n\nREPOSTAMP",
+     "2+2 equals 4.\n\nREPOSTAMP",
+     "2+2 equals 4.\n\nREPOSTAMP",
+     "2+2 equals 4.\n\nREPOSTAMP",
+     "2+2 equals 4.\n\nREPOSTAMP"
+    ],
+    "q2": "calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.",
+    "exit2": 0,
+    "sig2": null,
+    "sec2": 22,
+    "verifyAfter": {
+     "exit": 0,
+     "out": "VERIFY_OK"
+    },
+    "calc": "#!/bin/sh\necho $((1+1))\n",
+    "err": "f 200k tokens. Update Claude Code, or see https://code.claude.com/docs/en/model-config#correct-the-window-for-a-gateway-or-custom-model-id to set the window.\n[claude-code:unrecognized_model] {\"model\":\"qwen3-coder:30b\",\"query_source\":\"sdk\"}\n"
+   },
+   {
+    "tool": "claude",
+    "role": false,
+    "model": "qwen3-coder:30b",
+    "argvQ1": [
+     "claude",
+     "-p",
+     "<Q>",
+     "--model",
+     "qwen3-coder:30b",
+     "--output-format",
+     "text",
+     "--permission-mode",
+     "bypassPermissions"
+    ],
+    "q1": "What is 2+2? Answer in one short sentence.",
+    "exit1": 0,
+    "sig1": null,
+    "sec1": 2,
+    "n": 5,
+    "exits": [
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "firstIsRole": 0,
+    "lastIsRepo": 5,
+    "bothStrict": 0,
+    "roleAnywhere": 0,
+    "repoAnywhere": 5,
+    "answers": [
+     "2 + 2 equals 4.\n\nREPOSTAMP",
+     "2 + 2 equals 4.\n\nREPOSTAMP",
+     "2 + 2 equals 4.\n\nREPOSTAMP",
+     "2 + 2 equals 4.\n\nREPOSTAMP",
+     "2 + 2 equals 4.\n\nREPOSTAMP"
+    ],
+    "q2": "calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.",
+    "exit2": 0,
+    "sig2": null,
+    "sec2": 27,
+    "verifyAfter": {
+     "exit": 0,
+     "out": "VERIFY_OK"
+    },
+    "calc": "#!/bin/sh\necho $((1+1))\n",
+    "err": "f 200k tokens. Update Claude Code, or see https://code.claude.com/docs/en/model-config#correct-the-window-for-a-gateway-or-custom-model-id to set the window.\n[claude-code:unrecognized_model] {\"model\":\"qwen3-coder:30b\",\"query_source\":\"sdk\"}\n"
+   }
+  ]
+ },
+ "claudeDiag": {
+  "systemChars": 6445,
+  "rolePosition": 6366,
+  "runs": [
+   {
+    "num_ctx": null,
+    "promptEvalCount": 1545,
+    "firstIsRole": true,
+    "answer": "ROLESTAMP 2+2 equals 4."
+   },
+   {
+    "num_ctx": null,
+    "promptEvalCount": 1545,
+    "firstIsRole": true,
+    "answer": "ROLESTAMP 2+2 equals 4."
+   },
+   {
+    "num_ctx": null,
+    "promptEvalCount": 1545,
+    "firstIsRole": true,
+    "answer": "ROLESTAMP 2+2 equals 4."
+   },
+   {
+    "num_ctx": 32768,
+    "promptEvalCount": 1545,
+    "firstIsRole": true,
+    "answer": "ROLESTAMP 2+2 equals 4."
+   },
+   {
+    "num_ctx": 32768,
+    "promptEvalCount": 1545,
+    "firstIsRole": true,
+    "answer": "ROLESTAMP 2+2 equals 4."
+   },
+   {
+    "num_ctx": 32768,
+    "promptEvalCount": 1545,
+    "firstIsRole": true,
+    "answer": "ROLESTAMP 2+2 equals 4."
+   }
+  ]
+ }
+}

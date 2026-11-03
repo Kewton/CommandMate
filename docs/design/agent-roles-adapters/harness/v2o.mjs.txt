@@ -1,0 +1,20 @@
+import * as L from './lib.mjs'; import fs from 'node:fs'; import path from 'node:path'; import { execFileSync } from 'node:child_process';
+const out=[];const LS='<WORKTREE>/scripts/opencode-v2/launch.sh';
+const start=async(id,r,env,cmd)=>{L.startPane(id,r,env,cmd);await L.until(()=>/Ask anything/.test(L.cap(id)),30000);await L.sleep(5000);};
+const ask=async(id,tag)=>{const since=Date.now();await L.sendText(id,`CASE=${tag} hello`);const got=await L.until(()=>L.lastMain(tag,since),20000);await L.sleep(800);return got?{role:L.whereIs(got.body,'ROLE_MARKER_K3'),repo:L.whereIs(got.body,'REPO_MARKER_7Q'),baseKept:L.flat(got.body).includes('You are an AI agent running in OpenCode'),tools:L.toolNames(got.body).length,history:L.flat(got.body).includes('v2o-a')}:{req:false};};
+const footer=(id)=>(L.cap(id).match(/(\S+)\s+·\s+mock-model/)||[])[1];
+// A: build を同名上書き。B: 利用者の default_agent=plan のもとで effective agent を上書き。C: none で作った会話を上書きで再開
+const base=path.join(L.ROOT,'c','v2o');fs.rmSync(base,{recursive:true,force:true});const h=base+'/home',r=base+'/repo';L.repoSeed(r);fs.mkdirSync(h,{recursive:true});
+const p=18261;const d=L.toolDef('opencode-v2',h,r,{launchSh:LS,port:p});const rf=h+'/r.md';fs.writeFileSync(rf,L.ROLE_TEXT);
+const over=(a)=>JSON.stringify({agents:{[a]:{system:`{file:${rf}}`}}});
+await start('v2oa',r,{...d.env,OPENCODE_CONFIG_CONTENT:over('build')},d.cmd);out.push({label:'overlay-build-new',footer:footer('v2oa'),...(await ask('v2oa','v2o-x'))});L.stop('v2oa');await L.sleep(1500);
+await start('v2ob',r,d.env,d.cmd);const a=await ask('v2ob','v2o-a');const u=`http://127.0.0.1:${p}/api/session?directory=${encodeURIComponent(fs.realpathSync(r))}`;const j=JSON.parse(execFileSync('curl',['-s','-m','3','-u','opencode:probe-password',u],{encoding:'utf8'}));const arr=(Array.isArray(j)?j:(j.items??j.data??j.sessions??[]));const sid=(arr.find((s)=>true))?.id;out.push({label:'none-first',footer:footer('v2ob'),...a});L.stop('v2ob');await L.sleep(1500);
+const sh=`${L.ROOT}/v2o.sh`;fs.writeFileSync(sh,`#!/bin/bash\nexport OPENCODE_SERVER_PASSWORD=probe-password\n/opt/homebrew/bin/opencode2 serve --hostname 127.0.0.1 --port ${p} </dev/null >/dev/null 2>&1 &\nsp=$!; trap 'kill $sp' EXIT; sleep 3\n/opt/homebrew/bin/opencode2 --server http://127.0.0.1:${p} -s ${sid} "${fs.realpathSync(r)}"\n`);
+await start('v2oc',r,{...d.env,OPENCODE_CONFIG_CONTENT:over('build')},['bash',sh]);out.push({label:'overlay-build-resume-of-none',sid:sid?.slice(0,8),footer:footer('v2oc'),...(await ask('v2oc','v2o-c'))});L.stop('v2oc');await L.sleep(1500);
+// D: 利用者の default_agent=plan を保ったまま plan へ上書き
+const b2=path.join(L.ROOT,'c','v2o2');fs.rmSync(b2,{recursive:true,force:true});const h2=b2+'/home',r2=b2+'/repo';L.repoSeed(r2);fs.mkdirSync(h2,{recursive:true});const d2=L.toolDef('opencode-v2',h2,r2,{launchSh:LS,port:p+1,baseCfg:{default_agent:'plan'}});fs.writeFileSync(h2+'/r.md',L.ROLE_TEXT);
+await start('v2od',r2,{...d2.env,OPENCODE_CONFIG_CONTENT:JSON.stringify({agents:{plan:{system:`{file:${h2}/r.md}`}}})},d2.cmd);out.push({label:'overlay-user-default-plan',footer:footer('v2od'),...(await ask('v2od','v2o-d'))});L.stop('v2od');
+// E: 上書き先に利用者が system を持つ場合（上書きで失う）
+const b3=path.join(L.ROOT,'c','v2o3');fs.rmSync(b3,{recursive:true,force:true});const h3=b3+'/home',r3=b3+'/repo';L.repoSeed(r3);fs.mkdirSync(h3,{recursive:true});const d3=L.toolDef('opencode-v2',h3,r3,{launchSh:LS,port:p+2,baseCfg:{agents:{build:{system:'USERSYS_MARKER_S5'}}}});fs.writeFileSync(h3+'/r.md',L.ROLE_TEXT);
+await start('v2oe',r3,{...d3.env,OPENCODE_CONFIG_CONTENT:JSON.stringify({agents:{build:{system:`{file:${h3}/r.md}`}}})},d3.cmd);const since=Date.now();await L.sendText('v2oe','CASE=v2o-e hello');const g=await L.until(()=>L.lastMain('v2o-e',since),20000);out.push({label:'overlay-over-user-system',role:g&&L.whereIs(g.body,'ROLE_MARKER_K3'),userSystem:g&&L.whereIs(g.body,'USERSYS_MARKER_S5')});L.stop('v2oe');
+fs.writeFileSync(L.ROOT+'/rec-v2overlay.json',JSON.stringify(out,null,1));console.log(out.map((x)=>JSON.stringify(x)).join('\n'));

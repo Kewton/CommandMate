@@ -1,0 +1,1812 @@
+{
+ "records": {
+  "claude-none": {
+   "steps": {
+    "send1": {
+     "code": 0,
+     "out": "",
+     "err": "Message sent.\n"
+    },
+    "wait1": {
+     "code": 0,
+     "out": "",
+     "err": "Completed: claude-none (basis=hook_stop)\n"
+    },
+    "mock1": {
+     "requests": 1,
+     "role": [],
+     "repo": [
+     "user"
+     ],
+     "tools": 13,
+     "toolResult": null
+    },
+    "send2": {
+     "code": 0,
+     "err": "Message sent.\n"
+    },
+    "approval": [
+     {
+     "code": 10,
+     "out": "o RC=$? ─── A variable ",
+     "err": ""
+     },
+     {
+     "respond": 0,
+     "out": "Selected default option 1: Yes\nResponse sent.\n"
+     },
+     {
+     "code": 99,
+     "out": "",
+     "err": "k-evidence gate did not pass.)\nskipped: the work-evidence gate did not pass.\nGATE check SKIP (skipped: the work-evidence gate did not pass.)\nskipped: the work-evidence gate did not pass.\nRESULT error\n"
+     }
+    ],
+    "mock2": {
+     "requests": 2,
+     "role": [],
+     "repo": [
+     "user"
+     ],
+     "tools": 13,
+     "toolResult": "VERIFY_OK"
+    },
+    "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+    "send3": {
+     "code": 0,
+     "err": "Message sent.\n"
+    },
+    "wait3": {
+     "code": 0,
+     "out": ""
+    },
+    "mock3": {
+     "requests": 1,
+     "role": [],
+     "repo": [
+     "user"
+     ],
+     "tools": 13,
+     "toolResult": "VERIFY_OK"
+    },
+    "sendC": {
+     "code": 0,
+     "out": "97d5dbf6-9959-444e-83e8-22ce5eac8e74\n",
+     "err": "Task created: 97d5dbf6-9959-444e-83e8-22ce5eac8e74\nMessage sent.\n"
+    },
+    "approvalC": [
+     {
+     "code": 10,
+     "out": " note.txt; sh verify.sh; echo RC=$? ───",
+     "err": ""
+     },
+     {
+     "respond": 0,
+     "out": "Selected default option 1: Yes\nResponse sent.\n"
+     },
+     {
+     "code": 0,
+     "out": "",
+     "err": "Completed: claude-none (basis=hook_stop)\nVerifying: claude-none (run 4)\nGATE work-evidence PASS (commits=0, uncommitted=2)\nGATE scope PASS (exit=0, 0.1s)\nGATE check PASS (exit=0, 0.0s)\nRESULT passed\n"
+     }
+    ],
+    "mockC": {
+     "requests": 2,
+     "role": [],
+     "repo": [
+     "user"
+     ],
+     "tools": 13,
+     "toolResult": "VERIFY_OK"
+    }
+   },
+   "tool": "claude",
+   "kind": "none",
+   "worktree": "claude-none"
+  },
+  "claude-role": {
+   "steps": {
+    "send1": {
+     "code": 0,
+     "out": "",
+     "err": "Message sent.\n"
+    },
+    "wait1": {
+     "code": 0,
+     "out": "",
+     "err": "Completed: claude-role (basis=hook_stop)\n"
+    },
+    "mock1": {
+     "requests": 1,
+     "role": [
+     "system"
+     ],
+     "repo": [
+     "user"
+     ],
+     "tools": 13,
+     "toolResult": null
+    },
+    "send2": {
+     "code": 0,
+     "err": "Message sent.\n"
+    },
+    "approval": [
+     {
+     "code": 10,
+     "out": "o RC=$? ─── A variable ",
+     "err": ""
+     },
+     {
+     "respond": 0,
+     "out": "Selected default option 1: Yes\nResponse sent.\n"
+     },
+     {
+     "code": 99,
+     "out": "",
+     "err": "k-evidence gate did not pass.)\nskipped: the work-evidence gate did not pass.\nGATE check SKIP (skipped: the work-evidence gate did not pass.)\nskipped: the work-evidence gate did not pass.\nRESULT error\n"
+     }
+    ],
+    "mock2": {
+     "requests": 2,
+     "role": [
+     "system"
+     ],
+     "repo": [
+     "user"
+     ],
+     "tools": 13,
+     "toolResult": "VERIFY_OK"
+    },
+    "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+    "send3": {
+     "code": 0,
+     "err": "Message sent.\n"
+    },
+    "wait3": {
+     "code": 0,
+     "out": ""
+    },
+    "mock3": {
+     "requests": 1,
+     "role": [
+     "system"
+     ],
+     "repo": [
+     "user"
+     ],
+     "tools": 13,
+     "toolResult": "VERIFY_OK"
+    },
+    "sendC": {
+     "code": 0,
+     "out": "f5c233dc-60d1-42d4-a02c-2e6495dbd004\n",
+     "err": "Task created: f5c233dc-60d1-42d4-a02c-2e6495dbd004\nMessage sent.\n"
+    },
+    "approvalC": [
+     {
+     "code": 10,
+     "out": "─── A variable in this command can't be chec",
+     "err": ""
+     },
+     {
+     "respond": 0,
+     "out": "Selected default option 1: Yes\nResponse sent.\n"
+     },
+     {
+     "code": 0,
+     "out": "",
+     "err": "Completed: claude-role (basis=hook_stop)\nVerifying: claude-role (run 3)\nGATE work-evidence PASS (commits=0, uncommitted=2)\nGATE scope PASS (exit=0, 0.1s)\nGATE check PASS (exit=0, 0.0s)\nRESULT passed\n"
+     }
+    ],
+    "mockC": {
+     "requests": 2,
+     "role": [
+     "system"
+     ],
+     "repo": [
+     "user"
+     ],
+     "tools": 13,
+     "toolResult": "VERIFY_OK"
+    }
+   },
+   "tool": "claude",
+   "kind": "role",
+   "worktree": "claude-role"
+  },
+  "codex-none": {
+   "steps": {
+    "send1": {
+     "code": 0,
+     "out": "",
+     "err": "Message sent.\n"
+    },
+    "wait1": {
+     "code": 0,
+     "out": "",
+     "err": "Completed: codex-none (basis=hook_stop)\n"
+    },
+    "mock1": {
+     "requests": 1,
+     "role": [],
+     "repo": [
+     "user"
+     ],
+     "tools": 13,
+     "toolResult": null
+    },
+    "send2": {
+     "code": 0,
+     "err": "Message sent.\n"
+    },
+    "approval": [
+     {
+     "code": 10,
+     "out": "ayer published no options for it. Answer it in the terminal, or send the option NUMBER with `commandmate respond codex-none <number> --instance codex` — yes/no is not resolved on a numbered dialog (Issue #1681).\",\"option",
+     "err": ""
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 0,
+     "out": "Response sent.\n"
+     },
+     {
+     "code": 0,
+     "out": "",
+     "err": "ope: no contract is attached to this run, so no scope is declared to check.)\nscope: no contract is attached to this run, so no scope is declared to check.\nGATE check PASS (exit=0, 0.0s)\nRESULT passed\n"
+     }
+    ],
+    "mock2": {
+     "requests": 2,
+     "role": [],
+     "repo": [
+     "user"
+     ],
+     "tools": 13,
+     "toolResult": "VERIFY_OK"
+    },
+    "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+    "send3": {
+     "code": 0,
+     "err": "Message sent.\n"
+    },
+    "wait3": {
+     "code": 0,
+     "out": ""
+    },
+    "mock3": {
+     "requests": 1,
+     "role": [],
+     "repo": [
+     "user"
+     ],
+     "tools": 13,
+     "toolResult": "VERIFY_OK"
+    },
+    "sendC": {
+     "code": 0,
+     "out": "e927075d-4218-4a3b-a7a3-d82d2e9a3bc0\n",
+     "err": "Task created: e927075d-4218-4a3b-a7a3-d82d2e9a3bc0\nMessage sent.\n"
+    },
+    "approvalC": [
+     {
+     "code": 0,
+     "out": "",
+     "err": "Completed: codex-none (basis=hook_stop)\nVerifying: codex-none (run 14)\nGATE work-evidence PASS (commits=0, uncommitted=2)\nGATE scope PASS (exit=0, 0.0s)\nGATE check PASS (exit=0, 0.0s)\nRESULT passed\n"
+     }
+    ],
+    "mockC": {
+     "requests": 2,
+     "role": [],
+     "repo": [
+     "user"
+     ],
+     "tools": 13,
+     "toolResult": "VERIFY_OK"
+    }
+   },
+   "tool": "codex",
+   "kind": "none",
+   "worktree": "codex-none"
+  },
+  "codex-role": {
+   "steps": {
+    "send1": {
+     "code": 0,
+     "out": "",
+     "err": "Message sent.\n"
+    },
+    "wait1": {
+     "code": 0,
+     "out": "",
+     "err": "Waiting: codex-role (status=running, running=true, prompt=false)\nCompleted: codex-role (basis=hook_stop)\n"
+    },
+    "mock1": {
+     "requests": 1,
+     "role": [
+     "developer"
+     ],
+     "repo": [
+     "user"
+     ],
+     "tools": 13,
+     "toolResult": null
+    },
+    "send2": {
+     "code": 0,
+     "err": "Message sent.\n"
+    },
+    "approval": [
+     {
+     "code": 10,
+     "out": "ayer published no options for it. Answer it in the terminal, or send the option NUMBER with `commandmate respond codex-role <number> --instance codex` — yes/no is not resolved on a numbered dialog (Issue #1681).\",\"option",
+     "err": ""
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 0,
+     "out": "Response sent.\n"
+     },
+     {
+     "code": 0,
+     "out": "",
+     "err": "ope: no contract is attached to this run, so no scope is declared to check.)\nscope: no contract is attached to this run, so no scope is declared to check.\nGATE check PASS (exit=0, 0.0s)\nRESULT passed\n"
+     }
+    ],
+    "mock2": {
+     "requests": 2,
+     "role": [
+     "developer"
+     ],
+     "repo": [
+     "user"
+     ],
+     "tools": 13,
+     "toolResult": "VERIFY_OK"
+    },
+    "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+    "send3": {
+     "code": 0,
+     "err": "Message sent.\n"
+    },
+    "wait3": {
+     "code": 0,
+     "out": ""
+    },
+    "mock3": {
+     "requests": 1,
+     "role": [
+     "developer"
+     ],
+     "repo": [
+     "user"
+     ],
+     "tools": 13,
+     "toolResult": "VERIFY_OK"
+    },
+    "sendC": {
+     "code": 0,
+     "out": "16b5b772-19c0-4c2d-beb8-6fba5cc269dc\n",
+     "err": "Task created: 16b5b772-19c0-4c2d-beb8-6fba5cc269dc\nMessage sent.\n"
+    },
+    "approvalC": [
+     {
+     "code": 0,
+     "out": "",
+     "err": "Completed: codex-role (basis=hook_stop)\nVerifying: codex-role (run 13)\nGATE work-evidence PASS (commits=0, uncommitted=2)\nGATE scope PASS (exit=0, 0.1s)\nGATE check PASS (exit=0, 0.1s)\nRESULT passed\n"
+     }
+    ],
+    "mockC": {
+     "requests": 2,
+     "role": [
+     "developer"
+     ],
+     "repo": [
+     "user"
+     ],
+     "tools": 13,
+     "toolResult": "VERIFY_OK"
+    }
+   },
+   "tool": "codex",
+   "kind": "role",
+   "worktree": "codex-role"
+  },
+  "command-code-none": {
+   "steps": {
+    "send1": {
+     "code": 0,
+     "out": "",
+     "err": "Message sent.\n"
+    },
+    "wait1": {
+     "code": 0,
+     "out": "",
+     "err": "Completed: command-code-none (basis=hook_stop)\n"
+    },
+    "mock1": {
+     "requests": 1,
+     "role": [],
+     "repo": [
+     "system"
+     ],
+     "tools": 13,
+     "toolResult": null
+    },
+    "send2": {
+     "code": 0,
+     "err": "Message sent.\n"
+    },
+    "approval": [
+     {
+     "code": 10,
+     "out": "mmand-code\",\"instanceId\":\"command-code\",\"sessionName\":\"mcbd-<ns>-command-code-command-code-none\",\"resolvedBy\":\"primary\"},\"session\":{\"running\":true,\"starting\":false,\"generation\":1793649272354},\"status\":\"observed\",\"una",
+     "err": ""
+     },
+     {
+     "respond": 0,
+     "out": "Selected default option 1: Yes\nResponse sent.\n"
+     },
+     {
+     "code": 0,
+     "out": "",
+     "err": "ope: no contract is attached to this run, so no scope is declared to check.)\nscope: no contract is attached to this run, so no scope is declared to check.\nGATE check PASS (exit=0, 0.0s)\nRESULT passed\n"
+     }
+    ],
+    "mock2": {
+     "requests": 2,
+     "role": [],
+     "repo": [
+     "system"
+     ],
+     "tools": 13,
+     "toolResult": "VERIFY_OK"
+    },
+    "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+    "send3": {
+     "code": 0,
+     "err": "Message sent.\n"
+    },
+    "wait3": {
+     "code": 0,
+     "out": ""
+    },
+    "mock3": {
+     "requests": 1,
+     "role": [],
+     "repo": [
+     "system"
+     ],
+     "tools": 13,
+     "toolResult": "VERIFY_OK"
+    },
+    "sendC": {
+     "code": 0,
+     "out": "8fc64f62-0275-4a35-ad80-c7dcc131e11b\n",
+     "err": "Task created: 8fc64f62-0275-4a35-ad80-c7dcc131e11b\nMessage sent.\n"
+    },
+    "approvalC": [
+     {
+     "code": 10,
+     "out": "de\",\"instanceId\":\"command-code\",\"sessionName\":\"mcbd-<ns>-command-code-command-code-none\",\"resolvedBy\":\"primary\"},\"session\":{\"running\":true,\"starting\":false,\"generation\":null},\"status\":\"observed\",\"unavailableReason\":n",
+     "err": ""
+     },
+     {
+     "respond": 0,
+     "out": "Selected default option 1: Yes\nResponse sent.\n"
+     },
+     {
+     "code": 0,
+     "out": "",
+     "err": "ommand-code-none (basis=hook_stop)\nVerifying: command-code-none (run 16)\nGATE work-evidence PASS (commits=0, uncommitted=2)\nGATE scope PASS (exit=0, 0.0s)\nGATE check PASS (exit=0, 0.0s)\nRESULT passed\n"
+     }
+    ],
+    "mockC": {
+     "requests": 2,
+     "role": [],
+     "repo": [
+     "system"
+     ],
+     "tools": 13,
+     "toolResult": "VERIFY_OK"
+    }
+   },
+   "tool": "command-code",
+   "kind": "none",
+   "worktree": "command-code-none"
+  },
+  "command-code-role": {
+   "steps": {
+    "send1": {
+     "code": 0,
+     "out": "",
+     "err": "Message sent.\n"
+    },
+    "wait1": {
+     "code": 0,
+     "out": "",
+     "err": "Completed: command-code-role (basis=hook_stop)\n"
+    },
+    "mock1": {
+     "requests": 1,
+     "role": [
+     "system"
+     ],
+     "repo": [
+     "system"
+     ],
+     "tools": 13,
+     "toolResult": null
+    },
+    "send2": {
+     "code": 0,
+     "err": "Message sent.\n"
+    },
+    "approval": [
+     {
+     "code": 10,
+     "out": "mmand-code\",\"instanceId\":\"command-code\",\"sessionName\":\"mcbd-<ns>-command-code-command-code-role\",\"resolvedBy\":\"primary\"},\"session\":{\"running\":true,\"starting\":false,\"generation\":1793649257215},\"status\":\"observed\",\"una",
+     "err": ""
+     },
+     {
+     "respond": 0,
+     "out": "Selected default option 1: Yes\nResponse sent.\n"
+     },
+     {
+     "code": 0,
+     "out": "",
+     "err": "ope: no contract is attached to this run, so no scope is declared to check.)\nscope: no contract is attached to this run, so no scope is declared to check.\nGATE check PASS (exit=0, 0.0s)\nRESULT passed\n"
+     }
+    ],
+    "mock2": {
+     "requests": 2,
+     "role": [
+     "system"
+     ],
+     "repo": [
+     "system"
+     ],
+     "tools": 13,
+     "toolResult": "VERIFY_OK"
+    },
+    "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+    "send3": {
+     "code": 0,
+     "err": "Message sent.\n"
+    },
+    "wait3": {
+     "code": 0,
+     "out": ""
+    },
+    "mock3": {
+     "requests": 1,
+     "role": [
+     "system"
+     ],
+     "repo": [
+     "system"
+     ],
+     "tools": 13,
+     "toolResult": "VERIFY_OK"
+    },
+    "sendC": {
+     "code": 0,
+     "out": "9121828b-032a-42ab-bcf5-64f0132b83f7\n",
+     "err": "Task created: 9121828b-032a-42ab-bcf5-64f0132b83f7\nMessage sent.\n"
+    },
+    "approvalC": [
+     {
+     "code": 10,
+     "out": "6cb-command-code-command-code-role\",\"resolvedBy\":\"primary\"},\"session\":{\"running\":true,\"starting\":false,\"generation\":null},\"status\":\"observed\",\"unavailableReason\":null,\"screen\":{\"kind\":\"unknown\",\"token\":null,\"tokenExpires",
+     "err": ""
+     },
+     {
+     "respond": 0,
+     "out": "Selected default option 1: Yes\nResponse sent.\n"
+     },
+     {
+     "code": 0,
+     "out": "",
+     "err": "ommand-code-role (basis=hook_stop)\nVerifying: command-code-role (run 15)\nGATE work-evidence PASS (commits=0, uncommitted=2)\nGATE scope PASS (exit=0, 0.0s)\nGATE check PASS (exit=0, 0.0s)\nRESULT passed\n"
+     }
+    ],
+    "mockC": {
+     "requests": 2,
+     "role": [
+     "system"
+     ],
+     "repo": [
+     "system"
+     ],
+     "tools": 13,
+     "toolResult": "VERIFY_OK"
+    }
+   },
+   "tool": "command-code",
+   "kind": "role",
+   "worktree": "command-code-role"
+  },
+  "copilot-none": {
+   "steps": {
+    "send1": {
+     "code": 0,
+     "out": "",
+     "err": "Message sent.\n"
+    },
+    "wait1": {
+     "code": 0,
+     "out": "",
+     "err": "Completed: copilot-none (basis=hook_stop)\n"
+    },
+    "mock1": {
+     "requests": 1,
+     "role": [],
+     "repo": [
+     "system"
+     ],
+     "tools": 20,
+     "toolResult": null
+    },
+    "send2": {
+     "code": 0,
+     "err": "Message sent.\n"
+    },
+    "approval": [
+     {
+     "code": 10,
+     "out": "311035,\"target\":{\"worktreeId\":\"copilot-none\",\"cliToolId\":\"copilot\",\"instanceId\":\"copilot\",\"sessionName\":\"mcbd-<ns>-copilot-copilot-none\",\"resolvedBy\":\"primary\"},\"session\":{\"running\":true,\"starting\":false,\"generation\"",
+     "err": ""
+     },
+     {
+     "respond": 0,
+     "out": "Selected default option 1: Yes\nResponse sent.\n"
+     },
+     {
+     "code": 0,
+     "out": "",
+     "err": "ope: no contract is attached to this run, so no scope is declared to check.)\nscope: no contract is attached to this run, so no scope is declared to check.\nGATE check PASS (exit=0, 0.0s)\nRESULT passed\n"
+     }
+    ],
+    "mock2": {
+     "requests": 2,
+     "role": [],
+     "repo": [
+     "system"
+     ],
+     "tools": 20,
+     "toolResult": "VERIFY_OK"
+    },
+    "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+    "send3": {
+     "code": 0,
+     "err": "Message sent.\n"
+    },
+    "wait3": {
+     "code": 0,
+     "out": ""
+    },
+    "mock3": {
+     "requests": 1,
+     "role": [],
+     "repo": [
+     "system"
+     ],
+     "tools": 20,
+     "toolResult": "VERIFY_OK"
+    },
+    "sendC": {
+     "code": 0,
+     "out": "913891b2-5ec4-4407-ba5c-f8bbe584d22d\n",
+     "err": "Task created: 913891b2-5ec4-4407-ba5c-f8bbe584d22d\nMessage sent.\n"
+    },
+    "approvalC": [
+     {
+     "code": 10,
+     "out": "starting\":false,\"generation\":null},\"status\":\"observed\",\"unavailableReason\":null,\"screen\":{\"kind\":\"unknown\",\"token\":null,\"tokenExpiresAt\":null,\"tokenWithheld\":\"unknown-screen\",\"appearedAt\":null,\"question\":\"probe │ echo do",
+     "err": ""
+     },
+     {
+     "respond": 0,
+     "out": "Selected default option 1: Yes\nResponse sent.\n"
+     },
+     {
+     "code": 0,
+     "out": "",
+     "err": "mpleted: copilot-none (basis=hook_stop)\nVerifying: copilot-none (run 18)\nGATE work-evidence PASS (commits=0, uncommitted=2)\nGATE scope PASS (exit=0, 0.0s)\nGATE check PASS (exit=0, 0.0s)\nRESULT passed\n"
+     }
+    ],
+    "mockC": {
+     "requests": 2,
+     "role": [],
+     "repo": [
+     "system"
+     ],
+     "tools": 20,
+     "toolResult": "VERIFY_OK"
+    }
+   },
+   "tool": "copilot",
+   "kind": "none",
+   "worktree": "copilot-none"
+  },
+  "copilot-role": {
+   "steps": {
+    "send1": {
+     "code": 0,
+     "out": "",
+     "err": "Message sent.\n"
+    },
+    "wait1": {
+     "code": 0,
+     "out": "",
+     "err": "Completed: copilot-role (basis=hook_stop)\n"
+    },
+    "mock1": {
+     "requests": 1,
+     "role": [
+     "system"
+     ],
+     "repo": [
+     "system"
+     ],
+     "tools": 21,
+     "toolResult": null
+    },
+    "send2": {
+     "code": 0,
+     "err": "Message sent.\n"
+    },
+    "approval": [
+     {
+     "code": 10,
+     "out": "294678,\"target\":{\"worktreeId\":\"copilot-role\",\"cliToolId\":\"copilot\",\"instanceId\":\"copilot\",\"sessionName\":\"mcbd-<ns>-copilot-copilot-role\",\"resolvedBy\":\"primary\"},\"session\":{\"running\":true,\"starting\":false,\"generation\"",
+     "err": ""
+     },
+     {
+     "respond": 0,
+     "out": "Selected default option 1: Yes\nResponse sent.\n"
+     },
+     {
+     "code": 0,
+     "out": "",
+     "err": "ope: no contract is attached to this run, so no scope is declared to check.)\nscope: no contract is attached to this run, so no scope is declared to check.\nGATE check PASS (exit=0, 0.0s)\nRESULT passed\n"
+     }
+    ],
+    "mock2": {
+     "requests": 2,
+     "role": [
+     "system"
+     ],
+     "repo": [
+     "system"
+     ],
+     "tools": 21,
+     "toolResult": "VERIFY_OK"
+    },
+    "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+    "send3": {
+     "code": 0,
+     "err": "Message sent.\n"
+    },
+    "wait3": {
+     "code": 0,
+     "out": ""
+    },
+    "mock3": {
+     "requests": 1,
+     "role": [
+     "system"
+     ],
+     "repo": [
+     "system"
+     ],
+     "tools": 21,
+     "toolResult": "VERIFY_OK"
+    },
+    "sendC": {
+     "code": 0,
+     "out": "d1040ac2-bc90-4742-bf27-de0aaf7d3797\n",
+     "err": "Task created: d1040ac2-bc90-4742-bf27-de0aaf7d3797\nMessage sent.\n"
+    },
+    "approvalC": [
+     {
+     "code": 10,
+     "out": "navailableReason\":null,\"screen\":{\"kind\":\"unknown\",\"token\":null,\"tokenExpiresAt\":null,\"tokenWithheld\":\"unknown-screen\",\"appearedAt\":null,\"question\":\"probe │ echo done > note.txt; sh verify.sh; echo RC=$?     ",
+     "err": ""
+     },
+     {
+     "respond": 0,
+     "out": "Selected default option 1: Yes\nResponse sent.\n"
+     },
+     {
+     "code": 0,
+     "out": "",
+     "err": "mpleted: copilot-role (basis=hook_stop)\nVerifying: copilot-role (run 17)\nGATE work-evidence PASS (commits=0, uncommitted=2)\nGATE scope PASS (exit=0, 0.0s)\nGATE check PASS (exit=0, 0.0s)\nRESULT passed\n"
+     }
+    ],
+    "mockC": {
+     "requests": 2,
+     "role": [
+     "system"
+     ],
+     "repo": [
+     "system"
+     ],
+     "tools": 21,
+     "toolResult": "VERIFY_OK"
+    }
+   },
+   "tool": "copilot",
+   "kind": "role",
+   "worktree": "copilot-role"
+  },
+  "opencode-none": {
+   "steps": {
+    "send1": {
+     "code": 0,
+     "out": "",
+     "err": "Message sent.\n"
+    },
+    "wait1": {
+     "code": 124,
+     "out": "",
+     "err": "Waiting: opencode-none (status=ready, running=true, prompt=false)\nWaiting: opencode-none (status=ready, running=true, prompt=false)\nWaiting: opencode-none (status=ready, running=true, prompt=false)\nWaiting: opencode-none (status=ready, running=true, prompt=false)\nTimeout: opencode-none exceeded 60s\n"
+    },
+    "mock1": {
+     "requests": 1,
+     "role": [],
+     "repo": [
+     "system"
+     ],
+     "tools": 11,
+     "toolResult": null
+    },
+    "send2": {
+     "code": 0,
+     "err": "Message sent.\n"
+    },
+    "approval": [
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179364985",
+     "err": "ve frame on opencode-none for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     },
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179364992",
+     "err": "ve frame on opencode-none for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     },
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179364998",
+     "err": "ve frame on opencode-none for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     },
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179365004",
+     "err": "ve frame on opencode-none for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     },
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179365011",
+     "err": "ve frame on opencode-none for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     }
+    ],
+    "mock2": {
+     "requests": 2,
+     "role": [],
+     "repo": [
+     "system"
+     ],
+     "tools": 11,
+     "toolResult": "VERIFY_OK"
+    },
+    "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+    "send3": {
+     "code": 0,
+     "err": "Message sent.\n"
+    },
+    "wait3": {
+     "code": 124,
+     "out": ""
+    },
+    "mock3": {
+     "requests": 1,
+     "role": [],
+     "repo": [
+     "system"
+     ],
+     "tools": 11,
+     "toolResult": "VERIFY_OK"
+    },
+    "sendC": {
+     "code": 0,
+     "out": "fc2a3048-02c1-4091-ae7c-776e8b1d533e\n",
+     "err": "Task created: fc2a3048-02c1-4091-ae7c-776e8b1d533e\nMessage sent.\n"
+    },
+    "approvalC": [
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179365083",
+     "err": "ve frame on opencode-none for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     },
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179365089",
+     "err": "ve frame on opencode-none for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     },
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179365096",
+     "err": "ve frame on opencode-none for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     },
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179365102",
+     "err": "ve frame on opencode-none for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     },
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179365109",
+     "err": "ve frame on opencode-none for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     }
+    ],
+    "mockC": {
+     "requests": 2,
+     "role": [],
+     "repo": [
+     "system"
+     ],
+     "tools": 11,
+     "toolResult": "VERIFY_OK"
+    }
+   },
+   "tool": "opencode",
+   "kind": "none",
+   "worktree": "opencode-none"
+  },
+  "opencode-role": {
+   "steps": {
+    "send1": {
+     "code": 0,
+     "out": "",
+     "err": "Message sent.\n"
+    },
+    "wait1": {
+     "code": 124,
+     "out": "",
+     "err": "Waiting: opencode-role (status=ready, running=true, prompt=false)\nWaiting: opencode-role (status=ready, running=true, prompt=false)\nWaiting: opencode-role (status=ready, running=true, prompt=false)\nWaiting: opencode-role (status=ready, running=true, prompt=false)\nTimeout: opencode-role exceeded 60s\n"
+    },
+    "mock1": {
+     "requests": 1,
+     "role": [
+     "system"
+     ],
+     "repo": [
+     "system"
+     ],
+     "tools": 11,
+     "toolResult": null
+    },
+    "send2": {
+     "code": 0,
+     "err": "Message sent.\n"
+    },
+    "approval": [
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179364946",
+     "err": "ve frame on opencode-role for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     },
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179364953",
+     "err": "ve frame on opencode-role for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     },
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179364959",
+     "err": "ve frame on opencode-role for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     },
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179364965",
+     "err": "ve frame on opencode-role for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     },
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179364972",
+     "err": "ve frame on opencode-role for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     }
+    ],
+    "mock2": {
+     "requests": 2,
+     "role": [
+     "system"
+     ],
+     "repo": [
+     "system"
+     ],
+     "tools": 11,
+     "toolResult": "VERIFY_OK"
+    },
+    "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+    "send3": {
+     "code": 0,
+     "err": "Message sent.\n"
+    },
+    "wait3": {
+     "code": 124,
+     "out": ""
+    },
+    "mock3": {
+     "requests": 1,
+     "role": [
+     "system"
+     ],
+     "repo": [
+     "system"
+     ],
+     "tools": 11,
+     "toolResult": "VERIFY_OK"
+    },
+    "sendC": {
+     "code": 0,
+     "out": "64b073b6-0191-471c-9f9e-49e7cd250feb\n",
+     "err": "Task created: 64b073b6-0191-471c-9f9e-49e7cd250feb\nMessage sent.\n"
+    },
+    "approvalC": [
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179365044",
+     "err": "ve frame on opencode-role for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     },
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179365051",
+     "err": "ve frame on opencode-role for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     },
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179365057",
+     "err": "ve frame on opencode-role for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     },
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179365063",
+     "err": "ve frame on opencode-role for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     },
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179365070",
+     "err": "ve frame on opencode-role for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     }
+    ],
+    "mockC": {
+     "requests": 2,
+     "role": [
+     "system"
+     ],
+     "repo": [
+     "system"
+     ],
+     "tools": 11,
+     "toolResult": "VERIFY_OK"
+    }
+   },
+   "tool": "opencode",
+   "kind": "role",
+   "worktree": "opencode-role"
+  },
+  "opencode-v2-none": {
+   "steps": {
+    "send1": {
+     "code": 0,
+     "out": "",
+     "err": "Message sent.\n"
+    },
+    "wait1": {
+     "code": 0,
+     "out": "",
+     "err": "Completed: opencode-v2-none (basis=hook_stop)\n"
+    },
+    "mock1": {
+     "requests": 1,
+     "role": [],
+     "repo": [
+     "system"
+     ],
+     "tools": 12,
+     "toolResult": null
+    },
+    "send2": {
+     "code": 0,
+     "err": "Message sent.\n"
+    },
+    "approval": [
+     {
+     "code": 0,
+     "out": "",
+     "err": "ope: no contract is attached to this run, so no scope is declared to check.)\nscope: no contract is attached to this run, so no scope is declared to check.\nGATE check PASS (exit=0, 0.0s)\nRESULT passed\n"
+     }
+    ],
+    "mock2": {
+     "requests": 2,
+     "role": [],
+     "repo": [
+     "system"
+     ],
+     "tools": 12,
+     "toolResult": "VERIFY_OK"
+    },
+    "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+    "send3": {
+     "code": 0,
+     "err": "Message sent.\n"
+    },
+    "wait3": {
+     "code": 0,
+     "out": ""
+    },
+    "mock3": {
+     "requests": 1,
+     "role": [],
+     "repo": [
+     "system"
+     ],
+     "tools": 12,
+     "toolResult": "VERIFY_OK"
+    },
+    "sendC": {
+     "code": 0,
+     "out": "b167b41d-b637-4299-9e76-d9bd779d6dfc\n",
+     "err": "Task created: b167b41d-b637-4299-9e76-d9bd779d6dfc\nMessage sent.\n"
+    },
+    "approvalC": [
+     {
+     "code": 0,
+     "out": "",
+     "err": " opencode-v2-none (basis=hook_stop)\nVerifying: opencode-v2-none (run 20)\nGATE work-evidence PASS (commits=0, uncommitted=2)\nGATE scope PASS (exit=0, 0.0s)\nGATE check PASS (exit=0, 0.0s)\nRESULT passed\n"
+     }
+    ],
+    "mockC": {
+     "requests": 2,
+     "role": [],
+     "repo": [
+     "system"
+     ],
+     "tools": 12,
+     "toolResult": "VERIFY_OK"
+    }
+   },
+   "tool": "opencode-v2",
+   "kind": "none",
+   "worktree": "opencode-v2-none"
+  },
+  "opencode-v2-role": {
+   "steps": {
+    "send1": {
+     "code": 0,
+     "out": "",
+     "err": "Message sent.\n"
+    },
+    "wait1": {
+     "code": 0,
+     "out": "",
+     "err": "Completed: opencode-v2-role (basis=hook_stop)\n"
+    },
+    "mock1": {
+     "requests": 1,
+     "role": [
+     "system"
+     ],
+     "repo": [
+     "system"
+     ],
+     "tools": 12,
+     "toolResult": null
+    },
+    "send2": {
+     "code": 0,
+     "err": "Message sent.\n"
+    },
+    "approval": [
+     {
+     "code": 0,
+     "out": "",
+     "err": "ope: no contract is attached to this run, so no scope is declared to check.)\nscope: no contract is attached to this run, so no scope is declared to check.\nGATE check PASS (exit=0, 0.0s)\nRESULT passed\n"
+     }
+    ],
+    "mock2": {
+     "requests": 2,
+     "role": [
+     "system"
+     ],
+     "repo": [
+     "system"
+     ],
+     "tools": 12,
+     "toolResult": "VERIFY_OK"
+    },
+    "fileAfter": "#!/bin/sh\necho $((1+1))\n",
+    "send3": {
+     "code": 0,
+     "err": "Message sent.\n"
+    },
+    "wait3": {
+     "code": 0,
+     "out": ""
+    },
+    "mock3": {
+     "requests": 1,
+     "role": [
+     "system"
+     ],
+     "repo": [
+     "system"
+     ],
+     "tools": 12,
+     "toolResult": "VERIFY_OK"
+    },
+    "sendC": {
+     "code": 0,
+     "out": "c42e3e27-4b73-4f11-a3fa-db604805f4af\n",
+     "err": "Task created: c42e3e27-4b73-4f11-a3fa-db604805f4af\nMessage sent.\n"
+    },
+    "approvalC": [
+     {
+     "code": 0,
+     "out": "",
+     "err": " opencode-v2-role (basis=hook_stop)\nVerifying: opencode-v2-role (run 19)\nGATE work-evidence PASS (commits=0, uncommitted=2)\nGATE scope PASS (exit=0, 0.1s)\nGATE check PASS (exit=0, 0.1s)\nRESULT passed\n"
+     }
+    ],
+    "mockC": {
+     "requests": 2,
+     "role": [
+     "system"
+     ],
+     "repo": [
+     "system"
+     ],
+     "tools": 12,
+     "toolResult": "VERIFY_OK"
+    }
+   },
+   "tool": "opencode-v2",
+   "kind": "role",
+   "worktree": "opencode-v2-role"
+  },
+  "opencode-role-shortpath": {
+   "steps": {
+    "send1": {
+     "code": 0,
+     "out": "",
+     "err": "Message sent.\n"
+    },
+    "wait1": {
+     "code": 124,
+     "out": "",
+     "err": "Waiting: opencode-role (status=ready, running=true, prompt=false)\nWaiting: opencode-role (status=ready, running=true, prompt=false)\nWaiting: opencode-role (status=ready, running=true, prompt=false)\nWaiting: opencode-role (status=ready, running=true, prompt=false)\nTimeout: opencode-role exceeded 60s\n"
+    },
+    "mock1": {
+     "requests": 1,
+     "role": [
+     "system"
+     ],
+     "repo": [
+     "system"
+     ],
+     "tools": 11,
+     "toolResult": null
+    },
+    "send2": {
+     "code": 0,
+     "err": "Message sent.\n"
+    },
+    "approval": [
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179365156",
+     "err": "ve frame on opencode-role for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     },
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179365163",
+     "err": "ve frame on opencode-role for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     },
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179365169",
+     "err": "ve frame on opencode-role for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     },
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179365176",
+     "err": "ve frame on opencode-role for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     },
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179365182",
+     "err": "ve frame on opencode-role for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-role --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     }
+    ],
+    "mock2": {
+     "requests": 2,
+     "role": [
+     "system"
+     ],
+     "repo": [
+     "system"
+     ],
+     "tools": 11,
+     "toolResult": "VERIFY_OK"
+    },
+    "fileAfter": "#!/bin/sh\necho $((1+1))\n"
+   },
+   "tool": "opencode",
+   "kind": "role",
+   "worktree": "opencode-role"
+  },
+  "opencode-none-shortpath": {
+   "steps": {
+    "send1": {
+     "code": 0,
+     "out": "",
+     "err": "Message sent.\n"
+    },
+    "wait1": {
+     "code": 124,
+     "out": "",
+     "err": "Waiting: opencode-none (status=ready, running=true, prompt=false)\nWaiting: opencode-none (status=ready, running=true, prompt=false)\nWaiting: opencode-none (status=ready, running=true, prompt=false)\nWaiting: opencode-none (status=ready, running=true, prompt=false)\nTimeout: opencode-none exceeded 60s\n"
+    },
+    "mock1": {
+     "requests": 1,
+     "role": [],
+     "repo": [
+     "system"
+     ],
+     "tools": 11,
+     "toolResult": null
+    },
+    "send2": {
+     "code": 0,
+     "err": "Message sent.\n"
+    },
+    "approval": [
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179365195",
+     "err": "ve frame on opencode-none for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     },
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179365202",
+     "err": "ve frame on opencode-none for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     },
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179365208",
+     "err": "ve frame on opencode-none for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     },
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179365215",
+     "err": "ve frame on opencode-none for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     },
+     {
+     "code": 10,
+     "out": "arse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\",\"options\":[],\"status\":\"pending\",\"answerVia\":\"terminal\",\"observation\":{\"schemaVersion\":1,\"observedAt\":179365221",
+     "err": "ve frame on opencode-none for 61s (status=ready/hook_stop). The detection layer could not parse it; inspect the raw pane with `commandmate capture opencode-none --instance opencode --pane --tail 40`.\n"
+     },
+     {
+     "respond": 99,
+     "out": "Warning: Response may not have been applied. Reason: prompt_no_longer_active\n"
+     },
+     {
+     "respond1": 99,
+     "out": "Error: Answer was not sent. Reason: decision_not_found (this agent instance is not waiting on an approval or a question).\n"
+     }
+    ],
+    "mock2": {
+     "requests": 2,
+     "role": [],
+     "repo": [
+     "system"
+     ],
+     "tools": 11,
+     "toolResult": "VERIFY_OK"
+    },
+    "fileAfter": "#!/bin/sh\necho $((1+1))\n"
+   },
+   "tool": "opencode",
+   "kind": "none",
+   "worktree": "opencode-none"
+  }
+ },
+ "persona": {
+  "verify-opencode-role": {
+   "code": 0,
+   "tail": "scope SKIP (scope: no contract is attached to this run, so no scope is declared to check.)\nscope: no contract is attached to this run, so no scope is declared to check.\nGATE check PASS (exit=0, 0.0s)\n"
+  },
+  "verify-opencode-none": {
+   "code": 0,
+   "tail": "scope SKIP (scope: no contract is attached to this run, so no scope is declared to check.)\nscope: no contract is attached to this run, so no scope is declared to check.\nGATE check PASS (exit=0, 0.0s)\n"
+  },
+  "add": {
+   "code": 0,
+   "out": "Instance added: opencode (opencode)\n"
+  },
+  "list": "[\n  {\n    \"instanceId\": \"claude\",\n    \"alias\": \"Claude\",\n    \"cliTool\": \"claude\",\n    \"running\": false,\n    \"autoYes\": false,\n    \"model\": null,\n    \"reasoningEffort\": null,\n    \"sessionId\": null,\n    \"sessionTitle\": null,\n    \"tmuxSession\": \"mcbd-<ns>-claude-opencode-role\"\n  },\n  {\n    \"instanceId\": \"codex\",\n    \"alias\": \"Codex\",\n    \"cliTool\": \"codex\",\n    \"running\": false,\n    \"autoYes\": fa",
+  "iid": "opencode",
+  "put": {
+   "status": 200,
+   "body": "{\"instanceId\":\"opencode\",\"settings\":{\"agent\":\"plan\",\"providerId\":null,\"modelId\":null,\"variant\":null}}"
+  },
+  "first": {
+   "code": 0,
+   "err": "Message sent.\n",
+   "role": [
+    "system"
+   ],
+   "repo": [
+    "system"
+   ],
+   "planText": true
+  },
+  "second": {
+   "code": 0,
+   "err": "Message sent.\n",
+   "role": [
+    "system"
+   ],
+   "repo": [
+    "system"
+   ],
+   "planText": true
+  },
+  "third": {
+   "code": 0,
+   "err": "Message sent.\n",
+   "role": [
+    "system"
+   ],
+   "repo": [
+    "system"
+   ],
+   "planText": true
+  },
+  "argv": [
+   "--port 4258 --hostname 127.0.0.1",
+   "--port 4258 --hostname 127.0.0.1 --agent plan"
+  ],
+  "serverLog": [
+   " [INFO] [cli-tools/opencode] opencode-send-delivered-via-api {\"worktreeId\":\"opencode-role\",\"instanceId\":\"opencode\",\"port\":42",
+   " [INFO] [cli-tools/opencode] opencode-send-delivered-via-api {\"worktreeId\":\"opencode-role\",\"instanceId\":\"opencode\",\"port\":42",
+   " [INFO] [cli-tools/opencode] opencode-send-delivered-via-api {\"worktreeId\":\"opencode-role\",\"instanceId\":\"opencode\",\"port\":42"
+  ]
+ },
+ "approvalExternalDirectory": [
+  {
+   "id": "opencode-role",
+   "send": 0,
+   "wait": 10,
+   "prompt": "{\"worktreeId\":\"opencode-role\",\"cliToolId\":\"opencode\",\"type\":\"unclassified\",\"question\":\"A dialog is open in opencode-role: the agent reported it via Notification(permission_prompt) for bash, but the detection layer published no options for it. Answer it with `c",
+   "status": "waiting",
+   "reason": "opencode_permission_prompt",
+   "isPromptWaiting": true,
+   "unclassified": false,
+   "pane": "OK\n  ┃  RC=0\n  ┃\n     MOCK_DONE VERIFY_OK RC=0\n     ▣  Build · mock-model · 470ms\n  ┃\n  ┃  APPRopencoderole CMRUN<<cat /etc/hosts | head -1; ls /private/var/log |\n  ┃  head -1; sh verify.sh>>\n  ┃\n     $ cat /etc/hosts | head -1; ls /private/var/log | head -1; sh verify.sh\n     ▣  Build · mock-model\n  ┃\n  ┃  △ Permission required\n  ┃    ← Access external directory /etc\n  ┃\n  ┃  Patterns\n  ┃\n  ┃  - /etc/*\n  ┃\n  ┃\n  ┃   Allow once   Allow always   Reject  ctrl+f fullscreen  ⇆ select  enter con\n  ┃\n",
+   "respond": 99,
+   "respondOut": "Error: Answer was not sent. Reason: unresolvable_answer (--default cannot answer a structured approval: the agent publishes no default verdict. Send a number in",
+   "requests": 1,
+   "role": [
+    "system"
+   ],
+   "ok": false
+  },
+  {
+   "id": "opencode-none",
+   "send": 0,
+   "wait": 10,
+   "prompt": "{\"worktreeId\":\"opencode-none\",\"cliToolId\":\"opencode\",\"type\":\"unclassified\",\"question\":\"A dialog is open in opencode-none: the agent reported it via Notification(permission_prompt) for bash, but the detection layer published no options for it. Answer it with `c",
+   "status": "waiting",
+   "reason": "opencode_permission_prompt",
+   "isPromptWaiting": true,
+   "unclassified": false,
+   "pane": "OK\n  ┃  RC=0\n  ┃\n     MOCK_DONE VERIFY_OK RC=0\n     ▣  Build · mock-model · 460ms\n  ┃\n  ┃  APPRopencodenone CMRUN<<cat /etc/hosts | head -1; ls /private/var/log |\n  ┃  head -1; sh verify.sh>>\n  ┃\n     $ cat /etc/hosts | head -1; ls /private/var/log | head -1; sh verify.sh\n     ▣  Build · mock-model\n  ┃\n  ┃  △ Permission required\n  ┃    ← Access external directory /etc\n  ┃\n  ┃  Patterns\n  ┃\n  ┃  - /etc/*\n  ┃\n  ┃\n  ┃   Allow once   Allow always   Reject  ctrl+f fullscreen  ⇆ select  enter con\n  ┃\n",
+   "respond": 99,
+   "respondOut": "Error: Answer was not sent. Reason: unresolvable_answer (--default cannot answer a structured approval: the agent publishes no default verdict. Send a number in",
+   "requests": 1,
+   "role": [],
+   "ok": false
+  },
+  {
+   "id": "opencode-v2-role",
+   "send": 0,
+   "wait": 0,
+   "prompt": "",
+   "status": "ready",
+   "reason": "hook_stop",
+   "isPromptWaiting": false,
+   "unclassified": false,
+   "pane": "UN<<cat /etc/hosts | head -1; ls /private/var/log |\n  ┃  head -1; sh verify.sh>>\n  ┃\n  ┃\n  ┃  $ cat /etc/hosts | head -1; ls /private/var/log | head -1; sh verify.sh\n  ┃\n  ┃  ##\n  ┃  apache2\n  ┃  VERIFY_OK\n  ┃\n     MOCK_DONE ## apache2 VERIFY_OK\n     Cm-Role-X · mock-model · 156ms · 1000.0 tok/s\n  ┃\n  ┃\n  ┃\n  ┃  Cm-Role-X · mock-model mock\n  ╹───\n  <SHORT>/a/repos/opencode-v2-role:main  15 (0%)  ctrl+p commands\n",
+   "requests": 2,
+   "role": [
+    "system"
+   ],
+   "ok": true
+  },
+  {
+   "id": "opencode-v2-none",
+   "send": 0,
+   "wait": 0,
+   "prompt": "",
+   "status": "ready",
+   "reason": "hook_stop",
+   "isPromptWaiting": false,
+   "unclassified": false,
+   "pane": "none CMRUN<<cat /etc/hosts | head -1; ls /private/var/log |\n  ┃  head -1; sh verify.sh>>\n  ┃\n  ┃\n  ┃  $ cat /etc/hosts | head -1; ls /private/var/log | head -1; sh verify.sh\n  ┃\n  ┃  ##\n  ┃  apache2\n  ┃  VERIFY_OK\n  ┃\n     MOCK_DONE ## apache2 VERIFY_OK\n     Build · mock-model · 157ms · 1000.0 tok/s\n  ┃\n  ┃\n  ┃\n  ┃  Build · mock-model mock\n  ╹───\n  <SHORT>/a/repos/opencode-v2-none:main  15 (0%)  ctrl+p commands\n",
+   "requests": 2,
+   "role": [],
+   "ok": true
+  }
+ ],
+ "launchLinesViaShim": [
+  "claude-role\t1\t--settings <SP>/cmr/home/.commandmate/hooks/claude-claude-role-claude-2811f48db39e.json",
+  "claude-none\t0\t--settings <SP>/cmr/home/.commandmate/hooks/claude-claude-none-claude-553b1a8e8591.json",
+  "commandmate-issue-4113\t0\t--help",
+  "codex-role\t1\t-c features.daemon_auto_start=false --no-daemon",
+  "codex-none\t0\t-c features.daemon_auto_start=false --no-daemon",
+  "commandmate-issue-4113\t0\t--help",
+  "codex-role\t1\t-c features.daemon_auto_start=false --no-daemon --dangerously-bypass-hook-trust",
+  "codex-none\t0\t-c features.daemon_auto_start=false --no-daemon --dangerously-bypass-hook-trust",
+  "command-code-role\t1\t--trust --skip-onboarding --no-auto-update",
+  "command-code-none\t0\t--trust --skip-onboarding --no-auto-update",
+  "copilot-role\t1\t",
+  "copilot-none\t0\t",
+  "opencode-role\t1\t--port 4258 --hostname 127.0.0.1",
+  "opencode-none\t0\t--port 4204 --hostname 127.0.0.1",
+  "opencode-v2-role\t1\tserve --hostname 127.0.0.1 --port 4384",
+  "opencode-v2-role\t1\t--server http://127.0.0.1:4384 <SP>/cmr/repos/opencode-v2-role",
+  "opencode-v2-none\t0\tserve --hostname 127.0.0.1 --port 4302",
+  "opencode-v2-none\t0\t--server http://127.0.0.1:4302 <SP>/cmr/repos/opencode-v2-none"
+ ]
+}

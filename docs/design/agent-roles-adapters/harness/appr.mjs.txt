@@ -1,0 +1,14 @@
+import * as C from './cm.mjs'; import fs from 'node:fs'; import path from 'node:path';
+const tm=C.tmuxUp();const out=[];
+for(const t of ['opencode','opencode-v2'])for(const k of ['role','none']){
+ const id=`${t}-${k}`;const tag=`APPR${t.replace(/-/g,'')}${k}`;const since=Date.now();
+ const s=C.cli(tm,'send',id,`${tag} CMRUN<<cat /etc/hosts | head -1; ls /private/var/log | head -1; sh verify.sh>>`,'--instance',t);
+ const w=C.cli(tm,'wait',id,'--instance',t,'--on-prompt','agent','--timeout','30');
+ const sess=C.sessions().find((x)=>x.includes(`-${t}-${id}`));const pane=C.pane(sess).replace(/\n\s*\n+/g,'\n').slice(-500);
+ const cur=await C.api(`/api/worktrees/${id}/current-output?cliTool=${t}`);
+ const rec={id,send:s.code,wait:w.code,prompt:w.out.slice(0,260),status:cur.sessionStatus,reason:cur.sessionStatusReason,isPromptWaiting:cur.isPromptWaiting,unclassified:cur.isUnclassifiedActive,pane};
+ if(w.code===10){const a=C.cli(tm,'respond',id,'--default','--instance',t);rec.respond=a.code;rec.respondOut=(a.out+a.err).slice(0,160);await C.sleep(3000);}
+ await C.sleep(1500);const rs=C.reads(since).filter((q)=>q.method==='POST'&&JSON.stringify(q.body).includes(tag)&&(q.body.tools??[]).length);const b=rs.pop()?.body;rec.requests=rs.length+1;rec.role=b&&C.where(b,'ROLE_MARKER_K3');rec.ok=b?/VERIFY_OK/.test(JSON.stringify(b.messages?.slice(-1))):null;
+ out.push(rec);console.log(JSON.stringify({...rec,pane:rec.pane.slice(-180)}).slice(0,640));
+}
+fs.writeFileSync(C.ROOT+'/rec-approval.json',JSON.stringify(out,null,1));process.exit(0);

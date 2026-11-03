@@ -1,0 +1,70 @@
+// flow.mjs <tool> <variant> [label] — 新規 TUI で 2 通（読むだけ / 修正→検証）を送り、記録を JSON に残す
+import * as L from './lib.mjs'; import fs from 'node:fs'; import path from 'node:path';
+const WT = '<WORKTREE>';
+export async function clearDialogs(id) {
+  for (let i = 0; i < 4; i++) {
+    const p = L.cap(id);
+    if (/No, keep manual mode/.test(p)) { L.keys(id, 'Down'); await L.sleep(300); L.keys(id, 'Enter'); await L.sleep(1500); continue; }
+    if (/Enter to continue/.test(p)) { L.keys(id, 'Enter'); await L.sleep(1500); continue; }
+    break;
+  }
+}
+export async function flow(tool, variant, label = 'x', { body, opt = {}, keepAlive = false } = {}) {
+  L.ensureMock(); await L.sleep(300);
+  const id = `${tool}-${variant}-${label}`.replace(/[^a-z0-9-]/gi, '');
+  const base = path.join(L.ROOT, 'c', id); fs.rmSync(base, { recursive: true, force: true });
+  const home = base + '/home', repo = base + '/repo'; L.repoSeed(repo); fs.mkdirSync(home, { recursive: true });
+  const d = L.toolDef(tool, home, repo, { launchSh: `${WT}/scripts/opencode-v2/launch.sh`, ...opt });
+  const r = L.applyRole(tool, d, home, repo, variant, body ?? L.ROLE_TEXT, label);
+  const since = Date.now();
+  const rec = { tool, variant, label, id, argv: r.cmd.map((x) => x.split(base).join('<D>')), env: Object.fromEntries(Object.entries(r.env).filter(([k]) => !/KEY|TOKEN|PASSWORD/.test(k)).map(([k, v]) => [k, String(v).split(base).join('<D>')])), artifacts: r.artifacts };
+  L.startPane(id, repo, r.env, r.cmd);
+  const ready = await L.until(() => L.READY[tool].test(L.cap(id)) && !/__EXIT=/.test(L.cap(id)), 45000);
+  rec.ready = !!ready; await L.sleep(tool === 'opencode-v2' ? 6000 : 4000);
+  await clearDialogs(id);
+  rec.paneAtReady = L.cap(id).split(base).join('<D>').replace(/\n\s*\n+/g, '\n').slice(-900);
+  if (/__EXIT=/.test(L.cap(id))) { rec.earlyExit = true; }
+  const q1 = `CASE=${id} first turn. Say hello.`;
+  await L.sendText(id, q1); rec.q1 = q1;
+  const got1 = await L.until(() => L.lastMain(id, since), 40000);
+  rec.turn1 = got1 ? L.metrics(got1.body, base) : null;
+  if (got1) rec.turn1.url = got1.url;
+  await L.sleep(4000);
+  rec.paneTurn1 = L.cap(id).split(base).join('<D>').replace(/\n\s*\n+/g, '\n').slice(-700);
+  const q2 = `CASE=${id} second turn. ${L.FIX}`;
+  await L.sendText(id, q2); rec.q2 = q2;
+  let approval = null;
+  const done = await L.until(async () => {
+    const reqs = L.reads(since).filter((x) => x.method === 'POST' && /VERIFY_(OK|NG)/.test(L.flat(x.body)));
+    if (reqs.length) return reqs[reqs.length - 1];
+    const pane = L.cap(id);
+    if (/allow once|approve|do you want|run this|Yes|Enter to continue/i.test(pane.split('\n').filter((x) => x.trim()).slice(-25).join('\n')) ) { if (!approval) approval = pane.split(base).join('<D>').replace(/\n\s*\n+/g, '\n').slice(-900); L.keys(id, d.approve); }
+    return null;
+  }, 45000, 3000);
+  rec.approvalPane = approval;
+  await L.sleep(3000);
+  rec.toolResultSeen = !!done;
+  const j = done ? L.flat(done.body) : '';
+  rec.verify = /VERIFY_OK/.test(j) ? 'VERIFY_OK' : /VERIFY_NG/.test(j) ? 'VERIFY_NG' : null;
+  rec.rc = (/RC=(\d+)/.exec(j) ?? [])[1] ?? null;
+  rec.turn2 = done ? L.metrics(done.body, base) : null;
+  rec.fileAfter = fs.readFileSync(repo + '/calc.sh', 'utf8');
+  rec.paneEnd = L.cap(id).split(base).join('<D>').replace(/\n\s*\n+/g, '\n').slice(-900);
+  rec.answerShown = /MOCK_DONE/.test(L.cap(id));
+  rec.requests = L.reads(since).filter((x) => L.flat(x.body).includes(id)).map((x) => x.url + ' tools=' + (x.body.tools ?? []).length);
+  if (!keepAlive) {
+    L.keys(id, 'Escape'); await L.sleep(300); await L.sendText(id, '/exit');
+    const ex = await L.until(() => (/__EXIT=(\d+)/.exec(L.cap(id)) ?? [])[1], 15000);
+    rec.exitCode = ex ?? 'no-exit-seen';
+    L.stop(id);
+  }
+  fs.mkdirSync(path.join(L.ROOT, 'rec'), { recursive: true });
+  fs.writeFileSync(path.join(L.ROOT, 'rec', id + '.json'), JSON.stringify(rec, null, 1));
+  return { rec, base, home, repo, id, def: d, role: r };
+}
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const [tool, variant, label] = process.argv.slice(2);
+  const { rec } = await flow(tool, variant, label ?? 'x');
+  const s = { ...rec, turn1: rec.turn1 && { ...rec.turn1, sysLines: rec.turn1.sysLines.length, tools: rec.turn1.tools.length }, turn2: rec.turn2 && { ...rec.turn2, sysLines: rec.turn2.sysLines.length, tools: rec.turn2.tools.length } };
+  delete s.artifacts; console.log(JSON.stringify(s, null, 1));
+}

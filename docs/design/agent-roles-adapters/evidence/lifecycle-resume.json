@@ -1,0 +1,757 @@
+[
+ {
+  "tool": "claude",
+  "steps": {
+   "new-role-v1": {
+    "V1": [
+     "system"
+    ],
+    "V2": [],
+    "users": 1,
+    "history": true,
+    "tools": 13,
+    "model": "claude-opus-5-5",
+    "argv": [
+     "claude",
+     "--permission-mode",
+     "default",
+     "--append-system-prompt-file",
+     "<D>/home/.cmrole/role-V1.md"
+    ],
+    "paneTail": "───\n  ⏸ manual mode on · ? for shortcuts\n",
+    "sid": null,
+    "exit": "0"
+   },
+   "resume-same-v1": {
+    "V1": [
+     "system"
+    ],
+    "V2": [],
+    "users": 2,
+    "history": true,
+    "tools": 13,
+    "model": "claude-opus-5-5",
+    "argv": [
+     "claude",
+     "--permission-mode",
+     "default",
+     "--append-system-prompt-file",
+     "<D>/home/.cmrole/role-V1.md",
+     "--continue"
+    ],
+    "paneTail": "───\n  ⏸ manual mode on · ? for shortcuts · ← for agents\n",
+    "sid": null,
+    "exit": "0"
+   },
+   "resume-edited-v2": {
+    "V1": [
+     "system"
+    ],
+    "V2": [],
+    "users": 3,
+    "history": true,
+    "tools": 13,
+    "model": "claude-opus-5-5",
+    "argv": [
+     "claude",
+     "--permission-mode",
+     "default",
+     "--append-system-prompt-file",
+     "<D>/home/.cmrole/role-V2.md",
+     "--continue"
+    ],
+    "paneTail": "───\n  ⏸ manual mode on · ? for shortcuts · ← for agents\n",
+    "sid": null,
+    "exit": "0"
+   },
+   "resume-none": {
+    "V1": [
+     "system"
+    ],
+    "V2": [],
+    "users": 4,
+    "history": true,
+    "tools": 13,
+    "model": "claude-opus-5-5",
+    "argv": [
+     "claude",
+     "--permission-mode",
+     "default",
+     "--continue"
+    ],
+    "paneTail": "───\n  ⏸ manual mode on · ? for shortcuts · ← for agents\n",
+    "sid": null,
+    "exit": "0"
+   },
+   "new-none": {
+    "V1": [],
+    "V2": [],
+    "users": 1,
+    "history": false,
+    "tools": 13,
+    "model": "claude-opus-5-5",
+    "argv": [
+     "claude",
+     "--permission-mode",
+     "default"
+    ],
+    "paneTail": "───\n  ⏸ manual mode on · ? for shortcuts · ← for agents\n",
+    "sid": null,
+    "exit": "0"
+   },
+   "new-role-v2": {
+    "V1": [],
+    "V2": [
+     "system"
+    ],
+    "users": 1,
+    "history": false,
+    "tools": 13,
+    "model": "claude-opus-5-5",
+    "argv": [
+     "claude",
+     "--permission-mode",
+     "default",
+     "--append-system-prompt-file",
+     "<D>/home/.cmrole/role-V2.md"
+    ],
+    "paneTail": "───\n  ⏸ manual mode on · ? for shortcuts · ← for agents\n",
+    "sid": null,
+    "exit": "0"
+   }
+  }
+ },
+ {
+  "tool": "codex",
+  "steps": {
+   "new-role-v1": {
+    "V1": [
+     "developer"
+    ],
+    "V2": [],
+    "users": 2,
+    "history": true,
+    "tools": 13,
+    "model": "mock-model",
+    "argv": [
+     "codex",
+     "-c",
+     "features.daemon_auto_start=false",
+     "-p",
+     "cm-role-V1"
+    ],
+    "paneTail": "  ? for shortcuts     ⚠ 1 warning · f2 to view\n",
+    "sid": null,
+    "exit": "0"
+   },
+   "resume-same-v1": {
+    "V1": [
+     "developer"
+    ],
+    "V2": [],
+    "users": 3,
+    "history": true,
+    "tools": 13,
+    "model": "mock-model",
+    "argv": [
+     "codex",
+     "-c",
+     "features.daemon_auto_start=false",
+     "-p",
+     "cm-role-V1",
+     "resume",
+     "--last"
+    ],
+    "paneTail": "  ? for shortcuts     ⚠ 1 warning · f2 to view\n",
+    "sid": null,
+    "exit": "0"
+   },
+   "resume-edited-v2": {
+    "V1": [
+     "developer"
+    ],
+    "V2": [],
+    "users": 4,
+    "history": true,
+    "tools": 13,
+    "model": "mock-model",
+    "argv": [
+     "codex",
+     "-c",
+     "features.daemon_auto_start=false",
+     "-p",
+     "cm-role-V2",
+     "resume",
+     "--last"
+    ],
+    "paneTail": "  ? for shortcuts     ⚠ 1 warning · f2 to view\n",
+    "sid": null,
+    "exit": "0"
+   },
+   "resume-none": {
+    "V1": [
+     "developer"
+    ],
+    "V2": [],
+    "users": 5,
+    "history": true,
+    "tools": 13,
+    "model": "mock-model",
+    "argv": [
+     "codex",
+     "-c",
+     "features.daemon_auto_start=false",
+     "resume",
+     "--last"
+    ],
+    "paneTail": "  ? for shortcuts     ⚠ 1 warning · f2 to view\n",
+    "sid": null,
+    "exit": "0"
+   },
+   "new-none": {
+    "V1": [],
+    "V2": [],
+    "users": 2,
+    "history": false,
+    "tools": 13,
+    "model": "mock-model",
+    "argv": [
+     "codex",
+     "-c",
+     "features.daemon_auto_start=false"
+    ],
+    "paneTail": "  ? for shortcuts     ⚠ 1 warning · f2 to view\n",
+    "sid": null,
+    "exit": "0"
+   },
+   "new-role-v2": {
+    "V1": [],
+    "V2": [
+     "developer"
+    ],
+    "users": 2,
+    "history": false,
+    "tools": 13,
+    "model": "mock-model",
+    "argv": [
+     "codex",
+     "-c",
+     "features.daemon_auto_start=false",
+     "-p",
+     "cm-role-V2"
+    ],
+    "paneTail": "  ? for shortcuts     ⚠ 1 warning · f2 to view\n",
+    "sid": null,
+    "exit": "0"
+   }
+  }
+ },
+ {
+  "tool": "command-code",
+  "steps": {
+   "new-role-v1": {
+    "V1": [
+     "system"
+    ],
+    "V2": [],
+    "users": 1,
+    "history": true,
+    "tools": 13,
+    "model": "mock-model",
+    "argv": [
+     "cmd",
+     "--trust",
+     "--skip-onboarding",
+     "--no-auto-update",
+     "--local-only",
+     "-m",
+     "mock-model",
+     "--mod",
+     "<D>/home/.cmrole/cm-role-V1.ts"
+    ],
+    "paneTail": "───\n  ? for shortcuts · taste off (byok)\n",
+    "sid": null,
+    "exit": "0"
+   },
+   "resume-same-v1": {
+    "V1": [
+     "system"
+    ],
+    "V2": [],
+    "users": 2,
+    "history": true,
+    "tools": 13,
+    "model": "mock-model",
+    "argv": [
+     "cmd",
+     "--trust",
+     "--skip-onboarding",
+     "--no-auto-update",
+     "--local-only",
+     "-m",
+     "mock-model",
+     "--mod",
+     "<D>/home/.cmrole/cm-role-V1.ts",
+     "-c"
+    ],
+    "paneTail": "───\n  ? for shortcuts · taste off (byok)\n",
+    "sid": null,
+    "exit": "0"
+   },
+   "resume-edited-v2": {
+    "V1": [],
+    "V2": [
+     "system"
+    ],
+    "users": 3,
+    "history": true,
+    "tools": 13,
+    "model": "mock-model",
+    "argv": [
+     "cmd",
+     "--trust",
+     "--skip-onboarding",
+     "--no-auto-update",
+     "--local-only",
+     "-m",
+     "mock-model",
+     "--mod",
+     "<D>/home/.cmrole/cm-role-V2.ts",
+     "-c"
+    ],
+    "paneTail": "───\n  ? for shortcuts · taste off (byok)\n",
+    "sid": null,
+    "exit": "0"
+   },
+   "resume-none": {
+    "V1": [],
+    "V2": [],
+    "users": 4,
+    "history": true,
+    "tools": 13,
+    "model": "mock-model",
+    "argv": [
+     "cmd",
+     "--trust",
+     "--skip-onboarding",
+     "--no-auto-update",
+     "--local-only",
+     "-m",
+     "mock-model",
+     "-c"
+    ],
+    "paneTail": "───\n  ? for shortcuts · taste off (byok)\n",
+    "sid": null,
+    "exit": "0"
+   },
+   "new-none": {
+    "V1": [],
+    "V2": [],
+    "users": 1,
+    "history": false,
+    "tools": 13,
+    "model": "mock-model",
+    "argv": [
+     "cmd",
+     "--trust",
+     "--skip-onboarding",
+     "--no-auto-update",
+     "--local-only",
+     "-m",
+     "mock-model"
+    ],
+    "paneTail": "───\n  ? for shortcuts · taste off (byok)\n",
+    "sid": null,
+    "exit": "0"
+   },
+   "new-role-v2": {
+    "V1": [],
+    "V2": [
+     "system"
+    ],
+    "users": 1,
+    "history": false,
+    "tools": 13,
+    "model": "mock-model",
+    "argv": [
+     "cmd",
+     "--trust",
+     "--skip-onboarding",
+     "--no-auto-update",
+     "--local-only",
+     "-m",
+     "mock-model",
+     "--mod",
+     "<D>/home/.cmrole/cm-role-V2.ts"
+    ],
+    "paneTail": "───\n  ? for shortcuts · taste off (byok)\n",
+    "sid": null,
+    "exit": "0"
+   }
+  }
+ },
+ {
+  "tool": "copilot",
+  "steps": {
+   "new-role-v1": {
+    "V1": [
+     "system"
+    ],
+    "V2": [],
+    "users": 1,
+    "history": true,
+    "tools": 21,
+    "model": "mock-model",
+    "argv": [
+     "copilot",
+     "--agent",
+     "cm-role-V1"
+    ],
+    "paneTail": " ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     cm-role-V1 · mock-model\n",
+    "sid": null,
+    "exit": "0"
+   },
+   "resume-same-v1": {
+    "V1": [
+     "system"
+    ],
+    "V2": [],
+    "users": 2,
+    "history": true,
+    "tools": 21,
+    "model": "mock-model",
+    "argv": [
+     "copilot",
+     "--agent",
+     "cm-role-V1",
+     "--continue"
+    ],
+    "paneTail": " ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     cm-role-V1 · mock-model\n",
+    "sid": null,
+    "exit": "0"
+   },
+   "resume-edited-v2": {
+    "V1": [],
+    "V2": [
+     "system"
+    ],
+    "users": 3,
+    "history": true,
+    "tools": 21,
+    "model": "mock-model",
+    "argv": [
+     "copilot",
+     "--agent",
+     "cm-role-V2",
+     "--continue"
+    ],
+    "paneTail": " ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     cm-role-V2 · mock-model\n",
+    "sid": null,
+    "exit": "0"
+   },
+   "resume-none": {
+    "V1": [],
+    "V2": [
+     "system"
+    ],
+    "users": 4,
+    "history": true,
+    "tools": 21,
+    "model": "mock-model",
+    "argv": [
+     "copilot",
+     "--continue"
+    ],
+    "paneTail": " ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     cm-role-V2 · mock-model\n",
+    "sid": null,
+    "exit": "0"
+   },
+   "new-none": {
+    "V1": [],
+    "V2": [],
+    "users": 1,
+    "history": false,
+    "tools": 20,
+    "model": "mock-model",
+    "argv": [
+     "copilot"
+    ],
+    "paneTail": " ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     mock-model\n",
+    "sid": null,
+    "exit": "0"
+   },
+   "new-role-v2": {
+    "V1": [],
+    "V2": [
+     "system"
+    ],
+    "users": 1,
+    "history": false,
+    "tools": 21,
+    "model": "mock-model",
+    "argv": [
+     "copilot",
+     "--agent",
+     "cm-role-V2"
+    ],
+    "paneTail": " ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab     cm-role-V2 · mock-model\n",
+    "sid": null,
+    "exit": "0"
+   }
+  }
+ },
+ {
+  "tool": "opencode-v2",
+  "steps": {
+   "new-role-v1": {
+    "V1": [
+     "system"
+    ],
+    "V2": [],
+    "users": 1,
+    "history": true,
+    "tools": 12,
+    "model": "mock-model",
+    "argv": [
+     "bash",
+     "<SP>/run2/v2-resume.sh",
+     "18222",
+     "<D>/home/pw",
+     "<D>/repo",
+     ""
+    ],
+    "paneTail": "▀▀\n  /…/-Users-<user>-share-work-github-kewton-…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/life-opencode-v2/repo:main  15 (0%)  ctrl+p commands    /…/run2/c/life-opencode-v2/repo:main\n",
+    "sid": "ses_e6251f153ffegpySJOrHWUIw54",
+    "exit": "0"
+   },
+   "resume-same-v1": {
+    "V1": [
+     "system"
+    ],
+    "V2": [],
+    "users": 2,
+    "history": true,
+    "tools": 12,
+    "model": "mock-model",
+    "argv": [
+     "bash",
+     "<SP>/run2/v2-resume.sh",
+     "18222",
+     "<D>/home/pw",
+     "<D>/repo",
+     "ses_e6251f153ffegpySJOrHWUIw54"
+    ],
+    "paneTail": "▀▀\n  /…/-Users-<user>-share-work-github-kewton-…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/life-opencode-v2/repo:main  15 (0%)  ctrl+p commands    /…/run2/c/life-opencode-v2/repo:main\n",
+    "sid": "ses_e6251f153ffegpySJOrHWUIw54",
+    "exit": "0"
+   },
+   "resume-edited-v2": {
+    "V1": [],
+    "V2": [
+     "system"
+    ],
+    "users": 3,
+    "history": true,
+    "tools": 12,
+    "model": "mock-model",
+    "argv": [
+     "bash",
+     "<SP>/run2/v2-resume.sh",
+     "18222",
+     "<D>/home/pw",
+     "<D>/repo",
+     "ses_e6251f153ffegpySJOrHWUIw54"
+    ],
+    "paneTail": "▀▀\n  /…/-Users-<user>-share-work-github-kewton-…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/life-opencode-v2/repo:main  15 (0%)  ctrl+p commands    /…/run2/c/life-opencode-v2/repo:main\n",
+    "sid": "ses_e6251f153ffegpySJOrHWUIw54",
+    "exit": "0"
+   },
+   "resume-none": {
+    "V1": [],
+    "V2": [],
+    "users": 4,
+    "history": true,
+    "tools": 12,
+    "model": "mock-model",
+    "argv": [
+     "bash",
+     "<SP>/run2/v2-resume.sh",
+     "18222",
+     "<D>/home/pw",
+     "<D>/repo",
+     "ses_e6251f153ffegpySJOrHWUIw54"
+    ],
+    "paneTail": "▀▀\n  /…/-Users-<user>-share-work-github-kewton-…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/life-opencode-v2/repo:main  15 (0%)  ctrl+p commands    /…/run2/c/life-opencode-v2/repo:main\n",
+    "sid": "ses_e6251f153ffegpySJOrHWUIw54",
+    "exit": "0"
+   },
+   "new-none": {
+    "V1": [],
+    "V2": [],
+    "users": 1,
+    "history": false,
+    "tools": 12,
+    "model": "mock-model",
+    "argv": [
+     "bash",
+     "<SP>/run2/v2-resume.sh",
+     "18222",
+     "<D>/home/pw",
+     "<D>/repo",
+     ""
+    ],
+    "paneTail": "▀▀\n  /…/-Users-<user>-share-work-github-kewton-…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/life-opencode-v2/repo:main  15 (0%)  ctrl+p commands    /…/run2/c/life-opencode-v2/repo:main\n",
+    "sid": "ses_e624f1bf6ffeGH6EP2sprxuGyW",
+    "exit": "0"
+   },
+   "new-role-v2": {
+    "V1": [],
+    "V2": [
+     "system"
+    ],
+    "users": 1,
+    "history": false,
+    "tools": 12,
+    "model": "mock-model",
+    "argv": [
+     "bash",
+     "<SP>/run2/v2-resume.sh",
+     "18222",
+     "<D>/home/pw",
+     "<D>/repo",
+     ""
+    ],
+    "paneTail": "▀▀\n  /…/-Users-<user>-share-work-github-kewton-…/8b7b57b4-6886-4920-8ffa-36de861959e1/scratchpad/run2/c/life-opencode-v2/repo:main  15 (0%)  ctrl+p commands    /…/run2/c/life-opencode-v2/repo:main\n",
+    "sid": "ses_e624e89eeffeAGolV06RgbnSk2",
+    "exit": "0"
+   }
+  }
+ },
+ {
+  "tool": "opencode",
+  "steps": {
+   "new-role-v1": {
+    "V1": [
+     "system"
+    ],
+    "V2": [],
+    "users": 1,
+    "history": true,
+    "tools": 11,
+    "model": "mock-model",
+    "argv": [
+     "opencode",
+     "--port",
+     "18221",
+     "--hostname",
+     "127.0.0.1"
+    ],
+    "paneTail": "/     15 ctrl+p\n   scratchpad/run2/c/life-opencode/repo     commands     • OpenCode 1.18.35\n",
+    "sid": "ses_e625949e8ffea5TdBEBrLl9UCB",
+    "exit": "0"
+   },
+   "resume-same-v1": {
+    "V1": [
+     "system"
+    ],
+    "V2": [],
+    "users": 2,
+    "history": true,
+    "tools": 11,
+    "model": "mock-model",
+    "argv": [
+     "opencode",
+     "--port",
+     "18221",
+     "--hostname",
+     "127.0.0.1",
+     "-s",
+     "ses_e625949e8ffea5TdBEBrLl9UCB"
+    ],
+    "paneTail": "/     15 ctrl+p\n   scratchpad/run2/c/life-opencode/repo     commands     • OpenCode 1.18.35\n",
+    "sid": "ses_e625949e8ffea5TdBEBrLl9UCB",
+    "exit": "0"
+   },
+   "resume-edited-v2": {
+    "V1": [],
+    "V2": [
+     "system"
+    ],
+    "users": 3,
+    "history": true,
+    "tools": 11,
+    "model": "mock-model",
+    "argv": [
+     "opencode",
+     "--port",
+     "18221",
+     "--hostname",
+     "127.0.0.1",
+     "-s",
+     "ses_e625949e8ffea5TdBEBrLl9UCB"
+    ],
+    "paneTail": "/     15 ctrl+p\n   scratchpad/run2/c/life-opencode/repo     commands     • OpenCode 1.18.35\n",
+    "sid": "ses_e625949e8ffea5TdBEBrLl9UCB",
+    "exit": "0"
+   },
+   "resume-none": {
+    "V1": [],
+    "V2": [],
+    "users": 4,
+    "history": true,
+    "tools": 11,
+    "model": "mock-model",
+    "argv": [
+     "opencode",
+     "--port",
+     "18221",
+     "--hostname",
+     "127.0.0.1",
+     "-s",
+     "ses_e625949e8ffea5TdBEBrLl9UCB"
+    ],
+    "paneTail": "/     15 ctrl+p\n   scratchpad/run2/c/life-opencode/repo     commands     • OpenCode 1.18.35\n",
+    "sid": "ses_e625949e8ffea5TdBEBrLl9UCB",
+    "exit": "0"
+   },
+   "new-none": {
+    "V1": [],
+    "V2": [],
+    "users": 1,
+    "history": false,
+    "tools": 11,
+    "model": "mock-model",
+    "argv": [
+     "opencode",
+     "--port",
+     "18221",
+     "--hostname",
+     "127.0.0.1"
+    ],
+    "paneTail": "/     15 ctrl+p\n   scratchpad/run2/c/life-opencode/repo     commands     • OpenCode 1.18.35\n",
+    "sid": "ses_e62568c1dffeG2Zd2iB0T1Dvnu",
+    "exit": "0"
+   },
+   "new-role-v2": {
+    "V1": [],
+    "V2": [
+     "system"
+    ],
+    "users": 1,
+    "history": false,
+    "tools": 11,
+    "model": "mock-model",
+    "argv": [
+     "opencode",
+     "--port",
+     "18221",
+     "--hostname",
+     "127.0.0.1"
+    ],
+    "paneTail": "/     15 ctrl+p\n   scratchpad/run2/c/life-opencode/repo     commands     • OpenCode 1.18.35\n",
+    "sid": "ses_e62564587ffeWv5zPeSVWQHy69",
+    "exit": "0"
+   }
+  }
+ }
+]
