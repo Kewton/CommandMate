@@ -42,7 +42,12 @@ import {
   wasResumedAcrossRole,
 } from '@/lib/session/role-launch';
 import { clearSessionStarting } from '@/lib/session/session-starting-state';
-import { resetSessionLaunchFlightsForTest, isSessionLaunchRoleMismatchError } from '@/lib/session/session-launch-flight';
+import {
+  isSessionLaunchInFlight,
+  isSessionLaunchRoleMismatchError,
+  resetSessionLaunchFlightsForTest,
+} from '@/lib/session/session-launch-flight';
+import { classifySendFailure } from '@/lib/session/send-attempt-state';
 import { fixedEnvReader } from '@/lib/agent-roles/composition';
 import { readRoleLaunchRefusal, RoleLaunchRefusedError } from '@/lib/agent-roles/launch-errors';
 import { BaseCLITool } from '@/lib/cli-tools/base';
@@ -825,15 +830,18 @@ describe('a launch killed midway, and the one started after it', () => {
     const old = tool('claude');
     let proceed!: () => void;
     const before = new Promise<void>((resolve) => (proceed = resolve));
+    let entered!: () => void;
+    const inLaunchSession = new Promise<void>((resolve) => (entered = resolve));
     const original = old['launchSession'].bind(old);
     old['launchSession'] = async (...args: Parameters<typeof original>) => {
+      entered();
       await before;
       pane.exists = false;
       await original(...args);
     };
     const oldStart = old.startSession(WT, worktreePath);
-    await vi.waitFor(() => expect(old.launches).toBe(0));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Its flight is registered and its epoch read: the kill below is of a launch in progress.
+    await inLaunchSession;
 
     kill('claude');
     await tool('claude').startSession(WT, worktreePath);
@@ -845,6 +853,46 @@ describe('a launch killed midway, and the one started after it', () => {
     await oldStart;
     expect(getLaunchRoleEvidence({ worktreeId: WT, cliToolId: 'claude' })).toEqual(successor);
     expect(count()).toBe(rowsBefore);
+  });
+
+  it('stopped while it was still resolving its role: it starts nothing, and the next start is its own', async () => {
+    setSystemRoleDefault(db, 'claude', roleId);
+    const old = tool('claude');
+    // The same tick: resolving takes at least a git call, so no flight exists yet.
+    const oldOutcome = old.startSession(WT, worktreePath).catch((error: unknown) => error);
+    kill('claude');
+
+    const next = tool('claude');
+    await next.startSession(WT, worktreePath);
+
+    expect(readRoleLaunchRefusal(await oldOutcome)).toBe('session-stopped');
+    expect(old.launches).toBe(0);
+    expect(old.lines).toEqual([]);
+    expect(next.launches).toBe(1);
+    expect(next.lines).toHaveLength(1);
+    expect(records('claude').launched?.sessionGeneration).toBe(
+      getLaunchRoleEvidence({ worktreeId: WT, cliToolId: 'claude' })?.sessionGeneration
+    );
+  });
+
+  it('that refusal is a send not sent, by the code the route reads', () => {
+    const error = new RoleLaunchRefusedError('session-stopped', 'stopped');
+    expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'role-launch-refused' });
+  });
+
+  it('a stop of another instance does not refuse this one', async () => {
+    setSystemRoleDefault(db, 'claude', roleId);
+    const start = tool('claude').startSession(WT, worktreePath, 'claude-2');
+    kill('claude');
+    await expect(start).resolves.toBeUndefined();
+  });
+
+  it('with no role configured the flight is registered in the same tick, so a stop reaches it as before', async () => {
+    const instance = tool('claude');
+    setLaunchRoleDatabaseForTest(db);
+    const start = instance.startSession(WT, worktreePath);
+    expect(isSessionLaunchInFlight(instance.getSessionName(WT))).toBe(true);
+    await start;
   });
 
   it('Copilot: an old launch reading `✗` does not stop the successor', async () => {

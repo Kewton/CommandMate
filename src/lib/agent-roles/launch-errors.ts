@@ -33,7 +33,9 @@ export type RoleLaunchRefusalReason =
   /** The CLI said it did not take the role (Copilot's `✗`). */
   | 'not-applied'
   /** The role could not be resolved at all. */
-  | 'resolve-failed';
+  | 'resolve-failed'
+  /** The session was stopped while this start was still resolving its role. */
+  | 'session-stopped';
 
 const MARK = /\(role launch refused: ([a-z-]+)\)/;
 

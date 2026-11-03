@@ -727,6 +727,29 @@ export function forgetLaunchRoleEvidence(target: LaunchRoleTarget): void {
   epochMap().set(key, (epochMap().get(key) ?? 0) + 1);
 }
 
+/**
+ * How many times this session has been stopped. A start reads this before it waits to
+ * resolve its role: see {@link assertNotStoppedWhileResolving}.
+ */
+export function readLaunchRoleEpoch(target: LaunchRoleTarget): number {
+  return epochMap().get(evidenceKey(target)) ?? 0;
+}
+
+/**
+ * A start with roles configured waits for git before it registers its flight, so a
+ * stop in that wait finds no flight to forget and no launch to mark. Left to go on,
+ * this start would bring back the session that was just stopped, under an epoch it
+ * only read afterwards, and a later start would join it. It was asked for before
+ * the stop, so the stop wins.
+ *
+ * @throws {RoleLaunchRefusedError} The session was stopped since `epoch` was read
+ */
+export function assertNotStoppedWhileResolving(target: LaunchRoleTarget, epoch: number): void {
+  if (readLaunchRoleEpoch(target) !== epoch) {
+    throw new RoleLaunchRefusedError('session-stopped', 'The session was stopped while it was being started; nothing was typed');
+  }
+}
+
 /** Whether this process continued a conversation that had another role (§6.4). */
 export function wasResumedAcrossRole(target: LaunchRoleTarget): boolean {
   return evidenceMap().get(evidenceKey(target))?.resumedAcrossRole === true;

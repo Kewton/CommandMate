@@ -52,7 +52,9 @@ import {
 } from '../session/session-starting-state';
 import { isSessionLaunchInFlight, runSessionLaunch, settleSessionLaunch } from '../session/session-launch-flight';
 import {
+  assertNotStoppedWhileResolving,
   gateLaunchRole,
+  readLaunchRoleEpoch,
   requestLaunchRole,
   runWithLaunchRole,
   settleLaunchRole,
@@ -328,8 +330,13 @@ export abstract class BaseCLITool implements ICLITool {
     // anywhere, so the flight is still registered in this tick (R4). With roles
     // configured it waits for git first; nothing has touched tmux yet.
     const roleTarget = { worktreeId, cliToolId: this.id, instanceId };
+    const epoch = readLaunchRoleEpoch(roleTarget);
     const role = requestLaunchRole(roleTarget, worktreePath, roleEnvReaderForPane(roleTarget));
-    return role instanceof Promise ? role.then(startWith) : startWith(role);
+    if (!(role instanceof Promise)) return startWith(role);
+    return role.then((resolved) => {
+      assertNotStoppedWhileResolving(roleTarget, epoch);
+      return startWith(resolved);
+    });
   }
 
   /** {@link startSession}'s body: one launch, its failure reported once. */
