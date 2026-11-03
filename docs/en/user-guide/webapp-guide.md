@@ -459,7 +459,7 @@ A role is the instructions given to a session when it starts. Create a name and 
 
 OpenCode's persona (build, plan, …) is not a role. A persona is the agent you switch inside OpenCode; a role is instructions CommandMate gives at startup. On OpenCode V2 a role replaces the agent's default instructions.
 
-So that nothing is overwritten from an older roster when several screens or the CLI change it at once, the screen's saves always carry the roster's revision (`expectedRosterRevision` on `PATCH /api/worktrees/:id`; a mismatch is a 409). The screen then reads the latest roster and saves again. When the current roster cannot be read, it does not save and says why.
+So that nothing is overwritten from an older roster when several screens or the CLI change it at once, the screen's saves always carry the roster's revision (`expectedRosterRevision` on `PATCH /api/worktrees/:id`; a mismatch is a 409). The screen then reads the latest roster and saves again. When the current roster cannot be read, it does not save and says why. When a save went through but the latest state could not be read back, it says so, apart from a failure, and asks for a page reload.
 
 ### Ollama Model Selection (Vibe-Local)
 

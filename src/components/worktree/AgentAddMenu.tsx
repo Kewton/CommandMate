@@ -18,6 +18,10 @@
  * the default role: "could not check" must not lock the "+", as with the installed
  * list below. Either way the save carries a revision; the queue refuses it with none.
  *
+ * A save whose result could not be read back is not a failure, and not something to
+ * press again: another press would add a second instance. The form stays with that
+ * said and the submit off, and the instance is placed by nothing until a reload.
+ *
  * What the default is comes from the same GET's `toolDefaults`; nothing is resolved
  * here. It does NOT start a session: a split showing an instance with no session is
  * the ordinary state of every freshly added roster row, and the session starts
@@ -174,6 +178,7 @@ export const AgentAddMenu = memo(function AgentAddMenu({
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savedUnverified, setSavedUnverified] = useState(false);
   // Null: not read yet, or could not be read.
   const [roleSettings, setRoleSettings] = useState<InstanceRoleSettingsResponse | null>(null);
   const [roles, setRoles] = useState<AgentRoleSummary[]>([]);
@@ -235,6 +240,7 @@ export const AgentAddMenu = memo(function AgentAddMenu({
   const handleOpen = useCallback(() => {
     setName('');
     setError(null);
+    setSavedUnverified(false);
     setPlacement(resolveDefaultAgentPlacement(splitCount));
     setRoleChoice(ROLE_CHOICE_INHERIT);
     setOpen(true);
@@ -284,6 +290,10 @@ export const AgentAddMenu = memo(function AgentAddMenu({
             return instance && [...base, instance];
           });
         }
+        if (result.status === 'saved_unverified') {
+          setSavedUnverified(true);
+          return;
+        }
         if (result.status !== 'saved' || added === null) {
           // The dialog stays open, with what was typed.
           const failure = result.status === 'failed' ? result.error : undefined;
@@ -329,7 +339,7 @@ export const AgentAddMenu = memo(function AgentAddMenu({
     ? t('agentAdd.maxReached', { max: MAX_AGENT_INSTANCES })
     : t('agentAdd.button');
   const canSubmit =
-    !saving && !atMax && installed !== undefined && toolId !== '' && isToolSelectable(toolId);
+    !saving && !savedUnverified && !atMax && installed !== undefined && toolId !== '' && isToolSelectable(toolId);
 
   return (
     <>
@@ -475,6 +485,12 @@ export const AgentAddMenu = memo(function AgentAddMenu({
           {error && (
             <p role="alert" data-testid="agent-add-error" className="text-xs text-danger">
               {error}
+            </p>
+          )}
+
+          {savedUnverified && (
+            <p role="status" data-testid="agent-add-saved-unverified" className="text-xs text-warning">
+              {t('agentAdd.savedUnverified')}
             </p>
           )}
 

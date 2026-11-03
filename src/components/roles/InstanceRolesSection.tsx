@@ -169,12 +169,13 @@ function InstanceRoleRow({
 
 function OpenInstanceRoles({ worktreeId, rosterKey }: { worktreeId: string; rosterKey: string }): React.ReactElement {
   const t = useTranslations('common');
-  const { settings, refresh } = useInstanceRoleSettings(worktreeId, rosterKey);
+  const { settings, stale, refresh } = useInstanceRoleSettings(worktreeId, rosterKey);
   const [roles, setRoles] = useState<AgentRoleSummary[]>([]);
   // Undefined until the first answer; null when a read failed, which is not "stopped".
   const [running, setRunning] = useState<Record<string, boolean> | null | undefined>(undefined);
   const [readToken, setReadToken] = useState(0);
   const [catalogToken, setCatalogToken] = useState(0);
+  const [rolesFailed, setRolesFailed] = useState(false);
 
   const onCatalogChanged = useCallback(() => setCatalogToken((token) => token + 1), []);
   useRoleCatalogChanged(onCatalogChanged);
@@ -182,7 +183,9 @@ function OpenInstanceRoles({ worktreeId, rosterKey }: { worktreeId: string; rost
   useEffect(() => {
     let cancelled = false;
     void roleApi.list().then((result) => {
-      if (!cancelled && result.ok) setRoles(result.data.roles);
+      if (cancelled) return;
+      if (result.ok) setRoles(result.data.roles);
+      setRolesFailed(!result.ok);
     });
     return () => {
       cancelled = true;
@@ -215,6 +218,16 @@ function OpenInstanceRoles({ worktreeId, rosterKey }: { worktreeId: string; rost
       {running === null && (
         <p data-testid="instance-roles-running-unknown" className="text-xs text-warning">
           {t('agentRoles.instances.runningUnknown')}
+        </p>
+      )}
+      {stale && (
+        <p role="status" data-testid="instance-roles-stale" className="text-xs text-warning">
+          {t('agentRoles.savedStale')}
+        </p>
+      )}
+      {rolesFailed && (
+        <p role="alert" data-testid="instance-roles-list-error" className="text-xs text-danger-foreground">
+          {t('agentRoles.loadError')}
         </p>
       )}
       <ul className="space-y-2" data-testid="instance-roles-list">

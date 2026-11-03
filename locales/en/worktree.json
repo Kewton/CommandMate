@@ -1734,6 +1734,7 @@
     "roleUnavailable": "The role information could not be read, so this is added with the default role.",
     "roleMissing": "The chosen role no longer exists. Reopen this and choose again.",
     "rosterChanged": "The roster kept changing elsewhere, so this was not added. Try again.",
-    "rosterUnreadable": "The current roster could not be read, so this was not added, to avoid erasing other changes. Check the connection and try again."
+    "rosterUnreadable": "The current roster could not be read, so this was not added, to avoid erasing other changes. Check the connection and try again.",
+    "savedUnverified": "The session was added, but the latest roster could not be read back. Do not add it again; reload the page."
   }
 }

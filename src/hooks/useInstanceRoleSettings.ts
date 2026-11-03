@@ -14,13 +14,18 @@
  * which of their answers is newest cannot be told from which arrived last. An overlap
  * therefore always ends in a read made after the last answer.
  *
+ * A write's caller gets only what was taken or read afterwards, never an answer the
+ * store refused. When that read fails the write still happened: the entry is `stale`
+ * until an answer is next taken, so the screen can say so instead of showing old rows
+ * as current.
+ *
  * @module hooks/useInstanceRoleSettings
  */
 
 'use client';
 
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
-import { readWorktreeRoster, roleApi, type RoleApiResult } from '@/lib/api-client-agent-roles';
+import { readWorktreeRoster, roleApi, type RoleApiFailure, type RoleApiResult } from '@/lib/api-client-agent-roles';
 import type { AgentInstance } from '@/lib/cli-tools/types';
 import type { InstanceRoleEntry, InstanceRoleSettingsResponse } from '@/types/agent-roles';
 
@@ -38,14 +43,22 @@ interface WorktreeEntry {
   rerun: boolean;
   /** Moves whenever an answer is taken or the snapshot changes, so an older answer is not believed. */
   version: number;
+  /** A write went through and the read that should have followed it failed. */
+  stale: boolean;
 }
+
+/**
+ * How a write ended. `settings` is what the store now holds: null means the write
+ * happened, but its answer could not be trusted and nothing could be read after it.
+ */
+export type InstanceRoleWriteResult = RoleApiFailure | { ok: true; settings: InstanceRoleSettingsResponse | null };
 
 const entries = new Map<string, WorktreeEntry>();
 
 function entryFor(worktreeId: string): WorktreeEntry {
   let entry = entries.get(worktreeId);
   if (!entry) {
-    entry = { settings: null, snapshot: null, listeners: new Set(), inFlight: null, rerun: false, version: 0 };
+    entry = { settings: null, snapshot: null, listeners: new Set(), inFlight: null, rerun: false, version: 0, stale: false };
     entries.set(worktreeId, entry);
   }
   return entry;
@@ -78,6 +91,7 @@ function isSettings(value: unknown): value is InstanceRoleSettingsResponse {
 
 function adoptSettings(entry: WorktreeEntry, settings: InstanceRoleSettingsResponse): void {
   entry.version += 1;
+  entry.stale = false;
   entry.settings = settings;
   entry.snapshot = { roster: rosterFromRoleEntries(settings.instances), revision: settings.rosterRevision };
   notify(entry);
@@ -88,18 +102,26 @@ function adoptSettings(entry: WorktreeEntry, settings: InstanceRoleSettingsRespo
  * taken only if nothing else moved while it was on its way; otherwise it may be older
  * than what is shown, and the settings are read again.
  */
-export async function writeInstanceRoleSettings<T extends InstanceRoleSettingsResponse>(
+export async function writeInstanceRoleSettings(
   worktreeId: string,
-  send: () => Promise<RoleApiResult<T>>,
-): Promise<RoleApiResult<T>> {
+  send: () => Promise<RoleApiResult<InstanceRoleSettingsResponse>>,
+): Promise<InstanceRoleWriteResult> {
   const entry = entryFor(worktreeId);
   const issued = entry.version;
   const result = await send();
-  if (result.ok) {
-    if (entry.version === issued) adoptSettings(entry, result.data);
-    else void refreshInstanceRoleSettings(worktreeId);
+  if (!result.ok) return result;
+  if (entry.version === issued) {
+    adoptSettings(entry, result.data);
+    return { ok: true, settings: result.data };
   }
-  return result;
+  return { ok: true, settings: await refreshAfterWrite(worktreeId) };
+}
+
+/** Whether anything was taken since this was called: if so, an answer now on its way may be older. */
+export function watchForNewerAnswer(worktreeId: string): () => boolean {
+  const entry = entryFor(worktreeId);
+  const issued = entry.version;
+  return () => entry.version !== issued;
 }
 
 /** The roster a client may write against, or null when none is known. */
@@ -145,7 +167,7 @@ export function recordRosterSaved(worktreeId: string, roster: AgentInstance[], r
   const entry = entryFor(worktreeId);
   entry.version += 1;
   entry.snapshot = revision ? { roster, revision } : null;
-  if (entry.listeners.size > 0) void refreshInstanceRoleSettings(worktreeId);
+  if (entry.listeners.size > 0) void refreshAfterWrite(worktreeId);
 }
 
 /**
@@ -186,10 +208,24 @@ export function refreshInstanceRoleSettings(worktreeId: string): Promise<Instanc
   return entry.inFlight;
 }
 
+/**
+ * Read again because something was just written. A failure is remembered: what is on
+ * screen is known to be behind, which a read for no reason could not say.
+ */
+export async function refreshAfterWrite(worktreeId: string): Promise<InstanceRoleSettingsResponse | null> {
+  const answer = await refreshInstanceRoleSettings(worktreeId);
+  if (!answer) {
+    const entry = entryFor(worktreeId);
+    entry.stale = true;
+    notify(entry);
+  }
+  return answer;
+}
+
 /** Read again for every worktree on screen: a role's text or a default has changed. */
 export function refreshAllShownInstanceRoleSettings(): void {
   entries.forEach((entry, worktreeId) => {
-    if (entry.listeners.size > 0) void refreshInstanceRoleSettings(worktreeId);
+    if (entry.listeners.size > 0) void refreshAfterWrite(worktreeId);
   });
 }
 
@@ -220,7 +256,13 @@ export function useRoleCatalogChanged(onChange: () => void): void {
 export function useInstanceRoleSettings(
   worktreeId: string,
   refreshKey?: string,
-): { settings: InstanceRoleSettingsResponse | null; refresh: () => Promise<InstanceRoleSettingsResponse | null> } {
+): {
+  settings: InstanceRoleSettingsResponse | null;
+  /** A write went through, and what is shown may not include it. */
+  stale: boolean;
+  /** Read again after an action of the caller's. */
+  refresh: () => Promise<InstanceRoleSettingsResponse | null>;
+} {
   const subscribe = useCallback(
     (listener: () => void) => {
       const entry = entryFor(worktreeId);
@@ -236,6 +278,11 @@ export function useInstanceRoleSettings(
     () => entries.get(worktreeId)?.settings ?? null,
     () => null,
   );
+  const stale = useSyncExternalStore(
+    subscribe,
+    () => entries.get(worktreeId)?.stale ?? false,
+    () => false,
+  );
 
   useEffect(() => {
     void refreshInstanceRoleSettings(worktreeId);
@@ -250,6 +297,6 @@ export function useInstanceRoleSettings(
     return () => window.removeEventListener('focus', onFocus);
   }, [worktreeId]);
 
-  const refresh = useCallback(() => refreshInstanceRoleSettings(worktreeId), [worktreeId]);
-  return { settings, refresh };
+  const refresh = useCallback(() => refreshAfterWrite(worktreeId), [worktreeId]);
+  return { settings, stale, refresh };
 }

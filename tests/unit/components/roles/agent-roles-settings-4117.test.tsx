@@ -231,6 +231,20 @@ describe('[#4117] roles in the settings', () => {
     expect(server.writes('PUT', '/agent-role-defaults').map((body) => body.roleId)).toEqual([REVIEWER.id, null]);
   });
 
+  it('a role change whose system defaults cannot be read back says it could not read', async () => {
+    await renderSettings();
+    const real = server.fetch;
+    global.fetch = vi.fn((url: string, init?: RequestInit) =>
+      url === '/api/settings/agent-role-defaults' && !init?.method
+        ? Promise.resolve({ ok: false, status: 500, json: async () => ({ success: false, error: 'internal_error' }) })
+        : real(url, init),
+    ) as unknown as typeof fetch;
+    fireEvent.click(screen.getByTestId(`agent-role-delete-${REVIEWER.id}`));
+    fireEvent.click(screen.getByTestId(`agent-role-delete-confirm-${REVIEWER.id}`));
+    await waitFor(() => expect(screen.getByTestId('agent-roles-load-error')).toBeInTheDocument());
+    expect(screen.getByTestId('agent-roles-notice')).toBeInTheDocument();
+  });
+
   it('explains how a role differs from an OpenCode persona', async () => {
     await renderSettings();
     expect(screen.getByTestId('agent-roles-persona-note').textContent).toContain('ペルソナ');
@@ -321,6 +335,51 @@ describe('[#4117] a change in the settings reaches what is open elsewhere', () =
     server.repositoryStored.claude = { state: 'none' };
     await act(async () => window.dispatchEvent(new Event('focus')));
     await waitFor(() => expect(source()).toBe('指定中: なし［リポジトリで明示］'));
+  });
+
+  it('a change whose reads afterwards fail: the open session says so, and the repository says it could not read', async () => {
+    await renderAll();
+    await waitFor(() => expect(source()).toBe('継承中: マーケター［システム］'));
+    server.refuseSettingsRead = true;
+    const real = server.fetch;
+    global.fetch = vi.fn((url: string, init?: RequestInit) =>
+      String(url).endsWith('/role-defaults') && !init?.method
+        ? Promise.resolve({ ok: false, status: 500, json: async () => ({ success: false, error: 'internal_error' }) })
+        : real(url, init),
+    ) as unknown as typeof fetch;
+    fireEvent.change(field('agent-role-system-default-claude'), { target: { value: REVIEWER.id } });
+    await waitFor(() => expect(screen.getByTestId('instance-roles-stale')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('repository-roles-error-repo-1')).toBeInTheDocument());
+    expect(server.system.claude).toMatchObject({ state: 'role', roleId: REVIEWER.id });
+    expect(screen.queryByTestId('agent-roles-default-error')).toBeNull();
+  });
+
+  it('a repository save a read overtook, whose read afterwards fails: says to reload, with no save error', async () => {
+    await renderAll();
+    await waitFor(() => expect(source()).toBe('継承中: マーケター［システム］'));
+    let releasePut: () => void = () => {};
+    let refuse = false;
+    const real = server.fetch;
+    global.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (refuse && String(url).endsWith('/role-defaults') && !init?.method) {
+        return { ok: false, status: 500, json: async () => ({ success: false, error: 'internal_error' }) };
+      }
+      const answer = await real(url, init);
+      if (String(url).endsWith('/role-defaults') && init?.method === 'PUT') {
+        await new Promise<void>((resolve) => {
+          releasePut = resolve;
+        });
+      }
+      return answer;
+    }) as unknown as typeof fetch;
+    fireEvent.change(select(), { target: { value: 'none' } });
+    await waitFor(() => expect(server.writes('PUT', '/role-defaults')).toHaveLength(1));
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    await act(async () => {});
+    refuse = true;
+    await act(async () => releasePut());
+    await waitFor(() => expect(screen.getByTestId('repository-roles-stale-repo-1').textContent).toContain('再読み込み'));
+    expect(screen.queryByTestId('repository-roles-save-error-repo-1')).toBeNull();
   });
 
   it('a read that left before a repository save does not put the old value back', async () => {

@@ -98,6 +98,8 @@ export class FakeRoleServer {
    * in `held`, so answers can be delivered in another order than they were built.
    */
   holdPutAnswers = false;
+  /** The same for a roster PATCH or a create: written and answered at once, delivered on release. */
+  holdRosterAnswers = false;
   private held: Array<() => void> = [];
   readonly calls: Array<{ url: string; method: string; body: Record<string, unknown> }> = [];
 
@@ -268,7 +270,9 @@ export class FakeRoleServer {
       } else if (role.state === 'none') {
         this.stored[instance.id] = { state: 'none' };
       }
-      return json(201, { ...this.settings(), created: { instanceId: instance.id } });
+      const created = json(201, { ...this.settings(), created: { instanceId: instance.id } });
+      if (this.holdRosterAnswers) await new Promise<void>((resolve) => this.held.push(resolve));
+      return created;
     }
 
     if (path === '/api/roles') {
@@ -386,7 +390,9 @@ export class FakeRoleServer {
       this.roster = body.agentInstances as AgentInstance[];
       this.rosterSaved = true;
       this.revisionNumber += 1;
-      return json(200, { agentInstances: this.roster, rosterRevision: this.revision });
+      const saved = json(200, { agentInstances: this.roster, rosterRevision: this.revision });
+      if (this.holdRosterAnswers) await new Promise<void>((resolve) => this.held.push(resolve));
+      return saved;
     }
 
     if (url.startsWith('/api/settings/default-agents')) {

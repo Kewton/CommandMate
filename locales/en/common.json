@@ -392,6 +392,7 @@
       "membershipUndetermined": "Cannot tell: git could not confirm which repository this belongs to ({roots}). Starts are refused until that is resolved or the session names a role.",
       "rootInherits": "system default"
     },
+    "savedStale": "The change went through, but the latest state could not be read back, so this may be out of date. Reload the page.",
     "application": {
       "startup": "At start: {name}",
       "next": "Next: {name}",

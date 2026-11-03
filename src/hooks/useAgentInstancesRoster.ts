@@ -29,6 +29,11 @@
  *
  * Creating with a role goes through the same queue, so a rename issued while the
  * create is saving starts from the roster that contains it.
+ *
+ * An answer that crossed a newer one is not handed on: `onSaved` replaces the parent's
+ * roster, and an older list there would undo what was read since. The roster is read
+ * again instead, and if that fails the write reports `saved_unverified`: it happened,
+ * but no roster can be given for it.
  */
 
 'use client';
@@ -40,7 +45,9 @@ import {
   clearRosterSnapshot,
   ensureRosterSnapshot,
   recordRosterSaved,
+  refreshAfterWrite,
   rosterFromRoleEntries,
+  watchForNewerAnswer,
   writeInstanceRoleSettings,
 } from '@/hooks/useInstanceRoleSettings';
 import type { AgentRoleErrorResponse, RoleAssignmentInput } from '@/types/agent-roles';
@@ -53,6 +60,8 @@ export type RosterWriteError = AgentRoleErrorResponse['error'] | 'roster_unreada
 
 export type RosterWriteResult =
   | { status: 'saved'; roster: AgentInstance[] }
+  /** Saved, but its answer could not be trusted and nothing could be read after it. */
+  | { status: 'saved_unverified' }
   | { status: 'skipped' }
   | { status: 'failed'; error?: RosterWriteError };
 
@@ -62,6 +71,7 @@ export type RosterInstanceBuilder = (base: AgentInstance[]) => { id: string; cli
 /** One attempt at a write. `conflict`: the server's roster is not the one it started from. */
 type RosterAttempt =
   | { status: 'saved'; roster: AgentInstance[] }
+  | { status: 'saved_unverified' }
   | { status: 'skipped' }
   | { status: 'failed'; error?: AgentRoleErrorResponse['error'] }
   | { status: 'conflict' };
@@ -152,6 +162,7 @@ export function enqueueRosterWrite(
       const built = build(base);
       if (!built) return { status: 'skipped' };
       const roster = built.map((inst, order) => ({ ...inst, order }));
+      const crossed = watchForNewerAnswer(worktreeId);
       let response: Response;
       try {
         response = await fetch(`/api/worktrees/${worktreeId}`, {
@@ -164,6 +175,12 @@ export function enqueueRosterWrite(
       }
       if (response.status === 409) return { status: 'conflict' };
       if (!response.ok) return { status: 'failed' };
+      if (crossed()) {
+        const settings = await refreshAfterWrite(worktreeId);
+        return settings
+          ? { status: 'saved', roster: rosterFromRoleEntries(settings.instances) }
+          : { status: 'saved_unverified' };
+      }
       const answer = await readPatchAnswer(response);
       const saved = answer.roster ?? roster;
       recordRosterSaved(worktreeId, saved, answer.revision);
@@ -197,7 +214,9 @@ export function enqueueRosterCreate(
         const stale = result.error === 'roster_changed' || result.error === 'instance_exists';
         return stale ? { status: 'conflict' } : { status: 'failed', error: result.error };
       }
-      return { status: 'saved', roster: rosterFromRoleEntries(result.data.instances) };
+      return result.settings
+        ? { status: 'saved', roster: rosterFromRoleEntries(result.settings.instances) }
+        : { status: 'saved_unverified' };
     },
     onSaved,
   );

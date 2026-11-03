@@ -21,19 +21,25 @@ export function RepositoryRoleDefaults({ repositoryId }: { repositoryId: string 
   const [loadFailed, setLoadFailed] = useState(false);
   const [savingTool, setSavingTool] = useState<string | null>(null);
   const [saveError, setSaveError] = useState(false);
+  const [savedStale, setSavedStale] = useState(false);
 
   // Moves on every read and write: an answer that finds it moved may be older than what
   // is shown. A read is then dropped for the later one, and a write reads again.
   const requestRef = useRef(0);
 
-  const load = useCallback(async () => {
+  /** @returns false when this read was answered and failed. A read that was overtaken says nothing. */
+  const load = useCallback(async (): Promise<boolean> => {
     requestRef.current += 1;
     const request = requestRef.current;
     const [result, list] = await Promise.all([roleApi.repositoryDefaults(repositoryId), roleApi.list()]);
-    if (request !== requestRef.current) return;
-    if (result.ok) setDefaults(result.data.defaults);
-    setLoadFailed(!result.ok);
+    if (request !== requestRef.current) return true;
+    if (result.ok) {
+      setDefaults(result.data.defaults);
+      setSavedStale(false);
+    }
+    setLoadFailed(!result.ok || !list.ok);
     if (list.ok) setRoles(list.data.roles);
+    return result.ok;
   }, [repositoryId]);
 
   useEffect(() => {
@@ -44,7 +50,8 @@ export function RepositoryRoleDefaults({ repositoryId }: { repositoryId: string 
   }, [load]);
 
   // A role deleted or renamed, or a system default changed, reads differently here.
-  useRoleCatalogChanged(load);
+  const onCatalogChanged = useCallback(() => void load(), [load]);
+  useRoleCatalogChanged(onCatalogChanged);
 
   const handleChange = useCallback(
     async (cliToolId: string, choice: string) => {
@@ -55,7 +62,7 @@ export function RepositoryRoleDefaults({ repositoryId }: { repositoryId: string 
       const result = await roleApi.setRepositoryDefault(repositoryId, cliToolId, roleInputOf(choice));
       if (result.ok) {
         if (request === requestRef.current) setDefaults(result.data.defaults);
-        else void load();
+        else if (!(await load())) setSavedStale(true);
         refreshAllShownInstanceRoleSettings();
       } else {
         setSaveError(true);
@@ -77,6 +84,11 @@ export function RepositoryRoleDefaults({ repositoryId }: { repositoryId: string 
   return (
     <div className="space-y-3" data-testid={`repository-roles-${repositoryId}`}>
       <p className="text-xs text-muted-foreground">{t('agentRoles.repository.description')}</p>
+      {savedStale && (
+        <p role="status" data-testid={`repository-roles-stale-${repositoryId}`} className="text-xs text-warning">
+          {t('agentRoles.savedStale')}
+        </p>
+      )}
       {loadFailed && (
         <p role="alert" data-testid={`repository-roles-error-${repositoryId}`} className="text-xs text-danger-foreground">
           {t('agentRoles.loadError')}

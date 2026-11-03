@@ -301,6 +301,8 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Issue #4117: saved, but the roster could not be read back. Not an error.
+  const [savedUnverified, setSavedUnverified] = useState(false);
   // Per-id alias edit drafts (decoupled from prop to allow free typing).
   const [aliasDrafts, setAliasDrafts] = useState<Record<string, string>>({});
   // Base tool for the "add instance" control.
@@ -487,8 +489,10 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
     async (build: RosterBuilder) => {
       setSaving(true);
       setError(null);
+      setSavedUnverified(false);
       try {
         const result = await writeRoster(build);
+        if (result.status === 'saved_unverified') setSavedUnverified(true);
         if (result.status === 'failed') {
           setError(
             t(
@@ -896,6 +900,12 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
       {error && (
         <p data-testid="agent-instances-error" className="mt-3 text-xs text-danger-foreground">
           {error}
+        </p>
+      )}
+
+      {savedUnverified && (
+        <p role="status" data-testid="agent-instances-saved-unverified" className="mt-3 text-xs text-warning">
+          {t('agentInstanceSavedUnverified')}
         </p>
       )}
 

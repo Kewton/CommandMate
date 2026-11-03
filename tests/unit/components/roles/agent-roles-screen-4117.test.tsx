@@ -413,6 +413,161 @@ describe('[#4117] the queue', () => {
   });
 });
 
+describe('[#4117] an answer the store refused goes to nobody', () => {
+  const COPILOT: AgentInstance = { id: 'copilot', cliTool: 'copilot', alias: 'Copilot', order: 3 };
+  const focus = () => act(async () => window.dispatchEvent(new Event('focus')));
+
+  /** A row added elsewhere, read here while the save's older answer is still on its way. */
+  async function crossWithNewerRead(): Promise<void> {
+    await waitFor(() => expect(server.heldCount).toBe(1));
+    server.holdRosterAnswers = false;
+    const reads = () => server.calls.filter((c) => !c.method.includes('P') && c.url.endsWith('/instances/roles')).length;
+    const before = reads();
+    server.changeRosterElsewhere([...server.roster, COPILOT]);
+    await focus();
+    await waitFor(() => expect(reads()).toBeGreaterThan(before));
+    await act(async () => {});
+  }
+
+  it('a create: the parent gets the roster read afterwards, not the older answer', async () => {
+    const onAdded = vi.fn();
+    render(<Desktop onAdded={onAdded} />);
+    await openAdd();
+    server.holdRosterAnswers = true;
+    fireEvent.click(screen.getByTestId('agent-add-submit'));
+    await crossWithNewerRead();
+    await act(async () => server.release());
+
+    await waitFor(() => expect(onAdded).toHaveBeenCalled());
+    expect(screen.getByTestId('roster').textContent).toContain('claude-2:');
+    expect(screen.getByTestId('roster').textContent).toContain('copilot:Copilot');
+    expect(screen.queryByTestId('agent-add-saved-unverified')).toBeNull();
+  });
+
+  it('a pane save: the parent gets the roster read afterwards, not the older answer', async () => {
+    render(<Desktop />);
+    await waitFor(() => expect(server.calls.some((c) => c.url.endsWith('/instances/roles'))).toBe(true));
+    await act(async () => {});
+    server.holdRosterAnswers = true;
+    const alias = screen.getByTestId('agent-instance-alias-codex');
+    fireEvent.change(alias, { target: { value: 'Lead' } });
+    fireEvent.blur(alias);
+    await crossWithNewerRead();
+    await act(async () => server.release());
+
+    await waitFor(() => expect(screen.getByTestId('roster').textContent).toBe('claude:Claude,codex:Lead,copilot:Copilot'));
+    expect(screen.queryByTestId('agent-instances-saved-unverified')).toBeNull();
+  });
+
+  it('a create whose read afterwards fails: not a failure, says to reload, cannot be pressed again', async () => {
+    const onAdded = vi.fn();
+    render(<Desktop onAdded={onAdded} />);
+    await openAdd();
+    server.holdRosterAnswers = true;
+    fireEvent.click(screen.getByTestId('agent-add-submit'));
+    await crossWithNewerRead();
+    server.refuseSettingsRead = true;
+    await act(async () => server.release());
+
+    await waitFor(() => expect(screen.getByTestId('agent-add-saved-unverified').textContent).toContain('再読み込み'));
+    expect(screen.queryByTestId('agent-add-error')).toBeNull();
+    expect(screen.getByTestId('agent-add-submit')).toBeDisabled();
+    expect(onAdded).not.toHaveBeenCalled();
+    expect(screen.getByTestId('roster').textContent).toBe('claude:Claude,codex:Codex');
+    expect(server.roster.map((i) => i.id)).toContain('claude-2');
+  });
+
+  it('a pane save whose read afterwards fails: not a failure, and the parent keeps what it had', async () => {
+    render(<Desktop />);
+    await waitFor(() => expect(server.calls.some((c) => c.url.endsWith('/instances/roles'))).toBe(true));
+    await act(async () => {});
+    server.holdRosterAnswers = true;
+    const alias = screen.getByTestId('agent-instance-alias-codex');
+    fireEvent.change(alias, { target: { value: 'Lead' } });
+    fireEvent.blur(alias);
+    await crossWithNewerRead();
+    server.refuseSettingsRead = true;
+    await act(async () => server.release());
+
+    await waitFor(() => expect(screen.getByTestId('agent-instances-saved-unverified').textContent).toContain('再読み込み'));
+    expect(screen.queryByTestId('agent-instances-error')).toBeNull();
+    expect(screen.getByTestId('roster').textContent).toBe('claude:Claude,codex:Codex');
+  });
+
+  async function crossTwoRoleSaves(): Promise<void> {
+    render(<Desktop />);
+    fireEvent.click(screen.getByTestId('instance-roles-toggle'));
+    await screen.findByTestId('instance-role-select-claude');
+    await waitFor(() => expect(within(select('instance-role-select-claude')).getByText(REVIEWER.name)).toBeInTheDocument());
+    server.holdPutAnswers = true;
+    fireEvent.change(select('instance-role-select-claude'), { target: { value: REVIEWER.id } });
+    await waitFor(() => expect(server.heldCount).toBe(1));
+    fireEvent.change(select('instance-role-select-codex'), { target: { value: 'none' } });
+    await waitFor(() => expect(server.heldCount).toBe(2));
+    await act(async () => server.releaseLast());
+    await waitFor(() => expect(screen.getByTestId('instance-role-source-codex').textContent).toContain('なし'));
+  }
+
+  it('two role saves whose read afterwards fails: says to reload, with no save error, and the next read clears it', async () => {
+    await crossTwoRoleSaves();
+    server.refuseSettingsRead = true;
+    await act(async () => server.releaseLast());
+
+    await waitFor(() => expect(screen.getByTestId('instance-roles-stale').textContent).toContain('再読み込み'));
+    expect(screen.queryByTestId('instance-role-error-claude')).toBeNull();
+    expect(screen.queryByTestId('instance-role-error-codex')).toBeNull();
+
+    server.refuseSettingsRead = false;
+    await focus();
+    await waitFor(() => expect(screen.queryByTestId('instance-roles-stale')).toBeNull());
+  });
+
+  it('negative control: a read afterwards that works says nothing', async () => {
+    await crossTwoRoleSaves();
+    await act(async () => server.releaseLast());
+    await act(async () => {});
+    expect(screen.queryByTestId('instance-roles-stale')).toBeNull();
+  });
+
+  it('a roster save with rows on screen whose read afterwards fails: the rows say so', async () => {
+    render(<Desktop />);
+    fireEvent.click(screen.getByTestId('instance-roles-toggle'));
+    await screen.findByTestId('instance-role-select-codex');
+    await act(async () => {});
+    server.refuseSettingsRead = true;
+    const alias = screen.getByTestId('agent-instance-alias-codex');
+    fireEvent.change(alias, { target: { value: 'Lead' } });
+    fireEvent.blur(alias);
+    await waitFor(() => expect(screen.getByTestId('instance-roles-stale')).toBeInTheDocument());
+    expect(screen.queryByTestId('agent-instances-error')).toBeNull();
+    expect(screen.getByTestId('roster').textContent).toContain('codex:Lead');
+  });
+
+  it('a role list that cannot be read says so', async () => {
+    const real = server.fetch;
+    global.fetch = vi.fn((url: string, init?: RequestInit) =>
+      url === '/api/roles'
+        ? Promise.resolve({ ok: false, status: 500, json: async () => ({ success: false, error: 'internal_error' }) })
+        : real(url, init),
+    ) as unknown as typeof fetch;
+    render(<Desktop />);
+    fireEvent.click(screen.getByTestId('instance-roles-toggle'));
+    await screen.findByTestId('instance-roles-list-error');
+  });
+
+  it('a restart whose read afterwards fails: the rows say so', async () => {
+    server.running.claude = true;
+    server.application.claude = { launched: launched({ roleName: 'PM' }), restartPending: 'yes' };
+    render(<Desktop />);
+    fireEvent.click(screen.getByTestId('instance-roles-toggle'));
+    const restart = await screen.findByTestId('instance-role-restart-claude');
+    server.refuseSettingsRead = true;
+    fireEvent.click(restart);
+    fireEvent.click(await screen.findByTestId('confirm-dialog-confirm'));
+    await waitFor(() => expect(screen.getByTestId('instance-roles-stale')).toBeInTheDocument());
+  });
+});
+
 describe('[#4117] the split header', () => {
   const header = () => screen.getByTestId('split-role-status-0');
 

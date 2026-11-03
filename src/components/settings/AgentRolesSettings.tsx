@@ -188,7 +188,7 @@ export function AgentRolesSettings(): React.ReactElement {
     if (read !== readRef.current) return;
     if (list.ok) setRoles(list.data.roles);
     if (system.ok) setDefaults(system.data.defaults);
-    setLoadFailed(!list.ok);
+    setLoadFailed(!list.ok || !system.ok);
   }, []);
 
   useEffect(() => {
