@@ -479,6 +479,87 @@ describe('restart pending', () => {
     expect(again.instances.map((entry) => entry.application.restartPending)).toEqual(['no', 'no']);
   });
 
+  describe('the roster changing while the panes are being read', () => {
+    const entry = (id: string, cliTool: string, order: number) => ({ id, cliTool, alias: id, order });
+    const roster = (secondTool: string) =>
+      setAgentInstances(db, WT, [entry('claude', 'claude', 0), entry('second', secondTool, 1)] as never);
+    const secondOf = (settings: Awaited<ReturnType<typeof buildInstanceRoleSettings>>) =>
+      settings.instances.find((instance) => instance.instanceId === 'second');
+
+    /** Answers as the pane of that tool would, after the id has been given to another tool. */
+    function swappingTo(tool: string): (cliToolId: unknown) => Promise<RoleComposition> {
+      return async (cliToolId) => {
+        if (cliToolId === 'codex' || cliToolId === 'opencode-v2') roster(tool);
+        return cliToolId === 'opencode-v2' ? { opencodeV2EffectiveAgent: 'build' } : {};
+      };
+    }
+
+    beforeEach(() => {
+      setSystemRoleDefault(db, 'codex', a);
+      setSystemRoleDefault(db, 'opencode-v2', a);
+      setSystemRoleDefault(db, 'claude', a);
+    });
+
+    it.each([
+      ['Codex to V2', 'codex', 'opencode-v2'],
+      ['V2 to Codex', 'opencode-v2', 'codex'],
+    ])('%s: the other tool\'s composition is not used, and it reads as unknown', async (_name, before, after) => {
+      roster(before);
+      const live = await buildInstanceRoleSettings(db, WT, deps);
+      const fingerprint = secondOf(live)?.application.effectiveNext.injectionFingerprint ?? null;
+      recordRoleLaunch(db, { ...launchInput(fingerprint), instanceId: 'second', cliToolId: before });
+
+      const raced = secondOf(await buildInstanceRoleSettings(db, WT, { ...deps, loadComposition: swappingTo(after) }));
+      expect(raced?.cliToolId).toBe(after);
+      expect(raced?.application.effectiveNext.kind).toBe('role');
+      expect(raced?.application.effectiveNext.injectionFingerprint).toBeNull();
+      expect(raced?.application.restartPending).toBe('unknown');
+
+      // Nothing left over: the next read has the composition of the tool it now is.
+      const next = secondOf(await buildInstanceRoleSettings(db, WT, deps));
+      expect(next?.application.effectiveNext.injectionFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    it('asks each pane once, so a change means no more waiting', async () => {
+      roster('codex');
+      const asked = vi.fn(swappingTo('opencode-v2'));
+      await buildInstanceRoleSettings(db, WT, { ...deps, loadComposition: asked });
+      expect(asked).toHaveBeenCalledTimes(2);
+    });
+
+    it('the worktree moving while they are read: not the composition of this place', async () => {
+      roster('opencode-v2');
+      const raced = secondOf(
+        await buildInstanceRoleSettings(db, WT, {
+          ...deps,
+          loadComposition: async () => {
+            db.prepare('UPDATE worktrees SET path = ? WHERE id = ?').run(`${ROOT}/moved`, WT);
+            return { opencodeV2EffectiveAgent: 'build' };
+          },
+        })
+      );
+      expect(raced?.application.restartPending).toBe('unknown');
+      expect(raced?.application.effectiveNext.injectionFingerprint).toBeNull();
+    });
+
+    it('an instance added while they are read has none, and the others are computed', async () => {
+      roster('codex');
+      const settings = await buildInstanceRoleSettings(db, WT, {
+        ...deps,
+        loadComposition: async () => {
+          setAgentInstances(db, WT, [entry('claude', 'claude', 0), entry('second', 'codex', 1), entry('third', 'codex', 2)] as never);
+          return {};
+        },
+      });
+      const [claude, second, third] = settings.instances;
+      expect(claude.application.effectiveNext.injectionFingerprint).not.toBeNull();
+      expect(second.application.effectiveNext.injectionFingerprint).not.toBeNull();
+      expect(third.instanceId).toBe('third');
+      expect(third.application.effectiveNext.injectionFingerprint).toBeNull();
+      expect(third.application.restartPending).toBe('unknown');
+    });
+  });
+
   it('the pure comparison', () => {
     const record = (injectionFingerprint: string | null) => ({ injectionFingerprint }) as RoleLaunchRecord;
     expect(computeRestartPending({ computed: true, fingerprint: 'x' }, record('x'))).toBe('no');

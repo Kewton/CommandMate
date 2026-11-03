@@ -155,6 +155,15 @@ export async function buildInstanceRoleSettings(
   deps: RoleApplicationDeps = {}
 ): Promise<InstanceRoleSettingsResponse> {
   // Read first and outside: these wait, and no database answer may cross an await.
+  //
+  // So the roster can change while they do (the PATCH on a worktree may give an id to
+  // another tool). Each answer is kept under everything it was asked for, and the
+  // roster read below finds only what still describes it. Anything else has none, and
+  // reads as not computable: `unknown`, rather than a fingerprint of another tool's
+  // settings. Not asked again, so a roster that keeps changing cannot hold this up;
+  // the next read has it right.
+  const compositionKey = (cliToolId: CLIToolType, instanceId: string, worktreePath: string): string =>
+    JSON.stringify([cliToolId, instanceId, worktreePath]);
   const compositions = new Map<string, RoleComposition | null>();
   if (deps.loadComposition) {
     const row = getWorktreeById(db, worktreeId);
@@ -163,7 +172,7 @@ export async function buildInstanceRoleSettings(
       await Promise.all(
         instances.map(async (instance) => {
           const composition = await deps.loadComposition?.(instance.cliTool, instance.id, row.path).catch(() => null);
-          compositions.set(instance.id, composition ?? null);
+          compositions.set(compositionKey(instance.cliTool, instance.id, row.path), composition ?? null);
         })
       );
     }
@@ -178,7 +187,10 @@ export async function buildInstanceRoleSettings(
       const stored = getInstanceRoleState(db, worktree.id, instance.id);
       const records = getLatestRoleLaunchRecords(db, worktree.id, instance.id);
       const resolution = resolveDefaultsForTool(db, instance.cliTool, membership, stored);
-      const next = injectionOf(resolution, compositions.get(instance.id) ?? null);
+      const next = injectionOf(
+        resolution,
+        compositions.get(compositionKey(instance.cliTool, instance.id, worktree.path)) ?? null
+      );
       const generation = deps.currentGeneration?.(instance.cliTool, instance.id) ?? null;
       const launched =
         records.launched !== null && records.launched.sessionGeneration === generation ? records.launched : null;
