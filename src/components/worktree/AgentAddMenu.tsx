@@ -13,10 +13,10 @@
  * It creates the instance and its role in one request (`POST .../instances/roles`,
  * Issue #4117), so a failure leaves neither, and hands the new instance and the
  * chosen placement to the caller, which shows it in the chosen split. When the
- * role settings could not be read there is no role to choose and no revision to
- * hold, and it falls back to the roster `PATCH /api/worktrees/[id]` the pane uses,
- * which adds the instance with the default role: "could not check" must not lock
- * the "+", as with the installed list below.
+ * role settings could not be read there is no role to choose, and it falls back to
+ * the roster `PATCH /api/worktrees/[id]` the pane uses, which adds the instance with
+ * the default role: "could not check" must not lock the "+", as with the installed
+ * list below. Either way the save carries a revision; the queue refuses it with none.
  *
  * What the default is comes from the same GET's `toolDefaults`; nothing is resolved
  * here. It does NOT start a session: a split showing an instance with no session is
@@ -181,8 +181,8 @@ export const AgentAddMenu = memo(function AgentAddMenu({
 
   const atMax = instances.length >= MAX_AGENT_INSTANCES;
   // Issue #3514: the same per-worktree write queue AgentInstancesPane uses.
-  const writeRoster = useAgentInstancesRoster(worktreeId, instances, onInstancesChange);
-  const createInstance = useAgentInstanceCreate(worktreeId, instances, onInstancesChange);
+  const writeRoster = useAgentInstancesRoster(worktreeId, onInstancesChange);
+  const createInstance = useAgentInstanceCreate(worktreeId, onInstancesChange);
 
   const isToolSelectable = useCallback(
     (id: CLIToolType) => installed == null || installed.includes(id),
@@ -293,7 +293,9 @@ export const AgentAddMenu = memo(function AgentAddMenu({
                 ? 'agentAdd.roleMissing'
                 : failure === 'roster_changed'
                   ? 'agentAdd.rosterChanged'
-                  : 'agentAdd.saveError',
+                  : failure === 'roster_unreadable'
+                    ? 'agentAdd.rosterUnreadable'
+                    : 'agentAdd.saveError',
             ),
           );
           return;

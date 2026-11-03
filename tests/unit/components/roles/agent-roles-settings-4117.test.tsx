@@ -7,9 +7,11 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { SettingsGeneralSection } from '@/components/settings';
 import { RepositoryList } from '@/components/repository/RepositoryList';
+import { InstanceRolesSection } from '@/components/roles/InstanceRolesSection';
+import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 import { repositoryApi, type RepositoryListItem } from '@/lib/api-client';
 import { roleEditExample } from '@tests/integration/fixtures/agent-roles-api-examples';
 import { FakeRoleServer, MARKETER, REVIEWER } from './fake-role-server';
@@ -74,10 +76,13 @@ describe('[#4117] roles in the settings', () => {
     fireEvent.click(screen.getByTestId(`agent-role-edit-${MARKETER.id}`));
     await waitFor(() => expect(field('agent-role-edit-body').value).toBe('あなたはマーケターです。'));
     fireEvent.change(field('agent-role-edit-name'), { target: { value: '新しい名前' } });
+    fireEvent.change(field('agent-role-edit-body'), { target: { value: '新しい本文' } });
     fireEvent.click(screen.getByTestId('agent-role-edit-submit'));
 
     await waitFor(() => expect(screen.getByTestId(`agent-role-row-${MARKETER.id}`).textContent).toContain('新しい名前'));
-    expect(server.writes('PUT', `/api/roles/${MARKETER.id}`)[0].expectedBodyVersion).toBe(MARKETER.bodyVersion);
+    expect(server.writes('PUT', `/api/roles/${MARKETER.id}`)).toEqual([
+      { name: '新しい名前', body: '新しい本文', expectedBodyVersion: MARKETER.bodyVersion },
+    ]);
     const { instances, repositories, system } = roleEditExample.affected;
     expect(screen.getByTestId('agent-roles-notice').textContent).toContain(
       String(instances.length + repositories.length + system.length),
@@ -90,8 +95,96 @@ describe('[#4117] roles in the settings', () => {
     fireEvent.click(screen.getByTestId(`agent-role-edit-${MARKETER.id}`));
     await waitFor(() => expect(field('agent-role-edit-body').value).not.toBe(''));
     server.roles = server.roles.map((role) => (role.id === MARKETER.id ? { ...role, bodyVersion: 99 } : role));
+    fireEvent.change(field('agent-role-edit-body'), { target: { value: '古い画面からの本文' } });
     fireEvent.click(screen.getByTestId('agent-role-edit-submit'));
     await waitFor(() => expect(screen.getByTestId('agent-role-edit-error').textContent).toContain('別の場所'));
+    expect(server.bodies[MARKETER.id]).not.toBe('古い画面からの本文');
+  });
+
+  describe('sends only what the form changed', () => {
+    async function openEdit(): Promise<void> {
+      await renderSettings();
+      fireEvent.click(screen.getByTestId(`agent-role-edit-${MARKETER.id}`));
+      await waitFor(() => expect(field('agent-role-edit-body').value).not.toBe(''));
+    }
+    const renameElsewhere = (name: string): void => {
+      server.roles = server.roles.map((role) => (role.id === MARKETER.id ? { ...role, name } : role));
+    };
+    const puts = () => server.writes('PUT', `/api/roles/${MARKETER.id}`);
+
+    it('a body save from a form opened before a rename elsewhere keeps that rename', async () => {
+      await openEdit();
+      renameElsewhere('別の画面の名前');
+      fireEvent.change(field('agent-role-edit-body'), { target: { value: '新しい本文' } });
+      fireEvent.click(screen.getByTestId('agent-role-edit-submit'));
+      await waitFor(() => expect(puts()).toHaveLength(1));
+      expect(puts()[0]).toEqual({ body: '新しい本文', expectedBodyVersion: MARKETER.bodyVersion });
+      await waitFor(() => expect(screen.getByTestId(`agent-role-row-${MARKETER.id}`).textContent).toContain('別の画面の名前'));
+      expect(server.bodies[MARKETER.id]).toBe('新しい本文');
+    });
+
+    it('a rename does not send the body or its version, and does not move the version', async () => {
+      await openEdit();
+      fireEvent.change(field('agent-role-edit-name'), { target: { value: '新しい名前' } });
+      fireEvent.click(screen.getByTestId('agent-role-edit-submit'));
+      await waitFor(() => expect(puts()).toEqual([{ name: '新しい名前' }]));
+      expect(server.roles.find((role) => role.id === MARKETER.id)?.bodyVersion).toBe(MARKETER.bodyVersion);
+    });
+
+    it('a rename over a rename elsewhere is refused before it is sent', async () => {
+      await openEdit();
+      renameElsewhere('別の画面の名前');
+      fireEvent.change(field('agent-role-edit-name'), { target: { value: '新しい名前' } });
+      fireEvent.click(screen.getByTestId('agent-role-edit-submit'));
+      await waitFor(() => expect(screen.getByTestId('agent-role-edit-error').textContent).toContain('別の場所'));
+      expect(puts()).toEqual([]);
+      expect(server.roles.find((role) => role.id === MARKETER.id)?.name).toBe('別の画面の名前');
+    });
+
+    it('name and body together over a body edit elsewhere change nothing', async () => {
+      await openEdit();
+      server.roles = server.roles.map((role) => (role.id === MARKETER.id ? { ...role, bodyVersion: 99 } : role));
+      fireEvent.change(field('agent-role-edit-name'), { target: { value: '新しい名前' } });
+      fireEvent.change(field('agent-role-edit-body'), { target: { value: '新しい本文' } });
+      fireEvent.click(screen.getByTestId('agent-role-edit-submit'));
+      await waitFor(() => expect(screen.getByTestId('agent-role-edit-error').textContent).toContain('別の場所'));
+      expect(server.roles.find((role) => role.id === MARKETER.id)?.name).toBe(MARKETER.name);
+    });
+
+    it('negative control: nothing changed sends nothing and closes the form', async () => {
+      await openEdit();
+      fireEvent.click(screen.getByTestId('agent-role-edit-submit'));
+      await waitFor(() => expect(screen.queryByTestId('agent-role-edit-form')).toBeNull());
+      expect(puts()).toEqual([]);
+    });
+  });
+
+  it('a read that left first and answers last does not put back the older list', async () => {
+    let release: () => void = () => {};
+    let held = false;
+    const real = server.fetch;
+    global.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      const answer = await real(url, init);
+      if (url === '/api/roles' && !init?.method && !held) {
+        held = true;
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+      return answer;
+    }) as unknown as typeof fetch;
+    render(<SettingsGeneralSection />);
+    await waitFor(() => expect(held).toBe(true));
+
+    fireEvent.click(screen.getByTestId('agent-role-new'));
+    fireEvent.change(field('agent-role-create-name'), { target: { value: 'PM' } });
+    fireEvent.change(field('agent-role-create-body'), { target: { value: 'x' } });
+    fireEvent.click(screen.getByTestId('agent-role-create-submit'));
+    await waitFor(() => expect(screen.getAllByText('PM').length).toBeGreaterThan(0));
+
+    await act(async () => release());
+    await act(async () => {});
+    expect(screen.getAllByText('PM').length).toBeGreaterThan(0);
   });
 
   it('a role in use lists what the 409 says, and goes only on the second decision', async () => {
@@ -141,6 +234,141 @@ describe('[#4117] roles in the settings', () => {
   it('explains how a role differs from an OpenCode persona', async () => {
     await renderSettings();
     expect(screen.getByTestId('agent-roles-persona-note').textContent).toContain('ペルソナ');
+  });
+});
+
+describe('[#4117] a change in the settings reaches what is open elsewhere', () => {
+  const REPO: RepositoryListItem = {
+    id: 'repo-1',
+    name: 'app',
+    displayName: null,
+    path: '/repos/app',
+    enabled: true,
+    visible: true,
+    worktreeCount: 1,
+  };
+  const INSTANCES = [{ id: 'claude', cliTool: 'claude' as const, alias: 'Claude', order: 0 }];
+  const select = () => field('repository-role-select-repo-1-claude');
+  const source = () => screen.getByTestId('repository-role-source-repo-1-claude').textContent;
+  let worktreeSeq = 0;
+
+  async function renderAll(): Promise<void> {
+    server.roster = INSTANCES;
+    worktreeSeq += 1;
+    vi.spyOn(repositoryApi, 'list').mockResolvedValue({ success: true, repositories: [REPO] } as never);
+    render(
+      <ConfirmProvider>
+        <SettingsGeneralSection />
+        <RepositoryList refreshKey={0} />
+        <InstanceRolesSection worktreeId={`w-4117-settings-${worktreeSeq}`} rosterKey="claude" />
+      </ConfirmProvider>,
+    );
+    await screen.findByTestId(`agent-role-row-${MARKETER.id}`);
+    fireEvent.click(await screen.findByTestId('repository-roles-toggle-repo-1'));
+    fireEvent.click(screen.getByTestId('instance-roles-toggle'));
+    await waitFor(() => expect(within(select()).getByText(REVIEWER.name)).toBeInTheDocument());
+    await waitFor(() =>
+      expect(within(field('instance-role-select-claude')).getByText(REVIEWER.name)).toBeInTheDocument(),
+    );
+  }
+
+  it('a forced delete: the open repository and session go back to inherit', async () => {
+    server.repositoryStored.claude = { state: 'role', roleId: REVIEWER.id, roleName: REVIEWER.name };
+    server.stored.claude = { state: 'role', roleId: REVIEWER.id, roleName: REVIEWER.name };
+    server.references[REVIEWER.id] = roleEditExample.affected;
+    await renderAll();
+    await waitFor(() => expect(source()).toBe('指定中: レビュー担当［リポジトリ］'));
+
+    fireEvent.click(screen.getByTestId(`agent-role-delete-${REVIEWER.id}`));
+    fireEvent.click(screen.getByTestId(`agent-role-delete-confirm-${REVIEWER.id}`));
+    fireEvent.click(await screen.findByTestId(`agent-role-force-delete-${REVIEWER.id}`));
+
+    await waitFor(() => expect(source()).toBe('継承中: マーケター［システム］'));
+    expect(select().value).toBe('inherit');
+    expect(within(select()).queryByText(REVIEWER.name)).toBeNull();
+    await waitFor(() =>
+      expect(screen.getByTestId('instance-role-source-claude').textContent).toBe('継承中: マーケター［システム］'),
+    );
+    expect(within(field('instance-role-select-claude')).queryByText(REVIEWER.name)).toBeNull();
+  });
+
+  it('a system default: what inherits it, in the repository and the session, names the new one', async () => {
+    await renderAll();
+    await waitFor(() => expect(source()).toBe('継承中: マーケター［システム］'));
+    fireEvent.change(field('agent-role-system-default-claude'), { target: { value: REVIEWER.id } });
+    await waitFor(() => expect(source()).toBe('継承中: レビュー担当［システム］'));
+    await waitFor(() =>
+      expect(screen.getByTestId('instance-role-source-claude').textContent).toBe('継承中: レビュー担当［システム］'),
+    );
+  });
+
+  it('a rename and a new role: the open selectors follow', async () => {
+    server.repositoryStored.claude = { state: 'role', roleId: REVIEWER.id, roleName: REVIEWER.name };
+    await renderAll();
+    await waitFor(() => expect(source()).toBe('指定中: レビュー担当［リポジトリ］'));
+
+    fireEvent.click(screen.getByTestId(`agent-role-edit-${REVIEWER.id}`));
+    await waitFor(() => expect(field('agent-role-edit-name').value).toBe(REVIEWER.name));
+    fireEvent.change(field('agent-role-edit-name'), { target: { value: '校閲' } });
+    fireEvent.click(screen.getByTestId('agent-role-edit-submit'));
+    await waitFor(() => expect(source()).toBe('指定中: 校閲［リポジトリ］'));
+    await waitFor(() => expect(within(field('instance-role-select-claude')).getByText('校閲')).toBeInTheDocument());
+  });
+
+  it('coming back from another tab reads the open repository again', async () => {
+    await renderAll();
+    await waitFor(() => expect(source()).toBe('継承中: マーケター［システム］'));
+    server.repositoryStored.claude = { state: 'none' };
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    await waitFor(() => expect(source()).toBe('指定中: なし［リポジトリで明示］'));
+  });
+
+  it('a read that left before a repository save does not put the old value back', async () => {
+    await renderAll();
+    await waitFor(() => expect(source()).toBe('継承中: マーケター［システム］'));
+    let release: () => void = () => {};
+    let held = false;
+    const real = server.fetch;
+    global.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      const answer = await real(url, init);
+      if (String(url).endsWith('/role-defaults') && !init?.method && !held) {
+        held = true;
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+      return answer;
+    }) as unknown as typeof fetch;
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    await waitFor(() => expect(held).toBe(true));
+    fireEvent.change(select(), { target: { value: 'none' } });
+    await waitFor(() => expect(source()).toBe('指定中: なし［リポジトリで明示］'));
+    await act(async () => release());
+    await act(async () => {});
+    expect(source()).toBe('指定中: なし［リポジトリで明示］');
+  });
+
+  it('a save that a read overtook reads again, so it does not show the value from before it', async () => {
+    await renderAll();
+    await waitFor(() => expect(source()).toBe('継承中: マーケター［システム］'));
+    server.holdPutAnswers = false;
+    let releasePut: () => void = () => {};
+    const real = server.fetch;
+    global.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      const answer = await real(url, init);
+      if (String(url).endsWith('/role-defaults') && init?.method === 'PUT') {
+        await new Promise<void>((resolve) => {
+          releasePut = resolve;
+        });
+      }
+      return answer;
+    }) as unknown as typeof fetch;
+    fireEvent.change(select(), { target: { value: 'none' } });
+    await waitFor(() => expect(server.writes('PUT', '/role-defaults')).toHaveLength(1));
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    server.repositoryStored.claude = { state: 'role', roleId: REVIEWER.id, roleName: REVIEWER.name };
+    await act(async () => releasePut());
+    await waitFor(() => expect(source()).toBe('指定中: レビュー担当［リポジトリ］'));
   });
 });
 

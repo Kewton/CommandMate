@@ -13,6 +13,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { AgentAddMenu, defaultAlias, nextInstanceId } from '@/components/worktree/AgentAddMenu';
+import { clearRosterSnapshot } from '@/hooks/useInstanceRoleSettings';
 import { MAX_AGENT_INSTANCES, type AgentInstance } from '@/lib/cli-tools/types';
 
 const ROSTER: AgentInstance[] = [
@@ -29,8 +30,13 @@ function mockFetch({
   patchOk = true,
 }: { installed?: string[]; installedOk?: boolean; patchOk?: boolean } = {}): void {
   calls = [];
+  clearRosterSnapshot('w-3514');
   global.fetch = vi.fn((url: string, init?: RequestInit) => {
     calls.push({ url, init });
+    // Issue #4117: a save reads the roster and its revision first.
+    if (url === '/api/worktrees/w-3514' && !init?.method) {
+      return Promise.resolve({ ok: true, json: async () => ({ agentInstances: ROSTER, rosterRevision: 'rev-test' }) });
+    }
     if (url.startsWith('/api/settings/default-agents')) {
       return Promise.resolve({
         ok: installedOk,

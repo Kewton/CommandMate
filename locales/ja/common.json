@@ -408,7 +408,8 @@
       "selectLabel": "{alias} のロール",
       "saveError": "ロールを保存できませんでした。",
       "restartConfirm": "{alias} のセッションを終了します。次にメッセージを送ると、今の設定で新しく起動します。",
-      "restartError": "セッションを終了できませんでした。"
+      "restartError": "セッションを終了できませんでした。",
+      "runningUnknown": "稼働状態を読めませんでした。起動中か停止中かは表示していません。"
     },
     "repository": {
       "toggle": "ロール",

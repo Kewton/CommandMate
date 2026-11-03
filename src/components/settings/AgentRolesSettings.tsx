@@ -5,16 +5,20 @@
  *
  * A delete is asked for once here and refused by the server when the role is in use;
  * the references shown come from that 409, and removing them takes a second decision.
+ *
+ * An edit sends only what the form changed. The body has a version and the name has
+ * none, so a name sent along with a body edit would put back the name it was opened
+ * with, whatever another tab renamed it to since.
  */
 
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Card } from '@/components/ui';
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
 import { roleApi, roleInUseReferences, type RoleApiFailure } from '@/lib/api-client-agent-roles';
-import { refreshAllShownInstanceRoleSettings } from '@/hooks/useInstanceRoleSettings';
+import { notifyRoleCatalogChanged } from '@/hooks/useInstanceRoleSettings';
 import {
   MAX_ROLE_BODY_BYTES,
   MAX_ROLE_NAME_LENGTH,
@@ -175,8 +179,13 @@ export function AgentRolesSettings(): React.ReactElement {
   const [notice, setNotice] = useState<string | null>(null);
   const [defaultError, setDefaultError] = useState(false);
 
+  // An older read that arrives after a newer one must not put back the older list.
+  const readRef = useRef(0);
   const reload = useCallback(async () => {
+    readRef.current += 1;
+    const read = readRef.current;
     const [list, system] = await Promise.all([roleApi.list(), roleApi.systemDefaults()]);
+    if (read !== readRef.current) return;
     if (list.ok) setRoles(list.data.roles);
     if (system.ok) setDefaults(system.data.defaults);
     setLoadFailed(!list.ok);
@@ -186,10 +195,10 @@ export function AgentRolesSettings(): React.ReactElement {
     void reload();
   }, [reload]);
 
-  /** The list, the defaults and every session on screen follow a change to a role. */
+  /** The list, the defaults, every session and every open repository follow a change to a role. */
   const afterChange = useCallback(async () => {
     await reload();
-    refreshAllShownInstanceRoleSettings();
+    notifyRoleCatalogChanged();
   }, [reload]);
 
   const failureText = useCallback(
@@ -240,9 +249,33 @@ export function AgentRolesSettings(): React.ReactElement {
   const handleSaveEdit = useCallback(
     async (name: string, body: string) => {
       if (!editing) return;
+      const nameChanged = name !== editing.name;
+      const bodyChanged = body !== editing.body;
+      if (!nameChanged && !bodyChanged) {
+        setEditing(null);
+        return;
+      }
       setBusy(true);
       setEditError(null);
-      const result = await roleApi.update(editing.id, { name, body, expectedBodyVersion: editing.version });
+      if (nameChanged) {
+        // The server has no condition on the name, so a rename elsewhere is looked
+        // for here. What is left is the moment between this read and the write.
+        const current = await roleApi.get(editing.id);
+        if (!current.ok) {
+          setEditError(failureText(current));
+          setBusy(false);
+          return;
+        }
+        if (current.data.role.name !== editing.name && current.data.role.name !== name) {
+          setEditError(t('agentRoles.manage.versionConflict'));
+          setBusy(false);
+          return;
+        }
+      }
+      const result = await roleApi.update(editing.id, {
+        ...(nameChanged ? { name } : {}),
+        ...(bodyChanged ? { body, expectedBodyVersion: editing.version } : {}),
+      });
       if (result.ok) {
         setEditing(null);
         const { affected } = result.data;
@@ -292,7 +325,7 @@ export function AgentRolesSettings(): React.ReactElement {
       const result = await roleApi.setSystemDefault(cliToolId, roleId === '' ? null : roleId);
       if (result.ok) {
         setDefaults(result.data.defaults);
-        refreshAllShownInstanceRoleSettings();
+        notifyRoleCatalogChanged();
       } else {
         setDefaultError(true);
       }

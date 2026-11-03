@@ -4,8 +4,8 @@
  * `NotesAndLogsPane` on a phone. Responses have the shapes of the role API examples.
  *
  * Positive controls: everything about POST, the revision and the role section fails
- * on the code before this Issue. Negative controls: with no role settings readable the
- * "+" and the pane write the old PATCH with no condition.
+ * on the code before this Issue. Negative control: with no role settings readable the
+ * "+" still adds, by PATCH.
  *
  * @vitest-environment jsdom
  */
@@ -206,13 +206,8 @@ describe('[#4117] the add dialog', () => {
     expect(server.roster.map((i) => i.id)).toEqual(['claude', 'codex']);
   });
 
-  it('negative control: when the settings cannot be read it adds by PATCH, with no condition', async () => {
-    global.fetch = vi.fn((url: string, init?: RequestInit) => {
-      if (String(url).startsWith('/api/settings/default-agents')) {
-        return Promise.resolve({ ok: true, json: async () => ({ installed: ['claude'] }) });
-      }
-      return server.fetch(init?.method === 'PATCH' ? url : '/unknown', init);
-    }) as unknown as typeof fetch;
+  it('negative control: when the settings cannot be read it still adds, by PATCH, against the revision it read', async () => {
+    server.refuseSettingsRead = true;
     const onAdded = vi.fn();
     render(<Desktop onAdded={onAdded} />);
     await openAdd();
@@ -220,7 +215,20 @@ describe('[#4117] the add dialog', () => {
     fireEvent.click(screen.getByTestId('agent-add-submit'));
     await waitFor(() => expect(onAdded).toHaveBeenCalled());
     expect(server.writes('POST')).toEqual([]);
-    expect(server.writes('PATCH')[0]).not.toHaveProperty('expectedRosterRevision');
+    expect(server.writes('PATCH')[0].expectedRosterRevision).toBe('rev-1');
+  });
+
+  it('adds nothing, says why and stays open when neither the settings nor the roster can be read', async () => {
+    server.refuseSettingsRead = true;
+    server.refuseWorktreeRead = true;
+    const onAdded = vi.fn();
+    render(<Desktop onAdded={onAdded} />);
+    await openAdd();
+    fireEvent.click(screen.getByTestId('agent-add-submit'));
+    await waitFor(() => expect(screen.getByTestId('agent-add-error').textContent).toContain('今の名簿を読めなかった'));
+    expect(server.writes('PATCH')).toEqual([]);
+    expect(onAdded).not.toHaveBeenCalled();
+    expect(screen.getByTestId('agent-add-form')).toBeInTheDocument();
   });
 });
 
@@ -286,19 +294,122 @@ describe('[#4117] the queue', () => {
 
   it('gives up with a failure rather than saving blind when the roster cannot be read again', async () => {
     const onSaved = vi.fn();
-    const responses = [{ ok: false, status: 409, json: async () => ({}) }];
+    const responses = [
+      { ok: true, status: 200, json: async () => ({ agentInstances: INITIAL, rosterRevision: 'rev-1' }) },
+      { ok: false, status: 409, json: async () => ({}) },
+    ];
     global.fetch = vi.fn(async () => responses.shift() ?? { ok: false, status: 500, json: async () => ({}) }) as unknown as typeof fetch;
-    const result = await enqueueRosterWrite(`${worktreeId}-x`, () => INITIAL, (base) => [...base], onSaved);
+    const result = await enqueueRosterWrite(`${worktreeId}-x`, (base) => [...base], onSaved);
     expect(result).toEqual({ status: 'failed', error: 'roster_changed' });
     expect(onSaved).not.toHaveBeenCalled();
   });
 
-  it('negative control: with no revision known nothing extra is sent', async () => {
+  it('with no revision held, reads the roster first and saves against what it read', async () => {
     const onSaved = vi.fn();
-    const result = await enqueueRosterWrite(`${worktreeId}-y`, () => INITIAL, (base) => [...base], onSaved);
+    server.changeRosterElsewhere([...INITIAL, { id: 'copilot', cliTool: 'copilot', alias: 'Copilot', order: 2 }]);
+    const result = await enqueueRosterWrite(
+      worktreeId,
+      (base) => base.map((inst) => (inst.id === 'codex' ? { ...inst, alias: 'Lead' } : inst)),
+      onSaved,
+    );
     expect(result.status).toBe('saved');
-    expect(server.calls).toHaveLength(1);
-    expect(server.writes('PATCH')[0]).toEqual({ agentInstances: INITIAL });
+    expect(server.calls.map((call) => call.method)).toEqual(['GET', 'PATCH']);
+    // The row from elsewhere stays, and what the GET adds to a row is not sent back.
+    expect(server.writes('PATCH')[0]).toEqual({
+      agentInstances: [
+        { id: 'claude', cliTool: 'claude', alias: 'Claude', order: 0 },
+        { id: 'codex', cliTool: 'codex', alias: 'Lead', order: 1 },
+        { id: 'copilot', cliTool: 'copilot', alias: 'Copilot', order: 2 },
+      ],
+      expectedRosterRevision: 'rev-2',
+    });
+  });
+
+  it('with no revision to be had, sends no save and the pane says why', async () => {
+    server.refuseWorktreeRead = true;
+    server.refuseSettingsRead = true;
+    render(<Desktop />);
+    const alias = await screen.findByTestId('agent-instance-alias-codex');
+    fireEvent.change(alias, { target: { value: 'Lead' } });
+    fireEvent.blur(alias);
+    await waitFor(() => expect(screen.getByTestId('agent-instances-error').textContent).toContain('今の名簿を読めなかった'));
+    expect(server.writes('PATCH')).toEqual([]);
+    expect(server.roster).toEqual(INITIAL);
+  });
+
+  it('after giving up on 409s, the next save reads again and still carries a revision', async () => {
+    const onSaved = vi.fn();
+    let refusals = 3;
+    const real = server.fetch;
+    global.fetch = vi.fn((url: string, init?: RequestInit) => {
+      if (init?.method === 'PATCH' && refusals > 0) {
+        refusals -= 1;
+        return Promise.resolve({ ok: false, status: 409, json: async () => ({ code: 'ROSTER_CHANGED' }) });
+      }
+      return real(url, init);
+    }) as unknown as typeof fetch;
+    const first = await enqueueRosterWrite(worktreeId, (base) => [...base], onSaved);
+    expect(first).toEqual({ status: 'failed', error: 'roster_changed' });
+    const second = await enqueueRosterWrite(worktreeId, (base) => [...base], onSaved);
+    expect(second.status).toBe('saved');
+    const patches = server.writes('PATCH');
+    expect(patches).toHaveLength(1);
+    expect(patches[0].expectedRosterRevision).toBe('rev-1');
+  });
+
+  it('answers that cross: an older role answer does not undo a newer one', async () => {
+    render(<Desktop />);
+    fireEvent.click(screen.getByTestId('instance-roles-toggle'));
+    await screen.findByTestId('instance-role-select-claude');
+    await waitFor(() => expect(within(select('instance-role-select-claude')).getByText(REVIEWER.name)).toBeInTheDocument());
+
+    server.holdPutAnswers = true;
+    fireEvent.change(select('instance-role-select-claude'), { target: { value: REVIEWER.id } });
+    await waitFor(() => expect(server.heldCount).toBe(1));
+    fireEvent.change(select('instance-role-select-codex'), { target: { value: 'none' } });
+    await waitFor(() => expect(server.heldCount).toBe(2));
+    const readsBefore = server.calls.filter((c) => c.method === 'GET' && c.url.endsWith('/instances/roles')).length;
+
+    // The second answer, which has both changes, comes first; the first, with only its own, last.
+    await act(async () => server.releaseLast());
+    await waitFor(() => expect(screen.getByTestId('instance-role-source-codex').textContent).toBe('指定中: なし［このセッションで明示］'));
+    await act(async () => server.releaseLast());
+
+    await waitFor(() =>
+      expect(server.calls.filter((c) => c.method === 'GET' && c.url.endsWith('/instances/roles')).length).toBeGreaterThan(readsBefore),
+    );
+    await act(async () => {});
+    expect(screen.getByTestId('instance-role-source-codex').textContent).toBe('指定中: なし［このセッションで明示］');
+    expect(screen.getByTestId('instance-role-source-claude').textContent).toBe('指定中: レビュー担当［このセッション］');
+  });
+
+  it('a read that left before a role save does not put the old value back', async () => {
+    render(<Desktop />);
+    fireEvent.click(screen.getByTestId('instance-roles-toggle'));
+    await screen.findByTestId('instance-role-select-codex');
+    await act(async () => {});
+
+    let releaseRead: () => void = () => {};
+    const real = server.fetch;
+    global.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      const answer = await real(url, init);
+      if (!init?.method && String(url).endsWith('/instances/roles') && !releasedOnce) {
+        releasedOnce = true;
+        await new Promise<void>((resolve) => {
+          releaseRead = resolve;
+        });
+      }
+      return answer;
+    }) as unknown as typeof fetch;
+    let releasedOnce = false;
+
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    await waitFor(() => expect(releasedOnce).toBe(true));
+    fireEvent.change(select('instance-role-select-codex'), { target: { value: 'none' } });
+    await waitFor(() => expect(screen.getByTestId('instance-role-source-codex').textContent).toBe('指定中: なし［このセッションで明示］'));
+    await act(async () => releaseRead());
+    await act(async () => {});
+    expect(screen.getByTestId('instance-role-source-codex').textContent).toBe('指定中: なし［このセッションで明示］');
   });
 });
 
@@ -346,6 +457,15 @@ describe('[#4117] the split header', () => {
     await waitFor(() => expect(header().textContent).toBe('次回: マーケター'));
     expect(screen.queryByTestId('split-role-restart-0')).toBeNull();
   });
+
+  it('reads again when the session starts, with the status unchanged', async () => {
+    const props = { worktreeId, instanceId: 'claude', splitIndex: 0, sessionStatus: 'idle' };
+    const { rerender } = render(<SplitRoleStatus {...props} isRunning={false} />);
+    await waitFor(() => expect(header().textContent).toBe('次回: マーケター'));
+    server.application.claude = { launched: launched({ roleName: 'PM' }), restartPending: 'no' };
+    rerender(<SplitRoleStatus {...props} isRunning />);
+    await waitFor(() => expect(header().textContent).toBe('起動時: PM'));
+  });
 });
 
 describe('[#4117] the roster pane on PC', () => {
@@ -376,6 +496,54 @@ describe('[#4117] the roster pane on PC', () => {
     await waitFor(() =>
       expect(screen.getByTestId('split-role-status-0').textContent).toBe('起動時: PM／次回: レビュー担当／適用待ち'),
     );
+  });
+});
+
+describe('[#4117] the running state in the roster pane', () => {
+  async function openRoles(): Promise<void> {
+    render(<Desktop />);
+    fireEvent.click(screen.getByTestId('instance-roles-toggle'));
+    await screen.findByTestId('instance-role-select-claude');
+    await waitFor(() => expect(within(select('instance-role-select-claude')).getByText(REVIEWER.name)).toBeInTheDocument());
+  }
+
+  it('a session started elsewhere shows once the settings move: start, next, pending and the restart', async () => {
+    await openRoles();
+    await waitFor(() => expect(screen.getByTestId('instance-role-status-claude').textContent).toBe('次回: マーケター'));
+    expect(screen.queryByTestId('instance-role-restart-claude')).toBeNull();
+
+    server.running.claude = true;
+    server.application.claude = { launched: launched({ roleName: 'PM' }), restartPending: 'yes' };
+    fireEvent.change(select('instance-role-select-claude'), { target: { value: REVIEWER.id } });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('instance-role-status-claude').textContent).toBe('起動時: PM／次回: レビュー担当／適用待ち'),
+    );
+    expect(screen.getByTestId('instance-role-restart-claude')).toBeInTheDocument();
+  });
+
+  it('a failed read is not "stopped": what the server says of the launch stays, and it says it cannot tell', async () => {
+    server.refuseWorktreeRead = true;
+    server.application.claude = { launched: launched({ roleName: 'PM' }), restartPending: 'yes' };
+    await openRoles();
+    await screen.findByTestId('instance-roles-running-unknown');
+    expect(screen.getByTestId('instance-role-status-claude').textContent).toBe('起動時: PM／次回: マーケター／適用待ち');
+    expect(screen.getByTestId('instance-role-restart-claude')).toBeInTheDocument();
+  });
+
+  it('a failed read offers no restart when the server does not ask for one', async () => {
+    server.refuseWorktreeRead = true;
+    server.application.claude = { launched: null, restartPending: 'unknown' };
+    await openRoles();
+    await screen.findByTestId('instance-roles-running-unknown');
+    expect(screen.getByTestId('instance-role-status-claude').textContent).toBe('起動時: 不明／次回: マーケター');
+    expect(screen.queryByTestId('instance-role-restart-claude')).toBeNull();
+  });
+
+  it('negative control: a read that succeeds says nothing about reading', async () => {
+    await openRoles();
+    await screen.findByTestId('instance-role-status-claude');
+    expect(screen.queryByTestId('instance-roles-running-unknown')).toBeNull();
   });
 });
 

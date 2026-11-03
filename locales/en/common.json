@@ -408,7 +408,8 @@
       "selectLabel": "Role of {alias}",
       "saveError": "Could not save the role.",
       "restartConfirm": "End the session of {alias}? The next message starts a new one with the current settings.",
-      "restartError": "Could not end the session."
+      "restartError": "Could not end the session.",
+      "runningUnknown": "Could not read which sessions are running, so the status below does not say whether they are."
     },
     "repository": {
       "toggle": "Roles",

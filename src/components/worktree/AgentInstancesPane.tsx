@@ -482,14 +482,24 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
    * comes, so it cannot overwrite — or re-allocate an id taken by — a write the
    * header's "+" issued while this one was waiting.
    */
-  const writeRoster = useAgentInstancesRoster(worktreeId, instances, onInstancesChange);
+  const writeRoster = useAgentInstancesRoster(worktreeId, onInstancesChange);
   const persist = useCallback(
     async (build: RosterBuilder) => {
       setSaving(true);
       setError(null);
       try {
         const result = await writeRoster(build);
-        if (result.status === 'failed') setError(t('agentInstanceSaveError'));
+        if (result.status === 'failed') {
+          setError(
+            t(
+              result.error === 'roster_unreadable'
+                ? 'agentInstanceRosterUnreadable'
+                : result.error === 'roster_changed'
+                  ? 'agentInstanceRosterChanged'
+                  : 'agentInstanceSaveError',
+            ),
+          );
+        }
       } finally {
         setSaving(false);
       }

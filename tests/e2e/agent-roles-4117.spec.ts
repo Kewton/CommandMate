@@ -167,7 +167,7 @@ test.describe('roles in the settings on a phone (#4117)', () => {
     );
 
     await page.goto('/more');
-    await page.getByTestId('agent-role-new').scrollIntoViewIfNeeded();
+    // `click` scrolls by itself and retries; a separate scroll fails if the first paint is replaced.
     await page.getByTestId('agent-role-new').click();
     await page.getByTestId('agent-role-create-name').fill('PM');
     await page.getByTestId('agent-role-create-body').fill('一行目\n二行目');

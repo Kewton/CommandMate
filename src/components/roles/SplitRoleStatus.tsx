@@ -33,7 +33,7 @@ export function SplitRoleStatus({
   onRestart,
 }: SplitRoleStatusProps): React.ReactElement | null {
   const t = useTranslations('common');
-  const { settings } = useInstanceRoleSettings(worktreeId, sessionStatus);
+  const { settings } = useInstanceRoleSettings(worktreeId, `${sessionStatus}:${isRunning}`);
   const entry = settings?.instances.find((candidate) => candidate.instanceId === instanceId);
   if (!entry) return null;
   const view = roleApplicationView(entry, isRunning, t);

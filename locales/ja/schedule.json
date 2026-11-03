@@ -69,6 +69,8 @@
   "agentInstanceMax": "インスタンスは最大{max}個まで追加できます。",
   "agentInstanceMin": "インスタンスは最低{min}個必要です。",
   "agentInstanceSaveError": "エージェントインスタンスの保存に失敗しました。",
+  "agentInstanceRosterChanged": "名簿が別の場所で変更され続けたため、保存できませんでした。もう一度お試しください。",
+  "agentInstanceRosterUnreadable": "今の名簿を読めなかったため、保存しませんでした。他の変更を消さないためです。接続を確かめてもう一度お試しください。",
   "agentDefaults": "既定として使う",
   "agentDefaultsDescription": "いま並んでいるツールの順番を、新しいブランチの既定にしたり、このリポジトリのまだ触っていないブランチにまとめて適用したりできます。同じツールのインスタンスは 1 つとして数えます。",
   "agentDefaultsSetDefault": "この構成を既定にする",

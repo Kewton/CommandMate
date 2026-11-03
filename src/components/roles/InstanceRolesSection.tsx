@@ -16,8 +16,12 @@ import { useTranslations } from 'next-intl';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
-import { roleApi } from '@/lib/api-client-agent-roles';
-import { applyInstanceRoleSettings, useInstanceRoleSettings } from '@/hooks/useInstanceRoleSettings';
+import { readRunningInstances, roleApi } from '@/lib/api-client-agent-roles';
+import {
+  useInstanceRoleSettings,
+  useRoleCatalogChanged,
+  writeInstanceRoleSettings,
+} from '@/hooks/useInstanceRoleSettings';
 import type { AgentRoleSummary, InstanceRoleEntry } from '@/types/agent-roles';
 import { RoleChoiceSelect } from './RoleChoiceSelect';
 import {
@@ -31,24 +35,6 @@ import {
   type RoleTranslate,
 } from './role-display';
 
-/** Which sessions are running. The same read `AgentUpdatesCard` makes for its restart. */
-async function readRunningInstances(worktreeId: string): Promise<Record<string, boolean>> {
-  try {
-    const response = await fetch(`/api/worktrees/${worktreeId}`);
-    if (!response.ok) return {};
-    const body = (await response.json()) as {
-      sessionStatusByInstance?: Record<string, { isRunning?: boolean }>;
-    };
-    const running: Record<string, boolean> = {};
-    for (const [instanceId, status] of Object.entries(body.sessionStatusByInstance ?? {})) {
-      if (status?.isRunning) running[instanceId] = true;
-    }
-    return running;
-  } catch {
-    return {};
-  }
-}
-
 function InstanceRoleRow({
   worktreeId,
   entry,
@@ -60,7 +46,8 @@ function InstanceRoleRow({
   worktreeId: string;
   entry: InstanceRoleEntry;
   roles: readonly AgentRoleSummary[];
-  isRunning: boolean;
+  /** Null: the read failed. Undefined: not answered yet, so nothing is said about the launch. */
+  isRunning: boolean | null | undefined;
   onChanged: () => void;
   t: RoleTranslate;
 }): React.ReactElement {
@@ -74,9 +61,10 @@ function InstanceRoleRow({
     async (choice: string) => {
       setSaving(true);
       setError(null);
-      const result = await roleApi.setInstanceRole(worktreeId, id, roleInputOf(choice));
-      if (result.ok) applyInstanceRoleSettings(worktreeId, result.data);
-      else setError(t('agentRoles.instances.saveError'));
+      const result = await writeInstanceRoleSettings(worktreeId, () =>
+        roleApi.setInstanceRole(worktreeId, id, roleInputOf(choice)),
+      );
+      if (!result.ok) setError(t('agentRoles.instances.saveError'));
       setSaving(false);
     },
     [worktreeId, id, t],
@@ -99,7 +87,7 @@ function InstanceRoleRow({
     }
   }, [confirm, entry.alias, entry.cliToolId, id, onChanged, t, worktreeId]);
 
-  const view = roleApplicationView(entry, isRunning, t);
+  const view = isRunning === undefined ? null : roleApplicationView(entry, isRunning, t);
   const inherited = entry.stored.state === 'inherit';
   // The first option names what "from above" gives: the tool's default, not this
   // row's own explicit choice, which would read the same in the closed select.
@@ -183,21 +171,36 @@ function OpenInstanceRoles({ worktreeId, rosterKey }: { worktreeId: string; rost
   const t = useTranslations('common');
   const { settings, refresh } = useInstanceRoleSettings(worktreeId, rosterKey);
   const [roles, setRoles] = useState<AgentRoleSummary[]>([]);
-  const [running, setRunning] = useState<Record<string, boolean>>({});
+  // Undefined until the first answer; null when a read failed, which is not "stopped".
+  const [running, setRunning] = useState<Record<string, boolean> | null | undefined>(undefined);
   const [readToken, setReadToken] = useState(0);
+  const [catalogToken, setCatalogToken] = useState(0);
+
+  const onCatalogChanged = useCallback(() => setCatalogToken((token) => token + 1), []);
+  useRoleCatalogChanged(onCatalogChanged);
 
   useEffect(() => {
     let cancelled = false;
     void roleApi.list().then((result) => {
       if (!cancelled && result.ok) setRoles(result.data.roles);
     });
+    return () => {
+      cancelled = true;
+    };
+  }, [catalogToken]);
+
+  // Whenever the settings move, not only on opening: a session started elsewhere shows
+  // up in them, and its row must not go on reading as stopped. No polling of its own.
+  useEffect(() => {
+    if (!settings) return;
+    let cancelled = false;
     void readRunningInstances(worktreeId).then((next) => {
       if (!cancelled) setRunning(next);
     });
     return () => {
       cancelled = true;
     };
-  }, [worktreeId, rosterKey, readToken]);
+  }, [worktreeId, rosterKey, readToken, settings]);
 
   const onChanged = useCallback(() => {
     setReadToken((token) => token + 1);
@@ -208,19 +211,26 @@ function OpenInstanceRoles({ worktreeId, rosterKey }: { worktreeId: string; rost
     return <p className="text-xs text-muted-foreground">{t('agentRoles.loading')}</p>;
   }
   return (
-    <ul className="space-y-2" data-testid="instance-roles-list">
-      {settings.instances.map((entry) => (
-        <InstanceRoleRow
-          key={entry.instanceId}
-          worktreeId={worktreeId}
-          entry={entry}
-          roles={roles}
-          isRunning={running[entry.instanceId] === true}
-          onChanged={onChanged}
-          t={t}
-        />
-      ))}
-    </ul>
+    <>
+      {running === null && (
+        <p data-testid="instance-roles-running-unknown" className="text-xs text-warning">
+          {t('agentRoles.instances.runningUnknown')}
+        </p>
+      )}
+      <ul className="space-y-2" data-testid="instance-roles-list">
+        {settings.instances.map((entry) => (
+          <InstanceRoleRow
+            key={entry.instanceId}
+            worktreeId={worktreeId}
+            entry={entry}
+            roles={roles}
+            isRunning={running ? running[entry.instanceId] === true : running}
+            onChanged={onChanged}
+            t={t}
+          />
+        ))}
+      </ul>
+    </>
   );
 }
 

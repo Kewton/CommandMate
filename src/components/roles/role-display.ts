@@ -96,12 +96,15 @@ export interface RoleApplicationView {
  * a setting is only a setting until `launched` confirms it. `restartPending` decides
  * "適用待ち", and is not worked out here.
  *
+ * @param isRunning - null when that could not be read, which is not "stopped": what
+ *   the server says about the launch is still shown, and a restart is offered only
+ *   when the server says one is needed.
  * @returns null when there is no role anywhere to speak of, which is the ordinary
  *   state of a worktree with no roles and must not add a chip to every header
  */
 export function roleApplicationView(
   entry: InstanceRoleEntry,
-  isRunning: boolean,
+  isRunning: boolean | null,
   t: RoleTranslate,
 ): RoleApplicationView | null {
   if (!entry.supported) return null;
@@ -109,7 +112,7 @@ export function roleApplicationView(
   const nextName = effectiveRoleName(next, t);
   const nextText = t('agentRoles.application.next', { name: nextName });
 
-  if (!isRunning) {
+  if (isRunning === false) {
     return next.kind === 'none' ? null : { text: nextText, restartable: false, pending: false };
   }
 
@@ -135,7 +138,7 @@ export function roleApplicationView(
   // Not known either way: both sides are shown, and nothing is claimed about them.
   return {
     text: next.kind === 'none' ? startupText : [startupText, nextText].join(separator),
-    restartable: true,
+    restartable: isRunning === true,
     pending: false,
   };
 }

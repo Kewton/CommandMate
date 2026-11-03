@@ -7,8 +7,12 @@
  * use). The deadline covers the body as well as the headers, so a stalled answer
  * cannot hold a dialog open.
  *
+ * The two reads of the worktree route at the end answer null when they cannot tell,
+ * so "could not read" is never taken for "no revision needed" or "nothing is running".
+ *
  * @module lib/api-client-agent-roles
  */
+import type { AgentInstance } from '@/lib/cli-tools/types';
 import type {
   AgentRoleDeleteConflictResponse,
   AgentRoleDeleteResponse,
@@ -79,7 +83,8 @@ export const roleApi = {
   get: (id: string) => request<AgentRoleDetailResponse>(`/api/roles/${encodeURIComponent(id)}`),
   create: (input: { name: string; body: string }) =>
     sendJson<{ success: true; role: AgentRoleDetail }>('/api/roles', 'POST', input),
-  update: (id: string, input: { name: string; body: string; expectedBodyVersion: number }) =>
+  /** Send only what changed: the version guards the body, and a name sent along would overwrite a rename. */
+  update: (id: string, input: { name?: string; body?: string; expectedBodyVersion?: number }) =>
     sendJson<AgentRoleEditResponse>(`/api/roles/${encodeURIComponent(id)}`, 'PUT', input),
   remove: (id: string, options: { force?: boolean } = {}) =>
     request<AgentRoleDeleteResponse>(
@@ -120,4 +125,48 @@ export function roleInUseReferences(
 ): AgentRoleDeleteConflictResponse['references'] | null {
   if (failure.error !== 'role_in_use' || !isRecord(failure.body)) return null;
   return (failure.body as unknown as AgentRoleDeleteConflictResponse).references ?? null;
+}
+
+async function readWorktree(worktreeId: string): Promise<Record<string, unknown> | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ROLE_REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(`/api/worktrees/${worktreeId}`, { signal: controller.signal });
+    if (!response.ok) return null;
+    const body: unknown = await response.json();
+    return isRecord(body) ? body : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * The roster and the revision it was read with, or null when they cannot be had. Only
+ * the roster's own fields: the route adds `sessionName`, which a save must not send back.
+ */
+export async function readWorktreeRoster(
+  worktreeId: string,
+): Promise<{ roster: AgentInstance[]; revision: string } | null> {
+  const body = await readWorktree(worktreeId);
+  if (!body || typeof body.rosterRevision !== 'string' || !Array.isArray(body.agentInstances)) return null;
+  const roster = (body.agentInstances as AgentInstance[]).map(({ id, cliTool, alias, order }) => ({
+    id,
+    cliTool,
+    alias,
+    order,
+  }));
+  return { roster, revision: body.rosterRevision };
+}
+
+/** The instances with a running session, or null when that cannot be told. */
+export async function readRunningInstances(worktreeId: string): Promise<Record<string, boolean> | null> {
+  const body = await readWorktree(worktreeId);
+  if (!body || !isRecord(body.sessionStatusByInstance)) return null;
+  const running: Record<string, boolean> = {};
+  for (const [instanceId, status] of Object.entries(body.sessionStatusByInstance)) {
+    if (isRecord(status) && status.isRunning === true) running[instanceId] = true;
+  }
+  return running;
 }

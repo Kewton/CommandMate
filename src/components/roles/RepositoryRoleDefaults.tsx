@@ -5,11 +5,11 @@
 
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
 import { roleApi } from '@/lib/api-client-agent-roles';
-import { refreshAllShownInstanceRoleSettings } from '@/hooks/useInstanceRoleSettings';
+import { refreshAllShownInstanceRoleSettings, useRoleCatalogChanged } from '@/hooks/useInstanceRoleSettings';
 import type { AgentRoleSummary, RepositoryRoleDefaultEntry } from '@/types/agent-roles';
 import { RoleChoiceSelect } from './RoleChoiceSelect';
 import { roleChoiceOf, roleInputOf, roleSourceText, roleToolNoteKeys, storedRoleOption } from './role-display';
@@ -22,38 +22,50 @@ export function RepositoryRoleDefaults({ repositoryId }: { repositoryId: string 
   const [savingTool, setSavingTool] = useState<string | null>(null);
   const [saveError, setSaveError] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    void roleApi.repositoryDefaults(repositoryId).then((result) => {
-      if (cancelled) return;
-      if (result.ok) setDefaults(result.data.defaults);
-      else setLoadFailed(true);
-    });
-    void roleApi.list().then((result) => {
-      if (!cancelled && result.ok) setRoles(result.data.roles);
-    });
-    return () => {
-      cancelled = true;
-    };
+  // Moves on every read and write: an answer that finds it moved may be older than what
+  // is shown. A read is then dropped for the later one, and a write reads again.
+  const requestRef = useRef(0);
+
+  const load = useCallback(async () => {
+    requestRef.current += 1;
+    const request = requestRef.current;
+    const [result, list] = await Promise.all([roleApi.repositoryDefaults(repositoryId), roleApi.list()]);
+    if (request !== requestRef.current) return;
+    if (result.ok) setDefaults(result.data.defaults);
+    setLoadFailed(!result.ok);
+    if (list.ok) setRoles(list.data.roles);
   }, [repositoryId]);
+
+  useEffect(() => {
+    void load();
+    return () => {
+      requestRef.current += 1;
+    };
+  }, [load]);
+
+  // A role deleted or renamed, or a system default changed, reads differently here.
+  useRoleCatalogChanged(load);
 
   const handleChange = useCallback(
     async (cliToolId: string, choice: string) => {
       setSavingTool(cliToolId);
       setSaveError(false);
+      requestRef.current += 1;
+      const request = requestRef.current;
       const result = await roleApi.setRepositoryDefault(repositoryId, cliToolId, roleInputOf(choice));
       if (result.ok) {
-        setDefaults(result.data.defaults);
+        if (request === requestRef.current) setDefaults(result.data.defaults);
+        else void load();
         refreshAllShownInstanceRoleSettings();
       } else {
         setSaveError(true);
       }
       setSavingTool(null);
     },
-    [repositoryId],
+    [load, repositoryId],
   );
 
-  if (loadFailed) {
+  if (loadFailed && !defaults) {
     return (
       <p role="alert" data-testid={`repository-roles-error-${repositoryId}`} className="text-xs text-danger-foreground">
         {t('agentRoles.loadError')}
@@ -65,6 +77,11 @@ export function RepositoryRoleDefaults({ repositoryId }: { repositoryId: string 
   return (
     <div className="space-y-3" data-testid={`repository-roles-${repositoryId}`}>
       <p className="text-xs text-muted-foreground">{t('agentRoles.repository.description')}</p>
+      {loadFailed && (
+        <p role="alert" data-testid={`repository-roles-error-${repositoryId}`} className="text-xs text-danger-foreground">
+          {t('agentRoles.loadError')}
+        </p>
+      )}
       <ul className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {defaults.map((entry) => (
           <li key={entry.cliToolId} className="min-w-0 space-y-1">

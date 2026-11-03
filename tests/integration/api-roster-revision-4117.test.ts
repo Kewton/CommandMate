@@ -18,7 +18,17 @@ vi.mock('@/lib/db/db-instance', () => ({
   getDbInstance: () => testDb,
 }));
 
-import { PATCH } from '@/app/api/worktrees/[id]/route';
+// The worktree's GET also lists tmux and asks git. Neither is what this is about.
+vi.mock('@/lib/tmux/tmux', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/tmux/tmux')>()),
+  listSessions: vi.fn(async () => []),
+}));
+vi.mock('@/lib/git/git-utils', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/git/git-utils')>()),
+  getGitStatus: vi.fn(async () => undefined),
+}));
+
+import { GET, PATCH } from '@/app/api/worktrees/[id]/route';
 import * as instanceRolesRoute from '@/app/api/worktrees/[id]/instances/roles/route';
 
 const WT = 'wt-4117';
@@ -146,5 +156,43 @@ describe('[#4117] PATCH with expectedRosterRevision', () => {
     const response = await patch({ description: 'hello' });
     expect(response.status).toBe(200);
     expect(getWorktreeById(testDb, WT)?.description).toBe('hello');
+  });
+});
+
+describe('[#4117] GET answers the revision with the roster', () => {
+  const read = async () => (await GET(request(`/api/worktrees/${WT}`, 'GET'), params)).json();
+
+  it('is the revision the role route answers, and PATCH accepts it', async () => {
+    const body = await read();
+    expect(body.rosterRevision).toBe(await readRevision());
+    expect(body.agentInstances.map((i: AgentInstance) => i.id)).toEqual(['claude', 'codex']);
+    const saved = await patch({
+      agentInstances: [{ ...ROSTER[0], alias: 'Lead' }, ROSTER[1]],
+      expectedRosterRevision: body.rosterRevision,
+    });
+    expect(saved.status).toBe(200);
+  });
+
+  it('is computed from the roster alone, whatever else the row carries', async () => {
+    const before = await read();
+    expect(before.agentInstances[0].sessionName).toEqual(expect.any(String));
+    setAgentInstances(testDb, WT, [{ ...ROSTER[0], alias: 'Lead' }, ROSTER[1]]);
+    const after = await read();
+    expect(after.rosterRevision).not.toBe(before.rosterRevision);
+    expect(after.rosterRevision).toBe(await readRevision());
+  });
+
+  it('a revision read before a create is refused after it', async () => {
+    const role = createAgentRole(testDb, { name: 'Reviewer', body: 'b' });
+    const { rosterRevision } = await read();
+    expect((await createWithRole('codex-2', role.id)).status).toBe(201);
+    const refused = await patch({ agentInstances: ROSTER, expectedRosterRevision: rosterRevision });
+    expect(refused.status).toBe(409);
+    expect(getAgentInstances(testDb, WT).map((i) => i.id)).toEqual(['claude', 'codex', 'codex-2']);
+  });
+
+  it('negative control: a PATCH with no condition still saves', async () => {
+    const saved = await patch({ agentInstances: [{ ...ROSTER[0], alias: 'Lead' }, ROSTER[1]] });
+    expect(saved.status).toBe(200);
   });
 });

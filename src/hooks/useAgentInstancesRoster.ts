@@ -11,26 +11,21 @@
  *
  * Every roster write now goes through one per-worktree queue:
  *  - writes run one at a time, in the order they were issued;
- *  - each write is a BUILDER, `(base) => next | null`, run when its turn comes,
- *    where `base` is the roster the previous write in the same burst saved (or,
- *    for the first write of a burst, the caller's current roster). So ids are
- *    allocated against the roster that actually exists, and a rename cannot
- *    resurrect a row a delete just removed;
+ *  - each write is a BUILDER, `(base) => next | null`, run when its turn comes on the
+ *    roster the server last said is there. So ids are allocated against the roster that
+ *    actually exists, and a rename cannot resurrect a row a delete just removed;
  *  - `onSaved` runs before the next write starts, so the parent's state is
  *    updated in order too.
- *
- * The "last saved" roster is only remembered while writes are queued; once the
- * queue drains the caller's props are the authority again (another tab, a
- * server-side refresh). A failed write leaves the base untouched.
  *
  * ## Writes from elsewhere (Issue #4117)
  *
  * The queue only orders this tab. Another tab, a phone or the CLI can change the
  * roster too, and a full replace from an older list would erase what they added. So
- * when a roster snapshot is known (`useInstanceRoleSettings`) the write starts from
- * it and sends its revision; a server that has moved on answers 409, the snapshot is
- * read again, and the builder runs once more on what is really there. Builders go by
- * id, so that is safe. With no snapshot, nothing is sent and nothing changes.
+ * every write starts from a snapshot and sends its revision (`useInstanceRoleSettings`):
+ * with none held it is read first, and if it cannot be read the write does not happen.
+ * A server that has moved on answers 409, the snapshot is read again, and the builder
+ * runs once more on what is really there. Builders go by id, so that is safe. The
+ * parent's props are not a base: they carry no revision.
  *
  * Creating with a role goes through the same queue, so a rename issued while the
  * create is saving starts from the roster that contains it.
@@ -42,22 +37,24 @@ import { useCallback, useRef } from 'react';
 import type { AgentInstance } from '@/lib/cli-tools/types';
 import { roleApi } from '@/lib/api-client-agent-roles';
 import {
-  applyInstanceRoleSettings,
   clearRosterSnapshot,
-  getRosterSnapshot,
+  ensureRosterSnapshot,
   recordRosterSaved,
-  refreshInstanceRoleSettings,
   rosterFromRoleEntries,
+  writeInstanceRoleSettings,
 } from '@/hooks/useInstanceRoleSettings';
 import type { AgentRoleErrorResponse, RoleAssignmentInput } from '@/types/agent-roles';
 
 /** Builds the next roster from the latest one, or `null` to skip the write. */
 export type RosterBuilder = (base: AgentInstance[]) => AgentInstance[] | null;
 
+/** `roster_unreadable`: no revision could be had, so nothing was sent. */
+export type RosterWriteError = AgentRoleErrorResponse['error'] | 'roster_unreadable';
+
 export type RosterWriteResult =
   | { status: 'saved'; roster: AgentInstance[] }
   | { status: 'skipped' }
-  | { status: 'failed'; error?: AgentRoleErrorResponse['error'] };
+  | { status: 'failed'; error?: RosterWriteError };
 
 /** The instance a create adds, worked out from the latest roster. */
 export type RosterInstanceBuilder = (base: AgentInstance[]) => { id: string; cliTool: string; alias: string } | null;
@@ -69,7 +66,7 @@ type RosterAttempt =
   | { status: 'failed'; error?: AgentRoleErrorResponse['error'] }
   | { status: 'conflict' };
 
-type RosterOperation = (base: AgentInstance[], expectedRevision: string | undefined) => Promise<RosterAttempt>;
+type RosterOperation = (base: AgentInstance[], expectedRevision: string) => Promise<RosterAttempt>;
 
 /** How many times a write is rebuilt on a fresh roster before it reports failure. */
 const MAX_CONFLICT_RETRIES = 2;
@@ -77,8 +74,6 @@ const MAX_CONFLICT_RETRIES = 2;
 interface WorktreeQueue {
   tail: Promise<unknown>;
   pending: number;
-  /** Roster saved by the last write of the current burst, if any. */
-  latest: AgentInstance[] | null;
 }
 
 const queues = new Map<string, WorktreeQueue>();
@@ -86,7 +81,7 @@ const queues = new Map<string, WorktreeQueue>();
 function queueFor(worktreeId: string): WorktreeQueue {
   let queue = queues.get(worktreeId);
   if (!queue) {
-    queue = { tail: Promise.resolve(), pending: 0, latest: null };
+    queue = { tail: Promise.resolve(), pending: 0 };
     queues.set(worktreeId, queue);
   }
   return queue;
@@ -94,7 +89,6 @@ function queueFor(worktreeId: string): WorktreeQueue {
 
 function enqueue(
   worktreeId: string,
-  getCurrent: () => AgentInstance[],
   operation: RosterOperation,
   onSaved: (roster: AgentInstance[]) => void,
 ): Promise<RosterWriteResult> {
@@ -103,22 +97,20 @@ function enqueue(
   const run = async (): Promise<RosterWriteResult> => {
     try {
       for (let attempt = 0; ; attempt += 1) {
-        const snapshot = getRosterSnapshot(worktreeId);
-        const base = snapshot?.roster ?? queue.latest ?? getCurrent();
-        const result = await operation(base, snapshot?.revision);
+        const snapshot = await ensureRosterSnapshot(worktreeId);
+        if (!snapshot) {
+          return { status: 'failed', error: attempt === 0 ? 'roster_unreadable' : 'roster_changed' };
+        }
+        const result = await operation(snapshot.roster, snapshot.revision);
         if (result.status === 'saved') {
-          queue.latest = result.roster;
           onSaved(result.roster);
           return result;
         }
         if (result.status !== 'conflict') return result;
-        // What was held is stale. Without a fresh read there is nothing safe to
-        // rebuild on, so this fails rather than replacing the list blind.
+        // What was held is stale. The next attempt reads it again, and with no
+        // fresh read there is nothing safe to rebuild on.
         clearRosterSnapshot(worktreeId);
-        queue.latest = null;
         if (attempt >= MAX_CONFLICT_RETRIES) return { status: 'failed', error: 'roster_changed' };
-        await refreshInstanceRoleSettings(worktreeId);
-        if (!getRosterSnapshot(worktreeId)) return { status: 'failed', error: 'roster_changed' };
       }
     } finally {
       queue.pending -= 1;
@@ -146,20 +138,16 @@ async function readPatchAnswer(response: Response): Promise<{ roster?: AgentInst
 /**
  * Queue one roster write for `worktreeId`.
  *
- * @param getCurrent - the caller's roster at the moment the write RUNS (read
- *   through a ref), used as the base when no earlier write in the burst saved.
  * @param build - computes the next roster from the base.
  * @param onSaved - called with the saved roster before the next write starts.
  */
 export function enqueueRosterWrite(
   worktreeId: string,
-  getCurrent: () => AgentInstance[],
   build: RosterBuilder,
   onSaved: (roster: AgentInstance[]) => void,
 ): Promise<RosterWriteResult> {
   return enqueue(
     worktreeId,
-    getCurrent,
     async (base, expectedRevision) => {
       const built = build(base);
       if (!built) return { status: 'skipped' };
@@ -169,10 +157,7 @@ export function enqueueRosterWrite(
         response = await fetch(`/api/worktrees/${worktreeId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            agentInstances: roster,
-            ...(expectedRevision ? { expectedRosterRevision: expectedRevision } : {}),
-          }),
+          body: JSON.stringify({ agentInstances: roster, expectedRosterRevision: expectedRevision }),
         });
       } catch {
         return { status: 'failed' };
@@ -196,27 +181,22 @@ export function enqueueRosterWrite(
  */
 export function enqueueRosterCreate(
   worktreeId: string,
-  getCurrent: () => AgentInstance[],
   buildInstance: RosterInstanceBuilder,
   role: RoleAssignmentInput,
   onSaved: (roster: AgentInstance[]) => void,
 ): Promise<RosterWriteResult> {
   return enqueue(
     worktreeId,
-    getCurrent,
     async (base, expectedRevision) => {
       const instance = buildInstance(base);
       if (!instance) return { status: 'skipped' };
-      const result = await roleApi.createInstance(worktreeId, {
-        instance,
-        role,
-        ...(expectedRevision ? { expectedRosterRevision: expectedRevision } : {}),
-      });
+      const result = await writeInstanceRoleSettings(worktreeId, () =>
+        roleApi.createInstance(worktreeId, { instance, role, expectedRosterRevision: expectedRevision }),
+      );
       if (!result.ok) {
         const stale = result.error === 'roster_changed' || result.error === 'instance_exists';
         return stale ? { status: 'conflict' } : { status: 'failed', error: result.error };
       }
-      applyInstanceRoleSettings(worktreeId, result.data);
       return { status: 'saved', roster: rosterFromRoleEntries(result.data.instances) };
     },
     onSaved,
@@ -224,24 +204,19 @@ export function enqueueRosterCreate(
 }
 
 /**
- * The hook form: binds the queue to a component's worktree, roster and
- * `onInstancesChange`, reading the latest of each through refs so the returned
- * `write` is stable.
+ * The hook form: binds the queue to a component's worktree and `onInstancesChange`,
+ * reading the latest through a ref so the returned `write` is stable.
  */
 export function useAgentInstancesRoster(
   worktreeId: string,
-  instances: AgentInstance[],
   onInstancesChange: (instances: AgentInstance[]) => void,
 ): (build: RosterBuilder) => Promise<RosterWriteResult> {
-  const instancesRef = useRef(instances);
-  instancesRef.current = instances;
   const onChangeRef = useRef(onInstancesChange);
   onChangeRef.current = onInstancesChange;
   return useCallback(
     (build: RosterBuilder) =>
       enqueueRosterWrite(
         worktreeId,
-        () => instancesRef.current,
         build,
         (roster) => onChangeRef.current(roster),
       ),
@@ -252,18 +227,14 @@ export function useAgentInstancesRoster(
 /** The create form of {@link useAgentInstancesRoster}. */
 export function useAgentInstanceCreate(
   worktreeId: string,
-  instances: AgentInstance[],
   onInstancesChange: (instances: AgentInstance[]) => void,
 ): (buildInstance: RosterInstanceBuilder, role: RoleAssignmentInput) => Promise<RosterWriteResult> {
-  const instancesRef = useRef(instances);
-  instancesRef.current = instances;
   const onChangeRef = useRef(onInstancesChange);
   onChangeRef.current = onInstancesChange;
   return useCallback(
     (buildInstance: RosterInstanceBuilder, role: RoleAssignmentInput) =>
       enqueueRosterCreate(
         worktreeId,
-        () => instancesRef.current,
         buildInstance,
         role,
         (roster) => onChangeRef.current(roster),

@@ -87,8 +87,17 @@ export class FakeRoleServer {
   /** Answer the next `POST .../instances/roles` with this refusal. */
   refuseNextCreate: { status: number; error: string } | null = null;
   refusePut = false;
+  /** `GET /api/worktrees/:id` answers 500: the roster and the running state are unreadable. */
+  refuseWorktreeRead = false;
+  /** `GET .../instances/roles` answers 500. */
+  refuseSettingsRead = false;
   /** While set, every roster-writing request waits for {@link release}. */
   holdWrites = false;
+  /**
+   * While set, a role PUT is written and its answer built at once, but the answer waits
+   * in `held`, so answers can be delivered in another order than they were built.
+   */
+  holdPutAnswers = false;
   private held: Array<() => void> = [];
   readonly calls: Array<{ url: string; method: string; body: Record<string, unknown> }> = [];
 
@@ -110,6 +119,11 @@ export class FakeRoleServer {
     this.held.shift()?.();
   }
 
+  /** Deliver the newest held answer first. */
+  releaseLast(): void {
+    this.held.pop()?.();
+  }
+
   get heldCount(): number {
     return this.held.length;
   }
@@ -120,12 +134,26 @@ export class FakeRoleServer {
       .map((call) => call.body);
   }
 
+  /** What a row with nothing of its own gets: the system default when one is set. */
+  private inherited(cliTool: string): EffectiveRole {
+    const system = this.system[cliTool];
+    if (system?.state !== 'role') return TOOL_DEFAULTS[cliTool] ?? NO_DEFAULT;
+    return {
+      kind: 'role',
+      source: 'system',
+      cliToolId: cliTool,
+      repositoryId: null,
+      repositoryIds: [],
+      role: { id: system.roleId, name: system.roleName, bodyVersion: 1, bodyFingerprint: 'a'.repeat(64) },
+    } as EffectiveRole;
+  }
+
   private settings(): InstanceRoleSettingsResponse {
     const template = instanceSettingsExample.instances[0];
     const instances: InstanceRoleEntry[] = this.roster.map((inst) => {
       const supported = !['gemini', 'vibe-local'].includes(inst.cliTool);
       const stored = this.stored[inst.id] ?? { state: 'inherit' };
-      let effective: EffectiveRole = TOOL_DEFAULTS[inst.cliTool] ?? NO_DEFAULT;
+      let effective: EffectiveRole = this.inherited(inst.cliTool);
       if (stored.state === 'none') {
         effective = {
           kind: 'none',
@@ -198,7 +226,10 @@ export class FakeRoleServer {
     const path = url.split('?')[0];
 
     if (path.endsWith('/instances/roles')) {
-      if (method === 'GET') return json(200, this.settings());
+      if (method === 'GET') {
+        if (this.refuseSettingsRead) return json(500, { success: false, error: 'internal_error', message: 'x' });
+        return json(200, this.settings());
+      }
       if (method === 'PUT') {
         if (this.refusePut) return json(500, { success: false, error: 'internal_error', message: 'x' });
         const role = body.role as { state: string; roleId?: string };
@@ -207,7 +238,9 @@ export class FakeRoleServer {
           role.state === 'role'
             ? { state: 'role', roleId: String(role.roleId), roleName: this.roles.find((r) => r.id === role.roleId)?.name ?? '' }
             : ({ state: role.state } as StoredRoleState);
-        return json(200, this.settings());
+        const answer = json(200, this.settings());
+        if (this.holdPutAnswers) await new Promise<void>((resolve) => this.held.push(resolve));
+        return answer;
       }
       await this.holdIfAsked();
       if (this.refuseNextCreate) {
@@ -263,13 +296,25 @@ export class FakeRoleServer {
         });
       }
       if (method === 'PUT') {
-        if (body.expectedBodyVersion !== role.bodyVersion) {
-          return json(409, { success: false, error: 'version_conflict', message: 'stale', currentBodyVersion: 9 });
+        // As `updateAgentRole`: the version is checked only when sent, what is not sent
+        // stays, and only a changed body moves the version. A rename does not.
+        if (body.expectedBodyVersion !== undefined && body.expectedBodyVersion !== role.bodyVersion) {
+          return json(409, { success: false, error: 'version_conflict', message: 'stale', currentBodyVersion: role.bodyVersion });
         }
-        const after = { ...role, name: String(body.name), bodyVersion: role.bodyVersion + 1 };
+        const name = body.name === undefined ? role.name : String(body.name);
+        if (this.roles.some((candidate) => candidate.id !== id && candidate.name === name)) {
+          return json(409, { success: false, error: 'name_conflict', message: 'taken' });
+        }
+        const bodyText = body.body === undefined ? this.bodies[id] : String(body.body);
+        const after = { ...role, name, bodyVersion: bodyText === this.bodies[id] ? role.bodyVersion : role.bodyVersion + 1 };
         this.roles = this.roles.map((candidate) => (candidate.id === id ? after : candidate));
-        this.bodies[id] = String(body.body);
-        return json(200, { ...roleEditExample, after: { ...after, body: body.body }, bodyVersion: after.bodyVersion });
+        this.bodies[id] = bodyText;
+        for (const holder of [this.stored, this.system, this.repositoryStored]) {
+          for (const stored of Object.values(holder)) {
+            if (stored.state === 'role' && stored.roleId === id) stored.roleName = name;
+          }
+        }
+        return json(200, { ...roleEditExample, after: { ...after, body: bodyText }, bodyVersion: after.bodyVersion });
       }
       const force = url.includes('force=true');
       const references = this.references[id];
@@ -277,9 +322,11 @@ export class FakeRoleServer {
         return json(409, { success: false, error: 'role_in_use', message: 'in use', references });
       }
       this.roles = this.roles.filter((candidate) => candidate.id !== id);
-      for (const tool of Object.keys(this.system)) {
-        const stored = this.system[tool];
-        if (stored.state === 'role' && stored.roleId === id) delete this.system[tool];
+      // As `deleteAgentRole`: what pointed at it reads as inherit, not as an explicit none.
+      for (const holder of [this.system, this.stored, this.repositoryStored]) {
+        for (const [key, stored] of Object.entries(holder)) {
+          if (stored.state === 'role' && stored.roleId === id) delete holder[key];
+        }
       }
       return json(200, {
         success: true,
@@ -312,7 +359,7 @@ export class FakeRoleServer {
       const stored = this.repositoryStored[tool] ?? { state: 'inherit' };
       const effective: EffectiveRole =
         stored.state === 'inherit'
-          ? TOOL_DEFAULTS.claude
+          ? this.inherited('claude')
           : stored.state === 'none'
             ? { ...TOOL_DEFAULTS.opencode, cliToolId: 'claude' }
             : {
@@ -346,7 +393,10 @@ export class FakeRoleServer {
       return json(200, { installed: ['claude', 'codex', 'opencode', 'copilot', 'command-code', 'antigravity', 'gemini'] });
     }
     if (/^\/api\/worktrees\/[^/]+$/.test(path)) {
+      if (this.refuseWorktreeRead) return json(500, { error: 'Failed to fetch worktree' });
       return json(200, {
+        agentInstances: this.roster.map((inst) => ({ ...inst, sessionName: `cm-${inst.id}` })),
+        rosterRevision: this.revision,
         sessionStatusByInstance: Object.fromEntries(
           Object.entries(this.running).map(([id, isRunning]) => [id, { isRunning }]),
         ),

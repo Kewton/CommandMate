@@ -18,6 +18,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { AgentInstancesPane } from '@/components/worktree/AgentInstancesPane';
+import { recordRosterSaved } from '@/hooks/useInstanceRoleSettings';
 import { NewFileDialog } from '@/components/worktree/NewFileDialog';
 import { FileSearchBar } from '@/components/worktree/FileSearchBar';
 import { MemoSearchBar } from '@/components/worktree/MemoSearchBar';
@@ -113,6 +114,8 @@ function rosterCalls(): Array<[string, RequestInit | undefined]> {
 
 describe('AgentInstancesPane alias input (Issue #2428)', () => {
   function renderPane(): HTMLInputElement {
+    // Issue #4117: a save carries a revision, so the screen must hold this roster's.
+    recordRosterSaved('w-1', [primary('claude', 0, 'Claude')], 'rev-test');
     render(<AgentInstancesPane {...paneProps} instances={[primary('claude', 0, 'Claude')]} />);
     const input = screen.getByTestId('agent-instance-alias-claude') as HTMLInputElement;
     // Enter commits by blurring; a blur() on an unfocused element is a no-op in
