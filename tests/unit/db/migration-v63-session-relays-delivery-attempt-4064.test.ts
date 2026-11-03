@@ -75,7 +75,7 @@ describe('migration v63: session_relays delivery attempt (Issue #4064)', () => {
     runMigrations(db);
 
     expect(getCurrentVersion(db)).toBe(CURRENT_SCHEMA_VERSION);
-    expect(CURRENT_SCHEMA_VERSION).toBe(63);
+    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(63);
     for (const column of V63_SESSION_RELAY_COLUMNS) expect(columns()).toContain(column);
     expect(getRelayById(db, 'r-id')?.deliveryHold).toBeNull();
     expect(getRelayById(db, 'r-null')?.deliveryHold).toBeNull();

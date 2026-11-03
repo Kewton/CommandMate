@@ -277,6 +277,9 @@ export function setAgentInstances(
     // Issue's third acceptance condition; a mutation that drops this call makes
     // the note of a *removed* instance haunt the next instance to claim its id.
     pruneSessionNotes(db, worktreeId, instances.map((instance) => instance.id));
+    // Issue #4114: and the role setting. A rename or a reorder keeps it; leaving
+    // the roster ends it, so an id that comes back starts from the defaults.
+    pruneAgentInstanceRoles(db, worktreeId, instances.map((instance) => instance.id));
     const insertStmt = db.prepare(`
       INSERT INTO agent_instances
         (worktree_id, instance_id, cli_tool_id, alias, sort_order, created_at)
@@ -349,6 +352,11 @@ export function removeAgentInstance(
   // session is gone.
   db.prepare(`
     DELETE FROM session_notes WHERE worktree_id = ? AND instance_id = ?
+  `).run(worktreeId, instanceId);
+  // Issue #4114: and its role setting, whose re-use would hand the next instance
+  // to claim this id a decision made about another.
+  db.prepare(`
+    DELETE FROM agent_instance_roles WHERE worktree_id = ? AND instance_id = ?
   `).run(worktreeId, instanceId);
   return result.changes > 0;
 }
@@ -758,6 +766,30 @@ export function pruneSessionNotes(
   const placeholders = keepInstanceIds.map(() => '?').join(', ');
   return db.prepare(`
     DELETE FROM session_notes
+    WHERE worktree_id = ? AND instance_id NOT IN (${placeholders})
+  `).run(worktreeId, ...keepInstanceIds).changes;
+}
+
+/**
+ * Remove the role settings of instances that left the roster (Issue #4114). Same
+ * rule as {@link pruneSessionNotes}. Launch records are evidence and stay.
+ *
+ * @param keepInstanceIds - The ids that survive; every other row is deleted
+ * @returns How many rows were removed
+ */
+export function pruneAgentInstanceRoles(
+  db: Database.Database,
+  worktreeId: string,
+  keepInstanceIds: readonly string[]
+): number {
+  if (keepInstanceIds.length === 0) {
+    return db.prepare(`
+      DELETE FROM agent_instance_roles WHERE worktree_id = ?
+    `).run(worktreeId).changes;
+  }
+  const placeholders = keepInstanceIds.map(() => '?').join(', ');
+  return db.prepare(`
+    DELETE FROM agent_instance_roles
     WHERE worktree_id = ? AND instance_id NOT IN (${placeholders})
   `).run(worktreeId, ...keepInstanceIds).changes;
 }
