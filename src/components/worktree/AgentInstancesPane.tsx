@@ -62,6 +62,7 @@ import { InstanceCliCommandsModal } from '@/components/worktree/InstanceCliComma
 // re-implemented so the pane cannot grow its own idea of what an update does to
 // a live session.
 import { AgentUpdatesCard } from '@/components/settings';
+import { InstanceRolesSection } from '@/components/roles/InstanceRolesSection';
 import { Spinner } from '@/components/ui/Spinner';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { TruncationTooltip } from '@/components/common/TruncationTooltip';
@@ -300,6 +301,12 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Issue #4117: saved or not known to be saved, with the roster not read back. Not an
+  // error, but adding again could make a second instance, so add stays off until the
+  // roster shown changes.
+  const [unverified, setUnverified] = useState<'saved' | 'unknown' | null>(null);
+  const rosterShown = instances.map((inst) => `${inst.id}\0${inst.alias}`).join('\0');
+  useEffect(() => setUnverified(null), [rosterShown]);
   // Per-id alias edit drafts (decoupled from prop to allow free typing).
   const [aliasDrafts, setAliasDrafts] = useState<Record<string, string>>({});
   // Base tool for the "add instance" control.
@@ -481,14 +488,25 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
    * comes, so it cannot overwrite — or re-allocate an id taken by — a write the
    * header's "+" issued while this one was waiting.
    */
-  const writeRoster = useAgentInstancesRoster(worktreeId, instances, onInstancesChange);
+  const writeRoster = useAgentInstancesRoster(worktreeId, onInstancesChange);
   const persist = useCallback(
     async (build: RosterBuilder) => {
       setSaving(true);
       setError(null);
       try {
         const result = await writeRoster(build);
-        if (result.status === 'failed') setError(t('agentInstanceSaveError'));
+        if (result.status === 'saved_unverified') setUnverified(result.unconfirmed ? 'unknown' : 'saved');
+        if (result.status === 'failed') {
+          setError(
+            t(
+              result.error === 'roster_unreadable'
+                ? 'agentInstanceRosterUnreadable'
+                : result.error === 'roster_changed'
+                  ? 'agentInstanceRosterChanged'
+                  : 'agentInstanceSaveError',
+            ),
+          );
+        }
       } finally {
         setSaving(false);
       }
@@ -852,7 +870,7 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
         <button
           type="button"
           data-testid="agent-instance-add"
-          disabled={saving || atMax}
+          disabled={saving || atMax || unverified !== null}
           onClick={handleAdd}
           className="flex items-center gap-1 text-sm font-medium px-3 py-2 rounded-md border border-accent-200 dark:border-accent-700 bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300 hover:bg-accent-100 dark:hover:bg-accent-900/50 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
         >
@@ -888,6 +906,12 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
         </p>
       )}
 
+      {unverified !== null && (
+        <p role="status" data-testid="agent-instances-saved-unverified" className="mt-3 text-xs text-warning">
+          {t(unverified === 'unknown' ? 'agentInstanceOutcomeUnknown' : 'agentInstanceSavedUnverified')}
+        </p>
+      )}
+
       {/* Ollama model selector (shown when any instance backs vibe-local) */}
       {hasVibeLocal && (
         <VibeLocalSettings
@@ -898,6 +922,13 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
           onVibeLocalContextWindowChange={onVibeLocalContextWindowChange}
         />
       )}
+
+      {/* Issue #4117: each session's role. Also behind a disclosure that reads
+          nothing until opened, for the reason given just below. */}
+      <InstanceRolesSection
+        worktreeId={worktreeId}
+        rosterKey={instances.map((inst) => `${inst.id}:${inst.cliTool}`).join(',')}
+      />
 
       {/* Issue #2067: the two actions #2065 and #2066 deliberately left out —
           "make this the default" and "and the branches I already have".

@@ -34,19 +34,33 @@ let patches: AgentInstance[][] = [];
 let releases: Array<() => void> = [];
 let holdPatches = true;
 let worktreeSeq = 0;
+// Issue #4117: the server's roster and revision, which a save reads first and sends back.
+let serverRoster: AgentInstance[] = INITIAL;
+let serverRevision = 0;
 
 function installFetch(): void {
   patches = [];
   releases = [];
+  serverRoster = INITIAL;
+  serverRevision = 0;
   global.fetch = vi.fn((url: string, init?: RequestInit) => {
     if (init?.method === 'PATCH') {
-      patches.push(JSON.parse(String(init.body)).agentInstances);
-      const response = { ok: true, json: async () => ({}) };
+      serverRoster = JSON.parse(String(init.body)).agentInstances;
+      serverRevision += 1;
+      patches.push(serverRoster);
+      const answer = { agentInstances: serverRoster, rosterRevision: `rev-${serverRevision}` };
+      const response = { ok: true, json: async () => answer };
       if (!holdPatches) return Promise.resolve(response);
       return new Promise((resolve) => releases.push(() => resolve(response)));
     }
     if (String(url).startsWith('/api/settings/default-agents')) {
       return Promise.resolve({ ok: true, json: async () => ({ installed: ['claude', 'codex'] }) });
+    }
+    if (/^\/api\/worktrees\/[^/]+$/.test(String(url))) {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ agentInstances: serverRoster, rosterRevision: `rev-${serverRevision}` }),
+      });
     }
     return Promise.resolve({ ok: true, json: async () => ({}) });
   }) as unknown as typeof fetch;

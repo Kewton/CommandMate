@@ -76,7 +76,7 @@
     "filterDisabled": "無効化中 ({count})",
     "emptyDisabled": "走査対象から外したリポジトリはありません。",
     "disableConfirmTitle": "走査対象から外しますか？",
-    "disableConfirmBody": "「{name}」は今後 worktree の走査対象から外れます。\n\n削除は行いません: {count} 件の worktree と、そのチャット履歴・タスク・検証実行はデータベースに残り、稼働中の tmux セッションもそのまま動き続けます。\n\nworktree はサイドバーにも残ります。非表示にする場合は Visibility トグルを使ってください。",
+    "disableConfirmBody": "「{name}」は今後 worktree の走査対象から外れます。\n\n削除は行いません: {count} 件の worktree と、そのチャット履歴・タスク・検証実行はデータベースに残り、稼働中の tmux セッションもそのまま動き続けます。\n\nworktree はサイドバーにも残ります。非表示にする場合は Visibility トグルを使ってください。\n\nこのリポジトリのロールの既定も残り、走査に戻すとそのまま使われます。",
     "disableConfirmAction": "走査対象から外す",
     "disableSuccess": "「{name}」を走査対象から外しました。",
     "enableSuccess": "「{name}」を走査対象に戻しました (worktree {count} 件)。",
@@ -85,7 +85,8 @@
     "duplicateConfirmBody": "「{path}」は次と同じ git リポジトリです:\n{paths}\n\nどちらの root も同じ worktree を列挙するため、同期のたびに各 worktree が二重に登録され、「リポジトリパス」が実行ごとに入れ替わります。\n\nこの登録自体は可能です。これらの worktree を別々の root として管理したい場合はそのまま続行してください。そうでなければキャンセルするか、後から Repositories 一覧の Scan トグルで片方を走査対象から外してください。",
     "duplicateConfirmAction": "このまま追加",
     "duplicateRowBadge": "scan root 重複",
-    "duplicateRowDetail": "{paths} と同じ git リポジトリです。どちらかの行の Scan トグルで走査対象から外せます。"
+    "duplicateRowDetail": "{paths} と同じ git リポジトリです。どちらかの行の Scan トグルで走査対象から外せます。",
+    "rolesKeptNote": "走査から外しても、このリポジトリのロールの既定は残り、走査に戻すとそのまま使われます。"
   },
   "cancel": "キャンセル",
   "sending": "送信中...",
@@ -354,6 +355,99 @@
       "model_rejected": "モデル指定が受け付けられませんでした。消すか変えてから送り直してください。",
       "invalid": "依頼が受け付けられませんでした。",
       "failed": "送信に失敗しました。接続を確かめて送り直してください。"
+    }
+  },
+  "agentRoles": {
+    "title": "ロール",
+    "loading": "読み込み中…",
+    "loadError": "ロールの情報を読み込めませんでした。",
+    "description": "ロールはセッションの起動時に渡す指示です。ロールごとに本文を書き、ツールごとの既定やセッションごとの指定で使います。解決の順はセッション → リポジトリ → システムです。設定を変えても、動いているセッションには次の起動まで届きません。",
+    "personaNote": "OpenCode のペルソナ（build / plan など）とロールは別のものです。ペルソナは OpenCode の画面で切り替えるエージェントで、ロールは CommandMate が起動時に渡す指示です。",
+    "replacesDefaultNote": "OpenCode V2 では、ロールがエージェントの既定の指示を置き換えます（足すのではありません）。",
+    "resumedAcrossRoleNote": "前の会話を続けて起動したため、別のロールでの返答が履歴に残っています。新しい会話は次の起動時に始められます。",
+    "adapterDisabledNote": "このツールへのロールの適用はまだ有効ではありません。ロールが解決されると起動は拒否されます。",
+    "unsupportedNote": "このツールはロールの対象外です。",
+    "choice": {
+      "inherit": "既定を使う",
+      "inheritNamed": "既定（{label}）",
+      "none": "なし",
+      "useSystem": "システムの既定を使う",
+      "unset": "未設定"
+    },
+    "source": {
+      "inherited": "継承中: {label}",
+      "assigned": "指定中: {label}"
+    },
+    "label": {
+      "roleSystem": "{name}［システム］",
+      "roleRepository": "{name}［リポジトリ］",
+      "roleInstance": "{name}［このセッション］",
+      "noneRepository": "なし［リポジトリで明示］",
+      "noneInstance": "なし［このセッションで明示］",
+      "noneDefault": "なし［既定なし］",
+      "noneUnsupported": "なし［対象外のツール］"
+    },
+    "ambiguous": {
+      "rootSettingsDiffer": "判定できません: このブランチが属する複数のリポジトリで設定が異なります（{roots}）。リポジトリの設定を揃えるか、セッションでロールを指定するまで、起動は拒否されます。",
+      "membershipUndetermined": "判定できません: git がリポジトリの所属を確かめられませんでした（{roots}）。解消するか、セッションでロールを指定するまで、起動は拒否されます。",
+      "rootInherits": "システムの既定"
+    },
+    "savedStale": "変更の後に最新の状態を読み直せませんでした。表示が古い可能性があります。ページを再読み込みしてください。",
+    "saveUnknown": "保存できたか確かめられませんでした。今の設定を確かめてください。",
+    "application": {
+      "startup": "起動時: {name}",
+      "next": "次回: {name}",
+      "pending": "適用待ち",
+      "unknown": "不明",
+      "ambiguous": "判定できません",
+      "separator": "／",
+      "restart": "再起動",
+      "restartHint": "セッションを終了します。次にメッセージを送ると、今の設定で新しく起動します。"
+    },
+    "instances": {
+      "title": "セッションのロール",
+      "description": "セッションごとにロールを選びます。変更は次の起動から使われます。",
+      "selectLabel": "{alias} のロール",
+      "saveError": "ロールを保存できませんでした。",
+      "restartConfirm": "{alias} のセッションを終了します。次にメッセージを送ると、今の設定で新しく起動します。",
+      "restartError": "セッションを終了できませんでした。",
+      "runningUnknown": "稼働状態を読めませんでした。起動中か停止中かは表示していません。"
+    },
+    "repository": {
+      "toggle": "ロール",
+      "toggleLabel": "{name} のロールの既定",
+      "description": "このリポジトリのブランチで、ツールごとに使う既定です。",
+      "selectLabel": "{tool} の既定",
+      "saveError": "既定を保存できませんでした。"
+    },
+    "system": {
+      "title": "システムの既定",
+      "description": "リポジトリやセッションで指定がないときに使います。"
+    },
+    "manage": {
+      "new": "ロールを作成",
+      "create": "作成",
+      "save": "保存",
+      "edit": "編集",
+      "delete": "削除",
+      "cancel": "キャンセル",
+      "name": "名前",
+      "body": "本文",
+      "bodyPlaceholder": "例: あなたはコードレビュー担当です。",
+      "bytes": "{bytes} / {max} バイト",
+      "empty": "ロールはまだありません。",
+      "nameConflict": "同じ名前のロールがあります。",
+      "versionConflict": "このロールは別の場所で編集されました。閉じて開き直してください。",
+      "saveError": "保存できませんでした。",
+      "deleteError": "削除できませんでした。",
+      "edited": "保存しました。このロールを直接使う設定 {count} 件は、次の起動から新しい本文を使います。",
+      "deleted": "「{name}」を削除しました。",
+      "deleteAsk": "「{name}」を削除しますか？",
+      "inUse": "このロールは次の場所で使われています。削除すると、これらの設定も外れます。起動の記録と生成済みのファイルは残ります。",
+      "forceDelete": "設定を外して削除",
+      "referenceInstance": "セッション: {worktree} / {instance}",
+      "referenceRepository": "リポジトリ: {path}（{tool}）",
+      "referenceSystem": "システムの既定: {tool}"
     }
   }
 }

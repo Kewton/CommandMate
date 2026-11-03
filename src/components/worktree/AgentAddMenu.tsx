@@ -10,10 +10,27 @@
  *
  * ## What "add" does
  *
- * It PATCHes the roster (the same `PATCH /api/worktrees/[id]` +
- * `agentInstances` write `AgentInstancesPane` uses) and hands the new instance
- * and the chosen placement to the caller, which shows it in the chosen split.
- * It does NOT start a session: a split showing an instance with no session is
+ * It creates the instance and its role in one request (`POST .../instances/roles`,
+ * Issue #4117), so a failure leaves neither, and hands the new instance and the
+ * chosen placement to the caller, which shows it in the chosen split. When the
+ * role settings could not be read there is no role to choose, and it falls back to
+ * the roster `PATCH /api/worktrees/[id]` the pane uses, which adds the instance with
+ * the default role: "could not check" must not lock the "+", as with the installed
+ * list below. Either way the save carries a revision; the queue refuses it with none.
+ *
+ * A save whose result could not be read back is not a failure, and not something to
+ * press again: another press would add a second instance. The form stays with that
+ * said and the submit off, and the instance is placed by nothing until a reload. The
+ * same goes for a request whose answer was lost and whose result could not be read
+ * (`useAgentInstancesRoster`), worded as not known. While that read is out the form is
+ * still saving. Opening the form again lifts this only if its own read succeeds.
+ *
+ * Only an instance on the confirmed roster is handed to `onAdded`. One removed elsewhere
+ * before that roster was read has nothing to place, and a placement request left waiting
+ * for its id would land on whichever later row takes that id.
+ *
+ * What the default is comes from the same GET's `toolDefaults`; nothing is resolved
+ * here. It does NOT start a session: a split showing an instance with no session is
  * the ordinary state of every freshly added roster row, and the session starts
  * on the existing path — the first message sent from that split's composer
  * (`POST /api/worktrees/[id]/send` starts the agent when it is not running).
@@ -45,7 +62,18 @@ import {
   type AgentPlacement,
 } from '@/config/terminal-split-config';
 import { DEFAULT_AGENTS_ENDPOINT } from '@/config/default-agents';
-import { useAgentInstancesRoster } from '@/hooks/useAgentInstancesRoster';
+import { useAgentInstanceCreate, useAgentInstancesRoster, type RosterWriteResult } from '@/hooks/useAgentInstancesRoster';
+import { refreshInstanceRoleSettings } from '@/hooks/useInstanceRoleSettings';
+import { roleApi } from '@/lib/api-client-agent-roles';
+import { RoleChoiceSelect } from '@/components/roles/RoleChoiceSelect';
+import {
+  ROLE_CHOICE_INHERIT,
+  effectiveRoleName,
+  roleInputOf,
+  roleSourceText,
+  roleToolNoteKeys,
+} from '@/components/roles/role-display';
+import type { AgentRoleSummary, InstanceRoleSettingsResponse } from '@/types/agent-roles';
 import { Modal } from '@/components/ui/Modal';
 import { Tooltip } from '@/components/common/Tooltip';
 
@@ -75,6 +103,8 @@ export function defaultAlias(cliTool: CLIToolType, id: string): string {
   return suffix ? `${name} ${suffix}` : name;
 }
 
+const INSTALLED_READ_TIMEOUT_MS = 15000;
+
 /**
  * Read which agent CLIs are installed.
  *
@@ -91,8 +121,11 @@ export function defaultAlias(cliTool: CLIToolType, id: string): string {
  * agents are installed. A non-empty list is trusted as is.
  */
 export async function fetchInstalledAgentTools(): Promise<CLIToolType[] | null> {
+  // The submit button waits for this, so a stalled answer must end as "could not check".
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), INSTALLED_READ_TIMEOUT_MS);
   try {
-    const response = await fetch(`${DEFAULT_AGENTS_ENDPOINT}?include=installed`);
+    const response = await fetch(`${DEFAULT_AGENTS_ENDPOINT}?include=installed`, { signal: controller.signal });
     if (!response.ok) return null;
     const body: unknown = await response.json();
     if (!body || typeof body !== 'object') return null;
@@ -106,6 +139,8 @@ export async function fetchInstalledAgentTools(): Promise<CLIToolType[] | null> 
     return list.length > 0 ? list : null;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -144,6 +179,7 @@ export const AgentAddMenu = memo(function AgentAddMenu({
   onAdded,
 }: AgentAddMenuProps) {
   const t = useTranslations('worktree');
+  const tCommon = useTranslations('common');
   const formId = useId();
 
   const [open, setOpen] = useState(false);
@@ -156,10 +192,18 @@ export const AgentAddMenu = memo(function AgentAddMenu({
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Saved or not known to be saved; either way, not to be sent again.
+  const [unverified, setUnverified] = useState<'saved' | 'unknown' | null>(null);
+  const [removedElsewhere, setRemovedElsewhere] = useState(false);
+  // Null: not read yet, or could not be read.
+  const [roleSettings, setRoleSettings] = useState<InstanceRoleSettingsResponse | null>(null);
+  const [roles, setRoles] = useState<AgentRoleSummary[]>([]);
+  const [roleChoice, setRoleChoice] = useState(ROLE_CHOICE_INHERIT);
 
   const atMax = instances.length >= MAX_AGENT_INSTANCES;
   // Issue #3514: the same per-worktree write queue AgentInstancesPane uses.
-  const writeRoster = useAgentInstancesRoster(worktreeId, instances, onInstancesChange);
+  const writeRoster = useAgentInstancesRoster(worktreeId, onInstancesChange);
+  const createInstance = useAgentInstanceCreate(worktreeId, onInstancesChange);
 
   const isToolSelectable = useCallback(
     (id: CLIToolType) => installed == null || installed.includes(id),
@@ -176,13 +220,26 @@ export const AgentAddMenu = memo(function AgentAddMenu({
     if (!open) return;
     let cancelled = false;
     setInstalled(undefined);
-    void fetchInstalledAgentTools().then((list) => {
-      if (!cancelled) setInstalled(list);
+    setRoleSettings(null);
+    setRoles([]);
+    // Together, because the submit button opens on `installed` and what it does
+    // depends on whether the role settings were read.
+    void Promise.all([
+      fetchInstalledAgentTools(),
+      refreshInstanceRoleSettings(worktreeId),
+      roleApi.list(),
+    ]).then(([list, settings, roleList]) => {
+      if (cancelled) return;
+      setRoleSettings(settings);
+      // What is there has been read, so what to do next can be judged from it.
+      if (settings) setUnverified(null);
+      if (roleList.ok) setRoles(roleList.data.roles);
+      setInstalled(list);
     });
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, worktreeId]);
 
   // The tool the form submits: the user's pick while it is selectable, else the
   // first selectable one. Derived (not synced by an effect) so there is no
@@ -201,7 +258,9 @@ export const AgentAddMenu = memo(function AgentAddMenu({
   const handleOpen = useCallback(() => {
     setName('');
     setError(null);
+    setRemovedElsewhere(false);
     setPlacement(resolveDefaultAgentPlacement(splitCount));
+    setRoleChoice(ROLE_CHOICE_INHERIT);
     setOpen(true);
   }, [splitCount]);
 
@@ -209,6 +268,10 @@ export const AgentAddMenu = memo(function AgentAddMenu({
     if (saving) return;
     setOpen(false);
   }, [saving]);
+
+  // What a new instance of this tool would get, as the server says. Absent for a
+  // tool outside the roles, and while the settings are unread.
+  const toolDefault = roleSettings?.toolDefaults.find((entry) => entry.cliToolId === toolId) ?? null;
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -222,34 +285,85 @@ export const AgentAddMenu = memo(function AgentAddMenu({
       // #3514), so a pane write still in flight is kept and its ids are not
       // re-allocated here.
       let added: AgentInstance | null = null;
+      const buildAdded = (base: AgentInstance[]): AgentInstance | null => {
+        if (base.length >= MAX_AGENT_INSTANCES) return null;
+        const id = nextInstanceId(tool, base);
+        added = { id, cliTool: tool, alias: trimmed || defaultAlias(tool, id), order: base.length };
+        return added;
+      };
       setSaving(true);
       setError(null);
+      setRemovedElsewhere(false);
       try {
-        const result = await writeRoster((base) => {
-          if (base.length >= MAX_AGENT_INSTANCES) return null;
-          const id = nextInstanceId(tool, base);
-          added = { id, cliTool: tool, alias: trimmed || defaultAlias(tool, id), order: base.length };
-          return [...base, added];
-        });
+        let result: RosterWriteResult;
+        if (roleSettings) {
+          // A tool outside the roles can hold nothing but the default.
+          const role = roleInputOf(toolDefault ? roleChoice : ROLE_CHOICE_INHERIT);
+          result = await createInstance((base) => {
+            const instance = buildAdded(base);
+            return instance && { id: instance.id, cliTool: instance.cliTool, alias: instance.alias };
+          }, role);
+        } else {
+          result = await writeRoster((base) => {
+            const instance = buildAdded(base);
+            return instance && [...base, instance];
+          });
+        }
+        if (result.status === 'saved_unverified') {
+          setUnverified(result.unconfirmed ? 'unknown' : 'saved');
+          return;
+        }
         if (result.status !== 'saved' || added === null) {
-          setError(t('agentAdd.saveError'));
+          // The dialog stays open, with what was typed.
+          const failure = result.status === 'failed' ? result.error : undefined;
+          setError(
+            t(
+              failure === 'not_found'
+                ? 'agentAdd.roleMissing'
+                : failure === 'roster_changed'
+                  ? 'agentAdd.rosterChanged'
+                  : failure === 'roster_unreadable'
+                    ? 'agentAdd.rosterUnreadable'
+                    : 'agentAdd.saveError',
+            ),
+          );
           return;
         }
         const saved = result.roster.find((inst) => inst.id === (added as AgentInstance).id);
-        onAdded?.(saved ?? added, chosenPlacement);
+        if (!saved) {
+          // Not a failure, and adding again is fair: nothing of it is left.
+          setRemovedElsewhere(true);
+          return;
+        }
+        onAdded?.(saved, chosenPlacement);
         setOpen(false);
       } finally {
         setSaving(false);
       }
     },
-    [toolId, isToolSelectable, atMax, saving, placement, splitCount, name, writeRoster, t, onAdded],
+    [
+      toolId,
+      isToolSelectable,
+      atMax,
+      saving,
+      placement,
+      splitCount,
+      name,
+      writeRoster,
+      createInstance,
+      roleSettings,
+      toolDefault,
+      roleChoice,
+      t,
+      onAdded,
+    ],
   );
 
   const buttonLabel = atMax
     ? t('agentAdd.maxReached', { max: MAX_AGENT_INSTANCES })
     : t('agentAdd.button');
   const canSubmit =
-    !saving && !atMax && installed !== undefined && toolId !== '' && isToolSelectable(toolId);
+    !saving && unverified === null && !atMax && installed !== undefined && toolId !== '' && isToolSelectable(toolId);
 
   return (
     <>
@@ -280,7 +394,10 @@ export const AgentAddMenu = memo(function AgentAddMenu({
               data-testid="agent-add-tool"
               value={toolId}
               disabled={saving || installed === undefined}
-              onChange={(e) => setToolId(e.target.value as CLIToolType)}
+              onChange={(e) => {
+                setToolId(e.target.value as CLIToolType);
+                setRoleChoice(ROLE_CHOICE_INHERIT);
+              }}
               className="w-full text-sm border border-input rounded-md px-2 py-2 bg-surface text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
             >
               {CLI_TOOL_IDS.map((id) => {
@@ -313,6 +430,49 @@ export const AgentAddMenu = memo(function AgentAddMenu({
               className="w-full text-sm border border-input rounded-md px-2 py-2 bg-surface text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </label>
+
+          <div className="space-y-1">
+            <span className="text-xs font-medium text-muted-foreground">{t('agentAdd.role')}</span>
+            <RoleChoiceSelect
+              value={toolDefault ? roleChoice : ROLE_CHOICE_INHERIT}
+              inheritLabel={
+                toolDefault
+                  ? tCommon('agentRoles.choice.inheritNamed', { label: effectiveRoleName(toolDefault.effective, tCommon) })
+                  : tCommon('agentRoles.choice.inherit')
+              }
+              roles={toolDefault ? roles : []}
+              disabled={saving || !toolDefault}
+              ariaLabel={t('agentAdd.role')}
+              testId="agent-add-role"
+              onChange={setRoleChoice}
+            />
+            {toolDefault && roleChoice === ROLE_CHOICE_INHERIT && (
+              <p data-testid="agent-add-role-source" className="text-xs text-muted-foreground break-words">
+                {roleSourceText(toolDefault.effective, true, tCommon)}
+              </p>
+            )}
+            {toolDefault && !toolDefault.adapterEnabled && (
+              <p data-testid="agent-add-role-adapter-off" className="text-xs text-warning">
+                {tCommon('agentRoles.adapterDisabledNote')}
+              </p>
+            )}
+            {roleSettings && !toolDefault && (
+              <p data-testid="agent-add-role-unsupported" className="text-xs text-muted-foreground">
+                {t('agentAdd.roleUnsupported')}
+              </p>
+            )}
+            {!roleSettings && installed !== undefined && (
+              <p data-testid="agent-add-role-unavailable" className="text-xs text-muted-foreground">
+                {t('agentAdd.roleUnavailable')}
+              </p>
+            )}
+            {toolDefault &&
+              roleToolNoteKeys(toolDefault.cliToolId).map((key) => (
+                <p key={key} className="text-xs text-muted-foreground">
+                  {tCommon(key)}
+                </p>
+              ))}
+          </div>
 
           <fieldset className="space-y-1">
             <legend className="text-xs font-medium text-muted-foreground">
@@ -349,6 +509,17 @@ export const AgentAddMenu = memo(function AgentAddMenu({
           {error && (
             <p role="alert" data-testid="agent-add-error" className="text-xs text-danger">
               {error}
+            </p>
+          )}
+
+          {removedElsewhere && (
+            <p role="status" data-testid="agent-add-removed-elsewhere" className="text-xs text-warning">
+              {t('agentAdd.removedElsewhere')}
+            </p>
+          )}
+          {unverified !== null && (
+            <p role="status" data-testid="agent-add-saved-unverified" className="text-xs text-warning">
+              {t(unverified === 'unknown' ? 'agentAdd.outcomeUnknown' : 'agentAdd.savedUnverified')}
             </p>
           )}
 

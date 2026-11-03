@@ -2,6 +2,12 @@
  * API Route: /api/worktrees/:id
  * GET: Returns a specific worktree by ID
  * PATCH: Updates worktree properties (e.g., description, link, favorite, status)
+ *
+ * Issue #4117: PATCH takes `expectedRosterRevision`. The roster write replaces the
+ * whole list, so a client holding an older one would erase what
+ * `POST /instances/roles` created. A stale revision is a 409 before anything is
+ * written, and a client that sends none is not checked. GET answers `rosterRevision`
+ * with the roster, read together, so a client can hold the pair before its first save.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -24,6 +30,7 @@ import { createLogger } from '@/lib/logger';
 import { releaseAutoYes } from '@/lib/auto-yes-lifecycle';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { readJsonBody } from '@/lib/api/read-json-body';
+import { computeRosterRevision } from '@/lib/agent-roles/management';
 
 const logger = createLogger('api/worktrees');
 
@@ -94,7 +101,8 @@ export async function GET(
     // Issue #2867: each instance carries the tmux session name this server
     // actually uses for it — namespaced, or the legacy name it adopted — so
     // `commandmate attach` never has to assemble one it cannot know.
-    const agentInstances = resolveAgentInstances(db, id, worktree.selectedAgents).map((instance) => ({
+    const roster = resolveAgentInstances(db, id, worktree.selectedAgents);
+    const agentInstances = roster.map((instance) => ({
       ...instance,
       sessionName: resolveSessionName(instance.cliTool, id, instance.id),
     }));
@@ -102,6 +110,7 @@ export async function GET(
       {
         ...worktree,
         agentInstances,
+        rosterRevision: computeRosterRevision(roster),
         gitStatus,
         ...sessionStatus,
       },
@@ -151,6 +160,31 @@ export async function PATCH(
         { error: 'Request body must be a JSON object' },
         { status: 400 }
       );
+    }
+
+    // Issue #4117: before any field of this request is written. Read fresh, not
+    // from `worktree`, which predates the await on the body; nothing awaits from
+    // here to the roster write, so no other request can land in between.
+    if ('expectedRosterRevision' in body) {
+      if (typeof body.expectedRosterRevision !== 'string') {
+        return NextResponse.json(
+          { error: 'expectedRosterRevision must be a string' },
+          { status: 400 }
+        );
+      }
+      const current = resolveAgentInstances(db, id, getWorktreeById(db, id)?.selectedAgents);
+      const currentRevision = computeRosterRevision(current);
+      if (body.expectedRosterRevision !== currentRevision) {
+        return NextResponse.json(
+          {
+            error: 'The roster changed since it was read',
+            code: 'ROSTER_CHANGED',
+            rosterRevision: currentRevision,
+            agentInstances: current,
+          },
+          { status: 409 }
+        );
+      }
     }
 
     // Track if cli_tool_id was auto-updated due to selectedAgents change
@@ -328,6 +362,7 @@ export async function PATCH(
       {
         ...updatedWorktree,
         agentInstances,
+        rosterRevision: computeRosterRevision(agentInstances),
         isSessionRunning: isRunning,
         ...(cliToolIdAutoUpdated ? { cliToolIdAutoUpdated: true } : {}),
       },

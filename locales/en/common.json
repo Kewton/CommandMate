@@ -76,7 +76,7 @@
     "filterDisabled": "Disabled ({count})",
     "emptyDisabled": "No repositories are excluded from scans.",
     "disableConfirmTitle": "Exclude from scans?",
-    "disableConfirmBody": "\"{name}\" will no longer be scanned for worktrees.\n\nNothing is deleted: its {count} worktree(s) and their chat history, tasks and verification runs stay in the database, and any tmux session running under it keeps running.\n\nIts worktrees also stay in the sidebar — use the Visibility toggle to hide them.",
+    "disableConfirmBody": "\"{name}\" will no longer be scanned for worktrees.\n\nNothing is deleted: its {count} worktree(s) and their chat history, tasks and verification runs stay in the database, and any tmux session running under it keeps running.\n\nIts worktrees also stay in the sidebar — use the Visibility toggle to hide them.\n\nIts role defaults stay too, and apply again when it is scanned again.",
     "disableConfirmAction": "Exclude from scans",
     "disableSuccess": "\"{name}\" is excluded from scans.",
     "enableSuccess": "\"{name}\" is scanned again ({count} worktree(s)).",
@@ -85,7 +85,8 @@
     "duplicateConfirmBody": "\"{path}\" is the same git repository as:\n{paths}\n\nBoth roots list the same worktrees, so every sync registers each of them twice and their \"repository path\" flips between the roots run to run.\n\nThis is allowed — continue if you want to manage these worktrees as separate roots. Otherwise cancel, or use the Scan toggle on the Repositories list to exclude one of them later.",
     "duplicateConfirmAction": "Add anyway",
     "duplicateRowBadge": "Duplicate scan root",
-    "duplicateRowDetail": "Same git repository as {paths}. Use the Scan toggle on one of these rows to exclude it from scans."
+    "duplicateRowDetail": "Same git repository as {paths}. Use the Scan toggle on one of these rows to exclude it from scans.",
+    "rolesKeptNote": "An excluded repository keeps its role defaults, and uses them again when it is scanned again."
   },
   "cancel": "Cancel",
   "sending": "Sending...",
@@ -354,6 +355,99 @@
       "model_rejected": "The model was not accepted. Clear it or change it, then send again.",
       "invalid": "The request was not accepted.",
       "failed": "Sending failed. Check the connection and send again."
+    }
+  },
+  "agentRoles": {
+    "title": "Roles",
+    "loading": "Loading…",
+    "loadError": "Could not read the role information.",
+    "description": "A role is the instructions given to a session when it starts. Write a body per role, then use it as a per-tool default or on one session. It resolves session → repository → system. Changing a setting does not reach a running session until its next start.",
+    "personaNote": "OpenCode's persona (build, plan, …) is not a role. A persona is the agent you switch inside OpenCode; a role is instructions CommandMate gives at startup.",
+    "replacesDefaultNote": "On OpenCode V2 a role replaces the agent's default instructions rather than adding to them.",
+    "resumedAcrossRoleNote": "This start continued an earlier conversation, so replies from another role are still in its history. A new conversation can be started at the next start.",
+    "adapterDisabledNote": "Applying a role to this tool is not enabled yet. A start that resolves to a role is refused.",
+    "unsupportedNote": "Roles do not apply to this tool.",
+    "choice": {
+      "inherit": "Use the default",
+      "inheritNamed": "Default ({label})",
+      "none": "None",
+      "useSystem": "Use the system default",
+      "unset": "Not set"
+    },
+    "source": {
+      "inherited": "Inherited: {label}",
+      "assigned": "Set: {label}"
+    },
+    "label": {
+      "roleSystem": "{name} [system]",
+      "roleRepository": "{name} [repository]",
+      "roleInstance": "{name} [this session]",
+      "noneRepository": "None [set on the repository]",
+      "noneInstance": "None [set on this session]",
+      "noneDefault": "None [no default]",
+      "noneUnsupported": "None [tool not supported]"
+    },
+    "ambiguous": {
+      "rootSettingsDiffer": "Cannot tell: the repositories this branch belongs to hold different settings ({roots}). Starts are refused until the repositories agree or the session names a role.",
+      "membershipUndetermined": "Cannot tell: git could not confirm which repository this belongs to ({roots}). Starts are refused until that is resolved or the session names a role.",
+      "rootInherits": "system default"
+    },
+    "savedStale": "The latest state could not be read back after a change, so this may be out of date. Reload the page.",
+    "saveUnknown": "Whether this was saved could not be confirmed. Check the current setting.",
+    "application": {
+      "startup": "At start: {name}",
+      "next": "Next: {name}",
+      "pending": "Pending",
+      "unknown": "Unknown",
+      "ambiguous": "Cannot tell",
+      "separator": " / ",
+      "restart": "Restart",
+      "restartHint": "Ends the session. The next message starts a new one with the current settings."
+    },
+    "instances": {
+      "title": "Session roles",
+      "description": "Choose a role per session. A change is used from the next start.",
+      "selectLabel": "Role of {alias}",
+      "saveError": "Could not save the role.",
+      "restartConfirm": "End the session of {alias}? The next message starts a new one with the current settings.",
+      "restartError": "Could not end the session.",
+      "runningUnknown": "Could not read which sessions are running, so the status below does not say whether they are."
+    },
+    "repository": {
+      "toggle": "Roles",
+      "toggleLabel": "Role defaults of {name}",
+      "description": "The default per tool for this repository's branches.",
+      "selectLabel": "Default for {tool}",
+      "saveError": "Could not save the default."
+    },
+    "system": {
+      "title": "System defaults",
+      "description": "Used when neither the repository nor the session says otherwise."
+    },
+    "manage": {
+      "new": "Create a role",
+      "create": "Create",
+      "save": "Save",
+      "edit": "Edit",
+      "delete": "Delete",
+      "cancel": "Cancel",
+      "name": "Name",
+      "body": "Body",
+      "bodyPlaceholder": "e.g. You are the code reviewer.",
+      "bytes": "{bytes} / {max} bytes",
+      "empty": "No roles yet.",
+      "nameConflict": "A role with this name already exists.",
+      "versionConflict": "This role was edited elsewhere. Close this and open it again.",
+      "saveError": "Could not save.",
+      "deleteError": "Could not delete.",
+      "edited": "Saved. {count} setting(s) that name this role use the new body from their next start.",
+      "deleted": "Deleted \"{name}\".",
+      "deleteAsk": "Delete \"{name}\"?",
+      "inUse": "This role is used in these places. Deleting it removes these settings too. Launch records and generated files stay.",
+      "forceDelete": "Remove the settings and delete",
+      "referenceInstance": "Session: {worktree} / {instance}",
+      "referenceRepository": "Repository: {path} ({tool})",
+      "referenceSystem": "System default: {tool}"
     }
   }
 }
