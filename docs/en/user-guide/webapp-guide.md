@@ -445,6 +445,22 @@ Rename, reorder and delete in the **"Agent"** tool at the right of the header.
   [Approval Routes Differ by Agent](#approval-routes-differ-by-agent)
 - These sessions appear in the session field of the header ([current session][N more ▾])
 
+### Roles
+
+A role is the instructions given to a session when it starts. Create a name and a body, such as "Reviewer", then use it as a per-tool default or on one session. Roles apply to Claude, Codex, Command Code, OpenCode, OpenCode V2, Copilot and Antigravity (not Gemini or Vibe-Local; until Antigravity's check has passed, a start that resolves to a role is refused).
+
+- **Create, edit, delete, and the system defaults**: under General in the gear's settings dialog on PC, and `/more` on a phone. Deleting a role in use lists where it is used, and goes ahead only if you choose "Remove the settings and delete"
+- **Repository defaults**: **Roles** on each row of the Repositories screen, per tool: use the system default, none, or a role. Excluding a repository from scans keeps them, and they apply again when it is scanned again
+- **When adding**: choose "Default (role name)", none, or another role in the add form. The line below says where the default comes from, such as `Inherited: Reviewer [system]` or `Inherited: None [set on the repository]`
+- **Existing sessions**: open **Session roles** under Agents (the same on a phone). A session with no roster row yet can be changed too
+- **When it cannot be determined**: if the roots of one git repository hold different settings, for example, the reason is shown, and starts are refused until they agree or the session names a role
+
+**Changing a setting does not reach a running session.** The split header (on a phone, Session roles) keeps the start and the next apart, such as `At start: Reviewer / Next: PM / Pending`. When it cannot be confirmed, after a server restart for example, it reads `At start: Unknown`. **Restart** ends that session, and the next message starts a new one with the current settings.
+
+OpenCode's persona (build, plan, …) is not a role. A persona is the agent you switch inside OpenCode; a role is instructions CommandMate gives at startup. On OpenCode V2 a role replaces the agent's default instructions.
+
+So that nothing is overwritten from an older roster when several screens or the CLI change it at once, the screen's saves carry the roster's revision (`expectedRosterRevision` on `PATCH /api/worktrees/:id`; a mismatch is a 409). The screen then reads the latest roster and saves again.
+
 ### Ollama Model Selection (Vibe-Local)
 
 When Vibe-Local is selected, you can specify which Ollama model to use.

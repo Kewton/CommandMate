@@ -1728,6 +1728,11 @@
     "submit": "Add",
     "cancel": "Cancel",
     "saveError": "Could not add the agent.",
-    "maxReached": "Up to {max} agents per branch"
+    "maxReached": "Up to {max} agents per branch",
+    "role": "Role",
+    "roleUnsupported": "Roles do not apply to this agent.",
+    "roleUnavailable": "The role information could not be read, so this is added with the default role.",
+    "roleMissing": "The chosen role no longer exists. Reopen this and choose again.",
+    "rosterChanged": "The roster kept changing elsewhere, so this was not added. Try again."
   }
 }

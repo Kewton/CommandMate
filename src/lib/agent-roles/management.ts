@@ -23,7 +23,8 @@
  * - **Racing the roster PATCH.** That route replaces the list from what its client
  *   read earlier. Clients take `rosterRevision` from the responses here and hand it
  *   back as `expectedRosterRevision`; a stale one is refused before anything is
- *   written. The PATCH route itself does not check it (it is out of #4114's scope).
+ *   written. The PATCH takes the same condition (#4117); a client that sends none
+ *   is not checked.
  *
  * @module lib/agent-roles/management
  */

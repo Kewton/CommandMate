@@ -62,6 +62,7 @@ import { InstanceCliCommandsModal } from '@/components/worktree/InstanceCliComma
 // re-implemented so the pane cannot grow its own idea of what an update does to
 // a live session.
 import { AgentUpdatesCard } from '@/components/settings';
+import { InstanceRolesSection } from '@/components/roles/InstanceRolesSection';
 import { Spinner } from '@/components/ui/Spinner';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { TruncationTooltip } from '@/components/common/TruncationTooltip';
@@ -898,6 +899,13 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
           onVibeLocalContextWindowChange={onVibeLocalContextWindowChange}
         />
       )}
+
+      {/* Issue #4117: each session's role. Also behind a disclosure that reads
+          nothing until opened, for the reason given just below. */}
+      <InstanceRolesSection
+        worktreeId={worktreeId}
+        rosterKey={instances.map((inst) => `${inst.id}:${inst.cliTool}`).join(',')}
+      />
 
       {/* Issue #2067: the two actions #2065 and #2066 deliberately left out —
           "make this the default" and "and the branches I already have".
