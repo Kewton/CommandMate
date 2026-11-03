@@ -36,11 +36,16 @@
  *
  * ## Asking git takes time
  *
- * The roots are worked out across an `await`, and anything can change meanwhile.
- * So {@link settleWorktreeMembership} confirms afterwards that what it asked about
- * still holds, and hands back the row as it is now. Everything else (the roster,
- * the tool, the settings) is read after that with no `await` in between; better-sqlite3
- * is synchronous, so one such stretch is one consistent view.
+ * The answers from git arrive across an `await`, and anything can change meanwhile.
+ * Everything else happens in one synchronous stretch after the last answer: check
+ * that what was asked about still holds, and build the result, with {@link
+ * withSettledWorktreeMembership} calling the builder itself. better-sqlite3 is
+ * synchronous, so that stretch is one consistent view.
+ *
+ * The builder is a callback and not something the caller does with a returned
+ * membership on purpose: returning from an `async` function yields to the event
+ * loop, so anything read after that `await` can pair an old membership with a newer
+ * setting, however close together the two lines look.
  *
  * ## Targets
  *
@@ -96,31 +101,50 @@ function byPath(a: Repository, b: Repository): number {
   return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
 }
 
-async function resolveMembership(
+/** What was asked of git, and what it said. */
+interface MembershipQuestion {
+  namedRootPath: string | null;
+  identityPaths: readonly string[];
+}
+
+interface MembershipAnswers {
+  roots: Repository[];
+  identity: string | null;
+  commonDirs: Array<string | null>;
+}
+
+/** The only part that waits. Decides nothing. */
+async function askGit(
   db: Database.Database,
-  namedRootPath: string | null,
-  identityPaths: readonly string[],
+  question: MembershipQuestion,
   deps: RoleResolverDeps
-): Promise<RoleRepositoryMembership> {
+): Promise<MembershipAnswers> {
   const roots = getAllRepositories(db);
-  if (roots.length === 0) return NO_MEMBERSHIP;
+  if (roots.length === 0) return { roots, identity: null, commonDirs: [] };
 
   const resolveCommonDir = deps.resolveCommonDir ?? resolveGitCommonDir;
-  const pathExists = deps.pathExists ?? existsSync;
-
   let identity: string | null = null;
-  for (const path of identityPaths) {
+  for (const path of question.identityPaths) {
     identity = await resolveCommonDir(path);
     if (identity !== null) break;
   }
-
   const commonDirs = await Promise.all(roots.map((root) => resolveCommonDir(root.path)));
+  return { roots, identity, commonDirs };
+}
+
+function membershipFrom(
+  question: MembershipQuestion,
+  { roots, identity, commonDirs }: MembershipAnswers,
+  deps: RoleResolverDeps
+): RoleRepositoryMembership {
+  if (roots.length === 0) return NO_MEMBERSHIP;
+  const pathExists = deps.pathExists ?? existsSync;
 
   const candidates: Repository[] = [];
   const undetermined: Repository[] = [];
   roots.forEach((root, index) => {
     const commonDir = commonDirs[index];
-    if (root.path === namedRootPath || (identity !== null && commonDir === identity)) {
+    if (root.path === question.namedRootPath || (identity !== null && commonDir === identity)) {
       candidates.push(root);
     } else if ((identity === null || commonDir === null) && root.enabled && pathExists(root.path)) {
       undetermined.push(root);
@@ -139,79 +163,112 @@ function rootsSignature(db: Database.Database): string {
   return JSON.stringify(getAllRepositories(db).map((root) => [root.id, root.path, root.enabled]));
 }
 
+/** How a target of membership is read, and what its membership depends on. */
+interface MembershipTarget<T> {
+  /** The target as it is now. Throws when it is gone. */
+  read: () => T;
+  signature: (target: T) => string;
+  question: (target: T) => MembershipQuestion;
+}
+
 /**
- * Work out a membership and confirm it still applies once the wait is over.
+ * The synchronous stretch: compare, then build. Nothing here may await, and that is
+ * the whole of what makes the result one consistent view.
  *
- * @param read - Reads the target as it is now. Throws when it is gone.
- * @param signature - What the membership depends on, of the target
- * @throws {AgentRoleTargetNotFoundError} The target went away
- * @throws Error The target never held still; better no answer than a stale one
+ * @returns The built result, or `stale` to ask git again
  */
-async function settleMembership<T>(
+function finishAttempt<T, R>(
   db: Database.Database,
-  read: () => T,
-  signature: (target: T) => string,
-  membershipOf: (target: T) => Promise<RoleRepositoryMembership>
-): Promise<{ target: T; membership: RoleRepositoryMembership }> {
+  spec: MembershipTarget<T>,
+  asked: string,
+  question: MembershipQuestion,
+  answers: MembershipAnswers,
+  deps: RoleResolverDeps,
+  build: (target: T, membership: RoleRepositoryMembership) => R
+): { stale: true } | { stale: false; value: R } {
+  const current = spec.read();
+  if (`${spec.signature(current)}|${rootsSignature(db)}` !== asked) return { stale: true };
+  return { stale: false, value: build(current, membershipFrom(question, answers, deps)) };
+}
+
+async function withSettledMembership<T, R>(
+  db: Database.Database,
+  spec: MembershipTarget<T>,
+  deps: RoleResolverDeps,
+  build: (target: T, membership: RoleRepositoryMembership) => R
+): Promise<R> {
   for (let attempt = 0; attempt < MAX_MEMBERSHIP_ATTEMPTS; attempt += 1) {
-    const target = read();
-    const asked = `${signature(target)}|${rootsSignature(db)}`;
-    const membership = await membershipOf(target);
-    const current = read();
-    if (`${signature(current)}|${rootsSignature(db)}` === asked) return { target: current, membership };
+    const target = spec.read();
+    const asked = `${spec.signature(target)}|${rootsSignature(db)}`;
+    const question = spec.question(target);
+    const answers = await askGit(db, question, deps);
+    const outcome = finishAttempt(db, spec, asked, question, answers, deps, build);
+    if (!outcome.stale) return outcome.value;
   }
   throw new Error('The repository registration kept changing while it was being read');
 }
 
 /**
- * The roots a worktree belongs to, and the worktree as it is now. Reads only; never
- * registers anything. Read whatever goes with the answer before the next `await`.
+ * Build a result from a worktree, as it is now, and the roots it belongs to. Reads
+ * only; never registers anything.
  *
+ * @param build - Runs in the same synchronous stretch as the final check. Everything
+ *   that goes with the membership (roster, tool, settings) is read here, and it must
+ *   return plain data rather than a promise.
  * @throws {AgentRoleTargetNotFoundError} The worktree does not exist
+ * @throws Error The registration never held still; better no answer than a stale one
  */
-export async function settleWorktreeMembership(
+export function withSettledWorktreeMembership<R>(
   db: Database.Database,
   worktreeId: string,
-  deps: RoleResolverDeps = {}
-): Promise<{ worktree: Worktree; membership: RoleRepositoryMembership }> {
-  const { target, membership } = await settleMembership(
+  deps: RoleResolverDeps,
+  build: (worktree: Worktree, membership: RoleRepositoryMembership) => R
+): Promise<R> {
+  return withSettledMembership(
     db,
-    () => {
-      const worktree = getWorktreeById(db, worktreeId);
-      if (!worktree) throw new AgentRoleTargetNotFoundError(`Worktree not found: ${worktreeId}`);
-      return worktree;
+    {
+      read: () => {
+        const worktree = getWorktreeById(db, worktreeId);
+        if (!worktree) throw new AgentRoleTargetNotFoundError(`Worktree not found: ${worktreeId}`);
+        return worktree;
+      },
+      signature: (worktree) => JSON.stringify([worktree.path, worktree.repositoryPath]),
+      question: (worktree) => {
+        const named = worktree.repositoryPath || null;
+        return { namedRootPath: named, identityPaths: named ? [worktree.path, named] : [worktree.path] };
+      },
     },
-    (worktree) => JSON.stringify([worktree.path, worktree.repositoryPath]),
-    (worktree) => {
-      const named = worktree.repositoryPath || null;
-      return resolveMembership(db, named, named ? [worktree.path, named] : [worktree.path], deps);
-    }
+    deps,
+    build
   );
-  return { worktree: target, membership };
 }
 
 /**
- * The roots that are the same repository as this one, and the row as it is now.
- * Read whatever goes with the answer before the next `await`.
+ * Build a result from a root, as it is now, and the roots of the same repository.
+ * Same contract as {@link withSettledWorktreeMembership}.
  *
  * @throws {AgentRoleTargetNotFoundError} The repository does not exist
  */
-export async function settleRepositoryMembership(
+export function withSettledRepositoryMembership<R>(
   db: Database.Database,
   repositoryId: string,
-  deps: RoleResolverDeps = {}
-): Promise<{ repository: Repository; membership: RoleRepositoryMembership }> {
-  const { target, membership } = await settleMembership(
+  deps: RoleResolverDeps,
+  build: (repository: Repository, membership: RoleRepositoryMembership) => R
+): Promise<R> {
+  return withSettledMembership(
     db,
-    () => {
-      const repository = getRepositoryById(db, repositoryId);
-      if (!repository) throw new AgentRoleTargetNotFoundError(`Repository not found: ${repositoryId}`);
-      return repository;
+    {
+      read: () => {
+        const repository = getRepositoryById(db, repositoryId);
+        if (!repository) throw new AgentRoleTargetNotFoundError(`Repository not found: ${repositoryId}`);
+        return repository;
+      },
+      signature: (repository) => repository.path,
+      question: (repository) => ({ namedRootPath: repository.path, identityPaths: [repository.path] }),
     },
-    (repository) => repository.path,
-    (repository) => resolveMembership(db, repository.path, [repository.path], deps)
+    deps,
+    build
   );
-  return { repository: target, membership };
 }
 
 function freezeRole(db: Database.Database, roleId: string): ResolvedRole {
@@ -322,17 +379,18 @@ export async function resolveInstanceRole(
   input: ResolveInstanceRoleInput,
   deps: RoleResolverDeps = {}
 ): Promise<RoleResolution> {
-  const { membership } = await settleWorktreeMembership(db, input.worktreeId, deps);
-  const target = resolveSessionTarget(db, input.worktreeId, {
-    instanceId: input.instanceId,
-    requestedCliTool: input.requestedCliTool,
+  return withSettledWorktreeMembership(db, input.worktreeId, deps, (_worktree, membership) => {
+    const target = resolveSessionTarget(db, input.worktreeId, {
+      instanceId: input.instanceId,
+      requestedCliTool: input.requestedCliTool,
+    });
+    return resolveDefaultsForTool(
+      db,
+      target.cliToolId,
+      membership,
+      getInstanceRoleState(db, input.worktreeId, target.instanceId)
+    );
   });
-  return resolveDefaultsForTool(
-    db,
-    target.cliToolId,
-    membership,
-    getInstanceRoleState(db, input.worktreeId, target.instanceId)
-  );
 }
 
 /**
@@ -345,8 +403,9 @@ export async function resolveWorktreeToolRole(
   input: { worktreeId: string; cliToolId: CLIToolType },
   deps: RoleResolverDeps = {}
 ): Promise<RoleResolution> {
-  const { membership } = await settleWorktreeMembership(db, input.worktreeId, deps);
-  return resolveDefaultsForTool(db, input.cliToolId, membership);
+  return withSettledWorktreeMembership(db, input.worktreeId, deps, (_worktree, membership) =>
+    resolveDefaultsForTool(db, input.cliToolId, membership)
+  );
 }
 
 /**
@@ -359,8 +418,9 @@ export async function resolveRepositoryToolRole(
   input: { repositoryId: string; cliToolId: CLIToolType },
   deps: RoleResolverDeps = {}
 ): Promise<RoleResolution> {
-  const { repository, membership } = await settleRepositoryMembership(db, input.repositoryId, deps);
-  return attributeToRepository(resolveDefaultsForTool(db, input.cliToolId, membership), repository.id);
+  return withSettledRepositoryMembership(db, input.repositoryId, deps, (repository, membership) =>
+    attributeToRepository(resolveDefaultsForTool(db, input.cliToolId, membership), repository.id)
+  );
 }
 
 /** From a root's own screen, the answer speaks for that root when it is a member. */

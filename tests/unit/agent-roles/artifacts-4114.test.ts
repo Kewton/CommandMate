@@ -570,6 +570,69 @@ describe('role artifacts', () => {
       expect(readdirSync(fakeHome)).toEqual([]);
     });
 
+    describe('known shared state that lives outside the home through a symlink', () => {
+      let outside: string;
+
+      beforeEach(() => {
+        outside = join(base, 'shared-state');
+        mkdirSync(outside);
+      });
+
+      const named = (dataRoot: string | undefined) => () =>
+        writeRoleArtifact(
+          { adapter: 'claude', name: NAME, instructions: 'x' },
+          { ...options, dataRoot, env: uat }
+        );
+
+      it('~/.commandmate outside the home: the default root is still refused', () => {
+        symlinkSync(outside, join(fakeHome, '.commandmate'));
+        expect(named(undefined)).toThrow(UatIsolationLaunchRefusedError);
+        expect(readdirSync(outside)).toEqual([]);
+      });
+
+      it('~/.commandmate outside the home: so is its physical path, named directly', () => {
+        symlinkSync(outside, join(fakeHome, '.commandmate'));
+        expect(named(join(outside, 'agent-roles'))).toThrow(UatIsolationLaunchRefusedError);
+        expect(named(outside)).toThrow(UatIsolationLaunchRefusedError);
+        expect(readdirSync(outside)).toEqual([]);
+      });
+
+      it('the default root itself outside the home', () => {
+        mkdirSync(join(fakeHome, '.commandmate'));
+        symlinkSync(outside, join(fakeHome, '.commandmate', 'agent-roles'));
+        chmodSync(outside, 0o700); // As the writer leaves it; a loose one is refused for that reason first.
+        expect(named(outside)).toThrow(UatIsolationLaunchRefusedError);
+        expect(readdirSync(outside)).toEqual([]);
+      });
+
+      it.each(['.codex', '.copilot', '.gemini', '.claude'])('%s outside the home', (entry) => {
+        symlinkSync(outside, join(fakeHome, entry));
+        expect(named(join(outside, 'roles'))).toThrow(UatIsolationLaunchRefusedError);
+        expect(readdirSync(outside)).toEqual([]);
+      });
+
+      it('the homes the CLIs are really configured with', () => {
+        vi.stubEnv('CODEX_HOME', outside);
+        expect(named(join(outside, 'roles'))).toThrow(UatIsolationLaunchRefusedError);
+        expect(readdirSync(outside)).toEqual([]);
+      });
+
+      it('an identical file there is still reused: reading shares nothing', () => {
+        symlinkSync(outside, join(fakeHome, '.commandmate'));
+        const first = writeRoleArtifact(
+          { adapter: 'claude', name: NAME, instructions: 'x' },
+          { ...options, dataRoot: undefined, env: {} }
+        );
+        expect(first.path.startsWith(fakeHome)).toBe(true);
+        expect(named(undefined)().reused).toBe(true);
+      });
+
+      it('a directory beside that state, unrelated to it, may be written (negative control)', () => {
+        symlinkSync(outside, join(fakeHome, '.commandmate'));
+        expect(named(join(base, 'run', 'roles'))().reused).toBe(false);
+      });
+    });
+
     it('a run directory under the home, like a checkout, may be written', () => {
       expect(attempt(join(fakeHome, 'work', 'wt', 'run', 'roles')).reused).toBe(false);
     });

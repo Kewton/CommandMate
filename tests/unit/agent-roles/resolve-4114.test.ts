@@ -622,6 +622,164 @@ describe('role resolution', () => {
       expect(claude?.effective).toMatchObject({ kind: 'role', source: 'repository' });
     });
 
+    /**
+     * Apply one atomic change at every microtask tick of a resolution, and require
+     * each answer to be wholly from before it or wholly from after it. The gap this
+     * guards is between the last check and the reads: a promise resolving there hands
+     * control to whatever else is queued, however short the code looks.
+     */
+    describe('no tick of the event loop splits an answer', () => {
+      const TICKS = 40;
+
+      function reopen(): void {
+        db.close();
+        db = new Database(':memory:');
+        runMigrations(db);
+        insertWorktree(db, WT, ROOT_A);
+        roleI = createAgentRole(db, { name: 'individual', body: 'I' }).id;
+        roleR = createAgentRole(db, { name: 'repository', body: 'R' }).id;
+        roleS = createAgentRole(db, { name: 'system', body: 'S' }).id;
+      }
+
+      /** @returns The labels of the answers seen: both must occur, or the sweep proved nothing. */
+      async function sweep<R>(
+        scenario: () => { run: () => Promise<R>; change: () => void; label: (result: R) => string }
+      ): Promise<Set<string>> {
+        const seen = new Set<string>();
+        for (let tick = 0; tick <= TICKS; tick += 1) {
+          reopen();
+          const { run, change, label } = scenario();
+          const applied = (async () => {
+            for (let i = 0; i < tick; i += 1) await null;
+            change();
+          })();
+          const [result] = await Promise.all([run(), applied]);
+          seen.add(label(result));
+        }
+        return seen;
+      }
+
+      /** A worktree that moves from root A to root B, with the git answers following it. */
+      function movingWorktree(): { a: string; b: string; deps: RoleResolverDeps; move: () => void } {
+        const a = register(ROOT_A);
+        const b = register(ROOT_B);
+        let moved = false;
+        return {
+          a,
+          b,
+          deps: {
+            resolveCommonDir: async (path) => {
+              if (path === ROOT_A) return '/a/.git';
+              if (path === ROOT_B) return '/b/.git';
+              return moved ? '/b/.git' : '/a/.git';
+            },
+            pathExists: () => false,
+          },
+          move: () => {
+            moved = true;
+            db.prepare('UPDATE worktrees SET repository_path = ? WHERE id = ?').run(ROOT_B, WT);
+          },
+        };
+      }
+
+      /** Root A alone, then in one step a second root of the same repository and new settings. */
+      function growingRepository(): { a: string; deps: RoleResolverDeps; grow: () => void } {
+        const a = register(ROOT_A);
+        setRepositoryRoleState(db, a, 'claude', { state: 'role', roleId: roleR });
+        return {
+          a,
+          deps: { resolveCommonDir: async () => '/common/.git', pathExists: () => false },
+          grow: () => {
+            setRepositoryRoleState(db, a, 'claude', { state: 'none' });
+            const b = register(ROOT_B);
+            setRepositoryRoleState(db, b, 'claude', { state: 'none' });
+          },
+        };
+      }
+
+      it('resolveInstanceRole', async () => {
+        const seen = await sweep(() => {
+          const { a, b, deps, move } = movingWorktree();
+          setRepositoryRoleState(db, a, 'claude', { state: 'role', roleId: roleR });
+          return {
+            run: () => resolveInstanceRole(db, { worktreeId: WT, instanceId: 'claude' }, deps),
+            change: () => {
+              move();
+              setInstanceRoleState(db, WT, 'claude', { state: 'role', roleId: roleI });
+            },
+            label: (result) =>
+              `${result.repositoryId === a ? 'A' : result.repositoryId === b ? 'B' : '?'}/${result.source}`,
+          };
+        });
+        expect([...seen].sort()).toEqual(['A/repository', 'B/instance']);
+      });
+
+      it('resolveWorktreeToolRole', async () => {
+        const seen = await sweep(() => {
+          const { a, b, deps, move } = movingWorktree();
+          setRepositoryRoleState(db, a, 'claude', { state: 'role', roleId: roleR });
+          return {
+            run: () => resolveWorktreeToolRole(db, { worktreeId: WT, cliToolId: 'claude' }, deps),
+            change: () => {
+              move();
+              setRepositoryRoleState(db, a, 'claude', { state: 'none' });
+              setRepositoryRoleState(db, b, 'claude', { state: 'role', roleId: roleS });
+            },
+            label: (result) =>
+              `${result.repositoryId === a ? 'A' : 'B'}/${result.kind === 'role' ? result.role.name : result.kind}`,
+          };
+        });
+        expect([...seen].sort()).toEqual(['A/repository', 'B/system']);
+      });
+
+      it('resolveRepositoryToolRole', async () => {
+        const seen = await sweep(() => {
+          const { a, deps, grow } = growingRepository();
+          return {
+            run: () => resolveRepositoryToolRole(db, { repositoryId: a, cliToolId: 'claude' }, deps),
+            change: grow,
+            label: (result) => `${result.repositoryIds.length}/${result.kind}`,
+          };
+        });
+        expect([...seen].sort()).toEqual(['1/role', '2/none']);
+      });
+
+      it('buildInstanceRoleSettings', async () => {
+        const seen = await sweep(() => {
+          const { a, deps, move } = movingWorktree();
+          setRepositoryRoleState(db, a, 'claude', { state: 'role', roleId: roleR });
+          return {
+            run: () => buildInstanceRoleSettings(db, WT, deps),
+            change: () => {
+              move();
+              setInstanceRoleState(db, WT, 'claude', { state: 'role', roleId: roleI });
+            },
+            label: (settings) => {
+              const claude = settings.instances.find((entry) => entry.instanceId === 'claude');
+              const next = claude?.application.effectiveNext;
+              return `${next?.repositoryId === a ? 'A' : 'B'}/${claude?.stored.state}/${next?.source}`;
+            },
+          };
+        });
+        expect([...seen].sort()).toEqual(['A/inherit/repository', 'B/role/instance']);
+      });
+
+      it('buildRepositoryRoleDefaults', async () => {
+        const seen = await sweep(() => {
+          const { a, deps, grow } = growingRepository();
+          return {
+            run: () => buildRepositoryRoleDefaults(db, a, deps),
+            change: grow,
+            label: ({ defaults }) => {
+              const claude = defaults.find((entry) => entry.cliToolId === 'claude');
+              return `${claude?.effective.repositoryIds.length}/${claude?.stored.state}/${claude?.effective.kind}`;
+            },
+          };
+        });
+        expect([...seen].sort()).toEqual(['1/role/role', '2/none/none']);
+      });
+    });
+
     it('gives up rather than answer from something that never settles', async () => {
       register(ROOT_A);
       let flip = 0;

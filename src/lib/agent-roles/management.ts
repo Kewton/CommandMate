@@ -62,8 +62,8 @@ import type { Worktree } from '@/types/models';
 import {
   attributeToRepository,
   resolveDefaultsForTool,
-  settleRepositoryMembership,
-  settleWorktreeMembership,
+  withSettledRepositoryMembership,
+  withSettledWorktreeMembership,
   toEffectiveRole,
   type RoleResolverDeps,
 } from './resolve';
@@ -94,52 +94,52 @@ export function computeRosterRevision(roster: readonly AgentInstance[]): string 
  *
  * @throws {AgentRoleTargetNotFoundError} The worktree does not exist
  */
-export async function buildInstanceRoleSettings(
+export function buildInstanceRoleSettings(
   db: Database.Database,
   worktreeId: string,
   deps: RoleResolverDeps = {}
 ): Promise<InstanceRoleSettingsResponse> {
-  // One membership for the whole answer. Nothing below awaits, so the roster and
-  // the settings are one view, and a tool can never be paired with a setting made
-  // after it changed.
-  const { worktree, membership } = await settleWorktreeMembership(db, worktreeId, deps);
-  const roster = currentRoster(db, worktree);
+  // Everything is read in the builder, in one stretch with the final check, so a tool
+  // can never be paired with a setting made after it changed.
+  return withSettledWorktreeMembership(db, worktreeId, deps, (worktree, membership) => {
+    const roster = currentRoster(db, worktree);
 
-  const instances: InstanceRoleEntry[] = roster.map((instance) => {
-    const stored = getInstanceRoleState(db, worktree.id, instance.id);
-    const records = getLatestRoleLaunchRecords(db, worktree.id, instance.id);
-    return {
-      instanceId: instance.id,
-      cliToolId: instance.cliTool,
-      alias: instance.alias,
-      supported: isAgentRoleCliTool(instance.cliTool),
-      adapterEnabled: isAgentRoleCliTool(instance.cliTool) && isAgentRoleAdapterEnabled(instance.cliTool),
-      stored,
-      application: {
-        effectiveNext: {
-          ...toEffectiveRole(resolveDefaultsForTool(db, instance.cliTool, membership, stored)),
-          injectionFingerprint: null,
+    const instances: InstanceRoleEntry[] = roster.map((instance) => {
+      const stored = getInstanceRoleState(db, worktree.id, instance.id);
+      const records = getLatestRoleLaunchRecords(db, worktree.id, instance.id);
+      return {
+        instanceId: instance.id,
+        cliToolId: instance.cliTool,
+        alias: instance.alias,
+        supported: isAgentRoleCliTool(instance.cliTool),
+        adapterEnabled: isAgentRoleCliTool(instance.cliTool) && isAgentRoleAdapterEnabled(instance.cliTool),
+        stored,
+        application: {
+          effectiveNext: {
+            ...toEffectiveRole(resolveDefaultsForTool(db, instance.cliTool, membership, stored)),
+            injectionFingerprint: null,
+          },
+          requested: records.requested,
+          launched: records.launched,
+          restartPending: 'unknown',
         },
-        requested: records.requested,
-        launched: records.launched,
-        restartPending: 'unknown',
-      },
+      };
+    });
+
+    const toolDefaults: WorktreeToolRoleDefault[] = AGENT_ROLE_CLI_TOOLS.map((cliToolId) => ({
+      cliToolId,
+      adapterEnabled: isAgentRoleAdapterEnabled(cliToolId),
+      effective: toEffectiveRole(resolveDefaultsForTool(db, cliToolId, membership)),
+    }));
+
+    return {
+      success: true,
+      rosterRevision: computeRosterRevision(roster),
+      rosterSaved: getAgentInstances(db, worktree.id).length > 0,
+      instances,
+      toolDefaults,
     };
   });
-
-  const toolDefaults: WorktreeToolRoleDefault[] = AGENT_ROLE_CLI_TOOLS.map((cliToolId) => ({
-    cliToolId,
-    adapterEnabled: isAgentRoleAdapterEnabled(cliToolId),
-    effective: toEffectiveRole(resolveDefaultsForTool(db, cliToolId, membership)),
-  }));
-
-  return {
-    success: true,
-    rosterRevision: computeRosterRevision(roster),
-    rosterSaved: getAgentInstances(db, worktree.id).length > 0,
-    instances,
-    toolDefaults,
-  };
 }
 
 function assertToolTakesAssignment(cliToolId: CLIToolType, input: RoleAssignmentInput): void {
@@ -239,22 +239,23 @@ export function buildSystemRoleDefaults(db: Database.Database): SystemRoleDefaul
  *
  * @throws {AgentRoleTargetNotFoundError} The repository does not exist
  */
-export async function buildRepositoryRoleDefaults(
+export function buildRepositoryRoleDefaults(
   db: Database.Database,
   repositoryId: string,
   deps: RoleResolverDeps = {}
 ): Promise<{ repository: Repository; defaults: RepositoryRoleDefaultEntry[] }> {
-  const { repository, membership } = await settleRepositoryMembership(db, repositoryId, deps);
-  const stored = getRepositoryRoleStates(db, repository.id);
-  const defaults = AGENT_ROLE_CLI_TOOLS.map(
-    (cliToolId): RepositoryRoleDefaultEntry => ({
-      cliToolId,
-      adapterEnabled: isAgentRoleAdapterEnabled(cliToolId),
-      stored: stored[cliToolId] ?? { state: 'inherit' },
-      effective: toEffectiveRole(
-        attributeToRepository(resolveDefaultsForTool(db, cliToolId, membership), repository.id)
-      ),
-    })
-  );
-  return { repository, defaults };
+  return withSettledRepositoryMembership(db, repositoryId, deps, (repository, membership) => {
+    const stored = getRepositoryRoleStates(db, repository.id);
+    const defaults = AGENT_ROLE_CLI_TOOLS.map(
+      (cliToolId): RepositoryRoleDefaultEntry => ({
+        cliToolId,
+        adapterEnabled: isAgentRoleAdapterEnabled(cliToolId),
+        stored: stored[cliToolId] ?? { state: 'inherit' },
+        effective: toEffectiveRole(
+          attributeToRepository(resolveDefaultsForTool(db, cliToolId, membership), repository.id)
+        ),
+      })
+    );
+    return { repository, defaults };
+  });
 }

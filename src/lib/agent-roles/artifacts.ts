@@ -199,10 +199,33 @@ function accountHomes(): string[] {
   return homes;
 }
 
+/** State directories of this product and the CLIs it drives, as they sit in a home. */
+const KNOWN_HOME_STATE = ['.commandmate', '.codex', '.copilot', '.gemini', '.claude'] as const;
+
+/**
+ * Known shared state, wherever it physically is. Any of these may be a symlink out
+ * of the home (a synced or shared directory), and the state is just as shared there.
+ */
+function knownSharedStatePaths(): string[] {
+  const inHomes = accountHomes().flatMap((home) => KNOWN_HOME_STATE.map((entry) => join(home, entry)));
+  return [
+    defaultDataRoot(),
+    ...inHomes,
+    getCodexHome(),
+    getCopilotHomeDirectory(),
+    dirname(getAntigravityHooksConfigPath()),
+  ];
+}
+
+function isSameOrInside(path: string, parent: string): boolean {
+  return path === parent || path.startsWith(`${parent}${sep}`);
+}
+
 /**
  * Whether a data root is a place the user's other servers and CLIs share, judged
- * by where it really is and not by whether someone named it: the home itself, or
- * anything inside one of its dot-directories (`~/.commandmate`, `~/.codex`, ...).
+ * by where it physically is and not by whether someone named it: the home itself,
+ * anything inside one of its dot-directories, or anything inside known shared
+ * state wherever a symlink has put it.
  *
  * Not "anywhere under the home". A UAT's run directory normally is, because the
  * checkout is, and it belongs to that run alone (`.commandmate/uat.yaml` puts its
@@ -210,11 +233,12 @@ function accountHomes(): string[] {
  */
 function isSharedHomeState(root: string): boolean {
   const real = physicalPath(root);
-  return accountHomes().some((home) => {
+  const inHomeState = accountHomes().some((home) => {
     const realHome = physicalPath(home);
     if (real === realHome) return true;
     return real.startsWith(`${realHome}${sep}`) && real.slice(realHome.length + 1).startsWith('.');
   });
+  return inHomeState || knownSharedStatePaths().some((known) => isSameOrInside(real, physicalPath(known)));
 }
 
 /**
