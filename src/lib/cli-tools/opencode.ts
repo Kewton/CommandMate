@@ -101,11 +101,13 @@ import {
   resumeOpencodeEventStream,
 } from '@/lib/hooks/sources/opencode/runtime';
 import { getAssignedOpencodePort } from '@/lib/hooks/sources/opencode/ports';
+import { noteLaunchResumedConversation } from '@/lib/session/role-launch';
 import {
   getOpencodeLaunchSettings,
   opencodePromptSelection,
 } from '@/lib/hooks/sources/opencode/launch-settings';
 import {
+  fetchOpencodeConfig,
   fetchOpencodeHealth,
   newOpencodeMessageId,
   opencodeFileUrl,
@@ -468,6 +470,8 @@ export class OpenCodeTool extends BaseCLITool {
           ? plannedCommand
           : withOpencodeResumedSession(plannedCommand, resumeSessionId);
       if (resumeSessionId !== null) {
+        // Issue #4115 (§6.4): a role that changed goes on in this conversation; it is told.
+        noteLaunchResumedConversation(target);
         logger.info('opencode-session-resumed', {
           worktreeId,
           instanceId: instanceId ?? this.id,
@@ -512,6 +516,12 @@ export class OpenCodeTool extends BaseCLITool {
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to start OpenCode session: ${errorMessage}`);
     }
+  }
+
+  /** Issue #4115: `GET /config`, the evidence that the server read the role (§14). */
+  protected async readServerConfig(worktreeId: string, _worktreePath: string, instanceId: string | undefined): Promise<unknown> {
+    const port = getAssignedOpencodePort(opencodeTarget(worktreeId, instanceId));
+    return port === null ? null : fetchOpencodeConfig(port);
   }
 
   /**

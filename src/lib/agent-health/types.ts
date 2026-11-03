@@ -1,3 +1,4 @@
+import type { ExplicitRoleCondition } from '@/lib/agent-roles/explicit-launch';
 /**
  * The agent-health report (Issue #2878).
  *
@@ -137,6 +138,12 @@ export interface AgentHealthToolResult {
    * written before #3438 — readers show both as 不明.
    */
   launchedModel?: AgentHealthLaunchedModel;
+  /**
+   * The test role the run was given outright (Issue #4115, `--role-file`), so a
+   * result under a role cannot be read as one without. Absent on an ordinary run:
+   * a probe opens no database and inherits no role.
+   */
+  roleCondition?: ExplicitRoleCondition;
 }
 
 /**

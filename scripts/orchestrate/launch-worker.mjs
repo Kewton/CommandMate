@@ -31,11 +31,19 @@
  * (execution-key.mjs), so two sends of one Issue never write to the same
  * files. stdout is the task id only.
  *
+ * The starting message is also what fixes the worker's role (Issue #4115): the
+ * generation and injection fingerprint `capture --json` reports after it are read
+ * again right before the contract. A difference means the process was replaced or
+ * another role went in, and the contract is not sent (44). A change of the settings
+ * while the process stays the same is the server's to refuse (`POST /tasks`, exit
+ * of the `send`), since only the server can resolve them.
+ *
  * Exit code (send): 0 sent (and for Claude the model matched before the
  * contract went out); 40 the model did not match after one restart; 41 the
  * model could not be read after one restart (the session is stopped and the
  * contract not sent in both); 42 a stop could not be confirmed (nothing more
  * sent); 43 Auto-Yes could not be confirmed off before the start (nothing
+ * sent); 44 the role fixed at the starting message no longer holds (stopped, not
  * sent); 2 a usage error or a settings file git does not ignore (nothing
  * sent); 1 any other failure (the session did not come back ready after the
  * starting message: stopped, contract not sent); otherwise the `send`'s own
@@ -74,6 +82,7 @@ export const EXIT_MODEL_MISMATCH = 40;
 export const EXIT_MODEL_UNKNOWN = 41;
 export const EXIT_STOP_UNCONFIRMED = 42;
 export const EXIT_AUTO_YES_UNCONFIRMED = 43;
+export const EXIT_ROLE_CHANGED = 44;
 /** `auto-yes --disable` + read-back attempts before the start, and the pause between them. */
 export const DISARM_ATTEMPTS = 3;
 export const DISARM_INTERVAL_SEC = 2;
@@ -123,6 +132,33 @@ export function setModel(run, worktree, model) {
   return { file, value };
 }
 
+/**
+ * The process's role in one `capture --json` answer (Issue #4115): its generation and
+ * injection fingerprint, or null when it reports none (a server with no role layer,
+ * a tool outside it). Read off the answers already being read, so a launch asks
+ * `capture` no more often than it did.
+ *
+ * @returns {{ sessionGeneration: string, injectionFingerprint: string | null } | null}
+ */
+export function rolePinOf(answer) {
+  const roleLaunch = answer?.roleLaunch;
+  return typeof roleLaunch?.sessionGeneration === 'string' ? roleLaunch : null;
+}
+
+/**
+ * Whether the role read at the starting message still holds. Nothing to compare
+ * (no pin was read) holds: such a server has no generation to change. A pin that
+ * has gone away does not: the process it described is no longer known.
+ */
+export function rolePinHolds(pin, now) {
+  if (pin === null) return true;
+  return (
+    now !== null &&
+    pin.sessionGeneration === now.sessionGeneration &&
+    pin.injectionFingerprint === now.injectionFingerprint
+  );
+}
+
 /** `ok` when the reported model is the contract's family, `unknown` when nothing is reported, else `mismatch`. */
 export function classifyModel(got, want) {
   const reported = typeof got === 'string' ? got.trim().toLowerCase() : '';
@@ -136,13 +172,15 @@ export function classifyModel(got, want) {
  *
  * @returns {{ verdict: 'ok' | 'unknown' | 'mismatch', got: string }}
  */
-export function checkModel({ run, sleep, cli, wt, instance, want }) {
+export function checkModel({ run, sleep, cli, wt, instance, want, onAnswer }) {
   let got = '';
   for (let read = 1; read <= MODEL_READS; read++) {
     const out = run(cli, ['capture', wt, '--instance', instance, '--json']);
     if (out.status === 0) {
       try {
-        const model = JSON.parse(out.stdout)?.model;
+        const answer = JSON.parse(out.stdout);
+        onAnswer?.(answer);
+        const model = answer?.model;
         got = typeof model === 'string' ? model.trim() : '';
       } catch {
         got = '';
@@ -224,13 +262,15 @@ export function stopSession({ run, sleep, cli, wt, instance }) {
 }
 
 /** Wait until the session reads `sessionStatus: ready` READY_STREAK times in a row; false if it never does. */
-export function waitReady({ run, sleep, cli, wt, instance }) {
+export function waitReady({ run, sleep, cli, wt, instance, onAnswer }) {
   let streak = 0;
   for (let poll = 1; poll <= READY_MAX_POLLS; poll++) {
     const out = run(cli, ['capture', wt, '--instance', instance, '--json']);
     let status = null;
     try {
-      status = out.status === 0 ? JSON.parse(out.stdout)?.sessionStatus : null;
+      const answer = out.status === 0 ? JSON.parse(out.stdout) : null;
+      if (answer !== null) onAnswer?.(answer);
+      status = answer?.sessionStatus ?? null;
     } catch {
       status = null;
     }
@@ -380,7 +420,10 @@ export function main(argv, deps = {}) {
       // 99 = the message was not delivered (initialization timeout / prompt not ready / composer-not-empty), but the
       // session may be up: the starting message asks for no work, so a model read off the screen is as good (#3904).
       if (init.status !== 0 && init.status !== EXIT_NOT_DELIVERED) return init.status;
-      const { verdict, got } = checkModel({ ...ctx, want: o.model });
+      // The role is what the starting message started (Issue #4115): the last answer
+      // of the model check fixes it, and the last answer before the contract must agree.
+      let rolePin = null;
+      const { verdict, got } = checkModel({ ...ctx, want: o.model, onAnswer: (answer) => (rolePin = rolePinOf(answer)) });
       if (init.status !== 0 && got) {
         const note = `start exit=${init.status} but the prompt was reached (model read: ${got}); continuing\n`;
         fs.appendFileSync(path.join(o.runDir, `${init.name.replace(/\.out$/, '')}.err`), note);
@@ -393,9 +436,14 @@ export function main(argv, deps = {}) {
         if (attempt === LAUNCH_ATTEMPTS) return verdict === 'mismatch' ? EXIT_MODEL_MISMATCH : EXIT_MODEL_UNKNOWN;
         continue;
       }
-      if (!waitReady(ctx)) {
+      let roleNow = rolePin;
+      if (!waitReady({ ...ctx, onAnswer: (answer) => (roleNow = rolePinOf(answer)) })) {
         log(`not ready: ${o.instance} of ${o.wt} did not read ready ${READY_STREAK} times in a row after the starting message; contract not sent`);
         return stopped('not ready after the starting message') ? 1 : EXIT_STOP_UNCONFIRMED;
+      }
+      if (!rolePinHolds(rolePin, roleNow)) {
+        log(`role changed: ${o.instance} of ${o.wt} is not the process the starting message started; contract not sent`);
+        return stopped('role changed after the starting message') ? EXIT_ROLE_CHANGED : EXIT_STOP_UNCONFIRMED;
       }
       const sent = sendTo('send', contractArgs);
       log(`send exit=${sent.status} issue=${workItem} task=${sent.taskId || '-'} (${sent.name})`);

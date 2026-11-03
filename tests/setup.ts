@@ -245,6 +245,8 @@ if ((process.env.CM_AGENT_ROLE_ARTIFACTS_DIR ?? '').trim() === '') {
     String(process.pid)
   );
 }
+// Issue #4115: a shell that enabled the adapter does not enable it for the suite.
+delete process.env.CM_AGENT_ROLE_ANTIGRAVITY_ENABLED;
 if ((process.env.CM_AGENT_ROLE_ANTIGRAVITY_AGENTS_DIR ?? '').trim() === '') {
   process.env.CM_AGENT_ROLE_ANTIGRAVITY_AGENTS_DIR = join(
     tmpdir(),

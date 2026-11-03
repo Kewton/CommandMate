@@ -20,7 +20,9 @@ import {
 import {
   isSessionLaunchInFlight,
   isSessionLaunchModelMismatchError,
+  isSessionLaunchRoleMismatchError,
 } from '@/lib/session/session-launch-flight';
+import { readRoleLaunchRefusal, ROLE_LAUNCH_REFUSED_CODE } from '@/lib/agent-roles/launch-errors';
 import { isPaneBackAtShell } from './pane-shell';
 import { getGitStatus } from '@/lib/git/git-utils';
 import { createLogger } from '@/lib/logger';
@@ -142,6 +144,20 @@ export function answerSessionStartFailure(
   // a `--model` to a running session is (#989 / #2771).
   if (isSessionLaunchModelMismatchError(error)) {
     return NextResponse.json({ error: error.message }, { status: 400 });
+  }
+  // Issue #4115: the role could not be applied, or another start is running with
+  // another role. Nothing was typed, and the reason is stable for the caller.
+  const roleRefusal = readRoleLaunchRefusal(error);
+  if (roleRefusal !== null || isSessionLaunchRoleMismatchError(error)) {
+    recordNotSent('role-launch-refused');
+    return NextResponse.json(
+      {
+        error: getErrorMessage(error),
+        code: roleRefusal !== null ? ROLE_LAUNCH_REFUSED_CODE : (error as { code: string }).code,
+        ...(roleRefusal !== null ? { roleRefusal } : {}),
+      },
+      { status: 409 }
+    );
   }
   logger.error('failed-to-start-session:', { error: error instanceof Error ? error.message : String(error) });
   recordNotSent(isSessionStartTimeoutError(error) ? 'session-starting' : 'session-start-failed');

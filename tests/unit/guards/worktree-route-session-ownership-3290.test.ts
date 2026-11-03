@@ -297,6 +297,9 @@ interface Exemption {
 }
 
 const ENV_SNAPSHOT_ONLY = ['src/lib/verification/env-snapshot.ts'] as const;
+/** The one module the role routes reach tmux through (Issue #4115). */
+const ROLE_PANE_ENV_ONLY = ['src/lib/agent-roles/pane-env.ts'];
+
 const ENV_SNAPSHOT_REASON =
   'reaches tmux only through the env-clean snapshot, which runs `list-sessions` to count ' +
   'session names before and after a run; it never addresses a session';
@@ -333,6 +336,23 @@ const EXEMPT: readonly Exemption[] = [
     reason:
       'asks only whether a session by each instance\'s name exists, to refuse a branch switch under a ' +
       'live agent. A foreign session makes it refuse (fail closed); nothing is sent, read or stopped',
+  },
+  {
+    handler: 'instances/roles/route.ts#GET',
+    reason:
+      'reads the role settings from the database; tmux is asked only for one environment variable ' +
+      '(`show-environment`) to compute what a launch would inject. Nothing is sent, read off a pane or stopped',
+    reachesOnly: ROLE_PANE_ENV_ONLY,
+  },
+  {
+    handler: 'instances/roles/route.ts#PUT',
+    reason: 'writes a role setting, which applies at the next launch; its answer reads as the GET does',
+    reachesOnly: ROLE_PANE_ENV_ONLY,
+  },
+  {
+    handler: 'instances/roles/route.ts#POST',
+    reason: 'creates a roster row and its role setting; its answer reads as the GET does',
+    reachesOnly: ROLE_PANE_ENV_ONLY,
   },
   { handler: 'tasks/route.ts#GET', reason: ENV_SNAPSHOT_REASON, reachesOnly: ENV_SNAPSHOT_ONLY },
   { handler: 'tasks/route.ts#POST', reason: ENV_SNAPSHOT_REASON, reachesOnly: ENV_SNAPSHOT_ONLY },

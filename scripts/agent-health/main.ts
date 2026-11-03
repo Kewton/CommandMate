@@ -16,6 +16,7 @@
  * hooks go to the listener, never to production.
  */
 
+import type { ExplicitRole } from '@/lib/agent-roles/explicit-launch';
 import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
@@ -176,7 +177,25 @@ export async function main(argv: readonly string[]): Promise<AgentHealthExitCode
   return run(options, startedAt);
 }
 
+/** The test role of `--role-file`. Nothing else gives a probe a role. */
+function readRoleFile(file: string): ExplicitRole {
+  const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as { id?: unknown; body?: unknown };
+  if (typeof parsed.id !== 'string' || typeof parsed.body !== 'string') {
+    throw new Error(`--role-file: ${file} needs a string id and body`);
+  }
+  return { id: parsed.id, body: parsed.body };
+}
+
 async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentHealthExitCode> {
+  let role: ExplicitRole | null = null;
+  if (options.roleFile !== null) {
+    try {
+      role = readRoleFile(options.roleFile);
+    } catch (error) {
+      log(error instanceof Error ? error.message : String(error));
+      return 2;
+    }
+  }
   const outPath = path.resolve(options.out ?? path.join(DEFAULT_DIR, 'reports', `${reportDateJst(startedAt)}.json`));
   const statePath = path.resolve(options.statePath ?? path.join(DEFAULT_DIR, 'state.json'));
   // Issue #3183: the whole frame of a failing `screen-*` check, kept beside the
@@ -331,6 +350,7 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
           deadline: Math.min(Date.now() + options.timeoutPerToolSec * 1000, globalDeadline),
           log,
           frameArchive,
+          role,
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -380,6 +400,7 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
           previousVersion,
           checks: outcome.checks,
           launchedModel: outcome.launchedModel,
+          roleCondition: outcome.roleCondition,
         })
       );
     }

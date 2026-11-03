@@ -62,6 +62,11 @@ import { createHash } from 'crypto';
 import { getOrInitGlobal } from '@/lib/global-state';
 import { createLogger } from '@/lib/logger';
 import { SESSION_STARTING_CODE } from '@/lib/session/session-start-error';
+import {
+  isRoleConditionUnmet,
+  readRoleLaunchRefusal,
+  SESSION_LAUNCH_ROLE_MISMATCH_CODE,
+} from '@/lib/agent-roles/launch-errors';
 import { PASTE_NOT_STARTED_CODE, PLAN_REVIEW_SEND_REFUSED_CODE } from './send-attempt-types';
 import type { LastSendAttempt, SendAttemptReason, SendAttemptState } from './send-attempt-types';
 
@@ -314,6 +319,11 @@ export function classifySendFailure(error: unknown): { state: SendAttemptState; 
     /an earlier server dispatch may have delivered the message \(Issue #4040\)/.test(error.message)
   ) {
     return { state: 'indeterminate', reason: 'send-error' };
+  }
+  // #4115: refused before any key, whichever layer wrapped the message on the way out.
+  if (isRoleConditionUnmet(error)) return { state: 'not-sent', reason: 'role-condition-failed' };
+  if (readRoleLaunchRefusal(error) !== null || carriesCode(error, SESSION_LAUNCH_ROLE_MISMATCH_CODE)) {
+    return { state: 'not-sent', reason: 'role-launch-refused' };
   }
   if (
     typeof error === 'object' &&

@@ -5,9 +5,8 @@
  * `tests/integration/api-agent-roles-4114.test.ts` compares the keys of each
  * example with what the routes really answer.
  *
- * `application.requested` / `launched` stay null and `restartPending` stays
- * `unknown` until #4115 fills them; the example in `launchRecordExample` shows
- * what a filled one looks like.
+ * `application.requested` / `launched` are null and `restartPending` is `unknown`
+ * here because nothing has been launched; `launchRecordExample` shows a filled one.
  */
 import type {
   AgentRoleDeleteConflictResponse,

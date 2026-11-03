@@ -64,6 +64,9 @@ import {
   resetOpencodePortAssignments,
 } from '@/lib/hooks/sources/opencode/ports';
 
+import { buildRoleLaunchArguments } from '@/lib/agent-roles/adapters';
+import { fixedEnvReader, loadRoleComposition, RoleCompositionError } from '@/lib/agent-roles/composition';
+
 const REF = {
   worktreeId: 'wt-oc-2053',
   cliToolId: OPENCODE_CLI_TOOL_ID,
@@ -174,6 +177,22 @@ const DOCUMENTING_FILES = [
   'lib/hooks/sources/opencode/source.ts',
 ] as const;
 
+/**
+ * The only files whose code may name the mechanism, exactly.
+ *
+ * #2053's ruling is about Auto-Yes: a `permission` injected here would silently
+ * outrank the operator's own rules. A role is another matter, measured separately
+ * (#4113, `docs/design/agent-roles-adapters.md` §6–§7): it adds `instructions` (V1)
+ * or `agents.<effective>.system` (V2) and nothing that decides permissions, and it
+ * is applied outside every source's `prepareLaunch`. So this narrows the ruling to
+ * those files and leaves it whole everywhere else, `hooks/sources/**` included.
+ */
+const ROLE_ADAPTER_FILES = ['lib/agent-roles/adapters.ts', 'lib/agent-roles/composition.ts'] as const;
+
+function normalized(file: string): string {
+  return file.split(/[\\/]/).join('/');
+}
+
 interface Occurrence {
   file: string;
   line: number;
@@ -235,12 +254,64 @@ describe('[#2053] `OPENCODE_CONFIG_CONTENT` is documented in src/, never used', 
   });
 
   it('names it only in comments — no code path passes it to a child process', () => {
-    const code = occurrences.filter((o) => !isCommentLine(o.text));
+    // Everywhere but the role adapter, which the next two tests hold to its own terms.
+    const code = occurrences.filter(
+      (o) => !isCommentLine(o.text) && !(ROLE_ADAPTER_FILES as readonly string[]).includes(normalized(o.file))
+    );
     expect(
       code.map((o) => `${o.file}:${o.line} ${o.text}`),
-      'Adopting OPENCODE_CONFIG_CONTENT reverses the #2053 ruling. Re-measure ' +
-        'and update docs/design/agent-event-source-interface.md §3.4 first.'
+      'OPENCODE_CONFIG_CONTENT is for roles only (lib/agent-roles, lib/session/role-launch). ' +
+        'To use it for anything other than a role, read ' +
+        'docs/design/agent-event-source-interface.md §3.4 first: #2053 measured and rejected it.'
     ).toEqual([]);
+  });
+
+  it('the role adapter is exactly these files', () => {
+    const files = new Set(occurrences.filter((o) => !isCommentLine(o.text)).map((o) => normalized(o.file)));
+    expect([...files].sort()).toEqual([...ROLE_ADAPTER_FILES].sort());
+  });
+
+  it('no code under hooks/sources names it: a launch plan still declares nothing', () => {
+    const inSources = occurrences.filter(
+      (o) => normalized(o.file).startsWith('lib/hooks/sources/') && !isCommentLine(o.text)
+    );
+    expect(inSources).toEqual([]);
+  });
+});
+
+describe('[#2053] what a role may add through it', () => {
+  const artifact = { name: 'cm-role-x', path: '/data/cm-role-x.md' };
+  const AUTO_YES_AND_ROUTING_KEYS = ['permission', 'model', 'provider', 'providers', 'default_agent'];
+
+  it('V1: `instructions`, and with nothing of the user\'s that is the only key', () => {
+    const { env } = buildRoleLaunchArguments({ adapter: 'opencode', effectiveAgent: null }, artifact, {});
+    expect(Object.keys(JSON.parse(env[REJECTED_ENV]))).toEqual(['instructions']);
+  });
+
+  it('V2: `agents.<effective>.system`, and with nothing of the user\'s that is the only key', () => {
+    const { env } = buildRoleLaunchArguments({ adapter: 'opencode-v2', effectiveAgent: 'build' }, artifact, {});
+    const value = JSON.parse(env[REJECTED_ENV]);
+    expect(Object.keys(value)).toEqual(['agents']);
+    expect(Object.keys(value.agents)).toEqual(['build']);
+    expect(Object.keys(value.agents.build)).toEqual(['system']);
+  });
+
+  it.each(AUTO_YES_AND_ROUTING_KEYS)('adds no `%s`, and leaves the user\'s value of it alone', (key) => {
+    for (const adapter of ['opencode', 'opencode-v2'] as const) {
+      const bare = JSON.parse(buildRoleLaunchArguments({ adapter, effectiveAgent: 'build' }, artifact, {}).env[REJECTED_ENV]);
+      expect(bare).not.toHaveProperty(key);
+      const user = { [key]: 'THE_USERS' };
+      const composed = JSON.parse(
+        buildRoleLaunchArguments({ adapter, effectiveAgent: 'build' }, artifact, { opencodeUserContent: user }).env[REJECTED_ENV]
+      );
+      expect(composed[key]).toBe('THE_USERS');
+    }
+  });
+
+  it.each(['opencode', 'opencode-v2'] as const)('%s: a broken value of the user\'s is refused, so no child process gets it', async (adapter) => {
+    await expect(
+      loadRoleComposition(adapter, { worktreePath: sandbox, readEnv: fixedEnvReader({ [REJECTED_ENV]: '{broken' }) })
+    ).rejects.toBeInstanceOf(RoleCompositionError);
   });
 });
 

@@ -15,6 +15,11 @@ import {
 } from '@/lib/session/send-attempt-state';
 import { SESSION_STARTING_CODE } from '@/lib/session/session-start-error';
 import { FOREIGN_SESSION_ERROR_CODE } from '@/lib/cli-tools/session-ownership';
+import {
+  readRoleLaunchRefusal,
+  ROLE_CONDITION_UNMET_CODE,
+  ROLE_LAUNCH_REFUSED_CODE,
+} from '@/lib/agent-roles/launch-errors';
 import { answerSessionStartTimeout } from './send-session-start';
 
 /** How the error of a failed send starts, whoever wrote it. */
@@ -67,6 +72,20 @@ export function answerSendFailure(
   if (result.stage === 'foreign_session') {
     return NextResponse.json(
       { error: result.error, code: FOREIGN_SESSION_ERROR_CODE },
+      { status: 409 }
+    );
+  }
+  // Issue #4115: a driver's relaunch or the last check before the body refused it
+  // because of the role. Answered as a start refused for that reason is: nothing
+  // was typed, so this is a refusal with a stable code and not a server fault.
+  if (ownAttempt?.reason === 'role-condition-failed' || ownAttempt?.reason === 'role-launch-refused') {
+    const roleRefusal = readRoleLaunchRefusal(result.error);
+    return NextResponse.json(
+      {
+        error: result.error,
+        code: ownAttempt.reason === 'role-condition-failed' ? ROLE_CONDITION_UNMET_CODE : ROLE_LAUNCH_REFUSED_CODE,
+        ...(roleRefusal !== null ? { roleRefusal } : {}),
+      },
       { status: 409 }
     );
   }

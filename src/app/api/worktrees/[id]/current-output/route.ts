@@ -30,6 +30,7 @@ import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
 import { observeSession } from '@/lib/prompt-observation/session';
+import { getLaunchRoleEvidence } from '@/lib/session/role-launch';
 
 const logger = createLogger('api/current-output');
 
@@ -159,10 +160,20 @@ export async function GET(
     // "default" (see AGENT_MODE_UNKNOWN).
     const agentMode = detectAgentMode(target.cliToolId, payload.fullOutput);
 
+    // Issue #4115: the process's generation and what it was started with, for
+    // `capture --json`'s readers (`launch-worker` pins it). From memory, and absent
+    // when this server did not start it, so this costs a poll nothing.
+    const roleEvidence = getLaunchRoleEvidence({
+      worktreeId: id,
+      cliToolId: target.cliToolId,
+      instanceId: target.instanceId,
+    });
+    const roleField = roleEvidence === null ? {} : { roleLaunch: roleEvidence };
+
     const body =
       staleness === undefined
-        ? ({ ...payload, agentMode } satisfies CurrentOutputResponseBody)
-        : ({ ...payload, agentMode, detector: { staleness } } satisfies CurrentOutputResponseBody);
+        ? ({ ...payload, agentMode, ...roleField } satisfies CurrentOutputResponseBody)
+        : ({ ...payload, agentMode, detector: { staleness }, ...roleField } satisfies CurrentOutputResponseBody);
 
     // Issue #3755: read off THIS payload, so the observation and the verdict
     // `wait` decides its exit on are one capture, not two. An observation that

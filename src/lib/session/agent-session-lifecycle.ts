@@ -36,7 +36,7 @@
  * @module lib/session/agent-session-lifecycle
  */
 
-import { getAgentEventSource, renderAgentLaunchCommand } from '@/lib/hooks/sources';
+import { getAgentEventSource } from '@/lib/hooks/sources';
 import type { AgentInstanceRef, AgentLaunchContext, AgentLaunchPlan } from '@/lib/hooks/sources';
 import {
   beginAgentEventGeneration,
@@ -47,6 +47,7 @@ import { markSessionStarting } from '@/lib/session/session-starting-state';
 import { beginEnterFallbackSession } from '@/lib/polling/auto-yes-enter-fallback-state';
 import { invalidateInstanceInput } from '@/lib/session/instance-input-lock';
 import { notePromptSubmitSession } from '@/lib/session/prompt-submit-receipt';
+import { noteLaunchProcessReplaced, renderLaunchCommandWithRole } from '@/lib/session/role-launch';
 import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import { createLogger } from '@/lib/logger';
 
@@ -83,6 +84,10 @@ export function beginAgentSession(target: AgentInstanceRef, at: number = Date.no
   // its own. A second call from the same launch (codex's
   // `relaunchIntoSamePane`) rewrites the same launch's record.
   markSessionStarting(target.worktreeId, target.cliToolId, target.instanceId, at);
+
+  // Issue #4115: a second call from one launch means its process was replaced,
+  // so the role's generation moves on with it. The role itself does not change.
+  noteLaunchProcessReplaced(target);
 
   const before = getAgentEventDropCounts(
     target.worktreeId,
@@ -195,7 +200,11 @@ export function prepareAgentLaunch(context: AgentLaunchContext): AgentLaunchPlan
  *
  * @param context - The instance, its executable, and the worktree it runs in
  * @returns `NAME='value' … command`, ready for `sendKeys`
+ * @throws {RoleLaunchRefusedError} This launch's role cannot be applied (Issue #4115)
  */
 export function buildAgentLaunchCommandLine(context: AgentLaunchContext): string {
-  return renderAgentLaunchCommand(prepareAgentLaunch(context));
+  // Issue #4115: the role, when this runs inside a launch that has one. Applied
+  // here because every driver gets its line here, and outside `prepareLaunch`
+  // because that one fails open, and a role must not.
+  return renderLaunchCommandWithRole(context, prepareAgentLaunch(context));
 }

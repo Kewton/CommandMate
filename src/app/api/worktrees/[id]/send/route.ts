@@ -61,6 +61,15 @@ import {
 } from './send-session-start';
 import { resolveSendImagePath } from './send-image-path';
 import { answerSendFailure } from './send-failure';
+import {
+  checkRunningRole,
+  chooseNewOpencodeConversation,
+  prepareSendRole,
+  roleConditionBoundary,
+  roleSendNotices,
+  takeOpencodeResumeNotice,
+} from './send-role';
+import { getLaunchRoleEvidence } from '@/lib/session/role-launch';
 
 const logger = createLogger('api/send');
 
@@ -203,6 +212,18 @@ async function handleSend(
       return NextResponse.json(foreignSessionErrorBody(sessionName, ownership.sessionPath), { status: 409 });
     }
 
+    // Issue #4115: a role this send names is validated and saved here, before the
+    // start and outside it, so the launch below resolves what was just saved.
+    const roleTarget = { worktreeId: id, cliToolId, instanceId };
+    const preparedRole = await prepareSendRole(
+      db,
+      body,
+      { worktree, cliToolId, rosterInstanceId: target.instanceId, instanceId },
+      recordNotSent,
+    );
+    if (!preparedRole.ok) return preparedRole.response;
+    const roleGate = preparedRole.value;
+
     // Check if CLI tool session is running.
     //
     // Issue #3981 (R4): a launch of this session another request has in
@@ -233,6 +254,10 @@ async function handleSend(
 
     // Start CLI tool session if not running
     if (!running) {
+      // Issue #4115 (§6.4): only OpenCode V1 resumes, and it goes on unless told otherwise.
+      if (cliToolId === 'opencode' && body.newConversation === true) {
+        chooseNewOpencodeConversation({ worktreeId: id, instanceId });
+      }
       const started = await startSessionForSend({
         db,
         cliTool,
@@ -262,6 +287,10 @@ async function handleSend(
       // lookup, so the per-send `capture-pane` count is unchanged.
       probeRunningSessionHookUrl(cliTool, id, instanceId);
     }
+
+    // Issue #4115: running or just started, this is the process the body would reach.
+    const roleRefusal = checkRunningRole(roleGate, roleTarget, recordNotSent);
+    if (roleRefusal) return roleRefusal;
 
     const image = resolveSendImagePath(body.imagePath, worktree.path);
     if (!image.ok) return image.response;
@@ -303,7 +332,8 @@ async function handleSend(
         turnAtInput = readTurnAtInput(id, cliToolId, instanceId);
       },
       // Issue #3957: the relay's boundary, required — a refusal stops the send.
-      inputBoundary: relay.binding?.hooks(),
+      // Issue #4115: the role's condition goes first, re-read at the same moment.
+      inputBoundary: roleConditionBoundary(roleGate, roleTarget, relay.binding?.hooks()),
     });
 
     if (!result.ok) {
@@ -348,7 +378,19 @@ async function handleSend(
     );
     const sent: SendMessageResponse =
       turnOpenAtSend !== undefined ? { ...result.message, turnOpenAtSend } : result.message;
-    return NextResponse.json(sent, { status: 201 });
+    return NextResponse.json(
+      {
+        ...sent,
+        ...roleSendNotices({
+          cliToolId,
+          gate: roleGate,
+          evidence: getLaunchRoleEvidence(roleTarget),
+          // Here and not at the start: a driver may have relaunched inside the send.
+          opencodeResume: cliToolId === 'opencode' ? takeOpencodeResumeNotice({ worktreeId: id, instanceId }) : null,
+        }),
+      },
+      { status: 201 },
+    );
   } catch (error: unknown) {
     logger.error('error-sending-message:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(

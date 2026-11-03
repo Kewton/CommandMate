@@ -68,6 +68,7 @@
  * must never again be rendered as "there was nothing to see".
  */
 
+import { moveLaunchRoleEvidence } from '@/lib/session/role-launch';
 import type Database from 'better-sqlite3';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { buildInstanceId, isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
@@ -677,6 +678,11 @@ function migrateRuntimeState(
   renames: WorktreeIdRename[],
   result: ReconcileWorktreeSessionsResult
 ): void {
+  // --- Roles ----------------------------------------------------------------
+  // Issue #4115: the sessions were renamed and the processes are the same, so what
+  // this server knows about them follows. The records moved with the worktree row.
+  moveLaunchRoleEvidence(renames);
+
   // --- Auto-Yes -------------------------------------------------------------
   // Snapshot which pollers are running BEFORE the state moves: startAutoYesPolling
   // refuses to start when the state at its key is not enabled, so the state has

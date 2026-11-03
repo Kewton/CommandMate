@@ -19,9 +19,13 @@ import {
   buildInstanceRoleSettings,
   createInstanceWithRole,
   setManagedInstanceRole,
+  type RoleApplicationDeps,
 } from '@/lib/agent-roles/management';
 import { respondToRoleError, roleErrorResponse } from '@/lib/agent-roles/route-errors';
 import { parseRoleAssignmentInput } from '@/lib/agent-roles/validation';
+import { getLaunchRoleEvidence, wasResumedAcrossRole } from '@/lib/session/role-launch';
+import { loadPaneComposition } from '@/lib/agent-roles/pane-env';
+import type { CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { readJsonObjectBody } from '@/lib/api/read-json-body';
@@ -33,6 +37,18 @@ const logger = createLogger('api/instances/roles');
 
 type Params = { params: Promise<{ id: string }> };
 
+/** What only this server knows: the user's settings, and the process it started. */
+function applicationDeps(worktreeId: string): RoleApplicationDeps {
+  return {
+    loadComposition: (cliToolId: CLIToolType, instanceId: string, worktreePath: string) =>
+      loadPaneComposition(worktreeId, cliToolId, instanceId, worktreePath),
+    currentGeneration: (cliToolId: CLIToolType, instanceId: string) =>
+      getLaunchRoleEvidence({ worktreeId, cliToolId, instanceId })?.sessionGeneration ?? null,
+    resumedAcrossRole: (cliToolId: CLIToolType, instanceId: string) =>
+      wasResumedAcrossRole({ worktreeId, cliToolId, instanceId }),
+  };
+}
+
 function worktreeNotFound(id: string): NextResponse {
   return roleErrorResponse('not_found', `Worktree not found: ${id}`, 404);
 }
@@ -41,7 +57,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
   try {
     const { id: requested } = await params;
     const id = canonicalWorktreeId(requested);
-    return NextResponse.json(await buildInstanceRoleSettings(getDbInstance(), id), { status: 200 });
+    return NextResponse.json(await buildInstanceRoleSettings(getDbInstance(), id, applicationDeps(id)), { status: 200 });
   } catch (error: unknown) {
     return respondToRoleError(error, logger, 'read-failed');
   }
@@ -63,7 +79,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     const role = parseRoleAssignmentInput(parsed.body.role);
     if (!role) return roleErrorResponse('invalid_request', 'role must be inherit, none or a role id', 400);
     setManagedInstanceRole(db, worktree, instanceId, role);
-    return NextResponse.json(await buildInstanceRoleSettings(db, id), { status: 200 });
+    return NextResponse.json(await buildInstanceRoleSettings(db, id, applicationDeps(id)), { status: 200 });
   } catch (error: unknown) {
     return respondToRoleError(error, logger, 'write-failed');
   }
@@ -95,7 +111,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       role,
       expectedRosterRevision,
     });
-    const body: InstanceRoleCreateResponse = { ...(await buildInstanceRoleSettings(db, id)), created };
+    const body: InstanceRoleCreateResponse = { ...(await buildInstanceRoleSettings(db, id, applicationDeps(id))), created };
     return NextResponse.json(body, { status: 201 });
   } catch (error: unknown) {
     return respondToRoleError(error, logger, 'create-failed');

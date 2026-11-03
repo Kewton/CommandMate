@@ -353,6 +353,21 @@ export function setInstanceRoleState(
   ).run(worktreeId, instanceId, roleId, Date.now());
 }
 
+/**
+ * Whether any level holds a setting. With none, every instance of every tool
+ * resolves to no role, so a launch need not run git to find that out (#4115).
+ */
+export function hasAnyRoleSetting(db: Database.Database): boolean {
+  const row = db
+    .prepare(
+      `SELECT (EXISTS (SELECT 1 FROM agent_instance_roles)
+            OR EXISTS (SELECT 1 FROM agent_role_repository_defaults)
+            OR EXISTS (SELECT 1 FROM agent_role_system_defaults)) AS present`
+    )
+    .get() as { present?: number } | undefined;
+  return row?.present === 1;
+}
+
 // ---------------------------------------------------------------------------
 // Launch records
 // ---------------------------------------------------------------------------

@@ -61,7 +61,6 @@ import type Database from 'better-sqlite3';
 import { getAgentRole, getInstanceRoleState, getRepositoryRoleStates, getSystemRoleDefaults } from '@/lib/db/agent-roles-db';
 import { getAllRepositories, getRepositoryById, type Repository } from '@/lib/db/db-repository';
 import { getWorktreeById } from '@/lib/db/worktree-db';
-import { resolveGitCommonDir } from '@/lib/git/git-common-dir';
 import { resolveSessionTarget } from '@/lib/session/resolve-session-target';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { Worktree } from '@/types/models';
@@ -122,7 +121,10 @@ async function askGit(
   const roots = getAllRepositories(db);
   if (roots.length === 0) return { roots, identity: null, commonDirs: [] };
 
-  const resolveCommonDir = deps.resolveCommonDir ?? resolveGitCommonDir;
+  // Loaded here, on the way to git: every driver reaches this module, and suites
+  // that mock `child_process` down to what a driver uses have no git to load.
+  const resolveCommonDir =
+    deps.resolveCommonDir ?? (await import('@/lib/git/git-common-dir')).resolveGitCommonDir;
   let identity: string | null = null;
   for (const path of question.identityPaths) {
     identity = await resolveCommonDir(path);
