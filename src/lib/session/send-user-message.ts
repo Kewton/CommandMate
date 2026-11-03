@@ -79,6 +79,7 @@ import {
   type SendAttemptReason,
   type SendAttemptState,
 } from '@/lib/session/send-attempt-types';
+import { isRoleConditionUnmet, readRoleLaunchRefusal } from '@/lib/agent-roles/launch-errors';
 import { extractComposerText, SUPPORTED_COMPOSER_TOOLS } from '@/lib/detection/composer-text';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
 import {
@@ -580,6 +581,11 @@ export async function sendUserMessage(
       return { sent: true, inputStartedAt };
     } catch (error) {
       logger.error('failed-to-send-message-to:', { error: getErrorMessage(error) });
+      // Issue #4115: the role this send was conditional on, or the role a driver's
+      // relaunch resolved, refused it before the first key.
+      if (isRoleConditionUnmet(error) || readRoleLaunchRefusal(error) !== null) {
+        return { error, failure: classifySendFailure(error) };
+      }
       // Issue #3957: the relay's boundary hook refused before the first key —
       // nothing was typed because the reservation the body was going in under
       // was gone. Issue #3992: its own reason, not `input-lock-lost`.

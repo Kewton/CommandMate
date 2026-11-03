@@ -49,9 +49,13 @@ import { MAX_AGENT_INSTANCES, type AgentInstance, type CLIToolType } from '@/lib
 import { resolveAgentInstances } from '@/lib/session/agent-instances-resolver';
 import {
   AGENT_ROLE_CLI_TOOLS,
+  agentRoleReplacesDefaultInstructions,
   isAgentRoleAdapterEnabled,
   isAgentRoleCliTool,
+  type EffectiveRole,
   type InstanceRoleEntry,
+  type RoleLaunchRecord,
+  type RoleResolution,
   type InstanceRoleSettingsResponse,
   type RepositoryRoleDefaultEntry,
   type RoleAssignmentInput,
@@ -59,6 +63,7 @@ import {
   type WorktreeToolRoleDefault,
 } from '@/types/agent-roles';
 import type { Worktree } from '@/types/models';
+import { computeRoleInjection, type RoleComposition } from './adapters';
 import {
   attributeToRepository,
   resolveDefaultsForTool,
@@ -89,16 +94,76 @@ export function computeRosterRevision(roster: readonly AgentInstance[]): string 
   return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
 }
 
+/** What only a running server can say about a launch, on top of the settings. */
+export interface RoleApplicationDeps extends RoleResolverDeps {
+  /**
+   * The user's settings per tool. A rejection leaves that tool's fingerprint not
+   * computable. Omitted: nothing is computed, and `restartPending` is `unknown`.
+   */
+  loadComposition?: (cliToolId: CLIToolType, worktreePath: string) => Promise<RoleComposition>;
+  /**
+   * The generation of the process this server started for the instance. A record of
+   * any other generation is about a process it cannot vouch for. Omitted: none.
+   */
+  currentGeneration?: (cliToolId: CLIToolType, instanceId: string) => string | null;
+}
+
 /**
- * The settings of a worktree, each beside what it would resolve to.
+ * The injection fingerprint of what a resolution would inject.
+ *
+ * @returns `computed: false` when that takes a composition that could not be read
+ */
+function injectionOf(
+  resolution: RoleResolution,
+  composition: RoleComposition | null
+): { computed: boolean; fingerprint: string | null } {
+  if (resolution.kind === 'none') return { computed: true, fingerprint: null };
+  if (resolution.kind === 'ambiguous' || composition === null || !isAgentRoleCliTool(resolution.cliToolId)) {
+    return { computed: false, fingerprint: null };
+  }
+  return {
+    computed: true,
+    fingerprint: computeRoleInjection(resolution.cliToolId, resolution.role, composition).injectionFingerprint,
+  };
+}
+
+/**
+ * Restart pending, by the injection fingerprint and nothing else (§5). A role's name,
+ * id and the level it came from are not inputs, so none of them moves this.
+ */
+export function computeRestartPending(
+  next: { computed: boolean; fingerprint: string | null },
+  launched: RoleLaunchRecord | null
+): 'yes' | 'no' | 'unknown' {
+  if (!next.computed || launched === null) return 'unknown';
+  return next.fingerprint === launched.injectionFingerprint ? 'no' : 'yes';
+}
+
+/**
+ * The settings of a worktree, each beside what it would resolve to and what the
+ * process running now was started with.
  *
  * @throws {AgentRoleTargetNotFoundError} The worktree does not exist
  */
-export function buildInstanceRoleSettings(
+export async function buildInstanceRoleSettings(
   db: Database.Database,
   worktreeId: string,
-  deps: RoleResolverDeps = {}
+  deps: RoleApplicationDeps = {}
 ): Promise<InstanceRoleSettingsResponse> {
+  // Read first and outside: these wait, and no database answer may cross an await.
+  const compositions = new Map<CLIToolType, RoleComposition | null>();
+  if (deps.loadComposition) {
+    const row = getWorktreeById(db, worktreeId);
+    if (row) {
+      const tools = new Set(currentRoster(db, row).map((instance) => instance.cliTool).filter(isAgentRoleCliTool));
+      await Promise.all(
+        [...tools].map(async (tool) => {
+          compositions.set(tool, await deps.loadComposition?.(tool, row.path).catch(() => null) ?? null);
+        })
+      );
+    }
+  }
+
   // Everything is read in the builder, in one stretch with the final check, so a tool
   // can never be paired with a setting made after it changed.
   return withSettledWorktreeMembership(db, worktreeId, deps, (worktree, membership) => {
@@ -107,6 +172,15 @@ export function buildInstanceRoleSettings(
     const instances: InstanceRoleEntry[] = roster.map((instance) => {
       const stored = getInstanceRoleState(db, worktree.id, instance.id);
       const records = getLatestRoleLaunchRecords(db, worktree.id, instance.id);
+      const resolution = resolveDefaultsForTool(db, instance.cliTool, membership, stored);
+      const next = injectionOf(resolution, compositions.get(instance.cliTool) ?? null);
+      const generation = deps.currentGeneration?.(instance.cliTool, instance.id) ?? null;
+      const launched =
+        records.launched !== null && records.launched.sessionGeneration === generation ? records.launched : null;
+      const effectiveNext: EffectiveRole & { injectionFingerprint: string | null } = {
+        ...toEffectiveRole(resolution),
+        injectionFingerprint: next.fingerprint,
+      };
       return {
         instanceId: instance.id,
         cliToolId: instance.cliTool,
@@ -115,13 +189,11 @@ export function buildInstanceRoleSettings(
         adapterEnabled: isAgentRoleCliTool(instance.cliTool) && isAgentRoleAdapterEnabled(instance.cliTool),
         stored,
         application: {
-          effectiveNext: {
-            ...toEffectiveRole(resolveDefaultsForTool(db, instance.cliTool, membership, stored)),
-            injectionFingerprint: null,
-          },
+          effectiveNext,
           requested: records.requested,
-          launched: records.launched,
-          restartPending: 'unknown',
+          launched,
+          restartPending: computeRestartPending(next, launched),
+          ...(agentRoleReplacesDefaultInstructions(instance.cliTool) ? { replacesDefaultInstructions: true } : {}),
         },
       };
     });

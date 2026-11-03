@@ -34,13 +34,27 @@ export function isAgentRoleCliTool(value: unknown): value is AgentRoleCliTool {
   return typeof value === 'string' && (AGENT_ROLE_CLI_TOOLS as readonly string[]).includes(value);
 }
 
+/** Turns Antigravity's adapter on, once its check under a dedicated OS user has passed (§6.6). */
+export const AGENT_ROLE_ANTIGRAVITY_ENABLED_ENV_VAR = 'CM_AGENT_ROLE_ANTIGRAVITY_ENABLED';
+
 /**
  * Whether a launch may apply a role through this tool's adapter yet. Antigravity
  * can hold settings and its adapter is built, but stays off until the check under
- * a dedicated OS user has passed (D3).
+ * a dedicated OS user has passed (D3). A role resolved for a tool that is off
+ * refuses the launch; it never starts without it.
  */
 export function isAgentRoleAdapterEnabled(tool: AgentRoleCliTool): boolean {
-  return tool !== 'antigravity';
+  if (tool !== 'antigravity') return true;
+  return typeof process !== 'undefined' && process.env?.[AGENT_ROLE_ANTIGRAVITY_ENABLED_ENV_VAR] === '1';
+}
+
+/**
+ * Whether a role through this tool replaces its default instructions instead of
+ * adding to them: OpenCode V2 overrides the agent's `system`, which removes the
+ * provider's base prompt (§7.2). The API says so, so a client can.
+ */
+export function agentRoleReplacesDefaultInstructions(tool: string): boolean {
+  return tool === 'opencode-v2';
 }
 
 // ---------------------------------------------------------------------------
@@ -189,16 +203,26 @@ export interface RoleLaunchRecord extends RoleLaunchSnapshotInput {
 }
 
 /**
- * The application state of one instance. This Issue fills `effectiveNext` from
- * the settings and the two records from the table; #4115 fills
- * `effectiveNext.injectionFingerprint` and `restartPending`. An instance with no
- * evidence reads `unknown`, never as applied.
+ * The application state of one instance. `effectiveNext` is what the next launch
+ * would use; `requested` and `launched` are snapshots of a launch, and are the role
+ * at startup, since a switch inside the TUI cannot be seen.
+ *
+ * `launched` is null until something confirms it (§14), and after a server restart:
+ * null is "not known", which is not "no role". A launch with no role has a record
+ * with a null fingerprint and a `noRoleReason`.
+ *
+ * `restartPending` compares injection fingerprints: another name or another level
+ * holding the same text is `no`; `unknown` when either side cannot be computed.
+ * `effectiveNext.injectionFingerprint` is null with no role, and when it could not
+ * be computed: the role is set and {@link RoleApplicationState.restartPending} is `unknown`.
  */
 export interface RoleApplicationState {
   effectiveNext: EffectiveRole & { injectionFingerprint: string | null };
   requested: RoleLaunchRecord | null;
   launched: RoleLaunchRecord | null;
   restartPending: 'yes' | 'no' | 'unknown';
+  /** Whether this tool's role replaces its default instructions. See {@link agentRoleReplacesDefaultInstructions}. */
+  replacesDefaultInstructions?: boolean;
 }
 
 // ---------------------------------------------------------------------------

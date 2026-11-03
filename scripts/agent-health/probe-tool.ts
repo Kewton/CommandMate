@@ -18,6 +18,12 @@ import { detectPrompt } from '@/lib/detection/prompt-detector';
 import { detectSessionStatus } from '@/lib/detection/status-detector';
 import { shellQuote } from '@/lib/hooks/hook-settings-generator';
 import { getAgentEventSource, renderAgentLaunchCommand } from '@/lib/hooks/sources';
+import {
+  prepareExplicitRoleLaunch,
+  type ExplicitRole,
+  type ExplicitRoleCondition,
+} from '@/lib/agent-roles/explicit-launch';
+import { isAgentRoleCliTool } from '@/types/agent-roles';
 import { selectionKeys } from '@/lib/agent-health/dialog-select';
 import { expectedHookEvents } from '@/lib/agent-health/hook-correlation';
 import { skipCheck } from '@/lib/agent-health/coverage';
@@ -114,11 +120,19 @@ export interface ProbeContext {
    * frame is written — the unit tests that drive `probeTool` leave it out.
    */
   frameArchive?: FrameArchive | null;
+  /**
+   * A test role to launch with (Issue #4115), named outright. The probe opens no
+   * database and inherits no role; this is the only way one gets in, and the
+   * outcome records it.
+   */
+  role?: ExplicitRole | null;
 }
 
 export interface ProbeOutcome {
   version: string | null;
   checks: AgentHealthCheck[];
+  /** Issue #4115: the condition the run was under, when it had a role. */
+  roleCondition?: ExplicitRoleCondition;
   /** Issue #3438: set once the tool was launched; left out when it never was. */
   launchedModel?: AgentHealthLaunchedModel;
 }
@@ -705,7 +719,24 @@ export async function probeTool(ctx: ProbeContext): Promise<ProbeOutcome> {
     executablePath: spec.executable,
     worktreePath: workDir,
   });
-  const rendered = renderAgentLaunchCommand(plan);
+  const explicitRole =
+    ctx.role && isAgentRoleCliTool(spec.cliToolId)
+      ? await prepareExplicitRoleLaunch(spec.cliToolId, ctx.role, {
+          worktreePath: workDir,
+          env: ctx.childEnv,
+          namespace: 'probe',
+          artifacts: {
+            dataRoot: path.join(ctx.workRoot, 'role-artifacts'),
+            codexHome: ctx.childEnv.CODEX_HOME,
+            copilotHome: ctx.childEnv.COPILOT_HOME,
+            antigravityAgentsDir: ctx.childEnv.HOME
+              ? path.join(ctx.childEnv.HOME, '.gemini', 'config', 'agents')
+              : undefined,
+            env: ctx.childEnv,
+          },
+        })
+      : null;
+  const rendered = `${explicitRole?.linePrefix ?? ''}${renderAgentLaunchCommand(plan)}${explicitRole?.lineSuffix ?? ''}`;
   if (spec.server) {
     const line = evaluateOpencodeV2LaunchLine(rendered);
     if (!line.ok || serverPort === null) {
@@ -846,7 +877,12 @@ export async function probeTool(ctx: ProbeContext): Promise<ProbeOutcome> {
     session.record(judgeUsageLimit(check, usageLimitFrames));
   }
 
-  return { version, checks: [...checks, ...session.checks.values()], launchedModel };
+  return {
+    version,
+    checks: [...checks, ...session.checks.values()],
+    launchedModel,
+    ...(explicitRole ? { roleCondition: explicitRole.condition } : {}),
+  };
 }
 
 /**

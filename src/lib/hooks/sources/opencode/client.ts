@@ -253,6 +253,25 @@ export async function probeOpencodeHealth(port: number): Promise<OpencodeHealthO
 }
 
 /**
+ * The resolved config, for the role's evidence (Issue #4115, §14). May hold secrets,
+ * so the caller compares it and keeps none of it. Null when nothing answered.
+ */
+export async function fetchOpencodeConfig(port: number): Promise<unknown> {
+  try {
+    const response = await loopbackFetch(`${opencodeBaseUrl(port)}/config`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (response.status !== 200) {
+      await response.body?.cancel().catch(() => {});
+      return null;
+    }
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Ask whether an opencode server is listening on this port.
  *
  * @returns Its health and version, or null when nothing answered

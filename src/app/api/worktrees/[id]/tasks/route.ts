@@ -15,7 +15,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { createTask, getWorktreeById, listTasks, type Task } from '@/lib/db';
-import { isValidInstanceId, isCliToolType } from '@/lib/cli-tools/types';
+import { isValidInstanceId, isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
+import { ROLE_CONDITION_UNMET_CODE } from '@/lib/agent-roles/launch-errors';
+import { runningRoleProblem } from '@/lib/session/role-launch';
+import { resolveSessionTarget } from '@/lib/session/resolve-session-target';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { loadTaskContract, TaskContractError } from '@/lib/tasks/contract-parser';
 import {
@@ -158,6 +161,26 @@ export async function POST(
       return NextResponse.json(
         { error: 'Invalid task contract', issues: gateIssues },
         { status: 400 }
+      );
+    }
+
+    // Issue #4115: a contract goes out under the role the process was started with
+    // (for `launch-worker`, at its starting message). If the settings have moved on
+    // since then, this contract would run under a stale role: nothing is created or
+    // sent. A session with no evidence here is one the send below starts or decides.
+    const roleTarget = resolveSessionTarget(db, id, {
+      instanceId: payload.instanceId as string | undefined,
+      requestedCliTool: payload.cliToolId as CLIToolType | undefined,
+    });
+    const roleProblem = await runningRoleProblem(
+      db,
+      { worktreeId: id, cliToolId: roleTarget.cliToolId, instanceId: roleTarget.instanceId },
+      worktree.path
+    );
+    if (roleProblem !== null) {
+      return NextResponse.json(
+        { error: roleProblem, code: ROLE_CONDITION_UNMET_CODE, sendOutcome: 'not_sent' },
+        { status: 409 }
       );
     }
 

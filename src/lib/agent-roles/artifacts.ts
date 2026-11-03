@@ -533,6 +533,61 @@ function publishExclusively(path: string, bytes: Buffer): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// The composed environment (not an artifact)
+// ---------------------------------------------------------------------------
+
+/**
+ * Write a composed `OPENCODE_CONFIG_CONTENT` to a private file for one launch, read
+ * back with `$(cat …)` on the launch line (§7.1). It may hold the user's secrets, so
+ * unlike an artifact it has no fingerprint, is never reused, and is removed when the
+ * launch is over.
+ *
+ * @throws {RoleArtifactError} It could not be written
+ * @throws {UatIsolationLaunchRefusedError} The run may not write there
+ */
+export function writeLaunchEnvFile(
+  adapter: AgentRoleCliTool,
+  content: string,
+  options: ArtifactOptions = {}
+): string {
+  const root = dataRootFor(options);
+  const dir = join(root, 'launch-env');
+  const path = join(dir, `${randomBytes(12).toString('hex')}.json`);
+  const env = options.env ?? process.env;
+  if (sharedHookWritePolicy(adapter, [path], env) === 'read-only' && isSharedHomeState(root)) {
+    throw new UatIsolationLaunchRefusedError(adapter, `the file ${path} may not be written by this run`, UAT_SAME_BUILD_FIX);
+  }
+  const rootIsOurs = physicalPath(root) === physicalPath(defaultDataRoot());
+  const location: ArtifactLocation = {
+    path,
+    homeDir: null,
+    sharedDirs: rootIsOurs ? [] : [root],
+    ownedDirs: rootIsOurs ? [root, dir] : [dir],
+    inSharedHome: false,
+  };
+  checkDirectories(location, true);
+  try {
+    createMissingDirectories(location);
+    if (!publishExclusively(path, Buffer.from(content, 'utf8'))) {
+      throw new RoleArtifactError('write-failed', `${path} already exists`);
+    }
+  } catch (error) {
+    if (error instanceof RoleArtifactError) throw error;
+    throw new RoleArtifactError('write-failed', `Could not write ${path}: ${(error as NodeJS.ErrnoException).code ?? 'unknown error'}`);
+  }
+  return path;
+}
+
+/** Remove what {@link writeLaunchEnvFile} wrote. Never throws: the launch is already over. */
+export function removeLaunchEnvFile(path: string): void {
+  try {
+    unlinkSync(path);
+  } catch {
+    // Already gone, or not ours to fix now.
+  }
+}
+
+// ---------------------------------------------------------------------------
 // The two entry points
 // ---------------------------------------------------------------------------
 

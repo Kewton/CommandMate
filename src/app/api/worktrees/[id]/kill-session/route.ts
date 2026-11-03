@@ -28,6 +28,7 @@ import { releaseAutoYes } from '@/lib/auto-yes-lifecycle';
 import { clearSessionStarting } from '@/lib/session/session-starting-state';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import { forgetLaunchRoleEvidence } from '@/lib/session/role-launch';
 import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
 import {
   appendSessionKillRecord,
@@ -198,6 +199,8 @@ export async function POST(
       // Issue #3184: the table's `session-killed` row — disable with no reason,
       // stop the poller — which is exactly what #3188 wrote here.
       releaseAutoYes('session-killed', { scope: 'instance', worktreeId: id, cliToolId, instanceId });
+      // Issue #4115: what was known about that process goes with it.
+      forgetLaunchRoleEvidence({ worktreeId: id, cliToolId, instanceId });
       clearSessionStarting(id, cliToolId, instanceId);
     }
 

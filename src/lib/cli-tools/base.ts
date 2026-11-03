@@ -50,12 +50,23 @@ import {
   issueSessionStartingToken,
   runWithSessionStartingToken,
 } from '../session/session-starting-state';
-import { runSessionLaunch, settleSessionLaunch } from '../session/session-launch-flight';
+import { isSessionLaunchInFlight, runSessionLaunch, settleSessionLaunch } from '../session/session-launch-flight';
+import {
+  gateLaunchRole,
+  requestLaunchRole,
+  runWithLaunchRole,
+  settleLaunchRole,
+  type LaunchRoleSnapshot,
+} from '../session/role-launch';
+import { roleEnvReaderForPane } from '../agent-roles/pane-env';
 import { typeLaunchLines, type LaunchKeyStep } from './launch-keys';
 
 const execAsync = promisify(exec);
 
 const logger = createLogger('cli-tools/base');
+
+/** How much of a pane the role's evidence reads, right after a launch. */
+const LAUNCH_ROLE_SCREEN_LINES = 200;
 
 /**
  * `CM_HOOK_URL='…'` as a launch line spells it (Issue #2429).
@@ -299,9 +310,26 @@ export abstract class BaseCLITool implements ICLITool {
     } catch {
       // fall through: launchSession throws on it, inside the reporting below
     }
-    const launch = (): Promise<void> => this.startSessionOnce(worktreeId, worktreePath, instanceId, model);
-    if (sessionName === null) return launch();
-    return runSessionLaunch(sessionName, this.name, launch, { cliToolId: this.id, model });
+    const launch = (role: LaunchRoleSnapshot | null): Promise<void> =>
+      this.startSessionOnce(worktreeId, worktreePath, instanceId, model, role);
+    if (sessionName === null) return launch(null);
+    const flightName = sessionName;
+    const startWith = (role: LaunchRoleSnapshot | null): Promise<void> => {
+      // Issue #4115: a role that cannot be applied may not join someone else's launch either.
+      if (role?.refusal && isSessionLaunchInFlight(flightName)) return Promise.reject(role.refusal);
+      return runSessionLaunch(flightName, this.name, () => launch(role), {
+        cliToolId: this.id,
+        model,
+        injectionFingerprint: role === null || role.refusal ? undefined : role.injectionFingerprint,
+      });
+    };
+    // Issue #4115: the one entry for the role, whoever started this: a send, or
+    // `relaunchIfToolExited` inside one. Synchronous when no role is configured
+    // anywhere, so the flight is still registered in this tick (R4). With roles
+    // configured it waits for git first; nothing has touched tmux yet.
+    const roleTarget = { worktreeId, cliToolId: this.id, instanceId };
+    const role = requestLaunchRole(roleTarget, worktreePath, roleEnvReaderForPane(roleTarget));
+    return role instanceof Promise ? role.then(startWith) : startWith(role);
   }
 
   /** {@link startSession}'s body: one launch, its failure reported once. */
@@ -309,7 +337,8 @@ export abstract class BaseCLITool implements ICLITool {
     worktreeId: string,
     worktreePath: string,
     instanceId?: string,
-    model?: string
+    model?: string,
+    role: LaunchRoleSnapshot | null = null
   ): Promise<void> {
     // Issue #3195: this launch's "starting" record is written under this token
     // (see `session-starting-state`), so the `finally` below clears this
@@ -317,7 +346,9 @@ export abstract class BaseCLITool implements ICLITool {
     const startingToken = issueSessionStartingToken();
     try {
       await runWithSessionStartingToken(startingToken, () =>
-        this.launchSession(worktreeId, worktreePath, instanceId, model)
+        role === null
+          ? this.launchSession(worktreeId, worktreePath, instanceId, model)
+          : runWithLaunchRole(role, () => this.launchSessionWithRole(worktreeId, worktreePath, instanceId, model))
       );
     } catch (error: unknown) {
       // Issue #2429: a launch that threw is reported as a failed start and as
@@ -345,6 +376,46 @@ export abstract class BaseCLITool implements ICLITool {
     }
     const adopted = this.takeAdoptionMark(worktreeId, instanceId);
     if (adopted !== null) await this.warnIfHookUrlIsStale(worktreeId, adopted, instanceId);
+  }
+
+  /**
+   * {@link launchSession} inside a launch that resolved its role (Issue #4115).
+   *
+   * The file is prepared before the driver creates a pane, so a refusal leaves no
+   * empty pane behind for a later send to read as a running agent. A refusal does
+   * not stop a reconnect: a process already there keeps the role it started with,
+   * and the driver's reuse branch builds no launch line.
+   */
+  private async launchSessionWithRole(
+    worktreeId: string,
+    worktreePath: string,
+    instanceId: string | undefined,
+    model: string | undefined
+  ): Promise<void> {
+    const sessionName = this.getSessionName(worktreeId, instanceId);
+    const refusal = gateLaunchRole();
+    if (refusal !== null && !((await hasSession(sessionName)) && (await this.isToolLive(sessionName, { confirm: true })))) {
+      throw refusal;
+    }
+    await this.launchSession(worktreeId, worktreePath, instanceId, model);
+    await settleLaunchRole({
+      isAlive: () => this.isToolLive(sessionName),
+      capture: () => capturePane(sessionName, LAUNCH_ROLE_SCREEN_LINES),
+      kill: () => this.killSession(worktreeId, instanceId),
+      readServerConfig: () => this.readServerConfig(worktreeId, worktreePath, instanceId),
+    });
+  }
+
+  /**
+   * The config this tool's own server answers, for the role's evidence (§14).
+   * Null for a tool with no server; never throws out of an override's failed request.
+   */
+  protected async readServerConfig(
+    _worktreeId: string,
+    _worktreePath: string,
+    _instanceId: string | undefined
+  ): Promise<unknown> {
+    return null;
   }
 
   /**

@@ -74,7 +74,8 @@ import {
   reserveOpencodeV2Server,
   resumeOpencodeV2EventStream,
 } from '@/lib/hooks/sources/opencode-v2/runtime';
-import { probeOpencodeV2Server } from '@/lib/hooks/sources/opencode-v2/client';
+import { fetchOpencodeV2Config, probeOpencodeV2Server } from '@/lib/hooks/sources/opencode-v2/client';
+import { readOpencodeV2Password } from '@/lib/hooks/sources/opencode-v2/secrets';
 import { getAssignedOpencodeV2Port } from '@/lib/hooks/sources/opencode-v2/ports';
 import { isOpencodeV2Subscribed } from '@/lib/hooks/sources/opencode-v2/subscription';
 import {
@@ -303,6 +304,19 @@ export class OpenCodeV2Tool extends BaseCLITool {
     } catch (error: unknown) {
       throw new Error(`Failed to start OpenCode V2 session: ${getErrorMessage(error)}`);
     }
+  }
+
+  /** Issue #4115: `GET /api/config`, the evidence that the server read the role (§14). */
+  protected async readServerConfig(
+    worktreeId: string,
+    worktreePath: string,
+    instanceId: string | undefined
+  ): Promise<unknown> {
+    const target = opencodeV2Target(worktreeId, instanceId);
+    const port = getAssignedOpencodeV2Port(target);
+    const password = readOpencodeV2Password(target);
+    if (port === null || password === null) return null;
+    return fetchOpencodeV2Config(port, password, worktreePath);
   }
 
   /** Poll until the composer is on screen (or give up quietly). */
