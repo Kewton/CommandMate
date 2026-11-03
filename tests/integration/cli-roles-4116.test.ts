@@ -55,6 +55,7 @@ const fakeTool = vi.hoisted(() => ({
   /** Runs inside the send, right before the sender notes its first key. */
   beforeFirstKey: null as null | (() => Promise<void>),
   onStart: null as null | ((instanceId: string | undefined) => Promise<void>),
+  claudeRunning: (() => false) as () => boolean,
 }));
 
 vi.mock('@/lib/cli-tools/codex', () => ({
@@ -124,6 +125,31 @@ vi.mock('@/lib/db/db-instance', () => {
   };
 });
 
+vi.mock('@/lib/polling/auto-yes-manager', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/polling/auto-yes-manager')>()),
+  startAutoYesPolling: vi.fn(() => ({ started: true })),
+  stopAutoYesPolling: vi.fn(),
+  stopAutoYesPollingByWorktree: vi.fn(),
+}));
+vi.mock('@/lib/hooks/pending-decision-recheck', () => ({
+  recheckPendingDecisions: vi.fn(async () => ({ reason: 'test', examined: 0, delivered: 0, skipped: 0 })),
+}));
+vi.mock('@/lib/cli-tools/claude', () => ({
+  ClaudeTool: class {
+    id = 'claude';
+    name = 'Claude Code';
+    command = 'claude';
+    async isInstalled() { return true; }
+    async isRunning() { return fakeTool.claudeRunning(); }
+    async startSession() {}
+    async sendMessage() {}
+    async killSession() {}
+    getSessionName(id: string, instanceId?: string) { return `mcbd-claude-${id}-${instanceId ?? 'claude'}`; }
+  },
+}));
+
+import * as autoYesRoute from '@/app/api/worktrees/[id]/auto-yes/route';
+import { clearAllAutoYesStates, getAutoYesState, setAutoYesEnabled } from '@/lib/auto-yes-state';
 import * as rolesRoute from '@/app/api/roles/route';
 import * as roleRoute from '@/app/api/roles/[id]/route';
 import * as systemRoute from '@/app/api/settings/agent-role-defaults/route';
@@ -149,8 +175,9 @@ let db: Database.Database;
 let reviewer: string;
 let writer: string;
 let taskStatuses: string[];
-/** The Auto-Yes route's state and what it was told, per `<tool>:<instance>`. */
-let autoYes: { on: boolean; posts: Array<Record<string, unknown>> };
+/** What the real Auto-Yes route was told. */
+let autoYesPosts: Array<Record<string, unknown>>;
+const codexAutoYes = (instanceId = 'codex') => getAutoYesState(WT, 'codex', instanceId)?.enabled === true;
 
 type RouteHandler = (request: NextRequest, context: { params: Promise<Record<string, string>> }) => Promise<Response>;
 
@@ -165,7 +192,6 @@ function stubbed(pathname: string): unknown | undefined {
     return { id: WT, name: 'wt', agentInstances: resolveAgentInstances(db, WT, row.selectedAgents) };
   }
   if (pathname === `/api/worktrees/${WT}/current-output`) return { isRunning: fakeTool.running };
-  if (pathname === `/api/worktrees/${WT}/auto-yes`) return { instances: {} };
   if (pathname === `/api/worktrees/${WT}/opencode/session`) return { instances: [] };
   return undefined;
 }
@@ -182,6 +208,7 @@ function routed(pathname: string): { handlers: Record<string, unknown>; params: 
   if ((match = pathname.match(/^\/api\/worktrees\/([^/]+)\/instances\/roles$/))) {
     return { handlers: instanceRolesRoute, params: { id: match[1] } };
   }
+  if ((match = pathname.match(/^\/api\/worktrees\/([^/]+)\/auto-yes$/))) return { handlers: autoYesRoute, params: { id: match[1] } };
   if ((match = pathname.match(/^\/api\/worktrees\/([^/]+)\/send$/))) return { handlers: sendRoute, params: { id: match[1] } };
   if ((match = pathname.match(/^\/api\/worktrees\/([^/]+)\/tasks$/))) return { handlers: tasksRoute, params: { id: match[1] } };
   if ((match = pathname.match(/^\/api\/worktrees\/([^/]+)\/resolve-target$/))) {
@@ -197,15 +224,7 @@ async function dispatch(input: unknown, init?: RequestInit): Promise<Response> {
     taskStatuses.push(JSON.parse(String(init?.body)).status);
     return Response.json({ ok: true });
   }
-  if (url.pathname === `/api/worktrees/${WT}/auto-yes`) {
-    if (method === 'POST') {
-      const body = JSON.parse(String(init?.body));
-      autoYes.posts.push(body);
-      autoYes.on = body.enabled;
-      return Response.json({ enabled: body.enabled });
-    }
-    return Response.json(url.searchParams.has('cliToolId') ? { enabled: autoYes.on } : { instances: {} });
-  }
+  if (url.pathname === `/api/worktrees/${WT}/auto-yes` && method === 'POST') autoYesPosts.push(JSON.parse(String(init?.body)));
   const route = routed(url.pathname);
   if (route) {
     const handler = route.handlers[method] as RouteHandler | undefined;
@@ -311,7 +330,9 @@ beforeEach(async () => {
   fakeTool.onStart = (instanceId) => launch(instanceId);
   ownership.hook = null;
   taskStatuses = [];
-  autoYes = { on: false, posts: [] };
+  autoYesPosts = [];
+  clearAllAutoYesStates();
+  fakeTool.claudeRunning = () => false;
   vi.stubEnv('CM_AGENT_HOOKS_INJECT', '0');
   vi.stubEnv('CM_AGENT_ROLE_ARTIFACTS_DIR', path.join(dir, 'data'));
   vi.stubEnv('CODEX_HOME', path.join(dir, 'codex'));
@@ -1071,31 +1092,41 @@ describe('a send with a role that types nothing leaves Auto-Yes as it found it',
     fakeTool.running = true;
   }
   const armAndSend = (...args: string[]) => send('hello', '--instance', 'codex', '--auto-yes', ...args);
+  /** Arming asks about ownership too, so the second time this is asked is the send's. */
+  function atSendOwnership(change: () => void): void {
+    let asked = 0;
+    ownership.hook = () => {
+      asked += 1;
+      if (asked === 2) change();
+    };
+  }
 
   it('it was off: armed, refused, withdrawn', async () => {
     await runningWith(writer);
     const result = await armAndSend('--role', 'reviewer');
     expect(result.code).toBe(32);
-    expect(autoYes.posts.map(({ enabled }) => enabled)).toEqual([true, false]);
-    expect(autoYes.posts[1]).toMatchObject({ cliToolId: 'codex', instanceId: 'codex' });
-    expect(autoYes.on).toBe(false);
+    expect(autoYesPosts.map(({ enabled }) => enabled)).toEqual([true, false]);
+    expect(autoYesPosts[1]).toMatchObject({ cliToolId: 'codex', instanceId: 'codex' });
+    expect(codexAutoYes()).toBe(false);
     expect(result.stderr).toContain('withdrawn');
   });
 
   it('it was on: never turned off, and its terms untouched by a refusal', async () => {
     await runningWith(writer);
-    autoYes.on = true;
+    setAutoYesEnabled(WT, 'codex', true, 3600000, undefined, 'codex');
+    const before = getAutoYesState(WT, 'codex', 'codex')?.expiresAt;
     expect((await armAndSend('--role', 'reviewer')).code).toBe(32);
-    expect(autoYes.posts).toEqual([]);
-    expect(autoYes.on).toBe(true);
+    expect(autoYesPosts).toEqual([]);
+    expect(codexAutoYes()).toBe(true);
+    expect(getAutoYesState(WT, 'codex', 'codex')?.expiresAt).toBe(before);
   });
 
   it('it was on, and the message goes in: this send\'s terms apply then', async () => {
     await runningWith(reviewer);
-    autoYes.on = true;
+    setAutoYesEnabled(WT, 'codex', true, 3600000, undefined, 'codex');
     expect((await armAndSend('--role', 'reviewer', '--duration', '3h')).code).toBe(0);
     expect(fakeTool.typed).toEqual(['hello']);
-    expect(autoYes.posts).toEqual([expect.objectContaining({ enabled: true, duration: 3 * 3600 * 1000 })]);
+    expect(autoYesPosts).toEqual([expect.objectContaining({ enabled: true, duration: 3 * 3600 * 1000 })]);
   });
 
   it('a pin replaced at the first key: withdrawn too', async () => {
@@ -1105,17 +1136,14 @@ describe('a send with a role that types nothing leaves Auto-Yes as it found it',
     fakeTool.beforeFirstKey = () => launch();
     const result = await armAndSend('--expect-role-generation', evidence?.sessionGeneration as string, '--expect-no-role');
     expect(result.code).toBe(32);
-    expect(autoYes.on).toBe(false);
+    expect(codexAutoYes()).toBe(false);
   });
 
   it('a roster moved under it: exit 31, withdrawn', async () => {
     setAgentInstances(db, WT, [{ id: 'codex', cliTool: 'codex', alias: 'A', order: 0 }]);
-    ownership.hook = () => {
-      ownership.hook = null;
-      setAgentInstances(db, WT, [{ id: 'codex', cliTool: 'codex', alias: 'Renamed', order: 0 }]);
-    };
+    atSendOwnership(() => setAgentInstances(db, WT, [{ id: 'codex', cliTool: 'codex', alias: 'Renamed', order: 0 }]));
     expect((await armAndSend('--role', 'reviewer')).code).toBe(31);
-    expect(autoYes.on).toBe(false);
+    expect(codexAutoYes()).toBe(false);
   });
 
   it('the state could not be read: left on, with how to stop it, not guessed off', async () => {
@@ -1127,7 +1155,7 @@ describe('a send with a role that types nothing leaves Auto-Yes as it found it',
     });
     const result = await armAndSend('--role', 'reviewer');
     expect(result.code).toBe(32);
-    expect(autoYes.on).toBe(true);
+    expect(codexAutoYes()).toBe(true);
     expect(result.stderr).toContain(`auto-yes ${WT} --disable --instance codex`);
   });
 
@@ -1139,8 +1167,9 @@ describe('a send with a role that types nothing leaves Auto-Yes as it found it',
     });
     const result = await armAndSend('--role', 'reviewer');
     expect(result.code).toBe(1);
-    expect(autoYes.on).toBe(true);
-    expect(result.stderr).toContain('--disable');
+    expect(codexAutoYes()).toBe(true);
+    expect(result.stderr).toContain('--disable --instance codex');
+    expect(result.stderr).toContain('whether the role setting was saved is not known');
   });
 
   it('a refused relay ends the command before anything is armed', async () => {
@@ -1154,7 +1183,7 @@ describe('a send with a role that types nothing leaves Auto-Yes as it found it',
     });
     const result = await armAndSend('--role', 'reviewer', '--reply-to', `${WT}/codex`);
     expect(result.code).not.toBe(0);
-    expect(autoYes.posts).toEqual([]);
+    expect(autoYesPosts).toEqual([]);
     expect(fakeTool.typed).toEqual([]);
   });
 
@@ -1168,8 +1197,54 @@ describe('a send with a role that types nothing leaves Auto-Yes as it found it',
     });
     expect((await armAndSend()).code).not.toBe(0);
     expect(reads).toEqual([]);
-    expect(autoYes.posts.map(({ enabled }) => enabled)).toEqual([true]);
-    expect(autoYes.on).toBe(true);
+    expect(autoYesPosts.map(({ enabled }) => enabled)).toEqual([true]);
+    expect(codexAutoYes()).toBe(true);
+  });
+
+  it('naming no instance: withdrawn by name, and another instance\'s grant stays', async () => {
+    setAutoYesEnabled(WT, 'codex', true, 3600000, undefined, 'codex-2');
+    await runningWith(writer);
+    const result = await send('hello', '--auto-yes', '--role', 'reviewer');
+    expect(result.code).toBe(32);
+    expect(autoYesPosts[autoYesPosts.length - 1]).toEqual({ enabled: false, cliToolId: 'codex', instanceId: 'codex' });
+    expect(codexAutoYes()).toBe(false);
+    expect(codexAutoYes('codex-2')).toBe(true);
+  });
+
+  it('positive control: the request with nobody named would have stopped that one too', async () => {
+    setAutoYesEnabled(WT, 'codex', true, 3600000, undefined, 'codex-2');
+    await dispatch(`http://localhost:4116/api/worktrees/${WT}/auto-yes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(codexAutoYes('codex-2')).toBe(false);
+  });
+
+  it('another send updated the grant meanwhile: left on, with the command that stops it', async () => {
+    await runningWith(writer);
+    atSendOwnership(() => setAutoYesEnabled(WT, 'codex', true, 28800000, undefined, 'codex'));
+    const result = await armAndSend('--role', 'reviewer');
+    expect(result.code).toBe(32);
+    expect(codexAutoYes()).toBe(true);
+    expect(autoYesPosts.map(({ enabled }) => enabled)).toEqual([true]);
+    expect(result.stderr).toContain('updated after this send armed it');
+    expect(result.stderr).toContain(`auto-yes ${WT} --disable --instance codex`);
+  });
+
+  it('it cannot be read back: left on', async () => {
+    await runningWith(writer);
+    let reads = 0;
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'GET' && String(input).includes('/auto-yes')) {
+        reads += 1;
+        if (reads > 1) return Response.json({ error: 'x' }, { status: 500 });
+      }
+      return dispatch(input, init);
+    });
+    const result = await armAndSend('--role', 'reviewer');
+    expect(codexAutoYes()).toBe(true);
+    expect(result.stderr).toContain('could not be read back');
   });
 });
 
@@ -1212,7 +1287,7 @@ describe('--contract --role: the setting first, as send --role has it', () => {
     await processAndSetting(reviewer, writer);
     const result = await contract('--role', 'third');
     expect(result.code).toBe(32);
-    expect(result.stderr).toContain('stayed saved');
+    expect(result.stderr).toContain('stays saved');
     expect(getInstanceRoleState(db, WT, 'codex')).toMatchObject({ roleId: third });
     expect(fakeTool.typed).toEqual([]);
   });
@@ -1240,7 +1315,237 @@ describe('--contract --role: the setting first, as send --role has it', () => {
   });
 });
 
+describe('--contract --role: the save checks the roster as /send does', () => {
+  const contract = (...args: string[]) => send('--contract', '.commandmate/tasks/x.yaml', '--instance', 'helper', ...args);
+  const rows = (tool: 'codex' | 'claude', alias = 'H') => [
+    { id: 'codex', cliTool: 'codex' as const, alias: 'A', order: 0 },
+    { id: 'helper', cliTool: tool, alias, order: 1 },
+  ];
+
+  /** A process running `reviewer` for helper, with the setting now `writer`. */
+  async function refusedByTheCheck(): Promise<void> {
+    setAgentInstances(db, WT, rows('codex'));
+    setInstanceRoleState(db, WT, 'helper', { state: 'role', roleId: reviewer });
+    await launch('helper');
+    fakeTool.running = true;
+    setInstanceRoleState(db, WT, 'helper', { state: 'role', roleId: writer });
+  }
+  /** Runs `change` right after the first `POST /tasks`, or before the PUT when `at` says. */
+  function after(at: 'tasks' | 'put', change: () => void): void {
+    let done = false;
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      if (at === 'put' && !done && method === 'PUT' && url.endsWith('/instances/roles')) {
+        done = true;
+        change();
+      }
+      const response = await dispatch(input, init);
+      if (at === 'tasks' && !done && method === 'POST' && url.endsWith('/tasks')) {
+        done = true;
+        change();
+      }
+      return response;
+    });
+  }
+  const held = () => getInstanceRoleState(db, WT, 'helper');
+
+  it('the id became another tool after the check: exit 31, nothing saved', async () => {
+    await refusedByTheCheck();
+    after('tasks', () => setAgentInstances(db, WT, rows('claude')));
+    const result = await contract('--role', 'reviewer');
+    expect(result.code).toBe(31);
+    expect(result.stderr).toContain('roster changed');
+    expect(held()).toMatchObject({ roleId: writer });
+    expect(fakeTool.typed).toEqual([]);
+  });
+
+  it('the roster moved otherwise: exit 31, nothing saved', async () => {
+    await refusedByTheCheck();
+    after('tasks', () => setAgentInstances(db, WT, rows('codex', 'Renamed')));
+    expect((await contract('--role', 'reviewer')).code).toBe(31);
+    expect(held()).toMatchObject({ roleId: writer });
+  });
+
+  it('it changed right before the PUT: the answer shows it, and exit 31 says where it was saved', async () => {
+    await refusedByTheCheck();
+    after('put', () => setAgentInstances(db, WT, rows('claude')));
+    const result = await contract('--role', 'reviewer');
+    expect(result.code).toBe(31);
+    expect(result.stderr).toContain('which is now claude, not codex');
+    expect(fakeTool.typed).toEqual([]);
+  });
+
+  it('nothing moved: it goes (negative control)', async () => {
+    await refusedByTheCheck();
+    expect((await contract('--role', 'reviewer')).code).toBe(0);
+    expect(held()).toMatchObject({ roleId: reviewer });
+  });
+});
+
+describe('a refusal after the save says it stayed saved', () => {
+  const post = (body: Record<string, unknown>) =>
+    dispatch(`http://localhost:4116/api/worktrees/${WT}/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'hello', ...body }),
+    });
+  const role = () => ({ state: 'role', roleId: reviewer });
+
+  describe('what can be checked first leaves no setting', () => {
+    it('--model on a running session: 400, nothing saved', async () => {
+      fakeTool.claudeRunning = () => true;
+      const response = await post({ cliToolId: 'claude', model: 'opus', role: role() });
+      expect(response.status).toBe(400);
+      expect((await response.json()).roleSettings).toBeUndefined();
+      expect(getInstanceRoleState(db, WT, 'claude')).toEqual({ state: 'inherit' });
+    });
+
+    it('a bad image path: 400, nothing saved', async () => {
+      const response = await post({ cliToolId: 'codex', imagePath: 'https://example.invalid/x.png', role: role() });
+      expect(response.status).toBe(400);
+      expect((await response.json()).roleSettings).toBeUndefined();
+      expect(getInstanceRoleState(db, WT, 'codex')).toEqual({ state: 'inherit' });
+      expect(fakeTool.running).toBe(false);
+    });
+  });
+
+  describe('what comes later says so', () => {
+    it('a process that came up after the early check: the --model 400 carries it', async () => {
+      let reads = 0;
+      fakeTool.claudeRunning = () => (reads++ > 0);
+      const response = await post({ cliToolId: 'claude', model: 'opus', role: role() });
+      expect(response.status).toBe(400);
+      expect((await response.json()).roleSettings).toMatchObject({ saved: true, stored: { state: 'role', roleId: reviewer } });
+    });
+
+    it('a start that failed', async () => {
+      fakeTool.onStart = async () => {
+        throw new Error('no tmux');
+      };
+      const response = await post({ cliToolId: 'codex', role: role() });
+      expect(response.status).toBeGreaterThanOrEqual(500);
+      expect((await response.json()).roleSettings).toMatchObject({ saved: true });
+    });
+
+    it('a send that failed, through the CLI as well', async () => {
+      setInstanceRoleState(db, WT, 'codex', { state: 'role', roleId: reviewer });
+      await launch();
+      fakeTool.running = true;
+      fakeTool.beforeFirstKey = async () => {
+        throw new Error('pane gone');
+      };
+      const result = await send('hello', '--instance', 'codex', '--role', 'reviewer');
+      expect(result.code).not.toBe(0);
+      expect(result.stderr).toContain('stayed saved');
+    });
+
+    it('--model refused in the CLI\'s words: the note is there too', async () => {
+      let reads = 0;
+      fakeTool.claudeRunning = () => (reads++ > 0);
+      const result = await send('hello', '--instance', 'claude', '--model', 'opus', '--role', 'reviewer');
+      expect(result.code).toBe(2);
+      expect(result.stderr).toContain('stayed saved');
+    });
+  });
+
+  describe('a send with no role answers as it did (negative controls)', () => {
+    it('a failed start', async () => {
+      fakeTool.onStart = async () => {
+        throw new Error('no tmux');
+      };
+      expect((await (await post({ cliToolId: 'codex' })).json()).roleSettings).toBeUndefined();
+    });
+
+    it('--model on a running session', async () => {
+      fakeTool.claudeRunning = () => true;
+      const response = await post({ cliToolId: 'claude', model: 'opus' });
+      expect(response.status).toBe(400);
+      expect((await response.json()).roleSettings).toBeUndefined();
+    });
+
+    it('a bad image path still waits its turn: the session is started first', async () => {
+      const response = await post({ cliToolId: 'codex', imagePath: 'https://example.invalid/x.png' });
+      expect(response.status).toBe(400);
+      expect(fakeTool.running).toBe(true);
+    });
+
+    it('a success has no extra key', async () => {
+      const response = await post({ cliToolId: 'codex' });
+      expect(response.status).toBe(201);
+      expect((await response.json()).roleSettings).toBeUndefined();
+    });
+  });
+});
+
+describe('instances --json --require-roles', () => {
+  const failing = (status: number, body: unknown, raw?: string) => async (input: unknown, init?: RequestInit) => {
+    if (String(input).endsWith('/instances/roles')) {
+      return raw !== undefined ? new Response(raw, { status }) : Response.json(body, { status });
+    }
+    return dispatch(input, init);
+  };
+
+  it('the roles read: every row carries its role', async () => {
+    const result = await instances('--json', '--require-roles');
+    expect(result.code).toBe(0);
+    for (const row of result.json()) expect(row.role).toBeDefined();
+  });
+
+  it('a failed read fails the command, where the plain list leaves role out (positive control)', async () => {
+    vi.stubGlobal('fetch', failing(500, { success: false, error: 'internal_error', message: 'x' }));
+    const strict = await instances('--json', '--require-roles');
+    expect(strict.code).toBe(99);
+    expect(strict.json()).toMatchObject({ success: false, error: 'internal_error' });
+    const plain = await instances('--json');
+    expect(plain.code).toBe(0);
+    expect(plain.json()[0].role).toBeUndefined();
+  });
+
+  it('a server with no such route says so', async () => {
+    vi.stubGlobal('fetch', failing(404, null, '<html>not here</html>'));
+    const result = await instances('--json', '--require-roles');
+    expect(result.code).toBe(99);
+    expect(result.json().error).toBe('role_api_unavailable');
+  });
+
+  it('an answer saying nothing of instances, or nothing of a row, is a failure', async () => {
+    vi.stubGlobal('fetch', failing(200, { success: true }));
+    expect((await instances('--json', '--require-roles')).json().error).toBe('role_read_failed');
+    vi.stubGlobal('fetch', failing(200, { success: true, instances: [] }));
+    expect((await instances('--json', '--require-roles')).json().error).toBe('role_read_failed');
+  });
+});
+
 describe('--json answers every failure of a role command', () => {
+  it.each([
+    ['set-role', ['set-role', 'codex', '--none', '--json']],
+    ['add --role', ['add', '--agent', 'codex', '--role', 'reviewer', '--json']],
+  ])('%s: a client that cannot be built is JSON too', async (_name, args) => {
+    vi.stubEnv('CM_UAT_ISOLATION', '1');
+    vi.stubEnv('CM_PORT', '');
+    const result = await instances(...args);
+    expect(result.code).toBe(2);
+    expect(result.json()).toMatchObject({ success: false });
+    expect(result.stderr).toContain('requires CM_PORT');
+  });
+
+  it('roles: the same', async () => {
+    vi.stubEnv('CM_UAT_ISOLATION', '1');
+    vi.stubEnv('CM_PORT', '');
+    const result = await roles('list', '--json');
+    expect(result.code).toBe(2);
+    expect(result.json().success).toBe(false);
+  });
+
+  it('a plain list: stderr only, the same exit code (negative control)', async () => {
+    vi.stubEnv('CM_UAT_ISOLATION', '1');
+    vi.stubEnv('CM_PORT', '');
+    const result = await instances('--json');
+    expect(result.code).toBe(2);
+    expect(result.stdout).toBe('');
+  });
+
   const unreachable = async () => {
     throw new TypeError('fetch failed');
   };

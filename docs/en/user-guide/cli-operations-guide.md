@@ -2426,7 +2426,8 @@ See what is registered with `commandmate roles defaults`. Errors say which: `unk
 - `--register --role` creates the instance and its role **before** sending, so the first start has it. Repeating it creates nothing: `--role` replaces what the instance holds and is a condition as above. A roster changed after it was read is exit 31, nothing sent
 - `--register` without `--role` keeps its old order (sent, then registered) and leaves any role alone
 - `--contract --role` ends the same way. If the contract's own check would refuse for the old setting, the role is saved and the check runs again. A broken contract saves nothing
-- When a send with a role or a pin types nothing, the `--auto-yes` it armed is withdrawn. A grant already on stays as it was until the message is in. If it cannot be said that nothing was typed, it stays on, and the command to stop it is printed
+- When a send with a role or a pin types nothing, the `--auto-yes` it armed is withdrawn, naming the tool and instance, and only if it reads back as that grant. A grant already on stays as it was until the message is in. A grant updated since, or a send that cannot be said to have typed nothing, leaves it on, and the command to stop it is printed
+- A refusal that can be checked before the save (`--model` on a running session, a bad image path) leaves no setting. A refusal after the save says the setting stayed saved, whatever refused it
 - `--expect-role-generation <g>` with `--expect-role-fingerprint <f>` / `--expect-no-role` pin the send to what the caller read (`capture --json`'s `roleLaunch`), saving nothing. The server reads them again right before the first key, so a process replaced in between, even with the same role, gets nothing: exit 32. They combine with `--contract` and `--role`
 
 ### `set-role` and `instances --json`
@@ -2447,7 +2448,7 @@ Each `instances --json` row has `role` when the server has roles:
 }
 ```
 
-A null `launched` means not known, which is not "no role". The table appends `ROLE_AT_START`, `ROLE_NEXT` and `RESTART_PENDING`.
+With `--require-roles` a role that cannot be read fails the command instead of being left out (a server older than roles says `role_api_unavailable`). A null `launched` means not known, which is not "no role". The table appends `ROLE_AT_START`, `ROLE_NEXT` and `RESTART_PENDING`.
 
 ### `--json` shapes
 

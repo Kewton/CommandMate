@@ -83,6 +83,8 @@ interface SendRoleTarget {
   rosterInstanceId: string;
   /** As the request named it; undefined means the primary. */
   instanceId: string | undefined;
+  /** Told right after a save, so every later answer of the request can say so. */
+  onSaved?: (settings: { saved: true; stored: StoredRoleState }) => void;
 }
 
 function refuse(
@@ -191,6 +193,7 @@ export async function prepareSendRole(
     try {
       setManagedInstanceRole(db, worktree, rosterInstanceId, input);
       saved = true;
+      target.onSaved?.({ saved: true, stored: getInstanceRoleState(db, worktree.id, rosterInstanceId) });
     } catch (error) {
       if (error instanceof InstanceRoleRequestError || error instanceof AgentRoleNotFoundError) {
         const code = error instanceof InstanceRoleRequestError ? error.code : 'not_found';

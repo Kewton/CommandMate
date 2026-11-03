@@ -41,8 +41,9 @@
  * What was read goes with the contract (Issue #4116), and the server reads it again
  * right before the first key: a process replaced after that last read, even with
  * the same role, gets nothing (`send` exit 32). That too is stopped and is 44.
- * A roster that moved under it is the `send`'s own 31: no contract, Auto-Yes off, and
- * the session left for the next launch to stop. No role read off a server that does
+ * A roster that moved under it is the `send`'s own 31: no contract, and the session
+ * left for the next launch to stop. Either way the `send` withdraws the Auto-Yes it
+ * armed and no other, so here it is only read back. No role read off a server that does
  * have roles (it restarted, and knows nothing of this process) is not "nothing to
  * pin": stopped and 44, unlike an older server or a tool roles do not apply to.
  *
@@ -243,18 +244,35 @@ function readRunning(run, cli, wt, instance) {
 }
 
 /**
- * Whether a process that reports no role has to (Issue #4116), from its `instances
- * --json` row, which every start reads anyway. `capture --json` leaves `roleLaunch` out
- * for two opposite reasons: nothing here has roles, or this server has them and does
- * not know the process. A row with `role` is a server with roles, and only a tool
- * outside them needs no pin. A row without it is an older server or CLI, neither of
- * which can pin. (Also a roles read that failed just then; the `send` of a contract is
- * still checked by `POST /tasks`.)
+ * Whether a process that reports no role has to (Issue #4116), from its row as
+ * {@link readRowWithRoles} read it. `capture --json` leaves `roleLaunch` out for two
+ * opposite reasons: nothing here has roles, or this server has them and does not know
+ * the process. A row with `role` is a server with roles, and only a tool outside them
+ * needs no pin. A row without it is an older server or CLI, neither of which can pin.
  *
  * @returns {boolean}
  */
 export function roleEvidenceRequired(row) {
   return Boolean(row?.role) && row.role.effectiveNext?.source !== 'unsupported';
+}
+
+/**
+ * The instance's row with its role (Issue #4116): `--require-roles` fails the list
+ * rather than leave `role` out, so "could not be read" cannot pass for "none here".
+ * Only an answer naming the route as missing, or a CLI not knowing the flag, is an
+ * older one, and the plain list then says the rest. Same answers as {@link readRow}.
+ */
+function readRowWithRoles(run, cli, wt, instance) {
+  const listed = run(cli, ['instances', wt, '--json', '--require-roles']);
+  let answer = null;
+  try {
+    answer = JSON.parse(listed.stdout);
+  } catch {
+    answer = null;
+  }
+  if (listed.status === 0) return Array.isArray(answer) ? answer.find((row) => row?.instanceId === instance) : null;
+  const older = answer?.error === 'role_api_unavailable' || String(listed.stderr ?? '').includes('unknown option');
+  return older ? readRow(run, cli, wt, instance) : null;
 }
 
 /**
@@ -273,9 +291,9 @@ export function disarmAutoYes({ run, sleep, cli, wt, instance }) {
     if (off.status !== 0) {
       detail = `auto-yes --disable exit=${off.status} ${String(off.stderr ?? '').trim().split('\n').pop() ?? ''}`.trim();
     } else {
-      const row = readRow(run, cli, wt, instance);
+      const row = readRowWithRoles(run, cli, wt, instance);
       if (row && row.autoYes !== true) return { ok: true, detail: 'off', row };
-      detail = row === null ? 'instance list unreadable after --disable' : row === undefined ? `${instance} not in the instance list` : 'still on after --disable';
+      detail = row === null ? 'instance list or its roles unreadable after --disable' : row === undefined ? `${instance} not in the instance list` : 'still on after --disable';
     }
     if (attempt < DISARM_ATTEMPTS) sleep(DISARM_INTERVAL_SEC * 1000);
   }
@@ -500,10 +518,12 @@ export function main(argv, deps = {}) {
       log(`send exit=${sent.status} issue=${workItem} task=${sent.taskId || '-'} (${sent.name})`);
       if (sent.taskId) out(sent.taskId);
       if ((sent.status === EXIT_ROLE_NOT_SENT || sent.status === EXIT_ROLE_CONFLICT) && roleNow !== null) {
-        // Refused with nothing typed. This start began with Auto-Yes off (disarmed above),
-        // so the `send` withdraws what it armed; read back here, as a stop's is.
-        const disarmed = disarmAutoYes(ctx);
-        if (!disarmed.ok) log(`auto-yes UNCONFIRMED ${o.instance} of ${o.wt}: ${disarmed.detail} — turn it off by hand`);
+        // Refused with nothing typed, and the `send` withdrew the grant it armed. One still
+        // on is someone else's, or could not be told apart: not this script's to cut.
+        const row = readRow(run, o.cli, o.wt, o.instance);
+        if (row?.autoYes !== false) {
+          log(`auto-yes still on or unread: ${o.instance} of ${o.wt} (see ${sent.name.replace(/\.out$/, '.err')}); left as it is`);
+        }
         if (sent.status === EXIT_ROLE_CONFLICT) {
           log(`roster changed: ${o.instance} of ${o.wt}; contract not sent`);
           return sent.status;

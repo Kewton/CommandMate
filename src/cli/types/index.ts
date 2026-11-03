@@ -769,6 +769,8 @@ export interface InstancesOptions {
   none?: boolean;
   /** Issue #4116: set-role: drop the setting and follow the defaults. */
   inherit?: boolean;
+  /** Issue #4116: list: a role that cannot be read fails the command, rather than being left out. */
+  requireRoles?: boolean;
   token?: string;
 }
 

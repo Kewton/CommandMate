@@ -3296,7 +3296,8 @@ commandmate roles default codex --repo . --role reviewer
 - `--register --role` は、インスタンスとロールを送信の**前に**作るので、最初の起動からそのロールで動きます。繰り返しても作成はされず、`--role` の値で既存の指定を置き換えたうえで、上の条件が適用されます。読み取りの後に roster が変わると exit 31 で未送信です
 - `--role` なしの `--register` は従来どおり（送信の後に登録）で、既存のロールには触れません
 - `--contract --role` も同じ結果になります。契約側の検査が古い設定で拒否するときは、ロールを保存して検査し直します。契約そのものが不正なら何も保存しません
-- ロールか固定を付けた送信が未入力で終わると、その送信が有効にした `--auto-yes` は取り消します。もともと有効だった Auto-Yes は、本文が入るまでそのままです。未入力と確定できないときは残し、止めるコマンドを表示します
+- ロールか固定を付けた送信が未入力で終わると、その送信が有効にした `--auto-yes` は取り消します（対象のツールとインスタンスを明示し、直前に読み直して一致するときだけ）。もともと有効だった Auto-Yes は、本文が入るまでそのままです。後から更新された grant や、未入力と確定できないときは残し、止めるコマンドを表示します
+- 保存の前に確かめられる拒否（稼働中への `--model`、不正な画像パス）は設定を残しません。保存の後の拒否は、理由を問わず設定が保存されたことを伝えます
 - `--expect-role-generation <g>` と `--expect-role-fingerprint <f>` / `--expect-no-role` は、呼び出し側が読んだ値（`capture --json` の `roleLaunch`）に送信を固定します。何も保存しません。サーバーが最初のキーの直前に読み直すので、その間にプロセスが入れ替われば（同じロールでも）未送信 exit 32 です。`--contract` や `--role` と併用できます
 
 ### `set-role` と `instances --json`
@@ -3317,7 +3318,7 @@ commandmate roles default codex --repo . --role reviewer
 }
 ```
 
-`launched` が null なのは「わからない」であり、「ロールなし」ではありません。表形式では `ROLE_AT_START`、`ROLE_NEXT`、`RESTART_PENDING` の列を末尾に追加します。
+`--require-roles` を付けると、ロールを読めないときは `role` を省かず失敗します（ロールより古いサーバーは `role_api_unavailable`）。`launched` が null なのは「わからない」であり、「ロールなし」ではありません。表形式では `ROLE_AT_START`、`ROLE_NEXT`、`RESTART_PENDING` の列を末尾に追加します。
 
 ### `--json` の形
 

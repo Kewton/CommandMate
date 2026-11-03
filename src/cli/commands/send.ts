@@ -4,7 +4,7 @@
  */
 
 import { Command } from 'commander';
-import { ExitCode } from '../types';
+import { ExitCode, RoleExitCode } from '../types';
 import type { SendOptions } from '../types';
 import type { AutoYesContractPolicy, AutoYesSetResult, TaskCreateResponse, TaskView } from '../types/api-responses';
 import { ApiClient, ApiError, assertResponseShape, isValidWorktreeId, MAX_STOP_PATTERN_LENGTH } from '../utils/api-client';
@@ -114,7 +114,7 @@ async function enableAutoYes(
   agent: string | undefined,
   instanceId: string | undefined,
   contractPolicy: AutoYesContractPolicy | null = null
-): Promise<void> {
+): Promise<AutoYesSetResult | undefined> {
   const autoYesBody: Record<string, unknown> = {
     enabled: true,
     duration: durationMs,
@@ -155,6 +155,7 @@ async function enableAutoYes(
   for (const line of describeContractPolicy(result?.contractPolicy ?? contractPolicy)) {
     console.error(line);
   }
+  return result;
 }
 
 /**
@@ -306,8 +307,13 @@ async function effectiveTarget(
  * the SETTINGS, so `--role A` to a process running A while the setting says B would be
  * refused for a setting this very command is replacing. A plain `send --role` saves,
  * then checks; refused here, this does the same and checks again. Only then, because
- * the contract is read first: a broken contract saves nothing. As with any `--role`,
- * a refusal after the save leaves the setting saved, and says so.
+ * the contract is read first: a broken contract saves nothing.
+ *
+ * The save has what `POST /send` has before its own: the roster and the tool read
+ * again, against what this command was resolved to. Anything moved is exit 31 with
+ * nothing saved. The route takes no revision, so a change between that read and the
+ * PUT is seen only in its answer, which is then told. From the save on, anything that
+ * ends this command leaves the setting saved, so it is said right then.
  */
 async function createContractTaskWithRole(
   client: ApiClient,
@@ -317,37 +323,42 @@ async function createContractTaskWithRole(
   instanceId: string | undefined,
   role: RoleAssignmentInput | undefined
 ): ReturnType<typeof createContractTask> {
-  const unmet = (error: unknown): error is RoleCliError =>
-    error instanceof RoleCliError && error.code === 'ROLE_CONDITION_UNMET';
+  if (role === undefined) return createContractTask(client, worktreeId, options, agent, instanceId);
+  const target = await effectiveTarget(client, worktreeId, agent, instanceId);
+  const url = `/api/worktrees/${worktreeId}/instances/roles`;
+  const resolved = await client.get<InstanceRoleSettingsResponse>(url);
+  const toolOf = (settings: InstanceRoleSettingsResponse): string | undefined =>
+    settings.instances.find((instance) => instance.instanceId === target.instanceId)?.cliToolId;
   try {
     return await createContractTask(client, worktreeId, options, agent, instanceId);
   } catch (error) {
-    if (role === undefined || !unmet(error)) throw error;
+    if (!(error instanceof RoleCliError) || error.code !== 'ROLE_CONDITION_UNMET') throw error;
   }
-  const target = await effectiveTarget(client, worktreeId, agent, instanceId);
+  const rosterChanged = (message: string, details: Record<string, unknown> = {}): RoleCliError =>
+    new RoleCliError('roster_changed', message, RoleExitCode.CONFLICT, details);
+  const now = await client.get<InstanceRoleSettingsResponse>(url);
+  const toolThen = toolOf(resolved) ?? target.cliToolId;
+  if (now.rosterRevision !== resolved.rosterRevision || (toolOf(now) ?? toolThen) !== target.cliToolId) {
+    throw rosterChanged('The roster changed while this contract was being checked; nothing was saved or typed. Send it again.');
+  }
+  let saved: InstanceRoleSettingsResponse;
   try {
-    await client.put<InstanceRoleSettingsResponse>(`/api/worktrees/${worktreeId}/instances/roles`, {
-      instanceId: target.instanceId,
-      role,
-    });
+    saved = await client.put<InstanceRoleSettingsResponse>(url, { instanceId: target.instanceId, role });
   } catch (error) {
     const roleFailure = roleFailureFromApi(error);
     if (roleFailure) throw roleFailure;
     throw error;
   }
-  try {
-    return await createContractTask(client, worktreeId, options, agent, instanceId);
-  } catch (error) {
-    if (!unmet(error)) throw error;
-    throw new RoleCliError(
-      error.code,
-      `${error.message} The role setting stayed saved, so after a restart the contract can be sent again without --role.`,
-      error.exitCode,
-      error.details,
-      error.statusCode,
-      error.payload
+  const savedTool = toolOf(saved);
+  if (savedTool !== target.cliToolId) {
+    throw rosterChanged(
+      `The role was saved for ${target.instanceId}, which is now ${savedTool ?? 'not on the roster'}, not ${target.cliToolId}; `
+        + 'nothing was typed. Check it with: commandmate instances',
+      { roleSettings: { saved: true } }
     );
   }
+  console.error(`Role saved for ${target.instanceId} ahead of the contract's check; it stays saved if this send goes no further.`);
+  return createContractTask(client, worktreeId, options, agent, instanceId);
 }
 
 /**
@@ -363,24 +374,60 @@ function knownNotSent(error: unknown, outcome: FailedSendOutcome | null): boolea
 }
 
 /**
- * Whether this instance's Auto-Yes is on, or null when that could not be read. A send
- * with a role has to know: on a refusal it puts back what it found.
+ * This target's Auto-Yes as the server reads it now, or null when it could not be read.
+ * Always names both: a read naming no tool answers another question.
  */
-async function readPriorAutoYes(
+async function readAutoYes(
   client: ApiClient,
   worktreeId: string,
-  agent: string | undefined,
-  instanceId: string | undefined
-): Promise<boolean | null> {
+  target: { cliToolId: string; instanceId: string }
+): Promise<{ enabled?: unknown; expiresAt?: unknown; answerMode?: unknown } | null> {
   try {
-    const target = await effectiveTarget(client, worktreeId, agent, instanceId);
-    if (target.cliToolId === undefined) return null;
-    const query = new URLSearchParams({ cliToolId: target.cliToolId });
-    if (target.instanceId) query.set('instanceId', target.instanceId);
-    const state = await client.get<{ enabled?: unknown }>(`/api/worktrees/${worktreeId}/auto-yes?${query.toString()}`);
-    return typeof state?.enabled === 'boolean' ? state.enabled : null;
+    const query = new URLSearchParams({ cliToolId: target.cliToolId, instanceId: target.instanceId });
+    return await client.get(`/api/worktrees/${worktreeId}/auto-yes?${query.toString()}`);
   } catch {
     return null;
+  }
+}
+
+/**
+ * Turn off the grant this send armed, and no other (Issue #4116). The route has no
+ * "only if still this one", so it is read right before: a grant someone updated since
+ * has another expiry, and is theirs. `{ enabled: false }` naming nobody would stop
+ * every instance of the worktree, so tool and instance are always named. Anything not
+ * certain is left on, with the command that stops it.
+ *
+ * What remains: an update between that read and the POST.
+ */
+async function withdrawArmedAutoYes(
+  client: ApiClient,
+  worktreeId: string,
+  target: { cliToolId?: string; instanceId?: string } | null,
+  armed: AutoYesSetResult | undefined
+): Promise<void> {
+  const cliToolId = armed?.cliToolId ?? target?.cliToolId;
+  const instanceId = armed?.instanceId ?? target?.instanceId;
+  const manual = `commandmate auto-yes ${worktreeId} --disable --instance ${instanceId ?? '<instance-id>'}`;
+  const leave = (why: string): void => console.error(`Warning: Auto-Yes stays on (${why}). To turn it off: ${manual}`);
+  if (!cliToolId || !instanceId || typeof armed?.expiresAt !== 'number') {
+    leave('the grant this send armed could not be identified');
+    return;
+  }
+  const now = await readAutoYes(client, worktreeId, { cliToolId, instanceId });
+  if (now === null || typeof now.enabled !== 'boolean') {
+    leave('it could not be read back');
+    return;
+  }
+  if (!now.enabled) return;
+  if (now.expiresAt !== armed.expiresAt || (armed.answerMode !== undefined && now.answerMode !== armed.answerMode)) {
+    leave('it was updated after this send armed it');
+    return;
+  }
+  try {
+    await client.post<unknown>(`/api/worktrees/${worktreeId}/auto-yes`, { enabled: false, cliToolId, instanceId });
+    console.error('Auto-yes withdrawn: the message was not sent.');
+  } catch {
+    leave('the request to turn it off failed');
   }
 }
 
@@ -628,8 +675,11 @@ nothing (exit 32). \`launch-worker\` passes what its starting message fixed. Wit
 
 With a role or a pin, --auto-yes does not outlive a refusal: a grant this send armed is
 withdrawn when nothing was typed, and a grant already on is left as it was until the
-message is in. --contract --role saves the role before the contract's own check if that
+message is in. Only the grant it armed: one updated since is left on, with the command
+that stops it. --contract --role saves the role before the contract's own check if that
 check would refuse it, so it behaves like send --role; a broken contract saves nothing.
+A refusal that comes after the save says the setting stayed saved, whatever refused it.
+What can be checked first (--model on a running session, the image path) saves nothing.
 
 Exit codes: 2 usage, or an unknown or ambiguous role, or a tool roles do not apply to
 (nothing sent); 31 a roster conflict (nothing sent); 32 the role condition does not
@@ -721,8 +771,17 @@ hold or the start was refused because of its role (nothing typed).
         let relay: RegisteredRelay | undefined;
         if (options.replyTo && conditional) relay = await registerRelay();
         const armsNow = options.autoYes && !deferAutoYes;
-        const priorAutoYes = armsNow && conditional ? await readPriorAutoYes(client, worktreeId, agent, instanceId) : false;
+        const autoYesTarget = armsNow && conditional
+          ? await effectiveTarget(client, worktreeId, agent, instanceId).catch(() => null)
+          : null;
+        const priorState = autoYesTarget?.cliToolId && autoYesTarget.instanceId
+          ? await readAutoYes(client, worktreeId, { cliToolId: autoYesTarget.cliToolId, instanceId: autoYesTarget.instanceId })
+          : null;
+        const priorAutoYes: boolean | null = !(armsNow && conditional)
+          ? false
+          : typeof priorState?.enabled === 'boolean' ? priorState.enabled : null;
         const applyAutoYesAfterSend = options.autoYes && (deferAutoYes || priorAutoYes === true);
+        let armedGrant: AutoYesSetResult | undefined;
         if (armsNow && priorAutoYes !== true) {
           // Issue #3290: the server can refuse this — 409 when the session by
           // that name belongs to another CommandMate server — and the command
@@ -732,7 +791,7 @@ hold or the start was refused because of its role (nothing typed).
           // that never went out, which is the state #1608 removed for a bad
           // --duration.
           try {
-            await enableAutoYes(client, worktreeId, options, autoYesDurationMs, agent, instanceId, contractPolicy);
+            armedGrant = await enableAutoYes(client, worktreeId, options, autoYesDurationMs, agent, instanceId, contractPolicy);
           } catch (error) {
             await failTask();
             if (relay) await cancelRelayQuietly(client, relay.id);
@@ -743,21 +802,15 @@ hold or the start was refused because of its role (nothing typed).
         /** Issue #4116: what a conditional send armed, once it is known to have typed nothing. */
         const withdrawAutoYes = async (error: unknown, outcome: FailedSendOutcome | null): Promise<void> => {
           if (!conditional || !armsNow || priorAutoYes === true) return;
-          const manual = `commandmate auto-yes ${worktreeId} --disable${instanceId ? ` --instance ${instanceId}` : ''}`;
           if (priorAutoYes === null || !knownNotSent(error, outcome)) {
-            console.error(`Warning: Auto-Yes stays on (it was not known to be off, or the message may have gone in). To turn it off: ${manual}`);
+            const name = armedGrant?.instanceId ?? autoYesTarget?.instanceId ?? instanceId ?? '<instance-id>';
+            console.error(
+              'Warning: Auto-Yes stays on (it was not known to be off, or the message may have gone in). '
+                + `To turn it off: commandmate auto-yes ${worktreeId} --disable --instance ${name}`
+            );
             return;
           }
-          try {
-            await client.post<unknown>(`/api/worktrees/${worktreeId}/auto-yes`, {
-              enabled: false,
-              ...(agent ? { cliToolId: agent } : {}),
-              ...(instanceId ? { instanceId } : {}),
-            });
-            console.error('Auto-yes withdrawn: the message was not sent.');
-          } catch {
-            console.error(`Warning: could not withdraw Auto-Yes. To turn it off: ${manual}`);
-          }
+          await withdrawArmedAutoYes(client, worktreeId, autoYesTarget, armedGrant);
         };
 
         // Issue #2377: the relay is registered BEFORE the message goes out, so a
@@ -779,6 +832,10 @@ hold or the start was refused because of its role (nothing typed).
           onFailure: async (error, outcome) => {
             await failTask();
             await withdrawAutoYes(error, outcome);
+            // Issue #4116: no answer, so the send may have got as far as the save.
+            if (roleAssignment !== undefined && error instanceof ApiError && !error.payload) {
+              console.error('Note: whether the role setting was saved is not known. Check it with: commandmate instances');
+            }
           },
           promptWaitingFallback: promptWaitingFallback(worktreeId, commandTarget),
           target: commandTarget,

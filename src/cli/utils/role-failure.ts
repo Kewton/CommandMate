@@ -27,6 +27,15 @@ export class RoleCliError extends ApiError {
   }
 }
 
+/** Said on every refusal after a save, so nobody takes the old setting to be still there. */
+export const ROLE_STAYED_SAVED =
+  'The role setting stayed saved, so after a restart the message can be sent again without --role.';
+
+/** Whether a send's refusal says its role was saved before it. */
+export function roleSettingSavedBy(error: unknown): boolean {
+  return error instanceof ApiError && error.payload?.roleSettings?.saved === true;
+}
+
 const ROLE_ROUTE_EXITS: Record<string, number> = {
   invalid_request: ExitCode.CONFIG_ERROR,
   not_found: ExitCode.CONFIG_ERROR,
@@ -66,9 +75,7 @@ export function roleFailureFromApi(error: unknown): RoleCliError | null {
   if (payload.roleRefusal !== undefined) details.roleRefusal = payload.roleRefusal;
   if (payload.roleSettings !== undefined) details.roleSettings = payload.roleSettings;
   if (payload.sendOutcome !== undefined) details.sendOutcome = payload.sendOutcome;
-  const saved = payload.roleSettings?.saved === true
-    ? ' The role setting stayed saved, so after a restart the message can be sent again without --role.'
-    : '';
+  const saved = payload.roleSettings?.saved === true ? ` ${ROLE_STAYED_SAVED}` : '';
   return new RoleCliError(code, `${sentence}${saved}`, exitCode, details, error.statusCode, payload);
 }
 

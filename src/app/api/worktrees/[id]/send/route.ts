@@ -73,6 +73,7 @@ import {
   takeOpencodeResumeNotice,
 } from './send-role';
 import { getLaunchRoleEvidence } from '@/lib/session/role-launch';
+import type { StoredRoleState } from '@/types/agent-roles';
 
 const logger = createLogger('api/send');
 
@@ -86,7 +87,13 @@ export async function POST(
   context: { params: Promise<{ id: string }> }
 ) {
   const relay: RouteRelayState = { binding: null, attempt: null, sent: null };
-  const response = await handleSend(request, context, relay);
+  const role: RouteRoleState = { settings: null };
+  const handled = await handleSend(request, context, relay, role);
+  // Issue #4116: whatever refuses a send after its role was saved, the answer says it
+  // stayed saved. Nothing saved, nothing added: a send with no role answers as it did.
+  const response = role.settings && handled.status >= 400
+    ? await withBody(handled, { roleSettings: role.settings })
+    : handled;
   const { binding } = relay;
   if (!binding) {
     // Issue #4011: whether it may be sent again does not depend on a relay.
@@ -105,6 +112,11 @@ export async function POST(
   );
   if (sendOutcome === 'sent') evaluateRelayAfterSend(binding.relayId);
   return withBody(response, { relayId: binding.relayId, sendOutcome });
+}
+
+/** What this request saved for the instance, for its answer. */
+interface RouteRoleState {
+  settings: { saved: true; stored: StoredRoleState } | null;
 }
 
 /**
@@ -130,7 +142,8 @@ async function withBody(response: Response, extra: Record<string, unknown>): Pro
 async function handleSend(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
-  relay: RouteRelayState
+  relay: RouteRelayState,
+  role: RouteRoleState
 ) {
   // Issue #4065: the input generation counter at the request's outermost
   // entry, before the body is read and before every wait below. A refusal of
@@ -219,6 +232,19 @@ async function handleSend(
 
     // Issue #4115: a role this send names is validated and saved here, before the
     // start and outside it, so the launch below resolves what was just saved.
+    // Issue #4116: what can refuse this send later is asked first if it can be, so a
+    // refusal leaves no setting behind. Only for a send naming a role: for any other
+    // the order of its answers stays. The checks below stay too: a process can come up
+    // between here and there, and then the answer says the setting stayed saved.
+    if (body.role !== undefined) {
+      const earlyImage = resolveSendImagePath(body.imagePath, worktree.path);
+      if (!earlyImage.ok) return earlyImage.response;
+      const earlyModel = body.model
+        ? refuseModelOnRunningSession(body.model, cliToolId, await cliTool.isRunning(id, instanceId))
+        : null;
+      if (earlyModel) return earlyModel;
+    }
+
     // Issue #4116: what the waits above may have moved is read again first.
     const roleTarget = { worktreeId: id, cliToolId, instanceId };
     const roleWorktree = rereadWorktreeForRole(
@@ -231,7 +257,15 @@ async function handleSend(
     const preparedRole = await prepareSendRole(
       db,
       body,
-      { worktree: roleWorktree.value, cliToolId, rosterInstanceId: target.instanceId, instanceId },
+      {
+        worktree: roleWorktree.value,
+        cliToolId,
+        rosterInstanceId: target.instanceId,
+        instanceId,
+        onSaved: (settings) => {
+          role.settings = settings;
+        },
+      },
       recordNotSent,
     );
     if (!preparedRole.ok) return preparedRole.response;

@@ -507,6 +507,19 @@ async function fetchInstanceRoles(client: ApiClient, worktreeId: string): Promis
 }
 
 /**
+ * `--require-roles`: for a caller that must not read "the roles could not be read" as
+ * "this server has none". Every failure is the command's; the route being missing is
+ * `role_api_unavailable`, through {@link reportRoleFailure}.
+ */
+async function readInstanceRolesStrict(client: ApiClient, worktreeId: string): Promise<Map<string, InstanceRoleView>> {
+  const { instances } = await client.get<InstanceRoleSettingsResponse>(`/api/worktrees/${worktreeId}/instances/roles`);
+  if (!Array.isArray(instances)) {
+    throw new RoleCliError('role_read_failed', 'The server answered the role settings with no instances.', ExitCode.UNEXPECTED_ERROR);
+  }
+  return new Map(instances.map(({ instanceId, stored, application }) => [instanceId, { stored, ...application }]));
+}
+
+/**
  * List action: roster + live running/auto-yes status per instance.
  * Probes GET .../current-output?cliTool=&instance= per instance (same
  * endpoint capture.ts uses) since the roster itself carries no session state.
@@ -585,9 +598,14 @@ async function listInstances(
     });
 
   // Issue #4116: after the others, and additive.
-  const roles = instances.length > 0 ? await fetchInstanceRoles(client, worktreeId) : null;
+  const roles = options.requireRoles
+    ? await readInstanceRolesStrict(client, worktreeId)
+    : instances.length > 0 ? await fetchInstanceRoles(client, worktreeId) : null;
   const rows: InstanceRow[] = armedRows.map((row) => {
     const role = roles?.get(row.instanceId);
+    if (options.requireRoles && !role) {
+      throw new RoleCliError('role_read_failed', `The server said nothing about the role of ${row.instanceId}.`, ExitCode.UNEXPECTED_ERROR);
+    }
     return role ? { ...row, role } : row;
   });
 
@@ -934,6 +952,7 @@ export function createInstancesCommand(): Command {
     .option('--no-role', 'add: explicitly no role')
     .option('--none', 'set-role: explicitly no role')
     .option('--inherit', 'set-role: drop the setting, and follow the defaults')
+    .option('--require-roles', 'list --json: fail instead of leaving role out when it cannot be read; failures are JSON')
     .option('--token <token>', TOKEN_WARNING)
     .addHelpText('after', `
 set-role saves what this instance's NEXT start uses, running or not. A role is fixed
@@ -954,6 +973,8 @@ if the roster changed meanwhile. Without them the instance follows the defaults.
 --json, set-role and add --role: { success, instanceId, cliToolId, adapterEnabled, stored,
   effectiveNext, launched, requested, restartPending, applyPending, rosterRevision }
 --json failure of those two: { success: false, error, message } on stdout, whatever failed.
+--require-roles makes list --json fail rather than leave role out, so a script can tell
+"could not be read" from a server older than roles (error: role_api_unavailable).
 
 Exit codes for the role forms: 0 done; 2 usage, unknown or ambiguous role, instance not
 on the roster, or a tool roles do not apply to; 31 instance_exists or roster_changed.
@@ -962,10 +983,13 @@ on the roster, or a tool roles do not apply to; 31 instance_exists or roster_cha
       // One client for the whole invocation (Issue #2404): every action built
       // its own identical one, and the failure path below has to report the URL
       // the request actually went to — a second construction is a second answer.
-      const client = new ApiClient({ token: options.token });
+      let client: ApiClient | undefined;
       // Issue #4116: the forms whose `--json` promises an answer for every failure.
-      const roleForm = action === 'set-role' || (action === 'add' && options.role !== undefined);
+      const roleForm = action === 'set-role' || (action === 'add' && options.role !== undefined) || options.requireRoles === true;
       try {
+        // Inside the try, as `roles` has it: the constructor can refuse (CM_UAT_ISOLATION
+        // with no CM_PORT), and that is a failure like any other.
+        client = new ApiClient({ token: options.token });
         if (!isValidWorktreeId(worktreeId)) {
           if (roleForm) throw usageError('Invalid worktree ID format.');
           console.error('Error: Invalid worktree ID format.');
@@ -1033,7 +1057,7 @@ on the roster, or a tool roles do not apply to; 31 instance_exists or roster_cha
         // server does not list, the id was never the problem — say so before
         // handleCommandError() exits, so nobody re-checks a correct id and then
         // delegates to whatever this server does have.
-        await warnIfDifferentServer(client, error);
+        if (client) await warnIfDifferentServer(client, error);
         // Issue #4116: a role refusal has its own sentence, code and `--json` answer,
         // and so has any failure of a role form.
         if (roleForm || error instanceof RoleCliError || roleFailureFromApi(error) !== null) {

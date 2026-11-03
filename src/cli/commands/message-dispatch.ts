@@ -11,7 +11,7 @@ import { ExitCode } from '../types';
 import type { ChatMessage, RelayGetResponse } from '../types/api-responses';
 import { ApiClient, ApiError } from '../utils/api-client';
 import { paneCaptureCommand } from '../utils/follow-up-command';
-import { roleFailureFromApi } from '../utils/role-failure';
+import { ROLE_STAYED_SAVED, roleFailureFromApi, roleSettingSavedBy } from '../utils/role-failure';
 import type { CommandTarget } from './command-target';
 import {
   cancelRelayQuietly,
@@ -190,6 +190,11 @@ export async function postMessage(
       printRelayUnconfirmedNotice(relayId, worktreeId, options.target);
     }
     const promptWaiting = error instanceof ApiError && error.apiCode === PROMPT_WAITING_CODE;
+    // Issue #4116: a refusal with no role code of its own (a 400, a 503, a 500), after
+    // the role was saved. One with a role code says so in its own sentence.
+    if (roleSettingSavedBy(error) && roleFailureFromApi(error) === null) {
+      console.error(`Note: ${ROLE_STAYED_SAVED}`);
+    }
     // Issue #3992: whether it may be sent again, as the server said — not on
     // PROMPT_WAITING, whose own line says to answer the prompt first, and not
     // when the relay notice above already said it.

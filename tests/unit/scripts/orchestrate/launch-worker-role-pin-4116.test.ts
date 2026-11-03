@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  EXIT_AUTO_YES_UNCONFIRMED,
   EXIT_ROLE_CHANGED,
   EXIT_ROLE_CONFLICT,
   EXIT_ROLE_NOT_SENT,
@@ -38,11 +39,16 @@ interface FakeOptions {
   stuck?: boolean;
   /** What `instances --json` says about roles, for a server that has them. */
   role?: Record<string, unknown>;
+  /** How `instances --json --require-roles` fails. */
+  rolesRead?: 'failed' | 'old-server' | 'old-cli';
+  /** What the grant reads as after the contract's send. */
+  autoYesAfter?: boolean;
 }
 
-function fakeCli({ capture, contractExit = 0, stuck = false, role }: FakeOptions) {
+function fakeCli({ capture, contractExit = 0, stuck = false, role, rolesRead, autoYesAfter = false }: FakeOptions) {
   const calls: string[][] = [];
   let running = false;
+  let contractSent = false;
   const run = (command: string, args: string[]) => {
     calls.push([command, ...args]);
     const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
@@ -53,11 +59,19 @@ function fakeCli({ capture, contractExit = 0, stuck = false, role }: FakeOptions
         running = stuck;
         return ok();
       }
-      return ok(JSON.stringify([{ instanceId: 'claude', running, autoYes: false, ...(role ? { role } : {}) }]));
+      if (args.includes('--require-roles')) {
+        if (rolesRead === 'failed') return { status: 99, stdout: JSON.stringify({ success: false, error: 'internal_error' }), stderr: 'Error: x' };
+        if (rolesRead === 'old-server') return { status: 99, stdout: JSON.stringify({ success: false, error: 'role_api_unavailable' }), stderr: 'Error: x' };
+        if (rolesRead === 'old-cli') return { status: 1, stdout: '', stderr: "error: unknown option '--require-roles'" };
+      }
+      return ok(JSON.stringify([{ instanceId: 'claude', running, autoYes: contractSent && autoYesAfter, ...(role ? { role } : {}) }]));
     }
     if (args[0] === 'send') {
       running = true;
-      if (args.includes('--contract')) return { status: contractExit, stdout: 'task-1\n', stderr: '' };
+      if (args.includes('--contract')) {
+        contractSent = true;
+        return { status: contractExit, stdout: 'task-1\n', stderr: '' };
+      }
       return ok('sent\n');
     }
     return ok();
@@ -125,14 +139,14 @@ describe('the server refuses the pin', () => {
     expect(EXIT_ROLE_NOT_SENT).toBe(RoleExitCode.NOT_SENT);
   });
 
-  it('stopped, disarmed and 44, with the task id still reported', () => {
+  it('stopped and 44, with the task id still reported, and no grant of anyone\'s cut here', () => {
     const fake = fakeCli({ capture: { roleLaunch: PIN }, contractExit: EXIT_ROLE_NOT_SENT });
     const result = go(fake);
     expect(result.code).toBe(EXIT_ROLE_CHANGED);
     expect(result.out).toEqual(['task-1']);
     expect(result.log.join('\n')).toMatch(/role changed: .*contract not sent/);
     const afterContract = fake.calls.slice(fake.calls.indexOf(contractCall(fake) as string[]));
-    expect(afterContract.some((call) => call[1] === 'auto-yes' && call.includes('--disable'))).toBe(true);
+    expect(afterContract.some((call) => call[1] === 'auto-yes')).toBe(false);
     expect(afterContract.some((call) => call[1] === 'instances' && call[3] === 'kill')).toBe(true);
   });
 
@@ -199,16 +213,52 @@ describe('no role read: nothing to pin, or nothing known', () => {
 });
 
 describe('a roster that moved under the contract', () => {
-  it('exit 31: Auto-Yes read back off, not stopped, and the code passed on', () => {
+  it('exit 31: not stopped, no grant cut, and the code passed on', () => {
     const fake = fakeCli({ capture: { roleLaunch: PIN }, contractExit: EXIT_ROLE_CONFLICT });
     const result = go(fake);
     expect(result.code).toBe(EXIT_ROLE_CONFLICT);
     const afterContract = fake.calls.slice(fake.calls.indexOf(contractCall(fake) as string[]));
-    expect(afterContract.some((call) => call[1] === 'auto-yes' && call.includes('--disable'))).toBe(true);
+    expect(afterContract.some((call) => call[1] === 'auto-yes')).toBe(false);
     expect(afterContract.some((call) => call[1] === 'instances' && call[3] === 'kill')).toBe(false);
+    expect(result.log.join('\n')).not.toContain('still on');
+  });
+
+  it('a grant still on is reported, and left', () => {
+    const fake = fakeCli({ capture: { roleLaunch: PIN }, contractExit: EXIT_ROLE_CONFLICT, autoYesAfter: true });
+    const result = go(fake);
+    expect(result.log.join('\n')).toContain('still on');
+    expect(fake.calls.filter((call) => call[1] === 'auto-yes' && call.indexOf('--disable') > 0)).toHaveLength(1); // before the start only
   });
 
   it('uses the exit code the CLI defines', () => {
     expect(EXIT_ROLE_CONFLICT).toBe(RoleExitCode.CONFLICT);
+  });
+});
+
+describe('the role read failing is not a server with no roles', () => {
+  it('that read failed: nothing is sent, even with a pin', () => {
+    const fake = fakeCli({ capture: { roleLaunch: PIN }, rolesRead: 'failed' });
+    const result = go(fake);
+    expect(result.code).toBe(EXIT_AUTO_YES_UNCONFIRMED);
+    expect(fake.calls.some((call) => call[1] === 'send')).toBe(false);
+    expect(result.log.join('\n')).toContain('roles unreadable');
+  });
+
+  it('a server without the route goes as before, on the plain list (negative control)', () => {
+    const fake = fakeCli({ capture: {}, rolesRead: 'old-server' });
+    expect(go(fake).code).toBe(0);
+    expect(contractCall(fake)?.some((arg) => arg.startsWith('--expect'))).toBe(false);
+  });
+
+  it('a CLI without the flag goes as before (negative control)', () => {
+    const fake = fakeCli({ capture: {}, rolesRead: 'old-cli' });
+    expect(go(fake).code).toBe(0);
+    expect(contractCall(fake)).toBeDefined();
+  });
+
+  it('the read asks for it', () => {
+    const fake = fakeCli({ capture: { roleLaunch: PIN } });
+    go(fake);
+    expect(fake.calls.some((call) => call.includes('--require-roles'))).toBe(true);
   });
 });
