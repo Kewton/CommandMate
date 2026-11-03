@@ -10,11 +10,13 @@
  * @module lib/agent-roles/toml-basic
  */
 
+import { hasLoneSurrogate } from './unicode';
+
 const BARE_KEY = /^[A-Za-z0-9_-]+$/;
 
 /** A TOML basic string. `JSON.stringify` is not one: it leaves U+007F raw. */
 export function toTomlBasicString(value: string): string {
-  if (!value.isWellFormed()) throw new Error('A lone surrogate has no TOML spelling');
+  if (hasLoneSurrogate(value)) throw new Error('A lone surrogate has no TOML spelling');
   let out = '"';
   for (const char of value) {
     const code = char.codePointAt(0) as number;

@@ -3,6 +3,7 @@
  *
  * @module lib/agent-roles/validation
  */
+import { hasLoneSurrogate } from './unicode';
 import { MAX_ROLE_BODY_BYTES, MAX_ROLE_NAME_LENGTH, type RoleAssignmentInput } from '@/types/agent-roles';
 
 /**
@@ -19,7 +20,7 @@ export function roleBodyProblem(body: unknown): string | null {
     return `body exceeds ${MAX_ROLE_BODY_BYTES} bytes`;
   }
   if (body.includes('\0')) return 'body must not contain NUL';
-  if (!body.isWellFormed()) return 'body must be valid Unicode';
+  if (hasLoneSurrogate(body)) return 'body must be valid Unicode';
   return null;
 }
 
@@ -33,7 +34,7 @@ export function normalizeRoleName(name: unknown): { ok: true; name: string } | {
   }
   // eslint-disable-next-line no-control-regex -- control characters are exactly what this refuses
   if (/[\u0000-\u001f\u007f]/.test(trimmed)) return { ok: false, problem: 'name must not contain control characters' };
-  if (!trimmed.isWellFormed()) return { ok: false, problem: 'name must be valid Unicode' };
+  if (hasLoneSurrogate(trimmed)) return { ok: false, problem: 'name must be valid Unicode' };
   return { ok: true, name: trimmed };
 }
 
