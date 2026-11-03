@@ -20,7 +20,10 @@
  *
  * A save whose result could not be read back is not a failure, and not something to
  * press again: another press would add a second instance. The form stays with that
- * said and the submit off, and the instance is placed by nothing until a reload.
+ * said and the submit off, and the instance is placed by nothing until a reload. The
+ * same goes for a request whose answer was lost and whose result could not be read
+ * (`useAgentInstancesRoster`), worded as not known. While that read is out the form is
+ * still saving. Opening the form again lifts this only if its own read succeeds.
  *
  * Only an instance on the confirmed roster is handed to `onAdded`. One removed elsewhere
  * before that roster was read has nothing to place, and a placement request left waiting
@@ -100,6 +103,8 @@ export function defaultAlias(cliTool: CLIToolType, id: string): string {
   return suffix ? `${name} ${suffix}` : name;
 }
 
+const INSTALLED_READ_TIMEOUT_MS = 15000;
+
 /**
  * Read which agent CLIs are installed.
  *
@@ -116,8 +121,11 @@ export function defaultAlias(cliTool: CLIToolType, id: string): string {
  * agents are installed. A non-empty list is trusted as is.
  */
 export async function fetchInstalledAgentTools(): Promise<CLIToolType[] | null> {
+  // The submit button waits for this, so a stalled answer must end as "could not check".
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), INSTALLED_READ_TIMEOUT_MS);
   try {
-    const response = await fetch(`${DEFAULT_AGENTS_ENDPOINT}?include=installed`);
+    const response = await fetch(`${DEFAULT_AGENTS_ENDPOINT}?include=installed`, { signal: controller.signal });
     if (!response.ok) return null;
     const body: unknown = await response.json();
     if (!body || typeof body !== 'object') return null;
@@ -131,6 +139,8 @@ export async function fetchInstalledAgentTools(): Promise<CLIToolType[] | null> 
     return list.length > 0 ? list : null;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -182,7 +192,8 @@ export const AgentAddMenu = memo(function AgentAddMenu({
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [savedUnverified, setSavedUnverified] = useState(false);
+  // Saved or not known to be saved; either way, not to be sent again.
+  const [unverified, setUnverified] = useState<'saved' | 'unknown' | null>(null);
   const [removedElsewhere, setRemovedElsewhere] = useState(false);
   // Null: not read yet, or could not be read.
   const [roleSettings, setRoleSettings] = useState<InstanceRoleSettingsResponse | null>(null);
@@ -220,6 +231,8 @@ export const AgentAddMenu = memo(function AgentAddMenu({
     ]).then(([list, settings, roleList]) => {
       if (cancelled) return;
       setRoleSettings(settings);
+      // What is there has been read, so what to do next can be judged from it.
+      if (settings) setUnverified(null);
       if (roleList.ok) setRoles(roleList.data.roles);
       setInstalled(list);
     });
@@ -245,7 +258,6 @@ export const AgentAddMenu = memo(function AgentAddMenu({
   const handleOpen = useCallback(() => {
     setName('');
     setError(null);
-    setSavedUnverified(false);
     setRemovedElsewhere(false);
     setPlacement(resolveDefaultAgentPlacement(splitCount));
     setRoleChoice(ROLE_CHOICE_INHERIT);
@@ -298,7 +310,7 @@ export const AgentAddMenu = memo(function AgentAddMenu({
           });
         }
         if (result.status === 'saved_unverified') {
-          setSavedUnverified(true);
+          setUnverified(result.unconfirmed ? 'unknown' : 'saved');
           return;
         }
         if (result.status !== 'saved' || added === null) {
@@ -351,7 +363,7 @@ export const AgentAddMenu = memo(function AgentAddMenu({
     ? t('agentAdd.maxReached', { max: MAX_AGENT_INSTANCES })
     : t('agentAdd.button');
   const canSubmit =
-    !saving && !savedUnverified && !atMax && installed !== undefined && toolId !== '' && isToolSelectable(toolId);
+    !saving && unverified === null && !atMax && installed !== undefined && toolId !== '' && isToolSelectable(toolId);
 
   return (
     <>
@@ -505,9 +517,9 @@ export const AgentAddMenu = memo(function AgentAddMenu({
               {t('agentAdd.removedElsewhere')}
             </p>
           )}
-          {savedUnverified && (
+          {unverified !== null && (
             <p role="status" data-testid="agent-add-saved-unverified" className="text-xs text-warning">
-              {t('agentAdd.savedUnverified')}
+              {t(unverified === 'unknown' ? 'agentAdd.outcomeUnknown' : 'agentAdd.savedUnverified')}
             </p>
           )}
 

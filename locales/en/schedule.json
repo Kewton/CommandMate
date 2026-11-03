@@ -70,6 +70,7 @@
   "agentInstanceMin": "At least {min} instance is required.",
   "agentInstanceSaveError": "Failed to save agent instances.",
   "agentInstanceSavedUnverified": "Saved, but the latest roster could not be read back. Reload the page.",
+  "agentInstanceOutcomeUnknown": "Whether this was saved could not be confirmed. Do not add again; reload the page and check the roster.",
   "agentInstanceRosterChanged": "The roster kept changing elsewhere, so this was not saved. Try again.",
   "agentInstanceRosterUnreadable": "The current roster could not be read, so this was not saved, to avoid erasing other changes. Check the connection and try again.",
   "agentDefaults": "Use this layout as the default",

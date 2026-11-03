@@ -411,3 +411,42 @@ export class FakeRoleServer {
     return json(200, {});
   });
 }
+
+/** How an answer gets lost. The last two end only when the client's deadline aborts them, as a real fetch does. */
+export const LOST_ANSWERS = ['500', 'network', 'no-answer', 'stalled-body'] as const;
+export type LostAnswer = (typeof LOST_ANSWERS)[number];
+
+/** Pending until the request's signal fires. */
+function untilAborted<T>(init: RequestInit | undefined): Promise<T> {
+  return new Promise<T>((_, reject) => {
+    init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+  });
+}
+
+/**
+ * Lose the answer to the next request of this method and path. `committed` says whether
+ * the server did the write before it was lost, which is what the client cannot see.
+ */
+export function loseNextAnswer(
+  server: FakeRoleServer,
+  method: string,
+  pathEnd: string,
+  how: LostAnswer,
+  { committed }: { committed: boolean },
+): void {
+  const passOn = global.fetch;
+  let armed = true;
+  global.fetch = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
+    if (!armed || init?.method !== method || !url.split('?')[0].endsWith(pathEnd)) {
+      return (passOn as unknown as typeof server.fetch)(url, init);
+    }
+    armed = false;
+    // Sent either way: `writes` counts what left the client.
+    if (committed) await server.fetch(url, init);
+    else server.calls.push({ url, method, body: JSON.parse(String(init.body)) as Record<string, unknown> });
+    if (how === '500') return json(500, { success: false, error: 'internal_error', message: 'x' });
+    if (how === 'network') throw new TypeError('Failed to fetch');
+    if (how === 'no-answer') return untilAborted<Response>(init);
+    return { ok: true, status: 200, json: () => untilAborted<unknown>(init) } as unknown as Response;
+  }) as unknown as typeof fetch;
+}

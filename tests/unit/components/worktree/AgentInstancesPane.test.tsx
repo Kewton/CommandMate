@@ -353,7 +353,7 @@ describe('AgentInstancesPane (Issue #869)', () => {
 
   describe('persistence failure', () => {
     it('shows an error message when the PATCH responds !ok', async () => {
-      mockFetch.mockResolvedValue({ ok: false, json: () => Promise.resolve({}) });
+      mockFetch.mockResolvedValue({ ok: false, status: 400, json: () => Promise.resolve({}) });
       const onInstancesChange = vi.fn();
       render(
         <ConfirmProvider>

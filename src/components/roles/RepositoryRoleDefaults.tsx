@@ -8,7 +8,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
-import { roleApi } from '@/lib/api-client-agent-roles';
+import { isOutcomeUnknown, roleApi } from '@/lib/api-client-agent-roles';
 import { refreshAllShownInstanceRoleSettings, useRoleCatalogChanged } from '@/hooks/useInstanceRoleSettings';
 import type { AgentRoleSummary, RepositoryRoleDefaultEntry } from '@/types/agent-roles';
 import { RoleChoiceSelect } from './RoleChoiceSelect';
@@ -20,7 +20,7 @@ export function RepositoryRoleDefaults({ repositoryId }: { repositoryId: string 
   const [roles, setRoles] = useState<AgentRoleSummary[]>([]);
   const [loadFailed, setLoadFailed] = useState(false);
   const [savingTool, setSavingTool] = useState<string | null>(null);
-  const [saveError, setSaveError] = useState(false);
+  const [saveError, setSaveError] = useState<'failed' | 'unknown' | null>(null);
   const [savedStale, setSavedStale] = useState(false);
 
   // Moves on every read and write: an answer that finds it moved may be older than what
@@ -56,7 +56,7 @@ export function RepositoryRoleDefaults({ repositoryId }: { repositoryId: string 
   const handleChange = useCallback(
     async (cliToolId: string, choice: string) => {
       setSavingTool(cliToolId);
-      setSaveError(false);
+      setSaveError(null);
       requestRef.current += 1;
       const request = requestRef.current;
       const result = await roleApi.setRepositoryDefault(repositoryId, cliToolId, roleInputOf(choice));
@@ -66,8 +66,13 @@ export function RepositoryRoleDefaults({ repositoryId }: { repositoryId: string 
           setSavedStale(false);
         } else if (!(await load())) setSavedStale(true);
         refreshAllShownInstanceRoleSettings();
+      } else if (isOutcomeUnknown(result)) {
+        // It may have gone through: what is shown comes from reading, and others follow.
+        setSaveError('unknown');
+        if (!(await load())) setSavedStale(true);
+        refreshAllShownInstanceRoleSettings();
       } else {
-        setSaveError(true);
+        setSaveError('failed');
       }
       setSavingTool(null);
     },
@@ -129,7 +134,7 @@ export function RepositoryRoleDefaults({ repositoryId }: { repositoryId: string 
       </ul>
       {saveError && (
         <p role="alert" data-testid={`repository-roles-save-error-${repositoryId}`} className="text-xs text-danger-foreground">
-          {t('agentRoles.repository.saveError')}
+          {t(saveError === 'unknown' ? 'agentRoles.saveUnknown' : 'agentRoles.repository.saveError')}
         </p>
       )}
     </div>

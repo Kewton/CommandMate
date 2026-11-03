@@ -64,7 +64,7 @@ function InstanceRoleRow({
       const result = await writeInstanceRoleSettings(worktreeId, () =>
         roleApi.setInstanceRole(worktreeId, id, roleInputOf(choice)),
       );
-      if (!result.ok) setError(t('agentRoles.instances.saveError'));
+      if (!result.ok) setError(t(result.outcomeUnknown ? 'agentRoles.saveUnknown' : 'agentRoles.instances.saveError'));
       setSaving(false);
     },
     [worktreeId, id, t],

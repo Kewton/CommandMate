@@ -301,8 +301,12 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Issue #4117: saved, but the roster could not be read back. Not an error.
-  const [savedUnverified, setSavedUnverified] = useState(false);
+  // Issue #4117: saved or not known to be saved, with the roster not read back. Not an
+  // error, but adding again could make a second instance, so add stays off until the
+  // roster shown changes.
+  const [unverified, setUnverified] = useState<'saved' | 'unknown' | null>(null);
+  const rosterShown = instances.map((inst) => `${inst.id}\0${inst.alias}`).join('\0');
+  useEffect(() => setUnverified(null), [rosterShown]);
   // Per-id alias edit drafts (decoupled from prop to allow free typing).
   const [aliasDrafts, setAliasDrafts] = useState<Record<string, string>>({});
   // Base tool for the "add instance" control.
@@ -489,10 +493,9 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
     async (build: RosterBuilder) => {
       setSaving(true);
       setError(null);
-      setSavedUnverified(false);
       try {
         const result = await writeRoster(build);
-        if (result.status === 'saved_unverified') setSavedUnverified(true);
+        if (result.status === 'saved_unverified') setUnverified(result.unconfirmed ? 'unknown' : 'saved');
         if (result.status === 'failed') {
           setError(
             t(
@@ -867,7 +870,7 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
         <button
           type="button"
           data-testid="agent-instance-add"
-          disabled={saving || atMax}
+          disabled={saving || atMax || unverified !== null}
           onClick={handleAdd}
           className="flex items-center gap-1 text-sm font-medium px-3 py-2 rounded-md border border-accent-200 dark:border-accent-700 bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300 hover:bg-accent-100 dark:hover:bg-accent-900/50 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
         >
@@ -903,9 +906,9 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
         </p>
       )}
 
-      {savedUnverified && (
+      {unverified !== null && (
         <p role="status" data-testid="agent-instances-saved-unverified" className="mt-3 text-xs text-warning">
-          {t('agentInstanceSavedUnverified')}
+          {t(unverified === 'unknown' ? 'agentInstanceOutcomeUnknown' : 'agentInstanceSavedUnverified')}
         </p>
       )}
 

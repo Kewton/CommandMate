@@ -1736,6 +1736,7 @@
     "rosterChanged": "The roster kept changing elsewhere, so this was not added. Try again.",
     "rosterUnreadable": "The current roster could not be read, so this was not added, to avoid erasing other changes. Check the connection and try again.",
     "savedUnverified": "The session was added, but the latest roster could not be read back. Do not add it again; reload the page.",
+    "outcomeUnknown": "Whether the session was added could not be confirmed. Do not add it again; reload the page and check the roster.",
     "removedElsewhere": "The session was added, but it was removed elsewhere right after, so it was not opened. Add it again if you still need it."
   }
 }

@@ -17,7 +17,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl';
 import { Card } from '@/components/ui';
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
-import { roleApi, roleInUseReferences, type RoleApiFailure } from '@/lib/api-client-agent-roles';
+import { isOutcomeUnknown, roleApi, roleInUseReferences, type RoleApiFailure } from '@/lib/api-client-agent-roles';
 import { notifyRoleCatalogChanged } from '@/hooks/useInstanceRoleSettings';
 import {
   MAX_ROLE_BODY_BYTES,
@@ -162,7 +162,9 @@ function RoleReferencesList({ references }: { references: AgentRoleReferences })
 type DeleteState =
   | { step: 'asking' }
   | { step: 'in-use'; references: AgentRoleReferences }
-  | { step: 'failed' };
+  | { step: 'failed' }
+  /** The request got no usable answer, and it may have gone through. */
+  | { step: 'unknown' };
 
 export function AgentRolesSettings(): React.ReactElement {
   const t = useTranslations('common');
@@ -177,7 +179,7 @@ export function AgentRolesSettings(): React.ReactElement {
   const [editError, setEditError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<Record<string, DeleteState>>({});
   const [notice, setNotice] = useState<string | null>(null);
-  const [defaultError, setDefaultError] = useState(false);
+  const [defaultError, setDefaultError] = useState<'failed' | 'unknown' | null>(null);
 
   // An older read that arrives after a newer one must not put back the older list.
   const readRef = useRef(0);
@@ -222,11 +224,13 @@ export function AgentRolesSettings(): React.ReactElement {
         setCreateKey((key) => key + 1);
         await afterChange();
       } else {
-        setCreateError(failureText(result));
+        setCreateError(isOutcomeUnknown(result) ? t('agentRoles.saveUnknown') : failureText(result));
+        // Sent again it meets the name it may have taken, and adds no second role.
+        if (isOutcomeUnknown(result)) await afterChange();
       }
       setBusy(false);
     },
-    [afterChange, failureText],
+    [afterChange, failureText, t],
   );
 
   const handleStartEdit = useCallback(
@@ -286,7 +290,8 @@ export function AgentRolesSettings(): React.ReactElement {
         );
         await afterChange();
       } else {
-        setEditError(failureText(result));
+        setEditError(isOutcomeUnknown(result) ? t('agentRoles.saveUnknown') : failureText(result));
+        if (isOutcomeUnknown(result)) await afterChange();
       }
       setBusy(false);
     },
@@ -310,8 +315,10 @@ export function AgentRolesSettings(): React.ReactElement {
         const references = roleInUseReferences(result);
         setDeleting((prev) => ({
           ...prev,
-          [id]: references ? { step: 'in-use', references } : { step: 'failed' },
+          [id]: references ? { step: 'in-use', references } : { step: isOutcomeUnknown(result) ? 'unknown' : 'failed' },
         }));
+        // If it did go through, its row leaves with this read.
+        if (isOutcomeUnknown(result)) await afterChange();
       }
       setBusy(false);
     },
@@ -321,17 +328,20 @@ export function AgentRolesSettings(): React.ReactElement {
   const handleSetDefault = useCallback(
     async (cliToolId: string, roleId: string) => {
       setBusy(true);
-      setDefaultError(false);
+      setDefaultError(null);
       const result = await roleApi.setSystemDefault(cliToolId, roleId === '' ? null : roleId);
       if (result.ok) {
         setDefaults(result.data.defaults);
         notifyRoleCatalogChanged();
+      } else if (isOutcomeUnknown(result)) {
+        setDefaultError('unknown');
+        await afterChange();
       } else {
-        setDefaultError(true);
+        setDefaultError('failed');
       }
       setBusy(false);
     },
-    [],
+    [afterChange],
   );
 
   return (
@@ -412,6 +422,11 @@ export function AgentRolesSettings(): React.ReactElement {
                         <p className="text-xs text-warning">{t('agentRoles.manage.inUse')}</p>
                         <RoleReferencesList references={deleteState.references} />
                       </>
+                    )}
+                    {deleteState.step === 'unknown' && (
+                      <p role="alert" className="text-xs text-warning">
+                        {t('agentRoles.saveUnknown')}
+                      </p>
                     )}
                     {deleteState.step === 'failed' && (
                       <p role="alert" className="text-xs text-danger-foreground">
@@ -521,7 +536,7 @@ export function AgentRolesSettings(): React.ReactElement {
             </ul>
             {defaultError && (
               <p role="alert" data-testid="agent-roles-default-error" className="text-xs text-danger-foreground">
-                {t('agentRoles.manage.saveError')}
+                {t(defaultError === 'unknown' ? 'agentRoles.saveUnknown' : 'agentRoles.manage.saveError')}
               </p>
             )}
           </div>

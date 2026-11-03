@@ -23,7 +23,7 @@ import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 import { enqueueRosterWrite } from '@/hooks/useAgentInstancesRoster';
 import type { AgentInstance } from '@/lib/cli-tools/types';
 import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
-import { FakeRoleServer, MARKETER, REVIEWER, launched } from './fake-role-server';
+import { FakeRoleServer, LOST_ANSWERS, MARKETER, REVIEWER, launched, loseNextAnswer } from './fake-role-server';
 
 vi.mock('next-intl', async () => {
   const { createRealIntlMock } = await import('@tests/helpers/real-intl');
@@ -697,6 +697,340 @@ describe('[#4117] an answer the store refused goes to nobody', () => {
     fireEvent.click(restart);
     fireEvent.click(await screen.findByTestId('confirm-dialog-confirm'));
     await waitFor(() => expect(screen.getByTestId('instance-roles-stale')).toBeInTheDocument());
+  });
+});
+
+describe('[#4117] a write whose answer was lost', () => {
+  const COPILOT: AgentInstance = { id: 'copilot', cliTool: 'copilot', alias: 'Copilot', order: 2 };
+  const ROLES_PATH = '/instances/roles';
+  const expire = () => act(async () => void (await vi.advanceTimersByTimeAsync(15000)));
+  const settingsReads = () => server.calls.filter((c) => c.method === 'GET' && c.url.endsWith(ROLES_PATH)).length;
+  const ids = () => server.roster.map((i) => i.id);
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
+  });
+  afterEach(() => vi.useRealTimers());
+
+  async function renderedDesktop(onAdded?: (i: AgentInstance) => void): Promise<void> {
+    render(<Desktop onAdded={onAdded} />);
+    await waitFor(() => expect(settingsReads()).toBeGreaterThan(0));
+    await act(async () => {});
+  }
+
+  const pressAdd = () => fireEvent.click(screen.getByTestId('agent-add-submit'));
+  const pressPaneAdd = () => fireEvent.click(screen.getByTestId('agent-instance-add'));
+
+  describe('a create', () => {
+    it.each(LOST_ANSWERS)('%s, and it happened: the same as saved, and nothing is added twice', async (how) => {
+      const onAdded = vi.fn();
+      await renderedDesktop(onAdded);
+      await openAdd();
+      fireEvent.change(select('agent-add-role'), { target: { value: MARKETER.id } });
+      loseNextAnswer(server, 'POST', ROLES_PATH, how, { committed: true });
+      pressAdd();
+      await waitFor(() => expect(server.writes('POST', ROLES_PATH)).toHaveLength(1));
+      await expire();
+
+      await waitFor(() => expect(onAdded).toHaveBeenCalledTimes(1));
+      expect(onAdded.mock.calls[0][0].id).toBe('claude-2');
+      expect(screen.getByTestId('roster').textContent).toContain('claude-2:');
+      await waitFor(() => expect(screen.queryByTestId('agent-add-form')).toBeNull());
+      expect(ids()).toEqual(['claude', 'codex', 'claude-2']);
+    });
+
+    it.each(LOST_ANSWERS)('%s, and it did not: a failure, and adding again makes one', async (how) => {
+      const onAdded = vi.fn();
+      await renderedDesktop(onAdded);
+      await openAdd();
+      loseNextAnswer(server, 'POST', ROLES_PATH, how, { committed: false });
+      pressAdd();
+      await waitFor(() => expect(server.writes('POST', ROLES_PATH)).toHaveLength(1));
+      await expire();
+
+      await screen.findByTestId('agent-add-error');
+      expect(onAdded).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('agent-add-saved-unverified')).toBeNull();
+      await waitFor(() => expect(screen.getByTestId('agent-add-submit')).not.toBeDisabled());
+
+      pressAdd();
+      await waitFor(() => expect(onAdded).toHaveBeenCalledTimes(1));
+      expect(ids()).toEqual(['claude', 'codex', 'claude-2']);
+    });
+
+    it.each(LOST_ANSWERS)('%s, with nothing readable after it: stops, claims neither, and reopening needs a read', async (how) => {
+      const onAdded = vi.fn();
+      await renderedDesktop(onAdded);
+      await openAdd();
+      loseNextAnswer(server, 'POST', ROLES_PATH, how, { committed: true });
+      server.refuseSettingsRead = true;
+      pressAdd();
+      await waitFor(() => expect(server.writes('POST', ROLES_PATH)).toHaveLength(1));
+      await expire();
+
+      const note = await screen.findByTestId('agent-add-saved-unverified');
+      expect(note.textContent).toContain('確かめられません');
+      expect(note.textContent).not.toContain('保存しました');
+      expect(screen.queryByTestId('agent-add-error')).toBeNull();
+      expect(onAdded).not.toHaveBeenCalled();
+      expect(screen.getByTestId('agent-add-submit')).toBeDisabled();
+
+      // Closing and opening is not a way round it while nothing can be read.
+      fireEvent.click(screen.getByRole('button', { name: 'キャンセル' }));
+      fireEvent.click(screen.getByTestId('agent-add-button'));
+      await waitFor(() => expect(screen.getByTestId('agent-add-tool')).not.toBeDisabled());
+      expect(screen.getByTestId('agent-add-submit')).toBeDisabled();
+      expect(screen.getByTestId('agent-add-saved-unverified')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'キャンセル' }));
+      server.refuseSettingsRead = false;
+      await openAdd();
+      expect(screen.getByTestId('agent-add-submit')).not.toBeDisabled();
+      expect(screen.queryByTestId('agent-add-saved-unverified')).toBeNull();
+    });
+
+    it('stays off until the read has answered', async () => {
+      await renderedDesktop();
+      await openAdd();
+      let releaseRead: (() => void) | null = null;
+      loseNextAnswer(server, 'POST', ROLES_PATH, '500', { committed: false });
+      const lost = global.fetch;
+      global.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+        if (init?.method === undefined && url.endsWith(ROLES_PATH)) {
+          await new Promise<void>((resolve) => {
+            releaseRead = resolve;
+          });
+        }
+        return (lost as typeof fetch)(url, init);
+      }) as unknown as typeof fetch;
+      pressAdd();
+      await waitFor(() => expect(releaseRead).not.toBeNull());
+      expect(screen.getByTestId('agent-add-submit')).toBeDisabled();
+      expect(screen.queryByTestId('agent-add-error')).toBeNull();
+      await act(async () => releaseRead?.());
+      await screen.findByTestId('agent-add-error');
+      await waitFor(() => expect(screen.getByTestId('agent-add-submit')).not.toBeDisabled());
+    });
+
+    it('a row with that id but another role is not claimed as this one', async () => {
+      const onAdded = vi.fn();
+      await renderedDesktop(onAdded);
+      await openAdd();
+      fireEvent.change(select('agent-add-role'), { target: { value: MARKETER.id } });
+      loseNextAnswer(server, 'POST', ROLES_PATH, '500', { committed: false });
+      // Another client's add took the same id before this request reached the server.
+      server.changeRosterElsewhere([...server.roster, { id: 'claude-2', cliTool: 'claude', alias: 'Claude 2', order: 2 }]);
+      // The snapshot held is still the older one, so the id this create takes is claude-2.
+      pressAdd();
+      await waitFor(() => expect(screen.getByTestId('agent-add-saved-unverified').textContent).toContain('確かめられません'));
+      expect(onAdded).not.toHaveBeenCalled();
+      expect(screen.getByTestId('agent-add-submit')).toBeDisabled();
+    });
+
+    it('negative control: a refusal is not lost, and reads nothing to find out', async () => {
+      await renderedDesktop();
+      await openAdd();
+      const before = settingsReads();
+      server.refuseNextCreate = { status: 400, error: 'invalid_request' };
+      pressAdd();
+      await screen.findByTestId('agent-add-error');
+      expect(settingsReads()).toBe(before);
+    });
+  });
+
+  describe('a roster PATCH', () => {
+    it.each(LOST_ANSWERS)('%s from the pane, and it happened: the same as saved, and nothing is added twice', async (how) => {
+      await renderedDesktop();
+      loseNextAnswer(server, 'PATCH', worktreeId, how, { committed: true });
+      pressPaneAdd();
+      await waitFor(() => expect(server.writes('PATCH')).toHaveLength(1));
+      await expire();
+
+      await waitFor(() => expect(screen.getByTestId('roster').textContent).toContain('claude-2:'));
+      expect(screen.queryByTestId('agent-instances-error')).toBeNull();
+      expect(screen.queryByTestId('agent-instances-saved-unverified')).toBeNull();
+      expect(ids()).toEqual(['claude', 'codex', 'claude-2']);
+    });
+
+    it.each(LOST_ANSWERS)('%s from the pane, and it did not: a failure, and adding again makes one', async (how) => {
+      await renderedDesktop();
+      loseNextAnswer(server, 'PATCH', worktreeId, how, { committed: false });
+      pressPaneAdd();
+      await waitFor(() => expect(server.writes('PATCH')).toHaveLength(1));
+      await expire();
+
+      await screen.findByTestId('agent-instances-error');
+      expect(screen.queryByTestId('agent-instances-saved-unverified')).toBeNull();
+      await waitFor(() => expect(screen.getByTestId('agent-instance-add')).not.toBeDisabled());
+      pressPaneAdd();
+      await waitFor(() => expect(screen.getByTestId('roster').textContent).toContain('claude-2:'));
+      expect(ids()).toEqual(['claude', 'codex', 'claude-2']);
+    });
+
+    it('with nothing readable after it: add stays off, it claims neither, and a new roster lifts it', async () => {
+      await renderedDesktop();
+      loseNextAnswer(server, 'PATCH', worktreeId, '500', { committed: true });
+      server.refuseWorktreeRead = true;
+      server.refuseSettingsRead = true;
+      pressPaneAdd();
+
+      const note = await screen.findByTestId('agent-instances-saved-unverified');
+      expect(note.textContent).toContain('確かめられません');
+      expect(note.textContent).not.toContain('保存しました');
+      expect(screen.queryByTestId('agent-instances-error')).toBeNull();
+      await waitFor(() => expect(screen.getByTestId('agent-instance-add')).toBeDisabled());
+
+      // The next thing that does read decides it: a rename built on the real roster.
+      server.refuseWorktreeRead = false;
+      server.refuseSettingsRead = false;
+      const alias = screen.getByTestId('agent-instance-alias-codex');
+      fireEvent.change(alias, { target: { value: 'Lead' } });
+      fireEvent.blur(alias);
+      await waitFor(() => expect(screen.getByTestId('roster').textContent).toContain('claude-2:'));
+      expect(ids()).toEqual(['claude', 'codex', 'claude-2']);
+      expect(server.roster.find((i) => i.id === 'codex')?.alias).toBe('Lead');
+      await waitFor(() => expect(screen.queryByTestId('agent-instances-saved-unverified')).toBeNull());
+      expect(screen.getByTestId('agent-instance-add')).not.toBeDisabled();
+    });
+
+    it('a roster that moved both from what was sent and from where it started: not claimed either way', async () => {
+      await renderedDesktop();
+      loseNextAnswer(server, 'PATCH', worktreeId, '500', { committed: false });
+      server.changeRosterElsewhere([...server.roster, COPILOT]);
+      pressPaneAdd();
+      const note = await screen.findByTestId('agent-instances-saved-unverified');
+      expect(note.textContent).toContain('確かめられません');
+      expect(screen.queryByTestId('agent-instances-error')).toBeNull();
+      expect(screen.getByTestId('agent-instance-add')).toBeDisabled();
+    });
+
+    it('the PATCH the "+" falls back to: settled from the roster, with the role route failing', async () => {
+      const onAdded = vi.fn();
+      server.refuseSettingsRead = true;
+      await renderedDesktop(onAdded);
+      await openAdd();
+      loseNextAnswer(server, 'PATCH', worktreeId, '500', { committed: true });
+      pressAdd();
+      await waitFor(() => expect(onAdded).toHaveBeenCalledTimes(1));
+      expect(ids()).toEqual(['claude', 'codex', 'claude-2']);
+    });
+
+    it('negative control: a refused PATCH is a failure, and reads nothing to find out', async () => {
+      await renderedDesktop();
+      const passOn = global.fetch;
+      global.fetch = vi.fn(async (url: string, init?: RequestInit) =>
+        init?.method === 'PATCH'
+          ? ({ ok: false, status: 400, json: async () => ({ error: 'bad' }) } as Response)
+          : (passOn as typeof fetch)(url, init),
+      ) as unknown as typeof fetch;
+      const reads = () => (global.fetch as ReturnType<typeof vi.fn>).mock.calls.filter(([, init]) => !init?.method).length;
+      pressPaneAdd();
+      await screen.findByTestId('agent-instances-error');
+      expect(reads()).toBe(0);
+    });
+  });
+
+  describe('a stalled PATCH does not hold the queue', () => {
+    const rename = (id: string, value: string) => {
+      const alias = screen.getByTestId(`agent-instance-alias-${id}`);
+      fireEvent.change(alias, { target: { value } });
+      fireEvent.blur(alias);
+    };
+
+    it('already old when its headers arrive: the body is not waited for, not even until the deadline', async () => {
+      await renderedDesktop();
+      // Headers held; what comes after them never ends, abort or no abort.
+      let releaseHeaders: () => void = () => {};
+      const passOn = global.fetch;
+      let armed = true;
+      global.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+        const answer = await (passOn as typeof fetch)(url, init);
+        if (init?.method !== 'PATCH' || !armed) return answer;
+        armed = false;
+        await new Promise<void>((resolve) => {
+          releaseHeaders = resolve;
+        });
+        return { ok: true, status: 200, json: () => new Promise(() => {}) } as unknown as Response;
+      }) as unknown as typeof fetch;
+
+      rename('codex', 'Lead');
+      await waitFor(() => expect(server.writes('PATCH')).toHaveLength(1));
+      await act(async () => {});
+      rename('claude', 'Main');
+
+      const before = settingsReads();
+      server.changeRosterElsewhere([...server.roster, COPILOT]);
+      await act(async () => window.dispatchEvent(new Event('focus')));
+      await waitFor(() => expect(settingsReads()).toBeGreaterThan(before));
+      await act(async () => {});
+      await act(async () => releaseHeaders());
+
+      // No timer is advanced here: only not waiting gets the second save out.
+      await waitFor(() => expect(server.writes('PATCH')).toHaveLength(2));
+      await waitFor(() => expect(screen.getByTestId('roster').textContent).toBe('claude:Main,codex:Lead,copilot:Copilot'));
+    });
+
+    it.each(['stalled-body', 'no-answer'] as const)('%s, not old: the deadline ends it, and the next save goes out', async (how) => {
+      await renderedDesktop();
+      loseNextAnswer(server, 'PATCH', worktreeId, how, { committed: true });
+      rename('codex', 'Lead');
+      await waitFor(() => expect(server.writes('PATCH')).toHaveLength(1));
+      await act(async () => {});
+      rename('claude', 'Main');
+      await act(async () => {});
+      expect(server.writes('PATCH')).toHaveLength(1);
+
+      await expire();
+      await waitFor(() => expect(server.writes('PATCH')).toHaveLength(2));
+      await waitFor(() => expect(screen.getByTestId('roster').textContent).toBe('claude:Main,codex:Lead'));
+      expect(screen.queryByTestId('agent-instances-error')).toBeNull();
+    });
+
+    it('negative control: within the deadline, a slow body is still waited for and believed', async () => {
+      await renderedDesktop();
+      let releaseBody: () => void = () => {};
+      const passOn = global.fetch;
+      global.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+        const answer = await (passOn as typeof fetch)(url, init);
+        if (init?.method !== 'PATCH') return answer;
+        const body = answer.json.bind(answer);
+        return {
+          ok: answer.ok,
+          status: answer.status,
+          json: async () => {
+            await new Promise<void>((resolve) => {
+              releaseBody = resolve;
+            });
+            return body();
+          },
+        } as Response;
+      }) as unknown as typeof fetch;
+      rename('codex', 'Lead');
+      await waitFor(() => expect(server.writes('PATCH')).toHaveLength(1));
+      await act(async () => void (await vi.advanceTimersByTimeAsync(14000)));
+      const reads = server.calls.filter((c) => c.method === 'GET').length;
+      await act(async () => releaseBody());
+      await waitFor(() => expect(screen.getByTestId('roster').textContent).toBe('claude:Claude,codex:Lead'));
+      expect(server.calls.filter((c) => c.method === 'GET' && !c.url.endsWith(ROLES_PATH)).length).toBeLessThanOrEqual(reads);
+    });
+  });
+
+  it('a stalled installed list ends as "could not check", so the submit does not stay off', async () => {
+    await renderedDesktop();
+    const passOn = global.fetch;
+    global.fetch = vi.fn((url: string, init?: RequestInit) =>
+      url.includes('include=installed')
+        ? new Promise((_, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+          })
+        : (passOn as typeof fetch)(url, init),
+    ) as unknown as typeof fetch;
+    fireEvent.click(screen.getByTestId('agent-add-button'));
+    await act(async () => {});
+    expect(screen.getByTestId('agent-add-submit')).toBeDisabled();
+    await expire();
+    await screen.findByTestId('agent-add-installed-unknown');
+    expect(screen.getByTestId('agent-add-submit')).not.toBeDisabled();
   });
 });
 

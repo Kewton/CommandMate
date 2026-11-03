@@ -33,14 +33,30 @@
  * An answer that crossed a newer one is not handed on: `onSaved` replaces the parent's
  * roster, and an older list there would undo what was read since. The roster is read
  * again instead, and if that fails the write reports `saved_unverified`: it happened,
- * but no roster can be given for it.
+ * but no roster can be given for it. A body not yet read when that is known is not
+ * waited for: it has nothing to give, and it would hold up everything behind it.
+ *
+ * ## Answers that were lost
+ *
+ * A route commits before it answers, so a 5xx, no answer or a deadline passed on the
+ * body says nothing about whether the write happened. Reporting a failure would invite
+ * the same add again, which a rebuild gives the next free id: a second instance. So such
+ * a write ends in a read, still in its turn in the queue and with its caller's form
+ * still saving, and the read decides:
+ *  - what was sent is there: saved, the same as if the answer had come;
+ *  - nothing of it is there: failed, and sending it again is safe;
+ *  - it cannot be told, or nothing could be read: `saved_unverified` with `unconfirmed`.
+ *
+ * A create compares its row, since ids are the smallest free one and an absent id means
+ * no such row. A PATCH replaces the whole list, so it compares the list, and the revision
+ * it started from means nothing moved.
  */
 
 'use client';
 
 import { useCallback, useRef } from 'react';
 import type { AgentInstance } from '@/lib/cli-tools/types';
-import { roleApi } from '@/lib/api-client-agent-roles';
+import { roleApi, sendRosterPatch } from '@/lib/api-client-agent-roles';
 import {
   clearRosterSnapshot,
   ensureRosterSnapshot,
@@ -50,7 +66,11 @@ import {
   watchForNewerAnswer,
   writeInstanceRoleSettings,
 } from '@/hooks/useInstanceRoleSettings';
-import type { AgentRoleErrorResponse, RoleAssignmentInput } from '@/types/agent-roles';
+import type {
+  AgentRoleErrorResponse,
+  InstanceRoleSettingsResponse,
+  RoleAssignmentInput,
+} from '@/types/agent-roles';
 
 /** Builds the next roster from the latest one, or `null` to skip the write. */
 export type RosterBuilder = (base: AgentInstance[]) => AgentInstance[] | null;
@@ -60,8 +80,11 @@ export type RosterWriteError = AgentRoleErrorResponse['error'] | 'roster_unreada
 
 export type RosterWriteResult =
   | { status: 'saved'; roster: AgentInstance[] }
-  /** Saved, but its answer could not be trusted and nothing could be read after it. */
-  | { status: 'saved_unverified' }
+  /**
+   * Saved, but its answer could not be trusted and nothing could be read after it. With
+   * `unconfirmed`, whether it was saved at all is not known. Either way, not to be sent again.
+   */
+  | { status: 'saved_unverified'; unconfirmed?: boolean }
   | { status: 'skipped' }
   | { status: 'failed'; error?: RosterWriteError };
 
@@ -71,7 +94,7 @@ export type RosterInstanceBuilder = (base: AgentInstance[]) => { id: string; cli
 /** One attempt at a write. `conflict`: the server's roster is not the one it started from. */
 type RosterAttempt =
   | { status: 'saved'; roster: AgentInstance[] }
-  | { status: 'saved_unverified' }
+  | { status: 'saved_unverified'; unconfirmed?: boolean }
   | { status: 'skipped' }
   | { status: 'failed'; error?: AgentRoleErrorResponse['error'] }
   | { status: 'conflict' };
@@ -132,17 +155,60 @@ function enqueue(
   return result;
 }
 
-/** What a saving PATCH confirmed, where the response says. An older server says nothing. */
-async function readPatchAnswer(response: Response): Promise<{ roster?: AgentInstance[]; revision?: string }> {
-  try {
-    const body = (await response.json()) as { agentInstances?: unknown; rosterRevision?: unknown } | null;
-    return {
-      roster: Array.isArray(body?.agentInstances) ? (body.agentInstances as AgentInstance[]) : undefined,
-      revision: typeof body?.rosterRevision === 'string' ? body.rosterRevision : undefined,
-    };
-  } catch {
-    return {};
+/** A PATCH saved, and something newer was taken meanwhile: only a read made now can be believed. */
+async function readAfterCrossing(worktreeId: string): Promise<RosterAttempt> {
+  const settings = await refreshAfterWrite(worktreeId);
+  return settings
+    ? { status: 'saved', roster: rosterFromRoleEntries(settings.instances) }
+    : { status: 'saved_unverified' };
+}
+
+function sameRoster(left: readonly AgentInstance[], right: readonly AgentInstance[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every((inst, index) => {
+      const other = right[index];
+      return inst.id === other.id && inst.cliTool === other.cliTool && inst.alias === other.alias;
+    })
+  );
+}
+
+/** A PATCH with no usable answer. Reads the roster route: the "+" falls back here when the role route is failing. */
+async function settleLostPatch(
+  worktreeId: string,
+  sent: readonly AgentInstance[],
+  expectedRevision: string,
+): Promise<RosterAttempt> {
+  clearRosterSnapshot(worktreeId);
+  const confirmed = await ensureRosterSnapshot(worktreeId);
+  if (!confirmed) {
+    await refreshAfterWrite(worktreeId);
+    return { status: 'saved_unverified', unconfirmed: true };
   }
+  if (sameRoster(confirmed.roster, sent)) {
+    recordRosterSaved(worktreeId, confirmed.roster, confirmed.revision);
+    return { status: 'saved', roster: confirmed.roster };
+  }
+  if (confirmed.revision === expectedRevision) return { status: 'failed' };
+  recordRosterSaved(worktreeId, confirmed.roster, confirmed.revision);
+  return { status: 'saved_unverified', unconfirmed: true };
+}
+
+/** A create with no usable answer, from what was read after it. */
+function settleLostCreate(
+  settings: InstanceRoleSettingsResponse | null,
+  instance: { id: string; cliTool: string; alias: string },
+  role: RoleAssignmentInput,
+): RosterAttempt {
+  if (!settings) return { status: 'saved_unverified', unconfirmed: true };
+  const row = settings.instances.find((entry) => entry.instanceId === instance.id);
+  if (!row) return { status: 'failed' };
+  const { stored } = row;
+  const sameRole = stored.state === 'role' ? role.state === 'role' && role.roleId === stored.roleId : role.state === stored.state;
+  // A row with that id but other content may be this one changed since, or another client's.
+  return row.cliToolId === instance.cliTool && row.alias === instance.alias && sameRole
+    ? { status: 'saved', roster: rosterFromRoleEntries(settings.instances) }
+    : { status: 'saved_unverified', unconfirmed: true };
 }
 
 /**
@@ -163,28 +229,23 @@ export function enqueueRosterWrite(
       if (!built) return { status: 'skipped' };
       const roster = built.map((inst, order) => ({ ...inst, order }));
       const crossed = watchForNewerAnswer(worktreeId);
-      let response: Response;
-      try {
-        response = await fetch(`/api/worktrees/${worktreeId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ agentInstances: roster, expectedRosterRevision: expectedRevision }),
-        });
-      } catch {
-        return { status: 'failed' };
-      }
-      if (response.status === 409) return { status: 'conflict' };
-      if (!response.ok) return { status: 'failed' };
-      // After the body, not before: reading it waits, and a newer answer can be taken meanwhile.
-      const answer = await readPatchAnswer(response);
+      const answer = await sendRosterPatch(worktreeId, {
+        agentInstances: roster,
+        expectedRosterRevision: expectedRevision,
+      });
+      if (answer.kind === 'conflict') return { status: 'conflict' };
+      if (answer.kind === 'refused') return { status: 'failed' };
+      if (answer.kind === 'unknown') return settleLostPatch(worktreeId, roster, expectedRevision);
       if (crossed()) {
-        const settings = await refreshAfterWrite(worktreeId);
-        return settings
-          ? { status: 'saved', roster: rosterFromRoleEntries(settings.instances) }
-          : { status: 'saved_unverified' };
+        answer.abandon();
+        return readAfterCrossing(worktreeId);
       }
-      const saved = answer.roster ?? roster;
-      recordRosterSaved(worktreeId, saved, answer.revision);
+      const body = await answer.readBody();
+      if (!body) return settleLostPatch(worktreeId, roster, expectedRevision);
+      // Again after the body: reading it waits, and a newer answer can be taken meanwhile.
+      if (crossed()) return readAfterCrossing(worktreeId);
+      const saved = body.roster ?? roster;
+      recordRosterSaved(worktreeId, saved, body.revision);
       return { status: 'saved', roster: saved };
     },
     onSaved,
@@ -212,6 +273,7 @@ export function enqueueRosterCreate(
         roleApi.createInstance(worktreeId, { instance, role, expectedRosterRevision: expectedRevision }),
       );
       if (!result.ok) {
+        if (result.outcomeUnknown) return settleLostCreate(result.settings, instance, role);
         const stale = result.error === 'roster_changed' || result.error === 'instance_exists';
         return stale ? { status: 'conflict' } : { status: 'failed', error: result.error };
       }

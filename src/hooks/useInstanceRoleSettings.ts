@@ -19,13 +19,22 @@
  * until an answer is next taken, so the screen can say so instead of showing old rows
  * as current.
  *
+ * A write that got no usable answer may have happened (`isOutcomeUnknown`), so it is
+ * followed by a read too, and its caller gets what that read found.
+ *
  * @module hooks/useInstanceRoleSettings
  */
 
 'use client';
 
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
-import { readWorktreeRoster, roleApi, type RoleApiFailure, type RoleApiResult } from '@/lib/api-client-agent-roles';
+import {
+  isOutcomeUnknown,
+  readWorktreeRoster,
+  roleApi,
+  type RoleApiFailure,
+  type RoleApiResult,
+} from '@/lib/api-client-agent-roles';
 import type { AgentInstance } from '@/lib/cli-tools/types';
 import type { InstanceRoleEntry, InstanceRoleSettingsResponse } from '@/types/agent-roles';
 
@@ -51,7 +60,11 @@ interface WorktreeEntry {
  * How a write ended. `settings` is what the store now holds: null means the write
  * happened, but its answer could not be trusted and nothing could be read after it.
  */
-export type InstanceRoleWriteResult = RoleApiFailure | { ok: true; settings: InstanceRoleSettingsResponse | null };
+export type InstanceRoleWriteResult =
+  | { ok: true; settings: InstanceRoleSettingsResponse | null }
+  | (RoleApiFailure & { outcomeUnknown?: false })
+  /** It may have happened. `settings` was read after it: null when that failed too. */
+  | (RoleApiFailure & { outcomeUnknown: true; settings: InstanceRoleSettingsResponse | null });
 
 const entries = new Map<string, WorktreeEntry>();
 
@@ -109,7 +122,12 @@ export async function writeInstanceRoleSettings(
   const entry = entryFor(worktreeId);
   const issued = entry.version;
   const result = await send();
-  if (!result.ok) return result;
+  if (!result.ok) {
+    if (!isOutcomeUnknown(result)) return result;
+    // Moves the version too, so a read already on its way is not taken for this one.
+    clearRosterSnapshot(worktreeId);
+    return { ...result, outcomeUnknown: true, settings: await refreshAfterWrite(worktreeId) };
+  }
   if (entry.version === issued) {
     adoptSettings(entry, result.data);
     return { ok: true, settings: result.data };

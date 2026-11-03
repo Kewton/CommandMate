@@ -14,7 +14,7 @@ import { InstanceRolesSection } from '@/components/roles/InstanceRolesSection';
 import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 import { repositoryApi, type RepositoryListItem } from '@/lib/api-client';
 import { roleEditExample } from '@tests/integration/fixtures/agent-roles-api-examples';
-import { FakeRoleServer, MARKETER, REVIEWER } from './fake-role-server';
+import { FakeRoleServer, MARKETER, REVIEWER, loseNextAnswer } from './fake-role-server';
 
 vi.mock('next-intl', async () => {
   const { createRealIntlMock } = await import('@tests/helpers/real-intl');
@@ -385,7 +385,7 @@ describe('[#4117] a change in the settings reaches what is open elsewhere', () =
     refuse = false;
     global.fetch = vi.fn((url: string, init?: RequestInit) =>
       String(url).endsWith('/role-defaults') && init?.method === 'PUT'
-        ? Promise.resolve({ ok: false, status: 500, json: async () => ({ success: false, error: 'internal_error' }) })
+        ? Promise.resolve({ ok: false, status: 400, json: async () => ({ success: false, error: 'internal_error' }) })
         : real(url, init),
     ) as unknown as typeof fetch;
     fireEvent.change(select(), { target: { value: REVIEWER.id } });
@@ -445,6 +445,153 @@ describe('[#4117] a change in the settings reaches what is open elsewhere', () =
     server.repositoryStored.claude = { state: 'role', roleId: REVIEWER.id, roleName: REVIEWER.name };
     await act(async () => releasePut());
     await waitFor(() => expect(source()).toBe('指定中: レビュー担当［リポジトリ］'));
+  });
+});
+
+describe('[#4117] a role write whose answer was lost', () => {
+  const REPO: RepositoryListItem = {
+    id: 'repo-1',
+    name: 'app',
+    displayName: null,
+    path: '/repos/app',
+    enabled: true,
+    visible: true,
+    worktreeCount: 1,
+  };
+  const INSTANCES = [{ id: 'claude', cliTool: 'claude' as const, alias: 'Claude', order: 0 }];
+  let seq = 0;
+  const reads = (pathEnd: string) => server.calls.filter((c) => c.method === 'GET' && c.url.endsWith(pathEnd)).length;
+
+  async function renderAll(): Promise<void> {
+    server.roster = INSTANCES;
+    seq += 1;
+    vi.spyOn(repositoryApi, 'list').mockResolvedValue({ success: true, repositories: [REPO] } as never);
+    render(
+      <ConfirmProvider>
+        <SettingsGeneralSection />
+        <RepositoryList refreshKey={0} />
+        <InstanceRolesSection worktreeId={`w-4117-lost-${seq}`} rosterKey="claude" />
+      </ConfirmProvider>,
+    );
+    await screen.findByTestId(`agent-role-row-${MARKETER.id}`);
+    fireEvent.click(await screen.findByTestId('repository-roles-toggle-repo-1'));
+    fireEvent.click(screen.getByTestId('instance-roles-toggle'));
+    await waitFor(() => expect(within(field('repository-role-select-repo-1-claude')).getByText(REVIEWER.name)).toBeInTheDocument());
+    await waitFor(() => expect(within(field('instance-role-select-claude')).getByText(REVIEWER.name)).toBeInTheDocument());
+  }
+
+  describe.each([
+    ['it happened', true],
+    ['it did not', false],
+  ])('%s', (_label, committed) => {
+    it('a session\'s role: the row shows what was read, and says it could not tell', async () => {
+      await renderAll();
+      loseNextAnswer(server, 'PUT', '/instances/roles', '500', { committed });
+      fireEvent.change(field('instance-role-select-claude'), { target: { value: 'none' } });
+      await waitFor(() => expect(screen.getByTestId('instance-role-error-claude').textContent).toContain('確かめられません'));
+      await waitFor(() => expect(field('instance-role-select-claude').value).toBe(committed ? 'none' : 'inherit'));
+      expect(screen.queryByTestId('instance-roles-stale')).toBeNull();
+    });
+
+    it('a repository\'s default: the same', async () => {
+      await renderAll();
+      loseNextAnswer(server, 'PUT', '/role-defaults', '500', { committed });
+      fireEvent.change(field('repository-role-select-repo-1-claude'), { target: { value: 'none' } });
+      await waitFor(() => expect(screen.getByTestId('repository-roles-save-error-repo-1').textContent).toContain('確かめられません'));
+      await waitFor(() => expect(field('repository-role-select-repo-1-claude').value).toBe(committed ? 'none' : 'inherit'));
+      expect(screen.queryByTestId('repository-roles-stale-repo-1')).toBeNull();
+    });
+
+    it('the system default: the same, and the sessions read again', async () => {
+      await renderAll();
+      const before = reads('/instances/roles');
+      loseNextAnswer(server, 'PUT', '/api/settings/agent-role-defaults', '500', { committed });
+      fireEvent.change(field('agent-role-system-default-claude'), { target: { value: REVIEWER.id } });
+      await waitFor(() => expect(screen.getByTestId('agent-roles-default-error').textContent).toContain('確かめられません'));
+      await waitFor(() => expect(field('agent-role-system-default-claude').value).toBe(committed ? REVIEWER.id : ''));
+      await waitFor(() => expect(reads('/instances/roles')).toBeGreaterThan(before));
+    });
+
+    it('a new role: the list shows what was read, and pressing again adds no second one', async () => {
+      await renderAll();
+      fireEvent.click(screen.getByTestId('agent-role-new'));
+      fireEvent.change(field('agent-role-create-name'), { target: { value: 'PM' } });
+      fireEvent.change(field('agent-role-create-body'), { target: { value: 'x' } });
+      loseNextAnswer(server, 'POST', '/api/roles', '500', { committed });
+      fireEvent.click(screen.getByTestId('agent-role-create-submit'));
+      await waitFor(() => expect(screen.getByTestId('agent-role-create-error').textContent).toContain('確かめられません'));
+      await waitFor(() => expect(screen.getByTestId('agent-role-create-submit')).not.toBeDisabled());
+      expect(screen.queryAllByText('PM').length > 0).toBe(committed);
+
+      fireEvent.click(screen.getByTestId('agent-role-create-submit'));
+      if (committed) {
+        await waitFor(() => expect(screen.getByTestId('agent-role-create-error').textContent).toContain('同じ名前'));
+      } else {
+        await waitFor(() => expect(screen.queryByTestId('agent-role-create-form')).toBeNull());
+      }
+      expect(server.roles.filter((role) => role.name === 'PM')).toHaveLength(1);
+    });
+
+    it('an edit: the list shows what was read, and says it could not tell', async () => {
+      await renderAll();
+      fireEvent.click(screen.getByTestId(`agent-role-edit-${MARKETER.id}`));
+      await screen.findByTestId('agent-role-edit-name');
+      fireEvent.change(field('agent-role-edit-name'), { target: { value: 'PM' } });
+      loseNextAnswer(server, 'PUT', `/api/roles/${MARKETER.id}`, '500', { committed });
+      fireEvent.click(screen.getByTestId('agent-role-edit-submit'));
+      await waitFor(() => expect(screen.getByTestId('agent-role-edit-error').textContent).toContain('確かめられません'));
+      await waitFor(() => expect(within(field('agent-role-system-default-claude')).queryByText('PM') !== null).toBe(committed));
+    });
+
+    it('a delete: the row goes if it happened, and says it could not tell if it stays', async () => {
+      await renderAll();
+      fireEvent.click(screen.getByTestId(`agent-role-delete-${REVIEWER.id}`));
+      loseNextAnswer(server, 'DELETE', `/api/roles/${REVIEWER.id}`, '500', { committed });
+      fireEvent.click(screen.getByTestId(`agent-role-delete-confirm-${REVIEWER.id}`));
+      if (committed) {
+        await waitFor(() => expect(screen.queryByTestId(`agent-role-row-${REVIEWER.id}`)).toBeNull());
+      } else {
+        await waitFor(() => expect(screen.getByTestId(`agent-role-delete-panel-${REVIEWER.id}`).textContent).toContain('確かめられません'));
+      }
+    });
+  });
+
+  it('a session\'s role with nothing readable after it: says the rows may be behind', async () => {
+    await renderAll();
+    loseNextAnswer(server, 'PUT', '/instances/roles', 'network', { committed: true });
+    server.refuseSettingsRead = true;
+    fireEvent.change(field('instance-role-select-claude'), { target: { value: 'none' } });
+    await screen.findByTestId('instance-role-error-claude');
+    await waitFor(() => expect(screen.getByTestId('instance-roles-stale').textContent).toContain('再読み込み'));
+    expect(screen.getByTestId('instance-roles-stale').textContent).not.toContain('完了');
+  });
+
+  it('a repository\'s default with nothing readable after it: the same', async () => {
+    await renderAll();
+    loseNextAnswer(server, 'PUT', '/role-defaults', 'network', { committed: true });
+    const lost = global.fetch;
+    global.fetch = vi.fn((url: string, init?: RequestInit) =>
+      String(url).endsWith('/role-defaults') && !init?.method
+        ? Promise.resolve({ ok: false, status: 500, json: async () => ({ success: false, error: 'internal_error' }) })
+        : (lost as typeof fetch)(url, init),
+    ) as unknown as typeof fetch;
+    fireEvent.change(field('repository-role-select-repo-1-claude'), { target: { value: 'none' } });
+    await waitFor(() => expect(screen.getByTestId('repository-roles-stale-repo-1')).toBeInTheDocument());
+    expect(screen.getByTestId('repository-roles-save-error-repo-1').textContent).toContain('確かめられません');
+  });
+
+  it('negative control: a refusal is what it says, and reads nothing to find out', async () => {
+    await renderAll();
+    const before = reads('/role-defaults');
+    const real = global.fetch;
+    global.fetch = vi.fn((url: string, init?: RequestInit) =>
+      String(url).endsWith('/role-defaults') && init?.method === 'PUT'
+        ? Promise.resolve({ ok: false, status: 400, json: async () => ({ success: false, error: 'invalid_request' }) })
+        : (real as typeof fetch)(url, init),
+    ) as unknown as typeof fetch;
+    fireEvent.change(field('repository-role-select-repo-1-claude'), { target: { value: 'none' } });
+    await waitFor(() => expect(screen.getByTestId('repository-roles-save-error-repo-1').textContent).toContain('保存できませんでした'));
+    expect(reads('/role-defaults')).toBe(before);
   });
 });
 

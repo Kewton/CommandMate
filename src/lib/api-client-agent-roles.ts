@@ -42,6 +42,15 @@ export type RoleApiFailure = {
 
 export type RoleApiResult<T> = { ok: true; data: T } | RoleApiFailure;
 
+/**
+ * Only a refusal (4xx) says nothing was written. A route commits before it builds its
+ * answer, so a 5xx, no answer, an expired deadline or an unreadable body may all follow
+ * a write that happened.
+ */
+export function isOutcomeUnknown(failure: RoleApiFailure): boolean {
+  return !(failure.status >= 400 && failure.status < 500);
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -125,6 +134,75 @@ export function roleInUseReferences(
 ): AgentRoleDeleteConflictResponse['references'] | null {
   if (failure.error !== 'role_in_use' || !isRecord(failure.body)) return null;
   return (failure.body as unknown as AgentRoleDeleteConflictResponse).references ?? null;
+}
+
+/** What a saving roster PATCH confirmed, where it says. An older server says nothing. */
+export interface RosterPatchBody {
+  roster?: AgentInstance[];
+  revision?: string;
+}
+
+/**
+ * How a roster PATCH was answered. `saved` has only seen the headers: the body is read
+ * apart, because a caller who already knows the answer is old need not wait for it.
+ */
+export type RosterPatchAnswer =
+  | { kind: 'conflict' }
+  | { kind: 'refused' }
+  | { kind: 'unknown' }
+  | {
+      kind: 'saved';
+      /** Null: the body could not be read, or the deadline passed. */
+      readBody: () => Promise<RosterPatchBody | null>;
+      /** Nobody will read the body: end the deadline and the connection. */
+      abandon: () => void;
+    };
+
+/** The roster PATCH, with one deadline over the headers and the body, as {@link request} has. */
+export async function sendRosterPatch(
+  worktreeId: string,
+  body: { agentInstances: AgentInstance[]; expectedRosterRevision: string },
+): Promise<RosterPatchAnswer> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ROLE_REQUEST_TIMEOUT_MS);
+  const abandon = (): void => {
+    clearTimeout(timer);
+    controller.abort();
+  };
+  let response: Response;
+  try {
+    response = await fetch(`/api/worktrees/${worktreeId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch {
+    clearTimeout(timer);
+    return { kind: 'unknown' };
+  }
+  if (!response.ok) {
+    abandon();
+    if (response.status === 409) return { kind: 'conflict' };
+    return response.status >= 400 && response.status < 500 ? { kind: 'refused' } : { kind: 'unknown' };
+  }
+  return {
+    kind: 'saved',
+    abandon,
+    readBody: async () => {
+      try {
+        const answer = (await response.json()) as { agentInstances?: unknown; rosterRevision?: unknown } | null;
+        return {
+          roster: Array.isArray(answer?.agentInstances) ? (answer.agentInstances as AgentInstance[]) : undefined,
+          revision: typeof answer?.rosterRevision === 'string' ? answer.rosterRevision : undefined,
+        };
+      } catch {
+        return null;
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+  };
 }
 
 async function readWorktree(worktreeId: string): Promise<Record<string, unknown> | null> {
