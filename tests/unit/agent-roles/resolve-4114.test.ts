@@ -20,7 +20,12 @@ import {
   setRepositoryRoleState,
   setSystemRoleDefault,
 } from '@/lib/db/agent-roles-db';
-import { setAgentInstances } from '@/lib/db/agent-instances-db';
+import { getAgentInstances, setAgentInstances } from '@/lib/db/agent-instances-db';
+import {
+  buildInstanceRoleSettings,
+  buildRepositoryRoleDefaults,
+  computeRosterRevision,
+} from '@/lib/agent-roles/management';
 import { migrateWorktreeIdPreservingChildren } from '@/lib/db/worktree-db';
 import {
   AgentRoleTargetNotFoundError,
@@ -304,7 +309,7 @@ describe('role resolution', () => {
         expect(result.kind).toBe('role');
       });
 
-      it('an unidentifiable root with no setting for the tool blocks nothing', async () => {
+      it('an unidentifiable root with no row still holds inherit, which disagrees with a role', async () => {
         const a = register(ROOT_A);
         register(ROOT_B);
         setRepositoryRoleState(db, a, 'claude', { state: 'role', roleId: roleR });
@@ -313,7 +318,47 @@ describe('role resolution', () => {
           { worktreeId: WT, instanceId: 'claude' },
           deps({ [ROOT_B]: null }, [ROOT_B])
         );
-        expect(result.kind).toBe('role');
+        expect(result).toMatchObject({ kind: 'ambiguous', reason: 'membership-undetermined' });
+      });
+
+      it('an unidentifiable root that inherits, like a member that inherits, blocks nothing', async () => {
+        register(ROOT_A);
+        register(ROOT_B);
+        setSystemRoleDefault(db, 'claude', roleS);
+        const result = await resolveInstanceRole(
+          db,
+          { worktreeId: WT, instanceId: 'claude' },
+          deps({ [ROOT_B]: null }, [ROOT_B])
+        );
+        expect(result).toMatchObject({ kind: 'role', source: 'system' });
+      });
+
+      describe('a git failure does not change whether two settings agree', () => {
+        type State = 'inherit' | 'none' | 'role-1' | 'role-2';
+        const states: State[] = ['inherit', 'none', 'role-1', 'role-2'];
+        const pairs = states.flatMap((a) => states.map((b): [State, State] => [a, b]));
+
+        it.each(pairs)('A=%s B=%s', async (stateA, stateB) => {
+          const toInput = (state: State): RoleAssignmentInput =>
+            state === 'role-1'
+              ? { state: 'role', roleId: roleR }
+              : state === 'role-2'
+                ? { state: 'role', roleId: roleS }
+                : { state };
+          const a = register(ROOT_A);
+          const b = register(ROOT_B);
+          setRepositoryRoleState(db, a, 'claude', toInput(stateA));
+          setRepositoryRoleState(db, b, 'claude', toInput(stateB));
+
+          const target = { worktreeId: WT, instanceId: 'claude' };
+          const answered = await resolveInstanceRole(db, target, deps());
+          const failed = await resolveInstanceRole(db, target, deps({ [ROOT_B]: null }, [ROOT_B]));
+
+          expect(failed.kind).toBe(answered.kind);
+          expect(answered.kind === 'ambiguous').toBe(stateA !== stateB);
+          if (failed.kind === 'ambiguous') expect(failed.reason).toBe('membership-undetermined');
+          if (answered.kind === 'ambiguous') expect(answered.reason).toBe('root-settings-differ');
+        });
       });
 
       it('a root whose directory is gone blocks nothing: it cannot be scanned', async () => {
@@ -446,6 +491,150 @@ describe('role resolution', () => {
         deps()
       );
       expect(result.cliToolId).toBe('codex');
+    });
+  });
+
+  describe('a change while git is being asked', () => {
+    /** A resolver that runs `change` once, in the middle of the first question. */
+    function interrupting(change: () => void): RoleResolverDeps {
+      let done = false;
+      return {
+        resolveCommonDir: async () => {
+          if (!done) {
+            done = true;
+            change();
+          }
+          return '/common/.git';
+        },
+        pathExists: () => false,
+      };
+    }
+    const geminiRoster = [{ id: 'second', cliTool: 'gemini' as const, alias: 'x', order: 0 }];
+    const codexRoster = [{ id: 'second', cliTool: 'codex' as const, alias: 'x', order: 0 }];
+
+    it('resolveInstanceRole answers for the tool the setting was made for', async () => {
+      register(ROOT_A);
+      setAgentInstances(db, WT, geminiRoster);
+      const result = await resolveInstanceRole(
+        db,
+        { worktreeId: WT, instanceId: 'second' },
+        interrupting(() => {
+          setAgentInstances(db, WT, codexRoster);
+          setInstanceRoleState(db, WT, 'second', { state: 'role', roleId: roleI });
+        })
+      );
+      expect(result).toMatchObject({ kind: 'role', source: 'instance', cliToolId: 'codex' });
+    });
+
+    it('the settings list never pairs the old tool with the new setting', async () => {
+      register(ROOT_A);
+      setAgentInstances(db, WT, geminiRoster);
+      const settings = await buildInstanceRoleSettings(
+        db,
+        WT,
+        interrupting(() => {
+          setAgentInstances(db, WT, codexRoster);
+          setInstanceRoleState(db, WT, 'second', { state: 'role', roleId: roleI });
+        })
+      );
+      expect(settings.instances).toHaveLength(1);
+      expect(settings.instances[0]).toMatchObject({
+        cliToolId: 'codex',
+        supported: true,
+        stored: { state: 'role', roleId: roleI },
+        application: { effectiveNext: { kind: 'role', source: 'instance', cliToolId: 'codex' } },
+      });
+      expect(settings.rosterRevision).toBe(computeRosterRevision(getAgentInstances(db, WT)));
+    });
+
+    it('a re-scan that moves the worktree to another root asks again', async () => {
+      const a = register(ROOT_A);
+      const b = register(ROOT_B);
+      setRepositoryRoleState(db, a, 'claude', { state: 'role', roleId: roleR });
+      setRepositoryRoleState(db, b, 'claude', { state: 'none' });
+      const calls: string[] = [];
+      let moved = false;
+      const result = await resolveInstanceRole(db, { worktreeId: WT, instanceId: 'claude' }, {
+        resolveCommonDir: async (path) => {
+          calls.push(path);
+          if (!moved) {
+            moved = true;
+            db.prepare('UPDATE worktrees SET repository_path = ? WHERE id = ?').run(ROOT_B, WT);
+          }
+          return path === ROOT_A ? '/a/.git' : '/b/.git';
+        },
+        pathExists: () => false,
+      });
+      expect(result).toMatchObject({ kind: 'none', source: 'repository', repositoryId: b });
+    });
+
+    it('a root registered meanwhile takes part', async () => {
+      const a = register(ROOT_A);
+      setRepositoryRoleState(db, a, 'claude', { state: 'role', roleId: roleR });
+      const result = await resolveInstanceRole(
+        db,
+        { worktreeId: WT, instanceId: 'claude' },
+        interrupting(() => register(ROOT_B))
+      );
+      expect(result).toMatchObject({ kind: 'ambiguous', reason: 'root-settings-differ' });
+    });
+
+    it('a root deleted meanwhile does not take part', async () => {
+      const a = register(ROOT_A);
+      const b = register(ROOT_B);
+      setRepositoryRoleState(db, a, 'claude', { state: 'role', roleId: roleR });
+      const result = await resolveInstanceRole(
+        db,
+        { worktreeId: WT, instanceId: 'claude' },
+        interrupting(() => deleteRepository(db, b))
+      );
+      expect(result).toMatchObject({ kind: 'role', repositoryIds: [a] });
+    });
+
+    it('a worktree deleted meanwhile is not found', async () => {
+      register(ROOT_A);
+      const remove = () => db.prepare('DELETE FROM worktrees WHERE id = ?').run(WT);
+      await expect(
+        resolveInstanceRole(db, { worktreeId: WT, instanceId: 'claude' }, interrupting(remove))
+      ).rejects.toThrow(AgentRoleTargetNotFoundError);
+    });
+
+    it('the defaults-only entrances read after the wait as well', async () => {
+      const a = register(ROOT_A);
+      const schedule = await resolveWorktreeToolRole(
+        db,
+        { worktreeId: WT, cliToolId: 'claude' },
+        interrupting(() => setRepositoryRoleState(db, a, 'claude', { state: 'none' }))
+      );
+      expect(schedule).toMatchObject({ kind: 'none', source: 'repository' });
+
+      const { repository, defaults } = await buildRepositoryRoleDefaults(
+        db,
+        a,
+        interrupting(() => {
+          setRepositoryRoleState(db, a, 'claude', { state: 'role', roleId: roleR });
+          setRepositoryEnabled(db, a, false);
+        })
+      );
+      expect(repository.enabled).toBe(false);
+      const claude = defaults.find((entry) => entry.cliToolId === 'claude');
+      expect(claude?.stored).toMatchObject({ state: 'role', roleId: roleR });
+      expect(claude?.effective).toMatchObject({ kind: 'role', source: 'repository' });
+    });
+
+    it('gives up rather than answer from something that never settles', async () => {
+      register(ROOT_A);
+      let flip = 0;
+      await expect(
+        resolveInstanceRole(db, { worktreeId: WT, instanceId: 'claude' }, {
+          resolveCommonDir: async () => {
+            flip += 1;
+            db.prepare('UPDATE worktrees SET repository_path = ? WHERE id = ?').run(`/tmp/cm-4114/flip-${flip}`, WT);
+            return '/common/.git';
+          },
+          pathExists: () => false,
+        })
+      ).rejects.toThrow(/kept changing/);
     });
   });
 

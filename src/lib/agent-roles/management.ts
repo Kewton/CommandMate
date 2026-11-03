@@ -62,8 +62,8 @@ import type { Worktree } from '@/types/models';
 import {
   attributeToRepository,
   resolveDefaultsForTool,
-  resolveRepositoryMembership,
-  resolveWorktreeMembership,
+  settleRepositoryMembership,
+  settleWorktreeMembership,
   toEffectiveRole,
   type RoleResolverDeps,
 } from './resolve';
@@ -89,15 +89,21 @@ export function computeRosterRevision(roster: readonly AgentInstance[]): string 
   return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
 }
 
-/** The settings of a worktree, each beside what it would resolve to. */
+/**
+ * The settings of a worktree, each beside what it would resolve to.
+ *
+ * @throws {AgentRoleTargetNotFoundError} The worktree does not exist
+ */
 export async function buildInstanceRoleSettings(
   db: Database.Database,
-  worktree: Worktree,
+  worktreeId: string,
   deps: RoleResolverDeps = {}
 ): Promise<InstanceRoleSettingsResponse> {
+  // One membership for the whole answer. Nothing below awaits, so the roster and
+  // the settings are one view, and a tool can never be paired with a setting made
+  // after it changed.
+  const { worktree, membership } = await settleWorktreeMembership(db, worktreeId, deps);
   const roster = currentRoster(db, worktree);
-  // One membership for the whole answer: it is the same worktree throughout.
-  const membership = await resolveWorktreeMembership(db, worktree, deps);
 
   const instances: InstanceRoleEntry[] = roster.map((instance) => {
     const stored = getInstanceRoleState(db, worktree.id, instance.id);
@@ -228,20 +234,27 @@ export function buildSystemRoleDefaults(db: Database.Database): SystemRoleDefaul
   });
 }
 
-/** One root, one entry per supported tool: what it holds, and what a worktree would get. */
+/**
+ * One root, one entry per supported tool: what it holds, and what a worktree would get.
+ *
+ * @throws {AgentRoleTargetNotFoundError} The repository does not exist
+ */
 export async function buildRepositoryRoleDefaults(
   db: Database.Database,
-  repository: Repository,
+  repositoryId: string,
   deps: RoleResolverDeps = {}
-): Promise<RepositoryRoleDefaultEntry[]> {
+): Promise<{ repository: Repository; defaults: RepositoryRoleDefaultEntry[] }> {
+  const { repository, membership } = await settleRepositoryMembership(db, repositoryId, deps);
   const stored = getRepositoryRoleStates(db, repository.id);
-  const membership = await resolveRepositoryMembership(db, repository, deps);
-  return AGENT_ROLE_CLI_TOOLS.map((cliToolId) => ({
-    cliToolId,
-    adapterEnabled: isAgentRoleAdapterEnabled(cliToolId),
-    stored: stored[cliToolId] ?? { state: 'inherit' },
-    effective: toEffectiveRole(
-      attributeToRepository(resolveDefaultsForTool(db, cliToolId, membership), repository.id)
-    ),
-  }));
+  const defaults = AGENT_ROLE_CLI_TOOLS.map(
+    (cliToolId): RepositoryRoleDefaultEntry => ({
+      cliToolId,
+      adapterEnabled: isAgentRoleAdapterEnabled(cliToolId),
+      stored: stored[cliToolId] ?? { state: 'inherit' },
+      effective: toEffectiveRole(
+        attributeToRepository(resolveDefaultsForTool(db, cliToolId, membership), repository.id)
+      ),
+    })
+  );
+  return { repository, defaults };
 }

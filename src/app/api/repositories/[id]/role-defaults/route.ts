@@ -11,7 +11,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { setRepositoryRoleState } from '@/lib/db/agent-roles-db';
-import { getRepositoryById, type Repository } from '@/lib/db/db-repository';
+import { getRepositoryById } from '@/lib/db/db-repository';
 import { buildRepositoryRoleDefaults } from '@/lib/agent-roles/management';
 import { respondToRoleError, roleErrorResponse } from '@/lib/agent-roles/route-errors';
 import { parseRoleAssignmentInput } from '@/lib/agent-roles/validation';
@@ -25,7 +25,8 @@ const logger = createLogger('api/repositories/role-defaults');
 
 type Params = { params: Promise<{ id: string }> };
 
-async function respond(repository: Repository): Promise<NextResponse> {
+async function respond(repositoryId: string): Promise<NextResponse> {
+  const { repository, defaults } = await buildRepositoryRoleDefaults(getDbInstance(), repositoryId);
   const body: RepositoryRoleDefaultsResponse = {
     success: true,
     repository: {
@@ -34,7 +35,7 @@ async function respond(repository: Repository): Promise<NextResponse> {
       path: repository.path,
       enabled: repository.enabled,
     },
-    defaults: await buildRepositoryRoleDefaults(getDbInstance(), repository),
+    defaults,
   };
   return NextResponse.json(body, { status: 200 });
 }
@@ -42,9 +43,7 @@ async function respond(repository: Repository): Promise<NextResponse> {
 export async function GET(_request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
-    const repository = getRepositoryById(getDbInstance(), id);
-    if (!repository) return roleErrorResponse('not_found', `Repository not found: ${id}`, 404);
-    return await respond(repository);
+    return await respond(id);
   } catch (error: unknown) {
     return respondToRoleError(error, logger, 'read-failed');
   }
@@ -56,15 +55,14 @@ export async function PUT(request: NextRequest, { params }: Params) {
     const parsed = await readJsonObjectBody<{ cliToolId?: unknown; role?: unknown }>(request);
     if (!parsed.ok) return parsed.response;
     const db = getDbInstance();
-    const repository = getRepositoryById(db, id);
-    if (!repository) return roleErrorResponse('not_found', `Repository not found: ${id}`, 404);
+    if (!getRepositoryById(db, id)) return roleErrorResponse('not_found', `Repository not found: ${id}`, 404);
     if (!isAgentRoleCliTool(parsed.body.cliToolId)) {
       return roleErrorResponse('tool_not_supported', 'Roles do not apply to this tool', 400);
     }
     const role = parseRoleAssignmentInput(parsed.body.role);
     if (!role) return roleErrorResponse('invalid_request', 'role must be inherit, none or a role id', 400);
     setRepositoryRoleState(db, id, parsed.body.cliToolId, role);
-    return await respond(repository);
+    return await respond(id);
   } catch (error: unknown) {
     return respondToRoleError(error, logger, 'write-failed');
   }

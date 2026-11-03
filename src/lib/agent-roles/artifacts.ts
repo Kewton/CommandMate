@@ -35,12 +35,13 @@ import {
   chmodSync,
   openSync,
   readFileSync,
+  realpathSync,
   unlinkSync,
   writeSync,
 } from 'fs';
 import { randomBytes } from 'crypto';
-import { homedir } from 'os';
-import { dirname, join } from 'path';
+import { homedir, userInfo } from 'os';
+import { basename, dirname, join, resolve, sep } from 'path';
 import vm from 'vm';
 import { parse as parseYaml } from 'yaml';
 import { resolveSafeDirectory } from '@/config/safe-directory';
@@ -78,6 +79,7 @@ const FULL_FINGERPRINT = /^[0-9a-f]{64}$/;
 
 export type RoleArtifactErrorCode =
   | 'invalid-name'
+  | 'unexpected-location'
   | 'empty-instructions'
   | 'missing'
   | 'symlink'
@@ -120,7 +122,7 @@ export interface ArtifactLocation {
   sharedDirs: string[];
   /** Directories this feature alone uses: created 0700, and repaired to 0700. */
   ownedDirs: string[];
-  /** Whether this file would be in the user's home in a shared-read-only run. */
+  /** Whether this file is in a place a shared-read-only run may not write. */
   inSharedHome: boolean;
 }
 
@@ -160,14 +162,59 @@ function assertArtifactName(name: string): void {
   }
 }
 
-function dataRootFor(options: ArtifactOptions): { root: string; moved: boolean } {
-  const fallback = join(homedir(), '.commandmate', 'agent-roles');
-  if (options.dataRoot) {
-    return { root: resolveSafeDirectory(options.dataRoot, fallback, 'ArtifactOptions.dataRoot'), moved: true };
-  }
+function defaultDataRoot(): string {
+  return join(homedir(), '.commandmate', 'agent-roles');
+}
+
+function dataRootFor(options: ArtifactOptions): string {
+  const fallback = defaultDataRoot();
+  if (options.dataRoot) return resolveSafeDirectory(options.dataRoot, fallback, 'ArtifactOptions.dataRoot');
   const configured = (options.env ?? process.env)[AGENT_ROLE_ARTIFACTS_DIR_ENV_VAR];
-  const root = resolveSafeDirectory(configured, fallback, AGENT_ROLE_ARTIFACTS_DIR_ENV_VAR);
-  return { root, moved: root !== fallback };
+  return resolveSafeDirectory(configured, fallback, AGENT_ROLE_ARTIFACTS_DIR_ENV_VAR);
+}
+
+/** The path with every symlink that exists on the way followed. What is not there yet is kept as spelled. */
+function physicalPath(target: string): string {
+  const rest: string[] = [];
+  let existing = resolve(target);
+  for (;;) {
+    try {
+      return join(realpathSync(existing), ...rest);
+    } catch {
+      const parent = dirname(existing);
+      if (parent === existing) return join(existing, ...rest);
+      rest.unshift(basename(existing));
+      existing = parent;
+    }
+  }
+}
+
+function accountHomes(): string[] {
+  const homes = [homedir()];
+  try {
+    homes.push(userInfo().homedir);
+  } catch {
+    // No account entry for this uid: HOME is all there is to go on.
+  }
+  return homes;
+}
+
+/**
+ * Whether a data root is a place the user's other servers and CLIs share, judged
+ * by where it really is and not by whether someone named it: the home itself, or
+ * anything inside one of its dot-directories (`~/.commandmate`, `~/.codex`, ...).
+ *
+ * Not "anywhere under the home". A UAT's run directory normally is, because the
+ * checkout is, and it belongs to that run alone (`.commandmate/uat.yaml` puts its
+ * database and hook directory there).
+ */
+function isSharedHomeState(root: string): boolean {
+  const real = physicalPath(root);
+  return accountHomes().some((home) => {
+    const realHome = physicalPath(home);
+    if (real === realHome) return true;
+    return real.startsWith(`${realHome}${sep}`) && real.slice(realHome.length + 1).startsWith('.');
+  });
 }
 
 /**
@@ -214,10 +261,19 @@ export function resolveArtifactLocation(
     case 'command-code':
     case 'opencode':
     case 'opencode-v2': {
-      const { root, moved } = dataRootFor(options);
+      const root = dataRootFor(options);
       const dir = join(root, adapter);
       const extension = adapter === 'command-code' ? 'ts' : 'md';
-      return { path: join(dir, `${name}.${extension}`), homeDir: null, sharedDirs: [], ownedDirs: [root, dir], inSharedHome: !moved };
+      // Only the default root is ours to tighten. A root someone named may be any
+      // directory, up to the home itself, and is left to its owner.
+      const rootIsOurs = physicalPath(root) === physicalPath(defaultDataRoot());
+      return {
+        path: join(dir, `${name}.${extension}`),
+        homeDir: null,
+        sharedDirs: rootIsOurs ? [] : [root],
+        ownedDirs: rootIsOurs ? [root, dir] : [dir],
+        inSharedHome: isSharedHomeState(root),
+      };
     }
   }
 }
@@ -334,7 +390,9 @@ function lstatOrNull(path: string): Stats | null {
   try {
     return lstatSync(path);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    const { code } = error as NodeJS.ErrnoException;
+    // ENOTDIR: something on the way is a file, so this path does not exist either.
+    if (code === 'ENOENT' || code === 'ENOTDIR') return null;
     throw error;
   }
 }
@@ -365,12 +423,15 @@ function readExistingArtifact(path: string): Buffer | null {
   }
 }
 
-function assertDirectoryUsable(dir: string, owned: boolean): void {
+/**
+ * Check a directory that exists; one that does not has nothing to check.
+ *
+ * @param repair - Whether a directory of our own may be tightened. False when the
+ *   run only reads: a read-only caller refuses instead, and changes nothing.
+ */
+function checkDirectory(dir: string, owned: boolean, repair: boolean): void {
   const stat = lstatOrNull(dir);
-  if (!stat) {
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    return;
-  }
+  if (!stat) return;
   if (stat.isSymbolicLink()) throw new RoleArtifactError('symlink', `${dir} is a symlink`);
   if (!stat.isDirectory()) throw new RoleArtifactError('not-regular-file', `${dir} is not a directory`);
   const uid = currentUid();
@@ -378,7 +439,9 @@ function assertDirectoryUsable(dir: string, owned: boolean): void {
     throw new RoleArtifactError('foreign-owner', `${dir} belongs to another user`);
   }
   if (owned) {
-    if ((stat.mode & 0o077) !== 0) chmodSync(dir, 0o700);
+    if ((stat.mode & 0o077) === 0) return;
+    if (!repair) throw new RoleArtifactError('insecure-permissions', `${dir} is accessible to other users`);
+    chmodSync(dir, 0o700);
   } else if ((stat.mode & 0o022) !== 0) {
     // Readable is the CLI's business. Writable by others is someone else being able
     // to swap the file between this check and the launch.
@@ -386,15 +449,26 @@ function assertDirectoryUsable(dir: string, owned: boolean): void {
   }
 }
 
-function prepareDirectories(location: ArtifactLocation): void {
+/** A home may be reached through a symlink, so it is followed; what is below it is not. */
+function checkDirectories(location: ArtifactLocation, repair: boolean): void {
   if (location.homeDir !== null) {
-    mkdirSync(location.homeDir, { recursive: true, mode: 0o700 });
-    if ((statSync(location.homeDir).mode & 0o022) !== 0) {
+    let mode: number | null = null;
+    try {
+      mode = Number(statSync(location.homeDir).mode);
+    } catch {
+      // Absent, or a link to nothing: nothing readable is behind it, and creating it will say so.
+    }
+    if (mode !== null && (mode & 0o022) !== 0) {
       throw new RoleArtifactError('insecure-permissions', `${location.homeDir} is writable by other users`);
     }
   }
-  for (const dir of location.sharedDirs) assertDirectoryUsable(dir, false);
-  for (const dir of location.ownedDirs) assertDirectoryUsable(dir, true);
+  for (const dir of location.sharedDirs) checkDirectory(dir, false, repair);
+  for (const dir of location.ownedDirs) checkDirectory(dir, true, repair);
+}
+
+function createMissingDirectories(location: ArtifactLocation): void {
+  const dirs = [...(location.homeDir === null ? [] : [location.homeDir]), ...location.sharedDirs, ...location.ownedDirs];
+  for (const dir of dirs) mkdirSync(dir, { recursive: true, mode: 0o700 });
 }
 
 /**
@@ -456,18 +530,27 @@ export interface WrittenRoleArtifact {
 }
 
 /**
- * Checks 1 and 2 of §5, for the moment before a launch: the file is there, is what the
- * writer said, and is readable as this adapter's format.
+ * Checks 1 and 2 of §5, for the moment before a launch: the file is where this
+ * adapter keeps it, behind directories that could not have been swapped, is what
+ * the writer said, and reads as this adapter's format. Changes nothing.
  *
+ * @param options - The same options the file was written with
  * @throws {RoleArtifactError}
  */
-export function inspectRoleArtifact(input: {
-  adapter: AgentRoleCliTool;
-  name: string;
-  path: string;
-  expectedFingerprint: string;
-}): void {
+export function inspectRoleArtifact(
+  input: { adapter: AgentRoleCliTool; name: string; path: string; expectedFingerprint: string },
+  options: ArtifactOptions = {}
+): void {
   const { adapter, name, path, expectedFingerprint } = input;
+  const location = resolveArtifactLocation(adapter, name, options);
+  if (location.path !== path) {
+    throw new RoleArtifactError('unexpected-location', `${path} is not where this adapter keeps ${name}`);
+  }
+  checkDirectories(location, false);
+  inspectFile(adapter, name, path, expectedFingerprint);
+}
+
+function inspectFile(adapter: AgentRoleCliTool, name: string, path: string, expectedFingerprint: string): void {
   const bytes = readExistingArtifact(path);
   if (bytes === null) throw new RoleArtifactError('missing', `${path} does not exist`);
   if (computeFingerprint(bytes) !== expectedFingerprint) {
@@ -481,9 +564,10 @@ export function inspectRoleArtifact(input: {
  * Make sure the artifact exists with exactly this content, writing it only if it
  * is absent and the run may write there.
  *
- * In `CM_UAT_ISOLATION=1` nothing is written under the user's home (`config/uat-isolation.ts`):
- * an identical file is reused and anything else refuses the launch. A data root
- * the run moved elsewhere is not the home, and may be written.
+ * In `CM_UAT_ISOLATION=1` nothing is changed in the user's shared state
+ * (`config/uat-isolation.ts`): an identical file behind sound directories is
+ * reused, and anything else refuses the launch. A data root that really is
+ * elsewhere (see {@link isSharedHomeState}) belongs to the run and may be written.
  *
  * @throws {RoleArtifactError} The file cannot be used
  * @throws {UatIsolationLaunchRefusedError} The run may not write it
@@ -505,17 +589,20 @@ export function writeRoleArtifact(input: WriteRoleArtifactInput, options: Artifa
     artifactFingerprint,
     reused,
   });
-  const inspect = (): void =>
-    inspectRoleArtifact({ adapter, name, path: location.path, expectedFingerprint: artifactFingerprint });
+  const inspect = (): void => inspectFile(adapter, name, location.path, artifactFingerprint);
+
+  const policy = sharedHookWritePolicy(adapter, [location.path], options.env ?? process.env);
+  const readOnly = policy === 'read-only' && location.inSharedHome;
+
+  // Before the file is read: a good file behind a swapped directory is not ours.
+  checkDirectories(location, !readOnly);
 
   if (readExistingArtifact(location.path) !== null) {
     inspect();
     return written(true);
   }
 
-  const env = options.env ?? process.env;
-  const policy = sharedHookWritePolicy(adapter, [location.path], env);
-  if (policy === 'read-only' && location.inSharedHome) {
+  if (readOnly) {
     throw new UatIsolationLaunchRefusedError(
       adapter,
       `the role artifact ${location.path} does not exist and this run may not write it`,
@@ -523,9 +610,9 @@ export function writeRoleArtifact(input: WriteRoleArtifactInput, options: Artifa
     );
   }
 
-  prepareDirectories(location);
   let published: boolean;
   try {
+    createMissingDirectories(location);
     published = publishExclusively(location.path, bytes);
   } catch (error) {
     if (error instanceof RoleArtifactError) throw error;

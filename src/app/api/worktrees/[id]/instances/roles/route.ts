@@ -41,10 +41,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
   try {
     const { id: requested } = await params;
     const id = canonicalWorktreeId(requested);
-    const db = getDbInstance();
-    const worktree = getWorktreeById(db, id);
-    if (!worktree) return worktreeNotFound(id);
-    return NextResponse.json(await buildInstanceRoleSettings(db, worktree), { status: 200 });
+    return NextResponse.json(await buildInstanceRoleSettings(getDbInstance(), id), { status: 200 });
   } catch (error: unknown) {
     return respondToRoleError(error, logger, 'read-failed');
   }
@@ -66,7 +63,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     const role = parseRoleAssignmentInput(parsed.body.role);
     if (!role) return roleErrorResponse('invalid_request', 'role must be inherit, none or a role id', 400);
     setManagedInstanceRole(db, worktree, instanceId, role);
-    return NextResponse.json(await buildInstanceRoleSettings(db, worktree), { status: 200 });
+    return NextResponse.json(await buildInstanceRoleSettings(db, id), { status: 200 });
   } catch (error: unknown) {
     return respondToRoleError(error, logger, 'write-failed');
   }
@@ -98,9 +95,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       role,
       expectedRosterRevision,
     });
-    const worktree = getWorktreeById(db, id);
-    if (!worktree) return worktreeNotFound(id);
-    const body: InstanceRoleCreateResponse = { ...(await buildInstanceRoleSettings(db, worktree)), created };
+    const body: InstanceRoleCreateResponse = { ...(await buildInstanceRoleSettings(db, id)), created };
     return NextResponse.json(body, { status: 201 });
   } catch (error: unknown) {
     return respondToRoleError(error, logger, 'create-failed');

@@ -28,8 +28,19 @@
  * as well as for a path that is not a repository. Treating null as "another
  * repository" would let a slow git change the result, so a root that exists on
  * disk, is enabled and cannot be identified counts against the answer if its
- * setting differs: reason `membership-undetermined`. A root whose directory is gone
- * cannot be scanned and a disabled one is not scanned, so neither blocks anything.
+ * setting differs, by the same comparison as a member: a root with no row holds
+ * "inherit", which differs from a role. Reason `membership-undetermined`. So two
+ * settings give the same kind of answer whether or not git answered. A root whose
+ * directory is gone cannot be scanned and a disabled one is not scanned, so neither
+ * blocks anything.
+ *
+ * ## Asking git takes time
+ *
+ * The roots are worked out across an `await`, and anything can change meanwhile.
+ * So {@link settleWorktreeMembership} confirms afterwards that what it asked about
+ * still holds, and hands back the row as it is now. Everything else (the roster,
+ * the tool, the settings) is read after that with no `await` in between; better-sqlite3
+ * is synchronous, so one such stretch is one consistent view.
  *
  * ## Targets
  *
@@ -48,6 +59,7 @@ import { getWorktreeById } from '@/lib/db/worktree-db';
 import { resolveGitCommonDir } from '@/lib/git/git-common-dir';
 import { resolveSessionTarget } from '@/lib/session/resolve-session-target';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import type { Worktree } from '@/types/models';
 import {
   isAgentRoleCliTool,
   type EffectiveRole,
@@ -120,23 +132,86 @@ async function resolveMembership(
   return { members: [...members].sort(byPath), undetermined: undetermined.sort(byPath) };
 }
 
-/** The roots a worktree belongs to. Reads only; never registers anything. */
-export async function resolveWorktreeMembership(
-  db: Database.Database,
-  worktree: { path: string; repositoryPath: string },
-  deps: RoleResolverDeps = {}
-): Promise<RoleRepositoryMembership> {
-  const named = worktree.repositoryPath || null;
-  return resolveMembership(db, named, named ? [worktree.path, named] : [worktree.path], deps);
+/** How many times to ask again when the answer went stale during the wait. */
+const MAX_MEMBERSHIP_ATTEMPTS = 3;
+
+function rootsSignature(db: Database.Database): string {
+  return JSON.stringify(getAllRepositories(db).map((root) => [root.id, root.path, root.enabled]));
 }
 
-/** The roots that are the same repository as this one. */
-export async function resolveRepositoryMembership(
+/**
+ * Work out a membership and confirm it still applies once the wait is over.
+ *
+ * @param read - Reads the target as it is now. Throws when it is gone.
+ * @param signature - What the membership depends on, of the target
+ * @throws {AgentRoleTargetNotFoundError} The target went away
+ * @throws Error The target never held still; better no answer than a stale one
+ */
+async function settleMembership<T>(
   db: Database.Database,
-  repository: Repository,
+  read: () => T,
+  signature: (target: T) => string,
+  membershipOf: (target: T) => Promise<RoleRepositoryMembership>
+): Promise<{ target: T; membership: RoleRepositoryMembership }> {
+  for (let attempt = 0; attempt < MAX_MEMBERSHIP_ATTEMPTS; attempt += 1) {
+    const target = read();
+    const asked = `${signature(target)}|${rootsSignature(db)}`;
+    const membership = await membershipOf(target);
+    const current = read();
+    if (`${signature(current)}|${rootsSignature(db)}` === asked) return { target: current, membership };
+  }
+  throw new Error('The repository registration kept changing while it was being read');
+}
+
+/**
+ * The roots a worktree belongs to, and the worktree as it is now. Reads only; never
+ * registers anything. Read whatever goes with the answer before the next `await`.
+ *
+ * @throws {AgentRoleTargetNotFoundError} The worktree does not exist
+ */
+export async function settleWorktreeMembership(
+  db: Database.Database,
+  worktreeId: string,
   deps: RoleResolverDeps = {}
-): Promise<RoleRepositoryMembership> {
-  return resolveMembership(db, repository.path, [repository.path], deps);
+): Promise<{ worktree: Worktree; membership: RoleRepositoryMembership }> {
+  const { target, membership } = await settleMembership(
+    db,
+    () => {
+      const worktree = getWorktreeById(db, worktreeId);
+      if (!worktree) throw new AgentRoleTargetNotFoundError(`Worktree not found: ${worktreeId}`);
+      return worktree;
+    },
+    (worktree) => JSON.stringify([worktree.path, worktree.repositoryPath]),
+    (worktree) => {
+      const named = worktree.repositoryPath || null;
+      return resolveMembership(db, named, named ? [worktree.path, named] : [worktree.path], deps);
+    }
+  );
+  return { worktree: target, membership };
+}
+
+/**
+ * The roots that are the same repository as this one, and the row as it is now.
+ * Read whatever goes with the answer before the next `await`.
+ *
+ * @throws {AgentRoleTargetNotFoundError} The repository does not exist
+ */
+export async function settleRepositoryMembership(
+  db: Database.Database,
+  repositoryId: string,
+  deps: RoleResolverDeps = {}
+): Promise<{ repository: Repository; membership: RoleRepositoryMembership }> {
+  const { target, membership } = await settleMembership(
+    db,
+    () => {
+      const repository = getRepositoryById(db, repositoryId);
+      if (!repository) throw new AgentRoleTargetNotFoundError(`Repository not found: ${repositoryId}`);
+      return repository;
+    },
+    (repository) => repository.path,
+    (repository) => resolveMembership(db, repository.path, [repository.path], deps)
+  );
+  return { repository: target, membership };
 }
 
 function freezeRole(db: Database.Database, roleId: string): ResolvedRole {
@@ -204,10 +279,7 @@ export function resolveDefaultsForTool(
 
   const agreed: StoredRoleState = first ?? { state: 'inherit' };
   const contesting = membership.undetermined.filter((root) => {
-    const state = stateOf(db, root, cliToolId);
-    // A root with no row for this tool holds no opinion that could be lost: if it
-    // did turn out to be a member, a settings row is what would have to differ.
-    return state.state !== 'inherit' && !sameState(state, agreed);
+    return !sameState(stateOf(db, root, cliToolId), agreed);
   });
   if (contesting.length > 0) {
     return {
@@ -250,13 +322,11 @@ export async function resolveInstanceRole(
   input: ResolveInstanceRoleInput,
   deps: RoleResolverDeps = {}
 ): Promise<RoleResolution> {
-  const worktree = getWorktreeById(db, input.worktreeId);
-  if (!worktree) throw new AgentRoleTargetNotFoundError(`Worktree not found: ${input.worktreeId}`);
+  const { membership } = await settleWorktreeMembership(db, input.worktreeId, deps);
   const target = resolveSessionTarget(db, input.worktreeId, {
     instanceId: input.instanceId,
     requestedCliTool: input.requestedCliTool,
   });
-  const membership = await resolveWorktreeMembership(db, worktree, deps);
   return resolveDefaultsForTool(
     db,
     target.cliToolId,
@@ -275,9 +345,8 @@ export async function resolveWorktreeToolRole(
   input: { worktreeId: string; cliToolId: CLIToolType },
   deps: RoleResolverDeps = {}
 ): Promise<RoleResolution> {
-  const worktree = getWorktreeById(db, input.worktreeId);
-  if (!worktree) throw new AgentRoleTargetNotFoundError(`Worktree not found: ${input.worktreeId}`);
-  return resolveDefaultsForTool(db, input.cliToolId, await resolveWorktreeMembership(db, worktree, deps));
+  const { membership } = await settleWorktreeMembership(db, input.worktreeId, deps);
+  return resolveDefaultsForTool(db, input.cliToolId, membership);
 }
 
 /**
@@ -290,14 +359,8 @@ export async function resolveRepositoryToolRole(
   input: { repositoryId: string; cliToolId: CLIToolType },
   deps: RoleResolverDeps = {}
 ): Promise<RoleResolution> {
-  const repository = getRepositoryById(db, input.repositoryId);
-  if (!repository) throw new AgentRoleTargetNotFoundError(`Repository not found: ${input.repositoryId}`);
-  const resolution = resolveDefaultsForTool(
-    db,
-    input.cliToolId,
-    await resolveRepositoryMembership(db, repository, deps)
-  );
-  return attributeToRepository(resolution, repository.id);
+  const { repository, membership } = await settleRepositoryMembership(db, input.repositoryId, deps);
+  return attributeToRepository(resolveDefaultsForTool(db, input.cliToolId, membership), repository.id);
 }
 
 /** From a root's own screen, the answer speaks for that root when it is a member. */

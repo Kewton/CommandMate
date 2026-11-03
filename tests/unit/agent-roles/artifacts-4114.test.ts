@@ -4,7 +4,7 @@
  * @vitest-environment node
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import {
@@ -214,17 +214,17 @@ describe('role artifacts', () => {
 
     it('the pre-launch inspection passes on the file, then fails after it changes', () => {
       const result = write(adapter, TRICKY);
-      inspectRoleArtifact({ adapter, name: NAME, path: result.path, expectedFingerprint: result.artifactFingerprint });
+      inspectRoleArtifact({ adapter, name: NAME, path: result.path, expectedFingerprint: result.artifactFingerprint }, options);
       chmodSync(result.path, 0o600);
       writeFileSync(result.path, Buffer.concat([readFileSync(result.path), Buffer.from('tampered')]));
       expect(() =>
-        inspectRoleArtifact({ adapter, name: NAME, path: result.path, expectedFingerprint: result.artifactFingerprint })
+        inspectRoleArtifact({ adapter, name: NAME, path: result.path, expectedFingerprint: result.artifactFingerprint }, options)
       ).toThrow(expect.objectContaining({ code: 'content-mismatch' }));
     });
 
     it('the inspection refuses a missing file', () => {
       const { path } = resolveArtifactLocation(adapter, NAME, options);
-      expect(() => inspectRoleArtifact({ adapter, name: NAME, path, expectedFingerprint: FP })).toThrow(
+      expect(() => inspectRoleArtifact({ adapter, name: NAME, path, expectedFingerprint: FP }, options)).toThrow(
         expect.objectContaining({ code: 'missing' })
       );
     });
@@ -271,6 +271,110 @@ describe('role artifacts', () => {
     );
   });
 
+  it('a home that is a file is a write failure, not a raw error', () => {
+    writeFileSync(options.codexHome!, 'not a directory');
+    expect(() => write('codex')).toThrow(expect.objectContaining({ code: 'write-failed' }));
+  });
+
+  describe('reusing a file checks the directories as writing does', () => {
+    it('refuses identical content behind a symlinked directory of its own', () => {
+      const first = write('claude');
+      const moved = join(base, 'moved-claude');
+      renameSync(dirname(first.path), moved);
+      symlinkSync(moved, dirname(first.path));
+      expect(() => write('claude')).toThrow(expect.objectContaining({ code: 'symlink' }));
+      expect(() =>
+        inspectRoleArtifact(
+          { adapter: 'claude', name: NAME, path: first.path, expectedFingerprint: first.artifactFingerprint },
+          options
+        )
+      ).toThrow(expect.objectContaining({ code: 'symlink' }));
+    });
+
+    it('refuses identical content behind a symlinked data root, agents directory or antigravity directory', () => {
+      const claude = write('claude');
+      const movedRoot = join(base, 'moved-root');
+      renameSync(options.dataRoot!, movedRoot);
+      symlinkSync(movedRoot, options.dataRoot!);
+      expect(() => write('claude')).toThrow(expect.objectContaining({ code: 'symlink' }));
+      expect(claude.path.startsWith(options.dataRoot!)).toBe(true);
+
+      write('copilot');
+      const movedAgents = join(base, 'moved-agents');
+      renameSync(join(options.copilotHome!, 'agents'), movedAgents);
+      symlinkSync(movedAgents, join(options.copilotHome!, 'agents'));
+      expect(() => write('copilot')).toThrow(expect.objectContaining({ code: 'symlink' }));
+
+      const antigravity = write('antigravity');
+      const movedOwn = join(base, 'moved-own');
+      renameSync(dirname(antigravity.path), movedOwn);
+      symlinkSync(movedOwn, dirname(antigravity.path));
+      expect(() => write('antigravity')).toThrow(expect.objectContaining({ code: 'symlink' }));
+    });
+
+    it('refuses identical content under a shared directory or home others can write', () => {
+      const copilot = write('copilot');
+      chmodSync(dirname(copilot.path), 0o777);
+      expect(() => write('copilot')).toThrow(expect.objectContaining({ code: 'insecure-permissions' }));
+
+      write('codex');
+      chmodSync(options.codexHome!, 0o777);
+      expect(() => write('codex')).toThrow(expect.objectContaining({ code: 'insecure-permissions' }));
+    });
+
+    it('repairs its own directory when it may write', () => {
+      const first = write('claude');
+      chmodSync(dirname(first.path), 0o755);
+      expect(write('claude').reused).toBe(true);
+      expect(mode(dirname(first.path))).toBe(0o700);
+    });
+
+    it('read-only: refuses instead of repairing, and changes no mode', () => {
+      const first = write('antigravity');
+      chmodSync(dirname(first.path), 0o755);
+      expect(() =>
+        writeRoleArtifact(
+          { adapter: 'antigravity', name: NAME, instructions: 'be a marketer' },
+          { ...options, env: { CM_UAT_ISOLATION: '1' } }
+        )
+      ).toThrow(expect.objectContaining({ code: 'insecure-permissions' }));
+      expect(mode(dirname(first.path))).toBe(0o755);
+    });
+
+    it('read-only: an intact file behind intact directories is still reused', () => {
+      write('antigravity');
+      const again = writeRoleArtifact(
+        { adapter: 'antigravity', name: NAME, instructions: 'be a marketer' },
+        { ...options, env: { CM_UAT_ISOLATION: '1' } }
+      );
+      expect(again.reused).toBe(true);
+    });
+
+    it('the pre-launch inspection never repairs either', () => {
+      const first = write('claude');
+      chmodSync(dirname(first.path), 0o755);
+      expect(() =>
+        inspectRoleArtifact(
+          { adapter: 'claude', name: NAME, path: first.path, expectedFingerprint: first.artifactFingerprint },
+          options
+        )
+      ).toThrow(expect.objectContaining({ code: 'insecure-permissions' }));
+      expect(mode(dirname(first.path))).toBe(0o755);
+    });
+
+    it('the pre-launch inspection refuses a path this adapter would not use', () => {
+      const first = write('claude');
+      const copy = join(base, 'copy.md');
+      writeFileSync(copy, readFileSync(first.path), { mode: 0o600 });
+      expect(() =>
+        inspectRoleArtifact(
+          { adapter: 'claude', name: NAME, path: copy, expectedFingerprint: first.artifactFingerprint },
+          options
+        )
+      ).toThrow(expect.objectContaining({ code: 'unexpected-location' }));
+    });
+  });
+
   it('refuses a shared directory other users can write', () => {
     mkdirSync(join(options.copilotHome!, 'agents'), { recursive: true });
     chmodSync(join(options.copilotHome!, 'agents'), 0o777);
@@ -291,11 +395,11 @@ describe('role artifacts', () => {
 
     it('codex: refuses a file that is not this TOML', () => {
       const { path } = resolveArtifactLocation('codex', NAME, options);
-      mkdirSync(dirname(path), { recursive: true });
+      mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
       const bytes = Buffer.from('developer_instructions = "unterminated\n');
       writeFileSync(path, bytes, { mode: 0o600 });
       expect(() =>
-        inspectRoleArtifact({ adapter: 'codex', name: NAME, path, expectedFingerprint: computeFingerprint(bytes) })
+        inspectRoleArtifact({ adapter: 'codex', name: NAME, path, expectedFingerprint: computeFingerprint(bytes) }, options)
       ).toThrow(expect.objectContaining({ code: 'format-invalid' }));
     });
 
@@ -324,11 +428,11 @@ describe('role artifacts', () => {
       ['antigravity', `---\nname: ${NAME}\ndescription: x\n---\nbody`],
     ] as const)('%s: refuses a definition that would lose the role (%j)', (adapter, text) => {
       const { path } = resolveArtifactLocation(adapter, NAME, options);
-      mkdirSync(dirname(path), { recursive: true });
+      mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
       const bytes = Buffer.from(text);
       writeFileSync(path, bytes, { mode: 0o600 });
       expect(() =>
-        inspectRoleArtifact({ adapter, name: NAME, path, expectedFingerprint: computeFingerprint(bytes) })
+        inspectRoleArtifact({ adapter, name: NAME, path, expectedFingerprint: computeFingerprint(bytes) }, options)
       ).toThrow(expect.objectContaining({ code: 'format-invalid' }));
     });
 
@@ -343,17 +447,17 @@ describe('role artifacts', () => {
 
     it('command code: a syntax error is caught, since the CLI would swallow it', () => {
       const { path } = resolveArtifactLocation('command-code', NAME, options);
-      mkdirSync(dirname(path), { recursive: true });
+      mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
       const bytes = Buffer.from('export default function (cmd) { cmd.hooks({ appendSystemPrompt: () => "x" );\n');
       writeFileSync(path, bytes, { mode: 0o600 });
       expect(() =>
-        inspectRoleArtifact({ adapter: 'command-code', name: NAME, path, expectedFingerprint: computeFingerprint(bytes) })
+        inspectRoleArtifact({ adapter: 'command-code', name: NAME, path, expectedFingerprint: computeFingerprint(bytes) }, options)
       ).toThrow(expect.objectContaining({ code: 'format-invalid' }));
     });
 
     it('command code: the check parses and does not run the file', () => {
       const { path } = resolveArtifactLocation('command-code', NAME, options);
-      mkdirSync(dirname(path), { recursive: true });
+      mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
       const marker = join(base, 'ran');
       const bytes = Buffer.from(
         `export default function (cmd) { require('fs').writeFileSync(${JSON.stringify(marker)}, 'x'); }\n` +
@@ -361,7 +465,7 @@ describe('role artifacts', () => {
       );
       writeFileSync(path, bytes, { mode: 0o600 });
       expect(() =>
-        inspectRoleArtifact({ adapter: 'command-code', name: NAME, path, expectedFingerprint: computeFingerprint(bytes) })
+        inspectRoleArtifact({ adapter: 'command-code', name: NAME, path, expectedFingerprint: computeFingerprint(bytes) }, options)
       ).toThrow(expect.objectContaining({ code: 'format-invalid' }));
       expect(existsSync(marker)).toBe(false);
     });
@@ -414,6 +518,100 @@ describe('role artifacts', () => {
           { ...notMoved, env: { ...uat, HOME: base } }
         )
       ).toThrow(UatIsolationLaunchRefusedError);
+    });
+  });
+
+  describe('UAT shared-read-only decides by where the data root really is', () => {
+    const uat = { CM_UAT_ISOLATION: '1' };
+    let fakeHome: string;
+
+    beforeEach(() => {
+      // os.homedir() follows HOME, so "the home" here is a directory of this test.
+      fakeHome = join(base, 'home');
+      mkdirSync(fakeHome);
+      vi.stubEnv('HOME', fakeHome);
+    });
+    afterEach(() => vi.unstubAllEnvs());
+
+    const attempt = (dataRoot: string): ReturnType<typeof writeRoleArtifact> =>
+      writeRoleArtifact({ adapter: 'claude', name: NAME, instructions: 'x' }, { ...options, dataRoot, env: uat });
+
+    it.each([
+      ['the default, named explicitly', () => join(fakeHome, '.commandmate', 'agent-roles')],
+      ['the default, with a trailing slash', () => `${join(fakeHome, '.commandmate', 'agent-roles')}/`],
+      ['the default, spelled with ..', () => join(fakeHome, 'x') + '/../.commandmate/agent-roles'],
+      ['the state directory itself', () => join(fakeHome, '.commandmate')],
+      ['another CLI state directory', () => join(fakeHome, '.codex', 'roles')],
+      ['the home itself', () => fakeHome],
+    ])('refuses %s, and writes nothing', (_label, root) => {
+      expect(() => attempt(root())).toThrow(UatIsolationLaunchRefusedError);
+      expect(readdirSync(fakeHome)).toEqual([]);
+    });
+
+    it('refuses a symlink that leads into the home', () => {
+      mkdirSync(join(fakeHome, '.commandmate'));
+      const link = join(base, 'looks-elsewhere');
+      symlinkSync(join(fakeHome, '.commandmate'), link);
+      expect(() => attempt(join(link, 'agent-roles'))).toThrow(UatIsolationLaunchRefusedError);
+      expect(readdirSync(join(fakeHome, '.commandmate'))).toEqual([]);
+    });
+
+    it('the same applies to the environment variable', () => {
+      expect(() =>
+        writeRoleArtifact(
+          { adapter: 'claude', name: NAME, instructions: 'x' },
+          {
+            ...options,
+            dataRoot: undefined,
+            env: { ...uat, CM_AGENT_ROLE_ARTIFACTS_DIR: `${join(fakeHome, '.commandmate', 'agent-roles')}/` },
+          }
+        )
+      ).toThrow(UatIsolationLaunchRefusedError);
+      expect(readdirSync(fakeHome)).toEqual([]);
+    });
+
+    it('a run directory under the home, like a checkout, may be written', () => {
+      expect(attempt(join(fakeHome, 'work', 'wt', 'run', 'roles')).reused).toBe(false);
+    });
+
+    it('a root outside the home may be written', () => {
+      expect(attempt(join(base, 'run', 'roles')).reused).toBe(false);
+    });
+
+    it('a named root is not tightened, even when it is the home; the default root is', () => {
+      chmodSync(fakeHome, 0o755);
+      const inHome = writeRoleArtifact(
+        { adapter: 'claude', name: NAME, instructions: 'x' },
+        { ...options, dataRoot: fakeHome, env: {} }
+      );
+      expect(mode(fakeHome)).toBe(0o755);
+      expect(mode(dirname(inHome.path))).toBe(0o700);
+
+      const defaultRoot = join(fakeHome, '.commandmate', 'agent-roles');
+      mkdirSync(defaultRoot, { recursive: true });
+      chmodSync(defaultRoot, 0o755);
+      writeRoleArtifact(
+        { adapter: 'claude', name: NAME, instructions: 'x' },
+        { ...options, dataRoot: undefined, env: {} }
+      );
+      expect(mode(defaultRoot)).toBe(0o700);
+    });
+
+    it('a named root others can write is refused', () => {
+      const shared = join(base, 'shared-root');
+      mkdirSync(shared);
+      chmodSync(shared, 0o777);
+      expect(() =>
+        writeRoleArtifact({ adapter: 'claude', name: NAME, instructions: 'x' }, { ...options, dataRoot: shared, env: {} })
+      ).toThrow(expect.objectContaining({ code: 'insecure-permissions' }));
+    });
+
+    it('with no isolation the explicit root is simply used', () => {
+      const result = writeRoleArtifact(
+        { adapter: 'claude', name: NAME, instructions: 'x' },
+        { ...options, dataRoot: join(fakeHome, '.commandmate', 'agent-roles'), env: {} }
+      );
+      expect(result.reused).toBe(false);
     });
   });
 
