@@ -17,7 +17,7 @@ import {
   validateAntigravityModelName,
   validateClaudeModelName,
 } from '../config/model-validation';
-import { fetchAgentInstances, saveAgentInstances, defaultAlias, MAX_AGENT_INSTANCES } from '../utils/agent-instances';
+import { fetchAgentRoster, saveRosterChange, defaultAlias, MAX_AGENT_INSTANCES } from '../utils/agent-instances';
 import {
   isInstanceSelector,
   resolveInstanceTarget,
@@ -106,6 +106,7 @@ function resolveAutoYesDurationMs(duration: string | undefined): number {
  * @param durationMs - Duration already validated by resolveAutoYesDurationMs()
  * @param agent - CLI tool resolved for --instance (Issue #1629), else --agent
  * @param contractPolicy - The policy of the contract this send created (Issue #3723), else null
+ * @param onlyIfOff - Refuse if a grant is on by the time it arrives (Issue #4132)
  */
 async function enableAutoYes(
   client: ApiClient,
@@ -114,12 +115,16 @@ async function enableAutoYes(
   durationMs: number,
   agent: string | undefined,
   instanceId: string | undefined,
-  contractPolicy: AutoYesContractPolicy | null = null
+  contractPolicy: AutoYesContractPolicy | null = null,
+  onlyIfOff = false
 ): Promise<AutoYesSetResult | undefined> {
   const autoYesBody: Record<string, unknown> = {
     enabled: true,
     duration: durationMs,
   };
+  if (onlyIfOff) {
+    autoYesBody.onlyIfOff = true;
+  }
   if (agent) {
     autoYesBody.cliToolId = agent;
   }
@@ -170,18 +175,19 @@ async function registerInstance(
   instanceId: string,
   cliTool: string
 ): Promise<void> {
-  const existing = await fetchAgentInstances(client, worktreeId);
-  if (existing.some((inst) => inst.id === instanceId)) {
-    return;
-  }
-  if (existing.length >= MAX_AGENT_INSTANCES) {
-    console.error(`Warning: could not register '${instanceId}' in the roster (already at the ${MAX_AGENT_INSTANCES}-instance limit).`);
-    return;
-  }
-
-  const next = [...existing, { id: instanceId, cliTool, alias: defaultAlias(cliTool, instanceId), order: existing.length }];
-  await saveAgentInstances(client, worktreeId, next);
-  console.error(`Instance registered in roster: ${instanceId}`);
+  // Issue #4132: the whole list is replaced, so an add landing after this read has to
+  // survive it. Built again on a moved roster, where this one may be there by now.
+  const roster = await fetchAgentRoster(client, worktreeId);
+  const saved = await saveRosterChange(client, worktreeId, roster, (base) => {
+    if (base.some((inst) => inst.id === instanceId)) return null;
+    if (base.length >= MAX_AGENT_INSTANCES) {
+      console.error(`Warning: could not register '${instanceId}' in the roster (already at the ${MAX_AGENT_INSTANCES}-instance limit).`);
+      return null;
+    }
+    const added = { id: instanceId, cliTool, alias: defaultAlias(cliTool, instanceId), order: base.length };
+    return [...base, added as (typeof base)[number]];
+  });
+  if (saved !== null) console.error(`Instance registered in roster: ${instanceId}`);
 }
 
 /**
@@ -402,6 +408,12 @@ async function readAutoYes(
   }
 }
 
+/** The name the server gives a grant (Issue #4132). An older server gives none. */
+function grantIdOf(state: unknown): string | undefined {
+  const grantId = (state as { grantId?: unknown } | null | undefined)?.grantId;
+  return typeof grantId === 'string' ? grantId : undefined;
+}
+
 /** The command that stops one instance's Auto-Yes. An id that is no tool's own needs the tool as well. */
 function stopAutoYesCommand(worktreeId: string, instanceId: string | undefined, cliToolId: string | undefined): string {
   const agent = cliToolId !== undefined && cliToolId !== instanceId ? ` --agent ${cliToolId}` : '';
@@ -409,15 +421,15 @@ function stopAutoYesCommand(worktreeId: string, instanceId: string | undefined, 
 }
 
 /**
- * Turn off the grant this send armed, and no other (Issue #4116). The route has no
- * "only if still this one", so it is read right before: a grant someone updated since
- * has another expiry, and is theirs. `{ enabled: false }` naming nobody would stop
+ * Turn off the grant this send armed, and no other (Issue #4116). It is read right
+ * before, and the request itself says which grant it means (`expectedGrantId`, Issue
+ * #4132), so a grant someone armed since is theirs and stays, even with the same expiry.
+ * A server too old to name its grants is told nothing, and the read is all there is.
+ * `{ enabled: false }` naming nobody would stop
  * every instance of the worktree, so tool and instance are always named. A grant answered
  * for another target than the one read beforehand may be overwriting one that was on,
  * and that read says nothing about it. Anything not certain is left on, with the command
  * that stops it.
- *
- * What remains: an update between that read and the POST.
  */
 async function withdrawArmedAutoYes(
   client: ApiClient,
@@ -443,15 +455,25 @@ async function withdrawArmedAutoYes(
     return;
   }
   if (!now.enabled) return;
-  if (now.expiresAt !== armed.expiresAt || (armed.answerMode !== undefined && now.answerMode !== armed.answerMode)) {
+  const grantId = grantIdOf(armed);
+  if (
+    now.expiresAt !== armed.expiresAt
+    || (armed.answerMode !== undefined && now.answerMode !== armed.answerMode)
+    || (grantId !== undefined && grantIdOf(now) !== grantId)
+  ) {
     leave('it was updated after this send armed it');
     return;
   }
+  const condition = grantId === undefined ? '' : `?expectedGrantId=${encodeURIComponent(grantId)}`;
   try {
-    await client.post<unknown>(`/api/worktrees/${worktreeId}/auto-yes`, { enabled: false, cliToolId, instanceId });
+    await client.post<unknown>(`/api/worktrees/${worktreeId}/auto-yes${condition}`, { enabled: false, cliToolId, instanceId });
     console.error('Auto-yes withdrawn: the message was not sent.');
-  } catch {
-    leave('the request to turn it off failed');
+  } catch (error) {
+    leave(
+      error instanceof ApiError && error.apiCode === 'AUTO_YES_GRANT_CHANGED'
+        ? 'it was updated after this send armed it'
+        : 'the request to turn it off failed'
+    );
   }
 }
 
@@ -808,10 +830,9 @@ hold or the start was refused because of its role (nothing typed).
         const priorState = autoYesTarget?.cliToolId && autoYesTarget.instanceId
           ? await readAutoYes(client, worktreeId, { cliToolId: autoYesTarget.cliToolId, instanceId: autoYesTarget.instanceId })
           : null;
-        const priorAutoYes: boolean | null = !(armsNow && conditional)
+        let priorAutoYes: boolean | null = !(armsNow && conditional)
           ? false
           : typeof priorState?.enabled === 'boolean' ? priorState.enabled : null;
-        const applyAutoYesAfterSend = options.autoYes && (deferAutoYes || priorAutoYes === true);
         let armedGrant: AutoYesSetResult | undefined;
         if (armsNow && priorAutoYes !== true) {
           // Issue #3290: the server can refuse this — 409 when the session by
@@ -822,13 +843,19 @@ hold or the start was refused because of its role (nothing typed).
           // that never went out, which is the state #1608 removed for a bad
           // --duration.
           try {
-            armedGrant = await enableAutoYes(client, worktreeId, options, autoYesDurationMs, agent, instanceId, contractPolicy);
+            armedGrant = await enableAutoYes(client, worktreeId, options, autoYesDurationMs, agent, instanceId, contractPolicy, conditional);
           } catch (error) {
-            await failTask();
-            if (relay) await cancelRelayQuietly(client, relay.id);
-            throw error;
+            // Issue #4132: a grant armed since that read. It is theirs: it stays as it
+            // is, and this is now the send that found one on.
+            if (!conditional || !(error instanceof ApiError) || error.apiCode !== 'AUTO_YES_ALREADY_ENABLED') {
+              await failTask();
+              if (relay) await cancelRelayQuietly(client, relay.id);
+              throw error;
+            }
+            priorAutoYes = true;
           }
         }
+        const applyAutoYesAfterSend = options.autoYes && (deferAutoYes || priorAutoYes === true);
 
         /** Issue #4116: what a conditional send armed, once it is known to have typed nothing. */
         const withdrawAutoYes = async (error: unknown, outcome: FailedSendOutcome | null): Promise<void> => {

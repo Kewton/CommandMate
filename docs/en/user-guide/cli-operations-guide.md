@@ -2150,6 +2150,8 @@ commandmate instances <worktree-id> add --agent codex --role reviewer  # Add an 
 commandmate instances <worktree-id> set-role <instance-id> --role reviewer  # Save the role for its next start (also --none / --inherit)
 ```
 
+`add`, `remove`, `alias` and `send --register` save with the revision of the roster they read (Issue #4132). If the roster changed after the read, the change is rebuilt on the current roster, up to 2 more times, so another add or change is not erased. The id is one that is free in the current roster. If the roster keeps changing, the command ends in an error and other changes stay.
+
 `kill` also disables Auto-Yes for the instances it stops (Auto-Yes of instances it did not stop is kept).
 A successful `kill` (and `remove --kill`) appends one line to `~/.commandmate/session-kills/<UTC date>.jsonl`
 (kept 30 days): the worktree and instance, the tmux sessions the server says it stopped (`killedSessions`),
@@ -2433,6 +2435,7 @@ See what is registered with `commandmate roles defaults`. Errors say which: `unk
 - `--register` without `--role` keeps its old order (sent, then registered) and leaves any role alone
 - `--contract --role` ends the same way. If the contract's own check would refuse for the old setting, the role is saved and the check runs again. A broken contract saves nothing
 - When a send with a role or a pin types nothing, the `--auto-yes` it armed is withdrawn, naming the tool and instance, and only if it reads back as that grant. A grant already on stays as it was until the message is in. A grant updated since, or a send that cannot be said to have typed nothing, leaves it on, and the command to stop it is printed. With no target named, the default it read is named in every later request, so a default changed meanwhile neither overwrites nor withdraws another target's Auto-Yes (a server answering for another target than the one read gets no withdrawal, only the command to stop it)
+- Withdrawing and arming are conditional requests that go by the grant's id (Issue #4132). A grant another operation armed after the read-back is not turned off, even with the same expiry and answer mode. If another operation armed one first, its terms are not overwritten: this send's terms apply once the message is in
 - A refusal that can be checked before the save (`--model` on a running session, a bad image path) leaves no setting. A refusal after the save says the setting stayed saved, whatever refused it
 - `--expect-role-generation <g>` with `--expect-role-fingerprint <f>` / `--expect-no-role` pin the send to what the caller read (`capture --json`'s `roleLaunch`), saving nothing. The server reads them again right before the first key, so a process replaced in between, even with the same role, gets nothing: exit 32. They combine with `--contract` and `--role`
 
@@ -2481,7 +2484,7 @@ Failures included, on stdout (the same sentence goes to stderr). A failure with 
 | 0 | Done |
 | 1 | The server is not running |
 | 2 | Bad arguments, a body that cannot be stored, an unknown or ambiguous role or repository, an instance not on the roster, a tool outside the feature |
-| 31 | A conflict; nothing changed or sent: `name_conflict`, `version_conflict` (`--if-version`), `role_in_use` (`rm` without `--force`), `instance_exists`, `roster_changed` |
+| 31 | A conflict; nothing changed or sent: `name_conflict`, `name_changed` (another rename landed during `edit --name`), `version_conflict` (`--if-version`), `role_in_use` (`rm` without `--force`), `instance_exists`, `roster_changed` |
 | 32 | The body was not typed: the role condition does not hold (`ROLE_CONDITION_UNMET`), or the start was refused because of its role (`ROLE_LAUNCH_REFUSED`, `SESSION_LAUNCH_ROLE_MISMATCH`). `send` / `ask` |
 | 99 | Anything else |
 
@@ -3093,7 +3096,7 @@ commandmate ls --token your-token
 | 5 | UPDATE_FAILED | Update failed (`update`: registry query / `npm install -g` / version verification) |
 | 10 | PROMPT_DETECTED | Prompt detected during wait |
 | 11 | UPSTREAM_FAULT | An upstream API fault was on the screen when the turn ended (`wait --fail-on-upstream-fault`; `ask` always). stderr / `--json` carry `id=...`; `id=context-limit` means the conversation is over the model's context limit — kill the instance (`commandmate instances <wt> kill <instance>`) and send again in a fresh session; `id=model-capacity` means the selected model is at capacity and will not answer — send to another instance or model (#3936) |
-| 31 | ROLE CONFLICT | A role conflict (`name_conflict` / `version_conflict` / `role_in_use` / `instance_exists` / `roster_changed`); nothing changed or sent |
+| 31 | ROLE CONFLICT | A role conflict (`name_conflict` / `name_changed` / `version_conflict` / `role_in_use` / `instance_exists` / `roster_changed`); nothing changed or sent |
 | 32 | ROLE NOT_SENT | The role condition does not hold, or the start was refused because of its role; the body was not typed (`send` / `ask`) |
 | 99 | UNEXPECTED_ERROR | Unexpected error / resource not found |
 | 124 | TIMEOUT | Wait timeout exceeded |

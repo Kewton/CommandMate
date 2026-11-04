@@ -47,16 +47,24 @@
  *  - nothing of it is there: failed, and sending it again is safe;
  *  - it cannot be told, or nothing could be read: `saved_unverified` with `unconfirmed`.
  *
- * A create compares its row, since ids are the smallest free one and an absent id means
- * no such row. A PATCH replaces the whole list, so it compares the list, and the revision
- * it started from means nothing moved.
+ * A create asks the server about its own key (#4132): a row with the same content may be
+ * another tab's, and "not there" stops being true if the request commits a moment later.
+ * Settling marks a key that made nothing, so `failed` holds from then on and adding again
+ * makes one. A PATCH replaces the whole list, so it compares the list, and the revision it
+ * started from means nothing moved. That route takes no key yet, so two tabs saving the
+ * same list can still each read it as their own.
  */
 
 'use client';
 
 import { useCallback, useRef } from 'react';
 import type { AgentInstance } from '@/lib/cli-tools/types';
-import { roleApi, sendRosterPatch } from '@/lib/api-client-agent-roles';
+import { sendRosterPatch } from '@/lib/api-client-agent-roles';
+import {
+  createInstanceWithKey,
+  newInstanceCreationKey,
+  settleInstanceCreation,
+} from '@/lib/agent-roles/instance-creation-client';
 import {
   clearRosterSnapshot,
   ensureRosterSnapshot,
@@ -194,21 +202,28 @@ async function settleLostPatch(
   return { status: 'saved_unverified', unconfirmed: true };
 }
 
-/** A create with no usable answer, from what was read after it. */
-function settleLostCreate(
+/**
+ * A create with no usable answer. `settings` was read after it, which says what is there
+ * but not whose it is: the key says that.
+ */
+async function settleLostCreate(
+  worktreeId: string,
   settings: InstanceRoleSettingsResponse | null,
-  instance: { id: string; cliTool: string; alias: string },
-  role: RoleAssignmentInput,
-): RosterAttempt {
-  if (!settings) return { status: 'saved_unverified', unconfirmed: true };
-  const row = settings.instances.find((entry) => entry.instanceId === instance.id);
-  if (!row) return { status: 'failed' };
-  const { stored } = row;
-  const sameRole = stored.state === 'role' ? role.state === 'role' && role.roleId === stored.roleId : role.state === stored.state;
-  // A row with that id but other content may be this one changed since, or another client's.
-  return row.cliToolId === instance.cliTool && row.alias === instance.alias && sameRole
-    ? { status: 'saved', roster: rosterFromRoleEntries(settings.instances) }
-    : { status: 'saved_unverified', unconfirmed: true };
+  instance: { id: string },
+  idempotencyKey: string,
+): Promise<RosterAttempt> {
+  const unknown: RosterAttempt = { status: 'saved_unverified', unconfirmed: true };
+  const settled = await settleInstanceCreation(worktreeId, idempotencyKey);
+  if (!settled) return unknown;
+  const hasRow = (read: InstanceRoleSettingsResponse | null): boolean =>
+    read?.instances.some((entry) => entry.instanceId === instance.id) ?? false;
+  if (settled.outcome === 'cancelled') {
+    // A row with that id is someone else's: not this one, and the form is out of date.
+    return hasRow(settings) ? unknown : { status: 'failed' };
+  }
+  // The read can be from before the commit it is being asked about.
+  const read = hasRow(settings) ? settings : await refreshAfterWrite(worktreeId);
+  return read && hasRow(read) ? { status: 'saved', roster: rosterFromRoleEntries(read.instances) } : unknown;
 }
 
 /**
@@ -269,11 +284,13 @@ export function enqueueRosterCreate(
     async (base, expectedRevision) => {
       const instance = buildInstance(base);
       if (!instance) return { status: 'skipped' };
+      // One key per attempt: a refusal made nothing, and a rebuild can be another instance.
+      const idempotencyKey = newInstanceCreationKey();
       const result = await writeInstanceRoleSettings(worktreeId, () =>
-        roleApi.createInstance(worktreeId, { instance, role, expectedRosterRevision: expectedRevision }),
+        createInstanceWithKey(worktreeId, { instance, role, expectedRosterRevision: expectedRevision }, idempotencyKey),
       );
       if (!result.ok) {
-        if (result.outcomeUnknown) return settleLostCreate(result.settings, instance, role);
+        if (result.outcomeUnknown) return settleLostCreate(worktreeId, result.settings, instance, idempotencyKey);
         const stale = result.error === 'roster_changed' || result.error === 'instance_exists';
         return stale ? { status: 'conflict' } : { status: 'failed', error: result.error };
       }

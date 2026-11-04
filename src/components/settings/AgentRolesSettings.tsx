@@ -6,9 +6,9 @@
  * A delete is asked for once here and refused by the server when the role is in use;
  * the references shown come from that 409, and removing them takes a second decision.
  *
- * An edit sends only what the form changed. The body has a version and the name has
- * none, so a name sent along with a body edit would put back the name it was opened
- * with, whatever another tab renamed it to since.
+ * An edit sends only what the form changed, each with its own condition: a name sent
+ * along with a body edit would put back the name it was opened with, whatever another
+ * tab renamed it to since. A rename says which name it replaces (#4132).
  */
 
 'use client';
@@ -18,6 +18,7 @@ import { useTranslations } from 'next-intl';
 import { Card } from '@/components/ui';
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
 import { isOutcomeUnknown, roleApi, roleInUseReferences, type RoleApiFailure } from '@/lib/api-client-agent-roles';
+import { updateRoleExpectingName } from '@/lib/agent-roles/instance-creation-client';
 import { notifyRoleCatalogChanged } from '@/hooks/useInstanceRoleSettings';
 import {
   MAX_ROLE_BODY_BYTES,
@@ -206,7 +207,9 @@ export function AgentRolesSettings(): React.ReactElement {
   const failureText = useCallback(
     (failure: RoleApiFailure): string => {
       if (failure.error === 'name_conflict') return t('agentRoles.manage.nameConflict');
-      if (failure.error === 'version_conflict') return t('agentRoles.manage.versionConflict');
+      if (failure.error === 'version_conflict' || failure.error === 'name_changed') {
+        return t('agentRoles.manage.versionConflict');
+      }
       if (failure.error === 'invalid_request' && failure.message) return failure.message;
       return t('agentRoles.manage.saveError');
     },
@@ -261,9 +264,10 @@ export function AgentRolesSettings(): React.ReactElement {
       }
       setBusy(true);
       setEditError(null);
+      let expectedName: string | undefined;
       if (nameChanged) {
-        // The server has no condition on the name, so a rename elsewhere is looked
-        // for here. What is left is the moment between this read and the write.
+        // Read first for the sake of the case below, which is no conflict: someone else
+        // gave it this very name. The moment after this read is the server's to refuse.
         const current = await roleApi.get(editing.id);
         if (!current.ok) {
           setEditError(failureText(current));
@@ -275,11 +279,13 @@ export function AgentRolesSettings(): React.ReactElement {
           setBusy(false);
           return;
         }
+        expectedName = current.data.role.name;
       }
-      const result = await roleApi.update(editing.id, {
-        ...(nameChanged ? { name } : {}),
-        ...(bodyChanged ? { body, expectedBodyVersion: editing.version } : {}),
-      });
+      const bodyEdit = bodyChanged ? { body, expectedBodyVersion: editing.version } : {};
+      const result =
+        expectedName === undefined
+          ? await roleApi.update(editing.id, bodyEdit)
+          : await updateRoleExpectingName(editing.id, { name, ...bodyEdit }, expectedName);
       if (result.ok) {
         setEditing(null);
         const { affected } = result.data;

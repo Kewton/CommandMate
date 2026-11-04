@@ -301,9 +301,13 @@ export class ApiClient {
     return sendWithBody<T>(this.baseUrl, 'PATCH', this.getHeaders(), path, body, this.startDeadline());
   }
 
-  /** HTTP PUT request (Issue #4116: the role settings routes). */
-  async put<T>(path: string, body?: unknown): Promise<T> {
-    return sendWithBody<T>(this.baseUrl, 'PUT', this.getHeaders(), path, body, this.startDeadline());
+  /**
+   * HTTP PUT request (Issue #4116: the role settings routes).
+   *
+   * @param headers - Added to this request: a condition, not part of the body (Issue #4132)
+   */
+  async put<T>(path: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
+    return sendWithBody<T>(this.baseUrl, 'PUT', { ...this.getHeaders(), ...headers }, path, body, this.startDeadline());
   }
 
   /** HTTP DELETE request (Issue #4116: `roles rm`). */
