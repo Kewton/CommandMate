@@ -20,6 +20,7 @@ import {
   resolveEndpointForWorktree,
   resolveRelayEndpoint,
   type RegisteredRelay,
+  type RelayEndpointArg,
 } from './relays';
 
 /**
@@ -44,6 +45,29 @@ export interface RegisterRelayForMessageInput {
    * "was the relay opened?" unanswered — the same reason `/send` is not cut.
    */
   resolveClient?: ApiClient;
+  /** Issue #4133: already resolved by {@link resolveRelayEndpoints}, so not resolved again. */
+  endpoints?: RelayEndpoints;
+  /** Issue #4133: runs when the relay could not be opened, before the command ends. */
+  onFailure?: () => Promise<void>;
+}
+
+/** The two ends of a relay, as the ledger stores them. */
+export interface RelayEndpoints {
+  from: RelayEndpointArg;
+  to: RelayEndpointArg;
+}
+
+/**
+ * Both ends of a `--reply-to`. Only reads. Exits 2 when either cannot be named, so a
+ * caller with something to clean up afterwards calls this before making it (Issue #4133).
+ */
+export async function resolveRelayEndpoints(
+  client: ApiClient,
+  input: Pick<RegisterRelayForMessageInput, 'worktreeId' | 'replyTo' | 'instance' | 'agent'>
+): Promise<RelayEndpoints> {
+  const from = await resolveRelayEndpoint(client, input.replyTo);
+  const to = await resolveEndpointForWorktree(client, input.worktreeId, input.instance, input.agent);
+  return { from, to };
 }
 
 /** Resolve both endpoints and open the relay; returns its id and whether it is bound. */
@@ -51,18 +75,11 @@ export async function registerRelayForMessage(
   client: ApiClient,
   input: RegisterRelayForMessageInput
 ): Promise<RegisteredRelay> {
-  const resolveClient = input.resolveClient ?? client;
-  const replyEndpoint = await resolveRelayEndpoint(resolveClient, input.replyTo);
-  const workerEndpoint = await resolveEndpointForWorktree(
-    resolveClient,
-    input.worktreeId,
-    input.instance,
-    input.agent
-  );
+  const endpoints = input.endpoints ?? await resolveRelayEndpoints(input.resolveClient ?? client, input);
   return registerRelay(client, {
-    from: replyEndpoint,
-    to: workerEndpoint,
+    ...endpoints,
     allowRelayChain: input.allowRelayChain,
+    onFailure: input.onFailure,
   });
 }
 

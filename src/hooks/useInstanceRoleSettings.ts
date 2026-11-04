@@ -27,7 +27,7 @@
 
 'use client';
 
-import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import {
   isOutcomeUnknown,
   readWorktreeRoster,
@@ -52,7 +52,7 @@ interface WorktreeEntry {
   rerun: boolean;
   /** Moves whenever an answer is taken or the snapshot changes, so an older answer is not believed. */
   version: number;
-  /** A write went through and the read that should have followed it failed. */
+  /** A read that something had just changed failed: a write, or the caller's `refreshKey` moving. */
   stale: boolean;
 }
 
@@ -227,8 +227,9 @@ export function refreshInstanceRoleSettings(worktreeId: string): Promise<Instanc
 }
 
 /**
- * Read again because something was just written. A failure is remembered: what is on
- * screen is known to be behind, which a read for no reason could not say.
+ * Read again because something was just written, or a caller's `refreshKey` says
+ * something moved. A failure is remembered: what is on screen is known to be behind,
+ * which a read for no reason could not say.
  */
 export async function refreshAfterWrite(worktreeId: string): Promise<InstanceRoleSettingsResponse | null> {
   const answer = await refreshInstanceRoleSettings(worktreeId);
@@ -276,7 +277,7 @@ export function useInstanceRoleSettings(
   refreshKey?: string,
 ): {
   settings: InstanceRoleSettingsResponse | null;
-  /** A write went through, and what is shown may not include it. */
+  /** Something changed, and what is shown may not include it: the read after it failed. */
   stale: boolean;
   /** Read again after an action of the caller's. */
   refresh: () => Promise<InstanceRoleSettingsResponse | null>;
@@ -302,8 +303,14 @@ export function useInstanceRoleSettings(
     () => false,
   );
 
+  // Issue #4133: `refreshKey` moving is news, as a write is. The first read of a
+  // worktree is not: a failure there has shown nothing old.
+  const lastRead = useRef<{ worktreeId: string; refreshKey: string | undefined } | null>(null);
   useEffect(() => {
-    void refreshInstanceRoleSettings(worktreeId);
+    const last = lastRead.current;
+    lastRead.current = { worktreeId, refreshKey };
+    const moved = last !== null && last.worktreeId === worktreeId && last.refreshKey !== refreshKey;
+    void (moved ? refreshAfterWrite(worktreeId) : refreshInstanceRoleSettings(worktreeId));
   }, [worktreeId, refreshKey]);
 
   // Back from another tab or window: the roster and the launches may have moved.

@@ -36,6 +36,9 @@ import {
   type RoleTranslate,
 } from './role-display';
 
+/** The deadline every other role write has. A kill that outlives it may still have ended the session. */
+const KILL_SESSION_TIMEOUT_MS = 15000;
+
 function InstanceRoleRow({
   worktreeId,
   entry,
@@ -85,18 +88,36 @@ function InstanceRoleRow({
   const handleRestart = useCallback(async () => {
     if (!(await confirm({ description: t('agentRoles.instances.restartConfirm', { alias: entry.alias }) }))) return;
     setError(null);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), KILL_SESSION_TIMEOUT_MS);
+    // Issue #4133: only a refusal says it did not happen. A 5xx, no answer or the
+    // deadline say nothing, so what is running now decides, and either way the rows
+    // are read again.
+    let failed = false;
+    let outcomeUnknown = false;
     try {
       // The query scopes it: without both, this route ends every session of the worktree.
       const query = new URLSearchParams({ cliTool: entry.cliToolId, instance: id });
       const response = await fetch(`/api/worktrees/${worktreeId}/kill-session?${query.toString()}`, {
         method: 'POST',
+        signal: controller.signal,
       });
       // 404: already ended, which is the goal.
-      if (!response.ok && response.status !== 404) throw new Error(String(response.status));
-      onChanged();
+      if (!response.ok && response.status !== 404) {
+        failed = response.status < 500;
+        outcomeUnknown = !failed;
+      }
     } catch {
-      setError(t('agentRoles.instances.restartError'));
+      outcomeUnknown = true;
+    } finally {
+      clearTimeout(timer);
     }
+    if (outcomeUnknown) {
+      const running = await readRunningInstances(worktreeId);
+      failed = running === null || running[id] === true;
+    }
+    if (failed) setError(t('agentRoles.instances.restartError'));
+    onChanged();
   }, [confirm, entry.alias, entry.cliToolId, id, onChanged, t, worktreeId]);
 
   const view = isRunning === undefined ? null : roleApplicationView(entry, isRunning, t);

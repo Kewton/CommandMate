@@ -274,6 +274,7 @@ commandmate send <worktree-id> "<message>" --instance codex-2  # 追加インス
 commandmate send <worktree-id> "<message>" --agent codex --instance codex-3 --register  # 未登録IDをrosterへ登録
 commandmate send <worktree-id> "<message>" --instance codex --role reviewer  # ロールを保存し、そのロールで動くプロセスにだけ送る（commandmate roles の節）
 commandmate send <worktree-id> "<message>" --agent codex --instance codex-3 --register --role reviewer  # 登録とロールを先に作ってから送る
+commandmate send <worktree-id> "<message>" --instance opencode --new-conversation  # OpenCode V1: 止まっているセッションを、覚えている会話を続けず新しい会話で起動する
 commandmate send <worktree-id> "<message>" --auto-yes          # Auto-Yes有効化
 commandmate send <worktree-id> "<message>" --auto-yes --duration 3h
 commandmate send <worktree-id> "<message>" --auto-yes --stop-pattern "FAILED"
@@ -3307,6 +3308,7 @@ commandmate roles default codex --repo . --role reviewer
 - ロールか固定を付けた送信が未入力で終わると、その送信が有効にした `--auto-yes` は取り消します（対象のツールとインスタンスを明示し、直前に読み直して一致するときだけ）。もともと有効だった Auto-Yes は、本文が入るまでそのままです。後から更新された grant や、未入力と確定できないときは残し、止めるコマンドを表示します。宛先を省いても、読んだ既定を以後の全要求に名指しするので、途中で既定が変わっても別の対象の Auto-Yes を上書きも取り消しもしません（サーバーが答えた対象が読んだ対象と違えば、取り消さず止めるコマンドを表示します）
 - 取り消しと有効化は grant の識別子と条件つきの要求で行います（Issue #4132）。読み直しの後に別の操作が有効にした grant は、期限と回答モードが同じでも切りません。読み直しの後で別の操作が先に有効にしていたら、その条件を上書きせず、本文が入ってからこの送信の条件を適用します
 - 保存の前に確かめられる拒否（稼働中への `--model`、不正な画像パス）は設定を残しません。保存の後の拒否は、理由を問わず設定が保存されたことを伝えます
+- OpenCode V1 は、ロールが変わっても覚えている会話を続け、前のロールの発言は履歴に残ります。止めても会話は忘れません。新しい会話にするには、止めてから `send --new-conversation` で送ります。V1 以外のツールと、確認の時点で稼働中または起動途中のセッションは未送信 exit 2 です（確認の後に起動が割り込む場合は検出しません）
 - `--expect-role-generation <g>` と `--expect-role-fingerprint <f>` / `--expect-no-role` は、呼び出し側が読んだ値（`capture --json` の `roleLaunch`）に送信を固定します。何も保存しません。サーバーが最初のキーの直前に読み直すので、その間にプロセスが入れ替われば（同じロールでも）未送信 exit 32 です。`--contract` や `--role` と併用できます
 
 ### `set-role` と `instances --json`

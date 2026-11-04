@@ -49,7 +49,7 @@
 4. **送って、モデルを確かめてから待つ**。tasks.tsv には切替の行を追記する（元の行は残す）。
    ```bash
    AGENT=claude; MODEL=opus
-   # 書く → 起動 → capture --json の model が opus を含むかを確かめてから契約を送る（3-1 と同じ helper。exit 40〜43 なら待たずに止める）
+   # 書く → 起動 → capture --json の model が opus を含むかを確かめてから契約を送る（3-1 と同じ helper。exit 40〜44 なら待たずに止める）
    TASK_ID=$(node scripts/orchestrate/launch-worker.mjs send --run-dir "workspace/orchestration/runs/$DATE" --issue "$issue" \
      --wt "$WT" --worktree "$WT_PATH" --instance claude --model "$MODEL" --contract ".commandmate/tasks/issue-${issue}-opus.yaml") \
      && node scripts/orchestrate/wait-verify.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \

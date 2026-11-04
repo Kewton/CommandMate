@@ -2011,6 +2011,73 @@ describe('--json answers every failure of a role command', () => {
   });
 });
 
+describe('a relay refused after --contract created the task (Issue #4133)', () => {
+  const CONTRACT_ARGS = ['--contract', '.commandmate/tasks/x.yaml', '--instance', 'codex'];
+  const REFUSED = { error: 'you are answering a relayed message', code: 'RELAY_CHAIN_BLOCKED' };
+
+  function relayAnswers(answer: () => Promise<Response> | Response): void {
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      if (String(input).endsWith('/api/relays')) return answer();
+      return dispatch(input, init);
+    });
+  }
+
+  it('no role: exit 2, nothing typed, the task failed, stdout still the task id', async () => {
+    relayAnswers(() => Response.json(REFUSED, { status: 409 }));
+    const result = await send(...CONTRACT_ARGS, '--reply-to', `${WT}@codex`);
+    expect(result.code).toBe(2);
+    expect(taskStatuses).toEqual(['failed']);
+    expect(fakeTool.typed).toEqual([]);
+    expect(result.stdout.split('\n')).toHaveLength(1);
+    expect(result.stdout).toMatch(/^[0-9a-f-]{36}$/);
+    expect(result.stderr).toContain(REFUSED.error);
+  });
+
+  it('with a role, where the relay goes first: the same', async () => {
+    relayAnswers(() => Response.json(REFUSED, { status: 409 }));
+    const result = await send(...CONTRACT_ARGS, '--role', 'reviewer', '--reply-to', `${WT}@codex`);
+    expect(result.code).toBe(2);
+    expect(taskStatuses).toEqual(['failed']);
+    expect(fakeTool.typed).toEqual([]);
+  });
+
+  it('not a refusal, the request failing: the task is failed too', async () => {
+    relayAnswers(() => Response.json({ error: 'boom' }, { status: 500 }));
+    const result = await send(...CONTRACT_ARGS, '--reply-to', `${WT}@codex`);
+    expect(result.code).not.toBe(0);
+    expect(taskStatuses).toEqual(['failed']);
+    expect(fakeTool.typed).toEqual([]);
+  });
+
+  it('a --reply-to that cannot be resolved stops before any task exists', async () => {
+    const posted: string[] = [];
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'POST') posted.push(String(input));
+      return dispatch(input, init);
+    });
+    const result = await send(...CONTRACT_ARGS, '--reply-to', 'not a worktree id!');
+    expect(result.code).toBe(2);
+    expect(result.stdout).toBe('');
+    expect(posted).toEqual([]);
+    expect(taskStatuses).toEqual([]);
+  });
+
+  it('a relay that opens: the task runs (negative control)', async () => {
+    relayAnswers(() => Response.json({ relay: { id: '11111111-2222-4333-8444-555555555555', state: 'pending' } }, { status: 201 }));
+    const result = await send(...CONTRACT_ARGS, '--reply-to', `${WT}@codex`);
+    expect(result.code).toBe(0);
+    expect(taskStatuses).toEqual(['running']);
+    expect(fakeTool.typed).toHaveLength(1);
+  });
+
+  it('no --contract: no task to report on (negative control)', async () => {
+    relayAnswers(() => Response.json(REFUSED, { status: 409 }));
+    const result = await send('hello', '--instance', 'codex', '--reply-to', `${WT}@codex`);
+    expect(result.code).toBe(2);
+    expect(taskStatuses).toEqual([]);
+  });
+});
+
 describe('an OpenCode V1 conversation continuing', () => {
   it('names no flag the CLI lacks, and says what it cannot do; the API\'s sentence is unchanged', async () => {
     const realFetch = dispatch;

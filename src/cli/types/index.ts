@@ -434,6 +434,8 @@ export interface SendOptions {
   expectRoleFingerprint?: string;
   /** Issue #4116: pin the send to a process started with no role. */
   expectNoRole?: boolean;
+  /** Issue #4133: OpenCode V1, session stopped: start a new conversation, not the remembered one. */
+  newConversation?: boolean;
   /**
    * Issue #1545: path to an execution contract, relative to the worktree root
    * (e.g. `.commandmate/tasks/my-task.yaml`). The contract's goal replaces the
