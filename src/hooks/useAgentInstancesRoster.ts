@@ -328,6 +328,9 @@ export function enqueueRosterCreate(
 /**
  * The hook form: binds the queue to a component's worktree and `onInstancesChange`,
  * reading the latest through a ref so the returned `write` is stable.
+ *
+ * Issue #4145: a pane stays mounted across a worktree switch, so after one the latest
+ * callback is the new worktree's. A write answered then is not told to it.
  */
 export function useAgentInstancesRoster(
   worktreeId: string,
@@ -335,12 +338,16 @@ export function useAgentInstancesRoster(
 ): (build: RosterBuilder) => Promise<RosterWriteResult> {
   const onChangeRef = useRef(onInstancesChange);
   onChangeRef.current = onInstancesChange;
+  const currentWorktreeRef = useRef(worktreeId);
+  currentWorktreeRef.current = worktreeId;
   return useCallback(
     (build: RosterBuilder) =>
       enqueueRosterWrite(
         worktreeId,
         build,
-        (roster) => onChangeRef.current(roster),
+        (roster) => {
+          if (currentWorktreeRef.current === worktreeId) onChangeRef.current(roster);
+        },
       ),
     [worktreeId],
   );
@@ -353,13 +360,17 @@ export function useAgentInstanceCreate(
 ): (buildInstance: RosterInstanceBuilder, role: RoleAssignmentInput) => Promise<RosterWriteResult> {
   const onChangeRef = useRef(onInstancesChange);
   onChangeRef.current = onInstancesChange;
+  const currentWorktreeRef = useRef(worktreeId);
+  currentWorktreeRef.current = worktreeId;
   return useCallback(
     (buildInstance: RosterInstanceBuilder, role: RoleAssignmentInput) =>
       enqueueRosterCreate(
         worktreeId,
         buildInstance,
         role,
-        (roster) => onChangeRef.current(roster),
+        (roster) => {
+          if (currentWorktreeRef.current === worktreeId) onChangeRef.current(roster);
+        },
       ),
     [worktreeId],
   );

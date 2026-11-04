@@ -252,6 +252,7 @@
     "restart": "Restart {alias}",
     "restarted": "Ended. The next message starts it on the new version.",
     "restartError": "Could not restart the session.",
+    "restartUnknown": "Whether the session ended could not be confirmed. Check whether it is still running.",
     "loadError": "Could not read the agent CLI versions."
   },
   "settings": {
@@ -411,6 +412,7 @@
       "saveError": "Could not save the role.",
       "restartConfirm": "End the session of {alias}? The next message starts a new one with the current settings.",
       "restartError": "Could not end the session.",
+      "restartUnknown": "Whether the session ended could not be confirmed. Check whether it is still running.",
       "runningUnknown": "Could not read which sessions are running, so the status below does not say whether they are."
     },
     "repository": {

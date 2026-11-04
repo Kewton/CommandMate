@@ -37,6 +37,10 @@ import { AlertTriangle, ArrowUpCircle, RotateCcw } from 'lucide-react';
 import { Button, Card, Spinner } from '@/components/ui';
 import { getCliToolDisplayName, type CLIToolType } from '@/lib/cli-tools/types';
 import { useAgentUpdates, type AgentVersionView } from '@/hooks/useAgentUpdates';
+import { readRunningInstances } from '@/lib/api-client-agent-roles';
+
+/** The deadline `InstanceRolesSection` gives the same request. A kill that outlives it may still have ended the session. */
+const KILL_SESSION_TIMEOUT_MS = 15000;
 
 /** A roster row this card may offer to restart. */
 export interface AgentUpdateInstance {
@@ -116,6 +120,7 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
   const [refreshToken, setRefreshToken] = useState(0);
   const running = useRunningInstances(worktreeId, instances, refreshToken);
   const [restarted, setRestarted] = useState<Record<string, boolean>>({});
+  const [restarting, setRestarting] = useState<Record<string, boolean>>({});
   const [restartError, setRestartError] = useState<string | null>(null);
 
   // Keep the newest output in view without yanking the whole page around: only
@@ -140,20 +145,46 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
     async (instance: AgentUpdateInstance): Promise<void> => {
       if (!worktreeId) return;
       setRestartError(null);
+      setRestarting((prev) => ({ ...prev, [instance.id]: true }));
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), KILL_SESSION_TIMEOUT_MS);
+      // Issue #4145: only a refusal says it did not happen. A 5xx, no answer or the
+      // deadline say nothing, so what is running now decides.
+      let outcome: 'ended' | 'refused' | 'unknown' = 'ended';
       try {
         const query = new URLSearchParams({ cliTool: instance.cliTool, instance: instance.id });
         const response = await fetch(
           `/api/worktrees/${worktreeId}/kill-session?${query.toString()}`,
-          { method: 'POST' }
+          { method: 'POST', signal: controller.signal }
         );
         // 404 means the session already ended, which is the goal — treat it as
         // success rather than making the user press again.
-        if (!response.ok && response.status !== 404) throw new Error(String(response.status));
-        setRestarted((prev) => ({ ...prev, [instance.id]: true }));
-        setRefreshToken((token) => token + 1);
+        if (!response.ok && response.status !== 404) {
+          outcome = response.status < 500 ? 'refused' : 'unknown';
+        }
       } catch {
+        outcome = 'unknown';
+      } finally {
+        clearTimeout(timer);
+      }
+      if (outcome === 'unknown') {
+        const runningNow = await readRunningInstances(worktreeId);
+        if (runningNow === null) {
+          setRestartError(t('agentUpdates.restartUnknown'));
+        } else if (runningNow[instance.id] === true) {
+          setRestartError(t('agentUpdates.restartError'));
+        } else {
+          outcome = 'ended';
+        }
+        setRefreshToken((token) => token + 1);
+      } else if (outcome === 'refused') {
         setRestartError(t('agentUpdates.restartError'));
       }
+      if (outcome === 'ended') {
+        setRestarted((prev) => ({ ...prev, [instance.id]: true }));
+        setRefreshToken((token) => token + 1);
+      }
+      setRestarting((prev) => ({ ...prev, [instance.id]: false }));
     },
     [worktreeId, t]
   );
@@ -277,7 +308,7 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
                       <Button
                         size="sm"
                         variant="ghost"
-                        disabled={restarted[inst.id]}
+                        disabled={restarted[inst.id] || restarting[inst.id]}
                         onClick={() => void restart(inst)}
                         data-testid={`agent-updates-restart-${inst.id}`}
                       >
