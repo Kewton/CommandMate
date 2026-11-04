@@ -192,7 +192,8 @@ export async function sendRosterPatch(
   if (!response.ok) {
     abandon();
     if (response.status === 409) return { kind: 'conflict' };
-    return response.status >= 400 && response.status < 500 ? { kind: 'refused' } : { kind: 'unknown' };
+    // Only a 5xx can follow a write that happened: any other failure answered is a refusal.
+    return response.status >= 500 ? { kind: 'unknown' } : { kind: 'refused' };
   }
   return {
     kind: 'saved',

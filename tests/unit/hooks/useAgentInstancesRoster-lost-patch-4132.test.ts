@@ -134,6 +134,15 @@ describe('[#4132] a roster PATCH whose answer was lost', () => {
     expect(server.calls.filter((call) => call.url.endsWith('/settle'))).toEqual([]);
   });
 
+  it('negative: a failure answered with no 5xx is a failure, and asks nothing further', async () => {
+    const passOn = global.fetch;
+    global.fetch = vi.fn(async (url: string, init?: RequestInit) =>
+      init?.method === 'PATCH' ? ({ ok: false, json: async () => ({}) } as Response) : (passOn as typeof fetch)(url, init),
+    ) as unknown as typeof fetch;
+    expect((await write()).status).toBe('failed');
+    expect(server.calls.filter((call) => call.url.endsWith('/settle'))).toEqual([]);
+  });
+
   it('negative: a write the server refused asks nothing further', async () => {
     const passOn = global.fetch;
     global.fetch = vi.fn(async (url: string, init?: RequestInit) =>
