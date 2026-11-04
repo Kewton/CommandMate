@@ -2379,6 +2379,12 @@ Manage role definitions and defaults without the screen (Issue #4116). The body 
 | `roles default` | The default per tool (`--repo` for that repository, otherwise the system level). Schedules follow too | Unchanged |
 | `instances <wt> set-role` / `send --role` | That instance's setting | Unchanged. A role is fixed when the process starts: stop it (`instances <wt> kill <id>`) and send again to apply |
 
+### A role is not a permission
+
+A role is an instruction to the model. It limits nothing. The text sent with it at the start says that the request, an execution contract and the project instructions (`AGENTS.md` and the like) come first.
+
+For example, send an implementation contract under a "do not edit" role and the agent edits and commits, and `wait --verify` sees the real work and returns exit 0 (checked with Claude on 2026-11-04). To be sure nothing is edited, do not rely on a role: use the CLI's own permission settings, and do not send an implementation contract.
+
 ### Usage
 
 ```bash
