@@ -4,12 +4,16 @@
  *
  * Restart is the split's existing "end session", with its confirmation: the next
  * message starts a fresh process, and there is no other start.
+ *
+ * What it shows may be old when a read after a change failed (Issue #4133). The header
+ * has no room for the sentence, so that is a mark, with the sentence in its title.
  */
 
 'use client';
 
 import React from 'react';
 import { useTranslations } from 'next-intl';
+import { AlertTriangle } from 'lucide-react';
 import { useInstanceRoleSettings } from '@/hooks/useInstanceRoleSettings';
 import { ambiguityReasonText, roleApplicationView } from './role-display';
 
@@ -33,25 +37,41 @@ export function SplitRoleStatus({
   onRestart,
 }: SplitRoleStatusProps): React.ReactElement | null {
   const t = useTranslations('common');
-  const { settings } = useInstanceRoleSettings(worktreeId, `${sessionStatus}:${isRunning}`);
+  const { settings, stale } = useInstanceRoleSettings(worktreeId, `${sessionStatus}:${isRunning}`);
   const entry = settings?.instances.find((candidate) => candidate.instanceId === instanceId);
-  if (!entry) return null;
-  const view = roleApplicationView(entry, isRunning, t);
-  if (!view) return null;
-  const reason = ambiguityReasonText(entry.application.effectiveNext, t);
+  const view = entry ? roleApplicationView(entry, isRunning, t) : null;
+  // With nothing to show too: "no role" may itself be the old answer. Not for a tool
+  // roles do not apply to, which no newer answer would change.
+  const showStale = stale && entry?.supported !== false;
+  if (!view && !showStale) return null;
+  const reason = entry ? ambiguityReasonText(entry.application.effectiveNext, t) : null;
+  const staleText = t('agentRoles.savedStale');
   return (
     <>
-      <span
-        data-testid={`split-role-status-${splitIndex}`}
-        data-pending={view.pending ? 'true' : undefined}
-        title={reason ?? view.text}
-        className={`min-w-0 max-w-[16rem] shrink-[2] truncate text-[11px] leading-none ${
-          view.pending ? 'text-warning' : 'text-muted-foreground'
-        }`}
-      >
-        {view.text}
-      </span>
-      {view.restartable && onRestart ? (
+      {showStale ? (
+        <span
+          role="status"
+          data-testid={`split-role-stale-${splitIndex}`}
+          title={staleText}
+          aria-label={staleText}
+          className="flex-shrink-0 text-warning"
+        >
+          <AlertTriangle size={12} aria-hidden="true" />
+        </span>
+      ) : null}
+      {view ? (
+        <span
+          data-testid={`split-role-status-${splitIndex}`}
+          data-pending={view.pending ? 'true' : undefined}
+          title={reason ?? view.text}
+          className={`min-w-0 max-w-[16rem] shrink-[2] truncate text-[11px] leading-none ${
+            view.pending ? 'text-warning' : 'text-muted-foreground'
+          }`}
+        >
+          {view.text}
+        </span>
+      ) : null}
+      {view?.restartable && onRestart ? (
         <button
           type="button"
           data-testid={`split-role-restart-${splitIndex}`}

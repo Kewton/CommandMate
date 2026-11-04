@@ -180,6 +180,11 @@ export interface RegisterRelayInput {
   /** The session being asked. */
   to: RelayEndpointArg;
   allowRelayChain?: boolean;
+  /**
+   * Runs when the relay could not be opened, refused or not, before the command ends
+   * (Issue #4133): a refusal exits right here, past any caller's own handling.
+   */
+  onFailure?: () => Promise<void>;
 }
 
 /** A relay {@link registerRelay} opened (Issue #3957). */
@@ -225,6 +230,7 @@ export async function registerRelay(
     if (!bound) console.error(LEGACY_RELAY_NOTICE);
     return { id: response.relay.id, bound };
   } catch (error) {
+    await input.onFailure?.();
     if (error instanceof ApiError && error.apiCode && RELAY_REFUSAL_CODES.has(error.apiCode)) {
       console.error(`Error: ${error.payload?.error ?? error.apiCode}`);
       process.exit(ExitCode.CONFIG_ERROR);

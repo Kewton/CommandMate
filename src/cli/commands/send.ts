@@ -6,7 +6,7 @@
 import { Command } from 'commander';
 import { ExitCode, RoleExitCode } from '../types';
 import type { SendOptions } from '../types';
-import type { AutoYesContractPolicy, AutoYesSetResult, TaskCreateResponse, TaskView } from '../types/api-responses';
+import type { AutoYesContractPolicy, AutoYesSetResult, CurrentOutputResponse, TaskCreateResponse, TaskView } from '../types/api-responses';
 import { ApiClient, ApiError, assertResponseShape, isValidWorktreeId, MAX_STOP_PATTERN_LENGTH } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { parseDurationToMs, AUTO_YES_DURATION_FLAG_RANGE, DEFAULT_DURATION_FLAG } from '../config/duration-constants';
@@ -38,7 +38,7 @@ import {
   cancelRelayQuietly,
   type RegisteredRelay,
 } from './relays';
-import { postMessage, registerRelayForMessage, type FailedSendOutcome } from './message-dispatch';
+import { postMessage, registerRelayForMessage, resolveRelayEndpoints, type FailedSendOutcome } from './message-dispatch';
 import {
   assertRoleTool,
   roleAssignmentFromFlag,
@@ -592,6 +592,46 @@ function expectedRoleOf(options: SendOptions): Record<string, unknown> | undefin
   };
 }
 
+/**
+ * `--new-conversation` applies to a stopped OpenCode V1 session and nothing else
+ * (Issue #4133). `POST /send` ignores the field anywhere else, without saying so, so
+ * this is the only place that can refuse it. Read before anything with a side effect.
+ *
+ * What remains: a start between this read and the send. Closing that takes the API.
+ *
+ * @throws A usage error (exit 2) for anything but a session known to be stopped
+ */
+async function assertNewConversationApplies(
+  client: ApiClient,
+  worktreeId: string,
+  agent: string | undefined,
+  instanceId: string | undefined
+): Promise<void> {
+  if (agent !== 'opencode') {
+    throw usageError(
+      `--new-conversation applies only to OpenCode V1 (opencode), the one tool that resumes a remembered conversation; this send addresses ${agent ?? 'no tool'}. Nothing was sent.`
+    );
+  }
+  const instance = instanceId ?? agent;
+  const query = new URLSearchParams({ cliTool: agent, instance });
+  const { isRunning, startingSince } = await client.get<CurrentOutputResponse>(`/api/worktrees/${worktreeId}/current-output?${query.toString()}`);
+  // Ahead of isRunning, which can be false during a launch: that is not "stopped".
+  // Absent on a server that predates the field, and then isRunning is all there is.
+  if (startingSince !== undefined && startingSince !== null) {
+    throw usageError(
+      `--new-conversation applies when a session starts, and ${instance} is still starting. Nothing was sent. Stop it first: commandmate instances ${worktreeId} kill ${instance}`
+    );
+  }
+  if (isRunning === true) {
+    throw usageError(
+      `--new-conversation applies when a session starts, and ${instance} is running. Nothing was sent. Stop it first: commandmate instances ${worktreeId} kill ${instance}`
+    );
+  }
+  if (isRunning !== false) {
+    throw usageError(`--new-conversation needs ${instance} stopped, and the server did not say whether it is. Nothing was sent.`);
+  }
+}
+
 /** The `/send` request body. */
 function buildSendBody(
   content: string | undefined,
@@ -626,6 +666,10 @@ function buildSendBody(
   if (role.expected !== undefined) {
     sendBody.expectedRole = role.expected;
   }
+  // Issue #4133: sent only when asked for, and checked by the CLI first.
+  if (options.newConversation) {
+    sendBody.newConversation = true;
+  }
   return sendBody;
 }
 
@@ -644,6 +688,7 @@ export function createSendCommand(): Command {
     .option('--expect-role-generation <generation>', 'Only send to this process, as read from `capture --json` roleLaunch.sessionGeneration')
     .option('--expect-role-fingerprint <fingerprint>', 'Only send to a process started with this injection fingerprint (roleLaunch.injectionFingerprint)')
     .option('--expect-no-role', 'Only send to a process started with no role')
+    .option('--new-conversation', 'OpenCode V1, session stopped: start a new conversation instead of continuing the remembered one (see below)')
     .option(
       '--model <model>',
       'Specify AI model for a Copilot, Antigravity or Claude agent. For Antigravity and Claude it is a launch'
@@ -704,9 +749,17 @@ message is in. Only the grant it armed: one updated since is left on, with the c
 that stops it. --contract --role saves the role before the contract's own check if that
 check would refuse it, so it behaves like send --role; a broken contract saves nothing.
 A refusal that comes after the save says the setting stayed saved, whatever refused it.
-A save answered by a 5xx or not at all may have happened: it says that is not known, and
-how to check. A 4xx saved nothing.
+A save of its own (--contract --role, --register --role) answered by a 5xx or not at all
+may have happened: it says that is not known, and how to check. A 4xx to that request saved
+nothing. A plain send --role saves inside the send, and its own 400 or 409 can come after the
+save: it then says the setting stayed saved.
 What can be checked first (--model on a running session, the image path) saves nothing.
+
+--new-conversation (Issue #4133): OpenCode V1 goes on with the conversation it remembers,
+even under another role, and stopping the session does not forget it. This starts a new one,
+and is for the send that starts the session: another tool, or a session running or starting
+when this checks, is exit 2 with nothing sent. A start between that check and the send is
+not caught.
 
 Exit codes: 2 usage, or an unknown or ambiguous role, or a tool roles do not apply to
 (nothing sent); 31 a roster conflict (nothing sent); 32 the role condition does not
@@ -735,14 +788,30 @@ hold or the start was refused because of its role (nothing typed).
         // read stops the command with nothing done. A send with no role or pin, or that
         // is one request, is left to the server's reading as it always was.
         const conditional = options.role !== undefined || expectedRole !== undefined;
-        const pinsTarget = conditional && Boolean(options.autoYes || options.contract || options.replyTo);
+        // Issue #4133: --new-conversation too, so the send goes where its check looked.
+        const pinsTarget = Boolean(options.newConversation)
+          || (conditional && Boolean(options.autoYes || options.contract || options.replyTo));
         const commandTarget = pinsTarget ? await pinCommandTarget(client, worktreeId, namedTarget) : namedTarget;
         const { agent, instanceId } = commandTarget;
+        if (options.newConversation) await assertNewConversationApplies(client, worktreeId, agent, instanceId);
 
         // Issue #4116: named before anything with a side effect, so a role that does
         // not exist leaves no task row and no armed Auto-Yes behind.
         if (options.role !== undefined && agent !== undefined) assertRoleTool(agent);
         const roleAssignment = await roleAssignmentFromFlag(client, options.role);
+
+        // Issue #4133: a --reply-to that cannot be resolved exits 2 on the spot, from
+        // several depths. With a contract that has to be before the task row exists;
+        // only opening the relay can still be refused after it, and that closes the task.
+        const relayTarget = {
+          worktreeId,
+          instance: pinsTarget ? instanceId : options.instance,
+          agent: pinsTarget ? agent : options.agent,
+        };
+        const relayEndpoints = options.contract && options.replyTo
+          ? await resolveRelayEndpoints(client, { ...relayTarget, replyTo: options.replyTo })
+          : undefined;
+
         if (roleAssignment !== undefined && options.register && instanceId) {
           await registerInstanceWithRole(client, worktreeId, instanceId, options.agent ?? instanceId, roleAssignment);
         }
@@ -781,11 +850,11 @@ hold or the start was refused because of its role (nothing typed).
         const deferAutoYes = Boolean(options.model) && agent !== 'claude';
         const registerRelay = async (): Promise<RegisteredRelay> => {
           const registered = await registerRelayForMessage(client, {
-            worktreeId,
+            ...relayTarget,
             replyTo: options.replyTo as string,
-            instance: pinsTarget ? instanceId : options.instance,
-            agent: pinsTarget ? agent : options.agent,
             allowRelayChain: options.allowRelayChain,
+            endpoints: relayEndpoints,
+            onFailure: failTask,
           });
           // stderr, not stdout: `--contract` already owns this command's stdout
           // (it prints the task id there), and two commands writing two ids to
@@ -881,7 +950,8 @@ hold or the start was refused because of its role (nothing typed).
         if (sent?.roleResume?.continued) {
           console.error(
             'Note: this conversation continues under a different role, and what the earlier role said stays in its history. '
-              + 'The CLI cannot start a new conversation instead: stopping the session does not forget this one.'
+              + 'The CLI cannot start a new conversation on a running session, and stopping it does not forget this one: '
+              + `stop it (\`commandmate instances ${worktreeId} kill ${instanceId ?? agent ?? '<instance-id>'}\`) and send with --new-conversation.`
           );
         }
 
