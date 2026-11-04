@@ -2078,6 +2078,185 @@ describe('a relay refused after --contract created the task (Issue #4133)', () =
   });
 });
 
+describe('a relay refused after --auto-yes armed, with no role or pin (Issue #4144)', () => {
+  const REPLY_TO = ['--reply-to', `${WT}@codex`];
+  const ARGS = ['--contract', '.commandmate/tasks/x.yaml', '--instance', 'codex', '--auto-yes', ...REPLY_TO];
+  const REFUSED = { error: 'you are answering a relayed message', code: 'RELAY_CHAIN_BLOCKED' };
+  const OPENED = { relay: { id: '11111111-2222-4333-8444-555555555555', state: 'pending' } };
+  const refused = () => Response.json(REFUSED, { status: 409 });
+  const opened = () => Response.json(OPENED, { status: 201 });
+  const isAutoYesRead = (input: unknown, init?: RequestInit) =>
+    (init?.method ?? 'GET') === 'GET' && String(input).includes('/auto-yes');
+
+  /** The relay answers as told; every other request is the real route's. Returns the URLs asked. */
+  function relayAnswers(answer: () => Promise<Response> | Response): string[] {
+    const urls: string[] = [];
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      urls.push(String(input));
+      if (String(input).endsWith('/api/relays')) return answer();
+      return dispatch(input, init);
+    });
+    return urls;
+  }
+
+  it('it was off: exit 2, the task failed, and the grant this send armed is withdrawn by name', async () => {
+    const urls = relayAnswers(refused);
+    const result = await send(...ARGS);
+    expect(result.code).toBe(2);
+    expect(taskStatuses).toEqual(['failed']);
+    expect(fakeTool.typed).toEqual([]);
+    expect(autoYesPosts.map(({ enabled }) => enabled)).toEqual([true, false]);
+    expect(autoYesPosts[1]).toEqual({ enabled: false, cliToolId: 'codex', instanceId: 'codex' });
+    expect(urls.filter((url) => url.includes('expectedGrantId='))).toHaveLength(1);
+    expect(codexAutoYes()).toBe(false);
+    expect(result.stderr).toContain('withdrawn');
+  });
+
+  it('no --contract: withdrawn the same', async () => {
+    relayAnswers(refused);
+    const result = await send('hello', '--instance', 'codex', '--auto-yes', ...REPLY_TO);
+    expect(result.code).toBe(2);
+    expect(taskStatuses).toEqual([]);
+    expect(codexAutoYes()).toBe(false);
+  });
+
+  it('not a refusal, the request failing: nothing was typed either, so withdrawn', async () => {
+    relayAnswers(() => Response.json({ error: 'boom' }, { status: 500 }));
+    const result = await send(...ARGS);
+    expect(result.code).not.toBe(0);
+    expect(taskStatuses).toEqual(['failed']);
+    expect(codexAutoYes()).toBe(false);
+  });
+
+  it('it was on: never turned off, and its terms untouched by the refusal', async () => {
+    setAutoYesEnabled(WT, 'codex', true, 3600000, undefined, 'codex');
+    const before = getAutoYesState(WT, 'codex', 'codex');
+    relayAnswers(refused);
+    expect((await send(...ARGS)).code).toBe(2);
+    expect(autoYesPosts).toEqual([]);
+    expect(getAutoYesState(WT, 'codex', 'codex')).toBe(before);
+  });
+
+  it('a grant armed between this send\'s arming and the refusal: it stays, with the command that stops it', async () => {
+    let other: ReturnType<typeof setAutoYesEnabled> | null = null;
+    relayAnswers(() => {
+      other = setAutoYesEnabled(WT, 'codex', true, 28800000, undefined, 'codex');
+      return refused();
+    });
+    const result = await send(...ARGS);
+    expect(result.code).toBe(2);
+    expect(autoYesPosts.map(({ enabled }) => enabled)).toEqual([true]);
+    expect(getAutoYesState(WT, 'codex', 'codex')).toBe(other);
+    expect(result.stderr).toContain('updated after this send armed it');
+    expect(result.stderr).toContain(`auto-yes ${WT} --disable --instance codex`);
+  });
+
+  it('a grant armed between the read-back and the request: the server refuses by name, and it stays', async () => {
+    let other: ReturnType<typeof setAutoYesEnabled> | null = null;
+    let reads = 0;
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      if (String(input).endsWith('/api/relays')) return refused();
+      const response = await dispatch(input, init);
+      if (isAutoYesRead(input, init)) {
+        reads += 1;
+        if (reads === 2) other = setAutoYesEnabled(WT, 'codex', true, 28800000, undefined, 'codex');
+      }
+      return response;
+    });
+    const result = await send(...ARGS);
+    expect(result.code).toBe(2);
+    expect(autoYesPosts.map(({ enabled }) => enabled)).toEqual([true, false]);
+    expect(getAutoYesState(WT, 'codex', 'codex')).toBe(other);
+    expect(result.stderr).toContain('updated after this send armed it');
+    expect(result.stderr).not.toContain('withdrawn');
+  });
+
+  it('a grant armed between the first read and the arming: not overwritten, and left as it is', async () => {
+    let other: ReturnType<typeof setAutoYesEnabled> | null = null;
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      if (String(input).endsWith('/api/relays')) return refused();
+      const response = await dispatch(input, init);
+      if (isAutoYesRead(input, init)) other = setAutoYesEnabled(WT, 'codex', true, 28800000, undefined, 'codex');
+      return response;
+    });
+    expect((await send(...ARGS)).code).toBe(2);
+    expect(autoYesPosts).toEqual([expect.objectContaining({ enabled: true, onlyIfOff: true })]);
+    expect(getAutoYesState(WT, 'codex', 'codex')).toBe(other);
+  });
+
+  it('the state before could not be read: left on, and it says so', async () => {
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      if (String(input).endsWith('/api/relays')) return refused();
+      if (isAutoYesRead(input, init)) return Response.json({ error: 'x' }, { status: 500 });
+      return dispatch(input, init);
+    });
+    const result = await send(...ARGS);
+    expect(result.code).toBe(2);
+    expect(autoYesPosts.map(({ enabled }) => enabled)).toEqual([true]);
+    expect(codexAutoYes()).toBe(true);
+    expect(result.stderr).toContain('Auto-Yes stays on (it was not known to be off)');
+    expect(result.stderr).toContain(`auto-yes ${WT} --disable --instance codex`);
+  });
+
+  it('naming nobody: nothing to read the state of, so left on, naming what the server armed', async () => {
+    const urls = relayAnswers(refused);
+    const result = await send('hello', '--auto-yes', ...REPLY_TO);
+    expect(result.code).toBe(2);
+    expect(urls.filter((url) => url.includes('/auto-yes?'))).toEqual([]);
+    expect(autoYesPosts).toEqual([expect.not.objectContaining({ onlyIfOff: true })]);
+    expect(codexAutoYes()).toBe(true);
+    expect(result.stderr).toContain(`auto-yes ${WT} --disable --instance codex`);
+  });
+
+  it('a --reply-to that cannot be resolved, no --contract: stops before anything is armed', async () => {
+    const urls = relayAnswers(refused);
+    const result = await send('hello', '--instance', 'codex', '--auto-yes', '--reply-to', 'not a worktree id!');
+    expect(result.code).toBe(2);
+    expect(autoYesPosts).toEqual([]);
+    expect(urls.filter((url) => url.includes('/auto-yes'))).toEqual([]);
+  });
+
+  it('the relay opened and the send was refused before anything was typed: withdrawn too', async () => {
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      if (String(input).endsWith('/api/relays')) return opened();
+      if (String(input).endsWith('/send')) {
+        return Response.json({ error: 'no', sendOutcome: 'not_sent' }, { status: 409 });
+      }
+      return dispatch(input, init);
+    });
+    const result = await send('hello', '--instance', 'codex', '--auto-yes', ...REPLY_TO);
+    expect(result.code).not.toBe(0);
+    expect(codexAutoYes()).toBe(false);
+  });
+
+  it('the relay opened: armed, sent, and it stays on (negative control)', async () => {
+    relayAnswers(opened);
+    const result = await send(...ARGS);
+    expect(result.code).toBe(0);
+    expect(taskStatuses).toEqual(['running']);
+    expect(fakeTool.typed).toHaveLength(1);
+    expect(autoYesPosts.map(({ enabled }) => enabled)).toEqual([true]);
+    expect(codexAutoYes()).toBe(true);
+  });
+
+  it('the relay opened and it was on: this send\'s terms replace it once the message is in (negative control)', async () => {
+    setAutoYesEnabled(WT, 'codex', true, 3600000, undefined, 'codex');
+    relayAnswers(opened);
+    expect((await send(...ARGS, '--duration', '3h')).code).toBe(0);
+    expect(autoYesPosts).toEqual([expect.objectContaining({ enabled: true, duration: 3 * 3600 * 1000 })]);
+    expect(autoYesPosts[0]).not.toHaveProperty('onlyIfOff');
+    expect(codexAutoYes()).toBe(true);
+  });
+
+  it('no --reply-to: no read of the state and no condition on the arming (negative control)', async () => {
+    fakeTool.running = true;
+    const urls = relayAnswers(opened);
+    expect((await send('hello', '--instance', 'codex', '--auto-yes')).code).toBe(0);
+    expect(urls.filter((url) => url.includes('/auto-yes?'))).toEqual([]);
+    expect(autoYesPosts[0]).not.toHaveProperty('onlyIfOff');
+  });
+});
+
 describe('an OpenCode V1 conversation continuing', () => {
   it('names no flag the CLI lacks, and says what it cannot do; the API\'s sentence is unchanged', async () => {
     const realFetch = dispatch;
