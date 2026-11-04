@@ -94,7 +94,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { appendRecord } from './run-log.mjs';
+import { appendRecord, envCleanItemsNote, envCleanShared, formatEnvCleanShared, readRecords } from './run-log.mjs';
 import { dirtyPaths } from './dirty-tree.mjs';
 import { resolveInstanceThroughCli } from './resolve-instance.mjs';
 import { allocateLog, claimLog, executionKey, itemProblem, workItemName } from './execution-key.mjs';
@@ -316,6 +316,31 @@ export function summarizeVerdict(log, exitCode, view = null) {
     `exit=${exitCode}(${meaning}) result=${result ?? '-'} basis=${basis ?? '-'} ` +
     `passed=${passed.join(',') || '-'} failed=${failed.join(',') || '-'}`;
   return { exitCode, meaning, result, basis, passed, failed, line };
+}
+
+/**
+ * What the env-clean gate listed as added or removed (src/lib/verification/env-clean-gate.ts
+ * formatEnvCleanReport), as `<probe>:<sign><name>`, from the stored run or else the gate's part
+ * of the log. Not the worker's own (`[self]`) and not the excused task session (#4148).
+ *
+ * @param {string} log
+ * @param {{ gates?: Array<Record<string, unknown>> } | null} [view]
+ * @returns {string[]}
+ */
+export function envCleanItems(log, view = null) {
+  const gate = Array.isArray(view?.gates) ? view.gates.find((row) => row.gateId === 'env-clean') : null;
+  const report = typeof gate?.logTail === 'string' ? gate.logTail : (/^GATE env-clean [^\n]*\n((?:(?!GATE )[^\n]*\n?)*)/m.exec(log)?.[1] ?? '');
+  const items = [];
+  let probe = null;
+  for (const line of report.split('\n')) {
+    const header = /^ {2}(\S+) (\S+) \(/.exec(line);
+    if (header) probe = header[2] === 'VIOLATED' ? header[1] : null;
+    const change = /^ {4}([+-]) (\S+).* \[([^\]]+)\]$/.exec(line);
+    if (!probe || !change || change[3] === 'self' || change[3].startsWith('task session')) continue;
+    const item = `${probe}:${change[1]}${change[2]}`;
+    if (!items.includes(item)) items.push(item);
+  }
+  return items;
 }
 
 /** A gate's `[timing]` marker (src/lib/verification/gate-runner.ts timingMarker): its log tail's last line. */
@@ -1121,7 +1146,9 @@ export function main(argv, deps = {}) {
       const durationSec = Math.round((now().getTime() - started.getTime()) / 1000);
       // The note and the timing take their gates from one read of the stored run (#3928).
       const view = readRun(run, o.cli, o.wt, verifyRunId, cwd);
-      const note = typeof noteOf === 'function' ? noteOf(view) : noteOf;
+      const items = envCleanItems(verdictLog, view);
+      const verdictNote = typeof noteOf === 'function' ? noteOf(view) : noteOf;
+      const note = items.length > 0 ? `${verdictNote} ${envCleanItemsNote(items)}` : verdictNote;
       const { file } = appendRecord(
         o.runDir,
         o.issues,
@@ -1144,6 +1171,12 @@ export function main(argv, deps = {}) {
       );
       log(`verify #${workItemName(issue, o.item)} ${head.slice(0, 7)} ${result}: ${note}`);
       log(`recorded -> ${file} (log: ${o.logFile})`);
+      // The same item in another worker's verification (#4148): said here, and by `run-log.mjs status`.
+      if (items.length > 0) {
+        for (const shared of envCleanShared(readRecords(o.runDir, o.issues).records)) {
+          if (items.includes(shared.item)) log(formatEnvCleanShared(shared));
+        }
+      }
     };
     const headNow = () => git(run, o.worktree, ['rev-parse', 'HEAD']).trim();
 
@@ -1168,6 +1201,7 @@ export function main(argv, deps = {}) {
     const confirmed = confirmCompletion({
       ...verifyCtx, verdict: { exitCode, log: verdictLog, ...(verifyRunId ? { runId: verifyRunId } : {}) }, signal, since: baseline.found ? baseline.createdAt : null,
     });
+    verdictLog = confirmed.log;
     const verdictLine = (view) => summarizeVerdict(confirmed.log, confirmed.exitCode, view).line;
     // A re-verification (3-3) is the run the verdict is now taken on.
     if (confirmed.reverified) {

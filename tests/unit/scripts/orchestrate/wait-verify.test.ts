@@ -1799,3 +1799,34 @@ describe('a cancelled run and a re-verification without a verdict (#3938 review 
     expect(records()[0].note).toContain('auto-yes=off');
   });
 });
+
+describe('env-clean items across workers (#4148)', () => {
+  const ENV_LOG = [
+    'Verifying: wt-1 (run 12)',
+    'GATE work-evidence PASS (commits=1, uncommitted=0)',
+    'GATE env-clean FAIL (exit=1, 0.2s)',
+    '  home-entries VIOLATED ($HOME entries): +1 -0',
+    '    + .s185h-operator-tests [unattributed]',
+    'GATE lint PASS (exit=0, 30.2s)',
+    'RESULT failed',
+    '',
+  ].join('\n');
+  const OTHER_NOTE = 'exit=20(failed) env-clean-items=home-entries:+.s185h-operator-tests';
+
+  it('records the item and names the other worker that saw it', () => {
+    appendRecord(runDir, '3477', { issue: 3478, stage: 'verify', result: 'fail', head: HEAD_A, note: OTHER_NOTE });
+    const h = harness({ verifyLog: ENV_LOG, verifyExit: 20 });
+    expect(main(argv(), h.deps)).toBe(20);
+    expect(records().at(-1)?.note).toContain('env-clean-items=home-entries:+.s185h-operator-tests');
+    expect(h.out.join('\n')).toContain('env-clean: home-entries:+.s185h-operator-tests in #3478, #3477 — candidate for an outside cause');
+  });
+
+  it('negative control: the first worker to see it is told nothing yet, and a clean run adds no note', () => {
+    const first = harness({ verifyLog: ENV_LOG, verifyExit: 20 });
+    expect(main(argv(), first.deps)).toBe(20);
+    expect(first.out.join('\n')).not.toContain('candidate for an outside cause');
+    const clean = harness();
+    expect(main(argv(), clean.deps)).toBe(0);
+    expect(records().at(-1)?.note).not.toContain('env-clean-items=');
+  });
+});
