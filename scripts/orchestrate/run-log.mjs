@@ -324,7 +324,33 @@ export function summarize(records) {
   });
 }
 
-function formatStatus(summary, skipped) {
+/** What a `verify` record says env-clean listed (wait-verify.mjs): `<probe>:<sign><name>`, comma-separated. */
+const ENV_CLEAN_ITEMS_NOTE = /(?:^|\s)env-clean-items=(\S+)/;
+export const envCleanItemsNote = (items) => `env-clean-items=${items.join(',')}`;
+
+/**
+ * The env-clean items seen by more than one work item of a run (#4148): a candidate for an outside
+ * cause, not a verdict. Two workers' tests can make the same name, so the attribution stays with 3-4.
+ *
+ * @returns {{ item: string, workItems: string[] }[]}
+ */
+export function envCleanShared(records) {
+  /** @type {Map<string, Set<string>>} */
+  const seen = new Map();
+  for (const record of records) {
+    if (record.stage !== 'verify') continue;
+    const items = ENV_CLEAN_ITEMS_NOTE.exec(record.note ?? '')?.[1].split(',') ?? [];
+    for (const item of items) {
+      seen.set(item, (seen.get(item) ?? new Set()).add(`#${record.issue}${itemOf(record) ? `/${itemOf(record)}` : ''}`));
+    }
+  }
+  return [...seen].filter(([, workItems]) => workItems.size > 1).map(([item, workItems]) => ({ item, workItems: [...workItems] }));
+}
+
+export const formatEnvCleanShared = ({ item, workItems }) =>
+  `env-clean: ${item} in ${workItems.join(', ')} — candidate for an outside cause (attribute it: 3-4)`;
+
+function formatStatus(summary, skipped, shared = []) {
   const lines = [];
   for (const item of summary) {
     const stageText = STAGES.filter((stage) => item.stages[stage])
@@ -335,6 +361,7 @@ function formatStatus(summary, skipped) {
         (item.reason ? `\t(${item.reason})` : '')
     );
   }
+  lines.push(...shared.map(formatEnvCleanShared));
   if (skipped.length > 0) lines.push(`skipped unreadable line(s): ${skipped.join(', ')}`);
   return lines.join('\n');
 }
@@ -395,8 +422,9 @@ export function main(argv, now = new Date()) {
     }
     const { file, records, skipped } = readRecords(options.runDir, options.issues);
     const summary = summarize(records);
-    if (options.json) console.log(JSON.stringify({ file, summary, skipped }, null, 2));
-    else console.log(records.length === 0 ? `no records in ${file}` : formatStatus(summary, skipped));
+    const shared = envCleanShared(records);
+    if (options.json) console.log(JSON.stringify({ file, summary, skipped, envCleanShared: shared }, null, 2));
+    else console.log(records.length === 0 ? `no records in ${file}` : formatStatus(summary, skipped, shared));
     return 0;
   } catch (error) {
     console.error(error.message);

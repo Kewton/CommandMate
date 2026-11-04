@@ -45,6 +45,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 import { SECTION_ORDER } from '../changelog-fragments.mjs';
+import { classifyChanges } from '../run-related-unit-tests.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const TEMPLATE_DIR = path.join(HERE, 'templates');
@@ -117,15 +118,42 @@ const ROUTE_TEST = /^tests\/[^\s]+\.(?:test|spec)\.[cm]?[jt]sx?(?: > .+)?$/;
 const SCOPE_COMPANIONS = [
   {
     // tests/unit/lib/slash-command-description-override.test.ts pins the leaves a split description produces (#3998).
-    file: 'tests/unit/lib/slash-command-description-override.test.ts',
+    pattern: 'tests/unit/lib/slash-command-description-override.test.ts',
     when: (scope) => scope.includes('src/config/slash-commands-catalog.json'),
   },
   {
     // tests/unit/skills/sync-map.test.ts pins the sha256 of every file of a mapped package (#4106).
-    file: '.claude/skills/sync-map.json',
+    pattern: '.claude/skills/sync-map.json',
     when: (scope) => scope.some((pattern) => pattern === '.claude/skills' || pattern.startsWith('.claude/skills/')),
   },
+  {
+    // The CLI's copy of an API response lives in src/cli/types/ (#4132: api-responses.ts fell outside the scope, #4148).
+    pattern: 'src/cli/types/**',
+    when: (scope) => changesCliResponses(scope),
+  },
 ];
+
+/** The paths a pattern stands for, with `/**` and trailing slashes dropped: `src/cli/` and `src/cli/**` read alike. */
+function scopeRoots(pattern) {
+  const alternatives = hasBalancedBraces(pattern) ? expandBraces(pattern) : [pattern];
+  return (alternatives ?? []).map((alternative) => alternative.replace(/(?:\/\*\*)?\/*$/, ''));
+}
+
+/**
+ * Whether a scope changes what the CLI reads from the API and does not already hold src/cli/types/:
+ * a route under src/app/api, or CLI code. A pattern above src/cli/types/ (`src/**`) holds it already.
+ */
+function changesCliResponses(scope) {
+  const roots = scope.flatMap(scopeRoots);
+  if (roots.some((root) => ['**', 'src', 'src/cli', 'src/cli/types'].includes(root))) return false;
+  return roots.some(
+    (root) =>
+      root === 'src/app' ||
+      root === 'src/app/api' ||
+      root.startsWith('src/app/api/') ||
+      (root.startsWith('src/cli/') && !root.startsWith('src/cli/types/'))
+  );
+}
 
 /** Whether the scope reaches `tests/fixtures/` (the scanning tests have to be told about a new fixture, #4000). */
 /** Root files `npm run build:server` compiles or is configured by; everything else it reads is under src/. */
@@ -200,6 +228,35 @@ export function touchesServerBuild(scope) {
       return rest.length === 0 && SERVER_BUILD_ROOT_FILES.some((file) => segmentMatches(first, file));
     });
   });
+}
+
+/**
+ * The first scope pattern that can turn `unit-related` into the whole unit suite (#4148), judged
+ * by scripts/run-related-unit-tests.mjs `classifyChanges` itself: docs, .claude and scripts/ all
+ * do (`mode=full`), and then the gate queues on `cpu.heavy` behind every other worker's full run.
+ * The scope is what the worker may touch, not what it will, so this says "can": a plan note, not a stop.
+ * A glob with no extension stands for code, so `src/**` is related and `src/**\/*.json` is not.
+ */
+export function fullUnitPattern(scope) {
+  for (const pattern of scope) {
+    const alternatives = hasBalancedBraces(pattern) ? expandBraces(pattern) : [pattern];
+    if (alternatives === null) return pattern;
+    for (const alternative of alternatives) {
+      const trimmed = alternative.replace(/\/+$/, '');
+      const sample = trimmed.replace(/\*+|\?/g, 'x');
+      const file = trimmed.split('/').pop().includes('.') ? sample : `${sample}/x.ts`;
+      if (classifyChanges([file]).mode === 'full') return pattern;
+    }
+  }
+  return null;
+}
+
+/** What `generate` says about {@link fullUnitPattern} for a contract that runs `unit-related`, or null. */
+export function fullUnitNote(config) {
+  if (!config.gates.includes('unit-related')) return null;
+  const pattern = fullUnitPattern(config.scope);
+  if (pattern === null) return null;
+  return `contract: note: #${config.issue}: unit-related runs the whole unit suite when a file under "${pattern}" changes — write the order of such items in the plan (docs/orchestrate/plan-check.md)`;
 }
 
 /**
@@ -359,7 +416,7 @@ export function normalizeConfig(raw, options = {}) {
     gates.splice(gates.indexOf('typecheck') + 1, 0, SERVER_BUILD_GATE);
   }
   for (const companion of SCOPE_COMPANIONS) {
-    if (companion.when(asWritten) && !scope.includes(companion.file)) scope.push(companion.file);
+    if (companion.when(asWritten) && !scope.includes(companion.pattern)) scope.push(companion.pattern);
   }
   if (!scope.includes(fragment)) scope.push(fragment);
   if (scope.length > MAX_SCOPE_PATTERNS) problems.push(`scope: at most ${MAX_SCOPE_PATTERNS} patterns (got ${scope.length})`);
@@ -766,6 +823,8 @@ function main(argv) {
     return 2;
   }
   try {
+    const note = fullUnitNote(loadConfig(options.configFile, { worktree: options.worktree }));
+    if (note) console.error(note);
     if (options.stdout) {
       process.stdout.write(contractYaml(loadConfig(options.configFile, { worktree: options.worktree })));
       return 0;
