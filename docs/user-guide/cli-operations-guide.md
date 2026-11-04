@@ -3310,6 +3310,7 @@ commandmate roles default codex --repo . --role reviewer
 - 保存の前に確かめられる拒否（稼働中への `--model`、不正な画像パス）は設定を残しません。保存の後の拒否は、理由を問わず設定が保存されたことを伝えます
 - OpenCode V1 は、ロールが変わっても覚えている会話を続け、前のロールの発言は履歴に残ります。止めても会話は忘れません。新しい会話にするには、止めてから `send --new-conversation` で送ります。V1 以外のツールと、確認の時点で稼働中または起動途中のセッションは未送信 exit 2 です（確認の後に起動が割り込む場合は検出しません）
 - `--expect-role-generation <g>` と `--expect-role-fingerprint <f>` / `--expect-no-role` は、呼び出し側が読んだ値（`capture --json` の `roleLaunch`）に送信を固定します。何も保存しません。サーバーが最初のキーの直前に読み直すので、その間にプロセスが入れ替われば（同じロールでも）未送信 exit 32 です。`--contract` や `--role` と併用できます
+- 起動の証拠が無い稼働中のセッション（このサーバーが起動していない、またはサーバーの再起動より前に起動した）への `send --contract` は拒否しません。そのセッションにロールが解決されるときだけ、`Warning:` の行を stderr に 1 行出し、`POST tasks` の応答に `roleWarning` を足します（Issue #4132）。stdout の task id と終了コードは変わりません。ロールを効かせるにはセッションを止めて送り直します。このようなセッションへの送信を断るには `--role` か `--expect-*` を付けます（未送信 exit 32）
 
 ### `set-role` と `instances --json`
 

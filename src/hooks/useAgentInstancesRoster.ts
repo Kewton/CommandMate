@@ -51,9 +51,11 @@
  * content may be another tab's, and "not there" stops being true if the request commits a
  * moment later. Settling marks a key that made nothing, so `failed` holds from then on and
  * adding again makes one. A key whose row has since left the roster reads the same, so the
- * id made again by someone else is not claimed. A committed key is asked once more after the
- * read: a key still standing then says the row read was the one it made. Each attempt has its
- * own key, sent in a header, and the body is the same as without one.
+ * id made again by someone else is not claimed. The read after the settling is always made
+ * then, not taken from what is held, and a committed key is asked once more after it: a key
+ * still standing says the row read was the one it made. If a newer answer was taken while
+ * asking, what was read is not handed on: `saved_unverified`. Each attempt has its own key,
+ * sent in a header, and the body is the same as without one.
  */
 
 'use client';
@@ -193,6 +195,8 @@ async function settleLostPatch(
   const unknown: RosterAttempt = { status: 'saved_unverified', unconfirmed: true };
   clearRosterSnapshot(worktreeId);
   const settled = await settleInstanceCreation(worktreeId, idempotencyKey);
+  // Read now: a snapshot taken while settling can be older than the commit settling found.
+  clearRosterSnapshot(worktreeId);
   const confirmed = await ensureRosterSnapshot(worktreeId);
   if (!confirmed) {
     await refreshAfterWrite(worktreeId);
@@ -200,10 +204,18 @@ async function settleLostPatch(
   }
   // Nothing moved, and it never will because of this: sending it again is safe.
   if (settled?.outcome === 'cancelled' && confirmed.revision === expectedRevision) return { status: 'failed' };
+  if (settled?.outcome !== 'committed') {
+    // Cancelled on a roster that moved: not this write, and what was on screen is out of date.
+    recordRosterSaved(worktreeId, confirmed.roster, confirmed.revision);
+    return unknown;
+  }
+  const crossed = watchForNewerAnswer(worktreeId);
+  const stands = await keyStillStands(worktreeId, idempotencyKey);
+  // Something newer was taken meanwhile, and recording this read would undo it.
+  if (crossed()) return stands ? { status: 'saved_unverified' } : unknown;
+  // Recorded after the asking: for whoever is showing it this starts a read of its own.
   recordRosterSaved(worktreeId, confirmed.roster, confirmed.revision);
-  // Cancelled on a roster that moved: not this write, and what was on screen is out of date.
-  if (settled?.outcome !== 'committed') return unknown;
-  return (await keyStillStands(worktreeId, idempotencyKey)) ? { status: 'saved', roster: confirmed.roster } : unknown;
+  return stands ? { status: 'saved', roster: confirmed.roster } : unknown;
 }
 
 /**
@@ -228,9 +240,10 @@ async function settleLostCreate(
   // Read again: `settings` can be from before the commit, and its row with this id another's.
   const read = await refreshAfterWrite(worktreeId);
   if (!read || !hasRow(read)) return unknown;
-  return (await keyStillStands(worktreeId, idempotencyKey))
-    ? { status: 'saved', roster: rosterFromRoleEntries(read.instances) }
-    : unknown;
+  const crossed = watchForNewerAnswer(worktreeId);
+  if (!(await keyStillStands(worktreeId, idempotencyKey))) return unknown;
+  // Something newer was taken meanwhile, and handing this read on would undo it.
+  return crossed() ? { status: 'saved_unverified' } : { status: 'saved', roster: rosterFromRoleEntries(read.instances) };
 }
 
 /**

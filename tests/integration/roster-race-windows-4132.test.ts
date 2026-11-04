@@ -64,7 +64,7 @@ import * as worktreeRoute from '@/app/api/worktrees/[id]/route';
 import { createInstancesCommand } from '@/cli/commands/instances';
 import { enqueueRosterCreate, enqueueRosterWrite } from '@/hooks/useAgentInstancesRoster';
 import { duringTheCheck } from '../unit/components/roles/fake-role-server';
-import { clearRosterSnapshot } from '@/hooks/useInstanceRoleSettings';
+import { clearRosterSnapshot, getRosterSnapshot, refreshInstanceRoleSettings } from '@/hooks/useInstanceRoleSettings';
 import { roleApi } from '@/lib/api-client-agent-roles';
 
 const WT = 'wt-4132';
@@ -809,6 +809,31 @@ describe('[#4132-9] a lost PATCH, from the hook through the real routes', () => 
       expect(await enqueueRosterCreate(WT, addOne, { state: 'inherit' }, onSaved)).toEqual({ status: 'saved_unverified', unconfirmed: true });
       expect(onSaved).not.toHaveBeenCalled();
     });
+  });
+
+  it('positive: a read taken before a late commit is not the read after the settling', async () => {
+    lost.next = 'not-committed';
+    duringTheCheck('during-first-settling', async () => {
+      await refreshInstanceRoleSettings(WT);
+      const { url, init } = lost.sent as { url: string; init: RequestInit };
+      await worktreeRoute.PATCH(request(url, 'PATCH', JSON.parse(String(init.body)), init.headers as Record<string, string>), wt);
+    });
+    const onSaved = vi.fn();
+    const result = await enqueueRosterWrite(WT, add, onSaved);
+    expect(result.status === 'saved' && result.roster.map((row) => row.id)).toEqual(['claude', 'codex', 'claude-2']);
+    expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it('positive: a newer read taken during the second settling is not overwritten', async () => {
+    lost.next = 'committed';
+    duringTheCheck('before-second-settling', async () => {
+      setAgentInstances(db, WT, [CLAUDE, CODEX, { ...THREE, alias: 'Renamed' }]);
+      await refreshInstanceRoleSettings(WT);
+    });
+    const onSaved = vi.fn();
+    expect(await enqueueRosterWrite(WT, add, onSaved)).toEqual({ status: 'saved_unverified' });
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(getRosterSnapshot(WT)?.roster.map((row) => row.alias)).toEqual(['Claude', 'Codex', 'Renamed']);
   });
 
   it('it committed, by a create: saved', async () => {

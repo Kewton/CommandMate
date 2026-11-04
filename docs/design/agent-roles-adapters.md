@@ -603,12 +603,14 @@ GET で確かめるだけでは足りない。「無い」と読んだ後に先�
 
 - 1 回目の `settle` は遅れて届く要求を止める。読み直しをこの後にするのは、先の読み取りが commit より前かもしれず、その ID の行が別の行かもしれないため。
 - 2 回目の `settle` は読んだ行を自分の行に結び付ける。`settle` と読み直しの間に行が消されて同じ ID で作り直されると、読み直しは別の行を返す。確認は通信を挟むので、この間隔は短いとは限らない。キーは行が名簿を去ると失効し、元に戻らないので、読み直しの後も `committed` なら、commit から読み直しまで行は去っていない。読んだ行は自分の行である。`settle` は 2 回送っても同じ答えを返し、応答の形も変えない。
+- 読み直しは `settle` の後に必ず行い、保持している名簿を使わない。`settle` を待つ間に採用した読み取りは、`settle` が見つけた commit より古いことがあり、作った行が無く見えて再追加で重複しうる。PATCH は名簿の口、POST はロールの口を読む（「+」はロールの口が失敗すると PATCH に切り替わる）。
+- 2 回目の `settle` を待つ間に新しい読み取りを採用したら、読んだ名簿を渡さない。渡すと `onSaved` が新しい表示を古い名簿で上書きする。キーが立っていれば `saved_unverified`（`unconfirmed` なし）にする。読み直して渡さないのは、その読み直しもまた行に結び付いていないため。
 - 順を読み直し、`settle` の 2 手順にしないのは、読んだ直後に commit すると行の無い読み取りが `committed` になり、確認待ちが増えるため。また読み直しが `settle` より前だと、その間の改名を古い名簿のまま渡すため。
 - 2 回目の `settle` の後に行が消されるのは、応答が届いた書き込みの後に消されるのと同じで、次の読み直しで分かる。ここでは区別しない。
 
 | 1 回目の `settle` | 確認の読み直し | 2 回目の `settle` | 結果 |
 |---|---|---|---|
-| `committed` | 行が読めた | `committed` | `saved` |
+| `committed` | 行が読めた | `committed` | `saved`。待つ間に新しい読み取りを採用していれば `saved_unverified` |
 | `committed` | 行が読めた | `cancelled`、または答えが無い | `saved_unverified`（`unconfirmed`）。読んだ行を自分のものと言えない |
 | `committed` | 行が無い、または読めない | 問わない | `saved_unverified`（`unconfirmed`） |
 | `cancelled` | 同じ ID の行が無い、または読めない | 問わない | `failed`（再追加してよい） |
@@ -619,7 +621,7 @@ PATCH の `settleLostPatch` も同じ考えで、内容の一致では判定せ�
 
 | 1 回目の `settle` | 確認の読み直し | 2 回目の `settle` | 結果 |
 |---|---|---|---|
-| `committed` | 読めた | `committed` | `saved` |
+| `committed` | 読めた | `committed` | `saved`。待つ間に新しい読み取りを採用していれば `saved_unverified` |
 | `committed` | 読めた | `cancelled`、または答えが無い | `saved_unverified`（`unconfirmed`） |
 | `committed` | 読めない | 問わない | `saved_unverified`（`unconfirmed`） |
 | `cancelled` | 版が送ったときのまま、または読めない | 問わない | `failed`（再追加してよい） |
@@ -642,6 +644,8 @@ PATCH の `settleLostPatch` も同じ考えで、内容の一致では判定せ�
 `PUT /api/roles/:id` の `X-Expected-Role-Name` ヘッダーに、置き換える名前を URI エンコードして渡す。今の名前が違えば 409 `name_changed` で、本文の変更も含めて何も変えない。今の名前が頼んだ名前と同じなら競合にしない。編集の本文は「変えるものだけ」のままにする。
 
 ### 15.6 今回の範囲に入らなかったもの
+
+起動の証拠が無い稼働中のセッションへの契約は拒否しない（利用者の決定）。そのセッションにロールが解決されるときだけ、`POST tasks` の 201 に `roleWarning` を足し、`send --contract` が stderr へ 1 行出す。
 
 | 場所 | 残るもの |
 |---|---|

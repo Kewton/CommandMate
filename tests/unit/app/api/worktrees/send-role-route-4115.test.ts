@@ -13,7 +13,7 @@ import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree } from '@/lib/db';
 import { createRepository } from '@/lib/db/db-repository';
 import { createAgentRole, getInstanceRoleState, listAgentRoles, setSystemRoleDefault } from '@/lib/db/agent-roles-db';
-import { resetSessionLaunchFlightsForTest } from '@/lib/session/session-launch-flight';
+import { resetSessionLaunchFlightsForTest, runSessionLaunch } from '@/lib/session/session-launch-flight';
 import {
   getLaunchRoleEvidence,
   resetLaunchRoleStateForTest,
@@ -32,6 +32,16 @@ import {
 import { RoleLaunchRefusedError } from '@/lib/agent-roles/launch-errors';
 import type { Worktree } from '@/types/models';
 
+/** What `list-sessions` answers; null when it cannot. */
+const tmuxSessions = vi.hoisted(() => ({ names: [] as string[] | null }));
+vi.mock('@/lib/verification/env-snapshot', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/verification/env-snapshot')>()),
+  probeTmuxSessions: vi.fn(async () =>
+    tmuxSessions.names === null
+      ? { status: 'unavailable', entries: [], reason: 'tmux is gone' }
+      : { status: 'ok', entries: tmuxSessions.names.map((key) => ({ key, detail: null, anchor: null })), reason: null }
+  ),
+}));
 const startSession = vi.fn();
 const isRunning = vi.fn(async () => false);
 
@@ -165,6 +175,7 @@ beforeEach(async () => {
   setLaunchRoleDatabaseForTest(db);
   vi.clearAllMocks();
   resetSessionLaunchFlightsForTest();
+  tmuxSessions.names = [];
   isRunning.mockResolvedValue(false);
   opencodeRunning.mockResolvedValue(false);
   opencodeStart.mockReset();
@@ -352,5 +363,59 @@ describe('POST /tasks: a contract goes out under the role of the start', () => {
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({ code: 'ROLE_CONDITION_UNMET', sendOutcome: 'not_sent' });
     expect(db.prepare('SELECT COUNT(*) AS n FROM tasks').get()).toEqual({ n: 0 });
+  });
+
+  describe('[#4132] a running session with no evidence is warned about, not refused', () => {
+    const SESSION = `mcbd-codex-${WT}`;
+    const created = async (): Promise<Record<string, unknown>> => {
+      const response = await contract();
+      expect(response.status).toBe(201);
+      return response.json();
+    };
+
+    it('a role resolves: created, with a warning that says what to do', async () => {
+      setSystemRoleDefault(db, 'codex', role);
+      tmuxSessions.names = [SESSION];
+      const answer = await created();
+      expect(answer.roleWarning).toMatch(/--role/);
+      expect(answer.roleWarning).toMatch(/--expect-/);
+      expect(answer.roleWarning).toMatch(/stop the session/i);
+      expect(String(answer.roleWarning)).not.toContain('\n');
+      expect(db.prepare('SELECT COUNT(*) AS n FROM tasks').get()).toEqual({ n: 1 });
+    });
+
+    it('no role resolves: the answer is as before', async () => {
+      tmuxSessions.names = [SESSION];
+      expect(Object.keys(await created()).sort()).toEqual(['message', 'task']);
+    });
+
+    it('another session runs, not this one: the answer is as before', async () => {
+      setSystemRoleDefault(db, 'codex', role);
+      tmuxSessions.names = [`${SESSION}-2`];
+      expect(Object.keys(await created()).sort()).toEqual(['message', 'task']);
+    });
+
+    it('being started: the answer is as before', async () => {
+      setSystemRoleDefault(db, 'codex', role);
+      tmuxSessions.names = [SESSION];
+      let finish = (): void => {};
+      const launch = runSessionLaunch(SESSION, 'Codex CLI', () => new Promise<void>((resolve) => { finish = resolve; }));
+      expect(Object.keys(await created()).sort()).toEqual(['message', 'task']);
+      finish();
+      await launch;
+    });
+
+    it('started by this server: the answer is as before', async () => {
+      setSystemRoleDefault(db, 'codex', role);
+      await launchProcess();
+      tmuxSessions.names = [SESSION];
+      expect(Object.keys(await created()).sort()).toEqual(['message', 'task']);
+    });
+
+    it('whether it runs cannot be told: created all the same, with no warning', async () => {
+      setSystemRoleDefault(db, 'codex', role);
+      tmuxSessions.names = null;
+      expect(Object.keys(await created()).sort()).toEqual(['message', 'task']);
+    });
   });
 });

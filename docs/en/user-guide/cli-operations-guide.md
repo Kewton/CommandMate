@@ -2440,6 +2440,7 @@ See what is registered with `commandmate roles defaults`. Errors say which: `unk
 - A refusal that can be checked before the save (`--model` on a running session, a bad image path) leaves no setting. A refusal after the save says the setting stayed saved, whatever refused it
 - OpenCode V1 goes on with the conversation it remembers, even under another role, and what the earlier role said stays in its history. Stopping the session does not forget it. To start a new one, stop the session and send with `--new-conversation`. Another tool, or a session running or starting when this checks, is exit 2 with nothing sent (a start between that check and the send is not detected)
 - `--expect-role-generation <g>` with `--expect-role-fingerprint <f>` / `--expect-no-role` pin the send to what the caller read (`capture --json`'s `roleLaunch`), saving nothing. The server reads them again right before the first key, so a process replaced in between, even with the same role, gets nothing: exit 32. They combine with `--contract` and `--role`
+- `send --contract` to a running session with no evidence of its start (this server did not start it, or started it before restarting) is not refused. Only when the settings give that session a role, one `Warning:` line goes to stderr and `POST tasks` answers with `roleWarning` (Issue #4132). The task id on stdout and the exit code do not change. To apply the role, stop the session and send again. To refuse such a session, pass `--role` or `--expect-*` (not sent, exit 32)
 
 ### `set-role` and `instances --json`
 

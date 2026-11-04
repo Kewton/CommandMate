@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentInstance } from '@/lib/cli-tools/types';
 import { enqueueRosterWrite } from '@/hooks/useAgentInstancesRoster';
-import { clearRosterSnapshot } from '@/hooks/useInstanceRoleSettings';
+import { clearRosterSnapshot, getRosterSnapshot, refreshInstanceRoleSettings } from '@/hooks/useInstanceRoleSettings';
 import { INSTANCE_CREATION_KEY_HEADER } from '@/types/agent-roles';
 import { duringTheCheck, FakeRoleServer, loseNextAnswer } from '../components/roles/fake-role-server';
 
@@ -126,6 +126,31 @@ describe('[#4132] a roster PATCH whose answer was lost', () => {
       expect((await write(onSaved)).status).toBe('saved');
       expect(onSaved).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it('positive: a read taken before a late commit is not the read after the settling', async () => {
+    loseNextAnswer(server, 'PATCH', WT, 'network', { committed: false });
+    duringTheCheck('during-first-settling', async () => {
+      await refreshInstanceRoleSettings(WT);
+      const lost = patches(server)[0];
+      await server.fetch(`/api/worktrees/${WT}`, { method: 'PATCH', body: JSON.stringify(lost.body), headers: lost.headers });
+    });
+    const onSaved = vi.fn();
+    const result = await write(onSaved);
+    expect(result.status === 'saved' && result.roster.map((row) => row.id)).toEqual(['claude', 'claude-2']);
+    expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it('positive: a newer read taken during the second settling is not overwritten', async () => {
+    loseNextAnswer(server, 'PATCH', WT, '500', { committed: true });
+    duringTheCheck('before-second-settling', async () => {
+      server.changeRosterElsewhere([CLAUDE, { ...TWO, alias: 'Renamed' }]);
+      await refreshInstanceRoleSettings(WT);
+    });
+    const onSaved = vi.fn();
+    expect(await write(onSaved)).toEqual({ status: 'saved_unverified' });
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(getRosterSnapshot(WT)?.roster.map((row) => row.alias)).toEqual(['Claude', 'Renamed']);
   });
 
   it('the settling after the read gets no answer: not claimed', async () => {

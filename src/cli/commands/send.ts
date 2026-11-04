@@ -275,6 +275,7 @@ async function createContractTask(
       ['task', 'message'],
       'POST /api/worktrees/:id/tasks'
     );
+    if (typeof created.roleWarning === 'string') console.error(`Warning: ${created.roleWarning}`);
     return {
       taskId: created.task.id,
       message: created.message,

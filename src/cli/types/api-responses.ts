@@ -2426,6 +2426,8 @@ export interface TaskCreateResponse {
   task: TaskView;
   /** Contract preamble + goal, composed server-side; this is what gets sent. */
   message: string;
+  /** A running session with no evidence of its role, which the settings give one (Issue #4132). Absent otherwise and from older servers. */
+  roleWarning?: string;
 }
 
 /** Mirrors: src/app/api/worktrees/[id]/tasks/route.ts GET response. */
