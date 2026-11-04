@@ -53,6 +53,13 @@ export class AgentRoleVersionConflictError extends Error {
   }
 }
 
+export class AgentRoleNameChangedError extends Error {
+  constructor(public readonly currentName: string) {
+    super('The role was renamed since it was read');
+    this.name = 'AgentRoleNameChangedError';
+  }
+}
+
 export class AgentRoleInUseError extends Error {
   constructor(public readonly references: AgentRoleReferences) {
     super('The role is in use');
@@ -167,15 +174,18 @@ export interface AgentRoleEditResult {
  * not a new version of the text.
  *
  * @param input.expectedBodyVersion - When given, the edit applies only at this version
+ * @param input.expectedName - When given, the edit applies only under this name, or
+ *   when the role already has the name asked for
  * @throws {AgentRoleNotFoundError}
  * @throws {AgentRoleVersionConflictError} Someone else got there first; nothing changed
+ * @throws {AgentRoleNameChangedError} Someone else renamed it first; nothing changed
  * @throws {AgentRoleValidationError}
  * @throws {AgentRoleNameConflictError}
  */
 export function updateAgentRole(
   db: Database.Database,
   id: string,
-  input: { name?: unknown; body?: unknown; expectedBodyVersion?: number }
+  input: { name?: unknown; body?: unknown; expectedBodyVersion?: number; expectedName?: string }
 ): AgentRoleEditResult {
   const name = input.name === undefined ? undefined : validatedName(input.name);
   if (input.body !== undefined) assertBody(input.body);
@@ -186,6 +196,9 @@ export function updateAgentRole(
     if (!before) throw new AgentRoleNotFoundError(id);
     if (input.expectedBodyVersion !== undefined && input.expectedBodyVersion !== before.bodyVersion) {
       throw new AgentRoleVersionConflictError(before.bodyVersion);
+    }
+    if (input.expectedName !== undefined && input.expectedName !== before.name && name !== before.name) {
+      throw new AgentRoleNameChangedError(before.name);
     }
     const bodyChanged = newBody !== undefined && newBody !== before.body;
     try {
@@ -366,6 +379,77 @@ export function hasAnyRoleSetting(db: Database.Database): boolean {
     )
     .get() as { present?: number } | undefined;
   return row?.present === 1;
+}
+
+// ---------------------------------------------------------------------------
+// Creation keys (#4132, migration v65)
+// ---------------------------------------------------------------------------
+
+/** How long a key is remembered. A request's deadline is seconds, so a late one is well inside it. */
+export const INSTANCE_CREATION_KEY_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * What a key did. A null `requestFingerprint` is a key given up on, or one whose row has
+ * since left the roster: it makes nothing and claims nothing. Otherwise its write committed,
+ * and `instanceId` names the row it added; null when it added not exactly one (a roster PATCH).
+ */
+export interface InstanceCreationKeyRecord {
+  instanceId: string | null;
+  requestFingerprint: string | null;
+}
+
+export function getInstanceCreationKey(
+  db: Database.Database,
+  worktreeId: string,
+  key: string
+): InstanceCreationKeyRecord | null {
+  const row = db
+    .prepare(
+      `SELECT instance_id, request_fingerprint FROM agent_instance_creation_keys
+       WHERE worktree_id = ? AND idempotency_key = ?`
+    )
+    .get(worktreeId, key) as { instance_id: string | null; request_fingerprint: string | null } | undefined;
+  return row ? { instanceId: row.instance_id, requestFingerprint: row.request_fingerprint } : null;
+}
+
+function writeInstanceCreationKey(
+  db: Database.Database,
+  worktreeId: string,
+  key: string,
+  record: InstanceCreationKeyRecord
+): void {
+  const now = Date.now();
+  db.prepare('DELETE FROM agent_instance_creation_keys WHERE created_at < ?').run(now - INSTANCE_CREATION_KEY_TTL_MS);
+  db.prepare(
+    `INSERT INTO agent_instance_creation_keys (worktree_id, idempotency_key, instance_id, request_fingerprint, created_at)
+     VALUES (?, ?, ?, ?, ?)`
+  ).run(worktreeId, key, record.instanceId, record.requestFingerprint, now);
+}
+
+/** Written in the transaction that creates the row, so one never exists without the other. */
+export function recordInstanceCreationKey(
+  db: Database.Database,
+  worktreeId: string,
+  key: string,
+  instanceId: string | null,
+  requestFingerprint: string
+): void {
+  writeInstanceCreationKey(db, worktreeId, key, { instanceId, requestFingerprint });
+}
+
+/**
+ * What a key came to. One that has made nothing is marked given up on here, so a request
+ * still on its way with it makes nothing either: the answer holds from now on.
+ *
+ * @returns The instance it made, or null when it made none and never will
+ */
+export function settleInstanceCreationKey(db: Database.Database, worktreeId: string, key: string): string | null {
+  return db.transaction((): string | null => {
+    const existing = getInstanceCreationKey(db, worktreeId, key);
+    if (existing) return existing.instanceId;
+    writeInstanceCreationKey(db, worktreeId, key, { instanceId: null, requestFingerprint: null });
+    return null;
+  })();
 }
 
 // ---------------------------------------------------------------------------

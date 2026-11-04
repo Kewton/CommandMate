@@ -17,6 +17,7 @@ import type {
   AgentRoleListResponse,
   EffectiveRole,
   InstanceRoleCreateResponse,
+  InstanceCreationSettleResponse,
   InstanceRoleSettingsResponse,
   RepositoryRoleDefaultsResponse,
   RoleLaunchRecord,
@@ -188,4 +189,23 @@ export const instanceSettingsExample: InstanceRoleSettingsResponse = {
 export const instanceCreateExample: InstanceRoleCreateResponse = {
   ...instanceSettingsExample,
   created: { instanceId: 'codex-2' },
+};
+
+/** The same `idempotencyKey` sent again (#4132): 200 rather than 201, and nothing new. */
+export const instanceCreateReplayExample: InstanceRoleCreateResponse = {
+  ...instanceCreateExample,
+  replayed: true,
+};
+
+/** `POST .../instances/roles/settle` (#4132). `cancelled`: that key will create nothing from now on. */
+export const instanceCreationSettleExamples: Record<'committed' | 'cancelled', InstanceCreationSettleResponse> = {
+  committed: { success: true, outcome: 'committed', instanceId: 'codex-2' },
+  cancelled: { success: true, outcome: 'cancelled' },
+};
+
+/** A rename whose `expectedName` is no longer the name (#4132). */
+export const nameChangedErrorExample: AgentRoleErrorResponse = {
+  success: false,
+  error: 'name_changed',
+  message: 'The role was renamed since it was read',
 };

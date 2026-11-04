@@ -19,7 +19,8 @@ import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { isCliToolId, CLI_TOOL_IDS } from '../config/cli-tool-ids';
 import {
   fetchAgentInstances,
-  saveAgentInstances,
+  fetchAgentRoster,
+  saveRosterChange,
   nextInstanceId,
   defaultAlias,
   MAX_AGENT_INSTANCES,
@@ -743,9 +744,10 @@ async function addInstance(
   const roleSettings = roleAssignment === undefined
     ? null
     : await client.get<InstanceRoleSettingsResponse>(`/api/worktrees/${worktreeId}/instances/roles`);
-  const existing: Array<AgentInstance> = roleSettings === null
-    ? await fetchAgentInstances(client, worktreeId)
-    : roleSettings.instances.map((instance, order) => ({
+  const roster = roleSettings === null ? await fetchAgentRoster(client, worktreeId) : null;
+  const existing: Array<AgentInstance> = roster !== null
+    ? roster.instances
+    : (roleSettings as InstanceRoleSettingsResponse).instances.map((instance, order) => ({
         id: instance.instanceId,
         cliTool: instance.cliToolId,
         alias: instance.alias,
@@ -789,10 +791,23 @@ async function addInstance(
     }
     return;
   }
-  const next: AgentInstance[] = [...existing, { id, cliTool: options.agent, alias, order: existing.length }];
-  await saveAgentInstances(client, worktreeId, next);
+  // Issue #4132: built again if the roster moved after the read, so the checks above and
+  // the free id are asked again of what is really there.
+  const agent = options.agent;
+  let addedId = id;
+  const next = await saveRosterChange(client, worktreeId, roster ?? { instances: existing }, (base) => {
+    if (base.length >= MAX_AGENT_INSTANCES) {
+      refuse(`worktree already has the maximum of ${MAX_AGENT_INSTANCES} agent instances.`);
+    }
+    addedId = options.id ?? nextInstanceId(agent, base);
+    if (base.some((inst) => inst.id === addedId)) {
+      refuse(`instance '${addedId}' already exists.`);
+    }
+    const added = { id: addedId, cliTool: agent, alias: options.alias ?? defaultAlias(agent, addedId), order: base.length };
+    return [...base, added as AgentInstance];
+  });
 
-  console.error(`Instance added: ${id} (${options.agent})`);
+  console.error(`Instance added: ${addedId} (${options.agent})`);
   if (options.json) {
     console.log(JSON.stringify(next, null, 2));
   }
@@ -844,7 +859,8 @@ async function removeInstance(
     process.exit(ExitCode.CONFIG_ERROR);
   }
 
-  const existing = await fetchAgentInstances(client, worktreeId);
+  const roster = await fetchAgentRoster(client, worktreeId);
+  const existing = roster.instances;
 
   if (!existing.some(inst => inst.id === instanceId)) {
     console.error(`Error: instance '${instanceId}' not found in roster.`);
@@ -865,8 +881,15 @@ async function removeInstance(
     }
   }
 
-  const next = existing.filter(inst => inst.id !== instanceId);
-  await saveAgentInstances(client, worktreeId, next);
+  // Issue #4132: what the kill above did is not repeated when the roster moved; only this is.
+  await saveRosterChange(client, worktreeId, roster, (base) => {
+    if (!base.some(inst => inst.id === instanceId)) return null;
+    if (base.length <= MIN_AGENT_INSTANCES) {
+      console.error('Error: cannot remove the last remaining agent instance.');
+      process.exit(ExitCode.CONFIG_ERROR);
+    }
+    return base.filter(inst => inst.id !== instanceId);
+  });
   console.error(`Instance removed from roster: ${instanceId}`);
 }
 
@@ -888,15 +911,14 @@ async function renameInstance(
     process.exit(ExitCode.CONFIG_ERROR);
   }
 
-  const existing = await fetchAgentInstances(client, worktreeId);
-  const index = existing.findIndex(inst => inst.id === instanceId);
-  if (index === -1) {
-    console.error(`Error: instance '${instanceId}' not found in roster.`);
-    process.exit(ExitCode.UNEXPECTED_ERROR);
-  }
-
-  const next = existing.map((inst, i) => (i === index ? { ...inst, alias } : inst));
-  await saveAgentInstances(client, worktreeId, next);
+  const roster = await fetchAgentRoster(client, worktreeId);
+  await saveRosterChange(client, worktreeId, roster, (base) => {
+    if (!base.some(inst => inst.id === instanceId)) {
+      console.error(`Error: instance '${instanceId}' not found in roster.`);
+      process.exit(ExitCode.UNEXPECTED_ERROR);
+    }
+    return base.map(inst => (inst.id === instanceId ? { ...inst, alias } : inst));
+  });
   console.error(`Instance alias updated: ${instanceId} -> "${alias}"`);
 }
 

@@ -23,8 +23,11 @@
  * - **Racing the roster PATCH.** That route replaces the list from what its client
  *   read earlier. Clients take `rosterRevision` from the responses here and hand it
  *   back as `expectedRosterRevision`; a stale one is refused before anything is
- *   written. The PATCH takes the same condition (#4117); a client that sends none
- *   is not checked.
+ *   written. The PATCH (#4117) and the PUT of a role (#4132) take the same condition;
+ *   a client that sends none is not checked.
+ * - **A create or a roster PATCH can be asked about (#4132).** Comparing rows cannot tell
+ *   this request's row from another client's identical one, so either may carry a key,
+ *   written in its transaction. See `docs/design/agent-roles-adapters.md` §15.
  *
  * @module lib/agent-roles/management
  */
@@ -38,10 +41,13 @@ import {
   setAgentInstances,
 } from '@/lib/db/agent-instances-db';
 import {
+  getInstanceCreationKey,
+  type InstanceCreationKeyRecord,
   getInstanceRoleState,
   getLatestRoleLaunchRecords,
   getRepositoryRoleStates,
   getSystemRoleDefaults,
+  recordInstanceCreationKey,
   setInstanceRoleState,
 } from '@/lib/db/agent-roles-db';
 import type { Repository } from '@/lib/db/db-repository';
@@ -77,7 +83,14 @@ import {
 /** The refusals a route turns into a status. */
 export class InstanceRoleRequestError extends Error {
   constructor(
-    public readonly code: 'not_found' | 'tool_not_supported' | 'invalid_request' | 'instance_exists' | 'roster_changed',
+    public readonly code:
+      | 'not_found'
+      | 'tool_not_supported'
+      | 'invalid_request'
+      | 'instance_exists'
+      | 'roster_changed'
+      | 'idempotency_key_reused'
+      | 'creation_cancelled',
     message: string
   ) {
     super(message);
@@ -251,6 +264,8 @@ function assertToolTakesAssignment(cliToolId: CLIToolType, input: RoleAssignment
 /**
  * Set the role of an instance the roster shows.
  *
+ * @param expectedRosterRevision - When given, the write applies only to this roster:
+ *   the same id can have become another tool's since the caller read it
  * @throws {InstanceRoleRequestError}
  * @throws {AgentRoleNotFoundError}
  */
@@ -258,17 +273,74 @@ export function setManagedInstanceRole(
   db: Database.Database,
   worktree: Worktree,
   instanceId: string,
-  input: RoleAssignmentInput
+  input: RoleAssignmentInput,
+  expectedRosterRevision?: string
 ): void {
-  const instance = currentRoster(db, worktree).find((entry) => entry.id === instanceId);
-  if (!instance) throw new InstanceRoleRequestError('not_found', `Instance not in the roster: ${instanceId}`);
-  assertToolTakesAssignment(instance.cliTool, input);
-  setInstanceRoleState(db, worktree.id, instanceId, input);
+  db.transaction(() => {
+    const roster = currentRoster(db, worktree);
+    assertRosterRevision(roster, expectedRosterRevision);
+    const instance = roster.find((entry) => entry.id === instanceId);
+    if (!instance) throw new InstanceRoleRequestError('not_found', `Instance not in the roster: ${instanceId}`);
+    assertToolTakesAssignment(instance.cliTool, input);
+    setInstanceRoleState(db, worktree.id, instanceId, input);
+  })();
+}
+
+function assertRosterRevision(roster: readonly AgentInstance[], expected: string | undefined): void {
+  if (expected !== undefined && expected !== computeRosterRevision(roster)) {
+    throw new InstanceRoleRequestError('roster_changed', 'The roster changed since it was read');
+  }
+}
+
+/** What a key stands for. Another request sending the same key is not this one. */
+function creationFingerprint(
+  instance: { id: unknown; cliTool: unknown; alias?: unknown },
+  role: RoleAssignmentInput
+): string {
+  const canonical = [instance.id, instance.cliTool, instance.alias ?? null, role.state, role.state === 'role' ? role.roleId : null];
+  return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
+}
+
+/**
+ * What a key already did, for a request sending it again.
+ *
+ * @returns Its commit, or null when it has done nothing yet
+ * @throws {InstanceRoleRequestError} It was given up on, or stood for another request
+ */
+export function knownCreationKey(
+  db: Database.Database,
+  worktreeId: string,
+  key: string,
+  fingerprint: string
+): InstanceCreationKeyRecord | null {
+  const known = getInstanceCreationKey(db, worktreeId, key);
+  if (!known) return null;
+  if (known.requestFingerprint === null) {
+    throw new InstanceRoleRequestError('creation_cancelled', 'This write was given up on, or its row has gone, and makes nothing now');
+  }
+  if (known.requestFingerprint !== fingerprint) {
+    throw new InstanceRoleRequestError('idempotency_key_reused', 'This key was used for another request');
+  }
+  return known;
+}
+
+/** What a key on a roster PATCH stands for: the list it replaces the roster with. */
+export function rosterWriteFingerprint(agentInstances: unknown): string {
+  return createHash('sha256').update(JSON.stringify(agentInstances)).digest('hex');
+}
+
+/** The row a roster write adds, for its key to name. None when it adds not exactly one. */
+export function soleAddedInstanceId(previous: readonly AgentInstance[], next: readonly AgentInstance[]): string | null {
+  const added = next.filter((row) => !previous.some((was) => was.id === row.id && was.cliTool === row.cliTool));
+  return added.length === 1 ? added[0].id : null;
 }
 
 /**
  * Add an instance and its role together, so a launch that follows sees the right
  * role from its first turn, and a failure leaves neither.
+ *
+ * With `idempotencyKey`, what that key already did is answered first, before the
+ * revision: a resend's revision is stale because of its own first attempt.
  *
  * @throws {InstanceRoleRequestError}
  * @throws {AgentRoleNotFoundError}
@@ -280,19 +352,20 @@ export function createInstanceWithRole(
     instance: { id: unknown; cliTool: unknown; alias?: unknown };
     role: RoleAssignmentInput;
     expectedRosterRevision?: string;
+    idempotencyKey?: string;
   }
-): { instanceId: string } {
+): { instanceId: string; replayed?: true } {
   return db.transaction(() => {
     // Inside the transaction, so the revision compared is the list being replaced.
     const worktree = getWorktreeById(db, worktreeId);
     if (!worktree) throw new InstanceRoleRequestError('not_found', `Worktree not found: ${worktreeId}`);
-    const current = currentRoster(db, worktree);
-    if (
-      input.expectedRosterRevision !== undefined &&
-      input.expectedRosterRevision !== computeRosterRevision(current)
-    ) {
-      throw new InstanceRoleRequestError('roster_changed', 'The roster changed since it was read');
+    const fingerprint = creationFingerprint(input.instance, input.role);
+    if (input.idempotencyKey !== undefined) {
+      const known = knownCreationKey(db, worktreeId, input.idempotencyKey, fingerprint);
+      if (known) return { instanceId: known.instanceId as string, replayed: true as const };
     }
+    const current = currentRoster(db, worktree);
+    assertRosterRevision(current, input.expectedRosterRevision);
     if (current.some((entry) => entry.id === input.instance.id)) {
       throw new InstanceRoleRequestError('instance_exists', `Instance already exists: ${String(input.instance.id)}`);
     }
@@ -317,6 +390,9 @@ export function createInstanceWithRole(
       throw error;
     }
     setInstanceRoleState(db, worktreeId, created.id, input.role);
+    if (input.idempotencyKey !== undefined) {
+      recordInstanceCreationKey(db, worktreeId, input.idempotencyKey, created.id, fingerprint);
+    }
     return { instanceId: created.id };
   })();
 }

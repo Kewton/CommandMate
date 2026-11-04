@@ -720,6 +720,18 @@ export async function runningRoleProblem(
   return 'The role settings changed after this session was started, so the contract was not sent. Stop the session and send again.';
 }
 
+/** Whether the settings give this target a role, whatever it would compose with. */
+export async function settingsGiveRole(
+  db: Database.Database,
+  target: LaunchRoleTarget,
+  worktreePath: string,
+  deps: RoleResolverDeps = {}
+): Promise<boolean> {
+  const unread: RoleEnvReader = async () => undefined;
+  const snapshot = await resolveLaunchRole(db, { ...target, worktreePath, readEnv: unread, composition: {} }, deps);
+  return snapshot.resolution?.kind === 'role';
+}
+
 /** The session is gone, or its id is. What was known about it no longer applies. */
 export function forgetLaunchRoleEvidence(target: LaunchRoleTarget): void {
   const key = evidenceKey(target);

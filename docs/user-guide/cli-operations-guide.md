@@ -2963,6 +2963,8 @@ commandmate instances <worktree-id> add --agent codex --role reviewer  # 追加�
 commandmate instances <worktree-id> set-role <instance-id> --role reviewer  # 次回の起動のロールを保存（--none / --inherit も）
 ```
 
+`add` / `remove` / `alias` と `send --register` は読んだ名簿の版を付けて保存します（Issue #4132）。読んだ後に名簿が変わっていたら、今の名簿で作り直して最大 2 回やり直すので、別の追加や変更を消しません。ID は今の名簿で空いているものになります。変わり続けて保存できないときはエラーで終わり、他の変更はそのまま残ります。
+
 `kill` は止めたインスタンスの Auto-Yes も無効にします（止めていない別インスタンスの Auto-Yes は残ります）。
 `kill`（`remove --kill` も）が成功すると、どの worktree・インスタンスの、どの tmux セッション（サーバーの
 応答の `killedSessions`）を、どこ（cwd と tmux セッション）から止めたかを
@@ -3302,11 +3304,13 @@ commandmate roles default codex --repo . --role reviewer
 - ロールを持てるのは roster にあるインスタンスだけです。roster 外の ID には `--register` も付けます
 - `--register --role` は、インスタンスとロールを送信の**前に**作るので、最初の起動からそのロールで動きます。繰り返しても作成はされず、`--role` の値で既存の指定を置き換えたうえで、上の条件が適用されます。読み取りの後に roster が変わると exit 31 で未送信です
 - `--role` なしの `--register` は従来どおり（送信の後に登録）で、既存のロールには触れません
-- `--contract --role` も同じ結果になります。契約側の検査が古い設定で拒否するときは、ロールを保存して検査し直します。契約そのものが不正なら何も保存しません
+- `--contract --role` も同じ結果になります。契約側の検査が古い設定で拒否するときは、ロールを保存して検査し直します。契約そのものが不正なら何も保存しません。保存は読み直した名簿の版を条件にするので（Issue #4132）、その後に名簿が変わっていれば何も保存せず exit 31（`roster_changed`）です
 - ロールか固定を付けた送信が未入力で終わると、その送信が有効にした `--auto-yes` は取り消します（対象のツールとインスタンスを明示し、直前に読み直して一致するときだけ）。もともと有効だった Auto-Yes は、本文が入るまでそのままです。後から更新された grant や、未入力と確定できないときは残し、止めるコマンドを表示します。宛先を省いても、読んだ既定を以後の全要求に名指しするので、途中で既定が変わっても別の対象の Auto-Yes を上書きも取り消しもしません（サーバーが答えた対象が読んだ対象と違えば、取り消さず止めるコマンドを表示します）
+- 取り消しと有効化は grant の識別子と条件つきの要求で行います（Issue #4132）。読み直しの後に別の操作が有効にした grant は、期限と回答モードが同じでも切りません。読み直しの後で別の操作が先に有効にしていたら、その条件を上書きせず、本文が入ってからこの送信の条件を適用します
 - 保存の前に確かめられる拒否（稼働中への `--model`、不正な画像パス）は設定を残しません。保存の後の拒否は、理由を問わず設定が保存されたことを伝えます
 - OpenCode V1 は、ロールが変わっても覚えている会話を続け、前のロールの発言は履歴に残ります。止めても会話は忘れません。新しい会話にするには、止めてから `send --new-conversation` で送ります。V1 以外のツールと、確認の時点で稼働中または起動途中のセッションは未送信 exit 2 です（確認の後に起動が割り込む場合は検出しません）
 - `--expect-role-generation <g>` と `--expect-role-fingerprint <f>` / `--expect-no-role` は、呼び出し側が読んだ値（`capture --json` の `roleLaunch`）に送信を固定します。何も保存しません。サーバーが最初のキーの直前に読み直すので、その間にプロセスが入れ替われば（同じロールでも）未送信 exit 32 です。`--contract` や `--role` と併用できます
+- 起動の証拠が無い稼働中のセッション（このサーバーが起動していない、またはサーバーの再起動より前に起動した）への `send --contract` は拒否しません。そのセッションにロールが解決されるときだけ、`Warning:` の行を stderr に 1 行出し、`POST tasks` の応答に `roleWarning` を足します（Issue #4132）。stdout の task id と終了コードは変わりません。ロールを効かせるにはセッションを止めて送り直します。このようなセッションへの送信を断るには `--role` か `--expect-*` を付けます（未送信 exit 32）
 
 ### `set-role` と `instances --json`
 
@@ -3353,7 +3357,7 @@ commandmate roles default codex --repo . --role reviewer
 | 0 | 成功 |
 | 1 | サーバー未起動 |
 | 2 | 引数の誤り、保存できない本文、未知または曖昧なロール・リポジトリ、roster に無いインスタンス、対象外のツール |
-| 31 | 競合（何も変更・送信していない）: `name_conflict`、`version_conflict`（`--if-version`）、`role_in_use`（`--force` なしの `rm`）、`instance_exists`、`roster_changed` |
+| 31 | 競合（何も変更・送信していない）: `name_conflict`、`name_changed`（`edit --name` の間に別の改名が入った）、`version_conflict`（`--if-version`）、`role_in_use`（`--force` なしの `rm`）、`instance_exists`、`roster_changed` |
 | 32 | 本文を入力していない: ロールの条件を満たさない（`ROLE_CONDITION_UNMET`）、ロールのために起動を拒否（`ROLE_LAUNCH_REFUSED`、`SESSION_LAUNCH_ROLE_MISMATCH`）。`send` / `ask` |
 | 99 | 予期しないエラー |
 
@@ -4127,7 +4131,7 @@ commandmate ls --token your-token
 | 10 | PROMPT_DETECTED | wait中にプロンプトを検出 |
 | 11 | UPSTREAM_FAULT | ターン終了時に画面に上流障害があった（`wait --fail-on-upstream-fault`。`ask` は常時）。stderr / `--json` に `id=...`。`id=context-limit` は `instances <wt> kill <instance>` で新しいセッションにして送り直す。`id=model-capacity` は別の instance・別のモデルへ送る（#3936） |
 | 30 | NO_ACTIVE_SESSIONS | interruptの対象となる稼働中セッションが無い |
-| 31 | ROLE CONFLICT | ロールの競合（`name_conflict` / `version_conflict` / `role_in_use` / `instance_exists` / `roster_changed`）。何も変更・送信していない |
+| 31 | ROLE CONFLICT | ロールの競合（`name_conflict` / `name_changed` / `version_conflict` / `role_in_use` / `instance_exists` / `roster_changed`）。何も変更・送信していない |
 | 32 | ROLE NOT_SENT | ロールの条件を満たさない、またはロールのために起動を拒否。本文は入力していない（`send` / `ask`） |
 | 99 | UNEXPECTED_ERROR | 予期しないエラー / リソース未検出 |
 | 124 | TIMEOUT | waitのタイムアウト |

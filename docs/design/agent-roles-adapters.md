@@ -567,3 +567,86 @@ Welcome to the Antigravity CLI. You are currently not signed in.
 | OpenCode V2 | `GET /api/config?directory=…` は 1 つの統合オブジェクトではなく設定元の配列（`[{type,path,info},…]`）を返し、env の分が最後に来る。その `info.agents.<実効 agent>.system` のハッシュを**生成物 fingerprint** と比べ、本文はログに出さない。`/api/agent` には本文が含まれない | 実測（#4115、バイト一致を確認。serve のみ） |
 | Copilot | 画面の `✗ Custom agent` / `✗ Failed to select agent` が無いこと（否定の証拠）。`-p` は exit 1 | 実測 |
 | Antigravity | 未確認 | 未確認 |
+
+## 15. 読み直しと書き込みの間の窓を閉じる設計（#4132、migration v65）
+
+実装より先に書いた。作成の要求を識別する冪等キーの保存に migration を使うため。
+
+### 15.1 冪等キーの保存場所と寿命
+
+| 項目 | 決定 | 理由 |
+|---|---|---|
+| 保存場所 | 新しい表 `agent_instance_creation_keys`（v65） | 名簿の行と同じトランザクションで書かないと「作ったがキーが残らない」窓が残る。メモリではサーバーの再起動で消える |
+| 主キー | `(worktree_id, idempotency_key)` | キーの範囲は worktree ごと。`worktree_id` の規約に従うので ID の改名に追従し、worktree と一緒に消える |
+| 行の中身 | `instance_id`（足した行。ちょうど 1 行でなければ NULL）、`request_fingerprint`（NULL は取り消し済み、または行が名簿を去った）、`created_at` | 本文も秘密も持たない。fingerprint は POST が ID・ツール・別名・ロールの SHA-256、PATCH が送った名簿の SHA-256 |
+| 寿命 | 24 時間。キーを書くたびに古い行を消す | 要求の期限は 15 秒で、遅れて届く要求もこれを大きく超えない |
+| キーの形 | 英数字・`_`・`-` の 16〜128 文字。クライアントが要求ごとに作る | 画面は http でも動くので `crypto.randomUUID` に頼らず `getRandomValues` で作る |
+
+ロールバックは表を消すだけ。消えるのは 24 時間以内の再送の記憶で、名簿とロールは変わらない。
+
+### 15.2 応答が失われたときの確かめ方
+
+内容の一致では自分の作成か分からない。2 タブの同じ追加では先着の行が自分の行に見える。キーで確かめる。
+
+- `POST instances/roles` と `PATCH /api/worktrees/:id`（`agentInstances` を含むとき）の `Idempotency-Key` ヘッダーでキーを渡す。同じトランザクションでキーと行を書く。本文は作るものだけを表すので、キーの有無で変えない。キーの空間は共通で、確認の口も `settle` の 1 つ。
+- 同じキーの再送は作らず先の結果を返す（200、`replayed: true`）。別の内容なら 409 `idempotency_key_reused`。PATCH は版の検査より先にキーを見る（再送の版は自分の 1 回目で古くなっている）。他の項目も書かない。
+- `POST instances/roles/settle` に `{ idempotencyKey }` を送る。commit 済みならその ID を返す。まだなら**取り消しの印を書いて** `cancelled` を返す。
+- 取り消し済みのキーで届いた要求は 409 `creation_cancelled` で何も作らない。
+- 行が名簿を去ると（`setAgentInstances` / `removeAgentInstance`）、その行を作ったキーも取り消し済みにする。同じ ID で別のツールになるときも別の行として扱う。同じ ID で作り直された行を旧キーが自分の作成と判定せず、再送でも作り直さない。改名と並べ替えでは失効しない。
+- 複数行を足す PATCH のキーはどの行も名指さない（`committed` だけを答え、失効もしない）。画面の PATCH は 1 回に 1 行しか足さない。
+
+GET で確かめるだけでは足りない。「無い」と読んだ後に先の要求が commit すると、再追加で 2 件になる。`settle` は印を残すので、`cancelled` の答えは「この要求は今後も作らない」を意味し、再追加が安全になる。
+
+### 15.3 `settleLostCreate` の結果
+
+確認は `settle`、読み直し、`settle` の順に行う。
+
+- 1 回目の `settle` は遅れて届く要求を止める。読み直しをこの後にするのは、先の読み取りが commit より前かもしれず、その ID の行が別の行かもしれないため。
+- 2 回目の `settle` は読んだ行を自分の行に結び付ける。`settle` と読み直しの間に行が消されて同じ ID で作り直されると、読み直しは別の行を返す。確認は通信を挟むので、この間隔は短いとは限らない。キーは行が名簿を去ると失効し、元に戻らないので、読み直しの後も `committed` なら、commit から読み直しまで行は去っていない。読んだ行は自分の行である。`settle` は 2 回送っても同じ答えを返し、応答の形も変えない。
+- 読み直しは `settle` の後に必ず行い、保持している名簿を使わない。`settle` を待つ間に採用した読み取りは、`settle` が見つけた commit より古いことがあり、作った行が無く見えて再追加で重複しうる。PATCH は名簿の口、POST はロールの口を読む（「+」はロールの口が失敗すると PATCH に切り替わる）。
+- 2 回目の `settle` を待つ間に新しい読み取りを採用したら、読んだ名簿を渡さない。渡すと `onSaved` が新しい表示を古い名簿で上書きする。キーが立っていれば `saved_unverified`（`unconfirmed` なし）にする。読み直して渡さないのは、その読み直しもまた行に結び付いていないため。
+- 順を読み直し、`settle` の 2 手順にしないのは、読んだ直後に commit すると行の無い読み取りが `committed` になり、確認待ちが増えるため。また読み直しが `settle` より前だと、その間の改名を古い名簿のまま渡すため。
+- 2 回目の `settle` の後に行が消されるのは、応答が届いた書き込みの後に消されるのと同じで、次の読み直しで分かる。ここでは区別しない。
+
+| 1 回目の `settle` | 確認の読み直し | 2 回目の `settle` | 結果 |
+|---|---|---|---|
+| `committed` | 行が読めた | `committed` | `saved`。待つ間に新しい読み取りを採用していれば `saved_unverified` |
+| `committed` | 行が読めた | `cancelled`、または答えが無い | `saved_unverified`（`unconfirmed`）。読んだ行を自分のものと言えない |
+| `committed` | 行が無い、または読めない | 問わない | `saved_unverified`（`unconfirmed`） |
+| `cancelled` | 同じ ID の行が無い、または読めない | 問わない | `failed`（再追加してよい） |
+| `cancelled` | 同じ ID の行がある | 問わない | `saved_unverified`（`unconfirmed`）。自分のものとは言わない。読み直すまで追加を止める |
+| 答えが無い | 問わない | 問わない | `saved_unverified`（`unconfirmed`） |
+
+PATCH の `settleLostPatch` も同じ考えで、内容の一致では判定せず、同じ順に確かめる。`cancelled` では送った版と今の版を比べる（追加に限らず名簿全体を置き換えるので、行ではなく版を見る）。
+
+| 1 回目の `settle` | 確認の読み直し | 2 回目の `settle` | 結果 |
+|---|---|---|---|
+| `committed` | 読めた | `committed` | `saved`。待つ間に新しい読み取りを採用していれば `saved_unverified` |
+| `committed` | 読めた | `cancelled`、または答えが無い | `saved_unverified`（`unconfirmed`） |
+| `committed` | 読めない | 問わない | `saved_unverified`（`unconfirmed`） |
+| `cancelled` | 版が送ったときのまま、または読めない | 問わない | `failed`（再追加してよい） |
+| `cancelled` | 版が動いた | 問わない | `saved_unverified`（`unconfirmed`）。自分のものとは言わない。画面の名簿が古いので読み直すまで追加を止める |
+| 答えが無い | 問わない | 問わない | `saved_unverified`（`unconfirmed`） |
+
+### 15.4 Auto-Yes の grant の識別子
+
+`expiresAt` と `answerMode` は同じ時刻・同じ条件の別の grant を区別できない。`setAutoYesEnabled` は有効化のたびに新しい状態オブジェクトを作るので、そのオブジェクトに `WeakMap` で ID を結び付ける。
+
+- ID はメモリだけに置く。grant 自体がサーバーの再起動を越えないので足りる。
+- 単一対象の応答に `grantId` を足す（有効なときだけ）。
+- `POST auto-yes?expectedGrantId=<id>` の無効化は、別の grant が有効なら 409 `AUTO_YES_GRANT_CHANGED` で何も変えない。既に off なら何も書かず off を返す。条件は query で渡す。無効化の本文を変えないため。
+- `POST auto-yes` の本文の `onlyIfOff: true` は、有効な grant があれば 409 `AUTO_YES_ALREADY_ENABLED` で何も変えない。
+
+検査と書き込みの間に `await` を挟まないので、同じプロセスの別の要求は割り込めない。
+
+### 15.5 ロールの改名の条件
+
+`PUT /api/roles/:id` の `X-Expected-Role-Name` ヘッダーに、置き換える名前を URI エンコードして渡す。今の名前が違えば 409 `name_changed` で、本文の変更も含めて何も変えない。今の名前が頼んだ名前と同じなら競合にしない。編集の本文は「変えるものだけ」のままにする。
+
+### 15.6 今回の範囲に入らなかったもの
+
+起動の証拠が無い稼働中のセッションへの契約は拒否しない（利用者の決定）。そのセッションにロールが解決されるときだけ、`POST tasks` の 201 に `roleWarning` を足し、`send --contract` が stderr へ 1 行出す。
+
+| 場所 | 残るもの |
+|---|---|
+| `instances add --role` / `send --register --role` の `POST` | 冪等キーを付けない。CLI は自動で再送しない。応答が失われると「保存の有無は不明」と伝えて利用者に確認を任せる（§5 の既存の動き） |

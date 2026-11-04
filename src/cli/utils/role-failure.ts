@@ -42,6 +42,7 @@ const ROLE_ROUTE_EXITS: Record<string, number> = {
   tool_not_supported: ExitCode.CONFIG_ERROR,
   name_conflict: RoleExitCode.CONFLICT,
   version_conflict: RoleExitCode.CONFLICT,
+  name_changed: RoleExitCode.CONFLICT,
   role_in_use: RoleExitCode.CONFLICT,
   instance_exists: RoleExitCode.CONFLICT,
   roster_changed: RoleExitCode.CONFLICT,

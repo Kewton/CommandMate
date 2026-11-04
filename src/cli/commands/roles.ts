@@ -7,6 +7,7 @@
  * change reaches.
  */
 
+import { EXPECTED_ROLE_NAME_HEADER } from '../../types/agent-roles';
 import { Command } from 'commander';
 import type { RolesOptions } from '../types';
 import { ApiClient, ApiError } from '../utils/api-client';
@@ -71,7 +72,7 @@ Exit codes:
   1   the server is not running
   2   bad arguments, a body that cannot be stored, unknown or ambiguous role or
       repository, a tool outside the feature
-  31  a conflict; nothing changed: name_conflict, version_conflict (--if-version),
+  31  a conflict; nothing changed: name_conflict, name_changed, version_conflict (--if-version),
       role_in_use (roles rm without --force)
   99  anything else
 
@@ -217,13 +218,14 @@ async function editRole(
   if (options.name === undefined && body === undefined) {
     throw usageError('Nothing to change: give --name, --file or --stdin.');
   }
-  const { id } = await resolveRole(client, selector);
+  const { id, name: nameRead } = await resolveRole(client, selector);
   const response = await roleWrite(`commandmate roles show ${id}`, () =>
     client.put<AgentRoleEditResponse>(`/api/roles/${encodeURIComponent(id)}`, {
       ...(options.name !== undefined ? { name: options.name } : {}),
       ...(body !== undefined ? { body } : {}),
       ...(expectedBodyVersion !== undefined ? { expectedBodyVersion } : {}),
-    })
+      // Issue #4132: the rename replaces the name just read, not one set since.
+    }, options.name !== undefined ? { [EXPECTED_ROLE_NAME_HEADER]: encodeURIComponent(nameRead) } : undefined)
   );
   const { before, after, affected } = response;
   const used = describeReferences(affected);

@@ -6,6 +6,7 @@
  */
 import { vi } from 'vitest';
 import type { AgentInstance } from '@/lib/cli-tools/types';
+import { EXPECTED_ROLE_NAME_HEADER, INSTANCE_CREATION_KEY_HEADER } from '@/types/agent-roles';
 import type {
   AgentRoleReferences,
   AgentRoleSummary,
@@ -100,8 +101,13 @@ export class FakeRoleServer {
   holdPutAnswers = false;
   /** The same for a roster PATCH or a create: written and answered at once, delivered on release. */
   holdRosterAnswers = false;
+  /**
+   * What each `idempotencyKey` did: the row it made, '' for a roster PATCH naming none, null
+   * for given up on. A row leaving the roster revokes the key that made it, as `setAgentInstances`.
+   */
+  creationKeys = new Map<string, string | null>();
   private held: Array<() => void> = [];
-  readonly calls: Array<{ url: string; method: string; body: Record<string, unknown> }> = [];
+  readonly calls: Array<{ url: string; method: string; body: Record<string, unknown>; headers?: Record<string, string> }> = [];
 
   constructor(roster: AgentInstance[]) {
     this.roster = roster;
@@ -113,8 +119,16 @@ export class FakeRoleServer {
 
   /** Something outside this screen changed the roster: another tab, a phone, the CLI. */
   changeRosterElsewhere(next: AgentInstance[]): void {
+    this.revokeKeysOfRowsLeaving(next);
     this.roster = next;
     this.revisionNumber += 1;
+  }
+
+  private revokeKeysOfRowsLeaving(next: AgentInstance[]): void {
+    const leaving = this.roster.filter((row) => !next.some((kept) => kept.id === row.id && kept.cliTool === row.cliTool));
+    for (const [key, made] of this.creationKeys) {
+      if (leaving.some((row) => row.id === made)) this.creationKeys.set(key, null);
+    }
   }
 
   release(): void {
@@ -224,8 +238,17 @@ export class FakeRoleServer {
     const url = String(input);
     const method = init?.method ?? 'GET';
     const body = (init?.body ? JSON.parse(String(init.body)) : {}) as Record<string, unknown>;
-    this.calls.push({ url, method, body });
+    const headers = (init?.headers ?? {}) as Record<string, string>;
+    this.calls.push({ url, method, body, headers });
     const path = url.split('?')[0];
+
+    if (path.endsWith('/instances/roles/settle')) {
+      const key = String(body.idempotencyKey);
+      if (!this.creationKeys.has(key)) this.creationKeys.set(key, null);
+      const instanceId = this.creationKeys.get(key);
+      if (instanceId === null) return json(200, { success: true, outcome: 'cancelled' });
+      return json(200, instanceId === '' ? { success: true, outcome: 'committed' } : { success: true, outcome: 'committed', instanceId });
+    }
 
     if (path.endsWith('/instances/roles')) {
       if (method === 'GET') {
@@ -234,6 +257,9 @@ export class FakeRoleServer {
       }
       if (method === 'PUT') {
         if (this.refusePut) return json(500, { success: false, error: 'internal_error', message: 'x' });
+        if (body.expectedRosterRevision !== undefined && body.expectedRosterRevision !== this.revision) {
+          return json(409, { success: false, error: 'roster_changed', message: 'changed' });
+        }
         const role = body.role as { state: string; roleId?: string };
         const instanceId = String(body.instanceId);
         this.stored[instanceId] =
@@ -250,6 +276,12 @@ export class FakeRoleServer {
         this.refuseNextCreate = null;
         return json(status, { success: false, error, message: error });
       }
+      const key = headers[INSTANCE_CREATION_KEY_HEADER] ?? null;
+      if (key !== null && this.creationKeys.has(key)) {
+        const made = this.creationKeys.get(key);
+        if (!made) return json(409, { success: false, error: 'creation_cancelled', message: 'given up on' });
+        return json(200, { ...this.settings(), created: { instanceId: made }, replayed: true });
+      }
       if (body.expectedRosterRevision !== undefined && body.expectedRosterRevision !== this.revision) {
         return json(409, { success: false, error: 'roster_changed', message: 'changed' });
       }
@@ -258,6 +290,7 @@ export class FakeRoleServer {
         return json(409, { success: false, error: 'instance_exists', message: 'exists' });
       }
       this.roster = [...this.roster, { ...instance, order: this.roster.length }];
+      if (key !== null) this.creationKeys.set(key, instance.id);
       this.rosterSaved = true;
       this.revisionNumber += 1;
       const role = body.role as { state: string; roleId?: string };
@@ -306,6 +339,10 @@ export class FakeRoleServer {
           return json(409, { success: false, error: 'version_conflict', message: 'stale', currentBodyVersion: role.bodyVersion });
         }
         const name = body.name === undefined ? role.name : String(body.name);
+        const expectedName = headers[EXPECTED_ROLE_NAME_HEADER];
+        if (expectedName !== undefined && decodeURIComponent(expectedName) !== role.name && name !== role.name) {
+          return json(409, { success: false, error: 'name_changed', message: 'renamed' });
+        }
         if (this.roles.some((candidate) => candidate.id !== id && candidate.name === name)) {
           return json(409, { success: false, error: 'name_conflict', message: 'taken' });
         }
@@ -384,10 +421,21 @@ export class FakeRoleServer {
 
     if (method === 'PATCH') {
       await this.holdIfAsked();
+      const key = headers[INSTANCE_CREATION_KEY_HEADER] ?? null;
+      if (key !== null && this.creationKeys.has(key)) {
+        if (this.creationKeys.get(key) === null) return json(409, { success: false, error: 'creation_cancelled', message: 'given up on' });
+        return json(200, { agentInstances: this.roster, rosterRevision: this.revision, replayed: true });
+      }
       if (body.expectedRosterRevision !== undefined && body.expectedRosterRevision !== this.revision) {
         return json(409, { error: 'changed', code: 'ROSTER_CHANGED', rosterRevision: this.revision, agentInstances: this.roster });
       }
-      this.roster = body.agentInstances as AgentInstance[];
+      const next = body.agentInstances as AgentInstance[];
+      if (key !== null) {
+        const added = next.filter((row) => !this.roster.some((was) => was.id === row.id && was.cliTool === row.cliTool));
+        this.creationKeys.set(key, added.length === 1 ? added[0].id : '');
+      }
+      this.revokeKeysOfRowsLeaving(next);
+      this.roster = next;
       this.rosterSaved = true;
       this.revisionNumber += 1;
       const saved = json(200, { agentInstances: this.roster, rosterRevision: this.revision });
@@ -443,10 +491,37 @@ export function loseNextAnswer(
     armed = false;
     // Sent either way: `writes` counts what left the client.
     if (committed) await server.fetch(url, init);
-    else server.calls.push({ url, method, body: JSON.parse(String(init.body)) as Record<string, unknown> });
+    else server.calls.push({ url, method, body: JSON.parse(String(init.body)) as Record<string, unknown>, headers: init.headers as Record<string, string> });
     if (how === '500') return json(500, { success: false, error: 'internal_error', message: 'x' });
     if (how === 'network') throw new TypeError('Failed to fetch');
     if (how === 'no-answer') return untilAborted<Response>(init);
     return { ok: true, status: 200, json: () => untilAborted<unknown>(init) } as unknown as Response;
+  }) as unknown as typeof fetch;
+}
+
+/**
+ * Runs `change` once in a gap of a lost write's check, which settles, reads, and settles again:
+ * `during-first-settling` lands before that settling reaches the server, `before-read` after it,
+ * and `before-second-settling` after the read.
+ */
+export function duringTheCheck(
+  gap: 'during-first-settling' | 'before-read' | 'before-second-settling',
+  change: () => void | Promise<void>,
+): void {
+  const passOn = global.fetch;
+  let settlings = 0;
+  let done = false;
+  global.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    const settling = String(url).endsWith('/settle');
+    if (settling) settlings += 1;
+    const due =
+      gap === 'before-read'
+        ? !settling && settlings === 1 && (init?.method ?? 'GET') === 'GET'
+        : settling && settlings === (gap === 'during-first-settling' ? 1 : 2);
+    if (!done && due) {
+      done = true;
+      await change();
+    }
+    return (passOn as typeof fetch)(url, init);
   }) as unknown as typeof fetch;
 }

@@ -10,6 +10,7 @@
 import { NextResponse } from 'next/server';
 import {
   AgentRoleInUseError,
+  AgentRoleNameChangedError,
   AgentRoleNameConflictError,
   AgentRoleNotFoundError,
   AgentRoleValidationError,
@@ -35,6 +36,8 @@ const INSTANCE_REQUEST_STATUS: Record<InstanceRoleRequestError['code'], number> 
   invalid_request: 400,
   instance_exists: 409,
   roster_changed: 409,
+  idempotency_key_reused: 409,
+  creation_cancelled: 409,
 };
 
 /** The response for an error thrown by the role layer. */
@@ -48,6 +51,7 @@ export function respondToRoleError(
     return roleErrorResponse('not_found', error.message, 404);
   }
   if (error instanceof AgentRoleNameConflictError) return roleErrorResponse('name_conflict', error.message, 409);
+  if (error instanceof AgentRoleNameChangedError) return roleErrorResponse('name_changed', error.message, 409);
   if (error instanceof AgentRoleVersionConflictError) {
     const body: AgentRoleErrorResponse = {
       success: false,

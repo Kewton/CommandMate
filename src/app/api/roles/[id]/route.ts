@@ -1,6 +1,7 @@
 /**
  * `GET /api/roles/:id` — one role with its body and what points at it.
- * `PUT /api/roles/:id` — edit. `expectedBodyVersion` makes a stale edit a 409.
+ * `PUT /api/roles/:id` — edit. `expectedBodyVersion` and the `X-Expected-Role-Name`
+ * header (#4132) make a stale edit a 409.
  * `DELETE /api/roles/:id` — refused with 409 and the references while in use;
  * `?force=true` removes those settings in the same transaction. Launch records
  * and generated files stay.
@@ -18,10 +19,11 @@ import {
 import { respondToRoleError, roleErrorResponse } from '@/lib/agent-roles/route-errors';
 import { createLogger } from '@/lib/logger';
 import { readJsonObjectBody } from '@/lib/api/read-json-body';
-import type {
-  AgentRoleDeleteResponse,
-  AgentRoleDetailResponse,
-  AgentRoleEditResponse,
+import {
+  EXPECTED_ROLE_NAME_HEADER,
+  type AgentRoleDeleteResponse,
+  type AgentRoleDetailResponse,
+  type AgentRoleEditResponse,
 } from '@/types/agent-roles';
 
 export const dynamic = 'force-dynamic';
@@ -29,6 +31,17 @@ export const dynamic = 'force-dynamic';
 const logger = createLogger('api/roles');
 
 type Params = { params: Promise<{ id: string }> };
+
+/** The name a rename replaces: undefined when none is named, null when it cannot be read. */
+function expectedNameOf(request: NextRequest): string | undefined | null {
+  const raw = request.headers.get(EXPECTED_ROLE_NAME_HEADER);
+  if (raw === null) return undefined;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return null;
+  }
+}
 
 export async function GET(_request: NextRequest, { params }: Params) {
   try {
@@ -55,10 +68,15 @@ export async function PUT(request: NextRequest, { params }: Params) {
     if (expectedBodyVersion !== undefined && !Number.isInteger(expectedBodyVersion)) {
       return roleErrorResponse('invalid_request', 'expectedBodyVersion must be an integer', 400);
     }
+    const expectedName = expectedNameOf(request);
+    if (expectedName === null) {
+      return roleErrorResponse('invalid_request', `${EXPECTED_ROLE_NAME_HEADER} must be URI-encoded`, 400);
+    }
     const result = updateAgentRole(getDbInstance(), id, {
       name,
       body,
       expectedBodyVersion: expectedBodyVersion as number | undefined,
+      expectedName,
     });
     const response: AgentRoleEditResponse = {
       success: true,

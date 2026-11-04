@@ -171,6 +171,38 @@ describe('send --contract', () => {
     expect(mockConsoleError).toHaveBeenCalledWith('Message sent.');
   });
 
+  describe('[#4132] a warning about a session with no evidence of its role', () => {
+    const warned = (data: Record<string, unknown>): RouteResponse => ({ status: 201, data: { ...(TASK_CREATED.data as object), ...data } });
+    const run = async (created: RouteResponse): Promise<void> => {
+      mockRoutes([
+        { match: '/api/worktrees/wt1/tasks', response: created },
+        { match: '/api/worktrees/wt1/send', response: SEND_OK },
+        { match: `/api/tasks/${TASK_ID}`, method: 'PATCH', response: { status: 200, data: {} } },
+      ]);
+      await runSend(['wt1', '--contract', '.commandmate/tasks/t.yaml']);
+    };
+    const warnings = () => mockConsoleError.mock.calls.map(([line]) => String(line)).filter((line) => line.startsWith('Warning:'));
+
+    it('goes to stderr as one line; stdout is the task id, and the message is sent', async () => {
+      await run(warned({ roleWarning: 'Its role is not known.' }));
+      expect(warnings()).toEqual(['Warning: Its role is not known.']);
+      expect(mockConsoleLog.mock.calls).toEqual([[TASK_ID]]);
+      expect(mockConsoleError).toHaveBeenCalledWith('Message sent.');
+      expect(mockExit).not.toHaveBeenCalledWith(expect.anything());
+    });
+
+    it('an older server gives none: nothing is said', async () => {
+      await run(TASK_CREATED);
+      expect(warnings()).toEqual([]);
+      expect(mockConsoleLog.mock.calls).toEqual([[TASK_ID]]);
+    });
+
+    it('something that is no text is not printed', async () => {
+      await run(warned({ roleWarning: { nope: true } }));
+      expect(warnings()).toEqual([]);
+    });
+  });
+
   it('marks the task running only after the send succeeded', async () => {
     const calls = mockRoutes([
       { match: '/api/worktrees/wt1/tasks', response: TASK_CREATED },

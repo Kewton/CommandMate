@@ -31,6 +31,7 @@ import { captureEnvSnapshot, saveEnvSnapshot } from '@/lib/verification/env-snap
 import { recordTaskSession } from '@/lib/verification/env-clean-gate';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import { contractRoleWarning } from './contract-role-warning';
 
 const logger = createLogger('api/tasks');
 
@@ -167,22 +168,22 @@ export async function POST(
     // Issue #4115: a contract goes out under the role the process was started with
     // (for `launch-worker`, at its starting message). If the settings have moved on
     // since then, this contract would run under a stale role: nothing is created or
-    // sent. A session with no evidence here is one the send below starts or decides.
+    // sent. A session with no evidence here is one the send below starts, or one already
+    // running that the answer warns about (#4132).
     const roleTarget = resolveSessionTarget(db, id, {
       instanceId: payload.instanceId as string | undefined,
       requestedCliTool: payload.cliToolId as CLIToolType | undefined,
     });
-    const roleProblem = await runningRoleProblem(
-      db,
-      { worktreeId: id, cliToolId: roleTarget.cliToolId, instanceId: roleTarget.instanceId },
-      worktree.path
-    );
+    const launchTarget = { worktreeId: id, cliToolId: roleTarget.cliToolId, instanceId: roleTarget.instanceId };
+    const roleProblem = await runningRoleProblem(db, launchTarget, worktree.path);
     if (roleProblem !== null) {
       return NextResponse.json(
         { error: roleProblem, code: ROLE_CONDITION_UNMET_CODE, sendOutcome: 'not_sent' },
         { status: 409 }
       );
     }
+
+    const roleWarning = await contractRoleWarning(db, launchTarget, worktree.path);
 
     const task = createTask(db, {
       worktreeId: id,
@@ -195,7 +196,7 @@ export async function POST(
     await recordEnvBaseline(task, contract, verifyConfig);
 
     return NextResponse.json(
-      { task, message: composeContractMessage(contract, verifyConfig) },
+      { task, message: composeContractMessage(contract, verifyConfig), ...(roleWarning ? { roleWarning } : {}) },
       { status: 201 }
     );
   } catch (error: unknown) {

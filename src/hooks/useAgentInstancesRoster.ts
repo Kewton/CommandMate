@@ -47,16 +47,27 @@
  *  - nothing of it is there: failed, and sending it again is safe;
  *  - it cannot be told, or nothing could be read: `saved_unverified` with `unconfirmed`.
  *
- * A create compares its row, since ids are the smallest free one and an absent id means
- * no such row. A PATCH replaces the whole list, so it compares the list, and the revision
- * it started from means nothing moved.
+ * Either kind of write asks the server about its own key (#4132): a row with the same
+ * content may be another tab's, and "not there" stops being true if the request commits a
+ * moment later. Settling marks a key that made nothing, so `failed` holds from then on and
+ * adding again makes one. A key whose row has since left the roster reads the same, so the
+ * id made again by someone else is not claimed. The read after the settling is always made
+ * then, not taken from what is held, and a committed key is asked once more after it: a key
+ * still standing says the row read was the one it made. If a newer answer was taken while
+ * asking, what was read is not handed on: `saved_unverified`. Each attempt has its own key,
+ * sent in a header, and the body is the same as without one.
  */
 
 'use client';
 
 import { useCallback, useRef } from 'react';
 import type { AgentInstance } from '@/lib/cli-tools/types';
-import { roleApi, sendRosterPatch } from '@/lib/api-client-agent-roles';
+import { sendRosterPatch } from '@/lib/api-client-agent-roles';
+import {
+  createInstanceWithKey,
+  newInstanceCreationKey,
+  settleInstanceCreation,
+} from '@/lib/agent-roles/instance-creation-client';
 import {
   clearRosterSnapshot,
   ensureRosterSnapshot,
@@ -163,52 +174,76 @@ async function readAfterCrossing(worktreeId: string): Promise<RosterAttempt> {
     : { status: 'saved_unverified' };
 }
 
-function sameRoster(left: readonly AgentInstance[], right: readonly AgentInstance[]): boolean {
-  return (
-    left.length === right.length &&
-    left.every((inst, index) => {
-      const other = right[index];
-      return inst.id === other.id && inst.cliTool === other.cliTool && inst.alias === other.alias;
-    })
-  );
+/**
+ * Asked after a read, of a key that had committed before it. A key does not outlive its row,
+ * so one still standing says the row read was the row it made, not one made again since.
+ */
+async function keyStillStands(worktreeId: string, idempotencyKey: string): Promise<boolean> {
+  return (await settleInstanceCreation(worktreeId, idempotencyKey))?.outcome === 'committed';
 }
 
-/** A PATCH with no usable answer. Reads the roster route: the "+" falls back here when the role route is failing. */
+/**
+ * A PATCH with no usable answer. Its key says whether it happened, and the read comes after,
+ * since the settling is what stops a late commit. Reads the roster route: the "+" falls back
+ * here when the role route is failing.
+ */
 async function settleLostPatch(
   worktreeId: string,
-  sent: readonly AgentInstance[],
+  idempotencyKey: string,
   expectedRevision: string,
 ): Promise<RosterAttempt> {
+  const unknown: RosterAttempt = { status: 'saved_unverified', unconfirmed: true };
+  clearRosterSnapshot(worktreeId);
+  const settled = await settleInstanceCreation(worktreeId, idempotencyKey);
+  // Read now: a snapshot taken while settling can be older than the commit settling found.
   clearRosterSnapshot(worktreeId);
   const confirmed = await ensureRosterSnapshot(worktreeId);
   if (!confirmed) {
     await refreshAfterWrite(worktreeId);
-    return { status: 'saved_unverified', unconfirmed: true };
+    return settled?.outcome === 'cancelled' ? { status: 'failed' } : unknown;
   }
-  if (sameRoster(confirmed.roster, sent)) {
+  // Nothing moved, and it never will because of this: sending it again is safe.
+  if (settled?.outcome === 'cancelled' && confirmed.revision === expectedRevision) return { status: 'failed' };
+  if (settled?.outcome !== 'committed') {
+    // Cancelled on a roster that moved: not this write, and what was on screen is out of date.
     recordRosterSaved(worktreeId, confirmed.roster, confirmed.revision);
-    return { status: 'saved', roster: confirmed.roster };
+    return unknown;
   }
-  if (confirmed.revision === expectedRevision) return { status: 'failed' };
+  const crossed = watchForNewerAnswer(worktreeId);
+  const stands = await keyStillStands(worktreeId, idempotencyKey);
+  // Something newer was taken meanwhile, and recording this read would undo it.
+  if (crossed()) return stands ? { status: 'saved_unverified' } : unknown;
+  // Recorded after the asking: for whoever is showing it this starts a read of its own.
   recordRosterSaved(worktreeId, confirmed.roster, confirmed.revision);
-  return { status: 'saved_unverified', unconfirmed: true };
+  return stands ? { status: 'saved', roster: confirmed.roster } : unknown;
 }
 
-/** A create with no usable answer, from what was read after it. */
-function settleLostCreate(
+/**
+ * A create with no usable answer. `settings` was read after it, which says what is there
+ * but not whose it is: the key says that.
+ */
+async function settleLostCreate(
+  worktreeId: string,
   settings: InstanceRoleSettingsResponse | null,
-  instance: { id: string; cliTool: string; alias: string },
-  role: RoleAssignmentInput,
-): RosterAttempt {
-  if (!settings) return { status: 'saved_unverified', unconfirmed: true };
-  const row = settings.instances.find((entry) => entry.instanceId === instance.id);
-  if (!row) return { status: 'failed' };
-  const { stored } = row;
-  const sameRole = stored.state === 'role' ? role.state === 'role' && role.roleId === stored.roleId : role.state === stored.state;
-  // A row with that id but other content may be this one changed since, or another client's.
-  return row.cliToolId === instance.cliTool && row.alias === instance.alias && sameRole
-    ? { status: 'saved', roster: rosterFromRoleEntries(settings.instances) }
-    : { status: 'saved_unverified', unconfirmed: true };
+  instance: { id: string },
+  idempotencyKey: string,
+): Promise<RosterAttempt> {
+  const unknown: RosterAttempt = { status: 'saved_unverified', unconfirmed: true };
+  const settled = await settleInstanceCreation(worktreeId, idempotencyKey);
+  if (!settled) return unknown;
+  const hasRow = (read: InstanceRoleSettingsResponse | null): boolean =>
+    read?.instances.some((entry) => entry.instanceId === instance.id) ?? false;
+  if (settled.outcome === 'cancelled') {
+    // A row with that id is someone else's: not this one, and the form is out of date.
+    return hasRow(settings) ? unknown : { status: 'failed' };
+  }
+  // Read again: `settings` can be from before the commit, and its row with this id another's.
+  const read = await refreshAfterWrite(worktreeId);
+  if (!read || !hasRow(read)) return unknown;
+  const crossed = watchForNewerAnswer(worktreeId);
+  if (!(await keyStillStands(worktreeId, idempotencyKey))) return unknown;
+  // Something newer was taken meanwhile, and handing this read on would undo it.
+  return crossed() ? { status: 'saved_unverified' } : { status: 'saved', roster: rosterFromRoleEntries(read.instances) };
 }
 
 /**
@@ -229,19 +264,22 @@ export function enqueueRosterWrite(
       if (!built) return { status: 'skipped' };
       const roster = built.map((inst, order) => ({ ...inst, order }));
       const crossed = watchForNewerAnswer(worktreeId);
-      const answer = await sendRosterPatch(worktreeId, {
-        agentInstances: roster,
-        expectedRosterRevision: expectedRevision,
-      });
+      // One key per attempt: a refusal wrote nothing, and a rebuild can be another list.
+      const idempotencyKey = newInstanceCreationKey();
+      const answer = await sendRosterPatch(
+        worktreeId,
+        { agentInstances: roster, expectedRosterRevision: expectedRevision },
+        idempotencyKey,
+      );
       if (answer.kind === 'conflict') return { status: 'conflict' };
       if (answer.kind === 'refused') return { status: 'failed' };
-      if (answer.kind === 'unknown') return settleLostPatch(worktreeId, roster, expectedRevision);
+      if (answer.kind === 'unknown') return settleLostPatch(worktreeId, idempotencyKey, expectedRevision);
       if (crossed()) {
         answer.abandon();
         return readAfterCrossing(worktreeId);
       }
       const body = await answer.readBody();
-      if (!body) return settleLostPatch(worktreeId, roster, expectedRevision);
+      if (!body) return settleLostPatch(worktreeId, idempotencyKey, expectedRevision);
       // Again after the body: reading it waits, and a newer answer can be taken meanwhile.
       if (crossed()) return readAfterCrossing(worktreeId);
       const saved = body.roster ?? roster;
@@ -269,11 +307,13 @@ export function enqueueRosterCreate(
     async (base, expectedRevision) => {
       const instance = buildInstance(base);
       if (!instance) return { status: 'skipped' };
+      // One key per attempt: a refusal made nothing, and a rebuild can be another instance.
+      const idempotencyKey = newInstanceCreationKey();
       const result = await writeInstanceRoleSettings(worktreeId, () =>
-        roleApi.createInstance(worktreeId, { instance, role, expectedRosterRevision: expectedRevision }),
+        createInstanceWithKey(worktreeId, { instance, role, expectedRosterRevision: expectedRevision }, idempotencyKey),
       );
       if (!result.ok) {
-        if (result.outcomeUnknown) return settleLostCreate(result.settings, instance, role);
+        if (result.outcomeUnknown) return settleLostCreate(worktreeId, result.settings, instance, idempotencyKey);
         const stale = result.error === 'roster_changed' || result.error === 'instance_exists';
         return stale ? { status: 'conflict' } : { status: 'failed', error: result.error };
       }

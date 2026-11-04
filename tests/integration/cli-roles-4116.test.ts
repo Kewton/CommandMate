@@ -34,6 +34,7 @@ import {
   listAgentRoles,
   recordRoleLaunch,
   setInstanceRoleState,
+  updateAgentRole,
   setSystemRoleDefault,
 } from '@/lib/db/agent-roles-db';
 import { resetSessionLaunchFlightsForTest } from '@/lib/session/session-launch-flight';
@@ -1233,6 +1234,54 @@ describe('a send with a role that types nothing leaves Auto-Yes as it found it',
     expect(result.stderr).toContain(`auto-yes ${WT} --disable --instance codex`);
   });
 
+  it('[#4132] a grant with the same expiry and mode, armed meanwhile: left on, told apart by its name', async () => {
+    await runningWith(writer);
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+    let other: ReturnType<typeof setAutoYesEnabled> | null = null;
+    atSendOwnership(() => {
+      other = setAutoYesEnabled(WT, 'codex', true, 3600000, undefined, 'codex');
+    });
+    const result = await armAndSend('--role', 'reviewer');
+    clock.mockRestore();
+    expect(result.code).toBe(32);
+    expect(getAutoYesState(WT, 'codex', 'codex')).toBe(other);
+    expect(result.stderr).toContain('updated after this send armed it');
+  });
+
+  it('[#4132] a grant armed between the read-back and the request: the server refuses, and it stays', async () => {
+    await runningWith(writer);
+    let other: ReturnType<typeof setAutoYesEnabled> | null = null;
+    let reads = 0;
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      const response = await dispatch(input, init);
+      if ((init?.method ?? 'GET') === 'GET' && String(input).includes('/auto-yes')) {
+        reads += 1;
+        if (reads === 2) other = setAutoYesEnabled(WT, 'codex', true, 28800000, undefined, 'codex');
+      }
+      return response;
+    });
+    const result = await armAndSend('--role', 'reviewer');
+    expect(result.code).toBe(32);
+    expect(autoYesPosts.map(({ enabled }) => enabled)).toEqual([true, false]);
+    expect(getAutoYesState(WT, 'codex', 'codex')).toBe(other);
+    expect(result.stderr).toContain('updated after this send armed it');
+    expect(result.stderr).not.toContain('withdrawn');
+  });
+
+  it('[#4132] a grant armed between the read and arming: its terms stand, and a refusal leaves it', async () => {
+    await runningWith(writer);
+    let other: ReturnType<typeof setAutoYesEnabled> | null = null;
+    let asked = 0;
+    ownership.hook = () => {
+      asked += 1;
+      if (asked === 1) other = setAutoYesEnabled(WT, 'codex', true, 28800000, undefined, 'codex');
+    };
+    const result = await armAndSend('--role', 'reviewer');
+    expect(result.code).toBe(32);
+    expect(autoYesPosts).toEqual([expect.objectContaining({ enabled: true, onlyIfOff: true })]);
+    expect(getAutoYesState(WT, 'codex', 'codex')).toBe(other);
+  });
+
   it('it cannot be read back: left on', async () => {
     await runningWith(writer);
     let reads = 0;
@@ -1246,6 +1295,26 @@ describe('a send with a role that types nothing leaves Auto-Yes as it found it',
     const result = await armAndSend('--role', 'reviewer');
     expect(codexAutoYes()).toBe(true);
     expect(result.stderr).toContain('could not be read back');
+  });
+});
+
+describe('[#4132] roles edit --name', () => {
+  it('says which name it replaces: a rename landing after its read stands', async () => {
+    const realDispatch = dispatch;
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      if (init?.method === 'PUT' && String(input).includes('/api/roles/')) {
+        updateAgentRole(db, reviewer, { name: 'theirs' });
+      }
+      return realDispatch(input, init);
+    });
+    const result = await roles('edit', 'reviewer', '--name', 'mine');
+    expect(result.code).toBe(31);
+    expect(getAgentRole(db, reviewer)?.name).toBe('theirs');
+  });
+
+  it('negative: nothing landed, and it renames', async () => {
+    expect((await roles('edit', 'reviewer', '--name', 'mine')).code).toBe(0);
+    expect(getAgentRole(db, reviewer)?.name).toBe('mine');
   });
 });
 
@@ -1665,6 +1734,26 @@ describe('--contract --role: the save checks the roster as /send does', () => {
     const result = await contract('--role', 'reviewer');
     expect(result.code).toBe(31);
     expect(result.stderr).toContain('which is now claude, not codex');
+    expect(fakeTool.typed).toEqual([]);
+  });
+
+  it('[#4132] it changed right before the PUT: the condition refuses it, and nothing is saved', async () => {
+    await refusedByTheCheck();
+    after('put', () => setAgentInstances(db, WT, rows('claude')));
+    const result = await contract('--role', 'reviewer');
+    expect(result.code).toBe(31);
+    expect(result.stderr).toContain('not saved');
+    expect(held()).toMatchObject({ roleId: writer });
+    expect(fakeTool.typed).toEqual([]);
+  });
+
+  it('[#4132] only the alias changed right before the PUT: also refused, and nothing is saved', async () => {
+    await refusedByTheCheck();
+    after('put', () => setAgentInstances(db, WT, rows('codex', 'Renamed')));
+    const result = await contract('--role', 'reviewer');
+    expect(result.code).toBe(31);
+    expect(result.stderr).toContain('nothing was saved');
+    expect(held()).toMatchObject({ roleId: writer });
     expect(fakeTool.typed).toEqual([]);
   });
 

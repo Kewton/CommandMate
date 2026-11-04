@@ -282,10 +282,13 @@ export interface AgentRoleErrorResponse {
     | 'not_found'
     | 'name_conflict'
     | 'version_conflict'
+    | 'name_changed'
     | 'role_in_use'
     | 'tool_not_supported'
     | 'instance_exists'
     | 'roster_changed'
+    | 'idempotency_key_reused'
+    | 'creation_cancelled'
     | 'internal_error';
   message: string;
   /** `version_conflict` only. */
@@ -353,4 +356,31 @@ export interface InstanceRoleSettingsResponse {
 
 export interface InstanceRoleCreateResponse extends InstanceRoleSettingsResponse {
   created: { instanceId: string };
+  /** This `idempotencyKey` had already created it (#4132). Answered with 200 rather than 201. */
+  replayed?: true;
 }
+
+/**
+ * Carries a key on a create or a roster PATCH (#4132): a client makes one per request. A
+ * condition about the request rather than part of what is written, so the body is the same
+ * with or without it.
+ */
+export const INSTANCE_CREATION_KEY_HEADER = 'Idempotency-Key';
+
+export const INSTANCE_CREATION_KEY_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
+
+/**
+ * Carries the name a rename replaces (#4132), URI-encoded since a name need not be ASCII.
+ * A condition as well: the body of an edit stays only what the edit changes.
+ */
+export const EXPECTED_ROLE_NAME_HEADER = 'X-Expected-Role-Name';
+
+/**
+ * `POST .../instances/roles/settle`, for a write whose answer was lost (#4132).
+ * `cancelled`: the key made nothing and now never will, or the row it made has left the
+ * roster. A row with that id now is another's. `instanceId`: the row it added; a roster PATCH
+ * that added not exactly one has none.
+ */
+export type InstanceCreationSettleResponse =
+  | { success: true; outcome: 'committed'; instanceId?: string }
+  | { success: true; outcome: 'cancelled' };
