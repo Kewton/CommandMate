@@ -513,9 +513,20 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // Issue #4133: a poll answer can arrive after a newer one, or after a save, and
   // `rosterRevision` is a hash, which says nothing about which is newer. So the order
   // requests left in, and the saves taken since each one left, decide.
-  const rosterRequestSeqRef = useRef(0);
-  const rosterAdoptedSeqRef = useRef(0);
+  // Issue #4145: the order decides for the whole detail answer, not the roster alone.
+  // Each save has its own generation, because a save of one thing says nothing about
+  // the rest of an answer that left before it.
+  const detailRequestSeqRef = useRef(0);
+  const detailAdoptedSeqRef = useRef(0);
   const rosterSaveGenerationRef = useRef(0);
+  const recordSaveGenerationRef = useRef(0);
+  const vibeLocalSaveGenerationRef = useRef(0);
+  // Issue #4145: the worktree on screen. The screen keeps this instance across a switch
+  // (page.tsx sets no key), so an operation begun for the previous worktree is still
+  // running and its callbacks still hold that id. What it finishes compares against this
+  // before it touches the screen, or the shared generations and sequence above.
+  const worktreeIdRef = useRef(worktreeId);
+  worktreeIdRef.current = worktreeId;
   // Issue #898: which worktreeId the current `agentInstances` roster was loaded
   // for. `null` until the first real roster arrives. Until it equals the active
   // `worktreeId`, the roster in hand is the transient seed/default (or a
@@ -744,6 +755,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       cancelDetailRetry();
       setIsReconnecting(false);
       setRosterFailedWorktreeId(null);
+      // Issue #4145: what is in flight now asks about the previous worktree. Its
+      // answer, or its failure, says nothing about this one.
+      detailAdoptedSeqRef.current = detailRequestSeqRef.current;
       // Update ref for next comparison
       prevWorktreeIdRef.current = worktreeId;
     }
@@ -758,8 +772,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     // Issue #3594: note where saves and list syncs stood when this request
     // left, so its reply cannot put back a status changed in the meantime.
     const statusGeneration = currentWorktreeStatusGeneration();
-    const rosterRequestSeq = ++rosterRequestSeqRef.current;
+    const requestSeq = ++detailRequestSeqRef.current;
     const rosterSaveGeneration = rosterSaveGenerationRef.current;
+    const recordSaveGeneration = recordSaveGenerationRef.current;
+    const vibeLocalSaveGeneration = vibeLocalSaveGenerationRef.current;
     try {
       const response = await fetchApiResponse(`/api/worktrees/${worktreeId}`, POLL_REQUEST_OPTIONS);
       // Issue #2498: an expired session resolves as the /login HTML page with
@@ -780,6 +796,18 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         throw formatError;
       }
       const fetched: Worktree = await response.json();
+      // Issue #4145: asked by the previous worktree's code after the switch (a kill or a
+      // retry finishing). The sequence cannot tell: it left after everything else. Null,
+      // so that code does not go on to read the rest for this screen.
+      if (worktreeId !== worktreeIdRef.current) {
+        return null;
+      }
+      // Issue #4145: older than an answer already taken, so it has nothing to add:
+      // not to the screen, and not to the failure verdicts, which that answer cleared.
+      if (requestSeq <= detailAdoptedSeqRef.current) {
+        return fetched;
+      }
+      detailAdoptedSeqRef.current = requestSeq;
       // Issue #3594: a status saved (from any row's "…" or Info) or taken from
       // the list after this request started is newer than what the reply read;
       // between those two, the later one wins.
@@ -790,7 +818,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         statusSyncRef.current
       );
       const data = status === fetched.status ? fetched : { ...fetched, status };
-      setWorktree(data);
+      // Issue #4145: Info saved after this request left; the save is newer.
+      if (recordSaveGeneration === recordSaveGenerationRef.current) {
+        setWorktree(data);
+      }
       // Skip setState when value is unchanged to prevent unnecessary re-renders
       if (data.selectedAgents) {
         const current = selectedAgentsRef.current;
@@ -802,14 +833,12 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       }
       // Issue #869: sync the agent instance roster (GET always returns it,
       // falling back to a selectedAgents-derived primary set server-side).
-      // Issue #4133: an answer older than one already taken, or from before a save,
-      // is ignored. What it would have confirmed, the newer answer or the save has.
+      // Issue #4133: an answer from before a save is ignored. What it would have
+      // confirmed, the save has. (An older answer did not get this far: #4145.)
       if (
         data.agentInstances &&
-        rosterRequestSeq > rosterAdoptedSeqRef.current &&
         rosterSaveGeneration === rosterSaveGenerationRef.current
       ) {
-        rosterAdoptedSeqRef.current = rosterRequestSeq;
         const current = agentInstancesRef.current;
         const next = data.agentInstances;
         const isSame = next.length === current.length &&
@@ -821,19 +850,22 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
           setAgentInstances(next);
         }
         // Issue #898: the real roster for THIS worktree is now confirmed (even
-        // when unchanged), so terminal-split reconcile may run. `worktreeId` is
-        // captured from this callback's closure, so a stale response for a
-        // previous worktree tags its own id — `rosterReady` stays false until the
-        // active worktree's roster arrives.
+        // when unchanged), so terminal-split reconcile may run. A response for a
+        // previous worktree did not get this far (#4145), so `rosterReady` stays
+        // false until the active worktree's roster arrives.
         setRosterWorktreeId(worktreeId);
       }
-      // Issue #368: Sync vibeLocalModel from API response
-      if ('vibeLocalModel' in data) {
-        setVibeLocalModel(data.vibeLocalModel ?? null);
-      }
-      // Issue #374: Sync vibeLocalContextWindow from API response
-      if ('vibeLocalContextWindow' in data) {
-        setVibeLocalContextWindow(data.vibeLocalContextWindow ?? null);
+      // Issue #4145: both are saved by the same pane; an answer from before either
+      // save is ignored for both, and the next poll brings the one not saved.
+      if (vibeLocalSaveGeneration === vibeLocalSaveGenerationRef.current) {
+        // Issue #368: Sync vibeLocalModel from API response
+        if ('vibeLocalModel' in data) {
+          setVibeLocalModel(data.vibeLocalModel ?? null);
+        }
+        // Issue #374: Sync vibeLocalContextWindow from API response
+        if ('vibeLocalContextWindow' in data) {
+          setVibeLocalContextWindow(data.vibeLocalContextWindow ?? null);
+        }
       }
       // Issue #2498: one success ends every failure verdict at once, with no
       // user action — this is what makes the screen come back on its own when
@@ -848,6 +880,12 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       setError(null);
       return data;
     } catch (err) {
+      // Issue #4145: a request older than an answer already taken failing late, or one
+      // for the previous worktree, says nothing about now, and must not count toward
+      // the stale banner.
+      if (worktreeId !== worktreeIdRef.current || requestSeq <= detailAdoptedSeqRef.current) {
+        return null;
+      }
       const message = err instanceof Error ? err.message : 'Unknown error';
       const status = err instanceof ApiError ? err.status : 0;
       detailFailureCountRef.current += 1;
@@ -903,6 +941,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   /** Fetch message history for the worktree */
   // Issue #4: Use ref for activeCliTab to avoid callback recreation on tab switch
   const fetchMessages = useCallback(async (): Promise<void> => {
+    // Issue #4145: asked by the previous worktree's code after the switch. Leaving
+    // would also take the latest request id from what this screen is waiting for.
+    if (worktreeId !== worktreeIdRef.current) return;
     const requestedCliTool = activeCliTabRef.current;
     // Issue #874: on mobile the History tab follows the active agent *instance*
     // (tabs are instance-based). Add `instance` only on mobile so PC requests
@@ -949,6 +990,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   /** Fetch current terminal output and prompt status */
   // Issue #4: Use ref for activeCliTab to avoid callback recreation on tab switch
   const fetchCurrentOutput = useCallback(async (): Promise<void> => {
+    // Issue #4145: see fetchMessages (a prompt answered just before the switch).
+    if (worktreeId !== worktreeIdRef.current) return;
     const requestedCliTool = activeCliTabRef.current;
     // Issue #874: mobile-gate the instance selector (see fetchMessages). PC keeps
     // the cliTool-keyed parent poll byte-identical; the mobile terminal tab and
@@ -1126,6 +1169,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
    * older worktrees (rapid A→B→A) so a slow A reply can't pollute B's map.
    */
   const fetchAutoYesStates = useCallback(async (): Promise<void> => {
+    // Issue #4145: see fetchMessages.
+    if (worktreeId !== worktreeIdRef.current) return;
     const requestId = ++latestAutoYesRequestIdRef.current;
     try {
       const response = await fetchApiResponse(`/api/worktrees/${worktreeId}/auto-yes`, POLL_REQUEST_OPTIONS);
@@ -1339,6 +1384,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
    * valid if the active instance was renamed/removed.
    */
   const handleAgentInstancesChange = useCallback((instances: AgentInstance[]) => {
+    // Issue #4145: a save for the previous worktree, answered after the switch.
+    if (worktreeId !== worktreeIdRef.current) return;
     rosterSaveGenerationRef.current += 1;
     setAgentInstances(instances);
     // Issue #898: a roster edit applies to the active worktree, so keep the
@@ -1349,12 +1396,27 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
 
   /** Issue #368: Callback for AgentSettingsPane to update vibeLocalModel */
   const handleVibeLocalModelChange = useCallback((model: string | null) => {
+    // Issue #4145: a save for the previous worktree, answered after the switch.
+    if (worktreeId !== worktreeIdRef.current) return;
+    vibeLocalSaveGenerationRef.current += 1;
     setVibeLocalModel(model);
-  }, []);
+  }, [worktreeId]);
 
   /** Issue #374: Callback for AgentSettingsPane to update vibeLocalContextWindow */
   const handleVibeLocalContextWindowChange = useCallback((value: number | null) => {
+    // Issue #4145: a save for the previous worktree, answered after the switch.
+    if (worktreeId !== worktreeIdRef.current) return;
+    vibeLocalSaveGenerationRef.current += 1;
     setVibeLocalContextWindow(value);
+  }, [worktreeId]);
+
+  /** Issue #4145: Info hands over the record its save returned (see fetchWorktree). */
+  const handleWorktreeUpdate = useCallback((updated: Worktree) => {
+    // A save for the previous worktree, answered after the switch: not this screen's
+    // record, and no reason to throw away the read this screen is waiting for.
+    if (updated.id !== worktreeIdRef.current) return;
+    recordSaveGenerationRef.current += 1;
+    setWorktree(updated);
   }, []);
 
   // Issue #4: Immediately refresh data when the polled agent changes (without
@@ -1633,6 +1695,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
           });
           if (response.ok) {
             const data = await response.json();
+            // Issue #4145: toggled on the previous worktree, answered after the switch.
+            // This map is the new worktree's, keyed by the same instance ids.
+            if (worktreeId !== worktreeIdRef.current) return;
             // Issue #3723: a whole-worktree GET that started before this POST
             // answered read the state from before the toggle (e.g. an alias's
             // expired arming); landing after this write it would turn the toggle
@@ -1640,6 +1705,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
             // the GETs check retires every GET already in flight — one started
             // after this point is newer than the toggle and is adopted.
             ++latestAutoYesRequestIdRef.current;
+            // Issue #4145: the same for a current-output poll, which writes the
+            // same map. The next poll brings what the retired answer also carried.
+            ++latestCurrentOutputRequestIdRef.current;
             // Issue #525/#896: Store per-instance state keyed by the toggled instance.
             setAutoYesStateMap(prev => {
               const next = new Map(prev);
@@ -1696,6 +1764,11 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
    * gets terminated — never re-derived from active/focus state at confirm time.
    */
   const [killTarget, setKillTarget] = useState<SessionKillTarget | null>(null);
+  // Issue #4145: the target names an instance, not a worktree, and instance ids repeat
+  // across worktrees: confirming after a switch would end the new worktree's session.
+  useEffect(() => {
+    setKillTarget(null);
+  }, [worktreeId]);
   /**
    * Issue #1171: in-flight POST guard. Disables the Confirm button (prevents a
    * double-submit) and makes Cancel/close a no-op so the target is preserved
@@ -1739,6 +1812,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     // ending a non-active instance must not clear the active view's state.
     const syncActiveGlobalState = () => {
       if (target.instanceId === activeInstanceIdRef.current) {
+        // Issue #4145: an answer in flight read the session being ended; landing
+        // after this it would put back what is cleared here.
+        ++latestMessagesRequestIdRef.current;
+        ++latestCurrentOutputRequestIdRef.current;
         actions.clearMessages();
         // Issue #736: terminal reset is reflected per-split by
         // useTerminalPanePolling; only non-terminal global state is cleared here.
@@ -1746,21 +1823,28 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       }
     };
 
+    // Issue #4145: the switch has already closed this kill's dialog, and what is on
+    // screen now is another worktree's, under the same instance ids: its prompt, its
+    // read and any dialog opened since are left alone.
+    const isStillOnScreen = (): boolean => worktreeId === worktreeIdRef.current;
+    const finishEnded = async (): Promise<void> => {
+      if (!isStillOnScreen()) return;
+      syncActiveGlobalState();
+      await fetchWorktree();
+      if (isStillOnScreen()) setKillTarget(null);
+    };
+
     try {
       // Issue #874/#875: always scope the kill to the target agent instance. The
       // primary instance uses instanceId === cliToolId (byte-identical session
       // name); alias instances terminate only that instance's session.
       await worktreeApi.killSession(worktreeId, target.cliToolId, target.instanceId);
-      syncActiveGlobalState();
-      await fetchWorktree();
-      setKillTarget(null);
+      await finishEnded();
     } catch (err) {
       // Issue #1171: a 404 means the session already ended (natural-termination
       // race). The goal is achieved, so re-sync and close rather than error.
       if (err instanceof ApiError && err.status === 404) {
-        syncActiveGlobalState();
-        await fetchWorktree();
-        setKillTarget(null);
+        await finishEnded();
       } else {
         // Keep the target so the user can retry; surface a failure toast.
         showToast(tWorktree('session.failedToKill'), 'error');
@@ -2116,6 +2200,11 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       : IDLE_POLLING_INTERVAL_MS;
 
     const pollData = async () => {
+      // Issue #4145: nothing is looking, so nothing is asked. useVisibilityRecovery
+      // reads at once on the way back, and the interval is still running if its
+      // throttle skips that read. Automatic answers do not depend on this poll: they
+      // come from the server (see useAutoYes).
+      if (document.visibilityState === 'hidden') return;
       // Issue #744: `state.messages` is consumed ONLY by the mobile MobileContent
       // path; on PC each terminal split fetches its own history independently via
       // `useSplitMessages`. Polling `fetchMessages()` on PC would double-fetch the
@@ -2169,6 +2258,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   useEffect(() => {
     if (!anyAutoYesEnabled && !anyAutoYesReleasedByRestart) return;
     const intervalId = setInterval(() => {
+      // Issue #4145: as the detail poll. The next tick after coming back re-reads.
+      if (document.visibilityState === 'hidden') return;
       void fetchAutoYesStates();
     }, AUTO_YES_CONTRACT_REFRESH_MS);
     return () => clearInterval(intervalId);
@@ -2362,7 +2453,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     setActiveInstanceId,
     setFocusedSplitIndex,
     setHistorySubTab,
-    setWorktree,
+    setWorktree: handleWorktreeUpdate,
     showArchived,
     showNewFileDialog,
     showToast,

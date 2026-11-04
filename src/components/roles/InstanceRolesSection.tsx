@@ -95,6 +95,7 @@ function InstanceRoleRow({
     // are read again.
     let failed = false;
     let outcomeUnknown = false;
+    let stillUnknown = false;
     try {
       // The query scopes it: without both, this route ends every session of the worktree.
       const query = new URLSearchParams({ cliTool: entry.cliToolId, instance: id });
@@ -114,8 +115,11 @@ function InstanceRoleRow({
     }
     if (outcomeUnknown) {
       const running = await readRunningInstances(worktreeId);
-      failed = running === null || running[id] === true;
+      // Issue #4145: a read that failed cannot say either way, and the screen says that.
+      stillUnknown = running === null;
+      failed = running !== null && running[id] === true;
     }
+    if (stillUnknown) setError(t('agentRoles.instances.restartUnknown'));
     if (failed) setError(t('agentRoles.instances.restartError'));
     onChanged();
   }, [confirm, entry.alias, entry.cliToolId, id, onChanged, t, worktreeId]);
