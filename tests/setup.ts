@@ -58,8 +58,12 @@ if (currentTestPath !== undefined) {
 // So any test that starts a codex session, including ones written long after
 // this line, would edit the real file on whatever machine ran the suite. Pinned
 // here rather than per file because the default is what makes it dangerous.
-// A test that cares about the path sets its own value; this only fills a gap.
-process.env.CODEX_HOME ??= join(tmpdir(), 'commandmate-test-codex-home');
+//
+// Issue #4146: always this path, never the value the suite was started with. A
+// `CODEX_HOME` exported in the shell, or inherited by a tmux pane, is a real
+// directory, and `??=` kept it. A test that cares about the path still sets its
+// own value: this runs before the test file does.
+process.env.CODEX_HOME = join(tmpdir(), 'commandmate-test-codex-home');
 
 // Issue #1942: the same hazard, for the tool that has no per-session escape.
 //
@@ -79,11 +83,10 @@ process.env.CODEX_HOME ??= join(tmpdir(), 'commandmate-test-codex-home');
 // default is here for the test written next month, which will inherit the
 // isolation without knowing the hazard exists.
 //
-// Blank counts as absent, unlike CODEX_HOME's `??=` above: `resolveSafeDirectory`
-// reads `''` as unset and answers `~/.copilot`, so an empty value left by an
-// isolated runner would route straight back to the file this line is closing.
-// An explicitly chosen directory still wins, and a test that redirects itself
-// with `vi.stubEnv` or a bare assignment still wins over this.
+// Issue #4146: always this path, for CODEX_HOME's reason above: the value the
+// suite was started with may be the real directory, and a blank one reads as
+// unset and answers `~/.copilot` (`resolveSafeDirectory`). A test that redirects
+// itself with `vi.stubEnv` or a bare assignment still wins over this.
 //
 // Scoped by worker pid, unlike CODEX_HOME's and CM_VERIFY_WORKTREE_INDEX_ROOT's
 // single shared paths, because this default has a real writer and the file it
@@ -94,13 +97,11 @@ process.env.CODEX_HOME ??= join(tmpdir(), 'commandmate-test-codex-home');
 // at once (this repo routinely runs five) would be reproducing the exact
 // machine-global collision the isolation exists to prevent, one directory
 // further down. Grouped under one parent so the whole family is `rm -rf`-able.
-if ((process.env.COPILOT_HOME ?? '').trim() === '') {
-  process.env.COPILOT_HOME = join(
-    tmpdir(),
-    'commandmate-test-copilot-home',
-    String(process.pid)
-  );
-}
+process.env.COPILOT_HOME = join(
+  tmpdir(),
+  'commandmate-test-copilot-home',
+  String(process.pid)
+);
 
 // Issue #1873: keep worktree-index claims out of the developer's home.
 //

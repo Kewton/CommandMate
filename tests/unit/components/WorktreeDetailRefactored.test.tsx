@@ -6,7 +6,7 @@
  */
 
 import React from 'react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from 'vitest';
 import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import { WorktreeDetailRefactored } from '@/components/worktree/WorktreeDetailRefactored';
 import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
@@ -1296,7 +1296,12 @@ describe('WorktreeDetailRefactored', () => {
     it('TC-4: throttles rapid visibilitychange events within RECOVERY_THROTTLE_MS (SF-001)', async () => {
       // Mock Date.now to control timestamps for throttle testing.
       // RECOVERY_THROTTLE_MS = 5000ms, so events within 5 seconds should be skipped.
+      // Issue #4146: restored however the test ends. An assertion failing below
+      // would otherwise leave the clock frozen for every test after this one.
       const originalDateNow = Date.now;
+      onTestFinished(() => {
+        Date.now = originalDateNow;
+      });
       let currentTime = 1000000;
       Date.now = vi.fn(() => currentTime);
 
@@ -1363,9 +1368,6 @@ describe('WorktreeDetailRefactored', () => {
       await waitFor(() => {
         expect(mockFetch).toHaveBeenCalled();
       });
-
-      // Restore Date.now
-      Date.now = originalDateNow;
     });
 
     it('TC-5: lightweight recovery does not trigger loading state change (Issue #266)', async () => {

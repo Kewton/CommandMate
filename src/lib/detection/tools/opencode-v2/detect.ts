@@ -83,9 +83,15 @@ export const OPENCODE_V2_QUESTION_PATTERN =
  * (`┃  Build · <model> OpenCode Zen`) does and has no duration, so neither it
  * nor v1's `▣` row matches. A duration is required — the row without one is not
  * a completion (the lesson v1's #1893 learned).
+ *
+ * Durations, as V1's `OPENCODE_TURN_COMPLETE_PATTERN` reads them (Issue #4146):
+ * `836ms`, `5.2s`, `1m 5s`, `1h 5m`, `2d 3h`. Read off the 2.0.18 executable, whose
+ * `FR` draws this row's duration, the same five forms as V1's formatter. 未測定:
+ * no captured frame has a turn of an hour or more, so those two forms come from
+ * that function and not from a screen.
  */
 export const OPENCODE_V2_TURN_COMPLETE_PATTERN =
-  /^[^\S\n│┃]*[A-Za-z][\w-]*(?: [\w-]+)* · [^\n]+? · \d+(?:\.\d+)?(?:ms|s|m(?: \d+s)?)(?: · [\d.]+ tok\/s)?[^\S\n]*$/;
+  /^[^\S\n│┃]*[A-Za-z][\w-]*(?: [\w-]+)* · [^\n]+? · (?:\d+(?:\.\d+)?(?:ms|s|m(?: \d+s)?)|\d+h \d+m|\d+d \d+h)(?: · [\d.]+ tok\/s)?[^\S\n]*$/;
 
 /** The approval strip's buttons, in the order it draws them (2.0.18). */
 export const OPENCODE_V2_PERMISSION_OPTIONS: readonly string[] = ['Allow once', 'Always allow', 'Reject'];
