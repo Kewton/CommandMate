@@ -31,7 +31,7 @@ interface Call {
 }
 
 /** A worktree whose default is `defaultTool`, and whose `opencode` is running or not. */
-function mockServer({ defaultTool = 'opencode', running = false as unknown, outputStatus = 200 } = {}): Call[] {
+function mockServer({ defaultTool = 'opencode', running = false as unknown, startingSince = undefined as unknown, outputStatus = 200 } = {}): Call[] {
   const calls: Call[] = [];
   global.fetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
     const method = (init?.method ?? 'GET').toUpperCase();
@@ -50,7 +50,7 @@ function mockServer({ defaultTool = 'opencode', running = false as unknown, outp
       data = { cliToolId, instanceId: instance ?? cliToolId, resolvedBy: 'server', conflict: null };
     } else if (url.includes('/current-output')) {
       status = outputStatus;
-      data = status === 200 ? { isRunning: running } : { error: 'failed' };
+      data = status === 200 ? { isRunning: running, ...(startingSince === undefined ? {} : { startingSince }) } : { error: 'failed' };
     } else if (url.includes('/tasks')) {
       status = 201;
       data = { task: { id: 'task-1' }, message: 'contract goal' };
@@ -151,6 +151,27 @@ describe('send --new-conversation', () => {
     const calls = mockServer({ running: true });
     expect(await run(['wt', '--contract', '.commandmate/tasks/x.yaml', '--agent', 'opencode', '--auto-yes', '--new-conversation'])).toBe(ExitCode.CONFIG_ERROR);
     expect(writesOf(calls)).toEqual([]);
+  });
+
+  // current-output answers isRunning:false with a number here while the launch is under way.
+  it('still starting, isRunning false: exit 2, nothing sent, and says it is starting', async () => {
+    const calls = mockServer({ running: false, startingSince: 1_700_000_000_000 });
+    expect(await run(['wt', 'hello', '--agent', 'opencode', '--new-conversation'])).toBe(ExitCode.CONFIG_ERROR);
+    expect(writesOf(calls)).toEqual([]);
+    expect(stderr()).toContain('opencode is still starting');
+    expect(stderr()).toContain('commandmate instances wt kill opencode');
+  });
+
+  it('still starting, with --contract and --auto-yes: no task and no grant', async () => {
+    const calls = mockServer({ running: false, startingSince: 1_700_000_000_000 });
+    expect(await run(['wt', '--contract', '.commandmate/tasks/x.yaml', '--agent', 'opencode', '--auto-yes', '--new-conversation'])).toBe(ExitCode.CONFIG_ERROR);
+    expect(writesOf(calls)).toEqual([]);
+  });
+
+  it('startingSince null, isRunning false: stopped, so the field goes (negative control)', async () => {
+    const calls = mockServer({ running: false, startingSince: null });
+    expect(await run(['wt', 'hello', '--agent', 'opencode', '--new-conversation'])).toBeUndefined();
+    expect(sendsOf(calls)[0].body).toMatchObject({ newConversation: true });
   });
 
   it('an answer that does not say: exit 2, not "not running"', async () => {

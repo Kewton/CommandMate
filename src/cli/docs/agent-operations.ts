@@ -566,7 +566,7 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   --auto-yes it armed, and leaves a grant already on as it was.
   send --new-conversation: OpenCode V1 continues the conversation it remembers, even under another
   role, and stopping it does not forget it. Stop the session and send with this to start a new one.
-  Another tool, or a session running at that check, is exit 2 with nothing sent.
+  Another tool, or a session running or starting at that check, is exit 2 with nothing sent.
 
   Exit codes: 0 done; 1 server not running; 2 bad arguments, unknown or ambiguous role or
   repository, a tool outside the feature; 31 a conflict, nothing changed (name_conflict,

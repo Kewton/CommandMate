@@ -614,7 +614,14 @@ async function assertNewConversationApplies(
   }
   const instance = instanceId ?? agent;
   const query = new URLSearchParams({ cliTool: agent, instance });
-  const { isRunning } = await client.get<CurrentOutputResponse>(`/api/worktrees/${worktreeId}/current-output?${query.toString()}`);
+  const { isRunning, startingSince } = await client.get<CurrentOutputResponse>(`/api/worktrees/${worktreeId}/current-output?${query.toString()}`);
+  // Ahead of isRunning, which can be false during a launch: that is not "stopped".
+  // Absent on a server that predates the field, and then isRunning is all there is.
+  if (startingSince !== undefined && startingSince !== null) {
+    throw usageError(
+      `--new-conversation applies when a session starts, and ${instance} is still starting. Nothing was sent. Stop it first: commandmate instances ${worktreeId} kill ${instance}`
+    );
+  }
   if (isRunning === true) {
     throw usageError(
       `--new-conversation applies when a session starts, and ${instance} is running. Nothing was sent. Stop it first: commandmate instances ${worktreeId} kill ${instance}`
@@ -750,8 +757,9 @@ What can be checked first (--model on a running session, the image path) saves n
 
 --new-conversation (Issue #4133): OpenCode V1 goes on with the conversation it remembers,
 even under another role, and stopping the session does not forget it. This starts a new one,
-and is for the send that starts the session: another tool, or a session running when this
-checks, is exit 2 with nothing sent. A start between that check and the send is not caught.
+and is for the send that starts the session: another tool, or a session running or starting
+when this checks, is exit 2 with nothing sent. A start between that check and the send is
+not caught.
 
 Exit codes: 2 usage, or an unknown or ambiguous role, or a tool roles do not apply to
 (nothing sent); 31 a roster conflict (nothing sent); 32 the role condition does not
