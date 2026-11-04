@@ -258,6 +258,7 @@ commandmate send <worktree-id> "<message>"
 commandmate send <worktree-id> "<message>" --instance codex
 commandmate send <worktree-id> "<message>" --instance codex --role reviewer  # Save the role, and send only to a process running it (see commandmate roles)
 commandmate send <worktree-id> "<message>" --agent codex --instance codex-3 --register --role reviewer  # Create the instance and its role first, then send
+commandmate send <worktree-id> "<message>" --instance opencode --new-conversation  # OpenCode V1: start a stopped session on a new conversation, not the remembered one
 commandmate send <worktree-id> "<message>" --auto-yes --duration 3h
 commandmate send <worktree-id> "<message>" --auto-yes --auto-yes-answer-mode careful  # questions are yours
 ```
@@ -2434,6 +2435,7 @@ See what is registered with `commandmate roles defaults`. Errors say which: `unk
 - `--contract --role` ends the same way. If the contract's own check would refuse for the old setting, the role is saved and the check runs again. A broken contract saves nothing
 - When a send with a role or a pin types nothing, the `--auto-yes` it armed is withdrawn, naming the tool and instance, and only if it reads back as that grant. A grant already on stays as it was until the message is in. A grant updated since, or a send that cannot be said to have typed nothing, leaves it on, and the command to stop it is printed. With no target named, the default it read is named in every later request, so a default changed meanwhile neither overwrites nor withdraws another target's Auto-Yes (a server answering for another target than the one read gets no withdrawal, only the command to stop it)
 - A refusal that can be checked before the save (`--model` on a running session, a bad image path) leaves no setting. A refusal after the save says the setting stayed saved, whatever refused it
+- OpenCode V1 goes on with the conversation it remembers, even under another role, and what the earlier role said stays in its history. Stopping the session does not forget it. To start a new one, stop the session and send with `--new-conversation`. Another tool, or a session running when this checks, is exit 2 with nothing sent (a start between that check and the send is not detected)
 - `--expect-role-generation <g>` with `--expect-role-fingerprint <f>` / `--expect-no-role` pin the send to what the caller read (`capture --json`'s `roleLaunch`), saving nothing. The server reads them again right before the first key, so a process replaced in between, even with the same role, gets nothing: exit 32. They combine with `--contract` and `--role`
 
 ### `set-role` and `instances --json`

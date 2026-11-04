@@ -510,6 +510,12 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   );
   const agentInstancesRef = useRef(agentInstances);
   agentInstancesRef.current = agentInstances;
+  // Issue #4133: a poll answer can arrive after a newer one, or after a save, and
+  // `rosterRevision` is a hash, which says nothing about which is newer. So the order
+  // requests left in, and the saves taken since each one left, decide.
+  const rosterRequestSeqRef = useRef(0);
+  const rosterAdoptedSeqRef = useRef(0);
+  const rosterSaveGenerationRef = useRef(0);
   // Issue #898: which worktreeId the current `agentInstances` roster was loaded
   // for. `null` until the first real roster arrives. Until it equals the active
   // `worktreeId`, the roster in hand is the transient seed/default (or a
@@ -752,6 +758,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     // Issue #3594: note where saves and list syncs stood when this request
     // left, so its reply cannot put back a status changed in the meantime.
     const statusGeneration = currentWorktreeStatusGeneration();
+    const rosterRequestSeq = ++rosterRequestSeqRef.current;
+    const rosterSaveGeneration = rosterSaveGenerationRef.current;
     try {
       const response = await fetchApiResponse(`/api/worktrees/${worktreeId}`, POLL_REQUEST_OPTIONS);
       // Issue #2498: an expired session resolves as the /login HTML page with
@@ -794,7 +802,14 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       }
       // Issue #869: sync the agent instance roster (GET always returns it,
       // falling back to a selectedAgents-derived primary set server-side).
-      if (data.agentInstances) {
+      // Issue #4133: an answer older than one already taken, or from before a save,
+      // is ignored. What it would have confirmed, the newer answer or the save has.
+      if (
+        data.agentInstances &&
+        rosterRequestSeq > rosterAdoptedSeqRef.current &&
+        rosterSaveGeneration === rosterSaveGenerationRef.current
+      ) {
+        rosterAdoptedSeqRef.current = rosterRequestSeq;
         const current = agentInstancesRef.current;
         const next = data.agentInstances;
         const isSame = next.length === current.length &&
@@ -1324,6 +1339,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
    * valid if the active instance was renamed/removed.
    */
   const handleAgentInstancesChange = useCallback((instances: AgentInstance[]) => {
+    rosterSaveGenerationRef.current += 1;
     setAgentInstances(instances);
     // Issue #898: a roster edit applies to the active worktree, so keep the
     // roster tagged to it — reconcile must run against the edited roster (e.g.
