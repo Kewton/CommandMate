@@ -16,7 +16,7 @@
  *   kind: feature            # feature | bug | refactor | docs
  *   agent: claude            # claude | antigravity
  *   model: opus              # opus | sonnet ("-" / omitted for antigravity)
- *   gates: [lint, typecheck, unit-related]
+ *   gates: [lint, typecheck, unit-related]   # omitted: the kind's default, with build-server when the scope reaches the server build and --worktree's verify.yaml declares it
  *   scope: ["scripts/orchestrate/**"]   # changelog.d/<issue>.md is added for you
  *   decisions: ["…"]         # answers to the Issue's open questions
  *   changelog: { section: Added, bump: minor }   # section overrides the kind default
@@ -67,6 +67,12 @@ export const SHARED_FILES = ['CHANGELOG.md', 'docs/module-reference.md'];
 export const DEFAULT_GATES = ['lint', 'typecheck', 'unit-related'];
 /** 2-4-3: a refactor is judged by lint / typecheck locally; the full suite runs in the PR's CI. */
 export const REFACTOR_DEFAULT_GATES = ['lint', 'typecheck'];
+/**
+ * `typecheck` reads tsconfig.json only, whose `lib` is wider than the server build's
+ * (#4135: `isWellFormed` passed it and failed CI's Build). Measured 3.3-3.7s against
+ * typecheck's 24s at load 30-41, so it goes into the default instead of a new gate.
+ */
+export const SERVER_BUILD_GATE = 'build-server';
 export const UNIT_RELATED_GATE = {
   id: 'unit-related',
   command: 'node scripts/run-related-unit-tests.mjs --base origin/develop',
@@ -122,6 +128,94 @@ const SCOPE_COMPANIONS = [
 ];
 
 /** Whether the scope reaches `tests/fixtures/` (the scanning tests have to be told about a new fixture, #4000). */
+/** Root files `npm run build:server` compiles or is configured by; everything else it reads is under src/. */
+const SERVER_BUILD_ROOT_FILES = ['server.ts', 'tsconfig.server.json', 'tsconfig.base.json'];
+const MAX_BRACE_EXPANSIONS = 1024;
+
+/**
+ * `{a,b}` written out, nested too, or null past the limit. Unbalanced braces are literal,
+ * as in the scope gate (src/lib/verification/scope-gate-glob.ts).
+ */
+function expandBraces(pattern) {
+  const done = [];
+  const queue = [pattern];
+  while (queue.length > 0) {
+    const current = queue.pop();
+    const open = current.indexOf('{');
+    let depth = 0;
+    let close = -1;
+    const commas = [];
+    for (let i = open; open !== -1 && i < current.length; i++) {
+      if (current[i] === '{') depth += 1;
+      else if (current[i] === '}' && --depth === 0) {
+        close = i;
+        break;
+      } else if (current[i] === ',' && depth === 1) commas.push(i);
+    }
+    if (close === -1) {
+      done.push(current);
+    } else {
+      const cuts = [open, ...commas, close];
+      for (let i = 0; i < cuts.length - 1; i++) {
+        queue.push(`${current.slice(0, open)}${current.slice(cuts[i] + 1, cuts[i + 1])}${current.slice(close + 1)}`);
+      }
+    }
+    if (done.length + queue.length > MAX_BRACE_EXPANSIONS) return null;
+  }
+  return done;
+}
+
+function hasBalancedBraces(pattern) {
+  let depth = 0;
+  for (const char of pattern) {
+    if (char === '{') depth += 1;
+    else if (char === '}' && --depth < 0) return false;
+  }
+  return depth === 0;
+}
+
+/** One path segment of a scope glob, with `*` and `?` as the scope gate reads them. */
+function segmentMatches(segment, name) {
+  const source = segment.replace(/\*+|\?|[.+^${}()|[\]\\]/g, (token) => {
+    if (token[0] === '*') return '[^/]*';
+    return token === '?' ? '[^/]' : `\\${token}`;
+  });
+  return new RegExp(`^${source}$`).test(name);
+}
+
+/**
+ * Whether a scope reaches what `npm run build:server` compiles or is configured by (#4135),
+ * in the meaning the scope gate gives a pattern: `src`, `src/` and `src/**` are the same,
+ * and `**\/*.ts` or `{src,docs}/**` reach under src/ as well. Judged on the first segment,
+ * which is all that tells whether a path under src/ or a root file can match; a pattern too
+ * wide to write out counts as reaching it.
+ */
+export function touchesServerBuild(scope) {
+  return scope.some((pattern) => {
+    const alternatives = hasBalancedBraces(pattern) ? expandBraces(pattern) : [pattern];
+    if (alternatives === null) return true;
+    return alternatives.some((alternative) => {
+      const [first, ...rest] = alternative.replace(/\/+$/, '').split('/');
+      if (first === '**' || segmentMatches(first, 'src')) return true;
+      return rest.length === 0 && SERVER_BUILD_ROOT_FILES.some((file) => segmentMatches(first, file));
+    });
+  });
+}
+
+/**
+ * Whether the worktree the contract is for declares a gate. `POST /tasks` answers an unknown
+ * gate with 400, so a default is not grown by a gate the worktree cannot resolve; no
+ * verify.yaml, or one that cannot be read, declares nothing.
+ */
+function declaresGate(worktree, id) {
+  try {
+    const gates = YAML.parse(fs.readFileSync(path.join(worktree, '.commandmate', 'verify.yaml'), 'utf8'))?.gates;
+    return Array.isArray(gates) && gates.some((gate) => gate?.id === id);
+  } catch {
+    return false;
+  }
+}
+
 export function touchesFixtures(scope) {
   return scope.some((pattern) => pattern === 'tests/fixtures' || pattern.startsWith('tests/fixtures/'));
 }
@@ -260,6 +354,10 @@ export function normalizeConfig(raw, options = {}) {
     if (scope.includes(shared)) problems.push(`scope: ${shared} is shared — the worker writes a fragment instead (2-4-1)`);
   }
   const asWritten = [...scope];
+  // Only a default grows: a list written out runs as written, and a refactor keeps its two gates (2-4-3).
+  if (raw.gates === undefined && kindName !== 'refactor' && touchesServerBuild(asWritten) && declaresGate(options.worktree ?? process.cwd(), SERVER_BUILD_GATE)) {
+    gates.splice(gates.indexOf('typecheck') + 1, 0, SERVER_BUILD_GATE);
+  }
   for (const companion of SCOPE_COMPANIONS) {
     if (companion.when(asWritten) && !scope.includes(companion.file)) scope.push(companion.file);
   }
@@ -533,7 +631,12 @@ function fill(template, values) {
     .join('\n');
 }
 
-/** Render the goal text from the templates. Throws when it exceeds MAX_GOAL_LENGTH. */
+/**
+ * Render the goal text from the templates. Throws when it exceeds MAX_GOAL_LENGTH.
+ * No newline is added after the check: the parser counts the decoded YAML string (#4135).
+ *
+ * @returns {string}
+ */
 export function renderGoal(config) {
   const decisions =
     config.decisions.length === 0
@@ -579,7 +682,7 @@ export function renderGoal(config) {
       `goal: ${goal.length} characters exceeds ${MAX_GOAL_LENGTH} — shorten issueBody or decisions`,
     ]);
   }
-  return `${goal}\n`;
+  return goal;
 }
 
 /** The contract as a plain object, in the key order of docs/design/task-contract.md. */
@@ -607,9 +710,9 @@ export function contractYaml(config) {
 }
 
 /** Read a config file (YAML or JSON — JSON is valid YAML) and normalize it. */
-export function loadConfig(file) {
+export function loadConfig(file, { worktree } = {}) {
   const raw = YAML.parse(fs.readFileSync(file, 'utf8'));
-  return normalizeConfig(raw, { baseDir: path.dirname(path.resolve(file)) });
+  return normalizeConfig(raw, { baseDir: path.dirname(path.resolve(file)), worktree });
 }
 
 export function contractPath(worktree, config) {
@@ -624,7 +727,7 @@ export function contractPath(worktree, config) {
  * @returns {{ path: string, status: 'written' | 'unchanged' }}
  */
 export function writeContract({ configFile, worktree = process.cwd(), out, force = false }) {
-  const config = loadConfig(configFile);
+  const config = loadConfig(configFile, { worktree });
   const text = contractYaml(config);
   const target = out ? path.resolve(out) : contractPath(worktree, config);
   if (fs.existsSync(target)) {
@@ -664,7 +767,7 @@ function main(argv) {
   }
   try {
     if (options.stdout) {
-      process.stdout.write(contractYaml(loadConfig(options.configFile)));
+      process.stdout.write(contractYaml(loadConfig(options.configFile, { worktree: options.worktree })));
       return 0;
     }
     const result = writeContract(options);
