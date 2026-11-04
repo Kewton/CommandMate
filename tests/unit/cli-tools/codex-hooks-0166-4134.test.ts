@@ -28,22 +28,31 @@ vi.mock('util', async (importOriginal) => {
   return { ...actual, promisify: () => vi.fn().mockResolvedValue(undefined) };
 });
 
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { removeTempDir } from '@tests/helpers/temp-dir';
 import { CodexTool } from '@/lib/cli-tools/codex';
 import { capturePane, getSessionWorkingDirectory, hasSession, sendKeys, sendSpecialKey } from '@/lib/tmux/tmux';
 import { sendMessageWithSubmitVerification } from '@/lib/cli-tools/submit-verified-sender';
+import { withInstanceInputLock } from '@/lib/session/instance-input-lock';
 import { CODEX_HOOK_TRUST_ENV_VAR } from '@/lib/hooks/sources/codex/hooks-config';
 
 const frame = (name: string): string =>
   readFileSync(join(process.cwd(), 'tests/fixtures/codex-dialogs-0166', `${name}.txt`), 'utf8');
 
 /** A pane that moves only on the keys codex 0.166.0 was measured to take. */
-function simulate(start: string, moves: Record<string, Record<string, string>>): { keys: string[] } {
-  const typed: { keys: string[] } = { keys: [] };
+function simulate(
+  start: string,
+  moves: Record<string, Record<string, string>>
+): { keys: string[]; goTo: (name: string) => void } {
   let current = start;
+  const typed = {
+    keys: [] as string[],
+    goTo: (name: string): void => {
+      current = name;
+    },
+  };
   const press = (key: string): void => {
     typed.keys.push(key);
     current = moves[current]?.[key] ?? current;
@@ -73,9 +82,19 @@ describe('codex 0.166.0 hook review', () => {
   let plain: string;
   let withRepoHooks: string;
   let savedTrust: string | undefined;
+  let savedCodexHome: string | undefined;
+  let codexHome: string;
+
+  /** The launch really writes `hooks.json` and the relay: to this suite's own directory. */
+  function useOwnCodexHome(): void {
+    process.env.CODEX_HOME = codexHome;
+  }
 
   beforeEach(() => {
     vi.clearAllMocks();
+    savedCodexHome = process.env.CODEX_HOME;
+    codexHome = mkdtempSync(join(tmpdir(), 'codex-4134-home-'));
+    useOwnCodexHome();
     savedTrust = process.env[CODEX_HOOK_TRUST_ENV_VAR];
     delete process.env[CODEX_HOOK_TRUST_ENV_VAR];
     plain = mkdtempSync(join(tmpdir(), 'codex-4134-plain-'));
@@ -90,6 +109,9 @@ describe('codex 0.166.0 hook review', () => {
     vi.useRealTimers();
     if (savedTrust === undefined) delete process.env[CODEX_HOOK_TRUST_ENV_VAR];
     else process.env[CODEX_HOOK_TRUST_ENV_VAR] = savedTrust;
+    if (savedCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = savedCodexHome;
+    removeTempDir(codexHome);
     removeTempDir(plain);
     removeTempDir(withRepoHooks);
   });
@@ -211,5 +233,90 @@ describe('codex 0.166.0 hook review', () => {
     const pane = simulate('update', { update: { '3': 'ready' } });
     await start(plain);
     expect(pane.keys).toEqual(['3']);
+  });
+
+  describe('a screen that changes while the folder trust Enter waits for the composer', () => {
+    /** Another writer takes the composer right after the read that chose Enter, and the pane moves under it. */
+    function moveWhileEnterWaits(after: string): { keys: string[] } {
+      const pane = simulate('trust', LIVE_0166);
+      const session = new CodexTool().getSessionName('wt-4134');
+      const typeDigit = vi.mocked(sendKeys).getMockImplementation()!;
+      let digitTyped = false;
+      vi.mocked(sendKeys).mockImplementation(async (...args) => {
+        await typeDigit(...args);
+        if (args[1] === '1') digitTyped = true;
+      });
+      const read = vi.mocked(capturePane).getMockImplementation()!;
+      vi.mocked(capturePane).mockImplementation(async (...args) => {
+        const screen = await read(...args);
+        if (digitTyped) {
+          digitTyped = false;
+          void withInstanceInputLock(session, async () => {
+            pane.goTo(after);
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          });
+        }
+        return screen;
+      });
+      return pane;
+    }
+
+    it('does not press Enter on `1. Review hooks`, the same number on another screen', async () => {
+      const pane = moveWhileEnterWaits('hooks-review');
+      await start(plain);
+      // The hook review then gets its own answer, from its own read.
+      expect(pane.keys).toEqual(['1', '2', 'Enter']);
+    });
+
+    it('still presses it when the trust screen is what the second read shows', async () => {
+      const pane = moveWhileEnterWaits('trust');
+      await start(plain);
+      expect(pane.keys).toEqual(['1', 'Enter']);
+    });
+  });
+
+  it('names the folder trust screen a running process is parked on, and types nothing', async () => {
+    const pane = simulate('trust', {});
+    const error = await send();
+    expect(sendMessageWithSubmitVerification).not.toHaveBeenCalled();
+    expect(pane.keys).toEqual([]);
+    expect(String(error)).toMatch(/prompt not ready/);
+    expect(String(error)).toMatch(/\btrust\b/);
+  });
+
+  it('keeps the plain wording when no dialog is what is in the way', async () => {
+    vi.mocked(capturePane).mockResolvedValue('Starting up');
+    const error = await send();
+    expect(String(error)).toMatch(/timed out waiting for the input prompt before sending$/);
+  });
+
+  describe('CODEX_HOME', () => {
+    const written = (dir: string): string[] => readdirSync(dir);
+
+    it('the launch writes where the variable points, so the check below can fail', async () => {
+      const elsewhere = mkdtempSync(join(tmpdir(), 'codex-4134-elsewhere-'));
+      try {
+        process.env.CODEX_HOME = elsewhere;
+        simulate('ready', {});
+        await start(plain);
+        expect(existsSync(join(elsewhere, 'hooks.json'))).toBe(true);
+      } finally {
+        removeTempDir(elsewhere);
+      }
+    });
+
+    it('a CODEX_HOME inherited from outside gets nothing: the suite moves it first', async () => {
+      const inherited = mkdtempSync(join(tmpdir(), 'codex-4134-inherited-'));
+      try {
+        process.env.CODEX_HOME = inherited;
+        useOwnCodexHome();
+        simulate('ready', {});
+        await start(plain);
+        expect(written(inherited)).toEqual([]);
+        expect(existsSync(join(codexHome, 'hooks.json'))).toBe(true);
+      } finally {
+        removeTempDir(inherited);
+      }
+    });
   });
 });

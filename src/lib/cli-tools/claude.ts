@@ -84,6 +84,7 @@ export class ClaudeTool extends BaseCLITool implements IImageCapableCLITool {
 
     // Issue #4134: the start only waits for the prompt, so a dialog in front of
     // it costs the whole start budget. Both run: the start decides when it is over.
+    // A process already on the dialog starts no launch: `sendMessageToClaude` answers it.
     const start = startClaudeSession(options);
     await answerClaudeAutoDefaultNudgeUntil(this.getSessionName(worktreeId, instanceId), start);
     await start;

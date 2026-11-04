@@ -14,15 +14,16 @@
  * operator's settings (measured). The cursor starts on Yes, so a screen that does
  * not show it on No gets no Enter (`resolveClaudeAutoDefaultNudgeKey`).
  *
- * Next to the start rather than inside it because `lib/session/claude-session`
- * owns that loop and this Issue's scope stops at `lib/cli-tools`; a session parked
- * on the dialog before this existed is not reached (it starts no launch).
+ * Two callers, because a launch ends. {@link answerClaudeAutoDefaultNudgeUntil}
+ * runs beside a start; a process already parked on the dialog starts no launch,
+ * and is answered by the send that finds it there
+ * ({@link answerClaudeAutoDefaultNudgeBeforeSend}).
  *
  * @module lib/cli-tools/claude-auto-default-nudge
  */
 
 import { capturePane, sendKeys, sendSpecialKeys } from '../tmux/tmux';
-import { resolveClaudeAutoDefaultNudgeKey, stripAnsi } from '../detection/cli-patterns';
+import { isClaudeAutoDefaultNudgeOpen, resolveClaudeAutoDefaultNudgeKey, stripAnsi } from '../detection/cli-patterns';
 import { answerUnderInstanceInputLock, instanceInputLaunchReadMark } from '@/lib/session/instance-input-lock';
 import { createLogger } from '@/lib/logger';
 
@@ -37,10 +38,13 @@ const CAPTURE_LINES = 50;
 /** Keys one launch may spend. Two are enough; the rest are for a TUI not yet taking keys. */
 const MAX_KEYS = 5;
 
+/** Reads one send gives the dialog before it refuses: 10 seconds, as its own prompt wait. */
+const BEFORE_SEND_MAX_READS = 20;
+
 /** Read the pane while `start` runs and answer the dialog if it comes up. */
 export async function answerClaudeAutoDefaultNudgeUntil(sessionName: string, start: Promise<unknown>): Promise<void> {
   let settled = false;
-  const over = start.then(
+  const over = Promise.resolve(start).then(
     () => {
       settled = true;
     },
@@ -65,6 +69,38 @@ export async function answerClaudeAutoDefaultNudgeUntil(sessionName: string, sta
     if (await sendNudgeKey(sessionName, readMark, key)) keys++;
   }
   logger.warn('claude-auto-default-nudge-unanswered', { sessionName, keys });
+}
+
+/**
+ * Answer the dialog if this pane is on it, before a send waits for the prompt.
+ * One read and no key on any other screen. Inside a send that holds the input
+ * lock the keys join it.
+ *
+ * @throws Error (`prompt not ready`: `not-sent`, nothing typed) when the dialog
+ *   stays open: its cursor cannot be read or it does not take the keys. Only the
+ *   screen is named, nothing captured.
+ */
+export async function answerClaudeAutoDefaultNudgeBeforeSend(sessionName: string): Promise<void> {
+  let keys = 0;
+  for (let reads = 0; reads < BEFORE_SEND_MAX_READS; reads++) {
+    const readMark = instanceInputLaunchReadMark();
+    let screen: string;
+    try {
+      screen = stripAnsi(await capturePane(sessionName, { startLine: -CAPTURE_LINES }));
+    } catch {
+      // The send's own check reports what is wrong with the session.
+      return;
+    }
+    if (!isClaudeAutoDefaultNudgeOpen(screen)) return;
+    const key = resolveClaudeAutoDefaultNudgeKey(screen);
+    if (key !== null && keys < MAX_KEYS && (await sendNudgeKey(sessionName, readMark, key))) keys++;
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+  }
+  logger.warn('claude-auto-default-nudge-unanswered-at-send', { sessionName, keys });
+  throw new Error(
+    'Claude Code prompt not ready: "Make auto mode your default permission mode?" is open and did not take its keys. ' +
+      'Nothing was typed. Answer it in the terminal: No keeps the current mode'
+  );
 }
 
 /**

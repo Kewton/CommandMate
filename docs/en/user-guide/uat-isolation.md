@@ -6,6 +6,8 @@ When a UAT or the daily real-environment check runs a CommandMate server and CLI
 2. **claude's user-level hooks** — `--settings` is added to `~/.claude/settings.json`, not substituted for it. Moving `CLAUDE_CONFIG_DIR` logs claude out.
 3. **the CLI's settings** — the global CLI reads `~/.commandmate/.env` whatever the cwd, and with nothing set it sends to the default port 3000 (production).
 
+`scripts/uat/run-server.sh up` points `CM_OPENCODE_V2_DIR`, `CM_AGENT_HOOKS_DIR` and `CM_AGENT_ROLE_ARTIFACTS_DIR`, as well as the server's database, under the run. The checks in `.commandmate/uat.yaml` measure this in the running process's environment (`ps eww`). Generated role files do not appear in `~/.commandmate/agent-roles`.
+
 A server and CLI started with `CM_UAT_ISOLATION=1` behave as follows. Without it nothing changes (any value other than `1` or `own-home` counts as unset; `own-home` is described at the end).
 
 | Target | With `CM_UAT_ISOLATION=1` |

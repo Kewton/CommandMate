@@ -683,7 +683,8 @@ export class CodexTool extends BaseCLITool {
         // Issue #4134: on 0.166.0 the digit above only put the cursor on the
         // option, and the screen is still up. Enter, while THIS frame shows the
         // cursor on `1. Trust and continue`: Enter on the row below it leaves the
-        // session (`Back to Agent Command Center`, `Quit`).
+        // session (`Back to Agent Command Center`, `Quit`). The second read asks
+        // for the screen as well as the row: `1. Review hooks` is a row 1 too.
         if (
           activeDialog === 'trust' &&
           trustEnterPresses < CODEX_TRUST_ENTER_MAX_PRESSES &&
@@ -692,7 +693,10 @@ export class CodexTool extends BaseCLITool {
           const enterOutcome = await answerUnderInstanceInputLock(
             sessionName,
             readMark,
-            async () => readCodexEnterConfirmedCursor(stripAnsi(await capturePane(sessionName, 50))) === 1,
+            async () => {
+              const again = stripAnsi(await capturePane(sessionName, 50));
+              return getCodexActiveDialog(again) === 'trust' && readCodexEnterConfirmedCursor(again) === 1;
+            },
             () => sendSpecialKey(sessionName, 'Enter')
           );
           if (!enterOutcome.answered) {
@@ -904,6 +908,8 @@ export class CodexTool extends BaseCLITool {
     let trustHooks: boolean | null = null;
     /** The hooks screen the last read showed, for the error (Issue #4134). */
     let lastHooksScreen: CodexHooksScreen | null = null;
+    /** The dialog the last read showed; a send does not answer these (Issue #4134). */
+    let lastDialog: ReturnType<typeof getCodexActiveDialog> = null;
 
     while (Date.now() - startTime < CODEX_PROMPT_WAIT_TIMEOUT_MS) {
       try {
@@ -916,6 +922,7 @@ export class CodexTool extends BaseCLITool {
         // returning there types the user's message into the review UI.
         const screen = getCodexLifecycleDialog(output);
         lastHooksScreen = isCodexHooksScreen(screen) ? screen : null;
+        lastDialog = getCodexActiveDialog(output);
         if (isCodexHooksScreen(screen)) {
           if (trustHooks === null) {
             // The pane's own directory, for the same reason `relaunchIfToolExited`
@@ -946,7 +953,8 @@ export class CodexTool extends BaseCLITool {
       );
     }
     throw new Error(
-      'Codex prompt not ready: timed out waiting for the input prompt before sending'
+      'Codex prompt not ready: timed out waiting for the input prompt before sending' +
+        (lastDialog === null ? '' : ` (the ${lastDialog} dialog is open: answer it in the terminal)`)
     );
   }
 
