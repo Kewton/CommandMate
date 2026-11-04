@@ -15,7 +15,7 @@ import {
   sendSpecialKey,
 } from '../tmux/tmux';
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
-import { isVibeLocalComposerReady } from '../detection/tools/vibe-local/readiness';
+import { isVibeLocalComposerReady, readVibeLocalNotReadyScreen } from '../detection/tools/vibe-local/readiness';
 import { detectSessionStatus, isGeneratingStatus } from '../detection/status-detector';
 import {
   confirmedDialogRefusal,
@@ -70,6 +70,26 @@ const VIBE_LOCAL_PROMPT_CAPTURE_LINES = 200;
 function isVibeLocalWaitDialog(output: string): boolean {
   const status = detectSessionStatus(output, 'vibe-local');
   return status.hasActivePrompt && !isGeneratingStatus(status);
+}
+
+/**
+ * What held the pane when the wait for the prompt ran out (Issue #4146), for the
+ * refusal `send` reports. Names the screen only: nothing captured goes into it.
+ * A dialog here is one read too briefly to be refused as `prompt-waiting`.
+ *
+ * @param output - The last capture; null when the last read failed
+ */
+function describeVibeLocalPaneHold(output: string | null): string {
+  if (output === null) return 'the pane could not be read';
+  if (isVibeLocalWaitDialog(output)) return 'a prompt dialog is open: answer it in the terminal';
+  switch (readVibeLocalNotReadyScreen(output)) {
+    case 'no-input-row':
+      return 'no input row on the pane: vibe-local may still be starting';
+    case 'input-row-holds-text':
+      return 'the input row still holds text';
+    case 'output-below-input-row':
+      return 'output is drawn below the newest input row: vibe-local may still be starting or working';
+  }
 }
 
 /**
@@ -229,6 +249,7 @@ export class VibeLocalTool extends BaseCLITool {
   private async waitForPrompt(sessionName: string): Promise<void> {
     const deadline = Date.now() + VIBE_LOCAL_PROMPT_WAIT_TIMEOUT_MS;
     const dialog = createDialogConfirmation();
+    let lastOutput: string | null = null;
     while (Date.now() < deadline) {
       let confirmed = false;
       try {
@@ -237,10 +258,12 @@ export class VibeLocalTool extends BaseCLITool {
           deadline
         );
         if (output === null) break;
+        lastOutput = output;
         if (isVibeLocalComposerReady(output)) return;
         confirmed = dialog.observe(isVibeLocalWaitDialog(output));
       } catch (error: unknown) {
         // Capture may fail - continue polling. Not a dialog read: the run restarts.
+        lastOutput = null;
         dialog.reset();
         logger.debug('vibe-local-prompt-capture-failed', { sessionName, error: getErrorMessage(error) });
       }
@@ -253,7 +276,9 @@ export class VibeLocalTool extends BaseCLITool {
       await new Promise((resolve) => setTimeout(resolve, Math.min(VIBE_LOCAL_PROMPT_POLL_INTERVAL_MS, remaining)));
     }
     logger.info('vibe-local-prompt-not-detected');
-    throw new Error('Vibe Local prompt not ready: timed out waiting for the input prompt before sending');
+    throw new Error(
+      `Vibe Local prompt not ready: timed out waiting for the input prompt before sending (${describeVibeLocalPaneHold(lastOutput)})`
+    );
   }
 
   /**
