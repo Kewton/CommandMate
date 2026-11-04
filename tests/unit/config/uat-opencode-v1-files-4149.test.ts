@@ -203,7 +203,10 @@ describe.skipIf(!HAS_TOOLS)('the V1 records, on a running server', () => {
     const statePath = path.join(runDir, 'uat-run.state');
     if (fs.existsSync(statePath)) {
       const state = stateOf();
-      if (state.sock_dir) spawnSync('tmux', ['-S', path.join(state.sock_dir, 'tmux.sock'), 'kill-server'], { stdio: 'ignore' });
+      if (state.sock_dir) {
+        const socket = path.join(state.sock_dir, 'tmux.sock');
+        spawnSync('tmux', ['-S', socket, 'kill-server'], { stdio: 'ignore' });
+      }
       const pid = Number(state.server_pid);
       try {
         if (pid > 0) process.kill(pid, 'SIGKILL');
