@@ -10,7 +10,8 @@
  *
  * - **Immutable.** A name is fixed by the injection fingerprint, so one name means
  *   one content. An existing file is reused only if every byte matches, and a
- *   difference is an error rather than an overwrite.
+ *   difference is an error rather than an overwrite. The one exception is Codex,
+ *   which writes into the profile it runs under (#4136, {@link codexProfileAsWritten}).
  * - **Inspected.** Many CLIs run on with no role when a file is missing or broken
  *   (§8), so the writer reads back what it wrote, and {@link inspectRoleArtifact}
  *   is the same check for the moment before a launch.
@@ -43,6 +44,7 @@ import { randomBytes } from 'crypto';
 import { homedir, userInfo } from 'os';
 import { basename, dirname, join, resolve, sep } from 'path';
 import vm from 'vm';
+import { parse as parseToml } from 'smol-toml';
 import { parse as parseYaml } from 'yaml';
 import { resolveSafeDirectory } from '@/config/safe-directory';
 import {
@@ -55,7 +57,7 @@ import { getCodexHome } from '@/lib/hooks/sources/codex/hooks-config';
 import { getCopilotHomeDirectory } from '@/lib/hooks/sources/copilot/hook-settings';
 import type { AgentRoleCliTool } from '@/types/agent-roles';
 import { computeFingerprint } from './fingerprint';
-import { parseTomlBasicDocument, renderTomlBasicDocument } from './toml-basic';
+import { renderTomlBasicDocument } from './toml-basic';
 
 type Env = Readonly<Record<string, string | undefined>>;
 
@@ -363,14 +365,15 @@ function formatProblem(adapter: AgentRoleCliTool, name: string, bytes: Buffer): 
   const text = bytes.toString('utf8');
   switch (adapter) {
     case 'codex': {
-      let entries: Record<string, string>;
+      let entries: Record<string, unknown>;
       try {
-        entries = parseTomlBasicDocument(text);
-      } catch (error) {
-        return `not the expected TOML (${error instanceof Error ? error.message : 'unreadable'})`;
+        entries = parseToml(text);
+      } catch {
+        // Not the parser's message: it quotes the line, and the line is the role's body.
+        return 'not the expected TOML';
       }
       const value = entries.developer_instructions;
-      return value === undefined || value.trim() === '' ? 'developer_instructions is missing or empty' : null;
+      return typeof value !== 'string' || value.trim() === '' ? 'developer_instructions is missing or empty' : null;
     }
     case 'copilot':
     case 'antigravity': {
@@ -629,11 +632,35 @@ export function inspectRoleArtifact(
   inspectFile(adapter, name, path, expectedFingerprint);
 }
 
+/**
+ * The bytes CommandMate wrote for this Codex profile, given what is in it now.
+ *
+ * `codex -p <profile>` saves into the profile itself: answering the folder-trust
+ * screen adds `[projects."<path>"]` there and leaves `config.toml` alone (measured
+ * on 0.166.0, #4136). That is the CLI using its own file, so it must not lock the
+ * role out, and CommandMate does not rewrite the file to undo it. What the role
+ * depends on is `developer_instructions`, so that alone decides. Everything else
+ * in the file has the standing of `config.toml`: only this user can write either.
+ *
+ * @returns null when no such text can be read from the file
+ */
+function codexProfileAsWritten(bytes: Buffer): Buffer | null {
+  try {
+    const value = parseToml(bytes.toString('utf8')).developer_instructions;
+    return typeof value === 'string' ? Buffer.from(renderTomlBasicDocument({ developer_instructions: value }), 'utf8') : null;
+  } catch {
+    return null;
+  }
+}
+
 function inspectFile(adapter: AgentRoleCliTool, name: string, path: string, expectedFingerprint: string): void {
   const bytes = readExistingArtifact(path);
   if (bytes === null) throw new RoleArtifactError('missing', `${path} does not exist`);
   if (computeFingerprint(bytes) !== expectedFingerprint) {
-    throw new RoleArtifactError('content-mismatch', `${path} is not the expected content`);
+    const asWritten = adapter === 'codex' ? codexProfileAsWritten(bytes) : null;
+    if (asWritten === null || computeFingerprint(asWritten) !== expectedFingerprint) {
+      throw new RoleArtifactError('content-mismatch', `${path} is not the expected content`);
+    }
   }
   const problem = formatProblem(adapter, name, bytes);
   if (problem) throw new RoleArtifactError('format-invalid', `${path}: ${problem}`);

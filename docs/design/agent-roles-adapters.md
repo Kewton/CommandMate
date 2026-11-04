@@ -173,6 +173,7 @@
   - `-p a -p b` は **exit 2**（`cannot be used multiple times`）。
   - **未決事項の結論:** CommandMate の起動行に `-p` は無いので、合成すべきは `config.toml` の `developer_instructions` だけ。既存プロファイルを使いたい利用者には、`<name>.config.toml` と `developer_instructions` を合成した生成物で両立できることを確認した（`merged-generated-profile`: モデルと両方の本文が残る）。ラッパーが `-p` を足す運用は exit 2 で起動失敗になるので気づける。`-c developer_instructions=…` でも両立するが本文が argv に出るので不採用。`model_instructions_file` は置換なので不採用。TOML の読み書きは新規の依存が要る（現在の依存に TOML は無い）。
 - **再開:** `resume --last` では旧本文を保持（§3）。CommandMate は再開しない。
+- **Codex が書き込む（#4136）:** `-p` で起動すると、フォルダの信頼は `config.toml` ではなくプロファイルに保存される（`[projects."<path>"]`、0.166.0 で実測）。CommandMate は書き戻さず、Codex の生成物に限り `developer_instructions` の一致で判定する。信頼はこのプロファイルに閉じるので、別のロールやロールなしのセッション、本文を変えた後の新しい版では再度訊かれる。
 - **失敗時:** **未知のプロファイル → 素のまま動く（TUI は対照との画面の差なし、`exec` は exit 0）**。不正な TOML → exit 1（行番号つき）。読めない → exit 1。
 
 | 項目 | 記録 |
