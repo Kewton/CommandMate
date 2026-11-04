@@ -43,7 +43,7 @@
 
 'use client';
 
-import React, { memo, useCallback, useEffect, useId, useMemo, useState } from 'react';
+import React, { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Plus } from 'lucide-react';
 import {
@@ -204,6 +204,14 @@ export const AgentAddMenu = memo(function AgentAddMenu({
   // Issue #3514: the same per-worktree write queue AgentInstancesPane uses.
   const writeRoster = useAgentInstancesRoster(worktreeId, onInstancesChange);
   const createInstance = useAgentInstanceCreate(worktreeId, onInstancesChange);
+  // Issue #4145: this menu stays mounted across a worktree switch. A form and a save
+  // begun on the previous worktree are that worktree's, and instance ids repeat, so its
+  // result must not place anything here.
+  const currentWorktreeRef = useRef(worktreeId);
+  currentWorktreeRef.current = worktreeId;
+  useEffect(() => {
+    setOpen(false);
+  }, [worktreeId]);
 
   const isToolSelectable = useCallback(
     (id: CLIToolType) => installed == null || installed.includes(id),
@@ -309,6 +317,8 @@ export const AgentAddMenu = memo(function AgentAddMenu({
             return instance && [...base, instance];
           });
         }
+        // Issue #4145: the switch closed this form; one opened since is the new worktree's.
+        if (currentWorktreeRef.current !== worktreeId) return;
         if (result.status === 'saved_unverified') {
           setUnverified(result.unconfirmed ? 'unknown' : 'saved');
           return;
@@ -342,6 +352,7 @@ export const AgentAddMenu = memo(function AgentAddMenu({
       }
     },
     [
+      worktreeId,
       toolId,
       isToolSelectable,
       atMax,
