@@ -90,6 +90,38 @@ describe('[#4132] a create whose answer was lost', () => {
     expect(ids(server)).toEqual(['claude']);
   });
 
+  /** Runs `change` as the settling leaves: it lands after the read the create already made. */
+  function atTheSettling(change: () => void): void {
+    const passOn = global.fetch;
+    let done = false;
+    global.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (!done && String(url).endsWith('/settle')) {
+        done = true;
+        change();
+      }
+      return (passOn as typeof fetch)(url, init);
+    }) as unknown as typeof fetch;
+  }
+
+  it('positive: its row was removed and the id made again: the old key does not claim that row', async () => {
+    loseNextAnswer(server, 'POST', ROLES, '500', { committed: true });
+    atTheSettling(() => {
+      server.changeRosterElsewhere([CLAUDE]);
+      server.changeRosterElsewhere([CLAUDE, { ...TWO, alias: 'Theirs' }]);
+    });
+    const onSaved = vi.fn();
+    expect(await create(onSaved)).toEqual({ status: 'saved_unverified', unconfirmed: true });
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(server.roster.map((row) => row.alias)).toEqual(['Claude', 'Theirs']);
+  });
+
+  it('it committed: the roster handed on is read after the settling, not before', async () => {
+    loseNextAnswer(server, 'POST', ROLES, '500', { committed: true });
+    atTheSettling(() => server.changeRosterElsewhere([CLAUDE, { ...TWO, alias: 'Renamed' }]));
+    const result = await create();
+    expect(result.status === 'saved' && result.roster.map((row) => row.alias)).toEqual(['Claude', 'Renamed']);
+  });
+
   it('negative: an answered create asks nothing further', async () => {
     expect((await create()).status).toBe('saved');
     expect(server.calls.filter((call) => call.url.endsWith('/settle'))).toEqual([]);

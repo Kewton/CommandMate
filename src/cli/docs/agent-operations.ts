@@ -567,7 +567,7 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
 
   Exit codes: 0 done; 1 server not running; 2 bad arguments, unknown or ambiguous role or
   repository, a tool outside the feature; 31 a conflict, nothing changed (name_conflict,
-  version_conflict, role_in_use, instance_exists, roster_changed); 32 nothing typed (send);
+  name_changed, version_conflict, role_in_use, instance_exists, roster_changed); 32 nothing typed (send);
   99 anything else. --json failures: { success: false, error, message, candidates?, references? }.
   Full --json shapes: commandmate roles --help
 

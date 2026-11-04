@@ -85,8 +85,8 @@ export function newInstanceCreationKey(): string {
 }
 
 /**
- * What a create whose answer was lost came to. A `cancelled` holds from then on: the
- * request makes nothing, even if it is still on its way.
+ * What a create or a roster PATCH whose answer was lost came to. A `cancelled` holds from
+ * then on: the request makes nothing, even if it is still on its way.
  *
  * @returns null when the server gave no usable answer: nothing has been settled
  */

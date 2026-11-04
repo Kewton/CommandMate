@@ -572,7 +572,7 @@ Welcome to the Antigravity CLI. You are currently not signed in.
 |---|---|---|
 | 保存場所 | 新しい表 `agent_instance_creation_keys`（v65） | 名簿の行と同じトランザクションで書かないと「作ったがキーが残らない」窓が残る。メモリではサーバーの再起動で消える |
 | 主キー | `(worktree_id, idempotency_key)` | キーの範囲は worktree ごと。`worktree_id` の規約に従うので ID の改名に追従し、worktree と一緒に消える |
-| 行の中身 | `instance_id`（NULL は取り消し済み）、`request_fingerprint`、`created_at` | 本文も秘密も持たない。fingerprint は ID・ツール・別名・ロールの SHA-256 |
+| 行の中身 | `instance_id`（足した行。ちょうど 1 行でなければ NULL）、`request_fingerprint`（NULL は取り消し済み、または行が名簿を去った）、`created_at` | 本文も秘密も持たない。fingerprint は POST が ID・ツール・別名・ロールの SHA-256、PATCH が送った名簿の SHA-256 |
 | 寿命 | 24 時間。キーを書くたびに古い行を消す | 要求の期限は 15 秒で、遅れて届く要求もこれを大きく超えない |
 | キーの形 | 英数字・`_`・`-` の 16〜128 文字。クライアントが要求ごとに作る | 画面は http でも動くので `crypto.randomUUID` に頼らず `getRandomValues` で作る |
 
@@ -582,14 +582,18 @@ Welcome to the Antigravity CLI. You are currently not signed in.
 
 内容の一致では自分の作成か分からない。2 タブの同じ追加では先着の行が自分の行に見える。キーで確かめる。
 
-- `POST instances/roles` の `Idempotency-Key` ヘッダーでキーを渡す。同じトランザクションでキーと行を書く。本文は作るものだけを表すので、キーの有無で変えない。
-- 同じキーの再送は作らず先の結果を返す（200、`replayed: true`）。別の内容なら 409 `idempotency_key_reused`。
+- `POST instances/roles` と `PATCH /api/worktrees/:id`（`agentInstances` を含むとき）の `Idempotency-Key` ヘッダーでキーを渡す。同じトランザクションでキーと行を書く。本文は作るものだけを表すので、キーの有無で変えない。キーの空間は共通で、確認の口も `settle` の 1 つ。
+- 同じキーの再送は作らず先の結果を返す（200、`replayed: true`）。別の内容なら 409 `idempotency_key_reused`。PATCH は版の検査より先にキーを見る（再送の版は自分の 1 回目で古くなっている）。他の項目も書かない。
 - `POST instances/roles/settle` に `{ idempotencyKey }` を送る。commit 済みならその ID を返す。まだなら**取り消しの印を書いて** `cancelled` を返す。
 - 取り消し済みのキーで届いた要求は 409 `creation_cancelled` で何も作らない。
+- 行が名簿を去ると（`setAgentInstances` / `removeAgentInstance`）、その行を作ったキーも取り消し済みにする。同じ ID で別のツールになるときも別の行として扱う。同じ ID で作り直された行を旧キーが自分の作成と判定せず、再送でも作り直さない。改名と並べ替えでは失効しない。
+- 複数行を足す PATCH のキーはどの行も名指さない（`committed` だけを答え、失効もしない）。画面の PATCH は 1 回に 1 行しか足さない。
 
 GET で確かめるだけでは足りない。「無い」と読んだ後に先の要求が commit すると、再追加で 2 件になる。`settle` は印を残すので、`cancelled` の答えは「この要求は今後も作らない」を意味し、再追加が安全になる。
 
 ### 15.3 `settleLostCreate` の結果
+
+読み直しは `settle` の後に行う（先の読み取りは commit より前かもしれず、その ID の行が別の行かもしれない）。`settle` と読み直しの間に行が消されて同じ ID で作り直されると、まだ別の行を読みうる。ミリ秒の窓で、閉じるには `settle` の応答に名簿を載せる必要があるので残した。
 
 | `settle` の答え | 確認の読み直し | 結果 |
 |---|---|---|
@@ -597,6 +601,16 @@ GET で確かめるだけでは足りない。「無い」と読んだ後に先�
 | `committed` | 読めない | `saved_unverified`（`unconfirmed`） |
 | `cancelled` | 同じ ID の行が無い、または読めない | `failed`（再追加してよい） |
 | `cancelled` | 同じ ID の行がある | `saved_unverified`（`unconfirmed`）。自分のものとは言わない。読み直すまで追加を止める |
+| 答えが無い | 問わない | `saved_unverified`（`unconfirmed`） |
+
+PATCH の `settleLostPatch` も同じ考えで、内容の一致では判定しない。送った版と今の版を比べる（追加に限らず名簿全体を置き換えるので、行ではなく版を見る）。
+
+| `settle` の答え | 確認の読み直し | 結果 |
+|---|---|---|
+| `committed` | 読めた | `saved` |
+| `committed` | 読めない | `saved_unverified`（`unconfirmed`） |
+| `cancelled` | 版が送ったときのまま、または読めない | `failed`（再追加してよい） |
+| `cancelled` | 版が動いた | `saved_unverified`（`unconfirmed`）。自分のものとは言わない。画面の名簿が古いので読み直すまで追加を止める |
 | 答えが無い | 問わない | `saved_unverified`（`unconfirmed`） |
 
 ### 15.4 Auto-Yes の grant の識別子
@@ -618,6 +632,4 @@ GET で確かめるだけでは足りない。「無い」と読んだ後に先�
 
 | 場所 | 残るもの |
 |---|---|
-| `PATCH /api/worktrees/:id` の追加（`settleLostPatch`） | 冪等キーが無く、内容の一致で判定する。ルートが今回の変更範囲の外にある |
-| `InstanceRolesSection` の `PUT` | サーバーは `expectedRosterRevision` を受けるが、画面は送らない。呼ぶ側が今回の変更範囲の外にある |
 | `instances add --role` / `send --register --role` の `POST` | 冪等キーを付けない。CLI は自動で再送しない。応答が失われると「保存の有無は不明」と伝えて利用者に確認を任せる（§5 の既存の動き） |

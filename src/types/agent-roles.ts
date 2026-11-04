@@ -361,8 +361,9 @@ export interface InstanceRoleCreateResponse extends InstanceRoleSettingsResponse
 }
 
 /**
- * Carries a create's key (#4132): a client makes one per request. A condition about the
- * request rather than part of what is created, so the body is the same with or without it.
+ * Carries a key on a create or a roster PATCH (#4132): a client makes one per request. A
+ * condition about the request rather than part of what is written, so the body is the same
+ * with or without it.
  */
 export const INSTANCE_CREATION_KEY_HEADER = 'Idempotency-Key';
 
@@ -375,9 +376,11 @@ export const INSTANCE_CREATION_KEY_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
 export const EXPECTED_ROLE_NAME_HEADER = 'X-Expected-Role-Name';
 
 /**
- * `POST .../instances/roles/settle`, for a create whose answer was lost (#4132).
- * `cancelled`: the key made nothing and now never will, so adding again is safe.
+ * `POST .../instances/roles/settle`, for a write whose answer was lost (#4132).
+ * `cancelled`: the key made nothing and now never will, or the row it made has left the
+ * roster. A row with that id now is another's. `instanceId`: the row it added; a roster PATCH
+ * that added not exactly one has none.
  */
 export type InstanceCreationSettleResponse =
-  | { success: true; outcome: 'committed'; instanceId: string }
+  | { success: true; outcome: 'committed'; instanceId?: string }
   | { success: true; outcome: 'cancelled' };

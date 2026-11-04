@@ -13,6 +13,7 @@
  * @module lib/api-client-agent-roles
  */
 import type { AgentInstance } from '@/lib/cli-tools/types';
+import { INSTANCE_CREATION_KEY_HEADER } from '@/types/agent-roles';
 import type {
   AgentRoleDeleteConflictResponse,
   AgentRoleDeleteResponse,
@@ -113,10 +114,12 @@ export const roleApi = {
     ),
   instanceSettings: (worktreeId: string) =>
     request<InstanceRoleSettingsResponse>(`/api/worktrees/${worktreeId}/instances/roles`),
-  setInstanceRole: (worktreeId: string, instanceId: string, role: RoleAssignmentInput) =>
+  /** @param expectedRosterRevision - Refused with `roster_changed` if the roster has moved since (#4132). */
+  setInstanceRole: (worktreeId: string, instanceId: string, role: RoleAssignmentInput, expectedRosterRevision?: string) =>
     sendJson<InstanceRoleSettingsResponse>(`/api/worktrees/${worktreeId}/instances/roles`, 'PUT', {
       instanceId,
       role,
+      ...(expectedRosterRevision === undefined ? {} : { expectedRosterRevision }),
     }),
   createInstance: (
     worktreeId: string,
@@ -158,10 +161,15 @@ export type RosterPatchAnswer =
       abandon: () => void;
     };
 
-/** The roster PATCH, with one deadline over the headers and the body, as {@link request} has. */
+/**
+ * The roster PATCH, with one deadline over the headers and the body, as {@link request} has.
+ *
+ * @param idempotencyKey - What `settleInstanceCreation` asks about if the answer is lost (#4132)
+ */
 export async function sendRosterPatch(
   worktreeId: string,
   body: { agentInstances: AgentInstance[]; expectedRosterRevision: string },
+  idempotencyKey: string,
 ): Promise<RosterPatchAnswer> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ROLE_REQUEST_TIMEOUT_MS);
@@ -173,7 +181,7 @@ export async function sendRosterPatch(
   try {
     response = await fetch(`/api/worktrees/${worktreeId}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', [INSTANCE_CREATION_KEY_HEADER]: idempotencyKey },
       body: JSON.stringify(body),
       signal: controller.signal,
     });

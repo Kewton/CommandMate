@@ -1,10 +1,11 @@
 /**
- * Migration v65: idempotency keys for creating an instance (Issue #4132).
+ * Migration v65: idempotency keys for creating an instance or saving a roster (Issue #4132).
  *
- * A create whose answer was lost cannot be told from another client's identical
- * create by comparing rows, so the request carries a key, written in the transaction
- * that creates the row. A NULL `instance_id` is a key given up on (`settle`): a request
- * still on its way with that key creates nothing. Design:
+ * A write whose answer was lost cannot be told from another client's identical one by
+ * comparing rows, so the request carries a key, written in the transaction that makes the
+ * write. A NULL `request_fingerprint` is a key given up on (`settle`) or whose row has left
+ * the roster: a request still on its way with that key makes nothing. Otherwise a NULL
+ * `instance_id` is a roster PATCH that added not exactly one row. Design:
  * `docs/design/agent-roles-adapters.md` §15.
  *
  * `worktree_id` follows the convention `getWorktreeChildTables()` looks for, so a row

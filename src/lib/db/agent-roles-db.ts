@@ -388,7 +388,11 @@ export function hasAnyRoleSetting(db: Database.Database): boolean {
 /** How long a key is remembered. A request's deadline is seconds, so a late one is well inside it. */
 export const INSTANCE_CREATION_KEY_TTL_MS = 24 * 60 * 60 * 1000;
 
-/** What a key did: made `instanceId`, or, with null, was given up on. */
+/**
+ * What a key did. A null `requestFingerprint` is a key given up on, or one whose row has
+ * since left the roster: it makes nothing and claims nothing. Otherwise its write committed,
+ * and `instanceId` names the row it added; null when it added not exactly one (a roster PATCH).
+ */
 export interface InstanceCreationKeyRecord {
   instanceId: string | null;
   requestFingerprint: string | null;
@@ -427,7 +431,7 @@ export function recordInstanceCreationKey(
   db: Database.Database,
   worktreeId: string,
   key: string,
-  instanceId: string,
+  instanceId: string | null,
   requestFingerprint: string
 ): void {
   writeInstanceCreationKey(db, worktreeId, key, { instanceId, requestFingerprint });

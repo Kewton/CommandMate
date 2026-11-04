@@ -1737,6 +1737,26 @@ describe('--contract --role: the save checks the roster as /send does', () => {
     expect(fakeTool.typed).toEqual([]);
   });
 
+  it('[#4132] it changed right before the PUT: the condition refuses it, and nothing is saved', async () => {
+    await refusedByTheCheck();
+    after('put', () => setAgentInstances(db, WT, rows('claude')));
+    const result = await contract('--role', 'reviewer');
+    expect(result.code).toBe(31);
+    expect(result.stderr).toContain('not saved');
+    expect(held()).toMatchObject({ roleId: writer });
+    expect(fakeTool.typed).toEqual([]);
+  });
+
+  it('[#4132] only the alias changed right before the PUT: also refused, and nothing is saved', async () => {
+    await refusedByTheCheck();
+    after('put', () => setAgentInstances(db, WT, rows('codex', 'Renamed')));
+    const result = await contract('--role', 'reviewer');
+    expect(result.code).toBe(31);
+    expect(result.stderr).toContain('nothing was saved');
+    expect(held()).toMatchObject({ roleId: writer });
+    expect(fakeTool.typed).toEqual([]);
+  });
+
   it('nothing moved: it goes (negative control)', async () => {
     await refusedByTheCheck();
     expect((await contract('--role', 'reviewer')).code).toBe(0);

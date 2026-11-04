@@ -25,9 +25,9 @@
  *   back as `expectedRosterRevision`; a stale one is refused before anything is
  *   written. The PATCH (#4117) and the PUT of a role (#4132) take the same condition;
  *   a client that sends none is not checked.
- * - **A create can be asked about (#4132).** Comparing rows cannot tell this request's
- *   row from another client's identical one, so a create may carry a key, written in
- *   its transaction. See `docs/design/agent-roles-adapters.md` §15.
+ * - **A create or a roster PATCH can be asked about (#4132).** Comparing rows cannot tell
+ *   this request's row from another client's identical one, so either may carry a key,
+ *   written in its transaction. See `docs/design/agent-roles-adapters.md` §15.
  *
  * @module lib/agent-roles/management
  */
@@ -42,6 +42,7 @@ import {
 } from '@/lib/db/agent-instances-db';
 import {
   getInstanceCreationKey,
+  type InstanceCreationKeyRecord,
   getInstanceRoleState,
   getLatestRoleLaunchRecords,
   getRepositoryRoleStates,
@@ -301,6 +302,40 @@ function creationFingerprint(
 }
 
 /**
+ * What a key already did, for a request sending it again.
+ *
+ * @returns Its commit, or null when it has done nothing yet
+ * @throws {InstanceRoleRequestError} It was given up on, or stood for another request
+ */
+export function knownCreationKey(
+  db: Database.Database,
+  worktreeId: string,
+  key: string,
+  fingerprint: string
+): InstanceCreationKeyRecord | null {
+  const known = getInstanceCreationKey(db, worktreeId, key);
+  if (!known) return null;
+  if (known.requestFingerprint === null) {
+    throw new InstanceRoleRequestError('creation_cancelled', 'This write was given up on, or its row has gone, and makes nothing now');
+  }
+  if (known.requestFingerprint !== fingerprint) {
+    throw new InstanceRoleRequestError('idempotency_key_reused', 'This key was used for another request');
+  }
+  return known;
+}
+
+/** What a key on a roster PATCH stands for: the list it replaces the roster with. */
+export function rosterWriteFingerprint(agentInstances: unknown): string {
+  return createHash('sha256').update(JSON.stringify(agentInstances)).digest('hex');
+}
+
+/** The row a roster write adds, for its key to name. None when it adds not exactly one. */
+export function soleAddedInstanceId(previous: readonly AgentInstance[], next: readonly AgentInstance[]): string | null {
+  const added = next.filter((row) => !previous.some((was) => was.id === row.id && was.cliTool === row.cliTool));
+  return added.length === 1 ? added[0].id : null;
+}
+
+/**
  * Add an instance and its role together, so a launch that follows sees the right
  * role from its first turn, and a failure leaves neither.
  *
@@ -326,13 +361,7 @@ export function createInstanceWithRole(
     if (!worktree) throw new InstanceRoleRequestError('not_found', `Worktree not found: ${worktreeId}`);
     const fingerprint = creationFingerprint(input.instance, input.role);
     if (input.idempotencyKey !== undefined) {
-      const known = getInstanceCreationKey(db, worktreeId, input.idempotencyKey);
-      if (known && known.instanceId === null) {
-        throw new InstanceRoleRequestError('creation_cancelled', 'This create was given up on, and makes nothing now');
-      }
-      if (known && known.requestFingerprint !== fingerprint) {
-        throw new InstanceRoleRequestError('idempotency_key_reused', 'This key was used for another request');
-      }
+      const known = knownCreationKey(db, worktreeId, input.idempotencyKey, fingerprint);
       if (known) return { instanceId: known.instanceId as string, replayed: true as const };
     }
     const current = currentRoster(db, worktree);

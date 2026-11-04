@@ -329,10 +329,10 @@ async function pinCommandTarget(client: ApiClient, worktreeId: string, target: C
  *
  * The save has what `POST /send` has before its own: the roster and the tool read
  * again, against what this command was resolved to. Anything moved is exit 31 with
- * nothing saved. The route takes no revision, so a change between that read and the
- * PUT is seen only in its answer, which is then told. From the save on, anything that
- * ends this command leaves the setting saved, so it is said right then. A PUT with no
- * usable answer may have saved too, which {@link roleWrite} says.
+ * nothing saved, up to the PUT itself, which carries the revision read (#4132). A change
+ * after that is seen only in its answer, which is then told. From the save on, anything
+ * that ends this command leaves the setting saved, so it is said right then. A PUT with
+ * no usable answer may have saved too, which {@link roleWrite} says.
  */
 async function createContractTaskWithRole(
   client: ApiClient,
@@ -360,13 +360,27 @@ async function createContractTaskWithRole(
   if (now.rosterRevision !== resolved.rosterRevision || (toolOf(now) ?? toolThen) !== target.cliToolId) {
     throw rosterChanged('The roster changed while this contract was being checked; nothing was saved or typed. Send it again.');
   }
-  const saved = await roleWrite(`commandmate instances ${worktreeId}`, async () =>
-    assertResponseShape<InstanceRoleSettingsResponse>(
-      await client.put<unknown>(url, { instanceId: target.instanceId, role }),
-      ['instances'],
-      'PUT /api/worktrees/:id/instances/roles'
-    )
-  );
+  let saved: InstanceRoleSettingsResponse;
+  try {
+    saved = await roleWrite(`commandmate instances ${worktreeId}`, async () =>
+      assertResponseShape<InstanceRoleSettingsResponse>(
+        await client.put<unknown>(url, { instanceId: target.instanceId, role, expectedRosterRevision: now.rosterRevision }),
+        ['instances'],
+        'PUT /api/worktrees/:id/instances/roles'
+      )
+    );
+  } catch (error) {
+    if (!(error instanceof RoleCliError) || error.code !== 'roster_changed') throw error;
+    // Worth a read to say what moved. If it cannot be read, the refusal has said enough.
+    const latest = await client.get<InstanceRoleSettingsResponse>(url).catch(() => null);
+    const toolNow = latest && toolOf(latest);
+    throw rosterChanged(
+      latest === null || toolNow === target.cliToolId
+        ? 'The roster changed right before the save; nothing was saved or typed. Send it again.'
+        : `The role was not saved for ${target.instanceId}, which is now ${toolNow ?? 'not on the roster'}, not ${target.cliToolId}; `
+          + 'nothing was typed. Send it again.'
+    );
+  }
   const savedTool = toolOf(saved);
   if (savedTool !== target.cliToolId) {
     throw rosterChanged(

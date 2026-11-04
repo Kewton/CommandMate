@@ -12,7 +12,7 @@ import { NextRequest } from 'next/server';
 import type { Command } from 'commander';
 import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree } from '@/lib/db';
-import { getAgentInstances, setAgentInstances } from '@/lib/db/agent-instances-db';
+import { getAgentInstances, removeAgentInstance, setAgentInstances } from '@/lib/db/agent-instances-db';
 import { createAgentRole, getAgentRole, getInstanceRoleState } from '@/lib/db/agent-roles-db';
 import { computeRosterRevision } from '@/lib/agent-roles/management';
 import { clearAllAutoYesStates, getAutoYesState, setAutoYesEnabled } from '@/lib/auto-yes-state';
@@ -62,6 +62,9 @@ import * as settleRoute from '@/app/api/worktrees/[id]/instances/roles/settle/ro
 import * as roleRoute from '@/app/api/roles/[id]/route';
 import * as worktreeRoute from '@/app/api/worktrees/[id]/route';
 import { createInstancesCommand } from '@/cli/commands/instances';
+import { enqueueRosterWrite } from '@/hooks/useAgentInstancesRoster';
+import { clearRosterSnapshot } from '@/hooks/useInstanceRoleSettings';
+import { roleApi } from '@/lib/api-client-agent-roles';
 
 const WT = 'wt-4132';
 const ROLES = `/api/worktrees/${WT}/instances/roles`;
@@ -535,5 +538,251 @@ describe('[#4132-5] renaming a role: expectedName', () => {
     await put(id, { name: 'Theirs' });
     expect((await put(id, { name: 'Mine' })).status).toBe(200);
     expect(getAgentRole(db, id)?.name).toBe('Mine');
+  });
+});
+
+describe('[#4132-6] the screen PUT goes to the real route with the revision it read', () => {
+  const dispatchToRoute = () =>
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) =>
+      instanceRolesRoute.PUT(request(url, 'PUT', JSON.parse(String(init?.body))), wt),
+    );
+
+  it('positive: the roster moved after the read: 409, nothing saved', async () => {
+    dispatchToRoute();
+    const revision = rosterRevision();
+    setAgentInstances(db, WT, [CLAUDE, { ...CODEX, cliTool: 'claude', alias: 'Now claude' }]);
+    const result = await roleApi.setInstanceRole(WT, 'codex', { state: 'none' }, revision);
+    expect(result).toMatchObject({ ok: false, status: 409, error: 'roster_changed' });
+    expect(getInstanceRoleState(db, WT, 'codex')).toEqual({ state: 'inherit' });
+  });
+
+  it('nothing moved: saved', async () => {
+    dispatchToRoute();
+    const result = await roleApi.setInstanceRole(WT, 'codex', { state: 'none' }, rosterRevision());
+    expect(result.ok).toBe(true);
+    expect(getInstanceRoleState(db, WT, 'codex')).toEqual({ state: 'none' });
+  });
+
+  it('negative: with no revision the body is what it was, and it is not checked', async () => {
+    const sent: unknown[] = [];
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      sent.push(JSON.parse(String(init?.body)));
+      return instanceRolesRoute.PUT(request(url, 'PUT', JSON.parse(String(init?.body))), wt);
+    });
+    setAgentInstances(db, WT, [CLAUDE, { ...CODEX, alias: 'Moved' }]);
+    expect((await roleApi.setInstanceRole(WT, 'codex', { state: 'none' })).ok).toBe(true);
+    expect(sent).toEqual([{ instanceId: 'codex', role: { state: 'none' } }]);
+  });
+});
+
+const KEY = 'k'.repeat(32);
+const OTHER_KEY = 'o'.repeat(32);
+const WORKTREE = `/api/worktrees/${WT}`;
+const THREE: AgentInstance = { id: 'claude-2', cliTool: 'claude', alias: 'Claude 2', order: 2 };
+const keyed = (key: string | undefined): Record<string, string> => (key === undefined ? {} : { [INSTANCE_CREATION_KEY_HEADER]: key });
+const patch = (body: Record<string, unknown>, key?: string) => worktreeRoute.PATCH(request(WORKTREE, 'PATCH', body, keyed(key)), wt);
+const settleKey = async (key: string) =>
+  (await settleRoute.POST(request(`${ROLES}/settle`, 'POST', { idempotencyKey: key }), wt)).json();
+
+describe('[#4132-7] a roster PATCH with an idempotency key', () => {
+  const add = (extra: Record<string, unknown> = {}) => ({ agentInstances: [CLAUDE, CODEX, THREE], ...extra });
+
+  it('the same key sent again makes one, and says so, though its revision is now stale', async () => {
+    const expectedRosterRevision = rosterRevision();
+    expect((await patch(add({ expectedRosterRevision }), KEY)).status).toBe(200);
+    const again = await patch(add({ expectedRosterRevision }), KEY);
+    expect(again.status).toBe(200);
+    const body = await again.json();
+    expect(body.replayed).toBe(true);
+    expect(body.rosterRevision).toBe(rosterRevision());
+    expect(ids()).toEqual(['claude', 'codex', 'claude-2']);
+  });
+
+  it('a resend writes nothing, though the roster has moved since', async () => {
+    await patch(add(), KEY);
+    setAgentInstances(db, WT, [CLAUDE, CODEX, THREE, { id: 'codex-2', cliTool: 'codex', alias: 'Other', order: 3 }]);
+    expect((await patch(add({ description: 'second' }), KEY)).status).toBe(200);
+    expect(ids()).toEqual(['claude', 'codex', 'claude-2', 'codex-2']);
+    expect(db.prepare('SELECT description FROM worktrees WHERE id = ?').get(WT)).not.toEqual({ description: 'second' });
+  });
+
+  it('the same key with another list is refused, and writes nothing', async () => {
+    await patch(add(), KEY);
+    const reused = await patch({ agentInstances: [CLAUDE, CODEX] }, KEY);
+    expect(reused.status).toBe(409);
+    expect((await reused.json()).error).toBe('idempotency_key_reused');
+    expect(ids()).toEqual(['claude', 'codex', 'claude-2']);
+  });
+
+  it('a stale revision leaves no key behind, and settling then cancels it', async () => {
+    const stale = await patch(add({ expectedRosterRevision: 'stale' }), KEY);
+    expect(stale.status).toBe(409);
+    expect((await stale.json()).code).toBe('ROSTER_CHANGED');
+    expect(await settleKey(KEY)).toEqual(instanceCreationSettleExamples.cancelled);
+  });
+
+  it('an invalid list leaves no key behind', async () => {
+    expect((await patch({ agentInstances: 'nope' }, KEY)).status).toBe(400);
+    expect((await settleKey(KEY)).outcome).toBe('cancelled');
+  });
+
+  it('two tabs, the same add: the identical row of the other is not this one', async () => {
+    const expectedRosterRevision = rosterRevision();
+    expect((await patch(add({ expectedRosterRevision }), OTHER_KEY)).status).toBe(200);
+    expect((await patch(add({ expectedRosterRevision }), KEY)).status).toBe(409);
+    expect((await settleKey(KEY)).outcome).toBe('cancelled');
+    expect(ids()).toEqual(['claude', 'codex', 'claude-2']);
+  });
+
+  it('a commit arriving after the settling writes nothing, not even its other fields', async () => {
+    const expectedRosterRevision = rosterRevision();
+    expect((await settleKey(KEY)).outcome).toBe('cancelled');
+    const late = await patch(add({ expectedRosterRevision, description: 'late' }), KEY);
+    expect(late.status).toBe(409);
+    expect((await late.json()).error).toBe('creation_cancelled');
+    expect(ids()).toEqual(['claude', 'codex']);
+    expect(db.prepare('SELECT description FROM worktrees WHERE id = ?').get(WT)).not.toEqual({ description: 'late' });
+    expect((await patch(add({ expectedRosterRevision }), OTHER_KEY)).status).toBe(200);
+    expect(ids()).toEqual(['claude', 'codex', 'claude-2']);
+  });
+
+  it('settling: an add names its row', async () => {
+    await patch(add(), KEY);
+    expect(await settleKey(KEY)).toEqual({ success: true, outcome: 'committed', instanceId: 'claude-2' });
+  });
+
+  it('settling: a rename made no row, and is still committed', async () => {
+    await patch({ agentInstances: [CLAUDE, { ...CODEX, alias: 'Lead' }] }, KEY);
+    expect(await settleKey(KEY)).toEqual({ success: true, outcome: 'committed' });
+    expect((await settleKey(KEY)).outcome).toBe('committed');
+  });
+
+  it('a key on a POST and on a PATCH share one space', async () => {
+    await patch(add(), KEY);
+    const post = await instanceRolesRoute.POST(
+      request(ROLES, 'POST', { instance: { id: 'codex-2', cliTool: 'codex', alias: 'X' } }, keyed(KEY)),
+      wt,
+    );
+    expect(post.status).toBe(409);
+    expect((await post.json()).error).toBe('idempotency_key_reused');
+  });
+
+  it.each([['too short', 'short'], ['with a slash', `${'a'.repeat(20)}/x`]])('a key %s: 400, nothing written', async (_name, key) => {
+    expect((await patch(add(), key)).status).toBe(400);
+    expect(ids()).toEqual(['claude', 'codex']);
+  });
+
+  it('negative: no key answers as it did, and is not idempotent', async () => {
+    const response = await patch(add());
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.replayed).toBeUndefined();
+    expect(body.agentInstances.map((row: AgentInstance) => row.id)).toEqual(['claude', 'codex', 'claude-2']);
+    expect((await patch({ agentInstances: [CLAUDE, CODEX] })).status).toBe(200);
+    expect(ids()).toEqual(['claude', 'codex']);
+  });
+
+  it('negative: a key on a PATCH of no roster means nothing', async () => {
+    expect((await patch({ description: 'plain' }, 'short')).status).toBe(200);
+    expect(db.prepare('SELECT description FROM worktrees WHERE id = ?').get(WT)).toEqual({ description: 'plain' });
+    expect((await settleKey(KEY)).outcome).toBe('cancelled');
+  });
+});
+
+describe('[#4132-8] a key does not outlive the row it made', () => {
+  const madeAgain: AgentInstance = { ...THREE, alias: 'Theirs' };
+  const postAdd = (key: string, alias = 'Claude 2') =>
+    instanceRolesRoute.POST(
+      request(ROLES, 'POST', { instance: { id: 'claude-2', cliTool: 'claude', alias } }, keyed(key)),
+      wt,
+    );
+
+  it('positive: removed and made again by a PATCH: the POST key does not claim it', async () => {
+    await postAdd(KEY);
+    await patch({ agentInstances: [CLAUDE, CODEX] });
+    await patch({ agentInstances: [CLAUDE, CODEX, madeAgain] });
+    expect(await settleKey(KEY)).toEqual(instanceCreationSettleExamples.cancelled);
+  });
+
+  it('positive: removed and made again: the PATCH key does not claim it', async () => {
+    await patch({ agentInstances: [CLAUDE, CODEX, THREE] }, KEY);
+    await patch({ agentInstances: [CLAUDE, CODEX] });
+    await postAdd(OTHER_KEY, 'Theirs');
+    expect((await settleKey(KEY)).outcome).toBe('cancelled');
+    expect(await settleKey(OTHER_KEY)).toEqual({ success: true, outcome: 'committed', instanceId: 'claude-2' });
+  });
+
+  it('positive: a resend of the old key does not take the new row for its own, and makes nothing', async () => {
+    await postAdd(KEY);
+    setAgentInstances(db, WT, [CLAUDE, CODEX]);
+    setAgentInstances(db, WT, [CLAUDE, CODEX, madeAgain]);
+    const resend = await postAdd(KEY);
+    expect(resend.status).toBe(409);
+    expect((await resend.json()).error).toBe('creation_cancelled');
+    expect(getAgentInstances(db, WT).map((row) => row.alias)).toEqual(['Claude', 'Codex', 'Theirs']);
+  });
+
+  it('the same id given to another tool is another row', async () => {
+    await postAdd(KEY);
+    setAgentInstances(db, WT, [CLAUDE, CODEX, { ...THREE, cliTool: 'codex' }]);
+    expect((await settleKey(KEY)).outcome).toBe('cancelled');
+  });
+
+  it('removed one at a time as well', async () => {
+    await postAdd(KEY);
+    expect(removeAgentInstance(db, WT, 'claude-2')).toBe(true);
+    expect((await settleKey(KEY)).outcome).toBe('cancelled');
+  });
+
+  it('negative: a rename and a reorder keep it, and other keys stay', async () => {
+    await postAdd(KEY);
+    setAgentInstances(db, WT, [{ ...THREE, alias: 'Renamed', order: 0 }, { ...CLAUDE, order: 1 }, { ...CODEX, order: 2 }]);
+    expect(await settleKey(KEY)).toEqual({ success: true, outcome: 'committed', instanceId: 'claude-2' });
+    await patch({ agentInstances: [{ ...THREE, alias: 'Renamed', order: 0 }, { ...CLAUDE, order: 1 }] });
+    expect((await settleKey(KEY)).outcome).toBe('committed');
+  });
+});
+
+describe('[#4132-9] a lost PATCH, from the hook through the real routes', () => {
+  const add = (base: AgentInstance[]) => [...base, { id: 'claude-2', cliTool: 'claude' as const, alias: 'Claude 2', order: base.length }];
+  const lost = { next: null as 'committed' | 'not-committed' | null, sent: null as null | { url: string; init: RequestInit } };
+
+  beforeEach(() => {
+    clearRosterSnapshot(WT);
+    lost.next = null;
+    lost.sent = null;
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      if (url.endsWith('/settle')) return settleRoute.POST(request(url, 'POST', JSON.parse(String(init?.body))), wt);
+      if (url.endsWith('/instances/roles')) return instanceRolesRoute.GET(request(url, 'GET'), wt);
+      if (method === 'GET') return Response.json({ agentInstances: getAgentInstances(db, WT), rosterRevision: rosterRevision() });
+      const call = () => worktreeRoute.PATCH(request(url, 'PATCH', JSON.parse(String(init?.body)), init?.headers as Record<string, string>), wt);
+      if (lost.next === null) return call();
+      const how = lost.next;
+      lost.next = null;
+      lost.sent = { url, init: init as RequestInit };
+      if (how === 'committed') await call();
+      throw new TypeError('Failed to fetch');
+    });
+  });
+  afterEach(() => clearRosterSnapshot(WT));
+
+  it('it committed: saved', async () => {
+    lost.next = 'committed';
+    const onSaved = vi.fn();
+    expect((await enqueueRosterWrite(WT, add, onSaved)).status).toBe('saved');
+    expect(onSaved).toHaveBeenCalledTimes(1);
+    expect(ids()).toEqual(['claude', 'codex', 'claude-2']);
+  });
+
+  it('it did not, and arrives later: failed, makes nothing, and adding again makes one', async () => {
+    lost.next = 'not-committed';
+    expect((await enqueueRosterWrite(WT, add, vi.fn())).status).toBe('failed');
+    const { url, init } = lost.sent as { url: string; init: RequestInit };
+    const late = await worktreeRoute.PATCH(request(url, 'PATCH', JSON.parse(String(init.body)), init.headers as Record<string, string>), wt);
+    expect(late.status).toBe(409);
+    expect(ids()).toEqual(['claude', 'codex']);
+    expect((await enqueueRosterWrite(WT, add, vi.fn())).status).toBe('saved');
+    expect(ids()).toEqual(['claude', 'codex', 'claude-2']);
   });
 });

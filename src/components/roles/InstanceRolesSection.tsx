@@ -18,6 +18,7 @@ import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
 import { readRunningInstances, roleApi } from '@/lib/api-client-agent-roles';
 import {
+  clearRosterSnapshot,
   useInstanceRoleSettings,
   useRoleCatalogChanged,
   writeInstanceRoleSettings,
@@ -38,6 +39,7 @@ import {
 function InstanceRoleRow({
   worktreeId,
   entry,
+  rosterRevision,
   roles,
   isRunning,
   onChanged,
@@ -45,6 +47,8 @@ function InstanceRoleRow({
 }: {
   worktreeId: string;
   entry: InstanceRoleEntry;
+  /** The roster this row was read with: a choice applies to that roster only (#4132). */
+  rosterRevision: string;
   roles: readonly AgentRoleSummary[];
   /** Null: the read failed. Undefined: not answered yet, so nothing is said about the launch. */
   isRunning: boolean | null | undefined;
@@ -52,6 +56,7 @@ function InstanceRoleRow({
   t: RoleTranslate;
 }): React.ReactElement {
   const confirm = useConfirm();
+  const tSchedule = useTranslations('schedule');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const id = entry.instanceId;
@@ -62,12 +67,19 @@ function InstanceRoleRow({
       setSaving(true);
       setError(null);
       const result = await writeInstanceRoleSettings(worktreeId, () =>
-        roleApi.setInstanceRole(worktreeId, id, roleInputOf(choice)),
+        roleApi.setInstanceRole(worktreeId, id, roleInputOf(choice), rosterRevision),
       );
-      if (!result.ok) setError(t(result.outcomeUnknown ? 'agentRoles.saveUnknown' : 'agentRoles.instances.saveError'));
+      if (!result.ok && result.error === 'roster_changed') {
+        // Nothing was saved, and this row may not be what it was: show what is there to choose from.
+        setError(tSchedule('agentInstanceRosterChanged'));
+        clearRosterSnapshot(worktreeId);
+        onChanged();
+      } else if (!result.ok) {
+        setError(t(result.outcomeUnknown ? 'agentRoles.saveUnknown' : 'agentRoles.instances.saveError'));
+      }
       setSaving(false);
     },
-    [worktreeId, id, t],
+    [worktreeId, id, rosterRevision, onChanged, t, tSchedule],
   );
 
   const handleRestart = useCallback(async () => {
@@ -236,6 +248,7 @@ function OpenInstanceRoles({ worktreeId, rosterKey }: { worktreeId: string; rost
             key={entry.instanceId}
             worktreeId={worktreeId}
             entry={entry}
+            rosterRevision={settings.rosterRevision}
             roles={roles}
             isRunning={running ? running[entry.instanceId] === true : running}
             onChanged={onChanged}

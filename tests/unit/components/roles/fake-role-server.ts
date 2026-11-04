@@ -101,7 +101,10 @@ export class FakeRoleServer {
   holdPutAnswers = false;
   /** The same for a roster PATCH or a create: written and answered at once, delivered on release. */
   holdRosterAnswers = false;
-  /** What each `idempotencyKey` did, as `settleInstanceCreationKey`: null is given up on. */
+  /**
+   * What each `idempotencyKey` did: the row it made, '' for a roster PATCH naming none, null
+   * for given up on. A row leaving the roster revokes the key that made it, as `setAgentInstances`.
+   */
   creationKeys = new Map<string, string | null>();
   private held: Array<() => void> = [];
   readonly calls: Array<{ url: string; method: string; body: Record<string, unknown>; headers?: Record<string, string> }> = [];
@@ -116,8 +119,16 @@ export class FakeRoleServer {
 
   /** Something outside this screen changed the roster: another tab, a phone, the CLI. */
   changeRosterElsewhere(next: AgentInstance[]): void {
+    this.revokeKeysOfRowsLeaving(next);
     this.roster = next;
     this.revisionNumber += 1;
+  }
+
+  private revokeKeysOfRowsLeaving(next: AgentInstance[]): void {
+    const leaving = this.roster.filter((row) => !next.some((kept) => kept.id === row.id && kept.cliTool === row.cliTool));
+    for (const [key, made] of this.creationKeys) {
+      if (leaving.some((row) => row.id === made)) this.creationKeys.set(key, null);
+    }
   }
 
   release(): void {
@@ -235,7 +246,8 @@ export class FakeRoleServer {
       const key = String(body.idempotencyKey);
       if (!this.creationKeys.has(key)) this.creationKeys.set(key, null);
       const instanceId = this.creationKeys.get(key);
-      return json(200, instanceId ? { success: true, outcome: 'committed', instanceId } : { success: true, outcome: 'cancelled' });
+      if (instanceId === null) return json(200, { success: true, outcome: 'cancelled' });
+      return json(200, instanceId === '' ? { success: true, outcome: 'committed' } : { success: true, outcome: 'committed', instanceId });
     }
 
     if (path.endsWith('/instances/roles')) {
@@ -245,6 +257,9 @@ export class FakeRoleServer {
       }
       if (method === 'PUT') {
         if (this.refusePut) return json(500, { success: false, error: 'internal_error', message: 'x' });
+        if (body.expectedRosterRevision !== undefined && body.expectedRosterRevision !== this.revision) {
+          return json(409, { success: false, error: 'roster_changed', message: 'changed' });
+        }
         const role = body.role as { state: string; roleId?: string };
         const instanceId = String(body.instanceId);
         this.stored[instanceId] =
@@ -406,10 +421,21 @@ export class FakeRoleServer {
 
     if (method === 'PATCH') {
       await this.holdIfAsked();
+      const key = headers[INSTANCE_CREATION_KEY_HEADER] ?? null;
+      if (key !== null && this.creationKeys.has(key)) {
+        if (this.creationKeys.get(key) === null) return json(409, { success: false, error: 'creation_cancelled', message: 'given up on' });
+        return json(200, { agentInstances: this.roster, rosterRevision: this.revision, replayed: true });
+      }
       if (body.expectedRosterRevision !== undefined && body.expectedRosterRevision !== this.revision) {
         return json(409, { error: 'changed', code: 'ROSTER_CHANGED', rosterRevision: this.revision, agentInstances: this.roster });
       }
-      this.roster = body.agentInstances as AgentInstance[];
+      const next = body.agentInstances as AgentInstance[];
+      if (key !== null) {
+        const added = next.filter((row) => !this.roster.some((was) => was.id === row.id && was.cliTool === row.cliTool));
+        this.creationKeys.set(key, added.length === 1 ? added[0].id : '');
+      }
+      this.revokeKeysOfRowsLeaving(next);
+      this.roster = next;
       this.rosterSaved = true;
       this.revisionNumber += 1;
       const saved = json(200, { agentInstances: this.roster, rosterRevision: this.revision });

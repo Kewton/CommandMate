@@ -8,6 +8,11 @@
  * `POST /instances/roles` created. A stale revision is a 409 before anything is
  * written, and a client that sends none is not checked. GET answers `rosterRevision`
  * with the roster, read together, so a client can hold the pair before its first save.
+ *
+ * Issue #4132: a roster PATCH may carry an `Idempotency-Key` header, as `POST
+ * /instances/roles` does, and `POST /instances/roles/settle` asks what it came to. The same
+ * key sent again writes nothing and answers `replayed: true`. A PATCH with no key, or of no
+ * roster, is as it was. Design: `docs/design/agent-roles-adapters.md` §15.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -30,7 +35,15 @@ import { createLogger } from '@/lib/logger';
 import { releaseAutoYes } from '@/lib/auto-yes-lifecycle';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { readJsonBody } from '@/lib/api/read-json-body';
-import { computeRosterRevision } from '@/lib/agent-roles/management';
+import {
+  computeRosterRevision,
+  knownCreationKey,
+  rosterWriteFingerprint,
+  soleAddedInstanceId,
+} from '@/lib/agent-roles/management';
+import { respondToRoleError, roleErrorResponse } from '@/lib/agent-roles/route-errors';
+import { recordInstanceCreationKey } from '@/lib/db/agent-roles-db';
+import { INSTANCE_CREATION_KEY_HEADER, INSTANCE_CREATION_KEY_PATTERN } from '@/types/agent-roles';
 
 const logger = createLogger('api/worktrees');
 
@@ -125,6 +138,34 @@ export async function GET(
   }
 }
 
+/** The worktree as a PATCH answers it, with its session status. */
+async function worktreeAfterPatch(
+  db: ReturnType<typeof getDbInstance>,
+  id: string,
+  extra: { cliToolIdAutoUpdated?: true; replayed?: true } = {}
+): Promise<NextResponse> {
+  const updatedWorktree = getWorktreeById(db, id);
+  const manager = CLIToolManager.getInstance();
+  const cliToolId = updatedWorktree?.cliToolId || 'claude';
+  const cliTool = manager.getTool(cliToolId);
+  // Issue #2865: a same-named session another server created is not running here.
+  const ownership = updatedWorktree
+    ? await checkSessionOwnership(cliTool.getSessionName(id), updatedWorktree.path)
+    : null;
+  const isRunning = ownership?.verdict === 'foreign' ? false : await cliTool.isRunning(id);
+  const agentInstances = resolveAgentInstances(db, id, updatedWorktree?.selectedAgents);
+  return NextResponse.json(
+    {
+      ...updatedWorktree,
+      agentInstances,
+      rosterRevision: computeRosterRevision(agentInstances),
+      isSessionRunning: isRunning,
+      ...extra,
+    },
+    { status: 200 }
+  );
+}
+
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -160,6 +201,24 @@ export async function PATCH(
         { error: 'Request body must be a JSON object' },
         { status: 400 }
       );
+    }
+
+    // Issue #4132: before the revision, since a resend's is stale because of its own first
+    // attempt, and before any field, since a request given up on writes none of them.
+    let rosterKey: { key: string; fingerprint: string } | null = null;
+    const idempotencyKey = 'agentInstances' in body ? request.headers.get(INSTANCE_CREATION_KEY_HEADER) : null;
+    if (idempotencyKey !== null) {
+      if (!INSTANCE_CREATION_KEY_PATTERN.test(idempotencyKey)) {
+        return roleErrorResponse('invalid_request', `${INSTANCE_CREATION_KEY_HEADER} must be 16-128 letters, digits, _ or -`, 400);
+      }
+      rosterKey = { key: idempotencyKey, fingerprint: rosterWriteFingerprint(body.agentInstances) };
+      try {
+        if (knownCreationKey(db, id, rosterKey.key, rosterKey.fingerprint)) {
+          return await worktreeAfterPatch(db, id, { replayed: true });
+        }
+      } catch (keyError) {
+        return respondToRoleError(keyError, logger, 'roster-key-failed');
+      }
     }
 
     // Issue #4117: before any field of this request is written. Read fresh, not
@@ -273,7 +332,15 @@ export async function PATCH(
       // this PATCH drops can be named after it lands.
       const previousInstances = resolveAgentInstances(db, id, worktree.selectedAgents);
       try {
-        setAgentInstances(db, id, validatedInstances);
+        if (rosterKey) {
+          const { key, fingerprint } = rosterKey;
+          db.transaction(() => {
+            setAgentInstances(db, id, validatedInstances);
+            recordInstanceCreationKey(db, id, key, soleAddedInstanceId(previousInstances, validatedInstances), fingerprint);
+          })();
+        } else {
+          setAgentInstances(db, id, validatedInstances);
+        }
       } catch (instanceError) {
         if (instanceError instanceof AgentInstanceLimitError || instanceError instanceof InvalidAgentInstanceError) {
           return NextResponse.json(
@@ -348,26 +415,7 @@ export async function PATCH(
     }
 
     // Return updated worktree with session status
-    const updatedWorktree = getWorktreeById(db, id);
-    const manager = CLIToolManager.getInstance();
-    const cliToolId = updatedWorktree?.cliToolId || 'claude';
-    const cliTool = manager.getTool(cliToolId);
-    // Issue #2865: a same-named session another server created is not running here.
-    const ownership = updatedWorktree
-      ? await checkSessionOwnership(cliTool.getSessionName(id), updatedWorktree.path)
-      : null;
-    const isRunning = ownership?.verdict === 'foreign' ? false : await cliTool.isRunning(id);
-    const agentInstances = resolveAgentInstances(db, id, updatedWorktree?.selectedAgents);
-    return NextResponse.json(
-      {
-        ...updatedWorktree,
-        agentInstances,
-        rosterRevision: computeRosterRevision(agentInstances),
-        isSessionRunning: isRunning,
-        ...(cliToolIdAutoUpdated ? { cliToolIdAutoUpdated: true } : {}),
-      },
-      { status: 200 }
-    );
+    return await worktreeAfterPatch(db, id, cliToolIdAutoUpdated ? { cliToolIdAutoUpdated: true } : {});
   } catch (error) {
     logger.error('error-updating-worktree:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
