@@ -783,7 +783,9 @@ With a role or a pin, --auto-yes, --contract or --reply-to names the default tar
 read in every request, so a default changed meanwhile does not split them. --auto-yes does not outlive a refusal: a grant this send armed is
 withdrawn when nothing was typed, and a grant already on is left as it was until the
 message is in. Only the grant it armed: one updated since is left on, with the command
-that stops it. --contract --role saves the role before the contract's own check if that
+that stops it. --auto-yes --reply-to with --instance is held to the same, with its relay
+refused or the send refused (Issue #4144); naming no target, there is nothing to read
+first, so a grant it armed stays on, with the command that stops it. --contract --role saves the role before the contract's own check if that
 check would refuse it, so it behaves like send --role; a broken contract saves nothing.
 A refusal that comes after the save says the setting stayed saved, whatever refused it.
 A save of its own (--contract --role, --register --role) answered by a 5xx or not at all
@@ -838,14 +840,15 @@ hold or the start was refused because of its role (nothing typed).
         const roleAssignment = await roleAssignmentFromFlag(client, options.role);
 
         // Issue #4133: a --reply-to that cannot be resolved exits 2 on the spot, from
-        // several depths. With a contract that has to be before the task row exists;
-        // only opening the relay can still be refused after it, and that closes the task.
+        // several depths. With a contract that has to be before the task row exists, and
+        // with --auto-yes before the grant (Issue #4144). Only opening the relay can still
+        // be refused after them: that closes the task and withdraws the grant.
         const relayTarget = {
           worktreeId,
           instance: pinsTarget ? instanceId : options.instance,
           agent: pinsTarget ? agent : options.agent,
         };
-        const relayEndpoints = options.contract && options.replyTo
+        const relayEndpoints = options.replyTo && (options.contract || options.autoYes)
           ? await resolveRelayEndpoints(client, { ...relayTarget, replyTo: options.replyTo })
           : undefined;
 
@@ -885,13 +888,13 @@ hold or the start was refused because of its role (nothing typed).
         // claude model is a launch flag with no interaction to protect, and a
         // contract send must have Auto-Yes on BEFORE the worker starts working.
         const deferAutoYes = Boolean(options.model) && agent !== 'claude';
-        const registerRelay = async (): Promise<RegisteredRelay> => {
+        const registerRelay = async (onFailure: () => Promise<void>): Promise<RegisteredRelay> => {
           const registered = await registerRelayForMessage(client, {
             ...relayTarget,
             replyTo: options.replyTo as string,
             allowRelayChain: options.allowRelayChain,
             endpoints: relayEndpoints,
-            onFailure: failTask,
+            onFailure,
           });
           // stderr, not stdout: `--contract` already owns this command's stdout
           // (it prints the task id there), and two commands writing two ids to
@@ -906,17 +909,23 @@ hold or the start was refused because of its role (nothing typed).
         // first. Already on: that grant goes on answering, untouched, and this send's
         // terms replace it only once the message is in. Off: armed now, and withdrawn
         // on a refusal. Its relay goes first too, because a refused relay exits on the
-        // spot. A send saying nothing about a role reads nothing and is as it was.
+        // spot. A send saying nothing about a role reads nothing and is as it was, unless
+        // it has a relay to open after arming, which can be refused too (Issue #4144). It
+        // pins no target, so with none named there is nothing to read: the state stays
+        // unknown, and so does the grant's fate on a refusal.
         let relay: RegisteredRelay | undefined;
-        if (options.replyTo && conditional) relay = await registerRelay();
+        if (options.replyTo && conditional) relay = await registerRelay(failTask);
         const armsNow = options.autoYes && !deferAutoYes;
-        const autoYesTarget = armsNow && conditional ? { cliToolId: agent, instanceId } : null;
+        const autoYesTarget = armsNow && (conditional || options.replyTo) ? { cliToolId: agent, instanceId } : null;
         const priorState = autoYesTarget?.cliToolId && autoYesTarget.instanceId
           ? await readAutoYes(client, worktreeId, { cliToolId: autoYesTarget.cliToolId, instanceId: autoYesTarget.instanceId })
           : null;
-        let priorAutoYes: boolean | null = !(armsNow && conditional)
+        let priorAutoYes: boolean | null = autoYesTarget === null
           ? false
           : typeof priorState?.enabled === 'boolean' ? priorState.enabled : null;
+        // Off when read, so it can only be armed if it is off still: overwriting a grant armed
+        // since would make it this send's to withdraw.
+        const onlyIfOff = conditional || (autoYesTarget !== null && priorAutoYes === false);
         let armedGrant: AutoYesSetResult | undefined;
         if (armsNow && priorAutoYes !== true) {
           // Issue #3290: the server can refuse this — 409 when the session by
@@ -927,11 +936,11 @@ hold or the start was refused because of its role (nothing typed).
           // that never went out, which is the state #1608 removed for a bad
           // --duration.
           try {
-            armedGrant = await enableAutoYes(client, worktreeId, options, autoYesDurationMs, agent, instanceId, contractPolicy, conditional);
+            armedGrant = await enableAutoYes(client, worktreeId, options, autoYesDurationMs, agent, instanceId, contractPolicy, onlyIfOff);
           } catch (error) {
             // Issue #4132: a grant armed since that read. It is theirs: it stays as it
             // is, and this is now the send that found one on.
-            if (!conditional || !(error instanceof ApiError) || error.apiCode !== 'AUTO_YES_ALREADY_ENABLED') {
+            if (!onlyIfOff || !(error instanceof ApiError) || error.apiCode !== 'AUTO_YES_ALREADY_ENABLED') {
               await failTask();
               if (relay) await cancelRelayQuietly(client, relay.id);
               throw error;
@@ -941,14 +950,13 @@ hold or the start was refused because of its role (nothing typed).
         }
         const applyAutoYesAfterSend = options.autoYes && (deferAutoYes || priorAutoYes === true);
 
-        /** Issue #4116: what a conditional send armed, once it is known to have typed nothing. */
-        const withdrawAutoYes = async (error: unknown, outcome: FailedSendOutcome | null): Promise<void> => {
-          if (!conditional || !armsNow || priorAutoYes === true) return;
-          if (priorAutoYes === null || !knownNotSent(error, outcome)) {
+        /** Issue #4116, #4144: what a send that read the state armed, once it failed. */
+        const withdrawAutoYes = async (notSent: boolean): Promise<void> => {
+          if (autoYesTarget === null || priorAutoYes === true) return;
+          if (priorAutoYes === null || !notSent) {
             const stop = stopAutoYesCommand(worktreeId, armedGrant?.instanceId ?? instanceId, armedGrant?.cliToolId ?? agent);
-            console.error(
-              `Warning: Auto-Yes stays on (it was not known to be off, or the message may have gone in). To turn it off: ${stop}`
-            );
+            const why = priorAutoYes === null ? 'it was not known to be off' : 'the message may have gone in';
+            console.error(`Warning: Auto-Yes stays on (${why}). To turn it off: ${stop}`);
             return;
           }
           await withdrawArmedAutoYes(client, worktreeId, autoYesTarget, armedGrant);
@@ -958,8 +966,14 @@ hold or the start was refused because of its role (nothing typed).
         // session that answers immediately cannot finish its turn in the window
         // between the send and the ledger row — the completion trigger reads the
         // ledger, and a row that does not exist yet is a reply nobody collects.
-        // A refusal exits 2 here, having sent nothing.
-        if (options.replyTo && !conditional) relay = await registerRelay();
+        // A refusal exits 2 here, having sent nothing. Any failure here is before the
+        // message, so the grant armed above has nothing to answer (Issue #4144).
+        if (options.replyTo && !conditional) {
+          relay = await registerRelay(async () => {
+            await failTask();
+            await withdrawAutoYes(true);
+          });
+        }
 
         const sendBody = buildSendBody(content, agent, instanceId, options, {
           assignment: roleAssignment,
@@ -972,7 +986,7 @@ hold or the start was refused because of its role (nothing typed).
           relay,
           onFailure: async (error, outcome) => {
             await failTask();
-            await withdrawAutoYes(error, outcome);
+            await withdrawAutoYes(knownNotSent(error, outcome));
             // Issue #4116: no answer, so the send may have got as far as the save.
             // A 5xx with a body that says nothing of the setting is no better an answer.
             const saidNothing = error instanceof ApiError
