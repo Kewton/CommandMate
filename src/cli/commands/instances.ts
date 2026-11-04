@@ -990,6 +990,10 @@ To change the role's text: commandmate roles edit. See: commandmate roles --help
 add --role / --no-role creates the instance and its role together, refused (exit 31)
 if the roster changed meanwhile. Without them the instance follows the defaults.
 
+add, remove and alias without those flags build their change again on a fresh read when
+the roster moved. If it kept changing through every attempt: exit 31 (roster_changed) and
+nothing was saved to it. What came before the save stands (remove --kill stopped the session).
+
 --json, list: every row carries role when the server has roles:
   role: { stored, effectiveNext: { kind, source, role?, injectionFingerprint }, launched,
           requested, restartPending }

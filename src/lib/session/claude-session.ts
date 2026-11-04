@@ -15,6 +15,7 @@ import {
 } from '@/lib/tmux/tmux';
 import {
   CLAUDE_PROMPT_PATTERN,
+  isClaudeAutoDefaultNudgeOpen,
   isClaudeTrustDialogOpen,
   isShellPaneCommand,
   resolveClaudeTrustDialogKeys,
@@ -52,6 +53,7 @@ import {
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 import {
   answerUnderInstanceInputLock,
+  type InstanceInputAnswerSkip,
   instanceInputLaunchReadMark,
 } from '@/lib/session/instance-input-lock';
 import { settleSessionLaunch } from '@/lib/session/session-launch-flight';
@@ -192,6 +194,71 @@ export const CLAUDE_TRUST_DIALOG_CURSOR_STUCK = 'trust dialog: cursor did not re
 /** Reported when Claude Code quit from the trust dialog (Issue #3089). A fixed string, never captured output. */
 export const CLAUDE_TRUST_DIALOG_EXITED = 'trust dialog: Claude Code exited to the shell';
 
+/**
+ * Why a trust key did not go out (Issue #4149): the input lock's own refusals, tmux
+ * refusing the key, or a dialog whose cursor row cannot be read, where nothing is guessed.
+ */
+type TrustDialogKeySkip = InstanceInputAnswerSkip | 'send-failed' | 'cursor-unreadable';
+
+/**
+ * The start budget ran out with a startup dialog on the screen (Issue #4149).
+ *
+ * Nothing about that is slow, so {@link SessionStartTimeoutError}'s sentence would send
+ * the reader off to wait. Still that error to everything that reads it (`code`): the
+ * session is left alive, nothing was typed, the answer is a 503 and no push is sent. The
+ * message follows the module's rule (SEC-SF-002): built only from fixed strings, the
+ * session name, a number and {@link TrustDialogKeySkip}, never captured output.
+ */
+class ClaudeStartupDialogStalledError extends SessionStartTimeoutError {
+  /** @param where - Says what the session is stopped on, and what became of the keys */
+  constructor(sessionName: string, timeoutMs: number, where: string) {
+    super('Claude Code', sessionName, timeoutMs);
+    this.message =
+      `Claude Code did not reach its input prompt within ${Math.round(timeoutMs / 1000)}s: ` +
+      `the tmux session '${sessionName}' is stopped on ${where} This is not a slow start, so waiting will not ` +
+      'move it. The message was not delivered. Send it again, or run `commandmate capture <worktree-id>` to see the dialog.';
+    this.name = 'ClaudeStartupDialogStalledError';
+  }
+}
+
+/**
+ * The error for a start whose budget ran out, by what its last screen shows.
+ *
+ * @param lastScreen - The last pane output read, or null when none could be
+ */
+function startTimeoutError(sessionName: string, lastScreen: string | null, trust: TrustDialogState): SessionStartTimeoutError {
+  if (lastScreen !== null && isClaudeTrustDialogOpen(lastScreen)) {
+    const keys = trust.answers + trust.moves;
+    const fate =
+      keys === 0
+        ? `no key reached it (${trust.lastSkip ?? 'no key was due'})`
+        : `it stayed open after ${keys} keys`;
+    return new ClaudeStartupDialogStalledError(
+      sessionName,
+      CLAUDE_INIT_TIMEOUT,
+      `the folder-trust dialog, and ${fate}. Enter is never pressed while the cursor is on "No, exit".`
+    );
+  }
+  if (lastScreen !== null && isClaudeAutoDefaultNudgeOpen(lastScreen)) {
+    return new ClaudeStartupDialogStalledError(
+      sessionName,
+      CLAUDE_INIT_TIMEOUT,
+      '"Make auto mode your default permission mode?", which did not take its keys. No keeps the current mode.'
+    );
+  }
+  return new SessionStartTimeoutError('Claude Code', sessionName, CLAUDE_INIT_TIMEOUT);
+}
+
+/**
+ * Record a key that did not go out, at warn (Issue #4149: at info an ERROR-only setting
+ * hid the only trace of a start that sent nothing). Once per reason in a row: a key that
+ * cannot go out is due again on every poll.
+ */
+function noteTrustKeySkipped(sessionName: string, state: TrustDialogState, key: string | null, reason: TrustDialogKeySkip): void {
+  if (state.lastSkip !== reason) logger.warn('trust-dialog-key-skipped', { sessionName, key, reason });
+  state.lastSkip = reason;
+}
+
 /** The trust dialog's progress during one session start (Issue #3078 / #3089). */
 interface TrustDialogState {
   /** Polls since Enter was last sent, null = not yet. */
@@ -200,6 +267,8 @@ interface TrustDialogState {
   pollsSinceMove: number | null;
   answers: number;
   moves: number;
+  /** Why the last key due did not go out, for the log and the timeout's sentence (Issue #4149). */
+  lastSkip: TrustDialogKeySkip | null;
   /** The dialog has been on screen, so Claude Code was running. */
   seen: boolean;
   /**
@@ -250,7 +319,10 @@ async function answerTrustDialog(
   }
 
   const keys = resolveClaudeTrustDialogKeys(dialogScreen);
-  if (keys === null) return;
+  if (keys === null) {
+    noteTrustKeySkipped(sessionName, state, null, 'cursor-unreadable');
+    return;
+  }
 
   if (keys.length === 1) {
     // Cursor on Yes, on this very screen: the Issue #201 Enter.
@@ -259,12 +331,17 @@ async function answerTrustDialog(
       (state.pollsSinceAnswer >= TRUST_DIALOG_REANSWER_POLLS && state.answers < TRUST_DIALOG_MAX_ANSWERS);
     if (!due) return;
     try {
-      if (!(await sendTrustDialogKey(sessionName, readMark, 'Enter'))) return;
+      const skipped = await sendTrustDialogKey(sessionName, readMark, 'Enter');
+      if (skipped !== null) {
+        noteTrustKeySkipped(sessionName, state, 'Enter', skipped);
+        return;
+      }
       state.pollsSinceAnswer = 0;
       state.answers++;
       logger.info('trust-dialog-detected', { keys: 'Enter', attempt: state.answers });
     } catch {
       // Left unhandled so a later poll answers the dialog again
+      noteTrustKeySkipped(sessionName, state, 'Enter', 'send-failed');
     }
     return;
   }
@@ -275,12 +352,17 @@ async function answerTrustDialog(
     throw new SessionStartFailedError('Claude Code', sessionName, CLAUDE_TRUST_DIALOG_CURSOR_STUCK);
   }
   try {
-    if (!(await sendTrustDialogKey(sessionName, readMark, keys[0]))) return;
+    const skipped = await sendTrustDialogKey(sessionName, readMark, keys[0]);
+    if (skipped !== null) {
+      noteTrustKeySkipped(sessionName, state, keys[0], skipped);
+      return;
+    }
     state.pollsSinceMove = 0;
     state.moves++;
     logger.info('trust-dialog-cursor-move', { key: keys[0], attempt: state.moves });
   } catch {
     // Left unhandled so a later poll moves the cursor again
+    noteTrustKeySkipped(sessionName, state, keys[0], 'send-failed');
   }
 }
 
@@ -290,13 +372,13 @@ async function answerTrustDialog(
  * the read the key was decided on (`readMark`) and the lock, the dialog is read
  * again and the key goes out only if that screen still calls for it.
  *
- * @returns Whether the key was sent; false when it was not (the next poll decides again)
+ * @returns null when the key was sent, otherwise why not (the next poll decides again)
  */
 async function sendTrustDialogKey(
   sessionName: string,
   readMark: number,
   key: string
-): Promise<boolean> {
+): Promise<InstanceInputAnswerSkip | null> {
   const outcome = await answerUnderInstanceInputLock(
     sessionName,
     readMark,
@@ -310,8 +392,7 @@ async function sendTrustDialogKey(
     () => (key === 'Enter' ? sendKeys(sessionName, '', true) : sendSpecialKeys(sessionName, [key])),
     { mode: 'exclusive' }
   );
-  if (!outcome.answered) logger.info('trust-dialog-key-skipped', { key, reason: outcome.reason });
-  return outcome.answered;
+  return outcome.answered ? null : outcome.reason;
 }
 
 /**
@@ -848,7 +929,9 @@ export async function startClaudeSession(
 
     let initialized = false;
     // Issue #3078 / #3089: the trust dialog's progress this start.
-    const trust: TrustDialogState = { pollsSinceAnswer: null, pollsSinceMove: null, answers: 0, moves: 0, seen: false, shellTellsExit: false };
+    const trust: TrustDialogState = { pollsSinceAnswer: null, pollsSinceMove: null, answers: 0, moves: 0, lastSkip: null, seen: false, shellTellsExit: false };
+    // Issue #4149: what the budget ran out on.
+    let lastScreen: string | null = null;
     while (Date.now() - startTime < maxWaitTime) {
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
 
@@ -864,6 +947,7 @@ export async function startClaudeSession(
       if (cleanOutput === null) {
         continue;
       }
+      lastScreen = cleanOutput;
 
       // Issue #201 / #3078 / #3089: answer the folder-trust dialog. Checked
       // BEFORE the prompt: the dialog's cursor row (`❯ No, exit`) wears the
@@ -917,7 +1001,7 @@ export async function startClaudeSession(
     // carried to the caller by the error type rather than lost in a generic
     // message (CONS-005, IMP-001).
     if (!initialized) {
-      throw new SessionStartTimeoutError('Claude Code', sessionName, CLAUDE_INIT_TIMEOUT);
+      throw startTimeoutError(sessionName, lastScreen, trust);
     }
 
     logger.info('started-claude-session');
