@@ -446,6 +446,7 @@ cmd_up() {
         ${own_home_env[@]+"${own_home_env[@]}"} \
         CM_DB_PATH="$RUN_DIR/uat.db" CM_ROOT_DIR="$RUN_DIR/root" \
         CM_OPENCODE_V2_DIR="$RUN_DIR/opencode-v2" CM_AGENT_HOOKS_DIR="$RUN_DIR/hooks" \
+        CM_AGENT_ROLE_ARTIFACTS_DIR="$RUN_DIR/agent-roles" \
         nohup node "$SERVER_ENTRY" >"$RUN_DIR/server.log" 2>&1 </dev/null &
     server_pid=$!
     state_set "$UP_STATE" server_pid "$server_pid"

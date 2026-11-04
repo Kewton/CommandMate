@@ -1,0 +1,50 @@
+
+  [38;5;75m>_ [1m[39mOpenAI Codex[0;2m (v0.166.0)[0m
+     [2m/private/tmp/claude-501/-Users-localuser-share-work-github-kewton-commandmate-issue-4134/fc56e6e0-f05f-462a-8447-c232f74a566d/scratchpad/probe/repo[0m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  [1mHooks[0m
+  [2mLifecycle hooks from config and enabled plugins.
+[0m
+  Event                 Installed   Active      Description
+
+  PreToolUse            [2m0           0           Before a tool executes[0m
+[1;7m› PermissionRequest     1           1           When permission is requested
+[0m  PostToolUse           [2m0           0           After a tool executes[0m
+  PreCompact            [2m0           0           Before context compaction[0m
+  PostCompact           [2m0           0           After context compaction[0m
+  SessionStart          [2m1           1           When a new session starts[0m
+  SessionEnd            [2m1           1           Right before a session ends[0m
+  UserPromptSubmit      [2m1           1           When the user submits a prompt[0m
+[38;5;75m↓[39m
+
+  [1menter[0;2m details · [0;1mesc[0;2m close

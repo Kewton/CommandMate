@@ -80,6 +80,7 @@ const LIFECYCLE_DIALOG_KINDS: Readonly<Record<CodexLifecycleDialog, string>> = {
   'hooks-review': 'permission',
   'hooks-list': 'picker',
   'hooks-detail': 'picker',
+  'hooks-settled': 'picker',
   update: 'update',
   trust: 'trust',
 };

@@ -24,9 +24,11 @@
  *
  * ## When git cannot answer
  *
- * `resolveGitCommonDir` answers null for a git that failed or timed out (1 second)
- * as well as for a path that is not a repository. Treating null as "another
- * repository" would let a slow git change the result, so a root that exists on
+ * `probeGitCommonDir` tells a path that is not a repository from a git that failed
+ * or timed out (1 second). Not a repository is an answer: such a root is the same
+ * repository as nothing, so it is no candidate unless `repository_path` names it
+ * (Issue #4134). A failure is not. Treating it as "another repository" would let a
+ * slow git change the result, so a root that exists on
  * disk, is enabled and cannot be identified counts against the answer if its
  * setting differs, by the same comparison as a member: a root with no row holds
  * "inherit", which differs from a role. Reason `membership-undetermined`. So two
@@ -63,6 +65,7 @@ import { getAllRepositories, getRepositoryById, type Repository } from '@/lib/db
 import { getWorktreeById } from '@/lib/db/worktree-db';
 import { resolveSessionTarget } from '@/lib/session/resolve-session-target';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import type { GitCommonDirProbe } from '@/lib/git/git-common-dir';
 import type { Worktree } from '@/types/models';
 import {
   isAgentRoleCliTool,
@@ -82,6 +85,9 @@ export class AgentRoleTargetNotFoundError extends Error {
 }
 
 export interface RoleResolverDeps {
+  /** What git says about a path. Default: `probeGitCommonDir`. */
+  probeCommonDir?: (path: string) => Promise<GitCommonDirProbe>;
+  /** The common dir alone, where null means git failed. Wins over {@link probeCommonDir}. */
   resolveCommonDir?: (path: string) => Promise<string | null>;
   pathExists?: (path: string) => boolean;
 }
@@ -110,7 +116,25 @@ interface MembershipAnswers {
   roots: Repository[];
   identity: string | null;
   commonDirs: Array<string | null>;
+  /** By the index of `roots`: git said this path is no repository. */
+  notRepository: boolean[];
 }
+
+async function loadProbe(deps: RoleResolverDeps): Promise<(path: string) => Promise<GitCommonDirProbe>> {
+  const { resolveCommonDir, probeCommonDir } = deps;
+  if (resolveCommonDir) {
+    return async (path) => {
+      const commonDir = await resolveCommonDir(path);
+      return commonDir === null ? { kind: 'failed' } : { kind: 'repository', commonDir };
+    };
+  }
+  // Loaded here, on the way to git: every driver reaches this module, and suites
+  // that mock `child_process` down to what a driver uses have no git to load.
+  return probeCommonDir ?? (await import('@/lib/git/git-common-dir')).probeGitCommonDir;
+}
+
+const commonDirOf = (probe: GitCommonDirProbe): string | null =>
+  probe.kind === 'repository' ? probe.commonDir : null;
 
 /** The only part that waits. Decides nothing. */
 async function askGit(
@@ -119,24 +143,26 @@ async function askGit(
   deps: RoleResolverDeps
 ): Promise<MembershipAnswers> {
   const roots = getAllRepositories(db);
-  if (roots.length === 0) return { roots, identity: null, commonDirs: [] };
+  if (roots.length === 0) return { roots, identity: null, commonDirs: [], notRepository: [] };
 
-  // Loaded here, on the way to git: every driver reaches this module, and suites
-  // that mock `child_process` down to what a driver uses have no git to load.
-  const resolveCommonDir =
-    deps.resolveCommonDir ?? (await import('@/lib/git/git-common-dir')).resolveGitCommonDir;
+  const probe = await loadProbe(deps);
   let identity: string | null = null;
   for (const path of question.identityPaths) {
-    identity = await resolveCommonDir(path);
+    identity = commonDirOf(await probe(path));
     if (identity !== null) break;
   }
-  const commonDirs = await Promise.all(roots.map((root) => resolveCommonDir(root.path)));
-  return { roots, identity, commonDirs };
+  const probes = await Promise.all(roots.map((root) => probe(root.path)));
+  return {
+    roots,
+    identity,
+    commonDirs: probes.map(commonDirOf),
+    notRepository: probes.map((answer) => answer.kind === 'not-repository'),
+  };
 }
 
 function membershipFrom(
   question: MembershipQuestion,
-  { roots, identity, commonDirs }: MembershipAnswers,
+  { roots, identity, commonDirs, notRepository }: MembershipAnswers,
   deps: RoleResolverDeps
 ): RoleRepositoryMembership {
   if (roots.length === 0) return NO_MEMBERSHIP;
@@ -148,7 +174,12 @@ function membershipFrom(
     const commonDir = commonDirs[index];
     if (root.path === question.namedRootPath || (identity !== null && commonDir === identity)) {
       candidates.push(root);
-    } else if ((identity === null || commonDir === null) && root.enabled && pathExists(root.path)) {
+    } else if (
+      !notRepository[index] &&
+      (identity === null || commonDir === null) &&
+      root.enabled &&
+      pathExists(root.path)
+    ) {
       undetermined.push(root);
     }
   });

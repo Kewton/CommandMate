@@ -467,6 +467,12 @@ Welcome to the Antigravity CLI. You are currently not signed in.
 3. **API キー経路の Claude で「Make auto mode your default permission mode?」のダイアログに `send` が 60 秒待って exit 99。** `hasSeenAutoDefaultNudge` が無いホームで出る。製品の OAuth 経路で出るかは未確認。
 4. **公式文書との不一致:** OpenCode V2 の `instructions`（§7.1）。
 
+1〜3 は #4134 で直した。
+
+- 1 の原因は 1 秒未満のターンの `▣  Build · <model> · 836ms`。検出が `ms` の形（と `1h 5m`・`2d 3h`）を読まなかった。確定モデルは応答が速いので必ず当たる。局所モデル（Ollama の gemma4:26b）でも 2 ターン目が `637ms` だった。`wait` は exit 0 になった。`respond --default` の exit 99 の残りは別の理由で、構造化された承認に既定の答えが無いことをエラーの本文が述べる（番号なら通る）。
+- 2 の原因は codex 0.166.0 の画面の変更。確認の 1 枚目とフォルダの信頼は数字でカーソルが動くだけになり、一覧と詳細のフッターの文面が変わり、`t` の後も閉じない。
+- 3 は API キーの経路に限らない。2.1.318 の実行ファイルの条件は利用者の設定の `permissions.defaultMode`（`auto` 以外）で、認証の経路を見ていない。OAuth の経路では実機で確かめていない。起動は `No` を答える（`Yes` は利用者の設定の既定を書き換える）。
+
 ## 12. 未確認の一覧
 
 #4114〜#4117 の実装の時点で更新した。
@@ -478,7 +484,7 @@ Welcome to the Antigravity CLI. You are currently not signed in.
 | Claude の `--system-prompt-snapshot off` での再開 | CommandMate が再開しないので省いた |
 | OpenCode V2 の approval ダイアログの検出 | 確定モデルの課題で確認が出なかった |
 | Command Code の mod による受領ファイル | 確認の手段が無く、適用状態は「不明」のまま（#4115）。V1 の設定 API は確定モデルで確認した（§14） |
-| V1 の `wait --verify`、契約タスク、承認からの実行 | `wait` が完了せず、`respond --default` も通らない（§4、§11）。ロールなしでも同じ |
+| V1 の `wait --verify`、契約タスク | 計測の時点では `wait` が完了しなかった（§4、§11）。#4134 で `wait` と番号の `respond` からの実行は確かめたが、この 2 つは測り直していない |
 | Schedule の env の読み取りの実機確認 | テストだけ。`OPENCODE_CONFIG_CONTENT="$(cat <file>)"` の形とペインの env の読み取り（`tmux show-environment`）は #4115 で実機で確認した（確定モデル、私設 tmux） |
 | 実際のドライバを通した起動（待ちとダイアログの処理）、`gh copilot` の形、hooks 有効の起動行 | #4115 の実機確認は同じ関数を確認用の手順でつないだもの。Copilot は `copilot` の直接起動、起動行は hooks 無効で確かめた |
 | V2 の `continueSession`、Schedule の `-c` | 入口を通していない。再開の挙動は TUI で確認（§3） |

@@ -6,6 +6,8 @@ UAT や日次の実機確認で CommandMate のサーバーと CLI を動かす�
 2. **claude の利用者の hook** — `--settings` は `~/.claude/settings.json` に足されるだけで、置き換わらない。`CLAUDE_CONFIG_DIR` を移すと claude がログアウトする。
 3. **CLI の設定** — グローバルの CLI は cwd に関係なく `~/.commandmate/.env` を読む。何も指定しないと既定のポート 3000（本番）に送る。
 
+`scripts/uat/run-server.sh up` は、サーバーのデータベースのほか `CM_OPENCODE_V2_DIR`・`CM_AGENT_HOOKS_DIR`・`CM_AGENT_ROLE_ARTIFACTS_DIR` を run の下へ向ける。`.commandmate/uat.yaml` の検査はこれを動いているプロセスの環境（`ps eww`）で確かめる。ロールの生成物は `~/.commandmate/agent-roles` に増えない。
+
 `CM_UAT_ISOLATION=1` を付けて起動したサーバーと CLI は、次のように動く。付けないときの動きは変わらない（`1` と `own-home` 以外の値は付けないのと同じ。`own-home` は末尾の節）。
 
 | 対象 | `CM_UAT_ISOLATION=1` のときの動き |

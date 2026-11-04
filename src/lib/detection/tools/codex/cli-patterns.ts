@@ -152,6 +152,11 @@ export const CODEX_DIALOG_RULES_VERIFIED_AGAINST = {
  * | `Press space to select or enter to save` | `/experimental` (0.155.1) | 1st |
  * | `left/right group · enter edit shortcut · … · esc close` | `/keymap` | 2nd |
  * | `enter continue · esc skip` | update offer (0.157.1, Issue #3020) | 2nd |
+ * | `enter confirm · esc skip` | hook review (0.166.0, Issue #4134) | 2nd |
+ * | `t trust all · enter review · esc close` | hooks list (0.166.0) | 2nd |
+ * | `t trust · esc back` | hooks detail (0.166.0) | 2nd |
+ * | `enter details · esc close` | hooks list, nothing to review (0.166.0) | 2nd |
+ * | `space/enter toggle · esc back` | hooks detail, trusted (0.166.0) | 2nd |
  *
  * No `/g` (keeps `.test()` stateless) and no nested quantifiers (ReDoS-safe).
  */
