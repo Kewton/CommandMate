@@ -31,10 +31,11 @@
  *      (6-2: the last PR, and every PR of a run whose permission says "if CI passes",
  *      waits for the full CI; `gh pr checks` lists only what has registered).
  *      Anything else `pending` is not waited for. --register-timeout bounds the time until this
- *      HEAD has any check at all, and --ci-timeout runs from then (#4148). Every look also fetches
- *      the base: a base that moved during the wait stops the run with exit 4, because this HEAD no
- *      longer is the combination that would land (a rerun refreshes it, step 4). A fetch that fails
- *      is asked again at the next look and never merges on an unread base;
+ *      HEAD has any check at all, and --ci-timeout runs from then (#4148). Every look fetches
+ *      the base after reading the checks: a base that moved during the wait, that read included, stops
+ *      the run with exit 4, because this HEAD no longer is the combination that would land (a rerun
+ *      refreshes it, step 4). A fetch that fails is asked again at the next look and never merges on
+ *      an unread base;
  *   6. `gh pr merge --squash --match-head-commit <HEAD>`, recorded in the
  *      `merge` stage, then `gh issue close` unless `--close -`.
  *
@@ -474,13 +475,6 @@ export function main(argv, deps = {}) {
         return 0;
       }
       if (current.headRefOid === head) {
-        // The HEAD being waited for was refreshed on the base as it was then (step 4).
-        baseUnread = run('git', ['-C', o.worktree, 'fetch', 'origin', o.base]).status !== 0;
-        if (!baseUnread && run('git', ['-C', o.worktree, 'merge-base', '--is-ancestor', baseRef, 'HEAD']).status !== 0) {
-          record('merge', 'fail', head, `pr=#${pr.number} base-moved`, workHead);
-          error(`merge #${issue}: ${baseRef} moved during the CI wait — not merged; run again to refresh ${head.slice(0, 7)} on it (6-2)`);
-          return BASE_MOVED_EXIT;
-        }
         // gh pr checks exits 8 while checks are pending; the JSON is still on stdout.
         const out = run('gh', ['pr', 'checks', String(pr.number), '--repo', o.repo, '--json', 'name,bucket,link']);
         let checks = null;
@@ -490,6 +484,15 @@ export function main(argv, deps = {}) {
           checks = out.stderr.includes('no checks') ? [] : null;
         }
         if (checks === null) throw new Error(`gh pr checks ${pr.number} failed: ${(out.stderr || out.stdout).trim()}`);
+        // The HEAD being waited for was refreshed on the base as it was then (step 4). Read after the
+        // checks, so nothing of the base goes unread between the last green answer and the merge:
+        // --match-head-commit pins the PR's head, not the base. A rerun is not sent for a stale HEAD either.
+        baseUnread = run('git', ['-C', o.worktree, 'fetch', 'origin', o.base]).status !== 0;
+        if (!baseUnread && run('git', ['-C', o.worktree, 'merge-base', '--is-ancestor', baseRef, 'HEAD']).status !== 0) {
+          record('merge', 'fail', head, `pr=#${pr.number} base-moved`, workHead);
+          error(`merge #${issue}: ${baseRef} moved during the CI wait — not merged; run again to refresh ${head.slice(0, 7)} on it (6-2)`);
+          return BASE_MOVED_EXIT;
+        }
         if (ciDeadline === null && checks.length > 0) ciDeadline = now().getTime() + Number(o.ciTimeout) * 1000;
         verdict = judgeChecks(checks, need);
         if (verdict.state === 'fail') {

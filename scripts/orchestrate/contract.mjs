@@ -133,26 +133,91 @@ const SCOPE_COMPANIONS = [
   },
 ];
 
-/** The paths a pattern stands for, with `/**` and trailing slashes dropped: `src/cli/` and `src/cli/**` read alike. */
-function scopeRoots(pattern) {
+const API_ROOT = ['src', 'app', 'api'];
+const CLI_ROOT = ['src', 'cli'];
+const CLI_TYPES_ROOT = [...CLI_ROOT, 'types'];
+const GLOBSTAR = /^\*{2,}$/;
+
+/**
+ * A pattern's brace alternatives as path segments, read as the scope gate reads them
+ * (src/lib/verification/scope-gate-glob.ts): a trailing slash says nothing. Null past the brace limit.
+ */
+function scopeAlternatives(pattern) {
   const alternatives = hasBalancedBraces(pattern) ? expandBraces(pattern) : [pattern];
-  return (alternatives ?? []).map((alternative) => alternative.replace(/(?:\/\*\*)?\/*$/, ''));
+  return alternatives && alternatives.map((alternative) => alternative.replace(/\/+$/, '').split('/'));
 }
 
 /**
- * Whether a scope changes what the CLI reads from the API and does not already hold src/cli/types/:
- * a route under src/app/api, or CLI code. A pattern above src/cli/types/ (`src/**`) holds it already.
+ * Where a pattern can stand once `directory` is consumed. `**` crosses zero or more segments,
+ * `*` and `?` stay in one, and an index past the end means the pattern matched a directory
+ * above or at `directory`, which also admits everything beneath it.
+ */
+function positionsAfter(segments, directory) {
+  const withSkips = (positions) => {
+    const reached = new Set(positions);
+    for (const at of reached) if (GLOBSTAR.test(segments[at] ?? '')) reached.add(at + 1);
+    return reached;
+  };
+  let reached = withSkips([0]);
+  for (const name of directory) {
+    const next = [];
+    for (const at of reached) {
+      if (at === segments.length || GLOBSTAR.test(segments[at])) next.push(at);
+      else if (segmentMatches(segments[at], name)) next.push(at + 1);
+    }
+    reached = withSkips(next);
+  }
+  return [...reached];
+}
+
+/** Whether every path under src/cli/types/ is admitted: nothing narrower than `**`, or a single `*`, follows it. */
+function holdsCliTypes(segments) {
+  return positionsAfter(segments, CLI_TYPES_ROOT).some((at) => {
+    const rest = segments.slice(at);
+    return rest.slice(rest[0] === '*' ? 1 : 0).every((segment) => GLOBSTAR.test(segment));
+  });
+}
+
+/**
+ * Whether the last segment can name code (every file under src/app/api and src/cli is `.ts`). As in
+ * {@link fullUnitPattern}, one without a dot stands for a directory; `*.md` and `*.tsx` are other files.
+ */
+function canNameTsCode(segments) {
+  const last = segments.at(-1);
+  if (!last.includes('.')) return true;
+  for (let back = 1; back <= '.ts'.length; back++) {
+    const char = last.at(-back);
+    if (char === undefined) return false;
+    if (char === '*') return true;
+    if (char !== '?' && char !== '.ts'.at(-back)) return false;
+  }
+  return true;
+}
+
+/** Whether some code under src/app/api, or under src/cli outside src/cli/types, is admitted. */
+function reachesCliResponses(segments) {
+  if (!canNameTsCode(segments)) return false;
+  if (positionsAfter(segments, API_ROOT).length > 0) return true;
+  return positionsAfter(segments, CLI_ROOT).some((at) => segments[at] !== 'types');
+}
+
+/**
+ * Whether a scope changes what the CLI reads from the API and does not already hold src/cli/types/.
+ * An intersection in the scope gate's meaning, so `src/app/**\/route.ts` counts and `src/app/**\/page.tsx`
+ * does not. A pattern too wide to write out decides nothing here: {@link cliTypesNote} says so.
  */
 function changesCliResponses(scope) {
-  const roots = scope.flatMap(scopeRoots);
-  if (roots.some((root) => ['**', 'src', 'src/cli', 'src/cli/types'].includes(root))) return false;
-  return roots.some(
-    (root) =>
-      root === 'src/app' ||
-      root === 'src/app/api' ||
-      root.startsWith('src/app/api/') ||
-      (root.startsWith('src/cli/') && !root.startsWith('src/cli/types/'))
-  );
+  const alternatives = scope.flatMap((pattern) => scopeAlternatives(pattern) ?? []);
+  return !alternatives.some(holdsCliTypes) && alternatives.some(reachesCliResponses);
+}
+
+/** What `generate` says about a pattern {@link changesCliResponses} could not judge, or null. */
+export function cliTypesNote(config) {
+  const alternatives = config.scope.flatMap((pattern) => scopeAlternatives(pattern) ?? []);
+  if (alternatives.some(holdsCliTypes)) return null;
+  const pattern = config.scope.find((candidate) => scopeAlternatives(candidate) === null);
+  if (pattern === undefined) return null;
+  return `contract: note: #${config.issue}: scope "${pattern}" has more than ${MAX_BRACE_EXPANSIONS} brace expansions, so whether it reaches an API route or CLI code was not judged and src/cli/types/** was not added — write it in the scope if it does (docs/orchestrate/contract.md)`;
 }
 
 /** Whether the scope reaches `tests/fixtures/` (the scanning tests have to be told about a new fixture, #4000). */
@@ -823,8 +888,10 @@ function main(argv) {
     return 2;
   }
   try {
-    const note = fullUnitNote(loadConfig(options.configFile, { worktree: options.worktree }));
-    if (note) console.error(note);
+    const config = loadConfig(options.configFile, { worktree: options.worktree });
+    for (const note of [fullUnitNote(config), cliTypesNote(config)]) {
+      if (note) console.error(note);
+    }
     if (options.stdout) {
       process.stdout.write(contractYaml(loadConfig(options.configFile, { worktree: options.worktree })));
       return 0;

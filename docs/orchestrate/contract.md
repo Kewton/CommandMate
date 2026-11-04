@@ -181,7 +181,7 @@ unit ゲートで同型を弾くが、契約側にも明示すること。
 - `tests/fixtures/` の下を scope に書くと、goal に「fixture を走査するテストの表・許可リストへの登録も受入基準に入れる」が入る（#4000: 検出テスト 3 本が件数・許可リストで数えていた）。走査するテストは契約の起案者が scope に足す
 - `src/config/slash-commands-catalog.json` を scope に書くと、`tests/unit/lib/slash-command-description-override.test.ts` が scope に入る（#3998: 説明の衝突を解くとキーが分かれ、leaf の一覧を固定するこのテストが変わる）
 - `.claude/skills/` の下を scope に書くと、`.claude/skills/sync-map.json` が scope に入る（#4106: `mapped` パッケージの全ファイルの sha256 を固定するので、`SKILL.md` に限らず pin の打ち直しが要る）。どれも `changelog.d/<N>.md` と同じく、書いてあっても重複しない。足した分も `MAX_SCOPE_PATTERNS` に数える
-- `src/app/api/`（`src/app` も）か `src/cli/` の下を scope に書くと、`src/cli/types/**` が scope に入る（#4148: #4132 の `src/cli/types/api-responses.ts` が範囲外で 2 本目の契約になった。CLI は API の応答の型をここに写している）。`src/**`・`src/cli/**` のように既に含む書き方や、`src/cli/types/` だけの scope には足さない
+- API のルート（`src/app/api/` の下の `.ts`）か CLI のコード（`src/cli/` の下の `.ts`）に当たる scope を書くと、`src/cli/types/**` が scope に入る（#4148: #4132 の `src/cli/types/api-responses.ts` が範囲外で 2 本目の契約になった。CLI は API の応答の型をここに写している）。判定は scope ゲートの glob の意味（`src/lib/verification/scope-gate-glob.ts`）での交差で、`src/app`・`src/app/**/route.ts`・`**/*.ts`・`src/{app,cli}/**` も当たる。`src/app/**/page.tsx`・`**/*.md` は当たらない。`src/**`・`src/cli/**` のように既に含む書き方や、`src/cli/types/` だけの scope には足さない。ブレースの展開が 1024 通りを超える指定は判定せず、足さずに `contract: note:` を stderr へ出すので、当たるなら自分で書く
 - **期待を反転する契約**（#3999: 「ターミナル面に Plan review の操作を出さない」を反転して describe/it 名が変わり、precheck の removed-tests が落ちた）: 契約の決定が既存の振る舞いを反転するときは、plan に「removed-tests を許可する（理由）」を先に書き、その run の precheck に `--allow-removed-tests` を付ける。理由が plan に無いまま付けない
 
 ## 2-4-2 スラッシュコマンドが起動しなかった実測

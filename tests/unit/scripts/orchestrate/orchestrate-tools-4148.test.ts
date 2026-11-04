@@ -17,11 +17,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parse, stringify } from 'yaml';
-import { fullUnitNote, fullUnitPattern, normalizeConfig } from '../../../../scripts/orchestrate/contract.mjs';
+import { cliTypesNote, fullUnitNote, fullUnitPattern, normalizeConfig } from '../../../../scripts/orchestrate/contract.mjs';
 import { main as mergeMain, parseArgs, validate } from '../../../../scripts/orchestrate/merge-pr.mjs';
 import { checkPlan } from '../../../../scripts/orchestrate/plan-check.mjs';
 import { appendRecord, envCleanShared, readRecords } from '../../../../scripts/orchestrate/run-log.mjs';
 import { envCleanItems } from '../../../../scripts/orchestrate/wait-verify.mjs';
+import { ScopeMatcher } from '../../../../src/lib/verification/scope-gate-glob';
 import { HEAD_A, type Check, fakeGit, openPr } from './pr-fake';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
@@ -192,6 +193,78 @@ describe('item 3: src/cli/types/** を対で入れる', () => {
   it('does not duplicate one the config wrote', () => {
     expect(scopeOf(['src/app/api/roles/**', CLI_TYPES]).filter((p: string) => p === CLI_TYPES)).toHaveLength(1);
   });
+
+  describe('a glob, in the meaning the scope gate gives it', () => {
+    const admits = (pattern: string, file: string) => !new ScopeMatcher({ allow: [pattern], deny: [] }).isViolation(file);
+    const CODE = ['src/app/api/roles/route.ts', 'src/app/api/worktrees/[id]/send/route.ts', 'src/app/api/roles/helpers.ts', 'src/cli/commands/send.ts', 'src/cli/index.ts'];
+
+    it.each([
+      ['src/app/**/route.ts', 'src/app/api/roles/route.ts'],
+      ['src/**/route.ts', 'src/app/api/roles/route.ts'],
+      ['**/route.ts', 'src/app/api/roles/route.ts'],
+      ['src/*/api/**', 'src/app/api/roles/route.ts'],
+      ['src/app/*/roles/route.ts', 'src/app/api/roles/route.ts'],
+      ['src/app/ap?/**', 'src/app/api/roles/route.ts'],
+      ['src/app/api/**/route.*', 'src/app/api/roles/route.ts'],
+      ['src/app/api/worktrees/[id]/send/route.ts', 'src/app/api/worktrees/[id]/send/route.ts'],
+      ['src/{app,lib}/**/route.ts', 'src/app/api/roles/route.ts'],
+      ['src/cli/**/*.ts', 'src/cli/commands/send.ts'],
+      ['src/*/*.ts', 'src/cli/index.ts'],
+      ['src/*/route.ts', 'src/cli/route.ts'],
+      ['s*/cli/commands/**', 'src/cli/commands/send.ts'],
+      ['**/*.ts', 'src/cli/commands/send.ts'],
+      ['**/*.{ts,tsx}', 'src/app/api/roles/route.ts'],
+    ])('%s reaches %s, and adds it (positive control)', (pattern, file) => {
+      expect(admits(pattern, file)).toBe(true);
+      expect(admits(pattern, 'src/cli/types/a-new-copy.json')).toBe(false);
+      expect(scopeOf([pattern])).toContain(CLI_TYPES);
+    });
+
+    it.each(['src/app/**/page.tsx', 'src/app/*/page.tsx', 'src/*/page.tsx', 'src/lib/**/route.ts', 'src/app/(group)/**', 'src/app/worktrees/**/route.ts', '**/*.md', 'src/**/*.tsx', 'src/cli/types/*.ts', 'src/cli/types/**/*.ts', 'docs/**/route.ts'])(
+      '%s reaches no route or CLI code, and adds nothing (negative control)',
+      (pattern) => {
+        expect(CODE.filter((file) => admits(pattern, file))).toEqual([]);
+        expect(scopeOf([pattern])).not.toContain(CLI_TYPES);
+      }
+    );
+
+    it.each(['src/*/types/**', '**/types/**', 'src/cli/types/*', 'src/cli/*', 'src/**/*', '**/*', 'src/{cli,lib}/**'])('%s holds src/cli/types/ already, and adds nothing', (pattern) => {
+      expect(admits(pattern, 'src/cli/types/api-responses.ts')).toBe(true);
+      expect(admits(pattern, 'src/cli/types/sub/a.json')).toBe(true);
+      expect(scopeOf([pattern])).not.toContain(CLI_TYPES);
+    });
+  });
+
+  describe('a pattern that cannot be judged', () => {
+    const tooWide = `{a,b}${'{c,d}'.repeat(10)}/**`;
+    const configOf = (scope: string[]) => normalizeConfig({ issue: 7, title: 't', kind: 'feature', agent: 'claude', model: 'opus', scope });
+
+    it('adds nothing and says so', () => {
+      const config = configOf([tooWide]);
+      expect(config.scope).not.toContain(CLI_TYPES);
+      expect(cliTypesNote(config)).toContain(`#7: scope "${tooWide}" has more than 1024 brace expansions`);
+    });
+
+    it('does not stop what the other patterns decide, and then there is nothing to say', () => {
+      const config = configOf([tooWide, 'src/app/**/route.ts']);
+      expect(config.scope).toContain(CLI_TYPES);
+      expect(cliTypesNote(config)).toBeNull();
+    });
+
+    it('negative control: every pattern the generator can judge has no note', () => {
+      for (const scope of [['src/app/**/route.ts'], ['docs/**'], ['{src,docs}/**'], ['src/{a']]) {
+        expect(cliTypesNote(configOf(scope))).toBeNull();
+      }
+    });
+
+    it('generate prints it on stderr', () => {
+      const config = path.join(tmp, 'config.yaml');
+      fs.writeFileSync(config, stringify({ issue: 7, title: 't', kind: 'feature', agent: 'claude', model: 'opus', scope: [tooWide] }));
+      const out = spawnSync(process.execPath, [path.join(SCRIPTS, 'contract.mjs'), 'generate', '--config', config, '--worktree', worktree, '--stdout'], { encoding: 'utf-8' });
+      expect(out.status).toBe(0);
+      expect(out.stderr).toContain('src/cli/types/** was not added');
+    });
+  });
 });
 
 describe('item 4: merge-pr の待機', () => {
@@ -239,6 +312,55 @@ describe('item 4: merge-pr の待機', () => {
       const last = readRecords(runDir, '3477').records.at(-1);
       expect(last).toMatchObject({ stage: 'merge', result: 'fail' });
       expect(last?.note).toContain('base-moved');
+    });
+
+    /** develop moves while `gh pr checks` is out: only a fetch after that read can see it. */
+    function movesDuringRead(fake: ReturnType<typeof fakeGit>): Run {
+      let moved = false;
+      return (command, args, opts) => {
+        if (command === 'git' && args[2] === 'fetch' && moved) fake.state.behind = true;
+        const answer = fake.run(command, args, opts);
+        if (command === 'gh' && args[0] === 'pr' && args[1] === 'checks') moved = true;
+        return answer;
+      };
+    }
+
+    it('a green answer does not merge past a base that moved during that very read (positive control)', () => {
+      ready();
+      const fake = fakeGit({ prs: [openPr()], checks: [GREEN] });
+      const { code, err } = runMain(movesDuringRead(fake));
+      expect(code).toBe(4);
+      expect(err).toContain('moved during the CI wait');
+      expect(fake.ghCalls('pr merge')).toHaveLength(0);
+      expect(readRecords(runDir, '3477').records.at(-1)?.note).toContain('base-moved');
+    });
+
+    it('sends no rerun for a HEAD whose base moved during the read that failed', () => {
+      ready();
+      const fake = fakeGit({ prs: [openPr()], checks: [[{ ...pass('Build'), bucket: 'fail' }]] });
+      expect(runMain(movesDuringRead(fake)).code).toBe(4);
+      expect(fake.ghCalls('run rerun')).toHaveLength(0);
+    });
+
+    it('a failed fetch after the green answer does not merge on it: the next look reads both again', () => {
+      ready();
+      const fake = fakeGit({ prs: [openPr()], checks: [GREEN] });
+      const order: string[] = [];
+      let fetches = 0;
+      const run: Run = (command, args, opts) => {
+        if (command === 'gh' && args[0] === 'pr' && (args[1] === 'checks' || args[1] === 'merge')) order.push(args[1]);
+        if (command === 'git' && args[2] === 'fetch') {
+          if (++fetches === 2) {
+            order.push('fetch-failed');
+            return { status: 1, stdout: '', stderr: 'unreachable' };
+          }
+          order.push('fetch');
+        }
+        return fake.run(command, args, opts);
+      };
+      expect(runMain(run).code).toBe(0);
+      // Step 4's fetch, the first look, the second look. The merge follows a fetch that follows a read.
+      expect(order).toEqual(['fetch', 'checks', 'fetch-failed', 'checks', 'fetch', 'merge']);
     });
 
     it('stops on the first look too: the precheck and the push take time', () => {
