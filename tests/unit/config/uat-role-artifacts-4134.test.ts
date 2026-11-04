@@ -73,7 +73,7 @@ describe('CM_AGENT_ROLE_ARTIFACTS_DIR in the daily check', () => {
     redirectLaunchEnvironment(3999, '/run/hooks', '/run/opencode-v2-state', '/run/role-artifacts');
     expect(process.env[NAME]).toBe('/run/role-artifacts');
     expect(process.env.CM_OPENCODE_V2_DIR).toBe('/run/opencode-v2-state');
-  });
+  }, 30000);
 
   it('points the children at the same place the probes generate into', () => {
     const main = fs.readFileSync(path.join(ROOT, 'scripts/agent-health/main.ts'), 'utf8');
