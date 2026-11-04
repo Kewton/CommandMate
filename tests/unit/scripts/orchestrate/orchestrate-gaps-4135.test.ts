@@ -24,6 +24,7 @@ import {
   contractYaml,
   normalizeConfig,
   touchesServerBuild,
+  writeContract,
 } from '../../../../scripts/orchestrate/contract.mjs';
 import {
   EXIT_AUTO_YES_UNCONFIRMED,
@@ -37,6 +38,7 @@ import {
 } from '../../../../scripts/orchestrate/launch-worker.mjs';
 import { RoleExitCode } from '@/cli/types';
 import { parseTaskContract } from '@/lib/tasks/contract-parser';
+import { ScopeMatcher } from '@/lib/verification/scope-gate';
 
 const ROOT = path.resolve(__dirname, '../../../..');
 const read = (file: string) => fs.readFileSync(path.join(ROOT, file), 'utf-8');
@@ -85,6 +87,122 @@ describe('2: build-server when a contract touches src/', () => {
       expect(gatesOf({ scope: [scope] }), scope).toEqual(DEFAULT_GATES);
     }
     expect(gatesOf({ scope: ['src/lib/x/**'], gates: ['lint', 'unit'] })).toEqual(['lint', 'unit']);
+  });
+
+  describe('reads a scope the way the scope gate does (scope-gate-glob.ts)', () => {
+    const PROBES = [
+      'src/x.ts',
+      'src/x.tsx',
+      'src/x.md',
+      'src/lib/x.ts',
+      'src/lib/new/a.ts',
+      'src/lib/a/index.ts',
+      'server.ts',
+      'tsconfig.server.json',
+      'tsconfig.base.json',
+    ];
+    const admittedByScopeGate = (pattern: string) =>
+      PROBES.some((probe) => new ScopeMatcher({ allow: [pattern], deny: [] }).classify(probe).admitted);
+
+    it.each([
+      'src',
+      'src/',
+      'src/**',
+      'src/lib',
+      'src/lib/new/**',
+      'src/**/*.ts',
+      'src/lib/*/index.ts',
+      '**',
+      '**/*.ts',
+      '**/*.md',
+      '*',
+      's*',
+      's*/**',
+      '?rc/**',
+      '{src,docs}/**',
+      '{docs,{tests,src}}/**',
+      '*.ts',
+      '*.json',
+      '{server,foo}.ts',
+      'server.ts',
+      'tsconfig.server.json',
+    ])('%s reaches it', (pattern) => {
+      expect(admittedByScopeGate(pattern)).toBe(true);
+      expect(touchesServerBuild([pattern])).toBe(true);
+    });
+
+    it.each([
+      'docs',
+      'docs/**',
+      'scripts/**',
+      'tests/**/*.ts',
+      'tests/unit/src/**',
+      '{tests,docs}/**',
+      '*.md',
+      'srcs/**',
+      'sr',
+      'server.tsx',
+      'server.ts/x',
+      '{src/**',
+      'x/**/*.ts',
+    ])('%s does not', (pattern) => {
+      expect(admittedByScopeGate(pattern)).toBe(false);
+      expect(touchesServerBuild([pattern])).toBe(false);
+    });
+
+    it('stays bounded on a pattern with very many alternatives', () => {
+      expect(touchesServerBuild(['{a,b}'.repeat(40)])).toBe(true);
+    });
+  });
+
+  describe('a worktree whose verify.yaml has no build-server (POST /tasks would answer unknown gate)', () => {
+    /** Generate from a config in a temp worktree, through the same path `generate --worktree` takes. */
+    function generated(verifyYaml: string | null, config: Record<string, unknown> = {}) {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-gates-4135-'));
+      tmpDirs.push(dir);
+      if (verifyYaml !== null) {
+        fs.mkdirSync(path.join(dir, '.commandmate'), { recursive: true });
+        fs.writeFileSync(path.join(dir, '.commandmate', 'verify.yaml'), verifyYaml);
+      }
+      const configFile = path.join(dir, 'config.yaml');
+      fs.writeFileSync(configFile, JSON.stringify({ ...base, scope: ['src/lib/x/**'], ...config }));
+      const written = writeContract({ configFile, worktree: dir });
+      return (parseYaml(fs.readFileSync(written.path, 'utf-8')) as { verify: { gates: string[] } }).verify.gates;
+    }
+    const WITH = 'version: 1\ngates:\n  - id: lint\n    command: "true"\n  - id: build-server\n    command: "true"\n';
+    const WITHOUT = 'version: 1\ngates:\n  - id: lint\n    command: "true"\n';
+
+    it('adds it when that worktree declares it', () => {
+      expect(generated(WITH)).toEqual(['lint', 'typecheck', 'build-server', 'unit-related']);
+    });
+
+    it.each([
+      ['does not declare it', WITHOUT],
+      ['has no verify.yaml', null],
+      ['has one that does not parse', ':\n  - [unbalanced'],
+      ['has one without gates', 'version: 1\n'],
+    ])('keeps the default when it %s', (_name, yaml) => {
+      expect(generated(yaml)).toEqual(DEFAULT_GATES);
+    });
+
+    it('leaves a list written out as written, either way', () => {
+      expect(generated(WITHOUT, { gates: ['lint', 'build-server'] })).toEqual(['lint', 'build-server']);
+      expect(generated(WITH, { gates: ['lint'] })).toEqual(['lint']);
+    });
+
+    it('generate --stdout --worktree reads that worktree too', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-gates-4135-'));
+      tmpDirs.push(dir);
+      const configFile = path.join(dir, 'config.yaml');
+      fs.writeFileSync(configFile, JSON.stringify({ ...base, scope: ['src/lib/x/**'] }));
+      const result = spawnSync(
+        process.execPath,
+        [path.join(ROOT, 'scripts/orchestrate/contract.mjs'), 'generate', '--config', configFile, '--worktree', dir, '--stdout'],
+        { encoding: 'utf-8' }
+      );
+      expect(result.status, result.stderr).toBe(0);
+      expect((parseYaml(result.stdout) as { verify: { gates: string[] } }).verify.gates).toEqual(DEFAULT_GATES);
+    });
   });
 
   it('is a gate verify.yaml declares, running the build that reads tsconfig.server.json', () => {
@@ -182,6 +300,9 @@ describe('4: exit codes of send and of launch-worker.mjs (workers.md)', () => {
     expect(EXIT_ROLE_CONFLICT).toBe(RoleExitCode.CONFLICT);
     expect(EXIT_ROLE_NOT_SENT).toBe(RoleExitCode.NOT_SENT);
     expect(row(sendPart, EXIT_ROLE_CONFLICT)).toContain('`RoleExitCode.CONFLICT`');
+    // send.ts createContractTaskWithRole: saved, then the answer shows another tool, then 31.
+    expect(row(sendPart, EXIT_ROLE_CONFLICT)).toContain('`roleSettings.saved: true`');
+    expect(row(sendPart, EXIT_ROLE_CONFLICT)).not.toContain('何も変えず');
     expect(row(sendPart, EXIT_ROLE_NOT_SENT)).toContain('`RoleExitCode.NOT_SENT`');
     expect(row(sendPart, EXIT_NOT_DELIVERED)).toContain('exit-codes.md');
   });

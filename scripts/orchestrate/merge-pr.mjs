@@ -27,8 +27,9 @@
  *      unless the verification passed verify.yaml's full `unit` gate — a
  *      `unit-related` or a refactor contract (lint / typecheck only) waits for
  *      it (2-4-3, 6-2), and `--unit-related` forces the wait; with `--last`
- *      every check is `pass` or `skipping` (6-2: the last PR, and every PR of a
- *      run whose permission says "if CI passes", waits for the full CI).
+ *      every check is `pass` or `skipping` and LAST_REQUIRED_CHECKS have registered
+ *      (6-2: the last PR, and every PR of a run whose permission says "if CI passes",
+ *      waits for the full CI; `gh pr checks` lists only what has registered).
  *      Anything else `pending` is not waited for;
  *   6. `gh pr merge --squash --match-head-commit <HEAD>`, recorded in the
  *      `merge` stage, then `gh issue close` unless `--close -`.
@@ -79,6 +80,8 @@ export const DEFAULT_CI_TIMEOUT_SEC = 3600;
 export const DEFAULT_POLL_SEC = 30;
 export const BUILD_CHECK = 'Build';
 export const UNIT_CHECK = 'Unit Tests';
+/** What `--last` waits to see registered: a list of green checks without them is not the full CI (#4135). */
+export const LAST_REQUIRED_CHECKS = ['Lint', BUILD_CHECK, UNIT_CHECK];
 /** `bucket` values that settle a check without failing it. */
 const SETTLED_OK = ['pass', 'skipping'];
 
@@ -93,10 +96,10 @@ export function squashSubject(title, number) {
  * 6-3 over `gh pr checks --json name,bucket,link`.
  *
  * @param {{ name: string, bucket: string, link?: string }[]} checks
- * @param {{ needBuild: boolean, needUnit: boolean, last: boolean }} need
+ * @param {{ needBuild: boolean, needUnit: boolean, last: boolean, required?: string[] }} need
  * @returns {{ state: 'fail' | 'pending' | 'ok', failed: typeof checks, waiting: string[], summary: string }}
  */
-export function judgeChecks(checks, { needBuild, needUnit, last }) {
+export function judgeChecks(checks, { needBuild, needUnit, last, required = [] }) {
   const counts = {};
   for (const check of checks) counts[check.bucket] = (counts[check.bucket] ?? 0) + 1;
   const summary = Object.entries(counts).map(([bucket, n]) => `${bucket}:${n}`).join(',') || 'none';
@@ -107,6 +110,7 @@ export function judgeChecks(checks, { needBuild, needUnit, last }) {
   const passed = (name) => checks.some((check) => check.name === name && check.bucket === 'pass');
   if (last) {
     waiting.push(...checks.filter((check) => !SETTLED_OK.includes(check.bucket)).map((check) => check.name));
+    waiting.push(...required.filter((name) => !checks.some((check) => check.name === name)).map((name) => `${name} (not registered)`));
   } else {
     if (needBuild && !passed(BUILD_CHECK)) waiting.push(BUILD_CHECK);
     if (needUnit && !passed(UNIT_CHECK)) waiting.push(UNIT_CHECK);
@@ -418,7 +422,7 @@ export function main(argv, deps = {}) {
     // full unit suite. A latest verify of another HEAD is not that one, and does not spare the wait (#4076).
     const latestVerify = latestByStage(records, issue, item).verify ?? null;
     const verify = latestVerify && unmetStage('verify', latestVerify, { head, workHead }) === null ? latestVerify : null;
-    const need = { needBuild, needUnit: o.unitRelated || !ranFullUnit(verify), last: o.last };
+    const need = { needBuild, needUnit: o.unitRelated || !ranFullUnit(verify), last: o.last, required: o.last ? LAST_REQUIRED_CHECKS : [] };
     const rerunDone = records.some(
       (r) => r.issue === issue && inItem(r, item) && r.stage === 'ci' && r.head === head && /(^| )rerun=/.test(r.note ?? '')
     );

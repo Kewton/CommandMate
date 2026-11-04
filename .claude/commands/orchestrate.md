@@ -393,7 +393,7 @@ title: "<Issueタイトル>"
 kind: feature             # feature | bug | refactor | docs（CHANGELOG の節とコミットの type の既定）
 agent: claude             # claude | antigravity
 model: opus               # opus | sonnet（antigravity は書かない）
-gates: [lint, typecheck, build-server, unit-related]   # 書いたとおりに走る。省略すると kind の既定（src/ を触れば build-server を足す。refactor を除く）
+gates: [lint, typecheck, build-server, unit-related]   # 書いたとおりに走る。省略すると kind の既定（src/ に届き、worktree の verify.yaml にあれば build-server を足す。refactor を除く）
 scope: ["src/lib/<module>/**", "tests/unit/<module>/**"]   # changelog.d/<N>.md は自動で足される
 decisions: []             # Issue の「決めること」への答え（goal の「この契約での決定」になる）
 changelog: { section: Added }   # 節の上書き（既定は kind から）。最低の版を上げるなら bump: minor を足す
@@ -1148,7 +1148,7 @@ Issue ごとに別ファイル（`changelog.d/<N>.md`）で、`CHANGELOG.md` は
 上記が通れば**フル CI の完走を待たずにマージしてよい**。develop 側の CI（12〜25 分）が安全網に
 なる。**最後の 1 本だけ**はフル CI を待つ。
 
-**利用者の許可の条件が「CI が通れば」の run では、どの PR にも `--last` を付けて全チェックの合格を待つ**（全チェックの合格 = すべての `bucket` が `pass` か `skipping`。`pending` は待ち、`fail` / `cancel` はマージしない。根拠: docs/orchestrate/ci-merge.md#6-2-ci-が通ればの許可と全チェックの合格）。
+**利用者の許可の条件が「CI が通れば」の run では、どの PR にも `--last` を付けて全チェックの合格を待つ**（全チェックの合格 = すべての `bucket` が `pass` か `skipping` で、未登録の `Lint`・`Build`・`Unit Tests` も待つ。`pending` は待ち、`fail` / `cancel` はマージしない。根拠: docs/orchestrate/ci-merge.md#6-2-ci-が通ればの許可と全チェックの合格）。
 
 **例外: 契約の `gates` が `unit-related` の PR は、CI の `Unit Tests` が `pass` になってからマージする**（#2639）。
 ローカルの裁定がテスト全体を含まないため。整理の契約（`lint`・`typecheck` だけ、2-4-3）も同じ。`merge-pr.mjs` は、検証が verify.yaml の `unit`

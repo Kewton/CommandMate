@@ -160,7 +160,9 @@ unit ゲートで同型を弾くが、契約側にも明示すること。
 `typecheck`（`npx tsc --noEmit`）は `tsconfig.json` だけを読み、`lib` は `esnext`。サーバーのビルドの `tsconfig.server.json` は `tsconfig.base.json` の `ES2022` までで、`include` も別にある。
 だから「サーバーのビルドだけで落ちる型エラー」は `typecheck` を通る。実例（#4124）: #4114 のコードが #4115 で初めてサーバーのビルドに入り、`isWellFormed` が CI の `Build` で落ちた。
 
-決定（#4135）: 新しいゲートは足さず、既にある `build-server` を、生成器の既定に入れる。`gates` を省略し、scope が `src/`・`server.ts`・`tsconfig.server.json`・`tsconfig.base.json` に当たるときだけ `[lint, typecheck, build-server, unit-related]` になる。
+決定（#4135）: 新しいゲートは足さず、既にある `build-server` を、生成器の既定に入れる。`gates` を省略し、scope が `src/` の下か `server.ts`・`tsconfig.server.json`・`tsconfig.base.json` に届くときだけ `[lint, typecheck, build-server, unit-related]` になる。「届く」は scope ゲートの意味（`src/lib/verification/scope-gate-glob.ts`）で読む: `src` 単独、`**/*.ts`、`{src,docs}/**` も届く。
+
+`--worktree`（省略時はカレントディレクトリ）の `.commandmate/verify.yaml` に `build-server` が無ければ足さない。`POST /tasks` が未知のゲートを 400 で拒否し、従来の既定で送れていた契約が送れなくなるため。
 
 | 実測（2026-11-04、この worktree・warm、load average 30〜41） | 所要 |
 |---|---|
@@ -169,7 +171,7 @@ unit ゲートで同型を弾くが、契約側にも明示すること。
 
 既定に入れても検証の時間はほとんど変わらない。
 
-- `gates` を書いた設定は書いたとおりに走る（生成器は足さない）。本体の雛形が `build-server` を書くのはそのため
+- `gates` を書いた設定は書いたとおりに走る（生成器は足さず、verify.yaml も確かめない）。本体の雛形が `build-server` を書くのはそのため
 - `kind: refactor` の既定は `[lint, typecheck]` のまま（テストが固定している）。CI の `Build` を待つので、マージの前には検出する
 
 ## 2-4 契約が先回りする対のファイルと期待の反転

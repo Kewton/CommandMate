@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { appendRecord, readRecords, summarize } from '../../../../scripts/orchestrate/run-log.mjs';
-import { judgeChecks, judgedByUnitRelated, main, parseArgs, runIdsOf, squashSubject, validate } from '../../../../scripts/orchestrate/merge-pr.mjs';
+import { LAST_REQUIRED_CHECKS, judgeChecks, judgedByUnitRelated, main, parseArgs, runIdsOf, squashSubject, validate } from '../../../../scripts/orchestrate/merge-pr.mjs';
 import { workHeads } from '../../../../scripts/orchestrate/pr-common.mjs';
 import { DEVELOP, HEAD_A, HEAD_B, HEAD_M, type Check, fakeGit, openPr } from './pr-fake';
 
@@ -73,6 +73,22 @@ function runMainWith(fake: ReturnType<typeof fakeGit>, extraDeps: Record<string,
 const stages = () => readRecords(runDir, '3477').records.map((r) => `${r.stage}=${r.result}`);
 
 describe('judgeChecks (6-3)', () => {
+  it('names required checks that are not registered only when given them (#4135)', () => {
+    const need = { needBuild: false, needUnit: false, last: true };
+    expect(judgeChecks([pass('Lint')], need).state).toBe('ok');
+    expect(judgeChecks([pass('Lint')], { ...need, required: LAST_REQUIRED_CHECKS }).waiting).toEqual(['Build (not registered)', 'Unit Tests (not registered)']);
+    expect(judgeChecks([pass('Lint')], { ...need, last: false, required: LAST_REQUIRED_CHECKS }).state).toBe('ok');
+    expect(judgeChecks(LAST_REQUIRED_CHECKS.map(pass), { ...need, required: LAST_REQUIRED_CHECKS }).state).toBe('ok');
+    // One that registered and is running is waited for once, under its own name.
+    expect(judgeChecks([pass('Lint'), pass('Unit Tests'), pending('Build')], { ...need, required: LAST_REQUIRED_CHECKS }).waiting).toEqual(['Build']);
+  });
+
+  it('requires jobs the CI workflow really has (#4135)', () => {
+    const workflow = fs.readFileSync(path.resolve(__dirname, '../../../../.github/workflows/ci-pr.yml'), 'utf-8');
+    expect(LAST_REQUIRED_CHECKS).toEqual(expect.arrayContaining(['Build', 'Unit Tests']));
+    for (const name of LAST_REQUIRED_CHECKS) expect(workflow).toContain(`\n    name: ${name}\n`);
+  });
+
   const need = { needBuild: true, needUnit: false, last: false };
 
   it('fails on fail or cancel in bucket', () => {
@@ -499,6 +515,32 @@ describe('main: merges once', () => {
       const fake = fakeGit({ prs: [openPr()], checks: [[...GREEN, skipping('E2E')]] });
       expect(runMain(fake, '--last').code).toBe(0);
       expect(fake.ghCalls('pr merge')).toHaveLength(1);
+    });
+
+    it('with --last, a required check that is not registered yet is waited for: all registered and green is not enough', () => {
+      recordReady(HEAD_A, FULL);
+      const fake = fakeGit({ prs: [openPr()], checks: [[pass('Lint')]] });
+      const { code, err } = runMain(fake, '--last', '--ci-timeout', '60');
+      expect(code).toBe(124);
+      expect(err).toContain('Build (not registered)');
+      expect(err).toContain('Unit Tests (not registered)');
+      expect(fake.ghCalls('pr merge')).toHaveLength(0);
+    });
+
+    it('with --last, merges once the required checks have registered and settled, a skipped one included', () => {
+      recordReady(HEAD_A, FULL);
+      const fake = fakeGit({
+        prs: [openPr()],
+        checks: [[pass('Lint')], [pass('Lint'), pending('Build'), pending('Unit Tests')], [pass('Lint'), pass('Build'), skipping('Unit Tests')]],
+      });
+      expect(runMain(fake, '--last').code).toBe(0);
+      expect(fake.ghCalls('pr merge')).toHaveLength(1);
+    });
+
+    it('without --last, a check that is not registered is not waited for, as before', () => {
+      recordReady(HEAD_A, FULL);
+      const fake = fakeGit({ prs: [openPr()], checks: [[pass('Lint')]] });
+      expect(runMain(fake).code).toBe(0);
     });
   });
 });

@@ -76,7 +76,7 @@ done
 |---|---|---|---|
 | 0 | | 送った | 3-2 へ |
 | 2 | `ExitCode.CONFIG_ERROR` | 引数の誤り | 呼び出しを直す |
-| 31 | `RoleExitCode.CONFLICT` | 名簿やロールが読んだ後に動いた（`roster_changed` など）。何も変えず、何も送っていない | 名簿を読み直して送り直す |
+| 31 | `RoleExitCode.CONFLICT` | 名簿やロールが読んだ後に動いた（`roster_changed` など）。本文は打っていない。ふつうは保存もしていないが、`--contract --role` で保存の応答からツールの変更に気づいたときは、設定を保存したまま 31 を返す（出力に `roleSettings.saved: true`） | `instances <WT>` で今の名簿と設定を確かめてから送り直す |
 | 32 | `RoleExitCode.NOT_SENT` | `--role` などの条件が成り立たない、またはロールが原因で起動を断られた。本文は打っていない | ロールの状態を読み、セッションを止めて送り直す |
 | 99 | `ExitCode.UNEXPECTED_ERROR` | 送れていない（冷間起動など） | docs/orchestrate/exit-codes.md の「3-1 冷間起動の失敗」 |
 
