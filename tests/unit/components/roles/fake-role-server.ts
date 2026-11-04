@@ -498,3 +498,23 @@ export function loseNextAnswer(
     return { ok: true, status: 200, json: () => untilAborted<unknown>(init) } as unknown as Response;
   }) as unknown as typeof fetch;
 }
+
+/**
+ * Runs `change` once in a gap of a lost write's check, which settles, reads, and settles again:
+ * `before-read` lands after the first settling, `before-second-settling` after the read.
+ */
+export function duringTheCheck(gap: 'before-read' | 'before-second-settling', change: () => void): void {
+  const passOn = global.fetch;
+  let settlings = 0;
+  let done = false;
+  global.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    const settling = String(url).endsWith('/settle');
+    if (settling) settlings += 1;
+    const due = gap === 'before-read' ? !settling && settlings === 1 && (init?.method ?? 'GET') === 'GET' : settling && settlings === 2;
+    if (!done && due) {
+      done = true;
+      change();
+    }
+    return (passOn as typeof fetch)(url, init);
+  }) as unknown as typeof fetch;
+}

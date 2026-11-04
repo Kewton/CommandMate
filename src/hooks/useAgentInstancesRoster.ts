@@ -51,8 +51,9 @@
  * content may be another tab's, and "not there" stops being true if the request commits a
  * moment later. Settling marks a key that made nothing, so `failed` holds from then on and
  * adding again makes one. A key whose row has since left the roster reads the same, so the
- * id made again by someone else is not claimed. Each attempt has its own key, sent in a
- * header, and the body is the same as without one.
+ * id made again by someone else is not claimed. A committed key is asked once more after the
+ * read: a key still standing then says the row read was the one it made. Each attempt has its
+ * own key, sent in a header, and the body is the same as without one.
  */
 
 'use client';
@@ -172,6 +173,14 @@ async function readAfterCrossing(worktreeId: string): Promise<RosterAttempt> {
 }
 
 /**
+ * Asked after a read, of a key that had committed before it. A key does not outlive its row,
+ * so one still standing says the row read was the row it made, not one made again since.
+ */
+async function keyStillStands(worktreeId: string, idempotencyKey: string): Promise<boolean> {
+  return (await settleInstanceCreation(worktreeId, idempotencyKey))?.outcome === 'committed';
+}
+
+/**
  * A PATCH with no usable answer. Its key says whether it happened, and the read comes after,
  * since the settling is what stops a late commit. Reads the roster route: the "+" falls back
  * here when the role route is failing.
@@ -193,7 +202,8 @@ async function settleLostPatch(
   if (settled?.outcome === 'cancelled' && confirmed.revision === expectedRevision) return { status: 'failed' };
   recordRosterSaved(worktreeId, confirmed.roster, confirmed.revision);
   // Cancelled on a roster that moved: not this write, and what was on screen is out of date.
-  return settled?.outcome === 'committed' ? { status: 'saved', roster: confirmed.roster } : unknown;
+  if (settled?.outcome !== 'committed') return unknown;
+  return (await keyStillStands(worktreeId, idempotencyKey)) ? { status: 'saved', roster: confirmed.roster } : unknown;
 }
 
 /**
@@ -217,7 +227,10 @@ async function settleLostCreate(
   }
   // Read again: `settings` can be from before the commit, and its row with this id another's.
   const read = await refreshAfterWrite(worktreeId);
-  return read && hasRow(read) ? { status: 'saved', roster: rosterFromRoleEntries(read.instances) } : unknown;
+  if (!read || !hasRow(read)) return unknown;
+  return (await keyStillStands(worktreeId, idempotencyKey))
+    ? { status: 'saved', roster: rosterFromRoleEntries(read.instances) }
+    : unknown;
 }
 
 /**

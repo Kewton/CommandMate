@@ -62,7 +62,8 @@ import * as settleRoute from '@/app/api/worktrees/[id]/instances/roles/settle/ro
 import * as roleRoute from '@/app/api/roles/[id]/route';
 import * as worktreeRoute from '@/app/api/worktrees/[id]/route';
 import { createInstancesCommand } from '@/cli/commands/instances';
-import { enqueueRosterWrite } from '@/hooks/useAgentInstancesRoster';
+import { enqueueRosterCreate, enqueueRosterWrite } from '@/hooks/useAgentInstancesRoster';
+import { duringTheCheck } from '../unit/components/roles/fake-role-server';
 import { clearRosterSnapshot } from '@/hooks/useInstanceRoleSettings';
 import { roleApi } from '@/lib/api-client-agent-roles';
 
@@ -744,6 +745,11 @@ describe('[#4132-8] a key does not outlive the row it made', () => {
 });
 
 describe('[#4132-9] a lost PATCH, from the hook through the real routes', () => {
+  const madeAgain = () => {
+    setAgentInstances(db, WT, [CLAUDE, CODEX]);
+    setAgentInstances(db, WT, [CLAUDE, CODEX, { ...THREE, alias: 'Theirs' }]);
+  };
+  const addOne = () => ({ id: 'claude-2', cliTool: 'claude', alias: 'Claude 2' });
   const add = (base: AgentInstance[]) => [...base, { id: 'claude-2', cliTool: 'claude' as const, alias: 'Claude 2', order: base.length }];
   const lost = { next: null as 'committed' | 'not-committed' | null, sent: null as null | { url: string; init: RequestInit } };
 
@@ -754,9 +760,10 @@ describe('[#4132-9] a lost PATCH, from the hook through the real routes', () => 
     vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
       const method = init?.method ?? 'GET';
       if (url.endsWith('/settle')) return settleRoute.POST(request(url, 'POST', JSON.parse(String(init?.body))), wt);
-      if (url.endsWith('/instances/roles')) return instanceRolesRoute.GET(request(url, 'GET'), wt);
+      if (method === 'GET' && url.endsWith('/instances/roles')) return instanceRolesRoute.GET(request(url, 'GET'), wt);
       if (method === 'GET') return Response.json({ agentInstances: getAgentInstances(db, WT), rosterRevision: rosterRevision() });
-      const call = () => worktreeRoute.PATCH(request(url, 'PATCH', JSON.parse(String(init?.body)), init?.headers as Record<string, string>), wt);
+      const route = method === 'POST' ? instanceRolesRoute.POST : worktreeRoute.PATCH;
+      const call = () => route(request(url, method, JSON.parse(String(init?.body)), init?.headers as Record<string, string>), wt);
       if (lost.next === null) return call();
       const how = lost.next;
       lost.next = null;
@@ -783,6 +790,32 @@ describe('[#4132-9] a lost PATCH, from the hook through the real routes', () => 
     expect(late.status).toBe(409);
     expect(ids()).toEqual(['claude', 'codex']);
     expect((await enqueueRosterWrite(WT, add, vi.fn())).status).toBe('saved');
+    expect(ids()).toEqual(['claude', 'codex', 'claude-2']);
+  });
+
+  describe.each(['before-read', 'before-second-settling'] as const)('removed and made again %s', (gap) => {
+    it('positive: a PATCH does not claim that row', async () => {
+      lost.next = 'committed';
+      duringTheCheck(gap, madeAgain);
+      const onSaved = vi.fn();
+      expect(await enqueueRosterWrite(WT, add, onSaved)).toEqual({ status: 'saved_unverified', unconfirmed: true });
+      expect(onSaved).not.toHaveBeenCalled();
+    });
+
+    it('positive: a create does not claim that row', async () => {
+      lost.next = 'committed';
+      duringTheCheck(gap, madeAgain);
+      const onSaved = vi.fn();
+      expect(await enqueueRosterCreate(WT, addOne, { state: 'inherit' }, onSaved)).toEqual({ status: 'saved_unverified', unconfirmed: true });
+      expect(onSaved).not.toHaveBeenCalled();
+    });
+  });
+
+  it('it committed, by a create: saved', async () => {
+    lost.next = 'committed';
+    const onSaved = vi.fn();
+    expect((await enqueueRosterCreate(WT, addOne, { state: 'inherit' }, onSaved)).status).toBe('saved');
+    expect(onSaved).toHaveBeenCalledTimes(1);
     expect(ids()).toEqual(['claude', 'codex', 'claude-2']);
   });
 });

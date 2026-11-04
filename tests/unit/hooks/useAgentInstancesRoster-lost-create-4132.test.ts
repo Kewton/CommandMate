@@ -8,7 +8,7 @@ import type { AgentInstance } from '@/lib/cli-tools/types';
 import { enqueueRosterCreate } from '@/hooks/useAgentInstancesRoster';
 import { clearRosterSnapshot } from '@/hooks/useInstanceRoleSettings';
 import { INSTANCE_CREATION_KEY_HEADER } from '@/types/agent-roles';
-import { FakeRoleServer, loseNextAnswer } from '../components/roles/fake-role-server';
+import { duringTheCheck, FakeRoleServer, loseNextAnswer } from '../components/roles/fake-role-server';
 
 const WT = 'wt-4132-hook';
 const ROLES = '/instances/roles';
@@ -120,6 +120,41 @@ describe('[#4132] a create whose answer was lost', () => {
     atTheSettling(() => server.changeRosterElsewhere([CLAUDE, { ...TWO, alias: 'Renamed' }]));
     const result = await create();
     expect(result.status === 'saved' && result.roster.map((row) => row.alias)).toEqual(['Claude', 'Renamed']);
+  });
+
+  describe.each(['before-read', 'before-second-settling'] as const)('something lands %s', (gap) => {
+    it('positive: its row was removed and the id made again: the old key does not claim that row', async () => {
+      loseNextAnswer(server, 'POST', ROLES, '500', { committed: true });
+      duringTheCheck(gap, () => {
+        server.changeRosterElsewhere([CLAUDE]);
+        server.changeRosterElsewhere([CLAUDE, { ...TWO, alias: 'Theirs' }]);
+      });
+      const onSaved = vi.fn();
+      expect(await create(onSaved)).toEqual({ status: 'saved_unverified', unconfirmed: true });
+      expect(onSaved).not.toHaveBeenCalled();
+      expect(server.roster.map((row) => row.alias)).toEqual(['Claude', 'Theirs']);
+    });
+
+    it('negative: a rename keeps the key: saved', async () => {
+      loseNextAnswer(server, 'POST', ROLES, '500', { committed: true });
+      duringTheCheck(gap, () => server.changeRosterElsewhere([CLAUDE, { ...TWO, alias: 'Renamed' }]));
+      const onSaved = vi.fn();
+      expect((await create(onSaved)).status).toBe('saved');
+      expect(onSaved).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('the settling after the read gets no answer: not claimed', async () => {
+    loseNextAnswer(server, 'POST', ROLES, '500', { committed: true });
+    const passOn = global.fetch;
+    let settlings = 0;
+    global.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).endsWith('/settle') && (settlings += 1) === 2) throw new TypeError('Failed to fetch');
+      return (passOn as typeof fetch)(url, init);
+    }) as unknown as typeof fetch;
+    const onSaved = vi.fn();
+    expect(await create(onSaved)).toEqual({ status: 'saved_unverified', unconfirmed: true });
+    expect(onSaved).not.toHaveBeenCalled();
   });
 
   it('negative: an answered create asks nothing further', async () => {

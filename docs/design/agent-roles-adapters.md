@@ -593,25 +593,32 @@ GET で確かめるだけでは足りない。「無い」と読んだ後に先�
 
 ### 15.3 `settleLostCreate` の結果
 
-読み直しは `settle` の後に行う（先の読み取りは commit より前かもしれず、その ID の行が別の行かもしれない）。`settle` と読み直しの間に行が消されて同じ ID で作り直されると、まだ別の行を読みうる。ミリ秒の窓で、閉じるには `settle` の応答に名簿を載せる必要があるので残した。
+確認は `settle`、読み直し、`settle` の順に行う。
 
-| `settle` の答え | 確認の読み直し | 結果 |
-|---|---|---|
-| `committed` | 行が読めた | `saved` |
-| `committed` | 読めない | `saved_unverified`（`unconfirmed`） |
-| `cancelled` | 同じ ID の行が無い、または読めない | `failed`（再追加してよい） |
-| `cancelled` | 同じ ID の行がある | `saved_unverified`（`unconfirmed`）。自分のものとは言わない。読み直すまで追加を止める |
-| 答えが無い | 問わない | `saved_unverified`（`unconfirmed`） |
+- 1 回目の `settle` は遅れて届く要求を止める。読み直しをこの後にするのは、先の読み取りが commit より前かもしれず、その ID の行が別の行かもしれないため。
+- 2 回目の `settle` は読んだ行を自分の行に結び付ける。`settle` と読み直しの間に行が消されて同じ ID で作り直されると、読み直しは別の行を返す。確認は通信を挟むので、この間隔は短いとは限らない。キーは行が名簿を去ると失効し、元に戻らないので、読み直しの後も `committed` なら、commit から読み直しまで行は去っていない。読んだ行は自分の行である。`settle` は 2 回送っても同じ答えを返し、応答の形も変えない。
+- 順を読み直し、`settle` の 2 手順にしないのは、読んだ直後に commit すると行の無い読み取りが `committed` になり、確認待ちが増えるため。また読み直しが `settle` より前だと、その間の改名を古い名簿のまま渡すため。
+- 2 回目の `settle` の後に行が消されるのは、応答が届いた書き込みの後に消されるのと同じで、次の読み直しで分かる。ここでは区別しない。
 
-PATCH の `settleLostPatch` も同じ考えで、内容の一致では判定しない。送った版と今の版を比べる（追加に限らず名簿全体を置き換えるので、行ではなく版を見る）。
+| 1 回目の `settle` | 確認の読み直し | 2 回目の `settle` | 結果 |
+|---|---|---|---|
+| `committed` | 行が読めた | `committed` | `saved` |
+| `committed` | 行が読めた | `cancelled`、または答えが無い | `saved_unverified`（`unconfirmed`）。読んだ行を自分のものと言えない |
+| `committed` | 行が無い、または読めない | 問わない | `saved_unverified`（`unconfirmed`） |
+| `cancelled` | 同じ ID の行が無い、または読めない | 問わない | `failed`（再追加してよい） |
+| `cancelled` | 同じ ID の行がある | 問わない | `saved_unverified`（`unconfirmed`）。自分のものとは言わない。読み直すまで追加を止める |
+| 答えが無い | 問わない | 問わない | `saved_unverified`（`unconfirmed`） |
 
-| `settle` の答え | 確認の読み直し | 結果 |
-|---|---|---|
-| `committed` | 読めた | `saved` |
-| `committed` | 読めない | `saved_unverified`（`unconfirmed`） |
-| `cancelled` | 版が送ったときのまま、または読めない | `failed`（再追加してよい） |
-| `cancelled` | 版が動いた | `saved_unverified`（`unconfirmed`）。自分のものとは言わない。画面の名簿が古いので読み直すまで追加を止める |
-| 答えが無い | 問わない | `saved_unverified`（`unconfirmed`） |
+PATCH の `settleLostPatch` も同じ考えで、内容の一致では判定せず、同じ順に確かめる。`cancelled` では送った版と今の版を比べる（追加に限らず名簿全体を置き換えるので、行ではなく版を見る）。
+
+| 1 回目の `settle` | 確認の読み直し | 2 回目の `settle` | 結果 |
+|---|---|---|---|
+| `committed` | 読めた | `committed` | `saved` |
+| `committed` | 読めた | `cancelled`、または答えが無い | `saved_unverified`（`unconfirmed`） |
+| `committed` | 読めない | 問わない | `saved_unverified`（`unconfirmed`） |
+| `cancelled` | 版が送ったときのまま、または読めない | 問わない | `failed`（再追加してよい） |
+| `cancelled` | 版が動いた | 問わない | `saved_unverified`（`unconfirmed`）。自分のものとは言わない。画面の名簿が古いので読み直すまで追加を止める |
+| 答えが無い | 問わない | 問わない | `saved_unverified`（`unconfirmed`） |
 
 ### 15.4 Auto-Yes の grant の識別子
 
