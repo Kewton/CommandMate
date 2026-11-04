@@ -144,7 +144,7 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 
 全チェックの合格は `judgeChecks` の判定そのもの: すべての `bucket` が `pass` か `skipping`。`skipping` は CI が条件で飛ばしたジョブで、待っても結果は変わらないので合格に数える。`pending` は待ち、`fail` / `cancel` はマージしない。
 
-`gh pr checks` は登録済みのチェックしか返さない。登録済みが全部合格でも CI の完走とは限らないので、`--last` は `LAST_REQUIRED_CHECKS`（`Lint`・`Build`・`Unit Tests`）が登録されるまで待つ。名前は `.github/workflows/ci-pr.yml` のジョブと突き合わせるテストがある。これ以外のジョブは、登録されてから完了を待つ。`--last` なしは未登録を待たない（今までどおり）。
+`gh pr checks` は登録済みのチェックしか返さない。登録済みが全部合格でも CI の完走とは限らないので、`--last` は `LAST_REQUIRED_CHECKS` のすべてが登録されるまで待つ。一覧は `.github/workflows/ci-pr.yml` の全ジョブ（matrix の展開後の `Unit Tests (shard 1/4)`〜`(4/4)` を含む 17 件）で、ジョブを足す・名前を変えるときは一覧も直す。食い違うと `merge-pr.test.ts` が両方向で落ちる。一覧に無いチェック（ほかのワークフローなど）は、登録されてから完了を待つ。`--last` なしは未登録を待たない（今までどおり）。
 
 ## 6-2 分類器にマージを拒否されたとき
 

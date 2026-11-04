@@ -80,8 +80,30 @@ export const DEFAULT_CI_TIMEOUT_SEC = 3600;
 export const DEFAULT_POLL_SEC = 30;
 export const BUILD_CHECK = 'Build';
 export const UNIT_CHECK = 'Unit Tests';
-/** What `--last` waits to see registered: a list of green checks without them is not the full CI (#4135). */
-export const LAST_REQUIRED_CHECKS = ['Lint', BUILD_CHECK, UNIT_CHECK];
+/**
+ * What `--last` waits to see registered: every job of .github/workflows/ci-pr.yml, a matrix
+ * expanded, because `gh pr checks` lists only what has registered and a job registered late
+ * would otherwise be merged past (#4135). merge-pr.test.ts fails when this and the workflow differ.
+ */
+export const LAST_REQUIRED_CHECKS = [
+  'CLAUDE.md size check',
+  'orchestrate.md size check',
+  'Control character check',
+  'Token discipline (raw palette guard + token existence)',
+  'Route export guard',
+  'Legacy tmux (<3.2) reading-mode no-op',
+  'Lint',
+  'Type Check',
+  'Unit Tests (shard 1/4)',
+  'Unit Tests (shard 2/4)',
+  'Unit Tests (shard 3/4)',
+  'Unit Tests (shard 4/4)',
+  UNIT_CHECK,
+  'Integration Tests',
+  'E2E Tests',
+  BUILD_CHECK,
+  'Security Audit',
+];
 /** `bucket` values that settle a check without failing it. */
 const SETTLED_OK = ['pass', 'skipping'];
 
