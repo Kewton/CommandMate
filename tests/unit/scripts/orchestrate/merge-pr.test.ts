@@ -474,4 +474,31 @@ describe('main: merges once', () => {
     const done = fakeGit({ prs: [openPr()], checks: [[...GREEN, pending('Integration Tests')], [...GREEN, pass('Integration Tests')]] });
     expect(runMain(done, '--last').code).toBe(0);
   });
+
+  describe('a permission that says "if CI passes" (#4135: PR #4125 merged at checks=pending:16)', () => {
+    const FULL = { verifyNote: 'exit=0(passed) passed=lint,typecheck,unit failed=-', precheckNote: 'tsc=ok build=ok build-cli=ok build-server=ok' };
+    const skipping = (name: string): Check => ({ name, bucket: 'skipping', link: RUN_LINK });
+    const allPending = [pending('Build'), pending('Unit Tests'), pending('Lint')];
+
+    it('without --last, a full unit gate and a --build precheck do not wait: the path that rule replaces', () => {
+      recordReady(HEAD_A, FULL);
+      const fake = fakeGit({ prs: [openPr()], checks: [allPending] });
+      expect(runMain(fake).code).toBe(0);
+      expect(fake.ghCalls('pr merge')).toHaveLength(1);
+    });
+
+    it('with --last, the same PR waits for every check and does not merge', () => {
+      recordReady(HEAD_A, FULL);
+      const fake = fakeGit({ prs: [openPr()], checks: [allPending] });
+      expect(runMain(fake, '--last', '--ci-timeout', '60').code).toBe(124);
+      expect(fake.ghCalls('pr merge')).toHaveLength(0);
+    });
+
+    it('with --last, passing means pass or skipping, and a job CI skipped does not hold it', () => {
+      recordReady(HEAD_A, FULL);
+      const fake = fakeGit({ prs: [openPr()], checks: [[...GREEN, skipping('E2E')]] });
+      expect(runMain(fake, '--last').code).toBe(0);
+      expect(fake.ghCalls('pr merge')).toHaveLength(1);
+    });
+  });
 });

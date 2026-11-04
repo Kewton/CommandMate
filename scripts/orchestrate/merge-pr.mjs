@@ -27,7 +27,8 @@
  *      unless the verification passed verify.yaml's full `unit` gate — a
  *      `unit-related` or a refactor contract (lint / typecheck only) waits for
  *      it (2-4-3, 6-2), and `--unit-related` forces the wait; with `--last`
- *      every check is `pass` (6-2: only the last PR waits for the full CI).
+ *      every check is `pass` or `skipping` (6-2: the last PR, and every PR of a
+ *      run whose permission says "if CI passes", waits for the full CI).
  *      Anything else `pending` is not waited for;
  *   6. `gh pr merge --squash --match-head-commit <HEAD>`, recorded in the
  *      `merge` stage, then `gh issue close` unless `--close -`.

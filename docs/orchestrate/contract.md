@@ -151,9 +151,26 @@ unit ゲートで同型を弾くが、契約側にも明示すること。
 ## 2-4 生成器が止まる条件
 
 - 生成器は、出力する契約を正準のパーサー（`src/lib/tasks/contract-parser.ts`）と同じ制約で検査する（title 200 文字・gate の形と重複・scope の形）。
-- **goal が 8,000 文字を超えると生成が失敗する**（契約の上限）。Issue 本文を要点に縮めた `issueBodyFile` を渡し直す
+- **goal が 8,000 文字を超えると生成が失敗する**（契約の上限）。Issue 本文を要点に縮めた `issueBodyFile` を渡し直す。検査するのは parser が数える文字列と同じで（末尾に改行を足さない。YAML は `|-`）、ちょうど 8,000 文字は生成も送信も通る（#4135）
 - `scope` に `CHANGELOG.md` / `docs/module-reference.md` を書くと生成が失敗する（2-4-1）。`requireCommit: true` は常に入る
 - 同じ設定で再実行しても契約は変わらない（`unchanged`）。中身の違う契約が既にあると止まる。送信前に直すときだけ `--force`
+
+## 2-4 src を触る契約の build-server
+
+`typecheck`（`npx tsc --noEmit`）は `tsconfig.json` だけを読み、`lib` は `esnext`。サーバーのビルドの `tsconfig.server.json` は `tsconfig.base.json` の `ES2022` までで、`include` も別にある。
+だから「サーバーのビルドだけで落ちる型エラー」は `typecheck` を通る。実例（#4124）: #4114 のコードが #4115 で初めてサーバーのビルドに入り、`isWellFormed` が CI の `Build` で落ちた。
+
+決定（#4135）: 新しいゲートは足さず、既にある `build-server` を、生成器の既定に入れる。`gates` を省略し、scope が `src/`・`server.ts`・`tsconfig.server.json`・`tsconfig.base.json` に当たるときだけ `[lint, typecheck, build-server, unit-related]` になる。
+
+| 実測（2026-11-04、この worktree・warm、load average 30〜41） | 所要 |
+|---|---|
+| `npm run build:server` 3 回 | 3.63 / 3.65 / 3.33 秒 |
+| `npx tsc --noEmit` 1 回 | 24.19 秒 |
+
+既定に入れても検証の時間はほとんど変わらない。
+
+- `gates` を書いた設定は書いたとおりに走る（生成器は足さない）。本体の雛形が `build-server` を書くのはそのため
+- `kind: refactor` の既定は `[lint, typecheck]` のまま（テストが固定している）。CI の `Build` を待つので、マージの前には検出する
 
 ## 2-4 契約が先回りする対のファイルと期待の反転
 

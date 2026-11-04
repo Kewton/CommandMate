@@ -16,7 +16,7 @@
  *   kind: feature            # feature | bug | refactor | docs
  *   agent: claude            # claude | antigravity
  *   model: opus              # opus | sonnet ("-" / omitted for antigravity)
- *   gates: [lint, typecheck, unit-related]
+ *   gates: [lint, typecheck, unit-related]   # omitted: the kind's default, with build-server when the scope reaches the server build
  *   scope: ["scripts/orchestrate/**"]   # changelog.d/<issue>.md is added for you
  *   decisions: ["…"]         # answers to the Issue's open questions
  *   changelog: { section: Added, bump: minor }   # section overrides the kind default
@@ -67,6 +67,12 @@ export const SHARED_FILES = ['CHANGELOG.md', 'docs/module-reference.md'];
 export const DEFAULT_GATES = ['lint', 'typecheck', 'unit-related'];
 /** 2-4-3: a refactor is judged by lint / typecheck locally; the full suite runs in the PR's CI. */
 export const REFACTOR_DEFAULT_GATES = ['lint', 'typecheck'];
+/**
+ * `typecheck` reads tsconfig.json only, whose `lib` is wider than the server build's
+ * (#4135: `isWellFormed` passed it and failed CI's Build). Measured 3.3-3.7s against
+ * typecheck's 24s at load 30-41, so it goes into the default instead of a new gate.
+ */
+export const SERVER_BUILD_GATE = 'build-server';
 export const UNIT_RELATED_GATE = {
   id: 'unit-related',
   command: 'node scripts/run-related-unit-tests.mjs --base origin/develop',
@@ -122,6 +128,13 @@ const SCOPE_COMPANIONS = [
 ];
 
 /** Whether the scope reaches `tests/fixtures/` (the scanning tests have to be told about a new fixture, #4000). */
+/** Whether a scope pattern reaches what `npm run build:server` compiles or is configured by (#4135). */
+export function touchesServerBuild(scope) {
+  return scope.some(
+    (pattern) => pattern.startsWith('src/') || ['server.ts', 'tsconfig.server.json', 'tsconfig.base.json'].includes(pattern)
+  );
+}
+
 export function touchesFixtures(scope) {
   return scope.some((pattern) => pattern === 'tests/fixtures' || pattern.startsWith('tests/fixtures/'));
 }
@@ -260,6 +273,10 @@ export function normalizeConfig(raw, options = {}) {
     if (scope.includes(shared)) problems.push(`scope: ${shared} is shared — the worker writes a fragment instead (2-4-1)`);
   }
   const asWritten = [...scope];
+  // Only a default grows: a list written out runs as written, and a refactor keeps its two gates (2-4-3).
+  if (raw.gates === undefined && kindName !== 'refactor' && touchesServerBuild(asWritten)) {
+    gates.splice(gates.indexOf('typecheck') + 1, 0, SERVER_BUILD_GATE);
+  }
   for (const companion of SCOPE_COMPANIONS) {
     if (companion.when(asWritten) && !scope.includes(companion.file)) scope.push(companion.file);
   }
@@ -533,7 +550,12 @@ function fill(template, values) {
     .join('\n');
 }
 
-/** Render the goal text from the templates. Throws when it exceeds MAX_GOAL_LENGTH. */
+/**
+ * Render the goal text from the templates. Throws when it exceeds MAX_GOAL_LENGTH.
+ * No newline is added after the check: the parser counts the decoded YAML string (#4135).
+ *
+ * @returns {string}
+ */
 export function renderGoal(config) {
   const decisions =
     config.decisions.length === 0
@@ -579,7 +601,7 @@ export function renderGoal(config) {
       `goal: ${goal.length} characters exceeds ${MAX_GOAL_LENGTH} — shorten issueBody or decisions`,
     ]);
   }
-  return `${goal}\n`;
+  return goal;
 }
 
 /** The contract as a plain object, in the key order of docs/design/task-contract.md. */
