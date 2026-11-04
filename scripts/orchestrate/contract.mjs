@@ -170,11 +170,15 @@ function positionsAfter(segments, directory) {
   return [...reached];
 }
 
-/** Whether every path under src/cli/types/ is admitted: nothing narrower than `**`, or a single `*`, follows it. */
+/**
+ * Whether every path under src/cli/types/ is admitted, the files directly in it included: only `**`
+ * follows, or one last `*` (which also admits what is beneath a directory it matches).
+ * `src/cli/types/*\/**` does not hold it: a `**` after a `*` needs a segment of its own.
+ */
 function holdsCliTypes(segments) {
   return positionsAfter(segments, CLI_TYPES_ROOT).some((at) => {
     const rest = segments.slice(at);
-    return rest.slice(rest[0] === '*' ? 1 : 0).every((segment) => GLOBSTAR.test(segment));
+    return rest.every((segment) => GLOBSTAR.test(segment)) || (rest.length === 1 && rest[0] === '*');
   });
 }
 

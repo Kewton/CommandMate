@@ -487,8 +487,9 @@ export function main(argv, deps = {}) {
         // The HEAD being waited for was refreshed on the base as it was then (step 4). Read after the
         // checks, so nothing of the base goes unread between the last green answer and the merge:
         // --match-head-commit pins the PR's head, not the base. A rerun is not sent for a stale HEAD either.
+        // Asked of `head`, the SHA that merge names: the worktree's HEAD can move on its own during the wait.
         baseUnread = run('git', ['-C', o.worktree, 'fetch', 'origin', o.base]).status !== 0;
-        if (!baseUnread && run('git', ['-C', o.worktree, 'merge-base', '--is-ancestor', baseRef, 'HEAD']).status !== 0) {
+        if (!baseUnread && run('git', ['-C', o.worktree, 'merge-base', '--is-ancestor', baseRef, head]).status !== 0) {
           record('merge', 'fail', head, `pr=#${pr.number} base-moved`, workHead);
           error(`merge #${issue}: ${baseRef} moved during the CI wait — not merged; run again to refresh ${head.slice(0, 7)} on it (6-2)`);
           return BASE_MOVED_EXIT;

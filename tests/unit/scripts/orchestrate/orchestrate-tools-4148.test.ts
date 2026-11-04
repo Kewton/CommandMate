@@ -235,6 +235,37 @@ describe('item 3: src/cli/types/** を対で入れる', () => {
     });
   });
 
+  describe('what holds src/cli/types/ means: every path under it, the files directly in it included', () => {
+    const UNDER = ['src/cli/types/api-responses.ts', 'src/cli/types/new.json', 'src/cli/types/sub/a.ts'];
+    const admitted = (pattern: string) => UNDER.filter((file) => !new ScopeMatcher({ allow: [pattern], deny: [] }).isViolation(file));
+
+    it.each([
+      ['src/cli/types/*/**', ['src/cli/types/sub/a.ts']],
+      ['src/*/types/*/**', ['src/cli/types/sub/a.ts']],
+      ['**/types/*/**', ['src/cli/types/sub/a.ts']],
+      ['src/cli/types/sub/**', ['src/cli/types/sub/a.ts']],
+      ['src/cli/types/*/*', ['src/cli/types/sub/a.ts']],
+      ['src/cli/types/**/*/**', ['src/cli/types/sub/a.ts']],
+      ['src/cli/types/*.ts', ['src/cli/types/api-responses.ts']],
+    ])('%s does not: the companion is still added beside an API route (positive control)', (pattern, admits) => {
+      expect(admitted(pattern)).toEqual(admits);
+      expect(scopeOf(['src/app/api/roles/**', pattern])).toContain(CLI_TYPES);
+    });
+
+    it.each(['src/cli/types', 'src/cli/types/', 'src/cli/types/**', 'src/cli/types/*', 'src/cli/types/**/*', 'src/cli/types/**/**', 'src/cli/*', 'src/cli/*/**', 'src/*/*/**', 'src/*/types/**', '**/types/**', '**/*/**', '**/*', '**', 'src/**'])(
+      '%s does: nothing is added (negative control)',
+      (pattern) => {
+        expect(admitted(pattern)).toEqual(UNDER);
+        // The route, the pattern and the fragment: `toContain` would trip on src/cli/types/** as written.
+        expect(scopeOf(['src/app/api/roles/**', pattern])).toHaveLength(3);
+      }
+    );
+
+    it('src/cli/types/*/** alone is neither a route nor CLI code outside the types, so nothing is added', () => {
+      expect(scopeOf(['src/cli/types/*/**'])).not.toContain(CLI_TYPES);
+    });
+  });
+
   describe('a pattern that cannot be judged', () => {
     const tooWide = `{a,b}${'{c,d}'.repeat(10)}/**`;
     const configOf = (scope: string[]) => normalizeConfig({ issue: 7, title: 't', kind: 'feature', agent: 'claude', model: 'opus', scope });
@@ -361,6 +392,29 @@ describe('item 4: merge-pr の待機', () => {
       expect(runMain(run).code).toBe(0);
       // Step 4's fetch, the first look, the second look. The merge follows a fetch that follows a read.
       expect(order).toEqual(['fetch', 'checks', 'fetch-failed', 'checks', 'fetch', 'merge']);
+    });
+
+    it('judges the SHA it merges, not a worktree HEAD that took in develop during the wait (positive control)', () => {
+      ready();
+      const fake = fakeGit({ prs: [openPr()], checks: [GREEN] });
+      let tookIn = false;
+      const seen: string[] = [];
+      const run: Run = (command, args, opts) => {
+        if (command === 'git' && args[2] === 'merge-base' && tookIn) {
+          const commit = args.at(-1) as string;
+          seen.push(commit);
+          // develop moved and only the worktree merged it: its HEAD has develop, the pushed SHA does not.
+          return commit === 'HEAD' ? { status: 0, stdout: '', stderr: '' } : { status: 1, stdout: '', stderr: '' };
+        }
+        const answer = fake.run(command, args, opts);
+        if (command === 'gh' && args[0] === 'pr' && args[1] === 'checks') tookIn = true;
+        return answer;
+      };
+      const { code, err } = runMain(run);
+      expect(code).toBe(4);
+      expect(err).toContain('moved during the CI wait');
+      expect(seen).toEqual([HEAD_A]);
+      expect(fake.ghCalls('pr merge')).toHaveLength(0);
     });
 
     it('stops on the first look too: the precheck and the push take time', () => {
