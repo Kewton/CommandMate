@@ -109,7 +109,7 @@
 |---|---|---|---|---|---|
 | **本文 fingerprint** | ロールの本文の UTF-8 バイト列だけ | #4114 の解決関数 | `ResolvedRole`、起動の記録 | 起動の記録の本文 fingerprint | 「本文が変わった」の表示と、注入 fingerprint の入力。**起動前の検査と再起動待ちの判定には直接使わない** |
 | **注入 fingerprint** | adapter の ID と版、wrapper の版、本文 fingerprint、合成の入力（Codex の既存の `developer_instructions`、V2 の実効 agent、明示 `agent`）。ロール名、role ID、継承元、パス、利用者の env の他のキーは入れない | #4115 の純粋な変換処理 | effectiveNext、`requested`、`launched` | effectiveNext と `launched` の差、同時起動どうし、実入力の直前の確認 | 再起動待ち、起動の合流の可否、`send --role` の条件。生成物の名前のハッシュ |
-| **生成物 fingerprint** | 生成するファイルの全バイト（Codex の TOML、Command Code の mod、Copilot / Antigravity の frontmatter つき定義、V1 / V2 の本文ファイル） | #4114 の書き込み処理が、書く前のバイト列で | 起動の記録 | 同名の既存ファイル、起動直前に読み直したファイル | 再利用か拒否か、起動前の検査 1 |
+| **生成物 fingerprint** | 生成するファイルの全バイト（Codex の TOML、Command Code の mod、Copilot / Antigravity の frontmatter つき定義、V1 / V2 の本文ファイル） | #4114 の書き込み処理が、書く前のバイト列で | 起動の記録 | 同名の既存ファイル、起動直前に読み直したファイル（Codex は全バイトが違うとき、`developer_instructions` から作り直した内容。#4136） | 再利用か拒否か、起動前の検査 1 |
 
 - **生成物の名前は注入 fingerprint から作る**（`cm-role-<namespace>-<role ID>-<注入 fingerprint の先頭>`）。生成物 fingerprint を名前に使うと、名前を含む frontmatter との間で循環する。
 - 本文が同じでも、合成の入力や adapter・wrapper の版が変われば、注入 fingerprint も生成物も変わる。これは正しい動きで、起動は拒否しない。
@@ -118,13 +118,13 @@
 - 合成後の `OPENCODE_CONFIG_CONTENT` のファイル（§7.1）は秘密を含みうる起動ごとのファイルで、生成物に数えず、ハッシュも記録しない。
 - **ここまでは設計で、実装が無いので未実測。**
 
-**生成物。** 不変で、注入 fingerprint ごとに別の名前。親 0700、ファイル 0600。新規排他作成か一時ファイルからの rename で公開する。同名の既存ファイルは、生成物 fingerprint が同じなら再利用し、違えば拒否する。symlink を辿らない。worktree に置かない。ホーム解決は既存の resolver を使う（`CODEX_HOME`、`COPILOT_HOME`）。削除しない（#4112）。
+**生成物。** 不変で、注入 fingerprint ごとに別の名前。親 0700、ファイル 0600。新規排他作成か一時ファイルからの rename で公開する。同名の既存ファイルは、生成物 fingerprint が同じなら再利用し、違えば拒否する（Codex の例外は §6.2。Codex 自身がプロファイルへ書くため）。symlink を辿らない。worktree に置かない。ホーム解決は既存の resolver を使う（`CODEX_HOME`、`COPILOT_HOME`）。削除しない（#4112）。
 
 **本文を起動行に出さない。** 起動行はパスと ID だけ。Antigravity を除く 6 adapter で実際にこの形で動かした（`{file:}` は V2 2.0.18 で動いた）。Antigravity は `--agent` だけの形で、モデルまでは未確認。利用者の `OPENCODE_CONFIG_CONTENT` と合成するときは §7.1 の注意を守る。
 
 **起動前の検査（必須）。** 次を確かめ、失敗したら本文を送らず起動失敗にする。CLI に任せない（§8）。
 
-1. 生成物が在り、読め、読み直したバイト列のハッシュが、書き込み処理の返した**生成物 fingerprint** と一致する。本文 fingerprint とは比べない（合成があるので一致しない）
+1. 生成物が在り、読め、読み直したバイト列のハッシュが、書き込み処理の返した**生成物 fingerprint** と一致する。Codex は全バイトが違えば、`developer_instructions` の値から作り直した内容のハッシュで比べる（§6.2）。本文 fingerprint とは比べない（合成があるので一致しない）
 2. 形式の検査（Codex は TOML を読み直す。Command Code は構文の確認。Copilot / Antigravity は frontmatter を読み直す。V1 / V2 は JSON を読み直す）
 3. 本文が空なら「ロールなし」扱いにせず拒否する（Claude は空ファイルで素のまま動いた）
 
@@ -173,6 +173,7 @@
   - `-p a -p b` は **exit 2**（`cannot be used multiple times`）。
   - **未決事項の結論:** CommandMate の起動行に `-p` は無いので、合成すべきは `config.toml` の `developer_instructions` だけ。既存プロファイルを使いたい利用者には、`<name>.config.toml` と `developer_instructions` を合成した生成物で両立できることを確認した（`merged-generated-profile`: モデルと両方の本文が残る）。ラッパーが `-p` を足す運用は exit 2 で起動失敗になるので気づける。`-c developer_instructions=…` でも両立するが本文が argv に出るので不採用。`model_instructions_file` は置換なので不採用。TOML の読み書きは新規の依存が要る（現在の依存に TOML は無い）。
 - **再開:** `resume --last` では旧本文を保持（§3）。CommandMate は再開しない。
+- **Codex が書き込む（#4136）:** `-p` で起動すると、フォルダの信頼は `config.toml` ではなくプロファイルに保存される（`[projects."<path>"]`、0.166.0 で実測）。CommandMate は書き戻さず、Codex の生成物に限り `developer_instructions` の一致で判定する。信頼はこのプロファイルに閉じるので、別のロールやロールなしのセッション、本文を変えた後の新しい版では再度訊かれる。
 - **失敗時:** **未知のプロファイル → 素のまま動く（TUI は対照との画面の差なし、`exec` は exit 0）**。不正な TOML → exit 1（行番号つき）。読めない → exit 1。
 
 | 項目 | 記録 |
