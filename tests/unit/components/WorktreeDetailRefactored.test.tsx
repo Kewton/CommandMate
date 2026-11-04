@@ -1105,6 +1105,37 @@ describe('WorktreeDetailRefactored', () => {
       });
     }
 
+    /**
+     * Wait until the fetches of what has happened so far are over, so that what a test
+     * sees after `mockClear()` is caused by what it does next.
+     *
+     * `desktop-layout` showing does not mean that. The layout mounts the splits, whose
+     * own `/current-output` is still on its way. Its answer moves `SplitRoleStatus`'s
+     * `refreshKey`, and that reads `/instances/roles` again: after the clear when the
+     * machine is busy, which failed `not.toHaveBeenCalled()` here and could satisfy a
+     * `toHaveBeenCalled()` with no recovery at all.
+     *
+     * Counted in rounds rather than as one long wait: a starved process can wake from a
+     * single timer before the work queued ahead of it has run, and it cannot do that
+     * several times over. Each round is an `act`, so a pending render and its effects
+     * have run by the time the count is read.
+     */
+    async function settleFetches(): Promise<void> {
+      const QUIET_ROUNDS = 5;
+      const ROUND_MS = 20;
+      let lastCount = -1;
+      let quietRounds = 0;
+      while (quietRounds < QUIET_ROUNDS) {
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, ROUND_MS));
+        });
+        const count = mockFetch.mock.calls.length;
+        const unanswered = mockFetch.mock.settledResults.some((result) => result.type === 'incomplete');
+        quietRounds = count === lastCount && !unanswered ? quietRounds + 1 : 0;
+        lastCount = count;
+      }
+    }
+
     afterEach(() => {
       // Restore original visibilityState
       if (visibilityStateSpy) {
@@ -1130,6 +1161,7 @@ describe('WorktreeDetailRefactored', () => {
       });
 
       // Clear fetch call history after initial load
+      await settleFetches();
       mockFetch.mockClear();
 
       // Set visible state and dispatch visibilitychange event
@@ -1215,6 +1247,7 @@ describe('WorktreeDetailRefactored', () => {
       });
 
       // Clear fetch call history after initial load
+      await settleFetches();
       mockFetch.mockClear();
 
       // Set hidden state and dispatch visibilitychange event
@@ -1227,6 +1260,36 @@ describe('WorktreeDetailRefactored', () => {
       await new Promise((resolve) => setTimeout(resolve, 100));
 
       // No fetch calls should have been made
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('TC-3b: the same with a slow /current-output, whose answer moves the role status key', async () => {
+      const answerNow = mockFetch.getMockImplementation()!;
+      mockFetch.mockImplementation(async (url: string) => {
+        if (url.includes('/current-output')) {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+        }
+        return answerNow(url);
+      });
+
+      render(<WorktreeDetailRefactored worktreeId="test-worktree-123" />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('desktop-layout')).toBeInTheDocument();
+      });
+
+      await settleFetches();
+      mockFetch.mockClear();
+
+      setVisibilityState('hidden');
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      });
+
       expect(mockFetch).not.toHaveBeenCalled();
     });
 
@@ -1245,6 +1308,7 @@ describe('WorktreeDetailRefactored', () => {
       });
 
       // Clear fetch call history after initial load
+      await settleFetches();
       mockFetch.mockClear();
 
       // --- 1st visibilitychange: should trigger fetch ---
@@ -1258,6 +1322,7 @@ describe('WorktreeDetailRefactored', () => {
       });
 
       // --- 2nd visibilitychange at +2s: should be throttled (within 5s window) ---
+      await settleFetches();
       mockFetch.mockClear();
       currentTime += 2000;
 
@@ -1288,6 +1353,7 @@ describe('WorktreeDetailRefactored', () => {
 
       // --- 3rd visibilitychange at +6s total: should trigger fetch (past 5s window) ---
       currentTime += 4000;
+      await settleFetches();
       mockFetch.mockClear();
 
       await act(async () => {
@@ -1317,6 +1383,7 @@ describe('WorktreeDetailRefactored', () => {
       expect(screen.queryByText(/loading worktree/i)).not.toBeInTheDocument();
 
       // Clear fetch call history after initial load
+      await settleFetches();
       mockFetch.mockClear();
 
       // Dispatch visibilitychange event
@@ -1347,6 +1414,7 @@ describe('WorktreeDetailRefactored', () => {
       });
 
       // Clear fetch call history after initial load
+      await settleFetches();
       mockFetch.mockClear();
 
       // Dispatch visibilitychange event
