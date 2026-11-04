@@ -44,6 +44,30 @@ function isFooterRow(line: string): boolean {
   return FOOTER_ROWS.some((pattern) => pattern.test(line));
 }
 
+/** Why a pane is not ready, as far as the rows say (Issue #4146). */
+export type VibeLocalNotReadyScreen = 'no-input-row' | 'input-row-holds-text' | 'output-below-input-row';
+
+/**
+ * Which rows kept {@link isVibeLocalComposerReady} from saying yes. Only for the
+ * refusal `send` reports: it decides nothing, and a turn being generated is the
+ * caller's to have ruled out.
+ *
+ * @param output - Raw `capture-pane` output (ANSI escapes allowed)
+ */
+export function readVibeLocalNotReadyScreen(output: string): VibeLocalNotReadyScreen {
+  const lines = stripAnsi(output).split('\n');
+  let promptRow = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (PROMPT_ROW.test(lines[i])) {
+      promptRow = i;
+      break;
+    }
+  }
+  if (promptRow < 0) return 'no-input-row';
+  const outputBelow = lines.slice(promptRow + 1).some((line) => line.trim() !== '' && !isFooterRow(line));
+  return outputBelow ? 'output-below-input-row' : 'input-row-holds-text';
+}
+
 /**
  * @param output - Raw `capture-pane` output (ANSI escapes allowed)
  * @returns true when the newest prompt row is empty and only the footer is

@@ -31,7 +31,13 @@ import {
 } from '@/config/cli-tool-timing-config';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 import { getErrorMessage } from '@/lib/errors';
-import { decideLaunchDialog, GEMINI_TRUST_LAUNCH_DIALOG, launchDialogWarning } from './launch-dialog';
+import {
+  decideLaunchDialog,
+  GEMINI_TRUST_LAUNCH_DIALOG,
+  isLaunchDialogOpen,
+  launchDialogWarning,
+} from './launch-dialog';
+import { detectSessionStatus, isGeneratingStatus } from '../detection/status-detector';
 import { beginLaunchWindow, endLaunchWindow, recordLaunchDialogPress } from './launch-window';
 import {
   answerUnderInstanceInputLock,
@@ -69,6 +75,29 @@ const GEMINI_TRUST_SETTLE_MS = 5000;
 
 /** Timeout for waiting for prompt before sending a message */
 const GEMINI_PROMPT_WAIT_TIMEOUT_MS = 15000;
+
+/** The sign-in picker a new HOME gets after the trust restart (`tests/fixtures/gemini-live-3776/after-enter-auth.txt`). */
+const GEMINI_AUTH_PICKER_ROW = /^[\s│]*How would you like to authenticate\b/m;
+
+/**
+ * What held the pane when the wait for the prompt ran out (Issue #4146), for the
+ * refusal `send` reports. Names the screen only: nothing captured goes into it.
+ *
+ * @param output - The last capture with ANSI stripped; null when the last read failed
+ */
+function describeGeminiPaneHold(output: string | null): string {
+  if (output === null) return 'the pane could not be read';
+  if (isLaunchDialogOpen(GEMINI_TRUST_LAUNCH_DIALOG, output)) {
+    return 'the folder-trust dialog is open: answer it in the terminal';
+  }
+  if (GEMINI_AUTH_PICKER_ROW.test(output)) {
+    return 'the sign-in picker is open: answer it in the terminal';
+  }
+  const status = detectSessionStatus(output, 'gemini');
+  if (status.hasActivePrompt) return 'a prompt dialog is open: answer it in the terminal';
+  if (isGeneratingStatus(status)) return 'a turn is still being generated';
+  return 'no input prompt on the pane: gemini may still be starting';
+}
 
 /**
  * Gemini CLI tool implementation
@@ -257,15 +286,18 @@ export class GeminiTool extends BaseCLITool {
   private async waitForPrompt(sessionName: string): Promise<void> {
     const startTime = Date.now();
     const pollInterval = 500;
+    let lastOutput: string | null = null;
     while (Date.now() - startTime < GEMINI_PROMPT_WAIT_TIMEOUT_MS) {
       try {
         const rawOutput = await capturePane(sessionName, GEMINI_PANE_HEIGHT);
         const output = stripAnsi(rawOutput);
+        lastOutput = output;
         if (GEMINI_PROMPT_PATTERN.test(output)) {
           return;
         }
       } catch (error: unknown) {
         // Capture may fail - continue polling
+        lastOutput = null;
         logger.debug('gemini-prompt-capture-failed', { sessionName, error: getErrorMessage(error) });
       }
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
@@ -274,7 +306,7 @@ export class GeminiTool extends BaseCLITool {
     // body into whatever held the pane (a dialog, a slow start, a shell).
     logger.info('gemini-prompt-not-detected');
     throw new Error(
-      'Gemini prompt not ready: timed out waiting for the input prompt before sending'
+      `Gemini prompt not ready: timed out waiting for the input prompt before sending (${describeGeminiPaneHold(lastOutput)})`
     );
   }
 

@@ -301,8 +301,9 @@ const ENV_SNAPSHOT_ONLY = ['src/lib/verification/env-snapshot.ts'] as const;
 const ROLE_PANE_ENV_ONLY = ['src/lib/agent-roles/pane-env.ts'];
 
 const ENV_SNAPSHOT_REASON =
-  'reaches tmux only through the env-clean snapshot, which runs `list-sessions` to count ' +
-  'session names before and after a run; it never addresses a session';
+  'reaches tmux only through the env-clean snapshot\'s `list-sessions`, which reads session ' +
+  'names: to count them before and after a run, and for POST /tasks to warn when a session of ' +
+  'that name is running with no evidence of its role (#4132); it never addresses a session';
 
 const EXEMPT: readonly Exemption[] = [
   {

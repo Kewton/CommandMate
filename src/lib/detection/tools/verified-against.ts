@@ -268,6 +268,22 @@ export interface VerifiedAgainstStamp {
 /**
  * Tool id → the build its rules were measured against.
  *
+ * ## Reviewed by Issue #4146: no stamp moved
+ *
+ * Newer builds have been captured since, but only part of a screen set, and a
+ * stamp moves when the set is re-captured and read (see #2818, #2868, #2773).
+ *
+ *  - codex 0.166.0 (`tests/fixtures/codex-dialogs-0166/`): launch screens and the
+ *    idle composer. 未確認: the command approval, `/model`, and a running turn.
+ *  - opencode 1.18.35 (`tests/fixtures/opencode-live-4134/`): one finished turn.
+ *    未確認: the other four states the canary covers.
+ *  - claude 2.1.318 (`tests/fixtures/claude-auto-default-nudge-4134/`): one dialog.
+ *    未確認: everything else on that build.
+ *  - gemini and vibe-local have measured frames (a trust dialog; four readiness
+ *    screens) but no status rules read off them, so they stay `unmeasured`.
+ *
+ * `tests/unit/detection/tools/verified-against-4146.test.ts` keeps this list honest.
+ *
  * Keyed by the catalog / `CLIToolType` id, not by executable name: antigravity's
  * binary is `agy` (DR2-023), and that mapping belongs to the probe table, not
  * here.
