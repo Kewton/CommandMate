@@ -58,13 +58,45 @@ done
   設定の書き換えも再送もせずに exit 42（kill API は止められないとセッションを残して 500 を返す）。人が止めてから送り直す
 - **起動の前に Auto-Yes を切る**（#3883 N7）: Auto-Yes は worktree × instance ごとに残り、セッションが無くても次のセッションの画面に答える。
   そこで起動のたびに（セッションが動いていなくても）`auto-yes <WT> --disable --instance <id>` を送り、`instances <WT> --json` の `autoYes`（状態の保存先の値）が
-  true でないことを読み返す（2 秒おきに 3 回まで）。切れたと確かめられなければ `auto-yes UNCONFIRMED …` を出し、何も書かず何も送らずに exit 43。
+  true でないことを読み返す（2 秒おきに 3 回まで）。切れたと確かめられなければ（一覧やロールが読めないときも）`auto-yes UNCONFIRMED …` を出し、何も書かず何も送らずに exit 43。
   Auto-Yes は契約の送信（`--auto-yes`）で初めて入る
 - **送信の出力**: `runs/<date>/send-<issue>[-<item>][.a<n>].out` / `.err` を呼び出しごとに排他的に取る（`execution-key.mjs`。同じ Issue の送信を並行しても、
   起動し直しても混ざらない）。起動のメッセージの出力は `send-init-<issue>[-<item>][.a<n>].out` / `.err`。stdout は task id だけ。
   起動のメッセージが exit 99（initialization timeout / prompt not ready / composer-not-empty）なら、`MODEL_READS` × `MODEL_READ_INTERVAL_SEC` の範囲で `capture --json` の model を読み、読めれば `.err` に「プロンプト到達を確認して続行」と残して契約へ進む（読めなければ従来どおり 1 回起動し直し、なお読めなければ exit 41）。99 以外の失敗はその exit code を返し、モデルは確かめない。契約の send の失敗は従来どおり
 - **単独で使うとき**: `launch-worker.mjs set-model --worktree <path> --model <opus|sonnet>`、
   `launch-worker.mjs check-model --wt <WT> --model <opus|sonnet>`（0 / 40 / 41）
+
+## 3-1 send とワーカーの起動の exit code
+
+同じ番号でも、`send` が返すときと `launch-worker.mjs send` が返すときで扱いが違う。定数は `scripts/orchestrate/launch-worker.mjs` の `EXIT_*`。
+
+### `send`（`commandmatedev send`）
+
+| exit | 名前 | 意味 | 対処 |
+|---|---|---|---|
+| 0 | | 送った | 3-2 へ |
+| 2 | `ExitCode.CONFIG_ERROR` | 引数の誤り | 呼び出しを直す |
+| 31 | `RoleExitCode.CONFLICT` | 名簿やロールが読んだ後に動いた（`roster_changed` など）。本文は打っていない。ふつうは保存もしていないが、`--contract --role` で保存の応答からツールの変更に気づいたときは、設定を保存したまま 31 を返す（出力に `roleSettings.saved: true`） | `instances <WT>` で今の名簿と設定を確かめてから送り直す |
+| 32 | `RoleExitCode.NOT_SENT` | `--role` などの条件が成り立たない、またはロールが原因で起動を断られた。本文は打っていない | ロールの状態を読み、セッションを止めて送り直す |
+| 99 | `ExitCode.UNEXPECTED_ERROR` | 送れていない（冷間起動など） | docs/orchestrate/exit-codes.md の「3-1 冷間起動の失敗」 |
+
+### `launch-worker.mjs send`
+
+| exit | 定数 | 意味 | 対処 |
+|---|---|---|---|
+| 0 | | 契約を送った（Claude はモデルの一致を確かめた後） | 3-2 へ |
+| 1 | | 起動のメッセージの後で `ready` にならなかった。セッションは止めた。契約は送っていない | 画面を読んで送り直す |
+| 2 | | 使い方の誤り、または git が無視しない設定ファイル。何も送っていない | 呼び出しか `.gitignore` を直す |
+| 31 | `EXIT_ROLE_CONFLICT` | send の 31 をそのまま返す。名簿が動いた。契約は送っていない。セッションは止めず、次の起動が止める | 名簿を読み直し、同じ呼び出しで送り直す |
+| 32 | `EXIT_ROLE_NOT_SENT` | send の 32 をそのまま返すのは、`--model -` の直接送信・起動のメッセージで断られたとき・起動時のロールの記録が無いツールのとき。本文は打っていない | `send-*.err` を読み、ロールを確かめて送り直す |
+| 40 | `EXIT_MODEL_MISMATCH` | 起動し直しても別のモデル。止めた。契約は送っていない | 本体 3-1。人の判断で送り直す |
+| 41 | `EXIT_MODEL_UNKNOWN` | 起動し直してもモデルが読めない。止めた。契約は送っていない | 本体 3-1。人の判断で送り直す |
+| 42 | `EXIT_STOP_UNCONFIRMED` | `stop UNCONFIRMED`。止めたと確かめられない。40・41・44 や `ready` にならないときの停止で確かめられないときもこれになる | 何も送り直さない。人が止めたことを確かめてから送り直す |
+| 43 | `EXIT_AUTO_YES_UNCONFIRMED` | `auto-yes UNCONFIRMED`。Auto-Yes を切れたと確かめられない。`--disable` の失敗・読み返しで on のほか、インスタンスの一覧やロールの読み取りの失敗、一覧にインスタンスが無いときも含む。何も送っていない | `.err` の理由を読み、`auto-yes --disable` と `instances --json` を確かめて送り直す |
+| 44 | `EXIT_ROLE_CHANGED` | 起動のメッセージで固定したロールが保てない。止めた。契約は送っていない。理由は 3 つ: `ready` を待つ間に世代か指紋が変わった／ロールのあるサーバーに起動の記録が無い（再起動など）／契約の送信が send の 32 で断られた（止めたと確かめられなければ 42） | ロールの設定が意図どおりかを確かめ、同じ呼び出しで送り直す（新しいセッションが今の設定で起動する） |
+| それ以外 | | send の戻り値をそのまま返す（99 など） | 上の `send` の表 |
+
+**`--model -` の直接送信**（Antigravity）は、モデルの確認も停止も Auto-Yes の切断も行わないので 40〜44 を返さず、send の戻り値をそのまま返す。31 / 32 もそのまま。
 
 ## 3-2 monitor の起動と読み方
 

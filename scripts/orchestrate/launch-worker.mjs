@@ -51,12 +51,13 @@
  * contract went out); 40 the model did not match after one restart; 41 the
  * model could not be read after one restart (the session is stopped and the
  * contract not sent in both); 42 a stop could not be confirmed (nothing more
- * sent); 43 Auto-Yes could not be confirmed off before the start (nothing
- * sent); 44 the role fixed at the starting message no longer holds (stopped, not
+ * sent); 43 Auto-Yes could not be confirmed off before the start, which includes
+ * an instance list or roles that could not be read (nothing sent); 44 the role fixed at the starting message no longer holds (stopped, not
  * sent); 2 a usage error or a settings file git does not ignore (nothing
  * sent); 1 any other failure (the session did not come back ready after the
  * starting message: stopped, contract not sent); otherwise the `send`'s own
- * exit code (99 = not sent, 3-1's cold start).
+ * exit code (99 = not sent, 3-1's cold start; 31 / 32, see
+ * docs/orchestrate/workers.md "3-1 send とワーカーの起動の exit code").
  *
  * Usage:
  *   node scripts/orchestrate/launch-worker.mjs send --run-dir <dir> --issue <N> [--item <work item>]
