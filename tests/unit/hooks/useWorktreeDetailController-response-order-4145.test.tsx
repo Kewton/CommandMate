@@ -7,6 +7,10 @@
  * before this Issue. Negative controls: answers in order, reads made after a save, a
  * newer failed request and visible ticks all behave as they did.
  *
+ * An operation of worktree A that finishes after the switch to B changes nothing of B.
+ * The screen is one controller instance with a new id (page.tsx sets no key), so what A
+ * captured is still running, and a save's generation or a read's sequence is shared.
+ *
  * @vitest-environment jsdom
  */
 
@@ -72,11 +76,19 @@ interface Stub {
   details: Array<(reply: Response) => void>;
   /** Likewise `/current-output`, when `holdOutput` is on. */
   outputs: Array<(reply: Response) => void>;
+  /** Likewise the kill and the Auto-Yes POST, when held. */
+  kills: Array<(reply: Response) => void>;
+  autoYesPosts: Array<(reply: Response) => void>;
   calls: string[];
 }
 
-function stubFetch(options: { holdOutput?: boolean; autoYesInstances?: Record<string, unknown> } = {}): Stub {
-  const stub: Stub = { details: [], outputs: [], calls: [] };
+function stubFetch(options: {
+  holdOutput?: boolean;
+  holdKill?: boolean;
+  holdAutoYesPost?: boolean;
+  autoYesInstances?: Record<string, unknown>;
+} = {}): Stub {
+  const stub: Stub = { details: [], outputs: [], kills: [], autoYesPosts: [], calls: [] };
   global.fetch = vi.fn((input: unknown, init?: RequestInit) => {
     const url = String(input);
     stub.calls.push(url);
@@ -85,9 +97,15 @@ function stubFetch(options: { holdOutput?: boolean; autoYesInstances?: Record<st
       return Promise.resolve(jsonReply(200, { isRunning: false }));
     }
     if (url.includes('/messages')) return Promise.resolve(jsonReply(200, []));
-    if (url.includes('/kill-session')) return Promise.resolve(jsonReply(200, { success: true, message: 'ok' }));
+    if (url.includes('/kill-session')) {
+      if (options.holdKill) return new Promise<Response>((resolve) => stub.kills.push(resolve));
+      return Promise.resolve(jsonReply(200, { success: true, message: 'ok' }));
+    }
     if (url.includes('/auto-yes')) {
-      if (init?.method === 'POST') return Promise.resolve(jsonReply(200, { enabled: true, expiresAt: 123 }));
+      if (init?.method === 'POST') {
+        if (options.holdAutoYesPost) return new Promise<Response>((resolve) => stub.autoYesPosts.push(resolve));
+        return Promise.resolve(jsonReply(200, { enabled: true, expiresAt: 123 }));
+      }
       return Promise.resolve(jsonReply(200, { instances: options.autoYesInstances ?? {} }));
     }
     if (/\/api\/worktrees\/[^/?]+$/.test(url)) {
@@ -132,6 +150,8 @@ const answer = (hook: Hook, index: number, reply: Response): Promise<void> =>
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  // A roster answer moves the active instance, and that is saved per worktree.
+  window.localStorage.clear();
 });
 
 describe('[#4145] what the detail poll carries beside the roster', () => {
@@ -304,6 +324,253 @@ describe('[#4145] a current-output answer from before a local change', () => {
     const hook = await mounted({ holdOutput: true });
     await settle(hook.stub.outputs[0], jsonReply(200, promptAnswer));
     expect(hook.result.current.state.prompt.visible).toBe(true);
+  });
+});
+
+describe('[#4145] an operation from before a worktree switch, finishing after it', () => {
+  const OK = { success: true, message: 'ok' };
+  const promptAnswer = {
+    isRunning: true,
+    isPromptWaiting: true,
+    promptData: { type: 'yes_no', question: 'Continue?', options: ['yes', 'no'], status: 'pending' },
+  };
+  const askedForA = (hook: Hook, part: string) =>
+    hook.stub.calls.filter((url) => url.includes(`/api/worktrees/${WORKTREE_ID}${part}`));
+
+  /** On A, answered, then moved to B with B's GET still unanswered. Returns that GET's index. */
+  async function switched(hook: Hook, beforeSwitch: () => void = () => {}): Promise<number> {
+    await answer(hook, 0, jsonReply(200, worktreeBody({ name: 'A' })));
+    beforeSwitch();
+    const before = hook.stub.details.length;
+    hook.rerender({ worktreeId: OTHER_WORKTREE_ID });
+    await waitFor(() => expect(hook.stub.details.length).toBe(before + 1));
+    return before;
+  }
+  const answerB = (hook: Hook, index: number, overrides: Record<string, unknown> = {}) =>
+    answer(hook, index, jsonReply(200, worktreeBody({ name: 'B', ...overrides }, OTHER_WORKTREE_ID)));
+
+  it("A's Info save answered after the switch: not on B's screen, and B's read is not thrown away", async () => {
+    const hook = await mounted();
+    const forB = await switched(hook);
+    act(() => hook.result.current.setWorktree(worktreeBody({ name: 'A saved' }) as Worktree));
+    expect(hook.result.current.worktree?.name).not.toBe('A saved');
+    await answerB(hook, forB);
+    expect(hook.result.current.worktree?.id).toBe(OTHER_WORKTREE_ID);
+    expect(hook.result.current.worktree?.name).toBe('B');
+  });
+
+  it("A's vibe-local save answered after the switch: B's read decides", async () => {
+    const hook = await mounted();
+    let saveModelForA = hook.result.current.handleVibeLocalModelChange;
+    let saveWindowForA = hook.result.current.handleVibeLocalContextWindowChange;
+    const forB = await switched(hook, () => {
+      saveModelForA = hook.result.current.handleVibeLocalModelChange;
+      saveWindowForA = hook.result.current.handleVibeLocalContextWindowChange;
+    });
+    act(() => {
+      saveModelForA('A-model');
+      saveWindowForA(1);
+    });
+    expect(hook.result.current.vibeLocalModel).not.toBe('A-model');
+    await answerB(hook, forB, { vibeLocalModel: 'B-model', vibeLocalContextWindow: 2 });
+    expect(hook.result.current.vibeLocalModel).toBe('B-model');
+    expect(hook.result.current.vibeLocalContextWindow).toBe(2);
+  });
+
+  it("A's roster save answered after the switch: not on B's screen, and B's read is not thrown away", async () => {
+    const hook = await mounted();
+    let saveRosterForA = hook.result.current.handleAgentInstancesChange;
+    const forB = await switched(hook, () => {
+      saveRosterForA = hook.result.current.handleAgentInstancesChange;
+    });
+    act(() => saveRosterForA([{ id: 'a-only', cliTool: 'claude', alias: 'A only', order: 0 }]));
+    expect(hook.result.current.agentInstances.map((row) => row.id)).not.toContain('a-only');
+    await answerB(hook, forB, { agentInstances: [{ id: 'b-only', cliTool: 'codex', alias: 'B only', order: 0 }] });
+    expect(hook.result.current.agentInstances.map((row) => row.id)).toEqual(['b-only']);
+  });
+
+  it("A's kill sent, then the switch: B's prompt and B's own kill dialog stay, no GET for A", async () => {
+    const hook = await mounted({ holdOutput: true, holdKill: true });
+    await answer(hook, 0, jsonReply(200, worktreeBody({ name: 'A' })));
+    act(() => hook.result.current.openActiveKillConfirm());
+    let killing: Promise<void> = Promise.resolve();
+    await act(async () => {
+      killing = hook.result.current.handleKillConfirm();
+      await new Promise((done) => setTimeout(done, 0));
+    });
+    expect(hook.stub.kills).toHaveLength(1);
+
+    const before = hook.stub.details.length;
+    hook.rerender({ worktreeId: OTHER_WORKTREE_ID });
+    await waitFor(() => expect(hook.stub.details.length).toBe(before + 1));
+    await answerB(hook, before);
+    await settle(hook.stub.outputs[hook.stub.outputs.length - 1], jsonReply(200, promptAnswer));
+    act(() => hook.result.current.openActiveKillConfirm());
+    const askedAfterSwitch = hook.stub.details.length;
+    hook.stub.calls.length = 0;
+
+    await act(async () => {
+      hook.stub.kills[0](jsonReply(200, OK));
+      await killing;
+    });
+    expect(hook.result.current.state.prompt.visible).toBe(true);
+    expect(hook.stub.details.length).toBe(askedAfterSwitch);
+    expect(askedForA(hook, '')).toEqual([]);
+    expect(hook.result.current.worktree?.id).toBe(OTHER_WORKTREE_ID);
+    expect(hook.result.current.killTarget).not.toBeNull();
+  });
+
+  it("A's kill refused after the switch: nothing is left to retry against B", async () => {
+    const hook = await mounted({ holdKill: true });
+    await answer(hook, 0, jsonReply(200, worktreeBody({ name: 'A' })));
+    act(() => hook.result.current.openActiveKillConfirm());
+    let killing: Promise<void> = Promise.resolve();
+    await act(async () => {
+      killing = hook.result.current.handleKillConfirm();
+      await new Promise((done) => setTimeout(done, 0));
+    });
+    const before = hook.stub.details.length;
+    hook.rerender({ worktreeId: OTHER_WORKTREE_ID });
+    await waitFor(() => expect(hook.stub.details.length).toBe(before + 1));
+    await act(async () => {
+      hook.stub.kills[0](jsonReply(500, {}));
+      await killing;
+    });
+    expect(hook.result.current.killTarget).toBeNull();
+  });
+
+  it('a kill dialog left open does not survive the switch: confirming it would end B\'s session', async () => {
+    const hook = await mounted();
+    await answer(hook, 0, jsonReply(200, worktreeBody({ name: 'A' })));
+    act(() => hook.result.current.openActiveKillConfirm());
+    expect(hook.result.current.killTarget).not.toBeNull();
+    hook.rerender({ worktreeId: OTHER_WORKTREE_ID });
+    await waitFor(() => expect(hook.result.current.killTarget).toBeNull());
+  });
+
+  it("a GET A's code issues after the switch is not taken, and its failures do not count on B", async () => {
+    const hook = await mounted();
+    let retryForA = hook.result.current.handleRetry;
+    const forB = await switched(hook, () => {
+      retryForA = hook.result.current.handleRetry;
+    });
+    await answerB(hook, forB);
+
+    const late = hook.stub.details.length;
+    hook.stub.calls.length = 0;
+    await act(async () => {
+      void retryForA();
+      await new Promise((done) => setTimeout(done, 0));
+    });
+    await answer(hook, late, jsonReply(200, worktreeBody({ name: 'A, late', vibeLocalModel: 'A-model' })));
+    expect(hook.result.current.worktree?.name).toBe('B');
+    expect(hook.result.current.vibeLocalModel).toBeNull();
+    expect(askedForA(hook, '/messages')).toEqual([]);
+
+    const failing = hook.stub.details.length;
+    await act(async () => {
+      void retryForA();
+      void retryForA();
+      void retryForA();
+      await new Promise((done) => setTimeout(done, 0));
+    });
+    for (let i = 0; i < 3; i += 1) {
+      await answer(hook, failing + i, jsonReply(500, {}));
+    }
+    expect(hook.result.current.isReconnecting).toBe(false);
+  });
+
+  it("A's Auto-Yes toggle answered after the switch: B's map is left alone", async () => {
+    const hook = await mounted({ holdAutoYesPost: true });
+    let toggleForA = hook.result.current.makeAutoYesToggleHandler('claude');
+    const forB = await switched(hook, () => {
+      toggleForA = hook.result.current.makeAutoYesToggleHandler('claude');
+    });
+    await answerB(hook, forB);
+    let toggling: Promise<void> = Promise.resolve();
+    await act(async () => {
+      toggling = toggleForA({ enabled: true });
+      await new Promise((done) => setTimeout(done, 0));
+    });
+    hook.stub.calls.length = 0;
+    await act(async () => {
+      hook.stub.autoYesPosts[0](jsonReply(200, { enabled: true, expiresAt: 123 }));
+      await toggling;
+      await new Promise((done) => setTimeout(done, 0));
+    });
+    expect(hook.result.current.autoYesStateMap.get('claude')?.enabled).not.toBe(true);
+    expect(askedForA(hook, '/auto-yes')).toEqual([]);
+  });
+
+  it("a current-output read A's code asks for after the switch does not leave", async () => {
+    const hook = await mounted({ holdOutput: true });
+    let readForA = hook.result.current.fetchCurrentOutput;
+    const forB = await switched(hook, () => {
+      readForA = hook.result.current.fetchCurrentOutput;
+    });
+    await answerB(hook, forB);
+    const waitingForB = hook.stub.outputs[hook.stub.outputs.length - 1];
+    hook.stub.calls.length = 0;
+    await act(async () => {
+      await readForA();
+    });
+    expect(askedForA(hook, '/current-output')).toEqual([]);
+    // Nor did it retire what B is waiting for.
+    await settle(waitingForB, jsonReply(200, promptAnswer));
+    expect(hook.result.current.state.prompt.visible).toBe(true);
+  });
+
+  it('no switch: a save, then a read made after it, is taken (negative control)', async () => {
+    const hook = await mounted();
+    await answer(hook, 0, jsonReply(200, worktreeBody({ name: 'first' })));
+    act(() => {
+      hook.result.current.setWorktree(worktreeBody({ name: 'saved' }) as Worktree);
+      hook.result.current.handleVibeLocalModelChange('saved-model');
+      hook.result.current.handleAgentInstancesChange([{ id: 'saved', cliTool: 'claude', alias: 'Saved', order: 0 }]);
+    });
+    expect(hook.result.current.worktree?.name).toBe('saved');
+    expect(hook.result.current.vibeLocalModel).toBe('saved-model');
+    expect(hook.result.current.agentInstances.map((row) => row.id)).toEqual(['saved']);
+    await issueAnother(hook);
+    await answer(hook, 1, jsonReply(200, worktreeBody({
+      name: 'elsewhere',
+      vibeLocalModel: 'elsewhere-model',
+      agentInstances: [{ id: 'elsewhere', cliTool: 'codex', alias: 'Elsewhere', order: 0 }],
+    })));
+    expect(hook.result.current.worktree?.name).toBe('elsewhere');
+    expect(hook.result.current.vibeLocalModel).toBe('elsewhere-model');
+    expect(hook.result.current.agentInstances.map((row) => row.id)).toEqual(['elsewhere']);
+  });
+
+  it('no switch: a kill clears the prompt, reads again and closes the dialog (negative control)', async () => {
+    const hook = await mounted({ holdOutput: true, holdKill: true });
+    await answer(hook, 0, jsonReply(200, worktreeBody({ name: 'A' })));
+    await settle(hook.stub.outputs[0], jsonReply(200, promptAnswer));
+    act(() => hook.result.current.openActiveKillConfirm());
+    const asked = hook.stub.details.length;
+    await act(async () => {
+      const killing = hook.result.current.handleKillConfirm();
+      await new Promise((done) => setTimeout(done, 0));
+      hook.stub.kills[0](jsonReply(200, OK));
+      await new Promise((done) => setTimeout(done, 0));
+      hook.stub.details[asked](jsonReply(200, worktreeBody({ name: 'A, re-read' })));
+      await killing;
+    });
+    expect(hook.result.current.state.prompt.visible).toBe(false);
+    expect(hook.result.current.worktree?.name).toBe('A, re-read');
+    expect(hook.result.current.killTarget).toBeNull();
+  });
+
+  it("back on A before A's save is answered: it is A's, and it is taken (negative control)", async () => {
+    const hook = await mounted();
+    await switched(hook);
+    const before = hook.stub.details.length;
+    hook.rerender({ worktreeId: WORKTREE_ID });
+    await waitFor(() => expect(hook.stub.details.length).toBe(before + 1));
+    act(() => hook.result.current.setWorktree(worktreeBody({ name: 'A saved' }) as Worktree));
+    expect(hook.result.current.worktree?.name).toBe('A saved');
+    await answer(hook, before, jsonReply(200, worktreeBody({ name: 'from before' })));
+    expect(hook.result.current.worktree?.name).toBe('A saved');
   });
 });
 
