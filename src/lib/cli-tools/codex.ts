@@ -17,6 +17,7 @@ import {
   isCodexPromptReady,
   getCodexActiveDialog,
   getCodexLifecycleDialog,
+  readCodexEnterConfirmedCursor,
   CODEX_HOOKS_REVIEW_ANCHORS,
   stripAnsi,
 } from '../detection/cli-patterns';
@@ -106,6 +107,10 @@ const CODEX_PROMPT_WAIT_TIMEOUT_MS = 15000;
  * a trailing Enter is so costly here — the number having already advanced the
  * screen, the Enter lands on the NEXT one, which is precisely how a pane ends up
  * two screens deep in the hooks review UI.
+ *
+ * Not so on 0.166.0 (Issue #4134): the footer reads `enter confirm · esc skip`
+ * and the number only moves the cursor. {@link readCodexEnterConfirmedCursor}
+ * tells the two apart; see `sendCodexHooksScreenKey`.
  */
 const CODEX_HOOKS_REVIEW_DECLINE_KEY = '3';
 
@@ -159,13 +164,26 @@ const CODEX_HOOKS_TRUST_KEY = 't';
  * more attempts, and only a screen that will not respond at all runs out.
  *
  * Three per screen, because each screen has at most two keys worth trying
- * (`2` then `1` on the review dialog; `t` or `esc` below it) plus one spare for
- * a redraw landing between the capture and the send.
+ * (`2` then `1` on the review dialog, `2` then Enter on 0.166.0; `t` or `esc`
+ * below it) plus one spare for a redraw landing between the capture and the send.
  */
 const CODEX_HOOKS_SCREEN_MAX_ATTEMPTS = 3;
 
-/** The three screens codex's hook review can put in front of a launch. */
-type CodexHooksScreen = 'hooks-review' | 'hooks-list' | 'hooks-detail';
+/**
+ * Enter presses a launch may spend on the folder trust screen of 0.166.0, where
+ * the digit only moves the cursor (Issue #4134). One poll apart.
+ */
+const CODEX_TRUST_ENTER_MAX_PRESSES = 3;
+
+/**
+ * The screens codex's hook review can put in front of a launch.
+ * `hooks-settled` is the list or detail with nothing left to review (0.166.0).
+ */
+type CodexHooksScreen = 'hooks-review' | 'hooks-list' | 'hooks-detail' | 'hooks-settled';
+
+function isCodexHooksScreen(screen: ReturnType<typeof getCodexLifecycleDialog>): screen is CodexHooksScreen {
+  return screen === 'hooks-review' || screen === 'hooks-list' || screen === 'hooks-detail' || screen === 'hooks-settled';
+}
 
 /**
  * Which screen was last acted on, and how many keys it has cost.
@@ -357,6 +375,8 @@ export class CodexTool extends BaseCLITool {
     // update branch re-sends "2" every poll and the live prompt gets "222...".
     let updateDialogHandled = false;
     let trustDialogHandled = false;
+    /** Issue #4134: Enter presses spent on a trust screen whose digit only moves the cursor. */
+    let trustEnterPresses = 0;
     // Issue #2315: one budget per hooks screen, reset whenever the screen
     // changes, in place of #1829's single launch-wide escape count.
     const hooksScreenState = newHooksScreenState();
@@ -412,14 +432,11 @@ export class CodexTool extends BaseCLITool {
         // line, so it names a hooks screen only when that screen is what the
         // pane is actually showing.
         const lifecycleScreen = getCodexLifecycleDialog(output);
-        if (
-          lifecycleScreen === 'hooks-review' ||
-          lifecycleScreen === 'hooks-list' ||
-          lifecycleScreen === 'hooks-detail'
-        ) {
+        if (isCodexHooksScreen(lifecycleScreen)) {
           const sent = await this.answerCodexHooksScreen(
             sessionName,
             lifecycleScreen,
+            output,
             hooksScreenState,
             trustHooks,
             readMark
@@ -663,6 +680,35 @@ export class CodexTool extends BaseCLITool {
           continue;
         }
 
+        // Issue #4134: on 0.166.0 the digit above only put the cursor on the
+        // option, and the screen is still up. Enter, while THIS frame shows the
+        // cursor on `1. Trust and continue`: Enter on the row below it leaves the
+        // session (`Back to Agent Command Center`, `Quit`). The second read asks
+        // for the screen as well as the row: `1. Review hooks` is a row 1 too.
+        if (
+          activeDialog === 'trust' &&
+          trustEnterPresses < CODEX_TRUST_ENTER_MAX_PRESSES &&
+          readCodexEnterConfirmedCursor(output) === 1
+        ) {
+          const enterOutcome = await answerUnderInstanceInputLock(
+            sessionName,
+            readMark,
+            async () => {
+              const again = stripAnsi(await capturePane(sessionName, 50));
+              return getCodexActiveDialog(again) === 'trust' && readCodexEnterConfirmedCursor(again) === 1;
+            },
+            () => sendSpecialKey(sessionName, 'Enter')
+          );
+          if (!enterOutcome.answered) {
+            logger.info('codex-trust-dialog-answer-skipped', { sessionName, reason: enterOutcome.reason });
+            continue;
+          }
+          trustEnterPresses++;
+          logger.info('auto-trusted-folder-for-codex', { confirmedWith: 'Enter', attempt: trustEnterPresses });
+          await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
+          continue;
+        }
+
       } catch {
         // Capture may fail during initialization - continue polling
       }
@@ -720,6 +766,11 @@ export class CodexTool extends BaseCLITool {
    * When it is withheld — `CM_CODEX_HOOK_TRUST=never`, or a worktree carrying
    * its own `.codex/hooks.json` — it is the pre-#2315 path: `3`, then `esc`.
    *
+   * On 0.166.0 (Issue #4134) the launch dialog's digit only moves the cursor, so
+   * the answer there is the digit and then Enter, read off the frame each time;
+   * and `t` leaves the list or detail open with nothing to review
+   * (`hooks-settled`), which takes `esc` either way.
+   *
    * The launch dialog gets a second, different key on its second attempt.
    * Numbered options are a menu position codex is free to renumber (this method
    * has been re-pinned for that twice already), so if `2`/`3` did not move the
@@ -728,6 +779,7 @@ export class CodexTool extends BaseCLITool {
    *
    * @param sessionName - tmux session name
    * @param screen - The bottom-most active hooks screen, from `getCodexLifecycleDialog`
+   * @param frame - ANSI-stripped capture that showed `screen`
    * @param state - Per-screen budget, carried across polls by the caller
    * @param trust - Whether trust may be granted, from {@link shouldTrustCodexHooks}
    * @param readMark - {@link instanceInputReadMark} taken before the frame that showed `screen` was read
@@ -738,6 +790,7 @@ export class CodexTool extends BaseCLITool {
   private async answerCodexHooksScreen(
     sessionName: string,
     screen: CodexHooksScreen,
+    frame: string,
     state: CodexHooksScreenState,
     trust: boolean,
     readMark: number
@@ -761,8 +814,15 @@ export class CodexTool extends BaseCLITool {
     const outcome = await answerUnderInstanceInputLock(
       sessionName,
       readMark,
-      async () => getCodexLifecycleDialog(stripAnsi(await capturePane(sessionName, 50))) === screen,
-      () => this.sendCodexHooksScreenKey(sessionName, screen, attempt, trust)
+      async () => {
+        const again = stripAnsi(await capturePane(sessionName, 50));
+        // The cursor too: on 0.166.0 the key is chosen from where it stands.
+        return (
+          getCodexLifecycleDialog(again) === screen &&
+          readCodexEnterConfirmedCursor(again) === readCodexEnterConfirmedCursor(frame)
+        );
+      },
+      () => this.sendCodexHooksScreenKey(sessionName, screen, frame, attempt, trust)
     );
     if (!outcome.answered) {
       // Nothing was typed, so this screen's budget is not spent; poll again.
@@ -777,10 +837,26 @@ export class CodexTool extends BaseCLITool {
   private async sendCodexHooksScreenKey(
     sessionName: string,
     screen: CodexHooksScreen,
+    frame: string,
     attempt: number,
     trust: boolean
   ): Promise<void> {
     if (screen === 'hooks-review') {
+      // Issue #4134: a digit that only moves the cursor. Enter goes out only when
+      // this frame shows the cursor on the answer: row 1 opens the list and row 3
+      // turns the hooks off, and neither may be confirmed by accident.
+      const cursor = readCodexEnterConfirmedCursor(frame);
+      if (cursor !== null) {
+        const answer = trust ? CODEX_HOOKS_REVIEW_TRUST_KEY : CODEX_HOOKS_REVIEW_DECLINE_KEY;
+        if (String(cursor) === answer) {
+          await sendSpecialKey(sessionName, 'Enter');
+          logger.info('codex-hooks-review-confirmed', { sessionName, key: answer, attempt, trust });
+        } else {
+          await sendKeys(sessionName, answer, false);
+          logger.info('codex-hooks-review-cursor-moved', { sessionName, key: answer, attempt, trust });
+        }
+        return;
+      }
       const key =
         attempt === 1
           ? trust
@@ -794,7 +870,7 @@ export class CodexTool extends BaseCLITool {
       return;
     }
 
-    if (trust) {
+    if (trust && screen !== 'hooks-settled') {
       // `t`, the key screens 2 and 3 print in their own footers. Literal, so
       // tmux sends the character rather than resolving it as a key name.
       await sendKeys(sessionName, CODEX_HOOKS_TRUST_KEY, false, { literal: true });
@@ -830,6 +906,10 @@ export class CodexTool extends BaseCLITool {
     const hooksScreenState = newHooksScreenState();
     /** Resolved lazily — one tmux call, and only if a hooks screen shows up. */
     let trustHooks: boolean | null = null;
+    /** The hooks screen the last read showed, for the error (Issue #4134). */
+    let lastHooksScreen: CodexHooksScreen | null = null;
+    /** The dialog the last read showed; a send does not answer these (Issue #4134). */
+    let lastDialog: ReturnType<typeof getCodexActiveDialog> = null;
 
     while (Date.now() - startTime < CODEX_PROMPT_WAIT_TIMEOUT_MS) {
       try {
@@ -841,7 +921,9 @@ export class CodexTool extends BaseCLITool {
         // painted OVER a live composer leaves `isCodexPromptReady` true, and
         // returning there types the user's message into the review UI.
         const screen = getCodexLifecycleDialog(output);
-        if (screen === 'hooks-review' || screen === 'hooks-list' || screen === 'hooks-detail') {
+        lastHooksScreen = isCodexHooksScreen(screen) ? screen : null;
+        lastDialog = getCodexActiveDialog(output);
+        if (isCodexHooksScreen(screen)) {
           if (trustHooks === null) {
             // The pane's own directory, for the same reason `relaunchIfToolExited`
             // asks tmux for it: `sendMessage` is handed a worktree id, not a path,
@@ -849,7 +931,7 @@ export class CodexTool extends BaseCLITool {
             const worktreePath = await getSessionWorkingDirectory(sessionName);
             trustHooks = worktreePath !== null && shouldTrustCodexHooks(worktreePath);
           }
-          await this.answerCodexHooksScreen(sessionName, screen, hooksScreenState, trustHooks, readMark);
+          await this.answerCodexHooksScreen(sessionName, screen, output, hooksScreenState, trustHooks, readMark);
         } else if (isCodexPromptReady(output)) {
           // Issue #890/#892: position-based guard so a residual update/trust dialog
           // ("› 1. ...") is never mistaken for a ready prompt -- yet a genuine "› "
@@ -862,8 +944,17 @@ export class CodexTool extends BaseCLITool {
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
     }
     logger.info('codex-prompt-not-detected');
+    if (lastHooksScreen !== null) {
+      // Issue #4134: the reason, in the message `send` reports. Names only the
+      // screen and the setting, nothing captured.
+      throw new Error(
+        `Codex prompt not ready: codex's hook review (${lastHooksScreen}) did not respond to its keys. ` +
+          'Answer it in the terminal, or set CM_CODEX_HOOK_TRUST=bypass'
+      );
+    }
     throw new Error(
-      'Codex prompt not ready: timed out waiting for the input prompt before sending'
+      'Codex prompt not ready: timed out waiting for the input prompt before sending' +
+        (lastDialog === null ? '' : ` (the ${lastDialog} dialog is open: answer it in the terminal)`)
     );
   }
 

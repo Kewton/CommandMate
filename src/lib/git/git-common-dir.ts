@@ -21,6 +21,10 @@
  * Failure is never fatal here. A path that is not a git repository, a git that
  * is missing or times out, a directory that has been deleted — all resolve to
  * `null`, which means "no opinion" and leaves the caller's flow untouched.
+ *
+ * {@link probeGitCommonDir} keeps those apart for the one caller that needs them
+ * (Issue #4134, `agent-roles/resolve`): "not a repository" is an answer, a git that
+ * failed is not.
  */
 
 import path from 'path';
@@ -51,17 +55,48 @@ import { execGitCommandCapture } from './git-exec';
  * @returns Physical common-dir path, or `null` when git could not answer.
  */
 export async function resolveGitCommonDir(repoPath: string): Promise<string | null> {
+  const probe = await probeGitCommonDir(repoPath);
+  return probe.kind === 'repository' ? probe.commonDir : null;
+}
+
+/** What git said about a directory (Issue #4134). */
+export type GitCommonDirProbe =
+  | { kind: 'repository'; commonDir: string }
+  /** git ran, walked up to the top and found no repository. */
+  | { kind: 'not-repository' }
+  /** Anything else: a timeout, a directory that is gone, a config git refuses. */
+  | { kind: 'failed' };
+
+/**
+ * git's own words for "walked up and found none", in both of its forms.
+ *
+ * Deliberately not the bare `not a git repository`: a linked worktree whose
+ * repository is gone says `not a git repository: <path>`, and that directory WAS
+ * a member of something git can no longer name. A git printing these in another
+ * language reads as `failed`, the safe side (`git-exec` sets no locale).
+ */
+const NOT_A_REPOSITORY_STDERR =
+  /not a git repository \(or any (?:of the parent directories|parent up to mount point)/i;
+
+/**
+ * {@link resolveGitCommonDir} with the failures told apart (Issue #4134).
+ *
+ * @param repoPath - Directory to interrogate. Never interpolated into a shell.
+ */
+export async function probeGitCommonDir(repoPath: string): Promise<GitCommonDirProbe> {
   const outcome = await execGitCommandCapture(['rev-parse', '--git-common-dir'], repoPath);
   if (!outcome.ok) {
-    return null;
+    return !outcome.timedOut && NOT_A_REPOSITORY_STDERR.test(outcome.stderr)
+      ? { kind: 'not-repository' }
+      : { kind: 'failed' };
   }
 
   const firstLine = outcome.stdout.split('\n')[0]?.trim();
   if (!firstLine) {
-    return null;
+    return { kind: 'failed' };
   }
 
-  return realpathOrLexical(path.resolve(repoPath, firstLine));
+  return { kind: 'repository', commonDir: await realpathOrLexical(path.resolve(repoPath, firstLine)) };
 }
 
 /**

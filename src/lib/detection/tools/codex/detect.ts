@@ -226,6 +226,8 @@ export const codexStatusDetector = createToolStatusDetector({
     // codex-cli 0.148.0 answers "1. Review hooks" with a two-screen review UI:
     //   screen 2 "Press t to trust all; enter to review hooks; esc to close"
     //   screen 3 "Press t to trust; esc to go back"
+    // and 0.166.0 (Issue #4134) rewords them and leaves them open after `t`
+    // (`hooks-settled`, see `getCodexLifecycleDialog`).
     // Neither carries a numbered option, a "press enter to confirm" footer, or any
     // thinking indicator, so every branch below falls through to the `running`
     // default -- which is how two live sessions sat parked on screen 3 while the UI
@@ -234,7 +236,11 @@ export const codexStatusDetector = createToolStatusDetector({
     // Checked ahead of prompt detection because the transcript rows on screen 2 are
     // ordinary text that must not be read as options.
     const codexLifecycleDialog = getCodexLifecycleDialog(withLiveRegion(frame, 'codex'));
-    if (codexLifecycleDialog === 'hooks-list' || codexLifecycleDialog === 'hooks-detail') {
+    if (
+      codexLifecycleDialog === 'hooks-list' ||
+      codexLifecycleDialog === 'hooks-detail' ||
+      codexLifecycleDialog === 'hooks-settled'
+    ) {
       return positiveVerdictWithPrompt('waiting', STATUS_REASON.CODEX_HOOKS_REVIEW, detectCodexPrompt(frame.clean));
     }
 
