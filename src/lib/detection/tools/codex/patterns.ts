@@ -367,15 +367,67 @@ export const CODEX_HOOKS_REVIEW_ANCHORS = ['Hooks need review', 'Continue withou
  * The semicolon is what separates it from screen 3's footer — "trust all;" and
  * "trust;" are disjoint — and matching the footer rather than the table above it
  * keeps the two screens distinguishable by a single line each.
+ *
+ * 0.166.0 (Issue #4134): `t trust all · enter review · esc close`.
  */
-const CODEX_HOOKS_LIST_FOOTER_PATTERN = /press\s+t\s+to\s+trust\s+all\s*;/i;
+const CODEX_HOOKS_LIST_FOOTER_PATTERN = /press\s+t\s+to\s+trust\s+all\s*;|^\s*t\s+trust\s+all\s+·\s+enter\s+review\s+·\s+esc\s+close\s*$/i;
 
 /**
  * Footer of screen 3, the per-hook review DETAIL (Issue #1829):
  * `Press t to trust; esc to go back`. Where both live sessions in the Issue were
  * found parked.
+ *
+ * 0.166.0 (Issue #4134): `t trust · esc back`.
  */
-const CODEX_HOOKS_DETAIL_FOOTER_PATTERN = /press\s+t\s+to\s+trust\s*;/i;
+const CODEX_HOOKS_DETAIL_FOOTER_PATTERN = /press\s+t\s+to\s+trust\s*;|^\s*t\s+trust\s+·\s+esc\s+back\s*$/i;
+
+/**
+ * The same two screens with nothing left to review (0.166.0, Issue #4134):
+ * `enter details · esc close` and `space/enter toggle · esc back`. `t` no longer
+ * closes the screen on this build, so a launch that granted trust is left here
+ * until `esc`, and `› PreToolUse` on the list wears the composer glyph.
+ */
+const CODEX_HOOKS_SETTLED_FOOTER_PATTERN =
+  /^\s*(?:enter\s+details\s+·\s+esc\s+close|space\/enter\s+toggle\s+·\s+esc\s+back)\s*$/i;
+
+/**
+ * Footer of the screens whose digit only moves the cursor (0.166.0, Issue #4134):
+ * the hook review's `enter confirm · esc skip` and the folder trust's
+ * `enter continue · esc back` / `esc quit`.
+ *
+ * `esc skip` after `enter continue` is deliberately not here: that is the update
+ * offer, whose digit still confirms by itself on 0.166.0 (measured:
+ * `dismissed_version` written on the `3`, `tests/fixtures/codex-dialogs-0166/`).
+ */
+const CODEX_ENTER_CONFIRMS_FOOTER_PATTERN =
+  /^\s*enter\s+(?:confirm\s+·\s+esc\s+skip|continue\s+·\s+esc\s+(?:back|quit))\s*$/i;
+
+/** A numbered option under the cursor; group 1 is its number. */
+const CODEX_CURSOR_OPTION_ROW = /^\s*›\s*(\d+)\./;
+
+/** Rows above the footer the option block can start at (the hook review has three options). */
+const CODEX_ENTER_CONFIRMS_MAX_ROWS = 6;
+
+/**
+ * The option the cursor is on, on a screen where a digit moves the cursor and
+ * Enter confirms (Issue #4134); `null` on any other screen, including one where
+ * the digit confirms by itself.
+ *
+ * Read off the bottom of the frame, so a screen left in scrollback above a
+ * composer does not answer: the footer has to be the last content row.
+ *
+ * @param output - ANSI-stripped pane capture
+ */
+export function readCodexEnterConfirmedCursor(output: string): number | null {
+  const rows = output.split('\n').filter((row) => row.trim() !== '');
+  const footer = rows.length - 1;
+  if (footer < 0 || !CODEX_ENTER_CONFIRMS_FOOTER_PATTERN.test(rows[footer])) return null;
+  for (let i = footer - 1; i >= Math.max(0, footer - CODEX_ENTER_CONFIRMS_MAX_ROWS); i--) {
+    const match = CODEX_CURSOR_OPTION_ROW.exec(rows[i]);
+    if (match) return Number(match[1]);
+  }
+  return null;
+}
 
 /**
  * A screen codex puts up around a session's LIFECYCLE rather than around the
@@ -390,6 +442,7 @@ export type CodexLifecycleDialog =
   | 'hooks-review'
   | 'hooks-list'
   | 'hooks-detail'
+  | 'hooks-settled'
   | 'update'
   | 'trust';
 
@@ -465,6 +518,7 @@ export function getCodexLifecycleDialog(output: string | NormalizedFrame): Codex
     const line = window[i];
     if (CODEX_HOOKS_LIST_FOOTER_PATTERN.test(line)) return 'hooks-list';
     if (CODEX_HOOKS_DETAIL_FOOTER_PATTERN.test(line)) return 'hooks-detail';
+    if (CODEX_HOOKS_SETTLED_FOOTER_PATTERN.test(line)) return 'hooks-settled';
     // The agent asking the human for permission mid-turn (Issue #1628's
     // "esc to cancel" footer, which no lifecycle screen wears). This is exactly
     // the prompt Auto-Yes exists to answer, so whatever lifecycle text is still

@@ -721,7 +721,7 @@ function sameModel(a: string, b: string): boolean {
  * No /g. No nested quantifiers: `[^·]+?` is bounded by literal `·`/end.
  */
 export const OPENCODE_STEP_MODEL_PATTERN =
-  /^\s*▣\s+[A-Za-z][A-Za-z0-9-]*\s+·\s+([^·]+?)(?:\s+·\s+[\d.]+\s?m?s)?\s*$/;
+  /^\s*▣\s+[A-Za-z][A-Za-z0-9-]*\s+·\s+([^·]+?)(?:\s+·\s+(?:[\d.]+\s?m?s|\d+m\s+\d+s|\d+h\s+\d+m|\d+d\s+\d+h))?\s*$/;
 
 function readOpencodeStepMarker(line: string): ModelInfo | null {
   const match = OPENCODE_STEP_MODEL_PATTERN.exec(line);

@@ -32,6 +32,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { access, constants } from 'fs/promises';
 import { createLogger } from '@/lib/logger';
+import { answerClaudeAutoDefaultNudgeBeforeSend } from '@/lib/cli-tools/claude-auto-default-nudge';
 import { assertSessionNotForeign } from '@/lib/cli-tools/session-ownership';
 import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import { CLAUDE_CLI_TOOL_ID } from '@/lib/hooks/sources';
@@ -961,6 +962,9 @@ export async function sendMessageToClaude(
   // (`❯ ` can pass for Claude's prompt) — wait for that launch, or, holding the
   // input lock as the send service does, refuse with nothing typed (R1).
   await settleSessionLaunch(sessionName, 'Claude Code');
+  // Issue #4134: a process already parked on this dialog starts no launch, so
+  // nothing else answers it and the prompt wait below could only time out.
+  await answerClaudeAutoDefaultNudgeBeforeSend(sessionName);
   await sendMessageToSession(
     sessionName,
     message,

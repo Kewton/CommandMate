@@ -121,11 +121,16 @@ export const OPENCODE_RESPONSE_COMPLETE = /\u25A3\s+\w+\s+·\s+\S+(?:\s+·\s+(?:
  * quantifier -- ReDoS safe), and `.`/`[^·\n]` never cross a line without the
  * `m` flag, so the duration has to be on the marker's own row.
  *
- * Durations observed: `2.3s`, `5.2s`, `45.2s`; the `Nh`/`Nm` prefixes are
- * inherited from the #379 pattern and kept for long turns.
+ * Durations, as opencode formats them (Issue #4134, its `duration` function in
+ * the 1.18.35 executable): `836ms` under a second, `5.2s` under a minute, `1m 5s`
+ * under an hour, `1h 5m` under a day, `2d 3h` beyond. Reading only the second and
+ * third forms left a turn under a second, or over an hour, with no positive
+ * evidence: `running` / `unknown_frame` for good, so `wait` ended in exit 124
+ * (`tests/fixtures/opencode-live-4134/turn-done-subsecond.txt`). `\b` keeps a
+ * following word from passing for a unit.
  */
 export const OPENCODE_TURN_COMPLETE_PATTERN =
-  /\u25A3\s+\w+\s+·\s+[^·\n]+·\s+(?:\d+h\s*)?(?:\d+m\s*)?[\d.]+s/;
+  /\u25A3\s+\w+\s+·\s+[^·\n]+·\s+(?:\d+ms|(?:\d+h\s*)?(?:\d+m\s*)?[\d.]+s|\d+h\s+\d+m|\d+d\s+\d+h)\b/;
 
 /**
  * OpenCode's permission dialog, anchored on its button row (Issue #1893).
