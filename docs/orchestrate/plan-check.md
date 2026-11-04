@@ -43,6 +43,21 @@ sharedState:
 - 書き手の item は契約の設定に `routes` を書く。読む経路（`readers[].route`）のそれぞれに、テストを結び付けたセルが要る（無いと `routes-missing` / `routes-reader`）
 - 重いゲート（`unit` / `integration` / `build` / `e2e`）を持つ item は、1 つの波に `heavyGateLimit` 本まで。`unit-related` は数えない（既定のゲートで、全 item が持つ）
 
+## 1-4 全体実行に広がる item の順
+
+（#4148。2026-11-04 の run で、並列の `unit-related` が全体実行に広がって順番待ちが 1〜3 時間になり、#4133 は mutex の 5400 秒で SKIP を 2 回出した。）
+
+`unit-related` は、`src/` のコードと `tests/unit`・`tests/helpers` 以外のファイルが変わるとテスト全体に切り替わり、`cpu.heavy` で 1 本ずつになる（ci-merge.md#6-1-1-テスト全体と-unit-related-の分け方）。`docs/`・`.claude/`・`scripts/` の変更はどれも当たる。これを計画の段階で見分ける:
+
+- `contract.mjs generate` は、scope が全体実行に広げうる契約に `contract: note: #<N>: unit-related runs the whole unit suite when a file under "<pattern>" changes` を stderr へ出す（状態ファイルが無い run でも出る）。判定は `run-related-unit-tests.mjs` の `classifyChanges` そのもの
+- `plan-check.mjs check` は、1 つの波で `cpu.heavy` に並びうる item（`unit` / `integration` と、上の `unit-related`）が 2 本以上なら `plan-check: notice: cpu-heavy: wave <id>: …` を stdout へ出す（`--json` は `notices`）。契約の設定が無い item の `unit-related` は、scope が分からないので数えない
+
+**出たら、plan にその item の順を書く**（波を分けるか、同じ波で先に検証へ入れる順を決める）。`unit-related` の 5400 秒は待ちと実行の両方の上限で、2026-11-04 の run では全体実行の 1 本に 2158 秒かかったので、前に 3 本並ぶと待ち切りうる。
+
+止めない（exit は変わらない）のは、scope が「触ってよい範囲」で実際の差分ではなく、`docs/` を scope に持つ item の多くは同じ波で問題なく流れるから。`heavy-gates` の違反は今までどおり `unit-related` を数えない。
+
+待ちと実行の上限を分ける案は採らなかった。mutex の待ちの上限は `timeoutSec` で、`src/lib/verification/gate-runner.ts` と `.commandmate/verify.yaml` の変更になる。待ち切った検証は `wait-verify.mjs` が並び直す（#3938）。
+
 ## 2-4 経路表と割込み表の書き方
 
 契約の設定（`contract.mjs` の YAML）に `routes` を足すと、goal の「Issue 本文」の後に「経路表と割込み表」の節が入る。**省略したときの goal は今までと 1 文字も変わらない。**

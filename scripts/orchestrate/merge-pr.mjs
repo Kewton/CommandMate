@@ -30,7 +30,12 @@
  *      every check is `pass` or `skipping` and LAST_REQUIRED_CHECKS have registered
  *      (6-2: the last PR, and every PR of a run whose permission says "if CI passes",
  *      waits for the full CI; `gh pr checks` lists only what has registered).
- *      Anything else `pending` is not waited for;
+ *      Anything else `pending` is not waited for. --register-timeout bounds the time until this
+ *      HEAD has any check at all, and --ci-timeout runs from then (#4148). Every look fetches
+ *      the base after reading the checks: a base that moved during the wait, that read included, stops
+ *      the run with exit 4, because this HEAD no longer is the combination that would land (a rerun
+ *      refreshes it, step 4). A fetch that fails is asked again at the next look and never merges on
+ *      an unread base;
  *   6. `gh pr merge --squash --match-head-commit <HEAD>`, recorded in the
  *      `merge` stage, then `gh issue close` unless `--close -`.
  *
@@ -43,12 +48,13 @@
  * last PR's call).
  *
  * Exit code: 0 merged (or already merged), 1 a condition or a command failed,
- * 2 usage error or a dirty tree, 124 the CI did not settle within --ci-timeout.
+ * 2 usage error or a dirty tree, 3 the precheck is on hold, 4 the base moved during the CI wait,
+ * 124 no CI registered within --register-timeout, or it did not settle within --ci-timeout.
  *
  * Usage:
  *   node scripts/orchestrate/merge-pr.mjs --run-dir <dir> --issues <range> --issue <N> --worktree <path>
  *        [--pr <number>] [--branch <name>] [--base develop] [--repo Kewton/CommandMate]
- *        [--close <N|->] [--last] [--unit-related] [--ci-timeout <sec>] [--poll <sec>] [--item <work item>]
+ *        [--close <N|->] [--last] [--unit-related] [--ci-timeout <sec>] [--register-timeout <sec>] [--poll <sec>] [--item <work item>]
  */
 import os from 'node:os';
 import path from 'node:path';
@@ -77,7 +83,10 @@ import {
 } from './pr-common.mjs';
 
 export const DEFAULT_CI_TIMEOUT_SEC = 3600;
+/** Until a pushed HEAD has any check: GitHub creating the run is not the CI being slow (#4148). */
+export const DEFAULT_REGISTER_TIMEOUT_SEC = 600;
 export const DEFAULT_POLL_SEC = 30;
+export const BASE_MOVED_EXIT = 4;
 export const BUILD_CHECK = 'Build';
 export const UNIT_CHECK = 'Unit Tests';
 /**
@@ -170,7 +179,7 @@ export function builtLikeCi(precheckRecord) {
 const USAGE = `Usage:
   node scripts/orchestrate/merge-pr.mjs --run-dir <dir> --issues <range> --issue <N> --worktree <path>
        [--pr <number>] [--branch <name>] [--base ${DEFAULT_BASE_BRANCH}] [--repo ${DEFAULT_REPO}]
-       [--close <N|->] [--last] [--unit-related] [--ci-timeout <sec>] [--poll <sec>] [--item <work item>]`;
+       [--close <N|->] [--last] [--unit-related] [--ci-timeout <sec>] [--register-timeout <sec>] [--poll <sec>] [--item <work item>]`;
 
 const FLAGS = {
   '--run-dir': 'runDir',
@@ -183,6 +192,7 @@ const FLAGS = {
   '--repo': 'repo',
   '--close': 'close',
   '--ci-timeout': 'ciTimeout',
+  '--register-timeout': 'registerTimeout',
   '--poll': 'poll',
   '--item': 'item',
 };
@@ -195,6 +205,7 @@ export function parseArgs(argv) {
     last: false,
     unitRelated: false,
     ciTimeout: String(DEFAULT_CI_TIMEOUT_SEC),
+    registerTimeout: String(DEFAULT_REGISTER_TIMEOUT_SEC),
     poll: String(DEFAULT_POLL_SEC),
     close: /** @type {string | undefined} */ (undefined),
   };
@@ -220,7 +231,7 @@ export function validate(options) {
   if (!/^\d+$/.test(options.issue)) return `--issue must be an Issue number (got ${options.issue})`;
   if (options.close !== '-' && !/^\d+$/.test(options.close)) return `--close must be an Issue number or - (got ${options.close})`;
   if (options.pr !== undefined && !/^\d+$/.test(options.pr)) return `--pr must be a PR number (got ${options.pr})`;
-  for (const flag of ['--ci-timeout', '--poll']) {
+  for (const flag of ['--ci-timeout', '--register-timeout', '--poll']) {
     if (!/^\d+$/.test(options[FLAGS[flag]])) return `${flag} must be seconds (got ${options[FLAGS[flag]]})`;
   }
   return null;
@@ -449,7 +460,10 @@ export function main(argv, deps = {}) {
       (r) => r.issue === issue && inItem(r, item) && r.stage === 'ci' && r.head === head && /(^| )rerun=/.test(r.note ?? '')
     );
     let rerun = rerunDone;
-    const deadline = now().getTime() + Number(o.ciTimeout) * 1000;
+    const registerDeadline = now().getTime() + Number(o.registerTimeout) * 1000;
+    // Starts when this HEAD has its first check: until then the wait is GitHub's, not the CI's.
+    let ciDeadline = null;
+    let baseUnread = false;
     let verdict;
     let title = pr.title;
     for (;;) {
@@ -470,6 +484,17 @@ export function main(argv, deps = {}) {
           checks = out.stderr.includes('no checks') ? [] : null;
         }
         if (checks === null) throw new Error(`gh pr checks ${pr.number} failed: ${(out.stderr || out.stdout).trim()}`);
+        // The HEAD being waited for was refreshed on the base as it was then (step 4). Read after the
+        // checks, so nothing of the base goes unread between the last green answer and the merge:
+        // --match-head-commit pins the PR's head, not the base. A rerun is not sent for a stale HEAD either.
+        // Asked of `head`, the SHA that merge names: the worktree's HEAD can move on its own during the wait.
+        baseUnread = run('git', ['-C', o.worktree, 'fetch', 'origin', o.base]).status !== 0;
+        if (!baseUnread && run('git', ['-C', o.worktree, 'merge-base', '--is-ancestor', baseRef, head]).status !== 0) {
+          record('merge', 'fail', head, `pr=#${pr.number} base-moved`, workHead);
+          error(`merge #${issue}: ${baseRef} moved during the CI wait — not merged; run again to refresh ${head.slice(0, 7)} on it (6-2)`);
+          return BASE_MOVED_EXIT;
+        }
+        if (ciDeadline === null && checks.length > 0) ciDeadline = now().getTime() + Number(o.ciTimeout) * 1000;
         verdict = judgeChecks(checks, need);
         if (verdict.state === 'fail') {
           const names = verdict.failed.map((check) => `${check.name}:${check.bucket}`).join(',');
@@ -506,10 +531,15 @@ export function main(argv, deps = {}) {
           }
           rerun = true;
           record('ci', 'fail', head, `checks=${verdict.summary} failed=${names} rerun=${ids.join(',')}`, workHead);
-        } else if (verdict.state === 'ok') break;
+        } else if (verdict.state === 'ok' && !baseUnread) break;
       }
-      if (now().getTime() >= deadline) {
-        error(`merge #${issue}: CI did not settle within ${o.ciTimeout}s (waiting for ${verdict?.waiting.join(', ') || `the PR head to reach ${head.slice(0, 7)}`})`);
+      if (ciDeadline === null && now().getTime() >= registerDeadline) {
+        error(`merge #${issue}: no CI registered on ${head.slice(0, 7)} within ${o.registerTimeout}s (--register-timeout; the PR head is ${current.headRefOid.slice(0, 7)})`);
+        return 124;
+      }
+      if (ciDeadline !== null && now().getTime() >= ciDeadline) {
+        const waitingFor = verdict.state === 'ok' ? `git fetch origin ${o.base}` : verdict.waiting.join(', ');
+        error(`merge #${issue}: CI did not settle within ${o.ciTimeout}s (waiting for ${waitingFor})`);
         return 124;
       }
       sleep(Number(o.poll) * 1000);

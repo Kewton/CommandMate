@@ -45,6 +45,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 import { SECTION_ORDER } from '../changelog-fragments.mjs';
+import { classifyChanges } from '../run-related-unit-tests.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const TEMPLATE_DIR = path.join(HERE, 'templates');
@@ -117,15 +118,111 @@ const ROUTE_TEST = /^tests\/[^\s]+\.(?:test|spec)\.[cm]?[jt]sx?(?: > .+)?$/;
 const SCOPE_COMPANIONS = [
   {
     // tests/unit/lib/slash-command-description-override.test.ts pins the leaves a split description produces (#3998).
-    file: 'tests/unit/lib/slash-command-description-override.test.ts',
+    pattern: 'tests/unit/lib/slash-command-description-override.test.ts',
     when: (scope) => scope.includes('src/config/slash-commands-catalog.json'),
   },
   {
     // tests/unit/skills/sync-map.test.ts pins the sha256 of every file of a mapped package (#4106).
-    file: '.claude/skills/sync-map.json',
+    pattern: '.claude/skills/sync-map.json',
     when: (scope) => scope.some((pattern) => pattern === '.claude/skills' || pattern.startsWith('.claude/skills/')),
   },
+  {
+    // The CLI's copy of an API response lives in src/cli/types/ (#4132: api-responses.ts fell outside the scope, #4148).
+    pattern: 'src/cli/types/**',
+    when: (scope) => changesCliResponses(scope),
+  },
 ];
+
+const API_ROOT = ['src', 'app', 'api'];
+const CLI_ROOT = ['src', 'cli'];
+const CLI_TYPES_ROOT = [...CLI_ROOT, 'types'];
+const GLOBSTAR = /^\*{2,}$/;
+
+/**
+ * A pattern's brace alternatives as path segments, read as the scope gate reads them
+ * (src/lib/verification/scope-gate-glob.ts): a trailing slash says nothing. Null past the brace limit.
+ */
+function scopeAlternatives(pattern) {
+  const alternatives = hasBalancedBraces(pattern) ? expandBraces(pattern) : [pattern];
+  return alternatives && alternatives.map((alternative) => alternative.replace(/\/+$/, '').split('/'));
+}
+
+/**
+ * Where a pattern can stand once `directory` is consumed. `**` crosses zero or more segments,
+ * `*` and `?` stay in one, and an index past the end means the pattern matched a directory
+ * above or at `directory`, which also admits everything beneath it.
+ */
+function positionsAfter(segments, directory) {
+  const withSkips = (positions) => {
+    const reached = new Set(positions);
+    for (const at of reached) if (GLOBSTAR.test(segments[at] ?? '')) reached.add(at + 1);
+    return reached;
+  };
+  let reached = withSkips([0]);
+  for (const name of directory) {
+    const next = [];
+    for (const at of reached) {
+      if (at === segments.length || GLOBSTAR.test(segments[at])) next.push(at);
+      else if (segmentMatches(segments[at], name)) next.push(at + 1);
+    }
+    reached = withSkips(next);
+  }
+  return [...reached];
+}
+
+/**
+ * Whether every path under src/cli/types/ is admitted, the files directly in it included: only `**`
+ * follows, or one last `*` (which also admits what is beneath a directory it matches).
+ * `src/cli/types/*\/**` does not hold it: a `**` after a `*` needs a segment of its own.
+ */
+function holdsCliTypes(segments) {
+  return positionsAfter(segments, CLI_TYPES_ROOT).some((at) => {
+    const rest = segments.slice(at);
+    return rest.every((segment) => GLOBSTAR.test(segment)) || (rest.length === 1 && rest[0] === '*');
+  });
+}
+
+/**
+ * Whether the last segment can name code (every file under src/app/api and src/cli is `.ts`). As in
+ * {@link fullUnitPattern}, one without a dot stands for a directory; `*.md` and `*.tsx` are other files.
+ */
+function canNameTsCode(segments) {
+  const last = segments.at(-1);
+  if (!last.includes('.')) return true;
+  for (let back = 1; back <= '.ts'.length; back++) {
+    const char = last.at(-back);
+    if (char === undefined) return false;
+    if (char === '*') return true;
+    if (char !== '?' && char !== '.ts'.at(-back)) return false;
+  }
+  return true;
+}
+
+/** Whether some code under src/app/api, or under src/cli outside src/cli/types, is admitted. */
+function reachesCliResponses(segments) {
+  if (!canNameTsCode(segments)) return false;
+  if (positionsAfter(segments, API_ROOT).length > 0) return true;
+  return positionsAfter(segments, CLI_ROOT).some((at) => segments[at] !== 'types');
+}
+
+/**
+ * Whether a scope changes what the CLI reads from the API and does not already hold src/cli/types/.
+ * An intersection in the scope gate's meaning, so `src/app/**\/route.ts` counts and `src/app/**\/page.tsx`
+ * does not. A pattern too wide to write out decides nothing here: {@link cliTypesNote} says so.
+ */
+function changesCliResponses(scope) {
+  const alternatives = scope.flatMap((pattern) => scopeAlternatives(pattern) ?? []);
+  return !alternatives.some(holdsCliTypes) && alternatives.some(reachesCliResponses);
+}
+
+/** What `generate` says about a pattern {@link changesCliResponses} could not judge, or null. */
+export function cliTypesNote(config) {
+  const alternatives = config.scope.flatMap((pattern) => scopeAlternatives(pattern) ?? []);
+  if (alternatives.some(holdsCliTypes)) return null;
+  const pattern = config.scope.find((candidate) => scopeAlternatives(candidate) === null);
+  if (pattern === undefined) return null;
+  return `contract: note: #${config.issue}: scope "${pattern}" has more than ${MAX_BRACE_EXPANSIONS} brace expansions, so whether it reaches an API route or CLI code was not judged and src/cli/types/** was not added — write it in the scope if it does (docs/orchestrate/contract.md)`;
+}
 
 /** Whether the scope reaches `tests/fixtures/` (the scanning tests have to be told about a new fixture, #4000). */
 /** Root files `npm run build:server` compiles or is configured by; everything else it reads is under src/. */
@@ -200,6 +297,35 @@ export function touchesServerBuild(scope) {
       return rest.length === 0 && SERVER_BUILD_ROOT_FILES.some((file) => segmentMatches(first, file));
     });
   });
+}
+
+/**
+ * The first scope pattern that can turn `unit-related` into the whole unit suite (#4148), judged
+ * by scripts/run-related-unit-tests.mjs `classifyChanges` itself: docs, .claude and scripts/ all
+ * do (`mode=full`), and then the gate queues on `cpu.heavy` behind every other worker's full run.
+ * The scope is what the worker may touch, not what it will, so this says "can": a plan note, not a stop.
+ * A glob with no extension stands for code, so `src/**` is related and `src/**\/*.json` is not.
+ */
+export function fullUnitPattern(scope) {
+  for (const pattern of scope) {
+    const alternatives = hasBalancedBraces(pattern) ? expandBraces(pattern) : [pattern];
+    if (alternatives === null) return pattern;
+    for (const alternative of alternatives) {
+      const trimmed = alternative.replace(/\/+$/, '');
+      const sample = trimmed.replace(/\*+|\?/g, 'x');
+      const file = trimmed.split('/').pop().includes('.') ? sample : `${sample}/x.ts`;
+      if (classifyChanges([file]).mode === 'full') return pattern;
+    }
+  }
+  return null;
+}
+
+/** What `generate` says about {@link fullUnitPattern} for a contract that runs `unit-related`, or null. */
+export function fullUnitNote(config) {
+  if (!config.gates.includes('unit-related')) return null;
+  const pattern = fullUnitPattern(config.scope);
+  if (pattern === null) return null;
+  return `contract: note: #${config.issue}: unit-related runs the whole unit suite when a file under "${pattern}" changes — write the order of such items in the plan (docs/orchestrate/plan-check.md)`;
 }
 
 /**
@@ -359,7 +485,7 @@ export function normalizeConfig(raw, options = {}) {
     gates.splice(gates.indexOf('typecheck') + 1, 0, SERVER_BUILD_GATE);
   }
   for (const companion of SCOPE_COMPANIONS) {
-    if (companion.when(asWritten) && !scope.includes(companion.file)) scope.push(companion.file);
+    if (companion.when(asWritten) && !scope.includes(companion.pattern)) scope.push(companion.pattern);
   }
   if (!scope.includes(fragment)) scope.push(fragment);
   if (scope.length > MAX_SCOPE_PATTERNS) problems.push(`scope: at most ${MAX_SCOPE_PATTERNS} patterns (got ${scope.length})`);
@@ -766,6 +892,10 @@ function main(argv) {
     return 2;
   }
   try {
+    const config = loadConfig(options.configFile, { worktree: options.worktree });
+    for (const note of [fullUnitNote(config), cliTypesNote(config)]) {
+      if (note) console.error(note);
+    }
     if (options.stdout) {
       process.stdout.write(contractYaml(loadConfig(options.configFile, { worktree: options.worktree })));
       return 0;

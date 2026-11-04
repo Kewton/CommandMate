@@ -269,6 +269,8 @@ Antigravity は `.claude/commands` を読まないので、`/pm-auto-issue2dev`
 
 状態ファイルがある run は、3-1 の送信の前に `node scripts/orchestrate/plan-check.mjs check --plan <state file>` を通す（exit 1 なら送らない。無い run は skipped で今までどおり）。
 
+`plan-check.mjs` の `notice: cpu-heavy` か `contract.mjs generate` の `note:` が出た item は、テストが全体実行に広がって 1 本ずつになるので、plan に直列の順を書く（根拠: docs/orchestrate/plan-check.md#1-4-全体実行に広がる-item-の順）。
+
 ### 1-5. 実行計画の記録
 
 ```bash
@@ -410,7 +412,7 @@ node scripts/orchestrate/contract.mjs generate \
 - 2-4-2 の差し替え（テスト全体）は雛形に入っていない。生成した契約に手で足す
 - `typecheck` は `tsconfig.server.json` を見ない。`src/` を触る Issue の `gates` には `build-server` を入れる（根拠と所要時間: docs/orchestrate/contract.md#2-4-src-を触る契約の-build-server）
 - `kind: refactor` では 2-4-3 の整理の決まりが goal に入り、gates の既定が `[lint, typecheck]` になる。`tests/` の下の glob を scope に書くと生成が失敗する
-- scope が `tests/fixtures/` の下・`src/config/slash-commands-catalog.json`・`.claude/skills/` に当たると、生成器が受入基準の文・対のテスト・`sync-map.json` を自動で足す。契約の決定が既存のテストの期待を反転するときは、plan に「removed-tests を許可する（理由）」を先に書き、precheck に `--allow-removed-tests` を付ける（docs/orchestrate/contract.md#2-4-契約が先回りする対のファイルと期待の反転）
+- scope が `tests/fixtures/` の下・`src/config/slash-commands-catalog.json`・`.claude/skills/`・API のルートや CLI のコードに当たると、生成器が受入基準の文・対のテスト・`sync-map.json`・`src/cli/types/**` を自動で足す。契約の決定が既存のテストの期待を反転するときは、plan に「removed-tests を許可する（理由）」を先に書き、precheck に `--allow-removed-tests` を付ける（docs/orchestrate/contract.md#2-4-契約が先回りする対のファイルと期待の反転）
 - 共有状態を書く item は、設定に `routes`（経路表と割込み表）を書く。書き方は docs/orchestrate/plan-check.md#2-4-経路表と割込み表の書き方 を読む（省略時の goal は変わらない）
 
 - **`requireCommit: true` を外さない**（#3430）。外すと未コミットの変更も作業証跡に数え、ワーカーがコミット前に
@@ -1133,7 +1135,7 @@ precheck は作業の HEAD の precheck と同じ引数で走り、同じ HEAD �
 ```bash
 node scripts/orchestrate/merge-pr.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
   --issue "$issue" --worktree "$WT_DIR"            # 最後の 1 本は --last。Issue を閉じないときは --close -
-echo "exit=$?"   # 0 → マージ済み / 1 → 出力の欠けたもの・落ちた段を読む / 2 → 作業ツリーが汚れている / 3 → 保留（取り込み後の precheck がロック待ち。再実行すれば続きから進む） / 124 → CI が --ci-timeout（既定 3600 秒）に収まらない
+echo "exit=$?"   # 0 → マージ済み / 1 → 出力の欠けたもの・落ちた段を読む / 2 → 作業ツリーが汚れている / 3 → 保留（取り込み後の precheck がロック待ち。再実行すれば続きから進む） / 4 → CI 待ちの間に develop が進んだ（再実行で取り込み直す） / 124 → CI が --register-timeout（既定 600 秒）までに 1 つも登録されない、または登録から --ci-timeout（既定 3600 秒）に収まらない
 ```
 
 衝突で止まったときは、意味を見て解消（機械解決は module-reference などの共有ファイルだけ）してコミットし、同じ引数で再実行する。
@@ -1174,6 +1176,8 @@ precheck にも build が無いので、ローカルのどの裁定もビルド�
 根拠: docs/orchestrate/ci-merge.md#6-3-fail-を見落とした実例
 
 `merge-pr.mjs` がこの判定を行う（落ちたジョブは HEAD ごとに 1 回だけ `gh run rerun --failed` で再実行し、それでも落ちればマージしない）。
+
+既存の揺れは、同じテストの 2 回目で再実行をやめて修正の担当を決める（根拠: docs/orchestrate/ci-merge.md#6-3-既存の揺れが再発したときの担当）。
 `pending` の扱いは 6-2 に従う: **6-2 のローカルゲート（refresh → マーカー走査 → `tsc` →
 影響テスト）を通していれば `pending` は待たなくてよい**。develop 側の CI が安全網になるからで、
 待つと 1 issue あたり 12〜25 分が消える。**最後の 1 本だけ**（と 6-2 の「CI が通れば」の run の全 PR）は全チェックの合格を待つ。
@@ -1401,7 +1405,7 @@ gh issue list --repo Kewton/CommandMate --state open --search "<ファイル名�
 | worktree作成失敗 | エラー表示、手動作成を案内 |
 | ワーカーのタイムアウト（exit 124） | captureで状況確認→追加指示 or ユーザーに報告 |
 | 検証不合格（exit 20） | `verify --json` で失敗ゲートを特定し、先にワーカー起因かを判定（3-4）。ワーカー起因なら再指示。上限2回で、Antigravity 担当は Claude（opus）へ切替（3-5）、Claude（sonnet）担当は opus へ格上げ（3-5b）、Claude（opus）担当は人間へエスカレーション |
-| env-clean だけが FAIL（exit 20） | `capture --prompts` と違反項目の時刻で帰属を判定。ワーカー起因でなければ合格扱いにし、根拠を PR と summary に書く（3-4） |
+| env-clean だけが FAIL（exit 20） | `capture --prompts` と違反項目の時刻で帰属を判定（複数の worktree に同じ項目が出ると `wait-verify.mjs` と `run-log.mjs status` が外部要因の候補と出す）。ワーカー起因でなければ合格扱いにし、根拠を PR と summary に書く（3-4） |
 | 再指示の後の検証で scope が SKIP（`was not attached to it`）／env-clean が `no baseline snapshot exists for this run` | task に紐づいていない。`verify --task <task id>` で検証し直す（3-4） |
 | 作業証跡ゼロ（exit 21） | captureでcomposer未確定・権限プロンプト・未起動を切り分け（Phase 3-4） |
 | send が exit 99（`prompt not ready`） | 未送信。**待つ前に capture で画面を見て**、信頼ダイアログ / 既にプロンプト / まだ起動中で分岐する（3-1 の表）。task id は再送のたびに差し替える |

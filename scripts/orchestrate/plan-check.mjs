@@ -31,6 +31,11 @@
  *   routes-reader   a reader route of a state the item writes has no tested cell in its routes table
  *   heavy-gates     a wave starts more items with a heavy gate (HEAVY_GATES) than the limit
  *
+ * A notice (`plan-check: notice: cpu-heavy: …`, exit code unchanged) names the items of one wave
+ * that can queue on the `cpu.heavy` mutex: `unit` / `integration`, and `unit-related` whose scope
+ * can turn it into the whole suite (#4148). The scope says what may change, not what will, so it
+ * asks for the order in the plan and does not stop the run.
+ *
  * A run without a state file is checked as before: `check` says it skipped
  * and exits 0, so calling this from the runbook changes nothing for such a run.
  *
@@ -49,7 +54,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
-import { DEFAULT_GATES, ROUTE_COLUMNS, loadConfig, routesSection, testedColumns } from './contract.mjs';
+import { DEFAULT_GATES, ROUTE_COLUMNS, fullUnitPattern, loadConfig, routesSection, testedColumns } from './contract.mjs';
 
 /**
  * Gates that take the machine: unit / integration share the `cpu.heavy` mutex
@@ -63,6 +68,8 @@ export const HEAVY_GATES = ['unit', 'integration', 'build', 'e2e'];
  * verification slots, which stops a third run's light checks too (#3884 H-11).
  */
 export const HEAVY_GATE_LIMIT = 1;
+/** The gates verify.yaml puts on the `cpu.heavy` mutex. */
+const CPU_HEAVY_GATES = ['unit', 'integration'];
 
 const ITEM_ID = /^[0-9A-Za-z][0-9A-Za-z._-]*$/;
 
@@ -78,17 +85,19 @@ function isMapping(value) {
  *
  * @param {unknown} plan
  * @param {{ baseDir?: string, load?: (file: string) => any }} [options]
- * @returns {{ violations: Violation[], items: Map<string, { wave: string | null, gates: string[], config: any }> }}
+ * @returns {{ violations: Violation[], notices: string[], items: Map<string, { wave: string | null, gates: string[], config: any }> }}
  */
 export function checkPlan(plan, { baseDir = process.cwd(), load = loadConfig } = {}) {
   /** @type {Violation[]} */
   const violations = [];
+  /** @type {string[]} */
+  const notices = [];
   const add = (rule, message) => violations.push({ rule, message });
   /** @type {Map<string, { wave: string | null, gates: string[], config: any }>} */
   const items = new Map();
   if (!isMapping(plan)) {
     add('plan', 'the state file must be a mapping (version / waves / items / sharedState)');
-    return { violations, items };
+    return { violations, notices, items };
   }
   if (plan.version !== 1) add('plan', `version: must be 1 (got ${plan.version})`);
   let limit = HEAVY_GATE_LIMIT;
@@ -221,7 +230,22 @@ export function checkPlan(plan, { baseDir = process.cwd(), load = loadConfig } =
       add('heavy-gates', `wave ${wave}: ${ids.length} items with a heavy gate (${HEAVY_GATES.join(' / ')}): ${ids.join(', ')} — at most ${limit}; move one to unit-related or a later wave`);
     }
   }
-  return { violations, items };
+
+  // Who queues on cpu.heavy in one wave: told, not stopped (the scope is only what may change).
+  /** @type {Map<string, string[]>} */
+  const queueByWave = new Map();
+  for (const [id, item] of items) {
+    if (item.wave === null) continue;
+    const direct = item.gates.filter((gate) => CPU_HEAVY_GATES.includes(gate));
+    const widens = item.config && item.gates.includes('unit-related') ? fullUnitPattern(item.config.scope) : null;
+    if (direct.length === 0 && widens === null) continue;
+    const why = widens === null ? direct.join(',') : `unit-related, full by ${widens}`;
+    queueByWave.set(item.wave, [...(queueByWave.get(item.wave) ?? []), `${id} (${why})`]);
+  }
+  for (const [wave, queued] of queueByWave) {
+    if (queued.length > 1) notices.push(`cpu-heavy: wave ${wave}: ${queued.join(', ')} can run one at a time on cpu.heavy — write their order in the plan`);
+  }
+  return { violations, notices, items };
 }
 
 /** The name a state is matched by: NFKC, inner whitespace folded to one space, case-insensitive. */
@@ -310,8 +334,9 @@ export function main(argv, { stdout = process.stdout, stderr = process.stderr } 
       stdout.write(routesBrief(o.plan, o.item));
       return 0;
     }
-    const { violations, items } = checkPlanFile(o.plan);
-    if (o.json) stdout.write(`${JSON.stringify({ skipped: false, plan: o.plan, items: items.size, violations })}\n`);
+    const { violations, notices, items } = checkPlanFile(o.plan);
+    if (o.json) stdout.write(`${JSON.stringify({ skipped: false, plan: o.plan, items: items.size, violations, notices })}\n`);
+    else for (const notice of notices) stdout.write(`plan-check: notice: ${notice}\n`);
     for (const v of violations) stderr.write(`plan-check: ${v.rule}: ${v.message}\n`);
     if (violations.length > 0) return 1;
     if (!o.json) stdout.write(`plan-check: ok (${items.size} items)\n`);
