@@ -54,6 +54,7 @@ vi.mock('fs/promises', () => ({
 }));
 
 vi.mock('child_process', () => ({
+  execFile: vi.fn(),
   exec: vi.fn((cmd: string, opts: unknown, cb?: unknown) => {
     const callback = (typeof opts === 'function' ? opts : cb) as (
       err: Error | null,
@@ -66,7 +67,9 @@ vi.mock('child_process', () => ({
 
 import { CLAUDE_INIT_POLL_INTERVAL, CLAUDE_INIT_TIMEOUT, startClaudeSession } from '@/lib/session/claude-session';
 import { capturePane, createSession, getPaneCurrentCommand, hasSession, sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
-import { isSafeSessionStartError, isSessionStartTimeoutError } from '@/lib/session/session-start-error';
+import { isSafeSessionStartError, isSessionStartTimeoutError, SESSION_STARTING_CODE } from '@/lib/session/session-start-error';
+import { answerSessionStartTimeout } from '@/app/api/worktrees/[id]/send/send-session-start';
+import type { ICLITool } from '@/lib/cli-tools/types';
 import { withInstanceInputLock } from '@/lib/session/instance-input-lock';
 import { sendNudgeKey } from '@/lib/cli-tools/claude-auto-default-nudge';
 
@@ -208,6 +211,48 @@ describe('[#4149] a start whose trust keys never went out', () => {
     expect(error.message).toContain('Make auto mode your default permission mode?');
     expect(error.message).not.toContain('is a slow start');
     expect(isSessionStartTimeoutError(error)).toBe(true);
+  });
+
+  it('a process left on the folder-trust dialog is not told to just send again: a send does not answer it', async () => {
+    vi.mocked(capturePane).mockResolvedValue(CURSOR_ON_YES);
+
+    const error = await runOut();
+
+    expect(error.message).not.toContain('Send it again');
+    expect(error.message).toContain('commandmate capture <worktree-id>');
+    expect(error.message).toContain('commandmate attach <worktree-id>');
+    expect(error.message).toContain('then send the message again');
+    expect(error.message).toContain('A send on its own does not answer this dialog');
+    // The same error to everything that reads it.
+    expect((error as Error & { code?: string }).code).toBe(SESSION_STARTING_CODE);
+    expect(isSessionStartTimeoutError(error)).toBe(true);
+    expect(isSafeSessionStartError(error)).toBe(true);
+  });
+
+  it('the 503 and its message stay on the session-starting path', async () => {
+    vi.mocked(capturePane).mockResolvedValue(CURSOR_ON_YES);
+
+    const error = await runOut();
+    vi.mocked(getPaneCurrentCommand).mockResolvedValue('2.1.287');
+
+    const response = await answerSessionStartTimeout(
+      error.message,
+      { name: 'Claude Code', getSessionName: () => SESSION } as unknown as ICLITool,
+      'wt',
+      undefined
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: error.message, code: SESSION_STARTING_CODE });
+  });
+
+  it('control: the auto-default dialog is answered before a send, so sending again is still the advice', async () => {
+    vi.mocked(capturePane).mockResolvedValue(AUTO_DEFAULT_NUDGE);
+
+    const error = await runOut();
+
+    expect(error.message).toContain('Send it again');
+    expect((error as Error & { code?: string }).code).toBe(SESSION_STARTING_CODE);
   });
 
   it('control: a start with no dialog keeps the slow-start sentence', async () => {

@@ -210,13 +210,16 @@ type TrustDialogKeySkip = InstanceInputAnswerSkip | 'send-failed' | 'cursor-unre
  * session name, a number and {@link TrustDialogKeySkip}, never captured output.
  */
 class ClaudeStartupDialogStalledError extends SessionStartTimeoutError {
-  /** @param where - Says what the session is stopped on, and what became of the keys */
-  constructor(sessionName: string, timeoutMs: number, where: string) {
+  /**
+   * @param where - Says what the session is stopped on, and what became of the keys
+   * @param next - What the reader can do: a send to a running process answers only some dialogs
+   */
+  constructor(sessionName: string, timeoutMs: number, where: string, next: string) {
     super('Claude Code', sessionName, timeoutMs);
     this.message =
       `Claude Code did not reach its input prompt within ${Math.round(timeoutMs / 1000)}s: ` +
       `the tmux session '${sessionName}' is stopped on ${where} This is not a slow start, so waiting will not ` +
-      'move it. The message was not delivered. Send it again, or run `commandmate capture <worktree-id>` to see the dialog.';
+      `move it. The message was not delivered. ${next}`;
     this.name = 'ClaudeStartupDialogStalledError';
   }
 }
@@ -236,14 +239,20 @@ function startTimeoutError(sessionName: string, lastScreen: string | null, trust
     return new ClaudeStartupDialogStalledError(
       sessionName,
       CLAUDE_INIT_TIMEOUT,
-      `the folder-trust dialog, and ${fate}. Enter is never pressed while the cursor is on "No, exit".`
+      `the folder-trust dialog, and ${fate}. Enter is never pressed while the cursor is on "No, exit".`,
+      // The process stays, and a send to a running one reuses it without answering this dialog.
+      'A send on its own does not answer this dialog: run `commandmate capture <worktree-id>` to see it, ' +
+        'clear it in a terminal with `commandmate attach <worktree-id>` (each with --instance for a named instance), ' +
+        'then send the message again.'
     );
   }
   if (lastScreen !== null && isClaudeAutoDefaultNudgeOpen(lastScreen)) {
     return new ClaudeStartupDialogStalledError(
       sessionName,
       CLAUDE_INIT_TIMEOUT,
-      '"Make auto mode your default permission mode?", which did not take its keys. No keeps the current mode.'
+      '"Make auto mode your default permission mode?", which did not take its keys. No keeps the current mode.',
+      // A send answers this one first (answerClaudeAutoDefaultNudgeBeforeSend).
+      'Send it again, or run `commandmate capture <worktree-id>` to see the dialog.'
     );
   }
   return new SessionStartTimeoutError('Claude Code', sessionName, CLAUDE_INIT_TIMEOUT);

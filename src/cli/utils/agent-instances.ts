@@ -91,7 +91,8 @@ const MAX_ROSTER_CHANGE_RETRIES = 2;
  * @returns What was saved, or null when `build` said there was nothing to do
  * @throws {RoleCliError} `roster_changed` (exit 31): the roster kept moving through every
  *   attempt, so nothing was saved to it (Issue #4149). What the command did before the save
- *   stands: `remove --kill` has stopped the session, `send --register` has sent the message.
+ *   stands: `remove --kill` has stopped the session. `send --register` has sent the message,
+ *   and turns this into a warning for that reason.
  * @throws {ApiError} The server refused for another reason
  */
 export async function saveRosterChange(

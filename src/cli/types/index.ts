@@ -673,7 +673,7 @@ export type InterruptExitCode = typeof InterruptExitCode[keyof typeof InterruptE
  */
 export const RoleExitCode = {
   SUCCESS: 0,
-  /** Someone else got there first, or the role is in use: `name_conflict`, `version_conflict`, `role_in_use`, `instance_exists`, `roster_changed`. Nothing was changed or sent by the refused write; a step the command had already finished stands (`send --register` after its send, `remove --kill` after its kill, Issue #4149). */
+  /** Someone else got there first, or the role is in use: `name_conflict`, `version_conflict`, `role_in_use`, `instance_exists`, `roster_changed`. Nothing was changed or sent by the refused write; a step the command had already finished stands (`remove --kill` after its kill, Issue #4149). `send --register` without a role has already sent by then, so it warns and exits 0 instead. */
   CONFLICT: 31,
   /** The role a send is conditional on does not hold, or the start was refused because of its role. The body was not typed. */
   NOT_SENT: 32,
