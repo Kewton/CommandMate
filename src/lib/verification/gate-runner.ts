@@ -95,6 +95,7 @@ import { isAgentStateUntrackedEntry } from '@/lib/skills/agent-state-paths';
 import {
   ENV_CLEAN_GATE_ID,
   loadVerifyConfig,
+  mutexWaitBudgetSec,
   SCOPE_GATE_ID,
   VERIFY_CONFIG_RELATIVE_PATH,
   VerifyConfigError,
@@ -415,7 +416,7 @@ function releaseSlot(): void {
  *
  * The slot bounds what *executes*, not what waits. A run used to take its slot
  * up front and keep it while a gate queued for its `mutex` (`cpu.heavy`, up to
- * the gate's whole `timeoutSec`), so one run holding the lock and one waiting
+ * the gate's whole wait budget, `mutexWaitSec` or else `timeoutSec`), so one run holding the lock and one waiting
  * for it filled both slots, and a third run could not start even its 5-second
  * `lint`. {@link runGateAttempt} now hands the slot back while it waits for the
  * lock and takes it again — ahead of the runs still waiting to start — once the
@@ -847,9 +848,9 @@ function mutexWaitTimeoutLog(gate: VerifyGate, name: string, result: MachineLock
     `${MUTEX_WAIT_SKIP_REASON} waited=${formatSeconds(result.waitedMs)}`,
     `${MUTEX_LOG_PREFIX} name=${name} lock=${machineLockPathFor(name)}${held}`,
     `Gate '${gate.id}' declares mutex '${name}' and the machine-wide lock stayed held for its ` +
-      `whole ${gate.timeoutSec}s budget, so the command was never started. This is a resource ` +
-      'conflict, not a verdict on the work: re-run once the other run finishes, or raise ' +
-      "the gate's timeoutSec.",
+      `whole ${mutexWaitBudgetSec(gate)}s budget, so the command was never started. This is a ` +
+      'resource conflict, not a verdict on the work: re-run once the other run finishes, or ' +
+      `raise the gate's ${gate.mutexWaitSec === undefined ? 'timeoutSec (or declare mutexWaitSec)' : 'mutexWaitSec'}.`,
   ].join('\n');
 }
 
@@ -893,9 +894,10 @@ async function runGateAttempt(
     );
   }
 
-  // The gate's own timeout is the wait budget: a gate allowed 600s of execution
-  // has already declared how long this run may spend on it, and a second knob
-  // would only let the two disagree.
+  // The wait budget is `mutexWaitSec`, or the gate's own timeout when it declares
+  // none (Issue #4162; docs/orchestrate/exit-codes.md, 3-4 99). The queue length
+  // and the hang limit are separate facts about a gate, but no key still means
+  // the single budget every gate had before.
   //
   // Issue #2063: the wait is abandonable. `build` declares 1800s here, so a run
   // cancelled while queued behind the lock used to stay `running` for up to
@@ -906,7 +908,7 @@ async function runGateAttempt(
   // busy (never when it is free — `onWait` fires only once a claim has failed),
   // and taken back ahead of the runs still waiting to start. See RunSlot.
   const lock = await acquireMachineLock(mutex, {
-    timeoutMs: gate.timeoutSec * 1000,
+    timeoutMs: mutexWaitBudgetSec(gate) * 1000,
     shouldAbandon: () => cancellation.cancelled,
     onWait: () => slot.release(),
   });

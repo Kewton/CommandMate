@@ -185,6 +185,11 @@ gates:
   # （9.4）——壊れ方は「偽の赤」ではなく「裁定しない」である。
   # 代償として、本当にハングしたスイートの TIMEOUT 判定は 60 分から 90 分に延びる。
   #
+  # [Issue #4162] 製品ランナーは `mutexWaitSec`（待ちの上限。無ければ timeoutSec）で待ちと実行を分けられる。
+  # ここにはまだ**宣言しない**。v1 のキーは閉じた集合で、standalone ランナー（verify-run.sh）と
+  # 再ビルド前のサーバは未知のキーがあるとこのファイルごと拒否する。手順は docs/orchestrate/exit-codes.md の
+  # 「待ちの上限を分ける」、固定は tests/unit/verification/gate-mutex-wait-4162.test.ts。
+  #
   # 採らなかった案 `sh -c 'CI=true npm run test:integration'`: モード B をモード A に
   # 揃えれば mutex 無しで済むかもしれない。却下したのは (1) その条件での負荷実測を
   # 取っていない、(2) ゲートの決定性を env 文字列 1 個に預けることになる、
