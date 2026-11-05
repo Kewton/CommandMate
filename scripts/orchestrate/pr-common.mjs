@@ -201,34 +201,22 @@ export function isTransientPushFailure({ status, stdout, stderr }) {
 }
 
 /**
- * `git push` of `head` to `branch`, tried again on a transient failure (#4162): up to
+ * `git push` of the SHA `head` to `branch`, tried again on a transient failure (#4162): up to
  * GH_ATTEMPTS tries, GH_RETRY_DELAYS_MS apart. Pushing the same SHA twice changes nothing, so
  * unlike ghWrite this may send again, but the answer may also have been lost after the push
  * landed: each failure first reads the remote ref, and a ref at `head` is a success
  * (`confirmed: true`). A rejection is the answer and is returned as it is.
  *
- * `pushArgs` name `source`, not `head`, so what they send is whatever `source` is by then. Before
- * every try `source` is read again, and one that is no longer `head` stops the push (a failure,
- * not sent): what was verified and recorded is `head`, and the caller's next run judges
- * the new commit from the start. Only the moment between this read and the push is left open.
+ * The source is the SHA itself, never HEAD or a branch name: those are resolved by git when the
+ * push runs, so a commit made meanwhile would go out in place of what was verified and recorded.
  *
  * @param {typeof defaultRun} run
  * @param {string} worktree
- * @param {string[]} pushArgs what follows `git -C <worktree> push`
- * @param {{ branch: string, head: string, source?: string, sleep?: (ms: number) => void, notice?: (line: string) => void }} options
- *   `source`: the local ref `pushArgs` send (default HEAD)
+ * @param {{ branch: string, head: string, sleep?: (ms: number) => void, notice?: (line: string) => void }} options
  */
-export function pushHead(run, worktree, pushArgs, { branch, head, source = 'HEAD', sleep = defaultSleep, notice = (line) => console.error(line) }) {
+export function pushHead(run, worktree, { branch, head, sleep = defaultSleep, notice = (line) => console.error(line) }) {
   for (let attempt = 1; ; attempt++) {
-    const local = run('git', ['-C', worktree, 'rev-parse', '--verify', source]);
-    if (local.status !== 0) {
-      return { status: 1, stdout: '', stderr: `could not read ${source} before the push, not pushed: ${`${local.stderr || local.stdout}`.trim()}` };
-    }
-    const now = local.stdout.trim();
-    if (now !== head) {
-      return { status: 1, stdout: '', stderr: `${source} moved from ${head.slice(0, 7)} to ${now.slice(0, 7)} since it was checked, not pushed; run again to judge the new commit` };
-    }
-    const out = run('git', ['-C', worktree, 'push', ...pushArgs]);
+    const out = run('git', ['-C', worktree, 'push', 'origin', `${head}:refs/heads/${branch}`]);
     if (out.status === 0 || !isTransientPushFailure(out)) return out;
     const reason = `${out.stderr || out.stdout}`.trim().split('\n')[0];
     const remote = run('git', ['-C', worktree, 'ls-remote', 'origin', `refs/heads/${branch}`]);
@@ -240,6 +228,25 @@ export function pushHead(run, worktree, pushArgs, { branch, head, source = 'HEAD
     const delay = GH_RETRY_DELAYS_MS[Math.min(attempt, GH_RETRY_DELAYS_MS.length) - 1];
     notice(`git push: ${reason} — retrying in ${delay / 1000}s (attempt ${attempt + 1}/${GH_ATTEMPTS})`);
     sleep(delay);
+  }
+}
+
+/**
+ * What `git push -u` would have written for `branch` (#4162): `-u` does nothing when the source is
+ * a SHA. A convenience for whoever works in the worktree later, so a failure is said and not fatal.
+ *
+ * @param {typeof defaultRun} run
+ * @param {string} worktree
+ * @param {string} branch
+ * @param {(line: string) => void} notice
+ */
+export function setUpstream(run, worktree, branch, notice) {
+  for (const [key, value] of [[`branch.${branch}.remote`, 'origin'], [`branch.${branch}.merge`, `refs/heads/${branch}`]]) {
+    const out = run('git', ['-C', worktree, 'config', key, value]);
+    if (out.status !== 0) {
+      notice(`git config ${key}: ${`${out.stderr || out.stdout}`.trim()} — the push stands; the upstream of ${branch} is not set`);
+      return;
+    }
   }
 }
 

@@ -172,7 +172,7 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 - **対象**: HTTP 500・502・503・504、`RPC failed`、接続切れ。`[rejected]`・`[remote rejected]`（非 fast-forward、hook）は答えなので送り直さない
 - **応答が消えたとき**: 失敗のたびに `git ls-remote origin refs/heads/<branch>` を読み、リモートがこの HEAD なら成功として進む
 - **回数**: `gh` と同じ最大 4 回（10 秒・30 秒・60 秒あける）。尽きたら今までどおり exit 1
-- **ローカルが進んだとき**: 各回の push の直前に送り元（`merge-pr.mjs` は `HEAD`、`publish-pr.mjs` は `refs/heads/<branch>`）を読み直し、確かめた SHA と違えば送らず exit 1（`moved from <sha> to <sha>`）。検証と記録は古い SHA のものなので、再実行して新しいコミットを最初から判定する。読み直しと push の間の一瞬は残る（送り元を SHA に固定していないのは `-u` の上流設定と既存のテストの引数を保つため）
+- **ローカルが進んだとき**: 送り元は常に確かめた SHA（`git push origin <sha>:refs/heads/<branch>`）で、`HEAD` やブランチ名を git に解決させない。確認の後に参照が動いても、送るのは検証と記録の SHA のまま。進んだコミットは次の実行で判定する。`publish-pr.mjs` の上流は push の後に `git config` で設定する（SHA の送り元では `-u` が効かない。設定の失敗は知らせるだけで止めない）
 
 ## 6-3 CI の登録までの時間と --ci-timeout
 

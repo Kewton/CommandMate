@@ -42,6 +42,8 @@ export interface FakeState {
   pushFails: boolean;
   /** One stderr per failing `git push`, in order (#4162); the push after them goes through. */
   pushFailures: string[];
+  /** `git config` fails (#4162). */
+  configFails?: boolean;
   /** The SHA `git ls-remote origin refs/heads/<branch>` answers (#4162). */
   remoteHead: string;
   /** One stderr per refused `gh run rerun`, in order (#4162). */
@@ -89,6 +91,8 @@ export function fakeGit(overrides: Partial<FakeState> = {}) {
   const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
   const failed = (stderr: string, status = 1) => ({ status, stdout: '', stderr });
 
+  let pushed: string | null = null;
+
   const run = (command: string, args: string[], opts: { cwd?: string; env?: Record<string, string> } = {}) => {
     calls.push({ command, args, env: opts.env });
     if (command === 'git') {
@@ -121,9 +125,12 @@ export function fakeGit(overrides: Partial<FakeState> = {}) {
         if (state.pushFails) return failed('rejected');
         const failure = state.pushFailures.shift();
         if (failure !== undefined) return failed(failure);
-        for (const pr of state.prs) if (pr.state === 'OPEN' && pr.headRefName === state.branch) pr.headRefOid = state.head;
+        // What the refspec names, not what HEAD has become (#4162).
+        pushed = sub[sub.length - 1].split(':')[0];
+        for (const pr of state.prs) if (pr.state === 'OPEN' && pr.headRefName === state.branch) pr.headRefOid = pushed;
         return ok();
       }
+      if (verb === 'config') return state.configFails ? failed('error: could not lock config file') : ok();
       if (verb === 'ls-remote') return ok(`${state.remoteHead}\t${sub[sub.length - 1]}\n`);
       throw new Error(`unexpected git ${sub.join(' ')}`);
     }
@@ -138,7 +145,7 @@ export function fakeGit(overrides: Partial<FakeState> = {}) {
         const pr: Pr = {
           number: state.createdNumber,
           state: 'OPEN',
-          headRefOid: state.head,
+          headRefOid: pushed ?? state.head,
           url: `https://github.com/Kewton/CommandMate/pull/${state.createdNumber}`,
           title: args[args.indexOf('--title') + 1],
           headRefName: args[args.indexOf('--head') + 1],

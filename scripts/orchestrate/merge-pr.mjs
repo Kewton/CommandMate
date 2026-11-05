@@ -50,8 +50,8 @@
  * one: with `--item` the Issue stays open unless `--close <N>` is given (the
  * last PR's call).
  *
- * `git push` here and in publish-pr.mjs goes through pr-common.mjs pushHead (#4162): a local HEAD
- * that moved since it was checked stops the push (exit 1).
+ * `git push` here and in publish-pr.mjs goes through pr-common.mjs pushHead (#4162), which sends the
+ * checked SHA by itself, so a local HEAD that moved since does not go out.
  *
  * Exit code: 0 merged (or already merged), 1 a condition or a command failed,
  * 2 usage error or a dirty tree, 3 the precheck is on hold, 4 the base moved during the CI wait,
@@ -459,7 +459,7 @@ export function main(argv, deps = {}) {
       }
     }
     if (head !== pr.headRefOid) {
-      const push = pushHead(run, o.worktree, ['origin', `HEAD:${branch}`], { branch, head, sleep, notice: error });
+      const push = pushHead(run, o.worktree, { branch, head, sleep, notice: error });
       if (push.status !== 0) throw new Error(`git push failed: ${(push.stderr || push.stdout).trim()}`);
       log(`merge #${issue}: refresh=${refreshed ? 'merged' : 'unpushed'} marker=ok precheck=ok; pushed ${head.slice(0, 7)}`);
     }
