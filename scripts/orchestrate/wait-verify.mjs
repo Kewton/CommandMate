@@ -322,6 +322,9 @@ export function summarizeVerdict(log, exitCode, view = null) {
  * What the env-clean gate listed as added or removed (src/lib/verification/env-clean-gate.ts
  * formatEnvCleanReport), as `<probe>:<sign><name>`, from the stored run or else the gate's part
  * of the log. Not the worker's own (`[self]`) and not the excused task session (#4148).
+ * The name is everything up to the owner (#4162: `My Tests` and `My Photos` are two entries); only
+ * `listeners` writes a detail after its key (`tcp/3000 node pid=1`), and its key has no space.
+ * What this returns goes to a note and a candidate line, never to the verdict.
  *
  * @param {string} log
  * @param {{ gates?: Array<Record<string, unknown>> } | null} [view]
@@ -335,9 +338,10 @@ export function envCleanItems(log, view = null) {
   for (const line of report.split('\n')) {
     const header = /^ {2}(\S+) (\S+) \(/.exec(line);
     if (header) probe = header[2] === 'VIOLATED' ? header[1] : null;
-    const change = /^ {4}([+-]) (\S+).* \[([^\]]+)\]$/.exec(line);
+    const change = /^ {4}([+-]) (.+) \[([^\]]+)\]$/.exec(line);
     if (!probe || !change || change[3] === 'self' || change[3].startsWith('task session')) continue;
-    const item = `${probe}:${change[1]}${change[2]}`;
+    const name = probe === 'listeners' ? change[2].split(' ')[0] : change[2];
+    const item = `${probe}:${change[1]}${name}`;
     if (!items.includes(item)) items.push(item);
   }
   return items;

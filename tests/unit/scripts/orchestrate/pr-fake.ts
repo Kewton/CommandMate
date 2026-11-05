@@ -40,6 +40,12 @@ export interface FakeState {
   issueState: 'OPEN' | 'CLOSED';
   createdNumber: number;
   pushFails: boolean;
+  /** One stderr per failing `git push`, in order (#4162); the push after them goes through. */
+  pushFailures: string[];
+  /** The SHA `git ls-remote origin refs/heads/<branch>` answers (#4162). */
+  remoteHead: string;
+  /** One stderr per refused `gh run rerun`, in order (#4162). */
+  rerunFailures: string[];
   /** `%s` of a commit by sha; others get the default subject. */
   subjects: Record<string, string>;
   /** `gh api repos/<repo>/issues/<N> --jq .title` (#4076 B); null answers like an Issue gh could not read. */
@@ -69,6 +75,9 @@ export function fakeGit(overrides: Partial<FakeState> = {}) {
     issueState: 'OPEN',
     createdNumber: 9001,
     pushFails: false,
+    pushFailures: [],
+    remoteHead: DEVELOP,
+    rerunFailures: [],
     subjects: {},
     issueTitle: 'feat(orchestrate): publish and merge',
     runStatus: {},
@@ -110,9 +119,12 @@ export function fakeGit(overrides: Partial<FakeState> = {}) {
       if (verb === 'grep') return state.markers ? ok(state.markers) : failed('', 1);
       if (verb === 'push') {
         if (state.pushFails) return failed('rejected');
+        const failure = state.pushFailures.shift();
+        if (failure !== undefined) return failed(failure);
         for (const pr of state.prs) if (pr.state === 'OPEN' && pr.headRefName === state.branch) pr.headRefOid = state.head;
         return ok();
       }
+      if (verb === 'ls-remote') return ok(`${state.remoteHead}\t${sub[sub.length - 1]}\n`);
       throw new Error(`unexpected git ${sub.join(' ')}`);
     }
     if (command === 'gh') {
@@ -149,6 +161,8 @@ export function fakeGit(overrides: Partial<FakeState> = {}) {
         return { status: pending ? 8 : 0, stdout: JSON.stringify(answer), stderr: '' };
       }
       if (key === 'run rerun') {
+        const refusal = state.rerunFailures.shift();
+        if (refusal !== undefined) return failed(refusal);
         state.runStatus[args[2]] = 'queued';
         state.runAttempt[args[2]] = (state.runAttempt[args[2]] ?? 1) + 1;
         return ok();

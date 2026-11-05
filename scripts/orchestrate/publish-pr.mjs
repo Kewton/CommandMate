@@ -64,6 +64,7 @@ import {
   itemOption,
   refersToIssue,
   siblingPrNumbers,
+  pushHead,
   withGhRetry,
   workHeadOf,
 } from './pr-common.mjs';
@@ -246,7 +247,7 @@ export function main(argv, deps = {}) {
       fs.copyFileSync(fragment, moduleReferenceBackup(o.runDir, issue, item));
     }
 
-    const push = run('git', ['-C', o.worktree, 'push', '-u', 'origin', branch]);
+    const push = pushHead(run, o.worktree, ['-u', 'origin', branch], { branch, head, sleep, notice: error });
     if (push.status !== 0) {
       error(`publish #${issue}: git push failed: ${(push.stderr || push.stdout).trim()}`);
       return 1;

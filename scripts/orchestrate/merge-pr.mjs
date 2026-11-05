@@ -21,7 +21,10 @@
  *      `git push`;
  *   5. the PR's checks (6-3): no `fail` / `cancel` in `bucket` — a failed job is
  *      re-run once per HEAD (`gh run rerun --failed`, recorded in the `ci` stage
- *      so a rerun after a crash does not re-run it again); `Build` is `pass`
+ *      so a rerun after a crash does not re-run it again), once its run has finished:
+ *      GitHub refuses a run still going, and an early failure is always inside one (#4162).
+ *      That wait is under --ci-timeout, and a base or PR head that moves during it stops
+ *      the run; `Build` is `pass`
  *      unless the precheck of this HEAD built what the CI `Build` builds
  *      (`build`, `build-cli`, `build-server` all `ok`); `Unit Tests` is `pass`
  *      unless the verification passed verify.yaml's full `unit` gate — a
@@ -46,6 +49,8 @@
  * for `Unit Tests`. An Issue with several PRs is not closed by the merge of
  * one: with `--item` the Issue stays open unless `--close <N>` is given (the
  * last PR's call).
+ *
+ * `git push` here and in publish-pr.mjs goes through pr-common.mjs pushHead (#4162).
  *
  * Exit code: 0 merged (or already merged), 1 a condition or a command failed,
  * 2 usage error or a dirty tree, 3 the precheck is on hold, 4 the base moved during the CI wait,
@@ -78,6 +83,7 @@ import {
   markerFiles,
   missingRecords,
   prsOfBranch,
+  pushHead,
   withGhRetry,
   workHeadOf,
 } from './pr-common.mjs';
@@ -152,6 +158,15 @@ export function judgeChecks(checks, { needBuild, needUnit, last, required = [] }
 /** Workflow run ids in the checks' links (`…/actions/runs/<id>/job/<id>`). */
 export function runIdsOf(checks) {
   return [...new Set(checks.map((check) => /\/actions\/runs\/(\d+)/.exec(check.link ?? '')?.[1]).filter(Boolean))];
+}
+
+/** GitHub's answer to a re-run of a run still going: not sent, so it is asked again once the run ends (#4162). */
+const RUN_STILL_GOING = /already running/i;
+
+/** Of the run ids, those a check still pending belongs to: GitHub would refuse their re-run (#4162). */
+export function runsStillGoing(checks, ids) {
+  const going = runIdsOf(checks.filter((check) => check.bucket === 'pending'));
+  return ids.filter((id) => going.includes(id));
 }
 
 /** Whether the contract's test gate was `unit-related` (verify.yaml's or the contract's, wait-verify.mjs's note). */
@@ -443,7 +458,7 @@ export function main(argv, deps = {}) {
       }
     }
     if (head !== pr.headRefOid) {
-      const push = run('git', ['-C', o.worktree, 'push', 'origin', `HEAD:${branch}`]);
+      const push = pushHead(run, o.worktree, ['origin', `HEAD:${branch}`], { branch, head, sleep, notice: error });
       if (push.status !== 0) throw new Error(`git push failed: ${(push.stderr || push.stdout).trim()}`);
       log(`merge #${issue}: refresh=${refreshed ? 'merged' : 'unpushed'} marker=ok precheck=ok; pushed ${head.slice(0, 7)}`);
     }
@@ -460,6 +475,8 @@ export function main(argv, deps = {}) {
       (r) => r.issue === issue && inItem(r, item) && r.stage === 'ci' && r.head === head && /(^| )rerun=/.test(r.note ?? '')
     );
     let rerun = rerunDone;
+    // The runs whose end the re-run is waiting for; only ever set at a look where current.headRefOid === head.
+    let rerunWait = [];
     const registerDeadline = now().getTime() + Number(o.registerTimeout) * 1000;
     // Starts when this HEAD has its first check: until then the wait is GitHub's, not the CI's.
     let ciDeadline = null;
@@ -473,6 +490,11 @@ export function main(argv, deps = {}) {
         record('merge', 'ok', current.headRefOid, `pr=#${pr.number} merged-elsewhere`, current.headRefOid === head ? workHead : null);
         log(`merge #${issue}: #${pr.number} was merged meanwhile — issue ${o.close}: ${closeIssue(pr.number)}`);
         return 0;
+      }
+      if (current.headRefOid !== head && rerunWait.length > 0) {
+        record('ci', 'fail', head, `pr=#${pr.number} head-moved ${current.headRefOid.slice(0, 7)}`, workHead);
+        error(`merge #${issue}: the PR head moved to ${current.headRefOid.slice(0, 7)} while run ${rerunWait.join(',')} was finishing — not re-run, not merged; run again on the new HEAD`);
+        return 1;
       }
       if (current.headRefOid === head) {
         // gh pr checks exits 8 while checks are pending; the JSON is still on stdout.
@@ -496,6 +518,7 @@ export function main(argv, deps = {}) {
         }
         if (ciDeadline === null && checks.length > 0) ciDeadline = now().getTime() + Number(o.ciTimeout) * 1000;
         verdict = judgeChecks(checks, need);
+        rerunWait = [];
         if (verdict.state === 'fail') {
           const names = verdict.failed.map((check) => `${check.name}:${check.bucket}`).join(',');
           const ids = runIdsOf(verdict.failed);
@@ -504,7 +527,12 @@ export function main(argv, deps = {}) {
             error(`merge #${issue}: not merged — ${names} (6-3)`);
             return 1;
           }
-          for (const id of ids) {
+          rerunWait = runsStillGoing(checks, ids);
+          if (rerunWait.length > 0) {
+            log(`merge #${issue}: ${names} — waiting for run ${rerunWait.join(',')} to finish before re-running it (--ci-timeout ${o.ciTimeout}s)`);
+          }
+          const sent = [];
+          for (const id of rerunWait.length > 0 ? [] : ids) {
             // A rerun that is accepted raises the run's attempt number, whatever
             // its status: `completed` is both "before the rerun" and "the rerun
             // already finished". The attempt is read before sending; when it
@@ -527,10 +555,23 @@ export function main(argv, deps = {}) {
                 return after !== null && after > before ? '' : null;
               },
             });
-            if (again.status !== 0) throw new Error(`gh run rerun ${id} failed: ${(again.stderr || again.stdout).trim()}`);
+            if (again.status !== 0) {
+              // Not sent. A run this look did not see as going: asked again at a later look, under the same deadline.
+              if (RUN_STILL_GOING.test(`${again.stderr}\n${again.stdout}`)) {
+                rerunWait = [id];
+                break;
+              }
+              if (sent.length > 0) record('ci', 'fail', head, `checks=${verdict.summary} failed=${names} rerun=${sent.join(',')}`, workHead);
+              throw new Error(`gh run rerun ${id} failed: ${(again.stderr || again.stdout).trim()}`);
+            }
+            sent.push(id);
           }
-          rerun = true;
-          record('ci', 'fail', head, `checks=${verdict.summary} failed=${names} rerun=${ids.join(',')}`, workHead);
+          // Once per HEAD, by what was sent: a run refused above does not count unless another was accepted.
+          if (sent.length > 0) {
+            rerun = true;
+            rerunWait = [];
+            record('ci', 'fail', head, `checks=${verdict.summary} failed=${names} rerun=${sent.join(',')}`, workHead);
+          }
         } else if (verdict.state === 'ok' && !baseUnread) break;
       }
       if (ciDeadline === null && now().getTime() >= registerDeadline) {
@@ -538,7 +579,9 @@ export function main(argv, deps = {}) {
         return 124;
       }
       if (ciDeadline !== null && now().getTime() >= ciDeadline) {
-        const waitingFor = verdict.state === 'ok' ? `git fetch origin ${o.base}` : verdict.waiting.join(', ');
+        const waitingFor = rerunWait.length > 0
+          ? `run ${rerunWait.join(',')} to finish before re-running it`
+          : verdict.state === 'ok' ? `git fetch origin ${o.base}` : verdict.waiting.join(', ');
         error(`merge #${issue}: CI did not settle within ${o.ciTimeout}s (waiting for ${waitingFor})`);
         return 124;
       }

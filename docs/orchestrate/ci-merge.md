@@ -154,6 +154,25 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 
 `git fetch` が失敗した回は判定できないので、その回はマージせず、次の回に読み直す。読めないまま期限に達したら exit 124。
 
+## 6-3 落ちたジョブの再実行と run の完走
+
+（#4162。1 ジョブが早く落ちると、同じ run の残りが走っている間は `gh run rerun` が `already running` で拒まれ、`merge-pr.mjs` が exit 1 で止まっていた。#3783・#4149 で実測。）
+
+`merge-pr.mjs` は落ちたジョブの run に `pending` のチェックが残っている間は再実行を送らず、完走を待つ。追加の API は呼ばない（`gh pr checks` の `link` で run を見分ける）。チェックに現れていないのに `already running` で拒まれたときも、送っていないものとして待ちに戻る。
+
+- **待機の期限**: `--ci-timeout`（別の上限は設けない）。超えたら exit 124 で、`waiting for run <id> to finish before re-running it` と出す
+- **develop が進んだとき**: 見るたびの確認（「6-2 CI 待ちの間に develop が動いたとき」）で exit 4。再実行は送らない
+- **PR の HEAD が進んだとき**: 待ちの間に動いたら exit 1（`ci` 段に `head-moved <sha>` を記録）。古い HEAD の run を再実行しても、マージする HEAD の確認にならない。新しい HEAD で再実行すれば続きから進む
+- **再実行の回数**: 同じ HEAD で 1 回のまま。受理された分だけを `rerun=<id>` と記録するので、待っている間に `merge-pr.mjs` が止まっても、再開後に 1 回送る。受理の後は、また落ちれば `after-rerun` で止まる
+
+## 6-3 git push の 5xx
+
+`publish-pr.mjs` と `merge-pr.mjs` の `git push` は `pr-common.mjs` の `pushHead` を通る（#4162）。`gh` の書き込み（下の「gh の 5xx の再試行」）と違い、同じ SHA の push は送り直しても変わらないので、再試行する。
+
+- **対象**: HTTP 500・502・503・504、`RPC failed`、接続切れ。`[rejected]`・`[remote rejected]`（非 fast-forward、hook）は答えなので送り直さない
+- **応答が消えたとき**: 失敗のたびに `git ls-remote origin refs/heads/<branch>` を読み、リモートがこの HEAD なら成功として進む
+- **回数**: `gh` と同じ最大 4 回（10 秒・30 秒・60 秒あける）。尽きたら今までどおり exit 1
+
 ## 6-3 CI の登録までの時間と --ci-timeout
 
 待ちを 2 つに分ける（#4148）:

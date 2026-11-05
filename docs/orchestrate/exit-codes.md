@@ -41,7 +41,7 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
   `commandmatedev verify "$WT" --task "$TASK_ID" --gates env-clean` を再実行して、その項目が消えていれば合格として扱う。
 
   **外部要因の候補の表示**（#4148）: 2026-11-04 の run では `~/.s185h-operator-tests` が 1 件増えただけで、13:45 以降の検証の `env-clean` が worktree を問わず不合格になった。
-  `wait-verify.mjs` は env-clean が挙げた項目を `verify` の記録に `env-clean-items=<probe>:<+|-><名前>` と残し（`[self]` と免除された task session は除く）、同じ項目を別の Issue／work item の検証でも見たら、
+  `wait-verify.mjs` は env-clean が挙げた項目を `verify` の記録に `env-clean-items=<probe>:<+|-><名前>` と残し（`[self]` と免除された task session は除く。名前の空白・カンマ・`=`・`%` は記録の中だけ `%20` のように書く。#4162）、同じ項目を別の Issue／work item の検証でも見たら、
   `env-clean: <項目> in #4132, #4133 — candidate for an outside cause` と出す。`run-log.mjs status` も同じ行を出す（`--json` は `envCleanShared`）。
   **候補は裁定ではない。** 並行するワーカーのテストが同じ名前を作ることもあるので、帰属は下の 3 つで確かめる。作成元の特定は別の作業で、ここでは `$HOME` の項目を調べない・消さない。
 
