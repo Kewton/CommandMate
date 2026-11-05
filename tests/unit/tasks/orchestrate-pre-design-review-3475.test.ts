@@ -22,16 +22,26 @@ function section(start: string, end: string): string {
   return orchestrate.slice(s, e);
 }
 
-describe('orchestrate.md: 設計の事前レビュー（試行中の段）(#3475)', () => {
+describe('orchestrate.md: 設計の事前レビュー（2026-11-06 に常設）(#3475)', () => {
   const stage = `${section('### 2-4-4. 新しい仕組みの設計の事前レビュー', '### 2-5.')}\n${docSection('trials.md', '2-4-4 事前レビューの書き方と記録')}`;
 
-  it('段の見出しが 2-4-3 の後・2-5 の前にあり、期限が書いてある', () => {
+  it('段の見出しが 2-4-3 の後・2-5 の前にあり、試行の期限と集計の手順は残っていない', () => {
     const i243 = orchestrate.indexOf('### 2-4-3.');
-    const i244 = orchestrate.indexOf('### 2-4-4. 新しい仕組みの設計の事前レビュー（試行中の段、2026-11-06 まで）');
+    const i244 = orchestrate.indexOf('### 2-4-4. 新しい仕組みの設計の事前レビュー\n');
     const i25 = orchestrate.indexOf('### 2-5.');
     expect(i243).toBeLessThan(i244);
     expect(i244).toBeLessThan(i25);
-    expect(stage).toContain('2026-11-06 まで（4 週間）');
+    expect(stage).toContain('安全策**として常設した');
+    expect(stage).not.toContain('期限つきの試行');
+    expect(orchestrate).not.toContain('2-4-4-期限の集計の手順');
+    expect(orchestrate).not.toContain('2-4-4 新しい仕組みの設計の事前レビュー（試行中');
+  });
+
+  it('起票の段のレビューで代える条件が 4 つあり、「Codex 済み」の一言では代えない', () => {
+    expect(stage).toContain('「Codex 済み」の一言では代えない');
+    const cond = docSection('trials.md', '2-4-4 起票の段のレビューで代える条件');
+    for (const n of ['1. 設計の穴', '2. 見せた文書の版', '3. 原因の分析（Phase 2.5）の後', '4. 採った指摘を契約']) expect(cond).toContain(n);
+    expect(cond).toContain('その差分だけ事前レビューをする');
   });
 
   it('対象の条件（状態・副作用・寿命の変更）と、接頭辞で判定しないことが書いてある', () => {
@@ -49,6 +59,7 @@ describe('orchestrate.md: 設計の事前レビュー（試行中の段）(#3475
 
   it('記録は consistency-review.md の表に列を足す形で、Phase 0 の一覧にも入っている', () => {
     expect(stage).toContain('「事前レビューの有無」の列');
+    expect(stage).toContain('返答の文から推して決めない');
     expect(`${orchestrate}\n${docSection('trials.md', '5-2b 整合性レビューの進め方と記録')}`).toContain('| 処置 | 事前レビューの有無 |');
     expect(orchestrate).toContain('2-4-4 新しい仕組みの設計の事前レビュー');
   });
