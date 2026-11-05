@@ -132,8 +132,21 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
 
   const finishedOk = run?.ok === true;
   useEffect(() => {
-    if (finishedOk) setRefreshToken((token) => token + 1);
+    if (!finishedOk) return;
+    setRefreshToken((token) => token + 1);
+    // Issue #4160: an "ended" from before this update is not about the new version.
+    setRestarted({});
   }, [finishedOk]);
+
+  // Issue #4160: instance ids repeat across worktrees, and the pane keeps this card
+  // across a switch: what A's restart said is not about B's row.
+  const worktreeIdRef = useRef(worktreeId);
+  worktreeIdRef.current = worktreeId;
+  useEffect(() => {
+    setRestarted({});
+    setRestarting({});
+    setRestartError(null);
+  }, [worktreeId]);
 
   const runningFor = useCallback(
     (tool: string): AgentUpdateInstance[] =>
@@ -167,8 +180,10 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
       } finally {
         clearTimeout(timer);
       }
+      if (worktreeIdRef.current !== worktreeId) return;
       if (outcome === 'unknown') {
         const runningNow = await readRunningInstances(worktreeId);
+        if (worktreeIdRef.current !== worktreeId) return;
         if (runningNow === null) {
           setRestartError(t('agentUpdates.restartUnknown'));
         } else if (runningNow[instance.id] === true) {
@@ -219,6 +234,9 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
         <ul className="space-y-2" data-testid="agent-updates-rows">
           {rows.map((row: AgentVersionView) => {
             const liveInstances = runningFor(row.tool);
+            const restartRows = (instances ?? []).filter(
+              (inst) => inst.cliTool === row.tool && (running[inst.id] || restarted[inst.id])
+            );
             const canUpdate = row.updatable && row.installed !== null;
             return (
               <li
@@ -301,20 +319,25 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
                   </p>
                 )}
 
+                {/* Issue #4160: the read after a restart takes the instance off the
+                    running list, and the result has to outlive that. The button does
+                    not: there is nothing left for it to end. */}
                 {finishedOk &&
                   run?.tool === row.tool &&
-                  liveInstances.map((inst) => (
+                  restartRows.map((inst) => (
                     <div key={inst.id} className="mt-2 flex items-center gap-2">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={restarted[inst.id] || restarting[inst.id]}
-                        onClick={() => void restart(inst)}
-                        data-testid={`agent-updates-restart-${inst.id}`}
-                      >
-                        <RotateCcw className="h-4 w-4" aria-hidden="true" />
-                        {t('agentUpdates.restart', { alias: inst.alias })}
-                      </Button>
+                      {running[inst.id] && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={restarted[inst.id] || restarting[inst.id]}
+                          onClick={() => void restart(inst)}
+                          data-testid={`agent-updates-restart-${inst.id}`}
+                        >
+                          <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                          {t('agentUpdates.restart', { alias: inst.alias })}
+                        </Button>
+                      )}
                       {restarted[inst.id] && (
                         <span className="text-xs text-muted-foreground">
                           {t('agentUpdates.restarted')}
