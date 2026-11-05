@@ -164,6 +164,43 @@ async function enableAutoYes(
   return result;
 }
 
+/** The command that does what this send's --auto-yes asked for, on its own. */
+function enableAutoYesCommand(worktreeId: string, options: SendOptions, agent: string | undefined, instanceId: string | undefined): string {
+  return [
+    `commandmate auto-yes ${worktreeId} --enable --duration ${options.duration ?? DEFAULT_DURATION_FLAG}`,
+    ...(instanceId ? [`--instance ${instanceId}`] : []),
+    ...(agent && agent !== instanceId ? [`--agent ${agent}`] : []),
+    ...(options.stopPattern ? [`--stop-pattern '${options.stopPattern.replace(/'/g, `'\\''`)}'`] : []),
+    ...(options.autoYesAnswerMode ? [`--answer-mode ${options.autoYesAnswerMode}`] : []),
+  ].join(' ');
+}
+
+/**
+ * {@link enableAutoYes} once the message has gone out (Issue #4159). Whatever fails here is
+ * a warning and the send stays a success, as with {@link registerInstance}: an error exit
+ * reads as "not sent", and a script reading it would send the message twice. A 5xx or no
+ * answer may have armed it, and a grant on before this send may still be, so this says "may".
+ */
+async function enableAutoYesAfterSend(
+  client: ApiClient,
+  worktreeId: string,
+  options: SendOptions,
+  durationMs: number,
+  agent: string | undefined,
+  instanceId: string | undefined,
+  contractPolicy: AutoYesContractPolicy | null
+): Promise<void> {
+  try {
+    await enableAutoYes(client, worktreeId, options, durationMs, agent, instanceId, contractPolicy);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.error(
+      `Warning: the message was sent, but Auto-Yes may not be on with this send's terms (${reason}). `
+        + `Do not send it again. To enable it: ${enableAutoYesCommand(worktreeId, options, agent, instanceId)}`
+    );
+  }
+}
+
 /**
  * Register an ad-hoc --instance session into the agent-instance roster
  * (Issue #1000: --register). No-ops when already registered so `send
@@ -807,6 +844,11 @@ reads them again right before the first key, so a process replaced in between ge
 nothing (exit 32). \`launch-worker\` passes what its starting message fixed. With
 --contract too, the contract is recorded as a failed task.
 
+--auto-yes applied after the message (--model on a tool that arms after it, or a grant
+already on) cannot take the send back: if it fails, that is a warning and exit 0, so do not
+send it again; the warning has the command that enables it (Issue #4159). Armed before the
+message, a failure is an error with nothing sent.
+
 With a role or a pin, --auto-yes, --contract or --reply-to names the default target it
 read in every request, so a default changed meanwhile does not split them. --auto-yes does not outlive a refusal: a grant this send armed is
 withdrawn when nothing was typed, and a grant already on is left as it was until the
@@ -1063,9 +1105,9 @@ hold or the start was refused because of its role (nothing typed).
         // Issue #576: Enable auto-yes AFTER send when --model is specified
         // This avoids auto-yes interfering with the /model command interaction.
         // A failure here does not fail the task: the message was delivered and
-        // the task is running, which is what the row already says.
+        // the task is running, which is what the row already says. Nor the command (Issue #4159).
         if (applyAutoYesAfterSend) {
-          await enableAutoYes(client, worktreeId, options, autoYesDurationMs, agent, instanceId, contractPolicy);
+          await enableAutoYesAfterSend(client, worktreeId, options, autoYesDurationMs, agent, instanceId, contractPolicy);
         }
       } catch (error) {
         handleCommandError(error);

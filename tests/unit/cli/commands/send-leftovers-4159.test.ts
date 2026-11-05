@@ -7,6 +7,7 @@
  *    from one already on. It leaves it on, and says so.
  *  - `--register` without a role writes after the message went out: whatever fails there,
  *    the send has succeeded, and sending it again would deliver it twice.
+ *  - So does the enable that comes after the message, for the same reason.
  *
  * The real grants and the moments between the requests are driven against the real route in
  * tests/integration/cli-roles-4116.test.ts. This fakes what no current route can answer.
@@ -34,6 +35,12 @@ interface Server {
   rosterRead: { status: number; body: Record<string, unknown> } | 'network' | null;
   saveRefusal: { status: number; body: Record<string, unknown> } | null;
   roster: { id: string; cliTool: string; alias: string; order: number }[];
+  /** Set to answer every enable with this instead. */
+  armRefusal: { status: number; body: Record<string, unknown> } | 'network' | null;
+  /** On before this send: a send that reads first leaves its terms to after the message. */
+  onBefore: boolean;
+  /** The statuses reported for the contract's task. */
+  taskStatuses: unknown[];
 }
 
 function fakeServer(overrides: Partial<Server> = {}): Server {
@@ -48,9 +55,12 @@ function fakeServer(overrides: Partial<Server> = {}): Server {
     rosterRead: null,
     saveRefusal: null,
     roster: [{ id: 'claude', cliTool: 'claude', alias: 'Claude', order: 0 }],
+    armRefusal: null,
+    onBefore: false,
+    taskStatuses: [],
     ...overrides,
   };
-  let armed = false;
+  let armed = state.onBefore;
   const respond = (status: number, body: unknown): Response =>
     ({
       ok: status >= 200 && status < 300,
@@ -85,8 +95,18 @@ function fakeServer(overrides: Partial<Server> = {}): Server {
     if (url.includes('/auto-yes') && method === 'POST') {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       state.autoYesPosts.push({ url, body });
+      const refusal = body.enabled === true ? state.armRefusal : null;
+      if (refusal === 'network') throw new TypeError('fetch failed');
+      if (refusal) return respond(refusal.status, refusal.body);
       armed = body.enabled === true;
       return respond(200, armed ? grant() : { enabled: false, expiresAt: null });
+    }
+    if (url.endsWith(`/api/worktrees/${WT}/tasks`) && method === 'POST') {
+      return respond(201, { task: { id: 'task-1' }, message: 'from the contract' });
+    }
+    if (url.includes('/api/tasks/') && method === 'PATCH') {
+      state.taskStatuses.push((JSON.parse(String(init?.body)) as { status: unknown }).status);
+      return respond(200, {});
     }
     if (url.endsWith('/send') && method === 'POST') {
       state.sends += 1;
@@ -320,6 +340,105 @@ describe('[#4159]', () => {
 
       expect(server.patches).toBe(0);
       expect(errors.join('\n')).not.toContain('do not send it again');
+    });
+  });
+
+  describe('the enable that comes after the message', () => {
+    const FOREIGN = { status: 409, body: { error: 'another server', code: 'SESSION_OWNED_ELSEWHERE' } };
+    const afterSend = (...args: string[]): Promise<unknown> =>
+      run('--instance', 'copilot', '--model', 'gpt-5-mini', '--auto-yes', ...args);
+    const ENABLE = `commandmate auto-yes ${WT} --enable --duration 1h --instance copilot`;
+
+    it.each<[string, Server['armRefusal']]>([
+      ['a refusal', FOREIGN],
+      ['a 500', { status: 500, body: { error: 'boom' } }],
+      ['no answer', 'network'],
+    ])('%s: sent once, exit 0, not to send again, and how to enable it', async (_label, armRefusal) => {
+      const server = fakeServer({ armRefusal });
+
+      expect(await afterSend()).toBeNull();
+
+      expect(process.exit).not.toHaveBeenCalled();
+      expect(server.sends).toBe(1);
+      const text = errors.join('\n');
+      expect(text).toContain('Message sent.');
+      expect(text).toMatch(/^Warning: the message was sent, but Auto-Yes/m);
+      expect(text).toMatch(/do not send it again/i);
+      expect(text).toContain(ENABLE);
+      expect(text).not.toContain('Auto-yes enabled.');
+    });
+
+    it('the command it names carries the terms of this send, and the tool an id does not say', async () => {
+      fakeServer({ armRefusal: FOREIGN });
+
+      await run(
+        '--instance', 'copilot-2', '--model', 'gpt-5-mini', '--auto-yes',
+        '--duration', '3h', '--stop-pattern', "it's done", '--auto-yes-answer-mode', 'careful',
+      );
+
+      expect(errors.join('\n')).toContain(
+        `commandmate auto-yes ${WT} --enable --duration 3h --instance copilot-2 --agent copilot --stop-pattern 'it'\\''s done' --answer-mode careful`,
+      );
+    });
+
+    it('with a contract: stdout is the task id alone, and the task stays running', async () => {
+      const server = fakeServer({ armRefusal: FOREIGN });
+
+      await createSendCommand().parseAsync([
+        'node', 'send', WT, '--contract', '.commandmate/tasks/x.yaml',
+        '--instance', 'copilot', '--model', 'gpt-5-mini', '--auto-yes',
+      ]);
+
+      expect(stdout).toEqual(['task-1']);
+      expect(server.taskStatuses).toEqual(['running']);
+      expect(process.exit).not.toHaveBeenCalled();
+    });
+
+    it('send has no --json: there is no other form of this outcome to keep in step', () => {
+      expect(createSendCommand().options.map((option) => option.long)).not.toContain('--json');
+    });
+
+    it('a grant already on, whose new terms come after the message: the same, and it does not say it is off', async () => {
+      const server = fakeServer({ armRefusal: FOREIGN, onBefore: true });
+
+      expect(await run('--instance', 'codex', '--auto-yes', '--expect-no-role')).toBeNull();
+
+      expect(server.sends).toBe(1);
+      const text = errors.join('\n');
+      expect(text).toMatch(/do not send it again/i);
+      expect(text).toContain(`commandmate auto-yes ${WT} --enable --duration 1h --instance codex`);
+      expect(text).toMatch(/may not be on with this send's terms/);
+    });
+
+    it('control: it goes through, with no warning', async () => {
+      const server = fakeServer();
+
+      expect(await afterSend()).toBeNull();
+
+      expect(server.autoYesPosts.map(({ body }) => body.enabled)).toEqual([true]);
+      expect(errors.join('\n')).toContain('Auto-yes enabled.');
+      expect(errors.join('\n')).not.toContain('Warning');
+    });
+
+    it.each<[string, string[]]>([
+      ['no --model', ['--instance', 'codex', '--auto-yes']],
+      ['--model on claude, which arms first', ['--instance', 'claude', '--model', 'opus', '--auto-yes']],
+    ])('control: an enable before the send, %s, still fails the command with nothing sent', async (_label, args) => {
+      const server = fakeServer({ armRefusal: FOREIGN });
+
+      expect(((await run(...args)) as Error).message).toMatch(/^exit:[1-9]/);
+
+      expect(server.sends).toBe(0);
+      expect(errors.join('\n')).not.toContain('the message was sent');
+    });
+
+    it('control: a send that fails never gets as far as the enable', async () => {
+      const server = fakeServer({ sendAnswer: UNKNOWN, armRefusal: FOREIGN });
+
+      expect(((await afterSend()) as Error).message).toBe('exit:99');
+
+      expect(server.autoYesPosts).toEqual([]);
+      expect(errors.join('\n')).not.toContain('the message was sent');
     });
   });
 });
