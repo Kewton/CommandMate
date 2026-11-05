@@ -438,6 +438,73 @@ options:
   });
 });
 
+describe('gates[].mutexWaitSec (Issue #4162)', () => {
+  const blockedRepo = (sentinel: string, budget: string) =>
+    createRepo(`
+version: 1
+gates:
+  - id: blocked
+    command: "sh -c 'echo ran > ${sentinel}'"
+${budget}
+    mutex: held-elsewhere
+options:
+  baseRef: main
+`);
+
+  it('gives up on the wait budget, not on a longer timeoutSec', async () => {
+    const sentinel = join(tempDir('gate-mutex-wait-sentinel-'), 'ran.txt');
+    const repo = blockedRepo(sentinel, '    timeoutSec: 600\n    mutexWaitSec: 1');
+    registerWorktree('wt-wait-short', repo);
+    const held = await acquireMachineLock('held-elsewhere', { root: lockRoot, timeoutMs: 1000 });
+    expect(held.acquired).toBe(true);
+
+    const runId = await runToCompletion('wt-wait-short', repo);
+
+    const gate = gatesById(runId).get('blocked');
+    expect(gate?.status).toBe('skipped');
+    expect(gate?.logTail).toContain('whole 1s budget');
+    expect(gate?.logTail).toContain("raise the gate's mutexWaitSec");
+    expect(existsSync(sentinel)).toBe(false);
+    if (held.acquired) held.handle.release();
+  });
+
+  it('keeps waiting past timeoutSec when the wait budget is longer, and then runs the command', async () => {
+    const sentinel = join(tempDir('gate-mutex-wait-sentinel-'), 'ran.txt');
+    const repo = blockedRepo(sentinel, '    timeoutSec: 1\n    mutexWaitSec: 30');
+    registerWorktree('wt-wait-long', repo);
+    const held = await acquireMachineLock('held-elsewhere', { root: lockRoot, timeoutMs: 1000 });
+    expect(held.acquired).toBe(true);
+    // Freed after timeoutSec has gone by: with one shared budget this gate is already SKIPped.
+    const release = setTimeout(() => {
+      if (held.acquired) held.handle.release();
+    }, 1500);
+
+    try {
+      const runId = await runToCompletion('wt-wait-long', repo);
+      expect(gatesById(runId).get('blocked')?.status).toBe('passed');
+      expect(existsSync(sentinel)).toBe(true);
+    } finally {
+      clearTimeout(release);
+    }
+  });
+
+  it('negative control: without the key the wait budget is still timeoutSec', async () => {
+    const sentinel = join(tempDir('gate-mutex-wait-sentinel-'), 'ran.txt');
+    const repo = blockedRepo(sentinel, '    timeoutSec: 1');
+    registerWorktree('wt-wait-none', repo);
+    const held = await acquireMachineLock('held-elsewhere', { root: lockRoot, timeoutMs: 1000 });
+    expect(held.acquired).toBe(true);
+
+    const runId = await runToCompletion('wt-wait-none', repo);
+
+    const gate = gatesById(runId).get('blocked');
+    expect(gate?.status).toBe('skipped');
+    expect(gate?.logTail).toContain('whole 1s budget');
+    expect(gate?.logTail).toContain("raise the gate's timeoutSec");
+    if (held.acquired) held.handle.release();
+  });
+});
+
 describe('runner / CLI mirror', () => {
   it('spells the mutex marker identically on both sides', () => {
     // src/cli is compiled by tsconfig.cli.json alone, with no path aliases, so

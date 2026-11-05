@@ -40,6 +40,14 @@ export interface FakeState {
   issueState: 'OPEN' | 'CLOSED';
   createdNumber: number;
   pushFails: boolean;
+  /** One stderr per failing `git push`, in order (#4162); the push after them goes through. */
+  pushFailures: string[];
+  /** `git config` fails (#4162). */
+  configFails?: boolean;
+  /** The SHA `git ls-remote origin refs/heads/<branch>` answers (#4162). */
+  remoteHead: string;
+  /** One stderr per refused `gh run rerun`, in order (#4162). */
+  rerunFailures: string[];
   /** `%s` of a commit by sha; others get the default subject. */
   subjects: Record<string, string>;
   /** `gh api repos/<repo>/issues/<N> --jq .title` (#4076 B); null answers like an Issue gh could not read. */
@@ -69,6 +77,9 @@ export function fakeGit(overrides: Partial<FakeState> = {}) {
     issueState: 'OPEN',
     createdNumber: 9001,
     pushFails: false,
+    pushFailures: [],
+    remoteHead: DEVELOP,
+    rerunFailures: [],
     subjects: {},
     issueTitle: 'feat(orchestrate): publish and merge',
     runStatus: {},
@@ -79,6 +90,8 @@ export function fakeGit(overrides: Partial<FakeState> = {}) {
   let checksIndex = 0;
   const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
   const failed = (stderr: string, status = 1) => ({ status, stdout: '', stderr });
+
+  let pushed: string | null = null;
 
   const run = (command: string, args: string[], opts: { cwd?: string; env?: Record<string, string> } = {}) => {
     calls.push({ command, args, env: opts.env });
@@ -110,9 +123,15 @@ export function fakeGit(overrides: Partial<FakeState> = {}) {
       if (verb === 'grep') return state.markers ? ok(state.markers) : failed('', 1);
       if (verb === 'push') {
         if (state.pushFails) return failed('rejected');
-        for (const pr of state.prs) if (pr.state === 'OPEN' && pr.headRefName === state.branch) pr.headRefOid = state.head;
+        const failure = state.pushFailures.shift();
+        if (failure !== undefined) return failed(failure);
+        // What the refspec names, not what HEAD has become (#4162).
+        pushed = sub[sub.length - 1].split(':')[0];
+        for (const pr of state.prs) if (pr.state === 'OPEN' && pr.headRefName === state.branch) pr.headRefOid = pushed;
         return ok();
       }
+      if (verb === 'config') return state.configFails ? failed('error: could not lock config file') : ok();
+      if (verb === 'ls-remote') return ok(`${state.remoteHead}\t${sub[sub.length - 1]}\n`);
       throw new Error(`unexpected git ${sub.join(' ')}`);
     }
     if (command === 'gh') {
@@ -126,7 +145,7 @@ export function fakeGit(overrides: Partial<FakeState> = {}) {
         const pr: Pr = {
           number: state.createdNumber,
           state: 'OPEN',
-          headRefOid: state.head,
+          headRefOid: pushed ?? state.head,
           url: `https://github.com/Kewton/CommandMate/pull/${state.createdNumber}`,
           title: args[args.indexOf('--title') + 1],
           headRefName: args[args.indexOf('--head') + 1],
@@ -149,6 +168,8 @@ export function fakeGit(overrides: Partial<FakeState> = {}) {
         return { status: pending ? 8 : 0, stdout: JSON.stringify(answer), stderr: '' };
       }
       if (key === 'run rerun') {
+        const refusal = state.rerunFailures.shift();
+        if (refusal !== undefined) return failed(refusal);
         state.runStatus[args[2]] = 'queued';
         state.runAttempt[args[2]] = (state.runAttempt[args[2]] ?? 1) + 1;
         return ok();

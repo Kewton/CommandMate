@@ -211,7 +211,7 @@ CI の待ち（落ちたジョブは HEAD ごとに 1 回だけ再実行）・de
 ```bash
 node scripts/orchestrate/merge-pr.mjs --run-dir "$RUN_DIR" --issues "$RUN_ISSUES" \
   --issue "$issue" --worktree "$WT_DIR"
-echo "exit=$?"   # 0 → マージ済み / 1 → 出力の欠けたもの・落ちた段を読む（CI 失敗はワーカーに修正指示、最大3回） / 2 → 作業ツリーが汚れている / 124 → CI が収まらない
+echo "exit=$?"   # 0 → マージ済み / 1 → 出力の欠けたもの・落ちた段を読む（CI 失敗はワーカーに修正指示、最大3回） / 2 → 作業ツリーが汚れている / 3 → 保留（取り込み後の precheck がロック待ち。再実行すれば続きから進む） / 4 → CI 待ちの間に develop が進んだ（再実行で取り込み直す） / 124 → CI が --register-timeout（既定 600 秒）までに 1 つも登録されない、または登録から --ci-timeout（既定 3600 秒）に収まらない
 ```
 
 マージ後は develop を更新してビルドを検証する:

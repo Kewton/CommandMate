@@ -41,7 +41,7 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
   `commandmatedev verify "$WT" --task "$TASK_ID" --gates env-clean` を再実行して、その項目が消えていれば合格として扱う。
 
   **外部要因の候補の表示**（#4148）: 2026-11-04 の run では `~/.s185h-operator-tests` が 1 件増えただけで、13:45 以降の検証の `env-clean` が worktree を問わず不合格になった。
-  `wait-verify.mjs` は env-clean が挙げた項目を `verify` の記録に `env-clean-items=<probe>:<+|-><名前>` と残し（`[self]` と免除された task session は除く）、同じ項目を別の Issue／work item の検証でも見たら、
+  `wait-verify.mjs` は env-clean が挙げた項目を `verify` の記録に `env-clean-items=<probe>:<+|-><名前>` と残し（`[self]` と免除された task session は除く。名前の空白・カンマ・`=`・`%` は記録の中だけ `%20` のように書く。#4162）、同じ項目を別の Issue／work item の検証でも見たら、
   `env-clean: <項目> in #4132, #4133 — candidate for an outside cause` と出す。`run-log.mjs status` も同じ行を出す（`--json` は `envCleanShared`）。
   **候補は裁定ではない。** 並行するワーカーのテストが同じ名前を作ることもあるので、帰属は下の 3 つで確かめる。作成元の特定は別の作業で、ここでは `$HOME` の項目を調べない・消さない。
 
@@ -93,7 +93,7 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
 ## 3-4 99 の対応
 
 `wait-verify.mjs` の exit 99 は「検証が裁定に至らなかった」（裁定不能。作業の不合格ではない）。ゲートの `mutex`（`cpu.heavy` など）が
-`timeoutSec` の間ずっと埋まっていて、コマンドを始められなかったゲートは `reason=mutex-wait` の SKIP になり、run は exit 99 になる
+待ちの上限（`mutexWaitSec`、無ければ `timeoutSec`）の間ずっと埋まっていて、コマンドを始められなかったゲートは `reason=mutex-wait` の SKIP になり、run は exit 99 になる
 （並列の検証が多いとき。2026-10-25〜26 の run では 23 回中 6 回）。
 
 - **自動で並び直す**（#3938）: `wait-verify.mjs` は、`verify show <run> --json` で読んだ run のゲートについて、SKIP がすべて
@@ -110,6 +110,19 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
 - **上限に達したとき**（要約に `mutex-requeue-limit`）・**HEAD が動いたとき**（`mutex-requeue-stopped=head-moved`）: exit 99 のまま、
   Auto-Yes は切られていない（3-3 の確認が始める再検証が裁定に至らなかったときも同じ）。並列の検証が減ってから（または直列に）`wait-verify.mjs --after-reinstruct --task <id>` で検証し直す。
   再指示の回数には数えない。HEAD が動いたときは、ワーカーがまだ作業中でないかを capture で先に確かめる
+
+### 待ちの上限を分ける
+
+（#4162。2026-11-05 の run で 2 本が 5400 秒の待ちで SKIP になり、最初からやり直した。）
+
+ゲートの `mutexWaitSec` は mutex の待ちの上限で、`timeoutSec`（コマンドの実行の上限）とは別に数える。無ければ `timeoutSec` を使う（今までと同じ）。`mutex` の無いゲートには書けない。範囲は 1〜86400 秒。verify.yaml の `gates` と契約の `gateDefinitions` のどちらにも書ける。
+
+**`.commandmate/verify.yaml` と `contract.mjs` の `UNIT_RELATED_GATE` にはまだ宣言していない。** v1 のキーは閉じた集合なので、次の 2 つが揃う前に宣言すると検証が始まらない:
+
+1. 稼働中のサーバをこの変更より後のビルドにする（古いサーバは verify.yaml を丸ごと拒否し、`gateDefinitions` の契約は `send` で拒否する）
+2. `.claude/skills/cmate-verify/scripts/verify-run.sh`（と `.agents/` の写し）が `mutexWaitSec` を読む（今は `unknown gate key` で止まる。`tests/unit/verification/gate-mutex-wait-4162.test.ts` が、standalone ランナーの読めないキーを verify.yaml に書くと落ちる）
+
+揃うまでは、今までどおり上の「自動で並び直す」が受ける。
 
 ## 3-4 21 の対応
 
