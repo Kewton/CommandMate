@@ -39,7 +39,7 @@ export interface AgentRosterSnapshot {
  * Fetch the roster with its revision, for a write that replaces it (Issue #4132).
  */
 export async function fetchAgentRoster(client: ApiClient, worktreeId: string): Promise<AgentRosterSnapshot> {
-  const worktree = await client.get<WorktreeDetailResponse & { rosterRevision?: unknown }>(`/api/worktrees/${worktreeId}`);
+  const worktree = await client.get<WorktreeDetailResponse>(`/api/worktrees/${worktreeId}`);
   // Issue #1357: a current daemon always includes agentInstances (an empty array
   // when the worktree has no instances). Its absence means the running daemon
   // predates the roster API, so silently returning [] here would look to the user
@@ -50,7 +50,8 @@ export async function fetchAgentRoster(client: ApiClient, worktreeId: string): P
     ['agentInstances'],
     'GET /api/worktrees/:id (agent-instance roster)'
   );
-  const revision = worktree.rosterRevision;
+  // The type is what the route should answer. An answer of another type is no revision.
+  const revision: unknown = validated.rosterRevision;
   return {
     instances: validated.agentInstances,
     ...(typeof revision === 'string' ? { revision } : {}),
@@ -92,7 +93,7 @@ const MAX_ROSTER_CHANGE_RETRIES = 2;
  * @throws {RoleCliError} `roster_changed` (exit 31): the roster kept moving through every
  *   attempt, so nothing was saved to it (Issue #4149). What the command did before the save
  *   stands: `remove --kill` has stopped the session. `send --register` has sent the message,
- *   and turns this into a warning for that reason.
+ *   and turns this, like any other failure here (Issue #4159), into a warning for that reason.
  * @throws {ApiError} The server refused for another reason
  */
 export async function saveRosterChange(

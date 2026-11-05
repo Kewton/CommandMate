@@ -164,14 +164,51 @@ async function enableAutoYes(
   return result;
 }
 
+/** The command that does what this send's --auto-yes asked for, on its own. */
+function enableAutoYesCommand(worktreeId: string, options: SendOptions, agent: string | undefined, instanceId: string | undefined): string {
+  return [
+    `commandmate auto-yes ${worktreeId} --enable --duration ${options.duration ?? DEFAULT_DURATION_FLAG}`,
+    ...(instanceId ? [`--instance ${instanceId}`] : []),
+    ...(agent && agent !== instanceId ? [`--agent ${agent}`] : []),
+    ...(options.stopPattern ? [`--stop-pattern '${options.stopPattern.replace(/'/g, `'\\''`)}'`] : []),
+    ...(options.autoYesAnswerMode ? [`--answer-mode ${options.autoYesAnswerMode}`] : []),
+  ].join(' ');
+}
+
+/**
+ * {@link enableAutoYes} once the message has gone out (Issue #4159). Whatever fails here is
+ * a warning and the send stays a success, as with {@link registerInstance}: an error exit
+ * reads as "not sent", and a script reading it would send the message twice. A 5xx or no
+ * answer may have armed it, and a grant on before this send may still be, so this says "may".
+ */
+async function enableAutoYesAfterSend(
+  client: ApiClient,
+  worktreeId: string,
+  options: SendOptions,
+  durationMs: number,
+  agent: string | undefined,
+  instanceId: string | undefined,
+  contractPolicy: AutoYesContractPolicy | null
+): Promise<void> {
+  try {
+    await enableAutoYes(client, worktreeId, options, durationMs, agent, instanceId, contractPolicy);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.error(
+      `Warning: the message was sent, but Auto-Yes may not be on with this send's terms (${reason}). `
+        + `Do not send it again. To enable it: ${enableAutoYesCommand(worktreeId, options, agent, instanceId)}`
+    );
+  }
+}
+
 /**
  * Register an ad-hoc --instance session into the agent-instance roster
  * (Issue #1000: --register). No-ops when already registered so `send
  * --register` is safe to repeat across multiple messages to the same instance.
  *
- * This runs after the message went out, so a roster that keeps moving (Issue #4149) is a
- * warning and the send stays a success: exit 31 means nothing was sent, and a script
- * reading it would send the message twice. Any other failure is still the command's.
+ * This runs after the message went out, so whatever fails here (a roster that keeps moving,
+ * Issue #4149; anything else, Issue #4159) is a warning and the send stays a success: an
+ * error exit reads as "not sent", and a script reading it would send the message twice.
  */
 async function registerInstance(
   client: ApiClient,
@@ -179,14 +216,18 @@ async function registerInstance(
   instanceId: string,
   cliTool: string
 ): Promise<void> {
-  // Issue #4132: the whole list is replaced, so an add landing after this read has to
-  // survive it. Built again on a moved roster, where this one may be there by now.
-  const roster = await fetchAgentRoster(client, worktreeId);
+  const addCommand = `commandmate instances ${worktreeId} add --agent ${cliTool} --id ${instanceId}`;
   try {
+    // Issue #4132: the whole list is replaced, so an add landing after this read has to
+    // survive it. Built again on a moved roster, where this one may be there by now.
+    const roster = await fetchAgentRoster(client, worktreeId);
     const saved = await saveRosterChange(client, worktreeId, roster, (base) => {
       if (base.some((inst) => inst.id === instanceId)) return null;
       if (base.length >= MAX_AGENT_INSTANCES) {
-        console.error(`Warning: could not register '${instanceId}' in the roster (already at the ${MAX_AGENT_INSTANCES}-instance limit).`);
+        console.error(
+          `Warning: the message was sent, but could not register '${instanceId}' in the roster (already at the ${MAX_AGENT_INSTANCES}-instance limit). `
+            + `Do not send it again. Make room, then: ${addCommand}`
+        );
         return null;
       }
       const added = { id: instanceId, cliTool, alias: defaultAlias(cliTool, instanceId), order: base.length };
@@ -194,10 +235,15 @@ async function registerInstance(
     });
     if (saved !== null) console.error(`Instance registered in roster: ${instanceId}`);
   } catch (error) {
-    if (!(error instanceof RoleCliError) || error.code !== 'roster_changed') throw error;
+    if (error instanceof RoleCliError && error.code === 'roster_changed') {
+      console.error(`Warning: the message was sent, but '${instanceId}' was not added to the roster: it kept changing. Do not send it again. To register it: ${addCommand}`);
+      return;
+    }
+    // A save answered by a 5xx or not at all may have happened, so this does not say it did not.
+    const reason = error instanceof Error ? error.message : String(error);
     console.error(
-      `Warning: the message was sent, but '${instanceId}' was not added to the roster: it kept changing. `
-        + `Do not send it again. To register it: commandmate instances ${worktreeId} add --agent ${cliTool} --id ${instanceId}`
+      `Warning: the message was sent, but registering '${instanceId}' in the roster failed, so it may not be there (${reason}). `
+        + `Do not send it again. Check with \`commandmate instances ${worktreeId}\`. To register it: ${addCommand}`
     );
   }
 }
@@ -426,7 +472,7 @@ async function readAutoYes(
   client: ApiClient,
   worktreeId: string,
   target: { cliToolId: string; instanceId: string }
-): Promise<{ enabled?: unknown; expiresAt?: unknown; answerMode?: unknown } | null> {
+): Promise<Partial<AutoYesSetResult> | null> {
   try {
     const query = new URLSearchParams({ cliToolId: target.cliToolId, instanceId: target.instanceId });
     return await client.get(`/api/worktrees/${worktreeId}/auto-yes?${query.toString()}`);
@@ -436,8 +482,9 @@ async function readAutoYes(
 }
 
 /** The name the server gives a grant (Issue #4132). An older server gives none. */
-function grantIdOf(state: unknown): string | undefined {
-  const grantId = (state as { grantId?: unknown } | null | undefined)?.grantId;
+function grantIdOf(state: Pick<AutoYesSetResult, 'grantId'> | null | undefined): string | undefined {
+  // The type is what the route should answer. An answer of another type is no name.
+  const grantId: unknown = state?.grantId;
   return typeof grantId === 'string' ? grantId : undefined;
 }
 
@@ -451,7 +498,8 @@ function stopAutoYesCommand(worktreeId: string, instanceId: string | undefined, 
  * Turn off the grant this send armed, and no other (Issue #4116). It is read right
  * before, and the request itself says which grant it means (`expectedGrantId`, Issue
  * #4132), so a grant someone armed since is theirs and stays, even with the same expiry.
- * A server too old to name its grants is told nothing, and the read is all there is.
+ * A server too old to name its grants cannot be asked for that: with only the read to go on,
+ * a grant armed right after it would be stopped too, so it is left on (Issue #4159).
  * `{ enabled: false }` naming nobody would stop
  * every instance of the worktree, so tool and instance are always named. A grant answered
  * for another target than the one read beforehand may be overwriting one that was on,
@@ -483,17 +531,20 @@ async function withdrawArmedAutoYes(
   }
   if (!now.enabled) return;
   const grantId = grantIdOf(armed);
+  if (grantId === undefined) {
+    leave('this server does not name its grants, so turning it off could stop one armed since');
+    return;
+  }
   if (
     now.expiresAt !== armed.expiresAt
     || (armed.answerMode !== undefined && now.answerMode !== armed.answerMode)
-    || (grantId !== undefined && grantIdOf(now) !== grantId)
+    || grantIdOf(now) !== grantId
   ) {
     leave('it was updated after this send armed it');
     return;
   }
-  const condition = grantId === undefined ? '' : `?expectedGrantId=${encodeURIComponent(grantId)}`;
   try {
-    await client.post<unknown>(`/api/worktrees/${worktreeId}/auto-yes${condition}`, { enabled: false, cliToolId, instanceId });
+    await client.post<unknown>(`/api/worktrees/${worktreeId}/auto-yes?expectedGrantId=${encodeURIComponent(grantId)}`, { enabled: false, cliToolId, instanceId });
     console.error('Auto-yes withdrawn: the message was not sent.');
   } catch (error) {
     leave(
@@ -785,12 +836,18 @@ first start has it. Repeating that command creates nothing: --role replaces what
 instance holds and is a condition as above. A changed roster is exit 31, nothing sent.
 --register without a role keeps its old order (sent, then registered) and never
 touches a role already there. The message has gone out by then, so a roster that kept
-changing is a warning and exit 0, with the command that registers it (Issue #4149).
+changing, or any other failure to register, is a warning and exit 0 (Issues #4149, #4159):
+do not send it again; the warning has the command that registers it.
 
 --expect-* pin this send to what the caller read earlier, saving nothing; the server
 reads them again right before the first key, so a process replaced in between gets
 nothing (exit 32). \`launch-worker\` passes what its starting message fixed. With
 --contract too, the contract is recorded as a failed task.
+
+--auto-yes applied after the message (--model on a tool that arms after it, or a grant
+already on) cannot take the send back: if it fails, that is a warning and exit 0, so do not
+send it again; the warning has the command that enables it (Issue #4159). Armed before the
+message, a failure is an error with nothing sent.
 
 With a role or a pin, --auto-yes, --contract or --reply-to names the default target it
 read in every request, so a default changed meanwhile does not split them. --auto-yes does not outlive a refusal: a grant this send armed is
@@ -798,7 +855,12 @@ withdrawn when nothing was typed, and a grant already on is left as it was until
 message is in. Only the grant it armed: one updated since is left on, with the command
 that stops it. --auto-yes --reply-to with --instance is held to the same, with its relay
 refused or the send refused (Issue #4144); naming no target, there is nothing to read
-first, so a grant it armed stays on, with the command that stops it. --contract --role saves the role before the contract's own check if that
+first, so a grant it armed stays on, with the command that stops it. --auto-yes with no role, pin or
+--reply-to reads nothing first, by decision (Issue #4159): it cannot tell a grant it armed from
+one already on, so a refused send leaves it on, with the command that stops it. Reading first
+would add a request to every such send, and would move the new terms of a grant already on to
+after the message. A server too old to name its grants is not asked to withdraw one either:
+it stays on, with the same command. --contract --role saves the role before the contract's own check if that
 check would refuse it, so it behaves like send --role; a broken contract saves nothing.
 A refusal that comes after the save says the setting stayed saved, whatever refused it.
 A save of its own (--contract --role, --register --role) answered by a 5xx or not at all
@@ -965,9 +1027,14 @@ hold or the start was refused because of its role (nothing typed).
 
         /** Issue #4116, #4144: what a send that read the state armed, once it failed. */
         const withdrawAutoYes = async (notSent: boolean): Promise<void> => {
-          if (autoYesTarget === null || priorAutoYes === true) return;
+          const stop = stopAutoYesCommand(worktreeId, armedGrant?.instanceId ?? instanceId, armedGrant?.cliToolId ?? agent);
+          // Issue #4159: read nothing first, so it may be a grant that was on before (see --help).
+          if (autoYesTarget === null) {
+            if (armsNow) console.error(`Warning: Auto-Yes stays on (this send did not read it first, so it may have been on already). To turn it off: ${stop}`);
+            return;
+          }
+          if (priorAutoYes === true) return;
           if (priorAutoYes === null || !notSent) {
-            const stop = stopAutoYesCommand(worktreeId, armedGrant?.instanceId ?? instanceId, armedGrant?.cliToolId ?? agent);
             const why = priorAutoYes === null ? 'it was not known to be off' : 'the message may have gone in';
             console.error(`Warning: Auto-Yes stays on (${why}). To turn it off: ${stop}`);
             return;
@@ -1038,9 +1105,9 @@ hold or the start was refused because of its role (nothing typed).
         // Issue #576: Enable auto-yes AFTER send when --model is specified
         // This avoids auto-yes interfering with the /model command interaction.
         // A failure here does not fail the task: the message was delivered and
-        // the task is running, which is what the row already says.
+        // the task is running, which is what the row already says. Nor the command (Issue #4159).
         if (applyAutoYesAfterSend) {
-          await enableAutoYes(client, worktreeId, options, autoYesDurationMs, agent, instanceId, contractPolicy);
+          await enableAutoYesAfterSend(client, worktreeId, options, autoYesDurationMs, agent, instanceId, contractPolicy);
         }
       } catch (error) {
         handleCommandError(error);
