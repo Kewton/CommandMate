@@ -54,9 +54,14 @@ beforeEach(() => {
 });
 
 describe('the launch screens of 0.166.0 are numbered', () => {
-  it.each(['hooks-review', 'hooks-review-cursor-2', 'hooks-list', 'hooks-detail', 'trust', 'update'])('%s', (name) => {
+  it.each(['hooks-review', 'hooks-review-cursor-2', 'hooks-list', 'hooks-detail', 'trust'])('%s', (name) => {
     expect(dialogOn(name)?.answerMode).toBe('numbered');
     expect(dialogOn(name)?.submitMode).toBeUndefined();
+  });
+
+  it('update: numbered, and the digit alone answers it (Issue #4161)', () => {
+    expect(dialogOn('update')?.answerMode).toBe('numbered');
+    expect(dialogOn('update')?.submitMode).toBe('answer_only');
   });
 
   it('negative: the idle composer is no dialog', () => {
@@ -80,11 +85,27 @@ describe('a digit and an Enter, on the keys measured', () => {
     expect(end).toBe('ready');
   });
 
-  it('update offer: the digit already decided, so the Enter lands on the next screen (未確認 what it does there)', async () => {
-    const { keys } = await respond('update', '3');
-    expect(keys).toEqual([
-      ['3', 'update'],
-      ['Enter', 'ready'],
-    ]);
+  it('update offer: the digit decides by itself, and no Enter follows it to the next screen (Issue #4161)', async () => {
+    const { keys, end } = await respond('update', '3');
+    expect(keys).toEqual([['3', 'update']]);
+    expect(end).toBe('ready');
+  });
+
+  it('control: without the declaration the same answer sends an Enter onto the next screen', async () => {
+    const detector = getToolStatusDetector('codex');
+    const read = detector.detectDialog.bind(detector);
+    const spy = vi.spyOn(detector, 'detectDialog').mockImplementation((normalized) => {
+      const dialog = read(normalized);
+      return dialog === null ? null : { kind: dialog.kind, options: dialog.options, answerMode: dialog.answerMode };
+    });
+    try {
+      const { keys } = await respond('update', '3');
+      expect(keys).toEqual([
+        ['3', 'update'],
+        ['Enter', 'ready'],
+      ]);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
