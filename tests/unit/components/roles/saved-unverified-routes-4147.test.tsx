@@ -20,7 +20,12 @@ import { NotesAndLogsPane } from '@/components/worktree/NotesAndLogsPane';
 import { SplitRoleStatus } from '@/components/roles/SplitRoleStatus';
 import { DesktopHeader } from '@/components/worktree/WorktreeDetailSubComponents';
 import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
-import { clearRosterSnapshot, refreshInstanceRoleSettings } from '@/hooks/useInstanceRoleSettings';
+import {
+  clearRosterSnapshot,
+  ensureRosterSnapshot,
+  getRosterSnapshot,
+  refreshInstanceRoleSettings,
+} from '@/hooks/useInstanceRoleSettings';
 import type { AgentInstance } from '@/lib/cli-tools/types';
 import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
 import { FakeRoleServer, duringTheCheck, loseNextAnswer } from './fake-role-server';
@@ -212,10 +217,14 @@ describe('[#4147] the header "+" falling back to the roster PATCH', () => {
     await rendered(<Desktop onAdded={onAdded} />);
     await openAdd();
     loseNextAnswer(server, 'PATCH', worktreeId, '500', { committed: true });
-    // The role route is down, so the newer answer is the roster's own read.
+    // The role route is down, so the newer answer is the roster's own read: what was held
+    // lapses, the roster is read again, and that read is taken.
+    let revisionTaken = '';
     duringTheCheck('before-second-settling', async () => {
       server.changeRosterElsewhere(server.roster.map((i) => (i.id === 'claude-2' ? { ...i, alias: 'Renamed' } : i)));
+      revisionTaken = server.revision;
       clearRosterSnapshot(worktreeId);
+      await ensureRosterSnapshot(worktreeId);
     });
     fireEvent.click(screen.getByTestId('agent-add-submit'));
     await waitFor(() => expect(server.writes('PATCH')).toHaveLength(1));
@@ -226,6 +235,43 @@ describe('[#4147] the header "+" falling back to the roster PATCH', () => {
     expect(note.textContent).not.toContain(UNKNOWN);
     expect(screen.getByTestId('agent-add-submit')).toBeDisabled();
     expect(onAdded).not.toHaveBeenCalled();
+    // What the read took is still what is held: the check's older read did not undo it.
+    const held = getRosterSnapshot(worktreeId);
+    expect(held?.revision).toBe(revisionTaken);
+    expect(held?.roster.find((i) => i.id === 'claude-2')?.alias).toBe('Renamed');
+  });
+
+  it('positive control: with the read left out nothing is taken, so nothing newer is held', async () => {
+    const onAdded = vi.fn();
+    server.refuseSettingsRead = true;
+    await rendered(<Desktop onAdded={onAdded} />);
+    await openAdd();
+    loseNextAnswer(server, 'PATCH', worktreeId, '500', { committed: true });
+    duringTheCheck('before-second-settling', async () => {
+      server.changeRosterElsewhere(server.roster.map((i) => (i.id === 'claude-2' ? { ...i, alias: 'Renamed' } : i)));
+      clearRosterSnapshot(worktreeId);
+    });
+    fireEvent.click(screen.getByTestId('agent-add-submit'));
+    await waitFor(() => expect(server.writes('PATCH')).toHaveLength(1));
+    await expire();
+    await screen.findByTestId('agent-add-saved-unverified');
+
+    expect(getRosterSnapshot(worktreeId)).toBeNull();
+  });
+
+  it('negative control: with nothing newer in between it is saved, and no note shows', async () => {
+    const onAdded = vi.fn();
+    server.refuseSettingsRead = true;
+    await rendered(<Desktop onAdded={onAdded} />);
+    await openAdd();
+    loseNextAnswer(server, 'PATCH', worktreeId, '500', { committed: true });
+    fireEvent.click(screen.getByTestId('agent-add-submit'));
+    await waitFor(() => expect(server.writes('PATCH')).toHaveLength(1));
+    await expire();
+
+    await waitFor(() => expect(onAdded).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId('agent-add-saved-unverified')).toBeNull();
+    expect(getRosterSnapshot(worktreeId)?.revision).toBe(server.revision);
   });
 });
 

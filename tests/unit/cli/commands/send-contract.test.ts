@@ -621,10 +621,10 @@ describe('send --contract --auto-yes when Auto-Yes cannot be enabled', () => {
     expect(code).not.toBe(ExitCode.SUCCESS);
   });
 
-  it('leaves the task running when the enable deferred behind --model fails after the send', async () => {
+  it('leaves the task running, warns and does not exit when the enable deferred behind --model fails after the send', async () => {
     // With --model on copilot the enable runs AFTER the message (Issue #576).
     // By then the message was delivered and the task is running; a failed
-    // enable does not take that back.
+    // enable does not take that back, nor fail the command (Issue #4159).
     const calls = mockRoutes([
       { match: '/api/worktrees/wt1/tasks', response: TASK_CREATED },
       { match: '/api/worktrees/wt1/auto-yes', response: FOREIGN_SESSION },
@@ -655,7 +655,9 @@ describe('send --contract --auto-yes when Auto-Yes cannot be enabled', () => {
     );
     expect(calls.filter((c) => c.method === 'PATCH').map((c) => c.body)).toEqual([{ status: 'running' }]);
     expect(mockConsoleError).toHaveBeenCalledWith('Message sent.');
-    expect(code).not.toBe(ExitCode.SUCCESS);
+    expect(mockConsoleError).toHaveBeenCalledWith(expect.stringMatching(/^Warning: the message was sent, but Auto-Yes may not be on.*Do not send it again/));
+    expect(mockExit).not.toHaveBeenCalled();
+    expect(code).toBeUndefined();
   });
 
   it('marks the task running, not failed, when the enable succeeds (control)', async () => {

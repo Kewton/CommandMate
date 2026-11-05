@@ -26,6 +26,8 @@ interface Server {
   grantId: string | undefined;
   autoYesReads: string[];
   autoYesPosts: { url: string; body: Record<string, unknown> }[];
+  /** What reached the server, in order: `send`, `roster-read`, `auto-yes`. */
+  order: string[];
   sends: number;
   sendAnswer: { status: number; body: Record<string, unknown> };
   /** What a read of the grant says once armed. */
@@ -48,6 +50,7 @@ function fakeServer(overrides: Partial<Server> = {}): Server {
     grantId: 'grant-1',
     autoYesReads: [],
     autoYesPosts: [],
+    order: [],
     sends: 0,
     sendAnswer: { status: 201, body: { id: 1 } },
     liveAfterArming: true,
@@ -95,6 +98,7 @@ function fakeServer(overrides: Partial<Server> = {}): Server {
     if (url.includes('/auto-yes') && method === 'POST') {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       state.autoYesPosts.push({ url, body });
+      state.order.push('auto-yes');
       const refusal = body.enabled === true ? state.armRefusal : null;
       if (refusal === 'network') throw new TypeError('fetch failed');
       if (refusal) return respond(refusal.status, refusal.body);
@@ -110,6 +114,7 @@ function fakeServer(overrides: Partial<Server> = {}): Server {
     }
     if (url.endsWith('/send') && method === 'POST') {
       state.sends += 1;
+      state.order.push('send');
       return respond(state.sendAnswer.status, state.sendAnswer.body);
     }
     if (url.endsWith(`/api/worktrees/${WT}`) && method === 'PATCH') {
@@ -119,6 +124,7 @@ function fakeServer(overrides: Partial<Server> = {}): Server {
       return respond(200, { success: true });
     }
     if (url.endsWith(`/api/worktrees/${WT}`)) {
+      state.order.push('roster-read');
       if (state.rosterRead === 'network') throw new TypeError('fetch failed');
       if (state.rosterRead) return respond(state.rosterRead.status, state.rosterRead.body);
       return respond(200, { id: WT, agentInstances: state.roster, rosterRevision: 'rev-1' });
@@ -302,13 +308,16 @@ describe('[#4159]', () => {
       expect(text).toContain(ADD);
     });
 
-    it('what comes after the register still happens: --auto-yes with --model is armed', async () => {
+    it('what comes after the register still happens: copilot with --model arms Auto-Yes after the refused read', async () => {
       const server = fakeServer({ rosterRead: { status: 500, body: { error: 'boom' } } });
 
-      const outcome = await run('--agent', 'claude', '--instance', 'claude-2', '--register', '--auto-yes', '--model', 'opus');
+      const outcome = await run('--agent', 'copilot', '--instance', 'copilot-2', '--register', '--auto-yes', '--model', 'gpt-5-mini');
 
       expect(outcome).toBeNull();
       expect(server.autoYesPosts.map(({ body }) => body.enabled)).toEqual([true]);
+      // The last of them. Claude arms before the send, and could not show this.
+      expect(server.order.slice(-3)).toEqual(['send', 'roster-read', 'auto-yes']);
+      expect(errors.join('\n')).toMatch(/do not send it again/i);
     });
 
     it('stdout stays what a registered send leaves there', async () => {
