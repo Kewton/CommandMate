@@ -33,7 +33,7 @@ import {
   type UpdatableAgentTool,
 } from '@/lib/updates';
 import { createLogger } from '@/lib/logger';
-import { newLaunchAnswerSkips, noteLaunchAnswerSkipped, type LaunchAnswerSkips } from './launch-answer-skips';
+import { forgetLaunchAnswerSkips, newLaunchAnswerSkips, noteLaunchAnswerSkipped, type LaunchAnswerSkips } from './launch-answer-skips';
 import { CODEX_CLI_TOOL_ID } from '@/lib/hooks/sources';
 import { shouldTrustCodexHooks } from '@/lib/hooks/sources/codex/hooks-config';
 import {
@@ -804,6 +804,7 @@ export class CodexTool extends BaseCLITool {
       // nothing about this one.
       state.screen = screen;
       state.attempts = 0;
+      forgetLaunchAnswerSkips(state.skips);
     }
     if (state.attempts >= CODEX_HOOKS_SCREEN_MAX_ATTEMPTS) {
       logger.warn('codex-hooks-screen-unresponsive', { sessionName, screen, trust });
@@ -834,6 +835,7 @@ export class CodexTool extends BaseCLITool {
       return true;
     }
     state.attempts = attempt;
+    forgetLaunchAnswerSkips(state.skips);
     return true;
   }
 

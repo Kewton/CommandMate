@@ -18,6 +18,8 @@ import {
 } from '@/lib/detection/tools/opencode-v2/detect';
 import { OPENCODE_TURN_COMPLETE_PATTERN } from '@/lib/detection/tools/opencode/patterns';
 import { STATUS_REASON } from '@/lib/detection/status-reason';
+import { OPENCODE_V2_THINKING_PATTERN } from '@/lib/detection/tools/opencode-v2/patterns';
+import { extractResponse } from '@/lib/polling/response-checker';
 
 const fixture = (rel: string): string => readFileSync(resolve(__dirname, '../../../../fixtures', rel), 'utf8');
 
@@ -97,5 +99,70 @@ describe('negative: not read as finished', () => {
     expect(TURN_RUNNING).toContain('esc interrupt');
     const frame = TURN_RUNNING.replace('esc interrupt', 'esc again to interrupt');
     expect(verdict(frame).status).toBe('running');
+  });
+});
+
+describe('the running hint is the footer, not a row of the reply', () => {
+  /** The footer measured after the first Esc on 2.0.18, 80 columns. */
+  const FOOTER_AFTER_ESC = '   ⬝⬝⬝⬝⬝⬝⬝⬝ esc again to interrupt           shift+tab agents  ctrl+p commands';
+
+  const BODY_ROWS = [
+    ['in a sentence', '     One Esc shows "esc again to interrupt", and the next one stops the turn.'],
+    ['at the head of the row', '     esc again to interrupt is what the footer says after one Esc.'],
+    ['alone on the row', '     esc again to interrupt'],
+    ['the first hint', '     The footer reads esc interrupt while a turn runs.'],
+  ] as const;
+
+  /** A finished turn's reply with `row` as one of its lines. */
+  const finishedWith = (row: string): string => {
+    const next = TURN_DONE.replace('     OK\n', `     OK\n${row}\n`);
+    expect(next).not.toBe(TURN_DONE);
+    return next;
+  };
+
+  it.each([
+    ['the measured running frame', TURN_RUNNING.split('\n').find((row) => row.includes('esc interrupt')) ?? ''],
+    ['the frame measured after the first Esc', FOOTER_AFTER_ESC],
+    ['a spinner run in other cells', '   ⬝■■■■■■⬝ esc again to interrupt   8.8K (1%)  ctrl+p commands'],
+  ])('reads %s', (_name, row) => {
+    expect(row).not.toBe('');
+    expect(OPENCODE_V2_THINKING_PATTERN.test(row)).toBe(true);
+  });
+
+  it.each([
+    ['prose naming both', '     esc again to interrupt and ctrl+p commands'],
+    ['the hint without the footer\'s end', '   ⬝⬝⬝⬝⬝⬝⬝⬝ esc again to interrupt   shift+tab agents'],
+    ['words after the footer\'s end', '   ⬝⬝⬝⬝ esc interrupt  ctrl+p commands opens the palette'],
+    ['the hint inside a word', '   not-esc interrupt  ctrl+p commands'],
+  ])('does not read %s', (_name, row) => {
+    expect(OPENCODE_V2_THINKING_PATTERN.test(row)).toBe(false);
+  });
+
+  it('the frame after the first Esc, measured footer in place, is still running', () => {
+    const frame = TURN_RUNNING.replace(/^.*esc interrupt.*$/m, FOOTER_AFTER_ESC);
+    expect(frame).toContain(FOOTER_AFTER_ESC);
+    expect(verdict(frame).status).toBe('running');
+  });
+
+  it.each(BODY_ROWS)('a finished reply with the words %s is finished', (_name, row) => {
+    const frame = finishedWith(row);
+    expect(endsWithTurnComplete(normalizeFrame(frame))).toBe(true);
+    expect(verdict(frame).status).toBe('ready');
+    expect(verdict(frame).reason).toBe(STATUS_REASON.OPENCODE_RESPONSE_COMPLETE);
+  });
+
+  it.each(BODY_ROWS)('the extracted reply keeps the row with the words %s', (_name, row) => {
+    const result = extractResponse(finishedWith(row), 0, 'opencode-v2');
+    expect(result?.response).toContain(row.trim());
+  });
+
+  it('a reply still being written keeps that row, and the footer stays out', () => {
+    const row = BODY_ROWS[0][1];
+    const frame = TURN_RUNNING.replace(/^(\s*┃\s*tools\.\n\s*┃\n)/m, `$1\n${row}\n`);
+    expect(frame).toContain(row);
+    const result = extractResponse(frame, 0, 'opencode-v2');
+    expect(result?.isComplete).toBe(false);
+    expect(result?.response).toContain(row.trim());
+    expect(result?.response).not.toContain('ctrl+p commands');
   });
 });

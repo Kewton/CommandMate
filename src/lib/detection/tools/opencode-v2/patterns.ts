@@ -44,8 +44,16 @@ export const OPENCODE_V2_FOOTER_PATTERN = /ctrl\+p commands/;
  * OpenCode V2 working indicator: the footer's `esc interrupt` hint, drawn only
  * while a turn is running (2.0.18). After one Esc it reads `esc again to interrupt`
  * and the reply keeps being written (measured, Issue #4161), as V1's does (#1894).
+ *
+ * The whole footer row, because the status reader's last lines and the reply's
+ * skip list both read this, and a reply can say those words (Issue #4161):
+ * `   ⬝⬝⬝⬝■■■■ esc interrupt      shift+tab agents  ctrl+p commands`. So the hint
+ * has to be followed by the row's columns, two spaces apart, up to the row's end at
+ * `ctrl+p commands`. What stands before it is left open. A reply quoting that whole
+ * row is the one thing this cannot tell from the footer.
  */
-export const OPENCODE_V2_THINKING_PATTERN = /esc (?:again to )?interrupt/;
+export const OPENCODE_V2_THINKING_PATTERN =
+  /(?:^|[^\S\n])esc (?:again to )?interrupt[^\S\n]{2,}(?:[^\n]*[^\S\n]{2})?ctrl\+p commands[^\S\n]*$/m;
 
 /**
  * Whether OpenCode V2's composer is on screen, so a send may type into it

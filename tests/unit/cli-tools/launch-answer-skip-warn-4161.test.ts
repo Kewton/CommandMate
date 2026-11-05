@@ -10,7 +10,14 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const state = vi.hoisted(() => ({ screen: '', calls: 0, flipAfterCalls: Infinity }));
+type LockArgs = [string, number, () => Promise<boolean>, () => Promise<unknown>];
+const state = vi.hoisted(() => ({
+  screen: '',
+  calls: 0,
+  flipAfterCalls: Infinity,
+  /** Takes over the lock's answer for a test that needs a send to go through. */
+  lock: null as null | ((...args: LockArgs) => Promise<unknown>),
+}));
 const log = vi.hoisted(() => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() }));
 
 vi.mock('@/lib/logger', () => ({
@@ -37,14 +44,18 @@ vi.mock('@/lib/tmux/tmux-capture-cache', () => ({ invalidateCache: vi.fn() }));
 vi.mock('@/lib/session/instance-input-lock', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/session/instance-input-lock')>()),
   // The reason changes after a number of declines: some of the waits poll with no timer between them.
-  answerUnderInstanceInputLock: vi.fn(async () => ({
-    answered: false,
-    reason: ++state.calls > state.flipAfterCalls ? 'recheck-failed' : 'target-changed',
-  })),
+  answerUnderInstanceInputLock: vi.fn(async (...args: LockArgs) =>
+    state.lock
+      ? state.lock(...args)
+      : {
+          answered: false,
+          reason: ++state.calls > state.flipAfterCalls ? 'recheck-failed' : 'target-changed',
+        }
+  ),
 }));
 
 import { AntigravityTool } from '@/lib/cli-tools/antigravity';
-import { clearStartupTrust, markStartupTrustPending } from '@/lib/cli-tools/antigravity-startup-trust';
+import { claimStartupTrust, clearStartupTrust, markStartupTrustPending } from '@/lib/cli-tools/antigravity-startup-trust';
 import { CodexTool } from '@/lib/cli-tools/codex';
 import { CopilotTool } from '@/lib/cli-tools/copilot';
 import { GeminiTool } from '@/lib/cli-tools/gemini';
@@ -78,6 +89,7 @@ beforeEach(() => {
   vi.stubEnv(CODEX_UPDATE_DIALOG_ENV_VAR, undefined as unknown as string);
   state.calls = 0;
   state.flipAfterCalls = Infinity;
+  state.lock = null;
   clearStartupTrust();
 });
 
@@ -116,6 +128,62 @@ describe('codex launch answers', () => {
     expect(error.message).not.toContain('did not respond');
     expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'prompt-not-ready' });
     expect(warned('codex-hooks-screen-answer-skipped')).toHaveLength(1);
+  });
+
+  describe('a key that went out after a skip', () => {
+    const DECLINED = { answered: false, reason: 'target-changed' };
+    const REVIEW = fixture('codex-dialogs-0166/hooks-review.txt');
+    const send = (): Promise<unknown> => run(waits(new CodexTool()).waitForPrompt(SESSION), 20_000);
+
+    it('a skip after it is a new record, since the same reason did not go on', async () => {
+      state.screen = REVIEW;
+      let call = 0;
+      state.lock = async (_session, _mark, _still, answer) => {
+        if (++call === 2) return { answered: true, value: await answer() };
+        return DECLINED;
+      };
+      const error = (await send()) as Error;
+      expect(warned('codex-hooks-screen-answer-skipped')).toHaveLength(2);
+      expect(error.message).toContain('did not respond to its keys');
+    });
+
+    it('the next screen resets the count, and the refusal does not bring the old skip back', async () => {
+      // Skip, then a key that opens the list, then a list whose key cannot be typed:
+      // `attempts` is 0 again there, and what is left of the first screen's skip must not
+      // read as this screen having got no key for that reason.
+      state.screen = REVIEW;
+      let call = 0;
+      state.lock = async (_session, _mark, _still, answer) => {
+        call += 1;
+        if (call === 1) return DECLINED;
+        if (call === 2) {
+          const value = await answer();
+          state.screen = fixture('codex-dialogs-0166/hooks-list.txt');
+          return { answered: true, value };
+        }
+        throw new Error('tmux send failed');
+      };
+      const error = (await send()) as Error;
+      expect(call).toBeGreaterThan(2);
+      expect(error.message).toMatch(/hook review \(hooks-list\) did not respond to its keys/);
+      expect(error.message).not.toContain('got no key');
+    });
+
+    it('a skip on the next screen is that screen\'s, and is still named', async () => {
+      state.screen = REVIEW;
+      let call = 0;
+      state.lock = async (_session, _mark, _still, answer) => {
+        call += 1;
+        if (call === 2) {
+          const value = await answer();
+          state.screen = fixture('codex-dialogs-0166/hooks-list.txt');
+          return { answered: true, value };
+        }
+        return call === 1 ? DECLINED : { answered: false, reason: 'recheck-failed' };
+      };
+      const error = (await send()) as Error;
+      expect(error.message).toMatch(/hook review \(hooks-list\) got no key \(recheck-failed\)\. /);
+    });
   });
 });
 
@@ -174,5 +242,34 @@ describe('agy folder trust', () => {
     expect(warned('antigravity-trust-answer-skipped')).toHaveLength(1);
     expect(error.message).toMatch(/needs an answer; its Enter was not sent: target-changed\)$/);
     expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'prompt-not-ready' });
+  });
+
+  it('skipped, then the Enter went out, then the screen stayed: the refusal does not say it was not sent', async () => {
+    state.screen = TRUST;
+    markStartupTrustPending(SESSION);
+    let call = 0;
+    state.lock = async (_session, _mark, _still, answer) =>
+      ++call === 1 ? { answered: false, reason: 'target-changed' } : { answered: true, value: await answer() };
+    const error = (await run(waits(new AntigravityTool()).waitForPrompt(SESSION), 400_000)) as Error;
+    expect(call).toBe(2);
+    expect(sendSpecialKey).toHaveBeenCalledTimes(1);
+    expect(sendSpecialKey).toHaveBeenCalledWith(SESSION, 'Enter');
+    expect(error.message).toMatch(/needs an answer\)$/);
+    expect(error.message).not.toContain('was not sent');
+    expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'prompt-not-ready' });
+  });
+
+  it('skipped, then another wait took the owed Enter: this one does not say it was not sent either', async () => {
+    state.screen = TRUST;
+    markStartupTrustPending(SESSION);
+    let call = 0;
+    state.lock = async () => {
+      if (++call === 1) return { answered: false, reason: 'target-changed' };
+      expect(claimStartupTrust(SESSION)).toBe(true);
+      return { answered: true, value: false };
+    };
+    const error = (await run(waits(new AntigravityTool()).waitForPrompt(SESSION), 400_000)) as Error;
+    expect(sendSpecialKey).not.toHaveBeenCalled();
+    expect(error.message).toMatch(/needs an answer\)$/);
   });
 });

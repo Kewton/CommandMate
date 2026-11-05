@@ -43,3 +43,15 @@ export function noteLaunchAnswerSkipped(
   skips.byEvent.set(event, fields.reason);
   skips.last = fields.reason;
 }
+
+/**
+ * Forget what was declined: the answer went through, or the screen it was for has
+ * gone. What is recorded describes a key that has not gone out, so a refusal must
+ * not repeat it after that, and a later decline is a new one to report.
+ *
+ * @param skips - This wait's record
+ */
+export function forgetLaunchAnswerSkips(skips: LaunchAnswerSkips): void {
+  skips.byEvent.clear();
+  skips.last = null;
+}
