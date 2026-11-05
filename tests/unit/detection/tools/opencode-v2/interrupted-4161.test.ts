@@ -156,6 +156,55 @@ describe('the running hint is the footer, not a row of the reply', () => {
     expect(result?.response).toContain(row.trim());
   });
 
+  describe('a reply that quotes the footer row whole', () => {
+    const QUOTED = `     ${FOOTER_AFTER_ESC.trim()}`;
+
+    it('a finished turn is finished', () => {
+      const frame = finishedWith(QUOTED);
+      expect(endsWithTurnComplete(normalizeFrame(frame))).toBe(true);
+      expect(verdict(frame).status).toBe('ready');
+    });
+
+    it('the extraction keeps the quoted row, and the real footer stays out', () => {
+      // `isTurnComplete` has no V2 branch, so this is the partial path whatever the frame.
+      const result = extractResponse(finishedWith(QUOTED), 0, 'opencode-v2');
+      expect(result?.response).toContain(FOOTER_AFTER_ESC.trim());
+      expect(result?.response).not.toContain('repo:master');
+    });
+
+    it('a turn still running under the quote is running, from the real footer', () => {
+      const frame = TURN_RUNNING.replace(/^(\s*┃\s*tools\.\n\s*┃\n)/m, `$1\n${QUOTED}\n`);
+      expect(frame).toContain(QUOTED);
+      expect(verdict(frame).status).toBe('running');
+      expect(extractResponse(frame, 0, 'opencode-v2')?.response).toContain(FOOTER_AFTER_ESC.trim());
+    });
+
+    it('the hint on a row above the bottom one is not read', () => {
+      expect(OPENCODE_V2_THINKING_PATTERN.test(`${FOOTER_AFTER_ESC}\n  /…/repo:master   8.6K (1%)  ctrl+p commands\n\n`)).toBe(false);
+    });
+  });
+
+  describe('the footer of a pane wide enough for the sidebar (2.0.18, 200 columns)', () => {
+    const WIDE = fixture('opencode-v2-usage-2981/pane-turn1-2.0.18.txt');
+    const FOOTER = WIDE.split('\n').find((row) => row.includes('ctrl+p commands')) ?? '';
+
+    it('has a column after `ctrl+p commands`, as measured', () => {
+      expect(FOOTER).toMatch(/ctrl\+p commands {2,}\S/);
+    });
+
+    it('still reads as running with the hint in it', () => {
+      const frame = WIDE.replace(FOOTER, FOOTER.replace(/^ {2}\S+ {2,}/, '   ⬝⬝⬝⬝■■■■ esc interrupt      '));
+      expect(frame).not.toBe(WIDE);
+      expect(verdict(frame).status).toBe('running');
+    });
+
+    it('stays out of the extracted reply', () => {
+      const result = extractResponse(WIDE, 0, 'opencode-v2');
+      expect(result?.response).toContain('ALPHA one');
+      expect(result?.response).not.toContain('ctrl+p commands');
+    });
+  });
+
   it('a reply still being written keeps that row, and the footer stays out', () => {
     const row = BODY_ROWS[0][1];
     const frame = TURN_RUNNING.replace(/^(\s*┃\s*tools\.\n\s*┃\n)/m, `$1\n${row}\n`);

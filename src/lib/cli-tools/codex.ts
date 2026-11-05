@@ -33,7 +33,7 @@ import {
   type UpdatableAgentTool,
 } from '@/lib/updates';
 import { createLogger } from '@/lib/logger';
-import { forgetLaunchAnswerSkips, newLaunchAnswerSkips, noteLaunchAnswerSkipped, type LaunchAnswerSkips } from './launch-answer-skips';
+import { forgetLaunchAnswerSkip, newLaunchAnswerSkips, noteLaunchAnswerSkipped, type LaunchAnswerSkips } from './launch-answer-skips';
 import { CODEX_CLI_TOOL_ID } from '@/lib/hooks/sources';
 import { shouldTrustCodexHooks } from '@/lib/hooks/sources/codex/hooks-config';
 import {
@@ -629,6 +629,7 @@ export class CodexTool extends BaseCLITool {
               noteLaunchAnswerSkipped(logger, answerSkips, 'codex-update-dialog-answer-skipped', { sessionName, reason: updateOutcome.reason });
               continue;
             }
+            forgetLaunchAnswerSkip(answerSkips, 'codex-update-dialog-answer-skipped');
             updateDialogHandled = true;
             if (keyToSend === CODEX_UPDATE_DIALOG_KEYS.update) {
               // codex is about to become `npm install`. The prompt this method
@@ -659,6 +660,7 @@ export class CodexTool extends BaseCLITool {
             noteLaunchAnswerSkipped(logger, answerSkips, 'codex-notification-answer-skipped', { sessionName, reason: enterOutcome.reason });
             continue;
           }
+          forgetLaunchAnswerSkip(answerSkips, 'codex-notification-answer-skipped');
           logger.info('dismissed-codex-notification');
           await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
           continue;
@@ -678,6 +680,7 @@ export class CodexTool extends BaseCLITool {
             noteLaunchAnswerSkipped(logger, answerSkips, 'codex-trust-dialog-answer-skipped', { sessionName, reason: trustOutcome.reason });
             continue;
           }
+          forgetLaunchAnswerSkip(answerSkips, 'codex-trust-dialog-answer-skipped');
           trustDialogHandled = true;
           logger.info('auto-trusted-folder-for-codex');
           await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
@@ -707,6 +710,7 @@ export class CodexTool extends BaseCLITool {
             noteLaunchAnswerSkipped(logger, answerSkips, 'codex-trust-dialog-answer-skipped', { sessionName, reason: enterOutcome.reason });
             continue;
           }
+          forgetLaunchAnswerSkip(answerSkips, 'codex-trust-dialog-answer-skipped');
           trustEnterPresses++;
           logger.info('auto-trusted-folder-for-codex', { confirmedWith: 'Enter', attempt: trustEnterPresses });
           await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
@@ -804,7 +808,7 @@ export class CodexTool extends BaseCLITool {
       // nothing about this one.
       state.screen = screen;
       state.attempts = 0;
-      forgetLaunchAnswerSkips(state.skips);
+      forgetLaunchAnswerSkip(state.skips, 'codex-hooks-screen-answer-skipped');
     }
     if (state.attempts >= CODEX_HOOKS_SCREEN_MAX_ATTEMPTS) {
       logger.warn('codex-hooks-screen-unresponsive', { sessionName, screen, trust });
@@ -835,7 +839,7 @@ export class CodexTool extends BaseCLITool {
       return true;
     }
     state.attempts = attempt;
-    forgetLaunchAnswerSkips(state.skips);
+    forgetLaunchAnswerSkip(state.skips, 'codex-hooks-screen-answer-skipped');
     return true;
   }
 

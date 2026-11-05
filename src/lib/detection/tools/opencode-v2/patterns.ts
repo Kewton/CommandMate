@@ -45,15 +45,28 @@ export const OPENCODE_V2_FOOTER_PATTERN = /ctrl\+p commands/;
  * while a turn is running (2.0.18). After one Esc it reads `esc again to interrupt`
  * and the reply keeps being written (measured, Issue #4161), as V1's does (#1894).
  *
- * The whole footer row, because the status reader's last lines and the reply's
- * skip list both read this, and a reply can say those words (Issue #4161):
- * `   ⬝⬝⬝⬝■■■■ esc interrupt      shift+tab agents  ctrl+p commands`. So the hint
- * has to be followed by the row's columns, two spaces apart, up to the row's end at
- * `ctrl+p commands`. What stands before it is left open. A reply quoting that whole
- * row is the one thing this cannot tell from the footer.
+ * Read by position, because a reply can say those words and can even quote the
+ * whole row (Issue #4161): the hint has to be on the LAST non-blank row of the text,
+ * where the TUI pins its footer on a session frame, so no `m` flag. On that row it
+ * is followed by the footer's columns, two spaces apart: `   ⬝⬝⬝⬝■■■■ esc interrupt
+ *     shift+tab agents  ctrl+p commands`. A pane wide enough for the sidebar draws
+ * one more column after `ctrl+p commands` (`tests/fixtures/opencode-v2-usage-2981/`).
+ *
+ * Every reader hands over the bottom of the frame. Not for a per-row skip list, where
+ * each row is the last one: that is {@link OPENCODE_V2_FOOTER_ROW_PATTERN}.
  */
 export const OPENCODE_V2_THINKING_PATTERN =
-  /(?:^|[^\S\n])esc (?:again to )?interrupt[^\S\n]{2,}(?:[^\n]*[^\S\n]{2})?ctrl\+p commands[^\S\n]*$/m;
+  /(?:^|\s)esc (?:again to )?interrupt[^\S\n]{2,}(?:[^\n]*[^\S\n]{2})?ctrl\+p commands(?:[^\S\n]{2}[^\n]*)?\s*$/;
+
+/**
+ * The footer as one row of the transcript, for the extraction's skip list, which sees
+ * a row at a time and so cannot ask where the bottom is (Issue #4161). It asks for the
+ * column instead: 2.0.18 starts the footer in column 2 or 3 and a reply's text in
+ * column 5 (every frame under `tests/fixtures/opencode-v2*`), so a reply quoting the
+ * row stays in the reply.
+ */
+export const OPENCODE_V2_FOOTER_ROW_PATTERN =
+  /^[^\S\n]{0,4}\S[^\n]*ctrl\+p commands(?:[^\S\n]{2}[^\n]*)?$/;
 
 /**
  * Whether OpenCode V2's composer is on screen, so a send may type into it
@@ -68,8 +81,7 @@ export function isOpencodeV2ComposerVisible(text: string): boolean {
 /** OpenCode V2 rows that are chrome, never reply content. */
 export const OPENCODE_V2_SKIP_PATTERNS: readonly RegExp[] = [
   OPENCODE_SEPARATOR_PATTERN,
-  OPENCODE_V2_FOOTER_PATTERN,
-  OPENCODE_V2_THINKING_PATTERN,
+  OPENCODE_V2_FOOTER_ROW_PATTERN,
   /Ask anything(?:\.\.\.|\u2026)/,
   /^Build\s+·/,
   PASTED_TEXT_PATTERN,

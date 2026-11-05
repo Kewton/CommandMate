@@ -17,12 +17,14 @@ import type { InstanceInputAnswerSkip } from '@/lib/session/instance-input-lock'
 export interface LaunchAnswerSkips {
   /** The reason last recorded under each event. */
   readonly byEvent: Map<string, InstanceInputAnswerSkip>;
-  /** The latest reason under any event; null while none was declined. */
+  /** The latest reason under any event; null while none is outstanding. */
   last: InstanceInputAnswerSkip | null;
+  /** The event {@link LaunchAnswerSkips.last} was recorded under. */
+  lastEvent: string | null;
 }
 
 export function newLaunchAnswerSkips(): LaunchAnswerSkips {
-  return { byEvent: new Map(), last: null };
+  return { byEvent: new Map(), last: null, lastEvent: null };
 }
 
 /**
@@ -42,16 +44,22 @@ export function noteLaunchAnswerSkipped(
   if (skips.byEvent.get(event) !== fields.reason) logger.warn(event, fields);
   skips.byEvent.set(event, fields.reason);
   skips.last = fields.reason;
+  skips.lastEvent = event;
 }
 
 /**
- * Forget what was declined: the answer went through, or the screen it was for has
- * gone. What is recorded describes a key that has not gone out, so a refusal must
- * not repeat it after that, and a later decline is a new one to report.
+ * Forget what was declined under `event`: the answer went through, or the screen it
+ * was for has gone. The record describes a key that has not gone out, so a refusal
+ * must not repeat it after that, and a later decline is a new one to report, even
+ * for the same reason. Other events' records are theirs.
  *
  * @param skips - This wait's record
+ * @param event - The log event the answer belongs to
  */
-export function forgetLaunchAnswerSkips(skips: LaunchAnswerSkips): void {
-  skips.byEvent.clear();
-  skips.last = null;
+export function forgetLaunchAnswerSkip(skips: LaunchAnswerSkips, event: string): void {
+  skips.byEvent.delete(event);
+  if (skips.lastEvent === event) {
+    skips.last = null;
+    skips.lastEvent = null;
+  }
 }

@@ -54,7 +54,7 @@ import {
 } from '@/lib/session/agent-session-lifecycle';
 import { createLogger } from '@/lib/logger';
 import { detectSessionStatus, isGeneratingStatus } from '../detection/status-detector';
-import { forgetLaunchAnswerSkips, newLaunchAnswerSkips, noteLaunchAnswerSkipped } from './launch-answer-skips';
+import { forgetLaunchAnswerSkip, newLaunchAnswerSkips, noteLaunchAnswerSkipped } from './launch-answer-skips';
 import { TUI_EXIT_WAIT_MS } from '@/config/cli-tool-timing-config';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 import { getErrorMessage } from '@/lib/errors';
@@ -510,7 +510,7 @@ export class AntigravityTool extends BaseCLITool {
           });
         }
         // Answered with `false`: another wait holds the claim, so the Enter is its to send.
-        if (claimed?.answered === true) forgetLaunchAnswerSkips(answerSkips);
+        if (claimed?.answered === true) forgetLaunchAnswerSkip(answerSkips, 'antigravity-trust-answer-skipped');
         if (claimed?.answered === true && claimed.value) {
           logger.info('auto-trusted-folder-for-antigravity', { sessionName, afterLaunchWindow: true });
           // A full ordinary window for agy to draw its prompt after the Enter.

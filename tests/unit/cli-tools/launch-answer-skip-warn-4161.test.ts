@@ -57,6 +57,7 @@ vi.mock('@/lib/session/instance-input-lock', async (importOriginal) => ({
 import { AntigravityTool } from '@/lib/cli-tools/antigravity';
 import { claimStartupTrust, clearStartupTrust, markStartupTrustPending } from '@/lib/cli-tools/antigravity-startup-trust';
 import { CodexTool } from '@/lib/cli-tools/codex';
+import { forgetLaunchAnswerSkip, newLaunchAnswerSkips, noteLaunchAnswerSkipped } from '@/lib/cli-tools/launch-answer-skips';
 import { CopilotTool } from '@/lib/cli-tools/copilot';
 import { GeminiTool } from '@/lib/cli-tools/gemini';
 import { CODEX_UPDATE_DIALOG_ENV_VAR } from '@/config/codex-update-dialog-config';
@@ -119,6 +120,45 @@ describe('codex launch answers', () => {
     await launch();
     expect(warned('codex-notification-answer-skipped')).toHaveLength(1);
     expect(informed('codex-notification-answer-skipped')).toEqual([]);
+  });
+
+  describe('a stage that went out between two skips for the same reason', () => {
+    /** Decline, go through, then decline: what each of these waits meets in that order. */
+    const declineSendDecline = (): void => {
+      let call = 0;
+      state.lock = async (_session, _mark, _still, answer) =>
+        ++call === 2 ? { answered: true, value: await answer() } : { answered: false, reason: 'target-changed' };
+    };
+
+    it('the trust digit, then its Enter: the later skip is a warn of its own', async () => {
+      state.screen = fixture('codex-dialogs-0166/trust.txt');
+      declineSendDecline();
+      await launch();
+      expect(warned('codex-trust-dialog-answer-skipped').map((call) => (call[1] as { reason: string }).reason)).toEqual([
+        'target-changed',
+        'target-changed',
+      ]);
+    });
+
+    it('the press-enter notice', async () => {
+      state.screen = 'Something changed\n\nPress enter to continue\n';
+      declineSendDecline();
+      await launch();
+      expect(warned('codex-notification-answer-skipped')).toHaveLength(2);
+    });
+
+    it('a stage of one event leaves the record of another alone', async () => {
+      const skips = newLaunchAnswerSkips();
+      const logger = { warn: vi.fn() };
+      noteLaunchAnswerSkipped(logger, skips, 'a', { reason: 'target-changed' });
+      noteLaunchAnswerSkipped(logger, skips, 'b', { reason: 'target-changed' });
+      forgetLaunchAnswerSkip(skips, 'a');
+      expect(skips.last).toBe('target-changed'); // b's, and b is still declined
+      noteLaunchAnswerSkipped(logger, skips, 'b', { reason: 'target-changed' });
+      expect(logger.warn).toHaveBeenCalledTimes(2);
+      forgetLaunchAnswerSkip(skips, 'b');
+      expect(skips.last).toBe(null);
+    });
   });
 
   it('the refusal of a send says the hook review got no key, not that it ignored them', async () => {
