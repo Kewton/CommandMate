@@ -168,6 +168,10 @@ async function enableAutoYes(
  * Register an ad-hoc --instance session into the agent-instance roster
  * (Issue #1000: --register). No-ops when already registered so `send
  * --register` is safe to repeat across multiple messages to the same instance.
+ *
+ * This runs after the message went out, so a roster that keeps moving (Issue #4149) is a
+ * warning and the send stays a success: exit 31 means nothing was sent, and a script
+ * reading it would send the message twice. Any other failure is still the command's.
  */
 async function registerInstance(
   client: ApiClient,
@@ -178,16 +182,24 @@ async function registerInstance(
   // Issue #4132: the whole list is replaced, so an add landing after this read has to
   // survive it. Built again on a moved roster, where this one may be there by now.
   const roster = await fetchAgentRoster(client, worktreeId);
-  const saved = await saveRosterChange(client, worktreeId, roster, (base) => {
-    if (base.some((inst) => inst.id === instanceId)) return null;
-    if (base.length >= MAX_AGENT_INSTANCES) {
-      console.error(`Warning: could not register '${instanceId}' in the roster (already at the ${MAX_AGENT_INSTANCES}-instance limit).`);
-      return null;
-    }
-    const added = { id: instanceId, cliTool, alias: defaultAlias(cliTool, instanceId), order: base.length };
-    return [...base, added as (typeof base)[number]];
-  });
-  if (saved !== null) console.error(`Instance registered in roster: ${instanceId}`);
+  try {
+    const saved = await saveRosterChange(client, worktreeId, roster, (base) => {
+      if (base.some((inst) => inst.id === instanceId)) return null;
+      if (base.length >= MAX_AGENT_INSTANCES) {
+        console.error(`Warning: could not register '${instanceId}' in the roster (already at the ${MAX_AGENT_INSTANCES}-instance limit).`);
+        return null;
+      }
+      const added = { id: instanceId, cliTool, alias: defaultAlias(cliTool, instanceId), order: base.length };
+      return [...base, added as (typeof base)[number]];
+    });
+    if (saved !== null) console.error(`Instance registered in roster: ${instanceId}`);
+  } catch (error) {
+    if (!(error instanceof RoleCliError) || error.code !== 'roster_changed') throw error;
+    console.error(
+      `Warning: the message was sent, but '${instanceId}' was not added to the roster: it kept changing. `
+        + `Do not send it again. To register it: commandmate instances ${worktreeId} add --agent ${cliTool} --id ${instanceId}`
+    );
+  }
 }
 
 /**
@@ -772,7 +784,8 @@ needs --register as well.
 first start has it. Repeating that command creates nothing: --role replaces what the
 instance holds and is a condition as above. A changed roster is exit 31, nothing sent.
 --register without a role keeps its old order (sent, then registered) and never
-touches a role already there.
+touches a role already there. The message has gone out by then, so a roster that kept
+changing is a warning and exit 0, with the command that registers it (Issue #4149).
 
 --expect-* pin this send to what the caller read earlier, saving nothing; the server
 reads them again right before the first key, so a process replaced in between gets

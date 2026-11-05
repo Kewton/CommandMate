@@ -3,7 +3,7 @@
  * api-client.ts re-exports every exported name here; import from there.
  */
 
-import { ExitCode } from '../types';
+import { ExitCode, RoleExitCode } from '../types';
 
 /**
  * Error result from API operations
@@ -88,6 +88,12 @@ export function foreignSessionMessage(payload?: ApiErrorPayload): string {
 }
 
 /**
+ * The `code` of the 409 for a roster that moved since it was read (Issue #4132).
+ * Spelled out for the reason {@link FOREIGN_SESSION_ERROR_CODE} is: it comes from a route.
+ */
+export const ROSTER_CHANGED_ERROR_CODE = 'ROSTER_CHANGED';
+
+/**
  * Classify API errors into user-friendly messages and exit codes.
  * [IA3-09] Covers: ECONNREFUSED, 400, 401/403, 404, 429, 500, timeout
  *
@@ -96,7 +102,7 @@ export function foreignSessionMessage(payload?: ApiErrorPayload): string {
  * @param payload - Parsed error body, when the response carried one (Issue #1637).
  *   Used for 5xx, and for the foreign-session 409 (Issue #3334): the other 4xx
  *   messages below are already specific, and are pinned by tests as the CLI's
- *   own wording.
+ *   own wording. Issue #4149: the roster 409 is told apart by its code too.
  * @param context - Which server answered, when the caller knows (Issue #2404).
  *   Read by the 404 branch only; the other messages do not send anyone looking
  *   in the wrong place.
@@ -153,6 +159,13 @@ export function handleApiError(
           return {
             message: foreignSessionMessage(payload),
             exitCode: ExitCode.UNEXPECTED_ERROR,
+          };
+        }
+        // Issue #4149: exit 31, what the `instances` help gives for `roster_changed`.
+        if (payload?.code === ROSTER_CHANGED_ERROR_CODE) {
+          return {
+            message: 'The roster changed since it was read, so nothing was saved to it. Run the command again.',
+            exitCode: RoleExitCode.CONFLICT,
           };
         }
         return {

@@ -560,6 +560,8 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   its start, is exit 32 with nothing typed, and the setting stays saved. An ad-hoc id needs
   --register too: --register --role creates the instance and its role BEFORE sending, so the
   first start has it, and repeating it replaces the setting and is a condition as above.
+  --register without a role registers after sending: a roster that kept changing is a warning and
+  exit 0, with the command that registers it, not exit 31.
   --expect-role-generation <g> with --expect-role-fingerprint <f> | --expect-no-role pin a send
   to what capture --json's roleLaunch said, saving nothing: a process replaced before the
   first key gets nothing (exit 32). A send with a role or a pin that types nothing withdraws the
@@ -570,7 +572,9 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
 
   Exit codes: 0 done; 1 server not running; 2 bad arguments, unknown or ambiguous role or
   repository, a tool outside the feature; 31 a conflict, nothing changed (name_conflict,
-  name_changed, version_conflict, role_in_use, instance_exists, roster_changed); 32 nothing typed (send);
+  name_changed, version_conflict, role_in_use, instance_exists, roster_changed; plain instances
+  add/remove/alias end in roster_changed too, and remove --kill may have stopped the session by
+  then, as it stops first and saves after); 32 nothing typed (send);
   99 anything else. --json failures: { success: false, error, message, candidates?, references? }.
   Full --json shapes: commandmate roles --help
 
@@ -665,7 +669,8 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   20  VERIFY_FAILED    - A verification gate failed (verify, wait --verify)
   21  NOT_STARTED      - Nothing to verify: no commits, no uncommitted changes
   30  NO_ACTIVE_SESSIONS - interrupt found no running session to interrupt
-  31  ROLE CONFLICT    - A role conflict; nothing changed or sent (roles, instances, send)
+  31  ROLE CONFLICT    - A role or roster conflict; nothing changed or sent (roles, instances, send).
+                         Plain instances add/remove/alias too. remove --kill may have stopped the session
   32  ROLE NOT_SENT    - The role condition does not hold or its start was refused; nothing typed (send, ask)
   99  UNEXPECTED_ERROR - Unexpected error / resource not found / no verdict
   124 TIMEOUT          - Wait or verification timeout exceeded
