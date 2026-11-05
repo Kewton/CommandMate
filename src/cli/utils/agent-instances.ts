@@ -12,7 +12,10 @@
  * ../config/cli-tool-ids.ts.
  */
 
+import { RoleExitCode } from '../types';
 import { ApiError, assertResponseShape, type ApiClient } from './api-client';
+import { ROSTER_CHANGED_ERROR_CODE } from './api-client-errors';
+import { RoleCliError } from './role-failure';
 import type { AgentInstance, WorktreeDetailResponse } from '../types/api-responses';
 import { MAX_AGENT_INSTANCES, MAX_AGENT_ALIAS_LENGTH, getCliToolDisplayName, type CLIToolType } from '../../lib/cli-tools/types';
 import { MIN_AGENT_INSTANCES } from '../../lib/agent-instances-validator';
@@ -86,7 +89,11 @@ const MAX_ROSTER_CHANGE_RETRIES = 2;
  * @param first - The roster already read, which the first attempt builds on
  * @param build - The next roster, or null when there is nothing left to do
  * @returns What was saved, or null when `build` said there was nothing to do
- * @throws {ApiError} The roster kept moving, or the server refused for another reason
+ * @throws {RoleCliError} `roster_changed` (exit 31): the roster kept moving through every
+ *   attempt, so nothing was saved to it (Issue #4149). What the command did before the save
+ *   stands: `remove --kill` has stopped the session. `send --register` has sent the message,
+ *   and turns this into a warning for that reason.
+ * @throws {ApiError} The server refused for another reason
  */
 export async function saveRosterChange(
   client: ApiClient,
@@ -102,8 +109,18 @@ export async function saveRosterChange(
       await saveAgentInstances(client, worktreeId, next, snapshot.revision);
       return next;
     } catch (error) {
-      const moved = error instanceof ApiError && error.apiCode === 'ROSTER_CHANGED';
-      if (!moved || attempt >= MAX_ROSTER_CHANGE_RETRIES) throw error;
+      if (!(error instanceof ApiError) || error.apiCode !== ROSTER_CHANGED_ERROR_CODE) throw error;
+      if (attempt >= MAX_ROSTER_CHANGE_RETRIES) {
+        throw new RoleCliError(
+          'roster_changed',
+          `The roster kept changing while this command was saving (${attempt + 1} attempts, each on a fresh read), ` +
+            'so nothing was saved to it. Something else is still changing it. Run the command again once that has finished.',
+          RoleExitCode.CONFLICT,
+          {},
+          error.statusCode,
+          error.payload
+        );
+      }
     }
     snapshot = await fetchAgentRoster(client, worktreeId);
   }

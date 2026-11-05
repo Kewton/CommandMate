@@ -118,10 +118,16 @@ export async function sendNudgeKey(sessionName: string, readMark: number, key: '
       () => (key === 'Enter' ? sendKeys(sessionName, '', true) : sendSpecialKeys(sessionName, [key])),
       { mode: 'exclusive' }
     );
-    logger.info('claude-auto-default-nudge-key', { sessionName, key, answered: outcome.answered });
+    if (outcome.answered) {
+      logger.info('claude-auto-default-nudge-key', { sessionName, key, answered: true });
+    } else {
+      // Issue #4149: at warn, as the folder trust's skipped key is. An ERROR-only setting still hides it.
+      logger.warn('claude-auto-default-nudge-key-skipped', { sessionName, key, reason: outcome.reason });
+    }
     return outcome.answered;
   } catch {
     // Left for a later poll, as the folder trust's key is.
+    logger.warn('claude-auto-default-nudge-key-skipped', { sessionName, key, reason: 'send-failed' });
     return false;
   }
 }
