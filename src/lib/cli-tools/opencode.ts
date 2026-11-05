@@ -67,7 +67,7 @@ import {
 } from '../detection/cli-patterns';
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
 import { detectOpenCodeModalOverlay } from '../detection/opencode-modal-overlay';
-import { isOpenCodeComposerReady } from '../detection/tools/opencode/readiness';
+import { isOpenCodeComposerReady, readOpenCodeNotReadyScreen } from '../detection/tools/opencode/readiness';
 import { detectSessionStatus, isGeneratingStatus, type StatusDetectionResult } from '../detection/status-detector';
 import {
   PROMPT_WAIT_DIALOG_CONFIRM_MS,
@@ -225,6 +225,25 @@ const OPENCODE_PROMPT_POLL_INTERVAL_MS = 500;
 function isOpenCodeWaitDialog(status: Pick<StatusDetectionResult, 'status' | 'reason' | 'hasActivePrompt'>): boolean {
   if (isGeneratingStatus(status)) return false;
   return status.hasActivePrompt || status.status === 'waiting';
+}
+
+/**
+ * What held the pane when the wait for the input box ran out (Issue #4161), for the
+ * refusal `send` reports. Names the screen only: nothing captured goes into it. A
+ * dialog here is one read too briefly to be confirmed.
+ *
+ * @param output - The last capture; null when the last read failed
+ */
+function describeOpenCodePaneHold(output: string | null): string {
+  if (output === null) return 'the pane could not be read';
+  switch (readOpenCodeNotReadyScreen(output)) {
+    case 'dialog':
+      return 'a dialog or overlay is open: answer it in the terminal';
+    case 'input-box-holds-text':
+      return 'the input box still holds text';
+    default:
+      return 'no input box on the pane: opencode may still be starting';
+  }
 }
 
 /** Whether this send's server dispatch ended `unknown` (Issue #4040). */
@@ -986,6 +1005,7 @@ export class OpenCodeTool extends BaseCLITool {
   private async waitForPrompt(sessionName: string): Promise<void> {
     const deadline = Date.now() + OPENCODE_PROMPT_WAIT_TIMEOUT_MS;
     const dialog = createDialogConfirmation();
+    let lastOutput: string | null = null;
     while (Date.now() < deadline) {
       let refusal: Error | null = null;
       try {
@@ -993,6 +1013,7 @@ export class OpenCodeTool extends BaseCLITool {
           () => capturePane(sessionName, OPENCODE_READY_CAPTURE_LINES),
           deadline
         );
+        lastOutput = output;
         if (output === null) break;
         if (isOpenCodeComposerReady(output)) return;
         const status = detectSessionStatus(output, 'opencode');
@@ -1007,6 +1028,7 @@ export class OpenCodeTool extends BaseCLITool {
         }
       } catch (error: unknown) {
         // Capture may fail - continue polling. Not a dialog read: the run restarts.
+        lastOutput = null;
         dialog.reset();
         logger.debug('opencode-prompt-capture-failed', { sessionName, error: getErrorMessage(error) });
       }
@@ -1016,7 +1038,9 @@ export class OpenCodeTool extends BaseCLITool {
       await new Promise((resolve) => setTimeout(resolve, Math.min(OPENCODE_PROMPT_POLL_INTERVAL_MS, remaining)));
     }
     logger.info('opencode-prompt-not-detected');
-    throw new Error('OpenCode prompt not ready: timed out waiting for the input prompt before sending');
+    throw new Error(
+      `OpenCode prompt not ready: timed out waiting for the input prompt before sending (${describeOpenCodePaneHold(lastOutput)})`
+    );
   }
 
   /**

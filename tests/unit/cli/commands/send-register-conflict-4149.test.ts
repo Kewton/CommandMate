@@ -202,13 +202,15 @@ describe('[#4149] send --register, when the roster refuses after the message wen
     expect(help).toMatch(/warning and exit 0/);
   });
 
-  it('control: another refusal of the save is not a conflict, and keeps its exit code', async () => {
+  it('[#4159] another refusal of the save is not a conflict, and is a warning all the same: exit 0', async () => {
     const server = fakeServer({ saveRefusal: { status: 500, body: { error: 'boom' } } });
 
-    const outcome = (await send()) as Error;
+    const outcome = await send();
 
-    expect(outcome.message).toBe('exit:99');
+    expect(outcome).toBeNull();
+    expect(process.exit).not.toHaveBeenCalled();
     expect(server.sends).toHaveLength(1);
-    expect(errors.join('\n')).not.toContain('do not send it again');
+    expect(errors.join('\n')).toMatch(/^Warning: .*codex-2/m);
+    expect(errors.join('\n')).toMatch(/do not send it again/i);
   });
 });

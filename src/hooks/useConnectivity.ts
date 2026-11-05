@@ -407,10 +407,28 @@ export function useConnectivity(options: UseConnectivityOptions = {}): Connectiv
   const probeConfigRef = useRef({ url: probeUrl, timeoutMs: probeTimeoutMs });
   probeConfigRef.current = { url: probeUrl, timeoutMs: probeTimeoutMs };
 
+  // Issue #4160: a hidden tab whose socket dropped does not reconnect until it is shown
+  // (`useWebSocket`), so its verdict stays degraded for as long as it is hidden.
+  const [tabHidden, setTabHidden] = useState(false);
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const sync = () => setTabHidden(document.visibilityState === 'hidden');
+    sync();
+    document.addEventListener('visibilitychange', sync);
+    return () => document.removeEventListener('visibilitychange', sync);
+  }, []);
+
   // Probe only while the verdict is degraded and the device claims a network:
   // a healthy WebSocket already answers the question, and a device that knows
   // it is offline has nothing to probe with.
-  const shouldProbe = probe && degraded && browserOnline;
+  //
+  // Issue #4160: hidden, it rests once the server has answered, since another answer
+  // changes nothing and nobody is looking; becoming visible probes again. Until then it
+  // goes on, because resting there is not free: with the socket waiting and the polls
+  // resting, this is the only thing left that can notice recovery, and a parked message
+  // is resent on that (`usePendingMessages`). A real request that fails turns
+  // `serverReachable` false and starts it again.
+  const shouldProbe = probe && degraded && browserOnline && !(tabHidden && serverReachable === true);
 
   useEffect(() => {
     if (!shouldProbe || typeof fetch !== 'function') return;

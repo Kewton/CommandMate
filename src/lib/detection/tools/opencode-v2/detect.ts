@@ -14,8 +14,9 @@
  *    pickers, Commands, Sessions, Select agent) anywhere on the pane
  *    → `waiting` (Issue #2971);
  *  - the footer's `esc interrupt` hint → `running`;
- *  - the completion row (`Build · <model> · 3.5s · 11.2 tok/s`) as the last
- *    transcript row → `ready` (Issue #2965);
+ *  - the completion row (`Build · <model> · 3.5s · 11.2 tok/s`, or the same row
+ *    ending in `· interrupted`) as the last transcript row → `ready` (Issue #2965,
+ *    #4161);
  *  - the gutter-anchored empty composer (`┃  Ask anything…`) → `ready`;
  *  - otherwise the footer without that hint (`… 8.6K (1%)  ctrl+p commands`,
  *    the frame after a turn, whose composer is a bare gutter) → `ready`.
@@ -89,9 +90,17 @@ export const OPENCODE_V2_QUESTION_PATTERN =
  * `FR` draws this row's duration, the same five forms as V1's formatter. 未測定:
  * no captured frame has a turn of an hour or more, so those two forms come from
  * that function and not from a screen.
+ *
+ * An interrupted turn closes on the same row with ` · interrupted` last (Issue #4161):
+ * `Build · <model> · 4.5s · interrupted` after a second Esc on 2.0.18, and
+ * `· 41.6s · 13.4 tok/s · interrupted` after a declined tool call
+ * (`tests/fixtures/opencode-v2-dialogs-2984/question-under-quoted-dialog.txt`). The
+ * turn is over, as the event stream says (`session.execution.interrupted` is a
+ * `stop`), and the footer has lost its hint. Only the last transcript row is read
+ * ({@link endsWithTurnComplete}), so a later turn or a question below it is not this.
  */
 export const OPENCODE_V2_TURN_COMPLETE_PATTERN =
-  /^[^\S\n│┃]*[A-Za-z][\w-]*(?: [\w-]+)* · [^\n]+? · (?:\d+(?:\.\d+)?(?:ms|s|m(?: \d+s)?)|\d+h \d+m|\d+d \d+h)(?: · [\d.]+ tok\/s)?[^\S\n]*$/;
+  /^[^\S\n│┃]*[A-Za-z][\w-]*(?: [\w-]+)* · [^\n]+? · (?:\d+(?:\.\d+)?(?:ms|s|m(?: \d+s)?)|\d+h \d+m|\d+d \d+h)(?: · [\d.]+ tok\/s)?(?: · interrupted)?[^\S\n]*$/;
 
 /** The approval strip's buttons, in the order it draws them (2.0.18). */
 export const OPENCODE_V2_PERMISSION_OPTIONS: readonly string[] = ['Allow once', 'Always allow', 'Reject'];

@@ -5,7 +5,7 @@
  *
  * @module lib/agent-roles/instance-creation-client
  */
-import { ROLE_REQUEST_TIMEOUT_MS, sendJson, type RoleApiResult } from '@/lib/api-client-agent-roles';
+import { ROLE_REQUEST_TIMEOUT_MS, sendJson, whenBuilt, type RoleApiResult } from '@/lib/api-client-agent-roles';
 import {
   EXPECTED_ROLE_NAME_HEADER,
   INSTANCE_CREATION_KEY_HEADER,
@@ -36,9 +36,11 @@ export function updateRoleExpectingName(
   input: { name: string; body?: string; expectedBodyVersion?: number },
   expectedName: string,
 ): Promise<RoleApiResult<AgentRoleEditResponse>> {
-  return sendJson(`/api/roles/${encodeURIComponent(id)}`, 'PUT', input, {
-    [EXPECTED_ROLE_NAME_HEADER]: encodeURIComponent(expectedName),
-  });
+  return whenBuilt(() =>
+    sendJson(`/api/roles/${encodeURIComponent(id)}`, 'PUT', input, {
+      [EXPECTED_ROLE_NAME_HEADER]: encodeURIComponent(expectedName),
+    }),
+  );
 }
 
 /**
