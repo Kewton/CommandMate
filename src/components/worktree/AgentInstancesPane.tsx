@@ -248,11 +248,20 @@ function useAgentSourceByInstance(
         // look like a stream that just recovered.
       }
     };
-    void read();
-    const timer = setInterval(() => void read(), AGENT_SOURCE_POLL_INTERVAL_MS);
+    // Issue #4160: nobody is looking at a hidden tab, and coming back reads at once.
+    const readUnlessHidden = (): void => {
+      if (document.visibilityState !== 'hidden') void read();
+    };
+    const onVisibilityChange = (): void => {
+      if (document.visibilityState === 'visible') void read();
+    };
+    readUnlessHidden();
+    const timer = setInterval(readUnlessHidden, AGENT_SOURCE_POLL_INTERVAL_MS);
+    document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
       cancelled = true;
       clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, [worktreeId, hasSubscriptionSource, provided]);
 

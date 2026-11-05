@@ -46,13 +46,23 @@ export function useGenerationStatus(enabled: boolean): GenerationStatusState {
       return;
     }
 
+    // Issue #4160: nobody is looking at a hidden tab, and coming back reads at once.
+    const fetchUnlessHidden = () => {
+      if (document.visibilityState !== 'hidden') fetchStatus();
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') fetchStatus();
+    };
+
     // Initial fetch
-    fetchStatus();
+    fetchUnlessHidden();
 
     // Set up polling
-    timerRef.current = setInterval(fetchStatus, STATUS_POLL_INTERVAL_MS);
+    timerRef.current = setInterval(fetchUnlessHidden, STATUS_POLL_INTERVAL_MS);
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
     return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
