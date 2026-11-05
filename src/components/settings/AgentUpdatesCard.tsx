@@ -350,9 +350,15 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
                           {t('agentUpdates.restart', { alias: inst.alias })}
                         </Button>
                       )}
+                      {/* Issue #4160: once the button goes, this is all that says which
+                          instance of the tool ended. */}
                       {restarted[inst.id] && (
-                        <span className="text-xs text-muted-foreground">
-                          {t('agentUpdates.restarted')}
+                        <span
+                          className="text-xs text-muted-foreground"
+                          data-testid={`agent-updates-restarted-${inst.id}`}
+                        >
+                          <span className="font-medium text-foreground">{inst.alias}</span>{' '}
+                          <span>{t('agentUpdates.restarted')}</span>
                         </span>
                       )}
                     </div>

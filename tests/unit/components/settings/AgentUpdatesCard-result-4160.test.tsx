@@ -77,6 +77,7 @@ async function updated(worktreeId = 'wt-1') {
 }
 const button = (id = 'codex-2') => screen.queryByTestId(`agent-updates-restart-${id}`);
 const result = () => screen.queryByText(en.agentUpdates.restarted);
+const restartedLine = (id: string) => screen.queryByTestId(`agent-updates-restarted-${id}`);
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -87,6 +88,40 @@ describe('[#4160] AgentUpdatesCard — the result of a restart', () => {
     fireEvent.click(await screen.findByTestId('agent-updates-restart-codex-2'));
     await waitFor(() => expect(button()).toBeNull());
     expect(result()).toBeInTheDocument();
+  });
+
+  it('two instances of the tool: each result names its own, with the buttons gone', async () => {
+    const server = installServer();
+    server.running['codex-3'] = { isRunning: true };
+    server.kill = async () => {
+      server.running = {};
+      return new Response('{}', { status: 200 });
+    };
+    await updated();
+    fireEvent.click(await screen.findByTestId('agent-updates-restart-codex-2'));
+    await waitFor(() => expect(button('codex-3')).toBeNull());
+    expect(button()).toBeNull();
+    expect(restartedLine('codex-2')?.textContent).toBe(`Codex 2 ${en.agentUpdates.restarted}`);
+    // Ended by the same kill as far as the read can tell, but nobody asked this one to.
+    expect(restartedLine('codex-3')).toBeNull();
+  });
+
+  it('two restarted: two lines, each with its own alias', async () => {
+    const server = installServer();
+    server.running['codex-3'] = { isRunning: true };
+    let killed = 0;
+    server.kill = async () => {
+      killed += 1;
+      delete server.running[killed === 1 ? 'codex-2' : 'codex-3'];
+      return new Response('{}', { status: 200 });
+    };
+    await updated();
+    fireEvent.click(await screen.findByTestId('agent-updates-restart-codex-2'));
+    await waitFor(() => expect(button('codex-2')).toBeNull());
+    fireEvent.click(screen.getByTestId('agent-updates-restart-codex-3'));
+    await waitFor(() => expect(button('codex-3')).toBeNull());
+    expect(restartedLine('codex-2')?.textContent).toBe(`Codex 2 ${en.agentUpdates.restarted}`);
+    expect(restartedLine('codex-3')?.textContent).toBe(`Codex 3 ${en.agentUpdates.restarted}`);
   });
 
   it('a 500 whose read shows it ended: the result stays too', async () => {

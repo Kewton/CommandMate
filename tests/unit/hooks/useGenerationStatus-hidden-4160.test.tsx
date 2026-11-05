@@ -111,3 +111,58 @@ describe('[#4160] useGenerationStatus while the tab is hidden', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
+
+describe('[#4160] useGenerationStatus when answers arrive out of order', () => {
+  const answer = (body: object) => ({ ok: true, json: () => Promise.resolve(body) });
+
+  /** Each read stays pending until the test answers it, by the order they were asked in. */
+  function holdReads(): Array<(reply: unknown) => void> {
+    const answers: Array<(reply: unknown) => void> = [];
+    fetchSpy.mockImplementation(() => new Promise((resolve) => answers.push(resolve)));
+    return answers;
+  }
+  const settle = (reply: () => void) => act(async () => {
+    reply();
+    await vi.advanceTimersByTimeAsync(0);
+  });
+
+  it('asked before hiding, answered after the read on coming back: the newer one stays', async () => {
+    const answers = holdReads();
+    const { result } = renderHook(() => useGenerationStatus(true));
+    await tick(0);
+    setVisibility('hidden');
+    await tick(TICK_MS);
+    await comeBack();
+    expect(answers).toHaveLength(2);
+    await settle(() => answers[1](answer({ generating: false })));
+    expect(result.current.generating).toBe(false);
+    await settle(() => answers[0](answer({ generating: true, tool: 'claude' })));
+    expect(result.current.generating).toBe(false);
+    expect(result.current.tool).toBeUndefined();
+  });
+
+  it('answered in order: each is taken, and the last one stands (negative control)', async () => {
+    const answers = holdReads();
+    const { result } = renderHook(() => useGenerationStatus(true));
+    await tick(0);
+    setVisibility('hidden');
+    await tick(TICK_MS);
+    await comeBack();
+    await settle(() => answers[0](answer({ generating: true, tool: 'claude' })));
+    expect(result.current.tool).toBe('claude');
+    await settle(() => answers[1](answer({ generating: true, tool: 'codex' })));
+    expect(result.current.tool).toBe('codex');
+  });
+
+  it('the newer read failed: the older answer is still the latest word (negative control)', async () => {
+    const answers = holdReads();
+    const { result } = renderHook(() => useGenerationStatus(true));
+    await tick(0);
+    setVisibility('hidden');
+    await tick(TICK_MS);
+    await comeBack();
+    await settle(() => answers[1]({ ok: false }));
+    await settle(() => answers[0](answer({ generating: true, tool: 'claude' })));
+    expect(result.current.tool).toBe('claude');
+  });
+});

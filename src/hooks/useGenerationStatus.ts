@@ -27,12 +27,19 @@ export interface GenerationStatusState {
 export function useGenerationStatus(enabled: boolean): GenerationStatusState {
   const [status, setStatus] = useState<GenerationStatusState>({ generating: false });
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const requestSeqRef = useRef(0);
+  const adoptedSeqRef = useRef(0);
 
   const fetchStatus = useCallback(async () => {
+    const requestSeq = ++requestSeqRef.current;
     try {
       const res = await fetch('/api/daily-summary/status');
       if (res.ok) {
         const data = await res.json();
+        // Issue #4160: a read held up while the tab was hidden can answer after the one
+        // made on coming back. Older than an answer already taken, it has nothing to add.
+        if (requestSeq <= adoptedSeqRef.current) return;
+        adoptedSeqRef.current = requestSeq;
         setStatus(data);
       }
     } catch {

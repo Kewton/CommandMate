@@ -11,7 +11,7 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, act } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 import { AgentInstancesPane } from '@/components/worktree/AgentInstancesPane';
 import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 import { AGENT_SOURCE_POLL_INTERVAL_MS } from '@/config/agent-source-config';
@@ -125,5 +125,66 @@ describe('[#4160] the event-source read while the tab is hidden', () => {
     setVisibility('hidden');
     await comeBack();
     expect(sourceReads()).toBe(1);
+  });
+});
+
+describe('[#4160] the event-source read when answers arrive out of order', () => {
+  const DEGRADED = { kind: 'scraper', liveness: 'stale', degradedReason: 'port_identity_changed' };
+  const withSource = {
+    ok: true,
+    json: () => Promise.resolve({ sessionStatusByInstance: { opencode: { isRunning: true, eventSource: DEGRADED } } }),
+  };
+  const withoutSource = {
+    ok: true,
+    json: () => Promise.resolve({ sessionStatusByInstance: { opencode: { isRunning: true } } }),
+  };
+  const sourceRow = () => screen.queryByTestId('agent-instance-source-opencode');
+
+  /** Each source read stays pending until the test answers it, by the order they were asked in. */
+  function holdReads(): Array<(reply: unknown) => void> {
+    const answers: Array<(reply: unknown) => void> = [];
+    fetchSpy.mockImplementation((url: string) =>
+      /\/api\/worktrees\/wt-1$/.test(String(url))
+        ? new Promise((resolve) => answers.push(resolve))
+        : Promise.resolve({ ok: true, json: () => Promise.resolve({}) }),
+    );
+    return answers;
+  }
+  const settle = (reply: () => void) => act(async () => {
+    reply();
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  async function readBeforeAndAfterHiding(): Promise<Array<(reply: unknown) => void>> {
+    const answers = holdReads();
+    mountPane(OPENCODE);
+    await tick(0);
+    setVisibility('hidden');
+    await tick(AGENT_SOURCE_POLL_INTERVAL_MS);
+    await comeBack();
+    expect(answers).toHaveLength(2);
+    return answers;
+  }
+
+  it('asked before hiding, answered after the read on coming back: the newer one stays', async () => {
+    const answers = await readBeforeAndAfterHiding();
+    await settle(() => answers[1](withoutSource));
+    expect(sourceRow()).toBeNull();
+    await settle(() => answers[0](withSource));
+    expect(sourceRow()).toBeNull();
+  });
+
+  it('answered in order: each is taken, and the last one stands (negative control)', async () => {
+    const answers = await readBeforeAndAfterHiding();
+    await settle(() => answers[0](withSource));
+    expect(sourceRow()).not.toBeNull();
+    await settle(() => answers[1](withoutSource));
+    expect(sourceRow()).toBeNull();
+  });
+
+  it('the newer read failed: the older answer is still the latest word (negative control)', async () => {
+    const answers = await readBeforeAndAfterHiding();
+    await settle(() => answers[1]({ ok: false }));
+    await settle(() => answers[0](withSource));
+    expect(sourceRow()).not.toBeNull();
   });
 });

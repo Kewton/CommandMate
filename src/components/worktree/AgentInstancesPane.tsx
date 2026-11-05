@@ -228,12 +228,19 @@ function useAgentSourceByInstance(
       return;
     }
     let cancelled = false;
+    let lastRequestSeq = 0;
+    let adoptedSeq = 0;
     const read = async (): Promise<void> => {
+      const requestSeq = ++lastRequestSeq;
       try {
         const response = await fetch(`/api/worktrees/${worktreeId}`);
         if (!response.ok) return;
         const body: Worktree = await response.json();
         if (cancelled) return;
+        // Issue #4160: a read held up while the tab was hidden can answer after the one
+        // made on coming back. Older than an answer already taken, it has nothing to add.
+        if (requestSeq <= adoptedSeq) return;
+        adoptedSeq = requestSeq;
         const next: Partial<Record<string, AgentEventSourceView>> = {};
         for (const [instanceId, status] of Object.entries(body.sessionStatusByInstance ?? {})) {
           // Absent is the ordinary answer and stays absent: the row's
