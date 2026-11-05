@@ -47,6 +47,7 @@
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'fs';
+import { tmpdir } from 'os';
 import { join } from 'path';
 import Database from 'better-sqlite3';
 import { NextRequest } from 'next/server';
@@ -303,7 +304,9 @@ const ROLE_PANE_ENV_ONLY = ['src/lib/agent-roles/pane-env.ts'];
 const ENV_SNAPSHOT_REASON =
   'reaches tmux only through the env-clean snapshot\'s `list-sessions`, which reads session ' +
   'names: to count them before and after a run, and for POST /tasks to warn when a session of ' +
-  'that name is running with no evidence of its role (#4132); it never addresses a session';
+  'that name is running with no evidence of its role (#4132), and through the same runner\'s ' +
+  '`list-panes -a`, which reads each pane\'s session name and command to leave out a session ' +
+  'that is only a shell (#4144); it never addresses a session';
 
 const EXEMPT: readonly Exemption[] = [
   {
@@ -734,5 +737,91 @@ describe('[#3290] stage 2 — each of them leaves a foreign session alone', () =
         ]);
       }
     }, 30_000);
+  });
+});
+
+describe('[#4163] what ENV_SNAPSHOT_REASON says is what the warning runs', () => {
+  const WARNING = join(REPO_ROOT, 'src/app/api/worktrees/[id]/tasks/contract-role-warning.ts');
+
+  it('names both tmux reads of the route it excuses', () => {
+    const source = readFileSync(WARNING, 'utf-8');
+    expect(source).toContain("'list-panes', '-a'");
+    expect(source).toContain('probeTmuxSessions(');
+    expect(ENV_SNAPSHOT_REASON).toContain('`list-panes -a`');
+    expect(ENV_SNAPSHOT_REASON).toContain('`list-sessions`');
+  });
+});
+
+/*
+ * Issue #4163, item 2. Here because this Issue's scope has no isolation test file: the
+ * sibling is tests/unit/config/codex-home-isolation-4146.test.ts. No file is written.
+ */
+describe('[#4163] tests/setup.ts keeps no CM_* path from outside', () => {
+  const SETUP = readFileSync(join(REPO_ROOT, 'tests/setup.ts'), 'utf-8');
+  const PINNED = [
+    'CM_VERIFY_WORKTREE_INDEX_ROOT',
+    'CM_SESSION_KILL_LEDGER_ROOT',
+    'CM_OPENCODE_PORT_FILE',
+    'CM_OPENCODE_V2_DIR',
+    'CM_AUTO_YES_SHUTDOWN_RECORD_PATH',
+    'CM_AGENT_ROLE_ARTIFACTS_DIR',
+    'CM_AGENT_ROLE_ANTIGRAVITY_AGENTS_DIR',
+    'CM_OPENCODE_SESSION_FILE',
+    'CM_OPENCODE_LAUNCH_SETTINGS_FILE',
+    'CM_AGENT_HOOKS_DIR',
+    'CM_VERIFY_LOCK_ROOT',
+    'CM_LOG_DIR',
+    'CM_RUN_LOCK_DIR',
+    'CM_UAT_SOCK_BASE',
+    'CM_PRODUCT_PUBLISH_DIR',
+  ];
+  const REMOVED = [
+    'CM_ROOT_DIR',
+    'MCBD_ROOT_DIR',
+    'CM_BROWSE_ROOTS',
+    'CM_HOOK_URL',
+    'CM_PERMISSION_HOOK_URL',
+    'CM_HOOK_PORT',
+    'CM_REMOTE_PAIRING_FILE',
+    'CM_OPENCODE_LOCAL_PROVIDER_CONFIG',
+    'CM_AGENT_ROLE_ANTIGRAVITY_ENABLED',
+  ];
+  const OUTER = '/outer/real/place-4163';
+
+  /** The statements of `source` over `process.env`, run from an environment where every name is `outer`. */
+  function afterSetup(source: string, outer: string | undefined): Record<string, string | undefined> {
+    const code = source.split('\n').filter((line) => !line.trimStart().startsWith('//')).join('\n');
+    const statements = code.match(
+      /^(?:if \(\(process\.env\.[\s\S]*?^\}$|process\.env\.CM_\w+ = [\s\S]*?;$|delete process\.env\.\w+;$)/gm
+    ) ?? [];
+    const env: Record<string, string | undefined> = {};
+    for (const name of [...PINNED, ...REMOVED]) env[name] = outer;
+    new Function('process', 'join', 'tmpdir', statements.join('\n'))({ env, pid: 1 }, join, tmpdir);
+    return env;
+  }
+
+  it.each(PINNED)('%s ends under the temp directory, whatever it started as', (name) => {
+    for (const outer of [OUTER, '', undefined]) {
+      expect(afterSetup(SETUP, outer)[name]?.startsWith(tmpdir()), String(outer)).toBe(true);
+    }
+  });
+
+  it.each(REMOVED)('%s does not survive', (name) => {
+    expect(afterSetup(SETUP, OUTER)[name]).toBeUndefined();
+  });
+
+  it('this process, which tests/setup.ts handed to this file, is the same', () => {
+    for (const name of PINNED) expect(process.env[name]?.startsWith(tmpdir()), name).toBe(true);
+    for (const name of REMOVED) expect(process.env[name], name).toBeUndefined();
+  });
+
+  it('positive control: the guard the pins replaced keeps the outer value, so the reading can tell', () => {
+    const old = "if ((process.env.CM_LOG_DIR ?? '').trim() === '') {\n  process.env.CM_LOG_DIR = join(tmpdir(), 'x');\n}\n";
+    expect(afterSetup(old, OUTER).CM_LOG_DIR).toBe(OUTER);
+    expect(afterSetup(old, '').CM_LOG_DIR?.startsWith(tmpdir())).toBe(true);
+  });
+
+  it('positive control: a name nobody pinned keeps the outer value', () => {
+    expect(afterSetup('', OUTER).CM_LOG_DIR).toBe(OUTER);
   });
 });

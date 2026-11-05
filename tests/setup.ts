@@ -123,19 +123,16 @@ process.env.COPILOT_HOME = join(
 // themselves and keep doing so — `vi.stubEnv` and an explicit `{ root }`
 // argument both still win over this line.
 //
-// Filled only when absent *or blank*, not unconditionally, because the
-// override exists for isolated runners too and an explicitly chosen root must
-// survive. Blank counts as absent because `resolveWorktreeIndexRoot` itself
-// treats an empty or whitespace value as unset — leaving one in place would
-// silently route back to the real registry, which is the exact bug this line
-// closes.
+// Issue #4163: always this path, never the value the suite was started with,
+// for CODEX_HOME's reason above. A worker's tmux pane inherits the shell or the
+// server that started it, and an inherited root is a real directory. The same
+// goes for every path below. `vi.stubEnv`, a bare assignment and an explicit
+// `{ root }` run later and still win.
 //
 // One shared path under tmpdir is safe: claims are `O_EXCL` creates keyed by
 // worktree id, so concurrent suites in different checkouts either reuse their
 // own slot or take the next free one, never each other's.
-if ((process.env.CM_VERIFY_WORKTREE_INDEX_ROOT ?? '').trim() === '') {
-  process.env.CM_VERIFY_WORKTREE_INDEX_ROOT = join(tmpdir(), 'commandmate-test-worktree-index');
-}
+process.env.CM_VERIFY_WORKTREE_INDEX_ROOT = join(tmpdir(), 'commandmate-test-worktree-index');
 
 // Issue #3993: keep session-kill records out of the developer's home.
 //
@@ -145,19 +142,16 @@ if ((process.env.CM_VERIFY_WORKTREE_INDEX_ROOT ?? '').trim() === '') {
 // otherwise, and the env-clean gate of a real verification reads that same
 // directory back to excuse vanished sibling sessions. A test's fake kill of
 // some `wt-*` fixture left there is both litter in $HOME and a record a real
-// gate would read. Same guard as CM_VERIFY_WORKTREE_INDEX_ROOT above (blank
-// counts as absent, an explicit root or `vi.stubEnv` still wins).
+// gate would read. Pinned like CM_VERIFY_WORKTREE_INDEX_ROOT above.
 //
 // Scoped by worker pid, unlike the worktree index: `evaluateEnvClean` reads
 // this directory by default, so a kill another suite recorded at the same
 // moment could otherwise excuse a removal in an unrelated test.
-if ((process.env.CM_SESSION_KILL_LEDGER_ROOT ?? '').trim() === '') {
-  process.env.CM_SESSION_KILL_LEDGER_ROOT = join(
-    tmpdir(),
-    'commandmate-test-session-kills',
-    String(process.pid)
-  );
-}
+process.env.CM_SESSION_KILL_LEDGER_ROOT = join(
+  tmpdir(),
+  'commandmate-test-session-kills',
+  String(process.pid)
+);
 
 // Issue #2490: keep opencode's port ledger out of the developer's home.
 //
@@ -183,23 +177,20 @@ if ((process.env.CM_SESSION_KILL_LEDGER_ROOT ?? '').trim() === '') {
 // no count (#2487's run 750 reported `commandmate-entries clean` while doing
 // exactly this).
 //
-// Blank counts as absent, like COPILOT_HOME: `resolveSafeDirectory` reads `''`
-// as unset and answers the home path, so an empty value left by an isolated
-// runner would route straight back to the file this line is closing. A test
-// that redirects itself with `vi.stubEnv` or a bare assignment still wins.
+// A blank value is overwritten too: `resolveSafeDirectory` reads `''` as unset
+// and answers the home path. A test that redirects itself with `vi.stubEnv` or a
+// bare assignment still wins.
 //
 // Scoped by worker pid, like COPILOT_HOME and unlike CODEX_HOME: this default
 // has a real writer and the write is read-modify-write on a single JSON
 // document, so one shared path would let two checkouts running the suite at
 // once (this repo routinely runs five) drop each other's keys — the same
 // machine-global collision, one directory further down.
-if ((process.env.CM_OPENCODE_PORT_FILE ?? '').trim() === '') {
-  process.env.CM_OPENCODE_PORT_FILE = join(
-    tmpdir(),
-    'commandmate-test-opencode-ports',
-    `${process.pid}.json`
-  );
-}
+process.env.CM_OPENCODE_PORT_FILE = join(
+  tmpdir(),
+  'commandmate-test-opencode-ports',
+  `${process.pid}.json`
+);
 
 // Issue #2948: OpenCode V2 keeps its per-instance passwords and port
 // assignments under `~/.commandmate/opencode-v2` unless `CM_OPENCODE_V2_DIR`
@@ -208,13 +199,11 @@ if ((process.env.CM_OPENCODE_PORT_FILE ?? '').trim() === '') {
 // live tmux session deletes every record there — the records of the user's
 // running OpenCode V2 instances. Same default and same per-pid scoping as
 // CM_OPENCODE_PORT_FILE above. A test that stubs the variable still wins.
-if ((process.env.CM_OPENCODE_V2_DIR ?? '').trim() === '') {
-  process.env.CM_OPENCODE_V2_DIR = join(
-    tmpdir(),
-    'commandmate-test-opencode-v2',
-    String(process.pid)
-  );
-}
+process.env.CM_OPENCODE_V2_DIR = join(
+  tmpdir(),
+  'commandmate-test-opencode-v2',
+  String(process.pid)
+);
 
 // Issue #3730: the Auto-Yes shutdown record lives next to the database
 // (`<CM_DB_PATH>.auto-yes-shutdown.json`) unless
@@ -225,13 +214,11 @@ if ((process.env.CM_OPENCODE_V2_DIR ?? '').trim() === '') {
 // CM_OPENCODE_PORT_FILE above: the record has a writer and a deleter, so one
 // shared path would let two suites running at once read each other's. A test
 // that stubs the variable or passes `{ path }` still wins.
-if ((process.env.CM_AUTO_YES_SHUTDOWN_RECORD_PATH ?? '').trim() === '') {
-  process.env.CM_AUTO_YES_SHUTDOWN_RECORD_PATH = join(
-    tmpdir(),
-    'commandmate-test-auto-yes-shutdown',
-    `${process.pid}.json`
-  );
-}
+process.env.CM_AUTO_YES_SHUTDOWN_RECORD_PATH = join(
+  tmpdir(),
+  'commandmate-test-auto-yes-shutdown',
+  `${process.pid}.json`
+);
 
 // Issue #4114: generated role files. The data root defaults to
 // `~/.commandmate/agent-roles`, and Antigravity's agents directory to
@@ -239,22 +226,61 @@ if ((process.env.CM_AUTO_YES_SHUTDOWN_RECORD_PATH ?? '').trim() === '') {
 // cover. Same default and per-pid scoping as CM_OPENCODE_V2_DIR: a test that
 // writes a role artifact without naming a directory lands here, and an explicit
 // option or `vi.stubEnv` still wins.
-if ((process.env.CM_AGENT_ROLE_ARTIFACTS_DIR ?? '').trim() === '') {
-  process.env.CM_AGENT_ROLE_ARTIFACTS_DIR = join(
-    tmpdir(),
-    'commandmate-test-agent-roles',
-    String(process.pid)
-  );
-}
+process.env.CM_AGENT_ROLE_ARTIFACTS_DIR = join(
+  tmpdir(),
+  'commandmate-test-agent-roles',
+  String(process.pid)
+);
 // Issue #4115: a shell that enabled the adapter does not enable it for the suite.
 delete process.env.CM_AGENT_ROLE_ANTIGRAVITY_ENABLED;
-if ((process.env.CM_AGENT_ROLE_ANTIGRAVITY_AGENTS_DIR ?? '').trim() === '') {
-  process.env.CM_AGENT_ROLE_ANTIGRAVITY_AGENTS_DIR = join(
-    tmpdir(),
-    'commandmate-test-agent-roles-antigravity',
-    String(process.pid)
-  );
-}
+process.env.CM_AGENT_ROLE_ANTIGRAVITY_AGENTS_DIR = join(
+  tmpdir(),
+  'commandmate-test-agent-roles-antigravity',
+  String(process.pid)
+);
+
+// Issue #4163: the rest of the `CM_*` settings that name a real place. The
+// classification of every `CM_*` is in this Issue's commit message;
+// `tests/unit/guards/worktree-route-session-ownership-3290.test.ts` holds these
+// names and fails when one of them keeps a value from outside.
+//
+// Each of these has a real default or a real outer value: the opencode session
+// memory and launch settings and the claude hook settings under `~/.commandmate`,
+// the machine locks under `~/.commandmate/locks` that live runs share, the log
+// directory, the UAT run lock and sockets (`<tmpdir>` and `/tmp`, shared with a
+// live UAT), and the published daily result (`/Users/Shared/commandmate-check`).
+// Scoped by worker pid: each has a writer, and two suites run at once.
+process.env.CM_OPENCODE_SESSION_FILE = join(
+  tmpdir(),
+  'commandmate-test-opencode-sessions',
+  `${process.pid}.json`
+);
+process.env.CM_OPENCODE_LAUNCH_SETTINGS_FILE = join(
+  tmpdir(),
+  'commandmate-test-opencode-launch-settings',
+  `${process.pid}.json`
+);
+process.env.CM_AGENT_HOOKS_DIR = join(tmpdir(), 'commandmate-test-agent-hooks', String(process.pid));
+process.env.CM_VERIFY_LOCK_ROOT = join(tmpdir(), 'commandmate-test-locks', String(process.pid));
+process.env.CM_LOG_DIR = join(tmpdir(), 'commandmate-test-logs', String(process.pid));
+process.env.CM_RUN_LOCK_DIR = join(tmpdir(), 'commandmate-test-run-lock', String(process.pid));
+process.env.CM_UAT_SOCK_BASE = join(tmpdir(), 'commandmate-test-uat-sock', String(process.pid));
+process.env.CM_PRODUCT_PUBLISH_DIR = join(tmpdir(), 'commandmate-test-product-publish', String(process.pid));
+
+// Issue #4163: these are removed, not pinned, because having no value is the safe
+// state and is what CI runs with. The worker's shell carries
+// `CM_ROOT_DIR=<the real repositories>` (scans and clones land under it; with none
+// the root is the checkout); a hook URL names a running server; a pairing file
+// means `remote` is running, and the route consumes it; the provider config asks
+// for a file to be written beside opencode's own.
+delete process.env.CM_ROOT_DIR;
+delete process.env.MCBD_ROOT_DIR;
+delete process.env.CM_BROWSE_ROOTS;
+delete process.env.CM_HOOK_URL;
+delete process.env.CM_PERMISSION_HOOK_URL;
+delete process.env.CM_HOOK_PORT;
+delete process.env.CM_REMOTE_PAIRING_FILE;
+delete process.env.CM_OPENCODE_LOCAL_PROVIDER_CONFIG;
 
 // Issue #4086: keep the suite off the database the calling shell names.
 //
@@ -262,9 +288,9 @@ if ((process.env.CM_AGENT_ROLE_ANTIGRAVITY_AGENTS_DIR ?? '').trim() === '') {
 // server's `CM_DB_PATH=<production db>`. A test that reached the real
 // `getDbInstance()` opened that file, set WAL and ran this checkout's
 // migrations on it — on 2026-11-01 the production database went to v63 under a
-// v62 server. So, UNLIKE the defaults above, this is applied even when the
-// environment already has a value (the inherited value is the hazard), and the
-// deprecated aliases MCBD_DB_PATH / DATABASE_PATH are removed. With CM_DB_PATH
+// v62 server. So this is applied even when the environment already has a value
+// (the inherited value is the hazard), and the deprecated aliases
+// MCBD_DB_PATH / DATABASE_PATH are removed. With CM_DB_PATH
 // always set, the install default (`~/.commandmate/data/cm.db` or
 // `<cwd>/data/cm.db`) is never reached either. Scoped by worker pid like
 // CM_OPENCODE_PORT_FILE, and by VITEST_POOL_ID because `--pool=threads` runs

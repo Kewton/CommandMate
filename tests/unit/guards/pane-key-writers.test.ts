@@ -791,10 +791,17 @@ export function reconcile(
 
 const read = (file: string): string => readFileSync(join(REPO_ROOT, file), 'utf-8');
 
+/**
+ * Issue #4163: the two tests that walk all of src. 1.5 to 1.9 s alone and on CI, and 8.2 s at
+ * worst with the CPU taken away (`taskpolicy -b`), where 5 s failed them three runs in three.
+ * The commit message has the numbers. Sharing the walk is #4066's.
+ */
+const FULL_SCAN_TIMEOUT_MS = 30_000;
+
 describe('[#3981] every pane key writer in src is on the ledger', () => {
   it('the scan of src agrees with the ledger (negative control: today’s tree passes)', () => {
     expect(reconcile(scanRepository(), LEDGER)).toEqual([]);
-  });
+  }, FULL_SCAN_TIMEOUT_MS);
 
   it('every evidence test exists; a lock row’s runs the lock', () => {
     for (const row of LEDGER) {
@@ -824,7 +831,7 @@ describe('[#3981] every pane key writer in src is on the ledger', () => {
 describe('[#3981 review P2-1] every caller of a caller-held row is on the caller ledger', () => {
   it('negative control: today’s callers agree with the caller ledger', () => {
     expect(reconcileCallers(scanGuardedCallers(), CALLER_LEDGER)).toEqual([]);
-  });
+  }, FULL_SCAN_TIMEOUT_MS);
 
   it('the guarded rows are the four whose lock is the caller’s', () => {
     expect(callerGuarded(LEDGER).map((r) => functionName(r.site)).sort()).toEqual([

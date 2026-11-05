@@ -138,10 +138,17 @@ function reconcileKills(sites: readonly { file: string; site: string }[], table:
   return problems;
 }
 
+/**
+ * Issue #4163: this test walks all of src. 1.6 to 1.9 s alone and on CI, and 8.6 s at worst with
+ * the CPU taken away (`taskpolicy -b`), where 5 s failed it three runs in three. The commit
+ * message has the numbers. Sharing the walk is #4066's.
+ */
+const FULL_SCAN_TIMEOUT_MS = 30_000;
+
 describe('[#4032] every tmux kill-session in src, and whether it forgets the launch', () => {
   it('negative control: the kills in src are the table', () => {
     expect(reconcileKills(scanKills())).toEqual([]);
-  });
+  }, FULL_SCAN_TIMEOUT_MS);
 
   it('positive: a new kill anywhere in src fails until it is put in the table', () => {
     const text = "import { killSession } from '../tmux/tmux';\nexport async function reap(s: string) { await killSession(s); }\n";
