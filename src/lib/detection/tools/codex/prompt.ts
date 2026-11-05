@@ -103,16 +103,24 @@ export function detectCodexDialog(
   const block = findNumberedOptionBlock(lines, context.contentEnd);
 
   if (context.lifecycleDialog) {
-    // `sendPromptAnswer` sends the digit and then Enter. Read against the keys
-    // measured on 0.166.0 (`tests/fixtures/codex-dialogs-0166/README.md`, Issue
-    // #4146): on the hook review and the folder trust the digit moves the cursor
-    // and the Enter confirms that row, so the pair does what was asked. The update
-    // offer confirms on the digit alone, so its Enter goes to whatever comes next.
-    // 未確認: a `respond` at a live pane, and a digit on the hooks list and detail.
+    // `sendPromptAnswer` sends the digit and then Enter unless told otherwise. Read
+    // against the keys measured on 0.166.0 (`tests/fixtures/codex-dialogs-0166/README.md`,
+    // Issue #4146): on the hook review and the folder trust the digit moves the cursor
+    // and the Enter confirms that row, so the pair does what was asked.
+    //
+    // The update offer confirms on the digit alone. Issue #4161 measured where its
+    // Enter went (isolated CODEX_HOME, private tmux, the same 100 ms apart): onto the
+    // folder trust it wrote `trust_level = "trusted"`, onto the hook review it opened
+    // the list, and on the composer it did nothing. Hence `answer_only`, for this
+    // screen only.
+    //
+    // 未確認: a `respond` through a server at a live pane (the keys were sent with
+    // tmux), and a digit on the hooks list and detail.
     return {
       kind: LIFECYCLE_DIALOG_KINDS[context.lifecycleDialog],
       options: block?.options ?? [],
       answerMode: 'numbered',
+      ...(context.lifecycleDialog === 'update' ? { submitMode: 'answer_only' as const } : {}),
     };
   }
 
