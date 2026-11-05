@@ -223,6 +223,9 @@ describe('[#4149] a start whose trust keys never went out', () => {
     expect(error.message).toContain('commandmate attach <worktree-id>');
     expect(error.message).toContain('then send the message again');
     expect(error.message).toContain('A send on its own does not answer this dialog');
+    // The word the other start timeouts carry; "slow" stays out (see the tests above).
+    expect(error.message).toContain('initialization timeout');
+    expect(error.message).toMatch(/retry/i);
     // The same error to everything that reads it.
     expect((error as Error & { code?: string }).code).toBe(SESSION_STARTING_CODE);
     expect(isSessionStartTimeoutError(error)).toBe(true);
@@ -252,6 +255,7 @@ describe('[#4149] a start whose trust keys never went out', () => {
     const error = await runOut();
 
     expect(error.message).toContain('Send it again');
+    expect(error.message).toContain('initialization timeout');
     expect((error as Error & { code?: string }).code).toBe(SESSION_STARTING_CODE);
   });
 

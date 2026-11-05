@@ -217,7 +217,7 @@ class ClaudeStartupDialogStalledError extends SessionStartTimeoutError {
   constructor(sessionName: string, timeoutMs: number, where: string, next: string) {
     super('Claude Code', sessionName, timeoutMs);
     this.message =
-      `Claude Code did not reach its input prompt within ${Math.round(timeoutMs / 1000)}s: ` +
+      `Claude Code did not reach its input prompt within ${Math.round(timeoutMs / 1000)}s (initialization timeout): ` +
       `the tmux session '${sessionName}' is stopped on ${where} This is not a slow start, so waiting will not ` +
       `move it. The message was not delivered. ${next}`;
     this.name = 'ClaudeStartupDialogStalledError';
@@ -243,7 +243,7 @@ function startTimeoutError(sessionName: string, lastScreen: string | null, trust
       // The process stays, and a send to a running one reuses it without answering this dialog.
       'A send on its own does not answer this dialog: run `commandmate capture <worktree-id>` to see it, ' +
         'clear it in a terminal with `commandmate attach <worktree-id>` (each with --instance for a named instance), ' +
-        'then send the message again.'
+        'then send the message again. A retry before that will not get through.'
     );
   }
   if (lastScreen !== null && isClaudeAutoDefaultNudgeOpen(lastScreen)) {
