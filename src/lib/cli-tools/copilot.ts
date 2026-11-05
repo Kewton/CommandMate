@@ -55,6 +55,7 @@ import { COPILOT_LAUNCH_COMMAND } from '@/lib/hooks/sources/copilot/hook-setting
 import { COPILOT_CLI_TOOL_ID } from '@/lib/hooks/sources/copilot/tool-id';
 import { getErrorMessage } from '@/lib/errors';
 import { createLogger } from '@/lib/logger';
+import { newLaunchAnswerSkips, noteLaunchAnswerSkipped, type LaunchAnswerSkips } from './launch-answer-skips';
 import { missingToolError } from './install-hints';
 import { beginLaunchWindow, endLaunchWindow, recordLaunchDialogPress } from './launch-window';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
@@ -341,6 +342,20 @@ function describeBottomRow(output: string): string {
 }
 
 /**
+ * What held the pane when the wait for the composer ran out (Issue #4161), for the
+ * refusal `send` reports. Names the screen only: nothing captured goes into it, and
+ * `classifySendFailure` reads the result (see the refusals below).
+ *
+ * A dialog does not get here: the re-read before each refusal answers `prompt-waiting`.
+ *
+ * @param output - The last capture with ANSI stripped; empty when the last read failed
+ */
+function describeCopilotPaneHold(output: string): string {
+  if (output === '') return 'the pane could not be read';
+  return 'no composer on the pane: copilot may still be starting';
+}
+
+/**
  * What {@link CopilotTool.waitForPrompt} waits for (Issue #2623).
  *
  *   composer - the composer is drawn and copilot is past its start-up row.
@@ -568,9 +583,15 @@ export class CopilotTool extends BaseCLITool {
    * @param sessionName - tmux session name
    * @param output - ANSI-stripped pane capture
    * @param readMark - {@link instanceInputReadMark} taken before `output` was read
+   * @param skips - The calling wait's record of answers that did not go out (Issue #4161)
    * @returns True when the dialog was found and answered
    */
-  private async answerFolderTrustDialog(sessionName: string, output: string, readMark: number): Promise<boolean> {
+  private async answerFolderTrustDialog(
+    sessionName: string,
+    output: string,
+    readMark: number,
+    skips: LaunchAnswerSkips
+  ): Promise<boolean> {
     if (!isCopilotFolderTrustDialog(output)) {
       return false;
     }
@@ -581,7 +602,7 @@ export class CopilotTool extends BaseCLITool {
       () => sendKeys(sessionName, COPILOT_FOLDER_TRUST_ANSWER_KEY, false)
     );
     if (!outcome.answered) {
-      logger.info('copilot-folder-trust-answer-skipped', { reason: outcome.reason });
+      noteLaunchAnswerSkipped(logger, skips, 'copilot-folder-trust-answer-skipped', { reason: outcome.reason });
       return false;
     }
     recordLaunchDialogPress(sessionName);
@@ -656,6 +677,7 @@ export class CopilotTool extends BaseCLITool {
    */
   private async waitForReady(sessionName: string): Promise<void> {
     let trustDialogHandled = false;
+    const answerSkips = newLaunchAnswerSkips();
     for (let i = 0; i < COPILOT_INIT_MAX_ATTEMPTS; i++) {
       try {
         const readMark = instanceInputReadMark();
@@ -668,7 +690,7 @@ export class CopilotTool extends BaseCLITool {
           return;
         }
 
-        if (!trustDialogHandled && (await this.answerFolderTrustDialog(sessionName, output, readMark))) {
+        if (!trustDialogHandled && (await this.answerFolderTrustDialog(sessionName, output, readMark, answerSkips))) {
           trustDialogHandled = true;
         }
       } catch {
@@ -744,14 +766,19 @@ export class CopilotTool extends BaseCLITool {
     const pollInterval = 500;
     let trustDialogHandled = false;
     let output = '';
+    // Issue #4161: the last read failed, so `output` says nothing about the pane now.
+    let lastReadFailed = false;
+    const answerSkips = newLaunchAnswerSkips();
     // Issue #4067: the current run of reads that showed a dialog (counted by
     // the helper opencode and vibe-local share, Issue #4084).
     const dialog = createDialogConfirmation();
     while (Date.now() < deadline) {
       try {
         const readMark = instanceInputReadMark();
+        lastReadFailed = true;
         const rawOutput = await readBeforeDeadline(() => capturePane(sessionName, 50), deadline);
         if (rawOutput === null) break;
+        lastReadFailed = false;
         output = stripAnsi(rawOutput);
         if (this.isReadyFor(until, output)) {
           return { ready: true, output };
@@ -765,7 +792,7 @@ export class CopilotTool extends BaseCLITool {
         // remember this folder" and writes the operator's machine-global
         // ~/.copilot/config.json. The send now refuses instead, but answering
         // it here (as the launch path does) is what lets that send go through.
-        if (!trustDialogHandled && (await this.answerFolderTrustDialog(sessionName, output, readMark))) {
+        if (!trustDialogHandled && (await this.answerFolderTrustDialog(sessionName, output, readMark, answerSkips))) {
           trustDialogHandled = true;
         }
         if (dialog.observe(this.isRefusableDialog(rawOutput, output))) {
@@ -780,6 +807,7 @@ export class CopilotTool extends BaseCLITool {
       if (remaining <= 0) break;
       await new Promise((resolve) => setTimeout(resolve, Math.min(pollInterval, remaining)));
     }
+    if (lastReadFailed) output = '';
     logger.info('copilot-prompt-not-detected', { until, bottomRow: describeBottomRow(output) });
     return { ready: false, output };
   }
@@ -917,7 +945,7 @@ export class CopilotTool extends BaseCLITool {
             });
             throw new Error(
               `copilot prompt not ready within ${COPILOT_PROMPT_WAIT_TIMEOUT_MS}ms, ` +
-                'so the selection-list command was not sent; nothing was typed'
+                `so the selection-list command was not sent; nothing was typed (${describeCopilotPaneHold(prompt.output)})`
             );
           }
           assertCopilotInputOwner(ticket, 'the selection-list command');
@@ -948,7 +976,7 @@ export class CopilotTool extends BaseCLITool {
         logger.warn('copilot-message-not-sent:prompt-not-ready', { bottomRow: describeBottomRow(prompt.output) });
         throw new Error(
           `copilot prompt not ready within ${COPILOT_PROMPT_WAIT_TIMEOUT_MS}ms, ` +
-            'so the message was not sent; nothing was typed'
+            `so the message was not sent; nothing was typed (${describeCopilotPaneHold(prompt.output)})`
         );
       }
 
