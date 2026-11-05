@@ -29,7 +29,7 @@ import type {
   SystemRoleDefaultsResponse,
 } from '@/types/agent-roles';
 
-const ROLE_REQUEST_TIMEOUT_MS = 15000;
+export const ROLE_REQUEST_TIMEOUT_MS = 15000;
 
 export type RoleApiFailure = {
   ok: false;
@@ -80,10 +80,15 @@ async function request<T>(url: string, init?: RequestInit): Promise<RoleApiResul
   }
 }
 
-function sendJson<T>(url: string, method: 'POST' | 'PUT', body: unknown): Promise<RoleApiResult<T>> {
+export function sendJson<T>(
+  url: string,
+  method: 'POST' | 'PUT',
+  body: unknown,
+  header?: Record<string, string>,
+): Promise<RoleApiResult<T>> {
   return request<T>(url, {
     method,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...header },
     body: JSON.stringify(body),
   });
 }
