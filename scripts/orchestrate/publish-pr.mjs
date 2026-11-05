@@ -12,7 +12,8 @@
  *      a conflict marker, and the fragments are there (6-4);
  *   3. the module-reference fragment is copied into the run directory, because
  *      dev-reports/ is never committed and goes with the worktree;
- *   4. `git push -u origin <branch>` (never forced);
+ *   4. `git push origin <head>:refs/heads/<branch>` (never forced): the SHA checked above, whatever
+ *      the branch has become by then; the upstream is then set as `-u` would have;
  *   5. the PR is opened only when the branch has no open PR — a rerun after a
  *      crash finds the one it opened and records it instead. A merged PR on the
  *      branch means the Issue's work is in: nothing is pushed. An open PR of
@@ -64,6 +65,8 @@ import {
   itemOption,
   refersToIssue,
   siblingPrNumbers,
+  pushHead,
+  setUpstream,
   withGhRetry,
   workHeadOf,
 } from './pr-common.mjs';
@@ -246,11 +249,12 @@ export function main(argv, deps = {}) {
       fs.copyFileSync(fragment, moduleReferenceBackup(o.runDir, issue, item));
     }
 
-    const push = run('git', ['-C', o.worktree, 'push', '-u', 'origin', branch]);
+    const push = pushHead(run, o.worktree, { branch, head, sleep, notice: error });
     if (push.status !== 0) {
       error(`publish #${issue}: git push failed: ${(push.stderr || push.stdout).trim()}`);
       return 1;
     }
+    setUpstream(run, o.worktree, branch, error);
     log(`pushed ${branch} at ${short}`);
 
     if (open) {

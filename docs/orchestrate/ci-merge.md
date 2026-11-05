@@ -154,6 +154,26 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 
 `git fetch` が失敗した回は判定できないので、その回はマージせず、次の回に読み直す。読めないまま期限に達したら exit 124。
 
+## 6-3 落ちたジョブの再実行と run の完走
+
+（#4162。1 ジョブが早く落ちると、同じ run の残りが走っている間は `gh run rerun` が `already running` で拒まれ、`merge-pr.mjs` が exit 1 で止まっていた。#3783・#4149 で実測。）
+
+`merge-pr.mjs` は落ちたジョブの run に `pending` のチェックが残っている間は再実行を送らず、完走を待つ。追加の API は呼ばない（`gh pr checks` の `link` で run を見分ける）。チェックに現れていないのに `already running` で拒まれたときも、送っていないものとして待ちに戻る。
+
+- **待機の期限**: `--ci-timeout`（別の上限は設けない）。超えたら exit 124 で、`waiting for run <id> to finish before re-running it` と出す
+- **develop が進んだとき**: 見るたびの確認（「6-2 CI 待ちの間に develop が動いたとき」）で exit 4。再実行は送らない
+- **PR の HEAD が進んだとき**: 待ちの間に動いたら exit 1（`ci` 段に `head-moved <sha>` を記録）。古い HEAD の run を再実行しても、マージする HEAD の確認にならない。新しい HEAD で再実行すれば続きから進む
+- **再実行の回数**: 同じ HEAD で 1 回のまま。受理された分だけを `rerun=<id>` と記録するので、待っている間に `merge-pr.mjs` が止まっても、再開後に 1 回送る。受理の後は、また落ちれば `after-rerun` で止まる
+
+## 6-3 git push の 5xx
+
+`publish-pr.mjs` と `merge-pr.mjs` の `git push` は `pr-common.mjs` の `pushHead` を通る（#4162）。`gh` の書き込み（下の「gh の 5xx の再試行」）と違い、同じ SHA の push は送り直しても変わらないので、再試行する。
+
+- **対象**: HTTP 500・502・503・504、`RPC failed`、接続切れ、理由が `Internal Server Error` だけの `[remote rejected]`（#4133 の実測の形）。`[rejected]` と、ほかの理由の `[remote rejected]`（非 fast-forward、hook、protected branch）は答えなので送り直さない。hook が `Internal Server Error` と出力しても、git の理由は `pre-receive hook declined` なので対象にならない
+- **応答が消えたとき**: 失敗のたびに `git ls-remote origin refs/heads/<branch>` を読み、リモートがこの HEAD なら成功として進む
+- **回数**: `gh` と同じ最大 4 回（10 秒・30 秒・60 秒あける）。尽きたら今までどおり exit 1
+- **ローカルが進んだとき**: 送り元は常に確かめた SHA（`git push origin <sha>:refs/heads/<branch>`）で、`HEAD` やブランチ名を git に解決させない。確認の後に参照が動いても、送るのは検証と記録の SHA のまま。進んだコミットは次の実行で判定する。`publish-pr.mjs` の上流は push の後に `git config` で設定する（SHA の送り元では `-u` が効かない。設定の失敗は知らせるだけで止めない）
+
 ## 6-3 CI の登録までの時間と --ci-timeout
 
 待ちを 2 つに分ける（#4148）:
@@ -161,7 +181,7 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 - `--register-timeout`（既定 600 秒）: この HEAD にチェックが 1 つも無い間。GitHub が CI の run を作るまでの時間で、CI の遅さではない。超えると `no CI registered on <sha>` で exit 124
 - `--ci-timeout`（既定 3600 秒）: 最初のチェックが見えてから。超えると今までどおり `CI did not settle` で exit 124
 
-どちらも exit 124 で、再実行すれば同じ HEAD の CI を待ち直す。`git push` の 500（`remote rejected ... Internal Server Error`）は exit 1 で止まり、再実行すれば `refresh=unpushed` で push からやり直す（#4133 で 2 回）。
+どちらも exit 124 で、再実行すれば同じ HEAD の CI を待ち直す。`git push` の 500（`remote rejected ... Internal Server Error`、#4133 で 2 回）は上の「6-3 git push の 5xx」のとおり再試行する。4 回とも失敗すると exit 1 で止まり（`git push failed: ...`。マージには進まない）、再実行すれば `refresh=unpushed` で push からやり直す。
 
 #4133 の exit 124 の実測（`merge-4133c.out`）: 出力の 12 件はどれも `(not registered)` の付かない `pending` で、登録の遅れではなく登録後のジョブが 1 時間終わらなかった形だった。この形はこの分離でも exit 124 のままで、同じ HEAD で待ち直す前に `gh run view` でランナーの詰まりを見る。
 

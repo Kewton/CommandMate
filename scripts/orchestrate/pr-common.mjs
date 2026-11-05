@@ -186,6 +186,77 @@ export function ghWrite(run, args, { confirm, notice = (line) => console.error(l
   return { status: 0, stdout: done, stderr: '', confirmed: true };
 }
 
+/** What `git push` says when the server or the connection failed, including the 500 `gh` is not asked about. */
+const PUSH_TRANSIENT_PATTERN =
+  /\b(?:HTTP|returned error:) 50[0234]\b|RPC failed|remote end hung up|unexpected disconnect|early EOF|failed to connect|connection timed out|operation timed out/i;
+/** The server's answer, as a rule: a non-fast-forward or a hook refusing the push. */
+const PUSH_REJECTED_PATTERN = /\[(?:remote )?rejected\]/;
+/**
+ * The exception, the one 500 GitHub has answered a push with (#4133): git's own status line, whose
+ * reason is these words and nothing else. A hook's output comes prefixed `remote:`, and a hook that
+ * refuses gets a reason of its own from git, so neither reads as this.
+ */
+const PUSH_SERVER_ERROR_LINE = /^\s*!\s*\[remote rejected\]\s+\S+\s+->\s+\S+\s+\(Internal Server Error\)\s*$/i;
+
+/** Whether a finished `git push` failed for a reason worth trying again (#4162). */
+export function isTransientPushFailure({ status, stdout, stderr }) {
+  if (status === 0) return false;
+  const text = `${stderr ?? ''}\n${stdout ?? ''}`;
+  const rejected = text.split(/\r?\n/).filter((line) => PUSH_REJECTED_PATTERN.test(line));
+  if (rejected.length > 0) return rejected.every((line) => PUSH_SERVER_ERROR_LINE.test(line));
+  return PUSH_TRANSIENT_PATTERN.test(text) || GH_TRANSIENT_PATTERN.test(text);
+}
+
+/**
+ * `git push` of the SHA `head` to `branch`, tried again on a transient failure (#4162): up to
+ * GH_ATTEMPTS tries, GH_RETRY_DELAYS_MS apart. Pushing the same SHA twice changes nothing, so
+ * unlike ghWrite this may send again, but the answer may also have been lost after the push
+ * landed: each failure first reads the remote ref, and a ref at `head` is a success
+ * (`confirmed: true`). A rejection is the answer and is returned as it is.
+ *
+ * The source is the SHA itself, never HEAD or a branch name: those are resolved by git when the
+ * push runs, so a commit made meanwhile would go out in place of what was verified and recorded.
+ *
+ * @param {typeof defaultRun} run
+ * @param {string} worktree
+ * @param {{ branch: string, head: string, sleep?: (ms: number) => void, notice?: (line: string) => void }} options
+ */
+export function pushHead(run, worktree, { branch, head, sleep = defaultSleep, notice = (line) => console.error(line) }) {
+  for (let attempt = 1; ; attempt++) {
+    const out = run('git', ['-C', worktree, 'push', 'origin', `${head}:refs/heads/${branch}`]);
+    if (out.status === 0 || !isTransientPushFailure(out)) return out;
+    const reason = `${out.stderr || out.stdout}`.trim().split('\n')[0];
+    const remote = run('git', ['-C', worktree, 'ls-remote', 'origin', `refs/heads/${branch}`]);
+    if (remote.status === 0 && remote.stdout.trim().split(/\s+/)[0] === head) {
+      notice(`git push: ${reason} — not sent again; origin/${branch} is at ${head.slice(0, 7)}`);
+      return { status: 0, stdout: '', stderr: '', confirmed: true };
+    }
+    if (attempt >= GH_ATTEMPTS) return out;
+    const delay = GH_RETRY_DELAYS_MS[Math.min(attempt, GH_RETRY_DELAYS_MS.length) - 1];
+    notice(`git push: ${reason} — retrying in ${delay / 1000}s (attempt ${attempt + 1}/${GH_ATTEMPTS})`);
+    sleep(delay);
+  }
+}
+
+/**
+ * What `git push -u` would have written for `branch` (#4162): `-u` does nothing when the source is
+ * a SHA. A convenience for whoever works in the worktree later, so a failure is said and not fatal.
+ *
+ * @param {typeof defaultRun} run
+ * @param {string} worktree
+ * @param {string} branch
+ * @param {(line: string) => void} notice
+ */
+export function setUpstream(run, worktree, branch, notice) {
+  for (const [key, value] of [[`branch.${branch}.remote`, 'origin'], [`branch.${branch}.merge`, `refs/heads/${branch}`]]) {
+    const out = run('git', ['-C', worktree, 'config', key, value]);
+    if (out.status !== 0) {
+      notice(`git config ${key}: ${`${out.stderr || out.stdout}`.trim()} — the push stands; the upstream of ${branch} is not set`);
+      return;
+    }
+  }
+}
+
 /** `gh …` parsed as JSON; throws with gh's own message when it fails. */
 export function ghJson(run, args) {
   const { status, stdout, stderr } = run('gh', args);

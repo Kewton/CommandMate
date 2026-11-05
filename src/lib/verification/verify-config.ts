@@ -31,6 +31,20 @@ export interface VerifyGate {
    */
   mutex?: string;
   /**
+   * How long this gate may wait for its {@link VerifyGate.mutex}, separately
+   * from how long its command may run (Issue #4162). Absent means `timeoutSec`,
+   * the single budget every gate had before this field existed.
+   *
+   * The two answer different questions: `timeoutSec` is "when is this command
+   * hung", and the wait is "how long is the queue on this machine". Sharing one
+   * number meant a longer queue could only be bought by also taking longer to
+   * notice a hang. Valid only beside a `mutex`: without a lock there is no wait.
+   *
+   * Optional for the same reason `mutex` is: contract rows are stored as JSON
+   * and read back without re-validating.
+   */
+  mutexWaitSec?: number;
+  /**
    * Re-run this gate once, in the same tree, when its command exits non-zero
    * (Issue #1772). `1` opts in; `0` (the default) is the behaviour every gate
    * had before this field existed.
@@ -233,8 +247,20 @@ export const MAX_RETRY_ON_FAIL = 1;
  */
 export const MAX_ENV_CLEAN_IGNORE_HOME_ENTRIES = 32;
 
+/**
+ * Longest `mutexWaitSec` a gate may declare (Issue #4162): above `timeoutSec`'s
+ * ceiling on purpose, because a queue of several slow gates is longer than any
+ * one of them. A day is past any queue worth waiting behind.
+ */
+export const MAX_MUTEX_WAIT_SEC = 86400;
+
+/** The lock-wait budget of a gate, in seconds: `mutexWaitSec`, or `timeoutSec` when absent (Issue #4162). */
+export function mutexWaitBudgetSec(gate: Pick<VerifyGate, 'timeoutSec' | 'mutexWaitSec'>): number {
+  return gate.mutexWaitSec ?? gate.timeoutSec;
+}
+
 const TOP_LEVEL_KEYS = ['version', 'gates', 'options'];
-const GATE_KEYS = ['id', 'command', 'timeoutSec', 'mutex', 'retryOnFail', 'flakyIsPass'];
+const GATE_KEYS = ['id', 'command', 'timeoutSec', 'mutex', 'mutexWaitSec', 'retryOnFail', 'flakyIsPass'];
 const OPTION_KEYS = [
   'baseRef',
   'skipInPrimaryCheckout',
@@ -394,6 +420,23 @@ function validateGateEntry(
     }
   }
 
+  let mutexWaitSec: number | undefined;
+  if (entry.mutexWaitSec !== undefined) {
+    const parsed = asInteger(entry.mutexWaitSec);
+    if (parsed === null) {
+      issues.push(`${at}.mutexWaitSec: must be an integer (got ${describe(entry.mutexWaitSec)})`);
+    } else if (parsed < MIN_TIMEOUT_SEC || parsed > MAX_MUTEX_WAIT_SEC) {
+      issues.push(
+        `${at}.mutexWaitSec: must be ${MIN_TIMEOUT_SEC}..${MAX_MUTEX_WAIT_SEC} (got ${parsed})`
+      );
+    } else if (entry.mutex === undefined) {
+      // A knob that can never fire is a config bug, as with flakyIsPass below.
+      issues.push(`${at}.mutexWaitSec: requires mutex (without a lock there is no wait)`);
+    } else {
+      mutexWaitSec = parsed;
+    }
+  }
+
   let retryOnFail: number | undefined;
   if (entry.retryOnFail !== undefined) {
     const parsed = asInteger(entry.retryOnFail);
@@ -438,6 +481,7 @@ function validateGateEntry(
     // is not a state this field has. The same holds for the #1772 pair, whose
     // absence has to keep meaning "this gate runs exactly once".
     if (mutex !== undefined) gate.mutex = mutex;
+    if (mutexWaitSec !== undefined) gate.mutexWaitSec = mutexWaitSec;
     if (retryOnFail !== undefined) gate.retryOnFail = retryOnFail;
     if (flakyIsPass !== undefined) gate.flakyIsPass = flakyIsPass;
     gates.push(gate);

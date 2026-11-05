@@ -121,14 +121,14 @@ export type MachineLockResult =
     };
 
 export interface AcquireMachineLockOptions {
-  /** Total time to wait for the lock. A gate passes its own `timeoutSec`. */
+  /** Total time to wait for the lock. A gate passes its `mutexWaitSec`, or else its `timeoutSec` (#4162). */
   timeoutMs: number;
   root?: string;
   pollIntervalMs?: number;
   /**
    * Give up waiting as soon as this answers true (Issue #2063).
    *
-   * A gate's wait budget is its whole `timeoutSec`, which `.commandmate/verify.yaml`
+   * A gate's wait budget defaults to its whole `timeoutSec`, which `.commandmate/verify.yaml`
    * sets as high as 1800s for `build`. Without this hook a run cancelled while
    * queued behind a mutex could not be stopped: nothing had been spawned, so
    * the cancel switch had no process to signal, and the run row stayed

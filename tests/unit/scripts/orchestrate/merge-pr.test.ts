@@ -465,7 +465,7 @@ describe('main: merges once', () => {
     expect(fake.calls.some((c) => c.command === 'node' && c.args[0] === 'scripts/count-suppressions.mjs')).toBe(true);
     const precheck = readRecords(runDir, '3477').records.filter((r) => r.stage === 'precheck').at(-1);
     expect(precheck).toMatchObject({ result: 'ok', head: HEAD_M, workHead: HEAD_A });
-    expect(fake.gitCalls('push')[0].args).toEqual(['-C', worktree, 'push', 'origin', 'HEAD:feature/3477-worktree']);
+    expect(fake.gitCalls('push')[0].args).toEqual(['-C', worktree, 'push', 'origin', `${HEAD_M}:refs/heads/feature/3477-worktree`]);
     expect(fake.ghCalls('pr merge')[0].args).toContain(HEAD_M);
   });
 

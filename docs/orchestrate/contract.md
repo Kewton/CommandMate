@@ -184,6 +184,18 @@ unit ゲートで同型を弾くが、契約側にも明示すること。
 - API のルート（`src/app/api/` の下の `.ts`）か CLI のコード（`src/cli/` の下の `.ts`）に当たる scope を書くと、`src/cli/types/**` が scope に入る（#4148: #4132 の `src/cli/types/api-responses.ts` が範囲外で 2 本目の契約になった。CLI は API の応答の型をここに写している）。判定は scope ゲートの glob の意味（`src/lib/verification/scope-gate-glob.ts`）での交差で、`src/app`・`src/app/**/route.ts`・`**/*.ts`・`src/{app,cli}/**` も当たる。`src/app/**/page.tsx`・`**/*.md` は当たらない。`src/**`・`src/cli/**` のように既に含む書き方や、`src/cli/types/` だけの scope には足さない。ブレースの展開が 1024 通りを超える指定は判定せず、足さずに `contract: note:` を stderr へ出すので、当たるなら自分で書く
 - **期待を反転する契約**（#3999: 「ターミナル面に Plan review の操作を出さない」を反転して describe/it 名が変わり、precheck の removed-tests が落ちた）: 契約の決定が既存の振る舞いを反転するときは、plan に「removed-tests を許可する（理由）」を先に書き、その run の precheck に `--allow-removed-tests` を付ける。理由が plan に無いまま付けない
 
+## 2-4 文面を変える契約と integration
+
+（#4162。#4149 の文面の変更が既存の integration テストを壊し、PR の CI で初めて出た。）
+
+契約の `unit-related` は `tests/unit` だけを見る。`tests/integration` をゲートに足すとテスト全体の順番待ちに並ぶので、広げない。文面やエラーを変える契約は、変更と対になるテストを次のように指定する:
+
+- **探す**: 雛形の手順 3 が、ワーカーに `git grep -l '<変える前の文面>' -- tests/integration tests/e2e` を指示する
+- **起案者が先に分かるとき**: 当たるファイルを scope に足し、`decisions` にそのファイルと `NODE_ENV=test npx vitest run <ファイル>` を書く（そのファイルだけを走らせる。`npm run test:integration` は全体）
+- **scope の外で当たったとき**: ワーカーは直さず「本文に無い指摘」に書く。オーケストレーターは 2 本目の契約か同じ PR の修正で受ける
+
+`contract.mjs` に自動の先回りは足さない。文面を変えるかどうかは scope のパターンから判定できず、`src/` に当てると全部の契約に出て読まれなくなる。
+
 ## 2-4-2 スラッシュコマンドが起動しなかった実測
 
 （2026-09-17 #2598 で実測。ワーカーは skill を呼ばずに

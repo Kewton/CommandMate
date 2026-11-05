@@ -324,9 +324,22 @@ export function summarize(records) {
   });
 }
 
-/** What a `verify` record says env-clean listed (wait-verify.mjs): `<probe>:<sign><name>`, comma-separated. */
+/**
+ * What a `verify` record says env-clean listed (wait-verify.mjs): `<probe>:<sign><name>`, comma-separated.
+ * A note is split on whitespace and read as key=value, so those characters and the comma are percent-encoded
+ * in the name (#4162: a `$HOME` entry may hold any of them). A record from before that has no escapes to read,
+ * and a `%` that does not decode stays as written.
+ */
 const ENV_CLEAN_ITEMS_NOTE = /(?:^|\s)env-clean-items=(\S+)/;
-export const envCleanItemsNote = (items) => `env-clean-items=${items.join(',')}`;
+const encodeItem = (item) => item.replace(/[%,=\s]/g, encodeURIComponent);
+const decodeItem = (item) => {
+  try {
+    return decodeURIComponent(item);
+  } catch {
+    return item;
+  }
+};
+export const envCleanItemsNote = (items) => `env-clean-items=${items.map(encodeItem).join(',')}`;
 
 /**
  * The env-clean items seen by more than one work item of a run (#4148): a candidate for an outside
@@ -339,7 +352,7 @@ export function envCleanShared(records) {
   const seen = new Map();
   for (const record of records) {
     if (record.stage !== 'verify') continue;
-    const items = ENV_CLEAN_ITEMS_NOTE.exec(record.note ?? '')?.[1].split(',') ?? [];
+    const items = ENV_CLEAN_ITEMS_NOTE.exec(record.note ?? '')?.[1].split(',').map(decodeItem) ?? [];
     for (const item of items) {
       seen.set(item, (seen.get(item) ?? new Set()).add(`#${record.issue}${itemOf(record) ? `/${itemOf(record)}` : ''}`));
     }
