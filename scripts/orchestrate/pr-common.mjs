@@ -189,14 +189,21 @@ export function ghWrite(run, args, { confirm, notice = (line) => console.error(l
 /** What `git push` says when the server or the connection failed, including the 500 `gh` is not asked about. */
 const PUSH_TRANSIENT_PATTERN =
   /\b(?:HTTP|returned error:) 50[0234]\b|RPC failed|remote end hung up|unexpected disconnect|early EOF|failed to connect|connection timed out|operation timed out/i;
-/** The server's answer, not its failure: a non-fast-forward or a hook refusing the push. */
+/** The server's answer, as a rule: a non-fast-forward or a hook refusing the push. */
 const PUSH_REJECTED_PATTERN = /\[(?:remote )?rejected\]/;
+/**
+ * The exception, the one 500 GitHub has answered a push with (#4133): git's own status line, whose
+ * reason is these words and nothing else. A hook's output comes prefixed `remote:`, and a hook that
+ * refuses gets a reason of its own from git, so neither reads as this.
+ */
+const PUSH_SERVER_ERROR_LINE = /^\s*!\s*\[remote rejected\]\s+\S+\s+->\s+\S+\s+\(Internal Server Error\)\s*$/i;
 
 /** Whether a finished `git push` failed for a reason worth trying again (#4162). */
 export function isTransientPushFailure({ status, stdout, stderr }) {
   if (status === 0) return false;
   const text = `${stderr ?? ''}\n${stdout ?? ''}`;
-  if (PUSH_REJECTED_PATTERN.test(text)) return false;
+  const rejected = text.split(/\r?\n/).filter((line) => PUSH_REJECTED_PATTERN.test(line));
+  if (rejected.length > 0) return rejected.every((line) => PUSH_SERVER_ERROR_LINE.test(line));
   return PUSH_TRANSIENT_PATTERN.test(text) || GH_TRANSIENT_PATTERN.test(text);
 }
 

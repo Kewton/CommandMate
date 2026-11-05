@@ -262,6 +262,103 @@ describe('item 3: git push の 5xx', () => {
   });
 });
 
+/** #4133 の実際の出力（workspace/orchestration/runs/2026-11-04/merge-4133.out の `git push failed: ` の後）をそのまま。 */
+const PUSH_500_4133 = [
+  'remote: Internal Server Error        ',
+  'remote: Request ID F1BC:1BD11D:752008:A98681:6AEAFF92        ',
+  'remote: Time 2026-11-04T09:49:07Z',
+  'To https://github.com/Kewton/CommandMate.git',
+  ' ! [remote rejected]     HEAD -> feature/4133-roles-cli-ui-fixes (Internal Server Error)',
+  "error: failed to push some refs to 'https://github.com/Kewton/CommandMate.git'",
+].join('\n');
+
+describe('item 3: 実測の push の 500（#4133 の [remote rejected] ... (Internal Server Error)）', () => {
+  const failed = (stderr: string) => ({ status: 1, stdout: '', stderr });
+  const line = (reason: string) => ` ! [remote rejected]     ${HEAD_A} -> b (${reason})`;
+  const quiet = { sleep: () => {}, notice: () => {} };
+
+  it('the output of #4133 is worth trying again', () => {
+    expect(isTransientPushFailure(failed(PUSH_500_4133))).toBe(true);
+  });
+
+  it('so is the same line with a SHA as the source, which is how pushHead sends now', () => {
+    expect(isTransientPushFailure(failed(line('Internal Server Error')))).toBe(true);
+  });
+
+  it.each([
+    ['a hook', 'pre-receive hook declined'],
+    ['a protected branch', 'protected branch hook declined'],
+    ['a hook quoting a status', 'hook says HTTP 500'],
+    ['a hook quoting the words', 'hook says Internal Server Error'],
+    ['a reason that goes on', 'Internal Server Error: quota'],
+  ])('negative control: another reason, %s, is the answer', (_name, reason) => {
+    expect(isTransientPushFailure(failed(line(reason)))).toBe(false);
+  });
+
+  it('negative control: the words from a hook do not outvote what the server decided', () => {
+    const hook = ['remote: Internal Server Error', 'remote: HTTP 500', line('pre-receive hook declined')].join('\n');
+    expect(isTransientPushFailure(failed(hook))).toBe(false);
+    const quoted = ['remote:  ! [remote rejected] x -> y (Internal Server Error)', line('pre-receive hook declined')].join('\n');
+    expect(isTransientPushFailure(failed(quoted))).toBe(false);
+    expect(isTransientPushFailure(failed('remote:  ! [remote rejected] x -> y (Internal Server Error)'))).toBe(false);
+  });
+
+  it('negative control: [rejected] is not sent again, whatever is said beside it', () => {
+    expect(isTransientPushFailure(failed(' ! [rejected]        HEAD -> b (non-fast-forward)'))).toBe(false);
+    expect(isTransientPushFailure(failed(' ! [rejected]        HEAD -> b (Internal Server Error)'))).toBe(false);
+    expect(isTransientPushFailure(failed(`remote: Internal Server Error\n ! [rejected]        HEAD -> b (fetch first)`))).toBe(false);
+  });
+
+  it('pushHead tries again on it, and goes through', () => {
+    const fake = fakeGit({ pushFailures: [PUSH_500_4133], remoteHead: DEVELOP });
+    const out = pushHead(fake.run, '/w', { branch: 'b', head: HEAD_A, ...quiet });
+    expect(out.status).toBe(0);
+    expect(fake.gitCalls('push')).toHaveLength(2);
+  });
+
+  it('the answer was lost and the push landed: the remote is read, a success, not sent again', () => {
+    const fake = fakeGit({ pushFailures: [PUSH_500_4133], remoteHead: HEAD_A });
+    const out = pushHead(fake.run, '/w', { branch: 'b', head: HEAD_A, ...quiet });
+    expect(out).toMatchObject({ status: 0, confirmed: true });
+    expect(fake.gitCalls('push')).toHaveLength(1);
+    expect(fake.gitCalls('ls-remote')).toHaveLength(1);
+  });
+
+  it('merge-pr and publish-pr get through it', () => {
+    ready();
+    const merged = fakeGit({ prs: [openPr({ headRefOid: 'e'.repeat(40) })], checks: [GREEN], pushFailures: [PUSH_500_4133], remoteHead: DEVELOP });
+    expect(merge(merged).code).toBe(0);
+    expect(merged.gitCalls('push')).toHaveLength(2);
+    const published = fakeGit({ pushFailures: [PUSH_500_4133], remoteHead: DEVELOP });
+    expect(publishMain(argv(), { run: published.run, sleep: () => {}, log: () => {}, error: () => {} })).toBe(0);
+    expect(published.gitCalls('push')).toHaveLength(2);
+  });
+
+  it('out of tries: exit 1 from both, four sends, with the server\'s words', () => {
+    ready();
+    const five = [PUSH_500_4133, PUSH_500_4133, PUSH_500_4133, PUSH_500_4133, PUSH_500_4133];
+    const merged = fakeGit({ prs: [openPr({ headRefOid: 'e'.repeat(40) })], checks: [GREEN], pushFailures: [...five], remoteHead: DEVELOP });
+    const { code, err } = merge(merged);
+    expect(code).toBe(1);
+    expect(err).toContain('git push failed');
+    expect(err).toContain('(Internal Server Error)');
+    expect(merged.gitCalls('push')).toHaveLength(4);
+    expect(merged.ghCalls('pr merge')).toHaveLength(0);
+    const published = fakeGit({ pushFailures: [...five], remoteHead: DEVELOP });
+    expect(publishMain(argv(), { run: published.run, sleep: () => {}, log: () => {}, error: () => {} })).toBe(1);
+    expect(published.gitCalls('push')).toHaveLength(4);
+    expect(published.ghCalls('pr create')).toHaveLength(0);
+  });
+
+  it('negative control: a declined push is sent once, and the remote is not read', () => {
+    const fake = fakeGit({ pushFailures: [line('pre-receive hook declined')], remoteHead: HEAD_A });
+    const out = pushHead(fake.run, '/w', { branch: 'b', head: HEAD_A, ...quiet });
+    expect(out.status).toBe(1);
+    expect(fake.gitCalls('push')).toHaveLength(1);
+    expect(fake.gitCalls('ls-remote')).toHaveLength(0);
+  });
+});
+
 describe('item 3: 送るのは確かめた SHA（レビューの指摘 P2）', () => {
   const HTTP_500 = "fatal: unable to access 'https://github.com/x/y.git/': The requested URL returned error: 500";
   const MOVED = 'b'.repeat(40);
@@ -420,6 +517,38 @@ describe('item 3: 送るのは確かめた SHA（レビューの指摘 P2）', (
         throw new Error('no notice expected');
       });
       expect(gitIn(local, 'rev-parse', '--abbrev-ref', '@{upstream}')).toBe(`origin/${BRANCH}`);
+    });
+
+    it('the output of #4133 after the push really landed: ls-remote finds it, sent once', () => {
+      const { remote, local, head: a } = setup();
+      let pushes = 0;
+      const landedThenLost = (command: string, args: string[]) => {
+        if (args[2] !== 'push') return realRun(command, args);
+        pushes += 1;
+        expect(realRun(command, args).status).toBe(0);
+        return { status: 1, stdout: '', stderr: PUSH_500_4133 };
+      };
+      expect(pushHead(landedThenLost, local, { branch: BRANCH, head: a, ...quiet })).toMatchObject({ status: 0, confirmed: true });
+      expect(pushes).toBe(1);
+      expect(refAt(remote, BRANCH)).toBe(a);
+    });
+
+    it('negative control: a real hook printing the words is declined once, in the output git really gives', () => {
+      const { remote, local, head: a } = setup();
+      const hook = path.join(remote, 'hooks', 'pre-receive');
+      fs.writeFileSync(hook, '#!/bin/sh\necho "Internal Server Error"\nexit 1\n');
+      fs.chmodSync(hook, 0o755);
+      let pushes = 0;
+      const counted = (command: string, args: string[]) => {
+        if (args[2] === 'push') pushes += 1;
+        return realRun(command, args);
+      };
+      const out = pushHead(counted, local, { branch: BRANCH, head: a, ...quiet });
+      expect(out.status).not.toBe(0);
+      expect(out.stderr).toContain('remote: Internal Server Error');
+      expect(out.stderr).toContain('(pre-receive hook declined)');
+      expect(pushes).toBe(1);
+      expect(refAt(remote, BRANCH)).toBe('');
     });
 
     it('negative control: a non-fast-forward is still refused, not forced', () => {
