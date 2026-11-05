@@ -289,7 +289,7 @@ commandmate send <worktree-id> "<message>" --auto-yes --auto-yes-answer-mode car
 | `--agent <id>` | roster に無いインスタンスをアドホック起動するときの補助（claude, codex, gemini, vibe-local, opencode, copilot, antigravity, command-code, opencode-v2） | roster の値・worktree既定 |
 | `--register` | `--instance` で指定したセッションをroster（エージェントインスタンス一覧）に登録 | - |
 | `--model <model>` | 使うモデル（copilot / antigravity / claude のみ）。**copilot** はセッション内で切り替える。**antigravity と claude は起動フラグ**なので、この send がセッションを起動するときだけ効き、稼働中のセッションに渡すと 400 になる（切り替えるにはセッションを止めてから送り直す）。claude の値は別名（`sonnet` / `opus` / `opus[1m]`）か完全な ID（`claude-sonnet-5`）。送り先（`--instance` か `--agent`）の指定が必須 | ツールの既定 |
-| `--auto-yes` | 送信前にAuto-Yesを有効化 | - |
+| `--auto-yes` | 送信前にAuto-Yesを有効化。送信の後に適用するとき（`--model` で後回しになるツール、ロールや固定つきで既に有効なとき）の失敗は、本文を送った後なので警告と exit 0 です。本文は送り直さず、警告のコマンドで有効化だけをやり直します。送信前の失敗はエラーで未送信です（Issue #4159） | - |
 | `--auto-yes-answer-mode <m>` | `--auto-yes` で有効にするときの答え方のモード（`recommended` / `careful`。[答え方のモード](#答え方のモードおまかせ慎重issue-3863)）。`--auto-yes` なしで指定すると exit 2（Issue #3863） | 新たに有効にするなら `recommended`、有効中なら今のモードのまま |
 | `--duration <d>` | Auto-Yesの有効期間（`1h`〜`24h`、1 時間刻み。例: `1h` / `3h` / `8h`）。範囲の外は `--auto-yes` の有無にかかわらず exit 2 | 1h |
 | `--stop-pattern <p>` | Auto-Yes停止条件（正規表現、ターミナル出力への照合。[auto-yes の注意](#--stop-pattern-はターミナル出力への照合コマンドの抑止には使えない)参照） | - |
@@ -2963,7 +2963,7 @@ commandmate instances <worktree-id> add --agent codex --role reviewer  # 追加�
 commandmate instances <worktree-id> set-role <instance-id> --role reviewer  # 次回の起動のロールを保存（--none / --inherit も）
 ```
 
-`add` / `remove` / `alias` と `send --register` は読んだ名簿の版を付けて保存します（Issue #4132）。読んだ後に名簿が変わっていたら、今の名簿で作り直して最大 2 回やり直すので、別の追加や変更を消しません。ID は今の名簿で空いているものになります。変わり続けて保存できないとき、`add` / `remove` / `alias` は exit 31（`roster_changed`）で終わり、他の変更はそのまま残ります（`remove --kill` は停止の後に保存するので、セッションは停止済みのことがあります）。`send --register` は本文を送った後なので、警告と exit 0 にして、登録だけをやり直すコマンドを案内します。
+`add` / `remove` / `alias` と `send --register` は読んだ名簿の版を付けて保存します（Issue #4132）。読んだ後に名簿が変わっていたら、今の名簿で作り直して最大 2 回やり直すので、別の追加や変更を消しません。ID は今の名簿で空いているものになります。変わり続けて保存できないとき、`add` / `remove` / `alias` は exit 31（`roster_changed`）で終わり、他の変更はそのまま残ります（`remove --kill` は停止の後に保存するので、セッションは停止済みのことがあります）。`send --register` は本文を送った後なので、これも含めて登録のどの失敗でも（Issue #4159）、警告と exit 0 にして、登録だけをやり直すコマンドを案内します。
 
 `kill` は止めたインスタンスの Auto-Yes も無効にします（止めていない別インスタンスの Auto-Yes は残ります）。
 `kill`（`remove --kill` も）が成功すると、どの worktree・インスタンスの、どの tmux セッション（サーバーの
@@ -3303,10 +3303,11 @@ commandmate roles default codex --repo . --role reviewer
 - 稼働中なら、起動時の fingerprint が一致するときだけ送ります。別のロール、または起動時の記録が無い場合（サーバー再起動後など）は、本文を入力せず exit 32 です。設定は保存されたままなので、止めてから `--role` なしで送り直せます
 - ロールを持てるのは roster にあるインスタンスだけです。roster 外の ID には `--register` も付けます
 - `--register --role` は、インスタンスとロールを送信の**前に**作るので、最初の起動からそのロールで動きます。繰り返しても作成はされず、`--role` の値で既存の指定を置き換えたうえで、上の条件が適用されます。読み取りの後に roster が変わると exit 31 で未送信です
-- `--role` なしの `--register` は従来どおり（送信の後に登録）で、既存のロールには触れません。本文は送った後なので、名簿が変わり続けて登録できないときは exit 31 ではなく警告と exit 0 です。本文は送り直さず、警告のコマンド（`commandmate instances <worktree-id> add --agent <tool> --id <instance-id>`）で登録だけをやり直します
+- `--role` なしの `--register` は従来どおり（送信の後に登録）で、既存のロールには触れません。本文は送った後なので、名簿が変わり続けて登録できないときは exit 31 ではなく警告と exit 0 です。名簿の読み取りの失敗・5xx・別の 409 など、登録のほかの失敗も同じです（Issue #4159。5xx や応答なしは保存された可能性があるので、警告の `commandmate instances <worktree-id>` で確かめます）。本文は送り直さず、警告のコマンド（`commandmate instances <worktree-id> add --agent <tool> --id <instance-id>`）で登録だけをやり直します
 - `--contract --role` も同じ結果になります。契約側の検査が古い設定で拒否するときは、ロールを保存して検査し直します。契約そのものが不正なら何も保存しません。保存は読み直した名簿の版を条件にするので（Issue #4132）、その後に名簿が変わっていれば何も保存せず exit 31（`roster_changed`）です
 - ロールか固定を付けた送信が未入力で終わると、その送信が有効にした `--auto-yes` は取り消します（対象のツールとインスタンスを明示し、直前に読み直して一致するときだけ）。もともと有効だった Auto-Yes は、本文が入るまでそのままです。後から更新された grant や、未入力と確定できないときは残し、止めるコマンドを表示します。宛先を省いても、読んだ既定を以後の全要求に名指しするので、途中で既定が変わっても別の対象の Auto-Yes を上書きも取り消しもしません（サーバーが答えた対象が読んだ対象と違えば、取り消さず止めるコマンドを表示します）
-- 取り消しと有効化は grant の識別子と条件つきの要求で行います（Issue #4132）。読み直しの後に別の操作が有効にした grant は、期限と回答モードが同じでも切りません。読み直しの後で別の操作が先に有効にしていたら、その条件を上書きせず、本文が入ってからこの送信の条件を適用します
+- 取り消しと有効化は grant の識別子と条件つきの要求で行います（Issue #4132）。読み直しの後に別の操作が有効にした grant は、期限と回答モードが同じでも切りません。読み直しの後で別の操作が先に有効にしていたら、その条件を上書きせず、本文が入ってからこの送信の条件を適用します。grant の識別子を返さない古いサーバーには条件なしの取り消しを送らず、残して止めるコマンドを表示します（Issue #4159）
+- ロール・固定・`--reply-to` の無い `--auto-yes` は、事前に状態を読みません（Issue #4159 の決定）。この送信が有効にしたのか、もともと有効だったのかを区別できないので、未入力で終わっても残し、止めるコマンドを表示します。読むようにすると、この形の送信のすべてに要求が 1 つ増え、もともと有効な grant への新しい条件の適用が本文の後へ移ります
 - 保存の前に確かめられる拒否（稼働中への `--model`、不正な画像パス）は設定を残しません。保存の後の拒否は、理由を問わず設定が保存されたことを伝えます
 - OpenCode V1 は、ロールが変わっても覚えている会話を続け、前のロールの発言は履歴に残ります。止めても会話は忘れません。新しい会話にするには、止めてから `send --new-conversation` で送ります。V1 以外のツールと、確認の時点で稼働中または起動途中のセッションは未送信 exit 2 です（確認の後に起動が割り込む場合は検出しません）
 - `--expect-role-generation <g>` と `--expect-role-fingerprint <f>` / `--expect-no-role` は、呼び出し側が読んだ値（`capture --json` の `roleLaunch`）に送信を固定します。何も保存しません。サーバーが最初のキーの直前に読み直すので、その間にプロセスが入れ替われば（同じロールでも）未送信 exit 32 です。`--contract` や `--role` と併用できます
