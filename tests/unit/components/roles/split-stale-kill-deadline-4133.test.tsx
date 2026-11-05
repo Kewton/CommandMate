@@ -222,7 +222,9 @@ describe('[#4133] kill-session with a deadline', () => {
     expect(screen.queryByTestId('instance-role-error-claude')).toBeNull();
     const before = settingsReads();
     await expire();
-    await waitFor(() => expect(screen.getByTestId('instance-role-error-claude').textContent).toBe(ja.agentRoles.instances.restartError));
+    // Issue #4160: past the deadline the kill may still be working, so this is not "could not".
+    await waitFor(() => expect(screen.getByTestId('instance-role-progress-claude').textContent).toBe(ja.agentRoles.instances.restartInProgress));
+    expect(screen.queryByTestId('instance-role-error-claude')).toBeNull();
     await waitFor(() => expect(settingsReads()).toBeGreaterThan(before));
   });
 

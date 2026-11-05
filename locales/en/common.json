@@ -235,6 +235,10 @@
     "label": "Needs attention",
     "badgeLabel": "{count} worktrees need your attention"
   },
+  "sessionKill": {
+    "outcomeUnknown": "Whether the session of {label} ended could not be confirmed. Check whether it is still running.",
+    "inProgress": "The session of {label} is still running. Ending it may still be in progress. Wait a moment, then check whether it is still running."
+  },
   "agentUpdates": {
     "title": "Agent CLI versions",
     "description": "Installed versions of the agent CLIs on this machine. The update runs outside the agent pane, so a session that is already open is not interrupted.",
@@ -253,6 +257,7 @@
     "restarted": "Ended. The next message starts it on the new version.",
     "restartError": "Could not restart the session.",
     "restartUnknown": "Whether the session ended could not be confirmed. Check whether it is still running.",
+    "restartInProgress": "The session is still running. Ending it may still be in progress. Wait a moment, then check whether it is still running.",
     "loadError": "Could not read the agent CLI versions."
   },
   "settings": {
@@ -413,6 +418,7 @@
       "restartConfirm": "End the session of {alias}? The next message starts a new one with the current settings.",
       "restartError": "Could not end the session.",
       "restartUnknown": "Whether the session ended could not be confirmed. Check whether it is still running.",
+      "restartInProgress": "The session is still running. Ending it may still be in progress. Wait a moment, then check whether it is still running.",
       "runningUnknown": "Could not read which sessions are running, so the status below does not say whether they are."
     },
     "repository": {

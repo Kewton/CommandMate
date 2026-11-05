@@ -128,7 +128,9 @@ describe('[#4145] AgentUpdatesCard — the deadline on kill-session', () => {
     fireEvent.click(button);
     expect(server.killCalls).toHaveLength(1);
     await expire();
-    await waitFor(() => expect(errorText()).toBe(en.agentUpdates.restartError));
+    // Issue #4160: past the deadline the kill may still be working, so this is not "could not".
+    await waitFor(() => expect(screen.getByTestId('agent-updates-restart-progress').textContent).toBe(en.agentUpdates.restartInProgress));
+    expect(errorText()).toBeNull();
     expect(screen.getByTestId('agent-updates-restart-codex-2')).toBeEnabled();
   });
 });

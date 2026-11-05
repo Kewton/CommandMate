@@ -122,6 +122,12 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
   const [restarted, setRestarted] = useState<Record<string, boolean>>({});
   const [restarting, setRestarting] = useState<Record<string, boolean>>({});
   const [restartError, setRestartError] = useState<string | null>(null);
+  // Issue #4160: the instance past the deadline with its session still there. Not a
+  // failure, and it stops being true as soon as a read shows the session gone.
+  const [inProgressId, setInProgressId] = useState<string | null>(null);
+  useEffect(() => {
+    setInProgressId((id) => (id !== null && !running[id] ? null : id));
+  }, [running]);
 
   // Keep the newest output in view without yanking the whole page around: only
   // the log box scrolls.
@@ -132,8 +138,22 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
 
   const finishedOk = run?.ok === true;
   useEffect(() => {
-    if (finishedOk) setRefreshToken((token) => token + 1);
+    if (!finishedOk) return;
+    setRefreshToken((token) => token + 1);
+    // Issue #4160: an "ended" from before this update is not about the new version.
+    setRestarted({});
   }, [finishedOk]);
+
+  // Issue #4160: instance ids repeat across worktrees, and the pane keeps this card
+  // across a switch: what A's restart said is not about B's row.
+  const worktreeIdRef = useRef(worktreeId);
+  worktreeIdRef.current = worktreeId;
+  useEffect(() => {
+    setRestarted({});
+    setRestarting({});
+    setRestartError(null);
+    setInProgressId(null);
+  }, [worktreeId]);
 
   const runningFor = useCallback(
     (tool: string): AgentUpdateInstance[] =>
@@ -145,12 +165,13 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
     async (instance: AgentUpdateInstance): Promise<void> => {
       if (!worktreeId) return;
       setRestartError(null);
+      setInProgressId(null);
       setRestarting((prev) => ({ ...prev, [instance.id]: true }));
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), KILL_SESSION_TIMEOUT_MS);
       // Issue #4145: only a refusal says it did not happen. A 5xx, no answer or the
       // deadline say nothing, so what is running now decides.
-      let outcome: 'ended' | 'refused' | 'unknown' = 'ended';
+      let outcome: 'ended' | 'refused' | 'errored' | 'silent' = 'ended';
       try {
         const query = new URLSearchParams({ cliTool: instance.cliTool, instance: instance.id });
         const response = await fetch(
@@ -160,19 +181,25 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
         // 404 means the session already ended, which is the goal — treat it as
         // success rather than making the user press again.
         if (!response.ok && response.status !== 404) {
-          outcome = response.status < 500 ? 'refused' : 'unknown';
+          outcome = response.status < 500 ? 'refused' : 'errored';
         }
       } catch {
-        outcome = 'unknown';
+        outcome = 'silent';
       } finally {
         clearTimeout(timer);
       }
-      if (outcome === 'unknown') {
+      if (worktreeIdRef.current !== worktreeId) return;
+      if (outcome === 'errored' || outcome === 'silent') {
         const runningNow = await readRunningInstances(worktreeId);
+        if (worktreeIdRef.current !== worktreeId) return;
         if (runningNow === null) {
           setRestartError(t('agentUpdates.restartUnknown'));
         } else if (runningNow[instance.id] === true) {
-          setRestartError(t('agentUpdates.restartError'));
+          // Issue #4160: a 5xx means the server has finished and the session is still
+          // there. With no answer it may still be working on it (a graceful exit takes
+          // seconds), so that is not called a failure.
+          if (outcome === 'errored') setRestartError(t('agentUpdates.restartError'));
+          else setInProgressId(instance.id);
         } else {
           outcome = 'ended';
         }
@@ -219,6 +246,9 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
         <ul className="space-y-2" data-testid="agent-updates-rows">
           {rows.map((row: AgentVersionView) => {
             const liveInstances = runningFor(row.tool);
+            const restartRows = (instances ?? []).filter(
+              (inst) => inst.cliTool === row.tool && (running[inst.id] || restarted[inst.id])
+            );
             const canUpdate = row.updatable && row.installed !== null;
             return (
               <li
@@ -301,23 +331,34 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
                   </p>
                 )}
 
+                {/* Issue #4160: the read after a restart takes the instance off the
+                    running list, and the result has to outlive that. The button does
+                    not: there is nothing left for it to end. */}
                 {finishedOk &&
                   run?.tool === row.tool &&
-                  liveInstances.map((inst) => (
+                  restartRows.map((inst) => (
                     <div key={inst.id} className="mt-2 flex items-center gap-2">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={restarted[inst.id] || restarting[inst.id]}
-                        onClick={() => void restart(inst)}
-                        data-testid={`agent-updates-restart-${inst.id}`}
-                      >
-                        <RotateCcw className="h-4 w-4" aria-hidden="true" />
-                        {t('agentUpdates.restart', { alias: inst.alias })}
-                      </Button>
+                      {running[inst.id] && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={restarted[inst.id] || restarting[inst.id]}
+                          onClick={() => void restart(inst)}
+                          data-testid={`agent-updates-restart-${inst.id}`}
+                        >
+                          <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                          {t('agentUpdates.restart', { alias: inst.alias })}
+                        </Button>
+                      )}
+                      {/* Issue #4160: once the button goes, this is all that says which
+                          instance of the tool ended. */}
                       {restarted[inst.id] && (
-                        <span className="text-xs text-muted-foreground">
-                          {t('agentUpdates.restarted')}
+                        <span
+                          className="text-xs text-muted-foreground"
+                          data-testid={`agent-updates-restarted-${inst.id}`}
+                        >
+                          <span className="font-medium text-foreground">{inst.alias}</span>{' '}
+                          <span>{t('agentUpdates.restarted')}</span>
                         </span>
                       )}
                     </div>
@@ -358,6 +399,12 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
                 {t('agentUpdates.failed', { error: run.error ?? '' })}
               </div>
             )}
+          </div>
+        )}
+
+        {inProgressId !== null && (
+          <div className="text-xs text-warning-foreground" role="status" data-testid="agent-updates-restart-progress">
+            {t('agentUpdates.restartInProgress')}
           </div>
         )}
 

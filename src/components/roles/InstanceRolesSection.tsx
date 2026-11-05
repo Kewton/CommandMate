@@ -11,7 +11,7 @@
 
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
@@ -62,6 +62,16 @@ function InstanceRoleRow({
   const tSchedule = useTranslations('schedule');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Issue #4160: past the deadline with the session still there. Not a failure, and it
+  // stops being true as soon as a read shows the session gone.
+  const [killInProgress, setKillInProgress] = useState(false);
+  useEffect(() => {
+    if (isRunning === false) setKillInProgress(false);
+  }, [isRunning]);
+  // Issue #4160: the ref answers a press in the same tick and covers the dialog too,
+  // because a second confirm() would cancel the first and carry on as if confirmed.
+  const [restarting, setRestarting] = useState(false);
+  const restartingRef = useRef(false);
   const id = entry.instanceId;
   const next = entry.application.effectiveNext;
 
@@ -85,17 +95,16 @@ function InstanceRoleRow({
     [worktreeId, id, rosterRevision, onChanged, t, tSchedule],
   );
 
-  const handleRestart = useCallback(async () => {
-    if (!(await confirm({ description: t('agentRoles.instances.restartConfirm', { alias: entry.alias }) }))) return;
+  const endSession = useCallback(async () => {
     setError(null);
+    setKillInProgress(false);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), KILL_SESSION_TIMEOUT_MS);
     // Issue #4133: only a refusal says it did not happen. A 5xx, no answer or the
     // deadline say nothing, so what is running now decides, and either way the rows
     // are read again.
     let failed = false;
-    let outcomeUnknown = false;
-    let stillUnknown = false;
+    let saidNothing: 'errored' | 'silent' | null = null;
     try {
       // The query scopes it: without both, this route ends every session of the worktree.
       const query = new URLSearchParams({ cliTool: entry.cliToolId, instance: id });
@@ -106,23 +115,42 @@ function InstanceRoleRow({
       // 404: already ended, which is the goal.
       if (!response.ok && response.status !== 404) {
         failed = response.status < 500;
-        outcomeUnknown = !failed;
+        if (!failed) saidNothing = 'errored';
       }
     } catch {
-      outcomeUnknown = true;
+      saidNothing = 'silent';
     } finally {
       clearTimeout(timer);
     }
-    if (outcomeUnknown) {
+    if (saidNothing) {
       const running = await readRunningInstances(worktreeId);
-      // Issue #4145: a read that failed cannot say either way, and the screen says that.
-      stillUnknown = running === null;
-      failed = running !== null && running[id] === true;
+      if (running === null) {
+        // Issue #4145: a read that failed cannot say either way, and the screen says that.
+        setError(t('agentRoles.instances.restartUnknown'));
+      } else if (running[id] === true) {
+        // Issue #4160: a 5xx means the server has finished and the session is still
+        // there. With no answer it may still be working on it (a graceful exit takes
+        // seconds), so that is not called a failure.
+        failed = saidNothing === 'errored';
+        setKillInProgress(!failed);
+      }
     }
-    if (stillUnknown) setError(t('agentRoles.instances.restartUnknown'));
     if (failed) setError(t('agentRoles.instances.restartError'));
     onChanged();
-  }, [confirm, entry.alias, entry.cliToolId, id, onChanged, t, worktreeId]);
+  }, [entry.cliToolId, id, onChanged, t, worktreeId]);
+
+  const handleRestart = useCallback(async () => {
+    if (restartingRef.current) return;
+    restartingRef.current = true;
+    try {
+      if (!(await confirm({ description: t('agentRoles.instances.restartConfirm', { alias: entry.alias }) }))) return;
+      setRestarting(true);
+      await endSession();
+    } finally {
+      restartingRef.current = false;
+      setRestarting(false);
+    }
+  }, [confirm, endSession, entry.alias, t]);
 
   const view = isRunning === undefined ? null : roleApplicationView(entry, isRunning, t);
   const inherited = entry.stored.state === 'inherit';
@@ -166,8 +194,9 @@ function InstanceRoleRow({
                   type="button"
                   data-testid={`instance-role-restart-${id}`}
                   title={t('agentRoles.application.restartHint')}
+                  disabled={restarting}
                   onClick={() => void handleRestart()}
-                  className="min-h-8 rounded px-2 text-accent-700 dark:text-accent-300 underline hover:bg-muted"
+                  className="min-h-8 rounded px-2 text-accent-700 dark:text-accent-300 underline hover:bg-muted disabled:opacity-50"
                 >
                   {t('agentRoles.application.restart')}
                 </button>
@@ -193,6 +222,11 @@ function InstanceRoleRow({
       ) : (
         <p data-testid={`instance-role-unsupported-${id}`} className="text-xs text-muted-foreground">
           {t('agentRoles.unsupportedNote')}
+        </p>
+      )}
+      {killInProgress && (
+        <p role="status" data-testid={`instance-role-progress-${id}`} className="text-xs text-warning">
+          {t('agentRoles.instances.restartInProgress')}
         </p>
       )}
       {error && (
@@ -270,7 +304,9 @@ function OpenInstanceRoles({ worktreeId, rosterKey }: { worktreeId: string; rost
       <ul className="space-y-2" data-testid="instance-roles-list">
         {settings.instances.map((entry) => (
           <InstanceRoleRow
-            key={entry.instanceId}
+            // Issue #4160: instance ids repeat across worktrees, and what this row is
+            // doing or has said belongs to the one it was pressed in.
+            key={`${worktreeId}:${entry.instanceId}`}
             worktreeId={worktreeId}
             entry={entry}
             rosterRevision={settings.rosterRevision}

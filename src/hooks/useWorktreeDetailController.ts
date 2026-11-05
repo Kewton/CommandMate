@@ -83,6 +83,7 @@ import {
   type AgentInstance,
 } from '@/lib/cli-tools/types';
 import { worktreeApi, ApiError, detectAuthRedirect, detectNonJsonBody, fetchApiResponse } from '@/lib/api-client';
+import { readRunningInstances } from '@/lib/api-client-agent-roles';
 import { API_POLL_TIMEOUT_MS } from '@/config/api-timeout-config';
 import type { SessionKillTarget } from '@/types/terminal-split-pane';
 import {
@@ -300,6 +301,24 @@ const DEFAULT_WORKTREE_NAME = 'Unknown';
  * <WorktreeDetailRefactored worktreeId="feature-123" />
  * ```
  */
+
+/**
+ * What a kill-session that threw says about the session (Issue #4160).
+ *
+ * - `ended`: a 404, the session is already gone.
+ * - `refused`: a 4xx, or never sent because the device is offline. It did not happen.
+ * - `errored`: a 5xx. The server has finished and something went wrong, maybe after the
+ *   session ended.
+ * - `silent`: the deadline or no answer. The server may still be working on it.
+ */
+function classifyKillFailure(err: unknown): 'ended' | 'refused' | 'errored' | 'silent' {
+  if (!(err instanceof ApiError)) return 'silent';
+  if (err.kind === 'offline') return 'refused';
+  if (err.kind !== 'http') return 'silent';
+  if (err.status === 404) return 'ended';
+  if (err.status >= 500) return 'errored';
+  return err.status >= 400 ? 'refused' : 'silent';
+}
 
 export function useWorktreeDetailController({ worktreeId }: { worktreeId: string }) {
   const isMobile = useIsMobile();
@@ -1843,17 +1862,35 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     } catch (err) {
       // Issue #1171: a 404 means the session already ended (natural-termination
       // race). The goal is achieved, so re-sync and close rather than error.
-      if (err instanceof ApiError && err.status === 404) {
+      const failure = classifyKillFailure(err);
+      if (failure === 'ended') {
         await finishEnded();
-      } else {
+      } else if (failure === 'refused') {
         // Keep the target so the user can retry; surface a failure toast.
         showToast(tWorktree('session.failedToKill'), 'error');
+      } else {
+        // Issue #4160: this answer says nothing about the session, so what is running
+        // now decides. Another worktree is on screen after a switch and this one's
+        // dialog is gone: not worth a read, and the toast names the session.
+        const running = isStillOnScreen() ? await readRunningInstances(worktreeId) : null;
+        if (running === null) {
+          showToast(tCommon('sessionKill.outcomeUnknown', { label: target.label }), 'warning');
+        } else if (running[target.instanceId] !== true) {
+          await finishEnded();
+        } else if (failure === 'errored') {
+          showToast(tWorktree('session.failedToKill'), 'error');
+        } else {
+          // Issue #4160: past the deadline the kill may still be working (a tool's
+          // graceful exit takes seconds), so this is not called a failure. Pressing
+          // again is safe: a session that has gone by then answers 404.
+          showToast(tCommon('sessionKill.inProgress', { label: target.label }), 'warning');
+        }
       }
     } finally {
       isKillPendingRef.current = false;
       setIsKillPending(false);
     }
-  }, [killTarget, worktreeId, actions, fetchWorktree, showToast, tWorktree]);
+  }, [killTarget, worktreeId, actions, fetchWorktree, showToast, tWorktree, tCommon]);
 
   /** Issue #1171: cancel — a no-op while a kill POST is in flight (keeps target). */
   const handleKillCancel = useCallback((): void => {
