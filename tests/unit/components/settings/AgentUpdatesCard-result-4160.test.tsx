@@ -155,3 +155,63 @@ describe('[#4160] AgentUpdatesCard — the result of a restart', () => {
     expect(result()).toBeNull();
   });
 });
+
+describe('[#4160] AgentUpdatesCard — the kill said nothing and the session runs on', () => {
+  const progress = () => screen.queryByTestId('agent-updates-restart-progress');
+  const error = () => screen.queryByTestId('agent-updates-restart-error');
+
+  it('no answer: it may still be ending, and nothing says it failed', async () => {
+    const server = installServer();
+    server.kill = () => Promise.reject(new TypeError('Failed to fetch'));
+    await updated();
+    fireEvent.click(await screen.findByTestId('agent-updates-restart-codex-2'));
+    await waitFor(() => expect(progress()?.textContent).toBe(en.agentUpdates.restartInProgress));
+    expect(error()).toBeNull();
+    expect(result()).toBeNull();
+    expect(button()).toBeEnabled();
+  });
+
+  it('ending late: pressing again finds it gone, and the notice gives way to the result', async () => {
+    const server = installServer();
+    server.kill = () => Promise.reject(new TypeError('Failed to fetch'));
+    await updated();
+    fireEvent.click(await screen.findByTestId('agent-updates-restart-codex-2'));
+    await waitFor(() => expect(progress()).not.toBeNull());
+    server.kill = async () => {
+      delete server.running['codex-2'];
+      return new Response('{}', { status: 404 });
+    };
+    fireEvent.click(screen.getByTestId('agent-updates-restart-codex-2'));
+    await waitFor(() => expect(result()).toBeInTheDocument());
+    expect(progress()).toBeNull();
+    expect(error()).toBeNull();
+  });
+
+  it('a 500: the server has finished and it runs on, so that is a failure (negative control)', async () => {
+    const server = installServer();
+    server.kill = async () => new Response('{}', { status: 500 });
+    await updated();
+    fireEvent.click(await screen.findByTestId('agent-updates-restart-codex-2'));
+    await waitFor(() => expect(error()?.textContent).toBe(en.agentUpdates.restartError));
+    expect(progress()).toBeNull();
+  });
+
+  it('a refusal is a failure (negative control)', async () => {
+    const server = installServer();
+    server.kill = async () => new Response('{}', { status: 403 });
+    await updated();
+    fireEvent.click(await screen.findByTestId('agent-updates-restart-codex-2'));
+    await waitFor(() => expect(error()?.textContent).toBe(en.agentUpdates.restartError));
+    expect(progress()).toBeNull();
+  });
+
+  it("a switch takes A's notice away", async () => {
+    const server = installServer();
+    server.kill = () => Promise.reject(new TypeError('Failed to fetch'));
+    const view = await updated();
+    fireEvent.click(await screen.findByTestId('agent-updates-restart-codex-2'));
+    await waitFor(() => expect(progress()).not.toBeNull());
+    view.rerender(<AgentUpdatesCard worktreeId="wt-2" instances={INSTANCES} />);
+    await waitFor(() => expect(progress()).toBeNull());
+  });
+});

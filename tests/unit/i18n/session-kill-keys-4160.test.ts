@@ -19,7 +19,12 @@ function resolve(dict: Record<string, unknown>, key: string): unknown {
 
 const placeholders = (text: string): string[] => (text.match(/\{\w+\}/g) ?? []).sort();
 
-const KEYS = ['sessionKill.outcomeUnknown', 'sessionKill.inProgress'];
+const KEYS = [
+  'sessionKill.outcomeUnknown',
+  'sessionKill.inProgress',
+  'agentUpdates.restartInProgress',
+  'agentRoles.instances.restartInProgress',
+];
 
 describe('[#4160] kill outcome wording', () => {
   it.each(KEYS)('%s is in ja and en with the same placeholders', (key) => {

@@ -122,6 +122,12 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
   const [restarted, setRestarted] = useState<Record<string, boolean>>({});
   const [restarting, setRestarting] = useState<Record<string, boolean>>({});
   const [restartError, setRestartError] = useState<string | null>(null);
+  // Issue #4160: the instance past the deadline with its session still there. Not a
+  // failure, and it stops being true as soon as a read shows the session gone.
+  const [inProgressId, setInProgressId] = useState<string | null>(null);
+  useEffect(() => {
+    setInProgressId((id) => (id !== null && !running[id] ? null : id));
+  }, [running]);
 
   // Keep the newest output in view without yanking the whole page around: only
   // the log box scrolls.
@@ -146,6 +152,7 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
     setRestarted({});
     setRestarting({});
     setRestartError(null);
+    setInProgressId(null);
   }, [worktreeId]);
 
   const runningFor = useCallback(
@@ -158,12 +165,13 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
     async (instance: AgentUpdateInstance): Promise<void> => {
       if (!worktreeId) return;
       setRestartError(null);
+      setInProgressId(null);
       setRestarting((prev) => ({ ...prev, [instance.id]: true }));
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), KILL_SESSION_TIMEOUT_MS);
       // Issue #4145: only a refusal says it did not happen. A 5xx, no answer or the
       // deadline say nothing, so what is running now decides.
-      let outcome: 'ended' | 'refused' | 'unknown' = 'ended';
+      let outcome: 'ended' | 'refused' | 'errored' | 'silent' = 'ended';
       try {
         const query = new URLSearchParams({ cliTool: instance.cliTool, instance: instance.id });
         const response = await fetch(
@@ -173,21 +181,25 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
         // 404 means the session already ended, which is the goal — treat it as
         // success rather than making the user press again.
         if (!response.ok && response.status !== 404) {
-          outcome = response.status < 500 ? 'refused' : 'unknown';
+          outcome = response.status < 500 ? 'refused' : 'errored';
         }
       } catch {
-        outcome = 'unknown';
+        outcome = 'silent';
       } finally {
         clearTimeout(timer);
       }
       if (worktreeIdRef.current !== worktreeId) return;
-      if (outcome === 'unknown') {
+      if (outcome === 'errored' || outcome === 'silent') {
         const runningNow = await readRunningInstances(worktreeId);
         if (worktreeIdRef.current !== worktreeId) return;
         if (runningNow === null) {
           setRestartError(t('agentUpdates.restartUnknown'));
         } else if (runningNow[instance.id] === true) {
-          setRestartError(t('agentUpdates.restartError'));
+          // Issue #4160: a 5xx means the server has finished and the session is still
+          // there. With no answer it may still be working on it (a graceful exit takes
+          // seconds), so that is not called a failure.
+          if (outcome === 'errored') setRestartError(t('agentUpdates.restartError'));
+          else setInProgressId(instance.id);
         } else {
           outcome = 'ended';
         }
@@ -381,6 +393,12 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
                 {t('agentUpdates.failed', { error: run.error ?? '' })}
               </div>
             )}
+          </div>
+        )}
+
+        {inProgressId !== null && (
+          <div className="text-xs text-warning-foreground" role="status" data-testid="agent-updates-restart-progress">
+            {t('agentUpdates.restartInProgress')}
           </div>
         )}
 
