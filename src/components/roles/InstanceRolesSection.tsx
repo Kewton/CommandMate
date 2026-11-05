@@ -11,7 +11,7 @@
 
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
@@ -62,6 +62,10 @@ function InstanceRoleRow({
   const tSchedule = useTranslations('schedule');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Issue #4160: the ref answers a press in the same tick and covers the dialog too,
+  // because a second confirm() would cancel the first and carry on as if confirmed.
+  const [restarting, setRestarting] = useState(false);
+  const restartingRef = useRef(false);
   const id = entry.instanceId;
   const next = entry.application.effectiveNext;
 
@@ -85,8 +89,7 @@ function InstanceRoleRow({
     [worktreeId, id, rosterRevision, onChanged, t, tSchedule],
   );
 
-  const handleRestart = useCallback(async () => {
-    if (!(await confirm({ description: t('agentRoles.instances.restartConfirm', { alias: entry.alias }) }))) return;
+  const endSession = useCallback(async () => {
     setError(null);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), KILL_SESSION_TIMEOUT_MS);
@@ -122,7 +125,20 @@ function InstanceRoleRow({
     if (stillUnknown) setError(t('agentRoles.instances.restartUnknown'));
     if (failed) setError(t('agentRoles.instances.restartError'));
     onChanged();
-  }, [confirm, entry.alias, entry.cliToolId, id, onChanged, t, worktreeId]);
+  }, [entry.cliToolId, id, onChanged, t, worktreeId]);
+
+  const handleRestart = useCallback(async () => {
+    if (restartingRef.current) return;
+    restartingRef.current = true;
+    try {
+      if (!(await confirm({ description: t('agentRoles.instances.restartConfirm', { alias: entry.alias }) }))) return;
+      setRestarting(true);
+      await endSession();
+    } finally {
+      restartingRef.current = false;
+      setRestarting(false);
+    }
+  }, [confirm, endSession, entry.alias, t]);
 
   const view = isRunning === undefined ? null : roleApplicationView(entry, isRunning, t);
   const inherited = entry.stored.state === 'inherit';
@@ -166,8 +182,9 @@ function InstanceRoleRow({
                   type="button"
                   data-testid={`instance-role-restart-${id}`}
                   title={t('agentRoles.application.restartHint')}
+                  disabled={restarting}
                   onClick={() => void handleRestart()}
-                  className="min-h-8 rounded px-2 text-accent-700 dark:text-accent-300 underline hover:bg-muted"
+                  className="min-h-8 rounded px-2 text-accent-700 dark:text-accent-300 underline hover:bg-muted disabled:opacity-50"
                 >
                   {t('agentRoles.application.restart')}
                 </button>
@@ -270,7 +287,9 @@ function OpenInstanceRoles({ worktreeId, rosterKey }: { worktreeId: string; rost
       <ul className="space-y-2" data-testid="instance-roles-list">
         {settings.instances.map((entry) => (
           <InstanceRoleRow
-            key={entry.instanceId}
+            // Issue #4160: instance ids repeat across worktrees, and what this row is
+            // doing or has said belongs to the one it was pressed in.
+            key={`${worktreeId}:${entry.instanceId}`}
             worktreeId={worktreeId}
             entry={entry}
             rosterRevision={settings.rosterRevision}
