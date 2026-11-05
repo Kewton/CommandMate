@@ -33,6 +33,7 @@ import {
   type UpdatableAgentTool,
 } from '@/lib/updates';
 import { createLogger } from '@/lib/logger';
+import { newLaunchAnswerSkips, noteLaunchAnswerSkipped, type LaunchAnswerSkips } from './launch-answer-skips';
 import { CODEX_CLI_TOOL_ID } from '@/lib/hooks/sources';
 import { shouldTrustCodexHooks } from '@/lib/hooks/sources/codex/hooks-config';
 import {
@@ -194,11 +195,13 @@ function isCodexHooksScreen(screen: ReturnType<typeof getCodexLifecycleDialog>):
 interface CodexHooksScreenState {
   screen: CodexHooksScreen | null;
   attempts: number;
+  /** Keys the input lock declined; not a budget, so progress does not reset it (Issue #4161). */
+  skips: LaunchAnswerSkips;
 }
 
 /** A fresh {@link CodexHooksScreenState}. */
 function newHooksScreenState(): CodexHooksScreenState {
-  return { screen: null, attempts: 0 };
+  return { screen: null, attempts: 0, skips: newLaunchAnswerSkips() };
 }
 
 /**
@@ -380,6 +383,7 @@ export class CodexTool extends BaseCLITool {
     // Issue #2315: one budget per hooks screen, reset whenever the screen
     // changes, in place of #1829's single launch-wide escape count.
     const hooksScreenState = newHooksScreenState();
+    const answerSkips = newLaunchAnswerSkips();
 
     // Issue #2068. Resolved once per launch rather than per poll: the operator
     // does not get to change their mind halfway through one session start, and
@@ -622,7 +626,7 @@ export class CodexTool extends BaseCLITool {
                 updateLockHeld = false;
                 releaseAgentUpdateLock(CODEX_UPDATE_LOCK_TOOL);
               }
-              logger.info('codex-update-dialog-answer-skipped', { sessionName, reason: updateOutcome.reason });
+              noteLaunchAnswerSkipped(logger, answerSkips, 'codex-update-dialog-answer-skipped', { sessionName, reason: updateOutcome.reason });
               continue;
             }
             updateDialogHandled = true;
@@ -652,7 +656,7 @@ export class CodexTool extends BaseCLITool {
             () => sendSpecialKey(sessionName, 'Enter')
           );
           if (!enterOutcome.answered) {
-            logger.info('codex-notification-answer-skipped', { sessionName, reason: enterOutcome.reason });
+            noteLaunchAnswerSkipped(logger, answerSkips, 'codex-notification-answer-skipped', { sessionName, reason: enterOutcome.reason });
             continue;
           }
           logger.info('dismissed-codex-notification');
@@ -671,7 +675,7 @@ export class CodexTool extends BaseCLITool {
             () => sendKeys(sessionName, '1', false)
           );
           if (!trustOutcome.answered) {
-            logger.info('codex-trust-dialog-answer-skipped', { sessionName, reason: trustOutcome.reason });
+            noteLaunchAnswerSkipped(logger, answerSkips, 'codex-trust-dialog-answer-skipped', { sessionName, reason: trustOutcome.reason });
             continue;
           }
           trustDialogHandled = true;
@@ -700,7 +704,7 @@ export class CodexTool extends BaseCLITool {
             () => sendSpecialKey(sessionName, 'Enter')
           );
           if (!enterOutcome.answered) {
-            logger.info('codex-trust-dialog-answer-skipped', { sessionName, reason: enterOutcome.reason });
+            noteLaunchAnswerSkipped(logger, answerSkips, 'codex-trust-dialog-answer-skipped', { sessionName, reason: enterOutcome.reason });
             continue;
           }
           trustEnterPresses++;
@@ -826,7 +830,7 @@ export class CodexTool extends BaseCLITool {
     );
     if (!outcome.answered) {
       // Nothing was typed, so this screen's budget is not spent; poll again.
-      logger.info('codex-hooks-screen-answer-skipped', { sessionName, screen, reason: outcome.reason });
+      noteLaunchAnswerSkipped(logger, state.skips, 'codex-hooks-screen-answer-skipped', { sessionName, screen, reason: outcome.reason });
       return true;
     }
     state.attempts = attempt;
@@ -947,8 +951,13 @@ export class CodexTool extends BaseCLITool {
     if (lastHooksScreen !== null) {
       // Issue #4134: the reason, in the message `send` reports. Names only the
       // screen and the setting, nothing captured.
+      // Issue #4161: "did not respond" is untrue of a screen no key reached.
+      const fate =
+        hooksScreenState.attempts === 0 && hooksScreenState.skips.last !== null
+          ? `got no key (${hooksScreenState.skips.last})`
+          : 'did not respond to its keys';
       throw new Error(
-        `Codex prompt not ready: codex's hook review (${lastHooksScreen}) did not respond to its keys. ` +
+        `Codex prompt not ready: codex's hook review (${lastHooksScreen}) ${fate}. ` +
           'Answer it in the terminal, or set CM_CODEX_HOOK_TRUST=bypass'
       );
     }

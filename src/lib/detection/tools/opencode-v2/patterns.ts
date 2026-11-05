@@ -42,9 +42,10 @@ export const OPENCODE_V2_FOOTER_PATTERN = /ctrl\+p commands/;
 
 /**
  * OpenCode V2 working indicator: the footer's `esc interrupt` hint, drawn only
- * while a turn is running (2.0.18).
+ * while a turn is running (2.0.18). After one Esc it reads `esc again to interrupt`
+ * and the reply keeps being written (measured, Issue #4161), as V1's does (#1894).
  */
-export const OPENCODE_V2_THINKING_PATTERN = /esc interrupt/;
+export const OPENCODE_V2_THINKING_PATTERN = /esc (?:again to )?interrupt/;
 
 /**
  * Whether OpenCode V2's composer is on screen, so a send may type into it

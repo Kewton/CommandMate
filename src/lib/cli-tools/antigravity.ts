@@ -53,6 +53,8 @@ import {
   buildAgentLaunchCommandLine,
 } from '@/lib/session/agent-session-lifecycle';
 import { createLogger } from '@/lib/logger';
+import { detectSessionStatus, isGeneratingStatus } from '../detection/status-detector';
+import { newLaunchAnswerSkips, noteLaunchAnswerSkipped } from './launch-answer-skips';
 import { TUI_EXIT_WAIT_MS } from '@/config/cli-tool-timing-config';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 import { getErrorMessage } from '@/lib/errors';
@@ -132,6 +134,20 @@ function describeScreen(output: string | null): { screen: string; screenTail: st
     screen,
     screenTail: rows.slice(-SCREEN_TAIL_ROWS).map((row) => row.slice(0, SCREEN_TAIL_MAX_CHARS)),
   };
+}
+
+/**
+ * What held the pane when the wait for the prompt ran out and no trust screen is
+ * involved (Issue #4161), for the refusal `send` reports. Names the screen only.
+ *
+ * @param output - The last capture read; null when none could be
+ */
+function describeAntigravityPaneHold(output: string | null): string {
+  if (output === null) return 'the pane could not be read';
+  const status = detectSessionStatus(output, 'antigravity');
+  if (status.hasActivePrompt) return 'a prompt dialog is open: answer it in the terminal';
+  if (isGeneratingStatus(status)) return 'a turn is still being generated';
+  return 'no input prompt on the pane: agy may still be starting';
 }
 
 /**
@@ -350,6 +366,7 @@ export class AntigravityTool extends BaseCLITool {
     // One-shot guard: capturePane keeps the dismissed dialog in scrollback, so
     // Enter must be sent at most once per dialog.
     let trustDialogHandled = false;
+    const answerSkips = newLaunchAnswerSkips();
     const loggedTrustDecisions = new Set<string>();
     let lastOutput: string | null = null;
     let captureErrors = 0;
@@ -389,7 +406,7 @@ export class AntigravityTool extends BaseCLITool {
               await new Promise((resolve) => setTimeout(resolve, ANTIGRAVITY_DIALOG_SETTLE_MS));
               continue;
             }
-            logger.info('antigravity-trust-answer-skipped', { sessionName, reason: outcome.reason });
+            noteLaunchAnswerSkipped(logger, answerSkips, 'antigravity-trust-answer-skipped', { sessionName, reason: outcome.reason });
           }
           logTrustDecisionOnce(sessionName, decision, loggedTrustDecisions);
         }
@@ -447,6 +464,7 @@ export class AntigravityTool extends BaseCLITool {
       : ANTIGRAVITY_PROMPT_WAIT_TIMEOUT_MS);
     const pollInterval = 500;
     const loggedTrustDecisions = new Set<string>();
+    const answerSkips = newLaunchAnswerSkips();
     let lastOutput: string | null = null;
     let captureErrors = 0;
     let lastCaptureError: string | undefined;
@@ -485,7 +503,11 @@ export class AntigravityTool extends BaseCLITool {
           )
           : null;
         if (claimed !== null && !claimed.answered) {
-          logger.info('antigravity-trust-answer-skipped', { sessionName, reason: claimed.reason, afterLaunchWindow: true });
+          noteLaunchAnswerSkipped(logger, answerSkips, 'antigravity-trust-answer-skipped', {
+            sessionName,
+            reason: claimed.reason,
+            afterLaunchWindow: true,
+          });
         }
         if (claimed?.answered === true && claimed.value) {
           logger.info('auto-trusted-folder-for-antigravity', { sessionName, afterLaunchWindow: true });
@@ -514,10 +536,12 @@ export class AntigravityTool extends BaseCLITool {
     // A live trust screen here is one whose Enter was already sent (or never
     // owed): it is a human's now.
     const cause = seen.screen === 'trust-dialog'
-      ? ' (the folder-trust confirmation "Do you trust the contents of this project?" is on screen and needs an answer)'
+      ? ` (the folder-trust confirmation "Do you trust the contents of this project?" is on screen and needs an answer${
+        answerSkips.last === null ? '' : `; its Enter was not sent: ${answerSkips.last}`
+      })`
       : trustPending
         ? ' (startup-trust-unhandled: agy had not shown its folder-trust confirmation when the launch window ended, and it has not appeared since)'
-        : '';
+        : ` (${describeAntigravityPaneHold(lastOutput)})`;
     throw new Error(
       `Antigravity prompt not ready: timed out waiting for the input prompt before sending${cause}`
     );

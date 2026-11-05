@@ -25,6 +25,7 @@ import {
   buildAgentLaunchCommandLine,
 } from '@/lib/session/agent-session-lifecycle';
 import { createLogger } from '@/lib/logger';
+import { newLaunchAnswerSkips, noteLaunchAnswerSkipped } from './launch-answer-skips';
 import {
   TUI_INTERRUPT_SETTLE_MS,
   TUI_EXIT_WAIT_MS,
@@ -206,6 +207,7 @@ export class GeminiTool extends BaseCLITool {
     let trustDialogHandled = false;
     let trustPressedAt: number | null = null;
     const loggedDecisions = new Set<string>();
+    const answerSkips = newLaunchAnswerSkips();
     for (let i = 0; i < GEMINI_INIT_MAX_ATTEMPTS; i++) {
       try {
         // Issue #3975: taken before the read the trust Enter is decided on.
@@ -251,7 +253,7 @@ export class GeminiTool extends BaseCLITool {
               // Continue polling for prompt after trust dialog
             } else {
               // Not answered this poll; the next one reads the screen again.
-              logger.info('gemini-trust-answer-skipped', { sessionName, reason: pressed.reason });
+              noteLaunchAnswerSkipped(logger, answerSkips, 'gemini-trust-answer-skipped', { sessionName, reason: pressed.reason });
             }
           } else {
             const warning = launchDialogWarning(GEMINI_TRUST_LAUNCH_DIALOG, decision);
