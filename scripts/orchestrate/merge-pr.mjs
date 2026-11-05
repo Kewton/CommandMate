@@ -50,7 +50,8 @@
  * one: with `--item` the Issue stays open unless `--close <N>` is given (the
  * last PR's call).
  *
- * `git push` here and in publish-pr.mjs goes through pr-common.mjs pushHead (#4162).
+ * `git push` here and in publish-pr.mjs goes through pr-common.mjs pushHead (#4162): a local HEAD
+ * that moved since it was checked stops the push (exit 1).
  *
  * Exit code: 0 merged (or already merged), 1 a condition or a command failed,
  * 2 usage error or a dirty tree, 3 the precheck is on hold, 4 the base moved during the CI wait,

@@ -11,6 +11,7 @@
  * @vitest-environment node
  */
 
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -258,6 +259,155 @@ describe('item 3: git push の 5xx', () => {
     const rejected = fakeGit({ pushFails: true });
     expect(publishMain(argv(), deps(rejected))).toBe(1);
     expect(rejected.gitCalls('push')).toHaveLength(1);
+  });
+});
+
+describe('item 3: 再試行の待ちの間にローカルが進んだら送らない（レビューの指摘 P2）', () => {
+  const HTTP_500 = "fatal: unable to access 'https://github.com/x/y.git/': The requested URL returned error: 500";
+  const MOVED = 'b'.repeat(40);
+
+  it('stops before the next try, says why, and sends only the first', () => {
+    const fake = fakeGit({ pushFailures: [HTTP_500], remoteHead: DEVELOP });
+    const out = pushHead(fake.run, '/w', ['origin', 'HEAD:b'], {
+      branch: 'b',
+      head: HEAD_A,
+      sleep: () => {
+        fake.state.head = MOVED;
+      },
+      notice: () => {},
+    });
+    expect(out.status).toBe(1);
+    expect(out.stderr).toContain('HEAD moved from aaaaaaa to bbbbbbb');
+    expect(out.stderr).toContain('not pushed');
+    expect(fake.gitCalls('push')).toHaveLength(1);
+  });
+
+  it('stops before the first try too: precheck may have run for minutes since head was read', () => {
+    const fake = fakeGit({ head: MOVED });
+    const out = pushHead(fake.run, '/w', ['origin', 'HEAD:b'], { branch: 'b', head: HEAD_A, sleep: () => {}, notice: () => {} });
+    expect(out.status).toBe(1);
+    expect(fake.gitCalls('push')).toHaveLength(0);
+  });
+
+  it('a source that cannot be read is not pushed', () => {
+    const fake = fakeGit({});
+    const run = (command: string, args: string[]) =>
+      args[2] === 'rev-parse' ? { status: 128, stdout: '', stderr: 'fatal: Needed a single revision' } : fake.run(command, args);
+    const out = pushHead(run, '/w', ['origin', 'HEAD:b'], { branch: 'b', head: HEAD_A, sleep: () => {}, notice: () => {} });
+    expect(out.status).toBe(1);
+    expect(out.stderr).toContain('could not read HEAD');
+    expect(fake.gitCalls('push')).toHaveLength(0);
+  });
+
+  it('negative control: with HEAD still there the retry goes through, on the same arguments', () => {
+    const fake = fakeGit({ pushFailures: [HTTP_500], remoteHead: DEVELOP });
+    const out = pushHead(fake.run, '/w', ['origin', 'HEAD:b'], { branch: 'b', head: HEAD_A, sleep: () => {}, notice: () => {} });
+    expect(out.status).toBe(0);
+    expect(fake.gitCalls('push').map((c) => c.args.slice(3))).toEqual([['origin', 'HEAD:b'], ['origin', 'HEAD:b']]);
+  });
+
+  it('merge-pr: exit 1, no merge, no second push', () => {
+    ready();
+    const fake = fakeGit({ prs: [openPr({ headRefOid: 'e'.repeat(40) })], checks: [GREEN], pushFailures: [HTTP_500], remoteHead: DEVELOP });
+    const { code, err } = merge(fake, [], () => {
+      fake.state.head = MOVED;
+    });
+    expect(code).toBe(1);
+    expect(err).toContain('HEAD moved from aaaaaaa to bbbbbbb');
+    expect(fake.gitCalls('push')).toHaveLength(1);
+    expect(fake.ghCalls('pr merge')).toHaveLength(0);
+  });
+
+  it('publish-pr: exit 1, no PR, and the old SHA is not recorded as published', () => {
+    ready();
+    const fake = fakeGit({ pushFailures: [HTTP_500], remoteHead: DEVELOP });
+    const err: string[] = [];
+    const code = publishMain(argv(), {
+      run: fake.run,
+      sleep: () => {
+        fake.state.head = MOVED;
+      },
+      log: () => {},
+      error: (line: string) => err.push(line),
+    });
+    expect(code).toBe(1);
+    expect(err.join('\n')).toContain('moved from aaaaaaa to bbbbbbb');
+    expect(fake.gitCalls('push')).toHaveLength(1);
+    expect(fake.ghCalls('pr create')).toHaveLength(0);
+    expect(readRecords(runDir, '3477').records.filter((r) => r.stage === 'pr')).toEqual([]);
+  });
+
+  it('publish-pr reads the branch it pushes, not HEAD', () => {
+    ready();
+    const fake = fakeGit({});
+    expect(publishMain(argv(), { run: fake.run, sleep: () => {}, log: () => {}, error: () => {} })).toBe(0);
+    const reads = fake.gitCalls('rev-parse').map((c) => c.args.slice(3));
+    expect(reads).toContainEqual(['--verify', 'refs/heads/feature/3477-worktree']);
+  });
+
+  describe('with a real git and a bare remote under os.tmpdir()', () => {
+    const BRANCH = 'feature/x';
+    const gitIn = (cwd: string, ...args: string[]) => {
+      const out = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...args], { cwd, encoding: 'utf8' });
+      if (out.status !== 0) throw new Error(`git ${args.join(' ')}: ${out.stderr}`);
+      return out.stdout.trim();
+    };
+    /** Real git, except that the first push answers 500 without reaching the remote. */
+    const flaky = () => {
+      let failed = false;
+      return (command: string, args: string[]) => {
+        if (args[2] === 'push' && !failed) {
+          failed = true;
+          return { status: 128, stdout: '', stderr: HTTP_500 };
+        }
+        const out = spawnSync(command, args, { encoding: 'utf8' });
+        return { status: out.status ?? 1, stdout: out.stdout, stderr: out.stderr };
+      };
+    };
+    const setup = () => {
+      const remote = path.join(tmp, 'remote.git');
+      const local = path.join(tmp, 'local');
+      fs.mkdirSync(local);
+      gitIn(tmp, 'init', '-q', '--bare', remote);
+      gitIn(local, 'init', '-q');
+      gitIn(local, 'checkout', '-q', '-b', BRANCH);
+      gitIn(local, 'remote', 'add', 'origin', remote);
+      gitIn(local, 'commit', '-q', '--allow-empty', '-m', 'verified');
+      return { remote, local, head: gitIn(local, 'rev-parse', 'HEAD') };
+    };
+    const remoteHead = (remote: string) => spawnSync('git', ['rev-parse', '--verify', '-q', `refs/heads/${BRANCH}`], { cwd: remote, encoding: 'utf8' }).stdout.trim();
+
+    it.each([
+      ['merge-pr', ['origin', `HEAD:${BRANCH}`], undefined],
+      ['publish-pr', ['-u', 'origin', BRANCH], `refs/heads/${BRANCH}`],
+    ])('%s: a commit made during the wait does not reach the remote', (_name, pushArgs, source) => {
+      const { remote, local, head } = setup();
+      const out = pushHead(flaky(), local, pushArgs as string[], {
+        branch: BRANCH,
+        head,
+        ...(source ? { source } : {}),
+        sleep: () => gitIn(local, 'commit', '-q', '--allow-empty', '-m', 'made during the wait'),
+        notice: () => {},
+      });
+      expect(out.status).toBe(1);
+      expect(remoteHead(remote)).toBe('');
+    });
+
+    it.each([
+      ['merge-pr', ['origin', `HEAD:${BRANCH}`], undefined],
+      ['publish-pr', ['-u', 'origin', BRANCH], `refs/heads/${BRANCH}`],
+    ])('negative control, %s: nothing made during the wait, and the verified SHA lands', (_name, pushArgs, source) => {
+      const { remote, local, head } = setup();
+      const out = pushHead(flaky(), local, pushArgs as string[], {
+        branch: BRANCH,
+        head,
+        ...(source ? { source } : {}),
+        sleep: () => {},
+        notice: () => {},
+      });
+      expect(out.status).toBe(0);
+      expect(remoteHead(remote)).toBe(head);
+    });
   });
 });
 

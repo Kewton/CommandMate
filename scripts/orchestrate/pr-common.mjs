@@ -207,13 +207,27 @@ export function isTransientPushFailure({ status, stdout, stderr }) {
  * landed: each failure first reads the remote ref, and a ref at `head` is a success
  * (`confirmed: true`). A rejection is the answer and is returned as it is.
  *
+ * `pushArgs` name `source`, not `head`, so what they send is whatever `source` is by then. Before
+ * every try `source` is read again, and one that is no longer `head` stops the push (a failure,
+ * not sent): what was verified and recorded is `head`, and the caller's next run judges
+ * the new commit from the start. Only the moment between this read and the push is left open.
+ *
  * @param {typeof defaultRun} run
  * @param {string} worktree
  * @param {string[]} pushArgs what follows `git -C <worktree> push`
- * @param {{ branch: string, head: string, sleep?: (ms: number) => void, notice?: (line: string) => void }} options
+ * @param {{ branch: string, head: string, source?: string, sleep?: (ms: number) => void, notice?: (line: string) => void }} options
+ *   `source`: the local ref `pushArgs` send (default HEAD)
  */
-export function pushHead(run, worktree, pushArgs, { branch, head, sleep = defaultSleep, notice = (line) => console.error(line) }) {
+export function pushHead(run, worktree, pushArgs, { branch, head, source = 'HEAD', sleep = defaultSleep, notice = (line) => console.error(line) }) {
   for (let attempt = 1; ; attempt++) {
+    const local = run('git', ['-C', worktree, 'rev-parse', '--verify', source]);
+    if (local.status !== 0) {
+      return { status: 1, stdout: '', stderr: `could not read ${source} before the push, not pushed: ${`${local.stderr || local.stdout}`.trim()}` };
+    }
+    const now = local.stdout.trim();
+    if (now !== head) {
+      return { status: 1, stdout: '', stderr: `${source} moved from ${head.slice(0, 7)} to ${now.slice(0, 7)} since it was checked, not pushed; run again to judge the new commit` };
+    }
     const out = run('git', ['-C', worktree, 'push', ...pushArgs]);
     if (out.status === 0 || !isTransientPushFailure(out)) return out;
     const reason = `${out.stderr || out.stdout}`.trim().split('\n')[0];
