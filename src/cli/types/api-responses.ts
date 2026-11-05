@@ -178,6 +178,11 @@ export interface OpencodeSessionsResponse {
 // by the CLI `instances` command; omits gitStatus/session fields not needed here)
 export interface WorktreeDetailResponse extends WorktreeItem {
   agentInstances: AgentInstance[];
+  /**
+   * Issue #4132: names this reading of the roster, for a write that replaces it. Absent
+   * from an older server. Pinned to the route by tests/integration/cli-response-types-4159.test.ts.
+   */
+  rosterRevision?: string;
 }
 
 /**
@@ -1428,6 +1433,13 @@ export interface AutoYesSetResult {
    * not enabled and from an older server.
    */
   answerMode?: string;
+  /**
+   * Issue #4132: which enabling this is, on the same answers as `answerMode`. Handed back
+   * as `?expectedGrantId=` to turn off this grant and no other. Absent from an older server,
+   * which then cannot be asked for that (Issue #4159). Pinned to the route by
+   * tests/integration/cli-response-types-4159.test.ts.
+   */
+  grantId?: string;
   pollingStarted?: boolean;
   /**
    * Approvals that were already pending and got re-judged by this call

@@ -80,42 +80,66 @@ async function request<T>(url: string, init?: RequestInit): Promise<RoleApiResul
   }
 }
 
+/**
+ * Answer a failure for a request that cannot be put together (Issue #4159): `JSON.stringify`
+ * and `encodeURIComponent` both throw, and they run before {@link request} has a `try` to
+ * catch them. Nothing has gone out, so fetch is never called.
+ */
+export function whenBuilt<T>(send: () => Promise<RoleApiResult<T>>): Promise<RoleApiResult<T>> {
+  try {
+    return send();
+  } catch {
+    return Promise.resolve({ ok: false, status: 0 });
+  }
+}
+
 export function sendJson<T>(
   url: string,
   method: 'POST' | 'PUT',
   body: unknown,
   header?: Record<string, string>,
 ): Promise<RoleApiResult<T>> {
-  return request<T>(url, {
-    method,
-    headers: { 'Content-Type': 'application/json', ...header },
-    body: JSON.stringify(body),
+  return whenBuilt(() => {
+    const json = JSON.stringify(body);
+    // A function or `undefined` has no JSON form: this is no throw, and would send no body.
+    if (json === undefined) return Promise.resolve({ ok: false, status: 0 });
+    return request<T>(url, {
+      method,
+      headers: { 'Content-Type': 'application/json', ...header },
+      body: json,
+    });
   });
 }
 
 export const roleApi = {
   list: () => request<AgentRoleListResponse>('/api/roles'),
-  get: (id: string) => request<AgentRoleDetailResponse>(`/api/roles/${encodeURIComponent(id)}`),
+  get: (id: string) => whenBuilt(() => request<AgentRoleDetailResponse>(`/api/roles/${encodeURIComponent(id)}`)),
   create: (input: { name: string; body: string }) =>
     sendJson<{ success: true; role: AgentRoleDetail }>('/api/roles', 'POST', input),
   /** Send only what changed: the version guards the body, and a name sent along would overwrite a rename. */
   update: (id: string, input: { name?: string; body?: string; expectedBodyVersion?: number }) =>
-    sendJson<AgentRoleEditResponse>(`/api/roles/${encodeURIComponent(id)}`, 'PUT', input),
+    whenBuilt(() => sendJson<AgentRoleEditResponse>(`/api/roles/${encodeURIComponent(id)}`, 'PUT', input)),
   remove: (id: string, options: { force?: boolean } = {}) =>
-    request<AgentRoleDeleteResponse>(
-      `/api/roles/${encodeURIComponent(id)}${options.force ? '?force=true' : ''}`,
-      { method: 'DELETE' },
+    whenBuilt(() =>
+      request<AgentRoleDeleteResponse>(
+        `/api/roles/${encodeURIComponent(id)}${options.force ? '?force=true' : ''}`,
+        { method: 'DELETE' },
+      ),
     ),
   systemDefaults: () => request<SystemRoleDefaultsResponse>('/api/settings/agent-role-defaults'),
   setSystemDefault: (cliToolId: string, roleId: string | null) =>
     sendJson<SystemRoleDefaultsResponse>('/api/settings/agent-role-defaults', 'PUT', { cliToolId, roleId }),
   repositoryDefaults: (repositoryId: string) =>
-    request<RepositoryRoleDefaultsResponse>(`/api/repositories/${encodeURIComponent(repositoryId)}/role-defaults`),
+    whenBuilt(() =>
+      request<RepositoryRoleDefaultsResponse>(`/api/repositories/${encodeURIComponent(repositoryId)}/role-defaults`),
+    ),
   setRepositoryDefault: (repositoryId: string, cliToolId: string, role: RoleAssignmentInput) =>
-    sendJson<RepositoryRoleDefaultsResponse>(
-      `/api/repositories/${encodeURIComponent(repositoryId)}/role-defaults`,
-      'PUT',
-      { cliToolId, role },
+    whenBuilt(() =>
+      sendJson<RepositoryRoleDefaultsResponse>(
+        `/api/repositories/${encodeURIComponent(repositoryId)}/role-defaults`,
+        'PUT',
+        { cliToolId, role },
+      ),
     ),
   instanceSettings: (worktreeId: string) =>
     request<InstanceRoleSettingsResponse>(`/api/worktrees/${worktreeId}/instances/roles`),
