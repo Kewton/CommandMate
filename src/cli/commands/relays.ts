@@ -416,6 +416,9 @@ it; answer it and the next pass, about every 15 s, delivers), generating,
 session_stopped, foreign_session. Left alone until the deadline, the payload
 is replaced by the expiry notice. Absent = no observation by this server
 process (after a restart, or before the first attempt), not "deliverable".
+A closed relay whose expiry notice is still stopped (Issue #4193) is listed
+under "# closed, notice not delivered yet" (state=expired, pending=expired,
+blocked=...) until the notice goes out; it is not counted as open.
 
 send= / overlap= / hold= appear on a relay tied to its send (Issue #3957):
 send= is awaiting / input_started / sent / failed / unknown; hold= says why a
@@ -519,6 +522,14 @@ Withdraw one with \`commandmate relays cancel <relay-id>\`.
         if (inProgress.length > 0) {
           console.error(`# delivery in progress (${inProgress.length})`);
           inProgress.forEach(printRelayLine);
+        }
+        // Issue #4193: a closed relay whose payload to the requester (the
+        // expiry notice) is still stopped — listed apart from the open ones,
+        // and never counted in them. Absent on an older server.
+        const closedBlocked = response.closedBlocked ?? [];
+        if (closedBlocked.length > 0) {
+          console.error(`# closed, notice not delivered yet (${closedBlocked.length})`);
+          closedBlocked.forEach(printRelayLine);
         }
         if (response.awaiting.length === 0 && response.owed.length === 0) {
           console.error('No open relays.');
