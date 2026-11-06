@@ -58,6 +58,14 @@ sharedState:
 
 待ちと実行の上限を分ける案は採らなかった。mutex の待ちの上限は `timeoutSec` で、`src/lib/verification/gate-runner.ts` と `.commandmate/verify.yaml` の変更になる。待ち切った検証は `wait-verify.mjs` が並び直す（#3938）。
 
+### 1-4 全体に広がる item は同じ波に 2 本まで
+
+（#4192。2026-11-06 の run で、検証がテスト全体に広がる item が 4 本同じ波に重なり、2 本が mutex 待ち 5400 秒で SKIP、precheck が 2 回保留になった。）
+
+- 上の `notice: cpu-heavy` / `note:` が出た item（`unit` / `integration` を持つ item を含む）は、**1 つの波に 2 本まで**にする。3 本目からは次の波に送る
+- 2 本の中でも、検証に入れる順（先に入れる 1 本）を plan に書く。全体実行の 1 本が 2158 秒（2026-11-04）かかった実測では、3 本目は待ちだけで 5400 秒に届きうる
+- 並べる数を上げるのは、全体実行の 1 本の実測が短くなったときだけ。`mutexWaitSec` の宣言（待ちの上限を別に持つ）は #4172 で扱う
+
 ## 2-4 経路表と割込み表の書き方
 
 契約の設定（`contract.mjs` の YAML）に `routes` を足すと、goal の「Issue 本文」の後に「経路表と割込み表」の節が入る。**省略したときの goal は今までと 1 文字も変わらない。**
