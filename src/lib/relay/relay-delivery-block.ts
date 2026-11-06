@@ -30,10 +30,11 @@
  */
 
 import type Database from 'better-sqlite3';
-import { getRelayPendingPayload } from '@/lib/db/relay-db';
+import { getRelayPendingPayload, listClosedRelaysWithPendingPayload } from '@/lib/db/relay-db';
 import { createLogger } from '@/lib/logger';
 import type {
   RelayDeliveryBlockReason,
+  RelayEndpoint,
   RelayLastDeliveryBlock,
   RelayPendingKind,
   SessionRelay,
@@ -151,4 +152,32 @@ export function withLastDeliveryBlocks(
   relays: readonly SessionRelay[]
 ): SessionRelay[] {
   return relays.map((relay) => withLastDeliveryBlock(db, relay));
+}
+
+/**
+ * Closed relays whose undelivered payload's last attempt stopped (Issue #4193).
+ *
+ * An expired relay keeps its expiry notice in the slot until it reaches the
+ * requester, and the pump records why that delivery stopped like any other —
+ * but the list's `open` / `awaiting` (rightly) leave closed relays out, so the
+ * reason was readable through `relays --id` only. This is the list of those
+ * relays, each with its `lastDeliveryBlock`; one that carries no observation
+ * (nothing stopped it, or this process has not tried) is not listed. Never
+ * counted in `counts` / `heldCount`, never added to `open` / `awaiting`, and
+ * never throws (an empty list costs the label only).
+ */
+export function listClosedBlockedRelays(
+  db: Database.Database,
+  scope: { worktreeId?: string; requester?: RelayEndpoint } = {}
+): SessionRelay[] {
+  try {
+    return withLastDeliveryBlocks(db, listClosedRelaysWithPendingPayload(db, scope)).filter(
+      (relay) => relay.lastDeliveryBlock != null
+    );
+  } catch (error) {
+    logger.warn('relay-closed-blocked-list-failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
 }

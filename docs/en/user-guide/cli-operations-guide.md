@@ -724,6 +724,13 @@ before). Why it is stopped is now readable, as what the **last delivery attempt*
 - **The screens**: the PC and phone rosters and the chat surface show "stopped by this pane's dialog" (warning
   colour) on the requester A's row, for `prompt_waiting` only. It comes after "delivery unconfirmed" and before
   the worker's confirmation. The waiting and prompt counts are unchanged
+- **A notice still stopped after the expiry (Issue #4193)**: a relay closed by its deadline keeps the expiry
+  notice until it reaches A's composer. While that delivery is stopped (`lastDeliveryBlock` set) the relay is in
+  `closedBlocked` of `GET /api/relays` (scoped by the requester A), and `commandmate relays` prints it under
+  `# closed, notice not delivered yet` as `expired`, `pending=expired`, `blocked=<reason>@<observed time>`
+  (`closedBlocked` in `--json`). The PC and phone rosters and the chat surface show the same "stopped by this
+  pane's dialog" for `prompt_waiting`. It goes away once the notice is delivered. It is never in `open` /
+  `awaiting`, and `counts` / `heldCount` do not change. A closed relay with no stopped attempt is not listed
 - **Not the `prompt` state**: `prompt` records that the worker B stopped on a confirmation and a notice to A was
   **queued** (not that it arrived). **It does not mean B is still waiting**: once B answers and the reply replaces
   the notice (`pending=reply`), `state` stays `prompt` until the relay closes. The roster says "Worker confirmation

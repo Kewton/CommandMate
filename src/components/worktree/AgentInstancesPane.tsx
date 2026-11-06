@@ -653,6 +653,8 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
             awaiting: relays.awaitedBy(inst.id),
             // Issue #4082: payloads to this session whose delivery is not known.
             held: relays.heldFor(inst.id),
+            // Issue #4193: a closed relay's expiry notice stopped on this row's dialog.
+            closedBlocked: relays.closedBlockedFor(inst.id),
             aliasOf,
           });
           // Issue #2395: this row IS the composer's target, so "delegate to it"
