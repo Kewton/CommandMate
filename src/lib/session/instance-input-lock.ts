@@ -221,6 +221,8 @@ declare global {
   // eslint-disable-next-line no-var
   var __instanceInputLocks: Map<string, LockEntry> | undefined;
   // eslint-disable-next-line no-var
+  var __instanceInputAnswerSkips: AnswerSkipRecords | undefined;
+  // eslint-disable-next-line no-var
   var __instanceInputGeneration:
     | { last: number; lastExclusive?: number; exclusiveEvents?: number; sharedReleases?: number }
     | undefined;
@@ -269,6 +271,105 @@ const ownerScope = getOrInitGlobal(
   '__instanceInputOwnerScope',
   () => new AsyncLocalStorage<ReadonlyMap<string, InstanceInputTicket>>()
 );
+
+/**
+ * The warn of a declined answer, per session (Issue #4175).
+ *
+ * `instance-input-answer-not-admitted` and `instance-input-answer-recheck-failed`
+ * were written at every decline, and a launch wait asks again on every poll. They
+ * are written once while the same reason goes on for the session; a repeat is a
+ * debug. The record is the session's: the lock it describes is the session's, and
+ * every caller that answers there (launch waits, Auto-Yes, `respond`, plan review)
+ * shares it, so the first decline of a streak is a warn on whichever path it
+ * falls, and the callers that keep their own record (`launch-answer-skips`) still
+ * write their own warn as before.
+ *
+ * - **Ends**: an answer that went through, or a decline for another reason
+ *   (`target-changed` included, which stays an info) — the next decline is a warn
+ *   again, even for the same reason.
+ * - **A new process** (`invalidateInstanceInput`) starts the session's record
+ *   again under a new `life`. An answer is judged under the `life` it started in:
+ *   one that started before the replacement and ends after it neither reads the
+ *   new record (its warn is written) nor writes it.
+ * - **Bounded**: at most {@link ANSWER_SKIP_RECORD_MAX} sessions, oldest dropped;
+ *   in memory, so a restarted server warns at the first decline.
+ */
+interface AnswerSkipRecord {
+  life: number;
+  /** The reason of the streak going on; null when none is. */
+  reason: InstanceInputAnswerSkip | null;
+}
+
+interface AnswerSkipRecords {
+  seq: number;
+  readonly bySession: Map<string, AnswerSkipRecord>;
+}
+
+/** How many sessions {@link answerSkipRecords} keeps (Issue #4175). */
+export const ANSWER_SKIP_RECORD_MAX = 256;
+
+const answerSkipRecords = getOrInitGlobal(
+  '__instanceInputAnswerSkips',
+  (): AnswerSkipRecords => ({ seq: 0, bySession: new Map() })
+);
+
+/** The life an answer starts in; 0 for a session never replaced since the record was dropped. */
+function answerSkipLife(sessionName: string): number {
+  return answerSkipRecords.bySession.get(sessionName)?.life ?? 0;
+}
+
+function putAnswerSkipRecord(sessionName: string, record: AnswerSkipRecord): void {
+  const { bySession } = answerSkipRecords;
+  bySession.delete(sessionName);
+  bySession.set(sessionName, record);
+  while (bySession.size > ANSWER_SKIP_RECORD_MAX) {
+    const oldest = bySession.keys().next().value;
+    if (oldest === undefined) break;
+    bySession.delete(oldest);
+  }
+}
+
+/** The session's record if `life` is still its life; null for an answer of an older process. */
+function answerSkipRecordOf(sessionName: string, life: number): AnswerSkipRecord | null | undefined {
+  const record = answerSkipRecords.bySession.get(sessionName);
+  if ((record?.life ?? 0) !== life) return null;
+  return record;
+}
+
+/** Write a decline's warn unless the session's streak is already this reason. */
+function warnAnswerSkip(
+  event: string,
+  sessionName: string,
+  life: number,
+  reason: InstanceInputAnswerSkip,
+  fields: Record<string, unknown>
+): void {
+  const record = answerSkipRecordOf(sessionName, life);
+  if (record === null) {
+    logger.warn(event, fields);
+    return;
+  }
+  if (record?.reason === reason) {
+    logger.debug(event, { ...fields, repeated: true });
+    return;
+  }
+  logger.warn(event, fields);
+  putAnswerSkipRecord(sessionName, { life, reason });
+}
+
+/** A decline that is not a warn (`target-changed`) still ends the streak. */
+function noteAnswerSkipQuiet(sessionName: string, life: number, reason: InstanceInputAnswerSkip): void {
+  const record = answerSkipRecordOf(sessionName, life);
+  if (record) record.reason = reason;
+}
+
+/** An answer that went through ends the streak. */
+function noteAnswerAdmitted(sessionName: string, life: number): void {
+  const record = answerSkipRecordOf(sessionName, life);
+  if (!record || record.reason === null) return;
+  if (record.life === 0) answerSkipRecords.bySession.delete(sessionName);
+  else record.reason = null;
+}
 
 function entryOf(sessionName: string): LockEntry {
   let entry = entries.get(sessionName);
@@ -518,6 +619,7 @@ export async function answerUnderInstanceInputLock<T>(
   // has held it since before its read: it joins, and nothing is read again.
   const joined = currentInstanceInputTicket(sessionName) !== null;
   const mode = options.mode ?? 'shared';
+  const life = answerSkipLife(sessionName);
   const movedBeforeAdmission =
     (mode === 'exclusive' ? instanceInputLaunchReadMark() : instanceInputReadMark()) !== readMark;
   let admitted = false;
@@ -534,7 +636,7 @@ export async function answerUnderInstanceInputLock<T>(
           try {
             applies = await stillApplies();
           } catch (error: unknown) {
-            logger.warn('instance-input-answer-recheck-failed', {
+            warnAnswerSkip('instance-input-answer-recheck-failed', sessionName, life, 'recheck-failed', {
               sessionName,
               error: error instanceof Error ? error.message : String(error),
             });
@@ -542,11 +644,14 @@ export async function answerUnderInstanceInputLock<T>(
           }
           if (!applies) {
             logger.info('instance-input-answer-target-changed', { sessionName, generation: ticket.generation });
+            noteAnswerSkipQuiet(sessionName, life, 'target-changed');
             return { answered: false, reason: 'target-changed' };
           }
         }
         if (!ticket.isCurrent()) return { answered: false, reason: 'input-lock-lost' };
-        return { answered: true, value: await answer(ticket) };
+        const value = await answer(ticket);
+        noteAnswerAdmitted(sessionName, life);
+        return { answered: true, value };
       },
       { waitMs: options.waitMs, mode }
     );
@@ -555,7 +660,7 @@ export async function answerUnderInstanceInputLock<T>(
     // after it was admitted may have typed, and is the caller's to judge.
     const skip = admitted ? null : skipOfLockError(error);
     if (skip === null) throw error;
-    logger.warn('instance-input-answer-not-admitted', { sessionName, reason: skip });
+    warnAnswerSkip('instance-input-answer-not-admitted', sessionName, life, skip, { sessionName, reason: skip });
     return { answered: false, reason: skip };
   }
 }
@@ -636,6 +741,9 @@ export async function waitOutCarriedPasteMark(ticket: InstanceInputTicket): Prom
  * pane it just created.
  */
 export function invalidateInstanceInput(sessionName: string): void {
+  // Issue #4175: the new process's first declined answer is a warn of its own.
+  answerSkipRecords.seq += 1;
+  putAnswerSkipRecord(sessionName, { life: answerSkipRecords.seq, reason: null });
   const entry = entries.get(sessionName);
   if (entry === undefined) return;
   entry.mark = null;
@@ -866,4 +974,5 @@ export function resetInstanceInputLocks(): void {
     for (const waiter of entry.queue) clearTimeout(waiter.timer);
   }
   entries.clear();
+  answerSkipRecords.bySession.clear();
 }

@@ -60,6 +60,17 @@ const CODEX_POLL_INTERVAL_MS = 1000;
 const CODEX_INIT_MAX_ATTEMPTS = 30;
 
 /**
+ * Issue #4175: the pause after a launch answer the input lock declined. It is
+ * the poll's own, {@link CODEX_POLL_INTERVAL_MS}: a skip used to `continue` past
+ * it, and a lock that declines at once (`recheck-failed`, `session-replaced`,
+ * `input-lock-lost`) then spent all {@link CODEX_INIT_MAX_ATTEMPTS} in no time.
+ * An answer that went out waits `CODEX_DIALOG_SETTLE_MS` instead, never both.
+ */
+function pauseAfterLaunchAnswerSkip(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, CODEX_POLL_INTERVAL_MS));
+}
+
+/**
  * Extra polls `waitForReady` may spend waiting out `npm install -g
  * @openai/codex` under the `update` policy (Issue #2068).
  *
@@ -627,6 +638,8 @@ export class CodexTool extends BaseCLITool {
                 releaseAgentUpdateLock(CODEX_UPDATE_LOCK_TOOL);
               }
               noteLaunchAnswerSkipped(logger, answerSkips, 'codex-update-dialog-answer-skipped', { sessionName, reason: updateOutcome.reason });
+              // Issue #4175: the poll's own pause, which `continue` would skip.
+              await pauseAfterLaunchAnswerSkip();
               continue;
             }
             forgetLaunchAnswerSkip(answerSkips, 'codex-update-dialog-answer-skipped');
@@ -658,6 +671,8 @@ export class CodexTool extends BaseCLITool {
           );
           if (!enterOutcome.answered) {
             noteLaunchAnswerSkipped(logger, answerSkips, 'codex-notification-answer-skipped', { sessionName, reason: enterOutcome.reason });
+            // Issue #4175: the poll's own pause, which `continue` would skip.
+            await pauseAfterLaunchAnswerSkip();
             continue;
           }
           forgetLaunchAnswerSkip(answerSkips, 'codex-notification-answer-skipped');
@@ -678,6 +693,8 @@ export class CodexTool extends BaseCLITool {
           );
           if (!trustOutcome.answered) {
             noteLaunchAnswerSkipped(logger, answerSkips, 'codex-trust-dialog-answer-skipped', { sessionName, reason: trustOutcome.reason });
+            // Issue #4175: the poll's own pause, which `continue` would skip.
+            await pauseAfterLaunchAnswerSkip();
             continue;
           }
           forgetLaunchAnswerSkip(answerSkips, 'codex-trust-dialog-answer-skipped');
@@ -708,6 +725,8 @@ export class CodexTool extends BaseCLITool {
           );
           if (!enterOutcome.answered) {
             noteLaunchAnswerSkipped(logger, answerSkips, 'codex-trust-dialog-answer-skipped', { sessionName, reason: enterOutcome.reason });
+            // Issue #4175: the poll's own pause, which `continue` would skip.
+            await pauseAfterLaunchAnswerSkip();
             continue;
           }
           forgetLaunchAnswerSkip(answerSkips, 'codex-trust-dialog-answer-skipped');
