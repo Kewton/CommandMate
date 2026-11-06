@@ -103,6 +103,27 @@ function turn(n: number, closed = true, at = startOf(n)): Record<string, unknown
   return messages.reverse();
 }
 
+/**
+ * One closed turn spread over `count` newest-first pages: the idle and an
+ * assistant on page 1, one assistant on each page after, the user alone on the last.
+ */
+function longTurnPages(count: number): Record<string, unknown>[][] {
+  const [idle, assistant, user] = turn(1);
+  const steps = count - 1;
+  const assistantAt = (k: number): Record<string, unknown> => ({
+    ...assistant,
+    id: `msg_4187l${String(k).padStart(4, '0')}`,
+    time: { created: startOf(1) + 100 + k, completed: startOf(1) + 100 + k },
+  });
+  const result: Record<string, unknown>[][] = [];
+  for (let page = 0; page < steps; page += 1) {
+    const k = steps - 1 - page;
+    result.push(page === 0 ? [idle, assistantAt(k)] : [assistantAt(k)]);
+  }
+  result.push([user]);
+  return result;
+}
+
 let dir: string;
 let server: Server | null;
 let port: number;
@@ -344,6 +365,27 @@ describe('recoverOpencodeV2History (Issue #4187)', () => {
     for (let i = 2; i < pages.length; i += 1) markSaved(100 - i);
     expect(await recoverOpencodeV2History(target, port, SESSION)).toEqual({
       written: 2,
+      unreadable: false,
+    });
+    expect(warned('opencode-v2-history-recovery-truncated')).toEqual([]);
+  });
+
+  it('H13: a closed turn longer than the cap, its user on page 6, warns once and writes nothing', async () => {
+    pages = longTurnPages(MAX_OPENCODE_V2_HISTORY_PAGES + 1);
+    expect(await recoverOpencodeV2History(target, port, SESSION)).toEqual({
+      written: 0,
+      unreadable: false,
+    });
+    expect(pagesRead).toHaveLength(MAX_OPENCODE_V2_HISTORY_PAGES);
+    const truncated = warned('opencode-v2-history-recovery-truncated');
+    expect(truncated).toHaveLength(1);
+    expect(truncated[0][1]).toMatchObject({ sessionId: SESSION, pages: MAX_OPENCODE_V2_HISTORY_PAGES });
+  });
+
+  it('H14: the same long turn ending within the cap is written, with no warn', async () => {
+    pages = longTurnPages(MAX_OPENCODE_V2_HISTORY_PAGES);
+    expect(await recoverOpencodeV2History(target, port, SESSION)).toEqual({
+      written: 1,
       unreadable: false,
     });
     expect(warned('opencode-v2-history-recovery-truncated')).toEqual([]);

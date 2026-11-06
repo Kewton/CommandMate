@@ -163,6 +163,22 @@ export function readOpencodeV2ContentPart(
   };
 }
 
+/** `entries`' messages oldest first, as {@link buildOpencodeV2TurnsFromMessages} orders them. */
+function sortOpencodeV2MessagesOldestFirst(entries: readonly unknown[]): Record<string, unknown>[] {
+  return entries
+    .filter(isPlainObject)
+    .filter((message) => readStringField(message, 'id') !== null)
+    .map((message, index) => ({ message, index }))
+    .sort((a, b) => {
+      const byTime = createdAtOf(a.message) - createdAtOf(b.message);
+      if (byTime !== 0) return byTime;
+      const aId = readStringField(a.message, 'id') ?? '';
+      const bId = readStringField(b.message, 'id') ?? '';
+      return aId < bId ? -1 : aId > bId ? 1 : a.index - b.index;
+    })
+    .map(({ message }) => message);
+}
+
 /**
  * Rebuild the turns of a session from `GET /api/session/{id}/message` entries.
  *
@@ -178,18 +194,7 @@ export function buildOpencodeV2TurnsFromMessages(
   entries: readonly unknown[],
   sessionId: string
 ): OpencodeV2Turn[] {
-  const messages = entries
-    .filter(isPlainObject)
-    .filter((message) => readStringField(message, 'id') !== null)
-    .map((message, index) => ({ message, index }))
-    .sort((a, b) => {
-      const byTime = createdAtOf(a.message) - createdAtOf(b.message);
-      if (byTime !== 0) return byTime;
-      const aId = readStringField(a.message, 'id') ?? '';
-      const bId = readStringField(b.message, 'id') ?? '';
-      return aId < bId ? -1 : aId > bId ? 1 : a.index - b.index;
-    })
-    .map(({ message }) => message);
+  const messages = sortOpencodeV2MessagesOldestFirst(entries);
 
   const turns: OpencodeV2Turn[] = [];
   let open: { accumulator: OpencodeTurnAccumulator; completedAt: number | null } | null = null;
@@ -337,8 +342,9 @@ interface OpencodeV2RecoveryRead {
   readonly pages: number;
   /**
    * The page cap was reached with more of the document beyond it, and the
-   * oldest page read held a turn History did not have: turns further back may
-   * be missing too. A long document that is all saved is not truncated.
+   * oldest page read held a turn History did not have, or the oldest turn read
+   * lacks its `user` (its head is beyond the cap): turns further back may be
+   * missing too. A long document that is all saved is not truncated.
    */
   readonly truncated: boolean;
 }
@@ -375,12 +381,28 @@ async function readMessagesToCap(
         entries,
         unreadable: false,
         pages: page + 1,
-        truncated: await holdsUnsavedTurn(target, result.data),
+        truncated: headUnread(entries) || (await holdsUnsavedTurn(target, result.data)),
       };
     }
     cursor = result.next;
   }
   return { entries, unreadable: false, pages: MAX_OPENCODE_V2_HISTORY_PAGES, truncated: false };
+}
+
+/**
+ * Whether the oldest turn read has messages but not its head: an `assistant`
+ * older than every `user` read. Its `user` is beyond the cap, so the turn
+ * cannot be built (or told saved) from what was read — a turn longer than the
+ * pages read included. Counted as possibly missing: without its `user` id
+ * there is no way to ask History.
+ */
+function headUnread(entries: readonly unknown[]): boolean {
+  for (const message of sortOpencodeV2MessagesOldestFirst(entries)) {
+    const type = readStringField(message, 'type');
+    if (type === 'user') return false;
+    if (type === 'assistant') return true;
+  }
+  return false;
 }
 
 /** Whether `page` has a `user` message whose turn History does not have. */
@@ -590,7 +612,8 @@ export interface OpencodeV2HistoryRecoveryOptions {
  * instead of to the newest `user` message (C6), never stopping early at a turn
  * History has. A warn (`opencode-v2-history-recovery-truncated`) says only that
  * turns History does not have may lie beyond the cap: the oldest page read held
- * one, or {@link MAX_OPENCODE_V2_SYNCED_TURNS} dropped one. Guaranteed: the
+ * one, the oldest turn read has no `user` in what was read, or
+ * {@link MAX_OPENCODE_V2_SYNCED_TURNS} dropped one. Guaranteed: the
  * closed, unsaved turns within those pages, whatever order rows were written in
  * and whatever the clocks say — not every turn ever.
  *
