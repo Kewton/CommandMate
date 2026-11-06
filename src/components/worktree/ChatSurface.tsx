@@ -134,7 +134,7 @@ import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, 
 import { useTranslations } from 'next-intl';
 import { ArrowDown, Forward, Loader2, TerminalSquare } from 'lucide-react';
 import { useSessionRelays } from '@/lib/relay/use-session-relays';
-import { resolveRelayBadges, resolveRelayStrip } from '@/lib/relay/relay-badges';
+import { relayToneNeedsAttention, resolveRelayBadges, resolveRelayStrip } from '@/lib/relay/relay-badges';
 import {
   ChatTranscript,
   CHAT_TRANSCRIPT_SCROLL_CONTAINER_TESTID,
@@ -1141,7 +1141,7 @@ export const ChatSurface = memo(function ChatSurface({
           data-relay-tone={relayStrip.tone}
           role="status"
           className={`flex shrink-0 items-center gap-1.5 border-b border-border px-3 py-1 text-xs ${
-            relayStrip.tone === 'prompt' || relayStrip.tone === 'held' || relayStrip.tone === 'blocked'
+            relayToneNeedsAttention(relayStrip.tone)
               ? 'bg-warning-subtle text-warning-foreground'
               : 'bg-surface-2 text-muted-foreground'
           }`}
