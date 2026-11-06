@@ -618,7 +618,11 @@ describe('send --contract --auto-yes when Auto-Yes cannot be enabled', () => {
 
     expect(calls.filter((c) => c.method === 'PATCH')).toEqual([]);
     expect(calls.filter((c) => c.url.includes('/send'))).toEqual([]);
-    expect(code).not.toBe(ExitCode.SUCCESS);
+    // Issue #4176: `not.toBe(SUCCESS)` alone also passed when exit was never
+    // called (`code` undefined). The foreign-session 409 is exit 99
+    // (`handleApiError`).
+    expect(mockExit).toHaveBeenCalled();
+    expect(code).toBe(ExitCode.UNEXPECTED_ERROR);
   });
 
   it('leaves the task running, warns and does not exit when the enable deferred behind --model fails after the send', async () => {

@@ -7,7 +7,7 @@
  *  - renaming it in the route fails the reads below;
  *  - a field the route starts answering on an enable, not in the type, fails the key check.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { NextRequest } from 'next/server';
 import { runMigrations } from '@/lib/db/db-migrations';
@@ -15,6 +15,7 @@ import { upsertWorktree } from '@/lib/db';
 import { setAgentInstances } from '@/lib/db/agent-instances-db';
 import { computeRosterRevision } from '@/lib/agent-roles/management';
 import { clearAllAutoYesStates } from '@/lib/auto-yes-state';
+import { autoYesGrantIdOf } from '@/app/api/worktrees/[id]/auto-yes/auto-yes-grant';
 import type { AgentInstance } from '@/lib/cli-tools/types';
 import type { Worktree } from '@/types/models';
 import type { AutoYesSetResult, WorktreeDetailResponse } from '@/cli/types/api-responses';
@@ -99,6 +100,16 @@ afterEach(() => {
 });
 
 describe('[#4159] the CLI types against the real routes', () => {
+  // Issue #4173: the value type and the optionality, checked by `npx tsc --noEmit` (Vitest strips types).
+  it('types: grantId and rosterRevision carry the route\'s value type, and are optional for an older server', () => {
+    expectTypeOf<AutoYesSetResult['grantId']>().toEqualTypeOf<ReturnType<typeof autoYesGrantIdOf> | undefined>();
+    expectTypeOf<WorktreeDetailResponse['rosterRevision']>().toEqualTypeOf<
+      ReturnType<typeof computeRosterRevision> | undefined
+    >();
+    expectTypeOf<Record<never, never>>().toExtend<Pick<AutoYesSetResult, 'grantId'>>();
+    expectTypeOf<Record<never, never>>().toExtend<Pick<WorktreeDetailResponse, 'rosterRevision'>>();
+  });
+
   it('POST auto-yes: an enable answers nothing the type does not have, and names its grant', async () => {
     const answer = await arm();
     expect(Object.keys(answer).filter((key) => !(key in AUTO_YES_KEYS))).toEqual([]);
