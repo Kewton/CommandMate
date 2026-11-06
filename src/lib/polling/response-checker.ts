@@ -744,6 +744,9 @@ function extractCompletedTurn(
 
   // Layer 2: Accumulate TUI content for full-screen TUI tools, so a turn that
   // outgrows the alternate-screen pane keeps the head that has scrolled away.
+  // Issue #4187: not opencode-v2. The screen reading never completes a V2 turn
+  // (its replies are written from its server's document, including the turns a
+  // lost stream missed, on reconnect), so there is no save for the head to reach.
   if (owns && (cliToolId === 'opencode' || cliToolId === 'copilot')) {
     // Issue #1911: opencode is accumulated from the CURRENT TURN'S REGION
     // rather than the whole frame. Feeding the raw pane seeded the accumulator
