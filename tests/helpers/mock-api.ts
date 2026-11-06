@@ -7,7 +7,8 @@
  *   afterEach(() => { restoreFetch(); });
  */
 
-import { vi } from 'vitest';
+import { afterEach, beforeEach, expect, vi } from 'vitest';
+import { refusedRealServerRequests } from './real-server-fence';
 
 const originalFetch = global.fetch;
 
@@ -110,4 +111,61 @@ export function mockFetchError(error: string | Error): void {
 export function restoreFetch(): void {
   global.fetch = originalFetch;
   capabilitiesPayload = DEFAULT_CAPABILITIES;
+}
+
+/**
+ * The error `fetch` gives for a closed port: a `TypeError('fetch failed')` whose
+ * cause carries `code: 'ECONNREFUSED'`, as undici reports it and as the CLI's
+ * `ApiClient` classifies it.
+ */
+export function connectionRefusedError(url = 'http://127.0.0.1:3000/'): TypeError {
+  const { port } = new URL(url);
+  const cause = Object.assign(new Error(`connect ECONNREFUSED 127.0.0.1:${port || '80'} (mocked, #4191)`), {
+    code: 'ECONNREFUSED',
+    errno: -61,
+    syscall: 'connect',
+    address: '127.0.0.1',
+    port: Number(port || 80),
+  });
+  return new TypeError('fetch failed', { cause });
+}
+
+/**
+ * Mock global.fetch as a server that is not there: every request is refused
+ * the way a closed port refuses it, and nothing is sent (Issue #4191).
+ * Restore with {@link restoreFetch}.
+ *
+ * @returns The mock, so a test can see what was asked for
+ */
+export function mockFetchUnreachable(): ReturnType<typeof vi.fn> {
+  const mock = vi.fn((input: unknown) => Promise.reject(connectionRefusedError(String(input))));
+  global.fetch = mock as unknown as typeof fetch;
+  return mock;
+}
+
+/**
+ * Keep every test of the calling file off the real server (Issue #4191).
+ *
+ * Before each test, `fetch` is {@link mockFetchUnreachable} — a test that wants
+ * answers installs its own mock over it, as before. A request that still
+ * reaches the fence of `tests/setup.ts` (a test that put the real `fetch` back,
+ * or a client other than the mocked global) fails the test after it: passing
+ * because the connection to 127.0.0.1:3000 "failed" is passing by accident.
+ *
+ * Call once at the top level of a test file.
+ */
+export function keepOffTheRealServer(): void {
+  let seen = 0;
+  beforeEach(() => {
+    seen = refusedRealServerRequests().length;
+    mockFetchUnreachable();
+  });
+  afterEach(() => {
+    const fresh = refusedRealServerRequests().slice(seen);
+    restoreFetch();
+    expect(
+      fresh.map((r) => r.url),
+      'requests that reached the real-server fence (mock fetch, or use a server on an ephemeral port)'
+    ).toEqual([]);
+  });
 }

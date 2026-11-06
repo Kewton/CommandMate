@@ -36,6 +36,10 @@ vi.mock('../../../../src/lib/detection/version-probes', () => ({
 }));
 
 import { statusCommand } from '../../../../src/cli/commands/status';
+import { keepOffTheRealServer } from '../../../helpers/mock-api';
+
+// Issue #4191: no request from this file reaches 127.0.0.1:3000, not even by failing.
+keepOffTheRealServer();
 
 /** A running daemon, so status reaches the branch that prints the report. */
 function stubRunningServer(): void {
