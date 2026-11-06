@@ -272,6 +272,13 @@ const V2_READINGS: Array<[string, string, string]> = [
   ['opencode-v2-live-2971/select-variant-typed.txt', 'empty', 'B-empty'],
   ['opencode-v2-live-2971/select-variant.txt', 'empty', 'B-empty'],
   ['opencode-v2-live-2971/sessions.txt', 'empty', 'B-empty'],
+  // Issue #4175: 2.0.18 at 80x200, 2026-11-06 (a GitHub Copilot model).
+  ['opencode-v2-live-4175/esc-again-running.txt', 'empty', 'A'],
+  ['opencode-v2-live-4175/idle-after-turn.txt', 'empty', 'B-empty'],
+  ['opencode-v2-live-4175/interrupted.txt', 'empty', 'B-empty'],
+  ['opencode-v2-live-4175/long-done.txt', 'empty', 'B-empty'],
+  ['opencode-v2-live-4175/long-running.txt', 'empty', 'A'],
+  ['opencode-v2-live-4175/quote-footer-done.txt', 'empty', 'B-empty'],
   ['opencode-v2-model-keys-2983/commands-ctrl-p.txt', 'text:Open diff viewer', 'F'],
   ['opencode-v2-model-keys-2983/home-esc-then-variant.txt', 'empty', 'B-empty'],
   ['opencode-v2-model-keys-2983/home.txt', 'empty', 'B-empty'],

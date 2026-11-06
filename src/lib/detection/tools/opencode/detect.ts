@@ -11,11 +11,11 @@ import {
   detectThinking,
   stripBoxDrawing,
   OPENCODE_TURN_COMPLETE_PATTERN,
-  OPENCODE_PROCESSING_INDICATOR,
   OPENCODE_IDLE_COMPOSER_PATTERN,
   OPENCODE_PERMISSION_PATTERN,
   OPENCODE_SELECTION_LIST_PATTERN,
 } from '../../cli-patterns';
+import { isOpencodeProcessingFooter } from './patterns';
 import { positiveVerdict } from '../verdicts';
 import { STATUS_REASON } from '../../status-reason';
 import { detectOpenCodeModalOverlay } from '../../opencode-modal-overlay';
@@ -142,7 +142,8 @@ export const opencodeStatusDetector = createToolStatusDetector({
     }
 
     // A. Check footer for processing indicator ("esc interrupt" replaces "ctrl+t variants..." during processing)
-    if (OPENCODE_PROCESSING_INDICATOR.test(frame.lastLines)) {
+    // Issue #4175: the hint's row under the composer's border, not the words in a reply.
+    if (isOpencodeProcessingFooter(frame.lastLines)) {
       return positiveVerdict('running', STATUS_REASON.OPENCODE_PROCESSING_INDICATOR);
     }
 

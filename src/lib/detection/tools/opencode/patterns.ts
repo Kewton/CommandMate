@@ -215,8 +215,41 @@ export const OPENCODE_PERMISSION_PATTERN =
  * Filtered from response extraction via OPENCODE_SKIP_PATTERNS, which shares
  * this constant: the widened row is dropped from a saved answer for the same
  * reason the narrow one was.
+ *
+ * Issue #4175: matched as a whole row, not as words anywhere. The hint opens its row
+ * (after the spinner run `⬝■` when there is one) and the row ends there or goes on
+ * after two spaces with the footer's columns — the shape of every measured row
+ * (`opencode-live-1894/`, `opencode-live-2047/w80|w120|w200/`, the canary capture).
+ * A sentence of a reply with the words in it (`The footer reads esc interrupt while…`)
+ * read as a running turn before, in the status reader, in `isOpenCodeComplete` and
+ * in this list. A row that is the hint and nothing else still matches: tests outside
+ * this Issue pin `'esc interrupt'` and the label alone as matches, and the status
+ * reader adds the position on top ({@link isOpencodeProcessingFooter}).
  */
-export const OPENCODE_PROCESSING_INDICATOR = /esc (?:again to )?interrupt/;
+export const OPENCODE_PROCESSING_INDICATOR =
+  /(?:^|\n)[^\S\n]*(?:[\u2B1D\u25A0]+[^\S\n]+)?esc (?:again to )?interrupt(?:[^\S\n]{2}[^\n]*)?[^\S\n]*(?=\n|$)/;
+
+/**
+ * Whether the busy footer is on the frame, by position (Issue #4175): an
+ * {@link OPENCODE_PROCESSING_INDICATOR} row BELOW the composer's bottom border when
+ * the text holds one — every measured running frame draws the hint on the row right
+ * under it — and anywhere in the text when it holds none (a window cut above the
+ * border; the rule as it was). A reply quoting the hint row whole sits above the
+ * border and is not read.
+ *
+ * @param text - ANSI-stripped rows, box drawing intact (the status reader's `lastLines`)
+ */
+export function isOpencodeProcessingFooter(text: string): boolean {
+  const rows = text.split('\n');
+  let border = -1;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (OPENCODE_COMPOSER_BOTTOM_BORDER.test(rows[i])) {
+      border = i;
+      break;
+    }
+  }
+  return OPENCODE_PROCESSING_INDICATOR.test(rows.slice(border + 1).join('\n'));
+}
 
 /**
  * OpenCode's composer bottom border: `  ╹▀▀▀▀▀▀…` (Issue #1911).
