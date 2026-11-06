@@ -325,6 +325,43 @@ export function listExpiredOpenRelays(
 }
 
 /**
+ * Closed relays whose payload is still waiting to be typed into the requester
+ * (Issue #4193): in practice the expiry notice (`pending_kind = 'expired'`),
+ * which outlives the relay it closes. Not under a delivery hold (those are
+ * listed by `listRelaysWithDeliveryHold`), oldest first.
+ *
+ * Scoped by the REQUESTER (`from`) — the payload is going to it: with an
+ * endpoint, that session; with a worktree only, that worktree's sessions.
+ * Read-only, and not one of the counts.
+ */
+export function listClosedRelaysWithPendingPayload(
+  db: Database.Database,
+  scope: { worktreeId?: string; requester?: RelayEndpoint } = {}
+): SessionRelay[] {
+  const clauses = [
+    `state NOT IN (${OPEN_STATE_PLACEHOLDERS})`,
+    'pending_kind IS NOT NULL',
+    'delivery_state IS NULL',
+  ];
+  const params: string[] = [...OPEN_RELAY_STATES];
+  if (scope.requester) {
+    clauses.push('from_worktree_id = ? AND from_instance_id = ?');
+    params.push(scope.requester.worktreeId, scope.requester.instanceId);
+  } else if (scope.worktreeId) {
+    clauses.push('from_worktree_id = ?');
+    params.push(scope.worktreeId);
+  }
+  const rows = db
+    .prepare(`
+      SELECT ${RELAY_COLUMNS} FROM session_relays
+      WHERE ${clauses.join(' AND ')}
+      ORDER BY created_at ASC
+    `)
+    .all(...params) as SessionRelayRow[];
+  return rows.map(mapRelay);
+}
+
+/**
  * Withdraw a relay. Returns false when it was already closed or absent.
  *
  * Issue #4064: stops later deliveries only. A payload under a delivery hold

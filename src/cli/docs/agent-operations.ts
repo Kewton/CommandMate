@@ -216,6 +216,9 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   Answer that dialog and the next pass (about every 15 s) delivers; left alone,
   the payload is replaced by the expiry notice at the deadline. No blocked=
   means nothing was observed (e.g. after a restart), not that it can go out.
+  An expired relay whose expiry notice is still stopped (Issue #4193) is
+  listed under "# closed, notice not delivered yet" (closedBlocked in --json)
+  until the notice goes out; it is not an open relay and is not counted.
 
 ### commandmate wait <worktree-id...>
   Block until agent completes or prompt is detected.

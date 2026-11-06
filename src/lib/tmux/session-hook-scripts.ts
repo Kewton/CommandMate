@@ -32,11 +32,11 @@
 
 import { mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync } from 'fs';
 import { homedir } from 'os';
-import { join, dirname, resolve } from 'path';
+import { join, dirname } from 'path';
 import { TUI_PANE_HEIGHT, TUI_PANE_WIDTH } from '../../config/tmux-pane-config';
 import { MCBD_SESSION_PREFIX } from '../session/tmux-session-surface';
 import { PAGER_SCRIPT_FILENAME } from './read-mode-pager';
-import { resolveSafeDirectory } from '../../config/safe-directory';
+import { resolveSafeAbsoluteDirectory } from '../../config/safe-directory';
 
 /**
  * Moves {@link getScriptDir} off `~/.commandmate/bin` (Issue #4176).
@@ -195,6 +195,13 @@ tmux set-window-option -t "=$SESSION:" window-size latest 2>/dev/null || true
  * then the control-mode test below keeps it from firing for CommandMate's own
  * transport — a popup opened on a control client would be a popup nobody can
  * see and nobody can close.
+ *
+ * The pager path below is `read-mode.ts` `getPagerScriptPath()` written for `sh`
+ * (Issue #4191): the same `~/.commandmate/bin/<PAGER_SCRIPT_FILENAME>`, from the
+ * hook's `$HOME` rather than `homedir()`. Kept as two spellings on purpose: this
+ * text runs in the tmux server's shell, not here, and the pager is not moved by
+ * {@link SCRIPT_DIR_ENV} (it is `bind-key`'s target too). Change both together;
+ * `tests/unit/lib/tmux/pager-script-location-4191.test.ts` holds them equal.
  */
 export const AUTO_POPUP_SCRIPT = `#!/bin/sh
 # CommandMate auto read popup (Issue #2317) — generated file, edits are overwritten.
@@ -234,8 +241,7 @@ fi
  */
 export function getScriptDir(): string {
   const fallback = join(homedir(), '.commandmate', 'bin');
-  const configured = process.env[SCRIPT_DIR_ENV]?.trim();
-  return resolveSafeDirectory(configured ? resolve(configured) : undefined, fallback, SCRIPT_DIR_ENV);
+  return resolveSafeAbsoluteDirectory(process.env[SCRIPT_DIR_ENV]?.trim(), fallback, SCRIPT_DIR_ENV);
 }
 
 /** Absolute path of a materialized script. */

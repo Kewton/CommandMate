@@ -247,6 +247,11 @@ export function resolveExtractionStartIndex(
   // doesn't grow -- it's always ~PANE_HEIGHT lines. bufferWasReset is often true because
   // lastCapturedLine = totalLines. Must execute BEFORE Branch 1 to avoid Branch 1's small
   // window (40 lines) which fails to find the second-to-last Build marker in a 200-line pane.
+  // Issue #4187: opencode-v2 is an alternate-screen TUI too, but it is not added here
+  // on purpose. The screen reading never saves a V2 reply (V2 has no rule in
+  // `isTurnComplete`; its replies are written from its own server's document,
+  // `lib/hooks/sources/opencode-v2/history`), so it never reaches a completed
+  // extraction that would read this start.
   if (cliToolId === 'opencode' || cliToolId === 'copilot') {
     const foundUserPrompt = findRecentUserPromptIndex(totalLines);
     return foundUserPrompt >= 0 ? foundUserPrompt + 1 : 0;

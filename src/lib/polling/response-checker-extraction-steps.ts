@@ -90,7 +90,10 @@ export function findChromeStart(
   // its column in the skip list (#4161), which a reply drawn further left would
   // lose and a footer drawn further right would beat. opencode-v2 has no rule in
   // `isTurnComplete`, so today this boundary reaches only the partial reading,
-  // which the poller does not save.
+  // which the poller does not save. Issue #4187 made that the design: V2's
+  // replies are never saved from the screen — the event stream's turn end and,
+  // for a stream that was down, the recovery sync on reconnect write them from
+  // the server's document (`lib/hooks/sources/opencode-v2/history`).
   if (cliToolId === 'opencode-v2') {
     return findOpencodeV2ChromeStart(lines.map(stripAnsi));
   }

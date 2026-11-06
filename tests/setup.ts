@@ -262,6 +262,11 @@ process.env.CM_OPENCODE_LAUNCH_SETTINGS_FILE = join(
   'commandmate-test-opencode-launch-settings',
   `${process.pid}.json`
 );
+// Issue #4191: these per-worker paths are keyed by `process.pid`, which is one
+// per worker under the default `forks` pool (vitest.config.ts sets no `pool`,
+// and nothing runs the suite with `--pool=threads`). Under threads every worker
+// would share them. Left as is: keying by `threadId` too would rename every
+// path here for a pool nobody uses; add it when the pool changes.
 process.env.CM_AGENT_HOOKS_DIR = join(tmpdir(), 'commandmate-test-agent-hooks', String(process.pid));
 process.env.CM_VERIFY_LOCK_ROOT = join(tmpdir(), 'commandmate-test-locks', String(process.pid));
 process.env.CM_LOG_DIR = join(tmpdir(), 'commandmate-test-logs', String(process.pid));
@@ -291,11 +296,16 @@ delete process.env.CM_OPENCODE_LOCAL_PROVIDER_CONFIG;
 // Issue #4176: the server the suite would talk to. A worker's pane inherits the
 // running server's `CM_PORT=3000`, and removing it changes nothing, because
 // every reader falls back to 3000 — the same server. So the defaults are left
-// as CI has them and the fence goes in front of `fetch` (the only HTTP client
-// in src/): a loopback request to 3000, or to the `CM_PORT` / `MCBD_PORT` the
-// suite was started with, or to a port the client's `.env` names (read only),
-// fails as a closed port does on CI, unsent. Installed before the ports are
-// removed, so it reads them. See tests/helpers/real-server-fence.ts.
+// as CI has them and the fence goes in front of `fetch` (the CLI's `ApiClient`
+// and most of src/; `server-identity.ts`, `localhost-self-check.ts` and
+// `cloudflare.ts` use `http.request` / `http.get` and are not fenced — the
+// helper lists them and why no unit test reaches 3000 through them): a loopback
+// request to 3000, or to the `CM_PORT` / `MCBD_PORT` the suite was started
+// with, or to a port the client's `.env` names (read only), fails as a closed
+// port does on CI, unsent. Installed before the ports are removed, so it reads
+// them. See tests/helpers/real-server-fence.ts. A refusal is recorded
+// (`refusedRealServerRequests`), and a file that calls `keepOffTheRealServer()`
+// (tests/helpers/mock-api.ts) fails on one instead of passing by it (#4191).
 //
 // The hook relay runs `curl`, which the fence does not see, and reads `CM_HOST`
 // (nothing in src/ does): a never-resolving host keeps a relay started from the
@@ -318,6 +328,14 @@ delete process.env.MCBD_PORT;
 delete process.env.CM_AUTH_TOKEN;
 delete process.env.CM_HTTPS_CERT;
 delete process.env.CM_HTTPS_KEY;
+
+// Issue #4191: the push keys, as CI has them (unset). A worker's pane inherits
+// the running server's `CM_VAPID_PRIVATE_KEY` — a credential — and a test that
+// read `getVapidConfig()` without setting the keys itself would sign with it.
+// The VAPID tests set and restore their own values.
+delete process.env.CM_VAPID_PUBLIC_KEY;
+delete process.env.CM_VAPID_PRIVATE_KEY;
+delete process.env.CM_VAPID_SUBJECT;
 
 // Issue #4086: keep the suite off the database the calling shell names.
 //

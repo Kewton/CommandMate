@@ -39,6 +39,7 @@
  * @module config/safe-directory
  */
 
+import { resolve } from 'path';
 import { createLogger } from '@/lib/logger';
 import { isVirtualFilesystemPath } from './system-directories';
 
@@ -106,4 +107,37 @@ export function resolveSafeDirectory(
   }
 
   return fallback;
+}
+
+/**
+ * {@link resolveSafeDirectory} for a value that another process will be handed
+ * (Issue #4191): a relative candidate is made absolute against this process's
+ * working directory first, and the `/proc` check runs on that absolute form.
+ *
+ * `resolveSafeDirectory` returns a relative value as it was given, which is
+ * right for a directory only this process opens — `fs` resolves it against the
+ * same cwd every time. It is wrong for a path written into a command line, a
+ * tmux hook or a child's environment: the child resolves it against ITS cwd.
+ * Measured for `CM_AGENT_HOOKS_DIR`: the daemon runs from the package root
+ * (`src/cli/utils/daemon.ts`, `cwd: packageRoot`) and writes the settings file
+ * there, while claude is started in the worktree (`claude-session.ts`,
+ * `createSession({ workingDirectory: worktreePath })`) and reads
+ * `--settings <relative>` from there — another file, or none, and no events.
+ *
+ * Opt-in rather than a change to `resolveSafeDirectory`, whose other callers
+ * keep their values verbatim (`tests/unit/config/safe-directory.test.ts` pins
+ * that); each of them has to be judged on whether its value leaves the process.
+ *
+ * @param candidate - The configured path. Empty or undefined means "unset"
+ * @param fallback - The built-in default, already absolute
+ * @param source - What supplied the candidate, for the warning
+ * @returns The absolute form of `candidate`, or `fallback` when it is unset or
+ *   inside `/proc`, `/sys` or `/dev`
+ */
+export function resolveSafeAbsoluteDirectory(
+  candidate: string | undefined,
+  fallback: string,
+  source: string
+): string {
+  return resolveSafeDirectory(candidate ? resolve(candidate) : undefined, fallback, source);
 }

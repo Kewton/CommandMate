@@ -61,6 +61,7 @@ import { beginLaunchWindow, endLaunchWindow, recordLaunchDialogPress } from './l
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 import {
   answerUnderInstanceInputLock,
+  instanceInputAnswerSkipLife,
   instanceInputReadMark,
   leaveCarriedPasteMark,
   noteInputStart,
@@ -595,14 +596,19 @@ export class CopilotTool extends BaseCLITool {
     if (!isCopilotFolderTrustDialog(output)) {
       return false;
     }
+    // Issue #4189: the session's life before the answer's await; a decline of an older life writes no record for the new one.
+    const answerLife = instanceInputAnswerSkipLife(sessionName);
     const outcome = await answerUnderInstanceInputLock(
       sessionName,
       readMark,
       async () => isCopilotFolderTrustDialog(stripAnsi(await capturePane(sessionName, 50))),
-      () => sendKeys(sessionName, COPILOT_FOLDER_TRUST_ANSWER_KEY, false)
+      () => sendKeys(sessionName, COPILOT_FOLDER_TRUST_ANSWER_KEY, false),
+      // Issue #4189: the lock's warn of a decline, once per streak in the calling wait.
+      { repeatScope: skips }
     );
     if (!outcome.answered) {
-      noteLaunchAnswerSkipped(logger, skips, 'copilot-folder-trust-answer-skipped', { reason: outcome.reason });
+      // Issue #4189: the session, so a decline after it was made again is a new one.
+      noteLaunchAnswerSkipped(logger, skips, 'copilot-folder-trust-answer-skipped', { sessionName, reason: outcome.reason }, answerLife);
       return false;
     }
     recordLaunchDialogPress(sessionName);

@@ -201,6 +201,8 @@ export const MobileAgentInstancesPane = memo(function MobileAgentInstancesPane({
               awaiting: relays.awaitedBy(inst.id),
               // Issue #4082: same as the PC roster row.
               held: relays.heldFor(inst.id),
+              // Issue #4193: same as the PC roster row.
+              closedBlocked: relays.closedBlockedFor(inst.id),
               aliasOf,
             });
             return (

@@ -51,7 +51,7 @@ in the CLI setup guide.
 |---|---|---|
 | Sending | Send from the screen and with `commandmate send`. A bare `/<name>` (a project command or a Skill) runs in V2 as is | #2934 #2950 |
 | State | Running, done and waiting are shown from the SSE (e.g. `OpenCode V2: waiting` in the sidebar) | #2934 |
-| Transcript (History) | When a turn ends the reply is read from V2's server and recorded in chat, one row per turn | #2940 |
+| Transcript (History) | When a turn ends the reply is read from V2's server and recorded in chat, one row per turn. Turns that ended while the SSE stream was down are read again and recorded when it reconnects (see "Replies that are not recorded" below) | #2940 #4187 |
 | Approvals and questions | Approvals (with the diff) and questions can be answered from the PC panel, the phone, `commandmate respond` and Auto-Yes (below) | #2945 #2951 |
 | Refusing to send into a dialog | While a dialog such as model selection or the Commands palette is open, sending fails instead of typing the text into the dialog (below) | #2971 |
 | Model | The model that actually answered is shown in `capture --json` (`.model`) and in the pane header. After a model change in the TUI it switches with the next reply, and a change notification is raised | #2964 |
@@ -120,6 +120,16 @@ Both can be installed and used side by side. The installation details are in the
 - **The Skill detail screen**: the V2 row appears in the Skill detail's compatibility table only once the Catalog's
   manifest declares V2 (commandmate-skills#275).
 - **Starting with `--standalone`**: as in §2, the state display and answering approvals do not work.
+- **Replies that are not recorded** (Issue #4187): V2's replies are written from its server's record, never saved
+  from the screen. In the cases below the reply appears neither in History nor in the chat view; it can be read
+  **only on the terminal screen** (the PC and phone terminal, `commandmate capture`).
+  - Started with `--standalone` (there is no private server to subscribe to)
+  - The subscription ended on its own (the password file is gone, or the port now belongs to something else)
+  - Turns that ended while CommandMate was restarting. After a restart only the ordinary re-read at the end of the
+    next turn runs, and it stops at the page holding the newest question, so a turn on an earlier page may not be
+    recorded
+  - The re-read on reconnect goes back at most 5 pages and 50 turns from the newest; anything beyond may not be recorded
+  - Scheduled runs (`opencode2 run --standalone`) take a different path and are not what this item is about
 
 ---
 

@@ -108,6 +108,20 @@ export function TerminalComponent({
 
     let ws: WebSocket | null = null;
     let isDisposed = false;
+    // Issue #4190: a close seen while the tab is hidden books no reconnect;
+    // coming back visible makes the one attempt.
+    let reconnectDeferred = false;
+    const handleVisibilityChange = () => {
+      if (
+        document.visibilityState === 'visible' &&
+        reconnectDeferred &&
+        !isDisposed &&
+        reconnectTimerRef.current === null
+      ) {
+        reconnectDeferred = false;
+        setReconnectAttempt((current) => current + 1);
+      }
+    };
 
     // Handle window resize
     const handleResize = () => {
@@ -195,7 +209,12 @@ export function TerminalComponent({
     ws.onclose = () => {
       setConnectionStatus('disconnected');
       term.write('\x1b[33m⚠ Disconnected from terminal\x1b[0m\r\n');
-      if (!isDisposed && reconnectTimerRef.current === null) {
+      if (isDisposed) return;
+      if (document.visibilityState === 'hidden') {
+        reconnectDeferred = true;
+        return;
+      }
+      if (reconnectTimerRef.current === null) {
         reconnectTimerRef.current = setTimeout(() => {
           reconnectTimerRef.current = null;
           setReconnectAttempt((current) => current + 1);
@@ -203,6 +222,7 @@ export function TerminalComponent({
       }
     };
 
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     setSocket(ws);
 
     // Handle terminal input
@@ -218,6 +238,7 @@ export function TerminalComponent({
     // Cleanup
     return () => {
       isDisposed = true;
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('resize', handleResize);
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
