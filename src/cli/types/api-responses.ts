@@ -2563,6 +2563,26 @@ export interface RelayView {
    * is queued or there is none.
    */
   deliveryHold?: RelayDeliveryHoldResponse | null;
+  /**
+   * Issue #4105: what the last delivery attempt of the current payload
+   * stopped for. Absent on an older server; null = no observation in this
+   * server process (NOT "deliverable"). Never part of `held` / `heldCount`.
+   */
+  lastDeliveryBlock?: RelayLastDeliveryBlockResponse | null;
+}
+
+/**
+ * Mirrors: `RelayLastDeliveryBlock` in src/lib/relay/types.ts (Issue #4105).
+ * Strings rather than unions, for the reason `RelayView.state` is one.
+ */
+export interface RelayLastDeliveryBlockResponse {
+  /** `prompt_waiting` | `generating` | `session_stopped` | `foreign_session`. */
+  reason: string;
+  /** The payload it was for: `reply` | `prompt` | `expired`. */
+  kind: string;
+  payloadId: string | null;
+  /** Epoch ms of the attempt that observed it. */
+  observedAt: number;
 }
 
 /**
