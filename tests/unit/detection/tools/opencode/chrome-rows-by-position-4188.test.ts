@@ -260,3 +260,42 @@ describe('item 2, no chrome on the frame: the fallback cut reads the position', 
     expect(stripAnsi(result?.response ?? '')).not.toContain('cwd-continuation');
   });
 });
+
+describe('review: a kept row quoting `Thinking:` does not reopen the finished turn', () => {
+  const QUOTING_THINKING: Array<[string, string]> = [
+    ['the placeholder and the progress row', '     Ask anything... は入力欄、Thinking: は進行表示'],
+    ['the progress row alone', '     Thinking: is the progress row'],
+  ];
+
+  /** The measured finished frame with `row` added under the composer's border. */
+  function doneWithBelowBorder(row: string): string {
+    const lines = stripAnsi(DONE).split('\n');
+    const border = lines.findIndex((line) => /^[^\S\n]*╹▀{4,}/.test(line));
+    expect(border).toBeGreaterThan(0);
+    return [...lines.slice(0, border + 1), row, ...lines.slice(border + 1)].join('\n');
+  }
+
+  it.each(QUOTING_THINKING)('%s at the end of the reply: complete, and saved', (_name, row) => {
+    const frame = doneWith(row);
+    expect(isOpenCodeComplete(frame)).toBe(true);
+    const result = extract(frame);
+    expect(result?.isComplete).toBe(true);
+    const saved = save(result?.response ?? '');
+    expect(saved).toContain(row.trim());
+    expect(saved).toContain('MOCK_OK');
+  });
+
+  it('the progress row under the composer border keeps the turn unfinished', () => {
+    const frame = doneWithBelowBorder('   ⠦ Thinking: Crafting an essay');
+    expect(extract(frame)?.isComplete).toBe(false);
+  });
+
+  it.each(RUNNING)('%s: the measured running frame stays unfinished', (_name, raw) => {
+    expect(extract(stripAnsi(raw))?.isComplete ?? false).toBe(false);
+  });
+
+  it('with no chrome on the frame, the reply\'s tail is still read (the rule as it was)', () => {
+    const frame = withoutChrome(doneWith('     Thinking: is the progress row'));
+    expect(extract(frame)?.isComplete).toBe(false);
+  });
+});

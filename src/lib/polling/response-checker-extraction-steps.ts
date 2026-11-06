@@ -11,6 +11,7 @@ import {
   OPENCODE_PROMPT_PATTERN,
   OPENCODE_PROMPT_AFTER_RESPONSE,
   OPENCODE_TURN_COMPLETE_PATTERN,
+  OPENCODE_COMPOSER_BOTTOM_BORDER,
   findCommandCodeChromeStart,
   findCopilotChromeStart,
   readCopilotStatusBar,
@@ -769,6 +770,24 @@ function findLastOpenCodeTurnCompleteRow(lines: string[], from: number, to: numb
 }
 
 /**
+ * The rows of an opencode frame under the composer's bottom border `╹▀▀▀…`
+ * (Issue #4188), ANSI-stripped and joined; `''` when the chrome has no border
+ * (the permission dialog drawn in the composer's place runs to the last row).
+ *
+ * @param lines - The trimmed tmux buffer lines (ANSI intact)
+ * @param chromeStart - Where `findOpenCodeChromeStart` put the chrome (>= 0)
+ * @returns The rows below the border
+ */
+function openCodeRowsBelowComposer(lines: string[], chromeStart: number): string {
+  for (let i = lines.length - 1; i >= chromeStart; i--) {
+    if (OPENCODE_COMPOSER_BOTTOM_BORDER.test(stripAnsi(lines[i]))) {
+      return lines.slice(i + 1).map(stripAnsi).join('\n');
+    }
+  }
+  return '';
+}
+
+/**
  * Build the result for a frame the completion rules accepted.
  *
  * The body of the completion branch of {@link extractResponse}, split out as it
@@ -782,7 +801,7 @@ function findLastOpenCodeTurnCompleteRow(lines: string[], from: number, to: numb
  */
 export function extractCompletedResponse(ctx: ExtractionContext): ExtractionResult {
   const {
-    cliToolId, totalLines, openCodeCleanLines, bufferReset, captureWindowSaturated,
+    cliToolId, lines, totalLines, chromeStart, openCodeCleanLines, bufferReset, captureWindowSaturated,
     thinkingPattern, skipPatterns, findRecentUserPromptIndex,
   } = ctx;
 
@@ -797,8 +816,18 @@ export function extractCompletedResponse(ctx: ExtractionContext): ExtractionResu
   // that never scrolls away. `COPILOT_THINKING_PATTERN`'s braille alternative
   // matches any spinner glyph a reply happens to quote, and the turn would then
   // be reported unfinished for the rest of the session.
-  const responseTailLines = response.split('\n').slice(-THINKING_TAIL_LINE_COUNT).join('\n');
-  if (cliToolId !== 'copilot' && thinkingPattern.test(responseTailLines)) {
+  //
+  // Issue #4188: not the reply's tail on an opencode frame whose chrome was
+  // located. Its reply keeps the rows quoting the chrome's words by position
+  // (`OPENCODE_TRANSCRIPT_SKIP_PATTERNS`), so a reply ending on `Ask anything...
+  // is the input box, Thinking: is the progress row` would be read here as a
+  // running turn and the finished reply never saved. There the progress is read
+  // where the TUI draws it while a turn runs: under the composer's bottom border,
+  // as `isOpenCodeComplete` reads the busy hint.
+  const thinkingText = cliToolId === 'opencode' && chromeStart >= 0
+    ? openCodeRowsBelowComposer(lines, chromeStart)
+    : response.split('\n').slice(-THINKING_TAIL_LINE_COUNT).join('\n');
+  if (cliToolId !== 'copilot' && thinkingPattern.test(thinkingText)) {
     return incompleteResult(totalLines);
   }
 
