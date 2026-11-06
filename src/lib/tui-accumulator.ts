@@ -82,14 +82,24 @@ function normalizeOpenCodeLine(line: string): string {
 
 /**
  * Extract meaningful content lines from raw TUI output.
- * Strips ANSI codes, box-drawing characters, and lines matching OPENCODE_SKIP_PATTERNS.
+ * Strips ANSI codes, box-drawing characters, and lines matching `skipPatterns`.
+ *
+ * Issue #4188: the skip list is the caller's, because the rows arrive here with
+ * no position. The default (`OPENCODE_SKIP_PATTERNS`) drops the rows only the
+ * chrome draws by their words. The poller passes `OPENCODE_TRANSCRIPT_SKIP_PATTERNS`
+ * when the rows it hands over were cut above the located chrome
+ * (`sliceOpenCodeTurnWithSkip`), so a reply quoting those rows keeps them.
  *
  * @param rawOutput - Raw tmux capture-pane output
+ * @param skipPatterns - Rows to drop; defaults to `OPENCODE_SKIP_PATTERNS`
  * @returns Array of cleaned, non-empty content lines
  *
  * @internal Exported for unit testing
  */
-export function extractTuiContentLines(rawOutput: string): string[] {
+export function extractTuiContentLines(
+  rawOutput: string,
+  skipPatterns: readonly RegExp[] = OPENCODE_SKIP_PATTERNS
+): string[] {
   const lines = rawOutput.split('\n');
   const contentLines: string[] = [];
 
@@ -97,7 +107,7 @@ export function extractTuiContentLines(rawOutput: string): string[] {
     const cleaned = normalizeOpenCodeLine(line);
     if (!cleaned) continue;
 
-    const shouldSkip = OPENCODE_SKIP_PATTERNS.some(pattern => pattern.test(cleaned));
+    const shouldSkip = skipPatterns.some(pattern => pattern.test(cleaned));
     if (shouldSkip) continue;
 
     // Also skip the Build summary line (completion indicator)
@@ -280,16 +290,23 @@ export function initTuiAccumulator(pollerKey: string): void {
  * @param pollerKey - Poller key ("worktreeId:cliToolId")
  * @param rawOutput - Raw tmux capture-pane output
  * @param cliToolId - CLI tool identifier (default: 'opencode' for backward compatibility)
+ * @param openCodeSkipPatterns - The skip list for an opencode capture (Issue #4188);
+ *   defaults to `OPENCODE_SKIP_PATTERNS`. Ignored for copilot.
  *
  * @internal Exported for unit testing
  */
-export function accumulateTuiContent(pollerKey: string, rawOutput: string, cliToolId: CLIToolType = 'opencode'): void {
+export function accumulateTuiContent(
+  pollerKey: string,
+  rawOutput: string,
+  cliToolId: CLIToolType = 'opencode',
+  openCodeSkipPatterns: readonly RegExp[] = OPENCODE_SKIP_PATTERNS
+): void {
   const state = tuiResponseAccumulator.get(pollerKey);
   if (!state) return;
 
   const contentLines = cliToolId === 'copilot'
     ? extractCopilotContentLines(rawOutput)
-    : extractTuiContentLines(rawOutput);
+    : extractTuiContentLines(rawOutput, openCodeSkipPatterns);
   if (contentLines.length === 0) return;
 
   state.pollCount++;

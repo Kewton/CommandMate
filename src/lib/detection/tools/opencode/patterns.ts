@@ -62,6 +62,20 @@ export const OPENCODE_PROMPT_AFTER_RESPONSE = /tab agents\s+ctrl\+p commands/;
 export const OPENCODE_THINKING_PATTERN = /Thinking:/;
 
 /**
+ * OpenCode's progress row drawn under the composer's bottom border while a turn
+ * runs, read as a whole row (Issue #4188): a spinner run (braille `⠦`, or the
+ * `⬝■` run of the busy footer), then `Thinking:` — e.g. `   ⠦ Thinking: Crafting…`.
+ *
+ * Only for the rows below the border, where the footer also draws the cwd
+ * (`/private/tmp/…/repo`, wrapped over several rows). {@link OPENCODE_THINKING_PATTERN}
+ * matches the word anywhere, so a cwd such as `/tmp/Thinking:demo` read there as a
+ * running turn. A row opening with the spinner is never a path, nor a path's
+ * wrapped continuation (which opens with the path's next character).
+ */
+export const OPENCODE_THINKING_PROGRESS_ROW =
+  /^[^\S\n]*[\u2800-\u28FF\u2B1D\u25A0]+[^\S\n]+Thinking:/m;
+
+/**
  * OpenCode loading indicator pattern (Issue #379)
  * Shows a series of 4+ filled square characters (U+2B1D) during initial loading/model warm-up.
  * Filtered from response extraction via OPENCODE_SKIP_PATTERNS.
@@ -225,6 +239,11 @@ export const OPENCODE_PERMISSION_PATTERN =
  * in this list. A row that is the hint and nothing else still matches: tests outside
  * this Issue pin `'esc interrupt'` and the label alone as matches, and the status
  * reader adds the position on top ({@link isOpencodeProcessingFooter}).
+ *
+ * Issue #4188: the completion check (`isOpenCodeComplete`) reads it by position
+ * too, and the poller's extraction of a frame whose chrome it located skips it no
+ * more ({@link OPENCODE_TRANSCRIPT_SKIP_PATTERNS}): a reply quoting the hint row
+ * whole above the composer completes, and keeps the row.
  */
 export const OPENCODE_PROCESSING_INDICATOR =
   /(?:^|\n)[^\S\n]*(?:[\u2B1D\u25A0]+[^\S\n]+)?esc (?:again to )?interrupt(?:[^\S\n]{2}[^\n]*)?[^\S\n]*(?=\n|$)/;
@@ -563,3 +582,36 @@ export const OPENCODE_SKIP_PATTERNS: readonly RegExp[] = [
   OPENCODE_FOOTER_STATUS_PATTERN,
   PASTED_TEXT_PATTERN,
 ] as const;
+
+/**
+ * Rows only opencode's bottom chrome draws (Issue #4188): the spinner run, the
+ * first-idle footer (`tab agents  ctrl+p commands`), the busy hint
+ * (`esc interrupt`) and the placeholder (`Ask anything...`).
+ *
+ * Matched as words, so one row cannot tell them from a reply quoting them. On
+ * every measured frame under `tests/fixtures/opencode*` and
+ * `tests/unit/lib/detection/fixtures/opencode-live-*` a row these match sits in
+ * the chrome {@link findOpenCodeChromeStart} locates — or is a reply's row above
+ * it (`phrase-in-response.txt`: `Ask anything... is the placeholder`). So a reader
+ * that already holds only the rows above the chrome must not skip them.
+ */
+export const OPENCODE_CHROME_ROW_PATTERNS: readonly RegExp[] = [
+  OPENCODE_LOADING_PATTERN,
+  OPENCODE_PROMPT_AFTER_RESPONSE,
+  OPENCODE_PROCESSING_INDICATOR,
+  OPENCODE_PROMPT_PATTERN,
+] as const;
+
+/**
+ * {@link OPENCODE_SKIP_PATTERNS} less {@link OPENCODE_CHROME_ROW_PATTERNS}, for rows
+ * known to lie above the located chrome (Issue #4188): the turn region of a frame
+ * whose chrome `response-checker` found, the reply it extracted from it, and the
+ * Layer-2 accumulator's rows cut from such a frame (`sliceOpenCodeTurnWithSkip`).
+ * The whole list stays for a frame with no chrome boundary, where the words are
+ * the only reading left (the fallback {@link isOpencodeProcessingFooter} takes on a
+ * text with no border), and for the per-row readers that are handed no position
+ * (the default of `cleanOpenCodeResponse` / `extractTuiContentLines`).
+ */
+export const OPENCODE_TRANSCRIPT_SKIP_PATTERNS: readonly RegExp[] = OPENCODE_SKIP_PATTERNS.filter(
+  (pattern) => !OPENCODE_CHROME_ROW_PATTERNS.includes(pattern),
+);

@@ -30,9 +30,90 @@ import {
  * Measured on 2.0.18 at 80x200 (2026-09-28):
  * `   ┃  Ask anything… "Fix broken tests"`. Match against the ANSI-stripped
  * frame BEFORE `stripBoxDrawing`, which removes the gutter this anchors on.
+ *
+ * Read by position (Issue #4188): the placeholder row, then only gutter rows (the
+ * blank row and the agent/model row), then the composer's bottom border `╹▀▀▀…` —
+ * the box as every frame under `tests/fixtures/opencode-v2*` that draws the
+ * placeholder draws it. The gutter alone does not say "composer": the transcript
+ * echoes each sent message in the same `┃` box, so a message that began with
+ * `Ask anything…` put a placeholder on the pane and an empty input box with it,
+ * for the send path's composer check, the `ready` branch and liveness alike. The
+ * echo block ends in a non-gutter row (the reply, or a blank row), never the border.
+ *
+ * Read by {@link findOpencodeV2IdleComposer}, one pass over the rows: each border
+ * walks up its own run of gutter rows, and the runs do not overlap (a border row is
+ * not a gutter row), so the work is linear in the rows. The multi-line regular
+ * expression it replaces retried from every gutter row, which a pane of `┃  Ask
+ * anything…` rows with no border under them made quadratic (Issue #4188 review).
+ *
+ * Kept a `RegExp` because two readers outside this module take regular
+ * expressions only — liveness's `alivePatterns` (`readonly RegExp[]`,
+ * `src/types/cli-tool-contracts.ts`) and `getCliToolPatterns().promptPattern` — and
+ * they must read the same rule as the send path's composer check and the `ready`
+ * branch. A subclass whose `exec` is that pass gives all three one reader: `test`,
+ * `match` and `replace` go through `exec`. `source` still spells the rule.
  */
-export const OPENCODE_V2_IDLE_COMPOSER_PATTERN =
-  /^[^\S\n]*[\u2502\u2503][^\S\n]*Ask anything(?:\.\.\.|\u2026)/m;
+export const OPENCODE_V2_IDLE_COMPOSER_PATTERN: RegExp = new (class OpencodeV2IdleComposerPattern extends RegExp {
+  static get [Symbol.species](): RegExpConstructor {
+    return RegExp;
+  }
+
+  constructor() {
+    super(
+      '^[^\\S\\n]*[\\u2502\\u2503][^\\S\\n]*Ask anything(?:\\.\\.\\.|\\u2026)[^\\n]*\\n(?:[^\\S\\n]*[\\u2502\\u2503][^\\n]*\\n)*[^\\S\\n]*\\u2579\\u2580{4,}',
+      'm'
+    );
+  }
+
+  override exec(text: string): RegExpExecArray | null {
+    const found = findOpencodeV2IdleComposer(text);
+    if (!found) return null;
+    const match = [text.slice(found.start, found.end)] as unknown as RegExpExecArray;
+    match.index = found.start;
+    match.input = text;
+    return match;
+  }
+})();
+
+/** The placeholder at the start of a gutter row (Issue #2934). */
+const IDLE_COMPOSER_PLACEHOLDER_ROW = /^[^\S\n]*[\u2502\u2503][^\S\n]*Ask anything(?:\.\.\.|\u2026)/;
+/** A row of one of the `┃` boxes. */
+const IDLE_COMPOSER_GUTTER_ROW = /^[^\S\n]*[\u2502\u2503]/;
+/** The composer's bottom border, as the match ends on it. */
+const IDLE_COMPOSER_BORDER_ROW = /^[^\S\n]*\u2579\u2580{4,}/;
+
+/**
+ * The empty composer of {@link OPENCODE_V2_IDLE_COMPOSER_PATTERN}, by position, in
+ * one pass (Issue #4188): the first placeholder row whose gutter run reaches a
+ * bottom border, as character offsets from the placeholder row's start to the end
+ * of the border's `▀` run; or null.
+ *
+ * @param text - ANSI-stripped capture, box drawing intact
+ * @returns The match's `[start, end)` in `text`, or null
+ */
+export function findOpencodeV2IdleComposer(text: string): { start: number; end: number } | null {
+  const rows = text.split('\n');
+  const offsets: number[] = new Array(rows.length);
+  let offset = 0;
+  for (let i = 0; i < rows.length; i++) {
+    offsets[i] = offset;
+    offset += rows[i].length + 1;
+  }
+  for (let border = 1; border < rows.length; border++) {
+    const borderMatch = IDLE_COMPOSER_BORDER_ROW.exec(rows[border]);
+    if (!borderMatch) continue;
+    // Walk up the gutter run over this border, once; the topmost placeholder
+    // row in it is where the match starts.
+    let placeholder = -1;
+    for (let j = border - 1; j >= 0 && IDLE_COMPOSER_GUTTER_ROW.test(rows[j]); j--) {
+      if (IDLE_COMPOSER_PLACEHOLDER_ROW.test(rows[j])) placeholder = j;
+    }
+    if (placeholder >= 0) {
+      return { start: offsets[placeholder], end: offsets[border] + borderMatch[0].length };
+    }
+  }
+  return null;
+}
 
 /**
  * OpenCode V2's footer, which ends in `ctrl+p commands` on every frame the
@@ -110,13 +191,14 @@ export const OPENCODE_V2_FOOTER_ROW_PATTERN =
 
 /**
  * Whether OpenCode V2's composer is on screen, so a send may type into it
- * (Issue #2934, D6): the gutter-anchored placeholder, or the footer under the
- * composer's border (Issue #4175: not the words anywhere on the pane).
+ * (Issue #2934, D6): the gutter-anchored placeholder inside the box over the
+ * composer's border (Issue #4188: not a transcript echo starting with the phrase),
+ * or the footer under that border (Issue #4175: not the words anywhere on the pane).
  *
  * @param text - ANSI-stripped capture, box drawing intact
  */
 export function isOpencodeV2ComposerVisible(text: string): boolean {
-  return OPENCODE_V2_IDLE_COMPOSER_PATTERN.test(text) || OPENCODE_V2_FOOTER_PATTERN.test(text);
+  return findOpencodeV2IdleComposer(text) !== null || OPENCODE_V2_FOOTER_PATTERN.test(text);
 }
 
 /**

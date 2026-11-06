@@ -48,10 +48,9 @@ import {
   detectThinking,
   findOpencodeV2DialogTitle,
   OPENCODE_V2_FOOTER_PATTERN,
-  OPENCODE_V2_IDLE_COMPOSER_PATTERN,
   stripAnsi,
 } from '../../cli-patterns';
-import { isOpencodeV2FooterRowAt } from './patterns';
+import { findOpencodeV2IdleComposer, isOpencodeV2FooterRowAt } from './patterns';
 import { positiveVerdict } from '../verdicts';
 import { STATUS_REASON } from '../../status-reason';
 import { OPENCODE_V2_LIVE_REGION } from './live-region';
@@ -240,9 +239,11 @@ export const opencodeV2StatusDetector = createToolStatusDetector({
     // The placeholder against the ANSI-stripped frame with its box drawing
     // intact (the pattern anchors on the `┃` gutter). The footer is on every
     // frame, and the running hint was ruled out just above. Issue #4175: the
-    // footer under the composer's border, not its words in a reply.
+    // footer under the composer's border, not its words in a reply. Issue #4188:
+    // the placeholder inside the box over that border, not a transcript echo,
+    // read in one pass over the rows (`OPENCODE_V2_IDLE_COMPOSER_PATTERN`'s reader).
     if (
-      OPENCODE_V2_IDLE_COMPOSER_PATTERN.test(stripAnsi(frame.raw)) ||
+      findOpencodeV2IdleComposer(stripAnsi(frame.raw)) !== null ||
       OPENCODE_V2_FOOTER_PATTERN.test(frame.lastLines)
     ) {
       return positiveVerdict('ready', STATUS_REASON.INPUT_PROMPT);

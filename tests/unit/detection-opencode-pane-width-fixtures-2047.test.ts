@@ -68,6 +68,7 @@ import {
 } from '@/lib/detection/cli-patterns';
 import { isOpenCodeComplete, sliceOpenCodeTurn } from '@/lib/response-extractor';
 import { cleanOpenCodeResponse } from '@/lib/response-cleaner';
+import { OPENCODE_TRANSCRIPT_SKIP_PATTERNS } from '@/lib/detection/cli-patterns';
 import { resolvePromptWaiting } from '@/lib/session/prompt-waiting-composition';
 import {
   OPENCODE_PANE_WIDTH,
@@ -168,7 +169,16 @@ function verdictOf(raw: string) {
  * which glyphs reach the saved reply, in order. See the prefix assertion below.
  */
 function replyGlyphsOf(raw: string): string {
-  return cleanOpenCodeResponse(stripAnsi(sliceOpenCodeTurn(raw))).replace(/\s+/g, '');
+  return savedReplyOf(raw).replace(/\s+/g, '');
+}
+
+/**
+ * The turn's reply as the poller saves it (Issue #4188): the slice above the
+ * located chrome, cleaned with `OPENCODE_TRANSCRIPT_SKIP_PATTERNS` — the list the
+ * save path (`cleanCompletedResponse`) uses — not the default word list.
+ */
+function savedReplyOf(raw: string): string {
+  return cleanOpenCodeResponse(stripAnsi(sliceOpenCodeTurn(raw)), OPENCODE_TRANSCRIPT_SKIP_PATTERNS);
 }
 
 beforeEach(() => {
@@ -280,9 +290,7 @@ describe('Issue #2047: 120 columns changes nothing any opencode reader sees', ()
     // The verdict parity above still covers this frame in full: the palette
     // never makes opencode look `ready`, at any of the three widths.
     for (const width of WIDTHS) {
-      const reply = cleanOpenCodeResponse(
-        stripAnsi(sliceOpenCodeTurn(frame(width, 'command-palette')))
-      );
+      const reply = savedReplyOf(frame(width, 'command-palette'));
       // `Write heap snapshot` is a palette command and nothing an essay about
       // the X11 protocol would say. It is the one label visible in all three
       // captures — which item lands in the sliced region is itself a function of
@@ -369,11 +377,15 @@ describe('Issue #2047: 200 columns is why the default was not raised', () => {
     // The worst of the four, and the only one that needs nothing from the user:
     // the sidebar occupies the same rows as the reply, so the extractor takes
     // both. At 80 and 120 this turn extracts to the empty string.
-    const replyAt = (width: Width) =>
-      cleanOpenCodeResponse(stripAnsi(sliceOpenCodeTurn(frame(width, 'phrase-in-response'))));
+    //
+    // Issue #4188: "empty" was the placeholder's words dropping the reply's one
+    // row, `Ask anything... is the placeholder`. The save now reads that row's
+    // position (above the located chrome) and keeps it; what 200 adds is still
+    // the sidebar.
+    const replyAt = (width: Width) => savedReplyOf(frame(width, 'phrase-in-response'));
 
-    expect(replyAt(80)).toBe('');
-    expect(replyAt(120)).toBe('');
+    expect(replyAt(80)).toBe('Ask anything... is the placeholder');
+    expect(replyAt(120)).toBe('Ask anything... is the placeholder');
 
     const wide = replyAt(200);
     expect(wide).not.toBe('');
