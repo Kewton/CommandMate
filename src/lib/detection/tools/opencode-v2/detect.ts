@@ -240,7 +240,8 @@ export const opencodeV2StatusDetector = createToolStatusDetector({
     // The placeholder against the ANSI-stripped frame with its box drawing
     // intact (the pattern anchors on the `┃` gutter). The footer is on every
     // frame, and the running hint was ruled out just above. Issue #4175: the
-    // footer under the composer's border, not its words in a reply.
+    // footer under the composer's border, not its words in a reply. Issue #4188:
+    // the placeholder inside the box over that border, not a transcript echo.
     if (
       OPENCODE_V2_IDLE_COMPOSER_PATTERN.test(stripAnsi(frame.raw)) ||
       OPENCODE_V2_FOOTER_PATTERN.test(frame.lastLines)

@@ -30,9 +30,21 @@ import {
  * Measured on 2.0.18 at 80x200 (2026-09-28):
  * `   ┃  Ask anything… "Fix broken tests"`. Match against the ANSI-stripped
  * frame BEFORE `stripBoxDrawing`, which removes the gutter this anchors on.
+ *
+ * Read by position (Issue #4188): the placeholder row, then only gutter rows (the
+ * blank row and the agent/model row), then the composer's bottom border `╹▀▀▀…` —
+ * the box as every frame under `tests/fixtures/opencode-v2*` that draws the
+ * placeholder draws it. The gutter alone does not say "composer": the transcript
+ * echoes each sent message in the same `┃` box, so a message that began with
+ * `Ask anything…` put a placeholder on the pane and an empty input box with it,
+ * for the send path's composer check, the `ready` branch and liveness alike. The
+ * echo block ends in a non-gutter row (the reply, or a blank row), never the border.
+ *
+ * Linear: each repetition of the gutter-row group consumes exactly one row and must
+ * start with the gutter, so there is one way to match a row — ReDoS safe.
  */
 export const OPENCODE_V2_IDLE_COMPOSER_PATTERN =
-  /^[^\S\n]*[\u2502\u2503][^\S\n]*Ask anything(?:\.\.\.|\u2026)/m;
+  /^[^\S\n]*[\u2502\u2503][^\S\n]*Ask anything(?:\.\.\.|\u2026)[^\n]*\n(?:[^\S\n]*[\u2502\u2503][^\n]*\n)*[^\S\n]*\u2579\u2580{4,}/m;
 
 /**
  * OpenCode V2's footer, which ends in `ctrl+p commands` on every frame the
@@ -110,8 +122,9 @@ export const OPENCODE_V2_FOOTER_ROW_PATTERN =
 
 /**
  * Whether OpenCode V2's composer is on screen, so a send may type into it
- * (Issue #2934, D6): the gutter-anchored placeholder, or the footer under the
- * composer's border (Issue #4175: not the words anywhere on the pane).
+ * (Issue #2934, D6): the gutter-anchored placeholder inside the box over the
+ * composer's border (Issue #4188: not a transcript echo starting with the phrase),
+ * or the footer under that border (Issue #4175: not the words anywhere on the pane).
  *
  * @param text - ANSI-stripped capture, box drawing intact
  */

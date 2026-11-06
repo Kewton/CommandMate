@@ -9,12 +9,15 @@
 import type { CLIToolType } from './cli-tools/types';
 import {
   OPENCODE_TURN_COMPLETE_PATTERN,
-  OPENCODE_PROCESSING_INDICATOR,
   OPENCODE_PERMISSION_PATTERN,
+  OPENCODE_RESPONSE_COMPLETE,
+  OPENCODE_TRANSCRIPT_SKIP_PATTERNS,
   findOpenCodeChromeStart,
   findOpenCodeUserEchoEnd,
+  isOpencodeProcessingFooter,
   stripAnsi,
 } from './detection/cli-patterns';
+import { normalizeOpenCodeLine } from './tui-accumulator';
 
 /**
  * Bounds of the opencode turn currently rendered in a captured pane.
@@ -147,11 +150,54 @@ export function isOpenCodeComplete(output: string): boolean {
   // processing, and must NOT be blocked on a permission dialog. The last two are
   // read from the WHOLE frame: both live in the chrome the region excludes.
   // The "esc interrupt" indicator appears in the TUI footer during model processing.
+  //
+  // Issue #4188: the hint by position — under the composer's bottom border, where
+  // every measured running frame draws it — as the status reader has read it since
+  // #4175. A reply quoting the hint row whole sits above the border, and kept its
+  // turn from ever completing.
   return (
     OPENCODE_TURN_COMPLETE_PATTERN.test(turnRegion) &&
-    !OPENCODE_PROCESSING_INDICATOR.test(output) &&
+    !isOpencodeProcessingFooter(output) &&
     !OPENCODE_PERMISSION_PATTERN.test(output)
   );
+}
+
+/**
+ * Clean the reply `response-checker` extracted from an opencode turn region
+ * (Issue #4188).
+ *
+ * `cleanOpenCodeResponse` (`response-cleaner.ts`) with one difference: the rows
+ * only the chrome draws (`esc interrupt`, `Ask anything...`,
+ * `tab agents  ctrl+p commands`, the spinner run) are kept. The extraction has
+ * already cut the chrome off by position — or, on a frame whose chrome it could
+ * not locate, skipped those rows itself — so what reaches here with those words
+ * is the reply quoting them, which `cleanOpenCodeResponse` dropped one row at a
+ * time. The rest is the same: the newest turn after the second-to-last `▣ Build`
+ * row, rows normalised as the accumulator normalises them, the skip list, and the
+ * summary row left out.
+ *
+ * @param response - The extracted reply (`ExtractionResult.response`)
+ * @returns The cleaned reply
+ */
+export function cleanOpenCodeTurnResponse(response: string): string {
+  const lines = response.split('\n');
+  const normalized = lines.map(normalizeOpenCodeLine);
+
+  const buildIndices: number[] = [];
+  normalized.forEach((line, i) => {
+    if (line && OPENCODE_RESPONSE_COMPLETE.test(line)) buildIndices.push(i);
+  });
+  const startLine = buildIndices.length >= 2 ? buildIndices[buildIndices.length - 2] + 1 : 0;
+
+  const cleanedLines: string[] = [];
+  for (let i = startLine; i < normalized.length; i++) {
+    const line = normalized[i];
+    if (!line) continue;
+    if (OPENCODE_TRANSCRIPT_SKIP_PATTERNS.some((pattern) => pattern.test(line))) continue;
+    if (OPENCODE_RESPONSE_COMPLETE.test(line)) continue;
+    cleanedLines.push(line);
+  }
+  return cleanedLines.join('\n').trim();
 }
 
 /**
