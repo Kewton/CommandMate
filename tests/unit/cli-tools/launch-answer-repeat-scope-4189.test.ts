@@ -14,7 +14,8 @@ import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-type Step = 'fail' | 'changed' | 'through';
+/** `remake`: the session is made again while the answer reads the screen again, and the read fails. */
+type Step = 'fail' | 'changed' | 'through' | 'remake';
 type LockFn = typeof import('@/lib/session/instance-input-lock').answerUnderInstanceInputLock;
 
 const state = vi.hoisted(() => ({
@@ -64,6 +65,10 @@ vi.mock('@/lib/session/instance-input-lock', async (importOriginal) => {
       sessionName,
       -1,
       async () => {
+        if (step === 'remake') {
+          actual.invalidateInstanceInput(sessionName);
+          throw new Error('old pane gone');
+        }
         if (step === 'fail') throw new Error('pane read failed');
         return step === 'through';
       },
@@ -74,6 +79,7 @@ vi.mock('@/lib/session/instance-input-lock', async (importOriginal) => {
   return { ...actual, answerUnderInstanceInputLock: vi.fn(wrapped) };
 });
 
+import { newLaunchAnswerSkips } from '@/lib/cli-tools/launch-answer-skips';
 import { answerClaudeAutoDefaultNudgeBeforeSend, answerClaudeAutoDefaultNudgeUntil, sendNudgeKey } from '@/lib/cli-tools/claude-auto-default-nudge';
 import { AntigravityTool } from '@/lib/cli-tools/antigravity';
 import { clearStartupTrust, markStartupTrustPending } from '@/lib/cli-tools/antigravity-startup-trust';
@@ -302,6 +308,8 @@ describe('review P2: a session made again within the same wait, the caller\'s ow
     ],
     ['codex trust', () => (state.screen = fixture('codex-dialogs-0166/trust.txt')), codexLaunch, 'codex-trust-dialog-answer-skipped'],
     ['codex update offer', () => (state.screen = fixture('codex-dialogs-0166/update.txt')), codexLaunch, 'codex-update-dialog-answer-skipped'],
+    ['codex press-enter notice', () => (state.screen = 'Something changed\n\nPress enter to continue\n'), codexLaunch, 'codex-notification-answer-skipped'],
+    ['codex hook review', () => (state.screen = fixture('codex-dialogs-0166/hooks-review.txt')), codexLaunch, 'codex-hooks-screen-answer-skipped'],
   ];
 
   it.each(cases)('%s: one warn before, one more for the first decline after, the same reason', async (_name, setup, wait, event) => {
@@ -311,9 +319,46 @@ describe('review P2: a session made again within the same wait, the caller\'s ow
     expect(reasons(event)).toEqual(['recheck-failed', 'recheck-failed']);
   });
 
+  it.each(cases)(
+    '%s: an answer of the old life, ended after the session was made again, leaves the new life its first warn',
+    async (_name, setup, wait, event) => {
+      // Positive (review 4189b P2): the old answer's decline was recorded under the life
+      // read after its await — the new one — and held back the new process's first warn.
+      setup();
+      state.plan = ['remake'];
+      await wait();
+      // The old life's decline, the new life's first, then the new life's repeats: one record kept.
+      expect(reasons(event)).toEqual(['recheck-failed', 'recheck-failed']);
+      expect(state.scopes.length).toBeGreaterThan(2);
+    }
+  );
+
   it.each(cases)('%s, control: no new session, the same reason stays one warn', async (_name, setup, wait, event) => {
     setup();
     await wait();
     expect(reasons(event)).toEqual(['recheck-failed']);
+  });
+});
+
+describe('review 4189b P2: the life is the one the answer started in', () => {
+  it('the old answer\'s decline writes no record for the new life; the new life\'s does', async () => {
+    state.screen = nudgeFrame('cursor-yes');
+    const skips = newLaunchAnswerSkips();
+    state.plan = ['remake', 'fail', 'fail'];
+    await expect(sendNudgeKey(S, -1, 'Down', skips)).resolves.toBe(false); // old life
+    expect(skips.byEvent.has(NUDGE)).toBe(false);
+    await expect(sendNudgeKey(S, -1, 'Down', skips)).resolves.toBe(false); // new life, first
+    expect(skips.byEvent.get(NUDGE)).toBe('recheck-failed');
+    await expect(sendNudgeKey(S, -1, 'Down', skips)).resolves.toBe(false); // new life, repeat
+    expect(reasons(NUDGE)).toEqual(['recheck-failed', 'recheck-failed']);
+  });
+
+  it('control: an answer whose life did not change is recorded as before', async () => {
+    state.screen = nudgeFrame('cursor-yes');
+    const skips = newLaunchAnswerSkips();
+    await sendNudgeKey(S, -1, 'Down', skips);
+    await sendNudgeKey(S, -1, 'Down', skips);
+    expect(skips.byEvent.get(NUDGE)).toBe('recheck-failed');
+    expect(reasons(NUDGE)).toEqual(['recheck-failed']);
   });
 });

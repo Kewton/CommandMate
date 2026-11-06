@@ -42,6 +42,7 @@ import { detectSessionStatus, isGeneratingStatus } from '../detection/status-det
 import { beginLaunchWindow, endLaunchWindow, recordLaunchDialogPress } from './launch-window';
 import {
   answerUnderInstanceInputLock,
+  instanceInputAnswerSkipLife,
   instanceInputLaunchReadMark,
 } from '@/lib/session/instance-input-lock';
 
@@ -230,6 +231,8 @@ export class GeminiTool extends BaseCLITool {
             // Issue #3975: the Enter as an `exclusive` writer, so it never lands
             // inside a send's body, paste or Enter; a send that came between
             // the read and the lock makes the dialog be read again first.
+            // Issue #4189: the session's life before the answer's await; a decline of an older life writes no record for the new one.
+            const answerLife = instanceInputAnswerSkipLife(sessionName);
             const pressed = await answerUnderInstanceInputLock(
               sessionName,
               readMark,
@@ -254,7 +257,7 @@ export class GeminiTool extends BaseCLITool {
               // Continue polling for prompt after trust dialog
             } else {
               // Not answered this poll; the next one reads the screen again.
-              noteLaunchAnswerSkipped(logger, answerSkips, 'gemini-trust-answer-skipped', { sessionName, reason: pressed.reason });
+              noteLaunchAnswerSkipped(logger, answerSkips, 'gemini-trust-answer-skipped', { sessionName, reason: pressed.reason }, answerLife);
             }
           } else {
             const warning = launchDialogWarning(GEMINI_TRUST_LAUNCH_DIALOG, decision);

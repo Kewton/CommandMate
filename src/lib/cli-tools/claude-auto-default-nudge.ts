@@ -24,7 +24,7 @@
 
 import { capturePane, sendKeys, sendSpecialKeys } from '../tmux/tmux';
 import { isClaudeAutoDefaultNudgeOpen, resolveClaudeAutoDefaultNudgeKey, stripAnsi } from '../detection/cli-patterns';
-import { answerUnderInstanceInputLock, instanceInputLaunchReadMark } from '@/lib/session/instance-input-lock';
+import { answerUnderInstanceInputLock, instanceInputAnswerSkipLife, instanceInputLaunchReadMark } from '@/lib/session/instance-input-lock';
 import { createLogger } from '@/lib/logger';
 import { forgetLaunchAnswerSkip, newLaunchAnswerSkips, noteLaunchAnswerSkipped, type LaunchAnswerSkips } from './launch-answer-skips';
 
@@ -128,6 +128,8 @@ export async function sendNudgeKey(
   skips?: LaunchAnswerSkips
 ): Promise<boolean> {
   const record = skips ?? newLaunchAnswerSkips();
+  // Issue #4189: the session's life before the answer's await; a decline of an older life writes no record for the new one.
+  const answerLife = instanceInputAnswerSkipLife(sessionName);
   try {
     const outcome = await answerUnderInstanceInputLock(
       sessionName,
@@ -142,12 +144,12 @@ export async function sendNudgeKey(
       logger.info('claude-auto-default-nudge-key', { sessionName, key, answered: true });
     } else {
       // Issue #4149: at warn, as the folder trust's skipped key is. An ERROR-only setting still hides it.
-      noteLaunchAnswerSkipped(logger, record, KEY_SKIPPED, { sessionName, key, reason: outcome.reason });
+      noteLaunchAnswerSkipped(logger, record, KEY_SKIPPED, { sessionName, key, reason: outcome.reason }, answerLife);
     }
     return outcome.answered;
   } catch {
     // Left for a later poll, as the folder trust's key is.
-    noteLaunchAnswerSkipped(logger, record, KEY_SKIPPED, { sessionName, key, reason: 'send-failed' });
+    noteLaunchAnswerSkipped(logger, record, KEY_SKIPPED, { sessionName, key, reason: 'send-failed' }, answerLife);
     return false;
   }
 }

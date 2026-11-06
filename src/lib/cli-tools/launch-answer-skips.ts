@@ -52,18 +52,33 @@ export function newLaunchAnswerSkips(): LaunchAnswerSkips {
  * in the same life of the session (Issue #4189: `fields.sessionName`; without it
  * the life is not compared, as before).
  *
+ * The life is the one the answer started in (`startedIn`, taken before its await),
+ * as the input lock judges its own warn: a decline of an older life — the session
+ * was made again while it waited or read the screen again — is written, but neither
+ * reads nor writes the record of the new life. Without `startedIn` the life at this
+ * call is used.
+ *
  * @param logger - The caller's logger, so the record keeps its module
  * @param skips - This wait's record
  * @param event - The log event, one per kind of answer
  * @param fields - The log fields; `reason` is an enum, nothing captured goes in
+ * @param startedIn - {@link instanceInputAnswerSkipLife} of `fields.sessionName`, taken before the answer
  */
 export function noteLaunchAnswerSkipped(
   logger: Pick<Logger, 'warn'>,
   skips: LaunchAnswerSkips,
   event: string,
-  fields: { reason: LaunchAnswerSkipReason } & Record<string, unknown>
+  fields: { reason: LaunchAnswerSkipReason } & Record<string, unknown>,
+  startedIn?: InstanceInputAnswerSkipLife
 ): void {
   const sessionName = typeof fields.sessionName === 'string' ? fields.sessionName : null;
+  if (sessionName !== null && startedIn !== undefined && !isInstanceInputAnswerSkipLife(sessionName, startedIn)) {
+    // An answer of an older life: its warn, and no record for the new one.
+    logger.warn(event, fields);
+    skips.last = fields.reason;
+    skips.lastEvent = event;
+    return;
+  }
   const recorded = skips.lifeByEvent.get(event);
   const sameLife =
     recorded === undefined ||
@@ -71,7 +86,7 @@ export function noteLaunchAnswerSkipped(
   if (skips.byEvent.get(event) !== fields.reason || !sameLife) logger.warn(event, fields);
   skips.byEvent.set(event, fields.reason);
   if (sessionName === null) skips.lifeByEvent.delete(event);
-  else skips.lifeByEvent.set(event, { sessionName, life: instanceInputAnswerSkipLife(sessionName) });
+  else skips.lifeByEvent.set(event, { sessionName, life: startedIn ?? instanceInputAnswerSkipLife(sessionName) });
   skips.last = fields.reason;
   skips.lastEvent = event;
 }
