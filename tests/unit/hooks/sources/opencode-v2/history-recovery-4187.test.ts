@@ -4,11 +4,12 @@
  * The ordinary read on a turn's end (`syncOpencodeV2History`) reads newest-first
  * pages and stops at the first page with any `user` message, so a turn that
  * closed while the stream was down and sits a page further back is never read.
- * The recovery read keeps going back until it meets a turn whose row History
- * already had when the stream was lost (the gap's lower edge, told by a write
- * mark, not by time), bounded by
- * `MAX_OPENCODE_V2_HISTORY_PAGES`, and tells "could not read" from "nothing to
- * write" so the subscription can retry.
+ * The recovery read goes back the whole `MAX_OPENCODE_V2_HISTORY_PAGES` (or to
+ * the document's end) without stopping at a turn History already has — no
+ * saved turn marks the gap's edge for sure, whatever order rows were written in
+ * and whatever the clocks say — warns only when turns History lacks may lie
+ * beyond the cap, and tells "could not read" from "nothing to write" so the
+ * subscription can retry.
  *
  * Documents are the measured 2.0.18 turn (`tests/fixtures/opencode-v2-history-2940`)
  * cloned under new ids and times and served one turn per page by a loopback
@@ -51,7 +52,6 @@ import { makeTempDir, removeTempDir } from '@tests/helpers/temp-dir';
 import { opencodeV2AuthorizationHeader } from '@/lib/hooks/sources/opencode-v2/client';
 import {
   MAX_OPENCODE_V2_HISTORY_PAGES,
-  opencodeV2HistoryWriteMark,
   recoverOpencodeV2History,
   resetOpencodeV2HistoryQueue,
   syncOpencodeV2History,
@@ -109,6 +109,8 @@ let port: number;
 /** Newest-first pages; page k answers `cursor=p<k>`. */
 let pages: Record<string, unknown>[][];
 let messagesStatus: number;
+/** A page index that answers 500 (`null`: none). */
+let failPage: number | null;
 let pagesRead: number[];
 
 async function startServer(): Promise<void> {
@@ -129,6 +131,11 @@ async function startServer(): Promise<void> {
       const cursor = url.searchParams.get('cursor');
       const index = cursor === null ? 0 : Number(cursor.slice(1));
       pagesRead.push(index);
+      if (index === failPage) {
+        res.writeHead(500);
+        res.end();
+        return;
+      }
       const next = index + 1 < pages.length ? `p${index + 1}` : null;
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ data: pages[index] ?? [], cursor: { previous: 'x', next } }));
@@ -162,6 +169,7 @@ beforeEach(async () => {
   createMessage.mockClear();
   mockLogger.warn.mockClear();
   messagesStatus = 200;
+  failPage = null;
   pagesRead = [];
   pages = [];
   server = null;
@@ -179,17 +187,15 @@ describe('recoverOpencodeV2History (Issue #4187)', () => {
   it('H1: reaches an unsaved turn a page back, which the ordinary read never does', async () => {
     // Turn 1 closed while the stream was down; turn 2 is newer, on page 1.
     pages = [turn(2), turn(1)];
-    const lost = opencodeV2HistoryWriteMark();
 
     // The ordinary read stops at page 1 (it saw a user message): turn 1 is lost.
     expect(await syncOpencodeV2History(target, port, SESSION)).toBe(1);
     expect(writtenTurns()).toEqual(['TURN-2']);
     expect(pagesRead).toEqual([0]);
 
-    // Turn 2 is saved, but its row was written after the stream was lost, so it
-    // is not the gap's lower edge: the recovery read goes on to page 2.
+    // Turn 2 is saved, which does not stop the recovery read: it goes on to page 2.
     pagesRead = [];
-    expect(await recoverOpencodeV2History(target, port, SESSION, { savedUpTo: lost })).toEqual({
+    expect(await recoverOpencodeV2History(target, port, SESSION)).toEqual({
       written: 1,
       unreadable: false,
     });
@@ -200,7 +206,7 @@ describe('recoverOpencodeV2History (Issue #4187)', () => {
   it('H2: three unsaved turns are all written, oldest first', async () => {
     pages = [turn(4), turn(3), turn(2), turn(1)];
     markSaved(1);
-    const result = await recoverOpencodeV2History(target, port, SESSION, { savedUpTo: opencodeV2HistoryWriteMark() });
+    const result = await recoverOpencodeV2History(target, port, SESSION);
     expect(result).toEqual({ written: 3, unreadable: false });
     expect(writtenTurns()).toEqual(['TURN-2', 'TURN-3', 'TURN-4']);
     expect(createMessage.mock.calls.map(([, m]) => m.requestId)).toEqual([
@@ -210,20 +216,21 @@ describe('recoverOpencodeV2History (Issue #4187)', () => {
     ]);
   });
 
-  it('H3: stops at the page holding a turn saved before the loss, and does not double it', async () => {
+  it('H3: reads past the turns already saved, and does not double them', async () => {
     pages = [turn(4), turn(3), turn(2), turn(1)];
     markSaved(3);
     markSaved(2);
     markSaved(1);
-    const result = await recoverOpencodeV2History(target, port, SESSION, { savedUpTo: opencodeV2HistoryWriteMark() });
+    const result = await recoverOpencodeV2History(target, port, SESSION);
     expect(result).toEqual({ written: 1, unreadable: false });
-    expect(pagesRead).toEqual([0, 1]);
+    expect(pagesRead).toEqual([0, 1, 2, 3]);
     expect(writtenTurns()).toEqual(['TURN-4']);
+    expect(warned('opencode-v2-history-recovery-truncated')).toEqual([]);
   });
 
   it('H4: never meeting a saved turn, it stops at the page cap and says so', async () => {
     pages = Array.from({ length: MAX_OPENCODE_V2_HISTORY_PAGES + 2 }, (_v, i) => turn(100 - i));
-    const result = await recoverOpencodeV2History(target, port, SESSION, { savedUpTo: opencodeV2HistoryWriteMark() });
+    const result = await recoverOpencodeV2History(target, port, SESSION);
     expect(pagesRead).toHaveLength(MAX_OPENCODE_V2_HISTORY_PAGES);
     expect(result.unreadable).toBe(false);
     expect(result.written).toBe(MAX_OPENCODE_V2_HISTORY_PAGES);
@@ -235,39 +242,35 @@ describe('recoverOpencodeV2History (Issue #4187)', () => {
   it('H5: the newest turn, still open, is not written', async () => {
     pages = [turn(3, false), turn(2), turn(1)];
     markSaved(1);
-    const result = await recoverOpencodeV2History(target, port, SESSION, { savedUpTo: opencodeV2HistoryWriteMark() });
+    const result = await recoverOpencodeV2History(target, port, SESSION);
     expect(result).toEqual({ written: 1, unreadable: false });
     expect(writtenTurns()).toEqual(['TURN-2']);
   });
 
   it('C7: an unreadable document is told from a document with nothing to write', async () => {
     messagesStatus = 500;
-    expect(await recoverOpencodeV2History(target, port, SESSION, { savedUpTo: opencodeV2HistoryWriteMark() })).toEqual({
+    expect(await recoverOpencodeV2History(target, port, SESSION)).toEqual({
       written: 0,
       unreadable: true,
     });
     messagesStatus = 200;
     pages = [turn(1)];
     markSaved(1);
-    expect(await recoverOpencodeV2History(target, port, SESSION, { savedUpTo: opencodeV2HistoryWriteMark() })).toEqual({
+    expect(await recoverOpencodeV2History(target, port, SESSION)).toEqual({
       written: 0,
       unreadable: false,
     });
     expect(warned('opencode-v2-history-recovery-truncated')).toEqual([]);
   });
 
-  it('H7: a turn of the gap begun before the loss was noticed, synced first, is not the edge', async () => {
-    // The stream went silent at turn 2's start; the watchdog noticed the loss
-    // only after turn 3 began, so turn 3 is older than the moment of the loss.
+  it('H7: a newer turn the ordinary sync wrote before the loss was noticed does not hide an older one', async () => {
+    // Turn 2 closed unseen; turn 3's end was still delivered and its ordinary
+    // sync finished; only then did the watchdog notice the loss.
     pages = [turn(3), turn(2), turn(1)];
     markSaved(1);
-    const noticedAt = startOf(3) + 5_000;
-    const lost = opencodeV2HistoryWriteMark();
-    expect(startOf(3)).toBeLessThan(noticedAt);
-    // After the reconnect, turn 3's end runs the ordinary sync first.
     expect(await syncOpencodeV2History(target, port, SESSION)).toBe(1);
     pagesRead = [];
-    expect(await recoverOpencodeV2History(target, port, SESSION, { savedUpTo: lost })).toEqual({
+    expect(await recoverOpencodeV2History(target, port, SESSION)).toEqual({
       written: 1,
       unreadable: false,
     });
@@ -279,27 +282,71 @@ describe('recoverOpencodeV2History (Issue #4187)', () => {
     // V2's clock went back: turn 3 says it began long before turns 1 and 2.
     pages = [turn(3, true, BASE - 3_600_000), turn(2), turn(1)];
     markSaved(1);
-    const lost = opencodeV2HistoryWriteMark();
     expect(await syncOpencodeV2History(target, port, SESSION)).toBe(1);
-    expect(await recoverOpencodeV2History(target, port, SESSION, { savedUpTo: lost })).toEqual({
+    expect(await recoverOpencodeV2History(target, port, SESSION)).toEqual({
       written: 1,
       unreadable: false,
     });
     expect(writtenTurns()).toEqual(['TURN-3', 'TURN-2']);
   });
 
-  it('H9: read again with the same mark, it writes nothing and reads no further than the cap', async () => {
+  it('H9: read again, it writes nothing and reads no further than the cap', async () => {
     pages = Array.from({ length: MAX_OPENCODE_V2_HISTORY_PAGES + 2 }, (_v, i) => turn(100 - i));
-    const lost = opencodeV2HistoryWriteMark();
-    await recoverOpencodeV2History(target, port, SESSION, { savedUpTo: lost });
+    await recoverOpencodeV2History(target, port, SESSION);
     const rowsAfterFirst = createMessage.mock.calls.length;
+    mockLogger.warn.mockClear();
     pagesRead = [];
-    expect(await recoverOpencodeV2History(target, port, SESSION, { savedUpTo: lost })).toEqual({
+    expect(await recoverOpencodeV2History(target, port, SESSION)).toEqual({
       written: 0,
       unreadable: false,
     });
     expect(createMessage.mock.calls.length).toBe(rowsAfterFirst);
     expect(pagesRead).toHaveLength(MAX_OPENCODE_V2_HISTORY_PAGES);
+    // The oldest page read is saved now: nothing says turns are missing.
+    expect(warned('opencode-v2-history-recovery-truncated')).toEqual([]);
+  });
+
+  it('H10: a partial recovery that saved the newest turn, then another loss, still writes the older one', async () => {
+    // A long gap: page 2 cannot be read the first time, so only turn 3 is saved.
+    pages = [turn(3), turn(2), turn(1)];
+    markSaved(1);
+    failPage = 1;
+    expect(await recoverOpencodeV2History(target, port, SESSION)).toEqual({
+      written: 1,
+      unreadable: true,
+    });
+    expect(writtenTurns()).toEqual(['TURN-3']);
+    // Whatever was written in between, the next recovery is not stopped by turn 3.
+    failPage = null;
+    pagesRead = [];
+    expect(await recoverOpencodeV2History(target, port, SESSION)).toEqual({
+      written: 1,
+      unreadable: false,
+    });
+    expect(writtenTurns()).toEqual(['TURN-3', 'TURN-2']);
+    expect(pagesRead).toEqual([0, 1, 2]);
+  });
+
+  it('H11: a long document all saved gives no warn and no row', async () => {
+    pages = Array.from({ length: MAX_OPENCODE_V2_HISTORY_PAGES + 2 }, (_v, i) => turn(100 - i));
+    for (let i = 0; i < pages.length; i += 1) markSaved(100 - i);
+    expect(await recoverOpencodeV2History(target, port, SESSION)).toEqual({
+      written: 0,
+      unreadable: false,
+    });
+    expect(pagesRead).toHaveLength(MAX_OPENCODE_V2_HISTORY_PAGES);
+    expect(warned('opencode-v2-history-recovery-truncated')).toEqual([]);
+  });
+
+  it('H12: at the cap, it warns only when the oldest page read holds an unsaved turn', async () => {
+    // Unsaved turns on newer pages only: they are written, and nothing beyond is suspected.
+    pages = Array.from({ length: MAX_OPENCODE_V2_HISTORY_PAGES + 2 }, (_v, i) => turn(100 - i));
+    for (let i = 2; i < pages.length; i += 1) markSaved(100 - i);
+    expect(await recoverOpencodeV2History(target, port, SESSION)).toEqual({
+      written: 2,
+      unreadable: false,
+    });
+    expect(warned('opencode-v2-history-recovery-truncated')).toEqual([]);
   });
 
   it('H6: the public syncOpencodeV2History still answers the number of rows written', async () => {
