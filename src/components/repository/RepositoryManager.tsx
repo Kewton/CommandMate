@@ -8,7 +8,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import { FolderOpen } from 'lucide-react';
 import { Button, Card, ConfirmDialog, Input, Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui';
@@ -130,11 +130,17 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
   const urlNormalizer = UrlNormalizer.getInstance();
 
   /**
-   * Poll clone job status
+   * Read the clone job once. `isCurrent()` is false once the poll was torn down
+   * or a later read was asked (Issue #4190); a stale answer changes nothing.
+   * Returns whether the job is still running.
    */
-  const pollCloneStatus = useCallback(async (jobId: string) => {
+  const pollCloneStatus = useCallback(async (
+    jobId: string,
+    isCurrent: () => boolean,
+  ): Promise<boolean> => {
     try {
       const status = await repositoryApi.getCloneStatus(jobId);
+      if (!isCurrent()) return false;
 
       if (status.status === 'completed') {
         setSuccess(t('repositories.cloneSuccess'));
@@ -153,27 +159,56 @@ export function RepositoryManager({ onRepositoryAdded }: RepositoryManagerProps)
         setIsCloning(false);
         setCloneJobId(null);
       } else if (status.status === 'running' || status.status === 'pending') {
-        // Continue polling
-        setTimeout(() => pollCloneStatus(jobId), CLONE_STATUS_POLL_INTERVAL_MS);
+        return true;
       }
     } catch (err) {
+      if (!isCurrent()) return false;
       setError(handleApiError(err));
       setIsCloning(false);
       setCloneJobId(null);
     }
+    return false;
   }, [onRepositoryAdded, t]);
 
+  const pollCloneStatusRef = useRef(pollCloneStatus);
+  pollCloneStatusRef.current = pollCloneStatus;
+
   /**
-   * Start polling when we have a job ID
+   * Poll while we have a job ID (Issue #4190: one chain per job, stopped on
+   * unmount, resting while hidden and reading once on coming back).
    */
   useEffect(() => {
-    if (cloneJobId && isCloning) {
-      pollCloneStatus(cloneJobId);
-    }
-    // Keyed on the job, not pollCloneStatus: `t` churns identity every render,
-    // so keying on it re-enters polling per render — 5 re-renders during a clone
-    // left 6 concurrent setTimeout chains instead of 1 (Issue #1032).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!(cloneJobId && isCloning)) return;
+    const jobId = cloneJobId;
+    let stopped = false;
+    let seq = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const read = (): void => {
+      timer = null;
+      if (stopped || document.visibilityState === 'hidden') return;
+      const mySeq = ++seq;
+      void pollCloneStatusRef
+        .current(jobId, () => !stopped && mySeq === seq)
+        .then((again) => {
+          if (again && !stopped && mySeq === seq) {
+            timer = setTimeout(read, CLONE_STATUS_POLL_INTERVAL_MS);
+          }
+        });
+    };
+    const onVisibilityChange = (): void => {
+      if (document.visibilityState !== 'visible' || stopped) return;
+      if (timer !== null) clearTimeout(timer);
+      read();
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    read();
+    return () => {
+      stopped = true;
+      if (timer !== null) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, [cloneJobId, isCloning]);
 
   /**
