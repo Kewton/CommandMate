@@ -6,12 +6,13 @@
 
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button, Card, Spinner } from '@/components/ui';
 import { ExternalAppCard } from './ExternalAppCard';
 import { ExternalAppForm } from './ExternalAppForm';
 import type { ExternalApp } from '@/types/external-apps';
+import { useVisiblePolling, type VisiblePollingClaim } from '@/hooks/useVisiblePolling';
 import { EXTERNAL_APPS_POLL_INTERVAL_MS } from '@/config/external-apps-config';
 
 /**
@@ -35,31 +36,31 @@ export function ExternalAppsManager() {
   const [showForm, setShowForm] = useState(false);
   const [editApp, setEditApp] = useState<ExternalApp | null>(null);
 
-  // Fetch apps
-  const fetchApps = useCallback(async () => {
+  // Fetch apps.
+  // Issue #4174: rests while the tab is hidden, reads once on coming back, and an
+  // answer older than one already taken (or arriving after unmount) is dropped. A
+  // failed read keeps the last list and shows the error, as before.
+  const readApps = useCallback(async (claim: VisiblePollingClaim) => {
+    let apps: ExternalApp[] | null = null;
+    let failure: string | null = null;
     try {
-      setError(null);
       const response = await fetch('/api/external-apps');
       if (!response.ok) {
         throw new Error('Failed to fetch external apps');
       }
       const data = await response.json();
-      setApps(data.apps || []);
+      apps = data.apps || [];
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
-    } finally {
-      setIsLoading(false);
+      failure = err instanceof Error ? err.message : 'An error occurred';
     }
+    if (!claim()) return;
+    if (apps) setApps(apps);
+    setError(failure);
+    setIsLoading(false);
   }, []);
 
-  // Initial fetch and polling
-  useEffect(() => {
-    fetchApps();
-
-    // Poll every 60 seconds
-    const interval = setInterval(fetchApps, EXTERNAL_APPS_POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [fetchApps]);
+  // Initial fetch and polling (every 60 seconds); refresh after a save or delete
+  const fetchApps = useVisiblePolling(readApps, EXTERNAL_APPS_POLL_INTERVAL_MS);
 
   // Handle edit
   const handleEdit = useCallback((app: ExternalApp) => {

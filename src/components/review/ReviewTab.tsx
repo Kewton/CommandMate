@@ -8,7 +8,7 @@
 
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -35,6 +35,7 @@ import {
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
 import { SIDEBAR_STATUS_CONFIG } from '@/config/status-colors';
 import { buildWorktreeOpenHref } from '@/lib/waiting-instance-pick';
+import { useVisiblePolling, type VisiblePollingClaim } from '@/hooks/useVisiblePolling';
 import type { Worktree } from '@/types/models';
 import type { BranchStatus } from '@/types/sidebar';
 
@@ -135,7 +136,6 @@ export default function ReviewTab() {
   const [activeFilter, setActiveFilter] = useState<ReviewFilter>(
     () => parseReviewFilter(searchParams?.get(REVIEW_FILTER_QUERY_PARAM)) ?? DEFAULT_REVIEW_FILTER,
   );
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // A deep link followed while already on /review is a same-route navigation:
   // this component does not remount, so the initializer above never re-runs and
@@ -148,32 +148,28 @@ export default function ReviewTab() {
     if (fromUrl) setActiveFilter(fromUrl);
   }, [filterParam]);
 
-  const fetchWorktrees = useCallback(async () => {
+  // Issue #4174: rests while the tab is hidden, reads once on coming back, and an
+  // answer older than one already taken (or arriving after unmount) is dropped.
+  // A failed read keeps the last list on screen, as before.
+  const fetchWorktrees = useCallback(async (claim: VisiblePollingClaim) => {
+    let data: { defaultSelectedAgents?: unknown; worktrees?: Worktree[] } | null = null;
     try {
       const response = await fetch('/api/worktrees?include=review');
-      if (response.ok) {
-        const data = await response.json();
-        // Issue #2065: the list carries the server-wide default; adopt it so the
-        // fallback below agrees with the server instead of with the constant.
-        setClientDefaultSelectedAgents(data.defaultSelectedAgents);
-        setWorktrees(data.worktrees ?? []);
-      }
+      if (response.ok) data = await response.json();
     } catch {
       // Silently handle errors in polling
-    } finally {
-      setIsLoading(false);
     }
+    if (!claim()) return;
+    if (data) {
+      // Issue #2065: the list carries the server-wide default; adopt it so the
+      // fallback below agrees with the server instead of with the constant.
+      setClientDefaultSelectedAgents(data.defaultSelectedAgents);
+      setWorktrees(data.worktrees ?? []);
+    }
+    setIsLoading(false);
   }, []);
 
-  useEffect(() => {
-    fetchWorktrees();
-    intervalRef.current = setInterval(fetchWorktrees, REVIEW_POLL_INTERVAL_MS);
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-    };
-  }, [fetchWorktrees]);
+  useVisiblePolling(fetchWorktrees, REVIEW_POLL_INTERVAL_MS);
 
   const filteredWorktrees = useMemo(
     () => worktrees.filter(FILTER_PREDICATES[activeFilter]),
