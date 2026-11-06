@@ -299,3 +299,58 @@ describe('review: a kept row quoting `Thinking:` does not reopen the finished tu
     expect(extract(frame)?.isComplete).toBe(false);
   });
 });
+
+describe('re-review: the footer\'s cwd under the composer border is not a running turn', () => {
+  const DONE_2047 = fixture('opencode-live-2047/w80/turn-complete.txt');
+
+  /**
+   * `raw` with the leading path of the `nth` non-empty row under the composer's
+   * border replaced by `path` — the footer's cwd, wrapped over the rows there.
+   */
+  function withCwdRow(raw: string, nth: number, path: string): string {
+    const lines = stripAnsi(raw).split('\n');
+    let border = -1;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (/^[^\S\n]*╹▀{4,}/.test(lines[i])) { border = i; break; }
+    }
+    expect(border).toBeGreaterThan(0);
+    const rows = lines.map((line, i) => (i > border && line.trim() ? i : -1)).filter((i) => i >= 0);
+    const at = rows[nth];
+    expect(at).toBeDefined();
+    expect(lines[at]).toMatch(/^\s+\S/);
+    lines[at] = lines[at].replace(/^(\s+)\S+/, `$1${path}`);
+    return lines.join('\n');
+  }
+
+  const FRAMES: Array<[string, string]> = [
+    ['opencode-live-4134/turn-done-subsecond', DONE],
+    ['opencode-live-2047/w80/turn-complete', DONE_2047],
+  ];
+  const CWDS: Array<[string, number, string]> = [
+    ['a cwd of /tmp/Thinking:demo', 0, '/tmp/Thinking:demo'],
+    ['a cwd of ~/work/Thinking:x', 0, '~/work/Thinking:x'],
+    ['a wrapped cwd row opening with Thinking:', 1, 'Thinking:demo/repo'],
+  ];
+  const CASES = FRAMES.flatMap(([frame, raw]) =>
+    CWDS.map(([cwd, nth, path]) => [`${frame}, ${cwd}`, raw, nth, path] as const));
+
+  it.each(CASES)('%s: complete, and saved', (_name, raw, nth, path) => {
+    const frame = withCwdRow(raw, nth, path);
+    expect(frame).toContain(path);
+    // The word is there, where the previous rule read it.
+    expect(/Thinking:/.test(frame.split('\n').slice(-6).join('\n'))).toBe(true);
+    const result = extract(frame);
+    expect(result?.isComplete).toBe(true);
+    expect(save(result?.response ?? '').length).toBeGreaterThan(0);
+    expect(save(result?.response ?? '')).not.toContain('Thinking:');
+  });
+
+  it.each(FRAMES)('%s as measured: complete', (_name, raw) => {
+    expect(extract(stripAnsi(raw))?.isComplete).toBe(true);
+  });
+
+  it('a progress row with the busy footer\'s spinner run keeps the turn unfinished', () => {
+    const frame = withCwdRow(DONE, 0, '⬝⬝⬝⬝■■■■ Thinking:');
+    expect(extract(frame)?.isComplete).toBe(false);
+  });
+});

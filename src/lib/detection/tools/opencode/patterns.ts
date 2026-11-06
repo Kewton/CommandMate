@@ -62,6 +62,20 @@ export const OPENCODE_PROMPT_AFTER_RESPONSE = /tab agents\s+ctrl\+p commands/;
 export const OPENCODE_THINKING_PATTERN = /Thinking:/;
 
 /**
+ * OpenCode's progress row drawn under the composer's bottom border while a turn
+ * runs, read as a whole row (Issue #4188): a spinner run (braille `⠦`, or the
+ * `⬝■` run of the busy footer), then `Thinking:` — e.g. `   ⠦ Thinking: Crafting…`.
+ *
+ * Only for the rows below the border, where the footer also draws the cwd
+ * (`/private/tmp/…/repo`, wrapped over several rows). {@link OPENCODE_THINKING_PATTERN}
+ * matches the word anywhere, so a cwd such as `/tmp/Thinking:demo` read there as a
+ * running turn. A row opening with the spinner is never a path, nor a path's
+ * wrapped continuation (which opens with the path's next character).
+ */
+export const OPENCODE_THINKING_PROGRESS_ROW =
+  /^[^\S\n]*[\u2800-\u28FF\u2B1D\u25A0]+[^\S\n]+Thinking:/m;
+
+/**
  * OpenCode loading indicator pattern (Issue #379)
  * Shows a series of 4+ filled square characters (U+2B1D) during initial loading/model warm-up.
  * Filtered from response extraction via OPENCODE_SKIP_PATTERNS.

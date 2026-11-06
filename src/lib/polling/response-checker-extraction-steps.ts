@@ -12,6 +12,8 @@ import {
   OPENCODE_PROMPT_AFTER_RESPONSE,
   OPENCODE_TURN_COMPLETE_PATTERN,
   OPENCODE_COMPOSER_BOTTOM_BORDER,
+  OPENCODE_PROCESSING_INDICATOR,
+  OPENCODE_THINKING_PROGRESS_ROW,
   findCommandCodeChromeStart,
   findCopilotChromeStart,
   readCopilotStatusBar,
@@ -770,21 +772,26 @@ function findLastOpenCodeTurnCompleteRow(lines: string[], from: number, to: numb
 }
 
 /**
- * The rows of an opencode frame under the composer's bottom border `╹▀▀▀…`
- * (Issue #4188), ANSI-stripped and joined; `''` when the chrome has no border
- * (the permission dialog drawn in the composer's place runs to the last row).
+ * Whether an opencode frame shows a turn still running under the composer's
+ * bottom border `╹▀▀▀…` (Issue #4188): a progress row there, read whole — the
+ * spinner's `Thinking:` row ({@link OPENCODE_THINKING_PROGRESS_ROW}) or the busy
+ * hint ({@link OPENCODE_PROCESSING_INDICATOR}). The footer's cwd also sits there,
+ * so the bare word is not read: a cwd of `/tmp/Thinking:demo` is not a running
+ * turn. `false` when the chrome has no border (the permission dialog drawn in the
+ * composer's place runs to the last row; the completion check never passes it).
  *
  * @param lines - The trimmed tmux buffer lines (ANSI intact)
  * @param chromeStart - Where `findOpenCodeChromeStart` put the chrome (>= 0)
- * @returns The rows below the border
+ * @returns Whether a progress row is drawn below the border
  */
-function openCodeRowsBelowComposer(lines: string[], chromeStart: number): string {
+function isOpenCodeProgressBelowComposer(lines: string[], chromeStart: number): boolean {
   for (let i = lines.length - 1; i >= chromeStart; i--) {
     if (OPENCODE_COMPOSER_BOTTOM_BORDER.test(stripAnsi(lines[i]))) {
-      return lines.slice(i + 1).map(stripAnsi).join('\n');
+      const below = lines.slice(i + 1).map(stripAnsi).join('\n');
+      return OPENCODE_THINKING_PROGRESS_ROW.test(below) || OPENCODE_PROCESSING_INDICATOR.test(below);
     }
   }
-  return '';
+  return false;
 }
 
 /**
@@ -823,11 +830,13 @@ export function extractCompletedResponse(ctx: ExtractionContext): ExtractionResu
   // is the input box, Thinking: is the progress row` would be read here as a
   // running turn and the finished reply never saved. There the progress is read
   // where the TUI draws it while a turn runs: under the composer's bottom border,
-  // as `isOpenCodeComplete` reads the busy hint.
-  const thinkingText = cliToolId === 'opencode' && chromeStart >= 0
-    ? openCodeRowsBelowComposer(lines, chromeStart)
-    : response.split('\n').slice(-THINKING_TAIL_LINE_COUNT).join('\n');
-  if (cliToolId !== 'copilot' && thinkingPattern.test(thinkingText)) {
+  // as `isOpenCodeComplete` reads the busy hint, and as whole progress rows: the
+  // footer there also draws the cwd, which may hold the word (`/tmp/Thinking:demo`).
+  const stillRunning = cliToolId === 'opencode' && chromeStart >= 0
+    ? isOpenCodeProgressBelowComposer(lines, chromeStart)
+    : cliToolId !== 'copilot' &&
+      thinkingPattern.test(response.split('\n').slice(-THINKING_TAIL_LINE_COUNT).join('\n'));
+  if (stillRunning) {
     return incompleteResult(totalLines);
   }
 
