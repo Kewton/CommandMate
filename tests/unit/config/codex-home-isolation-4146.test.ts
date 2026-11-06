@@ -17,7 +17,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiClient } from '@/cli/utils/api-client';
 import { ApiError } from '@/cli/utils/api-client-errors';
 import { resolveServerEndpoint } from '@/cli/utils/server-url';
@@ -31,6 +31,7 @@ import {
   fencedTarget,
   installRealServerFence,
   isFencedFetch,
+  isLoopbackHost,
   readEnvFiles,
 } from '@tests/helpers/real-server-fence';
 import { getCodexHome, getCodexHooksPath } from '@/lib/hooks/sources/codex/hooks-config';
@@ -300,5 +301,154 @@ describe('[#4176] the suite does not reach the server running on this machine', 
 
   it('positive control: removing CM_PORT alone leaves the CLI on 3000, which is why the fence exists', () => {
     expect(resolveServerEndpoint({ CM_PORT: '3000' }).url).toBe(resolveServerEndpoint({}).url);
+  });
+});
+
+describe('[#4176] the fence after review: other spellings of loopback, and redirects', () => {
+  const servers: Server[] = [];
+
+  afterEach(async () => {
+    await Promise.all(servers.splice(0).map((open) => new Promise<void>((done) => open.close(() => done()))));
+  });
+
+  /** A server on an ephemeral loopback port; `handler` answers, `hits` records. */
+  async function listen(
+    handler: (url: string, method: string, res: import('node:http').ServerResponse) => void = (_u, _m, res) =>
+      res.end('{}')
+  ): Promise<{ port: number; hits: string[] }> {
+    const hits: string[] = [];
+    const created = createServer((req, res) => {
+      hits.push(`${req.method} ${req.url ?? ''}`);
+      handler(req.url ?? '', req.method ?? '', res);
+    });
+    servers.push(created);
+    await new Promise<void>((done) => created.listen(0, '127.0.0.1', () => done()));
+    return { port: (created.address() as AddressInfo).port, hits };
+  }
+
+  /** A server that answers every request with `status` to `location`. */
+  function redirecting(status: number, location: (url: string) => string) {
+    return listen((url, _method, res) => {
+      res.writeHead(status, { location: location(url) });
+      res.end();
+    });
+  }
+
+  it('refuses the IPv4-mapped IPv6 spelling of 127.0.0.1 without calling the real fetch', async () => {
+    expect(new URL('http://[::ffff:127.0.0.1]:3000/').hostname).toBe('[::ffff:7f00:1]');
+    const real = vi.fn(async () => new Response('{}'));
+    const fenced = fenceFetch(real as unknown as typeof fetch, [DEFAULT_SERVER_PORT]);
+    for (const url of [
+      'http://[::ffff:127.0.0.1]:3000/',
+      'https://[::ffff:127.0.0.1]:3000/',
+      'http://[::ffff:7f00:1]:3000/',
+      'http://[0:0:0:0:0:ffff:7f00:2]:3000/',
+      'http://[0:0:0:0:0:0:0:1]:3000/',
+      'http://[::ffff:0.0.0.0]:3000/',
+      'http://127.1:3000/',
+      'http://2130706433:3000/',
+      'http://0x7f.0.0.1:3000/',
+      'http://LOCALHOST.:3000/',
+      'http://app.localhost:3000/',
+    ]) {
+      const error = await fenced(url).catch((e: unknown) => e);
+      expect(((error as TypeError).cause as { code?: string }).code, url).toBe('ECONNREFUSED');
+    }
+    expect(real).not.toHaveBeenCalled();
+  });
+
+  it('judges the normalized hostname, and leaves other hosts alone', () => {
+    for (const host of ['localhost', '127.0.0.1', '127.255.0.9', '0.0.0.0', '[::1]', '[::]', '[::ffff:7f00:1]', '[::7f00:1]']) {
+      expect(isLoopbackHost(host), host).toBe(true);
+    }
+    for (const host of ['example.test', '128.0.0.1', '10.0.0.1', '[::2]', '[::ffff:a00:1]', '[fe80::1]', 'localhost.example']) {
+      expect(isLoopbackHost(host), host).toBe(false);
+    }
+  });
+
+  it('negative control: a request to a server of its own on an ephemeral port still arrives', async () => {
+    const own = await listen();
+    const response = await fenceFetch(globalThis.fetch, [DEFAULT_SERVER_PORT])(`http://127.0.0.1:${own.port}/own`);
+    expect(response.ok).toBe(true);
+    expect(own.hits).toEqual(['GET /own']);
+  });
+
+  // `real` stands in for the server on 3000: an ephemeral port that is fenced
+  // here, so the test needs nothing listening on 3000 and sends nothing to it.
+  it.each([301, 302, 303, 307, 308])(
+    'an allowed server answering %i to a fenced port: nothing reaches the fenced port',
+    async (status) => {
+      const real = await listen();
+      const allowed = await redirecting(status, () => `http://127.0.0.1:${real.port}/landed`);
+      const fenced = fenceFetch(globalThis.fetch, [real.port]);
+
+      const error = await fenced(`http://127.0.0.1:${allowed.port}/start`, { method: 'POST', body: 'x' }).catch(
+        (e: unknown) => e
+      );
+
+      expect(((error as TypeError).cause as { code?: string }).code).toBe('ECONNREFUSED');
+      expect(allowed.hits).toEqual(['POST /start']);
+      expect(real.hits).toEqual([]);
+    }
+  );
+
+  it('a chain that reaches the fenced port on its second hop, or by a relative Location, is refused too', async () => {
+    const real = await listen();
+    const allowed = await redirecting(307, (url) =>
+      url === '/start' ? '/second' : `//localhost:${real.port}/landed`
+    );
+    const refusals: number[] = [];
+    const fenced = fenceFetch(globalThis.fetch, [real.port], (request) => refusals.push(request.port));
+
+    const error = await fenced(new URL(`http://127.0.0.1:${allowed.port}/start`)).catch((e: unknown) => e);
+
+    expect(((error as TypeError).cause as { code?: string }).code).toBe('ECONNREFUSED');
+    expect(allowed.hits).toEqual(['GET /start', 'GET /second']);
+    expect(real.hits).toEqual([]);
+    expect(refusals).toEqual([real.port]);
+  });
+
+  it('negative control: redirect manual and error give what they gave before, and nothing is followed', async () => {
+    const real = await listen();
+    const allowed = await redirecting(307, () => `http://127.0.0.1:${real.port}/landed`);
+    const fenced = fenceFetch(globalThis.fetch, [real.port]);
+
+    const manual = await fenced(`http://127.0.0.1:${allowed.port}/manual`, { redirect: 'manual' });
+    expect(manual.status).toBe(307);
+    expect(manual.headers.get('location')).toBe(`http://127.0.0.1:${real.port}/landed`);
+    const errored = await fenced(`http://127.0.0.1:${allowed.port}/error`, { redirect: 'error' }).catch(
+      (e: unknown) => e
+    );
+    expect(errored).toBeInstanceOf(TypeError);
+    // The unfenced call answers the same way.
+    const unfencedError = await globalThis.fetch(`http://127.0.0.1:${allowed.port}/error`, { redirect: 'error' }).catch(
+      (e: unknown) => e
+    );
+    expect((errored as TypeError).message).toBe((unfencedError as TypeError).message);
+    expect(real.hits).toEqual([]);
+  });
+
+  it('positive control: a redirect to a port nobody fenced is followed, the way fetch follows it', async () => {
+    const other = await listen((url, method, res) => res.end(`${method} ${url}`));
+    const allowed = await redirecting(303, () => `http://127.0.0.1:${other.port}/landed`);
+    const keep = await redirecting(308, () => `http://127.0.0.1:${other.port}/kept`);
+    const fenced = fenceFetch(globalThis.fetch, [DEFAULT_SERVER_PORT]);
+
+    const seeOther = await fenced(`http://127.0.0.1:${allowed.port}/form`, { method: 'POST', body: 'x' });
+    expect(await seeOther.text()).toBe('GET /landed');
+    expect(seeOther.url).toBe(`http://127.0.0.1:${other.port}/landed`);
+    expect(seeOther.redirected).toBe(true);
+    expect((await fenced(`http://127.0.0.1:${other.port}/direct`)).redirected).toBe(false);
+    const kept = await fenced(`http://127.0.0.1:${keep.port}/put`, { method: 'PUT', body: 'x' });
+    expect(await kept.text()).toBe('PUT /kept');
+  });
+
+  it('stops after 20 redirects, as fetch does', async () => {
+    const loop = await redirecting(302, (url) => `/${Number(url.slice(1) || '0') + 1}`);
+    const error = await fenceFetch(globalThis.fetch, [DEFAULT_SERVER_PORT])(`http://127.0.0.1:${loop.port}/0`).catch(
+      (e: unknown) => e
+    );
+    expect(error).toBeInstanceOf(TypeError);
+    expect(loop.hits).toHaveLength(21);
   });
 });

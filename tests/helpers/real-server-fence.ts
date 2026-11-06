@@ -19,9 +19,34 @@
  * stubs `fetch` replaces the fence and is unaffected; a test that talks to a
  * server of its own listens on an ephemeral port and is unaffected.
  *
- * `fetch` is the only HTTP client in `src/` (no `http.request`, no `undici`
- * import). The hook relay (`scripts/hooks/cmate-agent-event.sh`) runs `curl`,
- * which no `fetch` wrapper sees; `tests/setup.ts` covers it through `CM_HOST`.
+ * A request the fence lets through may still be answered with a redirect to a
+ * fenced port. So a `redirect: 'follow'` request (the default) is followed here,
+ * one hop at a time, and each `Location` is judged before it is requested;
+ * `'manual'` and `'error'` go to the real `fetch` untouched.
+ *
+ * ## What the fence does not see
+ *
+ * Only `fetch`. These other clients in `src/` bypass it, and none reaches the
+ * real server from the unit suite today for the reason given (checked for
+ * #4176; a new caller has to keep it true):
+ *
+ * - `src/cli/utils/server-identity.ts` (`http.request` / `https.request`): the
+ *   only unit test that runs it unmocked, `remote-publish-guard-3087.test.ts`,
+ *   points it at servers it listens on with port 0; `remote.test.ts` and
+ *   `remote-launch-env-1937.test.ts` mock the module.
+ * - `src/lib/server/localhost-self-check.ts` (`http.request` /
+ *   `https.request`): `localhost-self-check-2113.test.ts` probes its own
+ *   port-0 servers (and port 1 with a server that throws before sending), and
+ *   gives `runLocalhostSelfCheck` a stub `probe`; the two tests that run
+ *   `server.ts`'s startup mock `http` / `https` without `request`.
+ * - `src/lib/remote/cloudflare.ts` (`http.get` to the cloudflared metrics
+ *   port): every unit test injects `fetchHostname`, and the port is a free one
+ *   `findFreePort` picked, never 3000.
+ * - `src/cli/utils/server-ready.ts` (`net.connect`, a TCP connect with no
+ *   payload): the tests that reach it unmocked (`daemon-process-group-3087`)
+ *   use a free port; the others mock `server-ready` or `DaemonManager`.
+ * - The hook relay (`scripts/hooks/cmate-agent-event.sh`) runs `curl`;
+ *   `tests/setup.ts` covers it through `CM_HOST`.
  *
  * With `CM_PORT` removed, the CLI's `ApiClient` takes its port from `.env`
  * (`loadClientEnv`: `<cwd>/.env`, or `~/.commandmate/.env` for a global
@@ -90,11 +115,38 @@ export function readEnvFiles(paths: readonly string[]): Array<Record<string, str
   return parsed;
 }
 
-const LOOPBACK_HOSTS = new Set(['localhost', '0.0.0.0', '[::1]', '[::]', '[::ffff:127.0.0.1]']);
+/**
+ * Whether `hostname` (as `new URL()` leaves it: lower-cased, IPv4 in dotted
+ * quads whatever form it was written in, IPv6 bracketed and compressed) names
+ * this machine.
+ *
+ * Covers `localhost` and `*.localhost` (with or without the trailing dot),
+ * 127.0.0.0/8, `0.0.0.0`, `[::1]`, `[::]`, and IPv4-mapped / IPv4-compatible
+ * IPv6 forms of those (`[::ffff:127.0.0.1]` parses to `[::ffff:7f00:1]`).
+ */
+export function isLoopbackHost(hostname: string): boolean {
+  let host = hostname.toLowerCase();
+  if (host.endsWith('.')) host = host.slice(0, -1);
+  if (host === 'localhost' || host.endsWith('.localhost')) return true;
+  if (host.startsWith('[') && host.endsWith(']')) return isLoopbackIpv6(host.slice(1, -1));
+  return isLoopbackIpv4(host);
+}
 
-function isLoopbackHost(hostname: string): boolean {
-  const host = hostname.toLowerCase();
-  return LOOPBACK_HOSTS.has(host) || host.endsWith('.localhost') || /^127(\.\d{1,3}){3}$/.test(host);
+function isLoopbackIpv4(host: string): boolean {
+  const octets = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (octets === null) return false;
+  return octets[1] === '127' || host === '0.0.0.0';
+}
+
+function isLoopbackIpv6(address: string): boolean {
+  if (address === '::1' || address === '::') return true;
+  // `::ffff:a.b.c.d` (mapped) and `::a.b.c.d` (compatible) both serialize the
+  // IPv4 part as two hex groups.
+  const embedded = /^::(?:ffff:)?([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(address);
+  if (embedded === null) return false;
+  const high = Number.parseInt(embedded[1], 16);
+  const low = Number.parseInt(embedded[2], 16);
+  return high >> 8 === 127 || (high === 0 && low === 0);
 }
 
 function urlOf(input: unknown): string | undefined {
@@ -136,8 +188,131 @@ function connectionRefused(target: RefusedRequest): TypeError {
   return new TypeError('fetch failed', { cause });
 }
 
+/** The statuses `fetch` follows; the same list undici uses. */
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+/** undici's limit before it fails a redirect chain. */
+export const MAX_REDIRECTS = 20;
+
+/** The headers the Fetch standard drops when a redirect changes method to GET. */
+const BODY_HEADERS = ['content-type', 'content-length', 'content-encoding', 'content-language', 'content-location'];
+
+/** The headers the Fetch standard drops when a redirect leaves the origin. */
+const CREDENTIAL_HEADERS = ['authorization', 'proxy-authorization', 'cookie'];
+
+type FetchInput = Parameters<typeof fetch>[0];
+type FetchInit = NonNullable<Parameters<typeof fetch>[1]>;
+
+/** A `Request`-shaped input, without depending on the `Request` global (tests stub it). */
+interface RequestLike {
+  url: string;
+  method?: string;
+  headers?: HeadersInit;
+  redirect?: RequestRedirect;
+  signal?: AbortSignal | null;
+  body?: unknown;
+}
+
+function requestLike(input: FetchInput): RequestLike | undefined {
+  if (typeof input === 'string' || input instanceof URL) return undefined;
+  return input as unknown as RequestLike;
+}
+
+/** The redirect mode a call asked for: `init` wins over the `Request`, as in `fetch`. */
+export function redirectModeOf(input: FetchInput, init?: FetchInit): RequestRedirect {
+  return init?.redirect ?? requestLike(input)?.redirect ?? 'follow';
+}
+
+function fetchFailed(message: string): TypeError {
+  return new TypeError('fetch failed', { cause: new Error(message) });
+}
+
+async function discard(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // Already consumed or errored: nothing left to release.
+  }
+}
+
 /**
- * `realFetch`, except that a request to a fenced port is refused unsent.
+ * A `redirect: 'follow'` request, followed one hop at a time so that every
+ * `Location` is judged by {@link fencedTarget} before it is requested.
+ *
+ * Follows the Fetch standard where it matters to callers: 303 (and 301 / 302
+ * after a POST) turn into a bodiless GET, 307 / 308 keep method and body (and
+ * fail when the body was a stream, which cannot be sent twice), credentials are
+ * dropped on a change of origin, and more than {@link MAX_REDIRECTS} hops fail.
+ * `response.redirected` is set on the result when a hop was followed.
+ */
+async function followInsideFence(
+  realFetch: typeof fetch,
+  input: FetchInput,
+  init: FetchInit | undefined,
+  ports: readonly number[],
+  onRefused: (request: RefusedRequest) => void
+): Promise<Response> {
+  const original = requestLike(input);
+  let response = await realFetch(input, { ...init, redirect: 'manual' });
+
+  let current = urlOf(input);
+  let method = (init?.method ?? original?.method ?? 'GET').toUpperCase();
+  const headers = new Headers(init?.headers ?? original?.headers ?? undefined);
+  let body: unknown = init?.body ?? original?.body ?? undefined;
+  const signal = init?.signal ?? original?.signal ?? undefined;
+
+  for (let hops = 0; ; hops += 1) {
+    const location = response.headers.get('location');
+    if (!REDIRECT_STATUSES.has(response.status) || location === null || current === undefined) {
+      // Each hop was its own call, so the real flag is false; callers read it
+      // (`api-client.ts`, `send-new-task.ts`, `server-capabilities.ts`).
+      if (hops > 0) Object.defineProperty(response, 'redirected', { value: true });
+      return response;
+    }
+    await discard(response);
+    if (hops >= MAX_REDIRECTS) throw fetchFailed('redirect count exceeded');
+
+    let next: URL;
+    try {
+      next = new URL(location, response.url || current);
+    } catch {
+      throw fetchFailed(`invalid redirect location: ${location}`);
+    }
+    if (next.protocol !== 'http:' && next.protocol !== 'https:') throw fetchFailed('URL scheme must be a HTTP(S) scheme');
+
+    const target = fencedTarget(next.href, ports);
+    if (target !== undefined) {
+      onRefused(target);
+      throw connectionRefused(target);
+    }
+
+    const status = response.status;
+    if ((status === 303 && method !== 'HEAD') || ((status === 301 || status === 302) && method === 'POST')) {
+      method = 'GET';
+      body = undefined;
+      for (const name of BODY_HEADERS) headers.delete(name);
+    } else if (body !== undefined && body !== null && typeof (body as ReadableStream).getReader === 'function') {
+      throw fetchFailed('cannot follow a redirect with a streamed body');
+    }
+    if (new URL(current).origin !== next.origin) {
+      for (const name of CREDENTIAL_HEADERS) headers.delete(name);
+    }
+
+    current = next.href;
+    response = await realFetch(current, {
+      ...init,
+      method,
+      headers,
+      body: body as FetchInit['body'],
+      signal,
+      redirect: 'manual',
+    });
+  }
+}
+
+/**
+ * `realFetch`, except that a request to a fenced port is refused unsent, and so
+ * is a redirect to one.
  *
  * @param realFetch - The fetch to call for everything else
  * @param ports - Fenced ports, from {@link fencedPortsFor}
@@ -148,13 +323,14 @@ export function fenceFetch(
   ports: readonly number[],
   onRefused: (request: RefusedRequest) => void = () => {}
 ): typeof fetch {
-  const fenced: FencedFetch = ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+  const fenced: FencedFetch = ((input: FetchInput, init?: FetchInit) => {
     const target = fencedTarget(input, ports);
     if (target !== undefined) {
       onRefused(target);
       return Promise.reject(connectionRefused(target));
     }
-    return realFetch(input, init);
+    if (redirectModeOf(input, init) !== 'follow') return realFetch(input, init);
+    return followInsideFence(realFetch, input, init, ports, onRefused);
   }) as FencedFetch;
   fenced[FENCED] = true;
   return fenced;

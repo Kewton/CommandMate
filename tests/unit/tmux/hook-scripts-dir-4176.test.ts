@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execFile } from 'child_process';
 import { existsSync, mkdtempSync, readdirSync, rmSync } from 'fs';
 import { homedir, tmpdir } from 'os';
-import { join, sep } from 'path';
+import { isAbsolute, join, relative, sep } from 'path';
 import {
   LIVE_DELEGATE_SCRIPT_FILENAME,
   LIVE_RESTORE_SCRIPT_FILENAME,
@@ -85,6 +85,33 @@ describe('the directory the hook scripts are written to', () => {
       .mock.calls.map((call) => call[1] as string[])
       .find((argv) => argv[0] === 'set-hook' && !argv.includes('-u'));
     expect(delegateInstall?.join(' ')).toContain(join(dir, LIVE_DELEGATE_SCRIPT_FILENAME));
+  });
+
+  it('a relative value: the scripts are written to, and the hook names, the same absolute path', async () => {
+    // tmux runs a hook from its own working directory, so a relative path in the
+    // hook would name another file. Made absolute against this process's cwd.
+    const relativeDir = relative(process.cwd(), dir);
+    expect(isAbsolute(relativeDir)).toBe(false);
+    vi.stubEnv(SCRIPT_DIR_ENV, relativeDir);
+    vi.stubEnv(LIVE_ATTACH_HOOK_ENV, 'on');
+    vi.stubEnv(AUTO_POPUP_ENV, '');
+    expect(getScriptDir()).toBe(dir);
+
+    await ensureSessionHooks('mcbd-claude-wt-4176-rel');
+    forgetSessionHooks('mcbd-claude-wt-4176-rel');
+
+    expect(readdirSync(dir)).toContain(LIVE_DELEGATE_SCRIPT_FILENAME);
+    const delegateInstall = vi
+      .mocked(execFile)
+      .mock.calls.map((call) => call[1] as string[])
+      .find((argv) => argv[0] === 'set-hook' && !argv.includes('-u'));
+    expect(delegateInstall?.join(' ')).toContain(join(dir, LIVE_DELEGATE_SCRIPT_FILENAME));
+    expect(delegateInstall?.join(' ')).not.toContain(` ${relativeDir}`);
+  });
+
+  it('a relative value that resolves into /proc is refused like an absolute one', () => {
+    vi.stubEnv(SCRIPT_DIR_ENV, relative(process.cwd(), '/proc/self/cm-4176'));
+    expect(getScriptDir()).toBe(join(homedir(), '.commandmate', 'bin'));
   });
 
   it('positive control: the same call with the variable unset would have used the home directory', () => {

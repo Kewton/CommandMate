@@ -32,7 +32,7 @@
 
 import { mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync } from 'fs';
 import { homedir } from 'os';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { TUI_PANE_HEIGHT, TUI_PANE_WIDTH } from '../../config/tmux-pane-config';
 import { MCBD_SESSION_PREFIX } from '../session/tmux-session-surface';
 import { PAGER_SCRIPT_FILENAME } from './read-mode-pager';
@@ -47,6 +47,15 @@ import { resolveSafeDirectory } from '../../config/safe-directory';
  * `tests/setup.ts` pins it to a temporary directory. Unset, the directory is the
  * one it has always been. The auto-popup script still looks for the pager at
  * `$HOME/.commandmate/bin`, where `read-mode.ts` writes it.
+ *
+ * A relative value is made absolute against this process's working directory
+ * when it is read. The scripts are written there anyway (`fs` resolves a
+ * relative path the same way), and the path recorded in the tmux hook has to
+ * be that same file: tmux runs a hook's command from its own working directory,
+ * not this process's, so a relative path in the hook would name another file or
+ * none. Rejecting the value instead would send the scripts back to
+ * `~/.commandmate/bin`, which is what the variable exists to avoid. The
+ * `/proc` check runs on the absolute form, so `../../proc/x` is refused too.
  */
 export const SCRIPT_DIR_ENV = 'CM_TMUX_SCRIPT_DIR';
 
@@ -219,10 +228,14 @@ else
 fi
 `;
 
-/** Directory every materialized CommandMate script lives in: `~/.commandmate/bin` unless {@link SCRIPT_DIR_ENV} names another. */
+/**
+ * Directory every materialized CommandMate script lives in, always absolute:
+ * `~/.commandmate/bin` unless {@link SCRIPT_DIR_ENV} names another.
+ */
 export function getScriptDir(): string {
   const fallback = join(homedir(), '.commandmate', 'bin');
-  return resolveSafeDirectory(process.env[SCRIPT_DIR_ENV]?.trim(), fallback, SCRIPT_DIR_ENV);
+  const configured = process.env[SCRIPT_DIR_ENV]?.trim();
+  return resolveSafeDirectory(configured ? resolve(configured) : undefined, fallback, SCRIPT_DIR_ENV);
 }
 
 /** Absolute path of a materialized script. */
