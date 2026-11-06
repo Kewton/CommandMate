@@ -28,6 +28,12 @@
  * And (Issue #2981) `session.usage.updated` and the end of a turn have
  * `./usage` refresh the session's spend and context, which the subscription
  * drops again when it closes or ends — the place v1 drops them.
+ * And (Issue #4187) a reconnect — a successful connection after an earlier
+ * successful one — has `./history` read the sessions the stream was following
+ * when it was lost, once, after the pending resync
+ * ({@link recoverOpencodeV2History}), so a turn that closed while the stream
+ * was down is written even when no later turn of that session ends. The screen
+ * scraper never writes a V2 reply, live or not.
  *
  * @module lib/hooks/sources/opencode-v2/subscription
  */
@@ -50,7 +56,11 @@ import {
   probeOpencodeV2Server,
   type OpencodeV2Frame,
 } from './client';
-import { isOpencodeV2TurnEndEventType, syncOpencodeV2History } from './history';
+import {
+  isOpencodeV2TurnEndEventType,
+  recoverOpencodeV2History,
+  syncOpencodeV2History,
+} from './history';
 import { frameSessionId, frameType, isHandledOpencodeV2EventType } from './mappers';
 import { opencodeV2KeyOf, readOpencodeV2Password } from './secrets';
 import { isOpencodeV2UsageTriggerType, scheduleOpencodeV2SessionUsageRefresh } from './usage';
@@ -79,6 +89,20 @@ export const OPENCODE_V2_MAX_REJECTED_PROBES = 3;
  */
 export const OPENCODE_V2_MAX_RESYNCED_DECISIONS = 50;
 
+/**
+ * Waits before retrying a recovery sync whose document could not be read
+ * (Issue #4187, C7). Three retries, then the session is given up with a warn;
+ * its next turn end still has the ordinary sync read the newest turns.
+ */
+export const OPENCODE_V2_HISTORY_RECOVERY_RETRY_MS: readonly number[] = [2_000, 5_000, 15_000];
+
+let recoveryRetryDelays: readonly number[] = OPENCODE_V2_HISTORY_RECOVERY_RETRY_MS;
+
+/** Shorten the recovery retries. Test seam; null restores the defaults. */
+export function setOpencodeV2HistoryRecoveryRetryDelaysForTests(delays: readonly number[] | null): void {
+  recoveryRetryDelays = delays ?? OPENCODE_V2_HISTORY_RECOVERY_RETRY_MS;
+}
+
 interface SubscriptionState {
   readonly key: string;
   readonly target: AgentInstanceRef;
@@ -90,6 +114,33 @@ interface SubscriptionState {
   liveness: SourceLiveness;
   closed: boolean;
   watchdog: ReturnType<typeof setTimeout> | null;
+  /**
+   * Whether a connection of this subscription has succeeded before
+   * (Issue #4187, C1). Read before it is set on each successful connection: a
+   * success with it already true is a reconnect, which starts the recovery
+   * sync. `attempt` cannot tell — it is reset to 0 on every success.
+   */
+  connectedOnce: boolean;
+  /**
+   * The session the newest frame carrying one named, resync frames included
+   * (Issue #4187, C4). The session whose model a sync may latch (C5).
+   */
+  currentSessionId: string | null;
+  /**
+   * Sessions to recover on the next reconnect (C4). Set when the stream is
+   * lost while following one — a new entry on every loss — and removed when a recovery read *begun on that very entry*
+   * succeeds or is given up: a loss during the read replaces the entry, so the
+   * older read's success leaves the newer loss to the next reconnect.
+   */
+  readonly recoverySessions: Map<string, OpencodeV2RecoveryTarget>;
+  /** Aborts the running recovery (its retry waits); replaced per reconnect, aborted on a loss. */
+  recoveryController: AbortController;
+}
+
+/** One loss of a session to recover; a new object per loss (its generation). */
+interface OpencodeV2RecoveryTarget {
+  /** When the stream was lost, epoch ms. For the record only: nothing stops on it. */
+  readonly lostAt: number;
 }
 
 declare global {
@@ -176,6 +227,10 @@ export function openOpencodeV2Subscription(
     liveness: { state: 'unknown' },
     closed: false,
     watchdog: null,
+    connectedOnce: false,
+    currentSessionId: null,
+    recoverySessions: new Map(),
+    recoveryController: new AbortController(),
   };
   subscriptions.set(key, state);
   logger.info('opencode-v2-subscription-opened', {
@@ -217,6 +272,7 @@ function stop(state: SubscriptionState): void {
   clearWatchdog(state);
   state.streamController.abort();
   state.lifetimeController.abort();
+  state.recoveryController.abort();
 }
 
 /** End a subscription from inside its own loop, remembering why. */
@@ -315,6 +371,10 @@ async function runStream(state: SubscriptionState): Promise<void> {
           password,
           state.streamController.signal
         );
+        // Issue #4187 (C1): read before it is set, so only a success after an
+        // earlier success counts as a reconnect.
+        const reconnected = state.connectedOnce;
+        state.connectedOnce = true;
         markAlive(state);
         attempt = 0;
         // Issue #2951: before the first live frame, so an approval raised while
@@ -324,6 +384,11 @@ async function runStream(state: SubscriptionState): Promise<void> {
         await resyncOpencodeV2Pending(state.target, state.port, password, (frame) =>
           deliver(state, frame)
         );
+        // Issue #4187 (C2, C3): once per reconnect, after the resync, and only
+        // for a subscription still the instance's. Started before the first
+        // live frame, so it is queued in `./history` ahead of any ordinary sync
+        // this connection's frames trigger.
+        if (reconnected && isCurrentSubscription(state)) startHistoryRecovery(state);
         for await (const item of items) {
           if (state.closed) break;
           markAlive(state);
@@ -337,6 +402,15 @@ async function runStream(state: SubscriptionState): Promise<void> {
     }
     if (state.closed) return;
     state.liveness = { state: 'lost', since: Date.now(), reason };
+    // Issue #4187 (C4): the session followed when the stream was lost is what a
+    // reconnect recovers, whatever session the resync then names. A new entry
+    // per loss, so a recovery read already running cannot take this loss out
+    // with its own success; that recovery stops here and the next reconnect
+    // starts anew.
+    state.recoveryController.abort();
+    if (state.currentSessionId !== null) {
+      state.recoverySessions.set(state.currentSessionId, { lostAt: state.liveness.since });
+    }
     logger.info('opencode-v2-subscription-disconnected', {
       worktreeId: state.target.worktreeId,
       instanceId: state.target.instanceId ?? state.target.cliToolId,
@@ -436,7 +510,72 @@ export function deliverOpencodeV2Frame(
   return true;
 }
 
+/**
+ * The recovery sync of one reconnect (Issue #4187, C2〜C8).
+ *
+ * Reads each session in `recoverySessions` back to the page cap; a
+ * session whose read succeeded leaves the set, one that could not be read stays
+ * and is retried after {@link OPENCODE_V2_HISTORY_RECOVERY_RETRY_MS}, three
+ * times at most, then is given up with a warn. A newer reconnect aborts this one
+ * and takes the set over (one recovery per reconnect); a loss of the stream,
+ * closing or ending the subscription aborts it too. A read already under way
+ * still writes its rows, but takes its session out of the set only if no loss
+ * replaced the entry it began on. Never throws.
+ */
+function startHistoryRecovery(state: SubscriptionState): void {
+  state.recoveryController.abort();
+  const controller = new AbortController();
+  state.recoveryController = controller;
+  void runHistoryRecovery(state, controller.signal).catch((error: unknown) => {
+    logger.warn('opencode-v2-history-recovery-failed', {
+      worktreeId: state.target.worktreeId,
+      instanceId: state.target.instanceId ?? state.target.cliToolId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+}
+
+async function runHistoryRecovery(state: SubscriptionState, signal: AbortSignal): Promise<void> {
+  const stillOurs = (): boolean => !signal.aborted && isCurrentSubscription(state);
+  for (let retry = 0; ; retry += 1) {
+    if (!stillOurs()) return;
+    const pending = [...state.recoverySessions];
+    if (pending.length === 0) return;
+    for (const [sessionId, entry] of pending) {
+      if (!stillOurs()) return;
+      const result = await recoverOpencodeV2History(state.target, state.port, sessionId, {
+        isCurrent: () => isFollowing(state, sessionId),
+      });
+      // Only the entry this read began on: a loss during the read replaced it.
+      if (!result.unreadable && state.recoverySessions.get(sessionId) === entry) {
+        state.recoverySessions.delete(sessionId);
+      }
+    }
+    if (state.recoverySessions.size === 0 || !stillOurs()) return;
+    const delays = recoveryRetryDelays;
+    if (retry >= delays.length) {
+      const givenUp = [...state.recoverySessions].filter(([, entry]) =>
+        pending.some(([, read]) => read === entry)
+      );
+      logger.warn('opencode-v2-history-recovery-failed', {
+        worktreeId: state.target.worktreeId,
+        instanceId: state.target.instanceId ?? state.target.cliToolId,
+        port: state.port,
+        sessionIds: givenUp.map(([sessionId]) => sessionId),
+        attempts: retry + 1,
+      });
+      for (const [sessionId] of givenUp) state.recoverySessions.delete(sessionId);
+      return;
+    }
+    await waitUnlessAborted(delays[retry], signal);
+  }
+}
+
 function deliver(state: SubscriptionState, frame: OpencodeV2Frame): void {
+  // Issue #4187 (C4): every frame naming a session moves the current one,
+  // resync frames included.
+  const sessionId = frameSessionId(frame);
+  if (sessionId !== null) state.currentSessionId = sessionId;
   try {
     deliverOpencodeV2Frame(frame, state.normalize, state.onEvent);
   } catch (error) {
@@ -447,7 +586,11 @@ function deliver(state: SubscriptionState, frame: OpencodeV2Frame): void {
       error: error instanceof Error ? error.message : String(error),
     });
   }
-  void recordOpencodeV2TurnEnd(state.target, state.port, frame, () => isCurrentSubscription(state));
+  // Issue #4187 (C5): latch only while this subscription still follows the
+  // session the frame ended a turn of.
+  void recordOpencodeV2TurnEnd(state.target, state.port, frame, () =>
+    sessionId !== null && isFollowing(state, sessionId)
+  );
   void refreshOpencodeV2UsageOnFrame(state.target, state.port, frame, () =>
     isCurrentSubscription(state)
   );
@@ -455,6 +598,11 @@ function deliver(state: SubscriptionState, frame: OpencodeV2Frame): void {
 
 function isCurrentSubscription(state: SubscriptionState): boolean {
   return !state.closed && subscriptions.get(state.key) === state;
+}
+
+/** Still the instance's subscription, and still following `sessionId` (C5). */
+function isFollowing(state: SubscriptionState, sessionId: string): boolean {
+  return isCurrentSubscription(state) && state.currentSessionId === sessionId;
 }
 
 /**
