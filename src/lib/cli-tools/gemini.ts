@@ -241,7 +241,8 @@ export class GeminiTool extends BaseCLITool {
                 return again.action === 'press' && again.key === decision.key;
               },
               () => sendSpecialKey(sessionName, decision.key),
-              { mode: 'exclusive' }
+              // Issue #4189: the lock's warn of a decline, once per streak in this wait.
+              { mode: 'exclusive', repeatScope: answerSkips }
             );
             if (pressed.answered) {
               trustDialogHandled = true;

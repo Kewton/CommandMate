@@ -13,12 +13,22 @@
 import type { Logger } from '@/lib/logger';
 import type { InstanceInputAnswerSkip } from '@/lib/session/instance-input-lock';
 
-/** What one wait has declined so far. */
+/**
+ * Why a launch answer did not go out: the lock's refusal, or (Issue #4189) a key
+ * tmux refused after the lock let it through (`send-failed`, the auto-default nudge's).
+ */
+export type LaunchAnswerSkipReason = InstanceInputAnswerSkip | 'send-failed';
+
+/**
+ * What one wait has declined so far. Also the wait's `repeatScope` for
+ * `answerUnderInstanceInputLock` (Issue #4189), so the lock's own warn of the
+ * decline is once per streak as well.
+ */
 export interface LaunchAnswerSkips {
   /** The reason last recorded under each event. */
-  readonly byEvent: Map<string, InstanceInputAnswerSkip>;
+  readonly byEvent: Map<string, LaunchAnswerSkipReason>;
   /** The latest reason under any event; null while none is outstanding. */
-  last: InstanceInputAnswerSkip | null;
+  last: LaunchAnswerSkipReason | null;
   /** The event {@link LaunchAnswerSkips.last} was recorded under. */
   lastEvent: string | null;
 }
@@ -39,7 +49,7 @@ export function noteLaunchAnswerSkipped(
   logger: Pick<Logger, 'warn'>,
   skips: LaunchAnswerSkips,
   event: string,
-  fields: { reason: InstanceInputAnswerSkip } & Record<string, unknown>
+  fields: { reason: LaunchAnswerSkipReason } & Record<string, unknown>
 ): void {
   if (skips.byEvent.get(event) !== fields.reason) logger.warn(event, fields);
   skips.byEvent.set(event, fields.reason);

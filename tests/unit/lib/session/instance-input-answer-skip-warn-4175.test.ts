@@ -205,7 +205,9 @@ describe('a new process for the session', () => {
 
   it('an answer of the old process that went through late does not end the new streak', async () => {
     const typing = deferred<string>();
-    const old = answerUnderInstanceInputLock(S, STALE, async () => true, () => typing.promise);
+    // Issue #4189: the old answer is of the same wait. With no scope it returned before
+    // the life was compared, so a broken comparison passed here as well.
+    const old = answerUnderInstanceInputLock(S, STALE, async () => true, () => typing.promise, { repeatScope: WAIT });
     await flush();
     invalidateInstanceInput(S);
     await recheckFails();

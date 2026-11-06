@@ -26,6 +26,7 @@ import { capturePane, sendKeys, sendSpecialKeys } from '../tmux/tmux';
 import { isClaudeAutoDefaultNudgeOpen, resolveClaudeAutoDefaultNudgeKey, stripAnsi } from '../detection/cli-patterns';
 import { answerUnderInstanceInputLock, instanceInputLaunchReadMark } from '@/lib/session/instance-input-lock';
 import { createLogger } from '@/lib/logger';
+import { forgetLaunchAnswerSkip, newLaunchAnswerSkips, noteLaunchAnswerSkipped, type LaunchAnswerSkips } from './launch-answer-skips';
 
 const logger = createLogger('cli-tools/claude-auto-default-nudge');
 
@@ -54,6 +55,8 @@ export async function answerClaudeAutoDefaultNudgeUntil(sessionName: string, sta
   );
 
   let keys = 0;
+  // Issue #4189: one record for this wait, so a key declined on every poll is one warn.
+  const skips = newLaunchAnswerSkips();
   while (keys < MAX_KEYS) {
     await Promise.race([over, new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))]);
     if (settled) return;
@@ -66,7 +69,7 @@ export async function answerClaudeAutoDefaultNudgeUntil(sessionName: string, sta
       continue;
     }
     if (key === null) continue;
-    if (await sendNudgeKey(sessionName, readMark, key)) keys++;
+    if (await sendNudgeKey(sessionName, readMark, key, skips)) keys++;
   }
   logger.warn('claude-auto-default-nudge-unanswered', { sessionName, keys });
 }
@@ -82,6 +85,8 @@ export async function answerClaudeAutoDefaultNudgeUntil(sessionName: string, sta
  */
 export async function answerClaudeAutoDefaultNudgeBeforeSend(sessionName: string): Promise<void> {
   let keys = 0;
+  // Issue #4189: one record for this send's wait, as the launch has its own.
+  const skips = newLaunchAnswerSkips();
   for (let reads = 0; reads < BEFORE_SEND_MAX_READS; reads++) {
     const readMark = instanceInputLaunchReadMark();
     let screen: string;
@@ -93,7 +98,7 @@ export async function answerClaudeAutoDefaultNudgeBeforeSend(sessionName: string
     }
     if (!isClaudeAutoDefaultNudgeOpen(screen)) return;
     const key = resolveClaudeAutoDefaultNudgeKey(screen);
-    if (key !== null && keys < MAX_KEYS && (await sendNudgeKey(sessionName, readMark, key))) keys++;
+    if (key !== null && keys < MAX_KEYS && (await sendNudgeKey(sessionName, readMark, key, skips))) keys++;
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
   logger.warn('claude-auto-default-nudge-unanswered-at-send', { sessionName, keys });
@@ -103,12 +108,26 @@ export async function answerClaudeAutoDefaultNudgeBeforeSend(sessionName: string
   );
 }
 
+/** The warn of a key that did not go out. */
+const KEY_SKIPPED = 'claude-auto-default-nudge-key-skipped';
+
 /**
  * One key, as an `exclusive` writer of the input lock, as the folder trust's keys go.
  *
+ * Issue #4189: `skips` is the calling wait's record. With it the key's skip warn,
+ * and the lock's own warn of the decline (`repeatScope`), are written once while
+ * the same reason goes on in that wait; a key that went out ends the streak. Without
+ * it every skip is a warn, as before.
+ *
  * @internal Exported for the input lock's evidence test.
  */
-export async function sendNudgeKey(sessionName: string, readMark: number, key: 'Down' | 'Up' | 'Enter'): Promise<boolean> {
+export async function sendNudgeKey(
+  sessionName: string,
+  readMark: number,
+  key: 'Down' | 'Up' | 'Enter',
+  skips?: LaunchAnswerSkips
+): Promise<boolean> {
+  const record = skips ?? newLaunchAnswerSkips();
   try {
     const outcome = await answerUnderInstanceInputLock(
       sessionName,
@@ -116,18 +135,19 @@ export async function sendNudgeKey(sessionName: string, readMark: number, key: '
       async () =>
         resolveClaudeAutoDefaultNudgeKey(stripAnsi(await capturePane(sessionName, { startLine: -CAPTURE_LINES }))) === key,
       () => (key === 'Enter' ? sendKeys(sessionName, '', true) : sendSpecialKeys(sessionName, [key])),
-      { mode: 'exclusive' }
+      { mode: 'exclusive', repeatScope: skips }
     );
     if (outcome.answered) {
+      forgetLaunchAnswerSkip(record, KEY_SKIPPED);
       logger.info('claude-auto-default-nudge-key', { sessionName, key, answered: true });
     } else {
       // Issue #4149: at warn, as the folder trust's skipped key is. An ERROR-only setting still hides it.
-      logger.warn('claude-auto-default-nudge-key-skipped', { sessionName, key, reason: outcome.reason });
+      noteLaunchAnswerSkipped(logger, record, KEY_SKIPPED, { sessionName, key, reason: outcome.reason });
     }
     return outcome.answered;
   } catch {
     // Left for a later poll, as the folder trust's key is.
-    logger.warn('claude-auto-default-nudge-key-skipped', { sessionName, key, reason: 'send-failed' });
+    noteLaunchAnswerSkipped(logger, record, KEY_SKIPPED, { sessionName, key, reason: 'send-failed' });
     return false;
   }
 }

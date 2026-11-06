@@ -599,7 +599,9 @@ export class CopilotTool extends BaseCLITool {
       sessionName,
       readMark,
       async () => isCopilotFolderTrustDialog(stripAnsi(await capturePane(sessionName, 50))),
-      () => sendKeys(sessionName, COPILOT_FOLDER_TRUST_ANSWER_KEY, false)
+      () => sendKeys(sessionName, COPILOT_FOLDER_TRUST_ANSWER_KEY, false),
+      // Issue #4189: the lock's warn of a decline, once per streak in the calling wait.
+      { repeatScope: skips }
     );
     if (!outcome.answered) {
       noteLaunchAnswerSkipped(logger, skips, 'copilot-folder-trust-answer-skipped', { reason: outcome.reason });

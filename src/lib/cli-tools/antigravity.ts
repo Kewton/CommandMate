@@ -398,7 +398,9 @@ export class AntigravityTool extends BaseCLITool {
               sessionName,
               readMark,
               () => this.isTrustPressStill(sessionName, key),
-              () => sendSpecialKey(sessionName, key)
+              () => sendSpecialKey(sessionName, key),
+              // Issue #4189: the lock's warn of a decline, once per streak in this wait.
+              { repeatScope: answerSkips }
             );
             if (outcome.answered) {
               trustDialogHandled = true;
@@ -499,7 +501,8 @@ export class AntigravityTool extends BaseCLITool {
               if (!claimStartupTrust(sessionName)) return false;
               await sendSpecialKey(sessionName, pressKey);
               return true;
-            }
+            },
+            { repeatScope: answerSkips }
           )
           : null;
         if (claimed !== null && !claimed.answered) {
