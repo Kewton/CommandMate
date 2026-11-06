@@ -2628,6 +2628,13 @@ export interface RelayListResponse {
    * delivery hold. Absent on an older server.
    */
   held?: RelayView[];
+  /**
+   * Issue #4193: closed relays in scope (by the requester) whose payload — the
+   * expiry notice, in practice — is still undelivered and whose last delivery
+   * attempt stopped (`lastDeliveryBlock` set). Not in `open` / `awaiting` and
+   * not in `counts` / `heldCount`. Absent on an older server.
+   */
+  closedBlocked?: RelayView[];
   counts: RelayCountsResponse;
   /**
    * Issue #4082: how many payloads in scope are held as `uncertain` now —

@@ -1298,6 +1298,11 @@
     "stripHeldMany": "配送未確認 {count} 件: 画面を確かめて relays resolve で片付けてください",
     "unplacedHeldHeading": "名簿に無いセッションへの配送未確認",
     "unplacedHeldLine": "{requester} ← {alias}（relay {relayId}）",
+    "blockedByPromptClosedTitle": "期限切れで閉じた relay の時間切れの知らせを、最後の配送の試行のとき、このセッション（依頼元）の画面に確認の案内が出ていたため止めました（何も打鍵していません）。案内に答えると、次の配送の周回（約 15 秒ごと）で届きます。この知らせは届くまで残り、別の知らせに置き換わることはありません。最後の試行の時点の観測です。観測時刻は commandmate relays --id で確かめられます。",
+    "blockedByPromptMixedTitle": "最後の配送の試行のとき、このセッション（依頼元）の画面に確認の案内が出ていたため、relay の配送を止めました（何も打鍵していません）。案内に答えると、次の配送の周回（約 15 秒ごと）で届きます。開いている relay の返答は、放置すると期限で時間切れの知らせに置き換わります。期限切れで閉じた relay の時間切れの知らせは、届くまで残ります。最後の試行の時点の観測です。観測時刻は commandmate relays --id で確かめられます。",
+    "unplacedBlockedHeading": "名簿に無いセッションへの時間切れの知らせ（配送が停止中）",
+    "unplacedBlockedTitle": "期限切れで閉じた relay の時間切れの知らせが、名簿に無いセッション（依頼元）へ届かず止まっています。理由は最後の配送の試行の時点の観測です（prompt_waiting = その画面に確認の案内）。届くと消えます。commandmate relays で確かめられます。",
+    "unplacedBlockedLine": "{requester} ← {alias}（relay {relayId}）: 停止の理由 {reason}",
     "historyBadge": "relay",
     "historyBadgeTitle": "別のエージェントセッションから届いたメッセージです（Issue #2377 relay）。",
     "historyCount": "表示範囲に relay メッセージが {count} 件"

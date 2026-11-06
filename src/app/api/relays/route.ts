@@ -24,7 +24,7 @@ import {
   listRelaysWithDeliveryHold,
 } from '@/lib/db/relay-db';
 import { openRelay, readSessionRelays } from '@/lib/relay/relay-service';
-import { withLastDeliveryBlocks } from '@/lib/relay/relay-delivery-block';
+import { listClosedBlockedRelays, withLastDeliveryBlocks } from '@/lib/relay/relay-delivery-block';
 import { resolveRelayTtlMs } from '@/lib/relay/relay-policy';
 import { isValidInstanceId } from '@/lib/cli-tools/types';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
@@ -119,6 +119,16 @@ export async function GET(request: NextRequest) {
         awaiting: withLastDeliveryBlocks(db, sided.awaiting),
         open: withLastDeliveryBlocks(db, open),
         held: withLastDeliveryBlocks(db, held),
+        // Issue #4193: closed relays (an expiry notice, in practice) whose
+        // payload to the requester is still undelivered and whose last attempt
+        // stopped. Kept out of `owed` / `awaiting` / `open` and the counts;
+        // scoped by the requester, the end the payload is going to.
+        closedBlocked: listClosedBlockedRelays(
+          db,
+          worktreeId && instanceId
+            ? { requester: { worktreeId, instanceId } }
+            : { worktreeId: worktreeId ?? undefined }
+        ),
         counts: countRelays(db, {
           worktreeId: worktreeId ?? undefined,
           instanceId: worktreeId && instanceId ? instanceId : undefined,

@@ -33,7 +33,7 @@ import {
   Forward,
 } from 'lucide-react';
 import { useSessionRelays } from '@/lib/relay/use-session-relays';
-import { resolveRelayBadges, type RelayBadge } from '@/lib/relay/relay-badges';
+import { relayToneNeedsAttention, resolveRelayBadges, type RelayBadge } from '@/lib/relay/relay-badges';
 import { RelayUnplacedHeldList } from '@/components/worktree/RelayUnplacedHeldList';
 import {
   CLI_TOOL_IDS,
@@ -287,7 +287,7 @@ function useAgentSourceByInstance(
 export function relayBadgeClassName(badge: RelayBadge): string {
   // Issue #4082: `held` needs somebody to act too (look, then resolve).
   // Issue #4105: so does `blocked` (answer this pane's dialog).
-  return badge.tone === 'prompt' || badge.tone === 'held' || badge.tone === 'blocked'
+  return relayToneNeedsAttention(badge.tone)
     ? 'text-warning'
     : 'text-muted-foreground';
 }
@@ -412,6 +412,12 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
   // Issue #4082: a held delivery to an instance the roster no longer has.
   const unplacedHeld = useMemo(
     () => relays.heldUnplaced(instances.map((inst) => inst.id)),
+    [relays, instances],
+  );
+  // Issue #4193: a closed relay's stopped expiry notice to an instance the
+  // roster no longer has (removed without --kill: its session lives on).
+  const unplacedClosedBlocked = useMemo(
+    () => relays.closedBlockedUnplaced(instances.map((inst) => inst.id)),
     [relays, instances],
   );
 
@@ -653,6 +659,8 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
             awaiting: relays.awaitedBy(inst.id),
             // Issue #4082: payloads to this session whose delivery is not known.
             held: relays.heldFor(inst.id),
+            // Issue #4193: a closed relay's expiry notice stopped on this row's dialog.
+            closedBlocked: relays.closedBlockedFor(inst.id),
             aliasOf,
           });
           // Issue #2395: this row IS the composer's target, so "delegate to it"
@@ -866,6 +874,7 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
       {/* Issue #4082: held deliveries whose requester has no row here. */}
       <RelayUnplacedHeldList
         relays={unplacedHeld}
+        closedBlocked={unplacedClosedBlocked}
         aliasOf={aliasOf}
         className="mt-2"
       />

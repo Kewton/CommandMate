@@ -59,6 +59,8 @@ interface RelayListPayload {
   open?: SessionRelay[];
   /** Issue #4064: relays in scope, open or closed, under a delivery hold. */
   held?: SessionRelay[];
+  /** Issue #4193: closed relays whose undelivered payload's last attempt stopped. */
+  closedBlocked?: SessionRelay[];
   counts?: RelayCounts;
 }
 
@@ -71,6 +73,12 @@ export interface SessionRelaysView {
    * is held as `uncertain` — open or closed.
    */
   held: SessionRelay[];
+  /**
+   * Issue #4193: closed relays (an expiry notice, in practice) whose payload
+   * to the requester is still undelivered and whose last attempt stopped.
+   * Never in `open`, never counted.
+   */
+  closedBlocked: SessionRelay[];
   counts: RelayCounts;
   /** Open relays this instance must answer (it is the `to` end); held ones excluded. */
   owedBy: (instanceId: string) => SessionRelay[];
@@ -83,6 +91,13 @@ export interface SessionRelaysView {
    * not in `rosterIds` (deleted from the roster, say), so they still show.
    */
   heldUnplaced: (rosterIds: readonly string[]) => SessionRelay[];
+  /** Issue #4193: closed relays whose stopped payload is going to this instance (the `from` end). */
+  closedBlockedFor: (instanceId: string) => SessionRelay[];
+  /**
+   * Issue #4193: the same, going to an instance of this worktree that is not
+   * in `rosterIds` (removed from the roster without killing its session).
+   */
+  closedBlockedUnplaced: (rosterIds: readonly string[]) => SessionRelay[];
   /** Re-read now. For a surface that just caused a change. */
   refresh: () => void;
 }
@@ -97,7 +112,12 @@ export function isRelayDeliveryUncertain(relay: SessionRelay): boolean {
 
 /** One worktree's shared answer, and the poll that keeps it fresh. */
 interface RelayStore {
-  snapshot: { open: SessionRelay[]; held: SessionRelay[]; counts: RelayCounts };
+  snapshot: {
+    open: SessionRelay[];
+    held: SessionRelay[];
+    closedBlocked: SessionRelay[];
+    counts: RelayCounts;
+  };
   listeners: Set<() => void>;
   timer: ReturnType<typeof setInterval> | null;
   /** How many mounted hooks are using it. */
@@ -131,7 +151,7 @@ export function resetSessionRelayStores(): void {
 }
 
 function emptySnapshot(): RelayStore['snapshot'] {
-  return { open: EMPTY_RELAYS, held: EMPTY_RELAYS, counts: emptyRelayCounts() };
+  return { open: EMPTY_RELAYS, held: EMPTY_RELAYS, closedBlocked: EMPTY_RELAYS, counts: emptyRelayCounts() };
 }
 
 async function readInto(worktreeId: string, store: RelayStore): Promise<void> {
@@ -149,6 +169,8 @@ async function readInto(worktreeId: string, store: RelayStore): Promise<void> {
       open: Array.isArray(body.open) ? body.open : EMPTY_RELAYS,
       // An older server answers without `held`: nothing is shown as held.
       held: Array.isArray(body.held) ? body.held.filter(isRelayDeliveryUncertain) : EMPTY_RELAYS,
+      // Issue #4193: an older server answers without it: nothing extra shown.
+      closedBlocked: Array.isArray(body.closedBlocked) ? body.closedBlocked : EMPTY_RELAYS,
       counts: body.counts ?? emptyRelayCounts(),
     };
     for (const listener of store.listeners) listener();
@@ -206,7 +228,7 @@ export function useSessionRelays(worktreeId: string | null | undefined): Session
     [worktreeId, fallback]
   );
 
-  const { open, held, counts } = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const { open, held, closedBlocked, counts } = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
   const refresh = useCallback(() => {
     const store = worktreeId ? stores.get(worktreeId) : undefined;
@@ -222,6 +244,7 @@ export function useSessionRelays(worktreeId: string | null | undefined): Session
     return {
       open,
       held,
+      closedBlocked,
       counts,
       owedBy: (instanceId: string) =>
         open.filter(
@@ -236,7 +259,16 @@ export function useSessionRelays(worktreeId: string | null | undefined): Session
         held.filter((relay) => isRequester(relay) && relay.from.instanceId === instanceId),
       heldUnplaced: (rosterIds: readonly string[]) =>
         held.filter((relay) => isRequester(relay) && !rosterIds.includes(relay.from.instanceId)),
+      closedBlockedFor: (instanceId: string) =>
+        closedBlocked.filter(
+          (relay) => !heldIds.has(relay.id) && isRequester(relay) && relay.from.instanceId === instanceId
+        ),
+      closedBlockedUnplaced: (rosterIds: readonly string[]) =>
+        closedBlocked.filter(
+          (relay) =>
+            !heldIds.has(relay.id) && isRequester(relay) && !rosterIds.includes(relay.from.instanceId)
+        ),
       refresh,
     };
-  }, [open, held, counts, worktreeId, refresh]);
+  }, [open, held, closedBlocked, counts, worktreeId, refresh]);
 }

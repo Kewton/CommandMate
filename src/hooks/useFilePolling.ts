@@ -68,8 +68,10 @@ export function useFilePolling({ intervalMs, enabled, onPoll }: UseFilePollingOp
       }
     }
 
+    // Issue #4190: mounted/enabled while hidden → no timer; the first
+    // `visible` reads once and starts it.
     if (enabled) {
-      startPolling();
+      if (document.visibilityState !== 'hidden') startPolling();
     } else {
       clearPolling();
     }
