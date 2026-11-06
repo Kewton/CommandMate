@@ -125,8 +125,9 @@ Both can be installed and used side by side. The installation details are in the
   **only on the terminal screen** (the PC and phone terminal, `commandmate capture`).
   - Started with `--standalone` (there is no private server to subscribe to)
   - The subscription ended on its own (the password file is gone, or the port now belongs to something else)
-  - Right after CommandMate restarts, until the session's next turn ends (turns that ended during the restart are
-    read again at the end of the next turn)
+  - Turns that ended while CommandMate was restarting. After a restart only the ordinary re-read at the end of the
+    next turn runs, and it stops at the page holding the newest question, so a turn on an earlier page may not be
+    recorded
   - The re-read on reconnect goes back at most 5 pages and 50 turns from the newest; anything beyond may not be recorded
   - Scheduled runs (`opencode2 run --standalone`) take a different path and are not what this item is about
 

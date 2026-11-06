@@ -58,6 +58,7 @@ import {
 } from './client';
 import {
   isOpencodeV2TurnEndEventType,
+  opencodeV2HistoryWriteMark,
   recoverOpencodeV2History,
   syncOpencodeV2History,
 } from './history';
@@ -127,13 +128,21 @@ interface SubscriptionState {
    */
   currentSessionId: string | null;
   /**
-   * Sessions to recover on the next reconnect, each with the earliest moment
-   * (epoch ms) the stream was lost while following it (C4). Added when the
-   * stream is lost, removed when a recovery read of it succeeds or is given up.
+   * Sessions to recover on the next reconnect (C4). Set when the stream is
+   * lost while following one — a new entry on every loss, keeping the earliest
+   * mark — and removed when a recovery read *begun on that very entry*
+   * succeeds or is given up: a loss during the read replaces the entry, so the
+   * older read's success leaves the newer loss to the next reconnect.
    */
-  readonly recoverySessions: Map<string, number>;
-  /** Aborts the running recovery (its retry waits); replaced per reconnect. */
+  readonly recoverySessions: Map<string, OpencodeV2RecoveryTarget>;
+  /** Aborts the running recovery (its retry waits); replaced per reconnect, aborted on a loss. */
   recoveryController: AbortController;
+}
+
+/** One loss of a session to recover; a new object per loss (its generation). */
+interface OpencodeV2RecoveryTarget {
+  /** {@link opencodeV2HistoryWriteMark} at the earliest loss not yet recovered. */
+  readonly savedUpTo: number;
 }
 
 declare global {
@@ -397,9 +406,15 @@ async function runStream(state: SubscriptionState): Promise<void> {
     state.liveness = { state: 'lost', since: Date.now(), reason };
     // Issue #4187 (C4): the session followed when the stream was lost is what a
     // reconnect recovers, whatever session the resync then names. The earliest
-    // loss is kept: it is the gap's lower edge.
-    if (state.currentSessionId !== null && !state.recoverySessions.has(state.currentSessionId)) {
-      state.recoverySessions.set(state.currentSessionId, state.liveness.since);
+    // loss's mark is kept (the gap's lower edge), under a new entry, so a
+    // recovery read already running cannot take this loss out with its own
+    // success; that recovery stops here and the next reconnect starts anew.
+    state.recoveryController.abort();
+    if (state.currentSessionId !== null) {
+      const earlier = state.recoverySessions.get(state.currentSessionId);
+      state.recoverySessions.set(state.currentSessionId, {
+        savedUpTo: earlier?.savedUpTo ?? opencodeV2HistoryWriteMark(),
+      });
     }
     logger.info('opencode-v2-subscription-disconnected', {
       worktreeId: state.target.worktreeId,
@@ -507,8 +522,10 @@ export function deliverOpencodeV2Frame(
  * session whose read succeeded leaves the set, one that could not be read stays
  * and is retried after {@link OPENCODE_V2_HISTORY_RECOVERY_RETRY_MS}, three
  * times at most, then is given up with a warn. A newer reconnect aborts this one
- * and takes the set over (one recovery per reconnect); closing or ending the
- * subscription aborts it too. Never throws.
+ * and takes the set over (one recovery per reconnect); a loss of the stream,
+ * closing or ending the subscription aborts it too. A read already under way
+ * still writes its rows, but takes its session out of the set only if no loss
+ * replaced the entry it began on. Never throws.
  */
 function startHistoryRecovery(state: SubscriptionState): void {
   state.recoveryController.abort();
@@ -529,25 +546,31 @@ async function runHistoryRecovery(state: SubscriptionState, signal: AbortSignal)
     if (!stillOurs()) return;
     const pending = [...state.recoverySessions];
     if (pending.length === 0) return;
-    for (const [sessionId, savedBefore] of pending) {
+    for (const [sessionId, entry] of pending) {
       if (!stillOurs()) return;
       const result = await recoverOpencodeV2History(state.target, state.port, sessionId, {
-        savedBefore,
+        savedUpTo: entry.savedUpTo,
         isCurrent: () => isFollowing(state, sessionId),
       });
-      if (!result.unreadable) state.recoverySessions.delete(sessionId);
+      // Only the entry this read began on: a loss during the read replaced it.
+      if (!result.unreadable && state.recoverySessions.get(sessionId) === entry) {
+        state.recoverySessions.delete(sessionId);
+      }
     }
     if (state.recoverySessions.size === 0 || !stillOurs()) return;
     const delays = recoveryRetryDelays;
     if (retry >= delays.length) {
+      const givenUp = [...state.recoverySessions].filter(([, entry]) =>
+        pending.some(([, read]) => read === entry)
+      );
       logger.warn('opencode-v2-history-recovery-failed', {
         worktreeId: state.target.worktreeId,
         instanceId: state.target.instanceId ?? state.target.cliToolId,
         port: state.port,
-        sessionIds: [...state.recoverySessions.keys()],
+        sessionIds: givenUp.map(([sessionId]) => sessionId),
         attempts: retry + 1,
       });
-      state.recoverySessions.clear();
+      for (const [sessionId] of givenUp) state.recoverySessions.delete(sessionId);
       return;
     }
     await waitUnlessAborted(delays[retry], signal);

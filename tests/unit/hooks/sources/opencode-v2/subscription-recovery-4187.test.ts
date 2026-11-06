@@ -161,6 +161,8 @@ async function startServer(): Promise<void> {
       const sessionId = decodeURIComponent(match[1]);
       messageReads.push(sessionId);
       const status = messagesStatuses.shift() ?? defaultMessagesStatus;
+      // The document as it is when asked, even if the answer is held.
+      const document = documents[sessionId] ?? [];
       const held = holdMessages;
       holdMessages = null;
       void (held ?? Promise.resolve()).then(() => {
@@ -171,7 +173,7 @@ async function startServer(): Promise<void> {
         }
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(
-          JSON.stringify({ data: documents[sessionId] ?? [], cursor: { previous: 'p', next: null } })
+          JSON.stringify({ data: document, cursor: { previous: 'p', next: null } })
         );
       });
       return;
@@ -531,6 +533,50 @@ describe('the recovery sync on reconnect (Issue #4187)', { timeout: 15_000 }, ()
     expect(messageReads).toHaveLength(4);
     expect(warned('opencode-v2-history-recovery-failed')).toHaveLength(1);
     expect(assistantRows()).toEqual([]);
+  });
+
+  it('R9: an older recovery read that succeeds keeps a loss of the same session during it', async () => {
+    // Connection 1's recovery read is held; meanwhile turn 2 closes and the
+    // stream is lost again. The held read (of the document without turn 2)
+    // succeeds before the next reconnect, which must still read turn 2.
+    documents[SESSION_A] = documentAfterTurn1();
+    onStream = (res, index) => {
+      if (index === 0) {
+        started(res, SESSION_A);
+        setTimeout(() => res.end(), 100);
+      }
+    };
+    const release = hold();
+    open();
+    await waitFor(() => messageReads.length === 1 && streams.length === 2, 8_000);
+    documents[SESSION_A] = DOCUMENT.data;
+    streams[1].end();
+    await settle(50);
+    expect(streams.length).toBe(2);
+    release();
+    await waitFor(() => assistantRows().length === 1);
+    expect(rows.has(opencodeTurnRequestId(USER_1))).toBe(true);
+    await waitFor(() => assistantRows().length === 2, 8_000);
+    expect(rows.has(opencodeTurnRequestId(USER_2))).toBe(true);
+    expect(streams.length).toBe(3);
+  });
+
+  it('R9b: with no loss during it, a successful recovery read takes the session out', async () => {
+    documents[SESSION_A] = documentAfterTurn1();
+    onStream = (res, index) => {
+      if (index === 0) {
+        started(res, SESSION_A);
+        setTimeout(() => res.end(), 100);
+      }
+    };
+    const release = hold();
+    open();
+    await waitFor(() => messageReads.length === 1 && streams.length === 2, 8_000);
+    release();
+    await waitFor(() => assistantRows().length === 1);
+    await settle(400);
+    expect(messageReads).toEqual([SESSION_A]);
+    expect(streams.length).toBe(2);
   });
 
   it('R8c: closing during the wait before a retry stops the retries', async () => {

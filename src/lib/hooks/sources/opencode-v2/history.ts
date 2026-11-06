@@ -265,7 +265,19 @@ export function readLatestOpencodeV2AssistantModel(entries: readonly unknown[]):
 declare global {
   // eslint-disable-next-line no-var
   var __opencodeV2HistoryQueue: Map<string, Promise<unknown>> | undefined;
+  // eslint-disable-next-line no-var
+  var __opencodeV2HistoryWrites: OpencodeV2HistoryWrites | undefined;
 }
+
+/** The order rows were written in this process (Issue #4187, the recovery's edge). */
+interface OpencodeV2HistoryWrites {
+  seq: number;
+  /** `<worktreeId>\0<requestId>` → the `seq` its row was written at. Newest kept. */
+  readonly written: Map<string, number>;
+}
+
+/** How many rows {@link OpencodeV2HistoryWrites} remembers; older ones count as written long ago. */
+const MAX_REMEMBERED_WRITES = 1000;
 
 /**
  * One sync at a time per instance, on `globalThis` for #1736's reason. Two turn
@@ -274,9 +286,42 @@ declare global {
  */
 const queue = getOrInitGlobal('__opencodeV2HistoryQueue', () => new Map<string, Promise<unknown>>());
 
-/** Forget queued syncs. Test seam. */
+const writes = getOrInitGlobal(
+  '__opencodeV2HistoryWrites',
+  (): OpencodeV2HistoryWrites => ({ seq: 0, written: new Map() })
+);
+
+/** Forget queued syncs and the remembered write order. Test seam. */
 export function resetOpencodeV2HistoryQueue(): void {
   queue.clear();
+  writes.written.clear();
+}
+
+/**
+ * A mark of the rows written so far (Issue #4187). The subscription takes it
+ * when the stream is lost; a recovery read given it as `savedUpTo` stops only at
+ * a turn whose row was there by then. Not a time, so neither a late-noticed loss
+ * nor a clock that moved changes which rows count.
+ */
+export function opencodeV2HistoryWriteMark(): number {
+  return writes.seq;
+}
+
+function rememberWrite(target: AgentInstanceRef, requestId: string): void {
+  writes.seq += 1;
+  const key = `${target.worktreeId}\0${requestId}`;
+  writes.written.delete(key);
+  writes.written.set(key, writes.seq);
+  if (writes.written.size > MAX_REMEMBERED_WRITES) {
+    const oldest = writes.written.keys().next().value;
+    if (oldest !== undefined) writes.written.delete(oldest);
+  }
+}
+
+/** Whether `userMessageId`'s row was written after `mark`, in this process. */
+function writtenAfter(target: AgentInstanceRef, userMessageId: string, mark: number): boolean {
+  const seq = writes.written.get(`${target.worktreeId}\0${opencodeTurnRequestId(userMessageId)}`);
+  return seq !== undefined && seq > mark;
 }
 
 function serialize<T>(key: string, work: () => Promise<T>): Promise<T> {
@@ -344,17 +389,20 @@ interface OpencodeV2RecoveryRead {
  *
  * The ordinary read ({@link readRecentMessages}) stops at the first page with a
  * `user` message, so a turn that closed while the stream was down and is a page
- * further back is never read. This one goes on until a page holds a turn History
- * already has *that began before the stream was lost* (`savedBefore`) — a turn
- * the ordinary sync wrote after the reconnect is newer than the gap and is not
- * its edge — or the document ends, or {@link MAX_OPENCODE_V2_HISTORY_PAGES}.
+ * further back is never read. This one goes on until a page holds a turn whose
+ * row History already had when the stream was lost (`savedUpTo`, a
+ * {@link opencodeV2HistoryWriteMark}) — a turn an ordinary sync wrote after
+ * that is not the gap's edge, whenever it began — or the document ends, or
+ * {@link MAX_OPENCODE_V2_HISTORY_PAGES}. Not by time: the loss is noticed late
+ * (a silent stream is lost only when the watchdog fires) and V2's times are
+ * another clock, so a turn of the gap can look older than the loss.
  */
 async function readMessagesBackToSaved(
   target: AgentInstanceRef,
   port: number,
   password: string,
   sessionId: string,
-  savedBefore: number
+  savedUpTo: number
 ): Promise<OpencodeV2RecoveryRead> {
   const entries: unknown[] = [];
   let cursor: string | null = null;
@@ -366,7 +414,7 @@ async function readMessagesBackToSaved(
     for (const entry of result.data) {
       if (!isPlainObject(entry) || readStringField(entry, 'type') !== 'user') continue;
       const id = readStringField(entry, 'id');
-      if (id === null || createdAtOf(entry) >= savedBefore) continue;
+      if (id === null || writtenAfter(target, id, savedUpTo)) continue;
       if (await isOpencodeV2TurnSaved(target, id)) {
         edge = true;
         break;
@@ -428,6 +476,7 @@ async function writeOpencodeV2Turn(
     instanceId,
     requestId,
   });
+  rememberWrite(target, requestId);
   broadcastMessage('message', { worktreeId: target.worktreeId, message });
   logger.info('opencode-v2-history-turn-saved', {
     worktreeId: target.worktreeId,
@@ -559,10 +608,10 @@ export interface OpencodeV2HistoryRecoveryResult {
 /** Options of {@link recoverOpencodeV2History}. */
 export interface OpencodeV2HistoryRecoveryOptions {
   /**
-   * When the stream was lost, epoch ms. Only a saved turn that began before it
-   * ends the read. Omitted: any saved turn does.
+   * {@link opencodeV2HistoryWriteMark} taken when the stream was lost. Only a
+   * turn whose row was written by then ends the read. Omitted: any saved turn does.
    */
-  readonly savedBefore?: number;
+  readonly savedUpTo?: number;
   /** As {@link syncOpencodeV2History}'s `isCurrent`. */
   readonly isCurrent?: () => boolean;
 }
@@ -587,7 +636,7 @@ export function recoverOpencodeV2History(
   sessionId: string,
   options: OpencodeV2HistoryRecoveryOptions = {}
 ): Promise<OpencodeV2HistoryRecoveryResult> {
-  const savedBefore = options.savedBefore ?? Number.POSITIVE_INFINITY;
+  const savedUpTo = options.savedUpTo ?? Number.POSITIVE_INFINITY;
   const isCurrent = options.isCurrent ?? (() => true);
   return serialize(
     opencodeV2KeyOf(target),
@@ -604,7 +653,7 @@ export function recoverOpencodeV2History(
           });
           return { written: 0, unreadable: false };
         }
-        const read = await readMessagesBackToSaved(target, port, password, sessionId, savedBefore);
+        const read = await readMessagesBackToSaved(target, port, password, sessionId, savedUpTo);
         if (read.unreadable && read.entries.length === 0) {
           logger.warn('opencode-v2-history-unavailable', {
             worktreeId: target.worktreeId,
