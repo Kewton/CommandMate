@@ -108,7 +108,26 @@ procfs 上の `realpath` は即 ENOENT を返すため、この関数自体は�
 | `CodexHookOptions.codexHome` | 同上 | 同上 | 同期 |
 | `COPILOT_HOME` | `hooks/sources/copilot/hook-settings.ts` `getCopilotHomeDirectory()` | 同ファイル `writeCopilotHookSettings` | 同期 |
 | `CM_OPENCODE_PORT_FILE` | `hooks/sources/opencode/ports.ts` `getOpencodePortFilePath()` | 同ファイル `writePersistedOpencodePorts` | 同期 |
+| `CM_OPENCODE_LAUNCH_SETTINGS_FILE` | `hooks/sources/opencode/launch-settings.ts` `getOpencodeLaunchSettingsFilePath()` | 同ファイルの書き込み | 同期 |
+| `CM_OPENCODE_SESSION_FILE` | `session/opencode-session-store.ts` `getOpencodeSessionFilePath()` | 同ファイルの書き込み | 同期 |
+| `CM_OPENCODE_V2_DIR` | `hooks/sources/opencode-v2/secrets.ts` `getOpencodeV2StateDir()` | 同ディレクトリの作成 | 同期 |
+| `XDG_CONFIG_HOME` | `cli-tools/opencode-config.ts` `opencodeGlobalConfigDir()` | opencode の設定の書き込み | 同期 |
+| `CM_AGENT_ROLE_ARTIFACTS_DIR` / `ArtifactOptions.dataRoot` | `agent-roles/artifacts.ts` | ロールの成果物の書き込み | 同期 |
+| `CM_AGENT_ROLE_ANTIGRAVITY_AGENTS_DIR` | `agent-roles/artifacts.ts` `antigravityAgentsDir()` | 同上 | 同期 |
+| `CM_TMUX_SCRIPT_DIR` | `tmux/session-hook-scripts.ts` `getScriptDir()` | 同ファイル `materializeScript` | 同期・**絶対化**（#4176） |
 | （引数） | `hooks/sources/gemini/shared-config-tree.ts` `writeJsonObjectFile()` | 同関数 | 同期・**拒否** |
+
+**相対パスの扱い（#4191）**: `resolveSafeDirectory()` は相対値をそのまま返す（判定だけ絶対形で行う）。
+同じプロセスが `fs` で開くだけなら cwd は一致するので問題ないが、パスを**別プロセスに渡す**設定では、
+渡した先の cwd で解決されて別のファイルを指す。そうした設定は `resolveSafeAbsoluteDirectory()`
+（このプロセスの cwd で絶対化してから判定）を使う。
+
+| 設定 | 渡す先 | 扱い |
+|---|---|---|
+| `CM_AGENT_HOOKS_DIR` / `HookSettingsOptions.directory` | claude の `--settings`（起動 cwd は worktree、daemon の cwd は package root） | **絶対化**（#4191） |
+| `CM_TMUX_SCRIPT_DIR` | tmux の hook のコマンド（tmux サーバーの cwd で実行） | **絶対化**（#4176） |
+| `CM_LOG_DIR` | 渡さない（`log-manager` と logs の API ルートが同じプロセスで読み書き。`process.chdir` は src に無い） | 相対のまま |
+| `CODEX_HOME` など上表の残り | 一部は子プロセスの環境に渡る（例: codex の起動環境の `CODEX_HOME`） | 相対のまま。#4191 の範囲外として申し送り |
 
 `CM_OPENCODE_PORT_FILE` は**ファイル**パスだが、判定は前置一致なのでディレクトリと同じ扱いで
 正しく弾ける（`/proc/ports.json` の親は `/proc` そのもの）。

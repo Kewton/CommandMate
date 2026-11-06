@@ -8,9 +8,12 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { restoreFetch } from '../../../helpers/mock-api';
+import { restoreFetch, keepOffTheRealServer } from '../../../helpers/mock-api';
 import { ExitCode } from '../../../../src/cli/types';
 import { MAX_STOP_PATTERN_LENGTH } from '../../../../src/cli/utils/api-client';
+
+// Issue #4191: no request from this file reaches 127.0.0.1:3000, not even by failing.
+keepOffTheRealServer();
 
 const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
 const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});

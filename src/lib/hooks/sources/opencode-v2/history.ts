@@ -23,7 +23,15 @@
  *    ending close together write each turn once;
  *  - and it recovers what the stream missed. A turn that ended while the
  *    connection was down is in the document the next time any turn of the
- *    session ends.
+ *    session ends — and, since Issue #4187, when the stream reconnects
+ *    ({@link recoverOpencodeV2History}, which reads back past the newest
+ *    `user` message, to the page cap).
+ *
+ * The screen scraper never writes a V2 reply (Issue #4187's decision): the turns
+ * of a stream that is not live are this module's to write, later, under their
+ * `oc-turn:` key — a scraped row cannot carry that key, so both writing would
+ * double the turn. A pane with no subscription at all (`--standalone`) or one
+ * whose subscription ended on its own is not recorded.
  *
  * ## One turn in the document
  *
@@ -155,6 +163,22 @@ export function readOpencodeV2ContentPart(
   };
 }
 
+/** `entries`' messages oldest first, as {@link buildOpencodeV2TurnsFromMessages} orders them. */
+function sortOpencodeV2MessagesOldestFirst(entries: readonly unknown[]): Record<string, unknown>[] {
+  return entries
+    .filter(isPlainObject)
+    .filter((message) => readStringField(message, 'id') !== null)
+    .map((message, index) => ({ message, index }))
+    .sort((a, b) => {
+      const byTime = createdAtOf(a.message) - createdAtOf(b.message);
+      if (byTime !== 0) return byTime;
+      const aId = readStringField(a.message, 'id') ?? '';
+      const bId = readStringField(b.message, 'id') ?? '';
+      return aId < bId ? -1 : aId > bId ? 1 : a.index - b.index;
+    })
+    .map(({ message }) => message);
+}
+
 /**
  * Rebuild the turns of a session from `GET /api/session/{id}/message` entries.
  *
@@ -170,18 +194,7 @@ export function buildOpencodeV2TurnsFromMessages(
   entries: readonly unknown[],
   sessionId: string
 ): OpencodeV2Turn[] {
-  const messages = entries
-    .filter(isPlainObject)
-    .filter((message) => readStringField(message, 'id') !== null)
-    .map((message, index) => ({ message, index }))
-    .sort((a, b) => {
-      const byTime = createdAtOf(a.message) - createdAtOf(b.message);
-      if (byTime !== 0) return byTime;
-      const aId = readStringField(a.message, 'id') ?? '';
-      const bId = readStringField(b.message, 'id') ?? '';
-      return aId < bId ? -1 : aId > bId ? 1 : a.index - b.index;
-    })
-    .map(({ message }) => message);
+  const messages = sortOpencodeV2MessagesOldestFirst(entries);
 
   const turns: OpencodeV2Turn[] = [];
   let open: { accumulator: OpencodeTurnAccumulator; completedAt: number | null } | null = null;
@@ -306,6 +319,102 @@ async function readRecentMessages(
   return entries;
 }
 
+/** Whether History already holds the turn opened by this user message. */
+async function isOpencodeV2TurnSaved(
+  target: AgentInstanceRef,
+  userMessageId: string
+): Promise<boolean> {
+  const [{ getDbInstance }, { findMessageByRequestId }] = await Promise.all([
+    import('@/lib/db/db-instance'),
+    import('@/lib/db'),
+  ]);
+  return (
+    findMessageByRequestId(getDbInstance(), target.worktreeId, opencodeTurnRequestId(userMessageId)) !==
+    null
+  );
+}
+
+/** What the recovery read got back. */
+interface OpencodeV2RecoveryRead {
+  readonly entries: unknown[];
+  /** A page could not be read (the first, or one further back). */
+  readonly unreadable: boolean;
+  readonly pages: number;
+  /**
+   * The page cap was reached with more of the document beyond it, and the
+   * oldest page read held a turn History did not have, or the oldest turn read
+   * lacks its `user` (its head is beyond the cap): turns further back may be
+   * missing too. A long document that is all saved is not truncated.
+   */
+  readonly truncated: boolean;
+}
+
+/**
+ * Read newest-first pages up to {@link MAX_OPENCODE_V2_HISTORY_PAGES} (or the
+ * document's end) for the recovery sync (Issue #4187, C6).
+ *
+ * The ordinary read ({@link readRecentMessages}) stops at the first page with a
+ * `user` message, so a turn that closed while the stream was down and is a page
+ * further back is never read. This one does not stop at a turn History already
+ * has either: no such turn marks the gap's edge for sure — an ordinary sync can
+ * write a newer turn before the loss is noticed, and V2's times are another
+ * clock — so it reads the whole cap, and the rows' keys (`oc-turn:<id>`) and
+ * the per-instance queue keep a turn from being written twice.
+ */
+async function readMessagesToCap(
+  target: AgentInstanceRef,
+  port: number,
+  password: string,
+  sessionId: string
+): Promise<OpencodeV2RecoveryRead> {
+  const entries: unknown[] = [];
+  let cursor: string | null = null;
+  for (let page = 0; page < MAX_OPENCODE_V2_HISTORY_PAGES; page += 1) {
+    const result = await fetchOpencodeV2SessionMessagesPage(port, password, sessionId, cursor);
+    if (result === null) return { entries, unreadable: true, pages: page, truncated: false };
+    entries.push(...result.data);
+    if (result.next === null || result.data.length === 0) {
+      return { entries, unreadable: false, pages: page + 1, truncated: false };
+    }
+    if (page === MAX_OPENCODE_V2_HISTORY_PAGES - 1) {
+      return {
+        entries,
+        unreadable: false,
+        pages: page + 1,
+        truncated: headUnread(entries) || (await holdsUnsavedTurn(target, result.data)),
+      };
+    }
+    cursor = result.next;
+  }
+  return { entries, unreadable: false, pages: MAX_OPENCODE_V2_HISTORY_PAGES, truncated: false };
+}
+
+/**
+ * Whether the oldest turn read has messages but not its head: an `assistant`
+ * older than every `user` read. Its `user` is beyond the cap, so the turn
+ * cannot be built (or told saved) from what was read — a turn longer than the
+ * pages read included. Counted as possibly missing: without its `user` id
+ * there is no way to ask History.
+ */
+function headUnread(entries: readonly unknown[]): boolean {
+  for (const message of sortOpencodeV2MessagesOldestFirst(entries)) {
+    const type = readStringField(message, 'type');
+    if (type === 'user') return false;
+    if (type === 'assistant') return true;
+  }
+  return false;
+}
+
+/** Whether `page` has a `user` message whose turn History does not have. */
+async function holdsUnsavedTurn(target: AgentInstanceRef, page: unknown[]): Promise<boolean> {
+  for (const entry of page) {
+    if (!isPlainObject(entry) || readStringField(entry, 'type') !== 'user') continue;
+    const id = readStringField(entry, 'id');
+    if (id !== null && !(await isOpencodeV2TurnSaved(target, id))) return true;
+  }
+  return false;
+}
+
 /**
  * Write one rendered turn, unless its row is already there.
  *
@@ -368,6 +477,55 @@ async function writeOpencodeV2Turn(
 }
 
 /**
+ * Latch the answering model, then write the closed turns of `entries` that
+ * History does not have, oldest first. Shared by the ordinary sync and the
+ * recovery sync (Issue #4187).
+ *
+ * @returns How many rows were written, and how many turns History does not
+ *   have the newest-kept cap dropped
+ */
+async function writeOpencodeV2Turns(
+  target: AgentInstanceRef,
+  sessionId: string,
+  entries: unknown[],
+  isCurrent: () => boolean
+): Promise<{ written: number; droppedUnsaved: number }> {
+  // Issue #2964: the model that answered, onto the hook latch the UI and
+  // `capture --json` read. Before the rows, so a failed write cannot cost it.
+  // Issue #3733: not for a subscription closed or replaced during the read —
+  // a restarted or stopped session would show the old model, and its change
+  // broadcast and Push (#2357) would fire for a session that is not there.
+  // Issue #4187 (C5): the subscription's `isCurrent` also asks that the session
+  // read is still the one it is following, so a late sync of the previous
+  // session does not put that session's model back on the display.
+  if (isCurrent()) {
+    recordAgentReportedModel(
+      target.worktreeId,
+      OPENCODE_V2_CLI_TOOL_ID,
+      target.instanceId ?? OPENCODE_V2_CLI_TOOL_ID,
+      readLatestOpencodeV2AssistantModel(entries)
+    );
+  }
+
+  const closed = buildOpencodeV2TurnsFromMessages(entries, sessionId).filter(
+    (turn) => turn.closed
+  );
+  const kept = closed.slice(-MAX_OPENCODE_V2_SYNCED_TURNS);
+  let droppedUnsaved = 0;
+  for (const turn of closed.slice(0, closed.length - kept.length)) {
+    if (!(await isOpencodeV2TurnSaved(target, turn.accumulator.userMessageId))) droppedUnsaved += 1;
+  }
+  let written = 0;
+  // Oldest first, so the rows go in in conversation order.
+  for (const turn of kept) {
+    const rendered = renderOpencodeTurn(turn.accumulator);
+    const at = Math.max(turn.accumulator.startedAt, turn.completedAt ?? 0);
+    if (await writeOpencodeV2Turn(target, rendered, at)) written += 1;
+  }
+  return { written, droppedUnsaved };
+}
+
+/**
  * Record every closed turn of a session that History does not have yet.
  *
  * Called when the instance's stream says a turn of `sessionId` ended. Never
@@ -377,9 +535,10 @@ async function writeOpencodeV2Turn(
  * @param port - Its server
  * @param sessionId - `ses_…` from the end-of-turn frame
  * @param isCurrent - Whether the subscription that asked is still the
- *   instance's (Issue #3733); checked after the read, right before the model
- *   is latched. False skips only the latch: the rows are still written (the
- *   turn did happen, and `requestId` keeps a later sync from doubling them)
+ *   instance's (Issue #3733) and still following `sessionId` (Issue #4187);
+ *   checked after the read, right before the model is latched. False skips
+ *   only the latch: the rows are still written (the turn did happen, and
+ *   `requestId` keeps a later sync from doubling them)
  * @returns How many rows were written
  */
 export function syncOpencodeV2History(
@@ -411,33 +570,7 @@ export function syncOpencodeV2History(
         });
         return 0;
       }
-
-      // Issue #2964: the model that answered, onto the hook latch the UI and
-      // `capture --json` read. Before the rows, so a failed write cannot cost it.
-      // Issue #3733: not for a subscription closed or replaced during the read —
-      // a restarted or stopped session would show the old model, and its change
-      // broadcast and Push (#2357) would fire for a session that is not there.
-      if (isCurrent()) {
-        recordAgentReportedModel(
-          target.worktreeId,
-          OPENCODE_V2_CLI_TOOL_ID,
-          target.instanceId ?? OPENCODE_V2_CLI_TOOL_ID,
-          readLatestOpencodeV2AssistantModel(entries)
-        );
-      }
-
-      const closed = buildOpencodeV2TurnsFromMessages(entries, sessionId).filter(
-        (turn) => turn.closed
-      );
-      const kept = closed.slice(-MAX_OPENCODE_V2_SYNCED_TURNS);
-      let written = 0;
-      // Oldest first, so the rows go in in conversation order.
-      for (const turn of kept) {
-        const rendered = renderOpencodeTurn(turn.accumulator);
-        const at = Math.max(turn.accumulator.startedAt, turn.completedAt ?? 0);
-        if (await writeOpencodeV2Turn(target, rendered, at)) written += 1;
-      }
-      return written;
+      return (await writeOpencodeV2Turns(target, sessionId, entries, isCurrent)).written;
     } catch (error) {
       logger.error('opencode-v2-history-sync-failed', {
         worktreeId: target.worktreeId,
@@ -449,4 +582,103 @@ export function syncOpencodeV2History(
       return 0;
     }
   });
+}
+
+/** What one recovery sync did (Issue #4187, C7). */
+export interface OpencodeV2HistoryRecoveryResult {
+  /** Rows written. */
+  readonly written: number;
+  /**
+   * The document could not be read (or the write failed), so the turns of the
+   * gap may still be missing and the caller may try again. False with
+   * `written: 0` means there was nothing to write.
+   */
+  readonly unreadable: boolean;
+}
+
+/** Options of {@link recoverOpencodeV2History}. */
+export interface OpencodeV2HistoryRecoveryOptions {
+  /** As {@link syncOpencodeV2History}'s `isCurrent`. */
+  readonly isCurrent?: () => boolean;
+}
+
+/**
+ * Record the closed turns of a session that ended while the instance's stream
+ * was not live (Issue #4187, the recovery sync on reconnect).
+ *
+ * The same rows, keys and queue as {@link syncOpencodeV2History} — a recovery
+ * and an ordinary sync that overlap still write each turn once (C8) — but read
+ * {@link MAX_OPENCODE_V2_HISTORY_PAGES} pages (or to the document's end)
+ * instead of to the newest `user` message (C6), never stopping early at a turn
+ * History has. A warn (`opencode-v2-history-recovery-truncated`) says only that
+ * turns History does not have may lie beyond the cap: the oldest page read held
+ * one, the oldest turn read has no `user` in what was read, or
+ * {@link MAX_OPENCODE_V2_SYNCED_TURNS} dropped one. Guaranteed: the
+ * closed, unsaved turns within those pages, whatever order rows were written in
+ * and whatever the clocks say — not every turn ever.
+ *
+ * Never throws.
+ */
+export function recoverOpencodeV2History(
+  target: AgentInstanceRef,
+  port: number,
+  sessionId: string,
+  options: OpencodeV2HistoryRecoveryOptions = {}
+): Promise<OpencodeV2HistoryRecoveryResult> {
+  const isCurrent = options.isCurrent ?? (() => true);
+  return serialize(
+    opencodeV2KeyOf(target),
+    async (): Promise<OpencodeV2HistoryRecoveryResult> => {
+      const instanceId = target.instanceId ?? target.cliToolId;
+      try {
+        const password = readOpencodeV2Password(target);
+        if (password === null) {
+          // The subscription ends on this too; nothing to try again for.
+          logger.info('opencode-v2-history-unavailable', {
+            worktreeId: target.worktreeId,
+            instanceId,
+            reason: 'password-file-missing',
+          });
+          return { written: 0, unreadable: false };
+        }
+        const read = await readMessagesToCap(target, port, password, sessionId);
+        if (read.unreadable && read.entries.length === 0) {
+          logger.warn('opencode-v2-history-unavailable', {
+            worktreeId: target.worktreeId,
+            instanceId,
+            port,
+            sessionId,
+            reason: 'messages-unreadable',
+          });
+          return { written: 0, unreadable: true };
+        }
+        const { written, droppedUnsaved } = await writeOpencodeV2Turns(
+          target,
+          sessionId,
+          read.entries,
+          isCurrent
+        );
+        if (read.truncated || droppedUnsaved > 0) {
+          logger.warn('opencode-v2-history-recovery-truncated', {
+            worktreeId: target.worktreeId,
+            instanceId,
+            sessionId,
+            pages: read.pages,
+            droppedTurns: droppedUnsaved,
+          });
+        }
+        return { written, unreadable: read.unreadable };
+      } catch (error) {
+        logger.error('opencode-v2-history-sync-failed', {
+          worktreeId: target.worktreeId,
+          instanceId,
+          port,
+          sessionId,
+          recovery: true,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return { written: 0, unreadable: true };
+      }
+    }
+  );
 }
