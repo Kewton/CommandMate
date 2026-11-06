@@ -1298,6 +1298,11 @@
     "stripHeldMany": "{count} unconfirmed deliveries: check this pane, then settle them with relays resolve.",
     "unplacedHeldHeading": "Unconfirmed deliveries to sessions not in the roster",
     "unplacedHeldLine": "{requester} ← {alias} (relay {relayId})",
+    "blockedByPromptClosedTitle": "At the last delivery attempt this session (the requester) showed a confirmation dialog, so the expiry notice of a relay closed by its deadline was stopped (nothing was typed). Answer the dialog and it is delivered on the next delivery pass (about every 15 s). The notice stays until it is delivered; nothing replaces it. This is what the last attempt observed; commandmate relays --id shows when.",
+    "blockedByPromptMixedTitle": "At the last delivery attempt this session (the requester) showed a confirmation dialog, so the relay deliveries were stopped (nothing was typed). Answer the dialog and they are delivered on the next delivery pass (about every 15 s). Left alone, a reply of an open relay is replaced by the expiry notice at the deadline; the expiry notice of a relay closed by its deadline stays until it is delivered. This is what the last attempt observed; commandmate relays --id shows when.",
+    "unplacedBlockedHeading": "Expiry notices to sessions not in the roster (delivery stopped)",
+    "unplacedBlockedTitle": "The expiry notice of a relay closed by its deadline has not reached a session (the requester) that is not in the roster. The reason is what the last delivery attempt observed (prompt_waiting = that pane shows a confirmation dialog). It goes away once delivered; commandmate relays shows it.",
+    "unplacedBlockedLine": "{requester} ← {alias} (relay {relayId}): stopped by {reason}",
     "historyBadge": "relay",
     "historyBadgeTitle": "Delivered by another agent session (Issue #2377 relay).",
     "historyCount": "{count} relayed message(s) in view"
