@@ -278,7 +278,7 @@ function useAgentSourceByInstance(
 /**
  * Token classes for a relay badge (Issue #2377).
  *
- * `prompt` and (Issue #4082) `held` are drawn as a warning, because they are
+ * `prompt`, (Issue #4082) `held` and (Issue #4105) `blocked` are drawn as a warning, because they are
  * the ones that mean somebody has to act; the other two are statements of fact about work
  * that is proceeding, and are drawn in the same muted grey as the model and
  * event-source lines above them. Semantic tokens only — see
@@ -286,7 +286,10 @@ function useAgentSourceByInstance(
  */
 export function relayBadgeClassName(badge: RelayBadge): string {
   // Issue #4082: `held` needs somebody to act too (look, then resolve).
-  return badge.tone === 'prompt' || badge.tone === 'held' ? 'text-warning' : 'text-muted-foreground';
+  // Issue #4105: so does `blocked` (answer this pane's dialog).
+  return badge.tone === 'prompt' || badge.tone === 'held' || badge.tone === 'blocked'
+    ? 'text-warning'
+    : 'text-muted-foreground';
 }
 
 // ============================================================================

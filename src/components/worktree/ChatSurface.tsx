@@ -1141,7 +1141,7 @@ export const ChatSurface = memo(function ChatSurface({
           data-relay-tone={relayStrip.tone}
           role="status"
           className={`flex shrink-0 items-center gap-1.5 border-b border-border px-3 py-1 text-xs ${
-            relayStrip.tone === 'prompt' || relayStrip.tone === 'held'
+            relayStrip.tone === 'prompt' || relayStrip.tone === 'held' || relayStrip.tone === 'blocked'
               ? 'bg-warning-subtle text-warning-foreground'
               : 'bg-surface-2 text-muted-foreground'
           }`}

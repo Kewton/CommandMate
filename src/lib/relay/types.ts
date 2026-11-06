@@ -13,9 +13,12 @@
  * Where a relay row stands.
  *
  *  - `pending`   — B has not finished the turn A is waiting on.
- *  - `prompt`    — B stopped on a confirmation, and A has been told so. Still
- *                  open: answering the prompt lets B finish and the reply is
- *                  delivered from this state.
+ *  - `prompt`    — B stopped on a confirmation, and a notice to A was QUEUED
+ *                  (Issue #4105: the state is set when the notice is stashed,
+ *                  not when it reaches A — whether it went out is read from
+ *                  `pendingKind` / {@link SessionRelay.lastDeliveryBlock}).
+ *                  Still open: answering the prompt lets B finish and the reply
+ *                  is delivered from this state.
  *  - `delivered` — B's reply reached A's composer. Terminal.
  *  - `expired`   — the deadline passed with nothing delivered. Terminal.
  *  - `cancelled` — somebody withdrew it (`commandmate relays cancel`). Terminal.
@@ -149,6 +152,42 @@ export interface RelayDeliveryHold {
   checkCommand: string;
 }
 
+/**
+ * Why the last delivery attempt of a payload stopped before typing anything
+ * (Issue #4105). The requester A's side only — never B's dialog, which is the
+ * relay's `prompt` state.
+ *
+ *  - `prompt_waiting`  — A's pane showed a confirmation; the send path refused
+ *                        to type into it (nothing was typed).
+ *  - `generating`      — A was mid-turn.
+ *  - `session_stopped` — A's session was not running.
+ *  - `foreign_session` — A's session name belongs to another server.
+ */
+export type RelayDeliveryBlockReason =
+  | 'prompt_waiting'
+  | 'generating'
+  | 'session_stopped'
+  | 'foreign_session';
+
+/**
+ * What the LAST delivery attempt of the payload now in the slot ran into
+ * (Issue #4105). An observation, not a current state: `observedAt` is when the
+ * attempt saw it, and a dialog closed since is only reflected by the next
+ * attempt (the pump runs every 15 s). Kept in the server process only — never
+ * written to the database — so a restart forgets it.
+ *
+ * Deliberately not called a "hold": `held` / `heldCount` / `holdReason` /
+ * `deliveryHold` are the ledger's own axes and this is not added to any of them.
+ */
+export interface RelayLastDeliveryBlock {
+  reason: RelayDeliveryBlockReason;
+  /** The payload the attempt was for — the one in the slot now. */
+  kind: RelayPendingKind;
+  payloadId: string | null;
+  /** Epoch ms of the attempt that observed it. */
+  observedAt: number;
+}
+
 /** A relay ledger row, as every reader sees it. */
 export interface SessionRelay {
   id: string;
@@ -184,6 +223,15 @@ export interface SessionRelay {
   overlap: RelayOverlap | null;
   /** Issue #4064: the payload whose delivery is under way or not known; null when none. */
   deliveryHold: RelayDeliveryHold | null;
+  /**
+   * Issue #4105: only on the relay APIs' answers (`GET /api/relays`,
+   * `GET /api/relays/:id`). `null` = this server process has no observation
+   * for the payload now in the slot (none attempted yet, attempted and not
+   * stopped, restarted, payload replaced, or under a delivery hold) — which
+   * is NOT "deliverable". Absent (undefined) = the row was not read through
+   * those APIs, or the server is older.
+   */
+  lastDeliveryBlock?: RelayLastDeliveryBlock | null;
 }
 
 /** The v62 fields of a row with no binding, as a legacy relay reads (Issue #3957), and no delivery hold (#4064). */
