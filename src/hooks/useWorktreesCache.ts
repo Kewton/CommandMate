@@ -184,6 +184,7 @@ export function useWorktreesCache(
    * subsequent success can both cancel it.
    */
   const retryAttemptRef = useRef(0);
+  const refreshSeqRef = useRef(0);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Issue #2643: the last fetch failed. A re-fetch of an empty cache after a
   // failure goes back to "loading" so no commit reads as "loaded and empty".
@@ -205,6 +206,9 @@ export function useWorktreesCache(
   connectedRef.current = connected;
 
   const refresh = useCallback(async () => {
+    // Issue #4190: only the latest request is adopted, so a reply held up
+    // before hidden cannot overwrite what the read on coming back returned.
+    const requestSeq = ++refreshSeqRef.current;
     try {
       setError(null);
       // Issue #2643: retrying an empty cache after a failure is a load, not a
@@ -234,6 +238,7 @@ export function useWorktreesCache(
         throw formatError;
       }
       const data = await response.json();
+      if (requestSeq !== refreshSeqRef.current) return;
       const wts = applySavedWorktreeStatuses<Worktree>(data.worktrees ?? [], statusGeneration);
       const repos = data.repositories ?? [];
       // Mark polling state updates as low-priority transitions so urgent
@@ -256,6 +261,7 @@ export function useWorktreesCache(
       retryAttemptRef.current = 0;
       cancelRetry();
     } catch (err) {
+      if (requestSeq !== refreshSeqRef.current) return;
       const fetchError = err instanceof Error ? err : new Error(String(err));
       // Issue #2059: the only place a failed worktree load became visible was
       // WorktreeSelectionContext's polling effect, which never runs in the app
@@ -291,6 +297,8 @@ export function useWorktreesCache(
 
   // Issue #2059: never leave a retry armed after unmount.
   useEffect(() => cancelRetry, [cancelRetry]);
+  // Issue #4190: a reply landing after unmount is not adopted.
+  useEffect(() => () => { refreshSeqRef.current += 1; }, []);
 
   /**
    * Returns true if any cached worktree is currently running a session.
@@ -354,9 +362,10 @@ export function useWorktreesCache(
       }
     };
 
-    // Start polling after initial load settles (next tick)
+    // Start polling after initial load settles (next tick). Issue #4190:
+    // enabled while hidden → no timer; `visible` refreshes once and starts it.
     const timeoutId = setTimeout(() => {
-      startPolling();
+      if (!document.hidden) startPolling();
     }, 0);
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
