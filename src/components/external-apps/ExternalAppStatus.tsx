@@ -6,9 +6,10 @@
 
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { useTranslations } from 'next-intl';
 import type { ExternalAppHealth } from '@/types/external-apps';
+import { useVisiblePolling, type VisiblePollingClaim } from '@/hooks/useVisiblePolling';
 
 export interface ExternalAppStatusProps {
   /** External app ID */
@@ -40,41 +41,40 @@ export function ExternalAppStatus({
   const [health, setHealth] = useState<ExternalAppHealth | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const checkHealth = useCallback(async () => {
-    try {
-      const response = await fetch(`/api/external-apps/${appId}/health`);
-      if (response.ok) {
-        const data = await response.json();
-        setHealth(data);
-      } else {
-        setHealth({
+  // Issue #4174: rests while the tab is hidden, checks once on coming back. An answer
+  // older than one already taken, for an app no longer shown (appId changed), or
+  // arriving after unmount is dropped. A failed check still shows unhealthy.
+  const checkHealth = useCallback(
+    async (claim: VisiblePollingClaim) => {
+      let next: ExternalAppHealth;
+      try {
+        const response = await fetch(`/api/external-apps/${appId}/health`);
+        if (response.ok) {
+          next = await response.json();
+        } else {
+          next = {
+            id: appId,
+            healthy: false,
+            lastChecked: Date.now(),
+            error: 'Failed to check health',
+          };
+        }
+      } catch {
+        next = {
           id: appId,
           healthy: false,
           lastChecked: Date.now(),
-          error: 'Failed to check health',
-        });
+          error: 'Network error',
+        };
       }
-    } catch {
-      setHealth({
-        id: appId,
-        healthy: false,
-        lastChecked: Date.now(),
-        error: 'Network error',
-      });
-    } finally {
+      if (!claim()) return;
+      setHealth(next);
       setIsLoading(false);
-    }
-  }, [appId]);
+    },
+    [appId],
+  );
 
-  useEffect(() => {
-    // Initial check
-    checkHealth();
-
-    // Set up polling
-    const interval = setInterval(checkHealth, pollInterval);
-
-    return () => clearInterval(interval);
-  }, [checkHealth, pollInterval]);
+  useVisiblePolling(checkHealth, pollInterval);
 
   if (isLoading) {
     return (
