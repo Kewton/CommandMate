@@ -703,6 +703,36 @@ The API is `POST /api/relays/:id/resolve` (body `{ "payloadId", "attemptId", "ac
   `replyDiscarded: true`). The expiry itself is told by the existing "expired" system line and the hold on the
   screens; no expiry notice is sent to the composer after the hold is settled
 
+#### A delivery stopped by the requester's confirmation dialog (Issue #4105)
+
+While the requester A shows a confirmation dialog, a relay delivery types nothing into A's composer (as
+before). Why it is stopped is now readable, as what the **last delivery attempt** observed.
+
+- **The field**: every relay in `GET /api/relays` (`owed`, `awaiting`, `open`, `held`) and `GET /api/relays/:id`
+  carries `lastDeliveryBlock` (`{ reason, kind, payloadId, observedAt }`). `reason` is `prompt_waiting` (A's
+  confirmation dialog), `generating` (A is mid-turn), `session_stopped` (A's session is not running) or
+  `foreign_session` (a session of that name belongs to another server). It is not a current state but what the
+  attempt at `observedAt` saw. Once the dialog is closed, the next delivery pass (about every 15 s) delivers
+  and it goes away; the screens follow with their 20-second re-read
+- **The payload it is for**: only an observation of the current payload (`kind`, `payloadId`) is shown. It is
+  `null` once the payload was replaced, delivered, cancelled, expired or held (`deliveryHold`)
+- **`null` does not mean "deliverable"**: it is kept in the server process only, never in the database. After a
+  restart, before the first attempt, or when the attempt stopped for another reason it is `null`. An older
+  server sends no such field
+- **CLI**: the lines of `commandmate relays` and `commandmate relays --id <relay-id>` carry `pending=<kind>`
+  (the payload waiting for the composer) and `blocked=<reason>@<observed time>`. `--json` is the API's answer
+- **The screens**: the PC and phone rosters and the chat surface show "stopped by this pane's dialog" (warning
+  colour) on the requester A's row, for `prompt_waiting` only. It comes after "delivery unconfirmed" and before
+  the worker's confirmation. The waiting and prompt counts are unchanged
+- **Not the `prompt` state**: `prompt` records that the worker B stopped on a confirmation and a notice to A was
+  **queued** (not that it arrived). **It does not mean B is still waiting**: once B answers and the reply replaces
+  the notice (`pending=reply`), `state` stays `prompt` until the relay closes. The roster says "Worker confirmation
+  recorded"
+- **No count changes**: the reason is never in `held`, `heldCount`, `holdReason`, `deliveryHold` or the
+  per-state `counts`
+- **Left alone**: at the deadline (24 hours by default) the waiting reply is replaced by the expiry notice (as
+  before). The dialog is never closed automatically (Auto-Yes is unchanged)
+
 ### Progress Output
 
 Progress is written to stderr. Only the final result (JSON) goes to stdout.

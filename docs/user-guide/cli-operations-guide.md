@@ -809,6 +809,31 @@ API は `POST /api/relays/:id/resolve`（本文 `{ "payloadId", "attemptId", "ac
   その旨を依頼元の履歴に system 行で残します（API の応答は `replyDiscarded: true`）。期限切れは既存の「期限切れ」の
   system 行と保留の表示で伝わり、片付けた後に期限切れの通知を新たに入力欄へ送ることはしません
 
+#### 依頼元の確認の案内で止まった配送（Issue #4105）
+
+依頼元 A の画面に確認の案内（ダイアログ）が出ている間、relay の配送は A の入力欄に打鍵しません（今までどおり）。
+止まっている理由を、配送の**最後の試行**の観測として読めるようにしています。
+
+- **欄**: `GET /api/relays`（`owed`・`awaiting`・`open`・`held`）と `GET /api/relays/:id` の各 relay に
+  `lastDeliveryBlock`（`{ reason, kind, payloadId, observedAt }`）が付きます。`reason` は `prompt_waiting`
+  （A の確認の案内）・`generating`（A が生成中）・`session_stopped`（A のセッションが止まっている）・
+  `foreign_session`（同じ名前のセッションが別のサーバーのもの）です。いまの状態ではなく、`observedAt` の時刻の
+  試行で見たことです。案内を閉じると、次の配送の周回（約 15 秒ごと）で配送されて消え、画面は 20 秒ごとの読み直しで追従します
+- **対象の payload**: いまの payload（`kind`・`payloadId`）に対する観測だけを出します。payload が置き換わった・
+  配送された・取り消された・期限切れになった・保留（`deliveryHold`）になったときは `null` です
+- **`null` は「配送できる」ではありません**: サーバーのプロセスの中だけに持ち、データベースには書きません。
+  再起動の後や、まだ試行していないとき、別の理由で止まったときは `null` です。古いサーバーでは欄がありません
+- **CLI**: `commandmate relays`・`commandmate relays --id <relay-id>` の行に `pending=<種類>`（入力欄へ届けるのを
+  待っている payload）と `blocked=<理由>@<観測時刻>` が付きます。`--json` は API の応答のままです
+- **画面**: PC・スマホの名簿とチャット面は、`prompt_waiting` のときだけ、依頼元 A の行に「この画面の確認で停止」
+  （警告色）を出します。並びは「配送が未確認」の次、確認待ちの前です。返信待ち・確認待ちの数はそのままです
+- **確認待ち（`state: prompt`）とは別です**: `prompt` は相手 B が確認待ちで止まり、A への知らせを**配送の待ち行列に入れた**
+  記録です（届いたことは意味しません）。**B が今も確認待ちであることも意味しません**: B が確認を終えて返信が知らせを
+  置き換えても（`pending=reply`）、`state` は relay が閉じるまで `prompt` のままです。名簿の表示も「相手の確認待ちを記録」です
+- **件数は変わりません**: `held`・`heldCount`・`holdReason`・`deliveryHold`・状態別の `counts` にこの理由は入りません
+- **放置すると**: 期限（既定 24 時間）で、待っていた返答は時間切れの知らせに置き換わります（今までどおり）。案内を自動で
+  閉じることはしません（Auto-Yes の扱いも変えません）
+
 ### ターン成立の判定（Issue #1839）
 
 `wait` はこれまで「エージェントが composer に戻ったか」しか見ておらず、**そのターンが

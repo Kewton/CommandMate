@@ -195,8 +195,9 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
     commandmate relays cancel <relay-id>    # withdraw one; nothing is delivered
 
   States: pending (the worker has not finished), prompt (it stopped on a
-  confirmation and the requester was told; still open), delivered, expired,
-  cancelled.
+  confirmation at some point and a notice to the requester was queued; still
+  open — a record, not "still waiting": it stays after the confirmation is
+  answered and the reply replaces the notice), delivered, expired, cancelled.
 
   'relays cancel' cannot withdraw a relay that is being delivered right now
   (a reply or a prompt notice): the server answers 409 and the command exits
@@ -207,6 +208,14 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   A reply is held rather than delivered while the requesting session is
   generating -- typing into a running composer interrupts the turn -- and is
   delivered as soon as it is idle again.
+
+  A line may end in pending=<kind> (the payload waiting for the requester's
+  composer) and blocked=<reason>@<time> (Issue #4105): why the LAST delivery
+  attempt of that payload stopped. blocked=prompt_waiting means the
+  requester's own pane shows a confirmation dialog; nothing is typed into it.
+  Answer that dialog and the next pass (about every 15 s) delivers; left alone,
+  the payload is replaced by the expiry notice at the deadline. No blocked=
+  means nothing was observed (e.g. after a restart), not that it can go out.
 
 ### commandmate wait <worktree-id...>
   Block until agent completes or prompt is detected.
