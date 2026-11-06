@@ -89,6 +89,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
   const [selectedTimer, setSelectedTimer] = useState<TimerItem | null>(null);
   const [, setTick] = useState(0); // Force re-render for countdown
 
+  const fetchSeqRef = useRef(0);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastCreatedAtRef = useRef<number | null>(null);
@@ -99,10 +100,13 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
 
   // [SF-002] fetchTimers: polling-only, depends only on worktreeId (Issue #540)
   const fetchTimers = useCallback(async () => {
+    // Issue #4190: only the latest request (and nothing after teardown) is adopted.
+    const seq = ++fetchSeqRef.current;
     try {
       const res = await fetch(`/api/worktrees/${worktreeId}/timers`);
       if (res.ok) {
         const data = await res.json();
+        if (seq !== fetchSeqRef.current) return;
         setTimers(data.timers);
         setHasMore(data.hasMore ?? false);
         if (data.timers.length > 0) {
@@ -144,6 +148,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
   useEffect(() => {
     /** Start polling and countdown intervals, returning a cleanup function. */
     function startIntervals(): () => void {
+      stopIntervals();
       void fetchTimers();
       pollingRef.current = setInterval(() => {
         void fetchTimers();
@@ -162,7 +167,8 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
       countdownRef.current = null;
     }
 
-    startIntervals();
+    // Issue #4190: mounted while hidden → no timers; `visible` starts them.
+    if (document.visibilityState !== 'hidden') startIntervals();
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
@@ -175,6 +181,7 @@ export const TimerPane = memo(function TimerPane({ worktreeId, instances }: Time
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
+      fetchSeqRef.current += 1;
       stopIntervals();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
