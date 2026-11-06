@@ -26,6 +26,11 @@ import type { SessionRelay } from '@/lib/relay/types';
  */
 export type RelayBadgeTone = 'held' | 'blocked' | 'owed' | 'awaiting' | 'prompt';
 
+/** Tones where somebody has to act (Issues #4082, #4105): `prompt`, `held`, `blocked`. */
+export function relayToneNeedsAttention(tone: RelayBadgeTone): boolean {
+  return tone === 'prompt' || tone === 'held' || tone === 'blocked';
+}
+
 /** One badge, ready for `t(key, params)`. */
 export interface RelayBadge {
   tone: RelayBadgeTone;

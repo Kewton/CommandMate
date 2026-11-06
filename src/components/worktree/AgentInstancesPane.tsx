@@ -33,7 +33,7 @@ import {
   Forward,
 } from 'lucide-react';
 import { useSessionRelays } from '@/lib/relay/use-session-relays';
-import { resolveRelayBadges, type RelayBadge } from '@/lib/relay/relay-badges';
+import { relayToneNeedsAttention, resolveRelayBadges, type RelayBadge } from '@/lib/relay/relay-badges';
 import { RelayUnplacedHeldList } from '@/components/worktree/RelayUnplacedHeldList';
 import {
   CLI_TOOL_IDS,
@@ -287,7 +287,7 @@ function useAgentSourceByInstance(
 export function relayBadgeClassName(badge: RelayBadge): string {
   // Issue #4082: `held` needs somebody to act too (look, then resolve).
   // Issue #4105: so does `blocked` (answer this pane's dialog).
-  return badge.tone === 'prompt' || badge.tone === 'held' || badge.tone === 'blocked'
+  return relayToneNeedsAttention(badge.tone)
     ? 'text-warning'
     : 'text-muted-foreground';
 }
