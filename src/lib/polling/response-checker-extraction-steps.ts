@@ -20,6 +20,7 @@ import {
   findCodexChromeStart,
   findCodexUserEchoIndex,
 } from '@/lib/detection/cli-patterns';
+import { findOpencodeV2ChromeStart } from '@/lib/detection/tools/opencode-v2/patterns';
 import { createLogger } from '@/lib/logger';
 import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
 
@@ -78,6 +79,17 @@ export function findChromeStart(
   // that one row. `findCodexChromeStart` reads the composer by its SGR
   // attributes (#2310) rather than by its placeholder wording, which is what the
   // previous guard did and why it stopped working at codex 0.15x.
+  //
+  // Issue #4175: opencode-v2 is the sixth. It draws V1's box — `┃` gutter rows
+  // over a `╹▀▀▀` border, the footer under it — and had no boundary: the
+  // composer's rows went into every reply, and the footer was kept out only by
+  // its column in the skip list (#4161), which a reply drawn further left would
+  // lose and a footer drawn further right would beat. opencode-v2 has no rule in
+  // `isTurnComplete`, so today this boundary reaches only the partial reading,
+  // which the poller does not save.
+  if (cliToolId === 'opencode-v2') {
+    return findOpencodeV2ChromeStart(lines.map(stripAnsi));
+  }
   return cliToolId === 'claude'
     ? findClaudeChromeStart(lines)
     : cliToolId === 'copilot'

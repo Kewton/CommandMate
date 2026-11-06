@@ -51,6 +51,7 @@ import {
   OPENCODE_V2_IDLE_COMPOSER_PATTERN,
   stripAnsi,
 } from '../../cli-patterns';
+import { isOpencodeV2FooterRowAt } from './patterns';
 import { positiveVerdict } from '../verdicts';
 import { STATUS_REASON } from '../../status-reason';
 import { OPENCODE_V2_LIVE_REGION } from './live-region';
@@ -143,13 +144,34 @@ function readQuestionDialog(frame: NormalizedFrame): DialogVerdict | null {
   return { kind: 'question', options, answerMode: 'numbered', submitMode: 'answer_only' };
 }
 
-/** Rows below the transcript that are chrome: gutter padding, the model bar, the rule, the footer, the version. */
-function isChromeRow(line: string): boolean {
+/**
+ * Rows below the transcript that are chrome: gutter padding, the model bar, the rule,
+ * the footer, the version.
+ *
+ * Issue #4175: the footer by its position (the row under the composer's border,
+ * {@link isOpencodeV2FooterRowAt}), not by `ctrl+p commands` anywhere in the row — a
+ * reply's last row saying those words was stepped over as chrome, and the row above
+ * it read as the last transcript row.
+ */
+function isChromeRow(lines: readonly string[], index: number): boolean {
+  const line = lines[index];
   if (/^[\s│┃╹▀]*$/.test(line)) return true;
   // The composer's model bar: gutter, then `<Agent> · <model> <provider>` with no second `·`.
   if (/^[^\S\n]*[│┃][^\S\n]*[A-Za-z][\w-]* · [^·\n]+$/.test(line)) return true;
-  if (OPENCODE_V2_FOOTER_PATTERN.test(line)) return true;
+  if (isOpencodeV2FooterRowAt(lines, index)) return true;
   return /^\s*\d+\.\d+\.\d+\s*$/.test(line);
+}
+
+/**
+ * The index of the last transcript row — the first row above the composer's
+ * chrome — or -1. `lines` are ANSI-stripped, box drawing intact.
+ */
+export function findOpencodeV2LastTranscriptRow(lines: readonly string[]): number {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (isChromeRow(lines, i)) continue;
+    return i;
+  }
+  return -1;
 }
 
 /**
@@ -158,12 +180,8 @@ function isChromeRow(line: string): boolean {
  * earlier turn stays on the pane behind the next turn and behind a dialog.
  */
 export function endsWithTurnComplete(frame: NormalizedFrame): boolean {
-  const lines = frame.contentLines;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (isChromeRow(lines[i])) continue;
-    return OPENCODE_V2_TURN_COMPLETE_PATTERN.test(lines[i]);
-  }
-  return false;
+  const last = findOpencodeV2LastTranscriptRow(frame.contentLines);
+  return last >= 0 && OPENCODE_V2_TURN_COMPLETE_PATTERN.test(frame.contentLines[last]);
 }
 
 export const opencodeV2StatusDetector = createToolStatusDetector({
@@ -221,7 +239,8 @@ export const opencodeV2StatusDetector = createToolStatusDetector({
 
     // The placeholder against the ANSI-stripped frame with its box drawing
     // intact (the pattern anchors on the `┃` gutter). The footer is on every
-    // frame, and the running hint was ruled out just above.
+    // frame, and the running hint was ruled out just above. Issue #4175: the
+    // footer under the composer's border, not its words in a reply.
     if (
       OPENCODE_V2_IDLE_COMPOSER_PATTERN.test(stripAnsi(frame.raw)) ||
       OPENCODE_V2_FOOTER_PATTERN.test(frame.lastLines)

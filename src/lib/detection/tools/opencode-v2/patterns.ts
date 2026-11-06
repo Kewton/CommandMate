@@ -4,7 +4,11 @@
  */
 
 import { PASTED_TEXT_PATTERN } from '../../shared/pasted-text';
-import { OPENCODE_SEPARATOR_PATTERN } from '../opencode/patterns';
+import {
+  findOpenCodeChromeStart,
+  OPENCODE_COMPOSER_BOTTOM_BORDER,
+  OPENCODE_SEPARATOR_PATTERN,
+} from '../opencode/patterns';
 
 // =============================================================================
 // OpenCode V2 (`opencode2`, Issue #2934)
@@ -37,8 +41,40 @@ export const OPENCODE_V2_IDLE_COMPOSER_PATTERN =
  *
  * Proof that the TUI — and so its composer — is on screen, NOT that it is idle:
  * a running turn keeps the footer.
+ *
+ * Read by position (Issue #4175): the footer is the row right under the composer's
+ * bottom border (`╹▀▀▀…`), on every frame under `tests/fixtures/opencode-v2*` —
+ * pinned to the bottom of a session frame, under the centred composer on the
+ * boot screen (row 106 of 200, with `2.0.18` below it). The words alone were
+ * matched before, so a reply saying `ctrl+p commands` put the composer on a
+ * frame that had none (the approval dialog replaces it) and made a frame with
+ * no footer `ready`. The row ends in the words, or in them and the sidebar's
+ * column two spaces later (`tests/fixtures/opencode-v2-usage-2981/`).
+ *
+ * Match against the ANSI-stripped text with its box drawing intact: the border is
+ * the anchor. For a reader that sees one row at a time, {@link isOpencodeV2FooterRowAt}.
  */
-export const OPENCODE_V2_FOOTER_PATTERN = /ctrl\+p commands/;
+export const OPENCODE_V2_FOOTER_PATTERN =
+  /^[^\S\n]*\u2579\u2580{4,}[^\n]*\n[^\n]*ctrl\+p commands(?:[^\S\n]{2}[^\n]*)?[^\S\n]*$/m;
+
+/** The end of the footer's row: the words, then nothing or the sidebar's column. */
+const FOOTER_ROW_END_PATTERN = /ctrl\+p commands(?:[^\S\n]{2}[^\n]*)?[^\S\n]*$/;
+
+/**
+ * Whether `rows[index]` is the footer, by {@link OPENCODE_V2_FOOTER_PATTERN}'s rule:
+ * the row under the composer's bottom border, ending as the footer ends.
+ *
+ * @param rows - ANSI-stripped rows, box drawing intact
+ * @param index - The row to ask about
+ */
+export function isOpencodeV2FooterRowAt(rows: readonly string[], index: number): boolean {
+  return (
+    index > 0 &&
+    index < rows.length &&
+    OPENCODE_COMPOSER_BOTTOM_BORDER.test(rows[index - 1]) &&
+    FOOTER_ROW_END_PATTERN.test(rows[index])
+  );
+}
 
 /**
  * OpenCode V2 working indicator: the footer's `esc interrupt` hint, drawn only
@@ -52,25 +88,30 @@ export const OPENCODE_V2_FOOTER_PATTERN = /ctrl\+p commands/;
  *     shift+tab agents  ctrl+p commands`. A pane wide enough for the sidebar draws
  * one more column after `ctrl+p commands` (`tests/fixtures/opencode-v2-usage-2981/`).
  *
- * Every reader hands over the bottom of the frame. Not for a per-row skip list, where
- * each row is the last one: that is {@link OPENCODE_V2_FOOTER_ROW_PATTERN}.
+ * Every reader hands over the bottom of the frame. Not for a reader that sees one row
+ * at a time, where each row is the last one: the extraction cuts the footer off by
+ * position instead ({@link findOpencodeV2ChromeStart}, Issue #4175). Confirmed on the
+ * 80-column footers measured for #4175 (`tests/fixtures/opencode-v2-live-4175/`).
  */
 export const OPENCODE_V2_THINKING_PATTERN =
   /(?:^|\s)esc (?:again to )?interrupt[^\S\n]{2,}(?:[^\n]*[^\S\n]{2})?ctrl\+p commands(?:[^\S\n]{2}[^\n]*)?\s*$/;
 
 /**
- * The footer as one row of the transcript, for the extraction's skip list, which sees
- * a row at a time and so cannot ask where the bottom is (Issue #4161). It asks for the
- * column instead: 2.0.18 starts the footer in column 2 or 3 and a reply's text in
- * column 5 (every frame under `tests/fixtures/opencode-v2*`), so a reply quoting the
- * row stays in the reply.
+ * The footer as one row, by its column (Issue #4161): 2.0.18 starts the footer in
+ * column 2 or 3 and a reply's text in column 5 (every frame under
+ * `tests/fixtures/opencode-v2*`).
+ *
+ * Issue #4175: no longer in the skip list. The extraction cuts the footer off with
+ * the rest of the chrome ({@link findOpencodeV2ChromeStart}), so the column is read
+ * only where that finds no composer — and there only on the last row of the frame.
  */
 export const OPENCODE_V2_FOOTER_ROW_PATTERN =
   /^[^\S\n]{0,4}\S[^\n]*ctrl\+p commands(?:[^\S\n]{2}[^\n]*)?$/;
 
 /**
  * Whether OpenCode V2's composer is on screen, so a send may type into it
- * (Issue #2934, D6): the gutter-anchored placeholder, or the footer.
+ * (Issue #2934, D6): the gutter-anchored placeholder, or the footer under the
+ * composer's border (Issue #4175: not the words anywhere on the pane).
  *
  * @param text - ANSI-stripped capture, box drawing intact
  */
@@ -78,11 +119,45 @@ export function isOpencodeV2ComposerVisible(text: string): boolean {
   return OPENCODE_V2_IDLE_COMPOSER_PATTERN.test(text) || OPENCODE_V2_FOOTER_PATTERN.test(text);
 }
 
-/** OpenCode V2 rows that are chrome, never reply content. */
+/**
+ * Where OpenCode V2's bottom-pinned chrome starts — the composer box (or the dialog
+ * drawn in its place), its border and the footer — or -1 (Issue #4175).
+ *
+ * V1's reader ({@link findOpenCodeChromeStart}): the same toolkit draws the same box,
+ * `┃` gutter rows over a `╹▀▀▀` border with the footer under it, on every frame under
+ * `tests/fixtures/opencode-v2*`, and the approval and question forms run their gutter
+ * to the last row as V1's dialog does. Without it the extraction knew the footer only
+ * by its column ({@link OPENCODE_V2_FOOTER_ROW_PATTERN}) and the composer's rows went
+ * into the reply. When it finds nothing, the footer as the last non-blank row.
+ *
+ * @param lines - ANSI-stripped rows, box drawing intact
+ * @returns Index of the first chrome row, or -1
+ */
+export function findOpencodeV2ChromeStart(lines: string[]): number {
+  const structural = findOpenCodeChromeStart(lines);
+  if (structural >= 0) return structural;
+  let last = lines.length - 1;
+  while (last >= 0 && lines[last].trim() === '') last--;
+  return last >= 0 && OPENCODE_V2_FOOTER_ROW_PATTERN.test(lines[last]) ? last : -1;
+}
+
+/**
+ * The composer's placeholder row, on the composer's `┃` gutter (Issue #4175). The
+ * skip list held `/Ask anything(?:\.\.\.|\u2026)/`, which dropped any row of a reply
+ * with those words. One row at a time, so no `m` flag.
+ */
+const OPENCODE_V2_PLACEHOLDER_ROW_PATTERN = /^[^\S\n]*[\u2502\u2503][^\S\n]*Ask anything(?:\.\.\.|\u2026)/;
+
+/**
+ * OpenCode V2 rows that are chrome, never reply content.
+ *
+ * Issue #4175: the footer and the placeholder are matched on their own rows only —
+ * the chrome is cut off before this list is read ({@link findOpencodeV2ChromeStart}),
+ * so what reaches it is the transcript, where those words are a reply's.
+ */
 export const OPENCODE_V2_SKIP_PATTERNS: readonly RegExp[] = [
   OPENCODE_SEPARATOR_PATTERN,
-  OPENCODE_V2_FOOTER_ROW_PATTERN,
-  /Ask anything(?:\.\.\.|\u2026)/,
+  OPENCODE_V2_PLACEHOLDER_ROW_PATTERN,
   /^Build\s+·/,
   PASTED_TEXT_PATTERN,
 ] as const;
