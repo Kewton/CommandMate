@@ -15,7 +15,7 @@
  * @module lib/relay/relay-badges
  */
 
-import type { SessionRelay } from '@/lib/relay/types';
+import { isOpenRelayState, type SessionRelay } from '@/lib/relay/types';
 
 /**
  * Which of the things a row can be saying. Issue #4082: `held` — a payload
@@ -29,6 +29,21 @@ export type RelayBadgeTone = 'held' | 'blocked' | 'owed' | 'awaiting' | 'prompt'
 /** Tones where somebody has to act (Issues #4082, #4105): `prompt`, `held`, `blocked`. */
 export function relayToneNeedsAttention(tone: RelayBadgeTone): boolean {
   return tone === 'prompt' || tone === 'held' || tone === 'blocked';
+}
+
+/**
+ * The `blocked` badge's title, by what the stopped payloads are (Issue #4193).
+ *
+ * An open relay's reply left alone is replaced by the expiry notice at the
+ * deadline; a closed relay's expiry notice is not replaced by anything — it
+ * waits until it is delivered. Each title says only what holds for the
+ * relays it stands for: open only, closed only, or both.
+ */
+export function blockedTitleKey(blocked: readonly SessionRelay[]): string {
+  const closed = blocked.filter((relay) => !isOpenRelayState(relay.state)).length;
+  if (closed === 0) return 'blockedByPromptTitle';
+  if (closed === blocked.length) return 'blockedByPromptClosedTitle';
+  return 'blockedByPromptMixedTitle';
 }
 
 /** One badge, ready for `t(key, params)`. */
@@ -59,6 +74,12 @@ export interface RelayBadgeInput {
    * `uncertain`. Absent = none. The caller keeps them out of `owed` / `awaiting`.
    */
   held?: SessionRelay[];
+  /**
+   * Issue #4193: CLOSED relays whose payload to this row (the requester) — the
+   * expiry notice, in practice — is still undelivered and whose last attempt
+   * stopped. Absent = none. Only feeds `blocked`; never `awaiting`.
+   */
+  closedBlocked?: SessionRelay[];
   /** Names the other end; defaults to the instance id. */
   aliasOf: RelayAliasResolver;
 }
@@ -114,7 +135,9 @@ export function resolveRelayBadges(input: RelayBadgeInput): RelayBadge[] {
 
   // Issue #4105: only the requester's own dialog. `generating` and
   // `session_stopped` are readable in `relays`, but need nobody to act here.
-  const blocked = input.awaiting.filter(
+  // Issue #4193: a closed relay's expiry notice stopped the same way counts
+  // too — the relay is no longer open, but the dialog still holds the notice.
+  const blocked = [...input.awaiting, ...(input.closedBlocked ?? [])].filter(
     (relay) => relay.lastDeliveryBlock?.reason === 'prompt_waiting'
   );
   if (blocked.length === 1) {
@@ -122,7 +145,7 @@ export function resolveRelayBadges(input: RelayBadgeInput): RelayBadge[] {
       tone: 'blocked',
       key: 'badgeBlockedByPrompt',
       params: { alias: input.aliasOf(blocked[0].to) },
-      titleKey: 'blockedByPromptTitle',
+      titleKey: blockedTitleKey(blocked),
       count: 1,
     });
   } else if (blocked.length > 1) {
@@ -130,7 +153,7 @@ export function resolveRelayBadges(input: RelayBadgeInput): RelayBadge[] {
       tone: 'blocked',
       key: 'badgeBlockedByPromptMany',
       params: { count: blocked.length },
-      titleKey: 'blockedByPromptTitle',
+      titleKey: blockedTitleKey(blocked),
       count: blocked.length,
     });
   }
