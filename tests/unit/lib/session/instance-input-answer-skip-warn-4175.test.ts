@@ -51,30 +51,39 @@ const warned = (event: string, session = S): unknown[][] =>
   log.warn.mock.calls.filter((call) => call[0] === event && (call[1] as { sessionName: string }).sessionName === session);
 const debugged = (event: string): unknown[][] => log.debug.mock.calls.filter((call) => call[0] === event);
 
-const recheckFails = (session = S): Promise<InstanceInputAnswerOutcome<string>> =>
+/** One launch wait's scope; a new one per test. */
+let WAIT: object = {};
+
+const recheckFails = (session = S, scope: object | null = WAIT): Promise<InstanceInputAnswerOutcome<string>> =>
   answerUnderInstanceInputLock(session, STALE, async () => {
     throw new Error('capture failed');
-  }, async () => 'typed');
-const targetChanged = (session = S): Promise<InstanceInputAnswerOutcome<string>> =>
-  answerUnderInstanceInputLock(session, STALE, async () => false, async () => 'typed');
-const goesThrough = (session = S): Promise<InstanceInputAnswerOutcome<string>> =>
-  answerUnderInstanceInputLock(session, STALE, async () => true, async () => 'typed');
+  }, async () => 'typed', { repeatScope: scope ?? undefined });
+const targetChanged = (session = S, scope: object | null = WAIT): Promise<InstanceInputAnswerOutcome<string>> =>
+  answerUnderInstanceInputLock(session, STALE, async () => false, async () => 'typed', { repeatScope: scope ?? undefined });
+const goesThrough = (session = S, scope: object | null = WAIT): Promise<InstanceInputAnswerOutcome<string>> =>
+  answerUnderInstanceInputLock(session, STALE, async () => true, async () => 'typed', { repeatScope: scope ?? undefined });
 
 /** An answer that waits behind a send past its (short) wait. */
-async function timesOut(session = S): Promise<InstanceInputAnswerOutcome<string>> {
+async function timesOut(session = S, scope: object | null = WAIT): Promise<InstanceInputAnswerOutcome<string>> {
   const send = deferred();
   const held = withInstanceInputLock(session, () => send.promise);
-  const outcome = answerUnderInstanceInputLock(session, STALE, async () => true, async () => 'typed', { waitMs: 5 });
+  const outcome = answerUnderInstanceInputLock(session, STALE, async () => true, async () => 'typed', {
+    waitMs: 5,
+    repeatScope: scope ?? undefined,
+  });
   await vi.advanceTimersByTimeAsync(10);
   send.resolve();
   await held;
   return outcome;
 }
 
+const lives = (): Map<string, number> | undefined => globalThis.__instanceInputAnswerSkipLives?.bySession;
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
   resetInstanceInputLocks();
+  WAIT = {};
 });
 
 afterEach(() => {
@@ -129,15 +138,34 @@ describe('once while the same reason goes on', () => {
     expect(warned(RECHECK, OTHER)).toHaveLength(1);
   });
 
-  it('the session shares one record across its answers: a second caller in the streak is a debug', async () => {
-    // The unit is the session (the lock's state is the session's): the launch wait
-    // and an Auto-Yes answer at the same session declining for the same reason
-    // leave one warn. The callers with their own record still write theirs.
+  it('an answer of another kind at the same session (Auto-Yes, no scope) is a warn of its own', async () => {
+    // Positive: the launch wait's streak must not hold back the warn of an answer
+    // whose own record of a decline is an info.
     await recheckFails();
     await answerUnderInstanceInputLock(S, STALE, async () => {
-      throw new Error('other caller');
+      throw new Error('auto-yes recheck');
     }, async () => 'typed');
-    expect(warned(RECHECK)).toHaveLength(1);
+    expect(warned(RECHECK)).toHaveLength(2);
+  });
+
+  it('an answer with no scope: every decline is a warn, as before', async () => {
+    await recheckFails(S, null);
+    await recheckFails(S, null);
+    expect(warned(RECHECK)).toHaveLength(2);
+  });
+
+  it('another wait at the same session has its own streak', async () => {
+    await recheckFails(S, WAIT);
+    await recheckFails(S, {});
+    expect(warned(RECHECK)).toHaveLength(2);
+  });
+
+  it('the same wait, the same reason, after another kind of answer declined: still a debug', async () => {
+    await recheckFails();
+    await recheckFails(S, null);
+    await recheckFails();
+    expect(warned(RECHECK)).toHaveLength(2); // the launch's first and the unscoped one
+    expect(debugged(RECHECK)).toHaveLength(1);
   });
 });
 
@@ -201,24 +229,46 @@ describe('a new process for the session', () => {
 });
 
 describe('bounded', () => {
-  it(`keeps at most ${ANSWER_SKIP_RECORD_MAX} sessions`, async () => {
-    for (let i = 0; i < ANSWER_SKIP_RECORD_MAX + 20; i++) {
-      await recheckFails(`mcbd-codex-wt-4175-${i}`);
-      if (i % 2 === 0) invalidateInstanceInput(`mcbd-codex-wt-4175-${i}`);
-    }
-    expect(globalThis.__instanceInputAnswerSkips?.bySession.size).toBeLessThanOrEqual(ANSWER_SKIP_RECORD_MAX);
+  it(`keeps the lives of at most ${ANSWER_SKIP_RECORD_MAX} sessions`, async () => {
+    for (let i = 0; i < ANSWER_SKIP_RECORD_MAX + 20; i++) invalidateInstanceInput(`mcbd-codex-wt-4175-${i}`);
+    expect(lives()?.size).toBe(ANSWER_SKIP_RECORD_MAX);
   });
 
-  it('an answer that went through drops a record that holds nothing else', async () => {
+  it('answers alone leave no life behind', async () => {
     await recheckFails();
-    expect(globalThis.__instanceInputAnswerSkips?.bySession.has(S)).toBe(true);
     await goesThrough();
-    expect(globalThis.__instanceInputAnswerSkips?.bySession.has(S)).toBe(false);
+    await goesThrough(OTHER, null);
+    expect(lives()?.size).toBe(0);
   });
 
-  it('answers that only go through leave no record', async () => {
-    await goesThrough();
-    await goesThrough(OTHER);
-    expect(globalThis.__instanceInputAnswerSkips?.bySession.size).toBe(0);
+  it('an old answer of a life that was dropped is not taken for the new one', async () => {
+    // Positive: life 0 read again later -> recreated -> 256 others push it out ->
+    // the old read declines. Before, the old answer matched "no life = 0" again and
+    // wrote the new process's record, which held back its first warn.
+    const reading = deferred<boolean>();
+    let readCalled = false;
+    const old = answerUnderInstanceInputLock(
+      S,
+      STALE,
+      async () => {
+        readCalled = true;
+        await reading.promise;
+        throw new Error('old pane gone');
+      },
+      async () => 'typed',
+      { repeatScope: WAIT }
+    );
+    await flush();
+    expect(readCalled).toBe(true);
+    invalidateInstanceInput(S);
+    for (let i = 0; i < ANSWER_SKIP_RECORD_MAX; i++) invalidateInstanceInput(`mcbd-codex-wt-4175-${i}`);
+    expect(lives()?.has(S) ?? false).toBe(false);
+    reading.resolve(true);
+    await expect(old).resolves.toEqual({ answered: false, reason: 'recheck-failed' });
+    expect(warned(RECHECK)).toHaveLength(1);
+    await recheckFails(); // the new process's first decline, in the same wait
+    expect(warned(RECHECK)).toHaveLength(2);
+    await recheckFails(); // and its streak is kept from here on
+    expect(warned(RECHECK)).toHaveLength(2);
   });
 });

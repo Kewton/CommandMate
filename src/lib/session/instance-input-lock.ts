@@ -221,7 +221,7 @@ declare global {
   // eslint-disable-next-line no-var
   var __instanceInputLocks: Map<string, LockEntry> | undefined;
   // eslint-disable-next-line no-var
-  var __instanceInputAnswerSkips: AnswerSkipRecords | undefined;
+  var __instanceInputAnswerSkipLives: AnswerSkipLives | undefined;
   // eslint-disable-next-line no-var
   var __instanceInputGeneration:
     | { last: number; lastExclusive?: number; exclusiveEvents?: number; sharedReleases?: number }
@@ -273,102 +273,133 @@ const ownerScope = getOrInitGlobal(
 );
 
 /**
- * The warn of a declined answer, per session (Issue #4175).
+ * The warn of a declined answer, once per streak (Issue #4175).
  *
  * `instance-input-answer-not-admitted` and `instance-input-answer-recheck-failed`
- * were written at every decline, and a launch wait asks again on every poll. They
- * are written once while the same reason goes on for the session; a repeat is a
- * debug. The record is the session's: the lock it describes is the session's, and
- * every caller that answers there (launch waits, Auto-Yes, `respond`, plan review)
- * shares it, so the first decline of a streak is a warn on whichever path it
- * falls, and the callers that keep their own record (`launch-answer-skips`) still
- * write their own warn as before.
+ * were written at every decline, and a launch wait asks again on every poll. A
+ * caller that passes a `repeatScope` (one per wait: codex passes its
+ * `LaunchAnswerSkips`) gets them once while the same reason goes on for the
+ * session within that scope; a repeat is a debug. A caller with no scope (Auto-Yes,
+ * `respond`, plan review, whose own record of a decline is an info) gets the warn
+ * every time, as before: another answer's past decline never holds its warn back.
  *
- * - **Ends**: an answer that went through, or a decline for another reason
- *   (`target-changed` included, which stays an info) — the next decline is a warn
- *   again, even for the same reason.
- * - **A new process** (`invalidateInstanceInput`) starts the session's record
- *   again under a new `life`. An answer is judged under the `life` it started in:
- *   one that started before the replacement and ends after it neither reads the
- *   new record (its warn is written) nor writes it.
- * - **Bounded**: at most {@link ANSWER_SKIP_RECORD_MAX} sessions, oldest dropped;
- *   in memory, so a restarted server warns at the first decline.
+ * - **Ends**: an answer of the scope that went through, or a decline for another
+ *   reason (`target-changed` included, which stays an info).
+ * - **A new process** (`invalidateInstanceInput`) gives the session a new life,
+ *   numbered from one counter that only goes up. An answer is judged under the life
+ *   it started in: one that started before the replacement neither reads the new
+ *   life's record (its warn is written) nor writes it.
+ * - **Bounded**: the records belong to the scope (a `WeakMap`, gone with the
+ *   wait); the lives of at most {@link ANSWER_SKIP_RECORD_MAX} sessions are kept.
+ *   A life that was dropped is not taken for life 0: an answer that started where
+ *   no life was known matches only while no life newer than its start was dropped.
  */
+interface AnswerSkipLife {
+  /** The session's life at the start, or null when none was kept. */
+  readonly known: number | null;
+  /** The life counter at the start. */
+  readonly seq: number;
+}
+
 interface AnswerSkipRecord {
-  life: number;
-  /** The reason of the streak going on; null when none is. */
+  readonly life: AnswerSkipLife;
   reason: InstanceInputAnswerSkip | null;
 }
 
-interface AnswerSkipRecords {
+interface AnswerSkipLives {
   seq: number;
-  readonly bySession: Map<string, AnswerSkipRecord>;
+  /** The highest life dropped by the bound. */
+  droppedUpTo: number;
+  readonly bySession: Map<string, number>;
 }
 
-/** How many sessions {@link answerSkipRecords} keeps (Issue #4175). */
+/** How many sessions' lives {@link answerSkipLives} keeps (Issue #4175). */
 export const ANSWER_SKIP_RECORD_MAX = 256;
 
-const answerSkipRecords = getOrInitGlobal(
-  '__instanceInputAnswerSkips',
-  (): AnswerSkipRecords => ({ seq: 0, bySession: new Map() })
+const answerSkipLives = getOrInitGlobal(
+  '__instanceInputAnswerSkipLives',
+  (): AnswerSkipLives => ({ seq: 0, droppedUpTo: 0, bySession: new Map() })
 );
 
-/** The life an answer starts in; 0 for a session never replaced since the record was dropped. */
-function answerSkipLife(sessionName: string): number {
-  return answerSkipRecords.bySession.get(sessionName)?.life ?? 0;
+/** Each scope's records, by session. */
+const answerSkipRecords = new WeakMap<object, Map<string, AnswerSkipRecord>>();
+
+function answerSkipLifeNow(sessionName: string): AnswerSkipLife {
+  return { known: answerSkipLives.bySession.get(sessionName) ?? null, seq: answerSkipLives.seq };
 }
 
-function putAnswerSkipRecord(sessionName: string, record: AnswerSkipRecord): void {
-  const { bySession } = answerSkipRecords;
-  bySession.delete(sessionName);
-  bySession.set(sessionName, record);
-  while (bySession.size > ANSWER_SKIP_RECORD_MAX) {
-    const oldest = bySession.keys().next().value;
+/** Whether `sessionName` is still in the life `life` was taken in. */
+function stillAnswerSkipLife(sessionName: string, life: AnswerSkipLife): boolean {
+  const current = answerSkipLives.bySession.get(sessionName);
+  if (life.known !== null) return current === life.known;
+  return current === undefined && answerSkipLives.droppedUpTo <= life.seq;
+}
+
+function beginAnswerSkipLife(sessionName: string): void {
+  const lives = answerSkipLives;
+  lives.seq += 1;
+  lives.bySession.delete(sessionName);
+  lives.bySession.set(sessionName, lives.seq);
+  while (lives.bySession.size > ANSWER_SKIP_RECORD_MAX) {
+    const oldest = lives.bySession.entries().next().value;
     if (oldest === undefined) break;
-    bySession.delete(oldest);
+    lives.bySession.delete(oldest[0]);
+    lives.droppedUpTo = Math.max(lives.droppedUpTo, oldest[1]);
   }
 }
 
-/** The session's record if `life` is still its life; null for an answer of an older process. */
-function answerSkipRecordOf(sessionName: string, life: number): AnswerSkipRecord | null | undefined {
-  const record = answerSkipRecords.bySession.get(sessionName);
-  if ((record?.life ?? 0) !== life) return null;
-  return record;
+/** The scope's record for the session, if it is of the life this answer is in. */
+function answerSkipRecordOf(
+  scope: object,
+  sessionName: string,
+  life: AnswerSkipLife
+): AnswerSkipRecord | undefined {
+  if (!stillAnswerSkipLife(sessionName, life)) return undefined;
+  const record = answerSkipRecords.get(scope)?.get(sessionName);
+  return record !== undefined && stillAnswerSkipLife(sessionName, record.life) ? record : undefined;
 }
 
-/** Write a decline's warn unless the session's streak is already this reason. */
+function putAnswerSkipRecord(scope: object, sessionName: string, record: AnswerSkipRecord): void {
+  let bySession = answerSkipRecords.get(scope);
+  if (bySession === undefined) {
+    bySession = new Map();
+    answerSkipRecords.set(scope, bySession);
+  }
+  bySession.set(sessionName, record);
+}
+
+/** Write a decline's warn unless the scope's streak is already this reason. */
 function warnAnswerSkip(
   event: string,
   sessionName: string,
-  life: number,
+  scope: object | undefined,
+  life: AnswerSkipLife,
   reason: InstanceInputAnswerSkip,
   fields: Record<string, unknown>
 ): void {
-  const record = answerSkipRecordOf(sessionName, life);
-  if (record === null) {
+  if (scope === undefined) {
     logger.warn(event, fields);
     return;
   }
-  if (record?.reason === reason) {
+  if (answerSkipRecordOf(scope, sessionName, life)?.reason === reason) {
     logger.debug(event, { ...fields, repeated: true });
     return;
   }
   logger.warn(event, fields);
-  putAnswerSkipRecord(sessionName, { life, reason });
+  // An answer of an older life writes nothing for the new one.
+  if (stillAnswerSkipLife(sessionName, life)) putAnswerSkipRecord(scope, sessionName, { life, reason });
 }
 
-/** A decline that is not a warn (`target-changed`) still ends the streak. */
-function noteAnswerSkipQuiet(sessionName: string, life: number, reason: InstanceInputAnswerSkip): void {
-  const record = answerSkipRecordOf(sessionName, life);
-  if (record) record.reason = reason;
-}
-
-/** An answer that went through ends the streak. */
-function noteAnswerAdmitted(sessionName: string, life: number): void {
-  const record = answerSkipRecordOf(sessionName, life);
-  if (!record || record.reason === null) return;
-  if (record.life === 0) answerSkipRecords.bySession.delete(sessionName);
-  else record.reason = null;
+/** A decline that is not a warn (`target-changed`), or an answer that went through, ends the streak. */
+function endAnswerSkipStreak(
+  sessionName: string,
+  scope: object | undefined,
+  life: AnswerSkipLife,
+  reason: InstanceInputAnswerSkip | null
+): void {
+  if (scope === undefined) return;
+  const record = answerSkipRecordOf(scope, sessionName, life);
+  if (record !== undefined) record.reason = reason;
 }
 
 function entryOf(sessionName: string): LockEntry {
@@ -607,19 +638,24 @@ function skipOfLockError(error: unknown): InstanceInputAnswerSkip | null {
  * compared before admission there, since the launch's own admission moves it,
  * and `readMark` is {@link instanceInputLaunchReadMark}, so a `shared` answer
  * that finished after the launch's read also makes it read again (review P2-1).
+ *
+ * Issue #4175: `repeatScope` — one object per wait that asks again on every poll —
+ * makes a decline's warn once while the same reason goes on in that scope (see
+ * {@link ANSWER_SKIP_RECORD_MAX}'s record). Without it every decline is a warn.
  */
 export async function answerUnderInstanceInputLock<T>(
   sessionName: string,
   readMark: number,
   stillApplies: () => Promise<boolean>,
   answer: (ticket: InstanceInputTicket) => Promise<T>,
-  options: { waitMs?: number; mode?: InstanceInputMode } = {}
+  options: { waitMs?: number; mode?: InstanceInputMode; repeatScope?: object } = {}
 ): Promise<InstanceInputAnswerOutcome<T>> {
   // A context that already owns the composer (a send's own readiness wait)
   // has held it since before its read: it joins, and nothing is read again.
   const joined = currentInstanceInputTicket(sessionName) !== null;
   const mode = options.mode ?? 'shared';
-  const life = answerSkipLife(sessionName);
+  const scope = options.repeatScope;
+  const life = answerSkipLifeNow(sessionName);
   const movedBeforeAdmission =
     (mode === 'exclusive' ? instanceInputLaunchReadMark() : instanceInputReadMark()) !== readMark;
   let admitted = false;
@@ -636,7 +672,7 @@ export async function answerUnderInstanceInputLock<T>(
           try {
             applies = await stillApplies();
           } catch (error: unknown) {
-            warnAnswerSkip('instance-input-answer-recheck-failed', sessionName, life, 'recheck-failed', {
+            warnAnswerSkip('instance-input-answer-recheck-failed', sessionName, scope, life, 'recheck-failed', {
               sessionName,
               error: error instanceof Error ? error.message : String(error),
             });
@@ -644,13 +680,13 @@ export async function answerUnderInstanceInputLock<T>(
           }
           if (!applies) {
             logger.info('instance-input-answer-target-changed', { sessionName, generation: ticket.generation });
-            noteAnswerSkipQuiet(sessionName, life, 'target-changed');
+            endAnswerSkipStreak(sessionName, scope, life, 'target-changed');
             return { answered: false, reason: 'target-changed' };
           }
         }
         if (!ticket.isCurrent()) return { answered: false, reason: 'input-lock-lost' };
         const value = await answer(ticket);
-        noteAnswerAdmitted(sessionName, life);
+        endAnswerSkipStreak(sessionName, scope, life, null);
         return { answered: true, value };
       },
       { waitMs: options.waitMs, mode }
@@ -660,7 +696,7 @@ export async function answerUnderInstanceInputLock<T>(
     // after it was admitted may have typed, and is the caller's to judge.
     const skip = admitted ? null : skipOfLockError(error);
     if (skip === null) throw error;
-    warnAnswerSkip('instance-input-answer-not-admitted', sessionName, life, skip, { sessionName, reason: skip });
+    warnAnswerSkip('instance-input-answer-not-admitted', sessionName, scope, life, skip, { sessionName, reason: skip });
     return { answered: false, reason: skip };
   }
 }
@@ -742,8 +778,7 @@ export async function waitOutCarriedPasteMark(ticket: InstanceInputTicket): Prom
  */
 export function invalidateInstanceInput(sessionName: string): void {
   // Issue #4175: the new process's first declined answer is a warn of its own.
-  answerSkipRecords.seq += 1;
-  putAnswerSkipRecord(sessionName, { life: answerSkipRecords.seq, reason: null });
+  beginAnswerSkipLife(sessionName);
   const entry = entries.get(sessionName);
   if (entry === undefined) return;
   entry.mark = null;
@@ -974,5 +1009,6 @@ export function resetInstanceInputLocks(): void {
     for (const waiter of entry.queue) clearTimeout(waiter.timer);
   }
   entries.clear();
-  answerSkipRecords.bySession.clear();
+  answerSkipLives.bySession.clear();
+  answerSkipLives.droppedUpTo = answerSkipLives.seq;
 }

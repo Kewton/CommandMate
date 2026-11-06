@@ -629,7 +629,8 @@ export class CodexTool extends BaseCLITool {
               sessionName,
               readMark,
               () => this.isActiveDialogStill(sessionName, 'update'),
-              () => sendKeys(sessionName, digit, false)
+              () => sendKeys(sessionName, digit, false),
+              { repeatScope: answerSkips }
             );
             if (!updateOutcome.answered) {
               // Nothing typed: the install this lock covers never started.
@@ -667,7 +668,8 @@ export class CodexTool extends BaseCLITool {
             sessionName,
             readMark,
             () => this.isActiveDialogStill(sessionName, 'press-enter'),
-            () => sendSpecialKey(sessionName, 'Enter')
+            () => sendSpecialKey(sessionName, 'Enter'),
+            { repeatScope: answerSkips }
           );
           if (!enterOutcome.answered) {
             noteLaunchAnswerSkipped(logger, answerSkips, 'codex-notification-answer-skipped', { sessionName, reason: enterOutcome.reason });
@@ -689,7 +691,8 @@ export class CodexTool extends BaseCLITool {
             sessionName,
             readMark,
             () => this.isActiveDialogStill(sessionName, 'trust'),
-            () => sendKeys(sessionName, '1', false)
+            () => sendKeys(sessionName, '1', false),
+            { repeatScope: answerSkips }
           );
           if (!trustOutcome.answered) {
             noteLaunchAnswerSkipped(logger, answerSkips, 'codex-trust-dialog-answer-skipped', { sessionName, reason: trustOutcome.reason });
@@ -721,7 +724,8 @@ export class CodexTool extends BaseCLITool {
               const again = stripAnsi(await capturePane(sessionName, 50));
               return getCodexActiveDialog(again) === 'trust' && readCodexEnterConfirmedCursor(again) === 1;
             },
-            () => sendSpecialKey(sessionName, 'Enter')
+            () => sendSpecialKey(sessionName, 'Enter'),
+            { repeatScope: answerSkips }
           );
           if (!enterOutcome.answered) {
             noteLaunchAnswerSkipped(logger, answerSkips, 'codex-trust-dialog-answer-skipped', { sessionName, reason: enterOutcome.reason });
@@ -850,7 +854,8 @@ export class CodexTool extends BaseCLITool {
           readCodexEnterConfirmedCursor(again) === readCodexEnterConfirmedCursor(frame)
         );
       },
-      () => this.sendCodexHooksScreenKey(sessionName, screen, frame, attempt, trust)
+      () => this.sendCodexHooksScreenKey(sessionName, screen, frame, attempt, trust),
+      { repeatScope: state.skips }
     );
     if (!outcome.answered) {
       // Nothing was typed, so this screen's budget is not spent; poll again.
