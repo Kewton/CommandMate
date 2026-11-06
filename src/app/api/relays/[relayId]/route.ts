@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getRelayById } from '@/lib/db/relay-db';
+import { withLastDeliveryBlock } from '@/lib/relay/relay-delivery-block';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/relay');
@@ -27,11 +28,15 @@ export async function GET(
     if (!RELAY_ID_PATTERN.test(relayId)) {
       return NextResponse.json({ error: 'Invalid relay ID format' }, { status: 400 });
     }
-    const relay = getRelayById(getDbInstance(), relayId);
+    const db = getDbInstance();
+    const relay = getRelayById(db, relayId);
     if (!relay) {
       return NextResponse.json({ error: 'Relay not found' }, { status: 404 });
     }
-    return NextResponse.json({ relay }, { status: 200 });
+    // Issue #4105: `lastDeliveryBlock` as the list answers it. Never throws —
+    // the send path reads this route when its own answer was lost
+    // (`message-dispatch`), and a label must not turn that into a failure.
+    return NextResponse.json({ relay: withLastDeliveryBlock(db, relay) }, { status: 200 });
   } catch (error: unknown) {
     logger.error('error-reading-relay:', {
       error: error instanceof Error ? error.message : String(error),

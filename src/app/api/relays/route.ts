@@ -24,6 +24,7 @@ import {
   listRelaysWithDeliveryHold,
 } from '@/lib/db/relay-db';
 import { openRelay, readSessionRelays } from '@/lib/relay/relay-service';
+import { withLastDeliveryBlocks } from '@/lib/relay/relay-delivery-block';
 import { resolveRelayTtlMs } from '@/lib/relay/relay-policy';
 import { isValidInstanceId } from '@/lib/cli-tools/types';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
@@ -109,12 +110,15 @@ export async function GET(request: NextRequest) {
         : { worktreeId: worktreeId ?? undefined }
     );
 
+    // Issue #4105: each relay carries what the last delivery attempt of its
+    // current payload stopped for (`lastDeliveryBlock`, null = no
+    // observation). Read-only, never throws, and not one of the counts.
     return NextResponse.json(
       {
-        owed: sided.owed,
-        awaiting: sided.awaiting,
-        open,
-        held,
+        owed: withLastDeliveryBlocks(db, sided.owed),
+        awaiting: withLastDeliveryBlocks(db, sided.awaiting),
+        open: withLastDeliveryBlocks(db, open),
+        held: withLastDeliveryBlocks(db, held),
         counts: countRelays(db, {
           worktreeId: worktreeId ?? undefined,
           instanceId: worktreeId && instanceId ? instanceId : undefined,
