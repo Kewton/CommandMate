@@ -348,6 +348,22 @@ function beginAnswerSkipLife(sessionName: string): void {
   }
 }
 
+/**
+ * Read-only (Issue #4189): the session's life now, for a record kept outside this
+ * module (`launch-answer-skips`) to tell a decline of a new process from a repeat.
+ */
+export type InstanceInputAnswerSkipLife = AnswerSkipLife;
+
+/** Read-only (Issue #4189): {@link InstanceInputAnswerSkipLife} as it stands now. */
+export function instanceInputAnswerSkipLife(sessionName: string): InstanceInputAnswerSkipLife {
+  return answerSkipLifeNow(sessionName);
+}
+
+/** Read-only (Issue #4189): whether the session is still in the life `life` was taken in. */
+export function isInstanceInputAnswerSkipLife(sessionName: string, life: InstanceInputAnswerSkipLife): boolean {
+  return stillAnswerSkipLife(sessionName, life);
+}
+
 /** The scope's record for the session, if it is of the life this answer is in. */
 function answerSkipRecordOf(
   scope: object,

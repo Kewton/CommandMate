@@ -58,7 +58,7 @@ import { forgetLaunchAnswerSkip, newLaunchAnswerSkips, noteLaunchAnswerSkipped }
 import { TUI_EXIT_WAIT_MS } from '@/config/cli-tool-timing-config';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 import { getErrorMessage } from '@/lib/errors';
-import { answerUnderInstanceInputLock, instanceInputReadMark } from '@/lib/session/instance-input-lock';
+import { answerUnderInstanceInputLock, instanceInputAnswerSkipLife, instanceInputReadMark } from '@/lib/session/instance-input-lock';
 
 const logger = createLogger('cli-tools/antigravity');
 
@@ -394,11 +394,15 @@ export class AntigravityTool extends BaseCLITool {
             // Issue #3952: typed as the composer's writer, and only while the
             // screen still asks for this key once a send holding it is over.
             const key = decision.key;
+            // Issue #4189: the session's life before the answer's await; a decline of an older life writes no record for the new one.
+            const answerLife = instanceInputAnswerSkipLife(sessionName);
             const outcome = await answerUnderInstanceInputLock(
               sessionName,
               readMark,
               () => this.isTrustPressStill(sessionName, key),
-              () => sendSpecialKey(sessionName, key)
+              () => sendSpecialKey(sessionName, key),
+              // Issue #4189: the lock's warn of a decline, once per streak in this wait.
+              { repeatScope: answerSkips }
             );
             if (outcome.answered) {
               trustDialogHandled = true;
@@ -406,7 +410,7 @@ export class AntigravityTool extends BaseCLITool {
               await new Promise((resolve) => setTimeout(resolve, ANTIGRAVITY_DIALOG_SETTLE_MS));
               continue;
             }
-            noteLaunchAnswerSkipped(logger, answerSkips, 'antigravity-trust-answer-skipped', { sessionName, reason: outcome.reason });
+            noteLaunchAnswerSkipped(logger, answerSkips, 'antigravity-trust-answer-skipped', { sessionName, reason: outcome.reason }, answerLife);
           }
           logTrustDecisionOnce(sessionName, decision, loggedTrustDecisions);
         }
@@ -490,6 +494,8 @@ export class AntigravityTool extends BaseCLITool {
         // made only once the screen has been read again after a send holding
         // the composer, so a screen that moved meanwhile keeps the Enter owed.
         const pressKey = trustDecision?.action === 'press' ? trustDecision.key : null;
+        // Issue #4189: the session's life before the answer's await; a decline of an older life writes no record for the new one.
+        const answerLife = instanceInputAnswerSkipLife(sessionName);
         const claimed = pressKey !== null && isStartupTrustPending(sessionName)
           ? await answerUnderInstanceInputLock(
             sessionName,
@@ -499,7 +505,8 @@ export class AntigravityTool extends BaseCLITool {
               if (!claimStartupTrust(sessionName)) return false;
               await sendSpecialKey(sessionName, pressKey);
               return true;
-            }
+            },
+            { repeatScope: answerSkips }
           )
           : null;
         if (claimed !== null && !claimed.answered) {
@@ -507,7 +514,7 @@ export class AntigravityTool extends BaseCLITool {
             sessionName,
             reason: claimed.reason,
             afterLaunchWindow: true,
-          });
+          }, answerLife);
         }
         // Answered with `false`: another wait holds the claim, so the Enter is its to send.
         if (claimed?.answered === true) forgetLaunchAnswerSkip(answerSkips, 'antigravity-trust-answer-skipped');

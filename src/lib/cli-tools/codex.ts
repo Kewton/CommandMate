@@ -46,7 +46,7 @@ import {
 } from '@/config/cli-tool-timing-config';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 import { getErrorMessage } from '@/lib/errors';
-import { answerUnderInstanceInputLock, instanceInputReadMark } from '@/lib/session/instance-input-lock';
+import { answerUnderInstanceInputLock, instanceInputAnswerSkipLife, instanceInputReadMark } from '@/lib/session/instance-input-lock';
 
 const logger = createLogger('cli-tools/codex');
 
@@ -625,6 +625,8 @@ export class CodexTool extends BaseCLITool {
             // Issue #3952: as the composer's writer, and only while the update
             // dialog is still the active one once a send holding it is over.
             const digit = keyToSend;
+            // Issue #4189: the session's life before the answer's await; a decline of an older life writes no record for the new one.
+            const answerLife = instanceInputAnswerSkipLife(sessionName);
             const updateOutcome = await answerUnderInstanceInputLock(
               sessionName,
               readMark,
@@ -638,7 +640,7 @@ export class CodexTool extends BaseCLITool {
                 updateLockHeld = false;
                 releaseAgentUpdateLock(CODEX_UPDATE_LOCK_TOOL);
               }
-              noteLaunchAnswerSkipped(logger, answerSkips, 'codex-update-dialog-answer-skipped', { sessionName, reason: updateOutcome.reason });
+              noteLaunchAnswerSkipped(logger, answerSkips, 'codex-update-dialog-answer-skipped', { sessionName, reason: updateOutcome.reason }, answerLife);
               // Issue #4175: the poll's own pause, which `continue` would skip.
               await pauseAfterLaunchAnswerSkip();
               continue;
@@ -664,6 +666,8 @@ export class CodexTool extends BaseCLITool {
         // Numbered selection dialogs are dismissed by the number key above, so this
         // branch is reached only when no number selection is pending.
         if (activeDialog === 'press-enter') {
+          // Issue #4189: the session's life before the answer's await; a decline of an older life writes no record for the new one.
+          const answerLife = instanceInputAnswerSkipLife(sessionName);
           const enterOutcome = await answerUnderInstanceInputLock(
             sessionName,
             readMark,
@@ -672,7 +676,7 @@ export class CodexTool extends BaseCLITool {
             { repeatScope: answerSkips }
           );
           if (!enterOutcome.answered) {
-            noteLaunchAnswerSkipped(logger, answerSkips, 'codex-notification-answer-skipped', { sessionName, reason: enterOutcome.reason });
+            noteLaunchAnswerSkipped(logger, answerSkips, 'codex-notification-answer-skipped', { sessionName, reason: enterOutcome.reason }, answerLife);
             // Issue #4175: the poll's own pause, which `continue` would skip.
             await pauseAfterLaunchAnswerSkip();
             continue;
@@ -687,6 +691,8 @@ export class CodexTool extends BaseCLITool {
         // Options: › 1. Yes, continue / 2. No, quit
         if (activeDialog === 'trust' && !trustDialogHandled) {
           // Issue #890: number-key selection confirms instantly; no trailing Enter.
+          // Issue #4189: the session's life before the answer's await; a decline of an older life writes no record for the new one.
+          const answerLife = instanceInputAnswerSkipLife(sessionName);
           const trustOutcome = await answerUnderInstanceInputLock(
             sessionName,
             readMark,
@@ -695,7 +701,7 @@ export class CodexTool extends BaseCLITool {
             { repeatScope: answerSkips }
           );
           if (!trustOutcome.answered) {
-            noteLaunchAnswerSkipped(logger, answerSkips, 'codex-trust-dialog-answer-skipped', { sessionName, reason: trustOutcome.reason });
+            noteLaunchAnswerSkipped(logger, answerSkips, 'codex-trust-dialog-answer-skipped', { sessionName, reason: trustOutcome.reason }, answerLife);
             // Issue #4175: the poll's own pause, which `continue` would skip.
             await pauseAfterLaunchAnswerSkip();
             continue;
@@ -717,6 +723,8 @@ export class CodexTool extends BaseCLITool {
           trustEnterPresses < CODEX_TRUST_ENTER_MAX_PRESSES &&
           readCodexEnterConfirmedCursor(output) === 1
         ) {
+          // Issue #4189: the session's life before the answer's await; a decline of an older life writes no record for the new one.
+          const answerLife = instanceInputAnswerSkipLife(sessionName);
           const enterOutcome = await answerUnderInstanceInputLock(
             sessionName,
             readMark,
@@ -728,7 +736,7 @@ export class CodexTool extends BaseCLITool {
             { repeatScope: answerSkips }
           );
           if (!enterOutcome.answered) {
-            noteLaunchAnswerSkipped(logger, answerSkips, 'codex-trust-dialog-answer-skipped', { sessionName, reason: enterOutcome.reason });
+            noteLaunchAnswerSkipped(logger, answerSkips, 'codex-trust-dialog-answer-skipped', { sessionName, reason: enterOutcome.reason }, answerLife);
             // Issue #4175: the poll's own pause, which `continue` would skip.
             await pauseAfterLaunchAnswerSkip();
             continue;
@@ -843,6 +851,8 @@ export class CodexTool extends BaseCLITool {
     // send that holds it — and is not typed if the hooks screen it was chosen
     // for is gone once that send is over. Inside `sendMessage` under
     // `sendUserMessage`'s lock it joins that lock instead.
+    // Issue #4189: the session's life before the answer's await; a decline of an older life writes no record for the new one.
+    const answerLife = instanceInputAnswerSkipLife(sessionName);
     const outcome = await answerUnderInstanceInputLock(
       sessionName,
       readMark,
@@ -859,7 +869,7 @@ export class CodexTool extends BaseCLITool {
     );
     if (!outcome.answered) {
       // Nothing was typed, so this screen's budget is not spent; poll again.
-      noteLaunchAnswerSkipped(logger, state.skips, 'codex-hooks-screen-answer-skipped', { sessionName, screen, reason: outcome.reason });
+      noteLaunchAnswerSkipped(logger, state.skips, 'codex-hooks-screen-answer-skipped', { sessionName, screen, reason: outcome.reason }, answerLife);
       return true;
     }
     state.attempts = attempt;
