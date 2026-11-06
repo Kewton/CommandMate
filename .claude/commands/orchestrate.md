@@ -271,6 +271,8 @@ Antigravity は `.claude/commands` を読まないので、`/pm-auto-issue2dev`
 
 `plan-check.mjs` の `notice: cpu-heavy` か `contract.mjs generate` の `note:` が出た item は、テストが全体実行に広がって 1 本ずつになるので、plan に直列の順を書く（根拠: docs/orchestrate/plan-check.md#1-4-全体実行に広がる-item-の順）。
 
+同じ Issue の 2 本目の PR の断片、2-4-4 の対象の当て方（item の中の変更ごと）、全体に広がる item の同時の本数（波に 2 本まで）は docs/orchestrate/run-log.md#1-5-2-本目の-pr-の-changelog-断片 と docs/orchestrate/trials.md#2-4-4-item-の中の変更ごとに対象の条件を当てる と docs/orchestrate/plan-check.md#1-4-全体に広がる-item-は同じ波に-2-本まで を読む（#4192）。
+
 ### 1-5. 実行計画の記録
 
 ```bash

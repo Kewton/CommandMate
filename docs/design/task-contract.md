@@ -645,12 +645,27 @@ probe は `ok` / `unavailable` のどちらかを必ず名乗り、`unavailable`
 
 | probe | 判定 |
 |---|---|
-| `tmux-sessions` | 名前 `mcbd-<cli>-<worktreeId>[-suffix]` を分解し、自 worktree なら `self`、別 worktree なら `other`、解釈できなければ `unattributed`。worktree id はハイフンを含みうるので曖昧なケースは `self` に倒す（厳しい側）。ただし**追加のうちタスク自身のエージェントセッションと完全一致する 1 本**は、帰属より先に除外する（Issue #2472） |
+| `tmux-sessions` | 名前 `mcbd-<cli>-<worktreeId>[-suffix]` を分解し、自 worktree なら `self`、別 worktree なら `other`、解釈できなければ `unattributed`。worktree id はハイフンを含みうるので曖昧なケースは `self` に倒す（厳しい側）。`<worktreeId>-…` の形は、自 id より長いハイフン区切りの接頭辞に**別の worktree だという証拠**があるときだけ `other`（Issue #4192、下の「`<id>-…` の帰属の証拠」）。ただし**追加のうちタスク自身のエージェントセッションと完全一致する 1 本**は、帰属より先に除外する（Issue #2472） |
 | `listeners` | プロセスの cwd が自 worktree 配下なら `self`、**自 worktree の兄弟ディレクトリ**なら `other`（linked worktree は横並びに作られ、ユーザの本番サーバが動くプライマリ checkout もそこに居る）、それ以外・cwd 不明は `unattributed` |
 | `home-entries` / `commandmate-entries` | ファイルに所有者は無いので常に `unattributed` |
 
 `unattributed` は「たぶん誰のものでもない」ではなく「他人のものだと**示せなかった**」であり、
 追加は違反として扱う。免除には他所有者の積極的な証拠が要る。
+
+#### `<id>-…` の帰属の証拠（Issue #4192）
+
+`mcbd-<cli>-<id>-v2` は、自 worktree `<id>` の追加インスタンス `v2` とも、隣の worktree `<id>-v2` の
+主セッションとも読める。名前だけでは決められないので、次の**証拠**で決める。
+
+| 項目 | 規則 |
+|---|---|
+| 証拠の種類 | (1) 自 worktree の隣のディレクトリで `.git` を持つもの（git worktree）の **sanitize 済み basename**（`deriveWorktreeId` の初回登録と同じ id。DB 不要で、未 sync の worktree も数える）。(2) 本サーバの **worktree 表の行**で、その id を持ち path が自 worktree でないもの（衝突で hash 付きになった id 用） |
+| 読む時点 | **検証の時点**（`evaluateEnvClean` が `defaultOtherWorktreeProbe` で読む）。隣の worktree はベースラインより後に作られるのが普通なので、ベースラインの記録では足りない |
+| 曖昧なとき | 証拠が無ければ `self`（厳しい側。`-codex-2`・`-2`・名前つきインスタンス・namespace つきの名前はこれで `self` のまま）。読めない・例外も「証拠なし」 |
+| ぶつかるとき | 証拠と「インスタンスの接尾辞」の読みがぶつかるとき（`<id>` のインスタンス `v2` と、隣に実在する worktree `<id>-v2`）は**証拠を優先して `other`**。証拠は機械上の事実で、接尾辞の読みはどの名前にも当てはまる形にすぎないため |
+| 受け入れた代償 | 隣に実在する worktree の id の残りで始まる接尾辞の自インスタンス（例: 隣に `<id>-v2` があるときの自インスタンス `v2`）は免除されうる |
+| `self` に戻るとき | ディレクトリと worktree 表の行の**両方が無いとき**だけ。ディレクトリを消しても sync していなければ DB 行が残り、証拠のまま |
+| 消失 | 別の worktree のセッションの消失は従来どおり違反（#1624） |
 
 #### タスク自身のエージェントセッション（Issue #2472）
 
