@@ -72,6 +72,8 @@ const FENCED = Symbol.for('commandmate.test.realServerFence');
 
 /** Where the ports of the first setup run in this worker are kept. */
 const FENCED_PORTS = Symbol.for('commandmate.test.realServerFencePorts');
+/** Where the requests the installed fence refused in this worker are kept (Issue #4191). */
+const REFUSED_REQUESTS = Symbol.for('commandmate.test.realServerFenceRefused');
 
 type FencedFetch = typeof fetch & { [FENCED]?: true };
 
@@ -342,6 +344,20 @@ export function isFencedFetch(fn: unknown): boolean {
 }
 
 /**
+ * The requests the fence {@link installRealServerFence} put on `target` has
+ * refused so far in this worker, oldest first (Issue #4191).
+ *
+ * A refusal means a test reached for the real server and passed only because
+ * the connection "failed"; `tests/helpers/mock-api.ts`
+ * `keepOffTheRealServer()` fails such a test instead of letting it pass.
+ */
+export function refusedRealServerRequests(
+  target: Record<symbol, unknown> = globalThis as unknown as Record<symbol, unknown>
+): readonly RefusedRequest[] {
+  return (target[REFUSED_REQUESTS] as RefusedRequest[] | undefined) ?? [];
+}
+
+/**
  * Put the fence in front of `globalThis.fetch`, once per worker.
  *
  * The ports are read from `env` on the first call in a worker and kept: later
@@ -368,8 +384,11 @@ export function installRealServerFence(
     target[FENCED_PORTS] = ports;
   }
   const current = target.fetch;
+  if (target[REFUSED_REQUESTS] === undefined) target[REFUSED_REQUESTS] = [];
+  const refused = target[REFUSED_REQUESTS] as RefusedRequest[];
   if (typeof current === 'function' && !isFencedFetch(current)) {
     target.fetch = fenceFetch(current, ports, (request) => {
+      refused.push(request);
       const test = where();
       process.stderr.write(
         `[tests/setup] refused a request to ${request.url}: port ${request.port} is the real server's (#4176)` +

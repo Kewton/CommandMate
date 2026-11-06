@@ -24,6 +24,10 @@ import { statusCommand } from '../../../../src/cli/commands/status';
 import { ExitCode } from '../../../../src/cli/types';
 import { getPidFilePath, getEnvPath } from '../../../../src/cli/utils/env-setup';
 import { readPackageVersion } from '../../../../src/cli/utils/package-info';
+import { keepOffTheRealServer } from '../../../helpers/mock-api';
+
+// Issue #4191: no request from this file reaches 127.0.0.1:3000, not even by failing.
+keepOffTheRealServer();
 
 describe('statusCommand', () => {
   let mockExit: ReturnType<typeof vi.fn>;

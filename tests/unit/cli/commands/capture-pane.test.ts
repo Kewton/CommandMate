@@ -10,8 +10,11 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import { mockFetchResponse, mockFetchSequence, restoreFetch } from '../../../helpers/mock-api';
+import { mockFetchResponse, mockFetchSequence, restoreFetch, keepOffTheRealServer } from '../../../helpers/mock-api';
 import { squeezeTranscript, isVisuallyBlank } from '@/lib/tmux/transcript-squeeze';
+
+// Issue #4191: no request from this file reaches 127.0.0.1:3000, not even by failing.
+keepOffTheRealServer();
 
 const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
 const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
