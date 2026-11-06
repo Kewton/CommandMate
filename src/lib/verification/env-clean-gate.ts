@@ -249,8 +249,9 @@ export function readSiblingWorktreeIds(worktreePath: string): Set<string> {
  *     other than the task's (covers the collision-suffixed ids a basename
  *     cannot reproduce).
  *
- * A sibling removed before verification leaves neither, and its session is
- * `self` again — the strict direction.
+ * The session is `self` again only when both are gone — the sibling directory
+ * and its row in this server's worktree table (removing the directory without
+ * a sync leaves the row, which still counts as evidence) — the strict direction.
  */
 export function defaultOtherWorktreeProbe(
   worktreePath: string,
