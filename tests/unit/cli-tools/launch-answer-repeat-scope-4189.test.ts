@@ -77,7 +77,9 @@ vi.mock('@/lib/session/instance-input-lock', async (importOriginal) => {
 import { answerClaudeAutoDefaultNudgeBeforeSend, answerClaudeAutoDefaultNudgeUntil, sendNudgeKey } from '@/lib/cli-tools/claude-auto-default-nudge';
 import { AntigravityTool } from '@/lib/cli-tools/antigravity';
 import { clearStartupTrust, markStartupTrustPending } from '@/lib/cli-tools/antigravity-startup-trust';
+import { CodexTool } from '@/lib/cli-tools/codex';
 import { CopilotTool } from '@/lib/cli-tools/copilot';
+import { CODEX_UPDATE_DIALOG_ENV_VAR } from '@/config/codex-update-dialog-config';
 import { GeminiTool } from '@/lib/cli-tools/gemini';
 import { invalidateInstanceInput, resetInstanceInputLocks } from '@/lib/session/instance-input-lock';
 import { sendSpecialKeys } from '@/lib/tmux/tmux';
@@ -126,10 +128,12 @@ beforeEach(() => {
   state.onRead = null;
   state.reads = 0;
   vi.mocked(sendSpecialKeys).mockResolvedValue();
+  vi.stubEnv(CODEX_UPDATE_DIALOG_ENV_VAR, undefined as unknown as string);
 });
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllEnvs();
   resetInstanceInputLocks();
 });
 
@@ -188,6 +192,7 @@ describe('claude auto-default nudge', () => {
     };
     await beforeSend();
     expect(lockWarns()).toBe(2);
+    expect(reasons(NUDGE)).toEqual(['recheck-failed', 'recheck-failed']); // #4189 review P2: its own too
 
     let end: () => void = () => undefined;
     const start = new Promise<void>((r) => {
@@ -199,7 +204,7 @@ describe('claude auto-default nudge', () => {
     await vi.advanceTimersByTimeAsync(3_000);
     end();
     await watching;
-    expect(reasons(NUDGE)).toEqual(['recheck-failed', 'recheck-failed']);
+    expect(reasons(NUDGE)).toEqual(['recheck-failed', 'recheck-failed', 'recheck-failed']);
     expect(lockWarns()).toBe(3);
   });
 
@@ -268,5 +273,47 @@ describe('the launch waits pass their record to the lock', () => {
     };
     await run(waits(new GeminiTool()).waitForReady(S), 120_000);
     expect(lockWarns()).toBe(2);
+  });
+});
+
+describe('review P2: a session made again within the same wait, the caller\'s own warn', () => {
+  /** Make the session again at the given read, after the wait's first decline. */
+  const remakeAt = (at: number): void => {
+    state.onRead = (n) => {
+      if (n === at) invalidateInstanceInput(S);
+    };
+  };
+  const codexLaunch = (): Promise<unknown> =>
+    run((new CodexTool() as unknown as { waitForReady(s: string, o: { trustHooks: boolean }): Promise<void> }).waitForReady(S, { trustHooks: false }), 120_000);
+
+  const cases: Array<[string, () => void, () => Promise<unknown>, string]> = [
+    ['the nudge before a send', () => (state.screen = nudgeFrame('cursor-yes')), () => run(answerClaudeAutoDefaultNudgeBeforeSend(S), 15_000), NUDGE],
+    ['gemini', () => (state.screen = fixture('gemini-live-3776/trust-dialog.txt')), () => run(waits(new GeminiTool()).waitForReady(S), 120_000), 'gemini-trust-answer-skipped'],
+    ['copilot', () => (state.screen = buildCopilotFolderTrustFrame()), () => run(waits(new CopilotTool()).waitForReady(S), 120_000), 'copilot-folder-trust-answer-skipped'],
+    ['agy launch', () => (state.screen = fixture('antigravity-live-2364/trust-dialog.txt')), () => run(waits(new AntigravityTool()).waitForReady(S), 200_000), 'antigravity-trust-answer-skipped'],
+    [
+      'agy owed Enter',
+      () => {
+        state.screen = fixture('antigravity-live-2364/trust-dialog.txt');
+        markStartupTrustPending(S);
+      },
+      () => run(waits(new AntigravityTool()).waitForPrompt(S), 200_000),
+      'antigravity-trust-answer-skipped',
+    ],
+    ['codex trust', () => (state.screen = fixture('codex-dialogs-0166/trust.txt')), codexLaunch, 'codex-trust-dialog-answer-skipped'],
+    ['codex update offer', () => (state.screen = fixture('codex-dialogs-0166/update.txt')), codexLaunch, 'codex-update-dialog-answer-skipped'],
+  ];
+
+  it.each(cases)('%s: one warn before, one more for the first decline after, the same reason', async (_name, setup, wait, event) => {
+    setup();
+    remakeAt(4);
+    await wait();
+    expect(reasons(event)).toEqual(['recheck-failed', 'recheck-failed']);
+  });
+
+  it.each(cases)('%s, control: no new session, the same reason stays one warn', async (_name, setup, wait, event) => {
+    setup();
+    await wait();
+    expect(reasons(event)).toEqual(['recheck-failed']);
   });
 });

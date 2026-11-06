@@ -604,7 +604,8 @@ export class CopilotTool extends BaseCLITool {
       { repeatScope: skips }
     );
     if (!outcome.answered) {
-      noteLaunchAnswerSkipped(logger, skips, 'copilot-folder-trust-answer-skipped', { reason: outcome.reason });
+      // Issue #4189: the session, so a decline after it was made again is a new one.
+      noteLaunchAnswerSkipped(logger, skips, 'copilot-folder-trust-answer-skipped', { sessionName, reason: outcome.reason });
       return false;
     }
     recordLaunchDialogPress(sessionName);
