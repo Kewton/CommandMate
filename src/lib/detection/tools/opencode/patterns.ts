@@ -591,10 +591,12 @@ export const OPENCODE_CHROME_ROW_PATTERNS: readonly RegExp[] = [
 /**
  * {@link OPENCODE_SKIP_PATTERNS} less {@link OPENCODE_CHROME_ROW_PATTERNS}, for rows
  * known to lie above the located chrome (Issue #4188): the turn region of a frame
- * whose chrome `response-checker` found, and the reply it extracted from it. The
- * whole list stays for a frame with no chrome boundary, where the words are the
- * only reading left (the fallback {@link isOpencodeProcessingFooter} takes on a
- * text with no border), and for the per-row readers that are handed no position.
+ * whose chrome `response-checker` found, the reply it extracted from it, and the
+ * Layer-2 accumulator's rows cut from such a frame (`sliceOpenCodeTurnWithSkip`).
+ * The whole list stays for a frame with no chrome boundary, where the words are
+ * the only reading left (the fallback {@link isOpencodeProcessingFooter} takes on a
+ * text with no border), and for the per-row readers that are handed no position
+ * (the default of `cleanOpenCodeResponse` / `extractTuiContentLines`).
  */
 export const OPENCODE_TRANSCRIPT_SKIP_PATTERNS: readonly RegExp[] = OPENCODE_SKIP_PATTERNS.filter(
   (pattern) => !OPENCODE_CHROME_ROW_PATTERNS.includes(pattern),

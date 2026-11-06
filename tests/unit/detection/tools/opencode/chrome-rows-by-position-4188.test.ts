@@ -25,9 +25,26 @@ import {
   OPENCODE_SKIP_PATTERNS,
   OPENCODE_TRANSCRIPT_SKIP_PATTERNS,
 } from '@/lib/detection/tools/opencode/patterns';
-import { cleanOpenCodeTurnResponse, isOpenCodeComplete } from '@/lib/response-extractor';
+import {
+  isOpenCodeComplete,
+  sliceOpenCodeTurn,
+  sliceOpenCodeTurnWithSkip,
+} from '@/lib/response-extractor';
 import { cleanOpenCodeResponse } from '@/lib/response-cleaner';
 import { extractResponse } from '@/lib/polling/response-checker';
+import {
+  accumulateTuiContent,
+  clearTuiAccumulator,
+  getAccumulatedContent,
+  initTuiAccumulator,
+} from '@/lib/tui-accumulator';
+
+/**
+ * The poller's save of an opencode turn (`cleanCompletedResponse`): one cleaner,
+ * with the skip list for rows known to lie above the chrome.
+ */
+const save = (response: string): string =>
+  cleanOpenCodeResponse(response, OPENCODE_TRANSCRIPT_SKIP_PATTERNS);
 
 const fixture = (rel: string): string => readFileSync(resolve(__dirname, '../../../../fixtures', rel), 'utf8');
 
@@ -115,7 +132,7 @@ describe('items 1 and 2: the quoted row stays in the reply', () => {
     expect(OPENCODE_SKIP_PATTERNS.some((p) => p.test(row.trim()))).toBe(true);
     expect(OPENCODE_TRANSCRIPT_SKIP_PATTERNS.some((p) => p.test(row.trim()))).toBe(false);
     expect(stripAnsi(result?.response ?? '')).toContain(row.trim());
-    const saved = cleanOpenCodeTurnResponse(result?.response ?? '');
+    const saved = save(result?.response ?? '');
     expect(saved).toContain(row.trim());
     expect(saved).toContain('MOCK_OK');
     expect(saved).not.toContain('▣');
@@ -127,12 +144,12 @@ describe('items 1 and 2: the quoted row stays in the reply', () => {
     const result = extractResponse(PHRASE_IN_RESPONSE, 0, 'opencode');
     expect(result?.isComplete).toBe(true);
     expect(cleanOpenCodeResponse(result?.response ?? '')).toBe('');
-    expect(cleanOpenCodeTurnResponse(result?.response ?? '')).toBe('Ask anything... is the placeholder');
+    expect(save(result?.response ?? '')).toBe('Ask anything... is the placeholder');
   });
 
   it('the finished frame saves only its reply, without the chrome', () => {
     const result = extract(stripAnsi(DONE));
-    expect(cleanOpenCodeTurnResponse(result?.response ?? '')).toBe('MOCK_OK');
+    expect(save(result?.response ?? '')).toBe('MOCK_OK');
   });
 });
 
@@ -148,5 +165,98 @@ describe('with no chrome on the frame, the words are still read (the rule as it 
     expect(result?.isComplete).toBe(true);
     expect(stripAnsi(result?.response ?? '')).toContain('MOCK_OK');
     expect(stripAnsi(result?.response ?? '')).not.toContain('⬝⬝⬝⬝');
+  });
+});
+
+/** The measured finished frame with `row` as a row of its reply, ABOVE `MOCK_OK`. */
+function doneWithBefore(row: string): string {
+  const lines = stripAnsi(DONE).split('\n');
+  const at = lines.findIndex((line) => line.trim() === 'MOCK_OK');
+  expect(at).toBeGreaterThan(0);
+  return [...lines.slice(0, at), row, ...lines.slice(at)].join('\n');
+}
+
+describe('item 2 through the accumulator (turnHeadTruncated): the quoted row is kept', () => {
+  const KEY = 'wt-4188:opencode';
+
+  /** What the poller accumulates for one frame, the way `extractCompletedTurn` feeds it. */
+  function accumulate(frame: string): string {
+    clearTuiAccumulator(KEY);
+    initTuiAccumulator(KEY);
+    const { turn, skipPatterns } = sliceOpenCodeTurnWithSkip(frame);
+    accumulateTuiContent(KEY, turn, 'opencode', skipPatterns);
+    const content = getAccumulatedContent(KEY);
+    clearTuiAccumulator(KEY);
+    return content;
+  }
+
+  /** The accumulator as it was fed before #4188: the slice, the whole word list. */
+  function accumulateAsBefore(frame: string): string {
+    clearTuiAccumulator(KEY);
+    initTuiAccumulator(KEY);
+    accumulateTuiContent(KEY, sliceOpenCodeTurn(frame), 'opencode');
+    const content = getAccumulatedContent(KEY);
+    clearTuiAccumulator(KEY);
+    return content;
+  }
+
+  it.each(QUOTED)('%s: accumulated and saved when the chrome was located', (_name, row) => {
+    const frame = doneWith(row);
+    expect(sliceOpenCodeTurnWithSkip(frame).skipPatterns).toBe(OPENCODE_TRANSCRIPT_SKIP_PATTERNS);
+    const content = accumulate(frame);
+    expect(content).toContain(row.trim());
+    const saved = save(content);
+    expect(saved).toContain(row.trim());
+    expect(saved).toContain('MOCK_OK');
+    expect(saved).not.toContain('▣');
+    // Before: the slice's rows were skipped by the words, with no position.
+    expect(accumulateAsBefore(frame)).not.toContain(row.trim());
+  });
+
+  it('the measured reply `Ask anything... is the placeholder` is accumulated', () => {
+    expect(save(accumulate(PHRASE_IN_RESPONSE))).toBe('Ask anything... is the placeholder');
+    expect(accumulateAsBefore(PHRASE_IN_RESPONSE)).toBe('');
+  });
+
+  it('the finished frame accumulates only its reply', () => {
+    expect(save(accumulate(stripAnsi(DONE)))).toBe('MOCK_OK');
+  });
+
+  it.each(QUOTED)('%s: with no chrome on the frame, still skipped by the words', (_name, row) => {
+    const frame = withoutChrome(doneWith(row));
+    expect(sliceOpenCodeTurnWithSkip(frame).skipPatterns).toBe(OPENCODE_SKIP_PATTERNS);
+    const content = accumulate(frame);
+    expect(content).toContain('MOCK_OK');
+    expect(content).not.toContain(row.trim());
+  });
+});
+
+describe('item 2, no chrome on the frame: the fallback cut reads the position', () => {
+  const QUOTED_CUT_ROWS: Array<[string, string]> = [
+    ['the placeholder', '     Ask anything... is the placeholder'],
+    ['the first-idle footer', '     tab agents  ctrl+p commands'],
+  ];
+
+  it.each(QUOTED_CUT_ROWS)('%s above the finished-turn row: the reply is not cut there', (_name, row) => {
+    const frame = withoutChrome(doneWithBefore(row));
+    expect(findOpenCodeChromeStart(frame.split('\n'))).toBe(-1);
+    const result = extract(frame);
+    expect(result?.isComplete).toBe(true);
+    // The row itself is still skipped by the words (no chrome boundary, the whole
+    // list), but the rows after it are the reply's and stay.
+    expect(stripAnsi(result?.response ?? '')).toContain('MOCK_OK');
+  });
+
+  it('the footer under the finished-turn row still ends the reply', () => {
+    const frame = [
+      withoutChrome(stripAnsi(DONE)),
+      '   tab agents  ctrl+p commands',
+      '   /private/tmp/probe/cwd-continuation',
+    ].join('\n');
+    expect(findOpenCodeChromeStart(frame.split('\n'))).toBe(-1);
+    const result = extract(frame);
+    expect(result?.isComplete).toBe(true);
+    expect(stripAnsi(result?.response ?? '')).toContain('MOCK_OK');
+    expect(stripAnsi(result?.response ?? '')).not.toContain('cwd-continuation');
   });
 });

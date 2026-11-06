@@ -10,14 +10,13 @@ import type { CLIToolType } from './cli-tools/types';
 import {
   OPENCODE_TURN_COMPLETE_PATTERN,
   OPENCODE_PERMISSION_PATTERN,
-  OPENCODE_RESPONSE_COMPLETE,
+  OPENCODE_SKIP_PATTERNS,
   OPENCODE_TRANSCRIPT_SKIP_PATTERNS,
   findOpenCodeChromeStart,
   findOpenCodeUserEchoEnd,
   isOpencodeProcessingFooter,
   stripAnsi,
 } from './detection/cli-patterns';
-import { normalizeOpenCodeLine } from './tui-accumulator';
 
 /**
  * Bounds of the opencode turn currently rendered in a captured pane.
@@ -88,10 +87,38 @@ export function resolveOpenCodeTurnRegion(lines: string[]): OpenCodeTurnRegion {
  *   on screen yet.
  */
 export function sliceOpenCodeTurn(output: string): string {
+  return sliceOpenCodeTurnWithSkip(output).turn;
+}
+
+/**
+ * {@link sliceOpenCodeTurn} plus the skip list its rows may be cleaned with
+ * (Issue #4188).
+ *
+ * When the chrome was located, the slice ends above it by position, so a row of
+ * the slice with the words only the chrome draws (`esc interrupt`,
+ * `Ask anything...`, `tab agents  ctrl+p commands`, the spinner run) is a reply's
+ * row quoting them: {@link OPENCODE_TRANSCRIPT_SKIP_PATTERNS} keeps it. With no
+ * chrome boundary the slice runs to the end of the pane and the words are the
+ * only reading left: the whole {@link OPENCODE_SKIP_PATTERNS}.
+ *
+ * The Layer-2 accumulator is the caller: its rows reach the save
+ * (`turnHeadTruncated`) one at a time with no position, so the position has to
+ * be read here, where the frame still is.
+ *
+ * @param output - Raw `capture-pane` output.
+ * @returns The region's rows (`''` when none) and the skip list for them
+ *
+ * @internal Exported for unit testing
+ */
+export function sliceOpenCodeTurnWithSkip(output: string): {
+  turn: string;
+  skipPatterns: readonly RegExp[];
+} {
   const rawLines = output.split('\n');
   const region = resolveOpenCodeTurnRegion(rawLines.map(stripAnsi));
-  if (region.start >= region.end) return '';
-  return rawLines.slice(region.start, region.end).join('\n');
+  const skipPatterns = region.chromeStart >= 0 ? OPENCODE_TRANSCRIPT_SKIP_PATTERNS : OPENCODE_SKIP_PATTERNS;
+  if (region.start >= region.end) return { turn: '', skipPatterns };
+  return { turn: rawLines.slice(region.start, region.end).join('\n'), skipPatterns };
 }
 
 /**
@@ -160,44 +187,6 @@ export function isOpenCodeComplete(output: string): boolean {
     !isOpencodeProcessingFooter(output) &&
     !OPENCODE_PERMISSION_PATTERN.test(output)
   );
-}
-
-/**
- * Clean the reply `response-checker` extracted from an opencode turn region
- * (Issue #4188).
- *
- * `cleanOpenCodeResponse` (`response-cleaner.ts`) with one difference: the rows
- * only the chrome draws (`esc interrupt`, `Ask anything...`,
- * `tab agents  ctrl+p commands`, the spinner run) are kept. The extraction has
- * already cut the chrome off by position — or, on a frame whose chrome it could
- * not locate, skipped those rows itself — so what reaches here with those words
- * is the reply quoting them, which `cleanOpenCodeResponse` dropped one row at a
- * time. The rest is the same: the newest turn after the second-to-last `▣ Build`
- * row, rows normalised as the accumulator normalises them, the skip list, and the
- * summary row left out.
- *
- * @param response - The extracted reply (`ExtractionResult.response`)
- * @returns The cleaned reply
- */
-export function cleanOpenCodeTurnResponse(response: string): string {
-  const lines = response.split('\n');
-  const normalized = lines.map(normalizeOpenCodeLine);
-
-  const buildIndices: number[] = [];
-  normalized.forEach((line, i) => {
-    if (line && OPENCODE_RESPONSE_COMPLETE.test(line)) buildIndices.push(i);
-  });
-  const startLine = buildIndices.length >= 2 ? buildIndices[buildIndices.length - 2] + 1 : 0;
-
-  const cleanedLines: string[] = [];
-  for (let i = startLine; i < normalized.length; i++) {
-    const line = normalized[i];
-    if (!line) continue;
-    if (OPENCODE_TRANSCRIPT_SKIP_PATTERNS.some((pattern) => pattern.test(line))) continue;
-    if (OPENCODE_RESPONSE_COMPLETE.test(line)) continue;
-    cleanedLines.push(line);
-  }
-  return cleanedLines.join('\n').trim();
 }
 
 /**

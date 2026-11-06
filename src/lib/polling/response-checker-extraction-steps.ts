@@ -10,6 +10,7 @@ import {
   stripAnsi,
   OPENCODE_PROMPT_PATTERN,
   OPENCODE_PROMPT_AFTER_RESPONSE,
+  OPENCODE_TURN_COMPLETE_PATTERN,
   findCommandCodeChromeStart,
   findCopilotChromeStart,
   readCopilotStatusBar,
@@ -690,6 +691,15 @@ function collectCompletedResponse(ctx: ExtractionContext): { response: string; e
   // stops, which is what it did before.
   let endIndex = cliToolId === 'codex' ? contentEnd : totalLines;
 
+  // Issue #4188: the opencode fallback cut below, by position. A completed turn
+  // ends on its `▣ Build · … · 2.5s` row and the chrome is drawn under it, so a
+  // row ABOVE the newest finished-turn row is the reply's, whatever words it
+  // holds. -1 (no such row in the window) leaves every row eligible, as before.
+  const openCodeTurnCompleteRow =
+    cliToolId === 'opencode' && chromeStart < 0
+      ? findLastOpenCodeTurnCompleteRow(lines, startIndex, contentEnd)
+      : -1;
+
   for (let i = startIndex; i < contentEnd; i++) {
     const line = lines[i];
     const cleanLine = stripAnsi(line);
@@ -718,7 +728,11 @@ function collectCompletedResponse(ctx: ExtractionContext): { response: string; e
     // one boundary available — and #1883 measured that a REPLY can contain
     // `Ask anything...`, so cutting the turn on it is a last resort, not the
     // primary rule.
-    if (cliToolId === 'opencode' && chromeStart < 0) {
+    //
+    // Issue #4188: and only below the turn's finished-turn row. Both patterns are
+    // words matched anywhere in the row, so a reply row quoting them (`Ask
+    // anything... is the placeholder`) above that row cut the reply short there.
+    if (cliToolId === 'opencode' && chromeStart < 0 && i > openCodeTurnCompleteRow) {
       if (OPENCODE_PROMPT_PATTERN.test(cleanLine) || OPENCODE_PROMPT_AFTER_RESPONSE.test(cleanLine)) {
         endIndex = i;
         break;
@@ -736,6 +750,22 @@ function collectCompletedResponse(ctx: ExtractionContext): { response: string; e
   const response = responseLines.join('\n').trim();
 
   return { response, endIndex };
+}
+
+/**
+ * The newest opencode finished-turn row (`▣ Build · <model> · 2.5s`) in
+ * `[from, to)`, or -1 (Issue #4188).
+ *
+ * @param lines - The trimmed tmux buffer lines (ANSI intact)
+ * @param from - First row to search
+ * @param to - Exclusive end of the search
+ * @returns Index into `lines`, or -1
+ */
+function findLastOpenCodeTurnCompleteRow(lines: string[], from: number, to: number): number {
+  for (let i = to - 1; i >= from; i--) {
+    if (OPENCODE_TURN_COMPLETE_PATTERN.test(stripAnsi(lines[i]))) return i;
+  }
+  return -1;
 }
 
 /**

@@ -66,6 +66,7 @@ import {
   stripAnsi,
   findOpenCodeChromeStart,
   findOpenCodeUserEchoEnd,
+  OPENCODE_TRANSCRIPT_SKIP_PATTERNS,
 } from '@/lib/detection/cli-patterns';
 
 const FIXTURE_DIR = path.resolve(__dirname, '../../../fixtures/opencode-live-2047');
@@ -77,11 +78,18 @@ function frame(width: Width, name: string): string {
   return fs.readFileSync(path.join(FIXTURE_DIR, `w${width}`, `${name}.txt`), 'utf-8');
 }
 
-/** What the poller would write to `chat_messages.content` for this frame. */
+/**
+ * What the poller would write to `chat_messages.content` for this frame.
+ *
+ * Issue #4188: the poller's save (`cleanCompletedResponse`) cleans the extracted
+ * turn with `OPENCODE_TRANSCRIPT_SKIP_PATTERNS` — the rows above the located
+ * chrome keep a reply's rows quoting the chrome's words — so this copy uses the
+ * same list rather than the default.
+ */
 function savedReply(raw: string): string | null {
   const result = extractResponse(raw, 0, 'opencode');
   if (!result?.isComplete) return null;
-  return cleanOpenCodeResponse(result.response);
+  return cleanOpenCodeResponse(result.response, OPENCODE_TRANSCRIPT_SKIP_PATTERNS);
 }
 
 beforeEach(() => {
@@ -161,8 +169,13 @@ describe('Issue #2047: at 200 columns the poller saves the sidebar', () => {
     // The single most consequential finding of #2047, and the one that needs
     // nothing from the user: opencode's sidebar occupies the same ROWS as the
     // transcript at >=121 columns, and #1911's region is a row range.
-    expect(savedReply(frame(80, 'phrase-in-response'))).toBe('');
-    expect(savedReply(frame(120, 'phrase-in-response'))).toBe('');
+    //
+    // Issue #4188: at 80 and 120 the reply is its one row, `Ask anything... is
+    // the placeholder`. The save used to drop it by its words (the placeholder's)
+    // and saved the empty string; it now reads the row's position (above the
+    // located chrome) and saves it. What 200 columns adds is still the sidebar.
+    expect(savedReply(frame(80, 'phrase-in-response'))).toBe('Ask anything... is the placeholder');
+    expect(savedReply(frame(120, 'phrase-in-response'))).toBe('Ask anything... is the placeholder');
 
     const wide = savedReply(frame(200, 'phrase-in-response'));
     expect(wide).not.toBe('');
