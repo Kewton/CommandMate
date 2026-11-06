@@ -60,6 +60,17 @@ const CODEX_POLL_INTERVAL_MS = 1000;
 const CODEX_INIT_MAX_ATTEMPTS = 30;
 
 /**
+ * Issue #4175: the pause after a launch answer the input lock declined. It is
+ * the poll's own, {@link CODEX_POLL_INTERVAL_MS}: a skip used to `continue` past
+ * it, and a lock that declines at once (`recheck-failed`, `session-replaced`,
+ * `input-lock-lost`) then spent all {@link CODEX_INIT_MAX_ATTEMPTS} in no time.
+ * An answer that went out waits `CODEX_DIALOG_SETTLE_MS` instead, never both.
+ */
+function pauseAfterLaunchAnswerSkip(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, CODEX_POLL_INTERVAL_MS));
+}
+
+/**
  * Extra polls `waitForReady` may spend waiting out `npm install -g
  * @openai/codex` under the `update` policy (Issue #2068).
  *
@@ -618,7 +629,8 @@ export class CodexTool extends BaseCLITool {
               sessionName,
               readMark,
               () => this.isActiveDialogStill(sessionName, 'update'),
-              () => sendKeys(sessionName, digit, false)
+              () => sendKeys(sessionName, digit, false),
+              { repeatScope: answerSkips }
             );
             if (!updateOutcome.answered) {
               // Nothing typed: the install this lock covers never started.
@@ -627,6 +639,8 @@ export class CodexTool extends BaseCLITool {
                 releaseAgentUpdateLock(CODEX_UPDATE_LOCK_TOOL);
               }
               noteLaunchAnswerSkipped(logger, answerSkips, 'codex-update-dialog-answer-skipped', { sessionName, reason: updateOutcome.reason });
+              // Issue #4175: the poll's own pause, which `continue` would skip.
+              await pauseAfterLaunchAnswerSkip();
               continue;
             }
             forgetLaunchAnswerSkip(answerSkips, 'codex-update-dialog-answer-skipped');
@@ -654,10 +668,13 @@ export class CodexTool extends BaseCLITool {
             sessionName,
             readMark,
             () => this.isActiveDialogStill(sessionName, 'press-enter'),
-            () => sendSpecialKey(sessionName, 'Enter')
+            () => sendSpecialKey(sessionName, 'Enter'),
+            { repeatScope: answerSkips }
           );
           if (!enterOutcome.answered) {
             noteLaunchAnswerSkipped(logger, answerSkips, 'codex-notification-answer-skipped', { sessionName, reason: enterOutcome.reason });
+            // Issue #4175: the poll's own pause, which `continue` would skip.
+            await pauseAfterLaunchAnswerSkip();
             continue;
           }
           forgetLaunchAnswerSkip(answerSkips, 'codex-notification-answer-skipped');
@@ -674,10 +691,13 @@ export class CodexTool extends BaseCLITool {
             sessionName,
             readMark,
             () => this.isActiveDialogStill(sessionName, 'trust'),
-            () => sendKeys(sessionName, '1', false)
+            () => sendKeys(sessionName, '1', false),
+            { repeatScope: answerSkips }
           );
           if (!trustOutcome.answered) {
             noteLaunchAnswerSkipped(logger, answerSkips, 'codex-trust-dialog-answer-skipped', { sessionName, reason: trustOutcome.reason });
+            // Issue #4175: the poll's own pause, which `continue` would skip.
+            await pauseAfterLaunchAnswerSkip();
             continue;
           }
           forgetLaunchAnswerSkip(answerSkips, 'codex-trust-dialog-answer-skipped');
@@ -704,10 +724,13 @@ export class CodexTool extends BaseCLITool {
               const again = stripAnsi(await capturePane(sessionName, 50));
               return getCodexActiveDialog(again) === 'trust' && readCodexEnterConfirmedCursor(again) === 1;
             },
-            () => sendSpecialKey(sessionName, 'Enter')
+            () => sendSpecialKey(sessionName, 'Enter'),
+            { repeatScope: answerSkips }
           );
           if (!enterOutcome.answered) {
             noteLaunchAnswerSkipped(logger, answerSkips, 'codex-trust-dialog-answer-skipped', { sessionName, reason: enterOutcome.reason });
+            // Issue #4175: the poll's own pause, which `continue` would skip.
+            await pauseAfterLaunchAnswerSkip();
             continue;
           }
           forgetLaunchAnswerSkip(answerSkips, 'codex-trust-dialog-answer-skipped');
@@ -831,7 +854,8 @@ export class CodexTool extends BaseCLITool {
           readCodexEnterConfirmedCursor(again) === readCodexEnterConfirmedCursor(frame)
         );
       },
-      () => this.sendCodexHooksScreenKey(sessionName, screen, frame, attempt, trust)
+      () => this.sendCodexHooksScreenKey(sessionName, screen, frame, attempt, trust),
+      { repeatScope: state.skips }
     );
     if (!outcome.answered) {
       // Nothing was typed, so this screen's budget is not spent; poll again.

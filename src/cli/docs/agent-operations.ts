@@ -569,12 +569,20 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   its start, is exit 32 with nothing typed, and the setting stays saved. An ad-hoc id needs
   --register too: --register --role creates the instance and its role BEFORE sending, so the
   first start has it, and repeating it replaces the setting and is a condition as above.
-  --register without a role registers after sending: a roster that kept changing is a warning and
-  exit 0, with the command that registers it, not exit 31.
+  --register without a role registers after sending, and the message has gone out by then: a roster
+  that kept changing, or any other failure to register, is a warning and exit 0 (not exit 31). Do
+  not send it again; the warning has the command that registers it.
+  --auto-yes applied after the message (--model on a tool that arms after it, or a grant already on)
+  cannot take the send back: if it fails, that is a warning and exit 0, so do not send it again; the
+  warning has the command that enables it. Armed before the message, a failure is an error with
+  nothing sent.
   --expect-role-generation <g> with --expect-role-fingerprint <f> | --expect-no-role pin a send
   to what capture --json's roleLaunch said, saving nothing: a process replaced before the
   first key gets nothing (exit 32). A send with a role or a pin that types nothing withdraws the
-  --auto-yes it armed, and leaves a grant already on as it was.
+  --auto-yes it armed, and leaves a grant already on as it was. --auto-yes with no role, pin or
+  --reply-to reads nothing first: it cannot tell a grant it armed from one already on, so a refused
+  send leaves it on, with the command that stops it. A server too old to name its grants (no
+  grantId) is not asked to withdraw one either: it stays on, with the same command.
   send --new-conversation: OpenCode V1 continues the conversation it remembers, even under another
   role, and stopping it does not forget it. Stop the session and send with this to start a new one.
   Another tool, or a session running or starting at that check, is exit 2 with nothing sent.

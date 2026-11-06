@@ -12,8 +12,11 @@
  * on that pin: deleting those lines turns this red instead of quietly resuming
  * the writes, which is the failure mode that let the leak run unnoticed for a
  * release. It asserts the *effective* root — the one production code will read —
- * rather than the spelling of the setup file, so an override arriving any other
- * way (isolated CI runner, `vi.stubEnv`) is equally acceptable.
+ * rather than the spelling of the setup file. Since #4163 the pin overwrites
+ * whatever the suite was started with (a shell's or CI runner's value no longer
+ * survives it; `tests/unit/config/codex-home-isolation-4146.test.ts` checks
+ * that), so the only override that can still arrive is one a test sets after
+ * setup (`vi.stubEnv`, an explicit `{ root }`).
  *
  * @vitest-environment node
  */
