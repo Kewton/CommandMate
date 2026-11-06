@@ -729,7 +729,10 @@ before). Why it is stopped is now readable, as what the **last delivery attempt*
   `closedBlocked` of `GET /api/relays` (scoped by the requester A), and `commandmate relays` prints it under
   `# closed, notice not delivered yet` as `expired`, `pending=expired`, `blocked=<reason>@<observed time>`
   (`closedBlocked` in `--json`). The PC and phone rosters and the chat surface show the same "stopped by this
-  pane's dialog" for `prompt_waiting`. It goes away once the notice is delivered. It is never in `open` /
+  pane's dialog" for `prompt_waiting` (its tooltip says the notice stays until delivered, not that it is replaced at
+  the deadline). A requester not in the roster (`instances remove` without `--kill` leaves its session running)
+  gets it below the roster, under its own heading apart from the unconfirmed deliveries, with the reason. It goes
+  away once the notice is delivered. It is never in `open` /
   `awaiting`, and `counts` / `heldCount` do not change. A closed relay with no stopped attempt is not listed
 - **Not the `prompt` state**: `prompt` records that the worker B stopped on a confirmation and a notice to A was
   **queued** (not that it arrived). **It does not mean B is still waiting**: once B answers and the reply replaces

@@ -93,6 +93,11 @@ export interface SessionRelaysView {
   heldUnplaced: (rosterIds: readonly string[]) => SessionRelay[];
   /** Issue #4193: closed relays whose stopped payload is going to this instance (the `from` end). */
   closedBlockedFor: (instanceId: string) => SessionRelay[];
+  /**
+   * Issue #4193: the same, going to an instance of this worktree that is not
+   * in `rosterIds` (removed from the roster without killing its session).
+   */
+  closedBlockedUnplaced: (rosterIds: readonly string[]) => SessionRelay[];
   /** Re-read now. For a surface that just caused a change. */
   refresh: () => void;
 }
@@ -257,6 +262,11 @@ export function useSessionRelays(worktreeId: string | null | undefined): Session
       closedBlockedFor: (instanceId: string) =>
         closedBlocked.filter(
           (relay) => !heldIds.has(relay.id) && isRequester(relay) && relay.from.instanceId === instanceId
+        ),
+      closedBlockedUnplaced: (rosterIds: readonly string[]) =>
+        closedBlocked.filter(
+          (relay) =>
+            !heldIds.has(relay.id) && isRequester(relay) && !rosterIds.includes(relay.from.instanceId)
         ),
       refresh,
     };

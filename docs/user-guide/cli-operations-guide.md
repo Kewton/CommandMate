@@ -831,7 +831,9 @@ API は `POST /api/relays/:id/resolve`（本文 `{ "payloadId", "attemptId", "ac
   届くまでは知らせを持ち続けます。その配送が止まっている間（`lastDeliveryBlock` があるとき）は、`GET /api/relays` の
   `closedBlocked`（依頼元 A で絞り込み）に入り、`commandmate relays` は `# closed, notice not delivered yet` の見出しの下に
   `expired`・`pending=expired`・`blocked=<理由>@<観測時刻>` の行を出します。`--json` では `closedBlocked` です。PC・スマホの
-  名簿とチャット面も、`prompt_waiting` なら同じ「この画面の確認で停止」を出します。知らせが配送されると消えます。
+  名簿とチャット面も、`prompt_waiting` なら同じ「この画面の確認で停止」を出します（説明の文は、閉じた relay では
+  「届くまで残る」と言い、期限で置き換わるとは言いません）。依頼元が名簿に無いとき（`instances remove` を `--kill`
+  なしで行うとセッションは残ります）は、名簿の下に配送未確認とは別の見出しで理由つきで出します。知らせが配送されると消えます。
   `open`・`awaiting` には入れず、`counts`・`heldCount` も変わりません。止まっていない（観測が無い）閉じた relay は出しません
 - **確認待ち（`state: prompt`）とは別です**: `prompt` は相手 B が確認待ちで止まり、A への知らせを**配送の待ち行列に入れた**
   記録です（届いたことは意味しません）。**B が今も確認待ちであることも意味しません**: B が確認を終えて返信が知らせを

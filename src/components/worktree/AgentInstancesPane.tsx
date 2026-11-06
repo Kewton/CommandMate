@@ -414,6 +414,12 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
     () => relays.heldUnplaced(instances.map((inst) => inst.id)),
     [relays, instances],
   );
+  // Issue #4193: a closed relay's stopped expiry notice to an instance the
+  // roster no longer has (removed without --kill: its session lives on).
+  const unplacedClosedBlocked = useMemo(
+    () => relays.closedBlockedUnplaced(instances.map((inst) => inst.id)),
+    [relays, instances],
+  );
 
   const atMax = instances.length >= MAX_AGENT_INSTANCES;
   const atMin = instances.length <= MIN_AGENT_INSTANCES;
@@ -868,6 +874,7 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
       {/* Issue #4082: held deliveries whose requester has no row here. */}
       <RelayUnplacedHeldList
         relays={unplacedHeld}
+        closedBlocked={unplacedClosedBlocked}
         aliasOf={aliasOf}
         className="mt-2"
       />
