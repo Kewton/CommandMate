@@ -1,13 +1,14 @@
 // Vitest setup file
 import { beforeAll, afterAll, afterEach, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import '@testing-library/jest-dom/vitest';
 import {
   REAL_SHELL_TEST_TIMEOUT_MS,
   startsRealSubprocess,
 } from './helpers/real-shell-budget';
+import { installRealServerFence, TEST_HOOK_HOST } from './helpers/real-server-fence';
 import {
   closeOpenTestDatabases,
   isolateTestDatabaseEnv,
@@ -240,9 +241,10 @@ process.env.CM_AGENT_ROLE_ANTIGRAVITY_AGENTS_DIR = join(
 );
 
 // Issue #4163: the rest of the `CM_*` settings that name a real place. The
-// classification of every `CM_*` is in this Issue's commit message;
-// `tests/unit/guards/worktree-route-session-ownership-3290.test.ts` holds these
-// names and fails when one of them keeps a value from outside.
+// classification of every `CM_*` is in this Issue's commit message (#4176's
+// corrects CM_HTTPS_CERT / CM_HTTPS_KEY / CM_HOST / CM_PORT / CM_AUTH_TOKEN);
+// `tests/unit/config/codex-home-isolation-4146.test.ts` holds these names and
+// fails when one of them keeps a value from outside.
 //
 // Each of these has a real default or a real outer value: the opencode session
 // memory and launch settings and the claude hook settings under `~/.commandmate`,
@@ -266,6 +268,10 @@ process.env.CM_LOG_DIR = join(tmpdir(), 'commandmate-test-logs', String(process.
 process.env.CM_RUN_LOCK_DIR = join(tmpdir(), 'commandmate-test-run-lock', String(process.pid));
 process.env.CM_UAT_SOCK_BASE = join(tmpdir(), 'commandmate-test-uat-sock', String(process.pid));
 process.env.CM_PRODUCT_PUBLISH_DIR = join(tmpdir(), 'commandmate-test-product-publish', String(process.pid));
+// Issue #4176: the scripts the running server's tmux hooks execute
+// (`~/.commandmate/bin`). `tests/unit/tmux/session-hooks-2317.test.ts` turns
+// the live-attach and auto-popup options on, and each turn materializes them.
+process.env.CM_TMUX_SCRIPT_DIR = join(tmpdir(), 'commandmate-test-tmux-scripts', String(process.pid));
 
 // Issue #4163: these are removed, not pinned, because having no value is the safe
 // state and is what CI runs with. The worker's shell carries
@@ -281,6 +287,37 @@ delete process.env.CM_PERMISSION_HOOK_URL;
 delete process.env.CM_HOOK_PORT;
 delete process.env.CM_REMOTE_PAIRING_FILE;
 delete process.env.CM_OPENCODE_LOCAL_PROVIDER_CONFIG;
+
+// Issue #4176: the server the suite would talk to. A worker's pane inherits the
+// running server's `CM_PORT=3000`, and removing it changes nothing, because
+// every reader falls back to 3000 — the same server. So the defaults are left
+// as CI has them and the fence goes in front of `fetch` (the only HTTP client
+// in src/): a loopback request to 3000, or to the `CM_PORT` / `MCBD_PORT` the
+// suite was started with, or to a port the client's `.env` names (read only),
+// fails as a closed port does on CI, unsent. Installed before the ports are
+// removed, so it reads them. See tests/helpers/real-server-fence.ts.
+//
+// The hook relay runs `curl`, which the fence does not see, and reads `CM_HOST`
+// (nothing in src/ does): a never-resolving host keeps a relay started from the
+// suite off `127.0.0.1`. The relay's own tests set `CM_HOST` themselves.
+//
+// The rest are removed, as CI has them: a real token is a credential for the
+// real server, and the HTTPS pair names real files and turns the CLI's URL into
+// `https://` (`resolveServerEndpoint`).
+installRealServerFence(
+  process.env,
+  [join(process.cwd(), '.env'), join(homedir(), '.commandmate', '.env')],
+  () => {
+    const state = expect.getState();
+    return [state.testPath, state.currentTestName].filter(Boolean).join(' > ');
+  }
+);
+process.env.CM_HOST = TEST_HOOK_HOST;
+delete process.env.CM_PORT;
+delete process.env.MCBD_PORT;
+delete process.env.CM_AUTH_TOKEN;
+delete process.env.CM_HTTPS_CERT;
+delete process.env.CM_HTTPS_KEY;
 
 // Issue #4086: keep the suite off the database the calling shell names.
 //

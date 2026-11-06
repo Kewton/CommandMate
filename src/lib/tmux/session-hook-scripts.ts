@@ -36,6 +36,19 @@ import { join, dirname } from 'path';
 import { TUI_PANE_HEIGHT, TUI_PANE_WIDTH } from '../../config/tmux-pane-config';
 import { MCBD_SESSION_PREFIX } from '../session/tmux-session-surface';
 import { PAGER_SCRIPT_FILENAME } from './read-mode-pager';
+import { resolveSafeDirectory } from '../../config/safe-directory';
+
+/**
+ * Moves {@link getScriptDir} off `~/.commandmate/bin` (Issue #4176).
+ *
+ * `ensureSessionHooks` materializes these scripts whenever the live-attach or
+ * auto-popup option is on, and a unit test that turns one on would otherwise
+ * read and rewrite the scripts the running server's tmux hooks execute.
+ * `tests/setup.ts` pins it to a temporary directory. Unset, the directory is the
+ * one it has always been. The auto-popup script still looks for the pager at
+ * `$HOME/.commandmate/bin`, where `read-mode.ts` writes it.
+ */
+export const SCRIPT_DIR_ENV = 'CM_TMUX_SCRIPT_DIR';
 
 /** Basename of the Phase D geometry-restore script. */
 export const LIVE_RESTORE_SCRIPT_FILENAME = 'cm-live-restore.sh';
@@ -206,9 +219,10 @@ else
 fi
 `;
 
-/** Directory every materialized CommandMate script lives in. */
+/** Directory every materialized CommandMate script lives in: `~/.commandmate/bin` unless {@link SCRIPT_DIR_ENV} names another. */
 export function getScriptDir(): string {
-  return join(homedir(), '.commandmate', 'bin');
+  const fallback = join(homedir(), '.commandmate', 'bin');
+  return resolveSafeDirectory(process.env[SCRIPT_DIR_ENV]?.trim(), fallback, SCRIPT_DIR_ENV);
 }
 
 /** Absolute path of a materialized script. */
@@ -217,7 +231,7 @@ export function getScriptPath(filename: string): string {
 }
 
 /**
- * Write a script to `~/.commandmate/bin/<filename>` if its content changed.
+ * Write a script to `<getScriptDir()>/<filename>` if its content changed.
  *
  * Idempotent by content comparison so a restart does not churn the file's mtime,
  * and re-executable after a `chmod` accident because the mode is re-applied —

@@ -10,9 +10,10 @@
  * server was still a v62 build.
  *
  * `tests/setup.ts` calls {@link isolateTestDatabaseEnv} once per test file.
- * Unlike the `CM_OPENCODE_*` defaults next to it, this one is applied *even
- * when the environment already has a value*: an inherited value is exactly the
- * hazard, so "fill only a gap" would leave it in place. The deprecated aliases
+ * Like every other place-naming default there (all of them since #4146 /
+ * #4163), it is applied *even when the environment already has a value*: an
+ * inherited value is exactly the hazard, so "fill only a gap" would leave it in
+ * place. The deprecated aliases
  * (`MCBD_DB_PATH`, `DATABASE_PATH`) are removed rather than repointed, so they
  * cannot name the protected file and nothing prints their deprecation warning
  * on behalf of the shell. With `CM_DB_PATH` always set, the install-dependent
