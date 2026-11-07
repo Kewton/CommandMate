@@ -16,7 +16,6 @@ describe('docs/orchestrate/team.md (#4239)', () => {
     for (const w of ['project-manager', 'enabler', 'judge', 'dev-leader', '`claude-2`', '`claude-3`', '`codex-2`']) {
       expect(team).toContain(w);
     }
-    expect(team).toContain('易＝Command Code（#4238）');
   });
 
   it('states the flow, brief shape and overlap order', () => {
@@ -24,10 +23,13 @@ describe('docs/orchestrate/team.md (#4239)', () => {
     expect(team).toContain('開発リーダーは利用者へ直接聞かない');
     expect(team).toContain('`DONE:`');
     expect(team).toContain('並行して 2 つの run を回さない');
+    expect(team).toContain('未対応（追跡）');
+    expect(team).toContain('4 のマージ後'.replace('4 ', '#4238 '));
+    expect(team).toContain('ジャッジ → PM → 開発リーダー');
   });
 
   it('is linked from orchestrate.md, CLAUDE.md and agent-health.md', () => {
-    expect(read('.claude/commands/orchestrate.md')).toContain('docs/orchestrate/team.md#2-流れ');
+    expect(read('.claude/commands/orchestrate.md')).toContain('docs/orchestrate/team.md#5-uat-の結果の返し方phase-7');
     expect(read('CLAUDE.md')).toContain('./docs/orchestrate/team.md');
     const ah = read('docs/user-guide/agent-health.md');
     expect(ah).toContain('../orchestrate/team.md');

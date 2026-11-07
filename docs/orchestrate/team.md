@@ -11,7 +11,7 @@ worktree `mycodebranchdesk` で動かす、このリポジトリの開発体制�
 | イネーブラー | `codex`（`codex-2`） | `enabler` | 設計の事前レビュー（2-4-4）・整合性レビュー（5-2b）・原因調査。読むだけ |
 | ジャッジ | `claude-2` | `judge` | 統合した版の受け入れテスト・リグレッションテスト（UAT） |
 | 開発リーダー | `claude-3` | `dev-leader` | ブリーフを受けて `/orchestrate` を回す。難易度でワーカーを選ぶ |
-| ワーカー | Issue の worktree ごと | — | 易＝Command Code（#4238）、中＝Claude sonnet、難＝Claude opus |
+| ワーカー | Issue の worktree ごと | — | 易＝Command Code（#4238 のマージ後。それまでは orchestrate.md 1-2b の現行の担当）、中＝Claude sonnet、難＝Claude opus |
 
 `claude-3` は、agent-health の自動修正ループ（Epic #3047、毎朝 08:30 の dispatch）の送り先も兼ねる。
 
@@ -37,4 +37,13 @@ worktree `mycodebranchdesk` で動かす、このリポジトリの開発体制�
 
 開発リーダー（`claude-3`）は同時に 1 つの run しか回さない。agent-health の依頼（08:30）と PM のブリーフが重なったら、
 先に受けた run を終えてから次に進む。並行して 2 つの run を回さない。
-dispatch は処理中・プロンプト待ちの `claude-3` には送らず持ち越す（docs/user-guide/agent-health.md の自動依頼の節）。
+dispatch は一時点の状態を見て `/clear` を送るだけで、PM の送信との排他は無い。そこで次を手順とする。
+
+- PM は `claude-3` へブリーフを送る前に、`claude-3` が処理中でもプロンプト待ちでもないことと、dispatch の時刻（08:30）の前後（例 08:20〜09:00）でないことを確かめる
+- dispatch の `/clear` で PM のブリーフが消えうる。PM の run が残っている間に dispatch が届いたら、`claude-3` は先に受けた run を終えてから次へ移る
+- 仕組みとしての排他（予約・ロック）は未対応（追跡）。dispatch のコードはこの文書では変えない
+
+## 5. UAT の結果の返し方（Phase 7）
+
+UAT はジャッジ（`claude-2`）が行い、結果はジャッジ → PM → 開発リーダーの順で返す。不合格の修正ループ（`/uat-fix-loop`）は開発リーダーが回す。
+開発リーダー以外の人が 1 人で `/orchestrate` を回す場合（今の運用）は、`orchestrate.md` の Phase 7 の手順のままでよい。

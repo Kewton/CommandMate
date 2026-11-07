@@ -591,7 +591,7 @@ npx tsx scripts/agent-health/dispatch.ts --dry-run   # 選定と状態確認だ�
 - **Claude 3 の状態**（`commandmate ls --json` の `sessionStatusByInstance["claude-3"]`）: 実行中で処理中でもプロンプト待ちでもなければ
   入力待ち（送る）。処理中・プロンプト待ちは送らない（`skipped-busy`。全件を持ち越し）。セッションが無ければ `send` が起動する。
   roster に `claude-3`（cliTool `claude`）が無いときは送らずに失敗する
-  開発リーダーとしての PM のブリーフと重なったときは、先に受けた run を終えてから次（並行して 2 つの run を回さない）。処理中は送らず持ち越すので、この動きで足りる
+  開発リーダーとしての PM のブリーフと重なったときの手順（dispatch は一時点の状態を見て `/clear` を送るだけで、PM の送信との排他は無い）: PM は `claude-3` へブリーフを送る前に、`claude-3` が処理中でもプロンプト待ちでもないことと、dispatch の時刻（08:30）の前後（例 08:20〜09:00）でないことを確かめる。dispatch の `/clear` で PM のブリーフが消えうる。PM の run が残っている間に dispatch が届いたら、`claude-3` は先に受けた run を終えてから次へ移る（並行して 2 つの run を回さない）。仕組みとしての排他は未対応（[体制](../orchestrate/team.md#4-agent-health-の依頼とブリーフが重なったとき)）
 - **送信**: `commandmate send mycodebranchdesk "/clear" --instance claude-3` → 5 秒ごとに状態を見て入力待ちに戻ったことを確かめる（90 秒まで）→
   `commandmate send mycodebranchdesk "<依頼>" --instance claude-3 --auto-yes --duration 8h`。どちらも `exit 99`（起動直後）なら 2 分後に 1 回だけ再送
 - **依頼の中身**: 送る本文は **改行を含まない 1 行** `/orchestrate <番号…> <条件ファイルの絶対パス> の条件に従うこと`

@@ -1239,7 +1239,7 @@ module-reference の断片が無い PR も同じ扱いにする。リリース�
 
 ## Phase 7: UAT（--full時のみ）
 
-体制では UAT の依頼は PM がジャッジ（`claude-2`）へ送る。開発リーダーは Phase 6 までを終えて PM へ報告する。根拠: docs/orchestrate/team.md#2-流れ
+体制では UAT の依頼は PM がジャッジ（`claude-2`）へ送り、結果はジャッジ→PM→開発リーダーの順で返る。7-2 の修正ループは開発リーダーが回す。1 人で回す場合は以下のまま。根拠: docs/orchestrate/team.md#5-uat-の結果の返し方phase-7
 
 ### 7-1. 受入テスト実行
 
