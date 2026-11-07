@@ -18,9 +18,9 @@
  * needs no running session. `--since` in the far future keeps the reply itself
  * empty; only the id and the tool are read.
  *
- * The tool is kept apart from the id (#3883): `antigravity-2` or an alias of it
- * is an Antigravity instance whose id is not `antigravity`, so a rule for a
- * tool must read `cliToolId`, not compare the id.
+ * The tool is kept apart from the id (#3883): `command-code-2` or an alias of
+ * it is a Command Code instance whose id is not `command-code` (likewise
+ * `antigravity-2`), so a rule for a tool must read `cliToolId`, not compare the id.
  */
 
 /** Matches `isValidInstanceId` (src/lib/cli-tools/types.ts, src/cli/utils/api-client.ts). */

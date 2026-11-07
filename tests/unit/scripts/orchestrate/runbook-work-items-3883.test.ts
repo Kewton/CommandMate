@@ -731,6 +731,18 @@ describe('the manual completion check names this task, this instance and this wo
     }
   });
 
+  // Issue #4238: the easy tier is Command Code, and the same manual check is used with INSTANCE=command-code.
+  it('the same halves judge a Command Code instance by its own reply and last stop (#4238)', () => {
+    const { a, env } = setUp();
+    fs.writeFileSync(path.join(fake, 'reply-command-code.json'), JSON.stringify({ reply: `IMPL_COMPLETED head=${a.slice(0, 7)}` }));
+    fs.writeFileSync(path.join(fake, 'capture-command-code.json'), JSON.stringify({ lastStopEventAt: T0 + 20 * 60_000 }));
+    const cc = { ...env, INSTANCE: 'command-code' };
+    expect(check(SHELLS[0], cc)).toEqual({ signal: `signal: done head=${a}`, verdict: 'timing=before-signal verdict=adopt' });
+    const asked = fs.readFileSync(path.join(fake, 'calls'), 'utf8');
+    expect(asked).toMatch(/^capture wt-agy --instance command-code --json$/m);
+    expect(asked).not.toMatch(/--instance antigravity/m);
+  });
+
   for (const shell of SHELLS) {
     it(`${shell}: the reply's signal is decided as hasCompletionSignal decides it, for this HEAD`, () => {
       const { a, p, reply, env } = setUp();

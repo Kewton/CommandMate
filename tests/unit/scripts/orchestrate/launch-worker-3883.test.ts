@@ -18,6 +18,8 @@ import {
   EXIT_MODEL_UNKNOWN,
   EXIT_AUTO_YES_UNCONFIRMED,
   EXIT_STOP_UNCONFIRMED,
+  EXIT_PERMISSION_ASK,
+  EXIT_ROLE_CHANGED,
   DISARM_ATTEMPTS,
   INIT_MESSAGE,
   MODEL_READS,
@@ -25,6 +27,8 @@ import {
   STOP_READS,
   MODEL_SETTINGS,
   classifyModel,
+  commandCodePermissionMode,
+  isCommandCodeInstance,
   main,
   parseArgs,
   setModel,
@@ -514,5 +518,86 @@ describe('parseArgs / set-model / check-model', () => {
     const fake = fakeCli();
     expect(go(fake, ['set-model', '--worktree', worktree, '--model', 'sonnet']).code).toBe(0);
     expect(localSettings()).toEqual({ model: 'sonnet' });
+  });
+});
+
+describe('send --instance command-code (Issue #4238)', () => {
+  const ccArgv = (...extra: string[]) => sendArgv(...extra).map((a) => (a === 'claude' ? 'command-code' : a));
+  const writeCc = (name: string, body: unknown) => {
+    fs.mkdirSync(path.join(worktree, '.commandcode'), { recursive: true });
+    fs.writeFileSync(path.join(worktree, '.commandcode', name), typeof body === 'string' ? body : JSON.stringify(body));
+  };
+
+  it('sends the contract without writing a Claude model, and says the mode it read', () => {
+    writeCc('settings.local.json', { permissions: { defaultMode: 'acceptEdits' } });
+    const fake = fakeCli();
+    const r = go(fake, ccArgv());
+    expect(r.code).toBe(0);
+    expect(r.out).toEqual(['task-1']);
+    expect(verbs(fake)).toEqual(['send contract']);
+    expect(contractSends(fake)[0]).toEqual([
+      'commandmatedev', 'send', 'wt-1', '--contract', '.commandmate/tasks/issue-3883.yaml', '--instance', 'command-code', '--auto-yes', '--duration', '3h',
+    ]);
+    expect(fs.existsSync(path.join(worktree, '.claude'))).toBe(false);
+    expect(r.log.join('\n')).toContain('permission ok command-code of wt-1: defaultMode=acceptEdits');
+  });
+
+  it('permissions.defaultMode ask: nothing is sent, exit 45 (positive control)', () => {
+    writeCc('settings.local.json', { permissions: { defaultMode: 'ask' } });
+    const fake = fakeCli();
+    const r = go(fake, ccArgv());
+    expect(r.code).toBe(EXIT_PERMISSION_ASK);
+    expect(fake.calls).toEqual([]);
+    expect(r.out).toEqual([]);
+    expect(r.log.join('\n')).toMatch(/permission ASK command-code of wt-1: permissions\.defaultMode is ask in .*settings\.local\.json/);
+  });
+
+  it('no local file: the shared settings.json decides (ask stops there too)', () => {
+    writeCc('settings.json', { permissions: { defaultMode: 'ask' } });
+    expect(go(fakeCli(), ccArgv()).code).toBe(EXIT_PERMISSION_ASK);
+  });
+
+  it('a local file without a mode (hooks only) falls through to settings.json', () => {
+    writeCc('settings.local.json', { hooks: { Stop: [] } });
+    writeCc('settings.json', { permissions: { defaultMode: 'ask' } });
+    expect(commandCodePermissionMode(worktree)).toMatchObject({ mode: 'ask', file: path.join(worktree, '.commandcode', 'settings.json') });
+    writeCc('settings.local.json', { hooks: { Stop: [] }, permissions: { defaultMode: 'auto' } });
+    expect(commandCodePermissionMode(worktree)).toMatchObject({ mode: 'auto', file: path.join(worktree, '.commandcode', 'settings.local.json') });
+  });
+
+  it('a settings file that is not a JSON object cannot rule ask out: exit 45, nothing sent', () => {
+    writeCc('settings.local.json', '{ not json');
+    const fake = fakeCli();
+    expect(go(fake, ccArgv()).code).toBe(EXIT_PERMISSION_ASK);
+    expect(fake.calls).toEqual([]);
+  });
+
+  it('no .commandcode settings at all: sent (the mode is not set)', () => {
+    const fake = fakeCli();
+    const r = go(fake, ccArgv());
+    expect(r.code).toBe(0);
+    expect(r.log.join('\n')).toContain('defaultMode=(not set) (no .commandcode settings)');
+  });
+
+  it('a Claude model for Command Code is a usage error: exit 2, nothing written or sent', () => {
+    const fake = fakeCli();
+    expect(go(fake, ccArgv('--model', 'opus')).code).toBe(2);
+    expect(fake.calls).toEqual([]);
+    expect(fs.existsSync(path.join(worktree, '.claude'))).toBe(false);
+  });
+
+  it('a second instance (command-code-2) is checked the same way; other tools are not (negative control)', () => {
+    expect(isCommandCodeInstance('command-code')).toBe(true);
+    expect(isCommandCodeInstance('command-code-2')).toBe(true);
+    expect(isCommandCodeInstance('claude')).toBe(false);
+    expect(isCommandCodeInstance('codex')).toBe(false);
+    writeCc('settings.local.json', { permissions: { defaultMode: 'ask' } });
+    // A Claude worker in the same worktree does not read .commandcode at all.
+    const fake = fakeCli({ models: ['claude-opus-5-5'] });
+    expect(go(fake, sendArgv('--model', 'opus')).code).toBe(0);
+  });
+
+  it('45 does not overlap 40〜44', () => {
+    expect([EXIT_MODEL_MISMATCH, EXIT_MODEL_UNKNOWN, EXIT_STOP_UNCONFIRMED, EXIT_AUTO_YES_UNCONFIRMED, EXIT_ROLE_CHANGED]).not.toContain(EXIT_PERMISSION_ASK);
   });
 });

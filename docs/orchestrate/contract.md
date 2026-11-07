@@ -154,6 +154,7 @@ unit ゲートで同型を弾くが、契約側にも明示すること。
 - **goal が 8,000 文字を超えると生成が失敗する**（契約の上限）。Issue 本文を要点に縮めた `issueBodyFile` を渡し直す。検査するのは parser が数える文字列と同じで（末尾に改行を足さない。YAML は `|-`）、ちょうど 8,000 文字は生成も送信も通る（#4135）
 - `scope` に `CHANGELOG.md` / `docs/module-reference.md` を書くと生成が失敗する（2-4-1）。`requireCommit: true` は常に入る
 - 同じ設定で再実行しても契約は変わらない（`unchanged`）。中身の違う契約が既にあると止まる。送信前に直すときだけ `--force`
+- `agent` は `claude` か `command-code`（易、#4238）。`agent: antigravity` は契約を作らず、`command-code` に置き換えた旨を出して止まる（exit 1）。`command-code` に `model` は書かない（docs/orchestrate/command-code.md）
 
 ## 2-4 src を触る契約の build-server
 

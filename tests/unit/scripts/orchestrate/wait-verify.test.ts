@@ -17,8 +17,10 @@ import {
   defaultResolveTarget,
   defaultRun,
   defaultSpawnToLog,
+  SIGNAL_INSTANCES,
   main,
   mutexWaitOnly,
+  needsCompletionSignal,
   newerTask,
   parseArgs,
   runIdOf,
@@ -1432,6 +1434,41 @@ describe('every Antigravity instance waits for the signal, whatever its id (#388
     const h = harness({ pane: ['no signal'], resolvedTools: { 'codex-2': 'codex' } });
     expect(main(base('codex-2'), h.deps)).toBe(0);
     expect(h.spawned.map((c) => c.args[0])).toEqual(['wait', 'verify']);
+    expect(h.ran.some((c) => c.args.includes('--pane'))).toBe(false);
+  });
+});
+
+describe('Command Code waits for the completion signal (Issue #4238)', () => {
+  const cc = (instance: string, ...extra: string[]) =>
+    [...argv().map((a) => (a === 'claude' ? instance : a)), '--signal-timeout', '60', ...extra];
+
+  it('lists command-code among the tools that need the signal', () => {
+    expect(SIGNAL_INSTANCES).toContain('command-code');
+    expect(needsCompletionSignal({ instance: 'command-code' })).toBe(true);
+    expect(needsCompletionSignal({ instance: 'command-code-2' })).toBe(true);
+    expect(needsCompletionSignal({ instance: 'cc', cliToolId: 'command-code' })).toBe(true);
+  });
+
+  it('a turn end without the signal starts no verification and keeps Auto-Yes (positive control)', () => {
+    const h = harness({ pane: ['working…'], resolvedTools: { 'command-code': 'command-code' } });
+    expect(main(cc('command-code'), h.deps)).toBe(3);
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait']);
+    expect(h.autoYesCalls()).toEqual([]);
+    expect(records()[0].note).toMatch(/no IMPL_COMPLETED line within 60s/);
+  });
+
+  it('the signal on screen: verified and judged', () => {
+    const h = harness({ pane: ['working…', 'IMPL_COMPLETED'], resolvedTools: { 'command-code': 'command-code' } });
+    expect(main(cc('command-code'), h.deps)).toBe(0);
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait', 'verify']);
+    expect(records()[0].note).toContain('signal=seen');
+  });
+
+  it('claude does not wait for the signal (negative control)', () => {
+    expect(needsCompletionSignal({ instance: 'claude' })).toBe(false);
+    expect(needsCompletionSignal({ instance: 'claude-2', cliToolId: 'claude' })).toBe(false);
+    const h = harness({ pane: ['no signal'] });
+    expect(main(argv(), h.deps)).toBe(0);
     expect(h.ran.some((c) => c.args.includes('--pane'))).toBe(false);
   });
 });

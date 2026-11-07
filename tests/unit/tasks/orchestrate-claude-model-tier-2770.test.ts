@@ -120,7 +120,7 @@ describe('/orchestrate 1-2b: three tiers', () => {
   const body = section('1-2b');
 
   it('has one row per tier, with the model each one runs on', () => {
-    expect(body).toMatch(/^\| 易 \| antigravity \| —/m);
+    expect(body).toMatch(/^\| 易 \| command-code \| —/m);
     expect(body).toMatch(/^\| 中 \| claude \| sonnet \|/m);
     expect(body).toMatch(/^\| 難 \| claude \| opus \|/m);
   });
@@ -154,7 +154,7 @@ describe('/orchestrate 1-2b: three tiers', () => {
 
 describe('/orchestrate: the model never becomes an --instance value', () => {
   it('documents claude-sonnet / claude-opus for --assign only', () => {
-    expect(orchestrate).toContain('--assign `<N>=<claude|claude-opus|claude-sonnet|antigravity>`');
+    expect(orchestrate).toContain('--assign `<N>=<claude|claude-opus|claude-sonnet|command-code>`');
     expect(orchestrate).toMatch(/`--instance` は常に `claude`/);
   });
 
@@ -175,7 +175,7 @@ describe('/orchestrate 3-1: the model is set before the first send, and checked 
   const body = section('3-1');
 
   it('reads three columns from assign.tsv', () => {
-    expect(body).toContain('"<issue>\\t<claude|antigravity>\\t<opus|sonnet|->"');
+    expect(body).toContain('"<issue>\\t<claude|command-code>\\t<opus|sonnet|->"');
     expect(body).toContain('read -r issue AGENT MODEL');
   });
 
@@ -251,7 +251,7 @@ describe('/orchestrate 3-1: the model is set before the first send, and checked 
 describe('/orchestrate 3-4 / 3-5 / 3-5b: where each tier goes after two failures', () => {
   it('3-4 names all three destinations', () => {
     const row = section('3-4').split('\n').find((line) => line.startsWith('| `20` |')) ?? '';
-    expect(row).toContain('Claude（opus）へ切替（3-5）');
+    expect(row).toContain('Command Code 担当は Claude（sonnet）へ格上げ（3-5）');
     expect(row).toContain('opus へ格上げ（3-5b）');
     expect(row).toContain('Claude（opus）担当は人間へエスカレーション');
   });
@@ -281,6 +281,40 @@ describe('/orchestrate 3-4 / 3-5 / 3-5b: where each tier goes after two failures
   it('the error table agrees with 3-4', () => {
     const row = orchestrate.split('\n').find((line) => line.startsWith('| 検証不合格（exit 20） |')) ?? '';
     expect(row).toContain('3-5b');
+  });
+});
+
+describe('/orchestrate: the easy tier is Command Code (Issue #4238)', () => {
+  it('Phase 0 sends the easy tier to --instance command-code, with no --model', () => {
+    const phase0 = orchestrate.slice(orchestrate.indexOf('## Phase 0'), orchestrate.indexOf('## Phase 1'));
+    expect(phase0).toContain('**易 → `--instance command-code`**');
+    expect(phase0).toContain('Command Code がワーカー起因で 2 回不合格になったら Claude（sonnet）に上げる（3-5）');
+    expect(phase0).not.toMatch(/--instance antigravity/);
+  });
+
+  it('1-2b names Command Code for the easy tier and points at its document', () => {
+    const body = section('1-2b');
+    expect(body).toContain('**Command Code に回す（すべて満たせば「易」）**');
+    expect(body).not.toMatch(/^\| 易 \| antigravity/m);
+    expect(body).toContain('docs/orchestrate/command-code.md');
+  });
+
+  it('3-5 raises a Command Code Issue to Claude sonnet, and 3-5b then takes it to opus', () => {
+    const body = `${section('3-5')}\n${docSection('switching.md', '3-5 Command Code から Claude（sonnet）への格上げ')}`;
+    expect(section('3-5')).toContain('Command Code 担当の Issue が');
+    expect(body).toContain('AGENT=claude; MODEL=sonnet');
+    expect(body).toContain('commandmatedev instances "$WT" kill command-code');
+    expect(body).toContain('--instance claude --model "$MODEL" --contract ".commandmate/tasks/issue-${issue}-claude.yaml"');
+    expect(body).toContain('3-5b');
+    expect(body).not.toMatch(/MODEL=opus/);
+    // Bound to the new task, like every switch (#3118).
+    expect(body).toMatch(/wait-verify\.mjs[\s\S]*--task "\$TASK_ID"/);
+  });
+
+  it('the error table and 8-3 agree with 3-5', () => {
+    const row = orchestrate.split('\n').find((line) => line.startsWith('| 検証不合格（exit 20） |')) ?? '';
+    expect(row).toContain('Command Code 担当は Claude（sonnet）へ格上げ（3-5）');
+    expect(orchestrate).toContain('- Command Code から Claude（sonnet）への格上げ（3-5）');
   });
 });
 

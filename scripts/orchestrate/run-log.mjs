@@ -39,7 +39,7 @@
  * Usage:
  *   node scripts/orchestrate/run-log.mjs append --run-dir <dir> --issues <range> --issue <N>
  *        --stage <stage> --result <ok|fail|skip> [--head <sha>] [--work-head <sha>] [--task <id>] [--contract <path>]
- *        [--agent <claude|antigravity>] [--model <opus|sonnet|->] [--duration-sec <n>] [--note <text>]
+ *        [--agent <claude|command-code>] [--model <opus|sonnet|->] [--duration-sec <n>] [--note <text>]
  *        [--item <work item>] [--key <execution key>] [--queue-sec <n>] [--mutex-sec <n>] [--run-sec <n>]
  *   node scripts/orchestrate/run-log.mjs status --run-dir <dir> --issues <range> [--json]
  */

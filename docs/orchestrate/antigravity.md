@@ -2,6 +2,9 @@
 
 Antigravity 担当のワーカーに固有の運用メモと、手で確かめるときの手順を移した（#3481）。いつ読むかは本体の各節に書いてある。
 
+**今は使わない（#4238）。** 難易度「易」の担当は Command Code に変わった（docs/orchestrate/command-code.md）。ここの実測は記録として残す。
+「3-3 完了の合図を手で確かめる」の手順は担当によらないので、Command Code でも `INSTANCE=command-code` で使う。
+
 ## 1-2b 冷間起動と信頼ダイアログの運用メモ
 
 **運用メモ（Antigravity の送信時、2026-09-20 実測）**: 新規 worktree の 1 回目の send は

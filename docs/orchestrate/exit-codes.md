@@ -55,7 +55,7 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
   - 裁定の根拠は PR の Test plan と summary に書く
   - ワーカーには再指示しない
 
-**合図の前に始まった検証**（Antigravity 担当。3-3 の「完了の合図」）で `env-clean` だけが落ちたとき:
+**合図の前に始まった検証**（Command Code 担当。Antigravity のときも同じ。3-3 の「完了の合図」）で `env-clean` だけが落ちたとき:
 
 - 違反は、ワーカー自身がまだ動かしていたもの（バックグラウンドのテスト実行の listener `[self]`、
   テストが作って後で消す `$HOME` 直下のエントリなど）であることが多い。`~/.commandmate-demo-vitest-*` は
@@ -82,7 +82,7 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
 |---|---|
 | `no IMPL_COMPLETED line within <秒>s` / `the verification saw an earlier state …` / `a commit landed during the re-verification` | ワーカーはまだ作業中。capture で確かめ、作業中なら同じ引数で待ち直す |
 | `uncommitted changes: …` | 未コミットの変更がある。commit するよう再指示する |
-| `no IMPL_COMPLETED line within <秒>s`（記録に `waited-for` も検証の行も無い） | 合図が要る担当（Antigravity・`--require-signal`）は、**合図を見るまで検証を始めない**（#3883）。作業の途中のターン終了だったので、capture で確かめて同じ引数で待ち直す。画面に前の task の `IMPL_COMPLETED` が残っていても、この task の返事に合図が無ければ合図とは数えない（返事がまだ無い・読めないときも、画面の裸の行は数えない。数えるのは、task の作成の後のコミットを名指す `IMPL_COMPLETED head=<sha>` だけ） |
+| `no IMPL_COMPLETED line within <秒>s`（記録に `waited-for` も検証の行も無い） | 合図が要る担当（Command Code・Antigravity・`--require-signal`）は、**合図を見るまで検証を始めない**（#3883）。作業の途中のターン終了だったので、capture で確かめて同じ引数で待ち直す。画面に前の task の `IMPL_COMPLETED` が残っていても、この task の返事に合図が無ければ合図とは数えない（返事がまだ無い・読めないときも、画面の裸の行は数えない。数えるのは、task の作成の後のコミットを名指す `IMPL_COMPLETED head=<sha>` だけ） |
 | `a newer task <新しい id> was created for this instance after task <古い id>` | 待機中に同じ instance へ新しい契約が送られた（#3587）。ワーカーは新しい task を作業中なので Auto-Yes は切られていない（`auto-yes=kept`）。古い task の裁定は取らず、tasks.tsv の task id を新しい id に差し替えて **`wait-verify.mjs --task <新しい id>`** を呼び直す（ほかの引数は同じ） |
 
 記録の要約の `waited-for=run <id>` は、検証を始めようとしたときに同じ worktree の別の検証（再指示の前の古い run など）が動いていた（`already in progress`）ので、その run の終了を待ってから検証をやり直したという意味（#3883）。裁定はこの呼び出しが始めた run（ログの `Verifying: … (run <id>)`）のもので、待った run の結果は使わない。`waited-for=run <id>(still running)` は 3600 秒待っても終わらなかったという意味で、exit は `verify` のもの（99）のまま、Auto-Yes は切られていない。
@@ -129,7 +129,8 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
 - **composer に本文が残っている** → Enter 未確定。`tmux send-keys -t "mcbd-${AGENT}-$WT" Enter` で確定させる
   （`commandmatedev respond` は空文字を受け付けず exit 2 になるのでここでは使えない）。
   tmux セッション名は `mcbd-<エージェント>-<worktree-id>` である（Antigravity なら `mcbd-antigravity-<worktree-id>`）
-- **Antigravity のアンケート画面**（`How's the CLI experience so far? [1] Good … [0] Skip`）で止まっている →
+- **Command Code の確認の画面**で止まっている → 権限の既定が `ask` の可能性がある。docs/orchestrate/command-code.md#3-1-権限の既定を確かめる を読み、利用者に直してもらう
+- **Antigravity（今は使わない）のアンケート画面**（`How's the CLI experience so far? [1] Good … [0] Skip`）で止まっている →
   Auto-Yes は答えず、`respond "0"` は `prompt_no_longer_active` になる。
   `tmux send-keys -t "mcbd-antigravity-$WT" -l -- 0` で閉じる（2026-09-09 実測。2026-09-17 のパイロットでは出なかった）
 - **権限プロンプトで停止** → Enter で承認。monitor.sh に自動承認させる場合、送信先は

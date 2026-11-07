@@ -1,6 +1,6 @@
 #! 契約の goal の雛形（/orchestrate 2-4-2）。持ち主はこのファイル（#3477）。orchestrate.md には写さない。
 #! scripts/orchestrate/contract.mjs が `{{…}}` を Issue ごとの設定で埋め、`#!` で始まる行を落とす。
-#! 担当（Claude / Antigravity）で雛形を分けない。Antigravity は `.claude/commands` を読まないので、どの節も省かない。
+#! 担当（Claude / Command Code）で雛形を分けない。Command Code は `.claude/commands` を読まない（skill は `.commandcode/skills` と `.agents/skills` だけ）ので、どの節も省かない。
 #! `{{REFACTOR_RULES}}` には kind: refactor のときだけ refactor-rules.md（2-4-3 の整理の決まり）が入る。
 #! `{{FIXTURE_RULE}}` には scope が tests/fixtures/ の下に当たるときだけ fixture 走査テストの登録の文が入る（#4015）。
 #! `{{ROUTES}}` には設定に routes があるときだけ経路表と割込み表が入る（#3884）。無ければ行ごと消え、goal は変わらない。

@@ -8,9 +8,11 @@
  * easy to lose with it:
  *   - `--instance` and `--on-prompt human` on every wait (3-3);
  *   - the completion checks of 3-3: a worker can close a turn mid-work (an
- *     Antigravity `schedule`, #2605), `wait` reads that turn end as completion,
- *     and the verification then judges an unfinished tree. A verdict is taken
- *     only after the completion signal (`IMPL_COMPLETED`, Antigravity) is on
+ *     Antigravity `schedule`, #2605; a Command Code `hook_stop` of the turn
+ *     before winning over the one being generated, #2429), `wait` reads that
+ *     turn end as completion, and the verification then judges an unfinished
+ *     tree. A verdict is taken only after the completion signal
+ *     (`IMPL_COMPLETED`, Command Code and Antigravity, #4238) is on
  *     screen, no commit landed after the verification started, and the tree is
  *     clean; a verification that saw an earlier state is redone with
  *     `verify --task`;
@@ -148,8 +150,11 @@ export const UNCONFIRMED_EXIT = 3;
  * Tools whose turn end is not trusted as completion without the signal (3-3,
  * #2605). Matched against the tool the instance runs (`cliToolId`), so a second
  * instance (`antigravity-2`) and an alias of it need the signal too (#3883).
+ * Command Code took the easy tier over (#4238): its previous turn's `hook_stop`
+ * can win while the contract's turn is still generating (#2429). Antigravity
+ * stays, for a run that still has one of its workers.
  */
-export const SIGNAL_INSTANCES = ['antigravity'];
+export const SIGNAL_INSTANCES = ['antigravity', 'command-code'];
 
 /**
  * Whether the completion signal is needed before a verdict: `--require-signal`,
