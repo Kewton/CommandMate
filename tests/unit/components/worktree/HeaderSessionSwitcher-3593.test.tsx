@@ -2,7 +2,8 @@
  * @vitest-environment jsdom
  *
  * Issue #3593: the desktop header's session field is [current session]
- * [N others ▾][+].
+ * [N others ▾][+]. Issue #4218: now the session on screen on the left and
+ * [Sessions N ▾][+] (every session, the one on screen included) on the right.
  *
  * - The current session is the active instance — which the worktree screen
  *   keeps equal to the selected split's (see the seam test in

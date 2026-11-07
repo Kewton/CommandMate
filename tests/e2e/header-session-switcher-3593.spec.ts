@@ -1,6 +1,8 @@
 /**
  * E2E: the header's session field — [current session][N others ▾][+]
- * (Issue #3593).
+ * (Issue #3593). Issue #4218: now the session on screen at the end of the
+ * left "repository › branch ›" line, and [Sessions N ▾][+] (every session,
+ * the one on screen included) at the right end.
  *
  * What this proves that the component tests cannot:
  * - **the width is real layout**: at one screen width the field measures the
