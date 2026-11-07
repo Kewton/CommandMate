@@ -25,7 +25,7 @@ import os from 'os';
 import path from 'path';
 import Database from 'better-sqlite3';
 import type { NextRequest } from 'next/server';
-import { runMigrations } from '@/lib/db/db-migrations';
+import { openMigratedFileDb } from '../../../helpers/migrated-file-db';
 import { createMessage } from '@/lib/db/chat-db';
 import { codexTurnRequestId } from '@/types/agent-transcript';
 import {
@@ -96,10 +96,8 @@ const INDETERMINATE: Attempt = { state: 'indeterminate', reason: 'submit-unconfi
 const SENT_ATTEMPT: Attempt = { state: 'sent', reason: 'submitted' };
 
 function openDb(): Database.Database {
-  const opened = new Database(dbPath);
-  opened.pragma('foreign_keys = ON');
-  runMigrations(opened);
-  return opened;
+  // Issue #4212: no fsync per migration commit (tests/helpers/migrated-file-db.ts).
+  return openMigratedFileDb(dbPath, { foreignKeys: true });
 }
 
 function insertWorktree(id: string, cliToolId: string): void {
@@ -984,5 +982,27 @@ describe('the relay the resolve answers with is read before the commit (Issue #4
     await flush();
     expect(sendUserMessage).not.toHaveBeenCalled();
     expect(getRelayById(db, held.relayId)?.deliveryHold?.state).toBe('uncertain');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The per-test database (Issue #4212)
+// ---------------------------------------------------------------------------
+
+describe('the per-test database file (Issue #4212)', () => {
+  // The beforeEach above migrates a fresh file (~65 commits). With the default
+  // `synchronous = FULL` each commit waits for the disk; on a CI runner sharing
+  // the disk with other verifications that sync hook passed 20s and Vitest
+  // reported "Hook timed out in 20000ms" (develop push run 42293211705).
+  it('commits without an fsync wait, with foreign keys still on', () => {
+    expect(db.pragma('synchronous', { simple: true })).toBe(0);
+    expect(db.pragma('foreign_keys', { simple: true })).toBe(1);
+  });
+
+  it('negative control: a reopened connection still reads what was committed', () => {
+    const relay = legacyRelay();
+    db.close();
+    db = openDb();
+    expect(getRelayById(db, relay.id)?.state).toBe('pending');
   });
 });

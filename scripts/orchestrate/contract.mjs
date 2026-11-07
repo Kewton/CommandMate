@@ -12,6 +12,8 @@
  *
  *   issue: 3477              # required
  *   key: "3477-opus"         # contract file name issue-<key>.yaml (default: the Issue number)
+ *   item: d2                 # the 2nd+ PR (work item) of the Issue only (docs/orchestrate/run-log.md 1-5); with it the goal
+ *                            # tells the worker to fold into develop's changelog.d/<issue>.md (a key suffix alone does not)
  *   title: "<Issue title>"   # required
  *   kind: feature            # feature | bug | refactor | docs
  *   agent: claude            # claude | antigravity
@@ -45,6 +47,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 import { SECTION_ORDER } from '../changelog-fragments.mjs';
+import { ITEM_PATTERN } from './execution-key.mjs';
 import { classifyChanges } from '../run-related-unit-tests.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -373,6 +376,8 @@ export class ContractConfigError extends Error {
 }
 
 const SECTION_MARK = /^#! (>>>|<<<) ([a-z-]+)$/;
+/** fragment-rules.md section only a second work item's goal carries (#4212). */
+export const SECOND_WORK_ITEM_SECTION = 'second-work-item';
 
 /**
  * A template with its `#!` note lines removed. Lines between `#! >>> <name>` and
@@ -441,6 +446,17 @@ export function normalizeConfig(raw, options = {}) {
   // contract on the same branch is issue-<N>-opus.yaml, its fragment is still <N>).
   const key = raw.key === undefined ? String(issue) : String(raw.key);
   if (!/^[0-9A-Za-z][0-9A-Za-z._-]*$/.test(key)) problems.push(`key: must be a file-name-safe token (got ${raw.key})`);
+
+  // Issue #4212: a second work item of the same Issue (a config with `item`)
+  // shares changelog.d/<issue>.md with the first PR, so its goal says to fold
+  // into the fragment develop already has (run-log.md 1-5). A key suffix alone
+  // does not count: it also restacks a contract of the SAME PR (the -opus
+  // upgrade of switching.md, design → implementation, -b), which has no first PR.
+  const item = raw.item === undefined ? null : String(raw.item);
+  if (item !== null && !ITEM_PATTERN.test(item)) {
+    problems.push(`item: the --item name of the run (letters, digits, "-", "_"; at most 32 characters; got ${raw.item})`);
+  }
+  const secondWorkItem = item !== null;
 
   const title = typeof raw.title === 'string' ? raw.title.trim() : '';
   if (!title) problems.push('title: required');
@@ -560,6 +576,8 @@ export function normalizeConfig(raw, options = {}) {
   return {
     issue,
     key,
+    item,
+    secondWorkItem,
     title,
     kind: kindName,
     kindLabel: kind.label,
@@ -770,7 +788,8 @@ export function renderGoal(config) {
       : `\n## この契約での決定（Issue の「決めること」への答え。これに従う）\n${config.decisions.map((d) => `- ${d}`).join('\n')}`;
   const issueBody = config.issueBody ? `\n## Issue 本文\n${config.issueBody}` : '';
   // changelog-fragments.mjs: the entry follows the optional `<!-- bump: … -->` line (#3480).
-  const fragmentRules = fill(readTemplate(FRAGMENT_RULES_TEMPLATE).replaceAll('<N>', String(config.issue)), {
+  const fragmentInclude = config.secondWorkItem ? [SECOND_WORK_ITEM_SECTION] : [];
+  const fragmentRules = fill(readTemplate(FRAGMENT_RULES_TEMPLATE, { include: fragmentInclude }).replaceAll('<N>', String(config.issue)), {
     ENTRY_LINE: config.bump ? `3 行目。2 行目は最低の版の宣言 \`<!-- bump: ${config.bump} -->\`` : '2 行目',
     AFTER_ENTRY_LINE: config.bump ? '4 行目' : '3 行目',
   }).trimEnd();

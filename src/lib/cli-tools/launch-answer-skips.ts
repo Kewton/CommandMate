@@ -20,9 +20,11 @@ import {
 
 /**
  * Why a launch answer did not go out: the lock's refusal, or (Issue #4189) a key
- * tmux refused after the lock let it through (`send-failed`, the auto-default nudge's).
+ * tmux refused after the lock let it through (`send-failed`, the auto-default nudge's),
+ * or (Issue #4211) a Claude trust dialog whose cursor row could not be read, so no key
+ * was decided (`cursor-unreadable`).
  */
-export type LaunchAnswerSkipReason = InstanceInputAnswerSkip | 'send-failed';
+export type LaunchAnswerSkipReason = InstanceInputAnswerSkip | 'send-failed' | 'cursor-unreadable';
 
 /**
  * What one wait has declined so far. Also the wait's `repeatScope` for

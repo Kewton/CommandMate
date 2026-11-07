@@ -58,7 +58,9 @@ module-reference の断片の写しは `module-reference-<issue>[-<item>].md`。
 
 - **順序:** 2 本目のワーカーは、1 本目のマージの後に develop を取り込んでから断片を書く。1 本目の前に 2 本目を送るときも、断片を書く段は 1 本目のマージの後に置く（plan.md の順にそう書く）
 - **2 本目の契約に書くこと:** goal に「develop に `changelog.d/<N>.md` があれば、新しいファイルを作らず、その既存の 1 項目へ統合して両方の変更を残す（1 項目・1 行のまま。`node scripts/changelog-fragments.mjs check` が exit 0）」を足す。
-  `scope.allow` の `changelog.d/<N>.md` はそのまま（既存のファイルの書き換えも同じパス）
+  `scripts/orchestrate/contract.mjs` は、設定に `item:`（work item の名前）があるとき、この文を goal の断片の節に自動で入れる
+  （#4212。`scripts/orchestrate/templates/fragment-rules.md` の `second-work-item`）。2 本目の PR の設定にだけ `item:` を書く。
+  `key:` の接尾辞（`<N>-opus` への格上げ・設計の後の実装・`-b` など、同じ PR の契約の積み直し）では入らない。`scope.allow` の `changelog.d/<N>.md` はそのまま（既存のファイルの書き換えも同じパス）
 - **統合の形:** 要約は Issue 全体を 1 文で言い直し、本文に 1 本目と 2 本目の変更を順に書く。1 本目の文を消さない
 - 1 本目が develop に入る前に 2 本目の検証まで進んだときは、2 本目の断片を後で統合し直すことになり、作業の HEAD が変わって検証をやり直す。上の順序はそれを避けるため
 
