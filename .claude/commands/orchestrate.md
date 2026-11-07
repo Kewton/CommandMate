@@ -850,9 +850,10 @@ done 3< "workspace/orchestration/runs/$DATE/tasks.tsv"
 - **合格の記録は再利用しない。** 合格は task・契約（そのゲートの定義）・その task の開始時の env-clean の基準に結び付いていて、
   HEAD だけでは同じ確認と言えない（同じブランチに次の契約を送った直後も HEAD は同じ）。呼ぶたびに待って検証する。
   落ちた後の再開では、`run-log.mjs status` で `verify=ok` の Issue を呼び直さない（終わった task を `wait --verify` で裁定し直すと、
-  紐づかない再検証になり #3118 の形で exit 20 になる）。裁定をやり直すときは `--after-reinstruct --task "$TASK_ID"`
-- 再指示の後（3-4）は `--after-reinstruct --task "$TASK_ID"` を付ける。`--verify` を付けない wait → `verify --task` の 2 段になる。
-  完了の合図は再指示の送信より後のものだけを数える（前の試行の `IMPL_COMPLETED` は数えない）。送る直前の時刻を `--signal-since` で渡す。無ければ呼び出しの開始から数える
+  紐づかない再検証になり #3118 の形で exit 20 になる）。再指示せずに検証だけをやり直すときは `--reverify --task "$TASK_ID"`
+  （合図の境界は前の呼び出しのものを run の記録の `signal-since=` から引き継ぐ。既に出た合図で裁定に進む）
+- 再指示の後（3-4）は `--after-reinstruct --task "$TASK_ID" --signal-since "$SENT_AT"` を付ける。`--verify` を付けない wait → `verify --task` の 2 段になる。
+  完了の合図は再指示の送信（`$SENT_AT`）より後のものだけを数える（前の試行の `IMPL_COMPLETED` は数えない）。`--signal-since` が無ければ呼び出しの開始から数える
 - `--verify` は完了検出**後**に全ゲート（`work-evidence` ＋ `scope` ＋ verify.yaml の宣言ゲート）を
   実行し、その結果を exit code にする。ここが「完了したが壊れていた」を目視から exit code へ
   移す一点である。
@@ -903,7 +904,18 @@ exit 20 を受けたら docs/orchestrate/exit-codes.md#3-4-20-の対応 を読�
 `--instance "$AGENT"` を付ける）。再指示は **同一 worktree につき最大2回**。
 3回目に到達したら、**Command Code 担当は 3-5 の手順で Claude（sonnet）に上げる**。**Claude（sonnet）担当は 3-5b の手順で opus に上げる**（3-5 で格上げした sonnet も同じ）。**Claude（opus）担当は** worker を止め、ユーザーに判断を仰ぐ。
 
-**再指示の後の裁定は `wait --verify` ではなく、`wait` → `verify --task` の 2 段で行う。**
+**再指示の後の裁定は `wait --verify` ではなく、`wait` → `verify --task` の 2 段で行う。** 担当によらず `wait-verify.mjs` で行う
+（Command Code・Antigravity は、再指示の送信より後の完了の合図を確かめてから検証する）。
+
+```bash
+SENT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)   # 再指示の send の直前に取る
+# （ここで再指示を send する）
+node scripts/orchestrate/wait-verify.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" --issue "$issue" \
+  --wt "$WT" --worktree "$WT_DIR" --instance "$AGENT" --task "$TASK_ID" --model "$MODEL" --after-reinstruct --signal-since "$SENT_AT"
+```
+
+Claude 担当だけは、スクリプトを使えないときの手動の代わりに素の 2 段でもよい（合図を待たないので Command Code・Antigravity には使わない。
+その担当を手で裁定するときは docs/orchestrate/antigravity.md#3-3-完了の合図を手で確かめる を `SENT_AT` つきで行う）:
 
 ```bash
 # 1. 完了を待つ（--verify を付けない）

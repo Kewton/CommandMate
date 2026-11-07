@@ -108,7 +108,8 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
   実行枠を取り直す間に取り消すと、ゲートは `mutex-wait` の SKIP のまま run は `cancelled` になる。取り消しは並び直しで覆さない）・run が読めない・ログに run id が無い・SKIP の理由が読めない・`mutex-wait` 以外の SKIP（取消し・primary
   checkout など）や FAIL・TIMEOUT がある、のどれかなら、今までどおり exit 99 を返す。中身を `verify show <run> --json` で見る
 - **上限に達したとき**（要約に `mutex-requeue-limit`）・**HEAD が動いたとき**（`mutex-requeue-stopped=head-moved`）: exit 99 のまま、
-  Auto-Yes は切られていない（3-3 の確認が始める再検証が裁定に至らなかったときも同じ）。並列の検証が減ってから（または直列に）`wait-verify.mjs --after-reinstruct --task <id>` で検証し直す。
+  Auto-Yes は切られていない（3-3 の確認が始める再検証が裁定に至らなかったときも同じ）。並列の検証が減ってから（または直列に）`wait-verify.mjs --reverify --task <id>` で検証し直す（再指示はしないので、`--after-reinstruct` だけで呼ぶと
+  呼び出しの開始より後の新しい合図を待ち、完了済みの Command Code・Antigravity は exit 3 になる。`--reverify` は前の呼び出しの境界（記録の `signal-since=`）を引き継ぐ）。
   再指示の回数には数えない。HEAD が動いたときは、ワーカーがまだ作業中でないかを capture で先に確かめる
 
 ### 待ちの上限を分ける

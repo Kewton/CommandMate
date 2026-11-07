@@ -356,9 +356,27 @@ describe('/orchestrate: the Command Code send and the re-instruction signal are 
     expect(launcher).toContain("stopped('Command Code reads its permissions when the session starts')");
   });
 
+  it('3-4 re-instructs through wait-verify with the send time; the plain two steps are a Claude-only manual stand-in (re-review)', () => {
+    const body = section('3-4');
+    expect(body).toContain('SENT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)');
+    expect(body).toMatch(/wait-verify\.mjs[\s\S]*--after-reinstruct --signal-since "\$SENT_AT"/);
+    expect(body).toContain('Claude 担当だけは、スクリプトを使えないときの手動の代わりに素の 2 段でもよい');
+    const manual = readFileSync(path.join(REPO_ROOT, 'docs/orchestrate/antigravity.md'), 'utf-8');
+    expect(manual).toContain('SINCE=${SENT_AT:-$TASK_CREATED}');
+    expect(manual).toContain('--since "$SINCE"');
+    expect(manual).not.toContain('--since "$TASK_CREATED"');
+  });
+
+  it('a verification started again without a re-instruction is --reverify, in 3-3 and in exit-codes.md (re-review)', () => {
+    expect(section('3-3')).toContain('`--reverify --task "$TASK_ID"`');
+    const exitCodes = readFileSync(path.join(REPO_ROOT, 'docs/orchestrate/exit-codes.md'), 'utf-8');
+    expect(exitCodes).toContain('`wait-verify.mjs --reverify --task <id>` で検証し直す');
+    expect(exitCodes).not.toContain('`wait-verify.mjs --after-reinstruct --task <id>` で検証し直す');
+  });
+
   it('after a re-instruction only a signal written after the send counts', () => {
     expect(doc).toContain('合図は再指示の送信より後に');
-    expect(orchestrate).toContain('完了の合図は再指示の送信より後のものだけを数える');
+    expect(orchestrate).toContain('完了の合図は再指示の送信（`$SENT_AT`）より後のものだけを数える');
     expect(orchestrate).toContain('`--signal-since`');
   });
 });

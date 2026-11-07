@@ -15,6 +15,7 @@ import { appendRecord, readRecords, summarize } from '../../../../scripts/orches
 import {
   baselineTask,
   completionSignalSince,
+  inheritedSignalSince,
   defaultResolveTarget,
   defaultRun,
   defaultSpawnToLog,
@@ -1531,6 +1532,58 @@ describe('after a re-instruction, only a signal written after it counts (Issue #
     expect(completionSignalSince({ baseline, afterReinstruct: true, startedMs: T0 })).toBe(T0);
     expect(completionSignalSince({ baseline, afterReinstruct: true, signalSince: iso(-5), startedMs: T0 })).toBe(T0 - 5 * 60_000);
     expect(completionSignalSince({ baseline: { ...baseline, found: false }, afterReinstruct: true, startedMs: T0 })).toBe(T0);
+  });
+
+  it('a recorded call after a re-instruction leaves its boundary in the note (for a --reverify after it)', () => {
+    go([OLD, { at: 15, text: 'IMPL_COMPLETED' }], ['--signal-since', iso(-5)]);
+    expect(records()[0].note).toContain(`signal-since=${iso(-5)}`);
+  });
+
+  describe('--reverify: the verification started again without a new re-instruction (Issue #4238 re-review)', () => {
+    // The re-instruction went out at 00:55; its signal came at 00:58; the verification then ended in a mutex wait (exit 99).
+    const NEW = { at: -2, text: 'IMPL_COMPLETED' };
+    const earlierCall = () =>
+      appendRecord(runDir, '3477', {
+        issue: 3477, stage: 'verify', result: 'fail', head: HEAD_A, taskId: 't-1',
+        note: `exit=99(error) mutex-requeue=2 mutex-requeue-limit signal-since=${iso(-5)} key=3477:3477:t-1:a1 auto-yes=kept`,
+      });
+
+    it('a finished Command Code task: the signal already written after the re-instruction is enough (positive control)', () => {
+      earlierCall();
+      const { h, code, sinces } = go([OLD, NEW], ['--reverify']);
+      expect(code).toBe(0);
+      expect(h.spawned.map((c) => c.args[0])).toEqual(['wait', 'verify']);
+      expect(sinces[0]).toBe(iso(-5));
+      expect(records().at(-1)?.note).toContain(`signal-since=${iso(-5)}`);
+    });
+
+    it('the same call as a new re-instruction (the guide before this fix) finds no new signal: exit 3', () => {
+      earlierCall();
+      expect(go([OLD, NEW]).code).toBe(3);
+    });
+
+    it('still not the previous attempt’s signal: with only that one, no verdict (negative control)', () => {
+      earlierCall();
+      expect(go([OLD], ['--reverify']).code).toBe(3);
+    });
+
+    it('no boundary recorded (the call before was not after a re-instruction): the task’s creation, as that call had', () => {
+      expect(go([OLD], ['--reverify']).code).toBe(0);
+    });
+
+    it('inheritedSignalSince reads the last verification of this task and work item only', () => {
+      earlierCall();
+      appendRecord(runDir, '3477', { issue: 3477, stage: 'verify', result: 'fail', head: HEAD_A, taskId: 't-0', note: `signal-since=${iso(9)}` });
+      appendRecord(runDir, '3477', { issue: 3477, stage: 'verify', result: 'fail', head: HEAD_A, taskId: 't-1', item: 'pr2', note: `signal-since=${iso(9)}` });
+      expect(inheritedSignalSince(records(), { issue: 3477, item: undefined, taskId: 't-1' })).toBe(T0 - 5 * 60_000);
+      expect(inheritedSignalSince(records(), { issue: 3477, item: 'pr2', taskId: 't-1' })).toBe(T0 + 9 * 60_000);
+      expect(inheritedSignalSince([], { issue: 3477, item: undefined, taskId: 't-1' })).toBeNull();
+    });
+
+    it('--reverify needs --task, and implies --after-reinstruct', () => {
+      expect(parseArgs(['--run-dir', 'r', '--issues', '1', '--issue', '1', '--wt', 'w', '--worktree', '/w', '--instance', 'claude', '--reverify']).error).toMatch(/--reverify needs --task/);
+      expect(parseArgs([...argv('--reverify')]).options?.afterReinstruct).toBe(true);
+    });
   });
 
   it('--signal-since is refused without --after-reinstruct, and when it is not a date', () => {

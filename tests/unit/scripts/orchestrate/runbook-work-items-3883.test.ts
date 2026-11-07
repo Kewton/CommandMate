@@ -743,6 +743,20 @@ describe('the manual completion check names this task, this instance and this wo
     expect(asked).not.toMatch(/--instance antigravity/m);
   });
 
+  // Issue #4238 re-review: after a re-instruction the boundary is its send time, not the task's creation.
+  it('after a re-instruction (SENT_AT) the reply is read from the send on, and the pane needs a commit after it', () => {
+    const { a, reply, env } = setUp();
+    reply(`IMPL_COMPLETED head=${a.slice(0, 7)}`);
+    check(SHELLS[0], { ...env, SENT_AT: at(3) });
+    expect(fs.readFileSync(path.join(fake, 'calls'), 'utf8')).toContain(`reply wt-agy --instance antigravity-2 --since ${at(3)} --json`);
+    // No reply yet: the pane line names A (committed at +5), which is before a send at +8: the previous attempt's.
+    reply(null);
+    fs.writeFileSync(path.join(fake, 'pane-antigravity-2.txt'), `IMPL_COMPLETED head=${a.slice(0, 7)}\n`);
+    expect(check(SHELLS[0], { ...env, SENT_AT: at(8) }).signal).toBe('signal: not yet');
+    // Without SENT_AT the task's creation is the boundary, as before (negative control).
+    expect(check(SHELLS[0], env).signal).toBe(`signal: done head=${a}`);
+  });
+
   for (const shell of SHELLS) {
     it(`${shell}: the reply's signal is decided as hasCompletionSignal decides it, for this HEAD`, () => {
       const { a, p, reply, env } = setUp();

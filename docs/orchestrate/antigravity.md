@@ -44,23 +44,27 @@ agy 用の目印を使い、`realtimeSnippet` と `content` の長い方から�
 合図は **この task・この instance・この work item の worktree** で確かめる（#3883）。入力は 3 つの変数で、後半もすべて同じ値を使う:
 `$INSTANCE` は wait が待った instance（`antigravity-2` などの追加 instance や別名を解決したもの。tasks.tsv の 3 列目）、
 `$WT_DIR` はその work item の worktree のパス（3-3 の `WT_DIR`。`../commandmate-issue-<N>` と決め打ちしない）、`$TASK_ID` は tasks.tsv の 4 列目。
+**再指示の後（3-4）は `$SENT_AT` に再指示の送信時刻**（送る直前に取った `date -u +%Y-%m-%dT%H:%M:%SZ`）を入れる。task は同じなので、
+前の試行の `IMPL_COMPLETED` がこの task の返事に残っている。境界（`$SINCE`）はその送信時刻で、無ければ task の作成時刻（`wait-verify.mjs --signal-since` と同じ）。
+検証だけをやり直す（再指示をしない）ときは、前の呼び出しと同じ `$SENT_AT` を使う（`wait-verify.mjs --reverify` と同じ）。
 
 ```bash
 # 前半: この task の合図と、それが指す HEAD（SIGNAL_HEAD）。規則は wait-verify.mjs の hasCompletionSignal と同じ
 ESC=$(printf '\033')
 TASK_CREATED=$(commandmatedev task show "$TASK_ID" --json | jq -r '.task.createdAt')
+SINCE=${SENT_AT:-$TASK_CREATED}   # 再指示の後はその送信時刻から（前の試行の合図を数えない）
 HEAD_NOW=$(git -C "$WT_DIR" rev-parse HEAD)
-REPLY_JSON=$(commandmatedev reply "$WT" --instance "$INSTANCE" --since "$TASK_CREATED" --json)
+REPLY_JSON=$(commandmatedev reply "$WT" --instance "$INSTANCE" --since "$SINCE" --json)
 if printf '%s' "$REPLY_JSON" | jq -e '(.reply | type) == "string"' > /dev/null 2>&1; then
   # この task の返事がある: 裸の行（=）と head= の行（=<sha>）を分けて取り出す
   CANDIDATES=$(printf '%s' "$REPLY_JSON" | jq -r '.reply' | sed "s/${ESC}\[[0-9;]*m//g" \
     | sed -nE 's/^[[:space:]]*IMPL_COMPLETED([[:space:]]+head=([0-9a-f]{7,40}))?[[:space:]]*$/=\2/p')
 else
-  # 返事がまだ無い（reply: null）・読めない: 画面では head= の行だけを取り、今の HEAD が task の作成より後のコミットのときだけ数える
+  # 返事がまだ無い（reply: null）・読めない: 画面では head= の行だけを取り、今の HEAD が境界（$SINCE）より後のコミットのときだけ数える
   CANDIDATES=$(commandmatedev capture "$WT" --instance "$INSTANCE" --pane --tail 40 | sed "s/${ESC}\[[0-9;]*m//g" \
     | sed -nE 's/^[[:space:]]*IMPL_COMPLETED[[:space:]]+head=([0-9a-f]{7,40})[[:space:]]*$/=\1/p')
   node -e 'process.exit(Date.parse(process.argv[1]) >= Date.parse(process.argv[2]) ? 0 : 1)' \
-    "$(git -C "$WT_DIR" log -1 --format=%cI HEAD)" "$TASK_CREATED" || CANDIDATES=
+    "$(git -C "$WT_DIR" log -1 --format=%cI HEAD)" "$SINCE" || CANDIDATES=
 fi
 # 裸の行は今の HEAD の合図、head= の行は今の HEAD を名指すときだけ（別の SHA は数えない）
 SIGNAL_HEAD=$(printf '%s\n' "$CANDIDATES" | awk -v h="$HEAD_NOW" '$0 == "=" || (length($0) > 1 && index(h, substr($0, 2)) == 1) { print h; exit }')
@@ -73,8 +77,8 @@ if [ -n "$SIGNAL_HEAD" ]; then echo "signal: done head=$SIGNAL_HEAD"; else echo 
   前の HEAD を名指す返事は、この HEAD の完了ではない（#3883。wait-verify.mjs も同じ規則で拒否する）
 - 画面（`capture --pane`）の裸の `IMPL_COMPLETED` では決めない。前の task の行が画面に残ったまま、この task の途中のターン終了
   （`schedule` など）が来ることがあり、ターン終了の時刻はその行がこの task のものかを示さない（#3883）。返事がまだ無い（`reply: null`）・
-  読めないときに画面で数えてよいのは、今の HEAD を名指す `IMPL_COMPLETED head=<sha>` で、そのコミットの時刻がこの task の作成
-  （`$TASK_CREATED`）以後のときだけ。task が台帳に無い（`$TASK_CREATED` が `null`）ときも `not yet` になる
+  読めないときに画面で数えてよいのは、今の HEAD を名指す `IMPL_COMPLETED head=<sha>` で、そのコミットの時刻が境界
+  （`$SINCE`。再指示の後はその送信時刻、それ以外は task の作成）以後のときだけ。task が台帳に無い（`$TASK_CREATED` が `null`）ときも `not yet` になる
 - `not yet` なら、合図が出るまで待つ。作業が続いているかは、`capture --prompts` と commits の増加で確かめる
 - 合図が出たら、`$SIGNAL_HEAD` を裁定まで保ち、wait の検証が合図より前に始まっていないかを確かめる。
   比べるのは、「wait が起動した検証の開始時刻」と「同じ `$INSTANCE` の最後のターン終了の時刻」（合図を出したターンの終了）の 2 つ。

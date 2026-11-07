@@ -48,8 +48,11 @@ Command Code は、前のターンの `hook_stop` が、生成中のターンよ
 再指示の後（`--after-reinstruct`）は、task が同じなので、前の試行の `IMPL_COMPLETED` が最新の返信に残っている。そのため合図は再指示の送信より後に
 書かれたものだけを数える（送る直前の時刻を `--signal-since` で渡す。無ければ呼び出しの開始から）。画面の `IMPL_COMPLETED head=<sha>` も、
 その HEAD が送信より後のコミットでなければ数えない。HEAD が前の試行と同じなら、新しい合図が返信に出るまで裁定しない。
+送信時刻は記録の要約に `signal-since=<時刻>` として残る。再指示をせずに検証だけをやり直すとき（mutex 待ちの exit 99 の後など）は
+`--reverify --task <id>` で呼ぶ。境界は前の呼び出しのものを引き継ぐので、既に出ている合図で裁定に進む（新しい合図は来ない）。
 
 `wait-verify.mjs` を通さずに待ったときの手順は、担当によらず docs/orchestrate/antigravity.md#3-3-完了の合図を手で確かめる と同じ（`INSTANCE=command-code` で使う）。
+再指示の後は `SENT_AT` に再指示の送信時刻を入れ、task の作成ではなくその時刻を境界にする。
 
 ## 3-4 止まったときの対処
 
