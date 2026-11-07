@@ -15,7 +15,7 @@ if (!key) { console.error('JEV_API_KEY が .env にありません'); process.ex
 
 const questions = {
   model: { type: 'choice', instructions: 'Which worker model should implement this GitHub issue, given the issue text', criteria: {
-    antigravity: 'Easy: every change is fully specified as file:line plus replacement code, acceptance fully automatic, no dangerous area',
+    'command-code': 'Easy: every change is fully specified as file:line plus replacement code, acceptance fully automatic, no dangerous area',
     sonnet: 'Medium: fix candidates or test checks are enumerated in the issue, only a closed judgement is left, acceptance automatic',
     opus: 'Hard: root cause not pinned to file:line, open design decision, needs real-device/screen verification, new module wiring, or touches tmux/session/auto-yes/detection/polling/hooks/security/db migration',
     human: 'Needs a human decision or non-code work (device testing, policy, release, external account)' } },

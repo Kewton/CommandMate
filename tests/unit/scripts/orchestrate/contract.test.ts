@@ -18,6 +18,7 @@ import { parse as parseYaml } from 'yaml';
 import {
   ContractConfigError,
   FRAGMENT_RULES_TEMPLATE,
+  REPLACED_AGENTS,
   GOAL_TEMPLATE,
   MAX_GOAL_LENGTH,
   REFACTOR_DEFAULT_GATES,
@@ -183,7 +184,7 @@ describe('goal', () => {
   it('adds the escape-hatch line for sonnet only', () => {
     expect(buildContract(normalizeConfig({ ...base, model: 'sonnet' })).goal).toContain(`- ${SONNET_RULE}`);
     expect(buildContract(normalizeConfig(base)).goal).not.toContain(SONNET_RULE);
-    expect(buildContract(normalizeConfig({ ...base, agent: 'antigravity', model: '-' })).goal).not.toContain(SONNET_RULE);
+    expect(buildContract(normalizeConfig({ ...base, agent: 'command-code', model: '-' })).goal).not.toContain(SONNET_RULE);
   });
 
   it('ends with IMPL_COMPLETED and forbids the full suite', () => {
@@ -586,5 +587,45 @@ describe('refactor scope: a file, not a directory (#3477 review 6)', () => {
 
   it('leaves other kinds alone', () => {
     expect(normalizeConfig({ ...base, scope: ['tests/unit'] }).scope).toContain('tests/unit');
+  });
+});
+
+describe('the easy tier is Command Code, not Antigravity (Issue #4238)', () => {
+  const commandCode = { ...base, agent: 'command-code', model: undefined };
+
+  it('generates a contract for agent: command-code, with no model and the completion signal in the goal', () => {
+    const config = normalizeConfig(commandCode);
+    expect(config).toMatchObject({ agent: 'command-code', model: null });
+    const { goal } = buildContract(config);
+    expect(goal.trimEnd().endsWith('すべて終わったら、最後に `IMPL_COMPLETED` とだけ出力する。')).toBe(true);
+    expect(goal).not.toContain(SONNET_RULE);
+    expect(parseTaskContract(contractYaml(config), 'generated').goal.trimEnd()).toBe(goal.trimEnd());
+  });
+
+  it('accepts "-" as no model for command-code, and refuses a Claude model for it', () => {
+    expect(normalizeConfig({ ...commandCode, model: '-' }).model).toBeNull();
+    expect(() => normalizeConfig({ ...commandCode, model: 'sonnet' })).toThrow(/only a claude worker/);
+  });
+
+  it('agent: antigravity generates nothing and says what replaced it (positive control)', () => {
+    expect(REPLACED_AGENTS).toEqual({ antigravity: 'command-code' });
+    expect(() => normalizeConfig({ ...base, agent: 'antigravity', model: undefined })).toThrow(
+      /agent: antigravity was replaced by command-code .*\(#4238\)/
+    );
+    const file = path.join(tmp, 'agy.yaml');
+    fs.writeFileSync(file, 'issue: 3477\ntitle: t\nagent: antigravity\nscope:\n  - "scripts/orchestrate/**"\n');
+    const out = path.join(tmp, 'contract.yaml');
+    const result = spawnSync(process.execPath, [SCRIPT, 'generate', '--config', file, '--out', out], { encoding: 'utf8' });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('replaced by command-code');
+    expect(fs.existsSync(out)).toBe(false);
+  });
+
+  it('an unknown agent is still the plain "must be one of" (negative control)', () => {
+    expect(() => normalizeConfig({ ...base, agent: 'codex' })).toThrow(/agent: must be one of claude \/ command-code \(got codex\)/);
+  });
+
+  it('claude stays as it was (negative control)', () => {
+    expect(normalizeConfig(base)).toMatchObject({ agent: 'claude', model: 'opus' });
   });
 });

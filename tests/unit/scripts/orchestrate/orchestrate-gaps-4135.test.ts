@@ -31,6 +31,7 @@ import {
   EXIT_MODEL_MISMATCH,
   EXIT_MODEL_UNKNOWN,
   EXIT_NOT_DELIVERED,
+  EXIT_PERMISSION_ASK,
   EXIT_ROLE_CHANGED,
   EXIT_ROLE_CONFLICT,
   EXIT_ROLE_NOT_SENT,
@@ -320,6 +321,16 @@ describe('4: exit codes of send and of launch-worker.mjs (workers.md)', () => {
     expect(line).toContain(`\`${name}\``);
     for (const word of words) expect(line).toContain(word);
     expect(fs.readFileSync(path.join(ROOT, 'scripts/orchestrate/launch-worker.mjs'), 'utf-8')).toContain(`export const ${name} = ${code};`);
+  });
+
+  // Issue #4238: Command Code's permissions default `ask` stops the send.
+  it('launch-worker: 45 is EXIT_PERMISSION_ASK, apart from 40〜44, with its meaning', () => {
+    const line = row(launchPart, EXIT_PERMISSION_ASK);
+    expect(line).toContain('`EXIT_PERMISSION_ASK`');
+    expect(line).toContain('permissions.defaultMode');
+    expect(line).toContain('何も送っていない');
+    expect([40, 41, 42, 43, 44]).not.toContain(EXIT_PERMISSION_ASK);
+    expect(fs.readFileSync(path.join(ROOT, 'scripts/orchestrate/launch-worker.mjs'), 'utf-8')).toContain(`export const EXIT_PERMISSION_ASK = ${EXIT_PERMISSION_ASK};`);
   });
 
   it('says the direct send returns send\'s code', () => {

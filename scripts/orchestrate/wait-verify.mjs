@@ -8,9 +8,11 @@
  * easy to lose with it:
  *   - `--instance` and `--on-prompt human` on every wait (3-3);
  *   - the completion checks of 3-3: a worker can close a turn mid-work (an
- *     Antigravity `schedule`, #2605), `wait` reads that turn end as completion,
- *     and the verification then judges an unfinished tree. A verdict is taken
- *     only after the completion signal (`IMPL_COMPLETED`, Antigravity) is on
+ *     Antigravity `schedule`, #2605; a Command Code `hook_stop` of the turn
+ *     before winning over the one being generated, #2429), `wait` reads that
+ *     turn end as completion, and the verification then judges an unfinished
+ *     tree. A verdict is taken only after the completion signal
+ *     (`IMPL_COMPLETED`, Command Code and Antigravity, #4238) is on
  *     screen, no commit landed after the verification started, and the tree is
  *     clean; a verification that saw an earlier state is redone with
  *     `verify --task`;
@@ -43,8 +45,11 @@
  *     the execution key. The verification is judged by the run id it printed
  *     (`Verifying: <wt> (run <id>)`, read back with `verify show`), not by the
  *     newest run of the worktree. The completion signal is taken from this
- *     task's reply (`reply --since <task start>`), or from the pane only after
- *     a turn of this task ended, and is tied to the HEAD it was seen at; for
+ *     task's reply (`reply --since <task start>`; after a re-instruction, from
+ *     its send on: `--signal-since`, else this call's start, #4238; a
+ *     `--reverify` keeps the boundary of the call before it), or from
+ *     the pane only after a turn of this task ended, and is tied to the HEAD
+ *     it was seen at; for
  *     an instance that needs it, no verification starts before it. A run of
  *     the worktree that is still going (`already in progress`, a
  *     re-instruction's old run) is waited out and the verification started
@@ -85,7 +90,7 @@
  *        --wt <worktree-id> --worktree <path> --instance <agent>
  *        [--task <id>] [--model <opus|sonnet|->] [--timeout <sec>] [--log <file>]
  *        [--after-reinstruct] [--require-signal] [--signal-timeout <sec>] [--cli <commandmatedev>] [--item <work item>]
- *        [--mutex-retries <n>]
+ *        [--mutex-retries <n>] [--signal-since <iso8601>] [--reverify]
  *   node scripts/orchestrate/wait-verify.mjs --auto-yes-off --wt <worktree-id> --instance <agent> [--cli <commandmatedev>]
  */
 import fs from 'node:fs';
@@ -94,7 +99,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { appendRecord, envCleanItemsNote, envCleanShared, formatEnvCleanShared, readRecords } from './run-log.mjs';
+import { appendRecord, envCleanItemsNote, envCleanShared, formatEnvCleanShared, inItem, readRecords } from './run-log.mjs';
 import { dirtyPaths } from './dirty-tree.mjs';
 import { resolveInstanceThroughCli } from './resolve-instance.mjs';
 import { allocateLog, claimLog, executionKey, itemProblem, workItemName } from './execution-key.mjs';
@@ -148,8 +153,11 @@ export const UNCONFIRMED_EXIT = 3;
  * Tools whose turn end is not trusted as completion without the signal (3-3,
  * #2605). Matched against the tool the instance runs (`cliToolId`), so a second
  * instance (`antigravity-2`) and an alias of it need the signal too (#3883).
+ * Command Code took the easy tier over (#4238): its previous turn's `hook_stop`
+ * can win while the contract's turn is still generating (#2429). Antigravity
+ * stays, for a run that still has one of its workers.
  */
-export const SIGNAL_INSTANCES = ['antigravity'];
+export const SIGNAL_INSTANCES = ['antigravity', 'command-code'];
 
 /**
  * Whether the completion signal is needed before a verdict: `--require-signal`,
@@ -714,6 +722,51 @@ export function awaitCompletionSignal({ run, sleep, now, o, cwd, since, supersed
 }
 
 /**
+ * From when a completion signal counts as this attempt's (epoch ms), or null
+ * when nothing dates it. The task's creation, as before; after a
+ * re-instruction (`--after-reinstruct`, 3-4) not before the re-instruction was
+ * sent (#4238 review): the task is the same, so the previous attempt's
+ * `IMPL_COMPLETED` is still this task's newest reply, and with the HEAD
+ * unchanged it would pass for the new attempt's. The send time is
+ * `--signal-since`, else the start of this call (which comes after the send;
+ * a signal written in between is then not counted, and the call ends
+ * unconfirmed rather than early).
+ *
+ * A verification started again without a new re-instruction (`--reverify`:
+ * after a mutex wait's exit 99, or a call that fell over) has no new send to
+ * date from: the worker is done and no new signal will come. It keeps the
+ * boundary of the call before it (`inherited`, read from the run record by
+ * {@link inheritedSignalSince}), or the task's creation when that call had
+ * none. `--signal-since` still wins.
+ *
+ * @param {{ baseline: { createdAt: number, found: boolean }, afterReinstruct?: boolean, reverify?: boolean, signalSince?: string, inherited?: number | null, startedMs: number }} args
+ * @returns {number | null}
+ */
+export function completionSignalSince({ baseline, afterReinstruct, reverify = false, signalSince, inherited = null, startedMs }) {
+  const task = baseline.found ? baseline.createdAt : null;
+  if (!afterReinstruct) return task;
+  const given = signalSince === undefined ? NaN : Date.parse(signalSince);
+  const sent = Number.isFinite(given) ? given : reverify ? inherited : startedMs;
+  if (sent === null) return task;
+  return task === null ? sent : Math.max(task, sent);
+}
+
+/** The note a call after a re-instruction leaves its boundary in (`signal-since=<iso>`), for a `--reverify` after it. */
+const SIGNAL_SINCE_NOTE = /(?:^|\s)signal-since=(\S+)/;
+
+/**
+ * The boundary of the last verification recorded for this task and work item
+ * (`signal-since=` in its note), in epoch ms; null when that call had none
+ * (it was dated by the task's creation) or nothing is recorded.
+ */
+export function inheritedSignalSince(records, { issue, item, taskId }) {
+  const last = records.filter((r) => r.stage === 'verify' && r.issue === issue && r.taskId === taskId && inItem(r, item ?? null)).at(-1);
+  const match = SIGNAL_SINCE_NOTE.exec(String(last?.note ?? ''));
+  const at = match ? Date.parse(match[1]) : NaN;
+  return Number.isFinite(at) ? at : null;
+}
+
+/**
  * Run `verify` into `logFile` ({@link runVerifyOnce}), and when its run
  * reached no verdict only because a gate's mutex stayed held for its whole
  * budget ({@link mutexWaitOnly}), start it again, up to `o.mutexRetries`
@@ -893,7 +946,7 @@ export function confirmCompletion(ctx) {
 const USAGE = `Usage:
   node scripts/orchestrate/wait-verify.mjs --run-dir <dir> --issues <range> --issue <N> --wt <worktree-id> --worktree <path> --instance <agent>
        [--task <id>] [--model <opus|sonnet|->] [--timeout <sec>] [--log <file>] [--after-reinstruct] [--require-signal] [--signal-timeout <sec>] [--cli <commandmatedev>]
-       [--item <work item>] [--mutex-retries <n>]
+       [--item <work item>] [--mutex-retries <n>] [--signal-since <iso8601>] [--reverify]
   node scripts/orchestrate/wait-verify.mjs --auto-yes-off --wt <worktree-id> --instance <agent> [--cli <commandmatedev>]`;
 
 const FLAGS = {
@@ -911,12 +964,19 @@ const FLAGS = {
   '--cli': 'cli',
   '--item': 'item',
   '--mutex-retries': 'mutexRetries',
+  '--signal-since': 'signalSince',
 };
-const SWITCHES = { '--after-reinstruct': 'afterReinstruct', '--require-signal': 'requireSignal', '--auto-yes-off': 'autoYesOff' };
+const SWITCHES = {
+  '--after-reinstruct': 'afterReinstruct',
+  '--reverify': 'reverify',
+  '--require-signal': 'requireSignal',
+  '--auto-yes-off': 'autoYesOff',
+};
 
 export function parseArgs(argv) {
   const options = {
     afterReinstruct: false,
+    reverify: false,
     requireSignal: false,
     autoYesOff: false,
     timeout: String(DEFAULT_TIMEOUT_SEC),
@@ -942,7 +1002,13 @@ export function parseArgs(argv) {
   if (!/^\d+$/.test(options.mutexRetries)) return { error: `--mutex-retries must be a count (got ${options.mutexRetries})` };
   // 3-4: after a re-instruction the task has ended, so `wait --verify` would judge
   // an unattached run (scope SKIP, env-clean ERROR). The task must be named.
-  if (options.afterReinstruct && !options.taskId) return { error: '--after-reinstruct needs --task <id>' };
+  // A verification started again (no new re-instruction) is judged as after one: wait → verify --task.
+  if (options.reverify) options.afterReinstruct = true;
+  if (options.afterReinstruct && !options.taskId) return { error: `${options.reverify ? '--reverify' : '--after-reinstruct'} needs --task <id>` };
+  if (options.signalSince !== undefined) {
+    if (!options.afterReinstruct) return { error: '--signal-since is for --after-reinstruct (the re-instruction\'s send time)' };
+    if (!Number.isFinite(Date.parse(options.signalSince))) return { error: `--signal-since must be an ISO 8601 date-time (got ${options.signalSince})` };
+  }
   const badItem = itemProblem(options.item);
   if (badItem) return { error: badItem };
   return { options };
@@ -1072,6 +1138,12 @@ export function main(argv, deps = {}) {
     // first (runVerify's onVerifyStart). An instance whose turn end can come
     // mid-work starts it only after its completion signal (#3883 P4).
     const needsSignal = needsCompletionSignal(o);
+    /** From when a completion signal counts (completionSignalSince): read when it is needed, after the baseline settled. */
+    const inherited = o.reverify ? inheritedSignalSince(readRecords(o.runDir, o.issues).records, { issue, item: o.item, taskId: o.taskId }) : null;
+    const signalFloor = () =>
+      completionSignalSince({
+        baseline, afterReinstruct: o.afterReinstruct, reverify: o.reverify, signalSince: o.signalSince, inherited, startedMs: started.getTime(),
+      });
     const waitArgs = ['wait', o.wt, '--instance', instance, '--on-prompt', 'human', '--timeout', o.timeout];
     let exitCode = spawnToLog(o.cli, waitArgs, { cwd, logFile: o.logFile, ...(watching ? { watch } : {}) });
     let verdictLog = fs.existsSync(o.logFile) ? fs.readFileSync(o.logFile, 'utf8') : '';
@@ -1094,7 +1166,7 @@ export function main(argv, deps = {}) {
     if (verifiable && !superseded) {
       superseded = supersededBy();
       if (!superseded && needsSignal) {
-        const seen = awaitCompletionSignal({ ...verifyCtx, since: baseline.found ? baseline.createdAt : null });
+        const seen = awaitCompletionSignal({ ...verifyCtx, since: signalFloor() });
         if (seen.seen) signal = seen;
         else if (seen.reason.startsWith('a newer task ')) superseded = seen.reason;
         else signalMissing = seen.reason;
@@ -1144,7 +1216,12 @@ export function main(argv, deps = {}) {
       const closed = closeEnv();
       return [`env=${closed.hash}`, ...(closed.duringTask.length > 0 ? [`env-changed=${closed.duringTask.join(',')}`] : [])];
     };
-    const extraNotes = () => [...verifyNotes, `key=${key()}`, ...envNotes()].join(' ');
+    /** The boundary after a re-instruction, kept in the record for a `--reverify` after this call. */
+    const sinceNote = () => {
+      const floor = o.afterReinstruct ? signalFloor() : null;
+      return floor === null ? [] : [`signal-since=${new Date(floor).toISOString()}`];
+    };
+    const extraNotes = () => [...verifyNotes, ...sinceNote(), `key=${key()}`, ...envNotes()].join(' ');
 
     const record = (result, head, noteOf) => {
       const durationSec = Math.round((now().getTime() - started.getTime()) / 1000);
@@ -1203,7 +1280,7 @@ export function main(argv, deps = {}) {
     }
 
     const confirmed = confirmCompletion({
-      ...verifyCtx, verdict: { exitCode, log: verdictLog, ...(verifyRunId ? { runId: verifyRunId } : {}) }, signal, since: baseline.found ? baseline.createdAt : null,
+      ...verifyCtx, verdict: { exitCode, log: verdictLog, ...(verifyRunId ? { runId: verifyRunId } : {}) }, signal, since: signalFloor(),
     });
     verdictLog = confirmed.log;
     const verdictLine = (view) => summarizeVerdict(confirmed.log, confirmed.exitCode, view).line;

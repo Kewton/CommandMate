@@ -2,7 +2,32 @@
 
 本体の 3-5・3-5b から、切り替えの手順を移した（#3481）。切り替えるかどうかの条件は本体にある。
 
+## 3-5 Command Code から Claude（sonnet）への格上げ
+
+易（Command Code）の 1 つ上は中（sonnet）なので、切替先は sonnet にする（#4238）。sonnet でもワーカー起因で 2 回不合格なら、3-5b で opus に上げる。
+
+1. **Command Code のセッションだけを止める**（task を作る**前**に。理由は下の Antigravity の手順 1 と同じ）。
+   ```bash
+   commandmatedev instances "$WT" kill command-code
+   commandmatedev instances "$WT"        # command-code の RUNNING が no であること
+   ```
+2. **sonnet 用の契約** `.commandmate/tasks/issue-<N>-claude.yaml` を作る。`scope` / `verify` / `success` は元の契約と同じ。
+   設定は `agent: claude`・`model: sonnet` にして `contract.mjs generate` で作る（sonnet の退避路の 1 行が入る）。
+   goal には、下の Antigravity の手順 2 と同じ形の「引き継ぎ」節を足す（見出しは `## 引き継ぎ（前任: Command Code、検証不合格 N 回）`）
+3. **Claude に送る**。tasks.tsv には切替の行を追記する（元の行は残す）。
+   ```bash
+   AGENT=claude; MODEL=sonnet        # 易の次は中（sonnet）。opus へは 3-5b で上げる
+   # 3-1 と同じ launch-worker.mjs: sonnet を明示して書き、起動して実効モデルを確かめてから契約を送る（exit 40〜44 なら待たずに止める）
+   TASK_ID=$(node scripts/orchestrate/launch-worker.mjs send --run-dir "workspace/orchestration/runs/$DATE" --issue "$issue" \
+     --wt "$WT" --worktree "$WT_PATH" --instance claude --model "$MODEL" --contract ".commandmate/tasks/issue-${issue}-claude.yaml") \
+     && node scripts/orchestrate/wait-verify.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
+       --issue "$issue" --wt "$WT" --worktree "$WT_PATH" --instance claude --task "$TASK_ID" --model "$MODEL"
+   ```
+4. 以降は通常の Claude（sonnet）担当として 3-4 に従う（ワーカー起因の不合格 2 回で 3-5b の opus への格上げ）。
+
 ## 3-5 Antigravity から Claude への切り替え
+
+**今は使わない（#4238 で易は Command Code）。** 上の Command Code の手順が参照する手順 1・2 の理由と「引き継ぎ」節の形のために残す。
 
 1. **Antigravity のセッションだけを止める**。他のインスタンスは止めない。
    ```bash

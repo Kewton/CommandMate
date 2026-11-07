@@ -37,7 +37,7 @@ run のたびには読まない手順（exit code ごとの対処・担当の切
 - monitor の COMPLETE 判定をマージ可否の裁定に使わない。裁定は `wait --verify` の exit code（3-2）
 - `wait` には `--instance "$AGENT"` と `--on-prompt human` を付ける（3-3）
 - 裁定が作業の終わりのものだと確かめてから Auto-Yes を切る。合格の記録は再利用しない（3-3）
-- Antigravity 担当は、完了の合図（`IMPL_COMPLETED`）を確かめてから裁定する（3-3）
+- Command Code 担当は、完了の合図（`IMPL_COMPLETED`）を確かめてから裁定する（3-3）
 - 不合格は先にワーカー起因かを判定する。再指示は同一 worktree につき最大 2 回（3-4）
 - 再指示の後の裁定は `wait` → `verify --task` の 2 段で行う（3-4）
 - ワーカーに「lint/tsc/test を実行して結果を報告して」と送らない（5-1）
@@ -79,7 +79,7 @@ run のたびには読まない手順（exit code ごとの対処・担当の切
 - **issue_numbers**: 開発対象のIssue番号（スペース区切り、2つ以上）
 - **--phase**: 実行範囲の制限（design, impl, pr, uat）。省略時はPRマージまで
 - **--full**: UAT合格まで全自動で実行
-- **--assign `<N>=<claude|claude-opus|claude-sonnet|antigravity>`**: Issue #N の開発担当を指定する（複数回指定可）。1-2b の判定より優先。
+- **--assign `<N>=<claude|claude-opus|claude-sonnet|command-code>`**: Issue #N の開発担当を指定する（複数回指定可）。1-2b の判定より優先。
   `claude` と `claude-opus` は同じ意味（Claude・opus）。`claude-sonnet` は Claude・sonnet。
   **これは assign.tsv の 2 列目と 3 列目を決める書き方であって、`--instance` に渡す値ではない**（`--instance` は常に `claude`）
 - **--claude-only**: 1-2b の振り分けを行わず、全 Issue を Claude（opus）に回す（従来の動作）
@@ -104,16 +104,16 @@ TodoWriteツールで作業計画を作成：
 ```
 
 **重要（エージェント指定ルール）**: `commandmatedev send` でワーカーにタスクを送信する際のエージェント指定は以下に従うこと：
-- **開発タスク**: 担当は 1-2b の難易度判定で決める。**易 → `--instance antigravity`**
-  （モデルは agy の既定。`--model` は渡さない）、**中 → `--instance claude`（sonnet＝Sonnet 5.5）**、**難 → `--instance claude`（opus）**
+- **開発タスク**: 担当は 1-2b の難易度判定で決める。**易 → `--instance command-code`**
+  （Command Code。`--model` は渡さない）、**中 → `--instance claude`（sonnet＝Sonnet 5.5）**、**難 → `--instance claude`（opus）**
   - **Claude のモデルは `--instance` でも `--model` でも決まらない**（`send --model` は copilot / antigravity 専用で、claude に渡すと 400）。
     セッションの**起動時**に、worktree の `.claude/settings.local.json` から決まる。書くのは 3-1 の `launch-worker.mjs`（opus も sonnet も明示して書く）
   - **ワーカーに `/model` を送らない。** Enter が `~/.claude/settings.json` のグローバル既定を書き換える（#1495 / #2297）
   - sonnet 担当がワーカー起因で 2 回不合格になったら opus に格上げする（3-5b）
   - 送り先は `--instance` で指定し、**send / wait / capture / respond で同じ値を渡す**。
     `wait` には `--agent` が無く、worktree の既定エージェントは claude なので、
-    antigravity のワーカーに `--instance antigravity` を付け忘れると Claude のセッションを待つことになる
-  - Antigravity がワーカー起因で 2 回不合格になったら Claude に切り替える（3-5）
+    `--instance command-code` を付け忘れると Claude のセッションを待つことになる
+  - Command Code がワーカー起因で 2 回不合格になったら Claude（sonnet）に上げる（3-5）
 - **レビュー系**（仕様レビュー、設計レビュー等）: 一部 `--agent codex` に依頼可
 - **バグ根本原因分析**（Phase 2.5）: `--agent copilot --model claude-sonnet-5` を指定
 
@@ -180,7 +180,7 @@ PR の前に `node scripts/count-suppressions.mjs --base origin/develop` を走�
 | 依存 | 他の Issue と強依存（1-4）、または同じ関数の書き換えを伴う |
 | 新規 export | 新しいモジュールや公開関数を作り、その呼び出し元の配線も必要 |
 
-**Antigravity に回す（すべて満たせば「易」）**
+**Command Code に回す（すべて満たせば「易」）**
 
 - 上の条件に 1 つも当てはまらない
 - **変更する全箇所が `file:line` ＋「置換後のコード」または「削除」まで確定している。件数は問わない**
@@ -213,14 +213,14 @@ Claude の担当は、Issue の中で**ワーカーが自分で見つけなけ�
 
 | 難易度 | 担当 | モデル | 条件 |
 |---|---|---|---|
-| 易 | antigravity | —（agy の既定） | 「Antigravity に回す」をすべて満たす |
+| 易 | command-code | — | 「Command Code に回す」をすべて満たす |
 | 中 | claude | sonnet | 「Claude に回す」の観点のうち当てはまるのが「危険な領域」「依存」と、次の「閉じた判断」「閉じた設計」**だけ**で、受入基準がすべて自動・逸脱時の退避路がある。**閉じた判断**＝直し方の候補が本文に列挙されている、または「置き場所・書き方はあなたが決めてよい」の範囲が 1 関数・1 節に収まる。**閉じた設計**＝新しいテストを書くが、確かめる項目と陽性/陰性対照が受入基準に列挙されている |
 | 難 | claude | opus | 次のどれかに当てはまる: **原因**（バグで原因が file:line まで特定されていない）・**未決事項**（「要調査」「実機で決める」など、結論が作業の結果で変わる）・**検証**（合否が実機・画面でしか決まらない）・**新規 export**（新しいモジュールと呼び出し元の配線）・**開いた判断/設計**（候補も確かめる項目も本文に無い） |
 
 - 「中」と「難」の境目は、**作業の前に結論が決まっているか**である。候補や手順が本文にあれば、ワーカーの仕事は選んで正確に書くことで、Sonnet 5.5 で足りる。
   結論が実機の結果や調査で変わる Issue（#2955 のような原因調査、#2997 のような「再現したら直す」）は opus に残す
 - 「危険な領域」と「依存」は、**壊したときの被害**と**順序の調整**の話で、「どう直すかが決まっているか」とは別の軸である。これは改定前と同じ
-- それでも Antigravity には上げない。過去の Antigravity の事故（#2605 / #2622）は道具に由来し、道具の事故がいちばん高くつくのが危険な領域だからである
+- それでも易には下げない。過去の易の事故（#2605 / #2622）は道具に由来し、道具の事故がいちばん高くつくのが危険な領域だからである
 - **迷ったら難（opus）にする**。sonnet がワーカー起因で 2 回不合格になったら opus へ格上げする（3-5b）ので、中に回した判断の誤りは往復 2 回で取り返せる
 - `.claude/settings.local.json` の `{"model":"sonnet"}` は、claude 2.1.284 で `claude-sonnet-5-5` に解決する（#2955 の fixture `tests/fixtures/claude-session-start-2955/`、SessionStart の `model`）。
   版を固定したいときだけ `claude-sonnet-5-5` と書く
@@ -240,12 +240,12 @@ Phase 8 の改善案（8-3）は、この根拠と実際の結果を突き合わ
 
 根拠: docs/orchestrate/difficulty.md#1-2b-件数をやめて判断の余地にした根拠
 
-根拠: docs/orchestrate/antigravity.md#1-2b-冷間起動と信頼ダイアログの運用メモ
+Command Code の運用（権限の既定・完了の合図・止まったとき）は docs/orchestrate/command-code.md を読む。Antigravity（今は使わない）の実測は docs/orchestrate/antigravity.md。
 
 **新規 worktree では信頼ダイアログがほぼ必ず出る**（2026-09-20 の run、#2770 で実測）ので、
 exit 99 を受けたら**待たずにまず画面を見る**。手順は 3-1 の「冷間起動の失敗」に書いてある。
 
-Antigravity は `.claude/commands` を読まないので、`/pm-auto-issue2dev`
+Command Code は `.claude/commands` を読まないので、`/pm-auto-issue2dev`
 のような多段ワークフローは使えない。Issue 本文だけで実装が決まる粒度のものに限る。
 
 根拠: docs/orchestrate/difficulty.md#1-2b-判定の背景
@@ -301,12 +301,12 @@ node scripts/orchestrate/run-log.mjs status --run-dir "workspace/orchestration/r
   ```markdown
   | Issue | 種別 | 難易度 | 担当 | モデル | 根拠 |
   |---|---|---|---|---|---|
-  | #2595 | BUG | 易 | antigravity | — | テスト 1 ファイル／原因と確定仕様あり／受入基準すべて自動 |
+  | #2595 | BUG | 易 | command-code | — | テスト 1 ファイル／原因と確定仕様あり／受入基準すべて自動 |
   | #2760 | BUG | 中 | claude | sonnet | 当てはまる観点は「危険な領域」（`src/lib/tmux/**`）だけ／全変更が確定 diff／受入基準すべて自動／退避路あり |
   | #2598 | FEATURE | 難 | claude | opus | 影響ファイル 7 以上（新規 hook あり）／対応方針が Phase 2 段／合否が実機でしか決まらない項目あり |
   ```
-- `workspace/orchestration/runs/$DATE/assign.tsv` も同時に書く。1 行 = `<issue>\t<claude|antigravity>\t<opus|sonnet|->`
-  （3 列目は Claude のモデル。antigravity は `-`。`--assign 123=claude-sonnet` は `123\tclaude\tsonnet` になる）
+- `workspace/orchestration/runs/$DATE/assign.tsv` も同時に書く。1 行 = `<issue>\t<claude|command-code>\t<opus|sonnet|->`
+  （3 列目は Claude のモデル。command-code は `-`。`--assign 123=claude-sonnet` は `123\tclaude\tsonnet` になる）
 - 依存関係グラフ
 - 並列実行グループ
 - マージ推奨順序
@@ -395,8 +395,8 @@ issue: <N>
 key: "<N>"                # 契約のファイル名 issue-<key>.yaml。同じブランチの 2 本目は "<N>-opus" など（断片は <N> のまま）
 title: "<Issueタイトル>"
 kind: feature             # feature | bug | refactor | docs（CHANGELOG の節とコミットの type の既定）
-agent: claude             # claude | antigravity
-model: opus               # opus | sonnet（antigravity は書かない）
+agent: claude             # claude | command-code（antigravity は止まる）
+model: opus               # opus | sonnet（command-code は書かない）
 gates: [lint, typecheck, build-server, unit-related]   # 書いたとおりに走る。省略すると kind の既定（src/ に届き、worktree の verify.yaml にあれば build-server を足す。refactor を除く）
 scope: ["src/lib/<module>/**", "tests/unit/<module>/**"]   # changelog.d/<N>.md は自動で足される
 decisions: []             # Issue の「決めること」への答え（goal の「この契約での決定」になる）
@@ -489,10 +489,10 @@ node scripts/orchestrate/contract.mjs generate \
     ```
     Issue 本文に無い変更が必要に見えたら、そのファイルを変更せず、コミットメッセージ本文に「本文に無い指摘: <file>:<line> <内容>」と書いて報告すること。
     ```
-    「中」に振り分けた前提（全変更が確定 diff）が崩れたときの退避路で、Antigravity の雛形と同じもの。
+    「中」に振り分けた前提（全変更が確定 diff）が崩れたときの退避路で、易の雛形と同じもの。
     サブエージェントについての指示は要らない: `.claude/agents/*.md` は `model: inherit` なので、ワーカーがサブエージェントを呼んでも
     セッションと同じモデル（sonnet）で走る（`model: opus` 固定だった頃は、その部分だけ opus で走っていた）
-- **Antigravity 担当**: `.claude/commands` を読まない（`.agents/skills` だけを探す）。
+- **Command Code 担当**: `.claude/commands` を読まない（`.commandcode/skills` と `.agents/skills` だけ）。
   次の雛形の**すべての節**を書くこと。特に「確認を求めない」「`IMPL_COMPLETED`」「一時ファイルは `os.tmpdir()`」は
   省かない。ワーカーが質問を書いてターンを終えると、Auto-Yes は答えられない。wait はそれを完了と読むので、
   作業が途中のまま検証に進み、exit 20 か 21 になる。
@@ -730,7 +730,7 @@ gh issue edit "$bug_issue" --repo Kewton/CommandMate --body "${CURRENT_BODY}${AN
 # 手で書くときは: node scripts/orchestrate/launch-worker.mjs set-model --worktree <worktree-path> --model <opus|sonnet>
 # （下の send は自分で書く）
 
-# assign.tsv は 1-2b の結果（1 行 = "<issue>\t<claude|antigravity>\t<opus|sonnet|->"）。3 列目は Claude のモデル
+# assign.tsv は 1-2b の結果（1 行 = "<issue>\t<claude|command-code>\t<opus|sonnet|->"）。3 列目は Claude のモデル
 # assign.tsv は fd 3 から読む（stdin にすると、ループの中の commandmatedev が残りの行を読み尽くす。下の注を参照）
 while IFS="$(printf '\t')" read -r issue AGENT MODEL <&3; do
   WT=$(commandmatedev ls --branch "feature/${issue}" --quiet)
@@ -738,6 +738,7 @@ while IFS="$(printf '\t')" read -r issue AGENT MODEL <&3; do
   # Claude（MODEL が opus|sonnet）は、動いているセッションを止め → モデルを書き → 作業を頼まない起動のメッセージ → capture --json の model を
   # 確かめ → 一致してから契約と Auto-Yes を送る。stderr に model ok / model UNKNOWN / model MISMATCH。合わない・読めないときは 1 回だけ起動し直し、
   # なお合わなければセッションを止めて exit 40（MISMATCH）/ 41（UNKNOWN）。契約は送らない。止めた・Auto-Yes を切ったと確かめられなければ 42 / 43、ロールが変わったら 44
+  # command-code（MODEL は -）は .commandcode の permissions.defaultMode を読み、ask なら送らず exit 45
   # 送信の出力は runs/$DATE/send-<issue>[.a<n>].out / .err（呼び出しごとに排他的に取る）。stdout は task id だけ
   TASK_ID=$(node scripts/orchestrate/launch-worker.mjs send --run-dir "workspace/orchestration/runs/$DATE" --issue "$issue" \
     --wt "$WT" --worktree "$WT_DIR" --instance "$AGENT" --model "$MODEL" --contract ".commandmate/tasks/issue-${issue}.yaml")
@@ -774,6 +775,7 @@ stdin で読む形に戻さないこと。ループを使わずに 1 件ずつ�
   8-3 に書き、`.claude/settings.local.json` と CommandMate の版を確かめてから、人の判断で送り直す。利用者の `~/.claude/settings.json` は変えない
 - exit 42（`stop UNCONFIRMED`）: kill が失敗した・まだ動いている。**何も送り直さない**。人がセッションを止めたことを確かめてから送り直す
 - exit 43（`auto-yes UNCONFIRMED`）: 起動の前に Auto-Yes を切れたと確かめられない（一覧・ロールが読めないときも）。何も送っていない。`auto-yes --disable` を確かめてから送り直す
+- exit 45（`permission ASK`）: Command Code の権限の既定が `ask`。何も送っていない。docs/orchestrate/command-code.md#3-1-権限の既定を確かめる
 - exit 31 / 32 / 43 / 44 の意味と対処（send とワーカーの起動で違う）は docs/orchestrate/workers.md#3-1-send-とワーカーの起動の-exit-code を読む
 - tasks.tsv は 5 列になった（`issue` / `WT` / `AGENT` / `TASK_ID` / `MODEL`）。**`--instance` に渡すのは 3 列目の `AGENT`**（`claude`）で、5 列目ではない
 
@@ -809,7 +811,7 @@ send の後に task が `cliToolId` / `instanceId` = 担当に紐づいている
 commandmatedev ls --branch feature/
 ```
 
-より詳細な監視は orchestrate-monitor skill を使う。monitor を起動するときは docs/orchestrate/workers.md#3-2-monitor-の起動と読み方 を読み、その手順（`hooks-task.sh` を付ける・Antigravity のワーカーは `<worktree-id>@antigravity` で渡す・起動直後に `monitor hooks ERROR` が無いことを確かめる・ログを絞るときは `ERROR|WARN|alive` を含める）で動かす。
+より詳細な監視は orchestrate-monitor skill を使う。monitor を起動するときは docs/orchestrate/workers.md#3-2-monitor-の起動と読み方 を読み、その手順（`hooks-task.sh` を付ける・Command Code のワーカーは `<worktree-id>@command-code` で渡す・起動直後に `monitor hooks ERROR` が無いことを確かめる・ログを絞るときは `ERROR|WARN|alive` を含める）で動かす。
 
 **monitor の COMPLETE 判定をマージ可否の裁定に使わないこと。** 裁定は 3-3 の
 `wait --verify` の exit code である。
@@ -848,19 +850,20 @@ done 3< "workspace/orchestration/runs/$DATE/tasks.tsv"
 - **合格の記録は再利用しない。** 合格は task・契約（そのゲートの定義）・その task の開始時の env-clean の基準に結び付いていて、
   HEAD だけでは同じ確認と言えない（同じブランチに次の契約を送った直後も HEAD は同じ）。呼ぶたびに待って検証する。
   落ちた後の再開では、`run-log.mjs status` で `verify=ok` の Issue を呼び直さない（終わった task を `wait --verify` で裁定し直すと、
-  紐づかない再検証になり #3118 の形で exit 20 になる）。裁定をやり直すときは `--after-reinstruct --task "$TASK_ID"`
-- 再指示の後（3-4）は `--after-reinstruct --task "$TASK_ID"` を付ける。`--verify` を付けない wait → `verify --task` の 2 段になる
-- Antigravity のワーカーの wait のログに `Prompt detected` が繰り返し出ても、それだけを見て介入しない。確かめ方は docs/orchestrate/antigravity.md#3-3-wait-のログの-prompt-detected を読む
+  紐づかない再検証になり #3118 の形で exit 20 になる）。再指示せずに検証だけをやり直すときは `--reverify --task "$TASK_ID"`
+  （合図の境界は前の呼び出しのものを run の記録の `signal-since=` から引き継ぐ。既に出た合図で裁定に進む）
+- 再指示の後（3-4）は `--after-reinstruct --task "$TASK_ID" --signal-since "$SENT_AT"` を付ける。`--verify` を付けない wait → `verify --task` の 2 段になる。
+  完了の合図は再指示の送信（`$SENT_AT`）より後のものだけを数える（前の試行の `IMPL_COMPLETED` は数えない）。`--signal-since` が無ければ呼び出しの開始から数える
 - `--verify` は完了検出**後**に全ゲート（`work-evidence` ＋ `scope` ＋ verify.yaml の宣言ゲート）を
   実行し、その結果を exit code にする。ここが「完了したが壊れていた」を目視から exit code へ
   移す一点である。
 - 契約の `gates` が `unit-related` のとき、`--verify` の裁定はテスト全体を含まない。テスト全体の合否は CI の `Unit Tests` で見る（6-2 の例外）。
 
-**Antigravity 担当は、完了の合図（`IMPL_COMPLETED`）を確かめてから裁定する。**
+**Command Code 担当は、完了の合図（`IMPL_COMPLETED`）を確かめてから裁定する。**
 
-根拠: docs/orchestrate/antigravity.md#3-3-途中でターンを閉じる理由
+根拠: docs/orchestrate/command-code.md#3-3-完了の合図が要る理由
 
-`wait-verify.mjs` を通さずに待ったとき（3-5・3-5b の `commandmatedev wait --verify` など）や、exit 3 の理由を確かめるときは、docs/orchestrate/antigravity.md#3-3-完了の合図を手で確かめる を読み、その手順で合図と検証の開始時刻を確かめる。
+`wait-verify.mjs` を通さずに待ったとき（3-5・3-5b の `commandmatedev wait --verify` など）や、exit 3 の理由を確かめるときは、docs/orchestrate/antigravity.md#3-3-完了の合図を手で確かめる を読み、その手順（担当によらない）で合図と検証の開始時刻を確かめる。
 
 **完了検出が壊れているときは `verify --gates` へ退避する。** `wait --verify` はゲートの前に
 完了検出を通すので、検出層の欠陥が裁定そのものを止める。
@@ -874,7 +877,7 @@ done 3< "workspace/orchestration/runs/$DATE/tasks.tsv"
 | exit | 意味 | 対応 |
 |------|------|------|
 | `0` | 完了・検証合格 | Phase 4（設計突合）／Phase 6（マージ）へ進む |
-| `20` | 検証不合格（ゲートが落ちた） | 下記「20 の対応」。**再指示は上限2回**。超えたら Antigravity 担当は Claude（opus）へ切替（3-5）、Claude（sonnet）担当は opus へ格上げ（3-5b）、Claude（opus）担当は人間へエスカレーション |
+| `20` | 検証不合格（ゲートが落ちた） | 下記「20 の対応」。**再指示は上限2回**。超えたら Command Code 担当は Claude（sonnet）へ格上げ（3-5）、Claude（sonnet）担当は opus へ格上げ（3-5b）、Claude（opus）担当は人間へエスカレーション |
 | `21` | 作業証跡ゼロ（未着手） | 下記「21 の対応」 |
 | `10` | プロンプト検出 | `commandmatedev capture <WT> --instance "$AGENT"` で内容確認 → `commandmatedev respond <WT> "<番号>" --instance "$AGENT"` → 再度 wait |
 | `124` | タイムアウト | capture で状況確認 → 追加指示 or ユーザーに報告 |
@@ -899,9 +902,20 @@ exit 20 を受けたら docs/orchestrate/exit-codes.md#3-4-20-の対応 を読�
 
 ワーカー起因なら、失敗ゲートと `logTail` を添えて同じ worker に再指示する（契約は据え置き。再送は素の send でよく、
 `--instance "$AGENT"` を付ける）。再指示は **同一 worktree につき最大2回**。
-3回目に到達したら、**Antigravity 担当は 3-5 の手順で Claude に切り替える**。**Claude 担当は** worker を止め、ユーザーに判断を仰ぐ。
+3回目に到達したら、**Command Code 担当は 3-5 の手順で Claude（sonnet）に上げる**。**Claude（sonnet）担当は 3-5b の手順で opus に上げる**（3-5 で格上げした sonnet も同じ）。**Claude（opus）担当は** worker を止め、ユーザーに判断を仰ぐ。
 
-**再指示の後の裁定は `wait --verify` ではなく、`wait` → `verify --task` の 2 段で行う。**
+**再指示の後の裁定は `wait --verify` ではなく、`wait` → `verify --task` の 2 段で行う。** 担当によらず `wait-verify.mjs` で行う
+（Command Code・Antigravity は、再指示の送信より後の完了の合図を確かめてから検証する）。
+
+```bash
+SENT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)   # 再指示の send の直前に取る
+# （ここで再指示を send する）
+node scripts/orchestrate/wait-verify.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" --issue "$issue" \
+  --wt "$WT" --worktree "$WT_DIR" --instance "$AGENT" --task "$TASK_ID" --model "$MODEL" --after-reinstruct --signal-since "$SENT_AT"
+```
+
+Claude 担当だけは、スクリプトを使えないときの手動の代わりに素の 2 段でもよい（合図を待たないので Command Code・Antigravity には使わない。
+その担当を手で裁定するときは docs/orchestrate/antigravity.md#3-3-完了の合図を手で確かめる を `SENT_AT` つきで行う）:
 
 ```bash
 # 1. 完了を待つ（--verify を付けない）
@@ -922,14 +936,14 @@ exit code の読み方は上の表と同じ。
 commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30
 ```
 
-画面ごとの対応（composer の未確定・Antigravity のアンケート画面・権限プロンプト・セッションの未起動）は、exit 21 を受けたら docs/orchestrate/exit-codes.md#3-4-21-の対応 を読み、その手順で切り分ける。
+画面ごとの対応（composer の未確定・Command Code の確認の画面・権限プロンプト・セッションの未起動）は、exit 21 を受けたら docs/orchestrate/exit-codes.md#3-4-21-の対応 を読み、その手順で切り分ける。
 
-### 3-5. Antigravity から Claude への切り替え
+### 3-5. Command Code から Claude（sonnet）への格上げ
 
-Antigravity 担当の Issue が、ワーカー起因の不合格を 2 回再指示しても合格しなかったとき（3-4 の 3 回目）に行う。
+Command Code 担当の Issue が、ワーカー起因の不合格を 2 回再指示しても合格しなかったとき（3-4 の 3 回目）に行う。
 ユーザーには確認しない（2026-09-17 合意）。切り替えたことは 8-2 と 8-3 に必ず書く。
 
-切り替えるときは docs/orchestrate/switching.md#3-5-antigravity-から-claude-への切り替え を読み、その手順 1〜4（Antigravity のセッションだけを止める・引き継ぎ節つきの Claude 用の契約を作る・opus で送る・以降は 3-4 に従う）で進める。
+切り替えるときは docs/orchestrate/switching.md#3-5-command-code-から-claudesonnetへの格上げ を読み、その手順 1〜4（Command Code のセッションだけを止める・引き継ぎ節つきの sonnet 用の契約を作る・sonnet で送る・以降は 3-4 と 3-5b に従う）で進める。
 
 ### 3-5b. sonnet から opus への格上げ
 
@@ -1292,8 +1306,8 @@ npm run build
 
 | Issue | 難易度 | 担当 | モデル（実測） | 判定の根拠 | 再指示 | 切替 | 実装時間 | 検証 | 帰属の裁定 |
 |-------|--------|------|---------------|-----------|--------|------|---------|------|-----------|
-| #{N} | 易 | antigravity | — | {plan.md の根拠} | 0 | なし | 5 分 | exit 20 → 合格扱い | env-clean の違反はワーカー起因でない（{根拠}） |
-| #{M} | 易 | antigravity → claude | opus | {根拠} | 2 | 切替（{失敗ゲート}） | {分} | exit 0 | — |
+| #{N} | 易 | command-code | — | {plan.md の根拠} | 0 | なし | 5 分 | exit 20 → 合格扱い | env-clean の違反はワーカー起因でない（{根拠}） |
+| #{M} | 易 | command-code → claude | sonnet | {根拠} | 2 | 切替（{失敗ゲート}） | {分} | exit 0 | — |
 | #{L} | 中 | claude | sonnet（`claude-sonnet-5-5`） | {根拠} | 0 | なし | {分} | exit 0 | — |
 | #{K} | 中 | claude | sonnet → opus | {根拠} | 2 | 格上げ（{失敗ゲート}） | {分} | exit 0 | — |
 
@@ -1334,12 +1348,12 @@ npm run build
 summary.md の末尾に「振り分けの改善案」節を書き、完了報告でユーザーにも示す。
 **次のどれかが起きた run では必須**（何も起きなかった run でも、気付いた点があれば書く）:
 
-- Antigravity から Claude への切り替え（3-5）
+- Command Code から Claude（sonnet）への格上げ（3-5）
 - sonnet から opus への格上げ（3-5b）、または sonnet 担当が再指示を要した（1-2b の「中」の条件が甘い証拠になる）
 - `model MISMATCH` / `model UNKNOWN` / `stop UNCONFIRMED` / `auto-yes UNCONFIRMED` で止まった（3-1。exit 40〜44）
 - ワーカー起因でない不合格を、オーケストレーターの裁定で合格扱いにした（3-4）
 - 判定表と実際の結果が食い違った（「易」と判定したのに再指示が要った／「難」と判定したが小さい変更で終わった）
-- Antigravity 固有の停止（アンケート画面、冷間起動の失敗、monitor の誤判定など）
+- Command Code 固有の停止（確認の画面・exit 45、冷間起動の失敗、合図の欠落など）
 
 各項目には次の 3 つを書く:
 
@@ -1408,13 +1422,12 @@ gh issue list --repo Kewton/CommandMate --state open --search "<ファイル名�
 | CommandMateサーバー未起動 | `commandmatedev start --daemon` を案内 |
 | worktree作成失敗 | エラー表示、手動作成を案内 |
 | ワーカーのタイムアウト（exit 124） | captureで状況確認→追加指示 or ユーザーに報告 |
-| 検証不合格（exit 20） | `verify --json` で失敗ゲートを特定し、先にワーカー起因かを判定（3-4）。ワーカー起因なら再指示。上限2回で、Antigravity 担当は Claude（opus）へ切替（3-5）、Claude（sonnet）担当は opus へ格上げ（3-5b）、Claude（opus）担当は人間へエスカレーション |
+| 検証不合格（exit 20） | `verify --json` で失敗ゲートを特定し、先にワーカー起因かを判定（3-4）。ワーカー起因なら再指示。上限2回で、Command Code 担当は Claude（sonnet）へ格上げ（3-5）、Claude（sonnet）担当は opus へ格上げ（3-5b）、Claude（opus）担当は人間へエスカレーション |
 | env-clean だけが FAIL（exit 20） | `capture --prompts` と違反項目の時刻で帰属を判定（複数の worktree に同じ項目が出ると `wait-verify.mjs` と `run-log.mjs status` が外部要因の候補と出す）。ワーカー起因でなければ合格扱いにし、根拠を PR と summary に書く（3-4） |
 | 再指示の後の検証で scope が SKIP（`was not attached to it`）／env-clean が `no baseline snapshot exists for this run` | task に紐づいていない。`verify --task <task id>` で検証し直す（3-4） |
 | 作業証跡ゼロ（exit 21） | captureでcomposer未確定・権限プロンプト・未起動を切り分け（Phase 3-4） |
 | send が exit 99（`prompt not ready`） | 未送信。**待つ前に capture で画面を見て**、信頼ダイアログ / 既にプロンプト / まだ起動中で分岐する（3-1 の表）。task id は再送のたびに差し替える |
-| Antigravity がアンケート画面で停止 | `tmux send-keys -t "mcbd-antigravity-$WT" -l -- 0` で閉じる（3-4） |
-| monitor が Antigravity を `IDLE` / `NOT_STARTED` と表示 | #2606 以降は agy 用の目印で読むので、生成中なら `GENERATING` になる。それでも出るのは、capture の `--json` にペインの行が無いポーリング。task 状態と `capture --prompts` で判断する（3-2） |
+| Command Code の権限の既定が `ask`（launch-worker が exit 45） | 何も送っていない。利用者に `ask` 以外にしてもらって送り直す（docs/orchestrate/command-code.md） |
 | 契約エラー（send が exit 2） | 契約の全エラーが一度に出るので、`docs/design/task-contract.md` と突き合わせて修正し再送 |
 | 品質チェック3回連続失敗 | ユーザーに報告して中断 |
 | コンフリクト解消失敗 | ユーザーに報告して中断 |
