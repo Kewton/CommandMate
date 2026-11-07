@@ -29,6 +29,7 @@ import {
   classifyModel,
   commandCodePermissionMode,
   isCommandCodeInstance,
+  isCommandCodeTarget,
   main,
   parseArgs,
   setModel,
@@ -188,6 +189,8 @@ function fakeCli({
   armed = false,
   disableExit = 0,
   disableSticks = false,
+  aliases = {} as Record<string, { instanceId: string; cliToolId: string }>,
+  resolveFails = false,
 } = {}) {
   const calls: string[][] = [];
   const sleeps: number[] = [];
@@ -202,9 +205,18 @@ function fakeCli({
   const run = (command: string, args: string[]) => {
     calls.push([command, ...args]);
     if (command === 'git') return { status: ignored ? 0 : 1, stdout: '', stderr: '' };
+    if (args[0] === 'reply') {
+      // `reply --json` resolves --instance through the server (resolve-instance.mjs): an alias, or the id itself.
+      if (resolveFails) return { status: 2, stdout: '', stderr: "Error: no instance 'nope'" };
+      const selector = args[args.indexOf('--instance') + 1];
+      const tool = selector.startsWith('command-code') ? 'command-code' : 'claude';
+      const target = aliases[selector] ?? { instanceId: selector, cliToolId: tool };
+      return { status: 0, stdout: JSON.stringify({ worktreeId: args[1], ...target, reply: null }), stderr: '' };
+    }
     if (args[0] === 'instances' && args[2] === '--json') {
+      const rows = ['claude', 'command-code'].map((instanceId) => ({ instanceId, running: alive, autoYes: grant }));
       return listExit === 0
-        ? { status: 0, stdout: JSON.stringify([{ instanceId: 'claude', running: alive, autoYes: grant }]), stderr: '' }
+        ? { status: 0, stdout: JSON.stringify(rows), stderr: '' }
         : { status: listExit, stdout: '', stderr: 'ECONNREFUSED' };
     }
     if (args[0] === 'auto-yes' && args.includes('--disable')) {
@@ -251,8 +263,9 @@ function go(fake: ReturnType<typeof fakeCli>, argv: string[]) {
   const code = main(argv, { run: fake.run, sleep: fake.sleep, out: (l: string) => out.push(l), log: (l: string) => log.push(l), error: (l: string) => log.push(l) });
   return { code, out, log };
 }
+/** The calls after the instance was resolved (`reply --json`, #4238 review), which every send makes first. */
 const verbs = (fake: ReturnType<typeof fakeCli>) =>
-  fake.calls.map((c) =>
+  fake.calls.filter((c) => c[1] !== 'reply').map((c) =>
     c[0] === 'git' ? 'git' : c[1] === 'instances' ? `instances ${c[3]}` : c[1] === 'send' ? (c.includes('--contract') ? 'send contract' : 'send init') : c[1]
   );
 const contractSends = (fake: ReturnType<typeof fakeCli>) => fake.calls.filter((c) => c[1] === 'send' && c.includes('--contract'));
@@ -530,11 +543,11 @@ describe('send --instance command-code (Issue #4238)', () => {
 
   it('sends the contract without writing a Claude model, and says the mode it read', () => {
     writeCc('settings.local.json', { permissions: { defaultMode: 'acceptEdits' } });
-    const fake = fakeCli();
+    const fake = fakeCli({ running: false });
     const r = go(fake, ccArgv());
     expect(r.code).toBe(0);
     expect(r.out).toEqual(['task-1']);
-    expect(verbs(fake)).toEqual(['send contract']);
+    expect(verbs(fake)).toEqual(['instances --json', 'send contract']);
     expect(contractSends(fake)[0]).toEqual([
       'commandmatedev', 'send', 'wt-1', '--contract', '.commandmate/tasks/issue-3883.yaml', '--instance', 'command-code', '--auto-yes', '--duration', '3h',
     ]);
@@ -547,7 +560,7 @@ describe('send --instance command-code (Issue #4238)', () => {
     const fake = fakeCli();
     const r = go(fake, ccArgv());
     expect(r.code).toBe(EXIT_PERMISSION_ASK);
-    expect(fake.calls).toEqual([]);
+    expect(verbs(fake)).toEqual([]);
     expect(r.out).toEqual([]);
     expect(r.log.join('\n')).toMatch(/permission ASK command-code of wt-1: permissions\.defaultMode is ask in .*settings\.local\.json/);
   });
@@ -569,7 +582,7 @@ describe('send --instance command-code (Issue #4238)', () => {
     writeCc('settings.local.json', '{ not json');
     const fake = fakeCli();
     expect(go(fake, ccArgv()).code).toBe(EXIT_PERMISSION_ASK);
-    expect(fake.calls).toEqual([]);
+    expect(verbs(fake)).toEqual([]);
   });
 
   it('no .commandcode settings at all: sent (the mode is not set)', () => {
@@ -582,7 +595,7 @@ describe('send --instance command-code (Issue #4238)', () => {
   it('a Claude model for Command Code is a usage error: exit 2, nothing written or sent', () => {
     const fake = fakeCli();
     expect(go(fake, ccArgv('--model', 'opus')).code).toBe(2);
-    expect(fake.calls).toEqual([]);
+    expect(verbs(fake)).toEqual([]);
     expect(fs.existsSync(path.join(worktree, '.claude'))).toBe(false);
   });
 
@@ -595,6 +608,54 @@ describe('send --instance command-code (Issue #4238)', () => {
     // A Claude worker in the same worktree does not read .commandcode at all.
     const fake = fakeCli({ models: ['claude-opus-5-5'] });
     expect(go(fake, sendArgv('--model', 'opus')).code).toBe(0);
+  });
+
+  it('a session started under ask is stopped before the fixed settings are sent: the send starts a new one', () => {
+    // Started under ask, still running; the settings were fixed since.
+    writeCc('settings.local.json', { permissions: { defaultMode: 'auto' } });
+    const fake = fakeCli({ running: true });
+    const r = go(fake, ccArgv());
+    expect(r.code).toBe(0);
+    expect(verbs(fake)).toEqual([...STOP, 'send contract']);
+    expect(r.log.join('\n')).toContain('stopped command-code of wt-1: Command Code reads its permissions when the session starts');
+  });
+
+  it('a stop that cannot be confirmed sends nothing (42)', () => {
+    const fake = fakeCli({ running: true, killStops: false });
+    expect(go(fake, ccArgv()).code).toBe(EXIT_STOP_UNCONFIRMED);
+    expect(contractSends(fake)).toEqual([]);
+  });
+
+  it('an alias of Command Code (cc) gets the same checks: ask → 45, a model → 2, and the resolved id is what is sent to', () => {
+    const aliases = { cc: { instanceId: 'command-code', cliToolId: 'command-code' } };
+    const ccAlias = (...extra: string[]) => sendArgv(...extra).map((a) => (a === 'claude' ? 'cc' : a));
+    writeCc('settings.local.json', { permissions: { defaultMode: 'ask' } });
+    const asked = fakeCli({ aliases });
+    expect(go(asked, ccAlias()).code).toBe(EXIT_PERMISSION_ASK);
+    expect(verbs(asked)).toEqual([]);
+    const modelled = fakeCli({ aliases });
+    expect(go(modelled, ccAlias('--model', 'opus')).code).toBe(2);
+    expect(verbs(modelled)).toEqual([]);
+    expect(fs.existsSync(path.join(worktree, '.claude'))).toBe(false);
+    writeCc('settings.local.json', { permissions: { defaultMode: 'auto' } });
+    const sent = fakeCli({ aliases, running: false });
+    const r = go(sent, ccAlias());
+    expect(r.code).toBe(0);
+    expect(contractSends(sent)[0]).toContain('command-code');
+    expect(contractSends(sent)[0]).not.toContain('cc');
+    expect(r.log.join('\n')).toContain('instance cc -> command-code (command-code)');
+  });
+
+  it('an alias of Claude is not Command Code (negative control), and an unresolvable --instance sends nothing (2)', () => {
+    expect(isCommandCodeTarget({ instanceId: 'claude', cliToolId: 'claude' })).toBe(false);
+    expect(isCommandCodeTarget({ instanceId: 'cc', cliToolId: 'command-code' })).toBe(true);
+    expect(isCommandCodeTarget({ instanceId: 'command-code-2' })).toBe(true);
+    writeCc('settings.local.json', { permissions: { defaultMode: 'ask' } });
+    const fake = fakeCli({ models: ['claude-opus-5-5'], aliases: { me: { instanceId: 'claude', cliToolId: 'claude' } } });
+    expect(go(fake, sendArgv('--model', 'opus').map((a) => (a === 'claude' ? 'me' : a))).code).toBe(0);
+    const lost = fakeCli({ resolveFails: true });
+    expect(go(lost, ccArgv()).code).toBe(2);
+    expect(verbs(lost)).toEqual([]);
   });
 
   it('45 does not overlap 40〜44', () => {

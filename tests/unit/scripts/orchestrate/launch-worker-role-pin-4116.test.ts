@@ -53,6 +53,8 @@ function fakeCli({ capture, contractExit = 0, stuck = false, role, rolesRead, au
     calls.push([command, ...args]);
     const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
     if (command === 'git') return ok();
+    // `reply --json` resolves --instance through the server (resolve-instance.mjs, #4238 review): the id names itself.
+    if (args[0] === 'reply') return ok(JSON.stringify({ instanceId: args[args.indexOf('--instance') + 1], cliToolId: 'claude', reply: null }));
     if (args[0] === 'capture') return ok(JSON.stringify({ model: 'claude-opus-5-5', sessionStatus: 'ready', ...capture }));
     if (args[0] === 'instances') {
       if (args[2] === 'kill') {

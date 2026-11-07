@@ -85,6 +85,8 @@ function launchCalls(reported: string): { code: number; calls: string[]; contrac
         calls.push(`git ${args.slice(2).join(' ')}`);
         return { status: 0, stdout: '', stderr: '' };
       }
+      // The instance is resolved first (`reply --json`, #4238 review); not one of the calls this test reads.
+      if (args[0] === 'reply') return { status: 0, stdout: JSON.stringify({ instanceId: 'claude', cliToolId: 'claude', reply: null }), stderr: '' };
       calls.push(args[0] === 'instances' ? `instances ${args[2]}` : args[0]);
       if (args[0] === 'instances' && args[2] === '--json') return { status: 0, stdout: JSON.stringify([{ instanceId: 'claude', running }]), stderr: '' };
       if (args[0] === 'instances' && args[2] === 'kill') running = false;
@@ -315,6 +317,49 @@ describe('/orchestrate: the easy tier is Command Code (Issue #4238)', () => {
     const row = orchestrate.split('\n').find((line) => line.startsWith('| 検証不合格（exit 20） |')) ?? '';
     expect(row).toContain('Command Code 担当は Claude（sonnet）へ格上げ（3-5）');
     expect(orchestrate).toContain('- Command Code から Claude（sonnet）への格上げ（3-5）');
+  });
+});
+
+describe('/orchestrate: after a raise from Command Code, failures go sonnet → opus → a person everywhere (Issue #4238 review)', () => {
+  const body34 = section('3-4');
+
+  it('the 3-4 text splits the Claude branch: sonnet goes to 3-5b, only opus stops for a person', () => {
+    expect(body34).toContain('**Claude（sonnet）担当は 3-5b の手順で opus に上げる**（3-5 で格上げした sonnet も同じ）');
+    expect(body34).toContain('**Claude（opus）担当は** worker を止め、ユーザーに判断を仰ぐ');
+    // The old branch stopped every Claude worker, a sonnet raised by 3-5 included.
+    expect(body34).not.toContain('**Claude 担当は** worker を止め');
+  });
+
+  it('the 3-4 table, the error table, 3-5b and switching.md say the same', () => {
+    const tableRow = body34.split('\n').find((line) => line.startsWith('| `20` |')) ?? '';
+    const errorRow = orchestrate.split('\n').find((line) => line.startsWith('| 検証不合格（exit 20） |')) ?? '';
+    for (const row of [tableRow, errorRow]) {
+      expect(row).toContain('Claude（sonnet）担当は opus へ格上げ（3-5b）');
+      expect(row).toContain('Claude（opus）担当は人間へエスカレーション');
+    }
+    expect(section('3-5b')).toContain('Claude（sonnet）担当の Issue が');
+    expect(docSection('switching.md', '3-5 Command Code から Claude（sonnet）への格上げ')).toMatch(/ワーカー起因の不合格 2 回で 3-5b の opus への格上げ/);
+    expect(docSection('switching.md', '3-5b sonnet から opus への格上げ')).toContain('Claude（opus）担当として 3-4 に従う（ワーカー起因の不合格 2 回で人間へエスカレーション）');
+  });
+
+  it('orchestrate.md stays within its 118,000-byte cap', () => {
+    expect(Buffer.byteLength(orchestrate, 'utf-8')).toBeLessThanOrEqual(118_000);
+  });
+});
+
+describe('/orchestrate: the Command Code send and the re-instruction signal are documented (Issue #4238 review)', () => {
+  const doc = readFileSync(path.join(REPO_ROOT, 'docs/orchestrate/command-code.md'), 'utf-8');
+
+  it('a session started under ask is stopped before the send, and an alias is checked by its tool', () => {
+    expect(doc).toContain('動いているセッションを止めてから契約を送る');
+    expect(doc).toContain('alias（例: `cc`）でも同じ確認が効く');
+    expect(launcher).toContain("stopped('Command Code reads its permissions when the session starts')");
+  });
+
+  it('after a re-instruction only a signal written after the send counts', () => {
+    expect(doc).toContain('合図は再指示の送信より後に');
+    expect(orchestrate).toContain('完了の合図は再指示の送信より後のものだけを数える');
+    expect(orchestrate).toContain('`--signal-since`');
   });
 });
 

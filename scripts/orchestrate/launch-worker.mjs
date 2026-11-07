@@ -53,6 +53,12 @@
  * (else `.commandcode/settings.json`) `permissions.defaultMode`, and `ask` stops
  * on a confirmation screen even under Auto-Yes. So before the send that mode is
  * read; `ask`, or a settings file that is not a JSON object, sends nothing (45).
+ * Otherwise a running session is stopped (and the stop confirmed, else 42) before
+ * the send, as for Claude: one started under `ask` would keep it after the
+ * settings were fixed, and the send would reuse it. Command Code is told by the
+ * tool the server resolves `--instance` to (`cliToolId`), so an alias of it is
+ * checked the same way; the id the server answers is the one every call uses.
+ * An `--instance` the server cannot resolve sends nothing (2).
  *
  * Exit code (send): 0 sent (and for Claude the model matched before the
  * contract went out); 40 the model did not match after one restart; 41 the
@@ -61,7 +67,7 @@
  * sent); 43 Auto-Yes could not be confirmed off before the start, which includes
  * an instance list or roles that could not be read (nothing sent); 44 the role fixed at the starting message no longer holds (stopped, not
  * sent); 45 a Command Code worktree whose permissions default is `ask`, or
- * cannot be read (nothing sent); 2 a usage error (a Claude model for Command Code too) or a settings file git does not ignore (nothing
+ * cannot be read (nothing sent); 2 a usage error (a Claude model for Command Code too), an `--instance` that cannot be resolved, or a settings file git does not ignore (nothing
  * sent); 1 any other failure (the session did not come back ready after the
  * starting message: stopped, contract not sent); otherwise the `send`'s own
  * exit code (99 = not sent, 3-1's cold start; 31 / 32, see
@@ -80,7 +86,8 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { allocateLog, itemProblem, workItemName } from './execution-key.mjs';
-import { defaultRun } from './wait-verify.mjs';
+import { QUERY_TIMEOUT_MS, defaultRun } from './wait-verify.mjs';
+import { resolveInstanceThroughCli } from './resolve-instance.mjs';
 
 /**
  * The value written for each contract model. `opus[1m]` keeps the 1M context
@@ -125,9 +132,25 @@ export const READY_POLL_SEC = 10;
 export const INIT_MESSAGE =
   'セッションの起動とモデルの確認です（作業の依頼ではありません）。まだ何も実行せず、ファイルにも触らず、「OK」とだけ返してください。依頼は次のメッセージで送ります。';
 
-/** Whether `--instance` is a Command Code instance (`command-code` or `command-code-<n>`). */
+/** Whether an instance id is a Command Code instance's (`command-code` or `command-code-<n>`). */
 export function isCommandCodeInstance(instance) {
   return instance === COMMAND_CODE_INSTANCE || String(instance ?? '').startsWith(`${COMMAND_CODE_INSTANCE}-`);
+}
+
+/**
+ * Whether the resolved target runs Command Code: the tool the server named
+ * (`cliToolId`), as wait-verify's needsCompletionSignal reads it, so an alias
+ * (`cc`) is Command Code too; a server that names no tool leaves the id's form.
+ *
+ * @param {{ instanceId: string, cliToolId?: string }} target
+ */
+export function isCommandCodeTarget({ instanceId, cliToolId }) {
+  return cliToolId ? cliToolId === COMMAND_CODE_INSTANCE : isCommandCodeInstance(instanceId);
+}
+
+/** `--instance` (an id or an alias) resolved by the server, through the CLI the script was given (resolve-instance.mjs). */
+export function defaultResolveTarget(run, cli, wt, selector) {
+  return resolveInstanceThroughCli(run, cli, wt, selector, { timeoutMs: QUERY_TIMEOUT_MS, withTool: true });
 }
 
 /**
@@ -456,6 +479,7 @@ export function parseArgs(argv) {
  * @param {string[]} argv
  * @param {{
  *   run?: (command: string, args: string[], opts?: { cwd?: string }) => { status: number, stdout: string, stderr: string },
+ *   resolveTarget?: typeof defaultResolveTarget,
  *   sleep?: (ms: number) => void,
  *   out?: (line: string) => void,
  *   log?: (line: string) => void,
@@ -489,6 +513,18 @@ export function main(argv, deps = {}) {
       return verdict === 'ok' ? 0 : verdict === 'mismatch' ? EXIT_MODEL_MISMATCH : EXIT_MODEL_UNKNOWN;
     }
 
+    // One id for everything that follows (the stop, Auto-Yes, the sends), and the tool behind it:
+    // an alias of a Command Code instance gets the Command Code checks (#4238 review). Unresolvable, nothing is sent.
+    const target = (deps.resolveTarget ?? defaultResolveTarget)(run, o.cli, o.wt, o.instance);
+    if ('error' in target) {
+      error(`cannot resolve --instance '${o.instance}' in ${o.wt}: ${target.error} (nothing sent)`);
+      return 2;
+    }
+    const given = o.instance;
+    o.instance = target.instanceId;
+    if (given !== o.instance) log(`instance ${given} -> ${o.instance}${target.cliToolId ? ` (${target.cliToolId})` : ''}`);
+    const commandCode = isCommandCodeTarget(target);
+
     const issue = Number(o.issue);
     const workItem = workItemName(issue, o.item);
     const ctx = { run, sleep, cli: o.cli, wt: o.wt, instance: o.instance };
@@ -512,7 +548,7 @@ export function main(argv, deps = {}) {
     };
     const contractArgs = ['--contract', o.contract, '--instance', o.instance, '--auto-yes', '--duration', o.duration];
 
-    if (isCommandCodeInstance(o.instance)) {
+    if (commandCode) {
       // No Claude model for Command Code (#4238): nothing goes to .claude/, and a model given is a mistake of the caller.
       if (o.model !== '-') {
         error(`--model ${o.model} is a Claude model; ${o.instance} (Command Code) takes --model - (nothing sent)\n${USAGE}`);
@@ -525,6 +561,9 @@ export function main(argv, deps = {}) {
         return EXIT_PERMISSION_ASK;
       }
       log(`permission ok ${o.instance} of ${o.wt}: defaultMode=${permission.mode ?? '(not set)'} (${permission.file ?? 'no .commandcode settings'})`);
+      // The mode is read when the session starts: a session started under `ask` keeps it after the
+      // settings are fixed, and the send would reuse it. Stopped first, so the send starts one on the mode read above.
+      if (!stopped('Command Code reads its permissions when the session starts')) return EXIT_STOP_UNCONFIRMED;
     }
     if (o.model === '-') {
       const sent = sendTo('send', contractArgs);

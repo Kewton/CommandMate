@@ -34,6 +34,8 @@ function fakeCli(captures: Array<Record<string, unknown>>) {
     const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
     if (command === 'git') return ok();
     const verb = args[0];
+    // `reply --json` resolves --instance through the server (resolve-instance.mjs, #4238 review): the id names itself.
+    if (verb === 'reply') return ok(JSON.stringify({ instanceId: args[args.indexOf('--instance') + 1], cliToolId: 'claude', reply: null }));
     if (verb === 'capture') {
       const answer = captures[Math.min(read, captures.length - 1)];
       read += 1;

@@ -15,16 +15,20 @@ Antigravity の実測は docs/orchestrate/antigravity.md に残してある（�
 対話の権限は、セッションの**起動時**に worktree の `.commandcode/settings.local.json`（そこに無ければ `.commandcode/settings.json`）の
 `permissions.defaultMode` で決まる。`ask` だと、Auto-Yes が有効でも確認の画面で止まる。
 
-`launch-worker.mjs send --instance command-code` は、契約を送る前にこの値を読む。
+`launch-worker.mjs send --instance command-code` は、契約を送る前にこの値を読む。Command Code かどうかは、サーバーが `--instance` を解決した
+ツール（`cliToolId`。`wait-verify.mjs` と同じ根拠）で決めるので、`command-code-2` や alias（例: `cc`）でも同じ確認が効く。
 
 | 読んだもの | 動き |
 |---|---|
 | `defaultMode: ask` | `permission ASK …` を出し、**何も送らずに exit 45** |
 | JSON のオブジェクトでないファイル | `ask` でないと言えないので exit 45（何も送らない） |
-| `ask` 以外・値が無い・ファイルが無い | `permission ok … defaultMode=<値>` を出して契約を送る |
+| `ask` 以外・値が無い・ファイルが無い | `permission ok … defaultMode=<値>` を出し、動いているセッションを止めてから契約を送る（新しいセッションがこの値で起動する） |
+| 止まったと確かめられない | exit 42（何も送らない） |
+| `--instance` を解決できない | exit 2（何も送らない） |
 | `--model opus` などを渡した | Claude のモデルは書かない。exit 2（何も送らない） |
 
 exit 45 を受けたら、利用者に `permissions.defaultMode` を `ask` 以外にしてもらってから同じ呼び出しで送り直す。
+`ask` で起動済みのセッションは設定を直しても `ask` のままなので、送り直しの呼び出しはそれを止めてから送る（Claude の担当と同じ「止める→起動→送る」の形）。
 オーケストレーターは利用者の設定（`~/.commandcode/`）を書き換えない。値が無いときに確認の画面が出るかは、UAT の実機の 1 本で確かめる。
 
 ## 3-1 冷間起動
@@ -40,6 +44,10 @@ Command Code は、前のターンの `hook_stop` が、生成中のターンよ
 そのため `wait-verify.mjs` は `command-code` の担当（`command-code-2` や alias も、サーバーが返す `cliToolId` で判定する）で、
 画面に `IMPL_COMPLETED`（または今の HEAD を名指す `IMPL_COMPLETED head=<sha>`）が出るまで裁定しない。
 合図が `--signal-timeout` の間に出なければ exit 3（Auto-Yes は切らない）。Claude の担当は合図を待たない。
+
+再指示の後（`--after-reinstruct`）は、task が同じなので、前の試行の `IMPL_COMPLETED` が最新の返信に残っている。そのため合図は再指示の送信より後に
+書かれたものだけを数える（送る直前の時刻を `--signal-since` で渡す。無ければ呼び出しの開始から）。画面の `IMPL_COMPLETED head=<sha>` も、
+その HEAD が送信より後のコミットでなければ数えない。HEAD が前の試行と同じなら、新しい合図が返信に出るまで裁定しない。
 
 `wait-verify.mjs` を通さずに待ったときの手順は、担当によらず docs/orchestrate/antigravity.md#3-3-完了の合図を手で確かめる と同じ（`INSTANCE=command-code` で使う）。
 

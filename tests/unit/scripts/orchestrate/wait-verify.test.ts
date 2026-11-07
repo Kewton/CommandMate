@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { appendRecord, readRecords, summarize } from '../../../../scripts/orchestrate/run-log.mjs';
 import {
   baselineTask,
+  completionSignalSince,
   defaultResolveTarget,
   defaultRun,
   defaultSpawnToLog,
@@ -1470,6 +1471,71 @@ describe('Command Code waits for the completion signal (Issue #4238)', () => {
     const h = harness({ pane: ['no signal'] });
     expect(main(argv(), h.deps)).toBe(0);
     expect(h.ran.some((c) => c.args.includes('--pane'))).toBe(false);
+  });
+});
+
+describe('after a re-instruction, only a signal written after it counts (Issue #4238 review)', () => {
+  // The task was created at 00:30, the previous attempt's IMPL_COMPLETED was written at 00:50
+  // on the same HEAD (committed 00:40), and the re-instruction went out just before this call (01:00).
+  const t1cc = task('t-1', -30, 'command-code');
+  const OLD = { at: -10, text: 'IMPL_COMPLETED' };
+  const cc = (...extra: string[]) =>
+    [...argv('--after-reinstruct').map((a) => (a === 'claude' ? 'command-code' : a)), '--signal-timeout', '60', ...extra];
+  /** The harness, with `reply --since` answering the newest of `rows` written at or after --since (as reply-ledger does). */
+  function go(rows: { at: number; text: string }[], extra: string[] = []) {
+    const h = harness({
+      tasks: [t1cc],
+      commitMinute: -20,
+      pane: [`IMPL_COMPLETED head=${HEAD_A}`],
+      resolvedTools: { 'command-code': 'command-code' },
+    });
+    const inner = h.deps.run;
+    const sinces: string[] = [];
+    h.deps.run = (command: string, args: string[], opts?: { timeoutMs?: number }) => {
+      const since = args[0] === 'reply' && args.includes('--since') ? args[args.indexOf('--since') + 1] : null;
+      if (since === null || since.startsWith('9999')) return inner(command, args, opts);
+      h.ran.push({ command, args, opts });
+      sinces.push(since);
+      const seen = rows.filter((r) => T0 + r.at * 60_000 >= Date.parse(since)).at(-1);
+      return { status: 0, stdout: JSON.stringify({ worktreeId: 'wt-1', instanceId: 'command-code', reply: seen?.text ?? null }), stderr: '' };
+    };
+    const code = main(cc(...extra), h.deps);
+    return { h, code, sinces };
+  }
+
+  it('the previous attempt’s signal on the same HEAD is not this attempt’s: no verification (positive control)', () => {
+    const { h, code, sinces } = go([OLD]);
+    expect(code).toBe(3);
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait']);
+    expect(h.autoYesCalls()).toEqual([]);
+    expect(records()[0].note).toMatch(/no IMPL_COMPLETED line within 60s/);
+    // Searched from the re-instruction on (this call's start), not from the task's creation.
+    expect(sinces[0]).toBe(iso(0));
+  });
+
+  it('a signal written after the re-instruction counts (negative control)', () => {
+    const { h, code } = go([OLD, { at: 15, text: 'IMPL_COMPLETED' }]);
+    expect(code).toBe(0);
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait', 'verify']);
+    expect(records()[0].note).toContain('signal=seen(reply)');
+  });
+
+  it('--signal-since names the send: a signal between the send and the call counts, one before it does not', () => {
+    expect(go([OLD, { at: -2, text: 'IMPL_COMPLETED' }], ['--signal-since', iso(-5)]).code).toBe(0);
+    expect(go([OLD], ['--signal-since', iso(-5)]).code).toBe(3);
+  });
+
+  it('completionSignalSince: the task’s creation without a re-instruction, the later of it and the send after one', () => {
+    const baseline = { id: 't-1', createdAt: T0 - 30 * 60_000, found: true };
+    expect(completionSignalSince({ baseline, afterReinstruct: false, startedMs: T0 })).toBe(T0 - 30 * 60_000);
+    expect(completionSignalSince({ baseline, afterReinstruct: true, startedMs: T0 })).toBe(T0);
+    expect(completionSignalSince({ baseline, afterReinstruct: true, signalSince: iso(-5), startedMs: T0 })).toBe(T0 - 5 * 60_000);
+    expect(completionSignalSince({ baseline: { ...baseline, found: false }, afterReinstruct: true, startedMs: T0 })).toBe(T0);
+  });
+
+  it('--signal-since is refused without --after-reinstruct, and when it is not a date', () => {
+    expect(parseArgs([...argv(), '--signal-since', iso(0)]).error).toMatch(/--after-reinstruct/);
+    expect(parseArgs([...argv('--after-reinstruct'), '--signal-since', 'yesterday']).error).toMatch(/ISO 8601/);
   });
 });
 

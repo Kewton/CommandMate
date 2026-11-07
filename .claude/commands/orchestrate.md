@@ -851,7 +851,8 @@ done 3< "workspace/orchestration/runs/$DATE/tasks.tsv"
   HEAD だけでは同じ確認と言えない（同じブランチに次の契約を送った直後も HEAD は同じ）。呼ぶたびに待って検証する。
   落ちた後の再開では、`run-log.mjs status` で `verify=ok` の Issue を呼び直さない（終わった task を `wait --verify` で裁定し直すと、
   紐づかない再検証になり #3118 の形で exit 20 になる）。裁定をやり直すときは `--after-reinstruct --task "$TASK_ID"`
-- 再指示の後（3-4）は `--after-reinstruct --task "$TASK_ID"` を付ける。`--verify` を付けない wait → `verify --task` の 2 段になる
+- 再指示の後（3-4）は `--after-reinstruct --task "$TASK_ID"` を付ける。`--verify` を付けない wait → `verify --task` の 2 段になる。
+  完了の合図は再指示の送信より後のものだけを数える（前の試行の `IMPL_COMPLETED` は数えない）。送る直前の時刻を `--signal-since` で渡す。無ければ呼び出しの開始から数える
 - `--verify` は完了検出**後**に全ゲート（`work-evidence` ＋ `scope` ＋ verify.yaml の宣言ゲート）を
   実行し、その結果を exit code にする。ここが「完了したが壊れていた」を目視から exit code へ
   移す一点である。
@@ -900,7 +901,7 @@ exit 20 を受けたら docs/orchestrate/exit-codes.md#3-4-20-の対応 を読�
 
 ワーカー起因なら、失敗ゲートと `logTail` を添えて同じ worker に再指示する（契約は据え置き。再送は素の send でよく、
 `--instance "$AGENT"` を付ける）。再指示は **同一 worktree につき最大2回**。
-3回目に到達したら、**Command Code 担当は 3-5 の手順で Claude（sonnet）に上げる**。**Claude 担当は** worker を止め、ユーザーに判断を仰ぐ。
+3回目に到達したら、**Command Code 担当は 3-5 の手順で Claude（sonnet）に上げる**。**Claude（sonnet）担当は 3-5b の手順で opus に上げる**（3-5 で格上げした sonnet も同じ）。**Claude（opus）担当は** worker を止め、ユーザーに判断を仰ぐ。
 
 **再指示の後の裁定は `wait --verify` ではなく、`wait` → `verify --task` の 2 段で行う。**
 

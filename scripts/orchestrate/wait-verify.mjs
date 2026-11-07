@@ -45,8 +45,10 @@
  *     the execution key. The verification is judged by the run id it printed
  *     (`Verifying: <wt> (run <id>)`, read back with `verify show`), not by the
  *     newest run of the worktree. The completion signal is taken from this
- *     task's reply (`reply --since <task start>`), or from the pane only after
- *     a turn of this task ended, and is tied to the HEAD it was seen at; for
+ *     task's reply (`reply --since <task start>`; after a re-instruction, from
+ *     its send on: `--signal-since`, else this call's start, #4238), or from
+ *     the pane only after a turn of this task ended, and is tied to the HEAD
+ *     it was seen at; for
  *     an instance that needs it, no verification starts before it. A run of
  *     the worktree that is still going (`already in progress`, a
  *     re-instruction's old run) is waited out and the verification started
@@ -87,7 +89,7 @@
  *        --wt <worktree-id> --worktree <path> --instance <agent>
  *        [--task <id>] [--model <opus|sonnet|->] [--timeout <sec>] [--log <file>]
  *        [--after-reinstruct] [--require-signal] [--signal-timeout <sec>] [--cli <commandmatedev>] [--item <work item>]
- *        [--mutex-retries <n>]
+ *        [--mutex-retries <n>] [--signal-since <iso8601>]
  *   node scripts/orchestrate/wait-verify.mjs --auto-yes-off --wt <worktree-id> --instance <agent> [--cli <commandmatedev>]
  */
 import fs from 'node:fs';
@@ -719,6 +721,28 @@ export function awaitCompletionSignal({ run, sleep, now, o, cwd, since, supersed
 }
 
 /**
+ * From when a completion signal counts as this attempt's (epoch ms), or null
+ * when nothing dates it. The task's creation, as before; after a
+ * re-instruction (`--after-reinstruct`, 3-4) not before the re-instruction was
+ * sent (#4238 review): the task is the same, so the previous attempt's
+ * `IMPL_COMPLETED` is still this task's newest reply, and with the HEAD
+ * unchanged it would pass for the new attempt's. The send time is
+ * `--signal-since`, else the start of this call (which comes after the send;
+ * a signal written in between is then not counted, and the call ends
+ * unconfirmed rather than early).
+ *
+ * @param {{ baseline: { createdAt: number, found: boolean }, afterReinstruct?: boolean, signalSince?: string, startedMs: number }} args
+ * @returns {number | null}
+ */
+export function completionSignalSince({ baseline, afterReinstruct, signalSince, startedMs }) {
+  const task = baseline.found ? baseline.createdAt : null;
+  if (!afterReinstruct) return task;
+  const given = signalSince === undefined ? NaN : Date.parse(signalSince);
+  const sent = Number.isFinite(given) ? given : startedMs;
+  return task === null ? sent : Math.max(task, sent);
+}
+
+/**
  * Run `verify` into `logFile` ({@link runVerifyOnce}), and when its run
  * reached no verdict only because a gate's mutex stayed held for its whole
  * budget ({@link mutexWaitOnly}), start it again, up to `o.mutexRetries`
@@ -898,7 +922,7 @@ export function confirmCompletion(ctx) {
 const USAGE = `Usage:
   node scripts/orchestrate/wait-verify.mjs --run-dir <dir> --issues <range> --issue <N> --wt <worktree-id> --worktree <path> --instance <agent>
        [--task <id>] [--model <opus|sonnet|->] [--timeout <sec>] [--log <file>] [--after-reinstruct] [--require-signal] [--signal-timeout <sec>] [--cli <commandmatedev>]
-       [--item <work item>] [--mutex-retries <n>]
+       [--item <work item>] [--mutex-retries <n>] [--signal-since <iso8601>]
   node scripts/orchestrate/wait-verify.mjs --auto-yes-off --wt <worktree-id> --instance <agent> [--cli <commandmatedev>]`;
 
 const FLAGS = {
@@ -916,6 +940,7 @@ const FLAGS = {
   '--cli': 'cli',
   '--item': 'item',
   '--mutex-retries': 'mutexRetries',
+  '--signal-since': 'signalSince',
 };
 const SWITCHES = { '--after-reinstruct': 'afterReinstruct', '--require-signal': 'requireSignal', '--auto-yes-off': 'autoYesOff' };
 
@@ -948,6 +973,10 @@ export function parseArgs(argv) {
   // 3-4: after a re-instruction the task has ended, so `wait --verify` would judge
   // an unattached run (scope SKIP, env-clean ERROR). The task must be named.
   if (options.afterReinstruct && !options.taskId) return { error: '--after-reinstruct needs --task <id>' };
+  if (options.signalSince !== undefined) {
+    if (!options.afterReinstruct) return { error: '--signal-since is for --after-reinstruct (the re-instruction\'s send time)' };
+    if (!Number.isFinite(Date.parse(options.signalSince))) return { error: `--signal-since must be an ISO 8601 date-time (got ${options.signalSince})` };
+  }
   const badItem = itemProblem(options.item);
   if (badItem) return { error: badItem };
   return { options };
@@ -1077,6 +1106,9 @@ export function main(argv, deps = {}) {
     // first (runVerify's onVerifyStart). An instance whose turn end can come
     // mid-work starts it only after its completion signal (#3883 P4).
     const needsSignal = needsCompletionSignal(o);
+    /** From when a completion signal counts (completionSignalSince): read when it is needed, after the baseline settled. */
+    const signalFloor = () =>
+      completionSignalSince({ baseline, afterReinstruct: o.afterReinstruct, signalSince: o.signalSince, startedMs: started.getTime() });
     const waitArgs = ['wait', o.wt, '--instance', instance, '--on-prompt', 'human', '--timeout', o.timeout];
     let exitCode = spawnToLog(o.cli, waitArgs, { cwd, logFile: o.logFile, ...(watching ? { watch } : {}) });
     let verdictLog = fs.existsSync(o.logFile) ? fs.readFileSync(o.logFile, 'utf8') : '';
@@ -1099,7 +1131,7 @@ export function main(argv, deps = {}) {
     if (verifiable && !superseded) {
       superseded = supersededBy();
       if (!superseded && needsSignal) {
-        const seen = awaitCompletionSignal({ ...verifyCtx, since: baseline.found ? baseline.createdAt : null });
+        const seen = awaitCompletionSignal({ ...verifyCtx, since: signalFloor() });
         if (seen.seen) signal = seen;
         else if (seen.reason.startsWith('a newer task ')) superseded = seen.reason;
         else signalMissing = seen.reason;
@@ -1208,7 +1240,7 @@ export function main(argv, deps = {}) {
     }
 
     const confirmed = confirmCompletion({
-      ...verifyCtx, verdict: { exitCode, log: verdictLog, ...(verifyRunId ? { runId: verifyRunId } : {}) }, signal, since: baseline.found ? baseline.createdAt : null,
+      ...verifyCtx, verdict: { exitCode, log: verdictLog, ...(verifyRunId ? { runId: verifyRunId } : {}) }, signal, since: signalFloor(),
     });
     verdictLog = confirmed.log;
     const verdictLine = (view) => summarizeVerdict(confirmed.log, confirmed.exitCode, view).line;

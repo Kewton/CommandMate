@@ -97,8 +97,10 @@ done
 | 45 | `EXIT_PERMISSION_ASK` | `permission ASK`。Command Code の worktree の `.commandcode/settings.local.json`（無ければ `settings.json`）の `permissions.defaultMode` が `ask`、または設定ファイルが JSON のオブジェクトでない。何も送っていない（#4238） | 利用者に `ask` 以外にしてもらい、同じ呼び出しで送り直す（docs/orchestrate/command-code.md#3-1-権限の既定を確かめる） |
 | それ以外 | | send の戻り値をそのまま返す（99 など） | 上の `send` の表 |
 
-**`--model -` の直接送信**（Command Code。今は使わない Antigravity も）は、モデルの確認も停止も Auto-Yes の切断も行わないので 40〜44 を返さず、send の戻り値をそのまま返す。31 / 32 もそのまま。
-Command Code（`--instance command-code` / `command-code-<n>`）だけは、送る前に権限の既定を読み、`ask` なら 45 で止まる。Claude のモデルを渡すと exit 2。
+**`--model -` の直接送信**（Command Code。今は使わない Antigravity も）は、モデルの確認も Auto-Yes の切断も行わないので 40・41・43・44 を返さず、send の戻り値をそのまま返す。31 / 32 もそのまま。
+Command Code（サーバーが `--instance` を解決したツールが `command-code` のもの。`command-code-<n>` や alias も）だけは、送る前に権限の既定を読み、`ask` なら 45 で止まる。
+`ask` でなければ、動いているセッションを止めてから送る（権限は起動時に決まるので、`ask` で起動済みのセッションに送ると設定を直しても確認の画面で止まる）。止まったと確かめられなければ 42。Claude のモデルを渡すと exit 2。
+`--instance` を解決できなければ、どの担当でも何も送らずに exit 2。
 
 ## 3-2 monitor の起動と読み方
 
