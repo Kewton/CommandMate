@@ -174,13 +174,18 @@ export const SERVER_PORT_ENV_VAR = 'CM_PORT';
  *    behaviour. `tests/unit/security/child-process-server-port-2403.test.ts`
  *    asserts that with a real child process.
  *
- * **Still not `COPILOT_HOME` or `XDG_CONFIG_HOME`.** #1933's test carried a
- * local allowlist of `CODEX_HOME` / `COPILOT_HOME` / `XDG_CONFIG_HOME`;
- * building the seven plans shows only the first is ever written. `COPILOT_HOME` and `XDG_CONFIG_HOME` are
- * *read* from the ambient environment by `copilot/hook-settings` and the
- * antigravity config writer to decide where a file goes — they never reach
- * `plan.env`. An allowlist wide enough to admit them would wave through a source
- * that started setting one, which is the opposite of what this list is for.
+ * **Not `COPILOT_HOME` here, and never `XDG_CONFIG_HOME`.** #1933's test carried
+ * a local allowlist of `CODEX_HOME` / `COPILOT_HOME` / `XDG_CONFIG_HOME`.
+ * `XDG_CONFIG_HOME` is only ever *read* from the ambient environment to decide
+ * where a file goes and never reaches `plan.env`. `COPILOT_HOME` does since
+ * #4210, but only when the operator configured a *relative* one — copilot's
+ * launch then pins the absolute form so it reads the `settings.json` the server
+ * wrote — so it is declared on its own list,
+ * {@link AGENT_LAUNCH_CONDITIONAL_CONFIG_ENV_VARS}, rather than here: this list
+ * is what every default launch writes, and the drift guard holds a default
+ * launch to it exactly. An allowlist wide enough to admit a name a launch does
+ * not write would wave through a source that started setting one, which is the
+ * opposite of what this list is for.
  *
  * Enumerated for the same reason as the list above: so the drift guard can
  * subtract it and hold the remainder to an exact set.
@@ -189,6 +194,25 @@ export const AGENT_LAUNCH_CONFIG_ENV_VARS: readonly string[] = [
   'CODEX_HOME',
   SERVER_PORT_ENV_VAR,
 ];
+
+/**
+ * Config a launch line carries only under a configuration, not by default
+ * (Issue #4210).
+ *
+ * `COPILOT_HOME`: written by copilot's launch environment
+ * (`copilot/hook-settings` `buildCopilotHookEnvironment`) only when the
+ * ambient `COPILOT_HOME` is relative, as the absolute path the hooks
+ * `settings.json` was written under — otherwise the server (cwd: package root)
+ * and copilot (cwd: the worktree) would resolve the same string to two homes.
+ * Unset or absolute, nothing is written and the launch line is what it was.
+ *
+ * Same kind as {@link AGENT_LAUNCH_CONFIG_ENV_VARS} — a per-tool config
+ * redirect, not an identity and not a credential, so it is kept for
+ * CommandMate's own children — and listed apart from it only so the drift
+ * guard can hold both cases exactly: the default launch to that list, and the
+ * relative-`COPILOT_HOME` launch to that list plus this one.
+ */
+export const AGENT_LAUNCH_CONDITIONAL_CONFIG_ENV_VARS: readonly string[] = ['COPILOT_HOME'];
 
 /**
  * The environment a launch line actually carries: the plan's own, plus this
