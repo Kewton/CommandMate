@@ -161,6 +161,15 @@ const ROW_STATE_CLASS =
   'hover:bg-accent-200/60 focus-visible:bg-accent-200/60 dark:hover:bg-accent-900 dark:focus-visible:bg-accent-900';
 const CURRENT_ROW_STATE_CLASS =
   'bg-accent-100 hover:bg-accent-200 focus-visible:bg-accent-200 dark:bg-accent-900 dark:hover:bg-accent-800 dark:focus-visible:bg-accent-800';
+/**
+ * Issue #4218: the secondary text in the list (status words, the
+ * "Add session…" icon and the limit note). `text-muted-foreground` is gray-400
+ * in dark mode, which drops to 3.59:1 on the current row and 2.86:1 on its
+ * hover / focus over the accent tint. accent-800 / accent-200 keep at least
+ * 5.8:1 on every state above (list, row hover / focus, current row and its
+ * hover / focus) in both themes. Exported for the tests.
+ */
+export const LIST_SECONDARY_TEXT_CLASS = 'text-accent-800 dark:text-accent-200';
 const ROW_BASE_CLASS =
   'flex w-full min-w-0 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
@@ -486,7 +495,9 @@ export function HeaderSessionSwitcher({
       >
         <StatusDot status={entry.status} size="sm" aria-hidden title={undefined} className={entry.dotClass} />
         <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-        <span className="flex-shrink-0 text-xs text-muted-foreground">{entry.statusWord}</span>
+        <span data-session-secondary="" className={`flex-shrink-0 text-xs ${LIST_SECONDARY_TEXT_CLASS}`}>
+          {entry.statusWord}
+        </span>
         {isCurrent && (
           <span
             aria-hidden="true"
@@ -545,7 +556,7 @@ export function HeaderSessionSwitcher({
             aria-describedby={canAddSession ? undefined : addLimitId}
             className={`${ROW_BASE_CLASS} flex-shrink-0 ${ROW_STATE_CLASS} disabled:cursor-not-allowed disabled:opacity-40`}
           >
-            <Plus className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+            <Plus data-session-secondary="" className={`h-3.5 w-3.5 ${LIST_SECONDARY_TEXT_CLASS}`} aria-hidden="true" />
             {t('agentStatus.addSession')}
           </button>
           {!canAddSession && (
@@ -553,7 +564,8 @@ export function HeaderSessionSwitcher({
             <p
               id={addLimitId}
               data-testid="desktop-session-add-limit"
-              className="flex-shrink-0 px-2 pb-1 text-xs text-muted-foreground"
+              data-session-secondary=""
+              className={`flex-shrink-0 px-2 pb-1 text-xs ${LIST_SECONDARY_TEXT_CLASS}`}
             >
               {t('agentAdd.maxReached', { max: MAX_AGENT_INSTANCES })}
             </p>

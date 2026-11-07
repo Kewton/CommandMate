@@ -27,7 +27,10 @@ import { render, screen, fireEvent, within } from '@testing-library/react';
 import { DesktopHeader } from '@/components/worktree/WorktreeDetailSubComponents';
 import { HeaderToolBar } from '@/components/worktree/HeaderToolBar';
 import { AGENT_INSTANCE_DND_MIME } from '@/components/worktree/TerminalSplitPane';
-import { CURRENT_PILL_LABEL_FIT_MIN_PX } from '@/components/worktree/HeaderSessionSwitcher';
+import {
+  CURRENT_PILL_LABEL_FIT_MIN_PX,
+  LIST_SECONDARY_TEXT_CLASS,
+} from '@/components/worktree/HeaderSessionSwitcher';
 import { FIT_MIN_WIDTH_ATTR } from '@/hooks/useDesktopHeaderFit';
 import { HEADER_TOOLS } from '@/config/activity-bar-config';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
@@ -426,5 +429,126 @@ describe('[#4218] the tools\' "…" list opens rightward from the left of the he
     const listEl = screen.getByTestId('header-tool-more-list');
     expect(listEl.className).toMatch(/\bleft-0\b/);
     expect(listEl.className).not.toMatch(/\bright-0\b/);
+  });
+});
+
+/**
+ * Issue #4218 (consistency review P2): the list's secondary text (status words,
+ * the "Add session…" icon, the limit note) on the accent tint. Gray
+ * `text-muted-foreground` fell to 3.59:1 / 2.86:1 on the dark current row and
+ * its hover / focus; it now uses `LIST_SECONDARY_TEXT_CLASS`.
+ */
+const SECONDARY_FG = { light: 'accent-800', dark: 'accent-200' } as const;
+
+/** What in a list's markup breaks the secondary-text rule, as messages. */
+function secondaryTextViolations(listEl: Element): string[] {
+  const violations: string[] = [];
+  listEl.querySelectorAll('[class]').forEach((el) => {
+    const cls = (el.getAttribute('class') ?? '').split(/\s+/);
+    if (cls.includes('text-muted-foreground')) violations.push(`muted: ${el.outerHTML.slice(0, 60)}`);
+  });
+  const secondary = Array.from(listEl.querySelectorAll('[data-session-secondary]'));
+  if (secondary.length === 0) violations.push('no secondary text marked');
+  for (const el of secondary) {
+    const cls = (el.getAttribute('class') ?? '').split(/\s+/);
+    if (!cls.includes(`text-${SECONDARY_FG.light}`) || !cls.includes(`dark:text-${SECONDARY_FG.dark}`)) {
+      violations.push(`secondary: ${el.outerHTML.slice(0, 60)}`);
+    }
+  }
+  return violations;
+}
+
+/** The pre-fix list, reduced to what the check reads. */
+const PRE_FIX_LIST = `
+<div data-testid="desktop-session-others-list" class="bg-accent-50 dark:bg-accent-950">
+  <button data-switcher-item="" class="bg-accent-100 dark:bg-accent-900">
+    <span data-session-secondary="" class="flex-shrink-0 text-xs text-muted-foreground">Running</span>
+  </button>
+  <button data-switcher-item="" data-testid="desktop-session-add">
+    <svg data-session-secondary="" class="h-3.5 w-3.5 text-muted-foreground"></svg>
+  </button>
+</div>`;
+
+/** `--accent-NNN` RGB from globals.css, per theme block (`:root` first, `.dark` next). */
+function accentScales(): Array<Record<string, number[]>> {
+  const css = fs.readFileSync(path.join(process.cwd(), 'src/app/globals.css'), 'utf8');
+  const scales: Array<Record<string, number[]>> = [];
+  let current: Record<string, number[]> | null = null;
+  for (const m of css.matchAll(/--accent-(\d+):\s*(\d+)\s+(\d+)\s+(\d+)\s*;/g)) {
+    if (m[1] === '50' || current === null) {
+      current = {};
+      scales.push(current);
+    }
+    current[m[1]] = [Number(m[2]), Number(m[3]), Number(m[4])];
+  }
+  return scales;
+}
+
+function luminance([r, g, b]: number[]): number {
+  const f = (v: number) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+}
+
+function contrast(a: number[], b: number[]): number {
+  const [x, y] = [luminance(a), luminance(b)].sort((p, q) => q - p);
+  return (x + 0.05) / (y + 0.05);
+}
+
+const over = (top: number[], under: number[], alpha: number): number[] =>
+  top.map((v, i) => v * alpha + under[i] * (1 - alpha));
+
+describe('[#4218] the list\'s secondary text reads on its tint', () => {
+  let tmp: string | null = null;
+
+  afterEach(() => {
+    if (tmp) fs.rmSync(tmp, { recursive: true, force: true });
+    tmp = null;
+  });
+
+  function parsedFromTmp(markup: string): Element {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'session-list-fg-4218-'));
+    const file = path.join(tmp, 'list.html');
+    fs.writeFileSync(file, markup);
+    const host = document.createElement('div');
+    host.innerHTML = fs.readFileSync(file, 'utf8');
+    return host.querySelector('[data-testid="desktop-session-others-list"]') as Element;
+  }
+
+  it('positive control: flags the gray secondary text of the pre-fix list', () => {
+    expect(secondaryTextViolations(parsedFromTmp(PRE_FIX_LIST)).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('negative control: the rendered list (status words, add icon, limit note) passes', () => {
+    renderFull({ instances: roster(10), splitInstanceIds: ['claude-1', 'claude-0'] });
+    fireEvent.click(screen.getByTestId('desktop-agent-status-overflow'));
+    const listEl = screen.getByTestId('desktop-session-others-list');
+    expect(secondaryTextViolations(listEl)).toEqual([]);
+    expect(LIST_SECONDARY_TEXT_CLASS).toBe(`text-${SECONDARY_FG.light} dark:text-${SECONDARY_FG.dark}`);
+    // Status words on the current and the other rows, the "+" icon and the limit note.
+    const current = screen.getByTestId('desktop-session-current-row');
+    const other = screen.getByTestId('desktop-agent-status-claude-0');
+    expect(current.querySelector('[data-session-secondary]')).not.toBeNull();
+    expect(other.querySelector('[data-session-secondary]')).not.toBeNull();
+    expect(screen.getByTestId('desktop-session-add').querySelector('[data-session-secondary]')).not.toBeNull();
+    expect(screen.getByTestId('desktop-session-add-limit')).toHaveAttribute('data-session-secondary');
+  });
+
+  it('keeps 4.5:1 on every row state in both themes (globals.css values)', () => {
+    const scales = accentScales();
+    expect(scales.length).toBeGreaterThanOrEqual(2);
+    const n = (k: string) => k.replace('accent-', '');
+    for (const a of scales.slice(0, 2)) {
+      // Light: list 50, other row hover/focus 200/60 over 50, current 100, its hover/focus 200.
+      const light = [a['50'], over(a['200'], a['50'], 0.6), a['100'], a['200']];
+      // Dark: list 950, other row hover/focus 900, current 900, its hover/focus 800.
+      const dark = [a['950'], a['900'], a['900'], a['800']];
+      for (const bg of light) expect(contrast(a[n(SECONDARY_FG.light)], bg)).toBeGreaterThanOrEqual(4.5);
+      for (const bg of dark) expect(contrast(a[n(SECONDARY_FG.dark)], bg)).toBeGreaterThanOrEqual(4.5);
+    }
+    // The gray it replaced fails on the dark current row's hover (the review's 2.86:1).
+    expect(contrast([156, 163, 175], scales[1]['800'])).toBeLessThan(4.5);
   });
 });
