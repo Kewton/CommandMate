@@ -35,4 +35,11 @@ describe('docs/orchestrate/team.md (#4239)', () => {
     expect(ah).toContain('../orchestrate/team.md');
     expect(ah).not.toContain('この用途の専用');
   });
+
+  it('routes re-UAT in uat-fix-loop through the judge (#4239)', () => {
+    expect(team).toContain('回帰確認も同じ');
+    const loop = read('.claude/commands/uat-fix-loop.md');
+    expect(loop).toContain('ジャッジ（`claude-2`）に頼み結果を待つ');
+    expect(loop).toContain('docs/orchestrate/team.md#5-uat-の結果の返し方phase-7');
+  });
 });
