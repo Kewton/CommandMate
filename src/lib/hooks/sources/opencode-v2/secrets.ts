@@ -44,7 +44,7 @@ import {
 } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
-import { resolveSafeDirectory } from '@/config/safe-directory';
+import { resolveSafeAbsoluteDirectory } from '@/config/safe-directory';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import type { AgentInstanceRef } from '../types';
 
@@ -62,10 +62,16 @@ export const OPENCODE_V2_PASSWORD_SUFFIX = '.pw';
  *
  * `~/.commandmate/opencode-v2`, or `$CM_OPENCODE_V2_DIR`. Resolved on every call
  * so a test that points `HOME` or the variable somewhere else is honoured.
+ *
+ * Issue #4210: absolute, because a path under it leaves this process. The
+ * launch line hands `--password-file <file>` to `scripts/opencode-v2/launch.sh`
+ * (`./source.ts` `prepareOpencodeV2Launch`), which runs in the worktree
+ * (`cli-tools/base.ts` `createLaunchPane`) and would otherwise read another
+ * file than the one written here, or none.
  */
 export function getOpencodeV2StateDir(): string {
   const fallback = join(homedir(), '.commandmate', 'opencode-v2');
-  return resolveSafeDirectory(process.env[OPENCODE_V2_DIR_ENV], fallback, OPENCODE_V2_DIR_ENV);
+  return resolveSafeAbsoluteDirectory(process.env[OPENCODE_V2_DIR_ENV], fallback, OPENCODE_V2_DIR_ENV);
 }
 
 /**
