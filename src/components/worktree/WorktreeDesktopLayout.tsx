@@ -29,13 +29,14 @@
 
 import React, { useState, useCallback, useRef, useMemo, memo, ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
-import { Pin, PinOff, X } from 'lucide-react';
+import { Pin, PinOff, PanelLeft, PanelRight, X } from 'lucide-react';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
 import { Tooltip } from '@/components/common/Tooltip';
 import {
   usePaneOverlayDismiss,
   type PaneDismissReason,
 } from '@/hooks/useActivityPaneOverlay';
+import { usePaneSide, type PaneSide } from '@/hooks/usePaneSide';
 import { PaneResizer } from './PaneResizer';
 
 // ============================================================================
@@ -75,7 +76,15 @@ export interface WorktreeDesktopLayoutProps {
    * while unpinned — outside-press dismissal). Its `pinned` is `activityPanePinned`.
    * Omit to render `activityPane` bare, as before.
    */
-  activityPaneFrame?: Omit<PaneOverlayFrameProps, 'children' | 'pinned'>;
+  activityPaneFrame?: Omit<PaneOverlayFrameProps, 'children' | 'pinned' | 'side' | 'onToggleSide'>;
+
+  /**
+   * Issue #4219: which side the activity pane sits on. When omitted the layout
+   * owns it (`usePaneSide`, persisted, default right). Pass together with
+   * `onToggleActivityPaneSide` to control it from the parent.
+   */
+  activityPaneSide?: PaneSide;
+  onToggleActivityPaneSide?: () => void;
 
   /** Optional extra className for the root element. */
   className?: string;
@@ -103,8 +112,13 @@ const PINNED_SLOT_CLASS = 'flex-shrink-0 overflow-hidden transition-[width] dura
  * Issue #3589: the unpinned slot — over the right pane, which keeps its width.
  * Issue #3591: from the right edge.
  */
-const OVERLAY_SLOT_CLASS =
-  'absolute inset-y-0 right-0 z-20 max-w-full overflow-hidden border-l border-border bg-surface shadow-lg';
+const OVERLAY_SLOT_CLASS_BASE =
+  'absolute inset-y-0 z-20 max-w-full overflow-hidden border-border bg-surface shadow-lg';
+/** Issue #4219: the edge the overlay hangs from, and the border on its inner side. */
+const OVERLAY_SLOT_SIDE_CLASS: Record<PaneSide, string> = {
+  right: 'right-0 border-l',
+  left: 'left-0 border-r',
+};
 
 const ACTIVITY_PANE_ID = 'worktree-activity-pane';
 const RIGHT_PANE_ID = 'worktree-right-pane';
@@ -122,10 +136,18 @@ export const WorktreeDesktopLayout = memo(function WorktreeDesktopLayout({
   onActivityPaneResize,
   activityPanePinned = true,
   activityPaneFrame,
+  activityPaneSide,
+  onToggleActivityPaneSide,
   className = '',
 }: WorktreeDesktopLayoutProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const t = useTranslations('worktree');
+  const ownSide = usePaneSide();
+  const side: PaneSide = activityPaneSide ?? ownSide.side;
+  const toggleSide = onToggleActivityPaneSide ?? ownSide.toggleSide;
+  const isLeft = side === 'left';
+  // Issue #4219: DOM order stays [body][resizer][pane]; `flex-row-reverse` puts
+  // the pane on the left, so a side switch never remounts it.
 
   // Internal width state (controlled fallback when no on*Resize callback is provided).
   const [localActivityWidth, setLocalActivityWidth] = useState(activityPaneWidth);
@@ -141,24 +163,30 @@ export const WorktreeDesktopLayout = memo(function WorktreeDesktopLayout({
       if (w === 0) return;
       // Issue #3591: the pane is right of its resizer, so dragging the
       // resizer right (a positive delta) makes the pane narrower.
-      const percentDelta = (-delta / w) * 100;
+      // Issue #4219: on the left the sign flips.
+      const percentDelta = ((isLeft ? delta : -delta) / w) * 100;
       const current = onActivityPaneResize ? activityPaneWidth : localActivityWidth;
       const next = Math.min(maxPaneWidth, Math.max(minPaneWidth, current + percentDelta));
       if (onActivityPaneResize) onActivityPaneResize(next);
       else setLocalActivityWidth(next);
     },
-    [activityPaneWidth, localActivityWidth, minPaneWidth, maxPaneWidth, onActivityPaneResize]
+    [activityPaneWidth, localActivityWidth, minPaneWidth, maxPaneWidth, onActivityPaneResize, isLeft]
   );
 
   const containerClassName = useMemo(
-    () => `relative flex h-full min-h-0 ${className}`.trim(),
-    [className]
+    () => `relative flex ${isLeft ? 'flex-row-reverse' : ''} h-full min-h-0 ${className}`.replace(/\s+/g, ' ').trim(),
+    [className, isLeft]
   );
 
   const showActivityCol = activityPane !== null;
   const framedActivityPane =
     showActivityCol && activityPaneFrame ? (
-      <PaneOverlayFrame {...activityPaneFrame} pinned={activityPanePinned}>
+      <PaneOverlayFrame
+        {...activityPaneFrame}
+        pinned={activityPanePinned}
+        side={side}
+        onToggleSide={toggleSide}
+      >
         {activityPane}
       </PaneOverlayFrame>
     ) : (
@@ -205,13 +233,18 @@ export const WorktreeDesktopLayout = memo(function WorktreeDesktopLayout({
             id={ACTIVITY_PANE_ID}
             data-testid="activity-pane-slot"
             data-pinned={activityPanePinned ? 'true' : 'false'}
+            data-side={side}
             aria-label={t('desktopLayout.activityPane')}
             style={
               activityPanePinned
                 ? { width: `${effectiveActivityWidth}%` }
                 : { width: `${effectiveActivityWidth}%`, minWidth: OVERLAY_MIN_WIDTH_PX }
             }
-            className={activityPanePinned ? PINNED_SLOT_CLASS : OVERLAY_SLOT_CLASS}
+            className={
+              activityPanePinned
+                ? PINNED_SLOT_CLASS
+                : `${OVERLAY_SLOT_CLASS_BASE} ${OVERLAY_SLOT_SIDE_CLASS[side]}`
+            }
           >
             <ErrorBoundary componentName="ActivityPane">{framedActivityPane}</ErrorBoundary>
           </div>
@@ -238,6 +271,10 @@ export interface PaneOverlayFrameProps {
   pinned: boolean;
   /** Pin button clicked. */
   onTogglePinned: () => void;
+  /** Issue #4219: side the panel sits on. With `onToggleSide`, shows the move button. */
+  side?: PaneSide;
+  /** Issue #4219: move button clicked. Omit to hide the button. */
+  onToggleSide?: () => void;
   /** × clicked. Always closes, edits or not. */
   onClose: () => void;
   /**
@@ -274,6 +311,8 @@ export const PaneOverlayFrame = memo(function PaneOverlayFrame({
   title,
   pinned,
   onTogglePinned,
+  side = 'right',
+  onToggleSide,
   onClose,
   onDismiss,
   ignoreOutsideSelectors,
@@ -295,6 +334,7 @@ export const PaneOverlayFrame = memo(function PaneOverlayFrame({
   });
 
   const pinLabel = pinned ? t('desktopLayout.unpinPane') : t('desktopLayout.pinPane');
+  const sideLabel = side === 'left' ? t('desktopLayout.movePaneRight') : t('desktopLayout.movePaneLeft');
   const iconButtonClass =
     'flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted-foreground/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
@@ -325,6 +365,23 @@ export const PaneOverlayFrame = memo(function PaneOverlayFrame({
             {pinned ? <PinOff size={16} aria-hidden="true" /> : <Pin size={16} aria-hidden="true" />}
           </button>
         </Tooltip>
+        {onToggleSide && (
+          <Tooltip content={sideLabel} placement="bottom">
+            <button
+              type="button"
+              onClick={onToggleSide}
+              aria-label={sideLabel}
+              data-testid={`${testIdPrefix}-side`}
+              className={iconButtonClass}
+            >
+              {side === 'left' ? (
+                <PanelRight size={16} aria-hidden="true" />
+              ) : (
+                <PanelLeft size={16} aria-hidden="true" />
+              )}
+            </button>
+          </Tooltip>
+        )}
         <Tooltip content={t('desktopLayout.closePane')} placement="bottom">
           <button
             type="button"

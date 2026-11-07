@@ -166,6 +166,14 @@ test.describe('Worktree tools in the header (Issue #3591)', () => {
 
   test('the pane opens from the right over the body, which keeps its width', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
+    // Issue #4219: say "right" explicitly instead of relying on the default.
+    await page.addInitScript(() => {
+      try {
+        localStorage.setItem('commandmate.worktree.activityPaneSide', 'right');
+      } catch {
+        /* storage unavailable - non-fatal */
+      }
+    });
     await openScreen(page);
     const before = (await page.getByTestId('terminal-split-container').boundingBox())!;
 

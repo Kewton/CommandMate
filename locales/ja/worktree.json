@@ -1208,7 +1208,9 @@
     "terminalPane": "ターミナルペイン",
     "pinPane": "ターミナルの横に固定",
     "unpinPane": "固定を解除（ターミナルの上に重ねる）",
-    "closePane": "パネルを閉じる"
+    "closePane": "パネルを閉じる",
+    "movePaneLeft": "左に移す",
+    "movePaneRight": "右に移す"
   },
   "worktreeStatus": {
     "notSet": "未設定",
