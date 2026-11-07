@@ -124,7 +124,7 @@ import {
   writeSync,
 } from 'fs';
 import { homedir } from 'os';
-import { dirname, join } from 'path';
+import { dirname, isAbsolute, join } from 'path';
 import { resolveSafeAbsoluteDirectory } from '@/config/safe-directory';
 import {
   isUatIsolationEnabled,
@@ -1022,7 +1022,30 @@ export function buildCopilotHookEnvironment(
     // one value that has to be *this* server's rather than the last one to
     // write the machine-global settings file.
     [COPILOT_HOOK_PORT_ENV]: String(options.port ?? getServerPort()),
+    ...copilotHomePin(options),
   };
+}
+
+/**
+ * `COPILOT_HOME`, for the one case where copilot would otherwise read another
+ * home than the one {@link writeCopilotHookSettings} just wrote into (Issue #4210).
+ *
+ * A relative `COPILOT_HOME` is resolved against this process's cwd when the
+ * settings file is written (the daemon runs from the package root), while
+ * copilot runs in the worktree (`cli-tools/base.ts` `createLaunchPane`) and
+ * would resolve the same string there — another `settings.json`, or none, and
+ * no events. Pinning the absolute form makes the two the same file, as codex's
+ * launch pins `CODEX_HOME`.
+ *
+ * Only then. Unset or absolute, the environment is what it was before #4210;
+ * and an explicit {@link CopilotHookSettingsOptions.settingsPath} names a file
+ * that is not `<home>/settings.json`, so there is no home to pin.
+ */
+function copilotHomePin(options: CopilotHookSettingsOptions): Record<string, string> {
+  if (options.settingsPath !== undefined) return {};
+  const configured = process.env.COPILOT_HOME;
+  if (!configured || isAbsolute(configured)) return {};
+  return { COPILOT_HOME: getCopilotHomeDirectory() };
 }
 
 /**
