@@ -20,7 +20,7 @@ import fs, { readFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import Database from 'better-sqlite3';
-import { runMigrations } from '@/lib/db/db-migrations';
+import { openMigratedFileDb } from '../../helpers/migrated-file-db';
 
 let db: Database.Database;
 let tmpDir: string;
@@ -83,8 +83,8 @@ function row(key: string): string | undefined {
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-3798-card-'));
-  db = new Database(path.join(tmpDir, 'db.sqlite'));
-  runMigrations(db);
+  // Issue #4212: no fsync per migration commit (tests/helpers/migrated-file-db.ts).
+  db = openMigratedFileDb(path.join(tmpDir, 'db.sqlite'));
   db.prepare(
     `INSERT INTO worktrees (id, name, path, repository_path, repository_name, updated_at)
      VALUES (?, ?, ?, ?, ?, ?)`
@@ -533,5 +533,15 @@ describe('[#3798] per-device delivery: the wait\'s since is not the order', () =
     expect(payloads()).toHaveLength(4);
     for (const p of payloads()) expect(p).not.toHaveProperty('order');
     expect(row('push_prompt_order:' + WT)).toBeUndefined();
+  });
+});
+
+describe('[#4212] the per-test database file', () => {
+  // The beforeEach migrates a fresh file (~65 commits). With the default
+  // `synchronous = FULL` each commit waits for the disk; on a CI runner sharing
+  // the disk with other verifications that sync hook passed 20s and Vitest
+  // reported "Hook timed out in 20000ms" (develop push run 42293211705, shard 1/4).
+  it('commits without an fsync wait', () => {
+    expect(db.pragma('synchronous', { simple: true })).toBe(0);
   });
 });
