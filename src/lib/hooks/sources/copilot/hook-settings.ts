@@ -125,7 +125,7 @@ import {
 } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
-import { resolveSafeDirectory } from '@/config/safe-directory';
+import { resolveSafeAbsoluteDirectory } from '@/config/safe-directory';
 import {
   isUatIsolationEnabled,
   sharedHookWritePolicy,
@@ -294,10 +294,16 @@ export interface CopilotHookSettingsOptions {
  * Issue #1774: `writeCopilotHookSettings` creates this directory with a
  * recursive mkdir, which does not fail but *hangs* for a path inside `/proc`,
  * `/sys` or `/dev`. Such a value is refused here and `~/.copilot` is used.
+ *
+ * Issue #4210: absolute, because the value leaves this process. A role launch
+ * hands copilot `COPILOT_HOME=<this>` (`agent-roles/adapters.ts`,
+ * `buildRoleLaunchArguments`) and copilot runs in the worktree
+ * (`cli-tools/base.ts` `createLaunchPane`), so a relative value named another
+ * `agents/` directory than the one the definition was written into.
  */
 export function getCopilotHomeDirectory(): string {
   const fallback = join(homedir(), '.copilot');
-  return resolveSafeDirectory(process.env.COPILOT_HOME, fallback, 'COPILOT_HOME');
+  return resolveSafeAbsoluteDirectory(process.env.COPILOT_HOME, fallback, 'COPILOT_HOME');
 }
 
 /** The one file copilot reads hooks from. */

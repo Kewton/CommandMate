@@ -126,8 +126,15 @@ procfs 上の `realpath` は即 ENOENT を返すため、この関数自体は�
 |---|---|---|
 | `CM_AGENT_HOOKS_DIR` / `HookSettingsOptions.directory` | claude の `--settings`（起動 cwd は worktree、daemon の cwd は package root） | **絶対化**（#4191） |
 | `CM_TMUX_SCRIPT_DIR` | tmux の hook のコマンド（tmux サーバーの cwd で実行） | **絶対化**（#4176） |
+| `COPILOT_HOME` | ロールつき起動で copilot の環境の `COPILOT_HOME`（`agent-roles/adapters.ts` `buildRoleLaunchArguments`。起動 cwd は worktree＝`cli-tools/base.ts` `createLaunchPane`） | **絶対化**（#4210） |
+| `CM_AGENT_ROLE_ARTIFACTS_DIR` / `ArtifactOptions.dataRoot` | ロールの成果物のパスを claude の `--append-system-prompt-file`・Command Code の `--mod`・OpenCode の `instructions` / `{file:…}` に渡す（同上） | **絶対化**（#4210）。`ArtifactOptions.copilotHome` も同じ理由で絶対化 |
+| `CM_OPENCODE_V2_DIR` | パスワードファイルを `scripts/opencode-v2/launch.sh` の `--password-file` に渡す（`opencode-v2/source.ts` `prepareOpencodeV2Launch`。pane の cwd は worktree） | **絶対化**（#4210） |
+| `CODEX_HOME` / `CodexHookOptions.codexHome` | 渡す（codex の起動環境の `CODEX_HOME`、`hooks.json` の relay のパス、ロールの `CODEX_HOME`）。ただし「相対値は codex の cwd で解決させる」ことを #2069 が意図した分岐として `tests/unit/updates/codex-home-parity-2069.test.ts` で固定している | 相対のまま。直す向き（絶対化するか、worktree 側へ書くか）が設計判断のため #4210 では変えず申し送り |
 | `CM_LOG_DIR` | 渡さない（`log-manager` と logs の API ルートが同じプロセスで読み書き。`process.chdir` は src に無い） | 相対のまま |
-| `CODEX_HOME` など上表の残り | 一部は子プロセスの環境に渡る（例: codex の起動環境の `CODEX_HOME`） | 相対のまま。#4191 の範囲外として申し送り |
+| `CM_LOG_DIR`（CLI の `security.log`） | 渡さない（CLI 自身が `appendFileSync` で書く） | 相対のまま（CLI の cwd で解決）。`/proc` などは `getLogDir()` と同じく拒否し `~/.commandmate-security.log` へ（#4210）。CLI ビルドは `@/` を解決できないため `getLogDir()` ではなく `isVirtualFilesystemPath()` を直接使う |
+| `CM_OPENCODE_PORT_FILE` / `CM_OPENCODE_LAUNCH_SETTINGS_FILE` / `CM_OPENCODE_SESSION_FILE` | 渡さない（サーバーだけが読み書き。起動行・環境に載らない） | 相対のまま |
+| `XDG_CONFIG_HOME` | 渡さない（opencode の設定の書き込み先を決めるだけ。`plan.env` には載らない＝`hooks/sources/launch-command.ts` の注記） | 相対のまま |
+| `CM_AGENT_ROLE_ANTIGRAVITY_AGENTS_DIR` | 渡さない（`--agent <name>` の名前だけ。agy は `~/.gemini/config/agents` を自分で探す） | 相対のまま |
 
 `CM_OPENCODE_PORT_FILE` は**ファイル**パスだが、判定は前置一致なのでディレクトリと同じ扱いで
 正しく弾ける（`/proc/ports.json` の親は `/proc` そのもの）。

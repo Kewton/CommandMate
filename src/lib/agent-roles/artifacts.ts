@@ -46,7 +46,7 @@ import { basename, dirname, join, resolve, sep } from 'path';
 import vm from 'vm';
 import { parse as parseToml } from 'smol-toml';
 import { parse as parseYaml } from 'yaml';
-import { resolveSafeDirectory } from '@/config/safe-directory';
+import { resolveSafeAbsoluteDirectory, resolveSafeDirectory } from '@/config/safe-directory';
 import {
   sharedHookWritePolicy,
   UAT_SAME_BUILD_FIX,
@@ -168,11 +168,18 @@ function defaultDataRoot(): string {
   return join(homedir(), '.commandmate', 'agent-roles');
 }
 
+/**
+ * Absolute (Issue #4210): the path of a file under this root is handed to the
+ * CLI — `--append-system-prompt-file`, `--mod`, OpenCode's `instructions` /
+ * `{file:…}` (`./adapters.ts` `buildRoleLaunchArguments`) — and the CLI runs in
+ * the worktree (`cli-tools/base.ts` `createLaunchPane`), so a relative root
+ * named another file than the one written here.
+ */
 function dataRootFor(options: ArtifactOptions): string {
   const fallback = defaultDataRoot();
-  if (options.dataRoot) return resolveSafeDirectory(options.dataRoot, fallback, 'ArtifactOptions.dataRoot');
+  if (options.dataRoot) return resolveSafeAbsoluteDirectory(options.dataRoot, fallback, 'ArtifactOptions.dataRoot');
   const configured = (options.env ?? process.env)[AGENT_ROLE_ARTIFACTS_DIR_ENV_VAR];
-  return resolveSafeDirectory(configured, fallback, AGENT_ROLE_ARTIFACTS_DIR_ENV_VAR);
+  return resolveSafeAbsoluteDirectory(configured, fallback, AGENT_ROLE_ARTIFACTS_DIR_ENV_VAR);
 }
 
 /** The path with every symlink that exists on the way followed. What is not there yet is kept as spelled. */
@@ -274,7 +281,9 @@ export function resolveArtifactLocation(
       return { path: join(home, `${name}.config.toml`), homeDir: home, sharedDirs: [], ownedDirs: [], inSharedHome: true };
     }
     case 'copilot': {
-      const home = options.copilotHome ?? getCopilotHomeDirectory();
+      // Absolute for getCopilotHomeDirectory()'s reason (Issue #4210): the home is
+      // handed to copilot as COPILOT_HOME.
+      const home = options.copilotHome !== undefined ? resolve(options.copilotHome) : getCopilotHomeDirectory();
       const agents = join(home, 'agents');
       return { path: join(agents, `${name}.agent.md`), homeDir: home, sharedDirs: [agents], ownedDirs: [], inSharedHome: true };
     }
