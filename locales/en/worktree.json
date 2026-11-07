@@ -1207,7 +1207,9 @@
     "terminalPane": "Terminal pane",
     "pinPane": "Pin beside the terminal",
     "unpinPane": "Unpin (show over the terminal)",
-    "closePane": "Close panel"
+    "closePane": "Close panel",
+    "movePaneLeft": "Move to left",
+    "movePaneRight": "Move to right"
   },
   "worktreeStatus": {
     "notSet": "Not set",
