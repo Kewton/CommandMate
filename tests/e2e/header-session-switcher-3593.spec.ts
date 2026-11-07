@@ -101,7 +101,11 @@ async function openScreen(page: Page, options: RosterOptions): Promise<void> {
   await expect(page.getByTestId('activity-pane-slot')).toHaveCount(0);
 }
 
-/** From the current session's left edge to the "+"'s right edge. */
+/**
+ * From the sessions trigger's left edge to the "+"'s right edge (Issue #4218:
+ * the current session's pill left for the identity group; the trigger and the
+ * "+" are what stays one width in the controls group).
+ */
 async function fieldWidth(page: Page): Promise<number> {
   const switcher = await box(page.getByTestId('desktop-session-switcher'));
   const plus = await box(page.getByTestId('agent-add-button'));
@@ -339,6 +343,9 @@ test.describe('Header session field (Issue #3593)', () => {
     await trigger.focus();
     await page.keyboard.press('ArrowDown');
     await expect(page.getByTestId('desktop-session-others-list')).toBeVisible();
+    // Issue #4218: the list leads with the current session (claude).
+    await expect(page.getByTestId('desktop-session-current-row')).toBeFocused();
+    await page.keyboard.press('ArrowDown');
     await expect(page.getByTestId('desktop-agent-status-codex')).toBeFocused();
     await page.keyboard.press('ArrowDown');
     await expect(page.getByTestId('desktop-agent-status-gemini')).toBeFocused();
@@ -347,6 +354,8 @@ test.describe('Header session field (Issue #3593)', () => {
     await expect(trigger).toBeFocused();
 
     await page.keyboard.press('Enter');
+    await expect(page.getByTestId('desktop-session-current-row')).toBeFocused();
+    await page.keyboard.press('ArrowDown');
     await expect(page.getByTestId('desktop-agent-status-codex')).toBeFocused();
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('Enter');
@@ -429,8 +438,14 @@ test.describe('Header session field (Issue #3593)', () => {
   test('a long row tooltip on a narrow screen, and on a partly visible row, covers no other row (#3616)', async ({
     page,
   }) => {
+    // Issue #4218: the list now opens near the right edge (its trigger sits
+    // in the right-aligned controls), so the room left of it is wide. The
+    // label is made longer than the whole screen so that it fits on neither
+    // side whatever the trigger's position.
     const alias = (i: number) =>
-      `session ${i} with a deliberately very long alias so that its tooltip cannot fit on either side of the list`;
+      `session ${i} with a deliberately very long alias so that its tooltip cannot fit on either side of the list`.repeat(
+        2,
+      );
 
     await page.setViewportSize({ width: 1024, height: 768 });
     await openScreenWithSidebar(page, { count: 4, alias });
@@ -498,6 +513,44 @@ test.describe('Header session field (Issue #3593)', () => {
         await expect(bubble).toHaveCount(0);
       }
     }
+  });
+
+  // Issue #4218: the pill ends the identity line, the trigger sits apart in
+  // the controls group (bordered), and the list holds every session.
+  test('the pill ends the identity line; the trigger is apart, right; the list marks the current session (#4218)', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openScreen(page, { count: 3, status: (i) => [running, idle, waiting][i] });
+    const repo = await box(page.getByTestId('desktop-repository-name'));
+    const name = await box(page.getByTestId('desktop-worktree-name'));
+    const pill = await box(page.locator('[data-session-current]'));
+    const trigger = page.getByTestId('desktop-agent-status-overflow');
+    const triggerBox = await box(trigger);
+    const plus = await box(page.getByTestId('agent-add-button'));
+    const info = await box(page.getByTestId('desktop-info-button'));
+    const header = await box(page.getByTestId('desktop-header'));
+    expect(name.x).toBeGreaterThan(repo.x);
+    expect(pill.x).toBeGreaterThan(name.x + name.width);
+    // Apart: the tools (and the room) lie between the pill and the trigger.
+    expect(triggerBox.x - (pill.x + pill.width)).toBeGreaterThan(100);
+    expect(plus.x).toBeGreaterThan(triggerBox.x + triggerBox.width);
+    expect(info.x).toBeGreaterThan(plus.x + plus.width);
+    expect(info.x + info.width).toBeGreaterThan(header.x + header.width - 40);
+    expect(await trigger.evaluate((el) => getComputedStyle(el).borderTopWidth)).toBe('1px');
+    await expect(trigger).toContainText(/Sessions 3|セッション 3/);
+
+    const list = await openList(page);
+    const items = list.locator('[data-switcher-item]');
+    await expect(items.first()).toHaveAttribute('data-testid', 'desktop-session-current-row');
+    await expect(items.first()).toHaveAttribute('aria-current', 'true');
+    await expect(list.locator('[aria-current="true"]')).toHaveCount(1);
+    // Its own background: not the header's.
+    const colors = await page.evaluate(() => ({
+      list: getComputedStyle(document.querySelector('[data-testid="desktop-session-others-list"]')!).backgroundColor,
+      header: getComputedStyle(document.querySelector('[data-testid="desktop-header"]')!).backgroundColor,
+    }));
+    expect(colors.list).not.toBe(colors.header);
   });
 
   test('a tall screen: the list does not scroll; at 10 sessions "Add session…" is off and says why', async ({

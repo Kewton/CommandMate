@@ -763,7 +763,8 @@ describe('DesktopHeader agent-row idle collapse + overflow (Issue #1078)', () =>
     );
     // Issue #3593: the five idle ones are the "N others" list, and none of
     // them waits for an answer, so the trigger carries no amber count.
-    expect(screen.getByTestId('desktop-agent-status-overflow').textContent).toContain('5');
+    // Issue #4218: the trigger counts every session (6), the current one too.
+    expect(screen.getByTestId('desktop-agent-status-overflow').textContent).toContain('Sessions 6');
     expect(screen.getByTestId('desktop-session-others-waiting').textContent).toBe('');
   });
 
@@ -777,7 +778,8 @@ describe('DesktopHeader agent-row idle collapse + overflow (Issue #1078)', () =>
       if (i > 0) expect(screen.queryByText(`Agent ${i}: Idle`)).toBeNull();
     }
     expect(screen.getByText('Agent 0: Idle')).toBeDefined();
-    expect(screen.getByTestId('desktop-agent-status-overflow').textContent).toContain('5');
+    // Issue #4218: the trigger counts every session.
+    expect(screen.getByTestId('desktop-agent-status-overflow').textContent).toContain('Sessions 6');
   });
 
   it('6 all working: keeps 4 pills inline and folds the remaining 2 into "+N"', () => {
@@ -798,7 +800,8 @@ describe('DesktopHeader agent-row idle collapse + overflow (Issue #1078)', () =>
       expect(screen.getByTestId(`desktop-agent-status-claude-${i}`)).toBeDefined();
     }
     const overflow = screen.getByTestId('desktop-agent-status-overflow');
-    expect(overflow.textContent).toContain('5');
+    // Issue #4218: the trigger counts every session.
+    expect(overflow.textContent).toContain('Sessions 6');
     expect(overflow.getAttribute('aria-expanded')).toBe('false');
     expect(screen.getByTestId('desktop-session-others-list')).not.toBeVisible();
     // Issue #1078: folded working sessions still surface the living glow so a

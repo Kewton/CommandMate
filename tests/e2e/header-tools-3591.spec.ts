@@ -131,6 +131,19 @@ test.describe('Worktree tools in the header (Issue #3591)', () => {
       await expect(page.getByTestId('header-tool-verification')).toHaveCount(0);
       await expect(page.getByTestId('verification-status-chip')).toBeVisible();
 
+      // Issue #4218: the tools come right after the identity group, in order,
+      // and the controls (ending with Info) come after them at the right end.
+      const identity = (await page.getByTestId('desktop-header-identity').boundingBox())!;
+      const controls = (await page.getByTestId('desktop-header-controls').boundingBox())!;
+      const info = (await page.getByTestId('desktop-info-button').boundingBox())!;
+      const xs: number[] = [];
+      for (const id of TOOL_IDS) xs.push((await page.getByTestId(`header-tool-${id}`).boundingBox())!.x);
+      expect(xs).toEqual([...xs].sort((a, b) => a - b));
+      expect(xs[0]).toBeGreaterThanOrEqual(identity.x + identity.width);
+      const lastTool = (await page.getByTestId(`header-tool-${TOOL_IDS[TOOL_IDS.length - 1]}`).boundingBox())!;
+      expect(lastTool.x + lastTool.width).toBeLessThanOrEqual(controls.x);
+      expect(info.x + info.width).toBeGreaterThan(header.x + header.width - 40);
+
       testInfo.annotations.push({
         type: 'header',
         description: `1440x900, sidebar ${sidebarOpen ? 'open' : 'closed'}: header ${Math.round(header.width)}px, 9 tools in a row`,
@@ -225,6 +238,14 @@ test.describe('Worktree tools in the header (Issue #3591)', () => {
     // The visible ones are a prefix: the trailing ones fold first.
     expect(visible).toEqual(TOOL_IDS.slice(0, visible.length));
     expect(visible.length).toBeLessThan(TOOL_IDS.length);
+    // Issue #4218: "…" follows the visible tools and comes before the controls.
+    const moreBox = (await more.boundingBox())!;
+    const controlsBox = (await page.getByTestId('desktop-header-controls').boundingBox())!;
+    if (visible.length > 0) {
+      const lastVisible = (await page.getByTestId(`header-tool-${visible[visible.length - 1]}`).boundingBox())!;
+      expect(moreBox.x).toBeGreaterThanOrEqual(lastVisible.x + lastVisible.width);
+    }
+    expect(moreBox.x + moreBox.width).toBeLessThanOrEqual(controlsBox.x);
     const folded = TOOL_IDS.slice(visible.length);
     const last = folded[folded.length - 1];
 

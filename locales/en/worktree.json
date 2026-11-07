@@ -2,9 +2,11 @@
   "agentStatus": {
     "overflowTrigger": "More agents",
     "otherSessions": "{count} more",
-    "otherSessionsLabel": "{count} other sessions",
-    "otherSessionsWaitingLabel": "{count} other sessions, {waiting} waiting for your answer",
-    "otherSessionsList": "Other sessions",
+    "sessions": "Sessions {count}",
+    "sessionsLabel": "Sessions: {count}",
+    "sessionsWaitingLabel": "Sessions: {count}, {waiting} waiting for your answer",
+    "sessionsList": "Sessions",
+    "currentSession": "Showing",
     "inSplit": "Split {index}",
     "addSession": "Add session…"
   },

@@ -19,8 +19,8 @@
  *
  * ## One line (Issue #3590)
  *
- * The header is one 44px row: the name ▾ first, then the repository, which
- * links to the Repositories screen. The worktree's memo is no longer drawn in
+ * The header is one 44px row. Issue #4218: it reads "repository › branch ▾ ›
+ * session" — the repository first, linking to the Repositories screen. The worktree's memo is no longer drawn in
  * the header; its full text is part of the name's tooltip (and Info).
  *
  * ## When there is no ▾
@@ -71,7 +71,8 @@ import type { Worktree } from '@/types/models';
  * same colour as its tab. Rendered whatever the tab strip is doing.
  *
  * Issue #3590: a link to the Repositories screen (there is no per-repository
- * page), on the header's one line right of the name.
+ * page). Issue #4218: first on the header's line, left of the branch, and the
+ * first to give way (`shrink-4`) on a narrow header.
  */
 export const WorktreeBreadcrumbRepository = memo(function WorktreeBreadcrumbRepository({
   repositoryName,
@@ -83,7 +84,7 @@ export const WorktreeBreadcrumbRepository = memo(function WorktreeBreadcrumbRepo
     <Link
       href="/repositories"
       data-testid="desktop-repository-name"
-      className="flex min-w-0 max-w-[200px] items-center gap-1 rounded text-xs text-muted-foreground
+      className="flex min-w-0 max-w-[200px] shrink-4 items-center gap-1 rounded text-xs text-muted-foreground
         hover:text-foreground hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       title={t('detail.openRepositories', { repository: repositoryName })}
     >

@@ -18,6 +18,13 @@
  * jsdom has no layout, so the "same width" promise is pinned here on the
  * classes (fixed widths, a reserved box for the trigger) and measured for real
  * in `tests/e2e/header-session-switcher-3593.spec.ts`.
+ *
+ * Issue #4218: the pill moved to the end of the identity group and the list
+ * became every session — the current one first, marked `aria-current` (its row
+ * is `desktop-session-current-row`; `rowIds()` below still lists the others).
+ * The trigger counts every session and is drawn with one session too. The `it`
+ * names are #3593's and are kept as they were; where the promise changed, a
+ * comment says what each pins now.
  */
 
 import React from 'react';
@@ -25,6 +32,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { DesktopHeader } from '@/components/worktree/WorktreeDetailSubComponents';
 import { AGENT_INSTANCE_DND_MIME } from '@/components/worktree/TerminalSplitPane';
+import { CURRENT_PILL_LABEL_FIT_MIN_PX } from '@/components/worktree/HeaderSessionSwitcher';
+import { FIT_MIN_WIDTH_ATTR } from '@/hooks/useDesktopHeaderFit';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
 import type { Worktree } from '@/types/models';
 
@@ -67,6 +76,7 @@ const rowIds = () =>
   Array.from(list().querySelectorAll('[data-testid^="desktop-agent-status-"]')).map(
     (el) => el.getAttribute('data-testid')
   );
+const currentRow = () => screen.getByTestId('desktop-session-current-row');
 
 /** A DataTransfer stand-in (jsdom has none). */
 function dataTransfer() {
@@ -97,7 +107,12 @@ describe('[#3593] the session field: current + others', () => {
       'desktop-agent-status-claude-1',
       'desktop-agent-status-claude-3',
     ]);
-    expect(trigger().textContent).toContain('3 more');
+    // Issue #4218: the list leads with the current session, and the trigger
+    // counts every session.
+    const items = list().querySelectorAll('[data-switcher-item]');
+    expect(items[0]).toBe(currentRow());
+    expect(currentRow().getAttribute('data-session-id')).toBe('claude-2');
+    expect(trigger().textContent).toContain('Sessions 4');
   });
 
   it('lists the sessions waiting for an answer first, and counts them in amber', () => {
@@ -119,8 +134,9 @@ describe('[#3593] the session field: current + others', () => {
     const count = screen.getByTestId('desktop-session-others-waiting');
     expect(count.textContent).toBe('2');
     expect(count.className).toContain('bg-warning');
+    // Issue #4218: every session counted (5), the current one included.
     expect(trigger().getAttribute('aria-label')).toBe(
-      '4 other sessions, 2 waiting for your answer'
+      'Sessions: 5, 2 waiting for your answer'
     );
   });
 
@@ -129,7 +145,7 @@ describe('[#3593] the session field: current + others', () => {
     const count = screen.getByTestId('desktop-session-others-waiting');
     expect(count.textContent).toBe('');
     expect(count.className).toContain('invisible');
-    expect(trigger().getAttribute('aria-label')).toBe('2 other sessions');
+    expect(trigger().getAttribute('aria-label')).toBe('Sessions: 3');
   });
 
   it('a row shows the dot, the name, the status and the split it is in', () => {
@@ -173,28 +189,51 @@ describe('[#3593] the session field: current + others', () => {
     });
     const badge = screen.getByTestId('desktop-awaiting-instruction-badge');
     const switcher = screen.getByTestId('desktop-session-switcher');
-    expect(badge.nextElementSibling).toBe(switcher);
+    // Issue #4218: right after the pill, in the identity group; the list's
+    // trigger is apart, in the controls group.
+    const pill = document.querySelector('[data-session-current]');
+    expect(pill?.nextElementSibling).toBe(badge);
+    expect(screen.getByTestId('desktop-header-identity').contains(badge)).toBe(true);
     expect(switcher.contains(badge)).toBe(false);
   });
 
+  // Issue #4218: the placeholder is gone — with one session the trigger is
+  // drawn (same box) and its list holds that session and "Add session…".
   it('with no other session: no trigger, but its box keeps the width', () => {
-    renderHeader({ instances: roster(1), activeInstanceId: 'claude-0' });
-    expect(screen.queryByTestId('desktop-agent-status-overflow')).toBeNull();
-    const placeholder = screen.getByTestId('desktop-session-others-placeholder');
-    expect(placeholder.className).toMatch(/\bw-\[7\.5rem\]/);
+    renderHeader({
+      instances: roster(1),
+      activeInstanceId: 'claude-0',
+      agentAddControl: (
+        <button type="button" data-testid="slot-plus">
+          +
+        </button>
+      ),
+    });
+    expect(screen.queryByTestId('desktop-session-others-placeholder')).toBeNull();
+    expect(trigger().className).toMatch(/\bw-44\b/);
+    expect(trigger().textContent).toContain('Sessions 1');
+    fireEvent.click(trigger());
+    expect(rowIds()).toEqual([]);
+    expect(currentRow()).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByTestId('desktop-session-add')).toBeVisible();
   });
 
+  // Issue #4218: the pill now shrinks with the identity group, between
+  // `max-w-44` and a floor, and declares the width its label must keep; the
+  // trigger stays one fixed box (w-44) for 1, 7 and 10.
   it('fixes the widths: the pill truncates, the trigger is the same box for 1, 7 and 10', () => {
     const longAlias = (i: number) => `a very long alias for the session number ${i}`;
     for (const n of [1, 7, 10]) {
       const { unmount } = renderHeader({ instances: roster(n, longAlias), activeInstanceId: 'claude-0' });
       const pill = screen.getByTestId('desktop-agent-status-claude-0');
-      expect(pill.className).toMatch(/\bw-44\b/);
-      expect(pill.className).toMatch(/\bflex-shrink-0\b/);
-      expect(pill.querySelector('span:not(.rounded-full)')?.className).toMatch(/\btruncate\b/);
-      const box = n === 1 ? screen.getByTestId('desktop-session-others-placeholder') : trigger();
-      expect(box.className).toMatch(/\bw-\[7\.5rem\]/);
-      expect(box.className).toMatch(/\bflex-shrink-0\b/);
+      expect(pill.className).toMatch(/\bmax-w-44\b/);
+      expect(pill.className).toMatch(/\bmin-w-\[4\.5rem\]/);
+      expect(pill.className).not.toMatch(/\bflex-shrink-0\b/);
+      const label = pill.querySelector('span:not(.rounded-full)');
+      expect(label?.className).toMatch(/\btruncate\b/);
+      expect(label?.getAttribute(FIT_MIN_WIDTH_ATTR)).toBe(String(CURRENT_PILL_LABEL_FIT_MIN_PX));
+      expect(trigger().className).toMatch(/\bw-44\b/);
+      expect(trigger().className).toMatch(/\bflex-shrink-0\b/);
       unmount();
     }
   });
@@ -258,14 +297,19 @@ describe('[#3593] keyboard only', () => {
     fireEvent.keyDown(trigger(), { key: 'ArrowDown' });
     expect(list()).toBeVisible();
     expect(trigger().getAttribute('aria-expanded')).toBe('true');
-    expect(document.activeElement).toBe(screen.getByTestId('desktop-agent-status-claude-1'));
+    // Issue #4218: the first row is the current session's.
+    expect(document.activeElement).toBe(currentRow());
 
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(screen.getByTestId('desktop-agent-status-claude-1'));
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
     expect(document.activeElement).toBe(screen.getByTestId('desktop-agent-status-claude-2'));
     fireEvent.keyDown(document.activeElement!, { key: 'End' });
     expect(document.activeElement).toBe(screen.getByTestId('desktop-agent-status-claude-3'));
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
-    expect(document.activeElement).toBe(screen.getByTestId('desktop-agent-status-claude-1'));
+    expect(document.activeElement).toBe(currentRow());
+    fireEvent.keyDown(document.activeElement!, { key: 'Home' });
+    expect(document.activeElement).toBe(currentRow());
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' });
     expect(document.activeElement).toBe(screen.getByTestId('desktop-agent-status-claude-3'));
 
@@ -285,7 +329,8 @@ describe('[#3593] keyboard only', () => {
   it('Enter / Space on the trigger (its click) opens the list on the first row', () => {
     renderHeader({ instances: roster(3), activeInstanceId: 'claude-0' });
     fireEvent.click(trigger());
-    expect(document.activeElement).toBe(screen.getByTestId('desktop-agent-status-claude-1'));
+    // Issue #4218: the first row is the current session's.
+    expect(document.activeElement).toBe(currentRow());
   });
 });
 

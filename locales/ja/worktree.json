@@ -2,9 +2,11 @@
   "agentStatus": {
     "overflowTrigger": "他のエージェント",
     "otherSessions": "ほか {count}",
-    "otherSessionsLabel": "ほかのセッション {count} 件",
-    "otherSessionsWaitingLabel": "ほかのセッション {count} 件（うち {waiting} 件が応答待ち）",
-    "otherSessionsList": "ほかのセッション",
+    "sessions": "セッション {count}",
+    "sessionsLabel": "セッション {count} 件",
+    "sessionsWaitingLabel": "セッション {count} 件（うち {waiting} 件が応答待ち）",
+    "sessionsList": "セッション一覧",
+    "currentSession": "表示中",
     "inSplit": "分割 {index}",
     "addSession": "セッションを追加…"
   },

@@ -1,21 +1,28 @@
 /**
- * HeaderSessionSwitcher (Issue #3593)
+ * HeaderSessionSwitcher (Issue #3593, Issue #4218)
  *
- * The desktop header's session field: [current session][N others ▾]. The "+"
- * that adds an agent (#3514) is drawn right after it by `DesktopHeader`.
+ * The desktop header's session field, in two parts `DesktopHeader` places
+ * apart (Issue #4218):
  *
- * - **Current session** — the session the selected split shows. A pill of a
- *   fixed width; the label truncates and the full text (model, cost, source)
- *   is its tooltip.
- * - **N others ▾** — every other session, in a list it opens. The rows waiting
- *   for an answer come first and the trigger carries their count in amber
- *   (and, as the "+N" did, the living dot of a working one). A row shows its
- *   status dot, name, status and the split showing it.
+ * - **{@link HeaderSessionPill}** — the session the selected split shows, at
+ *   the end of the identity group ("repository › branch › session"). It
+ *   shrinks with the identity group, from `max-w-44` down to a floor, and
+ *   declares the width its label must keep (`FIT_MIN_WIDTH_ATTR`) so the
+ *   header folds its tools before squeezing the name further. The full text
+ *   (model, cost, source) is its tooltip.
+ * - **{@link HeaderSessionSwitcher}** — "≡ N sessions ▾" in the right-hand
+ *   controls group, before the "+": a bordered button of a fixed width, and
+ *   the list it opens. The list holds **every** session: the current one first,
+ *   marked (`aria-current` and a "Showing" tag), then the others with the rows
+ *   waiting for an answer first. The trigger counts them all, carries the
+ *   amber count of those waiting for an answer and the living dot of a working
+ *   one — over every session, the current one included, since the trigger
+ *   sits apart from the pill and summarises the whole roster. It is drawn with
+ *   one session too, so "Add session…" is always one list away.
  *
- * The field is the same width at a given screen width whatever the number of
- * sessions, the length of their names or their states: the pill and the
- * trigger have fixed widths, and with no other session an empty box of the
- * trigger's width keeps its place.
+ * The list has its own background (the accent tint), so it does not read as
+ * part of the header or of another menu; its rows' hover / focus, the split
+ * tag and the separator are tinted to match, in light and dark.
  *
  * **Drag and drop.** A row can be dragged onto a split, as the pills could. The
  * list is our own disclosure rather than a Radix menu, because a drag needs
@@ -36,11 +43,13 @@
  * ArrowUp / Home / End move, Enter selects, Escape closes and returns focus.
  *
  * The list is portalled to `document.body` and always mounted (`hidden` while
- * closed), so the header's horizontal clip cannot cut it and each row keeps
- * its `desktop-agent-status-<id>` handle. Its height is capped at the room
- * left below the trigger and it scrolls inside (the repository strip's lists
- * do the same, `resolvePopoverMaxHeight`); a row reached with the keyboard is
- * scrolled into view. A row's tooltip is drawn above the list.
+ * closed), so the header's horizontal clip cannot cut it and each other row
+ * keeps its `desktop-agent-status-<id>` handle (the current one's row is
+ * `desktop-session-current-row`: the pill owns `desktop-agent-status-<id>`).
+ * Its height is capped at the room left below the trigger and it scrolls
+ * inside (the repository strip's lists do the same, `resolvePopoverMaxHeight`);
+ * a row reached with the keyboard is scrolled into view. A row's tooltip is
+ * drawn above the list.
  *
  * "Add session…" opens the "+" form: focus moves to the trigger first, so the
  * form hands it back there when it closes (the row itself is hidden by then).
@@ -54,12 +63,13 @@
 import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
-import { ChevronDown, Plus } from 'lucide-react';
+import { ChevronDown, Layers, Plus } from 'lucide-react';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { Tooltip } from '@/components/common/Tooltip';
 import { Z_INDEX } from '@/config/z-index';
 import { countWaitingInstances } from '@/lib/agent-status-display';
 import { MAX_AGENT_INSTANCES } from '@/lib/cli-tools/types';
+import { FIT_MIN_WIDTH_ATTR } from '@/hooks/useDesktopHeaderFit';
 import type { BranchStatus } from '@/types/sidebar';
 
 /** One session as the field draws it. Resolved by `DesktopHeader`. */
@@ -82,11 +92,8 @@ export interface HeaderSessionEntry {
   isActive: boolean;
 }
 
-export interface HeaderSessionSwitcherProps {
-  /** The session the selected split shows; null draws no pill. */
-  current: HeaderSessionEntry | null;
-  /** The other sessions, in the order the list shows them. */
-  others: HeaderSessionEntry[];
+/** What the pill and the list share: picking a session and dragging it. */
+interface SessionDragProps {
   /** A session was picked (the pill or a row). */
   onSelect?: (instanceId: string) => void;
   /** A drag started from the pill or a row (sets the payload, publishes the id). */
@@ -95,6 +102,18 @@ export interface HeaderSessionSwitcherProps {
   onDragEnd: () => void;
   /** The instance being dragged, for the pill's / row's drag visual. */
   draggingInstanceId: string | null;
+}
+
+export interface HeaderSessionPillProps extends SessionDragProps {
+  /** The session the selected split shows. */
+  current: HeaderSessionEntry;
+}
+
+export interface HeaderSessionSwitcherProps extends SessionDragProps {
+  /** The session the selected split shows; the list's first, marked row. Null: none. */
+  current: HeaderSessionEntry | null;
+  /** The other sessions, in the order the list shows them (after the current one). */
+  others: HeaderSessionEntry[];
   /** Opens the "+" add-agent form; omitted leaves "Add session…" out of the list. */
   onAddSession?: () => void;
   /**
@@ -104,9 +123,18 @@ export interface HeaderSessionSwitcherProps {
   canAddSession?: boolean;
 }
 
-/** Fixed widths, so the field never changes width with its content. */
-const CURRENT_PILL_WIDTH = 'w-44';
-const OTHERS_TRIGGER_WIDTH = 'w-[7.5rem]';
+/**
+ * Issue #4218: the pill shrinks with the identity group, from this cap down to
+ * {@link CURRENT_PILL_MIN_WIDTH} — the last resort, once the header has
+ * folded its tools and clips. Before that, its label must keep
+ * {@link CURRENT_PILL_LABEL_FIT_MIN_PX} (`FIT_MIN_WIDTH_ATTR`): clipped
+ * narrower, the header gives up its next step instead.
+ */
+const CURRENT_PILL_MAX_WIDTH = 'max-w-44';
+const CURRENT_PILL_MIN_WIDTH = 'min-w-[4.5rem]';
+export const CURRENT_PILL_LABEL_FIT_MIN_PX = 64;
+/** The trigger keeps one width whatever the count, so the controls group never changes width. */
+const SESSIONS_TRIGGER_WIDTH = 'w-44';
 
 /** Selector of the list's focusable rows (sessions and "Add session…"). */
 const ITEM_SELECTOR = '[data-switcher-item]:not([disabled])';
@@ -120,6 +148,21 @@ const LIST_VIEWPORT_MARGIN = 8;
  * Tooltip's default (`z-40`) is under the list, which would hide the bubble.
  */
 const ROW_TOOLTIP_Z_INDEX = Z_INDEX.POPOVER + 1;
+
+/**
+ * Issue #4218: the list's own tint (the accent scale from `globals.css`), so
+ * it reads apart from the header (`bg-surface`) and the other menus. Every
+ * state on it is tinted from the same scale, so text, hover and focus stay
+ * readable in both themes.
+ */
+const LIST_SURFACE_CLASS =
+  'border-accent-200 bg-accent-50 text-foreground dark:border-accent-800 dark:bg-accent-950';
+const ROW_STATE_CLASS =
+  'hover:bg-accent-200/60 focus-visible:bg-accent-200/60 dark:hover:bg-accent-900 dark:focus-visible:bg-accent-900';
+const CURRENT_ROW_STATE_CLASS =
+  'bg-accent-100 hover:bg-accent-200 focus-visible:bg-accent-200 dark:bg-accent-900 dark:hover:bg-accent-800 dark:focus-visible:bg-accent-800';
+const ROW_BASE_CLASS =
+  'flex w-full min-w-0 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
 /**
  * The list's max-height: the room left between the trigger's bottom (plus the
@@ -136,6 +179,50 @@ function focusItem(item: HTMLElement | undefined): void {
   item.scrollIntoView?.({ block: 'nearest' });
 }
 
+/**
+ * The current session's pill (Issue #3593; Issue #4218: at the end of the
+ * identity group). Click selects it, it drags onto a split, its tooltip and
+ * accessible name are the full label.
+ */
+export function HeaderSessionPill({
+  current,
+  onSelect,
+  onDragStart,
+  onDragEnd,
+  draggingInstanceId,
+}: HeaderSessionPillProps): React.ReactElement {
+  const fitMin = { [FIT_MIN_WIDTH_ATTR]: CURRENT_PILL_LABEL_FIT_MIN_PX };
+  return (
+    /* Issue #1061: draggable instance-tab switcher (aria-pressed) with typed drag handlers — 残置 */
+    <button
+      type="button"
+      data-testid={`desktop-agent-status-${current.id}`}
+      data-session-current=""
+      onClick={() => onSelect?.(current.id)}
+      draggable
+      onDragStart={(e) => onDragStart(e, current.id)}
+      onDragEnd={onDragEnd}
+      aria-label={current.tooltip}
+      // Native tooltip: the full label (and model, cost, source) for the
+      // truncated pill. Same string as the accessible name.
+      title={current.tooltip}
+      aria-pressed={current.isActive}
+      className={`flex ${CURRENT_PILL_MAX_WIDTH} ${CURRENT_PILL_MIN_WIDTH} shrink items-center gap-1.5 overflow-hidden px-2 py-1 rounded text-xs transition-colors ${
+        current.isActive
+          ? 'bg-accent-100 dark:bg-accent-900/30 text-accent-900 dark:text-accent-100'
+          : 'hover:bg-muted text-foreground'
+      }${draggingInstanceId === current.id ? ' opacity-50 cursor-grabbing' : ''}`}
+    >
+      {/* Issue #1078: unified StatusDot (decorative; the button carries the label) */}
+      <StatusDot status={current.status} size="sm" aria-hidden title={undefined} className={current.dotClass} />
+      <span className="min-w-0 truncate whitespace-nowrap" {...fitMin}>
+        {current.fullLabel}
+      </span>
+    </button>
+  );
+}
+
+/** The sessions trigger and the list of every session (Issue #3593 / #4218). */
 export function HeaderSessionSwitcher({
   current,
   others,
@@ -159,8 +246,10 @@ export function HeaderSessionSwitcher({
   );
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   // The rows as they were when a drag left the list; drawn until `dragend`.
-  const [frozenOthers, setFrozenOthers] = useState<HeaderSessionEntry[] | null>(null);
-  const listDragging = frozenOthers !== null;
+  const [frozen, setFrozen] = useState<{
+    current: HeaderSessionEntry | null;
+    others: HeaderSessionEntry[];
+  } | null>(null);
   // Whether the list is out of hit testing. Set one task after `dragstart`:
   // Chrome cancels a drag whose source turns `pointer-events: none` while
   // `dragstart` is still being dispatched (React flushes this event's state
@@ -180,7 +269,12 @@ export function HeaderSessionSwitcher({
     setPortalTarget(document.body);
   }, []);
 
-  const rows = frozenOthers ?? others;
+  const rowCurrent = frozen ? frozen.current : current;
+  const rowOthers = frozen ? frozen.others : others;
+  // Issue #4218: the list holds every session, the current one first.
+  const rows = rowCurrent ? [rowCurrent, ...rowOthers] : rowOthers;
+  // Issue #4218: the trigger counts every session, and so do its amber count
+  // and its living dot — it sits apart from the pill and sums up the roster.
   const waitingCount = countWaitingInstances(rows);
   const glowStatus =
     rows.find((r) => r.status === 'running' || r.status === 'generating')?.status ??
@@ -190,6 +284,9 @@ export function HeaderSessionSwitcher({
   const close = useCallback((returnFocus: boolean) => {
     setOpen(false);
     setPendingFocus(null);
+    // Issue #4218: placed afresh on the next open, so the first row / last row
+    // is focused only once the list has its height cap (see below).
+    setPosition(null);
     if (returnFocus) triggerRef.current?.focus();
   }, []);
 
@@ -215,12 +312,16 @@ export function HeaderSessionSwitcher({
     return () => window.removeEventListener('resize', place);
   }, [open]);
 
+  // Issue #4218: only once the list is placed. Focused before its height cap
+  // applies, a row past the cap ("Add session…" on a short screen) is
+  // scrolled into view in a list that does not scroll yet, and ends up below
+  // the screen once the cap lands.
   useEffect(() => {
-    if (!open || pendingFocus === null) return;
+    if (!open || pendingFocus === null || position === null) return;
     const items = Array.from(listRef.current?.querySelectorAll<HTMLElement>(ITEM_SELECTOR) ?? []);
     focusItem(pendingFocus === 'first' ? items[0] : items[items.length - 1]);
     setPendingFocus(null);
-  }, [open, pendingFocus]);
+  }, [open, pendingFocus, position]);
 
   // Pressing outside closes the list — never during a drag.
   useEffect(() => {
@@ -237,7 +338,7 @@ export function HeaderSessionSwitcher({
     return () => document.removeEventListener('pointerdown', onPointerDown, true);
   }, [open, close]);
 
-  // There is nothing left to list (the last other session went away).
+  // There is nothing left to list (the last session went away).
   useEffect(() => {
     if (open && rows.length === 0 && !onAddSession) close(false);
   }, [open, rows.length, onAddSession, close]);
@@ -308,7 +409,7 @@ export function HeaderSessionSwitcher({
   const handleRowDragStart = useCallback(
     (e: React.DragEvent<HTMLButtonElement>, instanceId: string) => {
       draggingRef.current = true;
-      setFrozenOthers(others);
+      setFrozen({ current, others });
       if (inertTimerRef.current) clearTimeout(inertTimerRef.current);
       inertTimerRef.current = setTimeout(() => {
         inertTimerRef.current = null;
@@ -316,7 +417,7 @@ export function HeaderSessionSwitcher({
       }, 0);
       onDragStart(e, instanceId);
     },
-    [others, onDragStart],
+    [current, others, onDragStart],
   );
 
   const handleRowDragEnd = useCallback(() => {
@@ -326,7 +427,7 @@ export function HeaderSessionSwitcher({
       inertTimerRef.current = null;
     }
     setListInert(false);
-    setFrozenOthers(null);
+    setFrozen(null);
     onDragEnd();
     close(true);
   }, [onDragEnd, close]);
@@ -346,17 +447,73 @@ export function HeaderSessionSwitcher({
     onAddSession?.();
   }, [close, onAddSession]);
 
-  const othersLabel =
+  const triggerLabel =
     waitingCount > 0
-      ? t('agentStatus.otherSessionsWaitingLabel', { count: rows.length, waiting: waitingCount })
-      : t('agentStatus.otherSessionsLabel', { count: rows.length });
+      ? t('agentStatus.sessionsWaitingLabel', { count: rows.length, waiting: waitingCount })
+      : t('agentStatus.sessionsLabel', { count: rows.length });
+
+  const renderRow = (entry: HeaderSessionEntry, isCurrent: boolean) => (
+    // Issue #3616: beside the row (right, or left when the right edge is
+    // too close), never below it — a `bottom` bubble covered the next row.
+    <Tooltip
+      key={entry.id}
+      content={entry.tooltip}
+      placement="right"
+      fallbackPlacement="left"
+      zIndex={ROW_TOOLTIP_Z_INDEX}
+    >
+      {/* Issue #1061: draggable session row (aria-pressed) — 残置 */}
+      <button
+        type="button"
+        data-switcher-item=""
+        // Issue #4218: the pill owns `desktop-agent-status-<id>` for the
+        // current session, so its row here has a handle of its own.
+        data-testid={isCurrent ? 'desktop-session-current-row' : `desktop-agent-status-${entry.id}`}
+        data-session-id={entry.id}
+        onClick={() => handleRowClick(entry.id)}
+        draggable
+        onDragStart={(e) => handleRowDragStart(e, entry.id)}
+        onDragEnd={handleRowDragEnd}
+        // No `title`: the <Tooltip> above already renders this string.
+        aria-label={entry.tooltip}
+        aria-pressed={entry.isActive}
+        // Issue #4218: the session on screen, for assistive technology; the
+        // tint and the "Showing" tag say the same visually.
+        aria-current={isCurrent ? 'true' : undefined}
+        className={`${ROW_BASE_CLASS} ${isCurrent ? CURRENT_ROW_STATE_CLASS : ROW_STATE_CLASS}${
+          draggingInstanceId === entry.id ? ' opacity-50 cursor-grabbing' : ''
+        }`}
+      >
+        <StatusDot status={entry.status} size="sm" aria-hidden title={undefined} className={entry.dotClass} />
+        <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+        <span className="flex-shrink-0 text-xs text-muted-foreground">{entry.statusWord}</span>
+        {isCurrent && (
+          <span
+            aria-hidden="true"
+            data-testid="desktop-session-current-tag"
+            className="flex-shrink-0 rounded border border-accent-300 px-1.5 text-[10px] font-semibold leading-4 text-accent-800 dark:border-accent-600 dark:text-accent-200"
+          >
+            {t('agentStatus.currentSession')}
+          </span>
+        )}
+        {entry.splitIndex !== null && (
+          <span
+            className="flex-shrink-0 rounded bg-accent-200 px-1.5 text-[10px] font-medium leading-4 text-accent-900 dark:bg-accent-800 dark:text-accent-100"
+            data-testid={`desktop-session-split-${entry.id}`}
+          >
+            {t('agentStatus.inSplit', { index: entry.splitIndex + 1 })}
+          </span>
+        )}
+      </button>
+    </Tooltip>
+  );
 
   const list = (
     <div
       ref={listRef}
       id={listId}
       role="group"
-      aria-label={t('agentStatus.otherSessionsList')}
+      aria-label={t('agentStatus.sessionsList')}
       data-testid="desktop-session-others-list"
       data-dragging={listInert ? 'true' : undefined}
       hidden={!open}
@@ -368,53 +525,17 @@ export function HeaderSessionSwitcher({
         right: position?.right ?? 0,
         ...(position ? { maxHeight: `${position.maxHeight}px` } : {}),
       }}
-      className={`fixed flex w-72 overflow-y-auto overscroll-contain max-w-[calc(100vw-8px)] flex-col gap-0.5 rounded-md border border-border bg-surface p-1 text-surface-foreground shadow-lg transition-opacity${
+      className={`fixed flex w-72 overflow-y-auto overscroll-contain max-w-[calc(100vw-8px)] flex-col gap-0.5 rounded-md border p-1 shadow-lg transition-opacity ${LIST_SURFACE_CLASS}${
         listInert ? ' pointer-events-none opacity-40' : ''
       }`}
     >
-      {rows.map((entry) => (
-        // Issue #3616: beside the row (right, or left when the right edge is
-        // too close), never below it — a `bottom` bubble covered the next row.
-        <Tooltip
-          key={entry.id}
-          content={entry.tooltip}
-          placement="right"
-          fallbackPlacement="left"
-          zIndex={ROW_TOOLTIP_Z_INDEX}
-        >
-          {/* Issue #1061: draggable session row (aria-pressed: never the current one) — 残置 */}
-          <button
-            type="button"
-            data-switcher-item=""
-            data-testid={`desktop-agent-status-${entry.id}`}
-            onClick={() => handleRowClick(entry.id)}
-            draggable
-            onDragStart={(e) => handleRowDragStart(e, entry.id)}
-            onDragEnd={handleRowDragEnd}
-            // No `title`: the <Tooltip> above already renders this string.
-            aria-label={entry.tooltip}
-            aria-pressed={entry.isActive}
-            className={`flex w-full min-w-0 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-foreground outline-none hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring${
-              draggingInstanceId === entry.id ? ' opacity-50 cursor-grabbing' : ''
-            }`}
-          >
-            <StatusDot status={entry.status} size="sm" aria-hidden title={undefined} className={entry.dotClass} />
-            <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-            <span className="flex-shrink-0 text-xs text-muted-foreground">{entry.statusWord}</span>
-            {entry.splitIndex !== null && (
-              <span
-                className="flex-shrink-0 rounded bg-muted px-1.5 text-[10px] font-medium leading-4 text-muted-foreground"
-                data-testid={`desktop-session-split-${entry.id}`}
-              >
-                {t('agentStatus.inSplit', { index: entry.splitIndex + 1 })}
-              </span>
-            )}
-          </button>
-        </Tooltip>
-      ))}
+      {rowCurrent && renderRow(rowCurrent, true)}
+      {rowOthers.map((entry) => renderRow(entry, false))}
       {onAddSession && (
         <>
-          {rows.length > 0 && <div role="separator" className="my-0.5 h-px bg-border" />}
+          {rows.length > 0 && (
+            <div role="separator" className="my-0.5 h-px bg-accent-200 dark:bg-accent-800" />
+          )}
           <button
             type="button"
             data-switcher-item=""
@@ -422,7 +543,7 @@ export function HeaderSessionSwitcher({
             onClick={handleAddClick}
             disabled={!canAddSession}
             aria-describedby={canAddSession ? undefined : addLimitId}
-            className="flex w-full flex-shrink-0 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-foreground outline-none hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
+            className={`${ROW_BASE_CLASS} flex-shrink-0 ${ROW_STATE_CLASS} disabled:cursor-not-allowed disabled:opacity-40`}
           >
             <Plus className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
             {t('agentStatus.addSession')}
@@ -443,82 +564,49 @@ export function HeaderSessionSwitcher({
   );
 
   return (
-    <div className="flex flex-shrink-0 items-center gap-1" data-testid="desktop-session-switcher">
-      {current ? (
-        /* Issue #1061: draggable instance-tab switcher (aria-pressed) with typed drag handlers — 残置 */
-        <button
-          type="button"
-          data-testid={`desktop-agent-status-${current.id}`}
-          data-session-current=""
-          onClick={() => onSelect?.(current.id)}
-          draggable
-          onDragStart={(e) => onDragStart(e, current.id)}
-          onDragEnd={onDragEnd}
-          aria-label={current.tooltip}
-          // Native tooltip: the full label (and model, cost, source) for the
-          // truncated pill. Same string as the accessible name.
-          title={current.tooltip}
-          aria-pressed={current.isActive}
-          className={`flex ${CURRENT_PILL_WIDTH} flex-shrink-0 items-center gap-1.5 overflow-hidden px-2 py-1 rounded text-xs transition-colors ${
-            current.isActive
-              ? 'bg-accent-100 dark:bg-accent-900/30 text-accent-900 dark:text-accent-100'
-              : 'hover:bg-muted text-foreground'
-          }${draggingInstanceId === current.id ? ' opacity-50 cursor-grabbing' : ''}`}
-        >
-          {/* Issue #1078: unified StatusDot (decorative; the button carries the label) */}
-          <StatusDot status={current.status} size="sm" aria-hidden title={undefined} className={current.dotClass} />
-          <span className="min-w-0 truncate whitespace-nowrap">{current.fullLabel}</span>
-        </button>
-      ) : (
-        <span aria-hidden="true" className={`${CURRENT_PILL_WIDTH} flex-shrink-0`} />
-      )}
-      {rows.length > 0 || listDragging ? (
-        <button
-          ref={triggerRef}
-          type="button"
-          data-testid="desktop-agent-status-overflow"
-          aria-label={othersLabel}
-          aria-expanded={open}
-          aria-controls={listId}
-          onClick={() => (open ? close(false) : openList('first'))}
-          onKeyDown={handleTriggerKeyDown}
-          className={`flex ${OTHERS_TRIGGER_WIDTH} flex-shrink-0 items-center gap-1.5 overflow-hidden rounded px-2 py-1 text-xs tabular-nums text-muted-foreground transition-colors hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring${
-            open ? ' bg-muted text-foreground' : ''
-          }`}
-        >
-          {/* Issue #1078: a working session in the list still shows its
-              living dot here — running/generating (green glow) over waiting
-              (amber). The slot is kept when there is none. */}
-          {glowStatus ? (
-            <StatusDot status={glowStatus} size="sm" aria-hidden title={undefined} />
-          ) : (
-            <span aria-hidden="true" className="h-2 w-2 flex-shrink-0" />
-          )}
-          <span className="min-w-0 flex-1 truncate text-left">
-            {t('agentStatus.otherSessions', { count: rows.length })}
+    <div className="flex flex-shrink-0 items-center" data-testid="desktop-session-switcher">
+      {/* Issue #4218: a bordered button of its own, in the controls group, so
+          it does not read as part of the pill. Drawn whatever the number of
+          sessions — with one, the list still reaches "Add session…". */}
+      <button
+        ref={triggerRef}
+        type="button"
+        data-testid="desktop-agent-status-overflow"
+        aria-label={triggerLabel}
+        aria-expanded={open}
+        aria-controls={listId}
+        onClick={() => (open ? close(false) : openList('first'))}
+        onKeyDown={handleTriggerKeyDown}
+        className={`flex ${SESSIONS_TRIGGER_WIDTH} flex-shrink-0 items-center gap-1 overflow-hidden rounded-md border border-border px-2 py-1 text-xs tabular-nums text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+          open ? 'bg-muted text-foreground' : 'bg-surface-2'
+        }`}
+      >
+        <Layers className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+        {/* Issue #1078: a working session still shows its living dot here —
+            running/generating (green glow) over waiting (amber). The slot is
+            kept when there is none. */}
+        {glowStatus ? (
+          <StatusDot status={glowStatus} size="sm" aria-hidden title={undefined} />
+        ) : (
+          <span aria-hidden="true" className="h-2 w-2 flex-shrink-0" />
+        )}
+        <span className="min-w-0 flex-1 truncate text-left text-foreground">
+          {t('agentStatus.sessions', { count: rows.length })}
+        </span>
+        <span className="flex flex-shrink-0 items-center gap-1">
+          {/* The amber count's box is always there, so it costs no width when it appears. */}
+          <span
+            data-testid="desktop-session-others-waiting"
+            aria-hidden="true"
+            className={`min-w-[1.25rem] rounded-full px-1 text-center text-[10px] font-semibold leading-4 ${
+              waitingCount > 0 ? 'bg-warning text-warning-foreground' : 'invisible'
+            }`}
+          >
+            {waitingCount > 0 ? waitingCount : ''}
           </span>
-          <span className="flex flex-shrink-0 items-center gap-0.5">
-            {/* The amber count's box is always there, so it costs no width when it appears. */}
-            <span
-              data-testid="desktop-session-others-waiting"
-              aria-hidden="true"
-              className={`min-w-[1.25rem] rounded-full px-1 text-center text-[10px] font-semibold leading-4 ${
-                waitingCount > 0 ? 'bg-warning text-warning-foreground' : 'invisible'
-              }`}
-            >
-              {waitingCount > 0 ? waitingCount : ''}
-            </span>
-            <ChevronDown className="h-3 w-3" aria-hidden="true" />
-          </span>
-        </button>
-      ) : (
-        // No other session: no trigger, but its width stays reserved.
-        <span
-          aria-hidden="true"
-          data-testid="desktop-session-others-placeholder"
-          className={`${OTHERS_TRIGGER_WIDTH} flex-shrink-0`}
-        />
-      )}
+          <ChevronDown className="h-3 w-3" aria-hidden="true" />
+        </span>
+      </button>
       {portalTarget && createPortal(list, portalTarget)}
     </div>
   );
