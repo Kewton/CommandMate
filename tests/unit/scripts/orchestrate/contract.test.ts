@@ -22,6 +22,7 @@ import {
   MAX_GOAL_LENGTH,
   REFACTOR_DEFAULT_GATES,
   REFACTOR_RULES_TEMPLATE,
+  SECOND_WORK_ITEM_SECTION,
   SONNET_RULE,
   buildContract,
   contractPath,
@@ -219,6 +220,54 @@ describe('config validation', () => {
     } catch (error) {
       expect((error as ContractConfigError).problems.length).toBeGreaterThanOrEqual(4);
     }
+  });
+});
+
+describe('the second work item of an Issue (Issue #4212)', () => {
+  // The sentence docs/orchestrate/run-log.md 1-5 says the 2nd contract's goal carries.
+  const RUN_LOG = fs.readFileSync(path.resolve(__dirname, '../../../../docs/orchestrate/run-log.md'), 'utf8');
+  const FOLD = 'develop に `changelog.d/3477.md` があれば、新しいファイルを作らず、その既存の 1 項目へ統合して両方の変更を残す';
+  const goalOf = (config: Record<string, unknown>) => buildContract(normalizeConfig(config)).goal;
+  /** The goal lines from the fragment rules up to the section line (the fragment block). */
+  const fragmentBlock = (goal: string) => {
+    const lines = goal.split('\n');
+    const start = lines.findIndex((line) => line.includes('**`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**'));
+    const end = lines.findIndex((line) => line.includes('この Issue の断片は'));
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    return lines.slice(start, end).join('\n');
+  };
+
+  it('a config with item: the fragment block tells the worker to fold into the existing entry', () => {
+    const block = fragmentBlock(goalOf({ ...base, item: 'd2' }));
+    expect(block).toContain(FOLD);
+    expect(block).toContain('1 本目の文を消さない');
+    expect(block).not.toContain('<N>');
+    expect(block).not.toMatch(/^#!/m);
+  });
+
+  it('a key with a suffix (a second contract of the same Issue) carries it as well', () => {
+    expect(fragmentBlock(goalOf({ ...base, key: '3477-opus' }))).toContain(FOLD);
+  });
+
+  it('negative control: the first work item (no item, the key is the Issue number) does not', () => {
+    for (const config of [base, { ...base, key: '3477' }]) {
+      const goal = goalOf(config);
+      expect(goal).not.toContain('既存の 1 項目へ統合');
+      expect(fragmentBlock(goal)).toContain('**実装と同じ commit の時点で書くこと。**');
+    }
+    expect(normalizeConfig(base)).toMatchObject({ item: null, secondWorkItem: false });
+  });
+
+  it('rejects an item the run scripts would not take as --item', () => {
+    for (const item of ['d/2', '-d2', 'x'.repeat(33), '']) {
+      expect(() => normalizeConfig({ ...base, item })).toThrow(/item:/);
+    }
+  });
+
+  it('says what run-log.md 1-5 says the second contract gets', () => {
+    expect(RUN_LOG).toContain(FOLD.replace('3477', '<N>'));
+    expect(readTemplate(FRAGMENT_RULES_TEMPLATE, { include: [SECOND_WORK_ITEM_SECTION] })).toContain(FOLD.replace('3477', '<N>'));
   });
 });
 
