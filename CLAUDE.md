@@ -326,4 +326,5 @@ npm run db:reset      # DBリセット
 - [ワークフロー例](./docs/user-guide/workflow-examples.md) - 実践的な使用例
 - [ステータスインジケーター](./docs/features/sidebar-status-indicator.md) - サイドバー機能詳細
 - [実装機能一覧](./docs/implementation-history.md) - Issue別の実装履歴
+- [開発体制](./docs/orchestrate/team.md) - PM・イネーブラー・ジャッジ・開発リーダー・ワーカーの役割と流れ
 - [Jev による Issue 棚卸し](./docs/jev-triage.md) - 優先度・担当モデルの下書き（API と注意点）

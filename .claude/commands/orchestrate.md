@@ -1239,6 +1239,8 @@ module-reference の断片が無い PR も同じ扱いにする。リリース�
 
 ## Phase 7: UAT（--full時のみ）
 
+体制では UAT の依頼は PM がジャッジ（`claude-2`）へ送る。開発リーダーは Phase 6 までを終えて PM へ報告する。根拠: docs/orchestrate/team.md#2-流れ
+
 ### 7-1. 受入テスト実行
 
 developブランチ（オーケストレーター自身）で実行：
