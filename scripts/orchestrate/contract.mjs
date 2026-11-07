@@ -12,8 +12,8 @@
  *
  *   issue: 3477              # required
  *   key: "3477-opus"         # contract file name issue-<key>.yaml (default: the Issue number)
- *   item: d2                 # the 2nd+ work item of the Issue only (docs/orchestrate/run-log.md 1-5); with it, or
- *                            # with a key suffix, the goal tells the worker to fold into develop's changelog.d/<issue>.md
+ *   item: d2                 # the 2nd+ PR (work item) of the Issue only (docs/orchestrate/run-log.md 1-5); with it the goal
+ *                            # tells the worker to fold into develop's changelog.d/<issue>.md (a key suffix alone does not)
  *   title: "<Issue title>"   # required
  *   kind: feature            # feature | bug | refactor | docs
  *   agent: claude            # claude | antigravity
@@ -447,14 +447,16 @@ export function normalizeConfig(raw, options = {}) {
   const key = raw.key === undefined ? String(issue) : String(raw.key);
   if (!/^[0-9A-Za-z][0-9A-Za-z._-]*$/.test(key)) problems.push(`key: must be a file-name-safe token (got ${raw.key})`);
 
-  // Issue #4212: a second work item of the same Issue (a config with `item`, or
-  // a key with a suffix) shares changelog.d/<issue>.md with the first one, so
-  // its goal says to fold into the fragment develop already has (run-log.md 1-5).
+  // Issue #4212: a second work item of the same Issue (a config with `item`)
+  // shares changelog.d/<issue>.md with the first PR, so its goal says to fold
+  // into the fragment develop already has (run-log.md 1-5). A key suffix alone
+  // does not count: it also restacks a contract of the SAME PR (the -opus
+  // upgrade of switching.md, design → implementation, -b), which has no first PR.
   const item = raw.item === undefined ? null : String(raw.item);
   if (item !== null && !ITEM_PATTERN.test(item)) {
     problems.push(`item: the --item name of the run (letters, digits, "-", "_"; at most 32 characters; got ${raw.item})`);
   }
-  const secondWorkItem = item !== null || key !== String(issue);
+  const secondWorkItem = item !== null;
 
   const title = typeof raw.title === 'string' ? raw.title.trim() : '';
   if (!title) problems.push('title: required');

@@ -246,8 +246,16 @@ describe('the second work item of an Issue (Issue #4212)', () => {
     expect(block).not.toMatch(/^#!/m);
   });
 
-  it('a key with a suffix (a second contract of the same Issue) carries it as well', () => {
-    expect(fragmentBlock(goalOf({ ...base, key: '3477-opus' }))).toContain(FOLD);
+  it('negative control: a key with a suffix and no item (a restacked contract of the same PR) does not', () => {
+    for (const key of ['3477-opus', '3477-b']) {
+      const config = { ...base, key };
+      expect(goalOf(config)).not.toContain('既存の 1 項目へ統合');
+      expect(normalizeConfig(config)).toMatchObject({ key, item: null, secondWorkItem: false });
+    }
+  });
+
+  it('a key with a suffix and an item (the second PR, contract upgraded) carries it', () => {
+    expect(fragmentBlock(goalOf({ ...base, key: '3477-d2-opus', item: 'd2' }))).toContain(FOLD);
   });
 
   it('negative control: the first work item (no item, the key is the Issue number) does not', () => {

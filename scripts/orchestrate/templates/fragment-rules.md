@@ -1,8 +1,8 @@
 #! 契約の「作業ルール（厳守）」に入る断片の書き方（/orchestrate 2-4-1 の転記ブロック）。持ち主はこのファイル（#3477）。
 #! scripts/orchestrate/contract.mjs が `<N>` を Issue 番号に、`{{ENTRY_LINE}}` / `{{AFTER_ENTRY_LINE}}` を最低の版の宣言（#3480）の
 #! 有無に合わせた行番号に置き換え（宣言なし: 2 行目 / 3 行目、宣言あり: 3 行目 / 4 行目）、`#!` で始まる行を落として goal に入れる。
-#! `#! >>> second-work-item` から `#! <<< second-work-item` までは、同じ Issue の 2 本目の work item の契約（設定に `item` があるか、
-#! `key` が Issue 番号に接尾辞を付けたもの）にだけ入れる（#4212。手順は docs/orchestrate/run-log.md#1-5-2-本目の-pr-の-changelog-断片）。
+#! `#! >>> second-work-item` から `#! <<< second-work-item` までは、同じ Issue の 2 本目の work item の契約（設定に `item` があるもの）
+#! にだけ入れる。`key` の接尾辞だけでは入れない（同じ PR の契約の積み直しにも使う）（#4212。手順は docs/orchestrate/run-log.md#1-5-2-本目の-pr-の-changelog-断片）。
 - **`CHANGELOG.md` と `docs/module-reference.md` を編集しないでください**（scope 外です）。
   代わりに次の 2 ファイルを書いてください。`changelog.d/<N>.md` は**実装と同じコミットに含めます**。
   `dev-reports/module-reference/issue-<N>.md` は `dev-reports/` 配下なので commit には入りません。
