@@ -119,13 +119,21 @@ function identityClipped(): boolean {
 // =============================================================================
 
 describe('DesktopHeader draws the worktree tools (Issue #3591)', () => {
+  // Issue #4218: the tools moved from the end of the controls group (after
+  // Info) to right after the identity group; Info is the controls' last child.
+  // The `it` name is #3591's and is kept as it was; what it pins now is the
+  // #4218 placement.
   it('puts every tool in the controls group, after Info, when the header has room', () => {
     const { onActivityToggle } = renderHeader(1600);
     const controls = screen.getByTestId('desktop-header-controls');
+    const identity = screen.getByTestId('desktop-header-identity');
     const bar = screen.getByTestId('header-tool-bar');
-    expect(controls.contains(bar)).toBe(true);
-    expect(screen.getByTestId('desktop-header-identity').contains(bar)).toBe(false);
-    expect(controls.lastElementChild).toBe(bar);
+    expect(controls.contains(bar)).toBe(false);
+    expect(identity.contains(bar)).toBe(false);
+    expect(identity.nextElementSibling).toBe(bar);
+    expect(bar.nextElementSibling).toBe(controls);
+    expect(controls.lastElementChild).toBe(screen.getByTestId('desktop-info-button'));
+    expect(controls.className).toMatch(/\bml-auto\b/);
     expect(visibleToolCount()).toBe(HEADER_TOOLS.length);
     expect(screen.queryByTestId('header-tool-more')).toBeNull();
     expect(screen.getByTestId('header-tool-env')).toHaveAttribute('aria-selected', 'true');

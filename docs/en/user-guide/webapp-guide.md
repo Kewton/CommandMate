@@ -411,8 +411,8 @@ The same agent can appear more than once under different names (e.g. "Claude" an
 ### Adding One (PC)
 
 1. Select a worktree
-2. Click the **[+]** at the right end of the header's session field ([current session][N more ▾])
-   ("Add session…" in the [N more ▾] list opens the same form)
+2. Click the **[+]** right after [Sessions N ▾] at the right end of the header
+   ("Add session…" in the [Sessions N ▾] list opens the same form)
 3. Choose the agent (installed ones), a name (optional) and **where to open it** (a new split / replace the current split / add only), then click **[Add]**
 4. Adding does not start a session: it starts when you send the first message from that split
 
@@ -443,7 +443,7 @@ Rename, reorder and delete in the **"Agent"** tool at the right of the header.
 - **Auto Yes behaves differently per agent.** Command Code / Gemini / Vibe-Local only have
   the screen-based route (the dialog is drawn once, then answered automatically). See
   [Approval Routes Differ by Agent](#approval-routes-differ-by-agent)
-- These sessions appear in the session field of the header ([current session][N more ▾])
+- These sessions all appear in the [Sessions N ▾] list at the right end of the header (N counts them all. The session on screen comes first, marked "Showing", and also follows "repository › branch ›" on the left of the header)
 
 ### Roles
 

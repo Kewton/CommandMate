@@ -21,7 +21,7 @@ CommandMate provides a responsive UI optimized for both desktop and mobile.
 
 | Screen | Layout | Features |
 |--------|--------|----------|
-| **Desktop** | One-row header + second-row action bar + body (TerminalContainer; the ActivityPane opens from the right, over it) | Tools at the right of the header, Verification chip on the second row, instant Tooltip, History embedded in the Terminal area, a pane that sits beside the body when pinned |
+| **Desktop** | One-row header + second-row action bar + body (TerminalContainer; the ActivityPane opens from the right, over it) | Tools right after the header's heading on the left, Verification chip on the second row, instant Tooltip, History embedded in the Terminal area, a pane that sits beside the body when pinned |
 | **Mobile** | Tab-based | Bottom navigation |
 
 ---
@@ -50,11 +50,11 @@ The `useIsMobile` hook automatically switches layouts based on screen size.
 
 > Issues #3589–#3594 gave the screen its current shape. The full-height vertical Activity Bar (48px) is gone from PC (the phone keeps its bottom tab bar).
 
-The header is one row, with the worktree's tools at its right. The second row is the splits' action bar. The panel (ActivityPane) is closed by default; opened, it comes in from the right, laid over the body (pin it and it sits beside the body instead, narrowing it).
+The header is one row: from the left, "repository › branch › the session on screen", the worktree's tools right after it, and the session list and other controls at the right end. The second row is the splits' action bar. The panel (ActivityPane) is closed by default; opened, it comes in from the right, laid over the body (pin it and it sits beside the body instead, narrowing it).
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
-│ ● worktree-name  repo  [current session][N more ▾][+] [Info] [tools…] │ ← Header (one row)
+│ ● repo › branch ▾ * ? › [session on screen] [tools…]   [Sessions N ▾][+][End][Update][Info] │ ← Header (one row)
 ├────────────────────────────────────────────────────────────────────┤
 │ [▢][▥][▥▥][▦]  [Verification chip]  (one split: its header) [⤢] [History][Open Files] │ ← Second row (action bar)
 ├────────────────────────────────────────────────────────────────────┤
@@ -71,10 +71,12 @@ The header is one row, with the worktree's tools at its right. The second row is
 ### Feature Details
 
 #### 1. Header
-- **Status dot and worktree name**: the repository name beside it (opens the Repositories screen); `*` when there are uncommitted changes
-- **Session field**: [current session][N more ▾][+]. The worktree's progress (Status) is not set here but from the sidebar row's "…" → Status
-- **Info button**: Opens the Worktree info modal
-- **Tools** (right end): the icons of the activities below except `verification`. On a narrow header the trailing ones fold into a "…" list
+- **Left (heading)**: the status dot, the repository name (opens the Repositories screen) › the branch name ▾ (the branch list). `*` when there are uncommitted changes, `?` when the Git status cannot be read. When the checked-out branch differs from the name, that name too. Then › the session on screen (the selected split's session) and the "awaiting instruction" badge
+- **Tools** (right after the heading): the icons of the activities below except `verification`. On a narrow header the trailing ones fold into a "…" list
+- **Right end (controls)**: [Sessions N ▾][+][End][Update][Info].
+  - N in [Sessions N ▾] counts every session, the one on screen included (drawn even with one). The list puts the session on screen first, marked "Showing"; "Add session…" at its end opens the same form as [+]. The badge of sessions waiting for your answer counts every session too
+  - [End] appears only while the session on screen is running, [Update] when an app update is available. [Info] opens the Worktree info modal
+  - The worktree's progress (Status) is not set here but from the sidebar row's "…" → Status
 
 #### 2. Tools (HeaderToolBar) and the Verification chip
 - What the vertical Activity Bar held is split between the icons at the right of the header (`HeaderToolBar`) and the Verification chip on the second row (`VerificationStatusChip`) (Issue #3591)

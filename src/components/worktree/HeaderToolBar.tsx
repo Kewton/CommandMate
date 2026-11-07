@@ -1,8 +1,8 @@
 /**
  * HeaderToolBar Component (Issue #3591)
  *
- * The worktree's tools (File Tree … Env) as icons at the right of the PC
- * worktree header. Replaces the vertical 48px `ActivityBar` column, so the
+ * The worktree's tools (File Tree … Env) as icons in the PC worktree header,
+ * right after its identity group (Issue #4218; at its right end before). Replaces the vertical 48px `ActivityBar` column, so the
  * body gets that width back and the only vertical column left of it is the
  * app-wide icon rail. Same tools, same order, same panes: the Verification
  * pane is the one exception — its entry point is the Verification chip on the
@@ -14,7 +14,8 @@
  *
  * Narrow header: the trailing `foldedCount` tools leave the row for a "…"
  * button (the header's width fit, `useDesktopHeaderFit`, decides how many).
- * The folded tools are a list under "…", two clicks away. When the open tool
+ * The folded tools are a list under "…", two clicks away, opening rightward
+ * from it (Issue #4218). When the open tool
  * is one of them, "…" carries the active mark and says which tool is open.
  *
  * Keyboard:
@@ -321,7 +322,10 @@ export const HeaderToolBar = memo(function HeaderToolBar({
               // Marks itself as an open floating layer: while it is up, a press
               // elsewhere closes it and not the activity pane (#3589's rule).
               data-floating-layer="open"
-              className="absolute right-0 top-full z-40 mt-1 flex min-w-[12rem] flex-col rounded-lg border border-border bg-surface p-1 shadow-lg"
+              // Issue #4218: the bar sits right after the identity group, on
+              // the left half of the header, so the list opens rightward from
+              // "…" (toward the controls) and stays on screen.
+              className="absolute left-0 top-full z-40 mt-1 flex min-w-[12rem] flex-col rounded-lg border border-border bg-surface p-1 shadow-lg"
             >
               {foldedTools.map((tool, index) => {
                 const Icon = tool.icon;

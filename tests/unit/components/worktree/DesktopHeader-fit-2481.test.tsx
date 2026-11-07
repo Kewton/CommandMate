@@ -430,7 +430,8 @@ describe('DesktopHeader fit to width (Issue #2481)', () => {
     // #3593: one labelled pill (the current session); the rest are listed.
     renderSixWorking(1600);
     expect(inlinePillIds()).toEqual(['desktop-agent-status-claude-0']);
-    expect(screen.getByTestId('desktop-agent-status-overflow').textContent).toContain('5');
+    // Issue #4218: the trigger counts every session.
+    expect(screen.getByTestId('desktop-agent-status-overflow').textContent).toContain('Sessions 6');
     expect(screen.getByTestId('desktop-header-identity').className).not.toContain('overflow-x-clip');
   });
 
@@ -438,7 +439,7 @@ describe('DesktopHeader fit to width (Issue #2481)', () => {
     // 1000px: the identity group gets 400px beside the session field.
     renderSixWorking(1000);
     expect(inlinePillIds()).toEqual(['desktop-agent-status-claude-0']);
-    expect(screen.getByTestId('desktop-agent-status-overflow').textContent).toContain('5');
+    expect(screen.getByTestId('desktop-agent-status-overflow').textContent).toContain('Sessions 6');
     expect(screen.getByTestId('desktop-header-identity').className).not.toContain('overflow-x-clip');
     expectControlsReachable();
   });
@@ -551,7 +552,7 @@ describe('DesktopHeader fit to width (Issue #2481)', () => {
       />
     );
     expect(inlinePillIds()).toEqual(['desktop-agent-status-claude-0']);
-    expect(screen.getByTestId('desktop-agent-status-overflow').textContent).toContain('5');
+    expect(screen.getByTestId('desktop-agent-status-overflow').textContent).toContain('Sessions 6');
     expect(screen.getByTestId('desktop-header-identity').className).not.toContain('overflow-x-clip');
     for (let i = 1; i < 6; i += 1) {
       expect(screen.getByTestId(`desktop-agent-status-claude-${i}`)).toBeDefined();
