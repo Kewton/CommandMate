@@ -111,6 +111,8 @@ const CURSOR_ON_YES = CURSOR_ON_NO.replace(' ❯ No, exit', '   No, exit').repla
   ' ❯ Yes, I trust this folder'
 );
 
+const NO_READABLE_CURSOR = '   No, exit\n   Yes, I trust this folder';
+
 const warned = (event: string): unknown[][] => log.warn.mock.calls.filter((call) => call[0] === event);
 const reasons = (event: string): string[] => warned(event).map((call) => (call[1] as { reason: string }).reason);
 const lockWarns = (): number => warned(RECHECK).filter((call) => (call[1] as { sessionName: string }).sessionName === S).length;
@@ -216,6 +218,31 @@ describe('[#4211] the trust dialog passes its wait\'s record to the lock', () =>
     await runOut();
     expect(reasons(TRUST)).toEqual(['recheck-failed', 'recheck-failed']);
     expect(state.scopes.length).toBeGreaterThan(2);
+  });
+
+  it('cursor-unreadable: a session made again during the screen check leaves the new life its first warn', async () => {
+    // Positive (review 4211 P2): the decline judged on the old screen was recorded under
+    // the life read after `paneCommandIsAgent`'s await — the new one — and held back the
+    // new session's first cursor-unreadable.
+    vi.mocked(capturePane).mockResolvedValue(NO_READABLE_CURSOR);
+    let checks = 0;
+    vi.mocked(getPaneCurrentCommand).mockImplementation(async () => {
+      checks += 1;
+      if (checks === 1) invalidateInstanceInput(S);
+      return '2.1.287';
+    });
+    await runOut();
+    expect(checks).toBeGreaterThan(0);
+    // The old life's decline, the new life's first, then its repeats: one record kept.
+    expect(reasons(TRUST)).toEqual(['cursor-unreadable', 'cursor-unreadable']);
+    expect(sendSpecialKeys).not.toHaveBeenCalled();
+  });
+
+  it('control: cursor-unreadable on every poll, no new session, stays one warn', async () => {
+    vi.mocked(capturePane).mockResolvedValue(NO_READABLE_CURSOR);
+    await runOut();
+    expect(reasons(TRUST)).toEqual(['cursor-unreadable']);
+    expect(state.scopes).toEqual([]);
   });
 
   it('control: a dialog whose keys go out warns nothing', async () => {

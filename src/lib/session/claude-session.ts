@@ -338,13 +338,17 @@ interface TrustDialogState {
  * @param dialogScreen - ANSI-stripped pane output when the dialog is open, else null
  * @param state - Mutated in place
  * @param readMark - {@link instanceInputLaunchReadMark} taken before `dialogScreen` was captured
+ * @param screenLife - {@link instanceInputAnswerSkipLife} taken before `dialogScreen` was captured
+ *   (review 4211 P2): a decline judged on that screen alone (`cursor-unreadable`) is
+ *   recorded in the life it was read in, not the one after this function's awaits
  * @throws {SessionStartFailedError} When the move budget is spent
  */
 async function answerTrustDialog(
   sessionName: string,
   dialogScreen: string | null,
   state: TrustDialogState,
-  readMark: number = instanceInputLaunchReadMark()
+  readMark: number = instanceInputLaunchReadMark(),
+  screenLife: InstanceInputAnswerSkipLife = instanceInputAnswerSkipLife(sessionName)
 ): Promise<void> {
   if (state.pollsSinceAnswer !== null) state.pollsSinceAnswer++;
   if (state.pollsSinceMove !== null) state.pollsSinceMove++;
@@ -356,7 +360,9 @@ async function answerTrustDialog(
 
   const keys = resolveClaudeTrustDialogKeys(dialogScreen);
   if (keys === null) {
-    noteTrustKeySkipped(sessionName, state, null, 'cursor-unreadable');
+    // Review 4211 P2: the screen's life, taken before `paneCommandIsAgent`'s await. A
+    // session made again meanwhile makes this an old life's decline: its warn, no record.
+    noteTrustKeySkipped(sessionName, state, null, 'cursor-unreadable', screenLife);
     return;
   }
 
@@ -986,6 +992,8 @@ export async function startClaudeSession(
       let cleanOutput: string | null = null;
       // Issue #3975: before the read the trust keys are decided on.
       const readMark = instanceInputLaunchReadMark();
+      // Review 4211 P2: the life the screen is read in, for a decline judged on it alone.
+      const screenLife = instanceInputAnswerSkipLife(sessionName);
       try {
         cleanOutput = await getCleanPaneOutput(sessionName);
       } catch {
@@ -1000,7 +1008,7 @@ export async function startClaudeSession(
       // BEFORE the prompt: the dialog's cursor row (`❯ No, exit`) wears the
       // prompt glyph, so an open dialog is never read as a ready prompt.
       const trustDialogOpen = isClaudeTrustDialogOpen(cleanOutput);
-      await answerTrustDialog(sessionName, trustDialogOpen ? cleanOutput : null, trust, readMark);
+      await answerTrustDialog(sessionName, trustDialogOpen ? cleanOutput : null, trust, readMark, screenLife);
 
       // Claude is ready when we see the prompt (DRY-001)
       // Use CLAUDE_PROMPT_PATTERN from cli-patterns.ts for consistency
