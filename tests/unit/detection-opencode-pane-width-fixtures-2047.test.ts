@@ -416,6 +416,12 @@ describe('Issue #2047: 200 columns is why the default was not raised', () => {
     // belongs to one pane. At ≥121 columns the sidebar prints the session TITLE
     // to the right of a transcript gutter, and a title carrying the phrase walks
     // straight through the anchor #1883 built.
+    //
+    // Issue #4209: the anchor now also needs the row to sit in the box over the
+    // composer's bottom border, so the title no longer satisfies it. The row rule
+    // the anchor had before (`LEGACY_ROW_ANCHOR`) is kept here to show the 200-column
+    // frames still reproduce what it matched.
+    const LEGACY_ROW_ANCHOR = /^[^\S\n]*[\u2502\u2503][^\S\n]*Ask anything(?:\.\.\.|\u2026)/m;
     for (const name of ['sidebar-title-phrase', 'phrase-in-response', 'numbered-answer'] as const) {
       expect(
         OPENCODE_IDLE_COMPOSER_PATTERN.test(stripAnsi(frame(80, name))),
@@ -426,16 +432,20 @@ describe('Issue #2047: 200 columns is why the default was not raised', () => {
         `w120/${name} should not look like an idle composer`
       ).toBe(false);
       expect(
-        OPENCODE_IDLE_COMPOSER_PATTERN.test(stripAnsi(frame(200, name))),
+        LEGACY_ROW_ANCHOR.test(stripAnsi(frame(200, name))),
         `w200/${name} no longer reproduces the sidebar false match`
       ).toBe(true);
+      expect(
+        OPENCODE_IDLE_COMPOSER_PATTERN.test(stripAnsi(frame(200, name))),
+        `w200/${name}: the title is not the composer (Issue #4209)`
+      ).toBe(false);
     }
 
     // And the row responsible really is the sidebar's, not a composer: the
     // phrase is the session title, printed far to the right of the gutter.
     const row = stripAnsi(frame(200, 'sidebar-title-phrase'))
       .split('\n')
-      .find((line) => OPENCODE_IDLE_COMPOSER_PATTERN.test(line)) as string;
+      .find((line) => LEGACY_ROW_ANCHOR.test(line)) as string;
     expect(row).toBeDefined();
     expect(row.indexOf('Ask anything...')).toBeGreaterThan(100);
   });

@@ -13,7 +13,7 @@
  *  0.x  spec.beforePrompt      tool pickers / pagers / status bars
  *  1    detectPrompt           shared, with spec.isStalePrompt as the #1160 guard
  *  1.5  spec.afterPrompt       tool selection-list footers
- *  2    detectThinking         shared, 5-line window
+ *  2    detectThinking         shared, 5-line window (or spec.readThinking)
  *  2.x  spec.afterThinking     tool running + completion markers
  *  3    promptPattern          shared composer check, gated by D1 evidence
  *  4    staleness heuristic    `no_recent_output`
@@ -51,6 +51,21 @@ import type {
 } from './types';
 
 /**
+ * A {@link ToolDetectorSpec} plus the hooks only the chain here reads
+ * (Issue #4209). Declared beside the chain rather than in `./types` so the
+ * contract the other tool modules implement is unchanged.
+ */
+export interface RunnableToolDetectorSpec extends ToolDetectorSpec {
+  /**
+   * Priority 2 — the tool's own reading of the thinking step, in place of
+   * `detectThinking(tool, frame.thinkingLines)` (the word in the last five rows).
+   * opencode reads its progress row by position: its last rows are the footer,
+   * which also draws the cwd (`/tmp/Thinking:demo`).
+   */
+  readThinking?(frame: NormalizedFrame): boolean;
+}
+
+/**
  * Time threshold (in ms) for considering output as "stale".
  *
  * Unchanged since #54. What changed in #1927 is the verdict it produces: the
@@ -81,7 +96,7 @@ function resolveIdleEvidence(spec: ToolDetectorSpec, frame: NormalizedFrame): St
 
 /** Run the whole chain for one tool over one frame. */
 export function runToolDetection(
-  spec: ToolDetectorSpec,
+  spec: RunnableToolDetectorSpec,
   input: NormalizedFrame,
   context: ToolDetectionContext = {},
 ): ToolStatusVerdict {
@@ -135,7 +150,10 @@ export function runToolDetection(
 
   // 2. Thinking indicator detection — THINKING_TAIL_LINE_COUNT window (narrower).
   // CLI tool is actively processing (shows spinner, "Planning...", etc.)
-  if (detectThinking(spec.tool, frame.thinkingLines)) {
+  const thinking = spec.readThinking
+    ? spec.readThinking(frame)
+    : detectThinking(spec.tool, frame.thinkingLines);
+  if (thinking) {
     return positiveVerdictWithPrompt('running', STATUS_REASON.THINKING_INDICATOR, promptDetection);
   }
 
@@ -188,7 +206,7 @@ export function runToolDetection(
 }
 
 /** Bind the shared chain around one tool's declarations. */
-export function createToolStatusDetector(spec: ToolDetectorSpec): ToolStatusDetector {
+export function createToolStatusDetector(spec: RunnableToolDetectorSpec): ToolStatusDetector {
   return {
     ...spec,
     detect: (frame, context) => runToolDetection(spec, frame, context),

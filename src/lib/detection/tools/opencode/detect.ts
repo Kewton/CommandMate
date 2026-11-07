@@ -8,14 +8,17 @@
  */
 
 import {
-  detectThinking,
   stripBoxDrawing,
   OPENCODE_TURN_COMPLETE_PATTERN,
-  OPENCODE_IDLE_COMPOSER_PATTERN,
   OPENCODE_PERMISSION_PATTERN,
   OPENCODE_SELECTION_LIST_PATTERN,
 } from '../../cli-patterns';
-import { isOpencodeProcessingFooter } from './patterns';
+import {
+  findOpenCodeIdleComposer,
+  isOpencodeProcessingFooter,
+  isOpenCodeThinkingBelowComposer,
+  isOpenCodeThinkingInOpenTurn,
+} from './patterns';
 import { positiveVerdict } from '../verdicts';
 import { STATUS_REASON } from '../../status-reason';
 import { detectOpenCodeModalOverlay } from '../../opencode-modal-overlay';
@@ -83,10 +86,9 @@ export function readIdleEvidence(frame: NormalizedFrame): StatusEvidence {
     .slice(Math.max(0, lastIndex - STATUS_CHECK_LINE_COUNT + 1), lastIndex + 1)
     .join('\n');
   if (OPENCODE_TURN_COMPLETE_PATTERN.test(window)) return 'positive';
-  const composerWindow = frame.lines
-    .slice(Math.max(0, lastIndex - STATUS_CHECK_LINE_COUNT + 1), lastIndex + 1)
-    .join('\n');
-  return OPENCODE_IDLE_COMPOSER_PATTERN.test(composerWindow) ? 'positive' : 'none';
+  // Issue #4209: the placeholder inside the box over its bottom border, read on the
+  // whole frame (the border sits under the content window), as branch E reads it.
+  return findOpenCodeIdleComposer(frame.clean) !== null ? 'positive' : 'none';
 }
 
 export const opencodeStatusDetector = createToolStatusDetector({
@@ -94,6 +96,15 @@ export const opencodeStatusDetector = createToolStatusDetector({
   verifiedAgainst: VERIFIED_AGAINST,
   // Issue #3183: where the live part of the frame begins (`./live-region.ts`).
   liveRegion: OPENCODE_LIVE_REGION,
+
+  // Issue #4209: the shared thinking step reads the progress row under the
+  // composer's bottom border, whole, as the poller's save does
+  // (`isOpenCodeProgressBelowComposer`; its busy-hint half is branch A). The word in
+  // the last five rows read the footer's cwd there: `/tmp/Thinking:demo` kept a
+  // finished session `running` while its reply was saved.
+  readThinking(frame): boolean {
+    return isOpenCodeThinkingBelowComposer(frame.lines);
+  },
 
   afterThinking(frame): ToolStatusVerdict | null {
     // 2.5. OpenCode status detection (Issue #379)
@@ -150,11 +161,14 @@ export const opencodeStatusDetector = createToolStatusDetector({
     const { candidates, lastIndex } = findContentEnd(frame);
     if (lastIndex < 0) return null;
 
-    // B. Check last few content lines for thinking indicators
-    const contentThinkingWindow = candidates
-      .slice(Math.max(0, lastIndex - THINKING_TAIL_LINE_COUNT + 1), lastIndex + 1)
-      .join('\n');
-    if (detectThinking('opencode', contentThinkingWindow)) {
+    // B. A `Thinking:` row at the end of the current turn, while it is open.
+    //
+    // Issue #4209: read by position and whole, not as the word anywhere in the last
+    // content rows — a finished reply quoting `Thinking:` was `running` while the
+    // poller saved it. The row has to open a row of the turn region (below the
+    // newest echo, above the chrome) and the region must hold no finished-turn
+    // marker, which every frame the poller saves holds.
+    if (isOpenCodeThinkingInOpenTurn(frame.lines, THINKING_TAIL_LINE_COUNT)) {
       return positiveVerdict('running', STATUS_REASON.THINKING_INDICATOR);
     }
 
@@ -229,17 +243,20 @@ export const opencodeStatusDetector = createToolStatusDetector({
     // only on positive evidence"), not a fallback for "nothing looked busy".
     //
     // The row is matched on `frame.lines` (ANSI stripped, box drawing intact)
-    // via OPENCODE_IDLE_COMPOSER_PATTERN, so it must carry the input box's own
+    // via findOpenCodeIdleComposer, so it must carry the input box's own
     // gutter. The bare phrase reaching the pane inside a response body is not
     // read as an idle composer.
     //
     // D1's other half — "and the footer shows no processing marker" — is
     // branch A above, which has already returned `running` for any frame whose
     // footer carries `esc interrupt`.
-    const composerWindow = frame.lines
-      .slice(Math.max(0, lastIndex - STATUS_CHECK_LINE_COUNT + 1), lastIndex + 1)
-      .join('\n');
-    if (OPENCODE_IDLE_COMPOSER_PATTERN.test(composerWindow)) {
+    //
+    // Issue #4209: and by position — the placeholder row has to sit in the box over
+    // the composer's bottom border (`findOpenCodeIdleComposer`). The echo of a sent
+    // message is guttered too, and at 200 columns its blank gutter row carries the
+    // sidebar's session title. Read on the whole frame: the border is below the
+    // content window.
+    if (findOpenCodeIdleComposer(frame.clean) !== null) {
       return positiveVerdict('ready', STATUS_REASON.INPUT_PROMPT);
     }
 

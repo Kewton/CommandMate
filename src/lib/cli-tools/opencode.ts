@@ -61,7 +61,7 @@ import {
   exactTarget,
 } from '../tmux/tmux';
 import {
-  OPENCODE_IDLE_COMPOSER_PATTERN,
+  findOpenCodeIdleComposer,
   OPENCODE_SELECTION_LIST_PATTERN,
   stripAnsi,
 } from '../detection/cli-patterns';
@@ -556,9 +556,10 @@ export class OpenCodeTool extends BaseCLITool {
    *
    * ## What counts as evidence
    *
-   * `OPENCODE_IDLE_COMPOSER_PATTERN` (Issue #1883) — the `Ask anything...`
-   * placeholder **behind the input box's gutter**. Not reimplemented here on
-   * purpose; it is the same positive-evidence row `status-detector` reads.
+   * `findOpenCodeIdleComposer` (Issue #1883, by position since Issue #4209) — the
+   * `Ask anything...` placeholder **behind the input box's gutter, in the box over
+   * its bottom border**. Not reimplemented here on purpose; it is the same
+   * positive-evidence row `status-detector` reads.
    *
    * The copilot hazard that #1907 hit does not reach opencode, and this was
    * checked rather than assumed. Removing copilot's blind sleep exposed the
@@ -604,7 +605,8 @@ export class OpenCodeTool extends BaseCLITool {
         const output = stripAnsi(frame);
 
         // Do NOT stripBoxDrawing() this frame: the gutter is the anchor.
-        if (OPENCODE_IDLE_COMPOSER_PATTERN.test(output)) {
+        // Issue #4209: by position — the placeholder in the box over its border.
+        if (findOpenCodeIdleComposer(output) !== null) {
           logger.info('opencode-composer-detected', { attempt });
           return true;
         }
