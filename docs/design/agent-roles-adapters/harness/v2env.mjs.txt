@@ -1,0 +1,30 @@
+import * as L from './lib.mjs'; import fs from 'node:fs'; import path from 'node:path'; import { execFileSync } from 'node:child_process';
+const out=[];
+const CFG=(h)=>JSON.stringify({default_agent:'cm-role-x',agents:{'cm-role-x':{description:'r',mode:'primary',system:L.ROLE_TEXT}}});
+async function one(label,serveEnv,tuiEnv,opts={}){
+  L.ensureMock();await L.sleep(200);const id=`ve-${label}`;const base=path.join(L.ROOT,'c',id);fs.rmSync(base,{recursive:true,force:true});const h=base+'/home',r=base+'/repo';L.repoSeed(r);fs.mkdirSync(h,{recursive:true});
+  const d=L.toolDef('opencode-v2',h,r,{launchSh:'x',port:18241});
+  const p=18241;const c=CFG(h);
+  const sh=`${L.ROOT}/${id}.sh`;fs.writeFileSync(sh,`#!/bin/bash\nexport OPENCODE_SERVER_PASSWORD=probe-password OPENCODE_DISABLE_AUTOUPDATE=1\n${serveEnv?`OPENCODE_CONFIG_CONTENT='${c}' `:''}/opt/homebrew/bin/opencode2 serve --hostname 127.0.0.1 --port ${p} </dev/null >/dev/null 2>&1 &\nsp=$!; trap 'kill $sp' EXIT; sleep 3\n${tuiEnv?`OPENCODE_CONFIG_CONTENT='${c}' `:''}/opt/homebrew/bin/opencode2 --server http://127.0.0.1:${p} "${fs.realpathSync(r)}"\n`);
+  const since=Date.now();L.startPane(id,r,d.env,['bash',sh]);await L.until(()=>/Ask anything/.test(L.cap(id)),25000);await L.sleep(4000);
+  const footer=(L.cap(id).match(/(\S+)\s+·\s+mock-model/)||[])[1];
+  await L.sendText(id,`CASE=${id} hello`);const got=await L.until(()=>L.lastMain(id,since),20000);await L.sleep(800);
+  const rec={label,serveEnv,tuiEnv,footerAgent:footer,req:!!got,roleIn:got?L.whereIs(got.body,'ROLE_MARKER_K3'):null};
+  // 既存セッションへ default_agent を足した場合（build で作った会話を role で再開）
+  L.stop(id);await L.sleep(1500);out.push(rec);console.log(JSON.stringify(rec));
+}
+await one('serve-only',true,false);await one('tui-only',false,true);await one('both',true,true);
+// none → role の再開（V2: 保存された agent の扱い。V1 も）
+for(const tool of ['opencode-v2','opencode']){
+  L.ensureMock();const id=`nr-${tool}`;const base=path.join(L.ROOT,'c',id);fs.rmSync(base,{recursive:true,force:true});const h=base+'/home',r=base+'/repo';L.repoSeed(r);fs.mkdirSync(h,{recursive:true});
+  const p=tool==='opencode'?18251:18252;const d=L.toolDef(tool,h,r,{launchSh:`<WORKTREE>/scripts/opencode-v2/launch.sh`,port:p});
+  L.startPane(id,r,d.env,d.cmd);await L.until(()=>/Ask anything/.test(L.cap(id)),30000);await L.sleep(5000);let since=Date.now();await L.sendText(id,`CASE=${id}-a hello`);await L.until(()=>L.lastMain(`${id}-a`,since),20000);await L.sleep(1500);
+  const u=`http://127.0.0.1:${p}/${tool==='opencode'?'':'api/'}session?directory=${encodeURIComponent(fs.realpathSync(r))}`;const a=['-s','-m','3'];if(tool!=='opencode')a.push('-u','opencode:probe-password');const j=JSON.parse(execFileSync('curl',[...a,u],{encoding:'utf8'}));const sid=(Array.isArray(j)?j:(j.items??j.data??j.sessions??[]))[0]?.id;
+  L.stop(id);await L.sleep(2000);
+  const rf=h+'/r.md';fs.writeFileSync(rf,L.ROLE_TEXT);const env={...d.env,OPENCODE_CONFIG_CONTENT:tool==='opencode'?JSON.stringify({instructions:[rf]}):JSON.stringify({default_agent:'cm-role-x',agents:{'cm-role-x':{description:'r',mode:'primary',system:`{file:${rf}}`}}})};
+  const sh=`${L.ROOT}/${id}.sh`;fs.writeFileSync(sh,tool==='opencode'?`#!/bin/bash\nexec opencode --port ${p} --hostname 127.0.0.1 -s ${sid}\n`:`#!/bin/bash\nexport OPENCODE_SERVER_PASSWORD=probe-password\n/opt/homebrew/bin/opencode2 serve --hostname 127.0.0.1 --port ${p} </dev/null >/dev/null 2>&1 &\nsp=$!; trap 'kill $sp' EXIT; sleep 3\n/opt/homebrew/bin/opencode2 --server http://127.0.0.1:${p} -s ${sid} "${fs.realpathSync(r)}"\n`);
+  L.startPane(id,r,env,['bash',sh]);await L.until(()=>/Ask anything|Build|mock-model/.test(L.cap(id)),30000);await L.sleep(5000);since=Date.now();await L.sendText(id,`CASE=${id}-b resumed`);const got=await L.until(()=>L.lastMain(`${id}-b`,since),20000);await L.sleep(800);
+  const footer=(L.cap(id).match(/(\S+)\s+·\s+mock-model/)||[])[1];
+  const rec={label:`none-to-role-resume-${tool}`,sid:sid?.slice(0,8),footerAgent:footer,req:!!got,roleIn:got?L.whereIs(got.body,'ROLE_MARKER_K3'):null,history:got?L.flat(got.body).includes(`${id}-a`):null};L.stop(id);await L.sleep(1500);out.push(rec);console.log(JSON.stringify(rec));
+}
+fs.writeFileSync(L.ROOT+'/rec-v2env.json',JSON.stringify(out,null,1));

@@ -40,7 +40,7 @@
 ```bash
 # 共通バリデーション関数を読み込み
 # Synced with: src/cli/utils/input-validators.ts MAX_ISSUE_NO
-source "$(dirname "$0")/../lib/validators.sh"
+source "$(git rev-parse --show-toplevel)/.claude/lib/validators.sh"
 
 # Issue番号の検証
 if ! validate_issue_no "$ISSUE_NO"; then

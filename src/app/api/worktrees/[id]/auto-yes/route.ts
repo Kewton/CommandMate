@@ -48,6 +48,7 @@ import {
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import type { Worktree } from '@/types/models';
+import { autoYesGrantIdOf } from './auto-yes-grant';
 
 const logger = createLogger('api/auto-yes');
 
@@ -73,6 +74,12 @@ interface AutoYesResponse {
    * them, as the worktree list carries `autoYesStopReasonByInstance` (#3730).
    */
   answerMode?: AutoYesAnswerMode;
+  /**
+   * Issue #4132: which enabling this is. `expiresAt` and `answerMode` cannot say: two
+   * enables can agree on both. On the same shapes as `answerMode`, and handed back as
+   * `?expectedGrantId=` to turn off this grant and no other.
+   */
+  grantId?: string;
   pollingStarted?: boolean;
   /**
    * Issue #1909: which agent this state (or this arming) actually belongs to.
@@ -182,7 +189,9 @@ function buildAutoYesResponse(
  * is enabled (see {@link AutoYesResponse.answerMode}).
  */
 function withAnswerMode(response: AutoYesResponse, state: AutoYesState | null): AutoYesResponse {
-  return state?.enabled ? { ...response, answerMode: autoYesAnswerModeOf(state) } : response;
+  return state?.enabled
+    ? { ...response, answerMode: autoYesAnswerModeOf(state), grantId: autoYesGrantIdOf(state) }
+    : response;
 }
 
 /** The worktree row, or the 404 response to answer with when there is none */
@@ -409,6 +418,23 @@ export async function POST(
       }
     }
 
+    // Issue #4132: the conditions. `onlyIfOff` belongs to an enable and goes in the
+    // body. `expectedGrantId` belongs to a disable naming its target, and goes in the
+    // query, so the body of a disable stays the same with or without it.
+    if (body.onlyIfOff !== undefined && (typeof body.onlyIfOff !== 'boolean' || !body.enabled)) {
+      return NextResponse.json(
+        { error: 'onlyIfOff must be a boolean, and applies to enabling only' },
+        { status: 400 }
+      );
+    }
+    const expectedGrantId = new URL(request.url).searchParams.get('expectedGrantId');
+    if (expectedGrantId !== null && (body.enabled || (!body.instanceId && !body.cliToolId))) {
+      return NextResponse.json(
+        { error: 'expectedGrantId applies to disabling a named instance or tool only' },
+        { status: 400 }
+      );
+    }
+
     // Issue #3863: how questions are answered. Omitted keeps a live grant's
     // mode and starts a new grant at `recommended` (`setAutoYesEnabled`).
     if (body.answerMode !== undefined && !isAutoYesAnswerMode(body.answerMode)) {
@@ -498,6 +524,22 @@ export async function POST(
         return NextResponse.json({ error: 'Server is shutting down' }, { status: 503 });
       }
 
+      // Issue #4132: read here, after the last await, so nothing lands between this
+      // and the write below.
+      if (body.onlyIfOff === true) {
+        const live = getAutoYesState(id, cliToolId, instanceId);
+        if (live?.enabled) {
+          return NextResponse.json(
+            {
+              error: 'Auto-Yes is already on for this instance',
+              code: 'AUTO_YES_ALREADY_ENABLED',
+              ...withAnswerMode(buildAutoYesResponse(live, undefined, target), live),
+            },
+            { status: 409 }
+          );
+        }
+      }
+
       // Issue #3863: the mode is passed only when the request named one, so an
       // enable without it reaches the setter exactly as before (which keeps a
       // live grant's mode and starts a new one at `recommended`).
@@ -542,6 +584,25 @@ export async function POST(
         };
       }
     } else {
+      // Issue #4132: a grant that is not the one named is someone else's, and is left
+      // as it is. So is one already off: writing again would lose why it went off.
+      if (expectedGrantId !== null) {
+        const live = getAutoYesState(id, cliToolId, instanceId);
+        if (live?.enabled && autoYesGrantIdOf(live) !== expectedGrantId) {
+          return NextResponse.json(
+            {
+              error: 'A different Auto-Yes grant is on for this instance',
+              code: 'AUTO_YES_GRANT_CHANGED',
+              ...withAnswerMode(buildAutoYesResponse(live, undefined, target), live),
+            },
+            { status: 409 }
+          );
+        }
+        if (!live?.enabled) {
+          return NextResponse.json(buildAutoYesResponse(live, false, target));
+        }
+      }
+
       // Issue #525, #896: instanceId/cliToolId specified -> stop that instance;
       // neither specified -> stop all instances for this worktree.
       if (body.instanceId) {

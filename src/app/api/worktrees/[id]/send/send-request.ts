@@ -12,6 +12,7 @@ import {
 import { sessionTargetConflictResponse } from '@/lib/session/session-target-conflict-response';
 import { respondAgentFor } from '@/lib/session/respond-target';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
+import type { SendRoleRequest } from './send-role';
 import {
   validateCopilotModelName,
   validateAntigravityModelName,
@@ -26,7 +27,7 @@ const VALID_CLI_TOOL_IDS: readonly CLIToolType[] = CLI_TOOL_IDS;
 // `resolveSessionTarget`'s worktree-default / fallback stages, and design §4 D5
 // 決定 4 says that literal may be written in exactly one module.
 
-export interface SendMessageRequest {
+export interface SendMessageRequest extends SendRoleRequest {
   content: string;
   cliToolId?: CLIToolType;  // Optional: override the worktree's default CLI tool
   instanceId?: string;  // Issue #868: agent instance ID (defaults to primary === cliToolId)

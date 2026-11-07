@@ -9,10 +9,12 @@
 import type { CLIToolType } from './cli-tools/types';
 import {
   OPENCODE_TURN_COMPLETE_PATTERN,
-  OPENCODE_PROCESSING_INDICATOR,
   OPENCODE_PERMISSION_PATTERN,
+  OPENCODE_SKIP_PATTERNS,
+  OPENCODE_TRANSCRIPT_SKIP_PATTERNS,
   findOpenCodeChromeStart,
   findOpenCodeUserEchoEnd,
+  isOpencodeProcessingFooter,
   stripAnsi,
 } from './detection/cli-patterns';
 
@@ -85,10 +87,38 @@ export function resolveOpenCodeTurnRegion(lines: string[]): OpenCodeTurnRegion {
  *   on screen yet.
  */
 export function sliceOpenCodeTurn(output: string): string {
+  return sliceOpenCodeTurnWithSkip(output).turn;
+}
+
+/**
+ * {@link sliceOpenCodeTurn} plus the skip list its rows may be cleaned with
+ * (Issue #4188).
+ *
+ * When the chrome was located, the slice ends above it by position, so a row of
+ * the slice with the words only the chrome draws (`esc interrupt`,
+ * `Ask anything...`, `tab agents  ctrl+p commands`, the spinner run) is a reply's
+ * row quoting them: {@link OPENCODE_TRANSCRIPT_SKIP_PATTERNS} keeps it. With no
+ * chrome boundary the slice runs to the end of the pane and the words are the
+ * only reading left: the whole {@link OPENCODE_SKIP_PATTERNS}.
+ *
+ * The Layer-2 accumulator is the caller: its rows reach the save
+ * (`turnHeadTruncated`) one at a time with no position, so the position has to
+ * be read here, where the frame still is.
+ *
+ * @param output - Raw `capture-pane` output.
+ * @returns The region's rows (`''` when none) and the skip list for them
+ *
+ * @internal Exported for unit testing
+ */
+export function sliceOpenCodeTurnWithSkip(output: string): {
+  turn: string;
+  skipPatterns: readonly RegExp[];
+} {
   const rawLines = output.split('\n');
   const region = resolveOpenCodeTurnRegion(rawLines.map(stripAnsi));
-  if (region.start >= region.end) return '';
-  return rawLines.slice(region.start, region.end).join('\n');
+  const skipPatterns = region.chromeStart >= 0 ? OPENCODE_TRANSCRIPT_SKIP_PATTERNS : OPENCODE_SKIP_PATTERNS;
+  if (region.start >= region.end) return { turn: '', skipPatterns };
+  return { turn: rawLines.slice(region.start, region.end).join('\n'), skipPatterns };
 }
 
 /**
@@ -147,9 +177,14 @@ export function isOpenCodeComplete(output: string): boolean {
   // processing, and must NOT be blocked on a permission dialog. The last two are
   // read from the WHOLE frame: both live in the chrome the region excludes.
   // The "esc interrupt" indicator appears in the TUI footer during model processing.
+  //
+  // Issue #4188: the hint by position — under the composer's bottom border, where
+  // every measured running frame draws it — as the status reader has read it since
+  // #4175. A reply quoting the hint row whole sits above the border, and kept its
+  // turn from ever completing.
   return (
     OPENCODE_TURN_COMPLETE_PATTERN.test(turnRegion) &&
-    !OPENCODE_PROCESSING_INDICATOR.test(output) &&
+    !isOpencodeProcessingFooter(output) &&
     !OPENCODE_PERMISSION_PATTERN.test(output)
   );
 }
@@ -212,6 +247,11 @@ export function resolveExtractionStartIndex(
   // doesn't grow -- it's always ~PANE_HEIGHT lines. bufferWasReset is often true because
   // lastCapturedLine = totalLines. Must execute BEFORE Branch 1 to avoid Branch 1's small
   // window (40 lines) which fails to find the second-to-last Build marker in a 200-line pane.
+  // Issue #4187: opencode-v2 is an alternate-screen TUI too, but it is not added here
+  // on purpose. The screen reading never saves a V2 reply (V2 has no rule in
+  // `isTurnComplete`; its replies are written from its own server's document,
+  // `lib/hooks/sources/opencode-v2/history`), so it never reaches a completed
+  // extraction that would read this start.
   if (cliToolId === 'opencode' || cliToolId === 'copilot') {
     const foundUserPrompt = findRecentUserPromptIndex(totalLines);
     return foundUserPrompt >= 0 ? foundUserPrompt + 1 : 0;

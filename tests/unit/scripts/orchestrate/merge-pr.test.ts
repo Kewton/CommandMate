@@ -11,8 +11,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { parse } from 'yaml';
 import { appendRecord, readRecords, summarize } from '../../../../scripts/orchestrate/run-log.mjs';
-import { judgeChecks, judgedByUnitRelated, main, parseArgs, runIdsOf, squashSubject, validate } from '../../../../scripts/orchestrate/merge-pr.mjs';
+import { LAST_REQUIRED_CHECKS, judgeChecks, judgedByUnitRelated, main, parseArgs, runIdsOf, squashSubject, validate } from '../../../../scripts/orchestrate/merge-pr.mjs';
 import { workHeads } from '../../../../scripts/orchestrate/pr-common.mjs';
 import { DEVELOP, HEAD_A, HEAD_B, HEAD_M, type Check, fakeGit, openPr } from './pr-fake';
 
@@ -35,6 +36,25 @@ const pass = (name: string): Check => ({ name, bucket: 'pass', link: RUN_LINK })
 const pending = (name: string): Check => ({ name, bucket: 'pending', link: RUN_LINK });
 const fail = (name: string): Check => ({ name, bucket: 'fail', link: RUN_LINK });
 const GREEN = [pass('Lint'), pass('Build'), pass('Unit Tests')];
+/** The whole CI as `--last` needs it: every job passed, except the ones named with another bucket. */
+const fullCi = (others: Record<string, string> = {}): Check[] =>
+  LAST_REQUIRED_CHECKS.map((name) => ({ name, bucket: others[name] ?? 'pass', link: RUN_LINK }));
+
+/** The check names ci-pr.yml registers: each job's `name`, once per combination of its matrix. */
+function checkNamesOfWorkflow(): string[] {
+  const workflow = parse(fs.readFileSync(path.resolve(__dirname, '../../../../.github/workflows/ci-pr.yml'), 'utf-8'));
+  const names: string[] = [];
+  for (const [id, job] of Object.entries<{ name?: string; strategy?: { matrix?: Record<string, unknown[]> } }>(workflow.jobs)) {
+    const matrix = job.strategy?.matrix ?? {};
+    if ('include' in matrix || 'exclude' in matrix) throw new Error(`${id}: matrix include / exclude is not expanded here`);
+    let expanded = [job.name ?? id];
+    for (const [key, values] of Object.entries(matrix)) {
+      expanded = expanded.flatMap((name) => values.map((value) => name.replaceAll(`\${{ matrix.${key} }}`, String(value))));
+    }
+    names.push(...expanded);
+  }
+  return names;
+}
 
 const argv = (...extra: string[]) => ['--run-dir', runDir, '--issues', '3477', '--issue', '3477', '--worktree', worktree, ...extra];
 
@@ -73,6 +93,32 @@ function runMainWith(fake: ReturnType<typeof fakeGit>, extraDeps: Record<string,
 const stages = () => readRecords(runDir, '3477').records.map((r) => `${r.stage}=${r.result}`);
 
 describe('judgeChecks (6-3)', () => {
+  it('names required checks that are not registered only when given them (#4135)', () => {
+    const need = { needBuild: false, needUnit: false, last: true };
+    expect(judgeChecks([pass('Lint')], need).state).toBe('ok');
+    expect(judgeChecks([pass('Lint')], { ...need, required: ['Lint', 'Build', 'Unit Tests'] }).waiting).toEqual(['Build (not registered)', 'Unit Tests (not registered)']);
+    expect(judgeChecks([pass('Lint')], { ...need, last: false, required: LAST_REQUIRED_CHECKS }).state).toBe('ok');
+    expect(judgeChecks(fullCi(), { ...need, required: LAST_REQUIRED_CHECKS }).state).toBe('ok');
+    // One that registered and is running is waited for once, under its own name.
+    expect(judgeChecks(fullCi({ Build: 'pending' }), { ...need, required: LAST_REQUIRED_CHECKS }).waiting).toEqual(['Build']);
+    // A check outside the list is waited for once it has registered.
+    expect(judgeChecks([...fullCi(), pending('Other')], { ...need, required: LAST_REQUIRED_CHECKS }).waiting).toEqual(['Other']);
+  });
+
+  describe('LAST_REQUIRED_CHECKS and ci-pr.yml are the same list (#4135)', () => {
+    it('every check the workflow registers is required, matrix shards and the aggregate included', () => {
+      const names = checkNamesOfWorkflow();
+      expect(names).toEqual(expect.arrayContaining(['Unit Tests (shard 1/4)', 'Unit Tests (shard 4/4)', 'Unit Tests', 'Build']));
+      expect(names.filter((name) => !LAST_REQUIRED_CHECKS.includes(name))).toEqual([]);
+    });
+
+    it('every required check is one the workflow registers, or --last would wait for it until the timeout', () => {
+      const names = checkNamesOfWorkflow();
+      expect(LAST_REQUIRED_CHECKS.filter((name) => !names.includes(name))).toEqual([]);
+      expect(new Set(LAST_REQUIRED_CHECKS).size).toBe(LAST_REQUIRED_CHECKS.length);
+    });
+  });
+
   const need = { needBuild: true, needUnit: false, last: false };
 
   it('fails on fail or cancel in bucket', () => {
@@ -419,7 +465,7 @@ describe('main: merges once', () => {
     expect(fake.calls.some((c) => c.command === 'node' && c.args[0] === 'scripts/count-suppressions.mjs')).toBe(true);
     const precheck = readRecords(runDir, '3477').records.filter((r) => r.stage === 'precheck').at(-1);
     expect(precheck).toMatchObject({ result: 'ok', head: HEAD_M, workHead: HEAD_A });
-    expect(fake.gitCalls('push')[0].args).toEqual(['-C', worktree, 'push', 'origin', 'HEAD:feature/3477-worktree']);
+    expect(fake.gitCalls('push')[0].args).toEqual(['-C', worktree, 'push', 'origin', `${HEAD_M}:refs/heads/feature/3477-worktree`]);
     expect(fake.ghCalls('pr merge')[0].args).toContain(HEAD_M);
   });
 
@@ -469,9 +515,74 @@ describe('main: merges once', () => {
 
   it('waits for every check with --last', () => {
     recordReady();
-    const fake = fakeGit({ prs: [openPr()], checks: [[...GREEN, pending('Integration Tests')]] });
+    const running = fullCi({ 'Integration Tests': 'pending' });
+    const fake = fakeGit({ prs: [openPr()], checks: [running] });
     expect(runMain(fake, '--last', '--ci-timeout', '60').code).toBe(124);
-    const done = fakeGit({ prs: [openPr()], checks: [[...GREEN, pending('Integration Tests')], [...GREEN, pass('Integration Tests')]] });
+    const done = fakeGit({ prs: [openPr()], checks: [running, fullCi()] });
     expect(runMain(done, '--last').code).toBe(0);
+  });
+
+  describe('a permission that says "if CI passes" (#4135: PR #4125 merged at checks=pending:16)', () => {
+    const FULL = { verifyNote: 'exit=0(passed) passed=lint,typecheck,unit failed=-', precheckNote: 'tsc=ok build=ok build-cli=ok build-server=ok' };
+    const allPending = LAST_REQUIRED_CHECKS.map(pending);
+
+    it('without --last, a full unit gate and a --build precheck do not wait: the path that rule replaces', () => {
+      recordReady(HEAD_A, FULL);
+      const fake = fakeGit({ prs: [openPr()], checks: [allPending] });
+      expect(runMain(fake).code).toBe(0);
+      expect(fake.ghCalls('pr merge')).toHaveLength(1);
+    });
+
+    it('with --last, the same PR waits for every check and does not merge', () => {
+      recordReady(HEAD_A, FULL);
+      const fake = fakeGit({ prs: [openPr()], checks: [allPending] });
+      expect(runMain(fake, '--last', '--ci-timeout', '60').code).toBe(124);
+      expect(fake.ghCalls('pr merge')).toHaveLength(0);
+    });
+
+    it('with --last, passing means pass or skipping, and a job CI skipped does not hold it', () => {
+      recordReady(HEAD_A, FULL);
+      const fake = fakeGit({ prs: [openPr()], checks: [fullCi({ 'E2E Tests': 'skipping' })] });
+      expect(runMain(fake, '--last').code).toBe(0);
+      expect(fake.ghCalls('pr merge')).toHaveLength(1);
+    });
+
+    it('with --last, a required check that is not registered yet is waited for: all registered and green is not enough', () => {
+      recordReady(HEAD_A, FULL);
+      const fake = fakeGit({ prs: [openPr()], checks: [[pass('Lint')]] });
+      const { code, err } = runMain(fake, '--last', '--ci-timeout', '60');
+      expect(code).toBe(124);
+      expect(err).toContain('Build (not registered)');
+      expect(err).toContain('Unit Tests (not registered)');
+      expect(err).toContain('Unit Tests (shard 1/4) (not registered)');
+      expect(fake.ghCalls('pr merge')).toHaveLength(0);
+    });
+
+    it('with --last, any one job that registers late holds it: the rest green is not the full CI', () => {
+      recordReady(HEAD_A, FULL);
+      for (const late of ['Security Audit', 'Unit Tests (shard 3/4)', 'Legacy tmux (<3.2) reading-mode no-op']) {
+        const fake = fakeGit({ prs: [openPr()], checks: [fullCi().filter((check) => check.name !== late)] });
+        const { code, err } = runMain(fake, '--last', '--ci-timeout', '60');
+        expect(code).toBe(124);
+        expect(err).toContain(`${late} (not registered)`);
+        expect(fake.ghCalls('pr merge')).toHaveLength(0);
+      }
+    });
+
+    it('with --last, merges once the required checks have registered and settled, a skipped one included', () => {
+      recordReady(HEAD_A, FULL);
+      const fake = fakeGit({
+        prs: [openPr()],
+        checks: [[pass('Lint')], fullCi({ Build: 'pending', 'Unit Tests': 'pending' }), fullCi({ 'Unit Tests': 'skipping' })],
+      });
+      expect(runMain(fake, '--last').code).toBe(0);
+      expect(fake.ghCalls('pr merge')).toHaveLength(1);
+    });
+
+    it('without --last, a check that is not registered is not waited for, as before', () => {
+      recordReady(HEAD_A, FULL);
+      const fake = fakeGit({ prs: [openPr()], checks: [[pass('Lint')]] });
+      expect(runMain(fake).code).toBe(0);
+    });
   });
 });

@@ -47,6 +47,7 @@ import { describe, expect, it, vi, afterEach } from 'vitest';
 import { execFileSync } from 'child_process';
 import {
   AGENT_CORRELATION_ENV_VARS,
+  AGENT_LAUNCH_CONDITIONAL_CONFIG_ENV_VARS,
   AGENT_LAUNCH_CONFIG_ENV_VARS,
 } from '@/lib/hooks/sources/launch-command';
 import {
@@ -131,6 +132,17 @@ describe('the set a child process must not inherit (Issue #1996)', () => {
       );
     }
   });
+
+  it('claims none of the conditional config redirects either (Issue #4210)', () => {
+    // `COPILOT_HOME` reaches the launch line only for a relative setting; it is
+    // the same kind of redirect, and a child that inherits it must keep it.
+    expect(AGENT_LAUNCH_CONDITIONAL_CONFIG_ENV_VARS).toEqual(['COPILOT_HOME']);
+    for (const name of AGENT_LAUNCH_CONDITIONAL_CONFIG_ENV_VARS) {
+      expect(isStrippedChildProcessEnvKey(name), `${name} is a redirect, not an identity`).toBe(
+        false
+      );
+    }
+  });
 });
 
 describe('a real child process cannot read them back (Issue #1996)', () => {
@@ -156,6 +168,14 @@ describe('a real child process cannot read them back (Issue #1996)', () => {
     // not simply widened to `CM_AGENT_`: they are operator switches read from
     // the ambient environment, not names CommandMate writes onto a launch line.
     const kept = [...AGENT_LAUNCH_CONFIG_ENV_VARS, 'CM_AGENT_HOOKS_INJECT', 'CM_AGENT_HOOKS_DIR'];
+    stubEnv(kept);
+
+    expect(namesVisibleToChild(kept, sanitizeEnvForChildProcess())).toEqual([...kept].sort());
+  });
+
+  it('still hands the child a conditional config redirect such as a relative COPILOT_HOME (Issue #4210)', () => {
+    stubEnv(MUST_NOT_REACH_A_CHILD);
+    const kept = [...AGENT_LAUNCH_CONDITIONAL_CONFIG_ENV_VARS];
     stubEnv(kept);
 
     expect(namesVisibleToChild(kept, sanitizeEnvForChildProcess())).toEqual([...kept].sort());

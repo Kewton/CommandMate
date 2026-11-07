@@ -54,11 +54,12 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, readdirSync, realpathSync, statSync } from 'fs';
 import { homedir, tmpdir } from 'os';
-import { join } from 'path';
+import { isAbsolute, join, relative } from 'path';
 import { removeTempDir } from '@tests/helpers/temp-dir';
 import { getAgentEventSource } from '@/lib/hooks/sources/registry';
 import {
   AGENT_CORRELATION_ENV_VARS,
+  AGENT_LAUNCH_CONDITIONAL_CONFIG_ENV_VARS,
   AGENT_LAUNCH_CONFIG_ENV_VARS,
   COMMANDMATE_HOOK_ENV_VARS,
   SERVER_PORT_ENV_VAR,
@@ -111,7 +112,11 @@ const PLANTED_SECRETS: Record<string, string> = {
  * ever written — the other two are *read* from the ambient environment to decide
  * where a file goes and never reach `plan.env` — and moved the declaration into
  * `launch-command` so the exact-set assertion below has one list rather than a
- * local copy.
+ * local copy. #4210 made `COPILOT_HOME` reach `plan.env` for a *relative*
+ * setting only; it is declared apart, as
+ * `AGENT_LAUNCH_CONDITIONAL_CONFIG_ENV_VARS`, and measured under that setting
+ * below — `tests/setup.ts` pins an absolute `COPILOT_HOME`, so the default
+ * measurement alone would never see it.
  */
 const ALLOWED_CONFIG_ENV_VARS = AGENT_LAUNCH_CONFIG_ENV_VARS;
 
@@ -354,6 +359,61 @@ describe('AgentLaunchPlan.env carries no secrets (Issue #1933 S18)', () => {
   });
 
   /**
+   * The same measurement under a relative `COPILOT_HOME` (Issue #4210).
+   *
+   * The default case above cannot see this: `tests/setup.ts` pins an absolute
+   * `COPILOT_HOME`, and copilot's launch writes one only when the configured
+   * value is relative. Measured here, so the declaration and the launch line
+   * cannot drift apart again in the one configuration where they differ.
+   *
+   * The relative value is computed from this process's cwd to a fresh temp
+   * home, so it resolves into `os.tmpdir()` and the plan writes nothing into
+   * the repository.
+   */
+  it('writes exactly the declared variables plus COPILOT_HOME when COPILOT_HOME is relative', () => {
+    const copilotHome = join(home, '.copilot-relative-4210');
+    const relativeHome = relative(process.cwd(), copilotHome);
+    expect(isAbsolute(relativeHome)).toBe(false);
+    vi.stubEnv('COPILOT_HOME', relativeHome);
+
+    const onLaunchLine = new Set<string>();
+    for (const id of CLI_TOOL_IDS) {
+      for (const name of Object.keys(resolveAgentLaunchEnv(planFor(id)))) onLaunchLine.add(name);
+    }
+
+    const declared = [
+      ...ALLOWED_CORRELATION_NAMES,
+      ...ALLOWED_CONFIG_ENV_VARS,
+      ...AGENT_LAUNCH_CONDITIONAL_CONFIG_ENV_VARS,
+    ].sort();
+    expect([...onLaunchLine].sort()).toEqual(declared);
+    expect(onLaunchLine.size).toBe(9);
+    // The value is the absolute home the settings file went under, not the
+    // relative string a worktree-cwd copilot would resolve elsewhere.
+    expect(resolveAgentLaunchEnv(planFor('copilot')).COPILOT_HOME).toBe(copilotHome);
+  });
+
+  it.each([
+    ['unset', undefined],
+    ['absolute', 'abs'],
+  ] as const)('writes no COPILOT_HOME when COPILOT_HOME is %s (Issue #4210)', (_label, kind) => {
+    if (kind === undefined) {
+      delete process.env.COPILOT_HOME;
+    } else {
+      vi.stubEnv('COPILOT_HOME', join(home, '.copilot-absolute-4210'));
+    }
+
+    const onLaunchLine = new Set<string>();
+    for (const id of CLI_TOOL_IDS) {
+      for (const name of Object.keys(resolveAgentLaunchEnv(planFor(id)))) onLaunchLine.add(name);
+    }
+
+    expect([...onLaunchLine].sort()).toEqual(
+      [...ALLOWED_CORRELATION_NAMES, ...ALLOWED_CONFIG_ENV_VARS].sort()
+    );
+  });
+
+  /**
    * The half of #2403 no per-source measurement can state: the port is on
    * EVERY line, including the two sources that declare no environment at all.
    *
@@ -427,6 +487,10 @@ describe('AgentLaunchPlan.env carries no secrets (Issue #1933 S18)', () => {
 
     expect(correlation.filter(isStrippedChildProcessEnvKey)).toEqual(correlation);
     expect([...ALLOWED_CONFIG_ENV_VARS].filter(isStrippedChildProcessEnvKey)).toEqual([]);
+    // Issue #4210: the conditional half is config too, and kept the same way.
+    expect([...AGENT_LAUNCH_CONDITIONAL_CONFIG_ENV_VARS].filter(isStrippedChildProcessEnvKey)).toEqual(
+      []
+    );
     // None of them is a credential, which is what S18 asks about.
     for (const name of correlation) {
       expect(SENSITIVE_ENV_KEYS).not.toContain(name);

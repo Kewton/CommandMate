@@ -1,0 +1,15 @@
+// V2: 共通指示＋ロールのラッパーで実モデルの保持を測る／serve と TUI の env 片側試験
+import * as L from './lib.mjs'; import fs from 'node:fs'; import path from 'node:path'; import { spawnSync } from 'node:child_process';
+const MODEL='qwen3-coder:30b',OL='http://127.0.0.1:11434',ROLE='Role: every answer you write must end with the exact word ROLESTAMP.';
+const COMMON=['You are an AI agent running in OpenCode, a coding agent harness. Help the user accomplish their goals using the tools you have available.','Follow every project instruction (AGENTS.md and the like) in addition to the role below. When they conflict, the current request and the project instructions win over the role.','Prefer dedicated tools over shell commands; fall back to the shell when a tool cannot do what you need.','Keep changes consistent with the structure, naming, style, and patterns of the surrounding code.','Treat unfamiliar files or changes as potential user work and investigate before deleting or overwriting them.'].join('\n');
+const base=path.join(L.ROOT,'c','v2wrap');fs.rmSync(base,{recursive:true,force:true});const h=base+'/home',r=base+'/repo';L.repoSeed(r);
+const w=(p,s)=>{fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,s);};
+w(`${h}/.config/opencode/opencode.jsonc`,JSON.stringify({model:`ollama/${MODEL}`,providers:{ollama:{name:'o',package:'@opencode/ai/providers/openai-compatible',settings:{baseURL:`${OL}/v1`,apiKey:'x'},models:{[MODEL]:{name:MODEL}}}}}));
+w(`${h}/r.md`,COMMON+'\n\n'+ROLE);
+const env={PATH:L.PATHV,HOME:h,LANG:'en_US.UTF-8',TERM:'dumb',XDG_CONFIG_HOME:`${h}/.config`,XDG_DATA_HOME:`${h}/.local/share`,XDG_STATE_HOME:`${h}/.local/state`,XDG_CACHE_HOME:`${h}/.cache`,OPENCODE_CONFIG_CONTENT:JSON.stringify({default_agent:'cm-role-x',agents:{'cm-role-x':{description:'r',mode:'primary',system:`{file:${h}/r.md}`}}})};
+const go=(m,ms)=>spawnSync('opencode2',['run','--standalone','--format','json','--auto','--',m],{cwd:r,env,encoding:'utf8',timeout:ms,input:''});
+const final=(o)=>{const t=[];for(const l of o.split('\n')){try{const j=JSON.parse(l);const v=j.part?.text??j.text;if(typeof v==='string'&&(j.part?.type==='text'||j.type==='text'))t.push(v);}catch{}}return t.pop()??'';};
+const rs=[];for(let i=0;i<3;i++){const x=go('What is 2+2? Answer in one short sentence.',150000);rs.push({exit:x.status,a:final(x.stdout).slice(0,120)});}
+const b=go('calc.sh prints the wrong number. Edit calc.sh so that `sh verify.sh` prints VERIFY_OK, then run `sh verify.sh`.',240000);const v=spawnSync('sh',['verify.sh'],{cwd:r,encoding:'utf8'});
+const rec={model:MODEL,common:COMMON,rs,roleHits:rs.filter((x)=>x.a.includes('ROLESTAMP')).length,repoHits:rs.filter((x)=>x.a.includes('REPOSTAMP')).length,both:rs.filter((x)=>x.a.includes('ROLESTAMP')&&x.a.includes('REPOSTAMP')).length,exit2:b.status,verify:v.stdout.trim(),verifyExit:v.status};
+fs.writeFileSync(L.ROOT+'/rec-v2wrap.json',JSON.stringify(rec,null,1));console.log(JSON.stringify(rec).slice(600));

@@ -241,6 +241,12 @@ require_run_dir() {
 #                             a shared file outside CH, by absolute path (#3360):
 #                             antigravity's ~/.gemini/config/hooks.json and
 #                             copilot's ~/.copilot/settings.json (#3391)
+#   OBSERVED  <sha256|absent>  <path>
+#                             opencode V1's two records in ~/.commandmate (#4149).
+#                             Reported, never a failure: the run's server is pointed
+#                             away from them, and a production server on this machine
+#                             keeps writing them, so a change does not say who did it.
+#                             isolation.checks is what holds the run's server to it.
 SHARED_RECORD_NAME="codex-shared.sha256"
 CODEX_SHARED_FILES="hooks.json commandmate/cmate-agent-event.sh"
 
@@ -297,17 +303,29 @@ write_shared_record() {
         for n in "$HOME/.gemini/config/hooks.json" "$HOME/.copilot/settings.json"; do
             printf 'ABSOLUTE  %s  %s\n' "$(sha_of "$n")" "$n"
         done
+        for n in "$HOME/.commandmate/opencode-sessions.json" "$HOME/.commandmate/opencode-ports.json"; do
+            printf 'OBSERVED  %s  %s\n' "$(sha_of "$n")" "$n"
+        done
     }>"$1"
 }
 
 # check_shared_record <record file> — 0 when nothing changed, 1 (with one
-# message per change) otherwise.
+# message per change) otherwise. An OBSERVED line only sets OBSERVED_CHANGED.
+OBSERVED_CHANGED=no
 check_shared_record() {
     local kind rest base="" rc=0 h p
     while read -r kind rest; do
         case "$kind" in
             '') ;;
             CODEX_HOME) base="$rest" ;;
+            OBSERVED)
+                h=${rest%%  *}
+                p=${rest#*  }
+                if [ "$(sha_of "$p")" != "$h" ]; then
+                    log "opencode V1 record changed during the run: $p (not a failure: a production server writes it too)"
+                    OBSERVED_CHANGED=yes
+                fi
+                ;;
             ABSOLUTE)
                 h=${rest%%  *}
                 p=${rest#*  }
@@ -446,6 +464,9 @@ cmd_up() {
         ${own_home_env[@]+"${own_home_env[@]}"} \
         CM_DB_PATH="$RUN_DIR/uat.db" CM_ROOT_DIR="$RUN_DIR/root" \
         CM_OPENCODE_V2_DIR="$RUN_DIR/opencode-v2" CM_AGENT_HOOKS_DIR="$RUN_DIR/hooks" \
+        CM_AGENT_ROLE_ARTIFACTS_DIR="$RUN_DIR/agent-roles" \
+        CM_OPENCODE_SESSION_FILE="$RUN_DIR/opencode-sessions.json" \
+        CM_OPENCODE_PORT_FILE="$RUN_DIR/opencode-ports.json" \
         nohup node "$SERVER_ENTRY" >"$RUN_DIR/server.log" 2>&1 </dev/null &
     server_pid=$!
     state_set "$UP_STATE" server_pid "$server_pid"
@@ -533,6 +554,7 @@ cmd_down() {
         else
             check_shared_record "$RUN_DIR/$SHARED_RECORD_NAME" || rc=1
         fi
+        state_set "$state" opencode_v1_real_changed "$OBSERVED_CHANGED"
     fi
     exit $rc
 }

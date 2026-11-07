@@ -46,7 +46,7 @@ import { createHash } from 'crypto';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join, resolve } from 'path';
-import { resolveSafeDirectory } from '@/config/safe-directory';
+import { resolveSafeAbsoluteDirectory } from '@/config/safe-directory';
 import { getServerPort } from '@/lib/env';
 import { isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { CLAUDE_POST_MODEL_SWITCH_EVENT_NAME } from '@/lib/hooks/sources/claude/model-switch';
@@ -310,13 +310,19 @@ export function isAuthTokenExpected(): boolean {
  * event loop forever rather than throw — the fail-open `try/catch` below is
  * never reached, because the call never returns. Such a value is refused here
  * and the default is used.
+ *
+ * Issue #4191: always absolute. The path is written into `--settings <file>`
+ * and read by claude, which runs in the worktree, not in this process's cwd (the
+ * daemon's is the package root); a relative `CM_AGENT_HOOKS_DIR` named another
+ * file there. It is resolved against this process's cwd, where the file is
+ * written.
  */
 export function getHookSettingsDirectory(options: HookSettingsOptions = {}): string {
   const fallback = join(homedir(), '.commandmate', 'hooks');
   if (options.directory) {
-    return resolveSafeDirectory(options.directory, fallback, 'HookSettingsOptions.directory');
+    return resolveSafeAbsoluteDirectory(options.directory, fallback, 'HookSettingsOptions.directory');
   }
-  return resolveSafeDirectory(process.env.CM_AGENT_HOOKS_DIR, fallback, 'CM_AGENT_HOOKS_DIR');
+  return resolveSafeAbsoluteDirectory(process.env.CM_AGENT_HOOKS_DIR, fallback, 'CM_AGENT_HOOKS_DIR');
 }
 
 /** The instance this settings file speaks for; primary when unspecified. */

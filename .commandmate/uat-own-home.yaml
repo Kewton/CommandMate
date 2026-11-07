@@ -38,6 +38,12 @@ isolation:
     # The two state directories under the run, positive and negative (as above).
     - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ps eww -p $P | tr ' ' '\\n' | grep -qxF 'CM_OPENCODE_V2_DIR={run_dir}/opencode-v2' && ps eww -p $P | tr ' ' '\\n' | grep -qxF 'CM_AGENT_HOOKS_DIR={run_dir}/hooks'"
     - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ! ps eww -p $P | tr ' ' '\\n' | grep -E '^CM_(OPENCODE_V2|AGENT_HOOKS)_DIR=' | grep -vF '{run_dir}/'"
+    # The role files under the run, positive and negative (as above).
+    - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ps eww -p $P | tr ' ' '\\n' | grep -qxF 'CM_AGENT_ROLE_ARTIFACTS_DIR={run_dir}/agent-roles'"
+    - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ! ps eww -p $P | tr ' ' '\\n' | grep -E '^CM_AGENT_ROLE_ARTIFACTS_DIR=' | grep -vF '{run_dir}/'"
+    # opencode V1's two records (Issue #4149): under the run (as above).
+    - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ps eww -p $P | tr ' ' '\\n' | grep -qxF 'CM_OPENCODE_SESSION_FILE={run_dir}/opencode-sessions.json' && ps eww -p $P | tr ' ' '\\n' | grep -qxF 'CM_OPENCODE_PORT_FILE={run_dir}/opencode-ports.json'"
+    - "P=$(lsof -nP -iTCP:{port} -sTCP:LISTEN -t | head -1); ! ps eww -p $P | tr ' ' '\\n' | grep -E '^CM_OPENCODE_(SESSION|PORT)_FILE=' | grep -vF '{run_dir}/'"
     # The API sees only the sandbox root.
     - "curl -fsS -m 5 http://127.0.0.1:{port}/api/repositories | python3 -c \"import json,sys; d=json.load(sys.stdin); r=d if isinstance(d,list) else d.get('repositories',[]); sys.exit(0 if all(str(x.get('path','')).startswith('{run_dir}/root') for x in r) else 1)\""
 report_dir: ".commandmate/uat"

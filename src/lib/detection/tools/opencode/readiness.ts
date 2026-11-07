@@ -4,7 +4,8 @@
  *
  * The launch wait (`OpenCodeTool.waitForReady`) is not this test: it accepts
  * the `Connect a provider` overlay so a launch does not burn its window there,
- * and `OPENCODE_IDLE_COMPOSER_PATTERN` only anchors the placeholder's start —
+ * and `OPENCODE_IDLE_COMPOSER_PATTERN` only anchors the placeholder's row in the
+ * box over its bottom border (#4209) —
  * it does not say the rest of the input box is empty, and opencode stops
  * painting the placeholder once a session has answered a turn (every
  * post-turn frame in `tests/fixtures/opencode-live-2047/w80/` has an input box
@@ -42,19 +43,30 @@ import { readOpenCodeComposerOwnRows } from './composer-own-text';
 /** The placeholder opencode paints in an empty buffer, with its quoted suggestion. */
 const PLACEHOLDER = /^Ask anything(?:\.\.\.|…)(?:[^\S\n]+"[^"\n]*")?$/;
 
+/** Why a pane is not ready to take a body (Issue #4161); names a screen, quotes nothing. */
+export type OpenCodeNotReadyScreen = 'dialog' | 'no-input-box' | 'input-box-holds-text';
+
+/**
+ * @param output - Raw `capture-pane` output of the whole pane (ANSI allowed)
+ * @returns What keeps the pane from being ready; null when it is ready
+ */
+export function readOpenCodeNotReadyScreen(output: string): OpenCodeNotReadyScreen | null {
+  const text = stripAnsi(output);
+  if (OPENCODE_SELECTION_LIST_PATTERN.test(text)) return 'dialog';
+  const status = detectSessionStatus(output, 'opencode');
+  if (status.hasActivePrompt || status.status === 'waiting') return 'dialog';
+
+  // Each row's own text, cut at the box's right edge (Issue #4067: the same
+  // cut the submit read-back uses — `composer-own-text`).
+  const rows = readOpenCodeComposerOwnRows(text.split('\n'));
+  if (rows === null || rows.length === 0) return 'no-input-box';
+  return rows.every((own) => own === '' || PLACEHOLDER.test(own)) ? null : 'input-box-holds-text';
+}
+
 /**
  * @param output - Raw `capture-pane` output of the whole pane (ANSI allowed)
  * @returns true when the input box is on screen, empty, and nothing covers it
  */
 export function isOpenCodeComposerReady(output: string): boolean {
-  const text = stripAnsi(output);
-  if (OPENCODE_SELECTION_LIST_PATTERN.test(text)) return false;
-  const status = detectSessionStatus(output, 'opencode');
-  if (status.hasActivePrompt || status.status === 'waiting') return false;
-
-  // Each row's own text, cut at the box's right edge (Issue #4067: the same
-  // cut the submit read-back uses — `composer-own-text`).
-  const rows = readOpenCodeComposerOwnRows(text.split('\n'));
-  if (rows === null || rows.length === 0) return false;
-  return rows.every((own) => own === '' || PLACEHOLDER.test(own));
+  return readOpenCodeNotReadyScreen(output) === null;
 }

@@ -8,9 +8,12 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { restoreFetch } from '../../../helpers/mock-api';
+import { restoreFetch, keepOffTheRealServer } from '../../../helpers/mock-api';
 import { ExitCode } from '../../../../src/cli/types';
 import { MAX_STOP_PATTERN_LENGTH } from '../../../../src/cli/utils/api-client';
+
+// Issue #4191: no request from this file reaches 127.0.0.1:3000, not even by failing.
+keepOffTheRealServer();
 
 const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
 const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -169,6 +172,38 @@ describe('send --contract', () => {
     // The id goes to stdout so an orchestrator can capture it.
     expect(mockConsoleLog).toHaveBeenCalledWith(TASK_ID);
     expect(mockConsoleError).toHaveBeenCalledWith('Message sent.');
+  });
+
+  describe('[#4132] a warning about a session with no evidence of its role', () => {
+    const warned = (data: Record<string, unknown>): RouteResponse => ({ status: 201, data: { ...(TASK_CREATED.data as object), ...data } });
+    const run = async (created: RouteResponse): Promise<void> => {
+      mockRoutes([
+        { match: '/api/worktrees/wt1/tasks', response: created },
+        { match: '/api/worktrees/wt1/send', response: SEND_OK },
+        { match: `/api/tasks/${TASK_ID}`, method: 'PATCH', response: { status: 200, data: {} } },
+      ]);
+      await runSend(['wt1', '--contract', '.commandmate/tasks/t.yaml']);
+    };
+    const warnings = () => mockConsoleError.mock.calls.map(([line]) => String(line)).filter((line) => line.startsWith('Warning:'));
+
+    it('goes to stderr as one line; stdout is the task id, and the message is sent', async () => {
+      await run(warned({ roleWarning: 'Its role is not known.' }));
+      expect(warnings()).toEqual(['Warning: Its role is not known.']);
+      expect(mockConsoleLog.mock.calls).toEqual([[TASK_ID]]);
+      expect(mockConsoleError).toHaveBeenCalledWith('Message sent.');
+      expect(mockExit).not.toHaveBeenCalledWith(expect.anything());
+    });
+
+    it('an older server gives none: nothing is said', async () => {
+      await run(TASK_CREATED);
+      expect(warnings()).toEqual([]);
+      expect(mockConsoleLog.mock.calls).toEqual([[TASK_ID]]);
+    });
+
+    it('something that is no text is not printed', async () => {
+      await run(warned({ roleWarning: { nope: true } }));
+      expect(warnings()).toEqual([]);
+    });
   });
 
   it('marks the task running only after the send succeeded', async () => {
@@ -586,13 +621,17 @@ describe('send --contract --auto-yes when Auto-Yes cannot be enabled', () => {
 
     expect(calls.filter((c) => c.method === 'PATCH')).toEqual([]);
     expect(calls.filter((c) => c.url.includes('/send'))).toEqual([]);
-    expect(code).not.toBe(ExitCode.SUCCESS);
+    // Issue #4176: `not.toBe(SUCCESS)` alone also passed when exit was never
+    // called (`code` undefined). The foreign-session 409 is exit 99
+    // (`handleApiError`).
+    expect(mockExit).toHaveBeenCalled();
+    expect(code).toBe(ExitCode.UNEXPECTED_ERROR);
   });
 
-  it('leaves the task running when the enable deferred behind --model fails after the send', async () => {
+  it('leaves the task running, warns and does not exit when the enable deferred behind --model fails after the send', async () => {
     // With --model on copilot the enable runs AFTER the message (Issue #576).
     // By then the message was delivered and the task is running; a failed
-    // enable does not take that back.
+    // enable does not take that back, nor fail the command (Issue #4159).
     const calls = mockRoutes([
       { match: '/api/worktrees/wt1/tasks', response: TASK_CREATED },
       { match: '/api/worktrees/wt1/auto-yes', response: FOREIGN_SESSION },
@@ -623,7 +662,9 @@ describe('send --contract --auto-yes when Auto-Yes cannot be enabled', () => {
     );
     expect(calls.filter((c) => c.method === 'PATCH').map((c) => c.body)).toEqual([{ status: 'running' }]);
     expect(mockConsoleError).toHaveBeenCalledWith('Message sent.');
-    expect(code).not.toBe(ExitCode.SUCCESS);
+    expect(mockConsoleError).toHaveBeenCalledWith(expect.stringMatching(/^Warning: the message was sent, but Auto-Yes may not be on.*Do not send it again/));
+    expect(mockExit).not.toHaveBeenCalled();
+    expect(code).toBeUndefined();
   });
 
   it('marks the task running, not failed, when the enable succeeds (control)', async () => {

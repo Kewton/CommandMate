@@ -246,6 +246,8 @@ export async function main(argv: readonly string[], overrides: Partial<DispatchD
     return result.status === 0;
   };
 
+  // Issue #4115: `/clear` is a message to the same process. It keeps the role that
+  // process started with and resolves nothing again; a new process gets the default.
   if (!(await send('/clear', false))) return fail('/clear を送れなかった', issues, deferred);
   let ready = false;
   for (let waited = 0; waited <= READY_TIMEOUT_MS; waited += READY_POLL_MS) {

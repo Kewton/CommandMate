@@ -135,6 +135,62 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 他方のテストが旧名を使っていた）。同型の統合破壊はこの run で 2 件あり、**どちらも
 `npx tsc --noEmit` と影響テストのローカル実行で捕まった**。
 
+## 6-2 「CI が通れば」の許可と全チェックの合格
+
+`--last` なしの `merge-pr.mjs` は、全 `unit` の検証と `--build` の precheck がある PR の `Build` も `Unit Tests` も待たない。設計どおりだが、利用者の許可の「CI が通れば」とは食い違う。
+実例（#4135）: PR #4125 を、開いて 22 秒でマージした（`checks=pending:16`）。push の CI は後で全 17 ジョブ合格で、結果として害は無かった。
+
+決定: `merge-pr` にオプションは足さない。全チェックを待つ経路は既存の `--last` で足りるので、許可の条件が「CI が通れば」の run ではどの PR にも付ける規則にする。
+
+全チェックの合格は `judgeChecks` の判定そのもの: すべての `bucket` が `pass` か `skipping`。`skipping` は CI が条件で飛ばしたジョブで、待っても結果は変わらないので合格に数える。`pending` は待ち、`fail` / `cancel` はマージしない。
+
+`gh pr checks` は登録済みのチェックしか返さない。登録済みが全部合格でも CI の完走とは限らないので、`--last` は `LAST_REQUIRED_CHECKS` のすべてが登録されるまで待つ。一覧は `.github/workflows/ci-pr.yml` の全ジョブ（matrix の展開後の `Unit Tests (shard 1/4)`〜`(4/4)` を含む 17 件）で、ジョブを足す・名前を変えるときは一覧も直す。食い違うと `merge-pr.test.ts` が両方向で落ちる。一覧に無いチェック（ほかのワークフローなど）は、登録されてから完了を待つ。`--last` なしは未登録を待たない（今までどおり）。
+
+対象は `ci-pr.yml` だけでよい（#4148 で見送り。追跡は不要）。PR に対して走るほかのワークフローは `cancel-pr-runs-on-close.yml` だけで、PR を閉じたとき（`types: [closed]`）にしか動かない。`pages.yml` は main への push、`publish.yml` はリリースで走る。PR の開いている間に別のワークフローを足すと `merge-pr.test.ts` が落ちるので、そのときに一覧へ足すかを決める。
+
+## 6-2 CI 待ちの間に develop が動いたとき
+
+`merge-pr.mjs` の refresh は開始時にしか行わない。CI を待つ間に先の PR がマージされると、待っている HEAD は組み合わせとして未確認になる。そこで CI を見るたびに、`gh pr checks` を読んだ**後で** `git fetch` して（#4148）、`origin/develop` がマージする SHA（worktree の今の HEAD ではなく、`--match-head-commit` に渡す固定の SHA）に含まれなくなっていたら**マージせず exit 4** で止める（`merge` の段に `base-moved` を記録）。同じ引数で再実行すれば、取り込み・precheck・push からやり直す。`--match-head-commit` が固定するのは PR の HEAD だけで base は固定しないので、緑の返答を待つ間に進んだ分もここで読む。最後の `git fetch` から `gh pr merge` が届くまでの間に進んだ分は、この検査では止まらない（GitHub 側で base を固定する手段が無い）。
+
+`git fetch` が失敗した回は判定できないので、その回はマージせず、次の回に読み直す。読めないまま期限に達したら exit 124。
+
+## 6-3 落ちたジョブの再実行と run の完走
+
+（#4162。1 ジョブが早く落ちると、同じ run の残りが走っている間は `gh run rerun` が `already running` で拒まれ、`merge-pr.mjs` が exit 1 で止まっていた。#3783・#4149 で実測。）
+
+`merge-pr.mjs` は落ちたジョブの run に `pending` のチェックが残っている間は再実行を送らず、完走を待つ。追加の API は呼ばない（`gh pr checks` の `link` で run を見分ける）。チェックに現れていないのに `already running` で拒まれたときも、送っていないものとして待ちに戻る。
+
+- **待機の期限**: `--ci-timeout`（別の上限は設けない）。超えたら exit 124 で、`waiting for run <id> to finish before re-running it` と出す
+- **develop が進んだとき**: 見るたびの確認（「6-2 CI 待ちの間に develop が動いたとき」）で exit 4。再実行は送らない
+- **PR の HEAD が進んだとき**: 待ちの間に動いたら exit 1（`ci` 段に `head-moved <sha>` を記録）。古い HEAD の run を再実行しても、マージする HEAD の確認にならない。新しい HEAD で再実行すれば続きから進む
+- **再実行の回数**: 同じ HEAD で 1 回のまま。受理された分だけを `rerun=<id>` と記録するので、待っている間に `merge-pr.mjs` が止まっても、再開後に 1 回送る。受理の後は、また落ちれば `after-rerun` で止まる
+
+## 6-3 git push の 5xx
+
+`publish-pr.mjs` と `merge-pr.mjs` の `git push` は `pr-common.mjs` の `pushHead` を通る（#4162）。`gh` の書き込み（下の「gh の 5xx の再試行」）と違い、同じ SHA の push は送り直しても変わらないので、再試行する。
+
+- **対象**: HTTP 500・502・503・504、`RPC failed`、接続切れ、理由が `Internal Server Error` だけの `[remote rejected]`（#4133 の実測の形）。`[rejected]` と、ほかの理由の `[remote rejected]`（非 fast-forward、hook、protected branch）は答えなので送り直さない。hook が `Internal Server Error` と出力しても、git の理由は `pre-receive hook declined` なので対象にならない
+- **応答が消えたとき**: 失敗のたびに `git ls-remote origin refs/heads/<branch>` を読み、リモートがこの HEAD なら成功として進む
+- **回数**: `gh` と同じ最大 4 回（10 秒・30 秒・60 秒あける）。尽きたら今までどおり exit 1
+- **ローカルが進んだとき**: 送り元は常に確かめた SHA（`git push origin <sha>:refs/heads/<branch>`）で、`HEAD` やブランチ名を git に解決させない。確認の後に参照が動いても、送るのは検証と記録の SHA のまま。進んだコミットは次の実行で判定する。`publish-pr.mjs` の上流は push の後に `git config` で設定する（SHA の送り元では `-u` が効かない。設定の失敗は知らせるだけで止めない）
+
+## 6-3 CI の登録までの時間と --ci-timeout
+
+待ちを 2 つに分ける（#4148）:
+
+- `--register-timeout`（既定 600 秒）: この HEAD にチェックが 1 つも無い間。GitHub が CI の run を作るまでの時間で、CI の遅さではない。超えると `no CI registered on <sha>` で exit 124
+- `--ci-timeout`（既定 3600 秒）: 最初のチェックが見えてから。超えると今までどおり `CI did not settle` で exit 124
+
+どちらも exit 124 で、再実行すれば同じ HEAD の CI を待ち直す。`git push` の 500（`remote rejected ... Internal Server Error`、#4133 で 2 回）は上の「6-3 git push の 5xx」のとおり再試行する。4 回とも失敗すると exit 1 で止まり（`git push failed: ...`。マージには進まない）、再実行すれば `refresh=unpushed` で push からやり直す。
+
+#4133 の exit 124 の実測（`merge-4133c.out`）: 出力の 12 件はどれも `(not registered)` の付かない `pending` で、登録の遅れではなく登録後のジョブが 1 時間終わらなかった形だった。この形はこの分離でも exit 124 のままで、同じ HEAD で待ち直す前に `gh run view` でランナーの詰まりを見る。
+
+## 6-2 分類器にマージを拒否されたとき
+
+明示の許可（dispatch-terms の「マージを進めてよい」）がある run でも、auto mode の分類器がマージを拒否することがある（#4016）。実測は 15 run 中 3 run。11-01 と 11-02 は計 8 PR が、人手なし・許可ルールがあっても拒否された。拒否は毎回ではない。
+
+決定: 「マージ可」は残す。拒否されたら `merge-pr.mjs` と `gh pr merge` の言い換えなど別の経路で再試行せず、CI の合格を確かめて「マージ可能」を報告し、残りの PR もマージせずに止まる。
+
 ## 6-2 コメントの中の衝突マーカーの実例
 
 2026-08-22 に JSDoc ブロックコメントの
@@ -145,6 +201,21 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 
 2026-08-22 に「10 pass / 1 fail（Build）」の PR を、fail を目視で見落として
 マージし develop のビルドを壊した。
+
+## 6-3 既存の揺れが再発したときの担当
+
+2026-11-04 の run で、`WorktreeDetailRefactored.test.tsx` の TC-3 が PR と develop で計 4 回落ちた。#4117 由来のテストの窓で、再実行で流している間に develop が赤になり、#4133 のワーカーが直した（負荷下 30 回で確認）。
+
+再実行が効くのは最初の 1 回だけにする（#4148）。**同じテストが同じ run でもう一度落ちたら（PR でも develop の push でも）、再実行をやめて担当を決める**:
+
+1. 由来を見る: `git log -S '<テスト名>' -- <テストのファイル>` で入れた PR を探し、run の記録と summary に、テスト名・落ちた回数・由来を書く
+2. 担当を上から順に決める:
+   - そのテストかその対象のファイルを scope に持つ、この run のワーカー → そのワーカーへ再指示する
+   - 無ければ、次にマージする PR のワーカー。契約の scope にテストのファイルを足して再指示する（#4133 の形。PR 本文に「既存の揺れで、この PR の変更が原因ではない」と書く）
+   - 走っているワーカーがいなければ、オーケストレーターが利用者に報告して追跡の Issue を提案する（起票は了承を得てから）
+3. develop の push の CI がそのテストで赤なら、直るまで次のマージを止める
+
+修正は負荷をかけて確かめる（直す前に落ちる条件で複数回）。1 回の緑では揺れが直った証拠にならない。
 
 ## 6-4 一本化のコミットと scope ゲート
 

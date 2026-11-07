@@ -472,6 +472,11 @@ export interface TerminalSplitPaneProps {
    */
   headerExtras?: React.ReactNode;
   /**
+   * Issue #4117: the session's role, between the chips and `headerExtras`. Handed
+   * in because it reads the server, and this component only draws.
+   */
+  roleStatus?: React.ReactNode;
+  /**
    * Issue #2193: which surface this split's body is showing. Presentational
    * only — the pane renders whatever `terminal` contains; this drives the
    * header control's pressed state. Defaults to `'terminal'`.
@@ -557,6 +562,7 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   onFocus,
   attaching = false,
   headerExtras,
+  roleStatus,
   surfaceMode = DEFAULT_SURFACE_MODE,
   onSurfaceModeChange,
   isMaximized = false,
@@ -794,6 +800,9 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
         noteEditLabel={noteEditLabel}
         openNoteEditor={openNoteEditor}
       />
+
+      {/* Issue #4117: absent when no role is involved. */}
+      {roleStatus}
 
       {/* Issue #1171: session-scoped extras (the End × button) sit directly
           after the instance selector, before the search button, so the

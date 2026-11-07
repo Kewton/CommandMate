@@ -61,12 +61,13 @@ import {
   exactTarget,
 } from '../tmux/tmux';
 import {
-  OPENCODE_IDLE_COMPOSER_PATTERN,
+  findOpenCodeIdleComposer,
   OPENCODE_SELECTION_LIST_PATTERN,
   stripAnsi,
 } from '../detection/cli-patterns';
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
-import { isOpenCodeComposerReady } from '../detection/tools/opencode/readiness';
+import { detectOpenCodeModalOverlay } from '../detection/opencode-modal-overlay';
+import { isOpenCodeComposerReady, readOpenCodeNotReadyScreen } from '../detection/tools/opencode/readiness';
 import { detectSessionStatus, isGeneratingStatus, type StatusDetectionResult } from '../detection/status-detector';
 import {
   PROMPT_WAIT_DIALOG_CONFIRM_MS,
@@ -100,11 +101,13 @@ import {
   resumeOpencodeEventStream,
 } from '@/lib/hooks/sources/opencode/runtime';
 import { getAssignedOpencodePort } from '@/lib/hooks/sources/opencode/ports';
+import { noteLaunchResumedConversation } from '@/lib/session/role-launch';
 import {
   getOpencodeLaunchSettings,
   opencodePromptSelection,
 } from '@/lib/hooks/sources/opencode/launch-settings';
 import {
+  fetchOpencodeConfig,
   fetchOpencodeHealth,
   newOpencodeMessageId,
   opencodeFileUrl,
@@ -222,6 +225,25 @@ const OPENCODE_PROMPT_POLL_INTERVAL_MS = 500;
 function isOpenCodeWaitDialog(status: Pick<StatusDetectionResult, 'status' | 'reason' | 'hasActivePrompt'>): boolean {
   if (isGeneratingStatus(status)) return false;
   return status.hasActivePrompt || status.status === 'waiting';
+}
+
+/**
+ * What held the pane when the wait for the input box ran out (Issue #4161), for the
+ * refusal `send` reports. Names the screen only: nothing captured goes into it. A
+ * dialog here is one read too briefly to be confirmed.
+ *
+ * @param output - The last capture; null when the last read failed
+ */
+function describeOpenCodePaneHold(output: string | null): string {
+  if (output === null) return 'the pane could not be read';
+  switch (readOpenCodeNotReadyScreen(output)) {
+    case 'dialog':
+      return 'a dialog or overlay is open: answer it in the terminal';
+    case 'input-box-holds-text':
+      return 'the input box still holds text';
+    default:
+      return 'no input box on the pane: opencode may still be starting';
+  }
 }
 
 /** Whether this send's server dispatch ended `unknown` (Issue #4040). */
@@ -467,6 +489,8 @@ export class OpenCodeTool extends BaseCLITool {
           ? plannedCommand
           : withOpencodeResumedSession(plannedCommand, resumeSessionId);
       if (resumeSessionId !== null) {
+        // Issue #4115 (§6.4): a role that changed goes on in this conversation; it is told.
+        noteLaunchResumedConversation(target);
         logger.info('opencode-session-resumed', {
           worktreeId,
           instanceId: instanceId ?? this.id,
@@ -513,6 +537,12 @@ export class OpenCodeTool extends BaseCLITool {
     }
   }
 
+  /** Issue #4115: `GET /config`, the evidence that the server read the role (§14). */
+  protected async readServerConfig(worktreeId: string, _worktreePath: string, instanceId: string | undefined): Promise<unknown> {
+    const port = getAssignedOpencodePort(opencodeTarget(worktreeId, instanceId));
+    return port === null ? null : fetchOpencodeConfig(port);
+  }
+
   /**
    * Wait until opencode has painted something only opencode paints.
    *
@@ -526,9 +556,10 @@ export class OpenCodeTool extends BaseCLITool {
    *
    * ## What counts as evidence
    *
-   * `OPENCODE_IDLE_COMPOSER_PATTERN` (Issue #1883) — the `Ask anything...`
-   * placeholder **behind the input box's gutter**. Not reimplemented here on
-   * purpose; it is the same positive-evidence row `status-detector` reads.
+   * `findOpenCodeIdleComposer` (Issue #1883, by position since Issue #4209) — the
+   * `Ask anything...` placeholder **behind the input box's gutter, in the box over
+   * its bottom border**. Not reimplemented here on purpose; it is the same
+   * positive-evidence row `status-detector` reads.
    *
    * The copilot hazard that #1907 hit does not reach opencode, and this was
    * checked rather than assumed. Removing copilot's blind sleep exposed the
@@ -547,6 +578,16 @@ export class OpenCodeTool extends BaseCLITool {
    * operator's config, which is the same line codex's launch draws at its
    * hooks-review dialog (#1760).
    *
+   * A modal overlay is the third (Issue #4104): the palette hides `Ask anything`
+   * too when it opens before the wait has seen the box, and its heading is not
+   * on that allowlist. Measured on 1.18.35: 30 s here for a send that was then
+   * refused in 2 s. The overlay is opencode's own painting, and the TUI is a
+   * client of its server, so the stream attach below still finds the server up
+   * (#1908). It ends the wait only once confirmed, as the send's own wait does
+   * ({@link waitForPrompt}), so a palette closed sooner still ends on the box. A
+   * wrong reading costs nothing typed: the send's wait reads the pane itself.
+   * The rectangle needs the SGR, so the raw capture is what is read.
+   *
    * ## On failure
    *
    * Returns false and lets the launch continue, exactly as the sleep did: a
@@ -557,12 +598,15 @@ export class OpenCodeTool extends BaseCLITool {
    * @returns Whether readiness evidence was seen inside the window
    */
   private async waitForReady(sessionName: string): Promise<boolean> {
+    const overlay = createDialogConfirmation();
     for (let attempt = 0; attempt < OPENCODE_READY_MAX_ATTEMPTS; attempt++) {
       try {
-        const output = stripAnsi(await capturePane(sessionName, OPENCODE_READY_CAPTURE_LINES));
+        const frame = await capturePane(sessionName, OPENCODE_READY_CAPTURE_LINES);
+        const output = stripAnsi(frame);
 
         // Do NOT stripBoxDrawing() this frame: the gutter is the anchor.
-        if (OPENCODE_IDLE_COMPOSER_PATTERN.test(output)) {
+        // Issue #4209: by position — the placeholder in the box over its border.
+        if (findOpenCodeIdleComposer(output) !== null) {
           logger.info('opencode-composer-detected', { attempt });
           return true;
         }
@@ -571,8 +615,15 @@ export class OpenCodeTool extends BaseCLITool {
           logger.info('opencode-overlay-detected', { attempt });
           return true;
         }
+
+        if (overlay.observe(detectOpenCodeModalOverlay(frame) !== null)) {
+          logger.info('opencode-launch-dialog-confirmed', { attempt, reads: overlay.reads });
+          return true;
+        }
       } catch {
-        // Capture may fail while the pane is still coming up - keep polling
+        // Capture may fail while the pane is still coming up - keep polling.
+        // Not an overlay read: the run restarts.
+        overlay.reset();
       }
       await new Promise((resolve) => setTimeout(resolve, OPENCODE_READY_POLL_INTERVAL_MS));
     }
@@ -956,6 +1007,7 @@ export class OpenCodeTool extends BaseCLITool {
   private async waitForPrompt(sessionName: string): Promise<void> {
     const deadline = Date.now() + OPENCODE_PROMPT_WAIT_TIMEOUT_MS;
     const dialog = createDialogConfirmation();
+    let lastOutput: string | null = null;
     while (Date.now() < deadline) {
       let refusal: Error | null = null;
       try {
@@ -963,6 +1015,7 @@ export class OpenCodeTool extends BaseCLITool {
           () => capturePane(sessionName, OPENCODE_READY_CAPTURE_LINES),
           deadline
         );
+        lastOutput = output;
         if (output === null) break;
         if (isOpenCodeComposerReady(output)) return;
         const status = detectSessionStatus(output, 'opencode');
@@ -977,6 +1030,7 @@ export class OpenCodeTool extends BaseCLITool {
         }
       } catch (error: unknown) {
         // Capture may fail - continue polling. Not a dialog read: the run restarts.
+        lastOutput = null;
         dialog.reset();
         logger.debug('opencode-prompt-capture-failed', { sessionName, error: getErrorMessage(error) });
       }
@@ -986,7 +1040,9 @@ export class OpenCodeTool extends BaseCLITool {
       await new Promise((resolve) => setTimeout(resolve, Math.min(OPENCODE_PROMPT_POLL_INTERVAL_MS, remaining)));
     }
     logger.info('opencode-prompt-not-detected');
-    throw new Error('OpenCode prompt not ready: timed out waiting for the input prompt before sending');
+    throw new Error(
+      `OpenCode prompt not ready: timed out waiting for the input prompt before sending (${describeOpenCodePaneHold(lastOutput)})`
+    );
   }
 
   /**

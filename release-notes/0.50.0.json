@@ -1,0 +1,113 @@
+{
+  "version": "0.50.0",
+  "date": "2026-11-07",
+  "highlight": {
+    "ja": "エージェントに「ロール」（役割の指示）を持たせられるようになりました。CLI・設定画面・名簿でロールを作り、セッションごとに指定できます。",
+    "en": "Agents can now be given a role, a standing instruction for their job. Create roles and assign them to sessions from the CLI, Settings, or the instance list."
+  },
+  "added": [
+    {
+      "ja": "設定画面・追加ダイアログ・名簿で、エージェントのロールを作成・指定できるようになりました。",
+      "en": "You can now create and assign agent roles from Settings, the add dialog, and the instance list."
+    },
+    {
+      "ja": "CLI の roles コマンドで、ロールの定義・既定・セッションへの指定ができるようになりました。",
+      "en": "The roles command in the CLI now lets you define roles, set defaults, and assign them to sessions."
+    },
+    {
+      "ja": "ロールが Claude・Codex・Copilot・OpenCode など 7 つのツールの起動と Schedule に適用されるようになりました。",
+      "en": "Roles are now applied when launching seven tools, including Claude, Codex, Copilot, and OpenCode, and in Schedules."
+    },
+    {
+      "ja": "OpenCode V2 で、接続が切れている間に終わった返信も、再接続したときに履歴へ記録されるようになりました。",
+      "en": "With OpenCode V2, replies that finished while the connection was down are now saved to history when it reconnects."
+    },
+    {
+      "ja": "OpenCode V1 で新しい会話を始めて送信できるようになりました（send の新しい会話のオプション）。",
+      "en": "You can now start a new conversation when sending to OpenCode V1 (a new-conversation option for send)."
+    }
+  ],
+  "improved": [],
+  "fixed": [
+    {
+      "ja": "依頼元の確認画面で依頼の返事の配送が止まっているとき、その理由を一覧・名簿・チャット面で読めるようにしました。",
+      "en": "When a relayed reply is held up by a confirmation on the requester's screen, the reason now shows in the relay list, the instance list, and the chat view."
+    },
+    {
+      "ja": "OpenCode で、作業フォルダ名や返信の文言によって完了・状態・送信の判定を誤る問題を直しました。",
+      "en": "Fixed OpenCode misjudging completion, status, or sending because of the folder name or words quoted in a reply."
+    },
+    {
+      "ja": "OpenCode の返信が「esc interrupt」などの語を引用すると、完了しない・行が消える問題を直しました。",
+      "en": "Fixed OpenCode replies that quote words such as esc interrupt not completing or losing those lines."
+    },
+    {
+      "ja": "OpenCode V2 で 1 時間を超えるターンの完了を読めない問題を直しました。",
+      "en": "Fixed OpenCode V2 not detecting the end of turns longer than one hour."
+    },
+    {
+      "ja": "OpenCode V1 で短いターンの完了を待ち続ける問題などを直しました。",
+      "en": "Fixed waiting forever on very short OpenCode V1 turns, among other issues."
+    },
+    {
+      "ja": "相対パスで指定した COPILOT_HOME などの設定で、エージェントが別の設定ファイルを読む問題を直しました。",
+      "en": "Fixed agents reading the wrong settings file when settings such as COPILOT_HOME were given as relative paths."
+    },
+    {
+      "ja": "タブが隠れている間の通信（ターミナルの再接続・クローンの進捗・一覧の更新）を止めるようにしました。",
+      "en": "Background tabs no longer keep talking to the server (terminal reconnects, clone progress, and list refreshes)."
+    },
+    {
+      "ja": "Review タブと外部アプリの画面が、隠れている間も通信を続ける問題を直しました。",
+      "en": "Fixed the Review tab and external apps screens polling while hidden."
+    },
+    {
+      "ja": "Codex の起動中の確認への自動の答えが断られ続けると、起動の待ちがすぐに尽きる問題を直しました。",
+      "en": "Fixed Codex launches giving up too early when the automatic answer to a startup prompt kept being refused."
+    },
+    {
+      "ja": "Codex でロールを使うと、2 回目以降の起動が拒否される問題を直しました。",
+      "en": "Fixed later Codex launches being refused when a role was in use."
+    },
+    {
+      "ja": "Claude の信頼の確認画面で止まったときに、その旨を知らせるようにしました。",
+      "en": "You are now told when Claude stops on its folder trust prompt."
+    },
+    {
+      "ja": "エージェントの終了・再起動の結果が分からないときに、誤って失敗と表示する問題を直しました。",
+      "en": "Fixed stopping or restarting an agent being shown as failed when the result was simply unknown."
+    },
+    {
+      "ja": "詳細画面で、遅れて届いた応答により古い値が表示される問題を直しました。",
+      "en": "Fixed the detail screen showing stale values when an older response arrived late."
+    },
+    {
+      "ja": "send の送信後に名簿への登録が失敗すると、送信まで失敗と扱われる問題を直しました。",
+      "en": "Fixed send reporting failure for a message that was sent when only the instance list update failed."
+    },
+    {
+      "ja": "send の Auto-Yes つきの返信の依頼が拒否されたときに、Auto-Yes が残る問題を直しました。",
+      "en": "Fixed Auto-Yes staying on after a reply request sent with it was refused."
+    },
+    {
+      "ja": "ロールの設定が同時に更新されたときに、別の操作の設定を上書きする問題を直しました。",
+      "en": "Fixed simultaneous role updates overwriting each other."
+    },
+    {
+      "ja": "送信失敗のエラーで前置きが重なる問題と、OpenCode の起動中のダイアログで送信に時間がかかる問題を直しました。",
+      "en": "Fixed duplicated prefixes in send errors and slow sends while an OpenCode startup dialog was open."
+    },
+    {
+      "ja": "PC の名簿で保留の件数が切れる問題と、スマホで更新の案内がボタンを覆う問題を直しました。",
+      "en": "Fixed the held count being cut off in the desktop instance list and the update notice covering buttons on mobile."
+    },
+    {
+      "ja": "特定の環境変数を引き継いだ環境で、コストの定期保存などが止まる問題を直しました。",
+      "en": "Fixed periodic cost saving and similar work stopping when a test-only environment variable was inherited."
+    },
+    {
+      "ja": "応答の本文が途中で止まると、画面の読み込みが終わらない問題を直しました。",
+      "en": "Fixed screens never finishing loading when a response body stalled partway."
+    }
+  ]
+}

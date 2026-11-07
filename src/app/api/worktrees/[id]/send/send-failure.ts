@@ -15,7 +15,15 @@ import {
 } from '@/lib/session/send-attempt-state';
 import { SESSION_STARTING_CODE } from '@/lib/session/session-start-error';
 import { FOREIGN_SESSION_ERROR_CODE } from '@/lib/cli-tools/session-ownership';
+import {
+  readRoleLaunchRefusal,
+  ROLE_CONDITION_UNMET_CODE,
+  ROLE_LAUNCH_REFUSED_CODE,
+} from '@/lib/agent-roles/launch-errors';
 import { answerSessionStartTimeout } from './send-session-start';
+
+/** How the error of a failed send starts, whoever wrote it. */
+const SEND_FAILURE_PREFIX = 'Failed to send message to ';
 
 /**
  * The fields of a failed `sendUserMessage` result this answer reads. Written
@@ -67,6 +75,20 @@ export function answerSendFailure(
       { status: 409 }
     );
   }
+  // Issue #4115: a driver's relaunch or the last check before the body refused it
+  // because of the role. Answered as a start refused for that reason is: nothing
+  // was typed, so this is a refusal with a stable code and not a server fault.
+  if (ownAttempt?.reason === 'role-condition-failed' || ownAttempt?.reason === 'role-launch-refused') {
+    const roleRefusal = readRoleLaunchRefusal(result.error);
+    return NextResponse.json(
+      {
+        error: result.error,
+        code: ownAttempt.reason === 'role-condition-failed' ? ROLE_CONDITION_UNMET_CODE : ROLE_LAUNCH_REFUSED_CODE,
+        ...(roleRefusal !== null ? { roleRefusal } : {}),
+      },
+      { status: 409 }
+    );
+  }
   // Issue #3006: the session this request (or one just before it) launched
   // has not shown its input prompt yet. Answered exactly as a slow start
   // above is — 503 + SESSION_STARTING, message unwrapped — so the CLI and
@@ -96,9 +118,19 @@ export function answerSendFailure(
       : null);
   const sendState = attempt !== null ? ` ${describeSendAttemptState(attempt)}` : '';
   return NextResponse.json(
-    { error: `Failed to send message to ${cliTool.name}: ${aimPlanReviewRefusal(result.error, attempt, input)}${sendState}` },
+    { error: `${withSendFailurePrefix(aimPlanReviewRefusal(result.error, attempt, input), cliTool.name)}${sendState}` },
     { status: 500 }
   );
+}
+
+/**
+ * The failure with the sentence that opens it, once (Issue #4104). Eight tools
+ * wrap their own failure in it, and a name comparison would miss four of them:
+ * the wrap says `Codex`, `cliTool.name` says `Codex CLI`. Only the start counts,
+ * so a failure that merely quotes the sentence still names the tool.
+ */
+function withSendFailurePrefix(error: string, toolName: string): string {
+  return error.startsWith(SEND_FAILURE_PREFIX) ? error : `${SEND_FAILURE_PREFIX}${toolName}: ${error}`;
 }
 
 /**

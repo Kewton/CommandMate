@@ -2,6 +2,7 @@
 #! scripts/orchestrate/contract.mjs が `{{…}}` を Issue ごとの設定で埋め、`#!` で始まる行を落とす。
 #! 担当（Claude / Antigravity）で雛形を分けない。Antigravity は `.claude/commands` を読まないので、どの節も省かない。
 #! `{{REFACTOR_RULES}}` には kind: refactor のときだけ refactor-rules.md（2-4-3 の整理の決まり）が入る。
+#! `{{FIXTURE_RULE}}` には scope が tests/fixtures/ の下に当たるときだけ fixture 走査テストの登録の文が入る（#4015）。
 #! `{{ROUTES}}` には設定に routes があるときだけ経路表と割込み表が入る（#3884）。無ければ行ごと消え、goal は変わらない。
 #! `{{ISSUE_BODY}}` には Issue 本文（事象 / 原因 / 確定仕様 / 受入基準）が入る。原因は file:line つきで書かれていること。
 {{ISSUE_URL}} を実装する（{{KIND_LABEL}}）。
@@ -16,7 +17,7 @@
    食い違っていたら実コードを正とし、判断をコミットメッセージ本文に書く。
 2. 先に失敗するテストを書き、それから直す。陽性対照（直す前の実装で落ちる）と陰性対照（今までどおりの動きは変わらない）を置く。
    対照は実リポジトリのファイルを書き換えずに示す（`os.tmpdir()` 配下に `fs.mkdtempSync` で作り、`afterEach` で必ず削除する）。
-3. **対になる場所を自分で探す。** 同じ処理の写し（PC とスマホ、チャット面とターミナル、ルートどうし、ツールごとの実装、同じ関数を別の関数越しに呼ぶ経路）、型の写し（`src/cli/types/`）、説明（`docs/` の ja と en、コメント）、古い動きを固定しているテスト。直した理由が、同じ場所の別の条件にも当てはまらないかも見る。scope の中なら一緒に直す。scope の外なら直さず、コミットメッセージ本文に「本文に無い指摘: <file>:<line> <内容>」と書く。探した結果は、見つからなかったときも「探した対象と、無かったこと」を本文に書く。
+3. **対になる場所を自分で探す。** 同じ処理の写し（PC とスマホ、チャット面とターミナル、ルートどうし、ツールごとの実装、同じ関数を別の関数越しに呼ぶ経路）、型の写し（`src/cli/types/`）、説明（`docs/` の ja と en、コメント）、古い動きを固定しているテスト。直した理由が、同じ場所の別の条件にも当てはまらないかも見る。scope の中なら一緒に直す。scope の外なら直さず、コミットメッセージ本文に「本文に無い指摘: <file>:<line> <内容>」と書く。探した結果は、見つからなかったときも「探した対象と、無かったこと」を本文に書く。文面・エラーを変えたら、`git grep -l '<変える前の文面>' -- tests/integration tests/e2e` で固定しているテストも探す（docs/orchestrate/contract.md#2-4-文面を変える契約と-integration）。
 4. 確認に使うコマンドは `npx vitest run <関係するテスト> tests/unit/guards tests/unit/docs`、`npm run lint`、`npx tsc --noEmit` だけにする（**ガードのテスト `tests/unit/guards` は必ず含める**）。
    テスト全体（`npm run test:unit`）は実行しないこと。全体は検証ゲートか CI が実行する。
    `npx vitest run tests/unit` と `node scripts/run-related-unit-tests.mjs` も同じ扱い（同じマシンでほかの検証が動いていて、負荷で互いに落ちる）。
@@ -31,6 +32,7 @@
 - worktree の外（`$HOME`、`/tmp` など）に既にあるファイルやディレクトリは、確認のためでも消したり書き換えたりしない。本番（ポート 3000）に何も送らない。
   確認は `os.tmpdir()` 配下に作った一時ディレクトリ（private HOME など）の中で行う。
 - 既存の `it(...)` / `describe(...)` を消したり名前を変えたりしない（上の「決定」が許したものを除く）。既存のテストの期待値も含め、変更が要ると判断したら、変えずに本文に無い指摘として報告する。
+{{FIXTURE_RULE}}
 {{REFACTOR_RULES}}
 {{FRAGMENT_RULES}}
 {{CHANGELOG_SECTION}}

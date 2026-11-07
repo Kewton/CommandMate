@@ -1,0 +1,8 @@
+import fs from 'node:fs';import {spawn,execFileSync} from 'node:child_process';
+const T=process.env.PROBE_ROOT+'/v2api';fs.rmSync(T,{recursive:true,force:true});fs.mkdirSync(T+'/.config/opencode',{recursive:true});fs.writeFileSync(T+'/r.md','ROLE_API_MARKER');execFileSync('git',['init','-q',T]);
+const env={PATH:'/opt/homebrew/bin:/usr/bin:/bin',HOME:T,XDG_CONFIG_HOME:T+'/.config',XDG_DATA_HOME:T+'/d',XDG_STATE_HOME:T+'/s',XDG_CACHE_HOME:T+'/c',OPENCODE_SERVER_PASSWORD:'pw',OPENCODE_CONFIG_CONTENT:JSON.stringify({agents:{build:{system:`{file:${T}/r.md}`}}})};
+const p=spawn('/opt/homebrew/bin/opencode2',['serve','--hostname','127.0.0.1','--port','18291'],{cwd:T,env,stdio:'ignore'});await new Promise(r=>setTimeout(r,6000));
+const g=async(u)=>{const r=await fetch('http://127.0.0.1:18291'+u,{headers:{authorization:'Basic '+Buffer.from('opencode:pw').toString('base64')}});return{status:r.status,ct:r.headers.get('content-type'),text:await r.text()};};
+const o=JSON.parse((await g('/openapi.json')).text);const paths=Object.keys(o.paths).filter(x=>/agent|config/i.test(x));console.log(paths);
+const q=`?directory=${encodeURIComponent(T)}`;for(const u of paths.filter(x=>!x.includes('{'))){const r=await g(u+q);console.log(u,r.status,r.ct,'hasRoleBody=',r.text.includes('ROLE_API_MARKER'),r.text.slice(0,140).replace(/\s+/g,' '));}
+p.kill('SIGTERM');await new Promise(r=>setTimeout(r,1500));process.exit(0);

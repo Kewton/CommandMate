@@ -61,6 +61,19 @@ import {
 } from './send-session-start';
 import { resolveSendImagePath } from './send-image-path';
 import { answerSendFailure } from './send-failure';
+import {
+  checkRunningRole,
+  chooseNewOpencodeConversation,
+  prepareSendRole,
+  readRoleRosterMark,
+  refuseGonePinnedProcess,
+  rereadWorktreeForRole,
+  roleConditionBoundary,
+  roleSendNotices,
+  takeOpencodeResumeNotice,
+} from './send-role';
+import { getLaunchRoleEvidence } from '@/lib/session/role-launch';
+import type { StoredRoleState } from '@/types/agent-roles';
 
 const logger = createLogger('api/send');
 
@@ -74,7 +87,13 @@ export async function POST(
   context: { params: Promise<{ id: string }> }
 ) {
   const relay: RouteRelayState = { binding: null, attempt: null, sent: null };
-  const response = await handleSend(request, context, relay);
+  const role: RouteRoleState = { settings: null };
+  const handled = await handleSend(request, context, relay, role);
+  // Issue #4116: whatever refuses a send after its role was saved, the answer says it
+  // stayed saved. Nothing saved, nothing added: a send with no role answers as it did.
+  const response = role.settings && handled.status >= 400
+    ? await withBody(handled, { roleSettings: role.settings })
+    : handled;
   const { binding } = relay;
   if (!binding) {
     // Issue #4011: whether it may be sent again does not depend on a relay.
@@ -93,6 +112,11 @@ export async function POST(
   );
   if (sendOutcome === 'sent') evaluateRelayAfterSend(binding.relayId);
   return withBody(response, { relayId: binding.relayId, sendOutcome });
+}
+
+/** What this request saved for the instance, for its answer. */
+interface RouteRoleState {
+  settings: { saved: true; stored: StoredRoleState } | null;
 }
 
 /**
@@ -118,7 +142,8 @@ async function withBody(response: Response, extra: Record<string, unknown>): Pro
 async function handleSend(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
-  relay: RouteRelayState
+  relay: RouteRelayState,
+  role: RouteRoleState
 ) {
   // Issue #4065: the input generation counter at the request's outermost
   // entry, before the body is read and before every wait below. A refusal of
@@ -148,6 +173,8 @@ async function handleSend(
     if (!validated.ok) return validated.response;
     const { trimmedContent, requestedCliToolId, instanceId, target } = validated.value;
     const cliToolId = target.cliToolId;
+    // Issue #4116: in the same step as the resolution, before anything waits.
+    const roleRosterMark = readRoleRosterMark(db, id, body);
 
     const reserved = reserveRelayForSend(db, body.relayId, {
       worktreeId: id,
@@ -203,6 +230,47 @@ async function handleSend(
       return NextResponse.json(foreignSessionErrorBody(sessionName, ownership.sessionPath), { status: 409 });
     }
 
+    // Issue #4115: a role this send names is validated and saved here, before the
+    // start and outside it, so the launch below resolves what was just saved.
+    // Issue #4116: what can refuse this send later is asked first if it can be, so a
+    // refusal leaves no setting behind. Only for a send naming a role: for any other
+    // the order of its answers stays. The checks below stay too: a process can come up
+    // between here and there, and then the answer says the setting stayed saved.
+    if (body.role !== undefined) {
+      const earlyImage = resolveSendImagePath(body.imagePath, worktree.path);
+      if (!earlyImage.ok) return earlyImage.response;
+      const earlyModel = body.model
+        ? refuseModelOnRunningSession(body.model, cliToolId, await cliTool.isRunning(id, instanceId))
+        : null;
+      if (earlyModel) return earlyModel;
+    }
+
+    // Issue #4116: what the waits above may have moved is read again first.
+    const roleTarget = { worktreeId: id, cliToolId, instanceId };
+    const roleWorktree = rereadWorktreeForRole(
+      db,
+      body,
+      { worktree, cliToolId, rosterInstanceId: target.instanceId, rosterMark: roleRosterMark },
+      recordNotSent,
+    );
+    if (!roleWorktree.ok) return roleWorktree.response;
+    const preparedRole = await prepareSendRole(
+      db,
+      body,
+      {
+        worktree: roleWorktree.value,
+        cliToolId,
+        rosterInstanceId: target.instanceId,
+        instanceId,
+        onSaved: (settings) => {
+          role.settings = settings;
+        },
+      },
+      recordNotSent,
+    );
+    if (!preparedRole.ok) return preparedRole.response;
+    const roleGate = preparedRole.value;
+
     // Check if CLI tool session is running.
     //
     // Issue #3981 (R4): a launch of this session another request has in
@@ -233,6 +301,13 @@ async function handleSend(
 
     // Start CLI tool session if not running
     if (!running) {
+      // Issue #4116: starting one would only make a process this send then refuses.
+      const gone = refuseGonePinnedProcess(roleGate, recordNotSent);
+      if (gone) return gone;
+      // Issue #4115 (§6.4): only OpenCode V1 resumes, and it goes on unless told otherwise.
+      if (cliToolId === 'opencode' && body.newConversation === true) {
+        chooseNewOpencodeConversation({ worktreeId: id, instanceId });
+      }
       const started = await startSessionForSend({
         db,
         cliTool,
@@ -262,6 +337,10 @@ async function handleSend(
       // lookup, so the per-send `capture-pane` count is unchanged.
       probeRunningSessionHookUrl(cliTool, id, instanceId);
     }
+
+    // Issue #4115: running or just started, this is the process the body would reach.
+    const roleRefusal = checkRunningRole(roleGate, roleTarget, recordNotSent);
+    if (roleRefusal) return roleRefusal;
 
     const image = resolveSendImagePath(body.imagePath, worktree.path);
     if (!image.ok) return image.response;
@@ -303,7 +382,8 @@ async function handleSend(
         turnAtInput = readTurnAtInput(id, cliToolId, instanceId);
       },
       // Issue #3957: the relay's boundary, required — a refusal stops the send.
-      inputBoundary: relay.binding?.hooks(),
+      // Issue #4115: the role's condition goes first, re-read at the same moment.
+      inputBoundary: roleConditionBoundary(roleGate, roleTarget, relay.binding?.hooks()),
     });
 
     if (!result.ok) {
@@ -348,7 +428,19 @@ async function handleSend(
     );
     const sent: SendMessageResponse =
       turnOpenAtSend !== undefined ? { ...result.message, turnOpenAtSend } : result.message;
-    return NextResponse.json(sent, { status: 201 });
+    return NextResponse.json(
+      {
+        ...sent,
+        ...roleSendNotices({
+          cliToolId,
+          gate: roleGate,
+          evidence: getLaunchRoleEvidence(roleTarget),
+          // Here and not at the start: a driver may have relaunched inside the send.
+          opencodeResume: cliToolId === 'opencode' ? takeOpencodeResumeNotice({ worktreeId: id, instanceId }) : null,
+        }),
+      },
+      { status: 201 },
+    );
   } catch (error: unknown) {
     logger.error('error-sending-message:', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(

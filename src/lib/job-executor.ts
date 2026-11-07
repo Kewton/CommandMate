@@ -16,6 +16,8 @@
 
 import { randomUUID } from 'crypto';
 import { executeClaudeCommand, type ExecuteCommandOptions } from './session/claude-executor';
+import { resolveScheduleRole } from './session/role-launch';
+import { sanitizeEnvForChildProcess } from '@/lib/security/env-sanitizer';
 import { resolveScheduleCommandOptions } from '@/lib/cmate-cli-tool-parser';
 import type { ScheduleEntry } from '@/types/cmate';
 import { createLogger } from '@/lib/logger';
@@ -249,12 +251,28 @@ export async function executeSchedule(state: ScheduleState): Promise<void> {
     // Resolve the CLI options via the centralized helper (DR1-004, #2044)
     const options = resolveScheduleExecuteOptions(state.entry, worktree);
 
+    // Issue #4115: the defaults for this worktree and tool, resolved here and not in
+    // `executeClaudeCommand`, which the daily summary shares (D2). A role that cannot
+    // be applied fails the run: it must not go ahead without one.
+    const scheduleRole = await resolveScheduleRole(db, {
+      worktreeId: state.worktreeId,
+      cliToolId: state.entry.cliToolId,
+      worktreePath: worktree.path,
+      explicitAgent: options?.agent,
+      env: sanitizeEnvForChildProcess(),
+    });
+    if (scheduleRole.kind === 'refused') {
+      updateExecutionLog(logId, 'failed', scheduleRole.refusal.message, null);
+      logger.warn('execution:role-refused', { name: state.entry.name, reason: scheduleRole.refusal.reason });
+      return;
+    }
+
     const result = await executeClaudeCommand(
       state.entry.message,
       worktree.path,
       state.entry.cliToolId,
       state.entry.permission,
-      options
+      scheduleRole.kind === 'role' ? { ...options, role: scheduleRole.role } : options
     );
 
     // Issue #2253: `result.status` is not always "did the process exit 0".

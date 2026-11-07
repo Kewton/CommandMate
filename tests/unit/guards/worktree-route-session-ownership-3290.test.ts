@@ -297,9 +297,15 @@ interface Exemption {
 }
 
 const ENV_SNAPSHOT_ONLY = ['src/lib/verification/env-snapshot.ts'] as const;
+/** The one module the role routes reach tmux through (Issue #4115). */
+const ROLE_PANE_ENV_ONLY = ['src/lib/agent-roles/pane-env.ts'];
+
 const ENV_SNAPSHOT_REASON =
-  'reaches tmux only through the env-clean snapshot, which runs `list-sessions` to count ' +
-  'session names before and after a run; it never addresses a session';
+  'reaches tmux only through the env-clean snapshot\'s `list-sessions`, which reads session ' +
+  'names: to count them before and after a run, and for POST /tasks to warn when a session of ' +
+  'that name is running with no evidence of its role (#4132), and through the same runner\'s ' +
+  '`list-panes -a`, which reads each pane\'s session name and command to leave out a session ' +
+  'that is only a shell (#4144); it never addresses a session';
 
 const EXEMPT: readonly Exemption[] = [
   {
@@ -333,6 +339,23 @@ const EXEMPT: readonly Exemption[] = [
     reason:
       'asks only whether a session by each instance\'s name exists, to refuse a branch switch under a ' +
       'live agent. A foreign session makes it refuse (fail closed); nothing is sent, read or stopped',
+  },
+  {
+    handler: 'instances/roles/route.ts#GET',
+    reason:
+      'reads the role settings from the database; tmux is asked only for one environment variable ' +
+      '(`show-environment`) to compute what a launch would inject. Nothing is sent, read off a pane or stopped',
+    reachesOnly: ROLE_PANE_ENV_ONLY,
+  },
+  {
+    handler: 'instances/roles/route.ts#PUT',
+    reason: 'writes a role setting, which applies at the next launch; its answer reads as the GET does',
+    reachesOnly: ROLE_PANE_ENV_ONLY,
+  },
+  {
+    handler: 'instances/roles/route.ts#POST',
+    reason: 'creates a roster row and its role setting; its answer reads as the GET does',
+    reachesOnly: ROLE_PANE_ENV_ONLY,
   },
   { handler: 'tasks/route.ts#GET', reason: ENV_SNAPSHOT_REASON, reachesOnly: ENV_SNAPSHOT_ONLY },
   { handler: 'tasks/route.ts#POST', reason: ENV_SNAPSHOT_REASON, reachesOnly: ENV_SNAPSHOT_ONLY },
@@ -713,5 +736,17 @@ describe('[#3290] stage 2 — each of them leaves a foreign session alone', () =
         ]);
       }
     }, 30_000);
+  });
+});
+
+describe('[#4163] what ENV_SNAPSHOT_REASON says is what the warning runs', () => {
+  const WARNING = join(REPO_ROOT, 'src/app/api/worktrees/[id]/tasks/contract-role-warning.ts');
+
+  it('names both tmux reads of the route it excuses', () => {
+    const source = readFileSync(WARNING, 'utf-8');
+    expect(source).toContain("'list-panes', '-a'");
+    expect(source).toContain('probeTmuxSessions(');
+    expect(ENV_SNAPSHOT_REASON).toContain('`list-panes -a`');
+    expect(ENV_SNAPSHOT_REASON).toContain('`list-sessions`');
   });
 });

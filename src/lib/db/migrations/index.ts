@@ -46,6 +46,8 @@ import { v60_migrations } from './v60-session-relays';
 import { v61_migrations } from './v61-session-notes';
 import { v62_migrations } from './v62-session-relays-bind';
 import { v63_migrations } from './v63-session-relays-delivery-attempt';
+import { v64_migrations } from './v64-agent-roles';
+import { v65_migrations } from './v65-agent-instance-creation-keys';
 
 /**
  * Complete ordered list of all migrations.
@@ -97,4 +99,6 @@ export const migrations: Migration[] = [
   ...v61_migrations,
   ...v62_migrations,
   ...v63_migrations,
+  ...v64_migrations,
+  ...v65_migrations,
 ];

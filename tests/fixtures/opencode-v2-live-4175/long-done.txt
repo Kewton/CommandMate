@@ -1,0 +1,200 @@
+[38;2;255;255;255m[48;2;30;30;30m   [1m[38;2;238;238;238mCounting from 1 to 400 in[38;2;196;196;196m [38;2;146;146;146mp[38;2;97;97;97ml[38;2;47;47;47ma[0m[38;2;128;128;128m[48;2;10;10;10m + [38;2;255;255;255m
+  [38;2;92;156;245m[48;2;20;20;20m┃[38;2;255;255;255m                                                                           [48;2;10;10;10m
+
+     [38;2;238;238;238mThe History of the Bicycle[38;2;255;255;255m
+
+     [38;2;238;238;238mThe bicycle is one of the most elegant and influential machines ever [38;2;255;255;255m
+     [38;2;238;238;238mdevised. Simple in form, efficient in its use of human energy, and [38;2;255;255;255m
+     [38;2;238;238;238madaptable to nearly every culture and landscape, it has shaped [38;2;255;255;255m
+     [38;2;238;238;238mtransportation, sport, social movements, and industry for more than two [38;2;255;255;255m
+     [38;2;238;238;238mcenturies. Its history is not a single story of invention but a gradual [38;2;255;255;255m
+     [38;2;238;238;238mprocess of experimentation, failure, and refinement, involving inventors [38;2;255;255;255m
+     [38;2;238;238;238min many countries.[38;2;255;255;255m
+
+     [38;2;238;238;238mEarly Precursors[38;2;255;255;255m
+
+     [38;2;238;238;238mThe idea of a human-propelled two-wheeled vehicle did not appear in a [38;2;255;255;255m
+     [38;2;238;238;238mflash. Legends and disputed claims have long surrounded the early [38;2;255;255;255m
+     [38;2;238;238;238mhistory. Sketches once attributed to Leonardo da Vinci's circle, [38;2;255;255;255m
+     [38;2;238;238;238msupposedly showing a bicycle, are now widely regarded as later forgeries.[38;2;255;255;255m
+     [38;2;238;238;238mA more credible story begins in 1817, when the German baron Karl von [38;2;255;255;255m
+     [38;2;238;238;238mDrais, a forestry official in Baden, built a machine he called the [38;2;255;255;255m
+     [38;2;238;238;238mLaufmaschine, or "running machine." It had two in-line wheels, a wooden [38;2;255;255;255m
+     [38;2;238;238;238mframe, a steerable front wheel, and a padded seat. The rider sat astride [38;2;255;255;255m
+     [38;2;238;238;238mand pushed against the ground with his feet. Drais was motivated partly [38;2;255;255;255m
+     [38;2;238;238;238mby practical concerns. The eruption of Mount Tambora in 1815 had caused [38;2;255;255;255m
+     [38;2;238;238;238mthe "year without a summer," ruining harvests and killing many horses [38;2;255;255;255m
+     [38;2;238;238;238mthrough starvation, so an alternative to horse transport had real appeal.[38;2;255;255;255m
+
+     [38;2;238;238;238mThe draisine, or "hobby horse," became a brief fashion across Europe. In [38;2;255;255;255m
+     [38;2;238;238;238mEngland, Denis Johnson produced improved versions that were popular among[38;2;255;255;255m
+     [38;2;238;238;238myoung dandies in London. However, the craze faded quickly. Road surfaces [38;2;255;255;255m
+     [38;2;238;238;238mwere poor, riders on the pavement annoyed pedestrians, and many towns [38;2;255;255;255m
+     [38;2;238;238;238mbanned the machines from sidewalks. The hobby horse became a curiosity, [38;2;255;255;255m
+     [38;2;238;238;238mand for a time development stalled.[38;2;255;255;255m
+
+     [38;2;238;238;238mThe Pedal Arrives[38;2;255;255;255m
+
+     [38;2;238;238;238mThe decisive step was the addition of cranks and pedals to the wheel. Who[38;2;255;255;255m
+     [38;2;238;238;238mfirst did this is contested. A Scottish blacksmith, Kirkpatrick [38;2;255;255;255m
+     [38;2;238;238;238mMacmillan, is often credited with building a rear-wheel-driven pedal [38;2;255;255;255m
+     [38;2;238;238;238mmachine around 1839, though documentation is thin. Other Scottish and [38;2;255;255;255m
+     [38;2;238;238;238mFrench builders may have made similar attempts. What is certain is that [38;2;255;255;255m
+     [38;2;238;238;238mby the early 1860s in Paris, the Michaux family, carriage makers, and [38;2;255;255;255m
+     [38;2;238;238;238mtheir associates such as Pierre Lallement were producing bicycles with [38;2;255;255;255m
+     [38;2;238;238;238mpedals attached directly to the front wheel. Lallement emigrated to the [38;2;255;255;255m
+     [38;2;238;238;238mUnited States and received a patent in 1866. The machine was called the [38;2;255;255;255m
+     [38;2;238;238;238mvelocipede, and it became popular in France and then internationally in [38;2;255;255;255m
+     [38;2;238;238;238mthe late 1860s.[38;2;255;255;255m
+
+     [38;2;238;238;238mVelocipedes had wooden or iron-rimmed wheels and rigid frames, so they [38;2;255;255;255m
+     [38;2;238;238;238mwere nicknamed "boneshakers" for good reason. Riding them on cobblestones[38;2;255;255;255m
+     [38;2;238;238;238mwas punishing. Even so, they inspired riding schools, races, and a wave [38;2;255;255;255m
+     [38;2;238;238;238mof excitement. The Paris-Rouen race of 1869 is often cited as one of the [38;2;255;255;255m
+     [38;2;238;238;238mfirst organized bicycle road races. The Franco-Prussian War of 1870 [38;2;255;255;255m
+     [38;2;238;238;238minterrupted the French industry, and the center of development shifted to[38;2;255;255;255m
+     [38;2;238;238;238mBritain.[38;2;255;255;255m
+
+     [38;2;238;238;238mThe High Wheel Era[38;2;255;255;255m
+
+     [38;2;238;238;238mBecause a pedal fixed to the front wheel moves the bicycle only one wheel[38;2;255;255;255m
+     [38;2;238;238;238mrevolution per pedal revolution, the way to go faster was to enlarge the [38;2;255;255;255m
+     [38;2;238;238;238mfront wheel. This logic produced the high-wheeler, or "penny-farthing," [38;2;255;255;255m
+     [38;2;238;238;238min the 1870s. James Starley and others in Coventry, England, developed [38;2;255;255;255m
+     [38;2;238;238;238mlightweight designs using wire-spoked tension wheels, hollow steel [38;2;255;255;255m
+     [38;2;238;238;238mtubing, and solid rubber tires. Front wheels grew to as much as fifty-odd[38;2;255;255;255m
+     [38;2;238;238;238minches in diameter, with riders perched high above the ground and a tiny [38;2;255;255;255m
+     [38;2;238;238;238mrear wheel trailing behind.[38;2;255;255;255m
+
+     [38;2;238;238;238mHigh wheelers were fast but dangerous. A sudden stop or a rock in the [38;2;255;255;255m
+     [38;2;238;238;238mroad could pitch the rider forward over the handlebars, an accident known[38;2;255;255;255m
+     [38;2;238;238;238mas a "header." They were also expensive and demanded athleticism, which [38;2;255;255;255m
+     [38;2;238;238;238mmade them a pastime of young, well-off men. Nevertheless, they built a [38;2;255;255;255m
+     [38;2;238;238;238mculture. Cycling clubs formed, touring became fashionable, and [38;2;255;255;255m
+     [38;2;238;238;238morganizations such as the League of American Wheelmen, founded in 1880, [38;2;255;255;255m
+     [38;2;238;238;238mlobbied for better roads. Thomas Stevens even rode a high wheeler across [38;2;255;255;255m
+     [38;2;238;238;238mthe United States and then around much of the world in the 1880s. The [38;2;255;255;255m
+     [38;2;238;238;238msport and its advocates created a constituency for improved roads that [38;2;255;255;255m
+     [38;2;238;238;238mwould later benefit motorists as well.[38;2;255;255;255m
+
+     [38;2;238;238;238mThe Safety Bicycle[38;2;255;255;255m
+
+     [38;2;238;238;238mThe search for a safer machine led to a series of designs. Some used [38;2;255;255;255m
+     [38;2;238;238;238mlevers or treadle mechanisms, and others used chains to drive a smaller [38;2;255;255;255m
+     [38;2;238;238;238mrear wheel. In 1876, Harry Lawson built a rear-chain-driven "bicyclette,"[38;2;255;255;255m
+     [38;2;238;238;238mand in 1885 John Kemp Starley, nephew of James, introduced the Rover [38;2;255;255;255m
+     [38;2;238;238;238mSafety Bicycle. It had two wheels of nearly equal size, a diamond-shaped [38;2;255;255;255m
+     [38;2;238;238;238mframe, a chain drive to the rear wheel, and a rider position low enough [38;2;255;255;255m
+     [38;2;238;238;238mto put feet on the ground. This layout is, in essential form, the bicycle[38;2;255;255;255m
+     [38;2;238;238;238mwe still know today.[38;2;255;255;255m
+
+     [38;2;238;238;238mA second breakthrough came in 1888, when the Scottish veterinarian John [38;2;255;255;255m
+     [38;2;238;238;238mBoyd Dunlop developed a practical pneumatic tire for his son's tricycle. [38;2;255;255;255m
+     [38;2;238;238;238mAir-filled tires absorbed shocks and reduced rolling resistance, making [38;2;255;255;255m
+     [38;2;238;238;238mthe ride dramatically more comfortable and faster. By the early 1890s, [38;2;255;255;255m
+     [38;2;238;238;238mthe pneumatic-tired safety bicycle had displaced the high wheeler almost [38;2;255;255;255m
+     [38;2;238;238;238mentirely. Other improvements followed: the freewheel, which allowed [38;2;255;255;255m
+     [38;2;238;238;238mcoasting; coaster brakes; and variable gearing, including hub gears from [38;2;255;255;255m
+     [38;2;238;238;238mthe 1890s and derailleur systems that matured in the early twentieth [38;2;255;255;255m
+     [38;2;238;238;238mcentury.[38;2;255;255;255m
+
+     [38;2;238;238;238mThe Golden Age and Social Change[38;2;255;255;255m
+
+     [38;2;238;238;238mThe 1890s are often called the golden age of the bicycle, or the "bicycle[38;2;255;255;255m
+     [38;2;238;238;238mcraze." Mass production, with techniques borrowed from the sewing machine[38;2;255;255;255m
+     [38;2;238;238;238mand firearms industries, lowered prices. Factories in Britain, the United[38;2;255;255;255m
+     [38;2;238;238;238mStates, France, and Germany produced hundreds of thousands of machines. [38;2;255;255;255m
+     [38;2;238;238;238mOrdinary clerks and workers could now afford one, and the bicycle gave [38;2;255;255;255m
+     [38;2;238;238;238mthem unprecedented mobility, allowing people to live farther from work [38;2;255;255;255m
+     [38;2;238;238;238mand to travel into the countryside on weekends.[38;2;255;255;255m
+
+     [38;2;238;238;238mThe bicycle also had a profound effect on women's lives. Riders needed [38;2;255;255;255m
+     [38;2;238;238;238mpractical clothing, which encouraged the shift away from restrictive [38;2;255;255;255m
+     [38;2;238;238;238mcorsets and long skirts toward bloomers and shorter hemlines. Women [38;2;255;255;255m
+     [38;2;238;238;238mgained independence of movement without needing a chaperone or a horse. [38;2;255;255;255m
+     [38;2;238;238;238mThe American suffragist Susan B. Anthony remarked in 1896 that the [38;2;255;255;255m
+     [38;2;238;238;238mbicycle had done more to emancipate women than anything else in the [38;2;255;255;255m
+     [38;2;238;238;238mworld. Whether or not that is an exaggeration, many contemporaries saw [38;2;255;255;255m
+     [38;2;238;238;238mcycling as a symbol and instrument of changing roles.[38;2;255;255;255m
+
+     [38;2;238;238;238mThe industry also served as a technological incubator. Bicycle makers [38;2;255;255;255m
+     [38;2;238;238;238mdeveloped ball bearings, tubular steel construction, chain drives, and [38;2;255;255;255m
+     [38;2;238;238;238mprecision manufacturing. Many early automobile and aircraft pioneers [38;2;255;255;255m
+     [38;2;238;238;238mbegan as bicycle mechanics, among them Wilbur and Orville Wright, who ran[38;2;255;255;255m
+     [38;2;238;238;238ma bicycle shop in Dayton, Ohio, and Henry Ford, who built an early [38;2;255;255;255m
+     [38;2;238;238;238mquadricycle. Companies like Peugeot, Opel, Morris, and Humber moved from [38;2;255;255;255m
+     [38;2;238;238;238mbicycles to motor vehicles.[38;2;255;255;255m
+
+     [38;2;238;238;238mSport and Competition[38;2;255;255;255m
+
+     [38;2;238;238;238mRacing grew alongside everyday cycling. The Tour de France, first held in[38;2;255;255;255m
+     [38;2;238;238;238m1903 to boost newspaper sales, became the most famous road race in the [38;2;255;255;255m
+     [38;2;238;238;238mworld, followed by the Giro d'Italia in 1909 and the Vuelta a España in [38;2;255;255;255m
+     [38;2;238;238;238m1935. Track cycling appeared at the first modern Olympic Games in 1896. [38;2;255;255;255m
+     [38;2;238;238;238mSix-day races drew crowds in indoor velodromes in Europe and North [38;2;255;255;255m
+     [38;2;238;238;238mAmerica. Cycling became a major spectator sport and a field for technical[38;2;255;255;255m
+     [38;2;238;238;238minnovation, from lighter alloys to aerodynamic design.[38;2;255;255;255m
+
+     [38;2;238;238;238mDecline and Revival in the Twentieth Century[38;2;255;255;255m
+
+     [38;2;238;238;238mAfter the Second World War, mass motorization changed the role of the [38;2;255;255;255m
+     [38;2;238;238;238mbicycle in wealthy countries. In North America and much of Western [38;2;255;255;255m
+     [38;2;238;238;238mEurope, the car became the default means of transport, and cycling [38;2;255;255;255m
+     [38;2;238;238;238mdeclined as an adult activity, surviving mainly as a children's toy or [38;2;255;255;255m
+     [38;2;238;238;238mrecreation. In other parts of the world, especially China, India, and [38;2;255;255;255m
+     [38;2;238;238;238mmuch of Africa and Southeast Asia, the bicycle remained a vital workhorse[38;2;255;255;255m
+     [38;2;238;238;238mfor carrying people and goods. China in particular became known as the [38;2;255;255;255m
+     [38;2;238;238;238m"kingdom of bicycles."[38;2;255;255;255m
+
+     [38;2;238;238;238mInnovation continued, however. The 1960s and 1970s saw a boom in [38;2;255;255;255m
+     [38;2;238;238;238mlightweight ten-speed road bikes in the United States, fueled by [38;2;255;255;255m
+     [38;2;238;238;238menvironmental awareness and fitness interest. The BMX movement emerged in[38;2;255;255;255m
+     [38;2;238;238;238mCalifornia in the early 1970s, drawing on motocross. In the same decade, [38;2;255;255;255m
+     [38;2;238;238;238menthusiasts in Marin County, California, adapted old balloon-tired [38;2;255;255;255m
+     [38;2;238;238;238mcruisers for rough mountain descents, creating the mountain bike. By the [38;2;255;255;255m
+     [38;2;238;238;238m1980s, companies were mass-producing models with suspension, wide tires, [38;2;255;255;255m
+     [38;2;238;238;238mand many gears. Materials evolved from steel to aluminum, titanium, and [38;2;255;255;255m
+     [38;2;238;238;238mcarbon fiber, while clipless pedals, index shifting, and disc brakes [38;2;255;255;255m
+     [38;2;238;238;238mbecame standard.[38;2;255;255;255m
+
+     [38;2;238;238;238mThe Bicycle Today[38;2;255;255;255m
+
+     [38;2;238;238;238mIn the twenty-first century, the bicycle has experienced a renewed role [38;2;255;255;255m
+     [38;2;238;238;238min urban life. Cities such as Amsterdam and Copenhagen demonstrated that [38;2;255;255;255m
+     [38;2;238;238;238mdedicated infrastructure could make cycling safe and ordinary, and many [38;2;255;255;255m
+     [38;2;238;238;238mothers have followed with bike lanes, shared systems, and car-free zones.[38;2;255;255;255m
+     [38;2;238;238;238mBike-sharing programs, beginning with early experiments in Amsterdam in [38;2;255;255;255m
+     [38;2;238;238;238mthe 1960s and scaling dramatically in Chinese and European cities in the [38;2;255;255;255m
+     [38;2;238;238;238m2000s and 2010s, made short-distance travel easy without ownership. [38;2;255;255;255m
+     [38;2;238;238;238mElectric-assist bicycles, or e-bikes, have broadened the appeal further [38;2;255;255;255m
+     [38;2;238;238;238mby flattening hills and extending range, and they have become one of the [38;2;255;255;255m
+     [38;2;238;238;238mfastest-growing segments of the market, along with cargo bikes that can [38;2;255;255;255m
+     [38;2;238;238;238mreplace car trips for family and commercial use.[38;2;255;255;255m
+
+     [38;2;238;238;238mConcerns about climate change, congestion, air quality, and public health[38;2;255;255;255m
+     [38;2;238;238;238mhave strengthened the case for cycling. Governments have begun treating [38;2;255;255;255m
+     [38;2;238;238;238mit not as a leisure pursuit but as a legitimate component of transport [38;2;255;255;255m
+     [38;2;238;238;238mpolicy.[38;2;255;255;255m
+
+     [38;2;238;238;238mConclusion[38;2;255;255;255m
+
+     [38;2;238;238;238mFrom Drais's wooden running machine to carbon-fiber racers and electric [38;2;255;255;255m
+     [38;2;238;238;238mcommuters, the bicycle has changed continually while keeping its basic [38;2;255;255;255m
+     [38;2;238;238;238mcharacter: a human-scale, efficient, and affordable vehicle. Its story [38;2;255;255;255m
+     [38;2;238;238;238mintersects with the history of industry, women's rights, sport, and urban[38;2;255;255;255m
+     [38;2;238;238;238mdesign. It also shows how invention is often collaborative and [38;2;255;255;255m
+     [38;2;238;238;238mincremental, with ideas passing between inventors, tinkerers, and users. [38;2;255;255;255m
+     [38;2;238;238;238mTwo centuries after its first appearance, the bicycle remains a modern [38;2;255;255;255m
+     [38;2;238;238;238mmachine, and a remarkably hopeful one.[38;2;255;255;255m
+
+     [38;2;238;238;238mREPOSTAMP[38;2;255;255;255m
+
+     [38;2;92;156;245mBuild[38;2;128;128;128m · Claude Sonnet 5.5 · 28.9s · 117.1 tok/s[38;2;255;255;255m
+
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;30;30;30m                                                                           [48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;30;30;30m                                                                           [48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;30;30;30m                                                                           [48;2;10;10;10m
+  [38;2;92;156;245m┃[38;2;255;255;255m[48;2;30;30;30m  [38;2;92;156;245mBuild[38;2;255;255;255m [38;2;128;128;128m·[38;2;255;255;255m [38;2;238;238;238mClaude Sonnet 5.5[38;2;255;255;255m [38;2;128;128;128mGitHub Copilot[38;2;255;255;255m                                 [48;2;10;10;10m
+  [38;2;92;156;245m╹[38;2;30;30;30m▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀[38;2;255;255;255m
+  [38;2;128;128;128m…/i…/4159-4163/uat/run/root/sample:main[38;2;255;255;255m  [38;2;128;128;128m21.3K (2%) · $0.04[38;2;255;255;255m  [38;2;238;238;238mctrl+p [38;2;128;128;128mcommands[38;2;255;255;255m
+

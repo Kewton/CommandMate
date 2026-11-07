@@ -215,6 +215,13 @@ turn-gate の**状態機械**は汎用（初出だけ通す／arm→complete）�
 **裁定: 不採用。opencode の `configScope` は `'none'` のまま、launch plan に
 `OPENCODE_CONFIG_CONTENT` を載せない。**
 
+> **ロールの例外（#4115）:** この裁定は Auto-Yes の権限の注入についてのもので、今も有効である。ロール機能だけは、
+> `src/lib/agent-roles/adapters.ts` と `composition.ts` の 2 ファイルに限って `OPENCODE_CONFIG_CONTENT` を使う
+> （[agent-roles-adapters.md](./agent-roles-adapters.md) §6〜§7）。足すキーは V1 の `instructions` と
+> V2 の `agents.<実効 agent>.system` だけで、`permission` / `model` / `provider` は足さない。利用者の値が壊れた
+> JSON なら子プロセスへ渡さず未送信で失敗する。launch plan の `configScope` は `'none'` のままで、
+> `tests/unit/hooks/sources/opencode-config-scope-2053.test.ts` がこの範囲を固定している。
+
 #2053 は「Auto-Yes の deny を `OPENCODE_CONFIG_CONTENT`（inline JSON、ファイルを書かない）で
 起動時に注入すれば、`permission.asked` の往復ごと消せる」という提案である。
 **機構は実在し、狙いどおりに効くことを実測した。** それでも採らない。
@@ -376,7 +383,7 @@ CommandMate 側だけで言える。**本 Issue のスコープ外**なので、
 - **`AgentInstanceRef` にパスや設定の場所を足す。** あれはキーで、6 モジュールが等値比較する。起動時だけ要るものは `AgentLaunchContext` へ。
 - **pull 型を turn-gate 無しで足す。** 再送は必ず来る（§4 手順 6′）。
 - **`supportedEvents` に「出せるが CommandMate には届かない語」を書く。** あの一覧は**届く語**の約束で、待つ側はそれしか見ない（§3.3.2）。
-- **opencode の launch plan に `OPENCODE_CONFIG_CONTENT` を足す。** inline config は precedence の**最上位**で、利用者が書いた `permission` を**警告なしに上書きする**（型が違えば層ごと消え、順序は具体性に勝つ）。壊れた JSON は TUI を**exit 0 で黙って落とし**、`serve` 形態では `/global/health` だけが `healthy` を返し続ける。#2053 で実測のうえ不採用（§3.4）。
+- **opencode の launch plan に `OPENCODE_CONFIG_CONTENT` を足す（ロールの注入は §3.4 冒頭の例外）。** inline config は precedence の**最上位**で、利用者が書いた `permission` を**警告なしに上書きする**（型が違えば層ごと消え、順序は具体性に勝つ）。壊れた JSON は TUI を**exit 0 で黙って落とし**、`serve` 形態では `/global/health` だけが `healthy` を返し続ける。#2053 で実測のうえ不採用（§3.4）。
 
 ---
 

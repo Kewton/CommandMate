@@ -85,6 +85,12 @@ import {
 } from '@/lib/relay/relay-bound-reply';
 import { RELAY_SCRAPE_QUIET_MS } from '@/lib/relay/relay-policy';
 import { findRelayHoldReason } from '@/lib/relay/relay-readiness';
+import {
+  noteRelayDeliveryAttempt,
+  pruneRelayDeliveryBlocks,
+  resetRelayDeliveryBlocks,
+  type RelayDeliveryBlockEntry,
+} from '@/lib/relay/relay-delivery-block';
 import { resolveRelaySession, type ResolvedRelaySession } from '@/lib/relay/relay-session-ref';
 import { writeRelaySystemLine } from '@/lib/relay/relay-system-line';
 import {
@@ -156,6 +162,8 @@ const inFlight = getOrInitGlobal('__relayDeliveryInFlight', () => new Set<string
 export function resetRelayDeliveryState(): void {
   inFlight.clear();
   resetRelayDeliveryClaims();
+  // Issue #4105: a restart forgets the last attempts' observations too.
+  resetRelayDeliveryBlocks();
   globalThis.__relayPumpRunning = false;
   globalThis.__relayRecoveredBootId = undefined;
   globalThis.__relayAttemptsRecoveredBootId = undefined;
@@ -512,12 +520,32 @@ function reasonForThrow(attempt: ObservedAttempt): string {
  * that same synchronous stretch, so no cancel can slip in between the check
  * and the send; from then on `withdrawRelay` answers `delivering`.
  */
-async function deliverOne(
+function deliverOne(
   db: Database.Database,
   relayId: string,
   kind: 'reply' | 'prompt' | 'expired',
   body: string,
   listedPayloadId: string | null
+): Promise<RelayDeliveryOutcome> {
+  // Issue #4105: what this attempt stopped for, recorded (or cleared) once it
+  // is over, whichever way it ended. Never touches the ledger. The attempt's
+  // own promise is returned as is — the note is a reaction registered before
+  // the caller's await, so it lands first and adds no tick to the pump.
+  const observed: { block: RelayDeliveryBlockEntry | null } = { block: null };
+  const attempt = attemptDelivery(db, relayId, kind, body, listedPayloadId, observed);
+  const note = (): void => noteRelayDeliveryAttempt(relayId, observed.block);
+  attempt.then(note, note);
+  return attempt;
+}
+
+/** {@link deliverOne}'s body; `observed.block` is set only for a stop worth showing (Issue #4105). */
+async function attemptDelivery(
+  db: Database.Database,
+  relayId: string,
+  kind: 'reply' | 'prompt' | 'expired',
+  body: string,
+  listedPayloadId: string | null,
+  observed: { block: RelayDeliveryBlockEntry | null }
 ): Promise<RelayDeliveryOutcome> {
   const listed = getRelayById(db, relayId);
   if (!listed) return 'skipped';
@@ -531,6 +559,12 @@ async function deliverOne(
   );
   if (hold) {
     logger.debug('relay-delivery-held', { relayId, kind, reason: hold });
+    // Issue #4105: the readiness check awaited, and a cancel, an expiry or a
+    // replacement may have run meanwhile — only a payload the slot still
+    // carries gets the reason (#3732's re-read, without its claim).
+    if (stillCarriesPayload(db, relayId, kind, body, listedPayloadId)) {
+      observed.block = { reason: hold, kind, payloadId: listedPayloadId, body, observedAt: Date.now() };
+    }
     return 'held';
   }
 
@@ -612,6 +646,18 @@ async function deliverOne(
         attempt as ObservedAttempt
       );
       requeued = settled.requeued;
+      // Issue #4105: A's dialog refused it and the payload is queued again
+      // under the same id. A requeue that failed leaves it `attempting` (a
+      // hold), which must not read as "waiting for the dialog".
+      if (settled.outcome === 'held' && settled.requeued) {
+        observed.block = {
+          reason: 'prompt_waiting',
+          kind,
+          payloadId: ref.payloadId,
+          body,
+          observedAt: Date.now(),
+        };
+      }
       return settled.outcome;
     }
 
@@ -673,6 +719,29 @@ function rereadDeliverablePayload(
     return null;
   }
   return current;
+}
+
+/**
+ * Whether the slot still carries the listed payload, deliverable (Issue
+ * #4105): the same test as {@link rereadDeliverablePayload}, unlogged, plus
+ * no delivery hold. Never throws.
+ */
+function stillCarriesPayload(
+  db: Database.Database,
+  relayId: string,
+  kind: 'reply' | 'prompt' | 'expired',
+  body: string,
+  listedPayloadId: string | null
+): boolean {
+  try {
+    const current = getRelayPendingPayload(db, relayId);
+    if (!current) return false;
+    if (current.kind !== kind || current.body !== body || current.payloadId !== listedPayloadId) return false;
+    if (current.relay.deliveryHold !== null) return false;
+    return kind === 'expired' || isOpenRelayState(current.relay.state);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -911,7 +980,11 @@ export async function pumpRelayDeliveries(): Promise<void> {
       globalThis.__relayPumpAgain = false;
       // Issue #4064: a payload under a delivery hold is not listed, so a pass
       // (or the next pump) never types it again; other relays go on.
-      for (const item of listDeliverableRelayPayloads(db)) {
+      const listing = listDeliverableRelayPayloads(db);
+      // Issue #4105: an observation of a relay no longer listed (delivered,
+      // closed, emptied, held) is dropped.
+      pruneRelayDeliveryBlocks(new Set(listing.map((item) => item.relay.id)));
+      for (const item of listing) {
         if (inFlight.has(item.relay.id)) continue;
         inFlight.add(item.relay.id);
         try {

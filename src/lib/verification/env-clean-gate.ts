@@ -35,11 +35,12 @@
  */
 
 import { execFileSync } from 'child_process';
-import { readlinkSync } from 'fs';
-import { dirname, resolve, sep } from 'path';
+import { existsSync, readdirSync, readlinkSync } from 'fs';
+import { basename, dirname, join, resolve, sep } from 'path';
 import type { VerificationGateTerminalStatus } from '@/lib/db';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById } from '@/lib/db/worktree-db';
+import { sanitizeIdSegment } from '@/lib/git/worktree-id';
 import {
   getActiveSessionNamespace,
   parseSessionName,
@@ -131,9 +132,22 @@ export function resolveRequireEnvClean(
  */
 export type EnvEntryOwner = 'self' | 'other' | 'unattributed';
 
+/**
+ * Whether a worktree id names a worktree *other than* the task's (#4192).
+ * Asked only about ids that extend the task's id (`<id>-v2`); see
+ * {@link attributeSessionName}. Must not throw; a throw counts as "no".
+ */
+export type OtherWorktreeProbe = (candidateId: string) => boolean;
+
 export interface EnvAttributionContext {
   worktreeId: string;
   worktreePath: string;
+  /**
+   * Evidence that a longer id is another worktree (#4192). Omitted means none,
+   * so every `<id>-…` session stays `self` — the behaviour before #4192.
+   * {@link evaluateEnvClean} fills it with {@link defaultOtherWorktreeProbe}.
+   */
+  isOtherWorktree?: OtherWorktreeProbe;
 }
 
 /**
@@ -144,18 +158,118 @@ export interface EnvAttributionContext {
  * session to this task, and a session this task's agent started in any
  * server's namespace is still this task's addition.
  *
- * Ambiguity resolves towards `self` on purpose. Worktree ids may contain
- * hyphens, so `mcbd-claude-foo-bar` is genuinely ambiguous between worktree
- * `foo` with suffix `bar` and worktree `foo-bar`; calling it `self` makes an
- * addition a violation, and being wrong in that direction costs a false report
- * rather than a missed leak.
+ * Worktree ids may contain hyphens, so `mcbd-claude-foo-bar` is genuinely
+ * ambiguous by name between worktree `foo` with instance suffix `bar` and
+ * worktree `foo-bar`. The rule (Issue #4192):
+ *
+ *   - tail equal to the task's id — `self`;
+ *   - tail not starting with `<id>-` — `other`;
+ *   - tail `<id>-…` — `other` only when `isOtherWorktree` positively says some
+ *     hyphen-boundary prefix of the tail longer than `<id>` (the whole tail
+ *     included) is another worktree: `commandmate-issue-4175-v2` when that
+ *     worktree exists next to, or is registered beside, `commandmate-issue-4175`.
+ *     Otherwise `self`: `-codex-2`, `-2`, a named instance.
+ *
+ * Without that evidence the ambiguity still resolves towards `self` on purpose:
+ * calling it `self` makes an addition a violation, and being wrong in that
+ * direction costs a false report rather than a missed leak. The evidence wins
+ * over the instance reading because it is a fact about the machine (a real
+ * worktree with exactly that id), where the instance reading is only a shape
+ * every name has. The cost, accepted: an instance of this worktree whose suffix
+ * begins with the rest of a live sibling's id (`foo` instance `v2` beside a
+ * worktree `foo-v2`) is excused as that sibling's.
  */
-export function attributeSessionName(name: string, worktreeId: string): EnvEntryOwner {
+export function attributeSessionName(
+  name: string,
+  worktreeId: string,
+  isOtherWorktree?: OtherWorktreeProbe
+): EnvEntryOwner {
   const parsed = parseSessionName(name);
   if (!parsed) return 'unattributed';
   const tail = parsed.rest;
-  if (tail === worktreeId || tail.startsWith(`${worktreeId}-`)) return 'self';
-  return 'other';
+  if (tail === worktreeId) return 'self';
+  if (!tail.startsWith(`${worktreeId}-`)) return 'other';
+  if (isOtherWorktree && longerWorktreeIds(tail, worktreeId).some((id) => askProbe(isOtherWorktree, id))) {
+    return 'other';
+  }
+  return 'self';
+}
+
+/** Hyphen-boundary prefixes of `tail` longer than `worktreeId`, the whole tail last. */
+function longerWorktreeIds(tail: string, worktreeId: string): string[] {
+  const ids: string[] = [];
+  let end = tail.indexOf('-', worktreeId.length + 1);
+  while (end !== -1) {
+    ids.push(tail.slice(0, end));
+    end = tail.indexOf('-', end + 1);
+  }
+  ids.push(tail);
+  return ids;
+}
+
+function askProbe(probe: OtherWorktreeProbe, id: string): boolean {
+  try {
+    return probe(id) === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Ids of the git worktrees next to `worktreePath` (#4192): its sibling
+ * directories that carry a `.git` entry, minted the way `deriveWorktreeId`
+ * mints a first registration (sanitized basename). Never throws.
+ */
+export function readSiblingWorktreeIds(worktreePath: string): Set<string> {
+  const worktree = resolve(worktreePath);
+  const parent = dirname(worktree);
+  const own = basename(worktree);
+  const ids = new Set<string>();
+  try {
+    for (const entry of readdirSync(parent, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name === own) continue;
+      if (!existsSync(join(parent, entry.name, '.git'))) continue;
+      const id = sanitizeIdSegment(entry.name);
+      if (id) ids.add(id);
+    }
+  } catch {
+    // An unreadable parent is no evidence of anything.
+  }
+  return ids;
+}
+
+/**
+ * The evidence {@link evaluateEnvClean} judges `<id>-…` session names by
+ * (#4192), read at verification — the sibling worktree is usually created
+ * after the baseline, so the baseline cannot know it:
+ *
+ *   - a sibling directory of the task's worktree that is a git worktree with
+ *     exactly that id (no database needed; a worktree not yet synced counts);
+ *   - otherwise a row of this server's worktree table with that id and a path
+ *     other than the task's (covers the collision-suffixed ids a basename
+ *     cannot reproduce).
+ *
+ * The session is `self` again only when both are gone — the sibling directory
+ * and its row in this server's worktree table (removing the directory without
+ * a sync leaves the row, which still counts as evidence) — the strict direction.
+ */
+export function defaultOtherWorktreeProbe(
+  worktreePath: string,
+  lookupRegisteredPath: (worktreeId: string) => string | null = (worktreeId) =>
+    getWorktreeById(getDbInstance(), worktreeId)?.path ?? null
+): OtherWorktreeProbe {
+  let siblings: Set<string> | null = null;
+  const own = resolve(worktreePath);
+  return (candidateId) => {
+    siblings ??= readSiblingWorktreeIds(worktreePath);
+    if (siblings.has(candidateId)) return true;
+    try {
+      const path = lookupRegisteredPath(candidateId);
+      return path !== null && path !== '' && resolve(path) !== own;
+    } catch {
+      return false;
+    }
+  };
 }
 
 /**
@@ -301,7 +415,7 @@ function attributeEntry(
 ): EnvEntryOwner {
   switch (probeId) {
     case 'tmux-sessions':
-      return attributeSessionName(entry.key, context.worktreeId);
+      return attributeSessionName(entry.key, context.worktreeId, context.isOtherWorktree);
     case 'listeners':
       return attributeAnchor(entry.anchor, context.worktreePath);
     case 'home-entries':
@@ -629,7 +743,8 @@ export function recordOtherRepositorySessions(
   return sessions.entries
     .map((entry) => entry.key)
     .filter((name) => {
-      if (attributeSessionName(name, taskWorktreeId) !== 'other') return false;
+      const isOtherWorktree = (id: string): boolean => server.repositoryOf?.(id) != null;
+      if (attributeSessionName(name, taskWorktreeId, isOtherWorktree) !== 'other') return false;
       if (isOtherServerSession(name, server)) return false;
       const parsed = parseSessionName(name);
       if (!parsed) return false;
@@ -716,7 +831,7 @@ function isKillByAnotherWorker(
       ? 'unattributed'
       : taskSession && record.callerSession === taskSession
         ? 'self'
-        : attributeSessionName(record.callerSession, context.worktreeId);
+        : attributeSessionName(record.callerSession, context.worktreeId, context.isOtherWorktree);
   const cwdOwner = attributeAnchor(record.callerCwd, context.worktreePath);
   if (sessionOwner === 'self' || cwdOwner === 'self') return false;
   return sessionOwner === 'other' || cwdOwner === 'other';
@@ -1342,7 +1457,12 @@ export async function evaluateEnvClean(input: EvaluateEnvCleanInput): Promise<En
     // An unreadable ledger excuses nothing; it is not a reason to withhold a verdict.
     sessionKills = [];
   }
-  const diff = diffEnvSnapshots(input.baseline, final, input, {
+  const context: EnvAttributionContext = {
+    worktreeId: input.worktreeId,
+    worktreePath: input.worktreePath,
+    isOtherWorktree: input.isOtherWorktree ?? defaultOtherWorktreeProbe(input.worktreePath),
+  };
+  const diff = diffEnvSnapshots(input.baseline, final, context, {
     ignoreHomeEntries: input.ignoreHomeEntries,
     resolvePidCwd: input.resolvePidCwd,
     sessionKills,

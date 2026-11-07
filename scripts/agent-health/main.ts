@@ -16,6 +16,7 @@
  * hooks go to the listener, never to production.
  */
 
+import type { ExplicitRole } from '@/lib/agent-roles/explicit-launch';
 import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
@@ -139,8 +140,17 @@ function writeReportOrPrint(file: string, report: AgentHealthReport): boolean {
  * `CM_OPENCODE_V2_DIR` moves opencode-v2's password and port files into the
  * run's temp dir: they are written by this process (`reserveOpencodeV2Server`),
  * so the variable has to be set here, not only in the child environment.
+ * `CM_AGENT_ROLE_ARTIFACTS_DIR` is what a role's file generation falls back to
+ * when a probe does not name a `dataRoot`: under the run as well (Issue #4134).
+ *
+ * @internal Exported for tests.
  */
-function redirectLaunchEnvironment(port: number, hooksDir: string, opencodeV2Dir: string): void {
+export function redirectLaunchEnvironment(
+  port: number,
+  hooksDir: string,
+  opencodeV2Dir: string,
+  roleArtifactsDir: string
+): void {
   for (const name of [
     'CM_HOOK_URL',
     'CM_PERMISSION_HOOK_URL',
@@ -157,6 +167,7 @@ function redirectLaunchEnvironment(port: number, hooksDir: string, opencodeV2Dir
   process.env.CM_PORT = String(port);
   process.env.CM_AGENT_HOOKS_DIR = hooksDir;
   process.env.CM_OPENCODE_V2_DIR = opencodeV2Dir;
+  process.env.CM_AGENT_ROLE_ARTIFACTS_DIR = roleArtifactsDir;
 }
 
 export async function main(argv: readonly string[]): Promise<AgentHealthExitCode> {
@@ -176,7 +187,25 @@ export async function main(argv: readonly string[]): Promise<AgentHealthExitCode
   return run(options, startedAt);
 }
 
+/** The test role of `--role-file`. Nothing else gives a probe a role. */
+function readRoleFile(file: string): ExplicitRole {
+  const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as { id?: unknown; body?: unknown };
+  if (typeof parsed.id !== 'string' || typeof parsed.body !== 'string') {
+    throw new Error(`--role-file: ${file} needs a string id and body`);
+  }
+  return { id: parsed.id, body: parsed.body };
+}
+
 async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentHealthExitCode> {
+  let role: ExplicitRole | null = null;
+  if (options.roleFile !== null) {
+    try {
+      role = readRoleFile(options.roleFile);
+    } catch (error) {
+      log(error instanceof Error ? error.message : String(error));
+      return 2;
+    }
+  }
   const outPath = path.resolve(options.out ?? path.join(DEFAULT_DIR, 'reports', `${reportDateJst(startedAt)}.json`));
   const statePath = path.resolve(options.statePath ?? path.join(DEFAULT_DIR, 'state.json'));
   // Issue #3183: the whole frame of a failing `screen-*` check, kept beside the
@@ -207,6 +236,8 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
   const hooksDir = path.join(workRoot, 'hooks');
   fs.mkdirSync(hooksDir, { mode: 0o700 });
   const opencodeV2Dir = path.join(workRoot, 'opencode-v2-state');
+  // Where the role probe's explicit `dataRoot` already points (probe-tool.ts).
+  const roleArtifactsDir = path.join(workRoot, 'role-artifacts');
 
   let listener: HookListener | null = null;
   let tmux: AgentHealthTmux | null = null;
@@ -254,10 +285,11 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
 
   try {
     listener = await HookListener.start();
-    redirectLaunchEnvironment(listener.port, hooksDir, opencodeV2Dir);
+    redirectLaunchEnvironment(listener.port, hooksDir, opencodeV2Dir, roleArtifactsDir);
     const childEnv = buildChildEnv(process.env, {
       CM_PORT: String(listener.port),
       CM_OPENCODE_V2_DIR: opencodeV2Dir,
+      CM_AGENT_ROLE_ARTIFACTS_DIR: roleArtifactsDir,
       // Safety net only: every launch line sets its own URL. A hook that
       // falls back to this one arrives without correlation keys and fails
       // the check — it never reaches production.
@@ -331,6 +363,7 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
           deadline: Math.min(Date.now() + options.timeoutPerToolSec * 1000, globalDeadline),
           log,
           frameArchive,
+          role,
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -380,6 +413,7 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
           previousVersion,
           checks: outcome.checks,
           launchedModel: outcome.launchedModel,
+          roleCondition: outcome.roleCondition,
         })
       );
     }

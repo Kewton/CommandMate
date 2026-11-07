@@ -78,6 +78,7 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | [`commandmate attach`](#commandmate-attach) | エージェントの tmux セッションにこの端末を attach |
 | [`commandmate auto-yes`](#commandmate-auto-yes) | Auto-Yesの制御 |
 | [`commandmate instances`](#commandmate-instances) | エージェントインスタンス（roster）の一覧・追加・削除・alias変更 |
+| [`commandmate roles`](#commandmate-roles) | ロールの定義と、ツール・リポジトリごとの既定の設定 |
 | [`commandmate agents`](#commandmate-agents) | エージェント CLI の版表示と更新（pane の外で `codex update` を実行） |
 | [`commandmate report`](#commandmate-report) | 日次レポートの生成・表示・一覧、Eval メトリクス集計 |
 | [`commandmate skill`](#commandmate-skill) | 公式Skillのカタログ参照・Install/Update Plan・install・update・uninstall・status |
@@ -271,6 +272,9 @@ commandmate send <worktree-id> "<message>"
 commandmate send <worktree-id> "<message>" --instance codex    # codex のプライマリインスタンス宛て
 commandmate send <worktree-id> "<message>" --instance codex-2  # 追加インスタンス宛て（roster登録済み）
 commandmate send <worktree-id> "<message>" --agent codex --instance codex-3 --register  # 未登録IDをrosterへ登録
+commandmate send <worktree-id> "<message>" --instance codex --role reviewer  # ロールを保存し、そのロールで動くプロセスにだけ送る（commandmate roles の節）
+commandmate send <worktree-id> "<message>" --agent codex --instance codex-3 --register --role reviewer  # 登録とロールを先に作ってから送る
+commandmate send <worktree-id> "<message>" --instance opencode --new-conversation  # OpenCode V1: 止まっているセッションを、覚えている会話を続けず新しい会話で起動する
 commandmate send <worktree-id> "<message>" --auto-yes          # Auto-Yes有効化
 commandmate send <worktree-id> "<message>" --auto-yes --duration 3h
 commandmate send <worktree-id> "<message>" --auto-yes --stop-pattern "FAILED"
@@ -285,7 +289,7 @@ commandmate send <worktree-id> "<message>" --auto-yes --auto-yes-answer-mode car
 | `--agent <id>` | roster に無いインスタンスをアドホック起動するときの補助（claude, codex, gemini, vibe-local, opencode, copilot, antigravity, command-code, opencode-v2） | roster の値・worktree既定 |
 | `--register` | `--instance` で指定したセッションをroster（エージェントインスタンス一覧）に登録 | - |
 | `--model <model>` | 使うモデル（copilot / antigravity / claude のみ）。**copilot** はセッション内で切り替える。**antigravity と claude は起動フラグ**なので、この send がセッションを起動するときだけ効き、稼働中のセッションに渡すと 400 になる（切り替えるにはセッションを止めてから送り直す）。claude の値は別名（`sonnet` / `opus` / `opus[1m]`）か完全な ID（`claude-sonnet-5`）。送り先（`--instance` か `--agent`）の指定が必須 | ツールの既定 |
-| `--auto-yes` | 送信前にAuto-Yesを有効化 | - |
+| `--auto-yes` | 送信前にAuto-Yesを有効化。送信の後に適用するとき（`--model` で後回しになるツール、ロールや固定つきで既に有効なとき）の失敗は、本文を送った後なので警告と exit 0 です。本文は送り直さず、警告のコマンドで有効化だけをやり直します。送信前の失敗はエラーで未送信です（Issue #4159） | - |
 | `--auto-yes-answer-mode <m>` | `--auto-yes` で有効にするときの答え方のモード（`recommended` / `careful`。[答え方のモード](#答え方のモードおまかせ慎重issue-3863)）。`--auto-yes` なしで指定すると exit 2（Issue #3863） | 新たに有効にするなら `recommended`、有効中なら今のモードのまま |
 | `--duration <d>` | Auto-Yesの有効期間（`1h`〜`24h`、1 時間刻み。例: `1h` / `3h` / `8h`）。範囲の外は `--auto-yes` の有無にかかわらず exit 2 | 1h |
 | `--stop-pattern <p>` | Auto-Yes停止条件（正規表現、ターミナル出力への照合。[auto-yes の注意](#--stop-pattern-はターミナル出力への照合コマンドの抑止には使えない)参照） | - |
@@ -804,6 +808,39 @@ API は `POST /api/relays/:id/resolve`（本文 `{ "payloadId", "attemptId", "ac
   同時に `expired` で閉じ、「期限切れ」の system 行を残します）を `--confirm`・`--discard` で片付けると、待っていた返答も破棄し（閉じた relay からは配送しません）、
   その旨を依頼元の履歴に system 行で残します（API の応答は `replyDiscarded: true`）。期限切れは既存の「期限切れ」の
   system 行と保留の表示で伝わり、片付けた後に期限切れの通知を新たに入力欄へ送ることはしません
+
+#### 依頼元の確認の案内で止まった配送（Issue #4105）
+
+依頼元 A の画面に確認の案内（ダイアログ）が出ている間、relay の配送は A の入力欄に打鍵しません（今までどおり）。
+止まっている理由を、配送の**最後の試行**の観測として読めるようにしています。
+
+- **欄**: `GET /api/relays`（`owed`・`awaiting`・`open`・`held`）と `GET /api/relays/:id` の各 relay に
+  `lastDeliveryBlock`（`{ reason, kind, payloadId, observedAt }`）が付きます。`reason` は `prompt_waiting`
+  （A の確認の案内）・`generating`（A が生成中）・`session_stopped`（A のセッションが止まっている）・
+  `foreign_session`（同じ名前のセッションが別のサーバーのもの）です。いまの状態ではなく、`observedAt` の時刻の
+  試行で見たことです。案内を閉じると、次の配送の周回（約 15 秒ごと）で配送されて消え、画面は 20 秒ごとの読み直しで追従します
+- **対象の payload**: いまの payload（`kind`・`payloadId`）に対する観測だけを出します。payload が置き換わった・
+  配送された・取り消された・期限切れになった・保留（`deliveryHold`）になったときは `null` です
+- **`null` は「配送できる」ではありません**: サーバーのプロセスの中だけに持ち、データベースには書きません。
+  再起動の後や、まだ試行していないとき、別の理由で止まったときは `null` です。古いサーバーでは欄がありません
+- **CLI**: `commandmate relays`・`commandmate relays --id <relay-id>` の行に `pending=<種類>`（入力欄へ届けるのを
+  待っている payload）と `blocked=<理由>@<観測時刻>` が付きます。`--json` は API の応答のままです
+- **画面**: PC・スマホの名簿とチャット面は、`prompt_waiting` のときだけ、依頼元 A の行に「この画面の確認で停止」
+  （警告色）を出します。並びは「配送が未確認」の次、確認待ちの前です。返信待ち・確認待ちの数はそのままです
+- **期限切れの後も止まっている知らせ（Issue #4193）**: 期限切れで閉じた relay も、時間切れの知らせが A の入力欄へ
+  届くまでは知らせを持ち続けます。その配送が止まっている間（`lastDeliveryBlock` があるとき）は、`GET /api/relays` の
+  `closedBlocked`（依頼元 A で絞り込み）に入り、`commandmate relays` は `# closed, notice not delivered yet` の見出しの下に
+  `expired`・`pending=expired`・`blocked=<理由>@<観測時刻>` の行を出します。`--json` では `closedBlocked` です。PC・スマホの
+  名簿とチャット面も、`prompt_waiting` なら同じ「この画面の確認で停止」を出します（説明の文は、閉じた relay では
+  「届くまで残る」と言い、期限で置き換わるとは言いません）。依頼元が名簿に無いとき（`instances remove` を `--kill`
+  なしで行うとセッションは残ります）は、名簿の下に配送未確認とは別の見出しで理由つきで出します。知らせが配送されると消えます。
+  `open`・`awaiting` には入れず、`counts`・`heldCount` も変わりません。止まっていない（観測が無い）閉じた relay は出しません
+- **確認待ち（`state: prompt`）とは別です**: `prompt` は相手 B が確認待ちで止まり、A への知らせを**配送の待ち行列に入れた**
+  記録です（届いたことは意味しません）。**B が今も確認待ちであることも意味しません**: B が確認を終えて返信が知らせを
+  置き換えても（`pending=reply`）、`state` は relay が閉じるまで `prompt` のままです。名簿の表示も「相手の確認待ちを記録」です
+- **件数は変わりません**: `held`・`heldCount`・`holdReason`・`deliveryHold`・状態別の `counts` にこの理由は入りません
+- **放置すると**: 期限（既定 24 時間）で、待っていた返答は時間切れの知らせに置き換わります（今までどおり）。案内を自動で
+  閉じることはしません（Auto-Yes の扱いも変えません）
 
 ### ターン成立の判定（Issue #1839）
 
@@ -2954,7 +2991,12 @@ commandmate instances <worktree-id> remove <instance-id> --kill        # 削除�
 commandmate instances <worktree-id> alias <instance-id> "新しい名前"    # alias変更
 
 commandmate instances <worktree-id> kill <instance-id>                 # 該当インスタンスのセッションのみ停止
+
+commandmate instances <worktree-id> add --agent codex --role reviewer  # 追加とロールの指定を同時に（--no-role で「ロールなし」）
+commandmate instances <worktree-id> set-role <instance-id> --role reviewer  # 次回の起動のロールを保存（--none / --inherit も）
 ```
+
+`add` / `remove` / `alias` と `send --register` は読んだ名簿の版を付けて保存します（Issue #4132）。読んだ後に名簿が変わっていたら、今の名簿で作り直して最大 2 回やり直すので、別の追加や変更を消しません。ID は今の名簿で空いているものになります。変わり続けて保存できないとき、`add` / `remove` / `alias` は exit 31（`roster_changed`）で終わり、他の変更はそのまま残ります（`remove --kill` は停止の後に保存するので、セッションは停止済みのことがあります）。`send --register` は本文を送った後なので、これも含めて登録のどの失敗でも（Issue #4159）、警告と exit 0 にして、登録だけをやり直すコマンドを案内します。
 
 `kill` は止めたインスタンスの Auto-Yes も無効にします（止めていない別インスタンスの Auto-Yes は残ります）。
 `kill`（`remove --kill` も）が成功すると、どの worktree・インスタンスの、どの tmux セッション（サーバーの
@@ -3228,6 +3270,130 @@ commandmate send "$WT" "軽くチェックして" --agent codex --instance codex
 # 不要になったら削除（セッションも停止）
 commandmate instances "$WT" remove codex-2 --kill
 ```
+
+---
+
+## commandmate roles
+
+ロールの定義と既定を、画面を使わずに管理します（Issue #4116）。本文は `--file` か標準入力で渡し、対話はありません。
+
+### 3 つの操作の違い
+
+| 操作 | 変わるもの | 稼働中のセッション |
+|------|-----------|-------------------|
+| `roles edit` | ロールの本文。指しているすべての設定が次回の起動から従う | 変わらない |
+| `roles default` | ツールごとの既定（`--repo` でそのリポジトリ、無ければシステム全体）。Schedule も従う | 変わらない |
+| `instances <wt> set-role` / `send --role` | そのインスタンスの指定 | 変わらない。ロールは起動時に固定される。適用するには止めて（`instances <wt> kill <id>`）送り直す |
+
+### ロールは権限ではありません
+
+ロールはモデルへ渡す指示で、できることを制限するものではありません。起動時に渡す前置きが、依頼・実行契約・プロジェクトの指示（`AGENTS.md` など）を優先すると伝えます。
+
+たとえば「編集しない」ロールで実装の契約を送ると、エージェントは編集してコミットし、`wait --verify` は実際の作業を見て exit 0 を返します（2026-11-04 に Claude で確認）。編集を確実に止めたいときは、ロールに頼らず、CLI の権限の設定を使い、実装の契約を送らないでください。
+
+### 使用方法
+
+```bash
+commandmate roles list [--json]
+commandmate roles show <role> [--json]
+commandmate roles add <name> (--file <path> | --stdin) [--json]
+commandmate roles edit <role> [--name <name>] [--file <path> | --stdin] [--if-version <n>] [--json]
+commandmate roles rm <role> [--force] [--json]
+commandmate roles default <tool> (--role <role> | --none) [--json]
+commandmate roles default <tool> --repo <repository> (--role <role> | --none | --inherit) [--json]
+commandmate roles defaults [--repo <repository>] [--tool <tool>] [--json]
+commandmate instances <worktree-id> set-role <instance-id> (--role <role> | --none | --inherit) [--json]
+commandmate instances <worktree-id> add --agent <tool> [--role <role> | --no-role]
+commandmate send <worktree-id> "..." --instance <id> [--role <role> | --no-role]
+```
+
+例: レビュー担当のロールを定義し、このリポジトリの Codex の既定にする。
+
+```bash
+commandmate roles add reviewer --file ./reviewer.md
+commandmate roles default codex --repo . --role reviewer
+```
+
+### 名前の指定
+
+- `<role>` は ID か名前です。完全一致を優先し、無ければ大文字小文字と Unicode の正規形を無視して照合します。候補が 2 つあれば候補を示して exit 2 です（自動では選びません）
+- 予約語はありません。「ロールなし」と「既定に従う」は `--none` / `--no-role` / `--inherit` のフラグなので、`none` という名前のロールも作れます
+- 対象のツールは claude、codex、command-code、opencode、opencode-v2、copilot、antigravity です。それ以外は exit 2（`tool_not_supported`）。Antigravity は設定を保存できますが、有効になるまでそのロールでの起動は拒否され、警告が出ます
+
+### `--repo` の形式と優先順位
+
+1. リポジトリの ID
+2. パス（`/` を含むか `.` で始まる値）。登録済みのリポジトリのほか、登録済みの worktree のパスはそのリポジトリを指します（worktree の中で `--repo .` が使えます）
+3. 名前（`/` を含まない値は、パスとしては読みません）
+
+登録済みのリポジトリは `commandmate roles defaults` で確認できます。エラーは `unknown_repository`（該当なし）、`repository_not_registered`（ディレクトリはあるが行が無い）、`ambiguous_repository`（複数該当。候補を表示）で区別します。リポジトリにそのツールの設定の行が無いことはエラーではなく、`stored: { state: "inherit" }` と表示され、`effective` が実際に使われるものを示します。
+
+### `send --role` と `--register`
+
+`send --role` は切り替えではなく条件です。
+
+- 設定を先に保存します。未起動ならそのロールで起動します
+- 稼働中なら、起動時の fingerprint が一致するときだけ送ります。別のロール、または起動時の記録が無い場合（サーバー再起動後など）は、本文を入力せず exit 32 です。設定は保存されたままなので、止めてから `--role` なしで送り直せます
+- ロールを持てるのは roster にあるインスタンスだけです。roster 外の ID には `--register` も付けます
+- `--register --role` は、インスタンスとロールを送信の**前に**作るので、最初の起動からそのロールで動きます。繰り返しても作成はされず、`--role` の値で既存の指定を置き換えたうえで、上の条件が適用されます。読み取りの後に roster が変わると exit 31 で未送信です
+- `--role` なしの `--register` は従来どおり（送信の後に登録）で、既存のロールには触れません。本文は送った後なので、名簿が変わり続けて登録できないときは exit 31 ではなく警告と exit 0 です。名簿の読み取りの失敗・5xx・別の 409 など、登録のほかの失敗も同じです（Issue #4159。5xx や応答なしは保存された可能性があるので、警告の `commandmate instances <worktree-id>` で確かめます）。本文は送り直さず、警告のコマンド（`commandmate instances <worktree-id> add --agent <tool> --id <instance-id>`）で登録だけをやり直します
+- `--contract --role` も同じ結果になります。契約側の検査が古い設定で拒否するときは、ロールを保存して検査し直します。契約そのものが不正なら何も保存しません。保存は読み直した名簿の版を条件にするので（Issue #4132）、その後に名簿が変わっていれば何も保存せず exit 31（`roster_changed`）です
+- ロールか固定を付けた送信が未入力で終わると、その送信が有効にした `--auto-yes` は取り消します（対象のツールとインスタンスを明示し、直前に読み直して一致するときだけ）。もともと有効だった Auto-Yes は、本文が入るまでそのままです。後から更新された grant や、未入力と確定できないときは残し、止めるコマンドを表示します。宛先を省いても、読んだ既定を以後の全要求に名指しするので、途中で既定が変わっても別の対象の Auto-Yes を上書きも取り消しもしません（サーバーが答えた対象が読んだ対象と違えば、取り消さず止めるコマンドを表示します）
+- 取り消しと有効化は grant の識別子と条件つきの要求で行います（Issue #4132）。読み直しの後に別の操作が有効にした grant は、期限と回答モードが同じでも切りません。読み直しの後で別の操作が先に有効にしていたら、その条件を上書きせず、本文が入ってからこの送信の条件を適用します。grant の識別子を返さない古いサーバーには条件なしの取り消しを送らず、残して止めるコマンドを表示します（Issue #4159）
+- ロール・固定・`--reply-to` の無い `--auto-yes` は、事前に状態を読みません（Issue #4159 の決定）。この送信が有効にしたのか、もともと有効だったのかを区別できないので、未入力で終わっても残し、止めるコマンドを表示します。読むようにすると、この形の送信のすべてに要求が 1 つ増え、もともと有効な grant への新しい条件の適用が本文の後へ移ります
+- 保存の前に確かめられる拒否（稼働中への `--model`、不正な画像パス）は設定を残しません。保存の後の拒否は、理由を問わず設定が保存されたことを伝えます
+- OpenCode V1 は、ロールが変わっても覚えている会話を続け、前のロールの発言は履歴に残ります。止めても会話は忘れません。新しい会話にするには、止めてから `send --new-conversation` で送ります。V1 以外のツールと、確認の時点で稼働中または起動途中のセッションは未送信 exit 2 です（確認の後に起動が割り込む場合は検出しません）
+- `--expect-role-generation <g>` と `--expect-role-fingerprint <f>` / `--expect-no-role` は、呼び出し側が読んだ値（`capture --json` の `roleLaunch`）に送信を固定します。何も保存しません。サーバーが最初のキーの直前に読み直すので、その間にプロセスが入れ替われば（同じロールでも）未送信 exit 32 です。`--contract` や `--role` と併用できます
+- 起動の証拠が無い稼働中のセッション（このサーバーが起動していない、またはサーバーの再起動より前に起動した）への `send --contract` は拒否しません。そのセッションにロールが解決されるときだけ、`Warning:` の行を stderr に 1 行出し、`POST tasks` の応答に `roleWarning` を足します（Issue #4132）。stdout の task id と終了コードは変わりません。ロールを効かせるにはセッションを止めて送り直します。このようなセッションへの送信を断るには `--role` か `--expect-*` を付けます（未送信 exit 32）
+
+### `set-role` と `instances --json`
+
+`set-role` は稼働中でも次回用として保存し、稼働中のプロセスには触れません。起動時と次回の比較を返し、差があるときだけ `applyPending: true`（表示では `Pending:`）になります。`restartPending` は `yes` / `no` / `unknown`（プロセスについて何もわからない）です。
+
+`instances --json` の各行には、サーバーがロールを持つとき `role` が付きます。
+
+```json
+{
+  "role": {
+    "stored": { "state": "role", "roleId": "...", "roleName": "reviewer" },
+    "effectiveNext": { "kind": "role", "source": "instance", "role": { "id": "...", "name": "reviewer" }, "injectionFingerprint": "..." },
+    "launched": { "roleName": "writer", "source": "system", "sessionGeneration": "...", "injectionFingerprint": "..." },
+    "requested": { "roleName": "writer", "source": "system" },
+    "restartPending": "yes"
+  }
+}
+```
+
+`--require-roles` を付けると、ロールを読めないときは `role` を省かず失敗します（ロールより古いサーバーは `role_api_unavailable`）。`launched` が null なのは「わからない」であり、「ロールなし」ではありません。表形式では `ROLE_AT_START`、`ROLE_NEXT`、`RESTART_PENDING` の列を末尾に追加します。
+
+### `--json` の形
+
+失敗も含めて stdout に出力します（同じ文を stderr にも出します）。ロールの分類が無い失敗の `error` は `internal_error`、`request_failed`、`no_response`（サーバーに届かない）、`role_api_unavailable`（ロールより古いサーバー）、`unexpected_error` で、終了コードは下の表のとおりです。引数の不足や不明なオプションは commander の出力（stderr のみ、exit 1）です。ロールを変える要求（`roles add` / `edit` / `rm` / `default`、`set-role`、`add --role`）が 5xx か応答なしで終わると、保存された可能性があるので、保存の有無が不明であることと確かめるコマンドを伝えます（`--json` は `saved: "unknown"` と `check`）。4xx は保存していません。`send` に `--json` はありませんが、`send --register --role` と `--contract --role` も同じ文を stderr に出します。
+
+| コマンド | 形 |
+|---------|----|
+| `list` | `{ success, roles: [{ id, name, bodyVersion, bodyFingerprint, bodyBytes, createdAt, updatedAt }] }` |
+| `show` | `{ success, role: { ..., body }, references: { instances, repositories, system } }` |
+| `add` | `{ success, role }` |
+| `edit` | `{ success, before, after, bodyVersion, affected, impact: { schedules, runningSessions, message } }` |
+| `rm` | `{ success, deleted: { id, name }, affected }` |
+| `default` | `{ success, level: "system" \| "repository", cliToolId, repository?, before, after, impact: { repositories, schedules, runningSessions, message } }`。`before` / `after` は `{ stored, effective }` |
+| `defaults` | `{ success, system: [{ cliToolId, adapterEnabled, stored, effective }], repositories }`。`--repo` では `{ success, repository, defaults: [{ cliToolId, adapterEnabled, stored, effective }] }` |
+| `set-role`, `add --role` | `{ success, instanceId, cliToolId, adapterEnabled, stored, effectiveNext, launched, requested, restartPending, applyPending, rosterRevision }` |
+| 失敗 | `{ success: false, error: <code>, message, candidates? \| references? \| currentBodyVersion? \| saved?: "unknown", check? }` |
+
+`stored.state` は `role` / `none` / `inherit`（行なし）/ `unset`（システムで行なし）、`effective.kind` は `role` / `none` / `ambiguous`、`effective.source` は `repository` / `system` / `fallback` です。
+
+### 終了コード
+
+| コード | 意味 |
+|:------:|------|
+| 0 | 成功 |
+| 1 | サーバー未起動 |
+| 2 | 引数の誤り、保存できない本文、未知または曖昧なロール・リポジトリ、roster に無いインスタンス、対象外のツール |
+| 31 | 競合（何も変更・送信していない）: `name_conflict`、`name_changed`（`edit --name` の間に別の改名が入った）、`version_conflict`（`--if-version`）、`role_in_use`（`--force` なしの `rm`）、`instance_exists`、`roster_changed`（ロールを付けない `instances add` / `remove` / `alias` でも、名簿が変わり続けて保存できないと出ます）。例外: `remove --kill` は停止の後に保存するので、名簿は変わっていなくてもセッションは停止済みのことがあります |
+| 32 | 本文を入力していない: ロールの条件を満たさない（`ROLE_CONDITION_UNMET`）、ロールのために起動を拒否（`ROLE_LAUNCH_REFUSED`、`SESSION_LAUNCH_ROLE_MISMATCH`）。`send` / `ask` |
+| 99 | 予期しないエラー |
 
 ---
 
@@ -3999,6 +4165,8 @@ commandmate ls --token your-token
 | 10 | PROMPT_DETECTED | wait中にプロンプトを検出 |
 | 11 | UPSTREAM_FAULT | ターン終了時に画面に上流障害があった（`wait --fail-on-upstream-fault`。`ask` は常時）。stderr / `--json` に `id=...`。`id=context-limit` は `instances <wt> kill <instance>` で新しいセッションにして送り直す。`id=model-capacity` は別の instance・別のモデルへ送る（#3936） |
 | 30 | NO_ACTIVE_SESSIONS | interruptの対象となる稼働中セッションが無い |
+| 31 | ROLE CONFLICT | ロールや名簿の競合（`name_conflict` / `name_changed` / `version_conflict` / `role_in_use` / `instance_exists` / `roster_changed`）。何も変更・送信していない。ロールを付けない `instances add` / `remove` / `alias` でも出る。例外: `remove --kill` はセッションが停止済みのことがある |
+| 32 | ROLE NOT_SENT | ロールの条件を満たさない、またはロールのために起動を拒否。本文は入力していない（`send` / `ask`） |
 | 99 | UNEXPECTED_ERROR | 予期しないエラー / リソース未検出 |
 | 124 | TIMEOUT | waitのタイムアウト |
 

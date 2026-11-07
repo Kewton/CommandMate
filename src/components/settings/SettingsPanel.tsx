@@ -22,6 +22,7 @@ import { ExternalAppsManager } from '@/components/external-apps';
 import { NotificationsSettings } from '@/components/notifications';
 // Relative, not `@/components/settings`: that barrel re-exports this file, and
 // importing it here would be a cycle.
+import { AgentRolesSettings } from './AgentRolesSettings';
 import { AgentUpdatesCard } from './AgentUpdatesCard';
 import { DefaultAgentsSettings } from './DefaultAgentsSettings';
 import { DefaultSurfaceModeSettings } from './DefaultSurfaceModeSettings';
@@ -99,6 +100,8 @@ export function SettingsGeneralSection() {
             works" — and it is also the only mount that seeds the browser's
             copy of the setting (see surface-mode-config). */}
         <DefaultSurfaceModeSettings />
+        {/* Issue #4117: what a new session is told, beside which agents it has. */}
+        <AgentRolesSettings />
         {/* Issue #2069: beside the default-agent list rather than in its own
             section — both answer "which agent CLIs does this machine run",
             and the roster above is where a user notices a tool at all. */}

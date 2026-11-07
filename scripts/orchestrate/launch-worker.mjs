@@ -31,15 +31,33 @@
  * (execution-key.mjs), so two sends of one Issue never write to the same
  * files. stdout is the task id only.
  *
+ * The starting message is also what fixes the worker's role (Issue #4115): the
+ * generation and injection fingerprint `capture --json` reports after it are read
+ * again right before the contract. A difference means the process was replaced or
+ * another role went in, and the contract is not sent (44). A change of the settings
+ * while the process stays the same is the server's to refuse (`POST /tasks`, exit
+ * of the `send`), since only the server can resolve them.
+ *
+ * What was read goes with the contract (Issue #4116), and the server reads it again
+ * right before the first key: a process replaced after that last read, even with
+ * the same role, gets nothing (`send` exit 32). That too is stopped and is 44.
+ * A roster that moved under it is the `send`'s own 31: no contract, and the session
+ * left for the next launch to stop. Either way the `send` withdraws the Auto-Yes it
+ * armed and no other, so here it is only read back. No role read off a server that does
+ * have roles (it restarted, and knows nothing of this process) is not "nothing to
+ * pin": stopped and 44, unlike an older server or a tool roles do not apply to.
+ *
  * Exit code (send): 0 sent (and for Claude the model matched before the
  * contract went out); 40 the model did not match after one restart; 41 the
  * model could not be read after one restart (the session is stopped and the
  * contract not sent in both); 42 a stop could not be confirmed (nothing more
- * sent); 43 Auto-Yes could not be confirmed off before the start (nothing
+ * sent); 43 Auto-Yes could not be confirmed off before the start, which includes
+ * an instance list or roles that could not be read (nothing sent); 44 the role fixed at the starting message no longer holds (stopped, not
  * sent); 2 a usage error or a settings file git does not ignore (nothing
  * sent); 1 any other failure (the session did not come back ready after the
  * starting message: stopped, contract not sent); otherwise the `send`'s own
- * exit code (99 = not sent, 3-1's cold start).
+ * exit code (99 = not sent, 3-1's cold start; 31 / 32, see
+ * docs/orchestrate/workers.md "3-1 send とワーカーの起動の exit code").
  *
  * Usage:
  *   node scripts/orchestrate/launch-worker.mjs send --run-dir <dir> --issue <N> [--item <work item>]
@@ -74,6 +92,11 @@ export const EXIT_MODEL_MISMATCH = 40;
 export const EXIT_MODEL_UNKNOWN = 41;
 export const EXIT_STOP_UNCONFIRMED = 42;
 export const EXIT_AUTO_YES_UNCONFIRMED = 43;
+export const EXIT_ROLE_CHANGED = 44;
+/** `send`'s exit code for a role condition that does not hold: nothing typed (`RoleExitCode.NOT_SENT`). */
+export const EXIT_ROLE_NOT_SENT = 32;
+/** `send`'s exit code for a role conflict such as a moved roster: nothing sent (`RoleExitCode.CONFLICT`). */
+export const EXIT_ROLE_CONFLICT = 31;
 /** `auto-yes --disable` + read-back attempts before the start, and the pause between them. */
 export const DISARM_ATTEMPTS = 3;
 export const DISARM_INTERVAL_SEC = 2;
@@ -123,6 +146,53 @@ export function setModel(run, worktree, model) {
   return { file, value };
 }
 
+/**
+ * The process's role in one `capture --json` answer (Issue #4115): its generation and
+ * injection fingerprint, or null when it reports none (a server with no role layer,
+ * a tool outside it). Read off the answers already being read, so a launch asks
+ * `capture` no more often than it did.
+ *
+ * @returns {{ sessionGeneration: string, injectionFingerprint: string | null } | null}
+ */
+export function rolePinOf(answer) {
+  const roleLaunch = answer?.roleLaunch;
+  if (typeof roleLaunch?.sessionGeneration !== 'string') return null;
+  // A fingerprint that is neither is not "no role".
+  const { injectionFingerprint } = roleLaunch;
+  return typeof injectionFingerprint === 'string' || injectionFingerprint === null ? roleLaunch : null;
+}
+
+/**
+ * Whether the role read at the starting message still holds. Nothing to compare
+ * (no pin was read) holds: such a server has no generation to change. A pin that
+ * has gone away does not: the process it described is no longer known.
+ */
+export function rolePinHolds(pin, now) {
+  if (pin === null) return true;
+  return (
+    now !== null &&
+    pin.sessionGeneration === now.sessionGeneration &&
+    pin.injectionFingerprint === now.injectionFingerprint
+  );
+}
+
+/**
+ * The `send` flags that pin a contract to the process {@link rolePinOf} read
+ * (Issue #4116). None without a pin: such a server has no generation to compare.
+ *
+ * @returns {string[]}
+ */
+export function rolePinArgs(pin) {
+  if (pin === null) return [];
+  return [
+    '--expect-role-generation',
+    pin.sessionGeneration,
+    ...(typeof pin.injectionFingerprint === 'string'
+      ? ['--expect-role-fingerprint', pin.injectionFingerprint]
+      : ['--expect-no-role']),
+  ];
+}
+
 /** `ok` when the reported model is the contract's family, `unknown` when nothing is reported, else `mismatch`. */
 export function classifyModel(got, want) {
   const reported = typeof got === 'string' ? got.trim().toLowerCase() : '';
@@ -136,13 +206,15 @@ export function classifyModel(got, want) {
  *
  * @returns {{ verdict: 'ok' | 'unknown' | 'mismatch', got: string }}
  */
-export function checkModel({ run, sleep, cli, wt, instance, want }) {
+export function checkModel({ run, sleep, cli, wt, instance, want, onAnswer }) {
   let got = '';
   for (let read = 1; read <= MODEL_READS; read++) {
     const out = run(cli, ['capture', wt, '--instance', instance, '--json']);
     if (out.status === 0) {
       try {
-        const model = JSON.parse(out.stdout)?.model;
+        const answer = JSON.parse(out.stdout);
+        onAnswer?.(answer);
+        const model = answer?.model;
         got = typeof model === 'string' ? model.trim() : '';
       } catch {
         got = '';
@@ -173,13 +245,45 @@ function readRunning(run, cli, wt, instance) {
 }
 
 /**
+ * Whether a process that reports no role has to (Issue #4116), from its row as
+ * {@link readRowWithRoles} read it. `capture --json` leaves `roleLaunch` out for two
+ * opposite reasons: nothing here has roles, or this server has them and does not know
+ * the process. A row with `role` is a server with roles, and only a tool outside them
+ * needs no pin. A row without it is an older server or CLI, neither of which can pin.
+ *
+ * @returns {boolean}
+ */
+export function roleEvidenceRequired(row) {
+  return Boolean(row?.role) && row.role.effectiveNext?.source !== 'unsupported';
+}
+
+/**
+ * The instance's row with its role (Issue #4116): `--require-roles` fails the list
+ * rather than leave `role` out, so "could not be read" cannot pass for "none here".
+ * Only an answer naming the route as missing, or a CLI not knowing the flag, is an
+ * older one, and the plain list then says the rest. Same answers as {@link readRow}.
+ */
+function readRowWithRoles(run, cli, wt, instance) {
+  const listed = run(cli, ['instances', wt, '--json', '--require-roles']);
+  let answer = null;
+  try {
+    answer = JSON.parse(listed.stdout);
+  } catch {
+    answer = null;
+  }
+  if (listed.status === 0) return Array.isArray(answer) ? answer.find((row) => row?.instanceId === instance) : null;
+  const older = answer?.error === 'role_api_unavailable' || String(listed.stderr ?? '').includes('unknown option');
+  return older ? readRow(run, cli, wt, instance) : null;
+}
+
+/**
  * Turn the instance's Auto-Yes off and read it back off (#3883 N7). The grant
  * belongs to the worktree × instance, not to a session: a session that is not
  * running does not mean it is off, and the poller keeps it for the next
  * session. `instances --json` reads `autoYes` from the state store, with or
  * without a session; only a readable row with `autoYes` not true is "off".
  *
- * @returns {{ ok: boolean, detail: string }}
+ * @returns {{ ok: boolean, detail: string, row?: object }} `row` is what read it back off
  */
 export function disarmAutoYes({ run, sleep, cli, wt, instance }) {
   let detail = '';
@@ -188,9 +292,9 @@ export function disarmAutoYes({ run, sleep, cli, wt, instance }) {
     if (off.status !== 0) {
       detail = `auto-yes --disable exit=${off.status} ${String(off.stderr ?? '').trim().split('\n').pop() ?? ''}`.trim();
     } else {
-      const row = readRow(run, cli, wt, instance);
-      if (row && row.autoYes !== true) return { ok: true, detail: 'off' };
-      detail = row === null ? 'instance list unreadable after --disable' : row === undefined ? `${instance} not in the instance list` : 'still on after --disable';
+      const row = readRowWithRoles(run, cli, wt, instance);
+      if (row && row.autoYes !== true) return { ok: true, detail: 'off', row };
+      detail = row === null ? 'instance list or its roles unreadable after --disable' : row === undefined ? `${instance} not in the instance list` : 'still on after --disable';
     }
     if (attempt < DISARM_ATTEMPTS) sleep(DISARM_INTERVAL_SEC * 1000);
   }
@@ -224,13 +328,15 @@ export function stopSession({ run, sleep, cli, wt, instance }) {
 }
 
 /** Wait until the session reads `sessionStatus: ready` READY_STREAK times in a row; false if it never does. */
-export function waitReady({ run, sleep, cli, wt, instance }) {
+export function waitReady({ run, sleep, cli, wt, instance, onAnswer }) {
   let streak = 0;
   for (let poll = 1; poll <= READY_MAX_POLLS; poll++) {
     const out = run(cli, ['capture', wt, '--instance', instance, '--json']);
     let status = null;
     try {
-      status = out.status === 0 ? JSON.parse(out.stdout)?.sessionStatus : null;
+      const answer = out.status === 0 ? JSON.parse(out.stdout) : null;
+      if (answer !== null) onAnswer?.(answer);
+      status = answer?.sessionStatus ?? null;
     } catch {
       status = null;
     }
@@ -380,7 +486,10 @@ export function main(argv, deps = {}) {
       // 99 = the message was not delivered (initialization timeout / prompt not ready / composer-not-empty), but the
       // session may be up: the starting message asks for no work, so a model read off the screen is as good (#3904).
       if (init.status !== 0 && init.status !== EXIT_NOT_DELIVERED) return init.status;
-      const { verdict, got } = checkModel({ ...ctx, want: o.model });
+      // The role is what the starting message started (Issue #4115): the last answer
+      // of the model check fixes it, and the last answer before the contract must agree.
+      let rolePin = null;
+      const { verdict, got } = checkModel({ ...ctx, want: o.model, onAnswer: (answer) => (rolePin = rolePinOf(answer)) });
       if (init.status !== 0 && got) {
         const note = `start exit=${init.status} but the prompt was reached (model read: ${got}); continuing\n`;
         fs.appendFileSync(path.join(o.runDir, `${init.name.replace(/\.out$/, '')}.err`), note);
@@ -393,13 +502,36 @@ export function main(argv, deps = {}) {
         if (attempt === LAUNCH_ATTEMPTS) return verdict === 'mismatch' ? EXIT_MODEL_MISMATCH : EXIT_MODEL_UNKNOWN;
         continue;
       }
-      if (!waitReady(ctx)) {
+      let roleNow = rolePin;
+      if (!waitReady({ ...ctx, onAnswer: (answer) => (roleNow = rolePinOf(answer)) })) {
         log(`not ready: ${o.instance} of ${o.wt} did not read ready ${READY_STREAK} times in a row after the starting message; contract not sent`);
         return stopped('not ready after the starting message') ? 1 : EXIT_STOP_UNCONFIRMED;
       }
-      const sent = sendTo('send', contractArgs);
+      if (!rolePinHolds(rolePin, roleNow)) {
+        log(`role changed: ${o.instance} of ${o.wt} is not the process the starting message started; contract not sent`);
+        return stopped('role changed after the starting message') ? EXIT_ROLE_CHANGED : EXIT_STOP_UNCONFIRMED;
+      }
+      if (roleNow === null && roleEvidenceRequired(disarm.row)) {
+        log(`role unknown: the server has no record of what ${o.instance} of ${o.wt} was started with; contract not sent`);
+        return stopped('no record of the role it started with') ? EXIT_ROLE_CHANGED : EXIT_STOP_UNCONFIRMED;
+      }
+      const sent = sendTo('send', [...contractArgs, ...rolePinArgs(roleNow)]);
       log(`send exit=${sent.status} issue=${workItem} task=${sent.taskId || '-'} (${sent.name})`);
       if (sent.taskId) out(sent.taskId);
+      if ((sent.status === EXIT_ROLE_NOT_SENT || sent.status === EXIT_ROLE_CONFLICT) && roleNow !== null) {
+        // Refused with nothing typed, and the `send` withdrew the grant it armed. One still
+        // on is someone else's, or could not be told apart: not this script's to cut.
+        const row = readRow(run, o.cli, o.wt, o.instance);
+        if (row?.autoYes !== false) {
+          log(`auto-yes still on or unread: ${o.instance} of ${o.wt} (see ${sent.name.replace(/\.out$/, '.err')}); left as it is`);
+        }
+        if (sent.status === EXIT_ROLE_CONFLICT) {
+          log(`roster changed: ${o.instance} of ${o.wt}; contract not sent`);
+          return sent.status;
+        }
+        log(`role changed: ${o.instance} of ${o.wt} is not the process the contract was pinned to; contract not sent`);
+        return stopped('the contract was pinned to another process') ? EXIT_ROLE_CHANGED : EXIT_STOP_UNCONFIRMED;
+      }
       return sent.status;
     }
     return 1;

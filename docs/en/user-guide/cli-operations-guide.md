@@ -69,6 +69,7 @@ node bin/commandmate.js ls
 | [`commandmate attach`](#commandmate-attach) | Attach this terminal to an agent's tmux session |
 | [`commandmate auto-yes`](#commandmate-auto-yes) | Control auto-yes |
 | [`commandmate instances`](#commandmate-instances) | List, add, remove, and rename agent instances (the roster) |
+| [`commandmate roles`](#commandmate-roles) | Define roles and set the defaults per tool and repository |
 | [`commandmate report`](#commandmate-report) | Generate, show, and list daily reports; aggregate Eval metrics |
 | [`commandmate skill`](#commandmate-skill) | Browse the Skill catalog; plan, install, update, uninstall, and inspect Skills |
 | [`commandmate update`](#commandmate-update) | Update CommandMate itself (stop, update, restart) |
@@ -255,6 +256,9 @@ Send a message to a worktree's agent (async). Starts the session automatically i
 ```bash
 commandmate send <worktree-id> "<message>"
 commandmate send <worktree-id> "<message>" --instance codex
+commandmate send <worktree-id> "<message>" --instance codex --role reviewer  # Save the role, and send only to a process running it (see commandmate roles)
+commandmate send <worktree-id> "<message>" --agent codex --instance codex-3 --register --role reviewer  # Create the instance and its role first, then send
+commandmate send <worktree-id> "<message>" --instance opencode --new-conversation  # OpenCode V1: start a stopped session on a new conversation, not the remembered one
 commandmate send <worktree-id> "<message>" --auto-yes --duration 3h
 commandmate send <worktree-id> "<message>" --auto-yes --auto-yes-answer-mode careful  # questions are yours
 ```
@@ -301,7 +305,7 @@ commandmate send "$WT" "Quick check" --agent codex --instance codex-3 --register
 | `--agent <id>` | Ad-hoc CLI tool for an instance the roster does not know (claude, codex, gemini, vibe-local, opencode, copilot, antigravity, command-code, opencode-v2) | The roster value / worktree default |
 | `--register` | Register the `--instance` session into the roster | - |
 | `--model <model>` | Model to use (copilot / antigravity / claude only). **copilot** switches inside the session. **antigravity and claude take it as a launch flag**: it applies only when this send starts the session, and a running session answers 400 (stop the session and resend to switch). For claude the value is an alias (`sonnet` / `opus` / `opus[1m]`) or a full id (`claude-sonnet-5`). The target must be named (`--instance` or `--agent`) | The tool's default |
-| `--auto-yes` | Enable auto-yes before sending | - |
+| `--auto-yes` | Enable auto-yes before sending. Applied after the message (a tool `--model` defers it for, or a grant already on with a role or pin), a failure is a warning and exit 0, because the message has gone out. Do not send it again: the warning's command enables it. A failure before the message is an error with nothing sent (Issue #4159) | - |
 | `--duration <d>` | Auto-yes duration (`1h`-`24h`, whole hours; e.g. `1h` / `3h` / `8h`). Out of range exits 2 with or without `--auto-yes` | 1h |
 | `--stop-pattern <p>` | Auto-yes stop condition (regex) | - |
 
@@ -698,6 +702,46 @@ The API is `POST /api/relays/:id/resolve` (body `{ "payloadId", "attemptId", "ac
   (a closed relay delivers nothing more) and a system line in the requester's history says so (the API answers
   `replyDiscarded: true`). The expiry itself is told by the existing "expired" system line and the hold on the
   screens; no expiry notice is sent to the composer after the hold is settled
+
+#### A delivery stopped by the requester's confirmation dialog (Issue #4105)
+
+While the requester A shows a confirmation dialog, a relay delivery types nothing into A's composer (as
+before). Why it is stopped is now readable, as what the **last delivery attempt** observed.
+
+- **The field**: every relay in `GET /api/relays` (`owed`, `awaiting`, `open`, `held`) and `GET /api/relays/:id`
+  carries `lastDeliveryBlock` (`{ reason, kind, payloadId, observedAt }`). `reason` is `prompt_waiting` (A's
+  confirmation dialog), `generating` (A is mid-turn), `session_stopped` (A's session is not running) or
+  `foreign_session` (a session of that name belongs to another server). It is not a current state but what the
+  attempt at `observedAt` saw. Once the dialog is closed, the next delivery pass (about every 15 s) delivers
+  and it goes away; the screens follow with their 20-second re-read
+- **The payload it is for**: only an observation of the current payload (`kind`, `payloadId`) is shown. It is
+  `null` once the payload was replaced, delivered, cancelled, expired or held (`deliveryHold`)
+- **`null` does not mean "deliverable"**: it is kept in the server process only, never in the database. After a
+  restart, before the first attempt, or when the attempt stopped for another reason it is `null`. An older
+  server sends no such field
+- **CLI**: the lines of `commandmate relays` and `commandmate relays --id <relay-id>` carry `pending=<kind>`
+  (the payload waiting for the composer) and `blocked=<reason>@<observed time>`. `--json` is the API's answer
+- **The screens**: the PC and phone rosters and the chat surface show "stopped by this pane's dialog" (warning
+  colour) on the requester A's row, for `prompt_waiting` only. It comes after "delivery unconfirmed" and before
+  the worker's confirmation. The waiting and prompt counts are unchanged
+- **A notice still stopped after the expiry (Issue #4193)**: a relay closed by its deadline keeps the expiry
+  notice until it reaches A's composer. While that delivery is stopped (`lastDeliveryBlock` set) the relay is in
+  `closedBlocked` of `GET /api/relays` (scoped by the requester A), and `commandmate relays` prints it under
+  `# closed, notice not delivered yet` as `expired`, `pending=expired`, `blocked=<reason>@<observed time>`
+  (`closedBlocked` in `--json`). The PC and phone rosters and the chat surface show the same "stopped by this
+  pane's dialog" for `prompt_waiting` (its tooltip says the notice stays until delivered, not that it is replaced at
+  the deadline). A requester not in the roster (`instances remove` without `--kill` leaves its session running)
+  gets it below the roster, under its own heading apart from the unconfirmed deliveries, with the reason. It goes
+  away once the notice is delivered. It is never in `open` /
+  `awaiting`, and `counts` / `heldCount` do not change. A closed relay with no stopped attempt is not listed
+- **Not the `prompt` state**: `prompt` records that the worker B stopped on a confirmation and a notice to A was
+  **queued** (not that it arrived). **It does not mean B is still waiting**: once B answers and the reply replaces
+  the notice (`pending=reply`), `state` stays `prompt` until the relay closes. The roster says "Worker confirmation
+  recorded"
+- **No count changes**: the reason is never in `held`, `heldCount`, `holdReason`, `deliveryHold` or the
+  per-state `counts`
+- **Left alone**: at the deadline (24 hours by default) the waiting reply is replaced by the expiry notice (as
+  before). The dialog is never closed automatically (Auto-Yes is unchanged)
 
 ### Progress Output
 
@@ -2142,7 +2186,12 @@ commandmate instances <worktree-id> remove <instance-id> --kill        # Remove 
 commandmate instances <worktree-id> alias <instance-id> "New name"     # Rename
 
 commandmate instances <worktree-id> kill <instance-id>                 # Stop just that instance's session
+
+commandmate instances <worktree-id> add --agent codex --role reviewer  # Add an instance and set its role together (--no-role for no role)
+commandmate instances <worktree-id> set-role <instance-id> --role reviewer  # Save the role for its next start (also --none / --inherit)
 ```
+
+`add`, `remove`, `alias` and `send --register` save with the revision of the roster they read (Issue #4132). If the roster changed after the read, the change is rebuilt on the current roster, up to 2 more times, so another add or change is not erased. The id is one that is free in the current roster. If the roster keeps changing, `add`, `remove` and `alias` end in exit 31 (`roster_changed`) and other changes stay (`remove --kill` stops the session and then saves, so the session may have been stopped). `send --register` has sent its message by then, so this and any other failure to register (Issue #4159) warn, exit 0 and name the command that registers it.
 
 `kill` also disables Auto-Yes for the instances it stops (Auto-Yes of instances it did not stop is kept).
 A successful `kill` (and `remove --kill`) appends one line to `~/.commandmate/session-kills/<UTC date>.jsonl`
@@ -2358,6 +2407,130 @@ commandmate send "$WT" "Give this a quick check" --agent codex --instance codex-
 # Remove it when it is no longer needed (stopping the session too)
 commandmate instances "$WT" remove codex-2 --kill
 ```
+
+---
+
+## commandmate roles
+
+Manage role definitions and defaults without the screen (Issue #4116). The body comes from `--file` or stdin, and nothing is interactive.
+
+### The three operations
+
+| Operation | What changes | Running sessions |
+|-----------|--------------|------------------|
+| `roles edit` | The role's text. Every setting pointing at it follows, from its next start | Unchanged |
+| `roles default` | The default per tool (`--repo` for that repository, otherwise the system level). Schedules follow too | Unchanged |
+| `instances <wt> set-role` / `send --role` | That instance's setting | Unchanged. A role is fixed when the process starts: stop it (`instances <wt> kill <id>`) and send again to apply |
+
+### A role is not a permission
+
+A role is an instruction to the model. It limits nothing. The text sent with it at the start says that the request, an execution contract and the project instructions (`AGENTS.md` and the like) come first.
+
+For example, send an implementation contract under a "do not edit" role and the agent edits and commits, and `wait --verify` sees the real work and returns exit 0 (checked with Claude on 2026-11-04). To be sure nothing is edited, do not rely on a role: use the CLI's own permission settings, and do not send an implementation contract.
+
+### Usage
+
+```bash
+commandmate roles list [--json]
+commandmate roles show <role> [--json]
+commandmate roles add <name> (--file <path> | --stdin) [--json]
+commandmate roles edit <role> [--name <name>] [--file <path> | --stdin] [--if-version <n>] [--json]
+commandmate roles rm <role> [--force] [--json]
+commandmate roles default <tool> (--role <role> | --none) [--json]
+commandmate roles default <tool> --repo <repository> (--role <role> | --none | --inherit) [--json]
+commandmate roles defaults [--repo <repository>] [--tool <tool>] [--json]
+commandmate instances <worktree-id> set-role <instance-id> (--role <role> | --none | --inherit) [--json]
+commandmate instances <worktree-id> add --agent <tool> [--role <role> | --no-role]
+commandmate send <worktree-id> "..." --instance <id> [--role <role> | --no-role]
+```
+
+Example: define a reviewer and make it this repository's Codex default.
+
+```bash
+commandmate roles add reviewer --file ./reviewer.md
+commandmate roles default codex --repo . --role reviewer
+```
+
+### Naming
+
+- `<role>` is an ID or a name. An exact match wins; failing that, one ignoring case and Unicode form. Two candidates is exit 2 with both listed, never a pick
+- Nothing is reserved. "No role" and "follow the defaults" are the flags `--none` / `--no-role` / `--inherit`, so a role can be called `none`
+- Tools are claude, codex, command-code, opencode, opencode-v2, copilot and antigravity. Any other is exit 2 (`tool_not_supported`). Antigravity can hold settings, but a start with a role is refused until it is enabled, and the command warns
+
+### `--repo` forms and precedence
+
+1. A repository ID
+2. A path (a value containing `/` or starting with `.`). A registered repository, or a registered worktree's path, which means its repository (so `--repo .` works inside a worktree)
+3. A name (a value with no `/` is never read as a path)
+
+See what is registered with `commandmate roles defaults`. Errors say which: `unknown_repository` (no match), `repository_not_registered` (a directory with no row), `ambiguous_repository` (several, listed). A repository with no setting for a tool is not an error: it reads `stored: { state: "inherit" }`, and `effective` says what it gets instead.
+
+### `send --role` and `--register`
+
+`send --role` is a condition, not a switch.
+
+- The setting is saved first. A session that is not running starts with it
+- A running one gets the message only if its startup fingerprint matches. Another role, or no record of its start (after a server restart, say), is exit 32 with nothing typed. The setting stays saved, so stop the session and send again without `--role`
+- Only an instance on the roster can hold a role. An ad-hoc id needs `--register` as well
+- `--register --role` creates the instance and its role **before** sending, so the first start has it. Repeating it creates nothing: `--role` replaces what the instance holds and is a condition as above. A roster changed after it was read is exit 31, nothing sent
+- `--register` without `--role` keeps its old order (sent, then registered) and leaves any role alone. The message has gone out by then, so a roster that keeps changing is a warning and exit 0, not exit 31. So is any other failure to register: a failed roster read, a 5xx, another 409 (Issue #4159; a 5xx or no answer may have saved it, so check with `commandmate instances <worktree-id>`, as the warning says). Do not send the message again: the warning's command (`commandmate instances <worktree-id> add --agent <tool> --id <instance-id>`) registers it
+- `--contract --role` ends the same way. If the contract's own check would refuse for the old setting, the role is saved and the check runs again. A broken contract saves nothing. The save is conditional on the revision of the roster just read (Issue #4132): if the roster changed after that, nothing is saved and it exits 31 (`roster_changed`)
+- When a send with a role or a pin types nothing, the `--auto-yes` it armed is withdrawn, naming the tool and instance, and only if it reads back as that grant. A grant already on stays as it was until the message is in. A grant updated since, or a send that cannot be said to have typed nothing, leaves it on, and the command to stop it is printed. With no target named, the default it read is named in every later request, so a default changed meanwhile neither overwrites nor withdraws another target's Auto-Yes (a server answering for another target than the one read gets no withdrawal, only the command to stop it)
+- Withdrawing and arming are conditional requests that go by the grant's id (Issue #4132). A grant another operation armed after the read-back is not turned off, even with the same expiry and answer mode. If another operation armed one first, its terms are not overwritten: this send's terms apply once the message is in. A server too old to return a grant's id is sent no unconditional withdrawal: the grant stays on, and the command to stop it is printed (Issue #4159)
+- `--auto-yes` with no role, pin or `--reply-to` reads nothing first (decided in Issue #4159). It cannot tell a grant it armed from one already on, so a send that types nothing leaves it on, and the command to stop it is printed. Reading first would add a request to every such send, and would move the new terms of a grant already on to after the message
+- A refusal that can be checked before the save (`--model` on a running session, a bad image path) leaves no setting. A refusal after the save says the setting stayed saved, whatever refused it
+- OpenCode V1 goes on with the conversation it remembers, even under another role, and what the earlier role said stays in its history. Stopping the session does not forget it. To start a new one, stop the session and send with `--new-conversation`. Another tool, or a session running or starting when this checks, is exit 2 with nothing sent (a start between that check and the send is not detected)
+- `--expect-role-generation <g>` with `--expect-role-fingerprint <f>` / `--expect-no-role` pin the send to what the caller read (`capture --json`'s `roleLaunch`), saving nothing. The server reads them again right before the first key, so a process replaced in between, even with the same role, gets nothing: exit 32. They combine with `--contract` and `--role`
+- `send --contract` to a running session with no evidence of its start (this server did not start it, or started it before restarting) is not refused. Only when the settings give that session a role, one `Warning:` line goes to stderr and `POST tasks` answers with `roleWarning` (Issue #4132). The task id on stdout and the exit code do not change. To apply the role, stop the session and send again. To refuse such a session, pass `--role` or `--expect-*` (not sent, exit 32)
+
+### `set-role` and `instances --json`
+
+`set-role` saves for the next start, running or not, and leaves a running process alone. It compares the two, and only a difference gives `applyPending: true` (`Pending:` in text). `restartPending` is `yes`, `no` or `unknown` (nothing known about the process).
+
+Each `instances --json` row has `role` when the server has roles:
+
+```json
+{
+  "role": {
+    "stored": { "state": "role", "roleId": "...", "roleName": "reviewer" },
+    "effectiveNext": { "kind": "role", "source": "instance", "role": { "id": "...", "name": "reviewer" }, "injectionFingerprint": "..." },
+    "launched": { "roleName": "writer", "source": "system", "sessionGeneration": "...", "injectionFingerprint": "..." },
+    "requested": { "roleName": "writer", "source": "system" },
+    "restartPending": "yes"
+  }
+}
+```
+
+With `--require-roles` a role that cannot be read fails the command instead of being left out (a server older than roles says `role_api_unavailable`). A null `launched` means not known, which is not "no role". The table appends `ROLE_AT_START`, `ROLE_NEXT` and `RESTART_PENDING`.
+
+### `--json` shapes
+
+Failures included, on stdout (the same sentence goes to stderr). A failure with no role code of its own says `internal_error`, `request_failed`, `no_response` (no server), `role_api_unavailable` (a server older than roles) or `unexpected_error`, with the exit codes below. A missing argument or unknown option is commander's: stderr only, exit 1. A request changing a role setting (`roles add` / `edit` / `rm` / `default`, `set-role`, `add --role`) that ends in a 5xx or no answer may have saved, so it says that is not known and how to check (`--json`: `saved: "unknown"` and `check`). A 4xx saved nothing. `send` has no `--json`; `send --register --role` and `--contract --role` print the same sentence on stderr.
+
+| Command | Shape |
+|---------|-------|
+| `list` | `{ success, roles: [{ id, name, bodyVersion, bodyFingerprint, bodyBytes, createdAt, updatedAt }] }` |
+| `show` | `{ success, role: { ..., body }, references: { instances, repositories, system } }` |
+| `add` | `{ success, role }` |
+| `edit` | `{ success, before, after, bodyVersion, affected, impact: { schedules, runningSessions, message } }` |
+| `rm` | `{ success, deleted: { id, name }, affected }` |
+| `default` | `{ success, level: "system" \| "repository", cliToolId, repository?, before, after, impact: { repositories, schedules, runningSessions, message } }`; `before` / `after` are `{ stored, effective }` |
+| `defaults` | `{ success, system: [{ cliToolId, adapterEnabled, stored, effective }], repositories }`; with `--repo`, `{ success, repository, defaults: [{ cliToolId, adapterEnabled, stored, effective }] }` |
+| `set-role`, `add --role` | `{ success, instanceId, cliToolId, adapterEnabled, stored, effectiveNext, launched, requested, restartPending, applyPending, rosterRevision }` |
+| Failure | `{ success: false, error: <code>, message, candidates? \| references? \| currentBodyVersion? \| saved?: "unknown", check? }` |
+
+`stored.state` is `role`, `none`, `inherit` (no row) or `unset` (system, no row). `effective.kind` is `role`, `none` or `ambiguous`. `effective.source` is `repository`, `system` or `fallback`.
+
+### Exit Codes
+
+| Code | Meaning |
+|:----:|---------|
+| 0 | Done |
+| 1 | The server is not running |
+| 2 | Bad arguments, a body that cannot be stored, an unknown or ambiguous role or repository, an instance not on the roster, a tool outside the feature |
+| 31 | A conflict; nothing changed or sent: `name_conflict`, `name_changed` (another rename landed during `edit --name`), `version_conflict` (`--if-version`), `role_in_use` (`rm` without `--force`), `instance_exists`, `roster_changed` (also from `instances add` / `remove` / `alias` without a role, when the roster keeps changing and cannot be saved). The exception: `remove --kill` stops the session and then saves, so the session may have been stopped even though the roster did not change |
+| 32 | The body was not typed: the role condition does not hold (`ROLE_CONDITION_UNMET`), or the start was refused because of its role (`ROLE_LAUNCH_REFUSED`, `SESSION_LAUNCH_ROLE_MISMATCH`). `send` / `ask` |
+| 99 | Anything else |
 
 ---
 
@@ -2967,6 +3140,8 @@ commandmate ls --token your-token
 | 5 | UPDATE_FAILED | Update failed (`update`: registry query / `npm install -g` / version verification) |
 | 10 | PROMPT_DETECTED | Prompt detected during wait |
 | 11 | UPSTREAM_FAULT | An upstream API fault was on the screen when the turn ended (`wait --fail-on-upstream-fault`; `ask` always). stderr / `--json` carry `id=...`; `id=context-limit` means the conversation is over the model's context limit — kill the instance (`commandmate instances <wt> kill <instance>`) and send again in a fresh session; `id=model-capacity` means the selected model is at capacity and will not answer — send to another instance or model (#3936) |
+| 31 | ROLE CONFLICT | A role or roster conflict (`name_conflict` / `name_changed` / `version_conflict` / `role_in_use` / `instance_exists` / `roster_changed`); nothing changed or sent. Also from `instances add` / `remove` / `alias` without a role. The exception: `remove --kill` may have stopped the session |
+| 32 | ROLE NOT_SENT | The role condition does not hold, or the start was refused because of its role; the body was not typed (`send` / `ask`) |
 | 99 | UNEXPECTED_ERROR | Unexpected error / resource not found |
 | 124 | TIMEOUT | Wait timeout exceeded |
 

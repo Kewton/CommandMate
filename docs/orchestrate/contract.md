@@ -151,9 +151,50 @@ unit ゲートで同型を弾くが、契約側にも明示すること。
 ## 2-4 生成器が止まる条件
 
 - 生成器は、出力する契約を正準のパーサー（`src/lib/tasks/contract-parser.ts`）と同じ制約で検査する（title 200 文字・gate の形と重複・scope の形）。
-- **goal が 8,000 文字を超えると生成が失敗する**（契約の上限）。Issue 本文を要点に縮めた `issueBodyFile` を渡し直す
+- **goal が 8,000 文字を超えると生成が失敗する**（契約の上限）。Issue 本文を要点に縮めた `issueBodyFile` を渡し直す。検査するのは parser が数える文字列と同じで（末尾に改行を足さない。YAML は `|-`）、ちょうど 8,000 文字は生成も送信も通る（#4135）
 - `scope` に `CHANGELOG.md` / `docs/module-reference.md` を書くと生成が失敗する（2-4-1）。`requireCommit: true` は常に入る
 - 同じ設定で再実行しても契約は変わらない（`unchanged`）。中身の違う契約が既にあると止まる。送信前に直すときだけ `--force`
+
+## 2-4 src を触る契約の build-server
+
+`typecheck`（`npx tsc --noEmit`）は `tsconfig.json` だけを読み、`lib` は `esnext`。サーバーのビルドの `tsconfig.server.json` は `tsconfig.base.json` の `ES2022` までで、`include` も別にある。
+だから「サーバーのビルドだけで落ちる型エラー」は `typecheck` を通る。実例（#4124）: #4114 のコードが #4115 で初めてサーバーのビルドに入り、`isWellFormed` が CI の `Build` で落ちた。
+
+決定（#4135）: 新しいゲートは足さず、既にある `build-server` を、生成器の既定に入れる。`gates` を省略し、scope が `src/` の下か `server.ts`・`tsconfig.server.json`・`tsconfig.base.json` に届くときだけ `[lint, typecheck, build-server, unit-related]` になる。「届く」は scope ゲートの意味（`src/lib/verification/scope-gate-glob.ts`）で読む: `src` 単独、`**/*.ts`、`{src,docs}/**` も届く。
+
+`--worktree`（省略時はカレントディレクトリ）の `.commandmate/verify.yaml` に `build-server` が無ければ足さない。`POST /tasks` が未知のゲートを 400 で拒否し、従来の既定で送れていた契約が送れなくなるため。
+
+| 実測（2026-11-04、この worktree・warm、load average 30〜41） | 所要 |
+|---|---|
+| `npm run build:server` 3 回 | 3.63 / 3.65 / 3.33 秒 |
+| `npx tsc --noEmit` 1 回 | 24.19 秒 |
+
+既定に入れても検証の時間はほとんど変わらない。
+
+- `gates` を書いた設定は書いたとおりに走る（生成器は足さず、verify.yaml も確かめない）。本体の雛形が `build-server` を書くのはそのため
+- `kind: refactor` の既定は `[lint, typecheck]` のまま（テストが固定している）。CI の `Build` を待つので、マージの前には検出する
+
+## 2-4 契約が先回りする対のファイルと期待の反転
+
+（#4015。2026-10-30 の run と 2026-11-02 の #4106 で、ワーカーが範囲を守った結果、検証が exit 20 になった。）
+
+- `tests/fixtures/` の下を scope に書くと、goal に「fixture を走査するテストの表・許可リストへの登録も受入基準に入れる」が入る（#4000: 検出テスト 3 本が件数・許可リストで数えていた）。走査するテストは契約の起案者が scope に足す
+- `src/config/slash-commands-catalog.json` を scope に書くと、`tests/unit/lib/slash-command-description-override.test.ts` が scope に入る（#3998: 説明の衝突を解くとキーが分かれ、leaf の一覧を固定するこのテストが変わる）
+- `.claude/skills/` の下を scope に書くと、`.claude/skills/sync-map.json` が scope に入る（#4106: `mapped` パッケージの全ファイルの sha256 を固定するので、`SKILL.md` に限らず pin の打ち直しが要る）。どれも `changelog.d/<N>.md` と同じく、書いてあっても重複しない。足した分も `MAX_SCOPE_PATTERNS` に数える
+- API のルート（`src/app/api/` の下の `.ts`）か CLI のコード（`src/cli/` の下の `.ts`）に当たる scope を書くと、`src/cli/types/**` が scope に入る（#4148: #4132 の `src/cli/types/api-responses.ts` が範囲外で 2 本目の契約になった。CLI は API の応答の型をここに写している）。判定は scope ゲートの glob の意味（`src/lib/verification/scope-gate-glob.ts`）での交差で、`src/app`・`src/app/**/route.ts`・`**/*.ts`・`src/{app,cli}/**` も当たる。`src/app/**/page.tsx`・`**/*.md` は当たらない。`src/**`・`src/cli/**` のように既に含む書き方や、`src/cli/types/` だけの scope には足さない。ブレースの展開が 1024 通りを超える指定は判定せず、足さずに `contract: note:` を stderr へ出すので、当たるなら自分で書く
+- **期待を反転する契約**（#3999: 「ターミナル面に Plan review の操作を出さない」を反転して describe/it 名が変わり、precheck の removed-tests が落ちた）: 契約の決定が既存の振る舞いを反転するときは、plan に「removed-tests を許可する（理由）」を先に書き、その run の precheck に `--allow-removed-tests` を付ける。理由が plan に無いまま付けない
+
+## 2-4 文面を変える契約と integration
+
+（#4162。#4149 の文面の変更が既存の integration テストを壊し、PR の CI で初めて出た。）
+
+契約の `unit-related` は `tests/unit` だけを見る。`tests/integration` をゲートに足すとテスト全体の順番待ちに並ぶので、広げない。文面やエラーを変える契約は、変更と対になるテストを次のように指定する:
+
+- **探す**: 雛形の手順 3 が、ワーカーに `git grep -l '<変える前の文面>' -- tests/integration tests/e2e` を指示する
+- **起案者が先に分かるとき**: 当たるファイルを scope に足し、`decisions` にそのファイルと `NODE_ENV=test npx vitest run <ファイル>` を書く（そのファイルだけを走らせる。`npm run test:integration` は全体）
+- **scope の外で当たったとき**: ワーカーは直さず「本文に無い指摘」に書く。オーケストレーターは 2 本目の契約か同じ PR の修正で受ける
+
+`contract.mjs` に自動の先回りは足さない。文面を変えるかどうかは scope のパターンから判定できず、`src/` に当てると全部の契約に出て読まれなくなる。
 
 ## 2-4-2 スラッシュコマンドが起動しなかった実測
 
@@ -167,6 +208,12 @@ unit ゲートで同型を弾くが、契約側にも明示すること。
 両者が同じマシンで重なると、テストが全部通っているのにティアダウンの race でゲートが落ちる。
 
 ## 2-4-4 事前レビューを足した理由
+
+**試行の結果（2026-10-09〜11-06）:** 実施は 12 本。5-2b の再レビューは 1 本あたり、実施した群 1.67 回、見せなかった群 1.40 回で、減らす効果は示せなかった（危ない Issue を選んで実施したので群どうしは比べられない）。
+ほぼすべてで、実装の前に設計の誤り・反例を見つけた（#3701 の dedup の前後、#3713 の設計の差し替え、#4065 の反例）。これを理由に、縮めて常設した。
+集計と判断案は `workspace/orchestration/runs/2026-11-05/trial-2-4-4/proposal.md`。
+
+**試行を足したときの理由:**
 
 #3397（読めない選択画面に Auto-Yes が Enter を送る）は
 整合性レビューを 3 回受け（3 件 → 2 件 → 3 件）、1 往復で約 45 分かかった。指摘はコードの書き方ではなく設計の穴だった

@@ -10,7 +10,10 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { SUMMARY_ALLOWED_TOOLS } from '@/config/review-config';
-import { mockFetchResponse, restoreFetch } from '../../helpers/mock-api';
+import { mockFetchResponse, restoreFetch, keepOffTheRealServer } from '../../helpers/mock-api';
+
+// Issue #4191: no request from this file reaches 127.0.0.1:3000, not even by failing.
+keepOffTheRealServer();
 
 const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
 const mockConsoleError = vi.spyOn(console, 'error').mockImplementation(() => {});

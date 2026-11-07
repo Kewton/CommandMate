@@ -50,6 +50,20 @@ module-reference の断片の写しは `module-reference-<issue>[-<item>].md`。
 「同じ Issue の 2 本目の PR」として止めない（記録に無い PR は今までどおり止める）。`merge-pr.mjs --item` は、`--close <N>` を付けない限り Issue を閉じない
 （最後の PR の呼び出しで `--close <N>` を付ける）。
 
+## 1-5 2 本目の PR の changelog 断片
+
+（#4192。2026-11-06 の run で #4175 の 2 本の PR がどちらも `changelog.d/4175.md` を作り、2 本目のマージで add/add の衝突になった。断片は 1 ファイル 1 項目で、`scripts/changelog-fragments.mjs` の `check` は 2 項目目を拒む。手で 1 項目に統合した解決のマージが作業の HEAD になり、検証を 1 回（約 44 分）やり直した。）
+
+同じ Issue の PR が 2 本以上ある run では、断片 `changelog.d/<N>.md` を 1 本目と 2 本目で取り合わない:
+
+- **順序:** 2 本目のワーカーは、1 本目のマージの後に develop を取り込んでから断片を書く。1 本目の前に 2 本目を送るときも、断片を書く段は 1 本目のマージの後に置く（plan.md の順にそう書く）
+- **2 本目の契約に書くこと:** goal に「develop に `changelog.d/<N>.md` があれば、新しいファイルを作らず、その既存の 1 項目へ統合して両方の変更を残す（1 項目・1 行のまま。`node scripts/changelog-fragments.mjs check` が exit 0）」を足す。
+  `scripts/orchestrate/contract.mjs` は、設定に `item:`（work item の名前）があるとき、この文を goal の断片の節に自動で入れる
+  （#4212。`scripts/orchestrate/templates/fragment-rules.md` の `second-work-item`）。2 本目の PR の設定にだけ `item:` を書く。
+  `key:` の接尾辞（`<N>-opus` への格上げ・設計の後の実装・`-b` など、同じ PR の契約の積み直し）では入らない。`scope.allow` の `changelog.d/<N>.md` はそのまま（既存のファイルの書き換えも同じパス）
+- **統合の形:** 要約は Issue 全体を 1 文で言い直し、本文に 1 本目と 2 本目の変更を順に書く。1 本目の文を消さない
+- 1 本目が develop に入る前に 2 本目の検証まで進んだときは、2 本目の断片を後で統合し直すことになり、作業の HEAD が変わって検証をやり直す。上の順序はそれを避けるため
+
 ## 1-5 work item の run の呼び出し
 
 同じ Issue の PR が 2 本以上ある run は、**3-1 の送信から 6-2 のマージまで、全段に同じ `--item` を渡す**（#3883）。1 段でも落とすと、

@@ -53,6 +53,7 @@ import {
 } from '../detection/cli-patterns';
 import { getErrorMessage } from '@/lib/errors';
 import { createLogger } from '@/lib/logger';
+import { detectSessionStatus, isGeneratingStatus } from '../detection/status-detector';
 import { PLAN_REVIEW_SEND_REFUSED_CODE } from '@/lib/session/send-attempt-types';
 import { commandCodePlanReviewSendMessage } from '@/lib/session/respond-target';
 import type { AgentLaunchContext } from '@/lib/hooks/sources';
@@ -173,6 +174,23 @@ export function isCommandCodeReady(rawOutput: string): boolean {
   const chromeStart = findCommandCodeChromeStart(lines);
   if (chromeStart < 0) return false;
   return !COMMAND_CODE_THINKING_PATTERN.test(stripAnsi(rawOutput));
+}
+
+/**
+ * What held the pane when the wait for the composer ran out (Issue #4161), for the
+ * refusal `send` reports. Names the screen only: nothing captured goes into it.
+ *
+ * @param output - The last capture, ANSI intact; null when the last read failed
+ */
+function describeCommandCodePaneHold(output: string | null): string {
+  if (output === null) return 'the pane could not be read';
+  if (readCommandCodePlanReviewState(output) !== null) return 'the plan review is open: answer it in the terminal';
+  const status = detectSessionStatus(output, 'command-code');
+  if (isGeneratingStatus(status) || COMMAND_CODE_THINKING_PATTERN.test(stripAnsi(output))) {
+    return 'a turn is still being generated';
+  }
+  if (status.hasActivePrompt || status.status === 'waiting') return 'a dialog is open: answer it in the terminal';
+  return 'no composer on the pane: command code may still be starting';
 }
 
 /**
@@ -343,10 +361,12 @@ export class CommandCodeTool extends BaseCLITool {
     const startTime = Date.now();
     const pollInterval = 500;
     let planReviewPolls = 0;
+    let lastOutput: string | null = null;
     while (Date.now() - startTime < COMMAND_CODE_PROMPT_WAIT_TIMEOUT_MS) {
       let planReviewUp = false;
       try {
         const rawOutput = await capturePane(sessionName, COMMAND_CODE_READINESS_CAPTURE_LINES);
+        lastOutput = rawOutput;
         // Read first: a focused action row (`❯ Approve  ctrl+a`) is a `❯` row.
         planReviewUp = readCommandCodePlanReviewState(rawOutput) !== null;
         if (!planReviewUp && isCommandCodeReady(rawOutput)) {
@@ -355,6 +375,7 @@ export class CommandCodeTool extends BaseCLITool {
         }
       } catch {
         // Capture may fail - continue polling
+        lastOutput = null;
       }
       // Issue #3125: no composer comes back until a human answers the review.
       // Two polls in a row, because the frame redrawn just after `Esc` can
@@ -380,7 +401,7 @@ export class CommandCodeTool extends BaseCLITool {
     }
     logger.info('command-code-prompt-not-ready');
     throw new Error(
-      'Command Code prompt not ready: timed out waiting for the composer before sending'
+      `Command Code prompt not ready: timed out waiting for the composer before sending (${describeCommandCodePaneHold(lastOutput)})`
     );
   }
 

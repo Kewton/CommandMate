@@ -417,16 +417,29 @@ export function cleanCopilotResponse(response: string): string {
  *    with a Build marker. Without this trimming, savePendingAssistantResponse
  *    and Layer 2 accumulator would include previous Q&As in the response.
  * 3. Skip empty lines
- * 4. Skip lines matching any OPENCODE_SKIP_PATTERNS (TUI artifacts)
+ * 4. Skip lines matching any of `skipPatterns` (TUI artifacts)
  * 5. Skip Build summary line (OPENCODE_RESPONSE_COMPLETE, the completion indicator)
  * 6. Join remaining lines
  *
+ * Issue #4188: the skip list is the caller's. The default is the whole
+ * `OPENCODE_SKIP_PATTERNS`, which reads the rows only the chrome draws
+ * (`esc interrupt`, `Ask anything...`, `tab agents  ctrl+p commands`, the spinner
+ * run) by their words, wherever they sit. A caller whose rows are known to lie
+ * above the located chrome — the poller's save of an extracted turn and of the
+ * Layer-2 accumulator — passes `OPENCODE_TRANSCRIPT_SKIP_PATTERNS`, so a reply
+ * quoting those rows keeps them. (This replaced `cleanOpenCodeTurnResponse`, a
+ * copy of this function that differed only in that list.)
+ *
  * @param response - Raw OpenCode response (may contain TUI decoration)
+ * @param skipPatterns - Rows to drop; defaults to `OPENCODE_SKIP_PATTERNS`
  * @returns Cleaned response with TUI artifacts removed
  *
  * @internal Exported for unit testing (response-poller-opencode.test.ts)
  */
-export function cleanOpenCodeResponse(response: string): string {
+export function cleanOpenCodeResponse(
+  response: string,
+  skipPatterns: readonly RegExp[] = OPENCODE_SKIP_PATTERNS
+): string {
   const lines = response.split('\n');
 
   // Step 2: Trim to latest response by finding Build markers.
@@ -453,7 +466,7 @@ export function cleanOpenCodeResponse(response: string): string {
     if (!cleanLine) continue;
 
     // Skip lines matching any OpenCode skip pattern
-    const shouldSkip = OPENCODE_SKIP_PATTERNS.some(pattern => pattern.test(cleanLine));
+    const shouldSkip = skipPatterns.some(pattern => pattern.test(cleanLine));
     if (shouldSkip) continue;
 
     // Skip the Build summary line (completion indicator)

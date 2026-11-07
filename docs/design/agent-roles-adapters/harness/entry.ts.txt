@@ -1,0 +1,25 @@
+// entry.ts — Schedule の現行の入口 executeClaudeCommand を実 CLI で通す。ロールは PATH シム。
+import fs from 'node:fs';
+const ROOT=process.env.CM_ROOT_T!;
+async function main(){
+const { executeClaudeCommand, getCommandForTool, buildCliArgs } = await import('<WORKTREE>/src/lib/session/claude-executor');
+const reads=(s:number)=>fs.readFileSync(ROOT+'/mock.jsonl','utf8').split('\n').filter(Boolean).map((l)=>JSON.parse(l)).filter((r)=>r.t>=s);
+const out:unknown[]=[];
+const CASES:[string,string,string|undefined,Record<string,unknown>|undefined][]=[['claude','','bypassPermissions',undefined],['claude','-default',undefined,undefined],['codex','',undefined,undefined],['command-code','',undefined,undefined],['opencode','',undefined,undefined],['opencode','-plan',undefined,{agent:'plan'}],['opencode-v2','',undefined,undefined],['opencode-v2','-plan',undefined,{agent:'plan'}],['copilot','',undefined,undefined]];
+for(const k of ['role','none'])for(const [tool,suf,perm,opt] of CASES){
+  const repo=fs.realpathSync(`${ROOT}/repos/${tool}-${k}`);
+  fs.writeFileSync(repo+'/calc.sh','#!/bin/sh\necho $((1+2))\n');
+  const tag=`ENTRY${tool.replace(/-/g,'')}${k}${suf.replace(/-/g,'')}`;
+  const msg=`${tag} CMRUN<<sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?>>`;
+  const since=Date.now();
+  const r=await executeClaudeCommand(msg,repo,tool,perm,opt as never);
+  await new Promise((x)=>setTimeout(x,300));
+  const rs=reads(since).filter((q:{method:string;body:{tools?:unknown[]}})=>q.method==='POST'&&JSON.stringify(q.body).includes(tag)&&(q.body.tools??[]).length>0);
+  const b=rs[rs.length-1]?.body;const j=b?JSON.stringify(b):'';
+  const sys=b?JSON.stringify([b.system,b.instructions,...(b.messages??[]).filter((m:{role:string})=>m.role==='system'||m.role==='developer'),...(Array.isArray(b.input)?b.input.filter((m:{role:string})=>m.role==='developer'):[])]):'';
+  const rec={tool,kind:k,variant:suf,command:getCommandForTool(tool),args:buildCliArgs('<MSG>',tool,perm,opt as never),status:r.status,exitCode:r.exitCode,error:(r.error??'').slice(0,160),output:String(r.output).slice(-160),requests:rs.length,roleInInstructions:sys.includes('ROLE_MARKER_K3'),toolResultVerifyOk:/VERIFY_OK/.test(j),fileFixed:fs.readFileSync(repo+'/calc.sh','utf8').includes('1+1')};
+  out.push(rec);console.log(JSON.stringify(rec).slice(0,420));
+}
+fs.writeFileSync(ROOT+'/rec-entry.json',JSON.stringify(out,null,1));process.exit(0);
+}
+void main();

@@ -36,6 +36,8 @@ export interface AgentHealthOptions {
   serverLog: string | null;
   /** The commit before `daily.sh` synced (Issue #2924). null → no `sync` in the report. */
   syncedFrom: string | null;
+  /** Issue #4115: a JSON file `{ "id", "body" }` naming a test role. null → no role, ever. */
+  roleFile: string | null;
 }
 
 const FULL_SHA = /^[0-9a-f]{40}$/i;
@@ -54,6 +56,7 @@ export const USAGE = [
   '  --state <file>            previous-version state (default: ~/.commandmate/agent-health/state.json)',
   '  --server-log <file>       production server log to watch (default: <main worktree>/logs/server.log)',
   '  --synced-from <sha>       commit before the sync (set by daily.sh); records `sync` in the report',
+  '  --role-file <file>        test role as JSON { id, body }; the report records the condition (default: no role)',
   '  -h, --help                show this help',
   '',
   'Exit: 0 all pass/skip, 1 at least one fail, 2 the script itself failed.',
@@ -75,6 +78,7 @@ export function parseAgentHealthArgs(argv: readonly string[]): ParseResult {
     statePath: null,
     serverLog: null,
     syncedFrom: null,
+    roleFile: null,
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -93,6 +97,12 @@ export function parseAgentHealthArgs(argv: readonly string[]): ParseResult {
     };
 
     switch (name) {
+      case '--role-file': {
+        const value = takeValue();
+        if (value === null) return { ok: false, error: '--role-file requires a value' };
+        options.roleFile = value;
+        break;
+      }
       case '--tools': {
         const value = takeValue();
         if (value === null) return { ok: false, error: '--tools requires a value' };

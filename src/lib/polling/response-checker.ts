@@ -30,6 +30,7 @@ import {
   stripAnsi,
   stripBoxDrawing,
   buildDetectPromptOptions,
+  OPENCODE_TRANSCRIPT_SKIP_PATTERNS,
 } from '@/lib/detection/cli-patterns';
 import { createLogger } from '@/lib/logger';
 import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
@@ -38,7 +39,7 @@ import { CACHE_MAX_CAPTURE_LINES, isCaptureWindowSaturated } from '@/lib/tmux/tm
 const logger = createLogger('response-poller');
 
 // Sub-module imports
-import { sliceOpenCodeTurn } from '../response-extractor';
+import { sliceOpenCodeTurnWithSkip } from '../response-extractor';
 import { cleanClaudeResponse, cleanGeminiResponse, cleanOpenCodeResponse, cleanCopilotResponse, truncateMessage } from '../response-cleaner';
 import { COPILOT_MAX_MESSAGE_LENGTH, COPILOT_TRUNCATION_MARKER } from '@/config/copilot-constants';
 import {
@@ -521,7 +522,15 @@ export function extractResponse(
     : linesToCheck.join('\n');
 
   // Get tool-specific patterns from shared module
-  const { promptPattern, separatorPattern, thinkingPattern, skipPatterns } = getCliToolPatterns(cliToolId);
+  const { promptPattern, separatorPattern, thinkingPattern, skipPatterns: toolSkipPatterns } = getCliToolPatterns(cliToolId);
+  // Issue #4188: on an opencode frame whose chrome was located, `contentEnd` has
+  // already cut off the rows only the chrome draws (`esc interrupt`,
+  // `Ask anything...`, `tab agents  ctrl+p commands`, the spinner run), so a row
+  // above it with those words is the reply's and is kept. With no boundary the
+  // words are the only reading left, and the whole list applies as before.
+  const skipPatterns = cliToolId === 'opencode' && chromeStart >= 0
+    ? [...OPENCODE_TRANSCRIPT_SKIP_PATTERNS]
+    : toolSkipPatterns;
 
   const findRecentUserPromptIndex = (windowSize: number = 60): number =>
     findRecentUserPromptIndexInFrame(cliToolId, lines, openCodeCleanLines, chromeStart, contentEnd, windowSize);
@@ -744,14 +753,25 @@ function extractCompletedTurn(
 
   // Layer 2: Accumulate TUI content for full-screen TUI tools, so a turn that
   // outgrows the alternate-screen pane keeps the head that has scrolled away.
+  // Issue #4187: not opencode-v2. The screen reading never completes a V2 turn
+  // (its replies are written from its server's document, including the turns a
+  // lost stream missed, on reconnect), so there is no save for the head to reach.
   if (owns && (cliToolId === 'opencode' || cliToolId === 'copilot')) {
     // Issue #1911: opencode is accumulated from the CURRENT TURN'S REGION
     // rather than the whole frame. Feeding the raw pane seeded the accumulator
     // with the previous turn's transcript, the echoed prompt and the bottom
     // chrome on the very first poll, so the accumulated content could never be
     // used as a response source without re-introducing defect 1.
-    const accumulatorSource = cliToolId === 'opencode' ? sliceOpenCodeTurn(output) : output;
-    accumulateTuiContent(pollerKey, accumulatorSource, cliToolId);
+    //
+    // Issue #4188: with the skip list the slice's position allows — the rows only
+    // the chrome draws are kept when the slice ends above the located chrome, so a
+    // reply quoting them survives into the accumulator (and the save below).
+    if (cliToolId === 'opencode') {
+      const { turn, skipPatterns } = sliceOpenCodeTurnWithSkip(output);
+      accumulateTuiContent(pollerKey, turn, cliToolId, skipPatterns);
+    } else {
+      accumulateTuiContent(pollerKey, output, cliToolId);
+    }
   }
 
   // Extract response
@@ -1107,11 +1127,19 @@ function cleanCompletedResponse(
     // `result.response` already holds exactly. When the echo is off screen the
     // frame is missing content outright, and a possible duplicate beats a
     // guaranteed truncation.
+    //
+    // Issue #4188: both sources are cleaned with `OPENCODE_TRANSCRIPT_SKIP_PATTERNS`,
+    // which keeps a reply's rows quoting the chrome's words (`esc interrupt`,
+    // `Ask anything...`). The extraction already left the chrome out by position
+    // (or, on a frame whose chrome it could not locate, skipped those rows with
+    // the whole list itself). The accumulator was filtered the same way when each
+    // frame was read (`sliceOpenCodeTurnWithSkip`): the shorter list only for
+    // rows cut above the located chrome, the whole list otherwise.
     const accumulatedContent = getAccumulatedContent(pollerKey);
-    const sourceContent = result.turnHeadTruncated && accumulatedContent
-      ? accumulatedContent
-      : result.response;
-    cleanedResponse = cleanOpenCodeResponse(sourceContent);
+    cleanedResponse = cleanOpenCodeResponse(
+      result.turnHeadTruncated && accumulatedContent ? accumulatedContent : result.response,
+      OPENCODE_TRANSCRIPT_SKIP_PATTERNS
+    );
 
     if (owns) clearTuiAccumulator(pollerKey);
   }

@@ -71,6 +71,8 @@ export function buildToolResult(input: {
   checks: readonly AgentHealthCheck[];
   /** Issue #3438: left out when the tool was not launched. */
   launchedModel?: AgentHealthLaunchedModel;
+  /** Issue #4115: the explicit test role, when the run had one. */
+  roleCondition?: AgentHealthToolResult['roleCondition'];
 }): AgentHealthToolResult {
   return {
     tool: input.tool,
@@ -82,6 +84,7 @@ export function buildToolResult(input: {
       ...(check.evidence !== undefined ? { evidence: truncateEvidence(check.evidence) } : {}),
     })),
     ...(input.launchedModel ? { launchedModel: input.launchedModel } : {}),
+    ...(input.roleCondition ? { roleCondition: input.roleCondition } : {}),
   };
 }
 

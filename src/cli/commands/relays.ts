@@ -180,6 +180,11 @@ export interface RegisterRelayInput {
   /** The session being asked. */
   to: RelayEndpointArg;
   allowRelayChain?: boolean;
+  /**
+   * Runs when the relay could not be opened, refused or not, before the command ends
+   * (Issue #4133): a refusal exits right here, past any caller's own handling.
+   */
+  onFailure?: () => Promise<void>;
 }
 
 /** A relay {@link registerRelay} opened (Issue #3957). */
@@ -225,6 +230,7 @@ export async function registerRelay(
     if (!bound) console.error(LEGACY_RELAY_NOTICE);
     return { id: response.relay.id, bound };
   } catch (error) {
+    await input.onFailure?.();
     if (error instanceof ApiError && error.apiCode && RELAY_REFUSAL_CODES.has(error.apiCode)) {
       console.error(`Error: ${error.payload?.error ?? error.apiCode}`);
       process.exit(ExitCode.CONFIG_ERROR);
@@ -294,6 +300,16 @@ function printRelayLine(relay: RelayView): void {
     if (delivery.attemptId) fields.push(`attempt=${delivery.attemptId}`);
     if (delivery.reason) fields.push(`reason=${delivery.reason}`);
     fields.push(`check=${delivery.checkCommand}`);
+  }
+  // Issue #4105: the payload waiting in the slot, and what its last delivery
+  // attempt stopped for — an observation with its time, not a current state.
+  // Nothing is printed when the server did not observe one (or is older):
+  // that is "not known", never "deliverable".
+  if (relay.pendingKind && !delivery) fields.push(`pending=${relay.pendingKind}`);
+  const block = relay.lastDeliveryBlock;
+  if (block && typeof block.reason === 'string') {
+    const at = typeof block.observedAt === 'number' ? `@${new Date(block.observedAt).toISOString()}` : '';
+    fields.push(`blocked=${block.reason}${at}`);
   }
   console.log(fields.join('\t'));
 }
@@ -384,9 +400,25 @@ export function createRelaysCommand(): Command {
 Columns: <relay-id>  <state>  <requester> <- <worker>  hops=<n>  expires=<iso>
          [send=<state>]  [overlap=<none|later|earlier|both|unknown>]  [hold=<reason>]
          [delivery=<attempting|uncertain>  payload=<kind>:<id>  attempt=<id>  reason=<r>  check=<cmd>]
+         [pending=<reply|prompt|expired>]  [blocked=<reason>@<iso>]
 
 States: pending (the worker has not finished), prompt (it stopped on a
-confirmation and the requester was told), delivered / expired / cancelled.
+confirmation at some point and a notice to the requester was queued -- not
+necessarily delivered yet; a record, not "still waiting": it stays after the
+confirmation is answered and pending=reply replaces the notice),
+delivered / expired / cancelled.
+
+pending= / blocked= (Issue #4105): pending= is the payload waiting to be
+typed into the requester's composer. blocked= is why the LAST delivery
+attempt of that payload stopped, and when it was observed: prompt_waiting
+(the requester's pane shows a confirmation dialog -- nothing is typed into
+it; answer it and the next pass, about every 15 s, delivers), generating,
+session_stopped, foreign_session. Left alone until the deadline, the payload
+is replaced by the expiry notice. Absent = no observation by this server
+process (after a restart, or before the first attempt), not "deliverable".
+A closed relay whose expiry notice is still stopped (Issue #4193) is listed
+under "# closed, notice not delivered yet" (state=expired, pending=expired,
+blocked=...) until the notice goes out; it is not counted as open.
 
 send= / overlap= / hold= appear on a relay tied to its send (Issue #3957):
 send= is awaiting / input_started / sent / failed / unknown; hold= says why a
@@ -490,6 +522,14 @@ Withdraw one with \`commandmate relays cancel <relay-id>\`.
         if (inProgress.length > 0) {
           console.error(`# delivery in progress (${inProgress.length})`);
           inProgress.forEach(printRelayLine);
+        }
+        // Issue #4193: a closed relay whose payload to the requester (the
+        // expiry notice) is still stopped — listed apart from the open ones,
+        // and never counted in them. Absent on an older server.
+        const closedBlocked = response.closedBlocked ?? [];
+        if (closedBlocked.length > 0) {
+          console.error(`# closed, notice not delivered yet (${closedBlocked.length})`);
+          closedBlocked.forEach(printRelayLine);
         }
         if (response.awaiting.length === 0 && response.owed.length === 0) {
           console.error('No open relays.');

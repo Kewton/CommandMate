@@ -265,6 +265,14 @@ export function setAgentInstances(
 
   const now = Date.now();
   const replace = db.transaction(() => {
+    // Issue #4132: an id kept with another tool is another row, so this goes by the pair.
+    const kept = new Set(instances.map((instance) => `${instance.id}\u0000${instance.cliTool}`));
+    const leaving = (db.prepare(`
+      SELECT instance_id, cli_tool_id FROM agent_instances WHERE worktree_id = ?
+    `).all(worktreeId) as Array<{ instance_id: string; cli_tool_id: string }>)
+      .filter((row) => !kept.has(`${row.instance_id}\u0000${row.cli_tool_id}`))
+      .map((row) => row.instance_id);
+    revokeInstanceCreationKeys(db, worktreeId, leaving);
     db.prepare(`DELETE FROM agent_instances WHERE worktree_id = ?`).run(worktreeId);
     // Issue #2048: the settings table is keyed on an instance id and this write
     // is a full replace, so an instance dropped from the roster would otherwise
@@ -277,6 +285,9 @@ export function setAgentInstances(
     // Issue's third acceptance condition; a mutation that drops this call makes
     // the note of a *removed* instance haunt the next instance to claim its id.
     pruneSessionNotes(db, worktreeId, instances.map((instance) => instance.id));
+    // Issue #4114: and the role setting. A rename or a reorder keeps it; leaving
+    // the roster ends it, so an id that comes back starts from the defaults.
+    pruneAgentInstanceRoles(db, worktreeId, instances.map((instance) => instance.id));
     const insertStmt = db.prepare(`
       INSERT INTO agent_instances
         (worktree_id, instance_id, cli_tool_id, alias, sort_order, created_at)
@@ -350,6 +361,13 @@ export function removeAgentInstance(
   db.prepare(`
     DELETE FROM session_notes WHERE worktree_id = ? AND instance_id = ?
   `).run(worktreeId, instanceId);
+  // Issue #4114: and its role setting, whose re-use would hand the next instance
+  // to claim this id a decision made about another.
+  db.prepare(`
+    DELETE FROM agent_instance_roles WHERE worktree_id = ? AND instance_id = ?
+  `).run(worktreeId, instanceId);
+  // Issue #4132: and the key that made it.
+  revokeInstanceCreationKeys(db, worktreeId, [instanceId]);
   return result.changes > 0;
 }
 
@@ -758,6 +776,48 @@ export function pruneSessionNotes(
   const placeholders = keepInstanceIds.map(() => '?').join(', ');
   return db.prepare(`
     DELETE FROM session_notes
+    WHERE worktree_id = ? AND instance_id NOT IN (${placeholders})
+  `).run(worktreeId, ...keepInstanceIds).changes;
+}
+
+/**
+ * Remove the role settings of instances that left the roster (Issue #4114). Same
+ * rule as {@link pruneSessionNotes}. Launch records are evidence and stay.
+ *
+ * @param keepInstanceIds - The ids that survive; every other row is deleted
+ * @returns How many rows were removed
+ */
+/**
+ * Issue #4132: the rows these keys made have left the roster, so an id made again is
+ * another row, which those keys must not claim. Each becomes a key given up on, not
+ * nothing: a request still on its way with one must not make the row again.
+ */
+export function revokeInstanceCreationKeys(
+  db: Database.Database,
+  worktreeId: string,
+  instanceIds: readonly string[]
+): void {
+  if (instanceIds.length === 0) return;
+  const placeholders = instanceIds.map(() => '?').join(', ');
+  db.prepare(`
+    UPDATE agent_instance_creation_keys SET instance_id = NULL, request_fingerprint = NULL
+    WHERE worktree_id = ? AND instance_id IN (${placeholders})
+  `).run(worktreeId, ...instanceIds);
+}
+
+export function pruneAgentInstanceRoles(
+  db: Database.Database,
+  worktreeId: string,
+  keepInstanceIds: readonly string[]
+): number {
+  if (keepInstanceIds.length === 0) {
+    return db.prepare(`
+      DELETE FROM agent_instance_roles WHERE worktree_id = ?
+    `).run(worktreeId).changes;
+  }
+  const placeholders = keepInstanceIds.map(() => '?').join(', ');
+  return db.prepare(`
+    DELETE FROM agent_instance_roles
     WHERE worktree_id = ? AND instance_id NOT IN (${placeholders})
   `).run(worktreeId, ...keepInstanceIds).changes;
 }

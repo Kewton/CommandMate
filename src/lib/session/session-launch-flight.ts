@@ -37,6 +37,8 @@
  *   a model the launch in progress is not starting with gets {@link
  *   SessionLaunchModelMismatchError}, as a `--model` to a running session
  *   gets a 400 (#989 / #2771), instead of joining and running on another model.
+ * - **Nor is a role** (Issue #4115): {@link SessionLaunchRoleMismatchError}, on
+ *   the injection fingerprint.
  *
  * In memory and on `globalThis` for the reason the lock is: the routes that
  * start sessions are separate bundles under `next dev`.
@@ -50,6 +52,7 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import { getSessionStartingMaxMs, getSessionStartingMaxMsAcrossTools } from '@/config/session-starting-config';
 import { currentInstanceInputTicket } from '@/lib/session/instance-input-lock';
 import { SessionStartTimeoutError } from '@/lib/session/session-start-error';
+import { SESSION_LAUNCH_ROLE_MISMATCH_CODE } from '@/lib/agent-roles/launch-errors';
 
 const logger = createLogger('session/session-launch-flight');
 
@@ -62,12 +65,16 @@ interface SessionLaunchFlight {
   cliToolId?: CLIToolType;
   /** The model the launch was asked for; undefined → the tool's default. */
   model?: string;
+  /** Issue #4115: what it injects; null → no role, undefined → the role layer does not apply. */
+  injectionFingerprint?: string | null;
 }
 
 /** What a launch is, beyond its session name. */
 export interface SessionLaunchOptions {
   cliToolId?: CLIToolType;
   model?: string;
+  /** Issue #4115: the injection fingerprint this launch resolved; see {@link SessionLaunchFlight}. */
+  injectionFingerprint?: string | null;
 }
 
 declare global {
@@ -143,6 +150,30 @@ export function isSessionLaunchModelMismatchError(error: unknown): error is Sess
   );
 }
 
+/**
+ * A start resolved a different role from the launch of the session already in
+ * progress (Issue #4115). A role is fixed when the process starts, so joining
+ * would silently run the request under the other one. Nothing was typed. Compared
+ * by the injection fingerprint: another name for the same text is the same role.
+ */
+export class SessionLaunchRoleMismatchError extends Error {
+  readonly code = SESSION_LAUNCH_ROLE_MISMATCH_CODE;
+
+  constructor(toolName: string, sessionName: string) {
+    super(
+      `${toolName} is being started by another request (tmux session '${sessionName}') with a different role. ` +
+        'A role is fixed when the process starts — the message was not delivered and nothing was typed. ' +
+        'Retry once that start has finished; the session will show which role it has.'
+    );
+    this.name = 'SessionLaunchRoleMismatchError';
+  }
+}
+
+/** Duck-typed on `code`, like the session-start errors (bundles do not share classes). */
+export function isSessionLaunchRoleMismatchError(error: unknown): error is SessionLaunchRoleMismatchError {
+  return error instanceof Error && (error as { code?: unknown }).code === SESSION_LAUNCH_ROLE_MISMATCH_CODE;
+}
+
 /** How long a caller may wait for `flight`, counted from when it began. */
 function launchWaitLimitMs(flight: SessionLaunchFlight): number {
   return flight.cliToolId === undefined
@@ -190,6 +221,7 @@ export function isSessionLaunchInFlight(sessionName: string): boolean {
  * synchronous step as the check, before `launch` reads anything (R4).
  *
  * @throws SessionLaunchModelMismatchError when another launch is in progress with another model
+ * @throws SessionLaunchRoleMismatchError when another launch is in progress with another role
  * @throws SessionLaunchInFlightError when another launch is in progress and the caller holds the input lock
  * @throws SessionLaunchWaitTimeoutError when the joined launch outlives its start budget
  */
@@ -206,6 +238,14 @@ export function runSessionLaunch(
       return Promise.reject(
         new SessionLaunchModelMismatchError(toolName, sessionName, options.model, inFlight.model)
       );
+    }
+    if (
+      options.injectionFingerprint !== undefined &&
+      inFlight.injectionFingerprint !== undefined &&
+      options.injectionFingerprint !== inFlight.injectionFingerprint
+    ) {
+      logger.info('session-launch-role-mismatch-refused', { sessionName });
+      return Promise.reject(new SessionLaunchRoleMismatchError(toolName, sessionName));
     }
     if (currentInstanceInputTicket(sessionName) !== null) {
       logger.info('session-launch-in-flight-refused', { sessionName });
@@ -224,6 +264,7 @@ export function runSessionLaunch(
     startedAt: Date.now(),
     cliToolId: options.cliToolId,
     model: options.model,
+    injectionFingerprint: options.injectionFingerprint,
   };
   flights.set(sessionName, flight);
   const clear = (): void => {

@@ -293,6 +293,81 @@ function findOpenClaudeTrustYesRow(lines: readonly string[]): number {
   return -1;
 }
 
+/** The question of Claude Code's offer to make auto mode the default (Issue #4134, 2.1.318). */
+const CLAUDE_AUTO_DEFAULT_NUDGE_QUESTION = /Make auto mode your default permission mode\?/;
+/** The option that writes `permissions.defaultMode: "auto"` to the operator's settings. */
+const CLAUDE_AUTO_DEFAULT_NUDGE_YES_ROW = /^\s*(?:([>❯])\s+)?Yes, set auto mode as my default permission mode\s*$/;
+/** The option that keeps their mode, whichever it is (`current_mode` in the executable). */
+const CLAUDE_AUTO_DEFAULT_NUDGE_NO_ROW = /^\s*(?:([>❯])\s+)?No, keep \S.*$/;
+/** How far below the question the options may start: the description wraps with the pane's width. */
+const CLAUDE_AUTO_DEFAULT_NUDGE_MAX_ROWS = 8;
+
+/**
+ * The key that moves Claude Code's "Make auto mode your default permission
+ * mode?" towards No, or `null` when the dialog is not open or its cursor cannot
+ * be read (Issue #4134).
+ *
+ * The launch answers No because it is the answer that changes nothing: No writes
+ * only `hasSeenAutoDefaultNudge` to `~/.claude.json`, Yes rewrites the operator's
+ * `permissions.defaultMode` (measured on 2.1.318, and read in its executable).
+ * The cursor starts on Yes, so Enter is returned only for a screen showing it on
+ * No, and the option rows have to be the last thing on the pane: Claude's input
+ * box below them means this is scrollback or a quotation.
+ *
+ * @param output - ANSI-stripped pane output
+ * @returns `Down` or `Up` to move, `Enter` to confirm No, or null
+ */
+export function resolveClaudeAutoDefaultNudgeKey(output: string): 'Down' | 'Up' | 'Enter' | null {
+  const rows = readClaudeAutoDefaultNudgeRows(output);
+  if (rows === null) return null;
+  if (rows.no.cursor) return 'Enter';
+  if (!rows.yes.cursor) return null;
+  return rows.yes.index < rows.no.index ? 'Down' : 'Up';
+}
+
+/**
+ * Whether the dialog of {@link resolveClaudeAutoDefaultNudgeKey} is the open screen.
+ *
+ * @param output - ANSI-stripped pane output
+ */
+export function isClaudeAutoDefaultNudgeOpen(output: string): boolean {
+  return readClaudeAutoDefaultNudgeRows(output) !== null;
+}
+
+interface ClaudeAutoDefaultNudgeRow {
+  index: number;
+  cursor: boolean;
+}
+
+function readClaudeAutoDefaultNudgeRows(
+  output: string
+): { yes: ClaudeAutoDefaultNudgeRow; no: ClaudeAutoDefaultNudgeRow } | null {
+  const lines = output.split('\n');
+  let question = -1;
+  for (let i = lines.length - 1; i >= 0 && question === -1; i--) {
+    if (CLAUDE_AUTO_DEFAULT_NUDGE_QUESTION.test(lines[i])) question = i;
+  }
+  if (question === -1) return null;
+  // Below the question there is only the description and the two options.
+  const below = lines.slice(question + 1);
+  if (below.some((line) => CLAUDE_SEPARATOR_PATTERN.test(line))) return null;
+
+  let yes: ClaudeAutoDefaultNudgeRow | null = null;
+  let no: ClaudeAutoDefaultNudgeRow | null = null;
+  let last = -1;
+  for (let offset = 0; offset < below.length; offset++) {
+    const line = below[offset];
+    if (line.trim() !== '') last = offset;
+    if (offset >= CLAUDE_AUTO_DEFAULT_NUDGE_MAX_ROWS) continue;
+    const yesMatch = CLAUDE_AUTO_DEFAULT_NUDGE_YES_ROW.exec(line);
+    if (yesMatch) yes = { index: offset, cursor: yesMatch[1] !== undefined };
+    const noMatch = CLAUDE_AUTO_DEFAULT_NUDGE_NO_ROW.exec(line);
+    if (noMatch) no = { index: offset, cursor: noMatch[1] !== undefined };
+  }
+  if (yes === null || no === null) return null;
+  return last === Math.max(yes.index, no.index) ? { yes, no } : null;
+}
+
 /**
  * [Issue #1495] Footer signature of Claude Code's `/model` local-settings overlay.
  * Verified against a real Claude Code v2.1.218 capture, the footer reads:

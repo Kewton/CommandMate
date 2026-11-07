@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { Z_INDEX } from '@/config/z-index';
+import { PWA_UPDATE_PROMPT_Z_INDEX, Z_INDEX } from '@/config/z-index';
 import type { ZIndexValue } from '@/config/z-index';
 
 describe('Z_INDEX configuration', () => {
@@ -85,6 +85,17 @@ describe('Z_INDEX configuration', () => {
       for (let i = 0; i < orderedValues.length - 1; i++) {
         expect(orderedValues[i]).toBeLessThan(orderedValues[i + 1]);
       }
+    });
+  });
+
+  describe('PWA update prompt (Issue #4103)', () => {
+    it('is below dialogs and above the z-40 phone tab bar and header', () => {
+      expect(PWA_UPDATE_PROMPT_Z_INDEX).toBeLessThan(Z_INDEX.MODAL);
+      expect(PWA_UPDATE_PROMPT_Z_INDEX).toBeGreaterThan(40);
+    });
+
+    it('leaves the toast layer the other toasts use where it was', () => {
+      expect(Z_INDEX.TOAST).toBeGreaterThan(Z_INDEX.MODAL);
     });
   });
 

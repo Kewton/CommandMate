@@ -1,0 +1,647 @@
+[
+ {
+  "tool": "claude",
+  "label": "none",
+  "argv": [
+   "claude",
+   "-p",
+   "<MSG>",
+   "--output-format",
+   "text",
+   "--permission-mode",
+   "bypassPermissions"
+  ],
+  "env": {},
+  "exit": 0,
+  "signal": null,
+  "stdout": "MOCK_DONE [{\"tool_use_id\":\"toolu_242\",\"type\":\"tool_result\",\"content\":\"VERIFY_OK\\nRC=0\",\"is_error\":false,\"cache_control\":{\"type\":\"ephemeral\"}}]\n",
+  "stderr": "",
+  "roleIn": [],
+  "repoIn": [
+   "user"
+  ],
+  "tools": 12,
+  "toolResult": "VERIFY_OK",
+  "file": true,
+  "sys": 15771,
+  "planMark": true
+ },
+ {
+  "tool": "codex",
+  "label": "none",
+  "argv": [
+   "codex",
+   "exec",
+   "<MSG>",
+   "--sandbox",
+   "workspace-write"
+  ],
+  "env": {
+   "CODEX_HOME": "<D>/home/.codex"
+  },
+  "exit": 0,
+  "signal": null,
+  "stdout": "MOCK_DONE exec_command failed: CreateProcess { message: \"Rejected(\\\"`/bin/zsh -lc 'sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?'` rejected: \n",
+  "stderr": "ak; sh verify.sh; echo RC=$?'` rejected: rm -f style commands are not permitted. Use a safer approach\\\")\" }\ncodex\nMOCK_DONE exec_command failed: CreateProcess { message: \"Rejected(\\\"`/bin/zsh -lc 'sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?'` rejected: \ntokens used\n30\n",
+  "roleIn": [],
+  "repoIn": [
+   "user"
+  ],
+  "tools": 9,
+  "toolResult": null,
+  "file": false,
+  "sys": 0,
+  "planMark": false
+ },
+ {
+  "tool": "command-code",
+  "label": "none",
+  "argv": [
+   "cmd",
+   "--local-only",
+   "-m",
+   "mock-model",
+   "-p",
+   "<MSG>",
+   "--output-format",
+   "json",
+   "--yolo",
+   "--no-auto-update"
+  ],
+  "env": {},
+  "exit": 0,
+  "signal": null,
+  "stdout": "37546e-17d9-487a-b6ad-86296c6cea98\"}}}}}}}}\n{\"type\":\"result\",\"subtype\":\"success\",\"sessionId\":\"bf896742-1c72-44a3-b892-d9a64749cdd4\",\"stopReason\":\"end_turn\",\"usage\":{\"inputTokens\":20,\"outputTokens\":10,\"cacheReadTokens\":0,\"cacheWriteTokens\":0},\"durationMs\":199,\"finalText\":\"MOCK_DONE VERIFY_OK RC=0 \"}\n",
+  "stderr": "",
+  "roleIn": [],
+  "repoIn": [
+   "system"
+  ],
+  "tools": 11,
+  "toolResult": "VERIFY_OK",
+  "file": true,
+  "sys": 37161,
+  "planMark": true
+ },
+ {
+  "tool": "opencode",
+  "label": "none",
+  "argv": [
+   "opencode",
+   "run",
+   "--format",
+   "json",
+   "<MSG>"
+  ],
+  "env": {},
+  "exit": 0,
+  "signal": null,
+  "stdout": "8d001lnA1tPo2EAIglg\",\"reason\":\"stop\",\"snapshot\":\"4c77edf84337eb191ea69e03522a8e482a1a1c4b\",\"messageID\":\"msg_19dde972e001xdOXyE5yy7mcq8\",\"sessionID\":\"ses_e62216cbfffeeeGJpMeaGtpCd6\",\"type\":\"step-finish\",\"tokens\":{\"total\":15,\"input\":10,\"output\":5,\"reasoning\":0,\"cache\":{\"write\":0,\"read\":0}},\"cost\":0}}\n",
+  "stderr": "",
+  "roleIn": [],
+  "repoIn": [
+   "system"
+  ],
+  "tools": 10,
+  "toolResult": "VERIFY_OK",
+  "file": true,
+  "sys": 10137,
+  "planMark": true
+ },
+ {
+  "tool": "opencode",
+  "label": "none-agent-plan",
+  "argv": [
+   "opencode",
+   "run",
+   "--format",
+   "json",
+   "--agent",
+   "plan",
+   "<MSG>"
+  ],
+  "env": {},
+  "exit": 0,
+  "signal": null,
+  "stdout": "360019ktj30aZIXSuif\",\"reason\":\"stop\",\"snapshot\":\"4c77edf84337eb191ea69e03522a8e482a1a1c4b\",\"messageID\":\"msg_19dde9fcc0024TO1JWsuld67AP\",\"sessionID\":\"ses_e62216437ffeQAl2WULRq26Uyt\",\"type\":\"step-finish\",\"tokens\":{\"total\":15,\"input\":10,\"output\":5,\"reasoning\":0,\"cache\":{\"write\":0,\"read\":0}},\"cost\":0}}\n",
+  "stderr": "",
+  "roleIn": [],
+  "repoIn": [
+   "system"
+  ],
+  "tools": 10,
+  "toolResult": "VERIFY_OK",
+  "file": true,
+  "sys": 10170,
+  "planMark": true
+ },
+ {
+  "tool": "opencode-v2",
+  "label": "none",
+  "argv": [
+   "opencode2",
+   "run",
+   "--standalone",
+   "--format",
+   "json",
+   "--auto",
+   "--",
+   "<MSG>"
+  ],
+  "env": {},
+  "exit": 0,
+  "signal": null,
+  "stdout": "p\":1793649991388,\"sessionID\":\"ses_e62212b9bffea4JWx7rduP7g3g\",\"part\":{\"id\":\"prt_19ddededb0019yU9TONvDvK6wU\",\"sessionID\":\"ses_e62212b9bffea4JWx7rduP7g3g\",\"messageID\":\"msg_19ddedec3001Qqkrl8jm4NEGO7\",\"type\":\"text\",\"text\":\"MOCK_DONE VERIFY_OK RC=0 \",\"time\":{\"start\":1793649991387,\"end\":1793649991388}}}\n",
+  "stderr": "",
+  "roleIn": [],
+  "repoIn": [
+   "system"
+  ],
+  "tools": 12,
+  "toolResult": "VERIFY_OK",
+  "file": true,
+  "sys": 12742,
+  "planMark": false
+ },
+ {
+  "tool": "opencode-v2",
+  "label": "none-agent-plan",
+  "argv": [
+   "opencode2",
+   "run",
+   "--standalone",
+   "--format",
+   "json",
+   "--auto",
+   "--agent",
+   "plan",
+   "--",
+   "<MSG>"
+  ],
+  "env": {},
+  "exit": 0,
+  "signal": null,
+  "stdout": "p\":1793650012175,\"sessionID\":\"ses_e6220d9b8ffeS4jvlA4hlYu4tq\",\"part\":{\"id\":\"prt_19ddf300e0015ZKdgNPVgfer6W\",\"sessionID\":\"ses_e6220d9b8ffeS4jvlA4hlYu4tq\",\"messageID\":\"msg_19ddf2ff7001c1dCJV4Q8V1cAr\",\"type\":\"text\",\"text\":\"MOCK_DONE VERIFY_OK RC=0 \",\"time\":{\"start\":1793650012174,\"end\":1793650012175}}}\n",
+  "stderr": "",
+  "roleIn": [],
+  "repoIn": [
+   "system"
+  ],
+  "tools": 12,
+  "toolResult": "VERIFY_OK",
+  "file": true,
+  "sys": 12775,
+  "planMark": true
+ },
+ {
+  "tool": "copilot",
+  "label": "none",
+  "argv": [
+   "copilot",
+   "-p",
+   "<MSG>",
+   "--allow-all-tools"
+  ],
+  "env": {
+   "COPILOT_HOME": "<D>/home/.copilot"
+  },
+  "exit": 0,
+  "signal": null,
+  "stdout": "● probe (shell)\n  │ sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?\n  └ 2 lines…\n\nMOCK_DONE VERIFY_OK RC=0 <shellId: 0 completed with exit code 0>\n\n",
+  "stderr": "\n\nChanges    +0 -0\nDuration   1s\nTokens     ↑ 20 • ↓ 10\nResume     copilot --resume=d30101ab-952a-4656-952c-c37514440071\n",
+  "roleIn": [],
+  "repoIn": [
+   "system"
+  ],
+  "tools": 19,
+  "toolResult": "VERIFY_OK",
+  "file": true,
+  "sys": 22266,
+  "planMark": true
+ },
+ {
+  "tool": "claude",
+  "label": "role",
+  "argv": [
+   "claude",
+   "-p",
+   "<MSG>",
+   "--output-format",
+   "text",
+   "--permission-mode",
+   "bypassPermissions",
+   "--append-system-prompt-file",
+   "<D>/home/.cmrole/r.md"
+  ],
+  "env": {},
+  "exit": 0,
+  "signal": null,
+  "stdout": "MOCK_DONE [{\"tool_use_id\":\"toolu_262\",\"type\":\"tool_result\",\"content\":\"VERIFY_OK\\nRC=0\",\"is_error\":false,\"cache_control\":{\"type\":\"ephemeral\"}}]\n",
+  "stderr": "",
+  "roleIn": [
+   "system"
+  ],
+  "repoIn": [
+   "user"
+  ],
+  "tools": 12,
+  "toolResult": "VERIFY_OK",
+  "file": true,
+  "sys": 15874,
+  "planMark": true
+ },
+ {
+  "tool": "codex",
+  "label": "role",
+  "argv": [
+   "codex",
+   "-p",
+   "cm-role-x",
+   "exec",
+   "<MSG>",
+   "--sandbox",
+   "workspace-write"
+  ],
+  "env": {
+   "CODEX_HOME": "<D>/home/.codex"
+  },
+  "exit": 0,
+  "signal": null,
+  "stdout": "MOCK_DONE exec_command failed: CreateProcess { message: \"Rejected(\\\"`/bin/zsh -lc 'sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?'` rejected: \n",
+  "stderr": "ak; sh verify.sh; echo RC=$?'` rejected: rm -f style commands are not permitted. Use a safer approach\\\")\" }\ncodex\nMOCK_DONE exec_command failed: CreateProcess { message: \"Rejected(\\\"`/bin/zsh -lc 'sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?'` rejected: \ntokens used\n30\n",
+  "roleIn": [
+   "developer"
+  ],
+  "repoIn": [
+   "user"
+  ],
+  "tools": 9,
+  "toolResult": null,
+  "file": false,
+  "sys": 0,
+  "planMark": false
+ },
+ {
+  "tool": "command-code",
+  "label": "role",
+  "argv": [
+   "cmd",
+   "--local-only",
+   "-m",
+   "mock-model",
+   "-p",
+   "<MSG>",
+   "--output-format",
+   "json",
+   "--yolo",
+   "--no-auto-update",
+   "--mod",
+   "<D>/home/.cmrole/x.ts"
+  ],
+  "env": {},
+  "exit": 0,
+  "signal": null,
+  "stdout": "0b7ba2-aacc-45c7-945d-59771b7fb4eb\"}}}}}}}}\n{\"type\":\"result\",\"subtype\":\"success\",\"sessionId\":\"696d60ad-7821-4d97-8fae-137248d04afe\",\"stopReason\":\"end_turn\",\"usage\":{\"inputTokens\":20,\"outputTokens\":10,\"cacheReadTokens\":0,\"cacheWriteTokens\":0},\"durationMs\":275,\"finalText\":\"MOCK_DONE VERIFY_OK RC=0 \"}\n",
+  "stderr": "",
+  "roleIn": [
+   "system"
+  ],
+  "repoIn": [
+   "system"
+  ],
+  "tools": 11,
+  "toolResult": "VERIFY_OK",
+  "file": true,
+  "sys": 37232,
+  "planMark": true
+ },
+ {
+  "tool": "opencode",
+  "label": "role",
+  "argv": [
+   "opencode",
+   "run",
+   "--format",
+   "json",
+   "<MSG>"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"instructions\":[\"<D>/home/.cmrole/r.md\"]}"
+  },
+  "exit": 0,
+  "signal": null,
+  "stdout": "7a001Mj6goaL7gOhU8h\",\"reason\":\"stop\",\"snapshot\":\"4c77edf84337eb191ea69e03522a8e482a1a1c4b\",\"messageID\":\"msg_19ddf9812001gms553Fb0Havqt\",\"sessionID\":\"ses_e62206bd6ffeKr8IURrUN2QPob\",\"type\":\"step-finish\",\"tokens\":{\"total\":15,\"input\":10,\"output\":5,\"reasoning\":0,\"cache\":{\"write\":0,\"read\":0}},\"cost\":0}}\n",
+  "stderr": "",
+  "roleIn": [
+   "system"
+  ],
+  "repoIn": [
+   "system"
+  ],
+  "tools": 10,
+  "toolResult": "VERIFY_OK",
+  "file": true,
+  "sys": 10405,
+  "planMark": true
+ },
+ {
+  "tool": "opencode",
+  "label": "role-agent-plan",
+  "argv": [
+   "opencode",
+   "run",
+   "--format",
+   "json",
+   "--agent",
+   "plan",
+   "<MSG>"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"instructions\":[\"<D>/home/.cmrole/r.md\"]}"
+  },
+  "exit": 0,
+  "signal": null,
+  "stdout": "e3001ppWJKxmquzmil6\",\"reason\":\"stop\",\"snapshot\":\"4c77edf84337eb191ea69e03522a8e482a1a1c4b\",\"messageID\":\"msg_19ddfa076002J1q3Maa6qbLUOf\",\"sessionID\":\"ses_e62206372ffeWlANu7y4zhruOZ\",\"type\":\"step-finish\",\"tokens\":{\"total\":15,\"input\":10,\"output\":5,\"reasoning\":0,\"cache\":{\"write\":0,\"read\":0}},\"cost\":0}}\n",
+  "stderr": "",
+  "roleIn": [
+   "system"
+  ],
+  "repoIn": [
+   "system"
+  ],
+  "tools": 10,
+  "toolResult": "VERIFY_OK",
+  "file": true,
+  "sys": 10449,
+  "planMark": true
+ },
+ {
+  "tool": "opencode-v2",
+  "label": "role",
+  "argv": [
+   "opencode2",
+   "run",
+   "--standalone",
+   "--format",
+   "json",
+   "--auto",
+   "--",
+   "<MSG>"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"default_agent\":\"cm-role-x\",\"agents\":{\"cm-role-x\":{\"description\":\"r\",\"mode\":\"primary\",\"system\":\"{file:<D>/home/.cmrole/r.md}\"}}}"
+  },
+  "exit": 0,
+  "signal": null,
+  "stdout": "p\":1793650058169,\"sessionID\":\"ses_e62202432ffeZPSkHZliA7NSw0\",\"part\":{\"id\":\"prt_19ddfe3b8001ybOYW7jXMFTMcZ\",\"sessionID\":\"ses_e62202432ffeZPSkHZliA7NSw0\",\"messageID\":\"msg_19ddfe3a2001tXqAPNGPLK37F7\",\"type\":\"text\",\"text\":\"MOCK_DONE VERIFY_OK RC=0 \",\"time\":{\"start\":1793650058168,\"end\":1793650058169}}}\n",
+  "stderr": "",
+  "roleIn": [
+   "system"
+  ],
+  "repoIn": [
+   "system"
+  ],
+  "tools": 12,
+  "toolResult": "VERIFY_OK",
+  "file": true,
+  "sys": 11340,
+  "planMark": false
+ },
+ {
+  "tool": "opencode-v2",
+  "label": "role-agent-plan",
+  "argv": [
+   "opencode2",
+   "run",
+   "--standalone",
+   "--format",
+   "json",
+   "--auto",
+   "--agent",
+   "plan",
+   "--",
+   "<MSG>"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"default_agent\":\"cm-role-x\",\"agents\":{\"cm-role-x\":{\"description\":\"r\",\"mode\":\"primary\",\"system\":\"{file:<D>/home/.cmrole/r.md}\"}}}"
+  },
+  "exit": 0,
+  "signal": null,
+  "stdout": "p\":1793650081364,\"sessionID\":\"ses_e621fcda5ffe37kbUByAnK9DZ2\",\"part\":{\"id\":\"prt_19de03e53001xil60SVhwdhqW6\",\"sessionID\":\"ses_e621fcda5ffe37kbUByAnK9DZ2\",\"messageID\":\"msg_19de03e3c00153zyAqLRgv4lbI\",\"type\":\"text\",\"text\":\"MOCK_DONE VERIFY_OK RC=0 \",\"time\":{\"start\":1793650081363,\"end\":1793650081364}}}\n",
+  "stderr": "",
+  "roleIn": [],
+  "repoIn": [
+   "system"
+  ],
+  "tools": 12,
+  "toolResult": "VERIFY_OK",
+  "file": true,
+  "sys": 12775,
+  "planMark": true
+ },
+ {
+  "tool": "copilot",
+  "label": "role",
+  "argv": [
+   "copilot",
+   "-p",
+   "<MSG>",
+   "--allow-all-tools",
+   "--agent",
+   "cm-role-x"
+  ],
+  "env": {
+   "COPILOT_HOME": "<D>/home/.copilot"
+  },
+  "exit": 0,
+  "signal": null,
+  "stdout": "● probe (shell)\n  │ sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?\n  └ 2 lines…\n\nMOCK_DONE VERIFY_OK RC=0 <shellId: 0 completed with exit code 0>\n\n",
+  "stderr": "\n\nChanges    +0 -0\nDuration   0s\nTokens     ↑ 20 • ↓ 10\nResume     copilot --resume=ce6b0203-f77a-4d09-b66e-65930402db29\n",
+  "roleIn": [
+   "system"
+  ],
+  "repoIn": [
+   "system"
+  ],
+  "tools": 20,
+  "toolResult": "VERIFY_OK",
+  "file": true,
+  "sys": 22590,
+  "planMark": true
+ },
+ {
+  "tool": "opencode-v2",
+  "label": "plan-override",
+  "argv": [
+   "opencode2",
+   "run",
+   "--standalone",
+   "--format",
+   "json",
+   "--auto",
+   "--agent",
+   "plan",
+   "--",
+   "<MSG>"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"agents\":{\"plan\":{\"system\":\"{file:<D>/home/.cmrole/r.md}\"}}}"
+  },
+  "exit": 0,
+  "signal": null,
+  "stdout": "p\":1793650111963,\"sessionID\":\"ses_e621f579cffe3k9KEQBU0u3YOB\",\"part\":{\"id\":\"prt_19de0b5d9001Wcs07H83bLAX1A\",\"sessionID\":\"ses_e621f579cffe3k9KEQBU0u3YOB\",\"messageID\":\"msg_19de0b5c1001r7h306ZAbAcg2l\",\"type\":\"text\",\"text\":\"MOCK_DONE VERIFY_OK RC=0 \",\"time\":{\"start\":1793650111961,\"end\":1793650111963}}}\n",
+  "stderr": "",
+  "roleIn": [
+   "system"
+  ],
+  "repoIn": [
+   "system"
+  ],
+  "tools": 12,
+  "toolResult": "VERIFY_OK",
+  "file": true,
+  "sys": 11367,
+  "planMark": true
+ },
+ {
+  "tool": "opencode-v2",
+  "label": "unknown-agent",
+  "argv": [
+   "opencode2",
+   "run",
+   "--standalone",
+   "--format",
+   "json",
+   "--agent",
+   "cm-role-nope",
+   "--",
+   "<MSG>"
+  ],
+  "env": {},
+  "exit": 1,
+  "signal": null,
+  "stdout": "{\"type\":\"error\",\"timestamp\":1793650149837,\"sessionID\":\"ses_e621ed941ffeZgBiFz9BIy74ju\",\"error\":{\"type\":\"unknown\",\"message\":\"Agent not found: \\\"cm-role-nope\\\"\"}}\n",
+  "stderr": "",
+  "roleIn": null,
+  "repoIn": null,
+  "tools": null,
+  "toolResult": null,
+  "file": false,
+  "sys": null,
+  "planMark": null
+ },
+ {
+  "tool": "copilot",
+  "label": "unknown-agent",
+  "argv": [
+   "copilot",
+   "-p",
+   "<MSG>",
+   "--allow-all-tools",
+   "--agent",
+   "cm-role-nope"
+  ],
+  "env": {
+   "COPILOT_HOME": "<D>/home/.copilot"
+  },
+  "exit": 1,
+  "signal": null,
+  "stdout": "",
+  "stderr": "No such agent: cm-role-nope, available: \n",
+  "roleIn": null,
+  "repoIn": null,
+  "tools": null,
+  "toolResult": null,
+  "file": false,
+  "sys": null,
+  "planMark": null
+ },
+ {
+  "tool": "codex",
+  "label": "unknown-profile",
+  "argv": [
+   "codex",
+   "-p",
+   "cm-role-nope",
+   "exec",
+   "<MSG>",
+   "--sandbox",
+   "workspace-write"
+  ],
+  "env": {
+   "CODEX_HOME": "<D>/home/.codex"
+  },
+  "exit": 0,
+  "signal": null,
+  "stdout": "MOCK_DONE exec_command failed: CreateProcess { message: \"Rejected(\\\"`/bin/zsh -lc 'sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?'` rejected: \n",
+  "stderr": "ak; sh verify.sh; echo RC=$?'` rejected: rm -f style commands are not permitted. Use a safer approach\\\")\" }\ncodex\nMOCK_DONE exec_command failed: CreateProcess { message: \"Rejected(\\\"`/bin/zsh -lc 'sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?'` rejected: \ntokens used\n30\n",
+  "roleIn": [],
+  "repoIn": [
+   "user"
+  ],
+  "tools": 9,
+  "toolResult": null,
+  "file": false,
+  "sys": 0,
+  "planMark": false
+ },
+ {
+  "tool": "command-code",
+  "label": "missing-mod",
+  "argv": [
+   "cmd",
+   "--local-only",
+   "-m",
+   "mock-model",
+   "-p",
+   "<MSG>",
+   "--output-format",
+   "json",
+   "--yolo",
+   "--no-auto-update",
+   "--mod",
+   "<D>/home/nope.ts"
+  ],
+  "env": {},
+  "exit": 0,
+  "signal": null,
+  "stdout": "726002-dd47-4624-869a-9f791acca3a0\"}}}}}}}}\n{\"type\":\"result\",\"subtype\":\"success\",\"sessionId\":\"3df231bf-f262-4c0e-8102-1f13e2a39fd0\",\"stopReason\":\"end_turn\",\"usage\":{\"inputTokens\":20,\"outputTokens\":10,\"cacheReadTokens\":0,\"cacheWriteTokens\":0},\"durationMs\":209,\"finalText\":\"MOCK_DONE VERIFY_OK RC=0 \"}\n",
+  "stderr": "",
+  "roleIn": [],
+  "repoIn": [
+   "system"
+  ],
+  "tools": 11,
+  "toolResult": "VERIFY_OK",
+  "file": true,
+  "sys": 37182,
+  "planMark": true
+ },
+ {
+  "tool": "opencode",
+  "label": "missing-instr",
+  "argv": [
+   "opencode",
+   "run",
+   "--format",
+   "json",
+   "<MSG>"
+  ],
+  "env": {
+   "OPENCODE_CONFIG_CONTENT": "{\"instructions\":[\"<D>/home/nope.md\"]}"
+  },
+  "exit": 0,
+  "signal": null,
+  "stdout": "5e001gI93S5VyJ3w4Jw\",\"reason\":\"stop\",\"snapshot\":\"4c77edf84337eb191ea69e03522a8e482a1a1c4b\",\"messageID\":\"msg_19de193f2001P6ap8oScNvEPjg\",\"sessionID\":\"ses_e621e7001ffeAq360KbLc8BMi1\",\"type\":\"step-finish\",\"tokens\":{\"total\":15,\"input\":10,\"output\":5,\"reasoning\":0,\"cache\":{\"write\":0,\"read\":0}},\"cost\":0}}\n",
+  "stderr": "",
+  "roleIn": [],
+  "repoIn": [
+   "system"
+  ],
+  "tools": 10,
+  "toolResult": "VERIFY_OK",
+  "file": true,
+  "sys": 10164,
+  "planMark": true
+ }
+]

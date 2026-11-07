@@ -14,6 +14,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vite
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { AgentInstancesPane } from '@/components/worktree/AgentInstancesPane';
 import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
+import { clearRosterSnapshot, recordRosterSaved } from '@/hooks/useInstanceRoleSettings';
 import {
   MAX_AGENT_INSTANCES,
   getCliToolDisplayName,
@@ -62,6 +63,11 @@ function rosterCalls(): Array<[string, RequestInit | undefined]> {
     .map(([url, init]) => [url, init] as [string, RequestInit | undefined]);
 }
 
+/** Issue #4117: a save carries a revision, so the screen must hold this roster's. */
+function holdRevision(instances: AgentInstance[]): void {
+  recordRosterSaved('w-1', instances, 'rev-test');
+}
+
 /** Parse the JSON body sent on the Nth roster PATCH call. */
 function patchBody(callIndex = 0): { agentInstances: AgentInstance[] } {
   const init = rosterCalls()[callIndex][1] as RequestInit;
@@ -71,6 +77,7 @@ function patchBody(callIndex = 0): { agentInstances: AgentInstance[] } {
 describe('AgentInstancesPane (Issue #869)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearRosterSnapshot('w-1');
     mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
   });
 
@@ -158,6 +165,7 @@ describe('AgentInstancesPane (Issue #869)', () => {
   describe('add instance', () => {
     it('PATCHes the roster with the new instance and reports it via onInstancesChange', async () => {
       const onInstancesChange = vi.fn();
+      holdRevision([primary('claude', 0)]);
       render(
         <AgentInstancesPane
           {...baseProps}
@@ -184,6 +192,7 @@ describe('AgentInstancesPane (Issue #869)', () => {
     });
 
     it('adding the SAME tool again allocates a {tool}-2 id (Claude × 2 registerable)', async () => {
+      holdRevision([primary('claude', 0)]);
       render(
         <AgentInstancesPane {...baseProps} instances={[primary('claude', 0)]} />,
       );
@@ -198,6 +207,7 @@ describe('AgentInstancesPane (Issue #869)', () => {
 
   describe('rename instance', () => {
     it('commits an alias edit on blur and PATCHes the updated alias', async () => {
+      holdRevision([primary('claude', 0, 'Claude'), primary('codex', 1)]);
       render(
         <AgentInstancesPane
           {...baseProps}
@@ -231,6 +241,7 @@ describe('AgentInstancesPane (Issue #869)', () => {
 
   describe('delete instance', () => {
     it('PATCHes the roster without the deleted instance after confirmation (Issue #1487)', async () => {
+      holdRevision([primary('claude', 0), primary('codex', 1), primary('gemini', 2)]);
       render(
         <ConfirmProvider>
           <AgentInstancesPane
@@ -275,6 +286,7 @@ describe('AgentInstancesPane (Issue #869)', () => {
 
   describe('reorder instances', () => {
     it('move-down swaps with the next instance and PATCHes the new order', async () => {
+      holdRevision([primary('claude', 0), primary('codex', 1), primary('gemini', 2)]);
       render(
         <AgentInstancesPane
           {...baseProps}
@@ -341,7 +353,7 @@ describe('AgentInstancesPane (Issue #869)', () => {
 
   describe('persistence failure', () => {
     it('shows an error message when the PATCH responds !ok', async () => {
-      mockFetch.mockResolvedValue({ ok: false, json: () => Promise.resolve({}) });
+      mockFetch.mockResolvedValue({ ok: false, status: 400, json: () => Promise.resolve({}) });
       const onInstancesChange = vi.fn();
       render(
         <ConfirmProvider>

@@ -426,6 +426,16 @@ export interface SendOptions {
   instance?: string;
   /** Issue #1000: register the ad-hoc --instance session into the roster after sending */
   register?: boolean;
+  /** Issue #4116: `--role <role>` is the string, `--no-role` is false. */
+  role?: string | false;
+  /** Issue #4116: pin the send to this process (`launch-worker` passes what it read). */
+  expectRoleGeneration?: string;
+  /** Issue #4116: pin the send to this injection fingerprint. */
+  expectRoleFingerprint?: string;
+  /** Issue #4116: pin the send to a process started with no role. */
+  expectNoRole?: boolean;
+  /** Issue #4133: OpenCode V1, session stopped: start a new conversation, not the remembered one. */
+  newConversation?: boolean;
   /**
    * Issue #1545: path to an execution contract, relative to the worktree root
    * (e.g. `.commandmate/tasks/my-task.yaml`). The contract's goal replaces the
@@ -654,6 +664,28 @@ export const InterruptExitCode = {
 } as const;
 export type InterruptExitCode = typeof InterruptExitCode[keyof typeof InterruptExitCode];
 
+/**
+ * What a role command or a send with a role can end in (Issue #4116). Argument
+ * errors, an unknown or ambiguous role or repository and a tool outside the role
+ * feature stay {@link ExitCode.CONFIG_ERROR}. 31 and 32 because 30 is
+ * {@link InterruptExitCode.NO_ACTIVE_SESSIONS} and 40 / 41 are the strict
+ * `respond`'s: an orchestration loop reads all of these out of one `$?`.
+ */
+export const RoleExitCode = {
+  SUCCESS: 0,
+  /** Someone else got there first, or the role is in use: `name_conflict`, `version_conflict`, `role_in_use`, `instance_exists`, `roster_changed`. Nothing was changed or sent by the refused write; a step the command had already finished stands (`remove --kill` after its kill, Issue #4149). `send --register` without a role has already sent by then, so it warns and exits 0 instead. */
+  CONFLICT: 31,
+  /** The role a send is conditional on does not hold, or the start was refused because of its role. The body was not typed. */
+  NOT_SENT: 32,
+} as const;
+export type RoleExitCode = typeof RoleExitCode[keyof typeof RoleExitCode];
+
+/** Shared by every `roles` subcommand (Issue #4116). */
+export interface RolesOptions {
+  json?: boolean;
+  token?: string;
+}
+
 /** Shared by every skill subcommand [Issue #1237] */
 export interface SkillCommonOptions {
   json?: boolean;
@@ -733,6 +765,14 @@ export interface InstancesOptions {
   id?: string;
   /** remove action: also kill the running session */
   kill?: boolean;
+  /** Issue #4116: add / set-role. `--role <role>` is the string, `--no-role` (add) is false. */
+  role?: string | false;
+  /** Issue #4116: set-role: an explicit "no role". */
+  none?: boolean;
+  /** Issue #4116: set-role: drop the setting and follow the defaults. */
+  inherit?: boolean;
+  /** Issue #4116: list: a role that cannot be read fails the command, rather than being left out. */
+  requireRoles?: boolean;
   token?: string;
 }
 

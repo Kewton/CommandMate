@@ -42,6 +42,10 @@ vi.mock('../../../../src/lib/server/localhost-self-check', async (importOriginal
 
 import { statusCommand } from '../../../../src/cli/commands/status';
 import { readLocalhostConflict } from '../../../../src/lib/server/localhost-self-check';
+import { keepOffTheRealServer } from '../../../helpers/mock-api';
+
+// Issue #4191: no request from this file reaches 127.0.0.1:3000, not even by failing.
+keepOffTheRealServer();
 
 const PID = 12345;
 const PORT = 3000;

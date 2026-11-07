@@ -45,8 +45,17 @@ const KEYS = [
   'agentUpdates.restart',
   'agentUpdates.restarted',
   'agentUpdates.restartError',
+  'agentUpdates.restartUnknown',
+  'agentUpdates.restartInProgress',
   'agentUpdates.loadError',
 ];
+
+const CARD_SOURCE = path.resolve(__dirname, '../../../src/components/settings/AgentUpdatesCard.tsx');
+
+/** The `agentUpdates.*` keys named in `source`. */
+function keysNamedIn(source: string): string[] {
+  return [...new Set(source.match(/agentUpdates\.[A-Za-z]+/g) ?? [])].sort();
+}
 
 /** Keys whose message MUST carry an interpolation placeholder. */
 const PLACEHOLDERS: Record<string, string[]> = {
@@ -82,6 +91,16 @@ describe('[#2069] common.agentUpdates i18n parity', () => {
       }
     });
   }
+
+  it('[#4163] KEYS is every key the card names, so the list above cannot fall behind it', () => {
+    expect(keysNamedIn(fs.readFileSync(CARD_SOURCE, 'utf-8'))).toEqual([...KEYS].sort());
+  });
+
+  it('[#4163] positive control: a key the list does not hold is told apart', () => {
+    const named = keysNamedIn("t('agentUpdates.title'); t('agentUpdates.brandNew');");
+    expect(named).toEqual(['agentUpdates.brandNew', 'agentUpdates.title']);
+    expect(named.filter((key) => !KEYS.includes(key))).toEqual(['agentUpdates.brandNew']);
+  });
 
   it('has the same key set in both locales', () => {
     const en = Object.keys((loadCommon('en').agentUpdates ?? {}) as Record<string, unknown>).sort();

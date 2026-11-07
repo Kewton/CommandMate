@@ -80,9 +80,14 @@ describe('Issue #2934: the patterns (D6)', () => {
   });
 
   it('accepts the placeholder with U+2026 and with ASCII dots, only inside the gutter', () => {
-    expect(OPENCODE_V2_IDLE_COMPOSER_PATTERN.test('   ┃  Ask anything… "Fix broken tests"')).toBe(true);
-    expect(OPENCODE_V2_IDLE_COMPOSER_PATTERN.test('   ┃  Ask anything... "x"')).toBe(true);
-    expect(OPENCODE_V2_IDLE_COMPOSER_PATTERN.test('Ask anything… in a reply')).toBe(false);
+    // Issue #4188: the row has to sit in the box over the composer's border — a
+    // transcript echo draws the same gutter row — so the box rows go with it.
+    const box = (row: string): string =>
+      `${row}\n   ┃\n   ┃  Build · LongCat 2.5 Preview Free OpenCode Zen\n   ╹▀▀▀▀▀▀▀▀▀▀\n`;
+    expect(OPENCODE_V2_IDLE_COMPOSER_PATTERN.test(box('   ┃  Ask anything… "Fix broken tests"'))).toBe(true);
+    expect(OPENCODE_V2_IDLE_COMPOSER_PATTERN.test(box('   ┃  Ask anything... "x"'))).toBe(true);
+    expect(OPENCODE_V2_IDLE_COMPOSER_PATTERN.test(box('Ask anything… in a reply'))).toBe(false);
+    expect(OPENCODE_V2_IDLE_COMPOSER_PATTERN.test('   ┃  Ask anything… "Fix broken tests"')).toBe(false);
   });
 
   it('sees the running hint only while a turn runs', () => {
@@ -93,9 +98,12 @@ describe('Issue #2934: the patterns (D6)', () => {
   });
 
   it('keeps v1’s composer constant exactly as it was', () => {
+    // Issue #4209 moved v1's own rule to position (the box over the border); this
+    // pins that it is v1's spelling, and that v2's constant is a different object.
     expect(OPENCODE_IDLE_COMPOSER_PATTERN.source).toBe(
-      '^[^\\S\\n]*[\\u2502\\u2503][^\\S\\n]*Ask anything(?:\\.\\.\\.|\\u2026)'
+      '^[^\\S\\n]*[\\u2502\\u2503][^\\S\\n]*Ask anything(?:\\.\\.\\.|\\u2026)[^\\n]*\\n(?:[^\\S\\n]*[\\u2502\\u2503][^\\n]*\\n)*[^\\S\\n]*\\u2579\\u2580{4,}'
     );
+    expect(OPENCODE_IDLE_COMPOSER_PATTERN).not.toBe(OPENCODE_V2_IDLE_COMPOSER_PATTERN);
   });
 
   it('declares liveness on the footer, which a shell prompt cannot match', () => {

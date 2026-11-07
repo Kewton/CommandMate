@@ -54,6 +54,10 @@ export type SendAttemptReason =
    * input-boundary hook refused it and nothing was typed or dispatched (#3957/#3992).
    */
   | 'relay-reservation-lost'
+  /** `not-sent`: the role this launch resolved cannot be applied, so nothing was started or typed (#4115). */
+  | 'role-launch-refused'
+  /** `not-sent`: the role this send was conditional on does not hold right before the body (#4115). */
+  | 'role-condition-failed'
   /** `not-sent`: the pane could not be re-read under the input lock, so nothing was typed (#3945). */
   | 'recheck-failed'
   /**

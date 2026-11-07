@@ -93,7 +93,7 @@ TodoWriteツールで作業計画を作成：
 ```
 - [ ] Phase 1: 依存関係分析・実行計画（ラベル分類・難易度判定と担当割当を含む）
 - [ ] Phase 2: Worktree準備・実行契約の起案
-- [ ] Phase 2: 2-4-4 新しい仕組みの設計の事前レビュー（試行中・対象の Issue のみ。バグは Phase 2.5 の後）
+- [ ] Phase 2: 2-4-4 新しい仕組みの設計の事前レビュー（対象の Issue のみ。バグは Phase 2.5 の後）
 - [ ] Phase 2.5: 根本原因分析（バグIssueのみ、他エージェント経由）
 - [ ] Phase 3: 並列開発（契約付き send → wait --verify）
 - [ ] Phase 4: 設計突合（バリア）
@@ -269,6 +269,10 @@ Antigravity は `.claude/commands` を読まないので、`/pm-auto-issue2dev`
 
 状態ファイルがある run は、3-1 の送信の前に `node scripts/orchestrate/plan-check.mjs check --plan <state file>` を通す（exit 1 なら送らない。無い run は skipped で今までどおり）。
 
+`plan-check.mjs` の `notice: cpu-heavy` か `contract.mjs generate` の `note:` が出た item は、テストが全体実行に広がって 1 本ずつになるので、plan に直列の順を書く（根拠: docs/orchestrate/plan-check.md#1-4-全体実行に広がる-item-の順）。
+
+同じ Issue の 2 本目の PR の断片、2-4-4 の対象の当て方（item の中の変更ごと）、全体に広がる item の同時の本数（波に 2 本まで）は docs/orchestrate/run-log.md#1-5-2-本目の-pr-の-changelog-断片 と docs/orchestrate/trials.md#2-4-4-item-の中の変更ごとに対象の条件を当てる と docs/orchestrate/plan-check.md#1-4-全体に広がる-item-は同じ波に-2-本まで を読む（#4192）。
+
 ### 1-5. 実行計画の記録
 
 ```bash
@@ -393,7 +397,7 @@ title: "<Issueタイトル>"
 kind: feature             # feature | bug | refactor | docs（CHANGELOG の節とコミットの type の既定）
 agent: claude             # claude | antigravity
 model: opus               # opus | sonnet（antigravity は書かない）
-gates: [lint, typecheck, unit-related]
+gates: [lint, typecheck, build-server, unit-related]   # 書いたとおりに走る。省略すると kind の既定（src/ に届き、worktree の verify.yaml にあれば build-server を足す。refactor を除く）
 scope: ["src/lib/<module>/**", "tests/unit/<module>/**"]   # changelog.d/<N>.md は自動で足される
 decisions: []             # Issue の「決めること」への答え（goal の「この契約での決定」になる）
 changelog: { section: Added }   # 節の上書き（既定は kind から）。最低の版を上げるなら bump: minor を足す
@@ -408,7 +412,9 @@ node scripts/orchestrate/contract.mjs generate \
 
 - 生成が失敗したとき・止まったときは docs/orchestrate/contract.md#2-4-生成器が止まる条件 を読む（検査する制約・goal の上限・scope に書けないファイル・再実行と `--force`）
 - 2-4-2 の差し替え（テスト全体）は雛形に入っていない。生成した契約に手で足す
+- `typecheck` は `tsconfig.server.json` を見ない。`src/` を触る Issue の `gates` には `build-server` を入れる（根拠と所要時間: docs/orchestrate/contract.md#2-4-src-を触る契約の-build-server）
 - `kind: refactor` では 2-4-3 の整理の決まりが goal に入り、gates の既定が `[lint, typecheck]` になる。`tests/` の下の glob を scope に書くと生成が失敗する
+- scope が `tests/fixtures/` の下・`src/config/slash-commands-catalog.json`・`.claude/skills/`・API のルートや CLI のコードに当たると、生成器が受入基準の文・対のテスト・`sync-map.json`・`src/cli/types/**` を自動で足す。契約の決定が既存のテストの期待を反転するときは、plan に「removed-tests を許可する（理由）」を先に書き、precheck に `--allow-removed-tests` を付ける（docs/orchestrate/contract.md#2-4-契約が先回りする対のファイルと期待の反転）
 - 共有状態を書く item は、設定に `routes`（経路表と割込み表）を書く。書き方は docs/orchestrate/plan-check.md#2-4-経路表と割込み表の書き方 を読む（省略時の goal は変わらない）
 
 - **`requireCommit: true` を外さない**（#3430）。外すと未コミットの変更も作業証跡に数え、ワーカーがコミット前に
@@ -566,8 +572,9 @@ success:
 `scripts/orchestrate/contract.mjs`（2-4）が、設定の `kind: refactor` のときに `<N>` を Issue 番号に置き換えて goal に入れるので、手で転記しない。
 設定には `refactor: { mergesCopies: true }`（写しをまとめる手順）か `false`（長い関数を分ける手順）を必ず書く。
 決まりの見出し（本文は雛形）: 振る舞いを変えない／`tests/` の下のファイルは変えない／写しは新しいモジュールに置く／循環を作らない／
-コメントは書き換えずに移す／`await` を足さない／見つけた食い違いや不具合は直さない／テストを変えずには通らないなら `IMPL_BLOCKED`／
+コメントは書き換えずに移す／`await` を足さない（async への切り出しも足すことに当たる）／見つけた食い違いや不具合は直さない／テストを変えずには通らないなら `IMPL_BLOCKED`／
 `git diff --shortstat` で行が減らないなら採用しない（`mergesCopies: true` のときだけ）／
+計測の陰性対照に無関係な関数の実測値を固定しない（元のファイルと分割先の両方を探す）／
 数え方を変えない（計測のコード・除外の一覧・抑止のコメントを足して数字を下げない）／
 どう届いたかを書く（言い換え・書き方の変更だけで数が変わった箇所は、そう書く）。
 
@@ -596,22 +603,22 @@ PR の前の確認（6-1-1 の `scripts/orchestrate/precheck.mjs`）を `--kind 
 
 整理の Issue の契約を起案するとき（`kind: refactor`）と、整理の PR がゲートや CI で落ちたときは、docs/orchestrate/refactor.md#2-4-3-整理の-issue-でだけ使う手順 を読み、その手順（ファイルや名前を消す前の確かめ方・コメント・同じ列の手順・テストが自分どうしの比較になる変更・範囲外の食い違い・検証ゲート）に従う。
 
-### 2-4-4. 新しい仕組みの設計の事前レビュー（試行中の段、2026-11-06 まで）
+### 2-4-4. 新しい仕組みの設計の事前レビュー
 
-5-2b の整合性レビューはマージの前の段で、設計の穴を実装の後に見つける。そこで、最終の契約をワーカーに送る**前**に、設計の要点を Codex に 1 回見せる。**期限つきの試行**で、常設しない。
+5-2b の整合性レビューはマージの前の段で、設計の穴を実装の後に見つける。そこで、最終の契約をワーカーに送る**前**に、設計の要点を Codex に 1 回見せる。
+4 週間の試行（2026-11-06 まで）の後、**実装の前に重大な設計の誤りを見つける安全策**として常設した。5-2b の再レビューを減らす効果は示せていない。
 
 根拠: docs/orchestrate/contract.md#2-4-4-事前レビューを足した理由
 
-- **期限:** 2026-11-06 まで（4 週間）。期限の日に、下の記録を集計して、続ける・入れる・やめるの判断案を書き、Codex のレビューを受けてから利用者に伺う
 - **対象の条件:** 危険な領域（hook・セッション・検出・ポーリング／Auto-Yes・tmux・security・応答の形・隔離）で、**状態・副作用・寿命を変える** Issue。
   新しい自動の動作・新しい状態や記録だけでなく、**既存の動作の修正で新しい経路や状態の遷移を生むもの**も含む。接頭辞（feat / fix）では判定しない。
   対象でないもの（表示だけの変更・docs だけ・テストだけ・状態や寿命に触れない修正）は飛ばし、飛ばした理由を plan.md に 1 行残す
 - **置き場所:** 実行契約の起案（2-4）の後、最終の契約を送る（3-1）前。**バグは Phase 2.5（原因の分析）の後**に行う。
   レビューで変わった scope と受入基準は、最終の契約に反映してから送る
+- **起票の段のレビューで代える:** 起票の段で Codex が同じ設計を見ていて、docs/orchestrate/trials.md#2-4-4-起票の段のレビューで代える条件 の 4 条件をすべて満たすときだけ代えてよい。「Codex 済み」の一言では代えない。代えたら plan.md に出典を 1 行残す
 - **書くもの・依頼の形・指摘の契約への入れ方・記録:** 対象の Issue では docs/orchestrate/trials.md#2-4-4-事前レビューの書き方と記録 を読み、その手順で行う
 - **依頼文は送る前に利用者に見せる**（高難易度の意思決定の既存の決まりと同じ）。承認を得てから送る
 - **5-2b は残す。** 事前レビューをした Issue も 5-2b の対象に含める
-- **期限の集計の手順:** 期限の日に docs/orchestrate/trials.md#2-4-4-期限の集計の手順 を読む
 
 ### 2-5. tmux / セッションに触れる Issue の追加ルール（必須）
 
@@ -720,9 +727,8 @@ gh issue edit "$bug_issue" --repo Kewton/CommandMate --body "${CURRENT_BODY}${AN
 # Claude のモデルは「セッションの起動時」に、worktree の .claude/settings.local.json から決まる。書くのも送るのも
 # scripts/orchestrate/launch-worker.mjs（#3883）。opus も sonnet も毎回明示して書く（opus は opus[1m]）。消して ~/.claude/settings.json
 # の既定を継がせることはしない（既定は利用者が変える。opus 指定が fable で動いた）。git に無視されていないファイルには書かない。
-set_claude_model() {  # <worktree-path> <opus|sonnet>（手で書くとき。下の send は自分で書く）
-  node scripts/orchestrate/launch-worker.mjs set-model --worktree "$1" --model "$2"
-}
+# 手で書くときは: node scripts/orchestrate/launch-worker.mjs set-model --worktree <worktree-path> --model <opus|sonnet>
+# （下の send は自分で書く）
 
 # assign.tsv は 1-2b の結果（1 行 = "<issue>\t<claude|antigravity>\t<opus|sonnet|->"）。3 列目は Claude のモデル
 # assign.tsv は fd 3 から読む（stdin にすると、ループの中の commandmatedev が残りの行を読み尽くす。下の注を参照）
@@ -731,7 +737,7 @@ while IFS="$(printf '\t')" read -r issue AGENT MODEL <&3; do
   WT_DIR=$(commandmatedev ls --json | jq -r --arg id "$WT" '.[] | select(.id == $id) | .path')
   # Claude（MODEL が opus|sonnet）は、動いているセッションを止め → モデルを書き → 作業を頼まない起動のメッセージ → capture --json の model を
   # 確かめ → 一致してから契約と Auto-Yes を送る。stderr に model ok / model UNKNOWN / model MISMATCH。合わない・読めないときは 1 回だけ起動し直し、
-  # なお合わなければセッションを止めて exit 40（MISMATCH）/ 41（UNKNOWN）。契約は送らない。止めた・Auto-Yes を切ったと確かめられなければ 42 / 43
+  # なお合わなければセッションを止めて exit 40（MISMATCH）/ 41（UNKNOWN）。契約は送らない。止めた・Auto-Yes を切ったと確かめられなければ 42 / 43、ロールが変わったら 44
   # 送信の出力は runs/$DATE/send-<issue>[.a<n>].out / .err（呼び出しごとに排他的に取る）。stdout は task id だけ
   TASK_ID=$(node scripts/orchestrate/launch-worker.mjs send --run-dir "workspace/orchestration/runs/$DATE" --issue "$issue" \
     --wt "$WT" --worktree "$WT_DIR" --instance "$AGENT" --model "$MODEL" --contract ".commandmate/tasks/issue-${issue}.yaml")
@@ -755,7 +761,7 @@ done 3< "workspace/orchestration/runs/$DATE/assign.tsv"
 ループの中の `commandmatedev`（`ls` / `send` / `capture`）が stdin を読み、残りの行を消費する。
 上の雛形は fd 3 から読むので、ループの中のコマンドに `</dev/null` を付けなくてよい。雛形を書き換えて使うときも、
 stdin で読む形に戻さないこと。ループを使わずに 1 件ずつ送るときは、各 `commandmatedev` に `</dev/null` を付ける。
-`task MISSING` が出たら、その Issue は送れていない。exit 40〜43 は下の「モデルの確認結果」、それ以外は `send-<issue>[.a<n>].err` を読み、3-1 の「冷間起動の失敗」に従って再送する。
+`task MISSING` が出たら、その Issue は送れていない。exit 40〜44 は下の「モデルの確認結果」、それ以外は `send-<issue>[.a<n>].err` を読み、3-1 の「冷間起動の失敗」に従って再送する。
 
 根拠: docs/orchestrate/workers.md#3-1-assigntsv-を-stdin-で読んで止まった実測
 
@@ -767,7 +773,8 @@ stdin で読む形に戻さないこと。ループを使わずに 1 件ずつ�
 - exit 40（2 回目も `model MISMATCH`）/ 41（2 回目も `model UNKNOWN`）: **セッションは止まっている。契約は送られていない。その Issue は進めない**（そのモデルのまま続けない）。
   8-3 に書き、`.claude/settings.local.json` と CommandMate の版を確かめてから、人の判断で送り直す。利用者の `~/.claude/settings.json` は変えない
 - exit 42（`stop UNCONFIRMED`）: kill が失敗した・まだ動いている。**何も送り直さない**。人がセッションを止めたことを確かめてから送り直す
-- exit 43（`auto-yes UNCONFIRMED`）: 起動の前に Auto-Yes を切れたと確かめられない。何も送っていない。`auto-yes --disable` を確かめてから送り直す
+- exit 43（`auto-yes UNCONFIRMED`）: 起動の前に Auto-Yes を切れたと確かめられない（一覧・ロールが読めないときも）。何も送っていない。`auto-yes --disable` を確かめてから送り直す
+- exit 31 / 32 / 43 / 44 の意味と対処（send とワーカーの起動で違う）は docs/orchestrate/workers.md#3-1-send-とワーカーの起動の-exit-code を読む
 - tasks.tsv は 5 列になった（`issue` / `WT` / `AGENT` / `TASK_ID` / `MODEL`）。**`--instance` に渡すのは 3 列目の `AGENT`**（`claude`）で、5 列目ではない
 
 stdout はパイプで切らずファイルに落とす（`| head` で切ると task が pending のまま残る）。
@@ -1117,6 +1124,8 @@ echo "exit=$?"   # 0 → PR を出す / 1 → runs/$DATE/precheck-<issue>[-<item
 
 根拠: docs/orchestrate/ci-merge.md#6-2-統合破壊の実測
 
+明示の許可がある run でも、マージが auto mode の分類器に拒否されたら別の経路で再試行せず、CI の合格を確かめて「マージ可能」を報告して止まる（根拠: docs/orchestrate/ci-merge.md#6-2-分類器にマージを拒否されたとき）。
+
 マージの条件の 1 つとして、**未処置の指摘（5-3）が残っている PR はマージしない**。
 
 1 本マージするたびに、残りの各 PR で `merge-pr.mjs` を呼ぶ。develop が進んでいれば `git fetch` と `git merge origin/develop`（衝突したら
@@ -1128,7 +1137,7 @@ precheck は作業の HEAD の precheck と同じ引数で走り、同じ HEAD �
 ```bash
 node scripts/orchestrate/merge-pr.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
   --issue "$issue" --worktree "$WT_DIR"            # 最後の 1 本は --last。Issue を閉じないときは --close -
-echo "exit=$?"   # 0 → マージ済み / 1 → 出力の欠けたもの・落ちた段を読む / 2 → 作業ツリーが汚れている / 3 → 保留（取り込み後の precheck がロック待ち。再実行すれば続きから進む） / 124 → CI が --ci-timeout（既定 3600 秒）に収まらない
+echo "exit=$?"   # 0 → マージ済み / 1 → 出力の欠けたもの・落ちた段を読む / 2 → 作業ツリーが汚れている / 3 → 保留（取り込み後の precheck がロック待ち。再実行すれば続きから進む） / 4 → CI 待ちの間に develop が進んだ（再実行で取り込み直す） / 124 → CI が --register-timeout（既定 600 秒）までに 1 つも登録されない、または登録から --ci-timeout（既定 3600 秒）に収まらない
 ```
 
 衝突で止まったときは、意味を見て解消（機械解決は module-reference などの共有ファイルだけ）してコミットし、同じ引数で再実行する。
@@ -1142,6 +1151,8 @@ Issue ごとに別ファイル（`changelog.d/<N>.md`）で、`CHANGELOG.md` は
 
 上記が通れば**フル CI の完走を待たずにマージしてよい**。develop 側の CI（12〜25 分）が安全網に
 なる。**最後の 1 本だけ**はフル CI を待つ。
+
+**利用者の許可の条件が「CI が通れば」の run では、どの PR にも `--last` を付けて全チェックの合格を待つ**（全チェックの合格 = すべての `bucket` が `pass` か `skipping` で、`ci-pr.yml` の全ジョブの登録も待つ。`pending` は待ち、`fail` / `cancel` はマージしない。根拠: docs/orchestrate/ci-merge.md#6-2-ci-が通ればの許可と全チェックの合格）。
 
 **例外: 契約の `gates` が `unit-related` の PR は、CI の `Unit Tests` が `pass` になってからマージする**（#2639）。
 ローカルの裁定がテスト全体を含まないため。整理の契約（`lint`・`typecheck` だけ、2-4-3）も同じ。`merge-pr.mjs` は、検証が verify.yaml の `unit`
@@ -1167,9 +1178,11 @@ precheck にも build が無いので、ローカルのどの裁定もビルド�
 根拠: docs/orchestrate/ci-merge.md#6-3-fail-を見落とした実例
 
 `merge-pr.mjs` がこの判定を行う（落ちたジョブは HEAD ごとに 1 回だけ `gh run rerun --failed` で再実行し、それでも落ちればマージしない）。
+
+既存の揺れは、同じテストの 2 回目で再実行をやめて修正の担当を決める（根拠: docs/orchestrate/ci-merge.md#6-3-既存の揺れが再発したときの担当）。
 `pending` の扱いは 6-2 に従う: **6-2 のローカルゲート（refresh → マーカー走査 → `tsc` →
 影響テスト）を通していれば `pending` は待たなくてよい**。develop 側の CI が安全網になるからで、
-待つと 1 issue あたり 12〜25 分が消える。**最後の 1 本だけ**は全 `pass` を待つ。
+待つと 1 issue あたり 12〜25 分が消える。**最後の 1 本だけ**（と 6-2 の「CI が通れば」の run の全 PR）は全チェックの合格を待つ。
 
 `unit-related` で裁定した PR（と、テスト全体を通していない整理の PR）では、`Unit Tests` のチェックが `pass` になってからマージする（6-2 の例外）。
 `Build` のチェックも `pass` になってからマージする（6-2 の例外。マージする HEAD の precheck の記録に `build=ok`（と `build-cli=ok`・`build-server=ok`）があるときだけ、その `pending` は待たなくてよい）。
@@ -1209,7 +1222,7 @@ cat "workspace/orchestration/runs/$DATE/module-reference-<N>-<item>.md"   # work
 
 ```bash
 # module-reference: 同じ行キーが 2 本になっていない
-awk -F'|' '/^\| `/{print $2}' docs/module-reference.md | sort | uniq -d
+grep '^| `' docs/module-reference.md | cut -d'|' -f2 | sort | uniq -d
 ```
 
 `changelog.d/<N>.md` がこの PR のコミットにあることと断片の書式、消えた `it` / `describe` の数は、`publish-pr.mjs`・`merge-pr.mjs` と precheck（6-1-1）が確かめる。手で確かめるときは docs/orchestrate/ci-merge.md#6-4-断片と消えたテストを手で確かめる を読む。
@@ -1321,7 +1334,7 @@ summary.md の末尾に「振り分けの改善案」節を書き、完了報告
 
 - Antigravity から Claude への切り替え（3-5）
 - sonnet から opus への格上げ（3-5b）、または sonnet 担当が再指示を要した（1-2b の「中」の条件が甘い証拠になる）
-- `model MISMATCH` / `model UNKNOWN` / `stop UNCONFIRMED` / `auto-yes UNCONFIRMED` で止まった（3-1。exit 40〜43）
+- `model MISMATCH` / `model UNKNOWN` / `stop UNCONFIRMED` / `auto-yes UNCONFIRMED` で止まった（3-1。exit 40〜44）
 - ワーカー起因でない不合格を、オーケストレーターの裁定で合格扱いにした（3-4）
 - 判定表と実際の結果が食い違った（「易」と判定したのに再指示が要った／「難」と判定したが小さい変更で終わった）
 - Antigravity 固有の停止（アンケート画面、冷間起動の失敗、monitor の誤判定など）
@@ -1394,7 +1407,7 @@ gh issue list --repo Kewton/CommandMate --state open --search "<ファイル名�
 | worktree作成失敗 | エラー表示、手動作成を案内 |
 | ワーカーのタイムアウト（exit 124） | captureで状況確認→追加指示 or ユーザーに報告 |
 | 検証不合格（exit 20） | `verify --json` で失敗ゲートを特定し、先にワーカー起因かを判定（3-4）。ワーカー起因なら再指示。上限2回で、Antigravity 担当は Claude（opus）へ切替（3-5）、Claude（sonnet）担当は opus へ格上げ（3-5b）、Claude（opus）担当は人間へエスカレーション |
-| env-clean だけが FAIL（exit 20） | `capture --prompts` と違反項目の時刻で帰属を判定。ワーカー起因でなければ合格扱いにし、根拠を PR と summary に書く（3-4） |
+| env-clean だけが FAIL（exit 20） | `capture --prompts` と違反項目の時刻で帰属を判定（複数の worktree に同じ項目が出ると `wait-verify.mjs` と `run-log.mjs status` が外部要因の候補と出す）。ワーカー起因でなければ合格扱いにし、根拠を PR と summary に書く（3-4） |
 | 再指示の後の検証で scope が SKIP（`was not attached to it`）／env-clean が `no baseline snapshot exists for this run` | task に紐づいていない。`verify --task <task id>` で検証し直す（3-4） |
 | 作業証跡ゼロ（exit 21） | captureでcomposer未確定・権限プロンプト・未起動を切り分け（Phase 3-4） |
 | send が exit 99（`prompt not ready`） | 未送信。**待つ前に capture で画面を見て**、信頼ダイアログ / 既にプロンプト / まだ起動中で分岐する（3-1 の表）。task id は再送のたびに差し替える |

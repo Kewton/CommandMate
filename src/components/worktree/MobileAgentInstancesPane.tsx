@@ -57,6 +57,7 @@ import { Checkbox } from '@/components/ui';
 import { MIN_VISIBLE_INSTANCES } from '@/hooks/useMobileSelectedInstances';
 import { AgentInstancesPane, relayBadgeClassName } from '@/components/worktree/AgentInstancesPane';
 import { useSessionRelays } from '@/lib/relay/use-session-relays';
+import { useInstanceRoleSettings } from '@/hooks/useInstanceRoleSettings';
 import { resolveRelayBadges } from '@/lib/relay/relay-badges';
 import type { AgentEventSourceView } from '@/types/models';
 
@@ -125,6 +126,11 @@ export const MobileAgentInstancesPane = memo(function MobileAgentInstancesPane({
   const t = useTranslations('schedule');
   // Issue #1783: model wording lives in the `worktree` namespace.
   const tWorktree = useTranslations('worktree');
+
+  // Issue #4117: a phone has no split header holding this, and it is the roster
+  // revision a save from this pane is checked against. Reading it here keeps the
+  // shared pane's own zero-request rule (#2054), which the PC path relies on.
+  useInstanceRoleSettings(worktreeId);
 
   const visibleSet = new Set(visibleInstanceIds);
   const atMinVisible = visibleInstanceIds.length <= MIN_VISIBLE_INSTANCES;
@@ -195,6 +201,8 @@ export const MobileAgentInstancesPane = memo(function MobileAgentInstancesPane({
               awaiting: relays.awaitedBy(inst.id),
               // Issue #4082: same as the PC roster row.
               held: relays.heldFor(inst.id),
+              // Issue #4193: same as the PC roster row.
+              closedBlocked: relays.closedBlockedFor(inst.id),
               aliasOf,
             });
             return (

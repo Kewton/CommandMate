@@ -178,6 +178,11 @@ export interface OpencodeSessionsResponse {
 // by the CLI `instances` command; omits gitStatus/session fields not needed here)
 export interface WorktreeDetailResponse extends WorktreeItem {
   agentInstances: AgentInstance[];
+  /**
+   * Issue #4132: names this reading of the roster, for a write that replaces it. Absent
+   * from an older server. Pinned to the route by tests/integration/cli-response-types-4159.test.ts.
+   */
+  rosterRevision?: string;
 }
 
 /**
@@ -1428,6 +1433,13 @@ export interface AutoYesSetResult {
    * not enabled and from an older server.
    */
   answerMode?: string;
+  /**
+   * Issue #4132: which enabling this is, on the same answers as `answerMode`. Handed back
+   * as `?expectedGrantId=` to turn off this grant and no other. Absent from an older server,
+   * which then cannot be asked for that (Issue #4159). Pinned to the route by
+   * tests/integration/cli-response-types-4159.test.ts.
+   */
+  grantId?: string;
   pollingStarted?: boolean;
   /**
    * Approvals that were already pending and got re-judged by this call
@@ -1655,6 +1667,12 @@ export interface ChatMessage {
   worktreeId: string;
   role: string;
   content: string;
+  /** Issue #4115/#4116: the process a send with a role condition reached. */
+  roleLaunch?: { sessionGeneration: string; injectionFingerprint: string | null; saved: boolean; stored: unknown };
+  /** Issue #4115/#4116: this tool's role replaces its default instructions. */
+  replacesDefaultInstructions?: boolean;
+  /** Issue #4115/#4116: OpenCode V1 continued a conversation that had another role. */
+  roleResume?: { continued: boolean; message: string };
   cliToolId?: string;
   createdAt?: string;
   /**
@@ -2420,6 +2438,8 @@ export interface TaskCreateResponse {
   task: TaskView;
   /** Contract preamble + goal, composed server-side; this is what gets sent. */
   message: string;
+  /** A running session with no evidence of its role, which the settings give one (Issue #4132). Absent otherwise and from older servers. */
+  roleWarning?: string;
 }
 
 /** Mirrors: src/app/api/worktrees/[id]/tasks/route.ts GET response. */
@@ -2543,6 +2563,26 @@ export interface RelayView {
    * is queued or there is none.
    */
   deliveryHold?: RelayDeliveryHoldResponse | null;
+  /**
+   * Issue #4105: what the last delivery attempt of the current payload
+   * stopped for. Absent on an older server; null = no observation in this
+   * server process (NOT "deliverable"). Never part of `held` / `heldCount`.
+   */
+  lastDeliveryBlock?: RelayLastDeliveryBlockResponse | null;
+}
+
+/**
+ * Mirrors: `RelayLastDeliveryBlock` in src/lib/relay/types.ts (Issue #4105).
+ * Strings rather than unions, for the reason `RelayView.state` is one.
+ */
+export interface RelayLastDeliveryBlockResponse {
+  /** `prompt_waiting` | `generating` | `session_stopped` | `foreign_session`. */
+  reason: string;
+  /** The payload it was for: `reply` | `prompt` | `expired`. */
+  kind: string;
+  payloadId: string | null;
+  /** Epoch ms of the attempt that observed it. */
+  observedAt: number;
 }
 
 /**
@@ -2588,6 +2628,13 @@ export interface RelayListResponse {
    * delivery hold. Absent on an older server.
    */
   held?: RelayView[];
+  /**
+   * Issue #4193: closed relays in scope (by the requester) whose payload — the
+   * expiry notice, in practice — is still undelivered and whose last delivery
+   * attempt stopped (`lastDeliveryBlock` set). Not in `open` / `awaiting` and
+   * not in `counts` / `heldCount`. Absent on an older server.
+   */
+  closedBlocked?: RelayView[];
   counts: RelayCountsResponse;
   /**
    * Issue #4082: how many payloads in scope are held as `uncertain` now —

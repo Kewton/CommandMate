@@ -32,7 +32,8 @@ describe('src/cli/index.ts', () => {
 
     // Issue #2377 added `relays`, the other half of the same feature: what a
     // delegation left standing. Same wiring, same reason it needs a test.
-    expect(attached).toEqual(['ask', 'whoami', 'peers', 'relays']);
+    // Issue #4116 attaches `roles` here too, to leave `buildProgram()` as it is.
+    expect(attached).toEqual(['ask', 'whoami', 'peers', 'relays', 'roles']);
     expect(parse).toHaveBeenCalledTimes(1);
   });
 });

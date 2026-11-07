@@ -93,6 +93,32 @@ export async function probeOpencodeV2Server(
   }
 }
 
+/**
+ * The config sources, for the role's evidence (Issue #4115, §14): on 2.0.18 an array
+ * in order of strength, not one merged object. Holds the role's text and possibly
+ * secrets, so the caller compares it and keeps none of it. Null when the server did
+ * not answer.
+ */
+export async function fetchOpencodeV2Config(port: number, password: string, directory: string): Promise<unknown> {
+  try {
+    const response = await fetch(
+      `${opencodeV2BaseUrl(port)}/api/config?directory=${encodeURIComponent(directory)}`,
+      {
+        headers: { Authorization: opencodeV2AuthorizationHeader(password) },
+        redirect: 'error',
+        signal: AbortSignal.timeout(OPENCODE_V2_PROBE_TIMEOUT_MS),
+      }
+    );
+    if (response.status !== 200) {
+      await response.body?.cancel().catch(() => {});
+      return null;
+    }
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
 /** Something the SSE parser produced. */
 export type OpencodeV2SseItem = { kind: 'frame'; data: string } | { kind: 'heartbeat' };
 

@@ -1,0 +1,140 @@
+// lib.mjs — 私設 tmux で実 CLI の TUI を起動し、確定モデルの記録を読む共通部。
+import { execFileSync, spawn } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+export const SOCK = 'cmrole4113';
+export const ROOT = process.env.PROBE_ROOT;
+export const PORT = Number(process.env.PROBE_MOCK_PORT ?? 18113);
+export const LOG = path.join(ROOT, 'mock.jsonl');
+export const PATHV = '<HOME>/.local/bin:<HOME>/.opencode/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin';
+export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+export const tmux = (...a) => execFileSync('tmux', ['-L', SOCK, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { PATH: PATHV, HOME: ROOT, TERM: 'xterm-256color', LANG: 'en_US.UTF-8' } });
+export const sha = (s) => crypto.createHash('sha256').update(s).digest('hex').slice(0, 12);
+export const MOCK_URL = `http://127.0.0.1:${PORT}`;
+export function ensureMock() {
+  try { execFileSync('curl', ['-s', '-m', '1', `${MOCK_URL}/v1/models`]); return; } catch {}
+  const p = spawn('node', [new URL('./mock-model.mjs', import.meta.url).pathname, String(PORT), LOG], { detached: true, stdio: 'ignore' }); p.unref();
+  fs.writeFileSync(path.join(ROOT, 'mock.pid'), String(p.pid));
+}
+export function reads(sinceTs = 0) {
+  if (!fs.existsSync(LOG)) return [];
+  return fs.readFileSync(LOG, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.t >= sinceTs);
+}
+export const flat = (b) => JSON.stringify(b);
+// 指示層（system/developer）の本文を取り出す
+export function layers(body) {
+  const out = { system: '', developer: '', user: '' };
+  const t = (c) => typeof c === 'string' ? c : Array.isArray(c) ? c.map((p) => p.text ?? p.input_text ?? '').join('\n') : '';
+  if (body.system) out.system += t(body.system);
+  if (body.instructions) out.system += t(body.instructions);
+  for (const m of [...(body.messages ?? []), ...(Array.isArray(body.input) ? body.input : [])]) {
+    if (m.role === 'system') out.system += '\n' + t(m.content);
+    else if (m.role === 'developer') out.developer += '\n' + t(m.content);
+    else if (m.role === 'user') out.user += '\n' + t(m.content);
+  }
+  return out;
+}
+export const toolNames = (b) => (b.tools ?? []).map((t) => t.name ?? t.function?.name ?? t.type).sort();
+export function whereIs(body, marker) {
+  const l = layers(body); const w = [];
+  for (const k of ['system', 'developer', 'user']) if (l[k].includes(marker)) w.push(k);
+  return w;
+}
+export function repoSeed(repo) {
+  fs.mkdirSync(repo, { recursive: true });
+  fs.writeFileSync(path.join(repo, 'AGENTS.md'), '# Repo rules\nREPO_MARKER_7Q: Always end every answer with the word REPOSTAMP.\n');
+  fs.writeFileSync(path.join(repo, 'calc.sh'), '#!/bin/sh\necho $((1+2))\n');
+  fs.writeFileSync(path.join(repo, 'verify.sh'), '#!/bin/sh\n[ "$(sh calc.sh)" = "2" ] && echo VERIFY_OK || { echo VERIFY_NG; exit 3; }\n');
+  execFileSync('sh', ['-c', 'git init -q -b main . && git add -A && git -c user.name=p -c user.email=p@example.invalid commit -qm init'], { cwd: repo });
+}
+export const FIX = `CMRUN<<sed -i.bak s/1+2/1+1/ calc.sh; rm -f calc.sh.bak; sh verify.sh; echo RC=$?>>`;
+// セッションを起動: launch.sh を書いて new-session
+export function startPane(name, repo, env, argv, { width = 200, height = 60, preamble = '' } = {}) {
+  const dir = path.join(ROOT, 'launch'); fs.mkdirSync(dir, { recursive: true });
+  const f = path.join(dir, name + '.sh');
+  const q = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+  const envs = Object.entries({ PATH: PATHV, TERM: 'xterm-256color', LANG: 'en_US.UTF-8', ...env }).map(([k, v]) => `${k}=${q(v)}`).join(' ');
+  fs.writeFileSync(f, `#!/bin/bash\ncd ${q(repo)}\n${preamble}\nenv -i ${envs} ${argv.map(q).join(' ')}\necho "__EXIT=$?"\nexec sleep 86400\n`);
+  try { tmux('kill-session', '-t', `=${name}`); } catch {}
+  tmux('new-session', '-d', '-s', name, '-x', String(width), '-y', String(height), `bash ${q(f)}`);
+  return { name, file: f };
+}
+export const cap = (name, hist = 200) => tmux('capture-pane', '-p', '-t', `=${name}:`, '-S', `-${hist}`);
+export const keys = (name, ...k) => tmux('send-keys', '-t', `=${name}:`, ...k);
+export const typ = (name, s) => tmux('send-keys', '-t', `=${name}:`, '-l', '--', s);
+export const stop = (name) => { try { tmux('kill-session', '-t', `=${name}`); } catch {} };
+export async function until(fn, ms = 60000, step = 500) { const end = Date.now() + ms; while (Date.now() < end) { const v = await fn(); if (v) return v; await sleep(step); } return null; }
+// ツール定義。mkHome: HOME 配下を作る / env / argv(role) / approve: 承認キー
+export function toolDef(tool, h, repo, opt = {}) {
+  const home = h; const xdg = { XDG_CONFIG_HOME: `${h}/.config`, XDG_DATA_HOME: `${h}/.local/share`, XDG_STATE_HOME: `${h}/.local/state`, XDG_CACHE_HOME: `${h}/.cache` };
+  const w = (p, s) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, s, { mode: 0o600 }); };
+  const KEY = 'mock-key-0000000000000000000000000000';
+  switch (tool) {
+    case 'claude': {
+      w(`${h}/.claude.json`, JSON.stringify({ hasCompletedOnboarding: true, lastOnboardingVersion: '2.1.316', customApiKeyResponses: { approved: [KEY.slice(-20)], rejected: [] }, projects: { [fs.realpathSync(repo)]: { hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true, allowedTools: [] } } }));
+      w(`${h}/.claude/settings.json`, JSON.stringify({ theme: 'dark', permissions: { defaultMode: 'default' } }));
+      return { env: { HOME: h, ...xdg, ANTHROPIC_BASE_URL: MOCK_URL, ANTHROPIC_API_KEY: KEY, DISABLE_AUTOUPDATER: 1, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: 1, DISABLE_TELEMETRY: 1 }, cmd: ['claude', '--permission-mode', 'default'], approve: 'Enter' };
+    }
+    case 'codex': {
+      const ch = `${h}/.codex`;
+      w(`${ch}/config.toml`, `model = "mock-model"\nmodel_provider = "mock"\ncheck_for_update_on_startup = false\n${opt.baseToml ?? ''}\n[model_providers.mock]\nname = "mock"\nbase_url = "${MOCK_URL}/v1"\nwire_api = "responses"\nrequires_openai_auth = false\n[projects."${fs.realpathSync(repo)}"]\ntrust_level = "trusted"\n[notice]\nhide_full_access_warning = true\n`);
+      return { env: { HOME: h, ...xdg, CODEX_HOME: ch }, cmd: ['codex', '-c', 'features.daemon_auto_start=false'], approve: 'y' };
+    }
+    case 'command-code': {
+      w(`${h}/.commandcode/providers.json`, JSON.stringify({ provider: { mock: { api: 'openai-completions', baseURL: `${MOCK_URL}/v1`, apiKey: false, models: { 'mock-model': { contextWindow: 200000 } } } } }));
+      return { env: { HOME: h, ...xdg, CMD_LOCAL_ONLY: 1, CMD_DISABLE_REMOTE_MODEL_CATALOG: 1, COMMAND_CODE_API_KEY: 'mock-not-a-real-key' }, cmd: ['cmd', '--trust', '--skip-onboarding', '--no-auto-update', '--local-only', '-m', 'mock-model'], approve: 'Enter' };
+    }
+    case 'opencode': {
+      w(`${h}/.config/opencode/opencode.json`, JSON.stringify({ $schema: 'https://opencode.ai/config.json', autoupdate: false, share: 'disabled', model: 'mock/mock-model', small_model: 'mock/mock-model', provider: { mock: { npm: '@ai-sdk/openai-compatible', name: 'mock', options: { baseURL: `${MOCK_URL}/v1`, apiKey: 'x' }, models: { 'mock-model': { name: 'mock-model', tool_call: true } } } }, ...(opt.baseCfg ?? {}) }));
+      return { env: { HOME: h, ...xdg, OPENCODE_DISABLE_AUTOUPDATE: 1 }, cmd: ['opencode', '--port', String(opt.port ?? 18201), '--hostname', '127.0.0.1'], approve: 'Enter' };
+    }
+    case 'copilot': {
+      const ch = `${h}/.copilot`;
+      w(`${ch}/config.json`, JSON.stringify({ trusted_folders: [fs.realpathSync(repo)], banner: 'never', beta: false }));
+      return { env: { HOME: h, ...xdg, COPILOT_HOME: ch, COPILOT_OFFLINE: 'true', COPILOT_PROVIDER_BASE_URL: `${MOCK_URL}/v1`, COPILOT_PROVIDER_API_KEY: 'x', COPILOT_MODEL: 'mock-model', COPILOT_AUTO_UPDATE: 'false', COPILOT_PROVIDER_MAX_PROMPT_TOKENS: 200000, COPILOT_PROVIDER_MAX_OUTPUT_TOKENS: 8000 }, cmd: ['copilot'], approve: 'Enter' };
+    }
+    case 'opencode-v2': {
+      w(`${h}/.config/opencode/opencode.jsonc`, JSON.stringify({ $schema: 'https://opencode.ai/config.json', model: 'mock/mock-model', providers: { mock: { name: 'mock', package: '@opencode/ai/providers/openai-compatible', settings: { baseURL: `${MOCK_URL}/v1`, apiKey: 'x' }, models: { 'mock-model': { name: 'mock-model' } } } }, ...(opt.baseCfg ?? {}) }));
+      w(`${h}/pw`, 'probe-password');
+      return { env: { HOME: h, ...xdg }, cmd: ['bash', opt.launchSh, '--port', String(opt.port ?? 18211), '--password-file', `${h}/pw`, '--directory', fs.realpathSync(repo), '--executable', '/opt/homebrew/bin/opencode2'], approve: 'Enter' };
+    }
+    default: throw new Error('unknown tool ' + tool);
+  }
+}
+
+export const ROLE_TEXT = 'ROLE_MARKER_K3: You are a test role. End every answer with ROLESTAMP.';
+export function applyRole(tool, d, h, repo, variant, body = ROLE_TEXT, label = 'x') {
+  const w = (p, s) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, s, { mode: 0o600 }); };
+  const rf = `${h}/.cmrole/role-${label}.md`;
+  const out = { env: { ...d.env }, cmd: [...d.cmd], artifacts: [] };
+  const art = (p, s) => { w(p, s); out.artifacts.push({ path: p.replace(h, '$HOME'), content: s.length > 2000 ? s.slice(0, 2000) + '…' : s }); };
+  if (variant === 'none') return out;
+  const toml = (s) => JSON.stringify(s);
+  switch (tool) {
+    case 'claude': art(rf, body); out.cmd.push('--append-system-prompt-file', rf); break;
+    case 'codex': art(`${h}/.codex/cm-role-${label}.config.toml`, `developer_instructions = ${toml(body)}\n`); out.cmd.push('-p', `cm-role-${label}`); break;
+    case 'command-code': { const f = `${h}/.cmrole/cm-role-${label}.ts`; art(f, `export default function (cmd) {\n  cmd.hooks({ appendSystemPrompt: () => ${JSON.stringify(body)} });\n}\n`); out.cmd.push('--mod', f); break; }
+    case 'opencode': art(rf, body); out.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({ instructions: [rf] }); break;
+    case 'opencode-v2':
+      if (variant === 'instructions-content') { art(rf, body); out.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({ instructions: [rf] }); }
+      else if (variant === 'instructions-dir') { art(rf, body); const dir = `${h}/.cmrole/cfg-${label}`; art(`${dir}/opencode.jsonc`, JSON.stringify({ instructions: [rf] })); out.env.OPENCODE_CONFIG_DIR = dir; }
+      else if (variant === 'agent-md' ) { const dir = `${h}/.cmrole/cfg-${label}`; art(`${dir}/agents/cm-role-${label}.md`, `---\ndescription: CommandMate role\nmode: primary\nhidden: true\n---\n${body}\n`); art(`${dir}/opencode.jsonc`, JSON.stringify({ default_agent: `cm-role-${label}` })); out.env.OPENCODE_CONFIG_DIR = dir; }
+      else if (variant === 'overlay') { art(rf, body); out.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({ agents: { build: { system: `{file:${rf}}` } } }); }
+      else if (variant === 'agent-inline') { out.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({ default_agent: `cm-role-${label}`, agents: { [`cm-role-${label}`]: { description: 'role', mode: 'primary', system: body } } }); }
+      else throw new Error(variant);
+      break;
+    case 'copilot': art(`${h}/.copilot/agents/cm-role-${label}.agent.md`, `---\nname: cm-role-${label}\ndescription: CommandMate role\ninfer: false\n---\n${body}\n`); out.cmd.push('--agent', `cm-role-${label}`); break;
+  }
+  return out;
+}
+export const READY = { claude: /❯/, codex: /Ask Codex|› /, 'command-code': /Ask your question|❯/, opencode: /Ask anything/, 'opencode-v2': /Ask anything/, copilot: /❯/ };
+const norm = (s, base) => s.split(base).join('<D>').replace(/\d{4}-\d{2}-\d{2}/g, '<DATE>').replace(/[0-9a-f]{8}-[0-9a-f-]{27}/g, '<UUID>');
+export function metrics(body, base) {
+  const l = layers(body);
+  const sys = norm(l.system + '\n' + l.developer, base);
+  return { url: null, model: body.model, tools: toolNames(body), toolsHash: sha(toolNames(body).join(',')), systemLen: l.system.length, developerLen: l.developer.length, systemHash: sha(sys), roleIn: whereIs(body, 'ROLE_MARKER_K3'), repoIn: whereIs(body, 'REPO_MARKER_7Q'), sysLines: [...new Set(sys.split('\n').map((x) => x.trim()).filter((x) => x.length > 20))] };
+}
+export function retention(baseLines, lines) { const set = new Set(lines); const hit = baseLines.filter((x) => set.has(x)).length; return baseLines.length ? +(hit / baseLines.length).toFixed(3) : null; }
+export async function sendText(name, s) { typ(name, s); await sleep(800); keys(name, 'Enter'); }
+export const lastMain = (id, since) => reads(since).filter((r) => r.method === 'POST' && flat(r.body).includes(id) && (r.body.tools ?? []).length > 0).pop();

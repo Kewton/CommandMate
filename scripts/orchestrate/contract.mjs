@@ -12,11 +12,13 @@
  *
  *   issue: 3477              # required
  *   key: "3477-opus"         # contract file name issue-<key>.yaml (default: the Issue number)
+ *   item: d2                 # the 2nd+ PR (work item) of the Issue only (docs/orchestrate/run-log.md 1-5); with it the goal
+ *                            # tells the worker to fold into develop's changelog.d/<issue>.md (a key suffix alone does not)
  *   title: "<Issue title>"   # required
  *   kind: feature            # feature | bug | refactor | docs
  *   agent: claude            # claude | antigravity
  *   model: opus              # opus | sonnet ("-" / omitted for antigravity)
- *   gates: [lint, typecheck, unit-related]
+ *   gates: [lint, typecheck, unit-related]   # omitted: the kind's default, with build-server when the scope reaches the server build and --worktree's verify.yaml declares it
  *   scope: ["scripts/orchestrate/**"]   # changelog.d/<issue>.md is added for you
  *   decisions: ["…"]         # answers to the Issue's open questions
  *   changelog: { section: Added, bump: minor }   # section overrides the kind default
@@ -45,6 +47,8 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 import { SECTION_ORDER } from '../changelog-fragments.mjs';
+import { ITEM_PATTERN } from './execution-key.mjs';
+import { classifyChanges } from '../run-related-unit-tests.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const TEMPLATE_DIR = path.join(HERE, 'templates');
@@ -67,6 +71,12 @@ export const SHARED_FILES = ['CHANGELOG.md', 'docs/module-reference.md'];
 export const DEFAULT_GATES = ['lint', 'typecheck', 'unit-related'];
 /** 2-4-3: a refactor is judged by lint / typecheck locally; the full suite runs in the PR's CI. */
 export const REFACTOR_DEFAULT_GATES = ['lint', 'typecheck'];
+/**
+ * `typecheck` reads tsconfig.json only, whose `lib` is wider than the server build's
+ * (#4135: `isWellFormed` passed it and failed CI's Build). Measured 3.3-3.7s against
+ * typecheck's 24s at load 30-41, so it goes into the default instead of a new gate.
+ */
+export const SERVER_BUILD_GATE = 'build-server';
 export const UNIT_RELATED_GATE = {
   id: 'unit-related',
   command: 'node scripts/run-related-unit-tests.mjs --base origin/develop',
@@ -103,6 +113,246 @@ const ROUTE_TOKEN = /^[a-z0-9][a-z0-9-]{0,31}$/;
 /** A test a cell is tied to: a test file under tests/, optionally `<file> > <test name>`. */
 const ROUTE_TEST = /^tests\/[^\s]+\.(?:test|spec)\.[cm]?[jt]sx?(?: > .+)?$/;
 
+/**
+ * Files a scope pattern drags in (#4015). A test pins a list that the change
+ * itself moves, so a worker who stayed inside the scope still fails the gate.
+ * `when` sees the scope the config wrote; the fragment is added separately.
+ */
+const SCOPE_COMPANIONS = [
+  {
+    // tests/unit/lib/slash-command-description-override.test.ts pins the leaves a split description produces (#3998).
+    pattern: 'tests/unit/lib/slash-command-description-override.test.ts',
+    when: (scope) => scope.includes('src/config/slash-commands-catalog.json'),
+  },
+  {
+    // tests/unit/skills/sync-map.test.ts pins the sha256 of every file of a mapped package (#4106).
+    pattern: '.claude/skills/sync-map.json',
+    when: (scope) => scope.some((pattern) => pattern === '.claude/skills' || pattern.startsWith('.claude/skills/')),
+  },
+  {
+    // The CLI's copy of an API response lives in src/cli/types/ (#4132: api-responses.ts fell outside the scope, #4148).
+    pattern: 'src/cli/types/**',
+    when: (scope) => changesCliResponses(scope),
+  },
+];
+
+const API_ROOT = ['src', 'app', 'api'];
+const CLI_ROOT = ['src', 'cli'];
+const CLI_TYPES_ROOT = [...CLI_ROOT, 'types'];
+const GLOBSTAR = /^\*{2,}$/;
+
+/**
+ * A pattern's brace alternatives as path segments, read as the scope gate reads them
+ * (src/lib/verification/scope-gate-glob.ts): a trailing slash says nothing. Null past the brace limit.
+ */
+function scopeAlternatives(pattern) {
+  const alternatives = hasBalancedBraces(pattern) ? expandBraces(pattern) : [pattern];
+  return alternatives && alternatives.map((alternative) => alternative.replace(/\/+$/, '').split('/'));
+}
+
+/**
+ * Where a pattern can stand once `directory` is consumed. `**` crosses zero or more segments,
+ * `*` and `?` stay in one, and an index past the end means the pattern matched a directory
+ * above or at `directory`, which also admits everything beneath it.
+ */
+function positionsAfter(segments, directory) {
+  const withSkips = (positions) => {
+    const reached = new Set(positions);
+    for (const at of reached) if (GLOBSTAR.test(segments[at] ?? '')) reached.add(at + 1);
+    return reached;
+  };
+  let reached = withSkips([0]);
+  for (const name of directory) {
+    const next = [];
+    for (const at of reached) {
+      if (at === segments.length || GLOBSTAR.test(segments[at])) next.push(at);
+      else if (segmentMatches(segments[at], name)) next.push(at + 1);
+    }
+    reached = withSkips(next);
+  }
+  return [...reached];
+}
+
+/**
+ * Whether every path under src/cli/types/ is admitted, the files directly in it included: only `**`
+ * follows, or one last `*` (which also admits what is beneath a directory it matches).
+ * `src/cli/types/*\/**` does not hold it: a `**` after a `*` needs a segment of its own.
+ */
+function holdsCliTypes(segments) {
+  return positionsAfter(segments, CLI_TYPES_ROOT).some((at) => {
+    const rest = segments.slice(at);
+    return rest.every((segment) => GLOBSTAR.test(segment)) || (rest.length === 1 && rest[0] === '*');
+  });
+}
+
+/**
+ * Whether the last segment can name code (every file under src/app/api and src/cli is `.ts`). As in
+ * {@link fullUnitPattern}, one without a dot stands for a directory; `*.md` and `*.tsx` are other files.
+ */
+function canNameTsCode(segments) {
+  const last = segments.at(-1);
+  if (!last.includes('.')) return true;
+  for (let back = 1; back <= '.ts'.length; back++) {
+    const char = last.at(-back);
+    if (char === undefined) return false;
+    if (char === '*') return true;
+    if (char !== '?' && char !== '.ts'.at(-back)) return false;
+  }
+  return true;
+}
+
+/** Whether some code under src/app/api, or under src/cli outside src/cli/types, is admitted. */
+function reachesCliResponses(segments) {
+  if (!canNameTsCode(segments)) return false;
+  if (positionsAfter(segments, API_ROOT).length > 0) return true;
+  return positionsAfter(segments, CLI_ROOT).some((at) => segments[at] !== 'types');
+}
+
+/**
+ * Whether a scope changes what the CLI reads from the API and does not already hold src/cli/types/.
+ * An intersection in the scope gate's meaning, so `src/app/**\/route.ts` counts and `src/app/**\/page.tsx`
+ * does not. A pattern too wide to write out decides nothing here: {@link cliTypesNote} says so.
+ */
+function changesCliResponses(scope) {
+  const alternatives = scope.flatMap((pattern) => scopeAlternatives(pattern) ?? []);
+  return !alternatives.some(holdsCliTypes) && alternatives.some(reachesCliResponses);
+}
+
+/** What `generate` says about a pattern {@link changesCliResponses} could not judge, or null. */
+export function cliTypesNote(config) {
+  const alternatives = config.scope.flatMap((pattern) => scopeAlternatives(pattern) ?? []);
+  if (alternatives.some(holdsCliTypes)) return null;
+  const pattern = config.scope.find((candidate) => scopeAlternatives(candidate) === null);
+  if (pattern === undefined) return null;
+  return `contract: note: #${config.issue}: scope "${pattern}" has more than ${MAX_BRACE_EXPANSIONS} brace expansions, so whether it reaches an API route or CLI code was not judged and src/cli/types/** was not added — write it in the scope if it does (docs/orchestrate/contract.md)`;
+}
+
+/** Whether the scope reaches `tests/fixtures/` (the scanning tests have to be told about a new fixture, #4000). */
+/** Root files `npm run build:server` compiles or is configured by; everything else it reads is under src/. */
+const SERVER_BUILD_ROOT_FILES = ['server.ts', 'tsconfig.server.json', 'tsconfig.base.json'];
+const MAX_BRACE_EXPANSIONS = 1024;
+
+/**
+ * `{a,b}` written out, nested too, or null past the limit. Unbalanced braces are literal,
+ * as in the scope gate (src/lib/verification/scope-gate-glob.ts).
+ */
+function expandBraces(pattern) {
+  const done = [];
+  const queue = [pattern];
+  while (queue.length > 0) {
+    const current = queue.pop();
+    const open = current.indexOf('{');
+    let depth = 0;
+    let close = -1;
+    const commas = [];
+    for (let i = open; open !== -1 && i < current.length; i++) {
+      if (current[i] === '{') depth += 1;
+      else if (current[i] === '}' && --depth === 0) {
+        close = i;
+        break;
+      } else if (current[i] === ',' && depth === 1) commas.push(i);
+    }
+    if (close === -1) {
+      done.push(current);
+    } else {
+      const cuts = [open, ...commas, close];
+      for (let i = 0; i < cuts.length - 1; i++) {
+        queue.push(`${current.slice(0, open)}${current.slice(cuts[i] + 1, cuts[i + 1])}${current.slice(close + 1)}`);
+      }
+    }
+    if (done.length + queue.length > MAX_BRACE_EXPANSIONS) return null;
+  }
+  return done;
+}
+
+function hasBalancedBraces(pattern) {
+  let depth = 0;
+  for (const char of pattern) {
+    if (char === '{') depth += 1;
+    else if (char === '}' && --depth < 0) return false;
+  }
+  return depth === 0;
+}
+
+/** One path segment of a scope glob, with `*` and `?` as the scope gate reads them. */
+function segmentMatches(segment, name) {
+  const source = segment.replace(/\*+|\?|[.+^${}()|[\]\\]/g, (token) => {
+    if (token[0] === '*') return '[^/]*';
+    return token === '?' ? '[^/]' : `\\${token}`;
+  });
+  return new RegExp(`^${source}$`).test(name);
+}
+
+/**
+ * Whether a scope reaches what `npm run build:server` compiles or is configured by (#4135),
+ * in the meaning the scope gate gives a pattern: `src`, `src/` and `src/**` are the same,
+ * and `**\/*.ts` or `{src,docs}/**` reach under src/ as well. Judged on the first segment,
+ * which is all that tells whether a path under src/ or a root file can match; a pattern too
+ * wide to write out counts as reaching it.
+ */
+export function touchesServerBuild(scope) {
+  return scope.some((pattern) => {
+    const alternatives = hasBalancedBraces(pattern) ? expandBraces(pattern) : [pattern];
+    if (alternatives === null) return true;
+    return alternatives.some((alternative) => {
+      const [first, ...rest] = alternative.replace(/\/+$/, '').split('/');
+      if (first === '**' || segmentMatches(first, 'src')) return true;
+      return rest.length === 0 && SERVER_BUILD_ROOT_FILES.some((file) => segmentMatches(first, file));
+    });
+  });
+}
+
+/**
+ * The first scope pattern that can turn `unit-related` into the whole unit suite (#4148), judged
+ * by scripts/run-related-unit-tests.mjs `classifyChanges` itself: docs, .claude and scripts/ all
+ * do (`mode=full`), and then the gate queues on `cpu.heavy` behind every other worker's full run.
+ * The scope is what the worker may touch, not what it will, so this says "can": a plan note, not a stop.
+ * A glob with no extension stands for code, so `src/**` is related and `src/**\/*.json` is not.
+ */
+export function fullUnitPattern(scope) {
+  for (const pattern of scope) {
+    const alternatives = hasBalancedBraces(pattern) ? expandBraces(pattern) : [pattern];
+    if (alternatives === null) return pattern;
+    for (const alternative of alternatives) {
+      const trimmed = alternative.replace(/\/+$/, '');
+      const sample = trimmed.replace(/\*+|\?/g, 'x');
+      const file = trimmed.split('/').pop().includes('.') ? sample : `${sample}/x.ts`;
+      if (classifyChanges([file]).mode === 'full') return pattern;
+    }
+  }
+  return null;
+}
+
+/** What `generate` says about {@link fullUnitPattern} for a contract that runs `unit-related`, or null. */
+export function fullUnitNote(config) {
+  if (!config.gates.includes('unit-related')) return null;
+  const pattern = fullUnitPattern(config.scope);
+  if (pattern === null) return null;
+  return `contract: note: #${config.issue}: unit-related runs the whole unit suite when a file under "${pattern}" changes — write the order of such items in the plan (docs/orchestrate/plan-check.md)`;
+}
+
+/**
+ * Whether the worktree the contract is for declares a gate. `POST /tasks` answers an unknown
+ * gate with 400, so a default is not grown by a gate the worktree cannot resolve; no
+ * verify.yaml, or one that cannot be read, declares nothing.
+ */
+function declaresGate(worktree, id) {
+  try {
+    const gates = YAML.parse(fs.readFileSync(path.join(worktree, '.commandmate', 'verify.yaml'), 'utf8'))?.gates;
+    return Array.isArray(gates) && gates.some((gate) => gate?.id === id);
+  } catch {
+    return false;
+  }
+}
+
+export function touchesFixtures(scope) {
+  return scope.some((pattern) => pattern === 'tests/fixtures' || pattern.startsWith('tests/fixtures/'));
+}
+
+const FIXTURE_RULE =
+  '- `tests/fixtures/` の下に足すので、fixture を走査するテスト（件数・許可リスト・判定表を持つもの。`grep -rl "tests/fixtures" tests/unit` で探す）の表・許可リストへの登録も受入基準に入れる。' +
+  '走査するテストは scope に入れておく。scope の外にあるなら変えず、「本文に無い指摘」として報告する。';
+
 const KINDS = {
   feature: { label: '機能追加', section: 'Added', type: 'feat' },
   bug: { label: '不具合修正', section: 'Fixed', type: 'fix' },
@@ -126,6 +376,8 @@ export class ContractConfigError extends Error {
 }
 
 const SECTION_MARK = /^#! (>>>|<<<) ([a-z-]+)$/;
+/** fragment-rules.md section only a second work item's goal carries (#4212). */
+export const SECOND_WORK_ITEM_SECTION = 'second-work-item';
 
 /**
  * A template with its `#!` note lines removed. Lines between `#! >>> <name>` and
@@ -195,6 +447,17 @@ export function normalizeConfig(raw, options = {}) {
   const key = raw.key === undefined ? String(issue) : String(raw.key);
   if (!/^[0-9A-Za-z][0-9A-Za-z._-]*$/.test(key)) problems.push(`key: must be a file-name-safe token (got ${raw.key})`);
 
+  // Issue #4212: a second work item of the same Issue (a config with `item`)
+  // shares changelog.d/<issue>.md with the first PR, so its goal says to fold
+  // into the fragment develop already has (run-log.md 1-5). A key suffix alone
+  // does not count: it also restacks a contract of the SAME PR (the -opus
+  // upgrade of switching.md, design → implementation, -b), which has no first PR.
+  const item = raw.item === undefined ? null : String(raw.item);
+  if (item !== null && !ITEM_PATTERN.test(item)) {
+    problems.push(`item: the --item name of the run (letters, digits, "-", "_"; at most 32 characters; got ${raw.item})`);
+  }
+  const secondWorkItem = item !== null;
+
   const title = typeof raw.title === 'string' ? raw.title.trim() : '';
   if (!title) problems.push('title: required');
   const fullTitle = `Issue #${issue}: ${title}`;
@@ -231,6 +494,14 @@ export function normalizeConfig(raw, options = {}) {
   if (scope.length === 0) problems.push('scope: at least one path is required');
   for (const shared of SHARED_FILES) {
     if (scope.includes(shared)) problems.push(`scope: ${shared} is shared — the worker writes a fragment instead (2-4-1)`);
+  }
+  const asWritten = [...scope];
+  // Only a default grows: a list written out runs as written, and a refactor keeps its two gates (2-4-3).
+  if (raw.gates === undefined && kindName !== 'refactor' && touchesServerBuild(asWritten) && declaresGate(options.worktree ?? process.cwd(), SERVER_BUILD_GATE)) {
+    gates.splice(gates.indexOf('typecheck') + 1, 0, SERVER_BUILD_GATE);
+  }
+  for (const companion of SCOPE_COMPANIONS) {
+    if (companion.when(asWritten) && !scope.includes(companion.pattern)) scope.push(companion.pattern);
   }
   if (!scope.includes(fragment)) scope.push(fragment);
   if (scope.length > MAX_SCOPE_PATTERNS) problems.push(`scope: at most ${MAX_SCOPE_PATTERNS} patterns (got ${scope.length})`);
@@ -305,6 +576,8 @@ export function normalizeConfig(raw, options = {}) {
   return {
     issue,
     key,
+    item,
+    secondWorkItem,
     title,
     kind: kindName,
     kindLabel: kind.label,
@@ -502,7 +775,12 @@ function fill(template, values) {
     .join('\n');
 }
 
-/** Render the goal text from the templates. Throws when it exceeds MAX_GOAL_LENGTH. */
+/**
+ * Render the goal text from the templates. Throws when it exceeds MAX_GOAL_LENGTH.
+ * No newline is added after the check: the parser counts the decoded YAML string (#4135).
+ *
+ * @returns {string}
+ */
 export function renderGoal(config) {
   const decisions =
     config.decisions.length === 0
@@ -510,7 +788,8 @@ export function renderGoal(config) {
       : `\n## この契約での決定（Issue の「決めること」への答え。これに従う）\n${config.decisions.map((d) => `- ${d}`).join('\n')}`;
   const issueBody = config.issueBody ? `\n## Issue 本文\n${config.issueBody}` : '';
   // changelog-fragments.mjs: the entry follows the optional `<!-- bump: … -->` line (#3480).
-  const fragmentRules = fill(readTemplate(FRAGMENT_RULES_TEMPLATE).replaceAll('<N>', String(config.issue)), {
+  const fragmentInclude = config.secondWorkItem ? [SECOND_WORK_ITEM_SECTION] : [];
+  const fragmentRules = fill(readTemplate(FRAGMENT_RULES_TEMPLATE, { include: fragmentInclude }).replaceAll('<N>', String(config.issue)), {
     ENTRY_LINE: config.bump ? `3 行目。2 行目は最低の版の宣言 \`<!-- bump: ${config.bump} -->\`` : '2 行目',
     AFTER_ENTRY_LINE: config.bump ? '4 行目' : '3 行目',
   }).trimEnd();
@@ -536,6 +815,7 @@ export function renderGoal(config) {
     TIER_RULE: config.model === 'sonnet' ? `- ${SONNET_RULE}` : '',
     PROCESS_RULE: processRule(config),
     REFACTOR_RULES: refactorRules,
+    FIXTURE_RULE: touchesFixtures(config.scope) ? FIXTURE_RULE : '',
     FRAGMENT_RULES: fragmentRules,
     CHANGELOG_SECTION: sectionLines.join('\n'),
     COMMIT_PREFIX: prefix,
@@ -547,7 +827,7 @@ export function renderGoal(config) {
       `goal: ${goal.length} characters exceeds ${MAX_GOAL_LENGTH} — shorten issueBody or decisions`,
     ]);
   }
-  return `${goal}\n`;
+  return goal;
 }
 
 /** The contract as a plain object, in the key order of docs/design/task-contract.md. */
@@ -575,9 +855,9 @@ export function contractYaml(config) {
 }
 
 /** Read a config file (YAML or JSON — JSON is valid YAML) and normalize it. */
-export function loadConfig(file) {
+export function loadConfig(file, { worktree } = {}) {
   const raw = YAML.parse(fs.readFileSync(file, 'utf8'));
-  return normalizeConfig(raw, { baseDir: path.dirname(path.resolve(file)) });
+  return normalizeConfig(raw, { baseDir: path.dirname(path.resolve(file)), worktree });
 }
 
 export function contractPath(worktree, config) {
@@ -592,7 +872,7 @@ export function contractPath(worktree, config) {
  * @returns {{ path: string, status: 'written' | 'unchanged' }}
  */
 export function writeContract({ configFile, worktree = process.cwd(), out, force = false }) {
-  const config = loadConfig(configFile);
+  const config = loadConfig(configFile, { worktree });
   const text = contractYaml(config);
   const target = out ? path.resolve(out) : contractPath(worktree, config);
   if (fs.existsSync(target)) {
@@ -631,8 +911,12 @@ function main(argv) {
     return 2;
   }
   try {
+    const config = loadConfig(options.configFile, { worktree: options.worktree });
+    for (const note of [fullUnitNote(config), cliTypesNote(config)]) {
+      if (note) console.error(note);
+    }
     if (options.stdout) {
-      process.stdout.write(contractYaml(loadConfig(options.configFile)));
+      process.stdout.write(contractYaml(loadConfig(options.configFile, { worktree: options.worktree })));
       return 0;
     }
     const result = writeContract(options);

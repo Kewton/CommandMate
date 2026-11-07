@@ -243,11 +243,19 @@ describe('Issue #1883: the gutter anchor is what makes the verdict positive', ()
     // `\s` crosses newlines under the `m` flag; the pattern uses `[^\S\n]`.
     const twoRows = '  ┃\n     Ask anything...';
     expect(OPENCODE_IDLE_COMPOSER_PATTERN.test(twoRows)).toBe(false);
-    expect(OPENCODE_IDLE_COMPOSER_PATTERN.test('  ┃  Ask anything...')).toBe(true);
+    // Issue #4209: one row alone cannot tell the input box from the transcript's
+    // echo (the same gutter), so the row has to sit in the box over the composer's
+    // bottom border. The same row inside the box matches; alone it does not.
+    const inBox = (row: string) => `${row}\n  ┃\n  ┃  Build · GPT-5.6 Luna\n  ╹▀▀▀▀▀▀▀▀`;
+    expect(OPENCODE_IDLE_COMPOSER_PATTERN.test(inBox('  ┃  Ask anything...'))).toBe(true);
+    expect(OPENCODE_IDLE_COMPOSER_PATTERN.test('  ┃  Ask anything...')).toBe(false);
     // The transcript echo of a sent message is guttered too, so the phrase has
     // to be the first thing after the gutter.
     expect(
       OPENCODE_IDLE_COMPOSER_PATTERN.test('  ┃  Print this: Ask anything...'),
+    ).toBe(false);
+    expect(
+      OPENCODE_IDLE_COMPOSER_PATTERN.test(inBox('  ┃  Print this: Ask anything...')),
     ).toBe(false);
   });
 });

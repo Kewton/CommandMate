@@ -8,6 +8,11 @@ import { resolveComposerSpec } from './composer-spec';
 import type { ComposerSpec } from '../../types/cli-tool-contracts';
 import { stripAnsi, detectThinking } from '../detection/cli-patterns';
 import { readOpenCodeComposerBox } from '../detection/tools/opencode/composer-own-text';
+import {
+  isOpenCodeThinkingBelowComposer,
+  isOpenCodeThinkingInOpenTurn,
+} from '../detection/tools/opencode/patterns';
+import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
 import type { CLIToolType } from './types';
 import {
   codexDialogBelow,
@@ -631,10 +636,10 @@ export function classifySubmitWithRule(
   const windowStr = windowLines.join('\n');
 
   // A. Actively generating a response => the message was accepted. Read from the
-  //    tail window for every tool: each one's busy marker lives in a status bar
-  //    pinned to the bottom of the pane, and widening it to opencode's whole
-  //    frame would match `esc interrupt` printed inside a reply.
-  if (detectThinking(cliToolId, windowStr)) {
+  //    tail window for every tool but opencode: each one's busy marker lives in a
+  //    status bar pinned to the bottom of the pane. opencode's is read by position
+  //    instead ({@link isOpenCodeGenerating}).
+  if (cliToolId === 'opencode' ? isOpenCodeGenerating(lines) : detectThinking(cliToolId, windowStr)) {
     return { state: 'submitted', rule: 'A' };
   }
 
@@ -679,6 +684,25 @@ export function classifySubmitWithRule(
   //    read as no composer at all; text there that is not the body says
   //    neither that the message left nor that Enter would send it.
   return composer.outsideWindow ? { state: 'indeterminate', rule: 'F-outside' } : { state: 'submitted', rule: 'F' };
+}
+
+/**
+ * Rule A of {@link classifySubmitWithRule} for opencode (Issue #4209): a
+ * `Thinking:` row read by the position rules the status detector's thinking
+ * step and branch B read (`../detection/tools/opencode/detect.ts`), which the
+ * poller's save also reads — the spinner's progress row under the composer's
+ * bottom border, or a `Thinking:` row at the end of the still-open turn.
+ *
+ * Before #4209 this was `/Thinking:/` anywhere in the 12-row tail window, which
+ * holds the footer's cwd: with a cwd of `/tmp/Thinking:demo` a body still unsent
+ * in the box read as `submitted`, so Enter was never pressed again and the send
+ * was reported as done. The busy hint (`esc interrupt`) is still not read here,
+ * as before: a reply may print it.
+ *
+ * @param lines - The ANSI-stripped pane, box drawing intact, trailing blank rows dropped
+ */
+function isOpenCodeGenerating(lines: readonly string[]): boolean {
+  return isOpenCodeThinkingBelowComposer(lines) || isOpenCodeThinkingInOpenTurn(lines, THINKING_TAIL_LINE_COUNT);
 }
 
 /**

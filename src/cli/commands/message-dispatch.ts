@@ -11,6 +11,7 @@ import { ExitCode } from '../types';
 import type { ChatMessage, RelayGetResponse } from '../types/api-responses';
 import { ApiClient, ApiError } from '../utils/api-client';
 import { paneCaptureCommand } from '../utils/follow-up-command';
+import { ROLE_STAYED_SAVED, roleFailureFromApi, roleSettingSavedBy } from '../utils/role-failure';
 import type { CommandTarget } from './command-target';
 import {
   cancelRelayQuietly,
@@ -19,6 +20,7 @@ import {
   resolveEndpointForWorktree,
   resolveRelayEndpoint,
   type RegisteredRelay,
+  type RelayEndpointArg,
 } from './relays';
 
 /**
@@ -43,6 +45,29 @@ export interface RegisterRelayForMessageInput {
    * "was the relay opened?" unanswered — the same reason `/send` is not cut.
    */
   resolveClient?: ApiClient;
+  /** Issue #4133: already resolved by {@link resolveRelayEndpoints}, so not resolved again. */
+  endpoints?: RelayEndpoints;
+  /** Issue #4133: runs when the relay could not be opened, before the command ends. */
+  onFailure?: () => Promise<void>;
+}
+
+/** The two ends of a relay, as the ledger stores them. */
+export interface RelayEndpoints {
+  from: RelayEndpointArg;
+  to: RelayEndpointArg;
+}
+
+/**
+ * Both ends of a `--reply-to`. Only reads. Exits 2 when either cannot be named, so a
+ * caller with something to clean up afterwards calls this before making it (Issue #4133).
+ */
+export async function resolveRelayEndpoints(
+  client: ApiClient,
+  input: Pick<RegisterRelayForMessageInput, 'worktreeId' | 'replyTo' | 'instance' | 'agent'>
+): Promise<RelayEndpoints> {
+  const from = await resolveRelayEndpoint(client, input.replyTo);
+  const to = await resolveEndpointForWorktree(client, input.worktreeId, input.instance, input.agent);
+  return { from, to };
 }
 
 /** Resolve both endpoints and open the relay; returns its id and whether it is bound. */
@@ -50,18 +75,11 @@ export async function registerRelayForMessage(
   client: ApiClient,
   input: RegisterRelayForMessageInput
 ): Promise<RegisteredRelay> {
-  const resolveClient = input.resolveClient ?? client;
-  const replyEndpoint = await resolveRelayEndpoint(resolveClient, input.replyTo);
-  const workerEndpoint = await resolveEndpointForWorktree(
-    resolveClient,
-    input.worktreeId,
-    input.instance,
-    input.agent
-  );
+  const endpoints = input.endpoints ?? await resolveRelayEndpoints(input.resolveClient ?? client, input);
   return registerRelay(client, {
-    from: replyEndpoint,
-    to: workerEndpoint,
+    ...endpoints,
     allowRelayChain: input.allowRelayChain,
+    onFailure: input.onFailure,
   });
 }
 
@@ -71,8 +89,11 @@ export interface PostMessageOptions {
    * send (`relayId`) and it is withdrawn only on a confirmed `not_sent`.
    */
   relay?: RegisteredRelay;
-  /** Runs first when the post fails, before the relay is cancelled. */
-  onFailure?: () => Promise<void>;
+  /**
+   * Runs first when the post fails, before the relay is cancelled and before any
+   * exit. Issue #4116: told the failure, and a bound relay's outcome (null unbound).
+   */
+  onFailure?: (error: unknown, outcome: FailedSendOutcome | null) => Promise<void>;
   /** Printed (after `Error: `) when PROMPT_WAITING carried no message body. */
   promptWaitingFallback: string;
   /** The resolved target the send addressed; the hints name it (Issue #3982). */
@@ -81,6 +102,9 @@ export interface PostMessageOptions {
 
 /** What the send did, as far as a bound relay is concerned (Issue #3957). */
 type BoundSendOutcome = 'sent' | 'not_sent' | 'unknown' | 'conflict';
+
+/** A bound relay's outcome once the send is known to have failed. */
+export type FailedSendOutcome = Exclude<BoundSendOutcome, 'sent'>;
 
 function isSendOutcome(value: unknown): value is 'sent' | 'not_sent' | 'unknown' {
   return value === 'sent' || value === 'not_sent' || value === 'unknown';
@@ -171,7 +195,7 @@ export async function postMessage(
       return { worktreeId, role: 'user', content: '', sendOutcome: 'sent' };
     }
     if (options.onFailure) {
-      await options.onFailure();
+      await options.onFailure(error, outcome);
     }
     // A relay whose message never arrived can never be answered; leaving
     // it open would have the requester waiting 24h for a turn that was
@@ -183,6 +207,11 @@ export async function postMessage(
       printRelayUnconfirmedNotice(relayId, worktreeId, options.target);
     }
     const promptWaiting = error instanceof ApiError && error.apiCode === PROMPT_WAITING_CODE;
+    // Issue #4116: a refusal with no role code of its own (a 400, a 503, a 500), after
+    // the role was saved. One with a role code says so in its own sentence.
+    if (roleSettingSavedBy(error) && roleFailureFromApi(error) === null) {
+      console.error(`Note: ${ROLE_STAYED_SAVED}`);
+    }
     // Issue #3992: whether it may be sent again, as the server said — not on
     // PROMPT_WAITING, whose own line says to answer the prompt first, and not
     // when the relay notice above already said it.
@@ -201,6 +230,11 @@ export async function postMessage(
       console.error(`Error: ${error.payload?.error ?? options.promptWaitingFallback}`);
       process.exit(ExitCode.CONFIG_ERROR);
     }
+    // Issue #4116: a refusal because of the role, whether or not this send named
+    // one (a default can refuse a start), with the server's sentence and its own
+    // exit code rather than "Unexpected HTTP status: 409".
+    const roleFailure = roleFailureFromApi(error);
+    if (roleFailure) throw roleFailure;
     throw error;
   }
 }

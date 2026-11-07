@@ -119,6 +119,15 @@ export const LEDGER: readonly LedgerRow[] = [
     evidence: 'tests/unit/session/launch-keys-input-lock-3975.test.ts',
   },
   {
+    file: 'src/lib/cli-tools/claude-auto-default-nudge.ts',
+    site: 'sendNudgeKey',
+    callee: 'sendKeys',
+    kind: 'lock',
+    held: 'lexical',
+    reason: 'claude’s Enter on “No” of the auto-mode offer at launch, as an exclusive answer (#4134).',
+    evidence: 'tests/unit/cli-tools/claude-auto-default-nudge-4134.test.ts',
+  },
+  {
     file: 'src/lib/cli-tools/codex.ts',
     site: 'CodexTool.waitForReady',
     callee: 'sendKeys',
@@ -134,7 +143,7 @@ export const LEDGER: readonly LedgerRow[] = [
     callee: 'sendKeys',
     kind: 'lock',
     held: 'caller',
-    count: 2,
+    count: 3,
     reason: 'codex’s hooks-screen keys; only called from `answerCodexHooksScreen`’s `answerUnderInstanceInputLock` (#3952).',
     evidence: 'tests/unit/cli-tools/codex-hooks-input-lock-3952.test.ts',
   },
@@ -259,7 +268,8 @@ export const STAGE_2_LEDGER: readonly LedgerRow[] = [
     callee: 'sendSpecialKey',
     kind: 'lock',
     held: 'lexical',
-    reason: 'codex’s launch-time “Press enter to continue”, as an answer under the lock (#3952).',
+    count: 2,
+    reason: 'codex’s launch-time “Press enter to continue”, and the Enter 0.166.0’s folder trust needs after its digit (#4134), as answers under the lock (#3952).',
     evidence: 'tests/unit/cli-tools/codex-launch-dialog-ticket-3981.test.ts',
   },
   {
@@ -270,6 +280,15 @@ export const STAGE_2_LEDGER: readonly LedgerRow[] = [
     held: 'lexical',
     reason: 'gemini’s folder-trust key at launch, as an exclusive answer under the lock (#3975).',
     evidence: 'tests/unit/session/launch-keys-input-lock-3975.test.ts',
+  },
+  {
+    file: 'src/lib/cli-tools/claude-auto-default-nudge.ts',
+    site: 'sendNudgeKey',
+    callee: 'sendSpecialKeys',
+    kind: 'lock',
+    held: 'lexical',
+    reason: 'The move to “No” on claude’s auto-mode offer at launch, as an exclusive answer (#4134).',
+    evidence: 'tests/unit/cli-tools/claude-auto-default-nudge-4134.test.ts',
   },
   {
     file: 'src/lib/session/claude-session.ts',
@@ -314,6 +333,7 @@ export const STAGE_2_LEDGER: readonly LedgerRow[] = [
     callee: 'sendSpecialKey',
     kind: 'lock',
     held: 'caller',
+    count: 2,
     reason: 'codex’s hooks-screen Escape; only called from `answerCodexHooksScreen`’s `answerUnderInstanceInputLock` (#3952).',
     evidence: 'tests/unit/cli-tools/codex-hooks-input-lock-3952.test.ts',
   },
@@ -771,10 +791,17 @@ export function reconcile(
 
 const read = (file: string): string => readFileSync(join(REPO_ROOT, file), 'utf-8');
 
+/**
+ * Issue #4163: the two tests that walk all of src. 1.5 to 1.9 s alone and on CI, and 8.2 s at
+ * worst with the CPU taken away (`taskpolicy -b`), where 5 s failed them three runs in three.
+ * The commit message has the numbers. Sharing the walk is #4066's.
+ */
+const FULL_SCAN_TIMEOUT_MS = 30_000;
+
 describe('[#3981] every pane key writer in src is on the ledger', () => {
   it('the scan of src agrees with the ledger (negative control: today’s tree passes)', () => {
     expect(reconcile(scanRepository(), LEDGER)).toEqual([]);
-  });
+  }, FULL_SCAN_TIMEOUT_MS);
 
   it('every evidence test exists; a lock row’s runs the lock', () => {
     for (const row of LEDGER) {
@@ -804,7 +831,7 @@ describe('[#3981] every pane key writer in src is on the ledger', () => {
 describe('[#3981 review P2-1] every caller of a caller-held row is on the caller ledger', () => {
   it('negative control: today’s callers agree with the caller ledger', () => {
     expect(reconcileCallers(scanGuardedCallers(), CALLER_LEDGER)).toEqual([]);
-  });
+  }, FULL_SCAN_TIMEOUT_MS);
 
   it('the guarded rows are the four whose lock is the caller’s', () => {
     expect(callerGuarded(LEDGER).map((r) => functionName(r.site)).sort()).toEqual([

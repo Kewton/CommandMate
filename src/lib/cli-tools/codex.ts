@@ -17,6 +17,7 @@ import {
   isCodexPromptReady,
   getCodexActiveDialog,
   getCodexLifecycleDialog,
+  readCodexEnterConfirmedCursor,
   CODEX_HOOKS_REVIEW_ANCHORS,
   stripAnsi,
 } from '../detection/cli-patterns';
@@ -32,6 +33,7 @@ import {
   type UpdatableAgentTool,
 } from '@/lib/updates';
 import { createLogger } from '@/lib/logger';
+import { forgetLaunchAnswerSkip, newLaunchAnswerSkips, noteLaunchAnswerSkipped, type LaunchAnswerSkips } from './launch-answer-skips';
 import { CODEX_CLI_TOOL_ID } from '@/lib/hooks/sources';
 import { shouldTrustCodexHooks } from '@/lib/hooks/sources/codex/hooks-config';
 import {
@@ -44,7 +46,7 @@ import {
 } from '@/config/cli-tool-timing-config';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 import { getErrorMessage } from '@/lib/errors';
-import { answerUnderInstanceInputLock, instanceInputReadMark } from '@/lib/session/instance-input-lock';
+import { answerUnderInstanceInputLock, instanceInputAnswerSkipLife, instanceInputReadMark } from '@/lib/session/instance-input-lock';
 
 const logger = createLogger('cli-tools/codex');
 
@@ -56,6 +58,17 @@ const CODEX_POLL_INTERVAL_MS = 1000;
 
 /** Max attempts for initialization polling (30 * 1000ms = 30s total window) */
 const CODEX_INIT_MAX_ATTEMPTS = 30;
+
+/**
+ * Issue #4175: the pause after a launch answer the input lock declined. It is
+ * the poll's own, {@link CODEX_POLL_INTERVAL_MS}: a skip used to `continue` past
+ * it, and a lock that declines at once (`recheck-failed`, `session-replaced`,
+ * `input-lock-lost`) then spent all {@link CODEX_INIT_MAX_ATTEMPTS} in no time.
+ * An answer that went out waits `CODEX_DIALOG_SETTLE_MS` instead, never both.
+ */
+function pauseAfterLaunchAnswerSkip(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, CODEX_POLL_INTERVAL_MS));
+}
 
 /**
  * Extra polls `waitForReady` may spend waiting out `npm install -g
@@ -106,6 +119,10 @@ const CODEX_PROMPT_WAIT_TIMEOUT_MS = 15000;
  * a trailing Enter is so costly here — the number having already advanced the
  * screen, the Enter lands on the NEXT one, which is precisely how a pane ends up
  * two screens deep in the hooks review UI.
+ *
+ * Not so on 0.166.0 (Issue #4134): the footer reads `enter confirm · esc skip`
+ * and the number only moves the cursor. {@link readCodexEnterConfirmedCursor}
+ * tells the two apart; see `sendCodexHooksScreenKey`.
  */
 const CODEX_HOOKS_REVIEW_DECLINE_KEY = '3';
 
@@ -159,13 +176,26 @@ const CODEX_HOOKS_TRUST_KEY = 't';
  * more attempts, and only a screen that will not respond at all runs out.
  *
  * Three per screen, because each screen has at most two keys worth trying
- * (`2` then `1` on the review dialog; `t` or `esc` below it) plus one spare for
- * a redraw landing between the capture and the send.
+ * (`2` then `1` on the review dialog, `2` then Enter on 0.166.0; `t` or `esc`
+ * below it) plus one spare for a redraw landing between the capture and the send.
  */
 const CODEX_HOOKS_SCREEN_MAX_ATTEMPTS = 3;
 
-/** The three screens codex's hook review can put in front of a launch. */
-type CodexHooksScreen = 'hooks-review' | 'hooks-list' | 'hooks-detail';
+/**
+ * Enter presses a launch may spend on the folder trust screen of 0.166.0, where
+ * the digit only moves the cursor (Issue #4134). One poll apart.
+ */
+const CODEX_TRUST_ENTER_MAX_PRESSES = 3;
+
+/**
+ * The screens codex's hook review can put in front of a launch.
+ * `hooks-settled` is the list or detail with nothing left to review (0.166.0).
+ */
+type CodexHooksScreen = 'hooks-review' | 'hooks-list' | 'hooks-detail' | 'hooks-settled';
+
+function isCodexHooksScreen(screen: ReturnType<typeof getCodexLifecycleDialog>): screen is CodexHooksScreen {
+  return screen === 'hooks-review' || screen === 'hooks-list' || screen === 'hooks-detail' || screen === 'hooks-settled';
+}
 
 /**
  * Which screen was last acted on, and how many keys it has cost.
@@ -176,11 +206,13 @@ type CodexHooksScreen = 'hooks-review' | 'hooks-list' | 'hooks-detail';
 interface CodexHooksScreenState {
   screen: CodexHooksScreen | null;
   attempts: number;
+  /** Keys the input lock declined; not a budget, so progress does not reset it (Issue #4161). */
+  skips: LaunchAnswerSkips;
 }
 
 /** A fresh {@link CodexHooksScreenState}. */
 function newHooksScreenState(): CodexHooksScreenState {
-  return { screen: null, attempts: 0 };
+  return { screen: null, attempts: 0, skips: newLaunchAnswerSkips() };
 }
 
 /**
@@ -357,9 +389,12 @@ export class CodexTool extends BaseCLITool {
     // update branch re-sends "2" every poll and the live prompt gets "222...".
     let updateDialogHandled = false;
     let trustDialogHandled = false;
+    /** Issue #4134: Enter presses spent on a trust screen whose digit only moves the cursor. */
+    let trustEnterPresses = 0;
     // Issue #2315: one budget per hooks screen, reset whenever the screen
     // changes, in place of #1829's single launch-wide escape count.
     const hooksScreenState = newHooksScreenState();
+    const answerSkips = newLaunchAnswerSkips();
 
     // Issue #2068. Resolved once per launch rather than per poll: the operator
     // does not get to change their mind halfway through one session start, and
@@ -412,14 +447,11 @@ export class CodexTool extends BaseCLITool {
         // line, so it names a hooks screen only when that screen is what the
         // pane is actually showing.
         const lifecycleScreen = getCodexLifecycleDialog(output);
-        if (
-          lifecycleScreen === 'hooks-review' ||
-          lifecycleScreen === 'hooks-list' ||
-          lifecycleScreen === 'hooks-detail'
-        ) {
+        if (isCodexHooksScreen(lifecycleScreen)) {
           const sent = await this.answerCodexHooksScreen(
             sessionName,
             lifecycleScreen,
+            output,
             hooksScreenState,
             trustHooks,
             readMark
@@ -593,11 +625,14 @@ export class CodexTool extends BaseCLITool {
             // Issue #3952: as the composer's writer, and only while the update
             // dialog is still the active one once a send holding it is over.
             const digit = keyToSend;
+            // Issue #4189: the session's life before the answer's await; a decline of an older life writes no record for the new one.
+            const answerLife = instanceInputAnswerSkipLife(sessionName);
             const updateOutcome = await answerUnderInstanceInputLock(
               sessionName,
               readMark,
               () => this.isActiveDialogStill(sessionName, 'update'),
-              () => sendKeys(sessionName, digit, false)
+              () => sendKeys(sessionName, digit, false),
+              { repeatScope: answerSkips }
             );
             if (!updateOutcome.answered) {
               // Nothing typed: the install this lock covers never started.
@@ -605,9 +640,12 @@ export class CodexTool extends BaseCLITool {
                 updateLockHeld = false;
                 releaseAgentUpdateLock(CODEX_UPDATE_LOCK_TOOL);
               }
-              logger.info('codex-update-dialog-answer-skipped', { sessionName, reason: updateOutcome.reason });
+              noteLaunchAnswerSkipped(logger, answerSkips, 'codex-update-dialog-answer-skipped', { sessionName, reason: updateOutcome.reason }, answerLife);
+              // Issue #4175: the poll's own pause, which `continue` would skip.
+              await pauseAfterLaunchAnswerSkip();
               continue;
             }
+            forgetLaunchAnswerSkip(answerSkips, 'codex-update-dialog-answer-skipped');
             updateDialogHandled = true;
             if (keyToSend === CODEX_UPDATE_DIALOG_KEYS.update) {
               // codex is about to become `npm install`. The prompt this method
@@ -628,16 +666,22 @@ export class CodexTool extends BaseCLITool {
         // Numbered selection dialogs are dismissed by the number key above, so this
         // branch is reached only when no number selection is pending.
         if (activeDialog === 'press-enter') {
+          // Issue #4189: the session's life before the answer's await; a decline of an older life writes no record for the new one.
+          const answerLife = instanceInputAnswerSkipLife(sessionName);
           const enterOutcome = await answerUnderInstanceInputLock(
             sessionName,
             readMark,
             () => this.isActiveDialogStill(sessionName, 'press-enter'),
-            () => sendSpecialKey(sessionName, 'Enter')
+            () => sendSpecialKey(sessionName, 'Enter'),
+            { repeatScope: answerSkips }
           );
           if (!enterOutcome.answered) {
-            logger.info('codex-notification-answer-skipped', { sessionName, reason: enterOutcome.reason });
+            noteLaunchAnswerSkipped(logger, answerSkips, 'codex-notification-answer-skipped', { sessionName, reason: enterOutcome.reason }, answerLife);
+            // Issue #4175: the poll's own pause, which `continue` would skip.
+            await pauseAfterLaunchAnswerSkip();
             continue;
           }
+          forgetLaunchAnswerSkip(answerSkips, 'codex-notification-answer-skipped');
           logger.info('dismissed-codex-notification');
           await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
           continue;
@@ -647,18 +691,59 @@ export class CodexTool extends BaseCLITool {
         // Options: › 1. Yes, continue / 2. No, quit
         if (activeDialog === 'trust' && !trustDialogHandled) {
           // Issue #890: number-key selection confirms instantly; no trailing Enter.
+          // Issue #4189: the session's life before the answer's await; a decline of an older life writes no record for the new one.
+          const answerLife = instanceInputAnswerSkipLife(sessionName);
           const trustOutcome = await answerUnderInstanceInputLock(
             sessionName,
             readMark,
             () => this.isActiveDialogStill(sessionName, 'trust'),
-            () => sendKeys(sessionName, '1', false)
+            () => sendKeys(sessionName, '1', false),
+            { repeatScope: answerSkips }
           );
           if (!trustOutcome.answered) {
-            logger.info('codex-trust-dialog-answer-skipped', { sessionName, reason: trustOutcome.reason });
+            noteLaunchAnswerSkipped(logger, answerSkips, 'codex-trust-dialog-answer-skipped', { sessionName, reason: trustOutcome.reason }, answerLife);
+            // Issue #4175: the poll's own pause, which `continue` would skip.
+            await pauseAfterLaunchAnswerSkip();
             continue;
           }
+          forgetLaunchAnswerSkip(answerSkips, 'codex-trust-dialog-answer-skipped');
           trustDialogHandled = true;
           logger.info('auto-trusted-folder-for-codex');
+          await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
+          continue;
+        }
+
+        // Issue #4134: on 0.166.0 the digit above only put the cursor on the
+        // option, and the screen is still up. Enter, while THIS frame shows the
+        // cursor on `1. Trust and continue`: Enter on the row below it leaves the
+        // session (`Back to Agent Command Center`, `Quit`). The second read asks
+        // for the screen as well as the row: `1. Review hooks` is a row 1 too.
+        if (
+          activeDialog === 'trust' &&
+          trustEnterPresses < CODEX_TRUST_ENTER_MAX_PRESSES &&
+          readCodexEnterConfirmedCursor(output) === 1
+        ) {
+          // Issue #4189: the session's life before the answer's await; a decline of an older life writes no record for the new one.
+          const answerLife = instanceInputAnswerSkipLife(sessionName);
+          const enterOutcome = await answerUnderInstanceInputLock(
+            sessionName,
+            readMark,
+            async () => {
+              const again = stripAnsi(await capturePane(sessionName, 50));
+              return getCodexActiveDialog(again) === 'trust' && readCodexEnterConfirmedCursor(again) === 1;
+            },
+            () => sendSpecialKey(sessionName, 'Enter'),
+            { repeatScope: answerSkips }
+          );
+          if (!enterOutcome.answered) {
+            noteLaunchAnswerSkipped(logger, answerSkips, 'codex-trust-dialog-answer-skipped', { sessionName, reason: enterOutcome.reason }, answerLife);
+            // Issue #4175: the poll's own pause, which `continue` would skip.
+            await pauseAfterLaunchAnswerSkip();
+            continue;
+          }
+          forgetLaunchAnswerSkip(answerSkips, 'codex-trust-dialog-answer-skipped');
+          trustEnterPresses++;
+          logger.info('auto-trusted-folder-for-codex', { confirmedWith: 'Enter', attempt: trustEnterPresses });
           await new Promise((resolve) => setTimeout(resolve, CODEX_DIALOG_SETTLE_MS));
           continue;
         }
@@ -720,6 +805,11 @@ export class CodexTool extends BaseCLITool {
    * When it is withheld — `CM_CODEX_HOOK_TRUST=never`, or a worktree carrying
    * its own `.codex/hooks.json` — it is the pre-#2315 path: `3`, then `esc`.
    *
+   * On 0.166.0 (Issue #4134) the launch dialog's digit only moves the cursor, so
+   * the answer there is the digit and then Enter, read off the frame each time;
+   * and `t` leaves the list or detail open with nothing to review
+   * (`hooks-settled`), which takes `esc` either way.
+   *
    * The launch dialog gets a second, different key on its second attempt.
    * Numbered options are a menu position codex is free to renumber (this method
    * has been re-pinned for that twice already), so if `2`/`3` did not move the
@@ -728,6 +818,7 @@ export class CodexTool extends BaseCLITool {
    *
    * @param sessionName - tmux session name
    * @param screen - The bottom-most active hooks screen, from `getCodexLifecycleDialog`
+   * @param frame - ANSI-stripped capture that showed `screen`
    * @param state - Per-screen budget, carried across polls by the caller
    * @param trust - Whether trust may be granted, from {@link shouldTrustCodexHooks}
    * @param readMark - {@link instanceInputReadMark} taken before the frame that showed `screen` was read
@@ -738,6 +829,7 @@ export class CodexTool extends BaseCLITool {
   private async answerCodexHooksScreen(
     sessionName: string,
     screen: CodexHooksScreen,
+    frame: string,
     state: CodexHooksScreenState,
     trust: boolean,
     readMark: number
@@ -747,6 +839,7 @@ export class CodexTool extends BaseCLITool {
       // nothing about this one.
       state.screen = screen;
       state.attempts = 0;
+      forgetLaunchAnswerSkip(state.skips, 'codex-hooks-screen-answer-skipped');
     }
     if (state.attempts >= CODEX_HOOKS_SCREEN_MAX_ATTEMPTS) {
       logger.warn('codex-hooks-screen-unresponsive', { sessionName, screen, trust });
@@ -758,18 +851,29 @@ export class CodexTool extends BaseCLITool {
     // send that holds it — and is not typed if the hooks screen it was chosen
     // for is gone once that send is over. Inside `sendMessage` under
     // `sendUserMessage`'s lock it joins that lock instead.
+    // Issue #4189: the session's life before the answer's await; a decline of an older life writes no record for the new one.
+    const answerLife = instanceInputAnswerSkipLife(sessionName);
     const outcome = await answerUnderInstanceInputLock(
       sessionName,
       readMark,
-      async () => getCodexLifecycleDialog(stripAnsi(await capturePane(sessionName, 50))) === screen,
-      () => this.sendCodexHooksScreenKey(sessionName, screen, attempt, trust)
+      async () => {
+        const again = stripAnsi(await capturePane(sessionName, 50));
+        // The cursor too: on 0.166.0 the key is chosen from where it stands.
+        return (
+          getCodexLifecycleDialog(again) === screen &&
+          readCodexEnterConfirmedCursor(again) === readCodexEnterConfirmedCursor(frame)
+        );
+      },
+      () => this.sendCodexHooksScreenKey(sessionName, screen, frame, attempt, trust),
+      { repeatScope: state.skips }
     );
     if (!outcome.answered) {
       // Nothing was typed, so this screen's budget is not spent; poll again.
-      logger.info('codex-hooks-screen-answer-skipped', { sessionName, screen, reason: outcome.reason });
+      noteLaunchAnswerSkipped(logger, state.skips, 'codex-hooks-screen-answer-skipped', { sessionName, screen, reason: outcome.reason }, answerLife);
       return true;
     }
     state.attempts = attempt;
+    forgetLaunchAnswerSkip(state.skips, 'codex-hooks-screen-answer-skipped');
     return true;
   }
 
@@ -777,10 +881,26 @@ export class CodexTool extends BaseCLITool {
   private async sendCodexHooksScreenKey(
     sessionName: string,
     screen: CodexHooksScreen,
+    frame: string,
     attempt: number,
     trust: boolean
   ): Promise<void> {
     if (screen === 'hooks-review') {
+      // Issue #4134: a digit that only moves the cursor. Enter goes out only when
+      // this frame shows the cursor on the answer: row 1 opens the list and row 3
+      // turns the hooks off, and neither may be confirmed by accident.
+      const cursor = readCodexEnterConfirmedCursor(frame);
+      if (cursor !== null) {
+        const answer = trust ? CODEX_HOOKS_REVIEW_TRUST_KEY : CODEX_HOOKS_REVIEW_DECLINE_KEY;
+        if (String(cursor) === answer) {
+          await sendSpecialKey(sessionName, 'Enter');
+          logger.info('codex-hooks-review-confirmed', { sessionName, key: answer, attempt, trust });
+        } else {
+          await sendKeys(sessionName, answer, false);
+          logger.info('codex-hooks-review-cursor-moved', { sessionName, key: answer, attempt, trust });
+        }
+        return;
+      }
       const key =
         attempt === 1
           ? trust
@@ -794,7 +914,7 @@ export class CodexTool extends BaseCLITool {
       return;
     }
 
-    if (trust) {
+    if (trust && screen !== 'hooks-settled') {
       // `t`, the key screens 2 and 3 print in their own footers. Literal, so
       // tmux sends the character rather than resolving it as a key name.
       await sendKeys(sessionName, CODEX_HOOKS_TRUST_KEY, false, { literal: true });
@@ -830,6 +950,10 @@ export class CodexTool extends BaseCLITool {
     const hooksScreenState = newHooksScreenState();
     /** Resolved lazily — one tmux call, and only if a hooks screen shows up. */
     let trustHooks: boolean | null = null;
+    /** The hooks screen the last read showed, for the error (Issue #4134). */
+    let lastHooksScreen: CodexHooksScreen | null = null;
+    /** The dialog the last read showed; a send does not answer these (Issue #4134). */
+    let lastDialog: ReturnType<typeof getCodexActiveDialog> = null;
 
     while (Date.now() - startTime < CODEX_PROMPT_WAIT_TIMEOUT_MS) {
       try {
@@ -841,7 +965,9 @@ export class CodexTool extends BaseCLITool {
         // painted OVER a live composer leaves `isCodexPromptReady` true, and
         // returning there types the user's message into the review UI.
         const screen = getCodexLifecycleDialog(output);
-        if (screen === 'hooks-review' || screen === 'hooks-list' || screen === 'hooks-detail') {
+        lastHooksScreen = isCodexHooksScreen(screen) ? screen : null;
+        lastDialog = getCodexActiveDialog(output);
+        if (isCodexHooksScreen(screen)) {
           if (trustHooks === null) {
             // The pane's own directory, for the same reason `relaunchIfToolExited`
             // asks tmux for it: `sendMessage` is handed a worktree id, not a path,
@@ -849,7 +975,7 @@ export class CodexTool extends BaseCLITool {
             const worktreePath = await getSessionWorkingDirectory(sessionName);
             trustHooks = worktreePath !== null && shouldTrustCodexHooks(worktreePath);
           }
-          await this.answerCodexHooksScreen(sessionName, screen, hooksScreenState, trustHooks, readMark);
+          await this.answerCodexHooksScreen(sessionName, screen, output, hooksScreenState, trustHooks, readMark);
         } else if (isCodexPromptReady(output)) {
           // Issue #890/#892: position-based guard so a residual update/trust dialog
           // ("› 1. ...") is never mistaken for a ready prompt -- yet a genuine "› "
@@ -862,8 +988,22 @@ export class CodexTool extends BaseCLITool {
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
     }
     logger.info('codex-prompt-not-detected');
+    if (lastHooksScreen !== null) {
+      // Issue #4134: the reason, in the message `send` reports. Names only the
+      // screen and the setting, nothing captured.
+      // Issue #4161: "did not respond" is untrue of a screen no key reached.
+      const fate =
+        hooksScreenState.attempts === 0 && hooksScreenState.skips.last !== null
+          ? `got no key (${hooksScreenState.skips.last})`
+          : 'did not respond to its keys';
+      throw new Error(
+        `Codex prompt not ready: codex's hook review (${lastHooksScreen}) ${fate}. ` +
+          'Answer it in the terminal, or set CM_CODEX_HOOK_TRUST=bypass'
+      );
+    }
     throw new Error(
-      'Codex prompt not ready: timed out waiting for the input prompt before sending'
+      'Codex prompt not ready: timed out waiting for the input prompt before sending' +
+        (lastDialog === null ? '' : ` (the ${lastDialog} dialog is open: answer it in the terminal)`)
     );
   }
 

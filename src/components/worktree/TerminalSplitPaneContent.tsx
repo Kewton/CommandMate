@@ -129,6 +129,7 @@ import { getSplitSurfaceModeStorageKey } from '@/config/surface-mode-config';
 import { useSurfaceMode } from '@/hooks/useSurfaceMode';
 import { buildPaneSessionLabels } from '@/components/worktree/pane-session-labels';
 import { Tooltip } from '@/components/common/Tooltip';
+import { SplitRoleStatus } from '@/components/roles/SplitRoleStatus';
 import { SessionStartingNotice } from '@/components/worktree/SessionStartingNotice';
 import {
   sessionStartingScopeKey,
@@ -1509,6 +1510,23 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     );
   }, [onRequestSessionEnd, terminal.isRunning, t, endTargetLabel, handleRequestSessionEnd, splitIndex]);
 
+  // Issue #4117: this split's role. Memoized like the End button above, for the same
+  // reason. The status is what makes it read again: launches are recorded as a
+  // session starts and turns over. The restart is that same End.
+  const roleStatus = useMemo(
+    () => (
+      <SplitRoleStatus
+        worktreeId={worktreeId}
+        instanceId={resolvedInstanceId}
+        splitIndex={splitIndex}
+        sessionStatus={cliStatus}
+        isRunning={terminal.isRunning}
+        onRestart={onRequestSessionEnd ? handleRequestSessionEnd : undefined}
+      />
+    ),
+    [worktreeId, resolvedInstanceId, splitIndex, cliStatus, terminal.isRunning, onRequestSessionEnd, handleRequestSessionEnd],
+  );
+
   // Issue #2042: hand this split's session facts up. In an effect rather than
   // in render because it writes the parent's state, and only when the snapshot
   // identity actually moved — the poller holds it stable across the polls that
@@ -1547,6 +1565,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       // Issue #2042: cost / context, as a second muted chip.
       agentUsage={paneAgentUsage}
       agentUsageDetail={paneAgentUsageDetail}
+      roleStatus={roleStatus}
       onFocus={onFocus}
       attaching={terminal.attaching}
       // Issue #2193: the header control's pressed state, and the body it names.

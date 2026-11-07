@@ -21,14 +21,24 @@
  *      `git push`;
  *   5. the PR's checks (6-3): no `fail` / `cancel` in `bucket` — a failed job is
  *      re-run once per HEAD (`gh run rerun --failed`, recorded in the `ci` stage
- *      so a rerun after a crash does not re-run it again); `Build` is `pass`
+ *      so a rerun after a crash does not re-run it again), once its run has finished:
+ *      GitHub refuses a run still going, and an early failure is always inside one (#4162).
+ *      That wait is under --ci-timeout, and a base or PR head that moves during it stops
+ *      the run; `Build` is `pass`
  *      unless the precheck of this HEAD built what the CI `Build` builds
  *      (`build`, `build-cli`, `build-server` all `ok`); `Unit Tests` is `pass`
  *      unless the verification passed verify.yaml's full `unit` gate — a
  *      `unit-related` or a refactor contract (lint / typecheck only) waits for
  *      it (2-4-3, 6-2), and `--unit-related` forces the wait; with `--last`
- *      every check is `pass` (6-2: only the last PR waits for the full CI).
- *      Anything else `pending` is not waited for;
+ *      every check is `pass` or `skipping` and LAST_REQUIRED_CHECKS have registered
+ *      (6-2: the last PR, and every PR of a run whose permission says "if CI passes",
+ *      waits for the full CI; `gh pr checks` lists only what has registered).
+ *      Anything else `pending` is not waited for. --register-timeout bounds the time until this
+ *      HEAD has any check at all, and --ci-timeout runs from then (#4148). Every look fetches
+ *      the base after reading the checks: a base that moved during the wait, that read included, stops
+ *      the run with exit 4, because this HEAD no longer is the combination that would land (a rerun
+ *      refreshes it, step 4). A fetch that fails is asked again at the next look and never merges on
+ *      an unread base;
  *   6. `gh pr merge --squash --match-head-commit <HEAD>`, recorded in the
  *      `merge` stage, then `gh issue close` unless `--close -`.
  *
@@ -40,13 +50,17 @@
  * one: with `--item` the Issue stays open unless `--close <N>` is given (the
  * last PR's call).
  *
+ * `git push` here and in publish-pr.mjs goes through pr-common.mjs pushHead (#4162), which sends the
+ * checked SHA by itself, so a local HEAD that moved since does not go out.
+ *
  * Exit code: 0 merged (or already merged), 1 a condition or a command failed,
- * 2 usage error or a dirty tree, 124 the CI did not settle within --ci-timeout.
+ * 2 usage error or a dirty tree, 3 the precheck is on hold, 4 the base moved during the CI wait,
+ * 124 no CI registered within --register-timeout, or it did not settle within --ci-timeout.
  *
  * Usage:
  *   node scripts/orchestrate/merge-pr.mjs --run-dir <dir> --issues <range> --issue <N> --worktree <path>
  *        [--pr <number>] [--branch <name>] [--base develop] [--repo Kewton/CommandMate]
- *        [--close <N|->] [--last] [--unit-related] [--ci-timeout <sec>] [--poll <sec>] [--item <work item>]
+ *        [--close <N|->] [--last] [--unit-related] [--ci-timeout <sec>] [--register-timeout <sec>] [--poll <sec>] [--item <work item>]
  */
 import os from 'node:os';
 import path from 'node:path';
@@ -70,14 +84,42 @@ import {
   markerFiles,
   missingRecords,
   prsOfBranch,
+  pushHead,
   withGhRetry,
   workHeadOf,
 } from './pr-common.mjs';
 
 export const DEFAULT_CI_TIMEOUT_SEC = 3600;
+/** Until a pushed HEAD has any check: GitHub creating the run is not the CI being slow (#4148). */
+export const DEFAULT_REGISTER_TIMEOUT_SEC = 600;
 export const DEFAULT_POLL_SEC = 30;
+export const BASE_MOVED_EXIT = 4;
 export const BUILD_CHECK = 'Build';
 export const UNIT_CHECK = 'Unit Tests';
+/**
+ * What `--last` waits to see registered: every job of .github/workflows/ci-pr.yml, a matrix
+ * expanded, because `gh pr checks` lists only what has registered and a job registered late
+ * would otherwise be merged past (#4135). merge-pr.test.ts fails when this and the workflow differ.
+ */
+export const LAST_REQUIRED_CHECKS = [
+  'CLAUDE.md size check',
+  'orchestrate.md size check',
+  'Control character check',
+  'Token discipline (raw palette guard + token existence)',
+  'Route export guard',
+  'Legacy tmux (<3.2) reading-mode no-op',
+  'Lint',
+  'Type Check',
+  'Unit Tests (shard 1/4)',
+  'Unit Tests (shard 2/4)',
+  'Unit Tests (shard 3/4)',
+  'Unit Tests (shard 4/4)',
+  UNIT_CHECK,
+  'Integration Tests',
+  'E2E Tests',
+  BUILD_CHECK,
+  'Security Audit',
+];
 /** `bucket` values that settle a check without failing it. */
 const SETTLED_OK = ['pass', 'skipping'];
 
@@ -92,10 +134,10 @@ export function squashSubject(title, number) {
  * 6-3 over `gh pr checks --json name,bucket,link`.
  *
  * @param {{ name: string, bucket: string, link?: string }[]} checks
- * @param {{ needBuild: boolean, needUnit: boolean, last: boolean }} need
+ * @param {{ needBuild: boolean, needUnit: boolean, last: boolean, required?: string[] }} need
  * @returns {{ state: 'fail' | 'pending' | 'ok', failed: typeof checks, waiting: string[], summary: string }}
  */
-export function judgeChecks(checks, { needBuild, needUnit, last }) {
+export function judgeChecks(checks, { needBuild, needUnit, last, required = [] }) {
   const counts = {};
   for (const check of checks) counts[check.bucket] = (counts[check.bucket] ?? 0) + 1;
   const summary = Object.entries(counts).map(([bucket, n]) => `${bucket}:${n}`).join(',') || 'none';
@@ -106,6 +148,7 @@ export function judgeChecks(checks, { needBuild, needUnit, last }) {
   const passed = (name) => checks.some((check) => check.name === name && check.bucket === 'pass');
   if (last) {
     waiting.push(...checks.filter((check) => !SETTLED_OK.includes(check.bucket)).map((check) => check.name));
+    waiting.push(...required.filter((name) => !checks.some((check) => check.name === name)).map((name) => `${name} (not registered)`));
   } else {
     if (needBuild && !passed(BUILD_CHECK)) waiting.push(BUILD_CHECK);
     if (needUnit && !passed(UNIT_CHECK)) waiting.push(UNIT_CHECK);
@@ -116,6 +159,15 @@ export function judgeChecks(checks, { needBuild, needUnit, last }) {
 /** Workflow run ids in the checks' links (`…/actions/runs/<id>/job/<id>`). */
 export function runIdsOf(checks) {
   return [...new Set(checks.map((check) => /\/actions\/runs\/(\d+)/.exec(check.link ?? '')?.[1]).filter(Boolean))];
+}
+
+/** GitHub's answer to a re-run of a run still going: not sent, so it is asked again once the run ends (#4162). */
+const RUN_STILL_GOING = /already running/i;
+
+/** Of the run ids, those a check still pending belongs to: GitHub would refuse their re-run (#4162). */
+export function runsStillGoing(checks, ids) {
+  const going = runIdsOf(checks.filter((check) => check.bucket === 'pending'));
+  return ids.filter((id) => going.includes(id));
 }
 
 /** Whether the contract's test gate was `unit-related` (verify.yaml's or the contract's, wait-verify.mjs's note). */
@@ -143,7 +195,7 @@ export function builtLikeCi(precheckRecord) {
 const USAGE = `Usage:
   node scripts/orchestrate/merge-pr.mjs --run-dir <dir> --issues <range> --issue <N> --worktree <path>
        [--pr <number>] [--branch <name>] [--base ${DEFAULT_BASE_BRANCH}] [--repo ${DEFAULT_REPO}]
-       [--close <N|->] [--last] [--unit-related] [--ci-timeout <sec>] [--poll <sec>] [--item <work item>]`;
+       [--close <N|->] [--last] [--unit-related] [--ci-timeout <sec>] [--register-timeout <sec>] [--poll <sec>] [--item <work item>]`;
 
 const FLAGS = {
   '--run-dir': 'runDir',
@@ -156,6 +208,7 @@ const FLAGS = {
   '--repo': 'repo',
   '--close': 'close',
   '--ci-timeout': 'ciTimeout',
+  '--register-timeout': 'registerTimeout',
   '--poll': 'poll',
   '--item': 'item',
 };
@@ -168,6 +221,7 @@ export function parseArgs(argv) {
     last: false,
     unitRelated: false,
     ciTimeout: String(DEFAULT_CI_TIMEOUT_SEC),
+    registerTimeout: String(DEFAULT_REGISTER_TIMEOUT_SEC),
     poll: String(DEFAULT_POLL_SEC),
     close: /** @type {string | undefined} */ (undefined),
   };
@@ -193,7 +247,7 @@ export function validate(options) {
   if (!/^\d+$/.test(options.issue)) return `--issue must be an Issue number (got ${options.issue})`;
   if (options.close !== '-' && !/^\d+$/.test(options.close)) return `--close must be an Issue number or - (got ${options.close})`;
   if (options.pr !== undefined && !/^\d+$/.test(options.pr)) return `--pr must be a PR number (got ${options.pr})`;
-  for (const flag of ['--ci-timeout', '--poll']) {
+  for (const flag of ['--ci-timeout', '--register-timeout', '--poll']) {
     if (!/^\d+$/.test(options[FLAGS[flag]])) return `${flag} must be seconds (got ${options[FLAGS[flag]]})`;
   }
   return null;
@@ -405,7 +459,7 @@ export function main(argv, deps = {}) {
       }
     }
     if (head !== pr.headRefOid) {
-      const push = run('git', ['-C', o.worktree, 'push', 'origin', `HEAD:${branch}`]);
+      const push = pushHead(run, o.worktree, { branch, head, sleep, notice: error });
       if (push.status !== 0) throw new Error(`git push failed: ${(push.stderr || push.stdout).trim()}`);
       log(`merge #${issue}: refresh=${refreshed ? 'merged' : 'unpushed'} marker=ok precheck=ok; pushed ${head.slice(0, 7)}`);
     }
@@ -417,12 +471,17 @@ export function main(argv, deps = {}) {
     // full unit suite. A latest verify of another HEAD is not that one, and does not spare the wait (#4076).
     const latestVerify = latestByStage(records, issue, item).verify ?? null;
     const verify = latestVerify && unmetStage('verify', latestVerify, { head, workHead }) === null ? latestVerify : null;
-    const need = { needBuild, needUnit: o.unitRelated || !ranFullUnit(verify), last: o.last };
+    const need = { needBuild, needUnit: o.unitRelated || !ranFullUnit(verify), last: o.last, required: o.last ? LAST_REQUIRED_CHECKS : [] };
     const rerunDone = records.some(
       (r) => r.issue === issue && inItem(r, item) && r.stage === 'ci' && r.head === head && /(^| )rerun=/.test(r.note ?? '')
     );
     let rerun = rerunDone;
-    const deadline = now().getTime() + Number(o.ciTimeout) * 1000;
+    // The runs whose end the re-run is waiting for; only ever set at a look where current.headRefOid === head.
+    let rerunWait = [];
+    const registerDeadline = now().getTime() + Number(o.registerTimeout) * 1000;
+    // Starts when this HEAD has its first check: until then the wait is GitHub's, not the CI's.
+    let ciDeadline = null;
+    let baseUnread = false;
     let verdict;
     let title = pr.title;
     for (;;) {
@@ -432,6 +491,11 @@ export function main(argv, deps = {}) {
         record('merge', 'ok', current.headRefOid, `pr=#${pr.number} merged-elsewhere`, current.headRefOid === head ? workHead : null);
         log(`merge #${issue}: #${pr.number} was merged meanwhile — issue ${o.close}: ${closeIssue(pr.number)}`);
         return 0;
+      }
+      if (current.headRefOid !== head && rerunWait.length > 0) {
+        record('ci', 'fail', head, `pr=#${pr.number} head-moved ${current.headRefOid.slice(0, 7)}`, workHead);
+        error(`merge #${issue}: the PR head moved to ${current.headRefOid.slice(0, 7)} while run ${rerunWait.join(',')} was finishing — not re-run, not merged; run again on the new HEAD`);
+        return 1;
       }
       if (current.headRefOid === head) {
         // gh pr checks exits 8 while checks are pending; the JSON is still on stdout.
@@ -443,7 +507,19 @@ export function main(argv, deps = {}) {
           checks = out.stderr.includes('no checks') ? [] : null;
         }
         if (checks === null) throw new Error(`gh pr checks ${pr.number} failed: ${(out.stderr || out.stdout).trim()}`);
+        // The HEAD being waited for was refreshed on the base as it was then (step 4). Read after the
+        // checks, so nothing of the base goes unread between the last green answer and the merge:
+        // --match-head-commit pins the PR's head, not the base. A rerun is not sent for a stale HEAD either.
+        // Asked of `head`, the SHA that merge names: the worktree's HEAD can move on its own during the wait.
+        baseUnread = run('git', ['-C', o.worktree, 'fetch', 'origin', o.base]).status !== 0;
+        if (!baseUnread && run('git', ['-C', o.worktree, 'merge-base', '--is-ancestor', baseRef, head]).status !== 0) {
+          record('merge', 'fail', head, `pr=#${pr.number} base-moved`, workHead);
+          error(`merge #${issue}: ${baseRef} moved during the CI wait — not merged; run again to refresh ${head.slice(0, 7)} on it (6-2)`);
+          return BASE_MOVED_EXIT;
+        }
+        if (ciDeadline === null && checks.length > 0) ciDeadline = now().getTime() + Number(o.ciTimeout) * 1000;
         verdict = judgeChecks(checks, need);
+        rerunWait = [];
         if (verdict.state === 'fail') {
           const names = verdict.failed.map((check) => `${check.name}:${check.bucket}`).join(',');
           const ids = runIdsOf(verdict.failed);
@@ -452,7 +528,12 @@ export function main(argv, deps = {}) {
             error(`merge #${issue}: not merged — ${names} (6-3)`);
             return 1;
           }
-          for (const id of ids) {
+          rerunWait = runsStillGoing(checks, ids);
+          if (rerunWait.length > 0) {
+            log(`merge #${issue}: ${names} — waiting for run ${rerunWait.join(',')} to finish before re-running it (--ci-timeout ${o.ciTimeout}s)`);
+          }
+          const sent = [];
+          for (const id of rerunWait.length > 0 ? [] : ids) {
             // A rerun that is accepted raises the run's attempt number, whatever
             // its status: `completed` is both "before the rerun" and "the rerun
             // already finished". The attempt is read before sending; when it
@@ -475,14 +556,34 @@ export function main(argv, deps = {}) {
                 return after !== null && after > before ? '' : null;
               },
             });
-            if (again.status !== 0) throw new Error(`gh run rerun ${id} failed: ${(again.stderr || again.stdout).trim()}`);
+            if (again.status !== 0) {
+              // Not sent. A run this look did not see as going: asked again at a later look, under the same deadline.
+              if (RUN_STILL_GOING.test(`${again.stderr}\n${again.stdout}`)) {
+                rerunWait = [id];
+                break;
+              }
+              if (sent.length > 0) record('ci', 'fail', head, `checks=${verdict.summary} failed=${names} rerun=${sent.join(',')}`, workHead);
+              throw new Error(`gh run rerun ${id} failed: ${(again.stderr || again.stdout).trim()}`);
+            }
+            sent.push(id);
           }
-          rerun = true;
-          record('ci', 'fail', head, `checks=${verdict.summary} failed=${names} rerun=${ids.join(',')}`, workHead);
-        } else if (verdict.state === 'ok') break;
+          // Once per HEAD, by what was sent: a run refused above does not count unless another was accepted.
+          if (sent.length > 0) {
+            rerun = true;
+            rerunWait = [];
+            record('ci', 'fail', head, `checks=${verdict.summary} failed=${names} rerun=${sent.join(',')}`, workHead);
+          }
+        } else if (verdict.state === 'ok' && !baseUnread) break;
       }
-      if (now().getTime() >= deadline) {
-        error(`merge #${issue}: CI did not settle within ${o.ciTimeout}s (waiting for ${verdict?.waiting.join(', ') || `the PR head to reach ${head.slice(0, 7)}`})`);
+      if (ciDeadline === null && now().getTime() >= registerDeadline) {
+        error(`merge #${issue}: no CI registered on ${head.slice(0, 7)} within ${o.registerTimeout}s (--register-timeout; the PR head is ${current.headRefOid.slice(0, 7)})`);
+        return 124;
+      }
+      if (ciDeadline !== null && now().getTime() >= ciDeadline) {
+        const waitingFor = rerunWait.length > 0
+          ? `run ${rerunWait.join(',')} to finish before re-running it`
+          : verdict.state === 'ok' ? `git fetch origin ${o.base}` : verdict.waiting.join(', ');
+        error(`merge #${issue}: CI did not settle within ${o.ciTimeout}s (waiting for ${waitingFor})`);
         return 124;
       }
       sleep(Number(o.poll) * 1000);

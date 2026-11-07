@@ -331,7 +331,7 @@ LP の hero には、prereq 行の下に版行が**静的に**書いてある（
 
 ```bash
 # 日付は 2-2 の apply が CHANGELOG に書いた見出しから取る（JST で書き直さない。二重管理になる）
-RELEASE_DATE=$(awk -v v="## [${NEXT_VERSION}] - " 'index($0, v) == 1 { print substr($0, length(v) + 1); exit }' CHANGELOG.md)
+RELEASE_DATE=$(sed -n "s/^## \[${NEXT_VERSION}\] - //p" CHANGELOG.md | head -1)
 # Release の総数。これから作る v${NEXT_VERSION} の 1 本を足し、10 の位で切り捨てる（"N+" は下限の概数）
 RELEASE_COUNT=$(gh api repos/Kewton/CommandMate/releases --paginate --jq '.[].tag_name' | wc -l | tr -d ' ')
 RELEASE_FLOOR=$(( (RELEASE_COUNT + 1) / 10 * 10 ))

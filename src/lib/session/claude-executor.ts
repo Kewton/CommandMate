@@ -116,6 +116,20 @@ export function getCommandForTool(cliToolId: string): string {
 export interface ExecuteCommandOptions extends OpencodeRunOptions {
   /** Execution timeout in milliseconds (default: EXECUTION_TIMEOUT_MS) */
   timeoutMs?: number;
+  /**
+   * Issue #4115: a role, resolved and prepared by the caller. Schedule passes it
+   * (`job-executor`); the daily summary never does, which is the point of it not
+   * being resolved in here.
+   */
+  role?: HeadlessRoleArguments;
+}
+
+/** What a role adds to a headless run: paths and names, never the body. */
+export interface HeadlessRoleArguments {
+  args: readonly string[];
+  /** Codex's `-p` precedes `exec`; Copilot's `--agent` follows `gh copilot`. */
+  headlessPosition: 'leading' | 'trailing';
+  env: Readonly<Record<string, string>>;
 }
 
 /** Result of executing a claude -p command */
@@ -182,6 +196,15 @@ export function truncateOutput(output: string): string {
  * @returns Array of CLI arguments
  */
 export function buildCliArgs(message: string, cliToolId: string, permission?: string, options?: ExecuteCommandOptions): string[] {
+  const args = buildCliArgsWithoutRole(message, cliToolId, permission, options);
+  const role = options?.role;
+  if (!role || role.args.length === 0) return args;
+  if (role.headlessPosition === 'trailing') return [...args, ...role.args];
+  // `gh copilot` is the executable's first word, so the role goes after it.
+  return cliToolId === 'copilot' ? [args[0], ...role.args, ...args.slice(1)] : [...role.args, ...args];
+}
+
+function buildCliArgsWithoutRole(message: string, cliToolId: string, permission?: string, options?: ExecuteCommandOptions): string[] {
   switch (cliToolId) {
     case 'codex':
       return ['exec', message, '--sandbox', permission ?? 'workspace-write'];
@@ -989,9 +1012,11 @@ export async function executeClaudeCommand(
   // `opencode.json` read was the one under `PWD`. `opencode2 run` has no `--dir`
   // (v1 has), so the child's `PWD` is set to `cwd`. Other tools keep the
   // environment they had.
-  const env = cliToolId === 'opencode-v2'
+  const baseEnv = cliToolId === 'opencode-v2'
     ? { ...sanitizeEnvForChildProcess(), PWD: cwd }
     : sanitizeEnvForChildProcess();
+  // Issue #4115: composed by the caller from this same sanitized environment.
+  const env = options?.role ? { ...baseEnv, ...options.role.env } : baseEnv;
 
   return new Promise<ExecutionResult>((resolve) => {
     const child = execFile(

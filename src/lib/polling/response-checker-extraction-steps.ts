@@ -10,6 +10,8 @@ import {
   stripAnsi,
   OPENCODE_PROMPT_PATTERN,
   OPENCODE_PROMPT_AFTER_RESPONSE,
+  OPENCODE_TURN_COMPLETE_PATTERN,
+  isOpenCodeProgressBelowComposer,
   findCommandCodeChromeStart,
   findCopilotChromeStart,
   readCopilotStatusBar,
@@ -20,6 +22,7 @@ import {
   findCodexChromeStart,
   findCodexUserEchoIndex,
 } from '@/lib/detection/cli-patterns';
+import { findOpencodeV2ChromeStart } from '@/lib/detection/tools/opencode-v2/patterns';
 import { createLogger } from '@/lib/logger';
 import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
 
@@ -78,6 +81,20 @@ export function findChromeStart(
   // that one row. `findCodexChromeStart` reads the composer by its SGR
   // attributes (#2310) rather than by its placeholder wording, which is what the
   // previous guard did and why it stopped working at codex 0.15x.
+  //
+  // Issue #4175: opencode-v2 is the sixth. It draws V1's box — `┃` gutter rows
+  // over a `╹▀▀▀` border, the footer under it — and had no boundary: the
+  // composer's rows went into every reply, and the footer was kept out only by
+  // its column in the skip list (#4161), which a reply drawn further left would
+  // lose and a footer drawn further right would beat. opencode-v2 has no rule in
+  // `isTurnComplete`, so today this boundary reaches only the partial reading,
+  // which the poller does not save. Issue #4187 made that the design: V2's
+  // replies are never saved from the screen — the event stream's turn end and,
+  // for a stream that was down, the recovery sync on reconnect write them from
+  // the server's document (`lib/hooks/sources/opencode-v2/history`).
+  if (cliToolId === 'opencode-v2') {
+    return findOpencodeV2ChromeStart(lines.map(stripAnsi));
+  }
   return cliToolId === 'claude'
     ? findClaudeChromeStart(lines)
     : cliToolId === 'copilot'
@@ -678,6 +695,15 @@ function collectCompletedResponse(ctx: ExtractionContext): { response: string; e
   // stops, which is what it did before.
   let endIndex = cliToolId === 'codex' ? contentEnd : totalLines;
 
+  // Issue #4188: the opencode fallback cut below, by position. A completed turn
+  // ends on its `▣ Build · … · 2.5s` row and the chrome is drawn under it, so a
+  // row ABOVE the newest finished-turn row is the reply's, whatever words it
+  // holds. -1 (no such row in the window) leaves every row eligible, as before.
+  const openCodeTurnCompleteRow =
+    cliToolId === 'opencode' && chromeStart < 0
+      ? findLastOpenCodeTurnCompleteRow(lines, startIndex, contentEnd)
+      : -1;
+
   for (let i = startIndex; i < contentEnd; i++) {
     const line = lines[i];
     const cleanLine = stripAnsi(line);
@@ -706,7 +732,11 @@ function collectCompletedResponse(ctx: ExtractionContext): { response: string; e
     // one boundary available — and #1883 measured that a REPLY can contain
     // `Ask anything...`, so cutting the turn on it is a last resort, not the
     // primary rule.
-    if (cliToolId === 'opencode' && chromeStart < 0) {
+    //
+    // Issue #4188: and only below the turn's finished-turn row. Both patterns are
+    // words matched anywhere in the row, so a reply row quoting them (`Ask
+    // anything... is the placeholder`) above that row cut the reply short there.
+    if (cliToolId === 'opencode' && chromeStart < 0 && i > openCodeTurnCompleteRow) {
       if (OPENCODE_PROMPT_PATTERN.test(cleanLine) || OPENCODE_PROMPT_AFTER_RESPONSE.test(cleanLine)) {
         endIndex = i;
         break;
@@ -727,6 +757,22 @@ function collectCompletedResponse(ctx: ExtractionContext): { response: string; e
 }
 
 /**
+ * The newest opencode finished-turn row (`▣ Build · <model> · 2.5s`) in
+ * `[from, to)`, or -1 (Issue #4188).
+ *
+ * @param lines - The trimmed tmux buffer lines (ANSI intact)
+ * @param from - First row to search
+ * @param to - Exclusive end of the search
+ * @returns Index into `lines`, or -1
+ */
+function findLastOpenCodeTurnCompleteRow(lines: string[], from: number, to: number): number {
+  for (let i = to - 1; i >= from; i--) {
+    if (OPENCODE_TURN_COMPLETE_PATTERN.test(stripAnsi(lines[i]))) return i;
+  }
+  return -1;
+}
+
+/**
  * Build the result for a frame the completion rules accepted.
  *
  * The body of the completion branch of {@link extractResponse}, split out as it
@@ -740,7 +786,7 @@ function collectCompletedResponse(ctx: ExtractionContext): { response: string; e
  */
 export function extractCompletedResponse(ctx: ExtractionContext): ExtractionResult {
   const {
-    cliToolId, totalLines, openCodeCleanLines, bufferReset, captureWindowSaturated,
+    cliToolId, lines, totalLines, chromeStart, openCodeCleanLines, bufferReset, captureWindowSaturated,
     thinkingPattern, skipPatterns, findRecentUserPromptIndex,
   } = ctx;
 
@@ -755,8 +801,20 @@ export function extractCompletedResponse(ctx: ExtractionContext): ExtractionResu
   // that never scrolls away. `COPILOT_THINKING_PATTERN`'s braille alternative
   // matches any spinner glyph a reply happens to quote, and the turn would then
   // be reported unfinished for the rest of the session.
-  const responseTailLines = response.split('\n').slice(-THINKING_TAIL_LINE_COUNT).join('\n');
-  if (cliToolId !== 'copilot' && thinkingPattern.test(responseTailLines)) {
+  //
+  // Issue #4188: not the reply's tail on an opencode frame whose chrome was
+  // located. Its reply keeps the rows quoting the chrome's words by position
+  // (`OPENCODE_TRANSCRIPT_SKIP_PATTERNS`), so a reply ending on `Ask anything...
+  // is the input box, Thinking: is the progress row` would be read here as a
+  // running turn and the finished reply never saved. There the progress is read
+  // where the TUI draws it while a turn runs: under the composer's bottom border,
+  // as `isOpenCodeComplete` reads the busy hint, and as whole progress rows: the
+  // footer there also draws the cwd, which may hold the word (`/tmp/Thinking:demo`).
+  const stillRunning = cliToolId === 'opencode' && chromeStart >= 0
+    ? isOpenCodeProgressBelowComposer(lines.slice(chromeStart).map(stripAnsi))
+    : cliToolId !== 'copilot' &&
+      thinkingPattern.test(response.split('\n').slice(-THINKING_TAIL_LINE_COUNT).join('\n'));
+  if (stillRunning) {
     return incompleteResult(totalLines);
   }
 

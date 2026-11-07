@@ -134,6 +134,10 @@ export interface ReadModeStatus {
  * Always under `~/.commandmate/`, never the install directory and never the cwd:
  * `bind-key` is server-global and long-lived, so the path it names has to outlive
  * a `npx` cache eviction or a `cd`.
+ *
+ * Not moved by `CM_TMUX_SCRIPT_DIR`. `session-hook-scripts.ts` `AUTO_POPUP_SCRIPT`
+ * spells the same location for `sh` as `$HOME/.commandmate/bin/…` (Issue #4191);
+ * change both together.
  */
 export function getPagerScriptPath(): string {
   return join(homedir(), '.commandmate', 'bin', PAGER_SCRIPT_FILENAME);

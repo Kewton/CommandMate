@@ -1,0 +1,78 @@
+// round2.mjs <group> — Codex 整合性レビューの追試: compose(env の合成と実効 agent の順序) / format(厳密なバイト) / silent(全画面の採取)
+import * as L from './lib.mjs'; import fs from 'node:fs'; import path from 'node:path'; import { execFileSync, spawnSync } from 'node:child_process';
+const WT='<WORKTREE>', LS=`${WT}/scripts/opencode-v2/launch.sh`;
+const out=[];const w=(p,s,m)=>{fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,s,m?{mode:m}:{});};
+const MOCKP={mock:{name:'mock',package:'@opencode/ai/providers/openai-compatible',settings:{baseURL:`${L.MOCK_URL}/v1`,apiKey:'x'},models:{'mock-model':{name:'m'},'model-b':{name:'b'}}}};
+const PV1={mock:{npm:'@ai-sdk/openai-compatible',name:'mock',options:{baseURL:`${L.MOCK_URL}/v1`,apiKey:'x'},models:{'mock-model':{name:'m',tool_call:true},'model-b':{name:'b',tool_call:true}}}};
+async function v(tool,label,mk,{wait=14000}={}){
+  L.ensureMock();await L.sleep(150);const id=`r2-${tool}-${label}`.replace(/[^a-z0-9-]/gi,'').slice(0,50);const base=path.join(L.ROOT,'c',id);fs.rmSync(base,{recursive:true,force:true});const h=base+'/home',r=base+'/repo';L.repoSeed(r);fs.mkdirSync(h,{recursive:true});
+  const d=L.toolDef(tool,h,r,{launchSh:LS,port:tool==='opencode'?18281:18282});
+  const m=mk({h,r,d})??{};if(m.global!==undefined)w(tool==='opencode'?`${h}/.config/opencode/opencode.json`:`${h}/.config/opencode/opencode.jsonc`,JSON.stringify(m.global));
+  const since=Date.now();L.startPane(id,r,{...d.env,...(m.env??{})},[...d.cmd,...(m.args??[])]);await L.until(()=>/Ask anything|__EXIT=/.test(L.cap(id)),60000);await L.sleep(4000);
+  const start=L.cap(id,1000);const early=(/__EXIT=(\d+)/.exec(start)??[])[1];
+  const rec={tool,label,userEnv:m.userEnv,merged:m.env?.OPENCODE_CONFIG_CONTENT?.split(base).join('<D>'),argsExtra:m.args};
+  if(early!==undefined){rec.exit=+early;rec.pane=start.split(base).join('<D>').replace(/\n\s*\n+/g,'\n').slice(-300);}
+  else{rec.footer=(start.match(/(\S+)\s+·\s+(mock-model|model-b|\S+)\s+\S*/)||[])[0]?.trim().slice(0,50);await L.sendText(id,`CASE=${id} hello`);const g=await L.until(()=>L.lastMain(id,since),15000);await L.sleep(500);rec.req=!!g;if(g){rec.model=g.body.model;rec.role=L.whereIs(g.body,'ROLE_MARKER_K3');rec.user=L.whereIs(g.body,'USER_MARKER_U1');rec.baseKept=tool==='opencode-v2'?L.flat(g.body).includes('You are an AI agent running in OpenCode'):undefined;rec.planText=/Plan Mode|plan mode|READ-ONLY/.test(L.layers(g.body).system);}}
+  L.stop(id);await L.sleep(1200);out.push(rec);console.log(JSON.stringify(rec).slice(0,420));
+}
+const rf=(h)=>{w(h+'/r.md',L.ROLE_TEXT);return h+'/r.md';};
+const G={
+ compose:async()=>{
+  if(process.argv[3]==='v2')out.length=0;
+  const ag=(n,s)=>({[n]:{description:n,mode:'primary',...(s?{system:s}:{})}});
+  // env だけに provider / model を持つ（大域設定は空）。利用者の env と役割を合成
+  await v('opencode-v2','env-only-provider-model',({h})=>{const u={model:'mock/model-b',providers:MOCKP};return{global:{},userEnv:u,env:{OPENCODE_CONFIG_CONTENT:JSON.stringify({...u,agents:{build:{system:`{file:${rf(h)}}`}}})}};});
+  await v('opencode-v2','env-default-agent-plan',({h})=>{const u={default_agent:'plan'};return{userEnv:u,env:{OPENCODE_CONFIG_CONTENT:JSON.stringify({...u,agents:{plan:{system:`{file:${rf(h)}}`}}})}};});
+  await v('opencode-v2','env-default-custom-agent',({h})=>{const u={default_agent:'mine',agents:{mine:{description:'m',mode:'primary'}}};return{userEnv:u,env:{OPENCODE_CONFIG_CONTENT:JSON.stringify({default_agent:'mine',agents:{mine:{...u.agents.mine,system:`{file:${rf(h)}}`}}})}};});
+  await v('opencode-v2','env-user-system-overwritten',({h})=>{const u={agents:{build:{system:'USER_MARKER_U1'}}};return{userEnv:u,env:{OPENCODE_CONFIG_CONTENT:JSON.stringify({agents:{build:{system:`{file:${rf(h)}}`}}})}};});
+  await v('opencode-v2','env-replaces-not-merged',({h})=>({userEnv:{model:'mock/model-b'},env:{OPENCODE_CONFIG_CONTENT:JSON.stringify({agents:{build:{system:`{file:${rf(h)}}`}}})},global:{model:'mock/mock-model',providers:MOCKP}}));
+  await v('opencode-v2','env-jsonc-comment',({h})=>({env:{OPENCODE_CONFIG_CONTENT:`{/*c*/ "agents":{"build":{"system":"{file:${rf(h)}}"}}}`}}));
+  await v('opencode-v2','invalid-user-env-unmerged',()=>({env:{OPENCODE_CONFIG_CONTENT:'{bad'}}));
+  // 実効 agent の順序: 大域・プロジェクト・env の default_agent
+  const three={agents:{...ag('ga',''),...ag('pa',''),...ag('ea','')}};
+  await v('opencode-v2','order-global-only',()=>({global:{model:'mock/mock-model',providers:MOCKP,default_agent:'ga',...three}}));
+  await v('opencode-v2','order-global+project',({r})=>{w(r+'/opencode.jsonc',JSON.stringify({default_agent:'pa'}));return{global:{model:'mock/mock-model',providers:MOCKP,default_agent:'ga',...three}};});
+  await v('opencode-v2','order-global+project+env',({r})=>{w(r+'/opencode.jsonc',JSON.stringify({default_agent:'pa'}));return{global:{model:'mock/mock-model',providers:MOCKP,default_agent:'ga',...three},env:{OPENCODE_CONFIG_CONTENT:JSON.stringify({default_agent:'ea'})}};});
+  await v('opencode-v2','order-dotopencode',({r})=>{w(r+'/.opencode/opencode.jsonc',JSON.stringify({default_agent:'pa'}));return{global:{model:'mock/mock-model',providers:MOCKP,default_agent:'ga',...three}};});
+  // 上書き先が Markdown の利用者定義
+  await v('opencode-v2','overlay-on-user-markdown',({h})=>{w(`${h}/.config/opencode/agents/mine.md`,'---\ndescription: m\nmode: primary\n---\nUSER_MARKER_U1\n');return{env:{OPENCODE_CONFIG_CONTENT:JSON.stringify({default_agent:'mine',agents:{mine:{system:`{file:${rf(h)}}`}}})}};});
+  await v('opencode-v2','overlay-keeps-other-keys',({h})=>({global:{model:'mock/mock-model',providers:MOCKP,agents:{build:{model:'mock/model-b'}}},env:{OPENCODE_CONFIG_CONTENT:JSON.stringify({agents:{build:{system:`{file:${rf(h)}}`}}})}}));
+  // V1
+  await v('opencode','env-only-provider-model',({h})=>{const u={model:'mock/model-b',provider:PV1};return{global:{autoupdate:false,share:'disabled'},userEnv:u,env:{OPENCODE_CONFIG_CONTENT:JSON.stringify({...u,instructions:[rf(h)]})}};});
+  await v('opencode','env-default-agent-plan',({h})=>{const u={default_agent:'plan'};return{userEnv:u,env:{OPENCODE_CONFIG_CONTENT:JSON.stringify({...u,instructions:[rf(h)]})}};});
+  await v('opencode','env-instructions-appended',({h})=>{w(h+'/u.md','USER_MARKER_U1');const u={instructions:[h+'/u.md']};return{env:{OPENCODE_CONFIG_CONTENT:JSON.stringify({instructions:[h+'/u.md',rf(h)]})}};});
+  fs.writeFileSync(L.ROOT+'/rec-r2-compose.json',JSON.stringify(out,null,1));
+ },
+ format:async()=>{
+  const SPECIAL=['# 役割 ROLE_MARKER_K3 日本語の見出し','---','title: "not frontmatter"','---','single \' double " back `tick` triple """ tq \'\'\' end','dollar $HOME ${HOME} $(echo x) %s \\n backslash \\ end','braces {file:/etc/hosts} {env:HOME} <tag> & [x](y)','tail line FORMAT_TAIL_Z9'].join('\n');
+  const exact=(n,nl)=>{let s=SPECIAL+'\n';const line='あいうえお padding 0123456789\n';while(Buffer.byteLength(s)+Buffer.byteLength(line)<n-40)s+=line;const tail='TAIL_Z9'+(nl?'\n':'');const pad=n-Buffer.byteLength(s)-Buffer.byteLength(tail);s+='x'.repeat(pad)+tail;if(Buffer.byteLength(s)!==n)throw new Error('size');return s;};
+  const bodies={'16384-no-nl':exact(16384,false),'16384-nl':exact(16384,true),'16385-no-nl':exact(16385,false)};
+  for(const tool of ['claude','codex','command-code','opencode','opencode-v2','copilot'])for(const [k,b] of Object.entries(bodies)){
+   L.ensureMock();await L.sleep(100);const id=`f2-${tool}-${k}`.replace(/[^a-z0-9-]/gi,'');const base=path.join(L.ROOT,'c',id);fs.rmSync(base,{recursive:true,force:true});const h=base+'/home',r=base+'/repo';L.repoSeed(r);fs.mkdirSync(h,{recursive:true});
+   const d=L.toolDef(tool,h,r,{launchSh:LS,port:18283});let run;
+   if(tool==='opencode-v2'){w(h+'/r.md',b);run={env:{...d.env,OPENCODE_CONFIG_CONTENT:JSON.stringify({agents:{build:{system:`{file:${h}/r.md}`}}})},cmd:d.cmd};}else run=L.applyRole(tool,d,h,r,'role',b,'x');
+   const since=Date.now();L.startPane(id,r,run.env,run.cmd);await L.until(()=>L.READY[tool].test(L.cap(id)),60000);await L.sleep(5000);
+   const p=L.cap(id);if(/No, keep manual mode/.test(p)){L.keys(id,'Down');await L.sleep(300);L.keys(id,'Enter');await L.sleep(1500);}
+   await L.sendText(id,`CASE=${id} hello`);const g=await L.until(()=>L.lastMain(id,since),20000);await L.sleep(400);
+   const rec={tool,body:k,bytes:Buffer.byteLength(b),req:!!g};if(g){const l=L.layers(g.body);const inst=l.system+l.developer;rec.layer=L.whereIs(g.body,'ROLE_MARKER_K3');rec.exactUntrimmed=inst.includes(b);rec.exactTrimmed=inst.includes(b.trim());rec.tailPresent=inst.includes('TAIL_Z9');rec.bytesFollowingTail=JSON.stringify(inst.slice(inst.indexOf('TAIL_Z9')+7,inst.indexOf('TAIL_Z9')+17));}
+   L.stop(id);await L.sleep(800);out.push(rec);console.log(JSON.stringify(rec));
+  }
+  fs.writeFileSync(L.ROOT+'/rec-r2-format.json',JSON.stringify(out,null,1));
+ },
+ silent:async()=>{
+  // 無言と書いた失敗の全画面。ロールなしの対照と差分だけ見る
+  const CASES=[['codex','missing-profile',(c,r)=>r.cmd.push('-p','cm-role-nope')],['command-code','missing-mod',(c,r)=>r.cmd.push('--mod',c.h+'/nope.ts')],['command-code','bad-mod',(c,r)=>{w(c.h+'/b.ts','export default function (cmd {');r.cmd.push('--mod',c.h+'/b.ts');}],['command-code','throw-mod',(c,r)=>{w(c.h+'/t.ts','export default function(cmd){ throw new Error("boom"); }');r.cmd.push('--mod',c.h+'/t.ts');}],['opencode','missing-instr',(c,r)=>{r.env.OPENCODE_CONFIG_CONTENT=JSON.stringify({instructions:[c.h+'/nope.md']});}],['opencode-v2','unknown-default',(c,r)=>{r.env.OPENCODE_CONFIG_CONTENT=JSON.stringify({default_agent:'cm-role-nope'});}],['copilot','missing-agent',(c,r)=>r.cmd.push('--agent','cm-role-nope')],['copilot','bad-frontmatter',(c,r)=>{w(c.h+'/.copilot/agents/cm-role-b.agent.md','---\nname: [unterminated\n---\nX\n');r.cmd.push('--agent','cm-role-b');}]];
+  for(const [tool,label,mut] of CASES){
+   L.ensureMock();await L.sleep(100);const panes={};
+   for(const kind of ['case','control']){const id=`s2-${tool}-${label}-${kind}`.replace(/[^a-z0-9-]/gi,'').slice(0,50);const base=path.join(L.ROOT,'c',id);fs.rmSync(base,{recursive:true,force:true});const h=base+'/home',r=base+'/repo';L.repoSeed(r);fs.mkdirSync(h,{recursive:true});const d=L.toolDef(tool,h,r,{launchSh:LS,port:18284});const run={env:{...d.env},cmd:[...d.cmd]};if(kind==='case')mut({h,r},run);
+    const logs0=Date.now();L.startPane(id,r,run.env,run.cmd);await L.until(()=>/Ask anything|__EXIT=|❯|Ask Codex/.test(L.cap(id)),60000);await L.sleep(6000);const a=L.cap(id,1000);await L.sendText(id,`CASE=${id} hello`);await L.sleep(5000);const b=L.cap(id,1000);
+    const n=(s)=>s.split(base).join('<D>').split('\n').map((x)=>x.trim().replace(id,'<ID>').replace(/\d/g,'#')).filter((x)=>x&&!/[⣀-⣿]|^[█▀▄ ]+$/.test(x));panes[kind]={a:n(a),b:n(b)};
+    if(kind==='case'){panes.logFiles=[];const walk=(d0,dep=0)=>{if(dep>5||!fs.existsSync(d0))return;for(const e of fs.readdirSync(d0,{withFileTypes:true})){const f=path.join(d0,e.name);if(e.isDirectory())walk(f,dep+1);else if(/\.log$/.test(e.name)&&fs.statSync(f).size<2e6){const t=fs.readFileSync(f,'utf8');const hit=t.split('\n').filter((x)=>/cm-role-nope|cm-role-b|nope\.|boom|b\.ts|t\.ts/.test(x)).slice(0,3).map((x)=>x.split(base).join('<D>').slice(0,220));if(hit.length)panes.logFiles.push({file:f.split(base).join('<D>'),hit});}}};walk(h);}
+    L.stop(id);await L.sleep(1000);}
+   const onlyInCase=[...new Set([...panes.case.a,...panes.case.b])].filter((x)=>!panes.control.a.includes(x)&&!panes.control.b.includes(x)&&!/CASE=|<ID>/.test(x)).slice(0,14);
+   const rec={tool,label,linesOnlyInFailureRun:onlyInCase,keywordLines:[...panes.case.a,...panes.case.b].filter((x)=>/not found|no such|warn|error|fail|cannot|invalid|mod\b|profile|agent/i.test(x)).slice(0,10),logFiles:panes.logFiles};out.push(rec);console.log(JSON.stringify(rec).slice(0,900));
+  }
+  fs.writeFileSync(L.ROOT+'/rec-r2-silent.json',JSON.stringify(out,null,1));
+ },
+};
+await G[process.argv[2]]();

@@ -164,7 +164,7 @@ describe('main: publishes once', () => {
     const fake = fakeGit();
     const { code } = runMain(fake, '--label', 'feature');
     expect(code).toBe(0);
-    expect(fake.gitCalls('push')[0].args).toEqual(['-C', worktree, 'push', '-u', 'origin', 'feature/3477-worktree']);
+    expect(fake.gitCalls('push')[0].args).toEqual(['-C', worktree, 'push', 'origin', `${HEAD_A}:refs/heads/feature/3477-worktree`]);
     const create = fake.ghCalls('pr create');
     expect(create).toHaveLength(1);
     expect(create[0].args).toEqual(expect.arrayContaining(['--base', 'develop', '--head', 'feature/3477-worktree', '--label', 'feature']));

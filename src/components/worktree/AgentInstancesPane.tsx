@@ -33,7 +33,7 @@ import {
   Forward,
 } from 'lucide-react';
 import { useSessionRelays } from '@/lib/relay/use-session-relays';
-import { resolveRelayBadges, type RelayBadge } from '@/lib/relay/relay-badges';
+import { relayToneNeedsAttention, resolveRelayBadges, type RelayBadge } from '@/lib/relay/relay-badges';
 import { RelayUnplacedHeldList } from '@/components/worktree/RelayUnplacedHeldList';
 import {
   CLI_TOOL_IDS,
@@ -62,6 +62,7 @@ import { InstanceCliCommandsModal } from '@/components/worktree/InstanceCliComma
 // re-implemented so the pane cannot grow its own idea of what an update does to
 // a live session.
 import { AgentUpdatesCard } from '@/components/settings';
+import { InstanceRolesSection } from '@/components/roles/InstanceRolesSection';
 import { Spinner } from '@/components/ui/Spinner';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { TruncationTooltip } from '@/components/common/TruncationTooltip';
@@ -227,12 +228,19 @@ function useAgentSourceByInstance(
       return;
     }
     let cancelled = false;
+    let lastRequestSeq = 0;
+    let adoptedSeq = 0;
     const read = async (): Promise<void> => {
+      const requestSeq = ++lastRequestSeq;
       try {
         const response = await fetch(`/api/worktrees/${worktreeId}`);
         if (!response.ok) return;
         const body: Worktree = await response.json();
         if (cancelled) return;
+        // Issue #4160: a read held up while the tab was hidden can answer after the one
+        // made on coming back. Older than an answer already taken, it has nothing to add.
+        if (requestSeq <= adoptedSeq) return;
+        adoptedSeq = requestSeq;
         const next: Partial<Record<string, AgentEventSourceView>> = {};
         for (const [instanceId, status] of Object.entries(body.sessionStatusByInstance ?? {})) {
           // Absent is the ordinary answer and stays absent: the row's
@@ -247,11 +255,20 @@ function useAgentSourceByInstance(
         // look like a stream that just recovered.
       }
     };
-    void read();
-    const timer = setInterval(() => void read(), AGENT_SOURCE_POLL_INTERVAL_MS);
+    // Issue #4160: nobody is looking at a hidden tab, and coming back reads at once.
+    const readUnlessHidden = (): void => {
+      if (document.visibilityState !== 'hidden') void read();
+    };
+    const onVisibilityChange = (): void => {
+      if (document.visibilityState === 'visible') void read();
+    };
+    readUnlessHidden();
+    const timer = setInterval(readUnlessHidden, AGENT_SOURCE_POLL_INTERVAL_MS);
+    document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
       cancelled = true;
       clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, [worktreeId, hasSubscriptionSource, provided]);
 
@@ -261,7 +278,7 @@ function useAgentSourceByInstance(
 /**
  * Token classes for a relay badge (Issue #2377).
  *
- * `prompt` and (Issue #4082) `held` are drawn as a warning, because they are
+ * `prompt`, (Issue #4082) `held` and (Issue #4105) `blocked` are drawn as a warning, because they are
  * the ones that mean somebody has to act; the other two are statements of fact about work
  * that is proceeding, and are drawn in the same muted grey as the model and
  * event-source lines above them. Semantic tokens only — see
@@ -269,7 +286,10 @@ function useAgentSourceByInstance(
  */
 export function relayBadgeClassName(badge: RelayBadge): string {
   // Issue #4082: `held` needs somebody to act too (look, then resolve).
-  return badge.tone === 'prompt' || badge.tone === 'held' ? 'text-warning' : 'text-muted-foreground';
+  // Issue #4105: so does `blocked` (answer this pane's dialog).
+  return relayToneNeedsAttention(badge.tone)
+    ? 'text-warning'
+    : 'text-muted-foreground';
 }
 
 // ============================================================================
@@ -300,6 +320,12 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Issue #4117: saved or not known to be saved, with the roster not read back. Not an
+  // error, but adding again could make a second instance, so add stays off until the
+  // roster shown changes.
+  const [unverified, setUnverified] = useState<'saved' | 'unknown' | null>(null);
+  const rosterShown = instances.map((inst) => `${inst.id}\0${inst.alias}`).join('\0');
+  useEffect(() => setUnverified(null), [rosterShown]);
   // Per-id alias edit drafts (decoupled from prop to allow free typing).
   const [aliasDrafts, setAliasDrafts] = useState<Record<string, string>>({});
   // Base tool for the "add instance" control.
@@ -386,6 +412,12 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
   // Issue #4082: a held delivery to an instance the roster no longer has.
   const unplacedHeld = useMemo(
     () => relays.heldUnplaced(instances.map((inst) => inst.id)),
+    [relays, instances],
+  );
+  // Issue #4193: a closed relay's stopped expiry notice to an instance the
+  // roster no longer has (removed without --kill: its session lives on).
+  const unplacedClosedBlocked = useMemo(
+    () => relays.closedBlockedUnplaced(instances.map((inst) => inst.id)),
     [relays, instances],
   );
 
@@ -481,14 +513,25 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
    * comes, so it cannot overwrite — or re-allocate an id taken by — a write the
    * header's "+" issued while this one was waiting.
    */
-  const writeRoster = useAgentInstancesRoster(worktreeId, instances, onInstancesChange);
+  const writeRoster = useAgentInstancesRoster(worktreeId, onInstancesChange);
   const persist = useCallback(
     async (build: RosterBuilder) => {
       setSaving(true);
       setError(null);
       try {
         const result = await writeRoster(build);
-        if (result.status === 'failed') setError(t('agentInstanceSaveError'));
+        if (result.status === 'saved_unverified') setUnverified(result.unconfirmed ? 'unknown' : 'saved');
+        if (result.status === 'failed') {
+          setError(
+            t(
+              result.error === 'roster_unreadable'
+                ? 'agentInstanceRosterUnreadable'
+                : result.error === 'roster_changed'
+                  ? 'agentInstanceRosterChanged'
+                  : 'agentInstanceSaveError',
+            ),
+          );
+        }
       } finally {
         setSaving(false);
       }
@@ -616,6 +659,8 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
             awaiting: relays.awaitedBy(inst.id),
             // Issue #4082: payloads to this session whose delivery is not known.
             held: relays.heldFor(inst.id),
+            // Issue #4193: a closed relay's expiry notice stopped on this row's dialog.
+            closedBlocked: relays.closedBlockedFor(inst.id),
             aliasOf,
           });
           // Issue #2395: this row IS the composer's target, so "delegate to it"
@@ -829,6 +874,7 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
       {/* Issue #4082: held deliveries whose requester has no row here. */}
       <RelayUnplacedHeldList
         relays={unplacedHeld}
+        closedBlocked={unplacedClosedBlocked}
         aliasOf={aliasOf}
         className="mt-2"
       />
@@ -852,7 +898,7 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
         <button
           type="button"
           data-testid="agent-instance-add"
-          disabled={saving || atMax}
+          disabled={saving || atMax || unverified !== null}
           onClick={handleAdd}
           className="flex items-center gap-1 text-sm font-medium px-3 py-2 rounded-md border border-accent-200 dark:border-accent-700 bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300 hover:bg-accent-100 dark:hover:bg-accent-900/50 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
         >
@@ -888,6 +934,12 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
         </p>
       )}
 
+      {unverified !== null && (
+        <p role="status" data-testid="agent-instances-saved-unverified" className="mt-3 text-xs text-warning">
+          {t(unverified === 'unknown' ? 'agentInstanceOutcomeUnknown' : 'agentInstanceSavedUnverified')}
+        </p>
+      )}
+
       {/* Ollama model selector (shown when any instance backs vibe-local) */}
       {hasVibeLocal && (
         <VibeLocalSettings
@@ -898,6 +950,13 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
           onVibeLocalContextWindowChange={onVibeLocalContextWindowChange}
         />
       )}
+
+      {/* Issue #4117: each session's role. Also behind a disclosure that reads
+          nothing until opened, for the reason given just below. */}
+      <InstanceRolesSection
+        worktreeId={worktreeId}
+        rosterKey={instances.map((inst) => `${inst.id}:${inst.cliTool}`).join(',')}
+      />
 
       {/* Issue #2067: the two actions #2065 and #2066 deliberately left out —
           "make this the default" and "and the branches I already have".

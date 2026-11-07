@@ -32,6 +32,8 @@ vi.mock('@/hooks/useRealtimeConnection', () => ({
 
 import { ServiceWorkerRegistrar } from '@/components/pwa/ServiceWorkerRegistrar';
 import { VersionMismatchBanner } from '@/components/layout/VersionMismatchBanner';
+import { PWA_UPDATE_PROMPT_Z_INDEX, Z_INDEX } from '@/config/z-index';
+import { OPEN_MODAL_SELECTOR } from '@/lib/new-task/modal-open';
 
 describe('ServiceWorkerRegistrar', () => {
   const register = vi.fn(() => Promise.resolve({}));
@@ -129,6 +131,49 @@ describe('ServiceWorkerRegistrar', () => {
       expect(toast.className).toContain('right-0');
       // `inset-x-0` is what made it span the whole footer.
       expect(toast.className).not.toContain('inset-x-0');
+    });
+
+    // Issue #4103. Where these end up on screen is measured in a real browser
+    // (tests/e2e/pwa-update-toast-4103.spec.ts); this pins the two choices behind
+    // it, so a later edit cannot undo them without a red test in the unit run.
+    it('draws under dialogs, not at the toast layer', async () => {
+      render(<ServiceWorkerRegistrar />);
+      const toast = await screen.findByTestId('pwa-update-toast');
+      expect(Number(toast.style.zIndex)).toBe(PWA_UPDATE_PROMPT_Z_INDEX);
+      expect(Number(toast.style.zIndex)).toBeLessThan(Z_INDEX.MODAL);
+    });
+
+    it('leaves the bottom of a phone screen and the PC send button alone', async () => {
+      render(<ServiceWorkerRegistrar />);
+      const toast = await screen.findByTestId('pwa-update-toast');
+      expect(toast.className).toContain('max-md:bottom-auto');
+      expect(toast.className).toContain('max-md:top-[');
+      expect(toast.className).toContain('pr-[4.25rem]');
+    });
+
+    it('steps aside only for a dialog inside main, which it would otherwise cover', async () => {
+      render(<ServiceWorkerRegistrar />);
+      const toast = await screen.findByTestId('pwa-update-toast');
+      // jsdom applies no Tailwind, so the behaviour itself is in the e2e spec.
+      expect(toast.className).toContain("[role='dialog'][aria-modal='true']");
+      // What `lib/new-task/modal-open.ts` does not count as a modal either. This
+      // selector cannot import that one (Tailwind needs the literal class).
+      expect(OPEN_MODAL_SELECTOR).toContain(':not([data-testid="prompt-panel"])');
+      expect(OPEN_MODAL_SELECTOR).toContain(':not([data-state="closed"])');
+      expect(toast.className).toContain(":not([data-testid='prompt-panel'])");
+      expect(toast.className).toContain(":not([data-state='closed'])");
+      expect(toast.className).toContain(":not([data-hidden='true']_*)");
+      expect(toast.className).toContain(":not([hidden]_*)");
+    });
+
+    it('can be put away, and offers a different waiting worker again', async () => {
+      render(<ServiceWorkerRegistrar />);
+      await screen.findByTestId('pwa-update-toast');
+      act(() => {
+        screen.getByTestId('pwa-update-toast-dismiss').click();
+      });
+      expect(screen.queryByTestId('pwa-update-toast')).toBeNull();
+      expect(waitingWorker.postMessage).not.toHaveBeenCalled();
     });
 
     it('stands down while the version-mismatch banner is showing', async () => {

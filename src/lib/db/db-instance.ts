@@ -13,6 +13,9 @@ import { openDatabaseWithAbiRecovery } from './abi-recovery';
 import { startAgentSessionCostSampler, stopAgentSessionCostSampler } from './agent-session-cost-sampler';
 import { getEnv } from '@/lib/env';
 import { isPathWithin } from '@/config/system-directories';
+import { isInsideVitestWorker, isUnderTest, type EnvLike } from '@/lib/test-run-detection';
+
+export { isInsideVitestWorker };
 
 declare global {
   // Issue #4086: closers of the connections getDbInstance() opened under
@@ -37,39 +40,6 @@ function nodeFs(): typeof import('fs') {
 function nodeTmpdir(): string {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   return (require('os') as typeof import('os')).tmpdir();
-}
-
-type EnvLike = Readonly<Record<string, string | undefined>>;
-
-/**
- * Issue #4086: is this code running inside a Vitest worker?
- *
- * Read off the worker state Vitest itself installs on `globalThis` (its
- * `getWorkerState()` reads the same `__vitest_worker__` global, in the forks
- * and threads pools alike), not off environment variables: the environment is
- * both inherited and editable. A test may swap `NODE_ENV` to `production`
- * mid-run (tests/unit/pwa/ServiceWorkerRegistrar.test.tsx does) and must stay
- * guarded, while a child process started outside Vitest inherits `VITEST` and
- * must not be taken for a test run.
- */
-export function isInsideVitestWorker(): boolean {
-  const state = (globalThis as { __vitest_worker__?: unknown }).__vitest_worker__;
-  return typeof state === 'object' && state !== null;
-}
-
-/**
- * Issue #4086: is this a test run (the guard's on-switch)?
- *
- * Inside a Vitest worker: always, whatever `NODE_ENV` says right now.
- * Outside one: only with `NODE_ENV=test` (a test's own child process, which
- * also inherits the per-process CM_DB_PATH). `VITEST` alone never counts —
- * the daemon spreads `process.env` into the server it starts
- * (src/cli/utils/daemon.ts buildChildEnv), so a `NODE_ENV=production` server
- * started from a shell where `VITEST` was left behind opens its real database.
- */
-function isUnderTest(env: EnvLike, inVitestWorker: boolean): boolean {
-  if (inVitestWorker) return true;
-  return (env.NODE_ENV ?? '').trim() === 'test';
 }
 
 /** realpath of the nearest existing ancestor, with the missing tail re-joined. */
@@ -108,8 +78,7 @@ export const TEST_DB_ROOT_ENV = 'CM_TEST_DB_ROOT';
  * databases tests/setup.ts hands out — not under the temp dir, because
  * `validateDbPath` rejects /tmp and /var, where every OS temp dir lives). Not
  * only the one setup path, so tests that name their own database keep working.
- * Active inside a Vitest worker (even while a test has swapped `NODE_ENV`) and
- * in a process with `NODE_ENV=test`; a no-op otherwise, so a real server is
+ * Active when {@link isUnderTest} says so; a no-op otherwise, so a real server is
  * never affected — including one that inherited `VITEST` but runs with
  * `NODE_ENV=production`.
  *
@@ -197,7 +166,7 @@ export function getDbInstance(): Database.Database {
       throw error;
     }
     dbInstance = db;
-    if (isUnderTest(process.env, isInsideVitestWorker())) {
+    if (isUnderTest()) {
       (globalThis.__commandmateTestDbClosers ??= new Set()).add(closeDbInstance);
     }
 
