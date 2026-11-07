@@ -11,9 +11,7 @@ import {
   OPENCODE_PROMPT_PATTERN,
   OPENCODE_PROMPT_AFTER_RESPONSE,
   OPENCODE_TURN_COMPLETE_PATTERN,
-  OPENCODE_COMPOSER_BOTTOM_BORDER,
-  OPENCODE_PROCESSING_INDICATOR,
-  OPENCODE_THINKING_PROGRESS_ROW,
+  isOpenCodeProgressBelowComposer,
   findCommandCodeChromeStart,
   findCopilotChromeStart,
   readCopilotStatusBar,
@@ -775,29 +773,6 @@ function findLastOpenCodeTurnCompleteRow(lines: string[], from: number, to: numb
 }
 
 /**
- * Whether an opencode frame shows a turn still running under the composer's
- * bottom border `╹▀▀▀…` (Issue #4188): a progress row there, read whole — the
- * spinner's `Thinking:` row ({@link OPENCODE_THINKING_PROGRESS_ROW}) or the busy
- * hint ({@link OPENCODE_PROCESSING_INDICATOR}). The footer's cwd also sits there,
- * so the bare word is not read: a cwd of `/tmp/Thinking:demo` is not a running
- * turn. `false` when the chrome has no border (the permission dialog drawn in the
- * composer's place runs to the last row; the completion check never passes it).
- *
- * @param lines - The trimmed tmux buffer lines (ANSI intact)
- * @param chromeStart - Where `findOpenCodeChromeStart` put the chrome (>= 0)
- * @returns Whether a progress row is drawn below the border
- */
-function isOpenCodeProgressBelowComposer(lines: string[], chromeStart: number): boolean {
-  for (let i = lines.length - 1; i >= chromeStart; i--) {
-    if (OPENCODE_COMPOSER_BOTTOM_BORDER.test(stripAnsi(lines[i]))) {
-      const below = lines.slice(i + 1).map(stripAnsi).join('\n');
-      return OPENCODE_THINKING_PROGRESS_ROW.test(below) || OPENCODE_PROCESSING_INDICATOR.test(below);
-    }
-  }
-  return false;
-}
-
-/**
  * Build the result for a frame the completion rules accepted.
  *
  * The body of the completion branch of {@link extractResponse}, split out as it
@@ -836,7 +811,7 @@ export function extractCompletedResponse(ctx: ExtractionContext): ExtractionResu
   // as `isOpenCodeComplete` reads the busy hint, and as whole progress rows: the
   // footer there also draws the cwd, which may hold the word (`/tmp/Thinking:demo`).
   const stillRunning = cliToolId === 'opencode' && chromeStart >= 0
-    ? isOpenCodeProgressBelowComposer(lines, chromeStart)
+    ? isOpenCodeProgressBelowComposer(lines.slice(chromeStart).map(stripAnsi))
     : cliToolId !== 'copilot' &&
       thinkingPattern.test(response.split('\n').slice(-THINKING_TAIL_LINE_COUNT).join('\n'));
   if (stillRunning) {

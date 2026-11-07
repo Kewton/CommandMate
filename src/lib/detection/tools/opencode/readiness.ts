@@ -4,7 +4,8 @@
  *
  * The launch wait (`OpenCodeTool.waitForReady`) is not this test: it accepts
  * the `Connect a provider` overlay so a launch does not burn its window there,
- * and `OPENCODE_IDLE_COMPOSER_PATTERN` only anchors the placeholder's start —
+ * and `OPENCODE_IDLE_COMPOSER_PATTERN` only anchors the placeholder's row in the
+ * box over its bottom border (#4209) —
  * it does not say the rest of the input box is empty, and opencode stops
  * painting the placeholder once a session has answered a turn (every
  * post-turn frame in `tests/fixtures/opencode-live-2047/w80/` has an input box

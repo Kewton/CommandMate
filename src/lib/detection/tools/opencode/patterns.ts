@@ -43,9 +43,92 @@ export const OPENCODE_PROMPT_PATTERN = /Ask anything(?:\.\.\.|\u2026)/;
  *
  * opencode 1.18.31 以降は見本文を U+2026（`…`）で描く。ASCII の `...` も実行ファイルに
  * 残っているので両方を受け付ける（Issue #2915、2026-09-28 に実行ファイルから確認）。
+ *
+ * Read by position (Issue #4209): the placeholder row, then only gutter rows (the
+ * blank rows and the agent/model row), then the composer's bottom border `╹▀▀▀…` —
+ * the box as every V1 frame under `tests/fixtures/opencode*` and
+ * `tests/unit/lib/detection/fixtures/opencode-live-*` that draws the placeholder
+ * draws it. The gutter alone does not say "composer": the transcript echoes each
+ * sent message in the same `┃` box, and at 200 columns the echo's blank gutter row
+ * carries the sidebar's session title, so a title holding the phrase put an empty
+ * composer on the pane (`opencode-live-2047/w200/{phrase-in-response,
+ * numbered-answer,sidebar-title-phrase}.txt`). V2's pattern had the same defect
+ * (#4188). The echo block ends in a non-gutter row, never the border.
+ *
+ * Kept a `RegExp` (a subclass whose `exec` is {@link findOpenCodeIdleComposer})
+ * because liveness's `alivePatterns` takes regular expressions; the send path's
+ * readiness wait and the status detector call the function directly.
+ * **Guaranteed**: `test`, `exec`, and the string methods that go through `exec` on
+ * a non-global pattern (`String.prototype.match` / `search` / `replace`). Rows are
+ * split on LF only. **Not guaranteed**: `split` and `matchAll` (they construct
+ * `Symbol.species`, the native `RegExp`), and a copy built from `source` and
+ * `flags` — native `^` under the `m` flag also starts a line after U+2028 / U+2029 /
+ * CR, and the copy retries from every gutter row. `source` still spells the rule.
  */
-export const OPENCODE_IDLE_COMPOSER_PATTERN =
-  /^[^\S\n]*[\u2502\u2503][^\S\n]*Ask anything(?:\.\.\.|\u2026)/m;
+export const OPENCODE_IDLE_COMPOSER_PATTERN: RegExp = new (class OpencodeIdleComposerPattern extends RegExp {
+  static get [Symbol.species](): RegExpConstructor {
+    return RegExp;
+  }
+
+  constructor() {
+    super(
+      '^[^\\S\\n]*[\\u2502\\u2503][^\\S\\n]*Ask anything(?:\\.\\.\\.|\\u2026)[^\\n]*\\n(?:[^\\S\\n]*[\\u2502\\u2503][^\\n]*\\n)*[^\\S\\n]*\\u2579\\u2580{4,}',
+      'm'
+    );
+  }
+
+  override exec(text: string): RegExpExecArray | null {
+    const found = findOpenCodeIdleComposer(text);
+    if (!found) return null;
+    const match = [text.slice(found.start, found.end)] as unknown as RegExpExecArray;
+    match.index = found.start;
+    match.input = text;
+    return match;
+  }
+})();
+
+/** The placeholder at the start of a gutter row (Issue #1883). */
+const IDLE_COMPOSER_PLACEHOLDER_ROW = /^[^\S\n]*[\u2502\u2503][^\S\n]*Ask anything(?:\.\.\.|\u2026)/;
+/** A row of one of the `┃` boxes. */
+const IDLE_COMPOSER_GUTTER_ROW = /^[^\S\n]*[\u2502\u2503]/;
+/** The composer's bottom border, as the match ends on it. */
+const IDLE_COMPOSER_BORDER_ROW = /^[^\S\n]*\u2579\u2580{4,}/;
+
+/**
+ * The empty composer of {@link OPENCODE_IDLE_COMPOSER_PATTERN}, by position, in one
+ * pass (Issue #4209, the shape of V2's `findOpencodeV2IdleComposer` from #4188): the
+ * first placeholder row whose gutter run reaches a bottom border `╹▀▀▀…`, as
+ * character offsets from the placeholder row's start to the end of the border's
+ * `▀` run; or null.
+ *
+ * Each border walks up its own run of gutter rows once, and the runs do not
+ * overlap (a border row is not a gutter row), so the work is linear in the rows.
+ * Rows are split on LF only.
+ *
+ * @param text - ANSI-stripped capture, box drawing intact
+ * @returns The match's `[start, end)` in `text`, or null
+ */
+export function findOpenCodeIdleComposer(text: string): { start: number; end: number } | null {
+  const rows = text.split('\n');
+  const offsets: number[] = new Array(rows.length);
+  let offset = 0;
+  for (let i = 0; i < rows.length; i++) {
+    offsets[i] = offset;
+    offset += rows[i].length + 1;
+  }
+  for (let border = 1; border < rows.length; border++) {
+    const borderMatch = IDLE_COMPOSER_BORDER_ROW.exec(rows[border]);
+    if (!borderMatch) continue;
+    let placeholder = -1;
+    for (let j = border - 1; j >= 0 && IDLE_COMPOSER_GUTTER_ROW.test(rows[j]); j--) {
+      if (IDLE_COMPOSER_PLACEHOLDER_ROW.test(rows[j])) placeholder = j;
+    }
+    if (placeholder >= 0) {
+      return { start: offsets[placeholder], end: offsets[border] + borderMatch[0].length };
+    }
+  }
+  return null;
+}
 
 /**
  * OpenCode prompt pattern after response completion (Issue #379)
@@ -268,6 +351,87 @@ export function isOpencodeProcessingFooter(text: string): boolean {
     }
   }
   return OPENCODE_PROCESSING_INDICATOR.test(rows.slice(border + 1).join('\n'));
+}
+
+/**
+ * The rows under the composer's bottom border `╹▀▀▀…`, joined, or null when no
+ * border is at or below `from` (Issue #4209).
+ */
+function rowsBelowComposerBorder(lines: readonly string[], from: number): string | null {
+  for (let i = lines.length - 1; i >= Math.max(0, from); i--) {
+    if (OPENCODE_COMPOSER_BOTTOM_BORDER.test(lines[i])) return lines.slice(i + 1).join('\n');
+  }
+  return null;
+}
+
+/**
+ * Whether the spinner's `Thinking:` row ({@link OPENCODE_THINKING_PROGRESS_ROW}) is
+ * drawn under the composer's bottom border (Issue #4209). The thinking half of
+ * {@link isOpenCodeProgressBelowComposer}; the status detector reads the busy hint
+ * half in its own branch ({@link isOpencodeProcessingFooter}), which keeps its own
+ * reason code. `false` when there is no border.
+ *
+ * @param lines - ANSI-stripped rows, box drawing intact
+ * @param from - The first row the border may be on (default 0)
+ */
+export function isOpenCodeThinkingBelowComposer(lines: readonly string[], from = 0): boolean {
+  const below = rowsBelowComposerBorder(lines, from);
+  return below !== null && OPENCODE_THINKING_PROGRESS_ROW.test(below);
+}
+
+/**
+ * Whether an opencode frame shows a turn still running under the composer's
+ * bottom border `╹▀▀▀…` (Issue #4188, shared by Issue #4209): a progress row there,
+ * read whole — the spinner's `Thinking:` row ({@link OPENCODE_THINKING_PROGRESS_ROW})
+ * or the busy hint ({@link OPENCODE_PROCESSING_INDICATOR}). The footer's cwd also
+ * sits there, so the bare word is not read: a cwd of `/tmp/Thinking:demo` is not a
+ * running turn. `false` when the frame has no border (the permission dialog drawn
+ * in the composer's place runs to the last row).
+ *
+ * The rule the poller's save (`extractCompletedResponse`) reads. Lives here, beside
+ * the patterns it combines, so the status detector (`./detect.ts` and the thinking
+ * step of `../run-detection.ts`) reads the same rule rather than a copy: before
+ * #4209 the save read this while the status read the word in the last five rows,
+ * so a finished reply was saved while the session showed `running`.
+ *
+ * @param lines - ANSI-stripped rows, box drawing intact
+ * @param from - The first row the border may be on (the chrome's start; default 0)
+ */
+export function isOpenCodeProgressBelowComposer(lines: readonly string[], from = 0): boolean {
+  const below = rowsBelowComposerBorder(lines, from);
+  return below !== null && (OPENCODE_THINKING_PROGRESS_ROW.test(below) || OPENCODE_PROCESSING_INDICATOR.test(below));
+}
+
+/** A `Thinking:` row read whole: the word opens the row, after the spinner when there is one. */
+const OPENCODE_THINKING_ROW = /^[^\S\n]*(?:[\u2800-\u28FF\u2B1D\u25A0]+[^\S\n]+)?Thinking:/;
+
+/**
+ * Whether the current turn, still open, ends on a `Thinking:` row (Issue #4209): one
+ * of the last `tailRows` non-blank rows of the turn region (below the newest echoed
+ * prompt, above the chrome — {@link findOpenCodeUserEchoEnd},
+ * {@link findOpenCodeChromeStart}) opens with the word, and the region holds no
+ * finished-turn marker ({@link OPENCODE_TURN_COMPLETE_PATTERN}).
+ *
+ * The status detector's reading of the progress row opencode draws in the
+ * transcript (`opencode-live-1894/esc-again-after-marker.txt`: `⠦ Thinking:
+ * Preparing an essay` under the echo). Never true on a frame the poller saves:
+ * that needs the marker in the same region (`isOpenCodeComplete`), so there the
+ * status reads only {@link isOpenCodeProgressBelowComposer}, as the save does. A
+ * reply quoting the word in a finished turn, or the footer's cwd, is not read.
+ *
+ * @param lines - ANSI-stripped rows, box drawing intact
+ * @param tailRows - How many non-blank rows from the region's end to read
+ */
+export function isOpenCodeThinkingInOpenTurn(lines: readonly string[], tailRows: number): boolean {
+  const rows = [...lines];
+  const chromeStart = findOpenCodeChromeStart(rows);
+  const echoEnd = findOpenCodeUserEchoEnd(rows, chromeStart);
+  const region = rows.slice(echoEnd + 1, chromeStart >= 0 ? chromeStart : rows.length);
+  if (region.some((row) => OPENCODE_TURN_COMPLETE_PATTERN.test(row))) return false;
+  return region
+    .filter((row) => row.trim() !== '')
+    .slice(-tailRows)
+    .some((row) => OPENCODE_THINKING_ROW.test(row));
 }
 
 /**
@@ -566,6 +730,18 @@ export const OPENCODE_SELECTION_LIST_PATTERN =
 export const OPENCODE_SEPARATOR_PATTERN = /^[\u2503\u2579\u25A3\u2580\u2500\u250C\u2510\u2514\u2518\u251C\u2524\u252C\u2534\u253C]+$/;
 
 /**
+ * The composer's agent/model row once its gutter is stripped
+ * (`Build · GPT-5.6 Luna GitHub Copilot`; Issue #379, named by Issue #4209).
+ *
+ * Matched as a word at the row's start, so a reply's row opening with "Build "
+ * matches too: read only where the rows carry no position
+ * ({@link OPENCODE_CHROME_ROW_PATTERNS}). On every measured V1 frame no row of the
+ * turn region above the chrome opens with it (the turn's own marker opens with
+ * `▣`).
+ */
+export const OPENCODE_MODEL_ROW_PATTERN = /^Build\s+/;
+
+/**
  * OpenCode skip patterns for response cleaning (Issue #379)
  * Lines matching any of these patterns are filtered from extracted responses.
  * Includes: TUI separators, loading indicators, Build summary prefix,
@@ -575,7 +751,7 @@ export const OPENCODE_SEPARATOR_PATTERN = /^[\u2503\u2579\u25A3\u2580\u2500\u250
 export const OPENCODE_SKIP_PATTERNS: readonly RegExp[] = [
   OPENCODE_SEPARATOR_PATTERN,
   OPENCODE_LOADING_PATTERN,
-  /^Build\s+/,
+  OPENCODE_MODEL_ROW_PATTERN,
   OPENCODE_PROMPT_AFTER_RESPONSE,
   OPENCODE_PROCESSING_INDICATOR,
   OPENCODE_PROMPT_PATTERN,
@@ -586,7 +762,10 @@ export const OPENCODE_SKIP_PATTERNS: readonly RegExp[] = [
 /**
  * Rows only opencode's bottom chrome draws (Issue #4188): the spinner run, the
  * first-idle footer (`tab agents  ctrl+p commands`), the busy hint
- * (`esc interrupt`) and the placeholder (`Ask anything...`).
+ * (`esc interrupt`) and the placeholder (`Ask anything...`). Issue #4209 added the
+ * composer's agent/model row ({@link OPENCODE_MODEL_ROW_PATTERN}) and the footer's
+ * status cell ({@link OPENCODE_FOOTER_STATUS_PATTERN}): a reply's row opening with
+ * "Build " or quoting `8.5K (1%) · $` was dropped from the save.
  *
  * Matched as words, so one row cannot tell them from a reply quoting them. On
  * every measured frame under `tests/fixtures/opencode*` and
@@ -600,6 +779,8 @@ export const OPENCODE_CHROME_ROW_PATTERNS: readonly RegExp[] = [
   OPENCODE_PROMPT_AFTER_RESPONSE,
   OPENCODE_PROCESSING_INDICATOR,
   OPENCODE_PROMPT_PATTERN,
+  OPENCODE_MODEL_ROW_PATTERN,
+  OPENCODE_FOOTER_STATUS_PATTERN,
 ] as const;
 
 /**

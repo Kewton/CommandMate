@@ -77,7 +77,10 @@ export {
   OPENCODE_SKIP_PATTERNS,
   OPENCODE_CHROME_ROW_PATTERNS,
   OPENCODE_TRANSCRIPT_SKIP_PATTERNS,
+  OPENCODE_MODEL_ROW_PATTERN,
   isOpencodeProcessingFooter,
+  isOpenCodeProgressBelowComposer,
+  findOpenCodeIdleComposer,
 } from './tools/opencode/patterns';
 import {
   OPENCODE_V2_IDLE_COMPOSER_PATTERN,

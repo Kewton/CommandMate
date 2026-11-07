@@ -52,6 +52,24 @@ import {
  * they must read the same rule as the send path's composer check and the `ready`
  * branch. A subclass whose `exec` is that pass gives all three one reader: `test`,
  * `match` and `replace` go through `exec`. `source` still spells the rule.
+ *
+ * Issue #4209 kept this form rather than having the readers call the function: the
+ * send path's composer check and the `ready` branch already do, but
+ * `getCliToolPatterns().promptPattern` is typed `RegExp` for every tool and read by
+ * the poller (`response-checker-extraction-steps.ts`) and the generic composer
+ * check, so dropping the `RegExp` would change that contract for all tools. What it
+ * guarantees instead, pinned in `tests/unit/detection/tools/opencode-v2/
+ * idle-composer-regexp-contract-4209.test.ts`:
+ *
+ * - **Guaranteed**: `test`, `exec`, and the string methods that go through `exec`
+ *   on a non-global pattern — `String.prototype.match` / `search` / `replace`.
+ * - **Rows are split on LF only.** U+2028 / U+2029 / CR are not row breaks.
+ * - **Not guaranteed**: `split` and `matchAll`, which construct `Symbol.species` —
+ *   the native `RegExp`, so neither the rule's answer nor its linear time carries
+ *   over; and a copy built from `source` and `flags`, whose `^` under the `m` flag
+ *   also starts a line after U+2028 / U+2029 / CR (it answers differently for a row
+ *   such as `x\u2028┃  Ask anything…` over a border) and which retries from every
+ *   gutter row. No production reader copies or splits it (searched for #4209).
  */
 export const OPENCODE_V2_IDLE_COMPOSER_PATTERN: RegExp = new (class OpencodeV2IdleComposerPattern extends RegExp {
   static get [Symbol.species](): RegExpConstructor {
