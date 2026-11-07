@@ -121,7 +121,8 @@ describe('[#3593 P2-1] the list fits the room below its trigger and scrolls', ()
     expect(scrolled[scrolled.length - 1]).toBe(last);
 
     fireEvent.keyDown(document.activeElement!, { key: 'Home' });
-    expect(scrolled[scrolled.length - 1]).toBe(screen.getByTestId('desktop-agent-status-claude-1'));
+    // Issue #4218: the first row is the current session's.
+    expect(scrolled[scrolled.length - 1]).toBe(screen.getByTestId('desktop-session-current-row'));
   });
 });
 
@@ -131,7 +132,8 @@ describe('[#3593 P2-2] a row tooltip is above the list', () => {
     trigger().focus();
     fireEvent.keyDown(trigger(), { key: 'ArrowDown' });
     const bubble = screen.getByRole('tooltip', { hidden: true });
-    expect(bubble.textContent).toContain('Agent 1');
+    // Issue #4218: the first row is the current session's (Agent 0).
+    expect(bubble.textContent).toContain('Agent 0');
     expect(Number(bubble.style.zIndex)).toBeGreaterThan(Z_INDEX.POPOVER);
     expect(Number(list().style.zIndex)).toBe(Z_INDEX.POPOVER);
   });

@@ -118,9 +118,12 @@ describe('[#3514] desktop header "+" slot', () => {
 
   it('renders the control at the right end of the agent row', () => {
     render(<DesktopHeader {...base} agentAddControl={<button data-testid="slot-plus">+</button>} />);
-    const row = screen.getByTestId('desktop-agent-status-row');
+    // Issue #4218: the "+" moved with the sessions trigger to the controls
+    // group; it is the last element of that session group.
+    const row = screen.getByTestId('desktop-session-controls');
     const plus = within(row).getByTestId('slot-plus');
     expect(row.lastElementChild).toBe(plus);
+    expect(screen.getByTestId('desktop-header-controls').contains(row)).toBe(true);
   });
 
   it('renders nothing extra without it (negative control)', () => {
