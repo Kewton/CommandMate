@@ -348,3 +348,17 @@ Codex の事前レビュー（`workspace/orchestration/runs/2026-11-08/prereview
 
 - `src/app/api/worktrees/[id]/send/send-role.ts`: 送信前のロールの条件確認（`resolveLaunchRole`）は `readLaunchCwd` を渡していない。`cd` した pane へ相対の `XDG_CONFIG_HOME` で送ると、条件確認は worktree を基準に通り、その後の起動（`base.ts`）で拒否される。誤った設定で起動することは無い（安全側）が、拒否が送信の後段で出る。
 - `src/app/api/worktrees/[id]/instances/roles/route.ts` は `loadPaneComposition` を通るので、変更が及ぶ（ファイルは変えていない）。
+
+### 8.2 起動行の直前の再照合（整合性レビュー P2）
+
+整合性レビュー（Codex、`567a86f7e` 対象）の P2: 起動 cwd を照合した（合成時、§3.2）後、`opencode-v2.ts` `launchSession` は実行ファイルの解決・既存 pane の調整・ポートの予約を await する。その間も pane の端末（`ws-server.ts` の terminal input）から `cd` でき、起動の直前に再照合が無かった。`cd` された pane では、相対の `XDG_CONFIG_HOME` / `HOME` を opencode は別の場所で解決し、合成で読んだ `default_agent` と違う agent で起動しうる。R1 の一致の条件を、起動行の実行まで保つ。
+
+| 項目 | 決めたこと |
+|---|---|
+| 向き | **起動の直前に再照合する**。起動行に `cd <worktree> &&` を足す案は、起動行のバイト一致の約束（既存のテストと `buildAgentLaunchCommandLine` の出力）に触れるので採らない。起動行は変えない |
+| 何を覚えるか | `RoleComposition.opencodeV2LaunchCwd`: 相対の値を worktree で解決したときだけ、その worktree を入れる。絶対値・未設定では入れない（再照合しない＝今どおり）。注入の fingerprint には入らない（`computeRoleInjection` は読まない） |
+| どこで照合するか | `role-launch.ts` `launchCwdRecheck(reader)` が、起動中のロール（`runWithLaunchRole` のスナップショット）に `opencodeV2LaunchCwd` があるときだけ、照合の step を返す。`opencode-v2.ts` はその step を起動行の前に置いて `typeLaunchLines` に渡す。同じ入力ロックの 1 回の手番の中で、照合の直後に起動行を打つ |
+| 照合の中身 | 合成時と同じ `composition.ts` `assertLaunchCwdIsWorktree`（`launchCwdFor` を切り出して export）。cwd が worktree でない・読めない → `RoleLaunchRefusedError('composition-failed')`。何も打たずに起動を止める |
+| 対照 | `tests/unit/cli-tools/opencode-v2-launch-cwd-recheck-4233.test.ts`。陽性=「cwd の確認 → ポート予約中に端末から `cd` → 起動」で拒否され、`sendKeys` は 0 回。陰性=`cd` しなければ今と同じ起動行を 1 回打つ／絶対の `XDG_CONFIG_HOME` では `cd` しても再照合せず起動する。再照合の配線を外すと陽性だけが落ちることを確かめた |
+
+残る窓: 照合（`display-message`）と起動行の `send-keys` の間の 1 回の tmux 呼び出し分。terminal input は入力ロックを通らないので、この間の `cd` は閉じられない。閉じるには起動行で cwd を固定するしかなく、それは上のとおりバイト一致の約束に触れる。

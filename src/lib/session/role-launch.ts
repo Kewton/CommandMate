@@ -66,6 +66,7 @@ import {
   type WrittenRoleArtifact,
 } from '@/lib/agent-roles/artifacts';
 import {
+  assertLaunchCwdIsWorktree,
   fixedEnvReader,
   loadRoleComposition,
   RoleCompositionError,
@@ -455,6 +456,32 @@ export async function runWithLaunchRole<T>(snapshot: LaunchRoleSnapshot, fn: () 
   } finally {
     if (store.envFile !== null) removeLaunchEnvFile(store.envFile);
   }
+}
+
+/**
+ * The check a launch runs right before it types its line, in the same input-lock
+ * turn (Issue #4233), or null when this launch's role did not depend on the cwd.
+ *
+ * The composition resolved a relative `XDG_CONFIG_HOME` / `HOME` against the
+ * worktree after checking the pane was there; the launch then awaits the
+ * executable, the pane's geometry and the server's port, and the pane's terminal
+ * can `cd` meanwhile. The line itself is left as it is (no `cd` added to it), so
+ * the launch is refused instead when the pane is no longer in the worktree.
+ *
+ * @param readLaunchCwd - The pane's cwd reader; none (a test run) checks nothing
+ * @returns A step that rejects with a {@link RoleLaunchRefusedError}, or null
+ */
+export function launchCwdRecheck(readLaunchCwd: RoleLaunchCwdReader | undefined): (() => Promise<void>) | null {
+  const pinned = scope().getStore()?.snapshot.composition?.opencodeV2LaunchCwd;
+  if (pinned === undefined || !readLaunchCwd) return null;
+  return async () => {
+    try {
+      await assertLaunchCwdIsWorktree(pinned, readLaunchCwd);
+    } catch (error) {
+      if (!(error instanceof RoleCompositionError)) throw error;
+      throw new RoleLaunchRefusedError('composition-failed', `${error.message} (it changed after the role was composed)`);
+    }
+  };
 }
 
 /**
