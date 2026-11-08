@@ -126,6 +126,8 @@ describe('buildProgram', () => {
       // Issue #2069: agent CLI versions, and running an agent's own updater in a
       // process that is not an agent pane
       'agents',
+      // Issue #4221: mem items (now / add / update / close / list / mode / purge)
+      'mem',
     ];
 
     it.each(expectedCommands)('should register the %s command', (name) => {

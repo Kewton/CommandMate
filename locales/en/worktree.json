@@ -1348,7 +1348,10 @@
     "hint": "Enter to save, Esc to cancel. An empty note is removed.",
     "editLabel": "Edit the session note for {split}",
     "label": "Note: {note} (updated {time})",
-    "empty": "No note yet"
+    "empty": "No note yet",
+    "rejected": "This note contains text that cannot be stored (something like a secret, or a control character). What you typed is kept.",
+    "conflict": "This note was changed elsewhere and has been read again. What you typed is kept.",
+    "failed": "The note could not be saved. What you typed is kept."
   },
   "nextAction": {
     "start": "Start",

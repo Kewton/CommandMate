@@ -280,7 +280,7 @@ function remainingSection(model: ReleaseReadinessModel): string {
       : dispatch === null
         ? 'dispatch の記録が無い（依頼は行われていない）。'
         : dispatch.status === 'skipped-busy'
-          ? 'orchestrate が実行中だったため依頼を見送った（skipped-busy）。'
+          ? 'claude-3 が使用中（orchestrate の実行中か予約中）だったため依頼を見送った（skipped-busy）。'
           : dispatch.status === 'no-target'
             ? '依頼する対象が無かった（no-target）。'
             : dispatch.deferred.length > 0

@@ -457,5 +457,52 @@
       "referenceRepository": "リポジトリ: {path}（{tool}）",
       "referenceSystem": "システムの既定: {tool}"
     }
+  },
+  "mem": {
+    "toggle": "mem",
+    "toggleLabel": "{name} の mem の設定",
+    "loading": "読み込み中…",
+    "loadError": "mem の設定を読めませんでした。",
+    "description": "ブランチごとに mem を使うかを決めます。上書き → 規則（上から最初に当たった行）→ off の順。既定は off です。",
+    "limits": "この画面だけが mode を変えられます。同じ OS 権限のプロセス（Agent を含む）が DB や API を直接書き換えることまでは防げません。",
+    "mode": {
+      "off": "off（使わない）",
+      "derived": "derived（導いた状態だけ）",
+      "on": "on（使う）"
+    },
+    "rules": {
+      "title": "ブランチの規則",
+      "none": "規則はありません（すべて off）。",
+      "match": "当て方",
+      "glob": "ブランチ名（glob）",
+      "detached": "detached HEAD",
+      "pattern": "パターン（* は / を含まない、** は含む）",
+      "modeLabel": "mode",
+      "up": "上へ",
+      "down": "下へ",
+      "remove": "規則を削除",
+      "add": "規則を追加"
+    },
+    "features": {
+      "title": "機能",
+      "injectOnStart": "起動時の差し込み",
+      "promptOnEvents": "操作からの促し",
+      "popup": "ポップアップ"
+    },
+    "save": "規則と機能を保存",
+    "overrides": {
+      "title": "ブランチごとの上書き",
+      "none": "上書きはありません。",
+      "inherit": "規則に従う",
+      "branch": "ブランチ名",
+      "add": "上書きを追加",
+      "remove": "{branch} の上書きを削除"
+    },
+    "status": {
+      "saved": "保存しました。",
+      "conflict": "他で変更されていました。最新の設定を表示しています。もう一度保存してください。",
+      "invalid": "保存できない値があります（パターン・ブランチ名を確かめてください）。",
+      "failed": "保存できませんでした。"
+    }
   }
 }

@@ -15,7 +15,11 @@
  */
 
 import { sendKeys } from '../tmux/tmux';
-import { withInstanceInputLock } from '../session/instance-input-lock';
+import {
+  currentInstanceInputTicket,
+  InstanceInputOwnershipLostError,
+  withInstanceInputLock,
+} from '../session/instance-input-lock';
 
 /**
  * One step of a launch's keys: a line typed with Enter, or a step that types
@@ -29,11 +33,17 @@ export type LaunchKeyStep = string | (() => Promise<void>);
  * @param sessionName - tmux session name
  * @param steps - Lines (typed with Enter) and self-typing steps
  * @throws Whatever `withInstanceInputLock` throws when not admitted; nothing was typed then
+ * @throws {InstanceInputOwnershipLostError} The session was replaced during the
+ *   turn; nothing after that point is typed
  */
 export async function typeLaunchLines(sessionName: string, steps: readonly LaunchKeyStep[]): Promise<void> {
   await withInstanceInputLock(sessionName, async () => {
     for (const step of steps) {
       if (typeof step === 'string') {
+        // Issue #4233: a step before this line can await (OpenCode V2's cwd
+        // re-check); a session replaced meanwhile revoked this turn, and the old
+        // launch's line must not reach the new pane.
+        if (currentInstanceInputTicket(sessionName) === null) throw new InstanceInputOwnershipLostError(sessionName);
         await sendKeys(sessionName, step, true);
       } else {
         await step();

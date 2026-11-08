@@ -52,18 +52,22 @@
  * | unset                    | `~/.codex`                          | `~/.codex`          |
  * | absolute                 | that path                           | that path           |
  * | inside `/proc`/`/sys`/`/dev` | `~/.codex` (#1774)              | `~/.codex`          |
- * | **relative**             | passed through **verbatim**         | **null = unknown**  |
+ * | **relative**             | **absolute against the server cwd** (#4233) | **null = unknown** |
  *
- * `resolveSafeDirectory` returns a relative candidate unchanged, and
- * `hooks-config` puts that value on codex's own launch line — so codex resolves
- * it against **the agent's worktree cwd**, and `CODEX_HOME=.codex-shared` means
- * codex writes `<worktree>/.codex-shared/version.json`. This process is not in
- * that worktree and, with several worktrees open, cannot say which one was
- * meant. Falling back to `~/.codex` there is the one genuinely bad answer: it
- * is not "no data", it is an unrelated install's version, reported with the
- * same confidence as a real reading. So a relative value resolves to null and
- * every surface renders "no update information", which is what they already
- * render when codex has never run.
+ * Since Issue #4233 `hooks-config` resolves a relative candidate against the
+ * cwd of the process that writes `hooks.json` — the server — and pins that
+ * absolute path on codex's launch line, so codex keeps its state (including
+ * `version.json`) under `<serverCwd>/<rel>`. This reader is still not allowed
+ * to do the same: it is also called from processes that do not share the
+ * server's cwd (`commandmate agents versions` / `agents update` run from any
+ * directory), and resolving against THAT cwd would name another directory.
+ * Falling back to `~/.codex` is worse still: it is not "no data", it is an
+ * unrelated install's version, reported with the same confidence as a real
+ * reading (the #2069 decision). So a relative value resolves to null and every
+ * surface renders "no update information", which is what they already render
+ * when codex has never run. (Before #4233 `hooks-config` forwarded the value
+ * verbatim and codex resolved it in the agent's worktree; the reader's answer
+ * was null then too.)
  *
  * @module lib/updates/codex-version
  */
@@ -136,10 +140,10 @@ export const EMPTY_CODEX_VERSION_FILE: Omit<CodexVersionFile, 'path'> = {
  * The directory codex keeps its state in, as seen from THIS process.
  *
  * See the table in the module header for the four cases. The one that returns
- * null is a relative `$CODEX_HOME`: `hooks-config` forwards such a value to
- * codex verbatim, codex resolves it against the agent's worktree cwd, and this
- * process has no worktree — so the honest answer is "cannot tell", not
- * `~/.codex`.
+ * null is a relative `$CODEX_HOME`: `hooks-config` makes such a value absolute
+ * against the SERVER's cwd (#4233), and this function is also called from CLI
+ * processes running in any directory — so the honest answer is "cannot tell",
+ * not a guess against this process's cwd and not `~/.codex`.
  *
  * @param env - Environment to read. Injectable so tests need no `process.env`
  *   mutation.
