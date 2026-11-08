@@ -186,9 +186,47 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 
 ## 6-2 CI 待ちの間に develop が動いたとき
 
-`merge-pr.mjs` の refresh は開始時にしか行わない。CI を待つ間に先の PR がマージされると、待っている HEAD は組み合わせとして未確認になる。そこで CI を見るたびに、`gh pr checks` を読んだ**後で** `git fetch` して（#4148）、`origin/develop` がマージする SHA（worktree の今の HEAD ではなく、`--match-head-commit` に渡す固定の SHA）に含まれなくなっていたら**マージせず exit 4** で止める（`merge` の段に `base-moved` を記録）。同じ引数で再実行すれば、取り込み・precheck・push からやり直す。`--match-head-commit` が固定するのは PR の HEAD だけで base は固定しないので、緑の返答を待つ間に進んだ分もここで読む。最後の `git fetch` から `gh pr merge` が届くまでの間に進んだ分は、この検査では止まらない（GitHub 側で base を固定する手段が無い）。
+`merge-pr.mjs` の refresh は開始時にしか行わない。CI を待つ間に先の PR がマージされると、待っている HEAD は組み合わせとして未確認になる。そこで CI を見るたびに、`gh pr checks` を読んだ**後で** `git fetch` して（#4148）、`origin/develop` がマージする SHA（worktree の今の HEAD ではなく、`--match-head-commit` に渡す固定の SHA）に含まれなくなっていたら**マージせず exit 4** で止める（`merge` の段に `base-moved` を記録）。同じ引数で再実行すれば、取り込み・precheck・push からやり直す（`--queue` はこのやり直しを自動で行う。下の「6-2 マージの列（--queue）」）。`--match-head-commit` が固定するのは PR の HEAD だけで base は固定しないので、緑の返答を待つ間に進んだ分もここで読む。最後の `git fetch` から `gh pr merge` が届くまでの間に進んだ分は、この検査では止まらない（GitHub 側で base を固定する手段が無い）。
 
 `git fetch` が失敗した回は判定できないので、その回はマージせず、次の回に読み直す。読めないまま期限に達したら exit 124。
+
+## 6-2 マージの列（--queue）
+
+（#4277。2026-11-08 の run 4221-4259 では、マージの直列化を自作のシェル（`merge-one.sh` と待ち合わせ）で行い、待ち合わせが
+`pgrep -f` で自分のコマンド行を拾ったのと、`cpu.heavy` の取り合いに順番が無かったのとで、マージが 2 回・合計 約 1.5 時間止まった。
+設計: docs/design/merge-queue-fair-lock-4277.md）
+
+```bash
+node scripts/orchestrate/merge-pr.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
+  --queue "$MERGE_ISSUES"   # 例 4245,4257,4243 / 3883/d1,3883/d2 / 3883@3889,3883@3895
+```
+
+- **entry** は `<issue>[/<item>][@<pr>]`。PR は `@<pr>`、無ければ run の記録の `pr` 段（その unit の `pr=#N`）。PR → `headRefName` → その branch の
+  worktree（`git worktree list` でちょうど 1 つ）の順に、**列を始める前に全 entry を解決する**。曖昧（item の無い `pr` 記録が 2 つの PR を指す、
+  worktree が 0 か 2 以上、同じ PR を 2 回）なら何も変えずに exit 2。マージ済みの PR は worktree を引かず、記録と close だけして次へ進む
+  （止まった列を同じ引数で流し直すと、マージ済みの entry は飛ばされる）。
+- **旧い run の同じ Issue の 2 本**（work item の無い記録が 2 つの PR を指す形）は `3883@3889,3883@3895` と PR を名指す。PR が違えば別の entry で、
+  Issue を閉じるのは**その Issue の最後の entry だけ**（それより前は閉じない）。work item の entry は閉じない（1 本の呼び出しと同じ規則）。
+- **`--last`**: 付けると全 entry（「CI が通れば」の run）、付けなければ最後の entry だけ。**`--close -`**: 全 entry で閉じない。
+- **やり直し**（entry ごと）: exit 3（precheck の保留）は 60 秒おいて 2 回まで、exit 4（CI 待ちの間に develop が進んだ）はすぐに 5 回まで。
+  それ以外の非 0（1・2・124）と、上限を超えた 3・4 は**列を止め**、後ろの entry は流さない（記録は `waiting` のまま）。列の exit は止めた entry の exit。
+- **マージのロック**: 1 本の呼び出しも列も、base ごとのロック `merge.<owner>.<repo>.<base>`（例 `merge.Kewton.CommandMate.develop`、
+  lock root は `CM_VERIFY_LOCK_ROOT` か `~/.commandmate/locks`）を**実行の間ずっと**持つ。待ちは札の順（先着順）で、`--merge-lock-timeout`
+  （既定 14400 秒、上限 86400）を過ぎたら exit 124。列は初めに 1 回だけ取り、中の entry は取り直さない（自分を待たない）。
+  待ち合わせのシェルを自作しない（プロセスの一覧は自分の行を拾う）。
+- **専用のプロセスグループ**: `merge-pr.mjs` は自分を detached の子として起動し直し（親の環境はそのまま継ぐ。`CM_MERGE_PR_INNER=1` を足すだけ）、
+  ロックの記録にそのグループを書く。親だけが死んでも、push 中の `git` や `gh pr merge` が残る間はロックは生きている扱いで、次の列は重ならない。
+  外側のプロセスは INT / TERM / HUP をグループへ送る。
+- **書込みの途中で死んだ持ち主**: ロックの記録は外への書込みの前に段（`refresh` → `precheck` → `push` → `ci-wait` → `merge` → `close` → `idle`）を書き換える。
+  `push` / `merge` / `close` の途中で死んだ持ち主のロックを回収した側は、`<lock root>/<ロック名>.unresolved/<token>.json` を書いてから回収する。
+  このファイルがある間は、**その PR を含まない merge-pr はどれも何も変えずに exit 1**（`queue` に `recovered-stop`）で止まる。1 回止まっても消えない。
+  その PR を列に入れて流すと最初に処理され（マージ済みなら記録と close だけ）、0 で終わればファイルを消す。それ以外の段で死んだ持ち主は
+  `recovered` を記録して続ける。
+- **記録**: entry の状態が変わるたびに `queue` の行（`state=waiting` / `lock-timeout` / `recovered` / `recovered-stop` / `running` / `retry` / `merged` / `stopped`、
+  `pos=` `attempt=` `exit=` `pr=`）。`queue` の行は HEAD を持たず進捗に数えない（docs/orchestrate/run-log.md）。`run-log.mjs status` が `queue:` に出す。
+
+`cpu.heavy` などの検証のロックも同じ札の規約で先着順になった（`machine-lock.ts` と `machine-lock-sync.mjs`。docs/design/verification-config.md §9.2）。
+standalone の `verify-run.sh` はまだ札を知らない（排他は保たれるが順番は保証されない。追跡は設計書 §8）。
 
 ## 6-3 落ちたジョブの再実行と run の完走
 
