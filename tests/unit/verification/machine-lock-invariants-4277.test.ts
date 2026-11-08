@@ -47,6 +47,7 @@ script=$1 root=$2 name=$3 budget=$4 events=$5 selfpid=$6
 export CM_VERIFY_LOCK_ROOT="$root"
 eval "$(sed -n '/^# --- machine-wide gate lock/,/^# --- gate execution/p' "$script")"
 if [ -n "$selfpid" ]; then LOCK_SELF_PID=$selfpid; fi
+if [ -n "$LOCK_TEST_PRELUDE" ]; then eval "$LOCK_TEST_PRELUDE"; fi
 emit() { printf '{"event":"%s","pid":%s,"heldBy":"%s"}\\n' "$1" "$$" "$LOCK_HELD_BY" >> "$events"; }
 if lock_acquire "$name" "$budget"; then
   emit acquired
@@ -81,10 +82,11 @@ let bashSerial = 0;
  * Start verify-run.sh's lock_acquire in its own bash. The returned `release` asks the holder to
  * release and waits for it, synchronously (an Outcome's release is synchronous).
  */
-function startBash(name: string, budgetSec: number, { script = VERIFY_RUN, selfPid }: { script?: string; selfPid?: number } = {}) {
+function startBash(name: string, budgetSec: number, { script = VERIFY_RUN, selfPid, prelude }: { script?: string; selfPid?: number; prelude?: string } = {}) {
   const events = path.join(root, `bash-events-${++bashSerial}.jsonl`);
   const child = spawn('bash', ['-c', BASH_DRIVER, 'bash', script, root, name, String(budgetSec), events, selfPid ? String(selfPid) : ''], {
     stdio: 'ignore',
+    env: { ...process.env, LOCK_TEST_PRELUDE: prelude ?? '' },
   });
   children.push(child);
   const first = () => bashEvents(events).find((e) => e.event === 'acquired' || e.event === 'not-acquired') ?? null;
@@ -481,6 +483,46 @@ describe('verify-run.sh: a holder whose pid is gone but whose process group is a
     await waitFor(() => again.first() !== null);
     expect(again.first()?.event).toBe('acquired');
     again.release();
+  }, 20000);
+});
+
+/**
+ * The 5-2b re-review of #4277 (P2): verify-run.sh's `ln` collides with ticket n, n is marked done and
+ * collected by the next taker, and only then does the waiter look. It is still a collision to retry,
+ * not a failure to publish. `ln` is replaced by a shell function (after the lock section is loaded)
+ * that puts exactly that into the window.
+ */
+describe('verify-run.sh: a ticket collision whose ticket is collected before the check is retried', () => {
+  it('positive: ln fails with EEXIST, the ticket is gone by the time it looks, and the waiter goes on to take the lock', async () => {
+    const name = 'inv-bash-ln-gc';
+    const prelude = `
+# A file, not a variable: verify-run.sh calls ln inside $( ) to read its message.
+ln() {
+  if [ ! -e "$CM_VERIFY_LOCK_ROOT/raced" ]; then
+    : > "$CM_VERIFY_LOCK_ROOT/raced"
+    printf '{"done":true,"token":"racer","doneAt":0}\\n' > "$2"   # another taker's ticket n, already used
+    command ln "$@"; lt_rc=$?
+    rm -f "$2"                                                     # collected by the next taker's GC
+    return $lt_rc
+  fi
+  command ln "$@"
+}`;
+    const b = startBash(name, 2, { prelude });
+    await waitFor(() => b.first() !== null);
+    expect(fs.existsSync(path.join(root, 'raced')), 'the collision was put into the window').toBe(true);
+    expect(b.first()?.event).toBe('acquired');
+    b.release();
+    expect(fs.existsSync(machineLockPath(name, root))).toBe(false);
+  }, 20000);
+
+  it('negative: a real failure to publish (not EEXIST, nothing at the name) still fails without trying the lock', async () => {
+    const name = 'inv-bash-ln-eperm';
+    const prelude = `
+ln() { echo "ln: $2: Permission denied" >&2; return 1; }`;
+    const b = startBash(name, 2, { prelude });
+    await waitFor(() => b.first() !== null);
+    expect(b.first()?.event).toBe('not-acquired');
+    expect(fs.existsSync(machineLockPath(name, root))).toBe(false);
   }, 20000);
 });
 

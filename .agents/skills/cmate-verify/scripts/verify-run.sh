@@ -788,8 +788,16 @@ lock_take_ticket() { # <queue-dir> <tmp>
     ltt_max=$(lock_ticket_names "$1" | tail -n 1)
     [ -n "$ltt_max" ] || ltt_max=0
     ltt_name=$(printf '%012d' $(( 10#$ltt_max + 1 )))
-    if ! ln "$2" "$1/$ltt_name" 2>/dev/null; then
+    # EEXIST is told by ln's own message (LC_ALL=C), not by looking for the
+    # name afterwards: the ticket it collided with can be marked done and
+    # collected by the next taker in between, and that is still a collision to
+    # retry, not a failure to publish (the TS / sync JS copies read the errno).
+    if ! ltt_err=$(LC_ALL=C ln "$2" "$1/$ltt_name" 2>&1); then
+      case "$ltt_err" in
+        *[Ff]ile\ exists*) continue;;
+      esac
       [ -e "$1/$ltt_name" ] && continue
+      echo "verify-run: ln $2 $1/$ltt_name: $ltt_err" >&2
       return 1
     fi
     if [ "$(lock_ticket_names "$1" | tail -n 1)" != "$ltt_name" ]; then
