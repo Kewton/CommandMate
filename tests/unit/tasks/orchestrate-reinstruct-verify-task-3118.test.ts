@@ -58,6 +58,8 @@ describe('orchestrate re-instruct verification (Issue #3118)', () => {
     expect(row).toContain('--task');
   });
 
+  // Reads the legacy Antigravity section of switching.md on purpose: it is kept ("今は使わない", #4238) because the Command Code
+  // section refers to its steps 1-2 and its handoff form; the current Command Code -> sonnet path is pinned in the #4238 describe below.
   it('3-5 (switch to a new contract) waits and verifies bound to the new task', () => {
     const body = `${section('3-5')}\n${docSection('switching.md', '3-5 Antigravity から Claude への切り替え')}`;
     expect(body).toMatch(/wait .*--verify|wait-verify\.mjs[\s\S]*--task "\$TASK_ID"/);
