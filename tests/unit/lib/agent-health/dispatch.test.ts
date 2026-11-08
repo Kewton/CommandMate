@@ -383,3 +383,17 @@ describe('catalog-drift Issues (#3159)', () => {
     expect(parseDispatchRecord(JSON.stringify(record))).toEqual(record);
   });
 });
+
+describe('buildTerms with the claude-3 reservation (#4243)', () => {
+  const issues = [{ number: 3050, kind: 'bug' as const, title: 'a' }];
+
+  it('tells the run to release the reservation with the dispatch token at the very end', () => {
+    const terms = buildTerms('2026-11-08', issues, 'dispatch-20261107T233000Z-ab12cd34');
+    expect(terms).toContain('`npx tsx scripts/agent-health/claude3-reserve.ts release --token dispatch-20261107T233000Z-ab12cd34` を実行し');
+    expect(terms).toContain('途中で止まったときも');
+  });
+
+  it('says nothing about the reservation without a token', () => {
+    expect(buildTerms('2026-11-08', issues)).not.toContain('claude3-reserve');
+  });
+});

@@ -591,9 +591,17 @@ npx tsx scripts/agent-health/dispatch.ts --dry-run   # 選定と状態確認だ�
 - **Claude 3 の状態**（`commandmate ls --json` の `sessionStatusByInstance["claude-3"]`）: 実行中で処理中でもプロンプト待ちでもなければ
   入力待ち（送る）。処理中・プロンプト待ちは送らない（`skipped-busy`。全件を持ち越し）。セッションが無ければ `send` が起動する。
   roster に `claude-3`（cliTool `claude`）が無いときは送らずに失敗する
-  開発リーダーとしての PM のブリーフと重なったときの手順（dispatch は一時点の状態を見て `/clear` を送るだけで、PM の送信との排他は無い）: PM は `claude-3` へブリーフを送る前に、`claude-3` が処理中でもプロンプト待ちでもないことと、dispatch の時刻（08:30）の前後（例 08:20〜09:00）でないことを確かめる。dispatch の `/clear` で PM のブリーフが消えうる。PM の run が残っている間に dispatch が届いたら、`claude-3` は先に受けた run を終えてから次へ移る（並行して 2 つの run を回さない）。仕組みとしての排他は未対応（[体制](../orchestrate/team.md#4-agent-health-の依頼とブリーフが重なったとき)）
+- **claude-3 の予約**（Issue #4243。[体制](../orchestrate/team.md#4-agent-health-の依頼とブリーフが重なったとき)）: 対象が 1 件以上あれば、状態を見る前に予約
+  （`~/.commandmate/agent-health/claude3.reservation`。置き場所は固定で、`--state-dir`・`$AGENT_HEALTH_DIR` では動かない）を取る。
+  PM（開発リーダーとしてのブリーフ）か前日の自動依頼の run が持っていれば、`/clear` も依頼も送らず、条件ファイル・ラベル・コメントも作らずに
+  `skipped-busy`（`reason` に持ち主と期限。期限を過ぎていれば「期限超過・要確認」。全件を持ち越し・exit 0）。待たない。
+  同じ日の別の dispatch が持っていれば記録を書かずに 1 行だけ出す。当日の `sent` の記録は `sent` 以外で置き換えない。
+  依頼を送った後も予約は外さず、run の最後に `claude-3` が条件ファイルの指示で `npx tsx scripts/agent-health/claude3-reserve.ts release --token <token>` を実行する。
+  依頼の前に止まったとき（busy・`/clear` の失敗・入力待ちに戻らない・条件ファイルが書けない）と、依頼が再送の後も `exit 99`（未送信）のときは dispatch が自分で外す。
+  依頼がそれ以外の非 0 で終わったときは届いたか分からないので外さない（`reason` に「届いたか不明」）。PM か人が `status` を見て `takeover`／`release --force` する
 - **送信**: `commandmate send mycodebranchdesk "/clear" --instance claude-3` → 5 秒ごとに状態を見て入力待ちに戻ったことを確かめる（90 秒まで）→
-  `commandmate send mycodebranchdesk "<依頼>" --instance claude-3 --auto-yes --duration 8h`。どちらも `exit 99`（起動直後）なら 2 分後に 1 回だけ再送
+  `commandmate send mycodebranchdesk "<依頼>" --instance claude-3 --auto-yes --duration 8h`。どちらも `exit 99`（起動直後）なら 2 分後に 1 回だけ再送。
+  送るたび（再送も）に予約がまだ自分のものかを確かめ、送信中の印を付けてから送る。途中で引き継がれていたら送らずに `skipped-busy`（`reason`: 予約が途中で引き継がれた）
 - **依頼の中身**: 送る本文は **改行を含まない 1 行** `/orchestrate <番号…> <条件ファイルの絶対パス> の条件に従うこと`
   （複数行の送信は Claude Code に貼り付けとして扱われ、スラッシュコマンドとして実行されないため）。`--full` は付けない
   （UAT を main の作業ディレクトリで走らせないため）。条件は送る前に `workspace/agent-health/<日付>/dispatch-terms-<番号を - でつないだもの>.md`

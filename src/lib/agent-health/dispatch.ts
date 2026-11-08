@@ -17,7 +17,10 @@ import type { DispatchIssue, DispatchIssueKind, DispatchRecord, DispatchStatus }
 export const DISPATCH_REPO = 'Kewton/CommandMate';
 /** develop's worktree in CommandMate (the main checkout). */
 export const DISPATCH_WORKTREE_ID = 'mycodebranchdesk';
-/** Claude 3 — also the development leader (docs/orchestrate/team.md), so there is no exclusion yet (#4243). */
+/**
+ * Claude 3 — also the development leader (docs/orchestrate/team.md), not dedicated to this hand-off:
+ * it is `/clear`ed only under the Claude 3 reservation (claude3-reservation.ts, #4243).
+ */
 export const DISPATCH_INSTANCE_ID = 'claude-3';
 export const DISPATCH_CLI_TOOL = 'claude';
 /** Only Issues written by the owner: the repository is public, and an Issue body is read as instructions. */
@@ -245,8 +248,16 @@ export function buildRequest(issues: readonly DispatchIssue[], termsPath: string
 /** Where a catalog-drift worker is pointed: the skill file, so a worker other than Claude Code can read it too. */
 export const CATALOG_SKILL_PATH = '.claude/skills/catalog-reconcile/SKILL.md';
 
-/** The run's terms, written to the file `buildRequest` points at. */
-export function buildTerms(date: string, issues: readonly DispatchIssue[]): string {
+/** The command the run's last step runs to give Claude 3 back (#4243). */
+export function reservationReleaseCommand(token: string): string {
+  return `npx tsx scripts/agent-health/claude3-reserve.ts release --token ${token}`;
+}
+
+/**
+ * The run's terms, written to the file `buildRequest` points at. With the
+ * reservation's `token` (#4243) the run is told to release it at the very end.
+ */
+export function buildTerms(date: string, issues: readonly DispatchIssue[], token?: string): string {
   const numbers = issues.map((issue) => issue.number);
   const suffix = runSuffixOf(issues);
   const catalog = issues.filter((issue) => issue.kind === 'catalog').map((issue) => `#${issue.number}`);
@@ -267,6 +278,11 @@ export function buildTerms(date: string, issues: readonly DispatchIssue[]): stri
     `- 完了後（途中で止まったときも）に \`npx tsx scripts/agent-health/release-report.ts --date ${date}\` を実行し、HTML を workspace/agent-health/${date}/release-readiness.html に書く`,
     '- 失敗した Issue を今日のうちに再依頼・再実行しない（翌日の日次に回す）',
     '- kill 系の API・コマンドを使わない。他のインスタンス・worktree に send しない',
+    ...(token
+      ? [
+          `- 最後に（途中で止まったときも）、リリース判断レポートを書いた後に \`${reservationReleaseCommand(token)}\` を実行し、claude-3 の予約を外す（外すまで PM は claude-3 に送れない）`,
+        ]
+      : []),
     '',
   ].join('\n');
 }
@@ -335,7 +351,10 @@ export const DISPATCH_USAGE = [
   '  --dry-run          select and check only; print the request, send nothing and write nothing',
   '  -h, --help         show this help',
   '',
-  'Exit: 0 sent / skipped-busy / no-target, 1 sent but labelling or the record failed,',
+  '  Claude 3 is reserved first (scripts/agent-health/claude3-reserve.ts): when PM or another run',
+  '  holds it, nothing is sent (skipped-busy).',
+  '',
+  'Exit: 0 sent / skipped-busy (Claude 3 busy or reserved) / no-target, 1 sent but labelling or the record failed,',
   '      2 not sent because something failed (missing label, gh / commandmate error, bad arguments).',
 ].join('\n');
 

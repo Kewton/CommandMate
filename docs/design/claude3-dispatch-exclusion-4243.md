@@ -345,3 +345,20 @@
 | R5 | 予約の外の送信済み確認・記録更新が同時 dispatch で食い違う | 採る | 取得の後に当日の記録を読み直す。同じ日付の dispatch が持つときは記録を書かない。`sent` は `sent` 以外で置き換えない（4 章）。記録の読者（release-report-main・release-readiness・HTML・`DispatchRecord.status` のコメント・Schedule の最終出力）を 4.1 に列挙。対照は 6.6 |
 | R6 | 同じ予約の実体を見る前提をパス表示だけに委ねている | 採る | 置き場所を `os.homedir()` からの絶対パス 1 つに固定し、環境変数・`--state-dir`・cwd から解決しない。テストの差し替えは注入だけ。世代の `target` を送り先の定数と照らし、食い違えば exit 2（3.1）。`os.homedir()` が両環境で同じかは未確認として残し、導入時の確認手順を docs に書く。対照は 6.7 |
 | — | 全経路の一覧を入れること | 採る | 5 章（PM・dispatch・読むだけ・記録の読者・手順の読者） |
+
+---
+
+## 10. 実装で決めたこと（設計との差と理由）
+
+実装の契約（同じブランチ）で、7 章の範囲から次のとおり決めた。どれも排他の規則（3〜5 章）は変えていない。
+
+| # | 決めたこと | 理由 |
+|---|---|---|
+| I1 | `main()` に `exec` だけを注入し `reservationDir` を渡さない呼び出し（既存の `dispatch.test.ts` の `it`）は、`os.tmpdir()` の下の使い捨てのディレクトリを予約の置き場所にし、終わりに消す。`spawnExec` も同じく注入の `exec` を使う | 既存のテストは `reservationDir` を知らず、既定（`os.homedir()` の下）に落ちると本物の置き場所に書く。既存の `it` と期待値は変えない契約のため。本番は `exec` を注入しないので、本番の 2 者が別の実体を見る経路にはならない（3.1 の R6 を保つ） |
+| I2 | 非同期の送信は新規 `scripts/agent-health/spawn-exec.ts`（`defaultSpawnExec`、kill は 300 秒）に置き、dispatch と PM のスクリプトで共有する | 7 章に無いファイル。2 つの入口で同じ写しを持たないため |
+| I3 | dispatch が送信の直前に「予約が途中で引き継がれた」を見つけたときは `skipped-busy`・**exit 0**（busy と同じ扱い）。予約の読み書きの失敗・`target` の不一致は今の失敗と同じ `fail()`（記録 `skipped-busy`・exit 2）。いずれも送らない | 引継ぎは PM か人の明示操作で、Schedule の AI が失敗として報告するものではない。設定不一致は人が見るべき失敗 |
+| I4 | `release` も `previousToken` に外した token を残す（強制解除と同じ形） | 監査で「誰が外したか」を世代から読めるようにするため。規則は変わらない |
+| I5 | `reserve` と `takeover` は token だけを標準出力に出し、説明は標準エラーに出す | `T=$(npx tsx … reserve --label …)` で受け取れるようにするため |
+| I6 | `takeover --reason dispatch-finished` の証拠のパスは、スクリプトのあるチェックアウト（`path.resolve(__dirname, '..', '..')`）の `workspace/agent-health/<予約の date>/release-readiness.html`。手順は main のチェックアウトで実行すると書いた | dispatch の条件ファイルとリリース判断レポートは main のチェックアウトに書かれるため |
+| I7 | `docs/orchestrate/team.md` は「未対応（追跡）」の語を、素の `commandmate send` を仕組みで止めていないこと（8 章の 1 点目）にだけ残した | 既存の `tests/unit/docs/dev-team-doc-4239.test.ts` がこの語を固定している。期待値は変えない契約のため、残る穴の記述として残した |
+| I8 | 英語版の `docs/en/user-guide/agent-health.md` は存在しないため直していない | — |

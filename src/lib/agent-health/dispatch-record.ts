@@ -26,7 +26,7 @@ export interface DispatchRecord {
   schemaVersion: 1;
   /** JST `YYYY-MM-DD`. */
   date: string;
-  /** `sent` handed to orchestrate; `skipped-busy` orchestrate was running; `no-target` nothing to hand. */
+  /** `sent` handed to orchestrate; `skipped-busy` orchestrate was running or Claude 3 was reserved (#4243); `no-target` nothing to hand. */
   status: DispatchStatus;
   /** ISO time of the hand-off (only when `status` is `sent`). */
   sentAt?: string;
