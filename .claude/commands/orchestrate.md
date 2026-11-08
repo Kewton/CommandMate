@@ -1144,7 +1144,7 @@ echo "exit=$?"   # 0 → PR を出す / 1 → runs/$DATE/precheck-<issue>[-<item
 
 1 本マージするたびに、残りの各 PR で `merge-pr.mjs` を呼ぶ。develop が進んでいれば `git fetch` と `git merge origin/develop`（衝突したら
 `git merge --abort` して止まる）を行い、**マージする HEAD について**（取り込んだ HEAD・`publish-pr.mjs` が先に push した取り込みの HEAD・未 push の HEAD のどれでも）
-衝突の印の走査（全追跡ファイル）と、その HEAD の precheck（`precheck.mjs`）を通してから `git push` する。落ちたら push せずに止まる。
+衝突の印の走査（全追跡ファイル）と、その HEAD の precheck（`precheck.mjs`。`npx tsc --noEmit` と `vitest related --dir tests/unit` など）を通してから `git push` する。落ちたら push せずに止まる。
 precheck の引数・再利用・取り込んだ HEAD の重い段を CI に任せること: docs/orchestrate/ci-merge.md#6-2-取り込み後の重い段
 
 ```bash
