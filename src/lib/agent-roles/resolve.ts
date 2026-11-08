@@ -98,9 +98,16 @@ export interface RoleRepositoryMembership {
   members: Repository[];
   /** Enabled, on disk, and could not be identified: may or may not be members. */
   undetermined: Repository[];
+  /**
+   * Every root judged to be this repository, disabled ones included, sorted by path
+   * (Issue #4221: mem reads items across all of them, §9.5). Roles do not read it.
+   */
+  candidates?: Repository[];
+  /** The common dir git gave for the worktree or root asked about; null when it gave none (Issue #4221). */
+  identity?: string | null;
 }
 
-const NO_MEMBERSHIP: RoleRepositoryMembership = { members: [], undetermined: [] };
+const NO_MEMBERSHIP: RoleRepositoryMembership = { members: [], undetermined: [], candidates: [], identity: null };
 
 function byPath(a: Repository, b: Repository): number {
   return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
@@ -165,7 +172,7 @@ function membershipFrom(
   { roots, identity, commonDirs, notRepository }: MembershipAnswers,
   deps: RoleResolverDeps
 ): RoleRepositoryMembership {
-  if (roots.length === 0) return NO_MEMBERSHIP;
+  if (roots.length === 0) return { ...NO_MEMBERSHIP, identity };
   const pathExists = deps.pathExists ?? existsSync;
 
   const candidates: Repository[] = [];
@@ -186,7 +193,12 @@ function membershipFrom(
 
   const enabled = candidates.filter((root) => root.enabled);
   const members = enabled.length > 0 ? enabled : candidates;
-  return { members: [...members].sort(byPath), undetermined: undetermined.sort(byPath) };
+  return {
+    members: [...members].sort(byPath),
+    undetermined: undetermined.sort(byPath),
+    candidates: [...candidates].sort(byPath),
+    identity,
+  };
 }
 
 /** How many times to ask again when the answer went stale during the wait. */
@@ -202,6 +214,19 @@ interface MembershipTarget<T> {
   read: () => T;
   signature: (target: T) => string;
   question: (target: T) => MembershipQuestion;
+}
+
+/**
+ * Something more to ask git about the target in the same attempt (Issue #4221 §9.3):
+ * asked before and after the membership, and the attempt is stale unless both
+ * answers are the same and `agrees` holds against the membership's own answers.
+ */
+export interface MembershipObservation<T, O> {
+  observe: (target: T) => Promise<O>;
+  /** Equality of two observations; JSON by default. */
+  same?: (a: O, b: O) => boolean;
+  /** Whether the observation and the membership speak of the same git (the common dir). */
+  agrees?: (observation: O, membership: RoleRepositoryMembership) => boolean;
 }
 
 /**
@@ -224,22 +249,41 @@ function finishAttempt<T, R>(
   return { stale: false, value: build(current, membershipFrom(question, answers, deps)) };
 }
 
-async function withSettledMembership<T, R>(
+/** Thrown when the registration (or an observation) never held still for one attempt. */
+export class MembershipUnsettledError extends Error {
+  constructor() {
+    super('The repository registration kept changing while it was being read');
+    this.name = 'MembershipUnsettledError';
+  }
+}
+
+async function withSettledMembership<T, R, O = undefined>(
   db: Database.Database,
   spec: MembershipTarget<T>,
   deps: RoleResolverDeps,
-  build: (target: T, membership: RoleRepositoryMembership) => R
+  build: (target: T, membership: RoleRepositoryMembership, observation: O) => R,
+  observation?: MembershipObservation<T, O>
 ): Promise<R> {
+  const same = observation?.same ?? ((a: O, b: O) => JSON.stringify(a) === JSON.stringify(b));
   for (let attempt = 0; attempt < MAX_MEMBERSHIP_ATTEMPTS; attempt += 1) {
     const target = spec.read();
     const asked = `${spec.signature(target)}|${rootsSignature(db)}`;
     const question = spec.question(target);
+    const before = observation ? await observation.observe(target) : (undefined as O);
     const answers = await askGit(db, question, deps);
-    const outcome = finishAttempt(db, spec, asked, question, answers, deps, build);
-    if (!outcome.stale) return outcome.value;
+    const after = observation ? await observation.observe(target) : (undefined as O);
+    if (observation && !same(before, after)) continue;
+    const outcome = finishAttempt(db, spec, asked, question, answers, deps, (current, membership) => {
+      if (observation?.agrees && !observation.agrees(after, membership)) return STALE;
+      return build(current, membership, after);
+    });
+    if (!outcome.stale && outcome.value !== STALE) return outcome.value as R;
   }
-  throw new Error('The repository registration kept changing while it was being read');
+  throw new MembershipUnsettledError();
 }
+
+/** Returned by a build that found its observation disagreeing with the membership. */
+const STALE: unique symbol = Symbol('stale');
 
 /**
  * Build a result from a worktree, as it is now, and the roots it belongs to. Reads
@@ -251,29 +295,46 @@ async function withSettledMembership<T, R>(
  * @throws {AgentRoleTargetNotFoundError} The worktree does not exist
  * @throws Error The registration never held still; better no answer than a stale one
  */
+function worktreeTarget(db: Database.Database, worktreeId: string): MembershipTarget<Worktree> {
+  return {
+    read: () => {
+      const worktree = getWorktreeById(db, worktreeId);
+      if (!worktree) throw new AgentRoleTargetNotFoundError(`Worktree not found: ${worktreeId}`);
+      return worktree;
+    },
+    signature: (worktree) => JSON.stringify([worktree.path, worktree.repositoryPath]),
+    question: (worktree) => {
+      const named = worktree.repositoryPath || null;
+      return { namedRootPath: named, identityPaths: named ? [worktree.path, named] : [worktree.path] };
+    },
+  };
+}
+
 export function withSettledWorktreeMembership<R>(
   db: Database.Database,
   worktreeId: string,
   deps: RoleResolverDeps,
   build: (worktree: Worktree, membership: RoleRepositoryMembership) => R
 ): Promise<R> {
-  return withSettledMembership(
-    db,
-    {
-      read: () => {
-        const worktree = getWorktreeById(db, worktreeId);
-        if (!worktree) throw new AgentRoleTargetNotFoundError(`Worktree not found: ${worktreeId}`);
-        return worktree;
-      },
-      signature: (worktree) => JSON.stringify([worktree.path, worktree.repositoryPath]),
-      question: (worktree) => {
-        const named = worktree.repositoryPath || null;
-        return { namedRootPath: named, identityPaths: named ? [worktree.path, named] : [worktree.path] };
-      },
-    },
-    deps,
-    build
-  );
+  return withSettledMembership(db, worktreeTarget(db, worktreeId), deps, build);
+}
+
+/**
+ * {@link withSettledWorktreeMembership} with one more question asked of git in the
+ * same attempt (Issue #4221 §9.3: the branch, HEAD and common dir of the worktree).
+ * The build sees the observation taken after the membership, which equals the one
+ * taken before it.
+ *
+ * @throws {MembershipUnsettledError} The worktree, the roots or the observation never held still
+ */
+export function withSettledObservedWorktreeMembership<R, O>(
+  db: Database.Database,
+  worktreeId: string,
+  deps: RoleResolverDeps,
+  observation: MembershipObservation<Worktree, O>,
+  build: (worktree: Worktree, membership: RoleRepositoryMembership, observed: O) => R
+): Promise<R> {
+  return withSettledMembership(db, worktreeTarget(db, worktreeId), deps, build, observation);
 }
 
 /**

@@ -79,6 +79,7 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | [`commandmate auto-yes`](#commandmate-auto-yes) | Auto-Yesの制御 |
 | [`commandmate instances`](#commandmate-instances) | エージェントインスタンス（roster）の一覧・追加・削除・alias変更 |
 | [`commandmate roles`](#commandmate-roles) | ロールの定義と、ツール・リポジトリごとの既定の設定 |
+| [`commandmate mem`](#commandmate-mem) | セッションをまたぐ作業の項目（now・待ち・決定など）の読み書き。mode は読むだけ |
 | [`commandmate agents`](#commandmate-agents) | エージェント CLI の版表示と更新（pane の外で `codex update` を実行） |
 | [`commandmate report`](#commandmate-report) | 日次レポートの生成・表示・一覧、Eval メトリクス集計 |
 | [`commandmate skill`](#commandmate-skill) | 公式Skillのカタログ参照・Install/Update Plan・install・update・uninstall・status |
@@ -3397,6 +3398,61 @@ commandmate roles default codex --repo . --role reviewer
 
 ---
 
+## commandmate mem
+
+セッションをまたいで作業の状態を引き継ぐ、型の付いた項目（Issue #4221、Epic #4220）。CommandMate が知り得ないもの（意図・次の一手・待っている相手・決定・外部の状態）だけを、閉じる条件つきで持つ。項目は登録された repository とブランチに付き、worktree を作り直しても同じブランチなら続く。
+
+### 有効にする（画面だけ）
+
+既定は `off`。mode（`off` / `derived` / `on`）は **Repositories の画面の各行の「mem」** で、ブランチ名の規則（上から最初に当たった行。`*` は `/` を含まない、`**` は含む、`detached HEAD` の行）とブランチごとの上書きとして設定する。優先順位は ブランチの上書き → 規則 → `off`。**CLI には mode を変える口が無い**（`mem mode` は読むだけ）。書き込み（`now` / `add` / `update` / `close`）は mode が `on` のブランチでだけ通り、`off` と `derived` では exit 50 で何も保存しない。
+
+### 使用方法
+
+```bash
+commandmate mem now "<text>" [--close-when <cond>] [--evidence <ref>]
+commandmate mem add --kind <kind> (--text "<text>" | --stdin) [--close-when <cond>] [--promote-to <dest>] [--quote "<words>" --quote-at <ts>] [--evidence <ref>] [--key <key>]
+commandmate mem update <id> --if-version <n> [--text … | --stdin] [--close-when …] [--evidence …]
+commandmate mem close <id> [--reason "<text>"]
+commandmate mem list [--all] [--branch <name>] [--json]
+commandmate mem mode [--json]
+commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before <ts>] [--include-decisions] --confirm
+```
+
+- 対象は、セッションの中では `whoami` で決まる自分の instance。通常のシェルでは、書き込みに `--worktree <id> --instance <id>`、`list` / `mode` / `purge` に `--worktree <id>` か `--repository <id> --branch <name>` を付ける（無ければ exit 2 `target_required`）
+- `now` はそのセッションのメモ（#2427）と同じもの。100 文字まで。次の `now` で置き換わり、前の内容は `superseded` として残る（枠ごとに新しい 20 件）
+- kind は `now` / `waiting` / `decision` / `next` / `external` / `note`。`--close-when` は `waiting` / `next` / `external` で必須。省略すると `now` → `replaced`、`note` → `manual`、`decision` → 反映（promote）まで閉じない
+- `--close-when`：`manual` ・ `replaced`（now だけ）・ `issue:[host/owner/repo]#N` ・ `pr:[host/owner/repo]#N[?state=merged|closed]` ・ `branch:<name>?merged=<ref>[&scope=local|remote]` ・ `branch:<name>?deleted` ・ `relay:<id>` ・ `worktree:<id>` ・ `session:<id>` ・ `at:<オフセット付き ISO 8601>`。この Issue では保存の前の検査まで（評価は #4222）
+- `update` / `close` ができるのは作成した instance（同じ世代）と人（画面）だけ。instance を消して同じ ID で作り直すと別の世代になり、前の項目は変えられない（exit 55）
+- `--key` を付けた `add` は、同じ key・同じ内容の再送で最初の項目を返す（`replayed: true`）。中身が違えば exit 54
+- `purge` は `--confirm` が無いと何も消さず、消える件数だけを出す。`recorded` / `promoted` の決定は `--include-decisions` が無いと対象にしない。Agent のセッションの中からは断る（exit 55）
+
+### 自由入力の欄の検査
+
+すべての自由入力の欄（`text`・`quote`・`evidence`・`promote_to`・`reason`）はサーバで、長さの上限・秘密らしい文字列（トークン・鍵・`password=` など）・制御文字を検査する。`evidence` と `promote_to` の `path:` は repository からの相対パスだけで、絶対パス・`..` で外へ出るもの・symlink を通るもの・`.env` などを断る。断ったときのエラー・`--json`・ログには `code`・`field`・`rule` だけが出て、**断った文字列そのものは出さない**。
+
+### 終了コード
+
+| コード | 意味 |
+|:------:|------|
+| 0 | 成功（`--key` の再送で既存を返したときも） |
+| 1 | サーバーに届かない |
+| 2 | 入力の不正（`invalid_close_when` / `control_char` / `secret_like` / `too_long` / `absolute_path` / `outside_repository` / `symlink` / `sensitive_path` / `invalid_evidence` / `invalid_key` / `target_required` など）。何も保存していない |
+| 50 | `disabled`：そのブランチの mode が `off` か `derived`。何も保存していない |
+| 51 | `version_conflict`：`--if-version` が今の版と違う。今保存されている項目を返す |
+| 52 | `not_registered` / `item_not_found` / `instance_not_found` / `branch_unresolved` |
+| 53 | `ambiguous`：同じ Git の複数の登録 root で設定が違う・git が答えない root がある・観測の間に登録が変わり続けた |
+| 54 | `duplicate_key`：同じ `--key` で中身が違う |
+| 55 | `not_owner` / `state_forbids`：作成者でない（別の世代を含む）・状態が許さない・セッションの中の `purge` |
+| 56 | `limit_exceeded`：そのブランチの open の項目が多すぎる（`waiting` / `next` / `external` は 30、`note` は 50。`decision` は警告だけ） |
+
+### 防げないこと（検査の限界）
+
+- mode を変えられるのは画面の経路だけ（画面だけが付ける印と `Origin` の一致をサーバが検査する）。ただし同じ OS 権限のプロセス（Agent を含む）は、`curl` で印を偽れば通れるし、DB ファイルを直接書き換えることもできる。CommandMate はこれを防がない・検出しない
+- 防いでいるのは、CLI の正規の口から mode が変わること、CLI の利用者が気づかずに変えること、別 origin のページが利用者のブラウザ越しに変えることだけ
+- `--instance` の名乗りも偽れる。作成者の検査は別のセッションの項目を誤って書き換えないためのもので、悪意の書き換えを防ぐものではない
+
+---
+
 ## commandmate report
 
 日次レポート（その日のエージェント活動サマリー）を生成・表示・一覧します（Issue #636）。
@@ -4167,6 +4223,7 @@ commandmate ls --token your-token
 | 30 | NO_ACTIVE_SESSIONS | interruptの対象となる稼働中セッションが無い |
 | 31 | ROLE CONFLICT | ロールや名簿の競合（`name_conflict` / `name_changed` / `version_conflict` / `role_in_use` / `instance_exists` / `roster_changed`）。何も変更・送信していない。ロールを付けない `instances add` / `remove` / `alias` でも出る。例外: `remove --kill` はセッションが停止済みのことがある |
 | 32 | ROLE NOT_SENT | ロールの条件を満たさない、またはロールのために起動を拒否。本文は入力していない（`send` / `ask`） |
+| 50〜56 | MEM | `mem` の拒否（50 disabled / 51 version_conflict / 52 対象不明 / 53 ambiguous / 54 duplicate_key / 55 not_owner・state_forbids / 56 limit_exceeded）。[commandmate mem](#commandmate-mem) の終了コード |
 | 99 | UNEXPECTED_ERROR | 予期しないエラー / リソース未検出 |
 | 124 | TIMEOUT | waitのタイムアウト |
 
