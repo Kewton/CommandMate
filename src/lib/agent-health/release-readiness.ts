@@ -669,7 +669,7 @@ function collectDispatchProgress(facts: ReadinessFacts, acc: ReadinessAccumulato
     holdSteps.push(`持ち越し（${issueList(facts.deferred)}）を待たずにリリースしてよいかを決める`);
   }
   if (facts.dispatchStatus === 'skipped-busy') {
-    notes.push('本日の依頼は orchestrate の実行中のため見送られた（skipped-busy）');
+    notes.push('本日の依頼は claude-3 が使用中（orchestrate の実行中か予約中）のため見送られた（skipped-busy）');
   }
 }
 

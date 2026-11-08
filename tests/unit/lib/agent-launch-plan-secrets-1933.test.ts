@@ -35,7 +35,8 @@
  * enumeration beside the prefix — and moved the measurement from a record into
  * a **drift guard**: the last test asserts the seven plans' env keys are
  * EXACTLY `AGENT_CORRELATION_ENV_VARS` plus `AGENT_LAUNCH_CONFIG_ENV_VARS`, in
- * both directions. That is what replaces the prefix for names outside
+ * both directions (plus `AGENT_LAUNCH_CONDITIONAL_CONFIG_ENV_VARS` under a
+ * relative `COPILOT_HOME`, Issue #4210 — see below). That is what replaces the prefix for names outside
  * `CM_HOOK_`, which the prefix never covered at all.
  *
  * ## What #2403 moved

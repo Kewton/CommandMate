@@ -87,7 +87,7 @@ import { spawnSync } from 'child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
-import { resolveSafeDirectory } from '@/config/safe-directory';
+import { resolveSafeAbsoluteDirectory } from '@/config/safe-directory';
 import {
   getUatIsolationMode,
   isUatIsolationEnabled,
@@ -422,13 +422,23 @@ export function shouldTrustCodexHooks(worktreePath: string): boolean {
  * Issue #1774: `writeCodexHookSettings` creates this directory with a recursive
  * mkdir, which does not fail but *hangs* for a path inside `/proc`, `/sys` or
  * `/dev`. Such a value is refused here and `~/.codex` is used instead.
+ *
+ * Issue #4233: a relative value is made absolute against THIS process's cwd
+ * (the server's — the package root under the daemon). The server writes
+ * `hooks.json`, the relay and the role profiles under this home and pins it on
+ * codex's launch line (`buildCodexLaunchPlan`, `agent-roles/adapters.ts`),
+ * while codex runs in the worktree and would resolve a relative value against
+ * THAT cwd — another directory, no hooks, no events. Pinning the absolute form
+ * keeps "the file we wrote" and "the file codex reads" one file, the same
+ * direction #4191 (`CM_AGENT_HOOKS_DIR`) and #4210 (`COPILOT_HOME`) took.
+ * See docs/design/relative-config-home-4233.md.
  */
 export function getCodexHome(options: CodexHookOptions = {}): string {
   const fallback = join(homedir(), '.codex');
   if (options.codexHome) {
-    return resolveSafeDirectory(options.codexHome, fallback, 'CodexHookOptions.codexHome');
+    return resolveSafeAbsoluteDirectory(options.codexHome, fallback, 'CodexHookOptions.codexHome');
   }
-  return resolveSafeDirectory(process.env[CODEX_HOME_ENV_VAR], fallback, CODEX_HOME_ENV_VAR);
+  return resolveSafeAbsoluteDirectory(process.env[CODEX_HOME_ENV_VAR], fallback, CODEX_HOME_ENV_VAR);
 }
 
 /** Absolute path of the hooks file codex reads. */

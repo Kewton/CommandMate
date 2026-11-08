@@ -248,3 +248,36 @@ describe('release-report main: the product-path check (Issue #3312)', () => {
   });
 });
 
+
+describe('release-report reads the day’s sent marker first (#4243 review b)', () => {
+  const sent = {
+    schemaVersion: 1,
+    date: '2026-10-01',
+    status: 'sent',
+    sentAt: '2026-10-01T00:30:00Z',
+    issues: [{ number: 3050, kind: 'bug', title: 'codex screen-idle' }],
+    deferred: [],
+    runSuffix: '3050',
+  };
+
+  it('positive: read after a skip’s rename and before the sent is written back — the sent Issue is reported', async () => {
+    write(path.join(stateDir, 'dispatch', '2026-10-01.json.sent'), JSON.stringify(sent));
+    write(
+      path.join(stateDir, 'dispatch', '2026-10-01.json'),
+      JSON.stringify({ schemaVersion: 1, date: '2026-10-01', status: 'skipped-busy', issues: [], deferred: [3050], reason: 'x' })
+    );
+    const { code, html } = await run(['--no-gh', '--no-audit']);
+    expect(code).toBe(0);
+    expect(lines.join('\n')).toMatch(/dispatched=1/);
+    expect(html).toContain('3050');
+  });
+
+  it('negative: without a marker the record file is read as before', async () => {
+    write(
+      path.join(stateDir, 'dispatch', '2026-10-01.json'),
+      JSON.stringify({ schemaVersion: 1, date: '2026-10-01', status: 'skipped-busy', issues: [], deferred: [3050], reason: 'x' })
+    );
+    await run(['--no-gh', '--no-audit']);
+    expect(lines.join('\n')).toMatch(/dispatched=0/);
+  });
+});
