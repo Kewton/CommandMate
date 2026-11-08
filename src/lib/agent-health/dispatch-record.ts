@@ -48,6 +48,27 @@ export function dispatchRecordPath(baseDir: string, date: string): string {
   return path.join(baseDir, 'dispatch', `${date}.json`);
 }
 
+/**
+ * `<baseDir>/dispatch/<date>.json.sent`: the day's `sent`, created once and
+ * exclusively before the record is written (#4243). A non-sent writer may
+ * briefly overwrite the record before it writes the `sent` back, so every
+ * reader goes through {@link readDispatchRecordOfDay}.
+ */
+export function dispatchSentMarkerPath(baseDir: string, date: string): string {
+  return `${dispatchRecordPath(baseDir, date)}.sent`;
+}
+
+/** The day's record as every reader must see it: the `sent` marker first, else the record file. */
+export function readDispatchRecordOfDay(
+  readText: (file: string) => string | null,
+  baseDir: string,
+  date: string
+): DispatchRecord | null {
+  const marked = parseDispatchRecord(readText(dispatchSentMarkerPath(baseDir, date)));
+  if (marked?.status === 'sent') return marked;
+  return parseDispatchRecord(readText(dispatchRecordPath(baseDir, date)));
+}
+
 /** `3050` or `3050-3051-…`: only digits and dashes, so it is safe inside a file name. */
 export const RUN_SUFFIX_RE = /^\d+(?:-\d+)*$/;
 

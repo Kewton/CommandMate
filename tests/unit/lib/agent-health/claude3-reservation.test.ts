@@ -12,6 +12,8 @@ import {
   acquireReservation,
   beginSend,
   defaultReservationDir,
+  dispatchRunFinishedMark,
+  finishDispatchRun,
   endSend,
   forceReleaseReservation,
   isSending,
@@ -324,5 +326,49 @@ describe('claude3 reservation: location and target (R6)', () => {
     );
     expect(acquireReservation(env(), { holder: 'pm', label: 'x' })).toMatchObject({ ok: false, code: 2 });
     expect(genFiles()).toEqual(['gen-1.json']);
+  });
+});
+
+describe('claude3 reservation: finished marks survive a late cleaning (#4243 review b)', () => {
+  const markOf = (token: string) => path.join(dir, `finished-${token}.json`);
+
+  it('positive: an old release whose cleaning resumes late leaves the current dispatch’s finished mark', () => {
+    const d1 = hold('dispatch', 1);
+    alive.add(2);
+    let d2: string | null = null;
+    const released = releaseReservation(
+      env(1, {
+        beforeClean: () => {
+          if (d2) return;
+          // While d1's release is paused before cleaning: d2 reserves, its run finishes, but its own send is in progress.
+          d2 = hold('dispatch', 2);
+          expect(beginSend(env(2), d2).ok).toBe(true);
+          expect(finishDispatchRun(env(2), d2)).toMatchObject({ ok: false, code: 3 });
+          expect(fs.existsSync(markOf(d2))).toBe(true);
+        },
+      }),
+      d1
+    );
+    expect(released.ok).toBe(true);
+    const token = d2 as unknown as string;
+    expect(fs.existsSync(markOf(token))).toBe(true);
+    expect(endSend(env(2), token).ok).toBe(true);
+    expect(fs.existsSync(markOf(token))).toBe(true);
+    expect(dispatchRunFinishedMark(dir, current())).toBe(true);
+  });
+
+  it('negative: a token’s own mark goes when the reservation leaves it (finish, or a later force release)', () => {
+    const a = hold('dispatch', 1);
+    expect(finishDispatchRun(env(1), a).ok).toBe(true);
+    expect(fs.existsSync(markOf(a))).toBe(false);
+
+    const b = hold('dispatch', 1);
+    alive.add(1);
+    expect(beginSend(env(1), b).ok).toBe(true);
+    expect(finishDispatchRun(env(1), b).ok).toBe(false);
+    expect(fs.existsSync(markOf(b))).toBe(true);
+    expect(endSend(env(1), b).ok).toBe(true);
+    expect(forceReleaseReservation(env(5), b).ok).toBe(true);
+    expect(fs.existsSync(markOf(b))).toBe(false);
   });
 });

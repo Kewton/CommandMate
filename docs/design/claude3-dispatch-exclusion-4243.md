@@ -371,3 +371,10 @@
 | I10 | P1-2: `takeover --reason dispatch-finished` の証拠が HTML の mtime だけで、run の途中の手動のレポート生成でも証拠になる | 条件ファイルの最後の行を `finish --token <t>` に替えた。`finish` はその token が自動依頼の予約を持っているときだけ予約の置き場所に `finished-<token>.json` を書き、続けて解除する。引継ぎの証拠はこの印だけ（HTML は見ない）。印は、token が現在の持ち主でなくなった世代の公開時に掃除する | `claude3-reserve.test.ts`: 陽性＝run の途中に更新された HTML では exit 3。陰性＝印を残して解除が送信中で拒まれた後は引き継げる。PM の token では `finish` できない |
 | I11 | P2-1: 当日の `sent` の確認と記録の置き換えの間に別の dispatch が割り込める | `sent` は `dispatch/<日付>.json.sent` を link で 1 回だけ排他作成してから記録を書く（2 本目の `sent` は書かない）。読む側（当日の確認・取得後の読み直し）は印を先に見る。見送り・失敗・no-target の書き手は、印が無いことを見て rename し、rename の後にもう一度印を見て、在れば `sent` を書き戻す。どの順序でも最後は `sent` が残る | `dispatch.test.ts` P2-1: 陽性＝確認と rename の間・rename の直後に `sent` が入っても最終は `sent`、予約取得前の失敗（gh の失敗）も `sent` を置き換えない。陰性＝`sent` が無ければ今どおり書く |
 | I12 | P2-2: PM 用の `send` が dispatch の token でも送れる | `beginSend` に送る側の `holder` を渡し、送信中の印を付ける同じ比較交換の中で持ち主を確かめる（PM の入口は `pm`、dispatch は `dispatch`） | `claude3-reserve.test.ts` P2-2: 陽性＝dispatch の token で PM の `send` は exit 3・`commandmate` を呼ばない。陰性＝PM の token の送信は今どおり |
+
+### 10.2 再レビュー（`workspace/orchestration/runs/2026-11-08/review-4243b.md`、P2 2）の処置
+
+| # | 指摘 | 変えたこと | 対照 |
+|---|---|---|---|
+| I13 | I11 の `sent` の印への追従が、リリース判断レポート（`release-report-main.ts`）に届いていない。見送りの rename の後・`sent` の書き戻しの前に読むと非 `sent` を採る | 当日の記録の読み方を `dispatch-record.ts` の `readDispatchRecordOfDay()`（印 `dispatchSentMarkerPath()` を先に読み、`sent` ならそれ、無ければ記録ファイル）に 1 つにし、dispatch（当日の確認・取得後の読み直し）とレポートの両方がそれを通る | `release-report.test.ts`: 陽性＝印が `sent`・記録ファイルが見送りの状態で読むと `dispatched=1`・Issue が出る（修正前は 0）。陰性＝印が無ければ記録ファイルを今どおり読む |
+| I14 | 古い公開の後処理（掃除）が、今の予約の完了の印を消す（印を「`next.token` と違う」で消していた） | 公開が消す印は、その公開の前提の世代の token（この公開で予約を失う token）のものだけにした。token は一意で二度と持ち主に戻らないので、いつ遅れて掃除が走っても今の持ち主の印には触れない。予約を失う公開は必ずその token を前提に作られるので、自分の古い印はそこで消える（失った後に書かれた印だけは残りうるが、引継ぎは今の token の印しか見ないので無害） | `claude3-reservation.test.ts`: 陽性＝旧 release の掃除の前で止め、その間に新しい dispatch が取得・`finish`（送信中で解除失敗）→ 再開しても新しい印が残り、送信の終了後に引継ぎの証拠になる（修正前は消える）。陰性＝`finish` の解除・後の強制解除で自分の印は消える |

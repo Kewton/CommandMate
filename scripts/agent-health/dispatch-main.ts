@@ -51,6 +51,8 @@ import {
 } from '@/lib/agent-health/claude3-reservation';
 import {
   dispatchRecordPath,
+  dispatchSentMarkerPath,
+  readDispatchRecordOfDay,
   parseDispatchRecord,
   type DispatchIssue,
   type DispatchRecord,
@@ -261,12 +263,8 @@ async function dispatch(
    * `sent` appeared meanwhile it writes that `sent` back, so a skip never stays
    * over a `sent`, whatever the interleaving (#4243 R5, design §10 I11).
    */
-  const sentMarker = `${recordFile}.sent`;
-  const readToday = (): DispatchRecord | null => {
-    const marked = parseDispatchRecord(readText(sentMarker));
-    if (marked?.status === 'sent') return marked;
-    return parseDispatchRecord(readText(recordFile));
-  };
+  const sentMarker = dispatchSentMarkerPath(stateDir, date);
+  const readToday = (): DispatchRecord | null => readDispatchRecordOfDay(readText, stateDir, date);
   /** Writes the record (not on a dry run), prints the line, returns the exit code. */
   const finish = (record: DispatchRecord, exitCode: number): number => {
     if (!dryRun) {

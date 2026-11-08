@@ -94,6 +94,8 @@ export interface ReservationEnv {
   randomHex?: () => string;
   /** Test hook: called after reading N and before publishing N+1. */
   beforePublish?: (next: ReservationGeneration) => void;
+  /** Test hook: called after a publish was verified and before its cleaning. */
+  beforeClean?: (next: ReservationGeneration) => void;
 }
 
 /** 2 = configuration / I/O / gave up, 3 = held by someone else / token mismatch / sending, 4 = Claude 3 busy (callers). */
@@ -269,7 +271,14 @@ function publishIsCurrent(dir: string, next: ReservationGeneration): boolean {
   }
 }
 
-function publish(env: ReservationEnv, next: ReservationGeneration): 'ok' | 'conflict' | string {
+/**
+ * `premiseToken` is the token of the generation this publish was built on. When
+ * the publish moves the reservation away from it, that token can never hold
+ * again (tokens are unique), so its finished mark is removed — and only that
+ * one: a paused publish that resumes late never touches the mark of whoever
+ * holds the reservation now (design §10.2 I14).
+ */
+function publish(env: ReservationEnv, next: ReservationGeneration, premiseToken: string | null): 'ok' | 'conflict' | string {
   const tmp = path.join(env.dir, `tmp-${env.pid}-${crypto.randomBytes(6).toString('hex')}.json`);
   const name = path.join(env.dir, `gen-${next.generation}.json`);
   try {
@@ -295,14 +304,16 @@ function publish(env: ReservationEnv, next: ReservationGeneration): 'ok' | 'conf
       // already gone
     }
   }
+  env.beforeClean?.(next);
   const oldest = next.generation - RESERVATION_KEEP_GENERATIONS;
   try {
     for (const entry of fs.readdirSync(env.dir)) {
       const m = GEN_RE.exec(entry);
       if (m && Number(m[1]) < oldest) fs.rmSync(path.join(env.dir, entry), { force: true });
-      // A finished mark matters only while its token holds the reservation.
       const f = FINISHED_RE.exec(entry);
-      if (f && f[1] !== next.token) fs.rmSync(path.join(env.dir, entry), { force: true });
+      if (f && premiseToken !== null && f[1] === premiseToken && next.token !== premiseToken) {
+        fs.rmSync(path.join(env.dir, entry), { force: true });
+      }
     }
   } catch {
     // cleaning is best effort
@@ -335,7 +346,7 @@ function transition(env: ReservationEnv, decide: (current: ReservationGeneration
       parentPublishId: current.publishId,
     };
     env.beforePublish?.(next);
-    const published = publish(env, next);
+    const published = publish(env, next, current.token);
     if (published === 'ok') return { ok: true, generation: next };
     if (published !== 'conflict') return { ok: false, code: 2, message: published, current };
   }

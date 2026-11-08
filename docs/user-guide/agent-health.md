@@ -595,7 +595,7 @@ npx tsx scripts/agent-health/dispatch.ts --dry-run   # 選定と状態確認だ�
   （`~/.commandmate/agent-health/claude3.reservation`。置き場所は固定で、`--state-dir`・`$AGENT_HEALTH_DIR` では動かない）を取る。
   PM（開発リーダーとしてのブリーフ）か前日の自動依頼の run が持っていれば、`/clear` も依頼も送らず、条件ファイル・ラベル・コメントも作らずに
   `skipped-busy`（`reason` に持ち主と期限。期限を過ぎていれば「期限超過・要確認」。全件を持ち越し・exit 0）。待たない。
-  同じ日の別の dispatch が持っていれば記録を書かずに 1 行だけ出す。当日の `sent` は `dispatch/<日付>.json.sent` に 1 回だけ排他作成してから記録を書き、見送り・失敗の記録はその印を見て `sent` を置き換えない（書いた後に印が現れたら `sent` に戻す）。
+  同じ日の別の dispatch が持っていれば記録を書かずに 1 行だけ出す。当日の `sent` は `dispatch/<日付>.json.sent` に 1 回だけ排他作成してから記録を書き、見送り・失敗の記録はその印を見て `sent` を置き換えない（書いた後に印が現れたら `sent` に戻す）。当日の記録を読む側（翌日以降の dispatch・リリース判断レポート）は印を先に読む。
   依頼を送った後も予約は外さず、run の最後に `claude-3` が条件ファイルの指示で `npx tsx scripts/agent-health/claude3-reserve.ts finish --token <token>` を実行する（その token の完了の印を残してから解除。解除が通らなかったときは、この印があるときだけ PM が `takeover --reason dispatch-finished` で引き継げる）。
   依頼の前に止まったとき（busy・`/clear` の失敗・入力待ちに戻らない・条件ファイルが書けない）と、依頼が再送の後も `exit 99`（未送信）のときは dispatch が自分で外す。
   依頼がそれ以外の非 0 で終わったときは届いたか分からないので外さない（`reason` に「届いたか不明」）。PM か人が `status` を見て `takeover`／`release --force` する
