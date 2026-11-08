@@ -1571,6 +1571,42 @@ describe('after a re-instruction, only a signal written after it counts (Issue #
       expect(go([OLD], ['--reverify']).code).toBe(0);
     });
 
+    describe('a call after a re-instruction that ended before it recorded (Issue #4244)', () => {
+      /** The first attempt's verification was recorded without a boundary; then a re-instruction's wait fell over. */
+      function interruptedReinstructThen(extra: string[]) {
+        appendRecord(runDir, '3477', { issue: 3477, stage: 'verify', result: 'fail', head: HEAD_A, taskId: 't-1', note: 'exit=20(verify)' });
+        const first = harness({ tasks: [t1cc], commitMinute: -20, pane: ['x'], resolvedTools: { 'command-code': 'command-code' } });
+        first.deps.spawnToLog = () => {
+          throw new Error('wait fell over');
+        };
+        const before = records().length;
+        const code = main(cc('--signal-since', iso(-5)), first.deps);
+        expect(code).toBe(1);
+        expect(records()).toHaveLength(before);
+        return go([OLD], extra);
+      }
+
+      it('the previous attempt’s signal is not counted by the --reverify after it (positive control)', () => {
+        const { h, code, sinces } = interruptedReinstructThen(['--reverify']);
+        expect(code).toBe(3);
+        expect(h.spawned.map((c) => c.args[0])).toEqual(['wait']);
+        expect(h.autoYesCalls()).toEqual([]);
+        expect(sinces[0]).toBe(iso(-5));
+      });
+
+      it('a new send (no --after-reinstruct) drops the mark: a later --reverify dates from the task, as before (negative control)', () => {
+        interruptedReinstructThen(['--reverify']);
+        const fresh = harness({ tasks: [t1cc], commitMinute: -20, pane: ['x'], resolvedTools: { 'command-code': 'command-code' } });
+        main([...argv().map((a) => (a === 'claude' ? 'command-code' : a)), '--signal-timeout', '60'], fresh.deps);
+        expect(go([OLD], ['--reverify']).code).toBe(0);
+      });
+
+      it('the mark never moves the next of run-log.mjs: it is not a record', () => {
+        interruptedReinstructThen(['--reverify']);
+        expect(records().every((r) => r.stage === 'verify')).toBe(true);
+      });
+    });
+
     it('inheritedSignalSince reads the last verification of this task and work item only', () => {
       earlierCall();
       appendRecord(runDir, '3477', { issue: 3477, stage: 'verify', result: 'fail', head: HEAD_A, taskId: 't-0', note: `signal-since=${iso(9)}` });
