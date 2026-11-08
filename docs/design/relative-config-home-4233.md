@@ -13,7 +13,7 @@
 | 問題 | 決めた向き | 一言の理由 |
 |---|---|---|
 | 1 `CODEX_HOME` | **サーバーの cwd で絶対化して 1 つの実体に寄せる**（#4191・#4210 と同じ向き） | CommandMate は起動行に `CODEX_HOME` を自分で載せている。載せる値を絶対にすれば、サーバーが書いた・読んだファイルと codex が読むファイルが構造的に一致する |
-| 2 `XDG_CONFIG_HOME`（V2 のロール判定） | **pane の cwd（worktree）で解決する**＝opencode と同じ基準で読む | この値は CommandMate が渡していない（pane の環境は tmux 由来）。読むだけの側なので、読み手である opencode の解決に合わせる。起動行に載せて絶対化する案は `launch-command.ts` の「`XDG_CONFIG_HOME` は決して載せない」に反する |
+| 2 `XDG_CONFIG_HOME`（V2 のロール判定） | **opencode の起動 cwd（通常は worktree）で解決する**＝opencode と同じ基準で読む。起動 cwd が worktree と一致すると言えない経路（`cd` した既存 pane への送り直し）では、相対値のときロールつきの起動を拒否する（§3.2） | この値は CommandMate が渡していない（pane の環境は tmux 由来）。読むだけの側なので、読み手である opencode の解決に合わせる。起動行に載せて絶対化する案は `launch-command.ts` の「`XDG_CONFIG_HOME` は決して載せない」に反する |
 | 3 説明の追従 | `child-process-env-scope-1996.md` と `env-sanitizer.ts` のコメントを #4210 の宣言（`AGENT_LAUNCH_CONDITIONAL_CONFIG_ENV_VARS`）に合わせる。当時の実測の記録は残し、今の仕様を別に書く | — |
 
 2 つの向きは「どちらが正しいか」ではなく、共通の規則 **「値を相手に渡す側がこちらなら、こちらの cwd で絶対化して渡す。渡していない値を読むときは、相手の cwd で解決して読む」** の 2 つの場合である。#4191・#4210 で採った向きはどれも前者に当たる。
@@ -41,9 +41,9 @@
    - 共有 hooks の点検: `inspectCodexSharedHooksReadOnly()`（`:752-756`）も同じ相対パスを読む。
    - ロールのプロファイル: `src/lib/agent-roles/artifacts.ts:280-281` `resolveArtifactLocation('codex')` が `join(getCodexHome(), '<name>.config.toml')` を書く。
    - ロールの合成: `src/lib/agent-roles/composition.ts:74` `readCodexDeveloperInstructions(getCodexHome())` が `config.toml` を読む。
-   - 共有状態の判定: `artifacts.ts:218-226` `knownSharedStatePaths()` が `getCodexHome()` を絶対パスの一覧に混ぜ、`isSameOrInside()` で前方一致を取る（相対値は何にも一致しない）。
+   - 共有状態の判定: `artifacts.ts:218-226` `knownSharedStatePaths()` が `getCodexHome()` を一覧に混ぜる。比較する側の `isSharedHomeState()`（`:244-251`）は各候補を `physicalPath()`（`:185-198`。最初に `resolve()` する）に通してから比べるので、**相対値も今すでにサーバーの cwd で絶対化されて一致する**（事前レビュー R4 で訂正。初版の「相対値は何にも一致しない」は誤り）。
 3. **worktree の cwd での解決**（codex の pane に渡る値）
-   - 起動環境: `hooks-config.ts:895` `[CODEX_HOME_ENV_VAR]: getCodexHome(options)` が相対の文字列のまま pane に載る。
+   - 起動環境: `hooks-config.ts:895` `[CODEX_HOME_ENV_VAR]: getCodexHome(options)` が相対の文字列のまま pane に載る。**hooks を準備できた起動だけ**である。`CM_AGENT_HOOKS_INJECT=0`・相関キーが不正・`hooks.json` が読めない/書けないときは `:845` の `bare`（`env: {}`）に落ち、`CODEX_HOME` は載らない（`tests/unit/hooks/codex-hooks-config-1760.test.ts:616-624` が「injection off は #1760 以前とバイト一致」を固定）。UAT 隔離中は `bare` に落ちず起動を拒否する（`:847-851`、#3360）。
    - `hooks.json` の中の relay のパス: `:466-469` `resolveCodexRelayCommandPath()` → `getInstalledCodexRelayPath(getCodexHome())`、`:484-489` で hook のコマンド文字列に埋める。codex の hook はエージェント側で実行される。
    - ロールの起動: `src/lib/agent-roles/adapters.ts:205` `{ CODEX_HOME: dirname(artifact.path) }`（`artifact.path` は 2 の相対パス）と `-p <name>`。
 
@@ -57,6 +57,16 @@
 1. **出どころ**: pane の環境。`src/lib/agent-roles/pane-env.ts:23` `tmuxPaneEnvReader()` が `tmux show-environment -t =<session>`、次に `-g` を読む。tmux サーバーが無いときだけサーバーの `process.env`。
 2. **サーバーの cwd での解決**: `composition.ts:207-210` `loadOpencodeV2Agent()` が `join(configHome, 'opencode')` を作り、`readConfigLevel()` と `existsSync()` で読む。相対の `configHome` はサーバーの cwd で解決される。
 3. **worktree の cwd での解決**: opencode V2 は `createLaunchPane`（worktree）の pane で `scripts/opencode-v2/launch.sh` から起動する（`launch.sh` は `cd` しない）。
+4. **起動 cwd が worktree でない経路**（事前レビュー R1 で追加。事実）: 既存の pane を使い回すとき、`cli-tools/opencode-v2.ts:261-263` は `reconcileExistingSession()` だけを呼び、`createLaunchPane` を通らない。所有の確認（`cli-tools/base.ts:439-446` `assertSessionNotForeign`）が見るのは作成時の `#{session_path}` で、`tmux/tmux.ts:266-283` のコメントのとおり、pane で `cd` した後の `#{pane_current_path}` とは別物である。agent が落ちた pane へ起動行を送り直す経路（`opencode-v2.ts:265-279`、`base.ts` `relaunchIfToolExited`）では、opencode は**その時点のシェルの cwd** で起動する。
+
+| 経路 | 合成に渡る `worktreePath` | opencode の実際の起動 cwd | 一致 |
+|---|---|---|---|
+| 新規 pane（`createLaunchPane`） | worktree | worktree（`base.ts:920-925`） | する |
+| 既存 pane へ送り直す（agent が落ちた後） | worktree（`session_path` 由来） | pane のシェルの今の cwd | **しないことがある** |
+| Schedule（`session/role-launch.ts:830-840` → `fixedEnvReader(input.env)`） | DB の worktree | `session/claude-executor.ts:1006-1026` の `execFile` の `cwd`（DB の worktree）。opencode V2 には `PWD: cwd` も渡す | する（**見立て**: Schedule の opencode V2 がこの実行関数を通ることは名前で追っただけ。実装の契約でテストに固定する） |
+| probe（`agent-roles/explicit-launch.ts:66-69`） | 呼び出し側の `context.worktreePath` | **未確認** | **未確認** |
+
+`claude-executor.ts:1006-1013` のコメントは、opencode 2.0.18 がプロジェクトのディレクトリを `process.cwd()` ではなく `PWD` から決めると実測している。相対の `XDG_CONFIG_HOME` を opencode が `PWD` と `process.cwd()` のどちらで解決するかも**未確認**である（pane の中では `cd` で両方が動くので、送り直しの経路の結論は変わらない）。
 
 → 相対の `XDG_CONFIG_HOME` では、ロール判定は `<serverCwd>/<rel>/opencode/opencode.json` の `default_agent` や `system` を見て、opencode は `<worktree>/<rel>/opencode/` を見る。判定（どの agent に役割を載せるか、`system` を持つ agent を拒否するか）が実際と食い違う。
 
@@ -129,19 +139,55 @@
 | ロールの書き手 | `artifacts.ts:280-281` `<name>.config.toml` | `<serverCwd>/<rel>/` | 同じ実体 |
 | ロールの起動環境 | `adapters.ts:205` `CODEX_HOME: dirname(artifact.path)` | 相対 | 絶対（`artifact.path` が絶対になるため。`adapters.ts` は変えない） |
 | ロールの読み手 | `composition.ts:74` `readCodexDeveloperInstructions` | `<serverCwd>/<rel>/config.toml` | 同じ実体 |
-| 共有状態の判定 | `artifacts.ts:218-226` `knownSharedStatePaths` | 相対の要素が何にも一致しない | 絶対で前方一致が効く |
+| 共有状態の判定 | `artifacts.ts:218-226` `knownSharedStatePaths`、`:244-251` `isSharedHomeState` | `physicalPath()` がサーバーの cwd で絶対化してから比べるので、すでに一致する（既存の保護） | 変わらない。A で新たに得る保護ではなく、**維持する保護**として §3.3 の #15・#16 で固定する |
 | 共有 hooks の点検 | `hooks-config.ts:752-756` | `<serverCwd>/<rel>/` | 同じ実体 |
 | 変えない読み手 | `history.ts:196-199` `resolveCodexHome`、`updates/codex-version.ts:148` | — | 前者はサーバーの cwd で相対を解決するので A と一致する。後者は §2.2 のとおり `null` のまま |
 
-起動環境のキーの宣言（`launch-command.ts:193-196` `AGENT_LAUNCH_CONFIG_ENV_VARS` の `CODEX_HOME`）は変わらない。`CODEX_HOME` は既定の起動でも常に載るので、`COPILOT_HOME` のような条件つきの宣言は要らない。
+起動環境のキーの宣言（`launch-command.ts:193-196` `AGENT_LAUNCH_CONFIG_ENV_VARS` の `CODEX_HOME`）は変わらない。`CODEX_HOME` は**hooks を準備できた既定の起動**では常に載るので、`COPILOT_HOME` のような条件つきの宣言は要らない（初版の「常に載る」は、下の `bare` の例外を落としていた。事前レビュー R2）。
+
+#### 3.1.1 home の pin が及ぶ範囲（守る条件。事前レビュー R2）
+
+**`bare` の fallback は今のまま残し、home の保証の例外として明記する**（home の pin を hooks の準備から切り離すことはしない）。
+
+| 起動 | ロールなし | ロールつき |
+|---|---|---|
+| hooks の準備に成功 | 起動環境に絶対の `CODEX_HOME`（`hooks-config.ts:895`）。**保証の対象** | 同上＋ロールの `CODEX_HOME: dirname(artifact.path)`（`adapters.ts:205`）。両方とも `getCodexHome()` 由来で同じ絶対パス。**保証の対象** |
+| `CM_AGENT_HOOKS_INJECT=0`／相関キーが不正／`hooks.json` が不正な JSON・書けない（`bare`） | `env: {}` のまま。codex は tmux の環境の `CODEX_HOME` を使う。**保証の例外**（hooks が無いので「書いた hooks.json と読む hooks.json の一致」の問題が無く、#1760 以前とバイト一致の約束を優先する） | ロールの `CODEX_HOME` だけが載り、絶対になる。プロファイルの書き先と読み先は一致する。**保証の対象**（hooks は無い） |
+| UAT 隔離中に上の失敗が起きた | 起動を拒否（#3360）。変えない | 同左 |
+
+理由: `bare` は「hooks なしで動く」ための逃げ道で、そこに `CODEX_HOME` を足すと、hooks を切った利用者の起動行が変わり、`codex-hooks-config-1760.test.ts:616-624` の期待（#1760 の約束）を変えることになる。hooks が無ければ `hooks.json` の食い違いは起きず、ロールのプロファイルは `adapters.ts:205` が別に pin している。
+
+#### 3.1.2 移行（守る条件。事前レビュー R3）
+
+保存先の実体は変わらないが、**`hooks.json` の中身は変わる**（relay のパスが相対から絶対になる）。
+
+| 項目 | 条件 |
+|---|---|
+| 新しい home に切り替わる時点 | 新しいビルドのサーバーが**次に codex を起動したとき**（新規 pane、または agent が落ちた pane への送り直し）。サーバーの再起動だけでは切り替わらない |
+| 稼働中の codex の pane | 使い回す（`cli-tools/codex.ts:279-285` `if (live) return`）。起動環境は古い相対の `CODEX_HOME` のままで、`<worktree>/<rel>` を読み続ける。**切り替わったとは扱わない**（hooks が届かないのは従来どおりで、悪化はしない）。切り替えるには利用者が codex を終了して起動し直す。変更履歴にそう書く |
+| `hooks.json` の更新 | 通常の書き込み（`hooks-config.ts:697-717` `writeCodexHookSettings`）は CommandMate の handler だけを差し替え、利用者の hooks は残す（`renderCodexHookSettings(existing, …)`）。2 回目以降は `previous === content` で書かない（`:714`） |
+| hook の再信頼 | codex は handler のハッシュで信頼を覚える（`:549-554` のコメント）。relay のパスが変わるので、**相対の `CODEX_HOME` を使っていた利用者には 1 回だけ再信頼（`Modified since last trusted - review required`）が出る**。既定（未設定・絶対値）の利用者には出ない（relay のパスが変わらない）。変更履歴に書く |
+| UAT の共有 read-only（`:770-786` `inspectCodexSharedHooksReadOnly`） | 古い中身のファイルは `differs from what this build writes` で拒否し、**ファイルは変えない**。運用者が本番の新しいビルドで一度書き直すまで、codex の UAT は従来どおり拒否される |
+| 旧版のサーバーとの併走 | 旧版と新版が**同じ cwd**から同じ相対の `CODEX_HOME` を使うと、同じ `hooks.json` を相対版と絶対版で交互に書き換え、再信頼が繰り返される（**見立て**。別々の package root なら別のファイルになり起きない）。対策はコードに入れず、変更履歴に「併走させるなら `CODEX_HOME` を絶対パスにする」と書く |
+| worktree 側の既存の状態 | 相対の `CODEX_HOME` で起動された codex が `<worktree>/<rel>/` に書いた `auth.json`・履歴・`version.json` は、切り替え後は使われない（サーバー側の `<serverCwd>/<rel>/` を使う）。**自動では移さない**（認証情報を複製しない）。移行上の変更として変更履歴に書き、必要なら利用者が移す。サーバーの履歴の読み手（`history.ts`）はもともとサーバー側を読んでいたので、見え方は変わらない |
+
+実機での移行の結果（再信頼のダイアログの出方など）は**未確認**。実装の契約の後の UAT で見る。
 
 ### 3.2 問題 2（pane の cwd で解決）で変わるもの
 
 | 種類 | 場所 | 今 | 変更後 |
 |---|---|---|---|
 | 読み手 | `composition.ts:208-210` `loadOpencodeV2Agent` の `configHome`（global の `opencode.json(c)` と `agents/*.md`） | `join(configHome, 'opencode')` をサーバーの cwd で解決 | `configHome` が相対なら `resolve(context.worktreePath, configHome)`。§1.3 の未確認で opencode が相対値を無視すると分かったら、相対値は未設定と同じに扱う（`join(home, '.config')`） |
-| 同じ関数の `HOME` | `composition.ts:208` | 相対の `HOME` も同じ問題を持つ | 同じ規則を当てる（**見立て**: 相対の `HOME` は実用上まず無い。実装の契約で同時に扱う） |
+| 同じ関数の `HOME` | `composition.ts:208` | 相対の `HOME` も同じ問題を持つ | 同じ規則を当てる（**見立て**: 相対の `HOME` は実用上まず無い）。§5 の実機確認と §3.3 の対照に `HOME` も入れる（事前レビュー R1） |
+| 起動 cwd の読み手（新規） | `agent-roles/pane-env.ts` に pane の `#{pane_current_path}` を読む関数を足し、`RoleCompositionContext` に「この起動の cwd」を渡す口を足す | — | 下の守る条件 |
 | 変えないもの | `pane-env.ts:23` `tmuxPaneEnvReader`、`launch-command.ts:177-188`（`XDG_CONFIG_HOME` は `plan.env` に載せない） | — | — |
+
+**守る条件（事前レビュー R1）: 合成の基準の cwd と、opencode の実際の起動 cwd を一致させる。一致すると言えないときは推測せず、ロールつきの起動を拒否する。**
+
+- `XDG_CONFIG_HOME`・`HOME` が**相対のときだけ**この条件を見る。絶対値・未設定では起動 cwd を読まず、tmux の呼び出しも増やさない（従来どおり）。
+- 基準の cwd は経路ごとに決める: 新規 pane は `worktreePath`。既存 pane への送り直しは、その pane の `#{pane_current_path}` を読み、`realpath` で `worktreePath` と比べる。一致すれば `worktreePath`、**一致しなければ `RoleCompositionError`**（「相対の XDG_CONFIG_HOME/HOME を pane の cwd `<path>` で解決すると worktree と違うため、opencode が読む設定を決められない」）。読めないときも拒否する。Schedule は `execFile` の `cwd`（＝`worktreePath`）。probe は実装の契約で起動 cwd を確かめ、`worktreePath` と一致しないならその cwd を基準に渡す。
+- 起動行に `cd <worktree>` を足して起動 cwd を固定する案は採らない。全ツールの起動行が変わり、#1760 などのバイト一致の約束に触れるため。
+- 拒否は誤った `default_agent` を選ぶこと・`system` を持つ agent の拒否を外すことより安全な側である（ロールは載らないが、利用者の設定を壊さない）。
 
 ### 3.3 対照のテスト（生成と起動の cwd を対にする。#4191・#4210 の形）
 
@@ -175,8 +221,41 @@
 | 12 | 陽性 | `<launchCwd>/rel-xdg/opencode/agents/build.md` があるとき `RoleCompositionError`（opencode が見る Markdown の定義を拒否に数える） | 落ちる |
 | 13 | 陰性 | 絶対の `XDG_CONFIG_HOME` は従来どおりそのディレクトリを読む | 通る |
 | 14 | 陰性 | 未設定は `HOME/.config/opencode` を読む | 通る |
+| 21 | 陽性 | 相対の `HOME`（`XDG_CONFIG_HOME` は未設定）で、`<launchCwd>/<relHome>/.config/opencode/opencode.json` の `default_agent` を読む | 落ちる |
+| 22 | 陽性 | 既存 pane への送り直し: 起動 cwd の読み手が `launchCwd` とは別の一時ディレクトリ（worktree で作った後に `cd` した pane を模す）を返し、`XDG_CONFIG_HOME` が相対 → `RoleCompositionError` | 落ちる（今はサーバーの cwd で読んで黙って進む） |
+| 23 | 陰性 | 同じく送り直しで、起動 cwd が `launchCwd` と一致（`cd` していない pane）→ #11 と同じ結果 | （#11 と同じ） |
+| 24 | 陰性 | 送り直しで起動 cwd が違っても、`XDG_CONFIG_HOME` が絶対なら拒否せず従来どおり読む。起動 cwd の読み手は呼ばれない | 通る |
+| 25 | 陰性 | Schedule の経路（`fixedEnvReader`、起動 cwd＝`worktreePath`）は相対値を `worktreePath` で解決し、起動 cwd の読み手（tmux）を呼ばない | 落ちる（解決の部分） |
 
-既存テストの変更は §2.2 の 1 件（`codex-home-parity-2069.test.ts:80-85` の期待と名前）だけ。`tests/unit/lib/agent-launch-plan-secrets-1933.test.ts` の起動環境のキーの完全一致は、`CODEX_HOME` が常に載るので変わらない（実装の契約で確認する）。
+起動 cwd の読み手はテストでは注入する（`pane-env.ts:55-57` の `isUnderTest()` と同じく、tmux には触らない）。
+
+`tests/unit/hooks/codex-launch-home-pin-4233.test.ts`（新規。事前レビュー R2。`codex-hooks-config-1760.test.ts` の一時 home の作り方に倣う）
+
+| # | 種類 | 内容 | 直す前 |
+|---|---|---|---|
+| 17 | 陽性 | 相対の `CODEX_HOME`・hooks 成功・ロールなし: `plan.env.CODEX_HOME` を `launchCwd` から解決すると書いた `hooks.json` の home | 落ちる |
+| 18 | 陽性 | 相対の `CODEX_HOME`・`CM_AGENT_HOOKS_INJECT=0`・ロールつき: ロールの `env.CODEX_HOME` が絶対で、`<name>.config.toml` の親 | 落ちる |
+| 19 | 陰性 | `CM_AGENT_HOOKS_INJECT=0`・ロールなし: `{ command, settingsPath: null, env: {} }` のまま（相関キーも `CODEX_HOME` も載らない）。`hooks.json` は作らない | 通る |
+| 20 | 陰性 | 既存の `hooks.json` が不正な JSON: `bare` に落ち、ファイルは書き換えない。UAT 隔離中は `UatIsolationLaunchRefusedError` を投げる（#3360 の維持） | 通る |
+
+`tests/unit/hooks/codex-hooks-migration-4233.test.ts`（新規。事前レビュー R3。旧版の中身は旧コードを使わず `buildCodexHookSettings({ relayScriptPath: '<相対の relay パス>' })` で作る。`relayScriptPath` は明示すれば従う（`hooks-config.ts:467`））
+
+| # | 種類 | 内容 | 直す前 |
+|---|---|---|---|
+| 26 | 陽性 | 旧版の中身（相対の relay）＋利用者の hook 1 本がある `hooks.json` を、相対の `CODEX_HOME` で書き直すと、CommandMate の handler だけが絶対の relay に替わり、利用者の hook は残る | 落ちる（relay が相対のまま） |
+| 27 | 陰性 | 続けてもう一度書いてもバイトも mtime も変わらない | 通る |
+| 28 | 陰性 | 共有 read-only で旧版の中身を点検すると `usable: false`（differs）で、ファイルのバイトは変わらない | 通る |
+| 29 | 陰性 | 既定（未設定・絶対値の `CODEX_HOME`）では、直す前と後で `hooks.json` のバイトが同じ（再信頼が出ない） | 通る |
+| 30 | 陰性 | codex の pane が生きている（`resolveLaunchPane` が `live: true`）とき、起動の計画も `hooks.json` の書き込みも行わない（新しい home に切り替わったと扱わない）。`codex.ts` の起動をモックで見る | 通る |
+
+`tests/unit/lib/agent-roles/codex-role-relative-home-4233.test.ts` に足す（事前レビュー R4。**維持の対照**で、直す前も後も通る）
+
+| # | 種類 | 内容 |
+|---|---|---|
+| 15 | 維持（拒否） | 相対の `CODEX_HOME`（`serverCwd` の下）の配下を `dataRoot` にすると、共有状態として拒否される |
+| 16 | 維持（許可） | `serverCwd` の下の、`CODEX_HOME` とは別の独立したディレクトリを `dataRoot` にすると許可される |
+
+既存テストの期待値の変更は §2.2 の 1 件（`codex-home-parity-2069.test.ts:80-85` の期待と名前）だけ。§3.1.1 で `bare` を残すので `codex-hooks-config-1760.test.ts:616-624` は変えない。`tests/unit/lib/agent-launch-plan-secrets-1933.test.ts` の起動環境のキーの完全一致は、hooks に成功した計画で `CODEX_HOME` が載ることに変わりがないので変わらない（実装の契約で確認する）。
 
 ---
 
@@ -196,8 +275,8 @@
 
 ### 4.2 `docs/design/virtual-filesystem-directory-guard.md`（相対パスの表）
 
-- `:132` `CODEX_HOME / CodexHookOptions.codexHome` の行: 「相対のまま。未対応の経路（追跡）」を「**絶対化**（#4233）。起動環境の `CODEX_HOME`・`hooks.json` の relay のパス・ロールの `CODEX_HOME` がすべて絶対になる。版の読み手（`updates/codex-version.ts`）は相対値で不明と答えたまま（#2069）」に替える。
-- `:136` `XDG_CONFIG_HOME` の行: 「未対応の経路（追跡）」を「ロール判定は pane の cwd（worktree）で解決する（#4233）」に替える。`opencodeGlobalConfigDir()` の書き込み先の注記は §6 の指摘として残す。
+- `:132` `CODEX_HOME / CodexHookOptions.codexHome` の行: 「相対のまま。未対応の経路（追跡）」を「**絶対化**（#4233）。hooks を準備できた起動の `CODEX_HOME`・`hooks.json` の relay のパス・ロールの `CODEX_HOME` が絶対になる。hooks なしの `bare` 起動（ロールなし）は起動環境に何も足さない（#1760 とバイト一致）。版の読み手（`updates/codex-version.ts`）は相対値で不明と答えたまま（#2069）」に替える。
+- `:136` `XDG_CONFIG_HOME` の行: 「未対応の経路（追跡）」を「ロール判定は opencode の起動 cwd で解決する。起動 cwd が worktree と違う既存 pane への送り直しでは、相対値のときロールつきの起動を拒否する（#4233）」に替える。`HOME` も同じ扱いであることを書き添える。`opencodeGlobalConfigDir()` の書き込み先の注記は §6 の指摘として残す。
 - `:107` の resolver の表の `CODEX_HOME` の行は、resolver が `resolveSafeAbsoluteDirectory` に替わることだけ反映する。
 
 ---
@@ -207,21 +286,24 @@
 scope に入れるもの:
 
 - `src/lib/hooks/sources/codex/hooks-config.ts`（`getCodexHome` を絶対化。コメント）
-- `src/lib/agent-roles/composition.ts`（`loadOpencodeV2Agent` の `configHome`・`home` を pane の cwd で解決）
+- `src/lib/agent-roles/composition.ts`（`loadOpencodeV2Agent` の `configHome`・`home` を起動 cwd で解決し、一致しないときは拒否。`RoleCompositionContext` に起動 cwd の口）
+- `src/lib/agent-roles/pane-env.ts`（pane の `#{pane_current_path}` を読む関数。§3.2 の守る条件）
+- 起動 cwd を合成へ渡す呼び出し元（`cli-tools/base.ts` の `requestLaunchRole` まわり、`session/role-launch.ts` の Schedule、`agent-roles/explicit-launch.ts` の probe）。どこまで変えるかは実装の契約の最初の確認（下の 3）で決める
 - `src/lib/updates/codex-version.ts`（コメントだけ）
 - `src/lib/security/env-sanitizer.ts`（コメントだけ）
 - `tests/unit/updates/codex-home-parity-2069.test.ts`（`:80-85` の期待と `it` の名前。**契約で名前の変更を明示的に許す**）
 - `tests/unit/updates/codex-version-2069.test.ts`・`tests/unit/lib/agent-launch-plan-secrets-1933.test.ts`・`tests/unit/security/child-process-agent-env-1996.test.ts`（コメントだけ）
-- 新規テスト 3 件（§3.3）
+- 新規テスト 5 件（§3.3: `codex-home-relative-dir-4233`・`codex-role-relative-home-4233`・`opencode-v2-xdg-relative-4233`・`codex-launch-home-pin-4233`・`codex-hooks-migration-4233`）
 - `docs/design/child-process-env-scope-1996.md`、`docs/design/virtual-filesystem-directory-guard.md`、本書（決定の結果を追記）
-- `changelog.d/4233.md`、`dev-reports/module-reference/issue-4233.md`
+- `changelog.d/4233.md`（§3.1.2 の移行の注意を含める: 次の codex の起動で切り替わる・稼働中の pane は再起動まで旧 home・相対の利用者は 1 回だけ再信頼・worktree 側の `auth.json` などは自動で移さない・旧版と併走するなら絶対パスに）、`dev-reports/module-reference/issue-4233.md`
 
-scope に入れないもの: `adapters.ts`・`artifacts.ts`（`getCodexHome()` が絶対を返せば変更不要）、`history.ts`・`transcript.ts`（§3.1 のとおり一致する）、`launch-command.ts`（宣言は変わらない）。
+scope に入れないもの: `adapters.ts`・`artifacts.ts`（`getCodexHome()` が絶対を返せば変更不要）、`history.ts`・`transcript.ts`（§3.1 のとおり一致する）、`launch-command.ts`（宣言は変わらない）、`hooks-config.ts` の `bare` の fallback（§3.1.1 で残す）と `tests/unit/hooks/codex-hooks-config-1760.test.ts`（期待を変えない）。
 
 実装の契約の最初に確かめること（未確認の解消）:
 
 1. opencode 2.x が相対の `XDG_CONFIG_HOME` をどう扱うか（cwd で解決／無視）。隔離 HOME の下で `opencode2 debug config` などを使い、実機で確かめる。結果で §3.2 の分岐を決める。
 2. codex が相対の `CODEX_HOME` を cwd で解決するか（A の正しさには影響しない。A は codex に絶対パスしか渡さない）。
+3. opencode V2 の起動 cwd を経路ごとに確かめる（新規 pane・既存 pane への送り直し・Schedule・probe。§1.3 の表の「見立て」「未確認」の行）。あわせて相対の `HOME` を opencode がどう解決するかも 1 と同じ方法で確かめる。
 
 ---
 
@@ -230,3 +312,16 @@ scope に入れないもの: `adapters.ts`・`artifacts.ts`（`getCodexHome()` �
 - `src/lib/cli-tools/opencode-config.ts:453-456` `opencodeGlobalConfigDir()`: global モードの `opencode.json` の書き込み先を**サーバーの** `process.env.XDG_CONFIG_HOME` から決め、相対ならサーバーの cwd で解決する。opencode は**pane の**環境（tmux 由来）の値を worktree の cwd で読む。値の出どころ（サーバーの env と tmux の env）からして違いうるので、相対値の扱いだけでは揃わない。別 Issue で扱う。
 - `src/lib/agent-health/tmux-command.ts:39` `KEPT_CHILD_ENV_VARS` が `CODEX_HOME` を子へ素通しする。相対値なら子の cwd で解決される。agent-health の子の cwd がサーバーと同じかは確かめていない（**未確認**）。
 - `src/lib/hooks/sources/codex/history.ts:196-199` `resolveCodexHome()` は `resolveSafeDirectory()` を通らず、`/proc` などを拒否しない（#1774 のガードの外）。読むだけなのでハングは起きない（**見立て**）。
+
+---
+
+## 7. 事前レビューの処置
+
+Codex の事前レビュー（`workspace/orchestration/runs/2026-11-08/prereview/review-4233.md`、P2 3 件・P3 1 件）への処置。番号は本書の中で R1〜R4 として引く。
+
+| # | 指摘 | 処置 | 理由と反映先 |
+|---|---|---|---|
+| R1 | P2: V2 の「pane の cwd＝worktree」は既存 pane への送り直しでは保証されない。相対の `HOME` も実測・対照へ | **採る** | `cd` した pane では `session_path` と実際の cwd が違うことをコードで確かめた（§1.3 の 4）。守る条件は「相対値のときだけ起動 cwd を読み、worktree と一致しなければ拒否」（§3.2）。起動行に `cd` を足す案はバイト一致の約束に触れるので採らない。対照は #21〜#25、実機確認は §5 の 3 |
+| R2 | P2: 「`CODEX_HOME` は常に載る」が hooks 無効・失敗の `bare` 経路と食い違う | **採る**（`bare` を残し、例外として明記する側） | `hooks-config.ts:845` の `env: {}` と `codex-hooks-config-1760.test.ts:616-624` を確かめた。hooks が無ければ `hooks.json` の食い違いは起きず、ロールのプロファイルは `adapters.ts:205` が別に pin するので、#1760 のバイト一致を優先する（§3.1.1）。既存期待値の変更は 1 件のまま。対照は #17〜#20 |
+| R3 | P2: 既存ファイル・稼働中 pane を含む移行の条件と対照が不足 | **採る** | 切り替えの時点・稼働中の pane・`hooks.json` の差し替え・1 回の再信頼・UAT の read-only の拒否・旧版との併走・worktree 側の認証を §3.1.2 に書いた。認証情報は自動で移さず、変更履歴で知らせる（§5）。対照は #26〜#30。実機の移行結果は未確認のまま UAT へ回す |
+| R4 | P3: 共有状態の判定の現状説明が誤り（`physicalPath()` がすでに絶対化している） | **採る** | `artifacts.ts:185-198`・`:244-251` を確かめ、§1.2 と §3.1 の記述を「既存の保護を維持する」に訂正した。A の選択は変わらない。維持の対照は #15・#16 |
