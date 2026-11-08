@@ -34,6 +34,10 @@ import {
 } from '@/lib/detection/cli-patterns';
 import { createLogger } from '@/lib/logger';
 import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
+import {
+  isOpenCodeThinkingBelowComposer,
+  isOpenCodeThinkingInOpenTurn,
+} from '@/lib/detection/tools/opencode/patterns';
 import { CACHE_MAX_CAPTURE_LINES, isCaptureWindowSaturated } from '@/lib/tmux/tmux-capture-cache';
 
 const logger = createLogger('response-poller');
@@ -797,7 +801,13 @@ function extractCompletedTurn(
     const { thinkingPattern } = getCliToolPatterns(cliToolId);
     const cleanOutput = stripAnsi(output);
     const tailLines = cleanOutput.split('\n').slice(-THINKING_TAIL_LINE_COUNT).join('\n');
-    if (owns && thinkingPattern.test(tailLines)) {
+    // opencode reads `Thinking:` by position (Issue #4231): the footer's cwd holds the word too.
+    const workingVisible =
+      cliToolId === 'opencode'
+        ? isOpenCodeThinkingBelowComposer(cleanOutput.split('\n')) ||
+          isOpenCodeThinkingInOpenTurn(cleanOutput.split('\n'), THINKING_TAIL_LINE_COUNT)
+        : thinkingPattern.test(tailLines);
+    if (owns && workingVisible) {
       // Intended twin of the sweep in recordCompletedResponse: this one runs when
       // working is visible on an unfinished frame, that one when a response is
       // recorded (Issue #31).

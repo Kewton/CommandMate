@@ -128,7 +128,7 @@ describe('loadSlashCommands', () => {
   });
 
   it('should parse valid cliTools from command frontmatter', async () => {
-    const testDir = path.resolve(__dirname, '../fixtures/test-command-cli-tools');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-command-cli-tools-'));
     const commandsDir = path.join(testDir, '.claude', 'commands');
     try {
       fs.mkdirSync(commandsDir, { recursive: true });
@@ -227,7 +227,7 @@ describe('getSlashCommandGroups', () => {
 
   it('should integrate skills into command groups', async () => {
     // Create a temporary test directory structure
-    const testDir = path.resolve(__dirname, '../fixtures/test-skills-integration');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-skills-integration-'));
     const commandsDir = path.join(testDir, '.claude', 'commands');
     const skillsDir = path.join(testDir, '.claude', 'skills', 'my-skill');
 
@@ -257,7 +257,7 @@ describe('getSlashCommandGroups', () => {
   });
 
   it('should prioritize commands over skills with same name', async () => {
-    const testDir = path.resolve(__dirname, '../fixtures/test-dedup');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-dedup-'));
     const commandsDir = path.join(testDir, '.claude', 'commands');
     const skillsDir = path.join(testDir, '.claude', 'skills', 'duplicate-name');
 
@@ -381,7 +381,7 @@ describe('loadSkills', () => {
   });
 
   it('should load skills from .claude/skills/*/SKILL.md', async () => {
-    const testDir = path.resolve(__dirname, '../fixtures/test-load-skills');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-load-skills-'));
     const skillDir = path.join(testDir, '.claude', 'skills', 'my-skill');
     try {
       fs.mkdirSync(skillDir, { recursive: true });
@@ -438,7 +438,7 @@ describe('loadSkills', () => {
   });
 
   it('should parse valid cliTools from skill frontmatter', async () => {
-    const testDir = path.resolve(__dirname, '../fixtures/test-skill-cli-tools');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-skill-cli-tools-'));
     const skillDir = path.join(testDir, '.claude', 'skills', 'shared-skill');
     try {
       fs.mkdirSync(skillDir, { recursive: true });
@@ -476,7 +476,7 @@ describe('loadSkills', () => {
   });
 
   it('should skip invalid SKILL.md files gracefully', async () => {
-    const testDir = path.resolve(__dirname, '../fixtures/test-invalid-skills');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-invalid-skills-'));
     const skillDir = path.join(testDir, '.claude', 'skills', 'broken-skill');
     try {
       fs.mkdirSync(skillDir, { recursive: true });
@@ -494,7 +494,7 @@ describe('loadSkills', () => {
 
   it('should reject entries containing ".."', async () => {
     // This test verifies the path traversal guard
-    const testDir = path.resolve(__dirname, '../fixtures/test-dotdot');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-dotdot-'));
     const skillsDir = path.join(testDir, '.claude', 'skills');
     try {
       fs.mkdirSync(skillsDir, { recursive: true });
@@ -518,7 +518,7 @@ describe('loadSkills', () => {
   });
 
   it('should enforce MAX_SKILLS_COUNT limit', async () => {
-    const testDir = path.resolve(__dirname, '../fixtures/test-max-skills');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-max-skills-'));
     const skillsDir = path.join(testDir, '.claude', 'skills');
     try {
       // Create 102 skill directories (over the 100 limit)
@@ -544,7 +544,7 @@ describe('loadSkills', () => {
   });
 
   it('should skip oversized SKILL.md files', async () => {
-    const testDir = path.resolve(__dirname, '../fixtures/test-oversized');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-oversized-'));
     const skillDir = path.join(testDir, '.claude', 'skills', 'big-skill');
     try {
       fs.mkdirSync(skillDir, { recursive: true });
@@ -565,7 +565,7 @@ describe('loadSkills', () => {
   });
 
   it('should truncate long name and description', async () => {
-    const testDir = path.resolve(__dirname, '../fixtures/test-truncate');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-truncate-'));
     const skillDir = path.join(testDir, '.claude', 'skills', 'long-skill');
     try {
       fs.mkdirSync(skillDir, { recursive: true });
@@ -592,7 +592,7 @@ describe('loadSkills', () => {
 
   it('should fallback to directory name when no name in frontmatter', async () => {
     // Create a test directory with the .claude/skills structure
-    const testDir = path.resolve(__dirname, '../fixtures/test-no-frontmatter');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-no-frontmatter-'));
     const skillDir = path.join(testDir, '.claude', 'skills', 'no-frontmatter');
     try {
       fs.mkdirSync(skillDir, { recursive: true });
@@ -613,7 +613,7 @@ describe('loadSkills', () => {
   });
 
   it('should sort skills alphabetically by name', async () => {
-    const testDir = path.resolve(__dirname, '../fixtures/test-sort-skills');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-sort-skills-'));
     const skillsDir = path.join(testDir, '.claude', 'skills');
     try {
       for (const name of ['zebra', 'alpha', 'middle']) {
@@ -681,7 +681,7 @@ describe('loadSkills with YAML-unfriendly frontmatter', () => {
   });
 
   it('should load skills even when frontmatter contains YAML-unfriendly characters', async () => {
-    const testDir = path.resolve(__dirname, '../fixtures/test-yaml-fallback');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-yaml-fallback-'));
     const skillDir = path.join(testDir, '.claude', 'skills', 'release');
     try {
       fs.mkdirSync(skillDir, { recursive: true });
@@ -704,7 +704,7 @@ describe('loadSkills with YAML-unfriendly frontmatter', () => {
   });
 
   it('should fallback to directory name when regex extraction finds no name', async () => {
-    const testDir = path.resolve(__dirname, '../fixtures/test-yaml-fallback-noname');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-yaml-fallback-noname-'));
     const skillDir = path.join(testDir, '.claude', 'skills', 'my-tool');
     try {
       fs.mkdirSync(skillDir, { recursive: true });
@@ -943,7 +943,7 @@ describe('loadCodexSkills', () => {
   });
 
   it('should load Codex skills with source codex-skill and cliTools codex', async () => {
-    const testDir = path.resolve(__dirname, '../fixtures/test-codex-skills');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-codex-skills-'));
     const skillDir = path.join(testDir, '.codex', 'skills', 'my-codex-skill');
     try {
       fs.mkdirSync(skillDir, { recursive: true });
@@ -968,7 +968,7 @@ describe('loadCodexSkills', () => {
 
   it('should use os.homedir() when basePath is not provided', async () => {
     // We test by mocking os.homedir to a temp dir with .codex/skills
-    const testDir = path.resolve(__dirname, '../fixtures/test-codex-homedir');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-codex-homedir-'));
     const skillDir = path.join(testDir, '.codex', 'skills', 'home-skill');
     try {
       fs.mkdirSync(skillDir, { recursive: true });
@@ -995,7 +995,7 @@ describe('loadCodexSkills', () => {
   });
 
   it('should skip directories containing ".." (path traversal defense)', async () => {
-    const testDir = path.resolve(__dirname, '../fixtures/test-codex-dotdot');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-codex-dotdot-'));
     const skillsDir = path.join(testDir, '.codex', 'skills');
     try {
       fs.mkdirSync(skillsDir, { recursive: true });
@@ -1017,7 +1017,7 @@ describe('loadCodexSkills', () => {
   });
 
   it('should skip oversized SKILL.md files', async () => {
-    const testDir = path.resolve(__dirname, '../fixtures/test-codex-oversized');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-codex-oversized-'));
     const skillDir = path.join(testDir, '.codex', 'skills', 'big-skill');
     try {
       fs.mkdirSync(skillDir, { recursive: true });
@@ -1037,7 +1037,7 @@ describe('loadCodexSkills', () => {
   });
 
   it('should enforce MAX_SKILLS_COUNT limit', async () => {
-    const testDir = path.resolve(__dirname, '../fixtures/test-codex-max-skills');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-codex-max-skills-'));
     const skillsDir = path.join(testDir, '.codex', 'skills');
     try {
       for (let i = 0; i < 102; i++) {
@@ -1062,7 +1062,7 @@ describe('loadCodexSkills', () => {
   });
 
   it('should sort skills alphabetically by name', async () => {
-    const testDir = path.resolve(__dirname, '../fixtures/test-codex-sort');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-codex-sort-'));
     const skillsDir = path.join(testDir, '.codex', 'skills');
     try {
       for (const name of ['zebra', 'alpha', 'middle']) {
@@ -1094,7 +1094,7 @@ describe('loadCodexSkills .system subdirectory', () => {
   });
 
   it('should load skills from .system/ subdirectory', async () => {
-    const testDir = path.resolve(__dirname, '../fixtures/test-codex-system');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-codex-system-'));
     const systemSkillDir = path.join(testDir, '.codex', 'skills', '.system', 'built-in-skill');
     try {
       fs.mkdirSync(systemSkillDir, { recursive: true });
@@ -1116,7 +1116,7 @@ describe('loadCodexSkills .system subdirectory', () => {
   });
 
   it('should load both .system/ and top-level skills', async () => {
-    const testDir = path.resolve(__dirname, '../fixtures/test-codex-mixed');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-codex-mixed-'));
     const systemSkillDir = path.join(testDir, '.codex', 'skills', '.system', 'sys-skill');
     const topSkillDir = path.join(testDir, '.codex', 'skills', 'user-skill');
     try {
@@ -1160,7 +1160,7 @@ describe('loadAgentsSkills', () => {
   });
 
   it('should load .agents/skills with source codex-skill and cliTools codex+antigravity (Issue #1504)', async () => {
-    const testDir = path.resolve(__dirname, '../fixtures/test-agents-skills');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-agents-skills-'));
     const skillDir = path.join(testDir, '.agents', 'skills', 'my-agents-skill');
     try {
       fs.mkdirSync(skillDir, { recursive: true });
@@ -1185,7 +1185,7 @@ describe('loadAgentsSkills', () => {
   });
 
   it('should use os.homedir() when basePath is not provided', async () => {
-    const testDir = path.resolve(__dirname, '../fixtures/test-agents-homedir');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-agents-homedir-'));
     const skillDir = path.join(testDir, '.agents', 'skills', 'home-agents-skill');
     try {
       fs.mkdirSync(skillDir, { recursive: true });
@@ -1212,7 +1212,7 @@ describe('loadAgentsSkills', () => {
   });
 
   it('should load built-in skills from .system/ subdirectory', async () => {
-    const testDir = path.resolve(__dirname, '../fixtures/test-agents-system');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-agents-system-'));
     const systemSkillDir = path.join(testDir, '.agents', 'skills', '.system', 'built-in-agents-skill');
     try {
       fs.mkdirSync(systemSkillDir, { recursive: true });
@@ -1297,7 +1297,7 @@ describe('getSlashCommandGroups with Codex skills', () => {
   });
 
   it('should include local .agents/skills when basePath is provided', async () => {
-    const testDir = path.resolve(__dirname, '../fixtures/test-agents-groups');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-agents-groups-'));
     const agentsSkillDir = path.join(testDir, '.agents', 'skills', 'agents-only-skill');
     try {
       fs.mkdirSync(agentsSkillDir, { recursive: true });
@@ -1321,7 +1321,7 @@ describe('getSlashCommandGroups with Codex skills', () => {
   });
 
   it('should collapse a skill present in both .agents/skills and .codex/skills to the agents entry (Issue #1504)', async () => {
-    const testDir = path.resolve(__dirname, '../fixtures/test-agents-codex-dedup');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-agents-codex-dedup-'));
     const agentsSkillDir = path.join(testDir, '.agents', 'skills', 'shared-skill');
     const codexSkillDir = path.join(testDir, '.codex', 'skills', 'shared-skill');
     try {
@@ -1354,7 +1354,7 @@ describe('getSlashCommandGroups with Codex skills', () => {
   });
 
   it('should include local Codex skills when basePath is provided', async () => {
-    const testDir = path.resolve(__dirname, '../fixtures/test-codex-groups');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-codex-groups-'));
     const commandsDir = path.join(testDir, '.claude', 'commands');
     const claudeSkillDir = path.join(testDir, '.claude', 'skills', 'claude-skill');
     const codexSkillDir = path.join(testDir, '.codex', 'skills', 'codex-skill');
@@ -1573,7 +1573,7 @@ describe('Issue #586: Copilot builtins must not override Claude standard command
     // When getSlashCommandGroups is called (with or without basePath),
     // the returned groups should NOT contain any commands with cliTools: ['copilot']
     // and source: 'builtin'. Copilot builtins should be injected only in the API route.
-    const testDir = path.resolve(__dirname, '../fixtures/test-586-no-copilot');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-586-no-copilot-'));
     const commandsDir = path.join(testDir, '.claude', 'commands');
     try {
       fs.mkdirSync(commandsDir, { recursive: true });

@@ -106,7 +106,7 @@ TodoWriteツールで作業計画を作成：
 **重要（エージェント指定ルール）**: `commandmatedev send` でワーカーにタスクを送信する際のエージェント指定は以下に従うこと：
 - **開発タスク**: 担当は 1-2b の難易度判定で決める。**易 → `--instance command-code`**
   （Command Code。`--model` は渡さない）、**中 → `--instance claude`（sonnet＝Sonnet 5.5）**、**難 → `--instance claude`（opus）**
-  - **Claude のモデルは `--instance` でも `--model` でも決まらない**（`send --model` は copilot / antigravity 専用で、claude に渡すと 400）。
+  - **Claude のモデルは `--instance` でも `--model` でも決まらない**（`send --model` は copilot / antigravity / claude に効くが antigravity / claude は新規起動時のみ。稼働中の claude に渡すと 400）。
     セッションの**起動時**に、worktree の `.claude/settings.local.json` から決まる。書くのは 3-1 の `launch-worker.mjs`（opus も sonnet も明示して書く）
   - **ワーカーに `/model` を送らない。** Enter が `~/.claude/settings.json` のグローバル既定を書き換える（#1495 / #2297）
   - sonnet 担当がワーカー起因で 2 回不合格になったら opus に格上げする（3-5b）
