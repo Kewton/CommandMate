@@ -993,13 +993,21 @@ export interface MemPurgeFilter {
   includeDecisions?: boolean;
 }
 
-/** `mem purge` (§8.3): counts without `confirm`, deletes with it. `mem_items` only. */
+/**
+ * `mem purge` (§8.3): counts without `confirm`, deletes with it. `mem_items` only.
+ *
+ * @param alive - For a purge named through a worktree: whether it is still the
+ *   worktree the request was read for. Asked first in the transaction; null (nothing
+ *   counted or deleted) when a delete and re-creation under the same id and path
+ *   overtook the request (4th integration review)
+ */
 export function purgeMem(
   db: Database.Database,
   scope: MemScope,
   filter: MemPurgeFilter,
-  confirm: boolean
-): Partial<Record<MemKind, number>> {
+  confirm: boolean,
+  alive: (() => boolean) | null = null
+): Partial<Record<MemKind, number>> | null {
   const where = scopeClause(scope);
   const clauses = [where.sql];
   const params = [...where.params];
@@ -1015,6 +1023,7 @@ export function purgeMem(
   if (!filter.includeDecisions) clauses.push("NOT (kind = 'decision' AND state IN ('recorded','promoted'))");
   const sql = clauses.join(' AND ');
   return db.transaction(() => {
+    if (alive && !alive()) return null;
     const counts: Partial<Record<MemKind, number>> = {};
     for (const row of db.prepare(`SELECT kind, COUNT(*) AS n FROM mem_items WHERE ${sql} GROUP BY kind`).all(...params) as Array<{
       kind: MemKind;

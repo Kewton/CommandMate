@@ -4,10 +4,12 @@
  * and path is refused, whatever the entrance and the mode; one the worktree was
  * left alone for lands.
  *
- * One table, one test each way. The table's keys are checked against the entrances
- * themselves: every exported function of `src/lib/mem/service.ts` that fixes an
- * actor (`lookupActor`), each mode of the screen's save, and the condition's save
- * — so a new entrance without a row here fails the first test.
+ * One table, one test each way. The table is checked against the entrances
+ * themselves, enumerated from the store's side (4th review): the exported functions
+ * of `src/lib/db/mem-db.ts` that INSERT / UPDATE / DELETE, and every exported
+ * function of `src/lib/mem/service.ts` that reaches one of them, with or without an
+ * actor. Each must be a row or a named exception; each mode of the screen's save and
+ * the condition's save have rows too — so a new way in fails the first test.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type Database from 'better-sqlite3';
@@ -29,6 +31,7 @@ import { deleteWorktreesByIds } from '@/lib/db/worktree-db';
 import {
   memAddItem,
   memCloseItem,
+  memPurge,
   memUpdateItem,
   memWriteNow,
   writeSessionNoteFromScreen,
@@ -103,6 +106,8 @@ interface Entrance {
   /** Made before the request is read (an item to update or close). */
   before?: () => Promise<{ id: string; version: number }>;
   request: (made: { id: string; version: number } | undefined) => Promise<{ status: number; body: unknown }>;
+  /** Done while the request waits, after the re-creation when there is one (mem the new worktree writes). */
+  during?: () => Promise<void>;
   /** Whether the request's write is in the store. */
   landed: (made: { id: string; version: number } | undefined) => boolean;
 }
@@ -168,17 +173,80 @@ const ENTRANCES: Record<string, Entrance> = {
     request: (made) => memUpdateItem(db, WT, made!.id, { instanceId: 'claude', ifVersion: made!.version, closeWhen: 'issue:#4221' }, deps()),
     landed: (made) => itemIs("id = ? AND close_when LIKE '%\"issue\"%'", made!.id),
   },
+  // A purge named through the worktree (`commandmate mem purge`): it must not delete
+  // what the worktree made again under the same id and path writes (4th review・PM).
+  'cli-purge': {
+    fn: 'memPurge',
+    mode: 'on',
+    request: () => memPurge(db, { via: 'worktree', worktreeId: WT, branch: 'feature/x' }, { confirm: true }, deps()),
+    during: async () => {
+      const outcome = await memAddItem(db, WT, { instanceId: 'claude', kind: 'note', text: 'written after the request' }, deps());
+      expect(outcome.status).toBe(201);
+    },
+    landed: () => !itemIs("text = 'written after the request'"),
+  },
 };
 
-/** The exported functions of the service that fix an actor: each is a way to write. */
-function writeEntrancesOfService(): string[] {
-  const source = readFileSync(SERVICE, 'utf8');
-  const starts = [...source.matchAll(/^export async function (\w+)\(/gm)];
-  return starts
-    .filter((match, i) => source.slice(match.index, starts[i + 1]?.index ?? source.length).includes('lookupActor('))
-    .map((match) => match[1])
-    .sort();
+const MEM_DB = path.join(process.cwd(), 'src/lib/db/mem-db.ts');
+
+/**
+ * Ways into the service that write mem but are not refused by a re-creation of the
+ * worktree, each with its reason. Kept in step with the source like the table.
+ */
+const NOT_BOUND_TO_A_WORKTREE_LIFETIME: Record<string, string> = {
+  // None: `memPurge` was considered and is bound (an old purge named through the
+  // worktree deleted what the re-created worktree wrote), so it is a row of the table.
+};
+
+interface Chunk {
+  name: string;
+  exported: boolean;
+  body: string;
 }
+
+/** Top-level `function` / `const … =` declarations of a source, each with its text. */
+function chunksOf(source: string): Chunk[] {
+  const starts = [...source.matchAll(/^(export )?(?:async )?(?:function\*? (\w+)|const (\w+)\b[^=\n]*=)/gm)];
+  return starts.map((match, i) => ({
+    name: match[2] ?? match[3],
+    exported: Boolean(match[1]),
+    body: source.slice(match.index, starts[i + 1]?.index ?? source.length),
+  }));
+}
+
+const calls = (body: string, names: Set<string>) => [...names].some((name) => new RegExp(`\\b${name}\\(`).test(body));
+
+/** Names of `chunks` that do `seed`, or call (within the file) one that does. */
+function closure(chunks: Chunk[], seed: (chunk: Chunk) => boolean): Set<string> {
+  const found = new Set(chunks.filter(seed).map((chunk) => chunk.name));
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const chunk of chunks) {
+      if (!found.has(chunk.name) && calls(chunk.body.slice(chunk.body.indexOf('{')), found)) {
+        found.add(chunk.name);
+        grew = true;
+      }
+    }
+  }
+  return found;
+}
+
+/** The store's exported writes: functions of mem-db that INSERT / UPDATE / DELETE, directly or through its own helpers. */
+function storeWriters(memDbSource: string): Set<string> {
+  const chunks = chunksOf(memDbSource);
+  const writes = closure(chunks, (chunk) => /\b(INSERT|UPDATE|DELETE)\b/.test(chunk.body));
+  return new Set(chunks.filter((chunk) => chunk.exported && writes.has(chunk.name)).map((chunk) => chunk.name));
+}
+
+/** The service's exported functions that reach one of the store's writes. */
+function writeEntrancesOf(serviceSource: string, writers: Set<string>): string[] {
+  const chunks = chunksOf(serviceSource);
+  const reach = closure(chunks, (chunk) => calls(chunk.body, writers));
+  return chunks.filter((chunk) => chunk.exported && reach.has(chunk.name)).map((chunk) => chunk.name).sort();
+}
+
+const tableAndExceptions = () =>
+  [...new Set([...Object.values(ENTRANCES).map((entry) => entry.fn), ...Object.keys(NOT_BOUND_TO_A_WORKTREE_LIFETIME)])].sort();
 
 function sourcesUnder(root: string): string[] {
   return readdirSync(root).flatMap((name) => {
@@ -204,7 +272,15 @@ afterEach(() => {
 
 describe('every write of mem refuses a request the worktree’s re-creation overtook', () => {
   it('the table names every entrance (a new one fails here until it has a row)', () => {
-    expect([...new Set(Object.values(ENTRANCES).map((entry) => entry.fn))].sort()).toEqual(writeEntrancesOfService());
+    const writers = storeWriters(readFileSync(MEM_DB, 'utf8'));
+    // The source of the check is the store's writes, not the actor (4th review P2).
+    for (const known of ['replaceNowSlot', 'createMemItem', 'updateMemItem', 'closeMemItem', 'writeScreenNote', 'purgeMem']) {
+      expect(writers.has(known)).toBe(true);
+    }
+    expect(writeEntrancesOf(readFileSync(SERVICE, 'utf8'), writers)).toEqual(tableAndExceptions());
+    // A way is in the table or an exception, never both.
+    const inTable = new Set(Object.values(ENTRANCES).map((entry) => entry.fn));
+    expect(Object.keys(NOT_BOUND_TO_A_WORKTREE_LIFETIME).filter((name) => inTable.has(name))).toEqual([]);
     const screenModes = Object.values(ENTRANCES)
       .filter((entry) => entry.fn === 'writeSessionNoteFromScreen')
       .map((entry) => entry.mode)
@@ -212,11 +288,26 @@ describe('every write of mem refuses a request the worktree’s re-creation over
     expect(screenModes).toEqual(['derived', 'off', 'on']);
     expect(Object.keys(ENTRANCES).filter((key) => key.startsWith('condition-')).length).toBeGreaterThan(0);
     // No way around the service: the store's writes are called from it alone.
-    const writers = /\b(replaceNowSlot|createMemItem|updateMemItem|closeMemItem|writeScreenNote)\(/;
+    const storeCalls = /\b(replaceNowSlot|createMemItem|updateMemItem|closeMemItem|writeScreenNote)\(/;
     const callers = sourcesUnder(path.join(process.cwd(), 'src'))
       .filter((file) => !file.endsWith(path.join('lib', 'db', 'mem-db.ts')) && file !== SERVICE)
-      .filter((file) => readFileSync(file, 'utf8').split('\n').some((line) => writers.test(line) && !/^\s*(\/\/|\*)/.test(line)));
+      .filter((file) => readFileSync(file, 'utf8').split('\n').some((line) => storeCalls.test(line) && !/^\s*(\/\/|\*)/.test(line)));
     expect(callers).toEqual([]);
+  });
+
+  it('the check catches a new way in that writes without an actor (and one through a helper)', () => {
+    const writers = storeWriters(readFileSync(MEM_DB, 'utf8'));
+    const service = readFileSync(SERVICE, 'utf8');
+    const direct = `${service}\nexport async function memSweep(db: Database.Database): Promise<void> {\n  purgeMem(db, scope, {}, true);\n}\n`;
+    expect(writeEntrancesOf(direct, writers)).toEqual([...tableAndExceptions(), 'memSweep'].sort());
+    const viaHelper = `${service}\nfunction sweepHelper(db: Database.Database): void {\n  closeMemItem(db, actor, 'x', null);\n}\nexport function memSweepAll(db: Database.Database): void {\n  sweepHelper(db);\n}\n`;
+    expect(writeEntrancesOf(viaHelper, writers)).toContain('memSweepAll');
+    // And a new write of the store itself is a writer the check follows.
+    const store = `${readFileSync(MEM_DB, 'utf8')}\nexport function eraseAll(db: Database.Database): void {\n  db.prepare('DELETE FROM mem_items').run();\n}\n`;
+    expect(storeWriters(store).has('eraseAll')).toBe(true);
+    // (control) a new read-only export is not a way to write.
+    const reader = `${service}\nexport async function memPeek(db: Database.Database): Promise<unknown> {\n  return getMemRecord(db, 'x');\n}\n`;
+    expect(writeEntrancesOf(reader, writers)).toEqual(tableAndExceptions());
   });
 
   it.each(Object.keys(ENTRANCES))('%s: deleted and made again (same id and path) during the await → refused, nothing written', async (key) => {
@@ -230,6 +321,7 @@ describe('every write of mem refuses a request the worktree’s re-creation over
     await Promise.resolve();
     deleteWorktreesByIds(db, [WT]);
     makeWorktree();
+    await entry.during?.();
     release();
     const outcome = await pending;
     expect(outcome.status).toBeGreaterThanOrEqual(400);
@@ -245,6 +337,7 @@ describe('every write of mem refuses a request the worktree’s re-creation over
     const release = arm();
     const pending = entry.request(made);
     await Promise.resolve();
+    await entry.during?.();
     release();
     const outcome = await pending;
     expect(outcome.status).toBeLessThan(300);

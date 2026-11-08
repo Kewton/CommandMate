@@ -838,6 +838,7 @@ D1〜D13 と違う作りは無い。設計の文面から外れた・細かく�
 | I15 | §10.4（P3） | 改名の衝突の分岐は、残った子の行を消す前にフック（`beforeDropLeftovers`）を呼び、runtime の改名（`migrateWorktreeIdPreservingChildren`）が mem の `now` を closed（`slot-removed`）で退避する | migration の層は `mem-db` を import しない（循環と `vi.mock` の継承を避ける）。v54/v55 の migration は v66 より前なので mem の表が無い |
 | I16 | §10.2（3 回目の整合性レビュー P2-1） | `baseVersion: 0` は行が無いときだけ一致する（`writeScreenNote`）。行が無いときの 409 は `current: null` を返し、画面は次の保存に 0 を送る（I7・I13 と同じ規則） | 以前は行が無ければ版つきの保存を必ず 409 にしていたので、編集中に他者がメモを消すと、戻した下書きを何度送っても保存できなかった |
 | I17 | §10.4（3 回目の整合性レビュー P2-2） | 画面の保存の off・derived の枝（行の直接更新）も、トランザクションの最初に要求時の worktree・instance の世代を照合する（`writeScreenNote` の `alive` ＝ `MemActor.stillOnRoster`）。違えば 409 `instance_not_found`（`incarnation_changed`） | on だけが `replaceNowSlot` を通って照合していた。不変条件「作り直しに追い越された要求は全入口で拒否」は `tests/unit/lib/mem/write-entrances-recreate-4221.test.ts` の 1 つの表で固定する（表のキーは service の `lookupActor` を呼ぶ export と突き合わせ、入口を足すと表に足すまで落ちる） |
+| I18 | §8.3・§10.4（4 回目の整合性レビュー P2・PM） | worktree を名指す purge（`commandmate mem purge`）も要求時に worktree の世代を固定し、`purgeMem` のトランザクションの最初に照合する。違えば数えも消しもせず 404 `not_found`（`incarnation_changed`）。repository を名指す purge は従来どおり。入口の表の網羅の検査は、`mem-db.ts` の書き込み（INSERT/UPDATE/DELETE をする export、内部の helper 越しも含む）を呼ぶ `service.ts` の export から列挙し、表か理由つきの例外の一覧にあることを assert する（例外は今は無い） | 作り直しの前に受けた purge が、作り直した worktree の書いた項目を消していた（表の行で陽性を確認）。`lookupActor` を呼ぶ export だけを拾う検査では、actor を通らない purge が漏れていた |
 
 本文に無い指摘（実装で見つけたもの。直さない。改名の衝突の分岐の退避は I15 で直した）：
 

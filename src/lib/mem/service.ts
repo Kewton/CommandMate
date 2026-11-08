@@ -542,6 +542,12 @@ export async function memPurge(
 ): Promise<MemOutcome> {
   if (typeof spec.branch !== 'string' || spec.branch.length === 0) return memError('target_required', { field: 'branch' });
   if (spec.via === 'worktree' && !getWorktreeById(db, spec.worktreeId)) return memError('not_found');
+  // 4th integration review: a purge named through a worktree fixes its lifetime here,
+  // before the awaits, so one the worktree's delete and re-creation (same id and
+  // path) overtook deletes nothing the new worktree wrote.
+  const namedWorktree = spec.via === 'worktree' ? spec.worktreeId : null;
+  const lifetime = namedWorktree !== null ? getOrCreateWorktreeIncarnation(db, namedWorktree) : null;
+  const alive = namedWorktree !== null ? () => getWorktreeIncarnation(db, namedWorktree) === lifetime : null;
   if (body.kind !== undefined && !isMemKind(body.kind)) return memError('invalid_request', { field: 'kind' });
   let before: number | undefined;
   if (body.before !== undefined) {
@@ -561,8 +567,10 @@ export async function memPurge(
         before,
         includeDecisions: body.includeDecisions === true,
       },
-      confirm
+      confirm,
+      alive
     );
+    if (counts === null) return memError('not_found', { reason: 'incarnation_changed' });
     if (confirm) logger.info('mem-purged', { branch: spec.branch, counts });
     const response: MemPurgeResponse = { ok: true, dryRun: !confirm, counts };
     return { status: 200, body: response };
