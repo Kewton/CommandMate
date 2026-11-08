@@ -81,4 +81,23 @@ test.describe('Activity pane side (Issue #4219)', () => {
       .poll(async () => (await slot.boundingBox())!.width)
       .toBeLessThan(pane.width - 20);
   });
+
+  test('[#4256] the open tooltip follows the side button after it moves', async ({ page }) => {
+    await openScreen(page, 'right');
+    await page.getByTestId('header-tool-files').click();
+    const btn = page.getByTestId('activity-pane-side');
+    await btn.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('activity-pane-slot')).toHaveAttribute('data-side', 'left');
+    const box = (await btn.boundingBox())!;
+    const label = (await btn.getAttribute('aria-label'))!;
+    const tip = page.locator('[role="tooltip"][data-placement]', { hasText: label });
+    await expect(tip).toBeVisible();
+    await expect
+      .poll(async () => {
+        const t = (await tip.boundingBox())!;
+        return Math.abs(t.x + t.width / 2 - (box.x + box.width / 2));
+      })
+      .toBeLessThan(box.width + 80);
+  });
 });
