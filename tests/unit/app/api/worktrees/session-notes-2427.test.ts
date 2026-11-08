@@ -66,6 +66,12 @@ import { GET as getNotes, PUT as putNote } from '@/app/api/worktrees/[id]/instan
 import { GET as getWorktrees } from '@/app/api/worktrees/route';
 import { GET as resolveTarget } from '@/app/api/worktrees/[id]/resolve-target/route';
 
+/**
+ * Issue #4221 (2nd review 9): a plain note now also carries its version and `mem: null`.
+ * `text` and `updatedAt` are still compared exactly; the added fields are accepted, not ignored.
+ */
+const plainNote = (text: string, updatedAt: number) => ({ text, updatedAt, version: expect.any(Number), mem: null });
+
 const WT = 'wt-2427-api';
 const NOTE_TEXT = 'レビュー結果を待っている';
 const ALIAS = 'レビュー担当';
@@ -210,7 +216,7 @@ describe('/api/worktrees/:id/instances/notes (Issue #2427)', () => {
 
     expect(response.status).toBe(200);
     expect((await response.json()).notes).toEqual({
-      'codex-2': { text: NOTE_TEXT, updatedAt: 1234 },
+      'codex-2': plainNote(NOTE_TEXT, 1234),
     });
   });
 
@@ -225,7 +231,7 @@ describe('/api/worktrees/:id/instances/notes (Issue #2427)', () => {
     const body = await response.json();
     const worktree = body.worktrees.find((entry: { id: string }) => entry.id === WT);
 
-    expect(worktree.sessionNotes).toEqual({ 'codex-2': { text: NOTE_TEXT, updatedAt: 1234 } });
+    expect(worktree.sessionNotes).toEqual({ 'codex-2': plainNote(NOTE_TEXT, 1234) });
     // Emphatically NOT on the roster entries: `AgentInstance` is the roster
     // PATCH's input shape, and a note there would have to be echoed back by
     // every writer or be destroyed.
