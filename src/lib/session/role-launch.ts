@@ -66,11 +66,13 @@ import {
   type WrittenRoleArtifact,
 } from '@/lib/agent-roles/artifacts';
 import {
+  assertLaunchCwdIsWorktree,
   fixedEnvReader,
   loadRoleComposition,
   RoleCompositionError,
   type RoleEnv,
   type RoleEnvReader,
+  type RoleLaunchCwdReader,
 } from '@/lib/agent-roles/composition';
 import { RoleLaunchRefusedError, type RoleLaunchRefusalReason } from '@/lib/agent-roles/launch-errors';
 import {
@@ -210,6 +212,11 @@ export interface ResolveLaunchRoleInput extends LaunchRoleTarget {
   worktreePath: string;
   /** Where the user's env is read from. Not read when {@link composition} is given. */
   readEnv: RoleEnvReader;
+  /**
+   * A reused pane's cwd (Issue #4233), for a relative `XDG_CONFIG_HOME` / `HOME`.
+   * None means the agent starts in `worktreePath` (a new pane, a Schedule).
+   */
+  readLaunchCwd?: RoleLaunchCwdReader;
   /** Use these instead of reading them again. */
   composition?: RoleComposition;
   /** Schedule's `agent`. */
@@ -299,6 +306,7 @@ export async function resolveLaunchRole(
       worktreePath: input.worktreePath,
       readEnv: input.readEnv,
       explicitAgent: input.explicitAgent,
+      readLaunchCwd: input.readLaunchCwd,
     });
   } catch (error) {
     const message = error instanceof RoleCompositionError ? error.message : 'The settings to compose with could not be read';
@@ -329,7 +337,8 @@ export async function resolveLaunchRole(
 export function requestLaunchRole(
   target: LaunchRoleTarget,
   worktreePath: string,
-  readEnv: RoleEnvReader
+  readEnv: RoleEnvReader,
+  readLaunchCwd?: RoleLaunchCwdReader
 ): LaunchRoleSnapshot | null | Promise<LaunchRoleSnapshot> {
   if (!isAgentRoleCliTool(target.cliToolId)) return null;
   let db: Database.Database | null;
@@ -341,7 +350,7 @@ export function requestLaunchRole(
     logger.warn('role-database-unavailable', { error: error instanceof Error ? error.message : String(error) });
     return Promise.reject(new RoleLaunchRefusedError('resolve-failed', 'The database could not be read to resolve the role'));
   }
-  return resolveLaunchRole(db, { ...target, worktreePath, readEnv });
+  return resolveLaunchRole(db, { ...target, worktreePath, readEnv, readLaunchCwd });
 }
 
 // ---------------------------------------------------------------------------
@@ -447,6 +456,42 @@ export async function runWithLaunchRole<T>(snapshot: LaunchRoleSnapshot, fn: () 
   } finally {
     if (store.envFile !== null) removeLaunchEnvFile(store.envFile);
   }
+}
+
+/**
+ * The check a launch runs right before it types its line, in the same input-lock
+ * turn (Issue #4233), or null when this launch's role did not depend on the cwd.
+ *
+ * The composition resolved a relative `XDG_CONFIG_HOME` / `HOME` against the
+ * worktree after checking the pane was there; the launch then awaits the
+ * executable, the pane's geometry and the server's port, and the pane's terminal
+ * can `cd` meanwhile. The line itself is left as it is (no `cd` added to it), so
+ * the launch is refused instead when the pane is no longer in the worktree.
+ *
+ * The step awaits, so it also refuses when the session was stopped meanwhile
+ * (its epoch moved), and `typeLaunchLines` checks the input ticket after it: a
+ * restart in between revokes this launch's turn, and its line is not typed.
+ *
+ * @param readLaunchCwd - The pane's cwd reader; none (a test run) checks nothing
+ * @returns A step that rejects with a {@link RoleLaunchRefusedError}, or null
+ */
+export function launchCwdRecheck(readLaunchCwd: RoleLaunchCwdReader | undefined): (() => Promise<void>) | null {
+  const store = scope().getStore();
+  const pinned = store?.snapshot.composition?.opencodeV2LaunchCwd;
+  if (store === undefined || pinned === undefined || !readLaunchCwd) return null;
+  return async () => {
+    try {
+      await assertLaunchCwdIsWorktree(pinned, readLaunchCwd);
+    } catch (error) {
+      if (!(error instanceof RoleCompositionError)) throw error;
+      throw new RoleLaunchRefusedError('composition-failed', `${error.message} (it changed after the role was composed)`);
+    }
+    // The session stopped while the cwd was read: this launch no longer speaks
+    // for it (`typeLaunchLines` checks the input ticket as well).
+    if (isStale(store)) {
+      throw new RoleLaunchRefusedError('session-stopped', 'The session was stopped while the launch checked its cwd');
+    }
+  };
 }
 
 /**
