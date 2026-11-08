@@ -8,7 +8,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { main, type DispatchDeps, type Exec } from '../../../../scripts/agent-health/dispatch-main';
+import { main, writeNotSent, writeSent, type DispatchDeps, type Exec } from '../../../../scripts/agent-health/dispatch-main';
 import { main as releaseReportMain } from '../../../../scripts/agent-health/release-report-main';
 import {
   acquireReservation,
@@ -399,10 +399,10 @@ describe('dispatch main under the claude-3 reservation (#4243)', () => {
     expect(current()).toEqual(before);
   });
 
-  it('negative: the terms file tells the run to release with the dispatch token', async () => {
+  it('negative: the terms file tells the run to finish (mark, then release) with the dispatch token', async () => {
     await runReserved({ issues: [ghIssue(3050, ['agent-health'], 'a')] });
     const token = current().token as string;
-    expect(fs.readFileSync(termsFile('3050'), 'utf8')).toContain(`npx tsx scripts/agent-health/claude3-reserve.ts release --token ${token}`);
+    expect(fs.readFileSync(termsFile('3050'), 'utf8')).toContain(`npx tsx scripts/agent-health/claude3-reserve.ts finish --token ${token}`);
   });
 
   it('positive: another day’s dispatch run still holding — skipped-busy naming that day', async () => {
@@ -564,6 +564,52 @@ describe('dispatch main under the claude-3 reservation (#4243)', () => {
     expect(code).toBe(0);
     expect(sends()).toEqual([]);
     expect(current().state).toBe('released');
+    expect(record()).toEqual(sent);
+  });
+
+  it('positive (P2-1): a sent published between the skip’s check and its rename is written back over the skip', () => {
+    fs.mkdirSync(path.dirname(recordFile()), { recursive: true });
+    const marker = `${recordFile()}.sent`;
+    const sent = { schemaVersion: 1 as const, date: '2026-10-01', status: 'sent' as const, issues: [{ number: 1, kind: 'bug' as const, title: '' }], deferred: [] };
+    const skip = { schemaVersion: 1 as const, date: '2026-10-01', status: 'skipped-busy' as const, issues: [], deferred: [1], reason: 'x' };
+    // D2 checked (no sent) → D1 publishes sent → D2 renames its skip.
+    const result = writeNotSent(recordFile(), marker, skip, { afterCheck: () => expect(writeSent(recordFile(), marker, sent)).toBeNull() });
+    expect(result).toBe('kept-sent');
+    expect(record()).toEqual(sent);
+  });
+
+  it('positive (P2-1): a sent published right after the skip’s rename still ends as sent', () => {
+    fs.mkdirSync(path.dirname(recordFile()), { recursive: true });
+    const marker = `${recordFile()}.sent`;
+    const sent = { schemaVersion: 1 as const, date: '2026-10-01', status: 'sent' as const, issues: [{ number: 1, kind: 'bug' as const, title: '' }], deferred: [] };
+    const skip = { schemaVersion: 1 as const, date: '2026-10-01', status: 'no-target' as const, issues: [], deferred: [] };
+    writeNotSent(recordFile(), marker, skip, { afterRename: () => expect(writeSent(recordFile(), marker, sent)).toBeNull() });
+    expect(record()).toEqual(sent);
+    // A second sent is not written over the first.
+    expect(writeSent(recordFile(), marker, { ...sent, issues: [] })).toContain('置き換えない');
+    expect(record()).toEqual(sent);
+  });
+
+  it('negative (P2-1): without a sent the skip is written as before', () => {
+    fs.mkdirSync(path.dirname(recordFile()), { recursive: true });
+    const skip = { schemaVersion: 1 as const, date: '2026-10-01', status: 'skipped-busy' as const, issues: [], deferred: [1], reason: 'x' };
+    expect(writeNotSent(recordFile(), `${recordFile()}.sent`, skip)).toBeNull();
+    expect(record()).toEqual(skip);
+  });
+
+  it('positive (P2-1): a pre-reservation stop (gh failure) does not replace a marked sent', async () => {
+    fs.mkdirSync(path.dirname(recordFile()), { recursive: true });
+    const sent = { schemaVersion: 1 as const, date: '2026-10-01', status: 'sent' as const, issues: [{ number: 1, kind: 'bug' as const, title: '' }], deferred: [] };
+    // D1's sent lands just after D2 passed the early check (the Issue list call).
+    const exec: Exec = (command, args) => {
+      calls.push([command, [...args]]);
+      if (command === 'gh' && args[1] === 'list') {
+        expect(writeSent(recordFile(), `${recordFile()}.sent`, sent)).toBeNull();
+        return { status: 1, stdout: '' };
+      }
+      return { status: null, stdout: '' };
+    };
+    expect(await runReserved({}, [], {}, exec)).toBe(2);
     expect(record()).toEqual(sent);
   });
 

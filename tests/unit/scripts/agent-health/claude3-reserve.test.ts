@@ -10,7 +10,14 @@ import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { main, type Exec, type ReserveDeps } from '../../../../scripts/agent-health/claude3-reserve-main';
-import { acquireReservation, readReservation, releaseReservation, type ReservationGeneration } from '@/lib/agent-health/claude3-reservation';
+import {
+  acquireReservation,
+  beginSend,
+  endSend,
+  readReservation,
+  releaseReservation,
+  type ReservationGeneration,
+} from '@/lib/agent-health/claude3-reservation';
 
 let root: string;
 let out: string[];
@@ -63,7 +70,6 @@ function run(argv: string[], extra: Partial<ReserveDeps> = {}): Promise<number> 
     pid: 500,
     isAlive: () => false,
     reservationDir: resDir(),
-    repoRoot: path.join(root, 'repo'),
     stdout: (line) => out.push(line),
     stderr: (line) => err.push(line),
     ...extra,
@@ -189,29 +195,48 @@ describe('claude3-reserve: the dispatch run’s reservation (R1)', () => {
     expect(await run(['reserve', '--label', 'x'])).toBe(0);
   });
 
-  it('positive: dispatch-finished without the report is refused (3)', async () => {
+  it('positive: dispatch-finished without the finished mark is refused (3)', async () => {
     const d = holdDispatch();
     expect(await run(['takeover', '--from', d, '--reason', 'dispatch-finished'])).toBe(3);
     expect(current().holder).toBe('dispatch');
   });
 
-  it('positive: a report older than the reservation is not evidence', async () => {
+  it('positive (P1-2): a release report updated in the middle of the run is not evidence', async () => {
     const d = holdDispatch();
     fs.mkdirSync(path.dirname(report()), { recursive: true });
-    fs.writeFileSync(report(), 'old');
-    const past = new Date(clock - 3_600_000);
-    fs.utimesSync(report(), past, past);
-    expect(await run(['takeover', '--from', d, '--reason', 'dispatch-finished'])).toBe(3);
-  });
-
-  it('negative: a report newer than heldSince and claude-3 ready — PM takes it over', async () => {
-    const d = holdDispatch();
-    fs.mkdirSync(path.dirname(report()), { recursive: true });
-    fs.writeFileSync(report(), 'done');
+    fs.writeFileSync(report(), 'manual, mid-run');
     const later = new Date(clock + 3_600_000);
     fs.utimesSync(report(), later, later);
+    expect(await run(['takeover', '--from', d, '--reason', 'dispatch-finished'])).toBe(3);
+    expect(current()).toMatchObject({ holder: 'dispatch', token: d });
+  });
+
+  it('negative (P1-2): the run left its finished mark but the release failed — PM takes it over', async () => {
+    const d = holdDispatch();
+    // The run's own send is in progress (parent alive), so finish leaves the mark and the release is refused.
+    const live = { ...resEnv(), pid: 77, isAlive: (p: number) => p === 77 };
+    expect(beginSend(live, d).ok).toBe(true);
+    expect(await run(['finish', '--token', d], { isAlive: (p) => p === 77 })).toBe(3);
+    expect(current()).toMatchObject({ holder: 'dispatch', token: d });
+    expect(endSend(live, d).ok).toBe(true);
     expect(await run(['takeover', '--from', d, '--reason', 'dispatch-finished'])).toBe(0);
     expect(current()).toMatchObject({ holder: 'pm', previousToken: d });
+  });
+
+  it('finish --token leaves the mark and releases; a PM token cannot finish', async () => {
+    const d = holdDispatch();
+    expect(await run(['finish', '--token', d])).toBe(0);
+    expect(current().state).toBe('released');
+    const p = await reserve();
+    expect(await run(['finish', '--token', p])).toBe(3);
+    expect(current()).toMatchObject({ holder: 'pm', token: p });
+  });
+
+  it('positive (P2-2): PM’s send with the dispatch token does not send', async () => {
+    const d = holdDispatch();
+    expect(await run(['send', '--token', d, 'ブリーフ'])).toBe(3);
+    expect(sends()).toEqual([]);
+    expect(current()).toMatchObject({ holder: 'dispatch', token: d, sending: null });
   });
 
   it('dispatch-finished exits 4 while claude-3 is still busy', async () => {

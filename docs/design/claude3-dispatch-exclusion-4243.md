@@ -359,6 +359,15 @@
 | I3 | dispatch が送信の直前に「予約が途中で引き継がれた」を見つけたときは `skipped-busy`・**exit 0**（busy と同じ扱い）。予約の読み書きの失敗・`target` の不一致は今の失敗と同じ `fail()`（記録 `skipped-busy`・exit 2）。いずれも送らない | 引継ぎは PM か人の明示操作で、Schedule の AI が失敗として報告するものではない。設定不一致は人が見るべき失敗 |
 | I4 | `release` も `previousToken` に外した token を残す（強制解除と同じ形） | 監査で「誰が外したか」を世代から読めるようにするため。規則は変わらない |
 | I5 | `reserve` と `takeover` は token だけを標準出力に出し、説明は標準エラーに出す | `T=$(npx tsx … reserve --label …)` で受け取れるようにするため |
-| I6 | `takeover --reason dispatch-finished` の証拠のパスは、スクリプトのあるチェックアウト（`path.resolve(__dirname, '..', '..')`）の `workspace/agent-health/<予約の date>/release-readiness.html`。手順は main のチェックアウトで実行すると書いた | dispatch の条件ファイルとリリース判断レポートは main のチェックアウトに書かれるため |
+| I6 | （I10 で置き換え）`takeover --reason dispatch-finished` の証拠のパスは、スクリプトのあるチェックアウト（`path.resolve(__dirname, '..', '..')`）の `workspace/agent-health/<予約の date>/release-readiness.html`。手順は main のチェックアウトで実行すると書いた | dispatch の条件ファイルとリリース判断レポートは main のチェックアウトに書かれるため |
 | I7 | `docs/orchestrate/team.md` は「未対応（追跡）」の語を、素の `commandmate send` を仕組みで止めていないこと（8 章の 1 点目）にだけ残した | 既存の `tests/unit/docs/dev-team-doc-4239.test.ts` がこの語を固定している。期待値は変えない契約のため、残る穴の記述として残した |
 | I8 | 英語版の `docs/en/user-guide/agent-health.md` は存在しないため直していない | — |
+
+### 10.1 整合性レビュー（Codex、`workspace/orchestration/runs/2026-11-08/review-4243.md`、P1 2・P2 2）の処置
+
+| # | 指摘 | 変えたこと | 対照 |
+|---|---|---|---|
+| I9 | P1-1: 掃除で名前が空いた世代番号へ、止まっていた古い操作が link して成功しうる（3.3 の比較交換が崩れる） | 各世代に `publishId`・`parentPublishId` を持たせ、link の直後に「自分が最大の世代」か「次の世代の `parentPublishId` が自分」でなければ古い公開とみなして自分の名前を消し、競合として読み直す（掃除された名前が空くのは現在が N+12 以上のときだけで、最大は減らないので必ず見つかる）。本物の公開の直後に 11 回以上の公開が割り込んだときも失敗側に倒れる（誰も送らない側） | `claude3-reservation.test.ts` P1-1: 陽性＝止めた `beginSend` の間に引継ぎと 12 回の延長で gen-2 を掃除 → 再開した送信は exit 3・送らない（修正前は送る）。陰性＝長い履歴の後の通常の送信は通り、世代が鎖でつながる |
+| I10 | P1-2: `takeover --reason dispatch-finished` の証拠が HTML の mtime だけで、run の途中の手動のレポート生成でも証拠になる | 条件ファイルの最後の行を `finish --token <t>` に替えた。`finish` はその token が自動依頼の予約を持っているときだけ予約の置き場所に `finished-<token>.json` を書き、続けて解除する。引継ぎの証拠はこの印だけ（HTML は見ない）。印は、token が現在の持ち主でなくなった世代の公開時に掃除する | `claude3-reserve.test.ts`: 陽性＝run の途中に更新された HTML では exit 3。陰性＝印を残して解除が送信中で拒まれた後は引き継げる。PM の token では `finish` できない |
+| I11 | P2-1: 当日の `sent` の確認と記録の置き換えの間に別の dispatch が割り込める | `sent` は `dispatch/<日付>.json.sent` を link で 1 回だけ排他作成してから記録を書く（2 本目の `sent` は書かない）。読む側（当日の確認・取得後の読み直し）は印を先に見る。見送り・失敗・no-target の書き手は、印が無いことを見て rename し、rename の後にもう一度印を見て、在れば `sent` を書き戻す。どの順序でも最後は `sent` が残る | `dispatch.test.ts` P2-1: 陽性＝確認と rename の間・rename の直後に `sent` が入っても最終は `sent`、予約取得前の失敗（gh の失敗）も `sent` を置き換えない。陰性＝`sent` が無ければ今どおり書く |
+| I12 | P2-2: PM 用の `send` が dispatch の token でも送れる | `beginSend` に送る側の `holder` を渡し、送信中の印を付ける同じ比較交換の中で持ち主を確かめる（PM の入口は `pm`、dispatch は `dispatch`） | `claude3-reserve.test.ts` P2-2: 陽性＝dispatch の token で PM の `send` は exit 3・`commandmate` を呼ばない。陰性＝PM の token の送信は今どおり |

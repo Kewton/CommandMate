@@ -248,9 +248,12 @@ export function buildRequest(issues: readonly DispatchIssue[], termsPath: string
 /** Where a catalog-drift worker is pointed: the skill file, so a worker other than Claude Code can read it too. */
 export const CATALOG_SKILL_PATH = '.claude/skills/catalog-reconcile/SKILL.md';
 
-/** The command the run's last step runs to give Claude 3 back (#4243). */
-export function reservationReleaseCommand(token: string): string {
-  return `npx tsx scripts/agent-health/claude3-reserve.ts release --token ${token}`;
+/**
+ * The command the run's last step runs to give Claude 3 back (#4243): it leaves
+ * the finished mark for this token (PM's only evidence for a takeover) and releases.
+ */
+export function reservationFinishCommand(token: string): string {
+  return `npx tsx scripts/agent-health/claude3-reserve.ts finish --token ${token}`;
 }
 
 /**
@@ -280,7 +283,7 @@ export function buildTerms(date: string, issues: readonly DispatchIssue[], token
     '- kill 系の API・コマンドを使わない。他のインスタンス・worktree に send しない',
     ...(token
       ? [
-          `- 最後に（途中で止まったときも）、リリース判断レポートを書いた後に \`${reservationReleaseCommand(token)}\` を実行し、claude-3 の予約を外す（外すまで PM は claude-3 に送れない）`,
+          `- 最後に（途中で止まったときも）、リリース判断レポートを書いた後に \`${reservationFinishCommand(token)}\` を実行し、完了の印を残して claude-3 の予約を外す（外すまで PM は claude-3 に送れない。run の途中では実行しない）`,
         ]
       : []),
     '',

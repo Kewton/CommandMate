@@ -134,6 +134,48 @@ describe('claude3 reservation: generations (R4)', () => {
   });
 });
 
+describe('claude3 reservation: a late publish onto a cleaned generation name (P1-1)', () => {
+  it('positive: a paused beginSend resumes after its N+1 was cleaned — the link is refused and nothing is sent', async () => {
+    const a = hold('pm', 1);
+    let resumed = false;
+    let ran = false;
+    const sent = await sendUnderReservation(
+      env(1, {
+        beforePublish: () => {
+          if (resumed) return;
+          resumed = true;
+          // While A is paused: a person takes over and B renews until A's N+1 (gen-2) is cleaned.
+          const taken = takeoverReservation(env(2), { fromToken: a, reason: 'restart' });
+          if (!taken.ok) throw new Error(taken.message);
+          const b = taken.generation.token as string;
+          for (let i = 0; i < 12; i++) expect(renewReservation(env(2), b).ok).toBe(true);
+          expect(fs.existsSync(path.join(dir, 'gen-2.json'))).toBe(false);
+        },
+      }),
+      a,
+      async () => {
+        ran = true;
+        return { status: 0, stdout: '' };
+      }
+    );
+    expect(sent).toMatchObject({ sent: false, code: 3 });
+    expect(ran).toBe(false);
+    expect(fs.existsSync(path.join(dir, 'gen-2.json'))).toBe(false);
+    expect(current()).toMatchObject({ holder: 'pm', previousToken: a, sending: null });
+  });
+
+  it('negative: an ordinary send under a long history still goes through and chains the generations', async () => {
+    const t = hold('pm', 1);
+    for (let i = 0; i < 12; i++) expect(renewReservation(env(1), t).ok).toBe(true);
+    const sent = await sendUnderReservation(env(1), t, async () => ({ status: 0, stdout: '' }));
+    expect(sent).toMatchObject({ sent: true, status: 0 });
+    const last = current();
+    const prev = JSON.parse(fs.readFileSync(path.join(dir, `gen-${last.generation - 1}.json`), 'utf8'));
+    expect(last.parentPublishId).toBe(prev.publishId);
+    expect(last.sending).toBeNull();
+  });
+});
+
 describe('claude3 reservation: tokens (R2)', () => {
   it('positive: A held → A released → B held → A’s renew / release / send all fail 3 and B stays', async () => {
     const a = hold('pm', 1);

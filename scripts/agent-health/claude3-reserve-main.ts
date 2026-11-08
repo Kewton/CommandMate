@@ -8,6 +8,7 @@
  *   renew --token <t> [--hours 1-24]
  *   release --token <t>
  *   release --force --from <t>                    (a person)
+ *   finish --token <t>                            (the dispatch run's last step: finished mark, then release)
  *   takeover --from <t> --reason restart|dispatch-finished [--label <s>] [--hours 1-24]
  *   status [--json]                               (reads only)
  *
@@ -26,6 +27,8 @@ import {
   DEFAULT_RESERVATION_HOURS,
   defaultReservationDir,
   describeHolder,
+  dispatchRunFinishedMark,
+  finishDispatchRun,
   forceReleaseReservation,
   isOverdue,
   isSending,
@@ -37,7 +40,6 @@ import {
   takeoverReservation,
   targetMatches,
   type ReservationEnv,
-  type ReservationGeneration,
   type ReservationResult,
   type TakeoverReason,
 } from '@/lib/agent-health/claude3-reservation';
@@ -58,8 +60,6 @@ export interface ReserveDeps {
   isAlive: (pid: number) => boolean;
   /** Production: `defaultReservationDir()`. A test that injects `exec` without this gets a throwaway directory. */
   reservationDir?: string;
-  /** Where the dispatch run writes `workspace/agent-health/<date>/release-readiness.html` (the main checkout). */
-  repoRoot: string;
   beforePublish?: ReservationEnv['beforePublish'];
   stdout: (line: string) => void;
   stderr: (line: string) => void;
@@ -73,6 +73,7 @@ export const RESERVE_USAGE = [
   '  renew --token <t> [--hours 1-24]     move the review time',
   '  release --token <t>                  give claude-3 back',
   '  release --force --from <t>           a person releases the reservation they looked at',
+  '  finish --token <t>                   the dispatch run\'s last step: leave the finished mark, then release',
   '  takeover --from <t> --reason restart|dispatch-finished [--label <s>] [--hours 1-24]',
   '  status [--json]                      show the reservation (reads only)',
   '',
@@ -96,7 +97,6 @@ function defaultDeps(): ReserveDeps {
     now: () => new Date(),
     pid: process.pid,
     isAlive: defaultIsAlive,
-    repoRoot: path.resolve(__dirname, '..', '..'),
     stdout: (line) => process.stdout.write(`${line}\n`),
     stderr: (line) => process.stderr.write(`[claude3-reserve] ${line}\n`),
   };
@@ -107,6 +107,7 @@ type Command =
   | { kind: 'send'; token: string; message: string }
   | { kind: 'renew'; token: string; hours: number }
   | { kind: 'release'; token: string }
+  | { kind: 'finish'; token: string }
   | { kind: 'force-release'; from: string }
   | { kind: 'takeover'; from: string; reason: TakeoverReason; label: string | null; hours: number }
   | { kind: 'status'; json: boolean };
@@ -181,6 +182,11 @@ export function parseReserveArgs(argv: readonly string[]): ReserveParse {
       if (bad) return bad;
       return { ok: true, command: { kind: 'release', token: values['--token'] } };
     }
+    case 'finish': {
+      const bad = failWith(allowed(['--token']) ?? need('--token'));
+      if (bad) return bad;
+      return { ok: true, command: { kind: 'finish', token: values['--token'] } };
+    }
     case 'takeover': {
       const bad = failWith(allowed(['--from', '--reason', '--label', '--hours']) ?? need('--from') ?? need('--reason'));
       if (bad) return bad;
@@ -197,18 +203,6 @@ export function parseReserveArgs(argv: readonly string[]): ReserveParse {
     }
     default:
       return { ok: false, error: `unknown command: ${sub}\n\n${RESERVE_USAGE}` };
-  }
-}
-
-/** The dispatch run's report of that day exists and is newer than the reservation (design §3.6). */
-export function dispatchRunFinished(repoRoot: string, current: ReservationGeneration): boolean {
-  if (!current.date || !current.heldSince) return false;
-  const since = Date.parse(current.heldSince);
-  try {
-    const stat = fs.statSync(path.join(repoRoot, 'workspace', 'agent-health', current.date, 'release-readiness.html'));
-    return Number.isFinite(since) && stat.mtimeMs > since;
-  } catch {
-    return false;
   }
 }
 
@@ -333,7 +327,8 @@ async function run(command: Command, env: ReservationEnv, deps: ReserveDeps, spa
     }
     case 'send': {
       const sent = await sendUnderReservation(env, command.token, (onChild) =>
-        spawnExec('commandmate', sendArgv(command.message, false), onChild)
+        spawnExec('commandmate', sendArgv(command.message, false), onChild),
+        'pm'
       );
       if (!sent.sent) {
         deps.stderr(`送らなかった: ${sent.message}`);
@@ -346,6 +341,8 @@ async function run(command: Command, env: ReservationEnv, deps: ReserveDeps, spa
       return report(deps, renewReservation(env, command.token, command.hours), '期限を延ばした');
     case 'release':
       return report(deps, releaseReservation(env, command.token), '予約を外した');
+    case 'finish':
+      return report(deps, finishDispatchRun(env, command.token), '完了の印を残し、予約を外した');
     case 'force-release':
       return report(deps, forceReleaseReservation(env, command.from), '予約を強制的に外した');
     case 'takeover': {
@@ -358,7 +355,7 @@ async function run(command: Command, env: ReservationEnv, deps: ReserveDeps, spa
         reason: command.reason,
         ...(command.label ? { label: command.label } : {}),
         hours: command.hours,
-        finished: (current) => dispatchRunFinished(deps.repoRoot, current),
+        finished: (current) => dispatchRunFinishedMark(env.dir, current),
       });
       if (!result.ok) {
         deps.stderr(result.message);

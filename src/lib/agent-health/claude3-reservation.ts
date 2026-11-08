@@ -12,6 +12,15 @@
  * generation (unlike run-lock's rename, design §1.4), and nothing reclaims a
  * reservation by age: `reviewAfter` only marks it for a person to look at.
  *
+ * Old generations are cleaned, which frees their names; a caller paused for
+ * long enough could then link a cleaned name. So a publish counts only if,
+ * right after the link, it is still the newest generation or the next one was
+ * built on it (`parentPublishId`); otherwise it is stale and fails (design §10 I9).
+ *
+ * A dispatch run ends with `finish --token` (design §10 I10), which leaves
+ * `finished-<token>.json` here before releasing: the only evidence that lets
+ * PM take over a dispatch reservation the run failed to release.
+ *
  * The production directory is one absolute path under `os.homedir()`
  * ({@link defaultReservationDir}); no environment variable, `--state-dir` or
  * cwd moves it. Tests pass their own directory.
@@ -66,6 +75,9 @@ export interface ReservationGeneration {
   reviewAfter: string | null;
   sending: SendingMark | null;
   previousToken: string | null;
+  /** Unique per publish; the next generation names it in `parentPublishId` (stale-link check). */
+  publishId: string | null;
+  parentPublishId: string | null;
 }
 
 /** `~/.commandmate/agent-health/claude3.reservation` — the only production location. */
@@ -114,6 +126,8 @@ function releasedAt(generation: number): ReservationGeneration {
     reviewAfter: null,
     sending: null,
     previousToken: null,
+    publishId: null,
+    parentPublishId: null,
   };
 }
 
@@ -154,6 +168,8 @@ function parseGeneration(text: string, n: number): ReservationGeneration | null 
     reviewAfter: str(r.reviewAfter),
     sending,
     previousToken: str(r.previousToken),
+    publishId: str(r.publishId),
+    parentPublishId: str(r.parentPublishId),
   };
 }
 
@@ -222,18 +238,53 @@ export function describeHolder(current: ReservationGeneration, now: Date): strin
   return `claude-3 を自動依頼（${current.date ?? '-'}）の run が予約中（${current.reviewAfter ?? '-'} まで${overdue}）`;
 }
 
-type Decision = { ok: true; next: Omit<ReservationGeneration, 'generation' | 'schemaVersion' | 'target'> } | { ok: false; code: ReservationFailureCode; message: string };
+type Fields = Omit<ReservationGeneration, 'generation' | 'schemaVersion' | 'target' | 'publishId' | 'parentPublishId'>;
+type Decision = { ok: true; next: Fields } | { ok: false; code: ReservationFailureCode; message: string };
+
+const FINISHED_RE = /^finished-([A-Za-z0-9-]+)\.json$/;
+
+function maxGeneration(dir: string): number {
+  let max = 0;
+  for (const name of fs.readdirSync(dir)) {
+    const m = GEN_RE.exec(name);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return max;
+}
+
+/**
+ * After a successful link: is this publish real? Newest → yes. Otherwise the
+ * next generation must have been built on it; if that one is not there or was
+ * built on something else, the name was a cleaned one and this link is stale.
+ * (A real publish whose successor was already cleaned again is also refused:
+ * that fails closed — nobody sends — and needs ~10 publishes inside this window.)
+ */
+function publishIsCurrent(dir: string, next: ReservationGeneration): boolean {
+  if (maxGeneration(dir) === next.generation) return true;
+  try {
+    const after = parseGeneration(fs.readFileSync(path.join(dir, `gen-${next.generation + 1}.json`), 'utf8'), next.generation + 1);
+    return after !== null && after.parentPublishId === next.publishId;
+  } catch {
+    return false;
+  }
+}
 
 function publish(env: ReservationEnv, next: ReservationGeneration): 'ok' | 'conflict' | string {
   const tmp = path.join(env.dir, `tmp-${env.pid}-${crypto.randomBytes(6).toString('hex')}.json`);
+  const name = path.join(env.dir, `gen-${next.generation}.json`);
   try {
     fs.mkdirSync(env.dir, { recursive: true });
     fs.writeFileSync(tmp, `${JSON.stringify(next, null, 2)}\n`);
     try {
-      fs.linkSync(tmp, path.join(env.dir, `gen-${next.generation}.json`));
+      fs.linkSync(tmp, name);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST') return 'conflict';
       throw error;
+    }
+    if (!publishIsCurrent(env.dir, next)) {
+      // A cleaned name: below the newest, never read as current. Remove our copy.
+      fs.rmSync(name, { force: true });
+      return 'conflict';
     }
   } catch (error) {
     return `予約を書けなかった: ${env.dir}（${(error as Error).message}）`;
@@ -246,9 +297,12 @@ function publish(env: ReservationEnv, next: ReservationGeneration): 'ok' | 'conf
   }
   const oldest = next.generation - RESERVATION_KEEP_GENERATIONS;
   try {
-    for (const name of fs.readdirSync(env.dir)) {
-      const m = GEN_RE.exec(name);
-      if (m && Number(m[1]) < oldest) fs.rmSync(path.join(env.dir, name), { force: true });
+    for (const entry of fs.readdirSync(env.dir)) {
+      const m = GEN_RE.exec(entry);
+      if (m && Number(m[1]) < oldest) fs.rmSync(path.join(env.dir, entry), { force: true });
+      // A finished mark matters only while its token holds the reservation.
+      const f = FINISHED_RE.exec(entry);
+      if (f && f[1] !== next.token) fs.rmSync(path.join(env.dir, entry), { force: true });
     }
   } catch {
     // cleaning is best effort
@@ -277,6 +331,8 @@ function transition(env: ReservationEnv, decide: (current: ReservationGeneration
       generation: current.generation + 1,
       target: { ...RESERVATION_TARGET },
       ...decision.next,
+      publishId: crypto.randomBytes(8).toString('hex'),
+      parentPublishId: current.publishId,
     };
     env.beforePublish?.(next);
     const published = publish(env, next);
@@ -378,7 +434,7 @@ export function takeoverReservation(
       return { ok: false, code: 3, message: `--reason ${input.reason} は ${wanted} の予約にだけ使える（${describeHolder(current, env.now())}）` };
     }
     if (input.reason === 'dispatch-finished' && !(input.finished?.(current) ?? false)) {
-      return { ok: false, code: 3, message: '自動依頼の run が終わった証拠（その日の release-readiness.html）が無い。人が release --force で判断する' };
+      return { ok: false, code: 3, message: '自動依頼の run が終わった証拠（その token の完了の印 finished-<token>.json。run の最後の finish --token が書く）が無い。人が release --force で判断する' };
     }
     return {
       ok: true,
@@ -397,16 +453,23 @@ export function takeoverReservation(
   });
 }
 
-function strip(g: ReservationGeneration): Omit<ReservationGeneration, 'generation' | 'schemaVersion' | 'target'> {
-  const { generation: _g, schemaVersion: _s, target: _t, ...rest } = g;
+function strip(g: ReservationGeneration): Fields {
+  const { generation: _g, schemaVersion: _s, target: _t, publishId: _p, parentPublishId: _pp, ...rest } = g;
   return rest;
 }
 
-/** Marks a send in progress (no child yet). */
-export function beginSend(env: ReservationEnv, token: string): ReservationResult {
+/**
+ * Marks a send in progress (no child yet). With `holder`, the reservation must
+ * also be that holder's — checked inside the same compare-and-swap (PM's
+ * `send` passes `pm`, so a dispatch token does not let PM send; §10 I12).
+ */
+export function beginSend(env: ReservationEnv, token: string, holder?: ReservationHolder): ReservationResult {
   return transition(env, (current) => {
     const refused = heldBy(current, token, env) ?? notSending(current, env);
     if (refused) return refused;
+    if (holder && current.holder !== holder) {
+      return { ok: false, code: 3, message: `この token の予約は ${holder} のものでない（${describeHolder(current, env.now())}）` };
+    }
     return { ok: true, next: { ...strip(current), sending: { parentPid: env.pid, childPid: null, since: env.now().toISOString() } } };
   });
 }
@@ -445,9 +508,10 @@ export type GuardedSendResult =
 export async function sendUnderReservation(
   env: ReservationEnv,
   token: string,
-  run: (onChild: (pid: number) => void) => Promise<SendResult>
+  run: (onChild: (pid: number) => void) => Promise<SendResult>,
+  holder?: ReservationHolder
 ): Promise<GuardedSendResult> {
-  const begun = beginSend(env, token);
+  const begun = beginSend(env, token, holder);
   if (!begun.ok) return { sent: false, code: begun.code, message: begun.message };
   let result: SendResult;
   try {
@@ -458,4 +522,46 @@ export async function sendUnderReservation(
     endSend(env, token);
   }
   return { sent: true, status: result.status, stdout: result.stdout };
+}
+
+const TOKEN_RE = /^[A-Za-z0-9-]+$/;
+
+function finishedMarkPath(dir: string, token: string): string {
+  return path.join(dir, `finished-${token}.json`);
+}
+
+/**
+ * The dispatch run's last step (`finish --token`): leave the finished mark for
+ * this token, then release. The mark is written only while the token holds a
+ * dispatch reservation; if the release then fails (e.g. a send is in
+ * progress), the mark is what lets PM take over later (§10 I10).
+ */
+export function finishDispatchRun(env: ReservationEnv, token: string): ReservationResult {
+  if (!TOKEN_RE.test(token)) return { ok: false, code: 2, message: `token の形が違う: ${token}` };
+  const read = readReservation(env.dir);
+  if (!read.ok) return { ok: false, code: 2, message: read.message };
+  const current = read.current;
+  if (current.state !== 'held' || current.token !== token || current.holder !== 'dispatch') {
+    return { ok: false, code: 3, message: `token が今の自動依頼の予約と一致しない（${describeHolder(current, env.now())}）`, current };
+  }
+  try {
+    fs.writeFileSync(
+      finishedMarkPath(env.dir, token),
+      `${JSON.stringify({ token, date: current.date, finishedAt: env.now().toISOString() })}\n`
+    );
+  } catch (error) {
+    return { ok: false, code: 2, message: `完了の印を書けなかった: ${env.dir}（${(error as Error).message}）`, current };
+  }
+  return releaseReservation(env, token);
+}
+
+/** Whether this dispatch reservation's run left its finished mark (`finish --token`). */
+export function dispatchRunFinishedMark(dir: string, current: ReservationGeneration): boolean {
+  if (current.holder !== 'dispatch' || !current.token || !TOKEN_RE.test(current.token)) return false;
+  try {
+    const mark = JSON.parse(fs.readFileSync(finishedMarkPath(dir, current.token), 'utf8')) as { token?: unknown };
+    return mark.token === current.token;
+  } catch {
+    return false;
+  }
 }
