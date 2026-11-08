@@ -6,6 +6,7 @@
  *   commandmate mem update <id> --if-version <n> [--text ... | --stdin] [--close-when ...] [--evidence ...]
  *   commandmate mem close <id> [--reason "<text>"]
  *   commandmate mem list [--all] [--branch <name>] [--json]
+ *   commandmate mem check [--branch <name>] [--json]          (Issue #4222)
  *   commandmate mem mode [--json]
  *   commandmate mem purge --branch <name> [--closed-only] --confirm
  *
@@ -25,6 +26,8 @@ import { resolveSessionIdentity, type SessionIdentity } from './whoami';
 import {
   MEM_EXIT_BY_CODE,
   MEM_KINDS,
+  type MemCheckResponse,
+  type MemConditionView,
   type MemErrorCode,
   type MemItemView,
   type MemListResponse,
@@ -44,8 +47,14 @@ name it: --worktree <id> --instance <id> for writes; --worktree <id>, or
 --close-when (required for waiting / next / external):
   manual | replaced (now only) | issue:[host/owner/repo]#N | pr:[host/owner/repo]#N[?state=merged|closed]
   branch:<name>?merged=<ref>[&scope=local|remote] | branch:<name>?deleted
-  relay:<id> | worktree:<id> | session:<id> | at:<ISO 8601 with offset>
+  relay:<id> | worktree:<id> | session:task:<id> | session:verify:<run id> |
+  session:schedule:<execution log id> | at:<ISO 8601 with offset>
   Omitted: now → replaced, note → manual, decision → until promoted.
+
+Conditions are evaluated when read (list, check, the brief), never in the background.
+Each one is met, not-met or unknown with a fixed reason; unknown (offline, 404, no
+permission, a timeout, the query budget, ...) never closes anything. A decision met
+before it is promoted stays open as "unreflected".
 
 Exit codes:
   0   done (a --key retry answering the first item: replayed)
@@ -154,10 +163,17 @@ function report(error: MemCliError, json: boolean | undefined): never {
   process.exit(error.exitCode);
 }
 
-function itemLine(item: MemItemView): string {
+function itemLine(item: MemItemView, condition?: MemConditionView): string {
   const text = item.withheld ? `(withheld: ${item.withheld.rule})` : (item.text ?? '');
   const flags = [item.stale ? 'stale' : null, item.frozen ? 'frozen' : null].filter(Boolean).join(',');
-  return `[${item.kind}] ${item.id} v${item.version} ${item.state}${flags ? ` (${flags})` : ''}: ${text}`;
+  return `[${item.kind}] ${item.id} v${item.version} ${item.state}${flags ? ` (${flags})` : ''}${conditionText(condition)}: ${text}`;
+}
+
+/** ` {met:issue-closed}` — the result and its fixed reason (Issue #4222). */
+function conditionText(condition: MemConditionView | undefined): string {
+  if (!condition) return '';
+  const extra = [condition.closed ? 'closed' : null, condition.unreflected ? 'unreflected' : null].filter(Boolean).join(',');
+  return ` {${condition.result}:${condition.reason}${extra ? `,${extra}` : ''}}`;
 }
 
 async function run(options: MemCommonOptions, action: (client: ApiClient) => Promise<void>): Promise<void> {
@@ -340,10 +356,38 @@ export function createMemCommand(): Command {
         return;
       }
       console.log(`mode: ${result.mode}  branch: ${result.branch ?? '(detached)'}`);
-      for (const slot of result.now) console.log(`now ${slot.instanceId}: ${itemLine(slot.item)}`);
-      for (const item of result.items) console.log(itemLine(item));
+      const conditions = result.conditions ?? {};
+      for (const slot of result.now) console.log(`now ${slot.instanceId}: ${itemLine(slot.item, conditions[slot.item.id])}`);
+      for (const item of result.items) console.log(itemLine(item, conditions[item.id]));
       for (const warning of result.warnings) {
         console.error(`Warning: ${warning.code} ${warning.kind ?? ''} ${warning.count}/${warning.threshold}`);
+      }
+    });
+  });
+
+  withTargetOptions(
+    mem
+      .command('check')
+      .description('Evaluate the close conditions of the branch now, and close what is met (mode on only)')
+      .option('--branch <name>', 'Another branch than the worktree’s'),
+    false
+  ).action(async (options: MemCommonOptions) => {
+    await run(options, async (client) => {
+      const target = await readTarget(client, options);
+      if (target.via !== 'worktree') throw usage('target_required', 'check runs through a worktree: --worktree <id>', 'worktree');
+      const identity = await identityOf(client);
+      const instanceId = identity && identity.worktreeId === target.worktreeId ? identity.instanceId : undefined;
+      const result = await client.post<MemCheckResponse>(`${wt(target.worktreeId)}/check`, {
+        ...(options.branch ? { branch: options.branch } : {}),
+        ...(instanceId ? { instanceId } : {}),
+      });
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+      console.log(`mode: ${result.mode}  branch: ${result.branch ?? '(detached)'}  evaluated: ${result.results.length}`);
+      for (const entry of result.results) {
+        console.log(`[${entry.kind}] ${entry.itemId} ${entry.type ?? '?'}${conditionText(entry.condition)}`);
       }
     });
   });

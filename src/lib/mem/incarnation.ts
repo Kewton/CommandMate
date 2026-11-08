@@ -43,22 +43,90 @@ export function listInstanceIncarnations(
   ).map((row) => ({ instanceId: row.instance_id, cliToolId: row.cli_tool_id, incarnation: row.incarnation }));
 }
 
+/**
+ * Which way an incarnation was made (Issue #4222, S6). Only `roster` (a new pair of a
+ * roster that already had rows) is evidence that the instance was born after an item;
+ * `lazy` (a derived primary's first mem write, or a primary copied into the first
+ * roster save, 2nd review ①) and NULL (before v67) are not.
+ */
+export type IncarnationIssuedBy = 'roster' | 'lazy';
+
 /** Start a new incarnation, replacing any row for the id. Returns it. */
 export function startInstanceIncarnation(
   db: Database.Database,
   worktreeId: string,
   instanceId: string,
   cliToolId: string,
-  now: number = Date.now()
+  now: number = Date.now(),
+  issuedBy: IncarnationIssuedBy = 'lazy'
 ): string {
   const incarnation = randomUUID();
   db.prepare(
-    `INSERT INTO mem_instance_incarnations (worktree_id, instance_id, cli_tool_id, incarnation, created_at)
-     VALUES (?, ?, ?, ?, ?)
+    `INSERT INTO mem_instance_incarnations (worktree_id, instance_id, cli_tool_id, incarnation, created_at, issued_by)
+     VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(worktree_id, instance_id) DO UPDATE SET
-       cli_tool_id = excluded.cli_tool_id, incarnation = excluded.incarnation, created_at = excluded.created_at`
-  ).run(worktreeId, instanceId, cliToolId, incarnation, now);
+       cli_tool_id = excluded.cli_tool_id, incarnation = excluded.incarnation, created_at = excluded.created_at,
+       issued_by = excluded.issued_by`
+  ).run(worktreeId, instanceId, cliToolId, incarnation, now, issuedBy);
   return incarnation;
+}
+
+/** An instance incarnation found by its id (UNIQUE), wherever a rename moved it (Issue #4222). */
+export interface InstanceIncarnationRow {
+  worktreeId: string;
+  instanceId: string;
+  cliToolId: string;
+  incarnation: string;
+  createdAt: number;
+  issuedBy: IncarnationIssuedBy | null;
+}
+
+function toIncarnationRow(row: {
+  worktree_id: string;
+  instance_id: string;
+  cli_tool_id: string;
+  incarnation: string;
+  created_at: number;
+  issued_by: IncarnationIssuedBy | null;
+}): InstanceIncarnationRow {
+  return {
+    worktreeId: row.worktree_id,
+    instanceId: row.instance_id,
+    cliToolId: row.cli_tool_id,
+    incarnation: row.incarnation,
+    createdAt: row.created_at,
+    issuedBy: row.issued_by,
+  };
+}
+
+const INCARNATION_COLUMNS = 'worktree_id, instance_id, cli_tool_id, incarnation, created_at, issued_by';
+
+export function findInstanceIncarnation(db: Database.Database, incarnation: string): InstanceIncarnationRow | null {
+  const row = db.prepare(`SELECT ${INCARNATION_COLUMNS} FROM mem_instance_incarnations WHERE incarnation = ?`).get(incarnation) as
+    | Parameters<typeof toIncarnationRow>[0]
+    | undefined;
+  return row ? toIncarnationRow(row) : null;
+}
+
+/** The row of a slot (worktree, instance), with its creation time and way of issue. */
+export function getInstanceIncarnationRow(
+  db: Database.Database,
+  worktreeId: string,
+  instanceId: string
+): InstanceIncarnationRow | null {
+  const row = db
+    .prepare(`SELECT ${INCARNATION_COLUMNS} FROM mem_instance_incarnations WHERE worktree_id = ? AND instance_id = ?`)
+    .get(worktreeId, instanceId) as Parameters<typeof toIncarnationRow>[0] | undefined;
+  return row ? toIncarnationRow(row) : null;
+}
+
+/**
+ * Whether an instance incarnation still exists under any worktree id (Issue #4222, P1-3).
+ * The author of a notice is alive while it does: a rename moves the row, so it is
+ * looked up by the incarnation and never by the worktree id the item was written in.
+ */
+export function instanceIncarnationAlive(db: Database.Database, incarnation: string): boolean {
+  return db.prepare('SELECT 1 FROM mem_instance_incarnations WHERE incarnation = ?').get(incarnation) !== undefined;
 }
 
 export function endInstanceIncarnation(db: Database.Database, worktreeId: string, instanceId: string): void {

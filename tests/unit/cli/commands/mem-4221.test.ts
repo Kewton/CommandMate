@@ -56,7 +56,7 @@ async function run(...argv: string[]): Promise<number | undefined> {
 describe('commandmate mem', () => {
   it('has no subcommand or option that changes the mode', () => {
     const mem = createMemCommand();
-    expect(mem.commands.map((command) => command.name())).toEqual(['now', 'add', 'update', 'close', 'list', 'mode', 'purge']);
+    expect(mem.commands.map((command) => command.name())).toEqual(['now', 'add', 'update', 'close', 'list', 'check', 'mode', 'purge']);
     const mode = mem.commands.find((command) => command.name() === 'mode')!;
     expect(mode.options.map((option) => option.long).sort()).toEqual(['--branch', '--json', '--repository', '--token', '--worktree']);
   });

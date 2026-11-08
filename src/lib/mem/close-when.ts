@@ -170,8 +170,9 @@ function parseSyntax(raw: string): CloseWhenParse {
     case 'worktree':
       return ID.test(rest) ? { ok: true, draft: { type: 'worktree', worktreeId: rest } } : invalid('bad_id');
     case 'session':
-      // A PID is not a session: it is re-used by the OS.
-      return ID.test(rest) && !/^[0-9]+$/.test(rest)
+      // A PID is not a session: it is re-used by the OS. Issue #4222 (S1): only the
+      // runs CommandMate records the end of, each under its namespace.
+      return ID.test(rest) && parseSessionId(rest) !== null
         ? { ok: true, draft: { type: 'session', sessionId: rest } }
         : invalid('bad_id');
     case 'at': {
@@ -184,6 +185,22 @@ function parseSyntax(raw: string): CloseWhenParse {
     default:
       return invalid('unknown_type');
   }
+}
+
+/** The namespaces of a `session:` id (Issue #4222, S1): the runs whose end is in the database. */
+export const SESSION_NAMESPACES = ['task', 'verify', 'schedule'] as const;
+export type SessionNamespace = (typeof SESSION_NAMESPACES)[number];
+
+/**
+ * `task:<id>` / `verify:<run id>` / `schedule:<execution log id>`, or null. A value
+ * stored before #4222 without a namespace reads as null, which evaluates as unknown.
+ */
+export function parseSessionId(sessionId: string): { kind: SessionNamespace; id: string } | null {
+  const match = /^(task|verify|schedule):([A-Za-z0-9._:-]{1,120})$/.exec(sessionId);
+  if (!match) return null;
+  const kind = match[1] as SessionNamespace;
+  if (kind === 'verify' && !/^[1-9][0-9]{0,15}$/.test(match[2])) return null;
+  return { kind, id: match[2] };
 }
 
 /**
@@ -207,12 +224,20 @@ export function parseCloseWhen(kind: MemKind, raw: unknown): CloseWhenParse {
   return parsed;
 }
 
-/** What git has to answer before the write, for this draft. */
-export function closeWhenGitNeeds(draft: CloseWhenDraft): { origin: boolean; tipOf: string | null } {
+/**
+ * What git has to answer before the write, for this draft. `tipOf` lists the refs to
+ * try in order; the first that names a commit is the tip (Issue #4222, P2-1: `deleted`
+ * keeps the tip too, read from the ref of its scope).
+ */
+export function closeWhenGitNeeds(draft: CloseWhenDraft): { origin: boolean; tipOf: string[] | null } {
   if ((draft.type === 'issue' || draft.type === 'pr') && draft.target === null) {
     return { origin: true, tipOf: null };
   }
-  if (draft.type === 'branch' && draft.event === 'merged') return { origin: false, tipOf: draft.name };
+  if (draft.type === 'branch') {
+    const refs =
+      draft.scope === 'remote' ? [`refs/remotes/origin/${draft.name}`, `refs/heads/${draft.name}`] : [`refs/heads/${draft.name}`];
+    return { origin: false, tipOf: refs };
+  }
   return { origin: false, tipOf: null };
 }
 
@@ -232,7 +257,7 @@ export function parseOriginUrl(url: string | null): CloseWhenTarget | null {
 export interface CloseWhenBinding {
   /** Answered by git for `#N` with no target. */
   origin: CloseWhenTarget | null;
-  /** Answered by git for `branch:…?merged=`. */
+  /** Answered by git for `branch:…` (required for `merged`, kept when present for `deleted`). */
   tip: string | null;
   /** Where the item is stored. */
   repositoryId: string;
@@ -268,6 +293,9 @@ export function finalizeCloseWhen(
       let tip = '';
       if (draft.event === 'merged') {
         if (!binding.tip || !/^[0-9a-f]{40}$/.test(binding.tip)) return { ok: false, reason: 'no_tip' };
+        tip = binding.tip;
+      } else if (binding.tip && /^[0-9a-f]{40}$/.test(binding.tip)) {
+        // `deleted` keeps the tip when the ref exists, and is not refused without one (#4222 P2-1).
         tip = binding.tip;
       }
       return {
