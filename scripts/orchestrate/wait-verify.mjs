@@ -767,6 +767,47 @@ export function inheritedSignalSince(records, { issue, item, taskId }) {
 }
 
 /**
+ * The boundary of a call after a re-instruction, written beside the run's logs before
+ * it waits (#4244): the record that carries `signal-since=` is written only at
+ * the call's end, which a wait that is interrupted never reaches.
+ */
+export function writeSinceMark(file, taskId, floor) {
+  if (floor === null || floor === undefined || !taskId) return;
+  try {
+    fs.writeFileSync(file, `${JSON.stringify({ taskId, since: new Date(floor).toISOString() })}\n`);
+  } catch {
+    // Best effort: without the mark a --reverify falls back to the record.
+  }
+}
+
+function removeSinceMark(file) {
+  try {
+    fs.rmSync(file, { force: true });
+  } catch {
+    // Nothing to remove.
+  }
+}
+
+/** The mark's boundary (epoch ms) when it is for `taskId`, else null. */
+export function readSinceMark(file, taskId) {
+  try {
+    const mark = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const at = Date.parse(mark.since);
+    return mark.taskId === taskId && Number.isFinite(at) ? at : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The boundary a `--reverify` keeps: the later of the last record's and the mark written before a wait (#4244). */
+export function inheritedBoundary(records, key, sinceFile) {
+  const fromRecord = inheritedSignalSince(records, key);
+  const fromMark = readSinceMark(sinceFile, key.taskId);
+  if (fromMark === null) return fromRecord;
+  return fromRecord === null ? fromMark : Math.max(fromRecord, fromMark);
+}
+
+/**
  * Run `verify` into `logFile` ({@link runVerifyOnce}), and when its run
  * reached no verdict only because a gate's mutex stayed held for its whole
  * budget ({@link mutexWaitOnly}), start it again, up to `o.mutexRetries`
@@ -1139,11 +1180,18 @@ export function main(argv, deps = {}) {
     // mid-work starts it only after its completion signal (#3883 P4).
     const needsSignal = needsCompletionSignal(o);
     /** From when a completion signal counts (completionSignalSince): read when it is needed, after the baseline settled. */
-    const inherited = o.reverify ? inheritedSignalSince(readRecords(o.runDir, o.issues).records, { issue, item: o.item, taskId: o.taskId }) : null;
+    // Keyed by the work item, not by the log: each call claims a log of its own.
+    const sinceFile = path.join(o.runDir, `wait-${workItemName(issue, o.item)}.since.json`);
+    const inherited = o.reverify ? inheritedBoundary(readRecords(o.runDir, o.issues).records, { issue, item: o.item, taskId: o.taskId }, sinceFile) : null;
     const signalFloor = () =>
       completionSignalSince({
         baseline, afterReinstruct: o.afterReinstruct, reverify: o.reverify, signalSince: o.signalSince, inherited, startedMs: started.getTime(),
       });
+    // The boundary is kept before the wait (#4244): a wait that ends before it
+    // is recorded still leaves it for a `--reverify`. A new send (no
+    // `--after-reinstruct`) starts the task's attempt again: the old one goes.
+    if (o.afterReinstruct && !o.reverify) writeSinceMark(sinceFile, o.taskId, signalFloor());
+    else if (!o.afterReinstruct) removeSinceMark(sinceFile);
     const waitArgs = ['wait', o.wt, '--instance', instance, '--on-prompt', 'human', '--timeout', o.timeout];
     let exitCode = spawnToLog(o.cli, waitArgs, { cwd, logFile: o.logFile, ...(watching ? { watch } : {}) });
     let verdictLog = fs.existsSync(o.logFile) ? fs.readFileSync(o.logFile, 'utf8') : '';

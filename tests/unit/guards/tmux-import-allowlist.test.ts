@@ -49,6 +49,7 @@ import { join, relative, sep, posix } from 'path';
 import { createRequire } from 'module';
 import { ESLint, type Linter } from 'eslint';
 import { inFamily, originsOf } from './split-family';
+import { ignoreVanished, walkTree } from '@tests/helpers/tolerant-walk';
 
 const posixDirname = posix.dirname;
 const REPO_ROOT = process.cwd();
@@ -394,14 +395,9 @@ async function lintOne(eslint: ESLint, filePath: string, text: string): Promise<
 const LINTED_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx'];
 
 function walk(dir: string, acc: string[] = []): string[] {
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry);
-    if (statSync(full).isDirectory()) {
-      walk(full, acc);
-    } else if (LINTED_EXTENSIONS.some((e) => entry.endsWith(e))) {
-      acc.push(full);
-    }
-  }
+  walkTree(dir, (full, entry, stat) => {
+    if (!stat.isDirectory() && LINTED_EXTENSIONS.some((e) => entry.endsWith(e))) acc.push(full);
+  });
   return acc;
 }
 
@@ -431,14 +427,12 @@ const IGNORED_DIR_PREFIXES = (rc.ignorePatterns ?? []).filter((p) => p.endsWith(
 const IGNORED_FILES = new Set((rc.ignorePatterns ?? []).filter((p) => !p.endsWith('/')));
 
 function walkRepo(dir: string, acc: string[] = []): string[] {
-  for (const entry of readdirSync(dir)) {
-    if (entry.startsWith('.') || entry === 'node_modules') continue;
-    const full = join(dir, entry);
+  walkTree(dir, (full, entry, stat) => {
+    if (entry.startsWith('.') || entry === 'node_modules') return false;
     const rel = relative(REPO_ROOT, full).split(sep).join('/');
-    if (IGNORED_DIR_PREFIXES.some((p) => `${rel}/`.startsWith(p)) || IGNORED_FILES.has(rel)) continue;
-    if (statSync(full).isDirectory()) walkRepo(full, acc);
-    else if (REPO_LINTED_EXTENSIONS.some((e) => entry.endsWith(e))) acc.push(rel);
-  }
+    if (IGNORED_DIR_PREFIXES.some((p) => `${rel}/`.startsWith(p)) || IGNORED_FILES.has(rel)) return false;
+    if (!stat.isDirectory() && REPO_LINTED_EXTENSIONS.some((e) => entry.endsWith(e))) acc.push(rel);
+  });
   return acc;
 }
 
@@ -449,7 +443,8 @@ function walkRepo(dir: string, acc: string[] = []): string[] {
  */
 function dynamicImportCandidates(): { rel: string; text: string }[] {
   return walkRepo(REPO_ROOT)
-    .map((rel) => ({ rel, text: readFileSync(join(REPO_ROOT, rel), 'utf-8') }))
+    .map((rel) => ({ rel, text: ignoreVanished(() => readFileSync(join(REPO_ROOT, rel), 'utf-8')) }))
+    .filter((f): f is { rel: string; text: string } => f.text !== undefined)
     .filter((f) => f.text.includes('tmux') && /\bimport\s*\(/.test(f.text))
     .sort((a, b) => (a.rel < b.rel ? -1 : 1));
 }

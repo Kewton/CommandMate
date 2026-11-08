@@ -109,7 +109,7 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
   checkout など）や FAIL・TIMEOUT がある、のどれかなら、今までどおり exit 99 を返す。中身を `verify show <run> --json` で見る
 - **上限に達したとき**（要約に `mutex-requeue-limit`）・**HEAD が動いたとき**（`mutex-requeue-stopped=head-moved`）: exit 99 のまま、
   Auto-Yes は切られていない（3-3 の確認が始める再検証が裁定に至らなかったときも同じ）。並列の検証が減ってから（または直列に）`wait-verify.mjs --reverify --task <id>` で検証し直す（再指示はしないので、`--after-reinstruct` だけで呼ぶと
-  呼び出しの開始より後の新しい合図を待ち、完了済みの Command Code・Antigravity は exit 3 になる。`--reverify` は前の呼び出しの境界（記録の `signal-since=`）を引き継ぐ）。
+  呼び出しの開始より後の新しい合図を待ち、完了済みの Command Code・Antigravity は exit 3 になる。`--reverify` は前の呼び出しの境界（記録の `signal-since=`、または再指示の後の呼び出しが待つ前に書く `wait-<issue>[-<item>].since.json`。中断で記録が無くても残る）を引き継ぐ）。
   再指示の回数には数えない。HEAD が動いたときは、ワーカーがまだ作業中でないかを capture で先に確かめる
 
 ### 待ちの上限を分ける

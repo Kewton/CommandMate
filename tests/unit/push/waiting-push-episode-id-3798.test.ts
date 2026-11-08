@@ -21,7 +21,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import Database from 'better-sqlite3';
-import { runMigrations } from '@/lib/db/db-migrations';
+import { openMigratedFileDb } from '../../helpers/migrated-file-db';
 
 let db: Database.Database;
 let tmpDir: string;
@@ -87,8 +87,7 @@ function open(since: number, at: number, kind: WaitingKind | null = 'prompt'): s
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-3798-notifier-'));
-  db = new Database(path.join(tmpDir, 'db.sqlite'));
-  runMigrations(db);
+  db = openMigratedFileDb(path.join(tmpDir, 'db.sqlite'));
   db.prepare(
     `INSERT INTO worktrees (id, name, path, repository_path, repository_name, updated_at)
      VALUES (?, ?, ?, ?, ?, ?)`
