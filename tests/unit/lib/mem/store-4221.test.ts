@@ -765,3 +765,42 @@ describe('integration review fixes (P1・P2-1・P2-4・P3)', () => {
     expect(count("SELECT COUNT(*) n FROM session_notes WHERE worktree_id = 'wt-2' AND mem_item_id = ?", now.id)).toBe(1);
   });
 });
+
+describe('2nd integration review P1: the worktree lifetime is fixed when the request arrives', () => {
+  const wtD = () => path.join(dir, 'wt-d');
+  const writes = [
+    () => memWriteNow(db, 'wt-d', { instanceId: 'claude', text: 'before the delete' }, deps()),
+    () => memAddItem(db, 'wt-d', { instanceId: 'claude', kind: 'note', text: 'before the delete' }, deps()),
+  ];
+
+  it('a first now / add of a derived primary is not stored when the worktree is deleted and made again (same id and path) during the wait', async () => {
+    on();
+    for (const write of writes) {
+      insertWorktree('wt-d', wtD(), rootA);
+      const release = arm();
+      const pending = write();
+      await Promise.resolve();
+      deleteWorktreesByIds(db, ['wt-d']);
+      insertWorktree('wt-d', wtD(), rootA);
+      release();
+      expect((await pending).body).toMatchObject({ code: 'instance_not_found' });
+      deleteWorktreesByIds(db, ['wt-d']);
+    }
+    expect(count('SELECT COUNT(*) n FROM mem_items')).toBe(0);
+    expect(count('SELECT COUNT(*) n FROM session_notes')).toBe(0);
+  });
+
+  it('(control) the same first now / add, with the worktree left as it was, is stored', async () => {
+    on();
+    insertWorktree('wt-d', wtD(), rootA);
+    for (const write of writes) {
+      const release = arm();
+      const pending = write();
+      await Promise.resolve();
+      release();
+      expect((await pending).status).toBe(201);
+    }
+    expect(count("SELECT COUNT(*) n FROM session_notes WHERE worktree_id = 'wt-d'")).toBe(1);
+    expect(count("SELECT COUNT(*) n FROM mem_items WHERE origin_worktree_id = 'wt-d' AND state = 'open'")).toBe(1);
+  });
+});

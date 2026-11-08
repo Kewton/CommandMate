@@ -157,23 +157,33 @@ describe('phone', () => {
 
 /** A server that answers like the note route: 409 unless `baseVersion` is the stored one. */
 let serverVersion: number;
+/** The next request is refused (400) before its version is read. */
+let rejectNext = false;
 function serveByVersion(): void {
   fetchMock.mockImplementation(async (_url: string, init: { body: string }) => {
     const body = JSON.parse(init.body) as { baseVersion?: number };
+    if (rejectNext) {
+      rejectNext = false;
+      return { ok: false, status: 400, json: async () => ({ code: 'secret_like' }) };
+    }
     const ok = body.baseVersion === serverVersion;
-    return { ok, status: ok ? 200 : 409, json: async () => ({ code: ok ? undefined : 'version_conflict' }) };
+    return {
+      ok,
+      status: ok ? 200 : 409,
+      json: async () => (ok ? {} : { code: 'version_conflict', current: { text: 'CLI が書いた', version: serverVersion, updatedAt: 2 } }),
+    };
   });
 }
 
 /** A CLI write reaching the list cache while the editor is open. */
-function cliUpdate(): void {
-  serverVersion = 8;
+function cliUpdate(version = 8): void {
+  serverVersion = version;
   cacheState.value = {
     worktrees: [
       {
         id: WT,
         sessionNotes: {
-          claude: { text: 'CLI が書いた', updatedAt: 2, version: 8, mem: { itemId: 'i', createdBy: 'agent', updatedBy: 'agent' } },
+          claude: { text: 'CLI が書いた', updatedAt: 2, version, mem: { itemId: 'i', createdBy: 'agent', updatedBy: 'agent' } },
         },
       },
     ],
@@ -194,6 +204,7 @@ function deferredFetch(status: number): () => void {
 
 describe('P2-2: the version is the one the edit started from', () => {
   beforeEach(() => {
+    rejectNext = false;
     serverVersion = 7;
     serveByVersion();
   });
@@ -290,5 +301,153 @@ describe('P2-3: a late failure stays with the session it was typed for', () => {
     release();
     await settle();
     expect(screen.getByTestId('split-session-note-input-0')).toHaveValue('A の下書き');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2nd integration review P2-1・P2-2
+// ---------------------------------------------------------------------------
+
+const sentBase = (call: number) => JSON.parse(String(fetchMock.mock.calls[call][1].body)).baseVersion;
+
+describe('2nd review P2-1: a returned draft keeps the version it names', () => {
+  beforeEach(() => {
+    rejectNext = false;
+    serverVersion = 7;
+    serveByVersion();
+  });
+
+  it('PC: 400 → a CLI update while fixing → the save again is 409 (the start’s version is kept)', async () => {
+    rejectNext = true;
+    const view = render(pcPane());
+    fireEvent.click(screen.getByTestId('split-session-note-0'));
+    typeAndEnter('split-session-note-input-0', '秘密を含む下書き');
+    await settle();
+    expect(screen.getByTestId('split-session-note-input-0-error').textContent).toContain('保存できない文字列');
+    cliUpdate();
+    view.rerender(pcPane());
+    typeAndEnter('split-session-note-input-0', '直した下書き');
+    await settle();
+    expect(sentBase(1)).toBe(7);
+    expect(screen.getByTestId('split-session-note-input-0')).toHaveValue('直した下書き');
+    expect(screen.getByTestId('split-session-note-input-0-error').textContent).toContain('他で更新されました');
+  });
+
+  it('PC (control): 400 → fixing with no update → the save again lands', async () => {
+    rejectNext = true;
+    const view = render(pcPane());
+    fireEvent.click(screen.getByTestId('split-session-note-0'));
+    typeAndEnter('split-session-note-input-0', '秘密を含む下書き');
+    await settle();
+    view.rerender(pcPane());
+    typeAndEnter('split-session-note-input-0', '直した下書き');
+    await settle();
+    expect(sentBase(1)).toBe(7);
+    expect(screen.queryByTestId('split-session-note-input-0')).toBeNull();
+  });
+
+  it('PC: after a 409 the next save names the conflict’s version; a later update is 409 again, none lands', async () => {
+    const view = render(pcPane());
+    fireEvent.click(screen.getByTestId('split-session-note-0'));
+    cliUpdate(8);
+    view.rerender(pcPane());
+    typeAndEnter('split-session-note-input-0', '一回目');
+    await settle();
+    cliUpdate(9);
+    view.rerender(pcPane());
+    typeAndEnter('split-session-note-input-0', '二回目');
+    await settle();
+    expect(sentBase(1)).toBe(8);
+    expect(screen.getByTestId('split-session-note-input-0-error').textContent).toContain('他で更新されました');
+    typeAndEnter('split-session-note-input-0', '三回目');
+    await settle();
+    expect(sentBase(2)).toBe(9);
+    expect(screen.queryByTestId('split-session-note-input-0')).toBeNull();
+  });
+
+  it('phone: 400 → a CLI update while fixing → the save again is 409', async () => {
+    rejectNext = true;
+    const view = render(<Phone />);
+    fireEvent.click(screen.getByTestId('open'));
+    typeAndEnter('mobile-session-note-input', '秘密を含む下書き');
+    await waitFor(() => expect(screen.getByTestId('mobile-session-note-input-error').textContent).toContain('保存できない文字列'));
+    cliUpdate();
+    view.rerender(<Phone />);
+    typeAndEnter('mobile-session-note-input', '直した下書き');
+    await waitFor(() => expect(screen.getByTestId('mobile-session-note-input-error').textContent).toContain('他で更新されました'));
+    expect(sentBase(1)).toBe(7);
+    expect(screen.getByTestId('mobile-session-note-input')).toHaveValue('直した下書き');
+  });
+
+  it('phone (control): 400 → fixing with no update → the save again lands; after a 409 the conflict’s version is named', async () => {
+    rejectNext = true;
+    const view = render(<Phone />);
+    fireEvent.click(screen.getByTestId('open'));
+    typeAndEnter('mobile-session-note-input', '秘密を含む下書き');
+    await waitFor(() => expect(screen.getByTestId('mobile-session-note-input-error')).toBeTruthy());
+    view.rerender(<Phone />);
+    typeAndEnter('mobile-session-note-input', '直した下書き');
+    await settle();
+    expect(sentBase(1)).toBe(7);
+    expect(screen.queryByTestId('mobile-session-note-input')).toBeNull();
+
+    cliUpdate(8);
+    view.rerender(<Phone />);
+    serverVersion = 9; // the server moved again, and the list has not seen it
+    fireEvent.click(screen.getByTestId('open'));
+    typeAndEnter('mobile-session-note-input', '競合する文');
+    await waitFor(() => expect(screen.getByTestId('mobile-session-note-input-error').textContent).toContain('他で更新されました'));
+    expect(sentBase(2)).toBe(8);
+    typeAndEnter('mobile-session-note-input', '競合の後の文');
+    await settle();
+    expect(sentBase(3)).toBe(9);
+    expect(screen.queryByTestId('mobile-session-note-input')).toBeNull();
+  });
+});
+
+describe('2nd review P2-2: a late failure of an unmounted hook opens no editor', () => {
+  beforeEach(() => {
+    const worktrees = [{ id: WT, sessionNotes: { claude: { text: 'A のメモ', updatedAt: 1, version: 7 }, codex: { text: 'B のメモ', updatedAt: 1, version: 3 } } }];
+    cacheState.value = { worktrees, refresh: vi.fn(async () => undefined) };
+  });
+
+  /** The phone's tabs: the history tab unmounts the terminal and its hook. */
+  function Tabs({ tab, instanceId }: { tab: 'terminal' | 'history'; instanceId: string }) {
+    return tab === 'terminal' ? <Phone key={`t-${instanceId}`} instanceId={instanceId} /> : <div data-testid="history" />;
+  }
+
+  it('A saves → history → back to the terminal on B → A’s late 409: B’s editor stays closed', async () => {
+    const release = deferredFetch(409);
+    const view = render(<Tabs tab="terminal" instanceId="claude" />);
+    fireEvent.click(screen.getByTestId('open'));
+    typeAndEnter('mobile-session-note-input', 'A の下書き');
+    view.rerender(<Tabs tab="history" instanceId="claude" />);
+    view.rerender(<Tabs tab="terminal" instanceId="codex" />);
+    release();
+    await settle();
+    expect(screen.queryByTestId('mobile-session-note-input')).toBeNull();
+    fireEvent.click(screen.getByTestId('open'));
+    expect(screen.getByTestId('mobile-session-note-input')).toHaveValue('B のメモ');
+    expect(screen.queryByTestId('mobile-session-note-input-error')).toBeNull();
+  });
+
+  it('(control) A saves → history → the late 409 while still in history: nothing opens; A’s hook alive opens A', async () => {
+    const release = deferredFetch(409);
+    const view = render(<Tabs tab="terminal" instanceId="claude" />);
+    fireEvent.click(screen.getByTestId('open'));
+    typeAndEnter('mobile-session-note-input', 'A の下書き');
+    view.rerender(<Tabs tab="history" instanceId="claude" />);
+    release();
+    await settle();
+    expect(screen.queryByTestId('mobile-session-note-input')).toBeNull();
+    view.rerender(<Tabs tab="terminal" instanceId="claude" />);
+    expect(screen.queryByTestId('mobile-session-note-input')).toBeNull();
+
+    // The same save with its hook alive does open A with the draft.
+    const again = deferredFetch(409);
+    fireEvent.click(screen.getByTestId('open'));
+    typeAndEnter('mobile-session-note-input', 'A の二つ目');
+    again();
+    await waitFor(() => expect(screen.getByTestId('mobile-session-note-input')).toHaveValue('A の二つ目'));
   });
 });

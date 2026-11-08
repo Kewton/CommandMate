@@ -162,7 +162,18 @@ export interface SessionNoteValue {
 export type SessionNoteSaveFailure = 'rejected' | 'conflict' | 'failed';
 
 /** Issue #4221: what {@link SessionNoteHandle.save} settles to. */
-export type SessionNoteSaveResult = { ok: true } | { ok: false; reason: SessionNoteSaveFailure };
+export type SessionNoteSaveResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: SessionNoteSaveFailure;
+      /**
+       * The version the next save of this draft names (2nd review P2-1): the one the
+       * edit started from after a 400 or a failed request, and after a 409 the one
+       * the server holds now (0: no row), which the conflict was shown against.
+       */
+      baseVersion: number | undefined;
+    };
 
 /**
  * Issue #4221 (2nd review 1): a draft the server refused, waiting for the phone's
@@ -182,6 +193,8 @@ interface NoteTarget {
 interface PendingNoteReopen extends NoteTarget {
   draft: string;
   reason: SessionNoteSaveFailure;
+  /** What the reopened editor's next save names (see {@link SessionNoteSaveResult}). */
+  baseVersion: number | undefined;
 }
 
 const sameTarget = (a: NoteTarget | null, b: NoteTarget | null): boolean =>
@@ -197,7 +210,7 @@ let pendingNoteReopen: PendingNoteReopen | null = null;
  * list to while typing.
  */
 let phoneNoteTarget: (NoteTarget & { version: number | undefined }) | null = null;
-/** The version the phone's open editor started from; null when none is open (or after a refusal: the latest). */
+/** The version the phone's open editor started from (or, reopened, the one its draft names); null when none is open. */
 let phoneNoteEditBase: (NoteTarget & { version: number | undefined }) | null = null;
 
 function peekPendingNoteReopen(): PendingNoteReopen | null {
@@ -206,6 +219,25 @@ function peekPendingNoteReopen(): PendingNoteReopen | null {
 
 function clearPendingNoteReopen(entry: PendingNoteReopen): void {
   if (pendingNoteReopen === entry) pendingNoteReopen = null;
+}
+
+/**
+ * The version a 409 says the server holds: `current.version`, 0 when it holds no
+ * row. An answer without it keeps the failed save's version, which stays a conflict
+ * rather than writing over something unseen.
+ */
+async function conflictVersion(
+  response: { json?: () => Promise<unknown> },
+  fallback: number | undefined,
+): Promise<number | undefined> {
+  try {
+    const body = (await response.json?.()) as { current?: { version?: unknown } | null } | undefined;
+    if (!body || !('current' in body)) return fallback;
+    if (body.current === null) return 0;
+    return typeof body.current?.version === 'number' ? body.current.version : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 /** For tests: forget what the phone's editor left behind. */
@@ -331,13 +363,25 @@ export function useSessionNote(
 
   // Issue #4221 (review P2-3): the session this hook is on now, read when a save
   // settles. A save for A that fails after the switch to B must not open B's editor.
-  const targetRef = useRef<NoteTarget>({ worktreeId, instanceId });
+  const targetRef = useRef<NoteTarget | null>({ worktreeId, instanceId });
   targetRef.current = { worktreeId, instanceId };
   const storedVersion = stored?.version;
   useEffect(() => {
     if (!reopenOnFailure) return;
-    phoneNoteTarget = { worktreeId, instanceId, version: storedVersion };
+    const mine = { worktreeId, instanceId, version: storedVersion };
+    phoneNoteTarget = mine;
+    // 2nd review P2-2: a hook that is gone (the phone's history tab unmounts the
+    // terminal) is nobody's receiver any more; a late failure of its save must not
+    // open the editor of whatever session the next hook is on.
+    return () => {
+      if (phoneNoteTarget === mine) phoneNoteTarget = null;
+    };
   }, [reopenOnFailure, worktreeId, instanceId, storedVersion]);
+  useEffect(() => {
+    return () => {
+      targetRef.current = null;
+    };
+  }, []);
 
   // `value: null` means "this session has no note"; the outer null means "no
   // write of ours is in flight", which is why this is not just `SessionNoteValue
@@ -372,7 +416,9 @@ export function useSessionNote(
   const save = useCallback(
     async (raw: string, edit?: { baseVersion: number | undefined }): Promise<SessionNoteSaveResult> => {
       const text = normalizeSessionNoteInput(raw);
-      if (Array.from(text).length > SESSION_NOTE_MAX_LENGTH) return { ok: false, reason: 'rejected' };
+      if (Array.from(text).length > SESSION_NOTE_MAX_LENGTH) {
+        return { ok: false, reason: 'rejected', baseVersion: edit ? edit.baseVersion : stored?.version };
+      }
       setOverride({
         value: text.length > 0 ? { text, updatedAt: Date.now() } : null,
         base: stored,
@@ -384,16 +430,23 @@ export function useSessionNote(
       const target: NoteTarget = { worktreeId, instanceId };
       const phoneBase = reopenOnFailure && sameTarget(phoneNoteEditBase, target) ? phoneNoteEditBase : null;
       const baseVersion = edit ? edit.baseVersion : phoneBase ? phoneBase.version : stored?.version;
-      const fail = (reason: SessionNoteSaveFailure): SessionNoteSaveResult => {
+      const fail = (reason: SessionNoteSaveFailure, next: number | undefined = baseVersion): SessionNoteSaveResult => {
         // Drop the optimistic value: falling back to the stored note is the
         // honest thing to show. The draft is the caller's, or the phone's below.
         setOverride(null);
-        // Handed back to the session it was typed for only (review P2-3).
-        if (reopenOnFailure && typeof window !== 'undefined' && sameTarget(targetRef.current, target)) {
-          pendingNoteReopen = { ...target, draft: raw, reason };
+        // Handed back to the session it was typed for only (review P2-3), and only
+        // while this hook is alive and the phone's receiver is on that session now
+        // (2nd review P2-2): its listener does not read the event's target.
+        if (
+          reopenOnFailure &&
+          typeof window !== 'undefined' &&
+          sameTarget(targetRef.current, target) &&
+          sameTarget(phoneNoteTarget, target)
+        ) {
+          pendingNoteReopen = { ...target, draft: raw, reason, baseVersion: next };
           window.dispatchEvent(new CustomEvent(SESSION_NOTE_OPEN_EVENT, { detail: target }));
         }
-        return { ok: false, reason };
+        return { ok: false, reason, baseVersion: next };
       };
       try {
         const response = await fetch(
@@ -407,9 +460,14 @@ export function useSessionNote(
           },
         );
         if (!response.ok) {
-          // A conflict means the list is behind: read it again so what is shown is the truth.
-          if (response.status === 409) void refresh?.();
-          return fail(response.status === 400 ? 'rejected' : response.status === 409 ? 'conflict' : 'failed');
+          if (response.status === 409) {
+            // A conflict means the list is behind: read it again so what is shown is
+            // the truth. The draft's next save names the version the conflict was
+            // shown against (2nd review P2-1), not whatever the list holds by then.
+            void refresh?.();
+            return fail('conflict', await conflictVersion(response, baseVersion));
+          }
+          return fail(response.status === 400 ? 'rejected' : 'failed');
         }
         await refresh?.();
         return { ok: true };
@@ -469,10 +527,13 @@ export function SessionNoteInput({
   // server refused when it was opened again for that (see `pendingNoteReopen`).
   const [reopened] = useState(() => (controlledValue === undefined ? peekPendingNoteReopen() : null));
   // Review P2-2: the phone's editor fixes the version it was opened on; a reopened
-  // one, after a conflict was shown, writes over the latest.
-  const [editBase] = useState(() =>
-    controlledValue === undefined && !reopened && phoneNoteTarget ? { ...phoneNoteTarget } : null,
-  );
+  // one, the version its draft names (2nd review P2-1: the start's after a 400 or a
+  // failed request, the conflict's after a 409).
+  const [editBase] = useState(() => {
+    if (controlledValue !== undefined) return null;
+    if (reopened) return { worktreeId: reopened.worktreeId, instanceId: reopened.instanceId, version: reopened.baseVersion };
+    return phoneNoteTarget ? { ...phoneNoteTarget } : null;
+  });
   useEffect(() => {
     if (reopened) clearPendingNoteReopen(reopened);
   }, [reopened]);
@@ -761,7 +822,7 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
   const noteEditingRef = useRef(noteEditing);
   noteEditingRef.current = noteEditing;
   // Issue #4221 (review P2-2): the version the draft was seeded from, fixed with it.
-  // null after a refusal: the conflict was shown, and Enter again writes over the latest.
+  // After a failure, the version the returned draft names (2nd review P2-1).
   const noteBaseRef = useRef<{ baseVersion: number | undefined } | null>(null);
   const sessionNoteVersion = sessionNote?.version;
   const openNoteEditor = useCallback(() => {
@@ -793,6 +854,7 @@ export const TerminalSplitPane = memo(function TerminalSplitPane({
         if (result.ok) return;
         // A save for the session this pane was on, not the one it shows now (review P2-3).
         if (!sameTarget(noteTargetRef.current, target)) return;
+        noteBaseRef.current = { baseVersion: result.baseVersion };
         setNoteDraft(text);
         setNoteError(result.reason);
         noteEditingRef.current = true;

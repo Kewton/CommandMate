@@ -62,7 +62,7 @@ import {
   type CloseWhenDraft,
   type CloseWhenTarget,
 } from './close-when';
-import { getInstanceIncarnation, getOrCreateWorktreeIncarnation } from './incarnation';
+import { getInstanceIncarnation, getOrCreateWorktreeIncarnation, getWorktreeIncarnation } from './incarnation';
 import { presentMemItem, type MemRecord } from './present';
 import { withMemTarget, type MemTarget, type MemTargetDeps, type MemTargetResolved, type MemTargetSpec } from './target';
 import {
@@ -210,6 +210,10 @@ function lookupActor(db: Database.Database, worktreeId: string, instanceId: unkn
   const instance = resolveAgentInstances(db, worktreeId, worktree.selectedAgents).find((entry) => entry.id === instanceId);
   if (!instance) return { ok: false, outcome: memError('instance_not_found') };
   const captured = getInstanceIncarnation(db, worktreeId, instanceId);
+  // Integration review 2 P1: the worktree's lifetime is fixed here too. Made now when
+  // it has none, so a delete and a re-creation under the same id and path during
+  // the awaits (which ends it, and may derive the same primary again) is told apart.
+  const worktreeIncarnation = getOrCreateWorktreeIncarnation(db, worktreeId);
   return {
     ok: true,
     worktree,
@@ -222,6 +226,7 @@ function lookupActor(db: Database.Database, worktreeId: string, instanceId: unkn
       by,
       // Asked again in the write's transaction, after the awaits (review P1).
       stillOnRoster: () => {
+        if (getWorktreeIncarnation(db, worktreeId) !== worktreeIncarnation) return false;
         const now = getWorktreeById(db, worktreeId);
         return Boolean(
           now &&

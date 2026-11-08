@@ -302,9 +302,11 @@ export interface MemActor {
   sessionGeneration: string | null;
   by: 'agent' | 'human';
   /**
-   * Whether the instance is still on the roster with the same tool, asked inside
-   * the write's transaction. Without an incarnation nothing else tells a deleted
-   * instance from one that never had one (review P1).
+   * Whether the instance is still on the roster with the same tool, of the same
+   * worktree lifetime as when the request arrived, asked inside the write's
+   * transaction. Without an incarnation nothing else tells a deleted instance (or
+   * a worktree deleted and made again under its id) from one that never had one
+   * (review P1, 2nd review P1).
    */
   stillOnRoster?: () => boolean;
 }

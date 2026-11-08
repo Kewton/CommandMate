@@ -65,6 +65,14 @@ export function endInstanceIncarnation(db: Database.Database, worktreeId: string
   db.prepare('DELETE FROM mem_instance_incarnations WHERE worktree_id = ? AND instance_id = ?').run(worktreeId, instanceId);
 }
 
+/** The worktree's incarnation, or null when it has none (none is made). */
+export function getWorktreeIncarnation(db: Database.Database, worktreeId: string): string | null {
+  const row = db.prepare('SELECT incarnation FROM mem_worktree_incarnations WHERE worktree_id = ?').get(worktreeId) as
+    | { incarnation: string }
+    | undefined;
+  return row ? row.incarnation : null;
+}
+
 /** The worktree's incarnation, made in this statement when it has none. */
 export function getOrCreateWorktreeIncarnation(
   db: Database.Database,
