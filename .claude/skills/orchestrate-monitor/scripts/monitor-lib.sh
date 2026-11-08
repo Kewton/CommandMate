@@ -428,6 +428,53 @@ ml_agy_is_retrying() {
     END { exit !(retry && !idle && !footer) }'
 }
 
+# --- Command Code screen markers ------------------------------------------------
+# Issue #4245. Command Code draws the same words the Claude markers read (the
+# status row `esc to interrupt • 0s • ↓ 0`, the `? for shortcuts` footer, dialogs
+# as `❯ 1. Yes`), measured on tests/fixtures/command-code-live-2250/. What it
+# does not share is WHERE they are: it renders inline in a 200x1000 pane and is
+# top-anchored, so until the transcript fills the pane `realtimeSnippet` (the last
+# 100 raw rows) is blank padding and the Claude path read every frame as IDLE
+# (all 15 live frames, measured). The fix is the window, as for agy (#2606): the
+# bottom ML_CC_FRAME_ROWS non-blank rows of the longer of content / realtimeSnippet.
+# The anchors themselves are the Claude ones, applied to that frame. Frames with
+# no measured capture (a retry backoff, a rate-limit banner) get no new marker.
+ML_CC_FRAME_ROWS=30
+
+# ml_cc_frame <file>: the bottom of what Command Code drew, as rows.
+ml_cc_frame() {
+  ml__snip=$(ml_json_scalar "$1" realtimeSnippet)
+  ml__cont=$(ml_json_scalar "$1" content)
+  [ "$ml__snip" = "null" ] && ml__snip=""
+  [ "$ml__cont" = "null" ] && ml__cont=""
+  if [ ${#ml__cont} -gt ${#ml__snip} ]; then
+    ml__src=$ml__cont
+  else
+    ml__src=$ml__snip
+  fi
+  printf '%s\n' "$ml__src" | ml_strip_ansi | ml__json_unescape \
+    | LC_ALL=C awk -v keep="$ML_CC_FRAME_ROWS" '
+        { row[NR] = $0; if ($0 ~ /[^ \t]/) last = NR }
+        END {
+          first = last - keep + 1
+          if (first < 1) first = 1
+          for (i = first; i <= last; i++) print row[i]
+        }'
+}
+
+ml_cc_has_gen_anchor() {
+  ml_cc_frame "$1" | grep -aqiE '↓ ?[0-9]|Waiting for [0-9]+ background agent|esc to interrupt'
+}
+
+ml_cc_has_prompt_marker() {
+  ml_cc_frame "$1" | grep -aqE '❯ [0-9]+\.|Do you want to (proceed|make this edit)'
+}
+
+ml_cc_is_retrying() {
+  ml_cc_frame "$1" | grep -aqiE 'retrying in [0-9]+s|attempt [0-9]+/[0-9]+' || return 1
+  ! ml_cc_frame "$1" | grep -aqiE '\? for shortcuts'
+}
+
 # --- prompt approval policy (skills #59, ported in Issue #2904) ---------------
 # Enter is not a neutral "unblock". Two facts, both measured, decide whether it
 # may be typed at all:
