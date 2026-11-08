@@ -10,6 +10,7 @@ import { useLocale } from 'next-intl';
 import { SUPPORTED_LOCALES } from '@/config/i18n-config';
 import type { SupportedLocale } from '@/config/i18n-config';
 import { setLocaleCookie } from '@/lib/locale-cookie';
+import { safeLocalStorage } from '@/lib/safe-local-storage';
 
 export function useLocaleSwitch() {
   const currentLocale = useLocale();
@@ -19,7 +20,7 @@ export function useLocaleSwitch() {
       return;
     }
     setLocaleCookie(newLocale as SupportedLocale);
-    localStorage.setItem('locale', newLocale);
+    safeLocalStorage.setItem('locale', newLocale);
     window.location.reload();
   };
 
