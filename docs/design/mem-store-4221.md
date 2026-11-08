@@ -813,3 +813,25 @@ Codex の事前レビュー（2026-11-08、P1 8 件・P2 3 件、ほかに試験
 | 8 | P2・質問：派生の primary を明示の roster に保存するときの世代 | 採る | 同じ ID・同じツールの世代の行があれば続ける規則を足した（§10.4） |
 | 9 | P2：既存のテストが「そのまま通る」は成立しない | 採る | 足した欄を受け入れる期待に直すことを変更範囲に入れ、text・updatedAt・正規化・削除の保証は弱めない（§13.3） |
 
+
+### 実装で変えた点（実装の契約、2026-11-08）
+
+D1〜D13 と違う作りは無い。設計の文面から外れた・細かく決めた点：
+
+| # | 箇所 | 実装 | 理由 |
+|---|---|---|---|
+| I1 | §5.4 の指紋 | `close_when` は保存の JSON ではなく**入力の文字列**で指紋に入れる。repository は指紋に入れず、「既にある項目の `repository_id` が今の読む範囲（全候補 root）に入っているか」で別に照合する | 保存の JSON は保存先の root（`branch` 型の `repositoryId`）と作成時の tip を含むので、前に root を足す・ブランチが進むだけで指紋が変わり、R9 の「root の追加の後でも同じ ID」を満たせない |
+| I2 | §10.5 | `origin_session_generation`・`mem_session_generation` は常に `NULL` を保存する | #4115 の世代を worktree・instance から読む口が lib に無い（`role-launch` はメモリの中）。§10.5 の「分からなければ NULL」の範囲 |
+| I3 | §8.3 の purge | `mem_items` だけを消す。open の `now`（#2427 のメモの行）は対象にしない | `now` の行は画面のメモでもあり、空にするのは画面の操作（§3.1）。purge の確認の件数にも出さない |
+| I4 | §10.2 の PC | PC の編集欄は保存を待たずに今までどおり閉じ、400・409・その他の失敗で**下書きと理由つきで開き直す**（スマホと同じ動き） | 既存のテスト（Enter で閉じる）を変えずに「入力を残す」を満たす。下書きは分割ごとの `noteDraft` に残る |
+| I5 | §11.1 | ブランチの上書きの書き込み・削除も repository の設定の `version`（1 つ）を照合して上げる | 画面が読んだ設定の全体（規則＋上書き）を 1 つの版で守る |
+| I6 | §10.4 | 受けた時点で世代が無く、書く直前に**同じツールの世代がある**ときも断る（52 `incarnation_changed`） | 削除→再追加（追加で世代をその場で作る）と、同じ派生の primary の同時の初回書き込みを区別できない。後者は再送で通る |
+| I7 | §10.2 | `baseVersion: 0` は「読んだとき行が無かった」。hook は版を持つ行を読んだときだけ `baseVersion` を送る（行が無い・v66 より前のサーバ：送らない＝表の「無し」） | 既存の画面の書き込み（`{instanceId, text}`）を変えない |
+| I8 | §6.3 | 画面でメモを空にするときは mode を読まない（git を待たない）。mem の行は版を照合して `manual` で閉じる | §3.1 の「人が画面のメモを空にする：全 mode」 |
+| I9 | §9 | 登録 root が 1 件も無いときは git を呼ばずに `not_registered` | 答えは git に依らず同じ。#2427 の既存の route のテスト（root なし）が git を呼ばない |
+| I10 | §12.1 | `screen_only`（403）は CLI では exit 2 | CLI はこの経路を呼ばない（呼べば入力の不正と同じ扱い） |
+
+本文に無い指摘（実装で見つけたもの。直さない）：
+
+- `src/lib/db/migrations/worktree-id-rename.ts` の `renameWorktreeIdPreservingChildren` は、移し先の ID が既にある衝突の分岐で `deleteWorktreeChildRows(db, [oldId])` を呼ぶ。このとき移し元の mem の `now`（`session_notes` の mem の行）は退避されずに消える。migration の層から runtime の `mem-db` を import しない向き（`worktree-child-tables.ts` の注記）なので、この Issue では直さない
+- `src/components/worktree/MobileTerminalTabSessionNote.tsx`（契約の scope の外）は保存の直後に編集欄を閉じる。§10.2 のとおり共有の hook の側で開き直して入力を残したが、スマホの部品が保存の結果を待つ形に直すなら別の Issue

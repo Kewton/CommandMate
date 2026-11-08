@@ -12,6 +12,7 @@ import { parseSelectedAgents } from '@/lib/selected-agents-validator';
 import { getRepoDefaultSelectedAgents } from '@/lib/repo-config/agents-config';
 import { getDefaultSelectedAgents } from './app-settings-db';
 import { ACTIVE_FILTER } from './chat-db';
+import { archiveNowSlots } from './mem-db';
 import {
   deleteWorktreeChildRows,
   renameWorktreeIdPreservingChildren,
@@ -953,6 +954,8 @@ export function deleteRepositoryWorktrees(
       .map((row) => row.id)
       .filter((id): id is string => id !== null);
 
+    // Issue #4221: a `now` of mem outlives its slot (T2), so it moves to mem_items first.
+    archiveNowSlots(db, ids);
     deleteWorktreeChildRows(db, ids);
 
     return db
@@ -985,6 +988,8 @@ export function deleteWorktreesByIds(
 
   const placeholders = worktreeIds.map(() => '?').join(',');
   const run = db.transaction((): number => {
+    // Issue #4221: a `now` of mem outlives its slot (T2), so it moves to mem_items first.
+    archiveNowSlots(db, worktreeIds);
     deleteWorktreeChildRows(db, worktreeIds);
 
     return db

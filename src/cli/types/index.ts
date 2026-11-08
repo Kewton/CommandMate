@@ -873,3 +873,38 @@ export function getErrorMessage(error: unknown): string {
   }
   return String(error);
 }
+
+/**
+ * What a `mem` command can end in (Issue #4221, design §12.1). Input errors stay
+ * {@link ExitCode.CONFIG_ERROR} (2) and nothing was stored. 50-56 because 30-32 and
+ * 40-41 are read out of the same `$?` by orchestration loops. The full map from the
+ * server's `code` is `MEM_EXIT_BY_CODE` in `src/types/mem.ts`.
+ */
+export const MemExitCode = {
+  SUCCESS: 0,
+  /** mode is `off` or `derived` for the branch: nothing was stored. */
+  DISABLED: 50,
+  /** `--if-version` is not the current version (or a mem note needs one): nothing was stored. */
+  CONFLICT: 51,
+  /** No such item, instance, registered repository, or the branch could not be read. */
+  TARGET_NOT_FOUND: 52,
+  /** The repository is ambiguous (roots that differ, git not answering, registration changing). */
+  AMBIGUOUS: 53,
+  /** The same `--key` was used for a different request. */
+  DUPLICATE: 54,
+  /** Not the author's incarnation, or the state does not allow it (also purge from a session). */
+  NOT_OWNER: 55,
+  /** Too many open items of the kind on the branch. */
+  LIMIT: 56,
+} as const;
+export type MemExitCode = typeof MemExitCode[keyof typeof MemExitCode];
+
+/** Shared by every `mem` subcommand (Issue #4221). */
+export interface MemCommonOptions {
+  json?: boolean;
+  token?: string;
+  worktree?: string;
+  instance?: string;
+  repository?: string;
+  branch?: string;
+}

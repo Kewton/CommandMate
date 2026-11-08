@@ -70,6 +70,7 @@ node bin/commandmate.js ls
 | [`commandmate auto-yes`](#commandmate-auto-yes) | Control auto-yes |
 | [`commandmate instances`](#commandmate-instances) | List, add, remove, and rename agent instances (the roster) |
 | [`commandmate roles`](#commandmate-roles) | Define roles and set the defaults per tool and repository |
+| [`commandmate mem`](#commandmate-mem) | Read and write the items that carry work across sessions (now, waiting, decisions, …); the mode is read-only |
 | [`commandmate report`](#commandmate-report) | Generate, show, and list daily reports; aggregate Eval metrics |
 | [`commandmate skill`](#commandmate-skill) | Browse the Skill catalog; plan, install, update, uninstall, and inspect Skills |
 | [`commandmate update`](#commandmate-update) | Update CommandMate itself (stop, update, restart) |
@@ -2534,6 +2535,61 @@ Failures included, on stdout (the same sentence goes to stderr). A failure with 
 
 ---
 
+## commandmate mem
+
+Typed items that carry the state of a piece of work across sessions (Issue #4221, Epic #4220). Only what CommandMate cannot know itself (intent, the next step, who you are waiting for, decisions, outside state) is kept, each with a condition that closes it. Items belong to a registered repository and a branch, so they survive a worktree made again for the same branch.
+
+### Turning it on (the screen only)
+
+Off by default. The mode (`off` / `derived` / `on`) is set on **the "mem" of each row of the Repositories screen**, as branch-name rules (the first that matches from the top; `*` stays within `/`, `**` crosses it; a `detached HEAD` row) and per-branch overrides. Precedence: the branch override → the rules → `off`. **The CLI has no way to change the mode** (`mem mode` only reads it). Writes (`now` / `add` / `update` / `close`) go through only on a branch whose mode is `on`; `off` and `derived` answer exit 50 and store nothing.
+
+### Usage
+
+```bash
+commandmate mem now "<text>" [--close-when <cond>] [--evidence <ref>]
+commandmate mem add --kind <kind> (--text "<text>" | --stdin) [--close-when <cond>] [--promote-to <dest>] [--quote "<words>" --quote-at <ts>] [--evidence <ref>] [--key <key>]
+commandmate mem update <id> --if-version <n> [--text … | --stdin] [--close-when …] [--evidence …]
+commandmate mem close <id> [--reason "<text>"]
+commandmate mem list [--all] [--branch <name>] [--json]
+commandmate mem mode [--json]
+commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before <ts>] [--include-decisions] --confirm
+```
+
+- Inside a session the target is your own instance (`whoami`). In an ordinary shell, writes need `--worktree <id> --instance <id>`, and `list` / `mode` / `purge` need `--worktree <id>` or `--repository <id> --branch <name>` (otherwise exit 2 `target_required`)
+- `now` is the session's note (#2427). Up to 100 characters. The next `now` replaces it; the previous content is kept as `superseded` (the newest 20 per slot)
+- Kinds: `now` / `waiting` / `decision` / `next` / `external` / `note`. `--close-when` is required for `waiting` / `next` / `external`; omitted, `now` → `replaced`, `note` → `manual`, `decision` → open until promoted
+- `--close-when`: `manual` · `replaced` (now only) · `issue:[host/owner/repo]#N` · `pr:[host/owner/repo]#N[?state=merged|closed]` · `branch:<name>?merged=<ref>[&scope=local|remote]` · `branch:<name>?deleted` · `relay:<id>` · `worktree:<id>` · `session:<id>` · `at:<ISO 8601 with an offset>`. Checked before it is stored; evaluating it is #4222
+- Only the instance that wrote an item (its same incarnation) and a person (on the screen) may `update` / `close` it. An instance removed and made again under the same id is another incarnation and cannot change the earlier items (exit 55)
+- `add` with `--key` answers the first item to a retry with the same key and content (`replayed: true`); different content is exit 54
+- `purge` deletes nothing without `--confirm` and shows the counts. Recorded / promoted decisions are left out unless `--include-decisions`. Refused from inside an agent session (exit 55)
+
+### Checks on the free fields
+
+Every free field (`text`, `quote`, `evidence`, `promote_to`, `reason`) is checked on the server for its length limit, secret-like strings (tokens, keys, `password=`, …) and control characters. `path:` in `evidence` and `promote_to` takes repository-relative paths only, and refuses absolute paths, `..` leaving the repository, a symlink on the way and files like `.env`. A refusal shows only `code`, `field` and `rule` in the error, `--json` and the log — **never the refused text itself**.
+
+### Exit codes
+
+| Code | Meaning |
+|:----:|---------|
+| 0 | Done (also a `--key` retry answering the existing item) |
+| 1 | The server cannot be reached |
+| 2 | Invalid input (`invalid_close_when` / `control_char` / `secret_like` / `too_long` / `absolute_path` / `outside_repository` / `symlink` / `sensitive_path` / `invalid_evidence` / `invalid_key` / `target_required`, …); nothing stored |
+| 50 | `disabled`: the branch's mode is `off` or `derived`; nothing stored |
+| 51 | `version_conflict`: `--if-version` is not the current version; the stored item is returned |
+| 52 | `not_registered` / `item_not_found` / `instance_not_found` / `branch_unresolved` |
+| 53 | `ambiguous`: registered roots of one git whose settings differ, a root git cannot identify, or a registration that kept changing |
+| 54 | `duplicate_key`: the same `--key` with different content |
+| 55 | `not_owner` / `state_forbids`: not the author (another incarnation included), a state that does not allow it, or `purge` inside a session |
+| 56 | `limit_exceeded`: too many open items on the branch (30 for `waiting` / `next` / `external`, 50 for `note`; `decision` only warns) |
+
+### What is not prevented
+
+- Only the screen path changes the mode (the server checks a mark only the screen sends and a matching `Origin`). A process with the same OS rights (agents included) can still forge the mark with `curl`, or write the database file directly. CommandMate does not prevent or detect that
+- What is prevented: the mode changing through the CLI's regular commands, a CLI user changing it without knowing, and a page of another origin changing it through the user's browser
+- `--instance` can be claimed falsely too. The author check keeps a session from changing another's items by mistake; it does not stop a deliberate rewrite
+
+---
+
 ## commandmate report
 
 Generate, show, and list daily reports (a summary of the day's agent activity, Issue #636).
@@ -3142,6 +3198,7 @@ commandmate ls --token your-token
 | 11 | UPSTREAM_FAULT | An upstream API fault was on the screen when the turn ended (`wait --fail-on-upstream-fault`; `ask` always). stderr / `--json` carry `id=...`; `id=context-limit` means the conversation is over the model's context limit — kill the instance (`commandmate instances <wt> kill <instance>`) and send again in a fresh session; `id=model-capacity` means the selected model is at capacity and will not answer — send to another instance or model (#3936) |
 | 31 | ROLE CONFLICT | A role or roster conflict (`name_conflict` / `name_changed` / `version_conflict` / `role_in_use` / `instance_exists` / `roster_changed`); nothing changed or sent. Also from `instances add` / `remove` / `alias` without a role. The exception: `remove --kill` may have stopped the session |
 | 32 | ROLE NOT_SENT | The role condition does not hold, or the start was refused because of its role; the body was not typed (`send` / `ask`) |
+| 50–56 | MEM | Refusals of `mem` (50 disabled / 51 version_conflict / 52 target not found / 53 ambiguous / 54 duplicate_key / 55 not_owner, state_forbids / 56 limit_exceeded); see the exit codes of [commandmate mem](#commandmate-mem) |
 | 99 | UNEXPECTED_ERROR | Unexpected error / resource not found |
 | 124 | TIMEOUT | Wait timeout exceeded |
 
