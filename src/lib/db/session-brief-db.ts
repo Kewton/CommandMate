@@ -8,15 +8,18 @@
  * in one stretch no other send can enter. A row is keyed by (worktree, instance,
  * seq); the highest seq is the instance's current boundary.
  *
- * Reads the instance's lifetime from two tables it does not own: #4221's
- * `mem_instance_incarnations` and the roster's `agent_instances.created_at`
- * (SELECT only).
+ * Reads the instance's lifetime from two places it does not own: #4221's incarnation
+ * (`getInstanceIncarnation`) and whether the instance is on the roster
+ * (`agent_instances`, SELECT only). The roster row's `created_at` is not a key: the
+ * roster's full replace (`setAgentInstances`, a reorder or an alias edit) writes a
+ * new one for the same instance.
  *
  * @module lib/db/session-brief-db
  */
 
 import { randomUUID } from 'crypto';
 import type Database from 'better-sqlite3';
+import { getInstanceIncarnation } from '@/lib/mem/incarnation';
 
 export type BoundaryKind = 'launch' | 'auto_restart' | 'reset' | 'resume' | 'explicit';
 export type BoundaryEvidence = 'launch' | 'hook' | 'send_command' | 'explicit';
@@ -40,7 +43,8 @@ export interface BoundaryRow {
   instanceId: string;
   cliToolId: string;
   instanceIncarnation: string | null;
-  rosterCreatedAt: number | null;
+  /** The instance was on the roster when the row opened (design §3.7). */
+  onRoster: boolean;
   seq: number;
   kind: BoundaryKind;
   evidence: BoundaryEvidence;
@@ -67,7 +71,7 @@ interface RawRow {
   instance_id: string;
   cli_tool_id: string;
   instance_incarnation: string | null;
-  roster_created_at: number | null;
+  on_roster: number;
   seq: number;
   kind: BoundaryKind;
   evidence: BoundaryEvidence;
@@ -105,7 +109,7 @@ function toRow(raw: RawRow): BoundaryRow {
     instanceId: raw.instance_id,
     cliToolId: raw.cli_tool_id,
     instanceIncarnation: raw.instance_incarnation,
-    rosterCreatedAt: raw.roster_created_at,
+    onRoster: raw.on_roster === 1,
     seq: raw.seq,
     kind: raw.kind,
     evidence: raw.evidence,
@@ -153,45 +157,53 @@ export function listRetainedBoundaries(db: Database.Database, worktreeId: string
   ).map(toRow);
 }
 
-/** How long the instance has been the same thing (design §3.7): #4221's incarnation and the roster row's identity. */
+/**
+ * How long the instance has been the same thing (design §3.7): #4221's incarnation,
+ * and whether the instance is on the roster.
+ */
 export interface InstanceLifetime {
   incarnation: string | null;
   /** The tool #4221's incarnation row names, or null without one. */
   incarnationToolId: string | null;
-  /** `agent_instances.created_at`, or null when the instance is not on the roster. */
-  rosterCreatedAt: number | null;
+  /** On the roster (`agent_instances`); a primary not saved there is not. */
+  onRoster: boolean;
 }
 
 export function readInstanceLifetime(db: Database.Database, worktreeId: string, instanceId: string): InstanceLifetime {
-  const incarnation = db
-    .prepare('SELECT incarnation, cli_tool_id FROM mem_instance_incarnations WHERE worktree_id = ? AND instance_id = ?')
-    .get(worktreeId, instanceId) as { incarnation: string; cli_tool_id: string } | undefined;
+  const incarnation = getInstanceIncarnation(db, worktreeId, instanceId);
   const roster = db
-    .prepare('SELECT created_at FROM agent_instances WHERE worktree_id = ? AND instance_id = ?')
-    .get(worktreeId, instanceId) as { created_at: number } | undefined;
+    .prepare('SELECT 1 AS present FROM agent_instances WHERE worktree_id = ? AND instance_id = ?')
+    .get(worktreeId, instanceId) as { present: number } | undefined;
   return {
     incarnation: incarnation?.incarnation ?? null,
-    incarnationToolId: incarnation?.cli_tool_id ?? null,
-    rosterCreatedAt: roster?.created_at ?? null,
+    incarnationToolId: incarnation?.cliToolId ?? null,
+    onRoster: roster !== undefined,
   };
 }
 
 /**
- * Whether `now` is the same lifetime of the instance as `earlier` (design §3.7, 2nd
- * review C). An incarnation both have is the answer: a delete ends it and an add
- * starts another, so equal means the same lifetime. From none (a row older than
- * v66, a primary not on the roster), #4221 issues one late on the first mem write —
- * the same lifetime only when the roster row is the very same one (a delete and
- * re-add writes a new `created_at`) and the tool did not change.
+ * Whether `now` is the same lifetime of the instance as `earlier` (design §3.7,
+ * consistency review 2). The key is #4221's incarnation: a delete ends it and an
+ * add starts another, and the roster's full replace keeps it.
+ *
+ *  - An incarnation `earlier` has: equal is the answer.
+ *  - None then and none now: the same (a full replace of a row older than v66 keeps
+ *    it at none; a delete and re-add would have started one).
+ *  - None then, one now: the same only for a primary off the roster both times
+ *    (#4221 issues its incarnation on the first mem write, and nothing else can
+ *    start one off the roster) with the same tool. On the roster, a late issue
+ *    for a row older than v66 cannot be told from a delete and re-add, so it is
+ *    another lifetime: the brief of that one boundary is left out, never put
+ *    into another instance's conversation.
  */
 export function isSameInstanceLifetime(
-  earlier: Pick<InstanceLifetime, 'incarnation' | 'rosterCreatedAt'>,
+  earlier: Pick<InstanceLifetime, 'incarnation' | 'onRoster'>,
   now: InstanceLifetime,
   cliToolId: string
 ): boolean {
   if (earlier.incarnation !== null) return earlier.incarnation === now.incarnation;
-  if (earlier.rosterCreatedAt !== now.rosterCreatedAt) return false;
-  return now.incarnation === null || now.incarnationToolId === cliToolId;
+  if (now.incarnation === null) return true;
+  return !earlier.onRoster && !now.onRoster && now.incarnationToolId === cliToolId;
 }
 
 // ===========================================================================
@@ -232,7 +244,7 @@ export function openBoundary(db: Database.Database, input: OpenBoundaryInput): B
        WHERE worktree_id = ? AND instance_id = ? AND state = 'pending'`
     ).run(input.openedAt, input.worktreeId, input.instanceId);
     db.prepare(
-      `INSERT INTO session_brief_boundaries (id, worktree_id, instance_id, cli_tool_id, instance_incarnation, roster_created_at,
+      `INSERT INTO session_brief_boundaries (id, worktree_id, instance_id, cli_tool_id, instance_incarnation, on_roster,
          seq, kind, evidence, conversation_id, late, opened_at, observation_key, opened_by_send, reset_send_token, state)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`
     ).run(
@@ -241,7 +253,7 @@ export function openBoundary(db: Database.Database, input: OpenBoundaryInput): B
       input.instanceId,
       input.cliToolId,
       input.lifetime.incarnation,
-      input.lifetime.rosterCreatedAt,
+      input.lifetime.onRoster ? 1 : 0,
       seq,
       input.kind,
       input.evidence,
@@ -297,6 +309,8 @@ export function fillBoundaryIncarnation(db: Database.Database, id: string, incar
 /**
  * Claim a pending boundary for one send. The one place "once" is decided: a second
  * send finds the state no longer `pending`, or a newer incarnation, and changes nothing.
+ * Only the instance's current row (highest seq): once a newer boundary is open, an
+ * older one planned before it is not claimed (consistency review 1).
  */
 export function claimBoundary(
   db: Database.Database,
@@ -308,7 +322,10 @@ export function claimBoundary(
     db
       .prepare(
         `UPDATE session_brief_boundaries SET state = 'claimed', claim_token = ?
-         WHERE id = ? AND state = 'pending' AND instance_incarnation IS ?`
+         WHERE id = ? AND state = 'pending' AND instance_incarnation IS ?
+           AND seq = (SELECT MAX(newer.seq) FROM session_brief_boundaries AS newer
+                      WHERE newer.worktree_id = session_brief_boundaries.worktree_id
+                        AND newer.instance_id = session_brief_boundaries.instance_id)`
       )
       .run(claimToken, id, incarnation).changes === 1
   );
@@ -334,8 +351,10 @@ export interface DeliveredBrief {
 
 /**
  * Settle a claim with the send's outcome (design §3.4 table): `not_sent` puts it back
- * to `pending` (nothing typed is not "read"), `unknown` keeps it from being sent
- * again, `sent` records what was typed. Only the claim's own token can.
+ * to `pending` (nothing typed is not "read") — or `superseded` when a newer boundary
+ * opened meanwhile (a relaunch inside the send; consistency review 1), as opening one
+ * does to a pending row — `unknown` keeps it from being sent again, `sent` records
+ * what was typed. Only the claim's own token can.
  */
 export function settleBoundaryClaim(
   db: Database.Database,
@@ -346,14 +365,18 @@ export function settleBoundaryClaim(
   now: number
 ): boolean {
   if (outcome === 'not_sent') {
+    const row = getBoundaryById(db, id);
+    if (!row || row.state !== 'claimed' || row.claimToken !== claimToken) return false;
+    const current = getCurrentBoundary(db, row.worktreeId, row.instanceId);
+    const stillCurrent = current?.id === id;
     return (
       db
         .prepare(
-          `UPDATE session_brief_boundaries SET state = 'pending', claim_token = NULL, attempts = attempts + 1,
+          `UPDATE session_brief_boundaries SET state = ?, settled_at = ?, claim_token = NULL, attempts = attempts + 1,
              last_outcome = 'not_sent'
            WHERE id = ? AND state = 'claimed' AND claim_token = ?`
         )
-        .run(id, claimToken).changes === 1
+        .run(stillCurrent ? 'pending' : 'superseded', stillCurrent ? null : now, id, claimToken).changes === 1
     );
   }
   return (

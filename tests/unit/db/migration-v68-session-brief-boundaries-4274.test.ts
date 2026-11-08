@@ -16,7 +16,7 @@ import {
   settleBoundaryClaim,
 } from '@/lib/db/session-brief-db';
 
-const LIFETIME = { incarnation: null, incarnationToolId: null, rosterCreatedAt: null };
+const LIFETIME = { incarnation: null, incarnationToolId: null, onRoster: false };
 
 describe('migration v68: session_brief_boundaries', () => {
   let db: Database.Database;
@@ -74,19 +74,43 @@ describe('migration v68: session_brief_boundaries', () => {
     expect(claimBoundary(db, row.id, 'again', 'some-incarnation')).toBe(false);
   });
 
-  it('the lifetime rule (design §3.7)', () => {
-    const now = (incarnation: string | null, rosterCreatedAt: number | null, tool = 'claude') => ({
+  it('[consistency review 1] once a newer row opens, the older one planned before it is not claimed; not_sent of it is superseded', () => {
+    const older = open();
+    // (control) the same row, claimed, not sent, claimed again: back to pending, claimable once more.
+    expect(claimBoundary(db, older.id, 'a', null)).toBe(true);
+    expect(settleBoundaryClaim(db, older.id, 'a', 'not_sent', null, 2)).toBe(true);
+    expect(claimBoundary(db, older.id, 'b', null)).toBe(true);
+    // A relaunch inside that send opens a newer row; the send then did not go.
+    const newer = open('claude', 3);
+    expect(settleBoundaryClaim(db, older.id, 'b', 'not_sent', null, 4)).toBe(true);
+    expect(listRetainedBoundaries(db, 'wt', 'claude').map((row) => [row.id, row.state])).toEqual([
+      [newer.id, 'pending'],
+      [older.id, 'superseded'],
+    ]);
+    expect(claimBoundary(db, older.id, 'c', null)).toBe(false);
+    // A pending older row forced back by hand is still not claimed: the newer one is current.
+    db.prepare("UPDATE session_brief_boundaries SET state = 'pending' WHERE id = ?").run(older.id);
+    expect(claimBoundary(db, older.id, 'c', null)).toBe(false);
+    expect(claimBoundary(db, newer.id, 'c', null)).toBe(true);
+  });
+
+  it('the lifetime rule (design §3.7): the incarnation is the key, the roster only says on or off', () => {
+    const now = (incarnation: string | null, onRoster: boolean, tool = 'claude') => ({
       incarnation,
       incarnationToolId: incarnation ? tool : null,
-      rosterCreatedAt,
+      onRoster,
     });
-    expect(isSameInstanceLifetime({ incarnation: 'a', rosterCreatedAt: 1 }, now('a', 2), 'claude')).toBe(true);
-    expect(isSameInstanceLifetime({ incarnation: 'a', rosterCreatedAt: 1 }, now('b', 1), 'claude')).toBe(false);
-    expect(isSameInstanceLifetime({ incarnation: 'a', rosterCreatedAt: 1 }, now(null, 1), 'claude')).toBe(false);
-    expect(isSameInstanceLifetime({ incarnation: null, rosterCreatedAt: 1 }, now('a', 1), 'claude')).toBe(true);
-    expect(isSameInstanceLifetime({ incarnation: null, rosterCreatedAt: 1 }, now('a', 2), 'claude')).toBe(false);
-    expect(isSameInstanceLifetime({ incarnation: null, rosterCreatedAt: null }, now('a', null, 'codex'), 'claude')).toBe(false);
-    expect(isSameInstanceLifetime({ incarnation: null, rosterCreatedAt: null }, now(null, null), 'claude')).toBe(true);
+    expect(isSameInstanceLifetime({ incarnation: 'a', onRoster: true }, now('a', true), 'claude')).toBe(true);
+    expect(isSameInstanceLifetime({ incarnation: 'a', onRoster: true }, now('b', true), 'claude')).toBe(false);
+    expect(isSameInstanceLifetime({ incarnation: 'a', onRoster: true }, now(null, true), 'claude')).toBe(false);
+    // None both times: a full replace of a row older than v66 keeps it at none.
+    expect(isSameInstanceLifetime({ incarnation: null, onRoster: true }, now(null, true), 'claude')).toBe(true);
+    expect(isSameInstanceLifetime({ incarnation: null, onRoster: false }, now(null, false), 'claude')).toBe(true);
+    // None, then one: a primary off the roster (the first mem write) with the same tool only.
+    expect(isSameInstanceLifetime({ incarnation: null, onRoster: false }, now('a', false), 'claude')).toBe(true);
+    expect(isSameInstanceLifetime({ incarnation: null, onRoster: false }, now('a', false, 'codex'), 'claude')).toBe(false);
+    expect(isSameInstanceLifetime({ incarnation: null, onRoster: false }, now('a', true), 'claude')).toBe(false);
+    expect(isSameInstanceLifetime({ incarnation: null, onRoster: true }, now('a', true), 'claude')).toBe(false);
   });
 
   it('the rollback removes the table and nothing else', () => {

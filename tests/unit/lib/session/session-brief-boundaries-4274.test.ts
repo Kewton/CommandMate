@@ -64,7 +64,7 @@ import {
 } from './session-brief-4274-harness';
 import { isPromptWaiting } from '@/lib/session/prompt-waiting-guard';
 import { resetLiveBriefClaimsForTest } from '@/lib/session/session-brief';
-import { addAgentInstance, removeAgentInstance } from '@/lib/db/agent-instances-db';
+import { addAgentInstance, removeAgentInstance, setAgentInstances } from '@/lib/db/agent-instances-db';
 import { startInstanceIncarnation } from '@/lib/mem/incarnation';
 import { getMemSettings } from '@/lib/db/mem-db';
 import { SEND_VERIFIED_MAX_BYTES } from '@/config/send-verified-limits';
@@ -601,24 +601,34 @@ describe('settings and the instance’s lifetime between the plan and the claim'
     expect(rows(world, 'codex-2')[0]).toMatchObject({ state: 'skipped', skipReason: 'incarnation_changed' });
   });
 
+  const PRE_V66_ROW =
+    "INSERT INTO agent_instances (worktree_id, instance_id, cli_tool_id, alias, sort_order, created_at) VALUES (?, 'codex-2', 'codex', '', 0, 1)";
+
   it('[2nd review C] a roster row with no incarnation (pre-v66), deleted and added again: not briefed', async () => {
-    world.db
-      .prepare("INSERT INTO agent_instances (worktree_id, instance_id, cli_tool_id, alias, sort_order, created_at) VALUES (?, 'codex-2', 'codex', '', 0, 1)")
-      .run(WT);
+    world.db.prepare(PRE_V66_ROW).run(WT);
     launch('codex', 'codex-2');
-    expect(rows(world, 'codex-2')[0]).toMatchObject({ instanceIncarnation: null, rosterCreatedAt: 1 });
+    expect(rows(world, 'codex-2')[0]).toMatchObject({ instanceIncarnation: null, onRoster: true });
     await withProviderWait(() => {
       removeAgentInstance(world.db, WT, 'codex-2');
       addAgentInstance(world.db, WT, { id: 'codex-2', cliTool: 'codex' } as never);
     });
     expect(typed(world, 'codex')).toEqual(['body']);
+    expect(rows(world, 'codex-2')[0]).toMatchObject({ state: 'skipped', skipReason: 'incarnation_changed' });
   });
 
-  it('(control) same roster row, incarnation issued late by the first mem write: briefed, row filled in', async () => {
-    world.db
-      .prepare("INSERT INTO agent_instances (worktree_id, instance_id, cli_tool_id, alias, sort_order, created_at) VALUES (?, 'codex-2', 'codex', '', 0, 1)")
-      .run(WT);
+  it('[consistency review 2] a pre-v66 roster row given its incarnation late: cannot be told from a re-add, not briefed', async () => {
+    world.db.prepare(PRE_V66_ROW).run(WT);
     launch('codex', 'codex-2');
+    await withProviderWait(() => {
+      startInstanceIncarnation(world.db, WT, 'codex-2', 'codex');
+    });
+    expect(typed(world, 'codex')).toEqual(['body']);
+    expect(rows(world, 'codex-2')[0]).toMatchObject({ state: 'skipped', skipReason: 'incarnation_changed' });
+  });
+
+  it('(control) a primary off the roster, incarnation issued late by the first mem write: briefed, row filled in', async () => {
+    launch('codex', 'codex-2');
+    expect(rows(world, 'codex-2')[0]).toMatchObject({ instanceIncarnation: null, onRoster: false });
     let incarnation = '';
     await withProviderWait(() => {
       incarnation = startInstanceIncarnation(world.db, WT, 'codex-2', 'codex');
@@ -627,13 +637,80 @@ describe('settings and the instance’s lifetime between the plan and the claim'
     expect(rows(world, 'codex-2')[0]).toMatchObject({ state: 'sent', instanceIncarnation: incarnation });
   });
 
-  it('(control) an alias change keeps the lifetime: briefed', async () => {
+  // The roster's full replace (`setAgentInstances`, what the API calls for a reorder or
+  // an alias edit) deletes and re-inserts every row with a new `created_at`.
+  const fullReplace = (alias: string) =>
+    setAgentInstances(world.db, WT, [
+      { id: 'codex-3', cliTool: 'codex' } as never,
+      { id: 'codex-2', cliTool: 'codex', alias } as never,
+    ]);
+
+  it.each([
+    ['with an incarnation', () => addAgentInstance(world.db, WT, { id: 'codex-2', cliTool: 'codex' } as never)],
+    ['pre-v66, no incarnation', () => void world.db.prepare(PRE_V66_ROW).run(WT)],
+  ])('[consistency review 2] (control) the full replace (reorder, alias) keeps the lifetime, %s: briefed', async (_name, seed) => {
+    seed();
+    launch('codex', 'codex-2');
+    await withProviderWait(() => fullReplace('Codex Two'));
+    expect(typed(world, 'codex')).toEqual([`${FAKE_BRIEF}\n\nbody`]);
+    expect(rows(world, 'codex-2')[0].state).toBe('sent');
+  });
+
+  it('[consistency review 2] delete and re-add of the same id through the full replace: not briefed', async () => {
     addAgentInstance(world.db, WT, { id: 'codex-2', cliTool: 'codex' } as never);
     launch('codex', 'codex-2');
     await withProviderWait(() => {
-      world.db.prepare("UPDATE agent_instances SET alias = 'Codex Two', sort_order = 3 WHERE instance_id = 'codex-2'").run();
+      setAgentInstances(world.db, WT, [{ id: 'codex-3', cliTool: 'codex' } as never]);
+      fullReplace('back again');
     });
-    expect(typed(world, 'codex')).toEqual([`${FAKE_BRIEF}\n\nbody`]);
+    expect(typed(world, 'codex')).toEqual(['body']);
+    expect(rows(world, 'codex-2')[0]).toMatchObject({ state: 'skipped', skipReason: 'incarnation_changed' });
+  });
+});
+
+describe('[consistency review 1] an older boundary is not claimed once a newer one opened', () => {
+  it('A claims X and relaunches (Y) but does not send; B planned X meanwhile: B is not briefed, Y gets one brief', async () => {
+    let releaseB!: () => void;
+    const gateB = new Promise<void>((resolve) => (releaseB = resolve));
+    const provider = fakeProvider({
+      build: vi.fn(async (request: BriefRequest) => {
+        if (provider.build.mock.calls.length === 2) await gateB;
+        return { body: FAKE_BRIEF, includedNoticeIds: ['n1'], mode: request.membership.mode };
+      }),
+    });
+    launch('claude');
+    world.tools.claude.sendMessage.mockImplementationOnce(async () => {
+      await until(() => provider.build.mock.calls.length === 2); // B has planned X
+      launch('claude'); // relaunchIfToolExited inside A's send: Y
+      const error = new Error('load-buffer failed') as Error & { code?: string };
+      error.code = 'PASTE_NOT_STARTED';
+      throw error;
+    });
+    const a = send('claude', 'a');
+    await until(() => provider.build.mock.calls.length === 1);
+    const b = send('claude', 'b');
+    await a;
+    releaseB();
+    const sentB = await b;
+    await send('claude', 'c');
+    expect(typed(world, 'claude')).toEqual([`${FAKE_BRIEF}\n\na`, 'b', `${FAKE_BRIEF}\n\nc`]);
+    expect(sentB.report).toBeNull(); // `auto` reports only what was attached
+    expect(rows(world, 'claude').map((row) => [row.kind, row.state])).toEqual([
+      ['auto_restart', 'sent'],
+      ['launch', 'superseded'],
+    ]);
+  });
+
+  it('(control) the same boundary, not sent then sent again with nothing newer: briefed once, on the retry', async () => {
+    fakeProvider();
+    launch('claude');
+    failNextSend(world, 'claude', 'not-sent');
+    await send('claude', 'a');
+    await send('claude', 'a');
+    await send('claude', 'b');
+    expect(typed(world, 'claude')).toEqual([`${FAKE_BRIEF}\n\na`, `${FAKE_BRIEF}\n\na`, 'b']);
+    expect(rows(world, 'claude')).toHaveLength(1);
+    expect(rows(world, 'claude')[0]).toMatchObject({ state: 'sent', attempts: 1 });
   });
 });
 

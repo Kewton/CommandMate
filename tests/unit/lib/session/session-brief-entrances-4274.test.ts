@@ -211,6 +211,21 @@ const ENTRANCES: Record<string, Entrance> = {
     briefs: 1,
     stale: { request: () => send('claude', 'x').then(() => undefined), hold: 'provider', landed: () => briefsIn(typed(world, 'claude')) > 0 },
   },
+  'send not sent after its relaunch opened a newer row: the older one is superseded': {
+    writes: ['openBoundary', 'claimBoundary', 'settleBoundaryClaim'],
+    run: async () => {
+      launch('claude');
+      world.tools.claude.sendMessage.mockImplementationOnce(async () => {
+        launch('claude');
+        const error = new Error('load-buffer failed') as Error & { code?: string };
+        error.code = 'PASTE_NOT_STARTED';
+        throw error;
+      });
+      await send('claude', 'x');
+    },
+    briefs: 1,
+    stale: 'reaches the claim of “send claims and settles not-sent”: its stale request is that row’s (consistency review 1)',
+  },
   'send --with-brief opens an explicit row': {
     writes: ['openBoundary', 'claimBoundary', 'settleBoundaryClaim'],
     run: async () => {
@@ -238,11 +253,9 @@ const ENTRANCES: Record<string, Entrance> = {
   },
   'send fills a late-issued incarnation': {
     writes: ['fillBoundaryIncarnation'],
-    arrange: () => {
-      world.db
-        .prepare("INSERT INTO agent_instances (worktree_id, instance_id, cli_tool_id, alias, sort_order, created_at) VALUES (?, 'claude', 'claude', '', 0, 1)")
-        .run(WT);
-    },
+    // A primary off the roster: #4221 issues its incarnation on the first mem write
+    // (consistency review 2: on the roster, a late issue is another lifetime).
+    arrange: () => {},
     run: async () => {
       launch('claude');
       startInstanceIncarnation(world.db, WT, 'claude', 'claude');

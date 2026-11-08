@@ -33,7 +33,7 @@ export const v68_migrations: Migration[] = [
           instance_id TEXT NOT NULL,
           cli_tool_id TEXT NOT NULL,
           instance_incarnation TEXT,
-          roster_created_at INTEGER,
+          on_roster INTEGER NOT NULL DEFAULT 0,
           seq INTEGER NOT NULL,
           kind TEXT NOT NULL CHECK (kind IN ('launch','auto_restart','reset','resume','explicit')),
           evidence TEXT NOT NULL CHECK (evidence IN ('launch','hook','send_command','explicit')),

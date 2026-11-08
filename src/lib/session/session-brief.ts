@@ -376,7 +376,13 @@ export class SendBrief {
     if (plan.boundary.existing) {
       const row = getBoundaryById(db, plan.boundary.id);
       if (!row) return null;
-      if (!sameInstanceLifetime({ incarnation: row.instanceIncarnation, rosterCreatedAt: row.rosterCreatedAt }, now, cliToolId)) {
+      if (getCurrentBoundary(db, worktreeId, instanceId)?.id !== row.id) {
+        // A newer boundary opened after this send planned (a relaunch inside another
+        // send, a reset): the older one is not claimed (consistency review 1).
+        this.report = { state: 'skipped', reason: 'superseded', boundaryId: row.id };
+        return null;
+      }
+      if (!sameInstanceLifetime({ incarnation: row.instanceIncarnation, onRoster: row.onRoster }, now, cliToolId)) {
         this.skip(row.id, 'incarnation_changed', true);
         return null;
       }
