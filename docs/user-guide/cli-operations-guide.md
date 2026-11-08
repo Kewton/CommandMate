@@ -276,11 +276,15 @@ commandmate send <worktree-id> "<message>" --agent codex --instance codex-3 --re
 commandmate send <worktree-id> "<message>" --instance codex --role reviewer  # ロールを保存し、そのロールで動くプロセスにだけ送る（commandmate roles の節）
 commandmate send <worktree-id> "<message>" --agent codex --instance codex-3 --register --role reviewer  # 登録とロールを先に作ってから送る
 commandmate send <worktree-id> "<message>" --instance opencode --new-conversation  # OpenCode V1: 止まっているセッションを、覚えている会話を続けず新しい会話で起動する
+commandmate send <worktree-id> "<message>" --no-brief          # この 1 回だけセッションの brief を付けない（境界は次の送信に残る）
+commandmate send <worktree-id> "<message>" --with-brief        # 境界を検出していなくても、この送信に brief を付ける
 commandmate send <worktree-id> "<message>" --auto-yes          # Auto-Yes有効化
 commandmate send <worktree-id> "<message>" --auto-yes --duration 3h
 commandmate send <worktree-id> "<message>" --auto-yes --stop-pattern "FAILED"
 commandmate send <worktree-id> "<message>" --auto-yes --auto-yes-answer-mode careful  # 質問は自分で答える
 ```
+
+**セッションの brief（Issue #4274）**：claude・codex・command-code では、会話の境界（新しい起動・reset の `/clear` や codex の `/new`・別の会話への resume・自動の再起動）の後の最初の送信に、mem の brief を本文の前に 1 回だけ付けます（そのブランチの mem が `on` / `derived` で `injectOnStart` が有効なときだけ。既存のプロセスへの再接続は境界ではありません）。`--no-brief` はその 1 回だけ付けず、設定は変えません。`--with-brief` は境界が無くても付けます。両方の指定は exit 2 で何も送りません。brief と本文の合計が #2464 で確かめた長さ（48 KiB・240 行）を超えるときは brief を外し、本文は削りません。付けたとき・旗を指定したときは、応答の `brief` に結果が入ります。他のツール・relay の配送・Schedule・ターミナルの命令・回答には付けません。
 
 ### オプション
 

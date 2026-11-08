@@ -89,6 +89,8 @@ import {
   withInstanceInputLock,
   type InputBoundaryHooks,
 } from '@/lib/session/instance-input-lock';
+import { SendBrief, type BriefReport, type BriefSendMode } from '@/lib/session/session-brief';
+import { runInSendScope } from '@/lib/session/session-boundary';
 import type { CopilotTool } from '@/lib/cli-tools/copilot';
 import { formatImagePathFallbackMessage } from '@/lib/cli-tools/opencode';
 import type { ChatMessage, MessageType } from '@/types/models';
@@ -168,6 +170,17 @@ export interface SendUserMessageParams {
    * is read on entry here.
    */
   observedInputGeneration?: number;
+  /**
+   * Issue #4274: whether this send may carry the session brief of a boundary
+   * (`docs/design/session-boundary-brief-4274.md` §4). `never` (the default) puts
+   * nothing in front and claims nothing — relay delivery, and any caller that does
+   * not say. `auto`: the first send after a boundary carries it once. `skip`
+   * (`--no-brief`): not this send, the boundary stays. `force` (`--with-brief`).
+   * A reset command this sends opens its boundary whatever the value.
+   */
+  brief?: BriefSendMode;
+  /** Issue #4274: what became of the brief, when there is something to say (the route's `brief`). */
+  onBrief?: (report: BriefReport) => void;
 }
 
 /** Result of {@link sendUserMessage}. */
@@ -335,7 +348,19 @@ export async function sendUserMessage(
   //   copilot's selection-list keys (input noted, no ticket), opencode's HTTP
   //   delivery and its keyboard fallback (a dispatch noted) — or anything else
   //   that reports neither; kept in the order attempts finish.
-  const typedContent = typedBodyFor(cliTool, content, absoluteImagePath);
+  let typedContent = typedBodyFor(cliTool, content, absoluteImagePath);
+  // Issue #4274: the text the tool types — the operator's body, or a claimed brief
+  // in front of it (`session-brief`). The history row keeps the operator's body.
+  let typedText = content;
+  const sendBrief = new SendBrief({
+    db,
+    worktreeId,
+    cliToolId,
+    instanceId: resolvedInstanceId,
+    mode: params.brief ?? 'never',
+    content,
+    typedBody: (text) => typedBodyFor(cliTool, text, absoluteImagePath),
+  });
   let inputGeneration: number | undefined;
   let inputNotedWithoutTicket = false;
   let dispatched = false;
@@ -479,6 +504,11 @@ export async function sendUserMessage(
     }
   }
 
+  // Issue #4274: the brief's plan — the boundary, the membership and mode, the
+  // budget and the provider's text — after every refusal above, which leave the
+  // ledger untouched. Never throws; nothing planned leaves the send as it was.
+  await sendBrief.plan();
+
   // Generate the user-message timestamp BEFORE saving the pending response so
   // ordering holds: assistantResponse < userMessage.
   //
@@ -596,7 +626,7 @@ export async function sendUserMessage(
       let failure = classifySendFailure(error);
       if (
         (failure.reason === 'submit-unconfirmed' || failure.reason === 'prompt-unreported') &&
-        (await composerStillHolds(worktreeId, cliToolId, instanceId, content))
+        (await composerStillHolds(worktreeId, cliToolId, instanceId, typedText))
       ) {
         failure = { state: 'indeterminate', reason: 'composer-residue' };
       }
@@ -609,7 +639,7 @@ export async function sendUserMessage(
     if (absoluteImagePath) {
       if (isImageCapableCLITool(cliTool)) {
         // Image-capable tool: use native image sending
-        await cliTool.sendMessageWithImage(worktreeId, content, absoluteImagePath, instanceId);
+        await cliTool.sendMessageWithImage(worktreeId, typedText, absoluteImagePath, instanceId);
       } else {
         // Fallback: embed path in message. Issue #2035 moved the wording to
         // `@/lib/cli-tools/opencode` so this branch and opencode's own fallback
@@ -617,7 +647,7 @@ export async function sendUserMessage(
         // apart; the behaviour of this line is unchanged.
         await cliTool.sendMessage(
           worktreeId,
-          formatImagePathFallbackMessage(content, absoluteImagePath),
+          formatImagePathFallbackMessage(typedText, absoluteImagePath),
           instanceId
         );
       }
@@ -635,7 +665,27 @@ export async function sendUserMessage(
       // composer (`❯ line one` / `  line two` / `  line three`) and a SEPARATE
       // Enter submits all of it — the transcript echo keeps the line breaks — so
       // the flattening is not needed to make Enter submit and is now gone.
-      await cliTool.sendMessage(worktreeId, content, instanceId);
+      await cliTool.sendMessage(worktreeId, typedText, instanceId);
+    }
+  }
+
+  // Issue #4274: the claim, the delivery and the ledger's settlement in one
+  // stretch under the input lock, so the lock is released only once the boundary
+  // says how this send ended (a send queued behind reads it settled), and a reset
+  // this send typed has opened its row (2nd review A).
+  async function deliverWithBrief(): ReturnType<typeof deliver> {
+    try {
+      typedText = await sendBrief.claim();
+      if (typedText !== content) typedContent = typedBodyFor(cliTool, typedText, absoluteImagePath);
+      const deliverStartedAt = Date.now();
+      const result = await runInSendScope(sendBrief.claimTokenForScope(), deliver);
+      sendBrief.settleInLock(
+        'sent' in result ? 'sent' : result.failure.state,
+        'sent' in result && result.inputStartedAt ? result.inputStartedAt.getTime() : deliverStartedAt
+      );
+      return result;
+    } finally {
+      sendBrief.abandonInLock();
     }
   }
 
@@ -644,15 +694,23 @@ export async function sendUserMessage(
   // others — opencode's HTTP delivery never touches the composer, and holding
   // the lock across it would stall a concurrent tmux send for nothing; their
   // tmux path takes the lock inside the shared sender.
-  const delivery = SUPPORTED_COMPOSER_TOOLS.has(cliToolId)
+  //
+  // Issue #4274: command-code too, but only for a send with a brief to claim or a
+  // reset to record — its own sender joins the outer ticket (`instance-input-lock`).
+  // Every other send of it takes the path it took before.
+  const delivery = SUPPORTED_COMPOSER_TOOLS.has(cliToolId) || sendBrief.needsOuterLock()
     ? await withInstanceInputLock(sessionName, (ticket) => {
         inputGeneration = ticket.generation;
-        return deliver();
+        return deliverWithBrief();
       }).catch((error: unknown) => ({
         error,
         failure: classifySendFailure(error),
       }))
-    : await deliver();
+    : await deliverWithBrief();
+  // Issue #4274: the provider hears how its text ended, outside the lock.
+  await sendBrief.afterLock();
+  const briefReport = sendBrief.reportForResponse();
+  if (briefReport) params.onBrief?.(briefReport);
   if (!('sent' in delivery)) {
     const { error, failure } = delivery;
     settle(failure.state, failure.reason);

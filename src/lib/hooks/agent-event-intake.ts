@@ -32,6 +32,7 @@ import {
   shortSessionTag,
 } from '@/lib/session/agent-event-state';
 import { isSessionRunning } from '@/lib/session/cli-session';
+import { observeHookBoundary } from '@/lib/session/session-boundary';
 import { noteLedgerToolCallEnded } from '@/lib/polling/auto-yes-confirmation-ledger';
 import { MAX_STRUCTURED_PROMPT_MESSAGE_LENGTH } from '@/lib/session/structured-prompt';
 import type { createLogger } from '@/lib/logger';
@@ -244,9 +245,19 @@ export function readAgentEventRequest(
   if ('error' in target) {
     return target;
   }
+  // Issue #4274: whether the event named both its worktree and its instance — what
+  // an interactive launch's hooks always send, and a headless run's never do.
+  identifiedPayloads.set(payload, target.worktreeIdParam !== undefined && target.instanceParam !== undefined);
 
   return { tool, source, receivedAt, normalized, event, sessionId: session.sessionId, ...target };
 }
+
+/**
+ * Issue #4274: the requests {@link readAgentEventRequest} read whose body or query
+ * named both the worktree and the instance, keyed by the payload object the route
+ * hands on to {@link applyAgentEventToState}. Only those are boundary evidence.
+ */
+const identifiedPayloads = new WeakMap<Record<string, unknown>, boolean>();
 
 /** The worktree the event names: by id when one was sent, else by `cwd`. */
 export function resolveAgentEventWorktree(
@@ -384,6 +395,24 @@ export function applyAgentEventToState(
       sessionStartMayArriveLate: source.capabilities.sessionStartMayArriveLate,
     }
   );
+
+  // Issue #4274: a conversation boundary the agent reported (`SessionStart`), or a
+  // turn of a conversation the ledger has not seen. Only an event that named both
+  // its worktree and its instance: a headless run's hook (resolved from `cwd`, or
+  // carrying no instance) never opens or binds one. A held late `SessionStart` is
+  // not observed.
+  if (recordOutcome.recorded) {
+    observeHookBoundary({
+      worktreeId: worktree.id,
+      cliToolId: tool,
+      instanceId: instanceParam,
+      identified: identifiedPayloads.get(payload) === true,
+      event,
+      detail,
+      sessionId: sessionId ?? null,
+      at: receivedAt,
+    });
+  }
 
   if (!recordOutcome.recorded) {
     // Never silent: a held frame is the one thing an operator debugging

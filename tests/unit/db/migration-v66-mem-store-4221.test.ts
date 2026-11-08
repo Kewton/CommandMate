@@ -8,6 +8,8 @@ import Database from 'better-sqlite3';
 import { runMigrations, CURRENT_SCHEMA_VERSION } from '@/lib/db/db-migrations';
 import { getWorktreeChildTables } from '@/lib/db/migrations/worktree-child-tables';
 import { v66_migrations } from '@/lib/db/migrations/v66-mem-store';
+// Issue #4274: v68 is above v66, so going back to before v66 removes v68's row first.
+import { v68_migrations } from '@/lib/db/migrations/v68-session-brief-boundaries';
 
 describe('migration v66: mem store', () => {
   let db: Database.Database;
@@ -38,6 +40,8 @@ describe('migration v66: mem store', () => {
     try {
       fresh.pragma('foreign_keys = ON');
       runMigrations(fresh);
+      v68_migrations[0].down!(fresh);
+      fresh.prepare('DELETE FROM schema_version WHERE version = 68').run();
       v66_migrations[0].down!(fresh);
       fresh.prepare('DELETE FROM schema_version WHERE version = 66').run();
       fresh.prepare(`INSERT INTO worktrees (id, name, path, repository_path, repository_name) VALUES ('w', 'w', '/p', '/r', 'r')`).run();

@@ -206,8 +206,8 @@ CREATE TABLE session_brief_boundaries (
   両方が来る）
 
 - 観測の入口は 2 つ：`beginAgentSession`（`agent-session-lifecycle.ts:76` の関数の中、柵の後）と、
-  `recordAgentEvent` の `session_start` の分岐（`agent-event-state.ts:393` の中、`generationStartedAt.set` の隣）。
-  ほかのフックの出来事は同じ関数の `lastAgentEvent.set`（`:377`）の後で ID だけ比べる。どれも新しいモジュールの
+  フックの受け口 `applyAgentEventToState`（`agent-event-intake.ts`、`recordAgentEvent` が記録した後。実装で
+  `agent-event-state.ts` の中から移した：§8.2）。どれも新しいモジュールの
   関数を 1 行呼ぶだけにし、`agent-event-state` は DB を import しない（呼ぶ先が動的に解決する。`transcript-history.ts:190`
   と同じ形）［見立て］
 - 台帳に行が 1 つも無い instance（D1 を入れる前から動いているプロセス）は**境界が無い**＝付けない。再起動の後の
@@ -284,13 +284,14 @@ primary は、mem の最初の書き込みで遅れて作られる（`mem-db.ts:
 
 「同じ寿命」の定義（寿命の鍵＝（世代, roster の行の識別 `roster_created_at`））：
 
-- **roster の行の識別が等しい**（両方 NULL＝roster に無い、または同じ `created_at`）ことが前提。roster の削除・再追加は
-  新しい `created_at` を書く（`agent-instances-db.ts:384`）ので、ここで必ず「違う寿命」になる（2 回目の事前レビュー C：
-  時刻の前後では、削除・再追加と遅い初回の発行を区別できなかった）
-- そのうえで世代の値が等しい
-- **NULL の寿命**：行（または計画）の世代が NULL で今が非 NULL のとき、roster の行の識別が等しく、今の世代の `cli_tool_id` が
-  同じなら、mem の最初の書き込み（`mem-db.ts` の `settleActorIncarnation`：roster に無い primary と v66 より前の行の遅い発行）
-  と見て同じ寿命とし、行の `instance_incarnation` を埋める。primary に限らない（v66 より前からの roster の行も同じ発行を受けるため。U9）
+- **世代が両方にあれば、等しいことが答え**。削除は世代を終え、追加は新しい世代を始める（`agent-instances-db.ts:384-410`）ので、
+  削除・再追加は必ず違う値になる。roster に無い primary を同じツールで roster に足したとき、A は世代を引き継ぐ（同 `:380-383`）ので、
+  roster の行の識別が変わっても同じ寿命
+- **NULL の寿命**：行（または計画）の世代が NULL のときは、**roster の行の識別が等しい**（両方 NULL＝roster に無い、または同じ
+  `created_at`）ことが前提（2 回目の事前レビュー C：時刻の前後では、削除・再追加と遅い初回の発行を区別できなかった。roster の
+  削除・再追加は新しい `created_at` を書く）。そのうえで今も NULL か、今の世代の `cli_tool_id` が同じなら、mem の最初の書き込み
+  （`mem-db.ts` の `settleActorIncarnation`：roster に無い primary と v66 より前の行の遅い発行）と見て同じ寿命とし、行の
+  `instance_incarnation` を埋める。primary に限らない（v66 より前からの roster の行も同じ発行を受けるため。U9）
 - 非 NULL → NULL・別の値：違う寿命
 
 境界は作り直さない：世代の変化で新しい行は開かない（新しい世代の instance には、次の起動・reset で行が開く）。
@@ -310,7 +311,7 @@ primary は、mem の最初の書き込みで遅れて作られる（`mem-db.ts:
 | CLI `ask` | `src/cli/commands/ask.ts:64` で同じ `postMessage` | 付ける（`auto` だけ。旗は足さない） | 同じ route を通る。旗は要望が出てから |
 | 契約付きの依頼（`send --contract`） | `send.ts:304-340` が task を作って前文つきの本文を受け取り、同じ route へ | 付ける（`auto`） | 契約の前文は利用者の本文として扱い、削らない。上限は §6 |
 | 画面の送信（PC・スマホ） | `src/components/worktree/MessageInput.tsx`・`ChatSurface.tsx`・`MobileTerminalTab.tsx`・`SessionTile.tsx`・`src/hooks/usePendingMessages.ts` → `src/lib/api-client.ts` → 同じ route | 付ける（`auto`。API の `brief` の欄を受ける） | 画面の「読まない」のボタンは G（#4227）。D1 は API の欄 `brief: 'skip' | 'force'` までを作る |
-| Timer（時刻の送信） | `src/lib/timer-manager.ts:110` | 付ける（`auto`） | 手の送信と同じ経路をとる方針（#1028、同 `:103-109`）。新しい起動の後の最初の送信になりうる |
+| Timer（時刻の送信） | `src/lib/timer-manager.ts:110` | **D1 では付けない（既定 `never`）。D2 で `auto` に** | 手の送信と同じ経路をとる方針（#1028、同 `:103-109`）なので付ける側だが、既存の `tests/unit/lib/timer-manager.test.ts:275,324` が `sendUserMessage` の引数をまるごと固定しており、D1 の契約は既存の期待値を変えない。実装の契約で判明（本文に無い指摘として報告）。境界は取らないので、Timer の後の最初の手の送信に付く |
 | relay の配送 | `src/lib/relay/relay-delivery.ts:611` | 付けない（`never`。ファイルは変えない） | 本文は相手の返事で、bind・予約・保留の 1 回の台帳（#3957・#4064）が本文の digest で配送を追う。brief を混ぜると「その返事が届いたか」の判定を変える。境界も**取らない**ので、`pending` は次の付けてよい送信に残る |
 | Schedule（`CMATE.md`） | `src/lib/schedule-manager.ts:149` → `job-executor.ts:228`（`execFile` で 1 回の実行） | 付けない | tmux の会話が無い 1 回きりの実行。dreaming（D13）は自分の材料（`dream-input`）で動く |
 | ターミナルの命令 | `src/app/api/worktrees/[id]/terminal/route.ts`（`sendUserMessage` を通らない、同 `:24-26`） | 付けない | 利用者が打った命令そのもの。前に文を足すと命令が変わる |
@@ -561,12 +562,12 @@ lines(s)    = (s の "\n" の数) + 1
 | ファイル | 変更 |
 |---|---|
 | `src/lib/session/agent-session-lifecycle.ts` | §4.2 の 1 行 |
-| `src/lib/session/agent-event-state.ts` | `recordAgentEvent` の `session_start` の分岐と ID の比較に 1 行ずつ（§3.3）。`RecordAgentEventOptions` に `identity: 'injected' \| 'cwd'` |
-| `src/lib/hooks/agent-event-intake.ts` | `recordAgentEvent` を呼ぶ所（`:348`）で、`worktreeIdParam` があったか（`readTarget` `:189`）を `identity` として渡す |
+| `src/lib/session/agent-event-state.ts` | **実装で変えなかった**：観測は `agent-event-intake.ts` の `applyAgentEventToState` で、`recordAgentEvent` が記録した後（遅れた `SessionStart` の保留を通った後）に 1 回呼ぶ。Claude・Codex・Command Code のフックはすべてここを通る（他の `recordAgentEvent` の呼び出し元は opencode の ingest・判断の応答で、対象外） |
+| `src/lib/hooks/agent-event-intake.ts` | `readAgentEventRequest` が「`worktreeId` と `instanceId` の両方を載せたか」を payload ごとに覚え（route は対象外のファイルなので `ResolvedAgentEvent` を変えない）、`applyAgentEventToState` が `observeHookBoundary` に渡す |
 | `src/lib/session/instance-input-lock.ts` | 変えない（外側のロックの合流を使うだけ）。送信の中の再起動の印は `session-brief.ts` の `AsyncLocalStorage` |
 | `src/lib/session/send-user-message.ts` | §4.3 |
 | `src/app/api/worktrees/[id]/send/route.ts`・`send-request.ts` | `brief` の欄の検証と受け渡し、応答の `brief` |
-| `src/lib/timer-manager.ts` | `brief: 'auto'` |
+| `src/lib/timer-manager.ts` | D1 では変えない（§4.1 の Timer の行）。D2 で `brief: 'auto'` |
 | `src/cli/commands/send.ts` | `--no-brief` / `--with-brief`、`--help`、上限の定数を `src/config/send-verified-limits.ts` から |
 | `src/cli/commands/ask.ts`（必要なら `message-dispatch.ts`） | `brief` を送らない（route の既定 `auto`）。変更が無いことを試験で固定 |
 | `src/cli/types/api-responses.ts` | 送信の応答の型に `brief?`（`:1702` の `sendOutcome` の隣） |
@@ -620,6 +621,30 @@ Claude の fixture は `session_id` が置換で同じ値なので、ID の変�
 | slash コマンド | — | `/model` などに付けない、行を触らない |
 
 ---
+
+## 9.1 共通規則の全読者（実装の契約で追記）
+
+D1 が足した共通の規則ごとに、それを読む・書く全経路と、追従しているかを並べる（探した範囲：`src/` の `session_brief_boundaries`・
+`session-brief-db` の export・`sendUserMessage(` の呼び出し元・`withMemTarget(` の呼び出し元・worktree の子の表の列挙）。
+未追従は無かった（Timer は §4.1 のとおり、意図して既定 `never` のまま）。
+
+| 規則 | 経路 | 読む／書く | 追従 |
+|---|---|---|---|
+| 境界のキー（worktree, instance, 寿命の鍵, 境界の ID） | `openLaunchBoundary`（`beginAgentSession` の作成の経路） | 書く（行を開く・寿命の鍵を写す） | 追従 |
+| 同 | `observeHookBoundary`（`agent-event-intake.ts` の `applyAgentEventToState`、識別つきだけ） | 読む・書く（開く・結ぶ） | 追従（識別は `readAgentEventRequest` が payload ごとに覚える） |
+| 同 | `openResetBoundaryFromSend`（送信のロックの中） | 読む・書く（開く・認める） | 追従（入口で読んだ寿命と照らす） |
+| 同 | `SendBrief.plan` / `claim`（`sendUserMessage`） | 読む・書く | 追従 |
+| 同 | worktree の改名・削除（`worktree-child-tables.ts` の列挙、CASCADE） | 書く（付け替え・削除） | 追従（`worktree_id` の列名で自動。v68 の試験で固定） |
+| 同 | instance の削除・再追加（`agent-instances-db.ts`、B のファイル・変えない） | 書かない（台帳は残る） | 追従（取る区間の寿命の照合で古い行を拒む。§3.7） |
+| claim | `claimBoundary`（`SendBrief.claimInStretch` だけ。`withMemTarget` の `build` の中・ロックの中） | 書く | 追従 |
+| 同 | `SendBrief.plan` の候補（`pending`・生きている `claimed`）、`settleStaleClaim`（他のプロセスの `claimed` を `unknown` に） | 読む・書く | 追従 |
+| 決着 | `settleInLock`・`abandonInLock`（ロックの中）・`copyDeliveryToRelaunchBoundaries` | 書く | 追従 |
+| 同 | `afterLock` → `provider.settle`（ロックの外） | 読む | 追従 |
+| mode の判定 | `withMemTarget`（A の `target.ts`、`decideMemTarget` → `decideRootMode`）を計画と取る区間の 2 回 | 読む | 追従（取る区間の答えで外す） |
+| 同 | mem の他の読者（`src/lib/mem/service.ts`） | 読む | 対象外（D1 は A の判定を写さず呼ぶだけ） |
+| brief の値 | `sendUserMessage` の呼び出し元：send の route（`body.brief ?? 'auto'`）・Timer（既定 `never`、§4.1）・relay の配送（既定 `never`） | 読む | 追従（`tests/unit/guards/session-brief-send-callers-4274.test.ts` で固定） |
+| 同 | CLI `send`（`--no-brief`→`skip`、`--with-brief`→`force`）・`ask`（送らない）・型の写し `src/cli/types/api-responses.ts` の `brief` | 書く・読む | 追従 |
+| reset の綴り | `isResetCommandBody`（`SendBrief`）。ターミナルの命令・直接入力の route は `sendUserMessage` を通らない | 読む | 追従（それらの reset はフックだけで開く。§3.3） |
 
 ## 10. 未確認の一覧（D2 の実機の受入、または実装の前の採取）
 
