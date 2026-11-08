@@ -24,7 +24,7 @@ import os from 'os';
 import path from 'path';
 import Database from 'better-sqlite3';
 import type { NextRequest } from 'next/server';
-import { runMigrations } from '@/lib/db/db-migrations';
+import { openMigratedFileDb } from '../../../helpers/migrated-file-db';
 import { createMessage } from '@/lib/db/chat-db';
 import { codexTurnRequestId } from '@/types/agent-transcript';
 import {
@@ -98,9 +98,7 @@ const SEND_FAILED = { ok: false, stage: 'send', error: 'x' };
 const SENT_ATTEMPT: Attempt = { state: 'sent', reason: 'submitted' };
 
 function openDb(): Database.Database {
-  const opened = new Database(dbPath);
-  opened.pragma('foreign_keys = ON');
-  runMigrations(opened);
+  const opened = openMigratedFileDb(dbPath, { foreignKeys: true });
   return opened;
 }
 
