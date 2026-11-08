@@ -73,7 +73,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { appendRecord, findLatest, inItem, latestByStage, readRecords, unmetStage } from './run-log.mjs';
 import { verifyEnvState } from './env-manifest.mjs';
-import { BUILD_STEPS, findTestsNaming, main as runPrecheck, optionsFromNote, parseNote, passedGates } from './precheck.mjs';
+import { BUILD_STEPS, TO_CI, findTestsNaming, main as runPrecheck, optionsFromNote, parseNote, passedGates } from './precheck.mjs';
 import {
   DEFAULT_BASE_BRANCH,
   DEFAULT_REPO,
@@ -188,6 +188,15 @@ export function judgedByUnitRelated(verifyRecord) {
  */
 export function ranFullUnit(verifyRecord) {
   return passedGates(verifyRecord).includes('unit');
+}
+
+/**
+ * Whether a precheck record left a heavy step to the PR's CI (`<step>=ci`, `--heavy-to-ci`, #4265).
+ * Such a HEAD waits for CI's `Unit Tests` with or without `--last`: no local run tested its tree.
+ */
+export function leftHeavyToCi(precheckRecord) {
+  if (!precheckRecord) return false;
+  return Object.values(parseNote(precheckRecord.note)).includes(TO_CI);
 }
 
 /** Whether a precheck record built everything CI's `Build` builds (`build`, `build:cli`, `build:server`). */
@@ -482,12 +491,21 @@ export function main(argv, deps = {}) {
 
     // 5. The checks of this HEAD.
     records = readRecords(o.runDir, o.issues).records;
-    const needBuild = !builtLikeCi(findLatest(records, { issue, item, stage: 'precheck', head }));
+    const headPrecheckNow = findLatest(records, { issue, item, stage: 'precheck', head });
+    const needBuild = !builtLikeCi(headPrecheckNow);
     // The verify judged at the work HEAD (step 3, or again after the refresh): whether it ran the
     // full unit suite. A latest verify of another HEAD is not that one, and does not spare the wait (#4076).
     const latestVerify = latestByStage(records, issue, item).verify ?? null;
     const verify = latestVerify && unmetStage('verify', latestVerify, { head, workHead }) === null ? latestVerify : null;
-    const need = { needBuild, needUnit: o.unitRelated || !ranFullUnit(verify), last: o.last, required: o.last ? LAST_REQUIRED_CHECKS : [] };
+    // A HEAD whose precheck left the heavy steps to CI (the refresh's, #4265) is the combination no
+    // local test has seen: the worker's full unit ran on the work HEAD, not on it — wait for `Unit Tests`.
+    const heavyToCi = leftHeavyToCi(headPrecheckNow);
+    const need = {
+      needBuild,
+      needUnit: o.unitRelated || heavyToCi || !ranFullUnit(verify),
+      last: o.last,
+      required: o.last ? LAST_REQUIRED_CHECKS : [],
+    };
     const rerunDone = records.some(
       (r) => r.issue === issue && inItem(r, item) && r.stage === 'ci' && r.head === head && /(^| )rerun=/.test(r.note ?? '')
     );

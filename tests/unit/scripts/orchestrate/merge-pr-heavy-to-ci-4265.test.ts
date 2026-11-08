@@ -170,6 +170,42 @@ describe('merge-pr after its own refresh leaves the heavy steps to CI (#4265)', 
   });
 });
 
+describe('a HEAD whose heavy steps were left to CI waits for CI Unit Tests without --last (#4265)', () => {
+  const FULL_UNIT = 'exit=0(passed) passed=lint,typecheck,unit failed=-';
+  const unitPending = [pass('Lint'), pass('Build'), pending('Unit Tests')];
+
+  it('refreshed, heavy steps left to CI, no --last, the worker verify ran the full unit: does not merge while Unit Tests is pending — positive control', () => {
+    recordWork();
+    appendRecord(runDir, '3477', { issue: 3477, stage: 'verify', result: 'ok', head: HEAD_A, note: FULL_UNIT });
+    const fake = fakeGit({ prs: [openPr()], behind: true, checks: [unitPending] });
+    const { code } = runMerge(fake, heavyLock(false), '--ci-timeout', '60');
+    expect(parseNote(lastPrecheck().note).tests).toBe(TO_CI);
+    expect(code).toBe(124);
+    expect(fake.gitCalls('push')).toHaveLength(1);
+    expect(fake.ghCalls('pr merge')).toHaveLength(0);
+  });
+
+  it('refreshed, heavy steps left to CI: merges once Unit Tests passes, recorded as unit=pass', () => {
+    recordWork();
+    appendRecord(runDir, '3477', { issue: 3477, stage: 'verify', result: 'ok', head: HEAD_A, note: FULL_UNIT });
+    const fake = fakeGit({ prs: [openPr()], behind: true, checks: [unitPending, GREEN] });
+    expect(runMerge(fake, heavyLock(false)).code).toBe(0);
+    expect(fake.ghCalls('pr merge')[0].args).toContain(HEAD_M);
+    const ci = readRecords(runDir, '3477').records.filter((r: { stage: string }) => r.stage === 'ci').at(-1);
+    expect(ci.note).toContain('unit=pass');
+  });
+
+  it('without a refresh, the worker verify ran the full unit: Unit Tests is not waited for, as before — negative control', () => {
+    recordWork();
+    appendRecord(runDir, '3477', { issue: 3477, stage: 'verify', result: 'ok', head: HEAD_A, note: FULL_UNIT });
+    const fake = fakeGit({ prs: [openPr()], behind: false, checks: [unitPending] });
+    expect(runMerge(fake, heavyLock(true), '--ci-timeout', '60').code).toBe(0);
+    expect(fake.ghCalls('pr merge')[0].args).toContain(HEAD_A);
+    const ci = readRecords(runDir, '3477').records.filter((r: { stage: string }) => r.stage === 'ci').at(-1);
+    expect(ci.note).toContain('unit=-');
+  });
+});
+
 /** Whether a run touched any precheck step (tsc is in every precheck). */
 const fake0Precheck = (fake: ReturnType<typeof fakeGit>) => fake.calls.some((c) => c.command === 'npx' && c.args[0] === 'tsc');
 
