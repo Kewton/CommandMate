@@ -68,6 +68,11 @@ import { judgeToolLiveness } from '@/lib/detection/tool-liveness';
 import { extractComposerText, type ComposerTextState } from '@/lib/detection/composer-text';
 import { stripAnsi, detectThinking } from '@/lib/detection/cli-patterns';
 import { THINKING_CHECK_LINE_COUNT } from '@/lib/auto-yes-state';
+import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
+import {
+  isOpenCodeThinkingBelowComposer,
+  isOpenCodeThinkingInOpenTurn,
+} from '@/lib/detection/tools/opencode/patterns';
 import {
   assessPromptAnswerability,
   UNSUPPORTED_DIALOG_LAYOUT_REASON,
@@ -243,8 +248,15 @@ export function judgeEnterFallback(
     return ineligible('tool-exited');
   }
 
-  const recentLines = stripAnsi(rawOutput).split('\n').slice(-THINKING_CHECK_LINE_COUNT).join('\n');
-  if (detectThinking(cliToolId, recentLines)) return ineligible('thinking');
+  const recentRows = stripAnsi(rawOutput).split('\n').slice(-THINKING_CHECK_LINE_COUNT);
+  // opencode reads `Thinking:` by position (Issue #4231): the footer's cwd also holds the
+  // word (`/tmp/Thinking:demo`). Other tools keep the word rule.
+  const thinking =
+    cliToolId === 'opencode'
+      ? isOpenCodeThinkingBelowComposer(recentRows) ||
+        isOpenCodeThinkingInOpenTurn(recentRows, THINKING_TAIL_LINE_COUNT)
+      : detectThinking(cliToolId, recentRows.join('\n'));
+  if (thinking) return ineligible('thinking');
 
   return { eligible: true, refusalReason: refusal.reason, composerState };
 }

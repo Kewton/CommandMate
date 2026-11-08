@@ -17,7 +17,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import Database from 'better-sqlite3';
-import { runMigrations } from '@/lib/db/db-migrations';
+import { openMigratedFileDb } from '../../helpers/migrated-file-db';
 
 let db: Database.Database;
 let tmpDir: string;
@@ -67,8 +67,7 @@ function open(): string {
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-3798-fan-out-'));
-  db = new Database(path.join(tmpDir, 'db.sqlite'));
-  runMigrations(db);
+  db = openMigratedFileDb(path.join(tmpDir, 'db.sqlite'));
   db.prepare(
     `INSERT INTO worktrees (id, name, path, repository_path, repository_name, updated_at)
      VALUES (?, ?, ?, ?, ?, ?)`
@@ -107,6 +106,10 @@ afterEach(() => {
 });
 
 describe('[#3798] fanOutAfterCommit', () => {
+  it('[#4234] the test DB skips the per-commit fsync (synchronous = 0)', () => {
+    expect(db.pragma('synchronous', { simple: true })).toBe(0);
+  });
+
   it('the producer fans out with the committed id before the edge gate; one card, the producer\'s, with that id', async () => {
     let sentDuringFanOut = -1;
     const id = fanOutAfterCommit(PARTS, open, (episodeId) => {

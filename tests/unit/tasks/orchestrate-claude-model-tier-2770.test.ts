@@ -259,6 +259,8 @@ describe('/orchestrate 3-4 / 3-5 / 3-5b: where each tier goes after two failures
   });
 
   // #3883: 3-5 / 3-5b call the same launch-worker.mjs as 3-1 (opus written, checked, restarted once).
+  // Reads the legacy Antigravity section of switching.md on purpose: it is kept ("今は使わない", #4238) because the Command Code
+  // section refers to its steps 1-2 and its handoff form; the current Command Code -> sonnet path is pinned in the #4238 describe below.
   it('3-5 switches an Antigravity Issue to opus, never to sonnet', () => {
     const body = `${section('3-5')}\n${docSection('switching.md', '3-5 Antigravity から Claude への切り替え')}`;
     expect(body).toContain('AGENT=claude; MODEL=opus');
@@ -444,5 +446,23 @@ describe('.claude/commands: a sonnet-pinned command still asks for opus where it
       .filter(({ line }) => !/^Use [a-z-]+-agent \(model: opus\)/.test(line))
       .map(({ name, lineNumber }) => `${name}:${lineNumber}`);
     expect(unprotected).toEqual([]);
+  });
+});
+
+describe('send --model: which tools it works for (Issue #4247)', () => {
+  // src/cli/commands/send.ts validateSendModel accepts copilot / antigravity / claude;
+  // the server answers 400 for antigravity / claude on a running session (send-session-start.ts refuseModelOnRunningSession).
+  it('orchestrate.md and CLAUDE.md both name copilot, antigravity and claude, not the old two-tool lists', () => {
+    const claudeMd = readFileSync(path.join(REPO_ROOT, 'CLAUDE.md'), 'utf-8');
+    expect(orchestrate).toContain('copilot / antigravity / claude に効く');
+    expect(orchestrate).not.toContain('copilot / antigravity 専用');
+    expect(claudeMd).toContain('copilot/antigravity/claude に効く');
+    expect(claudeMd).not.toContain('（claude/antigravity）');
+  });
+
+  it('3-5 Command Code path still goes to sonnet (current procedure, not the legacy Antigravity section)', () => {
+    const body = docSection('switching.md', '3-5 Command Code から Claude（sonnet）への格上げ');
+    expect(body).toContain('commandmatedev instances "$WT" kill command-code');
+    expect(body).toContain('sonnet');
   });
 });

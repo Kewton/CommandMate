@@ -20,6 +20,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import Database from 'better-sqlite3';
+import { openMigratedFileDb } from '../../helpers/migrated-file-db';
 import {
   runMigrations,
   rollbackMigrations,
@@ -65,9 +66,7 @@ function insertV61Relay(id: string, pending: { kind: string; body: string } | nu
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-v62-'));
-  db = new Database(path.join(dir, 'db.sqlite'));
-  db.pragma('foreign_keys = ON');
-  runMigrations(db);
+  db = openMigratedFileDb(path.join(dir, 'db.sqlite'), { foreignKeys: true });
   rollbackMigrations(db, 61);
   insertWorktree('wt-a');
   insertWorktree('wt-b');
