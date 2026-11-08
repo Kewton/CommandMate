@@ -1,6 +1,6 @@
 # close_when の型付きの評価と終了の記録（Issue #4222 / Epic #4220 の子 B）設計
 
-- 状態：設計の段（実装前）。第 2 版：Codex の事前レビュー 1 回目（P1 4 件・P2 5 件、2026-11-08）を反映した。処置の一覧は §13、守る条件と対照は §9.3。実装は同じブランチの別の契約で行う
+- 状態：第 3 版：Codex の事前レビュー 1 回目（P1 4 件・P2 5 件）と 2 回目（P2 3 件、2026-11-08）を反映した。処置の一覧は §13、守る条件と対照は §9.3。実装は同じブランチの別の契約で行う
 - 前提：Epic #4220 の決定事項 D1〜D13（とくに D3・D5・D6・D8・D9・D10・D12）と、A（#4221）の設計 `docs/design/mem-store-4221.md`（以下「A」）。close_when の文法・保存の形・kind × 型の許可表の正本は A §2 と `tests/fixtures/mem/close-when-v1.json`
 - 凡例：**［事実］** = この文書を書いた時点（2026-11-08、`feature/4222-worktree` = develop `e5297912a`）でファイルと行を読んで確かめたもの。**［見立て］** = 設計としての判断。**［未確認］** = 読んでいない・実測していないもの。行番号は確認時点のもので、実装の契約では名前で探し直す
 
@@ -78,11 +78,13 @@
 |---|---|
 | 無い（`gone`） | local：`git rev-parse --verify --quiet refs/heads/<name>^{commit}` が exit 1。remote：`git ls-remote --heads origin`（全 head の一覧、§1.4 の注）が exit 0 で、一覧に `refs/heads/<name>` が無い |
 | 同じ（`same`） | ref があり、`tipAtCreate` がその tip の祖先か同じ（`git merge-base --is-ancestor`）。local は加えて、ref の作成の時刻（下の注）が項目の `created_at` より後**でない** |
-| 作り直し（`recreated`） | local で、ref の作成の時刻が項目の `created_at` より後（`tipAtCreate` が空でないときだけ使う。§1.4 の空の tip の規則） |
+| 作り直し（`recreated`） | local で、ref の作成の秒 S が項目の `created_at` より確実に後（`S × 1000 > created_at`。`tipAtCreate` が空でないときだけ使う。§1.4 の空の tip の規則） |
+| 前後が言えない（`order-uncertain`） | local で、ref の作成の秒 S が項目の `created_at` と同じ秒（`S == floor(created_at / 1000)`）。reflog は秒、項目はミリ秒なので、どちらが先かを言えない（事前レビュー 2 回目 ②）。祖先の判定が `same` を示しても `same` にしない |
 | 区別できない（`diverged`） | ref はあるが `tipAtCreate` が祖先でない（作り直し・rebase・force push のどれかで、remote では見分けられない） |
 | 取得できない | 手元の git が exit 0/1 以外・タイムアウト、`ls-remote` が exit 128 等（`offline`・`query_timeout`・`remote_error`）、祖先の判定に要る object が手元に無い（`objects_missing`） |
 
-- **ref の作成の時刻**（事前レビュー P1-4）：commit の時刻（`%ct`・`%at`）は使わない。古い commit から作り直したブランチでも commit の時刻は古いままだから。使うのは **reflog の項目そのものの時刻**（ref を書き換えた時刻）：`git reflog show --date=unix --format=%gd%x09%gs refs/heads/<name>` の `%gd`（`refs/heads/<name>@{<unix 秒>}` の形）から秒を取り、最も古い項目が「`branch: Created from`」で始まるときだけ、その秒を作成の時刻とする。最も古い項目が作成の行でない（改名・期限切れで切れた）・reflog が無い（`core.logAllRefUpdates=false`）ときは作成の時刻は **不明** として reflog の条件を使わず、祖先の判定だけで `same` / `diverged` を決める（§12 U3 の限界）。`%gd` の形は実装の契約で実際の git で確かめる（§9.3 の P1-4 の試験は `os.tmpdir()` の中の実 repository で行う）
+- **同じ秒**（事前レビュー 2 回目 ②）：reflog の時刻は秒、項目の `created_at` は `Date.now()` のミリ秒［事実：`createMemItem` の `now`、`src/lib/db/mem-db.ts`］。作成の秒 S について、`S × 1000 > created_at` なら確実に後（`recreated`）、`(S + 1) × 1000 <= created_at` なら確実に前（祖先の判定へ）、どちらでもない＝同じ秒は `order-uncertain`（不明）。閉じないほうへ寄せる（同じ秒に枝を作ってすぐ項目を書いた場合も不明のまま。人が閉じる。§12 U3）
+- **ref の作成の時刻**（事前レビュー P1-4）：commit の時刻（`%ct`・`%at`）は使わない。古い commit から作り直したブランチでも commit の時刻は古いままだから。使うのは **reflog の項目そのものの時刻**（ref を書き換えた時刻）：`git reflog show --date=unix --format=%gd%x09%gs refs/heads/<name>` の `%gd`（実測：git 2.49 で `<name>@{<unix 秒>}` の短い形。末尾の `@{<数字>}` だけを読む）から秒を取り、最も古い項目が「`branch: Created from`」で始まるときだけ、その秒を作成の時刻とする。最も古い項目が作成の行でない（改名・期限切れで切れた）・reflog が無い（`core.logAllRefUpdates=false`）ときは作成の時刻は **不明** として reflog の条件を使わず、祖先の判定だけで `same` / `diverged` を決める（§12 U3 の限界）。`%gd` の形は実装の契約で実際の git で確かめる（§9.3 の P1-4 の試験は `os.tmpdir()` の中の実 repository で行う）
 - **remote の head は全件を 1 回で取る**（事前レビュー P1-1）：`git ls-remote --heads origin`（ref の引数なし）を repository ごとに 1 回（鍵 `ls-remote-heads:<repositoryId>`）。返るのは全 head の一覧なので、どの呼び手のどの ref も「一覧に無い＝無い」と読める。ref を引数で絞った照会を共有すると、照会しなかった ref を「無い」と読むので、絞った形を作らない。出力は `maxBuffer` 8 MB、超えたら不明（`unexpected_response`）。**`git fetch` はしない**（利用者の repository の refs を書き換えない・定期の照会を足さない）
 - **空の `tipAtCreate`**（事前レビュー P2-1）：今の A は `deleted` の条件で tip を取らず空文字を保存する［事実：`closeWhenGitNeeds` は `merged` だけ tip を求める、`src/lib/mem/close-when.ts:211-216`。`finalizeCloseWhen` は `deleted` で `tipAtCreate: ''`、`:267-283`］。B は次の 2 つを行う。評価の時の tip を作成の時の tip として補うことはしない
   1. **新しい保存**：B の実装で `closeWhenGitNeeds` を `deleted` でも tip を求めるように変え、保存の時に ref があればその tip、無ければ空文字を入れる（`deleted` は ref が無くても保存を断らない。`merged` は今どおり tip が無ければ断る）。tip を読む ref は scope で分ける：`local` → `refs/heads/<name>`、`remote` → `refs/remotes/origin/<name>`（無ければ `refs/heads/<name>`）。fixture に `deleted` の保存値（tip あり・空の 2 つ）を足す
@@ -97,6 +99,7 @@
 | `same` | 不成立（`branch-present`） |
 | ref がある・`tipAtCreate` が空 | 不成立（`branch-present-no-baseline`） |
 | `diverged` | **不明**（`branch-diverged`。rebase を削除と読まない） |
+| `order-uncertain` | **不明**（`branch-order-uncertain`。同じ秒の作り直しを `same` と読まない） |
 | 取得できない | 不明（理由はそのまま）。「ref が無い」と「取得できない」を分ける |
 
 - 「削除の未同期」：remote の削除は `ls-remote` で直接見るので、手元の `refs/remotes/origin/<name>` が残っていても関係ない。local の削除は refs をそのまま見る
@@ -110,7 +113,7 @@
    - `merged_at != null` かつ **`merged_at` が項目の `created_at` より後**（項目を書く前に終わった作業ではない）
    - `head.sha != tipAtCreate` かつ `tipAtCreate` が `head.sha` の祖先（手元に object があれば `merge-base`、無ければ `gh api repos/<o>/<r>/compare/<tipAtCreate>...<head.sha>` の `status == "ahead"`）
    - **今の頭との対応**：H があれば（`same`）`head.sha == H`（今のブランチの頭そのものが merge された。merge の後に積んだ未 merge の commit があれば当たらない）。H が無い（`gone`）ときは上の 2 つだけ。`recreated`・`diverged` のときは PR の証拠を使わない（項目が追う作業との対応が言えない）
-5. それ以外：H があれば不成立（`not-merged`）。H が無く（`gone`・`recreated`）scope が local なら不明（`branch-gone-unmerged-unknown`：merge の後に消したのか、merge せずに消したのかを手元だけでは言えない）。`diverged` は不明（`branch-diverged`）
+5. それ以外：H があれば不成立（`not-merged`）。H が無く（`gone`・`recreated`）scope が local なら不明（`branch-gone-unmerged-unknown`：merge の後に消したのか、merge せずに消したのかを手元だけでは言えない）。`diverged` は不明（`branch-diverged`）、`order-uncertain` は不明（`branch-order-uncertain`。H を決めない＝1〜4 に入らない）
 - **合流先が違う**：判定は `into` だけを見る。`main` に入っていても `into=develop` なら 3・4 に当たらず不成立
 - **remote が取得できない**：`ls-remote` が失敗 → 不明（`offline` 等）。4 の `gh` が失敗し、1〜3 で決まらない → 不明
 - **作り直し**：`recreated`・`diverged` の新しいブランチの merge は、2〜4 で元の項目の成立に数えない。remote で、作り直したブランチが `tipAtCreate` の子孫から始まっていると見分けられない（§12 U3）
@@ -150,7 +153,7 @@
 
 ### 1.9 理由の語彙（`reason`）
 
-成立・不成立の理由は上の各表の語。不明の理由は `not_found`・`unauthenticated`・`forbidden`・`rate_limited`・`remote_error`・`offline`・`query_timeout`・`gh_unavailable`・`unexpected_response`・`not_an_issue`・`host_not_allowed`・`repository_unavailable`・`objects_missing`・`branch-diverged`・`branch-gone-unmerged-unknown`・`relay_not_found`・`relay-delivery-uncertain`・`session_not_found`・`session_kind_unknown`・`schema_unknown`・`query_budget_exhausted`・`deadline_exceeded`。語は `src/types/mem.ts` に定数で置き、CLI・画面・C は語で分岐する（文面で分岐しない）。
+成立・不成立の理由は上の各表の語。不明の理由は `not_found`・`unauthenticated`・`forbidden`・`rate_limited`・`remote_error`・`offline`・`query_timeout`・`gh_unavailable`・`unexpected_response`・`not_an_issue`・`host_not_allowed`・`repository_unavailable`・`objects_missing`・`branch-diverged`・`branch-order-uncertain`・`branch-gone-unmerged-unknown`・`relay_not_found`・`relay-delivery-uncertain`・`session_not_found`・`session_kind_unknown`・`schema_unknown`・`query_budget_exhausted`・`deadline_exceeded`。語は `src/types/mem.ts` に定数で置き、CLI・画面・C は語で分岐する（文面で分岐しない）。
 
 ---
 
@@ -246,7 +249,8 @@ ALTER TABLE mem_instance_incarnations ADD COLUMN issued_by TEXT CHECK (issued_by
 ```
 
 - 1 つの試み（brief 1 回）に作成者の知らせと前の世代の知らせが混ざってよい。区分は試みではなく **知らせの行**（`attempt_audience`）に持ち、受領の区分（`acknowledged_by`）はその値から決める（事前レビュー P2-3）
-- `issued_by` を書くのは A の世代の発行の口だけ：`addAgentInstance`・`setAgentInstances` の新しい組（A §10.4 の表で「新しく作る」行）→ `'roster'`、`service.ts` の派生の primary の初回発行（A §10.4 の「mem が初めて書くときに作る」）→ `'lazy'`。`startInstanceIncarnation`（`incarnation.ts:47`）に引数を 1 つ足す
+- `issued_by` を書くのは A の世代の発行の口だけ：`addAgentInstance`・`setAgentInstances` の新しい組（A §10.4 の表で「新しく作る」行）→ `'roster'`、`mem-db.ts` の `settleActorIncarnation`（派生の primary の初回の mem の書き込み。A §10.4 の「mem が初めて書くときに作る」。第 2 版は経路を `service.ts` と書いていた）→ `'lazy'`。`startInstanceIncarnation`（`incarnation.ts`）に引数を 1 つ足す
+- **最初の roster の保存は「後から生まれた」の証拠にしない**（事前レビュー 2 回目 ①）：worktree に `agent_instances` の行が 1 つも無い（roster が派生のまま）ときの保存（`setAgentInstances`・`addAgentInstance`）では、primary の組（`instance_id == cli_tool_id`）は派生で前から居た primary が明示の roster に写されただけかもしれない。その組の新しい世代は `'lazy'` にする（証拠にしない）。primary でない ID（`codex-2` 等）は派生では生まれないので `'roster'`。最初の保存で本当に新しく足した primary も `'lazy'` になる（閉じないほう＝渡さないほうへ寄せる。知らせは (a)・画面の一覧に残る）
 
 - `REFERENCES mem_items(id) ON DELETE CASCADE` は `foreign_keys = ON` で効く［事実：`src/lib/db/db-instance.ts:147`］。`mem purge` が項目を消すと記録と知らせも消える（purge の dry-run の件数に `notices` を足す、§9.2）
 - 項目の側は A の列のまま：`mem_items.state='closed'`・`close_reason='condition'`・`updated_by='server'`［事実：`MEM_CLOSE_REASONS`、`src/types/mem.ts:20`］。`now` の枠の項目は A の退避（`archiveSlot`、`src/lib/db/mem-db.ts:489`）で `mem_items` へ `condition` として移してから記録を書く
@@ -294,8 +298,8 @@ ALTER TABLE mem_instance_incarnations ADD COLUMN issued_by TEXT CHECK (issued_by
 |---|---|---|
 | 関数 | 呼び手 | 返すもの | 書くもの |
 |---|---|---|---|
-| `listMemNoticesFor(db, recipient)` | C（brief の候補を選ぶ）・G（preview） | 受け取れる知らせと、知らせごとの `audience`。他の試みが `reserved` にしている知らせは出さない。古い試み（下の再起動・10 分）の知らせは `pending` として見せる | **何も書かない** |
-| `reserveMemNotices(db, recipient, noticeIds)` | D（送る本文を確定する前） | `{ attemptId \| null, reserved: Array<{noticeId, audience}> }`。**予約できた知らせの ID と区分**（事前レビュー P1-2） | 1 つの transaction で：古い試みを `abandoned` にして知らせを `pending`・`uncertain_count+1` に戻す → 渡された ID のうち今も `pending` で `noticeAudience` が非 `null` のものだけを `reserved`（`attempt_audience` も）にし、試みを 1 行作る。1 件も取れなければ試みを作らず `attemptId: null`。保持の期限を過ぎた行の削除 |
+| `listMemNoticesFor(db, recipient)` | C（brief の候補を選ぶ）・G（preview） | 受け取れる知らせと、知らせごとの `audience`・`uncertain`（前回の配送が確かめられなかったか。古い試みに予約されたままの知らせは、次の予約で `+1` されるのを先に数えた値）。他の試みが `reserved` にしている知らせは出さない。古い試み（下の再起動・10 分）の知らせは `pending` として見せる | **何も書かない** |
+| `reserveMemNotices(db, recipient, selections)` | D（送る本文を確定する前） | `{ attemptId \| null, reserved: Array<{noticeId, audience, uncertain}> }`。**予約できた知らせの ID・区分・配送不明の印**（事前レビュー P1-2・2 回目 ③）。`selections` は `Array<{noticeId, uncertain}>`（C が一覧で読んで本文の予算に数えた印） | 1 つの transaction で：古い試みを `abandoned` にして知らせを `pending`・`uncertain_count+1` に戻す → 渡された ID のうち今も `pending` で `noticeAudience` が非 `null` で、**戻した後の印（`uncertain_count > 0`）が C の渡した `uncertain` と同じ**ものだけを `reserved`（`attempt_audience` も）にし、試みを 1 行作る。印が変わった知らせは予約せず `pending` のまま（次の brief が新しい印で選び直す）。1 件も取れなければ試みを作らず `attemptId: null`。保持の期限を過ぎた行の削除 |
 | `settleMemNoticeAttempt(db, attemptId, sendState)` | D（送信の結果が出た後） | 処理した件数 | `sendState` は送信の到達確認の 3 値（`'sent'\|'not-sent'\|'indeterminate'`、`src/lib/session/send-attempt-types.ts:24`）。**`attempt_id = attemptId` の知らせだけ**を対象に：`sent` → 受領（`acknowledged_by` = その知らせの `attempt_audience`）。`not-sent` → `pending`。`indeterminate` → `pending`・`uncertain_count+1`（C は次の brief で「前回の配送が確かめられなかった知らせ」と付けて出す）。2 回目の settle は何もしない。保持の削除 |
 | `acknowledgeMemNoticeByHuman(db, noticeId, version)` | G（画面の引き取り） | 結果 | `acknowledged_by='human'` |
 
@@ -303,7 +307,7 @@ ALTER TABLE mem_instance_incarnations ADD COLUMN issued_by TEXT CHECK (issued_by
 
 1. C が `listMemNoticesFor` で候補を選ぶ（予算で省くのはここ）
 2. D が選んだ ID で `reserveMemNotices` を呼ぶ
-3. **C は予約の結果の `reserved` だけで知らせの部分を組み直す**（予約できなかった ID は本文から除く。区分の表示も `reserved` の `audience` を使う）。組み直しで本文は短くなるだけなので予算は超えない
+3. **C は予約の結果の `reserved` だけで知らせの部分を組み直す**（予約できなかった ID は本文から除く。区分の表示は `reserved` の `audience`、「前回の配送が確かめられなかった」の表示は `reserved` の `uncertain` を使う）。`reserved` の各行は、C が 1 で予算に数えたのと同じ印を持つ（印が変わった知らせは 2 で予約されない、事前レビュー 2 回目 ③）ので、組み直しで本文は短くなるだけで予算は超えない
 4. D が送る。送る前に止めた（組み直しの失敗・送信の口に入らなかった）ときも `settle(attemptId, 'not-sent')` を呼ぶ
 5. D が送信の結果で `settle` を呼ぶ。受領になるのは 3 で本文に入れた知らせ（＝その試みの知らせ）だけ
 
@@ -472,6 +476,9 @@ DB を使う試験は `os.tmpdir()` の `mkdtempSync` の中の DB で、`afterE
 | P2-3 | 区分は知らせごとに持ち、受領の区分はその値 | 1 つの brief に作成者の知らせ m1 と前の世代の知らせ m2 を入れて `sent` → m1 は `acknowledged_by='creator'`、m2 は `'successor'` | 作成者の知らせだけの brief は全部 `creator`。2 回目の settle は何もしない |
 | P2-4 | 「後から生まれた」の証拠は roster の発行（`issued_by='roster'`）か同じ枠の置き換えだけ。一覧は書かない | 項目より前から居る派生の primary（世代の行なし）が、項目の後に mem を初めて書いて `'lazy'` の世代を得る → (b) の `successor` にならない。`listMemNoticesFor` の前後で DB のどの表の行も変わらない（世代を作らない・古い試みを戻さない） | 項目の後に roster へ追加した instance は (b) で受け取れる。作成者の枠の次の世代（同じ instance ID、行が無い・`'lazy'` でも）は (a) で受け取れる。作成者の tmux を kill して同じ世代で起動し直す → `creator` のまま |
 | P2-5 | 呼び手の期限と共有の子の寿命を分ける。最後の呼び手が離れたら回収 | §7 の G5 の陽性 | §7 の G4・G5 の陰性 |
+| R2-① | 最初の roster の保存で写された primary の世代は「後から生まれた」の証拠にしない | 派生の primary だけの worktree で項目を作る → 作成者を終わらせる → 同じブランチの別の worktree で、前から居た派生の primary を `codex-2` の追加とともに初めて roster に保存（`addInstanceWithRole` → `setAgentInstances`）→ その primary の世代は `'lazy'` で、(b) の `successor` にならない（直す前の実装では `'roster'` で受け取れる） | 同じ保存で足した `codex-2` は `'roster'` で (b) の `successor`。roster が既にある worktree へ足した primary は `'roster'` |
+| R2-② | 項目と同じ秒の ref の作成は前後を言えないので `same` にしない | 項目の `created_at` と同じ秒に作成の行がある local のブランチ（祖先の判定は `same` を示す）→ `deleted` は不成立にせず不明（`branch-order-uncertain`）、`merged` は H を決めず不明（直す前の実装では `same` で `merged` が成立しうる） | 作成の秒が項目より確実に前（1 秒以上前）→ 祖先の判定どおり `same`。確実に後 → `recreated` |
+| R2-③ | 予約の結果は配送不明の印を持ち、C が予算に数えた印と違う知らせは予約しない | `settle('indeterminate')` の後の知らせ → 一覧の `uncertain` が真、予約の `reserved` も真。一覧で `uncertain:false` と読んだ後に古い試みが切れて印が真になる知らせ → 予約されず `pending` のまま（直す前の実装では印の無い本文の予算のまま予約される） | 印が変わらなければ選んだ ID がすべて予約され、`reserved` の印は一覧と同じ |
 
 ## 10. 対になる場所（探した結果）
 
@@ -507,7 +514,7 @@ DB を使う試験は `os.tmpdir()` の `mkdtempSync` の中の DB で、`afterE
 |---|---|
 | U1 | §1.1 の数字（外の照会 8 回・5 秒、手元の git 24 回・3 秒、期限 10 秒、brief は C が 4 回・3 秒）は見立て。brief の送信の遅れの許容（D10 は予算をバイトで決めるが時間は決めていない）は C・D と合わせる |
 | U2 | `gh` が `GH_ENTERPRISE_TOKEN` を github.com 以外の任意の host へ送るか（S5 の前提）を実測していない。送らないと分かっても、許可表は残す（照会の先を Agent の入力で広げない） |
-| U3 | `branch` の作り直しの見分けは local の reflog の項目の時刻に頼る（commit の時刻は使わない、§1.4）。`%gd` と `--date=unix` の出力の形は実測していない（実装の契約で実 git の試験で固定する）。reflog が無い・期限切れの repository と、remote で `tipAtCreate` の子孫から作り直したブランチは見分けられない（§1.4）。正確に追うなら `pr:` の型を使うよう利用者の説明に書く。`merged` の local で、merge の後にブランチを消した場合は不明のまま（人が閉じる） |
+| U3 | `branch` の作り直しの見分けは local の reflog の項目の時刻に頼る（commit の時刻は使わない、§1.4）。`%gd` と `--date=unix` の出力の形は git 2.49 で `<name>@{<秒>}` と実測した（実 git の試験で固定する）。項目と同じ秒に作ったブランチは前後を言えないので不明のまま（事前レビュー 2 回目 ②）。reflog が無い・期限切れの repository と、remote で `tipAtCreate` の子孫から作り直したブランチは見分けられない（§1.4）。正確に追うなら `pr:` の型を使うよう利用者の説明に書く。`merged` の local で、merge の後にブランチを消した場合は不明のまま（人が閉じる） |
 | U4 | S2（relay の `expired`・`cancelled` を成立・`failure` で閉じる）は解釈。「不成立のまま残す」が Issue の意図なら §2 の 2 行と試験を入れ替える |
 | U5 | S1 の狭め方で、B より前に名前空間なしで保存された `session` の項目は永遠に不明になる（閉じないだけで、人は閉じられる）。v66 の利用者は数日分（A のマージは 2026-11-08）で、移行の処理は作らない見立て |
 | U6 | §3.3 (b) の「次の世代」（roster で作った世代の `created_at > item_created_at`）は、作成者の生前に後から roster に加わった別の instance も含む。作成者の終わりの時刻は A の世代の表に残らない（行が消える）ので、これより狭くするには世代の終わりの記録が要る。派生の primary だけで回すブランチでは、別の worktree の primary は (b) にならず、知らせは画面の一覧に残る |
@@ -533,4 +540,14 @@ Codex の事前レビュー 1 回目（2026-11-08、P1 4 件・P2 5 件。`works
 | P2-3 | 1 つの試みでは作成者と前の世代の混在を記録できない | 採る | 区分を試みから知らせの行（`attempt_audience`）へ移した（§3.1・§3.5） |
 | P2-4 | 世代の発行の時刻を、セッションが後から生まれた証拠にしている | 採る | 証拠を「同じ枠の置き換え」と「roster の発行（`issued_by='roster'`）」に限り、A の世代の表に列を足した（S6）。作成者の終わりを roster の寿命と定め、合意は U9。一覧の副作用を無くし、書き込みを §3.5 の表に整理した |
 | P2-5 | 共有の照会の期限・中断の持ち主が無い | 採る | 子の寿命は照会自身のタイムアウトと `abort` だけで決め、呼び手は自分の期限で待ちをやめ、最後の呼び手が離れたら kill・回収する（§1.1・§7 の G4・G5） |
+
+### 13.2 事前レビュー 2 回目（2026-11-08、P2 3 件。`workspace/orchestration/runs/2026-11-08/prereview/review-4222b.md`）
+
+1 回目の 9 件は解消 7 件・一部解消 2 件（P1-4・P2-4）と判定された。一部解消の残りが下の ②・① で、③ は修正で生まれた穴。守る条件と対照は §9.3 の R2-① 〜 R2-③。
+
+| # | 指摘 | 処置 | 1 行の理由 |
+|---|---|---|---|
+| ① | 既存の派生の primary の初回の roster の保存を「後から生まれた」の証拠にできる | 採る | roster の行が無い worktree の最初の保存では、primary の組の新しい世代を `'lazy'` にする（§3.1）。lazy の発行の経路の記述を `mem-db.ts` の `settleActorIncarnation` に直した |
+| ② | 項目の作成と同じ秒のブランチの作り直しを見逃す | 採る | 作成の秒が項目と同じ秒なら `order-uncertain`（不明）にし、`same` にしない（§1.4）。確実に後・確実に前だけを使う |
+| ③ | 予約で増えた配送不明の情報が最終の本文へ届く契約が無い | 採る | 一覧が配送不明の印を（古い試みの `+1` を先に数えて）返し、予約は C が予算に数えた印と同じ知らせだけを取り、`reserved` に印を返す（§3.5）。印が変わった知らせは予約しないので、本文は短くなるだけで予算を超えない |
 
