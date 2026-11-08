@@ -16,7 +16,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { runMigrations } from '@/lib/db/db-migrations';
+import { openMigratedFileDb } from '../../helpers/migrated-file-db';
 import { stripAnsi } from '@/lib/detection/cli-patterns';
 import { extractResponse } from '@/lib/polling/response-checker';
 import { cleanScrollbackResponse } from '@/lib/response-cleaner';
@@ -174,8 +174,7 @@ function ids(): string[] {
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'cm-3335-'));
   dbPath = join(dir, 'test.db');
-  const db = new Database(dbPath);
-  runMigrations(db);
+  const db = openMigratedFileDb(dbPath);
   seed(db);
   db.close();
 });

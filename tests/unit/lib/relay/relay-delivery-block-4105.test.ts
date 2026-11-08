@@ -22,7 +22,7 @@ import os from 'os';
 import path from 'path';
 import Database from 'better-sqlite3';
 import { NextRequest } from 'next/server';
-import { runMigrations } from '@/lib/db/db-migrations';
+import { openMigratedFileDb } from '../../../helpers/migrated-file-db';
 import {
   countHeldRelays,
   countRelays,
@@ -126,9 +126,7 @@ async function readOne(relayId: string): Promise<SessionRelay> {
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-4105-'));
-  db = new Database(path.join(dir, 'cm.db'));
-  db.pragma('foreign_keys = ON');
-  runMigrations(db);
+  db = openMigratedFileDb(path.join(dir, 'cm.db'), { foreignKeys: true });
   insertWorktree('wt-a', 'claude');
   insertWorktree('wt-b', 'codex');
   resetRelayDeliveryState();
