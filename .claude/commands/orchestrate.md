@@ -1146,12 +1146,12 @@ echo "exit=$?"   # 0 → PR を出す / 1 → runs/$DATE/precheck-<issue>[-<item
 `git merge --abort` して止まる）を行い、**マージする HEAD について**（取り込んだ HEAD・`publish-pr.mjs` が先に push した取り込みの HEAD・未 push の HEAD のどれでも）
 衝突の印の走査（全追跡ファイル）と、その HEAD の precheck（`precheck.mjs`。`npx tsc --noEmit` で実際の統合破壊が出て、`vitest related --dir tests/unit` が import の関係
 （`@/` の alias を含む）で選ぶテストと、変えたパスを名指しするテスト・ガードで、型に出ない相互作用が出る）を通してから `git push` する。
-precheck は作業の HEAD の precheck と同じ引数で走り、同じ HEAD の `precheck=ok` が記録にあれば走らせない。どれかが落ちたら push せずに止まる。
+precheck は作業の HEAD と同じ引数で走り、同じ HEAD の `precheck=ok` があれば走らせない。落ちたら push せずに止まる。取り込んだ HEAD の重い段は CI に任せる（docs/orchestrate/ci-merge.md#6-2-取り込み後の重い段）。
 
 ```bash
 node scripts/orchestrate/merge-pr.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
   --issue "$issue" --worktree "$WT_DIR"            # 最後の 1 本は --last。Issue を閉じないときは --close -
-echo "exit=$?"   # 0 → マージ済み / 1 → 出力の欠けたもの・落ちた段を読む / 2 → 作業ツリーが汚れている / 3 → 保留（取り込み後の precheck がロック待ち。再実行すれば続きから進む） / 4 → CI 待ちの間に develop が進んだ（再実行で取り込み直す） / 124 → CI が --register-timeout（既定 600 秒）までに 1 つも登録されない、または登録から --ci-timeout（既定 3600 秒）に収まらない
+echo "exit=$?"   # 0 → マージ済み / 1 → 出力の欠けたもの・落ちた段を読む / 2 → 作業ツリーが汚れている / 3 → 保留（取り込みの無い precheck がロック待ち。再実行で続きから） / 4 → CI 待ちの間に develop が進んだ（再実行で取り込み直す） / 124 → CI が --register-timeout（既定 600 秒）までに 1 つも登録されない、または登録から --ci-timeout（既定 3600 秒）に収まらない
 ```
 
 衝突で止まったときは、意味を見て解消（機械解決は module-reference などの共有ファイルだけ）してコミットし、同じ引数で再実行する。

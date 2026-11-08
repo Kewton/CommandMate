@@ -27,6 +27,15 @@
  * (`<step>=held`, result `skip`, exit 3) — neither ok nor a failed test, and
  * worth running again once the machine is quieter.
  *
+ * `--heavy-to-ci` (Issue #4265): a heavy step is not run and does not wait for
+ * the lock; it is recorded as `<step>=ci` — left to the PR's CI, which
+ * merge-pr.mjs waits for on that same HEAD before it merges. merge-pr passes it
+ * only for the HEAD its own 6-2 refresh made; the first precheck (before
+ * publish-pr) and one merge-pr runs without a refresh are not given it. The
+ * light steps and a narrow `related` / `tests` run as always, and a failed one
+ * fails the precheck. A `<step>=ci` record is reused only by another
+ * `--heavy-to-ci` precheck: without the flag the heavy step runs.
+ *
  * The result goes to the `precheck` stage of `run-log.mjs` with the HEAD it
  * ran on. An `ok` precheck for the same HEAD and the same options (base, kind,
  * metrics, allow-removed-tests, build) is reused instead of run again — every
@@ -51,7 +60,7 @@
  * Usage:
  *   node scripts/orchestrate/precheck.mjs --run-dir <dir> --issues <range> --issue <N> --worktree <path>
  *        [--base origin/develop] [--kind <feature|bug|refactor|docs>] [--metrics] [--build] [--allow-removed-tests] [--force]
- *        [--item <work item>]
+ *        [--heavy-to-ci] [--item <work item>]
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -76,6 +85,8 @@ export const DEFAULT_BASE = 'origin/develop';
 export const EXIT_HELD = 3;
 /** The step status of a heavy step left unrun for want of the lock. */
 export const HELD = 'held';
+/** The step status of a heavy step `--heavy-to-ci` left to the PR's CI (Issue #4265). */
+export const TO_CI = 'ci';
 /** Run order: cheap and decisive first, the test runs last. */
 export const STEPS = ['changelog', 'removed-tests', 'eslint', 'lint-sh', 'suppressions', 'tsc', 'related', 'tests'];
 /** The verify-stage gate whose pass on the same HEAD already covers a step. */
@@ -447,7 +458,7 @@ export function planSteps({ changed, deleted }, { base, kind, metrics = false, b
 export function parseNote(note) {
   /** @type {Record<string, string>} */
   const steps = {};
-  for (const match of String(note ?? '').matchAll(/(?:^|\s)([a-z-]+)=(ok|fail|skip|held)\b/g)) steps[match[1]] = match[2];
+  for (const match of String(note ?? '').matchAll(/(?:^|\s)([a-z-]+)=(ok|fail|skip|held|ci)\b/g)) steps[match[1]] = match[2];
   return steps;
 }
 
@@ -580,7 +591,7 @@ const lines = (text) => text.split('\n').map((l) => l.trim()).filter(Boolean);
 
 const USAGE = `Usage:
   node scripts/orchestrate/precheck.mjs --run-dir <dir> --issues <range> --issue <N> --worktree <path>
-       [--base ${DEFAULT_BASE}] [--kind <feature|bug|refactor|docs>] [--metrics] [--build] [--allow-removed-tests] [--force] [--item <work item>]`;
+       [--base ${DEFAULT_BASE}] [--kind <feature|bug|refactor|docs>] [--metrics] [--build] [--allow-removed-tests] [--force] [--heavy-to-ci] [--item <work item>]`;
 
 const FLAGS = {
   '--run-dir': 'runDir',
@@ -591,10 +602,16 @@ const FLAGS = {
   '--kind': 'kind',
   '--item': 'item',
 };
-const SWITCHES = { '--metrics': 'metrics', '--build': 'build', '--allow-removed-tests': 'allowRemovedTests', '--force': 'force' };
+const SWITCHES = {
+  '--metrics': 'metrics',
+  '--build': 'build',
+  '--allow-removed-tests': 'allowRemovedTests',
+  '--force': 'force',
+  '--heavy-to-ci': 'heavyToCi',
+};
 
 export function parseArgs(argv) {
-  const options = { base: DEFAULT_BASE, metrics: false, build: false, allowRemovedTests: false, force: false };
+  const options = { base: DEFAULT_BASE, metrics: false, build: false, allowRemovedTests: false, force: false, heavyToCi: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (SWITCHES[arg]) options[SWITCHES[arg]] = true;
@@ -618,6 +635,7 @@ export function parseArgs(argv) {
  *   estimateRelatedTests?: typeof estimateRelatedTests,
  *   acquireHeavyLock?: (timeoutMs: number) => { acquired: boolean, waitedMs: number, heldBy: string | null, release: () => void },
  *   now?: () => Date,
+ *   home?: string,
  *   log?: (line: string) => void,
  *   error?: (line: string) => void,
  * }} [deps]
@@ -679,7 +697,8 @@ export function main(argv, deps = {}) {
       const previous = findLatest(records, { issue, item, stage: 'precheck', head });
       if (previous && previous.result === 'ok') {
         const done = parseNote(previous.note);
-        const missing = toRun.filter((step) => done[step] !== 'ok');
+        // A step left to CI counts as done only for another --heavy-to-ci precheck (#4265).
+        const missing = toRun.filter((step) => done[step] !== 'ok' && !(o.heavyToCi && plan[step].heavy && done[step] === TO_CI));
         const sameOptions = (previous.note ?? '').split(/\s+/).includes(opts);
         // The result holds for the environment it was taken in (#3883 N9); one from before env= is reused with a warning.
         const env = verifyEnvState(previous, where);
@@ -751,6 +770,13 @@ export function main(argv, deps = {}) {
       // whole budget leaves the step unrun (N1): running it beside the holder is the
       // load-flipped verdict the lock exists to prevent, and failing it would record
       // a resource conflict as a test failure.
+      // --heavy-to-ci (#4265): the PR's CI on this HEAD runs it; merge-pr waits for that CI.
+      if (heavy && o.heavyToCi) {
+        results[step] = TO_CI;
+        fs.appendFileSync(logFile, `\n## ${step}: not run — left to the PR's CI (--heavy-to-ci; ${HEAVY_MUTEX} not taken)\n`);
+        log(`  ${step} ${TO_CI} (not run: left to the PR's CI, ${HEAVY_MUTEX} not taken)`);
+        continue;
+      }
       if (heavy && heldBy !== null) {
         results[step] = HELD;
         fs.appendFileSync(logFile, `\n## ${step}: not run — ${HEAVY_MUTEX} ${heldBy}\n`);

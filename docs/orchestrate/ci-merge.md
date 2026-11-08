@@ -65,7 +65,8 @@ CI は使い捨ての self-hosted ランナー 8 台（2026-09-18 時点）で�
 - 関係するテストは `tests/unit` に限る（`vitest related --dir tests/unit`）。integration / e2e は CI が見る
 
 - 作業ツリーに契約（`.commandmate/tasks/`）と `dev-reports/` 以外の変更があると、その HEAD の結果にならないので exit 2 で止まる
-- 関係するテスト・テストの段が広いときは `cpu.heavy` を取ってから走らせる（#3884。しきい値と記録は下の「6-1-1 重い検証の資源制御と待ちの記録」）
+- 関係するテスト・テストの段が広いときは `cpu.heavy` を取ってから走らせる（#3884。しきい値と記録は下の「6-1-1 重い検証の資源制御と待ちの記録」）。
+  `merge-pr.mjs` が自分で取り込んだ HEAD だけは、その段を走らせず CI に任せる（`--heavy-to-ci`。下の「6-2 取り込み後の重い段」）
 
 ## 6-1-1 テスト全体と unit-related の分け方
 
@@ -147,6 +148,33 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 `gh pr checks` は登録済みのチェックしか返さない。登録済みが全部合格でも CI の完走とは限らないので、`--last` は `LAST_REQUIRED_CHECKS` のすべてが登録されるまで待つ。一覧は `.github/workflows/ci-pr.yml` の全ジョブ（matrix の展開後の `Unit Tests (shard 1/4)`〜`(4/4)` を含む 17 件）で、ジョブを足す・名前を変えるときは一覧も直す。食い違うと `merge-pr.test.ts` が両方向で落ちる。一覧に無いチェック（ほかのワークフローなど）は、登録されてから完了を待つ。`--last` なしは未登録を待たない（今までどおり）。
 
 対象は `ci-pr.yml` だけでよい（#4148 で見送り。追跡は不要）。PR に対して走るほかのワークフローは `cancel-pr-runs-on-close.yml` だけで、PR を閉じたとき（`types: [closed]`）にしか動かない。`pages.yml` は main への push、`publish.yml` はリリースで走る。PR の開いている間に別のワークフローを足すと `merge-pr.test.ts` が落ちるので、そのときに一覧へ足すかを決める。
+
+## 6-2 取り込み後の重い段
+
+（#4265。2026-11-08 の run 4221-4259 で、PR #4261 の取り込み後の precheck が `cpu.heavy` を 5400 秒待って exit 3、
+#4262 は 109 分中 67 分がこの待ちだった。取り込み後の PR の CI は 18 分。枠はワーカーの `wait --verify` の
+`unit` / `integration` / `unit-related` と共有で、並行するワーカーがいる間は空かない。）
+
+`merge-pr.mjs` は、**その実行で develop を取り込んだ HEAD** の precheck に `--heavy-to-ci` を渡す。precheck は
+`cpu.heavy` を取るはずの段（広い `related` / `tests`）を走らせず、ロックも取らずに、記録の要約へ `<段>=ci` と書く
+（結果は `ok`。`run-log.mjs status` の `next` も、merge-pr・publish-pr の `unmetStage` も、ほかの `ok` の precheck と同じに読む）。
+手元に残すのは秒で終わる段だけ:
+
+- 衝突の印の全追跡ファイル走査（precheck の前に merge-pr が行う）
+- changelog・removed-tests・ESLint・lint-sh・suppressions・tsc
+- 広くない `related` / `tests`（ロックを取らない段。guards・docs を含む）
+
+これらが落ちたら今までどおり push せずに止まる。重い段の確認は、取り込んだ HEAD を push した後の PR の CI が受け持つ。
+マージの条件は変えていない: 6-3 の判定（`--last` の全チェック、`Unit Tests`・`Build` を待つかどうかの規則）で、
+**その HEAD の CI が合格するまでマージしない**。単独で緑の PR を続けてマージしても組み合わせが通るとは限らない（上の「6-2 統合破壊の実測」）への備えは、
+この CI の合格を待つことで守る。
+
+次の precheck は今までどおり `cpu.heavy` を取り、待ち切ったら exit 3（保留）になる:
+
+- publish-pr の前の初回の precheck（6-1-1）
+- merge-pr が取り込みをせずに走らせる precheck（`publish-pr.mjs` が先に push した取り込みの HEAD、前回の実行で取り込んだまま push しなかった HEAD を含む）
+
+`<段>=ci` の記録は、`--heavy-to-ci` の precheck どうしでだけ再利用する。フラグ無しの precheck は同じ HEAD でも重い段を走らせ直す。
 
 ## 6-2 CI 待ちの間に develop が動いたとき
 

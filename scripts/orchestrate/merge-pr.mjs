@@ -17,7 +17,12 @@
  *      by publish-pr.mjs after a refresh, or not pushed yet — the conflict-marker
  *      sweep over every tracked file, and precheck.mjs (tsc, `vitest related`
  *      over the imports, the tests naming a changed path, the guards …) unless
- *      the run record already has `precheck=ok` for that very HEAD. Only then
+ *      the run record already has `precheck=ok` for that very HEAD. On the HEAD
+ *      this run's own refresh made, precheck gets `--heavy-to-ci` (#4265): the
+ *      steps that would take `cpu.heavy` are recorded `=ci` and left to the PR's
+ *      CI on that HEAD (step 5), so a worker's `wait --verify` holding the lock
+ *      does not hold the merge; the light steps run and stop the push as before.
+ *      Without a refresh in this run the precheck takes the lock as before. Only then
  *      `git push`;
  *   5. the PR's checks (6-3): no `fail` / `cancel` in `bucket` — a failed job is
  *      re-run once per HEAD (`gh run rerun --failed`, recorded in the `ci` stage
@@ -260,6 +265,9 @@ export function validate(options) {
  *   sleep?: (ms: number) => void,
  *   now?: () => Date,
  *   findTestsNaming?: typeof findTestsNaming,
+ *   acquireHeavyLock?: (timeoutMs: number) => { acquired: boolean, waitedMs: number, heldBy: string | null, release: () => void },
+ *   estimateRelatedTests?: (worktree: string, sources: string[]) => number,
+ *   home?: string,
  *   log?: (line: string) => void,
  *   error?: (line: string) => void,
  * }} [deps]
@@ -435,9 +443,17 @@ export function main(argv, deps = {}) {
         [
           '--run-dir', o.runDir, '--issues', o.issues, '--issue', String(issue), '--worktree', o.worktree,
           ...optionsFromNote(workPrecheck.note, baseRef),
+          // The HEAD this run's refresh made: the heavy steps are the PR's CI's on this very HEAD,
+          // which step 5 waits for before the merge — not cpu.heavy's here (#4265).
+          ...(refreshed ? ['--heavy-to-ci'] : []),
           ...(item ? ['--item', item] : []),
         ],
-        { run, now, log, error, findTestsNaming: findNaming, home: deps.home }
+        {
+          run, now, log, error, findTestsNaming: findNaming, home: deps.home,
+          // Test seams of precheck.mjs main, passed through when given.
+          ...(deps.acquireHeavyLock ? { acquireHeavyLock: deps.acquireHeavyLock } : {}),
+          ...(deps.estimateRelatedTests ? { estimateRelatedTests: deps.estimateRelatedTests } : {}),
+        }
       );
       if (code === 3) {
         // precheck exit 3: a heavy step could not take the machine lock — undecided, not failed.
