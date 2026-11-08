@@ -210,14 +210,14 @@ node scripts/orchestrate/merge-pr.mjs --run-dir "workspace/orchestration/runs/$D
 
 - 列は entry を順に処理する。entry ごとの処理は、今の `main` の本体を `mergeOne(options, deps)` に切り出したもの。列の中で merge-pr を子プロセスとして起動し直すことはしない。
 - **プロセスグループ**: `merge-pr.mjs` の入口（外側）は、自分自身を `spawn(process.execPath, [script, ...argv], { detached: true, stdio: 'inherit', env: { ...process.env, CM_MERGE_PR_INNER: '1' } })` で起動して終わりを待つ。**親の環境は丸ごと継ぎ、印を 1 つ足すだけ**（S3。前の版の `env: { CM_MERGE_PR_INNER: '1' }` は PATH・gh の認証・`CM_VERIFY_LOCK_ROOT` を落とす。`pr-common.mjs` の `defaultRun` も親の環境を保つ）。内側は起動直後に印を自分の環境から消し、子へは継がせない。内側は新しいプロセスグループの先頭（`pgid` = 内側の pid）になり、`defaultRun` の `spawnSync`（`pr-common.mjs:58`）で起こす git・gh・precheck の子（vitest・tsc）はすべてこのグループに入る。外側は INT / TERM / HUP をグループ（`-pgid`）へ送り直す。
-- **マージのロック**: 内側が `merge.<owner>.<repo>.<base>`（`/` を `.` に、規約外の文字を `_` に。64 文字を超えたら末尾を sha1 の先頭 12 桁に置き換える）を §2 の札つきで取る。`owner` に `pgid` と `phase`・`entry` を書く。
+- **マージのロック**: 内側が `<root>/merge/` の下に `merge.<owner>.<repo>.<base>`（`/` を `.` に、規約外の文字を `_` に。64 文字を超えたら末尾を sha1 の先頭 12 桁に置き換える）を §2 の札つきで取る。`owner` に `pgid` と `phase`・`entry` を書く。
   - 回収の条件は §2.4 の 3 のとおり「pid が ESRCH **かつ** `kill(-pgid, 0)` が ESRCH（グループに 1 つも残っていない）」。親（内側）だけが `kill -9` で死んでも、push 中の `git` や `gh pr merge` が残る間はロックは生きている扱いで、次の列は重ならない。
   - 外側だけが死んだ場合（ターミナルを閉じた等）、内側は動き続けロックも有効。正しい（重ならない）。
   - `--queue` は**列の初めに 1 回**取り、最後の entry の後に放す。中の `mergeOne` は取らない（`deps.holdsMergeLock: true`）。`--queue` なしの merge-pr も同じロックを取るので、手で 1 本流した merge-pr と動いている列は重ならない。
 - **書込みの到達が分からないとき**: 内側は外へ書く操作の前後で `owner` の `phase` を書き換える（同じディレクトリの一時ファイルから `rename`）: `refresh` → `precheck` → `push` → `ci-wait` → `merge` → `close` → `idle`。次の列が死んだ保有者のロックを回収したとき、その `phase` が `push` / `merge` / `close` なら:
   - その entry が自分の列にあれば、**それを最初に**処理する（`mergeOne` は再実行で続きから進む作り: `MERGED` なら記録と close、`OPEN` なら `pushHead` が `ls-remote` で届いたかを読み直す）。
   - 自分の列に無ければ、**何も変えずに exit 1** で止まり、`前の列が #<issue> の <phase> の途中で落ちた — その entry を流し直してから` と出す。`queue` に `state=recovered-stop` を記録する。
-  - **止まる理由を保持する（S2）**: 回収した者は、死んだ持ち主のロックを消す**前に** `<root>/<ロック名>.unresolved/<死んだ token>.json`（死んだ持ち主の `owner` の中身＋回収の時刻）を書く。止まる理由はロックではなくこのファイルが持つので、回収した B が止まった後に C を流しても、C も同じ理由で止まる（前の版は B が回収して消すと、C を止めるものが残らなかった）。回収者が書いた後・消す前に死んでも、ファイルは残る。マージのロックを取った merge-pr はどれも（1 本の呼び出しも列も）このファイルを読み、**そこに書かれた PR を自分が扱わないなら何も変えずに exit 1**。扱うなら最初に処理し、その entry が 0 で終わったときにだけファイルを消す。人が確かめて解消したときは、ファイルを消せばよい（ci-merge.md に書く）。
+  - **止まる理由を保持する（S2）**: 回収した者は、死んだ持ち主のロックを消す**前に** `<root>/merge/<ロック名>.unresolved/<死んだ token>.json`（マージのロックとともに root の下の `merge/` に置く。5-2b の P2-2）（死んだ持ち主の `owner` の中身＋回収の時刻）を書く。止まる理由はロックではなくこのファイルが持つので、回収した B が止まった後に C を流しても、C も同じ理由で止まる（前の版は B が回収して消すと、C を止めるものが残らなかった）。回収者が書いた後・消す前に死んでも、ファイルは残る。マージのロックを取った merge-pr はどれも（1 本の呼び出しも列も）このファイルを読み、**そこに書かれた PR を自分が扱わないなら何も変えずに exit 1**。扱うなら最初に処理し、その entry が 0 で終わったときにだけファイルを消す。人が確かめて解消したときは、ファイルを消せばよい（ci-merge.md に書く）。
   - `phase` が `refresh` / `precheck` / `ci-wait` / `idle`（ローカルか読むだけ）なら、`state=recovered` を記録して続ける。
 - **自分の待ち合わせで止まらないこと**: 待ちの判定は「ロックの `owner` の pid とグループが生きているか」だけで、プロセスの一覧・コマンド行は見ない。列の中の entry は同じプロセスの関数呼び出しで、ロックを取り直さない（再入しない）。
 - **未確認**: `gh` や git の credential helper が自分で `setsid` してグループを抜けるか。抜ける子があれば、その子だけはグループの判定から漏れる（実装時に `ps -o pgid` で 1 回見る）。
@@ -362,20 +362,23 @@ node scripts/orchestrate/merge-pr.mjs --run-dir "workspace/orchestration/runs/$D
 | 製品ランナーの取得・解放・死んだ札の回収（`gate-runner.ts` → `acquireMachineLock`） | `src/lib/verification/machine-lock.ts` | ○ 別プロセスの遅い待ち手が先 | ○ 25 時間前の生きた札・別 host の札・生きた／別 host のロック・再利用に見えない pid・ps が読めない pid・グループが生きている保有者 | ○ ESRCH・pid の再利用・期限＋60 秒／600 秒・死んだ保有者のロック | ○ 自分の札と自分が放したロックで待たない | invariants（`ts`）、fifo（S1・R3・実装をまたぐ） |
 | precheck の重い段（`cpu.heavy`。merge-pr の中の precheck も同じ） | `precheck.mjs` `acquireMachineLockSync` → `machine-lock-sync.mjs` | ○ | ○（差し込み口なしの行） | ○（実際に終了した pid） | ○ | invariants（`precheck`）、`precheck-heavy-3884.test.ts`（期待は不変） |
 | merge-pr のマージのロック（1 本の呼び出しと `--queue` の各段: 解決 → ロック → 未解決の確認 → entry ごとの `phase` → 解放） | `merge-pr.mjs` → `machine-lock-sync.mjs` | ○ | ○ グループが生きている保有者（実プロセスの孫） | ○ 子の無い死・`ci-wait` で死んだ保有者 | ○ ロックの取得は列で 1 回・`pgrep -f` の自己一致（陰性の対照）では待たない | invariants（`sync`・pgrep）、`merge-pr-queue-4277.test.ts`（R2・(d)・S2） |
-| `verify-run.sh` の取得・解放（standalone） | bash（`.claude` と `.agents` の写し） | **×（未追従）** | 既存のまま | 既存のまま | 既存のまま | invariants「札を知らない経路」— 札を持つ待ち手と `mkdir` だけの取り手が同時に持たない |
+| `verify-run.sh` の取得・解放（standalone。5-2b の P1 で追従） | bash（`.claude` と `.agents`、バイト一致） | ○ | ○ 25 時間前の生きた札・別 host の札・生きた／別 host のロック・グループが生きている保有者（実プロセス） | ○ ESRCH・死んだ保有者のロック | ○ | invariants（`bash`。ロックの関数だけを切り出して別の bash で回す）、「回収の窓（P1）」— TS／同期 JS の回収の退かす前と後に bash の取得を差し込んでも保有者は 1 人（陽性）・札の無い生きた `mkdir` の保有は今どおり（陰性）、`run-tests.sh` の tickets |
+| 札を知らない旧版（再ビルド前の本番、`commandmate-skills` の写し） | — | × | 既存のまま | 既存のまま | 既存のまま | invariants「札を知らない経路」— 札を持つ待ち手と `mkdir` だけの取り手が同時に持たない |
 
 ### 8.2 共通規則の全読者
 
 | 共通の規則 | 書く経路 | 読む経路 | 追従 |
 |---|---|---|---|
-| 札の規約（`<name>.queue/<12 桁>`、中身、`link` で公開、取り下げ、`done`、GC、外してよい条件） | `machine-lock.ts` `takeTicket`／`markDone`／`collectGarbage`、`machine-lock-sync.mjs` の同名の関数 | 同じ 2 つ（`listQueue`・`ticketRetirable`） | 2 実装は追従。`verify-run.sh`（＋ `.agents`）は未追従＝札を読まずに `mkdir` する旧版として扱う（§2.4 の混在の範囲）。`commandmate-skills` の `verify-run.sh` も同じ |
-| ロックの取り方（先頭だけ `mkdir`、`owner` の JSON、`pgid`、回収は退かしてから、解放は 1 回で token を確かめる） | `machine-lock.ts` `claim`／`breakStale`／`release`、`machine-lock-sync.mjs` `claim`／`recoverLock`／`release`／`setOwnerFields` | 同じ 2 つ＋`verify-run.sh` の `lock_owner_is_dead`（`owner` の `pid`・`host`・`token` を読む。足した `pgid`・`phase` は無視する）＋merge-pr の `heldByLine`（`phase`・`pgid` を表示） | `verify-run.sh` は `pgid` を見ないので、merge-pr のロックの子が残る保有者を死んだと読むが、`verify-run.sh` は `merge.*` を取らない（`cpu.heavy` 等の `mutex` だけ） |
-| マージのロックの `owner` の `phase`・`entry`・`pr` と `.unresolved/` | merge-pr `takeMergeLock`（`onStaleHolder` → `persistUnresolved`）・`mergeOne` の `phase` | merge-pr `runOne`（`beforeWrite`）・`runQueue`（並べ替えと `recovered-stop`）・`readUnresolved` | merge-pr だけ。人が手で消す手順は ci-merge.md |
+| 札の規約（`<name>.queue/<12 桁>`、中身、`link` で公開、取り下げ、`done`、GC、外してよい条件） | `machine-lock.ts` `takeTicket`／`markDone`／`collectGarbage`、`machine-lock-sync.mjs` の同名の関数 | 同じ 2 つ（`listQueue`・`ticketRetirable`） | 3 実装（＋ precheck の写しの呼び出し）が追従。`verify-run.sh` は `lock_take_ticket`／`lock_mark_done`／`lock_collect_garbage`／`lock_ticket_retirable`（5-2b の P1）。札を知らないのは `commandmate-skills` の写しと再ビルド前の本番だけ（§2.4 の混在の範囲。skills 側の移植は別途） |
+| ロックの取り方（先頭だけ `mkdir`、`owner` の JSON、`pgid`、回収は退かしてから、解放は 1 回で token を確かめる） | `machine-lock.ts` `claim`／`breakStale`／`release`、`machine-lock-sync.mjs` `claim`／`recoverLock`／`release`／`setOwnerFields` | 同じ 2 つ＋`verify-run.sh` の `lock_acquire`／`lock_recover`／`lock_release`（`pgid` も読む。`phase` は無視）＋merge-pr の `heldByLine`（`phase`・`pgid` を表示） | 追従。マージのロックは `<root>/merge/` に置き（5-2b の P2-2）、`mutex` は root 直下にしか作れないので、どのゲートの回収もマージのロックに届かない |
+| マージのロックの `owner` の `phase`・`entry`・`pr` と `.unresolved/` | merge-pr `takeMergeLock`（`onStaleHolder` → `persistUnresolved`）・`mergeOne` の `phase` | merge-pr `runOne`（`beforeWrite`）・`runQueue`（並べ替えと `recovered-stop`）・`readUnresolved` | merge-pr だけ（置き場が `<root>/merge/` で、`mutex` の名前では届かない）。人が手で消す手順は ci-merge.md |
 | 列の状態の記録（`queue` の行） | merge-pr `runQueue` の `record`（`appendRecord`。`makeRecord` が `head` を拒む） | `run-log.mjs` `readRecords`（`logRecords` に分ける）・`queueSummary`・`status`。進捗の読者（`headsOf`・`latestByStage`・`summarize`・`envCleanShared`・`findLatest`、それを呼ぶ merge-pr・publish-pr・precheck・wait-verify・pr-common・consistency-review）は `records` しか受け取らない | 追従（コードを変えずに `queue` を見ない）。`readRecords` の戻り値を丸ごと比べる読者は無い（`git grep` で確認） |
 
 ### 8.3 実装で実コードに合わせた点（設計からの差）
 
-- **bash（`verify-run.sh`）は変えていない。** 実装の契約の scope は `.claude/skills/cmate-verify/**` を含むが `.agents/skills/cmate-verify/**` を含まない。`tests/unit/skills/cmate-verify/dual-placement.test.ts` が 2 つの写しのバイト一致を固定しているので、片方だけ変えると必ず赤になる。§2.4 の「札を知らない実装」として扱い（排他は死んだ保有者が無いときだけ保証、順番は保証しない）、移すのは別の Issue（`.agents` と skills 側を含む scope）にする。2026-11-08 の飢えは gate-runner と precheck の取り合いで、2 つとも追従した。
+- **bash（`verify-run.sh`）は最初の実装では変えず、5-2b のレビュー（P1）の後の契約で移した。** 最初の契約の scope は `.agents/skills/cmate-verify/**` を含まず、`dual-placement.test.ts` がバイト一致を固定していたため。未移植の bash と新しい「退かしてから確かめる」回収が組み合わさると、TS が死んだ D を読む → bash B が D を消して取る → TS が B のロックを退かす → bash C が空きに `mkdir`、で B と C が同時に持つ（P1）。2 つ目の契約で `.agents` と `sync-map.json` を scope に足し、札・先頭だけの `mkdir` と回収・退かしてから確かめる回収・`pgid` を bash に移した（ms の時計は `date +%s%3N`、無い macOS は秒×1000。予算は従来どおりゲートの `timeoutSec` の秒）。`sync-map.json` の pin は再計算し、`commandmate-skills` への移植は別途（それまで counterpart とバイト一致しない）。
+- **回復の並べ替えと Issue の close（5-2b の P2-1）**: close する entry は `assignClose` が決め、`runQueue` が未確認の書込みを先頭へ出した後に実行の順で決め直す。`3883@3889,3883@3895` で 3895 が未確認なら 3895 → 3889 の順に流し、閉じるのは 3889 の後。列は失敗で止まるので、同じ Issue の全 entry がマージされるまで閉じない。`queue` の記録の `pos=` は渡された順の位置のまま。
+- **マージのロックの置き場（5-2b の P2-2）**: `<root>/merge/`（`mergeLockRoot`）。`deps.lockRoot` はこのディレクトリを指す。verify.yaml の `mutex` に `merge.*` を禁じる案は採らなかった（bash と TS の 2 つのパーサーと旧版に同じ禁止を入れる必要があり、旧版には効かない。置き場を分ければ名前に関係なく届かない）。
 - 札の `link` は 1 回のポーリングで 32 回まで試し、それでも EEXIST なら 1 回待ってから続ける（同期 JS の busy loop と、TS のイベントループの占有を避ける）。待ち手の期限まで続けるのは設計どおり。
 - 最後の `mkdir` の試行は、期限ちょうどに起きた回の 1 回まで（期限の後の回は無い）。他者が札を外すのは期限＋60 秒からなので重ならない。
 - `parseArgs` は `--queue` の中身を読まない（`main` が `parseQueue` で読む）。orchestrate.md の `--queue "$MERGE_ISSUES"` を書いたまま検査できるようにするため（`--issue "$issue"` と同じ扱い）。
@@ -385,6 +388,6 @@ node scripts/orchestrate/merge-pr.mjs --run-dir "workspace/orchestration/runs/$D
 
 ### 8.4 残り
 
-- `verify-run.sh`（`.claude` と `.agents`）と `commandmate-skills` の写しへの札の移植（別の Issue）。それまで standalone の検証は先着順に入らない。
+- `commandmate-skills` の `verify-run.sh`・`run-tests.sh`・`SKILL.md` への札の移植（別の PR。オーケストレーターが追跡）。それまでその写しは札を知らない旧版。
 - 本番サーバーの再ビルド（gate-runner が札を知るのは再ビルドの後。利用者に伺う）。
 - §6 の未決（124 と CI の 124 の区別、優先度、猶予の値、credential helper のグループ）は変えていない。

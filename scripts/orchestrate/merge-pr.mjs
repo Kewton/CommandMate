@@ -387,7 +387,7 @@ function validateShared(options) {
  *   log?: (line: string) => void,
  *   error?: (line: string) => void,
  *   runPrecheck?: typeof runPrecheck,
- *   lockRoot?: string,
+ *   lockRoot?: string,   the directory of the merge locks (default: mergeLockRoot of the machine-lock root)
  *   repoDir?: string,
  *   pgid?: number,
  *   lockSleep?: (ms: number) => void,
@@ -810,6 +810,18 @@ export function mergeOne(o, deps) {
 const unresolvedDir = (root, name) => path.join(root, `${name}.unresolved`);
 
 /**
+ * Where the merge locks live: a directory of their own under the machine-lock root (#4277, 5-2b review
+ * P2-2). A verify.yaml `mutex` is a bare name in the root (`<root>/<name>.lock`, no `/` allowed), so
+ * no gate — the product runner's recovery included, which knows nothing of `.unresolved/` — can take,
+ * recover or delete a merge lock, whatever its `mutex` is called (`merge.Kewton.CommandMate.develop`
+ * included). Only merge-pr reads and writes here.
+ */
+export const MERGE_LOCK_DIR_NAME = 'merge';
+export function mergeLockRoot(machineRoot) {
+  return path.join(machineRoot, MERGE_LOCK_DIR_NAME);
+}
+
+/**
  * The writes of dead merge lock holders that nobody has confirmed: one file per dead holder, kept
  * until a merge-pr that names that PR ends with 0. Read by every merge-pr on the base (Codex review 2
  * finding 2: the stop must not be lost to the one run that happened to recover the lock).
@@ -856,7 +868,7 @@ const describeUnresolved = (owner) =>
  * this process group, so the lock outlives a dead parent while its git / gh children still run.
  */
 function takeMergeLock(o, deps, recovered) {
-  const root = deps.lockRoot ?? machineLockRoot(deps.home ?? os.homedir());
+  const root = deps.lockRoot ?? mergeLockRoot(machineLockRoot(deps.home ?? os.homedir()));
   const name = mergeLockName(o.repo, o.base);
   const acquire = deps.acquireMergeLock ?? acquireMachineLockSync;
   const lock = acquire(name, {
@@ -990,15 +1002,21 @@ export function resolveEntries(o, deps) {
     if (numbers.indexOf(n) !== i) problems.push(`#${n} is named by two entries (${resolved.filter((e) => e.pr === n).map((e) => e.text).join(', ')})`);
   }
   if (problems.length > 0) return { problems };
-  // Only the last entry of an Issue closes it, and only an entry without a work item (the rule of a
-  // single call, #3883): earlier PRs of the Issue leave it open (review 2 finding 4).
-  return {
-    resolved: resolved.map((entry, i) => ({
-      ...entry,
-      close:
-        o.close === '-' || entry.item !== null || resolved.slice(i + 1).some((later) => later.issue === entry.issue) ? '-' : String(entry.issue),
-    })),
-  };
+  return { resolved: assignClose(resolved, o.close) };
+}
+
+/**
+ * Which entry closes its Issue, decided on the order the entries RUN in: only the last of an Issue,
+ * and only one without a work item (the rule of a single call, #3883) — earlier PRs of the Issue leave
+ * it open (review 2 finding 4). runQueue calls it again after moving an unconfirmed write to the
+ * front (5-2b review P2-1): `3883@3889,3883@3895` run as 3895, 3889 must close after 3889, not 3895.
+ * A queue stops at the first failure, so the Issue is closed only once all its entries merged.
+ */
+export function assignClose(entries, close) {
+  return entries.map((entry, i) => ({
+    ...entry,
+    close: close === '-' || entry.item !== null || entries.slice(i + 1).some((later) => later.issue === entry.issue) ? '-' : String(entry.issue),
+  }));
 }
 
 /**
@@ -1023,7 +1041,8 @@ export function runQueue(o, deps) {
   const entries = resolution.resolved;
   const total = entries.length;
   const record = (entry, result, state, extra = '') => {
-    const pos = entries.indexOf(entry) + 1;
+    // By PR (unique in a queue): the order that runs holds copies once the close is decided again.
+    const pos = entries.findIndex((e) => e.pr === entry.pr) + 1;
     const note = `state=${state} queue=${o.queue} pos=${pos}/${total} pr=#${entry.pr}${extra ? ` ${extra}` : ''}`;
     appendRecord(o.runDir, o.issues, { issue: entry.issue, item: entry.item, stage: 'queue', result, note }, now());
     log(`queue #${entry.issue}${entry.item ? `/${entry.item}` : ''} ${state}: ${note}`);
@@ -1046,7 +1065,7 @@ export function runQueue(o, deps) {
     }
     // Every unconfirmed write on this base must be one of this queue's PRs; those go first (design §3.2).
     const pending = readUnresolved(root, name);
-    const order = [...entries];
+    let order = [...entries];
     for (const u of [...pending].reverse()) {
       const at = order.findIndex((entry) => entry.pr === u.owner.pr);
       if (at < 0) {
@@ -1059,7 +1078,11 @@ export function runQueue(o, deps) {
       }
       order.unshift(...order.splice(at, 1));
     }
-    if (pending.length > 0) log(`merge --queue: finishing the unconfirmed write(s) first: ${pending.map((u) => describeUnresolved(u.owner)).join(', ')}`);
+    if (pending.length > 0) {
+      log(`merge --queue: finishing the unconfirmed write(s) first: ${pending.map((u) => describeUnresolved(u.owner)).join(', ')}`);
+      // The close was decided on the given order; decide it again on the order that runs (P2-1).
+      order = assignClose(order, o.close);
+    }
 
     const lastIndex = order.length - 1;
     for (const [index, entry] of order.entries()) {

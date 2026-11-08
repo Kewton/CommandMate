@@ -211,22 +211,24 @@ node scripts/orchestrate/merge-pr.mjs --run-dir "workspace/orchestration/runs/$D
 - **やり直し**（entry ごと）: exit 3（precheck の保留）は 60 秒おいて 2 回まで、exit 4（CI 待ちの間に develop が進んだ）はすぐに 5 回まで。
   それ以外の非 0（1・2・124）と、上限を超えた 3・4 は**列を止め**、後ろの entry は流さない（記録は `waiting` のまま）。列の exit は止めた entry の exit。
 - **マージのロック**: 1 本の呼び出しも列も、base ごとのロック `merge.<owner>.<repo>.<base>`（例 `merge.Kewton.CommandMate.develop`、
-  lock root は `CM_VERIFY_LOCK_ROOT` か `~/.commandmate/locks`）を**実行の間ずっと**持つ。待ちは札の順（先着順）で、`--merge-lock-timeout`
+  置き場は lock root（`CM_VERIFY_LOCK_ROOT` か `~/.commandmate/locks`）の下の専用の `merge/`。verify.yaml の `mutex` は root 直下なので、
+  同じ名前の `mutex` を書いたゲートでもマージのロックに触れない）を**実行の間ずっと**持つ。待ちは札の順（先着順）で、`--merge-lock-timeout`
   （既定 14400 秒、上限 86400）を過ぎたら exit 124。列は初めに 1 回だけ取り、中の entry は取り直さない（自分を待たない）。
   待ち合わせのシェルを自作しない（プロセスの一覧は自分の行を拾う）。
 - **専用のプロセスグループ**: `merge-pr.mjs` は自分を detached の子として起動し直し（親の環境はそのまま継ぐ。`CM_MERGE_PR_INNER=1` を足すだけ）、
   ロックの記録にそのグループを書く。親だけが死んでも、push 中の `git` や `gh pr merge` が残る間はロックは生きている扱いで、次の列は重ならない。
   外側のプロセスは INT / TERM / HUP をグループへ送る。
 - **書込みの途中で死んだ持ち主**: ロックの記録は外への書込みの前に段（`refresh` → `precheck` → `push` → `ci-wait` → `merge` → `close` → `idle`）を書き換える。
-  `push` / `merge` / `close` の途中で死んだ持ち主のロックを回収した側は、`<lock root>/<ロック名>.unresolved/<token>.json` を書いてから回収する。
+  `push` / `merge` / `close` の途中で死んだ持ち主のロックを回収した側は、`<lock root>/merge/<ロック名>.unresolved/<token>.json` を書いてから回収する。
   このファイルがある間は、**その PR を含まない merge-pr はどれも何も変えずに exit 1**（`queue` に `recovered-stop`）で止まる。1 回止まっても消えない。
-  その PR を列に入れて流すと最初に処理され（マージ済みなら記録と close だけ）、0 で終わればファイルを消す。それ以外の段で死んだ持ち主は
+  その PR を列に入れて流すと最初に処理され（マージ済みなら記録と close だけ）、0 で終わればファイルを消す。前へ出した後は Issue を閉じる entry を
+  実行の順で決め直す（同じ Issue の entry は実行の順で最後のものだけが閉じる。列は失敗で止まるので、全部がマージされるまで閉じない）。それ以外の段で死んだ持ち主は
   `recovered` を記録して続ける。
 - **記録**: entry の状態が変わるたびに `queue` の行（`state=waiting` / `lock-timeout` / `recovered` / `recovered-stop` / `running` / `retry` / `merged` / `stopped`、
   `pos=` `attempt=` `exit=` `pr=`）。`queue` の行は HEAD を持たず進捗に数えない（docs/orchestrate/run-log.md）。`run-log.mjs status` が `queue:` に出す。
 
 `cpu.heavy` などの検証のロックも同じ札の規約で先着順になった（`machine-lock.ts` と `machine-lock-sync.mjs`。docs/design/verification-config.md §9.2）。
-standalone の `verify-run.sh` はまだ札を知らない（排他は保たれるが順番は保証されない。追跡は設計書 §8）。
+standalone の `verify-run.sh`（`.claude` と `.agents`）も同じ札の規約に追従した。`commandmate-skills` の写しへの移植は未（別途。それまでその写しは札を知らない旧版）。
 
 ## 6-3 落ちたジョブの再実行と run の完走
 

@@ -29,7 +29,8 @@
  *      `mkdir`. Before, whoever polled first after a release won, and a long
  *      wait (merge-pr's precheck) was overtaken by gates that came later.
  *      scripts/orchestrate/machine-lock-sync.mjs is the synchronous copy of the
- *      same convention (docs/design/merge-queue-fair-lock-4277.md §2).
+ *      same convention, and verify-run.sh (`lock_acquire`) the bash one
+ *      (docs/design/merge-queue-fair-lock-4277.md §2).
  *
  * Server-only: reads and writes the filesystem.
  *
@@ -184,6 +185,11 @@ export interface MachineLockTestHooks {
   startOf?: (pid: number) => number | null;
   link?: (src: string, dst: string) => void;
   beforeLink?: (n: number) => void;
+  /**
+   * Called while a dead holder's lock is recovered: before it is moved aside and
+   * right after. Lets a test put a third party's claim into the window (#4277 P1).
+   */
+  onRecover?: (stage: 'before-move' | 'moved') => void;
 }
 
 /** Ticket file names: 12 zero-padded digits, so lexical order is numeric order. */
@@ -440,14 +446,21 @@ let goneSerial = 0;
  * an old-version cleaner let someone take meanwhile is put back, never over a
  * lock taken in between.
  */
-function breakStale(lockPath: string, owner: LockOwner, myToken: string): void {
+function breakStale(
+  lockPath: string,
+  owner: LockOwner,
+  myToken: string,
+  onRecover?: (stage: 'before-move' | 'moved') => void
+): void {
   const gone = `${lockPath}.gone-${myToken}-${++goneSerial}`;
+  onRecover?.('before-move');
   try {
     renameSync(lockPath, gone);
   } catch {
     // Someone else broke or re-took it first; the next attempt sorts it out.
     return;
   }
+  onRecover?.('moved');
   const moved = readOwner(gone);
   if (moved && moved.token === owner.token) {
     rmSync(gone, { recursive: true, force: true });
@@ -603,7 +616,7 @@ export async function acquireMachineLock(
           const holder = readOwner(lockPath);
           if (holder && !broken.has(holder.token) && holderGone(holder, probes)) {
             broken.add(holder.token);
-            breakStale(lockPath, holder, token);
+            breakStale(lockPath, holder, token, hooks.onRecover);
             continue;
           }
         }

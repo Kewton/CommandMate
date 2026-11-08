@@ -123,6 +123,8 @@ WORKDIR=$(mktemp -d "$TMPBASE/cmate-verify.XXXXXX") || die_config "cannot create
 # "a forked child of this run is dying".
 cleanup_workdir() {
   [ "${BASH_SUBSHELL:-0}" -eq 0 ] || return 0
+  # Defined with the machine-wide lock below; absent only before it is parsed.
+  if command -v lock_cleanup_on_exit >/dev/null 2>&1; then lock_cleanup_on_exit; fi
   rm -rf "$WORKDIR"
 }
 trap cleanup_workdir EXIT
@@ -603,11 +605,46 @@ if [ -z "$LOCK_ROOT" ]; then LOCK_ROOT="${HOME:-/tmp}/.commandmate/locks"; fi
 LOCK_POLL_SEC=0.25
 LOCK_HOST=$(hostname 2>/dev/null || echo unknown)
 
-# One field out of the owner record, which is the JSON object below. Read with
-# awk rather than a shell regex so a value containing `:` or `,` cannot corrupt
-# the next field.
-lock_owner_field() { # <lock-path> <key>
-  [ -f "$1/owner" ] || return 0
+# Waiters are served in the order they came (CommandMate #4277). A waiter takes
+# a ticket (`<root>/<name>.queue/<12 digits>`, published with `ln`, which refuses
+# an existing name) and only the holder of the smallest live ticket tries the
+# `mkdir` — and only it recovers a dead holder's lock. Before, whoever polled
+# first after a release won, and this runner's bare `mkdir` could also step in
+# while the TS runner had moved a dead holder's lock aside to recover it, so two
+# runs held the lock at once. The ticket shapes, the retire rules and the
+# recovery are the same as src/lib/verification/machine-lock.ts and
+# scripts/orchestrate/machine-lock-sync.mjs (docs/design/merge-queue-fair-lock-4277.md §2).
+LOCK_SAME_HOST_GRACE_MS=60000
+LOCK_OTHER_HOST_GRACE_MS=600000
+LOCK_PID_REUSE_SLACK_MS=2000
+LOCK_LINK_TRIES=32
+# The pid whose own tickets are never judged "reused" (it is this process).
+LOCK_SELF_PID=$$
+# A live ticket / a held lock of this process, so the EXIT trap can hand them back.
+LOCK_TICKET=""
+LOCK_HELD_PATH=""
+LOCK_HELD_TOKEN=""
+LOCK_GONE_SERIAL=0
+lock_start_cache_pid=""
+lock_start_cache_val=""
+lock_start_cache_at=0
+
+# Milliseconds since the epoch. `date +%s%3N` where date has it (GNU), else
+# seconds * 1000 (macOS) — the ticket deadline is then whole seconds, which is
+# also how this runner counts its budget.
+lock_now_ms() {
+  lnm=$(date +%s%3N 2>/dev/null)
+  case "$lnm" in
+    ''|*[!0-9]*) echo $(( $(date +%s) * 1000 ));;
+    *) echo "$lnm";;
+  esac
+}
+
+# One field out of a JSON record (an owner or a ticket): strings, digits, true /
+# false. Read with awk rather than a shell regex so a value containing `:` or `,`
+# cannot corrupt the next field.
+lock_json_field() { # <file> <key>
+  [ -f "$1" ] || return 0
   awk -v key="$2" '
     {
       k = "\"" key "\":"
@@ -618,6 +655,10 @@ lock_owner_field() { # <lock-path> <key>
         v = substr(v, 2)
         j = index(v, "\"")
         if (j > 0) v = substr(v, 1, j - 1)
+      } else if (substr(v, 1, 4) == "true") {
+        v = "true"
+      } else if (substr(v, 1, 5) == "false") {
+        v = "false"
       } else {
         j = 1
         while (j <= length(v) && index("0123456789", substr(v, j, 1)) > 0) j++
@@ -625,7 +666,11 @@ lock_owner_field() { # <lock-path> <key>
       }
       print v
       exit
-    }' "$1/owner" 2>/dev/null
+    }' "$1" 2>/dev/null
+}
+
+lock_owner_field() { # <lock-path> <key>
+  lock_json_field "$1/owner" "$2"
 }
 
 # Is the recorded holder gone? Only decidable on the machine that wrote the
@@ -645,6 +690,155 @@ lock_owner_is_dead() { # <pid> <host>
   esac
 }
 
+# A holder that named a process group (merge-pr's inner process, #4277) is alive
+# while any process of the group is: a push its parent left running still writes.
+lock_group_is_empty() { # <pgid>
+  case "$1" in ''|*[!0-9]*) return 0;; esac
+  [ "$1" -gt 1 ] || return 0
+  lge_out=$(kill -0 -- "-$1" 2>&1) && return 1
+  case "$lge_out" in
+    *[Nn]o\ such\ process*) return 0;;
+    *) return 1;;
+  esac
+}
+
+lock_record_gone() { # <file>
+  lock_owner_is_dead "$(lock_json_field "$1" pid)" "$(lock_json_field "$1" host)" || return 1
+  lock_group_is_empty "$(lock_json_field "$1" pgid)"
+}
+
+# When <pid> started (ms), from `ps -o etime=` (`[[dd-]hh:]mm:ss`); empty when ps
+# cannot say. One answer is trusted for 10 s, like the TS runner's cache.
+lock_pid_start_ms() { # <pid> <now-ms>
+  if [ "$lock_start_cache_pid" = "$1" ] && [ $(( $2 - lock_start_cache_at )) -lt 10000 ]; then
+    echo "$lock_start_cache_val"
+    return 0
+  fi
+  lps_et=$(ps -o etime= -p "$1" 2>/dev/null) || lps_et=""
+  lps_val=$(printf '%s\n' "$lps_et" | awk -v now="$2" '
+    NF == 1 {
+      s = $1; d = 0
+      if (index(s, "-") > 0) { split(s, a, "-"); d = a[1]; s = a[2] }
+      n = split(s, p, ":")
+      if (n == 3) { h = p[1]; m = p[2]; x = p[3] }
+      else if (n == 2) { h = 0; m = p[1]; x = p[2] }
+      else exit
+      printf "%.0f\n", now - (((d * 24 + h) * 60 + m) * 60 + x) * 1000
+      exit
+    }')
+  lock_start_cache_pid=$1
+  lock_start_cache_val=$lps_val
+  lock_start_cache_at=$2
+  echo "$lps_val"
+}
+
+# Why another waiter's ticket may be retired (printed), or return 1 — never by
+# age alone: a long gate budget is a legitimate long wait.
+lock_ticket_retirable() { # <file> <now-ms>
+  ltr_token=$(lock_json_field "$1" token)
+  [ -n "$ltr_token" ] || return 1
+  ltr_host=$(lock_json_field "$1" host)
+  ltr_pid=$(lock_json_field "$1" pid)
+  ltr_created=$(lock_json_field "$1" createdAt)
+  ltr_deadline=$(lock_json_field "$1" deadline)
+  if [ "$ltr_host" = "$LOCK_HOST" ]; then
+    if lock_record_gone "$1"; then echo gone; return 0; fi
+    if [ -n "$ltr_pid" ] && [ "$ltr_pid" != "$LOCK_SELF_PID" ] && [ -n "$ltr_created" ]; then
+      ltr_start=$(lock_pid_start_ms "$ltr_pid" "$2")
+      if [ -n "$ltr_start" ] && [ "$ltr_start" -gt $(( ltr_created + LOCK_PID_REUSE_SLACK_MS )) ]; then
+        echo pid-reused
+        return 0
+      fi
+    fi
+    if [ -n "$ltr_deadline" ] && [ "$2" -gt $(( ltr_deadline + LOCK_SAME_HOST_GRACE_MS )) ]; then echo expired; return 0; fi
+    return 1
+  fi
+  if [ -n "$ltr_deadline" ] && [ "$2" -gt $(( ltr_deadline + LOCK_OTHER_HOST_GRACE_MS )) ]; then echo expired; return 0; fi
+  return 1
+}
+
+# Ticket names in the queue, ascending (12 digits, so lexical order is numeric).
+lock_ticket_names() { # <queue-dir>
+  [ -d "$1" ] || return 0
+  ls -1 "$1" 2>/dev/null | grep -E '^[0-9]{12}$' | sort
+}
+
+# Mark a ticket used, if it is still <token>'s, by renaming a {done:true} record
+# over it (readers see the old or the new content, never half).
+lock_mark_done() { # <file> <token>
+  [ "$(lock_json_field "$1" token)" = "$2" ] || return 1
+  [ "$(lock_json_field "$1" done)" != "true" ] || return 1
+  lmd_tmp="$(dirname "$1")/.d-$2-$$-${RANDOM}${RANDOM}"
+  if printf '{"done":true,"token":"%s","doneAt":%s}\n' "$2" "$(lock_now_ms)" > "$lmd_tmp" 2>/dev/null &&
+    mv -f "$lmd_tmp" "$1" 2>/dev/null; then
+    return 0
+  fi
+  rm -f "$lmd_tmp" 2>/dev/null
+  return 1
+}
+
+# Publish <tmp> as the ticket max+1 and withdraw it when a larger number exists
+# (it was published late). Sets LOCK_TICKET, or leaves it empty when every try
+# this poll met contention. Returns 1 only when `ln` failed for another reason
+# than an existing name.
+lock_take_ticket() { # <queue-dir> <tmp>
+  ltt_tries=0
+  while [ "$ltt_tries" -lt "$LOCK_LINK_TRIES" ]; do
+    ltt_tries=$(( ltt_tries + 1 ))
+    ltt_max=$(lock_ticket_names "$1" | tail -n 1)
+    [ -n "$ltt_max" ] || ltt_max=0
+    ltt_name=$(printf '%012d' $(( 10#$ltt_max + 1 )))
+    if ! ln "$2" "$1/$ltt_name" 2>/dev/null; then
+      [ -e "$1/$ltt_name" ] && continue
+      return 1
+    fi
+    if [ "$(lock_ticket_names "$1" | tail -n 1)" != "$ltt_name" ]; then
+      lock_mark_done "$1/$ltt_name" "$LOCK_TOKEN" || true
+      continue
+    fi
+    LOCK_TICKET="$1/$ltt_name"
+    return 0
+  done
+  return 0
+}
+
+# Delete used tickets below the largest (the largest stays, so a late ticket
+# always sees a larger one), and temporaries a dead writer left an hour ago.
+lock_collect_garbage() { # <queue-dir>
+  lcg_max=$(lock_ticket_names "$1" | tail -n 1)
+  for lcg_name in $(lock_ticket_names "$1"); do
+    [ "$lcg_name" = "$lcg_max" ] && continue
+    if [ "$(lock_json_field "$1/$lcg_name" done)" = "true" ]; then rm -f "$1/$lcg_name" 2>/dev/null; fi
+  done
+  find "$1" -maxdepth 1 -type f \( -name '.t-*' -o -name '.d-*' \) -mmin +60 -exec rm -f {} + 2>/dev/null || true
+}
+
+lock_retire_own_ticket() {
+  if [ -n "$LOCK_TICKET" ]; then lock_mark_done "$LOCK_TICKET" "$LOCK_TOKEN" || true; fi
+  LOCK_TICKET=""
+}
+
+# Recover a lock whose recorded holder is gone: move it aside, then read what was
+# moved. Only the very record judged dead is deleted; a lock someone took
+# meanwhile (an old-version cleaner let them in) is put back, never over a lock
+# taken in between.
+lock_recover() { # <lock-path> <dead-token> <dead-pid>
+  LOCK_GONE_SERIAL=$(( LOCK_GONE_SERIAL + 1 ))
+  lrc_gone="$1.gone-$LOCK_TOKEN-$LOCK_GONE_SERIAL"
+  mv "$1" "$lrc_gone" 2>/dev/null || return 0
+  if [ "$(lock_owner_field "$lrc_gone" token)" = "$2" ]; then
+    rm -rf "$lrc_gone" 2>/dev/null || true
+    echo "verify-run: broke a stale lock at $1 (recorded holder pid $3 on this host no longer exists)" >&2
+    return 0
+  fi
+  if ! mkdir "$1" 2>/dev/null; then
+    echo "verify-run: machine-lock-restore-failed $1: kept $lrc_gone" >&2
+    return 0
+  fi
+  if [ -f "$lrc_gone/owner" ]; then mv -f "$lrc_gone/owner" "$1/owner" 2>/dev/null || true; fi
+  rm -rf "$lrc_gone" 2>/dev/null || true
+}
+
 # lock_acquire <name> <budget-seconds>
 # Sets LOCK_PATH / LOCK_TOKEN / LOCK_WAITED / LOCK_HELD_BY.
 # Returns 0 when the lock is held by this process, 1 when the budget ran out.
@@ -652,38 +846,86 @@ lock_acquire() {
   la_name=$1
   la_budget=$2
   LOCK_PATH="$LOCK_ROOT/$la_name.lock"
+  la_queue="$LOCK_ROOT/$la_name.queue"
   LOCK_TOKEN="$$-$(date +%s)-${RANDOM}${RANDOM}"
   LOCK_WAITED=0
   LOCK_HELD_BY=""
+  LOCK_TICKET=""
   mkdir -p "$LOCK_ROOT" 2>/dev/null || true
   la_start=$(date +%s)
+  la_start_ms=$(lock_now_ms)
+  la_deadline=$(( la_start_ms + la_budget * 1000 ))
+  la_tmp="$la_queue/.t-$LOCK_TOKEN"
   la_broken=""
   while :; do
-    if mkdir "$LOCK_PATH" 2>/dev/null; then
-      printf '{"pid":%s,"host":"%s","token":"%s","acquiredAt":%s}\n' \
-        "$$" "$LOCK_HOST" "$LOCK_TOKEN" "$(( $(date +%s) * 1000 ))" > "$LOCK_PATH/owner"
-      LOCK_WAITED=$(( $(date +%s) - la_start ))
-      return 0
-    fi
-    la_pid=$(lock_owner_field "$LOCK_PATH" pid)
-    la_host=$(lock_owner_field "$LOCK_PATH" host)
-    la_token=$(lock_owner_field "$LOCK_PATH" token)
-    if [ -n "$la_token" ]; then LOCK_HELD_BY="pid ${la_pid:-unknown} on ${la_host:-unknown host}"; fi
-    # A stale record is broken at most once per token, so a directory nobody can
-    # remove degrades into ordinary waiting instead of a spin loop.
-    if [ -n "$la_token" ] && [ "$la_token" != "$la_broken" ] && lock_owner_is_dead "$la_pid" "$la_host"; then
-      la_broken=$la_token
-      # Only ever remove the record just read: the holder may have released and
-      # a new one taken it between the two reads.
-      if [ "$(lock_owner_field "$LOCK_PATH" token)" = "$la_token" ]; then
-        rm -rf "$LOCK_PATH" 2>/dev/null || true
-        echo "verify-run: broke a stale lock at $LOCK_PATH (recorded holder pid $la_pid on this host no longer exists)" >&2
+    if [ -n "$LOCK_TICKET" ]; then
+      if [ "$(lock_json_field "$LOCK_TICKET" token)" != "$LOCK_TOKEN" ] || [ "$(lock_json_field "$LOCK_TICKET" done)" = "true" ]; then
+        echo "verify-run: machine-lock-ticket-lost $LOCK_TICKET: taking a new ticket at the end of the queue" >&2
+        LOCK_TICKET=""
       fi
-      continue
     fi
-    la_now=$(date +%s)
-    if [ $(( la_now - la_start )) -ge "$la_budget" ]; then
-      LOCK_WAITED=$(( la_now - la_start ))
+    if [ -z "$LOCK_TICKET" ]; then
+      mkdir -p "$la_queue" 2>/dev/null || true
+      printf '{"pid":%s,"host":"%s","token":"%s","createdAt":%s,"deadline":%s}\n' \
+        "$$" "$LOCK_HOST" "$LOCK_TOKEN" "$la_start_ms" "$la_deadline" > "$la_tmp" 2>/dev/null
+      if ! lock_take_ticket "$la_queue" "$la_tmp"; then
+        rm -f "$la_tmp" 2>/dev/null
+        echo "verify-run: cannot publish a ticket in $la_queue (ln failed), so the lock $LOCK_PATH was not tried" >&2
+        LOCK_WAITED=$(( $(date +%s) - la_start ))
+        return 1
+      fi
+      rm -f "$la_tmp" 2>/dev/null
+    fi
+    la_blocker=""
+    if [ -n "$LOCK_TICKET" ]; then
+      la_mine=${LOCK_TICKET##*/}
+      la_now=$(lock_now_ms)
+      for la_entry in $(lock_ticket_names "$la_queue"); do
+        [ "$la_entry" \< "$la_mine" ] || break
+        [ "$(lock_json_field "$la_queue/$la_entry" done)" = "true" ] && continue
+        if la_why=$(lock_ticket_retirable "$la_queue/$la_entry" "$la_now"); then
+          if lock_mark_done "$la_queue/$la_entry" "$(lock_json_field "$la_queue/$la_entry" token)"; then
+            echo "verify-run: machine-lock-ticket-retired $la_queue/$la_entry ($la_why)" >&2
+          fi
+          continue
+        fi
+        la_blocker="$la_queue/$la_entry"
+        break
+      done
+      if [ -z "$la_blocker" ]; then
+        if mkdir "$LOCK_PATH" 2>/dev/null; then
+          printf '{"pid":%s,"host":"%s","token":"%s","acquiredAt":%s}\n' \
+            "$$" "$LOCK_HOST" "$LOCK_TOKEN" "$(lock_now_ms)" > "$LOCK_PATH/owner"
+          LOCK_HELD_PATH=$LOCK_PATH
+          LOCK_HELD_TOKEN=$LOCK_TOKEN
+          lock_retire_own_ticket
+          lock_collect_garbage "$la_queue"
+          LOCK_WAITED=$(( $(date +%s) - la_start ))
+          return 0
+        fi
+        la_token=$(lock_owner_field "$LOCK_PATH" token)
+        # A stale record is broken at most once per token, so a directory nobody
+        # can remove degrades into ordinary waiting instead of a spin loop.
+        if [ -n "$la_token" ] && [ "$la_token" != "$la_broken" ] && lock_record_gone "$LOCK_PATH/owner"; then
+          la_broken=$la_token
+          lock_recover "$LOCK_PATH" "$la_token" "$(lock_owner_field "$LOCK_PATH" pid)"
+          continue
+        fi
+      fi
+    fi
+    la_token=$(lock_owner_field "$LOCK_PATH" token)
+    if [ -n "$la_token" ]; then
+      LOCK_HELD_BY="pid $(lock_owner_field "$LOCK_PATH" pid) on $(lock_owner_field "$LOCK_PATH" host)"
+    elif [ -n "$la_blocker" ]; then
+      if [ -n "$(lock_json_field "$la_blocker" token)" ]; then
+        LOCK_HELD_BY="queue ticket $la_blocker (pid $(lock_json_field "$la_blocker" pid) on $(lock_json_field "$la_blocker" host))"
+      else
+        LOCK_HELD_BY="queue ticket $la_blocker (unreadable)"
+      fi
+    fi
+    if [ "$(lock_now_ms)" -ge "$la_deadline" ]; then
+      lock_retire_own_ticket
+      LOCK_WAITED=$(( $(date +%s) - la_start ))
       return 1
     fi
     sleep "$LOCK_POLL_SEC" 2>/dev/null || sleep 1
@@ -694,10 +936,22 @@ lock_acquire() {
 # check, a holder whose lock was broken as stale would delete the NEXT holder's
 # directory and hand the resource to two runs at once.
 lock_release() { # <lock-path> <token>
+  if [ "$1" = "$LOCK_HELD_PATH" ] && [ "$2" = "$LOCK_HELD_TOKEN" ]; then
+    LOCK_HELD_PATH=""
+    LOCK_HELD_TOKEN=""
+  fi
   [ -d "$1" ] || return 0
   lr_current=$(lock_owner_field "$1" token)
   if [ -n "$lr_current" ] && [ "$lr_current" != "$2" ]; then return 0; fi
   rm -rf "$1" 2>/dev/null || true
+}
+
+# Called from the EXIT trap of the top-level shell (cleanup_workdir): a run
+# stopped while it waited hands its ticket back, and one stopped while it held
+# releases the lock. `kill -9` leaves both for the next waiter to recover.
+lock_cleanup_on_exit() {
+  lock_retire_own_ticket
+  if [ -n "$LOCK_HELD_PATH" ]; then lock_release "$LOCK_HELD_PATH" "$LOCK_HELD_TOKEN"; fi
 }
 
 # --- gate execution -----------------------------------------------------------

@@ -18,6 +18,9 @@
  * ticket published late is withdrawn), and there is no path to the `mkdir`
  * without a ticket.
  *
+ * The standalone runner's bash (.claude/skills/cmate-verify/scripts/verify-run.sh
+ * `lock_acquire`) is the third copy of the convention.
+ *
  * scripts/orchestrate/*.mjs do not import src/ TypeScript, which is why this
  * is a copy: precheck.mjs (cpu.heavy) and merge-pr.mjs (the merge lock) run
  * synchronously under spawnSync.
@@ -260,13 +263,16 @@ let goneSerial = 0;
  *
  * @returns {'recovered' | 'restored' | 'restore-failed' | 'gone'}
  */
-export function recoverLock(lockPath, dead, myToken, warn = () => {}) {
+export function recoverLock(lockPath, dead, myToken, warn = () => {}, onRecover = undefined) {
   const gone = `${lockPath}.gone-${myToken}-${++goneSerial}`;
+  onRecover?.('before-move');
   try {
     fs.renameSync(lockPath, gone);
   } catch {
     return 'gone';
   }
+  // Test seam (#4277 P1): a third party's claim can be put into the window here.
+  onRecover?.('moved');
   const moved = readOwner(gone);
   if (moved && moved.token === dead.token) {
     fs.rmSync(gone, { recursive: true, force: true });
@@ -303,7 +309,7 @@ export function recoverLock(lockPath, dead, myToken, warn = () => {}) {
  *   shouldAbandon?: () => boolean,
  *   onWait?: () => void,
  *   warn?: (line: string) => void,
- *   hooks?: { link?: (src: string, dst: string) => void, beforeLink?: (n: number) => void, startOf?: (pid: number) => number | null, now?: () => number, host?: string, pidAlive?: (pid: number) => boolean, groupAlive?: (pgid: number) => boolean },
+ *   hooks?: { onRecover?: (stage: 'before-move' | 'moved') => void, link?: (src: string, dst: string) => void, beforeLink?: (n: number) => void, startOf?: (pid: number) => number | null, now?: () => number, host?: string, pidAlive?: (pid: number) => boolean, groupAlive?: (pgid: number) => boolean },
  * }} options
  * @returns {{ acquired: boolean, waitedMs: number, heldBy: string | null, abandoned?: boolean, release: () => void, setOwnerFields: (fields: Record<string, unknown>) => boolean, path: string }}
  */
@@ -417,7 +423,7 @@ export function acquireMachineLockSync(name, options) {
             broken.add(holder.token);
             // Persist what the dead holder was doing before its lock is gone (merge-pr: an unconfirmed write).
             options.onStaleHolder?.(holder);
-            recoverLock(lockPath, holder, token, warn);
+            recoverLock(lockPath, holder, token, warn, hooks.onRecover);
             continue;
           }
         }

@@ -536,6 +536,7 @@ runner・standalone runner・`/orchestrate` の precheck と merge-pr が同じ�
 | 解放 | `owner` の `token` が自分のものであるときだけディレクトリを削除する。**1 つの取得の解放は 1 回だけ**で、2 回目は何もしない（#4277。古い handle が次の保有者のロックを動かさない） |
 | 死んだ保有者 | `host` が自ホストと一致し、かつ `pid` が存在しない（`kill(pid,0)` が ESRCH）、`pgid` があればそのグループにも 1 つも残っていない（`kill(-pgid,0)` が ESRCH）ときのみ、**列の先頭の待ち手が**回収してよい。回収はロックを `<name>.lock.gone-<token>` へ `rename` で退かしてから中身を読み、死んだと判定した token のときだけ消す（違えば元へ戻す）。**他ホストの pid では判断しない**（共有 home で 2 台が同時実行しうる） |
 | 名前 | `^[A-Za-z0-9_.-]+$` / 64 文字以内。ゲート ID ではなく**資源**の名前なので、別リポジトリのゲート同士が `port.60303` のような名前で排他し合ってよい |
+| マージのロックの置き場（#4277） | merge-pr のロックと `.unresolved/` は `<root>/merge/` に置く。`mutex` の名前は `/` を含めないので root 直下にしか作れず、`mutex: merge.Kewton.CommandMate.develop` と書いたゲートも別のロックになる（ゲートの回収は `.unresolved/` を書かないので、同じ場所だと書込みの途中で死んだマージの停止を消せた） |
 
 環境変数 `CM_VERIFY_LOCK_ROOT` でルートを差し替えられる（テストは必ずこれを使うこと。
 実 `~/.commandmate/locks` を使うテストは、並列 worktree の稼働中ランと排他して偽の赤を作る）。
@@ -579,12 +580,11 @@ claudemd-size / route-exports。各 0.1〜0.3s）は失敗を秒で返すため�
 | `gate-runner.ts` の `runGateAttempt` | `mutex` を宣言したゲートの試行ごと（CommandMate の runner） |
 | `.claude/skills/cmate-verify/scripts/verify-run.sh`（＋ `.agents/...` のコピー） | 同じく試行ごと（standalone runner、同じパス規約） |
 | `scripts/orchestrate/precheck.mjs`（`acquireMachineLockSync`） | `/orchestrate` 6-1-1 の `related` / `tests` の段が広いときだけ `cpu.heavy` を取る（#3884 H-10。ガードと docs だけの狭い段は取らない） |
-| `scripts/orchestrate/merge-pr.mjs`（`machine-lock-sync.mjs`） | マージの間ずっと、base ごとの `merge.<owner>.<repo>.<base>` を取る（#4277。`cpu.heavy` とは別の名前。owner に `pgid` と `phase`） |
+| `scripts/orchestrate/merge-pr.mjs`（`machine-lock-sync.mjs`） | マージの間ずっと、base ごとの `merge.<owner>.<repo>.<base>` を取る（#4277。置き場は root の下の `merge/`。`mutex` は root 直下なので、同じ名前の `mutex` でもマージのロックに届かない。owner に `pgid` と `phase`） |
 
-札（#4277）に追従しているのは `gate-runner.ts`（`machine-lock.ts`）・precheck・merge-pr（`machine-lock-sync.mjs`）で、
-`verify-run.sh` はまだ札を知らない（`mkdir` の取り合いのまま。排他は死んだ保有者が無いときは保たれ、順番は保証されない）。
-.agents 側の写しとバイト単位で一致させる必要があり、#4277 の変更の範囲に入れられなかったため、別の Issue で移す
-（docs/design/merge-queue-fair-lock-4277.md §8）。
+札（#4277）には 4 つとも追従している: `gate-runner.ts`（`machine-lock.ts`）・`verify-run.sh`（bash。`.claude` と `.agents` はバイト一致）・
+precheck・merge-pr（`machine-lock-sync.mjs`）。札を知らないのは旧版だけ（再ビルド前の本番サーバー、`commandmate-skills` の写し。移植は別途）で、
+旧版と混在する間の排他は死んだ保有者が無いときに限る（docs/design/merge-queue-fair-lock-4277.md §2.4・§8）。
 
 したがって `cpu.heavy` が保証するのは「**ゲートとして、または precheck の広い段として**起動された
 重いスイートは同時に 1 本」までであって、ワーカーや開発者が手で叩く `npm run test:unit`

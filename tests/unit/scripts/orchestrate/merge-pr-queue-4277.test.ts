@@ -12,7 +12,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { acquireMachineLock } from '@/lib/verification/machine-lock';
 import { appendRecord, readRecords, queueSummary } from '../../../../scripts/orchestrate/run-log.mjs';
 import {
   INNER_ENV,
@@ -20,6 +21,7 @@ import {
   innerSpawnOptions,
   main,
   mergeLockName,
+  mergeLockRoot,
   parseArgs,
   parseQueue,
   readUnresolved,
@@ -500,5 +502,75 @@ describe('orchestrate.md 6-2 calls the queue in a form it accepts', () => {
     expect(section).toContain('docs/orchestrate/ci-merge.md#6-2-マージの列--queue');
     const doc = fs.readFileSync(path.join(REPO, 'docs/orchestrate/ci-merge.md'), 'utf8');
     expect(doc).toContain('## 6-2 マージの列（--queue）');
+  });
+});
+
+describe('5-2b review P2-1: an unconfirmed write moved to the front does not close its Issue early', () => {
+  it('positive control: 3883@3889,3883@3895 with 3895 unconfirmed runs 3895 first and does not close #3883 before 3889 merged', () => {
+    const w = world([{ issue: 3883, pr: 3889, recorded: false }, { issue: 3883, pr: 3895, recorded: false }]);
+    deadHolder({ phase: 'merge', entry: '3883@3895', issue: 3883, pr: 3895 });
+    w.wts[0].fake.state.failCommands.push('gh pr merge');
+    const r = runQueue(w, '3883@3889,3883@3895');
+    expect(r.code).not.toBe(0);
+    expect(w.writes()).toEqual([3895, 3889]);
+    // 3889 did not merge: the Issue stays open.
+    expect(w.order.filter((o) => o.verb === 'issue close')).toEqual([]);
+    expect(w.issueState.get(3883)).toBe('OPEN');
+  });
+
+  it('both merge: the Issue is closed once, after the entry that ran last', () => {
+    const w = world([{ issue: 3883, pr: 3889, recorded: false }, { issue: 3883, pr: 3895, recorded: false }]);
+    deadHolder({ phase: 'merge', entry: '3883@3895', issue: 3883, pr: 3895 });
+    const r = runQueue(w, '3883@3889,3883@3895');
+    expect(r.code, r.err).toBe(0);
+    expect(w.writes()).toEqual([3895, 3889]);
+    expect(w.order.filter((o) => o.verb !== 'pr merge').map((o) => o.n)).toEqual(['3883 #3889 でマージした。']);
+    expect(w.order.map((o) => o.verb)).toEqual(['pr merge', 'pr merge', 'issue close']);
+    // The positions in the queue record are still those of the given order.
+    expect(readRecords(runDir, ISSUES).logRecords.filter((x: { note: string }) => x.note.includes('state=merged')).map((x: { note: string }) => /pos=(\S+)/.exec(x.note)?.[1])).toEqual(['2/2', '1/2']);
+  });
+});
+
+describe('5-2b review P2-2: a verify.yaml mutex cannot reach the merge lock', () => {
+  it('the merge locks live in a directory of their own under the machine-lock root', () => {
+    expect(mergeLockRoot('/r')).toBe(path.join('/r', 'merge'));
+  });
+
+  it('positive control: a gate whose mutex is named like the merge lock takes its own lock and leaves a dead merge holder (and its stop) alone', async () => {
+    const machineRoot = path.join(tmp, 'machine-locks');
+    vi.stubEnv('CM_VERIFY_LOCK_ROOT', machineRoot);
+    try {
+      lockRoot = mergeLockRoot(machineRoot);
+      const w = world([{ issue: 5000, pr: 5001 }, { issue: 4245, pr: 4263 }]);
+      deadHolder({ phase: 'push', entry: '5000', issue: 5000, pr: 5001 });
+      // The product runner's path (gate-runner -> acquireMachineLock) with `mutex: merge.Kewton.CommandMate.develop`:
+      // it recovers dead holders without writing `.unresolved/`, so it must not see this one.
+      const gate = await acquireMachineLock(LOCK, { root: machineRoot, timeoutMs: 1000, pollIntervalMs: 5 });
+      expect(gate.acquired).toBe(true);
+      if (gate.acquired) {
+        expect(gate.handle.path).toBe(path.join(machineRoot, `${LOCK}.lock`));
+        gate.handle.release();
+      }
+      expect(fs.existsSync(path.join(lockPathOf(lockRoot, LOCK), 'owner'))).toBe(true);
+      // merge-pr with the default root (no deps.lockRoot) finds the dead holder there and stops.
+      const out: string[] = [];
+      const code = main(['--run-dir', runDir, '--issues', ISSUES, '--queue', '4245'], {
+        run: w.run, sleep: () => {}, findTestsNaming: () => [], repoDir: tmp, home: tmp, log: (l: string) => out.push(l), error: (l: string) => out.push(l),
+      });
+      expect(code, out.join('\n')).toBe(1);
+      expect(out.join('\n')).toContain('died while writing #5000 (pr=#5001) phase=push');
+      expect(readUnresolved(lockRoot, LOCK)).toHaveLength(1);
+      expect(w.writes()).toEqual([]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('negative control: the gate lock of that name still excludes other gates as before', async () => {
+    const machineRoot = path.join(tmp, 'machine-locks');
+    const held = await acquireMachineLock(LOCK, { root: machineRoot, timeoutMs: 0 });
+    expect(held.acquired).toBe(true);
+    expect((await acquireMachineLock(LOCK, { root: machineRoot, timeoutMs: 30, pollIntervalMs: 5 })).acquired).toBe(false);
+    if (held.acquired) held.handle.release();
   });
 });

@@ -12,6 +12,10 @@
  *   (c) a dead holder's ticket is retired and the queue moves on (ESRCH, pid reuse, deadline + grace)
  *   (d) a waiter never waits for itself (its own ticket, its own released lock)
  *
+ * The standalone runner's bash (`verify-run.sh`, the `.claude` and `.agents` copies are byte-identical)
+ * follows the same convention since the 5-2b review of #4277 (P1) and has its row too: its lock
+ * functions are cut out of the script and run in a bash of their own (BASH_DRIVER below).
+ *
  * Holders and early waiters are real processes (fixtures/lock-actor-4277.mjs). Every lock root is
  * under os.tmpdir() and removed after each test.
  *
@@ -30,6 +34,67 @@ import { acquireMachineLockSync as precheckAcquire } from '../../../scripts/orch
 const REPO = path.resolve(__dirname, '../../..');
 const SYNC_MODULE = path.join(REPO, 'scripts/orchestrate/machine-lock-sync.mjs');
 const ACTOR = path.join(__dirname, 'fixtures/lock-actor-4277.mjs');
+const VERIFY_RUN = path.join(REPO, '.claude/skills/cmate-verify/scripts/verify-run.sh');
+
+/**
+ * verify-run.sh's lock section, alone: `bash -c BASH_DRIVER bash <verify-run.sh> <root> <name> <budget-s> <events> [self-pid]`.
+ * Appends {event, heldBy} lines to <events> (acquired / not-acquired / released), holds the lock
+ * until `<events>.release` exists, then releases it. `self-pid` is the pid whose tickets the driver
+ * treats as its own (LOCK_SELF_PID): the test process writes tickets on the driver's behalf.
+ */
+const BASH_DRIVER = `
+script=$1 root=$2 name=$3 budget=$4 events=$5 selfpid=$6
+export CM_VERIFY_LOCK_ROOT="$root"
+eval "$(sed -n '/^# --- machine-wide gate lock/,/^# --- gate execution/p' "$script")"
+if [ -n "$selfpid" ]; then LOCK_SELF_PID=$selfpid; fi
+emit() { printf '{"event":"%s","pid":%s,"heldBy":"%s"}\\n' "$1" "$$" "$LOCK_HELD_BY" >> "$events"; }
+if lock_acquire "$name" "$budget"; then
+  emit acquired
+  while [ ! -e "$events.release" ]; do sleep 0.02; done
+  lock_release "$LOCK_PATH" "$LOCK_TOKEN"
+  emit released
+else
+  emit not-acquired
+fi
+`;
+
+/** Read a driver's events file. */
+function bashEvents(events: string): { event: string; pid: number; heldBy: string; t?: number }[] {
+  return fs.existsSync(events)
+    ? fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line))
+    : [];
+}
+
+/** Block (synchronously) until `predicate` holds or `timeoutMs` passes. */
+function waitSync(predicate: () => boolean, timeoutMs = 10000): boolean {
+  const until = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > until) return false;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+  }
+  return true;
+}
+
+let bashSerial = 0;
+
+/**
+ * Start verify-run.sh's lock_acquire in its own bash. The returned `release` asks the holder to
+ * release and waits for it, synchronously (an Outcome's release is synchronous).
+ */
+function startBash(name: string, budgetSec: number, { script = VERIFY_RUN, selfPid }: { script?: string; selfPid?: number } = {}) {
+  const events = path.join(root, `bash-events-${++bashSerial}.jsonl`);
+  const child = spawn('bash', ['-c', BASH_DRIVER, 'bash', script, root, name, String(budgetSec), events, selfPid ? String(selfPid) : ''], {
+    stdio: 'ignore',
+  });
+  children.push(child);
+  const first = () => bashEvents(events).find((e) => e.event === 'acquired' || e.event === 'not-acquired') ?? null;
+  const release = () => {
+    if (first()?.event !== 'acquired') return;
+    fs.writeFileSync(`${events}.release`, '');
+    waitSync(() => bashEvents(events).some((e) => e.event === 'released'));
+  };
+  return { child, events, first, release };
+}
 
 let root: string;
 const children: ChildProcess[] = [];
@@ -56,6 +121,8 @@ interface Outcome {
   acquired: boolean;
   heldBy: string | null;
   at: number;
+  /** The pid the owner record names while this outcome holds. */
+  pid: number;
   release: () => void;
 }
 
@@ -75,7 +142,7 @@ const IMPLEMENTATIONS: { id: string; path: string; hooks: boolean; take: (name: 
     hooks: true,
     take: async (name, timeoutMs, pollMs, hooks) => {
       const r = await acquireMachineLock(name, { root, timeoutMs, pollIntervalMs: pollMs, ...(hooks ? { __testHooks: hooks } : {}) });
-      return { acquired: r.acquired, heldBy: r.acquired ? null : r.heldBy, at: Date.now(), release: () => (r.acquired ? r.handle.release() : undefined) };
+      return { acquired: r.acquired, heldBy: r.acquired ? null : r.heldBy, at: Date.now(), pid: process.pid, release: () => (r.acquired ? r.handle.release() : undefined) };
     },
   },
   {
@@ -84,7 +151,7 @@ const IMPLEMENTATIONS: { id: string; path: string; hooks: boolean; take: (name: 
     hooks: true,
     take: async (name, timeoutMs, pollMs, hooks) => {
       const r = lockSync.acquireMachineLockSync(name, { root, timeoutMs, pollMs, ...(hooks ? { hooks } : {}) });
-      return { acquired: r.acquired, heldBy: r.heldBy, at: Date.now(), release: r.release };
+      return { acquired: r.acquired, heldBy: r.heldBy, at: Date.now(), pid: process.pid, release: r.release };
     },
   },
   {
@@ -93,7 +160,19 @@ const IMPLEMENTATIONS: { id: string; path: string; hooks: boolean; take: (name: 
     hooks: false,
     take: async (name, timeoutMs, pollMs) => {
       const r = precheckAcquire(name, { root, timeoutMs, pollMs });
-      return { acquired: r.acquired, heldBy: r.heldBy, at: Date.now(), release: r.release };
+      return { acquired: r.acquired, heldBy: r.heldBy, at: Date.now(), pid: process.pid, release: r.release };
+    },
+  },
+  {
+    id: 'bash',
+    path: 'verify-run.sh lock_acquire / lock_release (standalone runner; .claude and .agents are byte-identical)',
+    hooks: false,
+    // The budget is whole seconds (the gate's timeoutSec) and the poll is fixed at 250 ms.
+    take: async (name, timeoutMs) => {
+      const b = startBash(name, Math.ceil(timeoutMs / 1000), { selfPid: process.pid });
+      await waitFor(() => b.first() !== null, timeoutMs + 10000);
+      const e = b.first()!;
+      return { acquired: e.event === 'acquired', heldBy: e.event === 'acquired' ? null : e.heldBy || null, at: Date.now(), pid: e.pid, release: b.release };
     },
   },
 ];
@@ -217,7 +296,7 @@ describe.each(IMPLEMENTATIONS)('$id: $path', (impl) => {
     writeLock(name, { pid: deadPid(), host: os.hostname(), token: 'stale', acquiredAt: 0 });
     const r = await impl.take(name, 1000, 5);
     expect(r.acquired).toBe(true);
-    expect(readJson(path.join(machineLockPath(name, root), 'owner')).pid).toBe(process.pid);
+    expect(readJson(path.join(machineLockPath(name, root), 'owner')).pid).toBe(r.pid);
     r.release();
     expect(fs.readdirSync(root).filter((entry) => entry.includes('.gone-'))).toEqual([]);
   });
@@ -285,7 +364,7 @@ describe.each(IMPLEMENTATIONS)('$id: $path', (impl) => {
   });
 });
 
-describe('the paths that do not follow the tickets yet (verify-run.sh, an old runner)', () => {
+describe('the paths that do not follow the tickets (an old runner: a server not rebuilt, the skills package before its port)', () => {
   it('a bare mkdir taker (the convention before #4277) and a ticket holder still never hold the lock together', async () => {
     const name = 'inv-mixed';
     const lockPath = machineLockPath(name, root);
@@ -302,6 +381,107 @@ describe('the paths that do not follow the tickets yet (verify-run.sh, an old ru
     expect(() => fs.mkdirSync(lockPath)).toThrow(/EEXIST/);
     if (held.acquired) held.handle.release();
   });
+});
+
+/**
+ * The 5-2b review of #4277, P1: a TS (or synchronous JS) waiter recovering a dead holder's lock moves
+ * it aside and then reads it. With verify-run.sh still taking the lock by a bare mkdir, the window
+ * let two runs hold at once — bash B broke the dead lock and took it just before the move (so the
+ * move took B's lock away), and bash C took the empty path just after it. Both third parties are put
+ * into exactly those two windows through the recovery seam.
+ */
+const RECOVERERS: { id: string; recover: (name: string, onRecover: (stage: 'before-move' | 'moved') => void) => Promise<{ acquired: boolean; token: string | null; release: () => void }> }[] = [
+  {
+    id: 'ts',
+    recover: async (name, onRecover) => {
+      const r = await acquireMachineLock(name, { root, timeoutMs: 3000, pollIntervalMs: 20, __testHooks: { onRecover } });
+      const owner = r.acquired ? readJson(path.join(r.handle.path, 'owner')) : null;
+      return { acquired: r.acquired, token: owner?.token ?? null, release: () => (r.acquired ? r.handle.release() : undefined) };
+    },
+  },
+  {
+    id: 'sync',
+    recover: async (name, onRecover) => {
+      const r = lockSync.acquireMachineLockSync(name, { root, timeoutMs: 3000, pollMs: 20, hooks: { onRecover } });
+      const owner = r.acquired ? readJson(path.join(r.path, 'owner')) : null;
+      return { acquired: r.acquired, token: owner?.token ?? null, release: r.release };
+    },
+  },
+];
+
+describe.each(RECOVERERS)('$id and verify-run.sh together: the recovery window (P1)', (rec) => {
+  /** Run one bash third party inside the recovery window and wait (synchronously) for its first answer. */
+  const thirdParty = (name: string, script: string) => {
+    const b = startBash(name, 0, { script });
+    waitSync(() => b.first() !== null);
+    return b;
+  };
+
+  async function scenario(script: string) {
+    const name = `inv-window-${rec.id}`;
+    writeLock(name, { pid: deadPid(), host: os.hostname(), token: 'dead-holder', acquiredAt: 0 });
+    const parties: ReturnType<typeof startBash>[] = [];
+    const recovered = await rec.recover(name, (stage) => {
+      // B before the move, C right after it (while the lock path is empty).
+      if (parties.length < 2) parties.push(thirdParty(name, script));
+      void stage;
+    });
+    const [b, c] = parties.map((p) => p.first());
+    const holders = [recovered.acquired ? 'recoverer' : null, b?.event === 'acquired' ? 'bash-b' : null, c?.event === 'acquired' ? 'bash-c' : null].filter(Boolean);
+    const lockOwner = fs.existsSync(path.join(machineLockPath(name, root), 'owner')) ? readJson(path.join(machineLockPath(name, root), 'owner')).token : null;
+    const restoreFailed = fs.readdirSync(root).filter((entry) => entry.includes('.gone-'));
+    for (const p of parties) p.release();
+    recovered.release();
+    return { holders, recovered, lockOwner, restoreFailed, parties };
+  }
+
+  it('positive: a bash claim put before and after the move never makes two holders — the recoverer, first in line, gets it', async () => {
+    const { holders, recovered, lockOwner, restoreFailed, parties } = await scenario(VERIFY_RUN);
+    expect(parties).toHaveLength(2);
+    expect(holders).toEqual(['recoverer']);
+    expect(lockOwner).toBe(recovered.token);
+    expect(restoreFailed).toEqual([]);
+    // The bash parties were kept out by the queue, not by luck: they name the ticket ahead of them.
+    for (const p of parties) expect(p.first()?.heldBy ?? '').toMatch(/queue ticket|pid /);
+  }, 20000);
+
+  it('negative: a bare mkdir holder without a ticket (an old runner) still keeps bash and the recoverer out, and is not broken while alive', async () => {
+    const name = `inv-bare-${rec.id}`;
+    const lockPath = writeLock(name, { pid: process.pid, host: os.hostname(), token: 'bare-holder', acquiredAt: Date.now() });
+    const b = startBash(name, 0);
+    await waitFor(() => b.first() !== null);
+    expect(b.first()?.event).toBe('not-acquired');
+    expect(b.first()?.heldBy).toContain(`pid ${process.pid}`);
+    expect(readJson(path.join(lockPath, 'owner')).token).toBe('bare-holder');
+    // And while bash holds, a bare mkdir fails with EEXIST.
+    fs.rmSync(lockPath, { recursive: true });
+    const held = startBash(name, 1);
+    await waitFor(() => held.first() !== null);
+    expect(held.first()?.event).toBe('acquired');
+    expect(() => fs.mkdirSync(lockPath)).toThrow(/EEXIST/);
+    held.release();
+    expect(fs.existsSync(lockPath)).toBe(false);
+  }, 20000);
+});
+
+describe('verify-run.sh: a holder whose pid is gone but whose process group is alive keeps its lock', () => {
+  it('reads pgid like the other implementations (real processes)', async () => {
+    const name = 'inv-bash-group';
+    const group = spawn('sleep', ['30'], { stdio: 'ignore', detached: true });
+    children.push(group);
+    const lockPath = writeLock(name, { pid: deadPid(), pgid: group.pid, host: os.hostname(), token: 'grouped', acquiredAt: 0 });
+    const b = startBash(name, 0);
+    await waitFor(() => b.first() !== null);
+    expect(b.first()?.event).toBe('not-acquired');
+    expect(readJson(path.join(lockPath, 'owner')).token).toBe('grouped');
+    // The group empty too: recovered.
+    process.kill(-(group.pid as number), 'SIGKILL');
+    await waitFor(() => spawnSync('sh', ['-c', `kill -0 -- -${group.pid} 2>/dev/null`]).status !== 0);
+    const again = startBash(name, 1);
+    await waitFor(() => again.first() !== null);
+    expect(again.first()?.event).toBe('acquired');
+    again.release();
+  }, 20000);
 });
 
 describe('(d) the wait of 2026-11-08: pgrep -f finds the waiter itself', () => {
