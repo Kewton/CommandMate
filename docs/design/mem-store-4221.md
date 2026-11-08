@@ -503,6 +503,7 @@ ALTER TABLE session_notes ADD COLUMN created_at INTEGER;
 | 無い／mem の行でない | 無し（旧クライアント） | 今までどおり上書き（#2427 の互換）。mode が `on` なら §6.3 の検査をかけて mem の `now` にする |
 | 無い／mem の行でない | 有り・一致 | 書く |
 | 無い／mem の行でない | 有り・不一致 | 409 `version_conflict`、今の `text`・`version` |
+| 無い | `0`（「読んだとき行が無かった」） | 書く（行が無いことを表す版は 0。行の版は 1 以上なので、行があれば 0 は常に不一致）（3 回目の整合性レビュー P2-1） |
 | mem の行 | 無し（旧クライアント） | **409 `version_required`**（mem の `now` を黙って上書きしない） |
 | mem の行 | 有り・一致 | §6.3 の検査 → mode が `on` なら置き換え（superseded）、それ以外なら同じ ID で更新（T1'） |
 | mem の行 | 有り・不一致 | 409 `version_conflict`、今の `text`・`version` |
@@ -835,6 +836,8 @@ D1〜D13 と違う作りは無い。設計の文面から外れた・細かく�
 | I13 | §10.2（P2-2・P2-3） | 画面は編集を始めたときの版を下書きと一緒に固定して `baseVersion` に送る（PC は分割ごと、スマホは開いた編集欄ごと）。保存の失敗・下書き・開き直しは保存した worktree・instance に結び、切り替え先には出さない。戻した下書きの次の保存は、400・通信の失敗なら編集を始めた時の版、409 なら競合の応答の `current.version`（行が無ければ 0）を明示して送る（2 回目 P2-1）。開き直しのイベントは、hook が生きていて、スマホの受け手（今マウントされている hook）の対象が保存した対象と同じときだけ出す（2 回目 P2-2） | 保存時点のキャッシュの版だと、編集中に届いた CLI の更新を上書きする。スマホの部品（scope の外）は開き直しのイベントの宛先を見ないので、送る側と、下書きを受け取る側（`SessionNoteInput`）の両方で今の受け手の対象と照合する |
 | I14 | §10.4（P2-4） | 所有の判定は instance ID と作者の世代で照合し、`owner.worktreeId`（来歴、改名前の ID のまま）は比べない | 改名は世代表を新しい ID へ移すが、項目の来歴は旧 ID を残す |
 | I15 | §10.4（P3） | 改名の衝突の分岐は、残った子の行を消す前にフック（`beforeDropLeftovers`）を呼び、runtime の改名（`migrateWorktreeIdPreservingChildren`）が mem の `now` を closed（`slot-removed`）で退避する | migration の層は `mem-db` を import しない（循環と `vi.mock` の継承を避ける）。v54/v55 の migration は v66 より前なので mem の表が無い |
+| I16 | §10.2（3 回目の整合性レビュー P2-1） | `baseVersion: 0` は行が無いときだけ一致する（`writeScreenNote`）。行が無いときの 409 は `current: null` を返し、画面は次の保存に 0 を送る（I7・I13 と同じ規則） | 以前は行が無ければ版つきの保存を必ず 409 にしていたので、編集中に他者がメモを消すと、戻した下書きを何度送っても保存できなかった |
+| I17 | §10.4（3 回目の整合性レビュー P2-2） | 画面の保存の off・derived の枝（行の直接更新）も、トランザクションの最初に要求時の worktree・instance の世代を照合する（`writeScreenNote` の `alive` ＝ `MemActor.stillOnRoster`）。違えば 409 `instance_not_found`（`incarnation_changed`） | on だけが `replaceNowSlot` を通って照合していた。不変条件「作り直しに追い越された要求は全入口で拒否」は `tests/unit/lib/mem/write-entrances-recreate-4221.test.ts` の 1 つの表で固定する（表のキーは service の `lookupActor` を呼ぶ export と突き合わせ、入口を足すと表に足すまで落ちる） |
 
 本文に無い指摘（実装で見つけたもの。直さない。改名の衝突の分岐の退避は I15 で直した）：
 

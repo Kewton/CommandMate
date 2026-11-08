@@ -30,6 +30,11 @@ vi.mock('@/components/providers/WorktreesCacheProvider', () => ({
 import { resetSessionNoteHandoffForTests, TerminalSplitPane } from '@/components/worktree/TerminalSplitPane';
 import { MobileSessionNoteEditor, useMobileSessionNoteEditor } from '@/components/worktree/MobileTerminalTabSessionNote';
 import type { AgentInstance } from '@/lib/cli-tools/types';
+import type Database from 'better-sqlite3';
+import path from 'path';
+import { writeScreenNote } from '@/lib/db/mem-db';
+import { openMigratedFileDb } from '@tests/helpers/migrated-file-db';
+import { makeTempDir, removeTempDir } from '@tests/helpers/temp-dir';
 
 beforeAll(() => installRadixJsdomPolyfills());
 
@@ -449,5 +454,110 @@ describe('2nd review P2-2: a late failure of an unmounted hook opens no editor',
     typeAndEnter('mobile-session-note-input', 'A の二つ目');
     again();
     await waitFor(() => expect(screen.getByTestId('mobile-session-note-input')).toHaveValue('A の二つ目'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3rd integration review P2-1: a 409 that says "no row" (`current: null`)
+// ---------------------------------------------------------------------------
+
+describe('3rd review P2-1: a draft restored after another deleted the note saves (the version of "no row" is 0)', () => {
+  // The fake route answers through the real slot rule (`writeScreenNote`), so the
+  // version the hook sends and the one the store accepts are checked together.
+  let sandbox: string;
+  let noteDb: Database.Database;
+
+  const store = (text: string, baseVersion: number | undefined) =>
+    writeScreenNote(noteDb, { worktreeId: WT, instanceId: 'claude', text, baseVersion, memWrite: null, alive: null });
+  const stored = () =>
+    (noteDb.prepare("SELECT note FROM session_notes WHERE worktree_id = ? AND instance_id = 'claude'").get(WT) as { note: string } | undefined)?.note;
+  const listShows = (version: number) => {
+    cacheState.value = {
+      worktrees: [{ id: WT, sessionNotes: { claude: { text: '前のメモ', updatedAt: 1, version, mem: null } } }],
+      refresh: vi.fn(async () => undefined),
+    };
+  };
+
+  beforeEach(() => {
+    sandbox = makeTempDir('session-note-3rd-p2-1-');
+    noteDb = openMigratedFileDb(path.join(sandbox, 'cm.db'), { foreignKeys: true });
+    noteDb
+      .prepare(`INSERT INTO worktrees (id, name, path, repository_path, repository_name) VALUES (?, ?, ?, ?, 'repo')`)
+      .run(WT, WT, path.join(sandbox, 'wt'), path.join(sandbox, 'root'));
+    const first = store('前のメモ', undefined);
+    if (!first.ok || !first.row) throw new Error('seed failed');
+    listShows(first.row.version);
+    fetchMock.mockImplementation(async (_url: string, init: { body: string }) => {
+      const body = JSON.parse(init.body) as { text: string; baseVersion?: number };
+      const result = store(body.text, body.baseVersion);
+      if (result.ok) return { ok: true, status: 200, json: async () => ({ note: result.row }) };
+      const current = 'current' in result && result.current ? { text: result.current.text, version: result.current.version, updatedAt: result.current.updatedAt } : null;
+      return { ok: false, status: 409, json: async () => ({ code: 'version_conflict', current }) };
+    });
+  });
+  afterEach(() => {
+    noteDb.close();
+    removeTempDir(sandbox);
+  });
+
+  const deletedByAnother = () => {
+    const row = noteDb.prepare("SELECT version FROM session_notes WHERE instance_id = 'claude'").get() as { version: number };
+    expect(store('', row.version).ok).toBe(true);
+  };
+
+  it('PC: deleted while editing → 409 (no row) → Enter again saves the draft', async () => {
+    render(pcPane());
+    fireEvent.click(screen.getByTestId('split-session-note-0'));
+    deletedByAnother();
+    typeAndEnter('split-session-note-input-0', '残した下書き');
+    await settle();
+    expect(screen.getByTestId('split-session-note-input-0-error').textContent).toContain('他で更新されました');
+    typeAndEnter('split-session-note-input-0', '残した下書き');
+    await settle();
+    expect(sentBase(1)).toBe(0);
+    expect(screen.queryByTestId('split-session-note-input-0')).toBeNull();
+    expect(stored()).toBe('残した下書き');
+  });
+
+  it('PC (control): a note written again after the delete still makes the restored draft 409, and is kept', async () => {
+    render(pcPane());
+    fireEvent.click(screen.getByTestId('split-session-note-0'));
+    deletedByAnother();
+    typeAndEnter('split-session-note-input-0', '残した下書き');
+    await settle();
+    expect(store('他の人が書き直した', 0).ok).toBe(true);
+    typeAndEnter('split-session-note-input-0', '残した下書き');
+    await settle();
+    expect(sentBase(1)).toBe(0);
+    expect(screen.getByTestId('split-session-note-input-0-error').textContent).toContain('他で更新されました');
+    expect(stored()).toBe('他の人が書き直した');
+  });
+
+  it('phone: deleted while editing → 409 (no row) → the reopened draft saves', async () => {
+    render(<Phone />);
+    fireEvent.click(screen.getByTestId('open'));
+    deletedByAnother();
+    typeAndEnter('mobile-session-note-input', 'スマホの下書き');
+    await waitFor(() => expect(screen.getByTestId('mobile-session-note-input-error').textContent).toContain('他で更新されました'));
+    typeAndEnter('mobile-session-note-input', 'スマホの下書き');
+    await settle();
+    expect(sentBase(1)).toBe(0);
+    expect(screen.queryByTestId('mobile-session-note-input')).toBeNull();
+    expect(stored()).toBe('スマホの下書き');
+  });
+
+  it('phone (control): a note written again after the delete makes the reopened draft 409, and is kept', async () => {
+    render(<Phone />);
+    fireEvent.click(screen.getByTestId('open'));
+    deletedByAnother();
+    typeAndEnter('mobile-session-note-input', 'スマホの下書き');
+    await waitFor(() => expect(screen.getByTestId('mobile-session-note-input-error')).toBeTruthy());
+    expect(store('他の人が書き直した', 0).ok).toBe(true);
+    typeAndEnter('mobile-session-note-input', 'スマホの下書き');
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await settle();
+    expect(sentBase(1)).toBe(0);
+    expect(screen.getByTestId('mobile-session-note-input-error').textContent).toContain('他で更新されました');
+    expect(stored()).toBe('他の人が書き直した');
   });
 });

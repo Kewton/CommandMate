@@ -636,6 +636,9 @@ export async function writeSessionNoteFromScreen(
         text,
         baseVersion,
         memWrite: on && text.length > 0 ? { actor, scope: scopeOf(target as MemTargetResolved) } : null,
+        // 3rd review P2-2: off / derived write the row directly, so the lifetime fixed
+        // at `lookupActor` is asked here too, not only through `replaceNowSlot`.
+        alive: actor.stillOnRoster ?? null,
       },
       deps.now?.() ?? Date.now()
     );

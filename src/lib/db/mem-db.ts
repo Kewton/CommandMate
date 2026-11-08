@@ -1070,7 +1070,14 @@ export function isMemSlot(db: Database.Database, worktreeId: string, instanceId:
  *
  * @param text - Already normalized and, when the row is or becomes mem, already checked
  * @param baseVersion - What the screen read; undefined for a client older than v66
+ * @param baseVersion - What the screen read; undefined for a client older than v66.
+ *   0 names "there was no row" (a 409 answered `current: null`), and matches only
+ *   while there is still none (3rd review P2-1); a row's version is never 0
  * @param memWrite - Set when the mode is `on`: the note becomes (or replaces) the `now`
+ * @param alive - Whether the worktree and instance the request was read for are still
+ *   the ones here (`MemActor.stillOnRoster`); asked first in the transaction, so every
+ *   mode refuses a request that a delete and re-creation of the worktree (same id and
+ *   path) overtook during its awaits (3rd review P2-2)
  */
 export function writeScreenNote(
   db: Database.Database,
@@ -1080,15 +1087,17 @@ export function writeScreenNote(
     text: string;
     baseVersion: number | undefined;
     memWrite: { actor: MemActor; scope: MemScope } | null;
+    alive: (() => boolean) | null;
   },
   now: number = Date.now()
 ): ScreenNoteResult {
   return db.transaction((): ScreenNoteResult => {
+    if (input.alive && !input.alive()) return { ok: false, code: 'instance_not_found', reason: 'incarnation_changed' };
     const row = readSlot(db, input.worktreeId, input.instanceId);
     const isMem = Boolean(row?.mem_item_id);
     if (input.baseVersion === undefined) {
       if (isMem) return { ok: false, code: 'version_required', current: toSlotView(row) };
-    } else if (!row || row.version !== input.baseVersion) {
+    } else if (row ? row.version !== input.baseVersion : input.baseVersion !== 0) {
       return { ok: false, code: 'version_conflict', current: toSlotView(row) };
     }
 

@@ -585,6 +585,33 @@ describe('the screen note and the slot version (§10.2・2nd review 2)', () => {
     expect((await write('fresh', again.note.version)).status).toBe(200);
   });
 
+  it('3rd review P2-1: after another deleted the note, the 409 says no row and baseVersion 0 saves the draft', async () => {
+    const write = (text: string, baseVersion?: number) =>
+      writeSessionNoteFromScreen(db, 'wt-1', { instanceId: 'claude', text, ...(baseVersion !== undefined ? { baseVersion } : {}) }, deps());
+    const read = ((await write('one')).body as { note: { version: number } }).note.version;
+    expect((await write('', read)).status).toBe(200);
+    const stale = await write('draft', read);
+    expect(stale.status).toBe(409);
+    expect(stale.body).toMatchObject({ code: 'version_conflict', current: null });
+    const saved = await write('draft', 0);
+    expect(saved.status).toBe(200);
+    expect(saved.body).toMatchObject({ note: { text: 'draft' } });
+    expect(((saved.body as { note: { version: number } }).note.version)).toBeGreaterThan(read);
+  });
+
+  it('3rd review P2-1 (control): baseVersion 0 while a row exists, or a stale version, is still 409', async () => {
+    on();
+    const write = (text: string, baseVersion?: number) =>
+      writeSessionNoteFromScreen(db, 'wt-1', { instanceId: 'claude', text, ...(baseVersion !== undefined ? { baseVersion } : {}) }, deps());
+    const first = ((await write('one')).body as { note: { version: number } }).note.version;
+    const zero = await write('over', 0);
+    expect(zero.status).toBe(409);
+    expect(zero.body).toMatchObject({ code: 'version_conflict', current: { text: 'one', version: first } });
+    const second = ((await write('two', first)).body as { note: { version: number } }).note.version;
+    expect((await write('stale', first)).body).toMatchObject({ code: 'version_conflict', current: { text: 'two', version: second } });
+    expect(count("SELECT COUNT(*) n FROM session_notes WHERE note = 'two'")).toBe(1);
+  });
+
   it('a person may change a now of mem from the screen (受入: 画面（人）で 0)', async () => {
     on();
     const now = itemOf(await memWriteNow(db, 'wt-1', { instanceId: 'claude', text: 'agent wrote' }, deps()));
