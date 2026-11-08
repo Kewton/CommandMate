@@ -128,6 +128,8 @@ describe('buildProgram', () => {
       'agents',
       // Issue #4221: mem items (now / add / update / close / list / mode / purge)
       'mem',
+      // Issue #4223: the brief a restart reads (derived state and mem items within a byte budget)
+      'brief',
     ];
 
     it.each(expectedCommands)('should register the %s command', (name) => {

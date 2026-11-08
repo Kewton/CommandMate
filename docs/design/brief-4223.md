@@ -2,7 +2,7 @@
 
 - 状態：第 3 版（設計の段）。Codex の事前レビュー 1 回目（P1 2 件・P2 6 件、`workspace/orchestration/runs/2026-11-08/prereview/review-4223.md`）と
   2 回目（P1 0 件・P2 6 件、`…/prereview/review-4223b.md`）を全件反映した。処置の一覧は §12（2 回目は §12.2）。
-  `src/`・`tests/` はまだ変えていない。実装は同じブランチの別の契約で行う
+  実装は同じブランチの実装の契約で行った（実装で決めたことは §11.1、共通規則の全読者は §11.2）
 - 前提：Epic #4220 の決定 D1〜D13（とくに D1・D2・D6・D10・D12）、A（#4221、`docs/design/mem-store-4221.md`、以下「A」）、
   B（#4222、`docs/design/mem-close-when-4222.md`、以下「B」）、D1（#4274、`docs/design/session-boundary-brief-4274.md`、以下「D1」）。
   3 つとも develop にマージ済み。D1 の口 `src/lib/session/brief-provider.ts`（空の実装）の中身が C
@@ -498,6 +498,8 @@ DB（migration を全部当てた SQLite）と run の記録のファイルを�
 | `src/lib/brief/deadline.ts` | 1 つの期限と残り時間の配分（§5.5） |
 | `src/lib/brief/build.ts` | `buildBrief(db, input)`（mode・所属の照合・評価・情報源・並べ・削る） |
 | `src/lib/brief/provider.ts` | `MEM_BRIEF_PROVIDER`（`build`・`reserve`）・`memos`・`attempts`・`settleBriefAttempt`。`getBriefProvider` に繋がない |
+| `src/lib/brief/model.ts` | 描く前の形（`BriefItem`・`BriefModel`） |
+| `src/lib/brief/service.ts` | route の入力の検査・組み直し（§5.4）・exit の写像 |
 | `src/app/api/worktrees/[id]/mem/brief/route.ts` | `GET` |
 | `src/cli/commands/brief.ts` | `commandmate brief` |
 | `tests/unit/lib/brief/brief-invariants.test.ts` | §7 の I1〜I10・I13・I14 |
@@ -580,6 +582,32 @@ memo の無い本文・配送中の試行がある境界には `null`（I12）�
 | U9 | 口の `settle` に `claimToken` を足すか（G6）。足せば §5.3 の `declined` の規則は不要 | D2 で D1 の口を変えるかを決める |
 | U10 | S1 の観測の値の鮮度：通常の監視が動いていない（画面を誰も開いていない）とき、`observed=none` か古い値になる。brief は監視を起こさない | レビュー（brief のために観測を足すなら、それは読みの外の別の作り） |
 | U11 | `isSessionAutoYesBlockedByContract`・`readSessionRelays` が読みだけか（§1.2 の S2・S3 の［未確認］） | 実装の契約で読み、書くなら呼ばない（I8 が固定） |
+
+---
+
+## 11.1 実装で決めたこと（実装の契約、2026-11-09）
+
+- U11：`isSessionAutoYesBlockedByContract` は poller のキャッシュ（`policyCache`）を書くので**呼ばない**。S2 の「契約による抑止」は、S4 と同じ
+  `getActiveTaskForInstance` で読んだ task の `contract.autoYes` を純粋な判定 `isAutoYesBlockedByPolicy`（`src/lib/polling/auto-yes-policy.ts`）に渡して出す（同じ判定・書き込みなし）
+- U11：S3 の `getSessionRelaySummary`（`src/lib/db/relay-db.ts`）は `listOpenRelaysTo`・`listOpenRelaysFrom` の SELECT だけで書かない（読んで確かめた）
+- U8：S6 の root は所属の `members`（登録された repository）の `path` の `workspace/orchestration/runs`。複数あれば全部を読む
+- A の上限（1,000 文字）を超える自由入力は検査できないので、`--all` でも本文を出さず省略の形にする（§3.3 の `too_long`）
+- I8 の静的な到達の検査から `waiting-episode-binding` を外した：`status-evidence` → `agent-event-state` の import で閉包に入るが呼ばない。
+  呼ばないことは購読者に何も届かないこと（I8 の (d)）で確かめる
+- 分けたファイル：`src/lib/brief/model.ts`（描く前の形）と `src/lib/brief/service.ts`（route の入力の検査・組み直し・exit の写像）を §8.1 に足した
+
+## 11.2 共通規則の全読者
+
+規則ごとに、それを読む・書く全経路と、同じ実装に追従しているか（「写し」が無いか）。
+
+| 規則 | 正の場所 | 読む・書く経路 | 追従 |
+|---|---|---|---|
+| 予算の数え方（UTF-8 の最終出力） | `src/types/brief.ts` の `BRIEF_BUDGET`・`parseBriefBudget`、`src/lib/brief/fit.ts`（`Buffer.byteLength`） | route（`service.ts`：既定値・範囲の検査・`fitText(trailingNewline: true)`／`fitJson`）・CLI（`brief.ts`：送る前の範囲の検査は同じ `parseBriefBudget`、出力は受けた本文＋改行 1 つ）・provider（`fitText(trailingNewline: false, maxLines)`、`minBytes`/`defaultBytes` も `BRIEF_BUDGET.text`） | 追従。数を写した場所は無い（CLI の help の数字も `BRIEF_BUDGET` から組む） |
+| 優先の順 | `src/lib/brief/rank.ts`（`compareBriefItems`）と各 reader の順位（`sources.ts`）、「取得できない」の行の順位 `BRIEF_STATUS_ROW_RANK` | テキスト・`--json`・`--all`・provider の本文はすべて `buildBrief` の `rankBriefItems` の結果を `fit*` で前から取る。provider の組み直し（`reserve`）は行を外すだけで並べ直さない | 追従 |
+| データの区画（境界・1 項目 1 行・自由入力の検査） | `render.ts`（`drawText`・`entryLine`・`fenceTag`）、`sanitize.ts`（`sanitizeBriefField` → A の `validateItemText`、`sanitizeBranch`） | 全 reader の自由入力は `applyText`／`recordedWord`（`sources.ts`）を通る。mem は A の `presentMemItem` の `withheld` の後に同じ検査。ブランチは `build.ts` の `sanitizeBranch`。`--json` の `entries` は同じ `BriefEntry` を出す | 追従。task の入口の検査（`contract-parser.ts:503`）は別の規則のまま（§10） |
+| mode の判定 | A の `withMemTarget`（`decideRootMode`）。再確認も同じ `decideRootMode` | `buildBrief` の初め（`withMemTarget`）と組み立ての前（`assertStillSame`）。`derived` で読まない情報源は `BRIEF_DERIVED_SOURCES` の 1 か所。CLI の `off` は route の `disabled` → `MEM_EXIT_BY_CODE`（exit 50） | 追従。D1 の claim の照合（`session-brief.ts` の `membershipKey`）は features も比べるが、C の `briefMembershipKey` は features を読まない（C の本文は features に依らないため）。D1 の照合の方が厳しく、C の本文が誤って付く向きの差ではない |
+| 知らせの予約 | B の `reserveMemNotices`・`settleMemNoticeAttempt`（`src/lib/mem/notices.ts`） | provider の `reserve`（予約）・`settleBriefAttempt`（受領・返却）だけ。build・CLI・route は `listMemNoticesFor`（書かない）だけで予約も受領もしない | 追従。`getBriefProvider()` に繋ぐのと D1 の `settle` を `settleBriefAttempt` に繋ぐのは D2 |
+| instance の寿命 | D1 の `isSameInstanceLifetime`・`readInstanceLifetime`（`src/lib/db/session-brief-db.ts`） | `buildBrief` の初め（request の世代と照らす）と `assertStillSame` | 追従（写さず呼ぶ） |
 
 ---
 

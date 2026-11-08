@@ -242,6 +242,22 @@ export function getAutoYesState(
 }
 
 /**
+ * The stored auto-yes state as it is, or null (Issue #4223).
+ *
+ * The brief reads auto-yes without changing it: unlike {@link getAutoYesState}
+ * this neither rewrites a grant that ran out to `expired` (which would notify
+ * the shutdown listener) nor drops a restart notice past its deadline. Whether
+ * a grant has run out is the reader's judgement (`now >= expiresAt`).
+ */
+export function peekAutoYesState(
+  worktreeId: string,
+  cliToolId: CLIToolType = 'claude',
+  instanceId?: string
+): AutoYesState | null {
+  return autoYesStates.get(buildCompositeKey(worktreeId, cliToolId, instanceId)) ?? null;
+}
+
+/**
  * Set the auto-yes enabled state for a worktree and CLI tool.
  *
  * Issue #525: Changed from (worktreeId, enabled, duration?, stopPattern?) to
