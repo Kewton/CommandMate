@@ -1,6 +1,6 @@
 # mem の設定・置き場・CRUD の CLI（Issue #4221 / Epic #4220 の子 A）設計
 
-- 状態：設計の段（実装前）。第 2 版：Codex の事前レビュー（P1 8 件・P2 3 件、2026-11-08）を反映した。処置の一覧は §16
+- 状態：設計の段（実装前）。第 3 版：Codex の事前レビュー 1 回目（P1 8 件・P2 3 件、2026-11-08）と 2 回目（P1 6 件・P2 3 件、同日）を反映した。処置の一覧は §16
 - 前提：Epic #4220 の決定事項 D1〜D13。とくに D3〜D7・D12
 - 凡例：**［事実］** = この文書を書いた時点（2026-11-08、`feature/4221-worktree` = develop `2307b8135`）でファイルと行を読んで確かめたもの。**［見立て］** = 設計としての判断。**［未確認］** = 読んでいない・実測していないもの。行番号は確認時点のもので、実装の契約では名前で探し直す
 
@@ -12,10 +12,10 @@
 
 | # | 決定 | 選んだ解釈（第 2 版） | 理由 |
 |---|---|---|---|
-| T1 | D3「off は何も評価・更新しない」と D7「`now` は #2427 のメモと同じ正本」 | 1 つの行が #2427 のメモでも mem の `now` でもある（D7）。**mem の `now` である行（`mem_item_id` がある行）は、どの経路・どの mode で書いても mem の検査（§6）を通った値しか入らない**。#2427 の画面のメモの経路も、その行を書くときは mem の検査をかけ、通らなければ 400 で断る（行は前の値のまま）。mem の行でないメモは、off・derived・on のどれでも今までどおり（#2427 の検査だけ）。加えて、mem の出口（list・`--json`・brief・画面の mem 表示）は、保存時より新しい検査の規則で読み直し、通らない値を出さない（§6.4） | 第 1 版は off 中の画面の書き込みを未検査のまま mem の行に入れ、`on` に戻すと list・brief に出た（レビュー P1-1）。検査の入口を「行」に結ぶと、経路を足しても抜けない。mem の行でないメモの挙動は変えないので、off（既定）の利用者にとって #2427 は今までの機能のまま |
+| T1 | D3「off は何も評価・更新しない」と D7「`now` は #2427 のメモと同じ正本」 | 1 つの行が #2427 のメモでも mem の `now` でもある（D7）。**mem の `now` である行（`mem_item_id` がある行）は、どの経路・どの mode で書いても mem の検査（§6）を通った値しか入らない**。#2427 の画面のメモの経路も、その行を書くときは mem の検査をかけ、通らなければ 400 で断る（行は前の値のまま）。mem の行でないメモは、off・derived・曖昧・未登録では今までどおり（#2427 の検査だけ）。on では書くと mem の `now` になるので mem の検査をかける（§6.3。400 になる条件は §6.3 の表が正本）。加えて、mem の出口（list・`--json`・brief・画面の mem 表示）は、保存時より新しい検査の規則で読み直し、通らない値を出さない（§6.4） | 第 1 版は off 中の画面の書き込みを未検査のまま mem の行に入れ、`on` に戻すと list・brief に出た（レビュー P1-1）。検査の入口を「行」に結ぶと、経路を足しても抜けない。mem の行でないメモの挙動は変えないので、off（既定）の利用者にとって #2427 は今までの機能のまま |
 | T1' | D3 の「derived は手で書いた項目を凍結する」と、人が画面のメモで mem の `now` を書き換えること | 凍結が止めるのは Agent の口（CLI）と B の評価・close・知らせ。人が #2427 の画面のメモから自分の目で書き換えるのは止めない（版つき、§10.2）。D6「手で書いた項目を変えたり閉じたりできるのは作成者と人」の人の経路として扱う | 止めると #2427 の画面のメモが、一度 mem を使った枠だけ off の間に編集できなくなる。人の書き込みは「評価」ではない |
 | T2 | D3「off は更新しない」と、instance・worktree を消すときの `now` の保持 | mem の行である `now` は、mode に関係なく、消える前に `mem_items` へ closed（`close_reason='slot-removed'`）として移す。値は T1 により検査済み | 「`on → off → on` で項目が保持される」（受入基準）を、off の間の roster 編集でも満たすため。評価でも利用者の操作でもない |
-| T3 | D3「変える経路は画面（PC・スマホ）だけ」 | 「画面の経路」の印を、**画面だけが付ける独自ヘッダ（`X-CommandMate-Client: screen`）＋ `Origin` が要求の宛先と一致**にする。`Sec-Fetch-Site` は要らない（§11.2）。同じ OS 権限のプロセスはこの印を偽れるので、**保証ではなく検査** | 第 1 版の `Sec-Fetch-Site` 必須は、スマホから LAN の HTTP（`http://<PCのIP>:3000`、`docs/user-guide/webapp-guide.md:906` 付近の手順）で開いた画面を断る（Fetch Metadata は安全でない HTTP の origin には付かない。レビュー P1-8）。ブラウザは同一 origin の `PUT`・`DELETE` の `fetch` に `Origin` を付け、独自ヘッダつきの別 origin の要求は CORS の preflight で止まる。D3 自身が「保証と書かず、検査の限界として書く」としている |
+| T3 | D3「変える経路は画面（PC・スマホ）だけ」 | 「画面の経路」の印を、**画面だけが付ける独自ヘッダ（`X-CommandMate-Client: screen`）＋ `Origin` が要求の宛先と一致**にする。宛先の scheme・host は §11.2 の規則（転送のヘッダ）で決める。`Sec-Fetch-Site` は要らない（§11.2）。同じ OS 権限のプロセスはこの印を偽れるので、**保証ではなく検査** | 第 1 版の `Sec-Fetch-Site` 必須は、スマホから LAN の HTTP（`http://<PCのIP>:3000`、`docs/user-guide/webapp-guide.md:906` 付近の手順）で開いた画面を断る（Fetch Metadata は安全でない HTTP の origin には付かない。レビュー P1-8）。ブラウザは同一 origin の `PUT`・`DELETE` の `fetch` に `Origin` を付け、独自ヘッダつきの別 origin の要求は CORS の preflight で止まる。D3 自身が「保証と書かず、検査の限界として書く」としている |
 | T4 | Issue の CLI 例は `add` の `--close-when` を必須に見せている | 既定値を持つ kind（`now` → `replaced`、`note` → `manual`、`decision` → `promoted`）だけ省略できる。他の kind は必須（§2.3） | Issue 本文が「`close_when` が必須の kind と、既定値を持つ kind を表にする」と求めている |
 
 ---
@@ -56,7 +56,7 @@ target    := "" | host "/" owner "/" repo  ; 空 = 項目の repository の orig
 
 - `#N` だけ（`issue:#4221`）は、項目の repository の `origin` remote の URL から host・owner・repo を補って保存する（B の表「番号だけの `#N` は項目の repository を既定にして保存する」）。origin が無い・解析できないときは **入力の不正**で断る（推測で補わない）［見立て］
 - `branch` の `merged=` は合流先の ref。作成したときの tip（`git rev-parse <name>`）を A が保存時に取って入れる（B の「作成したときの tip より後の commit を含む」の判定材料）。取れないときは断る
-- `worktree` は、保存時に §10.1 の `mem_worktree_incarnations` の今の世代を取り（無ければ同じトランザクションで作り）、ID と世代の組で保存する。存在しない worktree ID は断る。B は「その ID の今の世代が保存した世代と違う、または行が無い」を成立とする。これで「評価の前に削除され、同じ path で作り直された」を「削除された」と判定できる（ID は path から導くので作り直しで同じ ID になる、v54）
+- `worktree` は、保存時に §10.1 の `mem_worktree_incarnations` の今の世代を取り（無ければ同じトランザクションで作り）、ID と世代の組で保存する。存在しない worktree ID は断る。**B は「保存した世代（`worktreeIncarnation`）がどの worktree の行としても存続していない」を成立とする**（ID では引かない。A は `worktreeIncarnationAlive(db, incarnation)` を用意する）。worktree の改名（v54/v55、`renameWorktreeIdPreservingChildren`）では世代の行が新しい ID へ付け替わって存続するので**不成立**、削除（同じ path での作り直しを含む）では世代の行が消えるので**成立**。第 2 版の「その ID の行が無い」は改名を削除と読んだ（2 回目のレビュー 5）。この 2 つの場合は `tests/fixtures/mem/close-when-v1.json` の `worktreeLifecycle` に入れ、B も同じ fixture で評価する
 - `session` は保存時に分かれば #4115 のセッションの世代（`role-launch.ts` の `sessionGeneration`）を一緒に保存する。分からなければ `null`（§10.5）
 - `at` はオフセット必須（`Z` か `±HH:MM`）。オフセットの無い時刻は断る（サーバのタイムゾーンで黙って解釈しない）。過去の時刻は断らない
 - 未知の型・未知のキー・重複キー・余分な文字・長さ 300 code point 超・§2.3 の表で kind が受けない型は、保存の前に **入力の不正**（exit 2、`code: "invalid_close_when"`）
@@ -244,7 +244,8 @@ mode の判断は 1 つの関数（`resolveMemTarget`、§9）で行い、CLI・
 ### 6.4 出口での読み直し
 
 - 保存した行は `checked_rules_version`（保存時の `MEM_SECRET_RULES_VERSION`）を持つ（§10）
-- mem の出口（`mem list`・`--json`・C の brief・G の mem の表示）は、`checked_rules_version` が今の版より古い行を今の規則で読み直す。当たった項目は本文を出さず、`withheld: {code:"secret_like", rule:"<id>"}` だけを出す（項目の存在と ID・kind・状態は出す）。DB の値は書き換えない（人が画面で直すか purge する）
+- mem の出口（`mem list`・`--json`・版の競合の応答・C の brief・G の mem の表示）は、`checked_rules_version` が今の版より古い行を今の規則で読み直す。読み直す欄は自由入力のすべて（`text`・`quote`・`evidence` の各項目・`promote_to`・`close_note`）。どれか 1 つでも当たった項目は、**専用の出力形（withheld の形）**で出す。DB の値は書き換えない（人が画面で直すか purge する）
+- **withheld の形**（`src/lib/mem/present.ts` の `presentMemItem` 1 つで作り、全出口が共有する。2 回目のレビュー 6）：`id`・`kind`・`state`・`owner`・`createdBy`・`updatedBy`・`version`・`createdAt`・`updatedAt`・`closedAt`・`closeReason`・`stale`・`frozen` と `withheld: {code:"secret_like", field:"<当たった欄>", rule:"<id>"}` だけ。**`text`・`quote`・`quoteAt`・`evidence`・`promoteTo`・`closeWhen`・`closeNote` の鍵そのものを出さない**（当たった欄だけを消すのではない。隣の欄に同じ値の断片がある場合に備える）
 - 読み直しは表示のたびに行い、結果は保存しない（定期の実行を足さない、D8・D13）［見立て：行数は §8.1 の上限で小さい］
 
 ---
@@ -332,8 +333,8 @@ mode の判断は 1 つの関数（`resolveMemTarget`、§9）で行い、CLI・
 第 1 版はブランチを membership の前に 1 回だけ取り、membership の聞き直しで取り直さなかった（レビュー P1-2）。第 2 版は `resolve.ts` の `withSettledMembership`（`:227`）を一般化し、**目標ごとの追加の観測**（`observe`）を同じ試行に入れる：
 
 1. 試行の始め：worktree を読み、署名 S0 = `[path, repositoryPath, 登録 root の署名]`
-2. git に聞く（すべて `await`）：`observe` = worktree の path で `git symbolic-ref --quiet --short HEAD`（exit 1 = detached、他の失敗 = 不明）と `git rev-parse HEAD` → membership の git（`askGit`）→ もう一度 `observe`
-3. 同期の区間：worktree を読み直して S1 を作る。`S1 == S0` かつ 2 回の `observe` が一致（ブランチ名・detached・HEAD の SHA）でなければ「古い」として 1 へ（最大 3 回、超えたら exit 53 `registration_changed`）
+2. git に聞く（すべて `await`）：`observe` = worktree の path で `git symbolic-ref --quiet --short HEAD`（失敗し `git rev-parse --verify HEAD` が通れば detached、どちらも失敗なら不明）と `git rev-parse HEAD`、**`git rev-parse --git-common-dir`（realpath 済み）** → membership の git（`askGit`）→ もう一度 `observe`
+3. 同期の区間：worktree を読み直して S1 を作る。`S1 == S0` かつ 2 回の `observe` が一致（ブランチ名・detached・HEAD の SHA・**common-dir**）かつ **`observe` の common-dir が membership の判定に使った worktree の common-dir（`askGit` の `identity`）と一致**しなければ「古い」として 1 へ（最大 3 回、超えたら exit 53 `registration_changed`）。HEAD が同じでも、path の実体が別の Git（別の common-dir）に替わったら、前後の観測か membership との照合のどちらかで違いが出る（2 回目のレビュー 4）
 4. 同じ同期の区間で、mode を決め、`build` の中で `db.transaction` の書き込みまで行う（§5.3）。区間の外へ所属を返して後で書く形にしない（返すと `await` を挟む）
 
 - この手順を `mem now`・`add`・`update`・`close` の API と、#2427 のメモの route（mem の判断が要るとき）が共有する。`resolve.ts` の一般化は `withSettledMembership` に任意の `observe` と、その結果を署名に足す口を付けるだけで、role の解決の結果は変えない（role の既存のテストが通ることを陰性の対照にする）
@@ -453,6 +454,14 @@ CREATE TABLE mem_items (
   CHECK ((idempotency_key IS NULL) = (request_fingerprint IS NULL))
 );
 CREATE UNIQUE INDEX idx_mem_items_key ON mem_items(origin_incarnation, idempotency_key) WHERE idempotency_key IS NOT NULL;
+
+-- 枠（session_notes の行）の版の数。行を消しても残す（§10.2、2 回目のレビュー 2）
+CREATE TABLE session_note_versions (
+  worktree_id TEXT NOT NULL REFERENCES worktrees(id) ON DELETE CASCADE,
+  instance_id TEXT NOT NULL,
+  last_version INTEGER NOT NULL,
+  PRIMARY KEY (worktree_id, instance_id)
+);
 CREATE INDEX idx_mem_items_scope ON mem_items(repository_id, branch, state, kind);
 ```
 
@@ -480,7 +489,7 @@ ALTER TABLE session_notes ADD COLUMN created_at INTEGER;
 ```
 
 - 1 つの行が「#2427 のメモ」でも「`now` の枠」でもある。`mem_item_id IS NOT NULL` の行が mem の `now`。`mem_item_id` を立てるのは、mem の検査（§6）を通った書き込みだけ（T1）
-- `version` は行の版。内容の書き換え・`now` の置き換え（新しい `mem_item_id`）のどちらでも `+1`。画面が読んだ後に CLI が更新・置換すると、画面の版は古くなる
+- `version` は行の版。内容の書き換え・`now` の置き換え（新しい `mem_item_id`）・**行の削除**のどれでも `+1`。**枠（worktree・instance）ごとの版の数を `session_note_versions(worktree_id, instance_id, last_version)` に持ち、行を消しても数を残す**。新しく作る行の版は「数＋1」なので、削除して作り直しても前の版の番号は二度と出ない（2 回目のレビュー 2。第 2 版は既定値 1 で作り直すので、版 1 を読んだ古い画面が作り直した行に一致した）。この表は worktree の子（`worktree_id` 列）で、改名に追従し、worktree の削除で消える。画面が読んだ後に CLI が更新・置換すると、画面の版は古くなる
 - 退避（superseded・slot-removed・空にする）は、行の世代の列（`mem_incarnation`・`mem_worktree_incarnation`・`mem_session_generation`）を `mem_items` の `origin_*` へそのまま写す。世代を失わない
 
 **画面のメモの読みと書き（PC・スマホ共通）**
@@ -498,7 +507,9 @@ ALTER TABLE session_notes ADD COLUMN created_at INTEGER;
 | mem の行 | 有り・一致 | §6.3 の検査 → mode が `on` なら置き換え（superseded）、それ以外なら同じ ID で更新（T1'） |
 | mem の行 | 有り・不一致 | 409 `version_conflict`、今の `text`・`version` |
 
-- hook は 409 のとき、楽観の表示（`override`）を外して保存済みの値を表示し、**入力中の文字は編集欄に残して**「他で更新されました」を出す（今は `!response.ok` で `setOverride(null)` するだけ、`TerminalSplitPane.tsx:290-295` 付近）。書いた文字を黙って捨てない
+- hook は **400（検査で断った）と 409（版の競合）のどちらでも**、楽観の表示（`override`）を外して保存済みの値を表示し、**入力中の文字は編集欄に残して**理由（400 は「保存できない文字列が含まれています」、409 は「他で更新されました」）を出す（今は `!response.ok` で `setOverride(null)` するだけ、`TerminalSplitPane.tsx:290-295` 付近）。書いた文字を黙って捨てない。成功したときだけ編集欄を閉じる（2 回目のレビュー 1）
+  - PC：`TerminalSplitPane` の `commitNote` は保存の結果を待ち、失敗なら編集欄を開いたまま下書き（`noteDraft`）を残す
+  - スマホ：`MobileTerminalTabSessionNote.tsx` は保存の直後に編集欄を閉じる（契約の scope の外で変えない）。そこで共有の hook が失敗のとき、断った下書きと理由を `TerminalSplitPane.tsx` の小さな受け渡し（1 件だけ持つ）に置いてから `SESSION_NOTE_OPEN_EVENT` を出す。スマホの編集欄はこの event で開き直り、`SessionNoteInput`（自分で値を持つ形）は開くときに受け渡しの下書きと理由を受け取る。PC の編集欄（値を親が持つ形）は受け渡しを読まない
 - 空にする（行の削除）：mem の行なら、版を照合してから `mem_items` へ `closed`（`manual`、`updated_by='human'`）を写し、行を消す
 
 ### 10.3 `worktree_id` という列名を `mem_items` に使わない理由
@@ -523,7 +534,9 @@ ALTER TABLE session_notes ADD COLUMN created_at INTEGER;
 | worktree の削除（`deleteWorktreesByIds`・`deleteRepositoryWorktrees`） | CASCADE／`deleteWorktreeChildRows` で消える | **`deleteWorktreeChildRows` の前に** `slot-removed` に退避 | 既存のトランザクション（`worktree-db.ts:956`・`:988` の前） |
 | worktree ID の改名 | 子として付け替わり、維持 | 維持 | 既存 |
 
-- mem の書き込みは、要求の instance の今の世代を同じトランザクションで読み、作成者の照合（`update`・`close`）は `origin_incarnation` の一致で行う
+- **要求を受けた時点（最初の `await` の前）に要求の instance の世代を読んで固定し**、同期の区間の書き込みの直前にもう一度読んで一致を確かめる。違えば（`await` の間に削除→再追加・ツールの変更があった）書かずに exit 52 `instance_not_found`（`reason:'incarnation_changed'`）。受けた時点で世代が無かったとき（派生の primary の最初の書き込み・v66 より前からの行）は、書き込みの直前にも無いときだけ同じトランザクションで作る。追加（`addAgentInstance`）と全置換の新しい組（`setAgentInstances`）は世代を**その場で作る**ので、削除→再追加は必ず別の世代になり、「受けた時点で無い・書く時点で有る」として断れる（2 回目のレビュー 3）。alias の変更・並べ替えでは組の世代を変えないので通る
+- 作成者の照合（`update`・`close`）は `origin_incarnation` の一致で行う
+- **派生の primary を初めて明示の roster に保存するとき**（`management.ts` の追加の経路は派生の primary を新しい instance と一緒に `setAgentInstances` に渡す）：その ID の世代の行が既にあり、ツールが同じなら**その世代を続ける**（`now`・所有権が残る）。ツールが違えば前を終えて新しく作る。世代の行が無ければ新しく作る（2 回目のレビュー 8）
 - mem の行でないメモの prune は今までどおり ID だけ（#2427 を変えない）。同じ ID で別のツールにしたとき mem の行でないメモが残るのは既存の挙動で、この Issue では変えない（§16 の「本文に無い指摘」）
 
 ### 10.5 セッションの世代（#4115）の扱い
@@ -556,7 +569,7 @@ ALTER TABLE session_notes ADD COLUMN created_at INTEGER;
 1. **CLI に口を作らない**：`commandmate mem` に mode を変えるサブコマンドもオプションも無い。ガードのテスト（`tests/unit/guards/mem-mode-write-screen-only.test.ts`）で、`src/cli/**` が `mem-settings` の書き込み（`put(`・`delete(` と `mem-settings` の組）と、画面の印のヘッダ名 `X-CommandMate-Client` を持たないことを固定する
 2. **サーバの印**：書き込みの route（`PUT`・`DELETE`）は、次の **両方** を満たさない要求を 403 `screen_only` で断る。判定は新しい `src/lib/security/screen-request.ts` の 1 関数
    - `X-CommandMate-Client: screen` がある。画面の API 呼び出し（`RepositoryMemSettings` が使う client）だけが付ける。独自ヘッダなので、別 origin のページからの要求は CORS の preflight を通らない（`src/middleware.ts`・`next.config.*` に CORS の許可は無い［事実：grep 0 件。route ごとは §15 U6］）
-   - `Origin` があり、その scheme＋host＋port が要求の宛先と一致する。宛先は `Host`（`remote` の Tunnel 越しでは転送されたホスト名）から作る。ブラウザは同一 origin の `PUT`・`DELETE` の `fetch` に `Origin` を付ける（HTTP の LAN・localhost・HTTPS のどれでも）。Node の `fetch`（CLI）は付けない［見立て。ブラウザでの実測は未確認、§15 U2］
+   - `Origin` があり、その scheme＋host＋port が要求の宛先と一致する。**宛先の host＋port は `X-Forwarded-Host` があればその最初の値、無ければ `Host`。scheme は `X-Forwarded-Proto` があればその最初の値、無ければサーバが受けた接続の scheme（`request.nextUrl.protocol`）**。Tunnel（`remote`）は外側が HTTPS・上流が HTTP（`src/lib/remote/tailscale.ts` の serve は `http://127.0.0.1:<port>` へ転送）なので、転送のヘッダが無いと scheme が合わない。転送のヘッダを信じても弱くならない理由：別 origin のブラウザのページは独自ヘッダ（`X-CommandMate-Client`）を付けた時点で preflight で止まり、同じ OS のプロセスはそもそも全部を偽れる（§11.3）。実際の Tunnel がこれらのヘッダを付けるかは未確認（§15 U2 で実測）（2 回目のレビュー 7）。ブラウザは同一 origin の `PUT`・`DELETE` の `fetch` に `Origin` を付ける（HTTP の LAN・localhost・HTTPS のどれでも）。Node の `fetch`（CLI）は付けない［見立て。ブラウザでの実測は未確認、§15 U2］
    - `Sec-Fetch-Site` は見ない（LAN の HTTP で付かない）。`Authorization: Bearer` の有無も見ない（token の設定次第で付かない、`api-client.ts:200-202`）。ただし `Sec-Fetch-Site` が付いていて `same-origin` 以外なら断る（付く環境での追加の検査）
 3. 読み（`GET`）は CLI からも可（`mem mode` が使う）
 
@@ -621,7 +634,7 @@ ALTER TABLE session_notes ADD COLUMN created_at INTEGER;
 
 ### 12.3 項目の形（`--json` と API で共通）
 
-`id`・`kind`・`state`・`text`（§6.4 で止めたときは無く `withheld`）・`closeWhen`（§2.2 の JSON）・`promoteTo`・`quote`・`quoteAt`（ISO8601 UTC）・`evidence`（配列）・`owner { repositoryId, branch, worktreeId, worktreeIncarnation, instanceId, cliToolId, incarnation, sessionGeneration }`・`createdBy`・`updatedBy`・`version`・`createdAt`・`updatedAt`・`closedAt`・`closeReason`・`stale`（§8.2）・`frozen`（derived）。`now` も同じ形（`session_notes` の `mem_*` 列から組み立てる。`sessionGeneration` は `mem_session_generation`）
+`id`・`kind`・`state`・`text`（§6.4 で止めたときは withheld の形。自由入力の欄の鍵はすべて無い）・`closeWhen`（§2.2 の JSON）・`promoteTo`・`quote`・`quoteAt`（ISO8601 UTC）・`evidence`（配列）・`owner { repositoryId, branch, worktreeId, worktreeIncarnation, instanceId, cliToolId, incarnation, sessionGeneration }`・`createdBy`・`updatedBy`・`version`・`createdAt`・`updatedAt`・`closedAt`・`closeReason`・`stale`（§8.2）・`frozen`（derived）。`now` も同じ形（`session_notes` の `mem_*` 列から組み立てる。`sessionGeneration` は `mem_session_generation`）
 
 ### 12.4 対象の決め方
 
@@ -645,7 +658,9 @@ ALTER TABLE session_notes ADD COLUMN created_at INTEGER;
 | `src/lib/mem/secret-scan.ts` | §6 の規則（ID つき、版つき） |
 | `src/lib/mem/staleness.ts` | §8.2 |
 | `src/lib/mem/transitions.ts` | §3 の表（関数として） |
-| `src/lib/mem/incarnation.ts` | §10.4・§10.1 の世代の発行・照合 |
+| `src/lib/mem/incarnation.ts` | §10.4・§10.1 の世代の発行・照合、`worktreeIncarnationAlive` |
+| `src/lib/mem/present.ts` | §6.4 の出口の読み直しと withheld の形（全出口で共有） |
+| `src/lib/mem/git-observe.ts` | §9.3 の `observe`（HEAD・common-dir）と、`close_when` の補い（origin・tip）の git |
 | `src/lib/security/screen-request.ts` | §11.2 の印 |
 | `src/app/api/worktrees/[id]/mem/route.ts` ほか（`items`・`items/[itemId]`・`now`・`mode`） | worktree の経路の API |
 | `src/app/api/repositories/[id]/mem/route.ts`・`…/mem/purge/route.ts` | repository の経路の API（list・mode・purge） |
@@ -698,7 +713,7 @@ DB を使うテストは `os.tmpdir()` の `mkdtempSync` の中の DB で、`aft
 | `close_when` | 未知の型・オフセットの無い `at`・origin の無い `#N`・§2.3 で × の組を断る | §2.2 の各型の保存値の fixture を A が書いて読める（T-COND：B が同じ fixture を使う） |
 | mode の遷移 | `on` で作成 → `off`：list 50・check 50・brief に出ない・G の編集 409 → `derived`：list は `frozen`・書き込み 50 → `on`：書き込み 0 | 各時点で項目の行と版が変わらない（許された更新だけ） |
 | 断った値が出ない | 秘密・構造化した欄の絶対パスで断ったとき、応答の JSON・CLI の stderr・ロガーのモックの呼び出しに原文の部分文字列が無い | 断った理由の `code`・`field`・`rule` は出る |
-| #2427 を壊さない | — | `off` で mem の行でないメモの `PUT`（`baseVersion` 無し）・`GET` が v65 と同じ動き、100 の上限、空で削除、alias の変更で残る（既存のテスト `tests/unit/lib/db/session-notes-2427.test.ts`・`tests/unit/app/api/worktrees/session-notes-2427.test.ts` がそのまま通る）。`GET` の応答は足した欄以外が同じ |
+| #2427 を壊さない | — | `off` で mem の行でないメモの `PUT`（`baseVersion` 無し）・`GET` が v65 と同じ動き、100 の上限、空で削除、alias の変更で残る。既存のテスト `tests/unit/lib/db/session-notes-2427.test.ts`・`tests/unit/app/api/worktrees/session-notes-2427.test.ts` は旧の形（`{text, updatedAt}`）への完全一致を見ているので、**足した欄（`version`・`mem`）を受け入れる形に期待を直す**（`text`・`updatedAt`・正規化・削除の保証は弱めない。2 回目のレビュー 9）。`GET` の応答は足した欄以外が同じ |
 | 原子性 | 退避（superseded）の後の書き込みを失敗させると、退避の行も枠の行も前のまま（トランザクションが全部戻る） | 失敗しなければ両方が書かれる |
 
 **事前レビューの指摘ごと（§16 の R 番号）**
@@ -716,6 +731,21 @@ DB を使うテストは `os.tmpdir()` の `mkdtempSync` の中の DB で、`aft
 | R9 | root の増減で項目を移さず、読みと件数と key は全候補 root の和 | 同じ common-dir に path の順で前の root を足す → 前の項目が見え、key の再送が同じ ID、件数の上限が合算。前の先頭の root を無効にする → 項目が見える | scan の順だけを変えても所属・保存先が同じ |
 | R10 | kind × 型の許可表は一意で、A と B が同じ fixture を使う | `waiting`・`next` の `replaced` を断る。表の × の組をすべて断る | `now` の省略は `replaced`、`note` は `manual`、`decision` は `promoted`（列 NULL）。表の ○ の組をすべて通す |
 | R11 | 絶対パスを断る欄は構造化した欄だけ。競合で返すのは保存済みの値 | `evidence: path:/etc/passwd` が断られ、原文が API のエラー・`--json`・CLI の stderr・ログに出ない | 自由文の `text="/tmp/mem-example"` は保存され `--json` に出る。版の競合の応答に今の項目が出る |
+
+**2 回目の事前レビューの指摘ごと（§16 の 2 回目の表の番号）**
+
+| # | 守る条件 | 陽性 | 陰性 |
+|---|---|---|---|
+| 1 | 400 になる条件は §6.3 の表だけ。400・409 でも PC・スマホの入力が残る | `on` で mem の行でないメモに模擬の秘密 → 400。PC の編集欄が開いたまま下書きが残る、スマホの編集欄が開き直り下書きが残る | 通常の文で 200 → PC・スマホとも編集欄が閉じる。`off` の mem の行でないメモは秘密らしい文字列でも今までどおり 200 |
+| 2 | 削除を越えて版の番号が単調 | 版 n を読む → 空にして削除 → 作り直し → 古い画面の `baseVersion=n` が 409 | 今の版で 200 |
+| 3 | 受けた時点の世代を固定し、書く直前に照合 | 所属の観測の `await` の間に instance を削除→再追加 → `now`/`add` が 52（`incarnation_changed`）、何も書かない | `await` の間に alias の変更・並べ替え → 通る |
+| 4 | common-dir を前後の観測と membership に結ぶ | HEAD（ブランチ名・SHA）は同じで、2 回目の観測の common-dir だけ違う → 古い組で書かない（3 回で 53） | 同じ Git なら 1 回で書く |
+| 5 | worktree 条件は世代の存続で決める | 削除→同じ path で作り直し → 保存した世代が存続しない（fixture の `met`） | 改名 → 世代が存続（fixture の `not-met`） |
+| 6 | withheld の形は 1 つで全出口が共有 | `quote`・`evidence` だけに新しい規則が当たる → list・`--json`・競合の応答に `quote`・`evidence`・`text` の鍵が無い | 当たらない項目は全欄が出る |
+| 7 | 宛先の scheme は転送のヘッダ → 接続の scheme | `X-Forwarded-Proto: https`・`Origin: http://…` → 403 | `X-Forwarded-Proto: https`・`X-Forwarded-Host: x.ts.net`・`Origin: https://x.ts.net` → 200 |
+| 8 | 派生の primary を明示の roster に保存しても世代が続く | 同じ ID でツールを変えて保存 → 前の `now` は退避 | primary が `now` を書く → 別の Agent を追加（派生の primary と一緒に保存）→ primary の `now`・所有権が残る |
+| 9 | 既存の #2427 のテストは足した欄を受け入れる | — | `text`・`updatedAt`・正規化・削除の期待はそのまま |
+
 
 ---
 
@@ -766,3 +796,20 @@ Codex の事前レビュー（2026-11-08、P1 8 件・P2 3 件、ほかに試験
 | R12 | 追加：「交互に now」だけでは原子性を確かめられない | 採る | `await` の間に別の要求を進める試験と、退避の後の失敗で全部戻る試験を §13.3 に足した |
 
 本文に無い指摘（この Issue では直さない）：`src/lib/db/agent-instances-db.ts:287` — `pruneSessionNotes` は ID だけで残すので、同じ instance ID で別のツールに変えたとき、前のツールのセッションに書いた #2427 のメモが新しいツールのセッションに残る（#4132 の creation key は組で外す、`:269-275`。roles の `pruneAgentInstanceRoles` は `:290` で ID だけ）。mem の行は §10.4 で退避するが、mem の行でないメモは既存の挙動のまま。
+
+### 2 回目の事前レビュー（Codex、2026-11-08、P1 6 件・P2 3 件。`workspace/orchestration/runs/2026-11-08/prereview/review-4221b.md`）
+
+1 回目の R1〜R12 の判定は「解消 7 件・一部解消 5 件」。残りの指摘の処置（守る条件と対照は §13.3 の 2 回目の表）：
+
+| # | 指摘 | 処置 | 1 行の理由 |
+|---|---|---|---|
+| 1 | P1：400 の条件が T1 と §6.3 で食い違う。画面は 409 しか直さず、保存を待たずに閉じる | 採る | 400 の対象を §6.3 に揃え（T1 を直した）、400・409 で入力と理由を残す契約を PC・スマホに足した（§10.2）。スマホの部品は scope の外なので共有の hook と編集欄の側で開き直す |
+| 2 | P1：削除→再作成で古い版が一致しうる | 採る | 枠ごとの版の数を行の外（`session_note_versions`）に持ち、削除を越えて単調にした（§10.1・§10.2） |
+| 3 | P1：`await` 中に世代が替わった要求が新しい世代で保存される | 採る | 受けた時点の世代を固定し、書く直前に照合する。追加・全置換で世代をその場で作る（§10.4） |
+| 4 | P1：HEAD の一致だけでは Git の同一性を確かめられない | 採る | `observe` に common-dir を入れ、前後の一致と membership の `identity` との一致を求めた（§9.3） |
+| 5 | P1：worktree の改名を「削除された」と判定する | 採る | 条件の成立を ID の行ではなく保存した世代の存続で決め、改名・削除の両方を fixture に入れた（§2.1） |
+| 6 | P1：withheld で隠す欄が出口と項目の型で違う | 採る | withheld の形を 1 つの関数で定義し、自由入力の欄の鍵をすべて出さない（§6.4・§12.3） |
+| 7 | P2・質問：T3 の宛先の scheme の決め方が無い | 採る | `X-Forwarded-Host`／`X-Forwarded-Proto` → `Host`／接続の scheme の順に決めた。実際の Tunnel での実測は U2 のまま（§11.2） |
+| 8 | P2・質問：派生の primary を明示の roster に保存するときの世代 | 採る | 同じ ID・同じツールの世代の行があれば続ける規則を足した（§10.4） |
+| 9 | P2：既存のテストが「そのまま通る」は成立しない | 採る | 足した欄を受け入れる期待に直すことを変更範囲に入れ、text・updatedAt・正規化・削除の保証は弱めない（§13.3） |
+
