@@ -31,6 +31,8 @@ const state = vi.hoisted(() => ({
   calls: [] as string[],
   paneCwd: '' as string,
   cdTo: null as string | null,
+  /** When set, the pane cwd reader waits for the test to let it answer. */
+  hold: null as null | { reached: () => void; release: Promise<void> },
 }));
 
 vi.mock('@/lib/tmux/tmux', () => ({
@@ -78,12 +80,28 @@ vi.mock('@/lib/cli-tools/opencode-executable', async (importOriginal) => {
 // A test run has no pane reader (`pane-env.ts`); this one reads the modelled pane.
 vi.mock('@/lib/agent-roles/pane-env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/agent-roles/pane-env')>();
-  return { ...actual, roleLaunchCwdReaderForPane: vi.fn(() => async () => state.paneCwd) };
+  return {
+    ...actual,
+    roleLaunchCwdReaderForPane: vi.fn(() => async () => {
+      const hold = state.hold;
+      if (hold) {
+        hold.reached();
+        await hold.release;
+      }
+      return state.paneCwd;
+    }),
+  };
 });
 
 import { OpenCodeV2Tool } from '@/lib/cli-tools/opencode-v2';
 import { fixedEnvReader, loadRoleComposition } from '@/lib/agent-roles/composition';
-import { runWithLaunchRole, type LaunchRoleSnapshot } from '@/lib/session/role-launch';
+import {
+  forgetLaunchRoleEvidence,
+  resetLaunchRoleStateForTest,
+  runWithLaunchRole,
+  type LaunchRoleSnapshot,
+} from '@/lib/session/role-launch';
+import { invalidateInstanceInput, resetInstanceInputLocks } from '@/lib/session/instance-input-lock';
 import { RoleLaunchRefusedError } from '@/lib/agent-roles/launch-errors';
 
 let worktree: string;
@@ -139,6 +157,9 @@ beforeEach(() => {
   state.calls.length = 0;
   state.paneCwd = worktree;
   state.cdTo = null;
+  state.hold = null;
+  resetInstanceInputLocks();
+  resetLaunchRoleStateForTest();
 });
 
 afterEach(() => {
@@ -183,6 +204,52 @@ describe('the launch line is typed only while the pane is still in the worktree 
     state.cdTo = elsewhere;
 
     await launch(snapshotWith(composition));
+    expect(state.calls.filter((call) => call.startsWith('sendKeys'))).toEqual([LAUNCHED]);
+  });
+});
+
+describe('a launch replaced while it re-checked the cwd does not type (Issue #4233, re-review)', () => {
+  const SESSION = 'mcbd-opencode-v2-wt-4233';
+
+  /**
+   * Start a launch, wait until the re-check is reading the cwd, run `between`
+   * from outside the launch's own context (as another request would), then let
+   * the read answer.
+   */
+  async function launchWith(between: () => void): Promise<unknown> {
+    const composition = await compose({ XDG_CONFIG_HOME: 'rel-xdg', HOME: fakeHome });
+    let reached!: () => void;
+    const atRead = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    let release!: () => void;
+    state.hold = { reached, release: new Promise<void>((resolve) => (release = resolve)) };
+    const running = launch(snapshotWith(composition)).catch((caught: unknown) => caught);
+    await atRead;
+    between();
+    release();
+    return running;
+  }
+
+  it('positive: stopped and restarted meanwhile (input revoked, same cwd): the old line is not sent', async () => {
+    // The restart's `beginAgentSession` invalidates the old input turn; the new
+    // pane is in the worktree too, so the cwd alone would pass.
+    const error = await launchWith(() => invalidateInstanceInput(SESSION));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/input lock lost, nothing was typed/);
+    expect(state.calls.filter((call) => call.startsWith('sendKeys'))).toEqual([]);
+  });
+
+  it('positive: stopped meanwhile (the launch epoch moved): refused, nothing sent', async () => {
+    const error = await launchWith(() => forgetLaunchRoleEvidence({ worktreeId: 'wt-4233', cliToolId: 'opencode-v2' }));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain('(role launch refused: session-stopped)');
+    expect(state.calls.filter((call) => call.startsWith('sendKeys'))).toEqual([]);
+  });
+
+  it('negative: nothing happens meanwhile, the line is sent as before', async () => {
+    const error = await launchWith(() => undefined);
+    expect(error).toBeUndefined();
     expect(state.calls.filter((call) => call.startsWith('sendKeys'))).toEqual([LAUNCHED]);
   });
 });

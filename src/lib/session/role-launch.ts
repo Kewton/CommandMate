@@ -468,18 +468,28 @@ export async function runWithLaunchRole<T>(snapshot: LaunchRoleSnapshot, fn: () 
  * can `cd` meanwhile. The line itself is left as it is (no `cd` added to it), so
  * the launch is refused instead when the pane is no longer in the worktree.
  *
+ * The step awaits, so it also refuses when the session was stopped meanwhile
+ * (its epoch moved), and `typeLaunchLines` checks the input ticket after it: a
+ * restart in between revokes this launch's turn, and its line is not typed.
+ *
  * @param readLaunchCwd - The pane's cwd reader; none (a test run) checks nothing
  * @returns A step that rejects with a {@link RoleLaunchRefusedError}, or null
  */
 export function launchCwdRecheck(readLaunchCwd: RoleLaunchCwdReader | undefined): (() => Promise<void>) | null {
-  const pinned = scope().getStore()?.snapshot.composition?.opencodeV2LaunchCwd;
-  if (pinned === undefined || !readLaunchCwd) return null;
+  const store = scope().getStore();
+  const pinned = store?.snapshot.composition?.opencodeV2LaunchCwd;
+  if (store === undefined || pinned === undefined || !readLaunchCwd) return null;
   return async () => {
     try {
       await assertLaunchCwdIsWorktree(pinned, readLaunchCwd);
     } catch (error) {
       if (!(error instanceof RoleCompositionError)) throw error;
       throw new RoleLaunchRefusedError('composition-failed', `${error.message} (it changed after the role was composed)`);
+    }
+    // The session stopped while the cwd was read: this launch no longer speaks
+    // for it (`typeLaunchLines` checks the input ticket as well).
+    if (isStale(store)) {
+      throw new RoleLaunchRefusedError('session-stopped', 'The session was stopped while the launch checked its cwd');
     }
   };
 }

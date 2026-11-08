@@ -361,4 +361,21 @@ Codex の事前レビュー（`workspace/orchestration/runs/2026-11-08/prereview
 | 照合の中身 | 合成時と同じ `composition.ts` `assertLaunchCwdIsWorktree`（`launchCwdFor` を切り出して export）。cwd が worktree でない・読めない → `RoleLaunchRefusedError('composition-failed')`。何も打たずに起動を止める |
 | 対照 | `tests/unit/cli-tools/opencode-v2-launch-cwd-recheck-4233.test.ts`。陽性=「cwd の確認 → ポート予約中に端末から `cd` → 起動」で拒否され、`sendKeys` は 0 回。陰性=`cd` しなければ今と同じ起動行を 1 回打つ／絶対の `XDG_CONFIG_HOME` では `cd` しても再照合せず起動する。再照合の配線を外すと陽性だけが落ちることを確かめた |
 
-残る窓: 照合（`display-message`）と起動行の `send-keys` の間の 1 回の tmux 呼び出し分。terminal input は入力ロックを通らないので、この間の `cd` は閉じられない。閉じるには起動行で cwd を固定するしかなく、それは上のとおりバイト一致の約束に触れる。
+#### 8.2.1 再照合の待ちの間の終了・再起動（再レビュー P2 (2)）
+
+再照合は await するので、その間にセッションが終了・再起動されうる。再起動の `beginAgentSession` は旧起動の入力 ticket を失効させ（`invalidateInstanceInput`）、新しい pane も worktree にあれば cwd の照合は通る。そのまま進むと、旧起動の起動行と Enter が新しい pane に入っていた。
+
+| 項目 | 決めたこと |
+|---|---|
+| 入力 ticket | `cli-tools/launch-keys.ts` `typeLaunchLines` は、行を打つ前ごとに自分の手番の ticket が `isCurrent()` かを見る。失効していれば `InstanceInputOwnershipLostError` で、その行から先は打たない。ticket が失効するのは置き換えのときだけなので、何も起きなければ今と同じ |
+| 起動の世代 | `launchCwdRecheck` の step は、照合の await の後に起動の epoch（`forgetLaunchRoleEvidence` で進む）を見て、進んでいれば `RoleLaunchRefusedError('session-stopped')` |
+| 対照 | 同じテストファイル。陽性=再照合の読み取り中に入力を失効（cwd は worktree のまま）→ 起動行を送らない／再照合の読み取り中に停止（epoch が進む）→ `session-stopped` で送らない。陰性=何も起きなければ今と同じ起動行を送る。2 つの確認をそれぞれ外すと、対応する陽性だけが落ちることを確かめた |
+
+#### 8.2.2 残る制限: 照合と起動行の間の `cd`（再レビュー P2 (1)、直さない）
+
+- **利用者に見える症状**: OpenCode V2 が worktree 以外の cwd で起動する。相対の `XDG_CONFIG_HOME` / `HOME` を opencode はその cwd で解決するので、合成で読んだのと違う global 設定で起動しうる。ロールが実際の `default_agent` に載らないか、その agent 自身の `system` を消すことがある。
+- **起きる条件**: 次の 3 つが全部そろったとき。(a) `XDG_CONFIG_HOME`（未設定なら `HOME`）が相対で、ロールのある OpenCode V2 を既存の pane で起動し直す。(b) 再照合（`display-message`）が終わってから起動行の `send-keys` までの tmux 呼び出し 1 回分の間に、画面のターミナルから `cd` が入る。(c) または、それより前に打った `cd` の行を、shell がまだ読んでいない（pty に溜まっている）。
+- **直さない理由**:
+  1. 入力の排他: 端末の入力（`ws-server.ts` → `sendInput`）は、決めたうえで入力ロックに入れていない（#3952）。入れるには `ws-server.ts` と transport を変えることになり、この PR の範囲の外になる。入れたとしても、pty にもう溜まっているバイト（(c)）は tmux の側からは見えないので閉じきれない。
+  2. 実行時の cwd の固定: 起動行に `cd <worktree> &&` を足すと、起動行のバイト一致の約束に触れる。`scripts/opencode-v2/launch.sh` の中で固定する方法も範囲の外。
+- **追跡**: この制限は「本文に無い指摘」としてコミット本文に書き、追跡にする。直し方の候補は、wrapper（`launch.sh`）に起動 cwd を渡して中で `cd` するもの（起動行の約束を見直す Issue として出す）。
