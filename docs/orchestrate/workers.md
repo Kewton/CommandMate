@@ -239,3 +239,44 @@ build-cli,build-server,lint,lint-sh,build,typecheck,integration,unit
 このとき `work-evidence` と `scope` は落ちるので、**オーケストレーターが手で照合する**
 （commits ≥ 1 かつ作業ツリークリーン／`git diff --name-only origin/develop...HEAD` を契約の
 `allow` と `deny` に突き合わせる）。ワーカーが完了しているかは commits と作業ツリーの状態で見る。
+
+## 3-1 モデルの確認結果ごとの扱い
+
+- `model ok`: そのまま 3-2 へ
+- 起動のメッセージが exit 99 でも、launch-worker.mjs は画面の model を読み、読めれば契約へ進む（`send-init-*.err` に記録）。読めなければ下の UNKNOWN と同じ扱い
+- `model UNKNOWN` / `model MISMATCH`（1 回目）: launch-worker.mjs が自分で 1 回だけ起動し直す（契約はまだ送っていない）
+- exit 40（2 回目も `model MISMATCH`）/ 41（2 回目も `model UNKNOWN`）: **セッションは止まっている。契約は送られていない。その Issue は進めない**（そのモデルのまま続けない）。
+  8-3 に書き、`.claude/settings.local.json` と CommandMate の版を確かめてから、人の判断で送り直す。利用者の `~/.claude/settings.json` は変えない
+- exit 42（`stop UNCONFIRMED`）: kill が失敗した・まだ動いている。**何も送り直さない**。人がセッションを止めたことを確かめてから送り直す
+- exit 43（`auto-yes UNCONFIRMED`）: 起動の前に Auto-Yes を切れたと確かめられない（一覧・ロールが読めないときも）。何も送っていない。`auto-yes --disable` を確かめてから送り直す
+- exit 45（`permission ASK`）: Command Code の権限の既定が `ask`。何も送っていない。docs/orchestrate/command-code.md#3-1-権限の既定を確かめる
+- exit 31 / 32 / 43 / 44 の意味と対処（send とワーカーの起動で違う）は docs/orchestrate/workers.md#3-1-send-とワーカーの起動の-exit-code を読む
+- tasks.tsv は 5 列になった（`issue` / `WT` / `AGENT` / `TASK_ID` / `MODEL`）。**`--instance` に渡すのは 3 列目の `AGENT`**（`claude`）で、5 列目ではない
+
+## 3-3 合格の記録を再利用しない理由
+
+- **合格の記録は再利用しない。** 合格は task・契約（そのゲートの定義）・その task の開始時の env-clean の基準に結び付いていて、
+  HEAD だけでは同じ確認と言えない（同じブランチに次の契約を送った直後も HEAD は同じ）。呼ぶたびに待って検証する。
+  落ちた後の再開では、`run-log.mjs status` で `verify=ok` の Issue を呼び直さない（終わった task を `wait --verify` で裁定し直すと、
+  紐づかない再検証になり #3118 の形で exit 20 になる）。再指示せずに検証だけをやり直すときは `--reverify --task "$TASK_ID"`
+  （合図の境界は前の呼び出しのものを run の記録の `signal-since=` から引き継ぐ。既に出た合図で裁定に進む）
+
+## 3-1 goal に手順を書き下す理由
+
+契約の goal だけでは足りない Issue（`/bug-fix` の調査手順、Phase 2.5 の分析結果の参照など）は、
+**goal 本文にその指示を書く**。契約は送信メッセージそのものなので、素の send で送っていた文面は
+すべて goal に入る。goal の先頭にスラッシュコマンドを書いても起動しないので、
+必要な手順は goal に書き下す（2-4-2）。
+
+## Phase 0 Claude のモデルの決まり方
+
+- **Claude のモデルは `--instance` でも `--model` でも決まらない**（`send --model` は copilot / antigravity / claude に効くが antigravity / claude は新規起動時のみ。稼働中の claude に渡すと 400）。
+    セッションの**起動時**に、worktree の `.claude/settings.local.json` から決まる。書くのは 3-1 の `launch-worker.mjs`（opus も sonnet も明示して書く）
+  - **ワーカーに `/model` を送らない。** Enter が `~/.claude/settings.json` のグローバル既定を書き換える（#1495 / #2297）
+
+## 4-3 設計の修正指示の send
+
+この send は `launch-worker.mjs` を通さない。動いているワーカーへの 1 往復の指示で、モデルは起動時に固定済み・契約も作り直さないため。
+
+修正指示は**契約を作り直さない**（契約は Issue 単位の宣言であり、1往復の指摘ではない）。
+指示の反映は、3-4 の同じ手順（`wait` → `verify --task "$TASK_ID"`）で裁定する。
