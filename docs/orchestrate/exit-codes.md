@@ -149,3 +149,4 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
 テストの不合格（exit 1）ではないので、ワーカーへ再指示しない。記録の `precheck` 段は `skip`、要約は `<段>=held`。
 別の worktree の `unit` / `integration` / `unit-related` が終わってから、同じ行の precheck を走らせ直す（`skip` は再利用されない）。
 しきい値と待ちの記録は [ci-merge.md の 6-1-1](./ci-merge.md) を見る。
+`merge-pr.mjs` が自分で取り込んだ HEAD の precheck では起きない（重い段はロックを取らずに `<段>=ci` と記録し、PR の CI に任せる。#4265、[ci-merge.md の 6-2 取り込み後の重い段](./ci-merge.md)）。
