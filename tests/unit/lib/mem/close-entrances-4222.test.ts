@@ -46,6 +46,10 @@ import { evaluateMemConditions, fixMemEvalLifetime, type MemEvalContext } from '
 import { memAcknowledgeNotice, memCheck, memList } from '@/lib/mem/service';
 import type { MemTargetResolved } from '@/lib/mem/target';
 import type { MemListResponse } from '@/types/mem';
+import { getInstanceIncarnation } from '@/lib/mem/incarnation';
+import { briefForRoute } from '@/lib/brief/service';
+import { createMemBriefProvider } from '@/lib/brief/provider';
+import type { BriefRequest } from '@/lib/session/brief-provider';
 import { MemWorld } from './mem-4222-harness';
 
 const MEM_DB = path.join(process.cwd(), 'src/lib/db/mem-db.ts');
@@ -282,6 +286,46 @@ function evaluateDirectly(trigger: 'brief' | 'preview', overrides: Partial<MemEv
   };
 }
 
+/** The brief's route (#4223): `buildBrief` evaluates through `evaluateMemConditions`. */
+function briefRoute() {
+  const deps = world.deps();
+  return briefForRoute(
+    world.db,
+    'wt-1',
+    { instance: 'claude', budget: null, format: 'json', all: '1' },
+    { target: deps, evaluation: deps.evaluation }
+  );
+}
+
+/** The brief's provider (#4223): `reserve` and `settleBriefAttempt` reach #4222's reservation and receipt. */
+function briefProvider() {
+  const deps = world.deps();
+  return createMemBriefProvider(() => world.db, { target: deps, evaluation: deps.evaluation, notices: clock() });
+}
+
+function briefRequest(boundaryId = 'b-1'): BriefRequest {
+  return {
+    target: {
+      worktreeId: 'wt-1',
+      cliToolId: 'claude',
+      instanceId: 'claude',
+      instanceIncarnation: getInstanceIncarnation(world.db, 'wt-1', 'claude')?.incarnation ?? null,
+    },
+    membership: { repositoryId: world.repo, readRepositoryIds: [world.repo], branch: 'feature/x', detached: false, mode: 'on' },
+    boundary: { id: boundaryId, kind: 'launch', late: false, openedAt: Date.now() },
+    budget: { maxBytes: 4096, maxLines: 240 },
+    now: Date.now(),
+  };
+}
+
+/** Build a brief with the pending notice in it, and reserve it as D1's claim would. */
+async function briefReserved(provider: ReturnType<typeof briefProvider>, boundaryId = 'b-1') {
+  const built = await provider.provider.build(briefRequest(boundaryId));
+  expect(built.includedNoticeIds).toHaveLength(1);
+  return { built, reserve: () => provider.provider.reserve!({ boundaryId, claimToken: `t-${boundaryId}`, includedNoticeIds: built.includedNoticeIds, body: built.body }) };
+}
+const attemptCount = () => world.count('SELECT COUNT(*) n FROM mem_notice_attempts');
+
 const ROWS: Record<string, Row> = {
   'condition-close via check': evaluation('check'),
   'condition-close via list': evaluation('list'),
@@ -376,6 +420,116 @@ const ROWS: Record<string, Row> = {
       const attempt = reserveMemNotices(world.db, recipient(), pick(), clock()).attemptId!;
       expect(settleMemNoticeAttempt(world.db, attempt, 'not-sent', clock())).toBe(1);
       expect(settleMemNoticeAttempt(world.db, attempt, 'sent', clock())).toBe(0);
+      expect(noticeState()).toBe('pending');
+    },
+  },
+  'condition-close via the brief (buildBrief, #4223)': {
+    writers: ['closeItemByCondition', 'closeMemItemByCondition'],
+    entrance: 'evaluateMemConditions',
+    callers: ['src/lib/brief/build.ts:buildBrief'],
+    recreated: async () => {
+      // The worktree is deleted and made again while the condition's query is out
+      // (on both of the route's attempts: it rebuilds once when the lifetime changed).
+      await world.add('next', 'issue:#1');
+      world.fake.handler = () => {
+        recreate();
+        return ISSUE_CLOSED();
+      };
+      const outcome = await briefRoute();
+      expect(world.fake.calls.length).toBeGreaterThan(0);
+      expect(outcome.status).not.toBe(200);
+      expect(openCount()).toBe(1);
+      expect(closedCount()).toBe(0);
+      expect(writtenB()).toBe(0);
+    },
+    modeOff: async (mode) => {
+      await world.add('next', PAST);
+      world.setMode(mode);
+      const outcome = await briefRoute();
+      if (mode === 'off') expect(outcome.status).toBe(409);
+      else expect(outcome.body).toMatchObject({ mode: 'derived' });
+      expect(world.fake.calls).toEqual([]);
+      expect(closedCount()).toBe(0);
+      expect(writtenB()).toBe(0);
+    },
+    conflict: async () => {
+      const item = await world.add('next', 'issue:#1');
+      world.fake.handler = () => {
+        world.db.prepare('UPDATE mem_items SET version = version + 1 WHERE id = ?').run(item.id);
+        return ISSUE_CLOSED();
+      };
+      await briefRoute();
+      expect(world.fake.calls.length).toBeGreaterThan(0);
+      expect(closedCount()).toBe(0);
+      expect(writtenB()).toBe(0);
+    },
+  },
+  'reserve via the brief provider (#4223)': {
+    writers: ['reserveNotices'],
+    entrance: 'reserveMemNotices',
+    callers: ['src/lib/brief/provider.ts:createMemBriefProvider'],
+    recreated: async () => {
+      await closedOne();
+      const { reserve } = await briefReserved(briefProvider());
+      recreate();
+      expect(reserve()).toBeNull();
+      expect(noticeState()).toBe('pending');
+      expect(attemptCount()).toBe(0);
+    },
+    modeOff: async (mode) => {
+      await closedOne();
+      const provider = briefProvider();
+      const { reserve } = await briefReserved(provider);
+      world.setMode(mode);
+      expect(reserve()).toBeNull();
+      expect(attemptCount()).toBe(0);
+      // Built in that mode, the brief carries no notice at all.
+      const built = await Promise.resolve(provider.provider.build({ ...briefRequest('b-2'), membership: { ...briefRequest().membership, mode: 'derived' } })).catch(() => null);
+      expect(built?.includedNoticeIds ?? []).toEqual([]);
+      expect(noticeState()).toBe('pending');
+      expect(attemptCount()).toBe(0);
+    },
+    conflict: async () => {
+      await closedOne();
+      const provider = briefProvider();
+      const first = await briefReserved(provider, 'b-1');
+      const second = await briefReserved(provider, 'b-2');
+      expect(first.reserve()).not.toBeNull();
+      // The same notice, already taken by the first brief.
+      expect(second.reserve()).toBeNull();
+      expect(noticeState()).toBe('reserved');
+      expect(attemptCount()).toBe(1);
+    },
+  },
+  'settle via the brief provider (#4223)': {
+    writers: ['settleNoticeAttempt'],
+    entrance: 'settleMemNoticeAttempt',
+    // The caller is createMemBriefProvider's settle, claimed by the reserve row above.
+    callers: [],
+    recreated: async () => {
+      await closedOne();
+      const provider = briefProvider();
+      const reserved = (await briefReserved(provider)).reserve()!;
+      recreate();
+      provider.settle({ boundaryId: 'b-1', outcome: 'sent', includedNoticeIds: reserved.includedNoticeIds });
+      expect(noticeState()).toBe('pending');
+    },
+    modeOff: async (mode) => {
+      await closedOne();
+      const provider = briefProvider();
+      const reserved = (await briefReserved(provider)).reserve()!;
+      world.setMode(mode);
+      provider.settle({ boundaryId: 'b-1', outcome: 'sent', includedNoticeIds: reserved.includedNoticeIds });
+      expect(noticeState()).toBe('pending');
+    },
+    conflict: async () => {
+      await closedOne();
+      const provider = briefProvider();
+      const reserved = (await briefReserved(provider)).reserve()!;
+      provider.settle({ boundaryId: 'b-1', outcome: 'not_sent', includedNoticeIds: reserved.includedNoticeIds });
+      expect(noticeState()).toBe('pending');
+      // A late `sent` for the attempt already settled acknowledges nothing.
+      provider.settle({ boundaryId: 'b-1', outcome: 'sent', includedNoticeIds: reserved.includedNoticeIds });
       expect(noticeState()).toBe('pending');
     },
   },
