@@ -27,7 +27,7 @@ vi.mock('@/components/providers/WorktreesCacheProvider', () => ({
   WorktreesCacheProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-import { TerminalSplitPane } from '@/components/worktree/TerminalSplitPane';
+import { resetSessionNoteHandoffForTests, TerminalSplitPane } from '@/components/worktree/TerminalSplitPane';
 import { MobileSessionNoteEditor, useMobileSessionNoteEditor } from '@/components/worktree/MobileTerminalTabSessionNote';
 import type { AgentInstance } from '@/lib/cli-tools/types';
 
@@ -52,6 +52,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   cacheState.value = null;
+  resetSessionNoteHandoffForTests();
 });
 
 async function settle(): Promise<void> {
@@ -60,15 +61,17 @@ async function settle(): Promise<void> {
   });
 }
 
-function renderPc() {
-  return render(
+const codex: AgentInstance = { id: 'codex', cliTool: 'codex', alias: 'codex', order: 1 };
+
+function pcPane(instance: AgentInstance = claude) {
+  return (
     <TerminalSplitPane
       worktreeId={WT}
       splitIndex={0}
-      cliToolId="claude"
-      instanceId="claude"
-      instance={claude}
-      availableInstances={[claude]}
+      cliToolId={instance.cliTool}
+      instanceId={instance.id}
+      instance={instance}
+      availableInstances={[claude, codex]}
       onInstanceChange={vi.fn()}
       onFocus={vi.fn()}
       terminal={<div />}
@@ -76,6 +79,8 @@ function renderPc() {
     />
   );
 }
+
+const renderPc = () => render(pcPane());
 
 function typeAndEnter(testId: string, text: string): void {
   const input = screen.getByTestId(testId);
@@ -108,8 +113,8 @@ describe('PC split', () => {
   });
 });
 
-function Phone() {
-  const { sessionNote, noteEditing, openNoteEditor, closeNoteEditor, commitNote } = useMobileSessionNoteEditor(WT, 'claude');
+function Phone({ instanceId = 'claude' }: { instanceId?: string }) {
+  const { sessionNote, noteEditing, openNoteEditor, closeNoteEditor, commitNote } = useMobileSessionNoteEditor(WT, instanceId);
   return (
     <div>
       <button data-testid="open" onClick={openNoteEditor}>
@@ -143,5 +148,147 @@ describe('phone', () => {
     // The saved text is shown until the list confirms it (the #2427 override).
     expect(screen.getByTestId('mobile-session-note-input')).toHaveValue('通常の文');
     expect(screen.queryByTestId('mobile-session-note-input-error')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Integration review P2-2・P2-3
+// ---------------------------------------------------------------------------
+
+/** A server that answers like the note route: 409 unless `baseVersion` is the stored one. */
+let serverVersion: number;
+function serveByVersion(): void {
+  fetchMock.mockImplementation(async (_url: string, init: { body: string }) => {
+    const body = JSON.parse(init.body) as { baseVersion?: number };
+    const ok = body.baseVersion === serverVersion;
+    return { ok, status: ok ? 200 : 409, json: async () => ({ code: ok ? undefined : 'version_conflict' }) };
+  });
+}
+
+/** A CLI write reaching the list cache while the editor is open. */
+function cliUpdate(): void {
+  serverVersion = 8;
+  cacheState.value = {
+    worktrees: [
+      {
+        id: WT,
+        sessionNotes: {
+          claude: { text: 'CLI が書いた', updatedAt: 2, version: 8, mem: { itemId: 'i', createdBy: 'agent', updatedBy: 'agent' } },
+        },
+      },
+    ],
+    refresh: vi.fn(async () => undefined),
+  };
+}
+
+function deferredFetch(status: number): () => void {
+  let release!: () => void;
+  fetchMock.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        release = () => resolve({ ok: status < 400, status, json: async () => ({ code: 'version_conflict' }) });
+      })
+  );
+  return () => release();
+}
+
+describe('P2-2: the version is the one the edit started from', () => {
+  beforeEach(() => {
+    serverVersion = 7;
+    serveByVersion();
+  });
+
+  it('PC: a CLI update during the edit makes the save 409, keeping the draft', async () => {
+    const view = render(pcPane());
+    fireEvent.click(screen.getByTestId('split-session-note-0'));
+    cliUpdate();
+    view.rerender(pcPane());
+    typeAndEnter('split-session-note-input-0', '古い版からの下書き');
+    await settle();
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body)).baseVersion).toBe(7);
+    expect(screen.getByTestId('split-session-note-input-0')).toHaveValue('古い版からの下書き');
+    expect(screen.getByTestId('split-session-note-input-0-error').textContent).toContain('他で更新されました');
+  });
+
+  it('PC (control): without an update the save lands', async () => {
+    const view = render(pcPane());
+    fireEvent.click(screen.getByTestId('split-session-note-0'));
+    view.rerender(pcPane());
+    typeAndEnter('split-session-note-input-0', '下書き');
+    await settle();
+    expect(fetchMock.mock.results.length).toBe(1);
+    expect(screen.queryByTestId('split-session-note-input-0')).toBeNull();
+  });
+
+  it('phone: a CLI update during the edit makes the save 409, keeping the draft', async () => {
+    const view = render(<Phone />);
+    fireEvent.click(screen.getByTestId('open'));
+    cliUpdate();
+    view.rerender(<Phone />);
+    typeAndEnter('mobile-session-note-input', 'スマホの古い下書き');
+    await waitFor(() => expect(screen.getByTestId('mobile-session-note-input')).toHaveValue('スマホの古い下書き'));
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body)).baseVersion).toBe(7);
+    expect(screen.getByTestId('mobile-session-note-input-error').textContent).toContain('他で更新されました');
+  });
+
+  it('phone (control): without an update the save lands and the editor closes', async () => {
+    const view = render(<Phone />);
+    fireEvent.click(screen.getByTestId('open'));
+    view.rerender(<Phone />);
+    typeAndEnter('mobile-session-note-input', 'スマホの下書き');
+    await settle();
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body)).baseVersion).toBe(7);
+    expect(screen.queryByTestId('mobile-session-note-input')).toBeNull();
+  });
+});
+
+describe('P2-3: a late failure stays with the session it was typed for', () => {
+  beforeEach(() => {
+    const worktrees = [{ id: WT, sessionNotes: { claude: { text: 'A のメモ', updatedAt: 1, version: 7 }, codex: { text: 'B のメモ', updatedAt: 1, version: 3 } } }];
+    cacheState.value = { worktrees, refresh: vi.fn(async () => undefined) };
+  });
+
+  it('phone: A’s 409 after switching to B neither opens B’s editor nor fills it', async () => {
+    const release = deferredFetch(409);
+    const view = render(<Phone instanceId="claude" />);
+    fireEvent.click(screen.getByTestId('open'));
+    typeAndEnter('mobile-session-note-input', 'A の下書き');
+    view.rerender(<Phone instanceId="codex" />);
+    release();
+    await settle();
+    expect(screen.queryByTestId('mobile-session-note-input')).toBeNull();
+    fireEvent.click(screen.getByTestId('open'));
+    expect(screen.getByTestId('mobile-session-note-input')).toHaveValue('B のメモ');
+    expect(screen.queryByTestId('mobile-session-note-input-error')).toBeNull();
+  });
+
+  it('phone (control): without the switch the same late 409 reopens A with its draft', async () => {
+    const release = deferredFetch(409);
+    render(<Phone instanceId="claude" />);
+    fireEvent.click(screen.getByTestId('open'));
+    typeAndEnter('mobile-session-note-input', 'A の下書き');
+    release();
+    await waitFor(() => expect(screen.getByTestId('mobile-session-note-input')).toHaveValue('A の下書き'));
+  });
+
+  it('PC: A’s 409 after the split switched to B does not open B’s editor with A’s draft', async () => {
+    const release = deferredFetch(409);
+    const view = render(pcPane(claude));
+    fireEvent.click(screen.getByTestId('split-session-note-0'));
+    typeAndEnter('split-session-note-input-0', 'A の下書き');
+    view.rerender(pcPane(codex));
+    release();
+    await settle();
+    expect(screen.queryByTestId('split-session-note-input-0')).toBeNull();
+  });
+
+  it('PC (control): without the switch the late 409 reopens with A’s draft', async () => {
+    const release = deferredFetch(409);
+    render(pcPane(claude));
+    fireEvent.click(screen.getByTestId('split-session-note-0'));
+    typeAndEnter('split-session-note-input-0', 'A の下書き');
+    release();
+    await settle();
+    expect(screen.getByTestId('split-session-note-input-0')).toHaveValue('A の下書き');
   });
 });

@@ -33,7 +33,7 @@ import {
   saveMemSettings,
   type MemActor,
 } from '@/lib/db/mem-db';
-import { deleteWorktreesByIds } from '@/lib/db/worktree-db';
+import { deleteWorktreesByIds, migrateWorktreeIdPreservingChildren } from '@/lib/db/worktree-db';
 import { getInstanceIncarnation } from '@/lib/mem/incarnation';
 import {
   memAddItem,
@@ -627,5 +627,141 @@ describe('what was refused is never repeated (受入・§7)', () => {
     expect(exitOf(await memAddItem(db, 'wt-1', { instanceId: 'claude', kind: 'next', text: 'x', closeWhen: 'manual' }, deps()))).toBe(56);
     const list = (await memList(db, { via: 'worktree', worktreeId: 'wt-1' }, {}, deps())).body as MemListResponse;
     expect(list.warnings).toContainEqual({ code: 'open_count', kind: 'next', count: 30, threshold: 10 });
+  });
+});
+
+describe('integration review fixes (P1・P2-1・P2-4・P3)', () => {
+  const dropIncarnation = (instanceId: string) =>
+    db.prepare("DELETE FROM mem_instance_incarnations WHERE worktree_id = 'wt-1' AND instance_id = ?").run(instanceId);
+
+  it('P1: a v65 instance (no incarnation) deleted while its first now / add waits is not stored', async () => {
+    on();
+    for (const write of [
+      () => memWriteNow(db, 'wt-1', { instanceId: 'codex-2', text: 'x' }, deps()),
+      () => memAddItem(db, 'wt-1', { instanceId: 'codex-2', kind: 'note', text: 'x' }, deps()),
+    ]) {
+      setAgentInstances(db, 'wt-1', [
+        { id: 'claude', cliTool: 'claude', alias: '', order: 0 },
+        { id: 'codex-2', cliTool: 'codex', alias: '', order: 1 },
+      ]);
+      dropIncarnation('codex-2');
+      const release = arm();
+      const pending = write();
+      await Promise.resolve();
+      removeAgentInstance(db, 'wt-1', 'codex-2');
+      release();
+      expect((await pending).body).toMatchObject({ code: 'instance_not_found' });
+    }
+    expect(count('SELECT COUNT(*) n FROM mem_items')).toBe(0);
+    expect(count('SELECT COUNT(*) n FROM session_notes')).toBe(0);
+    expect(getInstanceIncarnation(db, 'wt-1', 'codex-2')).toBeNull();
+  });
+
+  it('P1 (control): the same v65 instance, not deleted during the wait, is stored', async () => {
+    on();
+    dropIncarnation('codex-2');
+    const release = arm();
+    const pending = memWriteNow(db, 'wt-1', { instanceId: 'codex-2', text: 'kept' }, deps());
+    await Promise.resolve();
+    release();
+    expect((await pending).status).toBe(201);
+    dropIncarnation('claude');
+    expect((await memAddItem(db, 'wt-1', { instanceId: 'claude', kind: 'note', text: 'kept' }, deps())).status).toBe(201);
+    expect(count("SELECT COUNT(*) n FROM session_notes WHERE instance_id = 'codex-2'")).toBe(1);
+  });
+
+  const listed = async () => (await memList(db, { via: 'worktree', worktreeId: 'wt-1' }, {}, deps())).body as MemListResponse;
+
+  it('P2-1: a partial update with the right version keeps a field the current rules withhold hidden', async () => {
+    on();
+    const item = itemOf(await memAddItem(db, 'wt-1', { instanceId: 'claude', kind: 'note', text: 'v1' }, deps()));
+    // What a rule update leaves: a stored field the current rules now match, checked under an older set.
+    db.prepare('UPDATE mem_items SET evidence = ?, checked_rules_version = 0 WHERE id = ?').run(JSON.stringify([GHP]), item.id);
+    const updated = await memUpdateItem(db, 'wt-1', item.id, { instanceId: 'claude', ifVersion: 1, text: 'v2' }, deps());
+    expect(exitOf(updated)).toBe(0);
+    expect(JSON.stringify(updated.body)).not.toContain(GHP);
+    expect((db.prepare('SELECT checked_rules_version v FROM mem_items WHERE id = ?').get(item.id) as { v: number }).v).toBe(0);
+    const view = (await listed()).items.find((entry) => entry.id === item.id)!;
+    expect(view.withheld).toMatchObject({ field: 'evidence' });
+    expect(JSON.stringify(await listed())).not.toContain(GHP);
+  });
+
+  it('P2-1 (control): a partial update over clean fields raises the checked version and shows them', async () => {
+    on();
+    const item = itemOf(await memAddItem(db, 'wt-1', { instanceId: 'claude', kind: 'note', text: 'v1' }, deps()));
+    db.prepare('UPDATE mem_items SET evidence = ?, checked_rules_version = 0 WHERE id = ?').run(JSON.stringify(['src/a.ts']), item.id);
+    expect(exitOf(await memUpdateItem(db, 'wt-1', item.id, { instanceId: 'claude', ifVersion: 1, text: 'v2' }, deps()))).toBe(0);
+    expect((db.prepare('SELECT checked_rules_version v FROM mem_items WHERE id = ?').get(item.id) as { v: number }).v).toBe(1);
+    const view = (await listed()).items.find((entry) => entry.id === item.id)!;
+    expect(view.withheld).toBeUndefined();
+    expect(view.evidence).toEqual(['src/a.ts']);
+  });
+
+  it('P2-1: a person’s edit of a now while off checks the fields it keeps too (and passes clean ones)', async () => {
+    on();
+    for (const [evidence, expected] of [
+      [GHP, 0],
+      ['src/a.ts', 1],
+    ] as const) {
+      const now = itemOf(await memWriteNow(db, 'wt-1', { instanceId: 'claude', text: 'agent' }, deps()));
+      db.prepare("UPDATE session_notes SET mem_evidence = ?, mem_checked_rules_version = 0 WHERE mem_item_id = ?").run(
+        JSON.stringify([evidence]),
+        now.id
+      );
+      setMode('off');
+      const slot = db.prepare("SELECT version FROM session_notes WHERE mem_item_id = ?").get(now.id) as { version: number };
+      const outcome = await writeSessionNoteFromScreen(db, 'wt-1', { instanceId: 'claude', text: 'person', baseVersion: slot.version }, deps());
+      expect(outcome.status).toBe(200);
+      expect(
+        (db.prepare('SELECT mem_checked_rules_version v FROM session_notes WHERE mem_item_id = ?').get(now.id) as { v: number }).v
+      ).toBe(expected);
+      on();
+    }
+  });
+
+  it('P2-4: after a plain rename the same author may update and close an item made before it; another gets 55', async () => {
+    on();
+    const item = itemOf(await memAddItem(db, 'wt-1', { instanceId: 'claude', kind: 'note', text: 'before' }, deps()));
+    const other = itemOf(await memAddItem(db, 'wt-1', { instanceId: 'claude', kind: 'note', text: 'other' }, deps()));
+    db.transaction(() => migrateWorktreeIdPreservingChildren(db, 'wt-1', 'wt-2'))();
+    // The provenance keeps the old id; the author is the incarnation that moved.
+    expect(db.prepare('SELECT origin_worktree_id o FROM mem_items WHERE id = ?').get(item.id)).toEqual({ o: 'wt-1' });
+    expect(exitOf(await memCloseItem(db, 'wt-2', item.id, { instanceId: 'codex-2' }, deps()))).toBe(55);
+    expect(exitOf(await memUpdateItem(db, 'wt-2', item.id, { instanceId: 'codex-2', ifVersion: 1, text: 'x' }, deps()))).toBe(55);
+    expect(exitOf(await memUpdateItem(db, 'wt-2', item.id, { instanceId: 'claude', ifVersion: 1, text: 'after' }, deps()))).toBe(0);
+    expect(exitOf(await memCloseItem(db, 'wt-2', other.id, { instanceId: 'claude' }, deps()))).toBe(0);
+  });
+
+  it('P3: a collision rename moves the source’s now to mem_items (slot-removed); a plain note goes as before', async () => {
+    on();
+    const now = itemOf(await memWriteNow(db, 'wt-1', { instanceId: 'claude', text: 'source now' }, deps()));
+    db.prepare("INSERT INTO session_notes (worktree_id, instance_id, note, updated_at, version) VALUES ('wt-1', 'codex-2', 'plain', 0, 1)").run();
+    insertWorktree('wt-2', path.join(dir, 'wt-2'), rootA);
+    for (const instanceId of ['claude', 'codex-2']) {
+      db.prepare("INSERT INTO session_notes (worktree_id, instance_id, note, updated_at, version) VALUES ('wt-2', ?, 'dest', 0, 1)").run(
+        instanceId
+      );
+    }
+    db.transaction(() => migrateWorktreeIdPreservingChildren(db, 'wt-1', 'wt-2'))();
+    expect(db.prepare('SELECT state, close_reason, text FROM mem_items WHERE id = ?').get(now.id)).toEqual({
+      state: 'closed',
+      close_reason: 'slot-removed',
+      text: 'source now',
+    });
+    // The destination's rows win; the plain note is dropped and does not become mem.
+    expect(count("SELECT COUNT(*) n FROM session_notes WHERE note = 'dest'")).toBe(2);
+    expect(count("SELECT COUNT(*) n FROM mem_items WHERE text = 'plain'")).toBe(0);
+    expect(count("SELECT COUNT(*) n FROM session_notes WHERE worktree_id = 'wt-1'")).toBe(0);
+    const all = (await memList(db, { via: 'repository', repositoryId: repoA, branch: 'feature/x' }, { all: true }, deps()))
+      .body as MemListResponse;
+    expect(all.items.map((entry) => entry.id)).toContain(now.id);
+  });
+
+  it('P3 (control): a plain rename keeps the now in its slot, not archived', async () => {
+    on();
+    const now = itemOf(await memWriteNow(db, 'wt-1', { instanceId: 'claude', text: 'moves' }, deps()));
+    db.transaction(() => migrateWorktreeIdPreservingChildren(db, 'wt-1', 'wt-2'))();
+    expect(count('SELECT COUNT(*) n FROM mem_items WHERE id = ?', now.id)).toBe(0);
+    expect(count("SELECT COUNT(*) n FROM session_notes WHERE worktree_id = 'wt-2' AND mem_item_id = ?", now.id)).toBe(1);
   });
 });

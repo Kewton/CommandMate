@@ -220,6 +220,16 @@ function lookupActor(db: Database.Database, worktreeId: string, instanceId: unkn
       capturedIncarnation: captured && captured.cliToolId === instance.cliTool ? captured.incarnation : null,
       sessionGeneration: null,
       by,
+      // Asked again in the write's transaction, after the awaits (review P1).
+      stillOnRoster: () => {
+        const now = getWorktreeById(db, worktreeId);
+        return Boolean(
+          now &&
+            resolveAgentInstances(db, worktreeId, now.selectedAgents).some(
+              (entry) => entry.id === instanceId && entry.cliTool === instance.cliTool
+            )
+        );
+      },
     },
   };
 }

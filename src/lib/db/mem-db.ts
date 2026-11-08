@@ -30,7 +30,7 @@ import {
 } from '@/types/mem';
 import { getInstanceIncarnation, getOrCreateWorktreeIncarnation, startInstanceIncarnation } from '@/lib/mem/incarnation';
 import { MEM_SECRET_RULES_VERSION } from '@/lib/mem/secret-scan';
-import type { MemRecord } from '@/lib/mem/present';
+import { findWithheld, type MemRecord } from '@/lib/mem/present';
 import { memTransition } from '@/lib/mem/transitions';
 
 // ===========================================================================
@@ -301,6 +301,12 @@ export interface MemActor {
   capturedIncarnation: string | null;
   sessionGeneration: string | null;
   by: 'agent' | 'human';
+  /**
+   * Whether the instance is still on the roster with the same tool, asked inside
+   * the write's transaction. Without an incarnation nothing else tells a deleted
+   * instance from one that never had one (review P1).
+   */
+  stillOnRoster?: () => boolean;
 }
 
 /** Where items are written and read (§9.5). */
@@ -566,6 +572,9 @@ function settleActorIncarnation(
   actor: MemActor,
   now: number
 ): { ok: true; incarnation: string } | { ok: false } {
+  // Still on the roster now: a row older than v66 has no incarnation, and deleting
+  // the instance while the first write waited on git leaves none either (review P1).
+  if (actor.stillOnRoster && !actor.stillOnRoster()) return { ok: false };
   const current = getInstanceIncarnation(db, actor.worktreeId, actor.instanceId);
   if (actor.capturedIncarnation !== null) {
     if (!current || current.incarnation !== actor.capturedIncarnation || current.cliToolId !== actor.cliToolId) {
@@ -828,16 +837,27 @@ export interface MemItemPatch {
   evidence?: string[];
 }
 
+/**
+ * A partial update re-reads only the fields it was sent, so it may raise the
+ * checked version only if every field it leaves behind also passes the current
+ * rules; otherwise the old version stays and the record stays withheld (review P2-1).
+ */
+function settleCheckedVersion(db: Database.Database, itemId: string, previous: number): void {
+  const record = getMemRecord(db, itemId);
+  if (!record || !findWithheld({ ...record, checkedRulesVersion: 0 })) return;
+  const slot = findSlotByItem(db, itemId);
+  if (slot) db.prepare('UPDATE session_notes SET mem_checked_rules_version = ? WHERE mem_item_id = ?').run(previous, itemId);
+  else db.prepare('UPDATE mem_items SET checked_rules_version = ? WHERE id = ?').run(previous, itemId);
+}
+
 /** Whether this actor may change this record: its author's incarnation, or a person. */
 function ownedBy(db: Database.Database, record: MemRecord, actor: MemActor): boolean {
   if (actor.by === 'human') return true;
   const current = getInstanceIncarnation(db, actor.worktreeId, actor.instanceId);
   if (!current || current.incarnation !== actor.capturedIncarnation) return false;
-  return (
-    record.owner.worktreeId === actor.worktreeId &&
-    record.owner.instanceId === actor.instanceId &&
-    record.owner.incarnation === current.incarnation
-  );
+  // The author is its incarnation, which a rename carries to the new worktree ID;
+  // `owner.worktreeId` is where the item was written and stays the old ID (review P2-4).
+  return record.owner.instanceId === actor.instanceId && record.owner.incarnation === current.incarnation;
 }
 
 /** `mem update --if-version`. */
@@ -874,6 +894,7 @@ export function updateMemItem(
         MEM_SECRET_RULES_VERSION,
         itemId
       );
+      settleCheckedVersion(db, itemId, current.checkedRulesVersion);
       return { ok: true as const, record: recordFromSlot(findSlotByItem(db, itemId)!) };
     }
     const row = findItemRow(db, itemId)!;
@@ -890,6 +911,7 @@ export function updateMemItem(
       MEM_SECRET_RULES_VERSION,
       itemId
     );
+    settleCheckedVersion(db, itemId, current.checkedRulesVersion);
     return { ok: true as const, record: recordFromItem(findItemRow(db, itemId)!) };
   })();
 }
@@ -1088,6 +1110,7 @@ export function writeScreenNote(
         `UPDATE session_notes SET note = ?, updated_at = ?, version = ?, updated_by = 'human', mem_checked_rules_version = ?
          WHERE worktree_id = ? AND instance_id = ?`
       ).run(input.text, now, version, MEM_SECRET_RULES_VERSION, input.worktreeId, input.instanceId);
+      settleCheckedVersion(db, row!.mem_item_id!, row!.mem_checked_rules_version ?? 0);
     } else {
       db.prepare(
         `INSERT INTO session_notes (worktree_id, instance_id, note, updated_at, version) VALUES (?, ?, ?, ?, ?)

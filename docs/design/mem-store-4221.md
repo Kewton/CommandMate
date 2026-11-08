@@ -830,8 +830,12 @@ D1〜D13 と違う作りは無い。設計の文面から外れた・細かく�
 | I8 | §6.3 | 画面でメモを空にするときは mode を読まない（git を待たない）。mem の行は版を照合して `manual` で閉じる | §3.1 の「人が画面のメモを空にする：全 mode」 |
 | I9 | §9 | 登録 root が 1 件も無いときは git を呼ばずに `not_registered` | 答えは git に依らず同じ。#2427 の既存の route のテスト（root なし）が git を呼ばない |
 | I10 | §12.1 | `screen_only`（403）は CLI では exit 2 | CLI はこの経路を呼ばない（呼べば入力の不正と同じ扱い） |
+| I11 | §10.4（整合性レビュー P1） | 書き込みのトランザクションの中で、instance が今も roster に同じツールで載っているかを読み直す（`MemActor.stillOnRoster`）。載っていなければ 52 `incarnation_changed` | v65 から移った instance は世代が未発行なので、世代だけでは「未発行」と「待機中に削除」を区別できない |
+| I12 | §7（P2-1） | 部分更新・画面の編集の後、残した欄も含めて現行の規則で読み、どれかが当たれば検査版を上げない（withheld のまま） | 検査したのは送られた欄だけなので、検査版を上げると隠した欄が出る |
+| I13 | §10.2（P2-2・P2-3） | 画面は編集を始めたときの版を下書きと一緒に固定して `baseVersion` に送る（PC は分割ごと、スマホは開いた編集欄ごと）。保存の失敗・下書き・開き直しは保存した worktree・instance に結び、切り替え先には出さない。409 を見せた後の再保存は最新の版で送る | 保存時点のキャッシュの版だと、編集中に届いた CLI の更新を上書きする。スマホの部品（scope の外）は開き直しのイベントの宛先を見ないので、hook の側で今の宛先と一致するときだけ出す |
+| I14 | §10.4（P2-4） | 所有の判定は instance ID と作者の世代で照合し、`owner.worktreeId`（来歴、改名前の ID のまま）は比べない | 改名は世代表を新しい ID へ移すが、項目の来歴は旧 ID を残す |
+| I15 | §10.4（P3） | 改名の衝突の分岐は、残った子の行を消す前にフック（`beforeDropLeftovers`）を呼び、runtime の改名（`migrateWorktreeIdPreservingChildren`）が mem の `now` を closed（`slot-removed`）で退避する | migration の層は `mem-db` を import しない（循環と `vi.mock` の継承を避ける）。v54/v55 の migration は v66 より前なので mem の表が無い |
 
-本文に無い指摘（実装で見つけたもの。直さない）：
+本文に無い指摘（実装で見つけたもの。直さない。改名の衝突の分岐の退避は I15 で直した）：
 
-- `src/lib/db/migrations/worktree-id-rename.ts` の `renameWorktreeIdPreservingChildren` は、移し先の ID が既にある衝突の分岐で `deleteWorktreeChildRows(db, [oldId])` を呼ぶ。このとき移し元の mem の `now`（`session_notes` の mem の行）は退避されずに消える。migration の層から runtime の `mem-db` を import しない向き（`worktree-child-tables.ts` の注記）なので、この Issue では直さない
 - `src/components/worktree/MobileTerminalTabSessionNote.tsx`（契約の scope の外）は保存の直後に編集欄を閉じる。§10.2 のとおり共有の hook の側で開き直して入力を残したが、スマホの部品が保存の結果を待つ形に直すなら別の Issue

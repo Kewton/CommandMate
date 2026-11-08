@@ -491,7 +491,13 @@ export function migrateWorktreeIdPreservingChildren(
   oldId: string,
   newId: string
 ): void {
-  renameWorktreeIdPreservingChildren(db, oldId, newId);
+  // Issue #4221: a `now` left on `oldId` by a collision moves to mem_items as closed
+  // (slot-removed) before the leftovers go, as on the two delete paths.
+  renameWorktreeIdPreservingChildren(db, oldId, newId, Date.now(), {
+    beforeDropLeftovers: (leftover) => {
+      archiveNowSlots(db, [leftover]);
+    },
+  });
 }
 
 /**
