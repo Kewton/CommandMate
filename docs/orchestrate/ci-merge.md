@@ -151,6 +151,11 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 
 ## 6-2 取り込み後の重い段
 
+（本体 6-2 の「マージする HEAD の precheck」の説明。）マージする HEAD の precheck（`precheck.mjs`）は、`npx tsc --noEmit` で実際の統合破壊を出し、
+`vitest related --dir tests/unit` が import の関係（`@/` の alias を含む）で選ぶテストと、変えたパスを名指しするテスト・ガードで、
+型に出ない相互作用を出す。作業の HEAD の precheck と同じ引数で走り、同じ HEAD の `precheck=ok` が記録にあれば走らせない。
+どれかが落ちたら push せずに止まる。
+
 （#4265。2026-11-08 の run 4221-4259 で、PR #4261 の取り込み後の precheck が `cpu.heavy` を 5400 秒待って exit 3、
 #4262 は 109 分中 67 分がこの待ちだった。取り込み後の PR の CI は 18 分。枠はワーカーの `wait --verify` の
 `unit` / `integration` / `unit-related` と共有で、並行するワーカーがいる間は空かない。）
