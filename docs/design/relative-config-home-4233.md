@@ -1,6 +1,6 @@
 # 相対の `CODEX_HOME` / `XDG_CONFIG_HOME` を、書き手と読み手で 1 つの実体に揃える（Issue #4233）
 
-- 状態: 設計（実装は Codex の事前レビューの後、別の契約で行う）
+- 状態: 実装済み（§8。設計は Codex の事前レビューを反映済み、§7）
 - 前提の Issue: #4191（`CM_AGENT_HOOKS_DIR`）、#4210（PR #4216。`COPILOT_HOME`・ロールの指示ファイル・OpenCode V2 の記録）、#2069（PR #2172。codex の版表示）
 - 行番号は 2026-11-08 の `fix/4233-worktree`（`bbfadb387`）のもの。Issue 本文の行番号（PR #4216 のマージ時点）とは一部ずれるので、名前で引く
 
@@ -325,3 +325,26 @@ Codex の事前レビュー（`workspace/orchestration/runs/2026-11-08/prereview
 | R2 | P2: 「`CODEX_HOME` は常に載る」が hooks 無効・失敗の `bare` 経路と食い違う | **採る**（`bare` を残し、例外として明記する側） | `hooks-config.ts:845` の `env: {}` と `codex-hooks-config-1760.test.ts:616-624` を確かめた。hooks が無ければ `hooks.json` の食い違いは起きず、ロールのプロファイルは `adapters.ts:205` が別に pin するので、#1760 のバイト一致を優先する（§3.1.1）。既存期待値の変更は 1 件のまま。対照は #17〜#20 |
 | R3 | P2: 既存ファイル・稼働中 pane を含む移行の条件と対照が不足 | **採る** | 切り替えの時点・稼働中の pane・`hooks.json` の差し替え・1 回の再信頼・UAT の read-only の拒否・旧版との併走・worktree 側の認証を §3.1.2 に書いた。認証情報は自動で移さず、変更履歴で知らせる（§5）。対照は #26〜#30。実機の移行結果は未確認のまま UAT へ回す |
 | R4 | P3: 共有状態の判定の現状説明が誤り（`physicalPath()` がすでに絶対化している） | **採る** | `artifacts.ts:185-198`・`:244-251` を確かめ、§1.2 と §3.1 の記述を「既存の保護を維持する」に訂正した。A の選択は変わらない。維持の対照は #15・#16 |
+
+---
+
+## 8. 実装の結果（実装の契約）
+
+§5 の範囲で実装した。設計と違えたところと、決めたことを書く。
+
+| 項目 | 結果 |
+|---|---|
+| 問題 1 | `getCodexHome()` を `resolveSafeAbsoluteDirectory()` に替えた（§3.1）。呼び出し元（`adapters.ts`・`artifacts.ts`・`history.ts`）は変えていない。`bare` の fallback も変えていない（§3.1.1） |
+| 問題 2 の読み手 | `composition.ts` `loadOpencodeV2Agent` は、global の場所を決める値（`XDG_CONFIG_HOME`、未設定なら `HOME`）が相対のときだけ起動 cwd を求め、`resolve(<起動 cwd>, 値)` で読む。絶対値・未設定では起動 cwd を読まない |
+| 起動 cwd の口 | `RoleCompositionContext.readLaunchCwd?: () => Promise<string \| null>`。無い・`null` は「`worktreePath` で起動する」（新規 pane・Schedule・probe）。値が返れば realpath で `worktreePath` と比べ、違えば `RoleCompositionError`。reject も拒否 |
+| pane の読み手 | `pane-env.ts` `tmuxPaneLaunchCwdReader(session)`（`display-message -p -t =<session>: '#{pane_current_path}'`。セッションが無い・tmux サーバーが無いは `null`、それ以外の失敗と空の答えは reject）と `roleLaunchCwdReaderForPane()`（テスト中は `undefined`＝tmux に触らない。`roleEnvReaderForPane` と同じ）。`loadPaneComposition` に配線 |
+| 呼び出し元（§5 の 3） | `cli-tools/base.ts` `startSession` → `requestLaunchRole(…, readLaunchCwd)` → `resolveLaunchRole` の入力 `readLaunchCwd` → 合成。Schedule（`resolveScheduleRole`）は `fixedEnvReader` のまま `readLaunchCwd` を渡さない（`execFile` の `cwd`＝`worktreePath`）。probe（`explicit-launch.ts` `prepareExplicitRoleLaunch`）は `src/` に呼び出し元が無い（`git grep prepareExplicitRoleLaunch -- src` は定義だけ）ので変えていない。渡さなければ `worktreePath` が基準になる |
+| §5 の 1・3（opencode の実機確認） | **この契約では実機を動かしていない**（本物の opencode・tmux を起動しない契約）。§3.2 の分岐は「起動 cwd で解決する」側を採った。opencode 2.x が相対の `XDG_CONFIG_HOME` を XDG の仕様どおり無視すると UAT で分かったら、相対値を未設定と同じに扱う側へ直す（別の変更） |
+| §5 の 2（codex の相対の解決） | 確かめていない。A は codex に絶対パスしか渡さないので結論に影響しない |
+| #2069 のテスト | `codex-home-parity-2069.test.ts` の 1 件だけ期待と名前を変えた（§2.2 の案のとおり）。`codex-version-2069.test.ts` はコメントだけ |
+| 対照のテスト | §3.3 の 5 ファイル。#20・#27・#28 は書き込みの前に `isAbsolute` を確かめるので、直す前の実装ではそこで止まる（checkout に書かないため）。陰性対照としては直した後のコードについてだけ意味を持つ。`opencode-v2-xdg-relative-4233` には pane の読み手（`tmuxPaneLaunchCwdReader`、`execFile` をモック）の対照も足した |
+
+### 8.1 scope の外に残したもの
+
+- `src/app/api/worktrees/[id]/send/send-role.ts`: 送信前のロールの条件確認（`resolveLaunchRole`）は `readLaunchCwd` を渡していない。`cd` した pane へ相対の `XDG_CONFIG_HOME` で送ると、条件確認は worktree を基準に通り、その後の起動（`base.ts`）で拒否される。誤った設定で起動することは無い（安全側）が、拒否が送信の後段で出る。
+- `src/app/api/worktrees/[id]/instances/roles/route.ts` は `loadPaneComposition` を通るので、変更が及ぶ（ファイルは変えていない）。

@@ -17,9 +17,11 @@
  * **A CommandMate process hands its children neither a credential nor the
  * identity of the agent that started it.** The identity half is
  * `AGENT_CORRELATION_ENV_VARS` — which server to report to, and as which
- * instance. A per-tool config redirect (`AGENT_LAUNCH_CONFIG_ENV_VARS`) is on
- * the same launch line and is deliberately kept: it says where a tool reads its
- * own settings, which is neither.
+ * instance. A per-tool config redirect (`AGENT_LAUNCH_CONFIG_ENV_VARS`, and
+ * `AGENT_LAUNCH_CONDITIONAL_CONFIG_ENV_VARS` which a launch writes only under a
+ * relative `COPILOT_HOME` — Issue #4210) is on the same launch line and is
+ * deliberately kept: it says where a tool reads its own settings, which is
+ * neither.
  *
  * ## Why this starts real processes
  *

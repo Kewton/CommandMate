@@ -42,7 +42,12 @@
   - `CM_OPENCODE_PORT_FILE` — port 割当ファイルの置き場所の上書き。`opencode/ports.ts` が読む。
   - `CM_CODEX_HOOK_TRUST` — `codex/hooks-config.ts` が読み、起動フラグ（`--dangerously-bypass-…`）を足すかどうかを決める。
   - `CM_PORT` — `codex/hooks-config.ts` が **生成する hooks.json の中に `${CM_PORT:-3000}` という文字列として**書く。エージェントのプロセス env で展開される。
-- **`AGENT_LAUNCH_CONFIG_ENV_VARS` は `CODEX_HOME` の 1 個。** #1933 のテストが持っていたローカル allowlist は `CODEX_HOME` / `COPILOT_HOME` / `XDG_CONFIG_HOME` の 3 個だったが、後ろ 2 つは *読み出し*専用で `plan.env` には入らない。allowlist を広く取ると「あるソースがそれを書き始めた」変化を素通しするので、実測の 1 個に絞った。
+- **（#1996 当時の実測、2026-08 時点）`AGENT_LAUNCH_CONFIG_ENV_VARS` は `CODEX_HOME` の 1 個。** #1933 のテストが持っていたローカル allowlist は `CODEX_HOME` / `COPILOT_HOME` / `XDG_CONFIG_HOME` の 3 個だったが、後ろ 2 つは *読み出し*専用で `plan.env` には入らない。allowlist を広く取ると「あるソースがそれを書き始めた」変化を素通しするので、実測の 1 個に絞った。
+- **今の仕様（#2403・#4210・#4233 の後）。** 上の行は当時の記録として残す。今の宣言は `src/lib/hooks/sources/launch-command.ts` にある。
+  - 既定の起動が載せるのは `AGENT_LAUNCH_CONFIG_ENV_VARS` = `CODEX_HOME`・`CM_PORT`（`CM_PORT` は #2403 で launch line に載るようになった。上の「`CM_PORT` は launch line に載らない」も当時の記録）。
+  - `AGENT_LAUNCH_CONDITIONAL_CONFIG_ENV_VARS` = `COPILOT_HOME`（#4210）。設定された `COPILOT_HOME` が**相対のときだけ**、copilot の起動環境にサーバーの cwd で絶対化した値が載る。未設定・絶対値では載らない。drift guard（`tests/unit/lib/agent-launch-plan-secrets-1933.test.ts`）は、既定の起動を前者に、相対の `COPILOT_HOME` での起動を前者＋後者に、それぞれ完全一致で固定する。
+  - `XDG_CONFIG_HOME` は今も `plan.env` に載らない（読み出し専用）。
+  - `CODEX_HOME` の値は #4233 から常に絶対パス（相対の設定はサーバーの cwd で絶対化してから載せる。`docs/design/relative-config-home-4233.md`）。キーの集合は変わらない。hooks を準備できない `bare` の起動（`CM_AGENT_HOOKS_INJECT=0` など）では、従来どおり何も載らない。
 
 ### `CM_AUTH_TOKEN`（優先度高・実測で確認）
 

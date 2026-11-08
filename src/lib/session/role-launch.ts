@@ -71,6 +71,7 @@ import {
   RoleCompositionError,
   type RoleEnv,
   type RoleEnvReader,
+  type RoleLaunchCwdReader,
 } from '@/lib/agent-roles/composition';
 import { RoleLaunchRefusedError, type RoleLaunchRefusalReason } from '@/lib/agent-roles/launch-errors';
 import {
@@ -210,6 +211,11 @@ export interface ResolveLaunchRoleInput extends LaunchRoleTarget {
   worktreePath: string;
   /** Where the user's env is read from. Not read when {@link composition} is given. */
   readEnv: RoleEnvReader;
+  /**
+   * A reused pane's cwd (Issue #4233), for a relative `XDG_CONFIG_HOME` / `HOME`.
+   * None means the agent starts in `worktreePath` (a new pane, a Schedule).
+   */
+  readLaunchCwd?: RoleLaunchCwdReader;
   /** Use these instead of reading them again. */
   composition?: RoleComposition;
   /** Schedule's `agent`. */
@@ -299,6 +305,7 @@ export async function resolveLaunchRole(
       worktreePath: input.worktreePath,
       readEnv: input.readEnv,
       explicitAgent: input.explicitAgent,
+      readLaunchCwd: input.readLaunchCwd,
     });
   } catch (error) {
     const message = error instanceof RoleCompositionError ? error.message : 'The settings to compose with could not be read';
@@ -329,7 +336,8 @@ export async function resolveLaunchRole(
 export function requestLaunchRole(
   target: LaunchRoleTarget,
   worktreePath: string,
-  readEnv: RoleEnvReader
+  readEnv: RoleEnvReader,
+  readLaunchCwd?: RoleLaunchCwdReader
 ): LaunchRoleSnapshot | null | Promise<LaunchRoleSnapshot> {
   if (!isAgentRoleCliTool(target.cliToolId)) return null;
   let db: Database.Database | null;
@@ -341,7 +349,7 @@ export function requestLaunchRole(
     logger.warn('role-database-unavailable', { error: error instanceof Error ? error.message : String(error) });
     return Promise.reject(new RoleLaunchRefusedError('resolve-failed', 'The database could not be read to resolve the role'));
   }
-  return resolveLaunchRole(db, { ...target, worktreePath, readEnv });
+  return resolveLaunchRole(db, { ...target, worktreePath, readEnv, readLaunchCwd });
 }
 
 // ---------------------------------------------------------------------------
