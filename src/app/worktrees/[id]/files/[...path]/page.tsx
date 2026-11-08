@@ -22,6 +22,7 @@ import { MermaidCodeBlock } from '@/components/worktree/MermaidCodeBlock';
 import { isMermaidLanguage, isMermaidPreChild } from '@/components/worktree/mermaid-block-utils';
 import { CodeBlockWithCopy } from '@/components/common/CodeBlockWithCopy';
 import { extractToc, TOC_VISIBLE_STORAGE_KEY } from '@/lib/markdown-toc';
+import { safeLocalStorage } from '@/lib/safe-local-storage';
 
 /**
  * Sticky page-header height (px). Rendered headings get this much
@@ -62,7 +63,7 @@ export default function FileViewerPage() {
 
   // Restore persisted TOC visibility after mount (hydration-safe).
   useEffect(() => {
-    const stored = localStorage.getItem(TOC_VISIBLE_STORAGE_KEY);
+    const stored = safeLocalStorage.getItem(TOC_VISIBLE_STORAGE_KEY);
     if (stored === 'true') {
       setTocVisible(true);
     } else if (stored === 'false') {
@@ -74,7 +75,7 @@ export default function FileViewerPage() {
   // Persist TOC visibility once hydrated (avoid clobbering before restore).
   useEffect(() => {
     if (tocHydrated) {
-      localStorage.setItem(TOC_VISIBLE_STORAGE_KEY, String(tocVisible));
+      safeLocalStorage.setItem(TOC_VISIBLE_STORAGE_KEY, String(tocVisible));
     }
   }, [tocVisible, tocHydrated]);
 

@@ -124,12 +124,17 @@ export function deleteWorktreeChildRows(
  * @param oldId - Current primary key
  * @param newId - Primary key it should have
  * @param now - Timestamp recorded on the alias row (epoch milliseconds)
+ * @param hooks.beforeDropLeftovers - Collision only: runs on `oldId` after the
+ *   non-conflicting children moved and before the conflicting ones are dropped.
+ *   The runtime rename passes the mem archive here (Issue #4221: a `now` of mem
+ *   outlives its slot), so this layer stays free of `mem-db` and its imports.
  */
 export function renameWorktreeIdPreservingChildren(
   db: Database.Database,
   oldId: string,
   newId: string,
-  now: number = Date.now()
+  now: number = Date.now(),
+  hooks: { beforeDropLeftovers?: (oldId: string) => void } = {}
 ): void {
   if (oldId === newId) return;
 
@@ -157,6 +162,7 @@ export function renameWorktreeIdPreservingChildren(
     // Conflicting leftovers are dropped explicitly rather than left to CASCADE:
     // tables without a foreign key never cascade, so relying on the parent
     // delete alone would strand their rows on a dead ID (#1621).
+    hooks.beforeDropLeftovers?.(oldId);
     deleteWorktreeChildRows(db, [oldId], allChildren);
     db.prepare('DELETE FROM worktrees WHERE id = ?').run(oldId);
     recordWorktreeAliasRow(db, oldId, newId, now);

@@ -30,6 +30,14 @@
  * be stored, never read (nothing renders a note for a session that is not in the
  * roster), and would survive as a row nothing can explain. `pruneSessionNotes`
  * cleans up ids that LEAVE the roster; this stops ids that were never in it.
+ *
+ * ## The `now` of mem (Issue #4221, design §6.3・§10.2)
+ *
+ * A note can also be the `now` of mem (D7). Such a row, and any write while the
+ * branch's mode is `on`, goes through mem's checks (400 with `code`/`field`/`rule`,
+ * never the text) and through the version the screen read (`baseVersion`; 409 when
+ * it moved, `version_required` when a client older than v66 sends none for a mem
+ * row). A plain note in `off` / `derived` is written as before.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -37,12 +45,12 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById } from '@/lib/db';
 import {
   getSessionNotesByWorktree,
-  setSessionNote,
   InvalidAgentInstanceError,
   SessionNoteTooLongError,
   MAX_SESSION_NOTE_LENGTH,
   type SessionNote,
 } from '@/lib/db/agent-instances-db';
+import { writeSessionNoteFromScreen } from '@/lib/mem/service';
 import { resolveAgentInstances } from '@/lib/session/agent-instances-resolver';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
@@ -126,18 +134,10 @@ export async function PUT(
       );
     }
 
-    const note = setSessionNote(db, id, instanceId, payload.text);
-
-    logger.info('session-note-updated', {
-      worktreeId: id,
-      instanceId,
-      // The note itself is the operator's own words about their own work; the
-      // length is what a log needs to explain a write.
-      length: note ? note.text.length : 0,
-      cleared: note === null,
-    });
-
-    return NextResponse.json({ instanceId, note }, { status: 200 });
+    // The note itself is the operator's own words about their own work; the
+    // service logs its length, never the text.
+    const outcome = await writeSessionNoteFromScreen(db, id, payload);
+    return NextResponse.json(outcome.body, { status: outcome.status });
   } catch (error: unknown) {
     if (error instanceof SessionNoteTooLongError) {
       return NextResponse.json(

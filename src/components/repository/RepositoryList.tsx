@@ -54,6 +54,7 @@ import {
 } from '@/lib/api-client';
 import { MAX_DISPLAY_NAME_LENGTH } from '@/config/repository-config';
 import { RepositoryRoleDefaults } from '@/components/roles/RepositoryRoleDefaults';
+import { RepositoryMemSettings } from '@/components/mem/RepositoryMemSettings';
 
 export interface RepositoryListProps {
   /** Incrementing value that triggers a refetch when changed. */
@@ -161,6 +162,8 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
   const [filter, setFilter] = useState<RepositoryFilter>('all');
   // Issue #4117: the row whose role defaults are open. They are read on opening.
   const [rolesOpenId, setRolesOpenId] = useState<string | null>(null);
+  // Issue #4221: the mem settings open the same way, one repository at a time.
+  const [memOpenId, setMemOpenId] = useState<string | null>(null);
   /** Row awaiting confirmation of a disable, or null when no dialog is open. */
   const [pendingDisable, setPendingDisable] = useState<RepositoryListItem | null>(null);
   /**
@@ -723,12 +726,30 @@ function RepositoryListInner({ refreshKey, onChanged }: RepositoryListProps) {
                       >
                         {t('agentRoles.repository.toggle')}
                       </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="px-2"
+                        data-testid={`repository-mem-toggle-${repo.id}`}
+                        aria-expanded={memOpenId === repo.id}
+                        aria-label={t('mem.toggleLabel', { name: repo.name })}
+                        onClick={() => setMemOpenId((open) => (open === repo.id ? null : repo.id))}
+                      >
+                        {t('mem.toggle')}
+                      </Button>
                     </td>
                   </tr>
                   {rolesOpenId === repo.id && (
                     <tr className="border-b border-border">
                       <td colSpan={7} className="px-4 py-3">
                         <RepositoryRoleDefaults repositoryId={repo.id} />
+                      </td>
+                    </tr>
+                  )}
+                  {memOpenId === repo.id && (
+                    <tr className="border-b border-border">
+                      <td colSpan={7} className="px-4 py-3">
+                        <RepositoryMemSettings repositoryId={repo.id} />
                       </td>
                     </tr>
                   )}

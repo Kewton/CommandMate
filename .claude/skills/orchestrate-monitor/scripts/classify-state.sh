@@ -18,8 +18,8 @@
 #   6. otherwise              -> IDLE
 #
 # The screen markers of steps 2-4 are per CLI (Issue #2606): the payload's
-# `cliToolId` picks agy's set for an Antigravity pane and the Claude set for
-# everything else. The priority chain itself is the same for every CLI.
+# `cliToolId` picks agy's set for an Antigravity pane, Command Code's window
+# (#4245) for a command-code pane and the Claude set for everything else. The priority chain itself is the same for every CLI.
 set -u
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 . "$SCRIPT_DIR/monitor-lib.sh"
@@ -54,6 +54,11 @@ case "$cli_tool" in
     is_retrying=ml_agy_is_retrying
     has_prompt_marker=ml_agy_has_prompt_marker
     has_gen_anchor=ml_agy_has_gen_anchor
+    ;;
+  command-code)
+    is_retrying=ml_cc_is_retrying
+    has_prompt_marker=ml_cc_has_prompt_marker
+    has_gen_anchor=ml_cc_has_gen_anchor
     ;;
   *)
     is_retrying=ml_is_retrying
