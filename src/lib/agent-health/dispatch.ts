@@ -17,7 +17,7 @@ import type { DispatchIssue, DispatchIssueKind, DispatchRecord, DispatchStatus }
 export const DISPATCH_REPO = 'Kewton/CommandMate';
 /** develop's worktree in CommandMate (the main checkout). */
 export const DISPATCH_WORKTREE_ID = 'mycodebranchdesk';
-/** Claude 3 — dedicated to this hand-off, so it may be `/clear`ed first. */
+/** Claude 3 — also the development leader (docs/orchestrate/team.md), so there is no exclusion yet (#4243). */
 export const DISPATCH_INSTANCE_ID = 'claude-3';
 export const DISPATCH_CLI_TOOL = 'claude';
 /** Only Issues written by the owner: the repository is public, and an Issue body is read as instructions. */
