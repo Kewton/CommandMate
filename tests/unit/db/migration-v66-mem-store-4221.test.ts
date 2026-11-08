@@ -8,8 +8,10 @@ import Database from 'better-sqlite3';
 import { runMigrations, CURRENT_SCHEMA_VERSION } from '@/lib/db/db-migrations';
 import { getWorktreeChildTables } from '@/lib/db/migrations/worktree-child-tables';
 import { v66_migrations } from '@/lib/db/migrations/v66-mem-store';
-// Issue #4222: v67 builds on v66, so going back to before v66 goes back through v67 first.
+// Issue #4222 / #4274: v67 builds on v66 and v68 sits above both, so going back to before v66
+// goes back through v68 and then v67 first.
 import { v67_migrations } from '@/lib/db/migrations/v67-mem-close-records';
+import { v68_migrations } from '@/lib/db/migrations/v68-session-brief-boundaries';
 
 describe('migration v66: mem store', () => {
   let db: Database.Database;
@@ -40,6 +42,8 @@ describe('migration v66: mem store', () => {
     try {
       fresh.pragma('foreign_keys = ON');
       runMigrations(fresh);
+      v68_migrations[0].down!(fresh);
+      fresh.prepare('DELETE FROM schema_version WHERE version = 68').run();
       v67_migrations[0].down!(fresh);
       fresh.prepare('DELETE FROM schema_version WHERE version = 67').run();
       v66_migrations[0].down!(fresh);

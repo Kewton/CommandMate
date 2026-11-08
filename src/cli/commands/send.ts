@@ -39,6 +39,7 @@ import {
   type RegisteredRelay,
 } from './relays';
 import { postMessage, registerRelayForMessage, resolveRelayEndpoints, type FailedSendOutcome } from './message-dispatch';
+import { SEND_VERIFIED_MAX_KIB, SEND_VERIFIED_MAX_LINES } from '../../config/send-verified-limits';
 import {
   assertRoleTool,
   roleAssignmentFromFlag,
@@ -54,16 +55,9 @@ import type {
   RoleAssignmentInput,
 } from '../../types/agent-roles';
 
-/**
- * The message length `send` is verified to deliver whole (Issue #2464): the
- * largest body sent through the paste path to claude, codex, command-code and
- * antigravity and found byte-identical in each tool's own transcript
- * (`docs/design/2464-long-body-repro-matrix.md`). Stated in `--help` so a
- * caller can choose "put it in a file" instead. A documented guarantee, not an
- * enforced cap: a longer message takes the same path and the same check.
- */
-const SEND_VERIFIED_MAX_KIB = 48;
-const SEND_VERIFIED_MAX_LINES = 240;
+// Issue #2464: the message length `send` is verified to deliver whole, stated in
+// `--help`. Issue #4274: the values moved to `src/config/send-verified-limits.ts`
+// so the server adding a session brief reads the same ones.
 
 /**
  * What to print when a PROMPT_WAITING response carried no message body — an
@@ -593,6 +587,12 @@ function validateSendArgs(worktreeId: string, message: string | undefined, optio
     process.exit(ExitCode.CONFIG_ERROR);
   }
 
+  // Issue #4274: one send cannot both carry the brief and skip it.
+  if (options.brief === false && options.withBrief) {
+    console.error('Error: give --with-brief or --no-brief, not both. Nothing was sent.');
+    process.exit(ExitCode.CONFIG_ERROR);
+  }
+
   // Validate agent if provided
   if (options.agent && !isCliToolId(options.agent)) {
     console.error(`Error: Invalid agent. Must be one of: ${CLI_TOOL_IDS.join(', ')}`);
@@ -770,6 +770,12 @@ function buildSendBody(
   if (options.newConversation) {
     sendBody.newConversation = true;
   }
+  // Issue #4274: sent only when asked for, so a plain send is the body it was.
+  if (options.brief === false) {
+    sendBody.brief = 'skip';
+  } else if (options.withBrief) {
+    sendBody.brief = 'force';
+  }
   return sendBody;
 }
 
@@ -799,6 +805,8 @@ export function createSendCommand(): Command {
     .option('--duration <duration>', `Auto-yes duration (${AUTO_YES_DURATION_FLAG_RANGE}, e.g. 1h, 3h, 8h; default ${DEFAULT_DURATION_FLAG})`)
     .option('--stop-pattern <pattern>', 'Auto-yes stop pattern (regex). Matched against terminal output; cannot block commands (use the task contract\'s autoYes.denyPatterns for that)')
     .option('--contract <path>', 'Execution contract path relative to the worktree root (e.g. .commandmate/tasks/my-task.yaml). Records a task and sends the contract preamble plus its goal.')
+    .option('--no-brief', 'This send carries no session brief; the boundary keeps it for the next send (Issue #4274)')
+    .option('--with-brief', 'This send carries the session brief even when no boundary was detected (Issue #4274)')
     .option('--ignore-structured-prompt', 'Send even if only the agent\'s hooks report an open dialog (Issue #1737). Use when the pane looks idle but sends are refused; a prompt visible in the terminal is still refused.')
     .option('--reply-to <target>', REPLY_TO_OPTION_DESCRIPTION)
     .option('--allow-relay-chain', ALLOW_RELAY_CHAIN_DESCRIPTION)
@@ -821,6 +829,15 @@ waits until the composer shows all of it. If it never does, nothing is
 submitted and send exits 99 with "Message body did not arrive intact" -- it
 does not print "Message sent.". For a longer brief, write it to a file in the
 worktree and send a short message that tells the agent to read that file.
+
+Session brief (Issue #4274): the first send after a conversation boundary -- a new
+launch, a reset (/clear, codex /new), a resume to another conversation, a restart -- of
+claude, codex or command-code carries the session brief once, in front of the message,
+when mem is on (or derived) for the branch and injectOnStart is enabled. A reconnect is
+not a boundary. --no-brief skips it for this send only (the next send gets it);
+--with-brief attaches it to this send. Giving both is exit 2 with nothing sent. The
+brief is left off, never the message, when the two together would pass the verified
+length above.
 
 --role / --no-role (Issue #4116): a role is fixed when the process starts, so this is
 a condition, not a switch. The setting is saved for the instance first. A session that
