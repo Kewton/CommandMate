@@ -124,6 +124,10 @@ describe('detectSessionStatus - OpenCode selection_list detection', () => {
   });
 
   // [DR3-002] Priority: (B) thinking takes precedence over (C) selection_list
+  // Issue #4231: kept on purpose. A bare `Thinking:` row (no spinner) is read by position since
+  // #4209: only as the last row of a turn that has no finished-turn marker (an open turn). This
+  // fixture is such a turn (no `▣` row), so running still holds; the same row in a finished turn
+  // or in the footer's cwd is not read (see opencode/thinking-and-composer-by-position-4209).
   it('should prioritize thinking (B) over selection_list (C)', () => {
     const output = buildOpenCodeOutput([
       '              Select model                                     esc',

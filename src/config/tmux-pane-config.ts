@@ -98,7 +98,7 @@ export const TMUX_HISTORY_LIMIT = 20000;
  * - `detectSessionStatus` flipped `ready`/`opencode_response_complete` to
  *   `running`/`unknown_frame` on an aborted turn, because the sidebar rows push
  *   the previous turn's `▣ … · 36.1s` out of branch D's content window.
- * - `OPENCODE_IDLE_COMPOSER_PATTERN` false-matched, because the sidebar prints
+ * - `OPENCODE_IDLE_COMPOSER_PATTERN` false-matched (fixed by position in #4209), because the sidebar prints
  *   the session TITLE on a row that already carries the transcript gutter — so
  *   `^\s*┃\s*Ask anything\.\.\.` matches a title, not a composer.
  *

@@ -9,7 +9,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { runMigrations } from '@/lib/db/db-migrations';
+import { openMigratedFileDb } from '../../../helpers/migrated-file-db';
 import {
   applyDedupePlan,
   findCounterpart,
@@ -64,8 +64,7 @@ function snapshot(db: Database.Database) {
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'dedupe-3102-'));
   dbPath = join(dir, 'test.db');
-  const db = new Database(dbPath);
-  runMigrations(db);
+  const db = openMigratedFileDb(dbPath);
   seed(db);
   db.close();
 });

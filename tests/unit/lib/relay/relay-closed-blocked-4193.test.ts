@@ -22,7 +22,7 @@ import os from 'os';
 import path from 'path';
 import Database from 'better-sqlite3';
 import { NextRequest } from 'next/server';
-import { runMigrations } from '@/lib/db/db-migrations';
+import { openMigratedFileDb } from '../../../helpers/migrated-file-db';
 import { createRelay, getRelayById } from '@/lib/db/relay-db';
 import { resetRelayServerBootId } from '@/lib/relay/relay-boot';
 import type { SendAttemptReason, SendAttemptState } from '@/lib/session/send-attempt-types';
@@ -129,9 +129,7 @@ async function relaysCli(answer: ListAnswer, argv: string[] = []): Promise<{ out
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-4193-'));
-  db = new Database(path.join(dir, 'cm.db'));
-  db.pragma('foreign_keys = ON');
-  runMigrations(db);
+  db = openMigratedFileDb(path.join(dir, 'cm.db'), { foreignKeys: true });
   insertWorktree('wt-a', 'claude');
   insertWorktree('wt-b', 'codex');
   resetRelayDeliveryState();

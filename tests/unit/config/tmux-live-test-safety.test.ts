@@ -56,6 +56,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { ignoreVanished, walkTree } from '@tests/helpers/tolerant-walk';
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 
@@ -510,22 +511,24 @@ export function collectUnits(root: string, targets = SCAN_ROOTS): ScanUnit[] {
     if (stat.isSymbolicLink()) continue;
 
     const visit = (dir: string): void => {
-      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        const full = path.join(dir, entry.name);
-        if (entry.isSymbolicLink()) continue;
-        if (entry.isDirectory()) {
-          if (SKIP_DIRS.has(entry.name)) continue;
-          visit(full);
-          continue;
-        }
-        if (!entry.isFile()) continue;
-        const rel = path.relative(root, full);
-        if (rel === SELF) continue;
-        const matches =
-          target.extensions.some((ext) => entry.name.endsWith(ext)) ||
-          (!entry.name.includes('.') && target.extensions.includes('.sh'));
-        if (matches) units.push(...unitsForFile(root, rel));
-      }
+      // Children may vanish mid-walk (other tests' temp dirs); the target root may not.
+      walkTree(
+        dir,
+        (full, name, entryStat) => {
+          if (entryStat.isSymbolicLink()) return false;
+          if (entryStat.isDirectory()) return !SKIP_DIRS.has(name);
+          if (!entryStat.isFile()) return;
+          const rel = path.relative(root, full);
+          if (rel === SELF) return;
+          const matches =
+            target.extensions.some((ext) => name.endsWith(ext)) ||
+            (!name.includes('.') && target.extensions.includes('.sh'));
+          if (!matches) return;
+          const found = ignoreVanished(() => unitsForFile(root, rel));
+          if (found) units.push(...found);
+        },
+        { followSymlinks: false }
+      );
     };
 
     if (stat.isDirectory()) visit(absolute);
