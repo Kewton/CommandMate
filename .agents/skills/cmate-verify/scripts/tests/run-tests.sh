@@ -891,6 +891,42 @@ assert_has "stale-lock: the gate really ran" "$OUT" "GATE e2e PASS exit=0 durati
 assert_has "stale-lock: breaking a stale lock is reported" "$ERR" "broke a stale lock"
 assert_file_absent "stale-lock: the lock is released again afterwards" "$LOCK_DIR"
 
+# --- first come, first served (CommandMate #4277) ----------------------------
+# A waiter takes a ticket in <root>/<name>.queue and only the smallest live
+# ticket tries the mkdir. What a free lock leaves behind: the largest ticket,
+# used, and no lock.
+QUEUE_DIR="$LOCK_ROOT/cmate-verify-selftest.queue"
+queue_left=$(ls -1 "$QUEUE_DIR" 2>/dev/null | grep -cE '^[0-9]{12}$')
+assert_eq "tickets: a released lock leaves exactly one (used) ticket" "1" "$queue_left"
+assert_has "tickets: that ticket is marked done" "$QUEUE_DIR/$(ls -1 "$QUEUE_DIR" | grep -E '^[0-9]{12}$' | tail -n 1)" '"done":true'
+# Positive: a live ticket ahead keeps this run out although the lock itself is
+# free — it waits its turn instead of racing the mkdir. The ticket names this
+# suite's own shell (alive, started before the ticket, deadline an hour ahead).
+rm -rf "$QUEUE_DIR"
+mkdir -p "$QUEUE_DIR"
+printf '{"pid":%s,"host":"%s","token":"waiting-ahead","createdAt":%s,"deadline":%s}\n' \
+  "$$" "$(hostname)" "$(( $(date +%s) * 1000 ))" "$(( ( $(date +%s) + 3600 ) * 1000 ))" > "$QUEUE_DIR/000000000001"
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+run_verify --config "$FIXTURES/mutex-short.yaml" --cwd "$mx" --base-ref "$BASE_BRANCH"
+assert_eq "tickets: a live ticket ahead keeps the run out of a free lock" "22" "$RC"
+assert_file_absent "tickets: the command is never started out of turn" "$marker"
+assert_has "tickets: the waiter names the ticket it waited behind" "$ERR" "queue ticket $QUEUE_DIR/000000000001"
+assert_lacks "tickets: the live ticket ahead is not retired" "$QUEUE_DIR/000000000001" '"done":true'
+assert_file_absent "tickets: the free lock was never taken out of turn" "$LOCK_DIR"
+# Negative: the ticket's holder is gone, so it is retired and the run proceeds.
+( : ) & dead_pid=$!
+wait "$dead_pid" 2>/dev/null
+printf '{"pid":%s,"host":"%s","token":"waiting-dead","createdAt":0,"deadline":%s}\n' \
+  "$dead_pid" "$(hostname)" "$(( ( $(date +%s) + 3600 ) * 1000 ))" > "$QUEUE_DIR/000000000001"
+marker=$(new_marker)
+CMATE_VERIFY_TEST_MARKER="$marker"
+run_verify --config "$FIXTURES/mutex.yaml" --cwd "$mx" --base-ref "$BASE_BRANCH"
+assert_eq "tickets: a dead waiter's ticket does not block the run" "0" "$RC"
+assert_has "tickets: retiring it is reported" "$ERR" "machine-lock-ticket-retired"
+assert_file_absent "tickets: the lock is released afterwards" "$LOCK_DIR"
+rm -rf "$QUEUE_DIR"
+
 # --- mutex and retry together -------------------------------------------------
 marker=$(new_marker)
 CMATE_VERIFY_TEST_MARKER="$marker"

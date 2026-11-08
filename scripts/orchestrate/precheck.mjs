@@ -62,7 +62,6 @@
  *        [--base origin/develop] [--kind <feature|bug|refactor|docs>] [--metrics] [--build] [--allow-removed-tests] [--force]
  *        [--heavy-to-ci] [--item <work item>]
  */
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -75,6 +74,7 @@ import { itemOption, workHeadOf } from './pr-common.mjs';
 import { dirtyPaths } from './dirty-tree.mjs';
 import { allocateLog, executionKey, workItemName } from './execution-key.mjs';
 import { diffManifest, manifestHash, takeManifest, verifyEnvState } from './env-manifest.mjs';
+import { LOCK_POLL_MS, acquireMachineLockSync as acquireTicketedLockSync } from './machine-lock-sync.mjs';
 
 export const DEFAULT_BASE = 'origin/develop';
 /**
@@ -132,7 +132,6 @@ export const HEAVY_TEST_FILES = 50;
 export const HEAVY_RELATED_SOURCES = 20;
 /** The wait budget: the `timeoutSec` of the `unit` gate the lock is shared with (verify.yaml). */
 export const HEAVY_LOCK_TIMEOUT_SEC = 5400;
-const LOCK_POLL_MS = 250;
 const CODE_FILE = /\.(?:[cm]?js|jsx|tsx?)$/;
 const TEST_FILE = /^tests\/unit\/.+\.test\.tsx?$/;
 const RELATED_SOURCE = /^(?:src|scripts)\/.+\.(?:[cm]?js|jsx|tsx?)$/;
@@ -501,73 +500,18 @@ export function optionsFromNote(note, fallbackBase = DEFAULT_BASE) {
   ];
 }
 
-function sleepSync(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-function readLockOwner(lockPath) {
-  try {
-    const owner = JSON.parse(fs.readFileSync(path.join(lockPath, 'owner'), 'utf8'));
-    return typeof owner.pid === 'number' && typeof owner.token === 'string' ? owner : null;
-  } catch {
-    return null;
-  }
-}
-
-/** Only a holder recorded on this host whose pid is gone (ESRCH) is stale — machine-lock.ts isStaleOwner. */
-function isStaleOwner(owner) {
-  if (owner.host !== os.hostname()) return false;
-  try {
-    process.kill(owner.pid, 0);
-    return false;
-  } catch (err) {
-    return err?.code === 'ESRCH';
-  }
-}
-
 /**
  * Take the machine-wide lock `name` the way src/lib/verification/machine-lock.ts
- * does (an atomic `mkdir` of `<root>/<name>.lock` with an owner record; a stale
- * holder is broken once), synchronously — precheck runs its steps with
- * spawnSync. Waits up to `timeoutMs`.
+ * does — in ticket order since #4277, so a long wait here is not overtaken by a
+ * verify gate that came later (machine-lock-sync.mjs) — synchronously: precheck
+ * runs its steps with spawnSync. Waits up to `timeoutMs`.
  *
+ * @param {string} name
+ * @param {{ root: string, timeoutMs: number, pollMs?: number, sleep?: (ms: number) => void }} options
  * @returns {{ acquired: boolean, waitedMs: number, heldBy: string | null, release: () => void }}
  */
-export function acquireMachineLockSync(name, { root, timeoutMs, pollMs = LOCK_POLL_MS, sleep = sleepSync }) {
-  const lockPath = path.join(root, `${name}.lock`);
-  const token = crypto.randomUUID();
-  const startedAt = Date.now();
-  const broken = new Set();
-  fs.mkdirSync(root, { recursive: true });
-  for (;;) {
-    try {
-      fs.mkdirSync(lockPath);
-      fs.writeFileSync(path.join(lockPath, 'owner'), JSON.stringify({ pid: process.pid, host: os.hostname(), token, acquiredAt: Date.now() }));
-      return {
-        acquired: true,
-        waitedMs: Date.now() - startedAt,
-        heldBy: null,
-        release: () => {
-          const current = readLockOwner(lockPath);
-          if (current && current.token !== token) return;
-          fs.rmSync(lockPath, { recursive: true, force: true });
-        },
-      };
-    } catch (err) {
-      if (err?.code !== 'EEXIST') throw err;
-    }
-    const holder = readLockOwner(lockPath);
-    if (holder && !broken.has(holder.token) && isStaleOwner(holder)) {
-      broken.add(holder.token);
-      if (readLockOwner(lockPath)?.token === holder.token) fs.rmSync(lockPath, { recursive: true, force: true });
-      continue;
-    }
-    const waitedMs = Date.now() - startedAt;
-    if (waitedMs >= timeoutMs) {
-      return { acquired: false, waitedMs, heldBy: holder ? `pid ${holder.pid} on ${holder.host || 'unknown host'}` : null, release: () => {} };
-    }
-    sleep(Math.min(pollMs, timeoutMs - waitedMs));
-  }
+export function acquireMachineLockSync(name, { root, timeoutMs, pollMs = LOCK_POLL_MS, sleep }) {
+  return acquireTicketedLockSync(name, { root, timeoutMs, pollMs, ...(sleep ? { sleep } : {}) });
 }
 
 /**

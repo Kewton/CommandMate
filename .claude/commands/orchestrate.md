@@ -1101,7 +1101,7 @@ echo "exit=$?"   # 0 → PR を出す / 1 → runs/$DATE/precheck-<issue>[-<item
 
 マージの条件の 1 つとして、**未処置の指摘（5-3）が残っている PR はマージしない**。
 
-1 本マージするたびに、残りの各 PR で `merge-pr.mjs` を呼ぶ。develop が進んでいれば `git fetch` と `git merge origin/develop`（衝突したら
+残りの PR は `--queue` で 1 本ずつ流す（待ち合わせのシェルを自作しない）。各 PR で develop が進んでいれば `git fetch` と `git merge origin/develop`（衝突したら
 `git merge --abort` して止まる）を行い、**マージする HEAD について**（取り込んだ HEAD・`publish-pr.mjs` が先に push した取り込みの HEAD・未 push の HEAD のどれでも）
 衝突の印の走査（全追跡ファイル）と、その HEAD の precheck（`precheck.mjs`。`npx tsc --noEmit` と `vitest related --dir tests/unit` など）を通してから `git push` する。落ちたら push せずに止まる。
 precheck の引数・再利用・取り込んだ HEAD の重い段を CI に任せること: docs/orchestrate/ci-merge.md#6-2-取り込み後の重い段
@@ -1109,13 +1109,15 @@ precheck の引数・再利用・取り込んだ HEAD の重い段を CI に任�
 ```bash
 node scripts/orchestrate/merge-pr.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
   --issue "$issue" --worktree "$WT_DIR"            # 最後の 1 本は --last。Issue を閉じないときは --close -
-echo "exit=$?"   # 0 → マージ済み / 1 → 出力の欠けたもの・落ちた段を読む / 2 → 作業ツリーが汚れている / 3 → 保留（取り込みの無い precheck がロック待ち。再実行で続きから） / 4 → CI 待ちの間に develop が進んだ（再実行で取り込み直す） / 124 → CI が --register-timeout（既定 600 秒）までに 1 つも登録されない、または登録から --ci-timeout（既定 3600 秒）に収まらない
+echo "exit=$?"   # 0 → マージ済み / 1 → 出力を読む / 2 → ツリーが汚れている / 3 → 保留 / 4 → develop が進んだ（3・4 は再実行で続きから） / 124 → --register-timeout か --ci-timeout 切れ、マージのロック待ち切れ
+node scripts/orchestrate/merge-pr.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" --queue "$MERGE_ISSUES"  # 4245,3883/d1,3883@3889
 ```
+
+列は exit 3・4 を自動でやり直す。根拠: docs/orchestrate/ci-merge.md#6-2-マージの列--queue
 
 衝突で止まったときは、意味を見て解消（機械解決は module-reference などの共有ファイルだけ）してコミットし、同じ引数で再実行する。
 
-機械的に解決してよい衝突は、`docs/module-reference.md` などの共有ファイルでだけ起こりうる。CHANGELOG の断片は
-Issue ごとに別ファイル（`changelog.d/<N>.md`）で、`CHANGELOG.md` はリリースまで書き換えないので、ここでは衝突しない（2-4-1）。
+CHANGELOG の断片は Issue ごとの別ファイル（`changelog.d/<N>.md`）で、ここでは衝突しない（2-4-1）。
 
 **マーカー走査を共有ファイル（`docs/module-reference.md` など）の決め打ちにしないこと。**
 
@@ -1141,7 +1143,7 @@ Issue ごとに別ファイル（`changelog.d/<N>.md`）で、`CHANGELOG.md` は
 
 根拠: docs/orchestrate/ci-merge.md#6-3-fail-を見落とした実例
 
-`merge-pr.mjs` がこの判定を行う（落ちたジョブは HEAD ごとに 1 回だけ `gh run rerun --failed` で再実行し、それでも落ちればマージしない）。
+`merge-pr.mjs`（`--queue` は entry ごと）がこの判定を行う（落ちたジョブは HEAD ごとに 1 回だけ `gh run rerun --failed` で再実行し、それでも落ちればマージしない）。
 
 既存の揺れは、同じテストの 2 回目で再実行をやめて修正の担当を決める（根拠: docs/orchestrate/ci-merge.md#6-3-既存の揺れが再発したときの担当）。
 `pending` の扱いは 6-2 に従う: **6-2 のローカルゲート（refresh → マーカー走査 → `tsc` →
