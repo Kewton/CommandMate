@@ -293,3 +293,48 @@ fold や develop の取り込みで work HEAD と異なるときも、CI 待ち�
 `publish-pr.mjs` と `merge-pr.mjs` の `gh` の呼び出しは、`pr-common.mjs` の `withGhRetry` を通る（#3633）。呼び直すのは読み取りの `gh`（`pr view` / `pr list` / `pr checks` / `issue view` / `run view` / `run list`、`gh api` の GET など。`isGhRead`）だけで、GitHub が `HTTP 502` / `503` / `504`（2026-10-12 の Partially Degraded の間の `504 Gateway Timeout` で、#3587・#3618・#3588 の merge-pr.mjs が計 10 回以上 exit 1 で止まった）を返したときと、接続が切れたとき（connection reset・i/o timeout など）だけ、10 秒・30 秒・60 秒あけて最大 4 回まで呼び直す。呼び直すたびに stderr へ `gh <サブコマンド>: <gh の 1 行目> — retrying in <秒>s (attempt <n>/4)` を出す。4xx（404・422・401 など）や本当の失敗（マージできない・チェックの待ち中の exit 8）は呼び直さず、今までどおりそのまま止まる。4 回とも 5xx なら最後の答えで今までどおり止まるので、外側での再試行は GitHub の障害が数分続いたときだけでよい。
 
 書き込みの `gh`（`pr create` / `pr merge` / `run rerun` / `issue close`）は 1 回だけ送る（`ghWrite`）。504 は「GitHub が処理を終えたが応答が届かなかった」こともあるので、送り直すと PR が 2 本立つ・同じ HEAD の run を 2 回 rerun することがありうる。5xx・接続エラーで失敗したときは送り直さず、読み取りで 1 回確かめる: `pr create` はブランチの open な PR が今の HEAD を指しているか、`pr merge` は PR が `MERGED` で head が今の HEAD か、`run rerun` は run の試行番号（`gh run view <id> --json attempt`。送る前に読んでおく）が増えたか（status は見ない。`completed` は再実行の前にも、受理された再実行が確かめるまでに終わった後にもなる。送る前に試行番号が読めなかったときは受理と判断しない）、`issue close` は Issue が `CLOSED` か。済んでいれば stderr に `— not sent again; it went through` を出して成功として続け、済んでいない（または確かめる読み取りも失敗した）ときは `— not sent again; it did not go through` を出して今までどおり失敗で止まる。HEAD ごとに rerun は 1 回の制御（`ci` の段の `rerun=`）は変わらない。
+
+## 6-2 Unit Tests と Build を待つ例外
+
+**例外: 契約の `gates` が `unit-related` の PR は、CI の `Unit Tests` が `pass` になってからマージする**（#2639）。
+ローカルの裁定がテスト全体を含まないため。整理の契約（`lint`・`typecheck` だけ、2-4-3）も同じ。`merge-pr.mjs` は、検証が verify.yaml の `unit`
+（テスト全体）を通していないかぎり `Unit Tests` を待つ（契約が定義した `unit@contract` は代わりにしない）。
+
+**例外: build。CI の `Build` が `pass` になってからマージする**（#3477）。6-1-1 で build を PR の前の確認から外し、契約の既定のゲートにも
+precheck にも build が無いので、ローカルのどの裁定もビルドを見ていない。ただし、マージする HEAD（refresh の後の HEAD）の precheck の記録に
+`build=ok` があれば（`precheck.mjs --build`）、`Build` の `pending` は待たなくてよい。`--build` は CI の `Build` と同じ 3 つ
+（`npm run build`・`build:cli`・`build:server`）を走らせ、`build=ok`・`build-cli=ok`・`build-server=ok` が揃ったときだけ代わりになる。ほかのジョブの扱いは上のとおり。
+
+## 6-2 マージ後の自動キャンセル
+
+マージ（または close）すると、**その PR の `pull_request` run は
+`.github/workflows/cancel-pr-runs-on-close.yml` が自動で止める**（Issue #2330）。**手でキャンセル
+しないこと。** マージ後に PR のチェックが `cancelled` と表示されるのは**正常であって失敗の証拠では
+ない** — 裁定を出すのは develop 側の push run のほうである。この自動キャンセルは
+`--event pull_request` と PR の head ref で絞るので、**develop / main の push run には構造的に
+届かない**（＝安全網は止まらない）。
+
+## Phase 6 止まる条件と二重実行の防止
+
+**止まる条件。** どちらも、run の記録に、**作業の HEAD**（ワーカーの最後のコミット。衝突を解いたマージもなりうる。定義は run-log.md 1-5）の `verify=ok`（3-3・5-1）・`review=ok`（5-2b）・`findings=ok`（5-3）と、
+**公開する HEAD**（push する・マージする HEAD）の `precheck=ok`（6-1-1）が無ければ、何も公開せずに止まり、欠けたものを出す（exit 1）。
+**5-2b の対象でない Issue は `review` 段に `skip` を記録しておく**（忘れたレビューと、対象でないレビューを区別するため）。
+公開する HEAD は、作業の HEAD そのものか、その上に develop の取り込み（6-2）と module-reference の一本化だけのコミット（6-4）を重ねたもの。
+重ねたときは、その HEAD の precheck が要る（`merge-pr.mjs` は無ければ自分で走らせ、`publish-pr.mjs` は止まる）。
+この判定は `run-log.mjs status` と同じ関数（`unmetStage`）で行い、記録には両方の HEAD を書く（`head` と `workHead`）ので、再開先と公開側の判定がずれない。
+衝突の印が追跡ファイルにある・`changelog.d/<N>.md` がコミットに無い・module-reference の断片が無いときも止まる（6-4）。
+
+**二重に実行しない。** ブランチに開いた PR があれば作らない（push だけして、その PR を記録する）。別のブランチの開いた PR が同じ Issue を指していれば止まる
+（題名の `(#<N>)`、`/create-pr` が書く本文の `Closes #<N>`（`Fixes` / `Resolves` / `Refs` も）、ブランチ名の番号）。
+マージ済みの PR はマージしない（記録が無ければ記録し、Issue が開いていれば閉じるだけ）。どちらも、途中で落ちた後に同じ引数で再実行すると続きから同じ結果になる。
+
+## 6-4 一本化のコミットと merge-pr
+
+`merge-pr.mjs` はこのコミットを越えてワーカーのコミットの `verify`・`review`・`findings` を使い、
+一本化の後の HEAD の precheck は自分で走らせる（ほかのファイルも変えたコミットを足すと、そのコミットが作業の HEAD になり、`verify` から止まる）。
+
+## 6-4 断片が無い PR をマージしない
+
+**断片が無い PR はマージしない**（`publish-pr.mjs`・`merge-pr.mjs` が止まる）。`changelog.d/<N>.md` がコミットに含まれていない PR も、
+module-reference の断片が無い PR も同じ扱いにする。リリースノートに載らない Issue が出る。`check` が exit 0 にならない PR もマージしない
+（リリース時の `apply` は、1 つでも不正な断片があると何も書かずに止まる）。
