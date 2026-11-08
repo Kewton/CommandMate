@@ -102,7 +102,7 @@ export function acknowledgeMemNoticeByHuman(
   ifVersion: number,
   deps: MemNoticeDeps = {}
 ): MemHumanAcknowledgement {
-  return acknowledgeNoticeByHuman(db, noticeId, ifVersion, clockOf(deps).now);
+  return acknowledgeNoticeByHuman(db, noticeId, ifVersion, clockOf(deps));
 }
 
 /** The screen's list of notices nobody has taken (§3.3). Writes nothing. */

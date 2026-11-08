@@ -55,9 +55,9 @@ import {
 } from './condition-evaluators';
 import { isAncestor, listRemoteHeads, readLocalRef, readOrigin, readRefCreatedSeconds } from './git-query';
 import { ghApi, hostAllowed, repoPath } from './github-query';
-import { worktreeIncarnationAlive } from './incarnation';
+import { getOrCreateWorktreeIncarnation, getWorktreeIncarnation, worktreeIncarnationAlive } from './incarnation';
 import { DEFAULT_QUERY_LIMITS, defaultMemExec, QueryPlan, type MemExec, type QueryLimits } from './query-plan';
-import type { MemTarget, MemTargetResolved } from './target';
+import type { MemTarget, MemTargetResolved, MemTargetSpec } from './target';
 import { memTransition } from './transitions';
 
 /** §1.1: the whole evaluation's deadline for `list` and `check`; the brief and the preview pass theirs. */
@@ -79,14 +79,43 @@ export interface MemEvalContext {
   /** Who asked (recorded as the trigger, never as the owner). */
   caller?: { worktreeId: string; instanceId: string | null } | null;
   /**
-   * Whether the worktree the request was read for is still the same lifetime, asked
-   * in each close's transaction (a delete and re-creation under the same id and path
-   * during the queries refuses the close). null when asked through a repository.
+   * The lifetime of the worktree the request was read for, fixed by
+   * {@link fixMemEvalLifetime} before the request's first await. Required: each
+   * close's transaction asks it again (a delete and re-creation under the same id and
+   * path during the queries refuses the close). A target read through a worktree with
+   * no lifetime, or with another worktree's, is not evaluated at all (review P2-3).
    */
-  alive?: (() => boolean) | null;
+  lifetime: MemEvalLifetime;
   deadlineMs?: number;
   limits?: Partial<QueryLimits>;
   deps?: MemEvalDeps;
+}
+
+/** What {@link fixMemEvalLifetime} fixed: the worktree's incarnation, or "through a repository". */
+export type MemEvalLifetime =
+  | { via: 'worktree'; worktreeId: string; incarnation: string }
+  | { via: 'repository' };
+
+/**
+ * Fix the lifetime of the worktree a request names. Call it before the request's
+ * first await (the target's resolution included): every entrance of the evaluation —
+ * `mem list`, `mem check`, the brief, the preview — goes through it.
+ */
+export function fixMemEvalLifetime(db: Database.Database, spec: MemTargetSpec): MemEvalLifetime {
+  if (spec.via !== 'worktree') return { via: 'repository' };
+  return { via: 'worktree', worktreeId: spec.worktreeId, incarnation: getOrCreateWorktreeIncarnation(db, spec.worktreeId) };
+}
+
+/**
+ * The check each close asks, or undefined when the lifetime does not fit the target
+ * (none, the other way in, or another worktree): then nothing is evaluated.
+ */
+function aliveOf(db: Database.Database, target: MemTargetResolved, lifetime: MemEvalLifetime | undefined): (() => boolean) | null | undefined {
+  if (!lifetime) return undefined;
+  if (target.via === 'repository') return lifetime.via === 'repository' ? null : undefined;
+  if (lifetime.via !== 'worktree') return undefined;
+  if (target.worktree && target.worktree.id !== lifetime.worktreeId) return undefined;
+  return () => getWorktreeIncarnation(db, lifetime.worktreeId) === lifetime.incarnation;
 }
 
 export interface MemEvalItemResult {
@@ -386,6 +415,8 @@ async function evaluateOne(env: Env, candidate: Candidate): Promise<ConditionAns
  */
 export async function evaluateMemConditions(db: Database.Database, target: MemTarget, ctx: MemEvalContext): Promise<MemEvalReport> {
   if (!target.ok || target.mode !== 'on') return { evaluated: false, results: [], asked: [] };
+  const alive = aliveOf(db, target, ctx.lifetime);
+  if (alive === undefined) return { evaluated: false, results: [], asked: [] };
   const now = ctx.deps?.now ?? Date.now;
   const started = now();
   const plan = new QueryPlan(
@@ -428,7 +459,7 @@ export async function evaluateMemConditions(db: Database.Database, target: MemTa
           trigger: ctx.trigger,
           triggeredBy: ctx.caller ?? null,
           modeRoots: target.members.map((root) => root.id),
-          alive: ctx.alive ?? null,
+          alive,
           now: now(),
         });
       }

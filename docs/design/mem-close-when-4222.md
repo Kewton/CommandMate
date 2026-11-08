@@ -582,10 +582,11 @@ B が足した・変えた共通の規則ごとに、読む・書く全経路と
 
 | 規則の関数 | 呼び出し元 | API / CLI / 画面 | 追従 |
 |---|---|---|---|
-| `fixRequestLifetime`（`service.ts`、要求の到着時に worktree の世代を固定）→ `closeItemByCondition` の `alive` | `memList`・`memCheck` | `GET /api/worktrees/:id/mem`・`POST /api/worktrees/:id/mem/check`・`mem list`・`mem check` | 追従（`close-entrances-4222` の (a)） |
-| 同上（repository の経路は `alive = null`） | `memList`（`via: 'repository'`） | `GET /api/repositories/:id/mem?branch=` | 追従（worktree を経ないので照合する寿命が無い。mode・版は照合する） |
+| `fixMemEvalLifetime`（`evaluate.ts`、要求の最初の await の前に worktree の世代を固定）→ `evaluateMemConditions` の必須の `lifetime` → `closeItemByCondition` の `alive` | `memList`・`memCheck` | `GET /api/worktrees/:id/mem`・`POST /api/worktrees/:id/mem/check`・`mem list`・`mem check` | 追従（`close-entrances-4222` の (a)） |
+| 同上（公開の評価の口そのもの） | brief（#4223）・preview（#4227）が呼ぶ口 `evaluateMemConditions` | C・G（未実装） | 追従（整合性レビュー P2-3 で直した。`lifetime` は省けない型で、worktree の対象に寿命が無い・別の worktree の寿命・`repository` の寿命なら何も評価しない。表の行「via evaluateMemConditions (brief / preview)」が口を直接呼んで (a)〜(c) を固定） |
+| 同上（repository の経路は `{ via: 'repository' }`、`alive = null`） | `memList`（`via: 'repository'`） | `GET /api/repositories/:id/mem?branch=` | 追従（worktree を経ないので照合する寿命が無い。mode・版は照合する） |
 | `recipientStillHere`（`mem-close-db.ts`） | `reserveNotices` ← `reserveMemNotices` | D（未実装） | 追従（(a)） |
-| settle の `sameWorktree`（試みの `recipient_worktree_incarnation`） | `settleNoticeAttempt` ← `settleMemNoticeAttempt` | D（未実装） | 追従（(a)。作り直しなら受領にせず `pending`） |
+| settle の `sameWorktree`（試みの `recipient_worktree_incarnation` を `worktreeIncarnationAlive` で世代から引く。予約時の id では引かない） | `settleNoticeAttempt` ← `settleMemNoticeAttempt` | D（未実装） | 追従（(a)。作り直しなら受領にせず `pending`。整合性レビュー P2-1 で直した：予約と settle の間の通常の改名は世代の行が新しい id へ動くので同じ受取先のまま受領する。改名先の削除・作り直しは世代が消えるので `pending`） |
 | `noticeAudience`（作成者は `origin_incarnation`、生存は `instanceIncarnationAlive`、(a) は `resolveWorktreeIdWithAlias`、(b) は `issued_by='roster'` と `created_at`） | `listNoticesFor`・`reserveNotices`・`memNoticeAudience` | C・D（未実装）、G は `memNoticeAudience` を呼ぶ口 | 追従（判定の写しは無い。`grep` で `origin_incarnation` を比べる箇所は `noticeAudience` だけ） |
 | `rosterIssue`（`agent-instances-db.ts`、最初の保存の primary は `lazy`） | `setAgentInstances`・`addAgentInstance` | `PATCH /api/worktrees/:id`（roster の全置換、`route.ts` の `setAgentInstances`）・`POST /api/worktrees/:id/instances/roles` 等の `createInstanceWithRole`（`management.ts`）→ `setAgentInstances` | 追従（`startInstanceIncarnation` の全呼び出しが `issuedBy` を名指す、`close-entrances-4222` の試験） |
 | `settleActorIncarnation`（`mem-db.ts`、`lazy`） | `createMemItem`・`replaceNowSlot` | mem の書き込みの全経路 | 追従 |
@@ -612,8 +613,17 @@ B が足した・変えた共通の規則ごとに、読む・書く全経路と
 | 規則の関数 | 呼び出し元 | API / CLI / 画面 | 追従 |
 |---|---|---|---|
 | `settleNoticeAttempt`（その試みの知らせだけ・`attempt_audience` で区分・2 回目は何もしない） | `settleMemNoticeAttempt` | D（未実装） | 追従 |
-| `acknowledgeNoticeByHuman`（版の照合・`pending` だけ） | `acknowledgeMemNoticeByHuman` ← `memAcknowledgeNotice` | `POST /api/repositories/:id/mem/notices/:noticeId/acknowledge`（画面の印） | 追従 |
+| `acknowledgeNoticeByHuman`（画面が読んだ版の照合 → mode → 古い予約は戻してから引き取る・生きている予約は `state_forbids`） | `acknowledgeMemNoticeByHuman` ← `memAcknowledgeNotice` | `POST /api/repositories/:id/mem/notices/:noticeId/acknowledge`（画面の印） | 追従（整合性レビュー P2-2 で直した。一覧が `pending` と読む古い予約を人が引き取れなかった） |
+| 古い試みの判定 `attemptIsStale`（別の boot か 10 分超） | `readable`（`listNoticesFor`・`listUndeliveredNotices`、書かない）・`abandonStaleAttempts`（`reserveNotices`）・`acknowledgeNoticeByHuman`（その知らせの試みだけを `abandoned` にし、+1 を数える） | C・D・G、画面の印 | 追従（読みが `pending` と見せるものは、書く側の reserve と人の引き取りの両方が引き取れる） |
 | 受領の後に出さない | `listNoticesFor`・`listUndeliveredNotices`（`state != 'acknowledged'`） | C・G | 追従 |
 | 保持の削除（30 日） | `pruneRetention`（close・reserve・settle・人の引き取りの transaction の中） | — | 追従（未受領は消さない） |
 
 未追従は見つからなかった（探した対象：`src/` の `mem_notices`・`mem_notice_attempts`・`mem_close_records`・`issued_by`・`startInstanceIncarnation`・`decideRootMode` を含む全ファイル）。
+
+その後の整合性レビュー（Codex、`workspace/orchestration/runs/2026-11-08/review-4222.md`、P2 3 件）で 3 つの未追従が見つかり、この PR で直した（上の表の該当行に反映済み）。
+
+| 番号 | 未追従 | 直し方 | 試験（陽性・陰性） |
+|---|---|---|---|
+| P2-1 | settle が試みの保存した旧 id から worktree の世代を引き、予約→通常の改名→`sent` を受領にしなかった | 世代そのものの存続（`worktreeIncarnationAlive`）で照合 | `notices-4222`：改名をまたいで受領／同じ id の作り直し・改名先の作り直しは `pending` |
+| P2-2 | 古い予約は一覧で `pending` と読めるのに、人の引き取りは `reserved` を一律に断った（DB の回復は reserve だけ） | 人の引き取りにも `attemptIsStale` を通し、古い予約はその試みを `abandoned` にしてから引き取る | `notices-4222`：別の boot・10 分超は引き取れ、古い試みの後の settle は何もしない／生きている予約は 409 `state_forbids`、版の違い・`off` は何も書かない |
+| P2-3 | 公開の評価の口 `evaluateMemConditions` が `alive` の省略を許し、入口の表は writer と writer の直接の呼び手しか数えなかった | `lifetime` を必須にし、口の中で対象と照合する。表に `entrance`（公開層の関数）と `callers`（公開層の関数を呼ぶ `src/` の関数）を持たせ、両方を源から列挙して表と一致させる | `close-entrances-4222`：口を直接呼ぶ行の (a)〜(c)／寿命なし・別の worktree・`repository` は評価しない、新しい入口・新しい呼び手・class の中の呼び出しを検査が拾う対照 |

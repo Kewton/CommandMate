@@ -324,3 +324,108 @@ describe('mode off / derived (§4)', () => {
     expect(noticeRow(item.id).state).toBe('acknowledged');
   });
 });
+
+describe('integration review P2-1: a rename between the reservation and the settle', () => {
+  it('reserved at wt-1, renamed to wt-1b, settled sent → acknowledged by the creator (the same worktree lifetime)', async () => {
+    const item = await world.add('next', PAST);
+    await check();
+    const reserved = reserveMemNotices(world.db, recipient('wt-1', 'claude'), pick(recipient('wt-1', 'claude')), clock());
+    world.db.transaction(() => migrateWorktreeIdPreservingChildren(world.db, 'wt-1', 'wt-1b'))();
+    expect(settleMemNoticeAttempt(world.db, reserved.attemptId!, 'sent', clock())).toBe(1);
+    expect(noticeRow(item.id)).toMatchObject({ state: 'acknowledged', acknowledged_by: 'creator', uncertain_count: 0 });
+    expect(listFor('wt-1b', 'claude')).toEqual([]);
+  });
+
+  it('(control) reserved, then the worktree deleted and made again under the same id → not acknowledged', async () => {
+    const item = await world.add('next', PAST);
+    await check();
+    const reserved = reserveMemNotices(world.db, recipient('wt-1', 'claude'), pick(recipient('wt-1', 'claude')), clock());
+    deleteWorktreesByIds(world.db, ['wt-1']);
+    world.worktree('wt-1', [{ id: 'claude', cliTool: 'claude' }]);
+    settleMemNoticeAttempt(world.db, reserved.attemptId!, 'sent', clock());
+    expect(noticeRow(item.id).state).toBe('pending');
+  });
+
+  it('(control) reserved, renamed, then the new id deleted and made again → not acknowledged', async () => {
+    const item = await world.add('next', PAST);
+    await check();
+    const reserved = reserveMemNotices(world.db, recipient('wt-1', 'claude'), pick(recipient('wt-1', 'claude')), clock());
+    world.db.transaction(() => migrateWorktreeIdPreservingChildren(world.db, 'wt-1', 'wt-1b'))();
+    deleteWorktreesByIds(world.db, ['wt-1b']);
+    world.worktree('wt-1b', [{ id: 'claude', cliTool: 'claude' }]);
+    settleMemNoticeAttempt(world.db, reserved.attemptId!, 'sent', clock());
+    expect(noticeRow(item.id).state).toBe('pending');
+  });
+});
+
+describe('integration review P2-2: a person takes a notice whose reservation is stale', () => {
+  const screen = () => world.deps({ bootId: () => boot });
+  const listed = async () => ((await memUndeliveredNotices(world.db, world.repo, 'feature/x', screen())).body as MemNoticeListResponse).notices;
+  const attempts = () => world.db.prepare('SELECT id, settled_at, result FROM mem_notice_attempts').all() as Array<{ id: string; settled_at: number | null; result: string | null }>;
+
+  async function reservedOne() {
+    const item = await world.add('next', PAST);
+    await check();
+    const reserved = reserveMemNotices(world.db, recipient('wt-1', 'claude'), pick(recipient('wt-1', 'claude')), clock());
+    expect(noticeRow(item.id).state).toBe('reserved');
+    return { item, attemptId: reserved.attemptId! };
+  }
+
+  it('the sender of another boot is gone → the version the list showed takes it; the old attempt is abandoned and its settle does nothing', async () => {
+    const { item, attemptId } = await reservedOne();
+    boot = 'boot-2';
+    const [shown] = await listed();
+    expect(shown.uncertain).toBe(true);
+    const taken = await memAcknowledgeNotice(world.db, world.repo, shown.id, { ifVersion: shown.version }, screen());
+    expect(taken.status).toBe(200);
+    expect(noticeRow(item.id)).toMatchObject({ state: 'acknowledged', acknowledged_by: 'human', attempt_id: null, uncertain_count: 1 });
+    expect(attempts()).toEqual([{ id: attemptId, settled_at: expect.any(Number), result: 'abandoned' }]);
+    expect(settleMemNoticeAttempt(world.db, attemptId, 'sent', clock())).toBe(0);
+    expect(noticeRow(item.id)).toMatchObject({ state: 'acknowledged', acknowledged_by: 'human' });
+    expect(await listed()).toEqual([]);
+  });
+
+  it('the same boot, more than 10 minutes later → taken', async () => {
+    const { item } = await reservedOne();
+    const later = Date.now() + 11 * 60 * 1000;
+    world.clock = () => later;
+    const [shown] = await listed();
+    expect((await memAcknowledgeNotice(world.db, world.repo, shown.id, { ifVersion: shown.version }, screen())).status).toBe(200);
+    expect(noticeRow(item.id)).toMatchObject({ state: 'acknowledged', acknowledged_by: 'human' });
+  });
+
+  it('(control) a live reservation stays protected: 409 state_forbids, nothing written; its settle acknowledges it', async () => {
+    const { item, attemptId } = await reservedOne();
+    const before = JSON.stringify([world.db.prepare('SELECT * FROM mem_notices').all(), attempts()]);
+    const row = noticeRow(item.id);
+    const refused = await memAcknowledgeNotice(world.db, world.repo, row.id as string, { ifVersion: row.version as number }, screen());
+    expect(refused.status).toBe(409);
+    expect((refused.body as { code: string }).code).toBe('state_forbids');
+    expect(JSON.stringify([world.db.prepare('SELECT * FROM mem_notices').all(), attempts()])).toBe(before);
+    settleMemNoticeAttempt(world.db, attemptId, 'sent', clock());
+    expect(noticeRow(item.id)).toMatchObject({ state: 'acknowledged', acknowledged_by: 'creator' });
+  });
+
+  it('(control) a stale reservation with a version the list did not show → 409 version_conflict, the reservation left as it was', async () => {
+    const { item } = await reservedOne();
+    boot = 'boot-2';
+    const [shown] = await listed();
+    const before = JSON.stringify([world.db.prepare('SELECT * FROM mem_notices').all(), attempts()]);
+    const refused = await memAcknowledgeNotice(world.db, world.repo, shown.id, { ifVersion: shown.version + 1 }, screen());
+    expect((refused.body as { code: string }).code).toBe('version_conflict');
+    expect(JSON.stringify([world.db.prepare('SELECT * FROM mem_notices').all(), attempts()])).toBe(before);
+    expect(noticeRow(item.id).state).toBe('reserved');
+  });
+
+  it('(control) a stale reservation while the mode is off → 409 disabled, nothing written', async () => {
+    const { item } = await reservedOne();
+    boot = 'boot-2';
+    const [shown] = await listed();
+    world.setMode('off');
+    const before = JSON.stringify([world.db.prepare('SELECT * FROM mem_notices').all(), attempts()]);
+    const refused = await memAcknowledgeNotice(world.db, world.repo, shown.id, { ifVersion: shown.version }, screen());
+    expect(refused.status).toBe(409);
+    expect(JSON.stringify([world.db.prepare('SELECT * FROM mem_notices').all(), attempts()])).toBe(before);
+    expect(noticeRow(item.id).state).toBe('reserved');
+  });
+});

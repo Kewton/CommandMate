@@ -13,6 +13,12 @@
  * (directly or through its own helpers) is a row's writer, or a named exception with
  * its reason. A new write fails the first test until it has a row.
  *
+ * The ways in are checked too (integration review P2-3): every exported function of the
+ * public layer (`src/lib/mem/evaluate.ts`, `src/lib/mem/notices.ts`) that reaches a
+ * writer is a row's `entrance`, and every function elsewhere in `src/` that calls one of
+ * those entrances is a row's `callers` entry. A new entrance, or a new caller of an
+ * existing one (the brief, the preview), fails here until a row runs (a)〜(c) through it.
+ *
  * @vitest-environment node
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -33,6 +39,8 @@ import {
   reserveMemNotices,
   settleMemNoticeAttempt,
 } from '@/lib/mem/notices';
+import { getWorktreeById } from '@/lib/db/worktree-db';
+import { evaluateMemConditions, fixMemEvalLifetime, type MemEvalContext } from '@/lib/mem/evaluate';
 import { memAcknowledgeNotice, memCheck, memList } from '@/lib/mem/service';
 import type { MemTargetResolved } from '@/lib/mem/target';
 import type { MemListResponse } from '@/types/mem';
@@ -40,6 +48,8 @@ import { MemWorld } from './mem-4222-harness';
 
 const MEM_DB = path.join(process.cwd(), 'src/lib/db/mem-db.ts');
 const MEM_CLOSE_DB = path.join(process.cwd(), 'src/lib/db/mem-close-db.ts');
+/** The public layer: the only files that may call the writers (the test "no way around"). */
+const PUBLIC_LAYER = ['src/lib/mem/evaluate.ts', 'src/lib/mem/notices.ts'];
 const PAST = 'at:2020-01-01T00:00+00:00';
 
 interface Chunk {
@@ -84,6 +94,50 @@ function allWriters(memDb = readFileSync(MEM_DB, 'utf8'), memCloseDb = readFileS
   const a = storeWriters(memDb);
   const b = storeWriters(memCloseDb, a);
   return [...new Set([...a, ...b])].sort();
+}
+
+/** Exported functions of a source that reach (call, directly or through its own helpers) one of `targets`. */
+function reachers(source: string, targets: Set<string>): Set<string> {
+  const chunks = chunksOf(source);
+  const found = closure(chunks, (chunk) => calls(chunk.body.slice(chunk.body.indexOf('{')), targets));
+  return new Set(chunks.filter((chunk) => chunk.exported && found.has(chunk.name)).map((chunk) => chunk.name));
+}
+
+const codeLines = (source: string) => source.split('\n').filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line)).join('\n');
+
+/** The public layer's exported functions that reach a writer of the table. */
+function publicEntrances(writers: Set<string>, sources: Record<string, string> = readAll(PUBLIC_LAYER)): string[] {
+  return Object.values(sources).flatMap((source) => [...reachers(source, writers)]).sort();
+}
+
+/**
+ * Who calls the public entrances, as `file:function` (exported, or reaching one through
+ * a helper). A file that calls one where no top-level function can be named (a class
+ * method, a default export) is `file:<unattributed>`, which no row can claim.
+ */
+function entranceCallers(entrances: Set<string>, sources: Record<string, string>): string[] {
+  const out: string[] = [];
+  for (const [file, source] of Object.entries(sources)) {
+    if (!calls(codeLines(source), entrances)) continue;
+    const named = reachers(source, entrances);
+    if (named.size === 0) out.push(`${file}:<unattributed>`);
+    for (const name of named) out.push(`${file}:${name}`);
+  }
+  return out.sort();
+}
+
+function readAll(files: string[]): Record<string, string> {
+  return Object.fromEntries(files.map((file) => [file, readFileSync(path.join(process.cwd(), file), 'utf8')]));
+}
+
+/** Every source of `src/` outside the store and the public layer. */
+function callerSources(): Record<string, string> {
+  const skip = new Set([MEM_DB, MEM_CLOSE_DB, ...PUBLIC_LAYER.map((file) => path.join(process.cwd(), file))]);
+  return readAll(
+    sourcesUnder(path.join(process.cwd(), 'src'))
+      .filter((file) => !skip.has(file))
+      .map((file) => path.relative(process.cwd(), file))
+  );
 }
 
 /** Writers of #4221's entrances and settings: fixed by `write-entrances-recreate-4221.test.ts` and the screen-only guard. */
@@ -145,6 +199,10 @@ async function closedOne(): Promise<void> {
 interface Row {
   /** The store writers this entrance reaches. */
   writers: string[];
+  /** The public layer's function the row goes through (evaluate.ts / notices.ts). */
+  entrance: string;
+  /** The functions elsewhere in `src/` that call the entrance and are run by this row, as `file:function`. */
+  callers: string[];
   /** (a): the request is read, the worktree deleted and made again, then the request lands. */
   recreated: (() => Promise<void>) | { exempt: string };
   /** (b): run in `off` and in `derived`; nothing of #4222 may be written. */
@@ -160,6 +218,8 @@ const evaluation = (via: 'check' | 'list'): Row => {
       : memList(world.db, { via: 'worktree', worktreeId: 'wt-1' }, {}, world.deps());
   return {
     writers: ['closeItemByCondition', 'closeMemItemByCondition'],
+    entrance: 'evaluateMemConditions',
+    callers: [via === 'check' ? 'src/lib/mem/service.ts:memCheck' : 'src/lib/mem/service.ts:memList'],
     recreated: async () => {
       await world.add('next', PAST);
       const release = world.arm();
@@ -195,11 +255,70 @@ const evaluation = (via: 'check' | 'list'): Row => {
   };
 };
 
+const ISSUE_CLOSED = () => ({ code: 0, stdout: JSON.stringify({ state: 'closed', state_reason: 'completed' }) });
+const openCount = () => world.count("SELECT COUNT(*) n FROM mem_items WHERE state != 'closed'");
+
+/** The public evaluation as the brief (#4223) and the preview (#4227) will call it: the lifetime fixed first. */
+function evaluateDirectly(trigger: 'brief' | 'preview', overrides: Partial<MemEvalContext> = {}, mode: 'on' | 'off' | 'derived' = 'on') {
+  const lifetime = fixMemEvalLifetime(world.db, { via: 'worktree', worktreeId: 'wt-1' });
+  return (run: () => void = () => undefined) => {
+    run();
+    return evaluateMemConditions(world.db, { ...target(), mode, worktree: getWorktreeById(world.db, 'wt-1') }, {
+      trigger,
+      lifetime,
+      deps: { exec: world.fake.exec },
+      ...overrides,
+    });
+  };
+}
+
 const ROWS: Record<string, Row> = {
   'condition-close via check': evaluation('check'),
   'condition-close via list': evaluation('list'),
+  'condition-close via evaluateMemConditions (brief / preview)': {
+    writers: ['closeItemByCondition', 'closeMemItemByCondition'],
+    entrance: 'evaluateMemConditions',
+    callers: [],
+    recreated: async () => {
+      // The worktree is deleted and made again while the condition's query is out.
+      await world.add('next', 'issue:#1');
+      const start = evaluateDirectly('brief');
+      world.fake.handler = () => {
+        recreate();
+        return ISSUE_CLOSED();
+      };
+      const report = await start();
+      expect(world.fake.calls.length).toBeGreaterThan(0);
+      expect(report.results.map((result) => result.condition.result)).toEqual(['met']);
+      expect(openCount()).toBe(1);
+      expect(closedCount()).toBe(0);
+      expect(writtenB()).toBe(0);
+    },
+    modeOff: async (mode) => {
+      await world.add('next', PAST);
+      world.setMode(mode);
+      const report = await evaluateDirectly('preview', {}, mode)();
+      expect(report.evaluated).toBe(false);
+      expect(world.fake.calls).toEqual([]);
+      expect(closedCount()).toBe(0);
+      expect(writtenB()).toBe(0);
+    },
+    conflict: async () => {
+      const item = await world.add('next', 'issue:#1');
+      world.fake.handler = () => {
+        world.db.prepare('UPDATE mem_items SET version = version + 1 WHERE id = ?').run(item.id);
+        return ISSUE_CLOSED();
+      };
+      await evaluateDirectly('brief')();
+      expect(world.fake.calls.length).toBeGreaterThan(0);
+      expect(closedCount()).toBe(0);
+      expect(writtenB()).toBe(0);
+    },
+  },
   reserve: {
     writers: ['reserveNotices'],
+    entrance: 'reserveMemNotices',
+    callers: [],
     recreated: async () => {
       await closedOne();
       const r = recipient();
@@ -226,6 +345,8 @@ const ROWS: Record<string, Row> = {
   },
   settle: {
     writers: ['settleNoticeAttempt'],
+    entrance: 'settleMemNoticeAttempt',
+    callers: [],
     recreated: async () => {
       await closedOne();
       const attempt = reserveMemNotices(world.db, recipient(), pick(), clock()).attemptId!;
@@ -250,6 +371,8 @@ const ROWS: Record<string, Row> = {
   },
   'human acknowledge': {
     writers: ['acknowledgeNoticeByHuman'],
+    entrance: 'acknowledgeMemNoticeByHuman',
+    callers: ['src/lib/mem/service.ts:memAcknowledgeNotice'],
     recreated: { exempt: '画面の経路で worktree を経ない（要求は知らせの ID と版で結び、版の照合 (c) が古い要求を断る）' },
     modeOff: async (mode) => {
       await closedOne();
@@ -314,6 +437,60 @@ describe('every write of #4222 keeps (a) re-creation, (b) mode, (c) version', ()
       .map((file) => path.relative(process.cwd(), file))
       .sort();
     expect(callers).toEqual(['src/lib/mem/evaluate.ts', 'src/lib/mem/notices.ts']);
+  });
+
+  it('integration review P2-3: every entrance of the public layer that reaches a writer is a row’s entrance', () => {
+    const entrances = publicEntrances(new Set(tableWriters()));
+    for (const known of ['evaluateMemConditions', 'reserveMemNotices', 'settleMemNoticeAttempt', 'acknowledgeMemNoticeByHuman']) {
+      expect(entrances).toContain(known);
+    }
+    expect(entrances).toEqual([...new Set(Object.values(ROWS).map((row) => row.entrance))].sort());
+  });
+
+  it('integration review P2-3: every caller of those entrances elsewhere in src/ is run by a row', () => {
+    const entrances = new Set(Object.values(ROWS).map((row) => row.entrance));
+    expect(entranceCallers(entrances, callerSources())).toEqual(Object.values(ROWS).flatMap((row) => row.callers).sort());
+  });
+
+  it('(control) the entrance checks catch a new entrance, a new caller, and one in a class; a reader is left alone', () => {
+    const writers = new Set(tableWriters());
+    const layer = readAll(PUBLIC_LAYER);
+    const extraEntrance = {
+      ...layer,
+      'src/lib/mem/evaluate.ts': `${layer['src/lib/mem/evaluate.ts']}\nfunction quiet(db: Database.Database): boolean {\n  return closeItemByCondition(db, {} as never);\n}\nexport function previewAndClose(db: Database.Database): boolean {\n  return quiet(db);\n}\n`,
+    };
+    expect(publicEntrances(writers, extraEntrance)).toContain('previewAndClose');
+    const entrances = new Set(Object.values(ROWS).map((row) => row.entrance));
+    const brief = {
+      'src/lib/mem/brief.ts': `import { evaluateMemConditions } from './evaluate';\nexport async function buildBrief(db: Database.Database, target: never) {\n  return evaluateMemConditions(db, target, { trigger: 'brief' } as never);\n}\n`,
+    };
+    expect(entranceCallers(entrances, brief)).toEqual(['src/lib/mem/brief.ts:buildBrief']);
+    const inClass = {
+      'src/lib/mem/brief.ts': `export class Brief {\n  run(db: never) {\n    return evaluateMemConditions(db, db, db);\n  }\n}\n`,
+    };
+    expect(entranceCallers(entrances, inClass)).toEqual(['src/lib/mem/brief.ts:<unattributed>']);
+    const reader = { 'src/lib/mem/brief.ts': `// evaluateMemConditions(db) is called by the brief\nexport const NOTE = 'evaluateMemConditions';\n` };
+    expect(entranceCallers(entrances, reader)).toEqual([]);
+  });
+
+  it('integration review P2-3: the public evaluation refuses a worktree target without its lifetime fixed (nothing asked, nothing written)', async () => {
+    await world.add('next', PAST);
+    const wt = getWorktreeById(world.db, 'wt-1');
+    const base = { ...target(), worktree: wt };
+    const deps = { exec: world.fake.exec };
+    const missing = await evaluateMemConditions(world.db, base, { trigger: 'brief', deps } as unknown as MemEvalContext);
+    expect(missing.evaluated).toBe(false);
+    world.worktree('wt-2');
+    const other = await evaluateMemConditions(world.db, base, { trigger: 'brief', deps, lifetime: fixMemEvalLifetime(world.db, { via: 'worktree', worktreeId: 'wt-2' }) });
+    expect(other.evaluated).toBe(false);
+    const viaRepository = await evaluateMemConditions(world.db, base, { trigger: 'brief', deps, lifetime: { via: 'repository' } });
+    expect(viaRepository.evaluated).toBe(false);
+    expect(closedCount()).toBe(0);
+    expect(writtenB()).toBe(0);
+    // (control) its own lifetime, the worktree left alone → closed.
+    const fixed = await evaluateDirectly('brief')();
+    expect(fixed.evaluated).toBe(true);
+    expect(closedCount()).toBe(1);
   });
 
   it('the writers of `issued_by` (S6): every call of startInstanceIncarnation names how it was issued', () => {

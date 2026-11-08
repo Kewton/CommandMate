@@ -67,7 +67,7 @@ import {
   type CloseWhenTarget,
 } from './close-when';
 import { getInstanceIncarnation, getOrCreateWorktreeIncarnation, getWorktreeIncarnation } from './incarnation';
-import { evaluateMemConditions, type MemEvalContext, type MemEvalDeps, type MemEvalReport } from './evaluate';
+import { evaluateMemConditions, fixMemEvalLifetime, type MemEvalContext, type MemEvalLifetime, type MemEvalDeps, type MemEvalReport } from './evaluate';
 import { acknowledgeMemNoticeByHuman, listUndeliveredMemNotices } from './notices';
 import type { QueryLimits } from './query-plan';
 import { presentMemItem, type MemRecord } from './present';
@@ -263,6 +263,8 @@ async function defaultGit(): Promise<MemGit> {
 export interface MemServiceDeps extends MemTargetDeps {
   git?: MemGit;
   now?: () => number;
+  /** Issue #4222: this server's boot id (stale reservations, §3.5), for tests. */
+  bootId?: () => string;
   /** Issue #4222: what the evaluation of the conditions asks (gh, git, the clock), for tests. */
   evaluation?: MemEvalDeps & { limits?: Partial<QueryLimits>; deadlineMs?: number };
 }
@@ -529,7 +531,7 @@ export async function memList(
   deps: MemServiceDeps = {}
 ): Promise<MemOutcome> {
   if (spec.via === 'worktree' && !getWorktreeById(db, spec.worktreeId)) return memError('not_found');
-  const fixed = fixRequestLifetime(db, spec);
+  const fixed = fixMemEvalLifetime(db, spec);
   const target = await resolveTarget(db, spec, deps, (resolved) => resolved);
   if (!target.ok) return targetFailure(target);
   if (target.mode === 'off') return memError('disabled', { mode: target.mode, source: target.source });
@@ -559,23 +561,11 @@ export async function memList(
 // Conditions (Issue #4222)
 // ---------------------------------------------------------------------------
 
-/**
- * The lifetime of the worktree a request names, fixed before any await (the
- * invariant of `close-entrances-4222.test.ts`): a close is refused when the worktree
- * was deleted and made again under the same id and path while the queries ran.
- */
-function fixRequestLifetime(db: Database.Database, spec: MemTargetSpec): (() => boolean) | null {
-  if (spec.via !== 'worktree') return null;
-  const worktreeId = spec.worktreeId;
-  const lifetime = getOrCreateWorktreeIncarnation(db, worktreeId);
-  return () => getWorktreeIncarnation(db, worktreeId) === lifetime;
-}
-
 function evalContext(
   trigger: MemEvalContext['trigger'],
   spec: MemTargetSpec,
   instanceId: unknown,
-  alive: (() => boolean) | null,
+  lifetime: MemEvalLifetime,
   deps: MemServiceDeps
 ): MemEvalContext {
   return {
@@ -584,7 +574,7 @@ function evalContext(
       spec.via === 'worktree'
         ? { worktreeId: spec.worktreeId, instanceId: typeof instanceId === 'string' && instanceId.length > 0 ? instanceId : null }
         : null,
-    alive,
+    lifetime,
     deps: deps.evaluation,
     limits: deps.evaluation?.limits,
     deadlineMs: deps.evaluation?.deadlineMs,
@@ -609,7 +599,7 @@ export async function memCheck(
 ): Promise<MemOutcome> {
   if (spec.via === 'worktree' && !getWorktreeById(db, spec.worktreeId)) return memError('not_found');
   if (body.instanceId !== undefined && typeof body.instanceId !== 'string') return memError('invalid_request', { field: 'instanceId' });
-  const fixed = fixRequestLifetime(db, spec);
+  const fixed = fixMemEvalLifetime(db, spec);
   const target = await resolveTarget(db, spec, deps, (resolved) => resolved);
   if (!target.ok) return targetFailure(target);
   if (target.mode !== 'on') return memError('disabled', { mode: target.mode, source: target.source });
@@ -662,7 +652,7 @@ export async function memAcknowledgeNotice(
   const target = await resolveTarget(db, { via: 'repository', repositoryId, branch: notice.branch ?? '' }, deps, (resolved) => resolved);
   if (!target.ok) return targetFailure(target);
   if (!target.readRepositoryIds.includes(notice.repository_id)) return memError('not_found');
-  const result = acknowledgeMemNoticeByHuman(db, noticeId, ifVersion, { now: deps.now });
+  const result = acknowledgeMemNoticeByHuman(db, noticeId, ifVersion, { now: deps.now, bootId: deps.bootId });
   if (!result.ok) {
     if (result.code === 'version_conflict') return memError('version_conflict', { currentVersion: result.current?.version });
     if (result.code === 'disabled') return memError('disabled', { mode: target.mode, source: target.source });

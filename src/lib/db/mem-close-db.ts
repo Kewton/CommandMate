@@ -17,7 +17,13 @@ import { randomUUID } from 'crypto';
 import type Database from 'better-sqlite3';
 import { closeMemItemByCondition, decideRootMode } from '@/lib/db/mem-db';
 import { resolveWorktreeIdWithAlias } from '@/lib/db/worktree-alias-db';
-import { getInstanceIncarnation, getInstanceIncarnationRow, getWorktreeIncarnation, instanceIncarnationAlive } from '@/lib/mem/incarnation';
+import {
+  getInstanceIncarnation,
+  getInstanceIncarnationRow,
+  getWorktreeIncarnation,
+  instanceIncarnationAlive,
+  worktreeIncarnationAlive,
+} from '@/lib/mem/incarnation';
 import type {
   MemCloseWhenType,
   MemEndOutcome,
@@ -354,13 +360,29 @@ export function closeItemByCondition(db: Database.Database, input: MemConditionC
 function abandonStaleAttempts(db: Database.Database, clock: MemNoticeClock): void {
   const open = db.prepare('SELECT * FROM mem_notice_attempts WHERE settled_at IS NULL').all() as AttemptRow[];
   for (const attempt of open) {
-    if (!attemptIsStale(attempt, clock)) continue;
-    db.prepare(
-      `UPDATE mem_notices SET state = 'pending', attempt_id = NULL, attempt_audience = NULL,
-         uncertain_count = uncertain_count + 1, version = version + 1 WHERE attempt_id = ?`
-    ).run(attempt.id);
-    db.prepare("UPDATE mem_notice_attempts SET settled_at = ?, result = 'abandoned' WHERE id = ?").run(clock.now, attempt.id);
+    if (attemptIsStale(attempt, clock)) abandonAttempt(db, attempt.id, clock.now);
   }
+}
+
+function abandonAttempt(db: Database.Database, attemptId: string, now: number): void {
+  db.prepare(
+    `UPDATE mem_notices SET state = 'pending', attempt_id = NULL, attempt_audience = NULL,
+       uncertain_count = uncertain_count + 1, version = version + 1 WHERE attempt_id = ?`
+  ).run(attemptId);
+  db.prepare("UPDATE mem_notice_attempts SET settled_at = ?, result = 'abandoned' WHERE id = ?").run(now, attemptId);
+}
+
+/** Put back the stale (or lost) reservation holding this notice, as {@link abandonStaleAttempts} would. */
+function abandonAttemptOf(db: Database.Database, notice: MemNoticeRow, clock: MemNoticeClock): void {
+  const attempt = attemptOf(db, notice.attempt_id);
+  if (attempt) {
+    abandonAttempt(db, attempt.id, clock.now);
+    return;
+  }
+  db.prepare(
+    `UPDATE mem_notices SET state = 'pending', attempt_id = NULL, attempt_audience = NULL,
+       uncertain_count = uncertain_count + 1, version = version + 1 WHERE id = ?`
+  ).run(notice.id);
 }
 
 export interface MemNoticeSelection {
@@ -428,7 +450,8 @@ export function reserveNotices(
  * `sent` acknowledges them (by the audience each was reserved with), `not-sent` puts
  * them back, `indeterminate` puts them back marked. A second settle does nothing.
  * While the mode is not `on`, or when the recipient's worktree was made again, nothing
- * is acknowledged: the notices go back to pending.
+ * is acknowledged: the notices go back to pending. A rename of the recipient's worktree
+ * between the reservation and the settle keeps it the same recipient.
  *
  * @returns how many notices were handled
  */
@@ -442,7 +465,10 @@ export function settleNoticeAttempt(
     const attempt = attemptOf(db, attemptId);
     if (!attempt || attempt.settled_at !== null) return 0;
     const notices = db.prepare("SELECT * FROM mem_notices WHERE attempt_id = ? AND state = 'reserved'").all(attemptId) as MemNoticeRow[];
-    const sameWorktree = getWorktreeIncarnation(db, attempt.recipient_worktree_ref) === attempt.recipient_worktree_incarnation;
+    // The recipient's worktree lifetime, looked up by its incarnation and never by the
+    // id it was reserved under: a rename moves the row (still the same worktree), a
+    // delete and re-creation removes it (review P2-1).
+    const sameWorktree = worktreeIncarnationAlive(db, attempt.recipient_worktree_incarnation);
     for (const notice of notices) {
       const acknowledge = sendState === 'sent' && sameWorktree && memModeOnFor(db, [notice.repository_id], notice.branch);
       if (acknowledge) {
@@ -467,24 +493,36 @@ export type MemHumanAcknowledgement =
   | { ok: true; notice: MemNoticeRow }
   | { ok: false; code: 'not_found' | 'version_conflict' | 'state_forbids' | 'disabled'; current?: MemNoticeRow };
 
-/** A person takes a notice from the screen's list (§3.3). Against the version the screen read. */
+/**
+ * A person takes a notice from the screen's list (§3.3). Against the version the screen
+ * read. A notice the list reads as pending is one a person may take: a reservation of
+ * another boot or older than {@link MEM_NOTICE_ATTEMPT_STALE_MS} is put back first (as
+ * `reserve` does, its +1 counted), so a sender that vanished does not hold it. A live
+ * reservation still refuses (`state_forbids`).
+ */
 export function acknowledgeNoticeByHuman(
   db: Database.Database,
   noticeId: string,
   ifVersion: number,
-  now: number
+  clock: MemNoticeClock
 ): MemHumanAcknowledgement {
   return db.transaction((): MemHumanAcknowledgement => {
-    const notice = getMemNotice(db, noticeId);
-    if (!notice) return { ok: false, code: 'not_found' };
-    if (notice.version !== ifVersion) return { ok: false, code: 'version_conflict', current: notice };
+    const read = getMemNotice(db, noticeId);
+    if (!read) return { ok: false, code: 'not_found' };
+    if (read.version !== ifVersion) return { ok: false, code: 'version_conflict', current: read };
+    if (!memModeOnFor(db, [read.repository_id], read.branch)) return { ok: false, code: 'disabled', current: read };
+    if (read.state === 'reserved') {
+      const attempt = attemptOf(db, read.attempt_id);
+      if (attempt && !attemptIsStale(attempt, clock)) return { ok: false, code: 'state_forbids', current: read };
+      abandonAttemptOf(db, read, clock);
+    }
+    const notice = getMemNotice(db, noticeId)!;
     if (notice.state !== 'pending') return { ok: false, code: 'state_forbids', current: notice };
-    if (!memModeOnFor(db, [notice.repository_id], notice.branch)) return { ok: false, code: 'disabled', current: notice };
     db.prepare(
       `UPDATE mem_notices SET state = 'acknowledged', acknowledged_at = ?, acknowledged_by = 'human', version = version + 1
        WHERE id = ? AND version = ?`
-    ).run(now, noticeId, ifVersion);
-    pruneRetention(db, now);
+    ).run(clock.now, noticeId, notice.version);
+    pruneRetention(db, clock.now);
     return { ok: true, notice: getMemNotice(db, noticeId)! };
   })();
 }
