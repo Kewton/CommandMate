@@ -428,16 +428,18 @@ const ROWS: Record<string, Row> = {
     entrance: 'evaluateMemConditions',
     callers: ['src/lib/brief/build.ts:buildBrief'],
     recreated: async () => {
-      // The worktree is deleted and made again while the condition's query is out
-      // (on both of the route's attempts: it rebuilds once when the lifetime changed).
+      // The worktree is deleted and made again once, while the first build's query is out
+      // (review P1 2026-11-09: a rebuild must not carry the request to the new worktree).
       await world.add('next', 'issue:#1');
+      let first = true;
       world.fake.handler = () => {
-        recreate();
+        if (first) recreate();
+        first = false;
         return ISSUE_CLOSED();
       };
       const outcome = await briefRoute();
-      expect(world.fake.calls.length).toBeGreaterThan(0);
-      expect(outcome.status).not.toBe(200);
+      expect(world.fake.calls.length).toBe(1);
+      expect(outcome.status).toBe(404);
       expect(openCount()).toBe(1);
       expect(closedCount()).toBe(0);
       expect(writtenB()).toBe(0);

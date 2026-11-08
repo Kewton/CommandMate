@@ -14,12 +14,35 @@ import { INSTANCE_ID_PATTERN, MAX_INSTANCE_ID_LENGTH } from '@/lib/cli-tools/typ
 import { createLogger } from '@/lib/logger';
 import { memError, type MemOutcome } from '@/lib/mem/service';
 import { BRIEF_BUDGET, BRIEF_FIXED_LIMITS, parseBriefBudget, type BriefFormat, type BriefTextResponse } from '@/types/brief';
-import { BriefMembershipChangedError, buildBrief, CLI_TIME_BUDGET, type BriefBuildDeps, type BuildBriefOutcome } from './build';
+import {
+  BriefMembershipChangedError,
+  buildBrief,
+  CLI_TIME_BUDGET,
+  pinBriefLifetime,
+  type BriefBuildDeps,
+  type BriefChangeReason,
+  type BuildBriefOutcome,
+} from './build';
 import { fitJson, fitText } from './fit';
 
 const logger = createLogger('brief');
 
 const WORKTREE_ID = /^[A-Za-z0-9_-]+$/;
+
+/** How many times the route builds one request (design §5.4: one rebuild). */
+export const BRIEF_ROUTE_ATTEMPTS = 2;
+
+/**
+ * Which change the route rebuilds for (review P1, 2026-11-09). A changed membership or
+ * mode is the same request asked again; a worktree or instance that ended is not — the
+ * request was for the one that is gone, and a rebuild would land it on its successor.
+ */
+export const BRIEF_ROUTE_RETRIES: Readonly<Record<BriefChangeReason, boolean>> = {
+  membership: true,
+  mode: true,
+  worktree_lifetime: false,
+  instance_lifetime: false,
+};
 
 export interface BriefQuery {
   instance: string | null;
@@ -54,14 +77,26 @@ export async function briefForRoute(
     maxBytes = parsed.maxBytes;
   }
 
+  // The request's lifetimes, fixed once: every build of this request is for them.
+  const pinned = pinBriefLifetime(db, worktreeId, instanceId);
   let outcome: BuildBriefOutcome | null = null;
-  for (let attempt = 1; attempt <= 2 && outcome === null; attempt += 1) {
+  for (let attempt = 1; attempt <= BRIEF_ROUTE_ATTEMPTS && outcome === null; attempt += 1) {
     try {
-      outcome = await buildBrief(db, { worktreeId, instanceId, time: CLI_TIME_BUDGET, onMembershipTimeout: 'ambiguous' }, deps);
+      outcome = await buildBrief(
+        db,
+        { worktreeId, instanceId, time: CLI_TIME_BUDGET, onMembershipTimeout: 'ambiguous', ...(pinned ? { pinned } : {}) },
+        deps
+      );
     } catch (error) {
       if (!(error instanceof BriefMembershipChangedError)) throw error;
       logger.info('brief-membership-changed', { worktreeId, instanceId, attempt, why: error.why });
-      if (attempt === 2) {
+      if (!BRIEF_ROUTE_RETRIES[error.why]) {
+        // What the request named is gone: answered as such, never built again for its successor.
+        return error.why === 'worktree_lifetime'
+          ? memError('not_found', { reason: 'lifetime_changed' })
+          : memError('instance_not_found', { reason: 'lifetime_changed' });
+      }
+      if (attempt === BRIEF_ROUTE_ATTEMPTS) {
         return error.modeNow === 'off' ? memError('disabled', { mode: 'off' }) : memError('ambiguous', { reason: 'registration_changed' });
       }
     }

@@ -28,6 +28,7 @@ import { BriefOverBudgetError, fitJson, fitText } from '@/lib/brief/fit';
 import type { BriefItem, BriefModel } from '@/lib/brief/model';
 import { sanitizeBranch } from '@/lib/brief/sanitize';
 import { BRIEF_BUDGET, BRIEF_SOURCE_IDS, type BriefEntry, type BriefJson, type BriefSourceId } from '@/types/brief';
+import { memAddItem } from '@/lib/mem/service';
 import { BriefWorld, GHP, bytes, itemLines, resetBriefMemory } from './brief-4223-harness';
 
 /** Every source: whether `derived` reads it, and where its "could not be read" row ranks. */
@@ -362,6 +363,52 @@ describe('I13 every free text goes through the exit check', () => {
     world.task({ title: JA });
     const out = (await world.brief({ all: '1' })).stdout;
     expect(out).toMatch(new RegExp(`\\[6\\] src=task id=\\S+ by=server updated=\\S+ .*text=${JSON.stringify(JA)}`));
+  });
+});
+
+describe('I13 invisible characters are shown, never passed through (review P2-1, 2026-11-09)', () => {
+  const HIDDEN = '\u{E0041}\u{E0069}\u{E007F}';
+  const TEXT = `ok${HIDDEN} zero\u200Bwidth line\u2028sep lrm\u200E wj\u2060`;
+  const INVISIBLE = /[\u{E0000}-\u{E007F}\u200B\u200C\u200E\u200F\u2028\u2029\u2060\u061C]/u;
+
+  it.each([null, 'json'] as const)('mem text and task title, format %s: none left; each one named as [U+XXXX]', async (format) => {
+    world.task({ title: TEXT });
+    const deps = { readers: { mem: synthetic([TEXT]) } };
+    for (const query of [{ all: '1' }, {}]) {
+      const out = (await world.brief({ format, ...query }, deps)).stdout;
+      expect(out).not.toMatch(INVISIBLE);
+      expect(out).toContain('[U+E0041]');
+      expect(out).toContain('[U+200B]');
+      expect(out).toContain('[U+2028]');
+      expect(out).toContain('[U+200E]');
+    }
+  });
+
+  it.each([null, 'json'] as const)('negative: Japanese and emoji (ZWJ sequences, flags) are unchanged, format %s', async (format) => {
+    world.task({ title: JA });
+    const out = (await world.brief({ format, all: '1' }, { readers: { mem: synthetic([JA]) } })).stdout;
+    expect(out).toContain(JSON.stringify(JA).slice(1, -1));
+    expect(out).not.toContain('[U+');
+  });
+});
+
+describe('I10 long references are left out with the body (review P2, 2026-11-09)', () => {
+  it('a mem item with 5 × 300-character references fits the minimum budgets in its omitted form', async () => {
+    const refs = Array.from({ length: 5 }, (_, i) => `url:https://example.com/${String(i)}${'a'.repeat(300 - 'url:https://example.com/0'.length)}`);
+    const added = await memAddItem(world.db, 'wt-1', { instanceId: 'claude', kind: 'next', text: '短い', closeWhen: 'manual', evidence: refs }, world.deps());
+    expect(added.status).toBe(201);
+    const all = (await world.brief({ all: '1' })).stdout;
+    expect(all).toContain(refs[4]);
+    const text = await world.brief({ budget: '1024' });
+    expect(bytes(text.stdout)).toBeLessThanOrEqual(1024);
+    const line = itemLines(text.stdout).find((entry) => entry.startsWith('[5] src=mem'));
+    expect(line).toBeDefined();
+    expect(line).toMatch(/…\(本文 \d+ bytes を省略。/);
+    expect(line).not.toContain('example.com');
+    const json = JSON.parse((await world.brief({ format: 'json', budget: '4096' })).stdout) as BriefJson;
+    const entry = json.entries.find((candidate) => candidate.source === 'mem')!;
+    expect(entry.fields.refs).toBeUndefined();
+    expect(entry.omittedBody!.bytes).toBeGreaterThan(1500);
   });
 });
 

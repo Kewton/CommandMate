@@ -48,10 +48,14 @@ import {
   type BriefSourceReader,
 } from './sources';
 
+/** Why a build found its request no longer stands (design §5.4). */
+export const BRIEF_CHANGE_REASONS = ['membership', 'mode', 'worktree_lifetime', 'instance_lifetime'] as const;
+export type BriefChangeReason = (typeof BRIEF_CHANGE_REASONS)[number];
+
 /** The membership, the mode or a lifetime changed while the build waited (design §5.4). */
 export class BriefMembershipChangedError extends Error {
   constructor(
-    readonly why: 'membership' | 'mode' | 'worktree_lifetime' | 'instance_lifetime',
+    readonly why: BriefChangeReason,
     /** The mode read when it was found; `off` makes the CLI answer exit 50. */
     readonly modeNow: MemMode | null = null
   ) {
@@ -104,6 +108,25 @@ export interface BriefBuildDeps {
   time?: BriefTimeBudget;
 }
 
+/**
+ * The lifetimes a request is for, fixed once for the whole request (review P1, 2026-11-09):
+ * a rebuild of the same request asks them again instead of fixing the newer ones, so a
+ * request read before the worktree (or the instance) was deleted and made again never
+ * lands on the one made later — the same check #4221's purge keeps.
+ */
+export interface BriefPinnedLifetime {
+  worktreeIncarnation: string;
+  instance: InstanceLifetime;
+}
+
+/** Fix the request's lifetimes before its first build, or null when the worktree does not exist. */
+export function pinBriefLifetime(db: Database.Database, worktreeId: string, instanceId: string): BriefPinnedLifetime | null {
+  if (!getWorktreeById(db, worktreeId)) return null;
+  const lifetime = fixMemEvalLifetime(db, { via: 'worktree', worktreeId });
+  if (lifetime.via !== 'worktree') return null;
+  return { worktreeIncarnation: lifetime.incarnation, instance: readInstanceLifetime(db, worktreeId, instanceId) };
+}
+
 export interface BuildBriefInput {
   worktreeId: string;
   instanceId: string;
@@ -112,6 +135,8 @@ export interface BuildBriefInput {
   request?: BriefRequest;
   /** The provider's line budget: below the fixed lines nothing is built (G3). */
   maxLines?: number;
+  /** The lifetimes the request was read for (a rebuild passes the first build's, {@link pinBriefLifetime}). */
+  pinned?: BriefPinnedLifetime;
   /** The CLI answers a membership wait past the deadline as `ambiguous`; the provider throws. */
   onMembershipTimeout: 'ambiguous' | 'throw';
 }
@@ -212,7 +237,13 @@ export async function buildBrief(db: Database.Database, input: BuildBriefInput, 
   if (getAllRepositories(db).length === 0) return { kind: 'refused', code: 'not_registered' };
   const spec = { via: 'worktree' as const, worktreeId };
   const lifetime = fixMemEvalLifetime(db, spec);
-  const earlier = readInstanceLifetime(db, worktreeId, instanceId);
+  if (input.pinned && (lifetime.via !== 'worktree' || lifetime.incarnation !== input.pinned.worktreeIncarnation)) {
+    throw new BriefMembershipChangedError('worktree_lifetime');
+  }
+  const earlier = input.pinned?.instance ?? readInstanceLifetime(db, worktreeId, instanceId);
+  if (input.pinned && !isSameInstanceLifetime(earlier, readInstanceLifetime(db, worktreeId, instanceId), instance.cliTool)) {
+    throw new BriefMembershipChangedError('instance_lifetime');
+  }
   if (
     input.request &&
     !isSameInstanceLifetime({ incarnation: input.request.target.instanceIncarnation, onRoster: earlier.onRoster }, earlier, instance.cliTool)

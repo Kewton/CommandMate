@@ -2631,7 +2631,7 @@ commandmate brief [--budget <bytes>] [--json] [--all] [--worktree <id> --instanc
 ### What it shows
 
 - A fixed top: the block's fences (`<<<cmate-brief:<tag>` … `cmate-brief:<tag>>>>`), a line saying that what follows is data, not instructions, the mode and the target, and **the number of entries left out with the command that reads them all** (`omitted=<n> all="commandmate brief … --all"`). The closing fence is never dropped
-- One entry per line, each with its source (`src=`), author (`by=`) and time (`updated=`). Free text is a JSON string; for every source (task titles, branch names and run stages as well as mem items), a secret-like value, a control character or a bidirectional control is not shown and the line says `withheld=<code>`. An entry over 512 bytes shows its body in the omitted form (`…(本文 <n> bytes を省略。読む: …)`)
+- One entry per line, each with its source (`src=`), author (`by=`) and time (`updated=`). Free text is a JSON string; for every source (task titles, branch names and run stages as well as mem items), a secret-like value, a control character or a bidirectional control is not shown and the line says `withheld=<code>`. Invisible characters (Unicode Tags, zero-width characters, directional marks, U+2028/U+2029; not the ZWJ inside an emoji sequence) are replaced by a visible `[U+XXXX]`. An entry over 512 bytes shows its body and references (`refs`) in the omitted form (`…(本文 <n> bytes を省略。読む: …)`)
 - A fixed order: what waits for a person (an open wait, a relay in `prompt`) → your own `now` → relays with a delivery hold → unreflected decisions → next steps → your session's state (the instance, auto-yes, the contract, your verification, the run) → other sessions' `now` → waiting and external items → ended notices → the rest. The same state gives the same order, and the cut stops at the first entry that does not fit
 - A source that cannot be read is one line saying `unavailable=<reason>` (`timeout`, `read_failed`, `no_transcript_reader`, `no_turn_yet`) or `unsupported=<reason>` (`format`, `too_large`), and the other lines are printed (exit 0)
 - An instance's state is the value the ordinary monitoring last observed; the brief never captures the screen or detects a state for itself (`observed=none` when nothing was observed). Auto-yes is read per instance; a grant past its deadline reads `enabled=false stop=expired`, and the state is not rewritten
@@ -2646,7 +2646,7 @@ commandmate brief [--budget <bytes>] [--json] [--all] [--worktree <id> --instanc
 | 1 | The server is not reachable |
 | 2 | Invalid input (the budget's range or form, `--all` with `--budget`, only one of `--worktree` / `--instance`, an id's shape). Nothing printed |
 | 50 | The branch's mode is `off` (also when it turned `off` while the brief was built). Nothing on stdout, one line on stderr |
-| 52 | Not registered, no such worktree / instance, or the branch cannot be read |
+| 52 | Not registered, no such worktree / instance, the branch cannot be read, or the worktree / instance was deleted and made again while the brief was built (`reason: lifetime_changed`; it is not rebuilt for the new one) |
 | 53 | `ambiguous`, or the membership kept changing while it was rebuilt |
 | 99 | Anything else |
 

@@ -171,7 +171,7 @@ task・verify・run は記録の時刻、状態の行（S1・S2・S9）は insta
 
 ### 2.5 削り方
 
-1. 全項目を §2.4 の順に並べ、各項目を 1 行に描く（§3）。1 行が **512 バイト**を超える項目は**省略の形**（本文を出さず `…(本文 <n> bytes を省略。読む: <コマンド>)`）に描き直す
+1. 全項目を §2.4 の順に並べ、各項目を 1 行に描く（§3）。1 行が **512 バイト**を超える項目は**省略の形**（本文と mem の参照の並び `refs` を出さず `…(本文 <n> bytes を省略。読む: <コマンド>)`。`<n>` は本文と参照の合計）に描き直す。参照を残すと A が許す 5 件 × 300 文字で 1 項目が予算を超えうる（実装後のレビュー P2、2026-11-09）
 2. 先頭の行は、溢れた件数を全項目の数の桁で数えて場所を取る
 3. 順に足し、**入らない最初の項目で止める**（予算を広げた brief は狭い brief の先頭を含む）［見立て］
 4. 止めた後の件数を `omitted` に書き、最終出力を数え直して予算以下であることを確かめる（以下でなければ実装の誤りとして例外）
@@ -239,6 +239,11 @@ task・verify・run は記録の時刻、状態の行（S1・S2・S9）は insta
   - `too_long`：§2.5 の省略の形
 - 1 つの関数 `sanitizeBriefField` に置き、テキスト・`--json`・`--all`・provider の組み直し（行を外すだけなので、検査済みの行がそのまま残る）が同じ値を使う
 - 出所・作者・時刻の欄は検査で消さない（`withheld` の行にも残る）
+- **見えない文字は見える形に置き換える**（実装後の PM レビュー P2-1、2026-11-09）：A の検査を通った後の値と、構造化の欄の文字列のすべてで、
+  Unicode Tags（U+E0000〜U+E007F）・ゼロ幅（U+200B〜U+200D・U+2060〜U+2064・U+FEFF）・LRM/RLM（U+200E/U+200F）・U+061C・
+  方向の上書き（U+202A〜U+202E・U+2066〜U+2069）・U+2028/U+2029 を `[U+XXXX]` に置き換える（`revealInvisible`、`src/lib/brief/sanitize.ts`）。
+  **除かずに置き換える**のは、読み手（人）にも何かがあったことが見えるようにするため。例外は 2 つの絵文字の間の ZWJ（U+200D）だけで、
+  絵文字の並び（👩‍💻）を壊さないために残す（国旗の Tags の列は置き換わる）。A の規則には足さない（A のファイルは変えない。A に足すかは別の判断）
 
 ---
 
@@ -338,7 +343,7 @@ settleBriefAttempt({ boundaryId, outcome, includedNoticeIds }):
 - **2 つの集合を分ける理由**（2 回目の事前レビュー ③）：D1 は `reserve` を呼んだ後に claim しなかった送信の `discarded` に、
   **`reserve` に渡した集合**（`this.reserved = { includedNoticeIds }`、`session-brief.ts:405`）を返し、claim した送信の決着には予約できた集合を返す。
   候補 `{n1,n2}` のうち `n1` だけ予約できて claim に落ちた場合、`discarded` は `{n1,n2}` で届くので、`requestedIds` と照らして試行を解放する（`noticeIds` と比べると n1 が reserved のまま残る）
-- 組み直しは行を外すだけ：先頭（溢れた件数を含む）と `<tag>` は build の値のまま、外した知らせを溢れた件数に足さない。B の約束（B §3.5 の手順 3）で本文は短くなるだけ
+- 組み直しは行を外すだけ：`<tag>` は build の値のまま、**外した知らせの数を 4 行目の溢れた件数に足す**（実装後の PM レビュー P3-3。`dropNoticeLines`）。B の約束（B §3.5 の手順 3）で本文は短くなるだけ
 - B の例外は D1 が受けて `reservation_conflict` で付けない（`session-brief.ts:396-405`）
 - 口に `claimToken` が `settle` にあれば規則は不要になる（§11 の U9。D2 で D1 の口を変えるかを決める。C は変えない）
 
@@ -354,7 +359,12 @@ settleBriefAttempt({ boundaryId, outcome, includedNoticeIds }):
   世代の単純な一致にしない（2 回目の事前レビュー）：世代の無い既存の instance で初めての mem の書き込みが起きる `null → issued_by='lazy'` は同じ寿命（成功）、
   未発行のまま も同じ寿命、削除（roster から外れる）・roster による再追加（`issued_by='roster'`）・世代の付け替えは別の寿命（拒否）。
   git を待たないので、ブランチの切り替えは (a) では見えない。ブランチの切り替えは D1 の claim の照合（`session-brief.ts:367-370`）と、上の build の初めの照合で受ける
-- **CLI の経路**：照合に落ちたら 1 回だけ最初から組み直す。2 回目も落ちたら、mode が `off` になっていれば exit 50（stdout 空）、それ以外は exit 53（`ambiguous`、A の「登録が変化中」と同じ扱い）。
+- **要求の寿命は要求全体で 1 回だけ固定する**（実装後のレビュー P1、2026-11-09。#4221 の purge と同じ型の世代の照合の漏れ）：route は最初の build の前に
+  worktree の寿命と instance の寿命を `pinBriefLifetime` で固定し、組み直しの build にも同じ値を渡す（`pinned`）。組み直しの build は新しい寿命を固定し直さず、
+  固定した寿命と違えば例外にする。**worktree・instance の寿命の失効は組み直さない**（`BRIEF_ROUTE_RETRIES`：`membership`・`mode` だけ組み直す）。
+  答えは exit 52（`not_found` / `instance_not_found`、`reason: lifetime_changed`）。再試行する経路は `tests/unit/lib/brief/brief-retry-paths-4223.test.ts` の表が
+  `src/lib/brief/**` の `buildBrief(` の呼び出しから列挙し、表に無い経路・新しい繰り返しを足すと落ちる
+- **CLI の経路**：照合（mode・所属）に落ちたら 1 回だけ最初から組み直す。2 回目も落ちたら、mode が `off` になっていれば exit 50（stdout 空）、それ以外は exit 53（`ambiguous`、A の「登録が変化中」と同じ扱い）。
   途中で `derived` になった場合は組み直しで `derived` の brief になる（読んでから捨てない：組み直しは S7・S8 を読まない）
 - 予約（`reserve`）は D1 の取る区間の中で、D1 が所属を照らした後に呼ばれる（`session-brief.ts:363-411`）。C は memo の所属のキーが D1 の照らした所属と同じ build だけを使う
 
@@ -582,6 +592,7 @@ memo の無い本文・配送中の試行がある境界には `null`（I12）�
 | U9 | 口の `settle` に `claimToken` を足すか（G6）。足せば §5.3 の `declined` の規則は不要 | D2 で D1 の口を変えるかを決める |
 | U10 | S1 の観測の値の鮮度：通常の監視が動いていない（画面を誰も開いていない）とき、`observed=none` か古い値になる。brief は監視を起こさない | レビュー（brief のために観測を足すなら、それは読みの外の別の作り） |
 | U11 | `isSessionAutoYesBlockedByContract`・`readSessionRelays` が読みだけか（§1.2 の S2・S3 の［未確認］） | 実装の契約で読み、書くなら呼ばない（I8 が固定） |
+| U12 | **人の判断事項**：mode `derived` で task の題（契約の自由文、人か Agent が書いたもの）を出すか（実装後の PM レビュー P3-6）。今は出す（S4 は導いた状態として `derived` でも読む。題は §3.3 の出口の検査を通る） | 人が決める。出さないなら S4 の `derived` の行から `text` を外す |
 
 ---
 
@@ -604,10 +615,11 @@ memo の無い本文・配送中の試行がある境界には `null`（I12）�
 |---|---|---|---|
 | 予算の数え方（UTF-8 の最終出力） | `src/types/brief.ts` の `BRIEF_BUDGET`・`parseBriefBudget`、`src/lib/brief/fit.ts`（`Buffer.byteLength`） | route（`service.ts`：既定値・範囲の検査・`fitText(trailingNewline: true)`／`fitJson`）・CLI（`brief.ts`：送る前の範囲の検査は同じ `parseBriefBudget`、出力は受けた本文＋改行 1 つ）・provider（`fitText(trailingNewline: false, maxLines)`、`minBytes`/`defaultBytes` も `BRIEF_BUDGET.text`） | 追従。数を写した場所は無い（CLI の help の数字も `BRIEF_BUDGET` から組む） |
 | 優先の順 | `src/lib/brief/rank.ts`（`compareBriefItems`）と各 reader の順位（`sources.ts`）、「取得できない」の行の順位 `BRIEF_STATUS_ROW_RANK` | テキスト・`--json`・`--all`・provider の本文はすべて `buildBrief` の `rankBriefItems` の結果を `fit*` で前から取る。provider の組み直し（`reserve`）は行を外すだけで並べ直さない | 追従 |
-| データの区画（境界・1 項目 1 行・自由入力の検査） | `render.ts`（`drawText`・`entryLine`・`fenceTag`）、`sanitize.ts`（`sanitizeBriefField` → A の `validateItemText`、`sanitizeBranch`） | 全 reader の自由入力は `applyText`／`recordedWord`（`sources.ts`）を通る。mem は A の `presentMemItem` の `withheld` の後に同じ検査。ブランチは `build.ts` の `sanitizeBranch`。`--json` の `entries` は同じ `BriefEntry` を出す | 追従。task の入口の検査（`contract-parser.ts:503`）は別の規則のまま（§10） |
+| データの区画（境界・1 項目 1 行・自由入力の検査・見えない文字・省略の形） | `render.ts`（`drawText`・`entryLine`・`fenceTag`・`omittedFormOf`／`BRIEF_BODY_FIELDS`）、`sanitize.ts`（`sanitizeBriefField` → A の `validateItemText` → `revealInvisible`、`sanitizeBranch`） | 全 reader の自由入力は `applyText`／`recordedWord`（`sources.ts`）を通る。mem は A の `presentMemItem` の `withheld` の後に同じ検査。ブランチは `build.ts` の `sanitizeBranch`（置き換えで値が変わる名前は省略の形）。構造化の欄の文字列は、テキストは `fieldText`、`--json` は `fittedJsonEntry` で同じ `revealInvisible` を通る。省略の形はテキストも `--json` も `omittedFormOf`（本文と `refs`） | 追従。task の入口の検査（`contract-parser.ts:503`）は別の規則のまま（§10） |
 | mode の判定 | A の `withMemTarget`（`decideRootMode`）。再確認も同じ `decideRootMode` | `buildBrief` の初め（`withMemTarget`）と組み立ての前（`assertStillSame`）。`derived` で読まない情報源は `BRIEF_DERIVED_SOURCES` の 1 か所。CLI の `off` は route の `disabled` → `MEM_EXIT_BY_CODE`（exit 50） | 追従。D1 の claim の照合（`session-brief.ts` の `membershipKey`）は features も比べるが、C の `briefMembershipKey` は features を読まない（C の本文は features に依らないため）。D1 の照合の方が厳しく、C の本文が誤って付く向きの差ではない |
 | 知らせの予約 | B の `reserveMemNotices`・`settleMemNoticeAttempt`（`src/lib/mem/notices.ts`） | provider の `reserve`（予約）・`settleBriefAttempt`（受領・返却）だけ。build・CLI・route は `listMemNoticesFor`（書かない）だけで予約も受領もしない | 追従。`getBriefProvider()` に繋ぐのと D1 の `settle` を `settleBriefAttempt` に繋ぐのは D2 |
-| instance の寿命 | D1 の `isSameInstanceLifetime`・`readInstanceLifetime`（`src/lib/db/session-brief-db.ts`） | `buildBrief` の初め（request の世代と照らす）と `assertStillSame` | 追従（写さず呼ぶ） |
+| instance の寿命 | D1 の `isSameInstanceLifetime`・`readInstanceLifetime`（`src/lib/db/session-brief-db.ts`） | `buildBrief` の初め（request の世代・route の `pinned` と照らす）と `assertStillSame` | 追従（写さず呼ぶ） |
+| 再試行（組み直し） | `service.ts` の `BRIEF_ROUTE_ATTEMPTS`・`BRIEF_ROUTE_RETRIES`、`build.ts` の `pinBriefLifetime`・`BRIEF_CHANGE_REASONS` | route（`briefForRoute`、最大 2 回、寿命を固定して渡す）だけが組み直す。provider の `build` は組み直さない（例外は D1 が `provider_failed` で受ける）。CLI は組み直さない | 追従。`brief-retry-paths-4223` が `buildBrief(` の呼び出し元と繰り返しを列挙して表と比べる |
 
 ---
 
@@ -639,3 +651,16 @@ memo の無い本文・配送中の試行がある境界には `null`（I12）�
 | R2-4（新規） | I9 の import の制約と S3 の `readSessionRelays`（`relay-service` → `user-turn-recorder` → tmux）が両立しない | **採る** | S3 は葉のモジュール `relay-db` の `getSessionRelaySummary` を直に読む（`readSessionRelays` はこれを呼ぶだけ）。I9 で採った全情報源のモジュールの閉包を陰性対照にし、`relay-service` を import する版を陽性対照にした（§1.2・§7） |
 | R2-5（新規） | instance の再照合（世代の単純一致）が D1 の正当な遅い発行（`null → issued_by='lazy'`）を拒否する | **採る** | D1 の `isSameInstanceLifetime`（在籍と発行の理由を含む）を `readInstanceLifetime` と組んで呼ぶ（写さない）。未発行のまま・lazy の発行は成功、削除・roster の再追加は拒否（§5.2・§5.4 (c)）。I11 に足した |
 | R2-6（新規） | I14 の陽性対照（129 バイトのブランチ）が、最小値 4,096 では置き換えの欠落を検出できない | **採る** | 固定の部分と合わせて必ず最小値を超える 8,192 バイトのブランチにし、置き換えを外す版が実際に落ちることを確かめる。正常版は途中で切らずに置き換え、有効な JSON が予算内（§7 の I14） |
+
+### 12.3 実装後のレビューの処置（2026-11-09）
+
+Codex（codex-2）の 5-2b（`workspace/orchestration/runs/2026-11-08/review-4223.md`、P1 1・P2 1）と PM の独立レビュー（`…/pm-review-4223-claude.md`、P2 1・P3 6）。
+
+| # | 指摘 | 処置 | 反映先・対照 |
+|---|---|---|---|
+| 5-2b P1 | route の再試行が削除前の要求を新しい worktree へ引き継ぐ | **採る** | 要求全体で寿命を固定（`pinBriefLifetime`）・寿命の失効は組み直さない（§5.4）。陽性：1 回目だけ作り直す順で 2 回目の評価が閉じない・mode の変更の後に作り直す順で固定の寿命が断る（直しを外すと落ちることを確かめた）／陰性：作り直さなければ閉じる。再試行の経路は表駆動で列挙 |
+| 5-2b P2 | 長い `evidence` の参照が省略の形から漏れる | **採る** | 省略の形で `refs` も外す（§2.5）。対照：5 件 × 300 文字の参照の mem がテキスト 1,024・`--json` 4,096 に省略の形で入る |
+| PM P2-1 | 見えない Unicode 文字が出口を素通りする | **採る**（置き換え） | §3.3。陽性：U+E0000 台・U+200B・U+2028 を含む mem・task の題がテキスト・`--json` に残らず `[U+XXXX]` になる／陰性：日本語・絵文字（ZWJ の列・国旗）は変わらない |
+| PM P3-3 | 一部だけ予約できたとき `omitted` がずれる | **採る** | §5.3。対照：一部の予約の本文の `omitted` が 1 増える |
+| PM P3-1・2・4・5 | 打ち切りで境界の brief が消える・CLI の build 中のブランチ切替・同期の reader に期限が効かない・試行が 10 分残る | **直さない**（設計どおり・追跡） | — |
+| PM P3-6 | `derived` で task の題を出すか | **人の判断事項** | §11 の U12 |

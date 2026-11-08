@@ -55,6 +55,21 @@ interface AttemptRow {
   declined: number;
 }
 
+/**
+ * The body without the lines of the notices that were not reserved, and with the omitted
+ * count of its 4th line raised by as many (review P3-3, 2026-11-09): the count says how
+ * many entries the reader does not see, and a dropped notice is one. Shorter than the
+ * body it came from (a line goes, at most a digit comes), so still within the budget.
+ */
+export function dropNoticeLines(body: string, drop: ReadonlySet<string>): string {
+  if (drop.size === 0) return body;
+  const lines = body.split('\n');
+  const kept = lines.filter((line, index) => index < 4 || !drop.has(line));
+  const dropped = lines.length - kept.length;
+  kept[3] = kept[3].replace(/^omitted=(\d+)/, (_match, count: string) => `omitted=${Number(count) + dropped}`);
+  return kept.join('\n');
+}
+
 export interface MemBriefProviderDeps extends BriefBuildDeps {
   notices?: MemNoticeDeps;
 }
@@ -163,9 +178,7 @@ export function createMemBriefProvider(getDb: () => Database.Database, deps: Mem
     row.attempt = { attemptId: reserved.attemptId, requestedIds: [...claim.includedNoticeIds], noticeIds, createdAt: now() };
     const kept = new Set(noticeIds);
     const drop = new Set([...memo.noticeLines].filter(([id]) => !kept.has(id)).map(([, line]) => line));
-    const lines = claim.body.split('\n');
-    const body = drop.size === 0 ? claim.body : lines.filter((line, index) => index < 4 || !drop.has(line)).join('\n');
-    return { body, includedNoticeIds: noticeIds };
+    return { body: dropNoticeLines(claim.body, drop), includedNoticeIds: noticeIds };
   }
 
   function settle(delivery: { boundaryId: string; outcome: BriefDeliveryOutcome; includedNoticeIds: string[] }): void {

@@ -222,6 +222,9 @@ describe('I12 reservation attempts are never confused or lost', () => {
     const ra = state.provider.reserve!({ boundaryId: 'b-1', claimToken: 'a', includedNoticeIds: [n1, n2], body: a.body })!;
     expect(ra.includedNoticeIds).toEqual([n1]);
     expect(ra.body).not.toContain(`id=${n2}`);
+    // The omitted count says one more entry is not seen (review P3-3).
+    const omittedOf = (body: string) => Number(/^omitted=(\d+)/.exec(body.split('\n')[3])![1]);
+    expect(omittedOf(ra.body)).toBe(omittedOf(a.body) + 1);
     expect(bytes(ra.body)).toBeLessThan(bytes(a.body));
     expect(noticeState(n1)).toBe('reserved');
     // The claim failed: D1 answers discarded with what it handed to reserve.

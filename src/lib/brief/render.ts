@@ -12,6 +12,7 @@
 import { createHash } from 'crypto';
 import { BRIEF_ITEM_MAX_BYTES, BRIEF_TEXT_NOTICE, type BriefAuthor, type BriefEntry, type BriefFieldValue } from '@/types/brief';
 import type { BriefFixed } from './model';
+import { revealInvisible } from './sanitize';
 
 export const bytesOf = (text: string): number => Buffer.byteLength(text, 'utf8');
 
@@ -21,7 +22,7 @@ const BARE_VALUE = /^[A-Za-z0-9._:/@+#-]+$/;
 export function fieldText(value: BriefFieldValue): string {
   if (value === null) return '-';
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  return BARE_VALUE.test(value) ? value : JSON.stringify(value);
+  return BARE_VALUE.test(value) ? value : JSON.stringify(revealInvisible(value));
 }
 
 export function authorText(author: BriefAuthor): string {
@@ -41,11 +42,37 @@ function isStatusRow(entry: BriefEntry): boolean {
   return 'unavailable' in entry.fields || 'unsupported' in entry.fields;
 }
 
-/** The body an entry leaves out: its free text, which is then not on the line at all. */
+/**
+ * The fields of an entry that are its body (left out with the text): the references a
+ * mem item carries (`refs`, up to 5 × 300 characters, review P2 2026-11-09).
+ */
+export const BRIEF_BODY_FIELDS = ['refs'] as const;
+
+/** Whether an entry has a body to leave out. */
+export function hasBody(entry: BriefEntry): boolean {
+  return entry.text !== undefined || BRIEF_BODY_FIELDS.some((field) => field in entry.fields);
+}
+
+/** The body an entry leaves out: its free text and its references, which are then not on the line at all. */
 export function omittedFormOf(entry: BriefEntry, read: string): BriefEntry {
-  if (entry.text === undefined) return entry;
+  if (!hasBody(entry)) return entry;
   const { text, ...rest } = entry;
-  return { ...rest, omittedBody: { bytes: bytesOf(text), read } };
+  const fields = { ...entry.fields };
+  let bytes = text === undefined ? 0 : bytesOf(text);
+  for (const field of BRIEF_BODY_FIELDS) {
+    const value = fields[field];
+    if (value === undefined) continue;
+    bytes += bytesOf(String(value));
+    delete fields[field];
+  }
+  return { ...rest, fields, omittedBody: { bytes, read } };
+}
+
+/** Every string of an entry's structured fields with its invisible characters shown (review P2-1). */
+function visibleFields(entry: BriefEntry): BriefEntry {
+  const fields: BriefEntry['fields'] = {};
+  for (const [key, value] of Object.entries(entry.fields)) fields[key] = typeof value === 'string' ? revealInvisible(value) : value;
+  return { ...entry, fields, id: revealInvisible(entry.id) };
 }
 
 /** One entry, one line (design §3.2). Never cut: a long one is drawn in the omitted form. */
@@ -65,14 +92,15 @@ export function entryLine(entry: BriefEntry): string {
 /** The line of an entry within {@link BRIEF_ITEM_MAX_BYTES}, unless `all`. */
 export function fittedEntryLine(entry: BriefEntry, read: string, all: boolean): { line: string; entry: BriefEntry } {
   const line = entryLine(entry);
-  if (all || bytesOf(line) <= BRIEF_ITEM_MAX_BYTES || entry.text === undefined) return { line, entry };
+  if (all || bytesOf(line) <= BRIEF_ITEM_MAX_BYTES || !hasBody(entry)) return { line, entry };
   const omitted = omittedFormOf(entry, read);
   return { line: entryLine(omitted), entry: omitted };
 }
 
 /** The entry for `--json` within {@link BRIEF_ITEM_MAX_BYTES}, unless `all`. */
-export function fittedJsonEntry(entry: BriefEntry, read: string, all: boolean): BriefEntry {
-  if (all || entry.text === undefined || bytesOf(JSON.stringify(entry)) <= BRIEF_ITEM_MAX_BYTES) return entry;
+export function fittedJsonEntry(raw: BriefEntry, read: string, all: boolean): BriefEntry {
+  const entry = visibleFields(raw);
+  if (all || !hasBody(entry) || bytesOf(JSON.stringify(entry)) <= BRIEF_ITEM_MAX_BYTES) return entry;
   return omittedFormOf(entry, read);
 }
 
