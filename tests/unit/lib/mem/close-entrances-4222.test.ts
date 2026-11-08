@@ -18,6 +18,8 @@
  * writer is a row's `entrance`, and every function elsewhere in `src/` that calls one of
  * those entrances is a row's `callers` entry. A new entrance, or a new caller of an
  * existing one (the brief, the preview), fails here until a row runs (a)〜(c) through it.
+ * The public layer is read as one source, so a chain across its files (a new export of
+ * `notices.ts` calling `evaluateMemConditions`) is an entrance too (re-review P2).
  *
  * @vitest-environment node
  */
@@ -106,9 +108,17 @@ function reachers(source: string, targets: Set<string>): Set<string> {
 const codeLines = (source: string) => source.split('\n').filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line)).join('\n');
 
 /** The public layer's exported functions that reach a writer of the table. */
+/**
+ * The public layer's exported functions that reach a writer of the table, across its
+ * files (re-review P2): the layer is read as one source, so a function of
+ * `notices.ts` that calls `evaluateMemConditions` of `evaluate.ts` (directly or through
+ * a helper of either file) is an entrance too, and needs its own row.
+ */
 function publicEntrances(writers: Set<string>, sources: Record<string, string> = readAll(PUBLIC_LAYER)): string[] {
-  return Object.values(sources).flatMap((source) => [...reachers(source, writers)]).sort();
+  return [...reachers(Object.values(sources).join('\n'), writers)].sort();
 }
+
+const rowEntrances = () => [...new Set(Object.values(ROWS).map((row) => row.entrance))].sort();
 
 /**
  * Who calls the public entrances, as `file:function` (exported, or reaching one through
@@ -444,7 +454,33 @@ describe('every write of #4222 keeps (a) re-creation, (b) mode, (c) version', ()
     for (const known of ['evaluateMemConditions', 'reserveMemNotices', 'settleMemNoticeAttempt', 'acknowledgeMemNoticeByHuman']) {
       expect(entrances).toContain(known);
     }
-    expect(entrances).toEqual([...new Set(Object.values(ROWS).map((row) => row.entrance))].sort());
+    expect(entrances).toEqual(rowEntrances());
+  });
+
+  it('(control) re-review P2: a chain across the public layer\'s files is an entrance, and the table comparison fails on it', () => {
+    const writers = new Set(tableWriters());
+    const layer = readAll(PUBLIC_LAYER);
+    expect(publicEntrances(writers, layer)).toEqual(rowEntrances());
+    // A new export of notices.ts that evaluates (evaluate.ts's entrance), directly …
+    const direct = {
+      ...layer,
+      'src/lib/mem/notices.ts': `${layer['src/lib/mem/notices.ts']}\nexport async function briefNotices(db: Database.Database, target: never) {\n  return evaluateMemConditions(db, target, { trigger: 'brief' } as never);\n}\n`,
+    };
+    expect(publicEntrances(writers, direct)).toContain('briefNotices');
+    expect(publicEntrances(writers, direct)).not.toEqual(rowEntrances());
+    // … or through a helper of notices.ts that calls a helper of evaluate.ts.
+    const chained = {
+      'src/lib/mem/evaluate.ts': `${layer['src/lib/mem/evaluate.ts']}\nfunction evaluateQuietly(db: Database.Database, target: never) {\n  return evaluateMemConditions(db, target, { trigger: 'preview' } as never);\n}\n`,
+      'src/lib/mem/notices.ts': `${layer['src/lib/mem/notices.ts']}\nfunction previewOf(db: Database.Database) {\n  return evaluateQuietly(db, db as never);\n}\nexport function previewNotices(db: Database.Database) {\n  return previewOf(db);\n}\n`,
+    };
+    expect(publicEntrances(writers, chained)).toContain('previewNotices');
+    expect(publicEntrances(writers, chained)).not.toEqual(rowEntrances());
+    // (control) a new export of notices.ts that only reads is not an entrance.
+    const reader = {
+      ...layer,
+      'src/lib/mem/notices.ts': `${layer['src/lib/mem/notices.ts']}\nexport function noticeCount(db: Database.Database): number {\n  return (db.prepare('SELECT COUNT(*) n FROM mem_notices').get() as { n: number }).n;\n}\n`,
+    };
+    expect(publicEntrances(writers, reader)).toEqual(rowEntrances());
   });
 
   it('integration review P2-3: every caller of those entrances elsewhere in src/ is run by a row', () => {
