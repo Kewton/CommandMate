@@ -588,7 +588,8 @@ function settleActorIncarnation(
   if (current) {
     archiveNowSlots(db, [actor.worktreeId], { instanceIds: [actor.instanceId], now, deleteRows: true });
   }
-  return { ok: true, incarnation: startInstanceIncarnation(db, actor.worktreeId, actor.instanceId, actor.cliToolId, now) };
+  // Issue #4222 (S6): made by mem for a derived primary, not by a roster: `lazy`.
+  return { ok: true, incarnation: startInstanceIncarnation(db, actor.worktreeId, actor.instanceId, actor.cliToolId, now, 'lazy') };
 }
 
 const scopeClause = (scope: MemScope, alias = ''): { sql: string; params: unknown[] } => {
@@ -1006,7 +1007,8 @@ export function purgeMem(
   scope: MemScope,
   filter: MemPurgeFilter,
   confirm: boolean,
-  alive: (() => boolean) | null = null
+  alive: (() => boolean) | null = null,
+  out: { notices: number } | null = null
 ): Partial<Record<MemKind, number>> | null {
   const where = scopeClause(scope);
   const clauses = [where.sql];
@@ -1031,9 +1033,53 @@ export function purgeMem(
     }>) {
       counts[row.kind] = row.n;
     }
+    // Issue #4222: the notices go with their items (CASCADE); the dry run counts them too.
+    if (out) {
+      out.notices = (
+        db.prepare(`SELECT COUNT(*) AS n FROM mem_notices WHERE item_id IN (SELECT id FROM mem_items WHERE ${sql})`).get(...params) as {
+          n: number;
+        }
+      ).n;
+    }
     if (confirm) db.prepare(`DELETE FROM mem_items WHERE ${sql}`).run(...params);
     return counts;
   })();
+}
+
+// ===========================================================================
+// Closed by a condition (Issue #4222, design `mem-close-when-4222.md` §3.2)
+// ===========================================================================
+
+/**
+ * Close an item because its condition was met, if it is still the item that was
+ * evaluated: the same version and the same stored condition, and a state that the
+ * `condition` transition closes (a decision only once promoted, §5). A `now` moves
+ * out of its slot as `condition`. Runs inside the caller's transaction, which writes
+ * the record and the notice with it (`mem-close-db.ts`). null when nothing was closed.
+ */
+export function closeMemItemByCondition(
+  db: Database.Database,
+  itemId: string,
+  expected: { version: number; closeWhen: string | null },
+  now: number
+): MemRecord | null {
+  const current = getMemRecord(db, itemId);
+  if (!current || current.version !== expected.version || current.closeWhen !== expected.closeWhen) return null;
+  if (!memTransition(current.kind, current.state, 'condition').ok) return null;
+  const slot = findSlotByItem(db, itemId);
+  if (slot) {
+    archiveSlot(db, slot, 'condition', 'server', now);
+    nextSlotVersion(db, slot.worktree_id, slot.instance_id);
+    db.prepare('DELETE FROM session_notes WHERE mem_item_id = ?').run(itemId);
+    return recordFromItem(findItemRow(db, itemId)!);
+  }
+  const changed = db
+    .prepare(
+      `UPDATE mem_items SET state = 'closed', closed_at = ?, close_reason = 'condition', updated_at = ?,
+         version = version + 1, updated_by = 'server', updated_by_instance = NULL WHERE id = ? AND version = ?`
+    )
+    .run(now, now, itemId, expected.version);
+  return changed.changes === 1 ? recordFromItem(findItemRow(db, itemId)!) : null;
 }
 
 // ===========================================================================

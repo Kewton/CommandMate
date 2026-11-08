@@ -41,10 +41,14 @@ import {
   type SessionSlotView,
 } from '@/lib/db/mem-db';
 import { createLogger } from '@/lib/logger';
+import { getMemNotice as getMemNoticeRow } from '@/lib/db/mem-close-db';
 import { resolveAgentInstances } from '@/lib/session/agent-instances-resolver';
 import {
   isMemKind,
+  type MemCheckResponse,
+  type MemConditionView,
   type MemErrorBody,
+  type MemNoticeListResponse,
   type MemErrorCode,
   type MemKind,
   type MemListResponse,
@@ -63,6 +67,9 @@ import {
   type CloseWhenTarget,
 } from './close-when';
 import { getInstanceIncarnation, getOrCreateWorktreeIncarnation, getWorktreeIncarnation } from './incarnation';
+import { evaluateMemConditions, fixMemEvalLifetime, type MemEvalContext, type MemEvalLifetime, type MemEvalDeps, type MemEvalReport } from './evaluate';
+import { acknowledgeMemNoticeByHuman, listUndeliveredMemNotices } from './notices';
+import type { QueryLimits } from './query-plan';
 import { presentMemItem, type MemRecord } from './present';
 import { withMemTarget, type MemTarget, type MemTargetDeps, type MemTargetResolved, type MemTargetSpec } from './target';
 import {
@@ -256,6 +263,18 @@ async function defaultGit(): Promise<MemGit> {
 export interface MemServiceDeps extends MemTargetDeps {
   git?: MemGit;
   now?: () => number;
+  /** Issue #4222: this server's boot id (stale reservations, §3.5), for tests. */
+  bootId?: () => string;
+  /** Issue #4222: what the evaluation of the conditions asks (gh, git, the clock), for tests. */
+  evaluation?: MemEvalDeps & { limits?: Partial<QueryLimits>; deadlineMs?: number };
+}
+
+async function firstTip(git: MemGit, worktreePath: string, refs: string[]): Promise<string | null> {
+  for (const ref of refs) {
+    const tip = await git.refTip(worktreePath, ref);
+    if (tip) return tip;
+  }
+  return null;
 }
 
 async function askConditionGit(
@@ -268,7 +287,7 @@ async function askConditionGit(
   const git = deps.git ?? (await defaultGit());
   return {
     origin: needs.origin ? parseOriginUrl(await git.originUrl(worktreePath)) : null,
-    tip: needs.tipOf !== null ? await git.refTip(worktreePath, needs.tipOf) : null,
+    tip: needs.tipOf !== null ? await firstTip(git, worktreePath, needs.tipOf) : null,
   };
 }
 
@@ -508,30 +527,140 @@ export async function memMode(db: Database.Database, spec: MemTargetSpec, deps: 
 export async function memList(
   db: Database.Database,
   spec: MemTargetSpec,
-  options: { all?: boolean },
+  options: { all?: boolean; instanceId?: string },
   deps: MemServiceDeps = {}
 ): Promise<MemOutcome> {
   if (spec.via === 'worktree' && !getWorktreeById(db, spec.worktreeId)) return memError('not_found');
-  return resolveTarget(db, spec, deps, (target) => {
-    if (!target.ok) return targetFailure(target);
-    if (target.mode === 'off') return memError('disabled', { mode: target.mode, source: target.source });
-    const frozen = target.mode === 'derived';
-    const scope = scopeOf(target);
-    const listed = listMem(db, scope, options);
-    const now = deps.now?.() ?? Date.now();
-    const warnings = openWarnings(db, scope, ['waiting', 'next', 'external', 'note', 'decision']);
-    const closed = countClosedItems(db, scope);
-    if (closed > MEM_CLOSED_WARN) warnings.push({ code: 'closed_count', count: closed, threshold: MEM_CLOSED_WARN });
-    const body: MemListResponse = {
-      ok: true,
-      mode: target.mode,
-      branch: scope.branch,
-      items: listed.items.map((record) => presentMemItem(record, { now, frozen })),
-      now: listed.now.map((slot) => ({ instanceId: slot.instanceId, item: presentMemItem(slot.record, { now, frozen }) })),
-      warnings,
-    };
-    return { status: 200, body };
+  const fixed = fixMemEvalLifetime(db, spec);
+  const target = await resolveTarget(db, spec, deps, (resolved) => resolved);
+  if (!target.ok) return targetFailure(target);
+  if (target.mode === 'off') return memError('disabled', { mode: target.mode, source: target.source });
+  // Issue #4222: `on` evaluates the conditions (and closes what is met) before listing;
+  // `derived` shows the items frozen and evaluates nothing (§4).
+  const report = await evaluateMemConditions(db, target, evalContext('list', spec, options.instanceId, fixed, deps));
+  const frozen = target.mode === 'derived';
+  const scope = scopeOf(target);
+  const listed = listMem(db, scope, options);
+  const now = deps.now?.() ?? Date.now();
+  const warnings = openWarnings(db, scope, ['waiting', 'next', 'external', 'note', 'decision']);
+  const closed = countClosedItems(db, scope);
+  if (closed > MEM_CLOSED_WARN) warnings.push({ code: 'closed_count', count: closed, threshold: MEM_CLOSED_WARN });
+  const body: MemListResponse = {
+    ok: true,
+    mode: target.mode,
+    branch: scope.branch,
+    items: listed.items.map((record) => presentMemItem(record, { now, frozen })),
+    now: listed.now.map((slot) => ({ instanceId: slot.instanceId, item: presentMemItem(slot.record, { now, frozen }) })),
+    warnings,
+    ...(report.evaluated ? { conditions: conditionsById(report) } : {}),
+  };
+  return { status: 200, body };
+}
+
+// ---------------------------------------------------------------------------
+// Conditions (Issue #4222)
+// ---------------------------------------------------------------------------
+
+function evalContext(
+  trigger: MemEvalContext['trigger'],
+  spec: MemTargetSpec,
+  instanceId: unknown,
+  lifetime: MemEvalLifetime,
+  deps: MemServiceDeps
+): MemEvalContext {
+  return {
+    trigger,
+    caller:
+      spec.via === 'worktree'
+        ? { worktreeId: spec.worktreeId, instanceId: typeof instanceId === 'string' && instanceId.length > 0 ? instanceId : null }
+        : null,
+    lifetime,
+    deps: deps.evaluation,
+    limits: deps.evaluation?.limits,
+    deadlineMs: deps.evaluation?.deadlineMs,
+  };
+}
+
+function conditionsById(report: MemEvalReport): Record<string, MemConditionView> {
+  const out: Record<string, MemConditionView> = {};
+  for (const result of report.results) out[result.itemId] = result.condition;
+  return out;
+}
+
+/**
+ * `mem check`: evaluate the branch's conditions and close what is met (§4). `off` and
+ * `derived` answer `disabled` and ask nothing. Nothing is acknowledged here (§3.5).
+ */
+export async function memCheck(
+  db: Database.Database,
+  spec: MemTargetSpec,
+  body: Record<string, unknown>,
+  deps: MemServiceDeps = {}
+): Promise<MemOutcome> {
+  if (spec.via === 'worktree' && !getWorktreeById(db, spec.worktreeId)) return memError('not_found');
+  if (body.instanceId !== undefined && typeof body.instanceId !== 'string') return memError('invalid_request', { field: 'instanceId' });
+  const fixed = fixMemEvalLifetime(db, spec);
+  const target = await resolveTarget(db, spec, deps, (resolved) => resolved);
+  if (!target.ok) return targetFailure(target);
+  if (target.mode !== 'on') return memError('disabled', { mode: target.mode, source: target.source });
+  const report = await evaluateMemConditions(db, target, evalContext('check', spec, body.instanceId, fixed, deps));
+  logger.info('mem-checked', {
+    branch: target.detached ? null : target.branch,
+    evaluated: report.results.length,
+    closed: report.results.filter((result) => result.condition.closed).length,
+    queries: report.asked.length,
   });
+  const response: MemCheckResponse = {
+    ok: true,
+    mode: target.mode,
+    branch: target.detached ? null : target.branch,
+    results: report.results.map((result) => ({ itemId: result.itemId, kind: result.kind, type: result.type, condition: result.condition })),
+  };
+  return { status: 200, body: response };
+}
+
+/** `GET /api/repositories/:id/mem/notices?branch=`: the notices nobody has taken. Any mode (§4: read only). */
+export async function memUndeliveredNotices(
+  db: Database.Database,
+  repositoryId: string,
+  branch: string,
+  deps: MemServiceDeps = {}
+): Promise<MemOutcome> {
+  const target = await resolveTarget(db, { via: 'repository', repositoryId, branch }, deps, (resolved) => resolved);
+  if (!target.ok) return targetFailure(target);
+  const body: MemNoticeListResponse = {
+    ok: true,
+    notices: listUndeliveredMemNotices(db, target.readRepositoryIds, branch, { now: deps.now }),
+  };
+  return { status: 200, body };
+}
+
+/** `POST /api/repositories/:id/mem/notices/:noticeId/acknowledge` — a person takes a notice (screen only, §3.3). */
+export async function memAcknowledgeNotice(
+  db: Database.Database,
+  repositoryId: string,
+  noticeId: string,
+  body: Record<string, unknown>,
+  deps: MemServiceDeps = {}
+): Promise<MemOutcome> {
+  if (typeof body.ifVersion !== 'number' || !Number.isInteger(body.ifVersion) || body.ifVersion < 1) {
+    return memError('invalid_request', { field: 'ifVersion' });
+  }
+  const ifVersion = body.ifVersion;
+  const notice = getMemNoticeRow(db, noticeId);
+  if (!notice) return memError('not_found');
+  const target = await resolveTarget(db, { via: 'repository', repositoryId, branch: notice.branch ?? '' }, deps, (resolved) => resolved);
+  if (!target.ok) return targetFailure(target);
+  if (!target.readRepositoryIds.includes(notice.repository_id)) return memError('not_found');
+  const result = acknowledgeMemNoticeByHuman(db, noticeId, ifVersion, { now: deps.now, bootId: deps.bootId });
+  if (!result.ok) {
+    if (result.code === 'version_conflict') return memError('version_conflict', { currentVersion: result.current?.version });
+    if (result.code === 'disabled') return memError('disabled', { mode: target.mode, source: target.source });
+    if (result.code === 'state_forbids') return memError('state_forbids');
+    return memError('not_found');
+  }
+  logger.info('mem-notice-acknowledged', { noticeId, by: 'human' });
+  return { status: 200, body: { ok: true, noticeId, version: result.notice.version } };
 }
 
 export async function memPurge(
@@ -558,6 +687,7 @@ export async function memPurge(
   const confirm = body.confirm === true;
   return resolveTarget(db, spec, deps, (target) => {
     if (!target.ok) return targetFailure(target);
+    const out = { notices: 0 };
     const counts = purgeMem(
       db,
       scopeOf(target),
@@ -568,11 +698,12 @@ export async function memPurge(
         includeDecisions: body.includeDecisions === true,
       },
       confirm,
-      alive
+      alive,
+      out
     );
     if (counts === null) return memError('not_found', { reason: 'incarnation_changed' });
-    if (confirm) logger.info('mem-purged', { branch: spec.branch, counts });
-    const response: MemPurgeResponse = { ok: true, dryRun: !confirm, counts };
+    if (confirm) logger.info('mem-purged', { branch: spec.branch, counts, notices: out.notices });
+    const response: MemPurgeResponse = { ok: true, dryRun: !confirm, counts, ...(out.notices > 0 ? { notices: out.notices } : {}) };
     return { status: 200, body: response };
   });
 }

@@ -5,7 +5,12 @@
 
 import path from 'path';
 import { describe, expect, it } from 'vitest';
-import { dispatchRecordPath, parseDispatchRecord } from '@/lib/agent-health/dispatch-record';
+import {
+  dispatchRecordPath,
+  dispatchSentMarkerPath,
+  parseDispatchRecord,
+  readDispatchRecordOfDay,
+} from '@/lib/agent-health/dispatch-record';
 
 describe('dispatchRecordPath', () => {
   it('is <base>/dispatch/<date>.json', () => {
@@ -64,5 +69,47 @@ describe('parseDispatchRecord', () => {
       issues: [],
       deferred: [],
     });
+  });
+});
+
+describe('readDispatchRecordOfDay (#4243 review c)', () => {
+  const base = '/state';
+  const sent = { schemaVersion: 1, date: '2026-10-01', status: 'sent', issues: [{ number: 1, kind: 'bug', title: '' }], deferred: [] };
+  const skip = { schemaVersion: 1, date: '2026-10-01', status: 'skipped-busy', issues: [], deferred: [1], reason: 'x' };
+
+  it('positive: marker absent → another dispatch publishes sent → a non-sent rename → the file is read: sent is returned', () => {
+    const files = new Map<string, string>();
+    files.set(dispatchRecordPath(base, '2026-10-01'), JSON.stringify({ ...skip, reason: 'older' }));
+    let markerReads = 0;
+    const readText = (file: string): string | null => {
+      if (file === dispatchSentMarkerPath(base, '2026-10-01')) {
+        markerReads++;
+        const text = files.get(file) ?? null;
+        if (markerReads === 1) {
+          // Right after this (empty) look: D1 publishes sent, then D2 renames its skip over the file.
+          files.set(file, JSON.stringify(sent));
+          files.set(dispatchRecordPath(base, '2026-10-01'), JSON.stringify(skip));
+        }
+        return text;
+      }
+      return files.get(file) ?? null;
+    };
+    expect(readDispatchRecordOfDay(readText, base, '2026-10-01')).toMatchObject({ status: 'sent', issues: [{ number: 1 }] });
+  });
+
+  it('negative: without a marker the record file is returned as it is', () => {
+    const files = new Map([[dispatchRecordPath(base, '2026-10-01'), JSON.stringify(skip)]]);
+    expect(readDispatchRecordOfDay((f) => files.get(f) ?? null, base, '2026-10-01')).toMatchObject({ status: 'skipped-busy', reason: 'x' });
+  });
+
+  it('a sent marker read first wins without reading the file', () => {
+    const seen: string[] = [];
+    const files = new Map([[dispatchSentMarkerPath(base, '2026-10-01'), JSON.stringify(sent)]]);
+    const read = (f: string) => {
+      seen.push(f);
+      return files.get(f) ?? null;
+    };
+    expect(readDispatchRecordOfDay(read, base, '2026-10-01')).toMatchObject({ status: 'sent' });
+    expect(seen).toEqual([dispatchSentMarkerPath(base, '2026-10-01')]);
   });
 });

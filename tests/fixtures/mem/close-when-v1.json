@@ -1,5 +1,5 @@
 {
-  "$comment": "Issue #4221 (A) writes these; #4222 (B) evaluates them. Shared source of truth for the close_when schema 1: the kind x type table (design §2.3), the defaults, one stored value per type (§2.2) and the worktree lifecycle cases (2nd review 5). Change it only together with src/lib/mem/close-when.ts.",
+  "$comment": "Issue #4221 (A) writes these; #4222 (B) evaluates them (and narrowed `session:` to the task / verify / schedule namespaces, S1). Shared source of truth for the close_when schema 1: the kind x type table (design §2.3), the defaults, one stored value per type (§2.2) and the worktree lifecycle cases (2nd review 5). Change it only together with src/lib/mem/close-when.ts.",
   "schema": 1,
   "types": ["replaced", "manual", "issue", "pr", "branch", "relay", "worktree", "session", "at"],
   "allowed": {
@@ -26,7 +26,7 @@
     "branch": "branch:feature/4221-worktree?merged=develop&scope=remote",
     "relay": "relay:relay-1",
     "worktree": "worktree:WORKTREE_ID",
-    "session": "session:run-42",
+    "session": "session:task:run-42",
     "at": "at:2026-11-09T09:00+09:00"
   },
   "stored": {
@@ -46,8 +46,32 @@
     },
     "relay": { "schema": 1, "type": "relay", "relayId": "relay-1" },
     "worktree": { "schema": 1, "type": "worktree", "worktreeId": "WORKTREE_ID", "worktreeIncarnation": "WORKTREE_INCARNATION" },
-    "session": { "schema": 1, "type": "session", "sessionId": "run-42", "sessionGeneration": null },
+    "session": { "schema": 1, "type": "session", "sessionId": "task:run-42", "sessionGeneration": null },
     "at": { "schema": 1, "type": "at", "epochMs": 1794182400000, "offset": "+09:00" }
+  },
+  "storedDeleted": {
+    "$comment": "Issue #4222 (P2-1): a deleted-branch condition keeps the tip when the ref exists, and is stored with an empty tip when it does not.",
+    "input": "branch:feature/4221-worktree?deleted",
+    "withTip": {
+      "schema": 1,
+      "type": "branch",
+      "repositoryId": "REPOSITORY_ID",
+      "name": "feature/4221-worktree",
+      "event": "deleted",
+      "into": null,
+      "scope": "local",
+      "tipAtCreate": "0123456789abcdef0123456789abcdef01234567"
+    },
+    "withoutTip": {
+      "schema": 1,
+      "type": "branch",
+      "repositoryId": "REPOSITORY_ID",
+      "name": "feature/4221-worktree",
+      "event": "deleted",
+      "into": null,
+      "scope": "local",
+      "tipAtCreate": ""
+    }
   },
   "binding": {
     "origin": "git@github.com:Kewton/CommandMate.git",
@@ -66,6 +90,9 @@
     "branch:x?merged=",
     "branch:../x?deleted",
     "session:12345",
+    "session:run-42",
+    "session:verify:abc",
+    "session:job:1",
     "at:2026-11-09T09:00",
     "manual extra",
     ""

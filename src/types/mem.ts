@@ -267,6 +267,8 @@ export interface MemListResponse {
   items: MemItemView[];
   now: Array<{ instanceId: string; item: MemItemView }>;
   warnings: MemWarning[];
+  /** Issue #4222: the evaluation of each listed item's condition, by item id (mode `on` only). */
+  conditions?: Record<string, MemConditionView>;
 }
 
 /** A write that succeeded. */
@@ -282,4 +284,151 @@ export interface MemPurgeResponse {
   ok: true;
   dryRun: boolean;
   counts: Partial<Record<MemKind, number>>;
+  /** Notices of the items counted (deleted with them, Issue #4222). */
+  notices?: number;
+}
+
+// ===========================================================================
+// close_when evaluation and the end of an item (Issue #4222, design
+// `docs/design/mem-close-when-4222.md`)
+// ===========================================================================
+
+/** The three answers of a condition (§1.1). `unknown` never closes anything. */
+export const MEM_CONDITION_RESULTS = ['met', 'not-met', 'unknown'] as const;
+export type MemConditionResult = (typeof MEM_CONDITION_RESULTS)[number];
+
+/** Whether the end was what the item waited for (D8): apart from the condition being met. */
+export const MEM_END_OUTCOMES = ['success', 'failure', 'unknown'] as const;
+export type MemEndOutcome = (typeof MEM_END_OUTCOMES)[number];
+
+/** Who asked for the evaluation (§1.1). */
+export const MEM_EVAL_TRIGGERS = ['list', 'check', 'brief', 'preview'] as const;
+export type MemEvalTrigger = (typeof MEM_EVAL_TRIGGERS)[number];
+
+/** Why a condition is unknown (§1.9). Fixed words: callers branch on them, never on prose. */
+export const MEM_UNKNOWN_REASONS = [
+  'not_found',
+  'unauthenticated',
+  'forbidden',
+  'rate_limited',
+  'remote_error',
+  'offline',
+  'query_timeout',
+  'gh_unavailable',
+  'unexpected_response',
+  'not_an_issue',
+  'host_not_allowed',
+  'repository_unavailable',
+  'objects_missing',
+  'branch-diverged',
+  'branch-order-uncertain',
+  'branch-gone-unmerged-unknown',
+  'relay_not_found',
+  'relay-delivery-uncertain',
+  'session_not_found',
+  'session_kind_unknown',
+  'schema_unknown',
+  'query_budget_exhausted',
+  'deadline_exceeded',
+] as const;
+export type MemUnknownReason = (typeof MEM_UNKNOWN_REASONS)[number];
+
+/** Why a condition is met or not met (§1.2〜§1.8・§2). */
+export const MEM_DECIDED_REASONS = [
+  'issue-closed',
+  'issue-open',
+  'pr-merged',
+  'pr-closed',
+  'pr-open',
+  'pr-closed-unmerged',
+  'branch-deleted',
+  'branch-recreated',
+  'branch-present',
+  'branch-present-no-baseline',
+  'branch-merged',
+  'branch-merged-pr',
+  'no-new-commits',
+  'not-merged',
+  'relay-open',
+  'relay-prompt',
+  'relay-delivered',
+  'relay-delivery-attempting',
+  'relay-payload-pending',
+  'relay-expired',
+  'relay-cancelled',
+  'task-succeeded',
+  'task-cancelled',
+  'task-running',
+  'task-reopenable',
+  'verify-passed',
+  'verify-failed',
+  'verify-error',
+  'verify-not_started',
+  'verify-cancelled',
+  'verify-running',
+  'schedule-completed',
+  'schedule-failed',
+  'schedule-timeout',
+  'schedule-cancelled',
+  'schedule-running',
+  'worktree-alive',
+  'worktree-deleted',
+  'time-passed',
+  'time-not-yet',
+] as const;
+export type MemDecidedReason = (typeof MEM_DECIDED_REASONS)[number];
+
+export type MemConditionReason = MemUnknownReason | MemDecidedReason;
+
+/** The evaluation of one item's condition, as the list and `check` carry it. */
+export interface MemConditionView {
+  result: MemConditionResult;
+  reason: MemConditionReason;
+  /** Set when met: whether the end was what was waited for. */
+  outcome?: MemEndOutcome;
+  evaluatedAt: string;
+  /** Closed by this evaluation. */
+  closed: boolean;
+  /** A decision met before it was promoted: kept open, not reflected yet (§5). */
+  unreflected?: boolean;
+}
+
+/** `POST …/mem/check`. */
+export interface MemCheckResponse {
+  ok: true;
+  mode: MemMode;
+  branch: string | null;
+  results: Array<{ itemId: string; kind: MemKind; type: MemCloseWhenType | null; condition: MemConditionView }>;
+}
+
+export const MEM_NOTICE_AUDIENCES = ['creator', 'successor'] as const;
+export type MemNoticeAudience = (typeof MEM_NOTICE_AUDIENCES)[number];
+
+/** The send result D hands to the settle (`SendAttemptState` of `lib/session/send-attempt-types.ts`). */
+export type MemNoticeSendState = 'sent' | 'not-sent' | 'indeterminate';
+
+/** One "it ended" notice as C, D and the screen read it (§3.3・§3.5). Free text never in it. */
+export interface MemNoticeView {
+  id: string;
+  itemId: string;
+  repositoryId: string;
+  branch: string | null;
+  origin: { worktreeId: string; instanceId: string; cliToolId: string; incarnation: string; itemCreatedAt: string };
+  state: 'pending' | 'reserved' | 'acknowledged';
+  /** Who may take it now; null in the screen's list when no session may. */
+  audience: MemNoticeAudience | null;
+  /** The delivery of an earlier brief could not be confirmed (stale attempts counted in, §3.5). */
+  uncertain: boolean;
+  uncertainCount: number;
+  endReason: string;
+  outcome: MemEndOutcome;
+  closedAt: string;
+  version: number;
+  acknowledgedBy: 'creator' | 'successor' | 'human' | null;
+}
+
+/** `GET /api/repositories/:id/mem/notices`. */
+export interface MemNoticeListResponse {
+  ok: true;
+  notices: MemNoticeView[];
 }

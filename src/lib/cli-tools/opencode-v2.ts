@@ -94,6 +94,8 @@ import {
   resolveOpencodeV2Executable,
 } from './opencode-executable';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
+import { launchCwdRecheck } from '@/lib/session/role-launch';
+import { roleLaunchCwdReaderForPane } from '@/lib/agent-roles/pane-env';
 
 const logger = createLogger('cli-tools/opencode-v2');
 
@@ -296,7 +298,13 @@ export class OpenCodeV2Tool extends BaseCLITool {
       // Issue #3981: in one writer's turn of the input lock; the readiness
       // wait below stays outside it.
       const launchCommand = buildAgentLaunchCommandLine({ target, executablePath: executable.path, worktreePath });
-      await this.typeLaunchLines(sessionName, [withLaunchScreenCleared(launchCommand)]);
+      // Issue #4233: a role composed against the worktree's cwd checks it again
+      // in the same turn, just before the line (unchanged) is typed.
+      const recheck = launchCwdRecheck(roleLaunchCwdReaderForPane(target));
+      await this.typeLaunchLines(sessionName, [
+        ...(recheck ? [recheck] : []),
+        withLaunchScreenCleared(launchCommand),
+      ]);
 
       await this.waitForReady(sessionName);
       await attachOpencodeV2EventStream(target);

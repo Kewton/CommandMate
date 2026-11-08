@@ -3418,6 +3418,7 @@ commandmate mem add --kind <kind> (--text "<text>" | --stdin) [--close-when <con
 commandmate mem update <id> --if-version <n> [--text … | --stdin] [--close-when …] [--evidence …]
 commandmate mem close <id> [--reason "<text>"]
 commandmate mem list [--all] [--branch <name>] [--json]
+commandmate mem check [--branch <name>] [--json]
 commandmate mem mode [--json]
 commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before <ts>] [--include-decisions] --confirm
 ```
@@ -3425,10 +3426,27 @@ commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before 
 - 対象は、セッションの中では `whoami` で決まる自分の instance。通常のシェルでは、書き込みに `--worktree <id> --instance <id>`、`list` / `mode` / `purge` に `--worktree <id>` か `--repository <id> --branch <name>` を付ける（無ければ exit 2 `target_required`）
 - `now` はそのセッションのメモ（#2427）と同じもの。100 文字まで。次の `now` で置き換わり、前の内容は `superseded` として残る（枠ごとに新しい 20 件）
 - kind は `now` / `waiting` / `decision` / `next` / `external` / `note`。`--close-when` は `waiting` / `next` / `external` で必須。省略すると `now` → `replaced`、`note` → `manual`、`decision` → 反映（promote）まで閉じない
-- `--close-when`：`manual` ・ `replaced`（now だけ）・ `issue:[host/owner/repo]#N` ・ `pr:[host/owner/repo]#N[?state=merged|closed]` ・ `branch:<name>?merged=<ref>[&scope=local|remote]` ・ `branch:<name>?deleted` ・ `relay:<id>` ・ `worktree:<id>` ・ `session:<id>` ・ `at:<オフセット付き ISO 8601>`。この Issue では保存の前の検査まで（評価は #4222）
+- `--close-when`：`manual` ・ `replaced`（now だけ）・ `issue:[host/owner/repo]#N` ・ `pr:[host/owner/repo]#N[?state=merged|closed]` ・ `branch:<name>?merged=<ref>[&scope=local|remote]` ・ `branch:<name>?deleted` ・ `relay:<id>` ・ `worktree:<id>` ・ `session:task:<id>` ・ `session:verify:<run id>` ・ `session:schedule:<実行ログ id>` ・ `at:<オフセット付き ISO 8601>`。`session:` は CommandMate が終わりを記録している 3 種類だけ（tmux のセッション名・PID は受けない）。`branch:…?deleted` も書いた時点の tip を保存する（ref が無ければ空）
 - `update` / `close` ができるのは作成した instance（同じ世代）と人（画面）だけ。instance を消して同じ ID で作り直すと別の世代になり、前の項目は変えられない（exit 55）
 - `--key` を付けた `add` は、同じ key・同じ内容の再送で最初の項目を返す（`replayed: true`）。中身が違えば exit 54
 - `purge` は `--confirm` が無いと何も消さず、消える件数だけを出す。`recorded` / `promoted` の決定は `--include-decisions` が無いと対象にしない。Agent のセッションの中からは断る（exit 55）
+
+### 閉じる条件の評価（Issue #4222）
+
+条件は **読むときに評価する**（`mem list`・`mem check`・brief）。常駐の見張りや定期的な照会は無い。mode が `on` のブランチだけで評価し、`off` / `derived` では照会もしないし閉じない（`mem check` は exit 50）。結果は 3 値で、どれにも固定の理由の語（`reason`）が付く。`list --json` は `conditions`（項目の ID ごと）、`check --json` は `results` に入る。
+
+| 結果 | 閉じるか | 例 |
+|---|---|---|
+| `met`（成立） | 閉じる（`close_reason=condition`・`updated_by=server`）。終了の記録（条件・照会の結果・終了の理由・成否）と「終わった」の知らせを 1 つずつ作る | `issue-closed`、`pr-merged`、`branch-deleted`、`relay-delivered`、`task-succeeded`、`worktree-deleted`、`time-passed` |
+| `not-met`（不成立） | 閉じない | `issue-open`、`not-merged`、`no-new-commits`、`relay-delivery-attempting`、`task-running` |
+| `unknown`（不明） | **閉じない** | `not_found`（404）・`unauthenticated`・`forbidden`・`rate_limited`・`offline`・`query_timeout`・`gh_unavailable`・`host_not_allowed`・`branch-diverged`・`branch-order-uncertain`・`relay-delivery-uncertain`・`session_kind_unknown`・`query_budget_exhausted`・`deadline_exceeded` など |
+
+- **型ごとの成立**：`issue` は closed（成否は `state_reason`）、`pr` は merged（`?state=closed` なら closed）、`branch` の `merged` は「書いた時点の tip より後の commit を含んで `into` に入った」（別の ref に入っただけ・変更がまだ無い新しいブランチは不成立。`scope=remote` は squash の merge を GitHub の PR で見る）、`deleted` は ref が無くなった（取得できないのとは別）、`relay` は `delivered`（`expired` / `cancelled` は成立だが成否は `failure`。保留・未配送の payload が残る間は閉じない）、`worktree` は削除（改名は不成立）、`session` は task / verify / schedule の終端（`running`・`waiting_input` は不成立）、`at` は時刻を過ぎた
+- **照会の上限**：1 回の評価で GitHub と `git ls-remote` は 8 回（1 回 5 秒）、手元の git は 24 回（1 回 3 秒）、全体で 10 秒。同じ対象は 1 回にまとめる。上限・期限を超えた項目は不明
+- **GitHub の host**：照会するのは `github.com` と、項目の repository の `origin` の host だけ（ほかは `host_not_allowed`）。`git fetch` はしない
+- **作り直したブランチ**：削除の後に同名で作り直したブランチは別物（local は reflog の作成の時刻で見分ける。項目と同じ秒に作ったものは前後が言えず不明）。remote で見分けたいときは `pr:` を使う
+- **decision**：`promote` 前の決定は成立しても閉じず、`unreflected` として残る
+- **「終わった」の知らせ**：作成者のセッション（同じ instance の世代）が次の brief で 1 回だけ受け取る。`check`・他の instance の brief・画面の preview が先に評価しても消費しない。作成者の世代が終わっていれば同じブランチの次の世代へ、それも無ければ画面の「未配送の知らせ」（`GET /api/repositories/:id/mem/notices?branch=`）に残り、人が引き取る
 
 ### 自由入力の欄の検査
 
@@ -3441,7 +3459,7 @@ commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before 
 | 0 | 成功（`--key` の再送で既存を返したときも） |
 | 1 | サーバーに届かない |
 | 2 | 入力の不正（`invalid_close_when` / `control_char` / `secret_like` / `too_long` / `absolute_path` / `outside_repository` / `symlink` / `sensitive_path` / `invalid_evidence` / `invalid_key` / `target_required` など）。何も保存していない |
-| 50 | `disabled`：そのブランチの mode が `off` か `derived`。何も保存していない |
+| 50 | `disabled`：そのブランチの mode が `off` か `derived`。何も保存していない（`check` は照会もしない） |
 | 51 | `version_conflict`：`--if-version` が今の版と違う。今保存されている項目を返す |
 | 52 | `not_registered` / `item_not_found` / `instance_not_found` / `branch_unresolved` |
 | 53 | `ambiguous`：同じ Git の複数の登録 root で設定が違う・git が答えない root がある・観測の間に登録が変わり続けた |

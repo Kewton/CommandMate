@@ -2555,6 +2555,7 @@ commandmate mem add --kind <kind> (--text "<text>" | --stdin) [--close-when <con
 commandmate mem update <id> --if-version <n> [--text … | --stdin] [--close-when …] [--evidence …]
 commandmate mem close <id> [--reason "<text>"]
 commandmate mem list [--all] [--branch <name>] [--json]
+commandmate mem check [--branch <name>] [--json]
 commandmate mem mode [--json]
 commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before <ts>] [--include-decisions] --confirm
 ```
@@ -2562,10 +2563,27 @@ commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before 
 - Inside a session the target is your own instance (`whoami`). In an ordinary shell, writes need `--worktree <id> --instance <id>`, and `list` / `mode` / `purge` need `--worktree <id>` or `--repository <id> --branch <name>` (otherwise exit 2 `target_required`)
 - `now` is the session's note (#2427). Up to 100 characters. The next `now` replaces it; the previous content is kept as `superseded` (the newest 20 per slot)
 - Kinds: `now` / `waiting` / `decision` / `next` / `external` / `note`. `--close-when` is required for `waiting` / `next` / `external`; omitted, `now` → `replaced`, `note` → `manual`, `decision` → open until promoted
-- `--close-when`: `manual` · `replaced` (now only) · `issue:[host/owner/repo]#N` · `pr:[host/owner/repo]#N[?state=merged|closed]` · `branch:<name>?merged=<ref>[&scope=local|remote]` · `branch:<name>?deleted` · `relay:<id>` · `worktree:<id>` · `session:<id>` · `at:<ISO 8601 with an offset>`. Checked before it is stored; evaluating it is #4222
+- `--close-when`: `manual` · `replaced` (now only) · `issue:[host/owner/repo]#N` · `pr:[host/owner/repo]#N[?state=merged|closed]` · `branch:<name>?merged=<ref>[&scope=local|remote]` · `branch:<name>?deleted` · `relay:<id>` · `worktree:<id>` · `session:task:<id>` · `session:verify:<run id>` · `session:schedule:<execution log id>` · `at:<ISO 8601 with an offset>`. `session:` takes only the three runs CommandMate records the end of (no tmux session name, no PID). `branch:…?deleted` also stores the tip at the time of writing (empty when the ref does not exist)
 - Only the instance that wrote an item (its same incarnation) and a person (on the screen) may `update` / `close` it. An instance removed and made again under the same id is another incarnation and cannot change the earlier items (exit 55)
 - `add` with `--key` answers the first item to a retry with the same key and content (`replayed: true`); different content is exit 54
 - `purge` deletes nothing without `--confirm` and shows the counts. Recorded / promoted decisions are left out unless `--include-decisions`. Refused from inside an agent session (exit 55)
+
+### Evaluating the close conditions (Issue #4222)
+
+Conditions are **evaluated when read** (`mem list`, `mem check`, the brief); nothing watches in the background and nothing polls. Only a branch in mode `on` is evaluated; `off` / `derived` ask nothing and close nothing (`mem check` exits 50). Each result is one of three, with a fixed reason word (`reason`): `list --json` carries `conditions` (by item ID), `check --json` carries `results`.
+
+| Result | Closes? | Examples |
+|---|---|---|
+| `met` | Yes (`close_reason=condition`, `updated_by=server`), with one end record (condition, what was observed, end reason, outcome) and one "it ended" notice | `issue-closed`, `pr-merged`, `branch-deleted`, `relay-delivered`, `task-succeeded`, `worktree-deleted`, `time-passed` |
+| `not-met` | No | `issue-open`, `not-merged`, `no-new-commits`, `relay-delivery-attempting`, `task-running` |
+| `unknown` | **No** | `not_found` (404), `unauthenticated`, `forbidden`, `rate_limited`, `offline`, `query_timeout`, `gh_unavailable`, `host_not_allowed`, `branch-diverged`, `branch-order-uncertain`, `relay-delivery-uncertain`, `session_kind_unknown`, `query_budget_exhausted`, `deadline_exceeded`, … |
+
+- **Met, per type**: `issue` closed (the outcome from `state_reason`); `pr` merged (closed with `?state=closed`); `branch … merged` means it reached `into` with commits after the tip it had when written (merged into another ref, or a new branch with no change yet, is not met; `scope=remote` sees a squash merge through the GitHub PR); `deleted` means the ref is gone (not "could not be read"); `relay` delivered (`expired` / `cancelled` are met with outcome `failure`; never closed while a delivery hold or an undelivered payload remains); `worktree` deleted (a rename is not met); `session` a terminal task / verify / schedule state (`running`, `waiting_input` are not met); `at` the time has passed
+- **Query limits**: per evaluation, 8 GitHub / `git ls-remote` queries (5 s each), 24 local git queries (3 s each), 10 s in all. The same target is asked once. Items past a limit are unknown
+- **GitHub hosts**: only `github.com` and the host of the item's repository's `origin` are asked (others: `host_not_allowed`). No `git fetch`
+- **Re-created branches**: a branch deleted and made again under the same name is another branch (locally told apart by its reflog's creation time; one made in the same second as the item cannot be ordered and stays unknown). Use `pr:` to follow a remote one exactly
+- **Decisions**: a decision met before it is promoted stays open, marked `unreflected`
+- **The "it ended" notice**: the author's session (the same instance incarnation) gets it once, in its next brief. A `check`, another instance's brief or the screen's preview evaluating first does not use it up. If the author's incarnation has ended, the next session of the same branch gets it; if none, it stays in the screen's undelivered list (`GET /api/repositories/:id/mem/notices?branch=`) for a person to take
 
 ### Checks on the free fields
 
@@ -2578,7 +2596,7 @@ Every free field (`text`, `quote`, `evidence`, `promote_to`, `reason`) is checke
 | 0 | Done (also a `--key` retry answering the existing item) |
 | 1 | The server cannot be reached |
 | 2 | Invalid input (`invalid_close_when` / `control_char` / `secret_like` / `too_long` / `absolute_path` / `outside_repository` / `symlink` / `sensitive_path` / `invalid_evidence` / `invalid_key` / `target_required`, …); nothing stored |
-| 50 | `disabled`: the branch's mode is `off` or `derived`; nothing stored |
+| 50 | `disabled`: the branch's mode is `off` or `derived`; nothing stored (`check` asks nothing either) |
 | 51 | `version_conflict`: `--if-version` is not the current version; the stored item is returned |
 | 52 | `not_registered` / `item_not_found` / `instance_not_found` / `branch_unresolved` |
 | 53 | `ambiguous`: registered roots of one git whose settings differ, a root git cannot identify, or a registration that kept changing |

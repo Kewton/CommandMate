@@ -1,0 +1,727 @@
+{
+  "$comment": "Issue #4222: what each condition type decides from what was observed (design docs/design/mem-close-when-4222.md §1・§2). Read by tests/unit/lib/mem/evaluate-4222.test.ts. `expected` is [result, reason, outcome?].",
+  "schema": 1,
+  "issue": [
+    {
+      "json": {
+        "state": "closed",
+        "state_reason": "completed"
+      },
+      "expected": [
+        "met",
+        "issue-closed",
+        "success"
+      ]
+    },
+    {
+      "json": {
+        "state": "closed",
+        "state_reason": "not_planned"
+      },
+      "expected": [
+        "met",
+        "issue-closed",
+        "failure"
+      ]
+    },
+    {
+      "json": {
+        "state": "closed",
+        "state_reason": null
+      },
+      "expected": [
+        "met",
+        "issue-closed",
+        "unknown"
+      ]
+    },
+    {
+      "json": {
+        "state": "open",
+        "state_reason": null
+      },
+      "expected": [
+        "not-met",
+        "issue-open"
+      ]
+    },
+    {
+      "json": {
+        "state": "open",
+        "pull_request": {
+          "url": "x"
+        }
+      },
+      "expected": [
+        "unknown",
+        "not_an_issue"
+      ]
+    },
+    {
+      "json": "not an object",
+      "expected": [
+        "unknown",
+        "unexpected_response"
+      ]
+    }
+  ],
+  "pr": [
+    {
+      "wanted": "merged",
+      "json": {
+        "state": "closed",
+        "merged_at": "2026-11-08T00:00:00Z"
+      },
+      "expected": [
+        "met",
+        "pr-merged",
+        "success"
+      ]
+    },
+    {
+      "wanted": "merged",
+      "json": {
+        "state": "closed",
+        "merged_at": null
+      },
+      "expected": [
+        "not-met",
+        "pr-closed-unmerged"
+      ]
+    },
+    {
+      "wanted": "merged",
+      "json": {
+        "state": "open",
+        "merged_at": null
+      },
+      "expected": [
+        "not-met",
+        "pr-open"
+      ]
+    },
+    {
+      "wanted": "closed",
+      "json": {
+        "state": "closed",
+        "merged_at": null
+      },
+      "expected": [
+        "met",
+        "pr-closed",
+        "failure"
+      ]
+    },
+    {
+      "wanted": "closed",
+      "json": {
+        "state": "closed",
+        "merged_at": "2026-11-08T00:00:00Z"
+      },
+      "expected": [
+        "met",
+        "pr-closed",
+        "success"
+      ]
+    },
+    {
+      "wanted": "closed",
+      "json": {
+        "state": "open",
+        "merged_at": null
+      },
+      "expected": [
+        "not-met",
+        "pr-open"
+      ]
+    }
+  ],
+  "ghFailures": [
+    {
+      "code": 1,
+      "stderr": "gh: Not Found (HTTP 404)",
+      "expected": "not_found"
+    },
+    {
+      "code": 1,
+      "stderr": "gh: Bad credentials (HTTP 401)",
+      "expected": "unauthenticated"
+    },
+    {
+      "code": 4,
+      "stderr": "To get started with GitHub CLI, please run:  gh auth login",
+      "expected": "unauthenticated"
+    },
+    {
+      "code": 1,
+      "stderr": "gh: Resource not accessible by integration (HTTP 403)",
+      "expected": "forbidden"
+    },
+    {
+      "code": 1,
+      "stderr": "gh: API rate limit exceeded for user (HTTP 403)",
+      "expected": "rate_limited"
+    },
+    {
+      "code": 1,
+      "stderr": "gh: Server Error (HTTP 502)",
+      "expected": "remote_error"
+    },
+    {
+      "code": 1,
+      "stderr": "error connecting to api.github.com",
+      "expected": "offline"
+    },
+    {
+      "code": null,
+      "stderr": "",
+      "timedOut": true,
+      "expected": "query_timeout"
+    },
+    {
+      "code": null,
+      "stderr": "",
+      "missing": true,
+      "expected": "gh_unavailable"
+    },
+    {
+      "code": 0,
+      "stderr": "",
+      "stdout": "<html>",
+      "expected": "unexpected_response"
+    }
+  ],
+  "relay": [
+    {
+      "state": "pending",
+      "deliveryHold": null,
+      "pendingKind": null,
+      "expected": [
+        "not-met",
+        "relay-open"
+      ]
+    },
+    {
+      "state": "pending",
+      "deliveryHold": null,
+      "pendingKind": "reply",
+      "expected": [
+        "not-met",
+        "relay-open"
+      ]
+    },
+    {
+      "state": "pending",
+      "deliveryHold": "attempting",
+      "pendingKind": null,
+      "expected": [
+        "not-met",
+        "relay-open"
+      ]
+    },
+    {
+      "state": "pending",
+      "deliveryHold": "attempting",
+      "pendingKind": "reply",
+      "expected": [
+        "not-met",
+        "relay-open"
+      ]
+    },
+    {
+      "state": "pending",
+      "deliveryHold": "uncertain",
+      "pendingKind": null,
+      "expected": [
+        "not-met",
+        "relay-open"
+      ]
+    },
+    {
+      "state": "pending",
+      "deliveryHold": "uncertain",
+      "pendingKind": "reply",
+      "expected": [
+        "not-met",
+        "relay-open"
+      ]
+    },
+    {
+      "state": "prompt",
+      "deliveryHold": null,
+      "pendingKind": null,
+      "expected": [
+        "not-met",
+        "relay-prompt"
+      ]
+    },
+    {
+      "state": "prompt",
+      "deliveryHold": null,
+      "pendingKind": "reply",
+      "expected": [
+        "not-met",
+        "relay-prompt"
+      ]
+    },
+    {
+      "state": "prompt",
+      "deliveryHold": "attempting",
+      "pendingKind": null,
+      "expected": [
+        "not-met",
+        "relay-prompt"
+      ]
+    },
+    {
+      "state": "prompt",
+      "deliveryHold": "attempting",
+      "pendingKind": "reply",
+      "expected": [
+        "not-met",
+        "relay-prompt"
+      ]
+    },
+    {
+      "state": "prompt",
+      "deliveryHold": "uncertain",
+      "pendingKind": null,
+      "expected": [
+        "not-met",
+        "relay-prompt"
+      ]
+    },
+    {
+      "state": "prompt",
+      "deliveryHold": "uncertain",
+      "pendingKind": "reply",
+      "expected": [
+        "not-met",
+        "relay-prompt"
+      ]
+    },
+    {
+      "state": "delivered",
+      "deliveryHold": null,
+      "pendingKind": null,
+      "expected": [
+        "met",
+        "relay-delivered",
+        "success"
+      ]
+    },
+    {
+      "state": "delivered",
+      "deliveryHold": null,
+      "pendingKind": "reply",
+      "expected": [
+        "not-met",
+        "relay-payload-pending"
+      ]
+    },
+    {
+      "state": "delivered",
+      "deliveryHold": "attempting",
+      "pendingKind": null,
+      "expected": [
+        "not-met",
+        "relay-delivery-attempting"
+      ]
+    },
+    {
+      "state": "delivered",
+      "deliveryHold": "attempting",
+      "pendingKind": "reply",
+      "expected": [
+        "not-met",
+        "relay-delivery-attempting"
+      ]
+    },
+    {
+      "state": "delivered",
+      "deliveryHold": "uncertain",
+      "pendingKind": null,
+      "expected": [
+        "unknown",
+        "relay-delivery-uncertain"
+      ]
+    },
+    {
+      "state": "delivered",
+      "deliveryHold": "uncertain",
+      "pendingKind": "reply",
+      "expected": [
+        "unknown",
+        "relay-delivery-uncertain"
+      ]
+    },
+    {
+      "state": "expired",
+      "deliveryHold": null,
+      "pendingKind": null,
+      "expected": [
+        "met",
+        "relay-expired",
+        "failure"
+      ]
+    },
+    {
+      "state": "expired",
+      "deliveryHold": null,
+      "pendingKind": "reply",
+      "expected": [
+        "not-met",
+        "relay-payload-pending"
+      ]
+    },
+    {
+      "state": "expired",
+      "deliveryHold": "attempting",
+      "pendingKind": null,
+      "expected": [
+        "not-met",
+        "relay-delivery-attempting"
+      ]
+    },
+    {
+      "state": "expired",
+      "deliveryHold": "attempting",
+      "pendingKind": "reply",
+      "expected": [
+        "not-met",
+        "relay-delivery-attempting"
+      ]
+    },
+    {
+      "state": "expired",
+      "deliveryHold": "uncertain",
+      "pendingKind": null,
+      "expected": [
+        "unknown",
+        "relay-delivery-uncertain"
+      ]
+    },
+    {
+      "state": "expired",
+      "deliveryHold": "uncertain",
+      "pendingKind": "reply",
+      "expected": [
+        "unknown",
+        "relay-delivery-uncertain"
+      ]
+    },
+    {
+      "state": "cancelled",
+      "deliveryHold": null,
+      "pendingKind": null,
+      "expected": [
+        "met",
+        "relay-cancelled",
+        "failure"
+      ]
+    },
+    {
+      "state": "cancelled",
+      "deliveryHold": null,
+      "pendingKind": "reply",
+      "expected": [
+        "not-met",
+        "relay-payload-pending"
+      ]
+    },
+    {
+      "state": "cancelled",
+      "deliveryHold": "attempting",
+      "pendingKind": null,
+      "expected": [
+        "not-met",
+        "relay-delivery-attempting"
+      ]
+    },
+    {
+      "state": "cancelled",
+      "deliveryHold": "attempting",
+      "pendingKind": "reply",
+      "expected": [
+        "not-met",
+        "relay-delivery-attempting"
+      ]
+    },
+    {
+      "state": "cancelled",
+      "deliveryHold": "uncertain",
+      "pendingKind": null,
+      "expected": [
+        "unknown",
+        "relay-delivery-uncertain"
+      ]
+    },
+    {
+      "state": "cancelled",
+      "deliveryHold": "uncertain",
+      "pendingKind": "reply",
+      "expected": [
+        "unknown",
+        "relay-delivery-uncertain"
+      ]
+    }
+  ],
+  "task": [
+    {
+      "status": "succeeded",
+      "expected": [
+        "met",
+        "task-succeeded",
+        "success"
+      ]
+    },
+    {
+      "status": "cancelled",
+      "expected": [
+        "met",
+        "task-cancelled",
+        "failure"
+      ]
+    },
+    {
+      "status": "failed",
+      "expected": [
+        "not-met",
+        "task-reopenable"
+      ]
+    },
+    {
+      "status": "not_started",
+      "expected": [
+        "not-met",
+        "task-reopenable"
+      ]
+    },
+    {
+      "status": "pending",
+      "expected": [
+        "not-met",
+        "task-running"
+      ]
+    },
+    {
+      "status": "running",
+      "expected": [
+        "not-met",
+        "task-running"
+      ]
+    },
+    {
+      "status": "waiting_input",
+      "expected": [
+        "not-met",
+        "task-running"
+      ]
+    },
+    {
+      "status": "verifying",
+      "expected": [
+        "not-met",
+        "task-running"
+      ]
+    },
+    {
+      "status": null,
+      "expected": [
+        "unknown",
+        "session_not_found"
+      ]
+    }
+  ],
+  "verify": [
+    {
+      "status": "passed",
+      "expected": [
+        "met",
+        "verify-passed",
+        "success"
+      ]
+    },
+    {
+      "status": "failed",
+      "expected": [
+        "met",
+        "verify-failed",
+        "failure"
+      ]
+    },
+    {
+      "status": "error",
+      "expected": [
+        "met",
+        "verify-error",
+        "failure"
+      ]
+    },
+    {
+      "status": "not_started",
+      "expected": [
+        "met",
+        "verify-not_started",
+        "failure"
+      ]
+    },
+    {
+      "status": "cancelled",
+      "expected": [
+        "met",
+        "verify-cancelled",
+        "failure"
+      ]
+    },
+    {
+      "status": "running",
+      "expected": [
+        "not-met",
+        "verify-running"
+      ]
+    },
+    {
+      "status": null,
+      "expected": [
+        "unknown",
+        "session_not_found"
+      ]
+    }
+  ],
+  "schedule": [
+    {
+      "status": "completed",
+      "expected": [
+        "met",
+        "schedule-completed",
+        "success"
+      ]
+    },
+    {
+      "status": "failed",
+      "expected": [
+        "met",
+        "schedule-failed",
+        "failure"
+      ]
+    },
+    {
+      "status": "timeout",
+      "expected": [
+        "met",
+        "schedule-timeout",
+        "failure"
+      ]
+    },
+    {
+      "status": "cancelled",
+      "expected": [
+        "met",
+        "schedule-cancelled",
+        "failure"
+      ]
+    },
+    {
+      "status": "running",
+      "expected": [
+        "not-met",
+        "schedule-running"
+      ]
+    },
+    {
+      "status": null,
+      "expected": [
+        "unknown",
+        "session_not_found"
+      ]
+    }
+  ],
+  "branchDeleted": [
+    {
+      "identity": "gone",
+      "expected": [
+        "met",
+        "branch-deleted",
+        "unknown"
+      ]
+    },
+    {
+      "identity": "recreated",
+      "expected": [
+        "met",
+        "branch-recreated",
+        "unknown"
+      ]
+    },
+    {
+      "identity": "same",
+      "expected": [
+        "not-met",
+        "branch-present"
+      ]
+    },
+    {
+      "identity": "present-no-baseline",
+      "expected": [
+        "not-met",
+        "branch-present-no-baseline"
+      ]
+    },
+    {
+      "identity": "diverged",
+      "expected": [
+        "unknown",
+        "branch-diverged"
+      ]
+    },
+    {
+      "identity": "order-uncertain",
+      "expected": [
+        "unknown",
+        "branch-order-uncertain"
+      ]
+    }
+  ],
+  "creationOrder": [
+    {
+      "createdSeconds": 1000,
+      "itemCreatedAtMs": 999999,
+      "expected": "after"
+    },
+    {
+      "createdSeconds": 1000,
+      "itemCreatedAtMs": 1000000,
+      "expected": "same-second"
+    },
+    {
+      "createdSeconds": 1000,
+      "itemCreatedAtMs": 1000999,
+      "expected": "same-second"
+    },
+    {
+      "createdSeconds": 1000,
+      "itemCreatedAtMs": 1001000,
+      "expected": "before"
+    }
+  ],
+  "at": [
+    {
+      "now": 1000,
+      "epochMs": 1000,
+      "expected": [
+        "met",
+        "time-passed",
+        "unknown"
+      ]
+    },
+    {
+      "now": 999,
+      "epochMs": 1000,
+      "expected": [
+        "not-met",
+        "time-not-yet"
+      ]
+    }
+  ]
+}

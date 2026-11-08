@@ -49,6 +49,7 @@ import { v63_migrations } from './v63-session-relays-delivery-attempt';
 import { v64_migrations } from './v64-agent-roles';
 import { v65_migrations } from './v65-agent-instance-creation-keys';
 import { v66_migrations } from './v66-mem-store';
+import { v67_migrations } from './v67-mem-close-records';
 // Issue #4274: v68 — #4222 adds v67 in parallel (PM decision, 2026-11-08).
 import { v68_migrations } from './v68-session-brief-boundaries';
 
@@ -105,5 +106,6 @@ export const migrations: Migration[] = [
   ...v64_migrations,
   ...v65_migrations,
   ...v66_migrations,
+  ...v67_migrations,
   ...v68_migrations,
 ];

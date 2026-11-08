@@ -18,7 +18,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { BUG_LABEL, CATALOG_LABEL, METRICS_LABEL } from '@/lib/agent-health/dispatch';
-import { dispatchRecordPath, parseDispatchRecord } from '@/lib/agent-health/dispatch-record';
+import { readDispatchRecordOfDay } from '@/lib/agent-health/dispatch-record';
 import {
   compareMetrics,
   countHighAdvisories,
@@ -337,8 +337,8 @@ export async function main(argv: readonly string[], overrides: Partial<ReleaseRe
   const out =
     options.out ?? path.join(mainDir as string, 'workspace', 'agent-health', date, 'release-readiness.html');
 
-  // --- dispatch record (#3045)
-  const dispatch = parseDispatchRecord(readText(dispatchRecordPath(stateDir, date)));
+  // --- dispatch record (#3045); the day's sent marker wins over the record file (#4243)
+  const dispatch = readDispatchRecordOfDay(readText, stateDir, date);
 
   // --- git: develop HEAD, last release tag, fragments
   const ref = facts.gitOk(['rev-parse', '--verify', '--quiet', 'origin/develop']) ? 'origin/develop' : 'HEAD';
