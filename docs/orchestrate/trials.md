@@ -49,6 +49,7 @@
 ## 5-2b 整合性レビューの進め方と記録
 
 - **Codex のセッション:** 1 つを直列で使う。依頼は 1 本ずつ（ロック）。待ち時間を記録する
+- **送り先:** `--wt` に Issue の worktree を渡さない（#4259）。そこで起動した Codex のセッションは env-clean にワーカーの残りと数えられる。既定（`mycodebranchdesk`）か `--instance codex-2` を使う。同じ worktree を指すと何も送らず exit 2
 - **依頼の手順:** run ごとに `review-<N>.sh` を手で写さず、`scripts/orchestrate/consistency-review.mjs` を 1 回呼ぶ（#3528）。
   `--brief` には、その Issue の変更の種類と特に見たいこと（数行）だけを書く。状態ファイルがある run は `--routes <plan-check.mjs routes の出力>` を足すと、依頼文に「割込み順序と読者の一覧」が入る（無いときは「渡されていない」と入る。#3884）。依頼文の残り（目的・対象・手順・出力の形・触ってはいけないもの・`DONE:` の締め方）は
   雛形 `scripts/orchestrate/templates/consistency-review.md` から作られ、再レビュー（`--rereview --previous <前回の review-<N>.md>`）は

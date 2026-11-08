@@ -104,6 +104,16 @@ export const START_READY_MAX_POLLS = 30;
  */
 export const START_MESSAGE =
   'レビュー役のセッションの起動です（作業の依頼ではありません）。まだ何も実行せず、ファイルにも触らず、「OK」とだけ返してください。依頼は次のメッセージで送ります。';
+/**
+ * The output of a starting `send` that was refused before anything was typed
+ * (exit 99, `sendOutcome=not_sent`, `prompt-not-ready`; the real
+ * review-4218.start.err, #4259). Only this one is sent again, once.
+ */
+export function isPromptNotReady(sent) {
+  const text = `${sent?.stderr ?? ''}\n${sent?.stdout ?? ''}`;
+  return sent?.status === 99 && /sendOutcome=not_sent/.test(text) && /prompt-not-ready/.test(text);
+}
+
 /** `ask`'s exit code for an upstream fault on the screen (WaitExitCode.UPSTREAM_FAULT, #1839). */
 export const ASK_UPSTREAM_FAULT_EXIT = 11;
 export const LOCK_POLL_SEC = 15;
@@ -508,6 +518,15 @@ function waitReady({ run, sleep, cli, wt, cwd, instance, start }) {
     const { status, notRunning } = readReviewer(run(cli, ['capture', wt, '--instance', instance, '--json'], { cwd }));
     if (i === 0 && started === null && notRunning) {
       started = start();
+      if (started.status !== 0 && isPromptNotReady(started)) {
+        // The launch was not typed into a prompt yet (#4259): wait for ready, then send the starting message once more.
+        let seenReady = false;
+        for (let j = 0; j < START_READY_MAX_POLLS && !seenReady; j++) {
+          sleep(READY_POLL_SEC * 1000);
+          seenReady = readReviewer(run(cli, ['capture', wt, '--instance', instance, '--json'], { cwd })).status === 'ready';
+        }
+        if (seenReady) started = start();
+      }
       if (started.status !== 0) return { ready: false, started, maxPolls };
       maxPolls = START_READY_MAX_POLLS;
       i = -1;
@@ -631,6 +650,14 @@ export function main(argv, deps = {}) {
     return outcome('usage').exit;
   }
   const o = parsed.options;
+  const reviewed = path.resolve(cwd, o.worktree ?? path.join('..', `commandmate-issue-${workItemName(Number(o.issue), o.item)}`));
+  if (o.wt === path.basename(reviewed) || o.wt === `commandmate-issue-${workItemName(Number(o.issue), o.item)}`) {
+    // The session left in the Issue's worktree is counted by env-clean as the worker's (#4259).
+    error(
+      `--wt ${o.wt} is the worktree under review; a reviewer started there stays behind and fails env-clean. Nothing sent. Omit --wt (default ${DEFAULT_REVIEWER_WT}) or use --instance codex-2 there.\n${USAGE}`
+    );
+    return outcome('usage').exit;
+  }
   if (o.instanceGiven) {
     const resolved = resolveInstance(run, o, cwd);
     if (resolved.error) {
@@ -697,7 +724,7 @@ export function main(argv, deps = {}) {
       fs.writeFileSync(file('.start.out'), sent.stdout);
       fs.writeFileSync(file('.start.err'), sent.stderr);
       log(`${label}: ${o.instance} was not running; start exit=${sent.status} (no brief)`);
-      return { status: sent.status };
+      return { status: sent.status, stdout: sent.stdout, stderr: sent.stderr };
     };
     const waited = waitReady({ run, sleep, cli: o.cli, wt: o.wt, cwd, instance: o.instance, start });
     if (waited.started && waited.started.status !== 0) {
