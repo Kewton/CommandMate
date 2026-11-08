@@ -311,7 +311,14 @@ export function setAgentInstances(
         !previousPairs.has(`${instance.id}\u0000${instance.cliTool}`) &&
         !getInstanceIncarnation(db, worktreeId, instance.id)
       ) {
-        startInstanceIncarnation(db, worktreeId, instance.id, instance.cliTool, now);
+        startInstanceIncarnation(
+          db,
+          worktreeId,
+          instance.id,
+          instance.cliTool,
+          now,
+          rosterIssue(previousPairs.size === 0, instance.id, instance.cliTool)
+        );
       }
     }
     db.prepare(`DELETE FROM agent_instances WHERE worktree_id = ?`).run(worktreeId);
@@ -341,6 +348,18 @@ export function setAgentInstances(
     });
   });
   replace();
+}
+
+/**
+ * How a roster save issues a new incarnation (Issue #4222, S6・2nd review ①).
+ *
+ * The first save of a worktree whose roster was derived (no rows) copies the derived
+ * primaries into it: a primary pair (`id === tool`) may have been running for long
+ * before, so its incarnation is `lazy`, which is no evidence that it was born after an
+ * item. An id that is not a primary is never derived, so it is new: `roster`.
+ */
+function rosterIssue(firstSave: boolean, instanceId: string, cliToolId: string): 'roster' | 'lazy' {
+  return firstSave && instanceId === cliToolId ? 'lazy' : 'roster';
 }
 
 /**
@@ -381,7 +400,7 @@ export function addAgentInstance(
     const incarnation = getInstanceIncarnation(db, worktreeId, instance.id);
     if (!incarnation || incarnation.cliToolId !== instance.cliTool) {
       archiveNowSlots(db, [worktreeId], { instanceIds: [instance.id], now, deleteRows: true });
-      startInstanceIncarnation(db, worktreeId, instance.id, instance.cliTool, now);
+      startInstanceIncarnation(db, worktreeId, instance.id, instance.cliTool, now, rosterIssue(count === 0, instance.id, instance.cliTool));
     }
   });
   add();
