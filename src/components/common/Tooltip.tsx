@@ -472,6 +472,39 @@ export function Tooltip({
     };
   }, [visible, updatePosition]);
 
+  // [Issue #4256] While open, re-place the bubble when the trigger moved or
+  // resized (e.g. a pane header button swapping sides) or the text changed. No
+  // polling: this runs after each render of the owner, compares the trigger's
+  // rect and the content with the last placement, and measures only on change.
+  // A size-only change of the trigger without a render is covered by the
+  // ResizeObserver below.
+  const placedKeyRef = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (!visible) {
+      placedKeyRef.current = null;
+      return;
+    }
+    const trigger = wrapperRef.current;
+    if (!trigger) return;
+    const r = trigger.getBoundingClientRect();
+    const key = `${r.left}|${r.top}|${r.width}|${r.height}|${content}`;
+    if (placedKeyRef.current === null) {
+      placedKeyRef.current = key;
+      return;
+    }
+    if (placedKeyRef.current !== key) {
+      placedKeyRef.current = key;
+      updatePosition();
+    }
+  });
+
+  useEffect(() => {
+    if (!visible || typeof ResizeObserver === 'undefined' || !wrapperRef.current) return;
+    const observer = new ResizeObserver(() => updatePosition());
+    observer.observe(wrapperRef.current);
+    return () => observer.disconnect();
+  }, [visible, updatePosition]);
+
   // [Issue #2319] Escape dismisses a visible bubble (WAI-ARIA tooltip pattern).
   // Bound on `window` rather than the wrapper so it also fires in the hover
   // case, where focus is on some other element entirely.
