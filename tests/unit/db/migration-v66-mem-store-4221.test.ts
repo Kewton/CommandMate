@@ -8,6 +8,8 @@ import Database from 'better-sqlite3';
 import { runMigrations, CURRENT_SCHEMA_VERSION } from '@/lib/db/db-migrations';
 import { getWorktreeChildTables } from '@/lib/db/migrations/worktree-child-tables';
 import { v66_migrations } from '@/lib/db/migrations/v66-mem-store';
+// Issue #4222: v67 builds on v66, so going back to before v66 goes back through v67 first.
+import { v67_migrations } from '@/lib/db/migrations/v67-mem-close-records';
 
 describe('migration v66: mem store', () => {
   let db: Database.Database;
@@ -38,6 +40,8 @@ describe('migration v66: mem store', () => {
     try {
       fresh.pragma('foreign_keys = ON');
       runMigrations(fresh);
+      v67_migrations[0].down!(fresh);
+      fresh.prepare('DELETE FROM schema_version WHERE version = 67').run();
       v66_migrations[0].down!(fresh);
       fresh.prepare('DELETE FROM schema_version WHERE version = 66').run();
       fresh.prepare(`INSERT INTO worktrees (id, name, path, repository_path, repository_name) VALUES ('w', 'w', '/p', '/r', 'r')`).run();
@@ -65,6 +69,7 @@ describe('migration v66: mem store', () => {
   });
 
   it('rolls back to the v65 shape', () => {
+    v67_migrations[0].down!(db);
     v66_migrations[0].down!(db);
     expect(columns('session_notes').sort()).toEqual(['instance_id', 'note', 'updated_at', 'worktree_id']);
     const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'mem_%'").all() as unknown[]).length;

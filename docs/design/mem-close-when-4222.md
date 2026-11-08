@@ -476,7 +476,7 @@ DB を使う試験は `os.tmpdir()` の `mkdtempSync` の中の DB で、`afterE
 | P2-3 | 区分は知らせごとに持ち、受領の区分はその値 | 1 つの brief に作成者の知らせ m1 と前の世代の知らせ m2 を入れて `sent` → m1 は `acknowledged_by='creator'`、m2 は `'successor'` | 作成者の知らせだけの brief は全部 `creator`。2 回目の settle は何もしない |
 | P2-4 | 「後から生まれた」の証拠は roster の発行（`issued_by='roster'`）か同じ枠の置き換えだけ。一覧は書かない | 項目より前から居る派生の primary（世代の行なし）が、項目の後に mem を初めて書いて `'lazy'` の世代を得る → (b) の `successor` にならない。`listMemNoticesFor` の前後で DB のどの表の行も変わらない（世代を作らない・古い試みを戻さない） | 項目の後に roster へ追加した instance は (b) で受け取れる。作成者の枠の次の世代（同じ instance ID、行が無い・`'lazy'` でも）は (a) で受け取れる。作成者の tmux を kill して同じ世代で起動し直す → `creator` のまま |
 | P2-5 | 呼び手の期限と共有の子の寿命を分ける。最後の呼び手が離れたら回収 | §7 の G5 の陽性 | §7 の G4・G5 の陰性 |
-| R2-① | 最初の roster の保存で写された primary の世代は「後から生まれた」の証拠にしない | 派生の primary だけの worktree で項目を作る → 作成者を終わらせる → 同じブランチの別の worktree で、前から居た派生の primary を `codex-2` の追加とともに初めて roster に保存（`addInstanceWithRole` → `setAgentInstances`）→ その primary の世代は `'lazy'` で、(b) の `successor` にならない（直す前の実装では `'roster'` で受け取れる） | 同じ保存で足した `codex-2` は `'roster'` で (b) の `successor`。roster が既にある worktree へ足した primary は `'roster'` |
+| R2-① | 最初の roster の保存で写された primary の世代は「後から生まれた」の証拠にしない | 派生の primary だけの worktree で項目を作る → 作成者を終わらせる → 同じブランチの別の worktree で、前から居た派生の primary を `codex-2` の追加とともに初めて roster に保存（`createInstanceWithRole` → `setAgentInstances`）→ その primary の世代は `'lazy'` で、(b) の `successor` にならない（直す前の実装では `'roster'` で受け取れる） | 同じ保存で足した `codex-2` は `'roster'` で (b) の `successor`。roster が既にある worktree へ足した primary は `'roster'` |
 | R2-② | 項目と同じ秒の ref の作成は前後を言えないので `same` にしない | 項目の `created_at` と同じ秒に作成の行がある local のブランチ（祖先の判定は `same` を示す）→ `deleted` は不成立にせず不明（`branch-order-uncertain`）、`merged` は H を決めず不明（直す前の実装では `same` で `merged` が成立しうる） | 作成の秒が項目より確実に前（1 秒以上前）→ 祖先の判定どおり `same`。確実に後 → `recreated` |
 | R2-③ | 予約の結果は配送不明の印を持ち、C が予算に数えた印と違う知らせは予約しない | `settle('indeterminate')` の後の知らせ → 一覧の `uncertain` が真、予約の `reserved` も真。一覧で `uncertain:false` と読んだ後に古い試みが切れて印が真になる知らせ → 予約されず `pending` のまま（直す前の実装では印の無い本文の予算のまま予約される） | 印が変わらなければ選んだ ID がすべて予約され、`reserved` の印は一覧と同じ |
 
@@ -551,3 +551,69 @@ Codex の事前レビュー 1 回目（2026-11-08、P1 4 件・P2 5 件。`works
 | ② | 項目の作成と同じ秒のブランチの作り直しを見逃す | 採る | 作成の秒が項目と同じ秒なら `order-uncertain`（不明）にし、`same` にしない（§1.4）。確実に後・確実に前だけを使う |
 | ③ | 予約で増えた配送不明の情報が最終の本文へ届く契約が無い | 採る | 一覧が配送不明の印を（古い試みの `+1` を先に数えて）返し、予約は C が予算に数えた印と同じ知らせだけを取り、`reserved` に印を返す（§3.5）。印が変わった知らせは予約しないので、本文は短くなるだけで予算を超えない |
 
+
+---
+
+## 14. 実装で変えた点・細かく決めた点（実装の契約で追記）
+
+| # | 設計の文面 | 実装 | 理由 |
+|---|---|---|---|
+| I1 | §8.2 `present.ts` の項目の形に `condition` を足す | `MemListResponse.conditions`（項目の ID → `MemConditionView`）に置き、`presentMemItem` と withheld の形は変えない | withheld の残す欄の表（A の `MEM_WITHHELD_KEPT_KEYS`）を変えずに済む。語は自由入力を含まないので別の欄で足りる |
+| I2 | §1.6 schedule の読み関数を `src/lib/db/` の既存の schedule の DB 関数の隣に置く | `mem-close-db.ts` の `readScheduleRunStatus`（読みだけ） | 契約の scope に schedule の DB ファイルが無い |
+| I3 | §3.1 の schema | `mem_notice_attempts.recipient_worktree_incarnation` と `mem_notices.version` を足した | 試みの受取先の worktree の作り直しを settle で見分ける（不変条件 (a)）。人の引き取りを版で照合する（(c)、§3.5 の `acknowledgeMemNoticeByHuman(…, version)`） |
+| I4 | §3.5 settle | `sent` でも、受取先の worktree が作り直されていた・mode が `on` でないときは受領にせず `pending` に戻す | 知らせを失わないほうへ寄せる（不変条件 (a)・(b)） |
+| I5 | §3.5 人の引き取り | `pending` の知らせだけ（`reserved` は `state_forbids`） | 送信中の試みと受領が二重にならない |
+| I6 | §7 G1「`setTimeout(` は `eval-deadline.ts` だけ」 | 例外の表に `screen-client.ts`（#4221 の画面の fetch の期限、ブラウザ側で `finally` で消す）を理由つきで置いた | サーバの評価の経路ではない。A のコードは変えない |
+| I7 | §9.2 purge の dry-run に知らせの件数 | `notices` は 1 件以上のときだけ応答に出す | A の応答の形（`{ok, dryRun, counts}`）を固定する試験を変えない |
+| I8 | §4 受領の mode | 予約は、知らせの root の mode に加えて、受取先の読む範囲の全 root の mode が `on` のときだけ | 受取先のブランチが `off` の間に brief へ載せない |
+| I9 | §3.2 の mode の決め直し | close は項目の root と対象の members の全 root。知らせの書き込み（予約・settle・人）は知らせの root | 知らせは root を 1 つしか持たない（A §9.5 の保存先） |
+| I10 | §1.4 `merged` | `tipAtCreate` が空の `merged`（A は保存を断るので通常は無い）は不明（`schema_unknown`）。`into` の ref が無い：local は不成立、remote は PR の証拠へ | 根拠の無いものを成立にしない |
+| I11 | §1.6 `verify:<run id>` | 数字（1〜16 桁）だけを受ける（`parseSessionId`） | `getVerificationRun` は数値の ID |
+| I12 | §1.4 `merged` の `recreated` | 不明（`branch-gone-unmerged-unknown`） | 元のブランチの merge を言えない |
+| I13 | §3.3 (b)（2 回目 ①） | 最初の roster の保存の判定は「保存の前に `agent_instances` の行が 0 件」 | 派生の roster は行を持たない（`resolveAgentInstances`）。primary の判定は `instance_id === cli_tool_id`（#868） |
+
+---
+
+## 15. 共通規則の全読者（実装の後に、5-2b の前に書く）
+
+B が足した・変えた共通の規則ごとに、読む・書く全経路と、規則に追従しているか。C・D・G は未実装なので、その口（関数）までを書く。
+
+### 15.1 世代の照合（worktree の寿命・instance の世代・`issued_by`）
+
+| 規則の関数 | 呼び出し元 | API / CLI / 画面 | 追従 |
+|---|---|---|---|
+| `fixRequestLifetime`（`service.ts`、要求の到着時に worktree の世代を固定）→ `closeItemByCondition` の `alive` | `memList`・`memCheck` | `GET /api/worktrees/:id/mem`・`POST /api/worktrees/:id/mem/check`・`mem list`・`mem check` | 追従（`close-entrances-4222` の (a)） |
+| 同上（repository の経路は `alive = null`） | `memList`（`via: 'repository'`） | `GET /api/repositories/:id/mem?branch=` | 追従（worktree を経ないので照合する寿命が無い。mode・版は照合する） |
+| `recipientStillHere`（`mem-close-db.ts`） | `reserveNotices` ← `reserveMemNotices` | D（未実装） | 追従（(a)） |
+| settle の `sameWorktree`（試みの `recipient_worktree_incarnation`） | `settleNoticeAttempt` ← `settleMemNoticeAttempt` | D（未実装） | 追従（(a)。作り直しなら受領にせず `pending`） |
+| `noticeAudience`（作成者は `origin_incarnation`、生存は `instanceIncarnationAlive`、(a) は `resolveWorktreeIdWithAlias`、(b) は `issued_by='roster'` と `created_at`） | `listNoticesFor`・`reserveNotices`・`memNoticeAudience` | C・D（未実装）、G は `memNoticeAudience` を呼ぶ口 | 追従（判定の写しは無い。`grep` で `origin_incarnation` を比べる箇所は `noticeAudience` だけ） |
+| `rosterIssue`（`agent-instances-db.ts`、最初の保存の primary は `lazy`） | `setAgentInstances`・`addAgentInstance` | `PATCH /api/worktrees/:id`（roster の全置換、`route.ts` の `setAgentInstances`）・`POST /api/worktrees/:id/instances/roles` 等の `createInstanceWithRole`（`management.ts`）→ `setAgentInstances` | 追従（`startInstanceIncarnation` の全呼び出しが `issuedBy` を名指す、`close-entrances-4222` の試験） |
+| `settleActorIncarnation`（`mem-db.ts`、`lazy`） | `createMemItem`・`replaceNowSlot` | mem の書き込みの全経路 | 追従 |
+| `listUndeliveredNotices` | `listUndeliveredMemNotices` ← `memUndeliveredNotices` | `GET /api/repositories/:id/mem/notices?branch=` | 追従（受取先を持たないので `audience: null`。判定はしない） |
+
+### 15.2 mode の判定
+
+| 規則の関数 | 呼び出し元 | API / CLI / 画面 | 追従 |
+|---|---|---|---|
+| 入口：`evaluateMemConditions` の `target.mode === 'on'` | `memList`（`off` は 409、`derived` は評価しない）・`memCheck`（`on` 以外は 409） | list・check の API と CLI | 追従（(b)。`off`・`derived` で `execFile` 0 回） |
+| `memModeOnFor`（`decideRootMode` を DB から読み直す） | `closeItemByCondition`（項目の root ＋ members）・`reserveNotices`（受取先の全 root ＋ 知らせの root）・`settleNoticeAttempt`・`acknowledgeNoticeByHuman` | 上記と D・G | 追従（(b)） |
+| 読みだけの一覧 | `listNoticesFor`・`listUndeliveredNotices` | C・G | 規則の対象外（§4：読みは出す） |
+
+### 15.3 評価の 3 値
+
+| 規則の関数 | 呼び出し元 | API / CLI / 画面 | 追従 |
+|---|---|---|---|
+| `condition-evaluators.ts`（型ごとの判定、理由の語は `src/types/mem.ts` の定数） | `evaluate.ts` の `evaluateOne` | — | 追従（fixture `close-when-eval-v1.json`） |
+| 閉じるのは `met` だけ・`unknown` は閉じない・decision は `memTransition` | `evaluateMemConditions` | `memList`（`conditions`）・`memCheck`（`results`） | 追従 |
+| 表示 | `conditionText`（`src/cli/commands/mem.ts`） | `mem list`・`mem check` | 追従（語で表示し、文面で分岐しない） |
+
+### 15.4 受領の確定
+
+| 規則の関数 | 呼び出し元 | API / CLI / 画面 | 追従 |
+|---|---|---|---|
+| `settleNoticeAttempt`（その試みの知らせだけ・`attempt_audience` で区分・2 回目は何もしない） | `settleMemNoticeAttempt` | D（未実装） | 追従 |
+| `acknowledgeNoticeByHuman`（版の照合・`pending` だけ） | `acknowledgeMemNoticeByHuman` ← `memAcknowledgeNotice` | `POST /api/repositories/:id/mem/notices/:noticeId/acknowledge`（画面の印） | 追従 |
+| 受領の後に出さない | `listNoticesFor`・`listUndeliveredNotices`（`state != 'acknowledged'`） | C・G | 追従 |
+| 保持の削除（30 日） | `pruneRetention`（close・reserve・settle・人の引き取りの transaction の中） | — | 追従（未受領は消さない） |
+
+未追従は見つからなかった（探した対象：`src/` の `mem_notices`・`mem_notice_attempts`・`mem_close_records`・`issued_by`・`startInstanceIncarnation`・`decideRootMode` を含む全ファイル）。
