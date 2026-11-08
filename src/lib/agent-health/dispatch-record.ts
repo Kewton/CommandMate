@@ -58,15 +58,27 @@ export function dispatchSentMarkerPath(baseDir: string, date: string): string {
   return `${dispatchRecordPath(baseDir, date)}.sent`;
 }
 
-/** The day's record as every reader must see it: the `sent` marker first, else the record file. */
+/**
+ * The day's record as every reader must see it: the `sent` marker first, else
+ * the record file — and the marker once more after the file, because a marker
+ * published between the two reads may have been followed by a non-sent rename
+ * that the file read saw. The marker is never removed, so a `sent` published
+ * before the file read is always found by the second look.
+ */
 export function readDispatchRecordOfDay(
   readText: (file: string) => string | null,
   baseDir: string,
   date: string
 ): DispatchRecord | null {
-  const marked = parseDispatchRecord(readText(dispatchSentMarkerPath(baseDir, date)));
-  if (marked?.status === 'sent') return marked;
-  return parseDispatchRecord(readText(dispatchRecordPath(baseDir, date)));
+  const marker = dispatchSentMarkerPath(baseDir, date);
+  const markedSent = (): DispatchRecord | null => {
+    const marked = parseDispatchRecord(readText(marker));
+    return marked?.status === 'sent' ? marked : null;
+  };
+  const before = markedSent();
+  if (before) return before;
+  const record = parseDispatchRecord(readText(dispatchRecordPath(baseDir, date)));
+  return markedSent() ?? record;
 }
 
 /** `3050` or `3050-3051-…`: only digits and dashes, so it is safe inside a file name. */
