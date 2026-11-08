@@ -28,6 +28,7 @@ import {
   isHistoryDisplayLimit,
   type HistoryDisplayLimit,
 } from '@/config/history-display-config';
+import { safeLocalStorage } from '@/lib/safe-local-storage';
 
 /** localStorage key for the "show archived messages" toggle (Issue #168). */
 const SHOW_ARCHIVED_STORAGE_KEY = 'commandmate:showArchived';
@@ -64,11 +65,11 @@ export function useHistoryFilters(): UseHistoryFiltersReturn {
   // Issue #168: showArchived toggle state with localStorage persistence
   const [showArchived, setShowArchived] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
-    return localStorage.getItem(SHOW_ARCHIVED_STORAGE_KEY) === 'true';
+    return safeLocalStorage.getItem(SHOW_ARCHIVED_STORAGE_KEY) === 'true';
   });
   const handleShowArchivedChange = useCallback((show: boolean) => {
     setShowArchived(show);
-    localStorage.setItem(SHOW_ARCHIVED_STORAGE_KEY, String(show));
+    safeLocalStorage.setItem(SHOW_ARCHIVED_STORAGE_KEY, String(show));
   }, []);
 
   // Issue #725: HistoryPane "User only" filter toggle with localStorage persistence.

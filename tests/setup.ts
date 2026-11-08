@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import '@testing-library/jest-dom/vitest';
+import { AGENT_CORRELATION_ENV_KEYS } from '../src/lib/security/env-sanitizer';
 import {
   REAL_SHELL_TEST_TIMEOUT_MS,
   startsRealSubprocess,
@@ -50,6 +51,21 @@ if (currentTestPath !== undefined) {
       hookTimeout: REAL_SHELL_TEST_TIMEOUT_MS,
     });
   }
+}
+
+// Issue #4275: drop the agent correlation keys the suite inherited.
+//
+// The suite is run from inside agent tmux sessions (`wait --verify`), where
+// CM_AGENT_WORKTREE_ID / CM_AGENT_INSTANCE_ID / ... name the *agent's* worktree.
+// A test that hands `process.env` to a child then reads the parent agent's
+// identity (measured in #4266: worktree-id `mycodebranchdesk`, instance `codex`).
+// Decision: delete them here for every test file rather than having each test
+// save them, because a per-test list is a hole the next test reopens. A test
+// that wants a value sets it itself (this runs before the test file does), so
+// tests that read an explicit correlation key are unaffected. The key list is
+// imported from the module that defines it, not copied.
+for (const key of AGENT_CORRELATION_ENV_KEYS) {
+  delete process.env[key];
 }
 
 // Issue #1760: keep agent config generation out of the developer's home.

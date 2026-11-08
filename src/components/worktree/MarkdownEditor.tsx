@@ -77,6 +77,7 @@ import {
   isValidSplitRatio,
   isValidBoolean,
 } from '@/types/markdown-editor';
+import { safeLocalStorage } from '@/lib/safe-local-storage';
 
 /**
  * Detect file type from file path extension (Issue #646)
@@ -102,7 +103,7 @@ function getInitialViewMode(initialViewMode?: ViewMode): ViewMode {
   }
 
   if (typeof window !== 'undefined') {
-    const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
+    const stored = safeLocalStorage.getItem(LOCAL_STORAGE_KEY);
     if (stored && isValidViewMode(stored)) {
       return stored;
     }
@@ -555,7 +556,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   const handleViewModeChange = useCallback((mode: ViewMode) => {
     setViewMode(mode);
     if (typeof window !== 'undefined') {
-      localStorage.setItem(LOCAL_STORAGE_KEY, mode);
+      safeLocalStorage.setItem(LOCAL_STORAGE_KEY, mode);
     }
   }, []);
 

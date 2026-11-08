@@ -26,7 +26,7 @@ export interface DispatchRecord {
   schemaVersion: 1;
   /** JST `YYYY-MM-DD`. */
   date: string;
-  /** `sent` handed to orchestrate; `skipped-busy` orchestrate was running; `no-target` nothing to hand. */
+  /** `sent` handed to orchestrate; `skipped-busy` orchestrate was running or Claude 3 was reserved (#4243); `no-target` nothing to hand. */
   status: DispatchStatus;
   /** ISO time of the hand-off (only when `status` is `sent`). */
   sentAt?: string;
@@ -46,6 +46,39 @@ export interface DispatchRecord {
 /** `<baseDir>/dispatch/<date>.json` (`baseDir` is `~/.commandmate/agent-health` in production). */
 export function dispatchRecordPath(baseDir: string, date: string): string {
   return path.join(baseDir, 'dispatch', `${date}.json`);
+}
+
+/**
+ * `<baseDir>/dispatch/<date>.json.sent`: the day's `sent`, created once and
+ * exclusively before the record is written (#4243). A non-sent writer may
+ * briefly overwrite the record before it writes the `sent` back, so every
+ * reader goes through {@link readDispatchRecordOfDay}.
+ */
+export function dispatchSentMarkerPath(baseDir: string, date: string): string {
+  return `${dispatchRecordPath(baseDir, date)}.sent`;
+}
+
+/**
+ * The day's record as every reader must see it: the `sent` marker first, else
+ * the record file — and the marker once more after the file, because a marker
+ * published between the two reads may have been followed by a non-sent rename
+ * that the file read saw. The marker is never removed, so a `sent` published
+ * before the file read is always found by the second look.
+ */
+export function readDispatchRecordOfDay(
+  readText: (file: string) => string | null,
+  baseDir: string,
+  date: string
+): DispatchRecord | null {
+  const marker = dispatchSentMarkerPath(baseDir, date);
+  const markedSent = (): DispatchRecord | null => {
+    const marked = parseDispatchRecord(readText(marker));
+    return marked?.status === 'sent' ? marked : null;
+  };
+  const before = markedSent();
+  if (before) return before;
+  const record = parseDispatchRecord(readText(dispatchRecordPath(baseDir, date)));
+  return markedSent() ?? record;
 }
 
 /** `3050` or `3050-3051-…`: only digits and dashes, so it is safe inside a file name. */

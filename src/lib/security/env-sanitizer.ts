@@ -102,9 +102,13 @@
  *
  *  1. `tests/unit/lib/agent-launch-plan-secrets-1933.test.ts` builds all seven
  *     `prepareLaunch` plans and asserts their env keys are **exactly**
- *     `AGENT_CORRELATION_ENV_VARS` plus `AGENT_LAUNCH_CONFIG_ENV_VARS`. A source
- *     that starts writing a new variable — in any namespace — goes red there, by
- *     name.
+ *     `AGENT_CORRELATION_ENV_VARS` plus `AGENT_LAUNCH_CONFIG_ENV_VARS` for a
+ *     default launch, and exactly those plus
+ *     `AGENT_LAUNCH_CONDITIONAL_CONFIG_ENV_VARS` (`COPILOT_HOME`, written only
+ *     when the configured one is relative — Issue #4210) under that setting. A
+ *     source that starts writing a new variable — in any namespace — goes red
+ *     there, by name. The config redirects are not stripped here: they say
+ *     where a tool reads its own settings, not who started it.
  *  2. `tests/unit/security/child-process-agent-env-1996.test.ts` takes that
  *     declared list and proves, with a real child process, that none of it is
  *     readable. Deleting a name from {@link AGENT_CORRELATION_ENV_KEYS} does not
