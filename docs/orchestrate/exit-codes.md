@@ -150,3 +150,12 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
 別の worktree の `unit` / `integration` / `unit-related` が終わってから、同じ行の precheck を走らせ直す（`skip` は再利用されない）。
 しきい値と待ちの記録は [ci-merge.md の 6-1-1](./ci-merge.md) を見る。
 `merge-pr.mjs` が自分で取り込んだ HEAD の precheck では起きない（重い段はロックを取らずに `<段>=ci` と記録し、PR の CI に任せる。#4265、[ci-merge.md の 6-2 取り込み後の重い段](./ci-merge.md)）。
+
+## エラーハンドリング表の個別の行
+
+| env-clean だけが FAIL（exit 20） | `capture --prompts` と違反項目の時刻で帰属を判定（複数の worktree に同じ項目が出ると `wait-verify.mjs` と `run-log.mjs status` が外部要因の候補と出す）。ワーカー起因でなければ合格扱いにし、根拠を PR と summary に書く（3-4） |
+| 再指示の後の検証で scope が SKIP（`was not attached to it`）／env-clean が `no baseline snapshot exists for this run` | task に紐づいていない。`verify --task <task id>` で検証し直す（3-4） |
+| 作業証跡ゼロ（exit 21） | captureでcomposer未確定・権限プロンプト・未起動を切り分け（Phase 3-4） |
+| send が exit 99（`prompt not ready`） | 未送信。**待つ前に capture で画面を見て**、信頼ダイアログ / 既にプロンプト / まだ起動中で分岐する（3-1 の表）。task id は再送のたびに差し替える |
+| Command Code の権限の既定が `ask`（launch-worker が exit 45） | 何も送っていない。利用者に `ask` 以外にしてもらって送り直す（docs/orchestrate/command-code.md） |
+| 契約エラー（send が exit 2） | 契約の全エラーが一度に出るので、`docs/design/task-contract.md` と突き合わせて修正し再送 |
