@@ -457,5 +457,52 @@
       "referenceRepository": "Repository: {path} ({tool})",
       "referenceSystem": "System default: {tool}"
     }
+  },
+  "mem": {
+    "toggle": "mem",
+    "toggleLabel": "mem settings for {name}",
+    "loading": "Loading…",
+    "loadError": "Could not read the mem settings.",
+    "description": "Decide per branch whether mem is used: the branch override, then the rules (the first that matches from the top), then off. Off by default.",
+    "limits": "Only this screen changes the mode. A process with the same OS rights (agents included) can still write the database or the API directly; that is not prevented.",
+    "mode": {
+      "off": "off (not used)",
+      "derived": "derived (derived state only)",
+      "on": "on (used)"
+    },
+    "rules": {
+      "title": "Branch rules",
+      "none": "No rules (everything is off).",
+      "match": "Match",
+      "glob": "Branch name (glob)",
+      "detached": "Detached HEAD",
+      "pattern": "Pattern (* stays within /, ** crosses it)",
+      "modeLabel": "mode",
+      "up": "Move up",
+      "down": "Move down",
+      "remove": "Remove rule",
+      "add": "Add rule"
+    },
+    "features": {
+      "title": "Features",
+      "injectOnStart": "Insert at start",
+      "promptOnEvents": "Prompts from actions",
+      "popup": "Pop-ups"
+    },
+    "save": "Save rules and features",
+    "overrides": {
+      "title": "Branch overrides",
+      "none": "No overrides.",
+      "inherit": "Follow the rules",
+      "branch": "Branch name",
+      "add": "Add override",
+      "remove": "Remove the override for {branch}"
+    },
+    "status": {
+      "saved": "Saved.",
+      "conflict": "Changed elsewhere. The latest settings are shown; save again.",
+      "invalid": "Some values cannot be stored (check the patterns and branch names).",
+      "failed": "Could not save."
+    }
   }
 }

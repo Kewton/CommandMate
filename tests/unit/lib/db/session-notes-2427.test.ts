@@ -47,6 +47,12 @@ import {
 import type { AgentInstance } from '@/lib/cli-tools/types';
 import type { Worktree } from '@/types/models';
 
+/**
+ * Issue #4221 (2nd review 9): a plain note now also carries its version and `mem: null`.
+ * `text` and `updatedAt` are still compared exactly; the added fields are accepted, not ignored.
+ */
+const plainNote = (text: string, updatedAt: number) => ({ text, updatedAt, version: expect.any(Number), mem: null });
+
 const WT = 'wt-2427-notes';
 const OTHER_WT = 'wt-2427-other';
 
@@ -148,8 +154,8 @@ describe('session notes (Issue #2427)', () => {
       const at = Date.UTC(2026, 8, 8, 5, 32);
       const stored = setSessionNote(db, WT, 'codex-2', '#2427 の DB 層', at);
 
-      expect(stored).toEqual({ text: '#2427 の DB 層', updatedAt: at });
-      expect(getSessionNote(db, WT, 'codex-2')).toEqual({ text: '#2427 の DB 層', updatedAt: at });
+      expect(stored).toEqual(plainNote('#2427 の DB 層', at));
+      expect(getSessionNote(db, WT, 'codex-2')).toEqual(plainNote('#2427 の DB 層', at));
     });
 
     it('answers null for a session nobody annotated', () => {
@@ -160,7 +166,7 @@ describe('session notes (Issue #2427)', () => {
       setSessionNote(db, WT, 'claude', 'first', 1_000);
       setSessionNote(db, WT, 'claude', 'second', 2_000);
 
-      expect(getSessionNote(db, WT, 'claude')).toEqual({ text: 'second', updatedAt: 2_000 });
+      expect(getSessionNote(db, WT, 'claude')).toEqual(plainNote('second', 2_000));
       const rows = db
         .prepare('SELECT COUNT(*) AS count FROM session_notes WHERE worktree_id = ?')
         .get(WT) as { count: number };
@@ -253,8 +259,8 @@ describe('session notes (Issue #2427)', () => {
       setSessionNote(db, WT, 'codex-3', 'B', 20);
 
       expect(getSessionNotesByWorktree(db, WT)).toEqual({
-        claude: { text: 'A', updatedAt: 10 },
-        'codex-3': { text: 'B', updatedAt: 20 },
+        claude: plainNote('A', 10),
+        'codex-3': plainNote('B', 20),
       });
     });
 
@@ -263,8 +269,8 @@ describe('session notes (Issue #2427)', () => {
       setSessionNote(db, OTHER_WT, 'claude', 'B', 20);
 
       expect(getAllSessionNotes(db)).toEqual({
-        [WT]: { claude: { text: 'A', updatedAt: 10 } },
-        [OTHER_WT]: { claude: { text: 'B', updatedAt: 20 } },
+        [WT]: { claude: plainNote('A', 10) },
+        [OTHER_WT]: { claude: plainNote('B', 20) },
       });
     });
 
@@ -291,8 +297,8 @@ describe('session notes (Issue #2427)', () => {
       ]);
 
       expect(getSessionNotesByWorktree(db, WT)).toEqual({
-        claude: { text: 'DB 層', updatedAt: 10 },
-        'codex-2': { text: 'レビュー中', updatedAt: 20 },
+        claude: plainNote('DB 層', 10),
+        'codex-2': plainNote('レビュー中', 20),
       });
     });
 
@@ -305,7 +311,7 @@ describe('session notes (Issue #2427)', () => {
         { id: 'codex-2', cliTool: 'codex', alias: 'レビュー担当', order: 2 },
       ]);
 
-      expect(getSessionNote(db, WT, 'codex-3')).toEqual({ text: '調査ログを読む', updatedAt: 30 });
+      expect(getSessionNote(db, WT, 'codex-3')).toEqual(plainNote('調査ログを読む', 30));
     });
 
     it('keeps the surviving notes when an instance is added', () => {
@@ -316,7 +322,7 @@ describe('session notes (Issue #2427)', () => {
         { id: 'codex-4', cliTool: 'codex', alias: '', order: 3 },
       ]);
 
-      expect(getSessionNote(db, WT, 'claude')).toEqual({ text: 'DB 層', updatedAt: 10 });
+      expect(getSessionNote(db, WT, 'claude')).toEqual(plainNote('DB 層', 10));
     });
 
     it('keeps the surviving notes when a NEIGHBOUR is removed', () => {
@@ -325,7 +331,7 @@ describe('session notes (Issue #2427)', () => {
 
       setAgentInstances(db, WT, [{ id: 'claude', cliTool: 'claude', alias: '', order: 0 }]);
 
-      expect(getSessionNote(db, WT, 'claude')).toEqual({ text: 'DB 層', updatedAt: 10 });
+      expect(getSessionNote(db, WT, 'claude')).toEqual(plainNote('DB 層', 10));
     });
 
     /**
@@ -363,7 +369,7 @@ describe('session notes (Issue #2427)', () => {
 
       setAgentInstances(db, WT, []);
 
-      expect(getSessionNote(db, OTHER_WT, 'claude')).toEqual({ text: 'untouched', updatedAt: 99 });
+      expect(getSessionNote(db, OTHER_WT, 'claude')).toEqual(plainNote('untouched', 99));
     });
   });
 

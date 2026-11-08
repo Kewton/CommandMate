@@ -60,7 +60,7 @@ import {
   settleLaunchRole,
   type LaunchRoleSnapshot,
 } from '../session/role-launch';
-import { roleEnvReaderForPane } from '../agent-roles/pane-env';
+import { roleEnvReaderForPane, roleLaunchCwdReaderForPane } from '../agent-roles/pane-env';
 import { typeLaunchLines, type LaunchKeyStep } from './launch-keys';
 
 const execAsync = promisify(exec);
@@ -331,7 +331,13 @@ export abstract class BaseCLITool implements ICLITool {
     // configured it waits for git first; nothing has touched tmux yet.
     const roleTarget = { worktreeId, cliToolId: this.id, instanceId };
     const epoch = readLaunchRoleEpoch(roleTarget);
-    const role = requestLaunchRole(roleTarget, worktreePath, roleEnvReaderForPane(roleTarget));
+    // Issue #4233: and the pane's cwd, which a relative XDG_CONFIG_HOME resolves against.
+    const role = requestLaunchRole(
+      roleTarget,
+      worktreePath,
+      roleEnvReaderForPane(roleTarget),
+      roleLaunchCwdReaderForPane(roleTarget)
+    );
     if (!(role instanceof Promise)) return startWith(role);
     return role.then((resolved) => {
       assertNotStoppedWhileResolving(roleTarget, epoch);

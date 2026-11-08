@@ -12,7 +12,13 @@ import { execFile } from 'child_process';
 import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { isUnderTest } from '@/lib/test-run-detection';
-import { fixedEnvReader, loadRoleComposition, type RoleEnv, type RoleEnvReader } from './composition';
+import {
+  fixedEnvReader,
+  loadRoleComposition,
+  type RoleEnv,
+  type RoleEnvReader,
+  type RoleLaunchCwdReader,
+} from './composition';
 import type { RoleComposition } from './adapters';
 import type { AgentRoleCliTool } from '@/types/agent-roles';
 
@@ -57,6 +63,51 @@ export function roleEnvReaderForPane(target: {
   return tmuxPaneEnvReader(resolveSessionName(target.cliToolId, target.worktreeId, target.instanceId));
 }
 
+/**
+ * The cwd an agent started in this session's pane would get (Issue #4233): the
+ * pane's `#{pane_current_path}` when the session exists, null when it does not
+ * (a new pane is created in the worktree, `cli-tools/base.ts` `createLaunchPane`).
+ *
+ * `#{pane_current_path}`, not `#{session_path}`: a reused pane can have been
+ * `cd`'d since it was created, and a relaunch types the launch line into that
+ * shell (`tmux/tmux.ts` `getSessionWorkingDirectory` explains the difference).
+ * Rejects when tmux answers anything else, so the caller refuses rather than guesses.
+ */
+export function tmuxPaneLaunchCwdReader(sessionName: string): RoleLaunchCwdReader {
+  return () =>
+    new Promise((resolve, reject) => {
+      execFile(
+        'tmux',
+        ['display-message', '-p', '-t', `=${sessionName}:`, '#{pane_current_path}'],
+        { timeout: 5000 },
+        (error, stdout, stderr) => {
+          if (!error) {
+            const dir = String(stdout).trim();
+            if (dir === '') reject(new Error('tmux reported no pane_current_path'));
+            else resolve(dir);
+            return;
+          }
+          const text = String(stderr);
+          if (/can't find (session|window|pane)|no server running|error connecting/i.test(text)) resolve(null);
+          else reject(error);
+        }
+      );
+    });
+}
+
+/**
+ * The launch-cwd reader for one instance's pane. In a test run, none: no test
+ * reaches a real tmux server from here, and no reader means "the worktree".
+ */
+export function roleLaunchCwdReaderForPane(target: {
+  worktreeId: string;
+  cliToolId: CLIToolType;
+  instanceId?: string;
+}): RoleLaunchCwdReader | undefined {
+  if (isUnderTest()) return undefined;
+  return tmuxPaneLaunchCwdReader(resolveSessionName(target.cliToolId, target.worktreeId, target.instanceId));
+}
+
 /** The user's settings, as this instance's pane sees them: its session can have its own env. */
 export function loadPaneComposition(
   worktreeId: string,
@@ -67,5 +118,6 @@ export function loadPaneComposition(
   return loadRoleComposition(cliToolId as AgentRoleCliTool, {
     worktreePath,
     readEnv: roleEnvReaderForPane({ worktreeId, cliToolId, instanceId }),
+    readLaunchCwd: roleLaunchCwdReaderForPane({ worktreeId, cliToolId, instanceId }),
   });
 }
