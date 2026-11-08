@@ -36,14 +36,20 @@ A の既存の export を読むだけにする。
 |---|---|---|
 | `withMemTarget(db, { via: 'worktree', worktreeId }, deps, build)` | `src/lib/mem/target.ts:116` | 所属（repository・ブランチ・detached）・`mode`・`features` を、送信の時点で決める。失敗（`not_registered` / `ambiguous` / `branch_unresolved` / `not_found`）は「付けない」（§7） |
 | `MemTargetResolved.features.injectOnStart` | `src/types/mem.ts:117-121`、既定は全部 `false`（`mem-db.ts:44`） | mode が `derived` / `on` **かつ** `injectOnStart` のときだけ付ける。A がこのスイッチを D 用に既に置いている |
-| `getInstanceIncarnation(db, worktreeId, instanceId)` | `src/lib/mem/incarnation.ts:24` | 差し込みのキーに instance の世代を入れる（ID の再利用で前の境界を引き継がない。A の D5 と同じ理由） |
+| `getInstanceIncarnation(db, worktreeId, instanceId)` | `src/lib/mem/incarnation.ts:24` | 差し込みのキーに instance の世代を入れ、計画・取る・決着で照らす（§3.7。ID の再利用で前の境界を引き継がない。A の D5 と同じ理由） |
+| `decideRootMode(db, repositoryId, branch)` | `src/lib/db/mem-db.ts:254`（同期） | 取る直前の同期の再確認（§3.4 の 3）。読むだけ |
+| `mem_instance_incarnations.created_at` | A の表（`incarnation.ts:47-62` が書く） | D1 自身の DB モジュール（`session-brief-db.ts`）から SELECT だけする。NULL の寿命の判定（§3.7） |
 
-重なりうるが B のファイルではないもの（オーケストレーターが順序を決める）：
+重なりうるが B のファイルではないもの：
 
-- **migration の番号**：D1 は新しい表のため migration を 1 本足す（`src/lib/db/migrations/` と `runner.ts:34` の
-  `CURRENT_SCHEMA_VERSION = 66`）。A の設計では B も終了の記録を「B の migration で足す」（`mem-store-4221.md:468`）。
-  **両方が v67 を名乗ると衝突する**。後にマージする側が番号を繰り上げる
+- **migration の番号（PM の決定、2026-11-08）**：B（#4222）が **v67**、D1 は **v68**
+  （`src/lib/db/migrations/v68-session-brief-boundaries.ts`、`runner.ts:34` の `CURRENT_SCHEMA_VERSION` を 68 に）。
+  **マージは B → D1 の順**。D1 の実装の契約は、B のマージの後に develop を取り込み直し、`runner.ts` の
+  `CURRENT_SCHEMA_VERSION` と `src/lib/db/migrations/` のファイル名で v67 が B のもの・v68 が無いこと（番号の衝突が無いこと）を
+  確かめてから v68 を足す。衝突があれば作らずに止めて報告する
 - `docs/module-reference.md` の行（実装の契約で断片に書く）
+- `src/lib/session/agent-event-state.ts` の `RecordAgentEventOptions` に、出来事の宛先がどう決まったか（§3.3 の「識別つき」）を
+  渡す欄を足す（B のファイルではない。B が同じ欄を触る予定は Issue に無い）
 
 ---
 
@@ -67,6 +73,12 @@ A の既存の export を読むだけにする。
 | (a) 起動の経路 | CommandMate がプロセスを作った。全ツール共通 | `beginAgentSession` は各ツールの作成の経路だけで呼ばれ、再利用の経路では呼ばれない（`agent-session-lifecycle.ts:22-35`）。Claude `claude-session.ts:910`（再利用は `:884-889` で return）、Codex `codex.ts:298`（再利用は `:284`）、Command Code `command-code.ts:283`（再利用は `:274`） |
 | (b) フックの `SessionStart` | 会話の識別（`session_id`）と種類（`source`：`startup` / `clear` / `resume` …） | `source` は `extractSnakeCaseEventDetail` が `detail` に入れる（`hook-event-vocabulary.ts:95,109`）。`recordAgentEvent` の `session_start` の分岐（`agent-event-state.ts:382,393`）が既に「`/clear` も新しい世代」として扱っている。`session_id` は記録されるが ID としては使わない（`agent-event-record.ts:24-31`、`/clear` で変わる：`app/api/hooks/agent-event/route.ts:26-28`） |
 | (c) 送った本文 | CommandMate の送信の経路で reset のコマンドを送った | `sendUserMessage` はすべての「本文を打つ」経路の要（`send-user-message.ts:397-403`）。送ったのが `/clear` 等なら、次の送信は新しい会話へ行く |
+
+(b) は**識別つきの出来事だけ**を証拠にする（事前レビュー②）。対話の起動は相関の鍵を環境に入れ、中継のスクリプトが
+`worktreeId` / `instanceId` を本文に載せる（`scripts/hooks/cmate-agent-event.sh:268-271`）。鍵の無い出来事は `cwd` から
+worktree に解決され、instance を省くと primary へ届く（`agent-event-intake.ts:189-205,252-262`）。headless の
+`codex exec`（Schedule・daily summary）は共有の `$CODEX_HOME/hooks.json` を読み、鍵を持たずに届く
+（`claude-executor.ts:931-943`）。だから `cwd` で解決した出来事は境界を開かず、結ばず、遅れた境界の判定にも使わない。
 
 画面（scraper）は境界の証拠に**使わない**［見立て］。Command Code は `/clear` の後の画面が起動画面とバイト単位で
 同じ（`src/lib/detection/tools/command-code/detect.ts:39-41`、fixture `tests/fixtures/command-code-live-2250/boot-idle-1490.txt`）
@@ -131,8 +143,11 @@ CREATE TABLE session_brief_boundaries (
   conversation_id TEXT,                   -- 分かれば agent の session_id。後から結ぶ
   late INTEGER NOT NULL DEFAULT 0,        -- 境界を開いたターンが既に送られていた（§3.6）
   opened_at INTEGER NOT NULL,
+  observation_key TEXT,                   -- フックで開いた行：'<source>:<session_id>'（再配達の照合、§3.3）
+  opened_by_send TEXT,                    -- この送信の中の再起動で開いた行：その送信の claim_token（§3.5）
+  reset_send_token TEXT,                  -- 送った reset のコマンドで開いた行：その送信の ID と入力の開始時刻（§3.3）
   state TEXT NOT NULL CHECK (state IN ('pending','claimed','sent','unknown','superseded','skipped')),
-  skip_reason TEXT,                       -- §7 の理由（off / disabled / target_unresolved / empty / over_limit / provider_failed）
+  skip_reason TEXT,                       -- §7 の理由（off / disabled / target_unresolved / empty / over_limit / provider_failed / incarnation_changed）
   claim_token TEXT,                       -- 取ったプロセスの nonce ＋ 送信の ID
   attempts INTEGER NOT NULL DEFAULT 0,    -- not_sent で戻した回数
   last_outcome TEXT CHECK (last_outcome IN ('not_sent','unknown','sent')),
@@ -156,11 +171,34 @@ CREATE TABLE session_brief_boundaries (
 
 | 観測 | 動き |
 |---|---|
-| `beginAgentSession` | `kind=launch`（同じ起動の 2 回目＝`noteLaunchProcessReplaced` が世代を進める場合と、`relaunchIfToolExited` からの場合は `auto_restart`）の行を開き、同じ instance の `pending` の行を `superseded` にする。`claimed` の行はそのまま（§3.5 の「送信の中の再起動」） |
-| `recordAgentEvent(session_start)`（遅れた `SessionStart` の保留 `isLateSessionStart` を通った後） | `source=startup`：今の行の `conversation_id` が空なら結ぶ。空でなく違う ID なら、CommandMate の外でプロセスが作り直された（ペインで手で起動し直した）と見て `kind=launch, evidence=hook` を開く。`source=clear`：今の行が送った本文 (c) で開いた reset で `conversation_id` が空なら**結ぶ**（二重にしない）。そうでなければ `kind=reset, evidence=hook` を開く。`source=resume`：ID が今の行と違うときだけ `kind=resume` を開く。`compact` とその他：何もしない |
-| ほかのフックの出来事（`session_id` を持つもの） | 今の行の `conversation_id` があり、違う ID が来たら、境界を見逃していた（サーバが止まっている間の `/clear` など）と見て `kind=reset, evidence=hook, late=1` を開く |
-| `sendUserMessage` が reset のコマンド（§2.3）を `sent` で送り終えた | `kind=reset, evidence=send_command` を開く |
+| `beginAgentSession` | `kind=launch`（同じ起動の 2 回目＝`noteLaunchProcessReplaced` が世代を進める場合と、`relaunchIfToolExited` からの場合は `auto_restart`）の行を開き、同じ instance の `pending` の行を `superseded` にする。`claimed` の行はそのまま（§3.5 の「送信の中の再起動」）。送信の中で呼ばれたら（送信の `AsyncLocalStorage` の印がある）`opened_by_send` にその送信の claim_token を書く |
+| `recordAgentEvent(session_start)`（遅れた `SessionStart` の保留 `isLateSessionStart` を通った後。**識別つきの出来事だけ**、§2.1） | 下の「フックの照合の規則」 |
+| ほかのフックの出来事（`session_id` を持つもの、識別つきだけ） | 今の行の `conversation_id` があり、違う ID が来たら、境界を見逃していた（サーバが止まっている間の `/clear` など）と見て `kind=reset, evidence=hook, late=1, observation_key='late:<id>'` を開く。同じ `observation_key` の行が保持の 20 行にあれば開かない |
+| `sendUserMessage` が reset のコマンド（§2.3）を `sent` で送り終えた（どの呼び出し元でも。`brief` の値に依らない） | 下の「送った reset とフックの順序」 |
 | `send --with-brief` | 今の行が `pending` ならそれを使う。そうでなければ `kind=explicit` を開いてその送信で取る |
+
+**フックの照合の規則**（事前レビュー①。到着の順・再配達・サーバの再起動に依らず同じ結果にする）。照合は台帳（DB）だけで行い、
+メモリの重複の窓（`agent-event-dedup.ts:330`）に頼らない。
+
+| `source` | 条件 | 動き |
+|---|---|---|
+| どれでも | 保持の 20 行に同じ `observation_key`（`<source>:<session_id>`）がある | 何もしない（再配達）。`clear` は毎回新しい ID を作るので、同じ鍵は常に再配達 |
+| `startup` | 今の行が `conversation_id` 空 | 結ぶ |
+| `startup` | 今の行が別の ID | `kind=launch, evidence=hook`（CommandMate の外でのプロセスの作り直し）を開く |
+| `clear` | 今の行が「送った reset で開き、`conversation_id` が空」で、出来事がその送信の入力の開始より後 | **結ぶ**（新しい行を開かない） |
+| `clear` | それ以外 | `kind=reset, evidence=hook` を開く |
+| `resume` | ID が今の行の `conversation_id` と同じ | 何もしない（同じ会話の再接続） |
+| `resume` | 違う ID | `kind=resume` を開く。再配達は上の 1 行目で止まる。ただし保持の 20 行より古い `resume:<id>` の再配達は新しい resume と区別できない［見立て・残る危険］ |
+| `compact`・その他 | — | 何もしない |
+
+**送った reset とフックの順序**（事前レビュー①）：
+
+- 送信が先に終わった：今の行が「この送信の入力の開始より後に開いた、`evidence=hook` の reset」なら、それを**この送信の
+  reset と認め**（`reset_send_token` を書く）、新しい行を開かない。そうでなければ `kind=reset, evidence=send_command,
+  conversation_id=NULL` を開き、後から来た `clear` を上の規則で結ぶ
+- フックが先に来た：上の表の `clear`「それ以外」で行が開き、送信が終わったとき 1 つ目の規則でその行を認める
+- どちらの順でも、サーバの再起動を挟んでも、行は 1 つ。端末から直接打った reset はフックだけで開く（CLI・画面・Timer の reset は
+  両方が来る）
 
 - 観測の入口は 2 つ：`beginAgentSession`（`agent-session-lifecycle.ts:76` の関数の中、柵の後）と、
   `recordAgentEvent` の `session_start` の分岐（`agent-event-state.ts:393` の中、`generationStartedAt.set` の隣）。
@@ -172,12 +210,29 @@ CREATE TABLE session_brief_boundaries (
 
 ### 3.4 取る（claim）と送る
 
-1. **計画（ロックの外、`await` あり）**：今の行が `pending` で、この送信が「付けてよい送信」（§4・§7）なら、
-   所属と mode を決め（`withMemTarget`）、予算を計算し（§6）、provider に brief を作らせる
-2. **取る（ロックの中、同期）**：本文を打つ直前に `UPDATE … SET state='claimed', claim_token=? WHERE id=? AND state='pending'`。
-   変わった行が 1 なら brief を付ける。0 なら（別の送信が先に取った・境界が替わった）brief を付けずに本文だけ送る
-3. **送る**：打つ本文は `brief + 区切り + 利用者の本文`（§6.2）
-4. **決着**：送信の結果（`settle`）を写像して行を更新する
+1. **計画（ロックの外、`await` あり）**：今の行が `pending`、または**生きている claim_token の `claimed`**（先行の送信が
+   未送信で戻すかもしれない、事前レビュー⑥）で、この送信が「付けてよい送信」（§4・§7）なら：最初の `await` の前に
+   instance の世代を読んで固定し（§3.7）、所属と mode を決め（`withMemTarget`）、予算を計算し（§6）、provider に brief を作らせる
+2. **計画の読み直し（ロックの外、provider の後）**：`withMemTarget` をもう一度呼び、所属（repository の集合）・ブランチ・
+   detached・`mode`・`injectOnStart` が 1 と同じことを確かめる（事前レビュー③）。違えば下の「設定の変化」
+3. **取る（ロックの中、同期の 1 区間）**：本文を打つ直前に、同じ同期の区間で次をすべて行う。
+   - 2 で決まった root ごとに `decideRootMode(db, root, branch)`（`mem-db.ts:254`、同期）を読み、`mode`・`injectOnStart` が
+     計画と同じか照らす（DB の設定の変更を、ロックの待ちの間のものまで拾う）
+   - instance の世代を読み、1 で固定した値と照らす（§3.7）
+   - `UPDATE … SET state='claimed', claim_token=? WHERE id=? AND state='pending' AND instance_incarnation IS ?`
+   変わった行が 1 なら brief を付ける。0 なら（別の送信が先に取った・境界が替わった）brief を付けずに本文だけ送る。
+   **判断の時点はこの区間**：ここから最初のキーまでの間の設定の変更は、この送信の brief を外さない（定義として書く）
+4. **送る**：打つ本文は `brief + 区切り + 利用者の本文`（§6.2）
+5. **決着（ロックの中）**：送信の結果を写像して行を更新する。**ロックを放す前に**行う（事前レビュー⑥）。Claude・Codex は
+   `deliver()` の失敗の分類（`composerStillHolds` を含む）が既にロックの中（`send-user-message.ts:647-655`）なので、
+   `deliver()` の中で分類が決まった直後に台帳を書く。ロックの中で例外が出て決着しないまま抜けるときは、`finally` で
+   この claim_token の行を `unknown` にする（打ったかどうか言えないため）
+6. **provider への知らせ**：決着の後、ロックの外で `provider.settle(…)`（§5.1）を呼ぶ（空の実装は何もしない）
+
+**設定の変化**（2・3 で計画と違った）：brief を外し、利用者の本文はそのまま送る。行は、今の答えが `off` なら
+`skipped(off)`、`injectOnStart=false` なら `skipped(disabled)`、それ以外（`on`↔`derived`、ブランチ・所属の変化）は
+`pending` のまま残し（理由 `settings_changed` をログに）、次の送信が今の設定で作り直す。人が `off` / `derived` に変えた後に、
+以前の `on` で作った本文を差し込まない。
 
 | 送信の結果（`SendAttemptState`） | 台帳の `last_outcome` | 行の状態 | 次の送信 |
 |---|---|---|---|
@@ -189,11 +244,12 @@ CREATE TABLE session_brief_boundaries (
 
 | 場合 | 作り | 保証 |
 |---|---|---|
-| 同時の初回の送信 2 つ | 2 は better-sqlite3 の同期の 1 文（Node の 1 本のスレッドで、間に他の送信が入らない）。Claude・Codex は本文を打つ部分が既に instance の入力のロックの中（`send-user-message.ts:647-655`、`withInstanceInputLock`）。Command Code は今はロックが送信関数の中（`submit-verified-sender.ts:691`）なので、**取る候補がある送信だけ** `deliver()` を外側の `withInstanceInputLock` で包む（内側の送信関数は同じ持ち主の切符に**合流**し、並ばない：`instance-input-lock.ts:530-542`） | 付くのは 1 回だけ、かつロックの順で先に打たれた本文に付く |
+| 先行の送信が未送信、後続がロックを待っている（事前レビュー⑥） | 後続は計画で `claimed`（生きている token）も候補にし、Command Code でも外側のロックを取る。先行は決着をロックの中で書く（§3.4 の 5）ので、後続が取るときには行は `pending` に戻っている。ロックの解除は次の待機者を許す（`instance-input-lock.ts:505-519`）が、その前に台帳は決着済み | 先行が `not-sent` なら後続に付く。`sent` / `unknown` なら後続に付かない |
+| 同時の初回の送信 2 つ | 3 は better-sqlite3 の同期の 1 区間（Node の 1 本のスレッドで、間に他の送信が入らない）。Claude・Codex は本文を打つ部分が既に instance の入力のロックの中（`send-user-message.ts:647-655`、`withInstanceInputLock`）。Command Code は今はロックが送信関数の中（`submit-verified-sender.ts:691`）なので、**取る候補がある送信だけ** `deliver()` を外側の `withInstanceInputLock` で包む（内側の送信関数は同じ持ち主の切符に**合流**し、並ばない：`instance-input-lock.ts:530-542`） | 付くのは 1 回だけ、かつロックの順で先に打たれた本文に付く |
 | 送信の拒否（`not-sent`） | 行を `pending` に戻す | 次の付けてよい送信に 1 回付く |
 | 結果不明（`indeterminate`） | 行を `unknown` に固定 | 二重には付かない。届かなかった可能性は残る（人が判断する）。D2 で B に「未確認」として渡す |
 | サーバの再起動 | 台帳は DB。プロセスが生きていれば (a) は呼ばれず、行も開かない→付かない。プロセスが死んでいて送信の経路が起動し直せば (a) で新しい行→付く。再起動の前に `claimed` のまま残った行は、`claim_token` の nonce が今のプロセスのものでないので、読むときに `unknown` として扱い書き直す（起動時の掃除を足さない） | 再接続では付かない。クラッシュの最中の送信は二重にしない |
-| 送信の中の再起動 | `sendMessage` の中の `requireSession` → `relaunchIfToolExited`（`base.ts:808-829`）は、本文を決めた**後**に新しいプロセスを作る。決着が `sent` のとき、取った行より新しい行がこの送信の取った後に開いていたら：取った行に brief を付けていたなら、新しい行を `sent`（同じ記録を写す）・取った行を `superseded` にする（brief は実際には新しいプロセスに届いたため）。付けていなかったなら新しい行は `pending` のまま（次の送信に付く） | 1 回。ただし「再起動の後の最初の本文」に付くとは限らない（2 通目に付くことがある） |
+| 送信の中の再起動 | `sendMessage` の中の `requireSession` → `relaunchIfToolExited`（`base.ts:808-829`）は、本文を決めた**後**に新しいプロセスを作る。決着が `sent` で、この送信が brief を付けていたとき、記録を移す先は **`opened_by_send` がこの送信の claim_token で、`kind` が `launch` / `auto_restart` の行だけ**（事前レビュー⑤）。その行が今の行なら `sent`（同じ記録を写す）にし、取った行を `superseded` にする。時刻の比較では移さない：この送信の後に開いた別の reset・resume（フック・端末の入力 `ws-server.ts:1145-1151`・別の送信の `force`）の行は `pending` のまま残る。自分の再起動の行の後にさらに別の行が開いていれば、自分の再起動の行は `sent`・`superseded`、新しい行は `pending`。付けていなかったなら自分の再起動の行は `pending` のまま（次の送信に付く） | 1 回。ただし「再起動の後の最初の本文」に付くとは限らない（2 通目に付くことがある） |
 | 境界が古くなる | 新しい行が開くと、それより前の `pending` は `superseded` | 前の境界の brief が後の会話の途中に入らない |
 
 ### 3.6 遅れて分かる境界
@@ -201,6 +257,30 @@ CREATE TABLE session_brief_boundaries (
 端末から直接打った reset（Codex の `/new`・Claude の `/clear`）は (c) を通らない。(b) が来れば分かるが、Codex の
 `SessionStart` が次のターンの送信時に来るなら、その送信は既に brief なしで打たれている［未確認］。この場合は行を
 `late=1` で開き、**次の**付けてよい送信に付ける。「最初の本文に付く」ではなく「その境界に 1 回付く」が保証の範囲。
+
+### 3.7 instance の世代の照合（事前レビュー④）
+
+［事実］A の世代は roster の追加・全置換の新しい組でその場で作られ（`mem-store-4221.md:538`）、削除で消える
+（`agent-instances-db.ts:403-410` の `endInstanceIncarnation`。`--kill` なしの削除でもプロセスは残る）。roster に無い派生の
+primary は、mem の最初の書き込みで遅れて作られる（`mem-db.ts:580-591`）。alias の変更・並べ替えでは変わらない。
+
+| 時点 | 照合 |
+|---|---|
+| 行を開く | そのときの世代を `instance_incarnation` に書く（無ければ NULL） |
+| 計画（最初の `await` の前） | 世代を読んで固定する |
+| 取る（同期の区間、§3.4 の 3） | 今の世代が、計画で固定した値と行の値の両方と「同じ寿命」でなければ取らない。行は `skipped(incarnation_changed)`。brief を外し、利用者の本文は送る |
+| 決着 | 記録だけ。世代が替わっていても既に打った本文は取り消せないので、行の状態は §3.4 の表どおり |
+
+「同じ寿命」の定義：
+
+- 値が等しい
+- **NULL の寿命**：行（または計画）が NULL で今が非 NULL のとき、`instance_id === cli_tool_id`（primary）で、今の世代の
+  `cli_tool_id` が同じで、その `created_at`（A の表から D1 の DB モジュールが読む）が行の `opened_at` 以後なら、mem の最初の
+  書き込みによる遅い発行と見て同じ寿命とし、行の `instance_incarnation` を埋める。primary 以外の NULL→非 NULL は削除→再追加と
+  区別できないので**違う寿命**（brief を付けない側に倒す）
+- 非 NULL → NULL・別の値：違う寿命
+
+境界は作り直さない：世代の変化で新しい行は開かない（新しい世代の instance には、次の起動・reset で行が開く）。
 
 ---
 
@@ -239,11 +319,12 @@ CREATE TABLE session_brief_boundaries (
 | 引数 `SendUserMessageParams`（`:99-171`） | `brief?: 'auto' \| 'skip' \| 'force' \| 'never'`、`onBrief?(outcome)`（route が応答に載せる） |
 | 本文を打つ形 `typedBodyFor`（`:281-285`、`:338`） | `typedContent` を「brief を付けたなら付けた本文」から作る。`settle` の `typedContent`（`:357`、#4048 の最初のプロンプトの受領が digest で照らす）も付けた本文になる |
 | プロンプト待ちの確認の後（`:425` の後、`/model` の段 `:444` の後） | 計画（§3.4 の 1）。`not-sent` で返る経路（`:373`・`:413`・`:455-459`）は計画の前なので台帳に触らない |
-| `deliver()` の始め（`:562` の前） | 取る（§3.4 の 2）。Claude・Codex はここが既に外側のロックの中（`:647-650`） |
+| `deliver()` の始め（`:562` の前） | 取る（§3.4 の 3）。Claude・Codex はここが既に外側のロックの中（`:647-650`） |
 | `sendToTool()`（`:607-640`） | `content` の代わりに付けた本文を渡す（画像の経路 `:612`・`:618-622` も同じ） |
-| ロックの選び方（`:647`） | 取る候補があるときは Command Code も外側のロックで包む |
+| ロックの選び方（`:647`） | 取る候補（`pending` または生きている `claimed`）があるときは Command Code も外側のロックで包む |
 | 失敗の後の composer の読み `composerStillHolds`（`:259-274`、`:599`） | 照らす本文を付けた本文にする（`composerHoldsMessage` は本文の最初の行を探す：`send-attempt-state.ts:413-417`。付けた本文の最初の行は brief の行） |
-| `settle`（`:342-363`）と `sent` の後（`:669`） | 台帳の決着（§3.4 の 4）。reset のコマンドなら行を開く |
+| `deliver()` の中、結果の分類が決まった直後（`:581`・`:587`・`:593`・`:603` の return の前）とロックの callback の `finally` | 台帳の決着（§3.4 の 5）。**ロックを放す前**。今の `settle`（`:342-363`、`:658`・`:669`）はロックの後なので、台帳はそこに置かない |
+| `sent` の後（`:669`） | reset のコマンドなら §3.3 の「送った reset とフックの順序」。`provider.settle` を呼ぶ |
 | 履歴の行 `createMessage`（`:685-694`）・`updateLastUserMessage`（`:763`）・孤児の判定（`:537-549`） | **変えない**。利用者の本文だけを保存する。brief は台帳にだけ残す |
 
 route（`src/app/api/worktrees/[id]/send/route.ts`）：`send-request.ts` の `SendMessageRequest`（`:30-49`）に
@@ -308,7 +389,21 @@ export interface BriefProvider {
   readonly minBytes: number;
   /** 予算の既定値（C の「既定値」）。 */
   readonly defaultBytes: number;
+  /**
+   * 本文を組み立てる。B の close_when の評価による close（D8：読むときにその場で評価する。`list`・`check`・
+   * `commandmate brief` と同じ書き込み）はしてよい。受領・予約・「読んだ」の記録はしない。
+   * 作った本文は捨てられることがある（取れなかった・設定の変化・予算の検め）。
+   */
   build(request: BriefRequest): Promise<BriefResult> | BriefResult;
+  /**
+   * 差し込みの決着の後に 1 回呼ぶ（ロックの外）。outcome が 'sent' のときだけ included は実際に打った本文の ID。
+   * D1 では何も呼ばない実装。D2 がここを B の受領に接続する。例外は D1 が飲み込みログに出す（送信の結果を変えない）。
+   */
+  settle?(delivery: {
+    boundaryId: string;
+    outcome: 'sent' | 'not_sent' | 'unknown' | 'discarded';
+    includedNoticeIds: string[];
+  }): void | Promise<void>;
 }
 
 export const EMPTY_BRIEF_PROVIDER: BriefProvider = {
@@ -343,7 +438,8 @@ C の Issue と両方に書く（D1 の実装の契約の前に、C の設計者
 | C5 | 含めた知らせの ID | `includedNoticeIds` は「本文に実際に入った」ものだけ（予算で落ちた項目を含めない）。ID の名前空間（mem の item ID か B の知らせの ID か）は C と B で決める。D1 は不透明な文字列として保存する |
 | C6 | 区切り（D12） | 出所・作者・時刻つきのデータの区画の形は C。D1 は `body` の後に区切りを 1 つ置くだけ（§6.2） |
 | C7 | 決定性 | 同じ状態から同じ本文（C の安定性の受入）。D1 の試験は固定の偽の provider で行う |
-| C8 | 副作用 | `build` はモデルを呼ばず（Epic D1）、DB に書かない（受領の記録は D2 で B が行う） |
+| C8 | 副作用と分担（事前レビュー⑦） | 3 者の分担を口の契約にする。**C**：`build` で B の評価（D8 の close を含む）と本文の組み立て。モデルを呼ばない（Epic D1）。受領・予約は書かない。**D**：取る（台帳の claim が唯一の予約。取れた送信の本文だけが打たれる）・決着・`settle` の呼び出し。**B**：`settle` の `outcome='sent'` の `includedNoticeIds` だけを受領に確定する（D2 で接続）。`not_sent` / `discarded`（取れなかった・設定の変化・予算で落ちた）では受領しない。`unknown` は「未確認」として扱う（B が決める）。`commandmate brief`（C の CLI）と preview は `build` だけで `settle` を呼ばない＝受領しない。並行の送信で `build` が 2 回走っても、受領は打った 1 つの本文の ID だけになる |
+| C10 | 評価の書き込みの冪等 | `build` が捨てられても、評価による close は条件の成立の記録として正しい（D8）。同じ状態から 2 回 `build` しても close は 1 回（B の版つきの更新）であることを B・C に確かめる |
 | C9 | 境界の種類 | `kind` と `late` を渡す。種類で本文を変えるか（例：resume では「前の会話の続き」を短く）は C が決める |
 
 ---
@@ -358,19 +454,25 @@ C の Issue と両方に書く（D1 の実装の契約の前に、C の設計者
 
 ### 6.2 合計の計算
 
+数えるのは**ツールが実際に打つ最終本文の全体**（事前レビュー⑧）。画像の経路では `typedBodyFor`（`send-user-message.ts:281-285`）が
+参照を足し、Claude の `imageMessageBody` は改行を 1 つ足す（`claude.ts:129-131`：`\n![](path)`）。その改行も行数に入る。
+
 ```
-区切り   = "\n\n"
-付けた本文 = brief.body + 区切り + 利用者の本文
-空き(bytes) = MAX_BYTES - bytes(利用者の本文) - bytes(区切り)
-空き(lines) = MAX_LINES - lines(利用者の本文) - 1
+区切り      = "\n\n"
+lines(s)    = (s の "\n" の数) + 1
+土台        = typedBodyFor(tool, 区切り + 利用者の本文, 画像)      // brief を除いた、実際に打つ形
+空き(bytes) = MAX_BYTES - bytes(土台)
+空き(lines) = MAX_LINES - ("\n" の数(土台))                       // lines(brief + 土台) = lines(brief) + "\n" の数(土台)
 予算.maxBytes = min(provider.defaultBytes, 空き(bytes))
 予算.maxLines = 空き(lines)
+最終本文    = typedBodyFor(tool, brief.body + 区切り + 利用者の本文, 画像)
 ```
 
-- 画像の経路では、`typedBodyFor` が付けた本文に画像の参照を足す（今と同じ処理を付けた本文に対して行う）。参照の
-  バイト数も空きから引く
-- `予算.maxBytes < provider.minBytes` または `予算.maxLines < 1`：brief を付けずに送り、行を `skipped`（`over_limit`）に
-  する（記録する）。**利用者の本文は削らない**
+- provider の答えの後、**最終本文そのもの**を数え直し、`bytes ≤ MAX_BYTES` かつ `lines ≤ MAX_LINES` でなければ brief を外す
+  （`skipped(over_limit)`）。式と実際の打ち方がずれても、上限を超える本文を打たない
+- `予算.maxBytes < provider.minBytes` または `予算.maxLines < 1`：provider を呼ばず brief を付けずに送り、行を
+  `skipped`（`over_limit`）にする（記録する）。**利用者の本文は削らない**
+- 利用者の本文だけで上限を超えるとき（空きが負）も同じ。利用者の本文は今までどおり送る
 - 「brief を予算の最小値まで縮める」は、`maxBytes` を空きまで下げて provider に渡すことで行う（縮め方は C）
 
 ### 6.3 到達の確認との合わせ方
@@ -384,7 +486,7 @@ C の Issue と両方に書く（D1 の実装の契約の前に、C の設計者
 ### 6.4 配送の記録
 
 §3.4 の表のとおり。`sent` のときだけ `included_ids` を確定する。`not_sent` は「読んだ」としない。`unknown` は再送しない。
-D2 はこの行を読んで B の受領に渡す（D1 は B を呼ばない）。
+決着の後に `provider.settle`（§5.1）へ同じ結果を渡す。D2 がそれを B の受領に接続する（D1 は B を呼ばない）。
 
 ---
 
@@ -399,7 +501,11 @@ D2 はこの行を読んで B の受領に渡す（D1 は B を呼ばない）�
 | 合計が上限を超えた | §6.2 | `skipped`（`over_limit`） | 同 |
 | provider の失敗・空 | §5.1 | `skipped`（`provider_failed` / `empty`） | 空のときは応答に足さない |
 | 配送の結果が不明 | `indeterminate` | `unknown` | `brief: { state: 'unknown' }` |
+| 計画の後に設定が変わった | §3.4 の 2・3 | `off`→`skipped(off)`、`injectOnStart=false`→`skipped(disabled)`、それ以外→`pending` のまま | `brief: { state: 'skipped', reason: 'settings_changed' }` |
+| 計画の後に instance の世代が変わった | §3.7 | `skipped(incarnation_changed)` | `brief: { state: 'skipped', reason: 'incarnation_changed' }` |
+| 取れなかった（別の送信が先に取った） | §3.4 の 3 | 触らない | 足さない |
 | slash コマンドの送信 | §4.1 | 触らない | 足さない |
+| 識別の無いフック（headless の run・手で設定したフック） | §2.1 | 開かない・結ばない | — |
 
 ### 7.3 明示の口（境界を検出できないツールの代わり）
 
@@ -419,9 +525,9 @@ D2 はこの行を読んで B の受領に渡す（D1 は B を呼ばない）�
 |---|---|
 | `src/lib/session/brief-provider.ts` | §5.1 の型・`EMPTY_BRIEF_PROVIDER`・取得と試験用の差し替え |
 | `src/lib/session/session-boundary.ts` | 観測（§3.3）：`openLaunchBoundary`・`observeSessionStartBoundary`・`observeConversationId`・`openResetBoundaryFromSend`、reset の綴り（§2.3）・slash コマンドの判定 |
-| `src/lib/session/session-brief.ts` | 計画・取る・決着（§3.4〜3.5）、予算（§6.2）、provider の検め（§5.1） |
+| `src/lib/session/session-brief.ts` | 計画・読み直し・取る・決着（§3.4〜3.5・§3.7）、送信の中の再起動の印、予算（§6.2）、provider の検め（§5.1） |
 | `src/lib/db/session-brief-db.ts` | 台帳の SQL（開く・取る・戻す・決着・保持の 20 行） |
-| `src/lib/db/migrations/v67-session-brief-boundaries.ts` | §3.2 の表（番号は §0.2） |
+| `src/lib/db/migrations/v68-session-brief-boundaries.ts` | §3.2 の表。**v68**（B が v67。§0.2 の PM の決定。B のマージ後に develop を取り込み、番号の衝突が無いことを確かめてから作る） |
 | `src/config/send-verified-limits.ts` | 48 KiB・240 行（G1） |
 
 ### 8.2 変える既存のファイル
@@ -429,14 +535,16 @@ D2 はこの行を読んで B の受領に渡す（D1 は B を呼ばない）�
 | ファイル | 変更 |
 |---|---|
 | `src/lib/session/agent-session-lifecycle.ts` | §4.2 の 1 行 |
-| `src/lib/session/agent-event-state.ts` | `recordAgentEvent` の `session_start` の分岐と ID の比較に 1 行ずつ（§3.3） |
+| `src/lib/session/agent-event-state.ts` | `recordAgentEvent` の `session_start` の分岐と ID の比較に 1 行ずつ（§3.3）。`RecordAgentEventOptions` に `identity: 'injected' \| 'cwd'` |
+| `src/lib/hooks/agent-event-intake.ts` | `recordAgentEvent` を呼ぶ所（`:348`）で、`worktreeIdParam` があったか（`readTarget` `:189`）を `identity` として渡す |
+| `src/lib/session/instance-input-lock.ts` | 変えない（外側のロックの合流を使うだけ）。送信の中の再起動の印は `session-brief.ts` の `AsyncLocalStorage` |
 | `src/lib/session/send-user-message.ts` | §4.3 |
 | `src/app/api/worktrees/[id]/send/route.ts`・`send-request.ts` | `brief` の欄の検証と受け渡し、応答の `brief` |
 | `src/lib/timer-manager.ts` | `brief: 'auto'` |
 | `src/cli/commands/send.ts` | `--no-brief` / `--with-brief`、`--help`、上限の定数を `src/config/send-verified-limits.ts` から |
 | `src/cli/commands/ask.ts`（必要なら `message-dispatch.ts`） | `brief` を送らない（route の既定 `auto`）。変更が無いことを試験で固定 |
 | `src/cli/types/api-responses.ts` | 送信の応答の型に `brief?`（`:1702` の `sendOutcome` の隣） |
-| `src/lib/db/migrations/runner.ts` | `CURRENT_SCHEMA_VERSION` |
+| `src/lib/db/migrations/runner.ts` | `CURRENT_SCHEMA_VERSION` を 68 に（B の 67 の後） |
 | `src/cli/docs/agent-operations.ts`、`docs/user-guide/cli-operations-guide.md`（ja）と `docs/en/` の対 | 旗と例外の説明 |
 
 変えないもの：`src/lib/relay/relay-delivery.ts`（既定 `never` で付けない）、`src/lib/mem/**`・`mem-db.ts`・
@@ -466,9 +574,17 @@ Claude の fixture は `session_id` が置換で同じ値なので、ID の変�
 | 送信の中の再起動 | `relaunchIfToolExited` を送信の中で起こす（偽）→ §3.5 の表どおり | — |
 | mode が `off` では何も付かない | — | `injectOnStart: false` または規則で `off` → 本文だけ、行は `skipped`。provider は呼ばれない |
 | `--no-brief` は 1 回だけ効く | `skip` → 本文だけ、次の送信に付く。設定（`mem-settings`）は変わらない | CLI：`--no-brief` と `--with-brief` の同時は exit 2 で何も送らない |
-| 合計が上限を超えても本文を削らない | 47.9 KiB の本文 → brief なし・本文はバイト一致・行は `skipped(over_limit)`。49 KiB の本文（brief なし）は今どおり送られる | 空きが `minBytes` 以上なら `maxBytes` が空きまで下がって provider に渡る |
+| 合計が上限を超えても本文を削らない | 空き(bytes) が `minBytes - 1`（= 15 バイト）になる長さの本文 → provider は呼ばれず brief なし・本文はバイト一致・行は `skipped(over_limit)`。空きが負（49 KiB の本文）も同じで、本文は今どおり送られる | 空きがちょうど `minBytes` なら `maxBytes = minBytes` で provider に渡り付く。日本語・絵文字の本文でも本文のバイトは一致 |
+| 合計の行数（画像を含む、事前レビュー⑧） | Claude・画像あり：1 行の本文＋ 238 行を返す偽の provider → 最終本文が 241 行になるので `maxLines` が 237 に下がって渡る。それを無視して 238 行を返す provider なら、最終本文の数え直しで brief を外す（`skipped(over_limit)`） | 画像なし・最終本文ちょうど 240 行なら付く。本文は削らない |
 | #2464 の到達の確認の試験が通ったまま | — | 既存の `long-body-2464` の試験を変えずに走らせる。付けた本文の 513 バイト超は paste の経路を通る |
-| 空の provider では送信の本文が今と同じ | — | **固定の試験**：`EMPTY_BRIEF_PROVIDER` で、境界あり・mode `on`・`injectOnStart: true` の送信の、`cliTool.sendMessage` / `sendMessageWithImage` へ渡る本文が引数の `content` とバイト一致、`recordSendAttempt` の `typedContent` が無い、route の応答に `brief` の鍵が無い、`chat_messages` の行が今と同じ |
+| 空の provider では送信の本文が今と同じ（事前レビュー⑨） | 対照が効くことの確認：試験の中で画像の実入力（`imageMessageBody` の結果）か digest を 1 文字変えると、この比較が落ちる | **差分の試験**：同じ場面（本文のみ・画像あり・契約の前文つき）を `brief: 'never'`（今の挙動）と `EMPTY_BRIEF_PROVIDER` ＋ `auto`（境界あり・mode `on`・`injectOnStart: true`）で走らせ、`cliTool.sendMessage` / `sendMessageWithImage` の引数、`recordSendAttempt` の記録（画像のときに今もある `typedContent` とその digest を含む）、route の応答（`brief` の鍵が無い）、`chat_messages` の行がすべて等しい。画像なしでは `typedContent` が無いまま、画像ありでは今の `typedContent` が残る。既存の `send-user-message-lastsend-4048.test.ts` は変えずに通る |
+| reset の観測の冪等（事前レビュー①） | 送信の完了→`clear` フック、`clear` フック→送信の完了の両順序で行は 1 つ・付くのは 1 回。同じ `clear`（同じ `session_id`）をサーバの再起動（メモリを消し DB を残す）の後に再配達しても行は増えず、追加の差し込みが無い。端末から打った reset（フックだけ）でも 1 回 | 本当に次の `/clear`（新しい ID）では新しい行で 1 回付く。別の会話への `resume` では 1 回付く |
+| 識別の無いフック（事前レビュー②） | 対話の Codex が稼働中に、同じ `cwd` の headless の run の別 ID の `SessionStart` / `Stop`（識別なし、`cwd` で解決）を届けても、台帳は変わらず次の送信に付かない | 対象のペイン自身の識別つきの `clear` では行が開く |
+| provider の待ちの間の設定の変化（事前レビュー③） | provider の `build` を待たせている間に `mode` を `off`（または `derived`・`injectOnStart=false`・ブランチの規則の変更）にすると、brief だけ外れ、利用者の本文は送られる。入力のロックを別の送信が持っている間に設定を変えても同じ（取る区間の同期の再確認） | 設定が変わらなければ 1 回付く |
+| instance の世代（事前レビュー④） | provider の待ちの間に同じ ID を削除→再追加（世代が替わる）すると、前の計画の brief を渡さない（`skipped(incarnation_changed)`）。primary 以外で NULL→非 NULL も渡さない | alias の変更・並べ替えでは付く。roster に無い primary の、mem の最初の書き込みによる遅い発行（NULL→同じツールの新しい世代）でも行は作り直さず付く |
+| 送信の中の再起動の記録の移し先（事前レビュー⑤） | 送信の間に、別の reset / resume の行（フック・`force`）が開いても、それを `sent` にせず、次の送信に付く | 自分の送信が起こした再起動の行（`opened_by_send` が一致）へ本文が届いたら記録を移し、次の送信に二重に付かない |
+| 決着とロックの順序（事前レビュー⑥） | Claude・Codex・Command Code それぞれ：A が取った後 `not-sent`、ロックを待っていた B（計画のとき行は `claimed`）に付く | A が `sent` / `unknown` なら B に付かない |
+| provider との分担（事前レビュー⑦） | 偽の provider の `settle` が、`sent` のときだけ実際に打った本文の `includedNoticeIds` で 1 回呼ばれる。並行の 2 送信で `build` が 2 回でも `settle(sent)` は 1 回、ID は打った本文のもの | `not_sent`・取れなかった（`discarded`）・予算で外れたときは `sent` で呼ばれない。`commandmate brief`（preview）の経路は `settle` を呼ばない（D1 では口の試験だけ。C の CLI は C の試験） |
 | 付けない経路 | — | relay の配送（`never`）・Schedule・ターミナル・直接入力・回答は付けず、行も触らない。`sendUserMessage` の呼び出し元を列挙して `brief` の値を固定するガード（新しい呼び出し元は既定 `never`） |
 | slash コマンド | — | `/model` などに付けない、行を触らない |
 
@@ -485,9 +601,27 @@ Claude の fixture は `session_id` が置換で同じ値なので、ID の変�
 | U5 | Claude の `/clear` の別名（`/reset`・`/new`） | 綴りの表 | slash のカタログ |
 | U6 | brief を付けた本文が、Claude の transcript からの履歴（#2121）にどう出るか | 画面の会話に brief が利用者の発言として出る可能性 | D2 の実機。出るなら D2 で履歴の表示から外す |
 | U7 | provider の時間切れの既定（2 秒） | 送信の遅れ | C の実測 |
+| U8 | 対話の起動の Codex・Command Code の中継が `worktreeId` / `instanceId` を必ず載せるか（環境の相関の鍵） | §2.1 の「識別つきだけ」で、対話のフックまで捨てないか | 実装の前に各 source の `prepareLaunch` の環境と `cmate-agent-event.sh:268-271` を照らす。載らない場合は §0.1 に書いて止まる |
+| U9 | v66 より前からの roster の行に A の世代が作られているか（migration の backfill の有無） | §3.7 の NULL の扱い（primary 以外の NULL→非 NULL は付けない側に倒すため、backfill が無いと最初の境界を落としうる） | `v66-mem-store.ts` を読む |
 
 ## 11. D2 に残すもの（#4224）
 
-C の provider を `getBriefProvider()` へ接続する・`included_ids` と `last_outcome` を B の受領へ渡す・フックでも brief を出す
+C の provider を `getBriefProvider()` へ接続する・`provider.settle` を B の受領へ接続する（§5.2 の C8）・フックでも brief を出す
 Agent で二重にしない（フックの側を採るか送信の側を採るか）・予定していない終わり方の後の先頭の表示・Claude Code / Codex /
 Command Code の実機の受入（§10 の U1〜U6 を含む）。
+
+## 12. 事前レビューの処置
+
+Codex の事前レビュー（2026-11-08、P1 5・P2 4）。D1〜D13・A と違う作りは要らなかった（§0.1 は止める点なしのまま）。
+
+| # | 指摘 | 処置 | 守る条件・反映先 |
+|---|---|---|---|
+| ① P1 | reset の観測が順序と再配達に冪等でない | 採る | 到着の順に依らず 1 つの行：送った reset とフックの相互の照合、`observation_key` による DB での再配達の照合（メモリの窓に頼らない）。§3.2・§3.3、試験は §9「reset の観測の冪等」。保持の 20 行より古い `resume` の再配達だけは残る危険として書いた |
+| ② P1 | Schedule のフックが対話の instance の境界を開ける | 採る | 識別つき（`worktreeId` を載せた）出来事だけが開く・結ぶ・遅れた境界を判定する。`cwd` で解決した出来事は使わない。§2.1・§3.3・§7・§8.2、試験は §9「識別の無いフック」。対話のフックが必ず識別つきかは U8 |
+| ③ P1 | provider の待ちの後に mode・所属を再確認しない | 採る | provider の後の `withMemTarget` の読み直しと、取る区間での `decideRootMode` の同期の再確認。判断の時点は取る区間と定義。§3.4 の 2・3・「設定の変化」、試験は §9「provider の待ちの間の設定の変化」 |
+| ④ P1 | instance の世代で古い計画の claim を拒めない | 採る | 計画で固定・取る区間で照合・`UPDATE` の条件に世代。NULL の寿命は primary の遅い発行だけ同じ寿命。§3.7、試験は §9「instance の世代」。backfill の有無は U9 |
+| ⑤ P1 | 後から開いた境界を到達の証拠なしに sent へ移せる | 採る | 移す先は `opened_by_send` がこの送信の token の起動の行だけ。時刻で同一視しない。§3.2・§3.3・§3.5、試験は §9「送信の中の再起動の記録の移し先」 |
+| ⑥ P2 | not-sent の決着の前に次の送信が claim を試せる | 採る | 台帳の決着をロックを放す前に置く。後続は生きている `claimed` も候補にして外側のロックを取る。§3.4 の 1・5、§3.5、§4.3、試験は §9「決着とロックの順序」 |
+| ⑦ P2 | C/B の評価・予約と provider の書き込みの契約が合っていない | 採る | `build` は B の評価（D8 の close）を許し、受領・予約は書かない。予約は D の claim だけ、受領は `settle(sent)` の ID だけ（D2 で B へ）。§5.1・§5.2 の C8・C10、§6.4、§11、試験は §9「provider との分担」。B・C との合意は実装の契約の前に取る |
+| ⑧ P2 | 画像の経路で合計の行数が 240 を超える | 採る | 予算は実際に打つ最終本文（画像の参照と改行を含む）で計算し、provider の後に最終本文を数え直す。47.9 KiB の対照は誤りだったので、空きが `minBytes - 1` になる長さに直した。§6.2、§9 |
+| ⑨ P2 | 空の provider の対照が画像の既存の `typedContent` と食い違う | 採る | 「`typedContent` が無い」をやめ、`never` と空の provider の差分が無いことを、本文のみ・画像・契約の前文で比べる。§9「空の provider では送信の本文が今と同じ」 |
