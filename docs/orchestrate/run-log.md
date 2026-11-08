@@ -179,3 +179,13 @@ done 3< <(awk -F'\t' '{
   `verify-<issue>[-<item>][.a<n>].env.json` に execution key と一緒に置く。`end` は記録の note に足す `env=<hash>` を出し、検証中に入力が変わっていれば
   `env-changed-during-verify=<項目>` と exit 3（雛形は `RC=3`＝`verify=fail` にする。裁定にしない）。precheck / publish / merge はこの `env=` を 3-3 の記録と同じに照らし合わせる
   （docs/orchestrate/workers.md の「合格を使う地点も環境を照らし合わせる」）
+
+## 1-5 plan.md の対象 Issue 表の例
+
+```markdown
+  | Issue | 種別 | 難易度 | 担当 | モデル | 根拠 |
+  |---|---|---|---|---|---|
+  | #2595 | BUG | 易 | command-code | — | テスト 1 ファイル／原因と確定仕様あり／受入基準すべて自動 |
+  | #2760 | BUG | 中 | claude | sonnet | 当てはまる観点は「危険な領域」（`src/lib/tmux/**`）だけ／全変更が確定 diff／受入基準すべて自動／退避路あり |
+  | #2598 | FEATURE | 難 | claude | opus | 影響ファイル 7 以上（新規 hook あり）／対応方針が Phase 2 段／合否が実機でしか決まらない項目あり |
+  ```
