@@ -27,7 +27,7 @@
 
 'use client';
 
-import React, { useState, useCallback, useRef, useMemo, memo, useLayoutEffect, ReactNode } from 'react';
+import React, { useState, useCallback, useRef, useMemo, memo, ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import { Pin, PinOff, PanelLeft, PanelRight, X } from 'lucide-react';
 import { ErrorBoundary } from '@/components/error/ErrorBoundary';
@@ -335,20 +335,6 @@ export const PaneOverlayFrame = memo(function PaneOverlayFrame({
 
   const pinLabel = pinned ? t('desktopLayout.unpinPane') : t('desktopLayout.pinPane');
   const sideLabel = side === 'left' ? t('desktopLayout.movePaneRight') : t('desktopLayout.movePaneLeft');
-  // [Issue #4256] The header buttons move (side flip) or change their label
-  // (pin toggle) while their tooltip is open; the tooltip measures only on open,
-  // resize and scroll, so ask it to measure again. One `resize` event, once per
-  // change (no polling); skipped on mount and when no bubble is showing.
-  const reflowKey = `${side}|${pinLabel}|${sideLabel}`;
-  const lastReflowKey = useRef(reflowKey);
-  useLayoutEffect(() => {
-    if (lastReflowKey.current === reflowKey) return;
-    lastReflowKey.current = reflowKey;
-    if (document.querySelector('[role="tooltip"][data-placement]')) {
-      window.dispatchEvent(new Event('resize'));
-    }
-  }, [reflowKey]);
-
   const iconButtonClass =
     'flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted-foreground/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
