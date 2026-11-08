@@ -31,6 +31,7 @@ import { getWorktreeById } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { probeRunningSessionHookUrl } from '@/lib/cli-tools/base';
 import { sendUserMessage } from '@/lib/session/send-user-message';
+import type { BriefReport } from '@/lib/session/session-brief';
 import { PROMPT_WAITING_CODE } from '@/lib/session/prompt-waiting-guard';
 import type { SendAttemptReason, SendAttemptState } from '@/lib/session/send-attempt-types';
 import { recordSendAttempt } from '@/lib/session/send-attempt-state';
@@ -88,7 +89,11 @@ export async function POST(
 ) {
   const relay: RouteRelayState = { binding: null, attempt: null, sent: null };
   const role: RouteRoleState = { settings: null };
-  const handled = await handleSend(request, context, relay, role);
+  const brief: RouteBriefState = { report: null };
+  const answered = await handleSend(request, context, relay, role, brief);
+  // Issue #4274: `brief` only when one was attached, a flag asked, or the delivery of
+  // a claimed one is unknown — a send with neither answers byte for byte as before.
+  const handled = brief.report ? await withBody(answered, { brief: brief.report }) : answered;
   // Issue #4116: whatever refuses a send after its role was saved, the answer says it
   // stayed saved. Nothing saved, nothing added: a send with no role answers as it did.
   const response = role.settings && handled.status >= 400
@@ -112,6 +117,11 @@ export async function POST(
   );
   if (sendOutcome === 'sent') evaluateRelayAfterSend(binding.relayId);
   return withBody(response, { relayId: binding.relayId, sendOutcome });
+}
+
+/** Issue #4274: what the send service said about this send's brief. */
+interface RouteBriefState {
+  report: BriefReport | null;
 }
 
 /** What this request saved for the instance, for its answer. */
@@ -143,7 +153,8 @@ async function handleSend(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
   relay: RouteRelayState,
-  role: RouteRoleState
+  role: RouteRoleState,
+  brief: RouteBriefState
 ) {
   // Issue #4065: the input generation counter at the request's outermost
   // entry, before the body is read and before every wait below. A refusal of
@@ -374,6 +385,12 @@ async function handleSend(
       // Issue #1737: `commandmate send --ignore-structured-prompt`.
       ignoreStructuredPromptGuard: body.ignoreStructuredPromptGuard === true,
       observedInputGeneration,
+      // Issue #4274: the screen, `send` and `ask` reach here; relay delivery and the
+      // others call the service with its default (`never`).
+      brief: body.brief ?? 'auto',
+      onBrief: (report) => {
+        brief.report = report;
+      },
       onAttempt: (attempt) => {
         ownAttempt = attempt;
         relay.attempt = attempt.state;

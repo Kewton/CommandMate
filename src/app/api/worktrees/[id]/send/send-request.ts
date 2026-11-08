@@ -46,6 +46,14 @@ export interface SendMessageRequest extends SendRoleRequest {
    * expired or already reserved relay 409, and neither types anything.
    */
   relayId?: string;
+  /**
+   * Issue #4274: this one send's session brief. `skip` (`send --no-brief`, the
+   * screen's "don't read"): not this send, the boundary stays for the next one and
+   * no setting changes. `force` (`send --with-brief`): this send carries it, even
+   * with no boundary detected. Omitted, the first send after a boundary carries it
+   * once. Anything else is 400 with nothing recorded.
+   */
+  brief?: 'skip' | 'force';
 }
 
 /**
@@ -84,6 +92,17 @@ export function validateSendRequest(
       ok: false,
       response: NextResponse.json(
         { error: 'Message content is required and must be a non-empty string' },
+        { status: 400 }
+      ),
+    };
+  }
+
+  // Issue #4274: the brief flag, before anything is resolved (nothing recorded).
+  if (body.brief !== undefined && body.brief !== 'skip' && body.brief !== 'force') {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "brief must be 'skip' or 'force'" },
         { status: 400 }
       ),
     };

@@ -49,6 +49,7 @@ import { invalidateInstanceInput } from '@/lib/session/instance-input-lock';
 import { notePromptSubmitSession } from '@/lib/session/prompt-submit-receipt';
 import { noteLaunchProcessReplaced, renderLaunchCommandWithRole } from '@/lib/session/role-launch';
 import { resolveSessionName } from '@/lib/cli-tools/session-name';
+import { openLaunchBoundary } from '@/lib/session/session-boundary';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('lib/session/agent-session-lifecycle');
@@ -141,6 +142,10 @@ export function beginAgentSession(target: AgentInstanceRef, at: number = Date.no
     // learn by noticing their `respond` no longer has anything to answer.
     decisionsEvicted: after - before,
   });
+
+  // Issue #4274: a new process is a conversation boundary (a reconnect never gets
+  // here). The ledger row the next send's brief is claimed against; fails open.
+  openLaunchBoundary(target, at);
 
   // Issue #2444: the rows the replaced process wrote are a previous session's
   // history now. Inside a `try` and after the fence on purpose — this module

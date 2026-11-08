@@ -1700,6 +1700,17 @@ export interface ChatMessage {
    * once the failure was recorded as its attempt; no 400), never on its 201.
    */
   sendOutcome?: 'sent' | 'not_sent' | 'unknown';
+  /**
+   * Issue #4274: present when a session brief was put in front of the message
+   * (`attached`), when the send named `--no-brief` / `--with-brief`, or when the
+   * delivery of a claimed brief is not known. Absent otherwise.
+   * Mirrors: src/lib/session/session-brief.ts BriefReport.
+   */
+  brief?: {
+    state: 'attached' | 'skipped' | 'unknown' | 'not_sent';
+    reason?: string;
+    boundaryId?: string;
+  };
 }
 
 // =============================================================================

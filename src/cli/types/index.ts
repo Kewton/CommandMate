@@ -449,6 +449,13 @@ export interface SendOptions {
    */
   ignoreStructuredPrompt?: boolean;
   /**
+   * Issue #4274: `--no-brief` (commander sets `brief: false`; true otherwise) — this
+   * send carries no session brief, and the boundary stays for the next one.
+   */
+  brief?: boolean;
+  /** Issue #4274: `--with-brief` — this send carries the session brief even with no boundary detected. */
+  withBrief?: boolean;
+  /**
    * Issue #2377: deliver the target's reply to this session when it finishes.
    *
    * `<worktree-id>[@<instance-id>]`, or `self` for the session running the

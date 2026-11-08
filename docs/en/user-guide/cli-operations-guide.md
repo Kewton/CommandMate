@@ -260,9 +260,13 @@ commandmate send <worktree-id> "<message>" --instance codex
 commandmate send <worktree-id> "<message>" --instance codex --role reviewer  # Save the role, and send only to a process running it (see commandmate roles)
 commandmate send <worktree-id> "<message>" --agent codex --instance codex-3 --register --role reviewer  # Create the instance and its role first, then send
 commandmate send <worktree-id> "<message>" --instance opencode --new-conversation  # OpenCode V1: start a stopped session on a new conversation, not the remembered one
+commandmate send <worktree-id> "<message>" --no-brief    # no session brief on this send only (the boundary keeps it for the next)
+commandmate send <worktree-id> "<message>" --with-brief  # attach the session brief to this send even with no boundary detected
 commandmate send <worktree-id> "<message>" --auto-yes --duration 3h
 commandmate send <worktree-id> "<message>" --auto-yes --auto-yes-answer-mode careful  # questions are yours
 ```
+
+**Session brief (Issue #4274)**: on claude, codex and command-code, the first send after a conversation boundary (a new launch, a reset such as `/clear` or codex's `/new`, a resume to another conversation, a restart) carries the mem brief once, in front of the message — only when mem is `on` / `derived` for the branch and `injectOnStart` is enabled. Reconnecting to a running process is not a boundary. `--no-brief` skips it for that one send without changing any setting; `--with-brief` attaches it with no boundary. Giving both is exit 2 with nothing sent. When the brief and the message together would pass the length #2464 verified (48 KiB, 240 lines), the brief is left off and the message is never cut. The response's `brief` says what happened when one was attached or a flag was given. Other tools, relay delivery, Schedule, terminal commands and answers never carry it.
 
 `--auto-yes-answer-mode <m>` picks the answer mode `--auto-yes` arms with (`recommended` / `careful`;
 see [Answer Modes](#answer-modes-recommended-and-careful-issue-3863)). Without `--auto-yes` it is
