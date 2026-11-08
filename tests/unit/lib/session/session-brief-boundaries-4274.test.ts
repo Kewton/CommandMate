@@ -616,14 +616,32 @@ describe('settings and the instance’s lifetime between the plan and the claim'
     expect(rows(world, 'codex-2')[0]).toMatchObject({ state: 'skipped', skipReason: 'incarnation_changed' });
   });
 
-  it('[consistency review 2] a pre-v66 roster row given its incarnation late: cannot be told from a re-add, not briefed', async () => {
+  it('[review 2b ②] a pre-v66 roster row given its incarnation late by mem (issued_by lazy): briefed, row filled in', async () => {
+    world.db.prepare(PRE_V66_ROW).run(WT);
+    launch('codex', 'codex-2');
+    let incarnation = '';
+    await withProviderWait(() => {
+      incarnation = startInstanceIncarnation(world.db, WT, 'codex-2', 'codex', Date.now(), 'lazy');
+    });
+    expect(typed(world, 'codex')).toEqual([`${FAKE_BRIEF}\n\nbody`]);
+    expect(rows(world, 'codex-2')[0]).toMatchObject({ state: 'sent', instanceIncarnation: incarnation });
+  });
+
+  it('[review 2b ①] a pre-v66 roster row (no incarnation) deleted while the provider waits: not briefed', async () => {
     world.db.prepare(PRE_V66_ROW).run(WT);
     launch('codex', 'codex-2');
     await withProviderWait(() => {
-      startInstanceIncarnation(world.db, WT, 'codex-2', 'codex');
+      removeAgentInstance(world.db, WT, 'codex-2');
     });
     expect(typed(world, 'codex')).toEqual(['body']);
     expect(rows(world, 'codex-2')[0]).toMatchObject({ state: 'skipped', skipReason: 'incarnation_changed' });
+  });
+
+  it('[review 2b ①] (control) a pre-v66 roster row left as it is: briefed', async () => {
+    world.db.prepare(PRE_V66_ROW).run(WT);
+    launch('codex', 'codex-2');
+    await withProviderWait(() => {});
+    expect(typed(world, 'codex')).toEqual([`${FAKE_BRIEF}\n\nbody`]);
   });
 
   it('(control) a primary off the roster, incarnation issued late by the first mem write: briefed, row filled in', async () => {

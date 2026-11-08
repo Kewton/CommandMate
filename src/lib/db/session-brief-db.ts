@@ -9,7 +9,7 @@
  * seq); the highest seq is the instance's current boundary.
  *
  * Reads the instance's lifetime from two places it does not own: #4221's incarnation
- * (`getInstanceIncarnation`) and whether the instance is on the roster
+ * and the way #4222 records it was issued (`getInstanceIncarnationRow`), and whether the instance is on the roster
  * (`agent_instances`, SELECT only). The roster row's `created_at` is not a key: the
  * roster's full replace (`setAgentInstances`, a reorder or an alias edit) writes a
  * new one for the same instance.
@@ -19,7 +19,7 @@
 
 import { randomUUID } from 'crypto';
 import type Database from 'better-sqlite3';
-import { getInstanceIncarnation } from '@/lib/mem/incarnation';
+import { getInstanceIncarnationRow, type IncarnationIssuedBy } from '@/lib/mem/incarnation';
 
 export type BoundaryKind = 'launch' | 'auto_restart' | 'reset' | 'resume' | 'explicit';
 export type BoundaryEvidence = 'launch' | 'hook' | 'send_command' | 'explicit';
@@ -159,42 +159,44 @@ export function listRetainedBoundaries(db: Database.Database, worktreeId: string
 
 /**
  * How long the instance has been the same thing (design §3.7): #4221's incarnation,
- * and whether the instance is on the roster.
+ * how it was issued (#4222's `issued_by`), and whether the instance is on the roster.
  */
 export interface InstanceLifetime {
   incarnation: string | null;
   /** The tool #4221's incarnation row names, or null without one. */
   incarnationToolId: string | null;
+  /** `issued_by` of the incarnation row (`lazy`: mem's late issue or a primary copied into the first roster save). */
+  incarnationIssuedBy: IncarnationIssuedBy | null;
   /** On the roster (`agent_instances`); a primary not saved there is not. */
   onRoster: boolean;
 }
 
 export function readInstanceLifetime(db: Database.Database, worktreeId: string, instanceId: string): InstanceLifetime {
-  const incarnation = getInstanceIncarnation(db, worktreeId, instanceId);
+  const incarnation = getInstanceIncarnationRow(db, worktreeId, instanceId);
   const roster = db
     .prepare('SELECT 1 AS present FROM agent_instances WHERE worktree_id = ? AND instance_id = ?')
     .get(worktreeId, instanceId) as { present: number } | undefined;
   return {
     incarnation: incarnation?.incarnation ?? null,
     incarnationToolId: incarnation?.cliToolId ?? null,
+    incarnationIssuedBy: incarnation?.issuedBy ?? null,
     onRoster: roster !== undefined,
   };
 }
 
 /**
  * Whether `now` is the same lifetime of the instance as `earlier` (design §3.7,
- * consistency review 2). The key is #4221's incarnation: a delete ends it and an
- * add starts another, and the roster's full replace keeps it.
+ * consistency reviews 2 and 2b). The key is #4221's incarnation: a delete ends it,
+ * an add starts another, and the roster's full replace keeps it.
  *
  *  - An incarnation `earlier` has: equal is the answer.
- *  - None then and none now: the same (a full replace of a row older than v66 keeps
- *    it at none; a delete and re-add would have started one).
- *  - None then, one now: the same only for a primary off the roster both times
- *    (#4221 issues its incarnation on the first mem write, and nothing else can
- *    start one off the roster) with the same tool. On the roster, a late issue
- *    for a row older than v66 cannot be told from a delete and re-add, so it is
- *    another lifetime: the brief of that one boundary is left out, never put
- *    into another instance's conversation.
+ *  - None then: leaving the roster ends the lifetime (a delete of an instance that
+ *    never had an incarnation leaves none to end — the roster is what shows it).
+ *    Otherwise none now is the same (a full replace keeps it at none; an add would
+ *    have started one), and one now is the same only when #4222 says it was issued
+ *    `lazy` (mem's first write, or a primary copied into the first roster save) for
+ *    the same tool. `roster` (a new pair: a delete and re-add) and NULL (before v67)
+ *    are another lifetime.
  */
 export function isSameInstanceLifetime(
   earlier: Pick<InstanceLifetime, 'incarnation' | 'onRoster'>,
@@ -202,8 +204,9 @@ export function isSameInstanceLifetime(
   cliToolId: string
 ): boolean {
   if (earlier.incarnation !== null) return earlier.incarnation === now.incarnation;
-  if (now.incarnation === null) return true;
-  return !earlier.onRoster && !now.onRoster && now.incarnationToolId === cliToolId;
+  if (earlier.onRoster && !now.onRoster) return false;
+  if (now.incarnation === null) return earlier.onRoster === now.onRoster;
+  return now.incarnationIssuedBy === 'lazy' && now.incarnationToolId === cliToolId;
 }
 
 // ===========================================================================

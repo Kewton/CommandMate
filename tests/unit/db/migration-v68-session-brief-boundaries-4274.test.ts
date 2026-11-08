@@ -16,7 +16,7 @@ import {
   settleBoundaryClaim,
 } from '@/lib/db/session-brief-db';
 
-const LIFETIME = { incarnation: null, incarnationToolId: null, onRoster: false };
+const LIFETIME = { incarnation: null, incarnationToolId: null, incarnationIssuedBy: null, onRoster: false };
 
 describe('migration v68: session_brief_boundaries', () => {
   let db: Database.Database;
@@ -94,10 +94,11 @@ describe('migration v68: session_brief_boundaries', () => {
     expect(claimBoundary(db, newer.id, 'c', null)).toBe(true);
   });
 
-  it('the lifetime rule (design §3.7): the incarnation is the key, the roster only says on or off', () => {
-    const now = (incarnation: string | null, onRoster: boolean, tool = 'claude') => ({
+  it('the lifetime rule (design §3.7): the incarnation is the key; with none, the roster and issued_by decide', () => {
+    const now = (incarnation: string | null, onRoster: boolean, issuedBy: 'lazy' | 'roster' | null = 'lazy', tool = 'claude') => ({
       incarnation,
       incarnationToolId: incarnation ? tool : null,
+      incarnationIssuedBy: incarnation ? issuedBy : null,
       onRoster,
     });
     expect(isSameInstanceLifetime({ incarnation: 'a', onRoster: true }, now('a', true), 'claude')).toBe(true);
@@ -106,11 +107,17 @@ describe('migration v68: session_brief_boundaries', () => {
     // None both times: a full replace of a row older than v66 keeps it at none.
     expect(isSameInstanceLifetime({ incarnation: null, onRoster: true }, now(null, true), 'claude')).toBe(true);
     expect(isSameInstanceLifetime({ incarnation: null, onRoster: false }, now(null, false), 'claude')).toBe(true);
-    // None, then one: a primary off the roster (the first mem write) with the same tool only.
-    expect(isSameInstanceLifetime({ incarnation: null, onRoster: false }, now('a', false), 'claude')).toBe(true);
-    expect(isSameInstanceLifetime({ incarnation: null, onRoster: false }, now('a', false, 'codex'), 'claude')).toBe(false);
-    expect(isSameInstanceLifetime({ incarnation: null, onRoster: false }, now('a', true), 'claude')).toBe(false);
-    expect(isSameInstanceLifetime({ incarnation: null, onRoster: true }, now('a', true), 'claude')).toBe(false);
+    // [review 2b ①] None both times, but it left the roster: the delete ended it.
+    expect(isSameInstanceLifetime({ incarnation: null, onRoster: true }, now(null, false), 'claude')).toBe(false);
+    // [review 2b ②] None, then one issued `lazy` with the same tool: the same lifetime, on the roster or off.
+    expect(isSameInstanceLifetime({ incarnation: null, onRoster: true }, now('a', true, 'lazy'), 'claude')).toBe(true);
+    expect(isSameInstanceLifetime({ incarnation: null, onRoster: false }, now('a', false, 'lazy'), 'claude')).toBe(true);
+    expect(isSameInstanceLifetime({ incarnation: null, onRoster: false }, now('a', true, 'lazy'), 'claude')).toBe(true);
+    // ...but `roster` (a new pair: delete and re-add), NULL (before v67), another tool, or a left roster are not.
+    expect(isSameInstanceLifetime({ incarnation: null, onRoster: true }, now('a', true, 'roster'), 'claude')).toBe(false);
+    expect(isSameInstanceLifetime({ incarnation: null, onRoster: true }, now('a', true, null), 'claude')).toBe(false);
+    expect(isSameInstanceLifetime({ incarnation: null, onRoster: false }, now('a', false, 'lazy', 'codex'), 'claude')).toBe(false);
+    expect(isSameInstanceLifetime({ incarnation: null, onRoster: true }, now('a', false, 'lazy'), 'claude')).toBe(false);
   });
 
   it('the rollback removes the table and nothing else', () => {

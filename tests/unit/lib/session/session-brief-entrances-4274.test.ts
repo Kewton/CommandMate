@@ -253,12 +253,19 @@ const ENTRANCES: Record<string, Entrance> = {
   },
   'send fills a late-issued incarnation': {
     writes: ['fillBoundaryIncarnation'],
-    // A primary off the roster: #4221 issues its incarnation on the first mem write
-    // (consistency review 2: on the roster, a late issue is another lifetime).
-    arrange: () => {},
+    // A roster row older than v66 (no incarnation) beside another member: mem's first
+    // write issues it `lazy` (review 2b ②), and a delete and re-add is a `roster` issue,
+    // another lifetime. (Alone on the roster, a re-add of a primary id is `lazy` too:
+    // #4222 counts it as the primary copied into the first save.)
+    arrange: () => {
+      addAgentInstance(world.db, WT, { id: 'codex-9', cliTool: 'codex', alias: '', order: 0 });
+      world.db
+        .prepare("INSERT INTO agent_instances (worktree_id, instance_id, cli_tool_id, alias, sort_order, created_at) VALUES (?, 'claude', 'claude', '', 1, 1)")
+        .run(WT);
+    },
     run: async () => {
       launch('claude');
-      startInstanceIncarnation(world.db, WT, 'claude', 'claude');
+      startInstanceIncarnation(world.db, WT, 'claude', 'claude', Date.now(), 'lazy');
       await send('claude', 'x');
     },
     briefs: 1,

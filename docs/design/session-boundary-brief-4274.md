@@ -283,18 +283,25 @@ CREATE TABLE session_brief_boundaries (
 | 取る（同期の区間、§3.4 の 3） | 今の寿命の鍵が、計画で固定した値と行の値の両方と「同じ寿命」でなければ取らない。行は `skipped(incarnation_changed)`。brief を外し、利用者の本文は送る |
 | 決着 | 記録だけ。世代が替わっていても既に打った本文は取り消せないので、行の状態は §3.4 の表どおり |
 
-「同じ寿命」の定義（寿命の鍵＝ A の世代。roster は居る・居ないだけを見る。整合性レビュー 2 で `agent_instances.created_at` を
-鍵から外した：既存の全置換が並べ替え・alias の変更でも同じ instance の `created_at` を書き直すため）：
+「同じ寿命」の定義（寿命の鍵＝ A の世代。世代が無いときは roster の在籍と、B（#4222、v67）の `issued_by` で補う。
+整合性レビュー 2 で `agent_instances.created_at` を鍵から外した：既存の全置換が並べ替え・alias の変更でも同じ instance の
+`created_at` を書き直すため）。読むのは `getInstanceIncarnationRow`（世代・ツール・`issued_by`）と `agent_instances` の行の有無だけ：
 
 - **前に世代があれば、等しいことが答え**。削除は世代を終え、追加は新しい世代を始めるので、削除・再追加は必ず違う値になる。
   全置換で残る組は同じ値
-- **前も今も NULL**：同じ寿命（v66 より前の行の全置換は NULL のまま。削除・再追加なら追加が世代を始めるので NULL ではない）
-- **前が NULL、今は非 NULL**：前も今も roster に居ない primary で、今の世代の `cli_tool_id` が同じときだけ同じ寿命
-  （roster の外で世代を始めるのは mem の最初の書き込みだけ）。行の `instance_incarnation` を埋める。roster に居る行では、
-  v66 より前の行の遅い発行と、削除・再追加（2 回目の事前レビュー C）を A の世代だけでは区別できないので、違う寿命として
-  その境界の brief を外す（別の instance の会話へ入れない側に倒す。外れるのは、その行の生涯で最初の mem の書き込みを
-  またいだ 1 つの境界だけ。U9）
+- **前が NULL で、roster に居たのに今は居ない**：違う寿命（2 回目の整合性レビュー ①：世代の無い instance の削除は終える世代が
+  無いので、在籍の変化で寿命の終わりを見る。`--kill` なしの削除でペインが残っても旧い計画を差し込まない）
+- **前も今も NULL**：在籍が変わっていなければ同じ寿命（v66 より前の行の全置換は NULL のまま。削除・再追加なら追加が世代を始める
+  ので NULL ではない）
+- **前が NULL、今は非 NULL**：今の世代の `issued_by` が `lazy`（mem の最初の書き込みの遅い発行、または primary を最初の roster の
+  保存へ写したとき。`incarnation.ts` の `IncarnationIssuedBy`）で、ツールが同じときだけ同じ寿命。行の `instance_incarnation` を
+  埋める（2 回目の整合性レビュー ②：v66 より前の在籍の行の正当な遅い発行で初回の brief を失わない）。`roster`（roster の新しい組＝
+  削除・再追加）と NULL（v67 より前の行。v68 の行より古いので、ここでは現れない）は違う寿命
 - 非 NULL → NULL・別の値：違う寿命
+
+残る危険（B の規則のまま）：roster の唯一の行が primary の ID（ID とツールが同じ）で、世代が NULL のまま、provider の待ちの間に
+削除→再追加されると、B はその追加を「primary を最初の保存へ写した」`lazy` と記録するので、同じ寿命と見る。待ちは provider の
+時間切れ（2 秒）までで、同じ ID・同じツールの instance に限る。
 
 境界は作り直さない：世代の変化で新しい行は開かない（新しい世代の instance には、次の起動・reset で行が開く）。
 
@@ -610,13 +617,13 @@ Claude の fixture は `session_id` が置換で同じ値なので、ID の変�
 | reset の観測の冪等（事前レビュー①） | 送信の完了→`clear` フック、`clear` フック→送信の完了の両順序で行は 1 つ・付くのは 1 回。同じ `clear`（同じ `session_id`）をサーバの再起動（メモリを消し DB を残す）の後に再配達しても行は増えず、追加の差し込みが無い。端末から打った reset（フックだけ）でも 1 回 | 本当に次の `/clear`（新しい ID）では新しい行で 1 回付く。別の会話への `resume` では 1 回付く |
 | 識別の無いフック（事前レビュー②） | 対話の Codex が稼働中に、同じ `cwd` の headless の run の別 ID の `SessionStart` / `Stop`（識別なし、`cwd` で解決）を届けても、台帳は変わらず次の送信に付かない | 対象のペイン自身の識別つきの `clear` では行が開く |
 | provider の待ちの間の設定の変化（事前レビュー③） | provider の `build` を待たせている間に `mode` を `off`（または `derived`・`injectOnStart=false`・ブランチの規則の変更）にすると、brief だけ外れ、利用者の本文は送られる。入力のロックを別の送信が持っている間に設定を変えても同じ（取る区間の同期の再確認） | 設定が変わらなければ 1 回付く |
-| instance の世代（事前レビュー④・整合性レビュー 2） | provider の待ちの間に同じ ID を削除→再追加（世代が替わる。`removeAgentInstance`＋`addAgentInstance`、または全置換で外して戻す）すると、前の計画の brief を渡さない（`skipped(incarnation_changed)`）。roster に居る行の NULL→非 NULL も渡さない | 全置換（`setAgentInstances` での並べ替え・alias の変更。世代あり・v66 より前の NULL の両方）では付く。roster に無い primary の、mem の最初の書き込みによる遅い発行（NULL→同じツールの新しい世代）でも行は作り直さず付く |
+| instance の世代（事前レビュー④・整合性レビュー 2・2 回目 ①②） | provider の待ちの間に同じ ID を削除→再追加（世代が替わる。`removeAgentInstance`＋`addAgentInstance`、または全置換で外して戻す。`issued_by='roster'`）すると、前の計画の brief を渡さない（`skipped(incarnation_changed)`）。世代 NULL の在籍の行を削除するだけでも渡さない | 全置換（`setAgentInstances` での並べ替え・alias の変更。世代あり・v66 より前の NULL の両方）では付く。何もしなければ付く。mem の最初の書き込みによる遅い発行（`issued_by='lazy'`。roster に無い primary と、v66 より前の在籍の行の両方）でも行は作り直さず付く |
 | 送信の中の再起動の記録の移し先（事前レビュー⑤） | 送信の間に、別の reset / resume の行（フック・`force`）が開いても、それを `sent` にせず、次の送信に付く | 自分の送信が起こした再起動の行（`opened_by_send` が一致）へ本文が届いたら記録を移し、次の送信に二重に付かない |
 | 決着とロックの順序（事前レビュー⑥） | Claude・Codex・Command Code それぞれ：A が取った後 `not-sent`、ロックを待っていた B（計画のとき行は `claimed`）に付く | A が `sent` / `unknown` なら B に付かない |
 | provider との分担（事前レビュー⑦） | 偽の provider の `settle` が、`sent` のときだけ実際に打った本文の `includedNoticeIds` で 1 回呼ばれる。並行の 2 送信で `build` が 2 回でも `settle(sent)` は 1 回、ID は打った本文のもの | `not_sent`・取れなかった（`discarded`）・予算で外れたときは `sent` で呼ばれない。`commandmate brief`（preview）の経路は `settle` を呼ばない（D1 では口の試験だけ。C の CLI は C の試験） |
 | reset の公開と後続の送信（2 回目 A） | フックなしで、起動の行が `pending` のまま `/clear` と通常の送信を並べる（`/clear` が先にロックを取る）→ 新しい会話へ付くのは 1 回だけ（通常の送信は本文だけ、次の送信に付く） | 逐次の送信、両順のフックの到着は今の表どおり |
 | ロックの待ちの間の所属・ブランチの変化（2 回目 B） | 計画の後、ロックを別の送信が持っている間にブランチを `on` の A から `off` の B へ替える → brief を外し本文は送る | 所属・ブランチが変わらなければ付く |
-| roster の削除・再追加（2 回目 C） | 世代 NULL の roster の行で計画の後、同じ ID を削除→再追加 → 付けない（`skipped(incarnation_changed)`） | roster に無い primary で、mem の最初の書き込みで世代が発行されたら付く |
+| roster の削除・再追加（2 回目 C） | 世代 NULL の roster の行で計画の後、同じ ID を削除→再追加 → 付けない（`skipped(incarnation_changed)`） | 同じ行で、mem の最初の書き込みで世代が発行されたら付く |
 | 新しい境界の後の旧い境界（整合性レビュー 1） | A が境界 X を取り、送信の中の再起動で Y を開いて `not-sent`。その間に X を計画していた B → B は本文だけ（X は `superseded`）、次の送信に 1 回付く（Y）。台帳の単体でも、新しい行の後の旧い行の `claimBoundary` は拒否 | 同じ境界の `not-sent` の後の再送は今どおり 1 回付く（行は 1 つ・`attempts` 1） |
 | 通知の予約（2 回目 D） | 別の 2 つの instance の境界が同じ知らせを選ぶ（偽の provider の `reserve` が共有の集合で予約）→ その知らせが本文に入るのは片方だけ | 別の知らせなら両方に入る。preview（`build` だけ）は `reserve`・`settle` を呼ばない |
 | resume で戻る（2 回目 E） | resume A→B→A でそれぞれ 1 回付く | 今の会話と同じ resume の再配達では行が増えない |
@@ -638,7 +645,9 @@ D1 が足した共通の規則ごとに、それを読む・書く全経路と�
 | 同 | `openResetBoundaryFromSend`（送信のロックの中） | 読む・書く（開く・認める） | 追従（入口で読んだ寿命と照らす） |
 | 同 | `SendBrief.plan` / `claim`（`sendUserMessage`） | 読む・書く | 追従 |
 | 同 | worktree の改名・削除（`worktree-child-tables.ts` の列挙、CASCADE） | 書く（付け替え・削除） | 追従（`worktree_id` の列名で自動。v68 の試験で固定） |
-| 同 | instance の削除・再追加・全置換（`agent-instances-db.ts`、B のファイル・変えない） | 書かない（台帳は残る） | 追従（取る区間の寿命の照合で古い行を拒む。鍵は A の世代 `getInstanceIncarnation` と roster に居るか。全置換の `created_at` の書き直しは鍵に入らない。§3.7、整合性レビュー 2） |
+| 同 | instance の削除・再追加・全置換（`agent-instances-db.ts`、変えない） | 書かない（台帳は残る） | 追従（取る区間の寿命の照合で古い行を拒む。鍵は A の世代、世代が無いときは在籍の変化と `issued_by`。全置換の `created_at` の書き直しは鍵に入らない。§3.7、整合性レビュー 2・2 回目 ①） |
+| 寿命の照合（`isSameInstanceLifetime`） | `SendBrief.claimInStretch`（行と計画の両方）・`openResetBoundaryFromSend`（送信の入口で読んだ寿命） | 読む | 追従（同じ関数を共有する。2 回目の整合性レビューで、世代 NULL の削除と `lazy` の遅い発行を両方の経路で直した） |
+| 世代の発行の経緯（`mem_instance_incarnations.issued_by`、v67） | `readInstanceLifetime` → `getInstanceIncarnationRow`（読むだけ）。書くのは B・A（`mem-db.ts` の `settleActorIncarnation` が `lazy`、`agent-instances-db.ts` の `rosterIssue` が `roster` / `lazy`） | 読む | 追従（`lazy` だけを同じ寿命の続きとする。2 回目 ②） |
 | claim | `claimBoundary`（`SendBrief.claimInStretch` だけ。`withMemTarget` の `build` の中・ロックの中） | 書く | 追従（今の行であることを `claimInStretch` と `UPDATE` の条件の両方で照らす。整合性レビュー 1） |
 | 今の行（`seq` の最大） | `openBoundary`（前の `pending` を `superseded`）・`claimBoundary`（今の行だけ）・`settleBoundaryClaim` の `not_sent`（今の行なら `pending`、でなければ `superseded`）・`SendBrief.plan`（今の行だけを候補に）・`observeHookBoundary`／`openResetBoundaryFromSend`（今の行と照らす） | 読む・書く | 追従（整合性レビュー 1 の前は `not_sent` と `claimBoundary` が今の行を見ていなかった） |
 | 同 | `SendBrief.plan` の候補（`pending`・生きている `claimed`）、`settleStaleClaim`（他のプロセスの `claimed` を `unknown` に） | 読む・書く | 追従 |
@@ -662,7 +671,7 @@ D1 が足した共通の規則ごとに、それを読む・書く全経路と�
 | U6 | brief を付けた本文が、Claude の transcript からの履歴（#2121）にどう出るか | 画面の会話に brief が利用者の発言として出る可能性 | D2 の実機。出るなら D2 で履歴の表示から外す |
 | U7 | provider の時間切れの既定（2 秒） | 送信の遅れ | C の実測 |
 | U8 | 対話の起動の Codex・Command Code の中継が `worktreeId` / `instanceId` を必ず載せるか（環境の相関の鍵） | §2.1 の「識別つきだけ」で、対話のフックまで捨てないか | 実装の前に各 source の `prepareLaunch` の環境と `cmate-agent-event.sh:268-271` を照らす。載らない場合は §0.1 に書いて止まる |
-| U9 | v66 より前からの roster の行に A の世代が作られているか（migration の backfill の有無） | §3.7 の NULL の扱い（roster に居る行の NULL→非 NULL は付けない側に倒すため、backfill が無いと、最初の mem の書き込みをまたいだ境界を 1 つ落としうる） | `v66-mem-store.ts` を読む |
+| U9 | v66 より前からの roster の行に A の世代が作られているか（migration の backfill の有無） | 解消：backfill が無くても、遅い発行は B の `issued_by='lazy'` で同じ寿命の続きと分かる（2 回目の整合性レビュー ②） | — |
 
 ## 11. D2 に残すもの（#4224）
 
@@ -710,3 +719,12 @@ U9：v66 に世代の backfill が無いことは確かめた（§3.7 の NULL �
 |---|---|---|---|
 | 1 P2 | 新しい境界の作成後に旧境界を再 claim できる（A が X を取る→B が X を計画→A の送信の中の再起動で Y→A が `not-sent` で X が `pending` に戻り、B が X を取る） | 採る | `claimBoundary` は今の行（`seq` の最大）だけを取る。`claimInStretch` も予約の前に照らし、報告の理由は `superseded`。`not-sent` の決着は、新しい行があれば `pending` ではなく `superseded`。§3.4 の 3・表、§3.5、§9.1、試験は §9「新しい境界の後の旧い境界」と入口の表 |
 | 2 P2 | roster の `created_at` は寿命の安定した識別子にならない（全置換が並べ替え・alias の変更でも書き直す） | 採る | 寿命の鍵を A の世代（`getInstanceIncarnation`、読むだけ）にし、roster は居る・居ないだけを `on_roster` に写す。`agent-instances-db.ts`・`src/lib/mem/**` は変えない。roster に居る行の NULL→非 NULL は違う寿命に倒す（v66 より前の行の遅い発行と削除・再追加を世代だけでは区別できない）。§0.2・§3.2・§3.7、試験は §9「instance の世代」「roster の削除・再追加」 |
+
+### 12.4 2 回目の整合性レビュー（2026-11-08、`b4fdf3340` に対して、P1 なし・P2 2。前回 2 件は解消）
+
+B（#4222、PR #4280：v67 と `mem_instance_incarnations.issued_by`）を develop から取り込んでから直した。
+
+| # | 指摘 | 処置 | 守る条件・反映先 |
+|---|---|---|---|
+| ① P2 | 世代が NULL の instance を削除しても旧い計画が失効しない（`{null, 在籍}`→`{null, 不在}` を同じ寿命と見た） | 採る | 前の世代が NULL なら、在籍から不在への変化を寿命の終わりとする。NULL どうしは在籍が同じときだけ同じ寿命。§3.7、試験は §9「instance の世代」 |
+| ② P2 | v66 より前の instance の正当な遅い発行で初回の brief を失う | 採る | `issued_by` を読み、`lazy` の発行（同じツール）は同じ寿命の続き、`roster`・NULL は違う寿命。§3.7・§9.1・U9、試験は §9「instance の世代」「roster の削除・再追加」と入口の表 |
