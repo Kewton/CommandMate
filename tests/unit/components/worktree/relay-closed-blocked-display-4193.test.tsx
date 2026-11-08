@@ -40,7 +40,7 @@ vi.mock('@/lib/relay/relay-readiness', () => ({
   findRelayHoldReason: (...args: unknown[]) => findRelayHoldReason(...args),
 }));
 
-import { runMigrations } from '@/lib/db/db-migrations';
+import { openMigratedFileDb } from '../../../helpers/migrated-file-db';
 import { createRelay } from '@/lib/db/relay-db';
 import { resetRelayServerBootId } from '@/lib/relay/relay-boot';
 import { pumpRelayDeliveries, resetRelayDeliveryState, sweepExpiredRelays } from '@/lib/relay/relay-delivery';
@@ -99,9 +99,7 @@ beforeAll(() => installRadixJsdomPolyfills());
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-4193-ui-'));
-  db = new Database(path.join(dir, 'cm.db'));
-  db.pragma('foreign_keys = ON');
-  runMigrations(db);
+  db = openMigratedFileDb(path.join(dir, 'cm.db'), { foreignKeys: true });
   insertWorktree('wt-a', 'claude');
   insertWorktree('wt-b', 'codex');
   resetRelayDeliveryState();

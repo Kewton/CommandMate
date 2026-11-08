@@ -145,11 +145,13 @@ export const OPENCODE_PROMPT_AFTER_RESPONSE = /tab agents\s+ctrl\+p commands/;
 export const OPENCODE_THINKING_PATTERN = /Thinking:/;
 
 /**
- * OpenCode's progress row drawn under the composer's bottom border while a turn
- * runs, read as a whole row (Issue #4188): a spinner run (braille `⠦`, or the
- * `⬝■` run of the busy footer), then `Thinking:` — e.g. `   ⠦ Thinking: Crafting…`.
+ * OpenCode's progress row while a turn runs, read as a whole row (Issue #4188): a
+ * spinner run (braille `⠦`, or the `⬝■` run of the busy footer), then `Thinking:` —
+ * e.g. `   ⠦ Thinking: Crafting…`. The only measurement
+ * (`opencode-live-1894/esc-again-after-marker.txt`) draws it in the transcript,
+ * ABOVE the border; {@link isOpenCodeThinkingInOpenTurn} reads that place.
  *
- * Only for the rows below the border, where the footer also draws the cwd
+ * This pattern is applied to the rows below the border, where the footer also draws the cwd
  * (`/private/tmp/…/repo`, wrapped over several rows). {@link OPENCODE_THINKING_PATTERN}
  * matches the word anywhere, so a cwd such as `/tmp/Thinking:demo` read there as a
  * running turn. A row opening with the spinner is never a path, nor a path's

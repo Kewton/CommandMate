@@ -26,7 +26,7 @@ vi.mock('@/lib/cli-tools/worktree-session-ownership', () => ({
   checkWorktreeSessionOwnership: vi.fn(async () => ({ verdict: 'owned', sessionPath: null })),
 }));
 import Database from 'better-sqlite3';
-import { runMigrations } from '@/lib/db/db-migrations';
+import { openMigratedFileDb } from '../../../helpers/migrated-file-db';
 import type { ChatMessage, PromptData } from '@/types/models';
 
 let db: Database.Database;
@@ -88,8 +88,7 @@ let tmpDir: string;
 
 beforeEach(() => {
   tmpDir = mkdtempSync(path.join(os.tmpdir(), 'cmate-3881-audit-'));
-  db = new Database(path.join(tmpDir, 'chat.sqlite'));
-  runMigrations(db);
+  db = openMigratedFileDb(path.join(tmpDir, 'chat.sqlite'));
   upsertWorktree(db, {
     id: WT,
     name: 'wt-3881-audit',

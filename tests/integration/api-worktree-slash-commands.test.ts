@@ -287,7 +287,7 @@ describe('GET /api/worktrees/[id]/slash-commands', () => {
   });
 
   it('should return Gemini builtins and gemini-tagged worktree commands when cliTool=gemini', async () => {
-    const testDir = path.resolve(__dirname, '../fixtures/test-gemini-worktree-slash-commands');
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-gemini-worktree-slash-commands-'));
     const commandsDir = path.join(testDir, '.claude', 'commands');
 
     try {
@@ -418,7 +418,7 @@ describe('GET /api/worktrees/[id]/slash-commands', () => {
     process.env.HOME = isolatedHome;
 
     const globalSkillDir = path.join(isolatedHome, '.claude', 'skills', 'dup-skill');
-    const worktreeDir = path.resolve(__dirname, '../fixtures/test-global-claude-skill-worktree');
+    const worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4246-global-claude-skill-worktree-'));
     const worktreeSkillDir = path.join(worktreeDir, '.claude', 'skills', 'dup-skill');
 
     try {
