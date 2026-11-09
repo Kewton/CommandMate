@@ -30,9 +30,12 @@ import { getMemRecord, listMem, type MemScope } from '@/lib/db/mem-db';
 import { memModeOnFor } from '@/lib/db/mem-close-db';
 import {
   abandonPromoteOperation,
+  acknowledgePromoteTransition,
+  beginPromoteTransition,
   claimPromoteOperation,
   destinationOf,
   docOperationsFor,
+  finishPromoteTransition,
   getPromoteOperation,
   getPromotePreview,
   hasActivePromoteOperation,
@@ -42,12 +45,12 @@ import {
   listUnresolvedPromoteOperations,
   prunePromoteRecords,
   recordedOperationIds,
-  setPromoteTransitionPending,
   settlePromoteOperation,
   settleStalePromoteAttempts,
   type PromoteOperationRow,
   type PromotePreviewRow,
   type PromoteSettle,
+  type PromoteTransitionRead,
 } from '@/lib/db/mem-promote-db';
 import { getWorktreeById, getWorktreesByRepository } from '@/lib/db/worktree-db';
 import { getRepositoryById, type Repository } from '@/lib/db/db-repository';
@@ -295,12 +298,19 @@ function transitionReasonOf(outcome: MemOutcome): PromoteTransitionReason {
 
 /**
  * The item's transition after a write outside (design §3.5): A's entrance with the
- * worktree lifetime and the version fixed when the person's request arrived.
- * Anything that does not match leaves `transition_pending` and its reason.
+ * worktree lifetime and the version fixed when the person's request arrived (§11.1 I1:
+ * fixed before the request's first await and never taken again). Anything that does
+ * not match leaves `transition_pending` and its reason.
+ *
+ * `read` is the operation as the caller read it in this same synchronous stretch. Every
+ * write here is conditional on it (§11.1 I2): the claim is taken only from that state,
+ * and A's failure is written only while this request still holds the claim, so a
+ * person's acknowledgement or a later request made during A's await is not overwritten.
  */
 async function settleTransition(
   db: Database.Database,
   operationId: string,
+  read: PromoteTransitionRead,
   fixed: { worktreeId: string; incarnation: string; version: number; transition: MemDecisionTransition },
   deps: PromoteDeps
 ): Promise<{ ok: true } | { ok: false; reason: PromoteTransitionReason }> {
@@ -308,7 +318,8 @@ async function settleTransition(
   // 5-2c: held pending from the settle's own synchronous stretch until A answers, so an
   // approval whose preview listed this write cannot write again while the item has not
   // moved yet (the settle and A's entrance are apart by A's await).
-  setPromoteTransitionPending(db, operationId, true, null, now());
+  const claim = beginPromoteTransition(db, operationId, read, now());
+  if (claim === null) return { ok: false, reason: 'state_forbids' };
   let outcome: MemOutcome;
   try {
     outcome =
@@ -329,12 +340,12 @@ async function settleTransition(
     outcome = { status: 500, body: { code: 'internal_error' } };
   }
   if (outcome.status < 300) {
-    setPromoteTransitionPending(db, operationId, false, null, now());
+    finishPromoteTransition(db, operationId, claim, { moved: true }, now());
     return { ok: true };
   }
   const reason = transitionReasonOf(outcome);
-  setPromoteTransitionPending(db, operationId, true, reason, now());
-  logger.info('mem-promote-transition-pending', { operationId, reason });
+  const written = finishPromoteTransition(db, operationId, claim, { moved: false, reason }, now());
+  logger.info('mem-promote-transition-pending', { operationId, reason, written });
   return { ok: false, reason };
 }
 
@@ -669,6 +680,7 @@ export async function promoteApprove(
     await settleTransition(
       db,
       row.id,
+      row,
       { worktreeId: row.context_worktree_id, incarnation: row.context_worktree_incarnation, version: row.item_version, transition: transitionOf(row.effect) },
       deps
     );
@@ -807,13 +819,16 @@ export async function promoteReconcile(
     }
   }
   const now = deps.now?.() ?? Date.now();
-  if (!settlePromoteOperation(db, operationId, finding.settle, now)) return promoteError('state_forbids');
+  // §11.1 I2: from the state read before the awaits (`unknown`) only.
+  if (!settlePromoteOperation(db, operationId, finding.settle, now, ['unknown'])) return promoteError('state_forbids');
   logger.info('mem-promote-reconciled', { operationId, state: finding.settle.state, reason: finding.settle.reason });
-  if (finding.settle.state === 'succeeded') {
+  const settled = getPromoteOperation(db, operationId);
+  if (finding.settle.state === 'succeeded' && settled) {
     // E1: the outcome is kept whatever the mode; the item moves only through A's entrance.
     await settleTransition(
       db,
       operationId,
+      settled,
       { worktreeId: row.context_worktree_id, incarnation: row.context_worktree_incarnation, version: row.item_version, transition: transitionOf(row.effect) },
       deps
     );
@@ -862,6 +877,9 @@ export async function promoteSettleTransition(
     if (typeof body.ifVersion !== 'number' || !Number.isInteger(body.ifVersion)) return promoteError('invalid_request', { field: 'ifVersion' });
     if (typeof body.worktreeId !== 'string' || !getWorktreeById(db, body.worktreeId)) return promoteError('not_found');
   }
+  // §11.1 I1 (5-2d P1): the lifetime is fixed before the first await (the membership's
+  // lookup) and given to A as it is; a worktree made again meanwhile is not this one.
+  const incarnation = itemClosedAcknowledged ? null : getOrCreateWorktreeIncarnation(db, body.worktreeId as string, deps.now?.() ?? Date.now());
   const readIds = await repositoryReadIds(db, repositoryId, deps.mem);
   const row = getPromoteOperation(db, operationId);
   if (!row || !ownsOperation(row, repositoryId, readIds)) return promoteError('not_found');
@@ -873,21 +891,23 @@ export async function promoteSettleTransition(
   const itemGone = !record || record.state === 'closed';
   if (itemClosedAcknowledged) {
     if (!itemGone) return promoteError('state_forbids', { reason: 'item_open' });
-    setPromoteTransitionPending(db, operationId, false, null, deps.now?.() ?? Date.now());
+    // §11.1 I2 (5-2d P2): conditional on the operation as read here; an earlier request's
+    // answer of A after this is not written (its claim is gone).
+    if (!acknowledgePromoteTransition(db, operationId, row, deps.now?.() ?? Date.now())) return promoteError('state_forbids');
     logger.info('mem-promote-item-closed-acknowledged', { operationId });
     return operationAnswer(db, operationId, deps);
   }
   if (!record) return promoteError('not_found', { reason: 'item_gone' });
   if (record.state === 'closed') return promoteError('state_forbids', { reason: 'item_closed' });
-  if (typeof body.ifVersion !== 'number' || typeof body.worktreeId !== 'string') return promoteError('invalid_request');
+  if (typeof body.ifVersion !== 'number' || typeof body.worktreeId !== 'string' || incarnation === null) return promoteError('invalid_request');
   if (record.version !== body.ifVersion) return promoteError('version_conflict');
   if (itemFingerprint(record) !== row.item_fingerprint && body.acknowledgeDiff !== true) {
     return promoteError('diff_not_acknowledged', { written: row.body, item: presentMemItem(record) });
   }
-  const incarnation = getOrCreateWorktreeIncarnation(db, body.worktreeId, deps.now?.() ?? Date.now());
   const settled = await settleTransition(
     db,
     operationId,
+    row,
     { worktreeId: body.worktreeId, incarnation, version: body.ifVersion, transition: transitionOf(row.effect) },
     deps
   );

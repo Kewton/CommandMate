@@ -72,6 +72,8 @@ export interface PromoteOperationRow {
   result_ref: string | null;
   transition_pending: number;
   transition_reason: string | null;
+  /** The request holding the item's transition (design §11.1 I2); null when none does. */
+  transition_claim: string | null;
   concurrent_edit: number;
   unknown_reason: string | null;
   decided_by: 'server' | 'human' | null;
@@ -260,20 +262,26 @@ const OUTCOME_OF: Record<PromoteSettle['state'], 'success' | 'failure' | 'unknow
   unknown: 'unknown',
 };
 
-/** Close the open attempt and settle the operation from `in_flight` (or `unknown`, by a reconcile). */
-export function settlePromoteOperation(db: Database.Database, operationId: string, settle: PromoteSettle, now: number): boolean {
+/**
+ * Close the open attempt and settle the operation (design §11.1 I2: conditional on the
+ * state as read). `from` is the set the caller read: an approval's own write settles
+ * from `in_flight` or the `unknown` a staleness made of it (the true outcome wins over
+ * unknown, never over a person's reconcile or abandon); a reconcile settles from `unknown` only.
+ */
+export function settlePromoteOperation(
+  db: Database.Database,
+  operationId: string,
+  settle: PromoteSettle,
+  now: number,
+  from: ReadonlyArray<Extract<PromoteOperationState, 'in_flight' | 'unknown'>> = ['in_flight', 'unknown']
+): boolean {
+  if (from.length === 0) return false;
   return db.transaction(() => {
-    db.prepare('UPDATE mem_promote_attempts SET ended_at = ?, outcome = ?, reason = ? WHERE operation_id = ? AND ended_at IS NULL').run(
-      now,
-      OUTCOME_OF[settle.state],
-      settle.reason,
-      operationId
-    );
     const changed = db
       .prepare(
         `UPDATE mem_promote_operations SET state = ?, result_ref = COALESCE(?, result_ref), concurrent_edit = ?,
            unknown_reason = ?, decided_by = ?, settled_at = ?, updated_at = ?
-         WHERE id = ? AND state IN ('in_flight','unknown')`
+         WHERE id = ? AND state IN (${from.map(() => '?').join(',')})`
       )
       .run(
         settle.state,
@@ -283,25 +291,91 @@ export function settlePromoteOperation(db: Database.Database, operationId: strin
         settle.state === 'unknown' ? null : (settle.decidedBy ?? 'server'),
         settle.state === 'unknown' ? null : now,
         now,
-        operationId
+        operationId,
+        ...from
       );
-    return changed.changes === 1;
+    if (changed.changes !== 1) return false;
+    db.prepare('UPDATE mem_promote_attempts SET ended_at = ?, outcome = ?, reason = ? WHERE operation_id = ? AND ended_at IS NULL').run(
+      now,
+      OUTCOME_OF[settle.state],
+      settle.reason,
+      operationId
+    );
+    return true;
   })();
 }
 
-/** A succeeded operation whose item did not move (design §3.5), or one that now did. */
-export function setPromoteTransitionPending(
+/** What a request read of the transition before it takes it (design §11.1 I2). */
+export interface PromoteTransitionRead {
+  transition_pending: number;
+  transition_claim: string | null;
+}
+
+/**
+ * Take the item's transition of a succeeded write (design §3.5・§11.1 I2): pending, with
+ * this request's claim, only while the operation is as the request read it (`state =
+ * 'succeeded'` and the same pending and claim). A later request takes it over from an
+ * earlier one; the earlier one's answer is then not written. Null when the state moved.
+ */
+export function beginPromoteTransition(db: Database.Database, operationId: string, read: PromoteTransitionRead, now: number): string | null {
+  const claim = randomUUID();
+  const changed = db
+    .prepare(
+      `UPDATE mem_promote_operations SET transition_pending = 1, transition_reason = NULL, transition_claim = ?, updated_at = ?
+       WHERE id = ? AND state = 'succeeded' AND transition_pending = ? AND transition_claim IS ?`
+    )
+    .run(claim, now, operationId, read.transition_pending, read.transition_claim);
+  return changed.changes === 1 ? claim : null;
+}
+
+/**
+ * A's answer to the request holding `claim` (design §11.1 I2).
+ * - moved: the item followed, so nothing is pending whoever holds the claim now (A's
+ *   success is the fact the pending stood for); written only while it is still pending.
+ * - not moved: the reason is written only while this request still holds the claim, so
+ *   a person's acknowledgement or a later request in between is never overwritten.
+ */
+export function finishPromoteTransition(
   db: Database.Database,
   operationId: string,
-  pending: boolean,
-  reason: string | null,
+  claim: string,
+  answer: { moved: true } | { moved: false; reason: string },
   now: number
-): void {
-  db.prepare("UPDATE mem_promote_operations SET transition_pending = ?, transition_reason = ?, updated_at = ? WHERE id = ? AND state = 'succeeded'").run(
-    pending ? 1 : 0,
-    pending ? reason : null,
-    now,
-    operationId
+): boolean {
+  if (answer.moved) {
+    return (
+      db
+        .prepare(
+          `UPDATE mem_promote_operations SET transition_pending = 0, transition_reason = NULL, transition_claim = NULL, updated_at = ?
+           WHERE id = ? AND state = 'succeeded' AND transition_pending = 1`
+        )
+        .run(now, operationId).changes === 1
+    );
+  }
+  return (
+    db
+      .prepare(
+        `UPDATE mem_promote_operations SET transition_reason = ?, transition_claim = NULL, updated_at = ?
+         WHERE id = ? AND state = 'succeeded' AND transition_pending = 1 AND transition_claim = ?`
+      )
+      .run(answer.reason, now, operationId, claim).changes === 1
+  );
+}
+
+/**
+ * A person acknowledged that a closed or purged item will not follow (5-2c P2-3): the
+ * pending ends without A, only while it is as the person's request read it (§11.1 I2).
+ * Any claim of an earlier request is dropped with it, so its answer is not written.
+ */
+export function acknowledgePromoteTransition(db: Database.Database, operationId: string, read: PromoteTransitionRead, now: number): boolean {
+  if (read.transition_pending !== 1) return false;
+  return (
+    db
+      .prepare(
+        `UPDATE mem_promote_operations SET transition_pending = 0, transition_reason = NULL, transition_claim = NULL, updated_at = ?
+         WHERE id = ? AND state = 'succeeded' AND transition_pending = 1 AND transition_claim IS ?`
+      )
+      .run(now, operationId, read.transition_claim).changes === 1
   );
 }
 

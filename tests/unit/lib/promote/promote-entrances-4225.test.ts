@@ -1177,3 +1177,103 @@ describe('5-2c: what the screen shows of an unsettled operation, its buttons rea
     expect(item(made.id).state).toBe('recorded');
   });
 });
+
+describe('5-2d: the rules behind the edges (I1 the generation fixed before the first await, I2 conditional writes)', () => {
+  beforeEach(() => routeScreenCalls());
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** Re-create the worktree (same id, same path) inside the next membership lookup's await, once. */
+  const recreateDuringMembership = () => {
+    let done = false;
+    commonDirOf = () => {
+      if (!done) {
+        done = true;
+        recreateWorktree();
+      }
+      return '/common/.git';
+    };
+  };
+
+  async function pendingTransition(): Promise<{ itemId: string; opId: string }> {
+    const made = await addDecision();
+    promoteHooks = { transition: () => ({ status: 409, body: { code: 'version_conflict' } }) };
+    const operation = operationOf(await approve(await preview(made.id)));
+    promoteHooks = undefined;
+    expect(op(operation.id)).toMatchObject({ state: 'succeeded', transition_pending: 1 });
+    return { itemId: made.id, opId: operation.id };
+  }
+
+  it('P1 (I1): the worktree re-created while settle-transition looks up the membership → the old request is refused, the item stays open', async () => {
+    const { itemId, opId } = await pendingTransition();
+    const version = item(itemId).version;
+    recreateDuringMembership();
+    const outcome = await promoteSettleTransition(db, SCREEN, repoA, opId, { worktreeId: WT, ifVersion: version }, deps());
+    expect(codeOf(outcome)).toMatchObject({ code: 'worktree_recreated' });
+    expect(item(itemId)).toEqual({ state: 'open', version });
+    expect(op(opId)).toMatchObject({ state: 'succeeded', transition_pending: 1, transition_reason: 'incarnation_changed' });
+  });
+
+  it('P1 (I1, control): no re-creation during the lookup → the same request records the item', async () => {
+    const { itemId, opId } = await pendingTransition();
+    const outcome = await promoteSettleTransition(db, SCREEN, repoA, opId, { worktreeId: WT, ifVersion: item(itemId).version }, deps());
+    expect(outcome.status).toBe(200);
+    expect(item(itemId).state).toBe('recorded');
+    expect(op(opId).transition_pending).toBe(0);
+  });
+
+  it('P2 (I2): acknowledged on another screen while the earlier request waits for A → its failure does not put the pending back', async () => {
+    const made = await addDecision();
+    const p = await preview(made.id);
+    const releasePost = holdThePost();
+    const pending = approve(p);
+    await until(() => gh.posts().length === 1);
+    expect((await memCloseItem(db, WT, made.id, { instanceId: 'claude' }, memDeps())).status).toBeLessThan(300);
+    const releaseA = arm();
+    releasePost();
+    await until(() => op(operationIdOfItem(made.id))?.state === 'succeeded' && hold?.armed === false);
+    const opId = operationIdOfItem(made.id);
+    expect(op(opId).transition_pending).toBe(1);
+
+    const acknowledged = await promoteApi.acknowledgeItemClosed(repoA, opId);
+    expect(acknowledged.ok).toBe(true);
+    expect(op(opId).transition_pending).toBe(0);
+
+    releaseA();
+    const answered = operationOf(await pending);
+    expect(answered.transitionPending).toBe(false);
+    expect(op(opId)).toMatchObject({ state: 'succeeded', transition_pending: 0, transition_reason: null });
+    expect((await screenList(repoA)).unresolved).toEqual([]);
+  });
+
+  it('P2 (I2): a later settle-transition supersedes the earlier one; the earlier failure does not overwrite the later success', async () => {
+    const { itemId, opId } = await pendingTransition();
+    const version = item(itemId).version;
+    const releaseA = arm();
+    const first = promoteSettleTransition(db, SCREEN, repoA, opId, { worktreeId: WT, ifVersion: version }, deps());
+    await until(() => hold?.armed === false);
+    // The second one moves the item while the first waits inside A.
+    const second = await promoteSettleTransition(db, SCREEN, repoA, opId, { worktreeId: WT, ifVersion: version }, deps());
+    expect(second.status).toBe(200);
+    expect(item(itemId).state).toBe('recorded');
+    releaseA();
+    await first;
+    expect(op(opId)).toMatchObject({ state: 'succeeded', transition_pending: 0, transition_reason: null });
+  });
+
+  it('P2 (I2, control): nothing acknowledged meanwhile → the failure of A leaves the pending with its reason, as before', async () => {
+    const made = await addDecision();
+    const p = await preview(made.id);
+    const releasePost = holdThePost();
+    const pending = approve(p);
+    await until(() => gh.posts().length === 1);
+    expect((await memCloseItem(db, WT, made.id, { instanceId: 'claude' }, memDeps())).status).toBeLessThan(300);
+    releasePost();
+    const answered = operationOf(await pending);
+    expect(answered).toMatchObject({ state: 'succeeded', transitionPending: true });
+    expect(op(answered.id).transition_reason).not.toBeNull();
+  });
+});
+
+function operationIdOfItem(itemId: string): string {
+  return (db.prepare('SELECT id FROM mem_promote_operations WHERE item_id = ? ORDER BY approved_at DESC, rowid DESC').get(itemId) as { id: string }).id;
+}

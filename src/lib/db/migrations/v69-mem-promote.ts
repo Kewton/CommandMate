@@ -16,6 +16,10 @@
  * write with it), and no column named `worktree_id` (a worktree's delete must not
  * take it either, as `getWorktreeChildTables()` would).
  *
+ * `transition_claim` names the request that holds the item's transition after a write
+ * outside (design §11.1 I2): a request's own outcome of A is written only while it still
+ * holds the claim, so an earlier request never overwrites a later confirmation.
+ *
  * The rollback drops the three tables, which forgets what was written outside.
  */
 
@@ -80,6 +84,7 @@ export const v69_migrations: Migration[] = [
           result_ref TEXT,
           transition_pending INTEGER NOT NULL DEFAULT 0,
           transition_reason TEXT,
+          transition_claim TEXT,
           concurrent_edit INTEGER NOT NULL DEFAULT 0,
           unknown_reason TEXT,
           decided_by TEXT CHECK (decided_by IN ('server','human')),

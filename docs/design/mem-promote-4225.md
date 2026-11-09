@@ -316,6 +316,7 @@ CREATE TABLE mem_promote_operations (
   result_ref TEXT,                       -- comment id・URL / パスと SHA-256
   transition_pending INTEGER NOT NULL DEFAULT 0,
   transition_reason TEXT,                -- incarnation_changed・version_conflict・disabled・db_error
+  transition_claim TEXT,                 -- 遷移を持つ要求の印（§11.1 I2、5-2d）。A の失敗はこの印を持つ要求だけが書く
   concurrent_edit INTEGER NOT NULL DEFAULT 0,  -- 文書：追記の間に他者の変更があった（§3.3）
   unknown_reason TEXT,                   -- body_differs・block_altered・block_missing・unreadable・poster_mismatch 等
   decided_by TEXT CHECK (decided_by IN ('server','human')),
@@ -533,6 +534,15 @@ Codex の事前レビュー（2026-11-09、P1 2・P2 5。`workspace/orchestratio
 | 5-2c P2-3 | closed の項目に出した遷移のボタンが必ず拒否される：A の状態表は closed からの遷移をすべて禁じる | 採る | 外部の結果の確認と項目の遷移を分ける。closed・purge 済みの項目の遷移待ちには遷移を出さず、「記録済みとして扱う（書けた結果だけを確かめ、閉じた項目は進めません）」を出す。これは settle-transition に `{ acknowledgeItemClosed: true }` を送り、A の入口を通らずに遷移待ちだけを終える（項目は閉じたまま）。遷移の要求（`ifVersion`）は closed なら A の前に 409 `state_forbids`（`reason: item_closed`）、purge 済みなら 404（`item_gone`）。開いた項目への `acknowledgeItemClosed` は 409（`item_open`）。対照はボタンの要求（画面の試験：URL と本文）から実 API（`promoteApi` を service へ通す試験）まで |
 | 5-2c 付随 | 照合の `succeeded` と A の答えの間（A の await）に、その記録を一覧に含めた preview の承認が通り 2 度目の POST をしうる（照合の前に所属の await を足したことで T10 が落ちて見えた） | 採る | `settleTransition` は最初の同期の文で遷移待ち（`transition_pending = 1`）を立て、A の答えで下ろす／理由を書く。approve の `hasActivePromoteOperation` がその間の承認を `operation_in_progress` で断る。対照：照合の A を止めた間の承認が断られ POST は 1 回（陽性、直しを外すと 2 回） |
 
+### 9.6 実装後の再レビュー（5-2b 3 回目、2026-11-09、`workspace/orchestration/runs/2026-11-09/review-4225c.md`）
+
+前回 3 件は解消。追加の指摘 2 件（P1 1・P2 1）。端を 1 つずつ塞ぐのをやめ、§11.1 の不変条件 I1・I2 の行として直した。
+
+| # | 指摘 | 処置 | 1 行の理由（守る条件・対照） |
+|---|---|---|---|
+| 5-2d P1 | settle-transition の所属の照会（`repositoryReadIds`）の await の後で世代を取っていたので、その間に同じ ID・同じ path で作業木を作り直すと新しい世代を A へ渡し、古い要求で項目が recorded／promoted になる | 採る（I1 の行） | 世代（`getOrCreateWorktreeIncarnation`）を最初の await の前へ移し、その値を `settleTransition` → A へそのまま渡す。§11.1 の世代の表と、`getOrCreateWorktreeIncarnation` がどの関数でも最初の await より前にしか無いことを試験で固定。対照：所属の照会の中で作り直す→`worktree_recreated`・項目は open のまま（陽性、直しを外すと recorded）、作り直さなければ recorded（陰性） |
+| 5-2d P2 | A を待つ間に別の画面で closed の項目の遷移待ちを確かめる（pending 0）と、先行の要求の A の失敗が照合せずに pending を 1 へ戻し、確認済みの操作が一覧に戻る | 採る（I2 の行） | 遷移を要求ごとの印（`transition_claim`）を持つ条件つきの更新に分ける：`beginPromoteTransition`（読んだ pending・印が同じときだけ印を取る）・`finishPromoteTransition`（失敗の理由は自分の印があるときだけ、成功は pending のときだけ下ろす）・`acknowledgePromoteTransition`（読んだ pending・印のときだけ下ろし印を外す）。照合の確定も読んだ `unknown` からだけにした。対照：A の待機中の確認の後、先行の失敗が pending を戻さない・後から来た要求の成功を先行の失敗が上書きしない（陽性、直しを外すと 1 に戻る）、間に何も無ければ失敗の理由が残る（陰性） |
+
 ---
 
 ## 10. 実装で実コードを正とした点（2026-11-09）
@@ -554,6 +564,8 @@ Codex の事前レビュー（2026-11-09、P1 2・P2 5。`workspace/orchestratio
 | I13 | 一覧は `withMemTarget`（repository）の答えで所属と mode を一度に判定（§4.2） | `promoteList` は `withSettledRepositoryMembership` と `decideMemTarget` を直接引く（`withMemTarget` の repository の枝と同じ組み立て） | 5-2c P2-1。`withMemTarget` の失敗は所属を返さないので、`ambiguous` のときに未解決の操作を引く `readRepositoryIds` が無い。`target.ts` は scope 外なので E の側で同じ組み立てをした |
 | I14 | 回復の API の所属は URL の root と操作の `repository_id` の一致（§4.2） | URL の root の所属（同じ Git の `candidates`）に操作の root が入っていればよい | 5-2c P2-2。一覧（`readRepositoryIds`）と同じ範囲 |
 | I15 | 「記録済みとして扱う」は項目の遷移（§3.4） | 項目が closed・purge 済みなら遷移を出さず、遷移待ちを終えるだけ（`acknowledgeItemClosed`）。`settleTransition` は A の前に遷移待ちを立てる | 5-2c P2-3・付随。A の状態表（`transitions.ts`）は closed からの遷移を禁じ、A は scope 外 |
+| I16 | 遷移待ちは `transition_pending` と理由（§6.1） | v69 の `mem_promote_operations` に `transition_claim`（遷移を持つ要求の印）を足した。v69 はこのブランチで足した未公開の版なので、新しい版を積まずに v69 の表に足した | 5-2d P2（I2）。先行の要求の A の答えが後から来た確認・要求を上書きしないことを、行の値だけで条件にする |
+| I17 | 結果の確定は `in_flight`・`unknown` から（§3.2） | `settlePromoteOperation` は呼び手が読んだ状態の集合（`from`）を条件にする。承認自身の結果は従来どおり `in_flight`・`unknown`、照合は `unknown` だけ。操作の行が変わったときだけ試行を閉じる | I2。照合の await の間に承認の結果が書いたものを照合が上書きしない |
 
 ## 11. 共通規則の全読者
 
@@ -575,7 +587,83 @@ E の入口が共有する規則と、それを読む（当てはめる）場所
 | 未解決の操作は項目の存否・closed に依らず画面に出す（5-2b P2-2） | `promoteList`（`unresolved`、`listUnresolvedPromoteOperations`。**追従**：`ambiguous` でも出す、5-2c P2-1）、`DecisionPromotePanel`（`decision-unresolved`。**追従**：closed・purge 済みには遷移を出さず `acknowledgeItemClosed` だけ、5-2c P2-3）、`screen-client.ts`（`PromoteListBody`・`acknowledgeItemClosed`） | `promote-entrances-4225`（5-2b P2-2・5-2c）・`DecisionPromotePanel-4225`（5-2c） |
 | 操作の所属は同じ Git の root の全部（一覧の `readRepositoryIds` と同じ範囲、5-2c P2-2） | `promoteList`（`readIdsOf`）、**追従**：`promoteReconcile`・`promoteAbandon`・`promoteSettleTransition`（`repositoryReadIds`・`ownsOperation`） | `promote-entrances-4225`（5-2c P2-2：2 root の間の表示→回復の要求、別の Git は 404） |
 | closed・purge 済みの項目は遷移しない：外部の結果の確認と項目の遷移を分ける（5-2c P2-3） | `promoteSettleTransition`（`acknowledgeItemClosed` は A を通らず遷移待ちだけを終える。遷移の要求は A の前に `item_closed`／`item_gone`）、`DecisionPromotePanel`（`operationLine` の `'closed'`）、A の状態表 `transitions.ts`（closed からの遷移を禁じる、変えない） | `promote-entrances-4225`（5-2c P2-3）・`DecisionPromotePanel-4225`（5-2c P2-3） |
-| 外へ書けた後、項目が動くまでは遷移待ち（`settleTransition` の最初の同期の文で立てる、5-2c 付随） | `settleTransition`（`promoteApprove`・`promoteReconcile`・`promoteSettleTransition` から）、`hasActivePromoteOperation` | `promote-entrances-4225`（T10・5-2c の窓） |
+| 外へ書けた後、項目が動くまでは遷移待ち（`settleTransition` の最初の同期の文で立てる、5-2c 付随）。立てる・下ろす・理由を書くはすべて読んだ値と要求の印を条件にする（§11.1 I2、5-2d） | `settleTransition`（`promoteApprove`・`promoteReconcile`・`promoteSettleTransition` から）、`hasActivePromoteOperation` | `promote-entrances-4225`（T10・5-2c の窓） |
 | 外へ出す本文の見えない文字（自由入力・引用・ブランチ・作成者）は見える形にし、`invisibleReplaced` に数える。ブランチは C の `sanitizeBranch`（5-2b P2-3） | `render.ts`（`renderPromoteBody`・`branchShown`）、`promotePreview`（`invisibleReplaced` を画面へ） | `promote-render-4225`（T15・5-2b P2-3） |
 | 「未反映」の表示（`recorded`） | E の画面（`DecisionPromotePanel`）と E の一覧の API（`unreflected:true`）。CLI の一覧と brief の文言は G（#4227）へ送った（§0.1 S3） | `promote-entrances-4225`（T13）・`DecisionPromotePanel-4225` |
 
+
+### 11.1 不変条件 I1・I2 と、E の service の await と書き込みの全表（5-2d）
+
+直しのたびに新しい await と書き込みが入り、そこから次の指摘が出ていた（5-2b・5-2c・5-2d）。端を 1 つずつ塞ぐのをやめ、次の 2 つを規則にする。
+
+- **I1（世代は最初の await の前に固定し、同じ値を最後まで渡す）**：E のすべての入口は、最初の await の前に作業木の世代を固定し、その同じ値を A の入口（`memSettleDecisionTransition` の `expectedWorktreeIncarnation`）と最後の書き込みまで渡す。途中で取り直さない（`getOrCreateWorktreeIncarnation` はどの関数でも最初の await より前にしか呼ばない）。E の入口は instance を受け取らない（A の入口は作業木の世代だけを比べる）ので、instance の世代は表の対象が無い。
+- **I2（状態を変える書き込みは、読んだ時点の状態を条件にする）**：操作の状態（`state`・遷移待ち `transition_pending`・その理由）を変える書き込みは、すべて読んだ時点の状態を条件にした条件つきの更新（CAS）にする。遷移は要求ごとの印（`transition_claim`、v69 の列）を持ち、A の失敗はその要求がまだ印を持っているときだけ書く。先行の要求は、後から来た確認（`acknowledgeItemClosed`）や後から来た要求の結果を上書きしない。A の成功（項目が動いた）は、遷移待ちが表していた事実そのものなので、印に依らず遷移待ちを下ろす（下ろした後に来る失敗は印が無いので書かない）。
+
+**入口ごとの世代の固定**（`promote-await-write-table-4225` がこの表と実コードを突き合わせる。固定する値は最初の await より前に読まれていなければならない。`—` は世代を固定しない入口で、`getOrCreateWorktreeIncarnation` を呼ばない）
+
+<!-- promote-generation:start -->
+| 入口 | 固定する値（最初の await の前） | 渡す先 |
+|---|---|---|
+| `promotePreview` | `getOrCreateWorktreeIncarnation` | preview の行（`context_worktree_incarnation`）→ approve |
+| `promoteApprove` | `preview.context_worktree_incarnation` | 同期の区間の照合 → operation の行 → `settleTransition` → A |
+| `promoteConfirmReflected` | `getOrCreateWorktreeIncarnation` | A |
+| `promoteReconcile` | — | 要求は作業木を持たない。operation に保存した世代を `settleTransition` → A |
+| `promoteAbandon` | — | 作業木を使わない |
+| `promoteSettleTransition` | `getOrCreateWorktreeIncarnation` | `settleTransition` → A（5-2d P1：所属の照会の await の前へ移した） |
+| `promoteList` | — | 読むだけ |
+<!-- promote-generation:end -->
+
+**E の service（`src/lib/promote/service.ts`）のすべての await と、状態を変えるすべての書き込み**（同じ試験がソースの await・書き込みの呼び出しを数えてこの表と比べる。新しい await・書き込み・未分類の import・service 自身の SELECT 以外の SQL は、表に行を足すまで落ちる。自己テストの対照は、写しに足した await・書き込み・import・SQL、await の後へ戻した世代、条件を外した UPDATE をそれぞれ検出すること）
+
+<!-- promote-await-write:start -->
+| 関数 | 種類 | 呼ぶもの | 回数 | 規則（I1：await の前に固定したもの・await の後に照らし直すもの／I2：書き込みの条件） |
+|---|---|---|---|---|
+| `defaultOrigin` | await | `import` | 1 | 読むだけ（モジュールの読み込み） |
+| `observeHead` | await | `import` | 1 | 読むだけ（モジュールの読み込み） |
+| `settleTransition` | write | `beginPromoteTransition` | 1 | I2：呼び手が同じ同期の区間で読んだ `state = 'succeeded'`・`transition_pending`・`transition_claim` が変わっていないときだけ印を取る。取れなければ A を呼ばない |
+| `settleTransition` | await | `memSettleDecisionTransition` | 1 | I1：呼び手が固定した世代・版をそのまま渡す（取り直さない） |
+| `settleTransition` | write | `memSettleDecisionTransition` | 1 | A の入口。版（`WHERE version = ?`）と世代（`alive()`）を条件に遷移する |
+| `settleTransition` | write | `finishPromoteTransition` | 2 | I2：成功は `transition_pending = 1` のときだけ下ろす。失敗の理由は自分の印（`transition_claim = ?`）がまだあるときだけ書く（5-2d P2） |
+| `settleOrUnknown` | write | `settlePromoteOperation` | 2 | I2：承認自身の結果は `in_flight`、または古さが作った `unknown` からだけ（人の照合・無いことの確認の後は書かない） |
+| `promotePreview` | write | `getOrCreateWorktreeIncarnation` | 1 | I1：最初の await の前に固定 |
+| `promotePreview` | await | `(deps.originUrl ?? defaultOrigin)` | 1 | I1：後の同期の区間で世代・版・指紋・mode を照らし直す |
+| `promotePreview` | await | `readGhIssue` | 1 | 同上 |
+| `promotePreview` | await | `readGhUser` | 1 | 同上 |
+| `promotePreview` | await | `observeHead` | 1 | 同上 |
+| `promotePreview` | write | `prunePromoteRecords` | 1 | 同じ取引の中で状態を読んで消す（進行中・不明・遷移待ちは消さない） |
+| `promotePreview` | write | `settleStalePromoteAttempts` | 1 | I2：`in_flight`・`unknown` の操作だけを不明にする（同期の区間で試行を読んで書く） |
+| `promotePreview` | write | `insertPromotePreview` | 1 | 新しい行（状態の変更ではない） |
+| `promoteApprove` | write | `invalidatePromotePreview` | 1 | I2：`used_at IS NULL AND invalidated_reason IS NULL` のときだけ |
+| `promoteApprove` | await | `observeHead` | 1 | I1：世代は preview の値。後の同期の区間で世代・HEAD・版・指紋・mode を照らし直す |
+| `promoteApprove` | await | `readGhToken` | 1 | 同上 |
+| `promoteApprove` | await | `readGhUser` | 1 | 同上 |
+| `promoteApprove` | await | `readGhIssue` | 1 | 同上 |
+| `promoteApprove` | await | `withMemTarget` | 1 | 照合と書き込みはこの同期の区間（コールバック）の中 |
+| `promoteApprove` | write | `settleStalePromoteAttempts` | 1 | I2：同上 |
+| `promoteApprove` | write | `claimPromoteOperation` | 1 | I2：preview が未使用のときだけ（`used_at IS NULL`）、一意の部分索引で進行中は 1 つ |
+| `promoteApprove` | write | `writeDocBlock` | 1 | 書く直前に基準の指紋をもう一度照らす（§3.3） |
+| `promoteApprove` | await | `postGhComment` | 1 | 結果は `settleOrUnknown`（I2）で書く |
+| `promoteApprove` | write | `postGhComment` | 1 | 外への書き込み。token・投稿者は await の前に固定した値 |
+| `promoteApprove` | await | `settleTransition` | 1 | I1：operation に保存した世代・版を渡す。I2：直前に読んだ operation を条件にする |
+| `promoteConfirmReflected` | write | `getOrCreateWorktreeIncarnation` | 1 | I1：最初の await の前に固定 |
+| `promoteConfirmReflected` | await | `memSettleDecisionTransition` | 1 | I1：固定した世代と要求の版を渡す |
+| `promoteConfirmReflected` | write | `memSettleDecisionTransition` | 1 | A の入口（版と世代が条件） |
+| `repositoryReadIds` | await | `withSettledRepositoryMembership` | 1 | 読むだけ（所属の照会） |
+| `promoteReconcile` | await | `repositoryReadIds` | 1 | 要求は世代を持たない。後で operation を読み直す |
+| `promoteReconcile` | write | `settleStalePromoteAttempts` | 1 | I2：同上 |
+| `promoteReconcile` | await | `listGhComments` | 1 | 後の書き込みは await の前に読んだ `unknown` を条件にする |
+| `promoteReconcile` | write | `settlePromoteOperation` | 1 | I2：`unknown` からだけ（その間に承認の結果や別の照合が書いたものを上書きしない） |
+| `promoteReconcile` | await | `settleTransition` | 1 | I1：operation に保存した世代・版。I2：照合の確定の直後に読み直した operation を条件にする |
+| `promoteAbandon` | await | `repositoryReadIds` | 1 | 後で operation を読む |
+| `promoteAbandon` | write | `abandonPromoteOperation` | 1 | I2：`unknown` のときだけ |
+| `promoteSettleTransition` | write | `getOrCreateWorktreeIncarnation` | 1 | I1：最初の await（所属の照会）の前に固定（5-2d P1） |
+| `promoteSettleTransition` | await | `repositoryReadIds` | 1 | 後で operation と項目を読む。世代は固定済みの値を使う |
+| `promoteSettleTransition` | write | `acknowledgePromoteTransition` | 1 | I2：読んだ `transition_pending = 1` と `transition_claim` のときだけ下ろし、先行の要求の印を外す（5-2d P2） |
+| `promoteSettleTransition` | await | `settleTransition` | 1 | I1：固定した世代と要求の版。I2：同じ同期の区間で読んだ operation を条件にする |
+| `promoteList` | await | `withSettledRepositoryMembership` | 1 | 読むだけ |
+<!-- promote-await-write:end -->
+
+| 共通規則 | 読む場所（ファイル・関数） | 固定している試験 |
+|---|---|---|
+| I1・I2 | 上の 2 表のすべての行。`mem-promote-db.ts` の `UPDATE mem_promote_operations` はすべて `state` を条件にし、遷移を変えるものは遷移の読んだ値を、理由を書くものは要求の印を条件にする | `promote-await-write-table-4225`（表と実コードの突き合わせ・自己テストの対照）・`mem-promote-transition-cas-4225`（条件つきの更新）・`promote-entrances-4225`（5-2d） |
+| 遷移待ちは保持期限の削除の対象外（5-2d で §11 に未記載と指摘された読者） | `prunePromoteRecords`（`mem-promote-db.ts`：`succeeded` で `transition_pending = 0` のものだけ消す） | `mem-promote-transition-cas-4225`（保持期限） |
