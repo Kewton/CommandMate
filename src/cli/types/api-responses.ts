@@ -1708,6 +1708,13 @@ export interface ChatMessage {
    */
   brief?: {
     state: 'attached' | 'skipped' | 'unknown' | 'not_sent';
+    /**
+     * A word when skipped: `no_brief`, `unsupported`, `slash_command`, `off`, `disabled`,
+     * `target_unresolved`, `empty`, `over_limit`, `provider_failed`, `incarnation_changed`,
+     * `settings_changed`, `superseded`, `reservation_conflict`, and (Issue #4224)
+     * `worktree_changed` — deleted, made again or renamed after the send's entrance — and
+     * `lifetime_unpinned` — the entrance had no evidence of the worktree's lifetime.
+     */
     reason?: string;
     boundaryId?: string;
   };

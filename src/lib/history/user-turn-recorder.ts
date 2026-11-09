@@ -341,23 +341,8 @@ function adoptExistingRow(
     at
   );
 
-  for (const candidate of candidates) {
-    // A relay delivery, kept for the pass below: claiming it would overwrite the
-    // `relay:<ledgerId>` the loop guard reads the ledger back out of.
-    if (candidate.requestId) continue;
-    if (!chatDb.setMessageRequestId(db, candidate.id, key)) continue;
-    logger.info('user-turn-adopted', {
-      ...describe(target),
-      requestId: key,
-      messageId: candidate.id,
-      driftMs: candidate.timestamp.getTime() - at,
-    });
-    return {
-      outcome: 'adopted',
-      messageId: candidate.id,
-      timestampMs: candidate.timestamp.getTime(),
-    };
-  }
+  const claimed = claimFirst(chatDb, db, target, key, candidates, at);
+  if (claimed) return claimed;
 
   // Issue #2392. Nothing is written here and that is the whole point: the row
   // already says what this prompt says, and its `request_id` is the loop guard's
@@ -390,7 +375,81 @@ function adoptExistingRow(
     };
   }
 
+  // Issue #4224 (D2 design §8.5): a send that carried a session brief typed it in front of
+  // the operator's body, and the agent records the two together; the `/send` row holds the
+  // body alone. Only when the whole text found no row, and the text opens with a brief's
+  // fences, is the rest asked for — in the same window — and only a `/send` row (no key)
+  // may answer: that row is the evidence the brief was CommandMate's. A brief the operator
+  // pasted is on its own row in full and was claimed above; nothing matching, the whole
+  // text is recorded as it is (never the cut one).
+  const rest = afterDeliveredBrief(normalized);
+  if (rest !== null) {
+    const bodies = sameText(
+      chatDb.findUnkeyedUserMessages(db, {
+        worktreeId: target.worktreeId,
+        cliToolId: target.cliToolId,
+        instanceId,
+        fromMs,
+        toMs: at + USER_TURN_ADOPTION_WINDOW_MS,
+      }),
+      rest,
+      at
+    ).filter((candidate) => !candidate.requestId);
+    const adopted = claimFirst(chatDb, db, target, key, bodies, at);
+    if (adopted) {
+      logger.info('user-turn-adopted-after-brief', { ...describe(target), requestId: key, messageId: adopted.messageId });
+      return adopted;
+    }
+  }
+
   return null;
+}
+
+/** Claim the first of `candidates` without a key for `key` (#2196); a relay delivery's row is skipped. */
+function claimFirst(
+  chatDb: ChatDbModule,
+  db: ChatDbHandle,
+  target: AgentInstanceRef,
+  key: string,
+  candidates: ChatDbUserRow[],
+  at: number
+): RecordedUserTurn | null {
+  for (const candidate of candidates) {
+    // A relay delivery, kept for the pass below: claiming it would overwrite the
+    // `relay:<ledgerId>` the loop guard reads the ledger back out of.
+    if (candidate.requestId) continue;
+    if (!chatDb.setMessageRequestId(db, candidate.id, key)) continue;
+    logger.info('user-turn-adopted', {
+      ...describe(target),
+      requestId: key,
+      messageId: candidate.id,
+      driftMs: candidate.timestamp.getTime() - at,
+    });
+    return {
+      outcome: 'adopted',
+      messageId: candidate.id,
+      timestampMs: candidate.timestamp.getTime(),
+    };
+  }
+  return null;
+}
+
+/** A session brief's opening and closing fences (#4223 `drawText`): the same tag on both. */
+const BRIEF_OPEN = /^<<<cmate-brief:([0-9a-f]{8})\n/;
+
+/**
+ * The normalised text after a session brief and its blank line, or null when it does not
+ * open with one (Issue #4224). The tag is not computed again from the lines: a brief
+ * rebuilt after a partial reservation keeps its first tag (`dropNoticeLines`, 2nd review ④).
+ */
+export function afterDeliveredBrief(normalized: string): string | null {
+  const open = BRIEF_OPEN.exec(normalized);
+  if (!open) return null;
+  const close = `\ncmate-brief:${open[1]}>>>\n\n`;
+  const end = normalized.indexOf(close);
+  if (end < 0) return null;
+  const rest = normalizeUserTurnContent(normalized.slice(end + close.length));
+  return rest.length > 0 ? rest : null;
 }
 
 /**

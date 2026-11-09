@@ -6,6 +6,13 @@
  * A change of the membership while building is retried once from the start; a second
  * one answers `disabled` when the branch is `off` by then, else `ambiguous` (§5.4).
  *
+ * Issue #4224 (D2 design §6.3): `sessionStart=1` is the form a `SessionStart` hook calls.
+ * When the send path will put the brief in front of the conversation's first send (the
+ * branch is `derived` / `on` with `injectOnStart`, and the instance's tool is one whose
+ * boundaries are detected), it answers an empty text marked `deferred: 'send'` — so a hook
+ * and the send never put two briefs in one conversation. Decided from the membership and
+ * the tool alone: the ledger is neither read nor written, nothing is built or reserved.
+ *
  * @module lib/brief/service
  */
 
@@ -24,6 +31,10 @@ import {
   type BuildBriefOutcome,
 } from './build';
 import { fitJson, fitText } from './fit';
+import { getWorktreeById } from '@/lib/db/worktree-db';
+import { withMemTarget } from '@/lib/mem/target';
+import { resolveAgentInstances } from '@/lib/session/agent-instances-resolver';
+import { BOUNDARY_TOOLS } from '@/lib/session/session-boundary';
 
 const logger = createLogger('brief');
 
@@ -49,6 +60,28 @@ export interface BriefQuery {
   budget: string | null;
   format: string | null;
   all: string | null;
+  /** Issue #4224: `1` from `commandmate brief --session-start`. */
+  sessionStart?: string | null;
+}
+
+/**
+ * Whether the send path briefs this instance's next conversation (D2 design §6.3): the
+ * membership's mode and `injectOnStart`, and the tool's boundaries. Null: it does not, and
+ * the hook prints the brief as `commandmate brief` does.
+ */
+export async function sessionStartDeferredTo(
+  db: Database.Database,
+  worktreeId: string,
+  instanceId: string,
+  deps: BriefBuildDeps = {}
+): Promise<{ mode: 'derived' | 'on' } | null> {
+  const worktree = getWorktreeById(db, worktreeId);
+  if (!worktree) return null;
+  const instance = resolveAgentInstances(db, worktreeId, worktree.selectedAgents).find((entry) => entry.id === instanceId);
+  if (!instance || !BOUNDARY_TOOLS.has(instance.cliTool)) return null;
+  return withMemTarget(db, { via: 'worktree', worktreeId }, deps.target ?? {}, (target) =>
+    target.ok && target.mode !== 'off' && target.features.injectOnStart ? { mode: target.mode } : null
+  );
 }
 
 export async function briefForRoute(
@@ -70,11 +103,24 @@ export async function briefForRoute(
   const all = query.all === '1';
   if (query.all !== null && query.all !== '1') return memError('invalid_request', { field: 'all' });
   if (all && query.budget !== null) return memError('invalid_request', { field: 'budget' });
+  const sessionStart = query.sessionStart === '1';
+  if (query.sessionStart !== undefined && query.sessionStart !== null && !sessionStart) {
+    return memError('invalid_request', { field: 'sessionStart' });
+  }
+  if (sessionStart && format !== 'text') return memError('invalid_request', { field: 'format' });
   let maxBytes: number | null = all ? null : BRIEF_BUDGET[format].default;
   if (query.budget !== null) {
     const parsed = parseBriefBudget(query.budget, format);
     if (!parsed.ok) return memError('invalid_request', { field: 'budget', reason: parsed.reason });
     maxBytes = parsed.maxBytes;
+  }
+
+  if (sessionStart) {
+    const deferred = await sessionStartDeferredTo(db, worktreeId, instanceId, deps);
+    if (deferred) {
+      const body: BriefTextResponse = { ok: true, format: 'text', mode: deferred.mode, text: '', omitted: 0, deferred: 'send' };
+      return { status: 200, body };
+    }
   }
 
   // The request's lifetimes, fixed once: every build of this request is for them.

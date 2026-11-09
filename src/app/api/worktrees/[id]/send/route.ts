@@ -31,7 +31,7 @@ import { getWorktreeById } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { probeRunningSessionHookUrl } from '@/lib/cli-tools/base';
 import { sendUserMessage } from '@/lib/session/send-user-message';
-import type { BriefReport } from '@/lib/session/session-brief';
+import { pinBriefRequest, pinBriefWorktree, type BriefReport } from '@/lib/session/session-brief';
 import { PROMPT_WAITING_CODE } from '@/lib/session/prompt-waiting-guard';
 import type { SendAttemptReason, SendAttemptState } from '@/lib/session/send-attempt-types';
 import { recordSendAttempt } from '@/lib/session/send-attempt-state';
@@ -168,7 +168,10 @@ async function handleSend(
 
     // Check if worktree exists
     const worktree = getWorktreeById(db, id);
-    if (!worktree) {
+    // Issue #4224 (D2 design §2.4, step 1): the worktree's lifetime this request is for,
+    // fixed in the same stretch it is read in — before the body is parsed or anything waits.
+    const briefWorktreePin = worktree ? pinBriefWorktree(db, id) : null;
+    if (!worktree || !briefWorktreePin) {
       return NextResponse.json(
         { error: `Worktree '${id}' not found` },
         { status: 404 }
@@ -184,6 +187,8 @@ async function handleSend(
     if (!validated.ok) return validated.response;
     const { trimmedContent, requestedCliToolId, instanceId, target } = validated.value;
     const cliToolId = target.cliToolId;
+    // Issue #4224 (step 2): the instance's lifetime, in the stretch it is resolved in.
+    const briefPin = pinBriefRequest(db, briefWorktreePin, instanceId ?? cliToolId);
     // Issue #4116: in the same step as the resolution, before anything waits.
     const roleRosterMark = readRoleRosterMark(db, id, body);
 
@@ -388,6 +393,7 @@ async function handleSend(
       // Issue #4274: the screen, `send` and `ask` reach here; relay delivery and the
       // others call the service with its default (`never`).
       brief: body.brief ?? 'auto',
+      briefPin,
       onBrief: (report) => {
         brief.report = report;
       },

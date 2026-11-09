@@ -75,7 +75,7 @@ import {
 import { addAgentInstance, removeAgentInstance } from '@/lib/db/agent-instances-db';
 import { startInstanceIncarnation } from '@/lib/mem/incarnation';
 import { resetLiveBriefClaimsForTest } from '@/lib/session/session-brief';
-import { setBriefProviderForTest, type BriefRequest } from '@/lib/session/brief-provider';
+import { EMPTY_BRIEF_PROVIDER, setBriefProviderForTest, type BriefRequest } from '@/lib/session/brief-provider';
 import { getLastSendAttempt, sendMessageDigest } from '@/lib/session/send-attempt-state';
 
 const STORE = path.join(process.cwd(), 'src/lib/db/session-brief-db.ts');
@@ -408,7 +408,8 @@ describe('every way into the session-brief ledger keeps the invariants', () => {
       bindWorld(local);
       try {
         arrange(entry);
-        setBriefProviderForTest(null);
+        // Issue #4224 (D2 design §10 T-1b): null is the default, now C's provider; the empty one is named.
+        setBriefProviderForTest(EMPTY_BRIEF_PROVIDER);
         overrideBriefMode(mode === 'never' ? 'never' : null);
         await entry.run();
         await send('claude', '## contract preamble\n\ngoal: do it');

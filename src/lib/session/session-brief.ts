@@ -18,6 +18,14 @@
  *
  * The operator's body is never cut: a brief that does not fit is left off.
  *
+ * Issue #4224 (D2, design `docs/design/brief-injection-d2-4224.md` §2): a send's request
+ * is for one worktree lifetime and one instance lifetime, fixed at its entrance
+ * ({@link pinBriefWorktree} where the route reads the worktree, {@link pinBriefRequest}
+ * where it resolves the instance) and carried here as `pin`. The plan, the claim and the
+ * reset's row never read them again: each asks whether the worktree pinned is still the
+ * one found ({@link SendBrief}'s continuity), and a worktree deleted and made again
+ * under the same id meanwhile gets nothing of this request (`worktree_changed`).
+ *
  * @module lib/session/session-brief
  */
 
@@ -29,6 +37,7 @@ import {
   fillBoundaryIncarnation,
   getBoundaryById,
   getCurrentBoundary,
+  getLatestWorktreeBoundaryId,
   isSameInstanceLifetime,
   openBoundary,
   readInstanceLifetime,
@@ -40,6 +49,10 @@ import {
   type InstanceLifetime,
 } from '@/lib/db/session-brief-db';
 import { withMemTarget, type MemTarget, type MemTargetDeps } from '@/lib/mem/target';
+import { getOrCreateWorktreeIncarnation, getWorktreeIncarnation } from '@/lib/mem/incarnation';
+import { getAllRepositories } from '@/lib/db/db-repository';
+import { getMemSettings } from '@/lib/db/mem-db';
+import type { MemMode, MemRepositorySettings } from '@/types/mem';
 import {
   getBriefProvider,
   type BriefBoundaryKind,
@@ -74,6 +87,103 @@ export interface BriefReport {
   state: 'attached' | 'skipped' | 'unknown' | 'not_sent';
   reason?: string;
   boundaryId?: string;
+}
+
+// ---------------------------------------------------------------------------
+// The request's lifetimes, fixed at its entrance (Issue #4224, D2 design §2.4)
+// ---------------------------------------------------------------------------
+
+/** What a send request's worktree was, read where the request first read the worktree (W1). */
+export interface BriefWorktreePin {
+  worktreeId: string;
+  /** `mem_worktree_incarnations` at the entrance; null when it had none and none was made. */
+  worktreeIncarnation: string | null;
+  /** The worktree's newest ledger row at the entrance (any instance, any state); null with none. */
+  anchorBoundaryId: string | null;
+}
+
+/** What a send request was read for: its worktree and its instance, fixed once (W1). */
+export interface BriefRequestPin extends BriefWorktreePin {
+  instanceId: string;
+  instance: InstanceLifetime;
+}
+
+const NO_LIFETIME: InstanceLifetime = { incarnation: null, incarnationToolId: null, incarnationIssuedBy: null, onRoster: false };
+
+/** Whether a repository's stored settings could put a brief in front of a send (any branch). */
+function settingsMayAttach(settings: MemRepositorySettings): boolean {
+  const ruleOn = settings.rules.some((rule) => rule.mode !== 'off');
+  const base = settings.features.injectOnStart && (ruleOn || settings.overrides.some((o) => o.mode !== null && o.mode !== 'off' && o.injectOnStart !== false));
+  const override = settings.overrides.some((o) => o.injectOnStart === true && ((o.mode !== null && o.mode !== 'off') || (o.mode === null && ruleOn)));
+  return base || override;
+}
+
+/**
+ * The entrance's synchronous guess (2nd review ①): whether the stored settings of the
+ * worktree's repository (by its stored `repository_path`; every repository when none
+ * matches) could attach a brief. Only then does the entrance make the worktree's
+ * incarnation, so a first send to a worktree with none (the launch it starts opens the
+ * first row) is pinned too — and `off` / disabled settings write nothing (W5).
+ */
+export function briefMayAttach(db: Database.Database, worktreeId: string): boolean {
+  const worktree = db.prepare('SELECT repository_path FROM worktrees WHERE id = ?').get(worktreeId) as
+    | { repository_path: string | null }
+    | undefined;
+  if (!worktree) return false;
+  const repositories = getAllRepositories(db);
+  const matching = repositories.filter((repository) => repository.path === worktree.repository_path);
+  return (matching.length > 0 ? matching : repositories).some((repository) => settingsMayAttach(getMemSettings(db, repository.id)));
+}
+
+/**
+ * Step 1 of the entrance (D2 design §2.4): in the synchronous stretch the route reads the
+ * worktree in, before the body (which names the instance) is parsed. Reads the worktree's
+ * incarnation and newest ledger row; makes the incarnation only when {@link briefMayAttach}.
+ * Fails open: a database it cannot read pins nothing (no brief, the body is sent).
+ */
+export function pinBriefWorktree(dbLike: unknown, worktreeId: string): BriefWorktreePin {
+  const empty: BriefWorktreePin = { worktreeId, worktreeIncarnation: null, anchorBoundaryId: null };
+  const db = boundaryDatabaseFor(dbLike);
+  if (!db) return empty;
+  try {
+    let worktreeIncarnation = getWorktreeIncarnation(db, worktreeId);
+    if (worktreeIncarnation === null && briefMayAttach(db, worktreeId)) {
+      worktreeIncarnation = getOrCreateWorktreeIncarnation(db, worktreeId);
+    }
+    return { worktreeId, worktreeIncarnation, anchorBoundaryId: getLatestWorktreeBoundaryId(db, worktreeId) };
+  } catch (error) {
+    logger.warn('session-brief-pin-failed', { worktreeId, error: error instanceof Error ? error.message : String(error) });
+    return empty;
+  }
+}
+
+/** Step 2 of the entrance: where the instance is resolved. The request's pin. Read only. */
+export function pinBriefRequest(dbLike: unknown, worktree: BriefWorktreePin, instanceId: string): BriefRequestPin {
+  const db = boundaryDatabaseFor(dbLike);
+  let instance = NO_LIFETIME;
+  if (db) {
+    try {
+      instance = readInstanceLifetime(db, worktree.worktreeId, instanceId);
+    } catch (error) {
+      logger.warn('session-brief-pin-failed', { worktreeId: worktree.worktreeId, instanceId, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return { ...worktree, instanceId, instance };
+}
+
+/**
+ * Whether the worktree a pin was read for is still the one found (W3・W6), from what the
+ * delete and the rename take or move (the incarnation row, the ledger rows): `same`,
+ * `changed`, or `unknown` when the pin holds no evidence (neither was there).
+ */
+export function briefWorktreeContinuity(db: Database.Database, pin: BriefWorktreePin): 'same' | 'changed' | 'unknown' {
+  if (pin.worktreeIncarnation !== null) {
+    return getWorktreeIncarnation(db, pin.worktreeId) === pin.worktreeIncarnation ? 'same' : 'changed';
+  }
+  if (pin.anchorBoundaryId !== null) {
+    return getBoundaryById(db, pin.anchorBoundaryId)?.worktreeId === pin.worktreeId ? 'same' : 'changed';
+  }
+  return 'unknown';
 }
 
 /** This process. A claim another process left behind is read as `unknown` (design §3.5). */
@@ -158,10 +268,18 @@ interface PlannedBoundary {
 interface Plan {
   boundary: PlannedBoundary;
   lifetime: InstanceLifetime;
+  /** The worktree incarnation the provider built for (D2 design §2.4). */
+  worktreeIncarnation: string;
   membershipKey: string;
   provider: BriefProvider;
   built: BriefResult;
   claimToken: string;
+}
+
+/** What the plan's synchronous stretch decided: a target to build for, and the worktree incarnation. */
+interface PlanDecision {
+  target: Extract<MemTarget, { ok: true }> & { mode: Exclude<MemMode, 'off'> };
+  worktreeIncarnation: string;
 }
 
 export interface SendBriefInput {
@@ -175,6 +293,11 @@ export interface SendBriefInput {
   content: string;
   /** What the tool types for a body (an image reference appended, `typedBodyFor`). */
   typedBody: (content: string) => string;
+  /**
+   * Issue #4224: the lifetimes the request's entrance fixed ({@link pinBriefRequest}). Required
+   * for `auto` / `force` (the service's type says so); null or another target's: no brief.
+   */
+  pin?: BriefRequestPin | null;
 }
 
 /** One send's brief. Every method fails open: a ledger error costs a log line, never the send. */
@@ -182,6 +305,8 @@ export class SendBrief {
   private readonly db: Database.Database | null;
   private readonly supported: boolean;
   private readonly entryLifetime: InstanceLifetime | null;
+  private readonly pin: BriefRequestPin | null;
+  private planCalled = false;
   private planned: Plan | null = null;
   private claimed: { body: string; includedNoticeIds: string[] } | null = null;
   private reserved: { includedNoticeIds: string[] } | null = null;
@@ -193,8 +318,10 @@ export class SendBrief {
     this.db = boundaryDatabaseFor(input.db);
     this.supported = this.db !== null && BOUNDARY_TOOLS.has(input.cliToolId);
     this.isReset = this.supported && isResetCommandBody(input.cliToolId, input.content);
-    let lifetime: InstanceLifetime | null = null;
-    if (this.supported && this.isReset) {
+    const pin = input.pin ?? null;
+    this.pin = pin && pin.worktreeId === input.worktreeId && pin.instanceId === input.instanceId ? pin : null;
+    let lifetime: InstanceLifetime | null = this.pin ? this.pin.instance : null;
+    if (this.supported && this.isReset && !this.pin) {
       // Read before the first await: a reset typed for an instance deleted and made
       // again meanwhile does not open a row of the new one.
       try {
@@ -231,8 +358,20 @@ export class SendBrief {
     return this.planned !== null || this.isReset;
   }
 
-  /** Step 1 (design §3.4 1). */
+  /** Whether the pinned worktree is still the one found (`unknown` without a pin's evidence). */
+  private continuity(db: Database.Database): 'same' | 'changed' | 'unknown' {
+    return this.pin ? briefWorktreeContinuity(db, this.pin) : 'unknown';
+  }
+
+  /** The worktree was deleted, made again or renamed after the request's entrance: nothing is written. */
+  private worktreeChanged(rowId: string | null): void {
+    this.report = { state: 'skipped', reason: 'worktree_changed', ...(rowId ? { boundaryId: rowId } : {}) };
+  }
+
+  /** Step 1 (design §3.4 1). A second call does nothing (D2 design §3.3 (c)). */
   async plan(): Promise<void> {
+    if (this.planCalled) return;
+    this.planCalled = true;
     const { mode, content, worktreeId, instanceId, cliToolId } = this.input;
     if (mode === 'never') return;
     if (!this.supported || !this.db) {
@@ -250,9 +389,16 @@ export class SendBrief {
       return;
     }
     const db = this.db;
+    const pin = this.pin;
+    if (!pin) {
+      this.report = { state: 'skipped', reason: 'lifetime_unpinned' };
+      return;
+    }
     let boundary: PlannedBoundary;
     let lifetime: InstanceLifetime;
     try {
+      // Before any read a write follows (D2 design §2.4 W3): not for a worktree made again.
+      if (this.continuity(db) === 'changed') return this.worktreeChanged(null);
       let current = getCurrentBoundary(db, worktreeId, instanceId);
       if (current?.state === 'claimed' && current.claimToken !== null && !liveClaims.has(current.claimToken)) {
         settleStaleClaim(db, current.id, current.claimToken, Date.now());
@@ -261,7 +407,8 @@ export class SendBrief {
       const usable =
         current !== null &&
         (current.state === 'pending' || (current.state === 'claimed' && current.claimToken !== null && liveClaims.has(current.claimToken)));
-      lifetime = readInstanceLifetime(db, worktreeId, instanceId);
+      // The instance's lifetime as the entrance read it (W1): never read again here.
+      lifetime = pin.instance;
       if (usable && current) {
         boundary = { id: current.id, kind: current.kind, late: current.late, openedAt: current.openedAt, existing: true };
       } else if (mode === 'force') {
@@ -275,17 +422,22 @@ export class SendBrief {
     }
     const rowId = boundary.existing ? boundary.id : null;
 
-    let target: MemTarget;
+    // Issue #4224: what the answer decides is written in its synchronous stretch, after the
+    // pinned worktree is found to be the same (W3); the incarnation is made only for a
+    // `derived` / `on` target with `injectOnStart` (W5).
+    let decided: PlanDecision | null;
     try {
-      target = await withMemTarget(db, { via: 'worktree', worktreeId }, memTargetDepsOverride ?? {}, (resolved) => resolved);
+      decided = await withMemTarget(db, { via: 'worktree', worktreeId }, memTargetDepsOverride ?? {}, (resolved) =>
+        this.planInStretch(db, pin, rowId, resolved)
+      );
     } catch (error) {
       this.warn('session-brief-target-failed', error);
+      if (this.continuity(db) === 'changed') return this.worktreeChanged(rowId);
       this.skip(rowId, 'target_unresolved', true);
       return;
     }
-    if (!target.ok) return this.skip(rowId, 'target_unresolved', true);
-    if (target.mode === 'off') return this.skip(rowId, 'off', true);
-    if (!target.features.injectOnStart) return this.skip(rowId, 'disabled', true);
+    if (!decided) return;
+    const { target, worktreeIncarnation } = decided;
 
     const provider = getBriefProvider();
     const budget = briefBudget(this.input.typedBody, content, provider);
@@ -296,9 +448,11 @@ export class SendBrief {
       built = await buildWithTimeout(provider, {
         target: {
           worktreeId,
+          worktreeIncarnation,
           cliToolId: cliToolId as Parameters<BriefProvider['build']>[0]['target']['cliToolId'],
           instanceId,
           instanceIncarnation: lifetime.incarnation,
+          instanceOnRoster: lifetime.onRoster,
         },
         membership: {
           repositoryId: target.storageRepositoryId,
@@ -313,11 +467,16 @@ export class SendBrief {
       });
     } catch (error) {
       this.warn('session-brief-provider-failed', error);
+      if (this.continuity(db) === 'changed') return this.worktreeChanged(rowId);
       return this.skip(rowId, 'provider_failed', true);
     }
+    // The build waited: a worktree made again meanwhile gets none of these writes.
+    if (this.continuity(db) === 'changed') return this.worktreeChanged(rowId);
     if (!built || typeof built.body !== 'string' || built.mode !== target.mode || !Array.isArray(built.includedNoticeIds)) {
       return this.skip(rowId, 'provider_failed', true);
     }
+    // D2 design §7.4: a line the brief must carry did not fit — recorded, the body is sent.
+    if (built.body === '' && built.skipReason === 'over_limit') return this.skip(rowId, 'over_limit', true);
     if (built.body === '') return this.skip(rowId, 'empty', true);
     if (bytesOf(built.body) > budget.maxBytes || linesOf(built.body) > budget.maxLines) {
       return this.skip(rowId, 'over_limit', true);
@@ -328,11 +487,49 @@ export class SendBrief {
     this.planned = {
       boundary,
       lifetime,
+      worktreeIncarnation,
       membershipKey: membershipKey(target),
       provider,
       built: { body: built.body, includedNoticeIds: [...built.includedNoticeIds], mode: built.mode },
       claimToken: `${PROCESS_NONCE}:${randomUUID()}`,
     };
+  }
+
+  /**
+   * The plan's synchronous stretch (Issue #4224, W3・W5): the pinned worktree still the one
+   * found, then the membership's answer, and the worktree incarnation the provider builds for.
+   */
+  private planInStretch(
+    db: Database.Database,
+    pin: BriefRequestPin,
+    rowId: string | null,
+    target: MemTarget
+  ): PlanDecision | null {
+    const continuity = briefWorktreeContinuity(db, pin);
+    if (continuity === 'changed') {
+      this.worktreeChanged(rowId);
+      return null;
+    }
+    if (!target.ok) {
+      this.skip(rowId, 'target_unresolved', true);
+      return null;
+    }
+    if (target.mode === 'off') {
+      this.skip(rowId, 'off', true);
+      return null;
+    }
+    if (!target.features.injectOnStart) {
+      this.skip(rowId, 'disabled', true);
+      return null;
+    }
+    const worktreeIncarnation = getOrCreateWorktreeIncarnation(db, this.input.worktreeId);
+    if (continuity === 'unknown') {
+      // No evidence the worktree read at the entrance is this one: none attached, the row
+      // stays for the next request — which finds the incarnation just made and is pinned.
+      this.report = { state: 'skipped', reason: 'lifetime_unpinned', ...(rowId ? { boundaryId: rowId } : {}) };
+      return null;
+    }
+    return { target: { ...target, mode: target.mode }, worktreeIncarnation };
   }
 
   /** The claim token a relaunch inside this send's delivery is tagged with. */
@@ -364,6 +561,12 @@ export class SendBrief {
   private claimInStretch(db: Database.Database, plan: Plan, target: MemTarget): string | null {
     const { worktreeId, instanceId, cliToolId } = this.input;
     const rowId = plan.boundary.existing ? plan.boundary.id : null;
+    // Issue #4224 (W3・W4): the worktree the request was read for, and the incarnation the
+    // provider built for, before anything is written — `force` opens its row only after.
+    if (this.continuity(db) !== 'same' || getWorktreeIncarnation(db, worktreeId) !== plan.worktreeIncarnation) {
+      this.worktreeChanged(rowId);
+      return null;
+    }
     if (!target.ok || membershipKey(target) !== plan.membershipKey) {
       // Changed while the provider or the lock was waited for: not with the old text.
       if (target.ok && target.mode === 'off') this.skip(rowId, 'off', true);
@@ -448,7 +651,18 @@ export class SendBrief {
         const delivered = { bytes: bytesOf(this.claimed.body), mode: this.planned.built.mode, includedIds: this.claimed.includedNoticeIds };
         settleBoundaryClaim(db, this.planned.boundary.id, this.planned.claimToken, outcome, delivered, now);
         if (outcome === 'sent') {
-          copyDeliveryToRelaunchBoundaries(db, this.input.worktreeId, this.input.instanceId, this.planned.claimToken, delivered, now);
+          const copied = copyDeliveryToRelaunchBoundaries(db, this.input.worktreeId, this.input.instanceId, this.planned.claimToken, delivered, now);
+          if (copied > 0 && this.planned.boundary.kind !== 'launch' && this.planned.boundary.kind !== 'auto_restart') {
+            // D2 design §7.2 R-c (a risk kept): the process this brief reached was started inside
+            // the send, but the brief was planned for a conversation step, without the line
+            // after an unplanned end. Not briefed again (one brief per conversation).
+            logger.info('brief-previous-end-not-delivered', {
+              worktreeId: this.input.worktreeId,
+              instanceId: this.input.instanceId,
+              boundaryId: this.planned.boundary.id,
+              kind: this.planned.boundary.kind,
+            });
+          }
         }
       } catch (error) {
         this.warn('session-brief-settle-failed', error);
@@ -462,6 +676,11 @@ export class SendBrief {
           : { state: outcome === 'unknown' ? 'unknown' : 'not_sent', boundaryId: this.planned.boundary.id };
     }
     if (state === 'sent' && this.isReset && this.entryLifetime) {
+      // Issue #4224 (W6): not for a worktree made again after the request's entrance.
+      if (this.continuity(db) === 'changed') {
+        logger.info('session-brief-reset-worktree-changed', { worktreeId: this.input.worktreeId, instanceId: this.input.instanceId });
+        return;
+      }
       openResetBoundaryFromSend(db, {
         worktreeId: this.input.worktreeId,
         cliToolId: this.input.cliToolId,

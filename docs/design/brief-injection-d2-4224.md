@@ -493,7 +493,7 @@ brief の本文の**データの区画の最初の行**（C の固定の先頭 4
 - この instance の更新が「最終更新」の規則（§7.3）で 1 件も見つからないとき：`終わる前の更新を確認できない（この instance の更新の記録なし）`
 - N は整数の時間（切り捨て）。1 時間未満は `1 時間未満`
 - 文言は固定のテンプレート（Epic D1：モデルを呼ばない）。**「更新せずに終わった」「更新を忘れた」とは書かない**（経過時間だけで断定しない）
-- 1 行は固定の文と数だけで、長さの上限は 96 バイト（§7.4 の予算の計算に使う）
+- 1 行は固定の文と数だけで、長さの上限は 128 バイト（§7.4 の予算の計算に使う。第 2 版の 96 は「記録なし」の文（97 バイト）が入らないので実装で直した）
 
 固定の先頭（5 行、`src/types/brief.ts:54` の `BRIEF_TEXT_FIXED_LINES`）に足さない理由［見立て］：固定の部分の最小値（C 設計 §2.6・I14）と、
 組み直しの `dropNoticeLines`（`provider.ts:64-71`：先頭 4 行を固定とみなす）を変えずに済む。ただし「後ろの項目と同じに落ちてよい」
@@ -859,3 +859,31 @@ X-j（新規、§7.5 の表に足す）：
 | # | 陽性 | 陰性 |
 |---|---|---|
 | X-j（②） | 既にある primary（世代なし）の最初の roster 保存で `lazy` が発行された後に kill して起動 → 前の会話（世代の `created_at` より前の利用者の行）を証拠に先頭の行が出る。同じブランチの別の worktree の `claude` が 1 時間前に更新した項目は数えず「記録なし」 | roster の削除と足し直し（`roster` 発行）の後は、その前の会話だけでは出ない |
+
+---
+
+## 17. 共通規則の全読者（実装の後に書く。5-2b の前）
+
+D2 で足した、または D2 が新しく読み手になった共通の規則と、それを読むすべての場所（`git grep` で探した。実装 `feature/4224-worktree` 時点）。
+規則を変えるときは、この一覧の全員を同じ差分で直す。
+
+| 規則 | 正本（書き手） | 読み手 |
+|---|---|---|
+| 要求の寿命の固定（`BriefRequestPin`：worktree の世代・台帳の今の行・instance の寿命。入口で 1 回） | `session-brief.ts` の `pinBriefWorktree`・`pinBriefRequest` | 送信の route の `handleSend`（2 段）、`SendBrief`（constructor の reset の寿命・`plan`・`planInStretch`・`claimInStretch`・`settleInLock`）、試験の harness（`session-brief-4274-harness.ts` の `send`・`brief-d2-4224-harness.ts` の `entrance`） |
+| worktree が続いていることの証拠（`briefWorktreeContinuity`：世代が同じ／台帳の行が同じ worktree に在る／証拠なし） | `session-brief.ts` | `SendBrief.plan`（最初の読みの前・build の後）・`planInStretch`・`claimInStretch`・`settleInLock`（W6）。`buildBrief` は同じ規則を自分の形で読む（`pinned.worktreeIncarnation` と `getWorktreeIncarnation` の等しさ、作る前に照らす） |
+| 入口で世代を作る前判定（`briefMayAttach`：保存された設定で `injectOnStart` と `off` 以外の規則がありうるか） | `session-brief.ts` | `pinBriefWorktree` だけ |
+| provider は自分で寿命を固定しない（`request` があれば `pinned` 必須） | `build.ts` の `buildBrief` の入口 | `provider.ts` の `build`（`request.target` から `pinned` を組む）。CLI の route（`service.ts:briefForRoute`）は `request` を渡さず `pinBriefLifetime` で固定 |
+| instance の誕生と作者（`issued_by='roster'` だけが誕生の証拠・作者は `origin_incarnation`） | B の `incarnation.ts`（`IncarnationIssuedBy`）・A の `mem-db.ts` の `ownedBy` | D1 の `isSameInstanceLifetime`（`session-brief-db.ts`）、D2 の `previous-end.ts` の `readPreviousEnd` |
+| brief の区画の形（`<<<cmate-brief:<tag>` … `cmate-brief:<tag>>>>`、tag は中身から。組み直しでも tag を保つ） | C の `render.ts` の `drawText`・`fenceTag` | `provider.ts` の `dropNoticeLines`（先頭 4 行を固定とみなす。先頭の行 `lead` は 5 行目で外さない）、`user-turn-recorder.ts` の `afterDeliveredBrief`（開きと閉じの tag が同じことだけを見る） |
+| 先頭の行（`lead`）は必須（入らなければ brief を作らない） | `fit.ts` の `fitText`（`leadUnfit`） | `provider.ts` の `build`（`skipReason: 'over_limit'`）、`session-brief.ts` の `plan`（`skipped(over_limit)`）。`fitJson` は読まない（`lead` は provider の経路だけで、CLI の `--json` には出ない） |
+| 送信の側の対象のツール（`BOUNDARY_TOOLS`） | D1 の `session-boundary.ts` | `SendBrief` の constructor、`openLaunchBoundary`・`observeHookBoundary`・`openResetBoundaryFromSend`、D2 の `service.ts` の `sessionStartDeferredTo`（`--session-start`） |
+| 付けるかの mode と `injectOnStart`（`withMemTarget` の答え） | A の `mem/target.ts` | `SendBrief.planInStretch`・`claimInStretch`（`membershipKey`）、`buildBrief`、`sessionStartDeferredTo` |
+| 受領の写像（`sent`→`sent`、`not_sent`・`discarded`→`not-sent`、`unknown`→`indeterminate`） | C の `provider.ts` の `SEND_STATE` | `MEM_BRIEF_PORT.settle`（`settleBriefAttempt`）だけ。呼ぶのは D1 の `SendBrief.afterLock` だけ |
+
+実装で設計から変えた所（理由つき）：
+
+- 先頭の行の上限は 128 バイト（§7.1。96 では「記録なし」の文が入らない）
+- 読み口 `readPreviousEnd` は `sources.ts` ではなく `src/lib/brief/previous-end.ts`（§7.3。`sources.ts` の import の一覧を増やさない）。`fitJson` に必須の先頭の項目は足さない（`lead` は CLI に出ない）
+- Timer（§10 の T-2）は `never` のまま（契約で既存の試験の期待を変えない。`tests/unit/lib/timer-manager.test.ts` が引数を固定）。Timer の後の最初の手の送信に付く（今と同じ）
+- 接続（§10 の T-1・T-1b）：`brief-provider.test.ts` の既定の期待を `MEM_BRIEF_PORT` に、D1 の (d) の `setBriefProviderForTest(null)` を `EMPTY_BRIEF_PROVIDER` の明示に替えた（D2 の目的そのもの。it の名前は契約どおり変えていない）。D1 の harness は世界の既定を空の provider に明示した（D1 の試験が書かれた前提を保つ）
+- C の試験の要求の作り手（`brief-provider.test.ts`・`brief-retry-paths-4223.test.ts`・`close-entrances-4222.test.ts` の `request()`）に `worktreeIncarnation`・`instanceOnRoster` を足した（口の欄が必須になったため。期待は変えていない）
