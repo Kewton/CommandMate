@@ -287,7 +287,7 @@ commandmate send <worktree-id> "<message>" --auto-yes --auto-yes-answer-mode car
 
 **セッションの brief（Issue #4274）**：claude・codex・command-code では、会話の境界（新しい起動・reset の `/clear` や codex の `/new`・別の会話への resume・自動の再起動）の後の最初の送信に、mem の brief を本文の前に 1 回だけ付けます（そのブランチの mem が `on` / `derived` で `injectOnStart` が有効なときだけ。既存のプロセスへの再接続は境界ではありません）。`--no-brief` はその 1 回だけ付けず、設定は変えません。`--with-brief` は境界が無くても付けます。両方の指定は exit 2 で何も送りません。brief と本文の合計が #2464 で確かめた長さ（48 KiB・240 行）を超えるときは brief を外し、本文は削りません。付けたとき・旗を指定したときは、応答の `brief` に結果が入ります。他のツール・relay の配送・Schedule・ターミナルの命令・回答には付けません。
 
-**brief の中身と、付けないとき（Issue #4224）**：付ける brief は [`commandmate brief`](#commandmate-brief) と同じ組み立て（C、#4223）で、本文に入った「終わった」の知らせだけを、配送の結果が `sent` のときに受領します（届いたか分からない `unknown` は受領ではありません）。送信を受け付けた後、送る前に worktree が削除・作り直し・改名された場合は、古い要求の brief を新しい worktree に付けません（応答の `brief.reason` は `worktree_changed`、入口で寿命を確かめられなかった送信は `lifetime_unpinned`）。プロセスが予定していない終わり方をした後の起動では、brief のデータの先頭に「終わる前の更新を確認できない（この instance の最終更新は N 時間前）」の 1 行が入ります（`on` のブランチで、前の会話の記録があるときだけ。断定の文ではありません）。この行が予算に入らないときは brief を付けず（`over_limit`）、本文は削りません。brief を付けた送信を transcript から履歴に取り込むときは、その送信の行に本文だけが残り、行は増えません。
+**brief の中身と、付けないとき（Issue #4224）**：付ける brief は [`commandmate brief`](#commandmate-brief) と同じ組み立て（C、#4223）で、本文に入った「終わった」の知らせだけを、配送の結果が `sent` のときに受領します（届いたか分からない `unknown` は受領ではありません）。送信を受け付けた後、送る前に worktree が削除・作り直し・改名された場合は、古い要求の brief を新しい worktree に付けません（応答の `brief.reason` は `worktree_changed`、入口で寿命を確かめられなかった送信は `lifetime_unpinned`）。プロセスが予定していない終わり方をした後の起動では、brief のデータの先頭に「終わる前の更新を確認できない（この instance の最終更新は N 時間前）」の 1 行が入ります（`on` のブランチで、前の会話の記録があるときだけ。断定の文ではありません）。この行が予算に入らないときは brief を付けず（`over_limit`）、本文は削りません。brief を付けた送信を transcript から履歴に取り込むときは、その送信の行に本文だけが残り、行は増えません。最初の語が `/` で始まる本文（`/model`・`/plugin:cmd`・`/mcp__srv__prompt`・`/prompts:name` など）と `!` で始まる本文はツールへの命令として扱い、brief を付けず、境界も次の送信に残します。instance が送信の受け付けの後に削除・作り直しされた場合も、古い要求は新しい instance の起動の境界を使いません（次の要求が使います）。
 
 ### オプション
 
@@ -3510,6 +3510,8 @@ commandmate brief --session-start     # SessionStart のフックから（Issue 
 - `--session-start` は、そのブランチの mode が `derived` / `on` で `injectOnStart` が有効、かつ instance のツールが送信の側の対象なら、stdout に何も出さず exit 0（stderr に 1 行）。それ以外は旗なしと同じ本文を出す（対象外のツールでは送信の側が付けないので、フックが出す）
 - 判定は所属・mode・`injectOnStart`・ツールだけで決め、境界の台帳は読みも書きもしない。予約・受領もしない。`--json` とは一緒に使えない（exit 2）
 - 二重にしないのは CommandMate が置くフックと `--session-start` を使うフックまで。利用者が旗なしの `commandmate brief` や手書きの引き継ぎを `SessionStart` で出すのは止められない
+- フックの `source`（`startup`・`resume`・`clear`・`compact` など）や、その会話が CommandMate の送信を経るかどうかは見ない。条件を満たせば `compact` の後や CommandMate を通さずに起動した会話でも何も出さないので、そうした会話には brief がどちらからも入らない（送信の側は CommandMate の `send` で送るときだけ付ける）
+- 判定を待つ間に worktree・instance が削除・作り直しされた場合は、新しい側の brief を出さず、閉じる条件の評価もしない（exit 52、`reason` は `lifetime_changed`）
 
 ### 終了コード
 

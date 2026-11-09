@@ -128,6 +128,25 @@ export function pinBriefLifetime(db: Database.Database, worktreeId: string, inst
   return { worktreeIncarnation: lifetime.incarnation, instance: readInstanceLifetime(db, worktreeId, instanceId) };
 }
 
+/**
+ * Whether the lifetimes a request fixed still stand, asked synchronously (Issue #4224,
+ * Codex 5-2b P1): the session-start pre-check of `briefForRoute` awaits the membership
+ * between the pin and the build, and asks this after it — the same comparison
+ * {@link buildBrief} makes before its first await. Null: unchanged.
+ */
+export function pinnedLifetimeChange(
+  db: Database.Database,
+  worktreeId: string,
+  instanceId: string,
+  pinned: BriefPinnedLifetime
+): BriefChangeReason | null {
+  const worktree = getWorktreeById(db, worktreeId);
+  if (!worktree || getWorktreeIncarnation(db, worktreeId) !== pinned.worktreeIncarnation) return 'worktree_lifetime';
+  const instance = resolveAgentInstances(db, worktreeId, worktree.selectedAgents).find((entry) => entry.id === instanceId);
+  if (!instance) return 'instance_lifetime';
+  return isSameInstanceLifetime(pinned.instance, readInstanceLifetime(db, worktreeId, instanceId), instance.cliTool) ? null : 'instance_lifetime';
+}
+
 export interface BuildBriefInput {
   worktreeId: string;
   instanceId: string;

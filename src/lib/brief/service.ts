@@ -26,6 +26,7 @@ import {
   buildBrief,
   CLI_TIME_BUDGET,
   pinBriefLifetime,
+  pinnedLifetimeChange,
   type BriefBuildDeps,
   type BriefChangeReason,
   type BuildBriefOutcome,
@@ -84,6 +85,13 @@ export async function sessionStartDeferredTo(
   );
 }
 
+/** What the request named is gone: answered as such, never built for its successor. */
+function lifetimeChanged(why: BriefChangeReason): MemOutcome {
+  return why === 'worktree_lifetime'
+    ? memError('not_found', { reason: 'lifetime_changed' })
+    : memError('instance_not_found', { reason: 'lifetime_changed' });
+}
+
 export async function briefForRoute(
   db: Database.Database,
   worktreeId: string,
@@ -115,16 +123,24 @@ export async function briefForRoute(
     maxBytes = parsed.maxBytes;
   }
 
-  if (sessionStart) {
+  // The request's lifetimes, fixed once before the first await: the session-start pre-check
+  // and every build of this request are for them (Issue #4224, Codex 5-2b P1 — the pin was
+  // after the pre-check's await, so a worktree made again meanwhile was the one pinned).
+  const pinned = pinBriefLifetime(db, worktreeId, instanceId);
+
+  if (sessionStart && pinned) {
     const deferred = await sessionStartDeferredTo(db, worktreeId, instanceId, deps);
+    const changed = pinnedLifetimeChange(db, worktreeId, instanceId, pinned);
+    if (changed) {
+      logger.info('brief-membership-changed', { worktreeId, instanceId, attempt: 0, why: changed });
+      return lifetimeChanged(changed);
+    }
     if (deferred) {
       const body: BriefTextResponse = { ok: true, format: 'text', mode: deferred.mode, text: '', omitted: 0, deferred: 'send' };
       return { status: 200, body };
     }
   }
 
-  // The request's lifetimes, fixed once: every build of this request is for them.
-  const pinned = pinBriefLifetime(db, worktreeId, instanceId);
   let outcome: BuildBriefOutcome | null = null;
   for (let attempt = 1; attempt <= BRIEF_ROUTE_ATTEMPTS && outcome === null; attempt += 1) {
     try {
@@ -138,9 +154,7 @@ export async function briefForRoute(
       logger.info('brief-membership-changed', { worktreeId, instanceId, attempt, why: error.why });
       if (!BRIEF_ROUTE_RETRIES[error.why]) {
         // What the request named is gone: answered as such, never built again for its successor.
-        return error.why === 'worktree_lifetime'
-          ? memError('not_found', { reason: 'lifetime_changed' })
-          : memError('instance_not_found', { reason: 'lifetime_changed' });
+        return lifetimeChanged(error.why);
       }
       if (attempt === BRIEF_ROUTE_ATTEMPTS) {
         return error.modeNow === 'off' ? memError('disabled', { mode: 'off' }) : memError('ambiguous', { reason: 'registration_changed' });

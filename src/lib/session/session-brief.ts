@@ -363,6 +363,18 @@ export class SendBrief {
     return this.pin ? briefWorktreeContinuity(db, this.pin) : 'unknown';
   }
 
+  /**
+   * Whether the current row may be consumed by this request (PM review P3-1): the instance is
+   * still the one its entrance pinned, and the row records no other incarnation than it.
+   */
+  private rowOfPinnedInstance(db: Database.Database, row: { instanceIncarnation: string | null }): boolean {
+    const pinned = this.pin!.instance;
+    if (!sameInstanceLifetime(pinned, readInstanceLifetime(db, this.input.worktreeId, this.input.instanceId), this.input.cliToolId)) {
+      return false;
+    }
+    return row.instanceIncarnation === null || pinned.incarnation === null || row.instanceIncarnation === pinned.incarnation;
+  }
+
   /** The worktree was deleted, made again or renamed after the request's entrance: nothing is written. */
   private worktreeChanged(rowId: string | null): void {
     this.report = { state: 'skipped', reason: 'worktree_changed', ...(rowId ? { boundaryId: rowId } : {}) };
@@ -409,6 +421,13 @@ export class SendBrief {
         (current.state === 'pending' || (current.state === 'claimed' && current.claimToken !== null && liveClaims.has(current.claimToken)));
       // The instance's lifetime as the entrance read it (W1): never read again here.
       lifetime = pin.instance;
+      if (usable && current && !this.rowOfPinnedInstance(db, current)) {
+        // Issue #4224 (PM review P3-1, the instance's W1・W3): the instance was deleted and
+        // made again after the entrance, and the row may be the new one's launch. The old
+        // request neither attaches nor consumes it: the new conversation's first request does.
+        this.report = { state: 'skipped', reason: 'incarnation_changed', boundaryId: current.id };
+        return;
+      }
       if (usable && current) {
         boundary = { id: current.id, kind: current.kind, late: current.late, openedAt: current.openedAt, existing: true };
       } else if (mode === 'force') {
@@ -676,9 +695,14 @@ export class SendBrief {
           : { state: outcome === 'unknown' ? 'unknown' : 'not_sent', boundaryId: this.planned.boundary.id };
     }
     if (state === 'sent' && this.isReset && this.entryLifetime) {
-      // Issue #4224 (W6): not for a worktree made again after the request's entrance.
-      if (this.continuity(db) === 'changed') {
-        logger.info('session-brief-reset-worktree-changed', { worktreeId: this.input.worktreeId, instanceId: this.input.instanceId });
+      // Issue #4224 (W6): not for a worktree made again after the request's entrance. A pinned
+      // request needs `same`, as the brief's claim does (Codex 5-2b P2): a pin without evidence
+      // (`unknown`: no incarnation, no row at the entrance) cannot tell a worktree made again
+      // with the same id and path, whose instance the lifetime check alone would let through.
+      // An unpinned send (Timer, relay: never briefed) keeps D1's instance check.
+      const continuity = this.continuity(db);
+      if (continuity === 'changed' || (this.pin && continuity !== 'same')) {
+        logger.info('session-brief-reset-worktree-changed', { worktreeId: this.input.worktreeId, instanceId: this.input.instanceId, continuity });
         return;
       }
       openResetBoundaryFromSend(db, {

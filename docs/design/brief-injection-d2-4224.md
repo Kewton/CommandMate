@@ -550,8 +550,10 @@ brief の本文の**データの区画の最初の行**（C の固定の先頭 4
 作者の時刻で数える（「72 時間前」のまま）。
 
 **置き場**［見立て。実装で決めた形］：先頭の行は `BriefSourceId` の新しい情報源（S10）にはしない。`BRIEF_SOURCE_IDS` は `--json` の `sources`
-の配列と C の試験の固定（9 つ）に出るので、送信の側（provider）だけの行のために CLI の出力を変えない。読み口は `src/lib/brief/sources.ts` の
-`readPreviousEnd`（読むだけの SQL）に置き、行は model の `lead`（`BriefModel.lead?: string`）として `drawText` が固定の 4 行の直後に置く。
+の配列と C の試験の固定（9 つ）に出るので、送信の側（provider）だけの行のために CLI の出力を変えない。読み口は **`src/lib/brief/previous-end.ts`**
+（`sources.ts` ではない。実装で決めた形、§18 の P3-5）の `readPreviousEnd`（読むだけの SQL）と `readPreEndUpdate`（G・F までは `not_recorded`）・
+`previousEndLead` に置き、行は model の `lead`（`BriefModel.lead?: string`）として `drawText` が固定の 4 行の直後に置く。
+G の S-C（終わる前の更新の記録）は `previous-end.ts` の `readPreEndUpdate` を差し替える前提で読むこと。
 `commandmate brief` は境界を知らない（X2 が成り立たない）ので、CLI のテキスト・`--json` には出ない。
 
 ### 7.4 必須の項目としての予算（事前レビュー P2-5）
@@ -566,8 +568,9 @@ brief の本文の**データの区画の最初の行**（C の固定の先頭 4
   （「上限を超えたので brief を付けずに送ったことを記録する」：Issue の本文どおり。利用者の本文は削らない）。先頭の行を落とした brief は付けない
 - 入ったときは、先頭の行の後ろの項目だけを C の規則で削る（`fitText` に「先頭の k 項目は必須」の引数を足す）
 - `reserve` の組み直し（`dropNoticeLines`）は知らせの行だけを外すので、先頭の行は残る
-- CLI のテキスト・`--json`：最小値（テキスト 1,024・`--json` 4,096）で、C の I14 の最悪の固定の部分＋先頭の行が入ることを数えて固定する。
-  入らないなら最小値を上げる（実装の契約で I14 を数え直して決める）。最小値以上なら先頭の行は必ず入る
+- CLI のテキスト・`--json`：先頭の行は CLI に出ない（`commandmate brief` は境界を知らず `lead` を組まない）ので、最小値（テキスト 1,024・
+  `--json` 4,096）と C の I14 は**数え直さず**そのまま（実装で決めた形、§18 の P3-5）。`fitJson` は `lead` を読まない（必須の先頭の項目は
+  `fitText` だけ）。CLI に `lead` を出す変更をするときは、この 2 つ（I14 の数え直し・`fitJson` の必須の項目）を同じ差分で入れる
 
 ### 7.5 対照の試験（C の `brief-invariants.test.ts` の個別の表に I18 として足す。送信の中の再起動は D1 の入口の表へ）
 
@@ -689,10 +692,10 @@ brief の本文の**データの区画の最初の行**（C の固定の先頭 4
 | `src/lib/session/send-user-message.ts` | `brief` を判別の型にし、`'auto'` / `'force'` で `briefPin` を必須に（§2.4）。`SendBrief` へ渡す |
 | `src/app/api/worktrees/[id]/send/route.ts` | `:170` で `pinBriefWorktree`、`validateSendRequest` の同期の区間で `pinBriefRequest`、`sendUserMessage` へ `briefPin`（§2.4） |
 | `src/lib/brief/provider.ts` | `MEM_BRIEF_PORT`（§4.1）、`build` が `pinned` を渡す（§2.4）、先頭の行を必須にして入らなければ `skipReason`（§7.4） |
-| `src/lib/brief/fit.ts` | `fitText`・`fitJson` に「先頭の k 項目は必須」（§7.4） |
+| `src/lib/brief/fit.ts` | `fitText` に「先頭の行（`lead`）は必須」（§7.4。`fitJson` は変えない：`lead` は CLI に出ない） |
 | `src/lib/history/user-turn-recorder.ts` | `stripDeliveredBrief`（§8.5） |
 | `src/lib/brief/build.ts` | 入口の規則：`request` があって `pinned` が無ければ例外（§2.4） |
-| `src/lib/brief/sources.ts`・`src/types/brief.ts`・`src/lib/brief/rank.ts` | S10 `previous_end`・順位 0・`--json` の項目（§7）。読み口 `readPreEndUpdate`（G・F までは `not_recorded`） |
+| `src/lib/brief/previous-end.ts`（新規）・`src/lib/brief/model.ts` | 先頭の行の読み口 `readPreviousEnd`・`readPreEndUpdate`（G・F までは `not_recorded`）・`previousEndLead`、`BriefModel.lead`（§7.3。`sources.ts`・`rank.ts`・`BRIEF_SOURCE_IDS` は変えない：S10 にしない） |
 | `src/lib/db/session-brief-db.ts` | 今の行の ID（worktree 全体の最新）・`sent` の行の `brief_bytes`・`settled_at` を読む関数（読むだけ、§2.4・§8.5）。保持の規則と migration は変えない（§7.2 X3 は台帳の保持に頼らない） |
 | `src/lib/brief/service.ts`・`src/app/api/worktrees/[id]/mem/brief/route.ts`・`src/cli/commands/brief.ts` | `--session-start`（§6.3）。`--help` |
 | `src/cli/types/api-responses.ts` | 応答の `brief.reason` に `worktree_changed`・`lifetime_unpinned`（送信の応答の型の写し） |
@@ -869,13 +872,15 @@ D2 で足した、または D2 が新しく読み手になった共通の規則�
 
 | 規則 | 正本（書き手） | 読み手 |
 |---|---|---|
-| 要求の寿命の固定（`BriefRequestPin`：worktree の世代・台帳の今の行・instance の寿命。入口で 1 回） | `session-brief.ts` の `pinBriefWorktree`・`pinBriefRequest` | 送信の route の `handleSend`（2 段）、`SendBrief`（constructor の reset の寿命・`plan`・`planInStretch`・`claimInStretch`・`settleInLock`）、試験の harness（`session-brief-4274-harness.ts` の `send`・`brief-d2-4224-harness.ts` の `entrance`） |
-| worktree が続いていることの証拠（`briefWorktreeContinuity`：世代が同じ／台帳の行が同じ worktree に在る／証拠なし） | `session-brief.ts` | `SendBrief.plan`（最初の読みの前・build の後）・`planInStretch`・`claimInStretch`・`settleInLock`（W6）。`buildBrief` は同じ規則を自分の形で読む（`pinned.worktreeIncarnation` と `getWorktreeIncarnation` の等しさ、作る前に照らす） |
+| 要求の寿命の固定（`BriefRequestPin`：worktree の世代・台帳の今の行・instance の寿命。入口で 1 回） | `session-brief.ts` の `pinBriefWorktree`・`pinBriefRequest` | 送信の route の `handleSend`（2 段）、`SendBrief`（constructor の reset の寿命・`plan`（今の行がこの instance の寿命のものか：`rowOfPinnedInstance`、§18 の P3-1）・`planInStretch`・`claimInStretch`・`settleInLock`）、試験の harness（`session-brief-4274-harness.ts` の `send`・`brief-d2-4224-harness.ts` の `entrance`） |
+| CLI の要求の寿命の固定（`BriefPinnedLifetime`：最初の await の前に 1 回、前判定と組み立てで共有） | `build.ts` の `pinBriefLifetime`・`pinnedLifetimeChange` | `service.ts` の `briefForRoute`（`--session-start` の前判定 `sessionStartDeferredTo` の await の後に `pinnedLifetimeChange` で照らす・組み立ては `pinned` を渡す。§18 の Codex P1）、`buildBrief` の入口（同じ比較を自分の形で） |
+| worktree が続いていることの証拠（`briefWorktreeContinuity`：世代が同じ／台帳の行が同じ worktree に在る／証拠なし） | `session-brief.ts` | `SendBrief.plan`（最初の読みの前・build の後）・`planInStretch`・`claimInStretch`（`same` 必須）・`settleInLock`（W6。固定のある要求は `same` 必須、証拠なしも公開しない。固定の無い Timer・relay は D1 の instance の照合のまま。§18 の Codex P2）。`buildBrief` は同じ規則を自分の形で読む（`pinned.worktreeIncarnation` と `getWorktreeIncarnation` の等しさ、作る前に照らす） |
 | 入口で世代を作る前判定（`briefMayAttach`：保存された設定で `injectOnStart` と `off` 以外の規則がありうるか） | `session-brief.ts` | `pinBriefWorktree` だけ |
 | provider は自分で寿命を固定しない（`request` があれば `pinned` 必須） | `build.ts` の `buildBrief` の入口 | `provider.ts` の `build`（`request.target` から `pinned` を組む）。CLI の route（`service.ts:briefForRoute`）は `request` を渡さず `pinBriefLifetime` で固定 |
 | instance の誕生と作者（`issued_by='roster'` だけが誕生の証拠・作者は `origin_incarnation`） | B の `incarnation.ts`（`IncarnationIssuedBy`）・A の `mem-db.ts` の `ownedBy` | D1 の `isSameInstanceLifetime`（`session-brief-db.ts`）、D2 の `previous-end.ts` の `readPreviousEnd` |
 | brief の区画の形（`<<<cmate-brief:<tag>` … `cmate-brief:<tag>>>>`、tag は中身から。組み直しでも tag を保つ） | C の `render.ts` の `drawText`・`fenceTag` | `provider.ts` の `dropNoticeLines`（先頭 4 行を固定とみなす。先頭の行 `lead` は 5 行目で外さない）、`user-turn-recorder.ts` の `afterDeliveredBrief`（開きと閉じの tag が同じことだけを見る） |
 | 先頭の行（`lead`）は必須（入らなければ brief を作らない） | `fit.ts` の `fitText`（`leadUnfit`） | `provider.ts` の `build`（`skipReason: 'over_limit'`）、`session-brief.ts` の `plan`（`skipped(over_limit)`）。`fitJson` は読まない（`lead` は provider の経路だけで、CLI の `--json` には出ない） |
+| ツールへの命令の本文（`isSlashCommandBody`：最初の語が `/` で始まる語すべて・`!` で始まる本文。付けない・境界を消費しない） | D1 の `session-boundary.ts`（§18 の PM P2 で広げた） | `SendBrief.plan` だけ（reset の判定 `isResetCommandBody` は `RESET_COMMANDS` の語の一致で別。constructor） |
 | 送信の側の対象のツール（`BOUNDARY_TOOLS`） | D1 の `session-boundary.ts` | `SendBrief` の constructor、`openLaunchBoundary`・`observeHookBoundary`・`openResetBoundaryFromSend`、D2 の `service.ts` の `sessionStartDeferredTo`（`--session-start`） |
 | 付けるかの mode と `injectOnStart`（`withMemTarget` の答え） | A の `mem/target.ts` | `SendBrief.planInStretch`・`claimInStretch`（`membershipKey`）、`buildBrief`、`sessionStartDeferredTo` |
 | 受領の写像（`sent`→`sent`、`not_sent`・`discarded`→`not-sent`、`unknown`→`indeterminate`） | C の `provider.ts` の `SEND_STATE` | `MEM_BRIEF_PORT.settle`（`settleBriefAttempt`）だけ。呼ぶのは D1 の `SendBrief.afterLock` だけ |
@@ -883,7 +888,25 @@ D2 で足した、または D2 が新しく読み手になった共通の規則�
 実装で設計から変えた所（理由つき）：
 
 - 先頭の行の上限は 128 バイト（§7.1。96 では「記録なし」の文が入らない）
-- 読み口 `readPreviousEnd` は `sources.ts` ではなく `src/lib/brief/previous-end.ts`（§7.3。`sources.ts` の import の一覧を増やさない）。`fitJson` に必須の先頭の項目は足さない（`lead` は CLI に出ない）
+- 読み口 `readPreviousEnd`・`readPreEndUpdate` は `sources.ts` ではなく `src/lib/brief/previous-end.ts`（§7.3。`sources.ts` の import の一覧を増やさない）。`fitJson` に必須の先頭の項目は足さない（`lead` は CLI に出ない）。CLI の最小値と C の I14 は数え直さない（§7.4）
 - Timer（§10 の T-2）は `never` のまま（契約で既存の試験の期待を変えない。`tests/unit/lib/timer-manager.test.ts` が引数を固定）。Timer の後の最初の手の送信に付く（今と同じ）
 - 接続（§10 の T-1・T-1b）：`brief-provider.test.ts` の既定の期待を `MEM_BRIEF_PORT` に、D1 の (d) の `setBriefProviderForTest(null)` を `EMPTY_BRIEF_PROVIDER` の明示に替えた（D2 の目的そのもの。it の名前は契約どおり変えていない）。D1 の harness は世界の既定を空の provider に明示した（D1 の試験が書かれた前提を保つ）
 - C の試験の要求の作り手（`brief-provider.test.ts`・`brief-retry-paths-4223.test.ts`・`close-entrances-4222.test.ts` の `request()`）に `worktreeIncarnation`・`instanceOnRoster` を足した（口の欄が必須になったため。期待は変えていない）
+
+---
+
+## 18. 実装後のレビューの処置（Codex 5-2b・PM 側 Claude の独立レビュー）
+
+5-2b（Codex、P1 1・P2 1）と PM 側の Claude の独立レビュー（P2 1・P3 5）を、PM の処分に従って 1 つの差分で直した。§17 の読み手も同じ差分で直した。
+
+| # | 指摘 | 処置 | 守る条件・対照の試験（反映先） |
+|---|---|---|---|
+| Codex P1 | `briefForRoute` の `--session-start` の前判定が所属の判定を await した後に `pinBriefLifetime` を呼ぶ。同 ID・同 path の作り直しを挟むと、新しい世代を固定して本文の生成と評価へ進む | **直す** | 寿命を最初の await の前に 1 回固定し、前判定の後に `pinnedLifetimeChange` で照らす（変わっていれば `lifetime_changed`、何も作らない）。組み立ては同じ `pinned` を渡す。陽性：前判定の await 中に作り直す → exit 52・新しい側の条件を閉じない（deferred の側も gone で答える）。直しを外すと落ちる／陰性：作り直しなし → 本文が出て条件が閉じる（`brief-session-start-4224.test.ts` の K6） |
+| Codex P2 | reset の公開（`settleInLock`）が寿命 `unknown` でも instance の照合だけで進む | **直す** | 固定のある要求は `same` を要求する（証拠なしの `unknown` も公開しない＝W6 の作り直しの拒否に揃える）。固定の無い送信（Timer・relay、`never`）は D1 のまま。陽性：mem off・境界なしの入口の後、本文の解析中に作り直す → 古い `/clear` は新しい worktree に reset の行を開かない。直しを外すと落ちる／陰性：入口に行がある（`same`）→ reset の行が開く（T0f）。残る影響：mem off で行も世代も無い worktree の最初の送信が `/clear` のときは reset の行を開かない（起動の行が境界になる） |
+| PM P2 | `isSlashCommandBody` の `/^\/[a-z][a-z0-9-]*$/` が狭く、`/plugin:cmd args`・`/mcp__srv__p`・`/prompts:name`・`!cmd` の前に brief が付き境界も消費する | **直す**（D1 のファイル。判定の関数だけ） | 最初の語が `/` で始まる語（`[^\s]+`）すべてと `!` で始まる本文は付けない・消費しない。表駆動（`session-boundary-slash-4224.test.ts`）：命令の表は付けず起動の行が `pending` のまま次の本文に付く、本文の表（`see /model`・`/` だけ等）は今までどおり付く。直しを外すと 14 件落ちる。残る影響：`/Users/...` のようなパスで始まる本文にも付けない（安全側） |
+| PM P3-1 | 入口で固定した古い instance の寿命の要求が、新しい世代の launch の行を `provider_failed`／`incarnation_changed` で消費する | **直す** | `plan` で今の行を使う前に、instance がまだ入口の寿命か・行の `instanceIncarnation` が固定と違わないかを照らし、違えば消費せず `skipped(incarnation_changed)` を報告する。陽性：入口の後に instance を作り直して起動 → 古い要求は本文だけ、新しい起動の行は `pending`、次の要求がその行に付ける。直しを外すと落ちる／陰性：作り直しなし → 付く（T0g）。build の待ちの間の作り直し（計画した古い行の消費）は D1 の [review ④] のまま |
+| PM P3-2 | `--session-start` がフックの `source`（`compact`・外部起動）を見ずに `deferred:'send'` を返す | **文書だけ** | `cli-operations-guide`（ja/en）の `--session-start` の節に範囲を書いた（`compact` の後・CommandMate を通さない会話には、どちらからも brief が入らない） |
+| PM P3-3 | off のブランチで `--session-start` が毎回 exit 50 | **追跡**（#4289） | フックの exit の扱いは F・G のフックの方針と合わせて決める |
+| PM P3-4 | `briefMayAttach` の `repository_path` 一致での推定／continuity `unknown` で作り直し後に世代を書ける | **記録だけ** | 想定内（T5b）・新しい側自身の世代で実害小 |
+| PM P3-5 | 設計との食い違い（`fitJson` に `lead` 未対応・CLI 最小値の I14 再計算なし・読み口の置き場） | **設計書を実装に合わせた** | §7.3（置き場は `src/lib/brief/previous-end.ts`。G の S-C の前提）・§7.4（CLI の最小値と I14 は数え直さない・`fitJson` は `lead` を読まない）・§9.1・§17 |
+

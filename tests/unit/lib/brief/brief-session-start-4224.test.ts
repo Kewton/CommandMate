@@ -12,6 +12,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { getMemSettings, saveMemSettings } from '@/lib/db/mem-db';
 import { setAgentInstances } from '@/lib/db/agent-instances-db';
+import { deleteWorktreesByIds } from '@/lib/db/worktree-db';
 import { BriefWorld, resetBriefMemory } from './brief-4223-harness';
 
 const world = new BriefWorld();
@@ -91,5 +92,50 @@ describe('K3 / K5 / J10 the flag changes nothing else', () => {
   it('a value other than 1, or --json, is an input error', async () => {
     expect((await world.brief({ sessionStart: 'yes' })).body).toMatchObject({ code: 'invalid_request', field: 'sessionStart' });
     expect((await world.brief({ sessionStart: '1', format: 'json' })).body).toMatchObject({ code: 'invalid_request', field: 'format' });
+  });
+});
+
+describe('K6 the pre-check and the build share the lifetime pinned at the entrance (Codex 5-2b P1)', () => {
+  const ISSUE_CLOSED = { code: 0, stdout: JSON.stringify({ state: 'closed', state_reason: 'completed' }) };
+  const closedCount = () => world.count("SELECT COUNT(*) n FROM mem_items WHERE state = 'closed'");
+  // The worktree deleted and made again with the same id and path while the pre-check awaits the membership.
+  const recreatingObserve = () => {
+    let first = true;
+    return async () => {
+      if (first) {
+        first = false;
+        deleteWorktreesByIds(world.db, ['wt-1']);
+        world.worktree('wt-1', [{ id: 'claude', cliTool: 'claude' }]);
+      }
+      return { ...world.head };
+    };
+  };
+
+  it('(control) re-made during the pre-check, not deferred: no brief, and the new one’s condition is not evaluated', async () => {
+    inject(false);
+    await world.add('next', 'issue:#1');
+    world.fake.handler = () => ISSUE_CLOSED;
+    const run = await world.brief({ sessionStart: '1' }, { target: world.deps({ observe: recreatingObserve() }) });
+    expect(run.exit).toBe(52);
+    expect(run.body).toMatchObject({ code: 'not_found', reason: 'lifetime_changed' });
+    expect(run.stdout).toBe('');
+    expect(closedCount()).toBe(0);
+  });
+
+  it('(control) re-made during the pre-check, deferred: answered as gone, not as the new one’s deferral', async () => {
+    inject(true);
+    const run = await world.brief({ sessionStart: '1' }, { target: world.deps({ observe: recreatingObserve() }) });
+    expect(run.body).toMatchObject({ code: 'not_found', reason: 'lifetime_changed' });
+    expect(ledgerRows()).toBe(0);
+  });
+
+  it('negative: left alone, not deferred — the brief is printed and the met condition closes as before', async () => {
+    inject(false);
+    await world.add('next', 'issue:#1');
+    world.fake.handler = () => ISSUE_CLOSED;
+    const run = await world.brief({ sessionStart: '1' });
+    expect(run.exit).toBe(0);
+    expect(String(run.body.text)).toMatch(/^<<<cmate-brief:/);
+    expect(closedCount()).toBe(1);
   });
 });

@@ -65,6 +65,7 @@ import { migrateWorktreeIdPreservingChildren } from '@/lib/db/worktree-db';
 import { briefMayAttach, pinBriefRequest, pinBriefWorktree, SendBrief } from '@/lib/session/session-brief';
 import type { BriefRequest } from '@/lib/session/brief-provider';
 import { sendUserMessage } from '@/lib/session/send-user-message';
+import { addAgentInstance, removeAgentInstance } from '@/lib/db/agent-instances-db';
 
 let world: World;
 
@@ -162,6 +163,66 @@ describe('T0 every wait after the entrance (review P1)', () => {
     launch('claude');
     await sendPinned(world, 'claude', '/clear', entrance(world, 'claude'));
     expect(rows(world, 'claude')[0]).toMatchObject({ kind: 'reset', state: 'pending' });
+  });
+});
+
+describe('T0f a reset with a pin that holds no evidence (Codex 5-2b P2)', () => {
+  const kinds = () => rows(world, 'claude').map((row) => row.kind);
+
+  it('(control) mem off, no row and no incarnation at the entrance, made again while the body is parsed: the old /clear opens no reset row on the new worktree', async () => {
+    setMem(world, 'off', true);
+    realPort(world);
+    const worktreePin = pinBriefWorktree(world.db, WT);
+    expect(worktreePin).toMatchObject({ worktreeIncarnation: null, anchorBoundaryId: null });
+    recreateWorktree(world); // the body's await
+    launch('claude'); // the new worktree's own session
+    const pin = pinBriefRequest(world.db, worktreePin, 'claude');
+    await sendPinned(world, 'claude', '/clear', pin);
+    expect(typed(world, 'claude')).toEqual(['/clear']);
+    expect(kinds()).not.toContain('reset');
+  });
+
+  it('negative: mem off with a row at the entrance (evidence, `same`) — the reset opens its row as D1 does', async () => {
+    setMem(world, 'off', true);
+    realPort(world);
+    launch('claude');
+    await sendPinned(world, 'claude', '/clear', entrance(world, 'claude'));
+    expect(kinds()).toContain('reset');
+  });
+});
+
+describe('T0g the instance made again after the entrance: the old request leaves the new launch row alone (PM review P3-1)', () => {
+  const ID = 'codex-2';
+  const sendAs = (pin: ReturnType<typeof entrance>, content: string) =>
+    sendUserMessage(world.db, { worktreeId: WT, content, cliToolId: 'codex', instanceId: ID, brief: 'auto', briefPin: pin });
+  const remake = () => {
+    removeAgentInstance(world.db, WT, ID);
+    addAgentInstance(world.db, WT, { id: ID, cliTool: 'codex' } as never);
+  };
+
+  it('(control) re-made and relaunched after the entrance: body only, the new launch row stays pending, the next request is briefed on it', async () => {
+    realPort(world);
+    addAgentInstance(world.db, WT, { id: ID, cliTool: 'codex' } as never);
+    launch('codex', ID);
+    const oldPin = entrance(world, ID);
+    remake();
+    launch('codex', ID); // the new instance's own launch row
+    const fresh = rows(world, ID).find((row) => row.state === 'pending' && row.instanceIncarnation !== oldPin.instance.incarnation);
+    expect(fresh).toBeDefined();
+    await sendAs(oldPin, 'old request');
+    expect(typed(world, 'codex')).toEqual(['old request']);
+    expect(rows(world, ID).find((row) => row.id === fresh!.id)?.state).toBe('pending');
+    await sendAs(entrance(world, ID), 'next request');
+    expect(typed(world, 'codex')[1]).toMatch(BRIEF);
+    expect(rows(world, ID).find((row) => row.id === fresh!.id)?.state).toBe('sent');
+  });
+
+  it('negative: not re-made — the pinned request is briefed on its launch row', async () => {
+    realPort(world);
+    addAgentInstance(world.db, WT, { id: ID, cliTool: 'codex' } as never);
+    launch('codex', ID);
+    await sendAs(entrance(world, ID), 'hello');
+    expect(typed(world, 'codex')[0]).toMatch(BRIEF);
   });
 });
 
