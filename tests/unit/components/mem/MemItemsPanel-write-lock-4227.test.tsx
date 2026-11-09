@@ -249,6 +249,12 @@ describe('[#4227] rule (4)(e): while a unit is sent or unknown, nothing else is 
     await tryOther(unit, other);
     // Nothing but the unit's own request was sent.
     expect(writes).toHaveLength(1);
+    if (unit === 'add' && state === 'sending' && (other === 'input' || other === 'add')) {
+      // Before the answer (rule (4)(e), the add's own field while sending): read-only, still the value sent.
+      const sendingField = screen.getByTestId(spec.field) as HTMLInputElement;
+      expect(sendingField.disabled).toBe(true);
+      expect(sendingField.value).toBe('A');
+    }
     if (other === 'select') {
       // Off the unit's destination it cannot be resent (rule (4)(a)): pressing sends nothing.
       press(spec.resend);
