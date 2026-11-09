@@ -330,8 +330,13 @@ describe('[#4227] rule (4): an unknown result keeps the request — its content 
     fireEvent.click(screen.getByTestId('mem-item-close-confirm-d1'));
     await waitFor(() => expect(screen.getByTestId('mem-items-notice').textContent).toContain('結果が分かりません'));
     fireEvent.click(screen.getByTestId('mem-item-close-confirm-d1'));
-    await waitFor(() => expect(screen.queryByTestId('mem-item-close-conflict-d1')).toBeNull());
+    // The first try closed it: the resend's 409 is a comparison (rule (4)(c)), kept on the units'
+    // side while the closed row leaves the default list (Codex review-4227-pr1c P2).
+    await screen.findByTestId('mem-item-close-conflict-d1');
     await waitFor(() => expect(screen.queryByTestId('mem-item-d1')).toBeNull());
+    expect(screen.getByTestId('mem-item-close-conflict-d1')).toBeInTheDocument();
+    expect(screen.getByTestId('mem-close-conflict-current').textContent).toContain('閉じた');
+    expect(screen.queryByTestId('mem-item-close-again-d1')).toBeNull();
     expect(writesOf('close')[1].body).toEqual(writesOf('close')[0].body);
     expect(writesOf('close')[0].body).toMatchObject({ ifVersion: 2, confirmUnreflected: true });
   });
@@ -426,6 +431,82 @@ describe('[#4227] rule (4)(a)(b)(c): one unit per operation, sent as it is (Code
     fireEvent.click(screen.getByTestId('mem-item-save-n1'));
     await waitFor(() => expect(screen.getByTestId('mem-items-notice').textContent).toContain('保存しました'));
     expect(find('n1').closeWhen).toEqual({ schema: 1, type: 'manual' });
+  });
+});
+
+describe('[#4227] rule (4)(c): the comparison and the unknown request stay apart from the list (Codex review-4227-pr1c P2)', () => {
+  it('close lands → its answer is lost → resend → 409: the comparison is shown with the default list (closed ones hidden)', async () => {
+    renderPanel();
+    fireEvent.click(await screen.findByTestId('mem-item-close-n1'));
+    loseAnswer = 'close';
+    fireEvent.click(screen.getByTestId('mem-item-close-confirm-n1'));
+    await waitFor(() => expect(screen.getByTestId('mem-items-notice').textContent).toContain('結果が分かりません'));
+    expect(find('n1').state).toBe('closed');
+    fireEvent.click(screen.getByTestId('mem-item-close-confirm-n1'));
+    // 2ae91fc1e drew the comparison inside the row; the read again right after hid the closed row and it.
+    await waitFor(() => expect(screen.queryByTestId('mem-item-n1')).toBeNull());
+    expect((screen.getByTestId('mem-items-all') as HTMLInputElement).checked).toBe(false);
+    const units = screen.getByTestId('mem-items-units');
+    expect(units).toContainElement(screen.getByTestId('mem-item-close-conflict-n1'));
+    expect(screen.getByTestId('mem-close-conflict-read').textContent).toContain('first note');
+    expect(screen.getByTestId('mem-close-conflict-current').textContent).toContain('閉じた');
+    expect(screen.getByTestId('mem-items-notice').textContent).not.toContain('閉じました');
+    // A closed one offers no "close again"; the person ends it.
+    expect(screen.queryByTestId('mem-item-close-again-n1')).toBeNull();
+    expect(writesOf('close')).toHaveLength(2);
+    fireEvent.click(screen.getByTestId('mem-item-close-conflict-discard-n1'));
+    await waitFor(() => expect(screen.queryByTestId('mem-items-units')).toBeNull());
+  });
+
+  it('close lost → a read again hides the closed row: its resend is still on the units’ side and sends the same request', async () => {
+    renderPanel();
+    fireEvent.click(await screen.findByTestId('mem-item-close-n1'));
+    loseAnswer = 'close';
+    fireEvent.click(screen.getByTestId('mem-item-close-confirm-n1'));
+    await waitFor(() => expect(screen.getByTestId('mem-items-notice').textContent).toContain('結果が分かりません'));
+    await readAgain();
+    await waitFor(() => expect(screen.queryByTestId('mem-item-n1')).toBeNull());
+    // 2ae91fc1e kept the resend inside the row: gone with it.
+    expect(screen.getByTestId('mem-items-units')).toContainElement(screen.getByTestId('mem-item-close-confirm-n1'));
+    fireEvent.click(screen.getByTestId('mem-item-close-confirm-n1'));
+    await screen.findByTestId('mem-item-close-conflict-n1');
+    expect(writesOf('close')[1].body).toEqual(writesOf('close')[0].body);
+  });
+
+  it('edit: the item is closed by another meanwhile → the 409 comparison stays although the row leaves the list (no "save on top")', async () => {
+    renderPanel();
+    fireEvent.click(await screen.findByTestId('mem-item-edit-n1'));
+    fireEvent.change(screen.getByTestId('mem-item-edit-text-n1'), { target: { value: 'mine' } });
+    agentWrites('n1', { state: 'closed' });
+    fireEvent.click(screen.getByTestId('mem-item-save-n1'));
+    await waitFor(() => expect(screen.queryByTestId('mem-item-n1')).toBeNull());
+    expect(screen.getByTestId('mem-items-units')).toContainElement(screen.getByTestId('mem-item-conflict-n1'));
+    expect(screen.getByTestId('mem-conflict-draft').textContent).toBe('mine');
+    expect(screen.queryByTestId('mem-item-rebase-n1')).toBeNull();
+    expect(find('n1').text).toBe('first note');
+  });
+
+  it('(control) nothing unknown and no conflict: no units’ side; an open close or edit stays in its row', async () => {
+    renderPanel();
+    fireEvent.click(await screen.findByTestId('mem-item-close-n1'));
+    expect(screen.queryByTestId('mem-items-units')).toBeNull();
+    expect(screen.getByTestId('mem-item-n1')).toContainElement(screen.getByTestId('mem-item-closer-n1'));
+    fireEvent.click(screen.getByTestId('mem-item-edit-d3'));
+    expect(screen.getByTestId('mem-item-d3')).toContainElement(screen.getByTestId('mem-item-editor-d3'));
+    expect(screen.queryByTestId('mem-items-units')).toBeNull();
+  });
+
+  it('(control) a conflict on a listed item is shown on the units’ side and "save on top" still saves', async () => {
+    renderPanel();
+    fireEvent.click(await screen.findByTestId('mem-item-edit-n1'));
+    fireEvent.change(screen.getByTestId('mem-item-edit-text-n1'), { target: { value: 'mine' } });
+    agentWrites('n1', { text: 'theirs' });
+    fireEvent.click(screen.getByTestId('mem-item-save-n1'));
+    await screen.findByTestId('mem-item-conflict-n1');
+    expect(screen.getByTestId('mem-item-n1')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('mem-item-rebase-n1'));
+    await waitFor(() => expect(find('n1').text).toBe('mine'));
+    await waitFor(() => expect(screen.queryByTestId('mem-items-units')).toBeNull());
   });
 });
 

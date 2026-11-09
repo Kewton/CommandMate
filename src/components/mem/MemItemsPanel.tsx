@@ -22,7 +22,9 @@
  *       moved off the unit's worktree or instance, it cannot be sent: the person goes back to it or
  *       drops it. (b) Another operation's answer never drops it. (c) Only the store's own answer
  *       for the same key says it landed (an add's replay); a 409 to a resent edit or close is a
- *       conflict, shown side by side, never taken for "saved" by comparing fields;
+ *       conflict, shown side by side, never taken for "saved" by comparing fields. The comparison,
+ *       and the resend of a unit whose row is not listed, are on the units' side, apart from the
+ *       list: a closed item leaves the default list, its comparison stays (Codex review-4227-pr1c P2);
  *   (5) the buttons are read off the transition table (`memScreenActions`).
  * - Read again on focus and every 30 seconds; a row whose version moved is marked.
  * - The notices no session took, each with "take it".
@@ -477,6 +479,222 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
         : t('mem.items.source.fallback')
     : '';
 
+  /** The editor of one item (in its row, or on the units' side when its row is not listed). */
+  const renderEditor = (itemId: string, edit: EditDraft) => {
+    const pendingEdit = pendings[pendingSlot('update', itemId)] ?? null;
+    return (
+      <div className="space-y-1" data-testid={`mem-item-editor-${itemId}`}>
+        <textarea
+          aria-label={t('mem.items.text')}
+          className={`${INPUT_CLASS} w-full`}
+          rows={3}
+          value={edit.text}
+          disabled={pendingEdit !== null}
+          data-testid={`mem-item-edit-text-${itemId}`}
+          onChange={(e) => setEdit({ ...edit, text: e.target.value })}
+        />
+        <input
+          type="text"
+          aria-label={t('mem.items.closeWhenInput')}
+          placeholder={edit.read.closeWhenType ? t('mem.items.closeWhenKeep', { type: edit.read.closeWhenType }) : t('mem.items.closeWhenInput')}
+          className={`${INPUT_CLASS} w-full`}
+          value={edit.closeWhen}
+          disabled={pendingEdit !== null}
+          data-testid={`mem-item-edit-close-when-${itemId}`}
+          onChange={(e) => setEdit({ ...edit, closeWhen: e.target.value })}
+        />
+        <input
+          type="text"
+          aria-label={t('mem.items.evidence')}
+          placeholder={t('mem.items.evidence')}
+          className={`${INPUT_CLASS} w-full`}
+          value={edit.evidence}
+          disabled={pendingEdit !== null}
+          data-testid={`mem-item-edit-evidence-${itemId}`}
+          onChange={(e) => setEdit({ ...edit, evidence: e.target.value })}
+        />
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" data-testid={`mem-item-save-${itemId}`} disabled={busy || !sendable(pendingEdit)} onClick={() => void save(edit)}>
+            {pendingEdit ? t('mem.items.resend') : t('mem.items.save')}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setEdit(null)}>
+            {t('mem.items.cancel')}
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  /** The close steps of one item (in its row, or on the units' side when its row is not listed). */
+  const renderCloser = (itemId: string, closing: Closing) => {
+    const pendingClose = pendings[pendingSlot('close', itemId)] ?? null;
+    // The steps follow the item as read when "close" was opened, not the last read.
+    const readActions = memScreenActions(closing.read.kind, closing.read.state);
+    const twoStep = readActions.close?.transition === 'withdraw-recorded';
+    const confirmLabel = twoStep
+      ? t('mem.items.recordedClose.confirm')
+      : readActions.close?.withdraw
+        ? t('mem.items.withdraw')
+        : t('mem.items.close');
+    return (
+      <div className="space-y-1" data-testid={`mem-item-closer-${itemId}`}>
+        {twoStep && closing.step === 1 ? (
+          <>
+            <p className="text-xs text-warning-foreground">{t('mem.items.recordedClose.first')}</p>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" data-testid={`mem-item-close-step1-${itemId}`} onClick={() => setClosing({ ...closing, step: 2 })}>
+                {t('mem.items.recordedClose.next')}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setClosing(null)}>
+                {t('mem.items.cancel')}
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            {twoStep && <p className="text-xs text-warning-foreground">{t('mem.items.recordedClose.second')}</p>}
+            <input
+              type="text"
+              aria-label={t('mem.items.reason')}
+              placeholder={t('mem.items.reason')}
+              className={`${INPUT_CLASS} w-full`}
+              value={closing.reason}
+              disabled={pendingClose !== null}
+              data-testid={`mem-item-close-reason-${itemId}`}
+              onChange={(e) => setClosing({ ...closing, reason: e.target.value })}
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                data-testid={`mem-item-close-confirm-${itemId}`}
+                disabled={busy || !sendable(pendingClose)}
+                onClick={() => void close(closing, twoStep)}
+              >
+                {pendingClose ? t('mem.items.resend') : confirmLabel}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setClosing(null)}>
+                {t('mem.items.cancel')}
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
+
+  /**
+   * The comparison of an edit's conflict. Shown on the units' side, never inside a row: the
+   * item may have left the default list (closed meanwhile) and the comparison must stay.
+   */
+  const renderConflict = (conflict: Conflict) => {
+    const itemId = conflict.current.id;
+    return (
+      <div className="space-y-1 rounded border border-warning-border bg-warning-subtle p-2" data-testid={`mem-item-conflict-${itemId}`}>
+        <p className="text-xs text-foreground">{t('mem.items.conflict.title')}</p>
+        <div className="grid gap-2 sm:grid-cols-3">
+          {(
+            [
+              ['draft', t('mem.items.conflict.draft'), conflict.draft.text, splitEvidence(conflict.draft.evidence)],
+              ['read', t('mem.items.conflict.read', { version: conflict.draft.read.version }), conflict.draft.read.text, conflict.draft.read.evidence],
+              [
+                'current',
+                t('mem.items.conflict.current', { version: conflict.current.version }),
+                conflict.current.withheld ? t('mem.items.withheldShort') : (conflict.current.text ?? ''),
+                conflict.current.withheld ? [] : (conflict.current.evidence ?? []),
+              ],
+            ] as const
+          ).map(([which, label, text, evidence]) => (
+            <div key={which} className="min-w-0">
+              <p className="text-xs font-medium text-foreground">{label}</p>
+              <p className="whitespace-pre-wrap break-words text-xs text-foreground" data-testid={`mem-conflict-${which}`}>
+                {text}
+              </p>
+              <p className="break-words text-xs text-muted-foreground" data-testid={`mem-conflict-evidence-${which}`}>
+                {t('mem.items.conflict.evidence', { evidence: evidence.length > 0 ? evidence.join(', ') : '—' })}
+              </p>
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground" data-testid={`mem-conflict-sends-${itemId}`}>
+          {t('mem.items.conflict.sends', {
+            fields:
+              Object.keys(editChanges(conflict.draft))
+                .map((field) => t(`mem.items.conflict.field.${field}`))
+                .join(', ') || '—',
+          })}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {memScreenActions(conflict.current.kind, conflict.current.state).edit && (
+            <Button
+              size="sm"
+              data-testid={`mem-item-rebase-${itemId}`}
+              disabled={busy}
+              onClick={() => void save({ ...conflict.draft, ifVersion: conflict.current.version })}
+            >
+              {t('mem.items.conflict.rebase')}
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" data-testid={`mem-item-discard-${itemId}`} onClick={() => setConflict(null)}>
+            {t('mem.items.conflict.discard')}
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  /**
+   * The comparison of a close's conflict (Codex review-4227-pr1c P2). A resend whose first try
+   * closed the item answers 409 with a closed one; the read again right after lists it no more
+   * (closed ones are hidden by default), so the comparison lives on the units' side, not in its row.
+   */
+  const renderCloseConflict = (closeConflict: CloseConflict) => {
+    const itemId = closeConflict.current.id;
+    return (
+      <div className="space-y-1 rounded border border-warning-border bg-warning-subtle p-2" data-testid={`mem-item-close-conflict-${itemId}`}>
+        <p className="text-xs text-foreground">{t('mem.items.closeConflict.title')}</p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-foreground">{t('mem.items.conflict.read', { version: closeConflict.read.version })}</p>
+            <p className="whitespace-pre-wrap break-words text-xs text-foreground" data-testid="mem-close-conflict-read">
+              {`${t(`mem.items.state.${closeConflict.read.state}`)} · ${closeConflict.read.withheld ? t('mem.items.withheldShort') : (closeConflict.read.text ?? '')}`}
+            </p>
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-foreground">{t('mem.items.conflict.current', { version: closeConflict.current.version })}</p>
+            <p className="whitespace-pre-wrap break-words text-xs text-foreground" data-testid="mem-close-conflict-current">
+              {`${t(`mem.items.state.${closeConflict.current.state}`)} · ${closeConflict.current.withheld ? t('mem.items.withheldShort') : (closeConflict.current.text ?? '')}`}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {memScreenActions(closeConflict.current.kind, closeConflict.current.state).close !== null && (
+            <Button
+              size="sm"
+              data-testid={`mem-item-close-again-${itemId}`}
+              disabled={busy}
+              onClick={() => {
+                // The person saw the current one: its version is the one read now, and the steps start again.
+                setClosing({ itemId, read: closeConflict.current, step: 1, reason: closeConflict.reason });
+                setCloseConflict(null);
+              }}
+            >
+              {t('mem.items.closeConflict.again')}
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" data-testid={`mem-item-close-conflict-discard-${itemId}`} onClick={() => setCloseConflict(null)}>
+            {t('mem.items.cancel')}
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  // The rows listed now; an open edit or close with an unknown request whose row is not among
+  // them (it left the default list) is shown on the units' side instead, so its resend stays reachable.
+  const listedIds = new Set<string>(list ? [...list.items.map((entry) => entry.id), ...list.now.map((slot) => slot.item.id)] : []);
+  const unlistedEdit = edit !== null && !listedIds.has(edit.itemId) && pendingSlot('update', edit.itemId) in pendings;
+  const unlistedClosing = closing !== null && !listedIds.has(closing.itemId) && pendingSlot('close', closing.itemId) in pendings;
+
   const renderRow = (item: MemItemView, slotOf?: string) => {
     const condition = list?.conditions?.[item.id];
     // Rule (5): the buttons are what the transition table lets this state do.
@@ -485,10 +703,6 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
     const closable = canWrite && actions.close !== null;
     const editingThis = edit?.itemId === item.id;
     const closingThis = closing?.itemId === item.id;
-    const conflictThis = conflict?.current.id === item.id;
-    const closeConflictThis = closeConflict?.current.id === item.id;
-    const pendingEdit = pendings[pendingSlot('update', item.id)] ?? null;
-    const pendingClose = pendings[pendingSlot('close', item.id)] ?? null;
     return (
       <li key={item.id} className="space-y-1 rounded border border-border p-2" data-testid={`mem-item-${item.id}`}>
         <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -552,191 +766,8 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
             </Button>
           )}
         </div>
-        {editingThis && edit && (
-          <div className="space-y-1" data-testid={`mem-item-editor-${item.id}`}>
-            <textarea
-              aria-label={t('mem.items.text')}
-              className={`${INPUT_CLASS} w-full`}
-              rows={3}
-              value={edit.text}
-              disabled={pendingEdit !== null}
-              data-testid={`mem-item-edit-text-${item.id}`}
-              onChange={(e) => setEdit({ ...edit, text: e.target.value })}
-            />
-            <input
-              type="text"
-              aria-label={t('mem.items.closeWhenInput')}
-              placeholder={edit.read.closeWhenType ? t('mem.items.closeWhenKeep', { type: edit.read.closeWhenType }) : t('mem.items.closeWhenInput')}
-              className={`${INPUT_CLASS} w-full`}
-              value={edit.closeWhen}
-              disabled={pendingEdit !== null}
-              data-testid={`mem-item-edit-close-when-${item.id}`}
-              onChange={(e) => setEdit({ ...edit, closeWhen: e.target.value })}
-            />
-            <input
-              type="text"
-              aria-label={t('mem.items.evidence')}
-              placeholder={t('mem.items.evidence')}
-              className={`${INPUT_CLASS} w-full`}
-              value={edit.evidence}
-              disabled={pendingEdit !== null}
-              data-testid={`mem-item-edit-evidence-${item.id}`}
-              onChange={(e) => setEdit({ ...edit, evidence: e.target.value })}
-            />
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" data-testid={`mem-item-save-${item.id}`} disabled={busy || !sendable(pendingEdit)} onClick={() => void save(edit)}>
-                {pendingEdit ? t('mem.items.resend') : t('mem.items.save')}
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setEdit(null)}>
-                {t('mem.items.cancel')}
-              </Button>
-            </div>
-          </div>
-        )}
-        {conflictThis && conflict && (
-          <div className="space-y-1 rounded border border-warning-border bg-warning-subtle p-2" data-testid={`mem-item-conflict-${item.id}`}>
-            <p className="text-xs text-foreground">{t('mem.items.conflict.title')}</p>
-            <div className="grid gap-2 sm:grid-cols-3">
-              {(
-                [
-                  ['draft', t('mem.items.conflict.draft'), conflict.draft.text, splitEvidence(conflict.draft.evidence)],
-                  ['read', t('mem.items.conflict.read', { version: conflict.draft.read.version }), conflict.draft.read.text, conflict.draft.read.evidence],
-                  [
-                    'current',
-                    t('mem.items.conflict.current', { version: conflict.current.version }),
-                    conflict.current.withheld ? t('mem.items.withheldShort') : (conflict.current.text ?? ''),
-                    conflict.current.withheld ? [] : (conflict.current.evidence ?? []),
-                  ],
-                ] as const
-              ).map(([which, label, text, evidence]) => (
-                <div key={which} className="min-w-0">
-                  <p className="text-xs font-medium text-foreground">{label}</p>
-                  <p className="whitespace-pre-wrap break-words text-xs text-foreground" data-testid={`mem-conflict-${which}`}>
-                    {text}
-                  </p>
-                  <p className="break-words text-xs text-muted-foreground" data-testid={`mem-conflict-evidence-${which}`}>
-                    {t('mem.items.conflict.evidence', { evidence: evidence.length > 0 ? evidence.join(', ') : '—' })}
-                  </p>
-                </div>
-              ))}
-            </div>
-            <p className="text-xs text-muted-foreground" data-testid={`mem-conflict-sends-${item.id}`}>
-              {t('mem.items.conflict.sends', {
-                fields:
-                  Object.keys(editChanges(conflict.draft))
-                    .map((field) => t(`mem.items.conflict.field.${field}`))
-                    .join(', ') || '—',
-              })}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {memScreenActions(conflict.current.kind, conflict.current.state).edit && (
-                <Button
-                  size="sm"
-                  data-testid={`mem-item-rebase-${item.id}`}
-                  disabled={busy}
-                  onClick={() => void save({ ...conflict.draft, ifVersion: conflict.current.version })}
-                >
-                  {t('mem.items.conflict.rebase')}
-                </Button>
-              )}
-              <Button size="sm" variant="ghost" data-testid={`mem-item-discard-${item.id}`} onClick={() => setConflict(null)}>
-                {t('mem.items.conflict.discard')}
-              </Button>
-            </div>
-          </div>
-        )}
-        {closeConflictThis && closeConflict && (
-          <div className="space-y-1 rounded border border-warning-border bg-warning-subtle p-2" data-testid={`mem-item-close-conflict-${item.id}`}>
-            <p className="text-xs text-foreground">{t('mem.items.closeConflict.title')}</p>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <div className="min-w-0">
-                <p className="text-xs font-medium text-foreground">{t('mem.items.conflict.read', { version: closeConflict.read.version })}</p>
-                <p className="whitespace-pre-wrap break-words text-xs text-foreground" data-testid="mem-close-conflict-read">
-                  {`${t(`mem.items.state.${closeConflict.read.state}`)} · ${closeConflict.read.withheld ? t('mem.items.withheldShort') : (closeConflict.read.text ?? '')}`}
-                </p>
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-medium text-foreground">{t('mem.items.conflict.current', { version: closeConflict.current.version })}</p>
-                <p className="whitespace-pre-wrap break-words text-xs text-foreground" data-testid="mem-close-conflict-current">
-                  {`${t(`mem.items.state.${closeConflict.current.state}`)} · ${closeConflict.current.withheld ? t('mem.items.withheldShort') : (closeConflict.current.text ?? '')}`}
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {memScreenActions(closeConflict.current.kind, closeConflict.current.state).close !== null && (
-                <Button
-                  size="sm"
-                  data-testid={`mem-item-close-again-${item.id}`}
-                  disabled={busy}
-                  onClick={() => {
-                    // The person saw the current one: its version is the one read now, and the steps start again.
-                    setClosing({ itemId: item.id, read: closeConflict.current, step: 1, reason: closeConflict.reason });
-                    setCloseConflict(null);
-                  }}
-                >
-                  {t('mem.items.closeConflict.again')}
-                </Button>
-              )}
-              <Button size="sm" variant="ghost" data-testid={`mem-item-close-conflict-discard-${item.id}`} onClick={() => setCloseConflict(null)}>
-                {t('mem.items.cancel')}
-              </Button>
-            </div>
-          </div>
-        )}
-        {closingThis && closing && (() => {
-          // The steps follow the item as read when "close" was opened, not the last read.
-          const readActions = memScreenActions(closing.read.kind, closing.read.state);
-          const twoStep = readActions.close?.transition === 'withdraw-recorded';
-          const confirmLabel = twoStep
-            ? t('mem.items.recordedClose.confirm')
-            : readActions.close?.withdraw
-              ? t('mem.items.withdraw')
-              : t('mem.items.close');
-          return (
-            <div className="space-y-1" data-testid={`mem-item-closer-${item.id}`}>
-              {twoStep && closing.step === 1 ? (
-                <>
-                  <p className="text-xs text-warning-foreground">{t('mem.items.recordedClose.first')}</p>
-                  <div className="flex flex-wrap gap-2">
-                    <Button size="sm" data-testid={`mem-item-close-step1-${item.id}`} onClick={() => setClosing({ ...closing, step: 2 })}>
-                      {t('mem.items.recordedClose.next')}
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setClosing(null)}>
-                      {t('mem.items.cancel')}
-                    </Button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  {twoStep && <p className="text-xs text-warning-foreground">{t('mem.items.recordedClose.second')}</p>}
-                  <input
-                    type="text"
-                    aria-label={t('mem.items.reason')}
-                    placeholder={t('mem.items.reason')}
-                    className={`${INPUT_CLASS} w-full`}
-                    value={closing.reason}
-                    disabled={pendingClose !== null}
-                    data-testid={`mem-item-close-reason-${item.id}`}
-                    onChange={(e) => setClosing({ ...closing, reason: e.target.value })}
-                  />
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      data-testid={`mem-item-close-confirm-${item.id}`}
-                      disabled={busy || !sendable(pendingClose)}
-                      onClick={() => void close(closing, twoStep)}
-                    >
-                      {pendingClose ? t('mem.items.resend') : confirmLabel}
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setClosing(null)}>
-                      {t('mem.items.cancel')}
-                    </Button>
-                  </div>
-                </>
-              )}
-            </div>
-          );
-        })()}
+        {editingThis && edit && renderEditor(item.id, edit)}
+        {closingThis && closing && renderCloser(item.id, closing)}
       </li>
     );
   };
@@ -854,6 +885,18 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
         <p role="alert" className="text-xs text-danger-foreground">
           {t('mem.items.refusal.other', { code: listRefusal })}
         </p>
+      )}
+
+      {(conflict || closeConflict || unlistedEdit || unlistedClosing) && (
+        // The units' side (Codex review-4227-pr1c P2): a comparison, and an unknown request whose
+        // row is not listed (closed meanwhile; closed ones are hidden by default), stay here,
+        // apart from the list, so they can be read and confirmed without "show closed".
+        <section className="space-y-2" data-testid="mem-items-units">
+          {conflict && renderConflict(conflict)}
+          {closeConflict && renderCloseConflict(closeConflict)}
+          {unlistedEdit && edit && renderEditor(edit.itemId, edit)}
+          {unlistedClosing && closing && renderCloser(closing.itemId, closing)}
+        </section>
       )}
 
       {canWrite && (
