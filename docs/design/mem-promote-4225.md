@@ -1,6 +1,6 @@
 # 人が差分を承認して decision を正本へ記録し、反映を確かめる（Issue #4225 / Epic #4220 の子 E）設計
 
-- 状態：設計の段（第 3 版、実装前）。第 1 版の「止める点」は PM が決めた（§0.1）。第 3 版は Codex の事前レビュー（P1 2・P2 5）を反映した（処置は §9）。実装は Codex の事前レビューの後、同じブランチの別の契約で行う
+- 状態：設計の段（第 3 版、実装前）。第 1 版の「止める点」は PM が決めた（§0.1）。第 3 版は Codex の事前レビュー（P1 2・P2 5）を反映した（処置は §9）。再確認（2 回目、P1 1・P2 1）も反映した（§9.2）。実装は Codex の事前レビューの後、同じブランチの別の契約で行う
 - 前提：Epic #4220 の決定事項 D1〜D13（とくに D3・D6・D9・D11・D12）。A（#4221）`docs/design/mem-store-4221.md`（以下「A」）、B（#4222）`docs/design/mem-close-when-4222.md`（「B」）、C（#4223）`docs/design/brief-4223.md`（「C」）、D1（#4274）`docs/design/session-boundary-brief-4274.md`（「D1」）。D2（#4224）は並行で設計中で、この文書は触れない
 - 凡例：**［事実］** = この文書を書いた時点（2026-11-09、`feature/4225-worktree` = develop `64572168c`）でファイルと行を読んで確かめたもの。**［見立て］** = 設計としての判断。**［未確認］** = 読んでいない・実測していないもの。行番号は確認時点のもので、実装の契約では名前で探し直す
 
@@ -136,7 +136,8 @@ preview は画面の要求（§4.2 の印）で作り、DB に保存する（`me
 ### 3.2 Issue のコメント
 
 - 本文の末尾に一意の印を入れる：`<!-- commandmate-promote:op=<operation id>; item=<item id> -->`（operation id は `randomUUID`）
-- 投稿の主体：approve の手順 3 で `gh api --hostname <host> user` の `id`（数値。login は変わりうるので照合に使わない）を読み、preview の `poster.id` と同じことを確かめ、operation の `poster_id` に保存してから POST する。読めなければ POST しない（`failure`、送っていない）。作成の応答の `user.id` が `poster_id` と違えば `unknown`（`poster_mismatch`、人へ）（事前レビュー ⑤）
+- 投稿の主体：approve の手順 3 で、**最初に 1 回だけ** `gh auth token --hostname <host>` で認証情報（token）を取り出し、以後の投稿者の確認（`gh api --hostname <host> user`）と POST の **2 つの呼び出しの両方に同じ token を環境変数で渡す**（`github.com` は `GH_TOKEN`、それ以外の host は `GH_ENTERPRISE_TOKEN`。もう一方の変数は空にして渡さない。gh は環境変数の token を保存済みの認証より先に使う［見立て：gh の環境変数の仕様。実測は U11］）。これで、確認と POST の間に `gh auth switch`・`gh auth login` で有効なアカウントが変わっても、POST は確認した主体で行われる（再確認 P2）。token は子の環境にだけ置き、DB・ログ・応答・引数に出さない。`user` の `id`（数値。login は変わりうるので照合に使わない）が preview の `poster.id` と同じことを確かめ、operation の `poster_id` に保存してから POST する。token が取り出せない・`user` が読めない・`id` が違う、のどれでも POST しない（`failure`／409 `poster_changed`、送っていない）。作成の応答の `user.id` が `poster_id` と違えば `unknown`（`poster_mismatch`、人へ。token を固定しているので起きない想定の検査）（事前レビュー ⑤）
+- 照合（§3.4）は投稿の後のアカウントの切り替えに備え、今の認証の token で読み、`poster_id` で突き合わせる（照合は読みだけなので主体を固定しない）
 - 送り方：`gh api --method POST --hostname <host> repos/<o>/<r>/issues/<N>/comments --input -`（本文は JSON で stdin。引数に本文を載せない）。実行の口は E の新しい関数（`ghApi` は GET だけで、本文を渡す口が無い、`github-query.ts:50-53`［事実］）。`hostAllowed`・`repoPath`（`github-query.ts:55`）は再利用する
 - 応答の分類（`classifyGhFailure`、`github-query.ts:18` の語を再利用し、E で「確定した失敗」と「不明」に分ける）［見立て］：
 
@@ -158,9 +159,9 @@ preview は画面の要求（§4.2 の印）で作り、DB に保存する（`me
 - 手順（すべて §2.3 の 4 と同じ同期の区間）：
   1. §5.3 のパスの検査を **もう一度** 行う（承認から時間が経っている）
   2. 内容を読み直し、`base_fingerprint` と一致を確かめる（§2.3 の 4。違えば書かずに再承認）
-  3. 開く：既にあるファイルは `O_WRONLY|O_APPEND|O_NOFOLLOW`、`base_fingerprint` が `absent` のときは `O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW`（他者が先に作っていれば `EEXIST` で書かずに再承認）。開いた記述子を `fstat` し、通常のファイル・`nlink === 1`・開く前の `lstat` と同じ `dev`/`ino` であることを確かめる（hardlink を通して repository の外のファイルへ書かない。最後の成分の symlink は `O_NOFOLLOW` が断る）
-  4. 区画を 1 回の `write` で追記し、`fsync` して閉じる
-  5. 読み直す：内容が「基準の内容＋区画」と一致すれば `success`。一致しないが、§3.4 の区画の照合で自分の区画がちょうど 1 つ、本文の SHA-256 も一致して見つかれば、`success` に `concurrent_edit=1` を付ける（最後の照合と追記の間に他者が書いた。他者の変更は残っている。画面に「書いている間に他の変更があった」と出し、人に文書を見てもらう）。区画が見つからない・壊れていれば `unknown`
+  3. **既にあるファイル**（`base_fingerprint` が `absent` でない）：`O_WRONLY|O_APPEND|O_NOFOLLOW` で開く。開いた記述子を `fstat` し、通常のファイル・`nlink === 1`・開く前の `lstat` と同じ `dev`/`ino` であることを確かめる（hardlink を通して repository の外のファイルへ書かない。最後の成分の symlink は `O_NOFOLLOW` が断る）。区画を 1 回の `write` で追記し、`fsync` して閉じる
+  4. **新しく作るファイル**（`base_fingerprint` が `absent`）：空のファイルを作ってから書く形にしない（作った後・書く前に他者が同じファイルへ書くと、位置 0 からの `write` で他者の内容を上書きする。再確認 P1）。代わりに、同じディレクトリに operation の ID から決めた名前の一時ファイル（`.commandmate-promote-<operation id>.tmp`）を `O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW` で作って区画の全文を書き、`fsync` し、**`link(一時ファイル, 行き先)`** で行き先の名前を付ける。`link` は行き先が既にあれば（他者が先に作った・symlink を置いた）`EEXIST` で失敗し何も上書きしない（書かずに再承認）。成功した瞬間に行き先は区画の全文を持って現れるので、空のファイルが見える窓が無い。その後に一時ファイルの名前を `unlink` し、行き先を `lstat` して通常のファイル・`nlink === 1`・一時ファイルと同じ `dev`/`ino` を確かめる。`link` の後に他者が行き先へ追記・置き換えしても E はもう書かないので、他者の内容は失われない。`link` が使えない（`EPERM`・`ENOTSUP` 等）ファイルシステムでは書かずに `failure`（送っていない）。一時ファイルが残った（`link` と `unlink` の間で process が終わった）ときは、照合（§3.4）で同じ名前・通常のファイル・中身が区画の全文と一致するものだけを消す（それ以外は触らない）
+  5. 読み直す：内容が「基準の内容＋区画」（新しく作ったときは区画だけ）と一致すれば `success`。一致しないが、§3.4 の区画の照合で自分の区画がちょうど 1 つ、本文の SHA-256 も一致して見つかれば、`success` に `concurrent_edit=1` を付ける（最後の照合と追記の間に他者が書いた。他者の変更は残っている。画面に「書いている間に他の変更があった」と出し、人に文書を見てもらう）。区画が見つからない・壊れていれば `unknown`
 - 例外で途中が分からなくなったとき（process の終了を含む）は §3.4 の文書の照合で決める。文書全体の一致・不一致では決めない（事前レビュー ④）
 - commit・add・push・stash・checkout など git の書き込みは呼ばない（§5.4、ガードで固定）
 
@@ -375,7 +376,8 @@ E の書き込みの入口（**preview**・approve・confirm-reflected・reconci
 | T3 | 承認の後に項目が変わった（`mem update` で `version+1`）→ 409 `item_changed`、書かない | 版の照合を外した版で書く | 版が同じなら書く |
 | T4 | 作り直し後の古い要求：preview の後に context／行き先の worktree を同じ ID・path で消して作り直す → 409 `worktree_recreated`、書かない（A §16 I17 と同じ形） | 世代の照合を外した版で書く | 作り直さなければ書く |
 | T5 | 文書を承認の後に別のプロセスが変えた → 409 `base_changed`、文書は他者の内容のまま | 基準の照合を外した版で他者の変更を上書き | 変わらなければ追記される |
-| T5b | 最後の照合（§3.3 の 2）と追記（4）の間に別のプロセスが文書を書き換える（試験の差し込み口で、同じ区間の中で外から書く）→ 他者の内容がすべて残り、区画が 1 つ足され、`succeeded`・`concurrent_edit=1`（事前レビュー ①） | 第 2 版の一時ファイル＋`rename` の版で他者の変更が消えて落ちる | 差し込みが無ければ内容は「基準＋区画」と完全に一致し、`concurrent_edit=0` |
+| T5b | **既にあるファイル**：最後の照合（§3.3 の 2）と追記（3）の間に別のプロセスが文書を書き換える（試験の差し込み口で、同じ区間の中で外から書く）→ 他者の内容がすべて残り、区画が 1 つ足され、`succeeded`・`concurrent_edit=1`（事前レビュー ①） | 第 2 版の一時ファイル＋`rename` の版で他者の変更が消えて落ちる | 差し込みが無ければ内容は「基準＋区画」と完全に一致し、`concurrent_edit=0` |
+| T5d | **新しく作るファイル**（再確認 P1）：(a) 一時ファイルを書いた後・`link` の前に、別のプロセスが行き先を作って書く → `EEXIST` で E は書かず 409 `base_changed`、行き先は他者の内容だけ、一時ファイルは消える。(b) `link` の後に別のプロセスが行き先へ追記する → 他者の追記が残る。(c) 行き先に symlink を置く → `EEXIST`、symlink の先は変わらない | 「`O_CREAT\|O_EXCL` で空のファイルを作り、位置 0 から `write`」の版で、作成の後・`write` の前に他者の書き込みを挟むと他者の内容が上書きされて落ちる | 差し込みが無ければ行き先の内容は区画の全文と完全に一致し、一時ファイルは残らない、`concurrent_edit=0` |
 | T5c | 文書の hardlink（`nlink=2`）・開く前と開いた後で `ino` が違う → 書かない | `fstat` の照合を外した版で repository の外の inode に追記されて落ちる | 通常のファイルは追記される |
 | T6 | 選んだ worktree で別のブランチへ切り替えた → 409 `branch_changed` | — | — |
 | T7 | 同じ項目を並行に承認（`await` の間に 2 本目を進める）→ 1 本だけ書く、2 本目は 409 | 一意の索引を外した版で 2 回書く | 1 本なら書く |
@@ -384,6 +386,7 @@ E の書き込みの入口（**preview**・approve・confirm-reflected・reconci
 | T10 | 並行の再試行（`unknown` に 2 本の reconcile・2 本の再承認）→ 外への POST は増えない | — | — |
 | T11 | 照合で印は見つかったが作者・本文の指紋が違う → `succeeded` にしない（作者が違う：印を写した他人。本文が違う：`unknown` の `body_differs`） | 印だけで見る版で成功と読む | — |
 | T11b | Enterprise の host（`origin` の host）への投稿：preview の照会・POST・一覧・投稿者の照会の 4 つの `gh` の呼び出しの引数がすべて同じ `--hostname <host>` を持つ。結果不明の後に偽の `gh` の認証アカウントを切り替えて（`user` が別の `id` を返す）照合しても、元の `poster_id` のコメントを `succeeded` と認識する（事前レビュー ⑤） | 照合で今の `gh api user` を使う版で認識できず落ちる。一覧で `--hostname` を省く版で引数の検査が落ちる | 印だけを写した他人（別の `user.id`）のコメントは認識しない |
+| T11c | 投稿者の確認と POST の主体の固定（再確認 P2）：偽の `gh` は環境変数の token があればその主体、無ければ「有効なアカウント」で答える。`user` の確認の後・POST の前に有効なアカウントを A から B へ切り替える → POST の呼び出しは A の token を環境変数に持ち、偽の `gh` の記録で投稿者は A、`succeeded` で `poster_id` = A。DB・ログ・応答・引数の列に token の文字列が現れない | token を固定しない版（呼び出しごとに保存済みの認証を使う）で、投稿者が B になり落ちる | 切り替えが無ければ同じ結果。`gh auth token` が失敗すれば POST の呼び出しは 0 回で `failure` |
 | T18 | 外への成功の後に項目の遷移を失敗させ（試験の差し込み口で入口に `version_conflict` を返させる）、もう一方の画面が先に作っていた preview を approve → 409（`operation_in_progress` か `prior_record_exists`）、外への POST・追記は 1 回（事前レビュー ②） | 一意の索引から `transition_pending=1` を外し、preview の無効化を外した版で 2 回書かれて落ちる | 遷移が成功する通常の場合、項目は 1 回だけ進み（`version+1` が 1 回）、`transition_pending=0` |
 | T19 | 既にある記録を並べた新しい preview の approve：`acknowledged_operation_ids` が今の集合と同じなら書ける。approve の前に別の operation が成功していれば 409 `prior_record_exists` | 集合の照合を外した版で、人が見ていない記録の後に重ねて書かれて落ちる | 記録が無い項目は一覧が空で通る |
 | T20 | 世代の受け渡し：(a) preview の後、(b) approve の外への書き込みの応答待ち（偽の `gh` を止めて待たせる）、(c) reconcile の照会待ち、のそれぞれで context の worktree を同じ ID・path で消して作り直す → (a) は 409 `worktree_recreated`、(b)(c) は外の結果だけ保存し（`succeeded`・`result_ref`）、項目は `open` のまま、`transition_pending=1`・`transition_reason='incarnation_changed'`（事前レビュー ③） | A の入口が自分で世代を固定し直す版で、(b)(c) の項目が `recorded` に進んで落ちる | 作り直さなければ (b)(c) とも項目は進み、`transition_pending=0` |
@@ -455,6 +458,8 @@ A のファイルを変えず、E の新しいファイル（`src/lib/db/mem-pro
 | U7 | （第 3 版で決めた）`transition_pending` の「記録済みとして扱う」は、今の項目の欄の指紋が書いた時と違えば差分を出し、`acknowledgeDiff:true` を求める（§1.2） |
 | U8 | 追記（§3.3）でも、途中のディレクトリの成分を `lstat` の後に symlink へ差し替える窓は Node で閉じられない（`openat` が無い）。これは同じ OS 権限の作為で、通常の並行編集ではない（§5.5）。通常の並行編集は ① の処置で失われない |
 | U9 | `O_NOFOLLOW` の値が Windows の Node で 0 になる（`daemon.ts:196` は `?? 0` で受けている［事実］）。E の文書の書き込みは `O_NOFOLLOW` が 0 の platform では断る |
+| U11 | `gh auth token --hostname` と、`GH_TOKEN`／`GH_ENTERPRISE_TOKEN` が保存済みの認証より優先されることを、使う gh の版で実測していない（実装の契約で `gh --version` の下限を決め、偽の `gh` の試験と別に 1 回だけ読みの API で確かめる） |
+| U12 | `link` の後・`unlink` の前に他者が一時ファイルの名前を消した・置き換えた場合、照合は中身が区画の全文と一致するものだけを消すので、他者のファイルは消さない（区画と同じ中身の別のファイルを他者が置いた場合を除く。その場合も消えるのは E の区画と同じ中身だけ） |
 | U10 | 他者の追記と E の追記が同じ瞬間に `O_APPEND` で重なったとき、1 回の `write` が分割されないか（ローカルの通常ファイルでは 1 回の `write` は原子的に末尾へ付く［見立て］。ネットワークのファイルシステムは対象外） |
 
 ### 8.5 本文に無い指摘（この Issue では直さない）
@@ -465,6 +470,8 @@ A のファイルを変えず、E の新しいファイル（`src/lib/db/mem-pro
 ---
 
 ## 9. 事前レビューの処置
+
+### 9.1 1 回目（2026-11-09）
 
 Codex の事前レビュー（2026-11-09、P1 2・P2 5。`workspace/orchestration/runs/2026-11-08/prereview/review-4225.md`）。守る条件と対照は §7 の T 番号の行。
 
@@ -478,3 +485,14 @@ Codex の事前レビュー（2026-11-09、P1 2・P2 5。`workspace/orchestratio
 | ⑥ | P2：フェンスの長さ「最長＋1」は backtick の無い本文でコードブロックにならない | 採る | フェンスの長さを `max(3, 最長＋1)` にし、`remark-parse` で `code` の節になることを確かめる（§5.2、T22） |
 | ⑦ | P2：入口の表に行を足すだけでは、新しい書き込み口の迂回を検出できない。preview が表に無い | 採る | E の新しい試験で、`mem-db.ts` の書き込みの export を本文から求め、別名・helper 越しも含めて呼び手を `service.ts` に限り、A の入口の呼び手を E の service に限り、E の書き込みに届く export（preview を含む）を表と突き合わせ、全部が `isScreenRequest` を最初に呼ぶことを固定する。A の試験は変えない（§7・§7.1、T23） |
 | 補 | U7：内容の違う「記録済みとして扱う」で何を見せるか | 採る | 今の項目と書いた時の指紋が違えば差分を出し、`acknowledgeDiff:true` を求める（§1.2・§4.2） |
+
+### 9.2 再確認（2 回目、2026-11-09、`workspace/orchestration/runs/2026-11-08/prereview/review-4225b.md`）
+
+前回 7 件の判定は「解消 5 件（②③④⑥⑦）・一部解消 2 件（①⑤）」。残りの 2 件の処置：
+
+| # | 指摘 | 処置 | 1 行の理由（守る条件・対照） |
+|---|---|---|---|
+| R1 | P1：新しく作る文書は `O_CREAT\|O_EXCL` で作った後・`write` の前に他者が書くと、位置 0 からの `write` で他者の内容を上書きする（① の残り） | 採る | 新しく作るファイルは、一時ファイルに全文を書いて `link` で名前を付ける（行き先が既にあれば `EEXIST` で何も上書きしない。空のファイルが見える窓が無い）。既にあるファイルは `O_APPEND` のまま（§3.3、T5b を既存／新規に分け T5d を足した） |
+| R2 | P2：投稿者の確認と POST が別々の `gh` の呼び出しで、間のアカウントの切り替えで別の主体として投稿される（⑤ の残り） | 採る | 最初に 1 回 `gh auth token --hostname` で取り出した token を、確認と POST の両方に環境変数で渡して主体を固定する。token は保存・記録しない。照合は読みだけなので固定せず `poster_id` で突き合わせる（§3.2、T11c。gh の優先順位の実測は U11） |
+
+- §0.1 の受入基準の読み（最後の照合の後の他者の変更は再承認ではなく `concurrent_edit` の成功）は、再確認でも了承済みとは判定されていない。PM の確認待ちのまま残す
