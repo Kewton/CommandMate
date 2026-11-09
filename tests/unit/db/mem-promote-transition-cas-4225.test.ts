@@ -9,6 +9,7 @@ import { runMigrations } from '@/lib/db/db-migrations';
 import { PROMOTE_RETENTION_MS } from '@/lib/promote/model';
 import {
   abandonPromoteOperation,
+  acceptFoundPromoteOperation,
   acknowledgePromoteTransition,
   beginPromoteTransition,
   finishPromoteTransition,
@@ -122,6 +123,31 @@ describe('the outcome of a write (I2)', () => {
     insert('b', 'unknown');
     expect(settlePromoteOperation(db, 'b', { state: 'succeeded', reason: null }, 2)).toBe(true);
     expect([row('a').state, row('b').state]).toEqual(['succeeded', 'succeeded']);
+  });
+});
+
+describe('a person judged a found mark written (PM review P3-2, I2)', () => {
+  const setReason = (id: string, reason: string) => db.prepare('UPDATE mem_promote_operations SET unknown_reason = ? WHERE id = ?').run(reason, id);
+
+  it('only from the unknown of the reason shown; settled by a person, and never overwritten by the approval’s late answer', () => {
+    insert('a', 'unknown');
+    setReason('a', 'body_differs');
+    expect(acceptFoundPromoteOperation(db, 'a', 'block_altered', 2)).toBe(false);
+    expect(acceptFoundPromoteOperation(db, 'a', 'body_differs', 2)).toBe(true);
+    expect(row('a')).toMatchObject({ state: 'succeeded', decided_by: 'human', unknown_reason: null, settled_at: 2 });
+    expect(settlePromoteOperation(db, 'a', { state: 'failed', reason: 'x' }, 3)).toBe(false);
+    expect(abandonPromoteOperation(db, 'a', 3)).toBe(false);
+    expect(row('a').state).toBe('succeeded');
+  });
+
+  it('(control) a reason the reconcile changed since, or a state that is not unknown, is refused and changes nothing', () => {
+    insert('a', 'unknown');
+    setReason('a', 'not_found_yet');
+    insert('b', 'abandoned');
+    setReason('b', 'body_differs');
+    expect(acceptFoundPromoteOperation(db, 'a', 'body_differs', 2)).toBe(false);
+    expect(acceptFoundPromoteOperation(db, 'b', 'body_differs', 2)).toBe(false);
+    expect([row('a').state, row('b').state]).toEqual(['unknown', 'abandoned']);
   });
 });
 

@@ -20,8 +20,14 @@ import { createRepository } from '@/lib/db/db-repository';
 import { getMemSettings, saveMemSettings } from '@/lib/db/mem-db';
 import type { MemBranchRule } from '@/types/mem';
 import { setBoundaryDatabaseForTest } from '@/lib/session/session-boundary';
-import { resetLiveBriefClaimsForTest, setBriefMemTargetDepsForTest, type BriefReport } from '@/lib/session/session-brief';
-import { setBriefProviderForTest, type BriefProvider, type BriefRequest, type BriefResult } from '@/lib/session/brief-provider';
+import {
+  pinBriefRequest,
+  pinBriefWorktree,
+  resetLiveBriefClaimsForTest,
+  setBriefMemTargetDepsForTest,
+  type BriefReport,
+} from '@/lib/session/session-brief';
+import { EMPTY_BRIEF_PROVIDER, setBriefProviderForTest, type BriefProvider, type BriefRequest, type BriefResult } from '@/lib/session/brief-provider';
 import { listRetainedBoundaries, type BoundaryRow } from '@/lib/db/session-brief-db';
 import { beginAgentSession } from '@/lib/session/agent-session-lifecycle';
 import {
@@ -127,6 +133,9 @@ export function makeWorld(): World {
     },
   });
   setMem(world, 'on', true);
+  // Issue #4224: the default provider is C's now (D2); this world briefs with D1's empty one
+  // unless a test hands in its own (`fakeProvider`) — the world these tests were written for.
+  setBriefProviderForTest(EMPTY_BRIEF_PROVIDER);
   clearSendAttempts();
   resetLiveBriefClaimsForTest();
   return world;
@@ -251,12 +260,16 @@ export function overrideBriefMode(mode: SendOptions['brief'] | null): void {
 
 export async function send(tool: string, content: string, options: SendOptions = {}): Promise<Sent> {
   let report: BriefReport | null = null;
-  const result = await sendUserMessage(globalThis.__briefDb as Database.Database, {
+  const db = globalThis.__briefDb as Database.Database;
+  // Issue #4224: the request's entrance fixes its lifetimes, as the send route does.
+  const briefPin = pinBriefRequest(db, pinBriefWorktree(db, WT), options.instanceId ?? tool);
+  const result = await sendUserMessage(db, {
     worktreeId: WT,
     content,
     cliToolId: tool as CLIToolType,
     instanceId: options.instanceId,
     brief: briefModeOverride ?? options.brief ?? 'auto',
+    briefPin,
     absoluteImagePath: options.absoluteImagePath,
     onBrief: (r) => {
       report = r;

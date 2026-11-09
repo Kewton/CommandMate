@@ -42,6 +42,7 @@ import type { WorktreeHeadObservation } from '@/lib/mem/git-observe';
 import type { PromoteOperationView, PromotePreviewView } from '@/lib/promote/model';
 import {
   promoteAbandon,
+  promoteAcceptFound,
   promoteApprove,
   promoteConfirmReflected,
   promoteList,
@@ -50,7 +51,7 @@ import {
   promoteSettleTransition,
   type PromoteDeps,
 } from '@/lib/promote/service';
-import { tempNameOf } from '@/lib/promote/doc-write';
+import { docBlockOf, tempNameOf } from '@/lib/promote/doc-write';
 import { promoteApi } from '@/lib/promote/screen-client';
 import type { MemWriteResponse } from '@/types/mem';
 import { FakeGh, failed } from './fake-gh';
@@ -180,6 +181,18 @@ async function unknownComment(itemId: string): Promise<string> {
   return operation.id;
 }
 
+/**
+ * An operation left `unknown` with `body_differs` (PM review P3-2): the POST timed out after
+ * GitHub took the comment, someone edited it, and the reconcile found our mark with another body.
+ */
+async function bodyDiffersComment(itemId: string): Promise<string> {
+  const opId = await unknownComment(itemId);
+  gh.comments = gh.comments.map((comment) => ({ ...comment, body: `${comment.body}\n(edited)` }));
+  await promoteReconcile(db, SCREEN, repoA, opId, deps());
+  expect(op(opId)).toMatchObject({ state: 'unknown', unknown_reason: 'body_differs' });
+  return opId;
+}
+
 interface Entrance {
   /** Make the state the entrance acts on; returns what `call` needs. */
   setup: () => Promise<Record<string, string>>;
@@ -217,6 +230,10 @@ const ENTRANCES: Record<string, Entrance> = {
   promoteAbandon: {
     setup: async () => ({ opId: await unknownComment((await addDecision()).id) }),
     call: (request, made) => promoteAbandon(db, request, repoA, made.opId, { ifState: 'unknown' }, deps()),
+  },
+  promoteAcceptFound: {
+    setup: async () => ({ opId: await bodyDiffersComment((await addDecision()).id) }),
+    call: (request, made) => promoteAcceptFound(db, request, repoA, made.opId, { ifState: 'unknown', ifReason: 'body_differs' }, deps()),
   },
   promoteSettleTransition: {
     setup: async () => {
@@ -969,7 +986,7 @@ function routeScreenCalls(): void {
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input), 'http://localhost:3000');
-      const match = url.pathname.match(/^\/api\/repositories\/([^/]+)\/mem\/decisions(?:\/operations\/([^/]+)\/(reconcile|abandon|settle-transition))?$/);
+      const match = url.pathname.match(/^\/api\/repositories\/([^/]+)\/mem\/decisions(?:\/operations\/([^/]+)\/(reconcile|abandon|accept-found|settle-transition))?$/);
       if (!match) throw new Error(`unexpected call ${url.pathname}`);
       const headers = new Headers(init?.headers);
       headers.set('origin', 'http://localhost:3000');
@@ -985,7 +1002,9 @@ function routeScreenCalls(): void {
             ? await promoteReconcile(db, request, repositoryId, opId, deps())
             : match[3] === 'abandon'
               ? await promoteAbandon(db, request, repositoryId, opId, body, deps())
-              : await promoteSettleTransition(db, request, repositoryId, opId, body, deps());
+              : match[3] === 'accept-found'
+                ? await promoteAcceptFound(db, request, repositoryId, opId, body, deps())
+                : await promoteSettleTransition(db, request, repositoryId, opId, body, deps());
       return { ok: outcome.status < 300, status: outcome.status, json: async () => outcome.body } as Response;
     })
   );
@@ -1362,3 +1381,204 @@ describe('5-2e: a late answer of the POST never starts a settled transition agai
 function operationIdOfItem(itemId: string): string {
   return (db.prepare('SELECT id FROM mem_promote_operations WHERE item_id = ? ORDER BY approved_at DESC, rowid DESC').get(itemId) as { id: string }).id;
 }
+
+describe('PM review (2026-11-09): what the person is shown is what is decided', () => {
+  const findingOf = (outcome: { body: unknown }) =>
+    (outcome.body as { finding?: { reason: string; found: string | null; intended: string } }).finding;
+  const opRow = (id: string) =>
+    db.prepare('SELECT state, decided_by, unknown_reason, result_ref, body FROM mem_promote_operations WHERE id = ?').get(id) as {
+      state: string;
+      decided_by: string | null;
+      unknown_reason: string | null;
+      result_ref: string | null;
+      body: string;
+    };
+
+  it('P3-2: body_differs → the reconcile answers both; "treat as written" settles it by a person, the item moves, and nothing is written twice', async () => {
+    const made = await addDecision();
+    const opId = await unknownComment(made.id);
+    const intended = opRow(opId).body;
+    gh.comments = gh.comments.map((comment) => ({ ...comment, body: `${comment.body}\n(edited)` }));
+    const reconciled = await promoteReconcile(db, SCREEN, repoA, opId, deps());
+    expect(findingOf(reconciled)).toEqual({ reason: 'body_differs', found: `${intended}\n(edited)`, intended });
+    expect(JSON.parse(opRow(opId).result_ref ?? 'null')).toMatchObject({ id: gh.comments[0].id });
+    const accepted = await promoteAcceptFound(db, SCREEN, repoA, opId, { ifState: 'unknown', ifReason: 'body_differs' }, deps());
+    expect(accepted.status).toBe(200);
+    expect(opRow(opId)).toMatchObject({ state: 'succeeded', decided_by: 'human', unknown_reason: null });
+    expect(item(made.id).state).toBe('recorded');
+    // The exits that led to a second write are closed now.
+    expect(codeOf(await promoteAbandon(db, SCREEN, repoA, opId, { ifState: 'unknown' }, deps())).code).toBe('state_forbids');
+    expect(codeOf(await promotePreview(db, SCREEN, repoA, made.id, { worktreeId: WT }, deps())).code).toBe('state_forbids');
+    expect(gh.posts()).toHaveLength(1);
+    expect(gh.comments).toHaveLength(1);
+  });
+
+  it('P3-2 (positive control: the hazard the new exit closes): body_differs → "it is not there" → a new approval writes the same decision again', async () => {
+    const made = await addDecision();
+    const opId = await bodyDiffersComment(made.id);
+    expect((await promoteAbandon(db, SCREEN, repoA, opId, { ifState: 'unknown' }, deps())).status).toBe(200);
+    expect((await approve(await preview(made.id))).status).toBe(200);
+    expect(gh.posts()).toHaveLength(2);
+    expect(gh.comments).toHaveLength(2);
+  });
+
+  it('P3-2: block_altered → the document around the marks and the approved body are answered; "treat as written" settles it, the document untouched', async () => {
+    writeFileSync(docPath(), '# 既存\n');
+    const made = await addDecision('path:docs/d.md');
+    promoteHooks = {
+      doc: {
+        beforeAppend: () => {
+          throw new Error('stopped');
+        },
+      },
+    };
+    const stopped = operationOf(await approve(await preview(made.id)));
+    promoteHooks = undefined;
+    const intended = opRow(stopped.id).body;
+    // A person edited the block by hand after it was written.
+    const altered = docBlockOf(stopped.id, intended).replace('方針を A にする', '方針を A にする（人が直した）');
+    writeFileSync(docPath(), `# 既存\n${altered}後ろの段落\n`);
+    const reconciled = await promoteReconcile(db, SCREEN, repoA, stopped.id, deps());
+    expect(op(stopped.id)).toMatchObject({ state: 'unknown', unknown_reason: 'block_altered' });
+    expect(findingOf(reconciled)).toEqual({ reason: 'block_altered', found: altered, intended });
+    const before = readFileSync(docPath(), 'utf8');
+    expect((await promoteAcceptFound(db, SCREEN, repoA, stopped.id, { ifState: 'unknown', ifReason: 'block_altered' }, deps())).status).toBe(200);
+    expect(opRow(stopped.id)).toMatchObject({ state: 'succeeded', decided_by: 'human' });
+    expect(item(made.id).state).toBe('recorded');
+    expect(readFileSync(docPath(), 'utf8')).toBe(before);
+  });
+
+  /** An operation of a document stopped before its append, and the block then edited by hand. */
+  async function alteredDoc(): Promise<{ itemId: string; opId: string; altered: string; intended: string }> {
+    writeFileSync(docPath(), '# 既存\n');
+    const made = await addDecision('path:docs/d.md');
+    promoteHooks = {
+      doc: {
+        beforeAppend: () => {
+          throw new Error('stopped');
+        },
+      },
+    };
+    const stopped = operationOf(await approve(await preview(made.id)));
+    promoteHooks = undefined;
+    const intended = opRow(stopped.id).body;
+    const altered = docBlockOf(stopped.id, intended).replace('方針を A にする', '方針を A にする（人が直した）');
+    writeFileSync(docPath(), `# 既存\n${altered}後ろの段落\n`);
+    return { itemId: made.id, opId: stopped.id, altered, intended };
+  }
+  /** The reconcile's reads of the document: the first `ok` succeed, the rest fail with EIO. */
+  function readsFailingAfter(ok: number): { reads: () => number } {
+    let reads = 0;
+    promoteHooks = {
+      doc: {
+        readDoc: (abs) => {
+          reads += 1;
+          if (reads > ok) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' });
+          return readFileSync(abs, 'utf8');
+        },
+      },
+    };
+    return { reads: () => reads };
+  }
+
+  it('Codex review 5 P2-2: block_altered is judged and shown from one read — a read failing after it cannot leave a finding nobody can compare', async () => {
+    const made = await alteredDoc();
+    const seam = readsFailingAfter(1);
+    const reconciled = await promoteReconcile(db, SCREEN, repoA, made.opId, deps());
+    promoteHooks = undefined;
+    // Positive control: the judgement and a second read for the screen answered `found: null` here.
+    expect(seam.reads()).toBe(1);
+    expect(findingOf(reconciled)).toEqual({ reason: 'block_altered', found: made.altered, intended: made.intended });
+    expect(op(made.opId)).toMatchObject({ state: 'unknown', unknown_reason: 'block_altered' });
+  });
+
+  it('Codex review 5 P2-2: the document unreadable at the reconcile → unreadable, no finding, and "treat as written" is refused (back to reconcile)', async () => {
+    const made = await alteredDoc();
+    readsFailingAfter(0);
+    const reconciled = await promoteReconcile(db, SCREEN, repoA, made.opId, deps());
+    promoteHooks = undefined;
+    expect(op(made.opId)).toMatchObject({ state: 'unknown', unknown_reason: 'unreadable' });
+    expect(findingOf(reconciled)).toBeUndefined();
+    const before = snapshot();
+    expect(codeOf(await promoteAcceptFound(db, SCREEN, repoA, made.opId, { ifState: 'unknown', ifReason: 'block_altered' }, deps())).code).toBe('state_forbids');
+    expect(snapshot()).toEqual(before);
+    expect(item(made.itemId).state).toBe('open');
+    // (control) readable again → the reconcile shows both and "treat as written" is offered again.
+    const again = await promoteReconcile(db, SCREEN, repoA, made.opId, deps());
+    expect(findingOf(again)).toEqual({ reason: 'block_altered', found: made.altered, intended: made.intended });
+    expect((await promoteAcceptFound(db, SCREEN, repoA, made.opId, { ifState: 'unknown', ifReason: 'block_altered' }, deps())).status).toBe(200);
+  });
+
+  it('P3-2 (control): no finding is answered for not_found_yet, and "treat as written" is refused for any reason but the one shown', async () => {
+    const made = await addDecision();
+    const opId = await unknownComment(made.id);
+    gh.comments = [];
+    const reconciled = await promoteReconcile(db, SCREEN, repoA, opId, deps());
+    expect(op(opId)).toMatchObject({ state: 'unknown', unknown_reason: 'not_found_yet' });
+    expect(findingOf(reconciled)).toBeUndefined();
+    const before = snapshot();
+    for (const ifReason of ['body_differs', 'block_altered']) {
+      expect(codeOf(await promoteAcceptFound(db, SCREEN, repoA, opId, { ifState: 'unknown', ifReason }, deps())).code).toBe('state_forbids');
+    }
+    for (const body of [{ ifState: 'unknown', ifReason: 'not_found_yet' }, { ifState: 'unknown' }, { ifReason: 'body_differs' }]) {
+      expect(codeOf(await promoteAcceptFound(db, SCREEN, repoA, opId, body, deps())).code).toBe('invalid_request');
+    }
+    expect(snapshot()).toEqual(before);
+  });
+
+  it('P3-2 (I2): the comment removed and reconciled again since the finding was shown → "treat as written" of the old reason is refused', async () => {
+    const made = await addDecision();
+    const opId = await bodyDiffersComment(made.id);
+    gh.comments = [];
+    await promoteReconcile(db, SCREEN, repoA, opId, deps());
+    expect(codeOf(await promoteAcceptFound(db, SCREEN, repoA, opId, { ifState: 'unknown', ifReason: 'body_differs' }, deps())).code).toBe('state_forbids');
+    expect(op(opId)).toMatchObject({ state: 'unknown', unknown_reason: 'not_found_yet' });
+    expect(item(made.id).state).toBe('open');
+  });
+
+  it('P3-2 (E1): "treat as written" while the branch is off keeps the outcome; the item does not move', async () => {
+    const made = await addDecision();
+    const opId = await bodyDiffersComment(made.id);
+    setMode('off');
+    expect((await promoteAcceptFound(db, SCREEN, repoA, opId, { ifState: 'unknown', ifReason: 'body_differs' }, deps())).status).toBe(200);
+    expect(op(opId)).toMatchObject({ state: 'succeeded', transition_pending: 1, transition_reason: 'disabled' });
+    expect(item(made.id).state).toBe('open');
+  });
+
+  it.each([
+    ['a document', 'path:docs/d.md', () => writeFileSync(docPath(), '# 他のセッションが変えた\n')],
+    ['an Issue', 'issue:#1', () => (gh.issue = { ...gh.issue, body: 'edited' })],
+  ] as const)('P3-5: %s whose base changed since the preview → back to approval at the approval’s own check: no operation is made', async (_name, promoteTo, change) => {
+    writeFileSync(docPath(), '# 既存\n');
+    const p = await preview((await addDecision(promoteTo)).id);
+    change();
+    expect(codeOf(await approve(p))).toMatchObject({ code: 'reapproval_required', reason: 'base_changed' });
+    expect(count('SELECT COUNT(*) n FROM mem_promote_operations')).toBe(0);
+    expect(count('SELECT COUNT(*) n FROM mem_promote_attempts')).toBe(0);
+    expect(gh.posts()).toHaveLength(0);
+  });
+
+  it('P3-5 (control): the base unchanged → one operation, written', async () => {
+    writeFileSync(docPath(), '# 既存\n');
+    const p = await preview((await addDecision('path:docs/d.md')).id);
+    expect(operationOf(await approve(p)).state).toBe('succeeded');
+    expect(count('SELECT COUNT(*) n FROM mem_promote_operations')).toBe(1);
+  });
+
+  it.each(['CLAUDE.md', 'AGENTS.md', '.claude/commands/x.md', 'docs/GEMINI.md', '.github/copilot-instructions.md'])(
+    'P3-8: an agent’s instruction file (%s) is refused as a destination; no preview, nothing written',
+    async (rel) => {
+      const made = await addDecision('path:docs/d.md');
+      const outcome = await promotePreview(db, SCREEN, repoA, made.id, { worktreeId: WT, destination: `path:${rel}` }, deps());
+      expect(codeOf(outcome)).toMatchObject({ code: 'invalid_destination', reason: 'agent_instructions' });
+      expect(promoteRows()).toBe(0);
+      expect(existsSync(path.join(wtPath(), rel))).toBe(false);
+    }
+  );
+
+  it('P3-8 (control): a document beside them is still a destination', async () => {
+    const made = await addDecision('path:docs/d.md');
+    const outcome = await promotePreview(db, SCREEN, repoA, made.id, { worktreeId: WT, destination: 'path:docs/claude-notes.md' }, deps());
+    expect(outcome.status).toBe(201);
+  });
+});

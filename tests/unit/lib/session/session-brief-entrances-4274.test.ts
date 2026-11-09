@@ -75,7 +75,7 @@ import {
 import { addAgentInstance, removeAgentInstance } from '@/lib/db/agent-instances-db';
 import { startInstanceIncarnation } from '@/lib/mem/incarnation';
 import { resetLiveBriefClaimsForTest } from '@/lib/session/session-brief';
-import { setBriefProviderForTest, type BriefRequest } from '@/lib/session/brief-provider';
+import { EMPTY_BRIEF_PROVIDER, setBriefProviderForTest, type BriefRequest } from '@/lib/session/brief-provider';
 import { getLastSendAttempt, sendMessageDigest } from '@/lib/session/send-attempt-state';
 
 const STORE = path.join(process.cwd(), 'src/lib/db/session-brief-db.ts');
@@ -279,7 +279,10 @@ const ENTRANCES: Record<string, Entrance> = {
       await send('claude', 'x');
     },
     briefs: 0,
-    stale: 'synchronous in the plan, before its first await; it attaches nothing',
+    // Issue #4224 (Codex re-review P2): a request pinned before the instance was made again
+    // waits at its entrance, not here — the plan compares the pinned lifetime before this
+    // write and leaves the row alone (T0g's claimed control in session-brief-worktree-lifetime-4224).
+    stale: 'compared with the entrance’s pinned instance lifetime before the write, in the plan’s synchronous stretch; it attaches nothing',
   },
   'send that relaunched inside copies its delivery': {
     writes: ['copyDeliveryToRelaunchBoundaries'],
@@ -408,7 +411,8 @@ describe('every way into the session-brief ledger keeps the invariants', () => {
       bindWorld(local);
       try {
         arrange(entry);
-        setBriefProviderForTest(null);
+        // Issue #4224 (D2 design §10 T-1b): null is the default, now C's provider; the empty one is named.
+        setBriefProviderForTest(EMPTY_BRIEF_PROVIDER);
         overrideBriefMode(mode === 'never' ? 'never' : null);
         await entry.run();
         await send('claude', '## contract preamble\n\ngoal: do it');

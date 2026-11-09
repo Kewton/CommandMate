@@ -148,6 +148,18 @@ export function getBoundaryById(db: Database.Database, id: string): BoundaryRow 
   return raw ? toRow(raw) : null;
 }
 
+/**
+ * The id of the worktree's newest row, any instance and any state (Issue #4224, D2 design
+ * §2.4): a send's entrance keeps it as evidence that the worktree it read is still the one
+ * a later step finds (a delete takes the rows with it, a rename moves them). Read only.
+ */
+export function getLatestWorktreeBoundaryId(db: Database.Database, worktreeId: string): string | null {
+  const row = db
+    .prepare('SELECT id FROM session_brief_boundaries WHERE worktree_id = ? ORDER BY opened_at DESC, seq DESC LIMIT 1')
+    .get(worktreeId) as { id: string } | undefined;
+  return row ? row.id : null;
+}
+
 /** The retained rows of an instance, newest first. */
 export function listRetainedBoundaries(db: Database.Database, worktreeId: string, instanceId: string): BoundaryRow[] {
   return (

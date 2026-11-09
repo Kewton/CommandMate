@@ -5,6 +5,11 @@
  *
  * Nothing is written until "Approve and write"; a 409 `reapproval_required` shows the
  * reason and asks for a new diff (never approves again by itself).
+ *
+ * What a person approves is what the preview shows (PM review P2・P3-1): the resolved
+ * destination and the poster are shown with the body, and a preview made under other
+ * choices (the item, the worktree, the effect, the quote's check) is dropped as soon as
+ * one of them changes. The checks a person ticks belong to one item or one operation.
  */
 
 'use client';
@@ -12,13 +17,25 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui';
-import type { PromoteEffect, PromoteOperationView, PromotePreviewView } from '@/lib/promote/model';
-import { promoteApi, type PromoteCallResult, type PromoteListBody } from '@/lib/promote/screen-client';
+import type { PromoteDestination, PromoteEffect, PromoteOperationView, PromotePreviewView } from '@/lib/promote/model';
+import { promoteApi, type PromoteCallResult, type PromoteFindingView, type PromoteListBody } from '@/lib/promote/screen-client';
 
 const INPUT_CLASS =
   'rounded border border-border bg-surface px-2 py-1 text-xs text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
 type Notice = { tone: 'status' | 'alert'; text: string } | null;
+
+/** The reasons under which the reconcile found the operation's own mark (design §3.4). */
+const MARK_FOUND: ReadonlyArray<string> = ['body_differs', 'block_altered'];
+
+/** Where the preview writes, resolved (P2): the repository and number, or the worktree, its branch and the path. */
+function destinationText(destination: PromoteDestination, worktrees: PromoteListBody['worktrees']): string {
+  if (destination.kind === 'issue_comment') {
+    return `${destination.ref === 'pr' ? 'PR' : 'Issue'} ${destination.host}/${destination.owner}/${destination.repo}#${destination.number}`;
+  }
+  const worktree = worktrees.find((entry) => entry.id === destination.worktreeId);
+  return `${worktree?.name ?? destination.worktreeId} (${destination.branch ?? '-'}): ${destination.path}`;
+}
 
 export function DecisionPromotePanel({ repositoryId, branch }: { repositoryId: string; branch: string }): React.ReactElement {
   const t = useTranslations('common');
@@ -29,10 +46,25 @@ export function DecisionPromotePanel({ repositoryId, branch }: { repositoryId: s
   const [effect, setEffect] = useState<PromoteEffect>('spec');
   const [quoteConfirmed, setQuoteConfirmed] = useState(false);
   const [preview, setPreview] = useState<PromotePreviewView | null>(null);
-  const [acknowledgeDiff, setAcknowledgeDiff] = useState(false);
+  /** P3-1: the one operation whose difference a person checked (another operation's check is not carried over). */
+  const [acknowledgeDiffFor, setAcknowledgeDiffFor] = useState<string | null>(null);
+  /** P3-2: what the reconcile found of an operation's own mark, beside what was meant. */
+  const [findings, setFindings] = useState<Record<string, PromoteFindingView>>({});
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const requestRef = useRef(0);
+  /** P2: moves on every change of what a preview is made under; the answer of an older request is not shown. */
+  const previewInputsRef = useRef(0);
+
+  // P3-1: the quote's check belongs to the item it was ticked for.
+  useEffect(() => {
+    setQuoteConfirmed(false);
+  }, [selected]);
+  // P2: a preview made under other choices is not the one a person would approve.
+  useEffect(() => {
+    previewInputsRef.current += 1;
+    setPreview(null);
+  }, [selected, worktreeId, effect, quoteConfirmed]);
 
   const load = useCallback(async () => {
     requestRef.current += 1;
@@ -86,12 +118,28 @@ export function DecisionPromotePanel({ repositoryId, branch }: { repositoryId: s
     [load, report, t]
   );
 
+  const reconcile = useCallback(
+    async (operationId: string) => {
+      const result = await run(() => promoteApi.reconcile(repositoryId, operationId));
+      const finding = result.ok ? (result.body as { finding?: PromoteFindingView }).finding : undefined;
+      setFindings((current) => {
+        const next = { ...current };
+        if (finding) next[operationId] = finding;
+        else delete next[operationId];
+        return next;
+      });
+    },
+    [repositoryId, run]
+  );
+
   const makePreview = useCallback(
     async (itemId: string) => {
       setBusy(true);
       setNotice(null);
+      const inputs = previewInputsRef.current;
       const result = await promoteApi.preview(repositoryId, itemId, { worktreeId, effect, quoteConfirmed });
       setBusy(false);
+      if (inputs !== previewInputsRef.current) return;
       if (report(result) && result.ok) setPreview(result.body.preview);
     },
     [effect, quoteConfirmed, report, repositoryId, worktreeId]
@@ -112,48 +160,90 @@ export function DecisionPromotePanel({ repositoryId, branch }: { repositoryId: s
    * acknowledged; while the roots disagree on the mode (`ambiguous`) the item cannot move
    * either, so only the outcome is reconciled.
    */
-  const operationLine = (operation: PromoteOperationView, version: number | null, item: 'movable' | 'closed' | 'frozen') => (
-    <li key={operation.id} className="space-y-1 text-xs" data-testid={`decision-operation-${operation.id}`}>
-      <span className="text-foreground">{t(`mem.decisions.operation.${operation.state}`)}</span>
-      {operation.transitionPending && (
-        <span className="ml-2 text-danger-foreground">{t('mem.decisions.pending', { reason: operation.transitionReason ?? '' })}</span>
-      )}
-      {operation.concurrentEdit && <span className="ml-2 text-danger-foreground">{t('mem.decisions.concurrent')}</span>}
-      <div className="flex flex-wrap gap-1">
-        {operation.state === 'unknown' && (
-          <>
-            <Button size="sm" variant="ghost" disabled={busy} onClick={() => void run(() => promoteApi.reconcile(repositoryId, operation.id))}>
-              {t('mem.decisions.reconcile')}
-            </Button>
-            <Button size="sm" variant="ghost" disabled={busy} onClick={() => void run(() => promoteApi.abandon(repositoryId, operation.id))}>
-              {t('mem.decisions.abandon')}
-            </Button>
-          </>
+  const operationLine = (operation: PromoteOperationView, version: number | null, item: 'movable' | 'closed' | 'frozen') => {
+    const markFound = operation.state === 'unknown' && operation.unknownReason !== null && MARK_FOUND.includes(operation.unknownReason);
+    const finding = findings[operation.id];
+    // P3-2: both are shown for the reason the reconcile answered; "treat as written" is offered only beside them.
+    const foundShown = markFound && finding && finding.reason === operation.unknownReason ? finding : null;
+    return (
+      <li key={operation.id} className="space-y-1 text-xs" data-testid={`decision-operation-${operation.id}`}>
+        <span className="text-foreground">{t(`mem.decisions.operation.${operation.state}`)}</span>
+        {markFound && (
+          <p className="text-danger-foreground" data-testid={`decision-mark-found-${operation.id}`}>
+            {t('mem.decisions.markFound', { reason: operation.unknownReason ?? '' })}
+          </p>
         )}
-        {operation.state === 'succeeded' && operation.transitionPending && item === 'movable' && version !== null && (
-          <>
-            <label className="flex items-center gap-1">
-              <input type="checkbox" checked={acknowledgeDiff} onChange={(e) => setAcknowledgeDiff(e.target.checked)} />
-              {t('mem.decisions.acknowledgeDiff')}
-            </label>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={busy || !worktreeId}
-              onClick={() => void run(() => promoteApi.settleTransition(repositoryId, operation.id, worktreeId, version, acknowledgeDiff))}
-            >
-              {t('mem.decisions.settleTransition')}
+        {foundShown && (
+          <div className="grid gap-2 md:grid-cols-2" data-testid={`decision-finding-${operation.id}`}>
+            <div className="min-w-0 space-y-1">
+              <p className="text-muted-foreground">{t('mem.decisions.found')}</p>
+              <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-words rounded bg-surface p-2 text-foreground">
+                {foundShown.found ?? t('mem.decisions.foundUnreadable')}
+              </pre>
+            </div>
+            <div className="min-w-0 space-y-1">
+              <p className="text-muted-foreground">{t('mem.decisions.intended')}</p>
+              <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-words rounded bg-surface p-2 text-foreground">{foundShown.intended}</pre>
+            </div>
+          </div>
+        )}
+        {operation.transitionPending && (
+          <span className="ml-2 text-danger-foreground">{t('mem.decisions.pending', { reason: operation.transitionReason ?? '' })}</span>
+        )}
+        {operation.concurrentEdit && <span className="ml-2 text-danger-foreground">{t('mem.decisions.concurrent')}</span>}
+        <div className="flex flex-wrap gap-1">
+          {operation.state === 'unknown' && (
+            <>
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => void reconcile(operation.id)}>
+                {t('mem.decisions.reconcile')}
+              </Button>
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => void run(() => promoteApi.abandon(repositoryId, operation.id))}>
+                {t('mem.decisions.abandon')}
+              </Button>
+              {/* Codex review 5 P2-2: what cannot be compared is never accepted as written; reconcile again. */}
+              {foundShown && foundShown.found !== null && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => void run(() => promoteApi.acceptFound(repositoryId, operation.id, foundShown.reason))}
+                >
+                  {t('mem.decisions.acceptFound')}
+                </Button>
+              )}
+            </>
+          )}
+          {operation.state === 'succeeded' && operation.transitionPending && item === 'movable' && version !== null && (
+            <>
+              <label className="flex items-center gap-1">
+                <input
+                  type="checkbox"
+                  checked={acknowledgeDiffFor === operation.id}
+                  onChange={(e) => setAcknowledgeDiffFor(e.target.checked ? operation.id : null)}
+                />
+                {t('mem.decisions.acknowledgeDiff')}
+              </label>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy || !worktreeId}
+                onClick={() =>
+                  void run(() => promoteApi.settleTransition(repositoryId, operation.id, worktreeId, version, acknowledgeDiffFor === operation.id))
+                }
+              >
+                {t('mem.decisions.settleTransition')}
+              </Button>
+            </>
+          )}
+          {operation.state === 'succeeded' && operation.transitionPending && item === 'closed' && (
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => void run(() => promoteApi.acknowledgeItemClosed(repositoryId, operation.id))}>
+              {t('mem.decisions.acknowledgeItemClosed')}
             </Button>
-          </>
-        )}
-        {operation.state === 'succeeded' && operation.transitionPending && item === 'closed' && (
-          <Button size="sm" variant="ghost" disabled={busy} onClick={() => void run(() => promoteApi.acknowledgeItemClosed(repositoryId, operation.id))}>
-            {t('mem.decisions.acknowledgeItemClosed')}
-          </Button>
-        )}
-      </div>
-    </li>
-  );
+          )}
+        </div>
+      </li>
+    );
+  };
   const ambiguous = list.mode === 'ambiguous';
 
   return (
@@ -206,7 +296,13 @@ export function DecisionPromotePanel({ repositoryId, branch }: { repositoryId: s
             {operations.length > 0 && <ul className="space-y-1">{operations.map((operation) => operationLine(operation, item.version, 'movable'))}</ul>}
             <div className="flex flex-wrap gap-1">
               {item.state === 'open' && (
-                <Button size="sm" variant="ghost" disabled={busy} onClick={() => setSelected(selected === item.id ? null : item.id)}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => setSelected(selected === item.id ? null : item.id)}
+                  data-testid={`decision-select-${item.id}`}
+                >
                   {t('mem.decisions.makePreview')}
                 </Button>
               )}
@@ -231,10 +327,18 @@ export function DecisionPromotePanel({ repositoryId, branch }: { repositoryId: s
                   </select>
                 </label>
                 {item.quote && (
-                  <label className="flex items-center gap-2 text-xs text-foreground">
-                    <input type="checkbox" checked={quoteConfirmed} onChange={(e) => setQuoteConfirmed(e.target.checked)} />
-                    {t('mem.decisions.quoteConfirmed')}
-                  </label>
+                  <div className="space-y-1">
+                    <blockquote
+                      className="whitespace-pre-wrap break-words border-l-2 border-border pl-2 text-xs text-foreground"
+                      data-testid={`decision-quote-${item.id}`}
+                    >
+                      {item.quote}
+                    </blockquote>
+                    <label className="flex items-center gap-2 text-xs text-foreground">
+                      <input type="checkbox" checked={quoteConfirmed} onChange={(e) => setQuoteConfirmed(e.target.checked)} />
+                      {t('mem.decisions.quoteConfirmed')}
+                    </label>
+                  </div>
                 )}
                 <Button size="sm" disabled={busy || !worktreeId || !item.promoteTo} onClick={() => void makePreview(item.id)}>
                   {t('mem.decisions.makePreview')}
@@ -242,6 +346,14 @@ export function DecisionPromotePanel({ repositoryId, branch }: { repositoryId: s
                 {preview && preview.itemId === item.id && (
                   <div className="space-y-2" data-testid={`decision-preview-${item.id}`}>
                     <h4 className="text-xs font-medium text-foreground">{t('mem.decisions.preview')}</h4>
+                    <p className="break-all text-xs text-foreground" data-testid={`decision-preview-destination-${item.id}`}>
+                      {t('mem.decisions.previewDestination', { destination: destinationText(preview.destination, list.worktrees) })}
+                    </p>
+                    {preview.poster && (
+                      <p className="break-all text-xs text-foreground" data-testid={`decision-preview-poster-${item.id}`}>
+                        {t('mem.decisions.poster', { login: preview.poster.login })}
+                      </p>
+                    )}
                     <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded bg-surface p-2 text-xs text-foreground">
                       {preview.body}
                     </pre>

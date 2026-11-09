@@ -18,6 +18,7 @@ export const WRITES = new Set([
   'finishPromoteTransition',
   'acknowledgePromoteTransition',
   'abandonPromoteOperation',
+  'acceptFoundPromoteOperation',
   'settleStalePromoteAttempts',
   'prunePromoteRecords',
   // the worktree's lifetime
@@ -50,6 +51,9 @@ export const READS = new Set([
   'worktreeIncarnationAlive',
   'docBlockOf',
   'reconcileDocBlock',
+  'reconcileDocBlockFinding',
+  // a constant (the unknown reasons under which the reconcile found the operation's mark)
+  'PROMOTE_MARK_FOUND_REASONS',
   'defaultGhRun',
   'fixedTokenEnv',
   'listGhComments',
@@ -264,6 +268,7 @@ export const CAS_WRITES = new Set([
   'finishPromoteTransition',
   'acknowledgePromoteTransition',
   'abandonPromoteOperation',
+  'acceptFoundPromoteOperation',
   'settleOrUnknown',
 ]);
 

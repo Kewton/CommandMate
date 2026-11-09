@@ -391,6 +391,33 @@ export function abandonPromoteOperation(db: Database.Database, operationId: stri
   );
 }
 
+/** The unknown reasons under which the reconcile found the operation's own mark (design §3.4). */
+export const PROMOTE_MARK_FOUND_REASONS = ['body_differs', 'block_altered'] as const;
+export type PromoteMarkFoundReason = (typeof PROMOTE_MARK_FOUND_REASONS)[number];
+
+/**
+ * A person compared what the reconcile found with what was meant to be written and judged
+ * it written (design §3.4, PM review P3-2): `unknown → succeeded`, `decided_by='human'`.
+ * Only from the `unknown` whose reason the person was shown (§11.1 I2): a reconcile or an
+ * approval's late answer since then is not overwritten. Any open attempt is closed with it.
+ */
+export function acceptFoundPromoteOperation(db: Database.Database, operationId: string, reason: PromoteMarkFoundReason, now: number): boolean {
+  return db.transaction(() => {
+    const changed = db
+      .prepare(
+        `UPDATE mem_promote_operations SET state = 'succeeded', unknown_reason = NULL, decided_by = 'human', settled_at = ?, updated_at = ?
+         WHERE id = ? AND state = 'unknown' AND unknown_reason = ?`
+      )
+      .run(now, now, operationId, reason);
+    if (changed.changes !== 1) return false;
+    db.prepare("UPDATE mem_promote_attempts SET ended_at = ?, outcome = 'success', reason = 'human' WHERE operation_id = ? AND ended_at IS NULL").run(
+      now,
+      operationId
+    );
+    return true;
+  })();
+}
+
 /**
  * An attempt of another boot, or `in_flight` past {@link PROMOTE_ATTEMPT_STALE_MS}, is
  * unknown (design §3.2's last row). Settled here, in a write's synchronous stretch.

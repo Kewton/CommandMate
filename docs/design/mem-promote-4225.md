@@ -170,12 +170,12 @@ preview は画面の要求（§4.2 の印）で作り、DB に保存する（`me
 
 - 画面の「照合する」（印つきの要求）でだけ行う。読むたびの自動の照合はしない（外への照会の回数を増やさない。常駐・定期の実行を足さない、D8・D13）［見立て］
 - コメント：`gh api --hostname <operation の host> --paginate repos/<o>/<r>/issues/<N>/comments`（GET）で、**本文に印があり、`user.id` が operation の `poster_id`（POST の前に保存した投稿者、§3.2）と同じで、本文の SHA-256 が operation の `body_sha256` と同じ** コメントを探す。照合の時点の `gh api user` は使わない（投稿の後に認証アカウントを切り替えても、元のコメントを認識する。事前レビュー ⑤）。見つかれば `succeeded`（`result_ref` を写す）。印を写した他人のコメントは `user.id` で外れる
-  - 印と投稿者は一致するが本文の SHA-256 が違う：`unknown`（`body_differs`）のまま。画面に両方を出して人に判断を求める（自動で成功にも未送信にもしない）
+  - 印と投稿者は一致するが本文の SHA-256 が違う：`unknown`（`body_differs`）のまま。画面に両方を出して人に判断を求める（自動で成功にも未送信にもしない）。**実装（PM レビュー P3-2）**：照合の応答に `finding`（見つかったコメントの本文・承認した本文）を返し、見つかったコメントの位置を `result_ref` に残す。画面は両方を並べて出し、人が「書かれていたとして扱う」（`POST …/operations/:opId/accept-found`、`{ifState:'unknown', ifReason}`）を押したときだけ `succeeded`（`decided_by='human'`、見せた理由の `unknown` からだけの CAS）にして §3.5 の遷移へ進む。この理由のときは画面に「無いことを確かめた」を押すと次の承認で同じ決定がもう一度書かれる旨を出す（abandon は断らない。人が外で消した後の照合は `not_found_yet` になり、abandon がそのまま出口になる）
   - 照会が失敗（offline・403 等）：`unknown` のまま。画面に「照合できない」と理由を出す
   - 照会は成功したが見つからない：**`unknown` のまま**（GitHub の一覧の反映の遅れを否定できない）。画面は「見つからない」と時刻を出し、人が「GitHub で無いことを確かめた」を押したときだけ operation を `abandoned`（人の判断で未送信とみなす、`decided_by='human'`）にする。その後は新しい承認でだけ書ける
 - 文書：今の内容から operation の印の区画（`begin op=<id>` 〜 `end op=<id>`）を探す（事前レビュー ④）
   - 区画がちょうど 1 つあり、中身の SHA-256 が `begin` の行と operation の `body_sha256` に一致：`succeeded`（文書の他の部分が変わっていても。他者の追記と、E の書き込みの成功の証拠を分ける）
-  - 区画が 2 つ以上・`begin` だけ・中身の指紋が違う（壊れた・直された）：`unknown`（`block_altered`）のまま、人へ
+  - 区画が 2 つ以上・`begin` だけ・中身の指紋が違う（壊れた・直された）：`unknown`（`block_altered`）のまま、人へ。コメントの `body_differs` と同じく、照合の応答に印の最初の行から最後の `end` の行までの今の内容（64 KiB まで、`docBlockExcerptOf`）と承認した本文を返し、人の「書かれていたとして扱う」でだけ `succeeded` にする（PM レビュー P3-2。文書には何も書かない）。判定と見せる内容は**同じ 1 回の読み**から作る（`reconcileDocBlockFinding`。Codex 5 回目 P2-2）：読めなければ、または同じ内容から区画を切り出せなければ `unreadable` とし、比べられないものを「書かれていたとして扱う」へ出さない
   - 区画が無い：`unknown`（`block_missing`）のまま、人へ。内容が `base_fingerprint` と一致していても、書いた後に人が消した場合と区別できないので、**未送信と読まない**。人が「無いことを確かめた」を押したときだけ `abandoned`
   - 読めない（worktree が消えた・パスの検査に通らない）：`unknown`（`unreadable`）のまま
 - 照合で `succeeded` に確定したら、§3.5 の手順（operation に保存した世代・版を A の入口へ渡す）で遷移を試みる。合わなければ `transition_pending=1`
@@ -196,7 +196,9 @@ preview は画面の要求（§4.2 の印）で作り、DB に保存する（`me
 - 部品：`src/components/mem/DecisionPromotePanel.tsx`（新規。G #4227 の画面はこの部品を使う）。1 画面に次だけを置く：
   1. その branch の decision の一覧（`open`・`recorded`。`recorded` には **「未反映：コメントに記録しただけで、正本（Issue の本文など）へはまだ反映されていません」** の警告。進行中・不明の operation があればその印）
   2. 選んだ項目の preview：行き先（種類・host/owner/repo/#N、または worktree・ブランチ・パス）、書く本文の全文（差分）、引用の出所の表示（§5.1）、効果の選択（`spec`／`record_only`、既定 `spec`）、期限
-  3. ボタン：「承認して書く」・「やめる」（何も書かない。preview を捨てる）・`recorded` なら「正本へ反映したことを確かめた」・`unknown` なら「照合する」と「無いことを確かめた」（コメントは GitHub、文書は作業木で）・`succeeded` で `transition_pending` なら「記録済みとして扱う」
+  3. ボタン：「承認して書く」・「やめる」（何も書かない。preview を捨てる）・`recorded` なら「正本へ反映したことを確かめた」・`unknown` なら「照合する」と「無いことを確かめた」（コメントは GitHub、文書は作業木で）、照合が `body_differs`・`block_altered` で両方を出したときだけ「書かれていたとして扱う」（PM レビュー P3-2）・`succeeded` で `transition_pending` なら「記録済みとして扱う」
+- preview は、作った時の選択（項目・作業木・効果・引用の確認）のどれかが変わったら捨てる。変わる前に頼んだ preview の応答が後から届いても出さない（PM レビュー P2）。行き先は解決後の形（`Issue <host>/<owner>/<repo>#N`、または `<作業木> (<ブランチ>): <パス>`）と投稿するアカウント（`poster.login`）を本文と一緒に出す
+- 引用の確認のチェックは、引用の本文の横に出す。項目を選び直すと外す。「書いた後に項目が変わったことを確かめた」は operation ごと（別の operation の「記録済みとして扱う」へ持ち越さない）（PM レビュー P3-1）
 - 409 `reapproval_required` を受けたら、理由の語を出して preview を作り直す（自動で承認し直さない）
 
 ### 4.2 書き込みの API と印
@@ -208,6 +210,7 @@ preview は画面の要求（§4.2 の印）で作り、DB に保存する（`me
 | `POST …/:itemId/confirm-reflected` | 要る | `{ifVersion}` → `recorded → promoted` |
 | `POST …/operations/:opId/reconcile` | 要る | — → §3.4 |
 | `POST …/operations/:opId/abandon` | 要る | `{ifState:'unknown'}` → `abandoned` |
+| `POST …/operations/:opId/accept-found` | 要る | `{ifState:'unknown', ifReason}`（`ifReason` は `body_differs`・`block_altered`）→ 人の判断で `succeeded`（`decided_by='human'`）、続けて §3.5 の遷移（PM レビュー P3-2） |
 | `POST …/operations/:opId/settle-transition` | 要る | `{ifVersion, acknowledgeDiff?}` → `transition_pending` の遷移だけ（その要求の時点で世代と版を固定する、§3.5）。項目が closed・purge 済みなら `{acknowledgeItemClosed: true}` で遷移なしに遷移待ちだけを終える（5-2c P2-3）。操作の所属は同じ Git の root の範囲（5-2c P2-2、reconcile・abandon も同じ） |
 | `GET /api/repositories/:id/mem/decisions?branch=` | 要らない（読み） | 一覧・operation の状態 |
 
@@ -252,6 +255,13 @@ preview は画面の要求（§4.2 の印）で作り、DB に保存する（`me
 1. `promote_to` の `path:` は A の検査（`validatePromoteTo`→`normalizeRepoPath`、`validate.ts:277`・`:185`）を **選んだ worktree の root で** もう一度かける：絶対パス・`~`・NUL・バックスラッシュ・ドライブ文字を断る、`..` で外へ出るものを断る、`findSensitivePathSegment` の当たる成分を断る、root から各成分を `lstat` して symlink を断る（`:213`）［事実］
 2. E で足す検査（A の関数は変えない）：root 自身が symlink でない（root を `lstat` して通常のディレクトリ。実装で `realpath` の比較から変えた、§10）、`.git` の成分を断る、最後の成分が存在するなら通常のファイルである、拡張子が `.md`、大きさの上限。**`normalizeRepoPath` は promote_to で最初の無い成分で止まる**（`validate.ts:204-211`：`mustExist=false` なら `break`）ので、無いディレクトリの下は作らない（親ディレクトリが存在することを求める）［見立て］
 3. 照合のたび（preview・approve・書く直前）に 1・2 をやり直す
+4. **エージェントの指示ファイルを断る**（PM レビュー P3-8、D12：Agent の書いた記録を後続のエージェントへの命令として読ませない）。`destination.ts` の `AGENT_INSTRUCTION_PATHS` の表（大文字小文字を区別しない）に当たる行き先は `invalid_destination`（`agent_instructions`）。`checkDocPath` の中なので preview・approve・`writeDocBlock` の直前のすべてで効く。表は `promote-agent-instructions-4225` で行ごとに固定する。**表は手で並べた一覧で終わらせない**（Codex 5 回目 P2-1）：Agent が Skill を見つけると実測された project の root（`docs/reference/skill-agent-compatibility.md` の probe の root と `compatibility-matrix.ts` の `discoveryRoots`）は必ずどれかの行に当たることを `promote-agent-instructions-discovery-4225` が正本を読んで確かめ、正本に root が増えると表の不足で落ちる
+
+| 種類 | 当たり方 | 名前 |
+|---|---|---|
+| ディレクトリ | パスのどの成分でも（入れ子も） | `.claude`・`.agents`・`.codex`・`.gemini`・`.agent`・`.cursor`・`.windsurf`・`.clinerules`・`.commandcode`・`.opencode` |
+| ファイル | どのディレクトリでも最後の成分 | `CLAUDE.md`・`CLAUDE.local.md`・`AGENTS.md`・`AGENTS.override.md`・`GEMINI.md`・`CMATE.md` |
+| パス | パス全体、またはその下 | `.github/copilot-instructions.md`・`.github/instructions`・`.github/prompts`・`.github/chatmodes`・`.github/skills`・`.config/opencode` |
 
 ### 5.4 commit・push をしない
 
@@ -551,6 +561,31 @@ Codex の事前レビュー（2026-11-09、P1 2・P2 5。`workspace/orchestratio
 |---|---|---|---|
 | 5-2e P2 | POST の応答待ちの操作が古さで不明になり、照合で決まって遷移も終えた（または closed の項目で確認済みの）後に元の応答が戻ると、結果の確定（CAS）の false を捨て、読み直した `succeeded` の行から新しい印を取り直し、A の失敗で pending を 1 へ戻す | 採る（I2 を強めた形） | I2 を「CAS の結果は必ず呼び手へ返し、不成立なら後続の書き込み・自動の遷移を始めない」に強めた。`settleOrUnknown` は自分の確定が成立したかを返し、`promoteApprove` は自分の確定が `succeeded` を書いたときだけ、その確定が残した遷移（pending 0・印なし）を条件に `settleTransition` を呼ぶ。`finishPromoteTransition`（成功）・`settleStalePromoteAttempts` の中の確定も戻り値を見る。網羅の検査に CAS の戻り値を捨てる呼び出し（式文・`await` だけの文・`void`）の検出と、表の CAS の行の「結果を見る」を足し、自己テストで落ちることを確かめた。対照：応答の保留 → 不明化 → 照合（＋closed の確認）→ 元の応答の解放で pending が 1 に戻らない（陽性、直しを外すと 1・`version_conflict`）、照合の無い不明化と何も無いときは従来どおり遷移する（陰性） |
 
+### 9.8 PM レビュー（Claude、独立、2026-11-09、`workspace/orchestration/runs/2026-11-09/pm-review-4225-claude.md`）
+
+P1 0・P2 1・P3 8。PM の処分で、P2・P3-1・P3-2・P3-5・P3-6・P3-8 をこの PR で直し、P3-3・P3-4・P3-7 は追跡（#4289）にした。それぞれ直しを外すと落ちる対照つき。
+
+| # | 指摘 | 処置 | 1 行の理由（守る条件・対照） |
+|---|---|---|---|
+| P2 | 承認の preview に解決後の行き先と投稿者が出ない。select を変えても古い preview を承認できる | 採る | preview に `Issue <host>/<owner>/<repo>#N`（または `<作業木> (<ブランチ>): <パス>`）と `poster.login` を出す。項目・作業木・効果・引用の確認のどれかが変わったら preview を捨て、変わる前に頼んだ応答は出さない（§4.1）。対照：`DecisionPromotePanel-4225` の「行き先と投稿者が出る」「select を変えると preview が消える」「古い応答を出さない」、陰性対照は何も変えなければそのまま承認できる |
+| P3-1 | 引用の「確かめた」を本文を見る前に付けられ、項目をまたいで残る。差分の確認も operation をまたぐ | 採る | 引用の本文をチェックの横に出し、項目を選び直すと外す。差分の確認は operation の ID で持つ。対照：別の項目・別の operation へ持ち越さない／同じものなら送る |
+| P3-2 | `body_differs`・`block_altered` の出口が abandon しか無く、abandon → 再承認で二重に書ける | 採る | 照合の応答に見つかったものと承認した本文を返して両方を出し、「書かれていたとして扱う」（`promoteAcceptFound`、`acceptFoundPromoteOperation`：見せた理由の `unknown` からだけの CAS、`decided_by='human'`）を足した（§3.4）。対照：受け入れた後は abandon も新しい preview も断られ POST は 1 回／陽性対照として abandon → 再承認は 2 回書く（新しい出口が塞ぐ危険）／理由が変わった後・他の理由は断る |
+| P3-5 | approve の文書の基準の照合を外しても試験が落ちない | 採る | 表の試験に「基準が変わった → operation・attempt の行が 0」を文書と Issue の 2 行で足した（`writeDocBlock` の照合だけだと operation を作って `failed` にする）。陰性対照：変わらなければ 1 行 |
+| P3-6 | `postGhComment`・`writeDocBlock` の呼び手を固定するガードが無い | 採る | ガード `mem-promote-external-write-callers-4225`：`src/` の全ファイルから呼び手を数え、`src/lib/promote/service.ts` だけ（#4274・#4288 と同じ網羅の形）。自己テスト：直接・別名・namespace・相対パス・再 export を拾い、読みとコメントは拾わない |
+| P3-8 | 文書の行き先がエージェントの指示ファイルでも断らない | 採る | §5.3 の 4 の表で断る（`agent_instructions`）。表は行ごとに固定し、各行の根・入れ子・大文字小文字違いを `checkDocPath` と `writeDocBlock` の両方で断ること、隣の普通の文書は通ることを表駆動で確かめる |
+| P3-3 | A の遷移の commit の後・`finishPromoteTransition` の前の終了で遷移待ちが解けない | 追跡（#4289） | PM の処分 |
+| P3-4 | 同じ DB を 2 つの server が使うと、相手の POST 中の操作を不明と読む | 追跡（#4289） | PM の処分 |
+| P3-7 | 「やめる」が preview をサーバー側で無効にしない | 追跡（#4289） | PM の処分 |
+
+### 9.9 実装後の再レビュー（Codex 5 回目、2026-11-09、`workspace/orchestration/runs/2026-11-09/review-4225f.md`）
+
+前回 2 件は解消維持。追加の指摘 2 件（P2）をこの PR で直した。それぞれ直しを外すと落ちる対照つき。
+
+| # | 指摘 | 処置 | 1 行の理由（守る条件・対照） |
+|---|---|---|---|
+| P2-1 | 指示ファイルの拒否の表に Copilot の Skill の発見先 `.github/skills` が無い | 採る | 表に `.github/skills`（と、正本の §10.2 に Skill の root として名のある `.config/opencode`）を足し、表を正本と突き合わせる試験 `promote-agent-instructions-discovery-4225` を足した：`skill-agent-compatibility.md` の probe の root（project の側）と `compatibility-matrix.ts` の `discoveryRoots` を読み、各 root の `x/SKILL.md`（既存の通常の `.md`）を `checkDocPath` と `writeDocBlock` の両方で断る。陽性対照：`.github/skills` の行を外すと落ちる／正本に新しい root が書かれると表に無いので落ちる。陰性対照：`docs/skills/x.md` は行き先のまま、home の root は数えない |
+| P2-2 | 表示用の読み直しが EIO 等で null でも `block_altered` の finding を返し、比べられないまま「書かれていたとして扱う」を受け入れる | 採る | 判定と表示を同じ 1 回の読みから作る（`reconcileDocBlockFinding`、`readDocBlockExcerpt` は消した）。`altered` は必ず今の内容を持ち、読めない・切り出せないは `unreadable`（受け入れの CAS は見せた理由の `unknown` からだけなので断られ、再照合へ戻る）。画面も `found` が null の finding には受け入れのボタンを出さない。対照：読みの失敗の注入（`DocWriteHooks.readDoc`）で、1 回目の後に失敗させても finding は今の内容（陽性：2 回読む形に戻すと `found: null` で落ちる）、1 回目から失敗させると `unreadable`・finding 無し・受け入れは `state_forbids`、読めるようになれば再照合で両方が出て受け入れられる（陰性）。画面：`found: null` の finding に「書かれていたとして扱う」が出ない |
+
 ---
 
 ## 10. 実装で実コードを正とした点（2026-11-09）
@@ -575,6 +610,9 @@ Codex の事前レビュー（2026-11-09、P1 2・P2 5。`workspace/orchestratio
 | I16 | 遷移待ちは `transition_pending` と理由（§6.1） | v69 の `mem_promote_operations` に `transition_claim`（遷移を持つ要求の印）を足した。v69 はこのブランチで足した未公開の版なので、新しい版を積まずに v69 の表に足した | 5-2d P2（I2）。先行の要求の A の答えが後から来た確認・要求を上書きしないことを、行の値だけで条件にする |
 | I18 | 承認の確定の後は読み直した行が `succeeded` なら遷移へ進む（§3.5） | 自分の確定（`settleOrUnknown` の戻り値）が `succeeded` を書いたときだけ進み、`beginPromoteTransition` には読み直した行ではなく確定が残した遷移（pending 0・印なし）を渡す | 5-2e P2（I2 を強めた形）。読み直した行は照合・確認が決めた状態のことがあり、そこから印を取り直すと確定済みの遷移を始め直す |
 | I17 | 結果の確定は `in_flight`・`unknown` から（§3.2） | `settlePromoteOperation` は呼び手が読んだ状態の集合（`from`）を条件にする。承認自身の結果は従来どおり `in_flight`・`unknown`、照合は `unknown` だけ。操作の行が変わったときだけ試行を閉じる | I2。照合の await の間に承認の結果が書いたものを照合が上書きしない |
+| I19 | `body_differs` のとき画面に両方を出す（§3.4） | 照合の応答（`finding`）で返し、一覧（`promoteList`）には持たない。画面は照合した直後にだけ両方と「書かれていたとして扱う」を出す。見つかったコメントの位置は `result_ref` に残す | PM レビュー P3-2。見つかった本文は外の今の内容で、DB に写すと古くなる。受け入れる前に人が今の内容を見ることを、照合を押す操作で求める |
+| I21 | `block_altered` の今の内容は `readDocBlockExcerpt` で読む（§3.4、PM レビュー P3-2） | 照合の判定と同じ 1 回の読みから切り出す（`reconcileDocBlockFinding`・`docBlockExcerptOf`）。`readDocBlockExcerpt` は消した | Codex 5 回目 P2-2。2 回目の読みだけが失敗すると、比べられない finding が受け入れられた |
+| I20 | 指示ファイルを断る（§5.3 の 4） | A の `validatePromoteTo`・`findSensitivePathSegment`（`src/lib/mem/validate.ts`・`sensitive-file-guard.ts`）は変えず、E の `checkDocPath` で断る | PM レビュー P3-8。A のファイルは scope の外。mem へ記録すること自体は止めない（外へ書く口でだけ断る） |
 
 ## 11. 共通規則の全読者
 
@@ -582,7 +620,7 @@ E の入口が共有する規則と、それを読む（当てはめる）場所
 
 | 共通規則 | 読む場所（ファイル・関数） | 固定している試験 |
 |---|---|---|
-| 画面の印（`isScreenRequest`）。無ければ 403 `screen_only`・何も書かない | `src/lib/promote/service.ts` の `promotePreview`・`promoteApprove`・`promoteConfirmReflected`・`promoteReconcile`・`promoteAbandon`・`promoteSettleTransition`（関数の最初の文）。route（`src/app/api/repositories/[id]/mem/decisions/**`）は要求を渡すだけ。画面の client `src/lib/promote/screen-client.ts` が `screenRequestHeaders()` を付ける | `promote-entrances-4225`（(e)）・`promote-write-chain-4225`（(4)）・`mem-decisions-routes-4225`・`DecisionPromotePanel-4225`・ガード `mem-promote-screen-only-4225` |
+| 画面の印（`isScreenRequest`）。無ければ 403 `screen_only`・何も書かない | `src/lib/promote/service.ts` の `promotePreview`・`promoteApprove`・`promoteConfirmReflected`・`promoteReconcile`・`promoteAbandon`・`promoteAcceptFound`（PM レビュー P3-2）・`promoteSettleTransition`（関数の最初の文）。route（`src/app/api/repositories/[id]/mem/decisions/**`）は要求を渡すだけ。画面の client `src/lib/promote/screen-client.ts` が `screenRequestHeaders()` を付ける | `promote-entrances-4225`（(e)）・`promote-write-chain-4225`（(4)）・`mem-decisions-routes-4225`・`DecisionPromotePanel-4225`・ガード `mem-promote-screen-only-4225` |
 | mode は項目の (repository, branch) で `on` のときだけ開始・遷移する。項目のブランチを名指しして所属の全 root で同じ判定（`ambiguous` は断る、5-2b P1）＋項目の root の `memModeOnFor` | `promotePreview`・`promoteApprove`（同期の区間、`itemBranchSpec`・`itemModeOn`）、`memSettleDecisionTransition`（`src/lib/mem/service.ts`、遷移の同期の区間、項目のブランチを名指し）。`promoteReconcile`・`promoteAbandon` は結果の記録だけで mode を問わない（E1）、遷移は A の入口が断る。**追従（5-2c P2-1）**：`promoteList` は mode の判定と所属の確認を分け、`ambiguous` でも 200 で未解決の操作を返す（決定の一覧は出さない）。`DecisionPromotePanel` は `ambiguous` で警告を出し、遷移のボタンを出さない | `promote-entrances-4225`（(b)・T17・5-2b P1・5-2c P2-1）・`write-entrances-recreate-4221`（decision-* の mode の `it.each`）・`DecisionPromotePanel-4225`（5-2c P2-1） |
 | 作業木の世代は要求の到着で固定し、比べるだけ（固定し直さない）。保存した作業木は alias と世代で今の ID へ解く（改名は同じ作業木、作り直しは別、5-2b P2-1） | `currentWorktreeIdOf`（`promoteApprove` の context・`settleTransition`・`promoteReconcile` の文書）、`docOperationsFor`（保存 ID を alias で解く）、`promotePreview`（`getOrCreateWorktreeIncarnation` → preview の行）、`promoteApprove`（preview の値 → operation の行）、`settleTransition`（operation の値を A の入口へ）、`promoteConfirmReflected`・`promoteSettleTransition`（その要求の時点）、`memSettleDecisionTransition` → `transitionDecision` の `alive()` | `promote-entrances-4225`（(a)・T20・5-2b P2-1）・`write-entrances-recreate-4221`（decision-* の作り直しの `it.each`） |
 | 版と指紋（`item_version`・`itemFingerprint`）が承認のときと同じ | `promotePreview`（同期の区間で読み直し）、`promoteApprove`、`transitionDecision`（`WHERE version = ?`）、`promoteSettleTransition`（`acknowledgeDiff`） | `promote-entrances-4225`（T3・T18 U7）・`write-entrances-recreate-4221`（版の `it.each`） |
@@ -599,6 +637,10 @@ E の入口が共有する規則と、それを読む（当てはめる）場所
 | 外へ書けた後、項目が動くまでは遷移待ち（`settleTransition` の最初の同期の文で立てる、5-2c 付随）。立てる・下ろす・理由を書くはすべて読んだ値と要求の印を条件にする（§11.1 I2、5-2d）。CAS の結果は呼び手が見て、不成立なら遷移を始めない（5-2e：承認は自分の確定が成立したときだけ遷移へ進む） | `settleTransition`（`promoteApprove`・`promoteReconcile`・`promoteSettleTransition` から）、`settleOrUnknown`（成否を返す）、`settleStalePromoteAttempts`（確定の成否を数える）、`hasActivePromoteOperation` | `promote-entrances-4225`（T10・5-2c の窓・5-2e）・`promote-await-write-table-4225`（CAS の戻り値を捨てる呼び出し） |
 | 外へ出す本文の見えない文字（自由入力・引用・ブランチ・作成者）は見える形にし、`invisibleReplaced` に数える。ブランチは C の `sanitizeBranch`（5-2b P2-3） | `render.ts`（`renderPromoteBody`・`branchShown`）、`promotePreview`（`invisibleReplaced` を画面へ） | `promote-render-4225`（T15・5-2b P2-3） |
 | 「未反映」の表示（`recorded`） | E の画面（`DecisionPromotePanel`）と E の一覧の API（`unreflected:true`）。CLI の一覧と brief の文言は G（#4227）へ送った（§0.1 S3） | `promote-entrances-4225`（T13）・`DecisionPromotePanel-4225` |
+| 外へ書く関数（`postGhComment`・`writeDocBlock`）の呼び手は `src/lib/promote/service.ts` だけ（PM レビュー P3-6） | `promoteApprove`（同期の区間の照合の後） | ガード `mem-promote-external-write-callers-4225`（自己テストの対照つき）・`mem-promote-no-git-write-4225`（`--method` は 1 か所） |
+| 文書の行き先はエージェントの指示ファイルでない（PM レビュー P3-8、D12） | `destination.ts`（`AGENT_INSTRUCTION_PATHS`・`agentInstructionPathOf`・`checkDocPath`）← `promotePreview`・`promoteApprove`・`writeDocBlock`・`reconcileDocBlockFinding`（`reconcileDocBlock`）。表の正本は Skill の発見先の実測（`docs/reference/skill-agent-compatibility.md`・`src/lib/skills/compatibility-matrix.ts` の `discoveryRoots`、Codex 5 回目 P2-1）。ja・en の利用者向けの文書（`cli-operations-guide.md` の「決定を正本へ記録する」） | `promote-agent-instructions-4225`（表の行ごと）・`promote-agent-instructions-discovery-4225`（正本との突き合わせ）・`promote-entrances-4225`（PM レビュー P3-8） |
+| 人が承認するのは画面が出したもの：preview は作った時の選択が変わったら捨て、行き先と投稿者を出す。チェックは項目・operation ごと（PM レビュー P2・P3-1） | `DecisionPromotePanel`（`destinationText`・`previewInputsRef`・`acknowledgeDiffFor`） | `DecisionPromotePanel-4225`（PM レビュー） |
+| 印が見つかった不明（`body_differs`・`block_altered`）は人が両方を見て決める（PM レビュー P3-2） | `promoteReconcile`（`finding`）、`promoteAcceptFound`・`acceptFoundPromoteOperation`（`mem-promote-db.ts`、見せた理由の `unknown` からだけ）、`reconcileDocBlockFinding`（`doc-write.ts`：判定と見せる内容を 1 回の読みから。読めなければ `unreadable`、Codex 5 回目 P2-2）、`DecisionPromotePanel`（`findings`。`found` が null なら受け入れを出さない）、`screen-client.ts`（`acceptFound`） | `promote-entrances-4225`（PM レビュー P3-2）・`mem-promote-transition-cas-4225`・`DecisionPromotePanel-4225`・`mem-decisions-routes-4225` |
 
 
 ### 11.1 不変条件 I1・I2 と、E の service の await と書き込みの全表（5-2d）
@@ -607,7 +649,7 @@ E の入口が共有する規則と、それを読む（当てはめる）場所
 
 - **I1（世代は最初の await の前に固定し、同じ値を最後まで渡す）**：E のすべての入口は、最初の await の前に作業木の世代を固定し、その同じ値を A の入口（`memSettleDecisionTransition` の `expectedWorktreeIncarnation`）と最後の書き込みまで渡す。途中で取り直さない（`getOrCreateWorktreeIncarnation` はどの関数でも最初の await より前にしか呼ばない）。E の入口は instance を受け取らない（A の入口は作業木の世代だけを比べる）ので、instance の世代は表の対象が無い。
 - **I2（状態を変える書き込みは、読んだ時点の状態を条件にする）**：操作の状態（`state`・遷移待ち `transition_pending`・その理由）を変える書き込みは、すべて読んだ時点の状態を条件にした条件つきの更新（CAS）にする。遷移は要求ごとの印（`transition_claim`、v69 の列）を持ち、A の失敗はその要求がまだ印を持っているときだけ書く。先行の要求は、後から来た確認（`acknowledgeItemClosed`）や後から来た要求の結果を上書きしない。A の成功（項目が動いた）は、遷移待ちが表していた事実そのものなので、印に依らず遷移待ちを下ろす（下ろした後に来る失敗は印が無いので書かない）。
-  - **I2 の強めた形（5-2e）**：条件つきの更新（CAS）の結果は必ず呼び手へ返し、呼び手は必ず見る。不成立なら、その呼び手は後続の書き込みも自動の遷移も始めない（読み直した行は他者が決めた状態なので、そこから次の書き込みへ進まない）。`promote-await-write-table-4225` は CAS（`claimPromoteOperation`・`settlePromoteOperation`・`beginPromoteTransition`・`finishPromoteTransition`・`acknowledgePromoteTransition`・`abandonPromoteOperation`・`settleOrUnknown`）の戻り値を捨てる呼び出し（式文として呼ぶ・`await` だけの文・`void`）を service と store の両方で検出し、下の表の CAS の行はすべて「結果を見る」を書く。
+  - **I2 の強めた形（5-2e）**：条件つきの更新（CAS）の結果は必ず呼び手へ返し、呼び手は必ず見る。不成立なら、その呼び手は後続の書き込みも自動の遷移も始めない（読み直した行は他者が決めた状態なので、そこから次の書き込みへ進まない）。`promote-await-write-table-4225` は CAS（`claimPromoteOperation`・`settlePromoteOperation`・`beginPromoteTransition`・`finishPromoteTransition`・`acknowledgePromoteTransition`・`abandonPromoteOperation`・`acceptFoundPromoteOperation`・`settleOrUnknown`）の戻り値を捨てる呼び出し（式文として呼ぶ・`await` だけの文・`void`）を service と store の両方で検出し、下の表の CAS の行はすべて「結果を見る」を書く。
 
 **入口ごとの世代の固定**（`promote-await-write-table-4225` がこの表と実コードを突き合わせる。固定する値は最初の await より前に読まれていなければならない。`—` は世代を固定しない入口で、`getOrCreateWorktreeIncarnation` を呼ばない）
 
@@ -619,6 +661,7 @@ E の入口が共有する規則と、それを読む（当てはめる）場所
 | `promoteConfirmReflected` | `getOrCreateWorktreeIncarnation` | A |
 | `promoteReconcile` | — | 要求は作業木を持たない。operation に保存した世代を `settleTransition` → A |
 | `promoteAbandon` | — | 作業木を使わない |
+| `promoteAcceptFound` | — | 要求は作業木を持たない。operation に保存した世代を `settleTransition` → A（PM レビュー P3-2） |
 | `promoteSettleTransition` | `getOrCreateWorktreeIncarnation` | `settleTransition` → A（5-2d P1：所属の照会の await の前へ移した） |
 | `promoteList` | — | 読むだけ |
 <!-- promote-generation:end -->
@@ -666,6 +709,9 @@ E の入口が共有する規則と、それを読む（当てはめる）場所
 | `promoteReconcile` | await | `settleTransition` | 1 | I1：operation に保存した世代・版。I2：照合の確定の直後に読み直した operation を条件にする |
 | `promoteAbandon` | await | `repositoryReadIds` | 1 | 後で operation を読む |
 | `promoteAbandon` | write | `abandonPromoteOperation` | 1 | I2：`unknown` のときだけ。結果を見る（不成立は `state_forbids`） |
+| `promoteAcceptFound` | await | `repositoryReadIds` | 1 | 後で operation を読む。世代は operation に保存した値（PM レビュー P3-2） |
+| `promoteAcceptFound` | write | `acceptFoundPromoteOperation` | 1 | I2：`unknown` で、人に見せた理由（`body_differs`・`block_altered`）のままのときだけ `succeeded`（`decided_by='human'`）。結果を見る（不成立は `state_forbids`、遷移を始めない） |
+| `promoteAcceptFound` | await | `settleTransition` | 1 | I1：operation に保存した世代・版。I2：確定の直後に読み直した operation を条件にする |
 | `promoteSettleTransition` | write | `getOrCreateWorktreeIncarnation` | 1 | I1：最初の await（所属の照会）の前に固定（5-2d P1） |
 | `promoteSettleTransition` | await | `repositoryReadIds` | 1 | 後で operation と項目を読む。世代は固定済みの値を使う |
 | `promoteSettleTransition` | write | `acknowledgePromoteTransition` | 1 | I2：読んだ `transition_pending = 1` と `transition_claim` のときだけ下ろし、先行の要求の印を外す（5-2d P2）。結果を見る（不成立は `state_forbids`） |

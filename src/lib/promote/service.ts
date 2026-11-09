@@ -30,6 +30,7 @@ import { getMemRecord, listMem, type MemScope } from '@/lib/db/mem-db';
 import { memModeOnFor } from '@/lib/db/mem-close-db';
 import {
   abandonPromoteOperation,
+  acceptFoundPromoteOperation,
   acknowledgePromoteTransition,
   beginPromoteTransition,
   claimPromoteOperation,
@@ -47,6 +48,8 @@ import {
   recordedOperationIds,
   settlePromoteOperation,
   settleStalePromoteAttempts,
+  PROMOTE_MARK_FOUND_REASONS,
+  type PromoteMarkFoundReason,
   type PromoteOperationRow,
   type PromotePreviewRow,
   type PromoteSettle,
@@ -74,7 +77,7 @@ import { validatePromoteTo, validateQuote } from '@/lib/mem/validate';
 import { isScreenRequest } from '@/lib/security/screen-request';
 import type { MemDecisionTransition } from '@/lib/db/mem-db';
 import { checkDocPath, docBaseFingerprint, issueBaseFingerprint, parsePromoteTo, resolveIssueTarget } from './destination';
-import { docBlockOf, reconcileDocBlock, writeDocBlock, type DocWriteHooks } from './doc-write';
+import { docBlockOf, reconcileDocBlockFinding, writeDocBlock, type DocWriteHooks } from './doc-write';
 import {
   defaultGhRun,
   fixedTokenEnv,
@@ -351,7 +354,19 @@ async function settleTransition(
   return { ok: false, reason };
 }
 
-function operationAnswer(db: Database.Database, operationId: string, deps: PromoteDeps, status = 200): MemOutcome {
+/**
+ * What a reconcile found of the operation's own mark when it is not exactly what was
+ * written (design §3.4: `body_differs`・`block_altered`): both, for a person to judge.
+ */
+export interface PromoteFinding {
+  reason: PromoteMarkFoundReason;
+  /** What is there now (the comment's body, or the document around the marks); null when it could not be read. */
+  found: string | null;
+  /** What the operation was approved to write. */
+  intended: string;
+}
+
+function operationAnswer(db: Database.Database, operationId: string, deps: PromoteDeps, status = 200, finding?: PromoteFinding): MemOutcome {
   const row = getPromoteOperation(db, operationId)!;
   const item = getMemRecord(db, row.item_id);
   return {
@@ -360,6 +375,7 @@ function operationAnswer(db: Database.Database, operationId: string, deps: Promo
       ok: true,
       operation: operationView(row, readState(db, row, deps.bootId?.() ?? memServerBootId(), deps.now?.() ?? Date.now())),
       item: item ? presentMemItem(item) : null,
+      ...(finding ? { finding } : {}),
     },
   };
 }
@@ -821,7 +837,7 @@ export async function promoteReconcile(
   if (row.state !== 'unknown') return promoteError('state_forbids');
   const destination = destinationOf(row);
 
-  let finding: { settle: PromoteSettle };
+  let finding: { settle: PromoteSettle; found?: string | null };
   if (destination.kind === 'issue_comment') {
     const listed = await listGhComments(deps.gh ?? defaultGhRun, destination);
     if (listed === null) {
@@ -831,9 +847,14 @@ export async function promoteReconcile(
       // A copy of the mark by someone else is not ours: the poster fixed before the POST decides.
       const ours = listed.filter((comment) => comment.body.includes(mark) && comment.userId !== null && comment.userId === row.poster_id);
       const exact = ours.find((comment) => sha256(comment.body) === row.body_sha256);
+      // P3-2: our mark by our poster with another body is kept with where it is and shown
+      // to the person beside what was meant (design §3.4), never settled by itself.
+      const differs = ours[0];
       finding = exact
         ? { settle: { state: 'succeeded', reason: null, resultRef: JSON.stringify({ id: exact.id, url: exact.url }) } }
-        : { settle: { state: 'unknown', reason: ours.length > 0 ? 'body_differs' : 'not_found_yet' } };
+        : differs
+          ? { settle: { state: 'unknown', reason: 'body_differs', resultRef: JSON.stringify({ id: differs.id, url: differs.url }) }, found: differs.body }
+          : { settle: { state: 'unknown', reason: 'not_found_yet' } };
     }
   } else {
     // The worktree it was written in, renamed or not (5-2b P2-1); a new lifetime is not it.
@@ -842,13 +863,27 @@ export async function promoteReconcile(
     if (!worktree || worktreeId === null) {
       finding = { settle: { state: 'unknown', reason: 'unreadable' } };
     } else {
-      const found = reconcileDocBlock(worktree.path, destination.path, row.id, row.body_sha256, docOperationsFor(db, worktreeId, destination.path));
-      finding = {
-        settle:
-          found === 'found'
-            ? { state: 'succeeded', reason: null, resultRef: JSON.stringify({ path: destination.path, sha256: row.body_sha256 }) }
-            : { state: 'unknown', reason: found === 'missing' ? 'block_missing' : found === 'altered' ? 'block_altered' : 'unreadable' },
-      };
+      // The judgement and what is shown come from one read (Codex review 5 P2-2): an
+      // altered block always carries the document as it is now; one that cannot be read
+      // is `unreadable`, never a finding offered as "treat as written".
+      const read = reconcileDocBlockFinding(
+        worktree.path,
+        destination.path,
+        row.id,
+        row.body_sha256,
+        docOperationsFor(db, worktreeId, destination.path),
+        deps.hooks?.doc
+      );
+      finding =
+        read.result === 'altered'
+          ? // P3-2: the altered block as it is now, beside what was meant (design §3.4).
+            { settle: { state: 'unknown', reason: 'block_altered' }, found: read.found }
+          : {
+              settle:
+                read.result === 'found'
+                  ? { state: 'succeeded', reason: null, resultRef: JSON.stringify({ path: destination.path, sha256: row.body_sha256 }) }
+                  : { state: 'unknown', reason: read.result === 'missing' ? 'block_missing' : 'unreadable' },
+            };
     }
   }
   const now = deps.now?.() ?? Date.now();
@@ -866,7 +901,14 @@ export async function promoteReconcile(
       deps
     );
   }
-  return operationAnswer(db, operationId, deps);
+  const markFound = PROMOTE_MARK_FOUND_REASONS.find((reason) => reason === finding.settle.reason);
+  return operationAnswer(
+    db,
+    operationId,
+    deps,
+    200,
+    markFound !== undefined && finding.found !== undefined ? { reason: markFound, found: finding.found, intended: row.body } : undefined
+  );
 }
 
 /** `POST …/decisions/operations/:opId/abandon` — `{ ifState: 'unknown' }`: a person checked outside that nothing is there. */
@@ -885,6 +927,48 @@ export async function promoteAbandon(
   if (!row || !ownsOperation(row, repositoryId, readIds)) return promoteError('not_found');
   if (!abandonPromoteOperation(db, operationId, deps.now?.() ?? Date.now())) return promoteError('state_forbids');
   logger.info('mem-promote-abandoned', { operationId });
+  return operationAnswer(db, operationId, deps);
+}
+
+/**
+ * `POST …/decisions/operations/:opId/accept-found` — `{ ifState: 'unknown', ifReason }`: the
+ * reconcile found the operation's own mark with another body (`body_differs`) or an altered
+ * block (`block_altered`), the screen showed both, and a person judged it written (design
+ * §3.4, PM review P3-2). `unknown → succeeded` with `decided_by='human'`, from the unknown
+ * of that reason only (§11.1 I2), then the item's transition as after a reconcile (§3.5:
+ * the lifetime and the version saved in the operation). Writes nothing outside.
+ *
+ * Without this, the only way out of such an unknown was "it is not there" (abandon), after
+ * which a new approval writes the same decision a second time.
+ */
+export async function promoteAcceptFound(
+  db: Database.Database,
+  request: ScreenRequest,
+  repositoryId: string,
+  operationId: string,
+  body: Record<string, unknown>,
+  deps: PromoteDeps = {}
+): Promise<MemOutcome> {
+  if (!isScreenRequest(request)) return promoteError('screen_only');
+  if (body.ifState !== 'unknown') return promoteError('invalid_request', { field: 'ifState' });
+  const ifReason = PROMOTE_MARK_FOUND_REASONS.find((reason) => reason === body.ifReason);
+  if (ifReason === undefined) return promoteError('invalid_request', { field: 'ifReason' });
+  const readIds = await repositoryReadIds(db, repositoryId, deps.mem);
+  const row = getPromoteOperation(db, operationId);
+  if (!row || !ownsOperation(row, repositoryId, readIds)) return promoteError('not_found');
+  if (!acceptFoundPromoteOperation(db, operationId, ifReason, deps.now?.() ?? Date.now())) return promoteError('state_forbids');
+  logger.info('mem-promote-accepted-found', { operationId, reason: ifReason });
+  const settled = getPromoteOperation(db, operationId);
+  if (settled) {
+    // E1: the outcome is kept whatever the mode; the item moves only through A's entrance.
+    await settleTransition(
+      db,
+      operationId,
+      settled,
+      { worktreeId: row.context_worktree_id, incarnation: row.context_worktree_incarnation, version: row.item_version, transition: transitionOf(row.effect) },
+      deps
+    );
+  }
   return operationAnswer(db, operationId, deps);
 }
 
