@@ -45,6 +45,8 @@ import { MobileContent } from '@/components/worktree/WorktreeDetailMobile';
 import { WorktreeDetailDesktop } from '@/components/worktree/WorktreeDetailDesktop';
 import { UPLOADABLE_EXTENSIONS } from '@/config/uploadable-extensions';
 import { Modal } from '@/components/ui/Modal';
+import { SessionHandoffDialog } from '@/components/mem/SessionHandoffDialog';
+import type { SessionKillTarget } from '@/types/terminal-split-pane';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
 import { AgentModeControl } from '@/components/worktree/AgentModeControl';
 import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
@@ -327,9 +329,12 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     handleInsertToSplit,
     handleKillCancel,
     handleKillConfirm,
-    openKillConfirm,
-    openActiveKillConfirm,
     killTarget,
+    openActiveEnd,
+    openEnd,
+    handoffTarget,
+    closeHandoff,
+    stopForHandoff,
     isKillPending,
     handleLoadContent,
     handleLoadError,
@@ -713,6 +718,19 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     setDirectInputOpen(true);
   }, [worktreeId, handleMobileTabChange]);
 
+  // Issue #4227 (G-4): every "end" — the PC header's, each split's own (and its restart),
+  // the phone's actions sheet — goes through the mem mode read: the hand-off on a branch
+  // set to be attended with mode `on`, the plain confirmation (as before) otherwise.
+  const handleActiveEnd = useCallback((): void => {
+    void openActiveEnd();
+  }, [openActiveEnd]);
+  const handleSplitEnd = useCallback(
+    (target: SessionKillTarget): void => {
+      void openEnd(target);
+    },
+    [openEnd],
+  );
+
   // Render
   // ========================================================================
 
@@ -846,12 +864,17 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           onWorktreeUpdate={setWorktree}
           fileInputRef={fileInputRef}
           onFileInputChange={handleFileInputChange}
-          onKillSession={openActiveKillConfirm}
-          onRequestSessionEnd={openKillConfirm}
+          // Issue #4227 (G-4): "end" reads the mem mode and opens the hand-off on a branch
+          // set to be attended with mode `on`, the plain confirmation otherwise.
+          onKillSession={handleActiveEnd}
+          onRequestSessionEnd={handleSplitEnd}
           killTarget={killTarget}
           isKillPending={isKillPending}
           onKillCancel={handleKillCancel}
           onKillConfirm={handleKillConfirm}
+          handoffTarget={handoffTarget}
+          onHandoffClose={closeHandoff}
+          onHandoffStop={stopForHandoff}
           moveTarget={moveTarget}
           isMoveDialogOpen={isMoveDialogOpen}
           onMoveCancel={handleMoveCancel}
@@ -1275,8 +1298,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             )}
 
             {/* Issue #1080: terminal secondary actions (search + End) bottom sheet.
-                Issue #1171: End defers to openActiveKillConfirm, which snapshots the
-                active instance as the kill target and opens the confirm dialog.
+                Issue #1171: End snapshots the active instance as the kill target.
+                Issue #4227 (G-4): through openActiveEnd, which opens the hand-off on a
+                branch set to be attended with mode `on` and the confirm dialog otherwise.
                 Issue #2823: on the chat surface `TerminalDisplay` is not mounted,
                 so the row searches the conversation through `chat-search-open`,
                 which only the phone's transcript hears (`openSearchOnWindowEvent`).
@@ -1290,7 +1314,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                   new CustomEvent(isMobileChatSurface ? 'chat-search-open' : 'terminal-search-open'),
                 )
               }
-              onEnd={openActiveKillConfirm}
+              onEnd={handleActiveEnd}
               endDisabled={!activeSessionRunning}
               onDirectInput={openDirectInput}
               directInputUnavailableReason={directInputUnavailableReason}
@@ -1348,6 +1372,15 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 </div>
               </div>
             </Modal>
+            {/* Issue #4227 (G-4, Mobile): the hand-off before ending — the same dialog
+                and the same existing stop as PC; it never kills by itself. */}
+            <SessionHandoffDialog
+              isOpen={handoffTarget !== null}
+              worktreeId={worktreeId}
+              target={handoffTarget}
+              onClose={closeHandoff}
+              onStop={stopForHandoff}
+            />
             {/* [Issue #162] Move Dialog (Mobile) */}
             {moveTarget && (
               <MoveDialog

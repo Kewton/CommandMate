@@ -2671,7 +2671,7 @@ A branch's items are shown under **the "mem" of each row of the Repositories scr
 - **Stale pages**: the screen reads the list again when it gets the focus back and every 30 seconds, and marks a row whose version moved as "Updated"
 - **Closing a recorded decision**: a `recorded` decision you decide not to reflect closes only after a two-step confirmation ("This decision is recorded; it will be closed without being reflected in the canonical place. Comments and other records stay"), with the reason `withdrawn`. `commandmate mem close` still refuses `recorded` (exit 55). Closing an open decision is a withdrawal (`withdrawn`)
 - **Undelivered notices**: the "it ended" notices no session took are listed, each with "Take it"
-- Of the mem settings' features, "Pop-ups" is the attended or unattended (the default) setting. In this version the setting is only saved; the screens that ask when a session opens and closes do not appear yet. It is separate from auto-yes; neither changes the other
+- Of the mem settings' features, "Pop-ups" is the attended or unattended (the default) setting. On a branch with it on and mode `on`, "end" shows the hand-off screen ("commandmate handoff" below); the screen that asks when a session opens does not appear yet. It is separate from auto-yes; neither changes the other
 
 ### What is not prevented
 
@@ -2704,7 +2704,7 @@ commandmate handoff done --request <id>
 
 - The hand-off **never stops a session**. Only the existing stop a person presses does. The screen's "Stop" declares the stop, runs the existing stop, then asks the server to observe it; the server checks with `isRunning` and records it. Nothing stops anything from a deadline, a cancel, a confirmation or a read
 - The record is `confirmed` (the agent's `done`, every proposal decided, every confirmation in, and the stop observed after the person's press — all of them) or `unconfirmed` with a reason: `forced`, `agent_timeout`, `request_failed`, `undecided_left`, `conflict_left`, `apply_failed`, `session_changed`. "Stop now" before confirming is always `unconfirmed(forced)`. When the stop cannot be confirmed nothing is recorded and the screen asks to press Stop again
-- The screen offers this flow from "end" in a later version (this one has the API for proposals, approval and the record of the stop, and this command). Until then "end" stops after the usual confirmation
+- The screen's "end" (the PC header's and each split's, the phone's "…" → End) reads the mode when pressed: with attended on and mode `on` it opens this hand-off; otherwise (unattended, mode not `on`, the mode not readable or not answered in 5 seconds) the usual confirmation as before. Opening either stops nothing. "Don't end" keeps the session
 - The exit codes are mem's: 0 done, 2 invalid input, 50 mode not on, 51 version conflict, 52 not found, 55 `not_requested` / `request_closed` / `session_changed` / `state_forbids`
 
 ---

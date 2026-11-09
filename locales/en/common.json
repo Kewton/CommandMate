@@ -578,7 +578,7 @@
     "featureHelp": {
       "injectOnStart": "Attach a short summary (brief) to the first send after a session boundary (start, reset, resume).",
       "promptOnEvents": "After an action (a PR, a merge), prompt the agent to update mem.",
-      "popup": "Attended: saves the setting. In this version it is saved only; the screens that ask when a session opens and closes do not appear yet. Off (the default) is unattended. Separate from auto-yes."
+      "popup": "Attended: on a branch with mode on, \"end\" shows the hand-off (approve the agent's proposals, then a person presses stop). The screen that asks when a session opens does not appear yet. Off (the default) is unattended. Separate from auto-yes."
     },
     "items": {
       "open": "View items",

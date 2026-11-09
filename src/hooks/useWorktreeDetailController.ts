@@ -266,6 +266,12 @@ export const DETAIL_LOAD_RETRY_DELAYS_MS = [2000, 5000, 10000] as const;
 export const STALE_BANNER_FAILURE_THRESHOLD = 3;
 
 /**
+ * Issue #4227 (G-4): how long "end" waits for the mem mode before it opens the plain
+ * confirmation instead. The read only chooses the dialog; it must not make "end" hang.
+ */
+export const END_MODE_READ_TIMEOUT_MS = 5000;
+
+/**
  * Issue #2499: transport options every poll on this screen uses.
  *
  * **Who owns the retry.** #2498 put the retry ladder above and the consecutive-
@@ -1910,24 +1916,37 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   useEffect(() => {
     setHandoffTarget(null);
   }, [worktreeId]);
-  const openActiveEnd = useCallback(async (): Promise<void> => {
-    const instanceId = activeInstanceIdRef.current;
-    const cliToolId = activeCliTabRef.current;
-    const label = getActiveInstanceLabel(agentInstancesRef.current, instanceId, cliToolId);
-    const target: SessionKillTarget = { cliToolId, instanceId, label };
+  /**
+   * The hand-off's "end" for an explicit target snapshot: the PC split's own End (and its
+   * restart), like {@link openKillConfirm}. The mode is read once per press; a read that
+   * fails, answers anything but `on` + `popup`, or takes longer than
+   * {@link END_MODE_READ_TIMEOUT_MS} opens the plain confirmation, so "end" never hangs on it.
+   */
+  const openEnd = useCallback(async (target: SessionKillTarget): Promise<void> => {
     const startedFor = worktreeId;
     let attended = false;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), END_MODE_READ_TIMEOUT_MS);
     try {
-      const response = await fetch(`/api/worktrees/${encodeURIComponent(worktreeId)}/mem/mode`);
+      const response = await fetch(`/api/worktrees/${encodeURIComponent(worktreeId)}/mem/mode`, { signal: controller.signal });
       const body = (await response.json()) as { ok?: boolean; mode?: string; features?: { popup?: boolean } };
       attended = response.ok && body.ok === true && body.mode === 'on' && body.features?.popup === true;
     } catch {
       attended = false;
+    } finally {
+      clearTimeout(timer);
     }
     if (startedFor !== worktreeIdRef.current) return;
     if (attended) setHandoffTarget(target);
     else setKillTarget(target);
   }, [worktreeId]);
+  /** The DesktopHeader / mobile End: the active instance, snapshotted at press time. */
+  const openActiveEnd = useCallback(async (): Promise<void> => {
+    const instanceId = activeInstanceIdRef.current;
+    const cliToolId = activeCliTabRef.current;
+    const label = getActiveInstanceLabel(agentInstancesRef.current, instanceId, cliToolId);
+    await openEnd({ cliToolId, instanceId, label });
+  }, [openEnd]);
   const closeHandoff = useCallback((): void => setHandoffTarget(null), []);
   /** The existing stop for the hand-off's target (G-4's stop button). */
   const stopForHandoff = useCallback(async (): Promise<void> => {
@@ -2462,6 +2481,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     killTarget,
     // Issue #4227 (G-4): the hand-off before ending, for the screens that render it.
     openActiveEnd,
+    openEnd,
     handoffTarget,
     closeHandoff,
     stopForHandoff,
