@@ -18,6 +18,7 @@
  * Errors print the server's code, field and rule, never what was refused (§7).
  */
 
+import { execFile } from 'child_process';
 import { Command } from 'commander';
 import { readFileSync } from 'fs';
 import { ExitCode, MemExitCode, type MemCommonOptions } from '../types';
@@ -106,9 +107,9 @@ function usage(code: MemErrorCode, message: string, field?: string): MemCliError
   return new MemCliError(MEM_EXIT_BY_CODE[code], { ok: false, code, message, ...(field ? { field } : {}) });
 }
 
-async function identityOf(client: ApiClient): Promise<SessionIdentity | null> {
+async function identityOf(client: ApiClient, env?: Readonly<Record<string, string | undefined>>): Promise<SessionIdentity | null> {
   try {
-    return await resolveSessionIdentity(client);
+    return await resolveSessionIdentity(client, env);
   } catch {
     return null;
   }
@@ -259,6 +260,35 @@ function suggestFlagError(options: MemCommonOptions & MemCheckSuggestOptions): M
   return null;
 }
 
+/**
+ * Whether tmux answers `display-message` before `deadlineAt` (Codex P2-1). Run as a
+ * child process the event loop does not wait on, killed at the deadline, so a tmux
+ * that hangs costs quiet its bound and no more.
+ */
+function tmuxAnswersBy(deadlineAt: number): Promise<boolean> {
+  const remaining = deadlineAt - Date.now();
+  if (remaining <= 0) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    execFile('tmux', ['display-message', '-p', '#{session_name}'], { timeout: remaining, killSignal: 'SIGKILL' }, (error, stdout) =>
+      resolve(!error && String(stdout).trim() !== '')
+    );
+  });
+}
+
+/**
+ * The identity of a quiet call, under its deadline (Codex P2-1). `resolveSessionIdentity`
+ * asks tmux first with a synchronous spawn that has no bound, before it reads even the
+ * environment. So the environment is read first with no tmux to ask; only when it
+ * names nobody is tmux asked, bounded by {@link tmuxAnswersBy}, and the full reading
+ * is made once tmux has answered (its own spawn is then the one right after an answer).
+ */
+async function quietIdentity(client: ApiClient, deadlineAt: number): Promise<SessionIdentity | null> {
+  const fromEnv = await identityOf(client, { ...process.env, TMUX: undefined });
+  if (fromEnv || !process.env.TMUX) return fromEnv;
+  if (!(await tmuxAnswersBy(deadlineAt))) return null;
+  return identityOf(client);
+}
+
 /** `--suggest --quiet`: never stops the caller. Everything after the parser ends in exit 0. */
 async function runQuietSuggest(options: MemCommonOptions & MemCheckSuggestOptions): Promise<number> {
   const flagError = suggestFlagError(options);
@@ -267,8 +297,9 @@ async function runQuietSuggest(options: MemCommonOptions & MemCheckSuggestOption
     return MemExitCode.SUCCESS;
   }
   try {
-    const client = new ApiClient({ token: options.token }).withDeadline(Date.now() + QUIET_DEADLINE_MS);
-    const identity = await identityOf(client);
+    const deadlineAt = Date.now() + QUIET_DEADLINE_MS;
+    const client = new ApiClient({ token: options.token }).withDeadline(deadlineAt);
+    const identity = await quietIdentity(client, deadlineAt);
     // The record is this instance's: no identity, or another instance, is nothing to do (§4.4).
     if (!identity) {
       quietNote('no session identity; nothing to do');

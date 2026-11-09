@@ -882,7 +882,8 @@ are stored. It needs --reply-to and a session identity (exit 2 otherwise). When 
 refuses it (mode not on: 50, a check: 2, too many open items: 56, ...) nothing is sent:
 the contract's task is failed, a grant this send armed is withdrawn and the relay is
 withdrawn, and send exits with mem's code. With --auto-yes, a state of Auto-Yes that
-cannot be read first stops the send before the grant (exit 99).
+cannot be read first stops the send before the grant (exit 99), and one with no
+--instance to read it for is refused before anything is done (exit 2).
 
 Exit 2 when the relay is refused: you are answering a relayed message already
 (pass --allow-relay-chain), the chain would exceed 3 hops, or an open relay
@@ -1000,6 +1001,20 @@ hold or the start was refused because of its role (nothing typed).
           || (conditional && Boolean(options.autoYes || options.contract || options.replyTo));
         const commandTarget = pinsTarget ? await pinCommandTarget(client, worktreeId, namedTarget) : namedTarget;
         const { agent, instanceId } = commandTarget;
+        // --auto-yes: enable auto-yes first (unless --model is specified, then after send) [DR2-02]
+        //
+        // Issue #2771: claude is the exception to the exception. The deferral
+        // exists so Auto-Yes does not answer copilot's `/model` interaction; a
+        // claude model is a launch flag with no interaction to protect, and a
+        // contract send must have Auto-Yes on BEFORE the worker starts working.
+        const deferAutoYes = Boolean(options.model) && agent !== 'claude';
+        // Issue #4226 (P3-2): a --note send that arms Auto-Yes reads its state first, and
+        // the state is read for a named instance. With none (`--agent` alone, nothing
+        // pinned) there is nothing to read, ever: an input error, before any side effect.
+        if (options.note !== undefined && options.autoYes && !deferAutoYes && (!agent || !instanceId)) {
+          console.error('Error: --note with --auto-yes needs --instance <id> (the Auto-Yes state of that instance is read first). Nothing was sent.');
+          process.exit(ExitCode.CONFIG_ERROR);
+        }
         if (options.newConversation) await assertNewConversationApplies(client, worktreeId, agent, instanceId);
 
         // Issue #4116: named before anything with a side effect, so a role that does
@@ -1049,13 +1064,6 @@ hold or the start was refused because of its role (nothing typed).
           }
         };
 
-        // --auto-yes: enable auto-yes first (unless --model is specified, then after send) [DR2-02]
-        //
-        // Issue #2771: claude is the exception to the exception. The deferral
-        // exists so Auto-Yes does not answer copilot's `/model` interaction; a
-        // claude model is a launch flag with no interaction to protect, and a
-        // contract send must have Auto-Yes on BEFORE the worker starts working.
-        const deferAutoYes = Boolean(options.model) && agent !== 'claude';
         const registerRelay = async (onFailure: () => Promise<void>): Promise<RegisteredRelay> => {
           const registered = await registerRelayForMessage(client, {
             ...relayTarget,

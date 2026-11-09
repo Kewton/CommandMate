@@ -13,6 +13,17 @@
  *      (`formatQuietLine`) are called only from the build handed to `withMemTarget` in
  *      `step('W5', …)`, helpers included (the call chain is followed).
  *  (4) That build is not `async` and returns no promise.
+ *  (5) The paths (Codex P2-2, PM P3-1): every path through `memSuggest`, the helpers it
+ *      calls inlined (across files), awaits the steps in the order of the table: for each
+ *      of the table's `paths`, its ids in the table's order, each once, the `last` one
+ *      last. A path may stop early (a return), never reorder, repeat or go past it, and
+ *      each whole sequence is walked by some path. A step in a loop, a `try`, a
+ *      condition expression or a function value is refused (its count is not fixed).
+ *  (6) No floating promise: a call whose type is a promise is awaited, or is what an
+ *      arrow given to `step` (or `runStep`) returns. Also in the route.
+ *
+ * The files are `src/lib/mem-suggest/**` as listed on disk (and any file a control
+ * adds there), not a fixed list (Codex P2-2).
  *
  * Read with the TypeScript type checker (the return types decide what is a promise).
  * The controls run the same checks on changed copies written under a `mkdtemp`
@@ -23,7 +34,7 @@
  * @vitest-environment node
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import ts from 'typescript';
@@ -31,7 +42,18 @@ import ts from 'typescript';
 const ROOT = process.cwd();
 const SERVICE = path.join(ROOT, 'src/lib/mem-suggest/service.ts');
 const ROUTE = path.join(ROOT, 'src/app/api/worktrees/[id]/mem/suggest/route.ts');
-const LIB_FILES = ['service.ts', 'rules.ts', 'fingerprint.ts'].map((name) => path.join(ROOT, 'src/lib/mem-suggest', name));
+const LIB_DIR = path.join(ROOT, 'src/lib/mem-suggest');
+/** The route's own steps (its rule is `routeViolations`); the service's paths go without them. */
+const ROUTE_IDS = new Set(['W1']);
+
+/** Every `.ts` of `src/lib/mem-suggest/**` on disk, and any a control adds there. */
+function libFilesOf(overrides: Record<string, string>): string[] {
+  const onDisk = (readdirSync(LIB_DIR, { recursive: true }) as string[])
+    .filter((name) => name.endsWith('.ts') && !name.endsWith('.d.ts'))
+    .map((name) => path.join(LIB_DIR, name));
+  const added = Object.keys(overrides).filter((file) => file.startsWith(LIB_DIR + path.sep) && file.endsWith('.ts'));
+  return [...new Set([...onDisk, ...added])].sort();
+}
 const RESTRICTED = new Set(['settleShown', 'readShown', 'judgeSuggestions', 'formatQuietLine']);
 const STEP_HELPER = 'runStep';
 const ENTRANCES = new Set(['memSuggest']);
@@ -44,18 +66,20 @@ const parsedConfig = (() => {
 let lastProgram: ts.Program | undefined;
 
 /** A program over the real files, with some of them replaced in memory. */
-function programWith(overrides: Record<string, string>): ts.Program {
+function programWith(rootFiles: string[], overrides: Record<string, string>): ts.Program {
   const options: ts.CompilerOptions = { ...parsedConfig.options, noEmit: true };
   const host = ts.createCompilerHost(options, true);
   const readFile = host.readFile.bind(host);
+  const fileExists = host.fileExists.bind(host);
   const getSourceFile = host.getSourceFile.bind(host);
   host.readFile = (file) => overrides[path.resolve(file)] ?? readFile(file);
+  host.fileExists = (file) => overrides[path.resolve(file)] !== undefined || fileExists(file);
   host.getSourceFile = (file, language, onError, create) => {
     const replaced = overrides[path.resolve(file)];
     if (replaced !== undefined) return ts.createSourceFile(file, replaced, language, true);
     return getSourceFile(file, language, onError, create);
   };
-  lastProgram = ts.createProgram([...LIB_FILES, ROUTE], options, host, lastProgram);
+  lastProgram = ts.createProgram([...rootFiles, ROUTE], options, host, lastProgram);
   return lastProgram;
 }
 
@@ -101,6 +125,40 @@ function tableKeys(source: ts.SourceFile): string[] {
   };
   visit(source);
   return keys;
+}
+
+interface TableEntry {
+  key: string;
+  paths: string[];
+  position: string;
+}
+
+/** The entries of `MEM_SUGGEST_AWAITS` in the source's order: their `paths` and `position`. */
+function tableEntries(source: ts.SourceFile): TableEntry[] {
+  let entries: TableEntry[] = [];
+  const visit = (node: ts.Node) => {
+    if (ts.isVariableDeclaration(node) && node.name.getText() === 'MEM_SUGGEST_AWAITS' && node.initializer) {
+      let init: ts.Expression = node.initializer;
+      while (ts.isAsExpression(init) || ts.isParenthesizedExpression(init)) init = init.expression;
+      if (!ts.isObjectLiteralExpression(init)) return;
+      entries = init.properties.filter(ts.isPropertyAssignment).map((property) => {
+        const entry: TableEntry = { key: property.name.getText().replace(/['"]/g, ''), paths: [], position: '' };
+        if (!ts.isObjectLiteralExpression(property.initializer)) return entry;
+        for (const field of property.initializer.properties) {
+          if (!ts.isPropertyAssignment(field)) continue;
+          const name = field.name.getText();
+          if (name === 'paths' && ts.isArrayLiteralExpression(field.initializer)) {
+            entry.paths = field.initializer.elements.filter(ts.isStringLiteral).map((element) => element.text);
+          }
+          if (name === 'position' && ts.isStringLiteral(field.initializer)) entry.position = field.initializer.text;
+        }
+        return entry;
+      });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return entries;
 }
 
 function walk(node: ts.Node, visit: (node: ts.Node) => void): void {
@@ -153,12 +211,14 @@ export interface TableFindings {
 
 /** Every check of (1)〜(4) on the sources as given (overrides by absolute path). */
 function analyze(overrides: Record<string, string> = {}): TableFindings {
-  const program = programWith(overrides);
+  const LIB_FILES = libFilesOf(overrides);
+  const program = programWith(LIB_FILES, overrides);
   const checker = program.getTypeChecker();
   const violations: string[] = [];
   const serviceFile = program.getSourceFile(SERVICE) as ts.SourceFile;
   const keys = tableKeys(serviceFile);
   const used = new Set<string>();
+  const libSources = new Set(LIB_FILES.map((file) => program.getSourceFile(file)).filter((source): source is ts.SourceFile => source !== undefined));
 
   for (const file of LIB_FILES) {
     const source = program.getSourceFile(file) as ts.SourceFile;
@@ -197,9 +257,11 @@ function analyze(overrides: Record<string, string> = {}): TableFindings {
   const reachable = new Set<ts.Node>();
   const queue: ts.Node[] = [];
   const declarationOf = (identifier: ts.Identifier): ts.Node | null => {
-    const symbol = checker.getSymbolAtLocation(identifier);
+    let symbol = checker.getSymbolAtLocation(identifier);
+    // An imported helper is followed to its file (Codex P2-2: the calls across files).
+    if (symbol && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
     const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
-    if (!declaration || declaration.getSourceFile() !== serviceFile) return null;
+    if (!declaration || !libSources.has(declaration.getSourceFile())) return null;
     if (isFunctionNode(declaration)) return declaration;
     if (ts.isVariableDeclaration(declaration) && declaration.initializer && isFunctionNode(declaration.initializer)) return declaration.initializer;
     return null;
@@ -235,11 +297,25 @@ function analyze(overrides: Record<string, string> = {}): TableFindings {
       const owner = enclosingFunction(node);
       const ownerName = owner ? nameOf(owner) : null;
       if (ownerName === null || !owner) return;
-      walk(serviceFile, (ref) => {
-        if (ts.isCallExpression(ref) && ts.isIdentifier(ref.expression) && ref.expression.text === ownerName && !insideReachable(ref)) {
-          violations.push(`${ownerName} (calls ${calleeName(node)}) is called outside the W5 build at ${where(ref)}`);
-        }
-      });
+      for (const other of libSources) {
+        walk(other, (ref) => {
+          if (ts.isCallExpression(ref) && ts.isIdentifier(ref.expression) && ref.expression.text === ownerName && !insideReachable(ref)) {
+            violations.push(`${ownerName} (calls ${calleeName(node)}) is called outside the W5 build at ${where(ref)}`);
+          }
+        });
+      }
+    });
+  }
+
+  // (5): the paths of memSuggest against the table.
+  violations.push(...pathViolations(serviceFile, libSources, declarationOf));
+
+  // (6): no floating promise, in the files and in the route.
+  for (const source of [...libSources, program.getSourceFile(ROUTE) as ts.SourceFile]) {
+    walk(source, (node) => {
+      if (ts.isCallExpression(node) && isPromise(checker, checker.getTypeAtLocation(node)) && !promiseIsHeld(node)) {
+        violations.push(`a promise not awaited (${calleeName(node) ?? 'a call'}) at ${where(node)}`);
+      }
     });
   }
 
@@ -250,11 +326,210 @@ function analyze(overrides: Record<string, string> = {}): TableFindings {
   return { violations, unusedKeys: keys.filter((key) => !used.has(key)) };
 }
 
+/** The arrow given to `step` as what it runs. */
+const isStepArrow = (node: ts.Node): boolean =>
+  ts.isArrowFunction(node) && ts.isCallExpression(node.parent) && stepId(node.parent) !== null && node.parent.arguments[1] === node;
+
+const isRunStep = (node: ts.Node): boolean =>
+  isFunctionNode(node) && ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name) && node.parent.name.text === STEP_HELPER;
+
+/** (6): a promise is awaited, or is what an arrow given to `step` (or `runStep`) returns. */
+function promiseIsHeld(call: ts.CallExpression): boolean {
+  let node: ts.Node = call;
+  while (
+    ts.isParenthesizedExpression(node.parent) ||
+    ts.isAsExpression(node.parent) ||
+    (ts.isConditionalExpression(node.parent) && node.parent.condition !== node)
+  ) {
+    node = node.parent;
+  }
+  const parent = node.parent;
+  if (ts.isAwaitExpression(parent)) return true;
+  if (ts.isArrowFunction(parent) && parent.body === node) return isStepArrow(parent) || isRunStep(parent);
+  if (ts.isReturnStatement(parent)) {
+    const owner = enclosingFunction(parent);
+    return owner !== null && (isStepArrow(owner) || isRunStep(owner));
+  }
+  return false;
+}
+
+interface Trace {
+  ids: string[];
+  ended: boolean;
+}
+
+/** (5): every path through `memSuggest`, helpers inlined across the files, against the table. */
+function pathViolations(
+  serviceFile: ts.SourceFile,
+  libSources: Set<ts.SourceFile>,
+  declarationOf: (identifier: ts.Identifier) => ts.Node | null
+): string[] {
+  const out: string[] = [];
+  const seenSteps = new Set<ts.Node>();
+  const stack: ts.Node[] = [];
+  const MAX_TRACES = 2000;
+
+  const calleeOf = (call: ts.CallExpression): ts.FunctionLikeDeclaration | null => {
+    if (!ts.isIdentifier(call.expression) || stepId(call) !== null) return null;
+    const target = declarationOf(call.expression);
+    return target && isFunctionNode(target) ? target : null;
+  };
+  const stepsMemo = new Map<ts.Node, boolean>();
+  const hasSteps = (node: ts.Node, seen = new Set<ts.Node>()): boolean => {
+    if (stepsMemo.has(node)) return stepsMemo.get(node) as boolean;
+    let found = false;
+    walk(node, (inner) => {
+      if (found || !ts.isCallExpression(inner)) return;
+      if (stepId(inner) !== null) found = true;
+      const callee = calleeOf(inner);
+      if (callee && !seen.has(callee)) {
+        seen.add(callee);
+        if (hasSteps(callee, seen)) found = true;
+      }
+    });
+    stepsMemo.set(node, found);
+    return found;
+  };
+  const dedupe = (traces: Trace[]): Trace[] => {
+    const byKey = new Map<string, Trace>();
+    for (const trace of traces) byKey.set(`${trace.ended}:${trace.ids.join(',')}`, trace);
+    const unique = [...byKey.values()];
+    if (unique.length > MAX_TRACES) {
+      out.push(`more than ${MAX_TRACES} paths through memSuggest`);
+      return unique.slice(0, MAX_TRACES);
+    }
+    return unique;
+  };
+  const extend = (traces: Trace[], sequences: string[][]): Trace[] =>
+    dedupe(traces.flatMap((trace) => sequences.map((ids) => ({ ids: [...trace.ids, ...ids], ended: false }))));
+
+  /** The steps an expression runs, as alternative sequences (an inlined helper may have several). */
+  const expressionSteps = (root: ts.Node): string[][] => {
+    let sequences: string[][] = [[]];
+    const visit = (node: ts.Node): void => {
+      if (node !== root && isFunctionNode(node)) {
+        if (hasSteps(node)) out.push(`a step inside a function value at ${where(node)}`);
+        return;
+      }
+      const id = stepId(node);
+      if (id !== null) {
+        seenSteps.add(node);
+        const run = (node as ts.CallExpression).arguments[1];
+        if (run && hasSteps(run)) out.push(`a step inside step('${id}') at ${where(node)}`);
+        sequences = sequences.map((ids) => [...ids, id]);
+        return;
+      }
+      if (ts.isConditionalExpression(node) && (hasSteps(node.whenTrue) || hasSteps(node.whenFalse))) {
+        out.push(`a step under a condition expression at ${where(node)}`);
+      }
+      if (
+        ts.isBinaryExpression(node) &&
+        [ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken].includes(node.operatorToken.kind) &&
+        hasSteps(node.right)
+      ) {
+        out.push(`a step under a condition expression at ${where(node)}`);
+      }
+      ts.forEachChild(node, visit);
+      if (ts.isCallExpression(node)) {
+        const callee = calleeOf(node);
+        if (callee && hasSteps(callee)) {
+          const inner = tracesOf(callee).map((trace) => trace.ids);
+          sequences = sequences.flatMap((ids) => inner.map((more) => [...ids, ...more]));
+        }
+      }
+    };
+    visit(root);
+    return sequences;
+  };
+
+  const statementTraces = (statement: ts.Statement, traces: Trace[]): Trace[] => {
+    const done = traces.filter((trace) => trace.ended);
+    const active = traces.filter((trace) => !trace.ended);
+    if (active.length === 0) return traces;
+    if (ts.isBlock(statement)) return dedupe([...done, ...statementsTraces(statement.statements, active)]);
+    if (ts.isIfStatement(statement)) {
+      const after = extend(active, expressionSteps(statement.expression));
+      const then = statementTraces(statement.thenStatement, after);
+      const otherwise = statement.elseStatement ? statementTraces(statement.elseStatement, after) : after;
+      return dedupe([...done, ...then, ...otherwise]);
+    }
+    if (ts.isReturnStatement(statement) || ts.isThrowStatement(statement)) {
+      const ended = extend(active, statement.expression ? expressionSteps(statement.expression) : [[]]).map((trace) => ({ ...trace, ended: true }));
+      return dedupe([...done, ...ended]);
+    }
+    if (ts.isVariableStatement(statement) || ts.isExpressionStatement(statement)) return dedupe([...done, ...extend(active, expressionSteps(statement))]);
+    if (ts.isFunctionDeclaration(statement) || ts.isEmptyStatement(statement)) return traces;
+    if (hasSteps(statement)) out.push(`a step in a ${ts.SyntaxKind[statement.kind]} at ${where(statement)}`);
+    return traces;
+  };
+  const statementsTraces = (statements: readonly ts.Statement[], traces: Trace[]): Trace[] =>
+    statements.reduce((current, statement) => statementTraces(statement, current), traces);
+
+  function tracesOf(fn: ts.FunctionLikeDeclaration): Trace[] {
+    if (stack.includes(fn)) {
+      out.push(`a recursive call through steps at ${where(fn)}`);
+      return [{ ids: [], ended: false }];
+    }
+    stack.push(fn);
+    const start: Trace[] = [{ ids: [], ended: false }];
+    const body = fn.body;
+    const traces = !body ? start : ts.isBlock(body) ? statementsTraces(body.statements, start) : extend(start, expressionSteps(body));
+    stack.pop();
+    return traces;
+  }
+
+  let entrance: ts.FunctionLikeDeclaration | null = null;
+  walk(serviceFile, (node) => {
+    if (isFunctionNode(node) && ENTRANCES.has(nameOf(node) ?? '')) entrance = node;
+  });
+  if (!entrance) return [...out, 'no entrance (memSuggest) in the service'];
+  const traces = tracesOf(entrance);
+
+  // The table's sequences: per path, its ids in the table's order; `last` must be last.
+  const entries = tableEntries(serviceFile).filter((entry) => !ROUTE_IDS.has(entry.key));
+  const pathNames = [...new Set(entries.flatMap((entry) => entry.paths))];
+  const expected = pathNames.map((name) => ({ name, ids: entries.filter((entry) => entry.paths.includes(name)).map((entry) => entry.key) }));
+  for (const entry of entries.filter((e) => e.position === 'last')) {
+    for (const sequence of expected) {
+      if (sequence.ids.includes(entry.key) && sequence.ids.at(-1) !== entry.key) out.push(`the table: ${entry.key} is "last" but not last on ${sequence.name}`);
+    }
+  }
+  const isPrefix = (ids: string[], of: string[]) => ids.length <= of.length && ids.every((id, index) => of[index] === id);
+  for (const trace of traces) {
+    if (!expected.some((sequence) => isPrefix(trace.ids, sequence.ids))) {
+      out.push(`a path of memSuggest awaits ${trace.ids.join(' → ') || '(nothing)'}, not in the table's order (${expected.map((e) => `${e.name}: ${e.ids.join(' → ')}`).join('; ')})`);
+    }
+  }
+  for (const sequence of expected) {
+    if (!traces.some((trace) => trace.ids.join(',') === sequence.ids.join(','))) {
+      out.push(`no path of memSuggest walks the table's ${sequence.name}: ${sequence.ids.join(' → ')}`);
+    }
+  }
+  for (const source of libSources) {
+    walk(source, (node) => {
+      if (stepId(node) !== null && !seenSteps.has(node)) out.push(`a step outside the paths of memSuggest at ${where(node)}`);
+    });
+  }
+  return out;
+}
+
 let dir: string;
 beforeEach(() => {
   dir = mkdtempSync(path.join(os.tmpdir(), 'mem-suggest-await-table-4226-'));
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+const EXTRA = path.join(LIB_DIR, 'extra-4226-control.ts');
+
+/** A new file of `src/lib/mem-suggest/`, written under the sandbox and read back (never on disk there). */
+function added(file: string, content: string): Record<string, string> {
+  const copy = path.join(dir, path.basename(file));
+  writeFileSync(copy, content);
+  return { [file]: readFileSync(copy, 'utf8') };
+}
+
+const QUIET_W5 = "closeRequest({ db, fixed, branches }, outcome)));\n    return answer;";
+const IMPORTS_END = "import { formatQuietLine, judgeSuggestions, MEM_SUGGEST_MESSAGES, type SuggestHit } from './rules';";
 
 /** A changed copy of a source, written under the sandbox and read back. */
 function changed(file: string, from: string, to: string): Record<string, string> {
@@ -349,5 +624,90 @@ describe('(self-test) the checks fail on what they forbid', () => {
     expect(findings.violations.some((v) => v.startsWith('route awaits:'))).toBe(true);
     expect(findings.violations.some((v) => v.startsWith('after memSuggest:'))).toBe(true);
     expect(findings.unusedKeys).toEqual(['W1']);
+  }, 60_000);
+});
+
+describe('(self-test, Codex P2-2 / PM P3-1) the order, the count, floating promises and the other files', () => {
+  it('G1: an id of the table reused after W5 (quiet: W2 → W5 → W2)', () => {
+    const findings = analyze(
+      changed(SERVICE, QUIET_W5, "closeRequest({ db, fixed, branches }, outcome)));\n    await step('W2', () => Promise.resolve(listing));\n    return answer;")
+    );
+    expect(findings.violations.some((v) => v.includes('awaits W2 → W5 → W2'))).toBe(true);
+  }, 60_000);
+
+  it('G3: the order turned round (a W5 before W2)', () => {
+    const findings = analyze(changed(SERVICE, "    const listing = await step('W2',", "    await step('W5', () => Promise.resolve(null));\n    const listing = await step('W2',"));
+    expect(findings.violations.some((v) => v.includes('awaits W5 → W2 → W5'))).toBe(true);
+  }, 60_000);
+
+  it('a whole sequence no path walks (W5 left out of quiet)', () => {
+    const findings = analyze(
+      changed(
+        SERVICE,
+        "    const answer = await step('W5', () => withMemTarget(db, fixed.spec, deps, (outcome) => closeRequest({ db, fixed, branches }, outcome)));",
+        "    const answer = closeRequest({ db, fixed, branches }, { ok: false, code: 'not_found' } as never);"
+      )
+    );
+    expect(findings.violations.some((v) => v.startsWith("no path of memSuggest walks the table's quiet"))).toBe(true);
+  }, 60_000);
+
+  it('a step in a loop (its count is not fixed)', () => {
+    const findings = analyze(
+      changed(SERVICE, "    const listing = await step('W2',", "    for (const _ of [1]) await step('W2', () => Promise.resolve(null));\n    const listing = await step('W2',")
+    );
+    expect(findings.violations.some((v) => v.startsWith('a step in a ForOfStatement'))).toBe(true);
+  }, 60_000);
+
+  it('G2: a floating promise in the build (a promise-returning call not awaited)', () => {
+    const findings = analyze(
+      changed(SERVICE, '  // The materials, read now (the copy after, §3.2).', '  execGitCommandCapture(BRANCH_ARGS, fixed.worktreePath);\n  // The materials, read now (the copy after, §3.2).')
+    );
+    expect(findings.violations.some((v) => v.startsWith('a promise not awaited (execGitCommandCapture)'))).toBe(true);
+  }, 60_000);
+
+  it('a floating promise in memSuggest itself (returned, not awaited)', () => {
+    const findings = analyze(changed(SERVICE, '    const branches = branchesOf(listing);', '    if (listing.ok === false) return memList(db, fixed.spec, {}, deps);\n    const branches = branchesOf(listing);'));
+    expect(findings.violations.some((v) => v.startsWith('a promise not awaited (memList)'))).toBe(true);
+  }, 60_000);
+
+  it('a bare await in a helper of another file of mem-suggest (the files are listed, not fixed)', () => {
+    const findings = analyze(added(EXTRA, 'export async function extra(): Promise<number> {\n  return await Promise.resolve(1);\n}\n'));
+    expect(findings.violations.some((v) => v.startsWith('await not through step at src/lib/mem-suggest/extra-4226-control.ts'))).toBe(true);
+  }, 60_000);
+
+  it('a step of the table in a helper of another file, called after W5 (the call is followed across files)', () => {
+    const both = analyze({
+      ...added(
+        EXTRA,
+        "import type { MemSuggestStep } from './service';\n\nexport async function listAgain(step: MemSuggestStep): Promise<void> {\n  await step('W2', () => Promise.resolve(null));\n}\n"
+      ),
+      [SERVICE]: readFileSync(SERVICE, 'utf8')
+        .replace(`${IMPORTS_END}\n`, `${IMPORTS_END}\nimport { listAgain } from './extra-4226-control';\n`)
+        .replace(QUIET_W5, 'closeRequest({ db, fixed, branches }, outcome)));\n    await listAgain(step);\n    return answer;'),
+    });
+    expect(both.violations.some((v) => v.includes('awaits W2 → W5 → W2'))).toBe(true);
+  }, 60_000);
+
+  it('a helper of another file that reads the record, called outside the W5 build', () => {
+    const findings = analyze({
+      ...added(
+        EXTRA,
+        "import type Database from 'better-sqlite3';\nimport { readShown } from '@/lib/db/suggestion-shown-db';\n\nexport function peek(db: Database.Database): number {\n  return readShown(db, 'w', 'claude', '').size;\n}\n"
+      ),
+      [SERVICE]: readFileSync(SERVICE, 'utf8')
+        .replace(`${IMPORTS_END}\n`, `${IMPORTS_END}\nimport { peek } from './extra-4226-control';\n`)
+        .replace('    const branches = branchesOf(listing);', '    peek(db);\n    const branches = branchesOf(listing);'),
+    });
+    expect(findings.violations.some((v) => v.startsWith('readShown outside the W5 build at src/lib/mem-suggest/extra-4226-control.ts'))).toBe(true);
+  }, 60_000);
+
+  it('(negative control) a synchronous helper of another file called from the build is no violation', () => {
+    const findings = analyze({
+      ...added(EXTRA, 'export function countOf(names: readonly string[]): number {\n  return names.length;\n}\n'),
+      [SERVICE]: readFileSync(SERVICE, 'utf8')
+        .replace(`${IMPORTS_END}\n`, `${IMPORTS_END}\nimport { countOf } from './extra-4226-control';\n`)
+        .replace('  // The materials, read now (the copy after, §3.2).', '  countOf(closing.branches ?? []);\n  // The materials, read now (the copy after, §3.2).'),
+    });
+    expect(findings.violations).toEqual([]);
   }, 60_000);
 });

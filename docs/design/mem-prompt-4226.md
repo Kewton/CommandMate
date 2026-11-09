@@ -285,7 +285,7 @@ Codex の指摘［事実］：`memList` は評価の await の後、最初に解
 **quiet の期限（P2 の処置）**：
 
 - 許す処理：(1) CLI の身元の解決（`whoami`）、(2) A の `withMemTarget` の所属の確認（`observeWorktreeHead` の git 3 つ。各 1 秒の期限：`GIT_COMMAND_TIMEOUT_MS`、`src/lib/git/git-exec.ts:59`）、(3) DB の読み、(4) `evidence` の `path:` の `lstatSync`（W5 の build の中）、(5) ブランチの一覧の git 1 つ（W2、1 秒の期限。第 4 版。第 5 版で (2) の前に走らせる）。期限の判定（5 の「3 秒」）は W5 の build の中で行うので、遅い git は記録の前に必ず捨てられる。**許さない処理**：B の評価（条件の照会の `git`・`gh`）、`memList`、tmux への送信
-- 期限：CLI は `client.withDeadline(Date.now() + 4000)`（`src/cli/utils/api-client.ts:170`、既存）で要求全体を 4 秒で切り、超えたら何も出さず exit 0。サーバは上の 5 の「3 秒」を過ぎたら記録しない。サーバの期限を CLI より短くするのは、**CLI が諦めた後にサーバが記録して促しが一度も見えない**（応答の消失）を減らすため。残る隙間（サーバが記録した後、応答が CLI に届く前に切れる）は既知の制限（§4.5）
+- 期限：CLI は `client.withDeadline(Date.now() + 4000)`（`src/cli/utils/api-client.ts:170`、既存）で要求全体を 4 秒で切り、超えたら何も出さず exit 0。サーバは上の 5 の「3 秒」を過ぎたら記録しない。サーバの 3 秒はサーバの fix から数えるので、CLI が要求の前に使った時間（(1) の身元の解決・接続）を含まない。**CLI が諦めた後にサーバが記録して促しが一度も見えない**隙間は、サーバの期限では狭まらない（PM P3-3。§12.5）。この隙間は既知の制限（§4.5）。CLI の (1) も 4 秒の期限の内側で行う：環境変数で身元が分かれば tmux に聞かず、聞くときは期限で打ち切る子プロセスで聞く（Codex P2-1。§12.5）
 - 期限はタイマーで作らない（`setTimeout` を足さない。I-F4）。サーバは時刻の差を比べ、CLI は既存の `withDeadline` を使う
 
 **直接の route の呼び出し**：route は CLI の身元の検査を当てにしない。`instanceId` が**解いた roster**（固定の表の `resolveAgentInstances`。導いた primary を含む）に居るか、その worktree に instance の世代の行がある（`L0.incarnation !== null`）ときだけ `now_*` を当て、quiet の記録をする。無ければ（任意の未知の ID）quiet は何もしない（200、`suggestions: []`）。第 2 版の「物理の roster の行（`L0.onRoster`）か世代の行」は、mem を使っていない正当な primary（導いた primary）を両方とも持たないので断っていた（再確認の P2）。所属の確認（解いた roster）と寿命の比較（`L0`）を分けて直した。OS の権限を持つプロセスが API を直接呼べば他の instance の記録を消費できる（A の説明「The author check stops mistakes, not intent」と同じ）ことは、説明に書く。
@@ -367,7 +367,7 @@ CREATE TABLE suggestion_shown (
 
 | # | 制限 | 起きること | 採った理由 |
 |---|---|---|---|
-| K3 | **応答が CLI に届く前に切れたとき、その促しは出ない** | サーバが記録した後、応答が CLI の 4 秒の期限に間に合わないと、記録済みで stdout に出ない。同じ状態の間は次も出ない | サーバの期限（3 秒）を CLI（4 秒）より短くして、狭くした。状態が変われば（項目の更新・会話の境界）また出る。繰り返さない側に倒す（受入基準） |
+| K3 | **応答が CLI に届く前に切れたとき、その促しは出ない** | サーバが記録した後、応答が CLI の 4 秒の期限に間に合わないと、記録済みで stdout に出ない。同じ状態の間は次も出ない | サーバの期限（3 秒）はサーバの fix から数え、CLI が要求の前に使った時間（whoami・route の手前）を含まないので、この隙間は狭まらない（PM P3-3。CLI の残り時間をサーバへ渡す案は採らず、記述を実際に合わせた）。状態が変われば（項目の更新・会話の境界）また出る。繰り返さない側に倒す（受入基準） |
 | K5 | roster から消えた instance の行・git から消えたブランチの範囲の行・登録が消えた root の範囲の行は、その worktree で次に quiet が呼ばれるか worktree が削除されるまで残る。登録が残っている root の範囲の行は、その root が storage でなくなっても残る（往復で再通知しないため。第 5 版） | 行は (worktree, instance) あたり最大 7 × R_s ×（ブランチの数 + 2）で、増え続けない | 消すために定期の実行を足さない（D8） |
 | K6 | ブランチの一覧の git が失敗・期限切れの回は、quiet は促さない（第 4 版） | その回の新しい促しは次の quiet まで遅れる | 消せないまま書くと行の上限が保てず、出して記録しないと次も出る。繰り返さない側に倒す |
 
@@ -707,6 +707,21 @@ F が他の module と共有する規則と、その規則を読む全部の場�
 | 登録の署名（`[id, path, enabled]` の全行） | `src/lib/agent-roles/resolve.ts` の private `rootsSignature` | resolver の `withSettledMembership`・`finishAttempt`、F の `service.ts` の `registrationOf`（同じ式の写し。I-F11 の所属の先の切り替えで実際の resolver と並べて固定） |
 | 作成者の判定（instance と世代。`owner.worktreeId` を見ない） | `src/lib/db/mem-db.ts` の private `ownedBy` | A の更新・閉じる経路、F の `rules.ts` の `ownsOrPerson`（同じ 2 つの欄の写し。人が書いた項目も対象） |
 | 促しの規則の表（`MEM_SUGGEST_CODES`・`MEM_SUGGEST_MESSAGES`・`MEM_SUGGEST_QUIET_CODES`） | `src/types/mem-suggest.ts`・`src/lib/mem-suggest/rules.ts` | F の `service.ts`（判定・記録の `knownCodes`）、`src/cli/commands/mem.ts`（テキスト・quiet）、route、試験。G（#4227）が読むかは G の判断 |
-| await の表（`MEM_SUGGEST_AWAITS`） | `src/lib/mem-suggest/service.ts` | `service.ts` の `step`、route（W1）、`tests/unit/guards/mem-suggest-await-table-4226.test.ts`、`tests/unit/lib/mem-suggest/suggest-invariants.test.ts`（I-F11 の表） |
+| await の表（`MEM_SUGGEST_AWAITS`） | `src/lib/mem-suggest/service.ts` | `service.ts` の `step`、route（W1）、`tests/unit/guards/mem-suggest-await-table-4226.test.ts`（`paths`・`position` も読み、経路ごとの step の順・回数と照合する。§12.5）、`tests/unit/lib/mem-suggest/suggest-invariants.test.ts`（I-F11 の表） |
+| セッションの身元（`resolveSessionIdentity`） | `src/cli/commands/whoami.ts` | `mem.ts` の `identityOf`（書き込み・読みの対象）と、quiet の `quietIdentity`（環境変数を先に読み、tmux は期限つきで聞いてから同じ関数を呼ぶ。Codex P2-1）、`send.ts` の `--note` の作成者 |
 | 記録の表（`readShown`・`settleShown`） | `src/lib/db/suggestion-shown-db.ts` | F の `service.ts` の W5 の build だけ（I-F13 の (3) で固定）。改名・削除の追従は `getWorktreeChildTables` が動的に拾う |
 
+### 12.5 5-2b（Codex）と PM の再レビューの処置
+
+対象：Codex の `review-4226.md`（P2 2 件）と、PM の `pm-review-4226-claude.md`（P3 5 件）の処分。develop（D2・E（v69）・#4288）を取り込んだ `b8520e4e0` の上で直した。
+
+| # | 指摘 | 処置（実装） | 直しを外すと落ちる対照 |
+|---|---|---|---|
+| Codex P2-1 | quiet の 4 秒の期限が身元の解決に届かない（`resolveSessionIdentity` は期限の無い同期の `tmux display-message` を、環境変数を読む前に呼ぶ） | `mem.ts` の `quietIdentity`：まず `TMUX` を外した環境で `resolveSessionIdentity` を呼ぶ（tmux を呼ばない。環境変数の身元はこれで決まる）。名前が無く `TMUX` があるときだけ、`execFile` の子プロセスで tmux に聞き、残り時間で `SIGKILL` する。答えが来たら、いつもの `resolveSessionIdentity` で身元を解く。`whoami.ts` は変えない（scope 外） | `tests/unit/cli/mem-check-suggest.test.ts`：PATH の先頭に 12 秒止まる偽の `tmux`（mkdtemp）を置き、身元の無い quiet が 7 秒以内に無出力・exit 0・送信 0 で戻る。環境変数で身元が分かるときは tmux が止まっていても 7 秒以内に送る。直しを外すと両方 12 秒待って落ちる。陰性：答える tmux は従来どおりその session の身元で送る |
+| Codex P2-2・PM P3-1 | await の網羅の検査が 3 ファイルの固定列挙で、別のファイルを辿らない。表の id の使い回し・順の入れ替え・浮いた Promise を通す | guard を (5)(6) に広げた：対象は `src/lib/mem-suggest/**` を `readdirSync` で列挙。import した helper は別名を解いて辿る（(3) の到達の判定も同じ）。`memSuggest` の全経路を、呼ぶ helper を展開して step の id の列にし、表の `paths`・順・`position: 'last'` から作る列（quiet `W2 → W5`、full `W3 → W4 → W5`）の接頭辞であること、各列を歩く経路があることを確かめる。ループ・`try`・条件式・関数値の中の step は断る。型が Promise の呼び出しは、await されるか `step` の arrow（と `runStep`）が返すものでなければ違反（route も） | guard の self-test 9 件（G1 の `W2 → W5 → W2`、G3 の `W5 → W2 → W5`、quiet から W5 を外す、ループの中の step、build の中の浮いた `execGitCommandCapture`、`memSuggest` が `memList` を返す、別ファイルの素の await、別ファイルの helper の中の W2 を W5 の後に呼ぶ、別ファイルの helper の `readShown`）。前の guard ではどれも通る（9 件とも落ちないことを実行で確かめた）。陰性：別ファイルの同期の helper を build から呼ぶのは違反なし |
+| PM P3-2 | `--agent` だけの `send --note --auto-yes` が必ず exit 99「後でもう一度」 | 宛先を決めた直後（副作用の前）に、`--note`・`--auto-yes`（`--model` で後回しにしない）で instance が決まらなければ exit 2「`--instance` が要る」。読めなかったときの exit 99 はそのまま | `tests/unit/cli/commands/send-note-4226.test.ts`：exit 2・要求 0・文言に `--instance`。直しを外すと exit 99 で落ちる。陰性：`--note` なし・`--auto-yes` なし・`--instance` ありは従来どおり |
+| PM P3-3 | 「隙間を狭くしている」の根拠が弱い | 小さい方を採り、記述を実際に合わせた（ja・en の cli-operations-guide、§3.6、§4.5 の K3）。CLI の残り時間をサーバへ渡す案は採らない | 文書だけ |
+| PM P3-4 | quiet の W5 の `gateOf` を外しても落ちない | 記録だけ（処分どおり）。`settingsMoved` が同じ結果に倒すので害は無い | — |
+| PM P3-5 | マージの手順 | 手順（PM が行う）。この契約では develop を取り込んだ木で検証をやり直す | — |
+
+残り：quiet で tmux に答えが来た後の `resolveSessionIdentity` は、もう一度同期の `tmux display-message` を呼ぶ（`whoami.ts` の `readTmuxSessionName` に期限が無い。scope 外なので直さない）。答えた直後の 2 回目なので、止まるのは tmux がその間に止まったときだけ。

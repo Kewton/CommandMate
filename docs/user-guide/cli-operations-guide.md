@@ -300,7 +300,7 @@ commandmate send <worktree-id> "<message>" --auto-yes --auto-yes-answer-mode car
 | `--auto-yes` | 送信前にAuto-Yesを有効化。送信の後に適用するとき（`--model` で後回しになるツール、ロールや固定つきで既に有効なとき）の失敗は、本文を送った後なので警告と exit 0 です。本文は送り直さず、警告のコマンドで有効化だけをやり直します。送信前の失敗はエラーで未送信です（Issue #4159） | - |
 | `--auto-yes-answer-mode <m>` | `--auto-yes` で有効にするときの答え方のモード（`recommended` / `careful`。[答え方のモード](#答え方のモードおまかせ慎重issue-3863)）。`--auto-yes` なしで指定すると exit 2（Issue #3863） | 新たに有効にするなら `recommended`、有効中なら今のモードのまま |
 | `--duration <d>` | Auto-Yesの有効期間（`1h`〜`24h`、1 時間刻み。例: `1h` / `3h` / `8h`）。範囲の外は `--auto-yes` の有無にかかわらず exit 2 | 1h |
-| `--note "<text>"` | `--reply-to` と一緒に使う。返事を待つ目的の一言を、送り手（`whoami` の自分のセッション）の mem に `waiting` の項目として残す（`close_when=relay:<id>`・`evidence=[relay:<id>]`。relay が終われば閉じる）。保存するのは一言と relay の ID だけで、相手・時刻・本文は写さない。**本文には足さない**。`--reply-to` が無い・セッションの身元が無いと exit 2。mem が断ると（mode が `on` でない 50・検査 2・件数の上限 56 など）**何も送らず**、契約の task を `failed` にし、この送信が有効にした Auto-Yes と relay を取り下げて mem の終了コードで終わる。`--auto-yes` で今の Auto-Yes の状態を読めなかったときは、有効にする前に止める（exit 99）。送れなかったと確定した送信では項目を閉じる（Issue #4226） | - |
+| `--note "<text>"` | `--reply-to` と一緒に使う。返事を待つ目的の一言を、送り手（`whoami` の自分のセッション）の mem に `waiting` の項目として残す（`close_when=relay:<id>`・`evidence=[relay:<id>]`。relay が終われば閉じる）。保存するのは一言と relay の ID だけで、相手・時刻・本文は写さない。**本文には足さない**。`--reply-to` が無い・セッションの身元が無いと exit 2。mem が断ると（mode が `on` でない 50・検査 2・件数の上限 56 など）**何も送らず**、契約の task を `failed` にし、この送信が有効にした Auto-Yes と relay を取り下げて mem の終了コードで終わる。`--auto-yes` で今の Auto-Yes の状態を読めなかったときは、有効にする前に止める（exit 99）。`--auto-yes` と一緒なら `--instance` が要る（`--agent` だけでは状態を読む先が無いので、何もせず exit 2）。送れなかったと確定した送信では項目を閉じる（Issue #4226） | - |
 | `--stop-pattern <p>` | Auto-Yes停止条件（正規表現、ターミナル出力への照合。[auto-yes の注意](#--stop-pattern-はターミナル出力への照合コマンドの抑止には使えない)参照） | - |
 
 > `--instance` の詳細（ID規約・rosterとの関係）は [マルチセッション（1エージェント複数セッション）](#マルチセッション1エージェント複数セッション) を参照してください。
@@ -3475,7 +3475,7 @@ commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before 
 - **終了コード**：促しが 1 つ以上で **57**、無ければ 0。mode が `off` / `derived` は stdout に何も出さず exit 50。`promptOnEvents`（画面の mem の設定）が無効なら促しは 0 件で exit 0（`--json` に `disabledBy: "promptOnEvents"`）。評価の途中で mode・設定・ブランチ・登録・instance や作業木の世代が変わったら何も出さず exit 0（`--json` に `discarded`、stderr に「もう一度」の 1 行）
 - `--suggest` は条件を評価する（`mem list` と同じく、成立した条件で項目を閉じうる）。表示済みかどうか（`shown`）を出すだけで、同じ状態でも毎回全部出します
 - `--quiet` は skill の手順から呼ぶ形です。**常に exit 0** で、その instance にまだ見せていない促しだけを 1 行（280 バイト以内）で出し、見せたことを記録します。条件の照会はしません。記録は DB に残り、**同じ状態の促しはサーバーの再起動の後も繰り返しません**（ブランチや同じ Git の登録 root を行き来しても、それぞれの状態が変わらなければ出しません）。会話の境界・instance の世代・状態（項目の版など）が変われば 1 回出ます。身元が無い・`--instance` が自分と違うときは何もしません。`--json` を付けても quiet が勝ちます。commander が断る旗の誤り（知らない旗など）は従来どおり exit 1
-- 既知の制限：サーバーが記録した後、応答が CLI の期限（4 秒）に間に合わないと、その促しは見えないまま記録済みになります（サーバーの期限は 3 秒で、隙間を狭くしている）。roster から消えた instance・git から消えたブランチ・登録を消した root の記録は、その作業木で次に `--quiet` が呼ばれるか作業木を消すまで残ります
+- 既知の制限：サーバーが記録した後、応答が CLI の期限（4 秒）に間に合わないと、その促しは見えないまま記録済みになります（サーバーの期限 3 秒はサーバーが要求を受けてから数えるもので、CLI がそれより前に使った時間（セッションの身元の解決など）は含まないため、この隙間は閉じない）。roster から消えた instance・git から消えたブランチ・登録を消した root の記録は、その作業木で次に `--quiet` が呼ばれるか作業木を消すまで残ります
 - `--hook <event>`（`session_start` / `pre_compact` / `turn_end` / `manual`）は呼んだ時点の印で、ログと `--json` に出るだけです
 - 同じ OS 権限のプロセスは API（`POST /api/worktrees/<id>/mem/suggest`）を直接呼んで、別の instance の記録を消費できます。作成者の検査と同じく、誤りを防ぐもので悪意は防ぎません
 

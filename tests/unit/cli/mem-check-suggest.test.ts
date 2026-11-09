@@ -5,6 +5,9 @@
  * @vitest-environment node
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import os from 'os';
+import path from 'path';
 import { mockFetchResponse, mockFetchUnreachable, restoreFetch } from '../../helpers/mock-api';
 import { createMemCommand } from '../../../src/cli/commands/mem';
 import { MemExitCode } from '../../../src/cli/types';
@@ -182,6 +185,62 @@ describe('mem check --suggest --quiet (I-F8)', () => {
     inSession();
     expect(await run('check', '--suggest', '--quiet', '--nope')).toBe(1);
   });
+});
+
+describe('mem check --suggest --quiet: the deadline covers the identity (Codex P2-1)', () => {
+  let shimDir: string;
+  let savedPath: string | undefined;
+
+  beforeEach(() => {
+    shimDir = mkdtempSync(path.join(os.tmpdir(), 'mem-quiet-tmux-4226-'));
+    savedPath = process.env.PATH;
+  });
+
+  afterEach(() => {
+    process.env.PATH = savedPath;
+    rmSync(shimDir, { recursive: true, force: true });
+  });
+
+  /** A `tmux` first on PATH (in the sandbox) that runs `body`. */
+  const fakeTmux = (body: string) => {
+    const file = path.join(shimDir, 'tmux');
+    writeFileSync(file, `#!/bin/sh\n${body}\n`);
+    chmodSync(file, 0o755);
+    process.env.PATH = `${shimDir}${path.delimiter}${savedPath ?? ''}`;
+    process.env.TMUX = '/tmp/fake-tmux-socket,1,0';
+  };
+
+  it('a tmux that hangs: back within the deadline, exit 0, nothing on stdout, nothing sent', async () => {
+    // Positive control: before the fix the synchronous spawn waited the 12 seconds out.
+    fakeTmux('exec sleep 12');
+    const fetchMock = vi.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const started = Date.now();
+    expect(await run('check', '--suggest', '--quiet')).toBe(0);
+    expect(Date.now() - started).toBeLessThan(7000);
+    expect(stdout).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  }, 20_000);
+
+  it('the environment names the session: tmux is not asked at all, even if it hangs', async () => {
+    // Positive control: before the fix tmux was asked first, and this waited 12 seconds.
+    fakeTmux('exec sleep 12');
+    inSession();
+    mockFetchResponse(answer({ full: false, quietLine: '[CommandMate mem] line' }));
+    const started = Date.now();
+    expect(await run('check', '--suggest', '--quiet')).toBe(0);
+    expect(Date.now() - started).toBeLessThan(7000);
+    expect(stdout).toEqual(['[CommandMate mem] line']);
+    expect(sentBody()).toEqual({ instanceId: 'claude', full: false });
+  }, 20_000);
+
+  it('(negative control) a tmux that answers: the identity is its session, as before', async () => {
+    fakeTmux("echo 'mcbd-claude-w'");
+    mockFetchResponse(answer({ full: false, quietLine: '[CommandMate mem] line' }));
+    expect(await run('check', '--suggest', '--quiet')).toBe(0);
+    expect(stdout).toEqual(['[CommandMate mem] line']);
+    expect(String(fetchCalls().at(-1)?.[0])).toContain('/api/worktrees/w/mem/suggest');
+  }, 20_000);
 });
 
 describe('E-0: check without the new flags is as it was', () => {

@@ -278,3 +278,44 @@ describe('send --note: after the message', () => {
     expect(server.memPosts.filter(({ url }) => url.endsWith('/close'))).toEqual([]);
   });
 });
+
+describe('send --note --auto-yes with --agent only (P3-2)', () => {
+  /** The send as typed, with no `--instance` added. */
+  async function sendAgentOnly(...args: string[]): Promise<number | undefined> {
+    await createSendCommand().parseAsync(['node', 'send', WT, 'hello', '--agent', 'codex', ...args]).catch(() => undefined);
+    return exitCode;
+  }
+
+  it('an input error: exit 2 naming --instance, before any side effect (not exit 99 "send it again later")', async () => {
+    const server = fakeServer();
+    // Positive control: before the fix this was exit 99 with "Send it again later", every time.
+    expect(await sendAgentOnly('--reply-to', 'self', '--auto-yes', '--note', NOTE)).toBe(2);
+    expect(server.order).toEqual([]);
+    expect(server.autoYesPosts).toEqual([]);
+    expect(server.memPosts).toEqual([]);
+    expect(server.sends).toEqual([]);
+    const said = errors.join('\n');
+    expect(said).toContain('--instance');
+    expect(said).not.toContain('again later');
+    expect(said).not.toContain(NOTE);
+  });
+
+  it('(negative control) the same send without --note: armed and sent as before', async () => {
+    const server = fakeServer();
+    expect(await sendAgentOnly('--reply-to', 'self', '--auto-yes')).toBeUndefined();
+    expect(server.sends).toHaveLength(1);
+  });
+
+  it('(negative control) --agent only with --note but no --auto-yes: the note is kept and the message sent', async () => {
+    const server = fakeServer();
+    expect(await sendAgentOnly('--reply-to', 'self', '--note', NOTE)).toBeUndefined();
+    expect(server.order).toEqual(['relay', 'mem', 'send']);
+  });
+
+  it('(negative control) --instance named with --note --auto-yes: armed, kept, sent', async () => {
+    const server = fakeServer();
+    expect(await send('--reply-to', 'self', '--auto-yes', '--note', NOTE)).toBeUndefined();
+    expect(arms(server)).toHaveLength(1);
+    expect(server.sends).toHaveLength(1);
+  });
+});
