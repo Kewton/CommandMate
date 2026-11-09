@@ -160,7 +160,20 @@ worktree は削除も作り直しも改名もされていない（台帳の行�
 |---|---|
 | `worktreeIncarnation` が非 null | 今の `getWorktreeIncarnation(db, worktreeId)` が同じ値 |
 | null で `anchorBoundaryId` が非 null | その行が今も在り、`worktree_id` が同じ |
-| どちらも null | 証拠が無い。付けない（理由 `lifetime_unpinned`）。mode が `derived` / `on` かつ `injectOnStart` のときだけ、その同期の区間で世代を作る（次の要求からは固定できる）。起きるのは、D1 の前から動いていて台帳に行の無い instance への `force` と、作ったばかりの worktree への `force` だけ |
+| どちらも null | 証拠が無い。付けない（理由 `lifetime_unpinned`）。mode が `derived` / `on` かつ `injectOnStart` のときだけ、その同期の区間で世代を作る（次の要求からは固定できる）。2 回目の事前レビュー ① の処置（下の「入口で世代を作る前判定」）の後に起きるのは、保存されている設定（`repository_path`・`branch` の写し）では無効と読めたのに git の観測では有効だった送信だけ |
+
+**入口で世代を作る前判定**（2 回目の事前レビュー ①）：世代も台帳の行も無い worktree への**通常の初回の `auto`**（送信が起動も行う）では、
+入口の固定が両方 null になり、route の起動（`startSessionForSend`）が開く `launch` の行には固定の時点の証拠が無い。これを `lifetime_unpinned`
+で落とすと UAT-1 の「新しい起動の 1 通目に付く」に反する。寿命の照合は緩めず、次のとおり**入口の同期の区間で**世代を作る：
+
+- `pinBriefWorktree` は、世代が無いとき、保存されている設定だけで同期に前判定する（`briefMayAttach`：worktree の `repository_path` と
+  path が等しい登録の repository（無ければ全 repository）のどれかで、`mem_repository_settings` の `injectOnStart`（上書きを含む）が
+  `true` で、かつ mode が `off` 以外になりうる規則・上書きがある）。成り立てば `getOrCreateWorktreeIncarnation` をその区間で呼び、
+  固定は作った値になる。成り立たなければ何も書かない（W5：保存された設定が `off`・無効なら `mem_*` を書かない）
+- 作る行は A の `fixMemEvalLifetime` が mem の読み（`list`・`check`・`brief`）で作るのと同じ行で、内容を持たない
+- 前判定が有効で git の観測が `off` だった場合に行が 1 つ残るのは許す（保存された設定が有効と言っているので「off／無効の先行書込み」ではない）
+- 起動の待ちの間の作り直し（T0d）では、作り直した worktree に世代が無い（CASCADE）ので照合が落ち、古い要求は付けない。新しい `launch` の行は
+  `pending` のまま、次の要求（自分の入口で新しく世代を作る）に 1 回付く
 
 **provider に渡す世代**：取る区間ではなく**計画**で provider を呼ぶので、計画の `withMemTarget` の callback（同期の区間）で、mode が
 `derived` / `on` かつ `injectOnStart` のときだけ、上の証拠を照らしてから `w = getOrCreateWorktreeIncarnation(…)` を読み（固定が非 null なら
@@ -218,7 +231,7 @@ target: {
 | T3 | P3：build の後、ロックの待ちの間に作り直す（`force`） | 本文だけ。報告は `worktree_changed`。`reserve` が 0 回 | ロックを待っても作り直さなければ付く |
 | T4 | P4：計画の後に改名 | 付けない（`worktree_changed` か `target_unresolved`）。新しい ID の行は `pending` のまま、次の送信（新しい ID）に 1 回付く | 改名しなければ付く |
 | T5 | W5（事前レビュー P2-1）：世代の表が 0 件・境界の行なしの worktree で、mode `off`・`injectOnStart=false` それぞれ `force` / `auto` を送る | — | `mem_*` の表の行の数と内容のハッシュが前後で同じ（`mem_worktree_incarnations` は 0 件のまま）。`never` の送信と打つ本文・記録が同じ |
-| T5b | 同：有効（`on`・`injectOnStart=true`）・世代 0 件・行なしで `force` | 1 回目は `lifetime_unpinned` で付かず、世代が 1 件作られる。2 回目の `force` は付く。2 回目の要求の待ちで作り直すと付かない（固定が効く） | 行のある instance（起動の後）の `force` は 1 回目から付く（証拠は行） |
+| T5b | 同：有効（`on`・`injectOnStart=true`）・世代 0 件・行なしで `force`・送信が起動も行う通常の `auto` の 1 通目（2 回目の事前レビュー ①） | 入口の前判定で世代が 1 件作られ、1 回目から付く。要求の待ちで作り直すと付かない（固定が効く。T0d） | 保存された設定が無効なのに git が有効と答える送信は `lifetime_unpinned` で 1 回付かない（照合を緩めない） |
 | T6 | 入口の規則 | `request` があり `pinned` の無い `buildBrief` を直に呼ぶと例外（規則を外した版が落ちる） | CLI の route（`pinned` あり）は今と同じ答え（`brief-retry-paths-4223` が変えずに通る） |
 | T7 | 型 | `brief: 'auto'` で `briefPin` の無い `sendUserMessage` の呼び出しを書いた試験用のソースが tsc で通らない（`// @ts-expect-error` で固定） | `brief` を書かない呼び出し（relay）は通る |
 
@@ -303,10 +316,19 @@ src に今ある形［事実］：`.build(` は `session-brief.ts:143` の 1 か
 引数のオブジェクトの `brief` の欄を構文で読む（オブジェクトの字面・スプレッドは「解決できない値」として R2 に）。表の値は今のまま
 （route は `body.brief ?? 'auto'`、relay は無し）。Timer は §10 の決定に従う。
 
-**(e) R5 の走査**：根 `pinBriefLifetime`・`pinBriefRequest`（§2.4）と、provider が `pinned` を組む関数（`provider.ts:build`）の呼び出し元を
-同じ規則で辿り、繰り返しの中で固定を作る呼び出し元が 1 つも無いこと、`pinBriefRequest` の呼び出しがその関数の最初の状態の読み
-（`getWorktreeById` など）と同じ同期の区間にあり、間に `await` が無いことを表で固定する（今は `service.ts:briefForRoute` がループの前で 1 回。
-D2 で足す `send/route.ts` の `POST` と、T-2 を許したときの `timer-manager.ts` の発火の関数）。
+**(e) R5 の走査**：根 `pinBriefLifetime`・`pinBriefWorktree`・`pinBriefRequest`（§2.4）と、provider が `pinned` を組む関数（`provider.ts:build`）の呼び出し元を
+同じ規則で辿り、繰り返しの中で固定を作る呼び出し元が 1 つも無いことを表で固定する（今は `service.ts:briefForRoute` がループの前で 1 回。
+D2 で足す `send/route.ts` の `handleSend`）。
+
+同期の区間の検査は二段固定（§2.4）に合わせて**2 つに分ける**（2 回目の事前レビュー ⑥）：
+
+| 検査 | 対の呼び出し | 間に置いてはいけないもの |
+|---|---|---|
+| worktree の固定 | 最初の状態の読み `getWorktreeById` → `pinBriefWorktree` | `await`（本文の解析 `readJsonObjectBody` を含む） |
+| instance の固定 | instance の解決 `validateSendRequest` → `pinBriefRequest` | `await`（所有の確認・起動の待ち） |
+
+本文の解析の `await` は worktree の固定と instance の固定の**間**にあってよい（その待ちの間の作り直しは worktree の固定が拾う）。
+自己対照：正しい二段固定は通り、`pinBriefWorktree` を本文の解析の後へ移した版・`pinBriefRequest` を所有の確認の後へ移した版がそれぞれ落ちる。
 
 ### 3.4 対照の試験
 
@@ -485,7 +507,7 @@ brief の本文の**データの区画の最初の行**（C の固定の先頭 4
 |---|---|---|
 | X1 | mode が `on` | 「最終更新」は手で書く項目（S7・S8）の話で、`derived` では読まない（C 設計 §4） |
 | X2 | 計画した境界の種類が `launch` か `auto_restart`（プロセスの世代の境界） | reset・resume は会話の操作で、プロセスは終わっていない。`explicit` は境界を知らない（D1 設計 §7.3） |
-| X3 | この instance に、その境界の `opened_at` より前の**会話の証拠**がある | 台帳の保持（20 行、種類を問わず古い行を消す：`src/lib/db/session-brief-db.ts:270-272`）には頼らない（事前レビュー P2-3）。証拠は (a) `chat_messages` の利用者の行（`worktree_id`・`cli_tool_id`・`instance_id` が同じ。経路は問わない：送信・relay・transcript の取り込み）、(b) §7.3 の「この instance の更新」のどちらか。instance の世代があれば、その `created_at` より後のものだけを数える（ID の再利用で前の作業の会話を数えない：D5）。どちらも無ければ出さない（「初めての起動」と断定するのではなく、前の会話を示す証拠が無いので出さない） |
+| X3 | この instance に、その境界の `opened_at` より前の**会話の証拠**がある | 台帳の保持（20 行、種類を問わず古い行を消す：`src/lib/db/session-brief-db.ts:270-272`）には頼らない（事前レビュー P2-3）。証拠は (a) `chat_messages` の利用者の行（`worktree_id`・`cli_tool_id`・`instance_id` が同じ。経路は問わない：送信・relay・transcript の取り込み）、(b) §7.3 の「この instance の更新」のどちらか。instance の世代の `created_at` で下限を切るのは、B の定義（`incarnation.ts:47`）どおり `issued_by='roster'`（新しい組み：削除して足し直した）のときだけ。`lazy`（mem の最初の書き込み・既にある primary の最初の roster 保存）と NULL（v67 より前）の `created_at` は誕生の時刻ではないので下限にしない（2 回目の事前レビュー ②）。worktree の作り直しの前の会話は、`chat_messages` が worktree の子（CASCADE）なので数えない。どちらも無ければ出さない（「初めての起動」と断定するのではなく、前の会話を示す証拠が無いので出さない） |
 | X4 | 前の世代について「終わる前の更新」の記録が**確認できない** | 読み口 `readPreEndUpdate(db, { worktreeId, instanceId, before: openedAt })` → `'recorded' \| 'not_recorded'`。G・F が書き手になるまでは常に `not_recorded`（§0.1 H2） |
 
 **送信の中の再起動との関係**（事前レビュー P2-2）。`sendMessage` の中の `requireSession`（Codex は `src/lib/cli-tools/codex.ts:1025`、
@@ -511,15 +533,26 @@ brief の本文の**データの区画の最初の行**（C の固定の先頭 4
 | 今の `now` | `mem_items` ではなく `session_notes`（`worktree_id`・`instance_id` の行、`updated_at`・`updated_by`：v61 の表と v66 の列、`mem-db.ts:646-648`） |
 | 退避した `now` | `archiveSlot` が `mem_items` に `closed` で入れる。`updated_by_instance` は NULL、`updated_at` は退避の時刻（`mem-db.ts:489-520`）。作者が最後に書いた時刻は残らない |
 
-規則：最終更新 ＝ 次の最大。
+規則：最終更新 ＝ 次の最大。作者は A の所有の規則（`mem-db.ts` の `ownedBy`：Agent の更新は `origin_instance_id` と
+`origin_incarnation` が自分の項目だけ）と同じく **instance の世代**で決める（2 回目の事前レビュー ②）。
 
-- `session_notes` のこの (worktree, instance) の行で、`updated_by='agent'`、かつ `mem_incarnation` が今の instance の世代と同じ（どちらかが NULL なら数える）ものの `updated_at`
-- `mem_items` の所属（repository・ブランチ）の行で、`updated_by='agent'` かつ `updated_by_instance` がこの instance と**等しい**ものの `updated_at`
-  （`origin_instance_id` へは寄せない：条件の close の `updated_at` を作者の更新と読まないため）
+- `session_notes` のこの (worktree, instance) の行で、`updated_by='agent'`、かつ `mem_incarnation` が今の instance の世代と同じものの `updated_at`
+- `mem_items` の行で、`updated_by='agent'` かつ `updated_by_instance` がこの instance と等しく、かつ `origin_incarnation` が今の instance の世代と
+  **等しい**ものの `updated_at`。同じブランチの別の worktree の同名の primary（例：両方 `claude`）は世代が違うので数えない。
+  `origin_instance_id` だけへは寄せない：条件の close の `updated_at` を作者の更新と読まないため
+- instance の世代が無いとき（Agent の mem の書き込みは世代を発行するので、書き込みも無い）は「記録なし」
 
 数えないもの：人の編集・条件の close（`server`）・退避した `now`（作者の時刻が分からない）・`updated_by` が NULL の古い `session_notes` の行。
-数えないものだけのときは「この instance の更新の記録なし」（分からない過去の時刻を作らない）。読むだけの SQL を新しい情報源 S10
-`previous_end`（`src/lib/brief/sources.ts`）に置く。A のファイル（`mem-db.ts`）は変えない。
+数えないものだけのときは「この instance の更新の記録なし」（分からない過去の時刻を作らない）。A のファイル（`mem-db.ts`）は変えない。
+
+**読む時点**（X-f の一部解消の残り）：条件の close（`mem-db.ts:1077-1079`）は `updated_at` を上書きするので、評価（`buildBrief` の 3）の**前**に読む。
+読みは `buildBrief` の 1（最初の await の前の同期の区間）で 1 回行い、mode が `on` と分かった後に使う。評価が close した項目も、その前の
+作者の時刻で数える（「72 時間前」のまま）。
+
+**置き場**［見立て。実装で決めた形］：先頭の行は `BriefSourceId` の新しい情報源（S10）にはしない。`BRIEF_SOURCE_IDS` は `--json` の `sources`
+の配列と C の試験の固定（9 つ）に出るので、送信の側（provider）だけの行のために CLI の出力を変えない。読み口は `src/lib/brief/sources.ts` の
+`readPreviousEnd`（読むだけの SQL）に置き、行は model の `lead`（`BriefModel.lead?: string`）として `drawText` が固定の 4 行の直後に置く。
+`commandmate brief` は境界を知らない（X2 が成り立たない）ので、CLI のテキスト・`--json` には出ない。
 
 ### 7.4 必須の項目としての予算（事前レビュー P2-5）
 
@@ -613,14 +646,22 @@ brief の本文の**データの区画の最初の行**（C の固定の先頭 4
 | H-3 | 空の provider・mode `off`・brief を付けなかった送信の取り込みは今と同じ |
 | H-4 | 取り込みは何度読み直しても同じ結果（鍵 `request_id` の既存の冪等のまま） |
 
-作り［見立て］：`recordUserTurn` の正規化の前に `stripDeliveredBrief(db, target, content, timestampMs)` を 1 回通す。
+作り［見立て。2 回目の事前レビュー ③④⑤ で第 2 版を替えた］：`recordUserTurn` の引き取り（`adoptExistingRow`）に、全文で引き取れなかった
+ときの 2 段目を足す。**証拠は台帳ではなく、その送信が書いた `/send` の行そのもの**にする。
 
-1. 本文の先頭が C の区画の形（`<<<cmate-brief:<8 桁の 16 進>` の行で始まり、同じ tag の `cmate-brief:<tag>>>>` の行で閉じ、その後に `"\n\n"`）でなければ何もしない
-2. 証拠：台帳に、同じ (worktree, instance) の `state='sent'` の行があり、`brief_bytes` が区画のバイト数と等しく、`settled_at` が
-   取り込みの窓（`USER_TURN_ADOPTION_WINDOW_MS`、引き取りと同じ窓）の中にある。台帳を読むだけ（書かない）。D1 の決着が `sent` のとき
-   `brief_bytes` を書く（`session-brief.ts:448-449`）
-3. 証拠があれば、区画と区切りを外した残りを本文として、以後の引き取り・INSERT に渡す。無ければ全文のまま（H-2）
-4. 区画の tag が中身から計算した値（`fenceTag`、`render.ts:124-134`）と一致することも照らす（壊れた区画を外さない）
+1. 1 段目は今のまま：全文（正規化）で、窓の中の鍵の無い行を引き取る。利用者が自分で区画ごと送った（手で貼った）送信は、その送信の
+   `/send` の行が区画を含む全文を持つので、ここで全文のまま引き取られる（③：同じ長さ・正しい tag の手の再送でも全文が残る）
+2. 2 段目：1 段目で引き取れず、本文の先頭が C の区画の形（`<<<cmate-brief:<8 桁の 16 進>` の行で始まり、同じ tag の
+   `cmate-brief:<tag>>>>` の行で閉じ、その後に空行）のときだけ、区画と区切りを外した残りで、**同じ窓**（`adoptionFromMs` で広げた窓を含む。⑤）の
+   鍵の無い `/send` の行を引き取る。引き取れた行は、利用者の本文だけを持つ行（D1 の送信は `chat_messages` に利用者の本文だけを書く）なので、
+   「CommandMate が区画を前に付けて打った送信」の行である。relay の行（`relay:` の鍵）は 2 段目では引き取らず、数えもしない（relay は `never`）
+3. 2 段目でも引き取れなければ、**全文のまま** INSERT する（H-2。区画を外した本文を INSERT しない：外してよい証拠が無い）
+4. tag は中身から計算し直さない（④：予約で知らせの行を外した本文 `dropNoticeLines` は元の tag を保つので、計算し直すと正当な区画が落ちる）。
+   照らすのは開きと閉じの tag が同じことだけ
+5. 台帳（`brief_bytes`・`settled_at`）は読まない（③：同じ長さの記録は自動の付加の証拠にならない。⑤：保持の 20 行で消えると証拠を失う）
+
+残る危険（文書に残す）：端末から直接打った（`/send` を通らない）区画つきの本文と、同じ窓の中に区画の後ろと同じ本文の未引き取りの `/send` の行が
+あると、2 段目がその行を引き取る。その行の本文（利用者の本文）は変わらず、直接打った方の区画が履歴に出ないだけで、行は増えも消えもしない。
 
 表示はこの DB の行を出すだけなので、表示の側で区画を外す処理は足さない（第 1 版の「表示で外す」をやめた）。
 
@@ -629,9 +670,11 @@ brief の本文の**データの区画の最初の行**（C の固定の先頭 4
 | # | 陽性（直す前の実装で落ちる） | 陰性 |
 |---|---|---|
 | H-a | brief を付けた送信（台帳 `sent`・`brief_bytes` 一致）の後、transcript の `brief + "\n\n" + 本文` を取り込む → 利用者の行は 1 件、本文は元のまま、`request_id` が付く。Claude・Codex・Command Code の 3 つの読み手で同じ | 同じ取り込みを 2 回 → 行は 1 件のまま（H-4） |
-| H-b | — | 利用者が自分で同じ形の区画を送った（台帳に `sent` の行が無い、または `brief_bytes` が違う）→ 全文が残る（H-2） |
+| H-b | — | 利用者が自分で同じ形の区画を送った（その送信の `/send` の行が全文を持つ）→ 全文が残る（H-2）。実際に brief を付けた直後に同じ区画を手で再送しても、両方の行が残り、手の再送の行は全文のまま（③） |
 | H-c | — | 空の provider で送った本文の取り込み → 今と同じ（H-3） |
-| H-d | — | 窓の外の `sent` の行しか無い → 全文が残る。tag の合わない区画 → 全文が残る |
+| H-d | — | 区画の後ろと同じ本文の `/send` の行が窓の中に無い → 全文が残る（無関係な古い記録で外さない）。開きと閉じの tag が違う区画 → 全文が残る |
+| H-e（④） | 知らせの一部を予約できずに組み直した本文（`dropNoticeLines`、tag は元のまま）の取り込み → 利用者の行が 1 件・元の本文のまま | — |
+| H-f（⑤） | キューで 11 分遅れて受理された送信（`adoptionFromMs` で窓を広げる取り込み）と、台帳の保持で行が消えた後の初回の取り込みでも、利用者の行は 1 件 | — |
 
 ---
 
@@ -783,3 +826,36 @@ D1〜D13・A・B・C・D1 と違う作りは要らなかった（§0.1 は止め
 決定は「`derived` でも task の title は出す」（人が PM の推奨に委任、2026-11-09）。
 理由：task は CommandMate が自分で持つ正本（実行契約）で、Epic の D2「導けるものは正本から読む」に当たり、mem の「手で書いた項目」ではない。
 title は C の sanitize（見えない文字の置き換え）と 1 行 512 bytes の上限（`BRIEF_ITEM_MAX_BYTES`）を通る。
+
+---
+
+## 16. 2 回目の事前レビューの処置
+
+Codex の 2 回目の事前レビュー（2026-11-09、`workspace/orchestration/runs/2026-11-08/prereview/review-4224b.md`）。前回 7 件は解消 4・一部解消 3、
+追加の指摘は P2 6 件（P1 なし）。すべて採った。A・B・C・D1 と違う作りは要らなかった（§0.1 は止める点なしのまま）。
+採った指摘の対照の試験は実装の契約で必ず書く。
+
+### 16.1 一部解消の 3 件
+
+| # | 残り | 処置 | 反映先 |
+|---|---|---|---|
+| P2-2 | R-c（`/clear` の後に送らずに kill）は先頭の行が届かないまま | **残る危険として受ける**（変えない）。同じ会話に brief を 2 つ入れない D1 の規則を優先する。ログ `brief-previous-end-not-delivered` を実装で残し、UAT-5 で頻度を見る。頻度が高ければ別の Issue で「reset の行の brief に先頭の行を足すか」を決める | §7.2 の R-c、§13 の U-P2 |
+| P2-4 | X-f の「close の後も 72 時間前」は、その項目しか無ければ取れない（close が `updated_at` を上書きする） | **採る**：先頭の行の読みを評価の前（`buildBrief` の 1 の同期の区間）へ移す。作者の規則は ② と合わせて instance の世代で決める | §7.3 の「読む時点」 |
+| P2-6 | 付加物の識別と正当な配送の認識の条件（③〜⑤） | **採る**：下の ③〜⑤ | §8.5 |
+
+### 16.2 追加の 6 件
+
+| # | 指摘 | 処置 | 守る条件・対照の試験（反映先） |
+|---|---|---|---|
+| ① | 通常の初回起動（世代・台帳なしの worktree への、起動も行う `auto` の 1 通目）も `lifetime_unpinned` になる | **採る** | 入口の同期の区間で、保存された設定の前判定（`briefMayAttach`）が有効なときだけ世代を作る。寿命の照合は緩めない（§2.4 の「入口で世代を作る前判定」）。陽性：未発行・境界なし・有効で、起動も行う通常の `auto` の 1 通目に付く（T5b）／陰性：起動の待ちで作り直すと付かない（T0d）・保存された設定が off／無効なら何も書かない（T5） |
+| ② | instance の寿命・作者を B／D1 と違う規則で判断する（`lazy` の `created_at` を誕生と読む・同名の primary の更新を数える） | **採る** | X3 の下限は `issued_by='roster'` のときだけ。作者は `origin_incarnation` が今の instance の世代と等しい項目（A の `ownedBy` と同じ規則）と、`mem_incarnation` が等しい `now`（§7.2 X3・§7.3）。陽性：既にある primary の最初の roster 保存で `lazy` 発行 → kill しても前の会話を拾う（X-j）。同じブランチの別の worktree の同名の primary の更新を「この instance の更新」に数えない（X-j）／陰性：roster による作り直し（`roster` 発行）では前の会話を拾わない（X-j） |
+| ③ | 同じ長さの `sent` の記録は自動の付加の証拠にならない（手で貼った区画を外せる） | **採る** | 証拠を台帳から、その送信の `/send` の行（利用者の本文だけを持つ）の引き取りへ替えた。全文の引き取りを先に試す（§8.5 の 1〜3）。陽性：実際に brief を送った直後に同じ区画を手で再送しても全文が残る（H-b） |
+| ④ | 一部予約の後の正当な brief が tag の検証に落ちる | **採る** | tag を計算し直さない。開きと閉じの tag が同じことだけを照らす（§8.5 の 4）。陽性：一部予約 → 実際の最終本文 → 取り込みで利用者の行が 1 件・元の本文（H-e） |
+| ⑤ | 履歴の証拠の寿命が既存の遅延取り込みより短い | **採る** | 2 段目は 1 段目と同じ窓（`adoptionFromMs` を含む）を使い、台帳を読まない（§8.5 の 2・5）。陽性：11 分遅れの受理・台帳の保持の削除の後の初回の取り込みでも重複しない（H-f）／陰性：窓の中に後ろの本文と同じ行が無ければ外さない（H-d） |
+| ⑥ | 固定の網羅の検査が二段固定の手順と一致しない | **採る** | 同期の区間の検査を worktree の固定（`getWorktreeById` → `pinBriefWorktree`）と instance の固定（`validateSendRequest` → `pinBriefRequest`）の 2 つに分け、R5 の根に `pinBriefWorktree` を足す（§3.3 (e)）。陽性：`pinBriefWorktree` を本文の解析の後へ移した版・`pinBriefRequest` を所有の確認の後へ移した版がそれぞれ落ちる（C12）／陰性：正しい二段固定は通る |
+
+X-j（新規、§7.5 の表に足す）：
+
+| # | 陽性 | 陰性 |
+|---|---|---|
+| X-j（②） | 既にある primary（世代なし）の最初の roster 保存で `lazy` が発行された後に kill して起動 → 前の会話（世代の `created_at` より前の利用者の行）を証拠に先頭の行が出る。同じブランチの別の worktree の `claude` が 1 時間前に更新した項目は数えず「記録なし」 | roster の削除と足し直し（`roster` 発行）の後は、その前の会話だけでは出ない |
