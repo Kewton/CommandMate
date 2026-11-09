@@ -22,6 +22,22 @@
  *  (6) No floating promise: a call whose type is a promise is awaited, or is what an
  *      arrow given to `step` (or `runStep`) returns. Also in the route.
  *
+ * What this guard guarantees, and what it does not (PM decision 2026-11-10, design §3.6
+ * "I-F13 の保証の範囲"). A static reading of calls never runs out of edges (aliases, helper
+ * depth, higher-order functions, dynamic calls), so the edge is drawn here, not chased:
+ *  - Covered: direct calls; import aliases (`import { settleShown as settleLate }`, namespace
+ *    imports `ns.peek(…)`); variable aliases (`const f = peek`, `let f = …; f = peek`); and the
+ *    reverse lookup of one level of helper (a helper the W5 build calls directly, called from
+ *    outside the build as well).
+ *  - Not covered: helpers of more than one level (`wrapped → peek → readShown`, called after
+ *    W5 through `wrapped`: Codex 5-2b, third re-review `review-4226d.md`, tracked in #4289);
+ *    higher-order functions (a function passed as a value and called elsewhere); dynamic calls
+ *    (computed property names, `Function.prototype.call`/`apply`, lookups by string).
+ * INV-A itself is fixed at run time by the table-driven injection test over W1〜W5
+ * (`tests/unit/lib/mem-suggest/suggest-invariants.test.ts`, I-F11: the state changes after each
+ * await, and no prompt nor record is left). This guard is an aid that notices a new `await`
+ * (or a record outside the build) added in the shapes above; it is not the proof of INV-A.
+ *
  * The files are `src/lib/mem-suggest/**` as listed on disk (and any file a control
  * adds there), not a fixed list (Codex P2-2).
  *
