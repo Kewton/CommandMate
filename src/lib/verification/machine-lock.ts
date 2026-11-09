@@ -293,6 +293,17 @@ function defaultStartOf(pid: number, now: number): number | null {
 
 const validPgid = (pgid: unknown): pgid is number => Number.isInteger(pgid) && (pgid as number) > 1;
 
+/**
+ * A record's pgid can be judged: no `pgid` key (an older record — judged by its pid alone), or a
+ * non-negative integer. Any other value (`-5`, `"x"`, `null`, `1.5`) is unknown (EINVAL), never "no
+ * group": a dead runner's lock would be recovered past its live gate (#4288 Codex re-review P1).
+ */
+const pgidFieldOk = (record: object): boolean => {
+  if (!Object.prototype.hasOwnProperty.call(record, 'pgid')) return true;
+  const pgid = (record as { pgid?: unknown }).pgid;
+  return Number.isInteger(pgid) && (pgid as number) >= 0;
+};
+
 /** The suffix of a lock moved aside (`<lockPath>.gone-<S>`): what the three implementations write — no `.`, no `_`. */
 export const MACHINE_LOCK_GONE_SUFFIX_PATTERN = /^[A-Za-z0-9-]+$/;
 
@@ -308,6 +319,7 @@ type LstatObs = { state: 'dir' } | { state: 'other' } | { state: 'absent' } | Un
 type OwnerObs = { state: 'record'; owner: LockOwner } | { state: 'missing' } | { state: 'corrupt' } | Unknown;
 type MkdirObs = { state: 'created' } | { state: 'exists' } | Unknown;
 type RenameObs = { state: 'moved' } | { state: 'absent' } | Unknown;
+type RmdirObs = { state: 'removed' } | Unknown;
 
 interface Observer {
   pid(point: string, pid: number): ProcessObs;
@@ -317,6 +329,7 @@ interface Observer {
   owner(point: string, dir: string): OwnerObs;
   mkdir(point: string, dir: string): MkdirObs;
   rename(point: string, from: string, to: string): RenameObs;
+  rmdir(point: string, dir: string): RmdirObs;
 }
 
 function toOwner(parsed: unknown): LockOwner | null {
@@ -384,13 +397,16 @@ function makeObserver(hooks: Pick<MachineLockTestHooks, 'fault' | 'pidAlive' | '
       } catch (error) {
         return errCode(error) === 'ENOENT' ? { state: 'missing' } : { state: 'unknown', code: errCode(error) };
       }
-      let owner: LockOwner | null = null;
+      let parsed: unknown;
       try {
-        owner = toOwner(JSON.parse(text));
+        parsed = JSON.parse(text);
       } catch {
-        owner = null;
+        return { state: 'corrupt' };
       }
-      return owner ? { state: 'record', owner } : { state: 'corrupt' };
+      const owner = toOwner(parsed);
+      if (!owner) return { state: 'corrupt' };
+      // The pgid's number check is a step of this observation too (#4288 Codex re-review P1).
+      return pgidFieldOk(parsed as object) ? { state: 'record', owner } : { state: 'unknown', code: 'EINVAL' };
     },
     mkdir(point, dir) {
       try {
@@ -406,6 +422,15 @@ function makeObserver(hooks: Pick<MachineLockTestHooks, 'fault' | 'pidAlive' | '
         return { state: 'moved' };
       } catch (error) {
         return errCode(error) === 'ENOENT' ? { state: 'absent' } : { state: 'unknown', code: errCode(error) };
+      }
+    },
+    /** rmdir of an empty directory, whose failure keeps its errno (#4288 Codex re-review P2). */
+    rmdir(point, dir) {
+      try {
+        attempt(point, dir, () => rmdirSync(dir));
+        return { state: 'removed' };
+      } catch (error) {
+        return { state: 'unknown', code: errCode(error) };
       }
     },
   };
@@ -434,6 +459,7 @@ function holderState(record: { pid?: unknown; host?: unknown; pgid?: unknown }, 
   if (record.host !== env.host || typeof record.pid !== 'number') return { state: 'alive' };
   const pid = env.obs.pid('pid', record.pid);
   if (pid.state !== 'gone') return pid;
+  if (!pgidFieldOk(record)) return { state: 'unknown', point: 'group', code: 'EINVAL' };
   if (!validPgid(record.pgid)) return { state: 'gone' };
   return env.obs.group('group', record.pgid);
 }
@@ -725,13 +751,18 @@ function restoreFromGone(ctx: GoneContext, gone: string): void {
  * a `<lock>` left empty by a put-back that stopped half way (never on release). When that cannot be
  * settled — whether `<lock>` is such a half put-back is unknown, or its rmdir failed — the moved-aside
  * record is KEPT (`kept`): it is the only trace that lets a later head take the empty `<lock>` back
- * once the fault clears (#4288 Codex 5-2b P2-1).
+ * once the fault clears (#4288 Codex 5-2b P2-1). Either way the reason — point, path, errno — goes
+ * with it (a failed rmdir as `reclaim-rmdir`), so the timeout names it (#4288 Codex re-review P2).
  */
 function reclaimGone(ctx: GoneContext, gone: string, token: string, takeBackHalf: boolean): { kept: boolean; unknown?: MachineLockUnknown } {
   if (takeBackHalf) {
     const half = ownerlessEmptyLock(ctx);
     if (half.state === 'unknown') return { kept: true, unknown: half.unknown };
-    if (half.state === 'yes' && !rmdirQuiet(ctx.lockPath)) return { kept: true };
+    if (half.state === 'yes') {
+      // A failed rmdir carries its reason like an unknown observation (#4288 Codex re-review P2).
+      const removed = ctx.obs.rmdir('reclaim-rmdir', ctx.lockPath);
+      if (removed.state === 'unknown') return { kept: true, unknown: { point: 'reclaim-rmdir', path: ctx.lockPath, code: removed.code } };
+    }
   }
   const mine = `${ctx.lockPath}.gone-${ctx.myToken}-${++goneSerial}`;
   if (ctx.obs.rename('reclaim-rename', gone, mine).state !== 'moved') return { kept: false };

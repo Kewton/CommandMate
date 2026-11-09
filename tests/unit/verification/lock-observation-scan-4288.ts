@@ -102,3 +102,87 @@ export function scanObservationPoints(impl: Impl, source: string): Set<string> {
   }
   return points;
 }
+
+/**
+ * The functions that make an observation themselves (#4288 Codex re-review P1): every step inside
+ * them — the read, each field's extraction, the number check — is three-valued too. The first
+ * implementation checked the read (`cat`) and not the extraction (`awk`) after it, and an extraction
+ * that failed came back empty — "no pgid", "no group" — and a live gate's lock was recovered.
+ */
+export const OBSERVER_FUNCTIONS: Record<Impl, (fn: string) => boolean> = {
+  bash: (fn) =>
+    /^lock_obs_/.test(fn) ||
+    ['lock_kill0_raw', 'lock_rmdir_errno', 'lock_pgid_field_ok', 'lock_ticket_retirable', 'lock_pid_start_ms'].includes(fn),
+  ts: (fn) => fn === 'makeObserver',
+  sync: (fn) => fn === 'makeObserver',
+};
+
+/** Pure classifiers (no I/O, no process): their command substitution cannot fail. */
+const BASH_PURE = /^\s*(?:lock_errno_text|lock_errno_of)\b/;
+
+/** Calls inside the TS / sync observers whose failure must be caught: each sits in a `try` block. */
+const TS_THROWING = /\b(?:process\.kill|(?:fs\.)?readdirSync|(?:fs\.)?lstatSync|(?:fs\.)?readFileSync|(?:fs\.)?mkdirSync|(?:fs\.)?renameSync|(?:fs\.)?rmdirSync|JSON\.parse)\(/g;
+
+/**
+ * The calls inside an observer whose failure is not looked at: `<fn>:<line>: <text>`, one per call.
+ *
+ *   - bash: a command substitution `$(…)` (other than a pure classifier, and `$((…))`) whose exit
+ *     code nothing reads — it is not the condition of an `if` / `elif` / `while`, not followed by
+ *     `||` or `; <var>=$?`, and the next line is not `<var>=$?`.
+ *   - TS / sync JS: a throwing call outside every `try { … }` of the observer.
+ */
+export function scanUncheckedCalls(impl: Impl, source: string): string[] {
+  const lines = source.split('\n');
+  const owner: string[] = [];
+  for (const { fn, n } of linesWithFunction(impl, source)) owner[n - 1] = fn;
+  const found: string[] = [];
+  if (impl === 'bash') {
+    for (let i = 0; i < lines.length; i++) {
+      const fn = owner[i];
+      if (!fn || !OBSERVER_FUNCTIONS.bash(fn)) continue;
+      const line = lines[i];
+      for (const m of line.matchAll(/\$\((?!\()/g)) {
+        const start = (m.index ?? 0) + 2;
+        if (BASH_PURE.test(line.slice(start))) continue;
+        // Walk to the closing parenthesis, across lines (an awk program spans several).
+        let depth = 1;
+        let li = i;
+        let ci = start;
+        while (li < lines.length && depth > 0) {
+          const text = lines[li];
+          for (; ci < text.length; ci++) {
+            if (text[ci] === '(') depth++;
+            else if (text[ci] === ')' && --depth === 0) break;
+          }
+          if (depth > 0) {
+            li++;
+            ci = 0;
+          }
+        }
+        const before = line.slice(0, m.index).trim();
+        const after = (lines[li] ?? '').slice(ci + 1);
+        const next = lines.slice(li + 1).find((l) => l.trim() !== '') ?? '';
+        const checked =
+          /^(?:if|elif|while|until)\b/.test(before) ||
+          /^\s*"?\s*(?:\|\||;\s*[A-Za-z_][A-Za-z0-9_]*=\$\?)/.test(after) ||
+          /^\s*[A-Za-z_][A-Za-z0-9_]*=\$\?\s*$/.test(next);
+        if (!checked) found.push(`${fn}:${i + 1}: ${line.trim()}`);
+      }
+    }
+    return found;
+  }
+  const stack: boolean[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const fn = owner[i];
+    const line = lines[i];
+    const calls = new Set([...line.matchAll(TS_THROWING)].map((m) => m.index ?? 0));
+    for (let ci = 0; ci < line.length; ci++) {
+      if (calls.has(ci) && fn && OBSERVER_FUNCTIONS[impl](fn) && !stack.includes(true)) {
+        found.push(`${fn}:${i + 1}: ${line.trim()}`);
+      }
+      if (line[ci] === '{') stack.push(/\btry\s*$/.test(line.slice(0, ci)));
+      else if (line[ci] === '}') stack.pop();
+    }
+  }
+  return found;
+}

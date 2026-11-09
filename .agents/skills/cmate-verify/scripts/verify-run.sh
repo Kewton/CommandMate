@@ -793,11 +793,10 @@ lock_kill0_raw() { # <point> <target>
     return 0
   fi
   if [ -n "${CM_VERIFY_TEST_KILL0_CMD:-}" ]; then
-    LKR_OUT=$(export LC_ALL=C; "$CM_VERIFY_TEST_KILL0_CMD" -0 -- "$2" 2>&1)
+    LKR_OUT=$(export LC_ALL=C; "$CM_VERIFY_TEST_KILL0_CMD" -0 -- "$2" 2>&1); LKR_RC=$?
   else
-    LKR_OUT=$(export LC_ALL=C; kill -0 -- "$2" 2>&1)
+    LKR_OUT=$(export LC_ALL=C; kill -0 -- "$2" 2>&1); LKR_RC=$?
   fi
-  LKR_RC=$?
 }
 
 # alive | gone (ESRCH) | unknown:<point>:<errno>. EPERM means the process exists and belongs to
@@ -844,13 +843,22 @@ lock_obs_lstat() { # <point> <path>
 # <dir>/owner: LOB_CLASS=record (pid and token read) | missing (ENOENT, not a symlink) |
 # corrupt (read, but not a record) | unknown (any other failure), and LOB_CODE, LOB_PID,
 # LOB_HOST, LOB_TOKEN, LOB_PGID (read the way lock_json_field reads them).
-lock_obs_owner() { # <point> <dir>
+# Every step inside is three-valued too (#4288 Codex re-review P1): the read, each field's
+# extraction and the pgid's number check. An extraction that failed (awk not started, killed, out
+# of memory: a non-zero exit with nothing printed) is unknown (EUNKNOWN), never an empty field — an
+# empty pgid means "no group", and a dead runner's lock would be recovered past its live gate. A
+# pgid key that is there but is not a number of digits is unknown (EINVAL) for the same reason.
+# Only a record read whole and WITHOUT a pgid key (an older owner) is judged by its pid alone.
+lock_obs_owner_fail() { # <errno>
   LOB_CLASS=unknown
-  LOB_CODE=""
+  LOB_CODE=$1
   LOB_PID=""
   LOB_HOST=""
   LOB_TOKEN=""
   LOB_PGID=""
+}
+lock_obs_owner() { # <point> <dir>
+  lock_obs_owner_fail ""
   lock_test_obs_fault "$1" "$2/owner"
   if [ -n "$LTF_CODE" ]; then
     lob_out=$(lock_errno_text "$LTF_CODE")
@@ -864,11 +872,23 @@ lock_obs_owner() { # <point> <dir>
     if [ "$LOB_CODE" = ENOENT ] && [ ! -L "$2/owner" ]; then LOB_CLASS=missing; fi
     return 0
   fi
-  LOB_PID=$(lock_json_text_field "$lob_out" pid)
-  LOB_HOST=$(lock_json_text_field "$lob_out" host)
-  LOB_TOKEN=$(lock_json_text_field "$lob_out" token)
-  LOB_PGID=$(lock_json_text_field "$lob_out" pgid)
+  LOB_PID=$(lock_json_text_field "$lob_out" pid) || { lock_obs_owner_fail EUNKNOWN; return 0; }
+  LOB_HOST=$(lock_json_text_field "$lob_out" host) || { lock_obs_owner_fail EUNKNOWN; return 0; }
+  LOB_TOKEN=$(lock_json_text_field "$lob_out" token) || { lock_obs_owner_fail EUNKNOWN; return 0; }
+  LOB_PGID=$(lock_json_text_field "$lob_out" pgid) || { lock_obs_owner_fail EUNKNOWN; return 0; }
   if [ -n "$LOB_PID" ] && [ -n "$LOB_TOKEN" ]; then LOB_CLASS=record; else LOB_CLASS=corrupt; fi
+  if [ "$LOB_CLASS" = record ] && ! lock_pgid_field_ok "$lob_out" "$LOB_PGID"; then lock_obs_owner_fail EINVAL; fi
+}
+
+# A record's pgid as extracted: absent (no "pgid": key — an older record) or digits. Anything else
+# — the key there and the value empty or not digits (`"pgid":-5`, `"pgid":"x"`) — is not a pgid
+# this runner can judge, and the caller reads it as unknown.
+lock_pgid_field_ok() { # <record text> <extracted pgid>
+  case "$2" in
+    '') case "$1" in *'"pgid":'*) return 1;; esac; return 0;;
+    *[!0-9]*) return 1;;
+  esac
+  return 0
 }
 
 # created | exists (EEXIST) | unknown:<errno>
@@ -902,8 +922,19 @@ lock_obs_pgid() { # <point> <pid>
   lock_test_obs_fault "$1" "$2"
   if [ -n "$LTF_CODE" ]; then echo "unknown:$LTF_CODE"; return 0; fi
   lop_out=$(ps -o pgid= -p "$2" 2>/dev/null) || { echo unknown:ESRCH; return 0; }
-  lop_out=$(printf '%s' "$lop_out" | tr -d ' ')
+  lop_out=$(printf '%s' "$lop_out" | tr -d ' ') || { echo unknown:EUNKNOWN; return 0; }
   case "$lop_out" in ''|*[!0-9]*) echo unknown:EUNKNOWN;; *) echo "$lop_out";; esac
+}
+
+# rmdir of an empty directory whose failure is reported, not only noticed (#4288 Codex re-review
+# P2): prints nothing when removed, else the errno (EACCES, EIO, ENOTEMPTY …), which the caller
+# carries to the timeout's report as point / path / errno. The point names the action for the
+# test seam (CM_VERIFY_TEST_OBS_FAULT) and the report.
+lock_rmdir_errno() { # <point> <dir>
+  lock_test_obs_fault "$1" "$2"
+  if [ -n "$LTF_CODE" ]; then echo "$LTF_CODE"; return 0; fi
+  if lre_out=$(LC_ALL=C rmdir -- "$2" 2>&1); then return 0; fi
+  lock_errno_of "$lre_out"
 }
 
 # The first unknown of this poll, for the timeout's report: "point=… path=… errno=…".
@@ -918,8 +949,12 @@ lock_warn_once() { # <line>
 }
 
 # A recorded process group: gone (none recorded, or ESRCH) | alive | unknown:group:<errno>.
+# A pgid that is not a number of digits is not "none recorded": unknown (EINVAL).
 lock_group_state() { # <pgid>
-  case "$1" in ''|*[!0-9]*) echo gone; return 0;; esac
+  case "$1" in
+    '') echo gone; return 0;;
+    *[!0-9]*) echo unknown:group:EINVAL; return 0;;
+  esac
   [ "$1" -gt 1 ] || { echo gone; return 0; }
   lock_obs_kill0 group "-$1"
 }
@@ -973,7 +1008,7 @@ lock_pid_start_ms() { # <pid> <now-ms>
       else exit
       printf "%.0f\n", now - (((d * 24 + h) * 60 + m) * 60 + x) * 1000
       exit
-    }')
+    }') || lps_val=""
   lock_start_cache_pid=$1
   lock_start_cache_val=$lps_val
   lock_start_cache_at=$2
@@ -984,18 +1019,22 @@ lock_pid_start_ms() { # <pid> <now-ms>
 # age alone: a long gate budget is a legitimate long wait.
 lock_ticket_retirable() { # <file> <now-ms>
   # One read of the ticket; a ticket that cannot be read is never retired (it blocks like a live one).
+  # Nor is one whose fields cannot be extracted (#4288 Codex re-review P1): an extraction that
+  # failed is not an empty field.
   ltr_text=$(cat -- "$1" 2>/dev/null) || return 1
-  ltr_token=$(lock_json_text_field "$ltr_text" token)
+  ltr_token=$(lock_json_text_field "$ltr_text" token) || return 1
   [ -n "$ltr_token" ] || return 1
-  ltr_host=$(lock_json_text_field "$ltr_text" host)
-  ltr_pid=$(lock_json_text_field "$ltr_text" pid)
-  ltr_pgid=$(lock_json_text_field "$ltr_text" pgid)
-  ltr_created=$(lock_json_text_field "$ltr_text" createdAt)
-  ltr_deadline=$(lock_json_text_field "$ltr_text" deadline)
+  ltr_host=$(lock_json_text_field "$ltr_text" host) || return 1
+  ltr_pid=$(lock_json_text_field "$ltr_text" pid) || return 1
+  ltr_pgid=$(lock_json_text_field "$ltr_text" pgid) || return 1
+  # A pgid key with no number in it is not "no group": the group check answers unknown (EINVAL).
+  lock_pgid_field_ok "$ltr_text" "$ltr_pgid" || ltr_pgid=invalid
+  ltr_created=$(lock_json_text_field "$ltr_text" createdAt) || return 1
+  ltr_deadline=$(lock_json_text_field "$ltr_text" deadline) || return 1
   if [ "$ltr_host" = "$LOCK_HOST" ]; then
     if lock_record_gone "$ltr_pid" "$ltr_host" "$ltr_pgid"; then echo gone; return 0; fi
     if [ -n "$ltr_pid" ] && [ "$ltr_pid" != "$LOCK_SELF_PID" ] && [ -n "$ltr_created" ]; then
-      ltr_start=$(lock_pid_start_ms "$ltr_pid" "$2")
+      ltr_start=$(lock_pid_start_ms "$ltr_pid" "$2") || ltr_start=""
       if [ -n "$ltr_start" ] && [ "$ltr_start" -gt $(( ltr_created + LOCK_PID_REUSE_SLACK_MS )) ]; then
         echo pid-reused
         return 0
@@ -1177,15 +1216,20 @@ lock_restore_from_gone() { # <lock-path> <gone>
 # left empty by a put-back that stopped half way is removed first (never on release). When that
 # cannot be settled — whether <lock> is such a half put-back is unknown (EIO on its listing), or
 # its rmdir failed — the moved-aside record is KEPT and 1 returned (LRG_HALF says why): it is the
-# only trace that lets a later head take the empty <lock> back once the fault clears, and without
-# it nobody would ever remove a <lock> that has no owner (#4288 Codex 5-2b P2-1).
+# it nobody would ever remove a <lock> that has no owner (#4288 Codex 5-2b P2-1). A failed rmdir
+# carries its reason like an unknown observation does (LRG_HALF=unknown:reclaim-rmdir:<lock>:<errno>,
+# #4288 Codex re-review P2), so the timeout names the point, the path and the errno.
 lock_reclaim_gone() { # <lock-path> <gone> <token> <take-back-half>
   LRG_HALF=""
   if [ "$4" = 1 ]; then
     LRG_HALF=$(lock_ownerless_empty "$1")
     case "$LRG_HALF" in
       unknown:*) return 1;;
-      yes) rmdir "$1" 2>/dev/null || return 1;;
+      yes) rmdir_err=$(lock_rmdir_errno reclaim-rmdir "$1")
+        if [ -n "$rmdir_err" ]; then
+          LRG_HALF="unknown:reclaim-rmdir:$1:$rmdir_err"
+          return 1
+        fi;;
     esac
   fi
   LOCK_GONE_SERIAL=$(( LOCK_GONE_SERIAL + 1 ))

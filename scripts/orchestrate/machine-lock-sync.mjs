@@ -103,6 +103,13 @@ export function groupAlive(pgid) {
 
 const validPgid = (pgid) => Number.isInteger(pgid) && pgid > 1;
 
+/**
+ * A record's pgid can be judged: no `pgid` key (an older record — judged by its pid alone), or a
+ * non-negative integer. Any other value (`-5`, `"x"`, `null`, `1.5`) is unknown (EINVAL), never "no
+ * group": a dead runner's lock would be recovered past its live gate (#4288 Codex re-review P1).
+ */
+const pgidFieldOk = (record) => !Object.prototype.hasOwnProperty.call(record, 'pgid') || (Number.isInteger(record.pgid) && record.pgid >= 0);
+
 /** The errno of a failed call, or EUNKNOWN when it carries none. */
 const errCode = (err) => (typeof err?.code === 'string' && err.code ? err.code : 'EUNKNOWN');
 
@@ -165,13 +172,15 @@ export function makeObserver(hooks = {}) {
       } catch (err) {
         return errCode(err) === 'ENOENT' ? { state: 'missing' } : { state: 'unknown', point, code: errCode(err) };
       }
+      let owner;
       try {
-        const owner = JSON.parse(text);
-        if (owner && typeof owner === 'object' && typeof owner.pid === 'number' && typeof owner.token === 'string') return { state: 'record', owner };
+        owner = JSON.parse(text);
       } catch {
-        // corrupt
+        return { state: 'corrupt' };
       }
-      return { state: 'corrupt' };
+      if (!owner || typeof owner !== 'object' || typeof owner.pid !== 'number' || typeof owner.token !== 'string') return { state: 'corrupt' };
+      // The pgid's number check is a step of this observation too (#4288 Codex re-review P1).
+      return pgidFieldOk(owner) ? { state: 'record', owner } : { state: 'unknown', point, code: 'EINVAL' };
     },
     /** mkdir: created / exists (EEXIST) / unknown */
     mkdir(point, dir) {
@@ -191,6 +200,15 @@ export function makeObserver(hooks = {}) {
         return errCode(err) === 'ENOENT' ? { state: 'absent' } : { state: 'unknown', point, code: errCode(err) };
       }
     },
+    /** rmdir of an empty directory: removed / unknown — a failure keeps its errno (#4288 Codex re-review P2) */
+    rmdir(point, dir) {
+      try {
+        attempt(point, dir, () => fs.rmdirSync(dir));
+        return { state: 'removed' };
+      } catch (err) {
+        return { state: 'unknown', point, code: errCode(err) };
+      }
+    },
   };
 }
 
@@ -204,6 +222,7 @@ export function holderState(record, env) {
   if (!record || record.host !== env.host || typeof record.pid !== 'number') return { state: 'alive' };
   const pid = env.obs.pid('pid', record.pid);
   if (pid.state !== 'gone') return pid;
+  if (!pgidFieldOk(record)) return { state: 'unknown', point: 'group', code: 'EINVAL' };
   if (!validPgid(record.pgid)) return { state: 'gone' };
   return env.obs.group('group', record.pgid);
 }
@@ -514,6 +533,8 @@ function restoreFromGone(ctx, gone) {
  * its mkdir and its owner write). When that cannot be settled — whether `<lock>` is such a half
  * put-back is unknown, or its rmdir failed — the moved-aside record is KEPT (`kept`): it is the only
  * trace that lets a later head take the empty `<lock>` back once the fault clears (#4288 Codex 5-2b P2-1).
+ * Either way the reason — point, path, errno — goes with it (a failed rmdir as `reclaim-rmdir`), so
+ * the timeout names it (#4288 Codex re-review P2).
  *
  * @returns {{ kept: boolean, unknown?: { point: string, path: string, code: string } }}
  */
@@ -521,7 +542,11 @@ function reclaimGone(ctx, gone, token, takeBackHalf) {
   if (takeBackHalf) {
     const half = ownerlessEmptyLock(ctx);
     if (half.state === 'unknown') return { kept: true, unknown: half.unknown };
-    if (half.state === 'yes' && !rmdirQuiet(ctx.lockPath)) return { kept: true };
+    if (half.state === 'yes') {
+      // A failed rmdir carries its reason like an unknown observation (#4288 Codex re-review P2).
+      const removed = ctx.obs.rmdir('reclaim-rmdir', ctx.lockPath);
+      if (removed.state === 'unknown') return { kept: true, unknown: { point: 'reclaim-rmdir', path: ctx.lockPath, code: removed.code } };
+    }
   }
   const mine = `${ctx.lockPath}.gone-${ctx.myToken}-${++goneSerial}`;
   if (ctx.obs.rename('reclaim-rename', gone, mine).state !== 'moved') return { kept: false };
