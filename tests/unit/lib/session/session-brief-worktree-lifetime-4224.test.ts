@@ -444,3 +444,81 @@ describe('T6 / T7 the rules that hold the pin in place', () => {
     expect(getWorktreeIncarnation(world.db, WT)).not.toBeNull();
   });
 });
+
+describe('T0h a pin without evidence never clears a dead launch row (Codex re-review 2 P2: every write needs `same`)', () => {
+  const ID = 'codex-2';
+  const sendAs = (pin: ReturnType<typeof entrance>, content: string) =>
+    sendUserMessage(world.db, { worktreeId: WT, content, cliToolId: 'codex', instanceId: ID, brief: 'auto', briefPin: pin });
+  const remake = () => {
+    removeAgentInstance(world.db, WT, ID);
+    addAgentInstance(world.db, WT, { id: ID, cliTool: 'codex' } as never);
+  };
+
+  it('(control) stage 1 holds no evidence, the worktree is made again while the body is parsed, X is launched on the new side and made again (Y), then stage 2: X’s pending row is not consumed', async () => {
+    setMem(world, 'off', true); // the entrance makes no incarnation: stage 1 has neither evidence
+    realPort(world);
+    const worktreePin = pinBriefWorktree(world.db, WT);
+    expect(worktreePin).toMatchObject({ worktreeIncarnation: null, anchorBoundaryId: null });
+    recreateWorktree(world); // the body's await
+    addAgentInstance(world.db, WT, { id: ID, cliTool: 'codex' } as never);
+    launch('codex', ID); // X: the new worktree's own launch row
+    const x = rows(world, ID).find((row) => row.state === 'pending')!;
+    expect(x).toBeDefined();
+    remake(); // Y, not launched yet
+    const pin = pinBriefRequest(world.db, worktreePin, ID); // stage 2: the instance as it is now (Y)
+    expect(pin.instance.incarnation).not.toBe(x.instanceIncarnation);
+    await sendAs(pin, 'old request');
+    expect(typed(world, 'codex')).toEqual(['old request']);
+    // `unknown` continuity: the old request writes nothing on the new worktree's ledger.
+    expect(rows(world, ID).find((row) => row.id === x.id)).toMatchObject({ state: 'pending' });
+  });
+
+  it('negative: the same lifetimes with continuity `same` (a row at the entrance) — the dead row is still cleared as incarnation_changed', async () => {
+    setMem(world, 'off', true);
+    realPort(world);
+    addAgentInstance(world.db, WT, { id: ID, cliTool: 'codex' } as never);
+    launch('codex', ID);
+    const x = rows(world, ID).find((row) => row.state === 'pending')!;
+    remake();
+    const pin = entrance(world, ID);
+    expect(pin.anchorBoundaryId).not.toBeNull();
+    await sendAs(pin, 'new request');
+    expect(typed(world, 'codex')).toEqual(['new request']);
+    expect(rows(world, ID).find((row) => row.id === x.id)).toMatchObject({ state: 'skipped', skipReason: 'incarnation_changed' });
+  });
+});
+
+describe('T0i the claim’s settlement is a row of the table too (D2 design §20.2 settle.claim)', () => {
+  const make = () =>
+    new SendBrief({ db: world.db, worktreeId: WT, cliToolId: 'claude', instanceId: 'claude', mode: 'auto', content: 'x', typedBody: (t) => t, pin: entrance(world, 'claude') });
+
+  it('(control) renamed while the body is typed: the moved row is not settled `sent`, the send says unknown, the provider is told unknown', async () => {
+    const { port } = realPort(world);
+    const settle = vi.spyOn(port, 'settle');
+    launch('claude');
+    const brief = make();
+    await brief.plan();
+    expect(BRIEF.test(await brief.claim())).toBe(true);
+    const renamed = `${WT}-renamed`;
+    world.db.transaction(() => migrateWorktreeIdPreservingChildren(world.db, WT, renamed))(); // while typing
+    brief.settleInLock('sent', Date.now());
+    await brief.afterLock();
+    expect(brief.reportForResponse()).toMatchObject({ state: 'unknown', reason: 'worktree_changed' });
+    expect(world.db.prepare('SELECT state FROM session_brief_boundaries WHERE worktree_id = ?').get(renamed)).toEqual({ state: 'claimed' });
+    expect(settle).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'unknown' }));
+  });
+
+  it('negative: not renamed — settled `sent`, the provider is told sent', async () => {
+    const { port } = realPort(world);
+    const settle = vi.spyOn(port, 'settle');
+    launch('claude');
+    const brief = make();
+    await brief.plan();
+    expect(BRIEF.test(await brief.claim())).toBe(true);
+    brief.settleInLock('sent', Date.now());
+    await brief.afterLock();
+    expect(brief.reportForResponse()).toMatchObject({ state: 'attached' });
+    expect(rows(world, 'claude')[0].state).toBe('sent');
+    expect(settle).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'sent' }));
+  });
+});

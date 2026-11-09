@@ -874,7 +874,8 @@ D2 で足した、または D2 が新しく読み手になった共通の規則�
 |---|---|---|
 | 要求の寿命の固定（`BriefRequestPin`：worktree の世代・台帳の今の行・instance の寿命。入口で 1 回） | `session-brief.ts` の `pinBriefWorktree`・`pinBriefRequest` | 送信の route の `handleSend`（2 段）、`SendBrief`（constructor の reset の寿命・`plan`（instance がまだ入口の寿命か：`instanceAsPinned` を今の行・stale claim の決着より前に照らす、違えば何も書かない。今の寿命が固定どおりで行の世代だけ古ければ `rowOfPinnedIncarnation` で `incarnation_changed` に消費。§18 の P3-1・§19）・`planInStretch`・`claimInStretch`・`settleInLock`）、試験の harness（`session-brief-4274-harness.ts` の `send`・`brief-d2-4224-harness.ts` の `entrance`） |
 | CLI の要求の寿命の固定（`BriefPinnedLifetime`：最初の await の前に 1 回、前判定と組み立てで共有） | `build.ts` の `pinBriefLifetime`・`pinnedLifetimeChange` | `service.ts` の `briefForRoute`（`--session-start` の前判定 `sessionStartDeferredTo` の await の後に `pinnedLifetimeChange` で照らす・組み立ては `pinned` を渡す。§18 の Codex P1）、`buildBrief` の入口（同じ比較を自分の形で） |
-| worktree が続いていることの証拠（`briefWorktreeContinuity`：世代が同じ／台帳の行が同じ worktree に在る／証拠なし） | `session-brief.ts` | `SendBrief.plan`（最初の読みの前・build の後）・`planInStretch`・`claimInStretch`（`same` 必須）・`settleInLock`（W6。固定のある要求は `same` 必須、証拠なしも公開しない。固定の無い Timer・relay は D1 の instance の照合のまま。§18 の Codex P2）。`buildBrief` は同じ規則を自分の形で読む（`pinned.worktreeIncarnation` と `getWorktreeIncarnation` の等しさ、作る前に照らす） |
+| worktree が続いていることの証拠（`briefWorktreeContinuity`：世代が同じ／台帳の行が同じ worktree に在る／証拠なし） | `session-brief.ts` | `SendBrief.plan`（最初の読みの前・build の後）・`planInStretch`・`claimInStretch`（`same` 必須）・`settleInLock`（W6。固定のある要求は `same` 必須、証拠なしも公開しない。固定の無い Timer・relay は D1 の instance の照合のまま。§18 の Codex P2）。§20 から、上の読み手の書き込みはすべて門 `SendBrief.write` で読む（`unknown` も書かない。§20 の Codex 再レビュー 2 回目の P2）。`buildBrief` は同じ規則を自分の形で読む（`pinned.worktreeIncarnation` と `getWorktreeIncarnation` の等しさ、作る前に照らす） |
+| 書き込みの規則（§20：すべての書き込みは `BRIEF_WRITE_RULES` の行として門 `SendBrief.write`／`writeAtEntrance` を通り、`briefWriteVerdict` が continuity `same`（`same-and-instance` の行は instance の寿命も）を証明したときだけ書く。`unknown`・`changed` は何も書かず報告） | `session-brief.ts` の `BRIEF_WRITE_RULES`・`briefWriteVerdict` | `SendBrief` の全書き込み：`plan`（`plan.stale-claim`・`plan.dead-row`・`plan.consume`）・`planInStretch`（`plan.consume`・`plan.incarnation`）・`claimInStretch`（`claim.consume`・`claim.reserve`・`claim.row`）・`settleInLock`（`settle.claim`・`settle.reset`）・`afterLock`（`after.provider-settle`）・`skip`（呼び手の site を受け取る）、`pinBriefWorktree`（`entrance.incarnation`）。走査の試験 `session-brief-write-rule-4224.test.ts`（書き手の名前・import の分類・表の使用） |
 | 入口で世代を作る前判定（`briefMayAttach`：保存された設定で `injectOnStart` と `off` 以外の規則がありうるか） | `session-brief.ts` | `pinBriefWorktree` だけ |
 | provider は自分で寿命を固定しない（`request` があれば `pinned` 必須） | `build.ts` の `buildBrief` の入口 | `provider.ts` の `build`（`request.target` から `pinned` を組む）。CLI の route（`service.ts:briefForRoute`）は `request` を渡さず `pinBriefLifetime` で固定 |
 | instance の誕生と作者（`issued_by='roster'` だけが誕生の証拠・作者は `origin_incarnation`） | B の `incarnation.ts`（`IncarnationIssuedBy`）・A の `mem-db.ts` の `ownedBy` | D1 の `isSameInstanceLifetime`（`session-brief-db.ts`）、D2 の `previous-end.ts` の `readPreviousEnd` |
@@ -920,3 +921,53 @@ D2 で足した、または D2 が新しく読み手になった共通の規則�
 |---|---|---|---|
 | Codex P2 | 旧 instance の寿命を入口で固定した要求が、待機中の作り直しの後に stale claim を読むと、`settleStaleClaim` が寿命の照合より前に新しい instance の行を `unknown` に決着する | **直す** | `plan` は今の行が `pending`・`claimed`（生きた claim も stale claim も）のとき、決着より前に `instanceAsPinned`（固定の寿命と今の寿命）を照らし、違えば何も書かずに `skipped(incarnation_changed)` を報告する。陽性：入口の後に作り直して起動、新しい起動の行を去ったプロセスの claim にする → 古い要求は本文だけ、行は `claimed` のまま。直しを外すと落ちる／陰性：作り直しなし → stale claim は D1 どおり `unknown`（T0g の claimed の対照）。`session-brief-entrances-4274.test.ts` の `settleStaleClaim` の例外の説明も「決着の前に固定の寿命を照らす」に揃えた |
 | PM P3（再） | 固定 = 今 = Y でも行が古い incarnation X のとき消費せず報告だけになり、死んだ instance の起動の行が「今の行」として残る | **直す** | 消費しないのは「固定 ≠ 今」のときだけ。固定 = 今で行の世代だけ古い（`rowOfPinnedIncarnation` が偽。どちらかが null なら照らさない）ときは、P3-1 の前と同じく `skipped(incarnation_changed)` に消費する（`pending` だけ。生きた claim は書かない）。陽性：起動の後に作り直し（起動なし）、その後の入口の要求 → 古い行は `skipped(incarnation_changed)`。直しを外すと落ちる／陰性：作り直しの前の入口（固定 = X・今 = Y）→ 古い行は `pending` のまま（T0g） |
+
+---
+
+## 20. 2 回目の再レビューの処置（Codex codex-2 の 2 回目の再レビュー）：端を 1 つずつ塞ぐのをやめて規則にする
+
+直しのたびに足した書き込みから次の指摘が出ていた（§18 の reset の公開、§19 の stale claim の決着と死んだ起動の行の片付け）。そこで、書き込みの関数の側から全書き込みを列挙して表にし、1 つの門を通す。§17 の読み手（`SendBrief` の全書き込み・`pinBriefWorktree`）も同じ差分で直した。
+
+### 20.1 不変条件（規則）
+
+**`session-brief.ts` のすべての書き込みは、要求が入口で固定した worktree の継続を `same` と証明できたとき（行によって instance の寿命も）だけ書く。`unknown`・`changed` なら何も書かずに報告する（fail-closed）。** §18 の reset の経路（固定のある要求は `same` 必須）と同じ規則を、全書き込みに広げたもの。
+
+- 門：`SendBrief.write(site, db, write)`（入口の書き込みは `writeAtEntrance`）。site の guard を `BRIEF_WRITE_RULES` から引き、`briefWriteVerdict` で判定する。判定は書き込みと同じ同期の区間で読む（間に await を挟まない）
+- guard：`entrance`（固定より前・固定の証拠そのものを作る）／`same`（書く行は計画した行で、計画の時点で instance が固定どおりと読んだもの）／`same-and-instance`（`same` に加えて今の instance が固定の寿命）／`reset`（固定のある要求は `same`、固定の無い Timer・relay は D1 の instance の照合）／`settled`（`settle.claim` が決めた結果を provider に渡すだけ。差し止めたときは `unknown`）
+- 差し止めの報告：`changed` → `worktree_changed`、`unknown` → `lifetime_unpinned`、instance の寿命が違う → `incarnation_changed`。決着（`settle.claim`）を差し止めたときは `brief.state` を `unknown`（理由つき）にし、provider にも `unknown` を渡す（受領にしない）。残った claim は、次の `same` の要求が stale claim として `unknown` に決着する
+
+### 20.2 全書き込みの表
+
+| site | 書き込み（書き手） | 場所 | guard | 前の守り（直す前） |
+|---|---|---|---|---|
+| `entrance.incarnation` | `getOrCreateWorktreeIncarnation` | `pinBriefWorktree`（`briefMayAttach` のときだけ） | `entrance` | 同じ |
+| `plan.stale-claim` | `settleStaleClaim` | `plan` | `same-and-instance` | instance だけ（`unknown` は通した） |
+| `plan.dead-row` | `skipBoundary`（`incarnation_changed`） | `plan` | `same-and-instance` | instance だけ（**今回の P2**） |
+| `plan.consume` | `skipBoundary`（`target_unresolved`・`off`・`disabled`・`over_limit`・`empty`・`provider_failed`） | `plan`・`planInStretch` | `same` | `changed` だけ止めた（`unknown` は通した） |
+| `plan.incarnation` | `getOrCreateWorktreeIncarnation` | `planInStretch` | `same` | `unknown` でも作った（§18 の PM P3-4「記録だけ」を閉じた） |
+| `claim.consume` | `skipBoundary`（`off`・`disabled`・`incarnation_changed`） | `claimInStretch` | `same` | `same`（区間の先頭で照らしていた） |
+| `claim.reserve` | `provider.reserve`（知らせの予約） | `claimInStretch` | `same-and-instance` | 同じ（区間の先頭と寿命の照合） |
+| `claim.row` | `openBoundary`・`fillBoundaryIncarnation`・`claimBoundary` | `claimInStretch` | `same-and-instance` | 同じ |
+| `settle.claim` | `settleBoundaryClaim`・`copyDeliveryToRelaunchBoundaries` | `settleInLock` | `same` | 守りなし（打鍵の間の作り直しで、送信の中の再起動が新しい側に開いた行へ配送を写しうる） 。対照：T0i（打鍵の間の改名 → 行は `claimed` のまま・`unknown`・provider に `unknown`。外すと落ちる／改名なし → `sent`） |
+| `settle.reset` | `openResetBoundaryFromSend` | `settleInLock` | `reset` | 同じ（§18 の Codex P2） |
+| `after.provider-settle` | `provider.settle`（受領） | `afterLock` | `settled` | 決着の結果をそのまま渡していた |
+
+`skip()` は書き込みの site を呼び手から受け取る（以前の `consume: boolean` は無くなった。型で表の site に限る）。
+
+### 20.3 網羅の検査（`tests/unit/lib/session/session-brief-write-rule-4224.test.ts`）
+
+- 走査：モジュールの本文（コメントを除く）で、書き手の名前（台帳の書き込み関数・世代の作成・reset の公開・provider の `.reserve(`・`.settle(`）が出るすべての所が門の呼び出しの括弧の内側にあること。台帳のモジュール（`session-brief-db`・`incarnation`・`session-boundary`）からの import はすべて書き手か読み手に分類済みで、名前空間・動的 import・別名の import が無いこと。門の site はすべて表にあり、表の site はすべて使われていること
+- 自己テストの対照（走査がここで書いた本文に対して）：門の外の呼び出し・値としての別名・provider の受領の直呼び・名前空間／動的／別名の import・未分類の名前・表に無い site・使われない site を見つける（陽性）。門の中の同じ呼び出し・読み手・コメントの中の名前は通す（陰性）
+- 規則の表駆動：`briefWriteVerdict` の guard × continuity × instance の行（`unknown`・`changed` の行を含む）
+
+### 20.4 Codex 再レビュー 2 回目の P2 の処置
+
+| # | 指摘 | 処置 | 守る条件・対照の試験（反映先） |
+|---|---|---|---|
+| Codex P2 | §19 で足した死んだ起動の行の片付け（`plan`）が、worktree の継続を証明できなくても（`unknown`）書く。第 1 段の世代・anchor が null のまま本文の解析中に作り直し → 新しい側で instance を起動（X）→ instance の作り直し（Y）→ 第 2 段の固定、のとき X の `pending` 行を `skipped` にする | **直す**（表の行 `plan.dead-row` として。§20.1 の規則） | 陽性：T0f の 2 段の固定と T0g の古い行を組み合わせた上の手順で、古い要求は本文だけ・X の行は `pending` のまま。直しを外すと落ちる／陰性：同じ寿命で入口に行がある（`same`）→ 今どおり `skipped(incarnation_changed)` に片付ける（`session-brief-worktree-lifetime-4224.test.ts` の T0h） |
+
+残る影響（規則から出るもの）：
+
+- 入口で証拠が無く（世代も行も無い）、計画の時点で設定が有効になった `force` の送信は、世代も作らない（以前は作って次の要求に回した）。次の要求の入口が行を見るか、保存された設定から世代を作れば固定される（T5b の陰性はそのまま通る）
+- 打鍵の間に worktree が改名・作り直しされたときは、brief を付けた送信でも台帳と provider は `unknown`（受領にしない）
+

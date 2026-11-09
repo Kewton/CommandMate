@@ -148,7 +148,7 @@ export function pinBriefWorktree(dbLike: unknown, worktreeId: string): BriefWork
   try {
     let worktreeIncarnation = getWorktreeIncarnation(db, worktreeId);
     if (worktreeIncarnation === null && briefMayAttach(db, worktreeId)) {
-      worktreeIncarnation = getOrCreateWorktreeIncarnation(db, worktreeId);
+      worktreeIncarnation = writeAtEntrance('entrance.incarnation', () => getOrCreateWorktreeIncarnation(db, worktreeId));
     }
     return { worktreeId, worktreeIncarnation, anchorBoundaryId: getLatestWorktreeBoundaryId(db, worktreeId) };
   } catch (error) {
@@ -184,6 +184,73 @@ export function briefWorktreeContinuity(db: Database.Database, pin: BriefWorktre
     return getBoundaryById(db, pin.anchorBoundaryId)?.worktreeId === pin.worktreeId ? 'same' : 'changed';
   }
   return 'unknown';
+}
+
+// ---------------------------------------------------------------------------
+// Every write is a row of one table (Issue #4224, D2 design §20: the rule, not one edge at a time)
+// ---------------------------------------------------------------------------
+
+/**
+ * What a write must prove before it is made (D2 design §20.1):
+ *  - `entrance` — the entrance's own write, before there is a pin (it makes the evidence a pin holds);
+ *  - `same` — the pinned worktree is still the one found (`same`; `unknown` or `changed`: nothing is
+ *    written). The row it writes is the planned one, whose instance was read as pinned when it was planned;
+ *  - `same-and-instance` — `same`, and the instance is still the lifetime the entrance pinned;
+ *  - `reset` — a pinned request needs `same`; an unpinned send (Timer, relay: never briefed) keeps D1's
+ *    instance check inside {@link openResetBoundaryFromSend};
+ *  - `settled` — tells the provider the outcome `settle.claim` decided (withheld: `unknown`).
+ */
+export type BriefWriteGuard = 'entrance' | 'same' | 'same-and-instance' | 'reset' | 'settled';
+
+/**
+ * Every write this module makes, by site (D2 design §20.2). A writer called outside
+ * {@link SendBrief}'s `write` (or {@link writeAtEntrance}) fails the scan
+ * (`tests/unit/lib/session/session-brief-write-rule-4224.test.ts`).
+ */
+export const BRIEF_WRITE_RULES = {
+  'entrance.incarnation': 'entrance',
+  'plan.stale-claim': 'same-and-instance',
+  'plan.dead-row': 'same-and-instance',
+  'plan.consume': 'same',
+  'plan.incarnation': 'same',
+  'claim.consume': 'same',
+  'claim.reserve': 'same-and-instance',
+  'claim.row': 'same-and-instance',
+  'settle.claim': 'same',
+  'settle.reset': 'reset',
+  'after.provider-settle': 'settled',
+} as const satisfies Record<string, BriefWriteGuard>;
+
+export type BriefWriteSite = keyof typeof BRIEF_WRITE_RULES;
+
+/** Why a write was withheld; reported as the brief's reason. */
+export type BriefWriteWithheld = 'worktree_changed' | 'lifetime_unpinned' | 'incarnation_changed';
+
+/**
+ * The rule (D2 design §20.1): whether a write of this guard may be made. Pure; the reads are the caller's.
+ * `continuity` is {@link briefWorktreeContinuity} of the request's pin (`unknown` without one).
+ */
+export function briefWriteVerdict(
+  guard: BriefWriteGuard,
+  pinned: boolean,
+  continuity: 'same' | 'changed' | 'unknown',
+  instanceAsPinned: () => boolean
+): BriefWriteWithheld | 'write' {
+  if (guard === 'entrance' || guard === 'settled') return 'write';
+  if (guard === 'reset') {
+    if (continuity === 'changed') return 'worktree_changed';
+    return pinned && continuity !== 'same' ? 'lifetime_unpinned' : 'write';
+  }
+  if (continuity === 'changed') return 'worktree_changed';
+  if (continuity !== 'same') return 'lifetime_unpinned';
+  if (guard === 'same-and-instance' && !instanceAsPinned()) return 'incarnation_changed';
+  return 'write';
+}
+
+/** The entrance's write (`entrance` guard): before a pin exists. */
+function writeAtEntrance<T>(site: BriefWriteSite, write: () => T): T {
+  if (BRIEF_WRITE_RULES[site] !== 'entrance') throw new Error(`not an entrance write: ${site}`);
+  return write();
 }
 
 /** This process. A claim another process left behind is read as `unknown` (design §3.5). */
@@ -341,13 +408,38 @@ export class SendBrief {
     });
   }
 
-  /** The send's own flag is reported whatever happened; `auto` only when something was attached. */
-  private skip(rowId: string | null, reason: BoundarySkipReason | 'no_brief' | 'settings_changed' | 'reservation_conflict', consume: boolean): void {
-    if (consume && rowId !== null && this.db) {
+  /**
+   * The one gate every write of a send goes through (D2 design §20): the site's guard from
+   * {@link BRIEF_WRITE_RULES}, read in the caller's synchronous stretch. Withheld: nothing is
+   * written, and the reason is answered for the caller to report (fail-closed).
+   */
+  private write(site: BriefWriteSite, db: Database.Database, write: () => void): BriefWriteWithheld | 'write' {
+    const verdict = briefWriteVerdict(BRIEF_WRITE_RULES[site], this.pin !== null, this.continuity(db), () => this.instanceAsPinned(db));
+    if (verdict !== 'write') {
+      logger.info('session-brief-write-withheld', { worktreeId: this.input.worktreeId, instanceId: this.input.instanceId, site, verdict });
+      return verdict;
+    }
+    write();
+    return 'write';
+  }
+
+  /**
+   * Consumes the row (under the site's guard) and reports the reason. The send's own flag is
+   * reported whatever happened; `auto` only when something was attached. A withheld write
+   * reports why nothing was written instead.
+   */
+  private skip(rowId: string | null, reason: BoundarySkipReason | 'no_brief' | 'settings_changed' | 'reservation_conflict', site: BriefWriteSite): void {
+    if (rowId !== null && this.db) {
+      const db = this.db;
+      let verdict: BriefWriteWithheld | 'write' = 'write';
       try {
-        skipBoundary(this.db, rowId, reason as BoundarySkipReason, Date.now());
+        verdict = this.write(site, db, () => skipBoundary(db, rowId, reason as BoundarySkipReason, Date.now()));
       } catch (error) {
         this.warn('session-brief-skip-failed', error);
+      }
+      if (verdict !== 'write') {
+        this.report = { state: 'skipped', reason: verdict, boundaryId: rowId };
+        return;
       }
     }
     this.report = { state: 'skipped', reason, ...(rowId ? { boundaryId: rowId } : {}) };
@@ -431,7 +523,13 @@ export class SendBrief {
         return;
       }
       if (current?.state === 'claimed' && current.claimToken !== null && !liveClaims.has(current.claimToken)) {
-        settleStaleClaim(db, current.id, current.claimToken, Date.now());
+        const stale = current;
+        const settled = this.write('plan.stale-claim', db, () => settleStaleClaim(db, stale.id, stale.claimToken!, Date.now()));
+        if (settled !== 'write') {
+          // D2 design §20: a pin without evidence (`unknown`) settles nothing either.
+          this.report = { state: 'skipped', reason: settled, boundaryId: stale.id };
+          return;
+        }
         current = getBoundaryById(db, current.id);
       }
       const usable =
@@ -439,8 +537,9 @@ export class SendBrief {
         (current.state === 'pending' || (current.state === 'claimed' && current.claimToken !== null && liveClaims.has(current.claimToken)));
       if (usable && current && !this.rowOfPinnedIncarnation(current)) {
         // PM re-review P3: the instance is the one pinned, the row a dead incarnation's launch.
-        // The new request does not leave it as the current row: consumed as before P3-1.
-        this.skip(current.id, 'incarnation_changed', true);
+        // The new request does not leave it as the current row: consumed as before P3-1 — only
+        // when the worktree is proven `same` (Codex re-review 2 P2, D2 design §20).
+        this.skip(current.id, 'incarnation_changed', 'plan.dead-row');
         return;
       }
       if (usable && current) {
@@ -467,7 +566,7 @@ export class SendBrief {
     } catch (error) {
       this.warn('session-brief-target-failed', error);
       if (this.continuity(db) === 'changed') return this.worktreeChanged(rowId);
-      this.skip(rowId, 'target_unresolved', true);
+      this.skip(rowId, 'target_unresolved', 'plan.consume');
       return;
     }
     if (!decided) return;
@@ -475,7 +574,7 @@ export class SendBrief {
 
     const provider = getBriefProvider();
     const budget = briefBudget(this.input.typedBody, content, provider);
-    if (budget.maxBytes < provider.minBytes || budget.maxLines < 1) return this.skip(rowId, 'over_limit', true);
+    if (budget.maxBytes < provider.minBytes || budget.maxLines < 1) return this.skip(rowId, 'over_limit', 'plan.consume');
 
     let built: BriefResult;
     try {
@@ -502,21 +601,21 @@ export class SendBrief {
     } catch (error) {
       this.warn('session-brief-provider-failed', error);
       if (this.continuity(db) === 'changed') return this.worktreeChanged(rowId);
-      return this.skip(rowId, 'provider_failed', true);
+      return this.skip(rowId, 'provider_failed', 'plan.consume');
     }
     // The build waited: a worktree made again meanwhile gets none of these writes.
     if (this.continuity(db) === 'changed') return this.worktreeChanged(rowId);
     if (!built || typeof built.body !== 'string' || built.mode !== target.mode || !Array.isArray(built.includedNoticeIds)) {
-      return this.skip(rowId, 'provider_failed', true);
+      return this.skip(rowId, 'provider_failed', 'plan.consume');
     }
     // D2 design §7.4: a line the brief must carry did not fit — recorded, the body is sent.
-    if (built.body === '' && built.skipReason === 'over_limit') return this.skip(rowId, 'over_limit', true);
-    if (built.body === '') return this.skip(rowId, 'empty', true);
+    if (built.body === '' && built.skipReason === 'over_limit') return this.skip(rowId, 'over_limit', 'plan.consume');
+    if (built.body === '') return this.skip(rowId, 'empty', 'plan.consume');
     if (bytesOf(built.body) > budget.maxBytes || linesOf(built.body) > budget.maxLines) {
-      return this.skip(rowId, 'over_limit', true);
+      return this.skip(rowId, 'over_limit', 'plan.consume');
     }
     if (!withinVerifiedSize(this.input.typedBody(built.body + BRIEF_SEPARATOR + content))) {
-      return this.skip(rowId, 'over_limit', true);
+      return this.skip(rowId, 'over_limit', 'plan.consume');
     }
     this.planned = {
       boundary,
@@ -545,22 +644,26 @@ export class SendBrief {
       return null;
     }
     if (!target.ok) {
-      this.skip(rowId, 'target_unresolved', true);
+      this.skip(rowId, 'target_unresolved', 'plan.consume');
       return null;
     }
     if (target.mode === 'off') {
-      this.skip(rowId, 'off', true);
+      this.skip(rowId, 'off', 'plan.consume');
       return null;
     }
     if (!target.features.injectOnStart) {
-      this.skip(rowId, 'disabled', true);
+      this.skip(rowId, 'disabled', 'plan.consume');
       return null;
     }
-    const worktreeIncarnation = getOrCreateWorktreeIncarnation(db, this.input.worktreeId);
-    if (continuity === 'unknown') {
-      // No evidence the worktree read at the entrance is this one: none attached, the row
-      // stays for the next request — which finds the incarnation just made and is pinned.
-      this.report = { state: 'skipped', reason: 'lifetime_unpinned', ...(rowId ? { boundaryId: rowId } : {}) };
+    let worktreeIncarnation: string | null = null;
+    const made = this.write('plan.incarnation', db, () => {
+      worktreeIncarnation = getOrCreateWorktreeIncarnation(db, this.input.worktreeId);
+    });
+    if (made !== 'write' || worktreeIncarnation === null) {
+      // No evidence the worktree read at the entrance is this one (`unknown`): none attached,
+      // nothing written — not the incarnation either (D2 design §20). The row stays for the next
+      // request, whose entrance finds the row (or makes the incarnation) and is pinned.
+      this.report = { state: 'skipped', reason: made === 'write' ? 'lifetime_unpinned' : made, ...(rowId ? { boundaryId: rowId } : {}) };
       return null;
     }
     return { target: { ...target, mode: target.mode }, worktreeIncarnation };
@@ -603,8 +706,8 @@ export class SendBrief {
     }
     if (!target.ok || membershipKey(target) !== plan.membershipKey) {
       // Changed while the provider or the lock was waited for: not with the old text.
-      if (target.ok && target.mode === 'off') this.skip(rowId, 'off', true);
-      else if (target.ok && !target.features.injectOnStart) this.skip(rowId, 'disabled', true);
+      if (target.ok && target.mode === 'off') this.skip(rowId, 'off', 'claim.consume');
+      else if (target.ok && !target.features.injectOnStart) this.skip(rowId, 'disabled', 'claim.consume');
       this.report = { state: 'skipped', reason: 'settings_changed', ...(rowId ? { boundaryId: rowId } : {}) };
       return null;
     }
@@ -620,26 +723,35 @@ export class SendBrief {
         return null;
       }
       if (!sameInstanceLifetime({ incarnation: row.instanceIncarnation, onRoster: row.onRoster }, now, cliToolId)) {
-        this.skip(row.id, 'incarnation_changed', true);
+        this.skip(row.id, 'incarnation_changed', 'claim.consume');
         return null;
       }
       rowIncarnation = row.instanceIncarnation;
     }
     if (!sameInstanceLifetime(plan.lifetime, now, cliToolId)) {
-      this.skip(rowId, 'incarnation_changed', true);
+      this.skip(rowId, 'incarnation_changed', 'claim.consume');
       return null;
     }
 
     let body = plan.built.body;
     let includedNoticeIds = plan.built.includedNoticeIds;
     if (plan.provider.reserve) {
-      let answer: { body: string; includedNoticeIds: string[] } | null = null;
-      try {
-        answer = plan.provider.reserve({ boundaryId: plan.boundary.id, claimToken: plan.claimToken, includedNoticeIds, body });
-      } catch (error) {
-        this.warn('session-brief-reserve-failed', error);
+      const provider = plan.provider;
+      let reserved: { body: string; includedNoticeIds: string[] } | null = null;
+      const reserving = this.write('claim.reserve', db, () => {
+        try {
+          reserved = provider.reserve!({ boundaryId: plan.boundary.id, claimToken: plan.claimToken, includedNoticeIds, body });
+        } catch (error) {
+          this.warn('session-brief-reserve-failed', error);
+        }
+      });
+      if (reserving !== 'write') {
+        this.report = { state: 'skipped', reason: reserving, ...(rowId ? { boundaryId: rowId } : {}) };
+        return null;
       }
       this.reserved = { includedNoticeIds };
+      // Assigned inside the gate's callback: read back with its declared type.
+      const answer = reserved as { body: string; includedNoticeIds: string[] } | null;
       if (!answer || answer.body === '' || !withinVerifiedSize(this.input.typedBody(answer.body + BRIEF_SEPARATOR + this.input.content))) {
         // The notices went to another boundary: this one stays pending for the next send.
         this.report = { state: 'skipped', reason: 'reservation_conflict', ...(rowId ? { boundaryId: rowId } : {}) };
@@ -649,23 +761,31 @@ export class SendBrief {
       includedNoticeIds = [...answer.includedNoticeIds];
     }
 
-    if (!plan.boundary.existing) {
-      openBoundary(db, {
-        id: plan.boundary.id,
-        worktreeId,
-        instanceId,
-        cliToolId,
-        lifetime: now,
-        kind: 'explicit',
-        evidence: 'explicit',
-        openedAt: plan.boundary.openedAt,
-      });
-      rowIncarnation = now.incarnation;
-    } else if (rowIncarnation === null && now.incarnation !== null) {
-      fillBoundaryIncarnation(db, plan.boundary.id, now.incarnation);
-      rowIncarnation = now.incarnation;
+    let claimedRow = false;
+    const claiming = this.write('claim.row', db, () => {
+      if (!plan.boundary.existing) {
+        openBoundary(db, {
+          id: plan.boundary.id,
+          worktreeId,
+          instanceId,
+          cliToolId,
+          lifetime: now,
+          kind: 'explicit',
+          evidence: 'explicit',
+          openedAt: plan.boundary.openedAt,
+        });
+        rowIncarnation = now.incarnation;
+      } else if (rowIncarnation === null && now.incarnation !== null) {
+        fillBoundaryIncarnation(db, plan.boundary.id, now.incarnation);
+        rowIncarnation = now.incarnation;
+      }
+      claimedRow = claimBoundary(db, plan.boundary.id, plan.claimToken, rowIncarnation);
+    });
+    if (claiming !== 'write') {
+      this.report = { state: 'skipped', reason: claiming, ...(rowId ? { boundaryId: rowId } : {}) };
+      return null;
     }
-    if (!claimBoundary(db, plan.boundary.id, plan.claimToken, rowIncarnation)) return null;
+    if (!claimedRow) return null;
     liveClaims.add(plan.claimToken);
     this.claimed = { body, includedNoticeIds };
     return body;
@@ -678,36 +798,48 @@ export class SendBrief {
   settleInLock(state: SendAttemptState, inputStartedAt: number): void {
     const db = this.db;
     if (!db) return;
-    const outcome = outcomeOf(state);
+    let outcome = outcomeOf(state);
     if (this.claimed && this.planned && this.settled === null) {
+      const planned = this.planned;
+      const claimed = this.claimed;
+      let withheld: BriefWriteWithheld | null = null;
       try {
         const now = Date.now();
-        const delivered = { bytes: bytesOf(this.claimed.body), mode: this.planned.built.mode, includedIds: this.claimed.includedNoticeIds };
-        settleBoundaryClaim(db, this.planned.boundary.id, this.planned.claimToken, outcome, delivered, now);
-        if (outcome === 'sent') {
-          const copied = copyDeliveryToRelaunchBoundaries(db, this.input.worktreeId, this.input.instanceId, this.planned.claimToken, delivered, now);
-          if (copied > 0 && this.planned.boundary.kind !== 'launch' && this.planned.boundary.kind !== 'auto_restart') {
-            // D2 design §7.2 R-c (a risk kept): the process this brief reached was started inside
-            // the send, but the brief was planned for a conversation step, without the line
-            // after an unplanned end. Not briefed again (one brief per conversation).
-            logger.info('brief-previous-end-not-delivered', {
-              worktreeId: this.input.worktreeId,
-              instanceId: this.input.instanceId,
-              boundaryId: this.planned.boundary.id,
-              kind: this.planned.boundary.kind,
-            });
+        const delivered = { bytes: bytesOf(claimed.body), mode: planned.built.mode, includedIds: claimed.includedNoticeIds };
+        const settling = this.write('settle.claim', db, () => {
+          settleBoundaryClaim(db, planned.boundary.id, planned.claimToken, outcome, delivered, now);
+          if (outcome === 'sent') {
+            const copied = copyDeliveryToRelaunchBoundaries(db, this.input.worktreeId, this.input.instanceId, planned.claimToken, delivered, now);
+            if (copied > 0 && planned.boundary.kind !== 'launch' && planned.boundary.kind !== 'auto_restart') {
+              // D2 design §7.2 R-c (a risk kept): the process this brief reached was started inside
+              // the send, but the brief was planned for a conversation step, without the line
+              // after an unplanned end. Not briefed again (one brief per conversation).
+              logger.info('brief-previous-end-not-delivered', {
+                worktreeId: this.input.worktreeId,
+                instanceId: this.input.instanceId,
+                boundaryId: planned.boundary.id,
+                kind: planned.boundary.kind,
+              });
+            }
           }
+        });
+        if (settling !== 'write') {
+          // D2 design §20: the worktree changed while the body was typed. Nothing is written
+          // (the claim, left behind, is settled `unknown` by the next request that is `same`),
+          // and the provider is told `unknown` — not an acknowledgement.
+          withheld = settling;
+          outcome = 'unknown';
         }
       } catch (error) {
         this.warn('session-brief-settle-failed', error);
       } finally {
-        liveClaims.delete(this.planned.claimToken);
+        liveClaims.delete(planned.claimToken);
         this.settled = outcome;
       }
       this.report =
         outcome === 'sent'
-          ? { state: 'attached', boundaryId: this.planned.boundary.id }
-          : { state: outcome === 'unknown' ? 'unknown' : 'not_sent', boundaryId: this.planned.boundary.id };
+          ? { state: 'attached', boundaryId: planned.boundary.id }
+          : { state: outcome === 'unknown' ? 'unknown' : 'not_sent', ...(withheld ? { reason: withheld } : {}), boundaryId: planned.boundary.id };
     }
     if (state === 'sent' && this.isReset && this.entryLifetime) {
       // Issue #4224 (W6): not for a worktree made again after the request's entrance. A pinned
@@ -715,19 +847,23 @@ export class SendBrief {
       // (`unknown`: no incarnation, no row at the entrance) cannot tell a worktree made again
       // with the same id and path, whose instance the lifetime check alone would let through.
       // An unpinned send (Timer, relay: never briefed) keeps D1's instance check.
-      const continuity = this.continuity(db);
-      if (continuity === 'changed' || (this.pin && continuity !== 'same')) {
-        logger.info('session-brief-reset-worktree-changed', { worktreeId: this.input.worktreeId, instanceId: this.input.instanceId, continuity });
-        return;
-      }
-      openResetBoundaryFromSend(db, {
-        worktreeId: this.input.worktreeId,
-        cliToolId: this.input.cliToolId,
-        instanceId: this.input.instanceId,
-        sendId: randomUUID(),
-        inputStartedAt,
-        lifetime: this.entryLifetime,
-      });
+      // Issue #4224 (W6): not for a worktree made again after the request's entrance. A pinned
+      // request needs `same`, as the brief's claim does (Codex 5-2b P2): a pin without evidence
+      // (`unknown`: no incarnation, no row at the entrance) cannot tell a worktree made again
+      // with the same id and path, whose instance the lifetime check alone would let through.
+      // An unpinned send (Timer, relay: never briefed) keeps D1's instance check. This is the
+      // `reset` guard of D2 design §20 (a withheld write is logged, nothing is opened).
+      const lifetime = this.entryLifetime;
+      this.write('settle.reset', db, () =>
+        openResetBoundaryFromSend(db, {
+          worktreeId: this.input.worktreeId,
+          cliToolId: this.input.cliToolId,
+          instanceId: this.input.instanceId,
+          sendId: randomUUID(),
+          inputStartedAt,
+          lifetime,
+        })
+      );
     }
   }
 
@@ -749,9 +885,16 @@ export class SendBrief {
       outcome = 'discarded';
       includedNoticeIds = this.reserved.includedNoticeIds;
     }
-    if (outcome === null) return;
+    const db = this.db;
+    if (outcome === null || !db) return;
+    const told = { boundaryId: plan.boundary.id, outcome, includedNoticeIds };
     try {
-      await plan.provider.settle({ boundaryId: plan.boundary.id, outcome, includedNoticeIds });
+      let pending: Promise<void> | void = undefined;
+      // `settled`: the outcome is what `settle.claim` decided (withheld there: `unknown`).
+      this.write('after.provider-settle', db, () => {
+        pending = plan.provider.settle!(told);
+      });
+      await pending;
     } catch (error) {
       this.warn('session-brief-provider-settle-failed', error);
     }

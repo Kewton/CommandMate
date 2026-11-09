@@ -1713,7 +1713,9 @@ export interface ChatMessage {
      * `target_unresolved`, `empty`, `over_limit`, `provider_failed`, `incarnation_changed`,
      * `settings_changed`, `superseded`, `reservation_conflict`, and (Issue #4224)
      * `worktree_changed` — deleted, made again or renamed after the send's entrance — and
-     * `lifetime_unpinned` — the entrance had no evidence of the worktree's lifetime.
+     * `lifetime_unpinned` — the entrance had no evidence of the worktree's lifetime. A send whose
+     * pin is not proven `same` writes nothing on the ledger (D2 design §20); an `unknown` delivery
+     * may carry `worktree_changed` when its claim could not be recorded for that reason.
      */
     reason?: string;
     boundaryId?: string;
