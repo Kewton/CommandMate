@@ -588,7 +588,12 @@ function collectGarbage(queueDir: string, now: number): void {
  * @returns true when this call created the directory and now owns it. A `mkdir` that failed for
  * another reason than EEXIST is neither a claim nor a contention: it throws, naming the errno.
  */
-function claim(lockPath: string, owner: LockOwner, obs: Observer): boolean {
+function claim(
+  lockPath: string,
+  owner: LockOwner,
+  obs: Observer,
+  fault?: MachineLockTestHooks['fault']
+): boolean {
   const made = obs.mkdir('mkdir-lock', lockPath);
   if (made.state === 'exists') return false;
   if (made.state !== 'created') {
@@ -596,18 +601,38 @@ function claim(lockPath: string, owner: LockOwner, obs: Observer): boolean {
     error.code = made.code;
     throw error;
   }
-  writeFileSync(join(lockPath, OWNER_FILE), JSON.stringify(owner), { encoding: 'utf8' });
+  const file = join(lockPath, OWNER_FILE);
+  try {
+    const code = fault?.('owner-write', file);
+    if (code) {
+      const error: NodeJS.ErrnoException = new Error(`${code}: injected at owner-write ${file}`);
+      error.code = code;
+      throw error;
+    }
+    writeFileSync(file, JSON.stringify(owner), { encoding: 'utf8' });
+  } catch (error) {
+    // An owner that could not be written (ENOSPC, EIO) is not a lock taken: the <lock> this mkdir
+    // made is taken out again, so no <lock> without an owner is left for every reader to wait on
+    // (#4288 PM review P3-2, the same as verify-run.sh's lock_acquire). The error still ends the
+    // acquisition, as a mkdir that failed does.
+    rmSync(file, { force: true });
+    rmdirQuiet(lockPath);
+    logger.warn('machine-lock-owner-write-failed', { lockPath, code: errCode(error) });
+    throw error;
+  }
   return true;
 }
 
 let goneSerial = 0;
 
-/** rmdir, which only ever removes an empty directory; a failure leaves it as it was. */
-function rmdirQuiet(dir: string): void {
+/** rmdir, which only ever removes an empty directory; a failure leaves it as it was (false). */
+function rmdirQuiet(dir: string): boolean {
   try {
     rmdirSync(dir);
+    return true;
   } catch {
     // not empty, gone, or not ours to remove: left as it is
+    return false;
   }
 }
 
@@ -641,15 +666,18 @@ function goneCandidates(ctx: GoneContext, point: string): { list: string[]; unkn
   return { list };
 }
 
+type HalfPutBack = { state: 'yes' | 'no' | 'absent' } | { state: 'unknown'; unknown: MachineLockUnknown };
+
 /** `<lock>` exists with no owner and nothing in it — a put-back stopped half way (§2.7 A / B). */
-function ownerlessEmptyLock(ctx: GoneContext): 'yes' | 'no' | 'absent' | 'unknown' {
+function ownerlessEmptyLock(ctx: GoneContext): HalfPutBack {
+  const ownerFile = join(ctx.lockPath, OWNER_FILE);
   const owner = ctx.obs.owner('lock-owner', ctx.lockPath);
-  if (owner.state === 'unknown') return 'unknown';
-  if (owner.state !== 'missing') return 'no';
+  if (owner.state === 'unknown') return { state: 'unknown', unknown: { point: 'lock-owner', path: ownerFile, code: owner.code } };
+  if (owner.state !== 'missing') return { state: 'no' };
   const listed = ctx.obs.list('lock-list', ctx.lockPath);
-  if (listed.state === 'absent') return 'absent';
-  if (listed.state === 'unknown') return 'unknown';
-  return listed.names.length === 0 ? 'yes' : 'no';
+  if (listed.state === 'absent') return { state: 'absent' };
+  if (listed.state === 'unknown') return { state: 'unknown', unknown: { point: 'lock-list', path: ctx.lockPath, code: listed.code } };
+  return { state: listed.names.length === 0 ? 'yes' : 'no' };
 }
 
 /**
@@ -680,7 +708,7 @@ function restoreFromGone(ctx: GoneContext, gone: string): void {
     return;
   }
   if (made.state === 'exists') {
-    const half = ownerlessEmptyLock(ctx);
+    const half = ownerlessEmptyLock(ctx).state;
     if (half === 'yes') {
       if (moveOwnerIn(ctx, gone) === 'restored') logger.warn('machine-lock-restored', { lockPath: ctx.lockPath, from: gone, completed: true });
     } else if (half === 'no') {
@@ -694,17 +722,25 @@ function restoreFromGone(ctx: GoneContext, gone: string): void {
 /**
  * §2.7 rows 4 and 7: a moved-aside record judged gone (or this acquisition's own) is moved to this
  * waiter's own name and deleted only when it is still the record judged. `takeBackHalf` first removes
- * a `<lock>` left empty by a put-back that stopped half way (never on release).
+ * a `<lock>` left empty by a put-back that stopped half way (never on release). When that cannot be
+ * settled — whether `<lock>` is such a half put-back is unknown, or its rmdir failed — the moved-aside
+ * record is KEPT (`kept`): it is the only trace that lets a later head take the empty `<lock>` back
+ * once the fault clears (#4288 Codex 5-2b P2-1).
  */
-function reclaimGone(ctx: GoneContext, gone: string, token: string, takeBackHalf: boolean): void {
-  if (takeBackHalf && ownerlessEmptyLock(ctx) === 'yes') rmdirQuiet(ctx.lockPath);
+function reclaimGone(ctx: GoneContext, gone: string, token: string, takeBackHalf: boolean): { kept: boolean; unknown?: MachineLockUnknown } {
+  if (takeBackHalf) {
+    const half = ownerlessEmptyLock(ctx);
+    if (half.state === 'unknown') return { kept: true, unknown: half.unknown };
+    if (half.state === 'yes' && !rmdirQuiet(ctx.lockPath)) return { kept: true };
+  }
   const mine = `${ctx.lockPath}.gone-${ctx.myToken}-${++goneSerial}`;
-  if (ctx.obs.rename('reclaim-rename', gone, mine).state !== 'moved') return;
+  if (ctx.obs.rename('reclaim-rename', gone, mine).state !== 'moved') return { kept: false };
   const moved = ctx.obs.owner('reclaim-owner', mine);
   if (moved.state === 'record' && moved.owner.token === token) {
     rmSync(mine, { recursive: true, force: true });
     logger.warn('machine-lock-gone-recovered', { gone, pid: moved.owner.pid });
   }
+  return { kept: false };
 }
 
 /** §2.7: the head's pass over the locks moved aside, before its mkdir. */
@@ -733,7 +769,8 @@ function settleGone(ctx: GoneContext): { block: boolean; pending?: string; unkno
     if (read.state === 'corrupt') continue;
     const holder = holderState(read.owner, ctx);
     if (holder.state === 'gone') {
-      reclaimGone(ctx, gone, read.owner.token, true);
+      const reclaimed = reclaimGone(ctx, gone, read.owner.token, true);
+      if (reclaimed.kept) hold(gone, reclaimed.unknown);
       continue;
     }
     hold(gone, holder.state === 'unknown' ? { point: holder.point, path: gone, code: holder.code } : undefined);
@@ -875,7 +912,8 @@ export async function acquireMachineLock(
   };
   const heldBy = (): string | null => {
     const owner = readOwner(lockPath);
-    if (owner) return describeOwner(owner);
+    // The gate's group (#4288): with verify-run.sh's runner killed, the pid is dead and the group holds.
+    if (owner) return `${describeOwner(owner)}${validPgid(owner.pgid) ? ` (pgid ${owner.pgid})` : ''}`;
     if (blocker) {
       return `queue ticket ${blocker.file}${blocker.ticket ? ` (${describeOwner(blocker.ticket as { pid: unknown; host?: unknown })})` : ' (unreadable)'}`;
     }
@@ -940,7 +978,7 @@ export async function acquireMachineLock(
             unknown = settled.unknown ?? null;
           } else {
             const owner: LockOwner = { pid: process.pid, host, token, acquiredAt: now() };
-            if (claim(lockPath, owner, obs)) {
+            if (claim(lockPath, owner, obs, hooks.fault)) {
               retire();
               collectGarbage(queueDir, now());
               let released = false;

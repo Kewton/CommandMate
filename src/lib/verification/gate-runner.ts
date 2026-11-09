@@ -844,9 +844,15 @@ function withMutexMarker(
 function mutexWaitTimeoutLog(gate: VerifyGate, name: string, result: MachineLockResult): string {
   if (result.acquired) throw new Error('mutexWaitTimeoutLog called for an acquired lock');
   const held = result.heldBy ? ` (held by ${result.heldBy})` : '';
+  // What the lock could not observe (Issue #4288): the observation point, the path and the errno.
+  // Without it an EPERM / EACCES / EIO that kept the lock out reads as an ordinary conflict.
+  const unknown = result.unknown
+    ? [`${MUTEX_LOG_PREFIX} unknown point=${result.unknown.point} path=${result.unknown.path} errno=${result.unknown.code} (not taken: unknown is never read as free)`]
+    : [];
   return [
     `${MUTEX_WAIT_SKIP_REASON} waited=${formatSeconds(result.waitedMs)}`,
     `${MUTEX_LOG_PREFIX} name=${name} lock=${machineLockPathFor(name)}${held}`,
+    ...unknown,
     `Gate '${gate.id}' declares mutex '${name}' and the machine-wide lock stayed held for its ` +
       `whole ${mutexWaitBudgetSec(gate)}s budget, so the command was never started. This is a ` +
       'resource conflict, not a verdict on the work: re-run once the other run finishes, or ' +

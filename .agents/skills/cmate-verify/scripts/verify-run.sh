@@ -779,7 +779,12 @@ lock_test_fault() { # <stage>
 }
 
 # kill -0 <target>, raw: LKR_RC and LKR_OUT (the message). Both judgements over a process — the
-# current one and any other — read this, so an injected EPERM reaches them alike.
+# current one and any other — read this, so an injected EPERM reaches them alike. The message is
+# read under LC_ALL=C: bash's kill prints strerror(), which a translated C library prints in the
+# user's language ("No such process" would then never match, and ESRCH would read as unknown — a
+# drain that never ends and a lock nobody recovers; #4288 PM review P2-1). Test seam only:
+# CM_VERIFY_TEST_KILL0_CMD names a command run in kill's place, in the same environment, so a test
+# can hand back the raw text another locale would print.
 lock_kill0_raw() { # <point> <target>
   lock_test_obs_fault "$1" "$2"
   if [ -n "$LTF_CODE" ]; then
@@ -787,7 +792,11 @@ lock_kill0_raw() { # <point> <target>
     LKR_OUT="kill: $2: $(lock_errno_text "$LTF_CODE")"
     return 0
   fi
-  LKR_OUT=$(kill -0 -- "$2" 2>&1)
+  if [ -n "${CM_VERIFY_TEST_KILL0_CMD:-}" ]; then
+    LKR_OUT=$(export LC_ALL=C; "$CM_VERIFY_TEST_KILL0_CMD" -0 -- "$2" 2>&1)
+  else
+    LKR_OUT=$(export LC_ALL=C; kill -0 -- "$2" 2>&1)
+  fi
   LKR_RC=$?
 }
 
@@ -933,19 +942,17 @@ lock_holder_state() { # <pid> <host> <pgid>
   lock_group_state "$3"
 }
 
-# The same over a record file, field by field at the time each is needed: the pgid is read after
-# the pid answered ESRCH (docs/design/verify-lock-holder-group-4288.md §2.2).
-lock_record_state() { # <file>
-  lrs_pid=$(lock_json_field "$1" pid)
-  lrs_host=$(lock_json_field "$1" host)
-  if [ -z "$lrs_pid" ] || [ "$lrs_host" != "$LOCK_HOST" ]; then echo alive; return 0; fi
-  lrs_p=$(lock_obs_kill0 pid "$lrs_pid")
-  if [ "$lrs_p" != gone ]; then echo "$lrs_p"; return 0; fi
-  lock_group_state "$(lock_json_field "$1" pgid)"
+# The same over the owner record lock_obs_owner read: its one read (LOB_PID / LOB_HOST / LOB_PGID),
+# never a second read of the file. A second read of the pgid that failed (EACCES, EIO) came back
+# empty — "no group" — and let a live group's lock be recovered (#4288 Codex 5-2b P1 / PM review
+# P2-2). The token changes when the group is published (§2.2), so the record judged and the record
+# the recovery deletes are tied by the token, not by reading the fields again.
+lock_record_state() { # (reads LOB_PID LOB_HOST LOB_PGID)
+  lock_holder_state "$LOB_PID" "$LOB_HOST" "$LOB_PGID"
 }
 
-lock_record_gone() { # <file>
-  [ "$(lock_record_state "$1")" = gone ]
+lock_record_gone() { # <pid> <host> <pgid>, from one read of the record
+  [ "$(lock_holder_state "$1" "$2" "$3")" = gone ]
 }
 
 # When <pid> started (ms), from `ps -o etime=` (`[[dd-]hh:]mm:ss`); empty when ps
@@ -976,14 +983,17 @@ lock_pid_start_ms() { # <pid> <now-ms>
 # Why another waiter's ticket may be retired (printed), or return 1 — never by
 # age alone: a long gate budget is a legitimate long wait.
 lock_ticket_retirable() { # <file> <now-ms>
-  ltr_token=$(lock_json_field "$1" token)
+  # One read of the ticket; a ticket that cannot be read is never retired (it blocks like a live one).
+  ltr_text=$(cat -- "$1" 2>/dev/null) || return 1
+  ltr_token=$(lock_json_text_field "$ltr_text" token)
   [ -n "$ltr_token" ] || return 1
-  ltr_host=$(lock_json_field "$1" host)
-  ltr_pid=$(lock_json_field "$1" pid)
-  ltr_created=$(lock_json_field "$1" createdAt)
-  ltr_deadline=$(lock_json_field "$1" deadline)
+  ltr_host=$(lock_json_text_field "$ltr_text" host)
+  ltr_pid=$(lock_json_text_field "$ltr_text" pid)
+  ltr_pgid=$(lock_json_text_field "$ltr_text" pgid)
+  ltr_created=$(lock_json_text_field "$ltr_text" createdAt)
+  ltr_deadline=$(lock_json_text_field "$ltr_text" deadline)
   if [ "$ltr_host" = "$LOCK_HOST" ]; then
-    if lock_record_gone "$1"; then echo gone; return 0; fi
+    if lock_record_gone "$ltr_pid" "$ltr_host" "$ltr_pgid"; then echo gone; return 0; fi
     if [ -n "$ltr_pid" ] && [ "$ltr_pid" != "$LOCK_SELF_PID" ] && [ -n "$ltr_created" ]; then
       ltr_start=$(lock_pid_start_ms "$ltr_pid" "$2")
       if [ -n "$ltr_start" ] && [ "$ltr_start" -gt $(( ltr_created + LOCK_PID_REUSE_SLACK_MS )) ]; then
@@ -1105,18 +1115,19 @@ LGC_EOF
   return 0
 }
 
-# <lock> exists with no owner and nothing in it — a put-back stopped half way: yes | no | absent | unknown
+# <lock> exists with no owner and nothing in it — a put-back stopped half way:
+# yes | no | absent | unknown:<point>:<path>:<errno>
 lock_ownerless_empty() { # <lock-path>
   lock_obs_owner lock-owner "$1"
   case "$LOB_CLASS" in
-    unknown) echo unknown; return 0;;
+    unknown) echo "unknown:lock-owner:$1/owner:$LOB_CODE"; return 0;;
     missing) ;;
     *) echo no; return 0;;
   esac
   lock_obs_list lock-list "$1"
   case "$LOL_STATE" in
     absent) echo absent;;
-    unknown) echo unknown;;
+    unknown) echo "unknown:lock-list:$1:$LOL_CODE";;
     *) if [ -z "$LOL_NAMES" ]; then echo yes; else echo no; fi;;
   esac
 }
@@ -1163,9 +1174,20 @@ lock_restore_from_gone() { # <lock-path> <gone>
 
 # §2.7 rows 4 and 7: a moved-aside record judged gone (or this run's own) goes to this waiter's own
 # name and is deleted only while it is still the record judged. With <take-back-half> 1 a <lock>
-# left empty by a put-back that stopped half way is removed first (never on release).
+# left empty by a put-back that stopped half way is removed first (never on release). When that
+# cannot be settled — whether <lock> is such a half put-back is unknown (EIO on its listing), or
+# its rmdir failed — the moved-aside record is KEPT and 1 returned (LRG_HALF says why): it is the
+# only trace that lets a later head take the empty <lock> back once the fault clears, and without
+# it nobody would ever remove a <lock> that has no owner (#4288 Codex 5-2b P2-1).
 lock_reclaim_gone() { # <lock-path> <gone> <token> <take-back-half>
-  if [ "$4" = 1 ] && [ "$(lock_ownerless_empty "$1")" = yes ]; then rmdir "$1" 2>/dev/null; fi
+  LRG_HALF=""
+  if [ "$4" = 1 ]; then
+    LRG_HALF=$(lock_ownerless_empty "$1")
+    case "$LRG_HALF" in
+      unknown:*) return 1;;
+      yes) rmdir "$1" 2>/dev/null || return 1;;
+    esac
+  fi
   LOCK_GONE_SERIAL=$(( LOCK_GONE_SERIAL + 1 ))
   lrg_mine="$1.gone-${LOCK_TOKEN:-$$}-$LOCK_GONE_SERIAL"
   [ "$(lock_obs_mv reclaim-rename "$2" "$lrg_mine")" = moved ] || return 0
@@ -1201,7 +1223,17 @@ lock_settle_gone() { # <lock-path>
     esac
     lsg_state=$(lock_holder_state "$LOB_PID" "$LOB_HOST" "$LOB_PGID")
     if [ "$lsg_state" = gone ]; then
-      lock_reclaim_gone "$1" "$lsg_g" "$LOB_TOKEN" 1
+      if ! lock_reclaim_gone "$1" "$lsg_g" "$LOB_TOKEN" 1; then
+        lsg_rc=1
+        [ -n "$LOCK_GONE_PENDING" ] || LOCK_GONE_PENDING=$lsg_g
+        case "$LRG_HALF" in
+          unknown:*)
+            lsg_u=${LRG_HALF#unknown:}
+            lsg_up=${lsg_u%%:*}
+            lsg_u=${lsg_u#*:}
+            lock_note_unknown "$lsg_up" "${lsg_u%:*}" "${lsg_u##*:}";;
+        esac
+      fi
       continue
     fi
     lsg_rc=1
@@ -1333,26 +1365,37 @@ lock_acquire() {
         case "$la_made" in
           created)
             LOCK_ACQUIRED_AT=$(lock_now_ms)
-            printf '{"pid":%s,"host":"%s","token":"%s","acquiredAt":%s}\n' \
-              "$$" "$LOCK_HOST" "$LOCK_TOKEN" "$LOCK_ACQUIRED_AT" > "$LOCK_PATH/owner"
-            LOCK_HELD_PATH=$LOCK_PATH
-            LOCK_HELD_TOKEN=$LOCK_TOKEN
-            lock_retire_own_ticket
-            lock_collect_garbage "$la_queue"
-            LOCK_WAITED=$(( $(date +%s) - la_start ))
-            return 0;;
+            # An owner that could not be written (ENOSPC, EIO) is not a lock taken: the <lock> this
+            # mkdir made is taken out again, so no <lock> without an owner is left for every reader
+            # to wait on (#4288 PM review P3-2). Test seam: CM_VERIFY_TEST_HANDOFF=fault:owner.
+            if ! lock_test_fault owner && printf '{"pid":%s,"host":"%s","token":"%s","acquiredAt":%s}\n' \
+              "$$" "$LOCK_HOST" "$LOCK_TOKEN" "$LOCK_ACQUIRED_AT" > "$LOCK_PATH/owner"; then
+              LOCK_HELD_PATH=$LOCK_PATH
+              LOCK_HELD_TOKEN=$LOCK_TOKEN
+              lock_retire_own_ticket
+              lock_collect_garbage "$la_queue"
+              LOCK_WAITED=$(( $(date +%s) - la_start ))
+              return 0
+            fi
+            rm -f "$LOCK_PATH/owner" 2>/dev/null
+            if rmdir "$LOCK_PATH" 2>/dev/null; then
+              echo "verify-run: machine-lock-owner-write-failed $LOCK_PATH (taken out again; not acquired)" >&2
+            else
+              echo "verify-run: machine-lock-owner-write-failed $LOCK_PATH (and it could not be taken out again)" >&2
+            fi;;
           exists)
             lock_obs_owner lock-owner "$LOCK_PATH"
             if [ "$LOB_CLASS" = unknown ]; then lock_note_unknown lock-owner "$LOCK_PATH/owner" "$LOB_CODE"; fi
             la_token=$LOB_TOKEN
+            la_pid=$LOB_PID
             # A stale record is broken at most once per token, so a directory nobody can
             # remove degrades into ordinary waiting instead of a spin loop.
             if [ "$LOB_CLASS" = record ] && [ "$la_token" != "$la_broken" ]; then
-              la_state=$(lock_record_state "$LOCK_PATH/owner")
+              la_state=$(lock_record_state)
               case "$la_state" in
                 gone)
                   la_broken=$la_token
-                  lock_recover "$LOCK_PATH" "$la_token" "$(lock_owner_field "$LOCK_PATH" pid)"
+                  lock_recover "$LOCK_PATH" "$la_token" "$la_pid"
                   continue;;
                 unknown:*)
                   la_u=${la_state#unknown:}
@@ -1370,6 +1413,9 @@ lock_acquire() {
     la_token=$(lock_owner_field "$LOCK_PATH" token)
     if [ -n "$la_token" ]; then
       LOCK_HELD_BY="pid $(lock_owner_field "$LOCK_PATH" pid) on $(lock_owner_field "$LOCK_PATH" host)"
+      # The gate's group (#4288): with the runner killed, the pid is dead and the group is what holds.
+      la_held_pgid=$(lock_owner_field "$LOCK_PATH" pgid)
+      if [ -n "$la_held_pgid" ]; then LOCK_HELD_BY="$LOCK_HELD_BY (pgid $la_held_pgid)"; fi
     elif [ -n "$la_blocker" ]; then
       if [ -n "$(lock_json_field "$la_blocker" token)" ]; then
         LOCK_HELD_BY="queue ticket $la_blocker (pid $(lock_json_field "$la_blocker" pid) on $(lock_json_field "$la_blocker" host))"

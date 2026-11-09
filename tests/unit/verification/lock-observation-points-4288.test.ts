@@ -100,6 +100,59 @@ describe('the observation-point table (§2.8)', () => {
       expect(scanRawCalls('sync', sync).get('collectGarbage|readdirSync')).toBe(2);
     });
 
+    // Codex 5-2b P1 / PM review P2-2: the scan saw only kill -0 / mkdir / mv / ls / cat / ps / glob /
+    // lock_owner_field (TS: 7 APIs). A second read of the owner through lock_json_field, a test
+    // operator, awk, a redirection, an rmdir — and TS existsSync / statSync / readJson / rmSync /
+    // fs.promises.readdir — went unseen. Each form, seeded in a new function, is now found and fails
+    // the comparison with the list; the primitives before the widening found none of them.
+    const BASH_FORMS: [string, string][] = [
+      ['json field', 'lock_json_field "$LOCK_PATH/owner" pgid'],
+      ['json text field', 'lock_json_text_field "$lnd_text" pgid'],
+      ['test -d/-e/-f/-r/-x', '[ -d "$LOCK_PATH" ] && return 0'],
+      ['test -d/-e/-f/-r/-x', '[ ! -e "$LOCK_PATH/owner" ] && return 0'],
+      ['awk', "lnd_pgid=$(awk -F: '{print $2}' \"$LOCK_PATH/owner\")"],
+      ['read <', 'read -r lnd_t < "$LOCK_PATH/owner"'],
+      ['read <', 'lnd_t=$(< "$LOCK_PATH/owner")'],
+      ['rmdir', 'rmdir "$LOCK_PATH" 2>/dev/null'],
+    ];
+    const TS_FORMS: [string, string][] = [
+      ['existsSync', 'if (!existsSync(lockPath)) return true;'],
+      ['statSync', 'if (statSync(lockPath).isDirectory()) return false;'],
+      ['readJson', "const o = readJson(join(lockPath, 'owner'));"],
+      ['rmdirSync', 'rmdirSync(lockPath);'],
+      ['rmSync', 'rmSync(lockPath, { recursive: true, force: true });'],
+      ['readdir (async)', 'await fs.promises.readdir(lockPath);'],
+    ];
+    const BEFORE_WIDENING = { bash: ['kill -0', 'mkdir', 'mv', 'ls', 'cat', 'ps -o', 'glob .gone-*', 'owner field'], ts: ['process.kill', 'readdirSync', 'mkdirSync', 'renameSync', 'readFileSync', 'lstatSync', 'readOwner'] };
+
+    it.each(BASH_FORMS)('bash: %s in a new function (%s) is found and fails the comparison', (name, line) => {
+      const source = `${read(SOURCES.bash)}\nlock_new_decision() {\n  ${line}\n}\n`;
+      const found = scanRawCalls('bash', source);
+      expect(found.get(`lock_new_decision|${name}`)).toBe(1);
+      const allowed = Object.fromEntries(RAW_CALL_ALLOWANCES.filter((a) => a.impl === 'bash').map((a) => [`${a.fn}|${a.primitive}`, a.count]));
+      expect(Object.fromEntries(found)).not.toEqual(allowed);
+      expect([...found.keys()].filter((k) => k.startsWith('lock_new_decision|')).every((k) => BEFORE_WIDENING.bash.includes(k.split('|')[1]))).toBe(false);
+    });
+
+    it.each(IMPLS.filter((i) => i !== 'bash').flatMap((impl) => TS_FORMS.map(([name, line]) => [impl, name, line] as const)))('%s: %s in a new function (%s) is found and fails the comparison', (impl, name, line) => {
+      const source = `${read(SOURCES[impl])}\nasync function newDecision(lockPath) {\n  ${line}\n}\n`;
+      const found = scanRawCalls(impl, source);
+      expect(found.get(`newDecision|${name}`)).toBe(1);
+      const allowed = Object.fromEntries(RAW_CALL_ALLOWANCES.filter((a) => a.impl === impl).map((a) => [`${a.fn}|${a.primitive}`, a.count]));
+      expect(Object.fromEntries(found)).not.toEqual(allowed);
+      expect(BEFORE_WIDENING.ts.includes(name)).toBe(false);
+    });
+
+    it('bash: the second read of the pgid the first implementation made (lock_record_state) would be found today', () => {
+      const legacy = read(SOURCES.bash).replace(
+        'lock_record_state() { # (reads LOB_PID LOB_HOST LOB_PGID)\n  lock_holder_state "$LOB_PID" "$LOB_HOST" "$LOB_PGID"\n}',
+        'lock_record_state() { # <file>\n  lrs_pid=$(lock_json_field "$1" pid)\n  lock_group_state "$(lock_json_field "$1" pgid)"\n}',
+      );
+      expect(legacy).not.toBe(read(SOURCES.bash));
+      expect(scanRawCalls('bash', legacy).get('lock_record_state|json field')).toBe(2);
+      expect(RAW_CALL_ALLOWANCES.some((a) => a.fn === 'lock_record_state')).toBe(false);
+    });
+
     it('a new observation point is found, and one the table lacks fails the comparison', () => {
       const ts = read(SOURCES.ts).replace("obs.list('list-queue', queueDir);", "obs.list('list-queue-2', queueDir);");
       const named = scanObservationPoints('ts', ts);

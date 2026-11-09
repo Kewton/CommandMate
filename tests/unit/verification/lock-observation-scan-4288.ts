@@ -31,6 +31,15 @@ export const RAW_PRIMITIVES: Record<Impl, { name: string; re: RegExp }[]> = {
     { name: 'ps -o', re: /\bps -o\b/g },
     { name: 'glob .gone-*', re: /\.gone-\*/g },
     { name: 'owner field', re: /\block_owner_field\b/g },
+    // Widened after the review of the first implementation (#4288 Codex 5-2b P1 / PM review P2-2): a
+    // second read of a record through the JSON helpers, a test operator or a redirection bypassed
+    // the observers unseen — lock_record_state read the pgid again and took a failed read as "no group".
+    { name: 'json field', re: /\block_json_field\b/g },
+    { name: 'json text field', re: /\block_json_text_field\b/g },
+    { name: 'awk', re: /(?:^|[\s;&|({$])awk(?![-\w])/g },
+    { name: 'test -d/-e/-f/-r/-x', re: /\[ (?:! )?-[defrx] /g },
+    { name: 'read <', re: /\bread\b[^<\n]*<(?!<)|\$\(<\s/g },
+    { name: 'rmdir', re: /(?:^|[\s;&|({$])rmdir(?![-\w])/g },
   ],
   ts: [
     { name: 'process.kill', re: /\bprocess\.kill\(/g },
@@ -40,6 +49,13 @@ export const RAW_PRIMITIVES: Record<Impl, { name: string; re: RegExp }[]> = {
     { name: 'readFileSync', re: /\breadFileSync\(/g },
     { name: 'lstatSync', re: /\blstatSync\(/g },
     { name: 'readOwner', re: /\breadOwner\(/g },
+    // Widened with the bash list (#4288 PM review P2-2).
+    { name: 'existsSync', re: /\bexistsSync\(/g },
+    { name: 'statSync', re: /\bstatSync\(/g },
+    { name: 'readJson', re: /\breadJson\(/g },
+    { name: 'rmdirSync', re: /\brmdirSync\(/g },
+    { name: 'rmSync', re: /\brmSync\(/g },
+    { name: 'readdir (async)', re: /\breaddir\(/g },
   ],
   sync: [],
 };

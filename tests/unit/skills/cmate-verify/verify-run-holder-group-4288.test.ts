@@ -206,6 +206,40 @@ describe('R (repro-1): the runner alone killed while its gate runs', () => {
     expect(await readers()).toEqual(ALL);
   }, 60000);
 
+  // PM review P3-5: the watchdog, not the test, stops the gate (design §2.6) — the runner alone killed,
+  // the watchdog it left counts timeoutSec from the ack and empties G; then the lock is taken.
+  it('the runner alone killed with a short timeoutSec: held while G lives, the watchdog stops G at the timeout, then all three take it', async () => {
+    const run = runAsync([{ command: 'touch $MARK/started; sleep 60', timeoutSec: 3 }]);
+    await until(() => fs.existsSync(mark('started')));
+    const g = owner()!.pgid as number;
+    gateGroups.push(g);
+    process.kill(run.pid, 'SIGKILL');
+    await run.wait();
+    expect(groupAlive(g), 'the gate outlived its runner').toBe(true);
+    const held = await take('ts', locks, 'holder');
+    expect(held.acquired).toBe(false);
+    expect(held.heldBy).toBe(`pid ${run.pid} on ${os.hostname()} (pgid ${g})`);
+    // Nobody signals G here: only the watchdog can empty it.
+    await until(() => !groupAlive(g), 15000);
+    expect(fs.existsSync(lockPath()), 'the lock stays for the next reader to recover').toBe(true);
+    expect(await readers()).toEqual(ALL);
+    // The watchdog itself ends (the runner's group, which it was left in, empties).
+    expect(waitSync(() => !groupAlive(run.pid), 10000)).toBe(true);
+  }, 60000);
+
+  it('positive control: a watchdog that never stops G leaves it running past the timeout (the test above is not vacuous)', async () => {
+    const legacy = mutatedBash(root, (s) => s.replace('      : > "$rgh_mark"\n      kill -s TERM -- "-$rgh_pid" 2>/dev/null\n      sleep "$KILL_GRACE_SEC"\n      kill -s KILL -- "-$rgh_pid" 2>/dev/null\n', '      : > "$rgh_mark"\n'));
+    const run = runAsync([{ command: 'touch $MARK/started; sleep 60', timeoutSec: 1 }], {}, legacy);
+    await until(() => fs.existsSync(mark('started')));
+    const g = owner()!.pgid as number;
+    gateGroups.push(g);
+    process.kill(run.pid, 'SIGKILL');
+    await run.wait();
+    await new Promise((r) => setTimeout(r, 3000));
+    expect(groupAlive(g)).toBe(true);
+    expect((await take('ts', locks, 'holder')).acquired).toBe(false);
+  }, 60000);
+
   it('positive control: with the handoff taken out, a reader takes the lock while the old gate still runs', async () => {
     const legacy = mutatedBash(root, withoutHandoff);
     const run = runAsync([GATE], {}, legacy);
