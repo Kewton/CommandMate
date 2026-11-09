@@ -5,7 +5,7 @@
  * so the PC and the phone share it.
  *
  * Issue #4227 (S-E, the screen only): each mode and switch says what it does (`popup`
- * is "attended: ask on the screen when a session opens and closes"), the rows wrap at
+ * is "attended or unattended"; in G-PR1 it is saved only, no dialog yet), the rows wrap at
  * a phone's width, the items screen is linked, and the items screen opens this with
  * its branch filled in for a new override (`initialOverrideBranch`). The API is the same.
  */

@@ -61,7 +61,7 @@ function view(item: Item, frozen: boolean) {
 }
 
 /** One store for every page of the context: two pages on one item share it. */
-async function stubMem(context: BrowserContext): Promise<Store> {
+async function stubMem(context: BrowserContext, names: { worktree: string; branch: string } = { worktree: 'wt', branch: BRANCH }): Promise<Store> {
   const store: Store = {
     mode: 'on',
     items: [
@@ -83,7 +83,7 @@ async function stubMem(context: BrowserContext): Promise<Store> {
       if (url.pathname === '/api/worktrees') {
         return json(route, 200, {
           repositories: [{ id: REPO, path: '/e2e/repo', name: 'repo' }],
-          worktrees: [{ id: WT, name: 'wt', repositoryPath: '/e2e/repo', branch: BRANCH, agentInstances: [{ id: 'claude', cliTool: 'claude', alias: 'Claude', order: 0 }] }],
+          worktrees: [{ id: WT, name: names.worktree, repositoryPath: '/e2e/repo', branch: names.branch, agentInstances: [{ id: 'claude', cliTool: 'claude', alias: 'Claude', order: 0 }] }],
         });
       }
       if (url.pathname.endsWith('/mem/mode')) {
@@ -111,7 +111,8 @@ async function stubMem(context: BrowserContext): Promise<Store> {
       if (match![2]) {
         if (target.state === 'recorded' && body.confirmUnreflected !== true) return json(route, 409, { ok: false, code: 'confirmation_required' });
         target.state = 'closed';
-      } else {
+      } else if (body.text !== undefined) {
+        // As the store: a field the screen did not send is kept.
         target.text = String(body.text);
       }
       target.version += 1;
@@ -209,6 +210,22 @@ for (const viewport of [
       await page.evaluate(() => window.dispatchEvent(new Event('focus')));
       await expect(page.getByTestId('mem-item-changed-note-1')).toBeVisible();
       await expect(page.getByTestId('mem-item-text-note-1')).toHaveText('the agent changed it');
+    });
+
+    test('long names (a real worktree and branch) do not make the page scroll sideways (P3-3)', async ({ context, page }) => {
+      const branch = 'feature/4227-worktree-with-a-long-descriptive-branch-name-for-the-mem-items-screen';
+      await stubMem(context, { worktree: 'commandmate-issue-4227-worktree-with-a-long-directory-name', branch });
+      await page.goto(`/repositories/${REPO}/mem?branch=${encodeURIComponent(branch)}&worktree=${WT}`);
+      await expect(page.getByTestId('mem-item-note-1')).toBeVisible();
+      await expect(page.getByTestId('mem-items-worktree')).toBeVisible();
+      // The whole page, not only the panel: the heading carries the branch name.
+      const widths = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, inner: window.innerWidth }));
+      expect(widths.scroll).toBeLessThanOrEqual(widths.inner);
+      for (const id of ['mem-items-worktree', 'mem-items-panel']) {
+        const box = await page.getByTestId(id).boundingBox();
+        expect(box).not.toBeNull();
+        expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.size.width);
+      }
     });
 
     test('the mode: derived freezes the writes, off lists nothing', async ({ context, page }) => {

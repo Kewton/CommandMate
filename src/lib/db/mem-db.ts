@@ -853,9 +853,17 @@ function settleCheckedVersion(db: Database.Database, itemId: string, previous: n
   else db.prepare('UPDATE mem_items SET checked_rules_version = ? WHERE id = ?').run(previous, itemId);
 }
 
-/** Whether this actor may change this record: its author's incarnation, or a person. */
+/**
+ * Whether this actor may change this record: its author's incarnation, or a person.
+ *
+ * An item a person wrote (`created_by = 'human'`, from the screen, Issue #4227) is
+ * changed and closed by a person only (Epic #4220 D6): the instance chosen as its owner
+ * does not make its agent the author. The condition's close (`closeMemItemByCondition`)
+ * does not ask this and still closes it. A `now` slot stays its instance's (#2427).
+ */
 function ownedBy(db: Database.Database, record: MemRecord, actor: MemActor): boolean {
   if (actor.by === 'human') return true;
+  if (record.createdBy === 'human' && record.kind !== 'now') return false;
   const current = getInstanceIncarnation(db, actor.worktreeId, actor.instanceId);
   if (!current || current.incarnation !== actor.capturedIncarnation) return false;
   // The author is its incarnation, which a rename carries to the new worktree ID;

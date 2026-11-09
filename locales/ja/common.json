@@ -578,13 +578,13 @@
     "featureHelp": {
       "injectOnStart": "セッションの境界（起動・reset・resume）の最初の送信に、短い要約（brief）を付けます。",
       "promptOnEvents": "操作（PR・マージなど）の後に、mem を更新するよう Agent に促します。",
-      "popup": "対話：開始・終了の確認を画面に出します。オフ（既定）は無人で、確認を出しません。auto-yes とは別の設定です。"
+      "popup": "対話：オン・オフを保存します。この版では保存だけで、開始・終了の確認の画面はまだ出ません。オフ（既定）は無人です。auto-yes とは別の設定です。"
     },
     "items": {
       "open": "項目を見る",
       "title": "mem の項目（{branch}）",
       "description": "このブランチの mem の項目を見て、人が追加・編集・close します。人が書いた項目の作成者・更新者は human になります。",
-      "limits": "防げないこと：同じ OS の権限で動くプロセスは画面の印を偽れ、DB を直接書き換えられます。Agent が CLI で同じ項目を書くことは止めません（版の照合で競合として見えます）。",
+      "limits": "防げないこと：同じ OS の権限で動くプロセスは画面の印を偽れ、DB を直接書き換えられます。人が書いた項目は Agent の CLI からは変えられず閉じられません（閉じる条件による close は効きます）。Agent が書いた項目を Agent が CLI で同時に書くことは止めません（版の照合で競合として見えます）。",
       "modeLine": "このブランチの mode：{mode}（{source}）",
       "source": {
         "override": "ブランチの上書き",
@@ -648,7 +648,14 @@
         "read": "読んだときの値（v{version}）",
         "current": "今の値（v{version}）",
         "rebase": "今の値に自分の下書きを載せ直して保存",
-        "discard": "下書きを捨てる"
+        "discard": "下書きを捨てる",
+        "evidence": "根拠：{evidence}",
+        "sends": "載せ直すと送る欄（自分が変えた欄だけ）：{fields}",
+        "field": {
+          "text": "本文",
+          "evidence": "根拠",
+          "closeWhen": "閉じる条件"
+        }
       },
       "recordedClose": {
         "first": "この決定は記録済みですが、正本（Issue の本文など）へは反映されていません。",
@@ -660,7 +667,7 @@
         "disabled": "このブランチの mem は on ではありません。書けません。",
         "version_conflict": "他で変更されていました（版が違います）。",
         "state_forbids": "今の状態では、この操作はできません（閉じられたか、記録済みです）。",
-        "not_owner": "この項目は変えられません（作成した instance か人だけ）。",
+        "not_owner": "この項目は変えられません（Agent が書いた項目は作成した instance と人だけ、人が書いた項目は人だけ）。",
         "incarnation_changed": "作業木か instance が、読んだときと入れ替わりました。読み直してください。",
         "membership_changed": "作業木の今のブランチが、この画面のブランチと違います。何も書いていません。",
         "confirmation_required": "記録済みの決定を閉じるには、反映しないことの確認が要ります。",
@@ -670,8 +677,11 @@
         "duplicate_key": "同じ要求が別の内容で送られています。",
         "limit_exceeded": "この種類の開いた項目が多すぎます。",
         "secret_like": "秘密らしい文字列が含まれています。",
-        "invalid_close_when": "閉じる条件が正しくありません。",
-        "other": "できませんでした（{code}）"
+        "invalid_close_when": "閉じる条件が正しくありません。例 issue:#123・pr:#45・manual",
+        "other": "できませんでした（{code}）",
+        "invalid_close_when_required": "この種類（waiting・next・external）には閉じる条件が要ります。例 issue:#123・pr:#45 を書いてください。",
+        "invalid_close_when_kind": "この種類には、その閉じる条件は使えません。",
+        "invalid_close_when_reason": "閉じる条件の書き方が正しくありません（{reason}）。例 issue:#123・pr:#45・manual"
       },
       "notices": {
         "title": "未配送の知らせ",
@@ -680,6 +690,17 @@
         "uncertain": "前の配送を確かめられませんでした",
         "take": "引き取る",
         "taken": "引き取りました。"
+      },
+      "unknown": "結果が分かりません（時間切れか接続が切れました）。書けたかどうかは分からないので、もう一度押すと同じ内容を同じ印で送り直します（書けていれば 2 件にならず、同じ項目が返ります）。",
+      "resend": "同じ内容で送り直す",
+      "addPending": "前の追加の結果が分かりません。送り直すまで入力は固定されます（同じ内容・同じ印で送るので 2 件になりません）。",
+      "pendingDiscard": "送り直さずにやめる（一覧で書けたかを確かめる）",
+      "closeWhenKeep": "閉じる条件（空なら今の {type} のまま。書くと置き換え）",
+      "closeWhenRequired": "閉じる条件（必須。例 issue:#123・pr:#45）",
+      "closeWhenRequiredHelp": "{kind} には閉じる条件が要ります（waiting・next・external は必須。例 issue:#123・pr:#45・branch:feature/x?merged=develop）。",
+      "closeConflict": {
+        "title": "閉じる前に他で変更されていました。読んだときと今を見比べて、閉じるかどうかを選び直してください。",
+        "again": "今の値を見たうえで閉じ直す"
       }
     }
   }

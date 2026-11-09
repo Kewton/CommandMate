@@ -121,8 +121,9 @@ PM の決定（`pm-decision-4227-kill.md`、2026-11-09）：**終了の流れか
 - 一覧：kind ごとの節（`now` は instance ごとの枠を名前つき、D6）。行に `kind`・`state`・本文（withheld なら A §6.4 の形のまま、本文は出さない）・作成者（`createdBy`・instance）・更新者・`version`・`updatedAt`・`closeWhen` と B の評価（`{result:reason}`）・`stale`・decision の `unreflected`（§6 S3 の文言）
 - 操作（mode `on` のときだけ有効。`derived`・`off` は無効にして理由を出す）：
   - 追加：kind・本文・`closeWhen`・`evidence`。**worktree の文脈（`worktree=`）があり、roster の instance を 1 つ選んだときだけ**（項目の所有は instance を持つ、D5・A §10.1 の `origin_instance_id NOT NULL`）。作成者は `human`、所有の instance は選んだもの
-  - 編集：本文・`closeWhen`・`evidence`。`ifVersion` は一覧を読んだときの `version`
-  - close：理由の任意入力。decision の `open` は「取り下げ」（`withdrawn`）、`recorded` は S-D の 2 段の確認
+  - 編集：本文・`closeWhen`・`evidence`。`ifVersion` は編集を開いた時点の `version`、送るのは人が変えた欄だけ（§2.4.1）
+  - close：理由の任意入力。`ifVersion` は「閉じる」を開いた時点の `version`。decision の `open` は「取り下げ」（`withdrawn`）、`recorded` は S-D の 2 段の確認、`promoted` は「close」（`manual`）。ボタンは遷移の表から導く（§2.4.1 の (5)）
+  - 人が書いた項目（`created_by='human'`）は人だけが変える・閉じる（D6）。所有に選んだ instance の Agent の `mem update`・`mem close` は 409 `not_owner`（exit 55）。条件の close は誰の項目にも効く
   - decision の「記録・反映」は G-5（E）へ。G-1 では書かない
   - `now`：G の項目の API では追加・編集しない（S-A は `now` を 400 で断る。A の `memAddItem` と同じ）。人の `now` の枠の書き込みは既存の #2427 の画面のメモ（`writeSessionNoteFromScreen`、`service.ts:731`）の経路のまま。G-1 はその枠を表示し、編集はその既存の画面へ移る入口を置くだけ。終了の流れの提案も `now` を扱わない（§4.3）
 - 未配送の知らせ（B）：`GET …/notices?branch=` の一覧と「引き取る」（印つき、既存の API）
@@ -148,6 +149,21 @@ PM の決定（`pm-decision-4227-kill.md`、2026-11-09）：**終了の流れか
 - 画面は一覧を読んだときの `version` を持ち、`PATCH`・`close` に送る。409 を受けたら、**自分の下書き・読んだときの値・今の値** の 3 つを並べ（差分の表示）、「今の値に自分の下書きを載せ直して保存」（新しい `ifVersion` で送り直す。人が押したときだけ）か「下書きを捨てる」を選ばせる。自動で載せ直さない
 - 古い差分：一覧を開いたまま時間が経った画面（別のセッション・条件の close で `closed` になった項目）は、書いた時点の 409（`version_conflict` か `state_forbids`）で知る。加えて、画面がフォーカスを取り戻したとき・30 秒ごと（画面の側の再読込。サーバに見張りを足さない）に一覧を読み直し、版が進んだ行に「更新されました」の印を付ける
 - PC とスマホで同じ項目を開いたときも同じ規則（同じ API・同じ版）
+
+#### 2.4.1 画面の入口ごとの規則（G-PR1 の 5-2b の処置、端でなく規則で塞ぐ）［事実：`MemItemsPanel.tsx`・`transitions.ts` の `memScreenActions`］
+
+画面は次の 5 つの規則を、書き込みの入口すべてで守る。規則を変えるときは、この表の行を全部見る。試験は `tests/unit/components/mem/MemItemsPanel-screen-rules-4227.test.tsx`（規則ごとの describe。8ccd61971 の画面ではそれぞれ落ちる）。
+
+| 規則 | 追加（`add`） | 編集（`update`） | close（`open`・`promoted`） | 記録済みの決定の close（`withdraw-recorded`） |
+|---|---|---|---|---|
+| (1) 読んだ時点の版と全欄の値を保つ | 読む値は無い（入力だけ） | 編集を開いた時点の `version`・本文・根拠・条件の種類を `EditDraft.read` に保つ。開いている間の再読込みで差し替えない | 「閉じる」を開いた時点の項目を `Closing.read` に保つ | 同左（段の判断も `read` の状態で行う） |
+| (2) 送るのは人が変えた欄だけ | 書いた欄だけ（空の欄は送らない） | `editChanges`：本文は読んだ値と違えば、根拠は読んだ配列と違えば（全部消したら `evidence: []`）、条件は書いたときだけ（空は「今のまま」）。何も変えていなければ `ifVersion` だけを送る（版の照合だけの保存） | 理由（書いたときだけ） | 理由＋`confirmUnreflected: true` |
+| (3) 版は読んだ時点のもの。競合は比較と明示の再確認へ | 版は無い。`expectBranch` は画面のブランチ | `ifVersion = read.version`。409 は下書き・読んだ値・今の値を本文と根拠ごとに並べ、載せ直しで送る欄も示す。「載せ直して保存」を押したときだけ今の版で送る（送る欄は (2) のまま） | `ifVersion = read.version`。409 は読んだ値と今の値（状態・本文）を並べ、「今の値を見たうえで閉じ直す」で今の項目を `read` にして確認からやり直す | 同左。やり直しは 2 段の確認の 1 段目から |
+| (4) 結果が不明（timeout・接続断、status 0）なら同じ要求を送り直す | 要求の内容と `key` を `pending` に保ち、入力を固定し「同じ内容で送り直す」。store は同じ `key` に同じ項目を返す（2 件にならない）。確定した拒否（4xx）は不明ではない（次は新しい `key`） | 同じ本文・同じ `ifVersion` を送り直す。最初が書けていれば 409 の今の項目が自分の書き込み（版＋1・`human`・送った欄が一致）なので保存できたとして扱う | 同じ要求を送り直す。最初が閉じていれば 409 の今が `closed`・版＋1 なので閉じたとして扱う | 同左（`confirmUnreflected` も同じ） |
+| (5) 出すボタンは遷移の表から | mode `on`・作業木・instance があるとき | `memScreenActions(kind,state).edit`（＝`memTransition(…,'update')`。記録済み・反映済みの決定には出さない） | `memScreenActions(…).close`。文言は遷移の理由で決める（`withdrawn` は「取り下げる」、`manual` は「close」。反映済みの決定は「close」） | `withdraw-recorded` のとき 2 段の確認 |
+
+- 閉じる条件が必須の kind（`waiting`・`next`・`external`、A の `CLOSE_WHEN_DEFAULTS` が `null`）は、追加の欄に「必須」を出す。`close-when.ts` は `fs` を引くので画面は `CLOSE_WHEN_REQUIRED_KINDS` を持ち、試験で A の表と等しいことを固定する。拒否 `invalid_close_when` は `reason`（`required`・`kind_forbids_type`・書き方）ごとに具体の文言にする
+- 390px：作業木・instance の選択欄は `min-w-0 max-w-full`、見出しのブランチ名は折り返す。e2e に実際の長さの名前で `document.documentElement.scrollWidth <= innerWidth` を測る行を足した
 
 ---
 
@@ -766,6 +782,23 @@ CREATE TRIGGER mem_handoff_requests_forced_sticky BEFORE UPDATE OF end_forced ON
 | P2(1) | 停止の観測の API が `cliTool.isRunning(sessionName)` と書かれていたが、実際は `isRunning(worktreeId, instanceId?)` で、session 名を渡すと別の名前を探して偽を返しうる | **`isRunning(target_worktree_id, instance_id)` に訂正**（kill-session の route と同じ呼び方）。session 名を渡さない。primary・追加の instance の両方で照会する session 名を G-PR2 で固定し、停止に失敗したときに `confirmed` にならないことは H9(f)(g) | §4.6 の 3 |
 | P2(2) | 境界が変わった後の `end/observe` の状態遷移が 2 通り（409・`expired(session_changed)` と `ended`・`unconfirmed(session_changed)`）あり、GET の失効が先に走ると観測の条件を満たせない | **停止の宣言の前の古い要求と、宣言済みの観測の要求を分けた**：前者は今どおり 409・`expired(session_changed)`、後者（`ending`）は読み・他の入口が失効させず、同じ `end_token` の `end/observe` で `ended`・`unconfirmed(session_changed)`、来なければ期限で `expired`。観測は境界・在籍の寿命を先に比べ、違えば `isRunning` の値・読みの失敗に関わらず `unconfirmed(session_changed)` | §4.3 の会話の寿命・§4.4 の表の 2 行・§4.6 の 4・§7.4 H15(a) と入口の表の `read` の行・§7.5 の停止の後の起動し直し |
 
+### 11.7 G-PR1 の 5-2b（Codex `review-4227-pr1.md`、P2 5）と PM 側の Claude のレビュー（`pm-review-4227-pr1-claude.md`）の処置
+
+前提：試験・vitest の前に必ず `export CM_DB_PATH=$PWD/data/test.db`（本番の DB を守る。サーバは起動しない。e2e は既存の仕組みで CI が走らせる）。
+
+| # | 指摘 | 処置 | 直した所 |
+|---|---|---|---|
+| Codex P2 #1・Claude P3-1 | close の `ifVersion` が確認を開いた時点でなく再読込み後の版 | 規則 (1)(3)：`Closing.read` の版を送る。409 は比較と「閉じ直す」で確認からやり直す | `MemItemsPanel.tsx`、§2.4.1 |
+| Codex P2 #2・Claude P2-1 | 競合の載せ直しが見ていない根拠を巻き戻す | 規則 (2)(3)：変えた欄だけ送る。競合の比較に根拠と送る欄を出す | 同上 |
+| Codex P2 #3・Claude P2-2 | 結果不明の押し直しが別の key で 2 件目を作る | 規則 (4)：要求の内容と key を保ち、入力を固定して送り直す。ja/en の文書を実際に合わせた | 同上、`docs/user-guide/cli-operations-guide.md`・en |
+| Codex P2 #4・Claude P2-1 | 根拠を空にしても送られない | 規則 (2)：`evidence: []` を送る | 同上 |
+| Codex P2 #5・Claude P3-2 | 記録済みの決定に実行できない「編集」、反映済みの close の文言が「取り下げ」 | 規則 (5)：`memScreenActions` を遷移の表から導く | `transitions.ts`・`MemItemsPanel.tsx` |
+| Claude P3-6（PM が P2 に上げた） | 人が書いた項目を所有の instance の Agent が CLI で変え・閉じられる（D6 に反する） | `ownedBy` で `createdBy='human'`（`now` を除く）を Agent に偽。条件の close は今どおり。表に人の項目の行と対照 | `mem-db.ts`、`write-entrances-recreate-4221.test.ts`、§12 |
+| Claude P3-3 | 390px で作業木の選択欄・ブランチ名がはみ出す見込み | `min-w-0 max-w-full`・見出しの折り返し。e2e に長い名前の行 | `MemItemsPanel.tsx`・`page.tsx`・e2e |
+| Claude P3-4 | 条件が必須の kind を示さない・拒否の文言 | 必須の表示と `reason` ごとの文言 | `MemItemsPanel.tsx`・locales |
+| Claude P3-5 | popup の説明が G-PR2・PR3 の動きを先に約束 | 「この版では保存だけ」に直した | locales・ja/en の文書 |
+| Claude P3-7 | ZWSP などが A の規則で通る | 追跡 #4289（直さない） | — |
+
 ---
 
 ## 12. 共通規則の全読者（G-PR1 の実装の後、5-2b の前に書いた）
@@ -779,6 +812,9 @@ G が使う共通の規則ごとに、規則を持つ 1 か所と、それを読
 | 在籍の寿命の比較（`null → lazy` は同じ、`roster` の発行は別） | `src/lib/db/session-brief-db.ts` の `isSameInstanceLifetime`・`readInstanceLifetime` | `session/session-boundary.ts`・`brief/build.ts`（D1・C）・**`mem/service.ts` の `memWriteFromScreen`**（G-PR1）。A の `createMemItem` の `settleActorIncarnation` は別の（より厳しい）規則で、読んだ時点で無かった世代が書き込みの前に発行されていれば断る［事実。G は変えない。H14(c) は `update` で固定した］ | G-PR2：handoff の会話の寿命（依頼・提案・`decide`・`end`・`end/observe`） |
 | 遷移の表（`withdraw-recorded` を含む） | `src/lib/mem/transitions.ts` の `memTransition` | `mem-db.ts` の `updateMemItem`・`closeMemItem`・`closeMemItemByCondition`・`transitionDecision`・**`closeMemItemVersioned`**、`mem/evaluate.ts`。`withdraw-recorded` を渡すのは `memWriteFromScreen`（人・`confirmUnreflected:true`・`recorded` の決定）だけ（ガードで固定、CLI と提案の側に文字列が無い） | G-PR2：提案の受け入れ（`close` は `open` の決定だけ。`withdraw-recorded` を持たない） |
 | 版の照合（`ifVersion`） | store の各関数の transaction の中（`updateMemItem`・**`closeMemItemVersioned`**・`transitionDecision`） | 画面：`MemItemsPanel.tsx` が読んだ版を送り、409 で 3 つの値を並べる。試験：H3・H16(a) の行・部品の試験・e2e | G-PR2：`decide` の `base_version` |
+| 画面の 5 つの規則（§2.4.1） | `MemItemsPanel.tsx`（`editChanges`・`readSnapshot`・`pending`・`Closing.read`）と `transitions.ts` の `memScreenActions` | 試験：`MemItemsPanel-screen-rules-4227.test.tsx`・`MemItemsPanel-4227.test.tsx`・e2e `mem-ui-4227.spec.ts`。文書：`docs/user-guide/cli-operations-guide.md`・`docs/en/…` の「同時編集」「送り直し」「ボタン」 | G-PR2：G-4 の承認の画面（`decide` の送り直し・競合の比較は同じ規則で） |
+| 人が書いた項目は人だけが変える・閉じる（D6） | `mem-db.ts` の `ownedBy`（`createdBy='human'` かつ `now` でない項目は `actor.by='agent'` に偽） | 書き手：`updateMemItem`・`closeMemItem`・`closeMemItemVersioned`（Agent の入口 `memUpdateItem`・`memCloseItem`、`memWriteFromScreen` の `author:'agent'`）。条件の close（`closeMemItemByCondition`）は読まない（誰の項目も閉じる）。試験：`write-entrances-recreate-4221.test.ts` の D6 の表。文書：ja/en の「人が書いた項目」・画面の `limits`・`refusal.not_owner` | G-PR2：提案の受け入れ（`author:'proposer'`）が人の項目を変えるかは G-PR2 の契約で決める（今は Agent として断られる） |
+| 本番 DB を守る（試験・vitest・verify） | 各契約の前提（`export CM_DB_PATH=$PWD/data/test.db` を先に） | G の試験はすべて `os.tmpdir()` の一時 DB（`openMigratedFileDb`）を開き、本番の DB を開かない。e2e は API を stub し、サーバを起動しない | G-PR2・G-PR3 の試験も同じ |
 | 古さ（`stale`） | `src/lib/mem/staleness.ts` の `memItemStaleness`（`present.ts` が一覧の `stale` に入れる） | 画面は一覧の `stale` を出すだけで計算しない（`MemItemsPanel.tsx`） | F（#4226）の促し・G-PR3 の preview |
 | 対話・無人の設定（`popup`） | A の `mem_repository_settings.popup`・`mem_branch_overrides.popup` → `decideRootMode` の `features.popup` | 書く：`settings-service.ts`（画面だけ）。説明：`RepositoryMemSettings.tsx` の `mem.featureHelp.popup`（S-E）・文書の「項目を画面で見る・書く」の最後の項。**G-PR1 では分岐に読まない**（auto-yes も読まない） | G-PR2：G-4 の分岐（`useWorktreeDetailController.ts`）。G-PR3：G-3 の出す条件 |
 | 宣言の前の古い要求と宣言済みの観測の要求（6 回目 P2(2)） | G-PR2 の `src/lib/handoff/request.ts`（会話の寿命の判定）と `end.ts`（観測）［見立て］ | G-PR1 には読者が無い（設計書の §4.3・§4.4・§4.6・H15・§7.5 だけ） | G-PR2：handoff の `GET`・期限の判定・`propose`・`done`・`decide`・`rebase`・`extend`・`end`・`end/observe`、H15(a)(e)、e2e の停止の後の起動し直し |

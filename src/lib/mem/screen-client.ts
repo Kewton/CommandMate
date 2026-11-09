@@ -119,7 +119,7 @@ export interface MemScreenAddInput {
   closeWhen?: string;
   evidence?: string[];
   promoteTo?: string;
-  /** Made once per press: a resend is the same item. */
+  /** Made once per request; a resend after an unknown result keeps it, so it is the same item. */
   key: string;
   /** The branch the screen shows; null for a detached HEAD. */
   expectBranch: string | null;
@@ -127,7 +127,9 @@ export interface MemScreenAddInput {
 
 export interface MemScreenUpdateInput {
   instanceId: string;
+  /** The version read when the edit was opened (or the current one the person chose after a conflict). */
   ifVersion: number;
+  /** Only the fields the person changed are sent; an emptied evidence is `[]` (an omitted field is kept). */
   text?: string;
   closeWhen?: string;
   evidence?: string[];

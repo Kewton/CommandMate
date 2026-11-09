@@ -578,13 +578,13 @@
     "featureHelp": {
       "injectOnStart": "Attach a short summary (brief) to the first send after a session boundary (start, reset, resume).",
       "promptOnEvents": "After an action (a PR, a merge), prompt the agent to update mem.",
-      "popup": "Attended: ask on the screen when a session opens and closes. Off (the default) is unattended and asks nothing. Separate from auto-yes."
+      "popup": "Attended: saves the setting. In this version it is saved only; the screens that ask when a session opens and closes do not appear yet. Off (the default) is unattended. Separate from auto-yes."
     },
     "items": {
       "open": "View items",
       "title": "mem items ({branch})",
       "description": "View this branch's mem items; a person adds, edits and closes them. Items a person writes are created and updated by human.",
-      "limits": "What this cannot prevent: a process with the same OS rights can forge the screen's mark and write the DB directly. An agent writing the same item through the CLI is not stopped (the version check shows it as a conflict).",
+      "limits": "What this cannot prevent: a process with the same OS rights can forge the screen's mark and write the DB directly. An item a person wrote cannot be changed or closed by an agent through the CLI (a close by its condition still applies). An agent writing its own item through the CLI at the same time is not stopped (the version check shows it as a conflict).",
       "modeLine": "Mode of this branch: {mode} ({source})",
       "source": {
         "override": "branch override",
@@ -648,7 +648,14 @@
         "read": "When read (v{version})",
         "current": "Now (v{version})",
         "rebase": "Save my draft on top of the current value",
-        "discard": "Discard my draft"
+        "discard": "Discard my draft",
+        "evidence": "Evidence: {evidence}",
+        "sends": "Fields saving on top sends (only the ones you changed): {fields}",
+        "field": {
+          "text": "text",
+          "evidence": "evidence",
+          "closeWhen": "close condition"
+        }
       },
       "recordedClose": {
         "first": "This decision is recorded but not reflected in the canonical place (such as the Issue body).",
@@ -660,7 +667,7 @@
         "disabled": "mem is not on for this branch. Nothing can be written.",
         "version_conflict": "It was changed elsewhere (the version differs).",
         "state_forbids": "This cannot be done in the item's current state (closed, or recorded).",
-        "not_owner": "This item cannot be changed (only its author's instance or a person).",
+        "not_owner": "This item cannot be changed (an agent's item: its author's instance or a person; a person's item: a person only).",
         "incarnation_changed": "The worktree or the instance was replaced since it was read. Read again.",
         "membership_changed": "The worktree is on another branch than this screen's. Nothing was written.",
         "confirmation_required": "Closing a recorded decision needs the confirmation that it is not reflected.",
@@ -670,8 +677,11 @@
         "duplicate_key": "The same request was sent with other content.",
         "limit_exceeded": "Too many open items of this kind.",
         "secret_like": "A field looks like it contains a secret.",
-        "invalid_close_when": "The close condition is not valid.",
-        "other": "Could not do it ({code})"
+        "invalid_close_when": "The close condition is not valid. E.g. issue:#123, pr:#45, manual",
+        "other": "Could not do it ({code})",
+        "invalid_close_when_required": "This kind (waiting, next, external) needs a close condition. Write one such as issue:#123 or pr:#45.",
+        "invalid_close_when_kind": "This kind does not take that close condition.",
+        "invalid_close_when_reason": "The close condition is not written correctly ({reason}). E.g. issue:#123, pr:#45, manual"
       },
       "notices": {
         "title": "Undelivered notices",
@@ -680,6 +690,17 @@
         "uncertain": "An earlier delivery could not be confirmed",
         "take": "Take it",
         "taken": "Taken."
+      },
+      "unknown": "The result is unknown (timed out or the connection was lost). It may or may not have been written; pressing again sends the same content with the same key (if it was written, no second item is made and the same item comes back).",
+      "resend": "Send the same again",
+      "addPending": "The result of the last add is unknown. The input is held until it is sent again (the same content and key, so no second item).",
+      "pendingDiscard": "Do not send again (check the list for whether it was written)",
+      "closeWhenKeep": "Close condition (empty keeps the current {type}; writing one replaces it)",
+      "closeWhenRequired": "Close condition (required, e.g. issue:#123, pr:#45)",
+      "closeWhenRequiredHelp": "{kind} needs a close condition (required for waiting, next and external; e.g. issue:#123, pr:#45, branch:feature/x?merged=develop).",
+      "closeConflict": {
+        "title": "It was changed elsewhere before closing. Compare what you read with the current value and choose again whether to close it.",
+        "again": "Close it again, having seen the current value"
       }
     }
   }

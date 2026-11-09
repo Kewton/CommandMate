@@ -26,7 +26,7 @@ function ItemsContent(): React.ReactElement {
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 p-4">
-      <h1 className="text-lg font-semibold text-foreground">{t('mem.items.title', { branch: branch || '—' })}</h1>
+      <h1 className="break-words text-lg font-semibold text-foreground [overflow-wrap:anywhere]">{t('mem.items.title', { branch: branch || '—' })}</h1>
       <p className="text-xs text-muted-foreground">{t('mem.items.description')}</p>
       <form
         className="flex flex-wrap items-center gap-2"
