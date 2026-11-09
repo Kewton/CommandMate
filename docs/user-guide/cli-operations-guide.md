@@ -80,6 +80,7 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | [`commandmate instances`](#commandmate-instances) | エージェントインスタンス（roster）の一覧・追加・削除・alias変更 |
 | [`commandmate roles`](#commandmate-roles) | ロールの定義と、ツール・リポジトリごとの既定の設定 |
 | [`commandmate mem`](#commandmate-mem) | セッションをまたぐ作業の項目（now・待ち・決定など）の読み書き。mode は読むだけ |
+| [`commandmate handoff`](#commandmate-handoff) | セッションを終える前の引き継ぎで、Agent が mem の更新を提案として出す（確定は人が画面で） |
 | [`commandmate brief`](#commandmate-brief) | 再開のときに読む要約（導いた状態と mem の項目）を UTF-8 のバイト数の予算の内で出す |
 | [`commandmate agents`](#commandmate-agents) | エージェント CLI の版表示と更新（pane の外で `codex update` を実行） |
 | [`commandmate report`](#commandmate-report) | 日次レポートの生成・表示・一覧、Eval メトリクス集計 |
@@ -3542,6 +3543,32 @@ commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before 
 - `--instance` の名乗りも偽れる。作成者の検査は別のセッションの項目を誤って書き換えないためのもので、悪意の書き換えを防ぐものではない
 - 決定の記録（promote）の承認も同じ印で画面の経路に限っている。同じ OS 権限のプロセスは印を偽れ、DB の操作の記録を書き換えて「成功」にもできる。Agent に承認させないのは CLI に口が無いことと skill の指示であって、保証ではない
 - 画面の項目の書き込み（Issue #4227）も同じ印で画面の経路に限っている。人の書き込みは作成者の検査を通らない（人はどの項目も変えられる。逆に人が書いた項目は Agent の入口からは変えられない）ので、作業木・instance の寿命・ブランチ・mode・版を書き込みの直前に照合する。同じ OS 権限のプロセスが印を偽れば、人として書ける
+
+---
+
+## commandmate handoff
+
+セッションを終える前の引き継ぎ（Issue #4227）で、**Agent が使う口**です。人が画面の「終了」から引き継ぎを始めると（対話の設定 `popup` がオンで mode が `on` のブランチだけ）、画面が Agent に依頼の文を送り、Agent はこのコマンドで mem の更新を **提案** として出します。提案は更新ではありません。人が画面で差分を見て承認したものだけが、項目の版を照合して確定します。
+
+```bash
+commandmate handoff propose --request <id> add --kind <kind> --text "…" [--close-when …] [--evidence …]
+commandmate handoff propose --request <id> update <itemId> --base-version <v> --text "…"
+commandmate handoff propose --request <id> close <itemId> --base-version <v> [--reason "…"]
+commandmate handoff done --request <id>
+```
+
+- `--request` は依頼の文にある ID です。宛先はセッションの中なら自分（whoami）、普通のシェルでは `--worktree <id> --instance <id>` を付けます
+- **承認・取り消し・終了の口はありません**（画面だけ、印つきの要求だけを受けます）
+- 提案は依頼された instance だけが出せます（他の instance は `not_requested`）。Agent の時間（5 分、画面で 2 回まで 5 分ずつ延ばせる）を過ぎた・`done` の後・強制終了の後・取り消しの後は受けません（`request_closed`）
+- 提案は `now` を扱いません。決定は追加（開いた決定）と、開いた決定の取り下げ（close）だけです。記録済みの決定の close は人が画面で行います（`state_forbids`）
+- 依頼の後にセッションを起動し直した（再起動・reset・resume など、D1 の境界が新しくなった）ら、古い依頼への提案は `session_changed` で断られ、依頼は期限切れになります
+
+### 引き継ぎの終わり方と記録（停止は人が押す）
+
+- 引き継ぎは **セッションを止めません**。止めるのは、人がその場で押す既存の停止だけです。画面の「停止する」は、停止の宣言 → 既存の停止 → 止まったことの観測 の順に行い、サーバは止まったかを `isRunning` で確かめて記録します。期限・取り消し・確定・読みからは何も止めません
+- 記録は `confirmed`（Agent の `done`・全提案への判断・確定の全成功・人の停止の後に止まったことを観測、の全部）か `unconfirmed`（理由つき：`forced`・`agent_timeout`・`request_failed`・`undecided_left`・`conflict_left`・`apply_failed`・`session_changed`）です。確定の前に「今すぐ停止」を押した強制終了は、必ず `unconfirmed(forced)` です。止まったことを確かめられないときは記録せず、もう一度停止を押すよう画面が出します
+- 画面がこの流れを「終了」から出すのは後の版です（この版では、提案・承認・停止の記録の API とこのコマンドまで）。それまで「終了」は今までどおりの確認から止めます
+- 終了コードは mem と同じです：0 成功・2 入力の誤り・50 mode が on でない・51 版の競合・52 見つからない・55 `not_requested`／`request_closed`／`session_changed`／`state_forbids`
 
 ---
 

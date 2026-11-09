@@ -15,6 +15,8 @@ import { v68_migrations } from '@/lib/db/migrations/v68-session-brief-boundaries
 // Issue #4225: v69 (mem_promote_*) sits above them all and goes back first.
 import { v69_migrations } from '@/lib/db/migrations/v69-mem-promote';
 import { v70_migrations } from '@/lib/db/migrations/v70-suggestion-shown';
+// Issue #4227 (G-PR2): v71 (mem_handoff_*) sits above them all and goes back first.
+import { v71_migrations } from '@/lib/db/migrations/v71-mem-handoff';
 
 describe('migration v66: mem store', () => {
   let db: Database.Database;
@@ -45,6 +47,8 @@ describe('migration v66: mem store', () => {
     try {
       fresh.pragma('foreign_keys = ON');
       runMigrations(fresh);
+      v71_migrations[0].down!(fresh);
+      fresh.prepare('DELETE FROM schema_version WHERE version = 71').run();
       v70_migrations[0].down!(fresh);
       fresh.prepare('DELETE FROM schema_version WHERE version = 70').run();
       v69_migrations[0].down!(fresh);
@@ -80,6 +84,7 @@ describe('migration v66: mem store', () => {
   });
 
   it('rolls back to the v65 shape', () => {
+    v71_migrations[0].down!(db);
     v69_migrations[0].down!(db);
     v67_migrations[0].down!(db);
     v66_migrations[0].down!(db);

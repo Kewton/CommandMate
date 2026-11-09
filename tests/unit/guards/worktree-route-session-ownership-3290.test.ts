@@ -363,6 +363,14 @@ const EXEMPT: readonly Exemption[] = [
   { handler: 'verify/config/route.ts#POST', reason: ENV_SNAPSHOT_REASON, reachesOnly: ENV_SNAPSHOT_ONLY },
   { handler: 'verify/route.ts#POST', reason: ENV_SNAPSHOT_REASON, reachesOnly: ENV_SNAPSHOT_ONLY },
   {
+    // Issue #4227 G-PR2: the hand-off's observation after a person's stop.
+    handler: 'mem/handoff/requests/[rid]/end/observe/route.ts#POST',
+    reason:
+      'asks only whether the request\'s instance runs (`cliTool.isRunning(worktreeId, instanceId)`, the ' +
+      'call kill-session makes) and records the answer; it sends, reads off a pane and stops nothing. A ' +
+      'foreign session of the same name answers "running", which is recorded as "not seen stopped" (fail closed)',
+  },
+  {
     handler: 'verify/runs/[runId]/cancel/route.ts#POST',
     reason: ENV_SNAPSHOT_REASON,
     reachesOnly: ENV_SNAPSHOT_ONLY,

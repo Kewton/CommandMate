@@ -1819,9 +1819,12 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     setKillTarget({ cliToolId, instanceId, label });
   }, []);
 
-  /** Issue #1171: execute the kill for the snapshotted target only. */
-  const handleKillConfirm = useCallback(async (): Promise<void> => {
-    const target = killTarget;
+  /**
+   * Issue #1171: execute the kill for the snapshotted target only. Issue #4227: the body is
+   * the existing stop as it was, taken out as `stopSession(target)` so the hand-off's stop
+   * button (G-4) runs the same one — not a copy — for the target it snapshotted.
+   */
+  const stopSession = useCallback(async (target: SessionKillTarget | null): Promise<void> => {
     if (!target || isKillPendingRef.current) return;
     isKillPendingRef.current = true;
     setIsKillPending(true);
@@ -1890,7 +1893,46 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       isKillPendingRef.current = false;
       setIsKillPending(false);
     }
-  }, [killTarget, worktreeId, actions, fetchWorktree, showToast, tWorktree, tCommon]);
+  }, [worktreeId, actions, fetchWorktree, showToast, tWorktree, tCommon]);
+
+  const handleKillConfirm = useCallback(async (): Promise<void> => {
+    await stopSession(killTarget);
+  }, [killTarget, stopSession]);
+
+  /**
+   * Issue #4227 (G-4, design `mem-ui-4227.md` §4.1): "end" on a branch set to be attended
+   * (`popup`) with mode `on` opens the hand-off dialog for the snapshotted target instead
+   * of the plain confirmation; anything else (unattended, mode not `on`, or the mode not
+   * readable) opens the plain confirmation as before. The hand-off never kills: its stop
+   * button runs {@link stopForHandoff}, the existing stop, from its handler only.
+   */
+  const [handoffTarget, setHandoffTarget] = useState<SessionKillTarget | null>(null);
+  useEffect(() => {
+    setHandoffTarget(null);
+  }, [worktreeId]);
+  const openActiveEnd = useCallback(async (): Promise<void> => {
+    const instanceId = activeInstanceIdRef.current;
+    const cliToolId = activeCliTabRef.current;
+    const label = getActiveInstanceLabel(agentInstancesRef.current, instanceId, cliToolId);
+    const target: SessionKillTarget = { cliToolId, instanceId, label };
+    const startedFor = worktreeId;
+    let attended = false;
+    try {
+      const response = await fetch(`/api/worktrees/${encodeURIComponent(worktreeId)}/mem/mode`);
+      const body = (await response.json()) as { ok?: boolean; mode?: string; features?: { popup?: boolean } };
+      attended = response.ok && body.ok === true && body.mode === 'on' && body.features?.popup === true;
+    } catch {
+      attended = false;
+    }
+    if (startedFor !== worktreeIdRef.current) return;
+    if (attended) setHandoffTarget(target);
+    else setKillTarget(target);
+  }, [worktreeId]);
+  const closeHandoff = useCallback((): void => setHandoffTarget(null), []);
+  /** The existing stop for the hand-off's target (G-4's stop button). */
+  const stopForHandoff = useCallback(async (): Promise<void> => {
+    await stopSession(handoffTarget);
+  }, [handoffTarget, stopSession]);
 
   /** Issue #1171: cancel — a no-op while a kill POST is in flight (keeps target). */
   const handleKillCancel = useCallback((): void => {
@@ -2418,6 +2460,11 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     openKillConfirm,
     openActiveKillConfirm,
     killTarget,
+    // Issue #4227 (G-4): the hand-off before ending, for the screens that render it.
+    openActiveEnd,
+    handoffTarget,
+    closeHandoff,
+    stopForHandoff,
     isKillPending,
     handleLoadContent,
     handleLoadError,

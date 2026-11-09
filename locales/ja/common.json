@@ -705,12 +705,92 @@
       "pendingDiscard": "送り直さずにやめる（一覧で書けたかを確かめる）",
       "lockedSending": "送信中です。答えが返るまで、ほかの書き込み（追加・編集・close）はできず、送った欄は変えられません。",
       "lockedUnknown": "結果が分からない要求があります。その要求を「同じ内容で送り直す」か「送り直さずにやめる」まで、ほかの書き込み（追加・編集・close・載せ直し・閉じ直す）はできず、その要求の欄は変えられません（二重や取り違えを防ぐため）。読み直しと作業木・instance の選択の変更はできます。",
+      "lockedElsewhere": "ほかの画面（終了の前の引き継ぎ）に、送信中か結果が分からない項目の書き込みがあります。それが決着するまで、ここでは書き込めません（読み直しと選択の変更はできます）。",
       "closeWhenKeep": "閉じる条件（空なら今の {type} のまま。書くと置き換え）",
       "closeWhenRequired": "閉じる条件（必須。例 issue:#123・pr:#45）",
       "closeWhenRequiredHelp": "{kind} には閉じる条件が要ります（waiting・next・external は必須。例 issue:#123・pr:#45・branch:feature/x?merged=develop）。",
       "closeConflict": {
         "title": "閉じる前に他で変更されていました。読んだときと今を見比べて、閉じるかどうかを選び直してください。",
         "again": "今の値を見たうえで閉じ直す"
+      }
+    },
+    "handoff": {
+      "title": "終了の前の引き継ぎ（{label}）",
+      "creating": "引き継ぎの依頼を作っています…",
+      "reload": "読み直す",
+      "sessionUnknown": "このセッションの会話の記録が無いため、引き継ぎの依頼を作れません。停止はできます（引き継ぎは記録されません）。",
+      "sessionChanged": "依頼の後にセッションが入れ替わりました。停止は今のセッションに効きます（引き継ぎは記録されません）。",
+      "keepSession": "やめる",
+      "stop": "停止する",
+      "stopNow": "今すぐ停止",
+      "cancel": "終了をやめる",
+      "close": "閉じる",
+      "confirm": "確定する",
+      "approve": "承認",
+      "discard": "捨てる",
+      "rebase": "今の版に載せ替える",
+      "resend": "同じ内容で送り直す",
+      "drop": "送り直さずにやめる",
+      "unknown": "確定の結果が分かりません。同じ内容で送り直すか、送り直さずにやめてください。その間、ほかの項目の書き込みはできません。",
+      "decided": "確定しました。",
+      "someNotApplied": "確定できなかった提案があります（競合・失敗）。一覧を見てください。",
+      "extended": "Agent の時間を 5 分延ばしました。",
+      "sendFailed": "依頼を送れませんでした。送り直すか、提案なしで停止するか、終了をやめてください。",
+      "resendText": "依頼を送り直す",
+      "agentTimeout": "Agent が期限までに「終わった」を返していません。待つ（+5 分）・ここまでの提案で進む・提案なしで停止・終了をやめる、から選んでください。",
+      "extend": "待つ（+5 分）",
+      "goOn": "ここまでの提案で進む",
+      "direct": "提案を経ずに確定した更新（読むだけ、巻き戻しません）",
+      "notStopped": "停止を確かめられませんでした。もう一度「停止する」を押してください。",
+      "forcedMark": "（強制）",
+      "lockedElsewhere": "ほかの画面に、送信中か結果が分からない項目の書き込みがあります。それが決着するまで、承認・捨てる・載せ替えはできません。",
+      "lockedSending": "確定を送信中です。答えが返るまで、ほかの項目の書き込みはできません。",
+      "lockedUnknown": "結果が分からない確定があります。送り直すかやめるまで、ほかの項目の書き込みはできません。",
+      "withheld": "本文は表示しません（{field} が規則 {rule} に当たりました）",
+      "withheldShort": "（表示しません）",
+      "closeProposal": "閉じる（理由：{reason}）",
+      "currentValue": "今の値（v{version}）",
+      "state": {
+        "awaiting_agent": "Agent の提案を待っています。",
+        "reviewing": "提案を見て、承認するものを選んでください。",
+        "applying": "確定しています…",
+        "ending": "停止を確かめています…",
+        "ended": "終わりました。",
+        "cancelled": "終了をやめました。",
+        "expired": "依頼は期限切れか、セッションが入れ替わりました。"
+      },
+      "proposalState": {
+        "proposed": "提案",
+        "approved": "承認済み",
+        "applied": "確定済み",
+        "conflict": "競合",
+        "discarded": "捨てた",
+        "failed": "失敗",
+        "expired": "期限切れ"
+      },
+      "op": {
+        "add": "追加",
+        "update": "更新",
+        "close": "close"
+      },
+      "outcome": {
+        "confirmed": "終わる前の更新を確かめて終わりました。",
+        "unconfirmed": "終わる前の更新を確認できませんでした（{reason}）。次のセッションにはその旨が残ります。"
+      },
+      "refusal": {
+        "disabled": "このブランチの mem は on ではありません。",
+        "session_changed": "依頼の後にセッションが入れ替わりました。",
+        "request_closed": "この依頼は、もうこの操作を受けません。",
+        "version_conflict": "依頼が読んだときから進みました。今の状態を見て、選び直してください。",
+        "proposal_changed": "提案が、見たときから変わりました。",
+        "state_forbids": "今の状態では、この操作はできません。",
+        "extend_limit": "これ以上は延ばせません。",
+        "not_stopped": "停止を確かめられませんでした。",
+        "end_token_changed": "この停止は、宣言したものではありません。",
+        "already_recorded": "終わり方は既に記録されています。",
+        "screen_only": "この操作は画面からだけできます。",
+        "not_found": "依頼が見つかりません。",
+        "other": "できませんでした（{code}）。"
       }
     }
   }

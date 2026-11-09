@@ -71,6 +71,7 @@ node bin/commandmate.js ls
 | [`commandmate instances`](#commandmate-instances) | List, add, remove, and rename agent instances (the roster) |
 | [`commandmate roles`](#commandmate-roles) | Define roles and set the defaults per tool and repository |
 | [`commandmate mem`](#commandmate-mem) | Read and write the items that carry work across sessions (now, waiting, decisions, …); the mode is read-only |
+| [`commandmate handoff`](#commandmate-handoff) | The hand-off before a session ends: the agent proposes its mem updates (a person confirms on the screen) |
 | [`commandmate brief`](#commandmate-brief) | The summary a restart reads (derived state and mem items) within a UTF-8 byte budget |
 | [`commandmate report`](#commandmate-report) | Generate, show, and list daily reports; aggregate Eval metrics |
 | [`commandmate skill`](#commandmate-skill) | Browse the Skill catalog; plan, install, update, uninstall, and inspect Skills |
@@ -2679,6 +2680,32 @@ A branch's items are shown under **the "mem" of each row of the Repositories scr
 - `--instance` can be claimed falsely too. The author check keeps a session from changing another's items by mistake; it does not stop a deliberate rewrite
 - Approving a decision's record (promote) is limited to the screen path by the same mark. A process with the same OS rights can forge it, and can rewrite the operation records in the database to read "succeeded". That agents do not approve rests on the CLI having no way to and on the skills' instructions, not on a guarantee
 - A person's item writes on the screen (Issue #4227) are limited to the screen path by the same mark. A person passes the author check (a person may change any item; conversely, an item a person wrote is not changed through an agent's entrance), so the worktree's and the instance's lifetimes, the branch, the mode and the version are checked right before the write. A process with the same OS rights that forges the mark writes as a person
+
+---
+
+## commandmate handoff
+
+The **agent's side** of the hand-off before a session ends (Issue #4227). When a person starts the hand-off from the screen's "end" (only on a branch set to be attended, `popup` on, with mode `on`), the screen sends the agent a request, and the agent puts its mem updates up as **proposals** with this command. A proposal is not an update: only what a person approves on the screen, after seeing the difference, is confirmed against the item's version.
+
+```bash
+commandmate handoff propose --request <id> add --kind <kind> --text "…" [--close-when …] [--evidence …]
+commandmate handoff propose --request <id> update <itemId> --base-version <v> --text "…"
+commandmate handoff propose --request <id> close <itemId> --base-version <v> [--reason "…"]
+commandmate handoff done --request <id>
+```
+
+- `--request` is the id in the request text. Inside a session the target is yourself (whoami); in an ordinary shell add `--worktree <id> --instance <id>`
+- **There is no way here to approve, cancel or end** (the screen's only, with its mark)
+- Only the instance asked can propose (another gets `not_requested`). Past the agent's time (5 minutes; the screen can add 5 minutes twice), after `done`, after a forced stop or a cancel, nothing is taken (`request_closed`)
+- A proposal never touches `now`. A decision is proposed as an add (open) or the withdrawal of an open one (close); closing a recorded decision is a person's, on the screen (`state_forbids`)
+- If the session is started again after the request (a restart, reset or resume: a new D1 boundary), proposals to the old request are refused with `session_changed` and the request expires
+
+### How a hand-off ends and what is recorded (a person stops it)
+
+- The hand-off **never stops a session**. Only the existing stop a person presses does. The screen's "Stop" declares the stop, runs the existing stop, then asks the server to observe it; the server checks with `isRunning` and records it. Nothing stops anything from a deadline, a cancel, a confirmation or a read
+- The record is `confirmed` (the agent's `done`, every proposal decided, every confirmation in, and the stop observed after the person's press — all of them) or `unconfirmed` with a reason: `forced`, `agent_timeout`, `request_failed`, `undecided_left`, `conflict_left`, `apply_failed`, `session_changed`. "Stop now" before confirming is always `unconfirmed(forced)`. When the stop cannot be confirmed nothing is recorded and the screen asks to press Stop again
+- The screen offers this flow from "end" in a later version (this one has the API for proposals, approval and the record of the stop, and this command). Until then "end" stops after the usual confirmation
+- The exit codes are mem's: 0 done, 2 invalid input, 50 mode not on, 51 version conflict, 52 not found, 55 `not_requested` / `request_closed` / `session_changed` / `state_forbids`
 
 ---
 

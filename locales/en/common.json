@@ -705,12 +705,92 @@
       "pendingDiscard": "Do not send again (check the list for whether it was written)",
       "lockedSending": "Sending. Until the answer comes back, no other write (add, edit, close) can be made and the fields sent cannot be changed.",
       "lockedUnknown": "A request's result is unknown. Until you send it again or choose \"Do not send again\", no other write (add, edit, close, save on top, close again) can be made and that request's fields cannot be changed (so nothing is written twice or mixed up). Reading again and changing the worktree or instance still work.",
+      "lockedElsewhere": "Another screen (the hand-off before ending) has an item write being sent or with an unknown result. Until it settles nothing can be written here (reading again and changing the selection still work).",
       "closeWhenKeep": "Close condition (empty keeps the current {type}; writing one replaces it)",
       "closeWhenRequired": "Close condition (required, e.g. issue:#123, pr:#45)",
       "closeWhenRequiredHelp": "{kind} needs a close condition (required for waiting, next and external; e.g. issue:#123, pr:#45, branch:feature/x?merged=develop).",
       "closeConflict": {
         "title": "It was changed elsewhere before closing. Compare what you read with the current value and choose again whether to close it.",
         "again": "Close it again, having seen the current value"
+      }
+    },
+    "handoff": {
+      "title": "Hand-off before ending ({label})",
+      "creating": "Making the hand-off request…",
+      "reload": "Read again",
+      "sessionUnknown": "No conversation is recorded for this session, so no hand-off request can be made. You can still stop it (no hand-off is recorded).",
+      "sessionChanged": "The session was replaced after the request. Stopping acts on the current session (no hand-off is recorded).",
+      "keepSession": "Cancel",
+      "stop": "Stop",
+      "stopNow": "Stop now",
+      "cancel": "Don't end",
+      "close": "Close",
+      "confirm": "Confirm",
+      "approve": "Approve",
+      "discard": "Discard",
+      "rebase": "Move onto the current version",
+      "resend": "Send the same again",
+      "drop": "Drop without resending",
+      "unknown": "The result of the confirmation is not known. Send the same again or drop it. Until then no other item can be written.",
+      "decided": "Confirmed.",
+      "someNotApplied": "Some proposals were not confirmed (conflict or failure). See the list.",
+      "extended": "Gave the agent 5 more minutes.",
+      "sendFailed": "The request could not be sent. Send it again, stop without proposals, or don't end.",
+      "resendText": "Send the request again",
+      "agentTimeout": "The agent has not said it is done in time. Wait (+5 min), go on with what came, stop without proposals, or don't end.",
+      "extend": "Wait (+5 min)",
+      "goOn": "Go on with what came",
+      "direct": "Updates made without a proposal (read only; not rolled back)",
+      "notStopped": "The stop could not be confirmed. Press Stop again.",
+      "forcedMark": "(forced)",
+      "lockedElsewhere": "Another screen has an item write being sent or with an unknown result. Until it settles, approving, discarding and moving are not possible.",
+      "lockedSending": "Sending the confirmation. Until it answers, no other item can be written.",
+      "lockedUnknown": "A confirmation's result is not known. Until it is resent or dropped, no other item can be written.",
+      "withheld": "Not shown ({field} matched rule {rule})",
+      "withheldShort": "(not shown)",
+      "closeProposal": "Close (reason: {reason})",
+      "currentValue": "Current (v{version})",
+      "state": {
+        "awaiting_agent": "Waiting for the agent's proposals.",
+        "reviewing": "Look at the proposals and choose what to approve.",
+        "applying": "Confirming…",
+        "ending": "Checking the stop…",
+        "ended": "Ended.",
+        "cancelled": "Not ending.",
+        "expired": "The request expired, or the session was replaced."
+      },
+      "proposalState": {
+        "proposed": "Proposed",
+        "approved": "Approved",
+        "applied": "Confirmed",
+        "conflict": "Conflict",
+        "discarded": "Discarded",
+        "failed": "Failed",
+        "expired": "Expired"
+      },
+      "op": {
+        "add": "Add",
+        "update": "Update",
+        "close": "Close"
+      },
+      "outcome": {
+        "confirmed": "Ended with the updates before ending confirmed.",
+        "unconfirmed": "The updates before ending could not be confirmed ({reason}). The next session is told so."
+      },
+      "refusal": {
+        "disabled": "mem is not on for this branch.",
+        "session_changed": "The session was replaced after the request.",
+        "request_closed": "This request no longer takes this.",
+        "version_conflict": "The request moved on since it was read. Look at it now and choose again.",
+        "proposal_changed": "The proposal changed since it was shown.",
+        "state_forbids": "Not possible in the current state.",
+        "extend_limit": "It cannot be extended any more.",
+        "not_stopped": "The stop could not be confirmed.",
+        "end_token_changed": "This is not the stop that was declared.",
+        "already_recorded": "How it ended is already recorded.",
+        "screen_only": "This is done from the screen only.",
+        "not_found": "No such request.",
+        "other": "Could not do it ({code})."
       }
     }
   }

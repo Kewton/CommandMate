@@ -22,6 +22,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemItemsPanel } from '@/components/mem/MemItemsPanel';
+import { publishMemWriteLock } from '@/components/mem/mem-write-lock';
 import type { MemItemView } from '@/types/mem';
 
 vi.mock('next-intl', async () => {
@@ -68,6 +69,8 @@ let release: (() => void) | null;
 /** The next write of this op is applied and its answer lost at once. */
 let loseAnswer: Op | null;
 const byKey = new Map<string, MemItemView>();
+/** Issue #4227 G-PR2 (PM P3-3): the branch's mode on the server; a write while it is not `on` is refused. */
+let serverMode: 'on' | 'off' = 'on';
 
 const json = (status: number, body: unknown) => ({ ok: status < 300, status, json: async () => body }) as Response;
 const find = (id: string) => items.find((entry) => entry.id === id)!;
@@ -80,6 +83,7 @@ beforeEach(() => {
   release = null;
   loseAnswer = null;
   byKey.clear();
+  serverMode = 'on';
   global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? 'GET';
@@ -93,13 +97,14 @@ beforeEach(() => {
         ],
       });
     }
-    if (url.includes('/mem/mode')) return json(200, { ok: true, mode: 'on', source: { level: 'fallback' } });
+    if (url.includes('/mem/mode')) return json(200, { ok: true, mode: serverMode, source: { level: 'fallback' } });
     if (url.includes('/mem/notices')) return json(200, { ok: true, notices: [] });
     if (method === 'GET' && url.includes('/mem?')) {
       return json(200, { ok: true, mode: 'on', branch: 'feat/x', items: items.filter((entry) => entry.state !== 'closed'), now: [], warnings: [] });
     }
     const answer = async (op: Op, response: Response) => {
       writes.push({ op, url, body });
+      if (serverMode !== 'on') return json(409, { ok: false, code: 'disabled', mode: serverMode });
       if (hold === op) {
         hold = null;
         await new Promise<void>((resolve) => (release = resolve));
@@ -355,5 +360,46 @@ describe('[#4227] rule (4)(e) (controls): what the lock leaves, and what comes b
     await waitFor(() => expect(button('mem-item-rebase-n1')?.disabled).toBe(true));
     press('mem-item-rebase-n1');
     expect(writesOf('update')).toHaveLength(1);
+  });
+});
+
+/**
+ * Issue #4227 G-PR2 (PM P3-3): the hand-off's approval (G-4) writes items too, so its decide being
+ * sent or unknown is a unit of the same lock: the panel writes nothing while it is there, and writes
+ * again once it settles. The rows are the other screen's state × the panel's writes. The decide's
+ * own side (the panel's unit locks approve / discard) is `SessionHandoffDialog-4227.test.tsx`.
+ * A notice's acknowledgement and the mode's settings stay outside the lock (they write no item).
+ */
+describe('[#4227] rule (4)(e) across screens: the hand-off’s decide locks the panel (PM P3-3)', () => {
+  afterEach(() => publishMemWriteLock('handoff', null));
+
+  const ACROSS = (['sending', 'unknown'] as const).flatMap((state) => (['add', 'edit', 'close'] as const).map((other) => [state, other] as const));
+
+  it.each(ACROSS)('the decide %s × the panel’s %s: nothing is sent, the reason is shown; after it settles the write goes', async (state, other) => {
+    renderPanel();
+    await screen.findByTestId('mem-item-edit-d3');
+    act(() => publishMemWriteLock('handoff', state));
+    await screen.findByTestId('mem-items-write-locked');
+    expect(screen.getByTestId('mem-items-write-locked').textContent).toContain('引き継ぎ');
+    // The panel's own writes, as a person would press them (`edit` here only picks which ones `tryOther` presses).
+    await tryOther('edit', other);
+    expect(writes).toHaveLength(0);
+    act(() => publishMemWriteLock('handoff', null));
+    await waitFor(() => expect(screen.queryByTestId('mem-items-write-locked')).toBeNull());
+    press('mem-item-edit-n1');
+    type('mem-item-edit-text-n1', 'after the decide');
+    press('mem-item-save-n1');
+    await waitFor(() => expect(find('n1').text).toBe('after the decide'));
+  });
+
+  it('the mode set off while a unit is unknown: the resend is refused by the server (disabled) and the reason is shown', async () => {
+    renderPanel();
+    await screen.findByTestId('mem-item-edit-d3');
+    await startUnit('close', 'unknown');
+    serverMode = 'off';
+    press(UNIT.close.resend);
+    await waitFor(() => expect(writes).toHaveLength(2));
+    await waitFor(() => expect(screen.getByTestId('mem-items-notice').textContent).toContain('on ではありません'));
+    expect(find('n1').state).toBe('closed');
   });
 });
