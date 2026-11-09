@@ -516,6 +516,7 @@
       "loading": "読み込み中…",
       "loadError": "読み込めませんでした",
       "none": "記録待ちの決定はありません",
+      "ambiguous": "このブランチの mem の設定がルートの間で食い違っています（{roots}）。決定の一覧と承認・項目の遷移はできません。外に書いた結果の照合だけできます。",
       "modeNotOn": "このブランチの mem は on ではありません（{mode}）。承認と記録は on のときだけできます。",
       "unreflected": "未反映：コメントに記録しただけで、正本（Issue の本文など）へはまだ反映されていません",
       "state": {
@@ -542,6 +543,7 @@
       "reconcile": "照合する",
       "abandon": "無いことを確かめた",
       "settleTransition": "記録済みとして扱う",
+      "acknowledgeItemClosed": "記録済みとして扱う（書けた結果だけを確かめ、閉じた項目は進めません）",
       "acknowledgeDiff": "書いた後に項目が変わったことを確かめた",
       "operation": {
         "approved": "承認済み",
@@ -552,6 +554,8 @@
         "abandoned": "無いことを確かめた（未送信とみなす）"
       },
       "unresolved": "項目が閉じられたか削除された後も、結果の確定していない操作",
+      "unresolvedAmbiguous": "結果の確定していない操作（ルートの設定が揃うまで項目は進みません）",
+      "unresolvedItemOpen": "項目は開いています（{itemId}）",
       "unresolvedItemGone": "項目は削除されました（{itemId}）",
       "unresolvedItemClosed": "項目は閉じられています（{itemId}）",
       "pending": "書けたが項目は進んでいません（{reason}）",

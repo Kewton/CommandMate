@@ -51,6 +51,7 @@ import {
   type PromoteDeps,
 } from '@/lib/promote/service';
 import { tempNameOf } from '@/lib/promote/doc-write';
+import { promoteApi } from '@/lib/promote/screen-client';
 import type { MemWriteResponse } from '@/types/mem';
 import { FakeGh, failed } from './fake-gh';
 import { writeEntrancesOfPromote } from './promote-write-chain-4225.helpers';
@@ -88,8 +89,10 @@ async function until(cond: () => boolean): Promise<void> {
   expect(cond()).toBe(true);
 }
 
+/** The git every root is judged by (5-2c P2-2: a root of another git is not the same repository). */
+let commonDirOf: (rootPath: string) => string = () => '/common/.git';
 const memDeps = (): MemServiceDeps => ({
-  resolveCommonDir: async () => '/common/.git',
+  resolveCommonDir: async (rootPath: string) => commonDirOf(rootPath),
   pathExists: () => true,
   observe: async () => {
     await held();
@@ -250,6 +253,7 @@ beforeEach(() => {
   boot = 'boot-1';
   promoteHooks = undefined;
   hold = null;
+  commonDirOf = () => '/common/.git';
   makeWorktree();
   setMode('on');
 });
@@ -953,5 +957,223 @@ describe('5-2b P2-2: an unsettled operation stays on the list after its item was
     expect(list.unresolved).toEqual([]);
     const entry = (list.decisions as Array<{ item: { id: string }; operations?: PromoteOperationView[] }>).find((d) => d.item.id === open.id)!;
     expect(entry.operations?.map((o) => o.id)).toEqual([unknownId]);
+  });
+});
+
+/**
+ * The screen's calls as the Panel makes them (`promoteApi` of screen-client.ts), answered by
+ * the service as the routes do: the button's request reaches the real entrance (5-2c).
+ */
+function routeScreenCalls(): void {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), 'http://localhost:3000');
+      const match = url.pathname.match(/^\/api\/repositories\/([^/]+)\/mem\/decisions(?:\/operations\/([^/]+)\/(reconcile|abandon|settle-transition))?$/);
+      if (!match) throw new Error(`unexpected call ${url.pathname}`);
+      const headers = new Headers(init?.headers);
+      headers.set('origin', 'http://localhost:3000');
+      headers.set('host', 'localhost:3000');
+      const request = { headers, url: url.toString() };
+      const repositoryId = decodeURIComponent(match[1]);
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+      const opId = match[2] ? decodeURIComponent(match[2]) : '';
+      const outcome =
+        match[3] === undefined
+          ? await promoteList(db, repositoryId, url.searchParams.get('branch') ?? '', { mem: memDeps(), bootId: () => boot })
+          : match[3] === 'reconcile'
+            ? await promoteReconcile(db, request, repositoryId, opId, deps())
+            : match[3] === 'abandon'
+              ? await promoteAbandon(db, request, repositoryId, opId, body, deps())
+              : await promoteSettleTransition(db, request, repositoryId, opId, body, deps());
+      return { ok: outcome.status < 300, status: outcome.status, json: async () => outcome.body } as Response;
+    })
+  );
+}
+
+type ScreenList = {
+  mode: string;
+  ambiguous?: { reason: string | null; roots: Array<{ repositoryId: string }> };
+  decisions: Array<{ item: { id: string }; operations: PromoteOperationView[] }>;
+  unresolved: Array<{ operation: PromoteOperationView; item: { id: string; state: string } | null; itemVersion: number | null }>;
+};
+async function screenList(repositoryId: string): Promise<ScreenList> {
+  const result = await promoteApi.list(repositoryId, 'feature/x');
+  expect(result.ok).toBe(true);
+  return (result as { ok: true; body: unknown }).body as ScreenList;
+}
+const holdThePost = () => {
+  let release!: () => void;
+  gh.hold = { match: (call) => call.args.includes('--method'), wait: new Promise<void>((resolve) => (release = resolve)) };
+  return () => release();
+};
+const setRules = (repositoryId: string, rules: Array<{ match: 'glob'; pattern: string; mode: 'off' | 'derived' | 'on' }>) => {
+  const current = getMemSettings(db, repositoryId);
+  saveMemSettings(db, repositoryId, { version: current.version, features: current.features, rules });
+};
+
+describe('5-2c: what the screen shows of an unsettled operation, its buttons reach', () => {
+  beforeEach(() => routeScreenCalls());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('P2-1: root B turned the item’s branch off while the POST waited → the list answers ambiguous with the pending write', async () => {
+    const made = await addDecision();
+    const repoB = addRootB(BOTH_ON);
+    const p = await preview(made.id);
+    const release = holdThePost();
+    const pending = approve(p);
+    await until(() => gh.posts().length === 1);
+    setRules(repoB, SPLIT);
+    release();
+    const operation = operationOf(await pending);
+    expect(operation).toMatchObject({ state: 'succeeded', transitionPending: true, transitionReason: 'disabled' });
+    const list = await screenList(repoA);
+    expect(list.mode).toBe('ambiguous');
+    expect(list.ambiguous?.roots.map((root) => root.repositoryId).sort()).toEqual([repoA, repoB].sort());
+    expect(list.decisions).toEqual([]);
+    expect(list.unresolved).toEqual([
+      expect.objectContaining({ operation: expect.objectContaining({ id: operation.id, transitionPending: true }), item: expect.objectContaining({ id: made.id, state: 'open' }) }),
+    ]);
+  });
+
+  it('P2-1: the POST timed out while root B turned the branch off → listed, and the reconcile reached from the list keeps the outcome', async () => {
+    const made = await addDecision();
+    const repoB = addRootB(BOTH_ON);
+    const p = await preview(made.id);
+    const release = holdThePost();
+    gh.postAnswer = () => failed('', { code: null, timedOut: true });
+    const pending = approve(p);
+    await until(() => gh.posts().length === 1);
+    setRules(repoB, SPLIT);
+    release();
+    const operation = operationOf(await pending);
+    gh.postAnswer = undefined;
+    expect(operation.state).toBe('unknown');
+    const listed = (await screenList(repoA)).unresolved.map((entry) => entry.operation.id);
+    expect(listed).toEqual([operation.id]);
+    const reconciled = await promoteApi.reconcile(repoA, listed[0]);
+    expect(reconciled.ok).toBe(true);
+    expect(op(operation.id)).toMatchObject({ state: 'succeeded', transition_pending: 1, transition_reason: 'disabled' });
+    expect(item(made.id).state).toBe('open');
+    expect(gh.comments).toHaveLength(1);
+    expect((await screenList(repoA)).unresolved.map((entry) => entry.operation.id)).toEqual([operation.id]);
+  });
+
+  it('P2-1 (control): the roots agree → the list is the usual one, no ambiguous field', async () => {
+    const made = await addDecision();
+    addRootB(BOTH_ON);
+    const list = await screenList(repoA);
+    expect(list.mode).toBe('on');
+    expect(list.ambiguous).toBeUndefined();
+    expect(list.decisions.map((entry) => entry.item.id)).toEqual([made.id]);
+  });
+
+  it('P2-2: root A’s operations shown on root B’s screen → the reconcile, the abandon and the settle sent with root B’s id reach them', async () => {
+    const first = await addDecision();
+    const second = await addDecision('issue:#1', '二つ目の決定');
+    const third = await addDecision('issue:#1', '三つ目の決定');
+    const repoB = addRootB(BOTH_ON);
+    const reconciled = await unknownComment(first.id);
+    const abandoned = await unknownComment(second.id);
+    promoteHooks = { transition: () => ({ status: 409, body: { code: 'version_conflict' } }) };
+    const settled = operationOf(await approve(await preview(third.id)));
+    promoteHooks = undefined;
+    expect(db.prepare('SELECT DISTINCT repository_id r FROM mem_promote_operations').all()).toEqual([{ r: repoA }]);
+
+    const shown = (await screenList(repoB)).decisions.flatMap((entry) => entry.operations.map((operation) => operation.id));
+    expect(shown.sort()).toEqual([reconciled, abandoned, settled.id].sort());
+
+    expect((await promoteApi.reconcile(repoB, reconciled)).ok).toBe(true);
+    expect(op(reconciled).state).toBe('succeeded');
+    expect((await promoteApi.abandon(repoB, abandoned)).ok).toBe(true);
+    expect(op(abandoned).state).toBe('abandoned');
+    expect((await promoteApi.settleTransition(repoB, settled.id, WT, item(third.id).version, false)).ok).toBe(true);
+    expect(op(settled.id).transition_pending).toBe(0);
+    expect(item(third.id).state).toBe('recorded');
+  });
+
+  it('P2-2 (control): a root of another git does not reach the operation (not found, nothing changed)', async () => {
+    const made = await addDecision();
+    const opId = await unknownComment(made.id);
+    const rootC = path.join(dir, 'root-c');
+    mkdirSync(rootC, { recursive: true });
+    const repoC = createRepository(db, { name: 'repo-c', path: rootC, cloneSource: 'local' }).id;
+    commonDirOf = (rootPath) => (rootPath === rootC ? '/other/.git' : '/common/.git');
+    const before = snapshot();
+    for (const result of [
+      await promoteApi.reconcile(repoC, opId),
+      await promoteApi.abandon(repoC, opId),
+      await promoteApi.settleTransition(repoC, opId, WT, item(made.id).version, false),
+    ]) {
+      expect(result).toMatchObject({ ok: false, status: 404, code: 'not_found' });
+    }
+    expect(snapshot()).toEqual(before);
+  });
+
+  it('P2-3: closed while the POST waited → "treat as recorded" of a closed item ends the pending without moving it', async () => {
+    const made = await addDecision();
+    const p = await preview(made.id);
+    const release = holdThePost();
+    const pending = approve(p);
+    await until(() => gh.posts().length === 1);
+    expect((await memCloseItem(db, WT, made.id, { instanceId: 'claude' }, memDeps())).status).toBeLessThan(300);
+    release();
+    const operation = operationOf(await pending);
+    const [entry] = (await screenList(repoA)).unresolved;
+    expect(entry).toMatchObject({ operation: { id: operation.id, transitionPending: true }, item: { state: 'closed' } });
+    const closedBefore = item(made.id);
+
+    // What the screen no longer offers for a closed item is refused before A's entrance.
+    const moved = await promoteApi.settleTransition(repoA, operation.id, WT, entry.itemVersion!, true);
+    expect(moved).toMatchObject({ ok: false, status: 409, code: 'state_forbids', reason: 'item_closed' });
+    expect(op(operation.id).transition_pending).toBe(1);
+
+    const acknowledged = await promoteApi.acknowledgeItemClosed(repoA, operation.id);
+    expect(acknowledged.ok).toBe(true);
+    expect(op(operation.id)).toMatchObject({ state: 'succeeded', transition_pending: 0 });
+    expect(item(made.id)).toEqual(closedBefore);
+    expect((await screenList(repoA)).unresolved).toEqual([]);
+    expect(gh.comments).toHaveLength(1);
+  });
+
+  it('P2-3: purged, reconciled → the closed-item acknowledgement ends the pending of an item that is gone', async () => {
+    const made = await addDecision();
+    const opId = await unknownComment(made.id);
+    const purged = await memPurge(db, { via: 'repository', repositoryId: repoA, branch: 'feature/x' }, { confirm: true, includeDecisions: true }, memDeps());
+    expect(purged.status).toBe(200);
+    expect((await promoteApi.reconcile(repoA, opId)).ok).toBe(true);
+    expect(op(opId)).toMatchObject({ state: 'succeeded', transition_pending: 1 });
+    expect((await promoteApi.acknowledgeItemClosed(repoA, opId)).ok).toBe(true);
+    expect(op(opId).transition_pending).toBe(0);
+    expect((await screenList(repoA)).unresolved).toEqual([]);
+  });
+
+  it('the window between a reconcile’s settle and A’s answer: an approval whose preview listed the write is refused, no second POST', async () => {
+    const made = await addDecision();
+    const opId = await unknownComment(made.id);
+    const p = await preview(made.id);
+    expect(p.acknowledgedOperationIds).toEqual([opId]);
+    const release = arm();
+    const reconciling = promoteApi.reconcile(repoA, opId);
+    await until(() => op(opId).state === 'succeeded');
+    const second = await approve(p);
+    expect(codeOf(second).code).toBe('operation_in_progress');
+    release();
+    expect((await reconciling).ok).toBe(true);
+    expect(gh.posts()).toHaveLength(1);
+    expect(op(opId).transition_pending).toBe(0);
+    expect(item(made.id).state).toBe('recorded');
+  });
+
+  it('P2-3 (control): an open item’s pending write is not ended by the closed-item acknowledgement; it still moves through A', async () => {
+    const made = await addDecision();
+    promoteHooks = { transition: () => ({ status: 409, body: { code: 'version_conflict' } }) };
+    const operation = operationOf(await approve(await preview(made.id)));
+    promoteHooks = undefined;
+    const refused = await promoteApi.acknowledgeItemClosed(repoA, operation.id);
+    expect(refused).toMatchObject({ ok: false, status: 409, code: 'state_forbids', reason: 'item_open' });
+    expect(op(operation.id).transition_pending).toBe(1);
+    expect((await promoteApi.settleTransition(repoA, operation.id, WT, item(made.id).version, false)).ok).toBe(true);
+    expect(item(made.id).state).toBe('recorded');
   });
 });

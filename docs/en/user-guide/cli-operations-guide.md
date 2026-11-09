@@ -2619,6 +2619,9 @@ A `decision` is written to an Issue / PR comment or a worktree document (`promot
 - When the write succeeded but the item did not move (the worktree was re-created, the version changed, the mode is not `on`), the screen says so, and "Treat as recorded" makes the transition only (nothing is written outside)
 - The mode is that of **the item's branch** (not the chosen worktree's current branch). With several roots of the same Git, it is written only when every root agrees the item's branch is `on` (roots whose settings differ write nothing)
 - An operation whose outcome is not settled stays on the screen under "Operations still unsettled after their item was closed or deleted" after the item was closed with `mem close` or deleted with `mem purge`, and can still be reconciled. A worktree whose id changed by a rename is reconciled as the same worktree (one deleted and made again is another)
+- A write that succeeded after its item was closed or deleted cannot move the item (a closed item never moves). The screen offers only "Treat as recorded (the outcome only; the closed item does not move)", which records that a person checked the outcome (the item stays closed)
+- When the roots of the same Git disagree on the setting of the item's branch, the screen warns and stops listing and approving decisions, but keeps showing the operations whose outcome is not settled; they can still be reconciled or checked as not there (the item does not move until the roots agree)
+- The screen of any root of the same Git reconciles and settles the operations of that Git's roots (a root of another Git does not reach them)
 - Invisible characters in the branch or the author are warned about too. A branch is written in its omitted form (`(省略 N bytes・reason)`)
 
 ### What is not prevented

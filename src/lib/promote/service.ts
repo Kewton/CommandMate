@@ -50,7 +50,7 @@ import {
   type PromoteSettle,
 } from '@/lib/db/mem-promote-db';
 import { getWorktreeById, getWorktreesByRepository } from '@/lib/db/worktree-db';
-import { getRepositoryById } from '@/lib/db/db-repository';
+import { getRepositoryById, type Repository } from '@/lib/db/db-repository';
 import { resolveWorktreeIdWithAlias } from '@/lib/db/worktree-alias-db';
 import { createLogger } from '@/lib/logger';
 import { parseOriginUrl } from '@/lib/mem/close-when';
@@ -60,7 +60,13 @@ import { memServerBootId } from '@/lib/mem/process-boot';
 import { findWithheld, presentMemItem, type MemRecord } from '@/lib/mem/present';
 import { MEM_SECRET_RULES_VERSION } from '@/lib/mem/secret-scan';
 import { memSettleDecisionTransition, type MemOutcome, type MemServiceDeps } from '@/lib/mem/service';
-import { withMemTarget, type MemTarget, type MemTargetSpec } from '@/lib/mem/target';
+import { decideMemTarget, withMemTarget, type MemTarget, type MemTargetSpec } from '@/lib/mem/target';
+import {
+  AgentRoleTargetNotFoundError,
+  MembershipUnsettledError,
+  withSettledRepositoryMembership,
+  type RoleRepositoryMembership,
+} from '@/lib/agent-roles/resolve';
 import { validatePromoteTo, validateQuote } from '@/lib/mem/validate';
 import { isScreenRequest } from '@/lib/security/screen-request';
 import type { MemDecisionTransition } from '@/lib/db/mem-db';
@@ -299,6 +305,10 @@ async function settleTransition(
   deps: PromoteDeps
 ): Promise<{ ok: true } | { ok: false; reason: PromoteTransitionReason }> {
   const now = () => deps.now?.() ?? Date.now();
+  // 5-2c: held pending from the settle's own synchronous stretch until A answers, so an
+  // approval whose preview listed this write cannot write again while the item has not
+  // moved yet (the settle and A's entrance are apart by A's await).
+  setPromoteTransitionPending(db, operationId, true, null, now());
   let outcome: MemOutcome;
   try {
     outcome =
@@ -718,6 +728,32 @@ export async function promoteConfirmReflected(
 }
 
 // ---------------------------------------------------------------------------
+// Which operations a repository's screen reaches (5-2c P2-1・P2-2)
+// ---------------------------------------------------------------------------
+
+/** Every root judged to be the same repository, disabled ones included (the list's `readRepositoryIds`). */
+const readIdsOf = (membership: RoleRepositoryMembership): string[] =>
+  (membership.candidates && membership.candidates.length > 0 ? membership.candidates : membership.members).map((root) => root.id);
+
+/**
+ * The roots of the same git as `repositoryId`, whatever their mem settings say (5-2c P2-2):
+ * the list shows the operations of all of them, so the reconcile, the abandon and the
+ * settle reach the same ones. The membership does not depend on the mode, so a branch
+ * whose roots disagree (`ambiguous`) still has one. Unknown or unsettled → the root alone.
+ */
+async function repositoryReadIds(db: Database.Database, repositoryId: string, deps: MemServiceDeps | undefined): Promise<string[]> {
+  try {
+    return await withSettledRepositoryMembership(db, repositoryId, deps ?? {}, (_repository, membership) => readIdsOf(membership));
+  } catch (error) {
+    if (error instanceof AgentRoleTargetNotFoundError || error instanceof MembershipUnsettledError) return [repositoryId];
+    throw error;
+  }
+}
+
+const ownsOperation = (row: PromoteOperationRow, repositoryId: string, readIds: readonly string[]): boolean =>
+  row.repository_id === repositoryId || readIds.includes(row.repository_id);
+
+// ---------------------------------------------------------------------------
 // reconcile, abandon, settle the transition
 // ---------------------------------------------------------------------------
 
@@ -731,10 +767,11 @@ export async function promoteReconcile(
   deps: PromoteDeps = {}
 ): Promise<MemOutcome> {
   if (!isScreenRequest(request)) return promoteError('screen_only');
+  const readIds = await repositoryReadIds(db, repositoryId, deps.mem);
   const now0 = deps.now?.() ?? Date.now();
   settleStalePromoteAttempts(db, deps.bootId?.() ?? memServerBootId(), now0);
   const row = getPromoteOperation(db, operationId);
-  if (!row || row.repository_id !== repositoryId) return promoteError('not_found');
+  if (!row || !ownsOperation(row, repositoryId, readIds)) return promoteError('not_found');
   if (row.state === 'in_flight') return promoteError('operation_in_progress');
   if (row.state !== 'unknown') return promoteError('state_forbids');
   const destination = destinationOf(row);
@@ -795,8 +832,9 @@ export async function promoteAbandon(
 ): Promise<MemOutcome> {
   if (!isScreenRequest(request)) return promoteError('screen_only');
   if (body.ifState !== 'unknown') return promoteError('invalid_request', { field: 'ifState' });
+  const readIds = await repositoryReadIds(db, repositoryId, deps.mem);
   const row = getPromoteOperation(db, operationId);
-  if (!row || row.repository_id !== repositoryId) return promoteError('not_found');
+  if (!row || !ownsOperation(row, repositoryId, readIds)) return promoteError('not_found');
   if (!abandonPromoteOperation(db, operationId, deps.now?.() ?? Date.now())) return promoteError('state_forbids');
   logger.info('mem-promote-abandoned', { operationId });
   return operationAnswer(db, operationId, deps);
@@ -816,13 +854,32 @@ export async function promoteSettleTransition(
   deps: PromoteDeps = {}
 ): Promise<MemOutcome> {
   if (!isScreenRequest(request)) return promoteError('screen_only');
-  if (typeof body.ifVersion !== 'number' || !Number.isInteger(body.ifVersion)) return promoteError('invalid_request', { field: 'ifVersion' });
-  if (typeof body.worktreeId !== 'string' || !getWorktreeById(db, body.worktreeId)) return promoteError('not_found');
+  const itemClosedAcknowledged = body.acknowledgeItemClosed === true;
+  if (body.acknowledgeItemClosed !== undefined && typeof body.acknowledgeItemClosed !== 'boolean') {
+    return promoteError('invalid_request', { field: 'acknowledgeItemClosed' });
+  }
+  if (!itemClosedAcknowledged) {
+    if (typeof body.ifVersion !== 'number' || !Number.isInteger(body.ifVersion)) return promoteError('invalid_request', { field: 'ifVersion' });
+    if (typeof body.worktreeId !== 'string' || !getWorktreeById(db, body.worktreeId)) return promoteError('not_found');
+  }
+  const readIds = await repositoryReadIds(db, repositoryId, deps.mem);
   const row = getPromoteOperation(db, operationId);
-  if (!row || row.repository_id !== repositoryId) return promoteError('not_found');
+  if (!row || !ownsOperation(row, repositoryId, readIds)) return promoteError('not_found');
   if (row.state !== 'succeeded' || row.transition_pending !== 1) return promoteError('state_forbids');
   const record = getMemRecord(db, row.item_id);
-  if (!record) return promoteError('not_found');
+  // 5-2c P2-3: a closed or purged item never moves (the transitions forbid every move out of
+  // closed). The outcome outside is already settled; the person only acknowledges that the
+  // item will not follow it, which ends the pending without A's entrance.
+  const itemGone = !record || record.state === 'closed';
+  if (itemClosedAcknowledged) {
+    if (!itemGone) return promoteError('state_forbids', { reason: 'item_open' });
+    setPromoteTransitionPending(db, operationId, false, null, deps.now?.() ?? Date.now());
+    logger.info('mem-promote-item-closed-acknowledged', { operationId });
+    return operationAnswer(db, operationId, deps);
+  }
+  if (!record) return promoteError('not_found', { reason: 'item_gone' });
+  if (record.state === 'closed') return promoteError('state_forbids', { reason: 'item_closed' });
+  if (typeof body.ifVersion !== 'number' || typeof body.worktreeId !== 'string') return promoteError('invalid_request');
   if (record.version !== body.ifVersion) return promoteError('version_conflict');
   if (itemFingerprint(record) !== row.item_fingerprint && body.acknowledgeDiff !== true) {
     return promoteError('diff_not_acknowledged', { written: row.body, item: presentMemItem(record) });
@@ -851,20 +908,10 @@ export interface PromoteListDeps {
 /** `GET /api/repositories/:id/mem/decisions?branch=` — the branch's decisions, their operations and the worktrees to choose from. */
 export async function promoteList(db: Database.Database, repositoryId: string, branch: string, deps: PromoteListDeps = {}): Promise<MemOutcome> {
   if (!getRepositoryById(db, repositoryId)) return promoteError('not_found');
-  return withMemTarget(db, { via: 'repository', repositoryId, branch }, deps.mem ?? {}, (target): MemOutcome => {
-    if (!target.ok) return promoteError('not_found', { reason: target.code });
-    const scope: MemScope = { storageRepositoryId: target.storageRepositoryId, readRepositoryIds: target.readRepositoryIds, branch, worktreeId: null };
-    const decisions = listMem(db, scope, { all: true }).items.filter((item) => item.kind === 'decision' && item.state !== 'closed');
-    const now = deps.now?.() ?? Date.now();
-    const bootId = deps.bootId?.() ?? memServerBootId();
-    const operations = listPromoteOperations(
-      db,
-      decisions.map((item) => item.id)
-    ).map((row) => operationView(row, readState(db, row, bootId, now)));
-    // 5-2b P2-2: an unsettled operation stays reachable after its item was closed or
-    // purged (the item's close does not wait for the write outside).
-    const shown = new Set(decisions.map((item) => item.id));
-    const unresolved = listUnresolvedPromoteOperations(db, target.readRepositoryIds, branch)
+  const now = deps.now?.() ?? Date.now();
+  const bootId = deps.bootId?.() ?? memServerBootId();
+  const unresolvedOf = (readRepositoryIds: readonly string[], shown: ReadonlySet<string>) =>
+    listUnresolvedPromoteOperations(db, readRepositoryIds, branch)
       .filter((row) => !shown.has(row.item_id))
       .map((row) => {
         const record = getMemRecord(db, row.item_id);
@@ -874,28 +921,65 @@ export async function promoteList(db: Database.Database, repositoryId: string, b
           itemVersion: record ? record.version : null,
         };
       });
-    const worktrees = target.members.flatMap((root) =>
+  const worktreesOf = (members: readonly Repository[]) =>
+    members.flatMap((root) =>
       getWorktreesByRepository(db, root.path).map((entry) => {
         const full = getWorktreeById(db, entry.id);
         return { id: entry.id, path: entry.path, name: full?.name ?? entry.id, branch: full?.branch ?? null };
       })
     );
-    return {
-      status: 200,
-      body: {
-        ok: true,
-        mode: target.mode,
-        branch,
-        decisions: decisions.map((item) => ({
-          item: presentMemItem(item, { now }),
-          unreflected: item.state === 'recorded',
-          operations: operations.filter((operation) => operation.itemId === item.id),
-        })),
-        unresolved,
-        worktrees,
-      },
-    };
-  });
+  try {
+    // The membership and the mode in one settled stretch (as `withMemTarget` does for a
+    // repository), so that a mode the roots disagree on still has the membership (5-2c P2-1).
+    return await withSettledRepositoryMembership(db, repositoryId, deps.mem ?? {}, (_repository, membership): MemOutcome => {
+      const target = decideMemTarget(db, membership, branch, { via: 'repository', worktree: null, detached: false, head: null });
+      if (!target.ok) {
+        if (target.code !== 'ambiguous' || membership.members.length === 0) return promoteError('not_found', { reason: target.code });
+        // 5-2c P2-1: the roots disagree on the branch's mode. Nothing can be approved, but a
+        // write already outside keeps its reconcile: the outcome is kept whatever the mode (E1).
+        return {
+          status: 200,
+          body: {
+            ok: true,
+            mode: 'ambiguous',
+            ambiguous: { reason: target.reason ?? null, roots: target.roots ?? [] },
+            branch,
+            decisions: [],
+            unresolved: unresolvedOf(readIdsOf(membership), new Set()),
+            worktrees: worktreesOf(membership.members),
+          },
+        };
+      }
+      const scope: MemScope = { storageRepositoryId: target.storageRepositoryId, readRepositoryIds: target.readRepositoryIds, branch, worktreeId: null };
+      const decisions = listMem(db, scope, { all: true }).items.filter((item) => item.kind === 'decision' && item.state !== 'closed');
+      const operations = listPromoteOperations(
+        db,
+        decisions.map((item) => item.id)
+      ).map((row) => operationView(row, readState(db, row, bootId, now)));
+      // 5-2b P2-2: an unsettled operation stays reachable after its item was closed or
+      // purged (the item's close does not wait for the write outside).
+      const shown = new Set(decisions.map((item) => item.id));
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          mode: target.mode,
+          branch,
+          decisions: decisions.map((item) => ({
+            item: presentMemItem(item, { now }),
+            unreflected: item.state === 'recorded',
+            operations: operations.filter((operation) => operation.itemId === item.id),
+          })),
+          unresolved: unresolvedOf(target.readRepositoryIds, shown),
+          worktrees: worktreesOf(target.members),
+        },
+      };
+    });
+  } catch (error) {
+    if (error instanceof AgentRoleTargetNotFoundError) return promoteError('not_found', { reason: 'not_found' });
+    if (error instanceof MembershipUnsettledError) return promoteError('not_found', { reason: 'ambiguous' });
+    throw error;
+  }
 }
 
 /** For tests and the routes: what an invalid body answers. */

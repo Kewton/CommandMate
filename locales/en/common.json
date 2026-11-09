@@ -516,6 +516,7 @@
       "loading": "Loading…",
       "loadError": "Could not load",
       "none": "No decision is waiting to be recorded",
+      "ambiguous": "The roots disagree on mem's setting for this branch ({roots}). Decisions cannot be listed, approved or moved; only an outcome written outside can be reconciled.",
       "modeNotOn": "mem is not on for this branch ({mode}). Approving and recording need on.",
       "unreflected": "Not reflected: recorded as a comment only, not yet reflected in the canonical place (such as the Issue body)",
       "state": {
@@ -542,6 +543,7 @@
       "reconcile": "Reconcile",
       "abandon": "I checked it is not there",
       "settleTransition": "Treat as recorded",
+      "acknowledgeItemClosed": "Treat as recorded (the outcome only; the closed item does not move)",
       "acknowledgeDiff": "I checked the item changed after it was written",
       "operation": {
         "approved": "Approved",
@@ -552,6 +554,8 @@
         "abandoned": "Checked as not there (treated as not sent)"
       },
       "unresolved": "Operations still unsettled after their item was closed or deleted",
+      "unresolvedAmbiguous": "Operations still unsettled (their item does not move until the roots agree)",
+      "unresolvedItemOpen": "The item is open ({itemId})",
       "unresolvedItemGone": "The item was deleted ({itemId})",
       "unresolvedItemClosed": "The item is closed ({itemId})",
       "pending": "Written, but the item did not move ({reason})",

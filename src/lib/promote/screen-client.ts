@@ -18,7 +18,10 @@ export interface PromoteDecisionEntry {
   operations: PromoteOperationView[];
 }
 
-/** An unsettled operation whose item is closed or purged (5-2b P2-2): still reconciled from the screen. */
+/**
+ * An unsettled operation whose item is closed or purged (5-2b P2-2), or any of the branch's
+ * while its roots disagree on the mode (5-2c P2-1): still reconciled from the screen.
+ */
 export interface PromoteUnresolvedEntry {
   operation: PromoteOperationView;
   /** null: the item was purged. */
@@ -28,7 +31,9 @@ export interface PromoteUnresolvedEntry {
 
 export interface PromoteListBody {
   ok: true;
+  /** `'ambiguous'`: the roots of the same git disagree on the branch's mode (5-2c P2-1); only `unresolved` is listed. */
   mode: string;
+  ambiguous?: { reason: string | null; roots: Array<{ repositoryId: string; name: string }> };
   branch: string;
   decisions: PromoteDecisionEntry[];
   unresolved: PromoteUnresolvedEntry[];
@@ -84,5 +89,10 @@ export const promoteApi = {
       worktreeId,
       ifVersion,
       acknowledgeDiff,
+    }),
+  /** 5-2c P2-3: the item is closed or purged and will not move; end the pending without moving it. */
+  acknowledgeItemClosed: (repositoryId: string, operationId: string) =>
+    post<OperationBody>(`${base(repositoryId)}/operations/${encodeURIComponent(operationId)}/settle-transition`, {
+      acknowledgeItemClosed: true,
     }),
 };

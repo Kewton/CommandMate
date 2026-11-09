@@ -167,4 +167,79 @@ describe('DecisionPromotePanel', () => {
     await screen.findByTestId('decision-d-open');
     expect(screen.queryByTestId('decision-unresolved')).toBeNull();
   });
+
+  describe('5-2c: what the screen offers is what the API accepts', () => {
+    const operation = (id: string, itemId: string, state: string, transitionPending: boolean) => ({
+      id,
+      itemId,
+      state,
+      destinationKind: 'issue_comment',
+      destination: PREVIEW.destination,
+      effect: 'spec',
+      resultRef: null,
+      transitionPending,
+      transitionReason: transitionPending ? 'disabled' : null,
+      concurrentEdit: false,
+      unknownReason: transitionPending ? null : 'timeout',
+      decidedBy: null,
+      approvedAt: '2026-11-09T00:00:00.000Z',
+      settledAt: null,
+    });
+    const posts = () => calls.filter((call) => call.method === 'POST');
+
+    it('P2-3: a closed or purged item’s pending write offers only the acknowledgement, which sends no transition', async () => {
+      listExtra = {
+        unresolved: [
+          { operation: operation('op-closed', 'd-closed', 'succeeded', true), item: view('d-closed', 'closed'), itemVersion: 2 },
+          { operation: operation('op-gone', 'd-gone', 'succeeded', true), item: null, itemVersion: null },
+        ],
+      };
+      render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" />);
+      for (const id of ['op-closed', 'op-gone']) {
+        const line = await screen.findByTestId(`decision-operation-${id}`);
+        expect(line.querySelector('input[type="checkbox"]')).toBeNull();
+        const buttons = line.querySelectorAll('button');
+        expect(buttons).toHaveLength(1);
+        expect(buttons[0]).toHaveTextContent('閉じた項目は進めません');
+      }
+      fireEvent.click(screen.getByTestId('decision-operation-op-closed').querySelector('button')!);
+      await waitFor(() => expect(posts()).toHaveLength(1));
+      expect(posts()[0].url).toBe('/api/repositories/repo/mem/decisions/operations/op-closed/settle-transition');
+      expect(posts()[0].body).toEqual({ acknowledgeItemClosed: true });
+      expect(posts()[0].headers[SCREEN_CLIENT_HEADER]).toBe('screen');
+    });
+
+    it('P2-3 (control): an open item’s pending write still offers the transition with its version and worktree', async () => {
+      listExtra = {
+        decisions: [{ item: view('d-open', 'open'), unreflected: false, operations: [operation('op-open', 'd-open', 'succeeded', true)] }],
+      };
+      render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" />);
+      const line = await screen.findByTestId('decision-operation-op-open');
+      expect(line).not.toHaveTextContent('閉じた項目は進めません');
+      fireEvent.click(screen.getByRole('button', { name: '記録済みとして扱う' }));
+      await waitFor(() => expect(posts()).toHaveLength(1));
+      expect(posts()[0].body).toEqual({ worktreeId: 'wt', ifVersion: 1, acknowledgeDiff: false });
+    });
+
+    it('P2-1: the roots disagree → the warning, no decisions, and the unsettled writes with their reconcile only', async () => {
+      listExtra = {
+        mode: 'ambiguous',
+        ambiguous: { reason: 'root-settings-differ', roots: [{ repositoryId: 'repo', name: 'root-a' }, { repositoryId: 'repo-b', name: 'root-b' }] },
+        decisions: [],
+        unresolved: [
+          { operation: operation('op-unknown', 'd-open', 'unknown', false), item: view('d-open', 'open'), itemVersion: 1 },
+          { operation: operation('op-pending', 'd-open2', 'succeeded', true), item: view('d-open2', 'open'), itemVersion: 1 },
+        ],
+      };
+      render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" />);
+      expect(await screen.findByTestId('decision-ambiguous')).toHaveTextContent('root-a, root-b');
+      expect(screen.queryByText('記録待ちの決定はありません')).toBeNull();
+      const section = screen.getByTestId('decision-unresolved');
+      expect(section).toHaveTextContent('項目は開いています（d-open）');
+      expect(screen.getByTestId('decision-operation-op-pending').querySelectorAll('button')).toHaveLength(0);
+      fireEvent.click(screen.getByTestId('decision-operation-op-unknown').querySelector('button')!);
+      await waitFor(() => expect(posts()).toHaveLength(1));
+      expect(posts()[0].url).toBe('/api/repositories/repo/mem/decisions/operations/op-unknown/reconcile');
+    });
+  });
 });

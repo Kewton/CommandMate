@@ -208,7 +208,7 @@ preview は画面の要求（§4.2 の印）で作り、DB に保存する（`me
 | `POST …/:itemId/confirm-reflected` | 要る | `{ifVersion}` → `recorded → promoted` |
 | `POST …/operations/:opId/reconcile` | 要る | — → §3.4 |
 | `POST …/operations/:opId/abandon` | 要る | `{ifState:'unknown'}` → `abandoned` |
-| `POST …/operations/:opId/settle-transition` | 要る | `{ifVersion, acknowledgeDiff?}` → `transition_pending` の遷移だけ（その要求の時点で世代と版を固定する、§3.5） |
+| `POST …/operations/:opId/settle-transition` | 要る | `{ifVersion, acknowledgeDiff?}` → `transition_pending` の遷移だけ（その要求の時点で世代と版を固定する、§3.5）。項目が closed・purge 済みなら `{acknowledgeItemClosed: true}` で遷移なしに遷移待ちだけを終える（5-2c P2-3）。操作の所属は同じ Git の root の範囲（5-2c P2-2、reconcile・abandon も同じ） |
 | `GET /api/repositories/:id/mem/decisions?branch=` | 要らない（読み） | 一覧・operation の状態 |
 
 - 印は A §11 の `isScreenRequest`（`src/lib/security/screen-request.ts:52`）をそのまま使う（`X-CommandMate-Client: screen` と `Origin` の一致）。画面の client は `screenRequestHeaders()`（`:28`）を付ける。書き込みの route は印が無ければ 403 `screen_only`（`settings-service.ts:37`・notices の acknowledge の route と同じ）
@@ -521,6 +521,18 @@ Codex の事前レビュー（2026-11-09、P1 2・P2 5。`workspace/orchestratio
 | P2-2 | 既存の close／purge の後に未解決の操作が画面から消える：一覧が closed を除いた項目の ID でしか操作を引かない | 採る | 一覧に `unresolved` を足す：ブランチの未解決の操作（approved・in_flight・unknown・遷移待ちの succeeded）を項目の存否・closed から独立に引き（`listUnresolvedPromoteOperations`）、項目の行に出ないものを項目（無ければ null）と並べる。画面は照合・無いことを確かめた・記録済みとして扱う（項目があるときだけ）のボタンを出す。対照：POST 待ちの間の close（遷移待ちのまま一覧に残る）と purge（不明のまま残り、照合が届く）、開いた項目の操作と確定した操作は `unresolved` に出ない |
 | P2-3 | ブランチの値の見えない文字：本文がブランチをそのまま差し込み、`invisibleReplaced` は本文と引用だけで計算 | 採る | ブランチに C の出口の検査 `sanitizeBranch`（`brief/sanitize.ts`）を当て、通らないものは省略の形（`(省略 N bytes・理由)`）で書く。作成者のインスタンス ID は `revealInvisible`。metadata の見えない文字も `invisibleReplaced` に数える。対照：`feature/a\u200Bb` は本文に残らず true、普通のブランチ・作成者・detached はそのままで false |
 
+
+### 9.5 実装後の再レビュー（5-2b 2 回目、2026-11-09、`workspace/orchestration/runs/2026-11-09/review-4225b.md`）
+
+前回 4 件は解消 3 件・一部未対応 1 件（P2-2）。残り・追加の指摘 3 件（P2）。すべてこの PR で直した。
+
+| # | 指摘 | 処置 | 1 行の理由（守る条件・対照） |
+|---|---|---|---|
+| 5-2c P2-1 | 設定の不一致で遷移待ちの回復画面を失う：A の入口の新判定は成功を遷移待ちに残すが、一覧は同じ `ambiguous` で 404 になり `unresolved` を読む前に終わる | 採る | 一覧の所属の確認を mode の一致の判定から分ける。`promoteList` は所属（`withSettledRepositoryMembership`）と mode（`decideMemTarget`）を同じ同期の区間で引き、`ambiguous` なら 200 で `mode: 'ambiguous'`・`ambiguous: { reason, roots }`・`decisions: []`・ブランチの未解決の操作すべてを返す（結果は mode に依らず残す、E1）。画面は警告を出し、照合・無いことを確かめたのボタンだけを出す（項目は遷移しないので「記録済みとして扱う」は出さない）。対照：POST 待ちの間に別 root の項目のブランチを off → 一覧に出る（陽性・成功と不明の 2 本）→ 不明は一覧から照合して結果が残る、設定が揃えば今までどおりの一覧（陰性） |
+| 5-2c P2-2 | 別 root の未解決の操作は表示できても回復の API が 404：一覧は同じ Git の全 `readRepositoryIds` から出すが、reconcile・abandon・settle-transition は保存した `repository_id` と URL の ID の完全一致を求める | 採る | 回復の 3 API の所属の範囲を一覧と同じ（URL の root の所属の `candidates`、無ければ `members`）に揃える（`repositoryReadIds`・`ownsOperation`）。所属が引けない（root が無い・登録が動いている）ときは今までどおり完全一致だけ。画面は表示中の root の ID のままでよい。対照：root A の操作を root B の画面に出し、B の ID で照合・無いことを確かめた・記録済みとして扱うが届く（陽性）、別の Git の root からは 404 で何も変わらない（陰性） |
+| 5-2c P2-3 | closed の項目に出した遷移のボタンが必ず拒否される：A の状態表は closed からの遷移をすべて禁じる | 採る | 外部の結果の確認と項目の遷移を分ける。closed・purge 済みの項目の遷移待ちには遷移を出さず、「記録済みとして扱う（書けた結果だけを確かめ、閉じた項目は進めません）」を出す。これは settle-transition に `{ acknowledgeItemClosed: true }` を送り、A の入口を通らずに遷移待ちだけを終える（項目は閉じたまま）。遷移の要求（`ifVersion`）は closed なら A の前に 409 `state_forbids`（`reason: item_closed`）、purge 済みなら 404（`item_gone`）。開いた項目への `acknowledgeItemClosed` は 409（`item_open`）。対照はボタンの要求（画面の試験：URL と本文）から実 API（`promoteApi` を service へ通す試験）まで |
+| 5-2c 付随 | 照合の `succeeded` と A の答えの間（A の await）に、その記録を一覧に含めた preview の承認が通り 2 度目の POST をしうる（照合の前に所属の await を足したことで T10 が落ちて見えた） | 採る | `settleTransition` は最初の同期の文で遷移待ち（`transition_pending = 1`）を立て、A の答えで下ろす／理由を書く。approve の `hasActivePromoteOperation` がその間の承認を `operation_in_progress` で断る。対照：照合の A を止めた間の承認が断られ POST は 1 回（陽性、直しを外すと 2 回） |
+
 ---
 
 ## 10. 実装で実コードを正とした点（2026-11-09）
@@ -539,6 +551,9 @@ Codex の事前レビュー（2026-11-09、P1 2・P2 5。`workspace/orchestratio
 | I10 | 項目の mode は `memModeOnFor(項目の root, 項目のブランチ)`（§2.3） | 作業木の所属に項目のブランチを名指しした `withMemTarget` の答え（全 root が同じ判定・`ambiguous` は断る）と、項目の root の `memModeOnFor` の両方 | 5-2b P1。所属の全 root で同じ判定を求める A の規則（`decideMemTarget`）に揃える。`MemTargetSpec.branch` は型が `string` だが `withMemTarget` は名指しの値（detached の null を含む）をそのまま `decideMemTarget` へ渡すので、null は型だけ合わせた（`target.ts` は scope 外） |
 | I11 | 操作が名指す作業木は保存した ID（§3.4・§3.5） | 保存した ID と世代は書き換えず、使うときに alias と世代で今の作業木へ解く（`currentWorktreeIdOf`） | 5-2b P2-1。改名は子の行（世代を含む）と alias を動かすが、E の表は `worktree_id` 列を持たない（v69：削除で消えないため）ので改名に追随しない |
 | I12 | 一覧は項目ごとの操作（§4.1） | 項目の行に加え、項目の無い／閉じた未解決の操作を `unresolved` に出す | 5-2b P2-2 |
+| I13 | 一覧は `withMemTarget`（repository）の答えで所属と mode を一度に判定（§4.2） | `promoteList` は `withSettledRepositoryMembership` と `decideMemTarget` を直接引く（`withMemTarget` の repository の枝と同じ組み立て） | 5-2c P2-1。`withMemTarget` の失敗は所属を返さないので、`ambiguous` のときに未解決の操作を引く `readRepositoryIds` が無い。`target.ts` は scope 外なので E の側で同じ組み立てをした |
+| I14 | 回復の API の所属は URL の root と操作の `repository_id` の一致（§4.2） | URL の root の所属（同じ Git の `candidates`）に操作の root が入っていればよい | 5-2c P2-2。一覧（`readRepositoryIds`）と同じ範囲 |
+| I15 | 「記録済みとして扱う」は項目の遷移（§3.4） | 項目が closed・purge 済みなら遷移を出さず、遷移待ちを終えるだけ（`acknowledgeItemClosed`）。`settleTransition` は A の前に遷移待ちを立てる | 5-2c P2-3・付随。A の状態表（`transitions.ts`）は closed からの遷移を禁じ、A は scope 外 |
 
 ## 11. 共通規則の全読者
 
@@ -547,7 +562,7 @@ E の入口が共有する規則と、それを読む（当てはめる）場所
 | 共通規則 | 読む場所（ファイル・関数） | 固定している試験 |
 |---|---|---|
 | 画面の印（`isScreenRequest`）。無ければ 403 `screen_only`・何も書かない | `src/lib/promote/service.ts` の `promotePreview`・`promoteApprove`・`promoteConfirmReflected`・`promoteReconcile`・`promoteAbandon`・`promoteSettleTransition`（関数の最初の文）。route（`src/app/api/repositories/[id]/mem/decisions/**`）は要求を渡すだけ。画面の client `src/lib/promote/screen-client.ts` が `screenRequestHeaders()` を付ける | `promote-entrances-4225`（(e)）・`promote-write-chain-4225`（(4)）・`mem-decisions-routes-4225`・`DecisionPromotePanel-4225`・ガード `mem-promote-screen-only-4225` |
-| mode は項目の (repository, branch) で `on` のときだけ開始・遷移する。項目のブランチを名指しして所属の全 root で同じ判定（`ambiguous` は断る、5-2b P1）＋項目の root の `memModeOnFor` | `promotePreview`・`promoteApprove`（同期の区間、`itemBranchSpec`・`itemModeOn`）、`memSettleDecisionTransition`（`src/lib/mem/service.ts`、遷移の同期の区間、項目のブランチを名指し）。`promoteReconcile`・`promoteAbandon` は結果の記録だけで mode を問わない（E1）、遷移は A の入口が断る | `promote-entrances-4225`（(b)・T17・5-2b P1）・`write-entrances-recreate-4221`（decision-* の mode の `it.each`） |
+| mode は項目の (repository, branch) で `on` のときだけ開始・遷移する。項目のブランチを名指しして所属の全 root で同じ判定（`ambiguous` は断る、5-2b P1）＋項目の root の `memModeOnFor` | `promotePreview`・`promoteApprove`（同期の区間、`itemBranchSpec`・`itemModeOn`）、`memSettleDecisionTransition`（`src/lib/mem/service.ts`、遷移の同期の区間、項目のブランチを名指し）。`promoteReconcile`・`promoteAbandon` は結果の記録だけで mode を問わない（E1）、遷移は A の入口が断る。**追従（5-2c P2-1）**：`promoteList` は mode の判定と所属の確認を分け、`ambiguous` でも 200 で未解決の操作を返す（決定の一覧は出さない）。`DecisionPromotePanel` は `ambiguous` で警告を出し、遷移のボタンを出さない | `promote-entrances-4225`（(b)・T17・5-2b P1・5-2c P2-1）・`write-entrances-recreate-4221`（decision-* の mode の `it.each`）・`DecisionPromotePanel-4225`（5-2c P2-1） |
 | 作業木の世代は要求の到着で固定し、比べるだけ（固定し直さない）。保存した作業木は alias と世代で今の ID へ解く（改名は同じ作業木、作り直しは別、5-2b P2-1） | `currentWorktreeIdOf`（`promoteApprove` の context・`settleTransition`・`promoteReconcile` の文書）、`docOperationsFor`（保存 ID を alias で解く）、`promotePreview`（`getOrCreateWorktreeIncarnation` → preview の行）、`promoteApprove`（preview の値 → operation の行）、`settleTransition`（operation の値を A の入口へ）、`promoteConfirmReflected`・`promoteSettleTransition`（その要求の時点）、`memSettleDecisionTransition` → `transitionDecision` の `alive()` | `promote-entrances-4225`（(a)・T20・5-2b P2-1）・`write-entrances-recreate-4221`（decision-* の作り直しの `it.each`） |
 | 版と指紋（`item_version`・`itemFingerprint`）が承認のときと同じ | `promotePreview`（同期の区間で読み直し）、`promoteApprove`、`transitionDecision`（`WHERE version = ?`）、`promoteSettleTransition`（`acknowledgeDiff`） | `promote-entrances-4225`（T3・T18 U7）・`write-entrances-recreate-4221`（版の `it.each`） |
 | 行き先と基準の指紋（文書：内容の SHA-256・HEAD のブランチと common-dir、コメント：Issue の指紋・投稿者の数値 ID） | `promoteApprove`（同期の区間）、`writeDocBlock`（書く直前にもう一度）、`destination.ts`（`checkDocPath`・`docBaseFingerprint`・`issueBaseFingerprint`） | `promote-entrances-4225`（T5・T6・poster_changed）・`promote-doc-write-4225` |
@@ -557,7 +572,10 @@ E の入口が共有する規則と、それを読む（当てはめる）場所
 | 文書は追記だけ・新規は `link`・E の一時名の回収規則 | `doc-write.ts`（`writeDocBlock`・`reclaimDocLeftovers`・`reconcileDocBlock`）、`docOperationsFor`（`mem-promote-db.ts`：同じ行き先の E の操作） | `promote-doc-write-4225`（T5b〜T5e・T12・T21）・`promote-entrances-4225`（T21・T5e） |
 | git を書かない・`gh --method` は 1 か所・常駐を持たない | E の全ソース | ガード `mem-promote-no-git-write-4225`・`promote-entrances-4225`（T16） |
 | decision の状態の遷移は A の 1 つの入口だけ | `transitionDecision`（`mem-db.ts`）← `memSettleDecisionTransition`（`mem/service.ts`）← `settleTransition`・`promoteConfirmReflected`（`promote/service.ts`） | `promote-write-chain-4225`（(1)〜(3)）・`write-entrances-recreate-4221`・`close-entrances-4222`（例外の行） |
-| 未解決の操作は項目の存否・closed に依らず画面に出す（5-2b P2-2） | `promoteList`（`unresolved`、`listUnresolvedPromoteOperations`）、`DecisionPromotePanel`（`decision-unresolved`）、`screen-client.ts`（`PromoteListBody`） | `promote-entrances-4225`（5-2b P2-2）・`DecisionPromotePanel-4225` |
+| 未解決の操作は項目の存否・closed に依らず画面に出す（5-2b P2-2） | `promoteList`（`unresolved`、`listUnresolvedPromoteOperations`。**追従**：`ambiguous` でも出す、5-2c P2-1）、`DecisionPromotePanel`（`decision-unresolved`。**追従**：closed・purge 済みには遷移を出さず `acknowledgeItemClosed` だけ、5-2c P2-3）、`screen-client.ts`（`PromoteListBody`・`acknowledgeItemClosed`） | `promote-entrances-4225`（5-2b P2-2・5-2c）・`DecisionPromotePanel-4225`（5-2c） |
+| 操作の所属は同じ Git の root の全部（一覧の `readRepositoryIds` と同じ範囲、5-2c P2-2） | `promoteList`（`readIdsOf`）、**追従**：`promoteReconcile`・`promoteAbandon`・`promoteSettleTransition`（`repositoryReadIds`・`ownsOperation`） | `promote-entrances-4225`（5-2c P2-2：2 root の間の表示→回復の要求、別の Git は 404） |
+| closed・purge 済みの項目は遷移しない：外部の結果の確認と項目の遷移を分ける（5-2c P2-3） | `promoteSettleTransition`（`acknowledgeItemClosed` は A を通らず遷移待ちだけを終える。遷移の要求は A の前に `item_closed`／`item_gone`）、`DecisionPromotePanel`（`operationLine` の `'closed'`）、A の状態表 `transitions.ts`（closed からの遷移を禁じる、変えない） | `promote-entrances-4225`（5-2c P2-3）・`DecisionPromotePanel-4225`（5-2c P2-3） |
+| 外へ書けた後、項目が動くまでは遷移待ち（`settleTransition` の最初の同期の文で立てる、5-2c 付随） | `settleTransition`（`promoteApprove`・`promoteReconcile`・`promoteSettleTransition` から）、`hasActivePromoteOperation` | `promote-entrances-4225`（T10・5-2c の窓） |
 | 外へ出す本文の見えない文字（自由入力・引用・ブランチ・作成者）は見える形にし、`invisibleReplaced` に数える。ブランチは C の `sanitizeBranch`（5-2b P2-3） | `render.ts`（`renderPromoteBody`・`branchShown`）、`promotePreview`（`invisibleReplaced` を画面へ） | `promote-render-4225`（T15・5-2b P2-3） |
 | 「未反映」の表示（`recorded`） | E の画面（`DecisionPromotePanel`）と E の一覧の API（`unreflected:true`）。CLI の一覧と brief の文言は G（#4227）へ送った（§0.1 S3） | `promote-entrances-4225`（T13）・`DecisionPromotePanel-4225` |
 

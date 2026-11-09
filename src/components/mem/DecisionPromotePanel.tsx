@@ -106,7 +106,13 @@ export function DecisionPromotePanel({ repositoryId, branch }: { repositoryId: s
   }
   if (!list) return <p className="text-xs text-muted-foreground">{t('mem.decisions.loading')}</p>;
 
-  const operationLine = (operation: PromoteOperationView, version: number | null) => (
+  /**
+   * One operation and what can be done with it. `item` is what the item can still do
+   * (5-2c P2-3): a closed or purged item never moves, so the outcome outside is only
+   * acknowledged; while the roots disagree on the mode (`ambiguous`) the item cannot move
+   * either, so only the outcome is reconciled.
+   */
+  const operationLine = (operation: PromoteOperationView, version: number | null, item: 'movable' | 'closed' | 'frozen') => (
     <li key={operation.id} className="space-y-1 text-xs" data-testid={`decision-operation-${operation.id}`}>
       <span className="text-foreground">{t(`mem.decisions.operation.${operation.state}`)}</span>
       {operation.transitionPending && (
@@ -124,7 +130,7 @@ export function DecisionPromotePanel({ repositoryId, branch }: { repositoryId: s
             </Button>
           </>
         )}
-        {operation.state === 'succeeded' && operation.transitionPending && version !== null && (
+        {operation.state === 'succeeded' && operation.transitionPending && item === 'movable' && version !== null && (
           <>
             <label className="flex items-center gap-1">
               <input type="checkbox" checked={acknowledgeDiff} onChange={(e) => setAcknowledgeDiff(e.target.checked)} />
@@ -140,18 +146,30 @@ export function DecisionPromotePanel({ repositoryId, branch }: { repositoryId: s
             </Button>
           </>
         )}
+        {operation.state === 'succeeded' && operation.transitionPending && item === 'closed' && (
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => void run(() => promoteApi.acknowledgeItemClosed(repositoryId, operation.id))}>
+            {t('mem.decisions.acknowledgeItemClosed')}
+          </Button>
+        )}
       </div>
     </li>
   );
+  const ambiguous = list.mode === 'ambiguous';
 
   return (
     <div className="space-y-3" data-testid="decision-promote-panel">
       <p className="text-xs text-muted-foreground">{t('mem.decisions.description')}</p>
       <p className="text-xs text-muted-foreground">{t('mem.decisions.limits')}</p>
-      {list.mode !== 'on' && (
-        <p role="status" className="text-xs text-danger-foreground">
-          {t('mem.decisions.modeNotOn', { mode: list.mode })}
+      {ambiguous ? (
+        <p role="status" className="text-xs text-danger-foreground" data-testid="decision-ambiguous">
+          {t('mem.decisions.ambiguous', { roots: (list.ambiguous?.roots ?? []).map((root) => root.name).join(', ') })}
         </p>
+      ) : (
+        list.mode !== 'on' && (
+          <p role="status" className="text-xs text-danger-foreground">
+            {t('mem.decisions.modeNotOn', { mode: list.mode })}
+          </p>
+        )
       )}
       <label className="flex flex-wrap items-center gap-2 text-xs text-foreground">
         {t('mem.decisions.worktree')}
@@ -168,7 +186,7 @@ export function DecisionPromotePanel({ repositoryId, branch }: { repositoryId: s
           </select>
         )}
       </label>
-      {list.decisions.length === 0 && <p className="text-xs text-muted-foreground">{t('mem.decisions.none')}</p>}
+      {list.decisions.length === 0 && !ambiguous && <p className="text-xs text-muted-foreground">{t('mem.decisions.none')}</p>}
       <ul className="space-y-3">
         {list.decisions.map(({ item, unreflected, operations }) => (
           <li key={item.id} className="space-y-2 rounded border border-border p-2" data-testid={`decision-${item.id}`}>
@@ -185,7 +203,7 @@ export function DecisionPromotePanel({ repositoryId, branch }: { repositoryId: s
                 {t('mem.decisions.unreflected')}
               </p>
             )}
-            {operations.length > 0 && <ul className="space-y-1">{operations.map((operation) => operationLine(operation, item.version))}</ul>}
+            {operations.length > 0 && <ul className="space-y-1">{operations.map((operation) => operationLine(operation, item.version, 'movable'))}</ul>}
             <div className="flex flex-wrap gap-1">
               {item.state === 'open' && (
                 <Button size="sm" variant="ghost" disabled={busy} onClick={() => setSelected(selected === item.id ? null : item.id)}>
@@ -254,16 +272,18 @@ export function DecisionPromotePanel({ repositoryId, branch }: { repositoryId: s
       </ul>
       {(list.unresolved ?? []).length > 0 && (
         <div className="space-y-2 rounded border border-border p-2" data-testid="decision-unresolved">
-          <h4 className="text-xs font-medium text-foreground">{t('mem.decisions.unresolved')}</h4>
+          <h4 className="text-xs font-medium text-foreground">{t(ambiguous ? 'mem.decisions.unresolvedAmbiguous' : 'mem.decisions.unresolved')}</h4>
           <ul className="space-y-2">
             {(list.unresolved ?? []).map(({ operation, item, itemVersion }) => (
               <li key={operation.id} className="space-y-1">
                 <p className="break-all text-xs text-muted-foreground">
                   {item === null
                     ? t('mem.decisions.unresolvedItemGone', { itemId: operation.itemId })
-                    : t('mem.decisions.unresolvedItemClosed', { itemId: operation.itemId })}
+                    : item.state === 'closed'
+                      ? t('mem.decisions.unresolvedItemClosed', { itemId: operation.itemId })
+                      : t('mem.decisions.unresolvedItemOpen', { itemId: operation.itemId })}
                 </p>
-                <ul>{operationLine(operation, itemVersion)}</ul>
+                <ul>{operationLine(operation, itemVersion, item === null || item.state === 'closed' ? 'closed' : ambiguous ? 'frozen' : 'movable')}</ul>
               </li>
             ))}
           </ul>
