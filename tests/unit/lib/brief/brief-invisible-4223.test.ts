@@ -49,6 +49,11 @@ const CONTEXTS: Array<{ name: string; wrap: (c: string) => string; index: number
   { name: 'between two emoji', wrap: (c) => `😀${c}😀`, index: 1, allowed: (code) => code === 0x200d || code === 0xfe0e || code === 0xfe0f },
   { name: 'after a keycap digit', wrap: (c) => `1${c}`, index: 1, allowed: (code) => code === 0xfe0e || code === 0xfe0f },
   { name: 'after a letter', wrap: (c) => `a${c}b`, index: 1, allowed: () => false },
+  // PM re-review P3-2: a ZWJ needs an emoji before it, not only after.
+  { name: 'between a letter and an emoji', wrap: (c) => `a${c}😀`, index: 1, allowed: () => false },
+  // codex re-review P2: a VS16 that is replaced is no ground for keeping what follows it.
+  { name: 'after a replaced VS16 before an emoji', wrap: (c) => `a\u{FE0F}${c}😀`, index: 2, allowed: () => false },
+  { name: 'after a kept VS16 before an emoji', wrap: (c) => `❤\u{FE0F}${c}😀`, index: 2, allowed: (code) => code === 0x200d },
   // 🏴 is an emoji character itself, so VS15 / VS16 right after it are its presentation.
   { name: 'alone after a black flag', wrap: (c) => `🏴${c}${CANCEL}`, index: 1, allowed: (code) => code === 0xfe0e || code === 0xfe0f },
   { name: 'inside an RGI flag', wrap: (c) => `🏴${tag('gbe')}${c}${tag('g')}${CANCEL}`, index: 4, allowed: (code) => code === 0xe006e },
@@ -107,7 +112,26 @@ describe('every invisible code point is replaced, but for the emoji exceptions',
       codes.forEach((code, i) => code >= 0xe0020 && code <= 0xe007f && i > 0 && kept.add(i));
       return kept;
     };
-    for (const wider of [anyVs, anyZwj, anyFlag]) expect(mismatches(wider).length).toBeGreaterThan(0);
+    // The ZWJ rule without its "an emoji before it" half (PM re-review P3-2).
+    const zwjBeforeEmoji: Keep = (codes) => {
+      const kept = keptInvisible(codes);
+      codes.forEach((code, i) => code === 0x200d && /\p{Extended_Pictographic}/u.test(String.fromCodePoint(codes[i + 1] ?? 0)) && kept.add(i));
+      return kept;
+    };
+    // The ZWJ rule that takes any VS16 before it as an emoji's, replaced or not (codex re-review P2).
+    const anyVs16: Keep = (codes) => {
+      const kept = keptInvisible(codes);
+      codes.forEach((code, i) => code === 0x200d && codes[i - 1] === 0xfe0f && /\p{Extended_Pictographic}/u.test(String.fromCodePoint(codes[i + 1] ?? 0)) && kept.add(i));
+      return kept;
+    };
+    for (const wider of [anyVs, anyZwj, anyFlag, zwjBeforeEmoji, anyVs16]) expect(mismatches(wider).length).toBeGreaterThan(0);
+  });
+
+  it('a VS16 and a ZWJ outside an emoji sequence are both shown (codex re-review P2)', () => {
+    expect(revealInvisible('a\u{FE0F}\u{200D}😀')).toBe('a[U+FE0F][U+200D]😀');
+    expect(revealInvisible('a\u{200D}😀')).toBe('a[U+200D]😀');
+    expect(revealInvisible('1\u{FE0F}\u{200D}😀')).toBe('1\u{FE0F}[U+200D]😀');
+    expect(Array.from(revealInvisible('x\u{FE0F}\u{200D}\u{FE0F}\u{200D}😀'))).not.toContain('\u{200D}');
   });
 
   it('negative: Japanese and emoji sequences are kept as they are', () => {

@@ -243,7 +243,7 @@ task・verify・run は記録の時刻、状態の行（S1・S2・S9）は insta
   A の検査を通った後の自由入力と、構造化の欄の文字列のすべてで、**Default_Ignorable_Code_Point・一般カテゴリ Cf・Zl・Zp・Co・異体字セレクタ
   （U+FE00〜U+FE0F・U+E0100〜U+E01EF）のすべて**を `[U+XXXX]` に置き換える（`BRIEF_INVISIBLE`・`revealInvisible`、`src/lib/brief/sanitize.ts`）。
   **除かずに置き換える**のは、読み手（人）にも何かがあったことが見えるようにするため。
-  例外は絵文字の列の中だけ（`keptInvisible`）：2 つの絵文字の間の ZWJ（前が Extended_Pictographic・肌色の修飾子・VS16、後が Extended_Pictographic）、
+  例外は絵文字の列の中だけ（`keptInvisible`）：2 つの絵文字の間の ZWJ（後が Extended_Pictographic で、前が絵文字の要素＝Extended_Pictographic に肌色の修飾子と**残す** VS16 が続いたもの。置き換える VS16 は根拠にしない：`a\u{FE0F}\u{200D}😀` は両方とも置き換わる、3 回目の再レビュー）、
   絵文字の文字の直後の VS15/VS16（キーキャップの数字を含む）、RGI の地域の旗（🏴＋`gbeng`・`gbsct`・`gbwls` の Tags＋CANCEL TAG）。
   肌色の修飾子は見える文字（So）なので対象に入らない。`tests/unit/lib/brief/brief-invisible-4223.test.ts` が全コードポイント（U+0000〜U+10FFFF、サロゲートを除く）を
   単独と例外の起こりうる文脈で走査し、該当するのに置き換わらないもの・例外の外で残るものが 0 であること、例外を広げた版が落ちることを確かめる
@@ -625,7 +625,7 @@ memo の無い本文・配送中の試行がある境界には `null`（I12）�
 | mode の判定 | A の `withMemTarget`（`decideRootMode`）。再確認も同じ `decideRootMode` | `buildBrief` の初め（`withMemTarget`）と組み立ての前（`assertStillSame`）。`derived` で読まない情報源は `BRIEF_DERIVED_SOURCES` の 1 か所。CLI の `off` は route の `disabled` → `MEM_EXIT_BY_CODE`（exit 50） | 追従。D1 の claim の照合（`session-brief.ts` の `membershipKey`）は features も比べるが、C の `briefMembershipKey` は features を読まない（C の本文は features に依らないため）。D1 の照合の方が厳しく、C の本文が誤って付く向きの差ではない |
 | 知らせの予約 | B の `reserveMemNotices`・`settleMemNoticeAttempt`（`src/lib/mem/notices.ts`） | provider の `reserve`（予約）・`settleBriefAttempt`（受領・返却）だけ。build・CLI・route は `listMemNoticesFor`（書かない）だけで予約も受領もしない | 追従。`getBriefProvider()` に繋ぐのと D1 の `settle` を `settleBriefAttempt` に繋ぐのは D2 |
 | instance の寿命 | D1 の `isSameInstanceLifetime`・`readInstanceLifetime`（`src/lib/db/session-brief-db.ts`） | `buildBrief` の初め（request の世代・route の `pinned` と照らす）と `assertStillSame` | 追従（写さず呼ぶ） |
-| 再試行（組み直し） | `service.ts` の `BRIEF_ROUTE_ATTEMPTS`・`BRIEF_ROUTE_RETRIES`、`build.ts` の `pinBriefLifetime`・`BRIEF_CHANGE_REASONS` | route（`briefForRoute`、最大 2 回、寿命を固定して渡す）だけが組み直す。provider の `build` は組み直さない（例外は D1 が `provider_failed` で受ける）。API（route の `GET`）と CLI は組み直さない | 追従。`brief-retry-paths-4223` が `src/` の `buildBrief` の呼び出しの連鎖（アロー関数・メソッド・別名・外側の呼び出しを含む、`tests/unit/lib/brief/brief-call-chain.ts`）と繰り返しを列挙して表と比べる |
+| 再試行（組み直し） | `service.ts` の `BRIEF_ROUTE_ATTEMPTS`・`BRIEF_ROUTE_RETRIES`、`build.ts` の `pinBriefLifetime`・`BRIEF_CHANGE_REASONS` | route（`briefForRoute`、最大 2 回、寿命を固定して渡す）だけが組み直す。provider の `build` は組み直さない（例外は D1 が `provider_failed` で受ける）。API（route の `GET`）と CLI は組み直さない | 追従。`brief-retry-paths-4223` が `src/` の `buildBrief` の呼び出しの連鎖（アロー関数・メソッド・import／ローカル／再 export の別名・名前空間の import・外側の呼び出しを含む。呼び出しは (モジュール, 名前) に解決し、再 export の名前もファイルの選別に伝える、`tests/unit/lib/brief/brief-call-chain.ts`）と繰り返しを列挙して表と比べる |
 
 ---
 
@@ -682,3 +682,13 @@ codex-2（`review-4223b.md`、P2 1）と PM の再レビュー（`pm-review-4223
 | PM 再 P3-1 | ペルシア語の ZWNJ・インド系文字の ZWJ・地域の旗が崩れる | **方針の代償として明記** | §3.3（RGI の 3 つの地域の旗は例外で保つ）。試験に明記 |
 | PM 再 P3-3 | provider の経路で worktree の世代を要求と照合しない | **D2 への申し送り** | §11 の U13 |
 | PM 再 P3-4 | 本文の無い長い構造化の行は省略できない | **直さない**（追跡） | — |
+
+### 12.5 3 回目の再レビューの処置（2026-11-09）
+
+codex-2（`review-4223c.md`、P2 2）と PM の再レビュー（`pm-review-4223-claude.md` の末尾、P3-2）。P1 なし。
+
+| # | 指摘 | 処置 | 反映先・対照 |
+|---|---|---|---|
+| codex P2-1 | 再 export した別名（`export { buildBrief as make }`）だけを import して再試行する新しい入口が、ファイルの選別から漏れる | **採る** | `brief-call-chain.ts`：呼び出しを (モジュール, 名前) に解決し（import の module path・名前空間の import・ローカルの別名）、再 export（`export { a as b } from`・`export const b = a`）の名前を連鎖の名前として選別に伝える。`obj.name(…)` はメソッド・関数の値のプロパティだけに当てる（トップレベルの関数を名前だけで当てると無関係な呼び出しが連鎖に入る）。自己対照は `chainSources(…, extra)` で選別の前にソースを足し、選別から表の比較まで通す（再 export の 2 形・名前空間の import）。名前を選別へ伝えるのを外すと対照が落ちることを確かめた |
+| codex P2-2 ＝ PM P3-4 | 置き換える VS16 を根拠に ZWJ を残す（`a\u{FE0F}\u{200D}😀`） | **採る** | §3.3。ZWJ の前に、置き換えた後も有効な絵文字の要素（絵文字＋肌色＋**残す** VS16）があることを確かめる（`joinsAfterEmoji`）。負の対照：`a\u{FE0F}\u{200D}😀`・`1\u{FE0F}\u{200D}😀`・VS16 と ZWJ の繰り返し。全コードポイントの走査に「置き換える VS16 の後」「残す VS16 の後」の文脈を足した |
+| PM P3-2 | 「文字＋ZWJ＋絵文字」の文脈が走査に無い | **採る** | `CONTEXTS` に「文字と絵文字の間」を足した。ZWJ の「前が絵文字」の条件を外した版・置き換える VS16 を根拠にする版が落ちる（陽性）。実装から条件を外しても落ちることを確かめた |

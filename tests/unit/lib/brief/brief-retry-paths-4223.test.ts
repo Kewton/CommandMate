@@ -225,19 +225,40 @@ describe('every rebuild of a brief keeps the request’s lifetime', () => {
       true,
     ],
     [
+      'a namespace import retried',
+      { 'src/lib/brief/extra.ts': `import * as svc from './service';\nexport async function viaNs(db: never) {\n  for (;;) await svc.briefForRoute(db, db, db);\n}\n` },
+      'src/lib/brief/extra.ts:viaNs',
+      true,
+    ],
+    [
       'a retry through a callback',
       { 'src/lib/brief/extra.ts': `import { briefForRoute } from './service';\nexport function twice(db: never) {\n  return [1, 2].map(async () => { for (;;) await briefForRoute(db, db, db); });\n}\n` },
       'src/lib/brief/extra.ts:twice',
       true,
     ],
   ])('(control) %s is found and the table comparison fails on it', (_name, extra, key, retries) => {
-    const found = briefCallChain({ ...chainSources(), ...extra });
+    const found = briefCallChain(chainSources(undefined, extra));
     expect(found[key]).toEqual({ retries });
     expect(found).not.toEqual(table());
   });
 
+  it.each([
+    ['export { buildBrief as make } from', `export { buildBrief as make } from './build';\n`],
+    ['export const make = buildBrief', `import { buildBrief } from './build';\nexport const make = buildBrief;\n`],
+  ])('(control) a re-exported alias (%s) used only by name in another file goes from the selection to the table and fails it', (_name, bridge) => {
+    const extra = {
+      'src/lib/brief/bridge.ts': bridge,
+      'src/app/api/worktrees/[id]/mem/brief3/route.ts': `import { make } from '@/lib/brief/bridge';\nexport async function POST(db: never) {\n  while (db) await make(db, db, db);\n}\n`,
+    };
+    const selected = chainSources(undefined, extra);
+    expect(Object.keys(selected)).toContain('src/app/api/worktrees/[id]/mem/brief3/route.ts');
+    const found = briefCallChain(selected);
+    expect(found['src/app/api/worktrees/[id]/mem/brief3/route.ts:POST']).toEqual({ retries: true });
+    expect(found).not.toEqual(table());
+  });
+
   it('(control) a file that only names buildBrief in a comment or a string is not a caller', () => {
-    const found = briefCallChain({ ...chainSources(), 'src/lib/brief/extra.ts': `// buildBrief(db) is called by the route\nexport const NOTE = 'buildBrief(';\n` });
+    const found = briefCallChain(chainSources(undefined, { 'src/lib/brief/extra.ts': `// buildBrief(db) is called by the route\nexport const NOTE = 'buildBrief(';\n` }));
     expect(found).toEqual(table());
   });
 

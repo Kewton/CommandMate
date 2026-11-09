@@ -31,12 +31,27 @@ const BLACK_FLAG = 0x1f3f4;
 const CANCEL_TAG = 0xe007f;
 const EMOJI = /\p{Emoji}/u;
 const PICTOGRAPH = /\p{Extended_Pictographic}/u;
-/** What a ZWJ of an emoji sequence follows: a pictograph, a skin tone, VS16. */
-const JOINS_AFTER = /[\p{Extended_Pictographic}\p{Emoji_Modifier}\u{FE0F}]/u;
+const MODIFIER = /\p{Emoji_Modifier}/u;
 /** The RGI tag sequences (subdivision flags): 🏴 + these tags + CANCEL TAG. Any other tag run is replaced. */
 export const BRIEF_RGI_TAG_FLAGS: readonly string[] = ['gbeng', 'gbsct', 'gbwls'];
 
 const charOf = (code: number | undefined): string => (code === undefined ? '' : String.fromCodePoint(code));
+
+/**
+ * Whether what stands before the ZWJ at `index` is an emoji element that stays as it is
+ * (codex re-review P2, 2026-11-09): a pictograph, optionally followed by a skin tone and a
+ * VS16 that is itself kept. A VS16 that is replaced (after a letter) is no ground for
+ * keeping the ZWJ: `a\u{FE0F}\u{200D}😀` shows both.
+ */
+function joinsAfterEmoji(codes: readonly number[], index: number, kept: ReadonlySet<number>): boolean {
+  let i = index - 1;
+  if (i >= 0 && codes[i] === VS16) {
+    if (!kept.has(i)) return false;
+    i -= 1;
+  }
+  if (i >= 0 && MODIFIER.test(String.fromCodePoint(codes[i]))) i -= 1;
+  return i >= 0 && PICTOGRAPH.test(String.fromCodePoint(codes[i]));
+}
 
 /**
  * The exceptions, and only these (the PM decision): inside an emoji sequence, a ZWJ
@@ -49,7 +64,7 @@ export function keptInvisible(codes: readonly number[]): Set<number> {
   codes.forEach((code, index) => {
     const before = charOf(codes[index - 1]);
     const after = charOf(codes[index + 1]);
-    if (code === ZWJ && JOINS_AFTER.test(before) && PICTOGRAPH.test(after)) kept.add(index);
+    if (code === ZWJ && PICTOGRAPH.test(after) && joinsAfterEmoji(codes, index, kept)) kept.add(index);
     if ((code === VS15 || code === VS16) && before !== '' && EMOJI.test(before) && !BRIEF_INVISIBLE.test(before)) kept.add(index);
     if (code === BLACK_FLAG) {
       let end = index + 1;
