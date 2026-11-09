@@ -510,6 +510,120 @@ describe('[#4227] rule (4)(c): the comparison and the unknown request stay apart
   });
 });
 
+describe('[#4227] rule (4)(d): a unit and its view never read the one open edit, close or draft (Codex review-4227-pr1d P2, PM review P3-1)', () => {
+  it('close lands → its answer is lost → a read again hides the row → another item is edited and saved → the close is still resent as it was', async () => {
+    renderPanel();
+    fireEvent.click(await screen.findByTestId('mem-item-close-n1'));
+    loseAnswer = 'close';
+    fireEvent.click(screen.getByTestId('mem-item-close-confirm-n1'));
+    await waitFor(() => expect(screen.getByTestId('mem-items-notice').textContent).toContain('結果が分かりません'));
+    await readAgain();
+    await waitFor(() => expect(screen.queryByTestId('mem-item-n1')).toBeNull());
+    // Another item's edit, opened and saved: it replaced the one open `closing` in 364738a07 and the resend went with it.
+    fireEvent.click(screen.getByTestId('mem-item-edit-d3'));
+    fireEvent.change(screen.getByTestId('mem-item-edit-text-d3'), { target: { value: 'other item' } });
+    fireEvent.click(screen.getByTestId('mem-item-save-d3'));
+    await waitFor(() => expect(find('d3').text).toBe('other item'));
+    expect(screen.getByTestId('mem-items-units')).toContainElement(screen.getByTestId('mem-item-close-confirm-n1'));
+    fireEvent.click(screen.getByTestId('mem-item-close-confirm-n1'));
+    await screen.findByTestId('mem-item-close-conflict-n1');
+    expect(writesOf('close')).toHaveLength(2);
+    expect(writesOf('close')[1].body).toEqual(writesOf('close')[0].body);
+    expect(writesOf('close')[1].url).toBe(writesOf('close')[0].url);
+  });
+
+  it('the view of a listed unit shows the unit’s own reason while another item’s edit and then its close are open', async () => {
+    renderPanel();
+    fireEvent.click(await screen.findByTestId('mem-item-close-d3'));
+    fireEvent.change(screen.getByTestId('mem-item-close-reason-d3'), { target: { value: 'kept reason' } });
+    // Applied and lost; nothing reads the list again, so d3's row (and its unit's view in it) stays listed.
+    loseAnswer = 'close';
+    fireEvent.click(screen.getByTestId('mem-item-close-confirm-d3'));
+    await waitFor(() => expect(screen.getByTestId('mem-items-notice').textContent).toContain('結果が分かりません'));
+    // Another item's edit, then its close, replace the one open draft in turn.
+    fireEvent.click(screen.getByTestId('mem-item-edit-n1'));
+    fireEvent.change(screen.getByTestId('mem-item-edit-text-n1'), { target: { value: 'typing' } });
+    fireEvent.click(screen.getByTestId('mem-item-close-n1'));
+    expect(screen.getByTestId('mem-item-closer-n1')).toBeInTheDocument();
+    // d3's unit is still shown, with its own reason and a resend.
+    const reason = screen.getByTestId('mem-item-close-reason-d3') as HTMLInputElement;
+    expect(reason.value).toBe('kept reason');
+    expect(reason.disabled).toBe(true);
+    expect(screen.getByTestId('mem-item-close-confirm-d3').textContent).toBe('同じ内容で送り直す');
+    fireEvent.click(screen.getByTestId('mem-item-close-confirm-d3'));
+    await screen.findByTestId('mem-item-close-conflict-d3');
+    expect(writesOf('close')[1].body).toEqual(writesOf('close')[0].body);
+    expect(writesOf('close')[0].body).toMatchObject({ reason: 'kept reason', ifVersion: 1 });
+    // The open close of n1 is not ended by d3's answer.
+    expect(screen.getByTestId('mem-item-closer-n1')).toBeInTheDocument();
+  });
+
+  it('an edit lost while another item’s close is opened: its editor stays with the draft sent', async () => {
+    renderPanel();
+    fireEvent.click(await screen.findByTestId('mem-item-edit-n1'));
+    fireEvent.change(screen.getByTestId('mem-item-edit-text-n1'), { target: { value: 'sent draft' } });
+    dropRequest = 'update';
+    fireEvent.click(screen.getByTestId('mem-item-save-n1'));
+    await waitFor(() => expect(screen.getByTestId('mem-items-notice').textContent).toContain('結果が分かりません'));
+    fireEvent.click(screen.getByTestId('mem-item-close-d3'));
+    expect((screen.getByTestId('mem-item-edit-text-n1') as HTMLTextAreaElement).value).toBe('sent draft');
+    fireEvent.click(screen.getByTestId('mem-item-save-n1'));
+    await waitFor(() => expect(find('n1').text).toBe('sent draft'));
+    expect(writesOf('update')[1].body).toEqual(writesOf('update')[0].body);
+    expect(screen.getByTestId('mem-item-closer-d3')).toBeInTheDocument();
+  });
+
+  it('an edit lost → the item is closed by another → a read again hides the row: its resend is on the units’ side and its 409 is a comparison (P3-1)', async () => {
+    renderPanel();
+    fireEvent.click(await screen.findByTestId('mem-item-edit-n1'));
+    fireEvent.change(screen.getByTestId('mem-item-edit-text-n1'), { target: { value: 'lost edit' } });
+    loseAnswer = 'update';
+    fireEvent.click(screen.getByTestId('mem-item-save-n1'));
+    await waitFor(() => expect(screen.getByTestId('mem-items-notice').textContent).toContain('結果が分かりません'));
+    agentWrites('n1', { state: 'closed' });
+    await readAgain();
+    await waitFor(() => expect(screen.queryByTestId('mem-item-n1')).toBeNull());
+    const units = screen.getByTestId('mem-items-units');
+    expect(units).toContainElement(screen.getByTestId('mem-item-save-n1'));
+    fireEvent.click(screen.getByTestId('mem-item-save-n1'));
+    await screen.findByTestId('mem-item-conflict-n1');
+    expect(writesOf('update')[1].body).toEqual(writesOf('update')[0].body);
+    expect(screen.getByTestId('mem-items-units')).toContainElement(screen.getByTestId('mem-item-conflict-n1'));
+    expect(screen.queryByTestId('mem-item-rebase-n1')).toBeNull();
+    expect(screen.getByTestId('mem-items-notice').textContent).not.toContain('保存しました');
+  });
+
+  it('a comparison stays when another item’s edit is opened; opening the same item’s edit ends it', async () => {
+    renderPanel();
+    fireEvent.click(await screen.findByTestId('mem-item-edit-n1'));
+    fireEvent.change(screen.getByTestId('mem-item-edit-text-n1'), { target: { value: 'mine' } });
+    agentWrites('n1', { text: 'theirs' });
+    fireEvent.click(screen.getByTestId('mem-item-save-n1'));
+    await screen.findByTestId('mem-item-conflict-n1');
+    fireEvent.click(screen.getByTestId('mem-item-edit-d3'));
+    // 364738a07 held one comparison and dropped it on any edit.
+    expect(screen.getByTestId('mem-item-conflict-n1')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('mem-item-edit-n1'));
+    expect(screen.queryByTestId('mem-item-conflict-n1')).toBeNull();
+  });
+
+  it('(control) the unit’s "drop" sends nothing, ends that unit only and gives the row its edit again', async () => {
+    renderPanel();
+    fireEvent.click(await screen.findByTestId('mem-item-edit-n1'));
+    fireEvent.change(screen.getByTestId('mem-item-edit-text-n1'), { target: { value: 'never landed' } });
+    dropRequest = 'update';
+    fireEvent.click(screen.getByTestId('mem-item-save-n1'));
+    await waitFor(() => expect(screen.getByTestId('mem-items-notice').textContent).toContain('結果が分かりません'));
+    expect(screen.queryByTestId('mem-item-edit-n1')).toBeNull();
+    fireEvent.click(screen.getByTestId('mem-item-unit-discard-update:n1'));
+    await waitFor(() => expect(screen.queryByTestId('mem-item-editor-n1')).toBeNull());
+    expect(screen.getByTestId('mem-item-edit-n1')).toBeInTheDocument();
+    expect(screen.queryByTestId('mem-items-units')).toBeNull();
+    expect(writesOf('update')).toHaveLength(1);
+    expect(find('n1').text).toBe('first note');
+  });
+});
+
 describe('[#4227] rule (5): the buttons are read off the transition table (P3-2, Codex P2 #5)', () => {
   it('a recorded decision has no edit; a promoted one closes as "close"; an open one withdraws', async () => {
     renderPanel();

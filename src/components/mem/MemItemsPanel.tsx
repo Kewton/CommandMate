@@ -24,7 +24,11 @@
  *       for the same key says it landed (an add's replay); a 409 to a resent edit or close is a
  *       conflict, shown side by side, never taken for "saved" by comparing fields. The comparison,
  *       and the resend of a unit whose row is not listed, are on the units' side, apart from the
- *       list: a closed item leaves the default list, its comparison stays (Codex review-4227-pr1c P2);
+ *       list: a closed item leaves the default list, its comparison stays (Codex review-4227-pr1c P2).
+ *       (d) A unit holds everything its resend and its view need (the values read and shown, the
+ *       destination, the key, every field sent; the comparisons are kept per item) and never reads
+ *       the one-at-a-time screen state (`edit`, `closing`, the add's draft): opening or saving
+ *       another item's edit or close leaves the unit and its view (Codex review-4227-pr1d P2);
  *   (5) the buttons are read off the transition table (`memScreenActions`).
  * - Read again on focus and every 30 seconds; a row whose version moved is marked.
  * - The notices no session took, each with "take it".
@@ -129,8 +133,24 @@ interface CloseConflict {
  */
 export type Pending =
   | { op: 'add'; worktreeId: string; input: MemScreenAddInput }
-  | { op: 'update'; worktreeId: string; itemId: string; input: MemScreenUpdateInput }
-  | { op: 'close'; worktreeId: string; itemId: string; input: MemScreenCloseInput };
+  | { op: 'update'; worktreeId: string; itemId: string; input: MemScreenUpdateInput; draft: EditDraft }
+  | { op: 'close'; worktreeId: string; itemId: string; input: MemScreenCloseInput; closing: Closing };
+
+/**
+ * A unit holds everything its resend and its view need (rule (4)(d)): an edit's draft (the
+ * values read and shown) and a close's `Closing` (the item read, the reason), besides what is
+ * sent. Its view never reads the one-at-a-time screen state (`edit`, `closing`), so opening
+ * another item's edit or close does not hide it (Codex review-4227-pr1d P2).
+ */
+type PendingItemUnit = Exclude<Pending, { op: 'add' }>;
+
+/** A record without one key (the same record when it has none). */
+function without<T>(record: Readonly<Record<string, T>>, key: string): Readonly<Record<string, T>> {
+  if (!(key in record)) return record;
+  const next = { ...record };
+  delete next[key];
+  return next;
+}
 
 /** One unit per operation: the add, and each item's edit and close (rule (4)(b)). */
 export const pendingSlot = (op: Pending['op'], itemId?: string): string => (op === 'add' ? 'add' : `${op}:${itemId}`);
@@ -196,9 +216,10 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
   const [showSettings, setShowSettings] = useState(false);
   const [changed, setChanged] = useState<Set<string>>(new Set());
   const [edit, setEdit] = useState<EditDraft | null>(null);
-  const [conflict, setConflict] = useState<Conflict | null>(null);
   const [closing, setClosing] = useState<Closing | null>(null);
-  const [closeConflict, setCloseConflict] = useState<CloseConflict | null>(null);
+  // The comparisons, one per item (rule (4)(d)): another item's operation does not drop them.
+  const [conflicts, setConflicts] = useState<Readonly<Record<string, Conflict>>>({});
+  const [closeConflicts, setCloseConflicts] = useState<Readonly<Record<string, CloseConflict>>>({});
   const [pendings, setPendings] = useState<Readonly<Record<string, Pending>>>({});
   const [adding, setAdding] = useState({ kind: 'note' as Exclude<MemKind, 'now'>, text: '', closeWhen: '', evidence: '', promoteTo: '' });
   const [busy, setBusy] = useState(false);
@@ -280,13 +301,11 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
   const addPending = pendingAdd !== null;
   const sendable = (request: Pending | null) => request === null || pendingSendable(request, worktreeId, instanceId);
   const dropPending = useCallback((slot: string) => {
-    setPendings((current) => {
-      if (!(slot in current)) return current;
-      const next = { ...current };
-      delete next[slot];
-      return next;
-    });
+    setPendings((current) => without(current, slot));
   }, []);
+  /** Ends this item's open edit or close only; another item's is left as it is. */
+  const endEdit = useCallback((itemId: string) => setEdit((current) => (current?.itemId === itemId ? null : current)), []);
+  const endClosing = useCallback((itemId: string) => setClosing((current) => (current?.itemId === itemId ? null : current)), []);
   const closeWhenRequired = CLOSE_WHEN_REQUIRED_KINDS.has(adding.kind);
 
   const refusalText = useCallback(
@@ -374,30 +393,33 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
       if (again && !pendingSendable(again, worktree.id, instanceId)) return;
       const target = again?.worktreeId ?? worktree.id;
       const input: MemScreenUpdateInput = again?.input ?? { instanceId, ifVersion: draft.ifVersion, ...editChanges(draft) };
+      // The unit keeps the draft it was built from: its view does not read `edit` (rule (4)(d)).
+      const shown = again?.draft ?? draft;
       setBusy(true);
       setNotice(null);
       try {
         const result = await memItemsApi.update(target, draft.itemId, input);
-        if (settle(result, { op: 'update', worktreeId: target, itemId: draft.itemId, input })) return;
+        if (settle(result, { op: 'update', worktreeId: target, itemId: draft.itemId, input, draft: shown })) return;
         if (!result.ok && result.code === 'version_conflict' && result.item) {
           // A conflict, also to a resend whose first try may have landed (rule (4)(c)): an edit has
           // no key the store could answer for, so the screen does not guess from the fields.
           // Never laid on top by itself: the person chooses (design §2.4).
-          setConflict({ draft, current: result.item });
-          setEdit(null);
+          const current = result.item;
+          setConflicts((all) => ({ ...all, [draft.itemId]: { draft: shown, current } }));
+          endEdit(draft.itemId);
           setNotice({ tone: 'alert', text: t('mem.items.refusal.version_conflict') });
           await load();
           return;
         }
         if (await finish(result, t('mem.items.saved'))) {
-          setEdit(null);
-          setConflict(null);
+          endEdit(draft.itemId);
+          setConflicts((all) => without(all, draft.itemId));
         }
       } finally {
         setBusy(false);
       }
     },
-    [finish, instanceId, load, pendings, settle, t, worktree]
+    [endEdit, finish, instanceId, load, pendings, settle, t, worktree]
   );
 
   const close = useCallback(
@@ -407,6 +429,8 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
       const again = unit?.op === 'close' ? unit : null;
       if (again && !pendingSendable(again, worktree.id, instanceId)) return;
       const destination = again?.worktreeId ?? worktree.id;
+      // The unit keeps the item read and the reason: its view does not read `closing` (rule (4)(d)).
+      const shown = again?.closing ?? target;
       // The version read when "close" was opened (rule (3)), not the one of the last read.
       const input: MemScreenCloseInput = again?.input ?? {
         instanceId,
@@ -418,26 +442,27 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
       setNotice(null);
       try {
         const result = await memItemsApi.close(destination, target.itemId, input);
-        if (settle(result, { op: 'close', worktreeId: destination, itemId: target.itemId, input })) return;
+        if (settle(result, { op: 'close', worktreeId: destination, itemId: target.itemId, input, closing: shown })) return;
         if (!result.ok && result.code === 'version_conflict' && result.item) {
           // A conflict, also to a resend whose first try may have closed it (rule (4)(c)): a close
           // has no key the store could answer for. Back to the comparison and an explicit
           // confirmation of the current one (a closed one offers no "close again").
-          setCloseConflict({ read: target.read, current: result.item, reason: target.reason });
-          setClosing(null);
+          const current = result.item;
+          setCloseConflicts((all) => ({ ...all, [target.itemId]: { read: shown.read, current, reason: shown.reason } }));
+          endClosing(target.itemId);
           setNotice({ tone: 'alert', text: t('mem.items.refusal.version_conflict') });
           await load();
           return;
         }
         if (await finish(result, t('mem.items.closed'))) {
-          setClosing(null);
-          setCloseConflict(null);
+          endClosing(target.itemId);
+          setCloseConflicts((all) => without(all, target.itemId));
         }
       } finally {
         setBusy(false);
       }
     },
-    [finish, instanceId, load, pendings, settle, t, worktree]
+    [endClosing, finish, instanceId, load, pendings, settle, t, worktree]
   );
 
   const acknowledge = useCallback(
@@ -452,10 +477,12 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
     [finish, repositoryId, t]
   );
 
+  // Opening an edit or a close replaces the one open draft, and drops this item's comparisons only:
+  // another item's unit, its view and its comparison stay (rule (4)(d)).
   const startEdit = (item: MemItemView) => {
-    setConflict(null);
     setClosing(null);
-    setCloseConflict(null);
+    setConflicts((all) => without(all, item.id));
+    setCloseConflicts((all) => without(all, item.id));
     const read = readSnapshot(item);
     // Opening this item's edit again is the person dropping its unknown edit; nothing else is dropped.
     dropPending(pendingSlot('update', item.id));
@@ -464,8 +491,8 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
 
   const startClose = (item: MemItemView) => {
     setEdit(null);
-    setConflict(null);
-    setCloseConflict(null);
+    setConflicts((all) => without(all, item.id));
+    setCloseConflicts((all) => without(all, item.id));
     dropPending(pendingSlot('close', item.id));
     setClosing({ itemId: item.id, read: item, step: 1, reason: '' });
   };
@@ -479,57 +506,84 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
         : t('mem.items.source.fallback')
     : '';
 
-  /** The editor of one item (in its row, or on the units' side when its row is not listed). */
-  const renderEditor = (itemId: string, edit: EditDraft) => {
-    const pendingEdit = pendings[pendingSlot('update', itemId)] ?? null;
+  /**
+   * The discard of a unit: the person drops its unknown request (and the open edit or close of the
+   * same item), and the list is read again to see whether it was written.
+   */
+  const discardUnit = (unit: PendingItemUnit) => {
+    dropPending(slotOf(unit));
+    if (unit.op === 'update') endEdit(unit.itemId);
+    else endClosing(unit.itemId);
+    void load();
+  };
+
+  /**
+   * The editor of one item (in its row, or on the units' side when its row is not listed). With a
+   * unit it shows the unit's own draft and resends the unit; it never reads `edit` (rule (4)(d)).
+   */
+  const renderEditor = (itemId: string, draft: EditDraft, unit: Extract<Pending, { op: 'update' }> | null) => {
+    const shown = unit?.draft ?? draft;
+    const change = (next: Partial<EditDraft>) => {
+      if (!unit) setEdit({ ...shown, ...next });
+    };
     return (
       <div className="space-y-1" data-testid={`mem-item-editor-${itemId}`}>
         <textarea
           aria-label={t('mem.items.text')}
           className={`${INPUT_CLASS} w-full`}
           rows={3}
-          value={edit.text}
-          disabled={pendingEdit !== null}
+          value={shown.text}
+          disabled={unit !== null}
           data-testid={`mem-item-edit-text-${itemId}`}
-          onChange={(e) => setEdit({ ...edit, text: e.target.value })}
+          onChange={(e) => change({ text: e.target.value })}
         />
         <input
           type="text"
           aria-label={t('mem.items.closeWhenInput')}
-          placeholder={edit.read.closeWhenType ? t('mem.items.closeWhenKeep', { type: edit.read.closeWhenType }) : t('mem.items.closeWhenInput')}
+          placeholder={shown.read.closeWhenType ? t('mem.items.closeWhenKeep', { type: shown.read.closeWhenType }) : t('mem.items.closeWhenInput')}
           className={`${INPUT_CLASS} w-full`}
-          value={edit.closeWhen}
-          disabled={pendingEdit !== null}
+          value={shown.closeWhen}
+          disabled={unit !== null}
           data-testid={`mem-item-edit-close-when-${itemId}`}
-          onChange={(e) => setEdit({ ...edit, closeWhen: e.target.value })}
+          onChange={(e) => change({ closeWhen: e.target.value })}
         />
         <input
           type="text"
           aria-label={t('mem.items.evidence')}
           placeholder={t('mem.items.evidence')}
           className={`${INPUT_CLASS} w-full`}
-          value={edit.evidence}
-          disabled={pendingEdit !== null}
+          value={shown.evidence}
+          disabled={unit !== null}
           data-testid={`mem-item-edit-evidence-${itemId}`}
-          onChange={(e) => setEdit({ ...edit, evidence: e.target.value })}
+          onChange={(e) => change({ evidence: e.target.value })}
         />
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" data-testid={`mem-item-save-${itemId}`} disabled={busy || !sendable(pendingEdit)} onClick={() => void save(edit)}>
-            {pendingEdit ? t('mem.items.resend') : t('mem.items.save')}
+          <Button size="sm" data-testid={`mem-item-save-${itemId}`} disabled={busy || !sendable(unit)} onClick={() => void save(shown)}>
+            {unit ? t('mem.items.resend') : t('mem.items.save')}
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => setEdit(null)}>
-            {t('mem.items.cancel')}
-          </Button>
+          {unit ? (
+            <Button size="sm" variant="ghost" data-testid={`mem-item-unit-discard-${slotOf(unit)}`} disabled={busy} onClick={() => discardUnit(unit)}>
+              {t('mem.items.pendingDiscard')}
+            </Button>
+          ) : (
+            <Button size="sm" variant="ghost" onClick={() => setEdit(null)}>
+              {t('mem.items.cancel')}
+            </Button>
+          )}
         </div>
       </div>
     );
   };
 
-  /** The close steps of one item (in its row, or on the units' side when its row is not listed). */
-  const renderCloser = (itemId: string, closing: Closing) => {
-    const pendingClose = pendings[pendingSlot('close', itemId)] ?? null;
+  /**
+   * The close steps of one item (in its row, or on the units' side when its row is not listed).
+   * With a unit it shows the unit's own item read and reason and resends the unit; it never reads
+   * `closing` (rule (4)(d)). A unit was sent, so it is past the confirmation steps.
+   */
+  const renderCloser = (itemId: string, open: Closing, unit: Extract<Pending, { op: 'close' }> | null) => {
+    const shown = unit?.closing ?? open;
     // The steps follow the item as read when "close" was opened, not the last read.
-    const readActions = memScreenActions(closing.read.kind, closing.read.state);
+    const readActions = memScreenActions(shown.read.kind, shown.read.state);
     const twoStep = readActions.close?.transition === 'withdraw-recorded';
     const confirmLabel = twoStep
       ? t('mem.items.recordedClose.confirm')
@@ -538,11 +592,11 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
         : t('mem.items.close');
     return (
       <div className="space-y-1" data-testid={`mem-item-closer-${itemId}`}>
-        {twoStep && closing.step === 1 ? (
+        {!unit && twoStep && shown.step === 1 ? (
           <>
             <p className="text-xs text-warning-foreground">{t('mem.items.recordedClose.first')}</p>
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" data-testid={`mem-item-close-step1-${itemId}`} onClick={() => setClosing({ ...closing, step: 2 })}>
+              <Button size="sm" data-testid={`mem-item-close-step1-${itemId}`} onClick={() => setClosing({ ...shown, step: 2 })}>
                 {t('mem.items.recordedClose.next')}
               </Button>
               <Button size="sm" variant="ghost" onClick={() => setClosing(null)}>
@@ -558,23 +612,31 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
               aria-label={t('mem.items.reason')}
               placeholder={t('mem.items.reason')}
               className={`${INPUT_CLASS} w-full`}
-              value={closing.reason}
-              disabled={pendingClose !== null}
+              value={shown.reason}
+              disabled={unit !== null}
               data-testid={`mem-item-close-reason-${itemId}`}
-              onChange={(e) => setClosing({ ...closing, reason: e.target.value })}
+              onChange={(e) => {
+                if (!unit) setClosing({ ...shown, reason: e.target.value });
+              }}
             />
             <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
                 data-testid={`mem-item-close-confirm-${itemId}`}
-                disabled={busy || !sendable(pendingClose)}
-                onClick={() => void close(closing, twoStep)}
+                disabled={busy || !sendable(unit)}
+                onClick={() => void close(shown, unit ? unit.input.confirmUnreflected === true : twoStep)}
               >
-                {pendingClose ? t('mem.items.resend') : confirmLabel}
+                {unit ? t('mem.items.resend') : confirmLabel}
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => setClosing(null)}>
-                {t('mem.items.cancel')}
-              </Button>
+              {unit ? (
+                <Button size="sm" variant="ghost" data-testid={`mem-item-unit-discard-${slotOf(unit)}`} disabled={busy} onClick={() => discardUnit(unit)}>
+                  {t('mem.items.pendingDiscard')}
+                </Button>
+              ) : (
+                <Button size="sm" variant="ghost" onClick={() => setClosing(null)}>
+                  {t('mem.items.cancel')}
+                </Button>
+              )}
             </div>
           </>
         )}
@@ -634,7 +696,7 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
               {t('mem.items.conflict.rebase')}
             </Button>
           )}
-          <Button size="sm" variant="ghost" data-testid={`mem-item-discard-${itemId}`} onClick={() => setConflict(null)}>
+          <Button size="sm" variant="ghost" data-testid={`mem-item-discard-${itemId}`} onClick={() => setConflicts((all) => without(all, itemId))}>
             {t('mem.items.conflict.discard')}
           </Button>
         </div>
@@ -674,14 +736,15 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
               disabled={busy}
               onClick={() => {
                 // The person saw the current one: its version is the one read now, and the steps start again.
+                setEdit(null);
                 setClosing({ itemId, read: closeConflict.current, step: 1, reason: closeConflict.reason });
-                setCloseConflict(null);
+                setCloseConflicts((all) => without(all, itemId));
               }}
             >
               {t('mem.items.closeConflict.again')}
             </Button>
           )}
-          <Button size="sm" variant="ghost" data-testid={`mem-item-close-conflict-discard-${itemId}`} onClick={() => setCloseConflict(null)}>
+          <Button size="sm" variant="ghost" data-testid={`mem-item-close-conflict-discard-${itemId}`} onClick={() => setCloseConflicts((all) => without(all, itemId))}>
             {t('mem.items.cancel')}
           </Button>
         </div>
@@ -689,11 +752,19 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
     );
   };
 
-  // The rows listed now; an open edit or close with an unknown request whose row is not among
-  // them (it left the default list) is shown on the units' side instead, so its resend stays reachable.
+  // The rows listed now. Every unit of an edit or a close whose row is not among them (it left the
+  // default list) is shown on the units' side instead, so its resend stays reachable. Read off the
+  // units alone, never off the one open `edit` or `closing` (rule (4)(d), Codex review-4227-pr1d P2).
   const listedIds = new Set<string>(list ? [...list.items.map((entry) => entry.id), ...list.now.map((slot) => slot.item.id)] : []);
-  const unlistedEdit = edit !== null && !listedIds.has(edit.itemId) && pendingSlot('update', edit.itemId) in pendings;
-  const unlistedClosing = closing !== null && !listedIds.has(closing.itemId) && pendingSlot('close', closing.itemId) in pendings;
+  const itemUnit = <O extends PendingItemUnit['op']>(op: O, itemId: string) => {
+    const unit = pendings[pendingSlot(op, itemId)];
+    return unit?.op === op ? (unit as Extract<Pending, { op: O }>) : null;
+  };
+  const unlistedUnits = Object.values(pendings).filter(
+    (unit): unit is PendingItemUnit => unit.op !== 'add' && !listedIds.has(unit.itemId)
+  );
+  const conflictList = Object.values(conflicts);
+  const closeConflictList = Object.values(closeConflicts);
 
   const renderRow = (item: MemItemView, slotOf?: string) => {
     const condition = list?.conditions?.[item.id];
@@ -701,8 +772,10 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
     const actions = memScreenActions(item.kind, item.state);
     const writable = canWrite && actions.edit;
     const closable = canWrite && actions.close !== null;
-    const editingThis = edit?.itemId === item.id;
-    const closingThis = closing?.itemId === item.id;
+    const editUnit = itemUnit('update', item.id);
+    const closeUnit = itemUnit('close', item.id);
+    const editingThis = edit?.itemId === item.id || editUnit !== null;
+    const closingThis = closing?.itemId === item.id || closeUnit !== null;
     return (
       <li key={item.id} className="space-y-1 rounded border border-border p-2" data-testid={`mem-item-${item.id}`}>
         <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -766,8 +839,8 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
             </Button>
           )}
         </div>
-        {editingThis && edit && renderEditor(item.id, edit)}
-        {closingThis && closing && renderCloser(item.id, closing)}
+        {editUnit ? renderEditor(item.id, editUnit.draft, editUnit) : edit?.itemId === item.id && renderEditor(item.id, edit, null)}
+        {closeUnit ? renderCloser(item.id, closeUnit.closing, closeUnit) : closing?.itemId === item.id && renderCloser(item.id, closing, null)}
       </li>
     );
   };
@@ -887,15 +960,22 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
         </p>
       )}
 
-      {(conflict || closeConflict || unlistedEdit || unlistedClosing) && (
+      {(conflictList.length > 0 || closeConflictList.length > 0 || unlistedUnits.length > 0) && (
         // The units' side (Codex review-4227-pr1c P2): a comparison, and an unknown request whose
         // row is not listed (closed meanwhile; closed ones are hidden by default), stay here,
         // apart from the list, so they can be read and confirmed without "show closed".
         <section className="space-y-2" data-testid="mem-items-units">
-          {conflict && renderConflict(conflict)}
-          {closeConflict && renderCloseConflict(closeConflict)}
-          {unlistedEdit && edit && renderEditor(edit.itemId, edit)}
-          {unlistedClosing && closing && renderCloser(closing.itemId, closing)}
+          {conflictList.map((entry) => (
+            <React.Fragment key={`conflict:${entry.current.id}`}>{renderConflict(entry)}</React.Fragment>
+          ))}
+          {closeConflictList.map((entry) => (
+            <React.Fragment key={`close-conflict:${entry.current.id}`}>{renderCloseConflict(entry)}</React.Fragment>
+          ))}
+          {unlistedUnits.map((unit) => (
+            <React.Fragment key={slotOf(unit)}>
+              {unit.op === 'update' ? renderEditor(unit.itemId, unit.draft, unit) : renderCloser(unit.itemId, unit.closing, unit)}
+            </React.Fragment>
+          ))}
         </section>
       )}
 
