@@ -288,19 +288,47 @@ function analyze(overrides: Record<string, string> = {}): TableFindings {
     for (let current: ts.Node | undefined = node; current; current = current.parent) if (reachable.has(current)) return true;
     return false;
   };
+  /**
+   * The name a call's callee was declared with (Codex 5-2c P2-2): an import alias
+   * (`settleShown as settleLate`) and a local binding (`const settleLate = settleShown`)
+   * are followed to the declaration, so the restricted calls are classified by symbol,
+   * as the helpers are, and not by the spelling at the call.
+   */
+  const declaredCalleeName = (call: ts.CallExpression): string | null => {
+    const at = ts.isIdentifier(call.expression) ? call.expression : ts.isPropertyAccessExpression(call.expression) ? call.expression.name : null;
+    let symbol = at ? checker.getSymbolAtLocation(at) : undefined;
+    for (let hops = 0; symbol && hops < 8; hops++) {
+      if (symbol.flags & ts.SymbolFlags.Alias) {
+        symbol = checker.getAliasedSymbol(symbol);
+        continue;
+      }
+      const declaration = symbol.valueDeclaration;
+      if (declaration && ts.isVariableDeclaration(declaration) && declaration.initializer && (ts.isIdentifier(declaration.initializer) || ts.isPropertyAccessExpression(declaration.initializer))) {
+        const next = checker.getSymbolAtLocation(ts.isIdentifier(declaration.initializer) ? declaration.initializer : declaration.initializer.name);
+        if (next && next !== symbol) {
+          symbol = next;
+          continue;
+        }
+      }
+      break;
+    }
+    return symbol?.getName() ?? calleeName(call);
+  };
   for (const file of LIB_FILES) {
     const source = program.getSourceFile(file) as ts.SourceFile;
     walk(source, (node) => {
-      if (!ts.isCallExpression(node) || !RESTRICTED.has(calleeName(node) ?? '')) return;
-      if (!insideReachable(node)) violations.push(`${calleeName(node)} outside the W5 build at ${where(node)}`);
-      // A helper the build reaches may not be called from outside it as well.
+      if (!ts.isCallExpression(node)) return;
+      const restricted = declaredCalleeName(node);
+      if (restricted === null || !RESTRICTED.has(restricted)) return;
+      if (!insideReachable(node)) violations.push(`${restricted} outside the W5 build at ${where(node)}`);
+      // A helper the build reaches may not be called from outside it as well (by any name).
       const owner = enclosingFunction(node);
       const ownerName = owner ? nameOf(owner) : null;
       if (ownerName === null || !owner) return;
       for (const other of libSources) {
         walk(other, (ref) => {
-          if (ts.isCallExpression(ref) && ts.isIdentifier(ref.expression) && ref.expression.text === ownerName && !insideReachable(ref)) {
-            violations.push(`${ownerName} (calls ${calleeName(node)}) is called outside the W5 build at ${where(ref)}`);
+          if (ts.isCallExpression(ref) && ts.isIdentifier(ref.expression) && declarationOf(ref.expression) === owner && !insideReachable(ref)) {
+            violations.push(`${ownerName} (calls ${restricted}) is called outside the W5 build at ${where(ref)}`);
           }
         });
       }
@@ -699,6 +727,66 @@ describe('(self-test, Codex P2-2 / PM P3-1) the order, the count, floating promi
         .replace('    const branches = branchesOf(listing);', '    peek(db);\n    const branches = branchesOf(listing);'),
     });
     expect(findings.violations.some((v) => v.startsWith('readShown outside the W5 build at src/lib/mem-suggest/extra-4226-control.ts'))).toBe(true);
+  }, 60_000);
+
+  it('(Codex 5-2c P2-2) settleShown imported under another name and called after W5 (the name is resolved, not read)', () => {
+    const findings = analyze({
+      [SERVICE]: readFileSync(SERVICE, 'utf8')
+        .replace(`${IMPORTS_END}\n`, `${IMPORTS_END}\nimport { settleShown as settleLate } from '@/lib/db/suggestion-shown-db';\n`)
+        .replace(
+          QUIET_W5,
+          "closeRequest({ db, fixed, branches }, outcome)));\n    settleLate(db, { worktreeId, instanceId: '', scopeHash: '', write: [], clear: [], rosterInstanceIds: [], knownCodes: [], liveScopeHashes: new Set() });\n    return answer;"
+        ),
+    });
+    expect(findings.violations.some((v) => v.startsWith('settleShown outside the W5 build'))).toBe(true);
+  }, 60_000);
+
+  it('(Codex 5-2c P2-2) settleShown bound to a local name and called after W5', () => {
+    const findings = analyze(
+      changed(
+        SERVICE,
+        QUIET_W5,
+        "closeRequest({ db, fixed, branches }, outcome)));\n    const settleLate = settleShown;\n    settleLate(db, { worktreeId, instanceId: '', scopeHash: '', write: [], clear: [], rosterInstanceIds: [], knownCodes: [], liveScopeHashes: new Set() });\n    return answer;"
+      )
+    );
+    expect(findings.violations.some((v) => v.startsWith('settleShown outside the W5 build'))).toBe(true);
+  }, 60_000);
+
+  it('(Codex 5-2c P2-2) readShown imported under another name in another file, called outside the W5 build', () => {
+    const findings = analyze({
+      ...added(
+        EXTRA,
+        "import type Database from 'better-sqlite3';\nimport { readShown as peekRecord } from '@/lib/db/suggestion-shown-db';\n\nexport function peek(db: Database.Database): number {\n  return peekRecord(db, 'w', 'claude', '').size;\n}\n"
+      ),
+      [SERVICE]: readFileSync(SERVICE, 'utf8')
+        .replace(`${IMPORTS_END}\n`, `${IMPORTS_END}\nimport { peek } from './extra-4226-control';\n`)
+        .replace('    const branches = branchesOf(listing);', '    peek(db);\n    const branches = branchesOf(listing);'),
+    });
+    expect(findings.violations.some((v) => v.startsWith('readShown outside the W5 build at src/lib/mem-suggest/extra-4226-control.ts'))).toBe(true);
+  }, 60_000);
+
+  it('(Codex 5-2c P2-2) a helper the build reaches, called outside it as well under an import alias', () => {
+    const findings = analyze({
+      ...added(
+        EXTRA,
+        "import type Database from 'better-sqlite3';\nimport { readShown } from '@/lib/db/suggestion-shown-db';\n\nexport function peek(db: Database.Database): number {\n  return readShown(db, 'w', 'claude', '').size;\n}\n"
+      ),
+      [SERVICE]: readFileSync(SERVICE, 'utf8')
+        .replace(`${IMPORTS_END}\n`, `${IMPORTS_END}\nimport { peek, peek as look } from './extra-4226-control';\n`)
+        .replace('  // The materials, read now (the copy after, §3.2).', '  peek(db);\n  // The materials, read now (the copy after, §3.2).')
+        .replace('    const branches = branchesOf(listing);', '    look(db);\n    const branches = branchesOf(listing);'),
+    });
+    expect(findings.violations.some((v) => v.startsWith('peek (calls readShown) is called outside the W5 build'))).toBe(true);
+  }, 60_000);
+
+  it('(negative control, Codex 5-2c P2-2) settleShown under another name inside the W5 build is no violation', () => {
+    const findings = analyze({
+      [SERVICE]: readFileSync(SERVICE, 'utf8').replace(
+        "import { readShown, settleShown, type ShownRow } from '@/lib/db/suggestion-shown-db';",
+        "import { readShown, settleShown as settleRecord, type ShownRow } from '@/lib/db/suggestion-shown-db';"
+      ).replace('  settleShown(db, {', '  settleRecord(db, {'),
+    });
+    expect(findings.violations).toEqual([]);
   }, 60_000);
 
   it('(negative control) a synchronous helper of another file called from the build is no violation', () => {

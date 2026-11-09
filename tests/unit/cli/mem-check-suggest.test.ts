@@ -10,6 +10,8 @@ import os from 'os';
 import path from 'path';
 import { mockFetchResponse, mockFetchUnreachable, restoreFetch } from '../../helpers/mock-api';
 import { createMemCommand } from '../../../src/cli/commands/mem';
+import { resolveSessionIdentity } from '../../../src/cli/commands/whoami';
+import { ApiClient } from '../../../src/cli/utils/api-client';
 import { MemExitCode } from '../../../src/cli/types';
 import type { MemSuggestResponse } from '../../../src/types/mem-suggest';
 
@@ -240,6 +242,77 @@ describe('mem check --suggest --quiet: the deadline covers the identity (Codex P
     expect(await run('check', '--suggest', '--quiet')).toBe(0);
     expect(stdout).toEqual(['[CommandMate mem] line']);
     expect(String(fetchCalls().at(-1)?.[0])).toContain('/api/worktrees/w/mem/suggest');
+  }, 20_000);
+
+  /** A tmux that prints `name` the first time it is asked, and hangs every time after. */
+  const tmuxAnswersOnceThenHangs = (name: string) =>
+    fakeTmux(`if [ -f '${path.join(shimDir, 'asked')}' ]; then exec sleep 12; fi\ntouch '${path.join(shimDir, 'asked')}'\necho '${name}'`);
+
+  /** A server that lists `worktreeIds` and answers the suggest call. */
+  const serverListing = (worktreeIds: string[]) => {
+    global.fetch = vi.fn((input: unknown) => {
+      const url = String(input);
+      const body = /\/api\/worktrees$/.test(url)
+        ? { worktrees: worktreeIds.map((id) => ({ id })) }
+        : url.includes('/api/capabilities')
+          ? { serverVersion: '0.0.0-test', capabilities: ['resolve-session-target'] }
+          : answer({ full: false, quietLine: '[CommandMate mem] line' });
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        redirected: false,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve(body),
+        text: () => Promise.resolve(JSON.stringify(body)),
+      } as unknown as Response);
+    }) as unknown as typeof fetch;
+  };
+
+  /** The body of the suggest call (the list of worktrees is read first on the tmux path). */
+  const suggestBody = () => JSON.parse(String(fetchCalls().filter(([url]) => String(url).includes('/mem/suggest')).at(-1)?.[1].body));
+
+  it('tmux answers once, then hangs: the name it gave is used and tmux is not asked again (Codex 5-2c P2-1)', async () => {
+    // Positive control: before the fix the answer was kept only as true/false and the
+    // identity was read again with a synchronous spawn, which waited the 12 seconds out.
+    tmuxAnswersOnceThenHangs('mcbd-claude-w');
+    serverListing(['w']);
+    const started = Date.now();
+    expect(await run('check', '--suggest', '--quiet')).toBe(0);
+    expect(Date.now() - started).toBeLessThan(7000);
+    expect(stdout).toEqual(['[CommandMate mem] line']);
+    expect(String(fetchCalls().at(-1)?.[0])).toContain('/api/worktrees/w/mem/suggest');
+    expect(suggestBody()).toEqual({ instanceId: 'claude', full: false });
+  }, 20_000);
+
+  it('(negative control) the name is split the way whoami splits it: the server list breaks the -<n> ambiguity', async () => {
+    const cases: Array<{ name: string; listed: string[]; worktreeId: string; instanceId: string }> = [
+      { name: 'mcbd-claude-w-2', listed: ['w'], worktreeId: 'w', instanceId: 'claude-2' },
+      { name: 'mcbd-claude-w-2', listed: ['w-2'], worktreeId: 'w-2', instanceId: 'claude' },
+      { name: 'mcbd-claude-w-2', listed: ['w', 'w-2'], worktreeId: 'w-2', instanceId: 'claude' },
+      { name: 'mcbd-codex-w-3', listed: [], worktreeId: 'w-3', instanceId: 'codex' },
+      { name: 'mcbd-0123abcd-claude-w-2', listed: ['w'], worktreeId: 'w', instanceId: 'claude-2' },
+    ];
+    for (const c of cases) {
+      rmSync(path.join(shimDir, 'asked'), { force: true });
+      stdout.length = 0;
+      tmuxAnswersOnceThenHangs(c.name);
+      serverListing(c.listed);
+      expect(await run('check', '--suggest', '--quiet')).toBe(0);
+      expect(String(fetchCalls().at(-1)?.[0])).toContain(`/api/worktrees/${c.worktreeId}/mem/suggest`);
+      expect(suggestBody()).toEqual({ instanceId: c.instanceId, full: false });
+      // The same name read by whoami's own resolver gives the same identity (no drift).
+      fakeTmux(`echo '${c.name}'`);
+      const whoami = await resolveSessionIdentity(new ApiClient({}));
+      expect({ worktreeId: whoami?.worktreeId, instanceId: whoami?.instanceId }).toEqual({ worktreeId: c.worktreeId, instanceId: c.instanceId });
+    }
+  }, 30_000);
+
+  it('(negative control) a session name CommandMate did not give: no identity, nothing sent', async () => {
+    tmuxAnswersOnceThenHangs('my-own-session');
+    serverListing(['w']);
+    expect(await run('check', '--suggest', '--quiet')).toBe(0);
+    expect(stdout).toEqual([]);
+    expect(fetchCalls().filter(([url]) => String(url).includes('/mem/'))).toEqual([]);
   }, 20_000);
 });
 

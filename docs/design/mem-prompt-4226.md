@@ -708,7 +708,7 @@ F が他の module と共有する規則と、その規則を読む全部の場�
 | 作成者の判定（instance と世代。`owner.worktreeId` を見ない） | `src/lib/db/mem-db.ts` の private `ownedBy` | A の更新・閉じる経路、F の `rules.ts` の `ownsOrPerson`（同じ 2 つの欄の写し。人が書いた項目も対象） |
 | 促しの規則の表（`MEM_SUGGEST_CODES`・`MEM_SUGGEST_MESSAGES`・`MEM_SUGGEST_QUIET_CODES`） | `src/types/mem-suggest.ts`・`src/lib/mem-suggest/rules.ts` | F の `service.ts`（判定・記録の `knownCodes`）、`src/cli/commands/mem.ts`（テキスト・quiet）、route、試験。G（#4227）が読むかは G の判断 |
 | await の表（`MEM_SUGGEST_AWAITS`） | `src/lib/mem-suggest/service.ts` | `service.ts` の `step`、route（W1）、`tests/unit/guards/mem-suggest-await-table-4226.test.ts`（`paths`・`position` も読み、経路ごとの step の順・回数と照合する。§12.5）、`tests/unit/lib/mem-suggest/suggest-invariants.test.ts`（I-F11 の表） |
-| セッションの身元（`resolveSessionIdentity`） | `src/cli/commands/whoami.ts` | `mem.ts` の `identityOf`（書き込み・読みの対象）と、quiet の `quietIdentity`（環境変数を先に読み、tmux は期限つきで聞いてから同じ関数を呼ぶ。Codex P2-1）、`send.ts` の `--note` の作成者 |
+| セッションの身元（`resolveSessionIdentity`） | `src/cli/commands/whoami.ts` | `mem.ts` の `identityOf`（書き込み・読みの対象）と、quiet の `quietIdentity`（環境変数を先に読み、tmux は期限つきで 1 回だけ聞き、その名前を `identityFromSessionName` で whoami の `splitRemainder` と同じ規則で解く。Codex P2-1・5-2c P2-1。規則の写しは `mem-check-suggest.test.ts` で `resolveSessionIdentity` と並べて固定）、`send.ts` の `--note` の作成者 |
 | 記録の表（`readShown`・`settleShown`） | `src/lib/db/suggestion-shown-db.ts` | F の `service.ts` の W5 の build だけ（I-F13 の (3) で固定）。改名・削除の追従は `getWorktreeChildTables` が動的に拾う |
 
 ### 12.5 5-2b（Codex）と PM の再レビューの処置
@@ -724,4 +724,13 @@ F が他の module と共有する規則と、その規則を読む全部の場�
 | PM P3-4 | quiet の W5 の `gateOf` を外しても落ちない | 記録だけ（処分どおり）。`settingsMoved` が同じ結果に倒すので害は無い | — |
 | PM P3-5 | マージの手順 | 手順（PM が行う）。この契約では develop を取り込んだ木で検証をやり直す | — |
 
-残り：quiet で tmux に答えが来た後の `resolveSessionIdentity` は、もう一度同期の `tmux display-message` を呼ぶ（`whoami.ts` の `readTmuxSessionName` に期限が無い。scope 外なので直さない）。答えた直後の 2 回目なので、止まるのは tmux がその間に止まったときだけ。
+残り：quiet で tmux に答えが来た後の `resolveSessionIdentity` は、もう一度同期の `tmux display-message` を呼ぶ（`whoami.ts` の `readTmuxSessionName` に期限が無い。scope 外なので直さない）。答えた直後の 2 回目なので、止まるのは tmux がその間に止まったときだけ。（→ §12.6 の 5-2c P2-1 で解消。2 回目の読み取りをなくした）
+
+### 12.6 5-2c（Codex の再レビュー `review-4226b.md`）の処置
+
+| # | 指摘 | 処置（実装） | 直しを外すと落ちる対照 |
+|---|---|---|---|
+| Codex P2-1 | quiet で tmux が 1 回答えた後、`resolveSessionIdentity` が期限の無い同期の `tmux display-message` で読み直す（1 回答えたことは 2 回目が間に合う証拠にならない） | `mem.ts`：`tmuxAnswersBy`（真偽）を `tmuxSessionNameBy`（期限内に得た名前）に替え、その名前から `identityFromSessionName` で身元を作る（`parseSessionName` で割り、末尾の `-<n>` は quiet の期限つき client で読んだ worktree の一覧で whoami の `splitRemainder` と同じ規則で決める。一覧の期限切れは投げ直す）。tmux は 1 回しか呼ばない。`whoami.ts` は変えない（scope 外） | `tests/unit/cli/mem-check-suggest.test.ts`：1 回目は `mcbd-claude-w` を即答し 2 回目からは 12 秒止まる偽の `tmux` で、quiet が 7 秒以内に `w`・`claude` で送る。直しを外すと 12 秒待って落ちる。陰性：`-<n>` の曖昧さ 5 例（一覧に `w` だけ／`w-2` だけ／両方／一覧なし／名前空間つき）で quiet の送り先と `resolveSessionIdentity` の答えが一致する。CommandMate の名前でない session は何も送らない |
+| Codex P2-2 | 記録の関数（`RESTRICTED`）の分類が呼び出しの綴り（`calleeName`）で、`settleShown as settleLate` の別名を見逃す | guard の `declaredCalleeName`：呼び出し先の symbol を import の別名（`getAliasedSymbol`）と、識別子・プロパティを初期値にする変数の束縛まで辿り、宣言の名前で分類する。build が辿る helper を build の外から呼ぶ検査も、名前の文字列でなく宣言の一致（`declarationOf`）で見る | guard の self-test 4 件（`settleShown as settleLate` を W5 の後に同期で呼ぶ、`const settleLate = settleShown` を W5 の後に呼ぶ、別ファイルで `readShown as peekRecord` を build の外から呼ぶ、build が辿る helper を `peek as look` で build の外からも呼ぶ）。前の guard では 4 件とも違反が出ない（self-test が落ちることを実行で確かめた）。陰性：W5 の build の中の `settleShown as settleRecord` は違反なし |
+| Codex P3 | develop の取り込みで、E の旧い「決定を正本へ記録する」の節が最新の節の前に二重に残った（ja・en） | 旧い方の節を両言語から取り除いた。`git diff origin/develop` で F の追記だけが残ることを確かめた | 文書だけ |
+

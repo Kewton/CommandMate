@@ -22,7 +22,9 @@ import { execFile } from 'child_process';
 import { Command } from 'commander';
 import { readFileSync } from 'fs';
 import { ExitCode, MemExitCode, type MemCommonOptions } from '../types';
-import { ApiClient, ApiError } from '../utils/api-client';
+import { ApiClient, ApiError, rethrowIfDeadlineExceeded } from '../utils/api-client';
+import type { WorktreeListResponse } from '../types/api-responses';
+import { parseSessionName } from '../../lib/cli-tools/session-name';
 import { TOKEN_WARNING } from '../utils/command-helpers';
 import { resolveSessionIdentity, type SessionIdentity } from './whoami';
 import {
@@ -261,32 +263,61 @@ function suggestFlagError(options: MemCommonOptions & MemCheckSuggestOptions): M
 }
 
 /**
- * Whether tmux answers `display-message` before `deadlineAt` (Codex P2-1). Run as a
+ * The tmux session name, if tmux gives it before `deadlineAt` (Codex P2-1). Run as a
  * child process the event loop does not wait on, killed at the deadline, so a tmux
- * that hangs costs quiet its bound and no more.
+ * that hangs costs quiet its bound and no more. null: no answer in time, or an empty one.
  */
-function tmuxAnswersBy(deadlineAt: number): Promise<boolean> {
+function tmuxSessionNameBy(deadlineAt: number): Promise<string | null> {
   const remaining = deadlineAt - Date.now();
-  if (remaining <= 0) return Promise.resolve(false);
+  if (remaining <= 0) return Promise.resolve(null);
   return new Promise((resolve) => {
-    execFile('tmux', ['display-message', '-p', '#{session_name}'], { timeout: remaining, killSignal: 'SIGKILL' }, (error, stdout) =>
-      resolve(!error && String(stdout).trim() !== '')
-    );
+    execFile('tmux', ['display-message', '-p', '#{session_name}'], { timeout: remaining, killSignal: 'SIGKILL' }, (error, stdout) => {
+      const name = String(stdout ?? '').trim();
+      resolve(!error && name !== '' ? name : null);
+    });
   });
+}
+
+/**
+ * The identity a CommandMate session name gives, read the way `resolveSessionIdentity`
+ * reads it (whoami.ts `splitRemainder`): `mcbd-[<ns>-]<tool>-<rest>`, and a `-<n>` at the
+ * end of `rest` is an instance suffix only when the server lists the worktree without it
+ * and not with it. The name is the one {@link tmuxSessionNameBy} got under the deadline,
+ * so tmux is never asked a second time (Codex 5-2c P2-1: an answer once is no proof the
+ * next one comes in time). The list is read with the quiet client, under the same deadline.
+ */
+async function identityFromSessionName(client: ApiClient, sessionName: string): Promise<SessionIdentity | null> {
+  const parsed = parseSessionName(sessionName);
+  if (!parsed) return null;
+  let known: Set<string> | null;
+  try {
+    const response = await client.get<WorktreeListResponse>('/api/worktrees');
+    known = new Set((response.worktrees ?? []).map((item) => item.id));
+  } catch (error) {
+    rethrowIfDeadlineExceeded(error);
+    known = null;
+  }
+  const { cliToolId, rest } = parsed;
+  const suffix = /^(.*)-(\d+)$/.exec(rest);
+  const split =
+    suffix && known && !known.has(rest) && suffix[1] !== '' && known.has(suffix[1])
+      ? { worktreeId: suffix[1], instanceId: `${cliToolId}-${suffix[2]}` }
+      : { worktreeId: rest, instanceId: cliToolId };
+  return { ...split, cliToolId, source: 'tmux-session', sessionName, knownWorktreeIds: known };
 }
 
 /**
  * The identity of a quiet call, under its deadline (Codex P2-1). `resolveSessionIdentity`
  * asks tmux first with a synchronous spawn that has no bound, before it reads even the
  * environment. So the environment is read first with no tmux to ask; only when it
- * names nobody is tmux asked, bounded by {@link tmuxAnswersBy}, and the full reading
- * is made once tmux has answered (its own spawn is then the one right after an answer).
+ * names nobody is tmux asked, once, bounded by {@link tmuxSessionNameBy}, and the name
+ * it answered with is what the identity is made from ({@link identityFromSessionName}).
  */
 async function quietIdentity(client: ApiClient, deadlineAt: number): Promise<SessionIdentity | null> {
   const fromEnv = await identityOf(client, { ...process.env, TMUX: undefined });
   if (fromEnv || !process.env.TMUX) return fromEnv;
-  if (!(await tmuxAnswersBy(deadlineAt))) return null;
-  return identityOf(client);
+  const sessionName = await tmuxSessionNameBy(deadlineAt);
+  return sessionName ? identityFromSessionName(client, sessionName) : null;
 }
 
 /** `--suggest --quiet`: never stops the caller. Everything after the parser ends in exit 0. */
