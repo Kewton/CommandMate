@@ -161,6 +161,47 @@ describe('the observation-point table (§2.8)', () => {
       const bash = read(SOURCES.bash).replace('lock_obs_list list-queue "$la_queue"', 'lock_obs_list list-queue-x "$la_queue"');
       expect(scanObservationPoints('bash', bash).has('list-queue-x')).toBe(true);
     });
+
+    // Codex 2nd re-review P2: the errno-keeping rmdir (TS / sync JS `obs.rmdir`, bash
+    // `lock_rmdir_errno`) decides whether a poll may take the lock (a failure keeps the moved-aside
+    // record and the poll does not mkdir), so its points are collected and compared with the table too.
+    // The patterns before this (no rmdir) collected none of them: a new rmdir point went unseen.
+    const BEFORE_RMDIR: Record<Impl, RegExp> = {
+      bash: /\block_obs_(?:kill0|list|lstat|owner|mkdir|mv|pgid) ([a-z][a-z0-9-]*)\b/g,
+      ts: /\bobs\.(?:pid|group|list|lstat|owner|mkdir|rename)\('([a-z][a-z0-9-]*)'/g,
+      sync: /\bobs\.(?:pid|group|list|lstat|owner|mkdir|rename)\('([a-z][a-z0-9-]*)'/g,
+    };
+    const RMDIR_SEEDS: Record<Impl, { rename: [string, string]; fn: string }> = {
+      bash: {
+        rename: ['$(lock_rmdir_errno reclaim-rmdir "$1")', '$(lock_rmdir_errno reclaim-rmdir-x "$1")'],
+        fn: 'lock_new_rmdir() {\n  lnr_err=$(lock_rmdir_errno new-rmdir "$1")\n  [ -z "$lnr_err" ]\n}',
+      },
+      ts: {
+        rename: ["ctx.obs.rmdir('reclaim-rmdir', ctx.lockPath)", "ctx.obs.rmdir('reclaim-rmdir-x', ctx.lockPath)"],
+        fn: "function newRmdir(ctx) {\n  return ctx.obs.rmdir('new-rmdir', ctx.lockPath);\n}",
+      },
+      sync: {
+        rename: ["ctx.obs.rmdir('reclaim-rmdir', ctx.lockPath)", "ctx.obs.rmdir('reclaim-rmdir-x', ctx.lockPath)"],
+        fn: "function newRmdir(ctx) {\n  return ctx.obs.rmdir('new-rmdir', ctx.lockPath);\n}",
+      },
+    };
+    const tablePoints = (impl: Impl) => OBSERVATION_POINTS.filter((p) => p.impls.includes(impl)).map((p) => p.point).sort();
+
+    it.each(IMPLS)('%s: the rmdir point is collected, and an rmdir point the table lacks fails the comparison', (impl) => {
+      const source = read(SOURCES[impl]);
+      expect(scanObservationPoints(impl, source).has('reclaim-rmdir')).toBe(true);
+      const [from, to] = RMDIR_SEEDS[impl].rename;
+      const renamed = source.replace(from, to);
+      expect(renamed, 'the seed applies to today\'s source').not.toBe(source);
+      const named = scanObservationPoints(impl, renamed);
+      expect(named.has('reclaim-rmdir-x')).toBe(true);
+      expect([...named].sort()).not.toEqual(tablePoints(impl));
+      const added = scanObservationPoints(impl, `${source}\n${RMDIR_SEEDS[impl].fn}\n`);
+      expect(added.has('new-rmdir')).toBe(true);
+      expect([...added].sort()).not.toEqual(tablePoints(impl));
+      // Positive control: the collection before this change did not see the rmdir points at all.
+      expect([...`${renamed}\n${RMDIR_SEEDS[impl].fn}`.matchAll(BEFORE_RMDIR[impl])].map((m) => m[1]).filter((p) => /rmdir/.test(p))).toEqual([]);
+    });
   });
 });
 
@@ -358,6 +399,24 @@ const SCENARIOS: Record<string, Scenario> = {
     injected: (r, name) => {
       expect(r.acquired).toBe(true);
       expect(goneEntries(root, name)).toHaveLength(1);
+    },
+    control: (r, name) => {
+      expect(r.acquired).toBe(true);
+      expect(goneEntries(root, name)).toEqual([]);
+    },
+  },
+  // Codex 2nd re-review P2: the errno-keeping rmdir of a put-back's empty <lock> (§2.7 A) is a row too.
+  'reclaim-rmdir': {
+    code: 'EIO',
+    reported: true,
+    setup: (name) => {
+      fs.mkdirSync(lockOf(root, name));
+      writeGone(name, '111-1', deadOwner('dead-gone'));
+    },
+    injected: (r, name, impl) => {
+      notTaken(r, impl);
+      expect(fs.existsSync(lockOf(root, name))).toBe(true);
+      expect(goneEntries(root, name)).toEqual([`${name}.lock.gone-111-1`]);
     },
     control: (r, name) => {
       expect(r.acquired).toBe(true);

@@ -274,7 +274,7 @@ drain_group G:
 
 5 回の事前レビューの P1 は、毎回「足した観測（`kill -0`・owner の読み・`mkdir`・一覧）の失敗を、生きている／いないの 2 値のどちらかに読み替えた」所から出た（EPERM を死、EACCES を残骸、一覧の失敗を対象なし）。手当てを足す代わりに規則で塞ぐ。
 
-- **不変条件**: ロックの取得・回収・解放（と bash の書き手の受け渡し）の判断に使う**全ての観測**は、3 値を返す関数を通す。bash は `lock_obs_kill0`・`lock_obs_list`・`lock_obs_lstat`・`lock_obs_owner`・`lock_obs_mkdir`・`lock_obs_mv`・`lock_obs_pgid`（`verify-run.sh`）、TS・同期 JS は `makeObserver` の `pid`・`group`・`list`・`lstat`・`owner`・`mkdir`・`rename`。どれも第 1 引数に観測点の名前を取る。
+- **不変条件**: ロックの取得・回収・解放（と bash の書き手の受け渡し）の判断に使う**全ての観測**は、3 値を返す関数を通す。bash は `lock_obs_kill0`・`lock_obs_list`・`lock_obs_lstat`・`lock_obs_owner`・`lock_obs_mkdir`・`lock_obs_mv`・`lock_obs_pgid`・`lock_rmdir_errno`（`verify-run.sh`）、TS・同期 JS は `makeObserver` の `pid`・`group`・`list`・`lstat`・`owner`・`mkdir`・`rename`・`rmdir`。どれも第 1 引数に観測点の名前を取る。
 - **「いない」の条件**: 観測が成功して否定の証拠を返したときだけ。`kill -0` の ESRCH、`mkdir` の EEXIST（在る）、一覧・読み・`rename` の ENOENT、一覧が成功して 0 件。EPERM・EACCES・EIO・EISDIR・ELOOP・一覧の失敗・その他は**不明**。
 - **不明のとき**: 取らない・消さない・解放しない・（書き手は）ゲートを始めない。保有者の判定（`holderState`／`lock_holder_state`）は pid と pgid の両方が ESRCH のときだけ「いない」、どちらかが不明なら不明（回収しない）。
 - **止まったままにしない**: 不明で待つのは既存の待ちの予算（`timeoutSec`／`timeoutMs`）の内だけ。予算が尽きたら取得は「取れない」で終わり、何が不明だったかを出す: bash は stderr に `verify-run: machine-lock-unknown point=<点> path=<パス> errno=<errno>`、TS・同期 JS は戻り値の `unknown: { point, path, code }`（と警告 `machine-lock-unknown`）。TS・同期 JS の `mkdir <lock>` の不明（EEXIST 以外）は今のまま errno 付きで投げる（取らない）。
@@ -299,6 +299,7 @@ drain_group G:
 | `restore-rename` | bash・TS・同期 JS | `rename 退避/owner → <lock>/owner`（戻し） | 空の `<lock>` を rmdir で戻し、退避を残す |
 | `reclaim-rename` | bash・TS・同期 JS | `rename 死んだ退避 → 自分の退避名` | 何もしない（消さない） |
 | `reclaim-owner` | bash・TS・同期 JS | 移した退避の owner の読み | 判定した記録と読まない: 消さない |
+| `reclaim-rmdir` | bash・TS・同期 JS | 途中で止まった戻しの空の `<lock>` の `rmdir`（回収の前。bash `lock_rmdir_errno`、TS・同期 JS `obs.rmdir`） | 退避を残し、その周回は `mkdir` しない（取らない）。点・パス・errno を出す |
 | `release-owner` | bash・TS・同期 JS | 解放の前の `<lock>/owner` の読み | 解放しない |
 | `release-list` | bash・TS・同期 JS | 解放のときの lock root の一覧（自分の退避の片付け） | 片付けない（消さない） |
 | `handoff-group` | bash | `ps -o pgid=`（ゲートのグループ G の確かめ） | ゲートを始めない（stage=group） |
@@ -311,8 +312,8 @@ drain_group G:
 | `handoff-ack` | bash | 子の `mkdir ack`（受け取りの印） | exec しない（stage=ack） |
 | `handoff-watch` | bash | 見張りの `kill -0 -G`（`ack` の前） | G が空と読まない: 見張りを続ける（signal は送らない） |
 
-- **網羅の検査**（D2・E の入口の網羅の検査と同じ形）: `tests/unit/verification/lock-observation-scan-4288.ts` が 3 実装のソースから (1) 名前の付いた観測点（`lock_obs_* <点>`・`obs.*('<点>'`・`goneCandidates(ctx, '<点>')`・`lock_gone_candidates <点>`）と (2) 観測の**生の呼び出し**（bash の `kill -0`・`mkdir`・`mv`・`ls`・`cat`・`ps -o`・`.gone-*` の glob・`lock_owner_field`、TS・同期 JS の `process.kill(`・`readdirSync(`・`lstatSync(`・`readFileSync(`・`mkdirSync(`・`renameSync(`・`readOwner(`）を、それを含む関数ごとに数える。(1) は上の表と一致、(2) は「観測の関数そのもの」か理由つきの許可（札の書き込み・置き場の `mkdir -p`・待ちの表示など、判断に使わないか既に fail-closed のもの）の一覧と件数まで一致しなければ落ちる。自己テストで、新しい関数の `kill -0`・glob・`readdirSync`、許可した関数の 2 つ目の呼び出し、表に無い観測点のそれぞれを足したソースで検査が落ちることを確かめる。
-- **行ごとの注入**: 読み手の 17 点 × 3 実装（51 行）は、行ごとに「注入あり → 取らない・消さない・解放しない（待ちは予算で終わり、点・パス・errno を出す）」と「同じ状態で注入なし → 逆の結果」の対で固定する（注入が結果を変えたことの対照）。書き手の 9 点は `verify-run-holder-group-4288.test.ts` で `FAIL exit=125`・`stage=…`・副作用 0 を固定する。実物の失敗（root の `chmod 0333`）でも 3 実装が取らないこと、直しを外した形（bash の glob で未展開を「無い」と読む読み手、同期 JS の一覧の失敗を空とする読み手、第 4 版の `kill -0` の成功だけを見るグループの判定）が同じ失敗の下で取る・解放することを陽性の対照にする。
+- **網羅の検査**（D2・E の入口の網羅の検査と同じ形）: `tests/unit/verification/lock-observation-scan-4288.ts` が 3 実装のソースから (1) 名前の付いた観測点（`lock_obs_* <点>`・`lock_rmdir_errno <点>`・`obs.*('<点>'`〔`obs.rmdir` を含む〕・`goneCandidates(ctx, '<点>')`・`lock_gone_candidates <点>`）と (2) 観測の**生の呼び出し**（bash の `kill -0`・`mkdir`・`mv`・`ls`・`cat`・`ps -o`・`.gone-*` の glob・`lock_owner_field`、TS・同期 JS の `process.kill(`・`readdirSync(`・`lstatSync(`・`readFileSync(`・`mkdirSync(`・`renameSync(`・`readOwner(`）を、それを含む関数ごとに数える。(1) は上の表と一致、(2) は「観測の関数そのもの」か理由つきの許可（札の書き込み・置き場の `mkdir -p`・待ちの表示など、判断に使わないか既に fail-closed のもの）の一覧と件数まで一致しなければ落ちる。自己テストで、新しい関数の `kill -0`・glob・`readdirSync`、許可した関数の 2 つ目の呼び出し、表に無い観測点（`rmdir` の点の名前の変更と、新しい関数の `obs.rmdir`／`lock_rmdir_errno` を含む）のそれぞれを足したソースで検査が落ちることを確かめる。
+- **行ごとの注入**: 読み手の 18 点 × 3 実装（54 行）は、行ごとに「注入あり → 取らない・消さない・解放しない（待ちは予算で終わり、点・パス・errno を出す）」と「同じ状態で注入なし → 逆の結果」の対で固定する（注入が結果を変えたことの対照）。書き手の 9 点は `verify-run-holder-group-4288.test.ts` で `FAIL exit=125`・`stage=…`・副作用 0 を固定する。実物の失敗（root の `chmod 0333`）でも 3 実装が取らないこと、直しを外した形（bash の glob で未展開を「無い」と読む読み手、同期 JS の一覧の失敗を空とする読み手、第 4 版の `kill -0` の成功だけを見るグループの判定）が同じ失敗の下で取る・解放することを陽性の対照にする。
 - **札（#4277）の観測**: 札の一覧も同じ規則に入れた（`list-queue`）。取得の周回で `.queue` が一覧できなければその周回は先頭にならず、札を取る `takeTicket`／`lock_take_ticket` も一覧の失敗では札を取らない（後から一覧して遅れの判定ができないので取り下げる）。札の形・番号・回収の規約は変えない。
 
 - **§6 の止め所との対応**: §6 の `fault:group|token|mv|verify|signal|child-go|child-ack` は、観測点 `handoff-group|handoff-token|handoff-publish|handoff-verify|handoff-signal|handoff-go|handoff-ack` への注入（`CM_VERIFY_TEST_OBS_FAULT`）に置き換えた。`CM_VERIFY_TEST_HANDOFF` の `fault:` に残したのは観測でない `tmp`（tmp の書き込み）と `drain`（`drain_group` を signal を送らずに 1 にする）だけ。`pause:` は §6 のとおり（`forked`・`group`・`watchdog`・`tmp`・`published`・`signalled`・`acked`〔子の側、`ack` の後・exec の前〕・`leader-exited`・`recover-moved`・`restore-mkdir`・`restore-owner`）。
@@ -366,16 +367,17 @@ owner の列は公開の状態、「取得者」は bash（`lock_acquire`）・T
 | owner が無い・**抽出できない破損**（空ファイル、`token` のキーが無い、値が `null`・`""`、`"token":` の直後が引用・数字・`true`／`false` 以外〔空白・`{`・`[`〕） | token が空 → 回収しない（`:917` の `-n`）。**解放は消す**（`:953`） | `readOwner` が null → 回収しない。解放は消さない（`:602`） | 同じく回収しない・解放は消さない（`:407`） |
 | **抽出できる不正な JSON**（末尾の `}` が無い、後ろにごみ。`"pid":123,"host":"h","token":"t"` は残る。**値の引用が閉じていない** `…,"token":"t` — `lock_json_field` は閉じ引用が無ければ行の残りを返す〔`verify-run.sh:654`–657〕ので token は `t`。`"token":123` は数字の `123`） | `lock_json_field` がキーごとに抜くので pid・host・token・pgid を読める → **回収・解放は正しい JSON と同じ結果**（閉じていない引用では、行の残り全体が token になる） | `JSON.parse` が投げて `readOwner` が null → 回収しない・解放は消さない | 同じく null → 回収しない・解放は消さない |
 | `pid` が文字列 `"123"` | 数字の接頭を読んで 123 として判定 | `readOwner` が null（数でない）→ 待つ | 同じく null → 待つ |
-| `pgid` が文字列 `"123"` | 123 としてグループを見る | `readOwner` が pgid を落とす（`:240`）→ pid だけ | `validPgid` が偽（`:94`）→ pid だけ |
-| `pgid` が小数 `12.5` | 数字の接頭 `12` としてグループ 12 を見る | 数として残るが `validPgid`（`:282`）が偽 → pid だけ | `validPgid` が偽 → pid だけ |
-| `pgid` が 1 以下・負・数字で始まらない | 空と見なす（`:696`–697） | `validPgid` が偽 → pid だけ | 同じ |
+| `pgid` が文字列 `"123"` | 引用の中身を抜いて 123 としてグループを見る（既存の差。`lock_json_text_field`） | 観測の関数（`makeObserver` の `owner`）の `pgidFieldOk` が偽 → **不明（`EINVAL`）で取らない**・回収しない・解放しない（#4288 Codex 再レビュー P1） | 同じ（`pgidFieldOk` が偽 → 不明 `EINVAL`） |
+| `pgid` が小数 `12.5` | 数字の接頭 `12` としてグループ 12 を見る（既存の差） | `pgidFieldOk` が偽 → **不明（`EINVAL`）で取らない** | 同じ |
+| `pgid` が `0`・`1` | `lock_group_state` が 1 以下を空と見なす → pid だけ | `pgidFieldOk` は真・`validPgid` が偽 → pid だけ | 同じ |
+| `pgid` が負（`-5`）・数字で始まらない（`"x"`、`null`） | `lock_pgid_field_ok` が偽 → **不明（`EINVAL`）で取らない** | `pgidFieldOk` が偽 → **不明（`EINVAL`）で取らない** | 同じ |
 | 正しい JSON だが `:` の後に空白（`"token": "t"`） | `lock_json_field` は `"token":` の直後の 1 文字で型を決めるので空 → 抽出できない破損の行と同じ（回収しない・**解放は消す**） | 正しく読む | 正しく読む |
 | 別 host | 生きている扱い | 同じ | 同じ |
 | `.gone-*` に読める・死んでいない記録（§2.7） | 新: `mkdir` しない。旧（#4288 以前）: 見ない → 復元の失敗と重なると取る | 同じ | 同じ |
 | `.gone-*` の owner が読めない（EACCES・EIO。§2.7 の「不明」） | 新: `mkdir` しない（`-x`／`-e`／`-r` と `awk` の終了コードで判定）。旧: 見ない | 新: `readGoneOwner` が `code` を返し、待つ。旧: 見ない | 同じ |
 | 退避名の形でない `<name>.lock.gone-…`（`.` を含む。例 別の mutex `a.lock.gone-b` の `a.lock.gone-b.lock`） | 新: mutex `a` の `.gone-*` として読まない（§2.7 の「退避名の識別」） | 同じ | 同じ |
 
-pid の再利用は 3 実装とも「生きている」側に倒れる（待つだけ）。#4277 以前の読み手は pgid を読まないが、#4277 の札を知らない版との混在は既に範囲外（4277 §0 B'）。#4288 以前の読み手が `.gone-*` を見ないことも同じ扱い（CommandMate 本体の TS・同期 JS は同じリリースで揃う。他のリポジトリの `verify-run.sh` の写しは commandmate-skills への移植で揃う）。抽出できる不正な JSON の行の差（bash だけが回収・解放する）は書き手が壊れた記録を書いた場合だけに表れ、新しい書き手は `printf` と `mv` で完全な記録しか置かない。
+pgid の行の 3 実装の差（文字列 `"123"` と小数 `12.5` を bash は数字として読んでグループを見るが、TS・同期 JS は不明で取らない）は、どれも安全な側の差である: bash は読めた数のグループに人が居れば待ち、TS・同期 JS は記録の形を判定できないので待つ。どの実装も「グループが無い」と読んで生きたゲートのロックを回収することは無い（`pgid` を数でない値・負の値にしたときに pid だけで判定していたのは #4288 の再レビュー P1 で直した前の動作）。新しい書き手（verify-run.sh・merge-pr）は 1 より大きい整数しか書かない。pid の再利用は 3 実装とも「生きている」側に倒れる（待つだけ）。#4277 以前の読み手は pgid を読まないが、#4277 の札を知らない版との混在は既に範囲外（4277 §0 B'）。#4288 以前の読み手が `.gone-*` を見ないことも同じ扱い（CommandMate 本体の TS・同期 JS は同じリリースで揃う。他のリポジトリの `verify-run.sh` の写しは commandmate-skills への移植で揃う）。抽出できる不正な JSON の行の差（bash だけが回収・解放する）は書き手が壊れた記録を書いた場合だけに表れ、新しい書き手は `printf` と `mv` で完全な記録しか置かない。
 
 ## 5. owner を読む・書く全経路
 
@@ -503,4 +505,11 @@ pid の再利用は 3 実装とも「生きている」側に倒れる（待つ�
 | 指摘 | 処置 | 実装 | 対照（試験） |
 |---|---|---|---|
 | Codex 再 P1 bash の `lock_obs_owner` が `cat` の終了コードは見るが、pgid を取り出す `awk` の終了コードを見ず、取り出しの失敗（非 0・無出力）を空＝pgid 無し＝グループ無しと読む（札の `lock_ticket_retirable` も同じ） | **採る**（3 値の関数の内側も 3 値にする） | 3 実装の観測の関数の内側のすべての段（読み・取り出し・数値の検査）で失敗を不明にする。bash: `lock_obs_owner` は各欄の取り出しの終了コードを見て、失敗は `unknown`（`EUNKNOWN`）。`"pgid":` の鍵が在るのに値が数字でない（`-5`・`"x"`・`null`）のは `lock_pgid_field_ok` で `unknown`（`EINVAL`）。鍵の無い旧い owner だけが今どおり pid だけで判定される。`lock_ticket_retirable` は取り出しの失敗で外さず、数字でない pgid は `lock_group_state` が `unknown:group:EINVAL` と答える（期限の規則は今どおり）。`lock_kill0_raw`・`lock_obs_pgid`（`tr`）・`lock_pid_start_ms`（`awk`）も終了コードを読む形にした。TS・同期 JS: `obs.owner` は JSON の解析の後に pgid の数値の検査（鍵が無いか 0 以上の整数）をし、外れは `unknown`（`EINVAL`）。`holderState` も札の pgid に同じ検査をする | `lock-extract-rmdir-4288.test.ts`: `-v key=pgid` のときだけ非 0・無出力で終わる `awk` を PATH に置く（他の欄は本物。口が空でないことも確かめる）。直した版は本体が死んで G が生きたロックを取らず `point=lock-owner … errno=EUNKNOWN`、解放も保留する。取り出しの終了コードと鍵の検査を外した版は同じ注入で取る（陽性）、注入なしでは外した版も取らない（陰性）。札も同じ（直した版は外さず、外した版は `gone` で外す）。3 実装で pgid `"x"`・`-5`・`null` は取らず `errno=EINVAL`（数値の検査を外した同期 JS は取る）。pgid の鍵の無い owner は pid が死んでいれば取り、生きていれば取らない（陰性）。網羅の検査: `scanUncheckedCalls`（`lock-observation-scan-4288.ts`）が観測の関数の内側で終了コードを読まないコマンド置換（bash）・`try` の外の投げる呼び出し（TS・同期 JS）を探す。今のソースは 0 件、58ec40349 の取り出しは 4 件見つかり、新しい観測の関数に足した無検査の `awk`・`try` の外へ出した `readFileSync`・複数行の `awk` の閉じの検査を外した形も見つかる（自己テスト） |
-| Codex 再 P2 空の主ロックの `rmdir` の失敗（EACCES・EIO）で errno を捨て、`kept` だけを返す（3 実装） | **採る** | 失敗を errno ごと返す rmdir（TS・同期 JS は `obs.rmdir`、bash は `lock_rmdir_errno`）を足し、`reclaimGone`／`lock_reclaim_gone` の削除の結果に不明の理由（`point=reclaim-rmdir`・`<lock>` のパス・errno）を持たせて、`lock-list` の失敗の枝と揃えた。退避を残してその周回を取らないのは今どおり。`reclaim-rmdir` は観測ではなく行為の結果なので §2.8 の観測点の表には足さない（試験の注入の口と報告の点の名前として使う） | 3 実装で `reclaim-rmdir=EIO` を注入: 取らず、`<lock>` と退避が残り、`point=reclaim-rmdir path=<lock> errno=EIO`。注入を外すと取れる。実物の失敗（lock root を `0555`）でも 3 実装が `errno=EACCES` を出す。製品のランナーの `skipped` のゲートの `logTail` と precheck の「not run」の行に `unknown point=reclaim-rmdir path=… errno=EACCES` が届く。理由を捨てる版（同期 JS・bash）は `unknown` が無い（陽性） |
+| Codex 再 P2 空の主ロックの `rmdir` の失敗（EACCES・EIO）で errno を捨て、`kept` だけを返す（3 実装） | **採る** | 失敗を errno ごと返す rmdir（TS・同期 JS は `obs.rmdir`、bash は `lock_rmdir_errno`）を足し、`reclaimGone`／`lock_reclaim_gone` の削除の結果に不明の理由（`point=reclaim-rmdir`・`<lock>` のパス・errno）を持たせて、`lock-list` の失敗の枝と揃えた。退避を残してその周回を取らないのは今どおり。当初は `reclaim-rmdir` を行為の結果として §2.8 の観測点の表から外したが、その結果が取得の可否（その周回が `mkdir` するか）を決めるので、Codex の 2 回目の再レビュー P2 で観測点の表に足した（網羅の検査が `obs.rmdir`／`lock_rmdir_errno` の点を集め、行ごとの注入にも入る） | 3 実装で `reclaim-rmdir=EIO` を注入: 取らず、`<lock>` と退避が残り、`point=reclaim-rmdir path=<lock> errno=EIO`。注入を外すと取れる。実物の失敗（lock root を `0555`）でも 3 実装が `errno=EACCES` を出す。製品のランナーの `skipped` のゲートの `logTail` と precheck の「not run」の行に `unknown point=reclaim-rmdir path=… errno=EACCES` が届く。理由を捨てる版（同期 JS・bash）は `unknown` が無い（陽性） |
+
+### 3 回目のレビュー（2026-11-09、PM Claude `pm-review-4288-claude-c.md` の P3-3・Codex `review-4288c.md` の P2 1）
+
+| 指摘 | 処置 | 実装 | 対照（試験） |
+|---|---|---|---|
+| Codex 再々 P2 新しい rmdir の経路（`obs.rmdir`・`lock_rmdir_errno`）が観測点の網羅の検査から外れる（取得の可否を決めるのに、走査器が点を集めない） | **採る** | 製品のコードは変えない。走査器（`lock-observation-scan-4288.ts` の `scanObservationPoints`）が `obs.rmdir('<点>'`・`lock_rmdir_errno <点>` を集め、§2.8 の表と `lock-observation-points-4288.ts` に `reclaim-rmdir` の行を足し、行ごとの注入に入れた | 3 実装で、今のソースの `reclaim-rmdir` が集まり、点の名前を変えたソース・新しい関数で `obs.rmdir`／`lock_rmdir_errno` を呼ぶソースで表との突合が落ちる。前の収集の式はどちらも拾わない（陽性）。行ごとの注入: `reclaim-rmdir=EIO` で取らず `<lock>` と退避が残り点・パス・errno を出す、注入なしで取れる |
+| PM P3-3 §4 の表が文字列・小数・負の pgid を TS・同期 JS で「pid だけ」と書いたまま／`lock_reclaim_gone` のコメントの 1 行抜け | **採る** | §4 の表を今の動作（TS・同期 JS は `pgidFieldOk` が偽で不明 `EINVAL`、bash は `"123"` を 123・`12.5` を 12 と読む既存の差、`0`・`1` は 3 実装とも pid だけ、負・数字で始まらない値は 3 実装とも不明）に直し、差がどれも安全な側であることを書いた。コメントの抜けた 1 行を補った（.claude／.agents は cmp 一致、sync-map の pin を再計算） | 文書とコメントだけ（動作は不変）。bash の読みは実物で確かめた（`"123"`→pgid 123、`12.5`→12、`-5`・`"x"`・`null`→`EINVAL`、`0`・`1`→pid だけ） |

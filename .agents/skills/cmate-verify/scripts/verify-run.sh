@@ -1216,6 +1216,7 @@ lock_restore_from_gone() { # <lock-path> <gone>
 # left empty by a put-back that stopped half way is removed first (never on release). When that
 # cannot be settled — whether <lock> is such a half put-back is unknown (EIO on its listing), or
 # its rmdir failed — the moved-aside record is KEPT and 1 returned (LRG_HALF says why): it is the
+# only trace that lets a later head take the empty <lock> back once the fault clears, and without
 # it nobody would ever remove a <lock> that has no owner (#4288 Codex 5-2b P2-1). A failed rmdir
 # carries its reason like an unknown observation does (LRG_HALF=unknown:reclaim-rmdir:<lock>:<errno>,
 # #4288 Codex re-review P2), so the timeout names the point, the path and the errno.

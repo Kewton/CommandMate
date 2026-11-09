@@ -36,6 +36,7 @@ export const OBSERVATION_POINTS: ObservationPoint[] = [
   { point: 'restore-rename', impls: ALL, observes: 'rename 退避/owner → <lock>/owner（戻し）', unknown: '空の <lock> を rmdir で戻し、退避を残す' },
   { point: 'reclaim-rename', impls: ALL, observes: 'rename 死んだ退避 → 自分の退避名', unknown: '何もしない（消さない）' },
   { point: 'reclaim-owner', impls: ALL, observes: '移した退避の owner の読み', unknown: '判定した記録と読まない: 消さない' },
+  { point: 'reclaim-rmdir', impls: ALL, observes: 'rmdir 途中で止まった戻しの空の <lock>（回収の前）', unknown: '退避を残し、その周回は mkdir しない（取らない）。点・パス・errno を出す' },
   { point: 'release-owner', impls: ALL, observes: '解放の前の <lock>/owner の読み', unknown: '解放しない' },
   { point: 'release-list', impls: ALL, observes: '解放のときの lock root の一覧（自分の退避の片付け）', unknown: '片付けない（消さない）' },
   { point: 'handoff-group', impls: ['bash'], observes: 'ps -o pgid=（ゲートのグループ G の確かめ）', unknown: 'ゲートを始めない（stage=group）' },

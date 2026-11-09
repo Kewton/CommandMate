@@ -9,7 +9,8 @@
  * from the source text, mechanically:
  *
  *   - the observation points each implementation names (`lock_obs_mkdir mkdir-lock …`,
- *     `obs.mkdir('mkdir-lock', …)`), to be compared with the table, and
+ *     `obs.mkdir('mkdir-lock', …)`, and the rmdir whose result decides a take: `lock_rmdir_errno
+ *     reclaim-rmdir …`, `obs.rmdir('reclaim-rmdir', …)`), to be compared with the table, and
  *   - every RAW call of an observing primitive (`kill -0`, `mkdir`, `readdirSync(`, …) with the
  *     function it sits in, to be compared with the list of the places allowed to make one: the
  *     observer functions themselves and the call sites the table exempts with a reason.
@@ -91,12 +92,16 @@ export function scanRawCalls(impl: Impl, source: string): Map<string, number> {
   return found;
 }
 
-/** The observation points an implementation names. */
+/**
+ * The observation points an implementation names. The errno-keeping rmdir (bash `lock_rmdir_errno`,
+ * TS / sync JS `obs.rmdir`) is one too: its failure keeps a poll from the mkdir (#4288 Codex 2nd
+ * re-review P2), so a new rmdir point must be in the table and get its injected failure.
+ */
 export function scanObservationPoints(impl: Impl, source: string): Set<string> {
   const points = new Set<string>();
   const patterns = impl === 'bash'
-    ? [/\block_obs_(?:kill0|list|lstat|owner|mkdir|mv|pgid) ([a-z][a-z0-9-]*)\b/g, /\block_gone_candidates ([a-z][a-z0-9-]*)\b/g]
-    : [/\bobs\.(?:pid|group|list|lstat|owner|mkdir|rename)\('([a-z][a-z0-9-]*)'/g, /\bgoneCandidates\(ctx, '([a-z][a-z0-9-]*)'/g];
+    ? [/\block_(?:obs_(?:kill0|list|lstat|owner|mkdir|mv|pgid)|rmdir_errno) ([a-z][a-z0-9-]*)\b/g, /\block_gone_candidates ([a-z][a-z0-9-]*)\b/g]
+    : [/\bobs\.(?:pid|group|list|lstat|owner|mkdir|rename|rmdir)\('([a-z][a-z0-9-]*)'/g, /\bgoneCandidates\(ctx, '([a-z][a-z0-9-]*)'/g];
   for (const { line } of linesWithFunction(impl, source)) {
     for (const re of patterns) for (const m of line.matchAll(re)) points.add(m[1]);
   }
