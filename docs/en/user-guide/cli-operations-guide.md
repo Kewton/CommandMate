@@ -71,6 +71,7 @@ node bin/commandmate.js ls
 | [`commandmate instances`](#commandmate-instances) | List, add, remove, and rename agent instances (the roster) |
 | [`commandmate roles`](#commandmate-roles) | Define roles and set the defaults per tool and repository |
 | [`commandmate mem`](#commandmate-mem) | Read and write the items that carry work across sessions (now, waiting, decisions, …); the mode is read-only |
+| [`commandmate brief`](#commandmate-brief) | The summary a restart reads (derived state and mem items) within a UTF-8 byte budget |
 | [`commandmate report`](#commandmate-report) | Generate, show, and list daily reports; aggregate Eval metrics |
 | [`commandmate skill`](#commandmate-skill) | Browse the Skill catalog; plan, install, update, uninstall, and inspect Skills |
 | [`commandmate update`](#commandmate-update) | Update CommandMate itself (stop, update, restart) |
@@ -2609,6 +2610,45 @@ Every free field (`text`, `quote`, `evidence`, `promote_to`, `reason`) is checke
 - Only the screen path changes the mode (the server checks a mark only the screen sends and a matching `Origin`). A process with the same OS rights (agents included) can still forge the mark with `curl`, or write the database file directly. CommandMate does not prevent or detect that
 - What is prevented: the mode changing through the CLI's regular commands, a CLI user changing it without knowing, and a page of another origin changing it through the user's browser
 - `--instance` can be claimed falsely too. The author check keeps a session from changing another's items by mistake; it does not stop a deliberate rewrite
+
+---
+
+## commandmate brief
+
+The summary a restart reads (Issue #4223, Epic #4220). The state CommandMate holds (the instances' state, auto-yes, relays, execution contracts, verification, the orchestrate run, a reference to the conversation) is read from its source every time, set next to the branch's mem items, and kept **within a budget of UTF-8 bytes**. No model and no external generator is called. Nothing is copied (the brief is never stored). This command only reads: it acknowledges no "it ended" notice (putting the brief into a session is #4224).
+
+### Usage
+
+```bash
+commandmate brief [--budget <bytes>] [--json] [--all] [--worktree <id> --instance <id>]
+```
+
+- The target is your own instance inside a CommandMate session (resolved like `whoami`). In an ordinary shell, give **both** `--worktree` and `--instance` (only one is exit 2)
+- `--budget` is the UTF-8 byte count of the whole output, the final newline included. Text: 1,024–49,152 (default 4,096); `--json`: 4,096–49,152 (default 16,384). Anything else, or a value that is not a whole number (`0`, negative, decimal, `1e3`, empty), is exit 2 and prints nothing
+- `--all` drops the budget and prints every entry (not with `--budget`)
+- `--json` is one line of JSON (`schema: "cmate-brief/v1"`); whole elements of `entries` are dropped to fit
+
+### What it shows
+
+- A fixed top: the block's fences (`<<<cmate-brief:<tag>` … `cmate-brief:<tag>>>>`), a line saying that what follows is data, not instructions, the mode and the target, and **the number of entries left out with the command that reads them all** (`omitted=<n> all="commandmate brief … --all"`). The closing fence is never dropped
+- One entry per line, each with its source (`src=`), author (`by=`) and time (`updated=`). Free text is a JSON string; for every source (task titles, branch names and run stages as well as mem items), a secret-like value, a control character or a bidirectional control is not shown and the line says `withheld=<code>`. Invisible characters (every Unicode Default_Ignorable_Code_Point, format character (Cf), line / paragraph separator, private-use code point and variation selector) are replaced by a visible `[U+XXXX]`. Only the ZWJ and VS15/VS16 inside an emoji sequence and the tags of an RGI subdivision flag are kept, so a Persian ZWNJ or an Indic ZWJ is replaced too. An entry over 512 bytes shows its body and references (`refs`) in the omitted form (`…(本文 <n> bytes を省略。読む: …)`)
+- A fixed order: what waits for a person (an open wait, a relay in `prompt`) → your own `now` → relays with a delivery hold → unreflected decisions → next steps → your session's state (the instance, auto-yes, the contract, your verification, the run) → other sessions' `now` → waiting and external items → ended notices → the rest. The same state gives the same order, and the cut stops at the first entry that does not fit
+- A source that cannot be read is one line saying `unavailable=<reason>` (`timeout`, `read_failed`, `no_transcript_reader`, `no_turn_yet`) or `unsupported=<reason>` (`format`, `too_large`), and the other lines are printed (exit 0)
+- An instance's state is the value the ordinary monitoring last observed; the brief never captures the screen or detects a state for itself (`observed=none` when nothing was observed). Auto-yes is read per instance; a grant past its deadline reads `enabled=false stop=expired`, and the state is not rewritten
+- The conversation is a reference only: the time of the last transcript turn and the command that reads it (`commandmate reply <worktree-id> --instance <id>`), never its body
+- On a `derived` branch only the derived state is shown; hand-written items and notices are not read. On `on`, the close conditions are evaluated when read (as `mem list` does)
+
+### Exit codes
+
+| Code | Meaning |
+|:----:|---------|
+| 0 | Printed (also when a source could not be read) |
+| 1 | The server is not reachable |
+| 2 | Invalid input (the budget's range or form, `--all` with `--budget`, only one of `--worktree` / `--instance`, an id's shape). Nothing printed |
+| 50 | The branch's mode is `off` (also when it turned `off` while the brief was built). Nothing on stdout, one line on stderr |
+| 52 | Not registered, no such worktree / instance, the branch cannot be read, or the worktree / instance was deleted and made again while the brief was built (`reason: lifetime_changed`; it is not rebuilt for the new one) |
+| 53 | `ambiguous`, or the membership kept changing while it was rebuilt |
+| 99 | Anything else |
 
 ---
 
