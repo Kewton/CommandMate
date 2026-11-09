@@ -1,6 +1,6 @@
 # 人が差分を承認して decision を正本へ記録し、反映を確かめる（Issue #4225 / Epic #4220 の子 E）設計
 
-- 状態：設計の段（第 2 版、実装前）。第 1 版の「止める点」は PM が決めた（§0.1）。実装は Codex の事前レビューの後、同じブランチの別の契約で行う
+- 状態：設計の段（第 3 版、実装前）。第 1 版の「止める点」は PM が決めた（§0.1）。第 3 版は Codex の事前レビュー（P1 2・P2 5）を反映した（処置は §9）。実装は Codex の事前レビューの後、同じブランチの別の契約で行う
 - 前提：Epic #4220 の決定事項 D1〜D13（とくに D3・D6・D9・D11・D12）。A（#4221）`docs/design/mem-store-4221.md`（以下「A」）、B（#4222）`docs/design/mem-close-when-4222.md`（「B」）、C（#4223）`docs/design/brief-4223.md`（「C」）、D1（#4274）`docs/design/session-boundary-brief-4274.md`（「D1」）。D2（#4224）は並行で設計中で、この文書は触れない
 - 凡例：**［事実］** = この文書を書いた時点（2026-11-09、`feature/4225-worktree` = develop `64572168c`）でファイルと行を読んで確かめたもの。**［見立て］** = 設計としての判断。**［未確認］** = 読んでいない・実測していないもの。行番号は確認時点のもので、実装の契約では名前で探し直す
 
@@ -19,6 +19,8 @@
 | S3 | 「未反映の警告」を CLI の一覧（`src/cli/commands/mem.ts:169`）と brief（`src/lib/brief/sources.ts:452`・`:479`）にも文言で出すか。両方とも既に `recorded` を区別して出し、古さ（`staleness.ts:19`・`:26`）も `recorded` にかかる［事実］ | **G（#4227）へ送った**。E では変えない | Issue の「警告」は E の画面（§4）と E の API の応答の欄（`unreflected:true`）で出す |
 
 D1〜D13 と違う作りは採らない（D9 のとおり）。
+
+**事前レビューの後の確認（止める点ではない）**：事前レビューの指摘で A のファイルの変更は S1 の案 1 より広がらない（③ は入口の引数に「比較する元の世代」を明示するだけで、関数は 1 つ・入口は 1 つのまま。⑦ の検査は E の新しい試験のファイルに置き、A の試験は変えない）。ただし ① の処置で、受入基準「承認の後に別のセッションが文書を変えた：既存の変更を失わず、**再承認へ戻る**」のうち **再承認へ戻る** は、書く直前の最後の照合より前の変更に限られる（最後の照合と追記の間の同期の窓に入った他プロセスの変更は、失われないが再承認にはならず、`concurrent_edit` の印つきの成功として人に見せる。§3.3）。**既存の変更を失わない** は窓の中でも保つ。この読みで受入基準を満たすとしてよいか、PM に確かめてほしい（§9 ①）。
 
 ### 0.2 D・A・B・Issue の文面だけでは一意に決まらず、この文書が選んだ解釈
 
@@ -62,12 +64,12 @@ preview（差分。期限つき）
                                         ├─ failure   → failed（未送信が確定。再承認で新しい operation）
                                         └─ unknown   → unknown（自動で再送しない。照合へ、§3.4）
                                                          ├─ 照合で見つけた → succeeded
-                                                         ├─ 照合で無いと確定（文書のみ）→ failed
-                                                         └─ 確定できない → unknown のまま（人に照合を求める）
-   書く直前の照合の不一致 → conflict（書いていない。再承認へ）
+                                                         └─ 見つからない・確定できない → unknown のまま（人に照合を求める。人が「無いことを確かめた」で abandoned）
+   書く直前の照合の不一致 → operation を作らない（書いていない。再承認へ、§2.3）
 ```
 
-- `succeeded` の後に項目の遷移が書けなかった（項目の版が変わった・mode が `on` でない・DB の更新が失敗した）ときは、operation に `transition_pending=1` を残す。画面は「書けたが項目は進んでいない」を出し、人が今の版で「記録済みとして扱う」を押すと、その版で遷移だけを行う（外へは書かない）［見立て］。同じ項目に `succeeded` の operation があるときの新しい preview は、既にある記録（コメントの URL・文書のパス）を先に出し、二重の記録を人に選ばせる
+- `succeeded` の後に項目の遷移が書けなかった（項目の版が変わった・mode が `on` でない・context の worktree が作り直された・DB の更新が失敗した）ときは、operation に `transition_pending=1` と理由の語を残す。**`transition_pending=1` の operation は「進行中」として排他に入る**（§6.1 の一意の部分索引、事前レビュー ②）。画面は「書けたが項目は進んでいない」を出し、人が「記録済みとして扱う」を押すと遷移だけを行う（外へは書かない）。そのとき今の項目の欄の指紋が operation に保存した `item_fingerprint` と違えば、書いた本文と今の項目の差分を画面に出し、要求に `acknowledgeDiff:true` が無ければ 409 `diff_not_acknowledged`（事前レビューの U7）
+- **外への書き込みが成功した（`succeeded`・`transition_pending` のどちらでも）後は、その時刻より前に作った同じ項目の preview はすべて無効**（approve で 409 `prior_record_exists`）。同じ項目を記録し直すには、既にある記録（コメントの URL・文書のパスと区画）を並べた **新しい preview** を作り、その preview に「既にある記録の operation ID の一覧」（`acknowledged_operation_ids`）を結ぶ。approve は、今ある成功・不明の operation の集合がこの一覧と同じときだけ通す（事前レビュー ②）
 
 ---
 
@@ -89,31 +91,36 @@ preview は画面の要求（§4.2 の印）で作り、DB に保存する（`me
 | `rules_version` | `MEM_SECRET_RULES_VERSION`（`secret-scan.ts:21`） | 規則が上がった後の承認は検査し直す |
 | `context_worktree_id`・`context_worktree_incarnation` | 画面を開いた worktree とその世代（`getWorktreeIncarnation`、`incarnation.ts:137`） | 作り直し後の古い要求（A §16 I17 と同じ不変条件） |
 | `created_at`・`expires_at` | 期限（初期値 30 分［見立て］） | 期限切れ |
+| `acknowledged_operation_ids` | preview を作った時点で同じ項目にある `succeeded`・`unknown` の operation の ID の一覧（画面に既にある記録として並べたもの） | 承認の後・別の画面で外への書き込みが成功した（事前レビュー ②） |
+| `poster`（コメントのみ） | preview の時点の `gh api --hostname <host> user` の `id`（数値）と `login` | 承認と書き込みの間の認証アカウントの切り替え（事前レビュー ⑤。§3.2） |
 
 ### 2.2 行き先と基準の指紋
 
 | 行き先の種類 | `destination`（正規化） | `base_fingerprint` | 照合で見るもの |
 |---|---|---|---|
-| Issue・PR のコメント（`issue:[host/owner/repo]#N`・`pr:…#N`。文法は A `validate.ts` の `ISSUE_REF`） | `{kind:'issue_comment', host（小文字）, owner, repo, number}`。target を省いた `issue:#N` は項目の repository の `origin` で解決する（B §1.2 と同じ解決）。host は `hostAllowed`（`github-query.ts:63`：`github.com` か `origin` の host）を通るものだけ | `gh api repos/{o}/{r}/issues/{N}` の `node_id`・`repository_url`・`state`・`locked`・本文の SHA-256 | Issue が別のものになった（移管・削除して同じ番号）、閉じた・ロックされた、本文が変わった。**他人のコメントの増減は見ない**（コメントは追記で、既存の内容を上書きしない） |
+| Issue・PR のコメント（`issue:[host/owner/repo]#N`・`pr:…#N`。文法は A `validate.ts` の `ISSUE_REF`） | `{kind:'issue_comment', host（小文字）, owner, repo, number}`。**この host を preview の照会・POST・コメントの一覧・投稿者の照会のすべてで `--hostname` に渡す**（事前レビュー ⑤）。target を省いた `issue:#N` は項目の repository の `origin` で解決する（B §1.2 と同じ解決）。host は `hostAllowed`（`github-query.ts:63`：`github.com` か `origin` の host）を通るものだけ | `gh api repos/{o}/{r}/issues/{N}` の `node_id`・`repository_url`・`state`・`locked`・本文の SHA-256 | Issue が別のものになった（移管・削除して同じ番号）、閉じた・ロックされた、本文が変わった。**他人のコメントの増減は見ない**（コメントは追記で、既存の内容を上書きしない） |
 | 作業木の文書（`path:<rel>`） | `{kind:'worktree_doc', repositoryId, branch, worktreeId, worktreeIncarnation, path（正規化後の相対）}`。worktree は人が画面で選ぶ（項目の repository の登録 root に属する worktree だけ、`withMemTarget` の `readRepositoryIds` に項目の `repository_id` が入るもの、`target.ts:116`） | ファイルの内容の SHA-256（無いときは `absent`）・大きさ・観測した HEAD のブランチと common-dir（`observeWorktreeHead`、`git-observe.ts:23`） | 承認の後に文書が変わった、worktree を消した・作り直した（世代の不一致）、別のブランチへ切り替えた、別の git になった |
 
 ### 2.3 書く直前の照合（approve の手順）
 
 1. 画面の印（§4.2）を確かめる。無ければ 403 `screen_only`（書かない・数えない）
-2. 要求を受けた時点で、context の worktree の世代と、文書なら行き先の worktree の世代を固定する（A §10.4 と同じ型）
-3. 文書の行き先なら `observeWorktreeHead` で HEAD を観測する（`await`）。コメントなら `gh api` で Issue を読む（`await`、§2.2）
-4. **同期の区間**（better-sqlite3 は同期なので他の要求は入らない、A §5.3）で次をすべて照合する。1 つでも違えば **何も書かず**、operation を作らず、409 `reapproval_required`（`reason` を 1 語：`item_changed`・`destination_changed`・`base_changed`・`worktree_recreated`・`branch_changed`・`expired`・`mode_not_on`・`rules_changed`・`withheld`）を返し、preview を無効にする
+2. 要求を受けた時点で、context の worktree の世代と、文書なら行き先の worktree の世代を固定する（A §10.4 と同じ型）。**この固定した世代を operation の行（`context_worktree_incarnation`・`destination_worktree_incarnation`）に保存し、外への書き込みの後の A の入口へそのまま渡す**（§3.5、事前レビュー ③）
+3. 文書の行き先なら `observeWorktreeHead` で HEAD を観測する（`await`）。コメントなら `gh api --hostname <host>` で Issue と投稿者（`user`）を読む（`await`、§2.2）
+4. **同期の区間**（better-sqlite3 は同期なので他の要求は入らない、A §5.3）で次をすべて照合する。1 つでも違えば **何も書かず**、operation を作らず、409 `reapproval_required`（`reason` を 1 語：`item_changed`・`destination_changed`・`base_changed`・`worktree_recreated`・`branch_changed`・`expired`・`mode_not_on`・`rules_changed`・`withheld`・`prior_record_exists`・`poster_changed`）を返し、preview を無効にする
    - preview が期限内・未使用、項目の今の版が `item_version` と一致、`item_fingerprint` が一致、項目が `open`（`spec`・`record_only`）
    - 項目の `(repository_id, branch)` の mode が `on`（`memModeOnFor`、`mem-close-db.ts:99`。曖昧・未登録は `on` ではない）
    - 項目が今の規則で withheld でない（`findWithheld`、`present.ts:70`）
    - context・行き先の worktree の世代が固定した値と同じで、今も生きている（`worktreeIncarnationAlive`、`incarnation.ts:170`）
    - 文書：手順 3 の HEAD のブランチ・common-dir が preview と同じ。ファイルの内容の SHA-256 を **この区間で同期に読み直して**（`fs.readFileSync`）`base_fingerprint` と一致
    - コメント：手順 3 の Issue の指紋が `base_fingerprint` と一致
-   - 同じ項目に進行中（`approved`・`in_flight`・`unknown`）の operation が無い（一意の部分索引でも守る、§6.1）
+   - 同じ項目に進行中（`approved`・`in_flight`・`unknown`、`succeeded` かつ `transition_pending=1`）の operation が無い（一意の部分索引でも守る、§6.1）
+   - 同じ項目の `succeeded`・`unknown` の operation の集合が preview の `acknowledged_operation_ids` と同じ（違えば `prior_record_exists`、§1.2）
+   - コメント：投稿者（`gh api --hostname <host> user` の `id`）が preview の `poster.id` と同じ（違えば `poster_changed`）
 5. 同じ区間で operation（`approved`）と attempt（`in_flight`、`boot_id` = 今の process）を INSERT し、preview を使用済みにする
 6. 外へ書く（§3.2・§3.3）。結果で attempt を確定する（§3.4）
 
-- コメントの照合（手順 3）と書き込み（手順 6）の間には `await` がある。その間に Issue の本文が変わっても、コメントは追記なので既存の内容を失わない（受入基準の「既存の変更を失わない」は満たす）。文書は手順 4 で同期に読み直し、手順 6 の書き込みも同期で行う（§3.3）ので、CommandMate の中の別の要求は入らない。**同じ OS 権限の別のプロセスが手順 4 と 6 の間に文書を書く** 窓は残る（§5.5 の限界）
+- コメントの照合（手順 3）と書き込み（手順 6）の間には `await` がある。その間に Issue の本文が変わっても、コメントは追記なので既存の内容を失わない（受入基準の「既存の変更を失わない」は満たす）
+- 文書は手順 4 で同期に読み直し、手順 6 は **追記だけ**（`O_APPEND`、§3.3）で行う。CommandMate の中の別の要求は入らない。別のプロセス（別の Agent・エディタ）が手順 4 と 6 の間に書いても、E は文書の内容を置き換えないので **他者の変更は失われない**（事前レビュー ①。第 2 版の一時ファイル＋`rename` は、最後の読みの後の他者の変更を古い内容で上書きしうるので採らない）
 - 同じ項目を 2 つの画面で並行に承認：先に手順 5 へ着いた方だけが operation を作る。後の方は「進行中の operation がある」か「版の不一致」で 409。既存の変更は失わない
 
 ---
@@ -129,15 +136,16 @@ preview は画面の要求（§4.2 の印）で作り、DB に保存する（`me
 ### 3.2 Issue のコメント
 
 - 本文の末尾に一意の印を入れる：`<!-- commandmate-promote:op=<operation id>; item=<item id> -->`（operation id は `randomUUID`）
+- 投稿の主体：approve の手順 3 で `gh api --hostname <host> user` の `id`（数値。login は変わりうるので照合に使わない）を読み、preview の `poster.id` と同じことを確かめ、operation の `poster_id` に保存してから POST する。読めなければ POST しない（`failure`、送っていない）。作成の応答の `user.id` が `poster_id` と違えば `unknown`（`poster_mismatch`、人へ）（事前レビュー ⑤）
 - 送り方：`gh api --method POST --hostname <host> repos/<o>/<r>/issues/<N>/comments --input -`（本文は JSON で stdin。引数に本文を載せない）。実行の口は E の新しい関数（`ghApi` は GET だけで、本文を渡す口が無い、`github-query.ts:50-53`［事実］）。`hostAllowed`・`repoPath`（`github-query.ts:55`）は再利用する
 - 応答の分類（`classifyGhFailure`、`github-query.ts:18` の語を再利用し、E で「確定した失敗」と「不明」に分ける）［見立て］：
 
 | 結果 | attempt | operation |
 |---|---|---|
 | exit 0 で JSON に `id`・`html_url`・`node_id` がある | `success`（`result_ref` = comment id と URL） | `succeeded` |
-| HTTP 4xx（401・403・404・410・422。429 を除く） | `failure`（GitHub は作っていない） | `failed` |
+| HTTP 4xx（401・403・404・410・422。408・429 を除く） | `failure`（GitHub は作っていない） | `failed` |
 | `gh` が無い（`missing`）・host の不許可・本文の検査の不合格（送る前） | `failure`（送っていない） | `failed` |
-| タイムアウト・中断・offline・HTTP 5xx・429・`overflow`・exit 0 だが JSON が読めない | `unknown` | `unknown` |
+| タイムアウト・中断・offline・HTTP 5xx・408・429・`overflow`・exit 0 だが JSON が読めない | `unknown` | `unknown` |
 | attempt を書いた process が無い（`boot_id` が違う）か、`in_flight` のまま一定時間（10 分、B の `MEM_NOTICE_ATTEMPT_STALE_MS` と同じ値、`mem-close-db.ts:37`）を過ぎた | `unknown`（読むときにそう扱い、次の書き込みの区間で確定させる） | `unknown` |
 
 - **GitHub が受理した後に応答が切れた**：`unknown` になり、照合（§3.4）で印を見つけて `succeeded` にする。再送しない
@@ -146,22 +154,35 @@ preview は画面の要求（§4.2 の印）で作り、DB に保存する（`me
 
 ### 3.3 作業木の文書
 
-- 書き方：既存の文書の末尾に、印つきの区画を足す（`<!-- commandmate-promote:op=…; item=… -->` で始まり、決まった終わりの行で閉じる）。既存の行は変えない［見立て：最小の差分。見出しの下へ差し込む形は後で］。拡張子は `.md` だけ、大きさは 1 MiB まで［見立て］
+- 書き方：既存の文書の末尾に、印つきの区画を **追記だけ** する。区画は `<!-- commandmate-promote:begin op=<operation id> sha256=<区画の本文の SHA-256> -->` で始まり、`<!-- commandmate-promote:end op=<operation id> -->` で閉じる。E は文書の既存の内容を読み直して比べるが、**書き換え・置き換え・切り詰めをしない**［見立て：最小の差分。見出しの下へ差し込む形は採らない。差し込みは内容の置き換えになり ① の保証が崩れる］。拡張子は `.md` だけ、大きさは 1 MiB まで［見立て］
 - 手順（すべて §2.3 の 4 と同じ同期の区間）：
   1. §5.3 のパスの検査を **もう一度** 行う（承認から時間が経っている）
-  2. 内容を読み直し、`base_fingerprint` と一致を確かめる（§2.3 の 4）
-  3. 同じディレクトリに一時ファイル（`O_CREAT|O_EXCL`、名前は operation id から）を書き、`fsync`、元のファイルの mode を写し、`rename` で置き換える。`rename` は最後の成分が symlink・hardlink でもそのリンクを辿らずに置き換える（リンク先を書き換えない）
-  4. 読み直して、書いた内容の SHA-256 と一致すれば `success`（`result_ref` = 相対パスと SHA-256）。違えば `unknown`
-- 例外で途中が分からなくなったとき（process の終了を含む）の照合は、読み直しで **確定できる**：今の内容が書いた内容と一致 → `succeeded`、`base_fingerprint` と一致し一時ファイルが無い → `failed`（書いていない）、どちらでもない → `conflict`（誰かが変えた。書かない。人へ）
+  2. 内容を読み直し、`base_fingerprint` と一致を確かめる（§2.3 の 4。違えば書かずに再承認）
+  3. 開く：既にあるファイルは `O_WRONLY|O_APPEND|O_NOFOLLOW`、`base_fingerprint` が `absent` のときは `O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW`（他者が先に作っていれば `EEXIST` で書かずに再承認）。開いた記述子を `fstat` し、通常のファイル・`nlink === 1`・開く前の `lstat` と同じ `dev`/`ino` であることを確かめる（hardlink を通して repository の外のファイルへ書かない。最後の成分の symlink は `O_NOFOLLOW` が断る）
+  4. 区画を 1 回の `write` で追記し、`fsync` して閉じる
+  5. 読み直す：内容が「基準の内容＋区画」と一致すれば `success`。一致しないが、§3.4 の区画の照合で自分の区画がちょうど 1 つ、本文の SHA-256 も一致して見つかれば、`success` に `concurrent_edit=1` を付ける（最後の照合と追記の間に他者が書いた。他者の変更は残っている。画面に「書いている間に他の変更があった」と出し、人に文書を見てもらう）。区画が見つからない・壊れていれば `unknown`
+- 例外で途中が分からなくなったとき（process の終了を含む）は §3.4 の文書の照合で決める。文書全体の一致・不一致では決めない（事前レビュー ④）
 - commit・add・push・stash・checkout など git の書き込みは呼ばない（§5.4、ガードで固定）
 
 ### 3.4 不明のときの照合（reconcile）
 
 - 画面の「照合する」（印つきの要求）でだけ行う。読むたびの自動の照合はしない（外への照会の回数を増やさない。常駐・定期の実行を足さない、D8・D13）［見立て］
-- コメント：`gh api --paginate repos/<o>/<r>/issues/<N>/comments`（GET）で、**本文に印があり、作者が `gh api user` の login と同じで、本文の SHA-256 が operation の `body_sha256` と同じ** コメントを探す。見つかれば `succeeded`（`result_ref` を写す）。印を偽った他人のコメントを成功と読まないため作者と本文の指紋も見る
+- コメント：`gh api --hostname <operation の host> --paginate repos/<o>/<r>/issues/<N>/comments`（GET）で、**本文に印があり、`user.id` が operation の `poster_id`（POST の前に保存した投稿者、§3.2）と同じで、本文の SHA-256 が operation の `body_sha256` と同じ** コメントを探す。照合の時点の `gh api user` は使わない（投稿の後に認証アカウントを切り替えても、元のコメントを認識する。事前レビュー ⑤）。見つかれば `succeeded`（`result_ref` を写す）。印を写した他人のコメントは `user.id` で外れる
+  - 印と投稿者は一致するが本文の SHA-256 が違う：`unknown`（`body_differs`）のまま。画面に両方を出して人に判断を求める（自動で成功にも未送信にもしない）
   - 照会が失敗（offline・403 等）：`unknown` のまま。画面に「照合できない」と理由を出す
   - 照会は成功したが見つからない：**`unknown` のまま**（GitHub の一覧の反映の遅れを否定できない）。画面は「見つからない」と時刻を出し、人が「GitHub で無いことを確かめた」を押したときだけ operation を `abandoned`（人の判断で未送信とみなす、`decided_by='human'`）にする。その後は新しい承認でだけ書ける
-- 文書：§3.3 の読み直しで確定する（人の判断は要らない）
+- 文書：今の内容から operation の印の区画（`begin op=<id>` 〜 `end op=<id>`）を探す（事前レビュー ④）
+  - 区画がちょうど 1 つあり、中身の SHA-256 が `begin` の行と operation の `body_sha256` に一致：`succeeded`（文書の他の部分が変わっていても。他者の追記と、E の書き込みの成功の証拠を分ける）
+  - 区画が 2 つ以上・`begin` だけ・中身の指紋が違う（壊れた・直された）：`unknown`（`block_altered`）のまま、人へ
+  - 区画が無い：`unknown`（`block_missing`）のまま、人へ。内容が `base_fingerprint` と一致していても、書いた後に人が消した場合と区別できないので、**未送信と読まない**。人が「無いことを確かめた」を押したときだけ `abandoned`
+  - 読めない（worktree が消えた・パスの検査に通らない）：`unknown`（`unreadable`）のまま
+- 照合で `succeeded` に確定したら、§3.5 の手順（operation に保存した世代・版を A の入口へ渡す）で遷移を試みる。合わなければ `transition_pending=1`
+
+### 3.5 外への書き込みの後の項目の遷移（世代の受け渡し、事前レビュー ③）
+
+- approve の手順 2 で固定した context の worktree の世代（`context_worktree_incarnation`）と項目の版（`item_version`）を operation に保存し、外への書き込みの成功の後（同じ要求の続き、または reconcile の成功の後）に、**その保存した値を** A の入口 `memSettleDecisionTransition` の引数（`expectedWorktreeIncarnation`・`expectedVersion`）として渡す。A の入口は渡された値と今の値を照合するだけで、自分で世代を固定し直さない（固定し直すと、外への書き込みの `await` の間の作り直しを見逃す）
+- 照合が合わない（`incarnation_changed`・`version_conflict`・`disabled`）とき：外への書き込みの結果（`succeeded`・`result_ref`）だけを保存し、`transition_pending=1` と理由を残す。遷移は人の「記録済みとして扱う」（新しい画面の要求。その要求の時点で世代と版を固定する）でだけ行う
+- `unknown`・`transition_pending=1` の operation と、それが使った preview は保持の期限で消さない（§6.1）
 
 ---
 
@@ -173,7 +194,7 @@ preview は画面の要求（§4.2 の印）で作り、DB に保存する（`me
 - 部品：`src/components/mem/DecisionPromotePanel.tsx`（新規。G #4227 の画面はこの部品を使う）。1 画面に次だけを置く：
   1. その branch の decision の一覧（`open`・`recorded`。`recorded` には **「未反映：コメントに記録しただけで、正本（Issue の本文など）へはまだ反映されていません」** の警告。進行中・不明の operation があればその印）
   2. 選んだ項目の preview：行き先（種類・host/owner/repo/#N、または worktree・ブランチ・パス）、書く本文の全文（差分）、引用の出所の表示（§5.1）、効果の選択（`spec`／`record_only`、既定 `spec`）、期限
-  3. ボタン：「承認して書く」・「やめる」（何も書かない。preview を捨てる）・`recorded` なら「正本へ反映したことを確かめた」・`unknown` なら「照合する」と「GitHub で無いことを確かめた」・`succeeded` で `transition_pending` なら「記録済みとして扱う」
+  3. ボタン：「承認して書く」・「やめる」（何も書かない。preview を捨てる）・`recorded` なら「正本へ反映したことを確かめた」・`unknown` なら「照合する」と「無いことを確かめた」（コメントは GitHub、文書は作業木で）・`succeeded` で `transition_pending` なら「記録済みとして扱う」
 - 409 `reapproval_required` を受けたら、理由の語を出して preview を作り直す（自動で承認し直さない）
 
 ### 4.2 書き込みの API と印
@@ -181,11 +202,11 @@ preview は画面の要求（§4.2 の印）で作り、DB に保存する（`me
 | API（新規） | 印 | 中身 |
 |---|---|---|
 | `POST /api/repositories/:id/mem/decisions/:itemId/preview` | 要る | `{branch, destination?, worktreeId?, effect, quoteConfirmed?, quoteText?}` → preview（本文・指紋・期限） |
-| `POST …/:itemId/approve` | 要る | `{previewId, itemVersion, baseFingerprint, bodySha256}`（画面が見たものを送り返す。本文は受け取らない）→ §2.3 |
+| `POST …/:itemId/approve` | 要る | `{previewId, itemVersion, baseFingerprint, bodySha256, acknowledgedOperationIds}`（画面が見たものを送り返す。本文は受け取らない）→ §2.3 |
 | `POST …/:itemId/confirm-reflected` | 要る | `{ifVersion}` → `recorded → promoted` |
 | `POST …/operations/:opId/reconcile` | 要る | — → §3.4 |
 | `POST …/operations/:opId/abandon` | 要る | `{ifState:'unknown'}` → `abandoned` |
-| `POST …/operations/:opId/settle-transition` | 要る | `{ifVersion}` → `transition_pending` の遷移だけ |
+| `POST …/operations/:opId/settle-transition` | 要る | `{ifVersion, acknowledgeDiff?}` → `transition_pending` の遷移だけ（その要求の時点で世代と版を固定する、§3.5） |
 | `GET /api/repositories/:id/mem/decisions?branch=` | 要らない（読み） | 一覧・operation の状態 |
 
 - 印は A §11 の `isScreenRequest`（`src/lib/security/screen-request.ts:52`）をそのまま使う（`X-CommandMate-Client: screen` と `Origin` の一致）。画面の client は `screenRequestHeaders()`（`:28`）を付ける。書き込みの route は印が無ければ 403 `screen_only`（`settings-service.ts:37`・notices の acknowledge の route と同じ）
@@ -221,7 +242,7 @@ preview は画面の要求（§4.2 の印）で作り、DB に保存する（`me
 </code fence>
 ```
 
-- 自由入力（`text`・`quote`）は **フェンスの中** に入れる。フェンスの長さは中身の最長の連続した backtick より 1 つ長くする。これで Markdown の差し込み、`@name` の通知、`#N` の自動リンクを起こさない（GitHub はコードの中の mention を通知しない［未確認：実測は実装の契約で fixture の Issue を使わずに文書で確かめる］）
+- 自由入力（`text`・`quote`）は **フェンスの中** に入れる。フェンスは行頭から始まる backtick の列で、長さは **`max(3, 中身の最長の連続した backtick + 1)`**（CommonMark のフェンスは 3 文字以上。第 2 版の「最長＋1」だけでは backtick の無い本文で長さ 1 になり、コードブロックにならなかった。事前レビュー ⑥）。中身の行のどの backtick の列もフェンスより短いので、中身からフェンスを閉じられない。空の本文は 1 行の空白にせず、空のブロックのまま出す。これで Markdown の差し込み、`@name` の通知、`#N` の自動リンクを起こさない（GitHub はコードの中の mention を通知しない［未確認：実測は実装の契約で fixture の Issue を使わずに文書で確かめる］）
 - `evidence` は出さない（構造化した参照で、正本の読者に要らない）［見立て］
 
 ### 5.3 パスの正規化（文書の行き先）
@@ -246,7 +267,7 @@ preview は画面の要求（§4.2 の印）で作り、DB に保存する（`me
 | 行き先（`issue:`・`path:`） | A の `ISSUE_REF`・§5.3 |
 | ログ | 出来事名・ID・行き先の種類・長さ・理由の語だけ。本文・引用・パスの絶対形は出さない（A §7 と同じ） |
 
-- 限界：同じ OS 権限のプロセスは §2.3 の照合と書き込みの間に文書を書ける。DB の operation の行を書き換えて「成功」にもできる。CommandMate はこれを防がない（A §11.3）
+- 限界：同じ OS 権限のプロセスは、途中のディレクトリを symlink に差し替える（U8）・DB の operation の行を書き換えて「成功」にする、ができる。CommandMate はこれを防がない（A §11.3）。**通常の並行編集**（別の Agent・エディタが文書を書く）は、E が追記だけをするので失われない（§3.3、事前レビュー ①）
 
 ---
 
@@ -269,8 +290,10 @@ CREATE TABLE mem_promote_previews (
   quote_confirmed_at INTEGER,
   rules_version INTEGER NOT NULL,
   context_worktree_id TEXT, context_worktree_incarnation TEXT,
+  acknowledged_operation_ids TEXT NOT NULL,   -- JSON 配列（§1.2）
+  poster_host TEXT, poster_id INTEGER, poster_login TEXT,  -- コメントのみ（§3.2）
   created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
-  used_at INTEGER
+  used_at INTEGER, invalidated_reason TEXT
 );
 
 CREATE TABLE mem_promote_operations (
@@ -278,19 +301,26 @@ CREATE TABLE mem_promote_operations (
   preview_id TEXT NOT NULL,
   item_id TEXT NOT NULL,                 -- FK なし
   item_version INTEGER NOT NULL,
+  item_fingerprint TEXT NOT NULL,
+  context_worktree_id TEXT, context_worktree_incarnation TEXT NOT NULL,  -- §3.5 で A の入口へ渡す
+  destination_worktree_incarnation TEXT,                                 -- 文書のみ
+  poster_id INTEGER,                                                     -- コメントのみ（§3.2）
   repository_id TEXT NOT NULL, branch TEXT,
   destination_kind TEXT NOT NULL CHECK (destination_kind IN ('issue_comment','worktree_doc')),
   destination TEXT NOT NULL, base_fingerprint TEXT NOT NULL,
   body TEXT NOT NULL, body_sha256 TEXT NOT NULL,
   effect TEXT NOT NULL, quote_origin TEXT NOT NULL,
-  state TEXT NOT NULL CHECK (state IN ('approved','in_flight','succeeded','failed','unknown','conflict','abandoned')),
+  state TEXT NOT NULL CHECK (state IN ('approved','in_flight','succeeded','failed','unknown','abandoned')),
   result_ref TEXT,                       -- comment id・URL / パスと SHA-256
   transition_pending INTEGER NOT NULL DEFAULT 0,
+  transition_reason TEXT,                -- incarnation_changed・version_conflict・disabled・db_error
+  concurrent_edit INTEGER NOT NULL DEFAULT 0,  -- 文書：追記の間に他者の変更があった（§3.3）
+  unknown_reason TEXT,                   -- body_differs・block_altered・block_missing・unreadable・poster_mismatch 等
   decided_by TEXT CHECK (decided_by IN ('server','human')),
   approved_at INTEGER NOT NULL, settled_at INTEGER, updated_at INTEGER NOT NULL
 );
 CREATE UNIQUE INDEX idx_mem_promote_active ON mem_promote_operations(item_id)
-  WHERE state IN ('approved','in_flight','unknown');
+  WHERE state IN ('approved','in_flight','unknown') OR (state = 'succeeded' AND transition_pending = 1);
 
 CREATE TABLE mem_promote_attempts (
   id TEXT PRIMARY KEY,
@@ -305,7 +335,7 @@ CREATE UNIQUE INDEX idx_mem_promote_attempt_open ON mem_promote_attempts(operati
 
 - `mem_items` に FK を張らない理由：`purgeMem` は `mem_items` を DELETE する（`mem-db.ts:1005-1049`。既定で `recorded`・`promoted` の decision を除く、`:1025`）。CASCADE だと `unknown` の operation の記録が消え、再承認で二重に書きうる。RESTRICT だと A の purge が FK の失敗で落ちる。FK を張らず、項目が消えた operation は画面に「項目は削除済み」として残す［見立て］
 - `worktree_id` という名前の列を持たない（`context_worktree_id` 等）。`deleteWorktreeChildRows` の対象にならず、worktree の削除を越えて残る（A §10.3 と同じ理由）
-- 保持：`succeeded`・`failed`・`abandoned`・`conflict` の operation と使った preview は 90 日、未使用の preview は期限の後に、次の書き込みの区間で消す（定期の実行を足さない）［見立て］
+- 保持：`succeeded`（`transition_pending=0`）・`failed`・`abandoned` の operation と使った preview は 90 日、未使用の preview は期限の後に、次の書き込みの区間で消す（定期の実行を足さない）［見立て］。**`approved`・`in_flight`・`unknown`・`transition_pending=1` の operation と、それが使った preview は期限で消さない**（世代・版・投稿者の固定を失わない。事前レビュー ②・③）
 
 ### 6.2 新規ファイル（A〜D1 のファイルの外）
 
@@ -327,8 +357,8 @@ CREATE UNIQUE INDEX idx_mem_promote_attempt_open ON mem_promote_attempts(operati
 
 ### 6.3 変える既存のファイル（§0.1 S1 の決定：案 1）
 
-- `src/lib/db/mem-db.ts`：`transitionDecision(db, alive, itemId, expected:{version}, transition:'record'|'promote'|'promote-record-only', now)` を 1 つ足す。トランザクションの最初に `alive()`（要求時に固定した context の worktree の世代が今も同じか）を聞き、`memTransition`（`transitions.ts:27`）で遷移を検査し、`UPDATE mem_items SET state=?, version=version+1, updated_by='human', updated_by_instance=NULL, updated_at=? WHERE id=? AND version=? AND state=?` で書く。失敗は既存の `MemStoreFailure`（`instance_not_found`/`incarnation_changed`・`item_not_found`・`version_conflict`・`state_forbids`、`mem-db.ts:323`）で返す。既存の関数・private の helper の振る舞いは変えない
-- `src/lib/mem/service.ts`：入口 `memSettleDecisionTransition(db, spec, itemId, body)` を 1 つ足す。要求時に context の worktree の世代を固定し（`lookupActor` は `by:'human'`）、`withMemTarget` で項目の `(repository_id, branch)` の mode を同じ同期の区間で決め、`on` でなければ store を呼ばずに 409 `disabled`。E の lib（`src/lib/promote/service.ts`）からだけ呼ぶ
+- `src/lib/db/mem-db.ts`：`transitionDecision(db, alive, itemId, expected:{version}, transition:'record'|'promote'|'promote-record-only', now)` を 1 つ足す。トランザクションの最初に `alive()`（呼び手が渡した context の worktree の世代が今も同じか）を聞き、`memTransition`（`transitions.ts:27`）で遷移を検査し、`UPDATE mem_items SET state=?, version=version+1, updated_by='human', updated_by_instance=NULL, updated_at=? WHERE id=? AND version=? AND state=?` で書く。失敗は既存の `MemStoreFailure`（`instance_not_found`/`incarnation_changed`・`item_not_found`・`version_conflict`・`state_forbids`、`mem-db.ts:323`）で返す。既存の関数・private の helper の振る舞いは変えない
+- `src/lib/mem/service.ts`：入口 `memSettleDecisionTransition(db, {worktreeId, expectedWorktreeIncarnation, itemId, expectedVersion, transition})` を 1 つ足す。比較する元の世代と版は **呼び手が渡す**（E の approve が最初に固定し operation に保存した値、§3.5）。入口は自分で固定し直さず、`expectedWorktreeIncarnation` が null なら断る（`lookupActor` は `by:'human'`）。`withMemTarget` で項目の `(repository_id, branch)` の mode を同じ同期の区間で決め、`on` でなければ store を呼ばずに 409 `disabled`。E の lib（`src/lib/promote/service.ts`）からだけ呼ぶ
 - `tests/unit/lib/mem/write-entrances-recreate-4221.test.ts`：`ENTRANCES` に行を足す（§7.1）。既存の行・`it`・期待値は変えない
 - `src/lib/db/migrations/runner.ts`：v69 の登録
 
@@ -336,7 +366,7 @@ CREATE UNIQUE INDEX idx_mem_promote_attempt_open ON mem_promote_attempts(operati
 
 ## 7. 不変条件の表駆動の試験（全入口）
 
-E の書き込みの入口（approve・confirm-reflected・reconcile・abandon・settle-transition）。A の側に足す入口は A の表に足す（§7.1）を 1 つの表に並べ、各行で同じ不変条件を回す（`tests/unit/lib/promote/promote-entrances-4225.test.ts`）。A の I18 と同じく、**表のキーは E の service の export のうち DB の書き込み・外への書き込みに届くものから列挙**し、入口を足すと表に足すまで落ちる。外への書き込みは偽の `gh`（`execFile` の差し替え）と `os.tmpdir()` の `mkdtempSync` の作業木で行い、`afterEach` で消す。本物の GitHub に書かない。
+E の書き込みの入口（**preview**・approve・confirm-reflected・reconcile・abandon・settle-transition。preview も DB に行を書くので表に入れる、事前レビュー ⑦）を 1 つの表に並べ（A の側に足す入口は A の表に足す、§7.1）、各行で同じ不変条件を回す（`tests/unit/lib/promote/promote-entrances-4225.test.ts`）。A の I18 と同じく、**表のキーは E の service の export のうち DB の書き込み・外への書き込みに届くものから列挙**し、入口を足すと表に足すまで落ちる。外への書き込みは偽の `gh`（`execFile` の差し替え）と `os.tmpdir()` の `mkdtempSync` の作業木で行い、`afterEach` で消す。本物の GitHub に書かない。
 
 | # | 不変条件 | 陽性対照（直す前・壊した実装で落ちる） | 陰性対照（変わらない） |
 |---|---|---|---|
@@ -345,12 +375,21 @@ E の書き込みの入口（approve・confirm-reflected・reconcile・abandon�
 | T3 | 承認の後に項目が変わった（`mem update` で `version+1`）→ 409 `item_changed`、書かない | 版の照合を外した版で書く | 版が同じなら書く |
 | T4 | 作り直し後の古い要求：preview の後に context／行き先の worktree を同じ ID・path で消して作り直す → 409 `worktree_recreated`、書かない（A §16 I17 と同じ形） | 世代の照合を外した版で書く | 作り直さなければ書く |
 | T5 | 文書を承認の後に別のプロセスが変えた → 409 `base_changed`、文書は他者の内容のまま | 基準の照合を外した版で他者の変更を上書き | 変わらなければ追記される |
+| T5b | 最後の照合（§3.3 の 2）と追記（4）の間に別のプロセスが文書を書き換える（試験の差し込み口で、同じ区間の中で外から書く）→ 他者の内容がすべて残り、区画が 1 つ足され、`succeeded`・`concurrent_edit=1`（事前レビュー ①） | 第 2 版の一時ファイル＋`rename` の版で他者の変更が消えて落ちる | 差し込みが無ければ内容は「基準＋区画」と完全に一致し、`concurrent_edit=0` |
+| T5c | 文書の hardlink（`nlink=2`）・開く前と開いた後で `ino` が違う → 書かない | `fstat` の照合を外した版で repository の外の inode に追記されて落ちる | 通常のファイルは追記される |
 | T6 | 選んだ worktree で別のブランチへ切り替えた → 409 `branch_changed` | — | — |
 | T7 | 同じ項目を並行に承認（`await` の間に 2 本目を進める）→ 1 本だけ書く、2 本目は 409 | 一意の索引を外した版で 2 回書く | 1 本なら書く |
 | T8 | GitHub が受理した後に応答が切れた（偽の `gh` が作ってからタイムアウト）→ `unknown`、再送しない。照合で `succeeded`、コメントは 1 件 | 不明を失敗と読む版で 2 件 | 確定した 4xx は `failed` |
 | T9 | 書けた後に DB の更新が失敗（settle で例外）→ 次の読みで `unknown`、照合で `succeeded`、外への書き込みは 1 回 | — | — |
 | T10 | 並行の再試行（`unknown` に 2 本の reconcile・2 本の再承認）→ 外への POST は増えない | — | — |
-| T11 | 照合で印は見つかったが作者・本文の指紋が違う → `succeeded` にしない | 印だけで見る版で成功と読む | — |
+| T11 | 照合で印は見つかったが作者・本文の指紋が違う → `succeeded` にしない（作者が違う：印を写した他人。本文が違う：`unknown` の `body_differs`） | 印だけで見る版で成功と読む | — |
+| T11b | Enterprise の host（`origin` の host）への投稿：preview の照会・POST・一覧・投稿者の照会の 4 つの `gh` の呼び出しの引数がすべて同じ `--hostname <host>` を持つ。結果不明の後に偽の `gh` の認証アカウントを切り替えて（`user` が別の `id` を返す）照合しても、元の `poster_id` のコメントを `succeeded` と認識する（事前レビュー ⑤） | 照合で今の `gh api user` を使う版で認識できず落ちる。一覧で `--hostname` を省く版で引数の検査が落ちる | 印だけを写した他人（別の `user.id`）のコメントは認識しない |
+| T18 | 外への成功の後に項目の遷移を失敗させ（試験の差し込み口で入口に `version_conflict` を返させる）、もう一方の画面が先に作っていた preview を approve → 409（`operation_in_progress` か `prior_record_exists`）、外への POST・追記は 1 回（事前レビュー ②） | 一意の索引から `transition_pending=1` を外し、preview の無効化を外した版で 2 回書かれて落ちる | 遷移が成功する通常の場合、項目は 1 回だけ進み（`version+1` が 1 回）、`transition_pending=0` |
+| T19 | 既にある記録を並べた新しい preview の approve：`acknowledged_operation_ids` が今の集合と同じなら書ける。approve の前に別の operation が成功していれば 409 `prior_record_exists` | 集合の照合を外した版で、人が見ていない記録の後に重ねて書かれて落ちる | 記録が無い項目は一覧が空で通る |
+| T20 | 世代の受け渡し：(a) preview の後、(b) approve の外への書き込みの応答待ち（偽の `gh` を止めて待たせる）、(c) reconcile の照会待ち、のそれぞれで context の worktree を同じ ID・path で消して作り直す → (a) は 409 `worktree_recreated`、(b)(c) は外の結果だけ保存し（`succeeded`・`result_ref`）、項目は `open` のまま、`transition_pending=1`・`transition_reason='incarnation_changed'`（事前レビュー ③） | A の入口が自分で世代を固定し直す版で、(b)(c) の項目が `recorded` に進んで落ちる | 作り直さなければ (b)(c) とも項目は進み、`transition_pending=0` |
+| T21 | 文書の照合（事前レビュー ④）：成功の後・応答の記録の前に止め、他者が文書の別の所に追記してから reconcile → 自分の区画を 1 つ見つけて `succeeded`、追記は増えない。区画の中身を直した・区画を消した → `unknown`（`block_altered`・`block_missing`）のまま、再承認の preview は `prior_record_exists`（`unknown` を一覧に並べないと通らない） | 文書全体の一致だけで見る版で、他者の追記の後を「未送信」と読み、2 つ目の区画が書かれて落ちる | 他者の変更が無ければ「基準＋区画」の一致で `succeeded` |
+| T22 | フェンス（事前レビュー ⑥）：backtick の無い本文・空行・`# 見出し`・`@name`・`#123`・`<!-- -->` を含む本文を描画し、`remark-parse`（依存に既にある［事実：`package.json`］）で解析すると、自由入力の部分がそれぞれ 1 つの `code` の節になり、`heading`・`html`・`link` の節が中身から出ない。中身に backtick 10 個の列があってもフェンスは 11 で、中身から閉じない | 「最長＋1」の版で backtick の無い本文のフェンスが 1 になり、`code` の節にならず落ちる | 通常の本文の文字は変わらない（`code` の節の値が元の本文と一致） |
+| T23 | 書き込みの連鎖の網羅（事前レビュー ⑦、`tests/unit/lib/promote/promote-write-chain-4225.test.ts`、新規。A の試験は変えない）：(1) `mem-db.ts` の書き込みの export（A の試験と同じく INSERT/UPDATE/DELETE に届く export を本文から求める。固定の名前の列挙にしない）を、`mem-db.ts`・`service.ts` 以外の `src/` のファイルが呼ばない（`import { x as y }` の別名・名前空間 import・re-export を解決して見る）。(2) `memSettleDecisionTransition` を呼ぶのは `src/lib/promote/service.ts` だけ。(3) E の service の export のうち、`mem-promote-db.ts` の書き込み・A の入口・`github-write.ts`・`doc-write.ts` に届くもの（helper 越しも）が §7 の表のキーと一致する。(4) その全部が関数の最初に `isScreenRequest` を呼ぶ（E の service は要求を受け取り、`settings-service.ts:37` と同じく中で印を見る。route だけに置かない） | 別のファイルから `transitionDecision` を直接呼ぶ合成の source、別名 import の合成、helper 越しの新しい入口の合成、`isScreenRequest` を呼ばない新しい入口の合成で、それぞれ検査が落ちる | 読みだけの export（一覧・`GET`）は表に入らなくても落ちない |
 | T12 | 文書の行き先：repository の外（`..`）・絶対パス・symlink（途中の成分・最後の成分・root 自身）・`.git`・sensitive → preview を作らない | `lstat` を `stat` にした版で symlink の先へ書く | 通常のファイルは書ける |
 | T13 | 効果 `spec` で成功 → `recorded`、警告の欄 `unreflected:true`。B の条件が成立しても閉じない。「反映を確かめた」で `promoted`、その後は B の条件で閉じる | — | `record_only` は `promoted` |
 | T14 | 拒否・取り消し・期限切れ・無人：「やめる」・期限切れの preview の approve・印の無い経路 → 項目は `open`、外へ書かない | 期限の照合を外した版で書く | — |
@@ -369,10 +408,12 @@ E の書き込みの入口（approve・confirm-reflected・reconcile・abandon�
 | 同上 | 版の食い違いを断る：入口に渡す `ifVersion` を今の版より 1 小さくする／`await` の間に `updateMemItem` で `version+1` する → 409 `version_conflict`、状態は変わらない | `WHERE … version=?` と事前の照合を外した版で書かれて落ちる | 版が同じなら書ける |
 
 - この 3 つの不変条件の対照は、表の行を足すだけで回る既存の `it.each` と、E で足す `it.each`（mode・版の 2 本、同じファイルの新しい `describe`。既存の `describe`・`it` の名前は変えない）で確かめる
+- 入口は比較する元の世代を引数で受ける（§3.5）。表の行の `request()` は、要求を受けた時点（`await` の前）に読んだ世代を渡し、作り直しはその後の `await`（`withMemTarget` の git の観測）の間に入れる。既存の作り直しの `it.each` の形のまま回る
+- A の試験の「store の書き込みは service だけ」（`write-entrances-recreate-4221.test.ts:291`）は固定の名前の列挙で、`transitionDecision` を含まない。A の試験は変えず、E の T23 が求めた名前の集合で同じことを見る（事前レビュー ⑦）
 - 遷移の表（`memTransition`）に無い組（`recorded` に `record`、`open` に `promote` など）は 409 `state_forbids`。これは A の `transitions` の試験が持つので、E では入口から 1 本だけ確かめる
 
-- ガード：§4.2（CLI に口が無い）、§5.4（git の書き込み・`gh --method` は E の 1 か所だけ・mem/brief の lib が fs に書かない）、§6.2（常駐を持たない）
-- 受入基準との対照：「拒否・取り消し・差分の変更・無人で書かない」= T1・T2・T3・T14／「別のセッションが文書を変えた・worktree を消した・別のブランチ・並行の承認」= T4〜T7／「受理後に応答が切れた・DB の更新が失敗・並行の再試行で二重に書かない」= T8〜T10／「`recorded` のままで警告、確かめた後に `promoted`」= T13（re-plan の例は H #4228 の受入と共有）／「repository の外・symlink を断る」= T12／「この Issue が入るまで外へ書かない」= §5.4 のガード
+- ガード：T23（書き込みの連鎖）、§4.2（CLI に口が無い）、§5.4（git の書き込み・`gh --method` は E の 1 か所だけ・mem/brief の lib が fs に書かない）、§6.2（常駐を持たない）
+- 受入基準との対照：「拒否・取り消し・差分の変更・無人で書かない」= T1・T2・T3・T14／「別のセッションが文書を変えた・worktree を消した・別のブランチ・並行の承認」= T4〜T7・T5b・T20／「受理後に応答が切れた・DB の更新が失敗・並行の再試行で二重に書かない」= T8〜T10・T18・T19・T21／「`recorded` のままで警告、確かめた後に `promoted`」= T13（re-plan の例は H #4228 の受入と共有）／「repository の外・symlink を断る」= T12／「この Issue が入るまで外へ書かない」= §5.4 のガード
 
 ---
 
@@ -411,10 +452,29 @@ A のファイルを変えず、E の新しいファイル（`src/lib/db/mem-pro
 | U4 | preview の期限（30 分）・保持（90 日）・文書の大きさ（1 MiB）・拡張子（`.md` だけ）は初期値の見立て |
 | U5 | 文書の書き込みの位置（末尾への追記）。見出しの下へ差し込む形を求められるか |
 | U6 | `cmate-orchestrate` が Issue のコメントを plan・goal に入れないこと（Issue 本文の記述）は commandmate-skills 側で確かめていない |
-| U7 | `transition_pending` の「記録済みとして扱う」は人が今の版で確かめる操作。Agent が書き換えた内容がコメントと違うまま `recorded` になりうる。差分を出して確かめさせるか |
-| U8 | 同じ OS 権限のプロセスによる §2.3 の 4〜6 の間の文書の書き換え（§5.5）。`O_NOFOLLOW` の open と `rename` の間の窓は Node で閉じられない |
+| U7 | （第 3 版で決めた）`transition_pending` の「記録済みとして扱う」は、今の項目の欄の指紋が書いた時と違えば差分を出し、`acknowledgeDiff:true` を求める（§1.2） |
+| U8 | 追記（§3.3）でも、途中のディレクトリの成分を `lstat` の後に symlink へ差し替える窓は Node で閉じられない（`openat` が無い）。これは同じ OS 権限の作為で、通常の並行編集ではない（§5.5）。通常の並行編集は ① の処置で失われない |
+| U9 | `O_NOFOLLOW` の値が Windows の Node で 0 になる（`daemon.ts:196` は `?? 0` で受けている［事実］）。E の文書の書き込みは `O_NOFOLLOW` が 0 の platform では断る |
+| U10 | 他者の追記と E の追記が同じ瞬間に `O_APPEND` で重なったとき、1 回の `write` が分割されないか（ローカルの通常ファイルでは 1 回の `write` は原子的に末尾へ付く［見立て］。ネットワークのファイルシステムは対象外） |
 
 ### 8.5 本文に無い指摘（この Issue では直さない）
 
 - `docs/design/mem-store-4221.md` §3.2 の「`recorded` の `mem close` は断る。人が画面で閉じる」に対し、`src/lib/mem/transitions.ts:45-48` は `recorded` の `close` を人の経路も含めて断る。人が閉じる遷移は無い（§0.1 S2 で G #4227 へ送った）
 - `tests/unit/lib/mem/write-entrances-recreate-4221.test.ts:291` の「store の書き込みは service だけ」は関数名の文字列で見るので、新しいファイルが `UPDATE mem_items` を直接書く経路を検出しない
+
+---
+
+## 9. 事前レビューの処置
+
+Codex の事前レビュー（2026-11-09、P1 2・P2 5。`workspace/orchestration/runs/2026-11-08/prereview/review-4225.md`）。守る条件と対照は §7 の T 番号の行。
+
+| # | 指摘 | 処置 | 1 行の理由（守る条件・対照） |
+|---|---|---|---|
+| ① | P1：同期の区間と `rename` では、最後の読みの後の他プロセスの通常の編集を古い内容で上書きする | 採る（受入基準の読みは PM に確認、§0.1） | 文書は置き換えをやめて `O_APPEND\|O_NOFOLLOW` の追記だけにし、`fstat` で hardlink・差し替えを断る。窓の中の他者の変更は失われず、`concurrent_edit` の成功として人に見せる（§3.3、T5b・T5c） |
+| ② | P1：外の成功・遷移待ちの間に、古い preview から二度目を書ける | 採る | `transition_pending=1` を一意の部分索引の排他に入れ、外の成功より前の preview を無効にし、記録し直しは既にある記録の一覧を結んだ新しい preview だけにする。保持の期限で消さない（§1.2・§2.3・§6.1、T18・T19） |
+| ③ | P2：E から A へ渡す途中で、要求の寿命を固定し直せる | 採る | approve で固定した世代と版を operation に保存し、A の入口は引数で受けて照合だけをする（固定し直さない）。合わなければ外の結果だけ保存して `transition_pending`。A の変更は入口の引数だけで S1 の範囲のまま（§3.5・§6.3、T20） |
+| ④ | P2：文書全体の一致・不一致だけでは、書き込みの結果を確定できない | 採る | 文書の照合は operation の印の区画（begin/end と本文の SHA-256）を探す。区画が 1 つで指紋が一致すれば成功、壊れた・無いは `unknown` のまま人へ（未送信と読まない）。`conflict` の状態をやめた（§3.3・§3.4、T21） |
+| ⑤ | P2：コメントの照合の host と投稿者が元の操作に固定されていない | 採る | destination の host を 4 つの `gh` の呼び出しすべての `--hostname` に使い、POST の前に投稿者の数値の `id` を operation に保存し、照合はその `id` で見る（§2.2・§3.2・§3.4、T11b） |
+| ⑥ | P2：フェンスの長さ「最長＋1」は backtick の無い本文でコードブロックにならない | 採る | フェンスの長さを `max(3, 最長＋1)` にし、`remark-parse` で `code` の節になることを確かめる（§5.2、T22） |
+| ⑦ | P2：入口の表に行を足すだけでは、新しい書き込み口の迂回を検出できない。preview が表に無い | 採る | E の新しい試験で、`mem-db.ts` の書き込みの export を本文から求め、別名・helper 越しも含めて呼び手を `service.ts` に限り、A の入口の呼び手を E の service に限り、E の書き込みに届く export（preview を含む）を表と突き合わせ、全部が `isScreenRequest` を最初に呼ぶことを固定する。A の試験は変えない（§7・§7.1、T23） |
+| 補 | U7：内容の違う「記録済みとして扱う」で何を見せるか | 採る | 今の項目と書いた時の指紋が違えば差分を出し、`acknowledgeDiff:true` を求める（§1.2・§4.2） |
