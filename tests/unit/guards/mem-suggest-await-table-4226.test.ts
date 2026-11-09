@@ -256,31 +256,99 @@ function analyze(overrides: Record<string, string> = {}): TableFindings {
   if (builds.length === 0) violations.push('no build is handed to withMemTarget in step(W5)');
   const reachable = new Set<ts.Node>();
   const queue: ts.Node[] = [];
-  const declarationOf = (identifier: ts.Identifier): ts.Node | null => {
-    let symbol = checker.getSymbolAtLocation(identifier);
-    // An imported helper is followed to its file (Codex P2-2: the calls across files).
-    if (symbol && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
-    const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
-    if (!declaration || !libSources.has(declaration.getSourceFile())) return null;
-    if (isFunctionNode(declaration)) return declaration;
-    if (ts.isVariableDeclaration(declaration) && declaration.initializer && isFunctionNode(declaration.initializer)) return declaration.initializer;
-    return null;
+  /**
+   * The values assigned to a binding after its declaration (`let f = a; f = peek;`), so a
+   * reassignment is followed as the initializer is (Codex 5-2c-2 P2).
+   */
+  const assigned = new Map<ts.Symbol, ts.Expression[]>();
+  for (const source of libSources) {
+    walk(source, (node) => {
+      if (!ts.isBinaryExpression(node) || node.operatorToken.kind !== ts.SyntaxKind.EqualsToken || !ts.isIdentifier(node.left)) return;
+      const symbol = checker.getSymbolAtLocation(node.left);
+      if (!symbol) return;
+      const list = assigned.get(symbol) ?? [];
+      list.push(node.right);
+      assigned.set(symbol, list);
+    });
+  }
+  /** The name a callee is spelt with at a call: an identifier, or the name of `a.b`. */
+  const calleeAt = (call: ts.CallExpression): ts.Identifier | null =>
+    ts.isIdentifier(call.expression) ? call.expression : ts.isPropertyAccessExpression(call.expression) && ts.isIdentifier(call.expression.name) ? call.expression.name : null;
+  /**
+   * The one rule that resolves a name (Codex 5-2c P2-2 and 5-2c-2 P2): an import alias
+   * (`peek as look`), a local binding (`const again = peek`, `const f = ns.peek`) and a
+   * reassignment (`f = peek`) are all followed to the symbols they end at. The helpers
+   * (reachability, the callers of a helper, the paths) and the restricted calls are
+   * classified by the same symbols, never by the spelling at the call.
+   */
+  const symbolsOf = (at: ts.Identifier): ts.Symbol[] => {
+    const ends: ts.Symbol[] = [];
+    const seen = new Set<ts.Symbol>();
+    const pending: ts.Symbol[] = [];
+    const first = checker.getSymbolAtLocation(at);
+    if (first) pending.push(first);
+    const follow = (expression: ts.Expression): boolean => {
+      let inner = expression;
+      while (ts.isParenthesizedExpression(inner) || ts.isAsExpression(inner) || ts.isNonNullExpression(inner)) inner = inner.expression;
+      const name = ts.isIdentifier(inner) ? inner : ts.isPropertyAccessExpression(inner) ? inner.name : null;
+      const next = name ? checker.getSymbolAtLocation(name) : undefined;
+      if (!next) return false;
+      pending.push(next);
+      return true;
+    };
+    while (pending.length > 0 && seen.size < 64) {
+      const symbol = pending.pop() as ts.Symbol;
+      if (seen.has(symbol)) continue;
+      seen.add(symbol);
+      if (symbol.flags & ts.SymbolFlags.Alias) {
+        pending.push(checker.getAliasedSymbol(symbol));
+        continue;
+      }
+      // A binding ends here when it holds a function itself, or when nothing it holds is a name.
+      let followed = false;
+      let holdsFunction = false;
+      const declaration = symbol.valueDeclaration;
+      const values = [...(declaration && ts.isVariableDeclaration(declaration) && declaration.initializer ? [declaration.initializer] : []), ...(assigned.get(symbol) ?? [])];
+      for (const value of values) {
+        if (isFunctionNode(value)) holdsFunction = true;
+        else followed = follow(value) || followed;
+      }
+      if (!followed || holdsFunction) ends.push(symbol);
+    }
+    return ends;
   };
+  /** Every function of the files a name may stand for, by {@link symbolsOf}. */
+  const functionsOf = (at: ts.Identifier): ts.Node[] => {
+    const out: ts.Node[] = [];
+    for (const symbol of symbolsOf(at)) {
+      const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0];
+      if (!declaration || !libSources.has(declaration.getSourceFile())) continue;
+      if (isFunctionNode(declaration)) out.push(declaration);
+      else if (ts.isVariableDeclaration(declaration) && declaration.initializer && isFunctionNode(declaration.initializer)) out.push(declaration.initializer);
+      for (const value of assigned.get(symbol) ?? []) if (isFunctionNode(value) && libSources.has(value.getSourceFile())) out.push(value);
+    }
+    return out;
+  };
+  const declarationOf = (identifier: ts.Identifier): ts.Node | null => functionsOf(identifier)[0] ?? null;
   for (const build of builds) {
-    const node = ts.isIdentifier(build) ? declarationOf(build) : build;
-    if (!node) continue;
-    if (isFunctionNode(node) && node.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword)) violations.push(`the W5 build is async at ${where(node)}`);
-    if (isFunctionNode(node) && returnsPromise(checker, node)) violations.push(`the W5 build returns a promise at ${where(node)}`);
-    reachable.add(node);
-    queue.push(node);
+    const nodes = ts.isIdentifier(build) ? functionsOf(build) : [build];
+    for (const node of nodes) {
+      if (isFunctionNode(node) && node.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword)) violations.push(`the W5 build is async at ${where(node)}`);
+      if (isFunctionNode(node) && returnsPromise(checker, node)) violations.push(`the W5 build returns a promise at ${where(node)}`);
+      reachable.add(node);
+      queue.push(node);
+    }
   }
   while (queue.length > 0) {
     walk(queue.pop() as ts.Node, (inner) => {
-      if (!ts.isCallExpression(inner) || !ts.isIdentifier(inner.expression)) return;
-      const target = declarationOf(inner.expression);
-      if (target && !reachable.has(target)) {
-        reachable.add(target);
-        queue.push(target);
+      if (!ts.isCallExpression(inner)) return;
+      const at = calleeAt(inner);
+      if (!at) return;
+      for (const target of functionsOf(at)) {
+        if (!reachable.has(target)) {
+          reachable.add(target);
+          queue.push(target);
+        }
       }
     });
   }
@@ -288,49 +356,33 @@ function analyze(overrides: Record<string, string> = {}): TableFindings {
     for (let current: ts.Node | undefined = node; current; current = current.parent) if (reachable.has(current)) return true;
     return false;
   };
-  /**
-   * The name a call's callee was declared with (Codex 5-2c P2-2): an import alias
-   * (`settleShown as settleLate`) and a local binding (`const settleLate = settleShown`)
-   * are followed to the declaration, so the restricted calls are classified by symbol,
-   * as the helpers are, and not by the spelling at the call.
-   */
-  const declaredCalleeName = (call: ts.CallExpression): string | null => {
-    const at = ts.isIdentifier(call.expression) ? call.expression : ts.isPropertyAccessExpression(call.expression) ? call.expression.name : null;
-    let symbol = at ? checker.getSymbolAtLocation(at) : undefined;
-    for (let hops = 0; symbol && hops < 8; hops++) {
-      if (symbol.flags & ts.SymbolFlags.Alias) {
-        symbol = checker.getAliasedSymbol(symbol);
-        continue;
-      }
-      const declaration = symbol.valueDeclaration;
-      if (declaration && ts.isVariableDeclaration(declaration) && declaration.initializer && (ts.isIdentifier(declaration.initializer) || ts.isPropertyAccessExpression(declaration.initializer))) {
-        const next = checker.getSymbolAtLocation(ts.isIdentifier(declaration.initializer) ? declaration.initializer : declaration.initializer.name);
-        if (next && next !== symbol) {
-          symbol = next;
-          continue;
-        }
-      }
-      break;
+  /** The restricted names a call's callee was declared with, by {@link symbolsOf}. */
+  const restrictedOf = (call: ts.CallExpression): string[] => {
+    const at = calleeAt(call);
+    const names = at ? symbolsOf(at).map((symbol) => symbol.getName()) : [];
+    if (names.length === 0) {
+      const spelt = calleeName(call);
+      if (spelt !== null) names.push(spelt);
     }
-    return symbol?.getName() ?? calleeName(call);
+    return [...new Set(names.filter((name) => RESTRICTED.has(name)))];
   };
   for (const file of LIB_FILES) {
     const source = program.getSourceFile(file) as ts.SourceFile;
     walk(source, (node) => {
       if (!ts.isCallExpression(node)) return;
-      const restricted = declaredCalleeName(node);
-      if (restricted === null || !RESTRICTED.has(restricted)) return;
-      if (!insideReachable(node)) violations.push(`${restricted} outside the W5 build at ${where(node)}`);
-      // A helper the build reaches may not be called from outside it as well (by any name).
-      const owner = enclosingFunction(node);
-      const ownerName = owner ? nameOf(owner) : null;
-      if (ownerName === null || !owner) return;
-      for (const other of libSources) {
-        walk(other, (ref) => {
-          if (ts.isCallExpression(ref) && ts.isIdentifier(ref.expression) && declarationOf(ref.expression) === owner && !insideReachable(ref)) {
-            violations.push(`${ownerName} (calls ${restricted}) is called outside the W5 build at ${where(ref)}`);
-          }
-        });
+      for (const restricted of restrictedOf(node)) {
+        if (!insideReachable(node)) violations.push(`${restricted} outside the W5 build at ${where(node)}`);
+        // A helper the build reaches may not be called from outside it as well (by any name).
+        const owner = enclosingFunction(node);
+        const ownerName = owner ? nameOf(owner) : null;
+        if (ownerName === null || !owner) continue;
+        for (const other of libSources) {
+          walk(other, (ref) => {
+            if (!ts.isCallExpression(ref) || insideReachable(ref)) return;
+            const at = calleeAt(ref);
+            if (at && functionsOf(at).includes(owner)) violations.push(`${ownerName} (calls ${restricted}) is called outside the W5 build at ${where(ref)}`);
+          });
+        }
       }
     });
   }
@@ -398,8 +450,10 @@ function pathViolations(
   const MAX_TRACES = 2000;
 
   const calleeOf = (call: ts.CallExpression): ts.FunctionLikeDeclaration | null => {
-    if (!ts.isIdentifier(call.expression) || stepId(call) !== null) return null;
-    const target = declarationOf(call.expression);
+    // The same callee rule as the reachability (Codex 5-2c-2 P2): `a.b(...)` is resolved by `b`.
+    const at = ts.isIdentifier(call.expression) ? call.expression : ts.isPropertyAccessExpression(call.expression) && ts.isIdentifier(call.expression.name) ? call.expression.name : null;
+    if (at === null || stepId(call) !== null) return null;
+    const target = declarationOf(at);
     return target && isFunctionNode(target) ? target : null;
   };
   const stepsMemo = new Map<ts.Node, boolean>();
@@ -786,6 +840,73 @@ describe('(self-test, Codex P2-2 / PM P3-1) the order, the count, floating promi
         "import { readShown, settleShown as settleRecord, type ShownRow } from '@/lib/db/suggestion-shown-db';"
       ).replace('  settleShown(db, {', '  settleRecord(db, {'),
     });
+    expect(findings.violations).toEqual([]);
+  }, 60_000);
+
+  /** A helper of another file that reads the record, called from the W5 build (`peek(db)`). */
+  const PEEK = "import type Database from 'better-sqlite3';\nimport { readShown } from '@/lib/db/suggestion-shown-db';\n\nexport function peek(db: Database.Database): number {\n  return readShown(db, 'w', 'claude', '').size;\n}\n";
+  const withPeek = (imports: string, inBuild: string, outside: string): Record<string, string> => ({
+    ...added(EXTRA, PEEK),
+    [SERVICE]: readFileSync(SERVICE, 'utf8')
+      .replace(`${IMPORTS_END}\n`, `${IMPORTS_END}\n${imports}\n`)
+      .replace('  // The materials, read now (the copy after, §3.2).', `${inBuild}  // The materials, read now (the copy after, §3.2).`)
+      .replace('    const branches = branchesOf(listing);', `${outside}    const branches = branchesOf(listing);`),
+  });
+
+  it('(Codex 5-2c-2 P2) a helper the build reaches, called outside it as well through a local binding (const again = peek)', () => {
+    const findings = analyze(withPeek("import { peek } from './extra-4226-control';", '  peek(db);\n', '    const again = peek;\n    again(db);\n'));
+    expect(findings.violations.some((v) => v.startsWith('peek (calls readShown) is called outside the W5 build at src/lib/mem-suggest/service.ts'))).toBe(true);
+  }, 60_000);
+
+  it('(Codex 5-2c-2 P2) a helper the build reaches, called outside it through a local binding of an import alias', () => {
+    const findings = analyze(withPeek("import { peek, peek as look } from './extra-4226-control';", '  peek(db);\n', '    const again = look;\n    again(db);\n'));
+    expect(findings.violations.some((v) => v.startsWith('peek (calls readShown) is called outside the W5 build'))).toBe(true);
+  }, 60_000);
+
+  it('(Codex 5-2c-2 P2) a helper the build reaches, called outside it through a reassigned binding', () => {
+    const findings = analyze(
+      withPeek("import { peek } from './extra-4226-control';", '  peek(db);\n', '    let again: (d: typeof db) => number = () => 0;\n    again = peek;\n    again(db);\n')
+    );
+    expect(findings.violations.some((v) => v.startsWith('peek (calls readShown) is called outside the W5 build'))).toBe(true);
+  }, 60_000);
+
+  it('(Codex 5-2c-2 P2) a helper the build reaches, called outside it through a namespace import', () => {
+    const findings = analyze(withPeek("import { peek } from './extra-4226-control';\nimport * as extra from './extra-4226-control';", '  peek(db);\n', '    extra.peek(db);\n'));
+    expect(findings.violations.some((v) => v.startsWith('peek (calls readShown) is called outside the W5 build'))).toBe(true);
+  }, 60_000);
+
+  it('(Codex 5-2c-2 P2) settleShown reassigned to a local binding and called after W5', () => {
+    const findings = analyze(
+      changed(
+        SERVICE,
+        QUIET_W5,
+        "closeRequest({ db, fixed, branches }, outcome)));\n    let settleLate: typeof settleShown = () => undefined as never;\n    settleLate = settleShown;\n    settleLate(db, { worktreeId, instanceId: '', scopeHash: '', write: [], clear: [], rosterInstanceIds: [], knownCodes: [], liveScopeHashes: new Set() });\n    return answer;"
+      )
+    );
+    expect(findings.violations.some((v) => v.startsWith('settleShown outside the W5 build'))).toBe(true);
+  }, 60_000);
+
+  it('(Codex 5-2c-2 P2) a step of the table in a helper of another file, called after W5 through a namespace import', () => {
+    const both = analyze({
+      ...added(
+        EXTRA,
+        "import type { MemSuggestStep } from './service';\n\nexport async function listAgain(step: MemSuggestStep): Promise<void> {\n  await step('W2', () => Promise.resolve(null));\n}\n"
+      ),
+      [SERVICE]: readFileSync(SERVICE, 'utf8')
+        .replace(`${IMPORTS_END}\n`, `${IMPORTS_END}\nimport * as extra from './extra-4226-control';\n`)
+        .replace(QUIET_W5, 'closeRequest({ db, fixed, branches }, outcome)));\n    await extra.listAgain(step);\n    return answer;'),
+    });
+    expect(both.violations.some((v) => v.includes('awaits W2 → W5 → W2'))).toBe(true);
+  }, 60_000);
+
+  it('(negative control, Codex 5-2c-2 P2) the helper called inside the W5 build, directly and through a binding, alias and reassignment, is no violation', () => {
+    const findings = analyze(
+      withPeek(
+        "import { peek, peek as look } from './extra-4226-control';",
+        '  peek(db);\n  const again = look;\n  again(db);\n  let later: (d: typeof db) => number = () => 0;\n  later = peek;\n  later(db);\n',
+        ''
+      )
+    );
     expect(findings.violations).toEqual([]);
   }, 60_000);
 
