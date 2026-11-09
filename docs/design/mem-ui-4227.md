@@ -1,7 +1,7 @@
 # mem の閲覧・編集と、対話・無人に応じた開始と終了の流れ（Issue #4227 / Epic #4220 の子 G）設計
 
-- 状態：設計の段（**第 5 版**、実装前）。第 1 版（`b832056a6`）に PM の決定（`pm-decision-4226-4227-stops.md` の G の節）と Codex の事前レビュー（`prereview/review-4227.md`、P1 3・P2 7・P3 1）を反映したのが第 2 版（`9ea305362`）。第 3 版は PM の決定（`pm-decision-4226-s3-4227-sf.md` の G の S-F の節と F の番号の節）と Codex の再確認（`prereview/review-4227b.md`、残件 P1 3・P2 4）を反映した。第 4 版は Codex の 3 回目の再確認（`prereview/review-4227c.md`、P1 1・P2 4）だけを局所に反映した。第 5 版は 4 回目の再確認（`prereview/review-4227d.md`、P1 1・P2 1）を、PM の決定（kill の対象の識別を 3 値の規則にする・新しい拒否を未送信へ写す）に沿って局所に反映した。処置の一覧は §11（1 回目 §11.1・2 回目 §11.2・3 回目 §11.3・4 回目 §11.4）。`src/`・`tests/` は変えていない。実装は同じブランチの別の契約で行う
-- **第 3 版〜第 5 版で新しく止める点は無い。**（第 5 版の識別の規則は、どのツールでも Agent 自身のプロセスを識別できないと分かったら止める条件つき。コードの上では止める条件に当たらない［見立て、§4.6］） 第 2 版の S-F は PM が (a)（C に旗を 1 つ足す）に決めた（§0.0）。migration の番号は **G = v71**（E = v69・F = v70。マージの順 E → F → G）
+- 状態：設計の段（**第 6 版**、実装前）。第 1 版（`b832056a6`）に PM の決定（`pm-decision-4226-4227-stops.md` の G の節）と Codex の事前レビュー（`prereview/review-4227.md`、P1 3・P2 7・P3 1）を反映したのが第 2 版（`9ea305362`）。第 3 版は PM の決定（`pm-decision-4226-s3-4227-sf.md` の G の S-F の節と F の番号の節）と Codex の再確認（`prereview/review-4227b.md`、残件 P1 3・P2 4）を反映した。第 4 版は Codex の 3 回目の再確認（`prereview/review-4227c.md`、P1 1・P2 4）だけを局所に反映した。第 5 版は 4 回目の再確認（`prereview/review-4227d.md`、P1 1・P2 1）を、PM の決定（kill の対象の識別を 3 値の規則にする・新しい拒否を未送信へ写す）に沿って局所に反映した。**第 6 版は PM の決定（`pm-decision-4227-kill.md`：終了の流れから自動の kill を外す）と 5 回目の再確認（`prereview/review-4227e.md`、P1 1・P2 2）を反映した**：G は kill しない。閉じるときは 更新の依頼 → 提案 → 差分 → 承認 → 確定 →（人がその場で押す既存の停止）で、G はその後に止まったことを観測して記録するだけ。kill の排他・Agent の世代の記録・識別の 3 値の関数・観測点の表・kill の側へ通す期待の識別・`InstanceLifecycleBusyError` は G から外した（§4.6.1 に「採らない」として理由つきで残す）。処置の一覧は §11（1 回目 §11.1・2 回目 §11.2・3 回目 §11.3・4 回目 §11.4・5 回目と PM の決定 §11.5）。`src/`・`tests/` は変えていない。実装は同じブランチの別の契約で行う
+- **第 3 版〜第 6 版で新しく止める点は無い。**（第 5 版の識別の規則と、その止める条件は第 6 版で G から外した。第 6 版は G の作るものを減らすだけで、A・B・C・D1 の作り直しも PM の決定の範囲の外の変更も無い［見立て、§11.5］） 第 2 版の S-F は PM が (a)（C に旗を 1 つ足す）に決めた（§0.0）。migration の番号は **G = v71**（E = v69・F = v70。マージの順 E → F → G）
 - 前提：Epic #4220 の決定事項 D1〜D13（とくに D3・D5・D6・D9・D11）。A（#4221）`docs/design/mem-store-4221.md`（以下「A」）、B（#4222）`docs/design/mem-close-when-4222.md`（「B」）、C（#4223）`docs/design/brief-4223.md`（「C」）、D1（#4274）`docs/design/session-boundary-brief-4274.md`（「D1」）。並行の D2（#4224）`brief-injection-d2-4224.md`（`feature/4224-worktree` `d21b22712`、「D2」）と E（#4225）`mem-promote-4225.md`（`feature/4225-worktree` `78ceab299`、「E」）は読むだけ
 - 凡例：**［事実］** = この文書を書いた時点（2026-11-09、`feature/4227-worktree` = develop `55b8192e0`）でファイルと行を読んで確かめたもの。**［見立て］** = 設計としての判断。**［未確認］** = 読んでいない・実測していないもの。行番号は確認時点のもので、実装の契約では名前で探し直す
 
@@ -55,8 +55,24 @@ D1〜D13 と違う作りは採らない。D の文面だけでは一意に決ま
 | G2 | Issue「Agent は通常の CLI では確定せず、提案として置き場に出す」 | 終了の流れの依頼の中で Agent が使う口は **提案の口だけ**（`commandmate handoff propose`）。依頼の文面がそれを指示する。ただし同じ時間に Agent が `mem add` などで直接書くことは **止めない**（止めるには A の入口すべてに G を呼ばせる必要があり、同じ OS 権限では保証にもならない、A §11.3）。直接書かれた更新は画面に「提案を経ずに確定した更新」として別の欄に出し、巻き戻さない | Issue の「確定済みの更新は巻き戻さない」と同じ扱い。止められない書き込みを止めたことにしない（D3 の検査の限界） |
 | G3 | Issue「開くとき：3 行の preview つきで選ぶ」 | 「開くとき」＝画面から送る **最初の送信の直前** に、その instance に `pending` の境界がある（D1 の台帳）とき。CLI・orchestrate・Timer など画面の外からの送信ではポップアップは出ず、`auto`（短い要約）になる | D1 の境界は「次の付けてよい送信」で消費される（D1 §3）。画面がそれより先に人へ聞ける時点は、画面の送信の直前だけ |
 | G4 | Issue「人が承認した提案だけを、項目の版を照合して確定する」 | 提案は **作った時点の項目の版（`base_version`）** を持つ。確定は「人が画面で見た提案の指紋」と `base_version` を送り返し、今の項目の版と一致したときだけ書く（S-A の入口の `ifVersion`）。違えば提案は `conflict` になり、今の項目と並べて出し直す（自動で今の版に載せ替えない） | E の preview と同じ考え方（E E2）。承認を「人が見たもの」に結ぶ |
-| G5 | Issue「『終わる前の更新を確認できない』事実を次の世代へ残す」 | 「確認できた」を **狭く** 定義する：その instance の終了の依頼が「確定して終了」（強制でない）で終わり、かつ Agent の応答（`done`）・人の全提案への判断（承認して確定 or 捨てる）・確定の全成功・**サーバが確かめた** kill の成功（§4.6）の **全部** を満たしたときだけ `confirmed`。**強制終了（「今すぐ終了」）は 4 条件より優先して必ず `unconfirmed(forced)`**（`done` 済み・提案 0 でも）。1 つでも欠ければ `unconfirmed`（理由の語つき）。依頼が無い終わり方（CLI・異常終了・orchestrate の掃除）は記録が無い＝確認できない |
+| G5 | Issue「『終わる前の更新を確認できない』事実を次の世代へ残す」 | 「確認できた」を **狭く** 定義する：その instance の終了の依頼が「確定して終了」（強制でない）で終わり、かつ Agent の応答（`done`）・人の全提案への判断（承認して確定 or 捨てる）・確定の全成功・**人がその場で押した既存の停止の後に、サーバが止まったことを観測した**（§4.6。第 6 版：G は kill しない）の **全部** を満たしたときだけ `confirmed`。**強制終了（確定の前に人が停止を押した＝「今すぐ停止」）は 4 条件より優先して必ず `unconfirmed(forced)`**（`done` 済み・提案 0 でも）。停止を確かめられなければ `confirmed` にしない（次の世代には「確認できない」が残る）。1 つでも欠ければ `unconfirmed`（理由の語つき）。依頼が無い終わり方（CLI・異常終了・orchestrate の掃除）は記録が無い＝確認できない |
 | G6 | 依頼・提案・kill・end を「同じセッション」に結ぶ | **会話の寿命の鍵を D1 の境界の行（`session_brief_boundaries` の `id`）にする。** 依頼を作るとき、その instance の今の境界（`getCurrentBoundary`、最も大きい `seq`）の `id` を固定する。以後の提案・`done`・`decide`・`end` は、今の境界の `id` が固定した値と同じで、かつ instance の寿命（A の在籍の世代、`isSameInstanceLifetime`）が同じときだけ受ける。境界は起動（`launch`）・自動の再起動・reset・resume・明示（`explicit`）で新しい行になる（`session-brief-db.ts:24`）ので、在籍を変えずに kill→再起動した後の古い要求は拒まれる。画面の再読込・WebSocket の再接続は境界を開かないので受ける | A の incarnation は在籍の寿命で、プロセスの起動の世代ではない（`src/lib/mem/incarnation.ts:1-12`。kill→再起動は `beginAgentEventGeneration` を進めるが incarnation は変えない、`agent-session-lifecycle.ts:99`）。永続化された会話の区切りで、既にあるのは D1 の境界だけ。`explicit` を「新しい会話」と数えるのは安全側（確認できない側）に倒れる［見立て］ | D2 §7.1 の文言は「確認できない」で断定しない。確認できなかった側に倒す（「確かめた」と誤って出す方が害が大きい） |
+
+
+### 0.2 Issue の範囲・受入基準との対応（第 6 版、PM の決定の読み替え）
+
+PM の決定（`pm-decision-4227-kill.md`、2026-11-09）：**終了の流れから自動の kill を外す。** 3〜5 回目の再確認の P1 はすべて「古い依頼が、後から入れ替わった Agent を kill しうる」ことの識別の端で、各 CLI のプロセス構成は実機でしか決まらず、識別を詰めても端が出続ける見込み。危険の元（古い依頼による自動の kill）を作らない。受入基準は弱めない。
+
+| Issue の文面 | この設計での読み（第 6 版） | どこで |
+|---|---|---|
+| 閉じるとき（画面の「終了」から）：更新を頼む → 提案 → 差分 → 人が承認した提案だけを版を照合して確定 → **閉じる** | 「閉じる」＝ **人がその場で押す既存の停止**（今の「終了」と同じ `handleKillConfirm` → `worktreeApi.killSession` → kill-session の route。変えない）。流れは 更新の依頼 → 提案 → 差分 → 承認 → 確定 →（人が押す既存の停止）。G はサーバから kill しない。停止の後に G の `end` が止まったことを観測して記録するだけ | §4.1・§4.6 |
+| Agent が応答しない | 今どおり試す：期限（5 分）で `agent_timeout`、待つ／ここまでの提案で進む／提案なしで終える／やめる | §4.4・H8・§7.5 |
+| 更新に失敗した | 今どおり試す：確定の 1 件の失敗は `failed`、残りで進むかやめる | §4.4・H13・§7.5 |
+| 人が取り消した | 今どおり試す：未決の提案を捨てる、確定済み・他のセッションの更新は巻き戻さない | §4.4・H4・§7.5 |
+| 強制終了した | **＝人が確定の前に停止を押した場合**（どの段でも「今すぐ停止」＝既存の停止＋`end` の `force`）。未決の提案を捨て、記録は必ず `unconfirmed(forced)`。停止に失敗した後の再試行でも forced は消えない | §4.4・H9・§7.5 |
+| タイムアウト | Agent 5 分（延長 2 回）・全体 60 分。サーバは待たず、読むときに判定。**期限でサーバが kill することはない**（今どおり） | §4.3・§4.4 |
+| 「終わる前の更新を確認できない」事実を次の世代へ残す | 「確認できた」（`confirmed`）＝ **確定までの成功**（`done`・全提案への判断・確定の全成功）と、**人が停止を押したことの観測**（G-4 の停止のボタンの押下の後にだけ画面が送る `end`）と、**サーバが止まったことを確かめた**（`isRunning` が偽・境界と在籍の寿命が依頼と同じ）の全部。停止を確かめられなければ（まだ動いている・境界が変わった・画面が `end` を送らずに閉じた・サーバが落ちた）`confirmed` にせず、次の世代の先頭の行は「確認できない」になる（D2 の読み口は `not_recorded`） | §0.1 G5・§4.6 |
+| 無人の経路・auto-yes を人の承認にしない | 変わらない（無人では今どおりの確認の Modal → kill。依頼なし・記録なし） | §5 |
 
 ---
 
@@ -77,12 +93,12 @@ D1〜D13 と違う作りは採らない。D の文面だけでは一意に決ま
 | 最新の migration | `CURRENT_SCHEMA_VERSION = 68`（`runner.ts:34`）。E が v69（E §6.1）、F が v70（PM の決定 2026-11-09） | G は **v71**（PM の決定。E → F → G の順にマージされる前提。順が変われば実装の契約で番号を入れ替える） |
 | decision の遷移 | `transitions.ts:39-56`。`recorded` の `close` は断る（`:45-48`） | S-D |
 | 在籍の世代とプロセス | A の incarnation は在籍（roster の削除・再追加）の寿命（`src/lib/mem/incarnation.ts:1-12`）。kill→再起動は event の世代（`beginAgentEventGeneration`、`agent-session-lifecycle.ts:99`）を進めるが incarnation は変えない。D1 の境界の行は起動・reset・resume ごとに新しい `id` になる（`session-brief-db.ts:24`・`getCurrentBoundary` `:139`） | 会話の寿命の鍵は D1 の境界の `id`（§0.1 G6） |
-| kill の口 | `worktreeApi.killSession(id, cliToolId?, instanceId?)`（`src/lib/api-client.ts:771`）は期待する世代を渡す欄を持たない。kill の本体は `kill-session/route.ts` の中に直書き（`:123-160`、`cliTool.isRunning`・`cliTool.killSession`） | G の終了は画面の kill を使わず、G の `end` の route がサーバで照合してから kill する（§4.6）。kill の本体は route から共有の関数へ移す（振る舞いは変えない） |
+| kill の口 | `worktreeApi.killSession(id, cliToolId?, instanceId?)`（`src/lib/api-client.ts:771`）は期待する世代を渡す欄を持たない。kill の本体は `kill-session/route.ts` の中に直書き（`:123-160`、`cliTool.isRunning`・`cliTool.killSession`） | **第 6 版：G は kill しない。** 閉じるときの停止は人がその場で押す既存の停止（この口と route をそのまま使う、変えない）。G の `end` は停止の後に止まったことを観測して記録するだけ（§4.6）。kill の本体の共有の関数への移動はしない（§4.6.1） |
 | 画面の送信の欄 | `sendMessage` の options は `{ cliToolId?, instanceId?, imagePath? }` だけで、`brief` を body に入れない（`api-client.ts:677-700`）。`MessageInput` の楽観送信は `onOptimisticSend` の直後に下書きを消す（`MessageInput.tsx:420-428`） | S-B の画面の側の契約（§3.2.1） |
 | C の「全文」 | 有限の予算では項目ごとに 512 バイトで省略形（`fit.ts:45-60`・`render.ts:95-100`・`types/brief.ts:43`）。`injectOnStart=false` は D1 が付けない（`session-brief.ts:288`）。provider の要求の型 `BriefRequest` は `src/lib/session/brief-provider.ts:23`、`fitText` を呼ぶのは `src/lib/brief/provider.ts:129-138` | S-F（§0.0、PM の決定 (a)） |
 | C の順位 1 | 情報源 `state`・`relay` の「読めない」行も順位 1（`BRIEF_STATUS_ROW_RANK`、`sources.ts:83-93`）。実際の待ちは `state` の `waiting`（`:182-199`、欄 `instance`）と `relay` の `state=prompt`（`relayItem`、`:244-262`。欄は `dir`（`owed`＝この instance が `to`、`awaiting`＝この instance が `from`）と `peer`＝`<worktreeId>/<instanceId>`。専用の待ち先の欄は無い）。relay の `from` は依頼した側、`to` は働く側で、`prompt` は **働く側（`to`）** が確認で止まったこと（`src/lib/db/migrations/v60-session-relays.ts:13-18`・`src/lib/relay/relay-badges.ts:20-25`・`:102`） | 人への質問の件数は順位でなく分類で数え、鍵は `(worktree, instance)`（§3.1.1） |
 | 送信の直前の照合（D1） | D1 の `claim()` は入力の排他の中の `claimInStretch` で所属・境界・寿命を照合し、不一致・例外では **本文だけを打つ**（`session-brief.ts:347-360` の `return this.input.content`）。`claimed` は消費ではなく、送れなければ `settleBoundaryClaim(…,'not_sent')` で `pending` に戻る（新しい境界があれば `superseded`、`session-brief-db.ts:362-403`） | §3.2 の最終の照合（`decline`・`full` は本文だけにせず 409） |
-| 起動と kill の排他 | 入力の排他（`withInstanceInputLock`、`instance-input-lock.ts:542`）は composer への書き手の順で、起動・kill を並べない。kill-session の route は `checkSessionOwnership`・`isRunning` を await してから `killSession` を呼ぶ（`kill-session/route.ts:129-152`）。起動の呼び出しは `send-session-start.ts:98-105`・`cli-tools/base.ts:800` など。src に tmux の `session_created`・`pane_pid` を読む所は無い（`git grep` で 0 件）。`pane_pid` は pane の最初のプロセス（shell）で、Codex は shell と pane を残して Agent だけを起動し直す（`codex.ts` の `resolveLaunchPane` の relaunch と `relaunchIntoSamePane`）ので、`pane_pid` は Agent の世代ではない（第 4 版）。`ps -o tpgid=` は端末の前面のプロセスグループの ID で、job control の無い shell では Agent が shell と同じグループで動くので、Agent が交代しても同じ値になりうる（第 5 版。4 回目 P1）。起動の行は `NAME='value' … <command>` を利用者の login shell に打つ（`agent-session-lifecycle.ts` の `buildAgentLaunchCommandLine`・`tmux.ts` の `respawnLoginShell`）。起動の全経路は `beginAgentSession` を呼ぶ（`git grep -ln 'beginAgentSession(' -- src` の 10 ファイル）tmux の `killSession` を直接呼ぶ所は `cliTool.killSession` の外にもある（`session-cleanup.ts:274`・`:314`、`claude-session.ts:712`、`session-key-sender.ts:166`、`base.ts:983`・`opencode*.ts` の stop） | §4.6 の排他と Agent の識別（新設。第 5 版で 3 値の規則に） |
+| 起動と kill の排他 | 入力の排他（`withInstanceInputLock`、`instance-input-lock.ts:542`）は composer への書き手の順で、起動・kill を並べない。kill-session の route は `checkSessionOwnership`・`isRunning` を await してから `killSession` を呼ぶ（`kill-session/route.ts:129-152`）。起動の呼び出しは `send-session-start.ts:98-105`・`cli-tools/base.ts:800` など。src に tmux の `session_created`・`pane_pid` を読む所は無い（`git grep` で 0 件）。`pane_pid` は pane の最初のプロセス（shell）で、Codex は shell と pane を残して Agent だけを起動し直す（`codex.ts` の `resolveLaunchPane` の relaunch と `relaunchIntoSamePane`）ので、`pane_pid` は Agent の世代ではない（第 4 版）。`ps -o tpgid=` は端末の前面のプロセスグループの ID で、job control の無い shell では Agent が shell と同じグループで動くので、Agent が交代しても同じ値になりうる（第 5 版。4 回目 P1）。起動の行は `NAME='value' … <command>` を利用者の login shell に打つ（`agent-session-lifecycle.ts` の `buildAgentLaunchCommandLine`・`tmux.ts` の `respawnLoginShell`）。起動の全経路は `beginAgentSession` を呼ぶ（`git grep -ln 'beginAgentSession(' -- src` の 10 ファイル）tmux の `killSession` を直接呼ぶ所は `cliTool.killSession` の外にもある（`session-cleanup.ts:274`・`:314`、`claude-session.ts:712`、`session-key-sender.ts:166`、`base.ts:983`・`opencode*.ts` の stop） | （第 6 版で外した）G は kill しないので、起動／終了の排他と Agent の識別を足さない（§4.6.1）。左の事実は「採らない」理由の記録として残す |
 | S3 の CLI と brief | CLI の一覧の行は `{result:reason,unreflected}` を出す（`src/cli/commands/mem.ts:169-177`）。brief の行は `fields` を全部 `key=value` で出し（`src/lib/brief/render.ts:78-89`）、`state=recorded`・`unreflected=true` が載る（`src/lib/brief/sources.ts:470-480`）。順位は `recorded` が 4（`:452-455`） | §6 S3 |
 
 ---
@@ -203,7 +219,7 @@ C は情報源 `state`・`relay` の「読めない」行にも順位 1 を使�
   | 所属・mode・`injectOnStart`・寿命が変わった（D1 の `settings_changed`・`incarnation_changed`）、provider の失敗・`over_limit`・予約の衝突（`reservation_conflict`）、区間の例外 | 今どおり（本文だけ。D1 の動きを変えない） | 409 `boundary_changed`（`reason` に D1 の語、例外は `claim_failed`）。本文を打たない。`full` の `empty`（付けるものが無い）だけは本文だけを送り、報告 `empty` |
 
   - **409 の伝播**：`claim()` は `full`・`decline` のときだけ、本文の代わりに「中止」（`{ abort: reason }`）を返し、`sendUserMessage` はキーを 1 つも送らずに型つきの誤り（`BriefChoiceAbortedError`）を投げる。送信の route はそれを 409 `{ error:'boundary_changed', reason, boundary: { id, state } | null }` にする（`sendUserMessage` の呼び出し元は変えない＝`CALLERS` の表は変わらない）。`auto`・`skip`・`force` は `claim()` の戻りが今と同じ（本文だけか brief つき）
-  - **`full` の失敗の経路を送信のサービスまで通す**（第 4 版、3 回目 P2）［事実：今の plan は provider の失敗・`over_limit` で `skip(rowId, …)` を書いて本文だけに倒し（`session-brief.ts:314-327`）、`claim()` は区間の例外を握って本文だけを返し（`session-brief.ts:347-360`）、`sendUserMessage` は配送の例外を `classifySendFailure` で普通の送信の失敗（`stage:'send'`）に変える（`send-user-message.ts:702-728`）］。そのままでは `full` の失敗が 409 にならないか、本文だけが打たれるので、G-PR3 で次を足す：(1) plan（`session-brief.ts`）は `full` のとき provider の失敗・`over_limit`（予算・行の上限・`withinVerifiedSize`）で **`skip` を書かず**（境界は `pending` のまま、消費しない）中止の理由（`provider_failed`・`over_limit`）を持ち、`claim()` は区間に入らずに中止を返す。(2) 区間の例外（`withMemTarget` の throw）は `full`・`decline` では中止 `claim_failed`。区間で既に `claimed` にしていたら `settleBoundaryClaim(…,'not_sent')` で `pending` に戻す（誤って消費しない）。(3) `send-user-message.ts` は `BriefChoiceAbortedError` を `classifySendFailure` に渡さず、`{ ok:false, stage:'brief_choice', code:'boundary_changed', reason, boundary }` で返す（`settle` は `not_sent`。relay の保留・`prompt_waiting` の分岐より前）。送信の route はこの `stage` だけを 409 にする。(4) `auto` は (1)(2) の失敗でも今どおり本文だけ（D1 の `skip` の記録も今どおり）
+  - **`full` の失敗の経路を送信のサービスまで通す**（第 4 版、3 回目 P2）［事実：今の plan は provider の失敗・`over_limit` で `skip(rowId, …)` を書いて本文だけに倒し（`session-brief.ts:314-327`）、`claim()` は区間の例外を握って本文だけを返し（`session-brief.ts:347-360`）、`sendUserMessage` は配送の例外を `classifySendFailure` で普通の送信の失敗（`stage:'send'`）に変える（`send-user-message.ts:702-728`）］。そのままでは `full` の失敗が 409 にならないか、本文だけが打たれるので、G-PR3 で次を足す：(1) plan（`session-brief.ts`）は `full` のとき provider の失敗・`over_limit`（予算・行の上限・`withinVerifiedSize`）で **`skip` を書かず**（境界は `pending` のまま、消費しない）中止の理由（`provider_failed`・`over_limit`）を持ち、`claim()` は区間に入らずに中止を返す。(2) 区間の例外（`withMemTarget` の throw）は `full`・`decline` では中止 `claim_failed`。区間で既に `claimed` にしていたら `settleBoundaryClaim(…,'not_sent')` で `pending` に戻す（誤って消費しない）。(3) `send-user-message.ts` は `BriefChoiceAbortedError` を `classifySendFailure` に渡さず、`{ ok:false, stage:'brief_choice', code:'boundary_changed', reason, boundary }` で返す（`settle` は `not_sent`。relay の保留・`prompt_waiting` の分岐より前）。**中止の判定は型（`instanceof BriefChoiceAbortedError`、`claim()` が投げた値そのもの）だけで行い、メッセージの文面では読まない**（第 6 版、5 回目 P2(1) の規則）：既存の分類は tmux の例外が利用者の本文を引用するので、配送不明の文面を「未送信」の文面より先に照合する［事実：`send-attempt-state.ts` の `classifySendFailure` の #3880 の注と `TMUX_TRANSPORT_FAILURE` の行］。中止は打鍵の前に `claim()` が投げ、配送の例外とは経路が別なので、本文に中止の文面が入っていて tmux の送信が失敗しても、その例外は中止の型ではなく、今どおり `classifySendFailure` で `indeterminate`（`send-error`）になる。`classifySendFailure` に中止の文面の行を足さない（code・`cause` の判定と文面の代替の判定を混ぜない）。送信の route はこの `stage` だけを 409 にする。(4) `auto` は (1)(2) の失敗でも今どおり本文だけ（D1 の `skip` の記録も今どおり）
   - **`decline` の予約**：区間で `briefBoundary` の行を `claimed`（`claim_token`）にしてから本文を打つ。結果で決める：`sent`・`unknown` → `skipped(declined)`（新しい関数 `settleDeclinedClaim`、`claimed` かつ同じ token のときだけ）／`not_sent` → 今の `settleBoundaryClaim(…,'not_sent')` と同じく `pending`（新しい境界があれば `superseded`）。本文が届かなかったのに「読まない」を消費しない
   - 画面（§3.2.1）：409 `boundary_changed` は再送しない。本文・画像・自由入力の状態を残したまま、新しい preview を取り直して聞き直す（`reason:'claimed'` のときは「別の送信が引き継ぎを渡しています」を添える）。**`auto` の応答には brief の報告が無いことがある**（`send/route.ts:94`：付いた・旗があった・不明のときだけ）ので、報告が無いときは何も出さない（「別の送信で渡された」と断定しない）
 - D2 の差し込みとの照合：D2 は D1 の口（`BriefRequest`）に `target.worktreeIncarnation`・`instanceOnRoster` と `BriefResult.skipReason?` を足し、`brief: 'auto'/'force'` で `briefPin` を必須にする（D2 §0.1・§2.4）。G が `BriefRequest` に足すのは S-F の `detail` だけ（他の選択は **route の本文の欄**）。D2 の先頭の行（§7.1「終わる前の更新を確認できない」）は「必須の項目」で、短い要約でも全文でも入る（D2 §7.4）。`decline` では brief が付かないので先頭の行も届かない — ダイアログに「読まないと、前回の終わり方の注意も届きません」を出す［見立て］
@@ -233,18 +249,23 @@ C は情報源 `state`・`relay` の「読めない」行にも順位 1 を使�
   ├ attended=false か mode≠on か  → 今どおりの確認の Modal → kill（依頼を作らない＝記録なし）
   └ attended=true かつ mode=on
       ① 依頼を作る（POST …/handoff/requests、印つき）→ requestId・依頼の文（テンプレート）
-           起動／終了の排他（§4.6）の中で、今の境界（会話の寿命の鍵、§0.1 G6）・在籍の寿命・
-           所属（repository・branch）・実プロセスの世代を一緒に固定。境界かプロセスが無ければ 409 session_unknown → 今どおりの確認の Modal
+           今の境界（会話の寿命の鍵、§0.1 G6）・在籍の寿命・所属（repository・branch）を固定する。
+           境界が無ければ 409 session_unknown → ダイアログに「引き継ぎの依頼を作れません」と出し、
+           選べるのは「停止」（下の ⑥ と同じ既存の停止。依頼が無いので記録なし）と「やめる」だけ
       ② 画面が依頼の文を既存の送信の route で送る（brief:'skip'）
            失敗 → request_failed（§4.4）
       ③ Agent が提案を出す（commandmate handoff propose …）→ 終わったら handoff done
            期限（5 分）までに done が無い → agent_timeout（§4.4）
       ④ 画面が提案を差分で見せる（提案ごとに 承認／捨てる）
            ＋「提案を経ずに確定した更新」（G2）を別の欄に出す（読むだけ）
-      ⑤ 「確定して終了」：承認した提案だけを、版を照合して 1 件ずつ確定
+      ⑤ 「確定する」：承認した提案だけを、版を照合して 1 件ずつ確定
            版の食い違い → conflict（§4.5）。失敗 → failed
-      ⑥ end（G の route がサーバで寿命を照合 → kill → 止まったことを確かめる → ended）
-  どの段でも：「終了をやめる」（取り消し）・「今すぐ終了」（強制終了 = end の force）
+      ⑥ 「停止する」を人が押す。押下の handler の中でだけ、次の 3 つを順に行う：
+           (a) POST …/end（停止の宣言。G は kill しない：依頼を ending にし、確定の途中なら止める）
+           (b) 既存の停止（handleKillConfirm → worktreeApi.killSession → kill-session の route、変えない）
+           (c) POST …/end/observe（G は kill せず、止まったことを観測して記録、§4.6）
+  どの段でも：「終了をやめる」（取り消し）・「今すぐ停止」（強制終了 = ⑥ を end の force で）
+  G はサーバから kill しない。期限・取り消し・古い依頼から kill に届く経路は無い（§4.6.1・§7.3）
 ```
 
 ### 4.2 依頼の文（Agent へ）
@@ -277,14 +298,13 @@ CREATE TABLE mem_handoff_requests (
   instance_incarnation TEXT,                          -- 作った時点で固定（NULL = 世代なし）
   instance_on_roster INTEGER NOT NULL,                -- 作った時点の在籍（isSameInstanceLifetime の earlier）
   boundary_id TEXT NOT NULL,                          -- 会話の寿命の鍵：作った時点の D1 の境界の id（§0.1 G6）。FK なし
-  process_identity TEXT NOT NULL,                     -- Agent の識別：作った時点で classifyAgentIdentity が same だった起動の世代の記録 {generation, pid, startedAt}（§4.6。第 5 版で tpgid をやめ、Agent 自身のプロセスと起動の記録に）
   state TEXT NOT NULL CHECK (state IN
     ('awaiting_agent','reviewing','applying','ending','ended','cancelled','expired')),
   apply_token TEXT,                                   -- applying の間だけ：その decide の印（§4.5）
-  end_token TEXT,                                     -- ending の間だけ（§4.6）
+  end_token TEXT,                                     -- ending の間だけ：停止の宣言の印（§4.6。G は kill しない）
   end_forced INTEGER NOT NULL DEFAULT 0 CHECK (end_forced IN (0, 1)),   -- 一度 1 にしたら同じ依頼では 0 に戻さない（§4.6、再確認 P1-2）
   outcome TEXT CHECK (outcome IN ('confirmed','unconfirmed')),
-  outcome_reason TEXT,   -- forced・request_failed・agent_timeout・apply_failed・conflict_left・kill_failed・session_changed・expired
+  outcome_reason TEXT,   -- forced・request_failed・agent_timeout・apply_failed・conflict_left・session_changed・expired（第 6 版で kill_failed を外した：止まらなければ ended にしない）
   agent_deadline_at INTEGER NOT NULL,                 -- 作成 + 5 分（延長は 2 回まで、各 + 5 分）
   expires_at INTEGER NOT NULL,                        -- 作成 + 60 分
   agent_done_at INTEGER, ended_at INTEGER,
@@ -315,9 +335,9 @@ CREATE TABLE mem_handoff_proposals (
 -- 提案の「何に対する何の操作か」は作った後に変えない（指紋の前提）。改版で変わるのは base_version・revision・fingerprint・state だけ
 CREATE TRIGGER mem_handoff_proposals_immutable BEFORE UPDATE OF request_id, op, item_id, kind, payload, author_instance_id, author_incarnation
   ON mem_handoff_proposals BEGIN SELECT RAISE(ABORT, 'mem_handoff_proposals: immutable column'); END;
--- 依頼の固定した所属・寿命・プロセスの世代は変えない。end_forced は 1 → 0 にしない（再確認 P1-2）
+-- 依頼の固定した所属・寿命は変えない。end_forced は 1 → 0 にしない（再確認 P1-2）。第 6 版で process_identity の列を外した（§4.6.1）
 CREATE TRIGGER mem_handoff_requests_pinned BEFORE UPDATE OF repository_id, branch, detached, target_worktree_id,
-    target_worktree_incarnation, instance_id, instance_incarnation, instance_on_roster, boundary_id, process_identity
+    target_worktree_incarnation, instance_id, instance_incarnation, instance_on_roster, boundary_id
   ON mem_handoff_requests BEGIN SELECT RAISE(ABORT, 'mem_handoff_requests: pinned column'); END;
 CREATE TRIGGER mem_handoff_requests_forced_sticky BEFORE UPDATE OF end_forced ON mem_handoff_requests
   WHEN OLD.end_forced = 1 AND NEW.end_forced = 0
@@ -328,7 +348,7 @@ CREATE TRIGGER mem_handoff_requests_forced_sticky BEFORE UPDATE OF end_forced ON
 - **作者**：提案の口（Agent の CLI）は A の Agent の口と同じく `instanceId` と世代で作者を決め、依頼の `instance_id`・`instance_incarnation` と違えば 409 `not_requested`（他の instance が他人の依頼に提案を足さない）
 - **会話の寿命**：提案・`done`・`decide`・`end` は、どれも書き込みの同期の区間で `getCurrentBoundary(…).id === boundary_id` と `isSameInstanceLifetime(依頼の値, readInstanceLifetime(…), cli_tool_id)` を確かめ、違えば 409 `session_changed`（依頼は `expired(session_changed)`、未決の提案は `expired`）。読み（`GET`）も同じ判定で状態を進める（読みは印が要らないが、旧依頼・旧提案を `expired` にすることはある。`mem_items` と新しい世代の依頼は変えない。§7.4 の入口の表）
 - **所属**：依頼の `repository_id`・`branch`・`detached` は作成の区間で `withMemTarget` の結果から固定し、以後変えない（トリガー）。確定（§4.5）は S-A に `pin.membership` として渡し、S-A の最終の区間の target と照合する（違えば 409 `membership_changed`、その提案は `failed(membership_changed)`）
-- **強制の後**：`end_forced=1` になった依頼は、以後 `propose`・`done`・`decide`・`rebase`・`extend` を 409 `request_closed` で断る（未決の提案は既に `discarded(forced)`）。受けるのは `end`（再試行）・`cancel`・読みだけ
+- **強制の後**：`end_forced=1` になった依頼は、以後 `propose`・`done`・`decide`・`rebase`・`extend` を 409 `request_closed` で断る（未決の提案は既に `discarded(forced)`）。受けるのは `end`・`end/observe`（停止の再試行）・`cancel`・読みだけ
 - **範囲**：提案は `now` を扱わない（`add` の `kind:'now'`・`now` の枠の項目への `update`・`close` は 400）。decision の `close` は `open` の取り下げだけ（`recorded` の項目への `close` の提案は 409 `state_forbids`）
 - **検査**：提案を受けたときに A の検査（`validateItemText`・`parseCloseWhen`・`validateEvidence`、`src/lib/mem/validate.ts`・`close-when.ts` の export を読むだけ）を通し、通らなければ入れない。確定のときは S-A の入口がもう一度すべて検査する（保存時より新しい規則で、A §6.4）。画面の差分の表示は出口の検査（withheld の形）を通す
 - **版**：`update`・`close` は Agent が見た `base_version` を必須にする。`add` は版を持たない（新しい項目）
@@ -350,7 +370,8 @@ CREATE TRIGGER mem_handoff_requests_forced_sticky BEFORE UPDATE OF end_forced ON
 | `POST …/handoff/requests/:rid/decide` | 画面 | 要る | `{ ifVersion, decisions: [{ proposalId, fingerprint, action:'approve'\|'discard' }] }` → 承認したものを確定（§4.5）。結果は提案ごと。同じ `ifVersion` の 2 回目（並行・応答の消失の後の再送）は 409 `version_conflict` と今の依頼・提案の状態（確定済みは `applied`）を返す |
 | `POST …/handoff/requests/:rid/proposals/:pid/rebase` | 画面 | 要る | `{ ifVersion, fingerprint }`（`conflict` の提案の、人が見た指紋）→ 改版（§4.5.1）。新しい `revision`・`base_version`・`fingerprint` を返す。確定はしない |
 | `POST …/handoff/requests/:rid/cancel` | 画面 | 要る | 取り消し（§4.4） |
-| `POST …/handoff/requests/:rid/end` | 画面 | 要る | `{ ifVersion, force?: true }` → **サーバが** 寿命を照合して kill し、止まったことを確かめて記録する（§4.6）。画面は `killed` を申告しない |
+| `POST …/handoff/requests/:rid/end` | 画面（停止のボタンの押下の handler だけ） | 要る | `{ ifVersion, force?: true }` → 停止の宣言（§4.6 の 1）。依頼を `ending`・`end_token` にし、確定の途中なら止める。**kill しない** |
+| `POST …/handoff/requests/:rid/end/observe` | 画面（同じ handler で、既存の停止の後） | 要る | `{ endToken }` → **サーバが** 止まったことを観測して記録する（§4.6 の 3・4）。**kill しない**。画面は `killed` を申告しない（観測の材料にしない） |
 
 - CLI：`commandmate handoff propose …` と `commandmate handoff done`（新規 `src/cli/commands/handoff.ts`、`program.ts` に登録）。**承認・取り消し・終了の口は CLI に作らない**（§7.3）。exit code は A の `MemExitCode` を使う（50 disabled・51 conflict・52 not found・55 not_owner）。新しい語 `not_requested`・`request_closed` は 52 / 55 に寄せる［見立て］
 
@@ -363,13 +384,11 @@ CREATE TRIGGER mem_handoff_requests_forced_sticky BEFORE UPDATE OF end_forced ON
 | 人が取り消す（「終了をやめる」） | 未決の提案をすべて `discarded(cancelled)`。**確定済みの提案（`applied`）と、他のセッション・Agent の直接の更新は巻き戻さない**。セッションは続く | `cancelled` | `discarded` | 終わっていないので記録しない（後で別の経路で終われば「記録なし」） |
 | 確定の 1 件が失敗（DB・mode が `on` でなくなった・作り直し） | その提案は `failed(<理由>)`。他の提案は続ける。画面に一覧で出し、選択：残りで終了／終了をやめる | `applying` → `reviewing` | `failed` | `unconfirmed(apply_failed)` |
 | 版の食い違い（§4.5） | `conflict`。人が今の値と並べて見直し、「今の版に載せ替える」（`rebase` で改版 → 新しい版との差分を再表示 → 新しい指紋で再承認、§4.5.1）か「捨てる」 | `reviewing` | `conflict` | 未決のまま終了すれば `unconfirmed(conflict_left)` |
-| 強制終了（「今すぐ終了」、どの段でも） | `end` の `force:true`。未決の提案を `discarded(forced)`、kill。確定済みは巻き戻さない。`applying` の最中なら、`apply_token` を外すので残りの確定は最終の区間の `fence` で止まる（§4.5） | `ending` → `ended` | `discarded` | **必ず** `unconfirmed(forced)`（`done` 済み・提案 0・確定が全部通っていても。G5 の優先の規則） |
-| kill が失敗（サーバが確かめて、同じ実プロセスがまだ動いている） | 「終了できませんでした」と出す。依頼は `ended` にしない（`reviewing` に戻す）。**一度立った `end_forced` は同じ依頼では消さない**：強制の後の再試行は `force` の有無にかかわらず forced のまま（`force` なしで再試行して成功しても `unconfirmed(forced)`）。forced の依頼は以後 `propose`・`decide` などを受けない（§4.3） | `ending` → `reviewing` | そのまま（強制なら既に `discarded(forced)`） | 終わっていない |
-| kill の待ちの間に CommandMate の経路で再起動しようとした（送信の起動・自動の再起動） | 起動は起動／終了の排他（§4.6）で kill の終わりまで待つ。kill → 止まったことを確かめる → 記録 → 排他を外す → 起動、の順になる | `ended` | — | 4 条件どおり（新しいプロセスの境界は記録の後に開く） |
-| 排他を通らない入れ替え（別の CommandMate サーバ・tmux の直接の操作。**同じ pane・同じ shell のまま Agent だけが交代した場合を含む**）を kill の直前に見つけた | kill の直前の識別（`classifyAgentIdentity`）が `'different'`（起動の世代番号か、Agent 自身のプロセスの pid・開始時刻が依頼の `process_identity` と違う）→ **kill しない**（新しいプロセスは生き残る） | `expired(session_changed)` | 未決は `expired` | 記録なし（確認できない） |
-| kill の直前の識別が `'unknown'`（`ps`・tmux の読みの失敗・値が古い・起動の記録が空・Agent 自身のプロセスが決まらない（shell しか見えない・宣言に無い wrapper・候補が 2 つ以上）） | **kill しない**（fail-closed）。409 `identity_unknown`、「終了できませんでした（今のプロセスを確かめられません）。ターミナルで Agent を止めてください」と人の手動の停止へ案内する | `ending` → `reviewing`（`end_forced` はそのまま） | そのまま | 終わっていない |
-| kill の後に、排他を通らない入れ替えで別のプロセスが動いている | 止まったことの確認で、動いているプロセスの世代が依頼と違う → 古いプロセスは止めた。新しいプロセスは kill し直さない | `ended` | 未決は `expired` | `unconfirmed(session_changed)` |
-| 在籍を変えずに kill→再起動（画面の外、CLI 等） | 次の読み・書きで境界が違う → 依頼は `expired(session_changed)`。古い依頼からの `propose`・`done`・`decide`・`end` はすべて 409 `session_changed`（新しいプロセスを古い依頼で kill しない） | `expired` | `expired` | 記録なし |
+| 強制終了（確定の前に人が「今すぐ停止」を押した。どの段でも） | 押下の handler が `end` の `force:true`（停止の宣言）→ 既存の停止 → `end/observe` を順に送る。宣言で未決の提案を `discarded(forced)`、`applying` の最中なら `apply_token` を外すので残りの確定は最終の区間の `fence` で止まる（§4.5）。確定済みは巻き戻さない。**kill は人の押した既存の停止だけ**（G は kill しない） | `ending` → `ended`（止まったことを観測できたとき） | `discarded` | **必ず** `unconfirmed(forced)`（`done` 済み・提案 0・確定が全部通っていても。G5 の優先の規則） |
+| 停止が効かなかった（既存の停止が失敗した・`end/observe` でまだ動いている） | 「停止を確かめられませんでした」と出し、停止のボタンをもう一度出す（押すのは人）。依頼は `ended` にしない（`reviewing` に戻す）。**一度立った `end_forced` は同じ依頼では消さない**：強制の後の再試行は `force` の有無にかかわらず forced のまま（`force` なしで再試行して止まっても `unconfirmed(forced)`）。forced の依頼は以後 `propose`・`decide` などを受けない（§4.3） | `ending` → `reviewing` | そのまま（強制なら既に `discarded(forced)`） | 終わっていない（このまま画面を閉じれば `confirmed` は無い＝次の世代は「確認できない」） |
+| 停止の宣言の後、`end/observe` を送らずに画面が閉じた（電源・再読込の途中） | サーバは待たない。依頼は `ending` のまま、`expires_at` の後の読みで `expired`。人が押した既存の停止が効いていても、観測していないので `confirmed` にしない | `ending` → `expired` | 未決は `expired` | 記録なし（確認できない）。再読込なら画面は `GET …/requests/:rid` で `ending` を見て、`end/observe` を送り直せる（同じ `end_token`） |
+| 止まったが、観測の時点で境界・在籍の寿命が依頼と違う（停止の後に CommandMate・人の手で起動し直した） | 古い会話は終わったが、止まったことを依頼の会話について確かめられない。新しいプロセスには何もしない（G は kill しない） | `ended` | 未決は `expired` | `unconfirmed(session_changed)` |
+| 在籍を変えずに kill→再起動（画面の外、CLI 等） | 次の読み・書きで境界が違う → 依頼は `expired(session_changed)`。古い依頼からの `propose`・`done`・`decide`・`end`・`end/observe` はすべて 409 `session_changed`。**古い依頼は kill に届く経路を持たない**（G は kill しない。停止は人が今の画面で押す既存の停止だけ） | `expired` | `expired` | 記録なし |
 | 画面を閉じた・電源が切れた（依頼の途中） | 何も進まない（サーバは待たない）。依頼は `expires_at`（60 分）の後の読みで `expired`、未決の提案は `expired`。**セッションは殺さない**（無人で kill しない） | `expired` | `expired` | 終わっていない。後で別の経路で終われば「記録なし」 |
 | 依頼の途中で、画面の外から kill（CLI・別の画面・異常終了） | 次の読みで、境界が違う・instance の寿命が違う・roster に無い → 依頼を `expired(session_changed)` | `expired` | `expired` | 記録なし（確認できない） |
 | 画面の再読込・WebSocket の再接続 | 境界も在籍も変わらないので依頼はそのまま。開き直した画面は `GET …/requests/:rid` で続きから出す | そのまま | そのまま | — |
@@ -407,69 +426,44 @@ CREATE TRIGGER mem_handoff_requests_forced_sticky BEFORE UPDATE OF end_forced ON
 
 - 指紋は `{request_id, id, revision, op, item_id, kind, base_version, payload}` を正規化した JSON の SHA-256（§4.3）。`op`・`item_id`・`kind`・`payload` の不変は v71 のトリガーで保証し、ガードの試験（H18）で「トリガーがある・更新が ABORT になる」を固定する
 
-### 4.6 終了（`end`）と「終わる前の更新を確認できない」を次の世代へ
+### 4.6 終了（`end`）と「終わる前の更新を確認できない」を次の世代へ（第 6 版：G は kill しない）
 
-**kill はサーバが照合してから行い、画面の `killed:true` の申告で成功を認めない。** kill の本体（今は `kill-session/route.ts:123-160` に直書き）を共有の関数 `src/lib/session/kill-instance-session.ts` の `killInstanceSession(worktreeId, { cliToolId, instanceId })` へ移す（既存の kill-session の route はそれを呼ぶだけになり、応答・副作用（auto-yes の解除・starting の記録の消去など）は変えない）。
+**G はサーバから kill しない**（PM の決定、§0.2）。停止は、人がその場で押す既存の停止（`handleKillConfirm` → `worktreeApi.killSession`（`src/lib/api-client.ts:771`）→ kill-session の route。route・api-client・hook の中身は変えない）だけ。G の `end` は停止の宣言と、停止の後の観測と記録だけを行う。古い依頼・期限・取り消し・`decide`・読みから kill に届く経路は作らない（§7.3 `handoff-no-kill-4227` で固定）。
 
-**照合と kill を別の区間にしない（第 3 版、再確認 P1-1）。** 既存の kill は `checkSessionOwnership`・`isRunning` を await してから `killSession` を呼ぶ［事実：`kill-session/route.ts:129-152`］。照合を route の始めだけで行うと、その await の間に旧プロセスが終わって同じ名前で再起動したとき、新しいプロセスを kill してから境界の変化に気づく（後から `unconfirmed` にしても終了は戻せない）。そこで次の 2 つを kill の側まで通す：
+停止のボタン（G-4 の ⑥ と「今すぐ停止」）の **押下の handler の中でだけ** 次を順に行う（effect・タイマー・`decide` の完了・依頼の状態の変化からは呼ばない。部品の試験 H15(f) で固定）：
 
-- **起動／終了の排他** `withInstanceLifecycleLock(sessionName, fn)`（新規 `src/lib/session/instance-lifecycle-lock.ts`。`instance-input-lock.ts` と同じく tmux のセッション名ごと・`globalThis` に置く・FIFO・待ちの上限つき。入力の排他とは別の錠で、入れ子の順は「lifecycle → input」に固定する）。取るのは **kill の全経路**（`killInstanceSession` の中）と **起動の全経路**（`startSession` を呼ぶ所：`send-session-start.ts:98-105`・`cli-tools/base.ts:800` の再起動・assistant の start など。全数は実装の契約で `git grep -n '\.startSession(' -- src` で数え、ガードで固定する）と、依頼の作成（§4.1 ①）。待ちの上限を超えたら何もせずに 409 `lifecycle_busy`（kill しない・起動しない）
-- **kill の全経路は tmux の終了の処理の側から逆引きして数える**（第 4 版、3 回目 P2）。`cliTool.killSession(` の呼び出しだけでは足りない（tmux の `killSession`（`src/lib/tmux/tmux.ts:951`）を直接呼ぶ所が `cliTool.killSession` の外にある［事実］）。2026-11-09 の分類（全数は実装の契約で取り直し、§7.3 のガードで固定）：
+1. **停止の宣言** `POST …/end` `{ ifVersion, force? }`（同期の 1 transaction）：印・依頼の `version === ifVersion`・依頼が `awaiting_agent`／`reviewing`／`applying`（`applying` は `force` のときだけ）・会話の寿命（境界の `id`・在籍の寿命）が同じ。違えば 409 `session_changed` など（依頼は `expired(session_changed)`）。このとき画面は「依頼の後にセッションが入れ替わりました。停止は今のセッションに効きます（引き継ぎは記録されません）」と出し、既存の停止を押すかは人が決める（押しても依頼は記録しない）。通れば `state='ending'`・`end_token`・**`end_forced = MAX(end_forced, force ? 1 : 0)`**（一度立った forced は同じ依頼では消さない。トリガーでも 1 → 0 を拒む）・`apply_token=NULL`（進行中の `decide` を最終の区間で止める）・未決の提案を `discarded(forced)`（今回 `force` のとき）・`version+1`。応答は `endToken`
+2. **既存の停止**：画面が今と同じ停止（`worktreeApi.killSession(worktreeId, cliToolId, instanceId)`）を呼ぶ。G はその応答を観測の材料にしない（成功・失敗のどちらでも 3 へ進む。画面の `killed` の申告で成功を認めない）
+3. **観測** `POST …/end/observe` `{ endToken }`：依頼が `ending` かつ `end_token` が同じ（違えば 409、何も変えない）。サーバが `cliTool.isRunning(sessionName)` と、今の境界の `id`・在籍の寿命を読む（**読むだけ。kill・起動をしない**）
+4. **記録（同期の 1 transaction）**：依頼が `ending` かつ `end_token` が同じ。
+   - `isRunning` が真で、境界・在籍の寿命が依頼と同じ → 止まっていない：`reviewing` に戻す（`end_token=NULL`、`end_forced` はそのまま）、409 `not_stopped`。画面は「停止を確かめられませんでした」と停止のボタンをもう一度出す（押すのは人）
+   - `isRunning` の読みが失敗した → 同じく `reviewing` に戻して 409 `not_stopped`（止まったと言わない）
+   - それ以外は `ended`・`ended_at`、`outcome` を次の **優先の順** で決める：
+     1. `end_forced=1` → `unconfirmed(forced)`（**4 条件より優先**。`done` 済み・提案 0 でも。前の宣言で立った forced も含む）
+     2. 境界の `id` か在籍の寿命が依頼と違う（停止の後に起動し直した。`isRunning` が真でも偽でも）→ `unconfirmed(session_changed)`。新しいプロセスには何もしない
+     3. §0.1 G5 の 4 条件（`agent_done_at` がある・未決の提案が無い・`failed`/`conflict` が無い・人の停止の後に `isRunning` が偽で境界と在籍の寿命が依頼と同じ）が全部 → `confirmed`
+     4. それ以外 → `unconfirmed(<最初に欠けた条件の語>)`（`agent_timeout`・`conflict_left`・`apply_failed` など）
+5. 応答の消失：同じ `end` の再送は 1 の `version` の照合で 409 になり今の状態を返す。同じ `endToken` の `end/observe` の再送は、記録の後なら 409 と今の状態（`ended` と `outcome`）を返す。G は kill しないので、再送で kill が増えることは無い（既存の停止をもう一度押すのは人）
 
-  | tmux の `killSession` に届く所 | 扱い |
-  |---|---|
-  | 各 driver の `killSession`（`base.ts:983` の共通の stop・`opencode.ts`・`opencode-v2.ts` の stop など） | `cliTool.killSession` の中身。呼ぶのは `killInstanceSession`（排他を取る）と、起動の中の `settleLaunchRole` の `kill`（`base.ts:417`、起動の排他に再入）だけにする |
-  | `claude-session.ts:712` の `ensureHealthySession`（起動の中の不健全な session の kill） | 起動の中（`startClaudeSession`）からだけ呼ばれる → 起動の排他に再入。起動の外から呼ぶ所ができたらガードで落とす |
-  | `session-key-sender.ts:166`（Claude の stop） | `stopClaudeSession`（`claude.ts:141` の `killSession`）の中身 → 上の driver と同じ |
-  | `session-cleanup.ts:274` の `killWorktreeSession`（worktree の削除） | **排他へ通す**（`withInstanceLifecycleLock(sessionName, …)` で包む。中身は変えない）。worktree の削除の間に起動・`end` が走りうるので除外しない |
-  | `session-cleanup.ts:314` の `cleanupGlobalSessions` | **除外**：`GLOBAL_SESSION_WORKTREE_ID` の session は roster の instance ではなく、依頼を作れない（依頼の作成は roster と D1 の境界を要する）。保証の範囲は「依頼のある instance の session」で、この除外はその外 |
-  | transport の `killSession`（`polling-tmux-transport.ts:67`・`control-mode-tmux-transport.ts:102`） | 今は呼ぶ所が無い［事実：`git grep` で 0 件］。呼ぶ所ができたらガードで落とす（表に足すまで） |
-
-  保証の範囲：依頼のある instance の session を kill する CommandMate のサーバの中の経路は、すべて `withInstanceLifecycleLock` の中で kill する。範囲の外（防げない）：別のサーバ・人の `tmux kill-session`・`cleanupGlobalSessions`。これらは kill の直前の世代の照合と止まったことの確認（§4.6 の 3）で「確認できない」側に倒す
-- **排他の順序と再入の契約**（第 4 版、3 回目 P2）。既存の送信は入力の排他を持ってから、終わった Agent の自動の再起動で `startSession` に入る［事実：`send-user-message.ts:702-713` の `withInstanceInputLock` の中の配送 → `base.ts:800`］ので、「lifecycle → input」の順と逆向きの入れ子が既にある。そこで次のとおり定める：
-  1. **順序**：外から新しく取るときは lifecycle → input。起動の中の打鍵（`launch-keys.ts:40` の `withInstanceInputLock`）は lifecycle を持ったまま input を待ってよい
-  2. **input を持った文脈から lifecycle を取るときは待たない**（送信の中の自動の再起動）：その文脈で lifecycle が空いていれば取り、空いていなければ **待たずに** `InstanceLifecycleBusyError`（`code = INSTANCE_LIFECYCLE_BUSY_CODE`、文面に `lifecycle busy, nothing was typed`）を投げる（起動しない・キーを送らない）。送信は `not-sent`（理由 `lifecycle-busy`）で失敗し（D1 の予約は `pending` に戻る）、画面は下書きを残す。**この写像は既存の配送の分類に足す**（第 5 版、4 回目 P2）：既存の配送は失敗を `classifySendFailure`（`send-attempt-state.ts`）で分類し、知らない失敗は最後の行で `indeterminate`（`send-error`）にする［事実：`send-attempt-state.ts:399`］。`indeterminate` は境界の予約を `unknown` で決着させる［事実：`session-brief.ts` の `outcomeOf`・`settleInLock`］ので、足さないと打鍵 0 でも予約が戻らない。そこで `classifySendFailure` の先頭の側（#4040 の判定の後、#4115 の role の判定と並べて）に `carriesCode(error, INSTANCE_LIFECYCLE_BUSY_CODE)` と文面の照合で `{ state:'not-sent', reason:'lifecycle-busy' }` を返す行を足し（ツールは送信の失敗を `Failed to send message to <tool>: …` で包み元の例外を `cause` に持つ［事実：`send-attempt-state.ts` の `carriesCode` の注］ので code で読み、`cause` の無い包みには文面で読む）、`send-attempt-types.ts` の `SendAttemptReason` に `'lifecycle-busy'` を足す。配送の catch（`send-user-message.ts:612-633` の `deliver` の catch と、外の `withInstanceInputLock(...).catch`）はどちらも `classifySendFailure` を通るので、ここは変えない（`composerStillHolds` の分岐は `submit-unconfirmed`・`prompt-unreported` だけで当たらない）。送信の route は `send/send-failure.ts` で、自分の試行の理由が `lifecycle-busy` のとき role の拒否（`role-condition-failed`・`role-launch-refused` を 409 と安定した code で返す既存の分岐［事実：`send-failure.ts:81-91`］）と同じ形で 409 `INSTANCE_LIFECYCLE_BUSY` を返す（500 の「送信の失敗」にしない）。CLI と画面の文書の理由の一覧（`docs/user-guide/cli-operations-guide.md` と `docs/en/…` の `lastSend` の行）に `lifecycle-busy` を足す。input の持ち主が lifecycle を待つことが無いので、lifecycle の持ち主（`end`・外の起動）が input を待っても循環しない
-  3. **同じ所有者の再入**：`instance-input-lock.ts` と同じく `AsyncLocalStorage` で持ち主を持ち、持ち主の文脈からの再取得は合流する（2 回取らない）。合流するのは `end` の route → `killInstanceSession`、起動の共通の関数 → `startSession` → `settleLaunchRole` の `kill`・`ensureHealthySession`・Codex の `relaunchIntoSamePane`
-  4. **旧 ticket の失効の後**：Agent の交代（`beginAgentSession` → `invalidateInstanceInput`）で input の ticket を失った文脈（古い送信）は、lifecycle を新しく取らない（`InstanceInputOwnershipLostError` と同じく断る）。古い送信が新しい Agent を再起動・kill しない。lifecycle の錠自体は Agent の交代で失効させない（kill・起動の持ち主は交代の当事者なので）
-  5. 待ちの上限：lifecycle の外からの待ちは上限つき（U14）で、超えたら 409 `lifecycle_busy`。2 の「待たない」は上限 0 と同じ扱い
-- **Agent の識別は 3 値の規則にする**（第 5 版、4 回目 P1。#4288 で PM が決めた「端を 1 つずつ塞がず規則にする」と同じ形。第 4 版の `readProcessIdentity` と `tpgid` の世代はやめる）。kill の対象の識別は、観測を 1 つの純関数 **`classifyAgentIdentity(expected, record, observation, decisionStartedAt) → 'same' | 'different' | 'unknown'`**（新規 `src/lib/session/agent-identity.ts`）に通し、**`'same'` のときだけ kill する**。`'different'` は kill せず `identity_changed`、`'unknown'` は kill せず `identity_unknown`（fail-closed。画面は「今のプロセスを確かめられません」と出し、人の手動の停止（ターミナルで Agent を止める）へ案内する）
-  - **規則**：「同じ」と言えるのは、**Agent 自身のプロセス** を **起動の時に記録した識別** と照らして一致したときだけ
-    - **Agent 自身のプロセス**：pane のプロセスの木（`ps -ax -o pid= -o ppid= -o lstart= -o args=` の 1 回の snapshot を、tmux の `#{pane_pid}` を根に辿る）のうち、ツールごとに宣言した実行ファイルの名前（新設 `agentProcessNames`。各 driver の静的な宣言で、例は `claude`・`codex`・`copilot`・`opencode`・`agy`・Command Code の実行ファイル。node・bun で動くものは `args` の先頭のスクリプトの basename で照合）に一致する **ただ 1 つ** のプロセス。一致したものの子孫に同じ名前があれば外側（shell に近い側＝Agent の寿命と同じ寿命）を採る。**shell（`pane_pid` の shell 自身）・宣言に無い wrapper（`env`・`sh -c`・`npx`・名前の分からない `node`）は採らない**。一致が 0 件、または祖先と子孫の関係に無い一致が 2 件以上なら決まらない（`'unknown'`）。`pane_pid` は木の根を探すためだけに使う
-    - **起動の時に記録した識別**：**起動の世代の記録** `launchIdentity`（新規、`globalThis` の Map、tmux のセッション名ごと）。`beginAgentSession`（`agent-session-lifecycle.ts`）の中で **同期に** 世代番号を 1 つ進め、pid の欄を空にする（Map の操作なので失敗しない。D1 の境界の DB の記録とは別で、境界の記録が失敗しても世代番号は進む）。起動の待ち（各 driver の `waitForReady` の後、`startSession` が返る前）で Agent 自身のプロセスを読み、`{ generation, pid, startedAt, recordedAt }` を書く（読めなければ空のまま＝その世代は以後 `'unknown'`）。すべての起動の経路（各 driver の `startSession`・Codex の `relaunchIntoSamePane`・`base.ts` の送信の前の再起動）は `beginAgentSession` を呼ぶ［事実：`git grep -ln 'beginAgentSession(' -- src` の 10 ファイルは `buildAgentLaunchCommandLine` を呼ぶ 9 ファイルをすべて含む。§7.3 のガードで固定］。サーバの再起動で Map が消えたら `'unknown'`
-    - **識別に使わないもの**：`tpgid`（端末の前面のプロセスグループの ID。job control の無い shell では Agent が shell と同じグループで動き、同じ pane で Agent A→B と起動し直しても同じ値のまま［事実：`ps(1)` の `tpgid` の定義。起動は利用者の login shell に起動の行を打つ（`tmux.ts` の `respawnLoginShell`・`codex.ts` の起動の行）］）・`pane_pid`・shell の pid・プロセスグループの ID
-  - **判定の表**（上から最初に当たった行。観測は `observeAgentProcess(sessionName, agentProcessNames)` の 1 か所で取り、各観測点の値に読んだ時刻を付ける）：
-
-    | 条件 | 結果 |
-    |---|---|
-    | 起動の世代の記録の世代番号が期待（依頼の値）と違う | `'different'`（CommandMate の経路で起動し直した。境界の記録の成否に依らない） |
-    | 観測点のどれかが失敗（tmux の表示値・`ps` が読めない・解析できない）・**値が古い**（観測の時刻が `decisionStartedAt` より前、キャッシュの値）・起動の記録の pid が空・Agent 自身のプロセスが決まらない（shell しか見えない・宣言に無い wrapper だけ・候補が 2 つ以上） | `'unknown'` |
-    | 観測の Agent 自身のプロセスの pid・開始時刻（`lstart`）が期待と違う | `'different'`（排他を通らない入れ替え・人の手での起動し直し） |
-    | 世代番号・pid・開始時刻が期待・記録・観測の 3 つで一致 | `'same'` |
-
-  - **期待の値**：依頼の作成（§4.1 ①、排他の中）で記録と観測を `classifyAgentIdentity(記録, 記録, 観測)` に通し、`'same'` のときだけ `{ generation, pid, startedAt }` を依頼の `process_identity` に固定する（それ以外は 409 `session_unknown` で依頼を作らない）
-  - **kill の直前**：`killInstanceSession` に `expect?: { processIdentity }` を足し、`cliTool.killSession` を呼ぶ **直前に**（所有の確認・`isRunning` の await の後、間に他の await を挟まずに）観測を 1 回取り判定する。`'same'` 以外は kill せず `{ result:'identity_changed' }`／`{ result:'identity_unknown' }`。`isRunning` が偽なら kill せず `{ result:'not_running' }`（下の 3 で止まったと扱う）。`expect` を渡さない呼び出し（既存の kill-session の route・設定の画面の再起動・roles の画面）は今どおり識別を見ない（§10）
-  - 観測点（tmux の表示値・`ps`・起動の記録・境界の記録）ごとの失敗の注入は §7.4.1 の表駆動の対照で「不明 → kill しない」を固定する
-  - **止める条件**：どのツールでも Agent 自身のプロセスを識別できない（pane の木に宣言した名前で現れない）と分かったら、kill を作らずに §0 に書いて止まる（終了の流れの kill を人の手動の停止に置き換える案）。［見立て：起動の行は `NAME='value' … <command>` で、shell は `command` を自分の子として直接起動する（`buildAgentLaunchCommandLine`）ので、Agent は pane の shell の子に名前で現れる見込みで、この条件には当たらない。ツールごとの実測は U13 の UAT。識別できないと分かったツールは `agentProcessNames` を宣言せず常に `'unknown'`（そのツールの `end` は手動の停止へ案内）にし、ツール単位で fail-closed にする］
-
-G の `end` の route は、全体を `withInstanceLifecycleLock` の中で行う：
-
-1. **始め（同期の 1 transaction）**：印・依頼の `version === ifVersion`・依頼が `awaiting_agent`／`reviewing`／`applying`（`applying` は `force` のときだけ）・会話の寿命（境界の `id`・在籍の寿命）が同じ。違えば 409 `session_changed` などで kill しない（**古い依頼から新しいプロセスを kill しない**）。通れば `state='ending'`・`end_token`・**`end_forced = MAX(end_forced, force ? 1 : 0)`**（一度立った forced は同じ依頼では消さない。トリガーでも 1 → 0 を拒む）・`apply_token=NULL`（進行中の `decide` を最終の区間で止める）・未決の提案を `discarded(forced)`（今回 `force` のとき）・`version+1`
-2. kill：`killInstanceSession(worktreeId, { cliToolId, instanceId, expect: { processIdentity: 依頼の値 } })`。中の await（所有の確認・`isRunning`）の間も排他を持ったままなので、CommandMate の経路の起動は割り込めない。排他を通らない入れ替えは直前の世代の照合で `identity_changed` になり、kill しない
-3. 止まったことの確認：`isRunning` が偽なら止まった。真なら観測を `classifyAgentIdentity` に通し、`'same'` なら `kill_failed`、`'different'` なら「古いプロセスは止まり、別のプロセスが動いている」（`session_changed`。kill し直さない）、`'unknown'` なら `kill_failed` と同じに扱う（止まったと言わない）
-4. **終わり（同期の 1 transaction）**：依頼が `ending` かつ `end_token` が同じ。`identity_changed`（kill しなかった）→ `expired(session_changed)`。`identity_unknown`（kill しなかった）→ `reviewing` に戻して 409 `identity_unknown`（`end_forced` はそのまま）。`kill_failed` → `reviewing` に戻す（`end_forced` はそのまま）。止まっていれば `ended`・`ended_at`、`outcome` を次の **優先の順** で決める：
-   1. `end_forced=1` → `unconfirmed(forced)`（**4 条件より優先**。`done` 済み・提案 0 でも。前の `end` で立った forced も含む）
-   2. 境界の `id` が依頼と違う・3 で別の世代が動いている → `unconfirmed(session_changed)`
-   3. §0.1 G5 の 4 条件（`agent_done_at` がある・未決の提案が無い・`failed`/`conflict` が無い・kill を確かめた）が全部 → `confirmed`
-   4. それ以外 → `unconfirmed(<最初に欠けた条件の語>)`（`agent_timeout`・`conflict_left`・`apply_failed` など）
-5. 排他を外す（待っていた起動はここから進み、新しい境界は記録の後に開く）
-6. 応答の消失：同じ `end` の再送は 1 の `version` の照合で 409 になり、今の状態（`ended` と `outcome`）を返す。kill を 2 回しない
-
-- 防げないこと［見立て］：排他はサーバのプロセスごと（`instance-input-lock.ts` の先頭のコメントと同じ限界）。2 つの CommandMate サーバが 1 つの tmux を共有する・人が tmux を直接操作する入れ替えは排他を通らない。それは kill の直前の識別で狭めるが、識別の読み（tmux と `ps` の読み）と `killSession` の中の tmux の操作の間は残る。記録は「確認できない」側に倒す。Agent の識別は前面のプロセスに依らない（Agent がエディタなどの子を出していても、Agent 自身のプロセスは木の中で同じ）。ただし Agent が同じ名前の子を兄弟として出す・宣言に無い wrapper で起動される形は `'unknown'` になり kill しない（安全側。U13）
-
-- 「今すぐ終了」（強制）も同じ `end` の route（`force:true`）。kill-session の route を画面から直接呼ばない（`popup=1`・mode `on` のとき）
-- 読み口（S-C）：`readPreEndUpdate(db, { worktreeId, instanceId, before })` は、その (worktree, instance) の `ended` の依頼のうち `ended_at < before` で最も新しいものが、**その直前の境界より後**（同じ世代の終わり）に `confirmed` なら `'recorded'`、それ以外（無い・`unconfirmed`・前の世代のもの）は `'not_recorded'`。D2 §7.2 の X1〜X3 はそのまま D2 が判定する
-- サーバが kill の後の 3 に届く前に落ちたら、依頼は `ending` のまま `expires_at` の後の読みで `expired`＝`not_recorded`（確認できない側）
+- 「止まった」の観測は `isRunning` が偽で、境界・在籍の寿命が依頼と同じこと。プロセスの識別（pid・世代）は見ない［見立て］：`confirmed` が言うのは「依頼の会話の Agent が止まり、別の会話は始まっていない」ことで、CommandMate の起動し直しは境界を変える（D1）。D1 の境界の記録に失敗した起動し直しを、人がさらに止めていた場合だけは区別できないが、そのときも「動いていない」は正しく、G は何も kill しない（誤って `confirmed` になるのは「止まったのは依頼の Agent か、その後に起動された Agent か」だけで、どちらも止まっている）
+- 防げないこと［見立て］：人が押す既存の停止は今どおり session の名前で kill し、期待する世代を照合しない（§10）。押す前にセッションが入れ替わっていれば今の画面のセッションが止まるが、これは今の「終了」と同じ動きで、G が新しく作る危険ではない。G の依頼が古くなったことは 1 の宣言の 409 で人に見せる
+- 読み口（S-C）：`readPreEndUpdate(db, { worktreeId, instanceId, before })` は、その (worktree, instance) の `ended` の依頼のうち `ended_at < before` で最も新しいものが、**その直前の境界より後**（同じ世代の終わり）に `confirmed` なら `'recorded'`、それ以外（無い・`unconfirmed`・前の世代のもの・`ending` のまま `expired`）は `'not_recorded'`。D2 §7.2 の X1〜X3 はそのまま D2 が判定する
+- サーバか画面が 3・4 に届く前に落ちたら、依頼は `ending` のまま `expires_at` の後の読みで `expired`＝`not_recorded`（確認できない側）。画面の再読込なら `GET …/requests/:rid` で `ending` を見て、同じ `endToken` で `end/observe` を送り直せる
 - 文言は D2 の固定の 1 行のまま（「確認できない」）。G は理由の語を brief に出さず、上限の値を持たない（D2 の先頭の行の上限は D2 の実装中の設計で **128 バイト**（第 2 版の 96 から実装で直した。`../commandmate-issue-4224` の作業中の設計書 §7.1、2026-11-09 に読んだ）。G-PR3 の接続の試験は D2 の export した定数を import して使い、数値を写さない）。理由は G-1 の「終了の記録」で人が読む
+
+#### 4.6.1 採らないもの（第 6 版、PM の決定で G から外した）
+
+第 5 版までの §4.6 は「G の `end` がサーバで照合してから kill する」前提で、次を足していた。PM の決定（終了の流れから自動の kill を外す）で前提が無くなったので、どれも作らない。既存のファイル（kill-session の route・起動の経路・`session-cleanup.ts`・`agent-session-lifecycle.ts`・各 driver・`send-attempt-*.ts`・`send-failure.ts`・`cli-operations-guide.md`）は G では変えない。
+
+| 外したもの（第 5 版まで） | 外した理由 | 代わり |
+|---|---|---|
+| 起動／終了の排他 `withInstanceLifecycleLock`（`instance-lifecycle-lock.ts`）、起動の全経路と `killWorktreeSession` を包む変更、排他の順序と再入の契約 5 項 | 守っていたのは「G の kill の await の間に起動し直した新しい Agent を、G が kill しない」こと（2 回目 R-P1-1）。G が kill しないので、守る対象が無い | 無し（起動・kill の既存の経路は今どおり） |
+| `InstanceLifecycleBusyError`（`INSTANCE_LIFECYCLE_BUSY_CODE`・文面 `lifecycle busy, nothing was typed`）、`classifySendFailure` の `lifecycle-busy` の行、`SendAttemptReason` の `'lifecycle-busy'`、`send-failure.ts` の 409 `INSTANCE_LIFECYCLE_BUSY`、`cli-operations-guide.md`（ja・en）の理由の一覧 | 排他を足さないので、送信の中の再起動が lifecycle を待たずに断る場面が無い（4 回目 P2 の前提が消える）。新しいエラーも文面も足さないので、5 回目 P2(1) の「本文に含まれる新しい文言を未送信の証拠と誤る」も起きない | `classifySendFailure`（`send-attempt-state.ts`）は 1 行も変えない。G が足す送信の中止（`BriefChoiceAbortedError`、§3.2）は **型で読み、文面で分類しない**（5 回目 P2(1) の規則をこちらに当てる。§3.2 と H21(j)） |
+| Agent の識別：起動の世代の記録 `launchIdentity`、`beginAgentSession` の変更、各 driver の `agentProcessNames`、観測 `observeAgentProcess`、3 値の `classifyAgentIdentity`（`agent-identity.ts`） | kill の対象を確かめるためのもの。5 回目 P1（宣言名に一致する wrapper の外側を本体と取り違え、本体だけの交代を `'same'` と読む）のように、識別の端は各 CLI のプロセス構成に依り実機でしか決まらない。3〜5 回目の P1 はすべてこの端だった | 「止まった」は `isRunning` と境界・在籍の寿命で観測する（§4.6 の 3・4）。識別しないので、取り違えても kill に届かない |
+| 観測点 × 失敗の注入の表（第 5 版 §7.4.1）、H15(d)(e)(g)(h)(i)(j)、H23 | 上の識別と排他の試験 | H15 を「G から kill に届かない」対照に置き換えた（§7.4） |
+| kill の側へ通す期待の識別（`killInstanceSession` の `expect.processIdentity`）、kill の本体の共有の関数 `kill-instance-session.ts` への移動、v71 の `process_identity` の列 | kill しないので照合する所が無い | kill-session の route のまま（変えない） |
+| kill の全経路を tmux の `killSession` から逆引きして、排他の中にあることを固定するガード（第 4 版 `instance-lifecycle-lock-4227`）と `agent-identity-4227` のガード | 排他と識別を固定するためのもの | 「G の閉包に kill が無い」ガード（§7.3 `handoff-no-kill-4227`） |
+| 識別不明のとき従来の kill の Modal に戻る導線（第 5 版 §4.1 ① の `session_unknown` → 今どおりの確認の Modal） | 5 回目 P2(2)。識別が無くなり、G-4 の停止そのものが既存の停止なので、別の導線として残す意味が無い。Modal へ戻すと「依頼の記録が無いまま終わる」経路がダイアログの外にもう 1 つできる | 依頼を作れない（境界が無い）ときは、ダイアログの中で「停止」（既存の停止。依頼が無いので記録なし）と「やめる」だけを出す（§4.1 ①） |
 
 ---
 
@@ -530,7 +524,7 @@ G の `end` の route は、全体を `withInstanceLifecycleLock` の中で行�
 | PR | 中身 | 待つもの |
 |---|---|---|
 | G-PR1 | S-A（`memWriteFromScreen` と `ENTRANCES` の 5 行）・S-D（遷移 1 つと `closeMemItemVersioned`）・人の項目の API（§2.3）・G-1 の画面（一覧・追加・編集・close・競合・未配送の知らせ）・S-E の mode の画面・ja/en の文書 | E のマージ（G-1 から E のページへ移る・decision の表示。マージの順 E → F → G） |
-| G-PR2 | v71（E = v69・F = v70 の後）・`src/lib/handoff/**`（依頼・提案・decide・rebase・期限・会話の寿命）・kill の本体の共有の関数への移動・CLI `handoff`・G-4 の画面・ガード | G-PR1 |
+| G-PR2 | v71（E = v69・F = v70 の後）・`src/lib/handoff/**`（依頼・提案・decide・rebase・期限・会話の寿命・停止の宣言と観測）・CLI `handoff`・G-4 の画面（停止は既存の停止を呼ぶ）・ガード（第 6 版：kill の本体の移動・排他・識別は外した、§4.6.1） | G-PR1 |
 | G-PR3 | G-3（開くときの preview と選択、§3.1.1 の分類）・S-B の欄と画面の側の契約（§3.2.1）・S-C の読み口の接続（`pre-end.ts` と `sources.ts` の 1 行）・S-F の C の `itemCap` と provider の `detail`（PM の決定 (a)） | **D2 の develop へのマージ**（S-B・S-C・S-F は D2 のマージを前提に、この PR で足す。D2 の契約は変えない） |
 
 ### 7.2 新規ファイル（A〜D1 の外）
@@ -539,8 +533,7 @@ G の `end` の route は、全体を `withInstanceLifecycleLock` の中で行�
 |---|---|
 | `src/lib/db/migrations/v71-mem-handoff.ts`・`runner.ts` の登録 | §4.3 |
 | `src/lib/db/handoff-db.ts` | 依頼・提案の CRUD（`mem_items` は書かない）。名前は A の `mem-*.ts` の glob に入れない |
-| `src/lib/handoff/request.ts`・`proposals.ts`・`decide.ts`・`pre-end.ts`・`template.ts` | 依頼の作成と状態（期限は読むときに判定）・提案の受け入れ（A の検査を呼ぶ）・承認と確定（S-A の入口だけを呼ぶ）・読み口（S-C）・依頼の文 |
-| `src/lib/session/instance-lifecycle-lock.ts`・`src/lib/session/agent-identity.ts` | 起動／終了の排他（順序と再入の契約を含む）と Agent の識別（§4.6。起動の世代の記録 `launchIdentity`、観測 `observeAgentProcess`、3 値の判定 `classifyAgentIdentity`。第 5 版で `process-identity.ts` の `tpgid` の世代から置き換え）。tmux と `ps` を読むのはサーバの側（`src/lib/tmux` を使う。CLI からは呼ばない）。`src/lib/handoff/**` からは import しない（世代は route が読んで値で渡す。下の no-generation のガードと同じ判定） |
+| `src/lib/handoff/request.ts`・`proposals.ts`・`decide.ts`・`end.ts`・`pre-end.ts`・`template.ts` | 依頼の作成と状態（期限は読むときに判定）・提案の受け入れ（A の検査を呼ぶ）・承認と確定（S-A の入口だけを呼ぶ）・停止の宣言と観測の記録（§4.6。kill しない。`isRunning` の値は route が読んで値で渡す）・読み口（S-C）・依頼の文 |
 | `src/lib/handoff/screen-client.ts` | 画面の client（`screenRequestHeaders()` つき、A の `screen-client.ts` と同じ形） |
 | `src/app/api/worktrees/[id]/mem/screen/**`・`…/mem/handoff/**` | §2.3・§4.3 |
 | `src/cli/commands/handoff.ts`（`program.ts` に登録）・`src/cli/types/` の型 | `propose`・`done` だけ |
@@ -549,19 +542,20 @@ G の `end` の route は、全体を `withInstanceLifecycleLock` の中で行�
 
 変える A〜D1 のファイル（PM の決定の範囲）：`src/lib/mem/service.ts`（S-A の入口 1 つ、既存の 3 つは変えない）・`src/lib/mem/transitions.ts`（S-D の遷移 1 つ）・`src/lib/db/mem-db.ts`（S-D の `closeMemItemVersioned` 1 つ、既存の `closeMemItem` は変えない）・`tests/unit/lib/mem/write-entrances-recreate-4221.test.ts`（`ENTRANCES` に行を足すだけ）・G-PR3 で `send-request.ts`・`session-brief.ts`・`send/route.ts`・`session-brief-db.ts`・**`src/lib/session/send-user-message.ts`**（S-B。`BriefChoiceAbortedError` を `classifySendFailure` に渡さず `stage:'brief_choice'` で返す、§3.2。第 4 版、3 回目 P2）・`sources.ts` の 1 行（S-C）。S-F（PM の決定 (a)）で `src/lib/brief/fit.ts`（`FitTextOptions.itemCap` と `uncapped` の分岐だけ）・`src/lib/brief/provider.ts`（`detail === 'full'` で `itemCap:false` を渡すだけ）・`src/lib/session/brief-provider.ts`（`BriefRequest.detail?` の欄だけ）。`render.ts` は変えない（`fittedEntryLine` の `all` の引数に `uncapped` を渡すだけで足りる）。C の既存の `it`・期待値・出力は変えない。
 
-変える既存のファイル（A〜D1 の外）：`src/app/api/worktrees/[id]/kill-session/route.ts`（kill の本体を `src/lib/session/kill-instance-session.ts` へ移すだけ。応答・副作用は変えない、既存の試験はそのまま通す。移した本体は起動／終了の排他を取るので、既存の終了も起動と直列になる。`expect` を渡さないので世代は見ない）・起動の全経路（`send-session-start.ts`・`cli-tools/base.ts` の再起動・assistant の start などの `startSession` の呼び出しを `withInstanceLifecycleLock` で包むだけ。起動の中身は変えない。送信の中の再起動は §4.6 の順序の契約の 2 で待たずに取る）・`src/lib/session-cleanup.ts`（`killWorktreeSession` の kill を `withInstanceLifecycleLock` で包むだけ。§4.6 の kill の全経路の表）・`src/lib/session/agent-session-lifecycle.ts`（`beginAgentSession` で起動の世代番号を同期に進めるだけ、第 5 版）・各 driver（`agentProcessNames` の宣言と、起動の待ちの後に `launchIdentity` を書く 1 行、第 5 版）・`src/lib/session/send-attempt-state.ts`（`classifySendFailure` に `lifecycle-busy` の 1 行、第 5 版、4 回目 P2）・`src/lib/session/send-attempt-types.ts`（`SendAttemptReason` に `'lifecycle-busy'`）・`src/app/api/worktrees/[id]/send/send-failure.ts`（`lifecycle-busy` を 409 `INSTANCE_LIFECYCLE_BUSY` に）・`docs/user-guide/cli-operations-guide.md`・`docs/en/user-guide/cli-operations-guide.md`（`lastSend` の理由の一覧）・`src/lib/api-client.ts`（`sendMessage` の options と戻り値の型、§3.2.1）・`useWorktreeDetailController.ts`（`openActiveKillConfirm`・`handleKillConfirm` の前に分岐）・`WorktreeDetailDesktop.tsx`／`WorktreeDetailRefactored.tsx`（ダイアログを描く）・画面の送信（`MessageInput.tsx`・`ChatSurface.tsx`・`MobileTerminalTab.tsx`・`SessionTile.tsx`・`usePendingMessages.ts` — D1 §4.1 の表の画面の送信の全経路。G-3 はこれらが通る共通の送信の関数の 1 か所に挟む。共通の 1 か所が無ければ全部に置き、表駆動の試験で全経路を固定する）・`MobileTerminalActionsSheet.tsx`（入口）・`RepositoryList.tsx`（入口）・`locales/{ja,en}`。
+変える既存のファイル（A〜D1 の外）：`src/lib/api-client.ts`（`sendMessage` の options と戻り値の型、§3.2.1。`killSession` は変えない）・`useWorktreeDetailController.ts`（`openActiveKillConfirm` の前に分岐。`handleKillConfirm` の中身（既存の停止）は変えず、G-4 の停止のボタンからも同じものを呼ぶ）・`WorktreeDetailDesktop.tsx`／`WorktreeDetailRefactored.tsx`（ダイアログを描く）・画面の送信（`MessageInput.tsx`・`ChatSurface.tsx`・`MobileTerminalTab.tsx`・`SessionTile.tsx`・`usePendingMessages.ts` — D1 §4.1 の表の画面の送信の全経路。G-3 はこれらが通る共通の送信の関数の 1 か所に挟む。共通の 1 か所が無ければ全部に置き、表駆動の試験で全経路を固定する）・`MobileTerminalActionsSheet.tsx`（入口）・`RepositoryList.tsx`（入口）・`locales/{ja,en}`。
+
+**第 6 版で変えないことにした既存のファイル**（§4.6.1）：`src/app/api/worktrees/[id]/kill-session/route.ts`（kill の本体を移さない）・起動の全経路（`send-session-start.ts`・`cli-tools/base.ts` など。排他で包まない）・`src/lib/session-cleanup.ts`・`src/lib/session/agent-session-lifecycle.ts`・各 driver（`agentProcessNames` を足さない）・`src/lib/session/send-attempt-state.ts`・`src/lib/session/send-attempt-types.ts`・`src/app/api/worktrees/[id]/send/send-failure.ts`・`docs/user-guide/cli-operations-guide.md`・`docs/en/user-guide/cli-operations-guide.md`。
 
 ### 7.3 ガード（`tests/unit/guards/`、新規）
 
-- `handoff-screen-only-4227.test.ts`：`src/cli/**` が `mem/screen`・`handoff/requests/*/(decide|cancel|end|extend|sent)` の書き込みと `X-CommandMate-Client` を持たない（A の `mem-mode-write-screen-only.test.ts` と同じ形。A の試験は変えない）
+- `handoff-screen-only-4227.test.ts`：`src/cli/**` が `mem/screen`・`handoff/requests/*/(decide|cancel|end|end/observe|extend|sent)` の書き込みと `X-CommandMate-Client` を持たない（A の `mem-mode-write-screen-only.test.ts` と同じ形。A の試験は変えない）
 - `handoff-no-resident-4227.test.ts`：`src/lib/handoff/**` が `setInterval`・`setTimeout`（打ち切りの `AbortController` を除く）・detached・`unref` を持たない（A の `mem-no-resident-4222.test.ts` と同じ判定）
 - `handoff-no-generation-4227.test.ts`：`src/lib/handoff/**` の import の閉包に LLM の SDK・`@/lib/report`・tmux を動かすモジュールが無い（C の I9 と同じ判定）
 - `handoff-approval-not-from-auto-yes-4227.test.ts`：§5.3 の閉包の検査。`decide.ts` を import するのは `…/handoff/requests/[rid]/decide/route.ts` だけ
 - `memWriteFromScreen` を呼ぶのは `src/lib/handoff/decide.ts` と `…/mem/screen/**/route.ts` だけ（E T23 の (2) と同じ形）
 - `closeMemItemVersioned` を呼ぶのは `src/lib/mem/service.ts` の `memWriteFromScreen` だけ。`withdraw-recorded` の文字列が `src/cli/**`・`src/lib/handoff/proposals.ts` に無い
-- `killInstanceSession` を呼ぶのは kill-session の route と `…/handoff/requests/[rid]/end/route.ts` だけ。`src/lib/handoff/**` の閉包には入らない（上の no-generation と同じ判定）。G の `end` の route は `expect.processIdentity` を必ず渡す
-- `instance-lifecycle-lock-4227.test.ts`：`src/**` の `.startSession(` の呼び出しと `cliTool.killSession(` の呼び出しが、すべて `withInstanceLifecycleLock` の callback の中か、それを取る関数（`killInstanceSession`・起動の共通の関数）の中にある（呼び出し元の表を本文から求め、新しい呼び出しを足すと表に足すまで落ちる。`CALLERS` と同じ形）。**加えて tmux の側から逆引きする**（第 4 版、3 回目 P2）：`src/lib/tmux/tmux.ts` の `killSession` を import する全モジュール（TypeScript の AST で、名前つきの import・`as` の別名・`import * as` の名前空間の `ns.killSession`・再 export を辿る）と、`SessionTransport` の `killSession` の呼び出しを本文から求め、各呼び出しが §4.6 の kill の全経路の表の「排他の中」「再入」「除外（理由つき）」のどれかの行にあることを確かめる。陽性対照（`os.tmpdir()` の `mkdtempSync` に置いた fixture のソースで）：表に無い直接の `killSession(name)`・`import { killSession as k }` の `k(name)`・`import * as tmux` の `tmux.killSession(name)` の 3 つがそれぞれ落ちる。陰性対照：表の行どおりの呼び出しは通る
-- `agent-identity-4227.test.ts`（第 5 版、4 回目 P1）：(1) `buildAgentLaunchCommandLine` を呼ぶ `src/**` のファイルと Codex の `relaunchIntoSamePane` が、すべて `beginAgentSession` を呼ぶ（起動の行を打つ経路が世代番号を進めずに Agent を起動しない。呼び出し元の表を本文から求める）。(2) `src/lib/session/agent-identity.ts` と `killInstanceSession` の閉包に `tpgid`・`pgid`・`#{pane_pid}` を識別の値として比べる所が無い（`pane_pid` は木の根の探索の 1 か所だけ、本文から求める）。(3) `killInstanceSession` の中で `cliTool.killSession(` に届く分岐は `classifyAgentIdentity(...) === 'same'` の後だけ（`expect` を渡さない既存の経路を除く）
+- `handoff-no-kill-4227.test.ts`（第 6 版、PM の決定）：G は kill しない。(1) `src/lib/handoff/**` と `src/app/api/worktrees/[id]/mem/handoff/**` の import の閉包（TypeScript の AST で、名前つきの import・`as` の別名・`import * as` の名前空間・再 export を辿る）に、tmux の `killSession`（`src/lib/tmux/tmux.ts`）・`SessionTransport` の `killSession`・cli-tools の各 driver の `killSession`・`stopClaudeSession`・`session-cleanup.ts`・kill-session の route のモジュールが無く、本文に `.killSession(` の呼び出しが無い。(2) `src/lib/handoff/**` と G の route が `cliTool.isRunning` 以外の tmux を動かす関数を呼ばない（観測は読むだけ。`isRunning` は route が読んで値で渡す）。陽性対照（`os.tmpdir()` の `mkdtempSync` に置いた fixture のソースで）：直接の `killSession(name)`・`import { killSession as k }` の `k(name)`・`import * as tmux` の `tmux.killSession(name)`・kill-session の route の `import` の 4 つがそれぞれ落ちる。陰性対照：`isRunning` だけを読む fixture は通る
+- `SessionHandoffDialog.tsx` が `worktreeApi.killSession`（と `handleKillConfirm`）に届くのは停止のボタンの `onClick` の handler の中だけ（`useEffect`・タイマー・`decide` の応答の処理からは届かない）。静的な検査に加えて部品の試験 H15(f) で固定する
 - v71 のトリガー `mem_handoff_proposals_immutable`・`mem_handoff_requests_pinned`・`mem_handoff_requests_forced_sticky` が migration にあり、`handoff-db.ts` の更新の SQL が不変の列を SET せず、`end_forced` を `MAX(end_forced, ?)` でだけ書く
 
 ### 7.4 全入口の不変条件の表駆動の試験
@@ -578,21 +572,21 @@ G の `end` の route は、全体を `withInstanceLifecycleLock` の中で行�
 | H6 | 印：印の無い `decide`・`cancel`・`end`・人の項目の API → 403、何も書かない | 印の検査を外した版 | 印つきは通る |
 | H7 | 無人×auto-yes の 2 通り（§5.3 の表）：`popup=0`・auto-yes off で依頼を作る要求 → 409 `unattended`、start-preview は `attended:false`。`popup=1`・auto-yes on で、auto-yes の答えの経路（`prompt-response`・`respond` の route を試験の中で呼ぶ）を通しても提案は `proposed`、依頼は `reviewing`。**加えて、通常の（auto-yes でない）`prompt-response` の経路を各入口（依頼の作成・提案・`done`・`decide`・`rebase`・`cancel`・`end`）の直後に通しても、承認・確定・`end` が進まない**（提案・依頼・`mem_items` の行が変わらない） | auto-yes の有効を「対話」と読む版（`popup` の代わりに auto-yes を読む）で、2 つの組の期待が入れ替わって落ちる | 画面の `decide` だけが確定する |
 | H8 | 期限：`agent_deadline_at` の後の提案は 409 `request_closed`。`expires_at` の後の読みで `expired`、kill しない（kill の関数が呼ばれない） | 期限を見ない版 | 期限の前は受ける |
-| H9 | 次の世代への記録：`confirmed` の 4 条件の 1 つずつを欠かした 4 通りで `readPreEndUpdate` が `not_recorded`、全部そろえば `recorded`。前の世代の `confirmed` は今の世代の終わりに使われない。**強制の優先**：(a) `done` 済み・提案 0 で `end` の `force:true` → 必ず `unconfirmed(forced)`。**(b) 強制の 2 段の再試行**（再確認 P1-2）：`done` 済み・提案 0 → `end` `force:true` → kill が失敗（`isRunning` が真のまま、世代は同じ）→ 依頼は `reviewing`・`end_forced=1` → `force` なしで `end` を再試行 → kill が成功 → `unconfirmed(forced)`（`confirmed` にならない）。(c) `end_forced` を 1 → 0 にする UPDATE はトリガーで ABORT。(d) forced の依頼への `propose`・`decide` は 409 `request_closed` | 条件を 1 つ外した版。強制の判定を 4 条件の後に置いた版（(a) が `confirmed` になって落ちる）。`end_forced = force ? 1 : 0` で代入する版（(b) の再試行で `confirmed` になって落ちる） | 通常の「確定して終了」（強制でない）で 4 条件がそろえば `confirmed`。強制を一度も使わない kill の失敗→再試行→成功は 4 条件どおり |
+| H9 | 次の世代への記録：`confirmed` の 4 条件の 1 つずつを欠かした 4 通りで `readPreEndUpdate` が `not_recorded`、全部そろえば `recorded`。前の世代の `confirmed` は今の世代の終わりに使われない。**停止の観測**（第 6 版）：(e) 停止の宣言の後に `end/observe` が来ない（`ending` のまま期限）→ `expired`、`not_recorded`。(f) `end/observe` で `isRunning` が真 → `reviewing`・409 `not_stopped`、`ended` にならない。(g) `isRunning` の読みが投げる → 同じく `not_stopped`（止まったと言わない）。**強制の優先**：(a) `done` 済み・提案 0 で `end` の `force:true` → 既存の停止 → `end/observe` で止まった → 必ず `unconfirmed(forced)`。**(b) 強制の 2 段の再試行**（再確認 P1-2。第 6 版で停止を人の既存の停止に読み替え）：`done` 済み・提案 0 → `end` `force:true` → 既存の停止が効かない（偽の kill-session が失敗し `isRunning` が真のまま）→ `end/observe` で依頼は `reviewing`・`end_forced=1` → `force` なしで `end` → 既存の停止が効く → `end/observe` → `unconfirmed(forced)`（`confirmed` にならない）。(c) `end_forced` を 1 → 0 にする UPDATE はトリガーで ABORT。(d) forced の依頼への `propose`・`decide` は 409 `request_closed` | 条件を 1 つ外した版。強制の判定を 4 条件の後に置いた版（(a) が `confirmed` になって落ちる）。`end_forced = force ? 1 : 0` で代入する版（(b) の再試行で `confirmed` になって落ちる）。画面の申告（kill-session の応答の成功）で止まったと読む版（(f) で `ended` になって落ちる）。`isRunning` の失敗を「止まった」と読む版（(g)） | 通常の「確定する」→ 人の停止 → 止まったことの観測（強制でない）で 4 条件がそろえば `confirmed`。強制を一度も使わない停止の失敗→再試行→成功は 4 条件どおり |
 | H10 | 提案の作者：他の instance の提案・他の依頼への提案 → 409 `not_requested` | 作者の照合を外した版 | 依頼の instance なら受ける |
 | H11 | decision の境界：提案に `record`・`promote` の op は無い（400）。G の close で `recorded` は `confirmUnreflected` が無ければ 409、あれば `closed(withdrawn)`。CLI の `mem close` は今どおり 55 | 確認を外した版 | `open` の取り下げは今どおり |
 | H12 | 出口の検査：秘密らしい文字列を含む提案（受け入れの後に規則が変わった）は差分の表示で withheld、確定のときに A の検査で断られて `failed` | 出口の読み直しを外した版で本文が出る | 通常の本文は出る |
 | H13 | `decide` の最終の transaction：(a) 同じ `ifVersion` の `decide` を 2 本並行 → 片方だけが `applying` になり、もう片方は 409。項目は 1 回だけ変わる。(b) 項目の保存の後に応答を捨てて同じ `decide` を再送 → 409 と `applied` の状態、`add` は 2 件にならない（`key`）。(c) `decide` の await 中に `end` の `force` → 残りの提案は `discarded(forced)`、項目は変わらない。(d) await 中に期限（`expires_at`）を過ぎる → `expired` | `fence` を外した版・始めの CAS を外した版・`key` を外した版 | 1 本だけの `decide` は全部確定し、既に確定した別の提案を巻き戻さない |
 | H14 | S-A の所属・mode・寿命（最終の区間）：(a) `on` の worktree の route から、`off` の別ブランチの item ID を `update`・`close` → 409、項目は変わらない。(b) await 中に worktree を同じ ID・path で作り直す → 409 `incarnation_changed`。(c) 正当な `null→lazy` の発行（A の最初の mem の書き込み）を挟んでも拒まない。**(d) 依頼の所属**（再確認 P1-3）：ブランチ A・B の両方が mode `on`、A で依頼を作り `add` の提案を承認 → `decide` の await（`askConditionGit` を止めた deps）中に同じ worktree の HEAD を B へ変える → 409 `membership_changed`、提案は `failed(membership_changed)`、**A にも B にも `mem_items` の行が 1 件も増えない**。(e) 画面の G-1 の `add`（`expectBranch:'A'`）で同じ await 中に HEAD を B へ → 409、保存ゼロ | 所属の照合を外した版（(a) が書かれる）・寿命を最初だけ見る版（(b)）・`isSameInstanceLifetime` の代わりに incarnation の等号を使う版（(c) が拒まれる）・`pin.membership` を比べない版（(d)・(e) で B に 1 件書かれる） | 同じブランチの項目は書ける。HEAD を変えなければ `add` は A に書かれる |
-| H15 | 会話の寿命と実プロセス（§0.1 G6・§4.6）：(a) 在籍を変えずに kill→再起動（新しい `launch` の境界を開く）→ 古い依頼の `propose`・`done`・`decide`・`end` はすべて 409 `session_changed`、`killInstanceSession` は呼ばれない。(b) 画面の再読込・再接続（境界を開かない）→ 受ける。(c) `end` は画面の申告でなく `isRunning` で決める：`isRunning` が真のままなら `ended` にならない。**(d) kill の内部の await 中の再起動**（再確認 P1-1）：`killInstanceSession` の `checkSessionOwnership`・`isRunning` の await を止めた deps で、その間に送信の起動の経路（`startSession` を呼ぶ入口）を呼ぶ → 起動は排他で kill の終わりまで待ち、旧プロセスだけが kill され、依頼の記録の後に新しいプロセスが起動して **生き残る**。(e) 同じ await 中に、排他を通らない入れ替え（偽の tmux で `session_created:pane_pid` を変える）→ `cliTool.killSession` は **呼ばれず**、新しいプロセスが生き残る、依頼は `expired(session_changed)`。(f) kill の後に別の世代が動いている → `unconfirmed(session_changed)`、kill し直さない。**(g) pane・shell は同じで Agent だけ交代する**（第 4 版、3 回目 P1。第 5 版で識別の規則に合わせた）：偽の tmux・`ps` で `session_created`・`pane_pid` は同じまま、shell の子の Agent の pid と `lstart` だけを変える（Codex の `relaunchIntoSamePane` と同じ形）→ `'different'`、`cliTool.killSession` は呼ばれず、依頼は `expired(session_changed)`。**加えて「Agent の PID は交代するが `tpgid` は同じ」の対照**（第 5 版、4 回目 P1）：job control の無い shell を模し、Agent A と B のプロセスグループと端末の `tpgid` をどちらも shell の pid（同じ値）にして、Agent の pid と `lstart` だけを A→B と変える（起動の世代の記録は B の起動で進んだ形と、人の手での起動し直しで進まない形の 2 通り）→ どちらも `'different'` で kill しない。**(h) 境界の記録の失敗の経路**：`openLaunchBoundary` の DB を投げる形にして同じ pane で Agent を起動し直す（境界の行は増えない）→ CommandMate の経路なら世代番号が進み、人の手なら pid が変わり、どちらも kill しない。(g) の `tpgid` が同じ形と組み合わせても kill しない。**(i) 識別が不明**：起動の記録が空（サーバの再起動・起動の後の読みの失敗）・`ps` が失敗する・shell しか見えない・宣言に無い wrapper だけ・候補が 2 つ → kill せず 409 `identity_unknown`、依頼は `reviewing`。依頼の作成で `'same'` でなければ 409 `session_unknown`。**(j) 観測点ごとの失敗の注入**：§7.4.1 の表駆動の対照 | 境界を見ない版（(a) で新しいプロセスが kill される）・`isRunning` を見ない版（(c)）・排他を kill の側に通さない版（(d) で起動が割り込み、新しいプロセスが kill される）・kill の直前に世代を読み直さない版（(e) で新しいプロセスが kill される）・**世代を `session_created:pane_pid` だけで作る版（(g)(h) で交代後の Agent が kill される）・識別を `tpgid` の pid と `lstart` で作る版（第 4 版の実装。(g) の `tpgid` が同じ対照で `'same'` と読み B が kill される）・識別を D1 の境界の記録に頼る版（(h) で kill される）・不明を「同じ」と読む版（(i)(j) で kill される）** | 境界と識別が同じなら全部通る（起動の世代番号・Agent 自身のプロセスの pid・開始時刻がすべて同じ → `'same'` で kill する。Agent がエディタなどの子を前面に出していても `'same'`）。既存の kill-session の route（`expect` なし）は今どおり kill する |
+| H15 | 会話の寿命と、G から kill に届かないこと（§0.1 G6・§4.6。第 6 版で書き直し：G は kill しない）：(a) 在籍を変えずに kill→再起動（新しい `launch` の境界を開く）→ 古い依頼の `propose`・`done`・`decide`・`end`・`end/observe` はすべて 409 `session_changed`、依頼は `expired(session_changed)`。(b) 画面の再読込・再接続（境界を開かない）→ 受ける。(c) `end/observe` は画面の申告でなく `isRunning` で決める：`isRunning` が真のままなら `ended` にならない。**(d) G の全入口で kill が呼ばれない**：依頼の作成・提案・`done`・`decide`・`rebase`・`cancel`・`extend`・`end`（`force` あり・なし）・`end/observe`・読み・期限の判定（`expires_at` を過ぎた読み）の各々を、kill の関数（tmux の `killSession`・各 driver の `killSession`・kill-session の route の本体）を数える偽で回す → どの入口でも呼び出し 0 回（入口の表と同じキーの表駆動）。**(e) 停止の後の起動し直し**：`end` → 既存の停止 → `end/observe` の前に新しい `launch` の境界を開いて新しいプロセスを動かす（`isRunning` が真）→ 依頼は `ended`・`unconfirmed(session_changed)`、kill は呼ばれず、新しいプロセスは動いたまま。同じく `isRunning` が偽（新しいプロセスも止まった）でも `unconfirmed(session_changed)`。**(f) 画面の停止は人の押下だけ**（部品の試験、`@testing-library/react`）：`decide` が全部成功しても・依頼が `expired` になっても・期限の表示が来ても `worktreeApi.killSession` の呼び出しは 0 回。停止のボタンを押したときだけ `end` → `killSession` → `end/observe` の順に 1 回ずつ呼ばれる（PC とスマホの 2 通り）。**(g) 依頼を作れない**：境界が無い → 409 `session_unknown`、ダイアログは「停止」と「やめる」だけを出し、今どおりの確認の Modal は開かない（5 回目 P2(2)）。「停止」は既存の停止を 1 回呼び、`end` は送らない（依頼が無い） | 境界を見ない版（(a) で古い依頼が通る）・`isRunning` を見ない版（(c)）・`end` か期限の判定の中で kill を呼ぶ版（第 5 版までの形。(d) で呼び出しが 1 回になって落ちる）・観測で境界を見ない版（(e) で `confirmed` になる）・`decide` の成功で自動に停止する版（(f) で `killSession` が呼ばれる）・`session_unknown` で確認の Modal に戻す版（(g)） | 境界と在籍の寿命が同じで、人の停止の後に `isRunning` が偽なら `ended`。`popup=0`（無人）の「終了」は今どおりの確認の Modal から kill-session を呼ぶ（G の入口を通らない）。既存の kill-session の route は今どおり kill する |
 | H16 | close の版と `recorded`：(a) 承認（人が見た版）の後に他者が `update` → 人の close は 409 `version_conflict`、項目は他者の値で `open`。(b) `recorded` に `confirmUnreflected` なし → 409、あり → `closed(withdrawn)`。(c) CLI の `mem close`（`closeMemItem`）は `recorded` に今どおり 55。(d) Agent の提案で `recorded` の close → 409 `state_forbids` | 版の照合を transaction の外に置いた版・遷移を `close` に混ぜた版（(c) が通る） | `open` の close は今どおり |
 | H17 | `now`：S-A の `add` の `kind:'now'`・提案の `now` → 400。人の `now` の枠は #2427 の経路のまま書ける | `now` を S-A に通した版 | 他の kind は書ける |
 | H18 | 改版：(a) `conflict` → `rebase` → 古い指紋の `approve` は 409 `proposal_changed`、新しい指紋で確定。(b) 指紋の範囲：`op`・`item_id`・`kind`・`base_version`・`payload`・`revision` のどれを変えても指紋が変わる（1 つずつの 6 通り）。(c) トリガー：不変の列の UPDATE は ABORT | `rebase` で指紋を計算し直さない版・指紋から `op` を外した版・トリガーの無い migration | 競合が無ければ改版なしで確定 |
 | H19 | 画面の送信の契約（部品の試験、`@testing-library/react`）：(a) G-3 を閉じると本文・画像・自由入力の下書きが残る。(b) 保留→再送で選択（`brief`・`briefDetail`・`briefBoundary`）が同じ。(c) 終了の依頼の文の送信の body は `brief:'skip'`。(d) PC・スマホ・分割の各ペイン・`SessionTile` の全経路で同じ（表駆動） | 下書きを先に消す版・再送で選択を落とす版 | `popup=0` では body が今と同じバイト列 |
 | H20 | `injectOnStart` と「全文」（S-F の (a)）：(a) `popup=1`・`injectOnStart=false` → preview は `show:false`、G-3 を出さない。(b) **600 バイトの本文の 1 項目**を `briefDetail:'full'`（provider に `detail:'full'`）で送る → 本文が省略されずに全部入る（`…(本文 N bytes を省略` が無い）。(c) **総予算の境界**：`itemCap:false` で、予算にちょうど入る項目数と 1 バイト足りない項目数の 2 通り → 入らない項目は項目ごと落ちて `omitted` と `all=` の案内、`BriefOverBudgetError` は出ない。(d) **行数の境界**：`maxLines` ちょうどと 1 行超えの 2 通り → 行の上限が今どおり効く。(e) withheld の項目は `full` でも本文を出さない。(f) D2 の必須の先頭の行は `full` でも入る（D2 の export した定数で照合、G-PR3）。(g) 見えない文字（U+200B など）を含む 600 バイトの本文 → `full` でも置き換えた形で出る。(h) **既定 short の不変**：`itemCap` を渡さない `fitText`・`detail` の無い要求・`briefDetail:'short'` の出力が、同じ入力で今の実装と 1 バイトも違わない（C の既存の試験がそのまま通ることと、変更の前後で出力を比べる対照） | `itemCap:false` を `all` と同じに扱う版（(c)(d) で予算・行の上限を超える）・`itemCap` を見ない版（(b) が省略形のまま）・`full` で sanitize を飛ばす版（(g)） | `short` と CLI の `brief`（`--all` を含む）は今どおり |
-| H21 | 選択と境界（§3.2 の表）：(a) preview で A を見た後に A→B（reset）→ `decline`・`full` は 409 `boundary_changed`（`superseded`）、B は `pending` のまま、本文は打たれない。(b) A が別の送信で消費済み → 本文だけ、報告どおりの表示。(c) 変化なし → 選んだとおり。(d) `auto` の応答に brief の報告が無いとき「別の送信で渡された」を出さない。**(e) 確認の後の変化**（再確認 P2）：route の入口の照合を通った後、provider の作成か入力の排他の待ちの間に A→B → 送信の直前の区間で 409、**キーが 1 つも送られない**（偽の sender の呼び出しが 0）、境界 A・B とも消費されない。**(f) 別の送信の予約**：別の送信が A を `claim`（`claimed`）した状態で `decline` → 409（`claimed`）、本文は打たれない → 別の送信が失敗して A が `pending` に戻る → 聞き直して `decline` → `skipped(declined)`。(g) `decline` の本文が打てなかった（`not_sent`）→ A は `pending` に戻る。(h) 画面：(e)(f) の 409 の後、本文・画像の下書きが残り、ダイアログが開き直る（部品の試験）。**(i) `full` の失敗の経路を実際の送信のサービス経由で**（第 4 版、3 回目 P2）：送信の route → `sendUserMessage`（偽の sender・偽の provider、DB は `mkdtempSync`）で、`full` の (i-1) provider が投げる (i-2) provider の本文が予算を超える（`over_limit`。バイトと行の 2 通り、`withinVerifiedSize` を超える 1 通り）(i-3) 区間の `withMemTarget` が投げる、の各々 → HTTP 409 `boundary_changed`（`reason` は `provider_failed`・`over_limit`・`claim_failed`）、**偽の sender の打鍵が 0 回**、境界は `pending` のまま（`skipped`・`sent`・`claimed` にならない、(i-3) で予約した後なら `pending` に戻る）、応答は普通の送信の失敗（`stage:'send'`）にならない。画面の部品の試験で同じ 409 の後に下書きが残る | `full` でも plan が `skip` を書く版（(i) で境界が消費される）・`send-user-message.ts` が `BriefChoiceAbortedError` を `classifySendFailure` に通す版（(i) が 409 でなく送信の失敗になる）・`briefBoundary` を見ない版（(a) で `decline` が B を消費する）・route の入口だけで照合する版（(e) で本文が打たれる）・`claimed` を消費済みと読む版（(f) で本文だけが送られる） | (c)。`auto` は (a)(e)(f) でも今どおり（D1 の既定の動き）。**`auto` の (i-1)〜(i-3)**：本文だけが打たれ（打鍵 1 回分）、D1 の記録は今どおり（`skipped(provider_failed)`・`skipped(over_limit)`、区間の例外は本文だけ）、HTTP は今どおり成功 |
+| H21 | 選択と境界（§3.2 の表）：(a) preview で A を見た後に A→B（reset）→ `decline`・`full` は 409 `boundary_changed`（`superseded`）、B は `pending` のまま、本文は打たれない。(b) A が別の送信で消費済み → 本文だけ、報告どおりの表示。(c) 変化なし → 選んだとおり。(d) `auto` の応答に brief の報告が無いとき「別の送信で渡された」を出さない。**(e) 確認の後の変化**（再確認 P2）：route の入口の照合を通った後、provider の作成か入力の排他の待ちの間に A→B → 送信の直前の区間で 409、**キーが 1 つも送られない**（偽の sender の呼び出しが 0）、境界 A・B とも消費されない。**(f) 別の送信の予約**：別の送信が A を `claim`（`claimed`）した状態で `decline` → 409（`claimed`）、本文は打たれない → 別の送信が失敗して A が `pending` に戻る → 聞き直して `decline` → `skipped(declined)`。(g) `decline` の本文が打てなかった（`not_sent`）→ A は `pending` に戻る。(h) 画面：(e)(f) の 409 の後、本文・画像の下書きが残り、ダイアログが開き直る（部品の試験）。**(i) `full` の失敗の経路を実際の送信のサービス経由で**（第 4 版、3 回目 P2）：送信の route → `sendUserMessage`（偽の sender・偽の provider、DB は `mkdtempSync`）で、`full` の (i-1) provider が投げる (i-2) provider の本文が予算を超える（`over_limit`。バイトと行の 2 通り、`withinVerifiedSize` を超える 1 通り）(i-3) 区間の `withMemTarget` が投げる、の各々 → HTTP 409 `boundary_changed`（`reason` は `provider_failed`・`over_limit`・`claim_failed`）、**偽の sender の打鍵が 0 回**、境界は `pending` のまま（`skipped`・`sent`・`claimed` にならない、(i-3) で予約した後なら `pending` に戻る）、応答は普通の送信の失敗（`stage:'send'`）にならない。画面の部品の試験で同じ 409 の後に下書きが残る。**(j) 中止の文面を本文に含む送信**（第 6 版、5 回目 P2(1) の陰性対照）：`auto` で本文に `BriefChoiceAbortedError` の message と同じ文字列を含め、偽の tmux の送信口が本文を引用した `Command failed: tmux send-keys … -l -- <本文>` で失敗する → 配送の記録は今どおり `{ state:'indeterminate', reason:'send-error' }`、HTTP は 409 `boundary_changed` にならない（`stage:'send'`）、境界の予約は D1 のとおり `unknown` で決着する（`not_sent` に戻さない） | `full` でも plan が `skip` を書く版（(i) で境界が消費される）・`send-user-message.ts` が `BriefChoiceAbortedError` を `classifySendFailure` に通す版（(i) が 409 でなく送信の失敗になる）・`briefBoundary` を見ない版（(a) で `decline` が B を消費する）・route の入口だけで照合する版（(e) で本文が打たれる）・`claimed` を消費済みと読む版（(f) で本文だけが送られる）・中止を文面で読む版（`classifySendFailure` か `send-user-message.ts` が message の照合で中止と読む。(j) で配送不明が 409 `boundary_changed`／`not_sent` になって落ちる） | (c)。`auto` は (a)(e)(f) でも今どおり（D1 の既定の動き）。**`auto` の (i-1)〜(i-3)**：本文だけが打たれ（打鍵 1 回分）、D1 の記録は今どおり（`skipped(provider_failed)`・`skipped(over_limit)`、区間の例外は本文だけ）、HTTP は今どおり成功 |
 | H22 | 人への質問の分類（§3.1.1）：(a) 質問 0・`state` の情報源が読めない → `count:0`・`unknownSources:['state']`（「質問あり」にしない）。(b) 実際の待ち 1 件 → `count:1`。(c) **同じ待ちの重複**：`state` の `waiting`（今の worktree の X）と `owed` の `prompt`（この instance＝X）→ `count:1`。同じ相手への `awaiting` の `prompt` が 2 本 → 1 件。**(d) 同名の別 worktree**：今の worktree の `claude` の `waiting` と、別の worktree の `claude` を待つ `awaiting` の `prompt` → `count:2`。**(e) 両方向**：`owed` の `prompt`（止まっているのはこの instance）と `awaiting` の `prompt`（止まっているのは `peer`）を別々に・一緒に → 鍵どおりに数える。(f) `peer` が形に合わない relay の行 → 数えず `unknownSources:['relay']`。**(g) C の実際の形**（第 4 版、3 回目 P2）：(a) の fixture は `briefForRoute` に投げる `state` の reader を渡して得た JSON（状態の行は `statusRowItem` の `fields.unavailable`、`sources[]` の `status:'unavailable'`）。entries の状態の行だけ・`sources[]` の `status` だけのどちらでも `unknownSources:['state']`。待っていない instance の `state` の行（`readStateSource` が作る、`waiting` の欄が無い）は数えない | 順位 1 を数える版（(a) が 1 になる）・`entry.status` を見る版（実際の行に `status` の欄が無く、(g) が「質問なし・不明なし」になる）・`waiting !== null` で判定する版（欄が無い行を待ちと数える）・instance ID だけを鍵にする版（(d) が 1 になる）・`dir` を見ずに常に `peer` を鍵にする版（(c) の `owed` が別の鍵になって 2 になる） | 待ちが無く読めれば `count:0`・不明なし |
-| H23 | 排他の順序と再入（§4.6 の契約、第 4 版、3 回目 P2。第 5 版、4 回目 P2 で (a) を実際の配送まで）：(a) **外部の起動と送信の中の再起動の競合**：送信 S が input を持ち、Agent が終わっている（`isToolLive` が偽）。同時に外の起動 X（`send-session-start` の経路）が lifecycle を取って input を待つ → S の再起動は lifecycle を待たずに `InstanceLifecycleBusyError`。**S は実際の `sendUserMessage` 経由で回し**（偽の tmux の送信口で打鍵を数える。D1 の境界の行を持つ一時の DB）、次の 4 つを確かめる：配送の記録（`getLastSendAttempt` と `onAttempt`）が `{ state:'not-sent', reason:'lifecycle-busy' }`、D1 の境界の予約が `pending` に戻る（`unknown` で決着しない）、打鍵の回数 0、送信の route は 409 `INSTANCE_LIFECYCLE_BUSY`。driver の包み（`Failed to send message to <tool>: …` で `cause` に持つ形）と `cause` の無い包み（文面だけ）の 2 通りで回す。S が input を離した後に X が起動する。起動は 1 回だけで、試験は待ちの上限の前に終わる（デッドロックしない）。(b) 逆の順：S の再起動が先に lifecycle を取る → X は lifecycle を待ち、S の後で `resolveLaunchPane` が `live` を見て起動しない（起動は 1 回）。(c) **同じ所有者の再入**：`end` → `killInstanceSession`、起動 → `settleLaunchRole` の `kill`・`ensureHealthySession`・`relaunchIntoSamePane` が錠を 2 回取らない（取得の回数を数える偽の錠で 1 回）。(d) **input の所有中の lifecycle の待ち**：`end` が lifecycle を持つ間に送信が input を持って再起動に入る → 待たずに失敗し、`end` の kill はその送信の input の解放を待たずに進む。(e) **旧 ticket の失効の後**：送信 S の input の ticket が `invalidateInstanceInput` で失効した後、S の文脈からの lifecycle の取得は断られる（起動・kill をしない） | 送信の中の再起動でも lifecycle を待つ版（(a) で S と X が互いを待ち、待ちの上限で両方が失敗する）・**`classifySendFailure` に `lifecycle-busy` の行が無い版（今の実装。(a) で記録が `indeterminate`（`send-error`）、境界が `unknown` で決着する）**・再入を合流しない版（(c) で自分の錠を待って止まる）・失効した文脈にも lifecycle を渡す版（(e) で古い送信が新しい Agent を起動する） | 競合が無ければ送信の中の再起動は今どおり起動して本文を打つ。`classifySendFailure` の既存の分類（`input-lock-lost`・`role-launch-refused`・知らない失敗の `indeterminate` など）は変わらない（既存の試験がそのまま通る） |
+| H23 | （第 6 版で削除：排他の順序と再入の試験。G は起動／終了の排他を足さないので対象が無い、§4.6.1。`classifySendFailure` は変えないので、既存の分類の試験がそのまま通ることだけを確かめる） | — | — |
 
 **入口ごとの適用条件と例外**（第 3 版、再確認 P2。表駆動の試験の行のキー。✓＝その H を回す、`—`＝回さない（理由を右端に）。期待が入口で違う所は「例外」に書く）：
 
@@ -600,39 +594,20 @@ G の `end` の route は、全体を `withInstanceLifecycleLock` の中で行�
 |---|---|---|---|---|---|---|---|
 | 画面の項目 `add`・`update`・`close`・`close`(recorded) | ✓ 無印は 403 | ✓ | ✓ | — 依頼に触らない | — 依頼が無い（寿命は S-A の (iii)、H14） | ✓ | `add` は `expectBranch` の照合（H14(e)） |
 | S-A の直接の呼び出し（`memWriteFromScreen`） | ✓ service の中の判定（route だけに置かない） | ✓ | ✓ | — | — | — | `pin` があれば H14(d) |
-| handoff `create` | ✓ | ✓ | ✓ | — 新しい依頼を作る側 | ✓ 境界・プロセスが無ければ 409 `session_unknown` | ✓ `popup=0` は 409 `unattended` | 開いた依頼があれば 409 `request_open` |
+| handoff `create` | ✓ | ✓ | ✓ | — 新しい依頼を作る側 | ✓ 境界が無ければ 409 `session_unknown`（H15(g)。プロセスの識別は見ない） | ✓ `popup=0` は 409 `unattended` | 開いた依頼があれば 409 `request_open` |
 | handoff `read`（`GET`） | **— 印は要らない**：無印でも 200（陰性対照として「無印で読める」を回す） | — 読みは mode で断らない（`off` は 409 でなく状態を返す） | ✓ `mem_items` を書かない | ✓ **状態を進める**：旧依頼は `expired(session_changed)`・期限切れは `expired` | ✓ 判定だけ（kill しない） | ✓ | 読みで変わってよいのは旧依頼・旧提案の状態だけ |
 | handoff `sent`・`send-failed`・`extend` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | forced の依頼への `extend` は 409 `request_closed` |
 | handoff `propose`・`done`（Agent の CLI） | **— 印は要らない**（Agent の口。印つきでも権限は増えない） | ✓ 50 `disabled` | ✓ | ✓ | ✓ | ✓ | 作者の照合（H10）。期限の後・forced の後は 409 `request_closed` |
 | handoff `decide`・`rebase` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `decide` は H13・H14(d) |
 | handoff `cancel` | ✓ | — mode が `off` になっても取り消しは受ける（何も確定しない操作） | ✓ | ✓（既に失効なら 409 で何もしない） | ✓ | ✓ | 確定済みを戻さない（H4） |
-| handoff `end`（`force` あり・なし） | ✓ | — mode が変わっても終了は受ける（kill の判断は寿命と世代だけ） | ✓ | ✓ | ✓ H15(a)(c)〜(j)・H9(b) | ✓ | 失効していれば kill しない |
+| handoff `end`・`end/observe`（`force` あり・なし） | ✓ | — mode が変わっても停止の宣言と観測は受ける（判断は寿命と停止の観測だけ） | ✓ | ✓ | ✓ H15(a)(c)(d)(e)・H9(b)(e)(f)(g) | ✓ | **kill しない**（H15(d)）。`end/observe` は同じ `end_token` のときだけ |
 | 読みに伴う期限の判定（`expired`） | — 内部 | — | ✓ | ✓ | ✓ kill しない（H8） | — | — |
 | 古い行の掃除（14 日） | — 内部 | — | ✓ `mem_items` を消さない | — 終わった依頼だけを消す | — | — | 開いた依頼・14 日以内の行を消さない |
 
 
-#### 7.4.1 Agent の識別の観測点と失敗の注入（H15(j)、第 5 版、4 回目 P1）
+#### 7.4.1 （第 6 版で削除）Agent の識別の観測点と失敗の注入
 
-`tests/unit/lib/session/agent-identity-4227.test.ts`（新規）。`classifyAgentIdentity` と `killInstanceSession`（偽の tmux・`ps`・起動の記録・D1 の境界の DB を deps で差し替える）を、観測点 × 注入の表で回す。どの行も「不明・違う → `cliTool.killSession` は呼ばれない」を確かめ、陽性対照は「その注入を『同じ』と読む版」で kill が呼ばれて落ちる形にする。
-
-| 観測点 | 注入 | 期待 |
-|---|---|---|
-| tmux の表示値（`#{session_created}`・`#{pane_pid}`） | 読めない（tmux が失敗・解析できない） | `'unknown'`、kill しない |
-| 〃 | 値が古い（読んだ時刻が `decisionStartedAt` より前） | `'unknown'`、kill しない |
-| `ps` の snapshot | 読めない（`ps` が失敗・`lstart` が空・解析できない） | `'unknown'`、kill しない |
-| 〃 | 値が古い | `'unknown'`、kill しない |
-| 〃 | shell しか見えない（pane の木に宣言した名前が無い。Agent が終わった直後の形） | `'unknown'`、kill しない |
-| 〃 | 宣言に無い wrapper だけ（`env`・`sh -c`・`npx`） | `'unknown'`、kill しない |
-| 〃 | 候補が 2 つ（兄弟の同じ名前） | `'unknown'`、kill しない |
-| 〃 | Agent の pid が交代、`tpgid`・プロセスグループは同じ（H15(g)） | `'different'`、kill しない |
-| 起動の記録（`launchIdentity`） | 空（サーバの再起動・起動の後の読みの失敗） | `'unknown'`、kill しない |
-| 〃 | 世代番号が進んだ（CommandMate の経路の起動し直し） | `'different'`、kill しない |
-| 〃 | 値が古い（`recordedAt` が今の世代の `beginAgentSession` より前） | `'unknown'`、kill しない |
-| D1 の境界の記録 | 記録の失敗（`openLaunchBoundary` が投げる）＋同じ Agent | 識別に入れないので `'same'`、kill する（陰性対照） |
-| 〃 | 記録の失敗＋Agent の起動し直し（H15(h)） | `'different'`、kill しない |
-| （注入なし） | すべて一致 | `'same'`、kill する（陰性対照） |
-
-表は「観測点の一覧」を `observeAgentProcess` の返す欄から本文で求め、欄を足すと表に行を足すまで落ちる（`CALLERS` と同じ形）。
+第 5 版の観測点 × 注入の表（`agent-identity-4227.test.ts`）は作らない。G は kill しないので、kill の対象の識別も、その観測の失敗を「kill しない」に倒す試験も要らない（§4.6.1）。G から kill に届かないことは H15(d)(f) と §7.3 `handoff-no-kill-4227` で固定する。
 
 ### 7.5 e2e で確かめる項目（`tests/e2e/mem-ui-4227.spec.ts`、PC と スマホの viewport の 2 通り）
 
@@ -640,14 +615,14 @@ G の `end` の route は、全体を `withInstanceLifecycleLock` の中で行�
 - 同時編集の競合：2 つのページで同じ項目を開き、片方で保存 → もう片方の保存が 409 になり、3 つの値が並ぶ。載せ直しで保存できる
 - 古い差分：Agent の API（`instanceId` つき）で項目を更新 → 開いたままの画面が再読込で「更新されました」を出す
 - mode の画面：`derived` で操作が無効・`off` で一覧が出ない
-- 閉じるときの流れ：Agent の応答は API で模す（`proposals`・`done` を試験から呼ぶ）。未応答（期限を試験の時計で進める）・確定の失敗（mode を途中で `derived` に）・取り消し・強制終了の 4 通りで、画面の表示と提案の状態。強制終了は `done` 済み・提案 0 でも画面の終了の記録が `unconfirmed(forced)`
-- 強制の 2 段の再試行（再確認 P1-2）：`done` 済み・提案 0 →「今すぐ終了」→ kill の失敗（e2e のサーバの kill を失敗させる）→ 画面は「終了できませんでした」→ 普通の「終了」で再試行 → 成功 → 画面の終了の記録が `unconfirmed(forced)`（`confirmed` にならない）
-- kill の内部の await 中の再起動（再確認 P1-1）：`end` の kill を遅らせた間に、別のページから同じ instance へ送信（起動の経路）→ 終了の記録が出た後に新しいプロセスが動いている（`isRunning` が真・世代が依頼と違う）。e2e のサーバで kill を遅らせ・失敗させる試験用の差し替え（`killInstanceSession` の deps）が組めなければ、この 2 つは H9(b)・H15(d)(e) の単体の対照と UAT（実の tmux）に回し、その旨を PR に書く［未確認：e2e のサーバの差し替えの口］
+- 閉じるときの流れ：Agent の応答は API で模す（`proposals`・`done` を試験から呼ぶ）。未応答（期限を試験の時計で進める）・確定の失敗（mode を途中で `derived` に）・取り消し・強制終了（確定の前に「今すぐ停止」を押す）の 4 通りで、画面の表示と提案の状態。どの通りでも、人が停止を押すまで kill-session の route への要求が 0 件（e2e のサーバへの要求を数える。第 6 版）。強制終了は `done` 済み・提案 0 でも画面の終了の記録が `unconfirmed(forced)`
+- 強制の 2 段の再試行（再確認 P1-2。第 6 版で停止を人の既存の停止に読み替え）：`done` 済み・提案 0 →「今すぐ停止」→ 既存の停止が効かない（e2e のサーバの kill を失敗させ、`isRunning` が真のまま）→ 画面は「停止を確かめられませんでした」→ 普通の「停止する」で再試行 → 止まる → 画面の終了の記録が `unconfirmed(forced)`（`confirmed` にならない）。e2e のサーバで kill を失敗させる差し替えの口が組めなければ H9(b) の単体の対照と UAT に回し、その旨を PR に書く［未確認：e2e のサーバの差し替えの口］
+- 停止の後の起動し直し（第 6 版。第 5 版の「kill の内部の await 中の再起動」は G が kill しないので外した）：停止のボタンの後、`end/observe` の前に別のページから同じ instance へ送信（起動の経路）→ 終了の記録が `unconfirmed(session_changed)` で、新しいプロセスは動いたまま（G は kill しない）。順序を e2e で作れなければ H15(e) の単体の対照に回し、その旨を PR に書く
 - 競合の後の改版：2 つ目のページで項目を更新 → 提案が `conflict` → 「今の版に載せ替える」→ 差分が新しい版で出直す → 承認で確定
 - 開くときの下書き：本文と画像を入れて送信 → G-3 を閉じる → 入力欄に本文と画像が残る。選んで送る → 保留の吹き出しの再送でも同じ選択（route の要求の body で確かめる）。**API の旗だけでなく、実際の入力欄の本文と送信の body を見る**
 - 終了の依頼の文：送信の body が `brief:'skip'` で、route の応答に brief が付かない
 - 開くときのポップアップ：境界の行を試験の DB に作り、3 行の preview（質問 0＋情報源の失敗で「不明」。失敗は手で書いた JSON でなく、e2e のサーバの `briefForRoute` の `state` の reader を失敗させて作る＝実際の `statusRowItem` の行。差し替えの口が組めなければ H22(g) の単体の対照に回し、その旨を PR に書く）と 3 択の送信の本文（`brief`・`briefDetail`・`briefBoundary`）を route の要求で確かめる。preview の後に境界を作り直すと聞き直しになり、**409 の後も入力欄に本文と画像が残る**
-- 実機（tmux・本物の Agent）で確かめるもの（kill の成功・kill の await 中の再起動で新しいプロセスが生き残ること・Agent が依頼の文に従って `handoff propose` を打つか・5 分の期限が足りるか・D2 の先頭の行の表示）は UAT に回す（D2 §8 と同じ分け方）
+- 実機（tmux・本物の Agent）で確かめるもの（人の停止の後に `end/observe` が「止まった」を観測できること（ツールごとの `isRunning` の値）・Agent が依頼の文に従って `handoff propose` を打つか・5 分の期限が足りるか・D2 の先頭の行の表示）は UAT に回す（D2 §8 と同じ分け方）
 
 ---
 
@@ -655,19 +630,19 @@ G の `end` の route は、全体を `withInstanceLifecycleLock` の中で行�
 
 | 対 | 探した結果 |
 |---|---|
-| PC とスマホの「終了」 | 同じ hook（`openActiveKillConfirm`・`handleKillConfirm`、`useWorktreeDetailController.ts:1806`・`:1823`）を通る［事実］。分岐はそこに置けば両方に効く。設定の画面の「再起動」（`AgentUpdatesCard.tsx:178`）と roles の画面（`InstanceRolesSection.tsx:111`）も kill-session を直接呼ぶ — **終了の流れに入れない**（設定の変更のための再起動で、作業の終わりではない）。この 2 つで終わったら「記録なし」になる［見立て。§9 U4］ |
+| PC とスマホの「終了」 | 同じ hook（`openActiveKillConfirm`・`handleKillConfirm`、`useWorktreeDetailController.ts:1806`・`:1823`）を通る［事実］。分岐はそこに置けば両方に効く。設定の画面の「再起動」（`AgentUpdatesCard.tsx:178`）と roles の画面（`InstanceRolesSection.tsx:111`）も kill-session を直接呼ぶ — **終了の流れに入れない**（設定の変更のための再起動で、作業の終わりではない）。この 2 つで終わったら「記録なし」になる［見立て。§9 U4］。第 6 版：G-4 の停止のボタンも同じ `handleKillConfirm` の中身（既存の停止）を呼ぶ。停止の写しを作らない |
 | 画面の送信の経路 | D1 §4.1 の表の 5 か所（`MessageInput.tsx`・`ChatSurface.tsx`・`MobileTerminalTab.tsx`・`SessionTile.tsx`・`usePendingMessages.ts`）が `src/lib/api-client.ts` を通る［D1 の事実。G では共通の 1 か所を実装の契約で確かめる］ |
 | 画面の印の写し | A の `screen-client.ts`（設定）・B の引き取り・E の承認・G の 3 つ目の client。`screenRequestHeaders()` を共有し、印の判定は `isScreenRequest` の 1 か所 |
 | 型の写し `src/cli/types/` | `handoff` の CLI の型を新しく置く。A の `mem` の型を写さず import する |
 | 文書の ja・en | `docs/user-guide/` の mem の節（A・E が作る）に G の節を足す。見出しの対は `tests/unit/docs/ja-en-heading-parity.test.ts` が見る |
-| kill の本体の写し | kill-session の route（`:123-160`）・G の `end` の route。G-PR2 で共有の関数に寄せ、写しを作らない。設定の画面の再起動・roles の画面は route を通るので、応答は変わらず、起動／終了の排他だけが新しく効く（世代の照合は `expect` を渡さないので無い） |
-| 起動／終了の排他の対（第 3 版） | kill の側（`killInstanceSession` の 1 か所）と起動の側（`startSession` の呼び出し：`send-session-start.ts:98-105`・`cli-tools/base.ts:800`・assistant の start）。片方だけに排他を置くと P1-1 は直らないので、両方をガード（§7.3 `instance-lifecycle-lock-4227`）で固定する［事実：`git grep -n '\.startSession(' -- src` の 2026-11-09 の結果。全数は実装の契約で取り直す］ |
+| kill の本体の写し | （第 6 版）G は kill しないので写しも共有の関数も作らない。停止は PC・スマホとも既存の `handleKillConfirm` → kill-session の route の 1 本。設定の画面の再起動・roles の画面も今どおり（G は触らない） |
+| 起動／終了の排他の対（第 3 版） | （第 6 版で外した、§4.6.1）kill の側と起動の側の両方に排他を置く必要は、G が kill するときだけ。G は kill しないので、どちらにも置かない |
 | 所属の固定の対（第 3 版） | handoff の `add`（`pin.membership`）と画面の G-1 の `add`（`expectBranch`）。どちらも A の `memAddItem` と同じく最終に解決した target に保存するので、同じ照合を置いた。`update`・`close` は既存の項目の所属の照合 (i) があるが、handoff の経路は `pin` でも照合する |
 | 送信の直前の照合の対（第 3 版） | route の入口の `briefBoundary` の照合と、D1 の `claimInStretch`（入力の排他の中）。正は後者。D1 の `auto`・`skip`・`force` の経路は `claim()` の戻りを変えない |
 | 中止の伝播の対（第 4 版） | `session-brief.ts` の plan（provider の失敗・`over_limit`）と `claim()`（区間の例外）の 2 か所が中止を作り、`send-user-message.ts` の配送の失敗の分岐（`classifySendFailure` の前）と送信の route の 2 か所が 409 に写す。`sendUserMessage` の他の呼び出し元（relay・timer など）は `full`・`decline` を渡さないので中止を受けない［見立て。実装の契約で `CALLERS` の表から確かめる］ |
-| kill の全経路の対（第 4 版） | `cliTool.killSession` の呼び出し（上からの検索）と tmux の `killSession` の import（下からの逆引き）。§4.6 の表に 6 行。片方だけでは `session-cleanup.ts:274` のような直接の呼び出しが漏れる［事実：2026-11-09 の `git grep -n 'killSession' -- src`］ |
-| Agent の再起動の対（第 4 版） | 起動の側で Agent だけが交代する所：Codex の `resolveLaunchPane` の relaunch と `relaunchIntoSamePane`（同じ pane に起動の行を打ち直す）・`base.ts:800` の送信の前の再起動（`relaunchIfToolExited`）。どれも `beginAgentSession` を呼ぶ。第 5 版では識別をこの呼び出し（起動の世代番号を同期に進める）と OS の Agent 自身のプロセス（pid・開始時刻）の 2 つで取り、D1 の境界の記録には依らない。起動の行を打つ経路が `beginAgentSession` を呼ぶことは §7.3 `agent-identity-4227` で固定する。人の手での起動し直し（`beginAgentSession` を通らない）は pid の違いで `'different'` になる |
-| 配送の分類の対（第 5 版、4 回目 P2） | 新しい拒否 `InstanceLifecycleBusyError` が通る配送の失敗の分類は `classifySendFailure` の 1 か所（`send-user-message.ts` の `deliver` の catch と外の `withInstanceInputLock(...).catch` の 2 か所がそれを呼ぶ）。その先の写しは境界の決着（`session-brief.ts` の `outcomeOf`：`not-sent` → `not_sent`）・送信の route（`send-failure.ts` の理由ごとの 409）・relay（`relay-delivery.ts` は `not-sent` を「次の pump で再試行」に読む）・文書の理由の一覧（`cli-operations-guide.md` の ja と en）。relay と `outcomeOf` は `state` で読むので変えない。CLI の型の写し（`src/cli/types/`）に理由の列挙は無い［事実：`git grep -n "input-lock-lost" -- src docs` の 2026-11-09 の結果。理由の型は import の無い `send-attempt-types.ts` を CLI も読む］ |
+| kill の全経路の対（第 4 版） | （第 6 版で置き換えた）tmux の `killSession` の import を下から逆引きする探し方は、§7.3 `handoff-no-kill-4227` で「G の閉包に kill が無い」ことを確かめる向きに使う（別名・名前空間・再 export を辿る）。kill の全経路を排他の中に入れることはしない |
+| Agent の再起動の対（第 4 版） | （第 6 版で外した）Agent だけが交代する所（Codex の `relaunchIntoSamePane`・`base.ts:800`）を識別で見分ける必要は、G が kill するときだけ。G の観測は境界（D1）と `isRunning` だけで、交代を見分けられないときは `confirmed` にならない側か、止まっていることが正しい側に倒れる（§4.6） |
+| 配送の分類の対（第 5 版、4 回目 P2。第 6 版で書き直し） | G は配送の分類に新しい行を足さない（`InstanceLifecycleBusyError` を外した、§4.6.1）。G が足す送信の中止 `BriefChoiceAbortedError` は `send-user-message.ts` で型で読み、`classifySendFailure` に渡さない（§3.2）。文面で読む所は作らないので、本文の引用（tmux の例外が本文を含む、`send-attempt-state.ts` の #3880 の注）と取り違える所が無い。探した対象：`classifySendFailure` を呼ぶ所（`send-user-message.ts` の 3 か所、`git grep -n 'classifySendFailure(' -- src`）と、文面で `not-sent` を返す行（同ファイル）。G の中止の文面と重なる行は無い |
 | 順位と分類 | C の順位 1（`BRIEF_STATUS_ROW_RANK`）を「質問」と読む所は G の preview だけ（§3.1.1）。D2 の先頭の行・E の画面は順位 1 を質問と数えない［見立て。実装の契約で `git grep -n "rank === 1\|rank: 1" src` で確かめる］ |
 | 古い動きを固定している試験 | kill の確認の Modal を固定している試験（`kill-session-confirm-button` の testid）は、`popup=0`（既定）では今どおり出るので変わらない［見立て。実装の契約で `git grep -l 'kill-session-confirm-button' -- tests` で確かめる］ |
 
@@ -686,13 +661,13 @@ G の `end` の route は、全体を `withInstanceLifecycleLock` の中で行�
 | U10 | 起動のたびに D1 の境界の行が必ず開くこと（依頼の作成が `session_unknown` で落ちないか）。D1 の `launch` の証拠の取りこぼしを UAT で見る |
 | U11 | （第 3 版で解消）relay の待ち先は `dir`・`peer` から復元する（§3.1.1）。残るのは instance ID が `/` を含みうるか（`peer` の分け方）だけ |
 | U12 | （第 3 版で解消）S-F は PM の決定 (a)（§0.0） |
-| U13 | 起動／終了の排他はサーバのプロセスごと。2 つのサーバが 1 つの tmux を共有する運用では kill の直前の世代の照合だけが効く。第 5 版で識別を 3 値の規則（起動の世代番号と Agent 自身のプロセスの pid・開始時刻。`tpgid` は使わない）にした。UAT で見ること：各 Agent（claude・codex・copilot・opencode・antigravity・command-code）が pane の shell の子に `agentProcessNames` の名前で **ただ 1 つ** 現れるか（npm の shim・node の起動のスクリプト・native の子を出す形で外側の採り方が合うか）、宣言に無い wrapper が挟まって `'unknown'` になるツールがあるか（あればそのツールは宣言せず手動の停止へ案内）、macOS と Linux の `ps -o lstart=` と `args=` の差。`lstart` は秒の精度だが pid と組なので、同じ秒に同じ pid が再利用されない限り区別できる |
-| U14 | 排他の待ちの上限（`lifecycle_busy` を返すまで）の値。起動は数十秒かかりうるので、kill の側の待ちの上限を起動の長さに合わせて UAT で決める |
+| U13 | （第 6 版で解消）kill の対象の識別と、2 つのサーバが 1 つの tmux を共有する運用での排他の限界は、G が kill しないので問いにならない。残るのは、人の停止の後に各 Agent で `isRunning` が偽になるまでの時間（`end/observe` が早すぎて `not_stopped` になりすぎないか）を UAT で見ることだけ |
+| U14 | （第 6 版で解消）排他を足さないので待ちの上限も無い |
 | U8 | D2 の先頭の行が `decline` で届かないこと（§3.2）。`decline` でも先頭の行だけは付ける案は D2 の「1 つの会話に 1 回」の規則と予算の扱いに触るので採らなかった |
 
 ## 10. 本文に無い指摘（この Issue では直さない）
 
-- `src/lib/api-client.ts:771` の `killSession` と kill-session の route は、期待するプロセス・会話の世代を受けない。G は自分の `end` の route で照合するが、既存の「終了」（`popup=0`）・設定の画面の再起動・roles の画面の kill は今どおり世代を見ずに kill する（G では直さない。G の流れの外）
+- `src/lib/api-client.ts:771` の `killSession` と kill-session の route は、期待するプロセス・会話の世代を受けない。第 6 版の G は kill しないので照合もしない。人が押す停止（`popup=0` の「終了」・G-4 の停止・設定の画面の再起動・roles の画面）は今どおり世代を見ずに今の session を kill する（G では直さない。人がその場で押す操作で、G の新しい危険ではない）
 - `src/lib/api-client.ts:677` の `sendMessage` は route が受ける `brief`（`'skip'`・`'force'`）を body に入れる口を持たない（D1 の欄が画面から使えない）。G-PR3 の §3.2.1 で足す
 
 - `docs/design/mem-store-4221.md` §3.2 の「`recorded` の `mem close` は断る。人が画面で閉じる」に対し、`transitions.ts:45-48` は人の経路も断る（E §8.5 と同じ指摘。§6 S2 で扱う）
@@ -767,3 +742,17 @@ G の `end` の route は、全体を `withInstanceLifecycleLock` の中で行�
 
 - 第 5 版で新しく止める点は無い。識別の規則・配送の分類の 1 行は A〜D1 の作り直しでも PM の決定の範囲の外でもない（`agent-session-lifecycle.ts`・各 driver・`send-attempt-*.ts`・`send-failure.ts` は A〜D1 の外で、足すのは欄・行だけ）［見立て］。D2・E の worktree とファイルは読んでいない（第 5 版でも読む必要が無かった）
 - 未確認：各 Agent が pane の木に宣言した名前でただ 1 つ現れるか（U13 の UAT）、e2e のサーバの reader と kill の差し替えの口、`send-failure.ts` の既存の試験の形（実装の契約で取り直す）
+
+### 11.5 5 回目（codex-2 の再確認、`prereview/review-4227e.md`、第 5 版 `f9c7fd5bc` に対して）と PM の決定（`pm-decision-4227-kill.md`）
+
+再確認の評価：前回の P1（Agent の起動世代）は一部解消、前回の P2（lifecycle の競合の未送信への写像）は解消。残件 P1 1・追加 P2 2。これを受けた **PM の決定：終了の流れから自動の kill を外す**（3〜5 回目の P1 はすべて「古い依頼が、後から入れ替わった Agent を kill しうる」ことの識別の端で、各 CLI のプロセス構成は実機でしか決まらず、識別を詰めても端が出続ける見込み。同じ種類の穴が 3 回出たので、手当てを足すのをやめて経路を消す）。第 6 版は次のとおり処置した。
+
+| # | 指摘・決定 | 処置 | 理由 | 設計のどこを変えたか |
+|---|---|---|---|---|
+| PM | 終了の流れから自動の kill を外す。閉じるときは 更新の依頼 → 提案 → 差分 → 承認 → 確定 →（人がその場で押す既存の停止）。G は古い依頼が後から kill する経路を作らない。kill の排他・Agent の世代の記録・識別の 3 値の関数・観測点の表・kill の側へ通す期待の識別は G から外す。受入基準は弱めない。「終わる前の更新を確認できた」は確定までの成功と人が停止を押したことの観測で決め、停止を確かめられなければ unconfirmed。対応表に読み替えを書く | **採る** | PM の決定 | §0.2 に Issue の範囲・受入基準との対応表と読み替え。§0.1 G5 の 4 条件の 4 つ目を「人の停止の後に止まったことを観測」に。§4.1 の流れ（⑥ を人の押下の handler の中の 停止の宣言 → 既存の停止 → 観測 に）。§4.3 の `process_identity` の列とトリガーの列・`kill_failed` を外し、API を `end`（停止の宣言、kill しない）と `end/observe`（観測、kill しない）に。§4.4 の行を書き直し（強制終了＝確定の前の「今すぐ停止」、停止が効かない、`end/observe` を送らずに閉じた、停止の後の起動し直し）。§4.6 を書き直し、§4.6.1 に外したもの 7 つを理由つきで残した。§1 の 2 行・§7.1・§7.2（変えないファイルを明記）・§7.3（`killInstanceSession`・`instance-lifecycle-lock-4227`・`agent-identity-4227` のガードを外し、`handoff-no-kill-4227` と停止のボタンの検査を足した）・§7.4 H9(e)(f)(g)・H15 の書き直し（(d) G の全入口で kill 0 回、(f) 停止は人の押下だけ、(g) 依頼を作れないとき）・H23 と §7.4.1 を削除・入口の表・§7.5・§8・§9 U13 U14 を解消・§10 |
+| P1 | 同名の親子から外側を選ぶだけでは Agent 自身に限定できない（宣言名に一致する wrapper W の下で本体だけが交代しても `'same'`） | **前提ごと外す**（PM の決定） | 指摘は kill の対象の識別の規則の反例で、G が kill しなければ識別が要らない。外側を採る規則・複数候補の扱い・driver の宣言を詰めても、各 CLI の実の構成（U13）次第で端が残る見込み（PM の判断） | `classifyAgentIdentity`・`agentProcessNames`・`launchIdentity` を外した（§4.6.1）。「止まった」の観測は `isRunning` と境界・在籍の寿命で、プロセスを識別しない（§4.6）。取り違えても kill に届かないことを H15(d) と `handoff-no-kill-4227` で固定 |
+| P2(1) | 本文に含まれる新しいエラー文言（`lifecycle busy, nothing was typed`）を未送信の証拠にできる。既存の分類は配送不明の判定を文言の判定より優先する［事実：`send-attempt-state.ts` の `classifySendFailure` の #3880 の注・`TMUX_TRANSPORT_FAILURE` の行］ | **`InstanceLifecycleBusyError` を外す**。規則は G の残りの新しい中止に当てる | kill を外したので起動／終了の排他が要らず、送信の中の再起動が lifecycle を待たずに断る場面が無い。新しいエラーも文面も `classifySendFailure` の行も足さないので、この誤りは起きない（`send-attempt-state.ts`・`send-attempt-types.ts`・`send-failure.ts`・`cli-operations-guide.md` は変えない）。G が残す新しい中止 `BriefChoiceAbortedError`（§3.2）には同じ規則を当てる：code（型）の判定と文面の代替の判定を分け、中止は型だけで読み、文面では読まない | §4.6.1 の 2 行目。§3.2 の (3) に「中止は `instanceof` だけで読み、`classifySendFailure` に文面の行を足さない」。§7.4 H21(j) に陰性対照（`auto` で本文に中止の文面＋tmux の失敗 → `indeterminate`（`send-error`）のまま、409 にならない、境界は `unknown`）と、文面で読む版の陽性対照。§8 の配送の分類の対 |
+| P2(2) | 依頼の作成時の識別不明だけ従来の kill の Modal へ戻る導線が残り、不明なら kill しない規則と食い違う | **導線を削除** | 識別が無くなり、G-4 の停止そのものが既存の停止（人の押下）なので、Modal へ戻す別の導線は不要。戻すと記録の無い終わり方の入口がダイアログの外にもう 1 つできる | §4.1 ①：境界が無く依頼を作れないときは、ダイアログの中で「停止」（既存の停止、記録なし）と「やめる」だけ。§4.6.1 の 7 行目。§7.4 H15(g)・入口の表の `create` |
+
+- 第 6 版で新しく止める点は無い。G は作るものを減らしただけで、A・B・C・D1 の作り直しも PM の決定の範囲の外の変更も無い。D2・E の worktree とファイルは読んでいない（第 6 版でも読む必要が無かった）［見立て］
+- 未確認：人の停止の後に各 Agent で `isRunning` が偽になるまでの時間（U13 の残り、UAT）、e2e のサーバの kill を失敗させる差し替えの口（§7.5）、`handleKillConfirm` を G-4 の停止のボタンから呼ぶときの対象の渡し方（今は確認の Modal の対象を読む。実装の契約で確かめる）
