@@ -471,6 +471,11 @@ export interface SendOptions {
    * `MAX_RELAY_HOPS`.
    */
   allowRelayChain?: boolean;
+  /**
+   * Issue #4226: with `--reply-to`, what the sender waits for, kept in mem as a `waiting`
+   * item closed by the relay. Never added to the message.
+   */
+  note?: string;
 }
 
 /** task list command options [Issue #1545] */
@@ -903,6 +908,8 @@ export const MemExitCode = {
   NOT_OWNER: 55,
   /** Too many open items of the kind on the branch. */
   LIMIT: 56,
+  /** `check --suggest`: at least one prompt to update mem (Issue #4226). */
+  SUGGESTED: 57,
 } as const;
 export type MemExitCode = typeof MemExitCode[keyof typeof MemExitCode];
 

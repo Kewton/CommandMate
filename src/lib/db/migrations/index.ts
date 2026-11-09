@@ -54,6 +54,7 @@ import { v67_migrations } from './v67-mem-close-records';
 import { v68_migrations } from './v68-session-brief-boundaries';
 // Issue #4225: the promote path of mem (previews, operations, attempts).
 import { v69_migrations } from './v69-mem-promote';
+import { v70_migrations } from './v70-suggestion-shown';
 
 /**
  * Complete ordered list of all migrations.
@@ -111,4 +112,5 @@ export const migrations: Migration[] = [
   ...v67_migrations,
   ...v68_migrations,
   ...v69_migrations,
+  ...v70_migrations,
 ];

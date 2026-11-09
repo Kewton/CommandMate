@@ -300,6 +300,7 @@ commandmate send <worktree-id> "<message>" --auto-yes --auto-yes-answer-mode car
 | `--auto-yes` | 送信前にAuto-Yesを有効化。送信の後に適用するとき（`--model` で後回しになるツール、ロールや固定つきで既に有効なとき）の失敗は、本文を送った後なので警告と exit 0 です。本文は送り直さず、警告のコマンドで有効化だけをやり直します。送信前の失敗はエラーで未送信です（Issue #4159） | - |
 | `--auto-yes-answer-mode <m>` | `--auto-yes` で有効にするときの答え方のモード（`recommended` / `careful`。[答え方のモード](#答え方のモードおまかせ慎重issue-3863)）。`--auto-yes` なしで指定すると exit 2（Issue #3863） | 新たに有効にするなら `recommended`、有効中なら今のモードのまま |
 | `--duration <d>` | Auto-Yesの有効期間（`1h`〜`24h`、1 時間刻み。例: `1h` / `3h` / `8h`）。範囲の外は `--auto-yes` の有無にかかわらず exit 2 | 1h |
+| `--note "<text>"` | `--reply-to` と一緒に使う。返事を待つ目的の一言を、送り手（`whoami` の自分のセッション）の mem に `waiting` の項目として残す（`close_when=relay:<id>`・`evidence=[relay:<id>]`。relay が終われば閉じる）。保存するのは一言と relay の ID だけで、相手・時刻・本文は写さない。**本文には足さない**。`--reply-to` が無い・セッションの身元が無いと exit 2。mem が断ると（mode が `on` でない 50・検査 2・件数の上限 56 など）**何も送らず**、契約の task を `failed` にし、この送信が有効にした Auto-Yes と relay を取り下げて mem の終了コードで終わる。`--auto-yes` で今の Auto-Yes の状態を読めなかったときは、有効にする前に止める（exit 99）。`--auto-yes` と一緒なら `--instance` が要る（`--agent` だけでは状態を読む先が無いので、何もせず exit 2）。送れなかったと確定した送信では項目を閉じる（Issue #4226） | - |
 | `--stop-pattern <p>` | Auto-Yes停止条件（正規表現、ターミナル出力への照合。[auto-yes の注意](#--stop-pattern-はターミナル出力への照合コマンドの抑止には使えない)参照） | - |
 
 > `--instance` の詳細（ID規約・rosterとの関係）は [マルチセッション（1エージェント複数セッション）](#マルチセッション1エージェント複数セッション) を参照してください。
@@ -3422,6 +3423,8 @@ commandmate mem update <id> --if-version <n> [--text … | --stdin] [--close-whe
 commandmate mem close <id> [--reason "<text>"]
 commandmate mem list [--all] [--branch <name>] [--json]
 commandmate mem check [--branch <name>] [--json]
+commandmate mem check --suggest [--instance <id>] [--json]
+commandmate mem check --suggest --quiet [--hook <event>]
 commandmate mem mode [--json]
 commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before <ts>] [--include-decisions] --confirm
 ```
@@ -3451,6 +3454,31 @@ commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before 
 - **decision**：`promote` 前の決定は成立しても閉じず、`unreflected` として残る
 - **「終わった」の知らせ**：作成者のセッション（同じ instance の世代）が次の brief で 1 回だけ受け取る。`check`・他の instance の brief・画面の preview が先に評価しても消費しない。作成者の世代が終わっていれば同じブランチの次の世代へ、それも無ければ画面の「未配送の知らせ」（`GET /api/repositories/:id/mem/notices?branch=`）に残り、人が引き取る
 
+### 更新の促し（`check --suggest`、Issue #4226）
+
+`mem check --suggest` は、自分の項目と自分の `now` に促しの規則を当てます。モデルは呼ばず、常駐の見張りも足さず、フックの設定も変えません（各ツールのフックから Agent の文脈へ一言を戻す手は作っていない。会話の境界では brief が、要約の前やターンの区切りでは skill の手順がこのコマンドを呼ぶのが代わりです）。
+
+| code | 当たるとき |
+|---|---|
+| `now_missing` | 自分の instance に `now` が無い（roster に居る instance だけ） |
+| `now_stale` | 自分の `now` が 1 日以上更新されていない |
+| `now_condition_met` | 自分の `now` の条件が成立して閉じた（`--quiet` では見ない） |
+| `decision_unreflected` | `open` / `recorded` の decision が古い（14 日）か、条件は成立したが未反映 |
+| `manual_stale` | 閉じる条件が `manual` の `next` / `external` / `note` が古い |
+| `open_count` | ブランチの open の項目が警告の数に達した（`mem list` の警告と同じ式） |
+| `ref_unknown` | 条件の参照先が見つからない（`not_found` / `relay_not_found`。`--quiet` では見ない） |
+| `evidence_missing` | `evidence` の `path:` が今は無い（symlink も無い扱い） |
+| `decision_no_destination` | `open` の decision に記録の行き先（`promote_to`）が無い |
+
+- 対象は、自分が作成者の項目（同じ instance の世代。作業木の ID を改名しても外れない）と、人が画面で書いた項目。**書くべきだったのに書かれていない意図までは見つけません**（書かれた項目の状態と、空の `now` だけを見る）
+- 出す文は code ごとの固定の文と ID・版だけで、項目の本文・ブランチ名は出しません。`--json` の `branch` は brief と同じ置き換え（秘密らしい・見えない文字を含むブランチは `null`）
+- **終了コード**：促しが 1 つ以上で **57**、無ければ 0。mode が `off` / `derived` は stdout に何も出さず exit 50。`promptOnEvents`（画面の mem の設定）が無効なら促しは 0 件で exit 0（`--json` に `disabledBy: "promptOnEvents"`）。評価の途中で mode・設定・ブランチ・登録・instance や作業木の世代が変わったら何も出さず exit 0（`--json` に `discarded`、stderr に「もう一度」の 1 行）
+- `--suggest` は条件を評価する（`mem list` と同じく、成立した条件で項目を閉じうる）。表示済みかどうか（`shown`）を出すだけで、同じ状態でも毎回全部出します
+- `--quiet` は skill の手順から呼ぶ形です。**常に exit 0** で、その instance にまだ見せていない促しだけを 1 行（280 バイト以内）で出し、見せたことを記録します。条件の照会はしません。記録は DB に残り、**同じ状態の促しはサーバーの再起動の後も繰り返しません**（ブランチや同じ Git の登録 root を行き来しても、それぞれの状態が変わらなければ出しません）。会話の境界・instance の世代・状態（項目の版など）が変われば 1 回出ます。身元が無い・`--instance` が自分と違うときは何もしません。`--json` を付けても quiet が勝ちます。commander が断る旗の誤り（知らない旗など）は従来どおり exit 1
+- 既知の制限：サーバーが記録した後、応答が CLI の期限（4 秒）に間に合わないと、その促しは見えないまま記録済みになります（サーバーの期限 3 秒はサーバーが要求を受けてから数えるもので、CLI がそれより前に使った時間（セッションの身元の解決など）は含まないため、この隙間は閉じない）。roster から消えた instance・git から消えたブランチ・登録を消した root の記録は、その作業木で次に `--quiet` が呼ばれるか作業木を消すまで残ります
+- `--hook <event>`（`session_start` / `pre_compact` / `turn_end` / `manual`）は呼んだ時点の印で、ログと `--json` に出るだけです
+- 同じ OS 権限のプロセスは API（`POST /api/worktrees/<id>/mem/suggest`）を直接呼んで、別の instance の記録を消費できます。作成者の検査と同じく、誤りを防ぐもので悪意は防ぎません
+
 ### 自由入力の欄の検査
 
 すべての自由入力の欄（`text`・`quote`・`evidence`・`promote_to`・`reason`）はサーバで、長さの上限・秘密らしい文字列（トークン・鍵・`password=` など）・制御文字を検査する。`evidence` と `promote_to` の `path:` は repository からの相対パスだけで、絶対パス・`..` で外へ出るもの・symlink を通るもの・`.env` などを断る。断ったときのエラー・`--json`・ログには `code`・`field`・`rule` だけが出て、**断った文字列そのものは出さない**。
@@ -3469,6 +3497,7 @@ commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before 
 | 54 | `duplicate_key`：同じ `--key` で中身が違う |
 | 55 | `not_owner` / `state_forbids`：作成者でない（別の世代を含む）・状態が許さない・セッションの中の `purge` |
 | 56 | `limit_exceeded`：そのブランチの open の項目が多すぎる（`waiting` / `next` / `external` は 30、`note` は 50。`decision` は警告だけ） |
+| 57 | `check --suggest`：促しが 1 つ以上ある（Issue #4226。`--quiet` は常に 0） |
 
 ### 決定を正本へ記録する（画面だけ、Issue #4225）
 
@@ -4335,7 +4364,7 @@ commandmate ls --token your-token
 | 30 | NO_ACTIVE_SESSIONS | interruptの対象となる稼働中セッションが無い |
 | 31 | ROLE CONFLICT | ロールや名簿の競合（`name_conflict` / `name_changed` / `version_conflict` / `role_in_use` / `instance_exists` / `roster_changed`）。何も変更・送信していない。ロールを付けない `instances add` / `remove` / `alias` でも出る。例外: `remove --kill` はセッションが停止済みのことがある |
 | 32 | ROLE NOT_SENT | ロールの条件を満たさない、またはロールのために起動を拒否。本文は入力していない（`send` / `ask`） |
-| 50〜56 | MEM | `mem` の拒否（50 disabled / 51 version_conflict / 52 対象不明 / 53 ambiguous / 54 duplicate_key / 55 not_owner・state_forbids / 56 limit_exceeded）。[commandmate mem](#commandmate-mem) の終了コード |
+| 50〜57 | MEM | `mem` の拒否（50 disabled / 51 version_conflict / 52 対象不明 / 53 ambiguous / 54 duplicate_key / 55 not_owner・state_forbids / 56 limit_exceeded）と、`mem check --suggest` の促しあり（57）。[commandmate mem](#commandmate-mem) の終了コード。`send --note` を mem が断ったときも 50〜56 で終わる |
 | 99 | UNEXPECTED_ERROR | 予期しないエラー / リソース未検出 |
 | 124 | TIMEOUT | waitのタイムアウト |
 
