@@ -133,6 +133,11 @@ export interface BriefTextResponse {
   mode: BriefMode;
   text: string;
   omitted: number;
+  /**
+   * Issue #4224: `sessionStart=1` only — the send path puts the brief in front of this
+   * conversation's first send, so the hook prints nothing (`text` is empty).
+   */
+  deferred?: 'send';
 }
 
 export type BriefBudgetCheck = { ok: true; maxBytes: number } | { ok: false; reason: 'format' | 'below_min' | 'above_max' };

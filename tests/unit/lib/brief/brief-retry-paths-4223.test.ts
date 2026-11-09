@@ -33,7 +33,8 @@ vi.mock('@/lib/logger', () => ({
 import { NextRequest } from 'next/server';
 import { addAgentInstance, removeAgentInstance } from '@/lib/db/agent-instances-db';
 import { deleteWorktreesByIds } from '@/lib/db/worktree-db';
-import { getInstanceIncarnation } from '@/lib/mem/incarnation';
+import { getInstanceIncarnation, getOrCreateWorktreeIncarnation } from '@/lib/mem/incarnation';
+import { readInstanceLifetime } from '@/lib/db/session-brief-db';
 import { BRIEF_CHANGE_REASONS, BriefMembershipChangedError } from '@/lib/brief/build';
 import { createMemBriefProvider } from '@/lib/brief/provider';
 import { BRIEF_ROUTE_RETRIES, briefForRoute } from '@/lib/brief/service';
@@ -54,7 +55,15 @@ const ISSUE = (state: 'open' | 'closed') => ({ code: 0, stdout: JSON.stringify({
 
 function request(): BriefRequest {
   return {
-    target: { worktreeId: 'wt-1', cliToolId: 'claude', instanceId: 'claude', instanceIncarnation: getInstanceIncarnation(world.db, 'wt-1', 'claude')?.incarnation ?? null },
+    // Issue #4224: the lifetimes a send's entrance fixes (D2 design §2.4), as of now.
+    target: {
+      worktreeId: 'wt-1',
+      worktreeIncarnation: getOrCreateWorktreeIncarnation(world.db, 'wt-1'),
+      cliToolId: 'claude',
+      instanceId: 'claude',
+      instanceIncarnation: getInstanceIncarnation(world.db, 'wt-1', 'claude')?.incarnation ?? null,
+      instanceOnRoster: readInstanceLifetime(world.db, 'wt-1', 'claude').onRoster,
+    },
     membership: { repositoryId: world.repo, readRepositoryIds: [world.repo], branch: 'feature/x', detached: false, mode: 'on' },
     boundary: { id: 'b-1', kind: 'launch', late: false, openedAt: Date.now() },
     budget: { maxBytes: 4096, maxLines: 240 },

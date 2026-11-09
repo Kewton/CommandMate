@@ -15,10 +15,11 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 import { addAgentInstance, removeAgentInstance } from '@/lib/db/agent-instances-db';
-import { endInstanceIncarnation, getInstanceIncarnation, startInstanceIncarnation } from '@/lib/mem/incarnation';
+import { endInstanceIncarnation, getInstanceIncarnation, getOrCreateWorktreeIncarnation, startInstanceIncarnation } from '@/lib/mem/incarnation';
+import { readInstanceLifetime } from '@/lib/db/session-brief-db';
 import { memCheck } from '@/lib/mem/service';
 import { EMPTY_BRIEF_PROVIDER, getBriefProvider, type BriefRequest } from '@/lib/session/brief-provider';
-import { createMemBriefProvider, MEM_BRIEF_PROVIDER, type MemBriefProviderState } from '@/lib/brief/provider';
+import { createMemBriefProvider, MEM_BRIEF_PORT, MEM_BRIEF_PROVIDER, settleBriefAttempt, type MemBriefProviderState } from '@/lib/brief/provider';
 import { BriefMembershipChangedError } from '@/lib/brief/build';
 import { BriefDeadlineExpiredError } from '@/lib/brief/deadline';
 import type { BriefSourceReader } from '@/lib/brief/sources';
@@ -48,9 +49,12 @@ function request(over: { boundaryId?: string; branch?: string; mode?: 'on' | 'de
   return {
     target: {
       worktreeId: 'wt-1',
+      // Issue #4224: the lifetimes a send's entrance fixes (D2 design §2.4), as of now.
+      worktreeIncarnation: getOrCreateWorktreeIncarnation(world.db, 'wt-1'),
       cliToolId: 'claude',
       instanceId: 'claude',
       instanceIncarnation: getInstanceIncarnation(world.db, 'wt-1', 'claude')?.incarnation ?? null,
+      instanceOnRoster: readInstanceLifetime(world.db, 'wt-1', 'claude').onRoster,
     },
     membership: {
       repositoryId: world.repo,
@@ -78,7 +82,11 @@ describe('the port’s contract', () => {
     expect(MEM_BRIEF_PROVIDER).toMatchObject({ id: 'mem-brief', minBytes: 1024, defaultBytes: 4096 });
     expect(MEM_BRIEF_PROVIDER.settle).toBeUndefined();
     expect(typeof MEM_BRIEF_PROVIDER.reserve).toBe('function');
-    expect(getBriefProvider()).toBe(EMPTY_BRIEF_PROVIDER);
+    // Issue #4224 (D2 design §10 T-1): D2 connects it — the default is MEM_BRIEF_PORT, which is
+    // this provider with settleBriefAttempt as its settle; MEM_BRIEF_PROVIDER keeps none (above).
+    expect(getBriefProvider()).toBe(MEM_BRIEF_PORT);
+    expect(getBriefProvider()).not.toBe(EMPTY_BRIEF_PROVIDER);
+    expect(MEM_BRIEF_PORT).toMatchObject({ id: 'mem-brief', minBytes: 1024, defaultBytes: 4096, build: MEM_BRIEF_PROVIDER.build, reserve: MEM_BRIEF_PROVIDER.reserve, settle: settleBriefAttempt });
   });
 
   it('maxLines below the fixed 5 lines builds an empty body', async () => {

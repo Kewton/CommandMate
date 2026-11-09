@@ -28,6 +28,8 @@ export interface FittedText {
   text: string;
   included: BriefItem[];
   omitted: number;
+  /** Issue #4224: the model's required lead does not fit; `text` is '' and nothing is to be attached. */
+  leadUnfit?: true;
 }
 
 export class BriefOverBudgetError extends Error {
@@ -47,10 +49,13 @@ export function fitText(model: BriefModel, options: FitTextOptions): FittedText 
   const drawn = model.items.map((item) => fittedEntryLine(item.entry, model.fixed.readAll, all).line);
   const total = drawn.length;
   const extra = options.trailingNewline ? 1 : 0;
-  const draw = (taken: number): string => drawText(model.fixed, drawn.slice(0, taken), total - taken);
+  // Issue #4224 (D2 design §7.4): the lead is required — the entries after it are cut, it is not.
+  const lead = model.lead !== undefined ? [model.lead] : [];
+  const draw = (taken: number): string => drawText(model.fixed, [...lead, ...drawn.slice(0, taken)], total - taken);
   const fits = (taken: number): boolean =>
     (options.maxBytes === null || bytesOf(draw(taken)) + extra <= options.maxBytes) &&
-    (options.maxLines === undefined || BRIEF_TEXT_FIXED_LINES + taken <= options.maxLines);
+    (options.maxLines === undefined || BRIEF_TEXT_FIXED_LINES + lead.length + taken <= options.maxLines);
+  if (lead.length > 0 && !all && !fits(0)) return { text: '', included: [], omitted: total, leadUnfit: true };
   const taken = all ? total : takePrefix(total, fits);
   const text = draw(taken);
   if (options.maxBytes !== null && bytesOf(text) + extra > options.maxBytes) {
