@@ -694,6 +694,14 @@
       "unknown": "The result is unknown (timed out or the connection was lost). It may or may not have been written; pressing again sends the same content with the same key (if it was written, no second item is made and the same item comes back).",
       "resend": "Send the same again",
       "addPending": "The result of the last add is unknown. The input is held until it is sent again (the same content and key, so no second item).",
+      "unknownVersioned": "The result is unknown (timed out or the connection was lost). Pressing again sends the same content with the same version. If the first send was written, or someone else changed the item, it comes back as a version conflict with the comparison (the screen does not guess that it was saved).",
+      "pendingElsewhere": "There is an {op} whose result is unknown (to {worktree} · {instance}). It cannot be sent again with the current selection. Go back to that destination, or do not send it again.",
+      "pendingReturn": "Go back to that destination",
+      "pendingOp": {
+        "add": "add",
+        "update": "edit",
+        "close": "close"
+      },
       "pendingDiscard": "Do not send again (check the list for whether it was written)",
       "closeWhenKeep": "Close condition (empty keeps the current {type}; writing one replaces it)",
       "closeWhenRequired": "Close condition (required, e.g. issue:#123, pr:#45)",

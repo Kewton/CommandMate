@@ -66,6 +66,10 @@ let writes: Array<{ op: Op; url: string; body: Record<string, unknown> }>;
 let loseAnswer: Op | null;
 /** The next add is refused with this body. */
 let refuseAdd: { status: number; body: Record<string, unknown> } | null;
+/** The next write of this op is lost before it reaches the store (fetch rejects, nothing written). */
+let dropRequest: Op | null;
+/** A second worktree on the same branch (rule (4)(a)). */
+let secondWorktree: boolean;
 const byKey = new Map<string, MemItemView>();
 
 const json = (status: number, body: unknown) => ({ ok: status < 300, status, json: async () => body }) as Response;
@@ -84,6 +88,8 @@ beforeEach(() => {
   writes = [];
   loseAnswer = null;
   refuseAdd = null;
+  secondWorktree = false;
+  dropRequest = null;
   byKey.clear();
   global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -92,7 +98,12 @@ beforeEach(() => {
     if (url.startsWith('/api/worktrees?')) {
       return json(200, {
         repositories: [{ id: 'repo-1', path: '/repos/app', name: 'app' }],
-        worktrees: [{ id: 'wt-1', name: 'wt-1', repositoryPath: '/repos/app', branch: 'feat/x', agentInstances: [{ id: 'claude', cliTool: 'claude' }] }],
+        worktrees: [
+          { id: 'wt-1', name: 'wt-1', repositoryPath: '/repos/app', branch: 'feat/x', agentInstances: [{ id: 'claude', cliTool: 'claude' }] },
+          ...(secondWorktree
+            ? [{ id: 'wt-2', name: 'wt-2', repositoryPath: '/repos/app', branch: 'feat/x', agentInstances: [{ id: 'codex', cliTool: 'codex' }] }]
+            : []),
+        ],
       });
     }
     if (url.includes('/mem/mode')) return json(200, { ok: true, mode: 'on', source: { level: 'fallback' } });
@@ -115,7 +126,8 @@ beforeEach(() => {
         writes.push({ op: 'add', url, body });
         return json(refusal.status, refusal.body);
       }
-      const key = String(body.key);
+      // As the store: a key is the same request only within one destination (its instance's incarnation).
+      const key = `${url}|${String(body.instanceId)}|${String(body.key)}`;
       const again = byKey.get(key);
       if (again) return lose('add', json(200, { ok: true, item: again, replayed: true, warnings: [] }));
       const added = item(`a${items.length}`, body.kind as MemItemView['kind'], String(body.text), { createdBy: 'human', updatedBy: 'human' });
@@ -125,6 +137,11 @@ beforeEach(() => {
     }
     const patch = /\/mem\/screen\/items\/([^/]+)$/.exec(url);
     if (method === 'PATCH' && patch) {
+      if (dropRequest === 'update') {
+        dropRequest = null;
+        writes.push({ op: 'update', url, body });
+        throw new TypeError('Failed to fetch');
+      }
       const target = find(patch[1]);
       if (target.version !== body.ifVersion) return lose('update', json(409, { ok: false, code: 'version_conflict', currentVersion: target.version, item: target }));
       // As the store: an omitted field is kept, `[]` clears.
@@ -132,6 +149,7 @@ beforeEach(() => {
         ...target,
         ...(body.text !== undefined ? { text: String(body.text) } : {}),
         ...(body.evidence !== undefined ? { evidence: body.evidence as string[] } : {}),
+        ...(body.closeWhen === 'manual' ? { closeWhen: { schema: 1, type: 'manual' } as const } : {}),
         version: target.version + 1,
         updatedBy: 'human',
       };
@@ -288,7 +306,7 @@ describe('[#4227] rule (4): an unknown result keeps the request — its content 
     expect(writesOf('add')[1].body.key).not.toBe(writesOf('add')[0].body.key);
   });
 
-  it('edit: the answer is lost after the store wrote it → the same body is sent again and its own write is not shown as a conflict', async () => {
+  it('edit: the answer is lost after the store wrote it → the same body is sent again and its 409 is a conflict, not guessed as "saved" (rule (4)(c))', async () => {
     renderPanel();
     fireEvent.click(await screen.findByTestId('mem-item-edit-n1'));
     fireEvent.change(screen.getByTestId('mem-item-edit-text-n1'), { target: { value: 'saved once' } });
@@ -298,7 +316,9 @@ describe('[#4227] rule (4): an unknown result keeps the request — its content 
     fireEvent.click(screen.getByTestId('mem-item-save-n1'));
     await waitFor(() => expect(screen.queryByTestId('mem-item-editor-n1')).toBeNull());
     expect(writesOf('update')[1].body).toEqual(writesOf('update')[0].body);
-    expect(screen.queryByTestId('mem-item-conflict-n1')).toBeNull();
+    // An edit has no key the store answers for: the screen shows the comparison, not "saved".
+    await screen.findByTestId('mem-item-conflict-n1');
+    expect(screen.getByTestId('mem-items-notice').textContent).not.toContain('保存しました');
     expect(find('n1')).toMatchObject({ text: 'saved once', version: 2 });
   });
 
@@ -314,6 +334,98 @@ describe('[#4227] rule (4): an unknown result keeps the request — its content 
     await waitFor(() => expect(screen.queryByTestId('mem-item-d1')).toBeNull());
     expect(writesOf('close')[1].body).toEqual(writesOf('close')[0].body);
     expect(writesOf('close')[0].body).toMatchObject({ ifVersion: 2, confirmUnreflected: true });
+  });
+});
+
+describe('[#4227] rule (4)(a)(b)(c): one unit per operation, sent as it is (Codex review-4227-pr1b P2 ①②③)', () => {
+  it('① add lost → another item is saved → the add sent again is still one item (another answer does not drop the unit)', async () => {
+    renderPanel();
+    await screen.findByTestId('mem-items-add');
+    fireEvent.change(screen.getByTestId('mem-items-add-text'), { target: { value: 'kept add' } });
+    loseAnswer = 'add';
+    fireEvent.click(screen.getByTestId('mem-items-add-submit'));
+    await screen.findByTestId('mem-items-add-pending');
+    // Another operation completes.
+    fireEvent.click(screen.getByTestId('mem-item-edit-n1'));
+    fireEvent.change(screen.getByTestId('mem-item-edit-text-n1'), { target: { value: 'other save' } });
+    fireEvent.click(screen.getByTestId('mem-item-save-n1'));
+    await waitFor(() => expect(find('n1').text).toBe('other save'));
+    // 538aa6cd9 dropped the add's key here and the next press made a second item.
+    expect(screen.getByTestId('mem-items-add-pending')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('mem-items-add-submit'));
+    await waitFor(() => expect(screen.queryByTestId('mem-items-add-pending')).toBeNull());
+    expect(writesOf('add')).toHaveLength(2);
+    expect(writesOf('add')[1].body).toEqual(writesOf('add')[0].body);
+    expect(items.filter((entry) => entry.text === 'kept add')).toHaveLength(1);
+  });
+
+  it('② add lost → another worktree is selected → it cannot be sent there; going back sends it to the first one (no second item)', async () => {
+    secondWorktree = true;
+    renderPanel();
+    await screen.findByTestId('mem-items-add');
+    await waitFor(() => expect(screen.getAllByRole('option').some((option) => option.textContent?.startsWith('wt-2'))).toBe(true));
+    fireEvent.change(screen.getByTestId('mem-items-add-text'), { target: { value: 'to wt-1' } });
+    loseAnswer = 'add';
+    fireEvent.click(screen.getByTestId('mem-items-add-submit'));
+    await screen.findByTestId('mem-items-add-pending');
+    fireEvent.change(screen.getByTestId('mem-items-worktree'), { target: { value: 'wt-2' } });
+    await screen.findByTestId('mem-items-pending-elsewhere-add');
+    // 538aa6cd9 sent the same key to wt-2: a second item there.
+    expect((screen.getByTestId('mem-items-add-submit') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByTestId('mem-items-add-submit'));
+    expect(writesOf('add')).toHaveLength(1);
+    fireEvent.click(screen.getByTestId('mem-items-pending-return-add'));
+    await waitFor(() => expect((screen.getByTestId('mem-items-worktree') as HTMLSelectElement).value).toBe('wt-1'));
+    expect(screen.queryByTestId('mem-items-pending-elsewhere-add')).toBeNull();
+    fireEvent.click(screen.getByTestId('mem-items-add-submit'));
+    await waitFor(() => expect(screen.queryByTestId('mem-items-add-pending')).toBeNull());
+    expect(writesOf('add').map((write) => write.url)).toEqual(['/api/worktrees/wt-1/mem/screen/items', '/api/worktrees/wt-1/mem/screen/items']);
+    expect(writesOf('add')[1].body).toEqual(writesOf('add')[0].body);
+    expect(items.filter((entry) => entry.text === 'to wt-1')).toHaveLength(1);
+  });
+
+  it('② (control) dropping the unit from the other worktree sends nothing and frees the add there', async () => {
+    secondWorktree = true;
+    renderPanel();
+    await screen.findByTestId('mem-items-add');
+    await waitFor(() => expect(screen.getAllByRole('option').some((option) => option.textContent?.startsWith('wt-2'))).toBe(true));
+    fireEvent.change(screen.getByTestId('mem-items-add-text'), { target: { value: 'dropped' } });
+    loseAnswer = 'add';
+    fireEvent.click(screen.getByTestId('mem-items-add-submit'));
+    await screen.findByTestId('mem-items-add-pending');
+    fireEvent.change(screen.getByTestId('mem-items-worktree'), { target: { value: 'wt-2' } });
+    fireEvent.click(await screen.findByTestId('mem-items-pending-drop-add'));
+    await waitFor(() => expect(screen.queryByTestId('mem-items-add-pending')).toBeNull());
+    expect(writesOf('add')).toHaveLength(1);
+  });
+
+  it('③ a condition-only edit lost before the store → another screen changes the text → the resend’s 409 is a conflict, not "saved"', async () => {
+    renderPanel();
+    fireEvent.click(await screen.findByTestId('mem-item-edit-n1'));
+    fireEvent.change(screen.getByTestId('mem-item-edit-close-when-n1'), { target: { value: 'manual' } });
+    dropRequest = 'update';
+    fireEvent.click(screen.getByTestId('mem-item-save-n1'));
+    await waitFor(() => expect(screen.getByTestId('mem-items-notice').textContent).toContain('結果が分かりません'));
+    // Another person's screen saves the text: version +1, by a human.
+    put({ ...find('n1'), text: 'other screen', version: 2, updatedBy: 'human' });
+    fireEvent.click(screen.getByTestId('mem-item-save-n1'));
+    // 538aa6cd9 compared only text and evidence and said "saved" with the condition never written.
+    await screen.findByTestId('mem-item-conflict-n1');
+    expect(screen.getByTestId('mem-items-notice').textContent).not.toContain('保存しました');
+    expect(writesOf('update').map((write) => write.body)).toEqual([
+      { instanceId: 'claude', ifVersion: 1, closeWhen: 'manual' },
+      { instanceId: 'claude', ifVersion: 1, closeWhen: 'manual' },
+    ]);
+    expect(find('n1').closeWhen).toBeNull();
+  });
+
+  it('③ (control) without an unknown result an edit saves as before', async () => {
+    renderPanel();
+    fireEvent.click(await screen.findByTestId('mem-item-edit-n1'));
+    fireEvent.change(screen.getByTestId('mem-item-edit-close-when-n1'), { target: { value: 'manual' } });
+    fireEvent.click(screen.getByTestId('mem-item-save-n1'));
+    await waitFor(() => expect(screen.getByTestId('mem-items-notice').textContent).toContain('保存しました'));
+    expect(find('n1').closeWhen).toEqual({ schema: 1, type: 'manual' });
   });
 });
 
