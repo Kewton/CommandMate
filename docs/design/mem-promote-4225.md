@@ -1,6 +1,6 @@
 # 人が差分を承認して decision を正本へ記録し、反映を確かめる（Issue #4225 / Epic #4220 の子 E）設計
 
-- 状態：設計の段（第 3 版、実装前）。第 1 版の「止める点」は PM が決めた（§0.1）。第 3 版は Codex の事前レビュー（P1 2・P2 5）を反映した（処置は §9）。再確認（2 回目、P1 1・P2 1）も反映した（§9.2）。再確認（3 回目、P2 2）も反映した（§9.3）。実装は Codex の事前レビューの後、同じブランチの別の契約で行う
+- 状態：設計の段（第 3 版、実装前）。第 1 版の「止める点」は PM が決めた（§0.1）。第 3 版は Codex の事前レビュー（P1 2・P2 5）を反映した（処置は §9）。再確認（2 回目、P1 1・P2 1）も反映した（§9.2）。再確認（3 回目、P2 2）も反映した（§9.3）。実装済み（実装で実コードを正とした点は §10、共通規則の全読者は §11）
 - 前提：Epic #4220 の決定事項 D1〜D13（とくに D3・D6・D9・D11・D12）。A（#4221）`docs/design/mem-store-4221.md`（以下「A」）、B（#4222）`docs/design/mem-close-when-4222.md`（「B」）、C（#4223）`docs/design/brief-4223.md`（「C」）、D1（#4274）`docs/design/session-boundary-brief-4274.md`（「D1」）。D2（#4224）は並行で設計中で、この文書は触れない
 - 凡例：**［事実］** = この文書を書いた時点（2026-11-09、`feature/4225-worktree` = develop `64572168c`）でファイルと行を読んで確かめたもの。**［見立て］** = 設計としての判断。**［未確認］** = 読んでいない・実測していないもの。行番号は確認時点のもので、実装の契約では名前で探し直す
 
@@ -250,7 +250,7 @@ preview は画面の要求（§4.2 の印）で作り、DB に保存する（`me
 ### 5.3 パスの正規化（文書の行き先）
 
 1. `promote_to` の `path:` は A の検査（`validatePromoteTo`→`normalizeRepoPath`、`validate.ts:277`・`:185`）を **選んだ worktree の root で** もう一度かける：絶対パス・`~`・NUL・バックスラッシュ・ドライブ文字を断る、`..` で外へ出るものを断る、`findSensitivePathSegment` の当たる成分を断る、root から各成分を `lstat` して symlink を断る（`:213`）［事実］
-2. E で足す検査（A の関数は変えない）：root 自身が symlink でない（`realpath(root) === path.resolve(root)`）、`.git` の成分を断る、最後の成分が存在するなら通常のファイルである、拡張子が `.md`、大きさの上限。**`normalizeRepoPath` は promote_to で最初の無い成分で止まる**（`validate.ts:204-211`：`mustExist=false` なら `break`）ので、無いディレクトリの下は作らない（親ディレクトリが存在することを求める）［見立て］
+2. E で足す検査（A の関数は変えない）：root 自身が symlink でない（root を `lstat` して通常のディレクトリ。実装で `realpath` の比較から変えた、§10）、`.git` の成分を断る、最後の成分が存在するなら通常のファイルである、拡張子が `.md`、大きさの上限。**`normalizeRepoPath` は promote_to で最初の無い成分で止まる**（`validate.ts:204-211`：`mustExist=false` なら `break`）ので、無いディレクトリの下は作らない（親ディレクトリが存在することを求める）［見立て］
 3. 照合のたび（preview・approve・書く直前）に 1・2 をやり直す
 
 ### 5.4 commit・push をしない
@@ -509,4 +509,39 @@ Codex の事前レビュー（2026-11-09、P1 2・P2 5。`workspace/orchestratio
 | R4 | P2：`link` の後・`unlink` の前の終了と他者の追記が重なると、一時名の中身が区画と一致せず回収されずに `nlink === 2` が残り、後続の追記が拒否され続ける | 採る | E の一時名の回収規則を定める：DB にある E の operation の ID で同じ行き先のものだけを候補にし、行き先と同じ inode なら中身に関係なく名前を消す（内容は行き先に残る）。別の inode なら区画の全文と完全一致のときだけ。回収は照合と既にあるファイルの追記の前に行う。無関係な hardlink は今までどおり断る（§3.3、T5e） |
 
 - §0.1 の受入基準の読みは PM の確認待ちのまま残す（3 回目でも判定の対象外）
+
+---
+
+## 10. 実装で実コードを正とした点（2026-11-09）
+
+| # | 設計の記述 | 実装 | 理由 |
+|---|---|---|---|
+| I1 | root の検査は `realpath(root) === path.resolve(root)`（§5.3） | root 自身を `lstat` して通常のディレクトリで symlink でないこと | `realpath` の比較は祖先の symlink（macOS の `/var` → `/private/var`、`/tmp`）でも不一致になり、正当な作業木を断る。守るのは「root 自身が symlink でない」で、途中・最後の成分は A の `normalizeRepoPath` と E の検査が `lstat` で見る |
+| I2 | operation id は approve で `randomUUID`（§3.2） | **preview で決め**、`mem_promote_previews.operation_id`（UNIQUE）に持ち、approve はその ID で operation を作る | 本文の印に operation id が入るので、画面が見せた本文（`body_sha256`）と書く本文を一致させるには preview の時点で決まっている必要がある |
+| I3 | `mem_promote_operations` の列（§6.1） | `block`（文書の区画の全文）を足した | 一時名の回収規則（§3.3 の R4、別の inode のときは区画の全文と完全一致）で照らす値 |
+| I4 | 本文の「承認: 人（画面）<時刻>」（§5.2） | 「差分の作成: <時刻>（承認は人が画面で行う）」 | 本文は preview で固定する（I2）。承認の時刻は operation の `approved_at` に持つ |
+| I5 | T23 (1)「`mem-db.ts` の書き込みの export を `mem-db.ts`・`service.ts` 以外が呼ばない」 | 今の呼び手（`agent-instances-db.ts`・`worktree-db.ts` の `archiveNowSlots` 等、`mem-close-db.ts` の `closeMemItemByCondition`、`settings-service.ts` の設定の書き込み）を理由つきで名指しし、**それ以外の新しい呼び手**を落とす。加えて `transitionDecision` の呼び手は `mem/service.ts` だけ、`memSettleDecisionTransition` は `promote/service.ts` だけ、`mem_items` を SQL で書くのは `mem-db.ts` だけ | 設計の文面のままでは A・B が既に持つ正当な呼び手で落ちる。迂回の検出（別名・名前空間・相対パス・re-export）は名前の集合を本文から求めたまま保った |
+| I6 | B の試験 `close-entrances-4222.test.ts` | `EXCEPTIONS` に `transitionDecision` を理由つきで 1 行足した（既存の行・`it`・期待値は変えない） | B の試験は「store の書き手はすべて表の行か理由つきの例外」を固定しており、新しい書き手は足すまで落ちる設計 |
+| I7 | v66 の試験 `migration-v66-mem-store-4221.test.ts` | v69 の `down` を先に呼ぶ 2 行を足した（期待値は変えない） | v66 より前へ戻す試験は上に積んだ版から順に戻す（v68 のときと同じ足し方）。`mem_promote_*` は `mem_` で始まるので戻さないと「`mem_%` の表が 0」の期待に当たる |
+| I8 | 文書の行き先の worktree は人が選ぶ（§2.2） | 画面で選んだ作業木を、文書の行き先と context の両方に使う。preview は HEAD のブランチが項目のブランチと同じことを求める | 1 画面で選ぶものを 1 つにした。別の作業木へ書く要求は無い |
+| I9 | approve で token が取り出せないとき `failure`（§3.2） | operation を作らずに 502 `gh_failed`（`token_unavailable`）。preview は有効のまま | 送る前の失敗で、operation の行を作る前に分かる。再試行は同じ preview でできる |
+
+## 11. 共通規則の全読者
+
+E の入口が共有する規則と、それを読む（当てはめる）場所の全部。規則を変えるときはこの表の行をすべて直す。
+
+| 共通規則 | 読む場所（ファイル・関数） | 固定している試験 |
+|---|---|---|
+| 画面の印（`isScreenRequest`）。無ければ 403 `screen_only`・何も書かない | `src/lib/promote/service.ts` の `promotePreview`・`promoteApprove`・`promoteConfirmReflected`・`promoteReconcile`・`promoteAbandon`・`promoteSettleTransition`（関数の最初の文）。route（`src/app/api/repositories/[id]/mem/decisions/**`）は要求を渡すだけ。画面の client `src/lib/promote/screen-client.ts` が `screenRequestHeaders()` を付ける | `promote-entrances-4225`（(e)）・`promote-write-chain-4225`（(4)）・`mem-decisions-routes-4225`・`DecisionPromotePanel-4225`・ガード `mem-promote-screen-only-4225` |
+| mode は項目の (repository, branch) で `on` のときだけ開始・遷移する（`memModeOnFor`） | `promotePreview`・`promoteApprove`（同期の区間）、`memSettleDecisionTransition`（`src/lib/mem/service.ts`、遷移の同期の区間）。`promoteReconcile`・`promoteAbandon` は結果の記録だけで mode を問わない（E1）、遷移は A の入口が断る | `promote-entrances-4225`（(b)・T17）・`write-entrances-recreate-4221`（decision-* の mode の `it.each`） |
+| 作業木の世代は要求の到着で固定し、比べるだけ（固定し直さない） | `promotePreview`（`getOrCreateWorktreeIncarnation` → preview の行）、`promoteApprove`（preview の値 → operation の行）、`settleTransition`（operation の値を A の入口へ）、`promoteConfirmReflected`・`promoteSettleTransition`（その要求の時点）、`memSettleDecisionTransition` → `transitionDecision` の `alive()` | `promote-entrances-4225`（(a)・T20）・`write-entrances-recreate-4221`（decision-* の作り直しの `it.each`） |
+| 版と指紋（`item_version`・`itemFingerprint`）が承認のときと同じ | `promotePreview`（同期の区間で読み直し）、`promoteApprove`、`transitionDecision`（`WHERE version = ?`）、`promoteSettleTransition`（`acknowledgeDiff`） | `promote-entrances-4225`（T3・T18 U7）・`write-entrances-recreate-4221`（版の `it.each`） |
+| 行き先と基準の指紋（文書：内容の SHA-256・HEAD のブランチと common-dir、コメント：Issue の指紋・投稿者の数値 ID） | `promoteApprove`（同期の区間）、`writeDocBlock`（書く直前にもう一度）、`destination.ts`（`checkDocPath`・`docBaseFingerprint`・`issueBaseFingerprint`） | `promote-entrances-4225`（T5・T6・poster_changed）・`promote-doc-write-4225` |
+| 進行中は項目ごとに 1 つ、既にある記録を見ていない承認は書かない（`hasActivePromoteOperation`・一意の部分索引・`acknowledged_operation_ids`） | `promoteApprove`、`claimPromoteOperation`（`mem-promote-db.ts`）、migration v69 の索引 | `promote-entrances-4225`（T7・T10・T18・T19）・`migration-v69-mem-promote-4225` |
+| 不明を未送信と読まない・自動で再送しない（`classifyCommentPost`、`settleStalePromoteAttempts`、照合は印・投稿者・本文の指紋／区画） | `github-write.ts`（`classifyCommentPost`）、`promoteApprove`（`settleOrUnknown`）、`promoteReconcile`、`promoteList`（`readState`：別の boot・10 分超は不明として出す）、`doc-write.ts`（`findDocBlock`・`reconcileDocBlock`） | `promote-github-4225`・`promote-entrances-4225`（T8〜T11・T21） |
+| 投稿の主体の固定（token を 4 つの変数すべてに入れる。host の分類を持たない） | `github-write.ts`（`readGhToken`・`fixedTokenEnv`・`readGhUser`・`postGhComment`）、`promoteApprove` | `promote-github-4225`（T11c・3 つの host の分類）・`promote-entrances-4225`（T11c） |
+| 文書は追記だけ・新規は `link`・E の一時名の回収規則 | `doc-write.ts`（`writeDocBlock`・`reclaimDocLeftovers`・`reconcileDocBlock`）、`docOperationsFor`（`mem-promote-db.ts`：同じ行き先の E の操作） | `promote-doc-write-4225`（T5b〜T5e・T12・T21）・`promote-entrances-4225`（T21・T5e） |
+| git を書かない・`gh --method` は 1 か所・常駐を持たない | E の全ソース | ガード `mem-promote-no-git-write-4225`・`promote-entrances-4225`（T16） |
+| decision の状態の遷移は A の 1 つの入口だけ | `transitionDecision`（`mem-db.ts`）← `memSettleDecisionTransition`（`mem/service.ts`）← `settleTransition`・`promoteConfirmReflected`（`promote/service.ts`） | `promote-write-chain-4225`（(1)〜(3)）・`write-entrances-recreate-4221`・`close-entrances-4222`（例外の行） |
+| 「未反映」の表示（`recorded`） | E の画面（`DecisionPromotePanel`）と E の一覧の API（`unreflected:true`）。CLI の一覧と brief の文言は G（#4227）へ送った（§0.1 S3） | `promote-entrances-4225`（T13）・`DecisionPromotePanel-4225` |
 

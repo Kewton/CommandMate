@@ -2605,11 +2605,25 @@ Every free field (`text`, `quote`, `evidence`, `promote_to`, `reason`) is checke
 | 55 | `not_owner` / `state_forbids`: not the author (another incarnation included), a state that does not allow it, or `purge` inside a session |
 | 56 | `limit_exceeded`: too many open items on the branch (30 for `waiting` / `next` / `external`, 50 for `note`; `decision` only warns) |
 
+### Recording a decision in its canonical place (screen only, Issue #4225)
+
+A `decision` is written to an Issue / PR comment or a worktree document (`promote_to`) **only when a person approves the diff on the screen** (the "mem" of each row of the Repositories screen → "Record decisions in their canonical place", `/repositories/<id>/mem/decisions?branch=<name>`). **The CLI has no way to do it** (`commandmate mem` has no promote / approve sub-command). No other path — the brief, `check`, prompts, Schedules — writes.
+
+1. Choose the item and a worktree and press "Make the diff". The whole body, the destination, the effect ("changes the specification" by default / "record only") and the expiry (30 minutes) are shown. A quote an agent wrote is shown as "recorded by the agent (unchecked)"; it becomes "checked by a person on the screen" only when you check it against the original. Free text (the decision, the quote) goes inside code blocks, and invisible characters are shown as `[U+XXXX]`
+2. Press "Approve and write". Right before writing, the item's version, the destination (host, repository and number, or worktree, branch and path), the fingerprint of the content the diff was made from, the worktree's lifetime, the mode and the poster are checked again; if any changed, **nothing is written** and a new diff is asked for (another session changed the document after the approval, the worktree was deleted or switched to another branch, the same item was approved in parallel, …)
+3. Once written, "changes the specification" leaves the item `recorded` (**not reflected**: only recorded as a comment or in a document, not yet reflected in the canonical place such as the Issue body), and "record only" makes it `promoted`. A `recorded` item becomes `promoted` when a person reflects it and presses "I checked it is reflected in the canonical place"
+
+- **Documents**: a marked block is appended at the end of an existing document (never rewritten or replaced). `.md` only, up to 1 MiB. A path outside the repository, an absolute path, a symlink, `.git`, `.env` and the like are refused. A new document appears whole through `link` from a temporary file (a `.commandmate-promote-<id>.tmp` left behind is taken back by the reconcile). **Nothing is committed or pushed** (the change stays in the worktree)
+- **Comments**: the body starts with a mark naming the operation (`<!-- commandmate-promote:op=…; item=… -->`). The poster is fixed by the token read once with `gh auth token --hostname <host>`, given to both the check and the post (the token is never stored or shown)
+- **Unknown outcomes**: a lost answer, a timeout, a database update that failed after the write, a restart and the like are kept as "outcome unknown" and **never sent again by themselves**. "Reconcile" on the screen looks for the mark (for a comment: the poster and the body's fingerprint; for a document: the block). If it is not found, the outcome stays unknown until a person presses "I checked it is not there" (on GitHub or in the worktree)
+- When the write succeeded but the item did not move (the worktree was re-created, the version changed, the mode is not `on`), the screen says so, and "Treat as recorded" makes the transition only (nothing is written outside)
+
 ### What is not prevented
 
 - Only the screen path changes the mode (the server checks a mark only the screen sends and a matching `Origin`). A process with the same OS rights (agents included) can still forge the mark with `curl`, or write the database file directly. CommandMate does not prevent or detect that
 - What is prevented: the mode changing through the CLI's regular commands, a CLI user changing it without knowing, and a page of another origin changing it through the user's browser
 - `--instance` can be claimed falsely too. The author check keeps a session from changing another's items by mistake; it does not stop a deliberate rewrite
+- Approving a decision's record (promote) is limited to the screen path by the same mark. A process with the same OS rights can forge it, and can rewrite the operation records in the database to read "succeeded". That agents do not approve rests on the CLI having no way to and on the skills' instructions, not on a guarantee
 
 ---
 

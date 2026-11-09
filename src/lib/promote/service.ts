@@ -1,0 +1,848 @@
+/**
+ * The promote path of mem (Issue #4225, design `docs/design/mem-promote-4225.md`): a
+ * person approves, on the screen, the diff that records a decision in its canonical
+ * place, and the outcome of that external write is kept apart from the approval.
+ *
+ * Every entrance that writes (the database, a comment, a document, or the item's
+ * state) asks for the screen's mark first (`isScreenRequest`), and the only callers
+ * are the routes of `/api/repositories/:id/mem/decisions/**`. Nothing else starts a
+ * write: no brief, check, prompt, Schedule or dreaming reaches here (design E3), so
+ * an unattended path never writes outside.
+ *
+ * The order of one approval (design §2.3):
+ * 1. Synchronously: the preview, what the screen sent back, the context worktree's
+ *    lifetime (fixed here and kept in the operation, §3.5).
+ * 2. Await: git's HEAD of the document's worktree, or gh (the token once, the poster
+ *    and the Issue with that token).
+ * 3. In the target's synchronous stretch: every check, the operation and its attempt,
+ *    and for a document the append itself.
+ * 4. A comment's POST (await), its outcome, then A's entrance with the values fixed in 1.
+ *
+ * An unknown outcome is never sent again by itself: only a person's reconcile looks for
+ * the mark, and only a new approval writes again.
+ *
+ * @module lib/promote/service
+ */
+
+import { randomUUID } from 'crypto';
+import type Database from 'better-sqlite3';
+import { getMemRecord, listMem, type MemScope } from '@/lib/db/mem-db';
+import { memModeOnFor } from '@/lib/db/mem-close-db';
+import {
+  abandonPromoteOperation,
+  claimPromoteOperation,
+  destinationOf,
+  docOperationsFor,
+  getPromoteOperation,
+  getPromotePreview,
+  hasActivePromoteOperation,
+  insertPromotePreview,
+  invalidatePromotePreview,
+  listPromoteOperations,
+  prunePromoteRecords,
+  recordedOperationIds,
+  setPromoteTransitionPending,
+  settlePromoteOperation,
+  settleStalePromoteAttempts,
+  type PromoteOperationRow,
+  type PromotePreviewRow,
+  type PromoteSettle,
+} from '@/lib/db/mem-promote-db';
+import { getWorktreeById, getWorktreesByRepository } from '@/lib/db/worktree-db';
+import { getRepositoryById } from '@/lib/db/db-repository';
+import { createLogger } from '@/lib/logger';
+import { parseOriginUrl } from '@/lib/mem/close-when';
+import type { WorktreeHeadObservation } from '@/lib/mem/git-observe';
+import { getOrCreateWorktreeIncarnation, getWorktreeIncarnation, worktreeIncarnationAlive } from '@/lib/mem/incarnation';
+import { memServerBootId } from '@/lib/mem/process-boot';
+import { findWithheld, presentMemItem, type MemRecord } from '@/lib/mem/present';
+import { MEM_SECRET_RULES_VERSION } from '@/lib/mem/secret-scan';
+import { memSettleDecisionTransition, type MemOutcome, type MemServiceDeps } from '@/lib/mem/service';
+import { withMemTarget, type MemTarget } from '@/lib/mem/target';
+import { validatePromoteTo, validateQuote } from '@/lib/mem/validate';
+import { isScreenRequest } from '@/lib/security/screen-request';
+import type { MemDecisionTransition } from '@/lib/db/mem-db';
+import { checkDocPath, docBaseFingerprint, issueBaseFingerprint, parsePromoteTo, resolveIssueTarget } from './destination';
+import { docBlockOf, reconcileDocBlock, writeDocBlock, type DocWriteHooks } from './doc-write';
+import {
+  defaultGhRun,
+  fixedTokenEnv,
+  listGhComments,
+  postGhComment,
+  readGhIssue,
+  readGhToken,
+  readGhUser,
+  type GhRun,
+} from './github-write';
+import {
+  PROMOTE_ATTEMPT_STALE_MS,
+  PROMOTE_EFFECTS,
+  PROMOTE_PREVIEW_TTL_MS,
+  type IssueCommentDestination,
+  type PromoteDestination,
+  type PromoteEffect,
+  type PromoteErrorBody,
+  type PromoteErrorCode,
+  type PromoteOperationView,
+  type PromotePreviewView,
+  type PromoteQuoteOrigin,
+  type PromoteReapprovalReason,
+  type PromoteTransitionReason,
+  type WorktreeDocDestination,
+} from './model';
+import { commentMark, itemFingerprint, renderPromoteBody, sha256 } from './render';
+
+const logger = createLogger('mem-promote');
+
+type ScreenRequest = Parameters<typeof isScreenRequest>[0];
+
+export interface PromoteHooks {
+  /** The document's write (test seams of `doc-write.ts`). */
+  doc?: DocWriteHooks;
+  /** After the POST answered, before its outcome is written. Throwing here is the database update failing. */
+  afterPost?: () => void;
+  /** Replaces A's entrance's answer (a transition made to fail). */
+  transition?: () => MemOutcome | null;
+}
+
+export interface PromoteDeps {
+  now?: () => number;
+  bootId?: () => string;
+  gh?: GhRun;
+  originUrl?: (worktreePath: string) => Promise<string | null>;
+  /** What the mem target asks git (and the HEAD of a document's worktree). */
+  mem?: MemServiceDeps;
+  hooks?: PromoteHooks;
+}
+
+const STATUS: Record<PromoteErrorCode, number> = {
+  screen_only: 403,
+  invalid_request: 400,
+  not_found: 404,
+  not_decision: 409,
+  state_forbids: 409,
+  disabled: 409,
+  invalid_destination: 400,
+  withheld: 409,
+  secret_like: 400,
+  reapproval_required: 409,
+  operation_in_progress: 409,
+  diff_not_acknowledged: 409,
+  version_conflict: 409,
+  worktree_recreated: 409,
+  gh_failed: 502,
+  internal_error: 500,
+};
+
+const MESSAGES: Record<PromoteErrorCode, string> = {
+  screen_only: 'This change is made from the screen only',
+  invalid_request: 'The request is not valid',
+  not_found: 'Not found',
+  not_decision: 'Only a decision is promoted',
+  state_forbids: 'The item or operation is in a state that does not allow this',
+  disabled: 'mem is not on for this branch',
+  invalid_destination: 'The destination is not valid',
+  withheld: 'The item is withheld by the current rules',
+  secret_like: 'The body looks like it contains a secret',
+  reapproval_required: 'Something changed since the diff was shown; make a new diff and approve it again',
+  operation_in_progress: 'Another write of this item is in progress or unsettled',
+  diff_not_acknowledged: 'The item changed since it was written; look at the difference first',
+  version_conflict: 'The item changed since that version',
+  worktree_recreated: 'The worktree was deleted and made again since the request was read',
+  gh_failed: 'gh could not answer',
+  internal_error: 'Unexpected error',
+};
+
+export function promoteError(code: PromoteErrorCode, extra: Partial<PromoteErrorBody> & Record<string, unknown> = {}): MemOutcome {
+  const body: PromoteErrorBody = { ok: false, code, message: MESSAGES[code], ...extra };
+  return { status: STATUS[code], body };
+}
+
+const reapproval = (reason: PromoteReapprovalReason, extra: Record<string, unknown> = {}): MemOutcome =>
+  promoteError('reapproval_required', { reason, ...extra });
+
+const iso = (epoch: number | null): string | null => (epoch === null ? null : new Date(epoch).toISOString());
+
+function previewView(row: PromotePreviewRow, invisibleReplaced = false): PromotePreviewView {
+  return {
+    id: row.id,
+    operationId: row.operation_id,
+    itemId: row.item_id,
+    itemVersion: row.item_version,
+    destination: JSON.parse(row.destination) as PromoteDestination,
+    baseFingerprint: row.base_fingerprint,
+    body: row.body,
+    bodySha256: row.body_sha256,
+    effect: row.effect,
+    quoteOrigin: row.quote_origin,
+    invisibleReplaced,
+    acknowledgedOperationIds: JSON.parse(row.acknowledged_operation_ids) as string[],
+    poster: row.poster_id !== null ? { id: row.poster_id, login: row.poster_login ?? '' } : null,
+    createdAt: iso(row.created_at) as string,
+    expiresAt: iso(row.expires_at) as string,
+  };
+}
+
+/** The state as read (design §3.2's last row): an attempt of a gone boot, or too old, reads as unknown. */
+function readState(db: Database.Database, row: PromoteOperationRow, bootId: string, now: number): PromoteOperationRow['state'] {
+  if (row.state !== 'in_flight') return row.state;
+  const attempt = db
+    .prepare('SELECT boot_id, started_at FROM mem_promote_attempts WHERE operation_id = ? AND ended_at IS NULL')
+    .get(row.id) as { boot_id: string; started_at: number } | undefined;
+  if (!attempt) return 'unknown';
+  return attempt.boot_id !== bootId || attempt.started_at < now - PROMOTE_ATTEMPT_STALE_MS ? 'unknown' : 'in_flight';
+}
+
+export function operationView(row: PromoteOperationRow, state: PromoteOperationRow['state'] = row.state): PromoteOperationView {
+  return {
+    id: row.id,
+    itemId: row.item_id,
+    state,
+    destinationKind: row.destination_kind,
+    destination: destinationOf(row),
+    effect: row.effect,
+    resultRef: row.result_ref,
+    transitionPending: row.transition_pending === 1,
+    transitionReason: row.transition_reason,
+    concurrentEdit: row.concurrent_edit === 1,
+    unknownReason: row.unknown_reason,
+    decidedBy: row.decided_by,
+    approvedAt: iso(row.approved_at) as string,
+    settledAt: iso(row.settled_at),
+  };
+}
+
+const sameIds = (a: readonly string[], b: readonly string[]): boolean => {
+  const x = [...a].sort();
+  const y = [...b].sort();
+  return x.length === y.length && x.every((id, index) => id === y[index]);
+};
+
+const isIdList = (value: unknown): value is string[] => Array.isArray(value) && value.every((entry) => typeof entry === 'string');
+
+async function defaultOrigin(worktreePath: string): Promise<string | null> {
+  return (await import('@/lib/mem/git-observe')).readOriginUrl(worktreePath);
+}
+
+async function observeHead(path: string, deps: PromoteDeps): Promise<WorktreeHeadObservation> {
+  if (deps.mem?.observe) return deps.mem.observe(path);
+  return (await import('@/lib/mem/git-observe')).observeWorktreeHead(path);
+}
+
+/** In the target's synchronous stretch: the context worktree resolves to the item's repository. */
+function targetMatches(target: MemTarget, record: MemRecord, repositoryId: string): boolean {
+  return target.ok && target.readRepositoryIds.includes(record.owner.repositoryId) && target.readRepositoryIds.includes(repositoryId);
+}
+
+const transitionOf = (effect: PromoteEffect): MemDecisionTransition => (effect === 'spec' ? 'record' : 'promote-record-only');
+
+function transitionReasonOf(outcome: MemOutcome): PromoteTransitionReason {
+  const body = outcome.body as { code?: string };
+  switch (body.code) {
+    case 'instance_not_found':
+      return 'incarnation_changed';
+    case 'version_conflict':
+      return 'version_conflict';
+    case 'disabled':
+      return 'disabled';
+    case 'state_forbids':
+      return 'state_forbids';
+    case 'not_found':
+    case 'item_not_found':
+      return 'not_found';
+    default:
+      return 'db_error';
+  }
+}
+
+/**
+ * The item's transition after a write outside (design §3.5): A's entrance with the
+ * worktree lifetime and the version fixed when the person's request arrived.
+ * Anything that does not match leaves `transition_pending` and its reason.
+ */
+async function settleTransition(
+  db: Database.Database,
+  operationId: string,
+  fixed: { worktreeId: string; incarnation: string; version: number; transition: MemDecisionTransition },
+  deps: PromoteDeps
+): Promise<{ ok: true } | { ok: false; reason: PromoteTransitionReason }> {
+  const now = () => deps.now?.() ?? Date.now();
+  let outcome: MemOutcome;
+  try {
+    outcome =
+      deps.hooks?.transition?.() ??
+      (await memSettleDecisionTransition(
+        db,
+        {
+          worktreeId: fixed.worktreeId,
+          expectedWorktreeIncarnation: fixed.incarnation,
+          itemId: getPromoteOperation(db, operationId)?.item_id ?? '',
+          expectedVersion: fixed.version,
+          transition: fixed.transition,
+        },
+        deps.mem
+      ));
+  } catch {
+    outcome = { status: 500, body: { code: 'internal_error' } };
+  }
+  if (outcome.status < 300) {
+    setPromoteTransitionPending(db, operationId, false, null, now());
+    return { ok: true };
+  }
+  const reason = transitionReasonOf(outcome);
+  setPromoteTransitionPending(db, operationId, true, reason, now());
+  logger.info('mem-promote-transition-pending', { operationId, reason });
+  return { ok: false, reason };
+}
+
+function operationAnswer(db: Database.Database, operationId: string, deps: PromoteDeps, status = 200): MemOutcome {
+  const row = getPromoteOperation(db, operationId)!;
+  const item = getMemRecord(db, row.item_id);
+  return {
+    status,
+    body: {
+      ok: true,
+      operation: operationView(row, readState(db, row, deps.bootId?.() ?? memServerBootId(), deps.now?.() ?? Date.now())),
+      item: item ? presentMemItem(item) : null,
+    },
+  };
+}
+
+/** Settle an outcome; if writing it fails, try once to leave it unknown (design §3.2: the DB update after the write failed). */
+function settleOrUnknown(db: Database.Database, operationId: string, settle: PromoteSettle, now: number, before?: () => void): void {
+  try {
+    before?.();
+    settlePromoteOperation(db, operationId, settle, now);
+  } catch {
+    try {
+      settlePromoteOperation(db, operationId, { state: 'unknown', reason: 'db_error' }, now);
+    } catch {
+      // Left in_flight: read as unknown once stale (another boot, or 10 minutes).
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// preview
+// ---------------------------------------------------------------------------
+
+/** `POST …/decisions/:itemId/preview` — `{ worktreeId, effect?, destination?, quoteConfirmed?, quoteText? }`. */
+export async function promotePreview(
+  db: Database.Database,
+  request: ScreenRequest,
+  repositoryId: string,
+  itemId: string,
+  body: Record<string, unknown>,
+  deps: PromoteDeps = {}
+): Promise<MemOutcome> {
+  if (!isScreenRequest(request)) return promoteError('screen_only');
+  const now0 = deps.now?.() ?? Date.now();
+  if (typeof body.worktreeId !== 'string' || body.worktreeId.length === 0) return promoteError('invalid_request', { field: 'worktreeId' });
+  const contextId = body.worktreeId;
+  const worktree = getWorktreeById(db, contextId);
+  if (!worktree || !getRepositoryById(db, repositoryId)) return promoteError('not_found');
+  const record = getMemRecord(db, itemId);
+  if (!record) return promoteError('not_found');
+  if (record.kind !== 'decision') return promoteError('not_decision');
+  if (record.state !== 'open') return promoteError('state_forbids');
+  const effect = (body.effect ?? 'spec') as PromoteEffect;
+  if (!PROMOTE_EFFECTS.includes(effect)) return promoteError('invalid_request', { field: 'effect' });
+
+  let quote: { text: string; origin: 'agent' | 'human'; at: number } | null = null;
+  if (body.quoteConfirmed === true) {
+    const checked = validateQuote(body.quoteText ?? record.quote);
+    if (!checked.ok) return promoteError(checked.error.code === 'secret_like' ? 'secret_like' : 'invalid_request', { field: 'quoteText' });
+    quote = { text: checked.value, origin: 'human', at: now0 };
+  } else if (record.quote !== null && record.quoteAt !== null) {
+    quote = { text: record.quote, origin: 'agent', at: record.quoteAt };
+  }
+
+  const rawDestination = body.destination ?? record.promoteTo;
+  const checkedDestination = validatePromoteTo(rawDestination, worktree.path);
+  if (!checkedDestination.ok || checkedDestination.value === null) return promoteError('invalid_destination', { field: 'destination' });
+  const parsed = parsePromoteTo(checkedDestination.value);
+  if (!parsed) return promoteError('invalid_destination', { field: 'destination' });
+  // Fixed before any await: the preview is bound to this lifetime (A §16 I17).
+  const contextIncarnation = getOrCreateWorktreeIncarnation(db, contextId, now0);
+  const gh = deps.gh ?? defaultGhRun;
+
+  let destination: PromoteDestination;
+  let baseFingerprint: string;
+  let poster: { id: number; login: string } | null = null;
+  if (parsed.kind === 'issue') {
+    const origin = parseOriginUrl(await (deps.originUrl ?? defaultOrigin)(worktree.path));
+    const target = resolveIssueTarget(parsed, origin);
+    if (!target) return promoteError('invalid_destination', { field: 'destination', reason: 'host_not_allowed' });
+    const dest: IssueCommentDestination = { kind: 'issue_comment', ref: parsed.ref, ...target, number: parsed.number };
+    const issue = await readGhIssue(gh, dest);
+    const fingerprint = issueBaseFingerprint(issue);
+    if (fingerprint === null) return promoteError('gh_failed', { reason: 'issue_unreadable' });
+    poster = await readGhUser(gh, dest.host);
+    if (!poster) return promoteError('gh_failed', { reason: 'user_unreadable' });
+    destination = dest;
+    baseFingerprint = fingerprint;
+  } else {
+    const checked = checkDocPath(worktree.path, parsed.path);
+    if (!checked.ok) return promoteError('invalid_destination', { field: 'destination', reason: checked.code });
+    const head = await observeHead(worktree.path, deps);
+    if (!head.known || head.detached) return promoteError('invalid_destination', { reason: 'branch_unresolved' });
+    if (head.branch !== record.owner.branch) return promoteError('invalid_destination', { reason: 'branch_changed' });
+    const dest: WorktreeDocDestination = {
+      kind: 'worktree_doc',
+      repositoryId: record.owner.repositoryId,
+      branch: record.owner.branch,
+      worktreeId: contextId,
+      worktreeIncarnation: contextIncarnation,
+      path: checked.rel,
+      head: { branch: head.branch, commonDir: head.commonDir },
+    };
+    destination = dest;
+    baseFingerprint = docBaseFingerprint(checked.abs);
+    if (baseFingerprint === 'unreadable') return promoteError('invalid_destination', { reason: 'unreadable' });
+  }
+
+  return withMemTarget(db, { via: 'worktree', worktreeId: contextId }, deps.mem ?? {}, (target): MemOutcome => {
+    const current = getMemRecord(db, itemId);
+    if (!current || !targetMatches(target, current, repositoryId)) return promoteError('not_found');
+    if (current.version !== record.version || itemFingerprint(current) !== itemFingerprint(record) || current.state !== 'open') {
+      return reapproval('item_changed');
+    }
+    if (!memModeOnFor(db, [current.owner.repositoryId], current.owner.branch)) return promoteError('disabled');
+    if (getWorktreeIncarnation(db, contextId) !== contextIncarnation) return promoteError('worktree_recreated');
+    if (findWithheld(current)) return promoteError('withheld');
+    const now = deps.now?.() ?? Date.now();
+    prunePromoteRecords(db, now);
+    settleStalePromoteAttempts(db, deps.bootId?.() ?? memServerBootId(), now);
+    const operationId = randomUUID();
+    const rendered = renderPromoteBody({
+      operationId,
+      itemId,
+      itemVersion: current.version,
+      branch: current.owner.branch,
+      effect,
+      authorInstanceId: current.owner.instanceId,
+      authorCreatedAt: current.createdAt,
+      createdAt: now,
+      text: current.text,
+      quote,
+    });
+    if (!rendered.ok) return promoteError('secret_like', { reason: rendered.rule });
+    const quoteOrigin: PromoteQuoteOrigin = quote ? quote.origin : 'none';
+    const row: PromotePreviewRow = {
+      id: randomUUID(),
+      operation_id: operationId,
+      item_id: itemId,
+      item_version: current.version,
+      item_fingerprint: itemFingerprint(current),
+      repository_id: current.owner.repositoryId,
+      branch: current.owner.branch,
+      destination: JSON.stringify(destination),
+      base_fingerprint: baseFingerprint,
+      body: rendered.body,
+      body_sha256: rendered.bodySha256,
+      effect,
+      quote_origin: quoteOrigin,
+      quote_confirmed_at: quote?.origin === 'human' ? quote.at : null,
+      rules_version: MEM_SECRET_RULES_VERSION,
+      context_worktree_id: contextId,
+      context_worktree_incarnation: contextIncarnation,
+      acknowledged_operation_ids: JSON.stringify(recordedOperationIds(db, itemId)),
+      poster_host: destination.kind === 'issue_comment' ? destination.host : null,
+      poster_id: poster?.id ?? null,
+      poster_login: poster?.login ?? null,
+      created_at: now,
+      expires_at: now + PROMOTE_PREVIEW_TTL_MS,
+      used_at: null,
+      invalidated_reason: null,
+    };
+    insertPromotePreview(db, row);
+    logger.info('mem-promote-previewed', { itemId, kind: destination.kind, length: rendered.body.length });
+    return { status: 201, body: { ok: true, preview: previewView(row, rendered.invisibleReplaced) } };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// approve
+// ---------------------------------------------------------------------------
+
+type Claimed =
+  | { kind: 'outcome'; outcome: MemOutcome }
+  | { kind: 'comment'; operationId: string; env: Record<string, string>; dest: IssueCommentDestination; posterId: number }
+  | { kind: 'doc'; operationId: string };
+
+/** `POST …/decisions/:itemId/approve` — `{ previewId, itemVersion, baseFingerprint, bodySha256, acknowledgedOperationIds }`. */
+export async function promoteApprove(
+  db: Database.Database,
+  request: ScreenRequest,
+  repositoryId: string,
+  itemId: string,
+  body: Record<string, unknown>,
+  deps: PromoteDeps = {}
+): Promise<MemOutcome> {
+  if (!isScreenRequest(request)) return promoteError('screen_only');
+  if (typeof body.previewId !== 'string') return promoteError('invalid_request', { field: 'previewId' });
+  const preview = getPromotePreview(db, body.previewId);
+  if (!preview || preview.item_id !== itemId) return promoteError('not_found');
+  const refuse = (reason: PromoteReapprovalReason): MemOutcome => {
+    invalidatePromotePreview(db, preview.id, reason);
+    logger.info('mem-promote-reapproval', { itemId, reason });
+    return reapproval(reason);
+  };
+  if (preview.used_at !== null || preview.invalidated_reason !== null) return reapproval('preview_used');
+  if (
+    body.itemVersion !== preview.item_version ||
+    body.baseFingerprint !== preview.base_fingerprint ||
+    body.bodySha256 !== preview.body_sha256 ||
+    !isIdList(body.acknowledgedOperationIds) ||
+    !sameIds(body.acknowledgedOperationIds, JSON.parse(preview.acknowledged_operation_ids) as string[])
+  ) {
+    return refuse('preview_mismatch');
+  }
+  const contextId = preview.context_worktree_id;
+  const worktree = getWorktreeById(db, contextId);
+  // Fixed here, before the awaits, and kept in the operation (design §3.5).
+  const fixedIncarnation = preview.context_worktree_incarnation;
+  if (!worktree || getWorktreeIncarnation(db, contextId) !== fixedIncarnation) return refuse('worktree_recreated');
+  const destination = JSON.parse(preview.destination) as PromoteDestination;
+  const gh = deps.gh ?? defaultGhRun;
+
+  let head: WorktreeHeadObservation | null = null;
+  let env: Record<string, string> | null = null;
+  let issueFingerprint: string | null = null;
+  let posterId: number | null = null;
+  if (destination.kind === 'worktree_doc') {
+    head = await observeHead(worktree.path, deps);
+  } else {
+    // R2・R3: the token is read once and given to both the check of the poster and the POST.
+    const token = await readGhToken(gh, destination.host);
+    if (token === null) return promoteError('gh_failed', { reason: 'token_unavailable' });
+    env = fixedTokenEnv(token);
+    posterId = (await readGhUser(gh, destination.host, env))?.id ?? null;
+    issueFingerprint = issueBaseFingerprint(await readGhIssue(gh, destination, env));
+  }
+
+  const claimed = await withMemTarget(db, { via: 'worktree', worktreeId: contextId }, deps.mem ?? {}, (target): Claimed => {
+    const outcome = (o: MemOutcome): Claimed => ({ kind: 'outcome', outcome: o });
+    const now = deps.now?.() ?? Date.now();
+    const bootId = deps.bootId?.() ?? memServerBootId();
+    const current = getMemRecord(db, itemId);
+    if (!current || !targetMatches(target, current, repositoryId)) return outcome(promoteError('not_found'));
+    const fresh = getPromotePreview(db, preview.id);
+    if (!fresh || fresh.used_at !== null || fresh.invalidated_reason !== null) return outcome(reapproval('preview_used'));
+    if (now > preview.expires_at) return outcome(refuse('expired'));
+    if (current.version !== preview.item_version || itemFingerprint(current) !== preview.item_fingerprint || current.state !== 'open') {
+      return outcome(refuse('item_changed'));
+    }
+    if (!memModeOnFor(db, [current.owner.repositoryId], current.owner.branch)) return outcome(refuse('mode_not_on'));
+    if (preview.rules_version !== MEM_SECRET_RULES_VERSION) return outcome(refuse('rules_changed'));
+    if (findWithheld(current)) return outcome(refuse('withheld'));
+    if (getWorktreeIncarnation(db, contextId) !== fixedIncarnation || !worktreeIncarnationAlive(db, fixedIncarnation)) {
+      return outcome(refuse('worktree_recreated'));
+    }
+    let block: string | null = null;
+    if (destination.kind === 'worktree_doc') {
+      if (!head || !head.known || head.branch !== destination.head.branch || head.commonDir !== destination.head.commonDir) {
+        return outcome(refuse('branch_changed'));
+      }
+      const checked = checkDocPath(worktree.path, destination.path);
+      if (!checked.ok || checked.rel !== destination.path) return outcome(refuse('destination_changed'));
+      if (docBaseFingerprint(checked.abs) !== preview.base_fingerprint) return outcome(refuse('base_changed'));
+      block = docBlockOf(preview.operation_id, preview.body);
+    } else {
+      if (issueFingerprint === null) return outcome(refuse('destination_changed'));
+      if (issueFingerprint !== preview.base_fingerprint) return outcome(refuse('base_changed'));
+      if (posterId === null || posterId !== preview.poster_id) return outcome(refuse('poster_changed'));
+    }
+    settleStalePromoteAttempts(db, bootId, now);
+    if (hasActivePromoteOperation(db, itemId)) return outcome(promoteError('operation_in_progress'));
+    if (!sameIds(recordedOperationIds(db, itemId), JSON.parse(preview.acknowledged_operation_ids) as string[])) {
+      return outcome(refuse('prior_record_exists'));
+    }
+    const claim = claimPromoteOperation(db, {
+      preview,
+      destinationWorktreeIncarnation: destination.kind === 'worktree_doc' ? destination.worktreeIncarnation : null,
+      posterId,
+      block,
+      bootId,
+      now,
+    });
+    if (!claim.ok) return outcome(promoteError('operation_in_progress'));
+    logger.info('mem-promote-approved', { itemId, operationId: claim.operationId, kind: destination.kind });
+    if (destination.kind === 'issue_comment') {
+      return { kind: 'comment', operationId: claim.operationId, env: env!, dest: destination, posterId: posterId! };
+    }
+    // The document is written in this same stretch (design §3.3).
+    try {
+      const written = writeDocBlock(
+        {
+          root: worktree.path,
+          rel: destination.path,
+          operationId: claim.operationId,
+          body: preview.body,
+          baseFingerprint: preview.base_fingerprint,
+          leftovers: docOperationsFor(db, destination.worktreeId, destination.path),
+        },
+        deps.hooks?.doc
+      );
+      if (written.result === 'not_written') {
+        settleOrUnknown(db, claim.operationId, { state: 'failed', reason: written.reason }, now);
+        return outcome(written.refusal ? reapproval(written.reason === 'base_changed' ? 'base_changed' : 'destination_changed', {
+          operationId: claim.operationId,
+        }) : promoteError('invalid_destination', { reason: written.reason, operationId: claim.operationId }));
+      }
+      if (written.result === 'success') {
+        settleOrUnknown(db, claim.operationId, { state: 'succeeded', reason: null, resultRef: written.resultRef, concurrentEdit: written.concurrentEdit }, now);
+      } else {
+        settleOrUnknown(db, claim.operationId, { state: 'unknown', reason: written.reason }, now);
+      }
+    } catch {
+      settleOrUnknown(db, claim.operationId, { state: 'unknown', reason: 'unreadable' }, now);
+    }
+    return { kind: 'doc', operationId: claim.operationId };
+  });
+
+  if (claimed.kind === 'outcome') return claimed.outcome;
+  if (claimed.kind === 'comment') {
+    const posted = await postGhComment(gh, claimed.dest, preview.body, claimed.env);
+    const now = deps.now?.() ?? Date.now();
+    const settle: PromoteSettle =
+      posted.outcome === 'success'
+        ? posted.userId !== null && posted.userId !== claimed.posterId
+          ? { state: 'unknown', reason: 'poster_mismatch' }
+          : { state: 'succeeded', reason: null, resultRef: JSON.stringify({ id: posted.commentId, url: posted.url }) }
+        : posted.outcome === 'failure'
+          ? { state: 'failed', reason: posted.reason }
+          : { state: 'unknown', reason: posted.reason };
+    settleOrUnknown(db, claimed.operationId, settle, now, deps.hooks?.afterPost);
+    logger.info('mem-promote-posted', { operationId: claimed.operationId, outcome: posted.outcome });
+  }
+  const row = getPromoteOperation(db, claimed.operationId)!;
+  if (row.state === 'succeeded') {
+    await settleTransition(
+      db,
+      row.id,
+      { worktreeId: row.context_worktree_id, incarnation: row.context_worktree_incarnation, version: row.item_version, transition: transitionOf(row.effect) },
+      deps
+    );
+  }
+  return operationAnswer(db, claimed.operationId, deps);
+}
+
+// ---------------------------------------------------------------------------
+// confirm the reflection
+// ---------------------------------------------------------------------------
+
+function memFailure(outcome: MemOutcome): MemOutcome {
+  const reason = transitionReasonOf(outcome);
+  switch (reason) {
+    case 'incarnation_changed':
+      return promoteError('worktree_recreated');
+    case 'version_conflict':
+      return promoteError('version_conflict');
+    case 'disabled':
+      return promoteError('disabled');
+    case 'state_forbids':
+      return promoteError('state_forbids');
+    case 'not_found':
+      return promoteError('not_found');
+    default:
+      return promoteError('internal_error');
+  }
+}
+
+/** `POST …/decisions/:itemId/confirm-reflected` — `{ worktreeId, ifVersion }`: a person checked the canonical place (`recorded → promoted`). */
+export async function promoteConfirmReflected(
+  db: Database.Database,
+  request: ScreenRequest,
+  repositoryId: string,
+  itemId: string,
+  body: Record<string, unknown>,
+  deps: PromoteDeps = {}
+): Promise<MemOutcome> {
+  if (!isScreenRequest(request)) return promoteError('screen_only');
+  if (typeof body.ifVersion !== 'number' || !Number.isInteger(body.ifVersion)) return promoteError('invalid_request', { field: 'ifVersion' });
+  if (typeof body.worktreeId !== 'string' || !getWorktreeById(db, body.worktreeId) || !getRepositoryById(db, repositoryId)) {
+    return promoteError('not_found');
+  }
+  const record = getMemRecord(db, itemId);
+  if (!record) return promoteError('not_found');
+  if (record.kind !== 'decision') return promoteError('not_decision');
+  if (record.state !== 'recorded') return promoteError('state_forbids');
+  const incarnation = getOrCreateWorktreeIncarnation(db, body.worktreeId, deps.now?.() ?? Date.now());
+  const outcome = await memSettleDecisionTransition(
+    db,
+    { worktreeId: body.worktreeId, expectedWorktreeIncarnation: incarnation, itemId, expectedVersion: body.ifVersion, transition: 'promote' },
+    deps.mem
+  );
+  if (outcome.status >= 300) return memFailure(outcome);
+  logger.info('mem-promote-confirmed', { itemId });
+  return outcome;
+}
+
+// ---------------------------------------------------------------------------
+// reconcile, abandon, settle the transition
+// ---------------------------------------------------------------------------
+
+
+/** `POST …/decisions/operations/:opId/reconcile` — look for the mark, never write outside (design §3.4). */
+export async function promoteReconcile(
+  db: Database.Database,
+  request: ScreenRequest,
+  repositoryId: string,
+  operationId: string,
+  deps: PromoteDeps = {}
+): Promise<MemOutcome> {
+  if (!isScreenRequest(request)) return promoteError('screen_only');
+  const now0 = deps.now?.() ?? Date.now();
+  settleStalePromoteAttempts(db, deps.bootId?.() ?? memServerBootId(), now0);
+  const row = getPromoteOperation(db, operationId);
+  if (!row || row.repository_id !== repositoryId) return promoteError('not_found');
+  if (row.state === 'in_flight') return promoteError('operation_in_progress');
+  if (row.state !== 'unknown') return promoteError('state_forbids');
+  const destination = destinationOf(row);
+
+  let finding: { settle: PromoteSettle };
+  if (destination.kind === 'issue_comment') {
+    const listed = await listGhComments(deps.gh ?? defaultGhRun, destination);
+    if (listed === null) {
+      finding = { settle: { state: 'unknown', reason: 'lookup_failed' } };
+    } else {
+      const mark = commentMark(row.id, row.item_id);
+      // A copy of the mark by someone else is not ours: the poster fixed before the POST decides.
+      const ours = listed.filter((comment) => comment.body.includes(mark) && comment.userId !== null && comment.userId === row.poster_id);
+      const exact = ours.find((comment) => sha256(comment.body) === row.body_sha256);
+      finding = exact
+        ? { settle: { state: 'succeeded', reason: null, resultRef: JSON.stringify({ id: exact.id, url: exact.url }) } }
+        : { settle: { state: 'unknown', reason: ours.length > 0 ? 'body_differs' : 'not_found_yet' } };
+    }
+  } else {
+    const worktree = getWorktreeById(db, destination.worktreeId);
+    if (!worktree || getWorktreeIncarnation(db, destination.worktreeId) !== destination.worktreeIncarnation) {
+      finding = { settle: { state: 'unknown', reason: 'unreadable' } };
+    } else {
+      const found = reconcileDocBlock(worktree.path, destination.path, row.id, row.body_sha256, docOperationsFor(db, destination.worktreeId, destination.path));
+      finding = {
+        settle:
+          found === 'found'
+            ? { state: 'succeeded', reason: null, resultRef: JSON.stringify({ path: destination.path, sha256: row.body_sha256 }) }
+            : { state: 'unknown', reason: found === 'missing' ? 'block_missing' : found === 'altered' ? 'block_altered' : 'unreadable' },
+      };
+    }
+  }
+  const now = deps.now?.() ?? Date.now();
+  if (!settlePromoteOperation(db, operationId, finding.settle, now)) return promoteError('state_forbids');
+  logger.info('mem-promote-reconciled', { operationId, state: finding.settle.state, reason: finding.settle.reason });
+  if (finding.settle.state === 'succeeded') {
+    // E1: the outcome is kept whatever the mode; the item moves only through A's entrance.
+    await settleTransition(
+      db,
+      operationId,
+      { worktreeId: row.context_worktree_id, incarnation: row.context_worktree_incarnation, version: row.item_version, transition: transitionOf(row.effect) },
+      deps
+    );
+  }
+  return operationAnswer(db, operationId, deps);
+}
+
+/** `POST …/decisions/operations/:opId/abandon` — `{ ifState: 'unknown' }`: a person checked outside that nothing is there. */
+export async function promoteAbandon(
+  db: Database.Database,
+  request: ScreenRequest,
+  repositoryId: string,
+  operationId: string,
+  body: Record<string, unknown>,
+  deps: PromoteDeps = {}
+): Promise<MemOutcome> {
+  if (!isScreenRequest(request)) return promoteError('screen_only');
+  if (body.ifState !== 'unknown') return promoteError('invalid_request', { field: 'ifState' });
+  const row = getPromoteOperation(db, operationId);
+  if (!row || row.repository_id !== repositoryId) return promoteError('not_found');
+  if (!abandonPromoteOperation(db, operationId, deps.now?.() ?? Date.now())) return promoteError('state_forbids');
+  logger.info('mem-promote-abandoned', { operationId });
+  return operationAnswer(db, operationId, deps);
+}
+
+/**
+ * `POST …/decisions/operations/:opId/settle-transition` — `{ worktreeId, ifVersion, acknowledgeDiff? }`:
+ * "記録済みとして扱う" for a write that succeeded while the item did not move. Writes
+ * nothing outside. The lifetime and the version are fixed at this request (§3.5).
+ */
+export async function promoteSettleTransition(
+  db: Database.Database,
+  request: ScreenRequest,
+  repositoryId: string,
+  operationId: string,
+  body: Record<string, unknown>,
+  deps: PromoteDeps = {}
+): Promise<MemOutcome> {
+  if (!isScreenRequest(request)) return promoteError('screen_only');
+  if (typeof body.ifVersion !== 'number' || !Number.isInteger(body.ifVersion)) return promoteError('invalid_request', { field: 'ifVersion' });
+  if (typeof body.worktreeId !== 'string' || !getWorktreeById(db, body.worktreeId)) return promoteError('not_found');
+  const row = getPromoteOperation(db, operationId);
+  if (!row || row.repository_id !== repositoryId) return promoteError('not_found');
+  if (row.state !== 'succeeded' || row.transition_pending !== 1) return promoteError('state_forbids');
+  const record = getMemRecord(db, row.item_id);
+  if (!record) return promoteError('not_found');
+  if (record.version !== body.ifVersion) return promoteError('version_conflict');
+  if (itemFingerprint(record) !== row.item_fingerprint && body.acknowledgeDiff !== true) {
+    return promoteError('diff_not_acknowledged', { written: row.body, item: presentMemItem(record) });
+  }
+  const incarnation = getOrCreateWorktreeIncarnation(db, body.worktreeId, deps.now?.() ?? Date.now());
+  const settled = await settleTransition(
+    db,
+    operationId,
+    { worktreeId: body.worktreeId, incarnation, version: body.ifVersion, transition: transitionOf(row.effect) },
+    deps
+  );
+  if (!settled.ok) return promoteError(settled.reason === 'incarnation_changed' ? 'worktree_recreated' : settled.reason === 'version_conflict' ? 'version_conflict' : settled.reason === 'disabled' ? 'disabled' : 'state_forbids', { reason: settled.reason });
+  return operationAnswer(db, operationId, deps);
+}
+
+// ---------------------------------------------------------------------------
+// The list (read only)
+// ---------------------------------------------------------------------------
+
+export interface PromoteListDeps {
+  now?: () => number;
+  bootId?: () => string;
+  mem?: MemServiceDeps;
+}
+
+/** `GET /api/repositories/:id/mem/decisions?branch=` — the branch's decisions, their operations and the worktrees to choose from. */
+export async function promoteList(db: Database.Database, repositoryId: string, branch: string, deps: PromoteListDeps = {}): Promise<MemOutcome> {
+  if (!getRepositoryById(db, repositoryId)) return promoteError('not_found');
+  return withMemTarget(db, { via: 'repository', repositoryId, branch }, deps.mem ?? {}, (target): MemOutcome => {
+    if (!target.ok) return promoteError('not_found', { reason: target.code });
+    const scope: MemScope = { storageRepositoryId: target.storageRepositoryId, readRepositoryIds: target.readRepositoryIds, branch, worktreeId: null };
+    const decisions = listMem(db, scope, { all: true }).items.filter((item) => item.kind === 'decision' && item.state !== 'closed');
+    const now = deps.now?.() ?? Date.now();
+    const bootId = deps.bootId?.() ?? memServerBootId();
+    const operations = listPromoteOperations(
+      db,
+      decisions.map((item) => item.id)
+    ).map((row) => operationView(row, readState(db, row, bootId, now)));
+    const worktrees = target.members.flatMap((root) =>
+      getWorktreesByRepository(db, root.path).map((entry) => {
+        const full = getWorktreeById(db, entry.id);
+        return { id: entry.id, path: entry.path, name: full?.name ?? entry.id, branch: full?.branch ?? null };
+      })
+    );
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        mode: target.mode,
+        branch,
+        decisions: decisions.map((item) => ({
+          item: presentMemItem(item, { now }),
+          unreflected: item.state === 'recorded',
+          operations: operations.filter((operation) => operation.itemId === item.id),
+        })),
+        worktrees,
+      },
+    };
+  });
+}
+
+/** For tests and the routes: what an invalid body answers. */
+export const promoteInvalidBody = (): MemOutcome => promoteError('invalid_request');
