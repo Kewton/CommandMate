@@ -455,6 +455,25 @@ describe('PM review (2026-11-09): what is approved is what is shown', () => {
     expect(accept.headers[SCREEN_CLIENT_HEADER]).toBe('screen');
   });
 
+  it('Codex review 5 P2-2: a finding whose found body could not be read offers no "treat as written" (only reconcile again)', async () => {
+    listExtra = { decisions: [{ item: view('d-a', 'open'), unreflected: false, operations: [unknownOp('op-u', 'block_altered')] }] };
+    postAnswer = async (url) =>
+      url.endsWith('/reconcile')
+        ? {
+            status: 200,
+            body: { ok: true, operation: unknownOp('op-u', 'block_altered'), item: null, finding: { reason: 'block_altered', found: null, intended: '承認した本文' } },
+          }
+        : undefined;
+    render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" />);
+    const line = await screen.findByTestId('decision-operation-op-u');
+    fireEvent.click(line.querySelector('button')!);
+    const finding = await screen.findByTestId('decision-finding-op-u');
+    expect(finding).toHaveTextContent('読めませんでした');
+    expect(screen.queryByRole('button', { name: '書かれていたとして扱う' })).toBeNull();
+    expect(screen.getByRole('button', { name: '照合する' })).toBeInTheDocument();
+    expect(posts().filter((call) => call.url.endsWith('/accept-found'))).toHaveLength(0);
+  });
+
   it('P3-2 (control): an unknown of another reason shows no warning and no "treat as written", even after the reconcile', async () => {
     listExtra = { decisions: [{ item: view('d-a', 'open'), unreflected: false, operations: [unknownOp('op-u', 'not_found_yet')] }] };
     render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" />);

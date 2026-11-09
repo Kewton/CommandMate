@@ -200,7 +200,8 @@ export function DecisionPromotePanel({ repositoryId, branch }: { repositoryId: s
               <Button size="sm" variant="ghost" disabled={busy} onClick={() => void run(() => promoteApi.abandon(repositoryId, operation.id))}>
                 {t('mem.decisions.abandon')}
               </Button>
-              {foundShown && (
+              {/* Codex review 5 P2-2: what cannot be compared is never accepted as written; reconcile again. */}
+              {foundShown && foundShown.found !== null && (
                 <Button
                   size="sm"
                   variant="ghost"

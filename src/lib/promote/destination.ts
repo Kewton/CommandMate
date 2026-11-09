@@ -70,6 +70,11 @@ export type DocPathCheck =
  * - `dir`: any path component (nested ones too: an agent reads `.claude/` below the root)
  * - `file`: the last component, in any directory (nested `CLAUDE.md` / `AGENTS.md` are read)
  * - `path`: the whole relative path
+ *
+ * Every project Skill root an agent was measured to discover (the probe roots of
+ * `docs/reference/skill-agent-compatibility.md` and the `discoveryRoots` of
+ * `lib/skills/compatibility-matrix.ts`) must fall under a row: a test reads those sources,
+ * so a root added there fails until it is refused here (Codex review 5 P2-1).
  */
 export const AGENT_INSTRUCTION_PATHS: ReadonlyArray<{ match: 'dir' | 'file' | 'path'; name: string; reader: string }> = [
   { match: 'dir', name: '.claude', reader: 'Claude Code (commands, agents, skills, settings)' },
@@ -92,6 +97,8 @@ export const AGENT_INSTRUCTION_PATHS: ReadonlyArray<{ match: 'dir' | 'file' | 'p
   { match: 'path', name: '.github/instructions', reader: 'GitHub Copilot (path-specific instructions)' },
   { match: 'path', name: '.github/prompts', reader: 'GitHub Copilot (prompt files)' },
   { match: 'path', name: '.github/chatmodes', reader: 'GitHub Copilot (chat modes)' },
+  { match: 'path', name: '.github/skills', reader: 'GitHub Copilot (skills)' },
+  { match: 'path', name: '.config/opencode', reader: 'OpenCode (its global config root, named among the measured Skill roots)' },
 ];
 
 /** The row of {@link AGENT_INSTRUCTION_PATHS} a normalized relative path falls under, or null. */

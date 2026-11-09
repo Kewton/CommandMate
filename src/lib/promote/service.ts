@@ -77,7 +77,7 @@ import { validatePromoteTo, validateQuote } from '@/lib/mem/validate';
 import { isScreenRequest } from '@/lib/security/screen-request';
 import type { MemDecisionTransition } from '@/lib/db/mem-db';
 import { checkDocPath, docBaseFingerprint, issueBaseFingerprint, parsePromoteTo, resolveIssueTarget } from './destination';
-import { docBlockOf, readDocBlockExcerpt, reconcileDocBlock, writeDocBlock, type DocWriteHooks } from './doc-write';
+import { docBlockOf, reconcileDocBlockFinding, writeDocBlock, type DocWriteHooks } from './doc-write';
 import {
   defaultGhRun,
   fixedTokenEnv,
@@ -863,15 +863,27 @@ export async function promoteReconcile(
     if (!worktree || worktreeId === null) {
       finding = { settle: { state: 'unknown', reason: 'unreadable' } };
     } else {
-      const found = reconcileDocBlock(worktree.path, destination.path, row.id, row.body_sha256, docOperationsFor(db, worktreeId, destination.path));
-      finding = {
-        settle:
-          found === 'found'
-            ? { state: 'succeeded', reason: null, resultRef: JSON.stringify({ path: destination.path, sha256: row.body_sha256 }) }
-            : { state: 'unknown', reason: found === 'missing' ? 'block_missing' : found === 'altered' ? 'block_altered' : 'unreadable' },
-        // P3-2: the altered block as it is now, beside what was meant (design §3.4).
-        ...(found === 'altered' ? { found: readDocBlockExcerpt(worktree.path, destination.path, row.id) } : {}),
-      };
+      // The judgement and what is shown come from one read (Codex review 5 P2-2): an
+      // altered block always carries the document as it is now; one that cannot be read
+      // is `unreadable`, never a finding offered as "treat as written".
+      const read = reconcileDocBlockFinding(
+        worktree.path,
+        destination.path,
+        row.id,
+        row.body_sha256,
+        docOperationsFor(db, worktreeId, destination.path),
+        deps.hooks?.doc
+      );
+      finding =
+        read.result === 'altered'
+          ? // P3-2: the altered block as it is now, beside what was meant (design §3.4).
+            { settle: { state: 'unknown', reason: 'block_altered' }, found: read.found }
+          : {
+              settle:
+                read.result === 'found'
+                  ? { state: 'succeeded', reason: null, resultRef: JSON.stringify({ path: destination.path, sha256: row.body_sha256 }) }
+                  : { state: 'unknown', reason: read.result === 'missing' ? 'block_missing' : 'unreadable' },
+            };
     }
   }
   const now = deps.now?.() ?? Date.now();

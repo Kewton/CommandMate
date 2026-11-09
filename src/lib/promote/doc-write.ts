@@ -129,6 +129,8 @@ export interface DocWriteHooks {
   beforeLink?: (abs: string) => void;
   /** A new file: after `link`, before the temporary name goes. Throwing here is the process ending. */
   afterLink?: (abs: string) => void;
+  /** The reconcile's read of the document (`readFileSync(abs, 'utf8')`). Test seam: throwing here is the read failing (EIO). */
+  readDoc?: (abs: string) => string;
 }
 
 export type DocWriteOutcome =
@@ -231,39 +233,54 @@ export function reconcileDocBlock(
   rel: string,
   operationId: string,
   bodySha: string,
-  leftovers: ReadonlyMap<string, string | null>
+  leftovers: ReadonlyMap<string, string | null>,
+  hooks: DocWriteHooks = {}
 ): 'found' | 'missing' | 'altered' | 'unreadable' {
-  const checked = checkDocPath(root, rel);
-  if (!checked.ok) return 'unreadable';
-  reclaimDocLeftovers(checked.abs, leftovers);
-  let content: string;
-  try {
-    content = readFileSync(checked.abs, 'utf8');
-  } catch {
-    return 'unreadable';
-  }
-  return findDocBlock(content, operationId, bodySha);
+  return reconcileDocBlockFinding(root, rel, operationId, bodySha, leftovers, hooks).result;
 }
 
 /** The most of a found block the screen is shown (design §3.4, PM review P3-2). */
 export const DOC_EXCERPT_MAX_CHARS = 64 * 1024;
 
 /**
- * What the document holds around the operation's marks, for a person to compare with
- * what was meant to be written (design §3.4: `block_altered` shows both). From the line
- * of the first mark of the operation to the end of the line of its last mark (to the end
- * of the content when no end mark follows), at most {@link DOC_EXCERPT_MAX_CHARS}. Null
- * when the document cannot be read or holds no mark of the operation. Reads only.
+ * What the reconcile of a document finds and, when the block is `altered`, what the
+ * document holds around the operation's marks (design §3.4: `block_altered` shows both).
+ * Both come from **one** read (Codex review 5 P2-2): a second read for the screen could
+ * fail where the first did not, and an altered block nobody can compare must not be
+ * offered as "treat as written". So `altered` always carries its excerpt; a read that
+ * fails, or an excerpt that cannot be cut from the same content, is `unreadable` (the
+ * three-valued unknown never moves forward). Reads only, after taking back E's leftovers.
  */
-export function readDocBlockExcerpt(root: string, rel: string, operationId: string): string | null {
+export function reconcileDocBlockFinding(
+  root: string,
+  rel: string,
+  operationId: string,
+  bodySha: string,
+  leftovers: ReadonlyMap<string, string | null>,
+  hooks: DocWriteHooks = {}
+): { result: 'found' | 'missing' | 'unreadable'; found: null } | { result: 'altered'; found: string } {
   const checked = checkDocPath(root, rel);
-  if (!checked.ok) return null;
+  if (!checked.ok) return { result: 'unreadable', found: null };
+  reclaimDocLeftovers(checked.abs, leftovers);
   let content: string;
   try {
-    content = readFileSync(checked.abs, 'utf8');
+    content = hooks.readDoc ? hooks.readDoc(checked.abs) : readFileSync(checked.abs, 'utf8');
   } catch {
-    return null;
+    return { result: 'unreadable', found: null };
   }
+  const result = findDocBlock(content, operationId, bodySha);
+  if (result !== 'altered') return { result, found: null };
+  const found = docBlockExcerptOf(content, operationId);
+  return found === null ? { result: 'unreadable', found: null } : { result, found };
+}
+
+/**
+ * The document around the operation's marks: from the line of the first mark of the
+ * operation to the end of the line of its last mark (to the end of the content when no
+ * end mark follows), at most {@link DOC_EXCERPT_MAX_CHARS}. Null when the content holds
+ * no mark of the operation. Pure.
+ */
+export function docBlockExcerptOf(content: string, operationId: string): string | null {
   const marks = [`<!-- ${BLOCK}:begin op=${operationId} `, endLine(operationId)];
   const firsts = marks.map((mark) => content.indexOf(mark)).filter((at) => at >= 0);
   if (firsts.length === 0) return null;

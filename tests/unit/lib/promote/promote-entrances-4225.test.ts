@@ -1448,6 +1448,67 @@ describe('PM review (2026-11-09): what the person is shown is what is decided', 
     expect(readFileSync(docPath(), 'utf8')).toBe(before);
   });
 
+  /** An operation of a document stopped before its append, and the block then edited by hand. */
+  async function alteredDoc(): Promise<{ itemId: string; opId: string; altered: string; intended: string }> {
+    writeFileSync(docPath(), '# 既存\n');
+    const made = await addDecision('path:docs/d.md');
+    promoteHooks = {
+      doc: {
+        beforeAppend: () => {
+          throw new Error('stopped');
+        },
+      },
+    };
+    const stopped = operationOf(await approve(await preview(made.id)));
+    promoteHooks = undefined;
+    const intended = opRow(stopped.id).body;
+    const altered = docBlockOf(stopped.id, intended).replace('方針を A にする', '方針を A にする（人が直した）');
+    writeFileSync(docPath(), `# 既存\n${altered}後ろの段落\n`);
+    return { itemId: made.id, opId: stopped.id, altered, intended };
+  }
+  /** The reconcile's reads of the document: the first `ok` succeed, the rest fail with EIO. */
+  function readsFailingAfter(ok: number): { reads: () => number } {
+    let reads = 0;
+    promoteHooks = {
+      doc: {
+        readDoc: (abs) => {
+          reads += 1;
+          if (reads > ok) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' });
+          return readFileSync(abs, 'utf8');
+        },
+      },
+    };
+    return { reads: () => reads };
+  }
+
+  it('Codex review 5 P2-2: block_altered is judged and shown from one read — a read failing after it cannot leave a finding nobody can compare', async () => {
+    const made = await alteredDoc();
+    const seam = readsFailingAfter(1);
+    const reconciled = await promoteReconcile(db, SCREEN, repoA, made.opId, deps());
+    promoteHooks = undefined;
+    // Positive control: the judgement and a second read for the screen answered `found: null` here.
+    expect(seam.reads()).toBe(1);
+    expect(findingOf(reconciled)).toEqual({ reason: 'block_altered', found: made.altered, intended: made.intended });
+    expect(op(made.opId)).toMatchObject({ state: 'unknown', unknown_reason: 'block_altered' });
+  });
+
+  it('Codex review 5 P2-2: the document unreadable at the reconcile → unreadable, no finding, and "treat as written" is refused (back to reconcile)', async () => {
+    const made = await alteredDoc();
+    readsFailingAfter(0);
+    const reconciled = await promoteReconcile(db, SCREEN, repoA, made.opId, deps());
+    promoteHooks = undefined;
+    expect(op(made.opId)).toMatchObject({ state: 'unknown', unknown_reason: 'unreadable' });
+    expect(findingOf(reconciled)).toBeUndefined();
+    const before = snapshot();
+    expect(codeOf(await promoteAcceptFound(db, SCREEN, repoA, made.opId, { ifState: 'unknown', ifReason: 'block_altered' }, deps())).code).toBe('state_forbids');
+    expect(snapshot()).toEqual(before);
+    expect(item(made.itemId).state).toBe('open');
+    // (control) readable again → the reconcile shows both and "treat as written" is offered again.
+    const again = await promoteReconcile(db, SCREEN, repoA, made.opId, deps());
+    expect(findingOf(again)).toEqual({ reason: 'block_altered', found: made.altered, intended: made.intended });
+    expect((await promoteAcceptFound(db, SCREEN, repoA, made.opId, { ifState: 'unknown', ifReason: 'block_altered' }, deps())).status).toBe(200);
+  });
+
   it('P3-2 (control): no finding is answered for not_found_yet, and "treat as written" is refused for any reason but the one shown', async () => {
     const made = await addDecision();
     const opId = await unknownComment(made.id);

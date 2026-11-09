@@ -175,7 +175,7 @@ preview は画面の要求（§4.2 の印）で作り、DB に保存する（`me
   - 照会は成功したが見つからない：**`unknown` のまま**（GitHub の一覧の反映の遅れを否定できない）。画面は「見つからない」と時刻を出し、人が「GitHub で無いことを確かめた」を押したときだけ operation を `abandoned`（人の判断で未送信とみなす、`decided_by='human'`）にする。その後は新しい承認でだけ書ける
 - 文書：今の内容から operation の印の区画（`begin op=<id>` 〜 `end op=<id>`）を探す（事前レビュー ④）
   - 区画がちょうど 1 つあり、中身の SHA-256 が `begin` の行と operation の `body_sha256` に一致：`succeeded`（文書の他の部分が変わっていても。他者の追記と、E の書き込みの成功の証拠を分ける）
-  - 区画が 2 つ以上・`begin` だけ・中身の指紋が違う（壊れた・直された）：`unknown`（`block_altered`）のまま、人へ。コメントの `body_differs` と同じく、照合の応答に印の最初の行から最後の `end` の行までの今の内容（64 KiB まで、`readDocBlockExcerpt`）と承認した本文を返し、人の「書かれていたとして扱う」でだけ `succeeded` にする（PM レビュー P3-2。文書には何も書かない）
+  - 区画が 2 つ以上・`begin` だけ・中身の指紋が違う（壊れた・直された）：`unknown`（`block_altered`）のまま、人へ。コメントの `body_differs` と同じく、照合の応答に印の最初の行から最後の `end` の行までの今の内容（64 KiB まで、`docBlockExcerptOf`）と承認した本文を返し、人の「書かれていたとして扱う」でだけ `succeeded` にする（PM レビュー P3-2。文書には何も書かない）。判定と見せる内容は**同じ 1 回の読み**から作る（`reconcileDocBlockFinding`。Codex 5 回目 P2-2）：読めなければ、または同じ内容から区画を切り出せなければ `unreadable` とし、比べられないものを「書かれていたとして扱う」へ出さない
   - 区画が無い：`unknown`（`block_missing`）のまま、人へ。内容が `base_fingerprint` と一致していても、書いた後に人が消した場合と区別できないので、**未送信と読まない**。人が「無いことを確かめた」を押したときだけ `abandoned`
   - 読めない（worktree が消えた・パスの検査に通らない）：`unknown`（`unreadable`）のまま
 - 照合で `succeeded` に確定したら、§3.5 の手順（operation に保存した世代・版を A の入口へ渡す）で遷移を試みる。合わなければ `transition_pending=1`
@@ -255,13 +255,13 @@ preview は画面の要求（§4.2 の印）で作り、DB に保存する（`me
 1. `promote_to` の `path:` は A の検査（`validatePromoteTo`→`normalizeRepoPath`、`validate.ts:277`・`:185`）を **選んだ worktree の root で** もう一度かける：絶対パス・`~`・NUL・バックスラッシュ・ドライブ文字を断る、`..` で外へ出るものを断る、`findSensitivePathSegment` の当たる成分を断る、root から各成分を `lstat` して symlink を断る（`:213`）［事実］
 2. E で足す検査（A の関数は変えない）：root 自身が symlink でない（root を `lstat` して通常のディレクトリ。実装で `realpath` の比較から変えた、§10）、`.git` の成分を断る、最後の成分が存在するなら通常のファイルである、拡張子が `.md`、大きさの上限。**`normalizeRepoPath` は promote_to で最初の無い成分で止まる**（`validate.ts:204-211`：`mustExist=false` なら `break`）ので、無いディレクトリの下は作らない（親ディレクトリが存在することを求める）［見立て］
 3. 照合のたび（preview・approve・書く直前）に 1・2 をやり直す
-4. **エージェントの指示ファイルを断る**（PM レビュー P3-8、D12：Agent の書いた記録を後続のエージェントへの命令として読ませない）。`destination.ts` の `AGENT_INSTRUCTION_PATHS` の表（大文字小文字を区別しない）に当たる行き先は `invalid_destination`（`agent_instructions`）。`checkDocPath` の中なので preview・approve・`writeDocBlock` の直前のすべてで効く。表は `promote-agent-instructions-4225` で行ごとに固定する
+4. **エージェントの指示ファイルを断る**（PM レビュー P3-8、D12：Agent の書いた記録を後続のエージェントへの命令として読ませない）。`destination.ts` の `AGENT_INSTRUCTION_PATHS` の表（大文字小文字を区別しない）に当たる行き先は `invalid_destination`（`agent_instructions`）。`checkDocPath` の中なので preview・approve・`writeDocBlock` の直前のすべてで効く。表は `promote-agent-instructions-4225` で行ごとに固定する。**表は手で並べた一覧で終わらせない**（Codex 5 回目 P2-1）：Agent が Skill を見つけると実測された project の root（`docs/reference/skill-agent-compatibility.md` の probe の root と `compatibility-matrix.ts` の `discoveryRoots`）は必ずどれかの行に当たることを `promote-agent-instructions-discovery-4225` が正本を読んで確かめ、正本に root が増えると表の不足で落ちる
 
 | 種類 | 当たり方 | 名前 |
 |---|---|---|
 | ディレクトリ | パスのどの成分でも（入れ子も） | `.claude`・`.agents`・`.codex`・`.gemini`・`.agent`・`.cursor`・`.windsurf`・`.clinerules`・`.commandcode`・`.opencode` |
 | ファイル | どのディレクトリでも最後の成分 | `CLAUDE.md`・`CLAUDE.local.md`・`AGENTS.md`・`AGENTS.override.md`・`GEMINI.md`・`CMATE.md` |
-| パス | パス全体、またはその下 | `.github/copilot-instructions.md`・`.github/instructions`・`.github/prompts`・`.github/chatmodes` |
+| パス | パス全体、またはその下 | `.github/copilot-instructions.md`・`.github/instructions`・`.github/prompts`・`.github/chatmodes`・`.github/skills`・`.config/opencode` |
 
 ### 5.4 commit・push をしない
 
@@ -577,6 +577,15 @@ P1 0・P2 1・P3 8。PM の処分で、P2・P3-1・P3-2・P3-5・P3-6・P3-8 を
 | P3-4 | 同じ DB を 2 つの server が使うと、相手の POST 中の操作を不明と読む | 追跡（#4289） | PM の処分 |
 | P3-7 | 「やめる」が preview をサーバー側で無効にしない | 追跡（#4289） | PM の処分 |
 
+### 9.9 実装後の再レビュー（Codex 5 回目、2026-11-09、`workspace/orchestration/runs/2026-11-09/review-4225f.md`）
+
+前回 2 件は解消維持。追加の指摘 2 件（P2）をこの PR で直した。それぞれ直しを外すと落ちる対照つき。
+
+| # | 指摘 | 処置 | 1 行の理由（守る条件・対照） |
+|---|---|---|---|
+| P2-1 | 指示ファイルの拒否の表に Copilot の Skill の発見先 `.github/skills` が無い | 採る | 表に `.github/skills`（と、正本の §10.2 に Skill の root として名のある `.config/opencode`）を足し、表を正本と突き合わせる試験 `promote-agent-instructions-discovery-4225` を足した：`skill-agent-compatibility.md` の probe の root（project の側）と `compatibility-matrix.ts` の `discoveryRoots` を読み、各 root の `x/SKILL.md`（既存の通常の `.md`）を `checkDocPath` と `writeDocBlock` の両方で断る。陽性対照：`.github/skills` の行を外すと落ちる／正本に新しい root が書かれると表に無いので落ちる。陰性対照：`docs/skills/x.md` は行き先のまま、home の root は数えない |
+| P2-2 | 表示用の読み直しが EIO 等で null でも `block_altered` の finding を返し、比べられないまま「書かれていたとして扱う」を受け入れる | 採る | 判定と表示を同じ 1 回の読みから作る（`reconcileDocBlockFinding`、`readDocBlockExcerpt` は消した）。`altered` は必ず今の内容を持ち、読めない・切り出せないは `unreadable`（受け入れの CAS は見せた理由の `unknown` からだけなので断られ、再照合へ戻る）。画面も `found` が null の finding には受け入れのボタンを出さない。対照：読みの失敗の注入（`DocWriteHooks.readDoc`）で、1 回目の後に失敗させても finding は今の内容（陽性：2 回読む形に戻すと `found: null` で落ちる）、1 回目から失敗させると `unreadable`・finding 無し・受け入れは `state_forbids`、読めるようになれば再照合で両方が出て受け入れられる（陰性）。画面：`found: null` の finding に「書かれていたとして扱う」が出ない |
+
 ---
 
 ## 10. 実装で実コードを正とした点（2026-11-09）
@@ -602,6 +611,7 @@ P1 0・P2 1・P3 8。PM の処分で、P2・P3-1・P3-2・P3-5・P3-6・P3-8 を
 | I18 | 承認の確定の後は読み直した行が `succeeded` なら遷移へ進む（§3.5） | 自分の確定（`settleOrUnknown` の戻り値）が `succeeded` を書いたときだけ進み、`beginPromoteTransition` には読み直した行ではなく確定が残した遷移（pending 0・印なし）を渡す | 5-2e P2（I2 を強めた形）。読み直した行は照合・確認が決めた状態のことがあり、そこから印を取り直すと確定済みの遷移を始め直す |
 | I17 | 結果の確定は `in_flight`・`unknown` から（§3.2） | `settlePromoteOperation` は呼び手が読んだ状態の集合（`from`）を条件にする。承認自身の結果は従来どおり `in_flight`・`unknown`、照合は `unknown` だけ。操作の行が変わったときだけ試行を閉じる | I2。照合の await の間に承認の結果が書いたものを照合が上書きしない |
 | I19 | `body_differs` のとき画面に両方を出す（§3.4） | 照合の応答（`finding`）で返し、一覧（`promoteList`）には持たない。画面は照合した直後にだけ両方と「書かれていたとして扱う」を出す。見つかったコメントの位置は `result_ref` に残す | PM レビュー P3-2。見つかった本文は外の今の内容で、DB に写すと古くなる。受け入れる前に人が今の内容を見ることを、照合を押す操作で求める |
+| I21 | `block_altered` の今の内容は `readDocBlockExcerpt` で読む（§3.4、PM レビュー P3-2） | 照合の判定と同じ 1 回の読みから切り出す（`reconcileDocBlockFinding`・`docBlockExcerptOf`）。`readDocBlockExcerpt` は消した | Codex 5 回目 P2-2。2 回目の読みだけが失敗すると、比べられない finding が受け入れられた |
 | I20 | 指示ファイルを断る（§5.3 の 4） | A の `validatePromoteTo`・`findSensitivePathSegment`（`src/lib/mem/validate.ts`・`sensitive-file-guard.ts`）は変えず、E の `checkDocPath` で断る | PM レビュー P3-8。A のファイルは scope の外。mem へ記録すること自体は止めない（外へ書く口でだけ断る） |
 
 ## 11. 共通規則の全読者
@@ -628,9 +638,9 @@ E の入口が共有する規則と、それを読む（当てはめる）場所
 | 外へ出す本文の見えない文字（自由入力・引用・ブランチ・作成者）は見える形にし、`invisibleReplaced` に数える。ブランチは C の `sanitizeBranch`（5-2b P2-3） | `render.ts`（`renderPromoteBody`・`branchShown`）、`promotePreview`（`invisibleReplaced` を画面へ） | `promote-render-4225`（T15・5-2b P2-3） |
 | 「未反映」の表示（`recorded`） | E の画面（`DecisionPromotePanel`）と E の一覧の API（`unreflected:true`）。CLI の一覧と brief の文言は G（#4227）へ送った（§0.1 S3） | `promote-entrances-4225`（T13）・`DecisionPromotePanel-4225` |
 | 外へ書く関数（`postGhComment`・`writeDocBlock`）の呼び手は `src/lib/promote/service.ts` だけ（PM レビュー P3-6） | `promoteApprove`（同期の区間の照合の後） | ガード `mem-promote-external-write-callers-4225`（自己テストの対照つき）・`mem-promote-no-git-write-4225`（`--method` は 1 か所） |
-| 文書の行き先はエージェントの指示ファイルでない（PM レビュー P3-8、D12） | `destination.ts`（`AGENT_INSTRUCTION_PATHS`・`agentInstructionPathOf`・`checkDocPath`）← `promotePreview`・`promoteApprove`・`writeDocBlock`・`reconcileDocBlock`・`readDocBlockExcerpt`。ja・en の利用者向けの文書（`cli-operations-guide.md` の「決定を正本へ記録する」） | `promote-agent-instructions-4225`（表の行ごと）・`promote-entrances-4225`（PM レビュー P3-8） |
+| 文書の行き先はエージェントの指示ファイルでない（PM レビュー P3-8、D12） | `destination.ts`（`AGENT_INSTRUCTION_PATHS`・`agentInstructionPathOf`・`checkDocPath`）← `promotePreview`・`promoteApprove`・`writeDocBlock`・`reconcileDocBlockFinding`（`reconcileDocBlock`）。表の正本は Skill の発見先の実測（`docs/reference/skill-agent-compatibility.md`・`src/lib/skills/compatibility-matrix.ts` の `discoveryRoots`、Codex 5 回目 P2-1）。ja・en の利用者向けの文書（`cli-operations-guide.md` の「決定を正本へ記録する」） | `promote-agent-instructions-4225`（表の行ごと）・`promote-agent-instructions-discovery-4225`（正本との突き合わせ）・`promote-entrances-4225`（PM レビュー P3-8） |
 | 人が承認するのは画面が出したもの：preview は作った時の選択が変わったら捨て、行き先と投稿者を出す。チェックは項目・operation ごと（PM レビュー P2・P3-1） | `DecisionPromotePanel`（`destinationText`・`previewInputsRef`・`acknowledgeDiffFor`） | `DecisionPromotePanel-4225`（PM レビュー） |
-| 印が見つかった不明（`body_differs`・`block_altered`）は人が両方を見て決める（PM レビュー P3-2） | `promoteReconcile`（`finding`）、`promoteAcceptFound`・`acceptFoundPromoteOperation`（`mem-promote-db.ts`、見せた理由の `unknown` からだけ）、`readDocBlockExcerpt`（`doc-write.ts`）、`DecisionPromotePanel`（`findings`）、`screen-client.ts`（`acceptFound`） | `promote-entrances-4225`（PM レビュー P3-2）・`mem-promote-transition-cas-4225`・`DecisionPromotePanel-4225`・`mem-decisions-routes-4225` |
+| 印が見つかった不明（`body_differs`・`block_altered`）は人が両方を見て決める（PM レビュー P3-2） | `promoteReconcile`（`finding`）、`promoteAcceptFound`・`acceptFoundPromoteOperation`（`mem-promote-db.ts`、見せた理由の `unknown` からだけ）、`reconcileDocBlockFinding`（`doc-write.ts`：判定と見せる内容を 1 回の読みから。読めなければ `unreadable`、Codex 5 回目 P2-2）、`DecisionPromotePanel`（`findings`。`found` が null なら受け入れを出さない）、`screen-client.ts`（`acceptFound`） | `promote-entrances-4225`（PM レビュー P3-2）・`mem-promote-transition-cas-4225`・`DecisionPromotePanel-4225`・`mem-decisions-routes-4225` |
 
 
 ### 11.1 不変条件 I1・I2 と、E の service の await と書き込みの全表（5-2d）

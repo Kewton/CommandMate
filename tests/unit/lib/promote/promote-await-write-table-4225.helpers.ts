@@ -51,7 +51,7 @@ export const READS = new Set([
   'worktreeIncarnationAlive',
   'docBlockOf',
   'reconcileDocBlock',
-  'readDocBlockExcerpt',
+  'reconcileDocBlockFinding',
   // a constant (the unknown reasons under which the reconcile found the operation's mark)
   'PROMOTE_MARK_FOUND_REASONS',
   'defaultGhRun',

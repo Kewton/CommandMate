@@ -39,6 +39,8 @@ const PINNED = [
   'path:.github/instructions',
   'path:.github/prompts',
   'path:.github/chatmodes',
+  'path:.github/skills',
+  'path:.config/opencode',
 ];
 
 /** The paths each row must refuse: at the root, nested, and in another case. */
