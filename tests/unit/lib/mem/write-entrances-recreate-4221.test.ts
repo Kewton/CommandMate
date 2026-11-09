@@ -28,10 +28,12 @@ vi.mock('@/lib/logger', () => ({
 import { createRepository } from '@/lib/db/db-repository';
 import { getMemSettings, saveMemSettings } from '@/lib/db/mem-db';
 import { deleteWorktreesByIds } from '@/lib/db/worktree-db';
+import { getOrCreateWorktreeIncarnation } from '@/lib/mem/incarnation';
 import {
   memAddItem,
   memCloseItem,
   memPurge,
+  memSettleDecisionTransition,
   memUpdateItem,
   memWriteNow,
   writeSessionNoteFromScreen,
@@ -125,6 +127,31 @@ const screen = (mode: Entrance['mode']): Entrance => ({
 });
 
 /** Every way in that writes mem. */
+/**
+ * Issue #4225 (§0.1 S1・PM): a decision recorded / promoted through A's one entrance.
+ * The lifetime is read when the request arrives (before the await), as the promote
+ * service does; the entrance compares it and never fixes it again.
+ */
+const addDecision = async (text: string) => {
+  const outcome = await memAddItem(db, WT, { instanceId: 'claude', kind: 'decision', text, promoteTo: 'issue:#4225' }, deps());
+  const item = (outcome.body as MemWriteResponse).item;
+  return { id: item.id, version: item.version };
+};
+const settleDecision = (made: { id: string; version: number }, transition: 'record' | 'promote' | 'promote-record-only', version = made.version) =>
+  memSettleDecisionTransition(
+    db,
+    { worktreeId: WT, expectedWorktreeIncarnation: getOrCreateWorktreeIncarnation(db, WT), itemId: made.id, expectedVersion: version, transition },
+    deps()
+  );
+const recordedDecision = async (text: string) => {
+  const made = await addDecision(text);
+  const outcome = await settleDecision(made, 'record');
+  const item = (outcome.body as MemWriteResponse).item;
+  return { id: item.id, version: item.version };
+};
+const decisionIs = (state: string) => (made: { id: string; version: number } | undefined) =>
+  itemIs('id = ? AND state = ? AND version = ?', made!.id, state, made!.version + 1);
+
 const ENTRANCES: Record<string, Entrance> = {
   'cli-now': {
     fn: 'memWriteNow',
@@ -175,6 +202,28 @@ const ENTRANCES: Record<string, Entrance> = {
   },
   // A purge named through the worktree (`commandmate mem purge`): it must not delete
   // what the worktree made again under the same id and path writes (4th review・PM).
+  // Issue #4225: the three transitions of a decision (A's entrance for E).
+  'decision-record': {
+    fn: 'memSettleDecisionTransition',
+    mode: 'on',
+    before: () => addDecision('to record'),
+    request: (made) => settleDecision(made!, 'record'),
+    landed: decisionIs('recorded'),
+  },
+  'decision-promote': {
+    fn: 'memSettleDecisionTransition',
+    mode: 'on',
+    before: () => recordedDecision('to promote'),
+    request: (made) => settleDecision(made!, 'promote'),
+    landed: decisionIs('promoted'),
+  },
+  'decision-record-only': {
+    fn: 'memSettleDecisionTransition',
+    mode: 'on',
+    before: () => addDecision('record only'),
+    request: (made) => settleDecision(made!, 'promote-record-only'),
+    landed: decisionIs('promoted'),
+  },
   'cli-purge': {
     fn: 'memPurge',
     mode: 'on',
@@ -342,5 +391,86 @@ describe('every write of mem refuses a request the worktree’s re-creation over
     const outcome = await pending;
     expect(outcome.status).toBeLessThan(300);
     expect(entry.landed(made)).toBe(true);
+  });
+});
+
+/**
+ * Issue #4225 (§0.1 S1, the PM's condition): the decision rows keep the other two
+ * invariants too — no write while the branch is `off` / `derived`, and a version that
+ * is not the current one is refused. Each fails if the entrance's check is removed.
+ */
+describe('a decision moves only when the branch is on and the version is the one approved (Issue #4225)', () => {
+  const decisionRows = Object.keys(ENTRANCES).filter((key) => key.startsWith('decision-'));
+
+  it('has the three decision rows', () => {
+    expect(decisionRows.sort()).toEqual(['decision-promote', 'decision-record', 'decision-record-only']);
+  });
+
+  it.each(decisionRows.flatMap((key) => [[key, 'off'] as const, [key, 'derived'] as const]))(
+    '%s with the branch %s → refused (disabled), the row unchanged',
+    async (key, mode) => {
+      const entry = ENTRANCES[key];
+      makeWorktree();
+      setMode('on');
+      const made = await entry.before!();
+      setMode(mode);
+      const outcome = await entry.request(made);
+      expect(outcome.status).toBe(409);
+      expect((outcome.body as { code: string }).code).toBe('disabled');
+      expect(entry.landed(made)).toBe(false);
+      expect(itemIs('id = ? AND version = ?', made.id, made.version)).toBe(true);
+    }
+  );
+
+  it.each(decisionRows)('%s with a version one below the current → version_conflict, nothing written', async (key) => {
+    const entry = ENTRANCES[key];
+    makeWorktree();
+    setMode('on');
+    const made = await entry.before!();
+    const transition = key === 'decision-record' ? 'record' : key === 'decision-promote' ? 'promote' : 'promote-record-only';
+    const outcome = await settleDecision(made, transition, made.version - 1);
+    expect(outcome.status).toBe(409);
+    expect((outcome.body as { code: string }).code).toBe('version_conflict');
+    expect(itemIs('id = ? AND version = ?', made.id, made.version)).toBe(true);
+  });
+
+  it.each(decisionRows)('%s: the item updated (version + 1) during the await → version_conflict, the state unchanged', async (key) => {
+    const entry = ENTRANCES[key];
+    makeWorktree();
+    setMode('on');
+    const made = await entry.before!();
+    const state = (db.prepare('SELECT state FROM mem_items WHERE id = ?').get(made.id) as { state: string }).state;
+    const release = arm();
+    const pending = entry.request(made);
+    await Promise.resolve();
+    // A person's edit (or any write) raises the version while the request waits on git.
+    db.prepare('UPDATE mem_items SET version = version + 1 WHERE id = ?').run(made.id);
+    release();
+    const outcome = await pending;
+    expect(outcome.status).toBe(409);
+    expect((outcome.body as { code: string }).code).toBe('version_conflict');
+    expect(itemIs('id = ? AND state = ? AND version = ?', made.id, state, made.version + 1)).toBe(true);
+  });
+
+  it('a transition the table forbids (promote an open decision) → state_forbids', async () => {
+    makeWorktree();
+    setMode('on');
+    const made = await addDecision('open still');
+    const outcome = await settleDecision(made, 'promote');
+    expect(outcome.status).toBe(409);
+    expect((outcome.body as { code: string }).code).toBe('state_forbids');
+  });
+
+  it('a null lifetime is refused before anything is read', async () => {
+    makeWorktree();
+    setMode('on');
+    const made = await addDecision('no lifetime');
+    const outcome = await memSettleDecisionTransition(
+      db,
+      { worktreeId: WT, expectedWorktreeIncarnation: null, itemId: made.id, expectedVersion: made.version, transition: 'record' },
+      deps()
+    );
+    expect(outcome.status).toBeGreaterThanOrEqual(400);
+    expect(itemIs("id = ? AND state = 'open'", made.id)).toBe(true);
   });
 });

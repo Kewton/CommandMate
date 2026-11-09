@@ -12,6 +12,8 @@ import { v66_migrations } from '@/lib/db/migrations/v66-mem-store';
 // goes back through v68 and then v67 first.
 import { v67_migrations } from '@/lib/db/migrations/v67-mem-close-records';
 import { v68_migrations } from '@/lib/db/migrations/v68-session-brief-boundaries';
+// Issue #4225: v69 (mem_promote_*) sits above them all and goes back first.
+import { v69_migrations } from '@/lib/db/migrations/v69-mem-promote';
 
 describe('migration v66: mem store', () => {
   let db: Database.Database;
@@ -42,6 +44,8 @@ describe('migration v66: mem store', () => {
     try {
       fresh.pragma('foreign_keys = ON');
       runMigrations(fresh);
+      v69_migrations[0].down!(fresh);
+      fresh.prepare('DELETE FROM schema_version WHERE version = 69').run();
       v68_migrations[0].down!(fresh);
       fresh.prepare('DELETE FROM schema_version WHERE version = 68').run();
       v67_migrations[0].down!(fresh);
@@ -73,6 +77,7 @@ describe('migration v66: mem store', () => {
   });
 
   it('rolls back to the v65 shape', () => {
+    v69_migrations[0].down!(db);
     v67_migrations[0].down!(db);
     v66_migrations[0].down!(db);
     expect(columns('session_notes').sort()).toEqual(['instance_id', 'note', 'updated_at', 'worktree_id']);
