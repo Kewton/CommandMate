@@ -1,6 +1,6 @@
 # 既存のフックと操作の出来事を使って mem の更新を促す（Issue #4226 / Epic #4220 の子 F）設計
 
-- 状態：設計の段（実装前）。**第 2 版**。第 1 版（`c12689c59`）の止める点 S1〜S3 に PM の決定（2026-11-09）が出て、Codex の事前レビュー（P1 2 件・P2 7 件・P3 1 件）を処置した。処置の一覧は §11
+- 状態：設計の段（実装前）。**第 3 版**。第 1 版（`c12689c59`）の止める点 S1〜S3 に PM の決定（2026-11-09）が出て、Codex の事前レビュー（P1 2 件・P2 7 件・P3 1 件）を第 2 版（`b71eb25a8`）で処置した。第 3 版は、Codex の再確認（`prereview/review-4226b.md`：P1 3 件・P2 4 件）と、それを受けた PM の S3 の差戻し（`pm-decision-4226-s3-4227-sf.md`：S3 は永続、migration は v70）を処置した。処置の一覧は §11（1 回目は §11.1、2 回目は §11.2）
 - 前提：Epic #4220 の決定事項 D1〜D13。とくに D1（モデルを呼ばない）・D2（導けるものは書かない）・D3（既定は off、有効にするのは人）・D8（新しい常駐・定期の実行を足さない）・D12（記録はデータとして区切る・自由入力の検査）
 - 読んだ設計：A `docs/design/mem-store-4221.md`・B `mem-close-when-4222.md`・C `brief-4223.md`・D1 `session-boundary-brief-4274.md`（develop にマージ済み）。D2（`../commandmate-issue-4224` の `HEAD:docs/design/brief-injection-d2-4224.md`）・E（`../commandmate-issue-4225` の `HEAD:docs/design/mem-promote-4225.md`）は読むだけ（未マージ）
 - 凡例：**［事実］** = この文書を書いた時点（2026-11-09、`feature/4226-worktree` = develop `55b8192e0` の上）でファイルと行を読んで確かめたもの。**［見立て］** = 設計としての判断。**［未確認］** = 読んでいない・実測していないもの。行番号は確認時点のもので、実装の契約では名前で探し直す
@@ -11,19 +11,19 @@
 
 ### 0.1 止める点（決定済み）
 
-第 1 版の止める点 3 つは、PM の決定（2026-11-09、人が PM の推奨に委任した範囲）で次のとおり決まった。**この版で新たに止める点は無い**（理由は表の下）。
+第 1 版の止める点 3 つは、PM の決定（2026-11-09、人が PM の推奨に委任した範囲）で次のとおり決まった。S3 は第 2 版の「メモリだけ」を、Codex の再確認の P1 を受けた PM の差戻し（同日）で**永続**に改めた。**この版で新たに止める点は無い**（理由は表の下）。
 
 | # | 止める点（第 1 版） | 決定 | この版での作り |
 |---|---|---|---|
 | **S1** | Agent の文脈へ一言を戻すには、既存のフックの設定の生成に「出力を文脈へ返す手」を 1 つ足す必要がある（今の手はどれも何も返さない：中継は応答を捨てる `scripts/hooks/cmate-agent-event.sh:352` の `curl "$@" >/dev/null`） | **採らない** | 文脈へ戻す手を**どのツールにも足さない**。全ツールが §1.1 の「代わり」の行になる：D2 の境界の brief（R1）と、`mem check --suggest` を Agent・skill（H #4228）が呼ぶ（R2）。フックの設定の生成（`hook-settings-generator.ts`・各 `sources/*/hooks-config.ts` 等）は 1 バイトも変えない。§2（導入の操作 `mem hooks`）は作らない。Codex の S1 への指摘（所有判定の識別形・出来事ごとの出力形式・trust の hash・フックの実行順と境界）は「S1 不採用」として処置し、**実測して手を足すときの条件**として §8.2 に残す（PM が追跡 #4289 に写す） |
 | **S2** | `commandmate mem check --suggest` は A の CLI のファイル（`src/cli/commands/mem.ts`）の `check` に旗を足し、`MemExitCode` に 1 つ足す必要がある | **採る**（`MemExitCode.SUGGESTED = 57`） | §3.1 の CLI の契約で、57 を返す経路（`run()` の 1 か所）・足す全部の旗（`--suggest`・`--quiet`・`--hook`・`--instance`）・parser の段の扱いを具体化した。**`service.ts`・`mem-db.ts`・B の評価は変えない** |
-| **S3** | 「同じ状態で 1 回」を再起動の後まで保つには新しい表（migration）が要る | **メモリだけで持つ**（migration を足さない） | §4.2。サーバーのプロセスのメモリの `Map`。**サーバーの再起動の後に 1 回だけ繰り返す**、**容量（1,000 件）を超えて追い出した鍵に戻ったとき 1 回だけ繰り返す**、を既知の制限として書く（§4.5） |
+| **S3** | 「同じ状態で 1 回」を再起動の後まで保つには新しい表（migration）が要る | **永続にする**（第 2 版の「メモリだけ」を差し戻し。メモリの LRU は採らない） | §4.2。migration **v70**（E #4225 = v69、G #4227 は v71 へ入れ替え。マージの順は E → F → G）の表 `suggestion_shown` を、新しいファイル `src/lib/db/suggestion-shown-db.ts`（`mem-*` の名前にしない＝A のファイルにしない）と `src/lib/db/migrations/v70-suggestion-shown.ts` で持つ。鍵は (worktree, instance, code) で、行の寿命（§4.3）を worktree の削除・instance の世代の終わり・規則が当たらなくなったこと・表からの code の削除で決め、**行は (worktree, instance) あたり最大 7**（quiet の code の数）に収まる。再起動・容量で繰り返さない（第 2 版の K1・K2・K4 は無くなった。§4.5） |
 
 止める点が無いと判断した理由：
 
-- **S3 を永続化しないと受入基準に反するか**：受入基準「同じ状態で同じ促しが繰り返されない」に対し、メモリだけの記録は「再起動の後」「追い出しの後」に 1 回だけ繰り返す。Codex の事前レビューはこれを P2（受入基準に反する P1 ではない）とし、繰り返しは 1 回で、規則は状態が変わらない限り増えない（§4.5）。PM の決定の「P1 のときだけ戻す」に当たらないので、既知の制限として書いて進める［見立て］
-- **P1 の 2 件の処置**は、F の新しいファイル（§3.6 の寿命の固定と再確認）と `send.ts` の `--note` の段（§6.2）で済み、A・B・C・D1 のファイルの作り直しは要らない。寿命の比較は D1 の export（`readInstanceLifetime`・`isSameInstanceLifetime`、`src/lib/db/session-brief-db.ts:174`・`:201`）、mode の読み直しは A の export（`decideRootMode`、`src/lib/db/mem-db.ts:254`）を呼ぶだけ
-- **D1〜D13 と違う作りは要らない**。A・B・C・D1 のファイル（`src/lib/mem/**`・`src/lib/db/mem-*.ts`・`src/lib/brief/**`・`src/lib/session/brief-provider.ts`・`session-brief.ts`・`src/lib/db/session-brief-db.ts`）は、S2 の `mem.ts` の変更（§3.1）と `MemExitCode` の 1 行のほかは変えない。D2（#4224）・E（#4225）の worktree とファイルには触らない
+- **S3 は永続で受入基準を満たす**：第 2 版はメモリの LRU（1,000 件）で「再起動・追い出しの後に 1 回だけ繰り返す」を既知の制限にしたが、Codex の再確認が「1,001 鍵を同じ順で回すと毎周すべて再通知」「再起動でも再通知」を受入基準「同じ状態で同じ促しが繰り返されない」に反する P1 とし、PM が永続に差し戻した。この版は表 `suggestion_shown`（v70）に持ち、I-F2 に「1,001 鍵を 3 周」「再起動の後」の試験を置く（§4・§7.3）。**A のファイルは変えない**：新しい表は新しいファイル（`suggestion-shown-db.ts`・`v70-*.ts`）で、migration の登録（`src/lib/db/migrations/index.ts`・`runner.ts` の `CURRENT_SCHEMA_VERSION`）は D1（v68）・E（v69）と同じ足し方。行の worktree の改名・削除の追従は既存の `getWorktreeChildTables`（`worktree_id` の列を持つ表を動的に拾う：`src/lib/db/migrations/worktree-child-tables.ts:47`［事実］）に任せ、改名・削除の関数を変えない
+- **P1 の処置**（第 2 版の 2 件と、再確認の残り 2 件）は、F の新しいファイル（§3.6 の寿命の固定・`memList` の前の照合・再確認）と `send.ts` の `--note` の段（§6.2）で済み、A・B・C・D1 のファイルの作り直しは要らない。寿命の比較は D1 の export（`readInstanceLifetime`・`isSameInstanceLifetime`、`src/lib/db/session-brief-db.ts:174`・`:201`）、worktree の世代の固定は B の export（`fixMemEvalLifetime`、`src/lib/mem/evaluate.ts:104`）、mode の読み直しは A の export（`decideRootMode`、`src/lib/db/mem-db.ts:254`）、roster は既存の `resolveAgentInstances`（`src/lib/session/agent-instances-resolver.ts:47`）を呼ぶだけ
+- **D1〜D13 と違う作りは要らない**。A・B・C・D1 のファイル（`src/lib/mem/**`・`src/lib/db/mem-*.ts`・`src/lib/brief/**`・`src/lib/session/brief-provider.ts`・`session-brief.ts`・`src/lib/db/session-brief-db.ts`）は、S2 の `mem.ts` の変更（§3.1）と `MemExitCode` の 1 行のほかは変えない。永続の表は D8（新しい常駐・定期の実行を足さない）に当たらない：行を消すのは quiet の書き込みの同じ transaction の中と、worktree の削除の既存の掃除だけ（§4.3）。D2（#4224）・E（#4225）の worktree とファイルには触らない
 
 ### 0.2 D・A・Issue の文面だけでは一意に決まらず、この文書が選んだ解釈
 
@@ -142,7 +142,7 @@ commandmate mem check --suggest --quiet [--hook <event>] [--worktree <id>] [--in
 | quiet の期限（§3.6）を超えた | （期限なし。B の `check` と同じ 10 秒の評価の期限：B §7 G5） | 何も出さない。exit 0 |
 | action の中の旗の誤り（上の表） | exit 2 | **exit 0**、stderr に 1 行 |
 
-- `--quiet` が表示を記録するのは mode `on` かつ `promptOnEvents=true` のときだけ。`off`・`derived` では何も書かない（A §4 の「F：更新の促し」の行のとおり）。記録はメモリだけ（§4.2）で、DB には書かない
+- `--quiet` が表示を記録するのは mode `on` かつ `promptOnEvents=true` のときだけ。`off`・`derived` では表示の記録を書かない（A §4 の「F：更新の促し」の行のとおり）。記録は表 `suggestion_shown`（§4.2、v70）。例外は §3.6 の worktree の世代の固定（`fixMemEvalLifetime` が未発行の世代を作る）で、これは `mem list`・`mem check` も mode を読む前に行う既存の書き込みと同じ（`memList` は `off` を返す前に呼ぶ：`src/lib/mem/service.ts:534`［事実］）
 
 ### 3.2 規則の一覧
 
@@ -156,11 +156,18 @@ commandmate mem check --suggest --quiet [--hook <event>] [--worktree <id>] [--in
 
 そこで F は次の 3 つを材料にする：(a) `listMem` の `MemRecord`（両方の経路。scope は §3.6 で固定した target の 4 つの欄 `storageRepositoryId`・`readRepositoryIds`・branch・worktreeId から作る。`service.ts:163-170` の `scopeOf` と同じ欄）、(b) `full=true` のときだけ `memList` の `conditions`、(c) 閉じた項目の所有者と版は `getMemRecord`（`mem-db.ts:651`）で ID から引き直す。
 
+**(b) を (a)・(c) に結ぶときの版の確かめ（再確認の P2 の処置）**［事実］：`memList` の `conditions` は ID → 結果だけで、評価した版を持たない（`conditionsById`、`service.ts:584-588`）。B は `memList` の中の await（target の解決）の**後**に候補を読み（`candidatesOf`、`evaluate.ts:160`）、decision の `unreflected` は版を確かめずに付ける（`evaluate.ts:443`）。そのため、照会中に decision の v1 が v2 に更新されると、v1 の結果が v2 に付きうる。F は次で結ぶ：
+
+- **前の写し**：§3.6 の「`memList` の前の照合」と同じ同期の区間で、`memList` を呼ぶ直前に (a) を読み、候補の項目ごとに `{ version, closeWhen, state }` を控える
+- **後の写し**：`memList` が返った後、§3.6 の再確認と同じ同期の区間で (a)・(c) を読み直す
+- **使ってよい結果**：`closed:false` の結果（`unreflected`・`ref_unknown` の材料）は、前と後の写しで `version`・`closeWhen`・`state` が全部同じ項目だけ。版は増える一方（更新は `version = version + 1`：`mem-db.ts:905`・`:947`・`:1079`［事実］）なので、前と後が同じなら、その間に B が読んだ版も同じ。`closed:true` の結果（`now_condition_met` の材料）は、B の close が版の一致を条件に書く（`closeMemItemByCondition` の `WHERE id = ? AND version = ?`、`mem-db.ts:1079`）ので、後の記録が `closed` で `version` が前の写しの `version + 1` のときだけ使う
+- 合わない項目の結果は使わず、`--json` の `skipped` に `{ code, reason: 'version_changed', itemId }` を出す（促さない）。古さだけで決まる規則（`decision_unreflected` の古さ・`manual_stale` 等）は後の写しの (a) で決める
+
 | code | 意味 | 判定の材料 | quiet | `unavailable` になるとき（促さず `skipped` に理由を出す） | 指紋（§4.1）に入れるもの |
 |---|---|---|---|---|---|
-| `now_missing` | 呼び手の instance に `now` が無い | (a) の `now` に呼び手の (worktree, instance) の行が無い。roster に居る instance だけ（`resolveAgentInstances`、C の S1）。`full=true` で同じ回に `now_condition_met` が出たら出さない | ○ | 呼び手の instance が分からない（`no_instance`） | code・instance・「無い」 |
+| `now_missing` | 呼び手の instance に `now` が無い | (a) の `now` に呼び手の (worktree, instance) の行が無い。roster に居る instance だけ（`resolveAgentInstances`、C の S1。物理の roster の行が無い worktree では `selectedAgents` から導いた primary も roster に居る：`agent-instances-resolver.ts:52-59`［事実］）。`full=true` で同じ回に `now_condition_met` が出たら出さない | ○ | 呼び手の instance が分からない（`no_instance`） | code・instance・「無い」 |
 | `now_stale` | 呼び手の `now` が古い | `memItemStaleness`（`src/lib/mem/staleness.ts:22-34`、`now` は 1 日）が `stale` | ○ | 同上 | `now` の item ID・`version` |
-| `now_condition_met` | 呼び手の `now` の条件が成立して閉じた | (b) の `conditions[id]` が `result:'met'` かつ `closed:true` で、(c) の記録の kind が `now`、`owner.worktreeId` が呼び手の worktree、`owner.instanceId` が呼び手の instance、`owner.incarnation` が §3.6 で固定した instance の世代と同じ。**版の競合で閉じなかった**（`closeMemItemByCondition` が null → `closed:false`）ものは当てない（枠に残り、`now_stale` 等で見る） | ×（評価が要る） | quiet（`quiet_no_query`）／(c) が引けない（`record_gone`） | item ID・閉じた後の `version`・`met` |
+| `now_condition_met` | 呼び手の `now` の条件が成立して閉じた | (b) の `conditions[id]` が `result:'met'` かつ `closed:true` で、(c) の記録の kind が `now`、`owner.instanceId` が呼び手の instance、`owner.incarnation` が §3.6 で固定した instance の世代と同じ（A の所有の判定 `ownedBy` と同じ 2 つ。`owner.worktreeId` は書いた時点の ID で改名の後も旧い ID のまま残るので見ない：`mem-db.ts:856-863`［事実］。instance の世代は (worktree, instance) ごとの行で、改名で新しい ID へ移るので、同じ instance ID の別の worktree の項目はこれで外れる）。上の「版の確かめ」に合うものだけ。**版の競合で閉じなかった**（`closeMemItemByCondition` が null → `closed:false`）ものは当てない（枠に残り、`now_stale` 等で見る） | ×（評価が要る） | quiet（`quiet_no_query`）／(c) が引けない（`record_gone`） | item ID・閉じた後の `version`・`met` |
 | `decision_unreflected` | decision が未反映のまま古い | `state` が `open`・`recorded` で `memItemStaleness` が `stale`（decision は 14 日、A §8.2）。`full=true` ではさらに (b) の `unreflected:true`（`evaluate.ts:443`、B §5） | ○（古さだけ） | — | item ID・`version`・`state` |
 | `manual_stale` | 閉じる条件が `manual` の open 項目が古い | `memItemStaleness` が `stale` で kind が `next`・`external`・`note`（`manual` を受ける kind、A §2.3） | ○ | — | item ID・`version` |
 | `open_count` | open の件数が警告の数に達した | `full=true`：`memList` の `warnings` の `open_count`。quiet：A の export `countOpenItems`（`mem-db.ts:607`）と `MEM_OPEN_LIMITS[kind].warn`（`mem-db.ts:284-290`）を `>=` で比べる（`openWarnings` と同じ 1 式。境界の試験で両方の答えが一致することを固定する：§7.3 の I-F10） | ○ | — | kind・件数の段（10 件刻み） |
@@ -168,7 +175,7 @@ commandmate mem check --suggest --quiet [--hook <event>] [--worktree <id>] [--in
 | `evidence_missing` | `evidence` の `path:` が今は無い | (a) の `evidence` の `path:` を worktree の root から `lstat`（A §6.2 と同じ連鎖。symlink は「無い」扱い） | ○（ファイルの `lstat` だけ） | 項目が `withheld`（`withheld`：秘密らしいと判定された欄の値でファイルを触らない） | item ID・`version`・欠けた参照の数 |
 | `decision_no_destination` | decision に記録の行き先が無い | (a) の `state='open'` の decision の `promoteTo` が `null`（表示の形でなく `MemRecord` を見るので、`withheld` で `promoteTo` が落ちた項目を「行き先なし」と誤って読まない。値は使わず `null` かだけ見る） | ○ | — | item ID・`version` |
 
-- 対象の範囲：`now_*` は呼び手の (worktree, instance) の枠だけ（他のセッションの `now` に促しを出さない、D6。**同じ instance ID の別の worktree の枠は当てない**）。他の規則は呼び手のブランチの項目のうち、**呼び手が作成者の項目**（`owner.worktreeId`・`owner.instanceId`・`owner.incarnation` が呼び手と同じ）と、作成者の無い（人・サーバの）項目［見立て：他の Agent の項目は、その Agent に促す］
+- 対象の範囲：`now_*` は呼び手の (worktree, instance) の枠だけ（他のセッションの `now` に促しを出さない、D6。**同じ instance ID の別の worktree の枠は当てない**）。他の規則は呼び手のブランチの項目のうち、**呼び手が作成者の項目**（A の所有の判定と同じ：`owner.instanceId` が呼び手の instance で、`owner.incarnation` が §3.6 で固定した呼び手の instance の世代と同じ。`owner.worktreeId` は見ない＝改名の後も自分の項目が外れない。再確認の P2 の処置）と、作成者の無い（人・サーバの）項目［見立て：他の Agent の項目は、その Agent に促す］。instance の世代が無い呼び手（mem に一度も書いていない primary）には自分の項目が無いので、作成者の無い項目だけが対象
 - `unavailable` は促しではない：テキストでは出さず、`--json` の `skipped` に `{ code, reason }` で出す。exit を 57 にしない。欠けた材料を「未設定」と読んで促すことはしない
 - 規則の表は `src/lib/mem-suggest/rules.ts` の 1 つの配列に置き、テキスト・`--json`・`--quiet`・試験が同じ表を読む
 
@@ -224,22 +231,31 @@ Codex の指摘［事実］：`memList` は評価の await の後、最初に解
 
 | 固定するもの | 読み方（呼ぶ export） |
 |---|---|
-| instance の寿命 `L0` | D1 の `readInstanceLifetime(db, worktreeId, instanceId)`（`session-brief-db.ts:174`）。`cliToolId` は roster の行か `L0.incarnationToolId` |
-| worktree の世代 `W0` | A の `getWorktreeIncarnation`（`src/lib/mem/incarnation.ts:137`）。`full=true` では B の `fixMemEvalLifetime`（`evaluate.ts:104`）を `memList` が中で呼ぶので、その値と同じになる |
+| 呼び手の instance の所属 | worktree の行（`getWorktreeById`）と、その `selectedAgents` で解いた roster（`resolveAgentInstances(db, worktreeId, worktree.selectedAgents)`、`agent-instances-resolver.ts:47`）。**物理の roster の行が無い worktree で導いた primary も所属に入る**（再確認の P2 の処置）。`cliToolId` は roster の要素の `cliToolId` |
+| instance の寿命 `L0` | D1 の `readInstanceLifetime(db, worktreeId, instanceId)`（`session-brief-db.ts:174`）。所属とは別に、寿命の比較にだけ使う（導いた primary は `incarnation: null`・`onRoster: false` で、それでよい） |
+| worktree の世代 `W0` | **両方の経路で** B の `fixMemEvalLifetime(db, spec)`（`evaluate.ts:104`。未発行なら作る `getOrCreateWorktreeIncarnation`）の `incarnation`。第 2 版の `getWorktreeIncarnation`（未発行なら `null`）は、`memList` が中で世代を作ると `null !== 新しい UUID` で初回の full を「寿命が変わった」と誤るので改めた（再確認の P2 の処置）。`memList` を含む評価の全入口が同じ関数で固定する（B の注、`evaluate.ts:99-103`） |
 | 会話の境界 `B0` | D1 の `getCurrentBoundary(db, worktreeId, instanceId)?.id ?? null`（`session-brief-db.ts:139`） |
 | 始めた時刻 `t0` | `deps.now()`（quiet の期限に使う） |
 
-**所属（await を 1 回）**：A の `withMemTarget` で target `T0`（`members`・branch・mode・`features`）を得る。`full=true` ではさらに `memList` を await する。
+**所属（await を 1 回）**：A の `withMemTarget` で target `T0`（`members`・branch・mode・`features`）を得る。
+
+**`memList` の前の照合（`full=true` だけ。再確認の P1 の処置）**［事実］：`memList` は呼ばれた時点で worktree の世代を固定し直し（`fixMemEvalLifetime`、`service.ts:534`）、その値で評価して閉じる。F の所属の await の間に同じ ID・同じ path で worktree が削除・再作成されると、`memList` は新しい世代を固定して新しい世代の成立した項目を閉じ、F は最後に `W0` との不一致で出力だけを捨てる（閉じた項目は戻らない）。所属の判定の署名は path・repositoryPath で世代を含まない（`src/lib/agent-roles/resolve.ts:305`）ので、所属の確認では気づけない。そこで F は、`withMemTarget` の await の後、**1 つの同期の区間で**次を行い、その区間の最後で `memList(...)` を呼ぶ（`memList` の最初の await＝target の解決より前の部分は同じ同期の区間で走る）：
+
+1. 下の再確認の 1〜3（`getWorktreeIncarnation(db, worktreeId) === W0`・instance の寿命・mode と `promptOnEvents`）。どれかが違えば `memList` を**呼ばずに**捨てる（出力・記録ゼロ、`discarded`）
+2. §3.2 の「前の写し」を読む
+3. `memList` を呼ぶ。`memList` の中の `fixMemEvalLifetime` は、1 で `W0` と同じと確かめた行を返す（`getOrCreateWorktreeIncarnation` は在る行をそのまま返す：`incarnation.ts:145-153`）ので、**評価が使う固定値は `W0` と一致する**
+
+`memList` の中の await（target の解決・照会）の間に削除・再作成が起きた場合は、B の close が閉じる直前に固定値の世代が生きているかを確かめて断る（`aliveOf`、`evaluate.ts:113-119`［事実］）ので、新しい世代の項目は閉じない。F はその後の再確認で捨てる。
 
 **再確認（出力を組み立てる直前と、表示を記録する直前。両方を 1 つの同期の区間で行い、その間に await を挟まない）**：
 
-1. worktree が在り、`getWorktreeIncarnation` が `W0` と同じ
-2. `isSameInstanceLifetime(L0, readInstanceLifetime(...), cliToolId)`（`session-brief-db.ts:201`）が true。**正当な `null → lazy` の世代の発行**（mem の最初の書き込みで世代が出来た）はこの関数が同じ寿命と答える
+1. worktree が在り、`getWorktreeIncarnation(db, worktreeId)`（作らない読み）が `W0` と同じ
+2. 呼び手の instance が今も所属（固定の表の roster）に居て、`isSameInstanceLifetime(L0, readInstanceLifetime(...), cliToolId)`（`session-brief-db.ts:201`）が true。**正当な `null → lazy` の世代の発行**（mem の最初の書き込みで世代が出来た）はこの関数が同じ寿命と答える
 3. `T0.members` のそれぞれについて `decideRootMode(db, root.id, T0.branch)`（A の同期の export）を読み直し、mode が `on`、`features.promptOnEvents` が `true`（`T0` と同じ）
-4. `full=true`：`memList` の応答の `branch` と `mode` が `T0` と同じ
+4. `full=true`：`memList` の応答の `branch` と `mode` が `T0` と同じ。§3.2 の「後の写し」を読む
 5. quiet：`getCurrentBoundary` が `B0` と同じ、`deps.now() - t0` が**サーバの期限 3 秒**以内
 
-どれかが違えば、**出力も記録もゼロ**（§3.1 の「要求の途中で…変わった」の行）。Node のサーバは 1 つのプロセスで、記録（§4.2）は同じプロセスのメモリなので、同期の区間の中の再確認と記録の間に他の要求は割り込まない［事実：記録は DB でなくメモリで、transaction は要らない］。
+どれかが違えば、**出力も記録もゼロ**（§3.1 の「要求の途中で…変わった」の行）。表示の記録（§4.2）は表 `suggestion_shown` への書き込みで、better-sqlite3 の同期の `db.transaction` で行う。Node のサーバは 1 つのプロセスで、再確認・記録の読み・記録の書き込みを 1 つの同期の区間に置くので、その間に同じプロセスの他の要求は割り込まない［事実：better-sqlite3 の呼び出しは同期で await を挟まない］。表に書くのはサーバのプロセスだけ（CLI は route を呼ぶだけ）。
 
 **quiet の期限（P2 の処置）**：
 
@@ -247,12 +263,12 @@ Codex の指摘［事実］：`memList` は評価の await の後、最初に解
 - 期限：CLI は `client.withDeadline(Date.now() + 4000)`（`src/cli/utils/api-client.ts:170`、既存）で要求全体を 4 秒で切り、超えたら何も出さず exit 0。サーバは上の 5 の「3 秒」を過ぎたら記録しない。サーバの期限を CLI より短くするのは、**CLI が諦めた後にサーバが記録して促しが一度も見えない**（応答の消失）を減らすため。残る隙間（サーバが記録した後、応答が CLI に届く前に切れる）は既知の制限（§4.5）
 - 期限はタイマーで作らない（`setTimeout` を足さない。I-F4）。サーバは時刻の差を比べ、CLI は既存の `withDeadline` を使う
 
-**直接の route の呼び出し**：route は CLI の身元の検査を当てにしない。`instanceId` が roster に居るか、その worktree に instance の世代の行がある（`L0.onRoster || L0.incarnation !== null`）ときだけ `now_*` を当て、quiet の記録をする。無ければ quiet は何もしない（200、`suggestions: []`）。OS の権限を持つプロセスが API を直接呼べば他の instance の記録を消費できる（A の説明「The author check stops mistakes, not intent」と同じ）ことは、説明に書く。
+**直接の route の呼び出し**：route は CLI の身元の検査を当てにしない。`instanceId` が**解いた roster**（固定の表の `resolveAgentInstances`。導いた primary を含む）に居るか、その worktree に instance の世代の行がある（`L0.incarnation !== null`）ときだけ `now_*` を当て、quiet の記録をする。無ければ（任意の未知の ID）quiet は何もしない（200、`suggestions: []`）。第 2 版の「物理の roster の行（`L0.onRoster`）か世代の行」は、mem を使っていない正当な primary（導いた primary）を両方とも持たないので断っていた（再確認の P2）。所属の確認（解いた roster）と寿命の比較（`L0`）を分けて直した。OS の権限を持つプロセスが API を直接呼べば他の instance の記録を消費できる（A の説明「The author check stops mistakes, not intent」と同じ）ことは、説明に書く。
 
 ### 3.7 F の lib が呼ぶもの・変えないもの
 
-- 呼ぶ（export を呼ぶだけ）：A の `withMemTarget`・`memList`・`listMem`・`getMemRecord`・`countOpenItems`・`MEM_OPEN_LIMITS`・`decideRootMode`・`presentMemItem`・`memItemStaleness`・`getWorktreeIncarnation`・`getInstanceIncarnation`（`src/lib/mem/incarnation.ts:24`）、B の評価の結果（`memList` の `conditions`）、D1 の `getCurrentBoundary`・`readInstanceLifetime`・`isSameInstanceLifetime`
-- 変えない：`src/lib/mem/**`・`src/lib/db/mem-*.ts`・`src/lib/brief/**`・`brief-provider.ts`・`session-brief.ts`・`session-brief-db.ts`。**brief に行を足さない**（§1.2 の R1）。フックの設定の生成（S1 不採用）
+- 呼ぶ（export を呼ぶだけ）：A の `withMemTarget`・`memList`・`listMem`・`getMemRecord`・`countOpenItems`・`MEM_OPEN_LIMITS`・`decideRootMode`・`presentMemItem`・`memItemStaleness`・`getWorktreeIncarnation`・`getInstanceIncarnation`（`src/lib/mem/incarnation.ts:24`）・`instanceIncarnationAlive`（`incarnation.ts:128`）、B の `fixMemEvalLifetime` と評価の結果（`memList` の `conditions`）、D1 の `getCurrentBoundary`・`readInstanceLifetime`・`isSameInstanceLifetime`、既存の `getWorktreeById`・`resolveAgentInstances`。F の表は F の `suggestion-shown-db.ts`（§4.2）だけが読み書きする
+- 変えない：`src/lib/mem/**`・`src/lib/db/mem-*.ts`・`src/lib/brief/**`・`brief-provider.ts`・`session-brief.ts`・`session-brief-db.ts`・`agent-instances-resolver.ts`・`worktree-child-tables.ts`・`worktree-id-rename.ts`・`worktree-db.ts`。**brief に行を足さない**（§1.2 の R1）。フックの設定の生成（S1 不採用）
 - E と共有（§5.2）：E が decision の未反映の判定を関数として export したら、`decision_unreflected` はそれを呼ぶ。E がマージされるまでは A の `memItemStaleness` と B の `unreflected` で決める
 
 ---
@@ -261,49 +277,72 @@ Codex の指摘［事実］：`memList` は評価の await の後、最初に解
 
 ### 4.1 状態の指紋と、記録の鍵
 
-- 記録の鍵：**(worktree, instance, repository, branch, code)**
-  - repository：§3.6 の `T0.storageRepositoryId`。branch：`T0` のブランチ（detached は `null`）。**Codex の指摘の処置**：worktree の ID の改名（`renameWorktreeIdPreservingChildren`、`src/lib/db/migrations/worktree-id-rename.ts:132`）は子の行を引き継ぎ、同じディレクトリでのブランチの切り替えでも世代・境界が同じことがある。鍵にブランチと repository が無いと、前のブランチで出した `now_missing`（材料がほぼ定数）の記録で新しいブランチの促しを抑えてしまう。鍵に入れれば、ブランチが変われば別の鍵で 1 回出る。前のブランチに戻ったときは前の鍵が残っていれば出ない（同じ状態）
-- 鍵の値：**(instance の世代, 会話の境界, 指紋)**。どれかが今と違えば「未表示」と読み、出したら値を置き換える
-  - instance の世代：A の `getInstanceIncarnation`（D5：ID の再利用で前の作業の記録を引き継がない）
+- 記録の鍵：**(worktree, instance, code)**（表の主キー）
+- 鍵の値：**(instance の世代, 会話の境界, 範囲, 指紋)**。どれかが今と違えば「未表示」と読み、出したら値を置き換える
+  - instance の世代：A の `getInstanceIncarnation`（D5：ID の再利用で前の作業の記録を引き継がない）。世代の無い instance（導いた primary）は `null`
   - 会話の境界：§3.6 の `B0`。境界を検出しないツールでは `null`（その instance の世代の間で 1 回）。新しい会話には前の会話の促しが見えていないので、境界が変われば同じ状態でも 1 回出す［見立て］
+  - **範囲**：`sha256(JSON.stringify([T0.storageRepositoryId, T0 のブランチ（detached は null）]))`。第 2 版は repository・ブランチを**鍵**に入れたが、鍵に入れると切り替えたブランチの数だけ行が増え、行の寿命を決められない（PM の条件「無限に増えない形」）。**値**に入れても、Codex の 1 回目の指摘（前のブランチで出した記録で新しいブランチの促しを抑える）は閉じる：ブランチが変われば範囲が違うので 1 回出る。ブランチ名を表に残さないよう、hash にする（自由入力に近い文字列を F の表に置かない。D12）
 - 指紋：`sha256(JSON.stringify([code, 規則ごとの材料]))`。材料は §3.2 の「指紋に入れるもの」を ID の順に並べた配列。**時刻を入れない**（`stale` に変わった瞬間に 1 回出て、更新されるまで同じ指紋）。項目を更新すれば `version` が変わり、まだ当たれば新しい指紋でもう 1 回出る
 - `--quiet` が 1 回の呼び出しで出す 1 行は、新しい値を持つ code をまとめたもの。記録するのは出した code の分だけ
+- 前のブランチに戻ると、直前に記録したのは別のブランチの範囲なので 1 回出る。直前に呼び手が見た促しは別のブランチの状態で、同じ状態の繰り返しではない［見立て］
 
-### 4.2 保存先（S3：メモリだけ）
+### 4.2 保存先（S3：永続。migration v70）
 
-- `src/lib/mem-suggest/shown-memory.ts` の、モジュールの 1 つの `Map<string, { incarnation: string | null; boundaryId: string | null; fingerprint: string }>`。鍵は §4.1 の 5 つを `JSON.stringify` した文字列
-- **上限 1,000 件、最近使った順（LRU）**：値を読んで「表示済み」と答えたとき・書いたときに、その鍵を `delete` して `set` し直す（`Map` の挿入順を最近使った順にする）。書いて 1,000 件を超えたら、挿入順の先頭（最も長く使っていない鍵）から捨てる
-- 書くのは quiet の route の、§3.6 の再確認と同じ同期の区間だけ（mode `on`・`promptOnEvents=true` を読み直した直後）。DB にも migration にも書かない
-- 試験はモジュールの `resetShownMemoryForTest()`（試験だけが呼ぶ export）で空にする。サーバの再起動はモジュールの再読み込み（`vi.resetModules()`）で表す
+```sql
+-- src/lib/db/migrations/v70-suggestion-shown.ts（CURRENT_SCHEMA_VERSION = 70）
+CREATE TABLE suggestion_shown (
+  worktree_id TEXT NOT NULL REFERENCES worktrees(id) ON DELETE CASCADE,
+  instance_id TEXT NOT NULL,
+  code TEXT NOT NULL,
+  instance_incarnation TEXT,
+  boundary_id TEXT,
+  scope_hash TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  shown_at INTEGER NOT NULL,
+  PRIMARY KEY (worktree_id, instance_id, code)
+);
+```
 
-### 4.3 寿命と消える条件
+- **番号**：v70（PM の決定。E #4225 が v69＝`v69-mem-promote.ts`［事実：E の設計 §6.1］、G #4227 は v71 に入れ替え）。マージの順は E → F → G。runner は今の版より上の版を全部当てる（v68 の注、`v68-session-brief-boundaries.ts:15-17`［事実］）ので、v69 が先に入っていても入っていなくても v70 に届く。`CURRENT_SCHEMA_VERSION`（`runner.ts:34`、今は 68［事実］）は E のマージの後の F の実装の契約で 70 にする
+- **名前**：表は `suggestion_shown`、ファイルは `src/lib/db/suggestion-shown-db.ts`。`mem_` で始めない（PM の条件。A のファイルにしない。E の設計 §11 の I7 のとおり、v66 の試験は「`mem_%` の表が 0」を見るので、`mem_` で始めると v66 より前へ戻す試験に `down` を足す必要が出る）。v66 より前へ戻す既存の試験が上の版の `down` を順に呼ぶ形なら、v70 の `down`（`DROP TABLE IF EXISTS suggestion_shown`）を足すかを実装の契約で `git grep -n "v69_migrations\|v68_migrations" -- tests` で確かめる
+- **`worktree_id` の列**：`getWorktreeChildTables`（`worktree-child-tables.ts:47`）は `worktree_id` の列を持つ表を動的に拾い、worktree の ID の改名（`renameWorktreeIdPreservingChildren`、`worktree-id-rename.ts:132`）は子の行を新しい ID へ移し、削除は子の行を消す（`deleteWorktreeChildRows`、`worktree-id-rename.ts:84`）［事実］。F の表もこれに乗るので、**改名で記録が移り（第 2 版の K4 は無くなる）、削除で消える**。改名・削除の関数は変えない
+- **本文を持たない**：列は ID・code・世代・境界の ID・hash・時刻だけ。項目の本文・ブランチ名・`--note` の文は置かない
+- **関数**（全部同期。`suggestion-shown-db.ts`）：`readShown(db, worktreeId, instanceId): Map<code, ShownRow>`、`settleShown(db, { worktreeId, instanceId, write: ShownRow[], clear: code[], rosterInstanceIds, knownCodes })`（下の §4.3 の消す処理と書き込みを 1 つの `db.transaction` で行う）
+- 書くのは quiet の route の、§3.6 の再確認と同じ同期の区間だけ（mode `on`・`promptOnEvents=true` を読み直した直後）。`full=true`（明示の `--suggest`）は読むだけ（`shown` の欄）
+- 試験は `os.tmpdir()` 配下の DB（migration を全部当てた SQLite）で行う。**テスト・verify の前に必ず `export CM_DB_PATH=$PWD/data/test.db`**（本番 DB を v70 に上げない。11-01 に worker のテストが本番 DB を v63 に上げた件）。サーバの再起動は同じ DB のファイルを開き直すこと（モジュールの再読み込み `vi.resetModules()` と DB の接続の作り直し）で表す
 
-| 条件 | 起きること |
-|---|---|
-| 同じ鍵の指紋・世代・境界が変わった | 次の `--quiet` で出し、値を置き換える |
-| ブランチ・repository が変わった | 別の鍵になり、次の `--quiet` で 1 回出る |
-| roster から instance が消えた・worktree の削除・ID の改名 | 古い鍵は使われなくなり、LRU で順に捨てられる（消す処理を足さない） |
-| 規則の表から code が消えた（版の更新） | 同上 |
-| mode が `off`・`derived` になった | 記録は残す（何も書かない・何も評価しない、A §4）。`on` に戻って指紋が同じなら、出さない［見立て：off の間に状態が変わっていなければ、同じ促しになる］ |
-| サーバの再起動 | 全部消える（§4.5） |
+### 4.3 行の寿命（いつ消すか）
 
-- 新しい定期の実行・タイマー・常駐の見張りを足さない（D8・D13）。捨てるのはすべて次の書き込みの同じ同期の区間の中
+| 条件 | 起きること | 消す場所 |
+|---|---|---|
+| 同じ鍵の世代・境界・範囲・指紋が変わった | 次の `--quiet` で出し、値を置き換える（行は増えない） | quiet の書き込み（`INSERT … ON CONFLICT … DO UPDATE`） |
+| **規則が当たらなくなった**（quiet が評価した code のうち、`unavailable` でなく「当たらない」と決まったもの） | その (worktree, instance, code) の行を消す。状態が戻ってまた当たれば 1 回出る（状態が変わったので繰り返しではない） | 同じ transaction |
+| **規則の表から code が消えた**（版の更新） | その (worktree, instance) の、表に無い code の行を消す | 同じ transaction |
+| **roster から instance が消えた**（instance の削除） | 書き込む worktree の行のうち、instance が解いた roster（§3.6）に居ず、かつ `instance_incarnation` が生きていない（`instanceIncarnationAlive` が false、または `null`）ものを消す | 同じ worktree への次の quiet の transaction |
+| instance の削除と再追加（ID の再利用） | 世代が違うので未表示と読み、出して置き換える（D5） | quiet の書き込み |
+| **worktree の削除** | 子の行として消える（`ON DELETE CASCADE` と `deleteWorktreeChildRows`） | 既存の削除 |
+| worktree の ID の改名 | 子の行として新しい ID へ移る（同じ状態なら出ない） | 既存の改名 |
+| ブランチ・repository が変わった | 範囲が違うので 1 回出て、値を置き換える（行は増えない） | quiet の書き込み |
+| mode が `off`・`derived` になった | 記録は残す（何も書かない・何も評価しない、A §4）。`on` に戻って値が同じなら出さない［見立て：off の間に状態が変わっていなければ、同じ促しになる］ | — |
+| サーバの再起動 | **何も消えない**（DB の表）。再起動の後も同じ状態なら出ない | — |
+
+**行の数の上限**：主キーが (worktree, instance, code) で、code は quiet の規則の 7 つ（`now_missing`・`now_stale`・`decision_unreflected`・`manual_stale`・`open_count`・`evidence_missing`・`decision_no_destination`）だけなので、行は **(worktree, instance) あたり最大 7**。worktree の行は worktree の削除で消え、instance の行は roster から消えた後の同じ worktree への次の quiet で消える。残るのは「roster から消えた後、その worktree で一度も quiet が呼ばれていない instance」の行だけで、その数は worktree の roster が持ったことのある instance の数で抑えられ、worktree の削除で消える。時刻（期限）で消すことはしない（期限で消すと、期限の後に同じ状態で繰り返す）。
+
+- 新しい定期の実行・タイマー・常駐の見張りを足さない（D8・D13）。消すのはすべて quiet の書き込みの同じ transaction の中と、既存の worktree の削除の中
 
 ### 4.4 明示の呼び出しは記録を見ない・quiet は自分の記録だけ
 
 - `--suggest`（`--quiet` なし）は表示済みかを `shown` の欄で出すだけで、出す・出さないを変えず、記録も書かない。人や Agent が自分で聞いたときは、今の状態を全部答える
 - quiet が読む・書く記録は、呼び手の身元の (worktree, instance) の鍵だけ（§3.1 の旗の表、§3.6 の直接の route）
 
-### 4.5 既知の制限（S3 をメモリだけにしたことによる）
+### 4.5 既知の制限
 
 | # | 制限 | 起きること | 採った理由 |
 |---|---|---|---|
-| K1 | **サーバの再起動の後に 1 回だけ繰り返す** | 再起動の前に出した促しを、再起動の後の最初の quiet でもう 1 回出す。その後は同じ状態なら出ない | PM の決定（S3）：繰り返しは 1 回で害が小さい。migration を増やすと本番 DB の版の事故の面が増える（11-01 の v63 の件） |
-| K2 | **容量を超えて捨てた鍵に戻ったとき 1 回だけ繰り返す** | 1,000 件を超えて LRU で捨てた鍵の (worktree, instance, ブランチ, code) で次に quiet が呼ばれると、同じ状態でも 1 回出す | 捨てない形（上限なし）は、ブランチ・instance の数だけメモリが増え続ける。新しい鍵を記録しない形（上限で止める）は、新しい状態の促しを出せなくなるか毎回出すことになり、繰り返しより悪い。鍵は 1 (worktree, instance, ブランチ) あたり最大 9 つで、1,000 件は約 110 の組。同時に動く instance とブランチの数はこれより十分小さい［見立て］ので、追い出しは長く使わなかった鍵に限られる |
 | K3 | **応答が CLI に届く前に切れたとき、その促しは出ない** | サーバが記録した後、応答が CLI の 4 秒の期限に間に合わないと、記録済みで stdout に出ない。同じ状態の間は次も出ない | サーバの期限（3 秒）を CLI（4 秒）より短くして、狭くした。状態が変われば（項目の更新・会話の境界）また出る。繰り返さない側に倒す（受入基準） |
-| K4 | ID の改名の後に 1 回だけ繰り返す | 鍵に worktree の ID を入れるので、改名の後は別の鍵になる | ブランチが同じ単なる改名は稀（同じディレクトリのブランチの切り替えは鍵のブランチも変わる）。鍵から worktree を外すと、別の worktree の同じ instance ID の記録が混ざる |
+| K5 | roster から消えた instance の行は、その worktree で次に quiet が呼ばれるか worktree が削除されるまで残る | 行は (worktree, instance) あたり最大 7 で、増え続けない | 消すために定期の実行を足さない（D8） |
 
-説明（`docs/user-guide/cli-operations-guide.md` と `docs/en/` の対）と試験（§7.3 の I-F2）に K1〜K3 をそのまま書く。
+第 2 版の K1（再起動の後に 1 回繰り返す）・K2（容量を超えて捨てた鍵で 1 回繰り返す）・K4（改名の後に 1 回繰り返す）は、永続の表と改名の追従で**無くなった**（番号は欠番のまま残し、§11 から引けるようにする）。説明（`docs/user-guide/cli-operations-guide.md` と `docs/en/` の対）と試験（§7.3 の I-F2）に K3・K5 をそのまま書く。
 
 ---
 
@@ -349,15 +388,18 @@ commandmate send <worktree-id> "<message>" --instance <id> --reply-to <target> -
 
 第 1 版は mem の書き込みを relay の直後に置き、拒否の後始末を relay の取り下げだけにしていた。**拒否は `postMessage` の前なので既存の送信の失敗の処理（`postMessage` の `onFailure`、`:1082-1095`）にも入らず、task が `pending` のまま、この送信が取った grant も残る**（Codex の指摘）。次の形に改める。
 
-1. （既存）task の行・relay・Auto-Yes の grant を今の順で取る
+1. （既存）task の行・relay・Auto-Yes の grant を今の順で取る。**ただし `--note` の送信で、grant を取る前の読み（`readAutoYes`）が状態を決められなかったら、grant を取らずに止める**（再確認の P1 の処置。下の「Auto-Yes の前の状態が不明なとき」）
 2. **mem に書く（新しい段。`postMessage` の直前、条件つき・条件なしの両方の経路の合流の後に 1 か所）**：既存の `POST /api/worktrees/<送り手の worktree>/mem/items`（A、`mem add` と同じ口）に `{ kind:'waiting', text:<note>, closeWhen:'relay:<id>', evidence:['relay:<id>'], key:'send-note:<relay id>', instanceId:<送り手> }`
    - **断られたら（mode が `on` でない＝50、検査で 2、件数の上限 56、曖昧・未登録 52/53、届かない）：本文を送らない失敗として、既存の 3 つの後始末を全部通す**：
      1. `failTask()`：`--contract` の task を `failed` にする（`pending` で残さない）
-     2. `withdrawAutoYes(true)`：この送信が取った grant を取り下げる。**送信の前から on の grant は保つ**（`priorAutoYes === true` なら何もしない、既存の動き）。`--note` は `--reply-to` を要るので、grant を取る送信では必ず `autoYesTarget` があり、取る前に既存の grant を読んでいる（`:1010-1020`［事実］）。読まずに取った grant を「残す」既存の分岐には入らない
+     2. `withdrawAutoYes(true)`：この送信が取った grant を取り下げる。**送信の前から on の grant は保つ**（`priorAutoYes === true` なら何もしない、既存の動き）。`--note` は `--reply-to` を要るので、grant を取る送信では必ず `autoYesTarget` があり、取る前に既存の grant を読もうとする（`:1012-1018`［事実］）。第 2 版は「読んでいるので残す分岐に入らない」と書いたが、**読みが失敗すると `readAutoYes` は `null` を返し（`:464-475`）、`priorAutoYes` は `null` のまま grant を取り（`:1022`）、`withdrawAutoYes` は `priorAutoYes === null` で取り下げずに警告だけ出して戻る（`:1054-1057`）**［事実。Codex の再確認の P1］。`--note` の送信ではこの組を作らない（下）ので、ここに来るときの `priorAutoYes` は `true`・`false` のどちらか
      3. `cancelRelayQuietly(client, relay.id)`：relay を取り下げる
      
      そのうえで mem の exit code（50・2・56・52・53。`send` の他の exit と重ならないことを実装の契約で `git grep` で確かめる［未確認］）で終わる。stderr に「`--note` を記録できなかったので送らなかった」の 1 行（`--note` の原文は繰り返さない：§6.4）
-   - `--model` で Auto-Yes を送った後に回す経路（`deferAutoYes`、`:982`）は、この段の時点で grant を取っていないので取り下げるものが無い
+   - **Auto-Yes の前の状態が不明なとき（`--note` の送信だけ）**：`armsNow`（`--auto-yes` で、`--model` の後回しでない）で、`priorAutoYes === null`（読みの失敗、または `agent`・`instanceId` が決まらず読めない）なら、**`enableAutoYes` を呼ぶ前に**止める：`failTask()`、relay を先に取った条件つきの経路では `cancelRelayQuietly`、mem に書かず、本文を送らない。stderr に「Auto-Yes の今の状態を読めなかったので、`--note` の送信を止めた」の 1 行と、`--note` を外すか後で送り直す案内。exit は `ExitCode.UNEXPECTED_ERROR`（99。`send` の既存の「サーバの答えが読めない」と同じ扱い［見立て：実装の契約で `send.ts` の他の読めない失敗の exit を名前で確かめて揃える］）
+     - 採らなかった案：`priorAutoYes === null` のとき `onlyIfOff: true` で条件つきに取る。今のサーバは最後の await の後に同期で確かめて断る（`AUTO_YES_ALREADY_ENABLED`、`src/app/api/worktrees/[id]/auto-yes/route.ts:527-541`［事実］）ので既存の grant は守れるが、`onlyIfOff` を知らない古いサーバ（#4132 より前）は旗を無視して既存の grant を上書きし、grant に名前（`grantId`）も無いので取り下げられない（`withdrawArmedAutoYes` の「this server does not name its grants」で残る：`send.ts:526-529`）。状態が不明な送信を止める方が、どのサーバでも grant を残さない
+     - `--note` の無い送信は今のまま（読めなくても送り、失敗のときは警告で残す。I-F6 の陰性対照）
+   - `--model` で Auto-Yes を送った後に回す経路（`deferAutoYes`、`:982`）は、この段の時点で grant を取っていないので取り下げるものが無い（読みもしない）
    - `--role` の保存（`registerInstanceWithRole`、`:947-949`）は既存の他の失敗と同じく保存されたまま（既存の文「Role saved … stays saved if this send goes no further」、`:445`）
    - `key` で再試行が冪等（A §5.4）
 3. 本文を送る（既存の `postMessage`）
@@ -398,15 +440,17 @@ commandmate send <worktree-id> "<message>" --instance <id> --reply-to <target> -
 |---|---|
 | `src/lib/mem-suggest/rules.ts` | §3.2 の規則の表と判定（純関数）。`unavailable` の理由の語も |
 | `src/lib/mem-suggest/fingerprint.ts` | §4.1 |
-| `src/lib/mem-suggest/shown-memory.ts` | §4.2 の LRU の `Map`（上限 1,000）と `resetShownMemoryForTest` |
-| `src/lib/mem-suggest/service.ts` | `memSuggest(db, spec, { full, instanceId, hook }, deps)`。§3.6 の固定・再確認。A・B・D1 の export を呼ぶだけ |
+| `src/lib/db/suggestion-shown-db.ts` | §4.2 の表の読み書き（`readShown`・`settleShown`）と §4.3 の消す処理。全部同期 |
+| `src/lib/db/migrations/v70-suggestion-shown.ts` | §4.2 の表（`up`・`down`） |
+| `src/lib/mem-suggest/service.ts` | `memSuggest(db, spec, { full, instanceId, hook }, deps)`。§3.6 の固定・`memList` の前の照合・再確認と、§3.2 の前と後の写し。A・B・D1 の export と F の表の関数を呼ぶだけ |
 | `src/app/api/worktrees/[id]/mem/suggest/route.ts` | §3.1 の `POST` |
 | `src/types/mem-suggest.ts` | §3.5 |
 | `tests/unit/guards/mem-suggest-no-resident-4226.test.ts` | §7.3 の I-F4 の静的な検査 |
 | `tests/unit/lib/mem-suggest/suggest-invariants.test.ts` | §7.3 の表 |
 | `tests/unit/cli/mem-check-suggest.test.ts` | §3.1 の CLI の契約（実際の commander の parser から） |
+| `tests/unit/db/migration-v70-suggestion-shown-4226.test.ts` | v70 の `up`・`down`、主キー、`getWorktreeChildTables` に拾われること（改名で移り、削除で消える） |
 
-第 1 版にあった `src/lib/db/suggestion-shown-db.ts`・`v70-suggestion-shown.ts`（S3）、`src/lib/hooks/mem-prompt-install.ts`・`src/cli/commands/mem-hooks.ts`（S1）は**作らない**。
+第 1 版にあった `src/lib/hooks/mem-prompt-install.ts`・`src/cli/commands/mem-hooks.ts`（S1）は**作らない**。第 2 版の `src/lib/mem-suggest/shown-memory.ts`（メモリの LRU）は、S3 の差戻しで**作らない**（永続の表に置き換えた）。
 
 ### 7.2 変える既存のファイル
 
@@ -414,14 +458,15 @@ commandmate send <worktree-id> "<message>" --instance <id> --reply-to <target> -
 |---|---|
 | `src/cli/commands/mem.ts` | `run()` の action が数を返せる（§3.1、1 か所）。`check` に `--suggest`・`--quiet`・`--hook [event]`・`--instance <id>` と、`--suggest` があるときだけ新しい route を呼ぶ分岐 1 つ。`MEM_HELP` の exit の表に 57 の 1 行 |
 | `src/cli/types/index.ts` | `MemExitCode.SUGGESTED = 57` |
-| `src/cli/commands/send.ts` | `--note`（§6）。`validateSendArgs` の検査と、`postMessage` の直前の mem の書き込みの段と、その拒否の後始末（既存の `failTask`・`withdrawAutoYes`・`cancelRelayQuietly` を呼ぶ） |
-| `docs/user-guide/cli-operations-guide.md` と `docs/en/` の対 | `mem check --suggest`・`send --note` の節。「意図の書き漏れまでは見つけない」「同じ促しはサーバの再起動・容量の超過の後に 1 回だけ繰り返す（K1〜K3）」「OS の権限で API を直接呼べば記録を消費できる」を書く |
+| `src/lib/db/migrations/index.ts`・`runner.ts` | v70 の登録と `CURRENT_SCHEMA_VERSION = 70`（D1 の v68・E の v69 と同じ足し方）。版を固定する既存の試験は実装の契約で `git grep -n "CURRENT_SCHEMA_VERSION\|toBe(69)" -- tests` で探す |
+| `src/cli/commands/send.ts` | `--note`（§6）。`validateSendArgs` の検査と、Auto-Yes の前の状態が不明なときに grant の前で止める分岐（§6.2）と、`postMessage` の直前の mem の書き込みの段と、その拒否の後始末（既存の `failTask`・`withdrawAutoYes`・`cancelRelayQuietly` を呼ぶ） |
+| `docs/user-guide/cli-operations-guide.md` と `docs/en/` の対 | `mem check --suggest`・`send --note` の節。「意図の書き漏れまでは見つけない」「同じ状態の促しは再起動の後も繰り返さない。応答が届く前に切れた促しは出ないことがある（K3）。消えた instance の記録は次の quiet か worktree の削除で消える（K5）」「OS の権限で API を直接呼べば記録を消費できる」を書く |
 
-**変えないことを試験で固定するもの**：`src/lib/hooks/**` と `scripts/hooks/**`（S1 不採用）、`src/lib/db/migrations/**`（S3）、`src/lib/mem/**`・`src/lib/db/mem-*.ts`・`src/lib/brief/**`・`src/lib/db/session-brief-db.ts`。
+**変えないことを試験で固定するもの**：`src/lib/hooks/**` と `scripts/hooks/**`（S1 不採用）、`src/lib/db/migrations/**` のうち v70 の新しいファイルと登録（`index.ts`・`runner.ts`）のほか（既存の版・`worktree-child-tables.ts`・`worktree-id-rename.ts`）、`src/lib/mem/**`・`src/lib/db/mem-*.ts`・`src/lib/brief/**`・`src/lib/db/session-brief-db.ts`。
 
 ### 7.3 全入口の不変条件の表駆動の試験
 
-入口（行）× 不変条件（列）を 1 つの表にし、同じ関数で当てる。状態は `os.tmpdir()` 配下の `fs.mkdtempSync` に DB（migration を全部当てた SQLite）・worktree の root・フックの設定ファイルを作り、`afterEach` で消す。本物の `~/.claude`・`~/.codex`・`~/.copilot`・`~/.gemini` には書かない（`CM_AGENT_HOOKS_DIR`・`CODEX_HOME` 等を一時ディレクトリへ向ける。`tests/setup.ts` の `CODEX_HOME` の pin と同じ）。
+入口（行）× 不変条件（列）を 1 つの表にし、同じ関数で当てる。状態は `os.tmpdir()` 配下の `fs.mkdtempSync` に DB（migration を全部当てた SQLite。v70 を含む）・worktree の root・フックの設定ファイルを作り、`afterEach` で消す。**テスト・verify の前に必ず `export CM_DB_PATH=$PWD/data/test.db`**（ワーカーの tmux はサーバの `CM_DB_PATH` を継ぐので、書かないと本番 DB を v70 に上げる）。本物の `~/.claude`・`~/.codex`・`~/.copilot`・`~/.gemini` には書かない（`CM_AGENT_HOOKS_DIR`・`CODEX_HOME` 等を一時ディレクトリへ向ける。`tests/setup.ts` の `CODEX_HOME` の pin と同じ）。
 
 **入口**：
 
@@ -432,33 +477,33 @@ commandmate send <worktree-id> "<message>" --instance <id> --reply-to <target> -
 | E-2 | `mem check --suggest --json` |
 | E-3 | `mem check --suggest --quiet`（skill の手順から） |
 | E-4 | `mem check --suggest --quiet --hook <event>` を、身元の無い環境（headless の `codex exec` の形） |
-| E-R | route `POST …/mem/suggest` を CLI を通さず直接（`full=true`・`full=false`。roster に居ない instance・別 worktree の instance を含む） |
+| E-R | route `POST …/mem/suggest` を CLI を通さず直接（`full=true`・`full=false`。roster に居ない任意の未知の ID・別 worktree の instance・**物理の roster の行も世代も無い、`selectedAgents` から導いた primary** を含む） |
 | E-5 | 全ツールのフックの設定の生成物（Claude・Codex・Command Code・Copilot・Antigravity・Gemini）— 変えないことの陰性対照 |
-| E-7 | `send --note`（条件なし・条件つき（`--role`）・`--contract`・`--auto-yes` の既存 on／off・`--model` の後回し・配送の結果 `sent`／`not-sent`／`indeterminate` の組） |
+| E-7 | `send --note`（条件なし・条件つき（`--role`）・`--contract`・`--auto-yes` の前の状態 **on／off／unknown（読みの失敗）** の 3 値・`--model` の後回し・配送の結果 `sent`／`not-sent`／`indeterminate` の組） |
 | E-8 | brief（C の provider と CLI）— F が変えないことの陰性対照 |
 
 **不変条件**：
 
 | # | 不変条件 | 確かめ方 | 陽性対照（壊れた実装で落ちる） | 陰性対照（変わらない動き） |
 |---|---|---|---|---|
-| I-F1 | `off`・`derived` で促さない | E-1〜E-4・E-R で mode `off`・`derived`：stdout 空、E-1・E-2 は exit 50、E-3・E-4 は exit 0。記録の `Map` が増えない。`promptOnEvents=false` の `on` も促しが 0 | mode を見ずに規則を当てる版、`derived` で `listMem` を読んで捨てる版（読みの回数 0 を偽で確かめる） | `on`・`promptOnEvents=true` で古い `now` の状態なら `now_stale` が出る |
-| I-F2 | 同じ状態で 1 回（と既知の制限） | E-3 を同じ状態で 3 回：1 回目だけ 1 行、2・3 回目は空。`now` を更新（`version+1`）して古くした状態で 1 回だけ出る。境界の ID・instance の世代を変えると 1 回出る。**ブランチを変える**と 1 回出て、戻すと出ない。**同じブランチのまま worktree の ID を改名**すると 1 回出る（K4）。**1,000 件の別の鍵の後**は最初の鍵も出ない、**1,001 件目**の後に最初の鍵へ戻ると 1 回だけ出る（K2）。**モジュールの再読み込み（再起動）の後**は 1 回だけ出る（K1） | 記録を書かない版、指紋に時刻を入れる版（2 回目も出る）、鍵に境界を入れない版（新しい会話で出ない）、鍵にブランチを入れない版（ブランチを変えて出ない）、LRU でなく挿入順で捨てる版（使い続けた鍵が捨てられて出る） | E-1 は同じ状態で毎回全部出す（§4.4）。別の instance には別に 1 回 |
+| I-F1 | `off`・`derived` で促さない | E-1〜E-4・E-R で mode `off`・`derived`：stdout 空、E-1・E-2 は exit 50、E-3・E-4 は exit 0。表 `suggestion_shown` の行が増えない。`promptOnEvents=false` の `on` も促しが 0 | mode を見ずに規則を当てる版、`derived` で `listMem` を読んで捨てる版（読みの回数 0 を偽で確かめる） | `on`・`promptOnEvents=true` で古い `now` の状態なら `now_stale` が出る |
+| I-F2 | 同じ状態で 1 回（永続。S3 の差戻し） | E-3 を同じ状態で 3 回：1 回目だけ 1 行、2・3 回目は空。`now` を更新（`version+1`）して古くした状態で 1 回だけ出る。境界の ID・instance の世代を変えると 1 回出る。**ブランチを変える**と 1 回出る。**同じブランチのまま worktree の ID を改名**（`renameWorktreeIdPreservingChildren`）すると**出ない**（行が移る）。改名の後も、自分が作った項目（`owner.worktreeId` が旧い ID）が `decision_unreflected`・`manual_stale` 等の対象に**残る**（記録の鍵だけでなく項目の選別。再確認の P2）。**1,001 個の別の鍵（例：143 の (worktree, instance) × quiet の 7 つの code）を同じ順で 3 周**：1 周目だけ各 1 回出て、2・3 周目は 0。**再起動の後**（同じ DB のファイルを開き直し、モジュールを再読み込み）も同じ状態なら 0。規則が当たらなくなると行が消え、また当たると 1 回出る。roster から instance を消した後の同じ worktree の quiet でその instance の行が消え、worktree の削除で全部消える（行の数が (worktree, instance) あたり 7 以下） | 記録を書かない版、指紋に時刻を入れる版（2 回目も出る）、値に境界を入れない版（新しい会話で出ない）、値に範囲を入れない版（ブランチを変えて出ない）、**メモリの LRU（1,000 件）の版（1,001 鍵の 2 周目で全部出て落ちる・再起動の後に出て落ちる）**、改名で行を移さない表（`worktree_id` の列名を変えた版：改名の後に出て落ちる）、`owner.worktreeId` で選ぶ版（改名の後に自分の項目が外れて落ちる）、消す処理の無い版（instance の削除の後も行が残って落ちる） | E-1 は同じ状態で毎回全部出す（§4.4）。別の instance には別に 1 回。v70 の前の DB の表（v69 まで）は変わらない（migration の試験） |
 | I-F3 | 既存のフックの設定が変わらない | E-5：全ツールの生成物・merge の結果が、F の前の期待値（既存の試験）と 1 バイト同じ。静的：`src/lib/mem-suggest/**`・新しい route・`mem.ts`・`send.ts` の F の差分が `@/lib/hooks/**` を import しない | 生成物に手を足す版、`mem-suggest` から生成の関数を呼ぶ版 | 既存の merge の試験（`mergeCodexHookSettings` 等）が変えずに通る |
-| I-F4 | モデルの実行と常駐の見張りが増えない | 静的（ガード）：`src/lib/mem-suggest/**`・新しい route に `setInterval`・`setTimeout`・`setImmediate`・`new Worker`・`fork(`・`detached: true`・`.unref(`・`schedule-manager`/`timer-manager` の import・LLM の SDK・`@/lib/report`・`child_process` が無い。サーバの起動の経路（`server.ts`・`src/lib/server/**`）が `@/lib/mem-suggest` を import しない（B の G1・G2 と同じ形）。動的：`vi.useFakeTimers()` で E-1〜E-3 の後に `vi.getTimerCount() === 0`。**E-3 で所属の確認の `observe` が 1 回、B の評価の照会（`deps.evaluation` の git・gh の偽）が 0 回**（第 1 版の「`execFile` が 0 回」は所属の git と両立しないので改めた）。tmux への送信の偽が 0 回 | ガードの走査に `setInterval(` を含む文字列・`execFile` を呼ぶ版を渡すと違反。E-3 で `memList`（評価つき）を呼ぶ版は評価の偽が 1 回以上で落ちる。E-3 で DB のブランチ名で代用する版は `observe` が 0 回で落ちる | E-1 の評価は B の照会だけを呼ぶ（B の期限の helper のタイマーは評価の終わりで 0） |
+| I-F4 | モデルの実行と常駐の見張りが増えない | 静的（ガード）：`src/lib/mem-suggest/**`・`src/lib/db/suggestion-shown-db.ts`・新しい route に `setInterval`・`setTimeout`・`setImmediate`・`new Worker`・`fork(`・`detached: true`・`.unref(`・`schedule-manager`/`timer-manager` の import・LLM の SDK・`@/lib/report`・`child_process` が無い。サーバの起動の経路（`server.ts`・`src/lib/server/**`）が `@/lib/mem-suggest` を import しない（B の G1・G2 と同じ形）。動的：`vi.useFakeTimers()` で E-1〜E-3 の後に `vi.getTimerCount() === 0`。**E-3 で所属の確認の `observe` が 1 回、B の評価の照会（`deps.evaluation` の git・gh の偽）が 0 回**（第 1 版の「`execFile` が 0 回」は所属の git と両立しないので改めた）。tmux への送信の偽が 0 回 | ガードの走査に `setInterval(` を含む文字列・`execFile` を呼ぶ版を渡すと違反。E-3 で `memList`（評価つき）を呼ぶ版は評価の偽が 1 回以上で落ちる。E-3 で DB のブランチ名で代用する版は `observe` が 0 回で落ちる | E-1 の評価は B の照会だけを呼ぶ（B の期限の helper のタイマーは評価の終わりで 0） |
 | I-F5 | `--note` が relay を参照し、relay の事実を写さない | E-7 で作られた項目：kind `waiting`、`closeWhen=relay:<id>`、`evidence=[relay:<id>]`、`text` が `--note` の文と同じ。項目の全欄（`--json` の全鍵）に相手の worktree ID・instance ID・送った時刻の文字列が現れない。relay の取り下げ → B の評価で閉じる | 文に相手の名前を足す版、`evidence` に相手の worktree を足す版、`--reply-to` 無しでも書く版（exit 2 にならず落ちる） | `--note` の無い `send` の body・relay・exit が今と同じ（既存の send の試験が変えずに通る） |
-| I-F6 | 記録できない `--note` は送らず、取った副作用を戻す（P1） | E-7 の全部の組で、mem が断る（mode `off`・秘密らしい文字列・件数の上限・届かない）とき：送信の偽が 0 回（本文ゼロ）、relay が取り下げられる、`--contract` の task が `failed`（`pending` で残らない）、**この送信が取った grant は `expectedGrantId` つきで取り下げられる**、**送信の前から on の grant は取り下げの要求が 0 回**、`--model` の後回しでは grant の要求が 0 回、exit が mem の code | 送ってから書く版、relay だけ取り下げる版（task が `pending`・grant が残って落ちる）、既存の grant まで止める版 | mode `on` の正しい `--note` は送り、項目が 1 つ。`--note` の無い送信の副作用の順と回数が今と同じ |
+| I-F6 | 記録できない `--note` は送らず、取った副作用を戻す（P1） | E-7 の全部の組で、mem が断る（mode `off`・秘密らしい文字列・件数の上限・届かない）とき：送信の偽が 0 回（本文ゼロ）、relay が取り下げられる、`--contract` の task が `failed`（`pending` で残らない）、**この送信が取った grant は `expectedGrantId` つきで取り下げられる**、**送信の前から on の grant は取り下げの要求が 0 回**、`--model` の後回しでは grant の要求が 0 回、exit が mem の code。**Auto-Yes の前の状態の 3 値**：on（grant の要求 0・取り下げ 0）／off（取った grant を取り下げる）／**unknown（`readAutoYes` の GET を失敗させる）：grant の要求（`POST …/auto-yes` の `enabled:true`）が 0 回、mem の書き込み 0 回、送信 0 回、task `failed`、条件つきでは relay の取り下げ、exit 99** | 送ってから書く版、relay だけ取り下げる版（task が `pending`・grant が残って落ちる）、既存の grant まで止める版、**unknown のまま grant を取る版（今の `send.ts` の分岐：grant が 1 回取られ、mem の拒否の後に取り下げの要求が 0 回で落ちる）** | mode `on` の正しい `--note` は送り、項目が 1 つ。`--note` の無い送信の副作用の順と回数が今と同じ（**unknown でも `--note` が無ければ今どおり grant を取って送る**） |
 | I-F7 | 促しの文に自由入力が出ない・長さの上限 | 項目の本文・ブランチ名に目印の文字列・秘密判定の fixture（`ghp_`＋36 文字）・U+202E・BOM を入れ、E-1〜E-3・E-R の stdout・stderr・`--json` に現れない。**quiet の最長の組（§3.4 の 6 つ・`999+`）が 280 バイト以下** | `message` に項目の `text` を入れる版、上限を 240 に戻した版（最長の組で落ちる） | 項目 ID・版・code は出る |
 | I-F8 | quiet は止めない・身元が無ければ黙る | E-3・E-4 の §3.1 の exit の表の全行・action の中の旗の誤りの全行・サーバに届かない・期限超えで exit 0。E-4 は stdout が空で記録が増えない。**parser の段（知らない旗）は exit 1 のまま**（範囲の外であることを固定） | 誤りで exit 2 を返す版 | E-1 の旗の誤りは exit 2 |
 | I-F9 | F は brief を変えない | E-8：F の実装の前後で C の `brief-invariants.test.ts` が変えずに通る。`getBriefProvider()` の既定は D2 の決めたまま | brief に促しの行を足す版が C の I1・I14（予算・固定の部分）で落ちる | — |
-| I-F10 | 規則は欠けた材料で誤って促さない（P2） | E-1・E-2・E-R：(1) `now` が条件で閉じた → `now_condition_met` だけが出る（`now_missing` は出ない）、(2) 版の競合で close が成り立たなかった → `now_condition_met` が出ない、(3) 同じ instance ID を持つ別の worktree の `now` → 呼び手に `now_*` を出さない、(4) `open_count` の境界（`warn-1`・`warn`・`warn+1`）で quiet と `full=true` の答えが一致、(5) 行き先を設定済みの `withheld` の decision → `decision_no_destination` を出さない、(6) `withheld` の項目の `evidence_missing` は `skipped` に `withheld` | `memList` の表示の形から `promoteTo` を読む版（(5) で落ちる）、`conditions` に無い kind を推す版（(1) で落ちる）、instance ID だけで枠を選ぶ版（(3) で落ちる） | 材料の揃った項目の規則は今の表どおり |
-| I-F11 | 要求の途中の変化では出力も記録もゼロ（P1） | E-1〜E-3・E-R で、`withMemTarget`・`memList` の偽の await の間に：`on→off`、`promptOnEvents=false`、instance の削除と再追加（世代が変わる）、worktree の削除、ブランチの切り替え、境界の更新（quiet）、quiet の期限の超過。どれも stdout の促し 0・記録 0、`--json` は `discarded` | 再確認をしない版、出力の前だけ再確認して記録の前にしない版、記録の後に再確認する版 | 同じ寿命のまま、および**正当な `null → lazy` の世代の発行**（mem の最初の書き込み）が間に入ったときは促しが出て記録される |
+| I-F10 | 規則は欠けた材料・別の版の結果で誤って促さない（P2） | E-1・E-2・E-R：(1) `now` が条件で閉じた → `now_condition_met` だけが出る（`now_missing` は出ない）、(2) 版の競合で close が成り立たなかった → `now_condition_met` が出ない、(3) 同じ instance ID を持つ別の worktree の `now` → 呼び手に `now_*` を出さない、(4) `open_count` の境界（`warn-1`・`warn`・`warn+1`）で quiet と `full=true` の答えが一致、(5) 行き先を設定済みの `withheld` の decision → `decision_no_destination` を出さない、(6) `withheld` の項目の `evidence_missing` は `skipped` に `withheld`、**(7) open の decision v1 の条件の照会の偽の await の間に、v2（未成立の条件）へ更新 → `decision_unreflected` の `unreflected` 由来の促しを出さず、`skipped` に `version_changed`**、**(8) `relay` の条件の項目の照会中に版が変わる → `ref_unknown` を出さず `version_changed`** | `memList` の表示の形から `promoteTo` を読む版（(5) で落ちる）、`conditions` に無い kind を推す版（(1) で落ちる）、instance ID だけで枠を選ぶ版（(3) で落ちる）、**ID だけで結果を結ぶ版（(7)(8) で v1 の結果が v2 に付いて落ちる）** | 材料の揃った項目の規則は今の表どおり。照会の間に変わらなかった項目の `unreflected`・`ref_unknown` は出る |
+| I-F11 | 要求の途中の変化では出力も記録もゼロ・新しい世代を触らない（P1） | E-1〜E-3・E-R で、`withMemTarget`・`memList` の偽の await の間に：`on→off`、`promptOnEvents=false`、instance の削除と再追加（世代が変わる）、worktree の削除、**同じ ID・同じ path での worktree の削除と再作成（新しい世代に、条件が成立する項目を置く）**、ブランチの切り替え、境界の更新（quiet）、quiet の期限の超過。どれも stdout の促し 0・表の記録 0、`--json` は `discarded`。**削除と再作成では、新しい世代の DB の項目（`state`・`version`・close の記録）も変わらない**：`withMemTarget` の await の間なら `memList` が呼ばれない（呼び出しの偽が 0 回）、`memList` の中の await の間なら B の close が断る | 再確認をしない版、出力の前だけ再確認して記録の前にしない版、記録の後に再確認する版、**`memList` の前に照合しない版（新しい世代の項目が閉じて落ちる）** | 同じ寿命のまま、**正当な `null → lazy` の世代の発行**（mem の最初の書き込み）が間に入ったとき、**worktree の世代が未発行の worktree への初回の `full=true`**（`fixMemEvalLifetime` が作った世代と `memList` の固定値が同じ）は、促しが出て記録される（第 2 版の `getWorktreeIncarnation` で固定する版は初回が `discarded` になって落ちる）。**導いた primary（物理の行も世代も無い）は E-R で成功し、任意の未知の ID は断られる**（`suggestions: []`・記録 0） |
 | I-F12 | CLI の契約（S2） | `tests/unit/cli/mem-check-suggest.test.ts`：実際の `createMemCommand()` の parser で、57（促しあり）・0（なし）・50（off）、`--quiet --json`（quiet が勝つ）、値の無い `--hook`（quiet 0・無しで 2）、`--suggest` 無しの `--instance`（2）、`--suggest --branch`（2） | `run()` が 57 を 0 にする版、`--hook <event>` を値の要る形で宣言した版（値なしが parser で exit 1 になり落ちる） | **E-0：旗の無い `check` の出力・exit・要求の body が今と同じ**。他の subcommand は exit 0 のまま |
 
-試験のファイル：`tests/unit/lib/mem-suggest/suggest-invariants.test.ts`（E-1〜E-4・E-R・E-7）、`tests/unit/cli/mem-check-suggest.test.ts`（I-F12）、`tests/unit/guards/mem-suggest-no-resident-4226.test.ts`（I-F4 の静的・I-F3 の import）。確認のコマンドは `npx vitest run <これらのファイル> tests/unit/guards tests/unit/docs`・`npm run lint`・`npx tsc --noEmit`。
+試験のファイル：`tests/unit/lib/mem-suggest/suggest-invariants.test.ts`（E-1〜E-4・E-R・E-7）、`tests/unit/cli/mem-check-suggest.test.ts`（I-F12）、`tests/unit/guards/mem-suggest-no-resident-4226.test.ts`（I-F4 の静的・I-F3 の import）、`tests/unit/db/migration-v70-suggestion-shown-4226.test.ts`（v70）。確認のコマンドは `export CM_DB_PATH=$PWD/data/test.db` の後に `npx vitest run <これらのファイル> tests/unit/guards tests/unit/docs`・`npm run lint`・`npx tsc --noEmit`。
 
 ### 7.4 実装の分け方［見立て］
 
-1. **F-1**：§3〜§6 と I-F1〜I-F12。フックの手は置かない（全ツール「戻さない」で、代わりの経路だけ）。migration は足さない。マージの順は E → F → G（PM の決定）
+1. **F-1**：§3〜§6 と I-F1〜I-F12。フックの手は置かない（全ツール「戻さない」で、代わりの経路だけ）。migration は v70 の 1 つ（§4.2）。マージの順は E（v69）→ F（v70）→ G（v71）（PM の決定）。実装の契約は E のマージの後に出し、`CURRENT_SCHEMA_VERSION` を 69 → 70 にする
 2. H（#4228）が `mem check --suggest --quiet` を skill の手順（ターンの区切り・要約の前）に入れる
 3. 文脈へ戻す手（S1）は、§8.2 の条件を満たしたときに追跡（#4289）で別に起票する
 
@@ -476,6 +521,8 @@ commandmate send <worktree-id> "<message>" --instance <id> --reply-to <target> -
 | U-F10 | E が未反映の判定を export するか（§5.2） | しなければ F の `rules.ts` に 1 式を置く |
 | U-F11 | `promptOnEvents` を「促しの全部」の切り替えにする（§3.1：`false` なら明示の `--suggest` も 0 件）でよいか。代わりは「quiet だけを切り替える」 | 代わりを採ると、明示の `--suggest` は `promptOnEvents` に依らず答える |
 | U-F12 | `send` の他の exit と mem の 50〜56 が重ならないか（§6.2） | 重なるなら `--note` の拒否は exit 2 にまとめ、理由の語を stderr に出す |
+| U-F13 | `--note` の送信で Auto-Yes の前の状態が不明なとき止める exit を 99 にするか（§6.2） | `send` の他の「読めない」失敗の exit に揃える。揃える先が別の値なら実装の契約で直す |
+| U-F14 | ブランチを行き来すると、戻ったときに 1 回出る（§4.1。範囲を鍵でなく値に置いた）でよいか | 鍵に戻すと行がブランチの数だけ増え、行の寿命をブランチの削除（quiet では git を呼べない）に結べない |
 
 ### 8.2 S1（文脈へ戻す手）を後で採るときの条件（S1 不採用。PM が追跡 #4289 に写す）
 
@@ -503,6 +550,11 @@ S1 を採らない理由：文脈へ戻す手は、どのツールでも「そ�
 | 古い動きを固定する試験 | 旗の無い `mem check` の試験（E-0）と、`send` の既存の試験（`--note` の無い送信の副作用の順と回数）。生成物を 1 バイトで固定する試験（例：`CM_AGENT_HOOKS_INJECT=0` で起動コマンドが同じ：CHANGELOG #1760）は、F が生成物を変えないので変わらない |
 | 本文の前の失敗の後始末の写し（`send.ts`） | relay の拒否（`registerRelay` の `onFailure`）・Auto-Yes の拒否（`:1032-1040`）・送信の失敗（`postMessage` の `onFailure`）が同じ 3 つ（`failTask`・`withdrawAutoYes`・`cancelRelayQuietly`）を呼ぶ。`--note` の拒否も同じ 3 つを呼ぶ（§6.2） |
 | D2 のガード `hook-no-brief-output-4224` | 未マージ。F はフックの生成物を変えず、`brief` を呼ばないので衝突しない |
+| 寿命の固定の写し：評価の全入口（`mem list`・`mem check`・brief・preview） | 全部 `fixMemEvalLifetime` で await の前に固定する（`evaluate.ts:99-103` の注、`service.ts:534`・`:602`）。F も同じ関数で固定する（§3.6）。F の 2 段（F の所属の await → `memList`）は既存の入口に無い形なので、`memList` の前の照合を F にだけ足す。既存の入口は変えない |
+| 所有の判定の写し：A の `ownedBy`（`mem-db.ts:857`）と F の規則の対象（§3.2） | 揃えた（instance と世代。`owner.worktreeId` を見ない）。B の `closeItemByCondition` の `triggeredBy` は記録の欄で、選別ではない |
+| roster の写し：`resolveAgentInstances`（導いた primary を含む）と D1 の `readInstanceLifetime`（物理の行だけを `onRoster`） | F は所属に前者、寿命に後者を使う（§3.6）。D1 の関数は変えない |
+| Auto-Yes の「読めないまま取る」写し：`send.ts` の条件つき・条件なしの経路 | 両方とも `priorAutoYes === null` で grant を取りうる（`:1022`）。F は `--note` の送信だけ止める（§6.2）。`--note` の無い送信の動きは変えない（範囲の外。本文に無い指摘としては挙げない：警告と止め方の案内を出す既存の設計） |
+| 表の子の行の追従：`worktree_id` の列を持つ既存の表（`session_brief_boundaries` 等） | 同じ規約に乗る（§4.2）。`getWorktreeChildTables` が動的に拾うので、登録の表は無い［事実：`worktree-child-tables.ts:47-90`］ |
 
 ---
 
@@ -514,7 +566,9 @@ S1 を採らない理由：文脈へ戻す手は、どのツールでも「そ�
 
 ---
 
-## 11. 事前レビューの処置（Codex、`prereview/review-4226.md`、2026-11-09）
+## 11. 事前レビューの処置
+
+### 11.1 1 回目（Codex、`prereview/review-4226.md`、2026-11-09。第 2 版で処置）
 
 | # | 重さ | 指摘 | 処置 | 理由 | 設計のどこを変えたか |
 |---|---|---|---|---|---|
@@ -523,11 +577,27 @@ S1 を採らない理由：文脈へ戻す手は、どのツールでも「そ�
 | 3 | P2 | S1 の手の形が Command Code・Gemini の既存の所有の判定に当たらない | **採らない（S1 不採用）** | PM の決定で S1 を採らず、手を足さない | §8.2 の C3 に、後で採るときの条件として残した（#4289） |
 | 4 | P2 | quiet の「git を呼ばず DB だけ」は `withMemTarget` の所属の git と両立しない | **採る** | 事実（`target.ts:128`→`git-observe.ts:23`）。DB のブランチ名で代用すると切り替え後の `off` を破る | §3.1（所属の git はする）、§3.6（許す処理・許さない処理・CLI 4 秒／サーバ 3 秒の期限）。I-F4 の「`execFile` 0 回」を「所属の `observe` 1 回・評価の照会 0 回」に改め、代用の版を陽性対照に |
 | 5 | P2 | 規則の材料が予定の応答に揃わない（閉じた `now`・`warnings`・`withheld`） | **採る** | 事実（`mem-db.ts:1060-1083`・`service.ts:311`・`types/mem.ts:100`）。欠けた材料を「未設定」と読むと誤って促す | §3.2 に材料の取り方（`listMem` の `MemRecord`・`getMemRecord`・`countOpenItems`）と `unavailable` の列。§7.3 に I-F10（close の成功／版の競合・別 worktree の同じ instance ID・閾値の境界・行き先つきの `withheld`） |
-| 6 | P2 | 指紋の範囲に repository・ブランチが無い。Map は 1,001 件目の追い出しで再起動の前にも繰り返す | **採る**（範囲）／**一部採る**（容量：繰り返しを既知の制限として明記） | 範囲は鍵に足せば閉じる。容量は、捨てない形はメモリが増え続け、記録しない形は新しい促しを出せず、どちらも 1 回の繰り返しより悪い。PM の決定（S3 はメモリだけ・migration を足さない）の内で、上限と LRU と繰り返しを明記した | §4.1（鍵に repository・branch）、§4.2（上限 1,000・LRU）、§4.5（K1〜K4）。I-F2 にブランチの変更・ID の改名・1,000／1,001 件・再起動 |
+| 6 | P2 | 指紋の範囲に repository・ブランチが無い。Map は 1,001 件目の追い出しで再起動の前にも繰り返す | **採る**（範囲）／**一部採る**（容量：繰り返しを既知の制限として明記） | 範囲は鍵に足せば閉じる。容量は、捨てない形はメモリが増え続け、記録しない形は新しい促しを出せず、どちらも 1 回の繰り返しより悪い。PM の決定（S3 はメモリだけ・migration を足さない）の内で、上限と LRU と繰り返しを明記した | 第 2 版：§4.1（鍵に repository・branch）、§4.2（上限 1,000・LRU）、§4.5（K1〜K4）。**第 3 版で改めた**：容量の部分は §11.2 の 1 で永続に覆り、repository・ブランチは鍵から値（範囲の hash）へ移した（§4.1。行の数を抑えるため） |
 | 7 | P2 | フックの登録の順は D1 の境界の更新との実行の順に使えない | **採らない（S1 不採用）**／quiet の側は一部採る | フックの手を足さないので、登録の順に依る作りが無い。skill から呼ぶ quiet でも境界が途中で動きうるので、境界を固定して記録の前に再確認する | §8.2 の C5 に条件として残した（#4289）。§3.6 の再確認の 5 に境界 |
 | 8 | P2 | S2 は旗 3 つと分岐 1 つだけでは CLI の契約を閉じられない（`run()` が常に 0、`--instance` が無い、parser の段） | **採る** | 事実（`mem.ts:179-188`・`:204-212`）。PM の決定も具体化を求めた | §3.1 を書き直し（足す 4 つの旗と宣言の形、57 を返す `run()` の 1 か所、旗の組み合わせの表、parser の段は commander の既定のまま＝quiet の「常に 0」は action の後）。§7.3 に E-0・I-F12 |
 | 9 | P2 | S1 は出来事ごとの出力の形まで表にする必要がある。trust は定義の hash | **採らない（S1 不採用）** | 手を足さないので出力の形に依る作りが無い | §8.2 の C1・C2・C4 に条件として残した（#4289） |
 | 10 | P3 | OpenCode V2 の開始を ○ としていた。quiet の 240 バイトの上限を最長の組が超える | **採る** | 事実（`opencode-v2/source.ts:292` に `session_start` が無い。最長の組は 260 バイト） | §1.1 で OpenCode と OpenCode V2 の行を分けた。§3.4 の上限を 280 バイトにし、最長の組を I-F7 に |
 | 11 | 補足 | Claude には `Stop.additionalContext` という非エラーの戻し方もある。「block しかない」でなく「追加のモデルの実行を避けるため使わない」と書く | **採る** | 文の正確さ | §0.2 の F4 |
 | 12 | 補足 | 試験の表に既存の check・HTTP route の直接の呼び出し・send の組・既存の brief を並べ、CLI の身元の検査だけで直接の route の記録を守れるとしない | **採る**（S1 の行は除く） | route は CLI を通らずに呼べる | §7.3 に E-0・E-R、E-7 の組。§3.6 の「直接の route の呼び出し」 |
-| 13 | 推奨 | S3 は永続の表を採る | **採らない** | PM の決定（メモリだけ）。Codex はメモリだけを P1 にしていない。再起動・容量の超過で 1 回繰り返すことを既知の制限（K1・K2）として書いた | §0.1・§4.2・§4.5 |
+| 13 | 推奨 | S3 は永続の表を採る | **採らない**（第 2 版）→ **第 3 版で採る**（§11.2 の 1） | 第 2 版：PM の決定（メモリだけ）。Codex はメモリだけを P1 にしていない。第 3 版：再確認で P1 になり、PM が永続に差し戻した | §0.1・§4.2・§4.5 |
+
+### 11.2 2 回目（Codex の再確認、`prereview/review-4226b.md`、2026-11-09。PM の決定 `pm-decision-4226-s3-4227-sf.md` の F の節とあわせて第 3 版で処置）
+
+再確認は第 2 版の 1 回目の処置のうち、旧 4・5・8・10 を「解消」、旧 3・7・9 を「S1 不採用で範囲外」、旧 1・2・6 を「一部解消」とした。残りと追加の指摘の処置：
+
+| # | 重さ | 指摘 | 処置 | 理由 | 設計のどこを変えたか |
+|---|---|---|---|---|---|
+| 1 | P1 | S3 のメモリの LRU は受入基準に反する：1,001 鍵を同じ順で回すと毎周すべて再通知、再起動でも再通知。「以前 P2 だった」は例外の根拠にならない（旧 6 の残り） | **採る**（PM の差戻し：永続） | 反例は正しい：LRU は使い続ける鍵の数が上限を 1 つ超えるだけで毎回すべて追い出す。PM は受入基準を弱めない。永続にしても、鍵を (worktree, instance, code) にして範囲を値へ移せば、行は (worktree, instance) あたり 7 以下に収まり、無限に増えない | §0.1 の S3 の行と理由、§3.1 の注、§3.6（DB の transaction）、§4 を書き直し（鍵と値、v70 の表、行の寿命の表と上限、K1・K2・K4 の削除と K5）、§7.1（`suggestion-shown-db.ts`・`v70-*.ts`・migration の試験。`shown-memory.ts` を作らない）、§7.2（登録）、§7.3 の I-F2（1,001 鍵を 3 周・再起動の後・行の寿命）と `CM_DB_PATH`、§7.4、§8.1 の U-F14、§9 |
+| 2 | P1 | Auto-Yes の事前の読みが失敗すると `priorAutoYes=null` のまま grant を取り、`--note` が拒否されても `withdrawAutoYes(true)` は `null` で取り下げない（旧 2 の残り） | **採る** | 事実（`send.ts:464-475`・`:1015-1022`・`:1054-1057`）。第 2 版の「読んでいるので残す分岐に入らない」は読みの失敗を見落としていた。条件つきの取得（`onlyIfOff`）は今のサーバでは守れるが、旗を知らない古いサーバでは上書きして名前の無い grant を残すので、**状態が不明なら grant を取る前に止める**方を採った | §6.2 の 1 と 2.ii を書き直し、「Auto-Yes の前の状態が不明なとき」を足した（採らなかった案も）。§7.2 の `send.ts` の行。§7.3 の E-7 と I-F6 に on・off・unknown の 3 値。§8.1 の U-F13。§9 |
+| 3 | P1 | 古い要求が、新しい worktree の世代の項目を閉じてから捨てられる：`memList` は呼ばれた時点で世代を固定し直し、F の世代の比較はその後（旧 1 の残り） | **採る** | 事実（`service.ts:533-534`、所属の署名は path・repositoryPath：`agent-roles/resolve.ts:305`）。F の所属の await の後、`memList` を呼ぶ同じ同期の区間で寿命を照合すれば、`memList` の固定値は `W0` と一致する。`memList` の中の await の間の変化は B の `aliveOf` が close を断る | §3.6 に「`memList` の前の照合」を足した。§7.3 の I-F11 に同じ ID・path の削除と再作成、新しい世代の DB の項目が変わらないこと、`memList` の前に照合しない版を陽性対照に |
+| 4 | P2 | worktree の世代の初回の発行を寿命の変更と誤る：`getWorktreeIncarnation` は未発行で `null`、`memList` の中の `fixMemEvalLifetime` は作る | **採る** | 事実（`incarnation.ts:137-143`・`:145-153`、`evaluate.ts:104-107`）。固定を両方の経路で `fixMemEvalLifetime` に揃えれば、初回でも `W0` と `memList` の固定値が同じになる。再確認は作らない読み（`getWorktreeIncarnation`）で比べる | §3.6 の固定の表の `W0`、§3.1 の注（`off` でも世代を作るのは既存の入口と同じ）。§7.3 の I-F11 に未発行からの初回の `full=true` の陰性対照 |
+| 5 | P2 | 改名の後、自分の項目が促しの対象から外れる：`owner.worktreeId` の一致を要求しているが、A は改名の後も旧い ID を残し、所有は instance と世代で決める | **採る** | 事実（`mem-db.ts:856-863` の `ownedBy`）。A と同じ 2 つ（`owner.instanceId`・`owner.incarnation`）に揃える。世代は (worktree, instance) ごとなので、別の worktree の同じ instance ID は世代で外れる | §3.2 の `now_condition_met` の行と「対象の範囲」。§7.3 の I-F2 に改名の後の項目の選別、`owner.worktreeId` で選ぶ版を陽性対照に。§9 |
+| 6 | P2 | 旧版の条件の結果を新版の項目に結ぶ：B は評価の前の候補を持ち、decision の `unreflected` を版を確かめずに付け、応答から版を落とす | **採る** | 事実（`evaluate.ts:160`・`:443`、`service.ts:584-588`）。A・B を変えずに、F が `memList` の前と後で記録を写し、版・条件・状態が同じ項目の結果だけを使う（版は増える一方なので前後が同じなら間も同じ）。`closed:true` は B の close が版の一致で書くので `version + 1` で確かめる | §3.2 に「版の確かめ」、`skipped` の `version_changed`。§7.3 の I-F10 に (7) decision・(8) `ref_unknown` の評価中の更新 |
+| 7 | P2 | 正当な派生の primary を未登録として断る：物理の roster の行か世代を要求しているが、正本の `resolveAgentInstances` は行が無ければ `selectedAgents` から primary を導く | **採る** | 事実（`agent-instances-resolver.ts:47-60`、`session-brief-db.ts:174-186` の `onRoster` は物理の行だけ）。所属（解いた roster）と寿命（`L0`）を分ける。導いた primary は `L0 = { incarnation: null, onRoster: false }` で、`isSameInstanceLifetime` は途中の `lazy` の発行も同じ寿命と答える | §3.6 の固定の表（所属の行）と「直接の route の呼び出し」、§3.2 の `now_missing`。§7.3 の E-R と I-F11 に導いた primary は成功・任意の未知の ID は断るの対照 |
+
+PM の決定（F の節）の条件の処置：新しいファイル `suggestion-shown-db.ts`（`mem-*` の名前にしない）と `v70-suggestion-shown.ts` → §4.2・§7.1。行の寿命 → §4.3。I-F2 の「1,001 鍵を 3 周」「再起動の後」 → §7.3。`export CM_DB_PATH=$PWD/data/test.db` → §4.2・§7.3。§0.1 の S3 の行と §4 の書き換え → 済み。マージの順 E → F → G・番号 v69／v70／v71 → §0.1・§4.2・§7.4。
