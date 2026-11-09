@@ -872,7 +872,7 @@ D2 で足した、または D2 が新しく読み手になった共通の規則�
 
 | 規則 | 正本（書き手） | 読み手 |
 |---|---|---|
-| 要求の寿命の固定（`BriefRequestPin`：worktree の世代・台帳の今の行・instance の寿命。入口で 1 回） | `session-brief.ts` の `pinBriefWorktree`・`pinBriefRequest` | 送信の route の `handleSend`（2 段）、`SendBrief`（constructor の reset の寿命・`plan`（今の行がこの instance の寿命のものか：`rowOfPinnedInstance`、§18 の P3-1）・`planInStretch`・`claimInStretch`・`settleInLock`）、試験の harness（`session-brief-4274-harness.ts` の `send`・`brief-d2-4224-harness.ts` の `entrance`） |
+| 要求の寿命の固定（`BriefRequestPin`：worktree の世代・台帳の今の行・instance の寿命。入口で 1 回） | `session-brief.ts` の `pinBriefWorktree`・`pinBriefRequest` | 送信の route の `handleSend`（2 段）、`SendBrief`（constructor の reset の寿命・`plan`（instance がまだ入口の寿命か：`instanceAsPinned` を今の行・stale claim の決着より前に照らす、違えば何も書かない。今の寿命が固定どおりで行の世代だけ古ければ `rowOfPinnedIncarnation` で `incarnation_changed` に消費。§18 の P3-1・§19）・`planInStretch`・`claimInStretch`・`settleInLock`）、試験の harness（`session-brief-4274-harness.ts` の `send`・`brief-d2-4224-harness.ts` の `entrance`） |
 | CLI の要求の寿命の固定（`BriefPinnedLifetime`：最初の await の前に 1 回、前判定と組み立てで共有） | `build.ts` の `pinBriefLifetime`・`pinnedLifetimeChange` | `service.ts` の `briefForRoute`（`--session-start` の前判定 `sessionStartDeferredTo` の await の後に `pinnedLifetimeChange` で照らす・組み立ては `pinned` を渡す。§18 の Codex P1）、`buildBrief` の入口（同じ比較を自分の形で） |
 | worktree が続いていることの証拠（`briefWorktreeContinuity`：世代が同じ／台帳の行が同じ worktree に在る／証拠なし） | `session-brief.ts` | `SendBrief.plan`（最初の読みの前・build の後）・`planInStretch`・`claimInStretch`（`same` 必須）・`settleInLock`（W6。固定のある要求は `same` 必須、証拠なしも公開しない。固定の無い Timer・relay は D1 の instance の照合のまま。§18 の Codex P2）。`buildBrief` は同じ規則を自分の形で読む（`pinned.worktreeIncarnation` と `getWorktreeIncarnation` の等しさ、作る前に照らす） |
 | 入口で世代を作る前判定（`briefMayAttach`：保存された設定で `injectOnStart` と `off` 以外の規則がありうるか） | `session-brief.ts` | `pinBriefWorktree` だけ |
@@ -910,3 +910,13 @@ D2 で足した、または D2 が新しく読み手になった共通の規則�
 | PM P3-4 | `briefMayAttach` の `repository_path` 一致での推定／continuity `unknown` で作り直し後に世代を書ける | **記録だけ** | 想定内（T5b）・新しい側自身の世代で実害小 |
 | PM P3-5 | 設計との食い違い（`fitJson` に `lead` 未対応・CLI 最小値の I14 再計算なし・読み口の置き場） | **設計書を実装に合わせた** | §7.3（置き場は `src/lib/brief/previous-end.ts`。G の S-C の前提）・§7.4（CLI の最小値と I14 は数え直さない・`fitJson` は `lead` を読まない）・§9.1・§17 |
 
+---
+
+## 19. 再レビューの処置（Codex codex-2 の再レビュー・PM 側 Claude の再レビュー）
+
+不変条件：**古い要求は新しい側に何も書かない／新しい要求は古い側の残りを放置しない**。§18 の P3-1 の直しの境目を、この 2 件で両側から閉じた。§17 の読み手（`SendBrief.plan`）も同じ差分で直した。
+
+| # | 指摘 | 処置 | 守る条件・対照の試験（反映先） |
+|---|---|---|---|
+| Codex P2 | 旧 instance の寿命を入口で固定した要求が、待機中の作り直しの後に stale claim を読むと、`settleStaleClaim` が寿命の照合より前に新しい instance の行を `unknown` に決着する | **直す** | `plan` は今の行が `pending`・`claimed`（生きた claim も stale claim も）のとき、決着より前に `instanceAsPinned`（固定の寿命と今の寿命）を照らし、違えば何も書かずに `skipped(incarnation_changed)` を報告する。陽性：入口の後に作り直して起動、新しい起動の行を去ったプロセスの claim にする → 古い要求は本文だけ、行は `claimed` のまま。直しを外すと落ちる／陰性：作り直しなし → stale claim は D1 どおり `unknown`（T0g の claimed の対照）。`session-brief-entrances-4274.test.ts` の `settleStaleClaim` の例外の説明も「決着の前に固定の寿命を照らす」に揃えた |
+| PM P3（再） | 固定 = 今 = Y でも行が古い incarnation X のとき消費せず報告だけになり、死んだ instance の起動の行が「今の行」として残る | **直す** | 消費しないのは「固定 ≠ 今」のときだけ。固定 = 今で行の世代だけ古い（`rowOfPinnedIncarnation` が偽。どちらかが null なら照らさない）ときは、P3-1 の前と同じく `skipped(incarnation_changed)` に消費する（`pending` だけ。生きた claim は書かない）。陽性：起動の後に作り直し（起動なし）、その後の入口の要求 → 古い行は `skipped(incarnation_changed)`。直しを外すと落ちる／陰性：作り直しの前の入口（固定 = X・今 = Y）→ 古い行は `pending` のまま（T0g） |

@@ -364,14 +364,22 @@ export class SendBrief {
   }
 
   /**
-   * Whether the current row may be consumed by this request (PM review P3-1): the instance is
-   * still the one its entrance pinned, and the row records no other incarnation than it.
+   * Whether the instance is still the lifetime the request's entrance pinned (PM review P3-1).
+   * When it is not, the request writes nothing on the instance's rows — not a stale claim's
+   * settlement either (Codex re-review P2): they may be the new instance's.
    */
-  private rowOfPinnedInstance(db: Database.Database, row: { instanceIncarnation: string | null }): boolean {
+  private instanceAsPinned(db: Database.Database): boolean {
+    return sameInstanceLifetime(this.pin!.instance, readInstanceLifetime(db, this.input.worktreeId, this.input.instanceId), this.input.cliToolId);
+  }
+
+  /**
+   * Whether the row records the pinned incarnation (either side null: not compared, so a
+   * lazily issued row is not broken). Asked only once the instance is found as pinned: a row
+   * of an older incarnation is then a dead instance's remainder, consumed as
+   * `incarnation_changed` (PM re-review P3).
+   */
+  private rowOfPinnedIncarnation(row: { instanceIncarnation: string | null }): boolean {
     const pinned = this.pin!.instance;
-    if (!sameInstanceLifetime(pinned, readInstanceLifetime(db, this.input.worktreeId, this.input.instanceId), this.input.cliToolId)) {
-      return false;
-    }
     return row.instanceIncarnation === null || pinned.incarnation === null || row.instanceIncarnation === pinned.incarnation;
   }
 
@@ -412,6 +420,16 @@ export class SendBrief {
       // Before any read a write follows (D2 design §2.4 W3): not for a worktree made again.
       if (this.continuity(db) === 'changed') return this.worktreeChanged(null);
       let current = getCurrentBoundary(db, worktreeId, instanceId);
+      // The instance's lifetime as the entrance read it (W1): never read again here.
+      lifetime = pin.instance;
+      if (current && (current.state === 'pending' || current.state === 'claimed') && !this.instanceAsPinned(db)) {
+        // Issue #4224 (PM review P3-1, Codex re-review P2; the instance's W1・W3): the instance
+        // was deleted and made again after the entrance, and the row may be the new one's
+        // launch. The old request neither attaches, consumes nor settles it (a stale claim
+        // included): the new conversation's first request does.
+        this.report = { state: 'skipped', reason: 'incarnation_changed', boundaryId: current.id };
+        return;
+      }
       if (current?.state === 'claimed' && current.claimToken !== null && !liveClaims.has(current.claimToken)) {
         settleStaleClaim(db, current.id, current.claimToken, Date.now());
         current = getBoundaryById(db, current.id);
@@ -419,13 +437,10 @@ export class SendBrief {
       const usable =
         current !== null &&
         (current.state === 'pending' || (current.state === 'claimed' && current.claimToken !== null && liveClaims.has(current.claimToken)));
-      // The instance's lifetime as the entrance read it (W1): never read again here.
-      lifetime = pin.instance;
-      if (usable && current && !this.rowOfPinnedInstance(db, current)) {
-        // Issue #4224 (PM review P3-1, the instance's W1・W3): the instance was deleted and
-        // made again after the entrance, and the row may be the new one's launch. The old
-        // request neither attaches nor consumes it: the new conversation's first request does.
-        this.report = { state: 'skipped', reason: 'incarnation_changed', boundaryId: current.id };
+      if (usable && current && !this.rowOfPinnedIncarnation(current)) {
+        // PM re-review P3: the instance is the one pinned, the row a dead incarnation's launch.
+        // The new request does not leave it as the current row: consumed as before P3-1.
+        this.skip(current.id, 'incarnation_changed', true);
         return;
       }
       if (usable && current) {

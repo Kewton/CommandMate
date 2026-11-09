@@ -217,6 +217,58 @@ describe('T0g the instance made again after the entrance: the old request leaves
     expect(rows(world, ID).find((row) => row.id === fresh!.id)?.state).toBe('sent');
   });
 
+  it('(control, claimed) re-made and relaunched, the new launch row left claimed by a gone process: the old request writes nothing on it (Codex re-review P2)', async () => {
+    realPort(world);
+    addAgentInstance(world.db, WT, { id: ID, cliTool: 'codex' } as never);
+    launch('codex', ID);
+    const oldPin = entrance(world, ID);
+    remake();
+    launch('codex', ID);
+    const fresh = rows(world, ID).find((row) => row.state === 'pending' && row.instanceIncarnation !== oldPin.instance.incarnation);
+    expect(fresh).toBeDefined();
+    world.db.prepare("UPDATE session_brief_boundaries SET state = 'claimed', claim_token = 'gone:x' WHERE id = ?").run(fresh!.id);
+    await sendAs(oldPin, 'old request');
+    expect(typed(world, 'codex')).toEqual(['old request']);
+    // Not settled `unknown` by the old request: the new instance's own request decides it.
+    expect(rows(world, ID).find((row) => row.id === fresh!.id)?.state).toBe('claimed');
+  });
+
+  it('negative (claimed): not re-made — a claim of a gone process is still settled `unknown` as D1 does', async () => {
+    realPort(world);
+    addAgentInstance(world.db, WT, { id: ID, cliTool: 'codex' } as never);
+    launch('codex', ID);
+    const row = rows(world, ID).find((r) => r.state === 'pending')!;
+    world.db.prepare("UPDATE session_brief_boundaries SET state = 'claimed', claim_token = 'gone:x' WHERE id = ?").run(row.id);
+    await sendAs(entrance(world, ID), 'hello');
+    expect(typed(world, 'codex')).toEqual(['hello']);
+    expect(rows(world, ID).find((r) => r.id === row.id)?.state).toBe('unknown');
+  });
+
+  it('(control, PM re-review P3) re-made before the entrance, the dead launch row still current: the new request consumes it as incarnation_changed', async () => {
+    realPort(world);
+    addAgentInstance(world.db, WT, { id: ID, cliTool: 'codex' } as never);
+    launch('codex', ID);
+    const dead = rows(world, ID).find((row) => row.state === 'pending')!;
+    remake(); // no launch yet: the dead incarnation's row is the current one
+    const pin = entrance(world, ID);
+    expect(dead.instanceIncarnation).not.toBe(pin.instance.incarnation);
+    await sendAs(pin, 'new request');
+    expect(typed(world, 'codex')).toEqual(['new request']);
+    expect(rows(world, ID).find((row) => row.id === dead.id)).toMatchObject({ state: 'skipped', skipReason: 'incarnation_changed' });
+  });
+
+  it('negative (PM re-review P3): pinned before the re-making, the dead row still current — the old request leaves it for the new one', async () => {
+    realPort(world);
+    addAgentInstance(world.db, WT, { id: ID, cliTool: 'codex' } as never);
+    launch('codex', ID);
+    const dead = rows(world, ID).find((row) => row.state === 'pending')!;
+    const oldPin = entrance(world, ID);
+    remake();
+    await sendAs(oldPin, 'old request');
+    expect(typed(world, 'codex')).toEqual(['old request']);
+    expect(rows(world, ID).find((row) => row.id === dead.id)?.state).toBe('pending');
+  });
+
   it('negative: not re-made — the pinned request is briefed on its launch row', async () => {
     realPort(world);
     addAgentInstance(world.db, WT, { id: ID, cliTool: 'codex' } as never);

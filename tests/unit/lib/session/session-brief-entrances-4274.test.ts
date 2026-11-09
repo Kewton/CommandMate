@@ -279,7 +279,10 @@ const ENTRANCES: Record<string, Entrance> = {
       await send('claude', 'x');
     },
     briefs: 0,
-    stale: 'synchronous in the plan, before its first await; it attaches nothing',
+    // Issue #4224 (Codex re-review P2): a request pinned before the instance was made again
+    // waits at its entrance, not here — the plan compares the pinned lifetime before this
+    // write and leaves the row alone (T0g's claimed control in session-brief-worktree-lifetime-4224).
+    stale: 'compared with the entrance’s pinned instance lifetime before the write, in the plan’s synchronous stretch; it attaches nothing',
   },
   'send that relaunched inside copies its delivery': {
     writes: ['copyDeliveryToRelaunchBoundaries'],
