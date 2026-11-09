@@ -569,6 +569,149 @@
       "concurrent": "Something else changed the document while writing. Check the document",
       "reapproval": "Changed since the approval ({reason}). Make the diff again",
       "failed": "Could not do it ({code})"
+    },
+    "modeHelp": {
+      "off": "Nothing is evaluated, written or inserted. The items are kept.",
+      "derived": "Only derived state (waits, relays) goes into the brief. Agent writes and condition checks stop; the items are shown frozen.",
+      "on": "Items are added, edited, checked against their conditions and inserted."
+    },
+    "featureHelp": {
+      "injectOnStart": "Attach a short summary (brief) to the first send after a session boundary (start, reset, resume).",
+      "promptOnEvents": "After an action (a PR, a merge), prompt the agent to update mem.",
+      "popup": "Attended: saves the setting. In this version it is saved only; the screens that ask when a session opens and closes do not appear yet. Off (the default) is unattended. Separate from auto-yes."
+    },
+    "items": {
+      "open": "View items",
+      "title": "mem items ({branch})",
+      "description": "View this branch's mem items; a person adds, edits and closes them. Items a person writes are created and updated by human.",
+      "limits": "What this cannot prevent: a process with the same OS rights can forge the screen's mark and write the DB directly. An item a person wrote cannot be changed or closed by an agent through the CLI (a close by its condition still applies). An agent writing its own item through the CLI at the same time is not stopped (the version check shows it as a conflict).",
+      "modeLine": "Mode of this branch: {mode} ({source})",
+      "source": {
+        "override": "branch override",
+        "rule": "rule {pattern}",
+        "fallback": "default"
+      },
+      "derived": "Frozen: agent writes and condition checks are stopped. This screen cannot write either.",
+      "off": "off: the items are kept but not shown.",
+      "changeMode": "Change the mode and features",
+      "worktree": "Worktree",
+      "noWorktree": "(no worktree: read only)",
+      "instance": "Owning instance",
+      "showClosed": "Show closed items",
+      "readOnly": "To write, choose a worktree of this branch and an instance of its roster (an item is owned by an instance).",
+      "otherBranch": "The chosen worktree is not on this branch now. Read only.",
+      "loadError": "Could not load.",
+      "none": "No items.",
+      "addTitle": "Add an item",
+      "kind": "Kind",
+      "kinds": {
+        "now": "now (per session)",
+        "waiting": "waiting",
+        "decision": "decision",
+        "next": "next",
+        "external": "external",
+        "note": "note"
+      },
+      "text": "Text",
+      "closeWhenInput": "Close condition (e.g. issue:#123, pr:#45, manual)",
+      "evidence": "Evidence paths (comma separated, relative to the repository)",
+      "promoteTo": "Promote to (e.g. issue:#123)",
+      "add": "Add",
+      "added": "Added.",
+      "edit": "Edit",
+      "save": "Save",
+      "saved": "Saved.",
+      "cancel": "Cancel",
+      "close": "Close",
+      "withdraw": "Withdraw",
+      "closed": "Closed.",
+      "reason": "Reason (optional)",
+      "state": {
+        "open": "open",
+        "recorded": "recorded, not reflected",
+        "promoted": "reflected",
+        "closed": "closed"
+      },
+      "slot": "now ({instance})",
+      "stale": "stale",
+      "frozen": "frozen",
+      "changed": "Updated",
+      "withheld": "The text is not shown ({field} matched rule {rule})",
+      "withheldShort": "(not shown)",
+      "meta": "created by {createdBy} ({instance}) · updated by {updatedBy} · {updatedAt}",
+      "closeWhen": "condition {type}",
+      "nowNote": "A now slot is edited from the session note (the worktree screen).",
+      "toDecisions": "Record and reflect",
+      "conflict": {
+        "title": "It was changed elsewhere. Compare your draft, the value you read and the current value.",
+        "draft": "Your draft",
+        "read": "When read (v{version})",
+        "current": "Now (v{version})",
+        "rebase": "Save my draft on top of the current value",
+        "discard": "Discard my draft",
+        "evidence": "Evidence: {evidence}",
+        "sends": "Fields saving on top sends (only the ones you changed): {fields}",
+        "field": {
+          "text": "text",
+          "evidence": "evidence",
+          "closeWhen": "close condition"
+        }
+      },
+      "recordedClose": {
+        "first": "This decision is recorded but not reflected in the canonical place (such as the Issue body).",
+        "next": "Close without reflecting…",
+        "second": "This decision is recorded; it will be closed without being reflected in the canonical place (such as the Issue body). Comments and other records stay.",
+        "confirm": "Close without reflecting"
+      },
+      "refusal": {
+        "disabled": "mem is not on for this branch. Nothing can be written.",
+        "version_conflict": "It was changed elsewhere (the version differs).",
+        "state_forbids": "This cannot be done in the item's current state (closed, or recorded).",
+        "not_owner": "This item cannot be changed (an agent's item: its author's instance or a person; a person's item: a person only).",
+        "incarnation_changed": "The worktree or the instance was replaced since it was read. Read again.",
+        "membership_changed": "The worktree is on another branch than this screen's. Nothing was written.",
+        "confirmation_required": "Closing a recorded decision needs the confirmation that it is not reflected.",
+        "screen_only": "This change is made from the screen only.",
+        "item_not_found": "No such item (it was deleted).",
+        "instance_not_found": "No such instance.",
+        "duplicate_key": "The same request was sent with other content.",
+        "limit_exceeded": "Too many open items of this kind.",
+        "secret_like": "A field looks like it contains a secret.",
+        "invalid_close_when": "The close condition is not valid. E.g. issue:#123, pr:#45, manual",
+        "other": "Could not do it ({code})",
+        "invalid_close_when_required": "This kind (waiting, next, external) needs a close condition. Write one such as issue:#123 or pr:#45.",
+        "invalid_close_when_kind": "This kind does not take that close condition.",
+        "invalid_close_when_reason": "The close condition is not written correctly ({reason}). E.g. issue:#123, pr:#45, manual"
+      },
+      "notices": {
+        "title": "Undelivered notices",
+        "none": "No notice is waiting to be taken.",
+        "line": "Item {item} ended ({reason}, {outcome})",
+        "uncertain": "An earlier delivery could not be confirmed",
+        "take": "Take it",
+        "taken": "Taken."
+      },
+      "unknown": "The result is unknown (timed out or the connection was lost). It may or may not have been written; pressing again sends the same content with the same key (if it was written, no second item is made and the same item comes back).",
+      "resend": "Send the same again",
+      "addPending": "The result of the last add is unknown. The input is held until it is sent again (the same content and key, so no second item).",
+      "unknownVersioned": "The result is unknown (timed out or the connection was lost). Pressing again sends the same content with the same version. If the first send was written, or someone else changed the item, it comes back as a version conflict with the comparison (the screen does not guess that it was saved).",
+      "pendingElsewhere": "There is an {op} whose result is unknown (to {worktree} · {instance}). It cannot be sent again with the current selection. Go back to that destination, or do not send it again.",
+      "pendingReturn": "Go back to that destination",
+      "pendingOp": {
+        "add": "add",
+        "update": "edit",
+        "close": "close"
+      },
+      "pendingDiscard": "Do not send again (check the list for whether it was written)",
+      "lockedSending": "Sending. Until the answer comes back, no other write (add, edit, close) can be made and the fields sent cannot be changed.",
+      "lockedUnknown": "A request's result is unknown. Until you send it again or choose \"Do not send again\", no other write (add, edit, close, save on top, close again) can be made and that request's fields cannot be changed (so nothing is written twice or mixed up). Reading again and changing the worktree or instance still work.",
+      "closeWhenKeep": "Close condition (empty keeps the current {type}; writing one replaces it)",
+      "closeWhenRequired": "Close condition (required, e.g. issue:#123, pr:#45)",
+      "closeWhenRequiredHelp": "{kind} needs a close condition (required for waiting, next and external; e.g. issue:#123, pr:#45, branch:feature/x?merged=develop).",
+      "closeConflict": {
+        "title": "It was changed elsewhere before closing. Compare what you read with the current value and choose again whether to close it.",
+        "again": "Close it again, having seen the current value"
+      }
     }
   }
 }

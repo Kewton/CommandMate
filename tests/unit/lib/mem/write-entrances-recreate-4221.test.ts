@@ -26,7 +26,7 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 import { createRepository } from '@/lib/db/db-repository';
-import { getMemSettings, saveMemSettings } from '@/lib/db/mem-db';
+import { closeMemItemByCondition, getMemRecord, getMemSettings, saveMemSettings } from '@/lib/db/mem-db';
 import { deleteWorktreesByIds } from '@/lib/db/worktree-db';
 import { getOrCreateWorktreeIncarnation } from '@/lib/mem/incarnation';
 import {
@@ -35,6 +35,7 @@ import {
   memPurge,
   memSettleDecisionTransition,
   memUpdateItem,
+  memWriteFromScreen,
   memWriteNow,
   writeSessionNoteFromScreen,
   type MemServiceDeps,
@@ -149,6 +150,28 @@ const recordedDecision = async (text: string) => {
   const item = (outcome.body as MemWriteResponse).item;
   return { id: item.id, version: item.version };
 };
+/** Issue #4227 (S-A): a request that carries the screen's mark, as the screen's routes pass it on. */
+const screenRequest = () => ({
+  headers: new Headers({ 'X-CommandMate-Client': 'screen', origin: 'http://localhost', host: 'localhost' }),
+  url: 'http://localhost/api/worktrees/wt-r/mem/screen/items',
+});
+const screenWrite = (op: 'add' | 'update' | 'close', body: Record<string, unknown>, itemId?: string) =>
+  memWriteFromScreen(db, screenRequest(), WT, { op, author: 'human', ...(itemId ? { itemId } : {}), body: { instanceId: 'claude', ...body } }, deps());
+/** Issue #4227 (Epic #4220 D6): an item a person added on the screen (`created_by = 'human'`, owned by `claude`). */
+let humanKeys = 0;
+const humanItem = async (text: string, kind: 'note' | 'next' = 'note') => {
+  humanKeys += 1;
+  const outcome = await screenWrite('add', {
+    kind,
+    text,
+    key: `human-${humanKeys}`,
+    expectBranch: 'feature/x',
+    ...(kind === 'next' ? { closeWhen: 'issue:#4221' } : {}),
+  });
+  const item = (outcome.body as MemWriteResponse).item;
+  expect(item.createdBy).toBe('human');
+  return { id: item.id, version: item.version };
+};
 const decisionIs = (state: string) => (made: { id: string; version: number } | undefined) =>
   itemIs('id = ? AND state = ? AND version = ?', made!.id, state, made!.version + 1);
 
@@ -223,6 +246,50 @@ const ENTRANCES: Record<string, Entrance> = {
     before: () => addDecision('record only'),
     request: (made) => settleDecision(made!, 'promote-record-only'),
     landed: decisionIs('promoted'),
+  },
+  // Issue #4227 (S-A・S-D): a person's add / edit / close from the screen, and the close
+  // of a recorded decision a person confirmed is not reflected (`withdraw-recorded`).
+  'screen-add': {
+    fn: 'memWriteFromScreen',
+    mode: 'on',
+    request: () => screenWrite('add', { kind: 'note', text: 'screen add', key: 'screen-add-1', expectBranch: 'feature/x' }),
+    landed: () => itemIs("text = 'screen add' AND created_by = 'human'"),
+  },
+  'screen-update': {
+    fn: 'memWriteFromScreen',
+    mode: 'on',
+    before: () => addNote('to screen update'),
+    request: (made) => screenWrite('update', { ifVersion: made!.version, text: 'screen updated' }, made!.id),
+    landed: (made) => itemIs("id = ? AND text = 'screen updated' AND updated_by = 'human'", made!.id),
+  },
+  'screen-close': {
+    fn: 'memWriteFromScreen',
+    mode: 'on',
+    before: () => addNote('to screen close'),
+    request: (made) => screenWrite('close', { ifVersion: made!.version }, made!.id),
+    landed: (made) => itemIs("id = ? AND state = 'closed' AND updated_by = 'human'", made!.id),
+  },
+  'screen-close-recorded': {
+    fn: 'memWriteFromScreen',
+    mode: 'on',
+    before: () => recordedDecision('to withdraw'),
+    request: (made) => screenWrite('close', { ifVersion: made!.version, confirmUnreflected: true }, made!.id),
+    landed: (made) => itemIs("id = ? AND state = 'closed' AND close_reason = 'withdrawn'", made!.id),
+  },
+  // Issue #4227 (D6): a person's item through a person's entrance (the agent's entrances refuse it, below).
+  'screen-update-human-item': {
+    fn: 'memWriteFromScreen',
+    mode: 'on',
+    before: () => humanItem('a person wrote it to update'),
+    request: (made) => screenWrite('update', { ifVersion: made!.version, text: 'a person updated it' }, made!.id),
+    landed: (made) => itemIs("id = ? AND text = 'a person updated it' AND created_by = 'human'", made!.id),
+  },
+  'screen-close-human-item': {
+    fn: 'memWriteFromScreen',
+    mode: 'on',
+    before: () => humanItem('a person wrote it to close'),
+    request: (made) => screenWrite('close', { ifVersion: made!.version }, made!.id),
+    landed: (made) => itemIs("id = ? AND state = 'closed' AND created_by = 'human'", made!.id),
   },
   'cli-purge': {
     fn: 'memPurge',
@@ -472,5 +539,70 @@ describe('a decision moves only when the branch is on and the version is the one
     );
     expect(outcome.status).toBeGreaterThanOrEqual(400);
     expect(itemIs("id = ? AND state = 'open'", made.id)).toBe(true);
+  });
+});
+
+/**
+ * Issue #4227 (Epic #4220 D6, the PM raised it to P2): an item a person wrote is changed
+ * and closed by a person only. The instance chosen as its owner does not make that
+ * instance's agent its author: A's agent entrances (`mem update` / `mem close`, and the
+ * condition's update) refuse it with `not_owner` (exit 55). A person's entrances and the
+ * condition's close (the server's evaluation) still go through. Each agent row lands
+ * if the check in `ownedBy` is removed (it did before this change); the agent's own items
+ * are unchanged (the `cli-*` rows of the table above, and the control here).
+ */
+describe('an item a person wrote is changed and closed by a person only (Epic #4220 D6, Issue #4227)', () => {
+  const D6_ROWS: Record<string, { refused: boolean; kind?: 'note' | 'next' }> = {
+    'cli-update': { refused: true },
+    'cli-close': { refused: true },
+    'condition-update': { refused: true, kind: 'next' },
+    'screen-update': { refused: false },
+    'screen-close': { refused: false },
+  };
+
+  it('names the agent and the person entrances that take an item (each a row of the table above)', () => {
+    for (const key of Object.keys(D6_ROWS)) expect(ENTRANCES[key]?.before).toBeTypeOf('function');
+    const rowFns = new Set(Object.keys(D6_ROWS).map((key) => ENTRANCES[key].fn));
+    expect([...rowFns].sort()).toEqual(['memCloseItem', 'memUpdateItem', 'memWriteFromScreen']);
+  });
+
+  it.each(Object.keys(D6_ROWS))('%s on a person’s item', async (key) => {
+    const row = D6_ROWS[key];
+    makeWorktree();
+    setMode('on');
+    const made = await humanItem(`person ${key}`, row.kind);
+    const outcome = await ENTRANCES[key].request(made);
+    if (row.refused) {
+      expect(outcome.status).toBe(409);
+      expect((outcome.body as { code: string }).code).toBe('not_owner');
+      expect(itemIs("id = ? AND version = ? AND state = 'open' AND text = ?", made.id, made.version, `person ${key}`)).toBe(true);
+    } else {
+      expect(outcome.status).toBeLessThan(300);
+      expect(ENTRANCES[key].landed(made)).toBe(true);
+    }
+  });
+
+  it('(control) the same agent entrances still change and close the agent’s own item', async () => {
+    makeWorktree();
+    setMode('on');
+    const updated = await addNote('agent own update');
+    const update = await memUpdateItem(db, WT, updated.id, { instanceId: 'claude', ifVersion: updated.version, text: 'agent changed own' }, deps());
+    expect(update.status).toBeLessThan(300);
+    const closed = await addNote('agent own close');
+    const close = await memCloseItem(db, WT, closed.id, { instanceId: 'claude' }, deps());
+    expect(close.status).toBeLessThan(300);
+    expect(itemIs("id = ? AND state = 'closed'", closed.id)).toBe(true);
+  });
+
+  it('the condition’s close (the server’s evaluation) still closes a person’s item', async () => {
+    makeWorktree();
+    setMode('on');
+    const made = await humanItem('person conditioned', 'next');
+    const record = getMemRecord(db, made.id)!;
+    const stored = (db.prepare('SELECT close_when FROM mem_items WHERE id = ?').get(made.id) as { close_when: string }).close_when;
+    expect(record.createdBy).toBe('human');
+    const closed = db.transaction(() => closeMemItemByCondition(db, made.id, { version: made.version, closeWhen: stored }, Date.now()))();
+    expect(closed?.state).toBe('closed');
+    expect(itemIs("id = ? AND state = 'closed' AND close_reason = 'condition'", made.id)).toBe(true);
   });
 });

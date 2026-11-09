@@ -3,6 +3,11 @@
  * match wins), each branch's own mode, and the three switches. The only place a mode
  * is changed; the CLI reads it. Opened from the repository list, as the roles are,
  * so the PC and the phone share it.
+ *
+ * Issue #4227 (S-E, the screen only): each mode and switch says what it does (`popup`
+ * is "attended or unattended"; in G-PR1 it is saved only, no dialog yet), the rows wrap at
+ * a phone's width, the items screen is linked, and the items screen opens this with
+ * its branch filled in for a new override (`initialOverrideBranch`). The API is the same.
  */
 
 'use client';
@@ -26,14 +31,22 @@ type SaveState = null | 'saving' | 'saved' | 'conflict' | 'invalid' | 'failed';
 const INPUT_CLASS =
   'rounded border border-border bg-surface px-2 py-1 text-xs text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
-export function RepositoryMemSettings({ repositoryId }: { repositoryId: string }): React.ReactElement {
+export interface RepositoryMemSettingsProps {
+  repositoryId: string;
+  /** Issue #4227: the branch the items screen shows, filled in as a new override. */
+  initialOverrideBranch?: string;
+  /** Issue #4227: told after a save that took, so the items screen reads its mode again. */
+  onSaved?: () => void;
+}
+
+export function RepositoryMemSettings({ repositoryId, initialOverrideBranch, onSaved }: RepositoryMemSettingsProps): React.ReactElement {
   const t = useTranslations('common');
   const [settings, setSettings] = useState<MemRepositorySettings | null>(null);
   const [rules, setRules] = useState<MemBranchRule[]>([]);
   const [features, setFeatures] = useState<MemFeatures>({ injectOnStart: false, promptOnEvents: false, popup: false });
   const [loadFailed, setLoadFailed] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>(null);
-  const [newBranch, setNewBranch] = useState('');
+  const [newBranch, setNewBranch] = useState(initialOverrideBranch ?? '');
   const [newBranchMode, setNewBranchMode] = useState<MemMode>('on');
   const requestRef = useRef(0);
 
@@ -64,6 +77,7 @@ export function RepositoryMemSettings({ repositoryId }: { repositoryId: string }
       if (result.ok) {
         adopt(result.settings);
         setSaveState('saved');
+        onSaved?.();
         return;
       }
       if (result.status === 409) {
@@ -73,7 +87,7 @@ export function RepositoryMemSettings({ repositoryId }: { repositoryId: string }
       }
       setSaveState(result.status === 400 ? 'invalid' : 'failed');
     },
-    [adopt]
+    [adopt, onSaved]
   );
 
   const saveRules = useCallback(async () => {
@@ -145,6 +159,22 @@ export function RepositoryMemSettings({ repositoryId }: { repositoryId: string }
       >
         {t('mem.decisions.open')}
       </Link>
+      {/* Issue #4227: the items of a branch (read, add, edit, close). */}
+      <Link
+        href={`/repositories/${encodeURIComponent(repositoryId)}/mem`}
+        className="ml-3 inline-block text-xs text-foreground underline"
+        data-testid={`repository-mem-items-${repositoryId}`}
+      >
+        {t('mem.items.open')}
+      </Link>
+      {/* Issue #4227 (S-E): what each mode does. */}
+      <ul className="space-y-0.5 text-xs text-muted-foreground" data-testid={`repository-mem-mode-help-${repositoryId}`}>
+        {MEM_MODES.map((mode) => (
+          <li key={mode}>
+            <span className="font-medium text-foreground">{modeLabel(mode)}</span>: {t(`mem.modeHelp.${mode}`)}
+          </li>
+        ))}
+      </ul>
 
       <section className="space-y-2">
         <h4 className="text-xs font-medium text-foreground">{t('mem.rules.title')}</h4>
@@ -214,14 +244,18 @@ export function RepositoryMemSettings({ repositoryId }: { repositoryId: string }
       <section className="space-y-1">
         <h4 className="text-xs font-medium text-foreground">{t('mem.features.title')}</h4>
         {MEM_FEATURE_KEYS.map((key) => (
-          <label key={key} className="flex items-center gap-2 text-xs text-foreground">
+          <label key={key} className="flex items-start gap-2 text-xs text-foreground">
             <input
               type="checkbox"
+              className="mt-0.5"
               data-testid={`repository-mem-feature-${repositoryId}-${key}`}
               checked={features[key]}
               onChange={(e) => setFeatures((current) => ({ ...current, [key]: e.target.checked }))}
             />
-            {t(`mem.features.${key}`)}
+            <span className="min-w-0">
+              {t(`mem.features.${key}`)}
+              <span className="block text-muted-foreground">{t(`mem.featureHelp.${key}`)}</span>
+            </span>
           </label>
         ))}
       </section>

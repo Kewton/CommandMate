@@ -853,9 +853,17 @@ function settleCheckedVersion(db: Database.Database, itemId: string, previous: n
   else db.prepare('UPDATE mem_items SET checked_rules_version = ? WHERE id = ?').run(previous, itemId);
 }
 
-/** Whether this actor may change this record: its author's incarnation, or a person. */
+/**
+ * Whether this actor may change this record: its author's incarnation, or a person.
+ *
+ * An item a person wrote (`created_by = 'human'`, from the screen, Issue #4227) is
+ * changed and closed by a person only (Epic #4220 D6): the instance chosen as its owner
+ * does not make its agent the author. The condition's close (`closeMemItemByCondition`)
+ * does not ask this and still closes it. A `now` slot stays its instance's (#2427).
+ */
 function ownedBy(db: Database.Database, record: MemRecord, actor: MemActor): boolean {
   if (actor.by === 'human') return true;
+  if (record.createdBy === 'human' && record.kind !== 'now') return false;
   const current = getInstanceIncarnation(db, actor.worktreeId, actor.instanceId);
   if (!current || current.incarnation !== actor.capturedIncarnation) return false;
   // The author is its incarnation, which a rename carries to the new worktree ID;
@@ -946,6 +954,60 @@ export function closeMemItem(
       `UPDATE mem_items SET state = 'closed', closed_at = ?, close_reason = ?, close_note = ?, updated_at = ?,
          version = version + 1, updated_by = ?, updated_by_instance = ? WHERE id = ?`
     ).run(now, transition.reason ?? 'manual', reason, now, actor.by, actor.by === 'agent' ? actor.instanceId : null, itemId);
+    return { ok: true as const, record: recordFromItem(findItemRow(db, itemId)!) };
+  })();
+}
+
+/** How the screen's close (Issue #4227, S-D) moves an item. */
+export type MemVersionedCloseTransition = 'close' | 'withdraw-recorded';
+
+export interface MemVersionedClose {
+  /** The version the person read (or approved); another is `version_conflict`. */
+  ifVersion: number;
+  reason: string | null;
+  transition: MemVersionedCloseTransition;
+}
+
+/**
+ * A close compared against a version, in one transaction (Issue #4227, S-D): the
+ * version, then who may change it (`ownedBy`), then the transition table, then the
+ * close. `withdraw-recorded` closes a recorded decision as `withdrawn` — the only way
+ * out of `recorded` short of `promoted`, asked for by a person on the screen alone.
+ * A `now` slot is not closed here (the #2427 note keeps its own path): `state_forbids`.
+ * {@link closeMemItem} is unchanged (the CLI and A's route call it).
+ */
+export function closeMemItemVersioned(
+  db: Database.Database,
+  actor: MemActor,
+  itemId: string,
+  close: MemVersionedClose,
+  now: number = Date.now()
+): { ok: true; record: MemRecord } | MemStoreFailure {
+  return db.transaction(() => {
+    const current = getMemRecord(db, itemId);
+    if (!current) return { ok: false as const, code: 'item_not_found' as const };
+    if (current.version !== close.ifVersion) return { ok: false as const, code: 'version_conflict' as const, current };
+    if (!ownedBy(db, current, actor)) return { ok: false as const, code: 'not_owner' as const, current };
+    if (findSlotByItem(db, itemId)) return { ok: false as const, code: 'state_forbids' as const, current };
+    const step = memTransition(current.kind, current.state, close.transition);
+    if (!step.ok) return { ok: false as const, code: 'state_forbids' as const, current };
+    const changed = db
+      .prepare(
+        `UPDATE mem_items SET state = 'closed', closed_at = ?, close_reason = ?, close_note = ?, updated_at = ?,
+           version = version + 1, updated_by = ?, updated_by_instance = ? WHERE id = ? AND version = ? AND state = ?`
+      )
+      .run(
+        now,
+        step.reason ?? 'manual',
+        close.reason,
+        now,
+        actor.by,
+        actor.by === 'agent' ? actor.instanceId : null,
+        itemId,
+        close.ifVersion,
+        current.state
+      );
+    if (changed.changes !== 1) return { ok: false as const, code: 'version_conflict' as const, current };
     return { ok: true as const, record: recordFromItem(findItemRow(db, itemId)!) };
   })();
 }

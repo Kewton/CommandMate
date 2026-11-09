@@ -22,6 +22,7 @@ import { getWorktreeById } from '@/lib/db/worktree-db';
 import { MAX_SESSION_NOTE_LENGTH, normalizeSessionNoteText, sessionNoteLength } from '@/lib/db/agent-instances-db';
 import {
   closeMemItem,
+  closeMemItemVersioned,
   countClosedItems,
   countOpenItems,
   createMemItem,
@@ -40,8 +41,11 @@ import {
   type MemDecisionTransition,
   type MemScope,
   type MemStoreFailure,
+  type MemVersionedCloseTransition,
   type SessionSlotView,
 } from '@/lib/db/mem-db';
+import { isSameInstanceLifetime, readInstanceLifetime, type InstanceLifetime } from '@/lib/db/session-brief-db';
+import { isScreenRequest } from '@/lib/security/screen-request';
 import { createLogger } from '@/lib/logger';
 import { getMemNotice as getMemNoticeRow, memModeOnFor } from '@/lib/db/mem-close-db';
 import { resolveAgentInstances } from '@/lib/session/agent-instances-resolver';
@@ -502,6 +506,297 @@ export async function memCloseItem(
     logger.info('mem-item-closed', { worktreeId, instanceId: actor.instanceId, itemId });
     return writeOk(result.record, false, []);
   });
+}
+
+// ---------------------------------------------------------------------------
+// A person's writes from the screen (Issue #4227, design `mem-ui-4227.md` §0.0b S-A・S-D・§2.3)
+// ---------------------------------------------------------------------------
+
+type ScreenRequest = Parameters<typeof isScreenRequest>[0];
+
+/** The refusals only the screen's entrance answers with (all 409; nothing is written). */
+export const MEM_SCREEN_REFUSALS = ['incarnation_changed', 'membership_changed', 'confirmation_required', 'fenced'] as const;
+export type MemScreenRefusal = (typeof MEM_SCREEN_REFUSALS)[number];
+
+const SCREEN_MESSAGES: Record<MemScreenRefusal, string> = {
+  incarnation_changed: 'The worktree or the instance is not the one the request was read for',
+  membership_changed: 'The branch is not the one the request was made for',
+  confirmation_required: 'Closing a recorded decision needs the confirmation that it is not reflected',
+  fenced: 'The request was withdrawn before the write',
+};
+
+function screenRefusal(code: MemScreenRefusal, extra: Record<string, unknown> = {}): MemOutcome {
+  return { status: 409, body: { ok: false, code, message: SCREEN_MESSAGES[code], ...extra } };
+}
+
+export type MemScreenWriteOp = 'add' | 'update' | 'close';
+
+/**
+ * What a caller fixed when the person's request (or the hand-off's request) was made,
+ * compared in the final stretch (S-A (iii)・(iv)). The screen's own routes pass none:
+ * the lifetimes are then fixed when the request is read, and the branch is `expectBranch`.
+ */
+export interface MemScreenPin {
+  worktreeIncarnation: string | null;
+  instanceLifetime: Pick<InstanceLifetime, 'incarnation' | 'onRoster'>;
+  membership: { repositoryId: string; branch: string | null; detached: boolean };
+}
+
+export interface MemScreenWriteInput {
+  op: MemScreenWriteOp;
+  /** `human`: a person on the screen. `proposer`: an agent's proposal a person approved (written as the agent). */
+  author: 'human' | 'proposer';
+  /** The item updated or closed (not for `add`). */
+  itemId?: string;
+  /**
+   * The request's fields as sent: `instanceId`, and per op `kind`・`text`・`closeWhen`・
+   * `evidence`・`key`・`expectBranch` (add), `ifVersion`・`text`・`closeWhen`・`evidence`
+   * (update), `ifVersion`・`reason`・`confirmUnreflected` (close). Never `author`, `pin`
+   * or `fence`: those come from the caller, not from the request body.
+   */
+  body: Record<string, unknown>;
+  pin?: MemScreenPin;
+  /** Asked in the same transaction just before the write; false writes nothing (`fenced`). */
+  fence?: () => boolean;
+}
+
+type ScreenPrepared =
+  | { op: 'add'; kind: Exclude<MemKind, 'now'>; fields: { text: string; promoteTo: string | null; quote: string | null; quoteAt: number | null; evidence: string[] }; key: string; draft: CloseWhenDraft; closeWhenInput: string | null }
+  | { op: 'update'; itemId: string; ifVersion: number; patch: { text?: string; closeWhen?: string | null; evidence?: string[] }; draft: CloseWhenDraft | null }
+  | { op: 'close'; itemId: string; ifVersion: number; reason: string | null; confirmUnreflected: boolean };
+
+const isVersion = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 0;
+
+/** `expectBranch`: a branch name, or null for a detached HEAD. Undefined when not sent. */
+function readExpectBranch(value: unknown): { ok: true; value: string | null | undefined } | { ok: false } {
+  if (value === undefined) return { ok: true, value: undefined };
+  if (value === null || (typeof value === 'string' && value.length > 0)) return { ok: true, value };
+  return { ok: false };
+}
+
+function prepareScreenWrite(
+  db: Database.Database,
+  input: MemScreenWriteInput,
+  worktreePath: string,
+  now0: number
+): { ok: true; prepared: ScreenPrepared } | { ok: false; outcome: MemOutcome } {
+  const body = input.body;
+  const fail = (outcome: MemOutcome) => ({ ok: false as const, outcome });
+  if (input.op === 'add') {
+    // The `now` slot stays the #2427 note's path (§2.2): refused as A's `memAddItem` does.
+    if (!isMemKind(body.kind) || body.kind === 'now') return fail(memError('invalid_request', { field: 'kind' }));
+    const kind = body.kind;
+    const fields = validateMemFields(kind, body, worktreePath, now0);
+    if (!fields.ok) return fail(fieldError(fields.error));
+    // One key per press: a second press or a resend is the same item (A §5.4).
+    const key = validateKey(body.key);
+    if (!key.ok) return fail(fieldError(key.error));
+    const draft = parseCloseWhen(kind, body.closeWhen);
+    if (!draft.ok) return fail(memError('invalid_close_when', { field: 'closeWhen', reason: draft.reason }));
+    return {
+      ok: true,
+      prepared: {
+        op: 'add',
+        kind,
+        fields: fields.value,
+        key: key.value,
+        draft: draft.draft,
+        closeWhenInput: typeof body.closeWhen === 'string' ? body.closeWhen : null,
+      },
+    };
+  }
+  if (typeof input.itemId !== 'string' || input.itemId.length === 0) return fail(memError('invalid_request', { field: 'itemId' }));
+  if (!isVersion(body.ifVersion)) return fail(memError('invalid_request', { field: 'ifVersion' }));
+  const record = getMemRecord(db, input.itemId);
+  if (!record) return fail(memError('item_not_found'));
+  if (record.kind === 'now') return fail(memError('invalid_request', { field: 'kind' }));
+  if (input.op === 'update') {
+    const patch: { text?: string; evidence?: string[] } = {};
+    if (body.text !== undefined) {
+      const text = validateItemText(body.text);
+      if (!text.ok) return fail(fieldError(text.error));
+      if (text.value.length === 0) return fail(memError('invalid_request', { field: 'text' }));
+      patch.text = text.value;
+    }
+    if (body.evidence !== undefined) {
+      const evidence = validateEvidence(body.evidence, worktreePath);
+      if (!evidence.ok) return fail(fieldError(evidence.error));
+      patch.evidence = evidence.value;
+    }
+    let draft: CloseWhenDraft | null = null;
+    if (body.closeWhen !== undefined) {
+      const parsed = parseCloseWhen(record.kind, body.closeWhen);
+      if (!parsed.ok) return fail(memError('invalid_close_when', { field: 'closeWhen', reason: parsed.reason }));
+      draft = parsed.draft;
+    }
+    return { ok: true, prepared: { op: 'update', itemId: input.itemId, ifVersion: body.ifVersion, patch, draft } };
+  }
+  let reason: string | null = null;
+  if (body.reason !== undefined && body.reason !== null) {
+    const checked = validateReason(body.reason);
+    if (!checked.ok) return fail(fieldError(checked.error));
+    reason = checked.value.length > 0 ? checked.value : null;
+  }
+  if (body.confirmUnreflected !== undefined && typeof body.confirmUnreflected !== 'boolean') {
+    return fail(memError('invalid_request', { field: 'confirmUnreflected' }));
+  }
+  return {
+    ok: true,
+    prepared: { op: 'close', itemId: input.itemId, ifVersion: body.ifVersion, reason, confirmUnreflected: body.confirmUnreflected === true },
+  };
+}
+
+/** Whether a stored item belongs to the branch the target resolved (S-A (i)). */
+function itemOnTarget(record: MemRecord, target: MemTargetResolved): boolean {
+  if (!target.readRepositoryIds.includes(record.owner.repositoryId)) return false;
+  const branch = target.detached ? null : target.branch;
+  if (record.owner.branch !== branch) return false;
+  // A detached item is narrowed to its worktree, as the list narrows it (`scopeClause`).
+  return branch !== null || record.owner.worktreeId === target.worktree?.id;
+}
+
+/**
+ * The one way a person (or a proposal a person approved) writes an item from the
+ * screen (Issue #4227, S-A): `add`・`update`・`close`. The same checks as A's three
+ * entrances (validate, the condition, the mode `on` of the target), and the writer is
+ * `human` for a person. A person passes A's `ownedBy`, so what an agent's entrance
+ * gets from the ownership check is asked explicitly here, in the final stretch (the
+ * target's synchronous build wrapped in one transaction):
+ *
+ * - (i) an item updated or closed belongs to the branch this worktree's route resolved;
+ * - (ii) the mode is `on`;
+ * - (iii) the worktree's lifetime and the instance's (`isSameInstanceLifetime`, so the
+ *   lawful `null → lazy` issue is not refused) are those fixed when the request was read
+ *   (or the caller's `pin`): otherwise 409 `incarnation_changed`;
+ * - (iv) the branch is the one asked for (`pin.membership`, or the screen's `expectBranch`):
+ *   otherwise 409 `membership_changed`.
+ *
+ * A close is compared against the version in the store's one transaction
+ * (`closeMemItemVersioned`, S-D). A recorded decision closes (as `withdrawn`) only
+ * for a person who confirmed it is not reflected (`confirmUnreflected: true`);
+ * without it 409 `confirmation_required`. A proposal never closes a recorded one.
+ *
+ * The screen's mark is asked here too, not only in the route (403 `screen_only`).
+ * Callers: the screen's item routes (`…/mem/screen/**`) and, later, the hand-off's
+ * decide. The CLI has no way to it (`tests/unit/guards/mem-screen-write-4227.test.ts`).
+ */
+export async function memWriteFromScreen(
+  db: Database.Database,
+  request: ScreenRequest,
+  worktreeId: string,
+  input: MemScreenWriteInput,
+  deps: MemServiceDeps = {}
+): Promise<MemOutcome> {
+  if (!isScreenRequest(request)) return memError('screen_only');
+  const lookup = lookupActor(db, worktreeId, input.body.instanceId, input.author === 'human' ? 'human' : 'agent');
+  if (!lookup.ok) return lookup.outcome;
+  const { worktree, actor } = lookup;
+  // (iii): fixed now, before any await (or given by the caller that fixed them earlier).
+  const worktreeIncarnation = input.pin ? input.pin.worktreeIncarnation : getWorktreeIncarnation(db, worktreeId);
+  const earlierLifetime = input.pin ? input.pin.instanceLifetime : readInstanceLifetime(db, worktreeId, actor.instanceId);
+  const expectBranch = readExpectBranch(input.body.expectBranch);
+  if (!expectBranch.ok) return memError('invalid_request', { field: 'expectBranch' });
+  // The screen's add names the branch it shows (S-A (iv), H14(e)); a pin names it for a caller.
+  if (input.op === 'add' && input.author === 'human' && !input.pin && expectBranch.value === undefined) {
+    return memError('invalid_request', { field: 'expectBranch' });
+  }
+  const prepared = prepareScreenWrite(db, input, worktree.path, deps.now?.() ?? Date.now());
+  if (!prepared.ok) {
+    logger.info('mem-screen-refused', { worktreeId, instanceId: actor.instanceId, op: input.op, code: (prepared.outcome.body as { code?: string }).code });
+    return prepared.outcome;
+  }
+  const plan = prepared.prepared;
+  const draft = plan.op === 'close' ? null : plan.draft;
+  const answers = draft ? await askConditionGit(draft, worktree.path, deps) : { origin: null, tip: null };
+
+  const write = (target: MemTarget): MemOutcome => {
+    if (!target.ok) return targetFailure(target);
+    if (target.mode !== 'on') return memError('disabled', { mode: target.mode, source: target.source });
+    // (iii) the lifetimes.
+    if (worktreeIncarnation === null || getWorktreeIncarnation(db, worktreeId) !== worktreeIncarnation) {
+      return screenRefusal('incarnation_changed');
+    }
+    if (!isSameInstanceLifetime(earlierLifetime, readInstanceLifetime(db, worktreeId, actor.instanceId), actor.cliToolId)) {
+      return screenRefusal('incarnation_changed');
+    }
+    if (actor.stillOnRoster && !actor.stillOnRoster()) return screenRefusal('incarnation_changed');
+    // (iv) the branch asked for.
+    const branch = target.detached ? null : target.branch;
+    if (input.pin) {
+      const pinned = input.pin.membership;
+      if (pinned.repositoryId !== target.storageRepositoryId || pinned.branch !== branch || pinned.detached !== target.detached) {
+        return screenRefusal('membership_changed');
+      }
+    }
+    if (expectBranch.value !== undefined && expectBranch.value !== branch) return screenRefusal('membership_changed');
+    const now = deps.now?.() ?? Date.now();
+
+    if (plan.op === 'add') {
+      const condition = bindCondition(db, plan.draft, answers, target.storageRepositoryId, now);
+      if (!condition.ok) return memError('invalid_close_when', { field: 'closeWhen' });
+      if (input.fence && !input.fence()) return screenRefusal('fenced');
+      const scope = scopeOf(target);
+      const result = createMemItem(
+        db,
+        actor,
+        scope,
+        {
+          kind: plan.kind,
+          text: plan.fields.text,
+          closeWhen: condition.json,
+          closeWhenInput: plan.closeWhenInput,
+          promoteTo: plan.fields.promoteTo,
+          quote: plan.fields.quote,
+          quoteAt: plan.fields.quoteAt,
+          evidence: plan.fields.evidence,
+          key: plan.key,
+        },
+        now
+      );
+      if (!result.ok) return screenStoreFailure(result);
+      logger.info('mem-screen-written', { worktreeId, instanceId: actor.instanceId, op: 'add', by: actor.by, itemId: result.record.id, replayed: result.replayed });
+      return writeOk(result.record, result.replayed, openWarnings(db, scope, [plan.kind]));
+    }
+
+    // (i) the item is of this branch.
+    const current = getMemRecord(db, plan.itemId);
+    if (!current) return memError('item_not_found');
+    if (!itemOnTarget(current, target)) return screenRefusal('membership_changed', { itemId: current.id });
+
+    if (plan.op === 'update') {
+      const patch: { text?: string; closeWhen?: string | null; evidence?: string[] } = { ...plan.patch };
+      if (plan.draft) {
+        const condition = bindCondition(db, plan.draft, answers, current.owner.repositoryId, now);
+        if (!condition.ok) return memError('invalid_close_when', { field: 'closeWhen' });
+        patch.closeWhen = condition.json;
+      }
+      if (input.fence && !input.fence()) return screenRefusal('fenced');
+      const result = updateMemItem(db, actor, plan.itemId, plan.ifVersion, patch, now);
+      if (!result.ok) return screenStoreFailure(result);
+      logger.info('mem-screen-written', { worktreeId, instanceId: actor.instanceId, op: 'update', by: actor.by, itemId: plan.itemId, version: result.record.version });
+      return writeOk(result.record, false, []);
+    }
+
+    let transition: MemVersionedCloseTransition = 'close';
+    if (current.kind === 'decision' && current.state === 'recorded' && actor.by === 'human' && current.version === plan.ifVersion) {
+      // S-D: only a person who said it is not reflected closes a recorded decision.
+      if (!plan.confirmUnreflected) return screenRefusal('confirmation_required', { itemId: current.id });
+      transition = 'withdraw-recorded';
+    }
+    if (input.fence && !input.fence()) return screenRefusal('fenced');
+    const result = closeMemItemVersioned(db, actor, plan.itemId, { ifVersion: plan.ifVersion, reason: plan.reason, transition }, now);
+    if (!result.ok) return screenStoreFailure(result);
+    logger.info('mem-screen-written', { worktreeId, instanceId: actor.instanceId, op: 'close', by: actor.by, itemId: plan.itemId, transition });
+    return writeOk(result.record, false, []);
+  };
+
+  return resolveTarget(db, { via: 'worktree', worktreeId }, deps, (target) => db.transaction(() => write(target))());
+}
+
+/** The store's refusals as the screen reads them: a lifetime the store found changed is `incarnation_changed`. */
+function screenStoreFailure(failure: MemStoreFailure): MemOutcome {
+  if (failure.code === 'instance_not_found') return screenRefusal('incarnation_changed');
+  return storeFailure(failure);
 }
 
 // ---------------------------------------------------------------------------
