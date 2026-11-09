@@ -1,6 +1,6 @@
 # 人が差分を承認して decision を正本へ記録し、反映を確かめる（Issue #4225 / Epic #4220 の子 E）設計
 
-- 状態：設計の段（第 1 版、実装前）。**§0.1 の「止める点」に PM の判断が要る点がある**。実装は Codex の事前レビューの後、同じブランチの別の契約で行う
+- 状態：設計の段（第 2 版、実装前）。第 1 版の「止める点」は PM が決めた（§0.1）。実装は Codex の事前レビューの後、同じブランチの別の契約で行う
 - 前提：Epic #4220 の決定事項 D1〜D13（とくに D3・D6・D9・D11・D12）。A（#4221）`docs/design/mem-store-4221.md`（以下「A」）、B（#4222）`docs/design/mem-close-when-4222.md`（「B」）、C（#4223）`docs/design/brief-4223.md`（「C」）、D1（#4274）`docs/design/session-boundary-brief-4274.md`（「D1」）。D2（#4224）は並行で設計中で、この文書は触れない
 - 凡例：**［事実］** = この文書を書いた時点（2026-11-09、`feature/4225-worktree` = develop `64572168c`）でファイルと行を読んで確かめたもの。**［見立て］** = 設計としての判断。**［未確認］** = 読んでいない・実測していないもの。行番号は確認時点のもので、実装の契約では名前で探し直す
 
@@ -8,17 +8,17 @@
 
 ## 0. 冒頭
 
-### 0.1 止める点（PM の判断が要る）
+### 0.1 決定（第 1 版の「止める点」への PM の答え、2026-11-09）
 
-契約の「止める条件」に当たるものが 2 件、当たるか判断の分かれるものが 1 件ある。**S1 は実装の前に決めてもらう必要がある**。S2・S3 は E の範囲から外して後続（G #4227）へ送る案を推す。以下の §1 以降は「S1 = 案 1 を採る」前提で書いた（案 2 の場合に変わる所は §8.3 に書く）。
+第 1 版は、契約の「止める条件」に当たる点を S1〜S3 として挙げて止めた。PM の決定（`workspace/orchestration/runs/2026-11-08/pm-return-4225-stop.md` の末尾）は次のとおり。
 
-| # | 箇所（A のファイル） | 何が要るか | 理由（事実） | 推す案 |
-|---|---|---|---|---|
-| **S1** | `src/lib/db/mem-db.ts`・`src/lib/mem/service.ts`、試験 `tests/unit/lib/mem/write-entrances-recreate-4221.test.ts` の `ENTRANCES` | decision の `open → recorded`・`recorded → promoted`・`open → promoted`（記録だけ）を `mem_items` に書く **store の書き込み関数** と、それを呼ぶ **service の入口** | (a) `mem-db.ts` には decision の状態を `recorded`・`promoted` へ進める関数が無い（書き込みの export は `createMemItem`・`updateMemItem`・`closeMemItem`・`closeMemItemByCondition`・`replaceNowSlot`・`writeScreenNote`・`purgeMem` 等。`mem-db.ts:659`・`:867`・`:923`・`:1060`）。A は「A の実装は `open` と `closed` だけを作り、`recorded`/`promoted` の検査だけを先に置く」と決めた（A §3.2）。(b) A の試験が「store の書き込みは service からだけ呼ぶ」（`write-entrances-recreate-4221.test.ts:290-295`）と、「service の export のうち store の書き込みに届くものは、すべて作り直しの表 `ENTRANCES` にある」（`:274-285`、A §16 I17・I18）を固定している。(c) 書き込みに要る行の読み・所有の照合は private（`findItemRow` `:642`・`recordFromItem` `:392`・`ownedBy` `:857`） | **案 1（推す）**：`mem-db.ts` に `transitionDecision(db, itemId, expected:{version}, transition:'record'\|'promote'\|'promote-record-only', now)` を 1 つ足し（`memTransition` を呼び、`version+1`・`updated_by='human'`）、`service.ts` に入口 `memSettleDecisionTransition`（E の lib からだけ呼ぶ）を足し、`ENTRANCES` に行を足す（既存の行・`it` は変えない、足すだけ）。A の不変条件（全入口の表）に E の書き込みが入る。**案 2**：A のファイルを変えず、E の新しいファイル（`src/lib/db/mem-promote-db.ts`）が `UPDATE mem_items` を直接書く。A の試験は文字列（関数名）で見ているので通ってしまうが、A の「書き込みは service だけ」「全入口の表」の意図を外から迂回する。E の側に同じ形の表を別に持つことになる（2 つの表が食い違いうる） |
-| **S2** | `src/lib/mem/transitions.ts:45-48` | 人が画面で `recorded` の decision を閉じる遷移 | A §3.2 は「`recorded` の `mem close` は断る（exit 55）。人が画面で閉じる」と書くが、`memTransition` は `recorded` の `close` を誰に対しても断る（`transitions.ts:45-48`：`open` は `withdrawn`、`promoted` は `manual`、それ以外は `ok:false`）。人の経路の遷移は無い［事実］ | **E では作らない**。Issue の流れ（`open → recorded → promoted → closed`）は `recorded` から閉じることを求めていない。`recorded` は「反映を確かめる」（→ `promoted`）か、残して警告を出し続けるかのどちらかにする。誤って記録した decision を閉じる口は G（#4227）の画面で `transitions.ts` に `close-by-human` を足す形で決める（A の文面と transitions の食い違いは本文に無い指摘として返す） |
-| S3 | `src/cli/commands/mem.ts:169`（一覧の 1 行）・`src/lib/brief/sources.ts:452`・`:479` | 「未反映の警告」を CLI の一覧と brief にも文言で出すか | CLI の一覧は `[kind] id vN <state>` の形で `recorded` をそのまま出す（`mem.ts:169`）。brief は `recorded` の decision を rank 4 に上げ、`state:recorded` と、条件が成立していれば `unreflected:true` を出す（`sources.ts:452`・`:479`）。古さ（`staleness.ts:19`：decision は 14 日）は `recorded` にもかかる（`:26` は `closed`・`promoted` だけを除く）［事実］ | **変えない**。Issue の「警告」は E の画面（§4）と E の API の応答の欄（`unreflected:true`）で出す。CLI と brief は既に `recorded` を区別して出している。文言を足すなら G か F（#4226）で |
+| # | 止めた点 | 決定 | この文書への反映 |
+|---|---|---|---|
+| **S1** | decision を `open → recorded`・`recorded → promoted`・`open → promoted`（記録だけ）へ進める store の書き込みが無い。`src/lib/db/mem-db.ts` の書き込みの export（`createMemItem`・`updateMemItem`・`closeMemItem`・`closeMemItemByCondition`・`replaceNowSlot`・`writeScreenNote`・`purgeMem` 等、`mem-db.ts:659`・`:867`・`:923`・`:1060`）に遷移の関数が無く、A は `recorded`/`promoted` の検査だけを先に置いた（A §3.2、`transitions.ts:51-56`）。A の試験が「store の書き込みは service からだけ」（`write-entrances-recreate-4221.test.ts:290-295`）と「store の書き込みに届く service の export はすべて `ENTRANCES` にある」（`:274-285`、A §16 I17・I18）を固定している［事実］ | **案 1 を採る。** A の `mem-db.ts` に `transitionDecision` を 1 つ、`src/lib/mem/service.ts` に入口を 1 つ足し、`write-entrances-recreate-4221.test.ts` の `ENTRANCES` に行を足す。既存の行・`it`・期待値・関数の振る舞いは変えない（足すだけ）。**条件**：足した入口も既存の 3 つの不変条件（作り直した後の古い要求の拒否・mode `off`/`derived` で書かない・版の食い違いを断る）を表の行で確かめ、直しを外すと落ちる陽性の対照を置く。理由：不変条件を 1 つの表に保つ（#4222・#4223 も同じ形で通した） | §6.3（変える既存のファイル）、§7（`ENTRANCES` の行と対照）。採らなかった案 2 は §8.3 |
+| S2 | 人が画面で `recorded` の decision を閉じる遷移が無い（A §3.2 は「人が画面で閉じる」と書くが、`transitions.ts:45-48` は `recorded` の `close` を誰に対しても断る）［事実］ | **G（#4227）へ送った**（PM が #4227 にコメント済み）。E では作らない | E の `recorded` は「反映を確かめる」（→ `promoted`）か、残して警告を出し続けるかのどちらか。`transitions.ts` は E で変えない |
+| S3 | 「未反映の警告」を CLI の一覧（`src/cli/commands/mem.ts:169`）と brief（`src/lib/brief/sources.ts:452`・`:479`）にも文言で出すか。両方とも既に `recorded` を区別して出し、古さ（`staleness.ts:19`・`:26`）も `recorded` にかかる［事実］ | **G（#4227）へ送った**。E では変えない | Issue の「警告」は E の画面（§4）と E の API の応答の欄（`unreflected:true`）で出す |
 
-D1〜D13 と違う作りは採らない（S1 の案 1・案 2 のどちらでも D9 のとおり）。
+D1〜D13 と違う作りは採らない（D9 のとおり）。
 
 ### 0.2 D・A・B・Issue の文面だけでは一意に決まらず、この文書が選んだ解釈
 
@@ -317,7 +317,7 @@ CREATE UNIQUE INDEX idx_mem_promote_attempt_open ON mem_promote_attempts(operati
 | `src/lib/promote/render.ts` | §5.2 の本文（フェンス・`revealInvisible`・秘密の検査） |
 | `src/lib/promote/github-write.ts` | コメントの作成（POST）・照合（GET）・結果の分類 |
 | `src/lib/promote/doc-write.ts` | §3.3 |
-| `src/lib/promote/service.ts` | preview・approve・confirm・reconcile・abandon・settle-transition。mem の項目の遷移は S1 の入口だけを呼ぶ |
+| `src/lib/promote/service.ts` | preview・approve・confirm・reconcile・abandon・settle-transition。mem の項目の遷移は §6.3 の入口 `memSettleDecisionTransition` だけを呼ぶ |
 | `src/lib/db/mem-promote-db.ts` | §6.1 の表の CRUD（`mem_items` は書かない） |
 | `src/app/api/repositories/[id]/mem/decisions/**/route.ts` | §4.2 |
 | `src/app/repositories/[id]/mem/decisions/page.tsx`・`src/components/mem/DecisionPromotePanel.tsx`・画面の client（`screenRequestHeaders` つき） | §4.1 |
@@ -325,18 +325,18 @@ CREATE UNIQUE INDEX idx_mem_promote_attempt_open ON mem_promote_attempts(operati
 
 - E のコードを `src/lib/mem/` の下に置かないのは、止める条件の「`src/lib/mem/**`」に当たらないため。代わりに A の常駐のガード（`mem-no-resident-4222.test.ts:29-52`）と同じ検査を `src/lib/promote/` にかけるガードを足す（`setInterval`・detached・`unref` を持たない。`execFile` の `timeout` は使う）［見立て］
 
-### 6.3 変える既存のファイル（S1 の案 1 のとき）
+### 6.3 変える既存のファイル（§0.1 S1 の決定：案 1）
 
-- `src/lib/db/mem-db.ts`：`transitionDecision` を 1 つ足す（既存の関数は変えない）
-- `src/lib/mem/service.ts`：入口 `memSettleDecisionTransition` を 1 つ足す（作り直しの照合は context の worktree の世代で行う。`lookupActor` は `by:'human'` で通る）
-- `tests/unit/lib/mem/write-entrances-recreate-4221.test.ts`：`ENTRANCES` に行を足す（既存の行・`it`・期待値は変えない）
+- `src/lib/db/mem-db.ts`：`transitionDecision(db, alive, itemId, expected:{version}, transition:'record'|'promote'|'promote-record-only', now)` を 1 つ足す。トランザクションの最初に `alive()`（要求時に固定した context の worktree の世代が今も同じか）を聞き、`memTransition`（`transitions.ts:27`）で遷移を検査し、`UPDATE mem_items SET state=?, version=version+1, updated_by='human', updated_by_instance=NULL, updated_at=? WHERE id=? AND version=? AND state=?` で書く。失敗は既存の `MemStoreFailure`（`instance_not_found`/`incarnation_changed`・`item_not_found`・`version_conflict`・`state_forbids`、`mem-db.ts:323`）で返す。既存の関数・private の helper の振る舞いは変えない
+- `src/lib/mem/service.ts`：入口 `memSettleDecisionTransition(db, spec, itemId, body)` を 1 つ足す。要求時に context の worktree の世代を固定し（`lookupActor` は `by:'human'`）、`withMemTarget` で項目の `(repository_id, branch)` の mode を同じ同期の区間で決め、`on` でなければ store を呼ばずに 409 `disabled`。E の lib（`src/lib/promote/service.ts`）からだけ呼ぶ
+- `tests/unit/lib/mem/write-entrances-recreate-4221.test.ts`：`ENTRANCES` に行を足す（§7.1）。既存の行・`it`・期待値は変えない
 - `src/lib/db/migrations/runner.ts`：v69 の登録
 
 ---
 
 ## 7. 不変条件の表駆動の試験（全入口）
 
-E の書き込みの入口（approve・confirm-reflected・reconcile・abandon・settle-transition、と S1 の入口）を 1 つの表に並べ、各行で同じ不変条件を回す（`tests/unit/lib/promote/promote-entrances-4225.test.ts`）。A の I18 と同じく、**表のキーは E の service の export のうち DB の書き込み・外への書き込みに届くものから列挙**し、入口を足すと表に足すまで落ちる。外への書き込みは偽の `gh`（`execFile` の差し替え）と `os.tmpdir()` の `mkdtempSync` の作業木で行い、`afterEach` で消す。本物の GitHub に書かない。
+E の書き込みの入口（approve・confirm-reflected・reconcile・abandon・settle-transition）。A の側に足す入口は A の表に足す（§7.1）を 1 つの表に並べ、各行で同じ不変条件を回す（`tests/unit/lib/promote/promote-entrances-4225.test.ts`）。A の I18 と同じく、**表のキーは E の service の export のうち DB の書き込み・外への書き込みに届くものから列挙**し、入口を足すと表に足すまで落ちる。外への書き込みは偽の `gh`（`execFile` の差し替え）と `os.tmpdir()` の `mkdtempSync` の作業木で行い、`afterEach` で消す。本物の GitHub に書かない。
 
 | # | 不変条件 | 陽性対照（直す前・壊した実装で落ちる） | 陰性対照（変わらない） |
 |---|---|---|---|
@@ -358,6 +358,19 @@ E の書き込みの入口（approve・confirm-reflected・reconcile・abandon�
 | T16 | commit・push をしない：書いた後の `git status` は作業木の変更だけ、`git log` は増えない | — | — |
 | T17 | `off` の間に結果の確定（E1）：`unknown` の照合は `off` でも記録するが、項目の状態は変えない（`transition_pending=1`） | — | — |
 
+### 7.1 A の表（`ENTRANCES`）に足す行（§0.1 S1 の条件）
+
+`write-entrances-recreate-4221.test.ts` の網羅の検査（`:274-285`）は、`mem-db.ts` の書き込みに届く `service.ts` の export が表か例外の一覧にあることを assert する。`transitionDecision` を足すと `memSettleDecisionTransition` が列挙に入り、表に行が無ければこの検査が落ちる（足し忘れの陽性）。足す行と、それぞれの対照：
+
+| 行のキー（足す） | 不変条件 | 陽性の対照（直しを外すと落ちる） | 陰性の対照 |
+|---|---|---|---|
+| `decision-record`（`transition:'record'`）・`decision-promote`（`'promote'`）・`decision-record-only`（`'promote-record-only'`） | 作り直し後の古い要求の拒否：要求の `await` の間に context の worktree を同じ ID・path で消して作り直す → 409 `incarnation_changed`、項目は前の状態・前の版のまま（既存の `it.each(Object.keys(ENTRANCES))` の 2 本がそのまま回る、`:313`・`:331`） | `transitionDecision` の `alive()` の照合を外した版で、行が `recorded`/`promoted` に変わり落ちる | 作り直さなければ遷移が書ける（既存の control の `it.each`） |
+| 同上（3 行に `mode` の列を持たせる。既存の `writeSessionNoteFromScreen` の行と同じ形） | mode `off`・`derived` で書かない：項目の branch を `off`・`derived` にして入口を呼ぶ → 409 `disabled`、`mem_items` の行は変わらない | service の mode の照合を外した版で `off` の行が書かれて落ちる | `on` は書ける |
+| 同上 | 版の食い違いを断る：入口に渡す `ifVersion` を今の版より 1 小さくする／`await` の間に `updateMemItem` で `version+1` する → 409 `version_conflict`、状態は変わらない | `WHERE … version=?` と事前の照合を外した版で書かれて落ちる | 版が同じなら書ける |
+
+- この 3 つの不変条件の対照は、表の行を足すだけで回る既存の `it.each` と、E で足す `it.each`（mode・版の 2 本、同じファイルの新しい `describe`。既存の `describe`・`it` の名前は変えない）で確かめる
+- 遷移の表（`memTransition`）に無い組（`recorded` に `record`、`open` に `promote` など）は 409 `state_forbids`。これは A の `transitions` の試験が持つので、E では入口から 1 本だけ確かめる
+
 - ガード：§4.2（CLI に口が無い）、§5.4（git の書き込み・`gh --method` は E の 1 か所だけ・mem/brief の lib が fs に書かない）、§6.2（常駐を持たない）
 - 受入基準との対照：「拒否・取り消し・差分の変更・無人で書かない」= T1・T2・T3・T14／「別のセッションが文書を変えた・worktree を消した・別のブランチ・並行の承認」= T4〜T7／「受理後に応答が切れた・DB の更新が失敗・並行の再試行で二重に書かない」= T8〜T10／「`recorded` のままで警告、確かめた後に `promoted`」= T13（re-plan の例は H #4228 の受入と共有）／「repository の外・symlink を断る」= T12／「この Issue が入るまで外へ書かない」= §5.4 のガード
 
@@ -369,12 +382,12 @@ E の書き込みの入口（approve・confirm-reflected・reconcile・abandon�
 
 | 契約の説明 | 実コード | 判断 |
 |---|---|---|
-| A の decision の遷移 | `transitions.ts` に `record`・`promote`・`promote-record-only` の検査はあるが、それを使う store の書き込みは無い（§0.1 S1） | S1 |
+| A の decision の遷移 | `transitions.ts` に `record`・`promote`・`promote-record-only` の検査はあるが、それを使う store の書き込みは無い | §0.1 S1 の決定（案 1）で A に足す |
 | B「未反映の decision は条件で閉じない」 | `transitions.ts:49-50`、`evaluate.ts:443`、`closeMemItemByCondition` は版と `close_when` を照合（`mem-db.ts:1060-1086`） | 一致 |
 | A §11 の screen-request の印 | `isScreenRequest`（`screen-request.ts:52`）、`settings-service.ts:37` と notices の acknowledge の route が使う | そのまま使う |
 | C の見えない文字の置き換え | `revealInvisible`・`BRIEF_INVISIBLE`（`sanitize.ts:24`・`:88`） | そのまま使う |
 | 「A〜D の段で外へ書かないことを試験済み」 | 名指しの試験は見つからない（§5.4） | E のガードで固定する |
-| A §3.2「`recorded` は人が画面で閉じる」 | 遷移が無い（§0.1 S2） | 本文に無い指摘として返す |
+| A §3.2「`recorded` は人が画面で閉じる」 | 遷移が無い | §0.1 S2 の決定で G（#4227）へ送った |
 
 ### 8.2 対になる場所（探した結果）
 
@@ -382,12 +395,11 @@ E の書き込みの入口（approve・confirm-reflected・reconcile・abandon�
 - CLI の型の写し（`src/cli/types/`）：E は CLI に口を作らないので足さない。`MemExitCode` も変えない
 - 説明（ja・en）：`docs/user-guide/` の mem の節（実装の契約）。この設計の段では書かない
 - 同じ処理の写し：`gh` の呼び出しは `github-query.ts`（GET）と `lib/git/github-api.ts`。E は POST を新しい 1 か所に置き、既存は変えない
-- 古い動きを固定している試験：`write-entrances-recreate-4221.test.ts:290-295`（store の書き込みは service だけ）が S1 の案 2 を許さない意図を持つ（文字列の検査なので案 2 でも通ってしまう点に注意）
+- 古い動きを固定している試験：`write-entrances-recreate-4221.test.ts:274-295`（store の書き込みは service だけ・全入口は `ENTRANCES`）。E は既存の行・`it` を変えずに行を足す（§7.1）
 
-### 8.3 S1 で案 2 を採る場合に変わる所
+### 8.3 採らなかった案（S1 の案 2）
 
-- §6.3 の 3 ファイルを変えない。代わりに `src/lib/db/mem-promote-db.ts` が `UPDATE mem_items SET state=?, version=version+1, updated_by='human' … WHERE id=? AND version=? AND state=?` を書き、`memTransition` で遷移を検査する
-- §7 の表に「mem の項目の遷移」の行を E の側で持つ。A の表との網羅の整合は E の試験で `mem_items` を書く `src/` のファイルを列挙して確かめる
+A のファイルを変えず、E の新しいファイル（`src/lib/db/mem-promote-db.ts`）が `UPDATE mem_items` を直接書き、E の側に別の入口の表を持つ案。A の試験（`write-entrances-recreate-4221.test.ts:291`）は関数名の文字列で見るので通ってしまうが、A の「書き込みは service だけ」「全入口の表」の意図を外から迂回し、表が 2 つになって食い違いうる。PM の決定（§0.1）で採らない。
 
 ### 8.4 未確認・未決（レビューで見てほしい点）
 
@@ -404,5 +416,5 @@ E の書き込みの入口（approve・confirm-reflected・reconcile・abandon�
 
 ### 8.5 本文に無い指摘（この Issue では直さない）
 
-- `docs/design/mem-store-4221.md` §3.2 の「`recorded` の `mem close` は断る。人が画面で閉じる」に対し、`src/lib/mem/transitions.ts:45-48` は `recorded` の `close` を人の経路も含めて断る。人が閉じる遷移は無い（§0.1 S2）
+- `docs/design/mem-store-4221.md` §3.2 の「`recorded` の `mem close` は断る。人が画面で閉じる」に対し、`src/lib/mem/transitions.ts:45-48` は `recorded` の `close` を人の経路も含めて断る。人が閉じる遷移は無い（§0.1 S2 で G #4227 へ送った）
 - `tests/unit/lib/mem/write-entrances-recreate-4221.test.ts:291` の「store の書き込みは service だけ」は関数名の文字列で見るので、新しいファイルが `UPDATE mem_items` を直接書く経路を検出しない
