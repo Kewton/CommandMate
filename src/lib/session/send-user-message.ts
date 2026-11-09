@@ -89,7 +89,7 @@ import {
   withInstanceInputLock,
   type InputBoundaryHooks,
 } from '@/lib/session/instance-input-lock';
-import { SendBrief, type BriefReport, type BriefSendMode } from '@/lib/session/session-brief';
+import { SendBrief, type BriefReport, type BriefRequestPin, type BriefSendMode } from '@/lib/session/session-brief';
 import { runInSendScope } from '@/lib/session/session-boundary';
 import type { CopilotTool } from '@/lib/cli-tools/copilot';
 import { formatImagePathFallbackMessage } from '@/lib/cli-tools/opencode';
@@ -97,7 +97,7 @@ import type { ChatMessage, MessageType } from '@/types/models';
 
 const logger = createLogger('session/send-user-message');
 
-/** Parameters for {@link sendUserMessage}. All values must be pre-validated. */
+/** Parameters for {@link sendUserMessage}, besides the brief's ({@link SendBriefParams}). All values must be pre-validated. */
 export interface SendUserMessageParams {
   /** Target worktree ID. */
   worktreeId: string;
@@ -170,18 +170,30 @@ export interface SendUserMessageParams {
    * is read on entry here.
    */
   observedInputGeneration?: number;
-  /**
-   * Issue #4274: whether this send may carry the session brief of a boundary
-   * (`docs/design/session-boundary-brief-4274.md` §4). `never` (the default) puts
-   * nothing in front and claims nothing — relay delivery, and any caller that does
-   * not say. `auto`: the first send after a boundary carries it once. `skip`
-   * (`--no-brief`): not this send, the boundary stays. `force` (`--with-brief`).
-   * A reset command this sends opens its boundary whatever the value.
-   */
-  brief?: BriefSendMode;
   /** Issue #4274: what became of the brief, when there is something to say (the route's `brief`). */
   onBrief?: (report: BriefReport) => void;
 }
+
+/**
+ * Issue #4274: whether this send may carry the session brief of a boundary
+ * (`docs/design/session-boundary-brief-4274.md` §4). `never` (the default) puts nothing
+ * in front and claims nothing — relay delivery, and any caller that does not say.
+ * `auto`: the first send after a boundary carries it once. `skip` (`--no-brief`): not
+ * this send, the boundary stays. `force` (`--with-brief`). A reset command this sends
+ * opens its boundary whatever the value.
+ *
+ * Issue #4224 (D2 design §2.4): a send that may carry a brief (`auto` / `force`) names the
+ * lifetimes its request's entrance fixed (`pinBriefWorktree` → `pinBriefRequest`, read
+ * where the request first read the worktree and resolved the instance). The service never
+ * reads them itself: a wait before it (ownership, the prompt guard, a launch, `/model`)
+ * would be read across. `never` (the default) and `skip` need none.
+ */
+export type SendBriefParams =
+  | { brief?: Exclude<BriefSendMode, 'auto' | 'force'>; briefPin?: BriefRequestPin }
+  | { brief: 'auto' | 'force'; briefPin: BriefRequestPin };
+
+/** What {@link sendUserMessage} takes: the parameters and the brief's. */
+export type SendUserMessageRequest = SendUserMessageParams & SendBriefParams;
 
 /** Result of {@link sendUserMessage}. */
 export type SendUserMessageResult =
@@ -306,7 +318,7 @@ function typedBodyFor(cliTool: ICLITool, content: string, absoluteImagePath: str
  */
 export async function sendUserMessage(
   db: Database.Database,
-  params: SendUserMessageParams
+  params: SendUserMessageRequest
 ): Promise<SendUserMessageResult> {
   const { worktreeId, content, cliToolId, instanceId, absoluteImagePath, copilotModel, respondAgent } = params;
   // Issue #4065: read once, before the first await — a send granted while this
@@ -358,6 +370,7 @@ export async function sendUserMessage(
     cliToolId,
     instanceId: resolvedInstanceId,
     mode: params.brief ?? 'never',
+    pin: params.briefPin ?? null,
     content,
     typedBody: (text) => typedBodyFor(cliTool, text, absoluteImagePath),
   });

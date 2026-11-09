@@ -40,4 +40,9 @@ export interface BriefModel {
   /** Already in the fixed order (`rank.ts`). */
   items: BriefItem[];
   sources: BriefSourceReport[];
+  /**
+   * Issue #4224 (D2 design §7): the first line of the data after an unplanned end, put
+   * right after the fixed 4 lines. A required line: a fit it does not enter makes no text.
+   */
+  lead?: string;
 }

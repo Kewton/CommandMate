@@ -37,6 +37,7 @@ import {
 } from '@/types/brief';
 import { BriefDeadlineExpiredError, createBriefDeadline, withinMs } from './deadline';
 import type { BriefItem, BriefModel } from './model';
+import { previousEndLead, readPreEndUpdate, readPreviousEnd } from './previous-end';
 import { rankBriefItems } from './rank';
 import { fixedId, sanitizeBranch } from './sanitize';
 import {
@@ -127,11 +128,34 @@ export function pinBriefLifetime(db: Database.Database, worktreeId: string, inst
   return { worktreeIncarnation: lifetime.incarnation, instance: readInstanceLifetime(db, worktreeId, instanceId) };
 }
 
+/**
+ * Whether the lifetimes a request fixed still stand, asked synchronously (Issue #4224,
+ * Codex 5-2b P1): the session-start pre-check of `briefForRoute` awaits the membership
+ * between the pin and the build, and asks this after it — the same comparison
+ * {@link buildBrief} makes before its first await. Null: unchanged.
+ */
+export function pinnedLifetimeChange(
+  db: Database.Database,
+  worktreeId: string,
+  instanceId: string,
+  pinned: BriefPinnedLifetime
+): BriefChangeReason | null {
+  const worktree = getWorktreeById(db, worktreeId);
+  if (!worktree || getWorktreeIncarnation(db, worktreeId) !== pinned.worktreeIncarnation) return 'worktree_lifetime';
+  const instance = resolveAgentInstances(db, worktreeId, worktree.selectedAgents).find((entry) => entry.id === instanceId);
+  if (!instance) return 'instance_lifetime';
+  return isSameInstanceLifetime(pinned.instance, readInstanceLifetime(db, worktreeId, instanceId), instance.cliTool) ? null : 'instance_lifetime';
+}
+
 export interface BuildBriefInput {
   worktreeId: string;
   instanceId: string;
   time: BriefTimeBudget;
-  /** The provider's request: its membership and instance incarnation are checked (design §5.4). */
+  /**
+   * The provider's request: its membership and instance incarnation are checked (design §5.4).
+   * Issue #4224: a request comes with its `pinned` lifetimes (the send's entrance fixed
+   * them, D2 design §2.4 W2); one without is refused (`worktree_lifetime`).
+   */
   request?: BriefRequest;
   /** The provider's line budget: below the fixed lines nothing is built (G3). */
   maxLines?: number;
@@ -222,6 +246,18 @@ function assertStillSame(
   }
 }
 
+/** The facts of the lead, or null when they cannot be read (no line then: nothing is asserted). */
+function readPreviousEndOnce(db: Database.Database, worktreeId: string, instanceId: string, before: number) {
+  try {
+    return {
+      facts: readPreviousEnd(db, { worktreeId, instanceId, before }),
+      recorded: readPreEndUpdate(db, { worktreeId, instanceId, before }),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function buildBrief(db: Database.Database, input: BuildBriefInput, deps: BriefBuildDeps = {}): Promise<BuildBriefOutcome> {
   const now = deps.now ?? Date.now;
   const time = deps.time ?? input.time;
@@ -229,6 +265,10 @@ export async function buildBrief(db: Database.Database, input: BuildBriefInput, 
   const { worktreeId, instanceId } = input;
 
   // 1. Before the first await.
+  // Issue #4224 (D2 design §2.4): a provider's request is for the lifetimes its send fixed
+  // at the entrance; building one for the lifetime found here would carry it to a worktree
+  // made again meanwhile.
+  if (input.request && !input.pinned) throw new BriefMembershipChangedError('worktree_lifetime');
   const worktree = getWorktreeById(db, worktreeId);
   if (!worktree) return { kind: 'refused', code: 'not_found' };
   const roster = resolveAgentInstances(db, worktreeId, worktree.selectedAgents);
@@ -236,6 +276,11 @@ export async function buildBrief(db: Database.Database, input: BuildBriefInput, 
   if (!instance) return { kind: 'refused', code: 'instance_not_found' };
   if (getAllRepositories(db).length === 0) return { kind: 'refused', code: 'not_registered' };
   const spec = { via: 'worktree' as const, worktreeId };
+  // Issue #4224: a pinned lifetime is compared before anything is made — a worktree made
+  // again meanwhile has none, and fixing one here would write on the new one's behalf.
+  if (input.pinned && getWorktreeIncarnation(db, worktreeId) !== input.pinned.worktreeIncarnation) {
+    throw new BriefMembershipChangedError('worktree_lifetime');
+  }
   const lifetime = fixMemEvalLifetime(db, spec);
   if (input.pinned && (lifetime.via !== 'worktree' || lifetime.incarnation !== input.pinned.worktreeIncarnation)) {
     throw new BriefMembershipChangedError('worktree_lifetime');
@@ -246,10 +291,17 @@ export async function buildBrief(db: Database.Database, input: BuildBriefInput, 
   }
   if (
     input.request &&
-    !isSameInstanceLifetime({ incarnation: input.request.target.instanceIncarnation, onRoster: earlier.onRoster }, earlier, instance.cliTool)
+    !isSameInstanceLifetime(
+      { incarnation: input.request.target.instanceIncarnation, onRoster: input.request.target.instanceOnRoster },
+      earlier,
+      instance.cliTool
+    )
   ) {
     throw new BriefMembershipChangedError('instance_lifetime');
   }
+  // Issue #4224 (D2 design §7.3): what the line after an unplanned end says, read before the
+  // evaluation below can close an item (a close overwrites `updated_at`).
+  const previousEnd = input.request ? readPreviousEndOnce(db, worktreeId, instanceId, input.request.boundary.openedAt) : null;
 
   // 2. The membership, within the deadline (2nd review ⑥).
   const resolved = await withinMs<MemTarget, typeof MEMBERSHIP_TIMED_OUT>(
@@ -326,6 +378,10 @@ export async function buildBrief(db: Database.Database, input: BuildBriefInput, 
   }));
   const items: BriefItem[] = answers.flatMap(({ answer }) => answer?.items ?? []);
   const repositoryId = fixedId(target.storageRepositoryId, BRIEF_FIXED_LIMITS.repositoryIdChars);
+  const lead =
+    previousEnd && input.request
+      ? previousEndLead({ mode, kind: input.request.boundary.kind, openedAt: input.request.boundary.openedAt, now: stamp }, previousEnd.facts, previousEnd.recorded)
+      : null;
   const model: BriefModel = {
     fixed: {
       mode,
@@ -342,6 +398,7 @@ export async function buildBrief(db: Database.Database, input: BuildBriefInput, 
     },
     items: rankBriefItems(items),
     sources,
+    ...(lead !== null ? { lead } : {}),
   };
   return { kind: 'built', model, target, recipient, membershipKey: keyOfTarget(target) };
 }

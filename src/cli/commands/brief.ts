@@ -2,6 +2,7 @@
  * brief Command - the summary a restart reads (Issue #4223).
  *
  *   commandmate brief [--budget <bytes>] [--json] [--all] [--worktree <id> --instance <id>]
+ *   commandmate brief --session-start   (from a SessionStart hook, Issue #4224)
  *
  * A thin client over `GET /api/worktrees/:id/mem/brief`. The server builds it from
  * the state it derives and the branch's mem items, with no model; this command checks
@@ -36,6 +37,11 @@ Budget (bytes): text ${BRIEF_BUDGET.text.min}-${BRIEF_BUDGET.text.max} (default 
 mode "derived" shows the derived state only (no hand-written items); "off" prints
 nothing (exit 50). The mode is set on the screen only.
 
+--session-start is the form for a SessionStart hook (Issue #4224). When the branch puts
+the brief in front of the first send itself (injectOnStart on, Claude Code / Codex /
+Command Code), it prints nothing to stdout and exits 0, so one conversation never gets
+the brief twice. Otherwise it prints what "commandmate brief" prints. Not with --json.
+
 Exit codes:
   0   printed (a source that could not be read is a line saying why)
   1   the server is not running
@@ -54,6 +60,7 @@ interface BriefOptions {
   worktree?: string;
   instance?: string;
   token?: string;
+  sessionStart?: boolean;
 }
 
 class BriefCliError extends Error {
@@ -105,14 +112,17 @@ export function createBriefCommand(): Command {
     .option('--all', 'Every entry, no budget')
     .option('--worktree <id>', 'Worktree ID (default: your own session)')
     .option('--instance <id>', 'Instance ID (default: your own session)')
+    .option('--session-start', 'From a SessionStart hook: print nothing when the send path briefs the conversation (Issue #4224)')
     .option('--token <token>', TOKEN_WARNING)
     .addHelpText('after', BRIEF_HELP)
     .action(async (options: BriefOptions) => {
       const format: BriefFormat = options.json ? 'json' : 'text';
       let failure: BriefCliError | null = null;
       let output: string | null = null;
+      let deferred = false;
       try {
         if (options.all && options.budget !== undefined) throw inputError('--all and --budget cannot be used together');
+        if (options.sessionStart && options.json) throw inputError('--session-start and --json cannot be used together');
         if (options.budget !== undefined) {
           const parsed = parseBriefBudget(options.budget, format);
           if (!parsed.ok) {
@@ -127,11 +137,14 @@ export function createBriefCommand(): Command {
         const query = new URLSearchParams({ instance: target.instanceId, format });
         if (options.budget !== undefined) query.set('budget', options.budget);
         if (options.all) query.set('all', '1');
+        if (options.sessionStart) query.set('sessionStart', '1');
         const path = `/api/worktrees/${encodeURIComponent(target.worktreeId)}/mem/brief?${query.toString()}`;
         if (format === 'json') {
           output = JSON.stringify(await client.get<BriefJson>(path));
         } else {
-          output = (await client.get<BriefTextResponse>(path)).text;
+          const answer = await client.get<BriefTextResponse>(path);
+          deferred = answer.deferred === 'send';
+          output = answer.text;
         }
       } catch (error) {
         failure = toCliError(error);
@@ -141,6 +154,11 @@ export function createBriefCommand(): Command {
         if (failure.exitCode === MemExitCode.DISABLED) console.error('brief: mem is off for this branch; nothing printed');
         else console.error(`Error: ${failure.code}: ${failure.message}`);
         process.exit(failure.exitCode);
+      }
+      if (deferred) {
+        // Issue #4224: the send path briefs this conversation; nothing for the hook to put in it.
+        console.error('brief: the first send of this conversation carries the brief; nothing printed');
+        process.exit(ExitCode.SUCCESS);
       }
       process.stdout.write(`${output ?? ''}\n`);
       process.exit(ExitCode.SUCCESS);
