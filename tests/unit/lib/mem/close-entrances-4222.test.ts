@@ -46,7 +46,8 @@ import { evaluateMemConditions, fixMemEvalLifetime, type MemEvalContext } from '
 import { memAcknowledgeNotice, memCheck, memList } from '@/lib/mem/service';
 import type { MemTargetResolved } from '@/lib/mem/target';
 import type { MemListResponse } from '@/types/mem';
-import { getInstanceIncarnation } from '@/lib/mem/incarnation';
+import { getInstanceIncarnation, getOrCreateWorktreeIncarnation } from '@/lib/mem/incarnation';
+import { readInstanceLifetime } from '@/lib/db/session-brief-db';
 import { briefForRoute } from '@/lib/brief/service';
 import { createMemBriefProvider } from '@/lib/brief/provider';
 import type { BriefRequest } from '@/lib/session/brief-provider';
@@ -167,6 +168,8 @@ const EXCEPTIONS: Record<string, string> = {
   closeMemItem: '#4221 の入口（同上）',
   writeScreenNote: '#4221 の入口（同上）',
   purgeMem: '#4221 の入口（同上。知らせは CASCADE で項目と一緒に消える）',
+  transitionDecision:
+    '#4225 の decision の遷移（write-entrances-recreate-4221 の decision-* の行が (a)〜(c) を固定。呼び手は memSettleDecisionTransition だけ、promote-write-chain-4225 が固定）',
 };
 
 const world = new MemWorld();
@@ -307,9 +310,12 @@ function briefRequest(boundaryId = 'b-1'): BriefRequest {
   return {
     target: {
       worktreeId: 'wt-1',
+      // Issue #4224: the lifetimes a send's entrance fixes (D2 design §2.4), as of now.
+      worktreeIncarnation: getOrCreateWorktreeIncarnation(world.db, 'wt-1'),
       cliToolId: 'claude',
       instanceId: 'claude',
       instanceIncarnation: getInstanceIncarnation(world.db, 'wt-1', 'claude')?.incarnation ?? null,
+      instanceOnRoster: readInstanceLifetime(world.db, 'wt-1', 'claude').onRoster,
     },
     membership: { repositoryId: world.repo, readRepositoryIds: [world.repo], branch: 'feature/x', detached: false, mode: 'on' },
     boundary: { id: boundaryId, kind: 'launch', late: false, openedAt: Date.now() },

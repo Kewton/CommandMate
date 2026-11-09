@@ -1,9 +1,11 @@
 /**
  * C's implementation of D1's {@link BriefProvider} port (Issue #4223, design §5).
  *
- * Not wired into `getBriefProvider()`: D2 (#4224) does that, and connects D1's
- * `settle` to {@link settleBriefAttempt}. Until then sends are briefed by D1's empty
- * provider and this module changes no send.
+ * D2 (#4224, design `docs/design/brief-injection-d2-4224.md` §4・§5) connects it:
+ * `getBriefProvider()` answers {@link MEM_BRIEF_PORT}, which is {@link MEM_BRIEF_PROVIDER}
+ * with D1's `settle` connected to {@link settleBriefAttempt} (#4222's receipt). `build`
+ * builds for the lifetimes the send's entrance fixed (`request.target`, D2 §2.4 W2) and
+ * never fixes its own.
  *
  * Two tables in this process's memory (design §5.3):
  *  - `memos`: what each build drew, per boundary. Bounded; a dropped one only makes
@@ -127,6 +129,16 @@ export function createMemBriefProvider(getDb: () => Database.Database, deps: Mem
         time: PROVIDER_TIME_BUDGET,
         request,
         maxLines: request.budget.maxLines,
+        // Issue #4224 (D2 design §2.4 W2): the lifetimes the send's entrance fixed.
+        pinned: {
+          worktreeIncarnation: request.target.worktreeIncarnation,
+          instance: {
+            incarnation: request.target.instanceIncarnation,
+            onRoster: request.target.instanceOnRoster,
+            incarnationToolId: null,
+            incarnationIssuedBy: null,
+          },
+        },
         onMembershipTimeout: 'throw',
       },
       deps
@@ -137,6 +149,10 @@ export function createMemBriefProvider(getDb: () => Database.Database, deps: Mem
       trailingNewline: false,
       maxLines: request.budget.maxLines,
     });
+    if (fitted.leadUnfit) {
+      // D2 design §7.4: the line after an unplanned end is required; without it, no brief.
+      return { body: '', includedNoticeIds: [], mode: outcome.model.fixed.mode, skipReason: 'over_limit' };
+    }
     const notices = fitted.included.filter((item) => item.notice);
     memos.push({
       boundaryId: request.boundary.id,
@@ -224,4 +240,15 @@ export const MEM_BRIEF_PROVIDER: BriefProvider = DEFAULT_STATE.provider;
 /** What D2 connects D1's `settle` to: #4222's receipt for the attempt the claim made (design §5.1). */
 export function settleBriefAttempt(delivery: { boundaryId: string; outcome: BriefDeliveryOutcome; includedNoticeIds: string[] }): void {
   DEFAULT_STATE.settle(delivery);
+}
+
+/**
+ * The provider sends are briefed by (Issue #4224, D2 design §4.1): C's, with D1's `settle`
+ * connected to #4222's receipt. {@link MEM_BRIEF_PROVIDER} itself keeps no `settle`.
+ */
+export const MEM_BRIEF_PORT: BriefProvider = { ...MEM_BRIEF_PROVIDER, settle: settleBriefAttempt };
+
+/** Test hook: forget the memos and attempts of {@link MEM_BRIEF_PORT} (a "restarted" server). */
+export function resetMemBriefPortForTest(): void {
+  DEFAULT_STATE.reset();
 }

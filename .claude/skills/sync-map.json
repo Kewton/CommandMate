@@ -35,7 +35,7 @@
       "local": ".claude/skills/cmate-verify",
       "counterpart": "skills/cmate-verify",
       "policy": "mapped",
-      "rationale": "CommandMate が開発元。scripts は #1586 で byte-identical に移植された（2026-08-01 実測: diff -r 無差分）。SKILL.md だけは移植時に適応が入っている。 2026-08-20（Issue #1861）に counterpart PR #225（6faa33f、skills #223 / #224）を取り込み、verify-run.sh を再び byte-identical にした。 なお counterpart は fixture と run-tests.sh を package の外（`tests/fixtures/cmate-verify/`）に置いているため、対応する `scripts/tests/fixtures/**` と `scripts/tests/run-tests.sh` の各 file エントリに `counterpartPath` でその実体を指定してある（Issue #2904。以前は `check --counterpart` がこれを MISSING と誤報告していた）。CommandMate 側は Node の無い導入先でも suite を回せるよう package 内に同梱している。fixture 47 本は byte-identical のまま（2026-09-27 実測: cmp で無差分）。run-tests.sh はヘッダのコメントと RUNNER 解決パスの前提が異なるため port-required に変更した。 同日（Issue #1864）に counterpart PR #230（9604e8f、skills #228 —— run の途中で $WORKDIR が消える欠陥の修正）も取り込み、verify-run.sh のバイト一致を維持している。 2026-11-09（Issue #4277）に verify-run.sh・run-tests.sh・SKILL.md へ先着順の札の規約（`<name>.queue/` の札・先頭だけが mkdir と回収・退かしてから確かめる回収・pgid）を足し、pin を再計算した。同じ規約を counterpart PR #314（7b87d3f、cmate-verify 0.7.0 として 2026-11-09 に公開）で skills 側へ移植し、verify-run.sh は再び byte-identical（cmp 一致）になった。",
+      "rationale": "CommandMate が開発元。scripts は #1586 で byte-identical に移植された（2026-08-01 実測: diff -r 無差分）。SKILL.md だけは移植時に適応が入っている。 2026-08-20（Issue #1861）に counterpart PR #225（6faa33f、skills #223 / #224）を取り込み、verify-run.sh を再び byte-identical にした。 なお counterpart は fixture と run-tests.sh を package の外（`tests/fixtures/cmate-verify/`）に置いているため、対応する `scripts/tests/fixtures/**` と `scripts/tests/run-tests.sh` の各 file エントリに `counterpartPath` でその実体を指定してある（Issue #2904。以前は `check --counterpart` がこれを MISSING と誤報告していた）。CommandMate 側は Node の無い導入先でも suite を回せるよう package 内に同梱している。fixture 47 本は byte-identical のまま（2026-09-27 実測: cmp で無差分）。run-tests.sh はヘッダのコメントと RUNNER 解決パスの前提が異なるため port-required に変更した。 同日（Issue #1864）に counterpart PR #230（9604e8f、skills #228 —— run の途中で $WORKDIR が消える欠陥の修正）も取り込み、verify-run.sh のバイト一致を維持している。 2026-11-09（Issue #4277）に verify-run.sh・run-tests.sh・SKILL.md へ先着順の札の規約（`<name>.queue/` の札・先頭だけが mkdir と回収・退かしてから確かめる回収・pgid）を足し、pin を再計算した。同じ規約を counterpart PR #314（7b87d3f、cmate-verify 0.7.0 として 2026-11-09 に公開）で skills 側へ移植し、verify-run.sh は再び byte-identical（cmp 一致）になった。 2026-11-09（Issue #4288）に verify-run.sh と SKILL.md へ、mutex 付きのゲートの起動前に owner を pgid（ゲートのプロセスグループ）付き・新しい token で書き直し、グループが空になってから解放する規約・戻せずに残った `<name>.lock.gone-*` を保有中と読む規約・観測の 3 値（不明は取らない・消さない・解放しない）を足して pin を再計算した。同日のレビューの直し（owner の判定を 1 回の読みから・kill -0 を LC_ALL=C で読む・途中の戻しが不明なら退避を残す・held by に pgid・owner の書き込みの失敗で <lock> を戻す）でも、再レビューの直し（観測の内側の段＝欄の取り出し・pgid の数値の検査の失敗を不明に・空の <lock> の rmdir の失敗に点・パス・errno）でも、lock_reclaim_gone のコメントの 1 行抜けの補い（動作は不変）でも pin を再計算した。skills 側への移植は別 PR（オーケストレーターが追跡）で、それまで verify-run.sh は counterpart と一致しない。",
       "mirrors": [
         ".agents/skills/cmate-verify"
       ],
@@ -48,7 +48,7 @@
         {
           "path": "SKILL.md",
           "policy": "port-required",
-          "sha256": "1190feff661822b71f02dcaac6b505d2f9bb3841e932e08f21e2f50a514e46cb",
+          "sha256": "a3cbda1492e2066c22aa05e10d7bbe8841a234f08bc9676a9034fd508b1f6e3c",
           "note": "#1586 の移植で GitHub 絶対 URL 化・「起案 / スタンドアロンランナー」の2役への書き換えが入っている。単純コピーするとこの適応が壊れる（#1611 で実際に注意点として扱った）。手順・フラグ・exit code の意味を変えたときは counterpart 側の同じ節を書き直す。 Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。 2026-08-03 に Issue #1651 の変更も counterpart（cmate-verify 0.3.0、skills PR #42）へ移植済み。 2026-08-20 に Issue #1861 で counterpart（skills PR #225、6faa33f）のmutex / retryOnFail / flakyIsPass / requireEnvClean の記述を移植した（CommandMate 側の Issue 番号 #1771 / #1772 / #1740 と相対パスに読み替えてある）。 2026-09-30 に Issue #3012 で counterpart（cmate-verify 0.6.0、skills #276）の `<skills-root>` 表記（install 先の説明と手順 2 の実行例）を移植した。"
         },
         {
@@ -394,7 +394,7 @@
         {
           "path": "scripts/verify-run.sh",
           "policy": "byte-identical",
-          "sha256": "17091de9524659b0937925e4b7097ce2b8b5af35243510c38cc22be87947e8c0",
+          "sha256": "5b221a5b62158a2ffc0bfdbddfb8c79151bb08e4e514459011a6aa805eea5a84",
           "note": "ランナー本体。#1586 で byte-identical に移植され、#1607 が CommandMate 側だけを直して 4 日間ドリフトした（#1611 で復旧）。この Issue の直接の発端。 Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。 2026-08-03 に Issue #1651 の変更も counterpart（cmate-verify 0.3.0、skills PR #42）へ移植済み。 2026-08-20（Issue #1861）に counterpart PR #225（6faa33f）から逐語コピーした。 2026-08-20（Issue #1864）に counterpart PR #230（9604e8f、skills #228）から逐語コピーした。 2026-10-27（Issue #3944）に set -m … set +m を { … } 2>>$rga_log.jobctl で囲んだ（demo-video/env-up.sh の #3935 と同じ形）。2026-10-28 に counterpart（cmate-verify 0.6.2、skills PR #312）へ移植済み。"
         }
       ]

@@ -58,9 +58,16 @@ function firstWord(content: string): string {
   return content.trim().split(/\s/, 1)[0] ?? '';
 }
 
-/** Whether the body is a slash command (design §4.1): nothing is put in front of one. */
+/**
+ * Whether the body is a command to the tool (design §4.1): nothing is put in front of one,
+ * and the boundary is left for the next send. Issue #4224 (PM review P2): any first word
+ * that starts with `/` (`/plugin:cmd`, `/mcp__srv__prompt`, `/prompts:name`, not only
+ * `/[a-z][a-z0-9-]*`) and any body that starts with `!` (a shell escape) — a brief in front
+ * of either would turn the command into plain text.
+ */
 export function isSlashCommandBody(content: string): boolean {
-  return /^\/[a-z][a-z0-9-]*$/.test(firstWord(content));
+  const word = firstWord(content);
+  return /^\/[^\s]+$/.test(word) || word.startsWith('!');
 }
 
 /** Whether the body is one of the tool's reset commands (design §2.3). */
